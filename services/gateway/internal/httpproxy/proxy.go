@@ -188,16 +188,13 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 		}
 	}
 
-	// Not connected (ok false) still proxies with epoch 0: the dial then
-	// waits for the agent (spec 6.4).
+	// Not connected or unknown (ok false, also when the registry fails)
+	// still proxies with epoch 0: the dial then resolves the owner itself,
+	// waits for the agent (spec 6.4) and maps its own errors. The only
+	// error is the client's own cancellation.
 	epoch, _, err := h.cfg.Upstream.Epoch(r.Context(), rt.MachineID)
 	if err != nil {
-		if r.Context().Err() != nil {
-			x.clientGone = true
-			return
-		}
-		h.log.Warn("httpproxy: owner lookup failed", "label", l.Raw, "request_id", x.rid, "err", err)
-		x.fail(agentUnavailable())
+		x.clientGone = true
 		return
 	}
 	h.proxy(x, rt, auth, upstream.SyntheticHost(rt.MachineID, epoch, rt.Port), trusted)

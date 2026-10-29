@@ -59,6 +59,9 @@ const (
 	selfOwnerPollMax = 200 * time.Millisecond
 )
 
+// epochLookupMax caps the owner lookup of Epoch.
+const epochLookupMax = 2 * time.Second
+
 // errDialTimeout is the cancel cause of a dial that used up DialTimeout.
 var errDialTimeout = errors.New("upstream: dial timeout")
 
@@ -87,6 +90,10 @@ func (e *Error) Unwrap() error { return e.Err }
 type LocalTunnels interface {
 	Machine(id string) (transport.MachineConn, bool)
 }
+
+// epocher gives the epoch of a local session; the concrete
+// *gateway.MachineConn has it.
+type epocher interface{ Epoch() uint64 }
 
 // tcpDialer is the local tunnel's TCP dial with options; the concrete
 // *gateway.MachineConn has it.
@@ -144,12 +151,32 @@ func New(cfg Config) *Dialer {
 // Close closes the idle peer connections.
 func (d *Dialer) Close() { d.peer.CloseIdleConnections() }
 
-// Epoch returns the tunnel epoch of a machine from the owner cache, for
-// SyntheticHost. false means no connected agent.
+// Epoch returns the tunnel epoch of a machine, for SyntheticHost. A machine
+// connected to this instance gets its session's epoch without a registry
+// query (spec 6.4: local first), so previews of local machines survive a
+// Postgres outage. Otherwise the owner cache is asked within
+// min(DialTimeout, 2 s).
+//
+// false means no known owner. A failed or slow lookup is logged and also
+// gives false: the dial then resolves the owner itself and maps its own
+// errors. The error is only ever the caller's ctx error.
 func (d *Dialer) Epoch(ctx context.Context, machineID string) (uint64, bool, error) {
-	o, ok, err := d.cfg.Owners.Lookup(ctx, machineID)
-	if err != nil || !ok {
-		return 0, false, err
+	if mc, ok := d.cfg.Local.Machine(machineID); ok {
+		if e, ok := mc.(epocher); ok {
+			return e.Epoch(), true, nil
+		}
+	}
+	lctx, cancel := context.WithTimeout(ctx, min(d.cfg.DialTimeout, epochLookupMax))
+	defer cancel()
+	o, ok, err := d.cfg.Owners.Lookup(lctx, machineID)
+	switch {
+	case ctx.Err() != nil:
+		return 0, false, ctx.Err()
+	case err != nil:
+		d.log.Warn("upstream: owner lookup for the epoch failed", "machine_id", machineID, "err", err)
+		return 0, false, nil
+	case !ok:
+		return 0, false, nil
 	}
 	return o.Epoch, true, nil
 }

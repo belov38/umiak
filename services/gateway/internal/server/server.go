@@ -63,6 +63,9 @@ const (
 	// metricsReadHeaderTimeout bounds the request headers on the metrics
 	// listener.
 	metricsReadHeaderTimeout = 10 * time.Second
+	// metricsIdleTimeout closes idle keep-alive conns on the metrics
+	// listener.
+	metricsIdleTimeout = 120 * time.Second
 	// Defaults of the tunnel admission bucket for zero config values.
 	defaultTunnelAdmitRate  = 200
 	defaultTunnelAdmitBurst = 1000
@@ -89,6 +92,9 @@ type Deps struct {
 	// sink of APIURL; with APIURL empty or config.APIURLNone the tunnel
 	// gateway logs, drops and acknowledges them.
 	Sink gateway.EventSink
+	// OwnerSource answers the owner lookups of the upstream dialer; nil
+	// queries the registry. Tests inject a broken registry.
+	OwnerSource registry.OwnerSource
 }
 
 // Listeners are the sockets an instance serves. A nil listener is not
@@ -200,7 +206,11 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	i.reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	i.metrics = obs.NewMetrics(i.reg)
 	i.routes = routes.NewCache(deps.API, routes.CacheConfig{Timeout: cfg.Timeouts.RouteLookup, Now: deps.Now}, i.metrics)
-	i.owners = registry.NewOwnerCache(i.store, staleAfter, 0)
+	if deps.OwnerSource != nil {
+		i.owners = registry.NewOwnerCacheFunc(deps.OwnerSource, 0)
+	} else {
+		i.owners = registry.NewOwnerCache(i.store, staleAfter, 0)
+	}
 
 	timing := deps.Timing
 	timing.TCPDeadline = cfg.SSHDrainDeadline
@@ -327,7 +337,11 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 
 	i.internal = gateway.NewInternalServer(g.InternalHandler())
 	i.internal.IdleTimeout = internalIdleTimeout
-	i.metricsSrv = &http.Server{Handler: i.MetricsHandler(), ReadHeaderTimeout: metricsReadHeaderTimeout}
+	i.metricsSrv = &http.Server{
+		Handler:           i.MetricsHandler(),
+		ReadHeaderTimeout: metricsReadHeaderTimeout,
+		IdleTimeout:       metricsIdleTimeout,
+	}
 	return i, nil
 }
 
