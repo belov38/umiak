@@ -3,7 +3,8 @@
 # Paths below are relative to this file. See README.md.
 #
 # Each implementation thread adds its own service(s) to this file and reuses the
-# x- anchors, the `sbx` network and the `sbx-image`/`sbx-env` conventions below.
+# x- anchors below (`*service-defaults`, `*db-env`, `*worker-build`, `*logging`)
+# and the `sbx` network.
 name: sbx
 
 x-logging: &logging

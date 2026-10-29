@@ -10,6 +10,7 @@
 - `~/.config/sbx` с файлами `pve-token` (mode 600), `pve-root-ca.pem`, `sbx-node_ed25519`, `known_hosts`
   (в нём должен быть pinned ключ `100.64.10.2`). Другой каталог: `SBX_PVE_SECRETS_DIR`.
 - Доступ контейнеров к `100.64.10.2` (Tailscale на хосте; в Docker Desktop проверено, что порты 8006 и 22 достижимы).
+- Linux-хост (без Docker Desktop): файлы секретов (`~/.config/sbx/*`, `deploy/compose/secrets/data-keys.json`) имеют mode 600 и принадлежат пользователю хоста, а контейнер работает под uid 1000 (`node`). Если uid хоста не 1000, worker не прочитает их: запускать от пользователя с uid 1000, либо выдать права (`chown 1000` на копию каталога и указать её в `SBX_PVE_SECRETS_DIR`), либо задать `user: "<uid>:<gid>"` у `worker` и `migrate` в локальном override-файле.
 
 ## Ключи данных
 
@@ -53,7 +54,13 @@ docker compose -f deploy/compose/compose.yaml down -v     # чистый ста�
 
 ## Настройки
 
-- `config/sbx.yaml` — шаблоны, размеры, квоты и топология `pve` (узел, хранилище `local-lvm`, сборка шаблона 599). Правки: изменить файл и `up -d` (миграция и bootstrap идемпотентны).
+- `config/sbx.yaml` — шаблоны, размеры, квоты и топология `pve` (узел, хранилище `local-lvm`, сборка шаблона 599). Worker читает конфиг один раз при старте, а `up -d` не пересоздаёт контейнер, если в `compose.yaml` ничего не поменялось. Поэтому после правки:
+
+  ```sh
+  docker compose -f deploy/compose/compose.yaml up -d --force-recreate worker
+  ```
+
+  Worker перечитывает конфиг. Если менялись топология или сборки шаблонов (их в базу загружает `bootstrap`), пересоздать и `migrate`: `... up -d --force-recreate migrate worker` (bootstrap идемпотентен). То же для правок `deploy/compose/.env` и файлов секретов.
 - `deploy/compose/.env` (git-ignored) переопределяет: `SBX_NODE_SSH_HOST` (по умолчанию `100.64.10.2`), `SBX_PVE_TOKEN_ID`, `SBX_PVE_SECRETS_DIR`, `SBX_RECONCILE_DRY_RUN`. URL API и TLS-имя PVE берутся из `topology.providers` в `config/sbx.yaml` (`apiUrl`, `tlsName`).
 - Учётные данные Postgres `sbx/sbx/sbx` — только для разработки; порт опубликован на `127.0.0.1:5432`.
 
@@ -63,6 +70,7 @@ docker compose -f deploy/compose/compose.yaml down -v     # чистый ста�
 - Целевые размеры пулов в `sbx.yaml` равны 0 (`pools: []`, решение 17), поэтому worker сам не создаёт VM на `pve`.
 - Пока нет агента (S3) и gateway (S2), создание sandbox не может дойти до `ready`: агентский порт недоступен, а без `SBX_GATEWAY_SERVICE_TOKEN_FILE` ротация токена падает по таймауту. Worker при этом предупреждает об этом в логе при старте.
 - Схема `tunnel` создаётся временной фикстурой (`migrate --tunnel-fixture`) до слияния S2; после слияния флаг убрать из `compose.yaml`.
+  Настоящая миграция S2 `0100` не применится поверх тома, созданного с фикстурой (схема уже есть, а записи о миграции нет). После слияния S2 существующий том пересоздать: `docker compose -f deploy/compose/compose.yaml down -v`, затем `up -d --build`.
 
 ## Smoke-тест реального адаптера Proxmox
 
@@ -87,3 +95,4 @@ SBX_PVE_SMOKE=1 mise exec -- pnpm --filter @sbx/worker exec vitest run test/pve-
 2. Если сервису нужна схема БД, поставить `depends_on: migrate: condition: service_completed_successfully`.
 3. Секреты класть в `deploy/compose/secrets/` (git-ignored) и подключать через `secrets:`; в git — только `*.example`.
 4. Образ собирать из корня репозитория (`context: ../..`, `dockerfile: apps/<name>/Dockerfile`); `.dockerignore` лежит в корне.
+5. Новый пакет workspace (`packages/<name>` или `apps/<name>`) — добавить строку `COPY <dir>/package.json <dir>/` в `apps/worker/Dockerfile` (блок манифестов перед `pnpm install`), иначе `pnpm install --frozen-lockfile` не совпадёт с lockfile. Если пакет входит в зависимости worker, добавить и `COPY <dir>/src <dir>/src`. То же в Dockerfile других сервисов.

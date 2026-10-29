@@ -20,11 +20,11 @@ scripts
 .claude
 docs
 
-# Secrets and local env
-.env
-.env.*
-*.pem
-*.key
+# Secrets and local env, at any depth
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
 deploy/compose/secrets
 
 # Go and unrelated services
