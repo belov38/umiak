@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file sbx/tunnel/v1/event.proto.
  */
 export const file_sbx_tunnel_v1_event: GenFile = /*@__PURE__*/
-  fileDesc("ChlzYngvdHVubmVsL3YxL2V2ZW50LnByb3RvEg1zYngudHVubmVsLnYxIoQBCgVFdmVudBILCgNzZXEYASABKAQSKAoEdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHYm9vdF9pZBgDIAEoCRIMCgR0eXBlGAQgASgJEiUKB3BheWxvYWQYBSABKAsyFC5nb29nbGUucHJvdG9idWYuQW55IoEBCg9Db25uZWN0aW9uRXZlbnQSEgoKbWFjaGluZV9pZBgBIAEoCRINCgVlcG9jaBgCIAEoBBIMCgR0eXBlGAMgASgJEigKBHRpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhMKC2luc3RhbmNlX2lkGAUgASgJQkVaQ2dpdGh1Yi5jb20vYmVsb3YzOC9ib2F0LWRldi1jbG9uZS9saWJzL3Byb3RvL3NieC90dW5uZWwvdjE7dHVubmVsdjFiBnByb3RvMw", [file_google_protobuf_any, file_google_protobuf_timestamp]);
+  fileDesc("ChlzYngvdHVubmVsL3YxL2V2ZW50LnByb3RvEg1zYngudHVubmVsLnYxIoQBCgVFdmVudBILCgNzZXEYASABKAQSKAoEdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHYm9vdF9pZBgDIAEoCRIMCgR0eXBlGAQgASgJEiUKB3BheWxvYWQYBSABKAsyFC5nb29nbGUucHJvdG9idWYuQW55IpwBCg9Db25uZWN0aW9uRXZlbnQSEgoKbWFjaGluZV9pZBgBIAEoCRINCgVlcG9jaBgCIAEoBBIMCgR0eXBlGAMgASgJEigKBHRpbWUYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhMKC2luc3RhbmNlX2lkGAUgASgJEhkKEWFnZW50X2luc3RhbmNlX2lkGAYgASgJQkVaQ2dpdGh1Yi5jb20vYmVsb3YzOC9ib2F0LWRldi1jbG9uZS9saWJzL3Byb3RvL3NieC90dW5uZWwvdjE7dHVubmVsdjFiBnByb3RvMw", [file_google_protobuf_any, file_google_protobuf_timestamp]);
 
 /**
  * Event is a guest-side event journaled by the agent and acknowledged by seq.
@@ -90,11 +90,20 @@ export type ConnectionEvent = Message<"sbx.tunnel.v1.ConnectionEvent"> & {
   time?: Timestamp | undefined;
 
   /**
-   * Agent instance id reported by the agent in the connect handshake.
+   * Gateway instance that recorded the event. For a sweep `disconnected` it
+   * is the dead instance whose session was swept.
    *
    * @generated from field: string instance_id = 5;
    */
   instanceId: string;
+
+  /**
+   * Agent instance id reported by the agent in the connect handshake; empty
+   * when unknown.
+   *
+   * @generated from field: string agent_instance_id = 6;
+   */
+  agentInstanceId: string;
 };
 
 /**

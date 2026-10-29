@@ -112,10 +112,14 @@ type ConnectionEvent struct {
 	// One of: connected, disconnected, agent_restarted, rebooted, identity_changed.
 	Type string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
 	Time *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=time,proto3" json:"time,omitempty"`
-	// Agent instance id reported by the agent in the connect handshake.
-	InstanceId    string `protobuf:"bytes,5,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Gateway instance that recorded the event. For a sweep `disconnected` it
+	// is the dead instance whose session was swept.
+	InstanceId string `protobuf:"bytes,5,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	// Agent instance id reported by the agent in the connect handshake; empty
+	// when unknown.
+	AgentInstanceId string `protobuf:"bytes,6,opt,name=agent_instance_id,json=agentInstanceId,proto3" json:"agent_instance_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ConnectionEvent) Reset() {
@@ -183,6 +187,13 @@ func (x *ConnectionEvent) GetInstanceId() string {
 	return ""
 }
 
+func (x *ConnectionEvent) GetAgentInstanceId() string {
+	if x != nil {
+		return x.AgentInstanceId
+	}
+	return ""
+}
+
 var File_sbx_tunnel_v1_event_proto protoreflect.FileDescriptor
 
 const file_sbx_tunnel_v1_event_proto_rawDesc = "" +
@@ -193,7 +204,7 @@ const file_sbx_tunnel_v1_event_proto_rawDesc = "" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12\x17\n" +
 	"\aboot_id\x18\x03 \x01(\tR\x06bootId\x12\x12\n" +
 	"\x04type\x18\x04 \x01(\tR\x04type\x12.\n" +
-	"\apayload\x18\x05 \x01(\v2\x14.google.protobuf.AnyR\apayload\"\xab\x01\n" +
+	"\apayload\x18\x05 \x01(\v2\x14.google.protobuf.AnyR\apayload\"\xd7\x01\n" +
 	"\x0fConnectionEvent\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x14\n" +
@@ -201,7 +212,8 @@ const file_sbx_tunnel_v1_event_proto_rawDesc = "" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12.\n" +
 	"\x04time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12\x1f\n" +
 	"\vinstance_id\x18\x05 \x01(\tR\n" +
-	"instanceIdBEZCgithub.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1;tunnelv1b\x06proto3"
+	"instanceId\x12*\n" +
+	"\x11agent_instance_id\x18\x06 \x01(\tR\x0fagentInstanceIdBEZCgithub.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1;tunnelv1b\x06proto3"
 
 var (
 	file_sbx_tunnel_v1_event_proto_rawDescOnce sync.Once

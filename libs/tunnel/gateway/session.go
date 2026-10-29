@@ -288,7 +288,7 @@ func (s *session) finish() {
 			s.log.Warn("gateway: marking session disconnected failed", "err", err)
 		case changed:
 			g.goEvents(newConnectionEvent(s.machineID, s.info.Epoch, evDisconnected,
-				s.hello.AgentInstanceID, time.Now()))
+				g.cfg.InstanceID, s.hello.AgentInstanceID, time.Now()))
 		}
 	}
 	s.wg.Wait()
@@ -314,7 +314,7 @@ func (s *session) sendConnectedEvents() {
 	}
 	evs := make([]*tunnelv1.ConnectionEvent, 0, len(types))
 	for _, typ := range types {
-		evs = append(evs, newConnectionEvent(s.machineID, s.info.Epoch, typ, s.hello.AgentInstanceID, now))
+		evs = append(evs, newConnectionEvent(s.machineID, s.info.Epoch, typ, s.g.cfg.InstanceID, s.hello.AgentInstanceID, now))
 	}
 	s.g.goEvents(evs...)
 }
@@ -406,13 +406,16 @@ func (s *session) rotateToken(ctx context.Context) error {
 	return nil
 }
 
-func newConnectionEvent(machineID string, epoch uint64, typ, agentInstanceID string, at time.Time) *tunnelv1.ConnectionEvent {
+// newConnectionEvent builds a synthetic connection event (spec 9.6):
+// instanceID is the gateway instance the session lived on.
+func newConnectionEvent(machineID string, epoch uint64, typ, instanceID, agentInstanceID string, at time.Time) *tunnelv1.ConnectionEvent {
 	return &tunnelv1.ConnectionEvent{
-		MachineId:  machineID,
-		Epoch:      epoch,
-		Type:       typ,
-		Time:       timestamppb.New(at),
-		InstanceId: agentInstanceID,
+		MachineId:       machineID,
+		Epoch:           epoch,
+		Type:            typ,
+		Time:            timestamppb.New(at),
+		InstanceId:      instanceID,
+		AgentInstanceId: agentInstanceID,
 	}
 }
 

@@ -426,6 +426,9 @@ func TestSweepStale(t *testing.T) {
 		if sess.State != "disconnected" || sess.DisconnectedAt == nil || !sess.DisconnectedAt.Equal(heartbeats[inst]) {
 			t.Fatalf("session %s = %+v", id, sess)
 		}
+		if sw.AgentInstanceID == "" || sw.AgentInstanceID != sess.AgentInstanceID {
+			t.Fatalf("swept agent instance id %q, session has %q", sw.AgentInstanceID, sess.AgentInstanceID)
+		}
 	}
 	for _, inst := range stale {
 		if _, err := s.Instance(ctx, inst); !errors.Is(err, registry.ErrNotFound) {

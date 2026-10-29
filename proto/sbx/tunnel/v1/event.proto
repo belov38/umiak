@@ -27,6 +27,10 @@ message ConnectionEvent {
   // One of: connected, disconnected, agent_restarted, rebooted, identity_changed.
   string type = 3;
   google.protobuf.Timestamp time = 4;
-  // Agent instance id reported by the agent in the connect handshake.
+  // Gateway instance that recorded the event. For a sweep `disconnected` it
+  // is the dead instance whose session was swept.
   string instance_id = 5;
+  // Agent instance id reported by the agent in the connect handshake; empty
+  // when unknown.
+  string agent_instance_id = 6;
 }

@@ -394,9 +394,11 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 
 // Swept describes a session moved to disconnected by SweepStale.
 type Swept struct {
-	MachineID  string
-	InstanceID string
-	Epoch      uint64
+	MachineID string
+	// InstanceID is the dead gateway instance.
+	InstanceID      string
+	AgentInstanceID string
+	Epoch           uint64
 	// DisconnectedAt is the last heartbeat of the dead instance.
 	DisconnectedAt time.Time
 }
@@ -435,7 +437,7 @@ func (s *Store) SweepStale(ctx context.Context, self string, staleAfter time.Dur
 		rows, err := tx.Query(ctx, `UPDATE tunnel.tunnel_sessions
 			SET state = 'disconnected', disconnected_at = $2
 			WHERE instance_id = $1 AND state = 'connected'
-			RETURNING machine_id::text, epoch`, inst.id, inst.heartbeat)
+			RETURNING machine_id::text, epoch, agent_instance_id`, inst.id, inst.heartbeat)
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +446,7 @@ func (s *Store) SweepStale(ctx context.Context, self string, staleAfter time.Dur
 				sw    = Swept{InstanceID: inst.id, DisconnectedAt: inst.heartbeat}
 				epoch int64
 			)
-			err := r.Scan(&sw.MachineID, &epoch)
+			err := r.Scan(&sw.MachineID, &epoch, &sw.AgentInstanceID)
 			sw.Epoch = uint64(epoch) //nolint:gosec // epoch starts at 1 and only grows
 			return sw, err
 		})

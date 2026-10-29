@@ -228,8 +228,9 @@ func TestConnectionEvents(t *testing.T) {
 		for _, ce := range gw.sink.connEvents(id) {
 			if ce.GetEpoch() == ev.Epoch {
 				types = append(types, ce.GetType())
-				if ce.GetInstanceId() != ident.InstanceID {
-					t.Errorf("event %v: instance id %q, want %q", ce.GetType(), ce.GetInstanceId(), ident.InstanceID)
+				if ce.GetInstanceId() != "gw-a" || ce.GetAgentInstanceId() != ident.InstanceID {
+					t.Errorf("event %v: instance id %q, agent instance id %q; want gw-a, %q",
+						ce.GetType(), ce.GetInstanceId(), ce.GetAgentInstanceId(), ident.InstanceID)
 				}
 			}
 		}
@@ -334,7 +335,8 @@ func TestSweepMarksCrashedInstance(t *testing.T) {
 	gwB := e.gateway("gw-b", func(c *Config) { c.Timing.StaleAfter = 300 * time.Millisecond })
 	gwB.routed.Store(false) // the agent cannot reconnect, so its session stays A's
 	id, bs := e.machine()
-	a := e.startAgent(agentConfig(e, id, bs, defaultIdentity()))
+	ident := defaultIdentity()
+	a := e.startAgent(agentConfig(e, id, bs, ident))
 	if ev := a.waitConnected(); ev.Gateway != "gw-a" {
 		t.Fatalf("connected to %s, want gw-a", ev.Gateway)
 	}
@@ -351,6 +353,14 @@ func TestSweepMarksCrashedInstance(t *testing.T) {
 	eventually(t, waitTimeout, "B sends disconnected", func() bool { return gwB.sink.hasConnEvent(id, 1, "disconnected") })
 	if gwA.sink.hasConnEvent(id, 1, "disconnected") {
 		t.Fatal("an abandoned gateway must not send events")
+	}
+	// The sweep event names the dead instance and the swept agent.
+	for _, ce := range gwB.sink.connEvents(id) {
+		if ce.GetType() == "disconnected" && (ce.GetInstanceId() != "gw-a" ||
+			ce.GetAgentInstanceId() != ident.InstanceID) {
+			t.Fatalf("sweep event: instance id %q, agent instance id %q; want gw-a, %q",
+				ce.GetInstanceId(), ce.GetAgentInstanceId(), ident.InstanceID)
+		}
 	}
 }
 

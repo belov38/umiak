@@ -485,7 +485,8 @@ func (g *Gateway) sweepLoop(ctx context.Context) {
 		}
 		evs := make([]*tunnelv1.ConnectionEvent, 0, len(swept))
 		for _, sw := range swept {
-			evs = append(evs, newConnectionEvent(sw.MachineID, sw.Epoch, evDisconnected, "", sw.DisconnectedAt))
+			evs = append(evs, newConnectionEvent(sw.MachineID, sw.Epoch, evDisconnected,
+				sw.InstanceID, sw.AgentInstanceID, sw.DisconnectedAt))
 		}
 		g.goEvents(evs...)
 	}
