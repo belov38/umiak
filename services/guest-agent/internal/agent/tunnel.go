@@ -53,7 +53,7 @@ func (a *agent) startTunnel(ctx context.Context) {
 		Handler:     a.mux,
 		Info:        a.tunnelInfo,
 		Journal:     a.st.Journal(),
-		Dial:        ports.Dialer{Counter: a.tcp}.Dial,
+		Dial:        ports.Dialer{Counter: a.tcp, LocalAddrs: a.d.LocalAddrs}.Dial,
 		OnConnEvent: a.onConnEvent,
 		Logger:      a.log,
 	})

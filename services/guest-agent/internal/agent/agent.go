@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -93,6 +94,10 @@ type Deps struct {
 	Statfs func(path string) (total, free uint64, err error)
 	// ProcDir is the procfs root of the ports scanner ("" = /proc).
 	ProcDir string
+	// LocalAddrs lists the interface addresses a CONNECT to localhost tries
+	// after the loopback ones (ports.Dialer.LocalAddrs). Default
+	// ports.InterfaceAddrs.
+	LocalAddrs func() []netip.Addr
 	// ShimPath is the binary started as the shim. Default os.Executable.
 	ShimPath string
 	// Hostname returns the hostname for System/Info. Default os.Hostname.
