@@ -10,3 +10,5 @@ sdnZone = "sbx"
 vnet = "sbx0"
 clusterId = 1
 leaseFile = "/var/lib/misc/dnsmasq.sbx.leases"
+ethersFile = "/etc/dnsmasq.d/sbx/ethers"
+macCacheFile = "/etc/pve/sdn/mac-cache.json"

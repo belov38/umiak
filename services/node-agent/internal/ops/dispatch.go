@@ -34,11 +34,13 @@ type Response struct {
 	Error  *Error `json:"error,omitempty"`
 }
 
-// Host gives read access to the node filesystem (rooted at "/") and runs commands.
+// Host gives read access to the node filesystem (rooted at "/"), runs commands and
+// rewrites files under a lock.
 type Host struct {
-	FS  fs.FS
-	Run lvm.Runner
-	Now func() time.Time
+	FS      fs.FS
+	Run     lvm.Runner
+	Now     func() time.Time
+	Replace func(path string, edit func([]byte) ([]byte, error)) error
 }
 
 // Server executes whitelisted operations.

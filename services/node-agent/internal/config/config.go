@@ -26,6 +26,8 @@ type Config struct {
 	VNet         string `toml:"vnet" json:"vnet"`
 	ClusterID    int    `toml:"clusterId" json:"clusterId"`
 	LeaseFile    string `toml:"leaseFile" json:"leaseFile"`
+	EthersFile   string `toml:"ethersFile" json:"ethersFile"`
+	MacCacheFile string `toml:"macCacheFile" json:"macCacheFile"`
 }
 
 // Default returns the PoC values from the S1 spec.
@@ -42,6 +44,8 @@ func Default() Config {
 		VNet:         "sbx0",
 		ClusterID:    1,
 		LeaseFile:    "/var/lib/misc/dnsmasq.sbx.leases",
+		EthersFile:   "/etc/dnsmasq.d/sbx/ethers",
+		MacCacheFile: "/etc/pve/sdn/mac-cache.json",
 	}
 }
 

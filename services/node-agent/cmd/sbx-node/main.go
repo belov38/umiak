@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/belov38/boat-dev-clone/services/node-agent/internal/config"
+	"github.com/belov38/boat-dev-clone/services/node-agent/internal/hostfs"
 	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
 	"github.com/belov38/boat-dev-clone/services/node-agent/internal/ops"
 )
@@ -63,7 +64,7 @@ func run(cfgPath string) int {
 	srv := &ops.Server{
 		Cfg:     cfg,
 		LVM:     &lvm.Exec{VG: cfg.VG, Run: lvm.RunCommand},
-		Host:    ops.Host{FS: os.DirFS("/"), Run: lvm.RunCommand, Now: time.Now},
+		Host:    ops.Host{FS: os.DirFS("/"), Run: lvm.RunCommand, Now: time.Now, Replace: hostfs.ReplaceLocked},
 		Log:     logf,
 		Version: version,
 	}

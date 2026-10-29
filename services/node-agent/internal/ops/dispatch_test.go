@@ -70,9 +70,12 @@ func newHarness(files fstest.MapFS) *harness {
 		files = fstest.MapFS{}
 	}
 	h.srv = &Server{
-		Cfg:     testConfig(),
-		LVM:     h.lvm,
-		Host:    Host{FS: files, Run: h.run.run, Now: func() time.Time { return time.Unix(1793300000, 0) }},
+		Cfg: testConfig(),
+		LVM: h.lvm,
+		Host: Host{
+			FS: files, Run: h.run.run, Now: func() time.Time { return time.Unix(1793300000, 0) },
+			Replace: (&fakeFiles{files: map[string][]byte{}}).replace,
+		},
 		Log:     func(s string) { h.logs = append(h.logs, s) },
 		Version: "test",
 	}
@@ -229,5 +232,65 @@ func TestLogRedactsSearchString(t *testing.T) {
 	h.call(t, "lv.list", map[string]any{"tags": []string{"sbx-vm-500"}})
 	if last := h.logs[len(h.logs)-1]; !strings.Contains(last, "sbx-vm-500") || !strings.Contains(last, "r1") {
 		t.Errorf("normal op args not logged: %s", last)
+	}
+}
+
+type fakeFiles struct {
+	files map[string][]byte
+}
+
+func (f *fakeFiles) replace(path string, edit func([]byte) ([]byte, error)) error {
+	out, err := edit(f.files[path])
+	if err != nil {
+		return err
+	}
+	f.files[path] = out
+	return nil
+}
+
+const ethers = "02:01:00:00:02:57,10.88.0.100\n02:01:00:00:01:f4,10.88.0.101\n"
+
+func TestDHCPReleaseRemovesStaleEthersLine(t *testing.T) {
+	h := newHarness(fstest.MapFS{
+		"var/lib/misc/dnsmasq.sbx.leases": {Data: []byte(leases)},
+		"etc/pve/sdn/mac-cache.json":      {Data: []byte(`{"macs":{"02:01:00:00:02:57":{"ip4":"10.88.0.100"}}}`)},
+		"etc/dnsmasq.d/sbx/ethers":        {Data: []byte(ethers)},
+	})
+	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/sbx/ethers": []byte(ethers)}}
+	h.srv.Host.Replace = files.replace
+	m := resultMap(t, h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:F4"}))
+	if m["released"] != true || m["ethersRemoved"] != true {
+		t.Fatalf("result = %v", m)
+	}
+	if got := string(files.files["/etc/dnsmasq.d/sbx/ethers"]); got != "02:01:00:00:02:57,10.88.0.100\n" {
+		t.Errorf("ethers = %q", got)
+	}
+	last := strings.Join(h.run.calls[len(h.run.calls)-1], " ")
+	if last != "systemctl reload dnsmasq@sbx" {
+		t.Errorf("last call = %q", last)
+	}
+}
+
+func TestDHCPReleaseKeepsEthersWhileMACIsInIPAM(t *testing.T) {
+	h := newHarness(fstest.MapFS{
+		"etc/pve/sdn/mac-cache.json": {Data: []byte(`{"macs":{"02:01:00:00:01:f4":{"ip4":"10.88.0.101"}}}`)},
+	})
+	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/sbx/ethers": []byte(ethers)}}
+	h.srv.Host.Replace = files.replace
+	m := resultMap(t, h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:f4"}))
+	if m["ethersRemoved"] != false || m["inMacCache"] != true {
+		t.Errorf("result = %v", m)
+	}
+	if string(files.files["/etc/dnsmasq.d/sbx/ethers"]) != ethers {
+		t.Error("ethers must not change while the MAC is still in the IPAM mac cache")
+	}
+}
+
+func TestDHCPLeasesIncludesEthers(t *testing.T) {
+	h := newHarness(fstest.MapFS{"etc/dnsmasq.d/sbx/ethers": {Data: []byte(ethers)}})
+	m := resultMap(t, h.call(t, "dhcp.leases", nil))
+	e := m["ethers"].([]any)
+	if len(e) != 2 || e[1].(map[string]any)["mac"] != "02:01:00:00:01:f4" || e[1].(map[string]any)["ip"] != "10.88.0.101" {
+		t.Errorf("ethers = %v", e)
 	}
 }
