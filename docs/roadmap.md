@@ -7,7 +7,7 @@
 | # | Область | Что решаем | Зависит от | Статус |
 |---|---|---|---|---|
 | S1 | **Proxmox foundation** | Подготовка хоста (пользователь, токен, pool, SDN Simple zone + VNet, firewall); драйвер LVM-thin; примитивы machine (из шаблона, start/stop, snapshot с хуком quiesce, fork, delete); выделение VMID и MAC; транспорт операций на ноде (`node-agent` на Go или SSH); стенд для замеров | — | ✅ спецификация `docs/specs/s1-proxmox-foundation.md`; ✅ реализация в main (126/126 проверок стенда, цифры в §11; 4 раунда независимой приёмки) |
-| S2 | Протокол туннеля агент ↔ gateway | Формат на проводе, auth, мультиплексирование, переподключение, `requestId`, offset, реестр `machine → gateway` | — | ✅ спецификация; реализация (ветка `s2-impl`) |
+| S2 | Протокол туннеля агент ↔ gateway | Формат на проводе, auth, мультиплексирование, переподключение, `requestId`, offset, реестр `machine → gateway` | — | ✅ спецификация `docs/specs/s2-tunnel-protocol.md`; ✅ реализация в main (`libs/tunnel`, `@sbx/agent-client`; 4 раунда независимой приёмки, включая атаки агента) |
 | S3 | Guest agent v0 (Linux) | exec / files / ports, claim, смена идентичности, quiesce, установка и обновление | S2 | ✅ спецификация `docs/specs/s3-guest-agent.md` |
 | S4 | Gateway | Приём туннелей, HTTP-прокси `*.sbx`, маршрутизация, несколько экземпляров, позже SSH gateway и TURN | S2 | ✅ спецификация `docs/specs/s4-gateway.md` |
 | S5 | Шаблон Linux | Сборка образа (cloud-init / Packer), встроенный агент, версии шаблонов | S1, S3 | ✅ спецификация `docs/specs/s5-linux-template.md` |
