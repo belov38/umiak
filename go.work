@@ -3,5 +3,6 @@ go 1.27.3
 use (
 	./libs/proto
 	./libs/tunnel
+	./services/guest-agent
 	./services/node-agent
 )

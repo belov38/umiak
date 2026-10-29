@@ -1,0 +1,62 @@
+// Command sbx-agent is the guest agent of a sandbox VM and its CLI.
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
+const usage = `usage: sbx-agent <command>
+
+commands:
+  run               run the agent daemon
+  shim              command supervisor (started by the agent)
+  identity apply    apply the machine identity (sbx-identity.service)
+  quiesce-watchdog  thaw a frozen filesystem when the lease expires
+  rollback          roll back an unfinished update
+  doctor            print diagnostics
+  thaw              thaw the filesystem
+  install-package   install an agent package
+  seal              prepare a VM for use as a template
+  selftest          run built-in checks
+  version           print the version
+`
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run dispatches a subcommand and returns the process exit code.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = io.WriteString(stderr, usage)
+		return 2
+	}
+	switch args[0] {
+	case "version":
+		_, _ = fmt.Fprintln(stdout, version)
+		return 0
+	case "identity":
+		if len(args) < 2 || args[1] != "apply" {
+			_, _ = io.WriteString(stderr, usage)
+			return 2
+		}
+		return notImplemented(stderr, "identity apply")
+	case "run", "shim", "quiesce-watchdog", "rollback", "doctor", "thaw",
+		"install-package", "seal", "selftest":
+		return notImplemented(stderr, args[0])
+	default:
+		_, _ = fmt.Fprintf(stderr, "sbx-agent: unknown command %q\n\n", args[0])
+		_, _ = io.WriteString(stderr, usage)
+		return 2
+	}
+}
+
+func notImplemented(stderr io.Writer, name string) int {
+	_, _ = fmt.Fprintf(stderr, "sbx-agent %s: not implemented\n", name)
+	return 1
+}
