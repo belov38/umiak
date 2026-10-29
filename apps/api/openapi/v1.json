@@ -2184,7 +2184,7 @@
 						"$ref": "#/components/schemas/Labels"
 					},
 					"timeoutSeconds": {
-						"description": "Process timeout (status timed_out). sync: default 60, at most 600. stream and detached: default none.",
+						"description": "Process timeout (status timed_out). sync: default 60, at most 600, null not allowed. stream and detached: default none (null).",
 						"minimum": 1,
 						"type": [
 							"integer",
@@ -3602,7 +3602,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/commands/{command}/output": {
 			"get": {
-				"description": "Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: Sbx-Offset (where the bytes start), Sbx-Next-Offset, Sbx-Available-From, Sbx-Stream-End (only once the stream ended), Sbx-Truncated: true when `offset` was already evicted and reading started at Sbx-Available-From. For polling without streams.",
+				"description": "Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: Sbx-Offset (where the bytes start), Sbx-Next-Offset, Sbx-Available-From, Sbx-Stream-End (only once the stream ended), Sbx-Truncated: true when `offset` was already evicted and reading started at Sbx-Available-From. An offset past the end is 416. For polling without streams.",
 				"operationId": "commands.output",
 				"parameters": [
 					{
@@ -3739,6 +3739,16 @@
 							}
 						},
 						"description": "`sandbox_not_ready` (details.state), `sandbox_starting` (retryable), `agent_outdated` (details.capability) or `invalid_state`"
+					},
+					"416": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`range_not_satisfiable`: offset past the end of the stream (details.size)"
 					},
 					"default": {
 						"content": {

@@ -7,15 +7,16 @@
 // (StreamClose: shutdown, revocation), and with `error` when the agent is
 // gone. On `exit` the command row is completed (completeCommand).
 import {
-	AgentUnavailableError,
 	type AttachOutput,
 	type AttachView,
-	isConnectionError,
 	resumableAttach,
 } from "@sbx/agent-client";
-import { agentErrorToHttp } from "../agent/errors.ts";
+import type { CommandResult } from "@sbx/core";
+import { agentErrorToHttp, isAgentUnreachable } from "../agent/errors.ts";
 import type {
 	AgentAttachEvent,
+	AgentCommandInfo,
+	AgentExitInfo,
 	AgentExitReason,
 	AgentExitStatus,
 	AgentStream,
@@ -80,6 +81,41 @@ export function commandStatus(
 }
 
 type ExitEvent = Extract<AgentAttachEvent, { type: "exit" }>;
+
+/**
+ * The `completeCommand` result of an agent exit. `bytes` are the stream
+ * ends; a PTY command keeps its one stream in `stdout_bytes`.
+ */
+export function commandResult(
+	exit: AgentExitInfo,
+	bytes: { stdout: number | null; stderr: number | null; pty: number | null },
+	pty: boolean,
+	endedAt: Date | null,
+): CommandResult {
+	return {
+		status: commandStatus(exit.status, exit.reason),
+		exitCode: exit.code,
+		signal: exit.signal,
+		stdoutBytes: pty ? bytes.pty : bytes.stdout,
+		stderrBytes: pty ? 0 : bytes.stderr,
+		...(endedAt === null ? {} : { endedAt }),
+	};
+}
+
+/** `commandResult` of a `Process/Get` answer; null while it runs. */
+export function commandResultOf(info: AgentCommandInfo): CommandResult | null {
+	if (info.exit === null) return null;
+	const end = (s: AgentStream) => {
+		const x = info.streams[s];
+		return x === undefined ? null : (x.end ?? x.size);
+	};
+	return commandResult(
+		info.exit,
+		{ stdout: end("stdout"), stderr: end("stderr"), pty: end("pty") },
+		info.streams.pty !== undefined,
+		info.endedAt,
+	);
+}
 
 /** Internal events of both sources (resumable and one-shot). */
 type Ev =
@@ -237,7 +273,7 @@ function nextWake(
 function errorOf(
 	e: unknown,
 ): Pick<ErrorFrame, "code" | "message" | "retryable"> {
-	if (e instanceof AgentUnavailableError || isConnectionError(e)) {
+	if (isAgentUnreachable(e)) {
 		return {
 			code: "agent_unavailable",
 			message:
@@ -246,18 +282,6 @@ function errorOf(
 		};
 	}
 	const h = agentErrorToHttp(e);
-	if (
-		h.code === "internal" &&
-		e instanceof Error &&
-		e.name === "ConnectError"
-	) {
-		// A transport error of the agent leg after resumableAttach gave up.
-		return {
-			code: "agent_unavailable",
-			message: "the sandbox agent stream failed; reattach with these offsets",
-			retryable: true,
-		};
-	}
 	return { code: h.code, message: h.message, retryable: h.retryable };
 }
 
@@ -446,15 +470,15 @@ async function exitFrame(
 ): Promise<ExitFrame> {
 	const status = commandStatus(e.status, e.reason);
 	try {
-		await deps.svc.completeCommand(commandId, {
-			status,
-			exitCode: e.code,
-			signal: e.signal,
-			// A PTY command keeps its one stream in stdout_bytes.
-			stdoutBytes: pty ? e.ptyEnd : e.stdoutEnd,
-			stderrBytes: pty ? 0 : e.stderrEnd,
-			...(e.endedAt === null ? {} : { endedAt: e.endedAt }),
-		});
+		await deps.svc.completeCommand(
+			commandId,
+			commandResult(
+				e,
+				{ stdout: e.stdoutEnd, stderr: e.stderrEnd, pty: e.ptyEnd },
+				pty,
+				e.endedAt,
+			),
+		);
 	} catch (err) {
 		deps.log.warn(
 			{ err: err instanceof Error ? err.message : String(err), commandId },

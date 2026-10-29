@@ -108,7 +108,7 @@ export class StreamRegistry {
 		return this.#entries.size;
 	}
 
-	/** Open connections of a principal (key id, else user id). */
+	/** Capped open connections of a principal (key id, else user id). */
 	count(principal: string): number {
 		return this.#perPrincipal.get(principal) ?? 0;
 	}
@@ -117,9 +117,15 @@ export class StreamRegistry {
 	 * Registers an open connection; returns its unregister function (call it
 	 * once the connection is closed, idempotent). Throws 429 `rate_limited`
 	 * at the per-principal cap and 503 `server_shutting_down` after closeAll.
-	 * `abort` is called at most once.
+	 * `abort` is called at most once. `capped: false` (sync requests) is
+	 * closed on revocation and shutdown like the rest but does not count
+	 * toward the cap.
 	 */
-	register(owner: StreamOwner, abort: StreamAbort): () => void {
+	register(
+		owner: StreamOwner,
+		abort: StreamAbort,
+		opts: { capped?: boolean } = {},
+	): () => void {
 		if (this.#closing) {
 			throw new ApiError(
 				503,
@@ -128,9 +134,9 @@ export class StreamRegistry {
 				{ retryable: true },
 			);
 		}
+		const capped = opts.capped ?? true;
 		const pk = principalKey(owner);
-		const n = this.count(pk);
-		if (n >= this.#max) {
+		if (capped && this.count(pk) >= this.#max) {
 			throw new ApiError(
 				429,
 				"rate_limited",
@@ -143,15 +149,17 @@ export class StreamRegistry {
 		}
 		const entry: Entry = { owner: { ...owner }, abort, closed: false };
 		this.#entries.add(entry);
-		this.#perPrincipal.set(pk, n + 1);
+		if (capped) this.#perPrincipal.set(pk, this.count(pk) + 1);
 		let done = false;
 		return () => {
 			if (done) return;
 			done = true;
 			this.#entries.delete(entry);
-			const left = this.count(pk) - 1;
-			if (left > 0) this.#perPrincipal.set(pk, left);
-			else this.#perPrincipal.delete(pk);
+			if (capped) {
+				const left = this.count(pk) - 1;
+				if (left > 0) this.#perPrincipal.set(pk, left);
+				else this.#perPrincipal.delete(pk);
+			}
 			if (this.#entries.size === 0) this.#notifyDrained();
 		};
 	}

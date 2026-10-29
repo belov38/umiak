@@ -13,7 +13,7 @@ import {
 	IdentityListener,
 	StreamRegistry,
 } from "../src/index.ts";
-import { testSettings } from "../src/testing/index.ts";
+import { captureLogs, testSettings } from "../src/testing/index.ts";
 import {
 	type Any,
 	openStream,
@@ -99,6 +99,14 @@ describe("StreamRegistry", () => {
 		u1();
 		expect(r.count("k1")).toBe(1);
 		r.register(owner, () => {});
+		expect(r.size).toBe(3);
+		// Uncapped (sync) connections are tracked but not counted.
+		const sync = r.register(owner, () => {}, { capped: false });
+		expect(r.count("k1")).toBe(2);
+		expect(r.size).toBe(4);
+		expect(r.revoke({ apiKeyId: "k1" })).toBe(3);
+		sync();
+		expect(r.count("k1")).toBe(2);
 		expect(r.size).toBe(3);
 	});
 
@@ -356,6 +364,12 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 			"SELECT count(*)::int AS n FROM runtime.commands",
 		);
 		expect(after.rows[0].n).toBe(before.rows[0].n);
+		// Sync requests are not capped.
+		const sync = await capped.request("POST", sb.commands, {
+			json: { command: "echo sync" },
+		});
+		expect(sync.status).toBe(200);
+		expect((sync.body as Any).stdout).toBe("sync\n");
 		await a.cancel();
 		await sleep(50);
 		const e = await openStream(
@@ -372,6 +386,53 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 				json: { graceMs: 0 },
 			});
 		}
+	});
+
+	it("a stream whose request is aborted before its body is read frees the slot", async () => {
+		const ac = new AbortController();
+		const res = await h.app.request(sb.commands, {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${w.secret}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ mode: "stream", command: "sleep 2" }),
+			signal: ac.signal,
+		});
+		expect(res.status).toBe(200);
+		const id = res.headers.get("sbx-command-id");
+		expect(h.deps.streams.size).toBe(1);
+		ac.abort();
+		await sleep(20);
+		expect(h.deps.streams.size).toBe(0);
+		await h.request("POST", `${sb.commands}/${id}/kill`, {
+			json: { graceMs: 0 },
+		});
+	});
+
+	it("a sync client that goes away gets no agent_error; the command keeps running", async () => {
+		const logs = captureLogs();
+		const quiet = w.harness({
+			deps: { log: logs.log, identityEvents: events },
+		});
+		const ac = new AbortController();
+		const pending = quiet.app.request(sb.commands, {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${w.secret}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ command: "sleep 1; echo late" }),
+			signal: ac.signal,
+		});
+		await sleep(300);
+		ac.abort();
+		const res = await pending;
+		expect(res.status).toBe(499);
+		expect(logs.text()).not.toContain("agent_error");
+		expect(quiet.deps.streams.size).toBe(0);
+		const list = await h.request("GET", `${sb.commands}?status=running`);
+		expect((list.body as Any).data.length).toBeGreaterThan(0);
 	});
 
 	it("closeAll: open streams end with reconnect server_shutdown; sync gets 503 server_shutting_down", async () => {

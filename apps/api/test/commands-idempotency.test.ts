@@ -7,7 +7,7 @@ import { AgentUnavailableError } from "@sbx/agent-client";
 import { uuidv5 } from "@sbx/core";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { AgentApi } from "../src/index.ts";
+import { type AgentApi, AgentCallError } from "../src/index.ts";
 import {
 	type Any,
 	bytesOf,
@@ -269,5 +269,93 @@ describe.skipIf(skipPg())("Idempotency-Key on POST /commands", () => {
 			expect(w.agent.startCount(internalId(e.details.commandId))).toBe(1);
 			expect(requestIds[0]).toBe(requestIds[1]);
 		});
+
+		it("a connection error from Start is the same unknown outcome", async () => {
+			let failed = false;
+			w.agent.start = async (m, req, opts) => {
+				requestIds.push(opts.requestId);
+				if (!failed) {
+					failed = true;
+					throw Object.assign(new Error("socket hang up"), {
+						code: "ECONNRESET",
+					});
+				}
+				return realStart(m, req, opts);
+			};
+			const r = await h.request("POST", sb.commands, {
+				json: { command: "true", mode: "detached" },
+			});
+			expect(r.status).toBe(503);
+			expect((r.body as Any).error).toMatchObject({
+				code: "agent_unavailable",
+				retryable: false,
+				details: { outcome: "unknown" },
+			});
+			const k = key();
+			failed = false;
+			const keyed = await h.request("POST", sb.commands, {
+				json: { command: "true", mode: "detached" },
+				headers: { "idempotency-key": k },
+			});
+			expect(keyed.status).toBe(503);
+			expect((keyed.body as Any).error).toMatchObject({
+				code: "agent_unavailable",
+				retryable: true,
+			});
+			expect((keyed.body as Any).error.details.commandId).toMatch(/^cmd_/);
+		});
+	});
+
+	it("a refused Start leaves a row that a concurrent replay already runs", async () => {
+		const k = key();
+		w.agent.start = async (_m, req) => {
+			// A concurrent replay got there first and marked it running.
+			await w.env.svc.markCommandRunning(req.commandId, 4242);
+			throw new AgentCallError("already_exists", "exists with another spec");
+		};
+		try {
+			const r = await h.request("POST", sb.commands, {
+				json: { command: "true", mode: "detached" },
+				headers: { "idempotency-key": k },
+			});
+			expect(r.status).toBe(409);
+			const rows = await db.pool.query(
+				"SELECT status FROM runtime.commands WHERE request_id = $1",
+				[uuidv5(`${w.keyId}:commands.create:${k}`)],
+			);
+			expect(rows.rows.map((x) => x.status)).toEqual(["running"]);
+		} finally {
+			w.agent.start = (m, req, opts) => {
+				requestIds.push(opts.requestId);
+				return realStart(m, req, opts);
+			};
+		}
+	});
+
+	it("a replay of a command from an earlier machine is 409 machine_replaced, no Start", async () => {
+		const k = key();
+		const body = { command: "sleep 0.1", mode: "detached" };
+		const first = await h.request("POST", sb.commands, {
+			json: body,
+			headers: { "idempotency-key": k },
+		});
+		expect(first.status).toBe(201);
+		const id = internalId((first.body as Any).id);
+		const other = await readySandbox(w);
+		await db.pool.query(
+			"UPDATE runtime.commands SET machine_id = $2 WHERE id = $1",
+			[id, other.machineId],
+		);
+		requestIds.length = 0;
+		const again = await h.request("POST", sb.commands, {
+			json: body,
+			headers: { "idempotency-key": k },
+		});
+		expect(again.status).toBe(409);
+		expect((again.body as Any).error).toMatchObject({
+			code: "invalid_state",
+			details: { reason: "machine_replaced" },
+		});
+		expect(requestIds).toEqual([]);
 	});
 });

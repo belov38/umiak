@@ -49,6 +49,32 @@ describe("collectSync", () => {
 		expect(r.ended).toBeNull();
 	});
 
+	it("truncated after kept output drops it: the answer starts at availableFrom", async () => {
+		const frames: Frame[] = [
+			{ type: "stdout", offset: 0, nextOffset: 3, data: "abc" },
+			{ type: "truncated", stream: "stdout", availableFrom: 10 },
+			{ type: "stdout", offset: 10, nextOffset: 13, data: "klm" },
+			{
+				type: "exit",
+				status: "exited",
+				exitCode: 0,
+				signal: null,
+				reason: "none",
+				stdoutOffset: 13,
+				stderrOffset: 0,
+			},
+		];
+		const r = await collectSync(framesOf(frames), "utf8");
+		expect(r).toMatchObject({
+			stdout: "klm",
+			stdoutFrom: 10,
+			stdoutTruncated: true,
+			stderr: "",
+			stderrFrom: 0,
+			stderrTruncated: false,
+		});
+	});
+
 	it("base64 pieces are joined as bytes; truncated moves From", async () => {
 		const frames: Frame[] = [
 			{ type: "truncated", stream: "stdout", availableFrom: 100 },
@@ -219,8 +245,18 @@ describe.skipIf(skipPg())("attach and output", () => {
 			"GET",
 			`${sb.commands}/${id}/output?offset=10`,
 		);
+		expect(past.status).toBe(200);
 		expect(past.text).toBe("");
 		expect(past.headers.get("sbx-next-offset")).toBe("10");
+		const beyond = await h.request(
+			"GET",
+			`${sb.commands}/${id}/output?offset=11`,
+		);
+		expect(beyond.status).toBe(416);
+		expect((beyond.body as Any).error).toMatchObject({
+			code: "range_not_satisfiable",
+			details: { size: 10 },
+		});
 		const pty = await h.request(
 			"GET",
 			`${sb.commands}/${id}/output?stream=pty`,

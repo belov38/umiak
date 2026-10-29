@@ -7,7 +7,6 @@
 // and shutdown).
 import { randomUUID } from "node:crypto";
 import { createRoute, z } from "@hono/zod-openapi";
-import { isConnectionError } from "@sbx/agent-client";
 import {
 	type CommandListFilter,
 	type CommandStatus,
@@ -19,7 +18,7 @@ import { agentErrorToHttp } from "../agent/errors.ts";
 import type { AgentCommandInfo, AgentStream } from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
-import { followCommand } from "../commands/attach.ts";
+import { commandResultOf, followCommand } from "../commands/attach.ts";
 import { collectSync, type SyncResult } from "../commands/collect.ts";
 import {
 	type CloseFrame,
@@ -29,7 +28,7 @@ import {
 	StreamClose,
 } from "../commands/frames.ts";
 import { streamOwner } from "../commands/registry.ts";
-import { startCommand } from "../commands/run.ts";
+import { requireSameMachine, startCommand } from "../commands/run.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { decodeCursor, signNextCursor } from "../http/cursor.ts";
 import { ApiError, validationError } from "../http/errors.ts";
@@ -243,7 +242,8 @@ const outputCommandRoute = createRoute({
 		"Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: " +
 		"Sbx-Offset (where the bytes start), Sbx-Next-Offset, Sbx-Available-From, Sbx-Stream-End " +
 		"(only once the stream ended), Sbx-Truncated: true when `offset` was already evicted and " +
-		"reading started at Sbx-Available-From. For polling without streams.",
+		"reading started at Sbx-Available-From. An offset past the end is 416. For polling " +
+		"without streams.",
 	tags: TAGS,
 	middleware: [requireScope("commands:read")] as const,
 	request: { params: CommandParams, query: OutputQuery },
@@ -269,6 +269,9 @@ const outputCommandRoute = createRoute({
 			},
 		},
 		400: errorResponse("`validation` (a stream the command does not have)"),
+		416: errorResponse(
+			"`range_not_satisfiable`: offset past the end of the stream (details.size)",
+		),
 		404: notFound404,
 		409: notReady409,
 		...ERROR_RESPONSES,
@@ -350,19 +353,6 @@ const signalCommandRoute = createRoute({
 
 // --- helpers ---
 
-/** An agent failure as HTTP: a dropped connection is agent_unavailable. */
-function agentHttp(e: unknown): ApiError {
-	if (isConnectionError(e)) {
-		return new ApiError(
-			503,
-			"agent_unavailable",
-			"the connection to the sandbox agent dropped; retry",
-			{ retryable: true },
-		);
-	}
-	return agentErrorToHttp(e);
-}
-
 /** The command (404 unless it is the sandbox's) and the machine to call. */
 async function commandTarget(
 	deps: ApiDeps,
@@ -375,14 +365,7 @@ async function commandTarget(
 		resolveCommandRef(params.command),
 	);
 	const { machineId } = await deps.svc.resolveAgentTarget(p, command.sandboxId);
-	if (machineId !== command.machineId) {
-		throw new ApiError(
-			409,
-			"invalid_state",
-			"the command ran on an earlier machine of this sandbox; its process and output are gone",
-			{ details: { reason: "machine_replaced" } },
-		);
-	}
+	requireSameMachine(command, machineId);
 	return { command, machineId };
 }
 
@@ -496,11 +479,16 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			);
 		}
 
-		// sync and stream are long connections: counted and closable.
+		// sync and stream are long connections, closed on revocation and
+		// shutdown; only streams count toward the per-principal cap.
 		const close = new AbortController();
-		const unregister = deps.streams.register(streamOwner(auth), (f) =>
-			close.abort(new StreamClose(f)),
+		const unregister = deps.streams.register(
+			streamOwner(auth),
+			(f) => close.abort(new StreamClose(f)),
+			{ capped: mode === "stream" },
 		);
+		// A body that is never read must not keep the slot (idempotent).
+		c.req.raw.signal.addEventListener("abort", unregister, { once: true });
 		let r: Awaited<ReturnType<typeof startCommand>>;
 		try {
 			r = await startCommand(deps, auth, ref, body, idemKey, close.signal);
@@ -541,9 +529,10 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			);
 			const headers: Record<string, string> = { "Sbx-Command-Id": pub };
 			if (r.replayed) headers[IDEMPOTENCY_REPLAYED_HEADER] = "true";
-			return ndjsonResponse(c, untilDone(frames, unregister), headers, () =>
-				gone.abort(),
-			) as never; // zod-openapi has no response type for application/x-ndjson
+			return ndjsonResponse(c, untilDone(frames, unregister), headers, () => {
+				gone.abort();
+				unregister();
+			}) as never; // zod-openapi has no response type for application/x-ndjson
 		}
 
 		// sync: read to the exit (the process timeout is at most 600 s).
@@ -568,6 +557,10 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			);
 		} finally {
 			unregister();
+		}
+		if (result.exit === null && c.req.raw.signal.aborted) {
+			// The client went away; the command keeps running (§9.2).
+			return new Response(null, { status: 499 }) as never;
 		}
 		if (result.exit === null) {
 			throw syncEndedError(
@@ -655,21 +648,10 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				.get(command.machineId, command.id)
 				.catch(() => null);
 		}
-		if (live?.exit && !isTerminalStatus(command.status)) {
+		const result = live === null ? null : commandResultOf(live);
+		if (result !== null && !isTerminalStatus(command.status)) {
 			// A command nobody followed to its end (detached).
-			const res = toCommandResource(command, live);
-			await svc
-				.completeCommand(command.id, {
-					status: res.status as Parameters<
-						typeof svc.completeCommand
-					>[1]["status"],
-					exitCode: live.exit.code,
-					signal: live.exit.signal,
-					stdoutBytes: (live.streams.pty ?? live.streams.stdout)?.end ?? null,
-					stderrBytes: live.streams.stderr?.end ?? null,
-					...(live.endedAt === null ? {} : { endedAt: live.endedAt }),
-				})
-				.catch(() => {});
+			await svc.completeCommand(command.id, result).catch(() => {});
 		}
 		return c.json(toCommandResource(command, live), 200);
 	});
@@ -690,6 +672,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const unregister = deps.streams.register(streamOwner(auth), (f) =>
 			close.abort(new StreamClose(f)),
 		);
+		c.req.raw.signal.addEventListener("abort", unregister, { once: true });
 		const pub = publicCommandId(command.id);
 		const frames = followCommand(
 			deps,
@@ -716,7 +699,10 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			c,
 			untilDone(frames, unregister),
 			{ "Sbx-Command-Id": pub },
-			() => gone.abort(),
+			() => {
+				gone.abort();
+				unregister();
+			},
 		) as never; // zod-openapi has no response type for application/x-ndjson
 	});
 
@@ -740,7 +726,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		try {
 			info = await deps.agent.get(machineId, command.id);
 		} catch (e) {
-			throw agentHttp(e);
+			throw agentErrorToHttp(e);
 		}
 		const si = info.streams[stream] ?? { size: 0, availableFrom: 0, end: 0 };
 		let offset = q.offset ?? 0;
@@ -749,6 +735,14 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		if (offset < availableFrom) {
 			offset = availableFrom;
 			truncated = true;
+		}
+		if (offset > si.size) {
+			throw new ApiError(
+				416,
+				"range_not_satisfiable",
+				`offset ${offset} is past the end of ${stream} (${si.size} bytes so far)`,
+				{ details: { size: si.size } },
+			);
 		}
 		const parts: Uint8Array[] = [];
 		let got = 0;
@@ -782,7 +776,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 					if (got >= limit) break;
 				}
 			} catch (e) {
-				throw agentHttp(e);
+				throw agentErrorToHttp(e);
 			} finally {
 				ac.abort();
 			}
@@ -825,7 +819,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				closeStdin: b.closeStdin ?? false,
 			});
 		} catch (e) {
-			throw agentHttp(e);
+			throw agentErrorToHttp(e);
 		}
 		return c.body(null, 204);
 	});
@@ -842,7 +836,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				graceMs: b.graceMs ?? KILL_DEFAULT_GRACE_MS,
 			});
 		} catch (e) {
-			throw agentHttp(e);
+			throw agentErrorToHttp(e);
 		}
 		return c.json(toCommandResource(command, info), 200);
 	});
@@ -859,7 +853,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				signal: b.signal,
 			});
 		} catch (e) {
-			throw agentHttp(e);
+			throw agentErrorToHttp(e);
 		}
 		return c.json(toCommandResource(command, info), 200);
 	});

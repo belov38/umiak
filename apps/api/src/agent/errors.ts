@@ -1,5 +1,9 @@
 // Agent errors (S3 §11.1, §9) and their public form (S7 §5.5).
-import { AgentOutdatedError, AgentUnavailableError } from "@sbx/agent-client";
+import {
+	AgentOutdatedError,
+	AgentUnavailableError,
+	isConnectionError,
+} from "@sbx/agent-client";
 import {
 	ApiError,
 	type ApiErrorOptions,
@@ -50,20 +54,38 @@ const SAME_CODE: Record<string, number> = {
 };
 
 /**
+ * The agent could not be reached or the transport failed, so the outcome of
+ * the call is unknown: AgentUnavailableError, a connection error (reset,
+ * refused), or a Connect error that is not an answer of the agent (agent
+ * answers are AgentCallError; AgentOutdatedError is a capability check).
+ */
+export function isAgentUnreachable(e: unknown): boolean {
+	if (e instanceof AgentUnavailableError || isConnectionError(e)) return true;
+	return (
+		e instanceof Error &&
+		e.name === "ConnectError" &&
+		!(e instanceof AgentOutdatedError)
+	);
+}
+
+/** 503 agent_unavailable (retryable) for an unreachable agent. */
+export function agentUnavailableError(): ApiError {
+	return new ApiError(
+		503,
+		"agent_unavailable",
+		"the sandbox agent is not reachable right now; retry later",
+		{ retryable: true },
+	);
+}
+
+/**
  * Maps an error of an AgentApi call to the public error. Unknown agent
  * codes are 502 agent_error with `details.agentCode`; ApiError passes
  * through; anything else maps like `toHttpError` (500 internal).
  */
 export function agentErrorToHttp(e: unknown): ApiError {
 	if (e instanceof ApiError) return e;
-	if (e instanceof AgentUnavailableError) {
-		return new ApiError(
-			503,
-			"agent_unavailable",
-			"the sandbox agent is not reachable right now; retry later",
-			{ retryable: true },
-		);
-	}
+	if (isAgentUnreachable(e)) return agentUnavailableError();
 	if (e instanceof AgentOutdatedError) {
 		return new ApiError(
 			409,

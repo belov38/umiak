@@ -5,7 +5,6 @@
 // never starts a second process: the agent's Start is idempotent by
 // commandId, and a command that already ended is not started again.
 import { randomUUID } from "node:crypto";
-import { AgentUnavailableError } from "@sbx/agent-client";
 import {
 	COMMAND_SCOPE,
 	type Command,
@@ -13,7 +12,11 @@ import {
 	idempotencyPrincipal,
 	uuidv5,
 } from "@sbx/core";
-import { AgentCallError, agentErrorToHttp } from "../agent/errors.ts";
+import {
+	AgentCallError,
+	agentErrorToHttp,
+	isAgentUnreachable,
+} from "../agent/errors.ts";
 import type { AgentCommandInfo, AgentCommandSpec } from "../agent/types.ts";
 import type { AuthContext } from "../auth/principal.ts";
 import type { ApiDeps } from "../deps.ts";
@@ -23,7 +26,7 @@ import {
 	type StartCommandBody,
 	SYNC_DEFAULT_TIMEOUT_SECONDS,
 } from "../schemas/command.ts";
-import { commandStatus } from "./attach.ts";
+import { commandResultOf } from "./attach.ts";
 import { waitUntilReady } from "./wait-ready.ts";
 
 export interface StartedCommand {
@@ -80,6 +83,24 @@ function coreSpec(b: StartCommandBody, requestId: string): CommandSpec {
 	};
 }
 
+/**
+ * 409 unless the command runs on the sandbox's current machine (after a
+ * reprovision its process and output are gone).
+ */
+export function requireSameMachine(
+	command: Pick<Command, "machineId">,
+	machineId: string,
+): void {
+	if (command.machineId !== machineId) {
+		throw new ApiError(
+			409,
+			"invalid_state",
+			"the command ran on an earlier machine of this sandbox; its process and output are gone",
+			{ details: { reason: "machine_replaced" } },
+		);
+	}
+}
+
 /** `agent_unavailable` of a Start whose outcome is unknown (§9.1). */
 function startUnavailable(commandId: string, keyed: boolean): ApiError {
 	const id = publicCommandId(commandId);
@@ -112,8 +133,9 @@ export async function startCommand(
 ): Promise<StartedCommand> {
 	const p = auth.principal;
 	const svc = deps.svc;
-	const sandbox = await waitUntilReady(deps, p, ref, signal);
-	await svc.touchApiActivity(sandbox.id);
+	const sandbox = await waitUntilReady(deps, p, ref, signal, (s) =>
+		svc.touchApiActivity(s.id),
+	);
 	const { machineId } = await svc.resolveAgentTarget(p, sandbox.id);
 	try {
 		await deps.agent.requireCapability(machineId, "process.v1", signal);
@@ -133,48 +155,46 @@ export async function startCommand(
 					replayed: false,
 				}
 			: await svc.createCommandWithKey(p, sandbox.id, spec, idemKey, body);
+	// A replay of a command of an earlier machine: its process is gone.
+	requireSameMachine(command, machineId);
 	if (replayed && isTerminalStatus(command.status)) {
 		// Ended: Start is not repeated (an agent that lost it would run it again).
-		return { command, machineId: command.machineId, info: null, replayed };
+		return { command, machineId, info: null, replayed };
 	}
 
 	let info: AgentCommandInfo;
 	try {
 		const r = await deps.agent.start(
-			command.machineId,
+			machineId,
 			{ commandId: command.id, spec: agentSpec(body) },
 			// Not aborted with the request: a Start cut short has an unknown outcome.
 			{ requestId },
 		);
 		info = r.command;
 	} catch (e) {
-		if (e instanceof AgentUnavailableError) {
+		if (isAgentUnreachable(e)) {
 			throw startUnavailable(command.id, idemKey !== undefined);
 		}
-		if (e instanceof AgentCallError && !replayed) {
-			// The agent refused it: the process never started.
-			await svc
-				.completeCommand(command.id, { status: "failed_to_start" })
-				.catch(() => {});
+		if (e instanceof AgentCallError) {
+			// The agent refused it: the process never started. A row that a
+			// concurrent replay already moved on is left alone.
+			const now = await svc
+				.getCommand(p, sandbox.id, command.id)
+				.catch(() => null);
+			if (now?.status === "starting") {
+				await svc
+					.completeCommand(command.id, { status: "failed_to_start" })
+					.catch(() => {});
+			}
 		}
 		throw agentErrorToHttp(e);
 	}
 
 	await svc.markCommandRunning(command.id, info.pid);
-	if (info.exit !== null) {
-		// Ended already (start_failed): complete it now, a detached command
-		// may never be followed.
-		const out = info.streams.pty ?? info.streams.stdout;
-		await svc.completeCommand(command.id, {
-			status: commandStatus(info.exit.status, info.exit.reason),
-			exitCode: info.exit.code,
-			signal: info.exit.signal,
-			stdoutBytes: out?.end ?? out?.size ?? null,
-			stderrBytes:
-				info.streams.stderr?.end ?? info.streams.stderr?.size ?? null,
-			...(info.endedAt === null ? {} : { endedAt: info.endedAt }),
-		});
-	}
+	// Ended already (start_failed): complete it now, a detached command may
+	// never be followed.
+	const result = commandResultOf(info);
+	if (result !== null) await svc.completeCommand(command.id, result);
 	const fresh = await svc.getCommand(p, sandbox.id, command.id);
-	return { command: fresh, machineId: command.machineId, info, replayed };
+	return { command: fresh, machineId, info, replayed };
 }

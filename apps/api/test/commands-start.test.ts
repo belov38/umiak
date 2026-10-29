@@ -204,6 +204,11 @@ describe.skipIf(skipPg())("POST /commands", () => {
 				{ command: "true", mode: "sync", timeoutSeconds: 601 },
 				"timeoutSeconds",
 			],
+			[{ command: "true", timeoutSeconds: null }, "timeoutSeconds"],
+			[
+				{ command: "true", mode: "sync", timeoutSeconds: null },
+				"timeoutSeconds",
+			],
 			[{ command: "true", failFast: true }, "failFast"],
 			[{ command: "true", mode: "pty" }, "mode"],
 		] as const) {
@@ -222,6 +227,14 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		});
 		expect(long.status).toBe(201);
 		expect((long.body as Any).timeoutSeconds).toBe(601);
+		// No timeout is allowed for stream and detached only.
+		const unbounded = await run({
+			command: "true",
+			mode: "detached",
+			timeoutSeconds: null,
+		});
+		expect(unbounded.status).toBe(201);
+		expect((unbounded.body as Any).timeoutSeconds).toBeNull();
 	});
 
 	it("agent capabilities: no process.stdin for stdin:true, no process.v1 → 409 agent_outdated", async () => {
@@ -256,6 +269,12 @@ describe.skipIf(skipPg())("POST /commands", () => {
 			`/v1/sandboxes/${ref}/commands`,
 		);
 		await sleep(150);
+		// API activity is recorded before the wait (§9.1 step 1).
+		const touched = await db.pool.query(
+			"SELECT last_api_call_at FROM runtime.sandboxes WHERE id = $1",
+			[s.sandboxId],
+		);
+		expect(touched.rows[0].last_api_call_at).not.toBeNull();
 		await w.markReady(s.sandboxId);
 		const r = await pending;
 		expect(r.status).toBe(200);

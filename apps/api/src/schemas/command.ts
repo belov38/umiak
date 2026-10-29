@@ -112,8 +112,8 @@ export const StartCommandRequest = z
 			.optional()
 			.openapi({
 				description:
-					"Process timeout (status timed_out). sync: default 60, at most 600. stream and " +
-					"detached: default none.",
+					"Process timeout (status timed_out). sync: default 60, at most 600, null not allowed. " +
+					"stream and detached: default none (null).",
 			}),
 		encoding: z.enum(ENCODINGS).optional().openapi({
 			description:
@@ -131,8 +131,17 @@ export const StartCommandRequest = z
 				message: "exactly one of command and argv is required",
 			});
 		}
+		const sync = (b.mode ?? "sync") === "sync";
+		if (sync && b.timeoutSeconds === null) {
+			// A sync request always finishes (§9.1): no unbounded process.
+			ctx.addIssue({
+				code: "custom",
+				path: ["timeoutSeconds"],
+				message: `sync commands always have a timeout (default ${SYNC_DEFAULT_TIMEOUT_SECONDS}, at most ${SYNC_MAX_TIMEOUT_SECONDS}); omit it or use stream or detached`,
+			});
+		}
 		if (
-			(b.mode ?? "sync") === "sync" &&
+			sync &&
 			typeof b.timeoutSeconds === "number" &&
 			b.timeoutSeconds > SYNC_MAX_TIMEOUT_SECONDS
 		) {

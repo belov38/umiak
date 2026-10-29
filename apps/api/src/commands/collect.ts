@@ -37,6 +37,7 @@ class Tail {
 	#bytes = 0;
 	/** Where the stream starts when nothing is kept. */
 	#end = 0;
+	#truncated = false;
 
 	constructor(max: number) {
 		this.#max = max;
@@ -52,8 +53,24 @@ class Tail {
 		}
 	}
 
-	moveTo(offset: number): void {
+	/** The first offset of the stream (`attached`), before any output. */
+	startAt(offset: number): void {
 		if (this.#pieces.length === 0) this.#end = offset;
+	}
+
+	/**
+	 * `truncated`: output up to `availableFrom` is gone, so kept pieces are
+	 * no longer contiguous with what follows; the answer starts there.
+	 */
+	truncate(availableFrom: number): void {
+		this.#pieces.length = 0;
+		this.#bytes = 0;
+		this.#end = availableFrom;
+		this.#truncated = true;
+	}
+
+	truncated(): boolean {
+		return this.#truncated || this.from() > 0;
 	}
 
 	from(): number {
@@ -88,11 +105,11 @@ export async function collectSync(
 				err.add(f);
 				break;
 			case "truncated":
-				(f.stream === "stderr" ? err : out).moveTo(f.availableFrom);
+				(f.stream === "stderr" ? err : out).truncate(f.availableFrom);
 				break;
 			case "attached":
-				out.moveTo(f.stdoutOffset);
-				err.moveTo(f.stderrOffset);
+				out.startAt(f.stdoutOffset);
+				err.startAt(f.stderrOffset);
 				break;
 			case "exit":
 				exit = f;
@@ -108,8 +125,8 @@ export async function collectSync(
 		ended,
 		stdout: out.text(encoding),
 		stderr: err.text(encoding),
-		stdoutTruncated: out.from() > 0,
-		stderrTruncated: err.from() > 0,
+		stdoutTruncated: out.truncated(),
+		stderrTruncated: err.truncated(),
 		stdoutFrom: out.from(),
 		stderrFrom: err.from(),
 	};

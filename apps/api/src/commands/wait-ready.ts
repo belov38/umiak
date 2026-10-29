@@ -35,13 +35,19 @@ export function sandboxNotReadyError(state: SandboxState): ApiError {
 	);
 }
 
+/**
+ * `found` runs once the sandbox is read with the principal, before any
+ * wait (§9.1 step 1: touchApiActivity); not for a deleted sandbox.
+ */
 export async function waitUntilReady(
 	deps: ApiDeps,
 	p: Principal,
 	ref: string,
 	signal?: AbortSignal,
+	found?: (s: Sandbox) => Promise<void>,
 ): Promise<Sandbox> {
 	let s = await deps.svc.get(p, ref);
+	if (s.state !== "deleted") await found?.(s);
 	if (STARTING.includes(s.state)) {
 		const wait = deps.svc.waitForState(
 			s.id,
