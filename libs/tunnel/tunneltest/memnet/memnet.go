@@ -240,7 +240,8 @@ type Link struct {
 	stallEnds  atomic.Int64 // ns since base; delivery is stopped before this instant
 
 	mu        sync.Mutex // guards the fields below
-	dead      bool
+	stopped   bool       // timers are torn down: cut, or both ends closed
+	ends      int        // number of closed ends
 	wakeTimer *time.Timer
 	deadTimer *time.Timer
 }
@@ -270,8 +271,8 @@ func newLink(n *Network, machineID, gwName string, info transport.ConnInfo) *Lin
 	return l
 }
 
-// Closed is closed once the link is dead: it was cut, stalled past
-// DeadAfter, or either end was closed.
+// Closed is closed once the link is dead: it was cut, either end was closed
+// (including the agent end closed by a stall of DeadAfter or more).
 func (l *Link) Closed() <-chan struct{} { return l.closed }
 
 func (l *Link) isClosed() bool {
@@ -293,20 +294,38 @@ func (l *Link) Cut() {
 		c.rd.stop()
 		c.wd.stop()
 	}
-	l.terminate()
+	l.stopTimers()
+	l.markClosed()
 }
 
-// terminate marks the link dead, stops its timers and removes it from the network.
-func (l *Link) terminate() {
+// endClosed records that one end was closed. The stall timers keep running
+// until both ends are closed, so a stall still ends (and DeadAfter still
+// closes the agent end) when the peer closed first.
+func (l *Link) endClosed() {
 	l.mu.Lock()
-	l.dead = true
+	l.ends++
+	both := l.ends >= 2
+	l.mu.Unlock()
+	if both {
+		l.stopTimers()
+	}
+	l.markClosed()
+}
+
+func (l *Link) stopTimers() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.stopped = true
 	if l.wakeTimer != nil {
 		l.wakeTimer.Stop()
 	}
 	if l.deadTimer != nil {
 		l.deadTimer.Stop()
 	}
-	l.mu.Unlock()
+}
+
+// markClosed fires Closed() and removes the link from the network.
+func (l *Link) markClosed() {
 	l.closedOnce.Do(func() {
 		close(l.closed)
 		l.net.unregister(l)
@@ -320,16 +339,17 @@ func (l *Link) stalled() bool { return l.now() < l.stallEnds.Load() }
 
 // Stall stops delivery in both directions for d. Writers can fill the buffer
 // and then block; readers see nothing. Stalls do not shorten each other: the
-// link stays stalled until the latest end. If d >= DeadAfter the link dies
-// when DeadAfter elapses (the agent end is closed, as by Cut). Safe for
-// concurrent use.
+// link stays stalled until the latest end. If d >= DeadAfter the agent end is
+// closed when DeadAfter elapses (its WebSocket liveness timeout); the gateway
+// end stays blackholed until the stall ends and only then sees the peer
+// closed. Safe for concurrent use, also after one end was closed.
 func (l *Link) Stall(d time.Duration) {
 	if d <= 0 {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.dead {
+	if l.stopped {
 		return
 	}
 	end := l.now() + int64(d)
@@ -343,7 +363,7 @@ func (l *Link) Stall(d time.Duration) {
 		}
 	}
 	if d >= l.deadAfter && l.deadTimer == nil {
-		l.deadTimer = time.AfterFunc(l.deadAfter, l.Cut)
+		l.deadTimer = time.AfterFunc(l.deadAfter, func() { _ = l.agent.Close() })
 	}
 }
 

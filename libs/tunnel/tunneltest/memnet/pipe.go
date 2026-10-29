@@ -262,7 +262,9 @@ func (c *conn) Write(p []byte) (int, error) {
 		case h.wClosed:
 			h.mu.Unlock()
 			return total, net.ErrClosed
-		case h.rClosed:
+		case h.rClosed && !h.link.stalled():
+			// During a stall the peer's close is not visible yet: writes
+			// are blackholed (buffered, then blocked) like on a dead path.
 			h.mu.Unlock()
 			return total, errPeerClosed
 		}
@@ -308,7 +310,7 @@ func (c *conn) Close() error {
 
 	c.rd.stop()
 	c.wd.stop()
-	c.link.terminate()
+	c.link.endClosed()
 	return nil
 }
 

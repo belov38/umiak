@@ -482,9 +482,10 @@ func TestStallConcurrent(t *testing.T) {
 }
 
 func TestStallLongClosesAgentEnd(t *testing.T) {
+	const stall = 400 * time.Millisecond
 	_, agent, gw, link := pair(t, memnet.Options{DeadAfter: 50 * time.Millisecond})
 	start := time.Now()
-	link.Stall(time.Second)
+	link.Stall(stall)
 
 	res := make(chan error, 1)
 	go func() { _, err := agent.Read(make([]byte, 1)); res <- err }()
@@ -493,19 +494,113 @@ func TestStallLongClosesAgentEnd(t *testing.T) {
 		if !errors.Is(err, net.ErrClosed) {
 			t.Fatalf("agent read: %v", err)
 		}
-		if el := time.Since(start); el < 40*time.Millisecond || el > 500*time.Millisecond {
+		if el := time.Since(start); el < 40*time.Millisecond || el > 300*time.Millisecond {
 			t.Fatalf("agent end closed after %s, want about 50ms", el)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("agent end not closed")
+	}
+	if _, err := agent.Write([]byte("x")); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("agent write: %v", err)
 	}
 	select {
 	case <-link.Closed():
 	case <-time.After(time.Second):
 		t.Fatal("Closed() did not fire")
 	}
+
+	// The gateway end stays blackholed while the stall lasts: no EOF, no
+	// error on write (it buffers).
+	_ = gw.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	if _, err := gw.Read(make([]byte, 1)); !isTimeout(err) {
+		t.Fatalf("gateway read during stall: %v, want timeout", err)
+	}
+	if n, err := gw.Write([]byte("lost")); err != nil || n != 4 {
+		t.Fatalf("gateway write during stall: %d, %v", n, err)
+	}
+
+	// After the stall the gateway sees the peer closed.
+	time.Sleep(time.Until(start.Add(stall + 50*time.Millisecond)))
+	_ = gw.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := gw.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("gateway read after stall: %v, want EOF", err)
+	}
 	if _, err := gw.Write([]byte("x")); err == nil {
-		t.Fatal("gateway write must fail after the link died")
+		t.Fatal("gateway write after stall must fail")
+	}
+}
+
+// The agent closes during a stall: the gateway gets the data and EOF when
+// the stall ends, not never.
+func TestStallThenAgentCloseDelivers(t *testing.T) {
+	_, agent, gw, link := pair(t, memnet.Options{DeadAfter: 5 * time.Second})
+	link.Stall(100 * time.Millisecond)
+	start := time.Now()
+	if _, err := agent.Write([]byte("tail")); err != nil {
+		t.Fatal(err)
+	}
+	_ = agent.Close()
+	_ = gw.SetReadDeadline(time.Now().Add(2 * time.Second))
+	data, err := io.ReadAll(gw)
+	if err != nil || string(data) != "tail" {
+		t.Fatalf("ReadAll = %q, %v", data, err)
+	}
+	if el := time.Since(start); el < 90*time.Millisecond || el > time.Second {
+		t.Fatalf("delivered after %s, want about 100ms", el)
+	}
+}
+
+// The gateway closes during a stall: the agent still wakes when the stall
+// ends.
+func TestStallThenGatewayCloseWakesAgent(t *testing.T) {
+	_, agent, gw, link := pair(t, memnet.Options{DeadAfter: 5 * time.Second})
+	link.Stall(100 * time.Millisecond)
+	start := time.Now()
+	res := make(chan error, 1)
+	_ = agent.SetReadDeadline(time.Now().Add(2 * time.Second))
+	go func() { _, err := agent.Read(make([]byte, 1)); res <- err }()
+	time.Sleep(10 * time.Millisecond)
+	_ = gw.Close()
+	if err := <-res; !errors.Is(err, io.EOF) {
+		t.Fatalf("agent read = %v, want EOF", err)
+	}
+	if el := time.Since(start); el < 90*time.Millisecond || el > time.Second {
+		t.Fatalf("EOF after %s, want about 100ms", el)
+	}
+}
+
+// DeadAfter still closes the agent end when the gateway closed first.
+func TestStallDeadAfterSurvivesGatewayClose(t *testing.T) {
+	_, agent, gw, link := pair(t, memnet.Options{DeadAfter: 50 * time.Millisecond})
+	link.Stall(5 * time.Second)
+	_ = gw.Close()
+	start := time.Now()
+	_ = agent.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, err := agent.Read(make([]byte, 1))
+	if !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("agent read = %v, want net.ErrClosed", err)
+	}
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("agent end closed after %s", el)
+	}
+}
+
+// Writes to a peer that closed behave like a blackhole while stalled.
+func TestStallHidesPeerClose(t *testing.T) {
+	_, agent, gw, link := pair(t, memnet.Options{BufferSize: 8, DeadAfter: 5 * time.Second})
+	link.Stall(150 * time.Millisecond)
+	_ = agent.Close()
+	if n, err := gw.Write([]byte("abc")); err != nil || n != 3 {
+		t.Fatalf("write during stall: %d, %v", n, err)
+	}
+	// A write larger than the buffer blocks, then fails once the stall ends.
+	start := time.Now()
+	_, err := gw.Write(make([]byte, 64))
+	if err == nil || !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("write = %v, want io.ErrClosedPipe", err)
+	}
+	if el := time.Since(start); el < 100*time.Millisecond {
+		t.Fatalf("write failed after %s, stall not honoured", el)
 	}
 }
 
@@ -821,7 +916,10 @@ func TestHTTP2OverMemnet(t *testing.T) {
 	}
 }
 
-type h2Admitter struct{ clients chan *http.ClientConn }
+type h2Admitter struct {
+	clients chan *http.ClientConn
+	cfg     h2.ClientConfig // zero means the defaults
+}
 
 func (a *h2Admitter) Admit(context.Context, transport.Hello) (transport.Admission, error) {
 	return &h2Admission{a: a}, nil
@@ -834,11 +932,83 @@ func (s *h2Admission) Abort(error)              {}
 func (s *h2Admission) Serve(c net.Conn) {
 	// The handshake needs the agent side to be served, which happens after Dial returns.
 	go func() {
-		cc, err := h2.NewClientConn(context.Background(), c, h2.DefaultClientConfig())
+		cfg := s.a.cfg
+		if cfg == (h2.ClientConfig{}) {
+			cfg = h2.DefaultClientConfig()
+		}
+		cc, err := h2.NewClientConn(context.Background(), c, cfg)
 		if err != nil {
 			_ = c.Close()
 			return
 		}
 		s.a.clients <- cc
 	}()
+}
+
+type closeSpy struct {
+	net.Conn
+	once   sync.Once
+	closed chan struct{}
+}
+
+func (c *closeSpy) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+// A long stall over HTTP/2: the agent side notices at DeadAfter, the gateway
+// side only through its own h2 ping.
+func TestHTTP2LongStall(t *testing.T) {
+	n := memnet.New(memnet.Options{DeadAfter: 100 * time.Millisecond})
+	ln := h2.New()
+	srv := h2.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}), h2.DefaultServerConfig())
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	clients := make(chan *http.ClientConn, 1)
+	adm := &h2Admitter{clients: clients, cfg: h2.ClientConfig{
+		StreamWindow: 1 << 20, ConnWindow: 16 << 20, MaxFrame: 16 << 10,
+		PingIdle: 50 * time.Millisecond, PingTimeout: 50 * time.Millisecond,
+	}}
+	n.AddGateway("gw-1", adm, nil)
+	agentEnd, _, err := n.Dialer().Dial(context.Background(), transport.Hello{MachineID: "m-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spy := &closeSpy{Conn: agentEnd, closed: make(chan struct{})}
+	if err := ln.Push(spy); err != nil {
+		t.Fatal(err)
+	}
+	cc := <-clients
+	t.Cleanup(func() { _ = cc.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://agent:80/x", nil)
+	resp, err := cc.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+
+	start := time.Now()
+	n.Links("m-1")[0].Stall(10 * time.Second)
+
+	select {
+	case <-spy.closed:
+		if el := time.Since(start); el < 90*time.Millisecond || el > time.Second {
+			t.Fatalf("agent side closed after %s, want about 100ms", el)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent side did not notice the dead link")
+	}
+	for cc.Err() == nil {
+		if time.Since(start) > time.Second {
+			t.Fatal("gateway h2 conn did not fail via ping")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
