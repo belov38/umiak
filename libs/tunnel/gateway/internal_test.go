@@ -948,8 +948,11 @@ func TestAgentConnectAnswerNotForwarded(t *testing.T) {
 		w.Header().Set(wire.HeaderErrorCode, wire.CodeMachineMoved)
 		w.Header().Set(wire.HeaderInstanceURL, evilURL)
 		w.Header().Set("X-Agent", "dropped")
-		if r.Host == "localhost:1" {
-			w.WriteHeader(http.StatusMisdirectedRequest)
+		w.Header().Set("Location", evilURL)
+		// Ports below 600 answer with the port as the status.
+		if _, p, _ := net.SplitHostPort(r.Host); len(p) == 3 {
+			code, _ := strconv.Atoi(p)
+			w.WriteHeader(code)
 			return
 		}
 		duplexEcho(w, r)
@@ -959,11 +962,18 @@ func TestAgentConnectAnswerNotForwarded(t *testing.T) {
 	rt := NewPeerTransport()
 	t.Cleanup(rt.CloseIdleConnections)
 
-	_, err := DialRemoteTCP(ctx, rt, gw.url, apiToken1, id, 1, TCPOptions{})
-	var moved *transport.MovedError
-	var de *transport.DialError
-	if errors.As(err, &moved) || !errors.As(err, &de) || de.Status != http.StatusBadGateway {
-		t.Fatalf("agent 421 on CONNECT: err %v, want DialError 502", err)
+	// The agent's policy answers pass; any other refusal is a 502, never a
+	// gateway signal (moved, too many streams, unavailable, auth).
+	for status, want := range map[int]int{
+		400: 400, 403: 403, 502: 502,
+		302: 502, 307: 502, 401: 502, 404: 502, 421: 502, 429: 502, 500: 502, 503: 502,
+	} {
+		_, err := DialRemoteTCP(ctx, rt, gw.url, apiToken1, id, uint16(status), TCPOptions{}) //nolint:gosec // small
+		var moved *transport.MovedError
+		var de *transport.DialError
+		if errors.As(err, &moved) || errors.Is(err, ErrTooManyStreams) || !errors.As(err, &de) || de.Status != want {
+			t.Errorf("agent %d on CONNECT: err %v, want DialError %d", status, err, want)
+		}
 	}
 
 	// The 200 the peer sees carries only gateway headers.
@@ -981,7 +991,7 @@ func TestAgentConnectAnswerNotForwarded(t *testing.T) {
 		t.Fatalf("CONNECT status %d", resp.StatusCode)
 	}
 	checkNoSbx(t, "CONNECT", resp.Header)
-	if resp.Header.Get("X-Agent") != "" {
+	if resp.Header.Get("X-Agent") != "" || resp.Header.Get("Location") != "" {
 		t.Errorf("CONNECT: agent header X-Agent reached the peer: %v", resp.Header)
 	}
 }
