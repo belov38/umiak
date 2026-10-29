@@ -30,6 +30,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/sshgw"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
 )
 
@@ -113,6 +114,7 @@ type Instance struct {
 	auth    *portauth.Auth
 	streams *httpproxy.StreamTracker
 	proxy   http.Handler
+	ssh     *sshgw.Server // nil when SSHListen is empty
 
 	internal   *http.Server
 	metricsSrv *http.Server
@@ -238,6 +240,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		Metrics:   i.metrics,
 	})
 	i.streams = httpproxy.NewStreamTracker()
+	accessLog := obs.NewAccessLog(deps.AccessLog)
 	i.proxy = httpproxy.New(httpproxy.Config{
 		SbxDomain:           cfg.SbxDomain,
 		Grammar:             grammar(cfg),
@@ -249,10 +252,30 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		TrustedProxies:      cfg.TrustedProxyCIDRs,
 		StripCookiePrefixes: cfg.StripCookiePrefixes,
 		Metrics:             i.metrics,
-		AccessLog:           obs.NewAccessLog(deps.AccessLog),
+		AccessLog:           accessLog,
 		Streams:             i.streams,
 		Logger:              deps.Logger,
 	})
+	if cfg.SSHListen != "" {
+		i.ssh, err = sshgw.New(sshgw.Config{
+			HostSigners:   cfg.SSHHostKeys,
+			LoginCAKeys:   cfg.SSHLoginCAKeys,
+			UserCA:        cfg.SSHUserCA,
+			API:           deps.API,
+			Dialer:        i.upstream,
+			Limits:        i.limits,
+			Metrics:       i.metrics,
+			Log:           accessLog,
+			Logger:        i.log,
+			DrainDeadline: cfg.SSHDrainDeadline,
+			Now:           deps.Now,
+			Self:          cfg.InstanceID,
+			Instances:     i.store,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("server: %w", err)
+		}
+	}
 	rateLimit, burst := cfg.TunnelAdmitRate, cfg.TunnelAdmitBurst
 	if rateLimit <= 0 {
 		rateLimit = defaultTunnelAdmitRate
@@ -405,6 +428,9 @@ func (i *Instance) Limits() *ratelimit.Limits { return i.limits }
 // Streams returns the tracker of long HTTP streams, for the drain.
 func (i *Instance) Streams() *httpproxy.StreamTracker { return i.streams }
 
+// SSH returns the SSH gateway, or nil when SSHListen is empty.
+func (i *Instance) SSH() *sshgw.Server { return i.ssh }
+
 // HTTPHandler returns the public HTTP proxy handler.
 func (i *Instance) HTTPHandler() http.Handler { return i.proxy }
 
@@ -505,6 +531,17 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 			wg.Go(func() { c.Run(runCtx) })
 		}
 	}
+	if ls.SSH != nil && i.ssh != nil {
+		ln := ls.SSH
+		if i.cfg.ProxyProtocol {
+			ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.Timeouts.TLSHandshake)
+		}
+		wg.Go(func() { //nolint:contextcheck // SSH conns run on the sshgw server context, ended by Close
+			if err := i.ssh.Serve(ln); err != nil {
+				fatal <- fmt.Errorf("server: ssh listener: %w", err)
+			}
+		})
+	}
 	wg.Go(func() { i.pingLoop(runCtx) })
 	wg.Go(func() { i.limits.Run(runCtx) })
 
@@ -546,11 +583,14 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	if disp != nil {
 		_ = disp.Close()
 	}
+	if i.ssh != nil {
+		_ = i.ssh.Close()
+	}
 	// Hijacked conns (WebSocket) are not closed by Server.Close.
 	i.streams.CloseAll()
 	i.appTransports.CloseIdleConnections()
 	i.upstream.Close()
-	// Listeners without a server yet (SSH) are owned here too; the TLS
+	// The SSH listener when SSH is disabled is owned here too; the TLS
 	// listener is closed by the dispatcher.
 	for _, ln := range []net.Listener{ls.TLS, ls.SSH} {
 		if ln != nil {

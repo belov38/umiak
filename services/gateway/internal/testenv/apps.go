@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
 )
 
 // appReadHeaderTimeout bounds request headers on the test apps.
@@ -89,6 +91,12 @@ func (m *Machine) ServeTCP(port uint16, fn func(net.Conn)) {
 		wg.Wait()
 	})
 	m.setApp(port, ln.Addr().String())
+}
+
+// ServeSSHD runs the sshd double behind port 22 of the machine.
+func (m *Machine) ServeSSHD(srv *sshdtest.Server) {
+	m.e.T.Helper()
+	m.ServeTCP(22, srv.ServeConn)
 }
 
 // Echo is a ServeTCP function that copies everything back.

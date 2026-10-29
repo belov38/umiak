@@ -162,6 +162,7 @@ func (e *Env) InstanceConfig(instanceID, internalURL string) config.Config {
 
 		HTTPListen:    "127.0.0.1:0",
 		MetricsListen: "127.0.0.1:0",
+		SSHListen:     "127.0.0.1:0",
 
 		SbxDomain:  SbxDomain,
 		TunnelHost: TunnelHost,
@@ -237,7 +238,7 @@ type Inst struct {
 	InternalURL string
 	HTTPSAddr   string
 	PlainAddr   string
-	SSHAddr     string // empty until the SSH listener exists
+	SSHAddr     string // empty when the config disables SSH
 	MetricsURL  string
 	Config      config.Config
 	AccessLog   *LogBuffer
@@ -249,9 +250,11 @@ type Inst struct {
 	stopOnce sync.Once
 }
 
-// StartInstance starts an instance on 127.0.0.1 (internal, metrics, plain
-// and TLS listeners) and waits until it is ready; mod may change the config. The instance is registered in memnet
-// under its InstanceID while it is Ready (and routed, see RouteOnly).
+// StartInstance starts an instance on 127.0.0.1 (internal, metrics, plain,
+// TLS and, unless the config's SSHListen is empty, SSH listeners) and waits
+// until it is ready; mod may change the config. The instance is registered
+// in memnet under its InstanceID while it is Ready (and routed, see
+// RouteOnly).
 func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 	e.T.Helper()
 	e.mu.Lock()
@@ -267,13 +270,19 @@ func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 	if mod != nil {
 		mod(&cfg)
 	}
+	var sshLn net.Listener
+	if cfg.SSHListen != "" {
+		sshLn = e.listen()
+	}
 	deps := e.Deps()
 	alog := deps.AccessLog.(*LogBuffer)
 	deps.Logger = Logger("gw", cfg.InstanceID)
 	inst, err := server.New(cfg, deps)
 	if err != nil {
-		for _, ln := range []net.Listener{internal, metrics, plain, tlsLn} {
-			_ = ln.Close()
+		for _, ln := range []net.Listener{internal, metrics, plain, tlsLn, sshLn} {
+			if ln != nil {
+				_ = ln.Close()
+			}
 		}
 		e.T.Fatalf("testenv: server.New: %v", err)
 	}
@@ -290,10 +299,13 @@ func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 		e:           e,
 		runErr:      make(chan error, 1),
 	}
+	if sshLn != nil {
+		i.SSHAddr = sshLn.Addr().String()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	i.cancel = cancel
 	go func() {
-		i.runErr <- inst.Run(ctx, server.Listeners{Internal: internal, Metrics: metrics, Plain: plain, TLS: tlsLn})
+		i.runErr <- inst.Run(ctx, server.Listeners{Internal: internal, Metrics: metrics, Plain: plain, TLS: tlsLn, SSH: sshLn})
 	}()
 	e.T.Cleanup(func() { e.StopInstance(i, false) })
 
