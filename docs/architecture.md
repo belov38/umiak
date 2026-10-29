@@ -69,18 +69,18 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 ## 4. Гостевой агент (Go)
 
-Работает с правами root или SYSTEM. Устанавливается в шаблон.
+Подробно: `docs/specs/s3-guest-agent.md` (Linux), Windows — S9. Работает с правами root или SYSTEM. Команды по умолчанию идут от непривилегированного `user` с NOPASSWD sudo (граница доверия — VM, S2 §16). Устанавливается в шаблон.
 
 - **Транспорт.** Агент сам открывает WSS к `gateway`, внутри — HTTP/2, где агент сервер. Входящих портов нет. По соединению идут RPC (exec, files) и TCP-потоки (порты, SSH, moonlight). См. ниже и S2.
-- **Регистрация в пуле.** При загрузке агент сообщает о себе (VMID, vmgenid, версия) и получает статус warm.
-- **Claim.** Получает env, секреты (в tmpfs или в защищённый каталог), файлы, SSH-ключи пользователя, hostname. Отвечает о готовности по фазам.
-- **Exec.** sync / stream (NDJSON-события `started`, `stdout`, `stderr`, `exit`) / detached + attach по offset / kill / timeout. Linux — bash, Windows — PowerShell. PTY/ConPTY для терминала.
+- **Регистрация в пуле.** При загрузке агент подключается к gateway и сообщает о себе (machineId, bootId, vmgenid, версия); VMID ему не известен. Machine становится warm.
+- **Claim.** Получает env, секреты (в tmpfs без swap или в защищённый каталог; после каждой перезагрузки control plane присылает их заново), файлы-секреты, публичный ключ SSH CA gateway (`TrustedUserCAKeys`; ключи пользователя проверяет gateway, S4), hostname. Отвечает о готовности по фазам.
+- **Exec.** sync / stream (NDJSON-события `started`, `stdout`, `stderr`, `exit`) / detached + attach по offset / kill / timeout. Linux — bash, Windows — PowerShell. PTY/ConPTY для терминала. Каждая команда работает в своём systemd unit-е под shim, который пишет её вывод в файлы.
 - **Files.** read, write (поток), list, stat, delete, mkdir, move, chmod.
-- **Ports.** Список слушающих портов; проксирование входящих потоков на `localhost:port`.
-- **Хуки снапшота.** `quiesce` (Docker pause, fsfreeze / VSS) и `thaw`, с watchdog авто-разморозки.
-- **Смена идентичности.** Агент видит смену `machineId` в smbios или `vmgenid` (fork) и меняет hostname, machine-id и SSH host keys; на Windows — имя машины. Затем перезапускает зависимые сервисы.
+- **Ports.** Список слушающих портов; проксирование входящих потоков на `localhost:port` (127.0.0.1, затем ::1, затем адреса интерфейсов).
+- **Хуки снапшота.** `quiesce` (Docker pause, fsfreeze / VSS) и `thaw`, с watchdog авто-разморозки. QEMU guest agent fsfreeze — запасной путь, когда агента нет.
+- **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние; на Windows — имя машины. На Linux vmgenid из userspace не читается, поэтому признак — только `machineId`; на Windows используется и vmgenid.
 - **Health.** Heartbeat, CPU/RAM/disk, признак простоя.
-- **Self-update.** Подписанные бинарники.
+- **Self-update.** Подписанный ed25519 пакет (бинарник + бандл tunnel CA) приходит через туннель; неудачная версия откатывается сама.
 
 Образец API процессов и файлов — E2B `envd` (Go, Apache-2.0).
 
