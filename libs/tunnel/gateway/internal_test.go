@@ -128,6 +128,17 @@ func TestInternalBadRequests(t *testing.T) {
 		{http.MethodGet, "/v1/machines/" + id + "/rotate-token", http.StatusMethodNotAllowed},
 		{http.MethodGet, "/v1/machines/" + id + "/other", http.StatusNotFound},
 		{http.MethodGet, "/v1/other", http.StatusNotFound},
+		// Traversal and separator segments, escaped or not.
+		{http.MethodGet, "/v1/machines/" + id + "/files/%2E%2E/x", http.StatusBadRequest},
+		{http.MethodGet, "/v1/machines/" + id + "/files/../x", http.StatusBadRequest},
+		{http.MethodGet, "/v1/machines/" + id + "/files/./x", http.StatusBadRequest},
+		{http.MethodGet, "/v1/machines/" + id + "/files/a%2Fb", http.StatusBadRequest},
+		{http.MethodGet, "/v1/machines/" + id + "/files/a%5Cb", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/..", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/%2E%2E", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/...", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/1Run", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/.sbx.agent.v1.X/Run", http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		resp, _ := do(t, c, tc.method, gw.url+tc.path, "application/json", nil)

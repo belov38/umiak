@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -95,7 +96,28 @@ func (h *internalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveTCP(w, r)
 		return
 	}
+	// Dot segments are refused before the mux, which would redirect them to
+	// the cleaned path.
+	if hasDotSegment(r.URL.EscapedPath()) {
+		f := fmtJSON
+		if strings.Contains(r.URL.EscapedPath(), "/rpc/") {
+			f = fmtRPC
+		}
+		h.writeRequestError(w, f, connect.CodeInvalidArgument, "path must not contain . or .. segments")
+		return
+	}
 	h.mux.ServeHTTP(w, r)
+}
+
+// hasDotSegment reports whether a segment of the escaped path is . or ..
+// after unescaping.
+func hasDotSegment(escaped string) bool {
+	for seg := range strings.SplitSeq(escaped, "/") {
+		if u, err := url.PathUnescape(seg); err == nil && (u == "." || u == "..") {
+			return true
+		}
+	}
+	return false
 }
 
 // parseMachineID accepts only the canonical 36-character UUID form and
@@ -251,9 +273,13 @@ func connectHTTPStatus(code connect.Code) int {
 	}
 }
 
-// validName reports whether s is a protobuf service or method name.
+// validName reports whether s is a protobuf service or method name: it
+// starts with a letter or _ and has only letters, digits, _ and dots.
 func validName(s string) bool {
 	if s == "" {
+		return false
+	}
+	if c := s[0]; !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_') {
 		return false
 	}
 	for _, c := range s {
@@ -313,6 +339,15 @@ func (h *internalHandler) serveFiles(w http.ResponseWriter, r *http.Request) {
 	if len(parts) != 5 {
 		h.writeRequestError(w, fmtJSON, connect.CodeInvalidArgument, "malformed files path")
 		return
+	}
+	// No segment may become a traversal or a separator once the agent
+	// unescapes it.
+	for seg := range strings.SplitSeq(parts[4], "/") {
+		u, err := url.PathUnescape(seg)
+		if err != nil || u == "." || u == ".." || strings.ContainsAny(u, `/\`) {
+			h.writeRequestError(w, fmtJSON, connect.CodeInvalidArgument, "malformed files path segment")
+			return
+		}
 	}
 	h.proxy(w, r, id, "", "/"+parts[4], fmtJSON)
 }
