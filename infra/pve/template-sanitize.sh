@@ -15,8 +15,16 @@ cleanup() { for d in dev sys proc; do umount "$R/$d" 2>/dev/null || true; done; 
 trap cleanup EXIT
 
 # 1. Tailscale: a sandbox must never join a tailnet.
-if chroot "$R" dpkg -s tailscale >/dev/null 2>&1; then
-	chroot "$R" env DEBIAN_FRONTEND=noninteractive apt-get purge -y -q tailscale
+# Every tailscale* package (tailscale, tailscale-archive-keyring, ...), installed or with config left.
+# shellcheck disable=SC2016 # dpkg-query format, not shell expansion
+ts_pkgs() { chroot "$R" dpkg-query -W -f '${db:Status-Abbrev} ${Package}\n' 'tailscale*' 2>/dev/null | awk '$1 != "un" {print $2}'; }
+mapfile -t pkgs < <(ts_pkgs)
+if ((${#pkgs[@]})); then
+	chroot "$R" env DEBIAN_FRONTEND=noninteractive apt-get purge -y -q "${pkgs[@]}"
+fi
+if [[ -n "$(ts_pkgs)" ]]; then
+	echo "tailscale packages remain: $(ts_pkgs | tr '\n' ' ')" >&2
+	exit 1
 fi
 rm -rf "$R/var/lib/tailscale" "$R/etc/default/tailscaled" "$R/etc/apt/sources.list.d/tailscale.list" \
 	"$R"/usr/share/keyrings/tailscale*

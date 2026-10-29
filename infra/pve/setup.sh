@@ -612,7 +612,7 @@ qm create "$ID" --pool sandbox --name sbx-ubuntu-poc --description "$COMMENT tem
 	--machine q35 --cpu host --ostype l26 --scsihw virtio-scsi-single --agent enabled=1,fstrim_cloned_disks=1 \
 	--serial0 socket --vga std --cores 2 --memory 2048 --balloon 0 \
 	--net0 "virtio=$MAC,bridge=sbx0,firewall=1" \
-	--ide2 local-lvm:cloudinit --ipconfig0 ip=dhcp --ciuser sbx
+	--ide2 local-lvm:cloudinit --ipconfig0 ip=dhcp --ciuser sbx --ciupgrade 0
 qm set "$ID" --scsi0 "local-lvm:vm-$ID-disk-0,discard=on,iothread=1,ssd=1" --boot order=scsi0
 pvesh set /nodes/$(hostname)/qemu/$ID/firewall/options --enable 1 --policy_in DROP --policy_out ACCEPT \
 	--dhcp 1 --ndp 1 --radv 0 --macfilter 1 --ipfilter 0
