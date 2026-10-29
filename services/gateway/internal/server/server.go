@@ -85,6 +85,10 @@ type Deps struct {
 	// passes to agents; nil keeps the libs/tunnel default (sbx.agent.v1).
 	// Tests add the sbx.testing.v1 Process double.
 	AllowedServicePrefixes []string
+	// Sink receives the agent and connection events. nil builds the HTTP
+	// sink of APIURL; with APIURL empty or config.APIURLNone the tunnel
+	// gateway logs, drops and acknowledges them.
+	Sink gateway.EventSink
 }
 
 // Listeners are the sockets an instance serves. A nil listener is not
@@ -207,7 +211,10 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		Timing: timing,
 		Logger: deps.Logger,
 	}
-	if cfg.APIURL != "" {
+	switch {
+	case deps.Sink != nil:
+		gcfg.Sink = deps.Sink
+	case cfg.APIURL != "" && cfg.APIURL != config.APIURLNone:
 		gcfg.Sink = gateway.NewHTTPSink(cfg.APIURL, cfg.APIToken, nil)
 	}
 	g, err := gateway.New(gcfg)

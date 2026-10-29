@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -103,6 +104,13 @@ type Config struct {
 	// Drain.
 	HTTPDrainDeadline time.Duration
 	SSHDrainDeadline  time.Duration
+	// EndpointWait is how long a draining instance keeps accepting while the
+	// load balancer drops it; 0 keeps the libs/tunnel default (5 s).
+	EndpointWait time.Duration
+	// DrainTimeout bounds the whole drain of the process after SIGTERM; 0
+	// means the drain budget plus a margin (950 s with the defaults). Both
+	// knobs exist for local runs and smoke tests.
+	DrainTimeout time.Duration
 
 	// SSH keepalive (spec 9.4): a probe to both ends every interval; the
 	// connection is closed after max consecutive misses.
@@ -120,6 +128,11 @@ type Config struct {
 
 	LogLevel string
 }
+
+// APIURLNone as SBX_GATEWAY_API_URL runs the gateway without api (local
+// development): every route lookup and SSH authorization fails as
+// unavailable and agent events are logged and dropped.
+const APIURLNone = "none"
 
 // Defaults of the drain deadlines (spec 10.2, 10.3).
 const (
@@ -208,6 +221,8 @@ func FromEnv(getenv func(string) string) (Config, error) {
 
 	c.HTTPDrainDeadline = l.duration("HTTP_DRAIN_DEADLINE", DefaultHTTPDrainDeadline)
 	c.SSHDrainDeadline = l.duration("SSH_DRAIN_DEADLINE", DefaultSSHDrainDeadline)
+	c.EndpointWait = l.duration("ENDPOINT_WAIT", 0)
+	c.DrainTimeout = l.duration("DRAIN_TIMEOUT", 0)
 	c.SSHKeepaliveInterval = l.duration("SSH_KEEPALIVE_INTERVAL", 30*time.Second)
 	c.SSHKeepaliveMax = l.integer("SSH_KEEPALIVE_MAX", 3)
 	c.SSHMaxChannels = l.integer("SSH_MAX_CHANNELS", 256)
@@ -239,6 +254,50 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		return Config{}, l.err
 	}
 	return c, nil
+}
+
+// ValidateServe checks what FromEnv leaves optional but a serving process
+// needs: the names, the database and the api endpoint with its token (unless
+// APIURL is APIURLNone). The TLS and SSH files are checked by FromEnv when
+// their listeners are on.
+func (c Config) ValidateServe() error {
+	var errs []error
+	need := func(name, v string) {
+		if v == "" {
+			errs = append(errs, fmt.Errorf("%s%s: is required", envPrefix, name))
+		}
+	}
+	need("SBX_DOMAIN", c.SbxDomain)
+	need("TUNNEL_HOST", c.TunnelHost)
+	if c.DatabaseURL == "" {
+		errs = append(errs, fmt.Errorf("%sDATABASE_URL (or DATABASE_URL): is required", envPrefix))
+	}
+	if err := checkHTTPURL(c.InternalURL); err != nil {
+		errs = append(errs, fmt.Errorf("%sINTERNAL_URL: %w", envPrefix, err))
+	}
+	switch c.APIURL {
+	case "":
+		errs = append(errs, fmt.Errorf("%sAPI_URL: is required (%q runs without api)", envPrefix, APIURLNone))
+	case APIURLNone:
+	default:
+		if err := checkHTTPURL(c.APIURL); err != nil {
+			errs = append(errs, fmt.Errorf("%sAPI_URL: %w", envPrefix, err))
+		}
+		need("API_TOKEN_FILE", c.APIToken)
+	}
+	return errors.Join(errs...)
+}
+
+// checkHTTPURL accepts an absolute http or https URL with a host.
+func checkHTTPURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return err
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("%q is not an http(s) URL", s)
+	}
+	return nil
 }
 
 func defaultInstanceID() string {

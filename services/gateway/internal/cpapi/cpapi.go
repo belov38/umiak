@@ -138,3 +138,23 @@ type Client interface {
 	// ErrUnavailable when api cannot answer.
 	AuthorizeSSH(ctx context.Context, req SSHAuthorizeRequest) (SSHAuthorization, error)
 }
+
+// Unavailable returns a Client whose every call fails with ErrUnavailable.
+// It stands in for api in local runs without a control plane
+// (SBX_GATEWAY_API_URL=none): routes answer 503 route_lookup_unavailable
+// and SSH logins are refused.
+func Unavailable() Client { return unavailable{} }
+
+type unavailable struct{}
+
+func (unavailable) LookupRoute(context.Context, string) (Route, error) {
+	return Route{}, ErrUnavailable
+}
+
+func (unavailable) ExchangePortAuthCode(context.Context, string, string) (PortAuthGrant, error) {
+	return PortAuthGrant{}, ErrUnavailable
+}
+
+func (unavailable) AuthorizeSSH(context.Context, SSHAuthorizeRequest) (SSHAuthorization, error) {
+	return SSHAuthorization{}, ErrUnavailable
+}

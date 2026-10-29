@@ -334,3 +334,64 @@ func TestFromEnvErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestFromEnvDrainKnobs(t *testing.T) {
+	f := newFixture(t)
+	cfg, err := FromEnv(f.getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EndpointWait != 0 || cfg.DrainTimeout != 0 {
+		t.Fatalf("defaults: EndpointWait=%v DrainTimeout=%v, want 0 (library defaults)", cfg.EndpointWait, cfg.DrainTimeout)
+	}
+	f.env["SBX_GATEWAY_ENDPOINT_WAIT"] = "100ms"
+	f.env["SBX_GATEWAY_DRAIN_TIMEOUT"] = "3s"
+	if cfg, err = FromEnv(f.getenv); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EndpointWait != 100*time.Millisecond || cfg.DrainTimeout != 3*time.Second {
+		t.Fatalf("EndpointWait=%v DrainTimeout=%v", cfg.EndpointWait, cfg.DrainTimeout)
+	}
+}
+
+func TestValidateServe(t *testing.T) {
+	valid := func(t *testing.T) Config {
+		t.Helper()
+		f := newFixture(t)
+		cfg, err := FromEnv(f.getenv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	if err := valid(t).ValidateServe(); err != nil {
+		t.Fatalf("valid config: %v", err)
+	}
+	none := valid(t)
+	none.APIURL, none.APIToken = APIURLNone, ""
+	if err := none.ValidateServe(); err != nil {
+		t.Fatalf("API_URL=none without a token: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"no domain", func(c *Config) { c.SbxDomain = "" }, "SBX_GATEWAY_SBX_DOMAIN"},
+		{"no tunnel host", func(c *Config) { c.TunnelHost = "" }, "SBX_GATEWAY_TUNNEL_HOST"},
+		{"no database", func(c *Config) { c.DatabaseURL = "" }, "SBX_GATEWAY_DATABASE_URL"},
+		{"no api url", func(c *Config) { c.APIURL = "" }, "SBX_GATEWAY_API_URL"},
+		{"bad api url", func(c *Config) { c.APIURL = "api:3000" }, "SBX_GATEWAY_API_URL"},
+		{"no api token", func(c *Config) { c.APIToken = "" }, "SBX_GATEWAY_API_TOKEN_FILE"},
+		{"bad internal url", func(c *Config) { c.InternalURL = "gateway:7000" }, "SBX_GATEWAY_INTERNAL_URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := valid(t)
+			tc.mutate(&c)
+			err := c.ValidateServe()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one naming %s", err, tc.want)
+			}
+		})
+	}
+}

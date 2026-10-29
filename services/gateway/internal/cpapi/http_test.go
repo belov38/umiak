@@ -373,3 +373,17 @@ func TestHTTPClientAuthorizeSSH(t *testing.T) {
 		t.Fatalf("calls = %d, want 4", n)
 	}
 }
+
+func TestUnavailable(t *testing.T) {
+	c := cpapi.Unavailable()
+	ctx := context.Background()
+	if _, err := c.LookupRoute(ctx, "a-3000"); !errors.Is(err, cpapi.ErrUnavailable) {
+		t.Fatalf("LookupRoute: %v", err)
+	}
+	if _, err := c.ExchangePortAuthCode(ctx, "c", "a-3000"); !errors.Is(err, cpapi.ErrUnavailable) {
+		t.Fatalf("ExchangePortAuthCode: %v", err)
+	}
+	if _, err := c.AuthorizeSSH(ctx, cpapi.SSHAuthorizeRequest{Sandbox: "a"}); !errors.Is(err, cpapi.ErrUnavailable) {
+		t.Fatalf("AuthorizeSSH: %v", err)
+	}
+}
