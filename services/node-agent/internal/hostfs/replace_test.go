@@ -67,3 +67,35 @@ func TestReplaceLockedConcurrentEditsAreNotLost(t *testing.T) {
 		}
 	}
 }
+
+// Proxmox locks the ethers file and then replaces it by rename, so a Proxmox writer that waited for
+// the lock may hold it on an inode that is no longer at path while we lock the current one. Its
+// rename can then land while we edit; ours must not overwrite it.
+func TestReplaceLockedDoesNotOverwriteAConcurrentRename(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ethers")
+	if err := os.WriteFile(p, []byte("old\ngone\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	err := ReplaceLocked(p, func(b []byte) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			tmp := filepath.Join(dir, "ethers.tmp")
+			if err := os.WriteFile(tmp, []byte(string(b)+"new\n"), 0o600); err != nil {
+				return nil, err
+			}
+			if err := os.Rename(tmp, p); err != nil {
+				return nil, err
+			}
+		}
+		return []byte(strings.Replace(string(b), "gone\n", "", 1)), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(p) //nolint:gosec // test temp file
+	if string(got) != "old\nnew\n" || calls != 2 {
+		t.Errorf("content %q after %d edits", got, calls)
+	}
+}

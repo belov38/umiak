@@ -78,18 +78,52 @@ export function parseJsonLenient(text: string): unknown {
 	}
 }
 
+/**
+ * Proxmox gave up waiting for the QEMU guest agent. The guest may still execute the command (or
+ * already did), so it must never be repeated blindly: exec may run twice, exec-status may have
+ * consumed the exit status.
+ */
+export class QgaTimeoutError extends PveApiError {
+	/** QGA command name, e.g. guest-exec-status. */
+	readonly command: string;
+	constructor(status: number, message: string, command: string) {
+		super(status, message);
+		this.name = "QgaTimeoutError";
+		this.command = command;
+	}
+}
+
+const QGA_TIMEOUT_RE = /qga command '([\w-]+)' failed - got timeout/i;
+const LOCK_TIMEOUT_RE = /can't lock file/i;
+
+function apiError(
+	status: number,
+	message: string,
+	errors?: Record<string, string>,
+): PveApiError {
+	const qga = QGA_TIMEOUT_RE.exec(message);
+	if (qga?.[1]) return new QgaTimeoutError(status, message, qga[1]);
+	return new PveApiError(status, message, errors);
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Lock timeouts mean the request was not executed, so any method may be retried. A broken connection
- * may hide an executed request, so only GET is retried then.
+ * A lock timeout means the request was not executed, so any method may be retried. Guest agent
+ * calls are not idempotent (exec, fsfreeze, and exec-status, which forgets an exited PID), so
+ * nothing else is retried for them. Otherwise only GET is retried on a timeout or a broken
+ * connection, which may hide an executed request.
  */
-function isRetryable(err: unknown, method: string): boolean {
-	if (err instanceof PveApiError) {
+function isRetryable(err: unknown, method: string, path: string): boolean {
+	if (err instanceof QgaTimeoutError) return false;
+	if (err instanceof PveApiError && LOCK_TIMEOUT_RE.test(err.message))
+		return true;
+	if (path.includes("/agent/")) return false;
+	if (err instanceof PveApiError)
 		return (
-			err.status === 503 || /can't lock file|got timeout/i.test(err.message)
+			err.status === 503 ||
+			(method === "GET" && /got timeout/.test(err.message))
 		);
-	}
 	const code = (err as { code?: string }).code;
 	return method === "GET" && (code === "ECONNRESET" || code === "EPIPE");
 }
@@ -130,7 +164,7 @@ export class PveApi implements PveClient {
 			try {
 				return (await this.#once(method, path, params)) as T;
 			} catch (err) {
-				if (attempt >= this.#opts.retries || !isRetryable(err, method))
+				if (attempt >= this.#opts.retries || !isRetryable(err, method, path))
 					throw err;
 				this.retryCount++;
 				await sleep(this.#opts.retryDelayMs * 2 ** attempt);
@@ -186,11 +220,7 @@ export class PveApi implements PveClient {
 								`HTTP ${status}`
 							).trim();
 							reject(
-								new PveApiError(
-									status,
-									`${method} ${path}: ${msg}`,
-									parsed.errors,
-								),
+								apiError(status, `${method} ${path}: ${msg}`, parsed.errors),
 							);
 							return;
 						}
