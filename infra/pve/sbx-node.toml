@@ -1,0 +1,14 @@
+# boat-dev-clone S1 PoC: sbx-node config, installed to /etc/sbx-node.toml by infra/pve/setup.sh node.
+node = "pve"
+vg = "pve"
+thinPool = "data"
+storage = "local-lvm"
+vmidMin = 500
+vmidMax = 599
+templateVmid = 599
+sdnZone = "sbx"
+vnet = "sbx0"
+clusterId = 1
+leaseFile = "/var/lib/misc/dnsmasq.sbx.leases"
+ethersFile = "/etc/dnsmasq.d/sbx/ethers"
+macCacheFile = "/etc/pve/sdn/mac-cache.json"

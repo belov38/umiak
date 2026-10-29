@@ -1,6 +1,6 @@
 # S1. Proxmox foundation: спецификация
 
-Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. Архитектура: `docs/architecture.md` (§5 хранилище, §7 сеть, §10 развёртывание). Roadmap: `docs/roadmap.md`.
+Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. Реализовано на ветке `s1-impl`, результаты в §11. Архитектура: `docs/architecture.md` (§5 хранилище, §7 сеть, §10 развёртывание). Roadmap: `docs/roadmap.md`. Дополнено MVP-рекомендациями R6 (только запись в §12) (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29).
 
 Пометка **[решение S1]** — решение, принятое в этой сессии без отдельного согласования с Ильёй; его можно пересмотреть при планировании, если найдётся причина.
 
@@ -54,6 +54,7 @@
   - `/sdn/zones/sbx` → `PVESDNUser` (`SDN.Use`, `SDN.Audit`); если чтение IPAM требует другого пути, добавить `SDN.Audit` на него.
 - Список прав окончательно подтверждает `sbx-bench preflight`: каждая операция стенда выполняется токеном, отказ в правах — красная проверка. Добавлять права только по факту отказа и записывать в этот раздел.
 - Откат: `pveum user delete sbx@pve`, `pveum role delete SbxPoC`, `pveum pool delete sandbox` (после удаления VM из pool).
+- Итог реализации: набора прав выше хватило, дополнительных прав не добавлялось. Ограничения токена: `tags` в `POST /qemu` даёт 403 (проверка тегов по `/vms/N` без pool), поэтому `tags=sbx` ставится вместе с дисками через `PUT config`; `vmgenid` задаёт только root, Proxmox генерирует новый сам; после удаления VM токен получает 403, а не 404.
 
 ### 4.2 dnsmasq и IPv4 forwarding
 
@@ -139,6 +140,11 @@ IPSet `sbx-gateway` — место для будущего адреса ingress 
 
 Ручной откат: `pvesh set /cluster/firewall/options --enable 0`; удалить группу `sbx-egress`, IPSet `sbx-deny-public`, `sbx-deny` и `sbx-gateway`; удалить `host.fw`.
 
+Итог реализации (`infra/pve/setup.sh fw`):
+- В `host.fw` добавлено `nf_conntrack_allow_invalid: 1`. После включения firewall `bridge-nf-call-iptables=1`, и весь мостовой трафик `vmbr0` идёт через `PVEFW-FORWARD`, где по умолчанию стоит `ctstate INVALID -j DROP`. Хост по-прежнему не фильтруется; правила sandbox работают как прежде.
+- IPv6 закрыт IPSet `sbx-deny6` из `::/1` и `8000::/1` (`ipset hash:net` не принимает `/0`) и правилом `OUT DROP -dest +sbx-deny6` в группе.
+- Mac оператора при включении был вне LAN хоста, поэтому проверки шли по Tailscale: `ssh pve`, HTTPS `:8006`, ping 7 гостей по их Tailscale-адресам (их трафик идёт через мост `vmbr0`) и ping 4 гостей с хоста. После переезда Mac в LAN проверены `ssh pve-lan`, HTTPS `:8006` по LAN IP и ping гостей 100, 102, 103, 109 из LAN — всё работает.
+
 ### 4.5 SSH-ключ для `sbx-node`
 
 - На Mac отдельный ключ `~/.config/sbx/sbx-node_ed25519`, комментарий `boat-dev-clone S1 sbx-node`.
@@ -156,6 +162,14 @@ IPSet `sbx-gateway` — место для будущего адреса ingress 
 4. Убрать `cicustom`, `qm template 599`. LV становится `base-599-disk-0`, тег `sbx-tpl` сохраняется.
 
 Тег `sbx-tpl` не равен `sbx`, поэтому `sbx-node` не может удалить LV шаблона. Шаблон 9000 и его LV не изменяются. Откат: `qm destroy 599`, удалить snippet.
+
+**Отклонение при реализации (по сигналу master о безопасности).** 9000 — личный dev-шаблон Ильи (пользователь `ib`, Tailscale, ключи, токены Claude/Codex, профиль Chrome, snapd, docker). Первая сборка 599 по шагам 2–3 загрузила его с `tailscaled` (state был пустой `{}`, узел в tailnet не вошёл, новых узлов в tailnet нет). Поэтому 599 собирается **офлайн, без загрузки** (`infra/pve/setup.sh template` + `infra/pve/template-sanitize.sh`):
+1. Thin-снимок `base-9000-disk-0` → `vm-599-disk-0` (тег `sbx-tpl`); корневой раздел подключается на хосте через dm-linear (не loop), чтобы discard доходил до thin LV.
+2. В chroot: purge `tailscale` и его state; удаление пользователя `ib` с `/home/ib`, его sudoers, `/opt/agent-desktop`, всего в `/root` кроме `.bashrc`/`.profile`, crontab, логов и journal; `cloud-init clean --logs --machine-id --seed`, `/etc/machine-id` = `uninitialized` (в chroot cloud-init удаляет файл, и без него networkd не получает DHCP), удаление SSH host keys; netplan-файл с MAC сборочной VM заменён fallback-файлом `en*` + DHCP; замаскированы `systemd-networkd-wait-online`, `unattended-upgrades`, `apt-daily*.timer`. `qemu-guest-agent` в 9000 уже есть, snippet не нужен.
+3. `fstrim` (33.5 GiB), затем обнуление свободных блоков ФС, в которых ещё остались данные (dm-thin освобождает только целые чанки по 64 KiB): 6297 блоков. Проверка: 64 байта из удалённого личного файла (хранятся только на хосте, не печатаются) не находятся на сыром разделе.
+4. `qm create 599` без cicustom, диск, firewall, `qm template 599`.
+
+599 — шаблон PoC; S5 заменит его чистой сборкой Ubuntu 26.04 minimal.
 
 ## 5. Как выполняются операции
 
@@ -379,7 +393,65 @@ infra/pve/snippets/       sbx-tpl-vendor.yaml
 
 ## 11. Результаты
 
-Заполняется после прогона `sbx-bench s1` на `pve`: таблица метрик, решение по `ipfilter`, итог по lease при delete, итог по параллелизму (выбранный дефолт лимита clone на ноду), сравнение с `qm clone`.
+Прогон `sbx-bench s1` (дефолты: 3 прогона, 2 vCPU / 2 GB, параллельно 1/2/4, `--clone-only 8`, базовая линия) 2026-10-29 04:41–04:47 UTC, коммит `ef2809c`. Proxmox VE 9.2.21, ядро 7.0.14-25-pve, `local-lvm` (VG `pve`, thin pool `data`, чанк 64 KiB, Crucial P310 QLC), шаблон 599 (офлайн-очищенный снимок 9000, см. §4.6). **126/126 проверок зелёные**, сравнение «мира до» и «мира после» пустое. JSON: `bench-results/s1-2026-10-29T04-41-38-016Z.json` (не в git).
+
+### Метрики, секунды
+
+p95 считается по nearest-rank; при n = 3 он равен max.
+
+| Метрика | n | median | p95 | min | max |
+|---|---|---|---|---|---|
+| `clone` (allocate → готова к старту) | 3 | 1.27 | 1.45 | 1.25 | 1.45 |
+| `clone_baseline` (`POST /qemu/599/clone`, тот же config и firewall) | 3 | 1.32 | 1.32 | 1.28 | 1.32 |
+| `boot` (start → первый `agent/ping`) | 3 | 11.04 | 11.14 | 10.99 | 11.14 |
+| `ip` (start → IPv4 в `10.88.0.0/24`) | 3 | 11.24 | 11.34 | 11.10 | 11.34 |
+| `snapshot` (весь, с QGA fsfreeze) | 3 | 1.08 | 1.08 | 0.98 | 1.08 |
+| `freeze` (начало freeze → конец thaw) | 3 | 0.69 | 0.69 | 0.68 | 0.69 |
+| `fork_clone` (fork → готова к старту) | 3 | 1.20 | 1.47 | 1.16 | 1.47 |
+| `fork` (fork → первый `agent/ping`) | 3 | 11.74 | 12.50 | 11.33 | 12.50 |
+| `delete` (до проверки отсутствия следов) | 6 | 1.95 | 1.98 | 1.94 | 1.98 |
+
+`clone` ~1.3 s складывается из `POST /qemu` с ожиданием задачи, `lvcreate -s` через `sbx-node`, `PUT config`, firewall (options, rule, ipset) и чтения IPAM. Загрузка ~11 s — это Ubuntu-шаблон с первым запуском cloud-init; QGA отвечает раньше, чем завершается `cloud-final`.
+
+### Параллелизм и конкуренция
+
+| Пакет | Всего, s | На VM: median / max, s | Ошибки | Повторы API |
+|---|---|---|---|---|
+| k = 1, create → start → ready | 12.63 | 12.63 / 12.63 | 0 | 0 |
+| k = 2 | 14.32 | 14.07 / 14.32 | 0 | 0 |
+| k = 4 (4 × 2 GB = лимит 8 GB) | 15.89 | 15.46 / 15.89 | 0 | 0 |
+| `--clone-only 8` (без start) | 3.00 | 2.25 / 3.00 | 0 | 0 |
+| базовая линия `qm clone`, k = 4 без start | 2.44 | 2.06 / 2.44 | 0 | 0 |
+
+- 8 одновременных create не дали ни одной ошибки и ни одного повтора из-за блокировок (`can't lock file`): LVM сериализует свои метаданные, наши имена уникальны, `/cluster/nextid` не используется. Время одного create растёт с 1.3 s до 2.2–3.0 s.
+- **Дефолт лимита параллельных clone на ноду оставлен 4** [решение S1 подтверждено]: при 4 загрузка одной VM растёт на ~25% (12.6 → 15.5 s), при 8 одновременных clone без загрузки конкуренции за блокировки нет. Стенд сам лимит не применяет, чтобы мерить конкуренцию.
+- **Сравнение с `qm clone`:** на этой версии Proxmox linked clone через API почти так же быстр (1.32 s против 1.27 s) и без ошибок при k = 4. Наш путь нужен не ради скорости clone, а ради fork: из снапшота работающей VM API делает только full clone, а `cloneFromSnapshot` занимает 1.2 s. Конкуренцию `qm clone` при k = 8 стенд не мерил.
+
+### Решения по пунктам «проверить при реализации» (§12)
+
+- **`ipfilter`: оставлен включённым.** С `ipfilter=1` и пустым `ipfilter-net0` весь IPv4 гостя, кроме DHCP, дропается; PVE создаёт IPSet `guest-ipam-<vmid>`, но в ipfilter его не подставляет. IP выдаётся IPAM уже при `POST /qemu`, поэтому create после firewall-опций читает IP из IPAM и кладёт его в ipset `ipfilter-net0` до start. Стенд проверяет DNS и HTTPS из A и F.
+- **Lease при delete.** Proxmox не удаляет ни lease в файле dnsmasq, ни строку `MAC,IP` в `/etc/dnsmasq.d/sbx/ethers`: `PVE::Network::SDN::Dhcp::remove_mapping` нигде не вызывается, а `del_ip_mapping` в плагине dnsmasq не реализован. Строки без MAC в IPAM PVE выбрасывает только при следующем старте любой VM. Поэтому delete вызывает `sbx-node dhcp.release`: `dhcp_release` и удаление строки ethers под `flock` (как PVE), только для нашего MAC и только если его уже нет в `mac-cache.json`, затем `reload dnsmasq@sbx`. IPAM и mac-cache Proxmox чистит сам.
+- **Продление lease через firewall.** Диапазон subnet создаётся как `infinite`: lease бессрочный, продления нет. Кроме того, в `tapN-OUT` правило `-p udp --sport 68 --dport 67` стоит до ipfilter и до `GROUP-sbx-egress-OUT`, ответ `--sport 67 --dport 68` в `tapN-IN` — до группы. Опция `dhcp=1` так же пропускает DHCPv6-клиента (546 → 547); IPv6-диапазона у dnsmasq нет.
+- **`isolate-ports` с firewall-bridge.** У порта `fwprNp0` в `sbx0` стоит `isolated on`. Стенд проверяет ping и TCP 22 A ↔ F в обе стороны с позитивным контролем (sshd слушает локально в A и F).
+- **Разные IP у A и F:** да, IPAM привязывает IP к MAC (проверка в каждом прогоне).
+- **Длина `smbios1`.** Предел PVE — 512 символов на всю строку (`value may only be 512 characters long`), то есть serial до ~340 байт в сыром виде. Payload S2 — 85 байт (116 base64, 174 символа на строку). Serial в 300 байт виден в госте целиком.
+- **Где виден serial** (тестовое значение размером с payload S2; ищется base64 и сырой вид): конфиг VM через API — да; journal хоста — нет (serial передаётся в `POST /qemu`, а pvedaemon пишет параметры только для `update VM`); task log — нет; **командная строка QEMU — да**, в сыром виде (`/proc/<pid>/cmdline` на хосте читается любым локальным пользователем). Это та же аудитория «операторы хоста», что принята в §6.4; на хосте нет непривилегированных пользователей с login shell (проверено). Для production (S12) это стоит учесть.
+- **Журнал ноды** читают только root и `adm` (группы `adm`, `systemd-journal`, `wheel` пусты; проверяется в preflight).
+
+### Шаблон 599 и Tailscale
+
+См. §4.6: 599 собран офлайн из очищенного снимка 9000 (Tailscale удалён, пользователь `ib` и его данные удалены, освобождённые блоки отброшены и проверены на сыром разделе). Стенд в каждой sandbox проверяет, что нет процесса `tailscaled` и интерфейса `tailscale0`. 599 — шаблон PoC; S5 заменяет его чистой сборкой Ubuntu 26.04 minimal.
+
+### Отклонения от спецификации
+
+- Runbook выполнен без остановки перед firewall: master передал согласие Ильи на весь runbook (§4). Процедура безопасного включения соблюдена; при регрессии скрипт сразу выключает firewall, таймер остаётся страховкой.
+- §4.2: применяется `sysctl -p` только своего файла, а не `sysctl --system` (чтобы не переприменять чужие значения). `dnsmasq-utils` ставится сразу (нужен `dhcp_release`).
+- §4.3: SDN apply (`ifreload -a`) сбросил `mcast_hash_max` у `vmbr0` с 4096 до 512 (дефолт ifupdown2). Значение возвращено, шаг `sdn` сохраняет и восстанавливает его.
+- §4.4: `nf_conntrack_allow_invalid: 1` в `host.fw`; IPv6 закрыт через `::/1` + `8000::/1`.
+- §4.6: шаблон собирается офлайн, без загрузки и без snippet.
+- §5.1: `dhcp.release` удаляет и строку ethers; `inventory search` принимает только строку формы serial S2 (иначе restricted-ключ стал бы оракулом по journal, task log и cmdline); `lv.snapshot` принимает `vm-*` как origin только с тегами `sbx` и `sbx-vm-N`; секция `lvs` в inventory не включает LV с тегом `sbx-tpl` (наш шаблон), JSON-файлы PVE хешируются в каноническом виде (Proxmox пишет их со случайным порядком ключей).
+- §6.3: `tags=sbx` ставится через `PUT config`, `vmgenid` не передаётся (Proxmox генерирует сам); при любой ошибке create откатывается через delete.
+- §7.2: базовая линия реализована в пакете (`Machines.createViaQmClone`), чтобы использовать тот же firewall-шаг.
 
 ## 12. Риски и что проверить при реализации
 
@@ -391,3 +463,4 @@ infra/pve/snippets/       sbx-tpl-vendor.yaml
 - QLC-диск `local-lvm` занижает цифры при долгой записи; для функционального PoC нормально, в отчёте указать storage.
 - Длина `smbios1` serial.
 - Исходящий трафик sandbox выходит в интернет с домашнего публичного IP Ильи. Для PoC это принято; политика egress для production — в S12/фазе 2.
+- **`cpu host` и вложенный KVM** (MVP-рек. R6, решение master 2026-10-29). Вложенная виртуализация в MVP не гарантируется: `/dev/kvm` в госте есть, только если на хосте `kvm_intel`/`kvm_amd` загружен с `nested=1` (проверить на `pve`: `cat /sys/module/kvm_*/parameters/nested`); runbook и код S1 это не меняют, шаблон S5 только даёт доступ (S5 §8.6, §10 п. 19). `cpu host` остаётся, пока нода одна. Живая миграция между нодами с разными CPU с `cpu host` невозможна: для такого кластера нужна именованная модель CPU (например, `x86-64-v3`) в шаблоне — решение S12 / фазы 2.

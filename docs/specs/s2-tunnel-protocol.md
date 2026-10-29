@@ -225,7 +225,7 @@ Gateway работает как Kubernetes Deployment, drain — часть за
    - TCP-потоки (`/tcp/`) живут до `tcpDeadline` (по умолчанию 2 min), потом закрываются.
 7. Когда соединений не осталось или истёк общий срок, процесс выходит. Агент сам закрывает старое соединение через `tcpDeadline + 10 s`.
 
-`terminationGracePeriodSeconds` должен покрывать шаги 2–7: 5 s + 5 s + 120 s + запас → **180**.
+`terminationGracePeriodSeconds` должен покрывать шаги 2–7. С одним `tcpDeadline` 2 min это было бы 5 s + 5 s + 120 s + запас → 180. **S4 переопределяет:** gateway передаёт `tcpDeadline` = 15 min, чтобы дожили SSH-потоки, а остальные TCP-потоки закрывает сам через 2 min (`docs/specs/s4-gateway.md` §10). Итог — **960**.
 
 **Падение без drain** (OOM, нода умерла): агенты замечают это по ping не позже чем через 15 s и переподключаются. Записи `tunnel_sessions` указывают на экземпляр, чей `heartbeat_at` устарел. Через 15 s `agent-client` считает такие machine отключёнными и ждёт новую запись.
 
@@ -296,7 +296,7 @@ Gateway как прокси:
 - стримит тела без буферизации.
 
 Для S4 и SSH:
-- `CONNECT /v1/machines/{id}/tcp/{port}` на внутреннем listener-е — для вызова из другого экземпляра gateway, когда публичный запрос попал не туда, где туннель;
+- `CONNECT /v1/machines/{id}/tcp/{port}` на внутреннем listener-е — для вызова из другого экземпляра gateway, когда публичный запрос попал не туда, где туннель. **Уточнение S4 (§7.2):** обычный HTTP/2 CONNECT не несёт `:path`, а extended CONNECT в Go включается только глобальным GODEBUG. Поэтому на проводе это `CONNECT <machineId>:<port>` (цель в `:authority`) с service token; `MaxConcurrentStreams` внутреннего listener-а — 10 000;
 - Go-интерфейс `MachineConn.DialTCP` внутри процесса.
 
 ## 9. Возобновляемость
@@ -479,7 +479,7 @@ sequenceDiagram
   K->>G1: preStop / SIGTERM
   G1->>G1: readiness fails, state=draining, wait 5 s
   Note over G1: Drain calls spread evenly over spreadMs=5000
-  G1->>A: Control/Drain(tcpDeadline=120 s)
+  G1->>A: Control/Drain(tcpDeadline=900 s, S4 §10.4)
   A->>G2: new WSS (old conn still served)
   G2->>DB: epoch+1, instance=B, NOTIFY
   API->>G1: new unary call
@@ -637,7 +637,7 @@ sequenceDiagram
 - **S12:**
   - ingress для `tunnel.<domain>` по требованиям §6;
   - tunnel CA и его секреты;
-  - Deployment gateway с readiness, `preStop` и `terminationGracePeriodSeconds: 180`;
+  - Deployment gateway с readiness, `preStop` и `terminationGracePeriodSeconds: 960` (S4 §10);
   - NetworkPolicy внутреннего listener-а;
   - service tokens в Secrets.
 
@@ -677,7 +677,7 @@ sequenceDiagram
 
 ## 19. Открытые вопросы
 
-- `tcpDeadline` 2 min при drain: хватит ли для SSH-сессий, или SSH-потокам нужен свой, более длинный срок (S4)?
+- ~~`tcpDeadline` 2 min при drain: хватит ли для SSH-сессий?~~ Решено в S4 §10: SSH-потоки 15 min, остальные 2 min, grace 960 s.
 - Список типов событий журнала и их payload (S3, S6).
 - Retention вывода команд на диске VM и лимиты (S3).
 - Ingress controller и где терминируется TLS `tunnel.<domain>` (S12).

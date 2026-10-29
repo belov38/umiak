@@ -1,0 +1,20 @@
+{
+	"name": "@sbx/pve",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Proxmox foundation: PVE API client, sbx-node client, lvmthin driver, machine primitives, VMID/MAC allocator",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"ssh2": "1.17.0"
+	},
+	"devDependencies": {
+		"@types/ssh2": "1.15.6"
+	}
+}
