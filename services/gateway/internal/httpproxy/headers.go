@@ -28,12 +28,7 @@ const (
 // header block as the client would get it: the header fields and the
 // Trailer field that announces the declared trailer names.
 func responseBlockSize(res *http.Response) int {
-	n := 0
-	for k, vv := range res.Header {
-		for _, v := range vv {
-			n += len(k) + len(v) + fieldOverhead
-		}
-	}
+	n := headerSize(res.Header)
 	if len(res.Trailer) > 0 {
 		n += len("Trailer") + fieldOverhead
 		for k := range res.Trailer {
@@ -190,6 +185,17 @@ func hasPrefixFold(s, prefix string) bool {
 	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
+// headerSize returns the HTTP/2 size of h.
+func headerSize(h http.Header) int {
+	n := 0
+	for k, vv := range h {
+		for _, v := range vv {
+			n += len(k) + len(v) + fieldOverhead
+		}
+	}
+	return n
+}
+
 // sanitizeTrailers removes Sbx-* trailers, then drops every trailer when the
 // block exceeds maxTrailerBytes or maxTrailerFields. It reports the drop.
 func sanitizeTrailers(t http.Header) bool {
@@ -198,12 +204,9 @@ func sanitizeTrailers(t http.Header) bool {
 			delete(t, k)
 		}
 	}
-	fields, size := 0, 0
-	for k, vv := range t {
-		for _, v := range vv {
-			fields++
-			size += len(k) + len(v) + fieldOverhead
-		}
+	fields, size := 0, headerSize(t)
+	for _, vv := range t {
+		fields += len(vv)
 	}
 	if fields > maxTrailerFields || size > maxTrailerBytes {
 		clear(t)

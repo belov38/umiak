@@ -6,8 +6,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
+	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -508,5 +511,34 @@ func TestAmbiguousFraming(t *testing.T) {
 				t.Fatalf("good answer = %d %q", status, body)
 			}
 		}
+	}
+}
+
+// An informational answer (103) over the header cap is dropped: it is
+// optional, and the final answer still reaches the client.
+func TestInformationalHeaderCap(t *testing.T) {
+	f := newFixture(t, nil)
+	rawApp(f.m, 3000, "HTTP/1.1 103 Early Hints\r\n"+strings.Repeat("X: v\r\n", 10000)+"\r\n"+
+		"HTTP/1.1 103 Early Hints\r\nLink: </a.css>; rel=preload\r\n\r\n"+
+		"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+	var mu sync.Mutex
+	var hints []http.Header
+	trace := &httptrace.ClientTrace{Got1xxResponse: func(_ int, h textproto.MIMEHeader) error {
+		mu.Lock()
+		defer mu.Unlock()
+		hints = append(hints, http.Header(h))
+		return nil
+	}}
+	req := newReq(t, http.MethodGet, testenv.Host(f.env.Route(f.m, 3000, nil).Label), "/", nil)
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	resp := do(t, f.c, req)
+	defer func() { _ = resp.Body.Close() }()
+	if b := readBody(t, resp); resp.StatusCode != http.StatusOK || b != "ok" {
+		t.Fatalf("answer = %d %q", resp.StatusCode, b)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(hints) != 1 || hints[0].Get("Link") == "" {
+		t.Fatalf("client got %d 1xx answers; want only the small 103", len(hints))
 	}
 }
