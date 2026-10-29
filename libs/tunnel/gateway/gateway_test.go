@@ -637,6 +637,55 @@ func TestFenceWhileDrainingMoves(t *testing.T) {
 	}
 }
 
+// A retire NOTIFY closes a moved session at once, TCP streams included:
+// they do not linger until their drain deadline.
+func TestRetireClosesMovedSession(t *testing.T) {
+	e := newEnv(t)
+	gwA := e.gateway("gw-a", nil)
+	gwB := e.gateway("gw-b", nil)
+	gwB.routed.Store(false)
+	id, bs := e.machine()
+	a := e.startAgent(agentConfig(e, id, bs, defaultIdentity()))
+	a.waitConnected()
+	mc := waitMachine(t, gwA, id)
+	ctx := context.Background()
+
+	tcp, err := mc.(*MachineConn).DialTCPWith(ctx, startEcho(t), TCPOptions{DrainDeadline: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tcp.Close() }()
+	echo(t, tcp, "before")
+
+	gwA.routed.Store(false)
+	gwB.routed.Store(true)
+	if err := mc.Drain(ctx, transport.DrainOptions{Reason: "test", TCPDeadline: time.Minute}); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	a.waitEvent("connected to gw-b", func(ev agent.ConnEvent) bool {
+		return ev.Kind == agent.KindConnected && ev.Gateway == "gw-b"
+	})
+	eventually(t, time.Second, "A moves the session", func() bool {
+		_, st := gwA.lookup(id)
+		return st == stateMoved
+	})
+	sA, _ := gwA.lookup(id)
+	echo(t, tcp, "moved")
+
+	retiredAt := time.Now()
+	if err := e.store.Retire(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 16)
+	if _, err := tcp.Read(buf); err == nil {
+		t.Fatal("tcp stream still open after retire")
+	}
+	if d := time.Since(retiredAt); d > 2*time.Second {
+		t.Fatalf("tcp stream closed %s after retire, want at once", d)
+	}
+	waitDone(t, sA)
+}
+
 func TestRunShutdownDisconnects(t *testing.T) {
 	e := newEnv(t)
 	gw := e.gateway("gw-a", nil)

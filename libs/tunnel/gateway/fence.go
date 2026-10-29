@@ -69,14 +69,28 @@ func (g *Gateway) fenceWorker(ctx context.Context) {
 // registry says it is superseded: a higher epoch (or another instance), the
 // machine retired, or the row with our epoch and instance already
 // disconnected (this instance was swept while alive).
+// A moved session only checks for retirement: it is fenced already, but a
+// retired machine must not keep its TCP streams until their deadline.
 // Registry errors re-queue the machine after fenceRetry.
 func (g *Gateway) checkFence(ctx context.Context, machineID string) {
 	s, st := g.lookup(machineID)
-	if s == nil || st == stateMoved {
+	if s == nil {
 		return
 	}
 	cctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
+	if st == stateMoved {
+		retired, err := g.store.Retired(cctx, machineID)
+		if err != nil {
+			g.fenceRetryLater(ctx, machineID, err)
+			return
+		}
+		if retired {
+			s.log.Info("gateway: closing moved session of a retired machine", "reason", "machine retired")
+			s.close("machine retired")
+		}
+		return
+	}
 	reg, err := g.store.Session(cctx, machineID)
 	missing := errors.Is(err, registry.ErrNotFound)
 	if err != nil && !missing {
