@@ -106,8 +106,9 @@ func (s *Server) Revoke(payload string) {
 }
 
 // Recheck re-runs ssh/authorize with the original request of every open
-// session, a few at a time, and closes the denied ones as revoked. A
-// session whose check fails (api unavailable) is kept.
+// session, marked as a recheck (api checks the identity, not the login
+// certificate's validity), a few at a time, and closes the denied ones as
+// revoked. A session whose check fails (api unavailable) is kept.
 func (s *Server) Recheck(ctx context.Context) {
 	ts := s.targets()
 	if len(ts) == 0 {
@@ -126,7 +127,9 @@ func (s *Server) Recheck(ctx context.Context) {
 		wg.Go(func() {
 			defer func() { <-sem }()
 			cctx, cancel := context.WithTimeout(ctx, recheckTimeout)
-			auth, err := s.cfg.API.AuthorizeSSH(cctx, t.ident().Request)
+			req := t.ident().Request
+			req.Recheck = true
+			auth, err := s.cfg.API.AuthorizeSSH(cctx, req)
 			cancel()
 			switch {
 			case err != nil:

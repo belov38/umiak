@@ -2,6 +2,7 @@ package sshgw
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sort"
 	"sync"
@@ -154,6 +155,9 @@ func TestRecheck(t *testing.T) {
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
+		if !req.Recheck {
+			return cpapi.SSHAuthorization{}, errors.New("recheck flag not set")
+		}
 		mu.Lock()
 		seen = append(seen, req.Sandbox)
 		mu.Unlock()

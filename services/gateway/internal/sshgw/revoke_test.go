@@ -164,6 +164,11 @@ func TestRecheckOnReconnect(t *testing.T) {
 	if l := f.waitLog(t); l["closeReason"] != "revoked" {
 		t.Fatalf("log %v", l)
 	}
+	// The login was a plain request, the recheck is marked.
+	reqs := f.env.API.SSHRequests()
+	if len(reqs) < 2 || reqs[0].Recheck || !reqs[len(reqs)-1].Recheck {
+		t.Fatalf("authorize requests %+v", reqs)
+	}
 }
 
 // The front B holds the SSH connection; the backend stream runs through

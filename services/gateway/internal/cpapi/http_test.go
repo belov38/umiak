@@ -349,7 +349,27 @@ func TestHTTPClientAuthorizeSSH(t *testing.T) {
 	if err != nil || got.Allowed {
 		t.Fatalf("no rule: %+v, %v", got, err)
 	}
-	if n := f.Calls("AuthorizeSSH"); n != 3 {
-		t.Fatalf("calls = %d, want 3", n)
+	if _, has := body["recheck"]; has {
+		t.Fatalf("recheck false must be omitted: %s", f.LastSSHBody())
+	}
+
+	// A recheck carries "recheck": true, and the fake records it.
+	if _, err := c.AuthorizeSSH(context.Background(), cpapi.SSHAuthorizeRequest{
+		Sandbox: "quiet-otter-lamp", PublicKey: "ssh-ed25519 AAAA", Fingerprint: "SHA256:abc", Recheck: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body = nil
+	if err := json.Unmarshal(f.LastSSHBody(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["recheck"] != true {
+		t.Fatalf("recheck body = %s", f.LastSSHBody())
+	}
+	if reqs := f.SSHRequests(); len(reqs) != 4 || !reqs[3].Recheck || reqs[2].Recheck {
+		t.Fatalf("recorded requests %+v", reqs)
+	}
+	if n := f.Calls("AuthorizeSSH"); n != 4 {
+		t.Fatalf("calls = %d, want 4", n)
 	}
 }

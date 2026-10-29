@@ -38,6 +38,7 @@ type Fake struct {
 	down    bool
 	latency time.Duration
 	lastSSH []byte
+	sshReqs []cpapi.SSHAuthorizeRequest
 }
 
 var _ cpapi.Client = (*Fake)(nil)
@@ -131,6 +132,14 @@ func (f *Fake) Calls(method string) int {
 	return f.calls[method]
 }
 
+// SSHRequests returns every AuthorizeSSH request the fake answered or
+// refused, in order (calls while down included).
+func (f *Fake) SSHRequests() []cpapi.SSHAuthorizeRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]cpapi.SSHAuthorizeRequest(nil), f.sshReqs...)
+}
+
 // LastSSHBody returns the body of the last POST /ssh/authorize that
 // NewServer received, or nil.
 func (f *Fake) LastSSHBody() []byte {
@@ -209,6 +218,9 @@ func (f *Fake) ExchangePortAuthCode(ctx context.Context, code, label string) (cp
 
 // AuthorizeSSH implements cpapi.Client.
 func (f *Fake) AuthorizeSSH(ctx context.Context, req cpapi.SSHAuthorizeRequest) (cpapi.SSHAuthorization, error) {
+	f.mu.Lock()
+	f.sshReqs = append(f.sshReqs, req)
+	f.mu.Unlock()
 	if err := f.enter(ctx, "AuthorizeSSH"); err != nil {
 		return cpapi.SSHAuthorization{}, err
 	}

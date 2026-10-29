@@ -67,11 +67,19 @@ type PortAuthGrant struct {
 // SSHAuthorizeRequest is the body of POST /internal/v1/gateway/ssh/authorize.
 // Either PublicKey and Fingerprint (a registered user key) or Certificate (a
 // short-lived login certificate that the gateway already verified) is set.
+//
+// Recheck marks the re-check of an open session after the gateway's LISTEN
+// reconnected (spec 9.5). The request is the one of the original login.
+// api must check the identity as on a login (the user is active and a
+// member of the sandbox's team, the key is not revoked or expired and has
+// ssh:connect) and must skip the certificate's validity: the gateway
+// checked it at login, and sessions outlive the 10-minute certificates.
 type SSHAuthorizeRequest struct {
 	Sandbox     string       `json:"sandbox"`
 	PublicKey   string       `json:"publicKey,omitempty"`
 	Fingerprint string       `json:"fingerprint,omitempty"`
 	Certificate *SSHCertInfo `json:"certificate,omitempty"`
+	Recheck     bool         `json:"recheck,omitempty"`
 }
 
 // SSHCertInfo carries the fields of a verified login certificate.
