@@ -375,3 +375,36 @@ func TestNoEnableConnectProtocol(t *testing.T) {
 		return
 	}
 }
+
+// rawApp answers every HTTP/1.1 request on port with raw and closes the
+// conn.
+func rawApp(m *testenv.Machine, port uint16, raw string) {
+	m.ServeTCP(port, func(c net.Conn) {
+		if _, err := http.ReadRequest(bufio.NewReader(c)); err != nil {
+			return
+		}
+		_, _ = io.WriteString(c, raw)
+	})
+}
+
+// The response header cap counts the HTTP/2 size of the block (name, value
+// and 32 per field), what a coalesced browser conn receives: 10,000 tiny
+// fields fit the transport's 64 KiB byte limit on the wire but are 340 KB
+// as an HTTP/2 header list.
+func TestResponseHeaderCap(t *testing.T) {
+	f := newFixture(t, nil)
+	rawApp(f.m, 3000, "HTTP/1.1 200 OK\r\n"+strings.Repeat("X: v\r\n", 10000)+"Content-Length: 2\r\n\r\nok")
+	// 1,500 fields: 51,000 bytes as HTTP/2, under the cap.
+	rawApp(f.m, 3001, "HTTP/1.1 200 OK\r\n"+strings.Repeat("X: v\r\n", 1500)+"Content-Length: 2\r\n\r\nok")
+	// Few fields, 63 KiB as HTTP/2 with the gateway's own headers: under.
+	rawApp(f.m, 3002, "HTTP/1.1 200 OK\r\nX-Big: "+strings.Repeat("b", 62<<10)+"\r\nContent-Length: 2\r\n\r\nok")
+
+	expectError(t, f.c, newReq(t, http.MethodGet, testenv.Host(f.env.Route(f.m, 3000, nil).Label), "/", nil), 502, "upstream_error", -1)
+	for _, port := range []uint16{3001, 3002} {
+		resp := do(t, f.c, newReq(t, http.MethodGet, testenv.Host(f.env.Route(f.m, port, nil).Label), "/", nil))
+		defer func() { _ = resp.Body.Close() }()
+		if b := readBody(t, resp); resp.StatusCode != http.StatusOK || b != "ok" {
+			t.Fatalf("port %d: %d %q", port, resp.StatusCode, b)
+		}
+	}
+}

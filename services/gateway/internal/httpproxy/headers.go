@@ -10,14 +10,36 @@ import (
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
 )
 
-// Response trailer caps (not in the spec): a trailer block above either is
-// dropped whole and logged. Each field counts len(name)+len(value)+32, like
-// the HTTP/2 header list size.
+// Response header and trailer caps (not in the spec). Each field counts
+// len(name)+len(value)+32, like the HTTP/2 header list size: what a browser
+// gets on a conn it may share with other labels. A header block above
+// maxHeaderBytes is a 502; a trailer block above either trailer cap is
+// dropped whole and logged.
 const (
+	maxHeaderBytes   = 64 << 10
 	maxTrailerBytes  = 64 << 10
 	maxTrailerFields = 100
 	fieldOverhead    = 32
 )
+
+// responseBlockSize returns the HTTP/2 size of an application's response
+// header block as the client would get it: the header fields and the
+// Trailer field that announces the declared trailer names.
+func responseBlockSize(res *http.Response) int {
+	n := 0
+	for k, vv := range res.Header {
+		for _, v := range vv {
+			n += len(k) + len(v) + fieldOverhead
+		}
+	}
+	if len(res.Trailer) > 0 {
+		n += len("Trailer") + fieldOverhead
+		for k := range res.Trailer {
+			n += len(k) + len(", ")
+		}
+	}
+	return n
+}
 
 const robotsTag = "noindex, nofollow"
 

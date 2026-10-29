@@ -215,8 +215,7 @@ func (h *handler) proxy(x *exchange, rt cpapi.Route, auth portauth.Result, targe
 		Transport:     h.cfg.Transports.For(rt.AppProtocol),
 		FlushInterval: -1,
 		ModifyResponse: func(res *http.Response) error {
-			h.modifyResponse(x, res, auth.SetCookie)
-			return nil
+			return h.modifyResponse(x, res, auth.SetCookie)
 		},
 		ErrorHandler: func(_ http.ResponseWriter, _ *http.Request, err error) {
 			h.proxyError(x, err)
@@ -257,9 +256,18 @@ func (h *handler) rewrite(x *exchange, pr *httputil.ProxyRequest, rt cpapi.Route
 	pr.Out = out.WithContext(httptrace.WithClientTrace(out.Context(), trace))
 }
 
+// errHeaderBlockTooLarge refuses an application response whose header block
+// is over maxHeaderBytes as HTTP/2 would carry it.
+var errHeaderBlockTooLarge = errors.New("httpproxy: application response header block over the limit")
+
 // modifyResponse applies the response policy (spec 7.4) and registers long
-// streams.
-func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *http.Cookie) {
+// streams. An error makes the answer 502 upstream_error.
+func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *http.Cookie) error {
+	if n := responseBlockSize(res); n > maxHeaderBytes {
+		h.log.Warn("httpproxy: response header block over the limit",
+			"label", x.label.Raw, "request_id", x.rid, "bytes", n, "limit", maxHeaderBytes)
+		return errHeaderBlockTooLarge
+	}
 	cleanResponseHeader(res.Header)
 	res.Header.Set("X-Robots-Tag", robotsTag)
 	res.Header.Set("X-Request-Id", x.rid)
@@ -276,7 +284,7 @@ func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *htt
 	}
 	if res.StatusCode == http.StatusSwitchingProtocols {
 		// The body is the upgraded conn; Hijack tracks the stream.
-		return
+		return nil
 	}
 	if res.Body != nil && res.Body != http.NoBody {
 		res.Body = &trailerGuard{ReadCloser: res.Body, res: res, dropped: func() {
@@ -287,6 +295,7 @@ func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *htt
 	if longResponse(res) {
 		x.track(closerFunc(x.cancel))
 	}
+	return nil
 }
 
 // proxyError answers a failed round trip. When the client is gone nothing
