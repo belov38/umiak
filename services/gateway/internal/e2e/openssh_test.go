@@ -350,6 +350,11 @@ func newOpenSSHEnv(t *testing.T) *opensshEnv {
 	})
 	sshd, why := startSSHD(t, sshdPath, c.env.Keys.UserCA.PublicKey())
 	if sshd == nil {
+		// As in preflight: on CI sshd is installed for this test, so a
+		// failing start is an error, not a skip.
+		if os.Getenv("CI") != "" {
+			t.Fatal("OpenSSH e2e: " + why)
+		}
 		t.Skip("OpenSSH e2e skipped: " + why)
 	}
 	e := &opensshEnv{c: c, sshPath: sshPath, sshd: sshd, dir: shortTempDir(t), slug: opensshSlug, loginUser: u.Username}
