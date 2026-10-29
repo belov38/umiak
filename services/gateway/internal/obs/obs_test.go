@@ -188,24 +188,25 @@ func TestAccessLogSSH(t *testing.T) {
 	var buf bytes.Buffer
 	l := NewAccessLog(&buf)
 	l.SSH(SSHEntry{
-		SessionID:   "s1",
-		ClientIP:    "198.51.100.1",
-		ActorKind:   "user",
-		UserID:      "usr_1",
-		Fingerprint: "SHA256:abc",
-		SandboxID:   "sbx_1",
-		Start:       time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC),
-		End:         time.Date(2026, 10, 29, 1, 5, 0, 0, time.UTC),
-		BytesIn:     1,
-		BytesOut:    2,
-		Channels:    []string{"session", "direct-tcpip"},
-		CloseReason: "client_closed",
+		SessionID:      "s1",
+		ClientIP:       "198.51.100.1",
+		ActorKind:      "user",
+		UserID:         "usr_1",
+		Fingerprint:    "SHA256:abc",
+		SandboxID:      "sbx_1",
+		Start:          time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC),
+		End:            time.Date(2026, 10, 29, 1, 5, 0, 0, time.UTC),
+		BytesIn:        1,
+		BytesOut:       2,
+		Channels:       map[string]int{"session": 2, "direct-tcpip": 1},
+		BackendHostKey: "SHA256:vm",
+		CloseReason:    "client_closed",
 	})
 	var got map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"sessionId", "clientIp", "actorKind", "userId", "fingerprint", "sandboxId", "start", "end", "bytesIn", "bytesOut", "channels", "closeReason"} {
+	for _, k := range []string{"sessionId", "clientIp", "actorKind", "userId", "fingerprint", "sandboxId", "start", "end", "bytesIn", "bytesOut", "backendHostKey", "channels", "closeReason"} {
 		if _, ok := got[k]; !ok {
 			t.Errorf("key %s missing in %v", k, got)
 		}
@@ -215,7 +216,7 @@ func TestAccessLogSSH(t *testing.T) {
 			t.Errorf("key %s should be omitted when unset", k)
 		}
 	}
-	if ch, _ := got["channels"].([]any); len(ch) != 2 {
+	if ch, _ := got["channels"].(map[string]any); len(ch) != 2 || ch["session"] != float64(2) {
 		t.Errorf("channels = %v", got["channels"])
 	}
 
@@ -228,8 +229,8 @@ func TestAccessLogSSH(t *testing.T) {
 	if got["apiKeyId"] != "key_1" || got["certSerial"] != float64(7) {
 		t.Errorf("got %v", got)
 	}
-	if ch, ok := got["channels"].([]any); !ok || len(ch) != 0 {
-		t.Errorf("nil channels should encode as [], got %v", got["channels"])
+	if ch, ok := got["channels"].(map[string]any); !ok || len(ch) != 0 {
+		t.Errorf("nil channels should encode as {}, got %v", got["channels"])
 	}
 }
 

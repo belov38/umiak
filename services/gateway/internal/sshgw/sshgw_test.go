@@ -307,6 +307,9 @@ func TestSSHStopped(t *testing.T) {
 		{"ready without machine", func(a *cpapi.SSHAuthorization) { a.MachineID = "" }, unavailable},
 		{"agent unavailable", func(a *cpapi.SSHAuthorization) { a.MachineID = "00000000-0000-0000-0000-000000000000" }, unavailable},
 		{"no sshd", func(a *cpapi.SSHAuthorization) { a.MachineID = noSSHD.ID }, unreachable},
+		// Malformed ids from api never reach a backend certificate.
+		{"bad login user", func(a *cpapi.SSHAuthorization) { a.LoginUser = "sbx,root" }, unavailable},
+		{"bad user id", func(a *cpapi.SSHAuthorization) { a.Actor.UserID = "usr_1:x" }, unavailable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

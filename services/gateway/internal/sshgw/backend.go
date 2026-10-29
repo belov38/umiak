@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"sync/atomic"
 	"time"
 
@@ -45,6 +46,13 @@ const (
 	stateCreating = "creating"
 	stateStarting = "starting"
 	stateResuming = "resuming" // spec 6.3 name of starting
+)
+
+var (
+	// idPattern is the form of userId and apiKeyId (public format).
+	idPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	// loginUserPattern is the OS user of the VM: POSIX and Windows names.
+	loginUserPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$`)
 )
 
 // backend is the gateway's SSH connection to the VM's sshd.
@@ -102,6 +110,15 @@ func (ss *session) connectBackend(ctx context.Context) (*backend, string) {
 		ss.log.Error("sshgw: ssh/authorize gave no login user")
 		return nil, unavailableMessage(user)
 	}
+	// The ids go into the backend certificate: refuse anything malformed.
+	actorID := a.Actor.UserID
+	if a.Actor.Kind == actorTeamKey {
+		actorID = a.Actor.APIKeyID
+	}
+	if !idPattern.MatchString(actorID) || !loginUserPattern.MatchString(a.LoginUser) {
+		ss.log.Error("sshgw: ssh/authorize gave malformed ids", "actor_id", actorID, "login_user", a.LoginUser)
+		return nil, unavailableMessage(user)
+	}
 	cfg := ss.srv.cfg
 	up, err := cfg.Dialer.Dial(ctx, a.MachineID, sshPort, cfg.DrainDeadline)
 	if err != nil {
@@ -156,7 +173,7 @@ func (ss *session) handshakeBackend(ctx context.Context, c net.Conn, loginUser s
 		_ = conn.Close()
 		return nil, errors.New("backend handshake aborted")
 	}
-	ss.log.Debug("sshgw: backend connected", "host_key", b.HostKey())
+	ss.log.Info("sshgw: backend connected", "host_key", b.HostKey())
 	b.conn, b.chans, b.reqs = conn, chans, reqs
 	return b, nil
 }

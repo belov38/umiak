@@ -26,6 +26,9 @@
 // for accepted conns; "cancel-tcpip-forward" stops that listener. Right
 // after the handshake the double sends "hostkeys-00@openssh.com"
 // (want-reply false), like OpenSSH.
+//
+// Certificates without principals are refused, like sshd. Stall makes the
+// double drop all further input, like a hung VM.
 package sshdtest
 
 import (
@@ -43,6 +46,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,6 +66,9 @@ type Server struct {
 	loginUser string
 	config    *ssh.ServerConfig
 	hostKey   ssh.Signer
+
+	// stalled makes every served conn stop reading, like a hung VM.
+	stalled atomic.Bool
 
 	mu       sync.Mutex
 	certs    []*ssh.Certificate
@@ -100,6 +107,11 @@ func (s *Server) authenticate(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Pe
 	cert, ok := key.(*ssh.Certificate)
 	if !ok {
 		return nil, errors.New("sshdtest: only certificates are accepted")
+	}
+	// CertChecker accepts any principal when the list is empty; sshd
+	// does not.
+	if len(cert.ValidPrincipals) == 0 {
+		return nil, errors.New("sshdtest: certificate without principals")
 	}
 	if meta.User() != s.loginUser {
 		return nil, fmt.Errorf("sshdtest: user %q is not %q", meta.User(), s.loginUser)
@@ -163,9 +175,30 @@ func (s *Server) record(dst *[]string, v string) {
 	*dst = append(*dst, v)
 }
 
+// Stall makes every served conn (open or later) stop processing input:
+// data that arrives after the call is read and dropped, so requests stay
+// unanswered. A conn ends when the peer closes it.
+func (s *Server) Stall() { s.stalled.Store(true) }
+
+// stallConn drops its input once the server is stalled.
+type stallConn struct {
+	net.Conn
+	srv *Server
+}
+
+func (c *stallConn) Read(p []byte) (int, error) {
+	for {
+		n, err := c.Conn.Read(p)
+		if err != nil || !c.srv.stalled.Load() {
+			return n, err
+		}
+	}
+}
+
 // ServeConn serves one SSH conn and returns when it ended. Everything it
 // started is stopped before it returns.
-func (s *Server) ServeConn(c net.Conn) {
+func (s *Server) ServeConn(raw net.Conn) {
+	c := &stallConn{Conn: raw, srv: s}
 	sconn, chans, reqs, err := ssh.NewServerConn(c, s.config)
 	if err != nil {
 		return

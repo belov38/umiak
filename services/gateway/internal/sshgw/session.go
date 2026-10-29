@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
+	"maps"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -27,16 +28,20 @@ const (
 	stoppedExitStatus = 255
 )
 
-// Session results of sbx_gateway_ssh_sessions_total.
+// Results of sbx_gateway_ssh_sessions_total, counted per session channel:
+// ok (opened on the VM), limited (over the per-user limit), rejected
+// (refused by the VM, or answered with the stopped message).
 const (
-	resultOK          = "ok"
-	resultUnavailable = "unavailable"
+	resultOK       = "ok"
+	resultLimited  = "limited"
+	resultRejected = "rejected"
 )
 
-// Close reasons in the SSH log.
+// Close reasons in the SSH log. Task 13 adds revoked and drain.
 const (
 	reasonClient      = "client_closed"
 	reasonBackend     = "backend_closed"
+	reasonKeepalive   = "keepalive_timeout"
 	reasonShutdown    = "shutdown"
 	reasonUnavailable = "sandbox_unavailable"
 )
@@ -54,10 +59,20 @@ type session struct {
 	bytesIn  atomic.Int64 // channel data from the client
 	bytesOut atomic.Int64 // channel data to the client
 
-	mu       sync.Mutex
-	backend  *backend
-	channels []string
-	reason   string
+	// mu guards the fields below. It is a leaf lock: nothing else is
+	// locked or blocked on while it is held.
+	mu      sync.Mutex
+	backend *backend
+	// channels counts the opened channels by type, for the log.
+	channels map[string]int
+	// open is the set of proxied channels that are open.
+	open   map[*channel]struct{}
+	reason string
+	// ended is set when run is about to wait for wg; no notice may start
+	// after that.
+	ended bool
+	// wg tracks notice writes (notify).
+	wg sync.WaitGroup
 }
 
 func newSession(s *Server, conn *ssh.ServerConn, id identity, ip netip.Addr) *session {
@@ -67,12 +82,14 @@ func newSession(s *Server, conn *ssh.ServerConn, id identity, ip netip.Addr) *se
 		actor = id.Auth.Actor.APIKeyID
 	}
 	return &session{
-		srv:   s,
-		sid:   sid,
-		ip:    ip,
-		conn:  conn,
-		id:    id,
-		start: time.Now(),
+		srv:      s,
+		sid:      sid,
+		ip:       ip,
+		conn:     conn,
+		id:       id,
+		start:    time.Now(),
+		channels: map[string]int{},
+		open:     map[*channel]struct{}{},
 		log: s.log.With("session_id", sid, "client_ip", ip.String(), "sandbox", conn.User(),
 			"sandbox_id", id.Auth.SandboxID, "actor", actor),
 	}
@@ -96,12 +113,90 @@ func (ss *session) setReason(r string) {
 	}
 }
 
-func (ss *session) addChannel(typ string) {
+// countChannel records an opened channel for the log and the metric.
+func (ss *session) countChannel(typ string) {
 	ss.mu.Lock()
-	ss.channels = append(ss.channels, typ)
+	ss.channels[typ]++
 	ss.mu.Unlock()
 	if m := ss.srv.cfg.Metrics; m != nil {
-		m.SSHChannels.WithLabelValues(typ).Inc()
+		m.SSHChannels.WithLabelValues(channelLabel(typ)).Inc()
+	}
+}
+
+// openChannel counts ch and adds it to the open set.
+func (ss *session) openChannel(ch *channel) {
+	ss.countChannel(ch.typ)
+	ss.mu.Lock()
+	ss.open[ch] = struct{}{}
+	ss.mu.Unlock()
+}
+
+func (ss *session) closeChannel(ch *channel) {
+	ss.mu.Lock()
+	delete(ss.open, ch)
+	ss.mu.Unlock()
+}
+
+// sessionChannels returns the open client session channels, only the
+// interactive ones (a pty-req was accepted) when interactiveOnly is set.
+func (ss *session) sessionChannels(interactiveOnly bool) []*channel {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	var out []*channel
+	for ch := range ss.open {
+		if ch.session && (!interactiveOnly || ch.interactive.Load()) {
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// notify writes msg followed by "\r\n" to the stderr of the open session
+// channels (only the interactive ones when interactiveOnly is set), for
+// drain warnings and revocation notices. The writes are serialized with
+// the stderr data the backend sends. They run in the background, because
+// a client that does not read blocks them; the returned channel is closed
+// when all of them finished. A write to a channel or conn that closes ends
+// with an error, so a write never outlives its session.
+func (ss *session) notify(msg string, interactiveOnly bool) <-chan struct{} {
+	done := make(chan struct{})
+	chans := ss.sessionChannels(interactiveOnly)
+	ss.mu.Lock()
+	if ss.ended || len(chans) == 0 {
+		ss.mu.Unlock()
+		close(done)
+		return done
+	}
+	var writes sync.WaitGroup
+	writes.Add(len(chans))
+	ss.wg.Add(len(chans) + 1)
+	ss.mu.Unlock()
+	line := []byte(msg + "\r\n")
+	for _, ch := range chans {
+		go func() {
+			defer ss.wg.Done()
+			defer writes.Done()
+			_, _ = lockedStderr{ch}.Write(line)
+		}()
+	}
+	go func() {
+		defer ss.wg.Done()
+		writes.Wait()
+		close(done)
+	}()
+	return done
+}
+
+// closeWithReason records reason (unless an earlier one is set) and closes
+// the client and backend conns, which ends the session.
+func (ss *session) closeWithReason(reason string) {
+	ss.setReason(reason)
+	ss.mu.Lock()
+	b := ss.backend
+	ss.mu.Unlock()
+	_ = ss.conn.Close()
+	if b != nil {
+		_ = b.conn.Close()
 	}
 }
 
@@ -111,6 +206,7 @@ func (ss *session) run(ctx context.Context, chans <-chan ssh.NewChannel, reqs <-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer ss.writeLog()
+	defer ss.waitNotices()
 	go func() {
 		_ = ss.conn.Wait()
 		ss.setReason(reasonClient)
@@ -123,20 +219,20 @@ func (ss *session) run(ctx context.Context, chans <-chan ssh.NewChannel, reqs <-
 	defer stop()
 	defer func() { _ = ss.conn.Close() }()
 
-	// Global requests of the client; Task 12 forwards some of them.
-	go ssh.DiscardRequests(reqs)
-
+	// Client global requests wait in their channel while the backend
+	// connects; they need it.
 	b, msg := ss.connectBackend(ctx)
 	if b == nil {
+		// Without a backend every global request is refused. The
+		// goroutine ends when the conn closes (deferred above).
+		go ssh.DiscardRequests(reqs)
 		if ctx.Err() != nil {
 			return
 		}
-		ss.sessionMetric(resultUnavailable)
 		ss.setReason(reasonUnavailable)
 		ss.serveStopped(ctx, chans, msg)
 		return
 	}
-	ss.sessionMetric(resultOK)
 	ss.mu.Lock()
 	ss.backend = b
 	ss.mu.Unlock()
@@ -148,10 +244,19 @@ func (ss *session) run(ctx context.Context, chans <-chan ssh.NewChannel, reqs <-
 	stopB := context.AfterFunc(ctx, func() { _ = b.conn.Close() })
 	defer stopB()
 	defer func() { _ = b.conn.Close() }()
-	ss.forward(ctx, b, chans)
+	ss.forward(ctx, b, chans, reqs)
 	// forward returns once the client conn ended; an earlier reason
 	// (backend, shutdown) wins.
 	ss.setReason(reasonClient)
+}
+
+// waitNotices waits for the notice writes. The conns are closed by then
+// (run's defers run in reverse), so the writes end.
+func (ss *session) waitNotices() {
+	ss.mu.Lock()
+	ss.ended = true
+	ss.mu.Unlock()
+	ss.wg.Wait()
 }
 
 func (ss *session) sessionMetric(result string) {
@@ -167,8 +272,9 @@ func (ss *session) writeLog() {
 		return
 	}
 	ss.mu.Lock()
-	channels := append([]string(nil), ss.channels...)
+	channels := maps.Clone(ss.channels)
 	reason := ss.reason
+	b := ss.backend
 	ss.mu.Unlock()
 	e := obs.SSHEntry{
 		SessionID:   ss.sid,
@@ -180,6 +286,9 @@ func (ss *session) writeLog() {
 		BytesOut:    ss.bytesOut.Load(),
 		Channels:    channels,
 		CloseReason: reason,
+	}
+	if b != nil {
+		e.BackendHostKey = b.HostKey()
 	}
 	if ss.id.Auth.Actor.Kind == actorTeamKey {
 		e.ActorKind, e.APIKeyID = "api_key", ss.id.Auth.Actor.APIKeyID
@@ -210,7 +319,8 @@ func (ss *session) serveStopped(ctx context.Context, chans <-chan ssh.NewChannel
 		if err != nil {
 			return
 		}
-		ss.addChannel(nc.ChannelType())
+		ss.countChannel(nc.ChannelType())
+		ss.sessionMetric(resultRejected)
 		stoppedChannel(ctx, ch, reqs, msg)
 		return
 	}

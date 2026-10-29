@@ -222,6 +222,18 @@ func (s *Server) Close() error {
 // Sessions returns the number of open authenticated connections.
 func (s *Server) Sessions() int { return int(s.active.Load()) }
 
+// snapshot returns the open sessions (authenticated connections), for
+// revocation and drain.
+func (s *Server) snapshot() []*session {
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	out := make([]*session, 0, len(s.sessions))
+	for ss := range s.sessions {
+		out = append(out, ss)
+	}
+	return out
+}
+
 func (s *Server) addSession(ss *session) {
 	s.sessMu.Lock()
 	s.sessions[ss] = struct{}{}
@@ -252,8 +264,12 @@ func (s *Server) handle(raw net.Conn) {
 	defer stop()
 	defer func() { _ = raw.Close() }()
 
-	// The deadline also bounds the PROXY header read behind RemoteAddr.
-	_ = raw.SetDeadline(time.Now().Add(s.cfg.AuthTimeout))
+	// One deadline bounds the whole authentication: the PROXY header read
+	// behind RemoteAddr, the handshake and every api call it makes.
+	authDeadline := time.Now().Add(s.cfg.AuthTimeout)
+	_ = raw.SetDeadline(authDeadline)
+	authCtx, authCancel := context.WithDeadline(ctx, authDeadline)
+	defer authCancel()
 	ip := connIP(raw)
 	if lim := s.cfg.Limits; lim != nil {
 		if lim.SSHAuthBlocked(ip) || !lim.AllowSSHConn(ip) {
@@ -262,24 +278,34 @@ func (s *Server) handle(raw net.Conn) {
 		}
 	}
 
-	var attempted atomic.Bool
+	// failed: a method other than "none" was refused for a reason other
+	// than api being unavailable. unavailable: api could not answer.
+	var failed, unavailable atomic.Bool
 	conf := s.base
 	conf.PublicKeyCallback = func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-		attempted.Store(true)
-		return s.authenticate(ctx, meta, key)
+		return s.authenticate(authCtx, meta, key)
 	}
-	conf.AuthLogCallback = func(_ ssh.ConnMetadata, method string, _ error) {
-		if method != "none" {
-			attempted.Store(true)
+	conf.AuthLogCallback = func(_ ssh.ConnMetadata, method string, err error) {
+		switch {
+		case method == "none" || err == nil:
+		case errors.Is(err, errUnavailable):
+			unavailable.Store(true)
+		default:
+			failed.Store(true)
 		}
 	}
 	sconn, chans, reqs, err := ssh.NewServerConn(raw, &conf)
 	if err != nil {
-		if attempted.Load() {
+		switch {
+		case failed.Load():
+			// An api outage is not the client's failure: it does not
+			// count towards the per-IP limit.
 			if lim := s.cfg.Limits; lim != nil {
 				lim.SSHAuthFailure(ip)
 			}
 			s.authMetric("fail")
+		case unavailable.Load():
+			s.authMetric("unavailable")
 		}
 		s.log.Debug("sshgw: handshake failed", "client_ip", ip, "err", err)
 		return

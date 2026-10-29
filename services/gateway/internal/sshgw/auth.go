@@ -83,7 +83,8 @@ func identityFrom(p *ssh.Permissions) (identity, error) {
 
 // authenticate is the PublicKeyCallback. It is called for key queries too;
 // the identity it returns is only used once x/crypto verified the
-// signature of that same key.
+// signature of that same key. ctx carries the connection's single auth
+// deadline.
 func (s *Server) authenticate(ctx context.Context, meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 	user := meta.User()
 	// <sandbox>+<osuser> is reserved (spec 9.2).
@@ -111,14 +112,18 @@ func (s *Server) authenticate(ctx context.Context, meta ssh.ConnMetadata, key ss
 		id.Request.Fingerprint = id.Fingerprint
 	}
 
-	actx, cancel := context.WithTimeout(ctx, s.cfg.AuthTimeout)
-	defer cancel()
-	auth, err := s.cfg.API.AuthorizeSSH(actx, id.Request)
+	auth, err := s.cfg.API.AuthorizeSSH(ctx, id.Request)
 	if err != nil {
 		s.log.Warn("sshgw: ssh/authorize failed", "user", user, "err", err)
 		return nil, errUnavailable
 	}
 	if !auth.Allowed {
+		return nil, errRefused
+	}
+	// A login certificate names its sandbox: api must answer for it.
+	if id.Request.Certificate != nil && auth.SandboxID != id.Request.Certificate.Principal {
+		s.log.Warn("sshgw: ssh/authorize answered for another sandbox than the certificate",
+			"user", user, "principal", id.Request.Certificate.Principal, "sandbox_id", auth.SandboxID)
 		return nil, errRefused
 	}
 	switch {

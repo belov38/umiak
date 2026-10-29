@@ -104,6 +104,11 @@ type Config struct {
 	HTTPDrainDeadline time.Duration
 	SSHDrainDeadline  time.Duration
 
+	// SSH keepalive (spec 9.4): a probe to both ends every interval; the
+	// connection is closed after max consecutive misses.
+	SSHKeepaliveInterval time.Duration
+	SSHKeepaliveMax      int
+
 	Timeouts Timeouts
 
 	// Tunnel.
@@ -195,6 +200,8 @@ func FromEnv(getenv func(string) string) (Config, error) {
 
 	c.HTTPDrainDeadline = l.duration("HTTP_DRAIN_DEADLINE", 2*time.Minute)
 	c.SSHDrainDeadline = l.duration("SSH_DRAIN_DEADLINE", 15*time.Minute)
+	c.SSHKeepaliveInterval = l.duration("SSH_KEEPALIVE_INTERVAL", 30*time.Second)
+	c.SSHKeepaliveMax = l.integer("SSH_KEEPALIVE_MAX", 3)
 
 	c.Timeouts = Timeouts{
 		TLSHandshake:   l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),

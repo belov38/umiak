@@ -258,19 +258,21 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	})
 	if cfg.SSHListen != "" {
 		i.ssh, err = sshgw.New(sshgw.Config{
-			HostSigners:   cfg.SSHHostKeys,
-			LoginCAKeys:   cfg.SSHLoginCAKeys,
-			UserCA:        cfg.SSHUserCA,
-			API:           deps.API,
-			Dialer:        i.upstream,
-			Limits:        i.limits,
-			Metrics:       i.metrics,
-			Log:           accessLog,
-			Logger:        i.log,
-			DrainDeadline: cfg.SSHDrainDeadline,
-			Now:           deps.Now,
-			Self:          cfg.InstanceID,
-			Instances:     i.store,
+			HostSigners:       cfg.SSHHostKeys,
+			LoginCAKeys:       cfg.SSHLoginCAKeys,
+			UserCA:            cfg.SSHUserCA,
+			API:               deps.API,
+			Dialer:            i.upstream,
+			Limits:            i.limits,
+			Metrics:           i.metrics,
+			Log:               accessLog,
+			Logger:            i.log,
+			DrainDeadline:     cfg.SSHDrainDeadline,
+			KeepaliveInterval: cfg.SSHKeepaliveInterval,
+			KeepaliveMax:      cfg.SSHKeepaliveMax,
+			Now:               deps.Now,
+			Self:              cfg.InstanceID,
+			Instances:         i.store,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)

@@ -122,48 +122,53 @@ type SSHEntry struct {
 	End         time.Time
 	BytesIn     int64
 	BytesOut    int64
-	Channels    []string // channel types opened during the session
+	// BackendHostKey is the fingerprint of the VM sshd host key.
+	BackendHostKey string
+	// Channels counts the channels opened during the session by type.
+	Channels    map[string]int
 	CloseReason string
 }
 
 type sshLine struct {
-	SessionID   string   `json:"sessionId"`
-	ClientIP    string   `json:"clientIp"`
-	ActorKind   string   `json:"actorKind"`
-	UserID      string   `json:"userId,omitempty"`
-	APIKeyID    string   `json:"apiKeyId,omitempty"`
-	Fingerprint string   `json:"fingerprint,omitempty"`
-	CertSerial  uint64   `json:"certSerial,omitempty"`
-	SandboxID   string   `json:"sandboxId"`
-	Start       string   `json:"start"`
-	End         string   `json:"end"`
-	BytesIn     int64    `json:"bytesIn"`
-	BytesOut    int64    `json:"bytesOut"`
-	Channels    []string `json:"channels"`
-	CloseReason string   `json:"closeReason"`
+	SessionID      string         `json:"sessionId"`
+	ClientIP       string         `json:"clientIp"`
+	ActorKind      string         `json:"actorKind"`
+	UserID         string         `json:"userId,omitempty"`
+	APIKeyID       string         `json:"apiKeyId,omitempty"`
+	Fingerprint    string         `json:"fingerprint,omitempty"`
+	CertSerial     uint64         `json:"certSerial,omitempty"`
+	SandboxID      string         `json:"sandboxId"`
+	Start          string         `json:"start"`
+	End            string         `json:"end"`
+	BytesIn        int64          `json:"bytesIn"`
+	BytesOut       int64          `json:"bytesOut"`
+	BackendHostKey string         `json:"backendHostKey,omitempty"`
+	Channels       map[string]int `json:"channels"`
+	CloseReason    string         `json:"closeReason"`
 }
 
 // SSH writes one SSH session line.
 func (l *AccessLog) SSH(e SSHEntry) {
 	ch := e.Channels
 	if ch == nil {
-		ch = []string{}
+		ch = map[string]int{}
 	}
 	l.write(sshLine{
-		SessionID:   e.SessionID,
-		ClientIP:    e.ClientIP,
-		ActorKind:   e.ActorKind,
-		UserID:      e.UserID,
-		APIKeyID:    e.APIKeyID,
-		Fingerprint: e.Fingerprint,
-		CertSerial:  e.CertSerial,
-		SandboxID:   e.SandboxID,
-		Start:       e.Start.UTC().Format(time.RFC3339Nano),
-		End:         e.End.UTC().Format(time.RFC3339Nano),
-		BytesIn:     e.BytesIn,
-		BytesOut:    e.BytesOut,
-		Channels:    ch,
-		CloseReason: e.CloseReason,
+		SessionID:      e.SessionID,
+		ClientIP:       e.ClientIP,
+		ActorKind:      e.ActorKind,
+		UserID:         e.UserID,
+		APIKeyID:       e.APIKeyID,
+		Fingerprint:    e.Fingerprint,
+		CertSerial:     e.CertSerial,
+		SandboxID:      e.SandboxID,
+		Start:          e.Start.UTC().Format(time.RFC3339Nano),
+		End:            e.End.UTC().Format(time.RFC3339Nano),
+		BytesIn:        e.BytesIn,
+		BytesOut:       e.BytesOut,
+		BackendHostKey: e.BackendHostKey,
+		Channels:       ch,
+		CloseReason:    e.CloseReason,
 	})
 }
 
