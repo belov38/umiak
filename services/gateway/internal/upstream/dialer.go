@@ -44,11 +44,17 @@ const (
 	ReasonCanceled = "canceled"
 )
 
+// Defaults of Config.
+const (
+	defaultDialTimeout = 10 * time.Second
+	defaultStaleAfter  = 15 * time.Second
+)
+
 // selfOwnerPoll is the poll interval while the registry names this instance
 // as the owner but the session is not registered locally yet.
 const selfOwnerPoll = 20 * time.Millisecond
 
-// errDialTimeout is the cancel cause of a dial attempt that hit DialTimeout.
+// errDialTimeout is the cancel cause of a dial that used up DialTimeout.
 var errDialTimeout = errors.New("upstream: dial timeout")
 
 // errAgentUnavailable is the cause of a dial that found no connected agent.
@@ -97,9 +103,10 @@ type Config struct {
 	PeerToken string
 	// AgentWait is how long a dial waits for a machine to connect.
 	AgentWait time.Duration
-	// DialTimeout bounds each dial attempt, the agent wait excluded.
+	// DialTimeout bounds the whole dial (owner lookups, CONNECTs, the move
+	// retry), the agent wait excluded (10 s).
 	DialTimeout time.Duration
-	// StaleAfter is the heartbeat age after which an instance is dead.
+	// StaleAfter is the heartbeat age after which an instance is dead (15 s).
 	StaleAfter time.Duration
 	Metrics    *obs.Metrics
 	Logger     *slog.Logger
@@ -116,6 +123,12 @@ type Dialer struct {
 func New(cfg Config) *Dialer {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.DialTimeout <= 0 {
+		cfg.DialTimeout = defaultDialTimeout
+	}
+	if cfg.StaleAfter <= 0 {
+		cfg.StaleAfter = defaultStaleAfter
 	}
 	peer := gateway.NewPeerTransport()
 	// The proxy is byte-transparent.
@@ -157,19 +170,19 @@ func (d *Dialer) Dial(ctx context.Context, machineID string, port uint16, drain 
 
 // dial runs the owner resolution of spec 6.4: the local tunnel, else the
 // registry owner over a peer CONNECT, else a wait for the agent.
+//
+// DialTimeout is one budget for the dial: lookups, the CONNECT, the URL
+// check and the move retry share it. Waiting for the agent is not part of
+// it: the budget starts again once the wait found an owner.
 func (d *Dialer) dial(ctx context.Context, id string, port uint16, drain time.Duration) (*Conn, error) {
 	opts := gateway.TCPOptions{DrainDeadline: drain}
 	var waitUntil time.Time
 	for {
-		if mc, ok := d.cfg.Local.Machine(id); ok {
-			return d.dialLocal(ctx, id, mc, port, opts)
-		}
-		o, ok, err := d.lookup(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if ok && o.InstanceID != d.cfg.Self {
-			return d.dialPeer(ctx, id, o, port, opts)
+		bctx, cancel := context.WithTimeoutCause(ctx, d.cfg.DialTimeout, errDialTimeout)
+		c, self, err := d.resolve(bctx, id, port, opts)
+		cancel()
+		if c != nil || err != nil {
+			return c, err
 		}
 
 		// Not connected, or connected here but not registered locally yet
@@ -177,36 +190,70 @@ func (d *Dialer) dial(ctx context.Context, id string, port uint16, drain time.Du
 		if waitUntil.IsZero() {
 			waitUntil = time.Now().Add(d.cfg.AgentWait)
 		}
-		left := time.Until(waitUntil)
-		if left <= 0 {
-			return nil, errAgentUnavailable
-		}
-		if ok {
-			t := time.NewTimer(min(selfOwnerPoll, left))
-			select {
-			case <-ctx.Done():
-				t.Stop()
-				return nil, ctx.Err()
-			case <-t.C:
-			}
-			continue
-		}
-		if _, ok, err := d.cfg.Owners.Wait(ctx, id, left); err != nil {
+		if err := d.waitAgent(ctx, id, self, waitUntil); err != nil {
 			return nil, err
-		} else if !ok {
-			return nil, errAgentUnavailable
 		}
 	}
 }
 
-// lookup asks the owner cache, bounded by DialTimeout.
-func (d *Dialer) lookup(ctx context.Context, id string) (registry.Owner, bool, error) {
-	lctx, cancel := context.WithTimeoutCause(ctx, d.cfg.DialTimeout, errDialTimeout)
+// resolve dials the local session or the registry owner within the budget
+// of ctx. It returns no conn and no error when the agent must be waited
+// for; self then says that the registry names this instance.
+func (d *Dialer) resolve(ctx context.Context, id string, port uint16, opts gateway.TCPOptions) (c *Conn, self bool, err error) {
+	if mc, ok := d.cfg.Local.Machine(id); ok {
+		c, err = d.dialLocal(ctx, id, mc, port, opts)
+		return c, false, err
+	}
+	o, ok, err := d.lookup(ctx, id)
+	switch {
+	case err != nil:
+		return nil, false, err
+	case ok && o.InstanceID != d.cfg.Self:
+		c, err = d.dialPeer(ctx, id, o, port, opts)
+		return c, false, err
+	}
+	return nil, ok, nil
+}
+
+// waitAgent waits until waitUntil for the machine to get an owner, or, when
+// the owner is already this instance, for a short poll interval. It returns
+// errAgentUnavailable when the time is up without an owner.
+func (d *Dialer) waitAgent(ctx context.Context, id string, self bool, waitUntil time.Time) error {
+	left := time.Until(waitUntil)
+	if left <= 0 {
+		return errAgentUnavailable
+	}
+	if self {
+		t := time.NewTimer(min(selfOwnerPoll, left))
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			return nil
+		}
+	}
+	// The deadline also bounds the registry queries inside Wait.
+	wctx, cancel := context.WithDeadline(ctx, waitUntil)
 	defer cancel()
-	o, ok, err := d.cfg.Owners.Lookup(lctx, id)
+	_, ok, err := d.cfg.Owners.Wait(wctx, id, left)
+	switch {
+	case ctx.Err() != nil:
+		return ctx.Err()
+	case err != nil && wctx.Err() == nil:
+		return &registryError{err: err}
+	case !ok:
+		return errAgentUnavailable
+	}
+	return nil
+}
+
+// lookup asks the owner cache within the dial budget of ctx.
+func (d *Dialer) lookup(ctx context.Context, id string) (registry.Owner, bool, error) {
+	o, ok, err := d.cfg.Owners.Lookup(ctx, id)
 	if err != nil {
 		if ctx.Err() != nil {
-			return o, false, ctx.Err()
+			return o, false, context.Cause(ctx)
 		}
 		return o, false, &registryError{err: err}
 	}
@@ -245,13 +292,12 @@ func (d *Dialer) dialLocal(ctx context.Context, id string, mc transport.MachineC
 	return d.retryFresh(ctx, id, port, opts, err)
 }
 
+// dialLocalOnce dials over the local session within the budget of ctx.
 func (d *Dialer) dialLocalOnce(ctx context.Context, mc transport.MachineConn, port uint16, opts gateway.TCPOptions) (net.Conn, error) {
-	dctx, cancel := context.WithTimeoutCause(ctx, d.cfg.DialTimeout, errDialTimeout)
-	defer cancel()
 	if td, ok := mc.(tcpDialer); ok {
-		return td.DialTCPWith(dctx, port, opts)
+		return td.DialTCPWith(ctx, port, opts)
 	}
-	return mc.DialTCP(dctx, port)
+	return mc.DialTCP(ctx, port)
 }
 
 func (d *Dialer) dialPeer(ctx context.Context, id string, o registry.Owner, port uint16, opts gateway.TCPOptions) (*Conn, error) {
@@ -264,10 +310,10 @@ func (d *Dialer) dialPeer(ctx context.Context, id string, o registry.Owner, port
 	// The answer's URL is only a hint: the token goes there only if the
 	// registry knows a live instance at that URL.
 	if me.InstanceURL != "" {
-		vctx, cancel := context.WithTimeout(ctx, d.cfg.DialTimeout)
-		inst, ok, verr := d.cfg.Store.InstanceByURL(vctx, me.InstanceURL, d.cfg.StaleAfter)
-		cancel()
+		inst, ok, verr := d.cfg.Store.InstanceByURL(ctx, me.InstanceURL, d.cfg.StaleAfter)
 		switch {
+		case verr != nil && ctx.Err() != nil:
+			return nil, context.Cause(ctx)
 		case verr != nil:
 			d.log.Warn("upstream: instance url check failed", "machine_id", id, "err", verr)
 		case ok && inst.ID == d.cfg.Self:
@@ -318,11 +364,10 @@ func (d *Dialer) retryPeer(ctx context.Context, id string, o registry.Owner, por
 	return c, err
 }
 
-// dialPeerOnce sends one peer CONNECT to the owner o.
+// dialPeerOnce sends one peer CONNECT to the owner o within the budget of
+// ctx.
 func (d *Dialer) dialPeerOnce(ctx context.Context, id string, o registry.Owner, port uint16, opts gateway.TCPOptions) (*Conn, error) {
-	dctx, cancel := context.WithTimeoutCause(ctx, d.cfg.DialTimeout, errDialTimeout)
-	defer cancel()
-	nc, err := gateway.DialRemoteTCP(dctx, d.peer, o.InternalURL, d.cfg.PeerToken, id, port, opts)
+	nc, err := gateway.DialRemoteTCP(ctx, d.peer, o.InternalURL, d.cfg.PeerToken, id, port, opts)
 	if err == nil {
 		return &Conn{Conn: nc, Via: ViaPeer, OwnerInstance: o.InstanceID}, nil
 	}
@@ -339,8 +384,8 @@ func (d *Dialer) dialPeerOnce(ctx context.Context, id string, o registry.Owner, 
 			d.cfg.Owners.Invalidate(id)
 		}
 		return nil, err
-	case dctx.Err() != nil:
-		return nil, context.Cause(dctx)
+	case ctx.Err() != nil:
+		return nil, context.Cause(ctx)
 	}
 	// The owner instance is unreachable or broke the stream: next time ask
 	// the registry again.

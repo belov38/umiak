@@ -249,6 +249,40 @@ func TestDialMovedValidated(t *testing.T) {
 	}
 }
 
+// fakePeer starts a cleartext HTTP/2 server standing in for an owner's
+// internal listener.
+func fakePeer(t *testing.T, h http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewUnstartedServer(h)
+	var p http.Protocols
+	p.SetUnencryptedHTTP2(true)
+	srv.Config.Protocols = &p
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// staleOwner makes the owner cache of from hold owner's instance at url:
+// owner's registry row points at url while the cache is filled, then gets
+// its real URL back.
+func staleOwner(t *testing.T, env *testenv.Env, owner, from *testenv.Inst, machineID, url string) {
+	t.Helper()
+	setURL := func(u string) {
+		t.Helper()
+		if _, err := env.Pool.Exec(context.Background(),
+			`UPDATE tunnel.gateway_instances SET internal_url = $2 WHERE id = $1`, owner.Name, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	from.Owners().Invalidate(machineID)
+	setURL(url)
+	o, ok, err := from.Owners().Lookup(context.Background(), machineID)
+	if err != nil || !ok || o.InternalURL != url {
+		t.Fatalf("Lookup = %+v, %v, %v; want %s", o, ok, err, url)
+	}
+	setURL(owner.InternalURL)
+}
+
 // A 421 pointing at a live instance is followed once, there.
 func TestDialMovedToLiveInstance(t *testing.T) {
 	env := testenv.New(t, testenv.Options{})
@@ -257,36 +291,49 @@ func TestDialMovedToLiveInstance(t *testing.T) {
 	m.ServeTCP(7000, testenv.Echo)
 	b := env.StartInstance(nil)
 
-	fake := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	fake := fakePeer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(wire.HeaderInstanceURL, a.InternalURL)
 		w.WriteHeader(http.StatusMisdirectedRequest)
-	}))
-	var p http.Protocols
-	p.SetUnencryptedHTTP2(true)
-	fake.Config.Protocols = &p
-	fake.Start()
-	t.Cleanup(fake.Close)
-
-	// B's cache is filled while A's row points at the fake.
-	setURL := func(u string) {
-		t.Helper()
-		if _, err := env.Pool.Exec(context.Background(),
-			`UPDATE tunnel.gateway_instances SET internal_url = $2 WHERE id = $1`, a.Name, u); err != nil {
-			t.Fatal(err)
-		}
-	}
-	b.Owners().Invalidate(m.ID)
-	setURL(fake.URL)
-	if _, _, err := b.Owners().Lookup(context.Background(), m.ID); err != nil {
-		t.Fatal(err)
-	}
-	setURL(a.InternalURL)
+	})
+	staleOwner(t, env, a, b, m.ID, fake.URL)
 
 	c := mustDial(t, b, m.ID, 7000)
 	if c.Via != upstream.ViaPeer || c.OwnerInstance != a.Name {
 		t.Fatalf("Via, OwnerInstance = %q, %q; want peer, %s", c.Via, c.OwnerInstance, a.Name)
 	}
 	echoRoundTrip(t, c, "followed")
+}
+
+// DialTimeout is one budget for the whole dial: a 421 that arrives late
+// leaves the retry only the rest of it.
+func TestDialSingleBudget(t *testing.T) {
+	const budget = 2 * time.Second
+	env := testenv.New(t, testenv.Options{})
+	a := env.StartInstance(nil)
+	m := env.NewMachine()
+	m.Blackhole(7001)
+	b := env.StartInstance(func(c *config.Config) { c.Timeouts.Dial = budget })
+
+	// The stale owner answers 421 after 60% of the budget, pointing at the
+	// live owner, where the dial hangs.
+	fake := fakePeer(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(budget * 6 / 10):
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set(wire.HeaderInstanceURL, a.InternalURL)
+		w.WriteHeader(http.StatusMisdirectedRequest)
+	})
+	staleOwner(t, env, a, b, m.ID, fake.URL)
+
+	start := time.Now()
+	_, err := dial(t, b, m.ID, 7001)
+	el := time.Since(start)
+	wantError(t, err, http.StatusGatewayTimeout, "app_timeout", "timeout")
+	if el < budget*9/10 || el > budget*13/10 {
+		t.Fatalf("dial failed after %s, want about %s (one budget)", el, budget)
+	}
 }
 
 func TestDialOverloaded(t *testing.T) {
