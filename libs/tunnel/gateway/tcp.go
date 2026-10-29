@@ -62,7 +62,8 @@ func (h *internalHandler) serveTCP(w http.ResponseWriter, r *http.Request) {
 			h.writeRequestError(w, fmtJSON, connect.CodeInvalidArgument, "malformed "+wire.HeaderTCPDrainDeadline)
 			return
 		}
-		opts.DrainDeadline = time.Duration(ms) * time.Millisecond
+		// DialTCPWith caps it at Timing.MaxTCPDrainDeadline.
+		opts.DrainDeadline = min(time.Duration(ms)*time.Millisecond, h.g.cfg.Timing.MaxTCPDrainDeadline)
 	}
 	s := h.target(w, r, id, fmtJSON)
 	if s == nil {

@@ -37,6 +37,9 @@ type Timing struct {
 	DrainSpread time.Duration
 	// TCPDeadline is the default per-stream drain deadline of TCP streams (2 min).
 	TCPDeadline time.Duration
+	// MaxTCPDrainDeadline caps a caller-chosen drain deadline of a TCP
+	// stream (Sbx-Tcp-Drain-Deadline-Ms, TCPOptions.DrainDeadline) (15 min).
+	MaxTCPDrainDeadline time.Duration
 	// DrainMargin is added to the overall wait of Drain (10 s): EndpointWait
 	// + DrainSpread + the longest TCP drain deadline + DrainMargin.
 	DrainMargin time.Duration
@@ -65,6 +68,7 @@ func (t Timing) withDefaults() Timing {
 	def(&t.EndpointWait, 5*time.Second)
 	def(&t.DrainSpread, 5*time.Second)
 	def(&t.TCPDeadline, 2*time.Minute)
+	def(&t.MaxTCPDrainDeadline, 15*time.Minute)
 	def(&t.DrainMargin, 10*time.Second)
 	def(&t.DrainRetryAfter, time.Second)
 	def(&t.TokenMaxAge, 24*time.Hour)
@@ -75,6 +79,7 @@ func (t Timing) withDefaults() Timing {
 		t.EventBatchMax = 500
 	}
 	t.EventRetryMax = max(t.EventRetryMax, t.EventRetryMin)
+	t.MaxTCPDrainDeadline = max(t.MaxTCPDrainDeadline, t.TCPDeadline)
 	return t
 }
 

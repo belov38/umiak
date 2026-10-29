@@ -718,3 +718,40 @@ func TestRotateToken(t *testing.T) {
 		t.Fatalf("Admit with the old token: err %v, want 401", err)
 	}
 }
+
+func TestTCPDrainDeadlineClamped(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", func(c *Config) { c.Timing.MaxTCPDrainDeadline = 5 * time.Minute })
+	id, bs := e.machine()
+	e.startStubAgent(id, bs, newStubAgent(), nil)
+	mc := waitMachine(t, gw.testGW, id).(*MachineConn)
+	ctx := context.Background()
+	rt := NewPeerTransport()
+	t.Cleanup(rt.CloseIdleConnections)
+	port := startEcho(t)
+	s, _ := gw.lookup(id)
+
+	// Sbx-Tcp-Drain-Deadline-Ms above the cap.
+	remote, err := DialRemoteTCP(ctx, rt, gw.url, apiToken1, id, port, TCPOptions{DrainDeadline: 1000 * time.Hour})
+	if err != nil {
+		t.Fatalf("DialRemoteTCP: %v", err)
+	}
+	watchdog(t, remote)
+	echo(t, remote, "hello")
+	if d := s.longestTCPDeadline(); d != 5*time.Minute {
+		t.Fatalf("drain deadline from the header = %s, want the 5m cap", d)
+	}
+	_ = remote.Close()
+	eventually(t, waitTimeout, "tcp stream released", func() bool { return tcpCount(gw.testGW, id) == 0 })
+
+	// TCPOptions.DrainDeadline above the cap.
+	local, err := mc.DialTCPWith(ctx, port, TCPOptions{DrainDeadline: 1000 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = local.Close() }()
+	echo(t, local, "hello")
+	if d := s.longestTCPDeadline(); d != 5*time.Minute {
+		t.Fatalf("drain deadline from TCPOptions = %s, want the 5m cap", d)
+	}
+}

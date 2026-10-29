@@ -31,6 +31,7 @@ const (
 type TCPOptions struct {
 	// DrainDeadline is how long the stream may keep running after the
 	// machine moved off a draining instance; 0 uses Timing.TCPDeadline.
+	// It is capped at Timing.MaxTCPDrainDeadline.
 	DrainDeadline time.Duration
 }
 
@@ -254,7 +255,7 @@ func (m *MachineConn) DialTCP(ctx context.Context, port uint16) (net.Conn, error
 // pending Read or Write.
 func (m *MachineConn) DialTCPWith(ctx context.Context, port uint16, opts TCPOptions) (net.Conn, error) {
 	s := m.s
-	deadline := opts.DrainDeadline
+	deadline := min(opts.DrainDeadline, s.g.cfg.Timing.MaxTCPDrainDeadline)
 	if deadline <= 0 {
 		deadline = s.g.cfg.Timing.TCPDeadline
 	}

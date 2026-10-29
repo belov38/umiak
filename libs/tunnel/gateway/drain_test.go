@@ -172,7 +172,7 @@ func TestDrainCancelClosesRemaining(t *testing.T) {
 	a := e.startAgent(agentConfig(e, id, bs, defaultIdentity()))
 	waitConnectedTo(a, "gw-a")
 	mc := waitMachine(t, gwA, id)
-	tcp, err := mc.(*MachineConn).DialTCPWith(context.Background(), startEcho(t), TCPOptions{DrainDeadline: time.Hour})
+	tcp, err := mc.(*MachineConn).DialTCPWith(context.Background(), startEcho(t), TCPOptions{DrainDeadline: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,8 +183,8 @@ func TestDrainCancelClosesRemaining(t *testing.T) {
 	first := make(chan error, 1)
 	go func() { first <- gwA.Drain(ctx) }()
 	ev := a.waitEvent("drain", func(ev agent.ConnEvent) bool { return ev.Kind == agent.KindDrain })
-	if ev.TCPDeadline != time.Hour {
-		t.Fatalf("drain tcp_deadline = %v, want 1h", ev.TCPDeadline)
+	if ev.TCPDeadline != 15*time.Minute {
+		t.Fatalf("drain tcp_deadline = %v, want 15m", ev.TCPDeadline)
 	}
 	waitConnectedTo(a, "gw-b")
 	// A second call waits for the first.
