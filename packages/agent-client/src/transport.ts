@@ -441,7 +441,7 @@ export class AgentClient {
  * Trailer-<name> headers and connect-es merges them, without the prefix, into
  * the error metadata, where they would read as the gateway's Sbx-* routing
  * signals. Only the gateway produces those, and never as trailers; it strips
- * the agent's (spec 16.1), this is defence in depth.
+ * the agent's (spec §16 item 1), this is defence in depth.
  */
 function dropTrailerSbx(client: UniversalClientFn): UniversalClientFn {
 	return async (req) => {

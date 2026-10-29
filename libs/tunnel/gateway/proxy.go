@@ -305,7 +305,7 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 
 	// A redirect would make the caller resend the request, with its service
 	// token when the host stays the same, to a URL the agent chose (another
-	// machine's route, any server): it is refused (spec 16.1).
+	// machine's route, any server): it is refused (spec §16 item 1).
 	if isRedirect(resp.StatusCode) {
 		s.log.Warn("gateway: agent answered with a redirect, refused", "status", resp.StatusCode, "path", u.Path)
 		h.writeBadAgent(w, r, f, fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode))
@@ -314,7 +314,7 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 	// The agent's Sbx-* (but agentSbxHeaders) and redirect headers and
 	// trailers are dropped: a compromised agent must not be able to forge a
 	// gateway answer such as 421 machine_moved with an Sbx-Instance-Url of
-	// its choosing, nor point the caller elsewhere (spec 16.1).
+	// its choosing, nor point the caller elsewhere (spec §16 item 1).
 	fwd, declared, ok := forwardHeader(resp)
 	hdr := w.Header()
 	// A caller may not take a larger block than the one written here, the
