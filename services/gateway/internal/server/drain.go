@@ -11,14 +11,9 @@ import (
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 )
 
-// The gateway.Timing defaults the drain budget needs (zero Timing fields
-// take them in libs/tunnel).
-const (
-	defaultEndpointWait        = 5 * time.Second
-	defaultDrainSpread         = 5 * time.Second
-	defaultDrainMargin         = 10 * time.Second
-	defaultMaxTCPDrainDeadline = 15 * time.Minute
-)
+// defaultEndpointWait is the gateway.Timing default (zero Timing fields
+// take the libs/tunnel defaults).
+const defaultEndpointWait = config.DefaultEndpointWait
 
 const (
 	// drainPoll is the period of the drain's waits for streams and SSH
@@ -32,19 +27,11 @@ const (
 	sshCloseGrace = 5 * time.Second
 )
 
-// DrainBudget is the longest a Drain takes with cfg and timing:
-// EndpointWait + DrainSpread + the longest stream drain deadline +
-// DrainMargin, the bound of the tunnel drain, after which only the
-// graceful shutdown of the internal listener is left. With the defaults it
-// is 5 s + 5 s + 15 min + 10 s = 920 s, within the pod's
-// terminationGracePeriodSeconds of 960 (spec 10.5). The process bounds its
-// drain context with it plus a small margin.
+// DrainBudget is the longest a Drain takes with cfg and timing; see
+// config.DrainBudget, which config.ValidateServe checks against the grace
+// period.
 func DrainBudget(cfg config.Config, timing gateway.Timing) time.Duration {
-	longest := max(cfg.SSHDrainDeadline, cfg.HTTPDrainDeadline, orDefault(timing.MaxTCPDrainDeadline, defaultMaxTCPDrainDeadline))
-	return orDefault(timing.EndpointWait, defaultEndpointWait) +
-		orDefault(timing.DrainSpread, defaultDrainSpread) +
-		longest +
-		orDefault(timing.DrainMargin, defaultDrainMargin)
+	return config.DrainBudget(cfg, timing)
 }
 
 func orDefault(v, def time.Duration) time.Duration {

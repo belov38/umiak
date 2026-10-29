@@ -77,6 +77,16 @@ type Config struct {
 	ProxyProtocol      bool
 	ProxyProtocolCIDRs []netip.Prefix
 	TrustedProxyCIDRs  []netip.Prefix
+	// ProxyHeaderTimeout bounds the wait for the PROXY v2 header of a conn
+	// from ProxyProtocolCIDRs. On the TLS edge a conn without a complete
+	// header by then is closed. On the SSH listener it goes on header-less
+	// (go-proxyproto "no header"), keyed by the LB address; a client that
+	// waits for the server banner first stalls that long.
+	ProxyHeaderTimeout time.Duration
+
+	// TLSMaxHandshakesPerIP caps the TLS handshakes in flight per client
+	// IP on the TLS listener; RateLimit.Exempt IPs skip it.
+	TLSMaxHandshakesPerIP int
 
 	// API.
 	APIURL   string
@@ -92,6 +102,9 @@ type Config struct {
 	SSHHostKeys    []ssh.Signer
 	SSHUserCA      ssh.Signer
 	SSHLoginCAKeys []ssh.PublicKey
+	// SSHLoginCertMaxValidity caps ValidBefore - ValidAfter of a login
+	// certificate; longer ones are refused.
+	SSHLoginCertMaxValidity time.Duration
 
 	// Reserved names.
 	ReservedPorts    []int
@@ -140,6 +153,21 @@ const (
 	DefaultSSHDrainDeadline  = 15 * time.Minute
 )
 
+// The gateway.Timing defaults the drain budget needs (zero Timing fields
+// take them in libs/tunnel), and the bounds of the process's drain.
+const (
+	DefaultEndpointWait        = 5 * time.Second
+	DefaultDrainSpread         = 5 * time.Second
+	DefaultDrainMargin         = 10 * time.Second
+	DefaultMaxTCPDrainDeadline = 15 * time.Minute
+	// DrainProcessMargin is added to DrainBudget for the process's drain
+	// context.
+	DrainProcessMargin = 30 * time.Second
+	// TerminationGrace is the pod's terminationGracePeriodSeconds (spec
+	// 10.5): DrainBudget + DrainProcessMargin must fit in it.
+	TerminationGrace = 960 * time.Second
+)
+
 // FromEnv reads and validates the configuration. getenv is normally os.Getenv;
 // an empty value means "unset". Errors name the offending variable.
 func FromEnv(getenv func(string) string) (Config, error) {
@@ -184,6 +212,8 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	}
 	c.ProxyProtocolCIDRs = l.cidrs("PROXY_PROTOCOL_CIDRS")
 	c.TrustedProxyCIDRs = l.cidrs("TRUSTED_PROXY_CIDRS")
+	c.ProxyHeaderTimeout = l.duration("PROXY_HEADER_TIMEOUT", 2*time.Second)
+	c.TLSMaxHandshakesPerIP = l.integer("TLS_MAX_HANDSHAKES_PER_IP", 64)
 
 	c.APIURL = l.str("API_URL", "")
 	c.APIToken = l.fileText("API_TOKEN_FILE", false)
@@ -226,6 +256,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.SSHKeepaliveInterval = l.duration("SSH_KEEPALIVE_INTERVAL", 30*time.Second)
 	c.SSHKeepaliveMax = l.integer("SSH_KEEPALIVE_MAX", 3)
 	c.SSHMaxChannels = l.integer("SSH_MAX_CHANNELS", 256)
+	c.SSHLoginCertMaxValidity = l.duration("SSH_LOGIN_CERT_MAX_VALIDITY", 24*time.Hour)
 
 	c.Timeouts = Timeouts{
 		TLSHandshake:   l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),
@@ -279,6 +310,28 @@ func (c Config) ValidateServe() error {
 	if c.ProxyProtocol && len(c.ProxyProtocolCIDRs) == 0 {
 		errs = append(errs, fmt.Errorf("%sPROXY_PROTOCOL_CIDRS: is required with %sPROXY_PROTOCOL=v2", envPrefix, envPrefix))
 	}
+	// An exempt LB address would make every header-less conn of the LB
+	// exempt from the per-IP limits.
+	if c.ProxyProtocol {
+		for _, e := range c.RateLimit.Exempt {
+			for _, pp := range c.ProxyProtocolCIDRs {
+				if e.Overlaps(pp) {
+					errs = append(errs, fmt.Errorf("%sRATELIMIT_EXEMPT_CIDRS: %s overlaps %s of %sPROXY_PROTOCOL_CIDRS",
+						envPrefix, e, pp, envPrefix))
+				}
+			}
+		}
+	}
+	// The drain must end within the pod's grace period, with the timing
+	// the process uses (only EndpointWait is configurable).
+	if b := DrainBudget(c, gateway.Timing{EndpointWait: c.EndpointWait}) + DrainProcessMargin; b > TerminationGrace {
+		errs = append(errs, fmt.Errorf("%sSSH_DRAIN_DEADLINE: drain budget %s (endpoint wait + drain spread + longest drain deadline + margin + %s process margin) exceeds the %s grace period",
+			envPrefix, b, DrainProcessMargin, TerminationGrace))
+	}
+	if c.HTTPDrainDeadline > c.SSHDrainDeadline {
+		errs = append(errs, fmt.Errorf("%sHTTP_DRAIN_DEADLINE: %s is longer than %sSSH_DRAIN_DEADLINE (%s)",
+			envPrefix, c.HTTPDrainDeadline, envPrefix, c.SSHDrainDeadline))
+	}
 	switch c.APIURL {
 	case "":
 		errs = append(errs, fmt.Errorf("%sAPI_URL: is required (%q runs without api)", envPrefix, APIURLNone))
@@ -290,6 +343,28 @@ func (c Config) ValidateServe() error {
 		need("API_TOKEN_FILE", c.APIToken)
 	}
 	return errors.Join(errs...)
+}
+
+// DrainBudget is the longest a Drain takes with c and timing:
+// EndpointWait + DrainSpread + the longest stream drain deadline +
+// DrainMargin, the bound of the tunnel drain, after which only the
+// graceful shutdown of the internal listener is left. Zero timing fields
+// take the libs/tunnel defaults. With the defaults it is 5 s + 5 s +
+// 15 min + 10 s = 920 s; the process bounds its drain at that plus
+// DrainProcessMargin, within TerminationGrace (spec 10.5).
+func DrainBudget(c Config, timing gateway.Timing) time.Duration {
+	longest := max(c.SSHDrainDeadline, c.HTTPDrainDeadline, orDefault(timing.MaxTCPDrainDeadline, DefaultMaxTCPDrainDeadline))
+	return orDefault(timing.EndpointWait, DefaultEndpointWait) +
+		orDefault(timing.DrainSpread, DefaultDrainSpread) +
+		longest +
+		orDefault(timing.DrainMargin, DefaultDrainMargin)
+}
+
+func orDefault(v, def time.Duration) time.Duration {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 // checkHTTPURL accepts an absolute http or https URL with a host.

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -118,6 +120,9 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"SSHKeepaliveInterval", cfg.SSHKeepaliveInterval, 30 * time.Second},
 		{"SSHKeepaliveMax", cfg.SSHKeepaliveMax, 3},
 		{"SSHMaxChannels", cfg.SSHMaxChannels, 256},
+		{"TLSMaxHandshakesPerIP", cfg.TLSMaxHandshakesPerIP, 64},
+		{"ProxyHeaderTimeout", cfg.ProxyHeaderTimeout, 2 * time.Second},
+		{"SSHLoginCertMaxValidity", cfg.SSHLoginCertMaxValidity, 24 * time.Hour},
 		{"TLSHandshake", cfg.Timeouts.TLSHandshake, 10 * time.Second},
 		{"ReadHeader", cfg.Timeouts.ReadHeader, 10 * time.Second},
 		{"MaxHeaderBytes", cfg.Timeouts.MaxHeaderBytes, 64 << 10},
@@ -155,30 +160,33 @@ func TestFromEnvDefaults(t *testing.T) {
 func TestFromEnvOverrides(t *testing.T) {
 	f := newFixture(t)
 	for k, v := range map[string]string{
-		"SBX_GATEWAY_INSTANCE_ID":             "gw-1",
-		"SBX_GATEWAY_TLS_LISTEN":              ":443",
-		"SBX_GATEWAY_HTTP_LISTEN":             ":8080",
-		"SBX_GATEWAY_PROXY_PROTOCOL":          "v2",
-		"SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":    "10.0.0.0/8, fd00::/8",
-		"SBX_GATEWAY_TRUSTED_PROXY_CIDRS":     "192.168.0.0/16",
-		"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":  "203.0.113.0/24",
-		"SBX_GATEWAY_RATELIMIT_IP_RATE":       "5.5",
-		"SBX_GATEWAY_RATELIMIT_AUTH_BLOCK":    "1m",
-		"SBX_GATEWAY_RESERVED_PORTS":          "22, 8080",
-		"SBX_GATEWAY_TIMEOUT_DIAL":            "3s",
-		"SBX_GATEWAY_TIMEOUT_STREAM_IDLE":     "30m",
-		"SBX_GATEWAY_MAX_HEADER_BYTES":        "1024",
-		"SBX_GATEWAY_COOKIE_CROSS_SITE":       "true",
-		"SBX_GATEWAY_HTTP_DRAIN_DEADLINE":     "30s",
-		"SBX_GATEWAY_TUNNEL_ADMIT_RATE":       "50",
-		"SBX_GATEWAY_TUNNEL_ADMIT_BURST":      "60",
-		"SBX_GATEWAY_MIN_AGENT_VERSION":       "1.2.3",
-		"SBX_GATEWAY_LOG_LEVEL":               "debug",
-		"SBX_GATEWAY_STRIP_COOKIE_PREFIXES":   "a,b",
-		"SBX_GATEWAY_AUTH_URL":                "https://app.example.com/authorize",
-		"SBX_GATEWAY_RESERVED_SUFFIXES":       "desktop,vnc",
-		"SBX_GATEWAY_RESERVED_SLUGS":          "api",
-		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER": "1m",
+		"SBX_GATEWAY_INSTANCE_ID":                 "gw-1",
+		"SBX_GATEWAY_TLS_LISTEN":                  ":443",
+		"SBX_GATEWAY_HTTP_LISTEN":                 ":8080",
+		"SBX_GATEWAY_PROXY_PROTOCOL":              "v2",
+		"SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":        "10.0.0.0/8, fd00::/8",
+		"SBX_GATEWAY_TRUSTED_PROXY_CIDRS":         "192.168.0.0/16",
+		"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":      "203.0.113.0/24",
+		"SBX_GATEWAY_RATELIMIT_IP_RATE":           "5.5",
+		"SBX_GATEWAY_RATELIMIT_AUTH_BLOCK":        "1m",
+		"SBX_GATEWAY_RESERVED_PORTS":              "22, 8080",
+		"SBX_GATEWAY_TIMEOUT_DIAL":                "3s",
+		"SBX_GATEWAY_TIMEOUT_STREAM_IDLE":         "30m",
+		"SBX_GATEWAY_MAX_HEADER_BYTES":            "1024",
+		"SBX_GATEWAY_COOKIE_CROSS_SITE":           "true",
+		"SBX_GATEWAY_HTTP_DRAIN_DEADLINE":         "30s",
+		"SBX_GATEWAY_TUNNEL_ADMIT_RATE":           "50",
+		"SBX_GATEWAY_TUNNEL_ADMIT_BURST":          "60",
+		"SBX_GATEWAY_MIN_AGENT_VERSION":           "1.2.3",
+		"SBX_GATEWAY_LOG_LEVEL":                   "debug",
+		"SBX_GATEWAY_STRIP_COOKIE_PREFIXES":       "a,b",
+		"SBX_GATEWAY_AUTH_URL":                    "https://app.example.com/authorize",
+		"SBX_GATEWAY_RESERVED_SUFFIXES":           "desktop,vnc",
+		"SBX_GATEWAY_RESERVED_SLUGS":              "api",
+		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER":     "1m",
+		"SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP":   "16",
+		"SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY": "1h",
+		"SBX_GATEWAY_PROXY_HEADER_TIMEOUT":        "500ms",
 	} {
 		f.env[k] = v
 	}
@@ -206,6 +214,15 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.HTTPDrainDeadline != 30*time.Second || cfg.TunnelAdmitRate != 50 || cfg.TunnelAdmitBurst != 60 || cfg.MinAgentVersion != "1.2.3" || cfg.LogLevel != "debug" {
 		t.Errorf("misc overrides: %+v", cfg)
+	}
+	if cfg.TLSMaxHandshakesPerIP != 16 {
+		t.Errorf("TLSMaxHandshakesPerIP = %d", cfg.TLSMaxHandshakesPerIP)
+	}
+	if cfg.ProxyHeaderTimeout != 500*time.Millisecond {
+		t.Errorf("ProxyHeaderTimeout = %s", cfg.ProxyHeaderTimeout)
+	}
+	if cfg.SSHLoginCertMaxValidity != time.Hour {
+		t.Errorf("SSHLoginCertMaxValidity = %s", cfg.SSHLoginCertMaxValidity)
 	}
 	if strings.Join(cfg.StripCookiePrefixes, "|") != "a|b" || strings.Join(cfg.ReservedSuffixes, "|") != "desktop|vnc" || cfg.AuthURL == "" {
 		t.Errorf("lists: %+v", cfg)
@@ -300,6 +317,7 @@ func TestFromEnvErrors(t *testing.T) {
 		{"bad duration", func(f *fixture) { f.env["SBX_GATEWAY_TIMEOUT_DIAL"] = "ten" }, "SBX_GATEWAY_TIMEOUT_DIAL"},
 		{"non-positive duration", func(f *fixture) { f.env["SBX_GATEWAY_TIMEOUT_DIAL"] = "-1s" }, "SBX_GATEWAY_TIMEOUT_DIAL"},
 		{"bad int", func(f *fixture) { f.env["SBX_GATEWAY_MAX_HEADER_BYTES"] = "x" }, "SBX_GATEWAY_MAX_HEADER_BYTES"},
+		{"bad handshakes per ip", func(f *fixture) { f.env["SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"] = "0" }, "SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"},
 		{"bad port", func(f *fixture) { f.env["SBX_GATEWAY_RESERVED_PORTS"] = "22,70000" }, "SBX_GATEWAY_RESERVED_PORTS"},
 		{"bad bool", func(f *fixture) { f.env["SBX_GATEWAY_COOKIE_CROSS_SITE"] = "maybe" }, "SBX_GATEWAY_COOKIE_CROSS_SITE"},
 		{"bad log level", func(f *fixture) { f.env["SBX_GATEWAY_LOG_LEVEL"] = "loud" }, "SBX_GATEWAY_LOG_LEVEL"},
@@ -367,6 +385,36 @@ func TestValidateServe(t *testing.T) {
 	if err := valid(t).ValidateServe(); err != nil {
 		t.Fatalf("valid config: %v", err)
 	}
+	// The largest SSH drain deadline that fits: 5 + 5 + 910 + 10 + 30 = 960 s.
+	edge := valid(t)
+	edge.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+	if err := edge.ValidateServe(); err != nil {
+		t.Fatalf("drain budget of exactly the grace period: %v", err)
+	}
+	// Disjoint exempt and PROXY CIDRs are fine, and an overlap does not
+	// matter with PROXY off.
+	disjoint := valid(t)
+	disjoint.ProxyProtocol = true
+	disjoint.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	disjoint.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("fd00::/8")}
+	if err := disjoint.ValidateServe(); err != nil {
+		t.Fatalf("disjoint exempt and PROXY CIDRs: %v", err)
+	}
+	off := valid(t)
+	off.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	off.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	if err := off.ValidateServe(); err != nil {
+		t.Fatalf("overlap with PROXY off: %v", err)
+	}
+	// Equal HTTP and SSH drain deadlines are fine.
+	eq := valid(t)
+	eq.HTTPDrainDeadline, eq.SSHDrainDeadline = 2*time.Minute, 2*time.Minute
+	if err := eq.ValidateServe(); err != nil {
+		t.Fatalf("equal drain deadlines: %v", err)
+	}
+	if got := DrainBudget(valid(t), gateway.Timing{}); got != 920*time.Second {
+		t.Fatalf("DrainBudget = %s, want 920s", got)
+	}
 	none := valid(t)
 	none.APIURL, none.APIToken = APIURLNone, ""
 	if err := none.ValidateServe(); err != nil {
@@ -385,6 +433,23 @@ func TestValidateServe(t *testing.T) {
 		{"no api token", func(c *Config) { c.APIToken = "" }, "SBX_GATEWAY_API_TOKEN_FILE"},
 		{"bad internal url", func(c *Config) { c.InternalURL = "gateway:7000" }, "SBX_GATEWAY_INTERNAL_URL"},
 		{"proxy v2 without cidrs", func(c *Config) { c.ProxyProtocol, c.ProxyProtocolCIDRs = true, nil }, "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS"},
+		// 5 s + 5 s + 15 min 11 s + 10 s + 30 s = 961 s > 960 s.
+		{"drain over the grace period", func(c *Config) { c.SSHDrainDeadline = 15*time.Minute + 11*time.Second }, "SBX_GATEWAY_SSH_DRAIN_DEADLINE"},
+		{"endpoint wait over the grace period", func(c *Config) {
+			c.EndpointWait = 6 * time.Second
+			c.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+		}, "SBX_GATEWAY_SSH_DRAIN_DEADLINE"},
+		{"exempt cidr inside the proxy cidrs", func(c *Config) {
+			c.ProxyProtocol = true
+			c.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+			c.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("10.1.0.0/16")}
+		}, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
+		{"exempt cidr containing a proxy cidr", func(c *Config) {
+			c.ProxyProtocol = true
+			c.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.5/32")}
+			c.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}
+		}, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
+		{"http drain longer than ssh drain", func(c *Config) { c.HTTPDrainDeadline = 3 * time.Minute; c.SSHDrainDeadline = 2 * time.Minute }, "SBX_GATEWAY_HTTP_DRAIN_DEADLINE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid(t)

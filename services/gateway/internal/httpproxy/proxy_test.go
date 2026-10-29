@@ -297,6 +297,68 @@ func TestResponseStrip(t *testing.T) {
 	}
 }
 
+// TestSetCookieTrailerStripped: an app cannot set cookies through
+// trailers, declared or not, over HTTP/1 chunked or h2c.
+func TestSetCookieTrailerStripped(t *testing.T) {
+	f := newFixture(t, nil)
+	app := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hd := w.Header()
+		if r.URL.Path == "/declared" {
+			hd.Set("Trailer", "Set-Cookie, X-Ok")
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "body")
+		_ = http.NewResponseController(w).Flush()
+		if r.URL.Path == "/declared" {
+			hd.Add("Set-Cookie", "__Host-sbx_auth=forged; Path=/")
+			hd.Add("Set-Cookie", "app=1")
+			hd.Set("X-Ok", "2")
+			return
+		}
+		hd.Add(http.TrailerPrefix+"Set-Cookie", "app=1")
+		hd.Set(http.TrailerPrefix+"X-Ok", "2")
+	})
+	f.m.ServeHTTP(3000, app)
+	f.m.ServeH2C(5000, app)
+	h1 := testenv.Host(f.env.Route(f.m, 3000, nil).Label)
+	h2 := testenv.Host(f.env.Route(f.m, 5000, func(r *cpapi.Route) { r.AppProtocol = "h2c" }).Label)
+	h2c := h2cTransport(f.inst)
+	defer h2c.CloseIdleConnections()
+
+	for _, tc := range []struct {
+		name string
+		host string
+		rt   http.RoundTripper
+	}{
+		{"http1 app, http1 client", h1, f.c.Transport},
+		{"http1 app, h2c client", h1, h2c},
+		{"h2c app, http1 client", h2, f.c.Transport},
+		{"h2c app, h2c client", h2, h2c},
+	} {
+		for _, path := range []string{"/declared", "/undeclared"} {
+			t.Run(tc.name+" "+path, func(t *testing.T) {
+				resp := do(t, &http.Client{Transport: tc.rt}, newReq(t, http.MethodGet, tc.host, path, nil))
+				defer func() { _ = resp.Body.Close() }()
+				if _, ok := resp.Trailer["Set-Cookie"]; ok {
+					t.Errorf("Set-Cookie declared to the client: %v", resp.Trailer)
+				}
+				if b := readBody(t, resp); b != "body" {
+					t.Fatalf("body = %q", b)
+				}
+				if v := resp.Trailer.Values("Set-Cookie"); len(v) != 0 {
+					t.Errorf("Set-Cookie trailer reached the client: %q", v)
+				}
+				if v := resp.Header.Values("Set-Cookie"); len(v) != 0 {
+					t.Errorf("Set-Cookie header = %q", v)
+				}
+				if resp.Trailer.Get("X-Ok") != "2" {
+					t.Errorf("trailer X-Ok = %q (trailers %v)", resp.Trailer.Get("X-Ok"), resp.Trailer)
+				}
+			})
+		}
+	}
+}
+
 func TestHostRewriteLocalhost(t *testing.T) {
 	f := newFixture(t, nil)
 	f.m.ServeHTTP(5173, echoApp())

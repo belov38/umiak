@@ -234,6 +234,11 @@ func TestSanitizeTrailers(t *testing.T) {
 		t.Fatalf("trailers = %v", tr)
 	}
 
+	sc := http.Header{"Set-Cookie": {"a=1", "b=2"}, "set-cookie": {"c=3"}, "X-Ok": {"2"}}
+	if sanitizeTrailers(sc) || len(sc) != 1 || sc.Get("X-Ok") != "2" {
+		t.Fatalf("Set-Cookie trailers kept: %v", sc)
+	}
+
 	many := http.Header{}
 	for i := range maxTrailerFields + 1 {
 		many.Set("X-T-"+strconv.Itoa(i), "v")

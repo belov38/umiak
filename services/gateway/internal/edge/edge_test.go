@@ -265,6 +265,26 @@ func TestHandshakeTimeout(t *testing.T) {
 	tlsDial(t, env, inst, testenv.TunnelHost)
 }
 
+// TestHandshakesPerIPWiring: SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP reaches
+// the dispatcher of an instance.
+func TestHandshakesPerIPWiring(t *testing.T) {
+	env := testenv.New(t, testenv.Options{})
+	inst := env.StartInstance(func(c *config.Config) {
+		c.Timeouts.TLSHandshake = 20 * time.Second
+		c.TLSMaxHandshakesPerIP = 2
+	})
+	for range 2 {
+		dialWrite(t, inst.HTTPSAddr, nil)
+	}
+	// The kernel queue hands the conns to the accept loop in order.
+	if !closedWithin(dialWrite(t, inst.HTTPSAddr, nil), 5*time.Second) {
+		t.Fatal("a third idle conn of one IP was not closed")
+	}
+	if got := testutil.ToFloat64(inst.Metrics().RateLimited.WithLabelValues("handshakes")); got != 1 {
+		t.Fatalf("ratelimited_total{handshakes} = %v, want 1", got)
+	}
+}
+
 // ppClient sends every request to the TLS listener of inst, writing header
 // (if any) before the TLS handshake.
 func ppClient(t *testing.T, env *testenv.Env, inst *testenv.Inst, header []byte) *http.Client {

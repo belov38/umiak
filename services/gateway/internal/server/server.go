@@ -293,23 +293,24 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	})
 	if cfg.SSHListen != "" {
 		i.ssh, err = sshgw.New(sshgw.Config{
-			HostSigners:       cfg.SSHHostKeys,
-			LoginCAKeys:       cfg.SSHLoginCAKeys,
-			UserCA:            cfg.SSHUserCA,
-			API:               deps.API,
-			Dialer:            i.upstream,
-			Limits:            i.limits,
-			Metrics:           i.metrics,
-			Log:               accessLog,
-			Logger:            i.log,
-			DrainDeadline:     cfg.SSHDrainDeadline,
-			KeepaliveInterval: cfg.SSHKeepaliveInterval,
-			KeepaliveMax:      cfg.SSHKeepaliveMax,
-			MaxChannels:       cfg.SSHMaxChannels,
-			Now:               deps.Now,
-			Self:              cfg.InstanceID,
-			Instances:         i.store,
-			Owners:            i.owners,
+			HostSigners:          cfg.SSHHostKeys,
+			LoginCAKeys:          cfg.SSHLoginCAKeys,
+			UserCA:               cfg.SSHUserCA,
+			API:                  deps.API,
+			Dialer:               i.upstream,
+			Limits:               i.limits,
+			Metrics:              i.metrics,
+			Log:                  accessLog,
+			Logger:               i.log,
+			DrainDeadline:        cfg.SSHDrainDeadline,
+			KeepaliveInterval:    cfg.SSHKeepaliveInterval,
+			KeepaliveMax:         cfg.SSHKeepaliveMax,
+			MaxChannels:          cfg.SSHMaxChannels,
+			LoginCertMaxValidity: cfg.SSHLoginCertMaxValidity,
+			Now:                  deps.Now,
+			Self:                 cfg.InstanceID,
+			Instances:            i.store,
+			Owners:               i.owners,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
@@ -514,7 +515,7 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 	}
 	i.AddReadyCheck(func() bool { return sbx.Loaded() && tun.Loaded() })
 	if i.cfg.ProxyProtocol {
-		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.Timeouts.TLSHandshake)
+		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.ProxyHeaderTimeout)
 	}
 	d := edge.NewDispatcher(ln, edge.DispatchConfig{
 		SbxDomain:        i.cfg.SbxDomain,
@@ -522,9 +523,13 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 		Sbx:              sbx,
 		Tunnel:           tun,
 		HandshakeTimeout: i.cfg.Timeouts.TLSHandshake,
-		ConnLimit:        i.limits.AcquireConn,
-		Metrics:          i.metrics,
-		Logger:           i.log,
+		// Node SNAT (spec 11) has its own handshake budget.
+		MaxHandshakesPerIP: i.cfg.TLSMaxHandshakesPerIP,
+		ProxyHeaderTimeout: i.cfg.ProxyHeaderTimeout,
+		HandshakeExempt:    i.cfg.RateLimit.Exempt,
+		ConnLimit:          i.limits.AcquireConn,
+		Metrics:            i.metrics,
+		Logger:             i.log,
 	})
 	return d, []*edge.CertSource{sbx, tun}, nil
 }
@@ -602,7 +607,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	if ls.SSH != nil && i.ssh != nil {
 		ln := ls.SSH
 		if i.cfg.ProxyProtocol {
-			ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.Timeouts.TLSHandshake)
+			ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.ProxyHeaderTimeout)
 		}
 		wg.Go(func() { //nolint:contextcheck // SSH conns run on the sshgw server context, ended by Close
 			if err := i.ssh.Serve(ln); err != nil {

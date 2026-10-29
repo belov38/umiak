@@ -219,7 +219,9 @@ func TestMainSecondSignal(t *testing.T) {
 	p := start(t, bin, append(serveEnv(dsn, dir, internal, metrics),
 		"SBX_GATEWAY_TLS_LISTEN=off",
 		"SBX_GATEWAY_SSH_LISTEN=off",
-		"SBX_GATEWAY_ENDPOINT_WAIT=1m",
+		// The longest endpoint wait the drain budget check allows:
+		// 15 s + 5 s + 15 min + 10 s + 30 s = 960 s.
+		"SBX_GATEWAY_ENDPOINT_WAIT=15s",
 	))
 	p.waitOK(t, "http://"+metrics+"/readyz")
 	p.signal(t, syscall.SIGTERM)
