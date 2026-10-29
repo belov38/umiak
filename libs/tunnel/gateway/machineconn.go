@@ -188,8 +188,24 @@ func (m *MachineConn) RoundTrip(req *http.Request) (*http.Response, error) {
 		cancel(nil)
 		return nil, err
 	}
+	abortOnCancel(ctx, resp.Body, nil)
 	resp.Body = &trackedBody{rc: resp.Body, s: s, st: st, ctx: ctx, cancel: cancel}
 	return resp, nil
+}
+
+// abortOnCancel ends a stream when ctx is cancelled (moved session past the
+// stream's deadline, closed session, caller gone). The HTTP/2 client does not
+// abort a stream for a cancelled context while the request body is still
+// open (a CONNECT upload, a bidi call): it would stay up until the whole
+// connection closes. Closing the response body resets the stream and makes
+// pending reads fail; pw, when set, makes pending writes fail with the cause.
+func abortOnCancel(ctx context.Context, body io.Closer, pw *io.PipeWriter) {
+	context.AfterFunc(ctx, func() {
+		if pw != nil {
+			_ = pw.CloseWithError(context.Cause(ctx))
+		}
+		_ = body.Close()
+	})
 }
 
 // trackedBody untracks its request when the body ends or is closed.
@@ -283,6 +299,7 @@ func (m *MachineConn) DialTCPWith(ctx context.Context, port uint16, opts TCPOpti
 		_ = pw.Close()
 		return fail(&transport.DialError{Status: resp.StatusCode})
 	}
+	abortOnCancel(sctx, resp.Body, pw)
 	return &tcpConn{
 		s: s, st: st, body: resp.Body, pw: pw, ctx: sctx, cancel: cancel,
 		remote: tunnelAddr(s.machineID + ":" + strconv.Itoa(int(port))),
