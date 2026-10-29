@@ -1,6 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+allowBuilds:
+  cpu-features: false
+  ssh2: false
 minimumReleaseAgeExclude:
   - "@biomejs/biome@2.6.4"
   - "@biomejs/cli-android-arm64@2.6.4"
