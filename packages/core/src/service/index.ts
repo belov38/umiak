@@ -65,7 +65,7 @@ export {
 	TERMINAL_COMMAND_STATUSES,
 	truncateUtf8,
 } from "./commands.ts";
-export type { SandboxServiceDeps } from "./common.ts";
+export type { SandboxServiceDeps, ServiceLogger } from "./common.ts";
 export {
 	findSandboxRow,
 	insertOperation,

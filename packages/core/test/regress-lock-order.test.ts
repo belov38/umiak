@@ -77,7 +77,9 @@ describe.skipIf(skipPg())("multi-node admission lock order (M4)", () => {
 		expect(errors.map((e) => e.code)).toEqual([]);
 	});
 
-	it("parallel cold creates of different teams on two near-full nodes only fail with SbxError", async () => {
+	// Smoke test: probabilistic (it found the deadlock only sometimes on the
+	// old code); test 1 is the deterministic regression.
+	it("smoke: parallel cold creates of different teams on two near-full nodes only fail with SbxError", async () => {
 		const nonDomain: string[] = [];
 		for (let round = 0; round < 8; round++) {
 			const env = await serviceEnv(t.pool, {
@@ -156,7 +158,9 @@ describe.skipIf(skipPg())("multi-node admission lock order (M4)", () => {
 	it("after the retries a create gets a retryable out_of_capacity, nothing is written", async () => {
 		const env = await serviceEnv(t.pool);
 		let calls = 0;
+		const warnings: { obj: Record<string, unknown>; msg: string }[] = [];
 		const svc = new SandboxServiceImpl({
+			log: { warn: (obj, msg) => warnings.push({ obj, msg }) },
 			pool: t.pool,
 			config: flaky(
 				env.config,
@@ -174,6 +178,13 @@ describe.skipIf(skipPg())("multi-node admission lock order (M4)", () => {
 		expect((err as SbxError).code).toBe("out_of_capacity");
 		expect((err as SbxError).retryable).toBe(true);
 		expect(calls).toBe(SERVICE_TX_RETRIES + 1);
+		expect(((err as SbxError).cause as { code?: string }).code).toBe("40001");
+		expect(warnings).toEqual([
+			{
+				obj: { sqlstate: "40001", attempts: SERVICE_TX_RETRIES + 1 },
+				msg: expect.stringContaining("out_of_capacity"),
+			},
+		]);
 		const n = await t.pool.query<{ n: number }>(
 			"SELECT count(*)::int AS n FROM runtime.sandboxes WHERE team_id = $1",
 			[env.p.teamId],

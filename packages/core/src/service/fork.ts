@@ -155,7 +155,7 @@ export async function forkSandbox(
 	const forkOpId = uuidv7();
 	const createOpId = uuidv7();
 
-	return withServiceTx(deps.pool, async (tx) => {
+	return withServiceTx(deps, async (tx) => {
 		if (idemKey !== undefined) {
 			const claim = await claimIdempotencyKey(tx, {
 				principalId: idempotencyPrincipal(p),

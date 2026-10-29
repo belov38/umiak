@@ -74,7 +74,7 @@ export async function createSandbox(
 	const sandboxId = uuidv7();
 	const operationId = uuidv7();
 
-	return withServiceTx(deps.pool, async (tx) => {
+	return withServiceTx(deps, async (tx) => {
 		if (idemKey !== undefined && hash !== null && principalId !== null) {
 			const claim = await claimIdempotencyKey(tx, {
 				principalId,

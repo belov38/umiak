@@ -235,7 +235,7 @@ export async function resumeSandbox(
 	const hash = requestHash(deps.keys, RESUME_SCOPE, input);
 	const bodyHash = hash.value.toString("hex");
 
-	return withServiceTx(deps.pool, async (tx) => {
+	return withServiceTx(deps, async (tx) => {
 		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
 		const active = await activeOperation(tx.client, row.id);
 		if (active !== null) {
@@ -398,7 +398,7 @@ export async function recoverSandbox(
 	p: Principal,
 	idOrSlug: string,
 ): Promise<Operation> {
-	return withServiceTx(deps.pool, async (tx) => {
+	return withServiceTx(deps, async (tx) => {
 		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
 		const active = await activeOperation(tx.client, row.id);
 		if (active !== null) {

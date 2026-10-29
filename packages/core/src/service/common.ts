@@ -30,6 +30,13 @@ export interface SandboxServiceDeps {
 	slugRandom?: RandomInt;
 	/** Fallback poll of `waitForState` (default 2000 ms, 500 ms without a notifier). */
 	waitPollMs?: number;
+	/** Warnings of the service (pino-compatible); none when absent. */
+	log?: ServiceLogger;
+}
+
+/** The subset of a pino logger the service uses. */
+export interface ServiceLogger {
+	warn(obj: Record<string, unknown>, msg: string): void;
 }
 
 /** A pool, a pooled client or `tx.client`. */

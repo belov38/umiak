@@ -90,11 +90,17 @@ export function operationInProgress(op: {
 	);
 }
 
-export function outOfCapacity(retryAfterSeconds: number): SbxError {
+export function outOfCapacity(
+	retryAfterSeconds: number,
+	cause?: unknown,
+): SbxError {
 	return new SbxError(
 		"out_of_capacity",
 		`not enough capacity; retry in ${retryAfterSeconds} s`,
-		{ details: { retryAfterSeconds } },
+		{
+			details: { retryAfterSeconds },
+			...(cause === undefined ? {} : { cause }),
+		},
 	);
 }
 
