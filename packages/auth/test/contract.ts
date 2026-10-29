@@ -197,6 +197,36 @@ export function runIdentityStoreContract(
 				expect(again.teams).toHaveLength(2);
 			});
 
+			it("concurrent first logins of a seeded user bind it once", async () => {
+				const e = email("seeded");
+				const id = await s.seedUser({ email: e });
+				const sub = randomUUID();
+				const all = await Promise.all(
+					Array.from({ length: 5 }, () =>
+						s.resolveSession({ email: e, user: sub, groups: [] }),
+					),
+				);
+				expect(new Set(all.map((r) => r.user.id))).toEqual(new Set([id]));
+				const teams = new Set(all.flatMap((r) => r.teams.map((t) => t.teamId)));
+				expect(teams.size).toBe(1);
+				expect(all.every((r) => r.user.idpSubject === sub)).toBe(true);
+			});
+
+			it("a missing or empty sub is subject_required, also for a known email", async () => {
+				const e = email();
+				await s.seedUser({ email: e });
+				for (const user of [undefined, "", "  "]) {
+					const h =
+						user === undefined
+							? { email: e, groups: [] }
+							: { email: e, user, groups: [] };
+					expect(await codeOf(s.resolveSession(h))).toBe("subject_required");
+				}
+				expect(
+					await codeOf(s.resolveSession({ email: email(), groups: [] })),
+				).toBe("subject_required");
+			});
+
 			it("an email bound to another sub is identity_conflict", async () => {
 				const e = email();
 				await s.resolveSession({ email: e, user: randomUUID(), groups: [] });

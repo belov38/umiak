@@ -16,7 +16,8 @@ import type { Scope } from "./scopes.ts";
 
 // Postgres stand-in for IdentityStore until S8 (S7 plan decision 2): schema
 // `identity` of migration 0300. Its triggers send NOTIFY sbx_identity
-// '<table>:<id>' on every change, so this class never notifies itself.
+// '<collection>:<id>' (users, memberships, api-keys, ssh-keys) on every
+// change, so this class never notifies itself.
 
 export interface PgIdentityStoreOptions {
 	pool: pg.Pool;
@@ -151,16 +152,20 @@ export class PgIdentityStore implements IdentityStore {
 
 	/**
 	 * S8 §5.3: find by `sub`, else by email (and bind `sub`), else create the
-	 * user with a personal team. Writes only what changed, so a repeated call
+	 * user with a personal team. `sub` is mandatory (S8 §5.3, C8): without it
+	 * an email alone could resolve to, or create, an account that another IdP
+	 * identity later takes over. Writes only what changed, so a repeated call
 	 * with the same claims neither writes nor notifies.
 	 */
 	async resolveSession(h: SessionHeaders): Promise<SessionIdentity> {
+		const sub = h.user?.trim() ?? "";
+		if (sub === "") throw new IdentityError("subject_required");
 		const email = h.email.trim().toLowerCase();
 		const isOperator = h.groups.some((g) => this.#operatorGroups.has(g));
 		for (let attempt = 1; ; attempt++) {
 			try {
 				return await inTx(this.#pool, (c) =>
-					this.#resolve(c, email, h, isOperator),
+					this.#resolve(c, email, sub, h, isOperator),
 				);
 			} catch (e) {
 				// Concurrent first logins raced on the unique email or
@@ -176,19 +181,16 @@ export class PgIdentityStore implements IdentityStore {
 	async #resolve(
 		c: pg.PoolClient,
 		email: string,
+		sub: string,
 		h: SessionHeaders,
 		isOperator: boolean,
 	): Promise<SessionIdentity> {
-		const sub = h.user ?? null;
-		let row: UserRow | undefined;
-		if (sub !== null) {
-			row = (
-				await c.query<UserRow>(
-					`SELECT ${USER_COLS} FROM identity.users WHERE idp_subject = $1 FOR UPDATE`,
-					[sub],
-				)
-			).rows[0];
-		}
+		let row = (
+			await c.query<UserRow>(
+				`SELECT ${USER_COLS} FROM identity.users WHERE idp_subject = $1 FOR UPDATE`,
+				[sub],
+			)
+		).rows[0];
 		let userId: string;
 		if (row) {
 			userId = row.id;
@@ -203,7 +205,9 @@ export class PgIdentityStore implements IdentityStore {
 			).rows[0];
 			if (row) {
 				userId = row.id;
-				if (row.idp_subject !== null && sub !== null) {
+				// The row may have been bound to this very sub by a concurrent
+				// first login that committed while this one waited for the lock.
+				if (row.idp_subject !== null && row.idp_subject !== sub) {
 					// A new IdP account reusing the email must not get the old
 					// account's teams and keys (S8 §5.3 item 2).
 					throw new IdentityError(
@@ -212,7 +216,7 @@ export class PgIdentityStore implements IdentityStore {
 					);
 				}
 				if (!row.active) throw new IdentityError("user_disabled");
-				if (sub !== null) {
+				if (row.idp_subject === null) {
 					// First login of a seeded user: bind it, add its personal team.
 					await c.query(
 						`UPDATE identity.users SET idp_subject = $2, name = COALESCE(name, $3)
@@ -258,7 +262,7 @@ export class PgIdentityStore implements IdentityStore {
 	async #createUser(
 		c: pg.PoolClient,
 		email: string,
-		sub: string | null,
+		sub: string,
 		h: SessionHeaders,
 		isOperator: boolean,
 	): Promise<string> {

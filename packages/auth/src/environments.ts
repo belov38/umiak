@@ -1,27 +1,18 @@
 import type pg from "pg";
 import { IdentityError } from "./identity.ts";
 import { FK_VIOLATION, inTx, pgCode, UNIQUE_VIOLATION } from "./pg-util.ts";
+import {
+	applySecretPatch,
+	type SecretFile,
+	type SecretPatch,
+	type SecretSets,
+} from "./secret-sets.ts";
 
 // Environments of a team (S8 §10) in the identity stand-in (table
 // identity.environments of migration 0300) until S8. The sets are encrypted
 // with the data key ring, AAD `environment:<id>:v<keyVersion>` (S8 §10.3).
 // Limits and names are validated by the caller (apps/api); the store merges,
 // encrypts and persists.
-
-/** Same shape as SecretFile of @sbx/core (S7 §8.3). */
-export interface SecretFile {
-	name: string;
-	contentBase64: string;
-	mode?: number;
-	linkPath?: string;
-}
-
-/** Same shape as SecretSets of @sbx/core (S7 §8.3). */
-export interface SecretSets {
-	env: Record<string, string>;
-	secrets: Record<string, string>;
-	secretFiles: SecretFile[];
-}
 
 /**
  * The part of KeyRing (@sbx/core) the store needs. auth cannot import core
@@ -74,16 +65,13 @@ export interface NewEnvironment {
 }
 
 /**
- * Body of `PATCH /v1/environments/{environment}`: sets merge by key (`null`
- * deletes, files match by name and are replaced whole), repositories are
- * replaced.
+ * Body of `PATCH /v1/environments/{environment}`: sets merge by key
+ * (`applySecretPatch`: `null` deletes, files match by name and are replaced
+ * whole), repositories are replaced.
  */
-export interface EnvironmentPatch {
+export interface EnvironmentPatch extends SecretPatch {
 	name?: string;
 	isDefault?: boolean;
-	env?: Record<string, string | null>;
-	secrets?: Record<string, string | null>;
-	secretFiles?: Record<string, Omit<SecretFile, "name"> | null>;
 	repositories?: EnvironmentRepository[];
 	excludeOwnerSecrets?: boolean;
 }
@@ -151,40 +139,6 @@ function idParam(idOrName: string): string | null {
 	return UUID_RE.test(idOrName) ? idOrName : null;
 }
 
-function mergeVars(
-	base: Record<string, string>,
-	patch: Record<string, string | null> | undefined,
-): Record<string, string> {
-	// A Map avoids `__proto__` surprises: the key grammar allows that name.
-	const m = new Map(Object.entries(base));
-	for (const [k, v] of Object.entries(patch ?? {})) {
-		if (v === null) m.delete(k);
-		else m.set(k, v);
-	}
-	return Object.fromEntries(m);
-}
-
-function fileOf(name: string, f: Omit<SecretFile, "name">): SecretFile {
-	const out: SecretFile = { name, contentBase64: f.contentBase64 };
-	if (f.mode !== undefined) out.mode = f.mode;
-	if (f.linkPath !== undefined) out.linkPath = f.linkPath;
-	return out;
-}
-
-/** Same rules as applySecretPatch of @sbx/core (S7 §8.2). */
-function applyPatch(base: SecretSets, p: EnvironmentPatch): SecretSets {
-	const files = new Map(base.secretFiles.map((f) => [f.name, f]));
-	for (const [name, f] of Object.entries(p.secretFiles ?? {})) {
-		if (f === null) files.delete(name);
-		else files.set(name, fileOf(name, f));
-	}
-	return {
-		env: mergeVars(base.env, p.env),
-		secrets: mergeVars(base.secrets, p.secrets),
-		secretFiles: [...files.values()],
-	};
-}
-
 export class PgEnvironmentStore implements EnvironmentStore {
 	readonly #pool: pg.Pool;
 	readonly #keys: EnvironmentKeys;
@@ -232,11 +186,15 @@ export class PgEnvironmentStore implements EnvironmentStore {
 		input: NewEnvironment,
 		byUserId: string | null,
 	): Promise<EnvironmentRecord> {
-		const sets: SecretSets = {
-			env: { ...input.env },
-			secrets: { ...input.secrets },
-			secretFiles: (input.secretFiles ?? []).map((f) => fileOf(f.name, f)),
-		};
+		// An empty patch copies the sets (files keep only the known fields).
+		const sets = applySecretPatch(
+			{
+				env: input.env ?? {},
+				secrets: input.secrets ?? {},
+				secretFiles: input.secretFiles ?? [],
+			},
+			{},
+		);
 		this.#validate(sets);
 		const id = (
 			await this.#pool.query<{ id: string }>("SELECT uuidv7()::text AS id")
@@ -280,7 +238,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 				)
 			).rows[0];
 			if (!cur) throw new IdentityError("not_found");
-			const sets = applyPatch(this.#record(cur).sets, patch);
+			const sets = applySecretPatch(this.#record(cur).sets, patch);
 			this.#validate(sets);
 			const blob = this.#encrypt(cur.id, sets);
 			const r = await c.query<EnvRow>(

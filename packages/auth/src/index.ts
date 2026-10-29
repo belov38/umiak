@@ -5,5 +5,6 @@ export * from "./identity.ts";
 export * from "./ids.ts";
 export * from "./pg-store.ts";
 export * from "./scopes.ts";
+export * from "./secret-sets.ts";
 export * from "./seed.ts";
 export * from "./ssh.ts";

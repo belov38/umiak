@@ -9,9 +9,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type EnvironmentKeys,
 	PgEnvironmentStore,
-	type SecretSets,
 } from "../src/environments.ts";
 import { IdentityError, type IdentityErrorCode } from "../src/identity.ts";
+import type { SecretSets } from "../src/secret-sets.ts";
 
 // AES-256-GCM with the AAD layout of KeyRing in @sbx/core (S6 §13.1); auth must
 // not depend on core, so the tests carry their own ring.

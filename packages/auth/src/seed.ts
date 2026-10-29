@@ -7,7 +7,8 @@ import { PRESETS, SCOPES, type Scope } from "./scopes.ts";
 // Identity file of the stand-in (SBX_IDENTITY_FILE, S7 plan decision 2):
 // users, teams, memberships and team keys by sha256, upserted at api start.
 // Upsert only: rows missing from the file are kept, a revoked key stays
-// revoked, JIT bindings (idp_subject, personal teams) are not touched.
+// revoked, JIT bindings (idp_subject, personal teams) are not touched, and
+// the email of a user who has logged in is the IdP's, not the file's.
 //
 //   teams:   [{id, name}]
 //   users:   [{id, email, name?, active?, teams: {<teamId>: owner|member}}]
@@ -104,7 +105,9 @@ export async function seedIdentity(
 					`INSERT INTO identity.users (id, email, name, active)
 					 VALUES ($1, $2, $3, COALESCE($4, true))
 					 ON CONFLICT (id) DO UPDATE SET
-					   email = EXCLUDED.email,
+					   -- After the first login the IdP owns the email (S8 §5.3).
+					   email = CASE WHEN identity.users.idp_subject IS NULL
+					                THEN EXCLUDED.email ELSE identity.users.email END,
 					   name = COALESCE($3, identity.users.name),
 					   active = COALESCE($4, identity.users.active)`,
 					[u.id, u.email, u.name ?? null, u.active ?? null],

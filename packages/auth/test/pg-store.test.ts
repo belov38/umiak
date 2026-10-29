@@ -20,6 +20,19 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 		pgContractSubject(t.pool),
 	);
 
+	it("resolveSession without sub creates nothing", async () => {
+		const s = pgContractSubject(t.pool);
+		const e = `nosub-${randomUUID()}@example.com`;
+		await expect(s.resolveSession({ email: e, groups: [] })).rejects.toThrow(
+			"subject_required",
+		);
+		const r = await t.pool.query(
+			"SELECT 1 FROM identity.users WHERE email = $1",
+			[e],
+		);
+		expect(r.rowCount).toBe(0);
+	});
+
 	describe("NOTIFY sbx_identity", () => {
 		let listener: Pg.Client;
 		const got: string[] = [];
@@ -80,7 +93,7 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 			return { s, userId: r.user.id, teamId: r.defaultTeamId as string };
 		}
 
-		it("revoke sends api_keys:<id>; touch sends nothing", async () => {
+		it("revoke sends api-keys:<id>; touch sends nothing", async () => {
 			const { s, userId, teamId } = await ownerWithTeam();
 			const k = await s.createApiKey({
 				teamId,
@@ -94,13 +107,13 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 				last4: "1234",
 			});
 			await flush();
-			expect(count(`api_keys:${k.id}`)).toBe(1); // insert
+			expect(count(`api-keys:${k.id}`)).toBe(1); // insert
 			await s.touchApiKey(k.id);
 			await flush();
-			expect(count(`api_keys:${k.id}`)).toBe(1);
+			expect(count(`api-keys:${k.id}`)).toBe(1);
 			await s.revokeApiKey(k.id, { userId });
 			await flush();
-			expect(count(`api_keys:${k.id}`)).toBe(2);
+			expect(count(`api-keys:${k.id}`)).toBe(2);
 			const row = await t.pool.query(
 				"SELECT revoked_by, revoked_by_key FROM identity.api_keys WHERE id = $1",
 				[k.id],
@@ -113,6 +126,8 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 			await received(`users:${userId}`);
 			await received(`memberships:${userId}:${teamId}`);
 			await s.removeMember(userId, teamId);
+			await flush();
+			expect(count(`memberships:${userId}:${teamId}`)).toBe(2); // insert, delete
 			const ssh = await s.addSshKey({
 				userId,
 				name: "k",
@@ -120,10 +135,10 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 				fingerprint: `SHA256:${randomBytes(8).toString("hex")}`,
 				type: "ssh-ed25519",
 			});
-			await received(`ssh_keys:${ssh.id}`);
+			await received(`ssh-keys:${ssh.id}`);
 			await s.touchSshKey(ssh.id);
 			await flush();
-			expect(count(`ssh_keys:${ssh.id}`)).toBe(1);
+			expect(count(`ssh-keys:${ssh.id}`)).toBe(1);
 			got.length = 0;
 			await s.setActive(userId, false);
 			await received(`users:${userId}`);
@@ -249,7 +264,7 @@ apiKeys:
 			expect(await s.team(team)).toEqual({ id: team, name: "acme" });
 		});
 
-		it("keeps a revocation and a JIT binding across re-seeding", async () => {
+		it("keeps a revocation, a JIT binding and the IdP's email across re-seeding", async () => {
 			const s = pgContractSubject(t.pool);
 			await seedIdentity(t.pool, yaml);
 			await s.revokeApiKey(roKey, {});
@@ -259,11 +274,27 @@ apiKeys:
 				user: sub,
 				groups: [],
 			});
+			// The email changes in the IdP after the first login.
+			const moved = `alice-moved-${team}@example.com`;
+			await s.resolveSession({ email: moved, user: sub, groups: [] });
 			await seedIdentity(t.pool, yaml);
 			expect((await s.findApiKeyByHash(roHash))?.revokedAt).toBeInstanceOf(
 				Date,
 			);
-			expect((await s.user(alice))?.idpSubject).toBe(sub);
+			expect(await s.user(alice)).toMatchObject({
+				idpSubject: sub,
+				email: moved,
+			});
+		});
+
+		it("a secret_hash that is not lowercase sha256 hex is rejected by the table", async () => {
+			await expect(
+				t.pool.query(
+					`INSERT INTO identity.api_keys (team_id, name, secret_hash, prefix, last4, scopes, created_via, expires_at)
+					 VALUES ($1, 'x', $2, '', '', '{}', 'api', now())`,
+					[team, "A".repeat(64)],
+				),
+			).rejects.toThrow(/check constraint/);
 		});
 
 		it.each([

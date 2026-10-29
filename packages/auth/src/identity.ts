@@ -28,6 +28,7 @@ export interface SessionIdentity {
 /** Identity claims from oauth2-proxy headers or Keycloak JWT claims. */
 export interface SessionHeaders {
 	email: string;
+	/** IdP `sub`; resolveSession throws IdentityError("subject_required") without it. */
 	user?: string;
 	groups: string[];
 	preferredUsername?: string;
@@ -133,7 +134,9 @@ export type IdentityErrorCode =
 	 * bound to another `sub`, or a changed email belongs to another user.
 	 * The api answers 403; an operator resolves it.
 	 */
-	| "identity_conflict";
+	| "identity_conflict"
+	/** The IdP subject (`sub`, `X-Auth-Request-User`) is missing; the api answers 401. */
+	| "subject_required";
 
 export class IdentityError extends Error {
 	readonly code: IdentityErrorCode;

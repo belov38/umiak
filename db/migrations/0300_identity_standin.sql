@@ -44,7 +44,7 @@ CREATE TABLE identity.api_keys (
   sandbox_id     uuid,
   team_id        uuid NOT NULL REFERENCES identity.teams (id) ON DELETE CASCADE,
   name           text NOT NULL,
-  secret_hash    text NOT NULL UNIQUE,
+  secret_hash    text NOT NULL UNIQUE CHECK (secret_hash ~ '^[0-9a-f]{64}$'),
   prefix         text NOT NULL,
   last4          text NOT NULL,
   scopes         text[] NOT NULL,
@@ -96,13 +96,17 @@ CREATE TABLE identity.environments (
 CREATE UNIQUE INDEX environments_one_default ON identity.environments (team_id)
   WHERE is_default;
 
--- NOTIFY sbx_identity '<table>:<id>' after a change (S8 §8, S7 §7.2, §7.4);
--- delivered after commit, so a listener reads the new data. Memberships have a
--- composite key: 'memberships:<user_id>:<team_id>'. Updates that only touch
--- last_used_at (touchApiKey, touchSshKey) and no-op updates do not notify.
+-- NOTIFY sbx_identity '<collection>:<id>' after a change (S8 §8, S7 §7.2,
+-- §7.4) with the Payload collection names of S8 §17.3: users, memberships,
+-- api-keys, ssh-keys (the trigger argument). Delivered after commit, so a
+-- listener reads the new data. Memberships have no id in the stand-in:
+-- 'memberships:<user_id>:<team_id>'; consumers treat the id as opaque.
+-- Updates that only touch last_used_at (touchApiKey, touchSshKey) and no-op
+-- updates do not notify.
 CREATE FUNCTION identity.notify_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
+  collection text := TG_ARGV[0];
   old_key text;
   new_key text;
 BEGIN
@@ -118,20 +122,20 @@ BEGIN
     IF TG_OP <> 'DELETE' THEN new_key := NEW.id::text; END IF;
   END IF;
   IF old_key IS NOT NULL THEN
-    PERFORM pg_notify('sbx_identity', TG_TABLE_NAME || ':' || old_key);
+    PERFORM pg_notify('sbx_identity', collection || ':' || old_key);
   END IF;
   IF new_key IS NOT NULL AND new_key IS DISTINCT FROM old_key THEN
-    PERFORM pg_notify('sbx_identity', TG_TABLE_NAME || ':' || new_key);
+    PERFORM pg_notify('sbx_identity', collection || ':' || new_key);
   END IF;
   RETURN NULL;
 END;
 $$;
 
 CREATE TRIGGER users_notify AFTER INSERT OR UPDATE OR DELETE ON identity.users
-  FOR EACH ROW EXECUTE FUNCTION identity.notify_change();
+  FOR EACH ROW EXECUTE FUNCTION identity.notify_change('users');
 CREATE TRIGGER memberships_notify AFTER INSERT OR UPDATE OR DELETE ON identity.memberships
-  FOR EACH ROW EXECUTE FUNCTION identity.notify_change();
+  FOR EACH ROW EXECUTE FUNCTION identity.notify_change('memberships');
 CREATE TRIGGER api_keys_notify AFTER INSERT OR UPDATE OR DELETE ON identity.api_keys
-  FOR EACH ROW EXECUTE FUNCTION identity.notify_change();
+  FOR EACH ROW EXECUTE FUNCTION identity.notify_change('api-keys');
 CREATE TRIGGER ssh_keys_notify AFTER INSERT OR UPDATE OR DELETE ON identity.ssh_keys
-  FOR EACH ROW EXECUTE FUNCTION identity.notify_change();
+  FOR EACH ROW EXECUTE FUNCTION identity.notify_change('ssh-keys');
