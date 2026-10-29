@@ -687,7 +687,8 @@ export class Machines {
 		}
 		await this.#o.driver.delete({ kind: "machine", node: this.#node, vmid });
 		await this.verifyGone(vmid, mac);
-		await allocator.release(vmid);
+		// Only our releasing row (the lease's owner, or null for the reservation).
+		await allocator.releaseOwned(vmid, lease?.ownerId ?? null);
 	}
 
 	/** dhcp.leases, repeated while sbx-node finds the lease file in the middle of a rewrite. */

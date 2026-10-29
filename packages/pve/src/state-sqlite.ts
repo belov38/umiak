@@ -124,6 +124,19 @@ export class SqliteStateStore implements AllocatorStore, SnapshotStore {
 			.run(cluster, vmid);
 	}
 
+	removeReleasing(
+		cluster: number,
+		vmid: number,
+		ownerId: string | null,
+	): boolean {
+		const r = this.#db
+			.prepare(
+				"DELETE FROM vmid_lease WHERE cluster = ? AND vmid = ? AND state = 'releasing' AND owner_id IS ?",
+			)
+			.run(cluster, vmid, ownerId);
+		return Number(r.changes) === 1;
+	}
+
 	putSnapshot(s: SnapshotRef): void {
 		this.#db
 			.prepare(

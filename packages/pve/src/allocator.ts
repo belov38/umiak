@@ -29,6 +29,16 @@ export interface AllocatorStore {
 		state: LeaseState,
 	): MaybePromise<void>;
 	remove(cluster: number, vmid: number): MaybePromise<void>;
+	/**
+	 * Removes the row only while it is `releasing` and owned by `ownerId`
+	 * (null: an ownerless reservation); true if a row was removed. Optional:
+	 * without it the allocator reads, compares and removes.
+	 */
+	removeReleasing?(
+		cluster: number,
+		vmid: number,
+		ownerId: string | null,
+	): MaybePromise<boolean>;
 	/** Lease of the owner that is not in the releasing state, if any. */
 	findByOwner?(
 		cluster: number,
@@ -197,6 +207,23 @@ export class Allocator {
 	/** Frees the VMID and MAC. Call only after delete verified that no traces remain. */
 	async release(vmid: number): Promise<void> {
 		await this.#o.store.remove(this.#o.clusterId, vmid);
+	}
+
+	/**
+	 * The final release of a delete: frees the VMID only while its lease is
+	 * still the `releasing` one of `ownerId` (null: a delete's ownerless
+	 * reservation), so a release never frees a lease that changed hands.
+	 * False if no such row was there.
+	 */
+	async releaseOwned(vmid: number, ownerId: string | null): Promise<boolean> {
+		const { store, clusterId } = this.#o;
+		if (store.removeReleasing)
+			return store.removeReleasing(clusterId, vmid, ownerId);
+		const l = await store.get(clusterId, vmid);
+		if (l?.state !== "releasing" || (l.ownerId ?? null) !== ownerId)
+			return false;
+		await store.remove(clusterId, vmid);
+		return true;
 	}
 
 	async get(vmid: number): Promise<VmidLease | undefined> {

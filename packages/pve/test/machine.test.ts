@@ -740,6 +740,34 @@ describe("owner-checked power operations", () => {
 		expect(store.get(1, a.vmid)).toBeUndefined();
 	});
 
+	it("the final release frees only the delete's own releasing lease, not one that changed hands meanwhile", async () => {
+		const { api, machines, node, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		node.handlers["dhcp.release"] = async () => {
+			// Someone frees the lease mid-delete and another owner takes the VMID.
+			if (store.get(1, a.vmid)?.ownerId === "m-a") {
+				store.remove(1, a.vmid);
+				store.tryInsert({
+					cluster: 1,
+					vmid: a.vmid,
+					mac: "02:01:00:00:01:F4",
+					state: "reserved",
+					purpose: "machine",
+					createdAt: 0,
+					updatedAt: 0,
+					ownerId: "m-c",
+				});
+			}
+			return { released: true };
+		};
+		await machines.delete(a.vmid, { expectedOwner: "m-a" });
+		expect(api.vms.has(a.vmid)).toBe(false);
+		expect(store.get(1, a.vmid)).toMatchObject({
+			ownerId: "m-c",
+			state: "reserved",
+		});
+	});
+
 	it("an orphan delete that loses the reservation re-checks the new lease and refuses", async () => {
 		const { api, allocator, machines, store } = setup();
 		const a = await machines.create({ ownerId: "m-a" });

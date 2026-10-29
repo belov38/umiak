@@ -125,6 +125,28 @@ describe.skipIf(skipPg())("PgAllocatorStore", () => {
 		expect((await a.allocate(randomUUID())).vmid).toBe(vmid);
 	});
 
+	it("releaseOwned removes only the releasing row of the given owner (null: a reservation)", async () => {
+		const p = await newProvider("release-owned", 19);
+		const a = allocatorOf(t.pool, p);
+		const owner = randomUUID();
+		const { vmid } = await a.allocate(owner);
+		await a.markActive(vmid);
+		// Not releasing yet: nothing is freed.
+		expect(await a.releaseOwned(vmid, owner)).toBe(false);
+		await a.markReleasing(vmid);
+		// Another owner, or the ownerless reservation, does not match.
+		expect(await a.releaseOwned(vmid, randomUUID())).toBe(false);
+		expect(await a.releaseOwned(vmid, null)).toBe(false);
+		expect((await a.get(vmid))?.ownerId).toBe(owner);
+		expect(await a.releaseOwned(vmid, owner)).toBe(true);
+		expect(await a.get(vmid)).toBeUndefined();
+
+		expect(await a.reserveForDelete(vmid)).toBe(true);
+		expect(await a.releaseOwned(vmid, owner)).toBe(false);
+		expect(await a.releaseOwned(vmid, null)).toBe(true);
+		expect(await a.get(vmid)).toBeUndefined();
+	});
+
 	it("never hands out the template lease", async () => {
 		const p = await newProvider("template", 15);
 		const range = { min: 597, max: 599 };

@@ -105,6 +105,20 @@ export class PgAllocatorStore implements AllocatorStore {
 		);
 	}
 
+	async removeReleasing(
+		_cluster: number,
+		vmid: number,
+		ownerId: string | null,
+	): Promise<boolean> {
+		const res = await this.#pool.query(
+			`DELETE FROM runtime.vmid_leases
+			 WHERE provider_id = $1 AND vmid = $2 AND state = 'releasing'
+			   AND machine_id IS NOT DISTINCT FROM $3`,
+			[this.#providerId, vmid, ownerId],
+		);
+		return res.rowCount === 1;
+	}
+
 	async findByOwner(
 		cluster: number,
 		ownerId: string,

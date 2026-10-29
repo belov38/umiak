@@ -51,6 +51,21 @@ describe("Allocator", () => {
 		expect((await alloc.get(501))?.ownerId).toBe("m-a");
 	});
 
+	it("releaseOwned frees only the releasing lease of the given owner (null: a reservation)", async () => {
+		const { alloc } = make();
+		const { vmid } = await alloc.allocate("m-a");
+		expect(await alloc.releaseOwned(vmid, "m-a")).toBe(false);
+		await alloc.markReleasing(vmid);
+		expect(await alloc.releaseOwned(vmid, "m-b")).toBe(false);
+		expect(await alloc.releaseOwned(vmid, null)).toBe(false);
+		expect(await alloc.releaseOwned(vmid, "m-a")).toBe(true);
+		expect(await alloc.get(vmid)).toBeUndefined();
+		expect(await alloc.reserveForDelete(vmid)).toBe(true);
+		expect(await alloc.releaseOwned(vmid, "m-a")).toBe(false);
+		expect(await alloc.releaseOwned(vmid, null)).toBe(true);
+		expect(await alloc.get(vmid)).toBeUndefined();
+	});
+
 	it("hands out the lowest free VMID with its MAC and reserves it", async () => {
 		const { alloc, store } = make();
 		expect(await alloc.allocate()).toEqual({
@@ -212,6 +227,12 @@ describe("Allocator", () => {
 		await alloc.markReleasing(a.vmid);
 		await alloc.release(a.vmid);
 		expect(await alloc.get(a.vmid)).toBeUndefined();
+		// Without removeReleasing the allocator compares and removes itself.
+		const b = await alloc.allocate("o2");
+		await alloc.markReleasing(b.vmid);
+		expect(await alloc.releaseOwned(b.vmid, "o3")).toBe(false);
+		expect(await alloc.releaseOwned(b.vmid, "o2")).toBe(true);
+		expect(await alloc.get(b.vmid)).toBeUndefined();
 	});
 });
 
