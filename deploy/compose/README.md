@@ -64,6 +64,23 @@ docker compose -f deploy/compose/compose.yaml down -v     # чистый ста�
 - Пока нет агента (S3) и gateway (S2), создание sandbox не может дойти до `ready`: агентский порт недоступен, а без `SBX_GATEWAY_SERVICE_TOKEN_FILE` ротация токена падает по таймауту. Worker при этом предупреждает об этом в логе при старте.
 - Схема `tunnel` создаётся временной фикстурой (`migrate --tunnel-fixture`) до слияния S2; после слияния флаг убрать из `compose.yaml`.
 
+## Smoke-тест реального адаптера Proxmox
+
+`apps/worker/test/pve-smoke.test.ts` гоняет `PveInfraRegistry` против хоста `pve`: create/start/shutdown,
+snapshot и fork, два параллельных старта (power lock), reconcile в dry-run, затем удаляет всё созданное
+и сравнивает inventory sbx-node «до» и «после». Без `SBX_PVE_SMOKE=1` тест пропускается, так что
+`pnpm -r test` остаётся офлайн. Топология берётся из `config/sbx.yaml` (через `sbx-admin bootstrap`)
+в свежей тестовой базе (локальный docker Postgres из global setup).
+
+```sh
+SBX_PVE_SMOKE=1 mise exec -- pnpm --filter @sbx/worker exec vitest run test/pve-smoke.test.ts
+```
+
+- Секреты: `~/.config/sbx` (или `SBX_SECRETS_DIR`); SSH-хост sbx-node: `SBX_NODE_SSH_HOST` (по умолчанию `100.64.10.2`).
+- Создаёт VM только в диапазоне 500–598 из шаблона 599, по 2 vCPU / 2 GB, не больше двух одновременно запущенных.
+  Перед запуском в этом диапазоне не должно быть VM: тест проверяет это в начале.
+- Идёт около 90 секунд, большая часть уходит на `shutdown` (гостю шаблона не хватает 60 с, дальше идёт `stop`).
+
 ## Как добавить сервис
 
 1. Добавить блок в `services:` в `compose.yaml`; взять `<<: *service-defaults` (логирование и сеть `sbx`) и `<<: *db-env` для `DATABASE_URL`.
