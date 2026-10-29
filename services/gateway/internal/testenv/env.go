@@ -31,6 +31,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
 )
 
@@ -182,7 +183,7 @@ func (e *Env) InstanceConfig(instanceID, internalURL string) config.Config {
 		ReservedSuffixes: []string{"desktop"},
 		ReservedSlugs:    []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "sbx"},
 
-		RateLimit: config.RateLimit{
+		RateLimit: ratelimit.Config{
 			IPRate: 300, IPBurst: 2000, LabelRate: 1000, LabelBurst: 3000,
 			AuthFailPerMin: 20, AuthBlock: 5 * time.Minute, ConnsPerIP: 512,
 			SSHConnPerMin: 10, SSHConnBurst: 20, SSHAuthFailPerMin: 10, SSHSessionsPerUser: 20,

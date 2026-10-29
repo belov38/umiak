@@ -140,7 +140,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"SSHConnBurst", cfg.RateLimit.SSHConnBurst, 20},
 		{"SSHAuthFailPerMin", cfg.RateLimit.SSHAuthFailPerMin, 10},
 		{"SSHSessionsPerUser", cfg.RateLimit.SSHSessionsPerUser, 20},
-		{"RateLimitExempt", len(cfg.RateLimitExempt), 0},
+		{"RateLimitExempt", len(cfg.RateLimit.Exempt), 0},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -189,8 +189,8 @@ func TestFromEnvOverrides(t *testing.T) {
 	if len(cfg.ProxyProtocolCIDRs) != 2 || cfg.ProxyProtocolCIDRs[1] != netip.MustParsePrefix("fd00::/8") {
 		t.Errorf("ProxyProtocolCIDRs = %v", cfg.ProxyProtocolCIDRs)
 	}
-	if len(cfg.TrustedProxyCIDRs) != 1 || len(cfg.RateLimitExempt) != 1 || len(cfg.RateLimit.Exempt) != 1 {
-		t.Errorf("cidrs: %v %v", cfg.TrustedProxyCIDRs, cfg.RateLimitExempt)
+	if len(cfg.TrustedProxyCIDRs) != 1 || len(cfg.RateLimit.Exempt) != 1 {
+		t.Errorf("cidrs: %v %v", cfg.TrustedProxyCIDRs, cfg.RateLimit.Exempt)
 	}
 	if cfg.RateLimit.IPRate != 5.5 || cfg.RateLimit.AuthBlock != time.Minute {
 		t.Errorf("ratelimit = %+v", cfg.RateLimit)

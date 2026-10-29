@@ -20,6 +20,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
 )
 
 const envPrefix = "SBX_GATEWAY_"
@@ -29,23 +30,6 @@ const envPrefix = "SBX_GATEWAY_"
 type CookieKey struct {
 	ID  string
 	Key []byte
-}
-
-// RateLimit holds the rate-limit settings. Task 7 replaces it with
-// ratelimit.Config; the fields are the same minus the clock.
-type RateLimit struct {
-	IPRate             float64
-	IPBurst            int
-	LabelRate          float64
-	LabelBurst         int
-	AuthFailPerMin     int
-	AuthBlock          time.Duration
-	ConnsPerIP         int
-	SSHConnPerMin      int
-	SSHConnBurst       int
-	SSHAuthFailPerMin  int
-	SSHSessionsPerUser int
-	Exempt             []netip.Prefix
 }
 
 // Timeouts are the limits of spec section 7.7.
@@ -114,8 +98,7 @@ type Config struct {
 	ReservedSlugs    []string
 
 	// Rate limits.
-	RateLimit       RateLimit
-	RateLimitExempt []netip.Prefix
+	RateLimit ratelimit.Config
 
 	// Drain.
 	HTTPDrainDeadline time.Duration
@@ -195,8 +178,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.ReservedSuffixes = l.list("RESERVED_SUFFIXES", []string{"desktop"})
 	c.ReservedSlugs = l.list("RESERVED_SLUGS", []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "sbx"})
 
-	c.RateLimitExempt = l.cidrs("RATELIMIT_EXEMPT_CIDRS")
-	c.RateLimit = RateLimit{
+	c.RateLimit = ratelimit.Config{
 		IPRate:             l.float("RATELIMIT_IP_RATE", 300),
 		IPBurst:            l.integer("RATELIMIT_IP_BURST", 2000),
 		LabelRate:          l.float("RATELIMIT_LABEL_RATE", 1000),
@@ -208,7 +190,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		SSHConnBurst:       l.integer("RATELIMIT_SSH_CONN_BURST", 20),
 		SSHAuthFailPerMin:  l.integer("RATELIMIT_SSH_AUTH_FAIL_PER_MIN", 10),
 		SSHSessionsPerUser: l.integer("RATELIMIT_SSH_SESSIONS_PER_USER", 20),
-		Exempt:             c.RateLimitExempt,
+		Exempt:             l.cidrs("RATELIMIT_EXEMPT_CIDRS"),
 	}
 
 	c.HTTPDrainDeadline = l.duration("HTTP_DRAIN_DEADLINE", 2*time.Minute)
