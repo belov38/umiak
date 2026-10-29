@@ -170,6 +170,10 @@ const (
 	// TerminationGrace is the pod's terminationGracePeriodSeconds (spec
 	// 10.5): DrainBudget + DrainProcessMargin must fit in it.
 	TerminationGrace = 960 * time.Second
+	// MaxDrainTimeout is the largest DrainTimeout: the grace period minus
+	// 10 s, the default process bound (DrainBudget + DrainProcessMargin =
+	// 950 s).
+	MaxDrainTimeout = TerminationGrace - 10*time.Second
 )
 
 // FromEnv reads and validates the configuration. getenv is normally os.Getenv;
@@ -331,8 +335,12 @@ func (c Config) ValidateServe() error {
 	// The drain must end within the pod's grace period, with the timing
 	// the process uses (only EndpointWait is configurable).
 	if b := DrainBudget(c, gateway.Timing{EndpointWait: c.EndpointWait}) + DrainProcessMargin; b > TerminationGrace {
-		errs = append(errs, fmt.Errorf("%sSSH_DRAIN_DEADLINE: drain budget %s (endpoint wait + drain spread + longest drain deadline + margin + %s process margin) exceeds the %s grace period",
-			envPrefix, b, DrainProcessMargin, TerminationGrace))
+		errs = append(errs, fmt.Errorf("%s: drain budget %s (endpoint wait + drain spread + longest drain deadline + margin + %s process margin) exceeds the %s grace period",
+			c.drainBudgetCause(), b, DrainProcessMargin, TerminationGrace))
+	}
+	if c.DrainTimeout > MaxDrainTimeout {
+		errs = append(errs, fmt.Errorf("%sDRAIN_TIMEOUT: %s exceeds %s (the %s grace period minus %s)",
+			envPrefix, c.DrainTimeout, MaxDrainTimeout, TerminationGrace, TerminationGrace-MaxDrainTimeout))
 	}
 	if c.HTTPDrainDeadline > c.SSHDrainDeadline {
 		errs = append(errs, fmt.Errorf("%sHTTP_DRAIN_DEADLINE: %s is longer than %sSSH_DRAIN_DEADLINE (%s)",
@@ -349,6 +357,28 @@ func (c Config) ValidateServe() error {
 		need("API_TOKEN_FILE", c.APIToken)
 	}
 	return errors.Join(errs...)
+}
+
+// drainBudgetCause names the drain settings above their defaults that make
+// the drain budget: the endpoint wait, and the SSH or HTTP drain deadline
+// when it is the longest deadline of the budget. With none above its
+// default (not reachable with the default constants) it names all three.
+func (c Config) drainBudgetCause() string {
+	var names []string
+	if c.EndpointWait > DefaultEndpointWait {
+		names = append(names, envPrefix+"ENDPOINT_WAIT")
+	}
+	longest := max(c.SSHDrainDeadline, c.HTTPDrainDeadline, DefaultMaxTCPDrainDeadline)
+	if c.SSHDrainDeadline > DefaultSSHDrainDeadline && c.SSHDrainDeadline == longest {
+		names = append(names, envPrefix+"SSH_DRAIN_DEADLINE")
+	}
+	if c.HTTPDrainDeadline > DefaultHTTPDrainDeadline && c.HTTPDrainDeadline == longest {
+		names = append(names, envPrefix+"HTTP_DRAIN_DEADLINE")
+	}
+	if len(names) == 0 {
+		names = []string{envPrefix + "ENDPOINT_WAIT", envPrefix + "SSH_DRAIN_DEADLINE", envPrefix + "HTTP_DRAIN_DEADLINE"}
+	}
+	return strings.Join(names, ", ")
 }
 
 // DrainBudget is the longest a Drain takes with c and timing:

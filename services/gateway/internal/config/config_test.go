@@ -518,3 +518,82 @@ func TestFromEnvMappedCIDRs(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateServeDrainTimeout: SBX_GATEWAY_DRAIN_TIMEOUT may not exceed the
+// grace period minus 10 s (950 s, the default process bound).
+func TestValidateServeDrainTimeout(t *testing.T) {
+	f := newFixture(t)
+	f.env["SBX_GATEWAY_DRAIN_TIMEOUT"] = "950s"
+	cfg, err := FromEnv(f.getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateServe(); err != nil {
+		t.Fatalf("DRAIN_TIMEOUT=950s: %v", err)
+	}
+	cfg.DrainTimeout = 951 * time.Second
+	err = cfg.ValidateServe()
+	if err == nil || !strings.Contains(err.Error(), "SBX_GATEWAY_DRAIN_TIMEOUT") {
+		t.Fatalf("DRAIN_TIMEOUT=951s: err = %v, want one naming SBX_GATEWAY_DRAIN_TIMEOUT", err)
+	}
+}
+
+// TestValidateServeDrainBudgetCause: the drain budget error names the
+// variables set above their defaults.
+func TestValidateServeDrainBudgetCause(t *testing.T) {
+	const (
+		endpoint = "SBX_GATEWAY_ENDPOINT_WAIT"
+		ssh      = "SBX_GATEWAY_SSH_DRAIN_DEADLINE"
+		http     = "SBX_GATEWAY_HTTP_DRAIN_DEADLINE"
+	)
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*Config)
+		want    []string
+		notWant []string
+	}{
+		// 5 s + 5 s + 15 min 11 s + 10 s + 30 s = 961 s.
+		{"ssh drain deadline", func(c *Config) { c.SSHDrainDeadline = 15*time.Minute + 11*time.Second }, []string{ssh}, []string{endpoint, http}},
+		// 16 s + 5 s + 15 min + 10 s + 30 s = 961 s.
+		{"endpoint wait", func(c *Config) { c.EndpointWait = 16 * time.Second }, []string{endpoint}, []string{ssh, http}},
+		{"both", func(c *Config) {
+			c.EndpointWait = 6 * time.Second
+			c.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+		}, []string{endpoint, ssh}, []string{http}},
+		// The HTTP deadline enters the budget when it is the longest; the
+		// separate HTTP > SSH check names it too.
+		{"http drain deadline", func(c *Config) { c.HTTPDrainDeadline = 16 * time.Minute }, []string{http}, []string{endpoint, ssh}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			cfg, err := FromEnv(f.getenv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(&cfg)
+			err = cfg.ValidateServe()
+			if err == nil {
+				t.Fatal("ValidateServe passed")
+			}
+			var budget string
+			for line := range strings.SplitSeq(err.Error(), "\n") {
+				if strings.Contains(line, "drain budget") {
+					budget = line
+				}
+			}
+			if budget == "" {
+				t.Fatalf("no drain budget error in %q", err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(budget, w) {
+					t.Errorf("%q does not name %s", budget, w)
+				}
+			}
+			for _, w := range tc.notWant {
+				if strings.Contains(budget, w) {
+					t.Errorf("%q names %s", budget, w)
+				}
+			}
+		})
+	}
+}
