@@ -11,13 +11,24 @@ import {
 } from "./common.ts";
 import { compensateStart } from "./compensate.ts";
 import type { SandboxOpHandler } from "./kind.ts";
-import { finishStart, provisionStep, waitAgentStep } from "./resume.ts";
+import {
+	finishStart,
+	provisionStep,
+	resizeStep,
+	waitAgentStep,
+} from "./resume.ts";
 
-// Recover (S6 §7.8): reset (hard power cycle) → wait_agent → provision →
-// finish, like resume. Machines that never finished a claim (allocating …
-// claiming) have no recover path.
+// Recover (S6 §7.8): resize → reset (hard power cycle) → wait_agent →
+// provision → finish, like resume. Machines that never finished a claim
+// (allocating … claiming) have no recover path.
+//
+// `resize` matters after a failed resume that changed the size: the service
+// admits recover with the machine row's memory_mb, which already holds the
+// new size, while the VM config may still have the old one. A stopped VM is
+// configured to the row first, so the RAM it boots with is the RAM counted.
 
 export const RECOVER_STEPS = [
+	"resize",
 	"reset",
 	"wait_agent",
 	"provision",
@@ -40,6 +51,7 @@ export class RecoverUnsupported extends Error {
 function recoverSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 	const machine = () => currentMachine(ctx, fenced.sandboxId);
 	return [
+		resizeStep(ctx, fenced),
 		{
 			name: "reset",
 			run: async () => {

@@ -105,32 +105,48 @@ export async function finishStart(
 	if (!ok) throw new Error(`sandbox ${sandboxId}: not starting at finish`);
 }
 
+/**
+ * `resize` (resume and recover): the machine row holds the size the service
+ * admitted (RESERVED_SQL counts its memory_mb) and the VM config may still
+ * have another one (a resume that changed the size failed before or in this
+ * step). PUT config only while the VM is off; skipped otherwise.
+ */
+export function resizeStep(ctx: WorkerCtx, fenced: Fenced): Step {
+	const machine = () => currentMachine(ctx, fenced.sandboxId);
+	return {
+		name: "resize",
+		skipIf: async () => {
+			const m = await machine();
+			if (m.state !== "stopped") return true;
+			const infra = await ctx.infra.forNode(m.node_id);
+			const vmid = vmidOf(m);
+			let cur: { vcpu: number; memoryMb: number };
+			try {
+				cur = await infra.vmSize(vmid);
+			} catch (e) {
+				// A missing VM is reported as machine_lost by the start step.
+				if ((await infra.status(vmid)) === "missing") return true;
+				throw e;
+			}
+			return cur.vcpu === m.vcpu && cur.memoryMb === m.memory_mb;
+		},
+		run: async () => {
+			const m = await machine();
+			const infra = await ctx.infra.forNode(m.node_id);
+			await fenced.check();
+			await infra.configure(vmidOf(m), {
+				vcpu: m.vcpu,
+				memoryMb: m.memory_mb,
+			});
+			return { resized: { vcpu: m.vcpu, memoryMb: m.memory_mb } };
+		},
+	};
+}
+
 function resumeSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 	const machine = () => currentMachine(ctx, fenced.sandboxId);
 	return [
-		{
-			name: "resize",
-			// The service wrote a new size to the machine row; the VM config
-			// may still have the old one (also after a failed earlier resume).
-			// PUT config only while the VM is off.
-			skipIf: async () => {
-				const m = await machine();
-				if (m.state !== "stopped") return true;
-				const infra = await ctx.infra.forNode(m.node_id);
-				const cur = await infra.vmSize(vmidOf(m));
-				return cur.vcpu === m.vcpu && cur.memoryMb === m.memory_mb;
-			},
-			run: async () => {
-				const m = await machine();
-				const infra = await ctx.infra.forNode(m.node_id);
-				await fenced.check();
-				await infra.configure(vmidOf(m), {
-					vcpu: m.vcpu,
-					memoryMb: m.memory_mb,
-				});
-				return { resized: { vcpu: m.vcpu, memoryMb: m.memory_mb } };
-			},
-		},
+		resizeStep(ctx, fenced),
 		{
 			name: "start",
 			run: async () => {

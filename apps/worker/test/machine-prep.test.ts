@@ -353,9 +353,17 @@ describe("waits of the preparation", () => {
 			powerObserved: "running",
 		});
 		const id = await insertMachine(w);
+		// What the other machine's power looked like when S1 start was called.
+		const otherPowerAtStart: unknown[] = [];
+		w.useInfra(
+			spyBefore(w.infra, "start", async () => {
+				otherPowerAtStart.push((await machine(w, other)).power_observed);
+			}),
+		);
 		const run = handleMachineOp(w.ctx, { machineId: id, action: "provision" });
 
-		await new Promise((r) => setTimeout(r, 150));
+		// The VM and its disks are recorded right before the start gate.
+		await until(async () => (await activeDisks(w, id)).length > 0);
 		expect((await machine(w, id)).state).toBe("provisioning");
 		expect(w.infra.callsOf("start")).toHaveLength(0);
 
@@ -366,6 +374,8 @@ describe("waits of the preparation", () => {
 		expect(await run).toBe("done");
 		await w.agentWorld.settled();
 		expect((await machine(w, id)).state).toBe("warm");
+		// The start waited for the RAM, however long the gate took to see it.
+		expect(otherPowerAtStart).toEqual(["stopped"]);
 	});
 
 	it("waits for a clone slot of the node", async () => {
@@ -376,9 +386,21 @@ describe("waits of the preparation", () => {
 			[w.topo.nodeId],
 		);
 		const id = await insertMachine(w);
+		// Who held the slot when S1 create was called.
+		const holderAtCreate: (string | null)[] = [];
+		w.useInfra(
+			spyBefore(w.infra, "create", async () => {
+				const r = await w.pool.query<{ holder: string | null }>(
+					"SELECT holder FROM runtime.node_clone_slots WHERE node_id = $1 AND slot = 0",
+					[w.topo.nodeId],
+				);
+				holderAtCreate.push(r.rows[0]?.holder ?? null);
+			}),
+		);
 		const run = handleMachineOp(w.ctx, { machineId: id, action: "provision" });
 
-		await new Promise((r) => setTimeout(r, 150));
+		// The machine is provisioning (lease taken) before the slot wait.
+		await until(async () => (await machine(w, id)).state === "provisioning");
 		expect(w.infra.callsOf("create")).toHaveLength(0);
 
 		await w.pool.query(
@@ -387,6 +409,9 @@ describe("waits of the preparation", () => {
 		);
 		expect(await run).toBe("done");
 		expect(w.infra.callsOf("create")).toHaveLength(1);
+		// Our own holder took the freed slot; "someone" never shared it.
+		expect(holderAtCreate).toHaveLength(1);
+		expect(holderAtCreate[0]).not.toBe("someone");
 		expect(await heldCloneSlots(w)).toBe(0);
 	});
 });

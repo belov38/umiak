@@ -4,7 +4,12 @@ import { withTx } from "@sbx/db";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
-import { blockAfter, crashAfter, SimulatedCrash } from "./fakes/crash.ts";
+import {
+	blockAfter,
+	crashAfter,
+	SimulatedCrash,
+	spyBefore,
+} from "./fakes/crash.ts";
 import {
 	createWorld,
 	insertMachine,
@@ -399,6 +404,23 @@ describe("recover", () => {
 		await expectLostFreed(w, machineId);
 	});
 
+	it("from error with a stopped machine and the VM missing: machine_lost, not a resize failure", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await stoppedSandbox(w, e);
+		w.agent.fail("updateEnv", { rejected: "bad_env" });
+		const resume = await e.svc.resume(e.p, sandboxId);
+		expect(await run(w, resume.id)).toBe("failed");
+		w.infra.vms.delete(vmOf(w, machineId).vmid);
+
+		const op = await e.svc.recover(e.p, sandboxId);
+		expect(await run(w, op.id)).toBe("failed");
+		expect((await row(w, "sandboxes", sandboxId)).error_code).toBe(
+			"machine_lost",
+		);
+		expect(w.infra.callsOf("configure")).toHaveLength(0);
+	});
+
 	it("from ready: hard power cycle, new boot provisioned, ready again", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
@@ -434,6 +456,43 @@ describe("recover", () => {
 		expect((await row(w, "sandboxes", sandboxId)).state).toBe("ready");
 		expect((await row(w, "machines", machineId)).state).toBe("running");
 		expect(w.infra.callsOf("stop")).toHaveLength(stopsBefore);
+	});
+
+	it("after a failed resume that shrank the size: the VM is resized before the start (its RAM is the RAM counted)", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await readySandbox(w, e, { size: "4gb" });
+		const stop = await e.svc.stop(e.p, sandboxId);
+		expect(await run(w, stop.id)).toBe("succeeded");
+		expect(vmOf(w, machineId).memoryMb).toBe(4096);
+
+		// The resume to 2gb fails in its resize step: the row (the admitted
+		// reservation) says 2048, the VM config still 4096.
+		w.useInfra(
+			spyBefore(w.infra, "configure", async () => {
+				throw Object.assign(new Error("config refused"), {
+					code: "bad_config",
+					retryable: false,
+				});
+			}),
+		);
+		const resume = await e.svc.resume(e.p, sandboxId, { size: "2gb" });
+		expect(await run(w, resume.id)).toBe("failed");
+		w.useInfra(w.infra);
+		expect((await row(w, "sandboxes", sandboxId)).state).toBe("error");
+		expect((await row(w, "machines", machineId)).memory_mb).toBe(2048);
+		expect(vmOf(w, machineId).memoryMb).toBe(4096);
+
+		const op = await e.svc.recover(e.p, sandboxId);
+		expect(await run(w, op.id)).toBe("succeeded");
+		expect(vmOf(w, machineId).memoryMb).toBe(2048);
+		const configured = w.infra.calls.findLastIndex(
+			(c) => c.method === "configure",
+		);
+		const started = w.infra.calls.findLastIndex((c) => c.method === "start");
+		expect(configured).toBeGreaterThan(-1);
+		expect(configured).toBeLessThan(started);
+		expect(await poweredMb(w)).toBe(2048);
 	});
 
 	it("a failure: hard stop, machine stopped, sandbox error resume_failed (§6.1)", async () => {
