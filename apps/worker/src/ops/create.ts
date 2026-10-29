@@ -21,8 +21,14 @@ import {
 	sessionOf,
 	transitionSandbox,
 } from "./common.ts";
-import { compensateCreate } from "./compensate.ts";
+import { compensateCreate, compensateForkTarget } from "./compensate.ts";
 import type { SandboxOpHandler } from "./kind.ts";
+import {
+	CONSUMED_SNAPSHOT_STATES,
+	consumedForkSources,
+	deleteSnapshotLvs,
+	markSnapshot,
+} from "./snapshot-step.ts";
 
 // Create (S6 §7.3). Cold path: provision (§7.4) → boot → rotate_token →
 // claim → finish. Claim path (the API claimed a warm machine, now
@@ -38,6 +44,46 @@ export const CREATE_STEPS = [
 	"claim",
 	"finish",
 ] as const;
+
+/**
+ * Step names of a fork target's create (§7.7): the create steps, then
+ * `cleanup_source` before the final transition (it is recorded, so a crash
+ * after it does not repeat it, and the final transition stays the last
+ * fenced write). Also the list snapshot-op uses for "passed provision".
+ */
+export const FORK_TARGET_STEPS = [
+	"provision",
+	"boot",
+	"rotate_token",
+	"claim",
+	"cleanup_source",
+	"finish",
+] as const;
+
+/** A create with a parent is a fork target's (§7.1, §7.7). */
+export function isForkTarget(fenced: Fenced): boolean {
+	return fenced.op.parentOperationId !== null;
+}
+
+/**
+ * `cleanup_source`: S1 delete of the fork_source the target was cloned from
+ * (thin snapshots are independent), then the row `deleted`.
+ */
+export function cleanupSourceStep(ctx: WorkerCtx, fenced: Fenced): Step {
+	return {
+		name: "cleanup_source",
+		run: async () => {
+			const ids = await consumedForkSources(ctx.pool, fenced.sandboxId);
+			for (const id of ids) {
+				await deleteSnapshotLvs(ctx, fenced, id, CONSUMED_SNAPSHOT_STATES);
+				await fenced.tx((tx) =>
+					markSnapshot(tx, id, "deleted", CONSUMED_SNAPSHOT_STATES),
+				);
+			}
+			return { cleanedSnapshots: ids };
+		},
+	};
+}
 
 /** Preparation source of a machine: its origin snapshot (create from snapshot, fork target) or the template. */
 export function prepSourceOf(m: MachineRow): PrepSource {
@@ -184,9 +230,16 @@ export async function finishCreate(
 
 export const CREATE_OP: SandboxOpHandler = {
 	run: (ctx, fenced) =>
-		runOp(fenced, createSteps(ctx, fenced), (tx) =>
-			finishCreate(tx, fenced.sandboxId, fenced.id),
+		runOp(
+			fenced,
+			isForkTarget(fenced)
+				? [...createSteps(ctx, fenced), cleanupSourceStep(ctx, fenced)]
+				: createSteps(ctx, fenced),
+			(tx) => finishCreate(tx, fenced.sandboxId, fenced.id),
 		),
 	retry: retryClaim,
-	compensate: compensateCreate,
+	compensate: (ctx, fenced, error) =>
+		isForkTarget(fenced)
+			? compensateForkTarget(ctx, fenced, error)
+			: compensateCreate(ctx, fenced, error),
 };

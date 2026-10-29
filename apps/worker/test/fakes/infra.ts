@@ -280,8 +280,16 @@ export class FakeInfra implements NodeInfra {
 		vmid: number,
 		opts: { lvId: string; hook?: QuiesceHook },
 	): Promise<InfraSnapshotResult> {
-		this.#call("snapshot", vmid, { lvId: opts.lvId });
+		this.#call("snapshot", vmid, { lvId: opts.lvId, hook: !!opts.hook });
 		const vm = this.#vm(vmid);
+		// As sbx-node lv.snapshot: an LV of that name must not exist yet.
+		if (
+			[...this.lvs.values()].some((l) =>
+				l.tags.includes(`sbx-snap-${opts.lvId}`),
+			)
+		) {
+			throw new Error(`snapshot ${opts.lvId}: LV already exists`);
+		}
 		const running = vm.status === "running";
 		if (running && opts.hook) await opts.hook.freeze();
 		try {

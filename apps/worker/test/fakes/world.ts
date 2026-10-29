@@ -122,7 +122,7 @@ export class FakeAgentWorld implements VmLifecycle {
 				randomUUID(),
 				bootId,
 				randomUUID(),
-				["process.v1", "system.claim.v1"],
+				["process.v1", "system.claim.v1", "system.quiesce.v1"],
 			],
 		);
 		const epoch = Number(s.rows[0]?.epoch ?? 1);
@@ -179,6 +179,36 @@ export class FakeAgentWorld implements VmLifecycle {
 		const n = (this.#seq.get(machineId) ?? 0) + 1;
 		this.#seq.set(machineId, n);
 		return n;
+	}
+
+	/**
+	 * An agent event on the machine's current boot (next seq), ingested
+	 * through core and processed like a boot's events.
+	 */
+	async emit(machineId: string, type: string, payload: unknown): Promise<void> {
+		const r = await this.#pool.query<{ boot_id: string }>(
+			"SELECT boot_id FROM tunnel.tunnel_sessions WHERE machine_id = $1",
+			[machineId],
+		);
+		const bootId = r.rows[0]?.boot_id;
+		if (bootId === undefined)
+			throw new Error(`machine ${machineId}: no session`);
+		await ingestAgentEvents(this.#pool, this.#jobs, {
+			machineId,
+			events: [
+				{
+					seq: this.#nextSeq(machineId),
+					bootId,
+					type,
+					time: new Date(),
+					payload,
+				},
+			],
+			synthetic: [],
+		});
+		if (this.processEvents && this.ctx) {
+			await handleMachineEvents(this.ctx, { machineId });
+		}
 	}
 
 	async powerOff(machineId: string): Promise<void> {

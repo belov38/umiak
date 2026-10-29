@@ -1,12 +1,14 @@
-// Crash matrix (Task 10a): for create (cold and from a snapshot), delete,
-// stop, resume and recover, a crash right after the side-effecting port call
+// Crash matrix (Tasks 10a, 10b): for create (cold and from a snapshot),
+// delete, stop, resume, recover, fork (source side), the fork target's create
+// and save_snapshot, a crash right after the side-effecting port call
 // of every step (the effect happened, the step was not recorded), then the job
 // is redelivered. The end state must equal the end state without a crash, and
 // the fake must hold no extra VMs, LVs or leases.
 //
 // Steps without a port call (create boot/finish, stop verify/finish, resume
-// wait_agent/finish, delete retire/ports/secrets/finish) are repeated by the
-// same redelivery: the crash of the previous step leaves them unrecorded too.
+// wait_agent/finish, delete retire/ports/secrets/finish, the fork hand-off,
+// the save's name move) are repeated by the same redelivery: the crash of the
+// previous step leaves them unrecorded too.
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
@@ -14,6 +16,7 @@ import { crashAfter, SimulatedCrash } from "./fakes/crash.ts";
 import { createWorld, insertSnapshot, type TestWorld } from "./fakes/world.ts";
 import {
 	createSandbox,
+	forkSandbox,
 	infraState,
 	machinesOf,
 	type OpsEnv,
@@ -42,7 +45,11 @@ type OpName =
 	| "delete"
 	| "stop"
 	| "resume"
-	| "recover";
+	| "recover"
+	| "fork"
+	| "fork_target"
+	| "fork_target_gone"
+	| "save_snapshot";
 
 interface Started {
 	sandboxId: string;
@@ -90,6 +97,30 @@ const SETUP: Record<OpName, (w: TestWorld, e: OpsEnv) => Promise<Started>> = {
 		const { sandboxId } = await readySandbox(w, e);
 		const op = await e.svc.recover(e.p, sandboxId);
 		return { sandboxId, operationId: op.id };
+	},
+	fork: async (w, e) => {
+		const { sandboxId } = await readySandbox(w, e);
+		const f = await forkSandbox(e, sandboxId);
+		return { sandboxId, operationId: f.forkOpId };
+	},
+	fork_target: async (w, e) => {
+		const { sandboxId } = await readySandbox(w, e);
+		const f = await forkSandbox(e, sandboxId, { secrets: { EXTRA: "x" } });
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+		return { sandboxId: f.targetId, operationId: f.createOpId };
+	},
+	// The target was deleted before the hand-off: the fork deletes the snapshot.
+	fork_target_gone: async (w, e) => {
+		const { sandboxId } = await readySandbox(w, e);
+		const f = await forkSandbox(e, sandboxId);
+		const del = await e.svc.delete(e.p, f.targetId);
+		expect(await run(w, del.id)).toBe("succeeded");
+		return { sandboxId, operationId: f.forkOpId };
+	},
+	save_snapshot: async (w, e) => {
+		const { sandboxId } = await readySandbox(w, e);
+		const r = await e.svc.saveSnapshot(e.p, sandboxId, "base");
+		return { sandboxId, operationId: r.operation.id };
 	},
 };
 
@@ -157,6 +188,35 @@ const CASES: Case[] = [
 	{ op: "recover", step: "reset", port: "infra", method: "start" },
 	{ op: "recover", step: "provision", port: "agent", method: "updateEnv" },
 	{ op: "recover", step: "provision", port: "agent", method: "updateSecrets" },
+	{ op: "fork", step: "snapshot", port: "infra", method: "snapshot" },
+	{ op: "fork_target", step: "provision", port: "infra", method: "fork" },
+	{ op: "fork_target", step: "provision", port: "infra", method: "start" },
+	{
+		op: "fork_target",
+		step: "rotate_token",
+		port: "gateway",
+		method: "rotateToken",
+	},
+	{ op: "fork_target", step: "claim", port: "agent", method: "claim" },
+	{
+		op: "fork_target",
+		step: "cleanup_source",
+		port: "infra",
+		method: "deleteSnapshot",
+	},
+	{
+		op: "fork_target_gone",
+		step: "snapshot",
+		port: "infra",
+		method: "snapshot",
+	},
+	{
+		op: "fork_target_gone",
+		step: "finish (target gone)",
+		port: "infra",
+		method: "deleteSnapshot",
+	},
+	{ op: "save_snapshot", step: "snapshot", port: "infra", method: "snapshot" },
 ];
 
 function wrap(w: TestWorld, port: Port, method: string): void {
@@ -177,6 +237,12 @@ async function summary(w: TestWorld, started: Started) {
 		.map((m) => m.state)
 		.sort();
 	const infra = await infraState(w);
+	const snaps = await w.pool.query<{ d: string }>(
+		`SELECT kind || ':' || state || ':' || coalesce(consistency, '-') || ':' ||
+		        coalesce(name, '-') AS d
+		 FROM runtime.snapshots WHERE provider_id = $1`,
+		[w.topo.providerId],
+	);
 	const current = s.machine_id as string;
 	const m = await row(w, "machines", current);
 	return {
@@ -195,7 +261,19 @@ async function summary(w: TestWorld, started: Started) {
 		vmsOfMachine: w.infra.vmsOf(current).length,
 		lvs: infra.lvs.length,
 		leases: infra.leases,
+		snapshots: snaps.rows.map((x) => x.d).sort(),
+		/** A fork hands its target over once: the target create has a deadline. */
+		childDeadlines: await childDeadlines(w, started.operationId),
 	};
+}
+
+async function childDeadlines(w: TestWorld, operationId: string) {
+	const r = await w.pool.query<{ state: string; has_deadline: boolean }>(
+		`SELECT state, deadline_at IS NOT NULL AS has_deadline
+		 FROM runtime.operations WHERE parent_operation_id = $1`,
+		[operationId],
+	);
+	return r.rows.map((x) => `${x.state}:${x.has_deadline}`);
 }
 
 async function baseline(op: OpName) {
@@ -253,6 +331,40 @@ describe("crash matrix", () => {
 			sandbox: "ready",
 			provisionedOnCurrentBoot: true,
 			vms: ["running:2x2048"],
+		});
+		expect(baselines.get("fork")).toMatchObject({
+			sandbox: "ready",
+			operation: "succeeded",
+			vms: ["running:2x2048"],
+			lvs: 2,
+			leases: 1,
+			snapshots: ["fork_source:ready:quiesced:-"],
+			childDeadlines: ["pending:true"],
+		});
+		expect(baselines.get("fork_target")).toMatchObject({
+			sandbox: "ready",
+			operation: "succeeded",
+			machines: ["running"],
+			provisionedOnCurrentBoot: true,
+			vms: ["running:2x2048", "running:2x2048"],
+			lvs: 2,
+			leases: 2,
+			snapshots: ["fork_source:deleted:quiesced:-"],
+		});
+		expect(baselines.get("fork_target_gone")).toMatchObject({
+			sandbox: "ready",
+			operation: "succeeded",
+			lvs: 1,
+			leases: 1,
+			snapshots: ["fork_source:deleted:quiesced:-"],
+			childDeadlines: ["superseded:false"],
+		});
+		expect(baselines.get("save_snapshot")).toMatchObject({
+			sandbox: "ready",
+			operation: "succeeded",
+			lvs: 2,
+			leases: 1,
+			snapshots: ["saved:ready:quiesced:base"],
 		});
 	});
 

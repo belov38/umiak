@@ -5,6 +5,11 @@ import type { WorkerCtx } from "../context.ts";
 import type { MachineRow } from "../db.ts";
 import type { Fenced, OperationError } from "../steps.ts";
 import { currentMachine, hardStop, sandboxToError } from "./common.ts";
+import {
+	consumedForkSources,
+	deleteSnapshotLvs,
+	markSnapshot,
+} from "./snapshot-step.ts";
 
 // Compensation of failed operations (S6 §7.1, §7.3, §7.5, §7.6, §15.1). Each
 // function undoes infrastructure first (outside a transaction), then ends the
@@ -107,14 +112,19 @@ export async function sendMachineDelete(
 	);
 }
 
-/** Create (§7.3): machines → `deleting`, sandbox `creating → error` (`create_failed`). */
+/**
+ * Create (§7.3): machines → `deleting`, sandbox `creating → error`
+ * (`create_failed`). `extra` runs in the same fenced transaction.
+ */
 export async function compensateCreate(
 	ctx: WorkerCtx,
 	fenced: Fenced,
 	error: OperationError,
+	extra?: (tx: Tx) => Promise<void>,
 ): Promise<void> {
 	const code = sandboxErrorCode("create_failed", error);
 	await fenced.finish("failed", error, async (tx) => {
+		await extra?.(tx);
 		await deleteSandboxMachines(
 			ctx,
 			tx,
@@ -130,6 +140,27 @@ export async function compensateCreate(
 			error.message,
 			errorData(fenced, error),
 		);
+	});
+}
+
+/**
+ * Create of a fork target (§7.7 ownership): as create, and the fork_source it
+ * owns since the hand-off is deleted (S1 first, the row in the final
+ * transaction).
+ */
+export async function compensateForkTarget(
+	ctx: WorkerCtx,
+	fenced: Fenced,
+	error: OperationError,
+): Promise<void> {
+	const ids = await consumedForkSources(ctx.pool, fenced.sandboxId);
+	for (const id of ids) {
+		await deleteSnapshotLvs(ctx, fenced, id, ["ready", "failed", "deleting"]);
+	}
+	await compensateCreate(ctx, fenced, error, async (tx) => {
+		for (const id of ids) {
+			await markSnapshot(tx, id, "deleted", ["ready", "failed", "deleting"]);
+		}
 	});
 }
 

@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	type CreateInput,
+	type ForkInput,
 	type Principal,
 	SandboxServiceImpl,
 	SCOPES,
@@ -192,4 +193,68 @@ export function restorePorts(w: TestWorld): void {
 	w.useInfra(w.infra);
 	w.ctx.agent = w.agent;
 	w.ctx.gateway = w.gateway;
+}
+
+export interface Forked {
+	sourceId: string;
+	targetId: string;
+	/** The `fork` operation on the source. */
+	forkOpId: string;
+	/** The target's `create` (child of the fork). */
+	createOpId: string;
+}
+
+export async function forkSandbox(
+	e: OpsEnv,
+	sourceId: string,
+	input: ForkInput = {},
+	idemKey?: string,
+): Promise<Forked> {
+	const r = await e.svc.fork(e.p, sourceId, input, idemKey);
+	return {
+		sourceId,
+		targetId: r.sandbox.id,
+		forkOpId: r.sourceOperation.id,
+		createOpId: r.operation.id,
+	};
+}
+
+/** `sandbox-op` jobs sent for an operation. */
+export function sandboxOpJobs(w: TestWorld, operationId: string) {
+	return w.jobs.sent.filter(
+		(j) => j.queue === "sandbox-op" && j.data.operationId === operationId,
+	);
+}
+
+/** The snapshot rows of a source sandbox or a fork target. */
+export async function snapshotsOf(
+	w: TestWorld,
+	sandboxId: string,
+): Promise<Record<string, unknown>[]> {
+	const r = await w.pool.query(
+		`SELECT * FROM runtime.snapshots
+		 WHERE source_sandbox_id = $1 OR consumer_sandbox_id = $1
+		 ORDER BY created_at, id`,
+		[sandboxId],
+	);
+	return r.rows;
+}
+
+/** LVs of a snapshot in the fake (tag `sbx-snap-<lvId>`). */
+export function snapshotLvs(w: TestWorld, lvId: string): string[] {
+	return [...w.infra.lvs.values()]
+		.filter((l) => l.tags.includes(`sbx-snap-${lvId}`))
+		.map((l) => l.name);
+}
+
+/** Marks the machine's tunnel session disconnected (the agent is unreachable). */
+export async function disconnectAgent(
+	w: TestWorld,
+	machineId: string,
+): Promise<void> {
+	await w.pool.query(
+		`UPDATE tunnel.tunnel_sessions SET state = 'disconnected', disconnected_at = now()
+		 WHERE machine_id = $1`,
+		[machineId],
+	);
 }

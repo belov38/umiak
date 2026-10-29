@@ -4,10 +4,12 @@ import { operationErrorOf } from "../ops/common.ts";
 import { markCompensating, pendingCompensation } from "../ops/compensate.ts";
 import { CREATE_OP } from "../ops/create.ts";
 import { DELETE_OP } from "../ops/delete.ts";
+import { FORK_OP } from "../ops/fork.ts";
 import type { SandboxOpHandler } from "../ops/kind.ts";
 import { RECOVER_OP } from "../ops/recover.ts";
 import { REPROVISION_OP } from "../ops/reprovision.ts";
 import { RESUME_OP } from "../ops/resume.ts";
+import { SAVE_SNAPSHOT_OP } from "../ops/save-snapshot.ts";
 import { STOP_OP } from "../ops/stop.ts";
 import { isPermanent } from "../ports.ts";
 import {
@@ -24,7 +26,7 @@ export interface SandboxOpData {
 	operationId: string;
 }
 
-/** Operation kinds and their handlers. Task 10b adds fork and save_snapshot. */
+/** Operation kinds and their handlers. */
 export const SANDBOX_OPS: Partial<Record<OperationKind, SandboxOpHandler>> = {
 	create: CREATE_OP,
 	delete: DELETE_OP,
@@ -32,6 +34,8 @@ export const SANDBOX_OPS: Partial<Record<OperationKind, SandboxOpHandler>> = {
 	resume: RESUME_OP,
 	recover: RECOVER_OP,
 	reprovision: REPROVISION_OP,
+	fork: FORK_OP,
+	save_snapshot: SAVE_SNAPSHOT_OP,
 };
 
 /** `skipped`: unknown, terminal, or a child waiting for its parent. */

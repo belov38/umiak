@@ -39,6 +39,8 @@ export class FakeAgent implements AgentPort {
 	readonly calls: AgentCall[] = [];
 	/** Activity per machine (default all zero). */
 	readonly activityOf = new Map<string, AgentActivity>();
+	/** Runs after a successful thaw of a quiesce hook (e.g. a watchdog event). */
+	onThaw: ((machineId: string) => Promise<void>) | undefined;
 	readonly #failures = new Map<
 		AgentMethod,
 		{ failure: AgentFailure; times: number }
@@ -103,7 +105,10 @@ export class FakeAgent implements AgentPort {
 		return {
 			freeze: async () =>
 				this.#record({ method: "freeze", machineId, args: { leaseMs } }),
-			thaw: async () => this.#record({ method: "thaw", machineId }),
+			thaw: async () => {
+				this.#record({ method: "thaw", machineId });
+				await this.onThaw?.(machineId);
+			},
 		};
 	}
 

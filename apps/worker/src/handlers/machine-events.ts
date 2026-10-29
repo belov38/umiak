@@ -14,8 +14,8 @@ import { type MachineRow, withMachineLocked } from "../db.ts";
 // go by `seq`, synthetic ones by `time`. Connection state is read from
 // tunnel_sessions, not from the event order (S2).
 //
-// This task handles `connected` and agent `phase`; Task 11 adds the other
-// kinds to the tables below. Events without a handler are marked processed.
+// This task handles `connected`, agent `phase` and `quiesce.watchdog_thawed`
+// (Task 10b); Task 11 adds the other kinds to the tables below. Events without a handler are marked processed.
 
 export interface MachineEventsData {
 	machineId: string;
@@ -58,6 +58,7 @@ const SYNTHETIC: Partial<Record<SyntheticEventType, SyntheticHandler>> = {
 
 const AGENT: { [K in AgentEventKind]?: AgentHandler<K> } = {
 	phase: onPhase,
+	quiesce_watchdog_thawed: onQuiesceWatchdogThawed,
 };
 
 /** Returns the number of events processed. */
@@ -191,4 +192,31 @@ async function onPhase(
 	m.ready_boot_id = row.boot_id;
 	m.agent_phase = "pool_ready";
 	if (toWarm) m.state = "warm";
+}
+
+/**
+ * §10.2 `quiesce.watchdog_thawed`: an alarm metric, and a snapshot of this
+ * machine in `creating` is marked `quiesce_broken`. The operation is not
+ * touched: its snapshot step checks the flag after the thaw (§7.7).
+ */
+async function onQuiesceWatchdogThawed(
+	s: EventScope,
+	_e: Extract<AgentEvent, { kind: "quiesce_watchdog_thawed" }>,
+	row: AgentRow,
+): Promise<void> {
+	const r = await s.tx.client.query<{ id: string }>(
+		`UPDATE runtime.snapshots SET quiesce_broken = true, version = version + 1
+		 WHERE source_machine_id = $1 AND state = 'creating'
+		 RETURNING id`,
+		[s.machine.id],
+	);
+	s.ctx.metrics.inc("sbx_quiesce_watchdog_thawed_total");
+	s.ctx.log.warn(
+		{
+			machineId: s.machine.id,
+			bootId: row.boot_id,
+			snapshots: r.rows.map((x) => x.id),
+		},
+		"the agent's quiesce watchdog thawed the guest",
+	);
 }

@@ -4,6 +4,7 @@ import { handleMachineOp } from "../handlers/machine-op.ts";
 import { type Fenced, FencedOut, MachineFence } from "../steps.ts";
 import { runOp, transitionSandbox } from "./common.ts";
 import type { SandboxOpHandler } from "./kind.ts";
+import { enqueueOrphanedChildren } from "./snapshot-step.ts";
 
 // Delete (S6 §7.2): works by the actual state, not by the plan of the
 // superseded operation. Every machine with this sandbox_id that is not
@@ -171,6 +172,8 @@ function deleteSteps(ctx: WorkerCtx, fenced: Fenced) {
  * handed them over (not `creating`: while creating, the source's fork owns
  * them, §7.7), and every snapshot still `creating` from this sandbox (its own
  * fork or save was superseded). Saved snapshots that are ready survive.
+ * Then the pending creates of fork targets whose fork this delete superseded
+ * get their job, so their handler fails them `fork_failed`.
  */
 async function deleteOwnedSnapshots(
 	ctx: WorkerCtx,
@@ -204,6 +207,7 @@ async function deleteOwnedSnapshots(
 			);
 		});
 	}
+	await fenced.tx((tx) => enqueueOrphanedChildren(ctx, tx, fenced.sandboxId));
 }
 
 export const DELETE_OP: SandboxOpHandler = {
