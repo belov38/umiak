@@ -95,5 +95,6 @@ export const RECOVER_OP: SandboxOpHandler = {
 			finishStart(tx, fenced.sandboxId, fenced.id, "recover_done"),
 		),
 	compensate: (ctx, fenced, error) =>
-		compensateStart(ctx, fenced, error, "recover_failed"),
+		// §6.1: starting -> error is `resume_failed` for recover too.
+		compensateStart(ctx, fenced, error, "resume_failed"),
 };

@@ -205,3 +205,16 @@ export function isRetryable(e: unknown): boolean {
 		(e as { retryable?: unknown }).retryable === true
 	);
 }
+
+/**
+ * True only for errors that say `retryable === false` (domain errors of the
+ * ports, the step engine and core). Anything else, including database and
+ * socket errors, is transient for sandbox operations.
+ */
+export function isPermanent(e: unknown): boolean {
+	return (
+		typeof e === "object" &&
+		e !== null &&
+		(e as { retryable?: unknown }).retryable === false
+	);
+}

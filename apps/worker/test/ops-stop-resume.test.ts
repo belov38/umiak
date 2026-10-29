@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { stepRequestId } from "@sbx/core";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
+import { blockAfter, crashAfter, SimulatedCrash } from "./fakes/crash.ts";
 import { createWorld, insertOperation, type TestWorld } from "./fakes/world.ts";
 import {
 	ENV,
@@ -95,6 +97,28 @@ describe("stop", () => {
 		expect(w.infra.callsOf("stop")).toHaveLength(1);
 		expect(vmOf(w, machineId).status).toBe("stopped");
 		expect((await row(w, "sandboxes", sandboxId)).state).toBe("stopped");
+	});
+
+	it("a machine that left running/stopping before finish: machine_lost, not stopped", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await readySandbox(w, e);
+		const blocked = blockAfter(w.infra, "shutdown");
+		w.useInfra(blocked.port);
+		const op = await e.svc.stop(e.p, sandboxId);
+		const pending = handleSandboxOp(w.ctx, { operationId: op.id });
+		await blocked.reached;
+		await w.pool.query(
+			"UPDATE runtime.machines SET state = 'failed' WHERE id = $1",
+			[machineId],
+		);
+		blocked.release();
+
+		expect(await pending).toBe("failed");
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(s.state).toBe("error");
+		expect(s.error_code).toBe("machine_lost");
+		expect((await row(w, "operations", op.id)).error_code).toBe("machine_lost");
 	});
 
 	it("past its deadline: sandbox error stop_failed", async () => {
@@ -211,6 +235,36 @@ describe("resume", () => {
 		expect((await row(w, "sandboxes", sandboxId)).state).toBe("ready");
 	});
 
+	it("a crash inside compensation (after the hard stop) is finished by the next attempt with the original error", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await stoppedSandbox(w, e);
+		w.agent.fail("updateEnv", { rejected: "bad_env" });
+		w.useInfra(crashAfter(w.infra, "stop"));
+		const op = await e.svc.resume(e.p, sandboxId);
+
+		await expect(
+			handleSandboxOp(w.ctx, { operationId: op.id }),
+		).rejects.toBeInstanceOf(SimulatedCrash);
+		const mid = await row(w, "operations", op.id);
+		expect(mid.state).toBe("running");
+		expect(mid.progress).toMatchObject({ compensating: "bad_env" });
+		expect(vmOf(w, machineId).status).toBe("stopped");
+		w.useInfra(w.infra);
+
+		expect(await run(w, op.id)).toBe("failed");
+
+		const done = await row(w, "operations", op.id);
+		expect(done.error_code).toBe("bad_env");
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(s.state).toBe("error");
+		expect(s.error_code).toBe("resume_failed");
+		expect((await row(w, "machines", machineId)).state).toBe("stopped");
+		// The steps did not run again.
+		expect(w.agent.callsOf("updateEnv")).toHaveLength(1);
+		expect(w.infra.callsOf("start")).toHaveLength(2); // create + this resume
+	});
+
 	it("past its deadline: hard stop and resume_failed", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
@@ -264,6 +318,23 @@ describe("recover", () => {
 		expect((await row(w, "sandboxes", sandboxId)).state).toBe("ready");
 		expect((await row(w, "machines", machineId)).state).toBe("running");
 		expect(w.infra.callsOf("stop")).toHaveLength(stopsBefore);
+	});
+
+	it("a failure: hard stop, machine stopped, sandbox error resume_failed (§6.1)", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await readySandbox(w, e);
+		w.agent.fail("updateSecrets", { rejected: "bad_secrets" });
+
+		const op = await e.svc.recover(e.p, sandboxId);
+		expect(await run(w, op.id)).toBe("failed");
+
+		const s = await row(w, "sandboxes", sandboxId);
+		expect((await row(w, "operations", op.id)).error_code).toBe("bad_secrets");
+		expect(s.state).toBe("error");
+		expect(s.error_code).toBe("resume_failed");
+		expect((await row(w, "machines", machineId)).state).toBe("stopped");
+		expect(vmOf(w, machineId).status).toBe("stopped");
 	});
 
 	it("a machine with no recover path: failed recover_unsupported, the machine is left alone", async () => {

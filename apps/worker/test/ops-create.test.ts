@@ -18,6 +18,7 @@ import {
 	run,
 	SECRETS,
 	sessionBoot,
+	until,
 	warmMachine,
 } from "./helpers/ops.ts";
 
@@ -217,6 +218,45 @@ describe("create, cold path", () => {
 		expect(w.infra.calls).toEqual([]);
 	});
 
+	it("a database error (40P01) is transient: thrown, no compensation, the op stays running", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, operationId } = await createSandbox(w, e);
+		w.useInfra(
+			spyBefore(w.infra, "create", async () => {
+				throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+			}),
+		);
+
+		await expect(handleSandboxOp(w.ctx, { operationId })).rejects.toThrow(
+			"deadlock detected",
+		);
+
+		const op = await row(w, "operations", operationId);
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(op.state).toBe("running");
+		expect(op.error_code).toBeNull();
+		expect(op.progress).not.toHaveProperty("compensating");
+		expect(s.state).toBe("creating");
+		expect(await machinesOf(w, sandboxId)).toEqual([
+			{ id: s.machine_id, state: "provisioning" },
+		]);
+		expect(w.jobs.sent.filter((j) => j.queue === "machine-op")).toEqual([]);
+
+		// Once the deadline has passed, the next attempt compensates.
+		await expireDeadline(w, operationId);
+		expect(await run(w, operationId)).toBe("failed");
+		expect((await row(w, "operations", operationId)).error_code).toBe(
+			"deadline_exceeded",
+		);
+		const after = await row(w, "sandboxes", sandboxId);
+		expect(after.state).toBe("error");
+		expect(after.error_code).toBe("create_failed");
+		expect(await machinesOf(w, sandboxId)).toEqual([
+			{ id: s.machine_id, state: "deleting" },
+		]);
+	});
+
 	it("dead letter: failed retries_exhausted, the machine is deleted", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
@@ -341,6 +381,35 @@ describe("create, pool claim path", () => {
 		const left = (op.deadline_at as Date).getTime() - Date.now();
 		expect(left).toBeGreaterThan(5 * 60_000);
 		expect(claimsOf(w).map((c) => c.machineId)).toEqual([warm, m.id]);
+	});
+
+	it("cold retry on a node that fits exactly one machine: the rejected machine's RAM is freed first", async () => {
+		const w = await createWorld(db, { ramCapMb: 2048 });
+		const e = opsEnv(w);
+		const warm = await warmMachine(w);
+		w.agent.fail("claim", { rejected: "bad_state" }, 1);
+		const { sandboxId, operationId } = await createSandbox(w, e);
+
+		const create = handleSandboxOp(w.ctx, { operationId });
+		// The new machine waits at the start gate until the rejected one is
+		// powered off by its machine-op delete.
+		await until("rejected machine deleting", async () => {
+			return (await row(w, "machines", warm)).state === "deleting";
+		});
+		expect(
+			await handleMachineOp(w.ctx, { machineId: warm, action: "delete" }),
+		).toBe("done");
+		expect(await create).toBe("succeeded");
+		await w.agentWorld.settled();
+
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(s.state).toBe("ready");
+		expect(s.machine_id).not.toBe(warm);
+		expect((await row(w, "machines", warm)).state).toBe("deleted");
+		expect((await row(w, "machines", s.machine_id as string)).state).toBe(
+			"running",
+		);
+		expect(await infraState(w)).toMatchObject({ vms: 1, leases: 1 });
 	});
 
 	it("failFast: a rejected claim is retried only from the pool; none left → create_failed", async () => {

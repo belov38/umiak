@@ -127,13 +127,16 @@ export const STOP_OP: SandboxOpHandler = {
 				[fenced.sandboxId],
 			);
 			const machineId = s.rows[0]?.machine_id ?? null;
-			await tx.client.query(
+			const m = await tx.client.query(
 				`UPDATE runtime.machines
 				 SET state = 'stopped', power_observed = 'stopped', power_observed_at = now(),
 				     state_changed_at = now(), version = version + 1
 				 WHERE id = $1 AND state IN ('running', 'stopping')`,
 				[machineId],
 			);
+			if (m.rowCount !== 1) {
+				throw new MachineGone(machineId ?? "-", "not stopping at finish");
+			}
 			// The guest is off: nothing that ran on it survives.
 			await tx.client.query(
 				`UPDATE runtime.commands SET status = 'lost', ended_at = now()

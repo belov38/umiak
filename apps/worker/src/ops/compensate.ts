@@ -1,3 +1,4 @@
+import type { Operation } from "@sbx/core";
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import type { Tx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
@@ -9,6 +10,46 @@ import { currentMachine, hardStop, sandboxToError } from "./common.ts";
 // function undoes infrastructure first (outside a transaction), then ends the
 // operation `failed` and moves rows in one fenced transaction, so a repeat
 // after a crash does the same again.
+
+/**
+ * Records `progress.compensating = <error code>` (and the message) under the
+ * fence before any compensation work, so a crash inside compensation makes
+ * the next attempt finish it with the original error instead of running the
+ * steps again.
+ */
+export async function markCompensating(
+	fenced: Fenced,
+	error: OperationError,
+): Promise<void> {
+	await fenced.tx(async (tx) => {
+		await tx.client.query(
+			`UPDATE runtime.operations
+			 SET progress = progress || $3::jsonb, version = version + 1
+			 WHERE id = $1 AND attempt = $2 AND state = 'running'`,
+			[
+				fenced.id,
+				fenced.attempt,
+				JSON.stringify({
+					compensating: error.code,
+					compensatingMessage: error.message,
+				}),
+			],
+		);
+	});
+	await fenced.check();
+}
+
+/** The error of a compensation an earlier attempt started, or null. */
+export function pendingCompensation(op: Operation): OperationError | null {
+	const code = op.progress.compensating;
+	if (typeof code !== "string") return null;
+	const message = op.progress.compensatingMessage;
+	return {
+		code,
+		message: typeof message === "string" ? message : code,
+		retryable: false,
+	};
+}
 
 /** `machine_lost` (§6.1) wins over the operation's own sandbox error code. */
 export function sandboxErrorCode(
@@ -150,7 +191,7 @@ export async function compensateStart(
 	ctx: WorkerCtx,
 	fenced: Fenced,
 	error: OperationError,
-	fallback: "resume_failed" | "recover_failed",
+	fallback: "resume_failed",
 ): Promise<void> {
 	const m = await machineOrNull(ctx, fenced.sandboxId);
 	const untouched = error.code === "recover_unsupported";
