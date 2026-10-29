@@ -487,3 +487,37 @@ func TestConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestEmptyLabelAndAllowLabel: AllowRequest with "" takes only the IP token,
+// so no bucket exists for labels without a route; AllowLabel takes only the
+// label token.
+func TestEmptyLabelAndAllowLabel(t *testing.T) {
+	l, _, m := newTest(t, func(c *Config) { c.LabelRate = 1; c.LabelBurst = 2 })
+	addr := ip("192.0.2.7")
+	for i := range 10 {
+		if ok, _, _ := l.AllowRequest(addr, ""); !ok {
+			t.Fatalf("AllowRequest(ip, \"\") #%d refused", i)
+		}
+	}
+	l.mu.Lock()
+	n := len(l.labelReq.m)
+	l.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("label buckets = %d, want 0", n)
+	}
+	for i := range 2 {
+		if ok, _ := l.AllowLabel("app"); !ok {
+			t.Fatalf("AllowLabel #%d refused", i)
+		}
+	}
+	ok, wait := l.AllowLabel("app")
+	if ok || wait <= 0 {
+		t.Fatalf("AllowLabel over burst = %v, %v; want refused with a wait", ok, wait)
+	}
+	if got := refusals(m, LimitLabel); got != 1 {
+		t.Fatalf("label refusals = %d, want 1", got)
+	}
+	if ok, _ := l.AllowLabel("other"); !ok {
+		t.Fatal("another label refused")
+	}
+}

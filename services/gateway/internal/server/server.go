@@ -23,7 +23,10 @@ import (
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/httpproxy"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
 )
@@ -57,6 +60,10 @@ const (
 	// metricsReadHeaderTimeout bounds the request headers on the metrics
 	// listener.
 	metricsReadHeaderTimeout = 10 * time.Second
+	// Defaults of the public listeners for zero config values (spec 7.7).
+	defaultReadHeaderTimeout = 10 * time.Second
+	defaultClientIdle        = 120 * time.Second
+	defaultMaxHeaderBytes    = 64 << 10
 )
 
 // Deps are the external dependencies of an instance.
@@ -101,8 +108,14 @@ type Instance struct {
 	upstream      *upstream.Dialer
 	appTransports *upstream.AppTransports
 
+	limits  *ratelimit.Limits
+	auth    *portauth.Auth
+	streams *httpproxy.StreamTracker
+	proxy   http.Handler
+
 	internal   *http.Server
 	metricsSrv *http.Server
+	plain      *http.Server
 
 	pingEvery time.Duration
 
@@ -125,6 +138,9 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	}
 	if deps.API == nil {
 		return nil, errors.New("server: Deps.API is required")
+	}
+	if len(cfg.CookieKeys) == 0 {
+		return nil, errors.New("server: cookie keys are required")
 	}
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
@@ -206,10 +222,84 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		MaxResponseHeaderBytes: appMaxResponseHeaderBytes,
 	})
 
+	i.limits = ratelimit.New(cfg.RateLimit, i.metrics)
+	i.auth = portauth.New(portauth.Config{
+		Codec:     portauth.NewCodec(cfg.CookieKeys, deps.Now),
+		API:       deps.API,
+		AuthURL:   cfg.AuthURL,
+		SbxDomain: cfg.SbxDomain,
+		CrossSite: cfg.CookieCrossSite,
+		Limits:    i.limits,
+		Metrics:   i.metrics,
+	})
+	i.streams = httpproxy.NewStreamTracker()
+	i.proxy = httpproxy.New(httpproxy.Config{
+		SbxDomain:           cfg.SbxDomain,
+		Grammar:             grammar(cfg),
+		Routes:              i.routes,
+		Auth:                i.auth,
+		Limits:              i.limits,
+		Upstream:            i.upstream,
+		Transports:          i.appTransports,
+		TrustedProxies:      cfg.TrustedProxyCIDRs,
+		StripCookiePrefixes: cfg.StripCookiePrefixes,
+		Metrics:             i.metrics,
+		AccessLog:           obs.NewAccessLog(deps.AccessLog),
+		Streams:             i.streams,
+		Logger:              deps.Logger,
+	})
+	// Task 10 replaces the handler with the Host dispatcher of plain mode.
+	i.plain = newPlainServer(i.proxy, cfg.Timeouts, deps.Logger)
+
 	i.internal = gateway.NewInternalServer(g.InternalHandler())
 	i.internal.IdleTimeout = internalIdleTimeout
 	i.metricsSrv = &http.Server{Handler: i.MetricsHandler(), ReadHeaderTimeout: metricsReadHeaderTimeout}
 	return i, nil
+}
+
+// grammar returns the label grammar of the config; empty fields take the
+// defaults.
+func grammar(cfg config.Config) routes.Grammar {
+	g := routes.DefaultGrammar()
+	if cfg.ReservedPorts != nil {
+		g.ReservedPorts = map[uint16]bool{}
+		for _, p := range cfg.ReservedPorts {
+			if p > 0 && p <= 65535 {
+				g.ReservedPorts[uint16(p)] = true
+			}
+		}
+	}
+	if cfg.ReservedSuffixes != nil {
+		g.ReservedSuffixes = cfg.ReservedSuffixes
+	}
+	if cfg.ReservedSlugs != nil {
+		g.ReservedSlugs = cfg.ReservedSlugs
+	}
+	return g
+}
+
+// newPlainServer serves h over HTTP/1 and cleartext HTTP/2 (prior
+// knowledge). HTTP/2 SETTINGS carry no ENABLE_CONNECT_PROTOCOL: the process
+// never sets GODEBUG=http2xconnect (spec 7.3).
+func newPlainServer(h http.Handler, t config.Timeouts, log *slog.Logger) *http.Server {
+	var p http.Protocols
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	return &http.Server{
+		Handler:           h,
+		Protocols:         &p,
+		ReadHeaderTimeout: orDefault(t.ReadHeader, defaultReadHeaderTimeout),
+		IdleTimeout:       orDefault(t.ClientIdle, defaultClientIdle),
+		MaxHeaderBytes:    orDefault(t.MaxHeaderBytes, defaultMaxHeaderBytes),
+		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelDebug),
+	}
+}
+
+func orDefault[T time.Duration | int](v, def T) T {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 // onInstanceChange runs on a tunnel gateway goroutine. "" means the LISTEN
@@ -315,6 +405,15 @@ func (i *Instance) Upstream() *upstream.Dialer { return i.upstream }
 // AppTransports returns the HTTP transports to applications.
 func (i *Instance) AppTransports() *upstream.AppTransports { return i.appTransports }
 
+// Limits returns the abuse limits.
+func (i *Instance) Limits() *ratelimit.Limits { return i.limits }
+
+// Streams returns the tracker of long HTTP streams, for the drain.
+func (i *Instance) Streams() *httpproxy.StreamTracker { return i.streams }
+
+// HTTPHandler returns the public HTTP proxy handler.
+func (i *Instance) HTTPHandler() http.Handler { return i.proxy }
+
 // Run serves the non-nil listeners and runs the tunnel gateway until ctx is
 // done, Drain finished, or a server fails. It then stops everything, closes
 // the listeners and returns the first error (nil for a normal stop). Run may
@@ -330,7 +429,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	go func() { tunnelDone <- i.tunnel.Run(runCtx) }()
 
 	var wg sync.WaitGroup
-	fatal := make(chan error, 2)
+	fatal := make(chan error, 3) // one per served listener
 	serve := func(name string, srv *http.Server, ln net.Listener) {
 		wg.Go(func() {
 			if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
@@ -344,7 +443,11 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	if ls.Metrics != nil {
 		serve("metrics", i.metricsSrv, ls.Metrics)
 	}
+	if ls.Plain != nil {
+		serve("plain", i.plain, ls.Plain)
+	}
 	wg.Go(func() { i.pingLoop(runCtx) })
+	wg.Go(func() { i.limits.Run(runCtx) })
 
 	var err error
 	tunnelExited := false
@@ -378,10 +481,13 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	}
 	_ = i.internal.Close()
 	_ = i.metricsSrv.Close()
+	_ = i.plain.Close()
+	// Hijacked conns (WebSocket) are not closed by Server.Close.
+	i.streams.CloseAll()
 	i.appTransports.CloseIdleConnections()
 	i.upstream.Close()
-	// Listeners without a server yet (TLS, plain, SSH) are owned here too.
-	for _, ln := range []net.Listener{ls.TLS, ls.Plain, ls.SSH} {
+	// Listeners without a server yet (TLS, SSH) are owned here too.
+	for _, ln := range []net.Listener{ls.TLS, ls.SSH} {
 		if ln != nil {
 			_ = ln.Close()
 		}

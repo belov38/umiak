@@ -161,6 +161,10 @@ func (l *Limits) exempt(ip netip.Addr) bool {
 // is exempt) and from the label bucket. On refusal it returns the limit name
 // (LimitIP or LimitLabel) and how long the client should wait. A request
 // refused by the label bucket has already used one IP token.
+//
+// An empty label skips the label bucket. Labels come from the network, so the
+// proxy checks the IP alone first and calls AllowLabel only once a route for
+// the label exists; otherwise every random host would create a bucket.
 func (l *Limits) AllowRequest(ip netip.Addr, label string) (ok bool, limit string, retryAfter time.Duration) {
 	now := l.now()
 	l.mu.Lock()
@@ -171,6 +175,10 @@ func (l *Limits) AllowRequest(ip netip.Addr, label string) (ok bool, limit strin
 			return false, LimitIP, wait
 		}
 	}
+	if label == "" {
+		l.mu.Unlock()
+		return true, "", 0
+	}
 	allowed, wait := l.labelReq.take(label, now)
 	l.mu.Unlock()
 	if !allowed {
@@ -178,6 +186,20 @@ func (l *Limits) AllowRequest(ip netip.Addr, label string) (ok bool, limit strin
 		return false, LimitLabel, wait
 	}
 	return true, "", 0
+}
+
+// AllowLabel takes one HTTP request from the label bucket only. On refusal
+// it returns how long the client should wait.
+func (l *Limits) AllowLabel(label string) (ok bool, retryAfter time.Duration) {
+	now := l.now()
+	l.mu.Lock()
+	allowed, wait := l.labelReq.take(label, now)
+	l.mu.Unlock()
+	if !allowed {
+		l.refused(LimitLabel)
+		return false, wait
+	}
+	return true, 0
 }
 
 // AuthFailure records one authorization failure (token_invalid, bad
