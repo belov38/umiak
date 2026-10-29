@@ -43,6 +43,10 @@ const (
 	leaseSettle = 2 * time.Millisecond
 )
 
+// ErrBusy means a host file was being rewritten for the whole read window; the call may be
+// repeated (error code "busy").
+var ErrBusy = errors.New("busy")
+
 // readSettled reads path until two reads in a row match and end with a whole line.
 func (s *Server) readSettled(path string) ([]byte, error) {
 	sleep := s.Host.Sleep
@@ -64,7 +68,7 @@ func (s *Server) readSettled(path string) ([]byte, error) {
 		}
 		prev = cur
 	}
-	return nil, fmt.Errorf("%s keeps changing", path)
+	return nil, fmt.Errorf("%s keeps changing: %w", path, ErrBusy)
 }
 
 func (s *Server) readLeases() ([]Lease, error) {
@@ -160,7 +164,7 @@ func (s *Server) dhcpRelease(ctx context.Context, raw json.RawMessage) (any, err
 	if err != nil {
 		return nil, err
 	}
-	var ips []string
+	ips := []string{}
 	for _, l := range leases {
 		if l.MAC == mac && !slices.Contains(ips, l.IP) {
 			ips = append(ips, l.IP)
