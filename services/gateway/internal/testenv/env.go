@@ -73,6 +73,8 @@ func FastTiming() gateway.Timing {
 type Options struct {
 	// Timing changes FastTiming for every instance of the Env.
 	Timing func(*gateway.Timing)
+	// Deps changes the dependencies of every instance of the Env.
+	Deps func(*server.Deps)
 }
 
 // Env is one test platform.
@@ -87,6 +89,8 @@ type Env struct {
 	Keys  *Keys
 	// Timing is the tunnel timing given to every instance.
 	Timing gateway.Timing
+
+	depsMod func(*server.Deps)
 
 	mu    sync.Mutex
 	seq   int
@@ -110,15 +114,16 @@ func New(t testing.TB, opts Options) *Env {
 		opts.Timing(&timing)
 	}
 	e := &Env{
-		T:      t,
-		Pool:   pool,
-		DSN:    dsn,
-		Store:  registry.New(pool),
-		Net:    memnet.New(memnet.Options{DeadAfter: DeadAfter}),
-		API:    cpapitest.NewFake(),
-		PKI:    p,
-		Keys:   keys,
-		Timing: timing,
+		T:       t,
+		Pool:    pool,
+		DSN:     dsn,
+		Store:   registry.New(pool),
+		Net:     memnet.New(memnet.Options{DeadAfter: DeadAfter}),
+		API:     cpapitest.NewFake(),
+		PKI:     p,
+		Keys:    keys,
+		Timing:  timing,
+		depsMod: opts.Deps,
 	}
 	return e
 }
@@ -207,7 +212,7 @@ func (e *Env) InstanceConfig(instanceID, internalURL string) config.Config {
 
 // Deps returns the dependencies of an instance on this Env.
 func (e *Env) Deps() server.Deps {
-	return server.Deps{
+	d := server.Deps{
 		Pool:      e.Pool,
 		API:       e.API,
 		Logger:    Logger(),
@@ -215,6 +220,10 @@ func (e *Env) Deps() server.Deps {
 		Now:       time.Now,
 		Timing:    e.Timing,
 	}
+	if e.depsMod != nil {
+		e.depsMod(&d)
+	}
+	return d
 }
 
 // Inst is a running instance.

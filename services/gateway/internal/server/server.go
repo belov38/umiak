@@ -25,6 +25,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
 )
 
 // Postgres channels the gateway LISTENs on next to the tunnel channels.
@@ -44,6 +45,12 @@ const (
 	// defaultStaleAfter is gateway.Timing's default heartbeat age after
 	// which an instance is dead; the owner cache uses the same value.
 	defaultStaleAfter = 15 * time.Second
+	// appMaxIdlePerHost and appIdleConnTimeout size the keep-alive pool of
+	// each (machine, epoch, port) (spec 7.2).
+	appMaxIdlePerHost  = 8
+	appIdleConnTimeout = 30 * time.Second
+	// appMaxResponseHeaderBytes caps an application's response headers.
+	appMaxResponseHeaderBytes = 64 << 10
 	// pingInterval and pingTimeout drive the postgres dependency gauge.
 	pingInterval = 10 * time.Second
 	pingTimeout  = 5 * time.Second
@@ -62,6 +69,9 @@ type Deps struct {
 	// Timing is the tunnel timing; tests shrink it. TCPDeadline is always
 	// replaced by the config's SSHDrainDeadline.
 	Timing gateway.Timing
+	// MaxTCPStreamsPerMachine is the per-machine CONNECT stream limit this
+	// instance enforces as the owner; 0 means 800. Tests shrink it.
+	MaxTCPStreamsPerMachine int
 }
 
 // Listeners are the sockets an instance serves. A nil listener is not
@@ -87,6 +97,9 @@ type Instance struct {
 	tunnel  *gateway.Gateway
 	routes  *routes.Cache
 	owners  *registry.OwnerCache
+
+	upstream      *upstream.Dialer
+	appTransports *upstream.AppTransports
 
 	internal   *http.Server
 	metricsSrv *http.Server
@@ -122,6 +135,9 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
+	if deps.MaxTCPStreamsPerMachine <= 0 {
+		deps.MaxTCPStreamsPerMachine = maxTCPStreamsPerMachine
+	}
 	staleAfter := deps.Timing.StaleAfter
 	if staleAfter <= 0 {
 		staleAfter = defaultStaleAfter
@@ -150,7 +166,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		Store:                   i.store,
 		ServiceTokens:           cfg.ServiceTokens,
 		MinAgentVersion:         cfg.MinAgentVersion,
-		MaxTCPStreamsPerMachine: maxTCPStreamsPerMachine,
+		MaxTCPStreamsPerMachine: deps.MaxTCPStreamsPerMachine,
 		OnInstanceChange:        i.onInstanceChange,
 		OnSessionChange:         i.owners.Invalidate,
 		ListenChannels: map[string]func(string){
@@ -168,6 +184,27 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		return nil, fmt.Errorf("server: %w", err)
 	}
 	i.tunnel = g
+
+	i.upstream = upstream.New(upstream.Config{
+		Self:        cfg.InstanceID,
+		Local:       g,
+		Owners:      i.owners,
+		Store:       i.store,
+		PeerToken:   cfg.PeerToken,
+		AgentWait:   cfg.Timeouts.AgentWait,
+		DialTimeout: cfg.Timeouts.Dial,
+		StaleAfter:  staleAfter,
+		Metrics:     i.metrics,
+		Logger:      deps.Logger,
+	})
+	i.appTransports = upstream.NewAppTransports(i.upstream, upstream.TransportConfig{
+		HTTPDrain:              cfg.HTTPDrainDeadline,
+		ResponseHeaderTimeout:  cfg.Timeouts.ResponseHeader,
+		StreamIdle:             cfg.Timeouts.StreamIdle,
+		MaxIdlePerHost:         appMaxIdlePerHost,
+		IdleConnTimeout:        appIdleConnTimeout,
+		MaxResponseHeaderBytes: appMaxResponseHeaderBytes,
+	})
 
 	i.internal = gateway.NewInternalServer(g.InternalHandler())
 	i.internal.IdleTimeout = internalIdleTimeout
@@ -272,6 +309,12 @@ func (i *Instance) Routes() *routes.Cache { return i.routes }
 // Owners returns the machine owner cache.
 func (i *Instance) Owners() *registry.OwnerCache { return i.owners }
 
+// Upstream returns the dialer of application streams.
+func (i *Instance) Upstream() *upstream.Dialer { return i.upstream }
+
+// AppTransports returns the HTTP transports to applications.
+func (i *Instance) AppTransports() *upstream.AppTransports { return i.appTransports }
+
 // Run serves the non-nil listeners and runs the tunnel gateway until ctx is
 // done, Drain finished, or a server fails. It then stops everything, closes
 // the listeners and returns the first error (nil for a normal stop). Run may
@@ -335,6 +378,8 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	}
 	_ = i.internal.Close()
 	_ = i.metricsSrv.Close()
+	i.appTransports.CloseIdleConnections()
+	i.upstream.Close()
 	// Listeners without a server yet (TLS, plain, SSH) are owned here too.
 	for _, ln := range []net.Listener{ls.TLS, ls.Plain, ls.SSH} {
 		if ln != nil {
