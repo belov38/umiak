@@ -365,6 +365,12 @@ describe("AgentClient.fetch", () => {
 			"/a%255cb",
 			"/a%255Cb",
 			"/%25252e%25252e/x",
+			// Encoded hex digits of a double-encoded ".", "/" or "\".
+			"/%25%32%65%25%32%65/x",
+			"/%25%32%45/x",
+			"/a%25%32%66b",
+			"/a%25%35%63b",
+			"/a%25%35%43b",
 			"/./x",
 			"/a%2fb",
 			"/a%2Fb",
@@ -391,6 +397,7 @@ describe("AgentClient.fetch", () => {
 			"/a%25b",
 			"/100%25",
 			"/%25%25",
+			"/%2525",
 		]) {
 			it(`allows ${JSON.stringify(path)}`, async () => {
 				registry.set(route(m, a.url));

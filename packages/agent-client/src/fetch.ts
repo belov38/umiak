@@ -152,17 +152,13 @@ function isIdentity(encoding: string | null): boolean {
 }
 
 /**
- * A percent-encoded "%" followed, after any further "%25" layers, by an
- * encoded ".", "/" or "\" (%252e, %252f, %255c, %25252e, ...).
- */
-const multiEncodedSeparator = /%25(?:25)*(?:2e|2f|5c)/i;
-
-/**
- * Rejects a path whose segment decodes (once, as the gateway and the agent
- * do) to "." or ".." or to one holding "/" or "\", or holds a multiply
- * encoded ".", "/" or "\": like the gateway's /files check, so a path
- * cannot reach another machine's route or another endpoint. A literal "%"
- * (%25) is allowed otherwise. The query is not checked.
+ * Rejects a path with a segment that decodes to "." or ".." or to one
+ * holding "/" or "\", at any layer: the first decode (as the gateway and the
+ * agent do) and every further one, so a multiply encoded traversal or
+ * separator (%252e, %25%32%65, ...) is refused too, like the gateway's
+ * /files check. A segment that fails the first decode is malformed; a later
+ * layer that fails to decode, or does not change, ends the check for that
+ * segment, so a literal "%" (%25) is allowed. The query is not checked.
  */
 function checkPathSegments(path: string): void {
 	const q = path.indexOf("?");
@@ -174,15 +170,23 @@ function checkPathSegments(path: string): void {
 		} catch {
 			throw new TypeError(`agent fetch path is malformed: ${path}`);
 		}
-		if (
-			seg === "." ||
-			seg === ".." ||
-			/[/\\]/.test(seg) ||
-			multiEncodedSeparator.test(raw)
-		) {
-			throw new TypeError(
-				`agent fetch path must not hold ".", ".." or separators in a segment: ${path}`,
-			);
+		// Every layer is shorter than the one before, so this ends.
+		for (;;) {
+			if (seg === "." || seg === ".." || /[/\\]/.test(seg)) {
+				throw new TypeError(
+					`agent fetch path must not hold ".", ".." or separators in a segment: ${path}`,
+				);
+			}
+			let next: string;
+			try {
+				next = decodeURIComponent(seg);
+			} catch {
+				break;
+			}
+			if (next === seg) {
+				break;
+			}
+			seg = next;
 		}
 	}
 }
