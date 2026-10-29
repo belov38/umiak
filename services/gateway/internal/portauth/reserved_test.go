@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,8 +29,27 @@ func (h *harness) startLogin(t *testing.T, l routes.Label, rd string) (string, *
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := cookieHeader(t, w, StateCookie)
-	return loc.Query().Get("state"), &http.Cookie{Name: StateCookie, Value: cookieValue(line)}
+	state := loc.Query().Get("state")
+	name := stateName(t, state)
+	line := cookieHeader(t, w, name)
+	return state, &http.Cookie{Name: name, Value: cookieValue(line)}
+}
+
+func stateName(t *testing.T, state string) string {
+	t.Helper()
+	name, ok := stateCookieName(state)
+	if !ok {
+		t.Fatalf("state %q too short", state)
+	}
+	return name
+}
+
+func callbackWith(l routes.Label, code, state string, cs ...*http.Cookie) *http.Request {
+	r := callbackRequest(l, code, state, nil)
+	for _, c := range cs {
+		r.AddCookie(c)
+	}
+	return r
 }
 
 func callbackRequest(l routes.Label, code, state string, c *http.Cookie) *http.Request {
@@ -67,8 +87,11 @@ func TestCallback(t *testing.T) {
 		if s != want {
 			t.Errorf("session = %+v, want %+v", s, want)
 		}
-		cleared := cookieHeader(t, w, StateCookie)
-		if !strings.HasPrefix(cleared, StateCookie+"=;") {
+		if n := len(w.Result().Header.Values("Set-Cookie")); n != 2 {
+			t.Errorf("%d Set-Cookie lines, want auth + one cleared state", n)
+		}
+		cleared := cookieHeader(t, w, sc.Name)
+		if !strings.HasPrefix(cleared, sc.Name+"=;") {
 			t.Errorf("state cookie not cleared: %q", cleared)
 		}
 		assertAttrs(t, cleared, 0, false)
@@ -88,13 +111,53 @@ func TestCallback(t *testing.T) {
 		assertDenied(t, w, http.StatusUnauthorized, "auth_required")
 	})
 
+	t.Run("parallel logins", func(t *testing.T) {
+		h := newHarness(t, nil)
+		type tab struct {
+			state string
+			c     *http.Cookie
+			rd    string
+		}
+		var tabs []tab
+		for i := range 25 {
+			rd := "/tab/" + strconv.Itoa(i)
+			state, c := h.startLogin(t, l, rd)
+			tabs = append(tabs, tab{state, c, rd})
+		}
+		jar := func() []*http.Cookie {
+			var cs []*http.Cookie
+			for _, tb := range tabs {
+				if tb.c != nil {
+					cs = append(cs, tb.c)
+				}
+			}
+			return cs
+		}
+		// Callbacks come back in reverse order; each finds its own cookie
+		// among all the others and clears only that one.
+		for i := len(tabs) - 1; i >= 0; i-- {
+			w := h.serve(callbackWith(l, h.api.IssueCode(l.Raw, grant), tabs[i].state, jar()...), l, &rt)
+			if w.Code != http.StatusFound || w.Header().Get("Location") != tabs[i].rd {
+				t.Fatalf("tab %d: got %d Location %q", i, w.Code, w.Header().Get("Location"))
+			}
+			if !strings.HasPrefix(cookieHeader(t, w, tabs[i].c.Name), tabs[i].c.Name+"=;") {
+				t.Errorf("tab %d: own state cookie not cleared", i)
+			}
+			tabs[i].c = nil
+		}
+	})
+
 	t.Run("swapped state", func(t *testing.T) {
 		h := newHarness(t, nil)
 		_, sc := h.startLogin(t, l, "/")
 		other, _ := h.startLogin(t, l, "/")
 		code := h.api.IssueCode(l.Raw, grant)
+		// The cookie for other is absent: no auth failure.
 		w := h.serve(callbackRequest(l, code, other, sc), l, &rt)
 		assertDenied(t, w, http.StatusUnauthorized, "auth_required")
+		if h.authCount("sso", ResultMissing) != 1 {
+			t.Errorf("missing = %v", h.authCount("sso", ResultMissing))
+		}
 		// The code was not burned.
 		if h.api.Calls("ExchangePortAuthCode") != 0 {
 			t.Error("exchange called with a bad state")
@@ -104,8 +167,49 @@ func TestCallback(t *testing.T) {
 	t.Run("no state cookie", func(t *testing.T) {
 		h := newHarness(t, nil)
 		state, _ := h.startLogin(t, l, "/")
-		w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), state, nil), l, &rt)
+		for range 30 {
+			w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), state, nil), l, &rt)
+			assertDenied(t, w, http.StatusUnauthorized, "auth_required")
+		}
+		// Short or empty state params name no cookie either.
+		for _, st := range []string{"", "short"} {
+			w := h.serve(callbackRequest(l, "c", st, nil), l, &rt)
+			assertDenied(t, w, http.StatusUnauthorized, "auth_required")
+		}
+		if h.authCount("sso", ResultMissing) != 32 || h.authCount("sso", ResultInvalid) != 0 {
+			t.Errorf("missing = %v, invalid = %v", h.authCount("sso", ResultMissing), h.authCount("sso", ResultInvalid))
+		}
+		if h.api.Calls("ExchangePortAuthCode") != 0 {
+			t.Error("exchange called without a state cookie")
+		}
+	})
+
+	t.Run("state mismatch under the same name", func(t *testing.T) {
+		h := newHarness(t, nil)
+		state, sc := h.startLogin(t, l, "/")
+		// Same first 8 characters, so the same cookie name, but a different
+		// state: the cookie is present and does not match.
+		forged := state[:stateKeyLen] + strings.Repeat("A", len(state)-stateKeyLen)
+		for range 20 {
+			w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), forged, sc), l, &rt)
+			assertDenied(t, w, http.StatusUnauthorized, "auth_required")
+		}
+		if h.authCount("sso", ResultInvalid) != 20 || h.api.Calls("ExchangePortAuthCode") != 0 {
+			t.Errorf("invalid = %v, exchanges = %d", h.authCount("sso", ResultInvalid), h.api.Calls("ExchangePortAuthCode"))
+		}
+		w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), state, sc), l, &rt)
+		assertDenied(t, w, http.StatusTooManyRequests, "rate_limited")
+	})
+
+	t.Run("garbage state cookie", func(t *testing.T) {
+		h := newHarness(t, nil)
+		state, sc := h.startLogin(t, l, "/")
+		bad := &http.Cookie{Name: sc.Name, Value: "v1s.a.e30.AAAA"}
+		w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), state, bad), l, &rt)
 		assertDenied(t, w, http.StatusUnauthorized, "auth_required")
+		if h.authCount("sso", ResultInvalid) != 1 {
+			t.Errorf("invalid = %v", h.authCount("sso", ResultInvalid))
+		}
 	})
 
 	t.Run("expired state", func(t *testing.T) {
@@ -128,9 +232,9 @@ func TestCallback(t *testing.T) {
 		h := newHarness(t, nil)
 		// A state cookie forged with rd=//evil.com (as if minted by an
 		// older or buggy build) still redirects to "/".
-		st := State{State: "s1", RD: "//evil.com", Label: l.Raw, Expiry: h.now.Add(time.Minute)}
-		sc := &http.Cookie{Name: StateCookie, Value: h.codec.SealState(st)}
-		w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), "s1", sc), l, &rt)
+		st := State{State: "s1234567890", RD: "//evil.com", Label: l.Raw, Expiry: h.now.Add(time.Minute)}
+		sc := &http.Cookie{Name: stateName(t, st.State), Value: h.codec.SealState(st)}
+		w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), st.State, sc), l, &rt)
 		if w.Code != http.StatusFound || w.Header().Get("Location") != "/" {
 			t.Errorf("got %d Location %q", w.Code, w.Header().Get("Location"))
 		}
@@ -139,7 +243,8 @@ func TestCallback(t *testing.T) {
 		r := navRequest(http.MethodGet, "https://x/")
 		r.URL.Path = "//evil.com"
 		w2, _ := h.check(r, l, rt)
-		got, err := h.codec.OpenState(cookieValue(cookieHeader(t, w2, StateCookie)))
+		loc, _ := url.Parse(w2.Header().Get("Location"))
+		got, err := h.codec.OpenState(cookieValue(cookieHeader(t, w2, stateName(t, loc.Query().Get("state")))))
 		if err != nil || got.RD != "/" {
 			t.Errorf("stored rd = %q (%v)", got.RD, err)
 		}
@@ -184,16 +289,17 @@ func TestCallback(t *testing.T) {
 		}
 	})
 
-	t.Run("failures count and block", func(t *testing.T) {
+	t.Run("bad codes count and block", func(t *testing.T) {
 		h := newHarness(t, nil)
+		state, sc := h.startLogin(t, l, "/")
 		for range 20 {
-			w := h.serve(callbackRequest(l, "bad", "bad", nil), l, &rt)
+			w := h.serve(callbackRequest(l, "bad", state, sc), l, &rt)
 			assertDenied(t, w, http.StatusUnauthorized, "auth_required")
 		}
 		if h.authCount("sso", ResultInvalid) != 20 {
 			t.Errorf("invalid = %v", h.authCount("sso", ResultInvalid))
 		}
-		w := h.serve(callbackRequest(l, "bad", "bad", nil), l, &rt)
+		w := h.serve(callbackRequest(l, h.api.IssueCode(l.Raw, grant), state, sc), l, &rt)
 		assertDenied(t, w, http.StatusTooManyRequests, "rate_limited")
 	})
 }
@@ -202,17 +308,28 @@ func TestLogout(t *testing.T) {
 	for _, crossSite := range []bool{false, true} {
 		h := newHarness(t, func(c *Config) { c.CrossSite = crossSite })
 		l := label("quiet-otter-3000")
-		w := h.serve(navRequest(http.MethodGet, "https://x/__sbx/auth/logout"), l, nil)
+		r := navRequest(http.MethodGet, "https://x/__sbx/auth/logout")
+		r.Header.Set("Cookie", "app=1; "+AuthCookie+"=x; __Host-sbx_state_aaaaaaaa=1; __Host-sbx_state_bbbbbbbb=2; __Host-sbx_state_aaaaaaaa=3")
+		w := h.serve(r, l, nil)
 		if w.Code != http.StatusFound || w.Header().Get("Location") != "/" {
 			t.Fatalf("got %d Location %q", w.Code, w.Header().Get("Location"))
 		}
 		assertNoStore(t, w)
-		for _, name := range []string{AuthCookie, StateCookie} {
+		if n := len(w.Result().Header.Values("Set-Cookie")); n != 3 {
+			t.Errorf("%d Set-Cookie lines, want 3: %q", n, w.Result().Header.Values("Set-Cookie"))
+		}
+		for _, name := range []string{AuthCookie, "__Host-sbx_state_aaaaaaaa", "__Host-sbx_state_bbbbbbbb"} {
 			line := cookieHeader(t, w, name)
 			if !strings.HasPrefix(line, name+"=;") {
 				t.Errorf("%s not cleared: %q", name, line)
 			}
 			assertAttrs(t, line, 0, crossSite)
+		}
+
+		// Without cookies, logout still clears the auth cookie.
+		w = h.serve(navRequest(http.MethodGet, "https://x/__sbx/auth/logout"), l, nil)
+		if got := w.Result().Header.Values("Set-Cookie"); len(got) != 1 || !strings.HasPrefix(got[0], AuthCookie+"=;") {
+			t.Errorf("Set-Cookie = %q", got)
 		}
 	}
 }
@@ -228,7 +345,7 @@ func TestReservedUnknown(t *testing.T) {
 
 func TestStripRequest(t *testing.T) {
 	h := http.Header{}
-	h.Add("Cookie", `a=1; __Host-sbx_auth=v1.x; b="q v"; __host-SBX_STATE=s`)
+	h.Add("Cookie", `a=1; __Host-sbx_auth=v1.x; b="q v"; __host-SBX_STATE=s; __Host-sbx_state_abcdefgh=t; __Host-sbx_statex=u`)
 	h.Add("Cookie", `_oauth2_proxy_csrf=z;c=3;__Secure-oauth2_proxy=y; d`)
 	h.Set(TokenHeader, "t")
 	h.Set("Authorization", "Bearer app")

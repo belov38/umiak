@@ -194,7 +194,8 @@ func (a *Auth) checkSSO(w http.ResponseWriter, r *http.Request, l routes.Label, 
 		Label:  l.Raw,
 		Expiry: a.cfg.Codec.now().Add(a.cfg.StateTTL),
 	})
-	w.Header().Add("Set-Cookie", a.cookie(StateCookie, v, a.cfg.StateTTL).String())
+	name, _ := stateCookieName(state) // 22 characters: always long enough
+	w.Header().Add("Set-Cookie", a.cookie(name, v, a.cfg.StateTTL).String())
 	a.redirect(w, a.authURL(l.Raw, state))
 	return Result{AuthResult: ResultRedirect}
 }

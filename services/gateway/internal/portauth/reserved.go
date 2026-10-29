@@ -27,18 +27,41 @@ func (a *Auth) ServeReserved(w http.ResponseWriter, r *http.Request, l routes.La
 	case CallbackPath:
 		a.callback(w, r, l, rt, ip, requestID)
 	case LogoutPath:
-		h := w.Header()
-		h.Add("Set-Cookie", a.cookie(AuthCookie, "", 0).String())
-		h.Add("Set-Cookie", a.cookie(StateCookie, "", 0).String())
-		a.redirect(w, "/")
+		a.logout(w, r)
 	default:
 		sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusNotFound, Code: sbxerr.CodeRouteNotFound, RequestID: requestID})
 	}
 }
 
-// errCallback marks a callback refusal: 401 auth_required plus one auth
-// failure of the IP.
-var errCallback = errors.New("portauth: callback refused")
+// logout clears the auth cookie and every state cookie the request carries.
+func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Add("Set-Cookie", a.cookie(AuthCookie, "", 0).String())
+	seen := map[string]bool{}
+	for _, c := range r.Cookies() {
+		if isStateCookie(c.Name) && !seen[c.Name] {
+			seen[c.Name] = true
+			h.Add("Set-Cookie", a.cookie(c.Name, "", 0).String())
+		}
+	}
+	a.redirect(w, "/")
+}
+
+var (
+	// errNoState: the request carries no state cookie for its state param
+	// (another tab finished first, the cookie expired, or a stray link).
+	// 401 auth_required without an auth failure.
+	errNoState = errors.New("portauth: no state cookie")
+	// errCallback: a refusal that counts as an auth failure of the IP.
+	errCallback = errors.New("portauth: callback refused")
+)
+
+// login is a validated callback.
+type login struct {
+	session     Session
+	rd          string
+	stateCookie string
+}
 
 // callback finishes the sso login (spec 8.4). Everything that does not need
 // api is checked before the code is exchanged, so a bad request never burns
@@ -48,9 +71,13 @@ func (a *Auth) callback(w http.ResponseWriter, r *http.Request, l routes.Label, 
 		a.count(AccessSSO, ResultInvalid)
 		return
 	}
-	s, rd, err := a.finishLogin(r, l, rt)
+	in, err := a.finishLogin(r, l, rt)
 	switch {
 	case err == nil:
+	case errors.Is(err, errNoState):
+		a.count(AccessSSO, ResultMissing)
+		sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusUnauthorized, Code: sbxerr.CodeAuthRequired, RequestID: requestID})
+		return
 	case errors.Is(err, errCallback):
 		a.authFailure(ip)
 		a.count(AccessSSO, ResultInvalid)
@@ -69,59 +96,71 @@ func (a *Auth) callback(w http.ResponseWriter, r *http.Request, l routes.Label, 
 	}
 
 	h := w.Header()
-	h.Add("Set-Cookie", a.sessionCookie(s, a.cfg.SSOTTL).String())
-	h.Add("Set-Cookie", a.cookie(StateCookie, "", 0).String())
+	h.Add("Set-Cookie", a.sessionCookie(in.session, a.cfg.SSOTTL).String())
+	h.Add("Set-Cookie", a.cookie(in.stateCookie, "", 0).String())
 	h.Set("Referrer-Policy", "no-referrer")
 	a.count(AccessSSO, ResultOK)
-	a.redirect(w, rd)
+	a.redirect(w, in.rd)
 }
 
 // finishLogin validates the callback and exchanges the code. It returns
-// errCallback for every refusal and another error when api is unavailable.
-func (a *Auth) finishLogin(r *http.Request, l routes.Label, rt *cpapi.Route) (Session, string, error) {
+// errNoState or errCallback for refusals and another error when api is
+// unavailable.
+func (a *Auth) finishLogin(r *http.Request, l routes.Label, rt *cpapi.Route) (login, error) {
 	q := r.URL.Query()
 	code, state := q.Get("code"), q.Get("state")
-	if code == "" || state == "" {
-		return Session{}, "", errCallback
-	}
-	st, ok := a.stateCookie(r, l, state)
+	name, ok := stateCookieName(state)
 	if !ok {
-		return Session{}, "", errCallback
+		return login{}, errNoState
 	}
-	if rt == nil || rt.Access != AccessSSO {
-		return Session{}, "", errCallback
+	st, err := a.stateCookie(r, name, l, state)
+	if err != nil {
+		return login{}, err
+	}
+	if code == "" || rt == nil || rt.Access != AccessSSO {
+		return login{}, errCallback
 	}
 
 	g, err := a.cfg.API.ExchangePortAuthCode(r.Context(), code, l.Raw)
 	switch {
 	case err == nil:
 	case errors.Is(err, cpapi.ErrInvalidCode):
-		return Session{}, "", errCallback
+		return login{}, errCallback
 	default:
-		return Session{}, "", err
+		return login{}, err
 	}
 	// The epoch check catches an access change between the redirect and
 	// the exchange.
 	if g.Label != l.Raw || g.AuthEpoch != rt.AuthEpoch {
-		return Session{}, "", errCallback
+		return login{}, errCallback
 	}
-	s := Session{Label: l.Raw, Mode: ModeSSO, Epoch: g.AuthEpoch, UserID: g.UserID, Email: g.Email}
-	return s, safeRD(st.RD), nil
+	return login{
+		session:     Session{Label: l.Raw, Mode: ModeSSO, Epoch: g.AuthEpoch, UserID: g.UserID, Email: g.Email},
+		rd:          safeRD(st.RD),
+		stateCookie: name,
+	}, nil
 }
 
-// stateCookie finds a valid state cookie of l whose state equals want.
-func (a *Auth) stateCookie(r *http.Request, l routes.Label, want string) (State, bool) {
+// stateCookie opens the cookie name and checks it belongs to l and holds
+// exactly want. No such cookie gives errNoState; a cookie that does not open
+// or does not match gives errCallback.
+func (a *Auth) stateCookie(r *http.Request, name string, l routes.Label, want string) (State, error) {
+	present := false
 	for _, c := range r.Cookies() {
-		if c.Name != StateCookie {
+		if c.Name != name {
 			continue
 		}
+		present = true
 		st, err := a.cfg.Codec.OpenState(c.Value)
 		if err != nil || st.Label != l.Raw {
 			continue
 		}
 		if subtle.ConstantTimeCompare([]byte(st.State), []byte(want)) == 1 {
-			return st, true
+			return st, nil
 		}
 	}
-	return State{}, false
+	if !present {
+		return State{}, errNoState
+	}
+	return State{}, errCallback
 }

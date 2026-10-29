@@ -155,6 +155,19 @@ func TestCodecTamper(t *testing.T) {
 		}
 	}
 
+	// Non-canonical base64: the last character of the 43-character MAC
+	// carries two padding bits. Setting them keeps the decoded bytes, but
+	// the strict decoder rejects it.
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, v[len(v)-1])
+	nonCanonical := v[:len(v)-1] + string(alphabet[last|1])
+	if nonCanonical == v {
+		nonCanonical = v[:len(v)-1] + string(alphabet[last|2])
+	}
+	if _, err := c.OpenSession(nonCanonical); !errors.Is(err, ErrInvalidCookie) {
+		t.Errorf("non-canonical MAC encoding accepted: %v", err)
+	}
+
 	// An auth cookie is never a state cookie, and vice versa.
 	if _, err := c.OpenState(v); !errors.Is(err, ErrInvalidCookie) {
 		t.Errorf("auth cookie opened as state: %v", err)

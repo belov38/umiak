@@ -459,6 +459,10 @@ func (l *loader) cookieKeys(name string) []CookieKey {
 			l.fail(name, fmt.Errorf("line %d: key %q is %d bytes, want 32", n, id, len(key)))
 			return nil
 		}
+		if !ValidCookieKeyID(id) {
+			l.fail(name, fmt.Errorf("line %d: key id %q has characters not allowed in a cookie value", n, id))
+			return nil
+		}
 		if seen[id] {
 			l.fail(name, fmt.Errorf("line %d: duplicate key id %q", n, id))
 			return nil
@@ -474,6 +478,21 @@ func (l *loader) cookieKeys(name string) []CookieKey {
 		l.fail(name, errors.New("contains no keys"))
 	}
 	return keys
+}
+
+// ValidCookieKeyID reports whether id is non-empty and uses only the RFC 6265
+// cookie-octet set, so it can appear in a cookie value as is.
+func ValidCookieKeyID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if c <= 0x20 || c >= 0x7f || c == '"' || c == ',' || c == ';' || c == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 func decodeBase64(s string) ([]byte, error) {

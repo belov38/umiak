@@ -16,11 +16,31 @@ import (
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 )
 
-// Cookie names. Both are __Host- cookies: no Domain, Path=/, Secure.
+// Cookie names. All are __Host- cookies: no Domain, Path=/, Secure.
+//
+// Every login gets its own state cookie, StateCookiePrefix + "_" + the first
+// stateKeyLen characters of its state, so parallel logins (several tabs,
+// session restore) do not overwrite each other's state.
 const (
-	AuthCookie  = "__Host-sbx_auth"
-	StateCookie = "__Host-sbx_state"
+	AuthCookie        = "__Host-sbx_auth"
+	StateCookiePrefix = "__Host-sbx_state"
+	stateKeyLen       = 8
 )
+
+// stateCookieName returns the state cookie name for state. It reports false
+// when state is too short to name a cookie.
+func stateCookieName(state string) (string, bool) {
+	if len(state) < stateKeyLen {
+		return "", false
+	}
+	return StateCookiePrefix + "_" + state[:stateKeyLen], true
+}
+
+// isStateCookie reports whether name is a state cookie name (prefix match,
+// case-insensitive).
+func isStateCookie(name string) bool {
+	return len(name) >= len(StateCookiePrefix) && strings.EqualFold(name[:len(StateCookiePrefix)], StateCookiePrefix)
+}
 
 // Session modes (the "m" field).
 const (
@@ -83,14 +103,14 @@ type Codec struct {
 }
 
 // NewCodec returns a codec for keys. now nil means time.Now. It panics when
-// keys is empty or a key id is not a valid cookie-value token: config
-// validation must have caught both.
+// keys is empty or a key id is not cookie-safe: config loading rejects both,
+// so a panic here is a programming error.
 func NewCodec(keys []config.CookieKey, now func() time.Time) *Codec {
 	if len(keys) == 0 {
 		panic("portauth: no cookie keys")
 	}
 	for _, k := range keys {
-		if !validKid(k.ID) {
+		if !config.ValidCookieKeyID(k.ID) {
 			panic(fmt.Sprintf("portauth: cookie key id %q has characters not allowed in a cookie", k.ID))
 		}
 	}
@@ -98,20 +118,6 @@ func NewCodec(keys []config.CookieKey, now func() time.Time) *Codec {
 		now = time.Now
 	}
 	return &Codec{keys: keys, now: now}
-}
-
-// validKid accepts the RFC 6265 cookie-octet set.
-func validKid(id string) bool {
-	if id == "" {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		if c <= 0x20 || c >= 0x7f || c == '"' || c == ',' || c == ';' || c == '\\' {
-			return false
-		}
-	}
-	return true
 }
 
 // SealSession returns the signed cookie value of s.
@@ -192,11 +198,11 @@ func (c *Codec) open(tag, v string, dst any) error {
 	if key == nil {
 		return ErrInvalidCookie
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(macB64)
+	sig, err := b64.DecodeString(macB64)
 	if err != nil || !hmac.Equal(sig, mac(key, signed)) {
 		return ErrInvalidCookie
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(payloadB64)
+	raw, err := b64.DecodeString(payloadB64)
 	if err != nil {
 		return ErrInvalidCookie
 	}
@@ -205,6 +211,10 @@ func (c *Codec) open(tag, v string, dst any) error {
 	}
 	return nil
 }
+
+// b64 decodes strictly: non-zero padding bits are rejected, so every cookie
+// has exactly one valid encoding.
+var b64 = base64.RawURLEncoding.Strict()
 
 func (c *Codec) key(kid string) []byte {
 	for _, k := range c.keys {

@@ -284,6 +284,12 @@ func TestFromEnvErrors(t *testing.T) {
 		{"cookie keys empty", func(f *fixture) {
 			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "empty.keys", "# nothing\n")
 		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
+		{"cookie key id not cookie-safe", func(f *fixture) {
+			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "badkid.keys", "k;1:"+b64key('a')+"\n")
+		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
+		{"cookie key id with space", func(f *fixture) {
+			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "spacekid.keys", "k 1:"+b64key('a')+"\n")
+		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
 		{"cookie keys unset", func(f *fixture) { delete(f.env, "SBX_GATEWAY_COOKIE_KEYS_FILE") }, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
 		{"bad cidr", func(f *fixture) { f.env["SBX_GATEWAY_TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8,nonsense" }, "SBX_GATEWAY_TRUSTED_PROXY_CIDRS"},
 		{"bad exempt cidr", func(f *fixture) { f.env["SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"] = "1.2.3.4/99" }, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},

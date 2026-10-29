@@ -383,7 +383,7 @@ func TestSSORedirect(t *testing.T) {
 	if raw, err := base64.RawURLEncoding.DecodeString(state); err != nil || len(raw) != 16 {
 		t.Errorf("state = %q (%v)", state, err)
 	}
-	line := cookieHeader(t, w, StateCookie)
+	line := cookieHeader(t, w, StateCookiePrefix+"_"+state[:8])
 	assertAttrs(t, line, 600, false)
 	st, err := h.codec.OpenState(cookieValue(line))
 	if err != nil {
