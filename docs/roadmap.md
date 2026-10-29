@@ -11,7 +11,7 @@
 | S3 | Guest agent v0 (Linux) | exec / files / ports, claim, смена идентичности, quiesce, установка и обновление | S2 | ✅ спецификация `docs/specs/s3-guest-agent.md` |
 | S4 | Gateway | Приём туннелей, HTTP-прокси `*.sbx`, маршрутизация, несколько экземпляров, позже SSH gateway и TURN | S2 | ✅ спецификация `docs/specs/s4-gateway.md` |
 | S5 | Шаблон Linux | Сборка образа (cloud-init / Packer), встроенный агент, версии шаблонов | S1, S3 | ✅ спецификация `docs/specs/s5-linux-template.md` |
-| S6 | Ядро control plane | Модель данных, машины состояний sandbox и machine, worker, warm pool, оркестрация create / stop / resume / fork / delete | S1, S2 | ✅ спецификация `docs/specs/s6-control-plane.md` |
+| S6 | Ядро control plane | Модель данных, машины состояний sandbox и machine, worker, warm pool, оркестрация create / stop / resume / fork / delete | S1, S2 | ✅ спецификация `docs/specs/s6-control-plane.md`; реализация в ветке `s6-impl` (план `docs/plans/s6-control-plane.md`, ждёт приёмки; контроллер warm pool — фаза 2) |
 | S7 | Публичное API v1 | Hono + OpenAPI, генерация SDK, CLI | S6 | ✅ спецификация `docs/specs/s7-public-api.md` |
 | S8 | Web (Payload) | Админка, клиентский дашборд, JIT-пользователи из заголовков oauth2-proxy (Keycloak), роли из групп Keycloak, команды, командные API-ключи, offboarding через опрос Keycloak (`sbx login` — S7). Требования S7: ID в Payload — UUID, `IdentityStore`/`ConfigReader` на Payload, роли member/owner | S7 | ✅ спецификация `docs/specs/s8-web.md` |
 | S9 | Windows | Шаблон Win11 (образ пользователя, autounattend, sysprep), агент как служба, ConPTY, VSS, autologon. Server Core — фаза 2 | S3, S5 | ✅ спецификация `docs/specs/s9-windows.md` (первым в реализации спайк: vTPM + `suspend --todisk`) |
