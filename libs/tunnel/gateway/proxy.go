@@ -99,13 +99,35 @@ func dropAgentHeaders(h http.Header) {
 	}
 }
 
-// maxForwardHeaderBytes bounds the agent's response header block, and its
-// trailer block, passed to a caller (HTTP/2 size, see headerBlockSize). A
-// Node HTTP/2 client destroys its whole session, every machine's calls on it
-// included, on a block of about 128 KiB; the gateway's HTTP/2 server does not
-// enforce the caller's SETTINGS_MAX_HEADER_LIST_SIZE. A larger agent answer
-// is a 502 for that call, larger trailers reset that stream.
+// maxForwardHeaderBytes bounds the response header block the gateway writes
+// for an agent answer, and the agent's trailer block (HTTP/2 size, see
+// headerBlockSize). A Node HTTP/2 client destroys its whole session, every
+// machine's calls on it included, on a block of about 128 KiB; the gateway's
+// HTTP/2 server does not enforce the caller's SETTINGS_MAX_HEADER_LIST_SIZE.
+// A larger answer is a 502 for that call, larger trailers reset that stream.
 const maxForwardHeaderBytes = 64 << 10
+
+// maxDeclaredTrailers and maxTrailerNameBytes bound the trailer names an
+// agent declares (Trailer header): the gateway re-emits each as a Trailer
+// field of its response header block.
+const (
+	maxDeclaredTrailers = 32
+	maxTrailerNameBytes = 256
+)
+
+// maxForwardHeaderFields bounds the fields of the response header block, the
+// gateway's own included, and of the trailer block passed to a caller. A Node
+// HTTP/2 client takes about 124 pairs (maxHeaderListPairs) and destroys the
+// session on more, like on a too large block.
+const maxForwardHeaderFields = 100
+
+// serverHeaderFields and serverHeaderBytes reserve room for the fields the
+// HTTP/2 server adds when it writes the header block (:status, Date,
+// Content-Length, a sniffed Content-Type).
+const (
+	serverHeaderFields = 4
+	serverHeaderBytes  = 4*32 + 128
+)
 
 // headerBlockSize is the HTTP/2 size of h: name, value and 32 bytes per field.
 func headerBlockSize(h http.Header) int {
@@ -116,6 +138,59 @@ func headerBlockSize(h http.Header) int {
 		}
 	}
 	return n
+}
+
+// headerFields is the number of fields of h.
+func headerFields(h http.Header) int {
+	n := 0
+	for _, vv := range h {
+		n += len(vv)
+	}
+	return n
+}
+
+// headerOverLimit reports whether a block of the fields in hs would be over
+// maxForwardHeaderBytes or maxForwardHeaderFields.
+func headerOverLimit(hs ...http.Header) bool {
+	size, fields := serverHeaderBytes, serverHeaderFields
+	for _, h := range hs {
+		size += headerBlockSize(h)
+		fields += headerFields(h)
+	}
+	return size > maxForwardHeaderBytes || fields > maxForwardHeaderFields
+}
+
+// trailerBlockOverLimit reports whether the trailer block of t would be over
+// maxForwardHeaderBytes or maxForwardHeaderFields.
+func trailerBlockOverLimit(t http.Header) bool {
+	return headerBlockSize(t) > maxForwardHeaderBytes || headerFields(t) > maxForwardHeaderFields
+}
+
+// forwardHeader builds the agent's response header and trailer declarations
+// passed to the caller: resp.Header without the hop-by-hop and blocked
+// headers, and a Trailer field for each allowed name the agent declared (Go's
+// HTTP/2 client moves them to resp.Trailer). declared holds those names. ok
+// is false when the agent declared more than maxDeclaredTrailers names or one
+// longer than maxTrailerNameBytes.
+func forwardHeader(resp *http.Response) (h http.Header, declared map[string]bool, ok bool) {
+	if len(resp.Trailer) > maxDeclaredTrailers {
+		return nil, nil, false
+	}
+	h = make(http.Header, len(resp.Header)+1)
+	copyHeader(h, resp.Header)
+	dropAgentHeaders(h)
+	declared = make(map[string]bool, len(resp.Trailer))
+	for k := range resp.Trailer {
+		if len(k) > maxTrailerNameBytes {
+			return nil, nil, false
+		}
+		if blockedAgentHeader(k) {
+			continue
+		}
+		h.Add("Trailer", k)
+		declared[k] = true
+	}
+	return h, declared, true
 }
 
 // isHeaderListTooLarge reports whether err is the gateway->agent transport
@@ -221,27 +296,21 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		h.writeBadAgent(w, f, fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode))
 		return
 	}
-	// A caller may not take a larger block: a Node HTTP/2 client destroys
-	// the whole session, every machine's calls on it included.
-	if headerBlockSize(resp.Header) > maxForwardHeaderBytes {
-		h.badAgentHeaders(w, s, f, u.Path)
-		return
-	}
-
 	// The agent's Sbx-* (but agentSbxHeaders) and redirect headers and
 	// trailers are dropped: a compromised agent must not be able to forge a
 	// gateway answer such as 421 machine_moved with an Sbx-Instance-Url of
 	// its choosing, nor point the caller elsewhere (spec 16.1).
+	fwd, declared, ok := forwardHeader(resp)
 	hdr := w.Header()
-	copyHeader(hdr, resp.Header)
-	dropAgentHeaders(hdr)
-	declared := make(map[string]bool, len(resp.Trailer))
-	for k := range resp.Trailer {
-		if blockedAgentHeader(k) {
-			continue
-		}
-		hdr.Add("Trailer", k)
-		declared[k] = true
+	// A caller may not take a larger block than the one written here, the
+	// re-emitted trailer names included: a Node HTTP/2 client destroys the
+	// whole session, every machine's calls on it included.
+	if !ok || headerOverLimit(hdr, fwd) {
+		h.badAgentHeaders(w, s, f, u.Path)
+		return
+	}
+	for k, vv := range fwd {
+		hdr[k] = vv
 	}
 	w.WriteHeader(resp.StatusCode)
 	_ = rc.Flush()
@@ -252,14 +321,14 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 			return
 		}
 		if isHeaderListTooLarge(err) {
-			s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes)
+			s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
 			panic(http.ErrAbortHandler)
 		}
 		h.abortBody(w, rc, r, id, ct, err)
 		return
 	}
-	if headerBlockSize(resp.Trailer) > maxForwardHeaderBytes {
-		s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes)
+	if trailerBlockOverLimit(resp.Trailer) {
+		s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
 		panic(http.ErrAbortHandler)
 	}
 	for k, vv := range resp.Trailer {
@@ -288,10 +357,14 @@ func (h *internalHandler) writeBadAgent(w http.ResponseWriter, f errFormat, msg 
 }
 
 // badAgentHeaders refuses an agent answer whose header block is over
-// maxForwardHeaderBytes or h2.MaxResponseHeaderBytes.
+// maxForwardHeaderBytes, maxForwardHeaderFields or h2.MaxResponseHeaderBytes,
+// or whose trailer declarations are over maxDeclaredTrailers or
+// maxTrailerNameBytes.
 func (h *internalHandler) badAgentHeaders(w http.ResponseWriter, s *session, f errFormat, path string) {
-	s.log.Warn("gateway: agent response headers over the limit, refused", "path", path, "max_bytes", maxForwardHeaderBytes)
-	h.writeBadAgent(w, f, fmt.Sprintf("agent response headers are larger than %d bytes, which the gateway does not pass on", maxForwardHeaderBytes))
+	s.log.Warn("gateway: agent response headers over the limit, refused", "path", path,
+		"max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
+	h.writeBadAgent(w, f, fmt.Sprintf("agent response headers are over %d bytes or %d fields (or over %d declared trailers of up to %d bytes), which the gateway does not pass on",
+		maxForwardHeaderBytes, maxForwardHeaderFields, maxDeclaredTrailers, maxTrailerNameBytes))
 }
 
 // copyBody copies the upstream body with a flush after every read. It

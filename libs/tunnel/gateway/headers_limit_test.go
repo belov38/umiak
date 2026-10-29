@@ -13,6 +13,7 @@ import (
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
 	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
 )
 
 // An agent answer with a header block over 64 KiB would make the gateway
@@ -161,6 +162,182 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 	}
 	if _, err := processClientFor(c, gw, id).SetLabel(ctx, connect.NewRequest(&testingv1.SetLabelRequest{CommandId: "c1"})); err != nil {
 		t.Fatalf("call after the oversized answers: %v", err)
+	}
+}
+
+// The gateway counts the header block it writes, not the agent's: Go's HTTP/2
+// client moves the agent's Trailer declarations out of resp.Header, and the
+// gateway re-emits each name as a Trailer field. A long declared name, too
+// many names or too many fields would otherwise reach a Node caller as a
+// block or field list it cannot take, and it destroys the session with every
+// machine's calls on it. Such an answer is a 502 (a reset for trailers) for
+// that one call; a server stream of another machine on the same caller
+// connection completes.
+func TestAgentTrailerDeclarationsCounted(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+
+	// Machine B: a server stream held open until release, then completed.
+	idB, bsB := e.machine()
+	release := make(chan struct{})
+	cfgB := agentConfig(e, idB, bsB, defaultIdentity())
+	cfgB.Handler = newStubAgent().handlerWith(func(mux *http.ServeMux) {
+		mux.Handle(testingv1connect.ProcessRunProcedure, connect.NewServerStreamHandler(testingv1connect.ProcessRunProcedure,
+			func(ctx context.Context, _ *connect.Request[testingv1.RunRequest], s *connect.ServerStream[testingv1.AttachResponse]) error {
+				if err := s.Send(dataEvent(0, lineData(0, 10))); err != nil {
+					return err
+				}
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if err := s.Send(dataEvent(10, lineData(1, 10))); err != nil {
+					return err
+				}
+				return s.Send(&testingv1.AttachResponse{Event: &testingv1.AttachResponse_Exit{Exit: &testingv1.ExitEvent{
+					Status: testingv1.ExitStatus_EXIT_STATUS_EXITED, StdoutEnd: 20,
+				}}})
+			}))
+	})
+	e.startAgent(cfgB).waitConnected()
+	waitMachine(t, gw.testGW, idB)
+
+	// Machine A: the hostile agent.
+	idA, bsA := e.machine()
+	names := func(n, size int) []string {
+		var out []string
+		for i := range n {
+			p := fmt.Sprintf("X-T%03d-", i)
+			out = append(out, p+strings.Repeat("n", size-len(p)))
+		}
+		return out
+	}
+	declare := func(trailers []string, fill string, fields int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			for _, k := range trailers {
+				w.Header().Add("Trailer", k)
+			}
+			if fill != "" {
+				w.Header().Set("X-Fill", fill)
+			}
+			for i := range fields {
+				w.Header().Set(fmt.Sprintf("X-Field-%03d", i), "v")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{}`)
+			if len(trailers) > 0 && len(trailers[0]) <= maxTrailerNameBytes {
+				w.Header().Set(trailers[0], "sent")
+			}
+		}
+	}
+	longName := "X-" + strings.Repeat("n", 140000)
+	fill := strings.Repeat("f", maxForwardHeaderBytes-4<<10)
+	cfgA := agentConfig(e, idA, bsA, defaultIdentity())
+	cfgA.Handler = newStubAgent().handlerWith(func(mux *http.ServeMux) {
+		mux.HandleFunc("/files/long-name", declare([]string{longName}, "", 0))
+		mux.HandleFunc("/files/long-names", declare(names(12, 60000), "", 0))
+		mux.HandleFunc("/files/name-over-cap", declare(names(1, maxTrailerNameBytes+1), "", 0))
+		mux.HandleFunc("/files/too-many-names", declare(names(maxDeclaredTrailers+1, 16), "", 0))
+		mux.HandleFunc("/files/names-over-block", declare(names(maxDeclaredTrailers, maxTrailerNameBytes), fill, 0))
+		mux.HandleFunc("/files/too-many-fields", declare(nil, "", maxForwardHeaderFields))
+		mux.HandleFunc("/files/fit", declare(names(maxDeclaredTrailers, maxTrailerNameBytes), "", 50))
+		mux.HandleFunc("/sbx.testing.v1.Forge/LongName", declare([]string{longName}, "", 0))
+		mux.HandleFunc("/sbx.testing.v1.Forge/ManyFields", declare(nil, "", maxForwardHeaderFields))
+		mux.HandleFunc("/files/many-trailer-fields", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = io.WriteString(w, "body")
+			for i := range maxForwardHeaderFields + 1 {
+				w.Header().Set(fmt.Sprintf("%sX-Tf-%03d", http.TrailerPrefix, i), "v")
+			}
+		})
+	})
+	e.startAgent(cfgA).waitConnected()
+	waitMachine(t, gw.testGW, idA)
+
+	c := peerClient(t, apiToken1)
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	run, err := processClientFor(c, gw, idB).Run(ctx, connect.NewRequest(&testingv1.RunRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !run.Receive() {
+		t.Fatalf("machine B stream: no first message: %v", run.Err())
+	}
+
+	for _, tc := range []struct {
+		path, ct string
+		want     int
+	}{
+		{"/files/long-name", "", http.StatusBadGateway},
+		{"/files/long-names", "", http.StatusBadGateway},
+		{"/files/name-over-cap", "", http.StatusBadGateway},
+		{"/files/too-many-names", "", http.StatusBadGateway},
+		{"/files/names-over-block", "", http.StatusBadGateway},
+		{"/files/too-many-fields", "", http.StatusBadGateway},
+		{"/files/fit", "", http.StatusOK},
+		{"/rpc/sbx.testing.v1.Forge/LongName", "application/json", http.StatusBadGateway},
+		{"/rpc/sbx.testing.v1.Forge/ManyFields", "application/json", http.StatusBadGateway},
+	} {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(idA)+tc.path, strings.NewReader(`{}`))
+		if tc.ct != "" {
+			req.Header.Set("Content-Type", tc.ct)
+		}
+		req.Header.Set("Te", "trailers")
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.path, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("%s: read body: %v", tc.path, err)
+		}
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s: status %d, want %d (body %.200s)", tc.path, resp.StatusCode, tc.want, body)
+		}
+		// What the caller got: the header block with the Trailer fields the
+		// Go client moved into resp.Trailer.
+		got, fields := headerBlockSize(resp.Header), 0
+		for _, vv := range resp.Header {
+			fields += len(vv)
+		}
+		for k := range resp.Trailer {
+			got += len("Trailer") + len(k) + 32
+			fields++
+		}
+		if got > maxForwardHeaderBytes || fields > maxForwardHeaderFields {
+			t.Errorf("%s: caller got a header block of %d bytes, %d fields", tc.path, got, fields)
+		}
+		if tc.want == http.StatusBadGateway && !strings.Contains(string(body), "header") {
+			t.Errorf("%s: body %s does not name the header limit", tc.path, body)
+		}
+		if tc.want == http.StatusOK && resp.Trailer.Get(names(1, maxTrailerNameBytes)[0]) != "sent" {
+			t.Errorf("%s: declared trailer lost: %v", tc.path, resp.Trailer)
+		}
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(idA)+"/files/many-trailer-fields", strings.NewReader(`{}`))
+	req.Header.Set("Te", "trailers")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err == nil {
+		t.Errorf("many trailer fields: body %q and %d trailers passed, want a reset", b, len(resp.Trailer))
+	}
+
+	close(release)
+	n := 1
+	for run.Receive() {
+		n++
+	}
+	if err := run.Err(); err != nil || n != 3 {
+		t.Fatalf("machine B stream: %d messages, err %v; want 3 and a clean end", n, err)
 	}
 }
 
