@@ -14,8 +14,9 @@ import {
 	type MachineRow,
 	snapshotRef,
 } from "./db.ts";
+import { errFields } from "./log.ts";
 import type { CreatedVm, InfraSnapshotRef, NodeInfra } from "./ports.ts";
-import { FencedOut, type StepFence } from "./steps.ts";
+import { DeadlineExceeded, FencedOut, type StepFence } from "./steps.ts";
 import { waitUntil } from "./wait.ts";
 
 // Machine preparation (S6 §7.4), shared by the pool (machine-op provision),
@@ -30,13 +31,28 @@ export type PrepSource =
 	| { kind: "template" }
 	| { kind: "snapshot"; snapshotId: string };
 
-/** The machine is gone or broken (failed, deleting, deleted, VM missing). Permanent. */
+/** The machine's VM is missing in Proxmox (§6.1 `machine_lost`). Permanent. */
 export class MachineGone extends Error {
 	readonly retryable = false;
 	readonly code = "machine_lost";
 	constructor(machineId: string, detail: string) {
 		super(`machine ${machineId}: ${detail}`);
 		this.name = "MachineGone";
+	}
+}
+
+/**
+ * The machine row is not in the state the step expects (another actor moved
+ * it, no VMID recorded, no machine row). The VM may well exist, so the
+ * machine is not marked lost: the sandbox goes to `error` with this code and
+ * the machine is left for delete or reconcile. Permanent.
+ */
+export class MachineStateConflict extends Error {
+	readonly retryable = false;
+	readonly code = "machine_state_conflict";
+	constructor(machineId: string, detail: string) {
+		super(`machine ${machineId}: ${detail}`);
+		this.name = "MachineStateConflict";
 	}
 }
 
@@ -48,6 +64,35 @@ export class CapacityWaitTimeout extends Error {
 		super(`${what}: still waiting after ${timeoutMs} ms`);
 		this.name = "CapacityWaitTimeout";
 	}
+}
+
+/**
+ * Polls a capacity condition (powered RAM at the start gate, a clone slot)
+ * for up to `timeoutMs`, capped at the time left until the fence's deadline.
+ * Running out of `timeoutMs` is `CapacityWaitTimeout` (retryable); reaching
+ * the deadline first is `DeadlineExceeded` (the operation compensates).
+ */
+export async function capacityWait<T>(
+	ctx: WorkerCtx,
+	fence: StepFence,
+	what: string,
+	cond: () => Promise<T | undefined>,
+	opts: { timeoutMs: number; pollMs: number },
+): Promise<T> {
+	const deadline = fence.deadline;
+	const left =
+		deadline === null
+			? Number.POSITIVE_INFINITY
+			: deadline.at.getTime() - Date.now();
+	const timeoutError =
+		deadline !== null && left < opts.timeoutMs
+			? () => new DeadlineExceeded(deadline.operationId)
+			: () => new CapacityWaitTimeout(what, opts.timeoutMs);
+	return waitUntil(ctx, fence, cond, {
+		timeoutMs: Math.max(0, Math.min(opts.timeoutMs, left)),
+		pollMs: opts.pollMs,
+		timeoutError,
+	});
 }
 
 /** The source of a preparation is unusable (snapshot missing or not ready). Permanent. */
@@ -77,7 +122,7 @@ export async function prepareMachine(
 	source: PrepSource,
 ): Promise<void> {
 	const m = await loadMachine(ctx.pool, machineId);
-	if (m === null) throw new MachineGone(machineId, "not found");
+	if (m === null) throw new MachineStateConflict(machineId, "not found");
 	if (PREPARED.includes(m.state)) return;
 	const infra = await ctx.infra.forNode(m.node_id);
 	if (m.state === "booting") {
@@ -85,7 +130,7 @@ export async function prepareMachine(
 		return;
 	}
 	if (m.state !== "allocating" && m.state !== "provisioning") {
-		throw new MachineGone(machineId, `state ${m.state}`);
+		throw new MachineStateConflict(machineId, `state ${m.state}`);
 	}
 
 	// 1. allocating -> provisioning (a retry stays in provisioning).
@@ -162,9 +207,10 @@ export async function prepareMachine(
 				throw new FencedOut(`machine ${machineId}: left provisioning`);
 			await insertDisks(tx, { machineId }, m.storage_id, created.disks);
 		});
-		await waitUntil(
+		await capacityWait(
 			ctx,
 			fence,
+			`machine ${machineId} start gate`,
 			async () =>
 				(await fence.tx(
 					(tx) => tryPoweredStart(tx, { machineId, toState: "booting" }),
@@ -175,11 +221,6 @@ export async function prepareMachine(
 			{
 				timeoutMs: ctx.timing.ramWaitTimeoutMs,
 				pollMs: ctx.timing.ramWaitPollMs,
-				timeoutError: () =>
-					new CapacityWaitTimeout(
-						`machine ${machineId} start gate`,
-						ctx.timing.ramWaitTimeoutMs,
-					),
 			},
 		);
 	} catch (e) {
@@ -269,7 +310,7 @@ async function abandonCreated(
 		await infra.delete(vmid);
 	} catch (e) {
 		ctx.log.warn(
-			{ err: e, machineId, vmid },
+			{ ...errFields(e), machineId, vmid },
 			"could not delete an abandoned VM; reconcile will find it",
 		);
 	}
@@ -295,19 +336,15 @@ async function withCloneSlot<T>(
 	nodeId: string,
 	fn: () => Promise<T>,
 ): Promise<T> {
-	const slot = await waitUntil(
+	const slot = await capacityWait(
 		ctx,
 		fence,
+		`node ${nodeId} clone slot`,
 		async () =>
 			(await acquireCloneSlot(ctx.pool, nodeId, fence.holder)) ?? undefined,
 		{
 			timeoutMs: ctx.timing.cloneSlotTimeoutMs,
 			pollMs: ctx.timing.cloneSlotPollMs,
-			timeoutError: () =>
-				new CapacityWaitTimeout(
-					`node ${nodeId} clone slot`,
-					ctx.timing.cloneSlotTimeoutMs,
-				),
 		},
 	);
 	try {
@@ -316,7 +353,7 @@ async function withCloneSlot<T>(
 		await releaseCloneSlot(ctx.pool, nodeId, slot, fence.holder).catch(
 			(e: unknown) => {
 				ctx.log.warn(
-					{ err: e, nodeId, slot },
+					{ ...errFields(e), nodeId, slot },
 					"clone slot release failed; it expires by itself",
 				);
 			},
@@ -331,7 +368,8 @@ async function ensureStarted(
 	infra: NodeInfra,
 	m: MachineRow,
 ): Promise<void> {
-	if (m.vmid === null) throw new MachineGone(m.id, "booting without a VMID");
+	if (m.vmid === null)
+		throw new MachineStateConflict(m.id, "booting without a VMID");
 	const status = await infra.status(m.vmid);
 	if (status === "missing")
 		throw new MachineGone(m.id, `VM ${m.vmid} is missing`);

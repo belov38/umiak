@@ -1,6 +1,6 @@
 import type { Tx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
-import { MachineGone } from "../machine-prep.ts";
+import { MachineStateConflict } from "../machine-prep.ts";
 import type { Fenced, Step } from "../steps.ts";
 import {
 	bootTimeoutMs,
@@ -86,7 +86,7 @@ export async function finishStart(
 		[machineId],
 	);
 	if (m.rowCount !== 1) {
-		throw new MachineGone(machineId ?? "-", "not starting at finish");
+		throw new MachineStateConflict(machineId ?? "-", "not starting at finish");
 	}
 	const ok = await transitionSandbox(
 		tx,
@@ -136,7 +136,7 @@ function resumeSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 			run: async () => {
 				const m = await machine();
 				if (m.state !== "stopped" && m.state !== "starting") {
-					throw new MachineGone(m.id, `state ${m.state}`);
+					throw new MachineStateConflict(m.id, `state ${m.state}`);
 				}
 				await startMachine(ctx, fenced, m);
 			},

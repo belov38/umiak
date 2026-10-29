@@ -4,6 +4,7 @@ import type { QuiesceHook } from "@sbx/pve";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { insertDisks, loadSnapshot, snapshotRef } from "../db.ts";
+import { errFields } from "../log.ts";
 import { MachineGone } from "../machine-prep.ts";
 import {
 	AgentUnavailable,
@@ -84,7 +85,10 @@ async function agentCanQuiesce(
 	ctx: WorkerCtx,
 	machineId: string,
 ): Promise<boolean> {
-	const r = await ctx.pool.query<{ state: string; capabilities: string[] }>(
+	const r = await ctx.pool.query<{
+		state: string;
+		capabilities: string[] | null;
+	}>(
 		"SELECT state, capabilities FROM tunnel.tunnel_sessions WHERE machine_id = $1",
 		[machineId],
 	);
@@ -173,7 +177,7 @@ async function abandonSnapshot(
 		await infra.deleteSnapshot(bareRef(lvId, vmid));
 	} catch (e) {
 		ctx.log.warn(
-			{ err: e, snapshotId, lvId },
+			{ ...errFields(e), snapshotId, lvId },
 			"could not delete abandoned snapshot LVs; reconcile will find them",
 		);
 	}

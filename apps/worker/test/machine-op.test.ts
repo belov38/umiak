@@ -69,7 +69,7 @@ describe("machine-op provision failures", () => {
 		await expectGone(w, id);
 	});
 
-	it("a permanent infrastructure error fails the machine; a retryable one is thrown", async () => {
+	it("a permanent infrastructure error fails the machine; retryable and unknown ones are thrown", async () => {
 		const w = await createWorld(db);
 		const id = await insertMachine(w);
 		w.useInfra(
@@ -82,9 +82,22 @@ describe("machine-op provision failures", () => {
 		).rejects.toThrow("proxmox says no");
 		expect((await machine(w, id)).state).toBe("provisioning");
 
+		// Unknown errors (database, sockets) are transient, as in sandbox-op.
 		w.useInfra(
 			spyBefore(w.infra, "create", async () => {
-				throw new Error("template is broken");
+				throw new Error("connection reset");
+			}),
+		);
+		await expect(
+			handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
+		).rejects.toThrow("connection reset");
+		expect((await machine(w, id)).state).toBe("provisioning");
+
+		w.useInfra(
+			spyBefore(w.infra, "create", async () => {
+				throw Object.assign(new Error("template is broken"), {
+					retryable: false,
+				});
 			}),
 		);
 		expect(

@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { stepRequestId } from "@sbx/core";
+import { nodeRam, stepRequestId } from "@sbx/core";
+import { withTx } from "@sbx/db";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
 import { blockAfter, crashAfter, SimulatedCrash } from "./fakes/crash.ts";
-import { createWorld, insertOperation, type TestWorld } from "./fakes/world.ts";
+import {
+	createWorld,
+	insertMachine,
+	insertOperation,
+	type TestWorld,
+} from "./fakes/world.ts";
 import {
 	ENV,
 	expireDeadline,
@@ -48,6 +54,23 @@ async function commandStatus(w: TestWorld, id: string): Promise<string> {
 		[id],
 	);
 	return r.rows[0]?.status ?? "missing";
+}
+
+function poweredMb(w: TestWorld): Promise<number> {
+	return withTx(
+		w.pool,
+		async (tx) => (await nodeRam(tx, w.topo.nodeId)).poweredMb,
+	);
+}
+
+/** A machine whose VM is gone: failed machine_lost, power observed stopped, not in powered RAM. */
+async function expectLostFreed(w: TestWorld, machineId: string): Promise<void> {
+	const m = await row(w, "machines", machineId);
+	expect(m.state).toBe("failed");
+	expect(m.error_code).toBe("machine_lost");
+	expect(m.power_observed).toBe("stopped");
+	expect(m.power_observed_at).not.toBeNull();
+	expect(await poweredMb(w)).toBe(0);
 }
 
 function vmOf(w: TestWorld, machineId: string) {
@@ -99,7 +122,7 @@ describe("stop", () => {
 		expect((await row(w, "sandboxes", sandboxId)).state).toBe("stopped");
 	});
 
-	it("a machine that left running/stopping before finish: machine_lost, not stopped", async () => {
+	it("a machine that left running/stopping before finish: machine_state_conflict, the machine is left alone", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
 		const { sandboxId, machineId } = await readySandbox(w, e);
@@ -109,7 +132,7 @@ describe("stop", () => {
 		const pending = handleSandboxOp(w.ctx, { operationId: op.id });
 		await blocked.reached;
 		await w.pool.query(
-			"UPDATE runtime.machines SET state = 'failed' WHERE id = $1",
+			"UPDATE runtime.machines SET state = 'starting' WHERE id = $1",
 			[machineId],
 		);
 		blocked.release();
@@ -117,8 +140,29 @@ describe("stop", () => {
 		expect(await pending).toBe("failed");
 		const s = await row(w, "sandboxes", sandboxId);
 		expect(s.state).toBe("error");
+		expect(s.error_code).toBe("machine_state_conflict");
+		expect((await row(w, "operations", op.id)).error_code).toBe(
+			"machine_state_conflict",
+		);
+		const m = await row(w, "machines", machineId);
+		expect(m.state).toBe("starting");
+		expect(m.error_code).toBeNull();
+	});
+
+	it("the VM is missing: machine failed machine_lost and its RAM no longer counts as powered", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await readySandbox(w, e);
+		expect(await poweredMb(w)).toBeGreaterThan(0);
+		w.infra.vms.delete(vmOf(w, machineId).vmid);
+
+		const op = await e.svc.stop(e.p, sandboxId);
+		expect(await run(w, op.id)).toBe("failed");
+
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(s.state).toBe("error");
 		expect(s.error_code).toBe("machine_lost");
-		expect((await row(w, "operations", op.id)).error_code).toBe("machine_lost");
+		await expectLostFreed(w, machineId);
 	});
 
 	it("past its deadline: sandbox error stop_failed", async () => {
@@ -265,6 +309,63 @@ describe("resume", () => {
 		expect(w.infra.callsOf("start")).toHaveLength(2); // create + this resume
 	});
 
+	it("a machine in a state resume cannot start from: machine_state_conflict, no hard stop, the machine is left alone", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await stoppedSandbox(w, e);
+		const op = await e.svc.resume(e.p, sandboxId);
+		await w.pool.query(
+			"UPDATE runtime.machines SET state = 'running' WHERE id = $1",
+			[machineId],
+		);
+		const stopsBefore = w.infra.callsOf("stop").length;
+
+		expect(await run(w, op.id)).toBe("failed");
+
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(s.state).toBe("error");
+		expect(s.error_code).toBe("machine_state_conflict");
+		const m = await row(w, "machines", machineId);
+		expect(m.state).toBe("running");
+		expect(m.error_code).toBeNull();
+		expect(w.infra.callsOf("stop")).toHaveLength(stopsBefore);
+	});
+
+	it("a start gate wait ends at the operation deadline, not at the configured timeout", async () => {
+		const w = await createWorld(db, {
+			ramCapMb: 4096,
+			timing: { ramWaitTimeoutMs: 60_000 },
+		});
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await stoppedSandbox(w, e);
+		const op = await e.svc.resume(e.p, sandboxId);
+		// A deleting machine whose VM still runs holds powered RAM (§8.1).
+		await insertMachine(w, {
+			state: "deleting",
+			poolKey: null,
+			memoryMb: 3072,
+			powerObserved: "running",
+		});
+		await w.pool.query(
+			"UPDATE runtime.operations SET deadline_at = now() + interval '300 milliseconds' WHERE id = $1",
+			[op.id],
+		);
+		const startsBefore = w.infra.callsOf("start").length;
+
+		const t0 = Date.now();
+		expect(await run(w, op.id)).toBe("failed");
+		expect(Date.now() - t0).toBeLessThan(3000);
+
+		expect((await row(w, "operations", op.id)).error_code).toBe(
+			"deadline_exceeded",
+		);
+		expect((await row(w, "sandboxes", sandboxId)).error_code).toBe(
+			"resume_failed",
+		);
+		expect((await row(w, "machines", machineId)).state).toBe("stopped");
+		expect(w.infra.callsOf("start")).toHaveLength(startsBefore);
+	});
+
 	it("past its deadline: hard stop and resume_failed", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
@@ -283,6 +384,21 @@ describe("resume", () => {
 });
 
 describe("recover", () => {
+	it("from running with the VM missing: machine failed machine_lost and its RAM no longer counts as powered", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const { sandboxId, machineId } = await readySandbox(w, e);
+		w.infra.vms.delete(vmOf(w, machineId).vmid);
+
+		const op = await e.svc.recover(e.p, sandboxId);
+		expect(await run(w, op.id)).toBe("failed");
+
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(s.state).toBe("error");
+		expect(s.error_code).toBe("machine_lost");
+		await expectLostFreed(w, machineId);
+	});
+
 	it("from ready: hard power cycle, new boot provisioned, ready again", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);

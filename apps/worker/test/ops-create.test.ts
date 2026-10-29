@@ -218,6 +218,36 @@ describe("create, cold path", () => {
 		expect(w.infra.calls).toEqual([]);
 	});
 
+	it("a clone slot wait ends at the operation deadline, not at the configured timeout", async () => {
+		const w = await createWorld(db, {
+			cloneConcurrency: 1,
+			timing: { cloneSlotTimeoutMs: 60_000 },
+		});
+		await w.pool.query(
+			`INSERT INTO runtime.node_clone_slots (node_id, slot, holder, expires_at)
+			 VALUES ($1, 0, 'someone', now() + interval '1 minute')`,
+			[w.topo.nodeId],
+		);
+		const e = opsEnv(w);
+		const { sandboxId, operationId } = await createSandbox(w, e);
+		await w.pool.query(
+			"UPDATE runtime.operations SET deadline_at = now() + interval '300 milliseconds' WHERE id = $1",
+			[operationId],
+		);
+
+		const t0 = Date.now();
+		expect(await run(w, operationId)).toBe("failed");
+		expect(Date.now() - t0).toBeLessThan(3000);
+
+		expect((await row(w, "operations", operationId)).error_code).toBe(
+			"deadline_exceeded",
+		);
+		const s = await row(w, "sandboxes", sandboxId);
+		expect(s.state).toBe("error");
+		expect(s.error_code).toBe("create_failed");
+		expect(w.infra.callsOf("create")).toHaveLength(0);
+	});
+
 	it("a database error (40P01) is transient: thrown, no compensation, the op stays running", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);

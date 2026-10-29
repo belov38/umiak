@@ -10,7 +10,11 @@ import type { Tx } from "@sbx/db";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine, type MachineRow } from "../db.ts";
-import { CapacityWaitTimeout, MachineGone } from "../machine-prep.ts";
+import {
+	capacityWait,
+	MachineGone,
+	MachineStateConflict,
+} from "../machine-prep.ts";
 import { AgentUnavailable } from "../ports.ts";
 import {
 	DeadlineExceeded,
@@ -67,16 +71,16 @@ export async function currentMachine(
 ): Promise<MachineRow> {
 	const s = await loadSandboxRow(ctx.pool, sandboxId);
 	if (s.machine_id === null) {
-		throw new MachineGone("-", `sandbox ${sandboxId} has no machine`);
+		throw new MachineStateConflict("-", `sandbox ${sandboxId} has no machine`);
 	}
 	const m = await loadMachine(ctx.pool, s.machine_id);
-	if (m === null) throw new MachineGone(s.machine_id, "not found");
+	if (m === null) throw new MachineStateConflict(s.machine_id, "not found");
 	return m;
 }
 
-/** VMID of a machine that has a VM; `MachineGone` otherwise. */
+/** VMID of a machine that has a VM; `MachineStateConflict` otherwise. */
 export function vmidOf(m: MachineRow): number {
-	if (m.vmid === null) throw new MachineGone(m.id, "no VMID recorded");
+	if (m.vmid === null) throw new MachineStateConflict(m.id, "no VMID recorded");
 	return m.vmid;
 }
 
@@ -245,9 +249,10 @@ export async function startMachine(
 	m: MachineRow,
 ): Promise<void> {
 	const vmid = vmidOf(m);
-	await waitUntil(
+	await capacityWait(
 		ctx,
 		fenced,
+		`machine ${m.id} start gate`,
 		async () =>
 			(await fenced.tx(
 				(tx) => tryPoweredStart(tx, { machineId: m.id, toState: "starting" }),
@@ -258,11 +263,6 @@ export async function startMachine(
 		{
 			timeoutMs: ctx.timing.ramWaitTimeoutMs,
 			pollMs: ctx.timing.ramWaitPollMs,
-			timeoutError: () =>
-				new CapacityWaitTimeout(
-					`machine ${m.id} start gate`,
-					ctx.timing.ramWaitTimeoutMs,
-				),
 		},
 	);
 	const infra = await ctx.infra.forNode(m.node_id);
@@ -345,6 +345,38 @@ export async function transitionSandbox(
 		...(ev.data ? { data: ev.data } : {}),
 	});
 	return true;
+}
+
+/**
+ * The machine-lost transition (§6.1): the VM is gone, so the machine is
+ * `failed` (`machine_lost`) with `power_observed = stopped`. The observed
+ * power matters: §8.1 counts a `failed` machine whose power is not `stopped`
+ * in powered RAM, and nothing corrects it later (reconcile skips failed
+ * machines), so without it the RAM would block the start gate until the
+ * sandbox is deleted. `expected` makes it conditional on a snapshot (state
+ * and version); without it, any state but failed/deleting/deleted. Returns
+ * true if the row changed.
+ */
+export async function markMachineLost(
+	tx: Tx,
+	machineId: string,
+	detail: string,
+	expected?: { state: string; version: number },
+): Promise<boolean> {
+	const guard = expected
+		? "state = $3 AND version = $4"
+		: "state NOT IN ('failed', 'deleting', 'deleted')";
+	const r = await tx.client.query(
+		`UPDATE runtime.machines
+		 SET state = 'failed', error_code = 'machine_lost', error_detail = $2,
+		     power_observed = 'stopped', power_observed_at = now(),
+		     state_changed_at = now(), version = version + 1
+		 WHERE id = $1 AND ${guard}`,
+		expected
+			? [machineId, detail, expected.state, expected.version]
+			: [machineId, detail],
+	);
+	return r.rowCount === 1;
 }
 
 /** Puts the sandbox in `error` with a code and message (any of `from`). */

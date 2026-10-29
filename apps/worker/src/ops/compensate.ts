@@ -4,7 +4,12 @@ import type { Tx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
 import type { MachineRow } from "../db.ts";
 import type { Fenced, OperationError } from "../steps.ts";
-import { currentMachine, hardStop, sandboxToError } from "./common.ts";
+import {
+	currentMachine,
+	hardStop,
+	markMachineLost,
+	sandboxToError,
+} from "./common.ts";
 import {
 	consumedForkSources,
 	deleteSnapshotLvs,
@@ -56,12 +61,18 @@ export function pendingCompensation(op: Operation): OperationError | null {
 	};
 }
 
-/** `machine_lost` (§6.1) wins over the operation's own sandbox error code. */
+/** Codes that win over the operation's own sandbox error code. */
+const MACHINE_ERROR_CODES: readonly string[] = [
+	"machine_lost", // §6.1: the VM is missing
+	"machine_state_conflict", // the machine row is not where the step expects it
+];
+
+/** `machine_lost` (§6.1) and `machine_state_conflict` win over the operation's own sandbox error code. */
 export function sandboxErrorCode(
 	fallback: string,
 	error: OperationError,
 ): string {
-	return error.code === "machine_lost" ? "machine_lost" : fallback;
+	return MACHINE_ERROR_CODES.includes(error.code) ? error.code : fallback;
 }
 
 function errorData(
@@ -164,21 +175,6 @@ export async function compensateForkTarget(
 	});
 }
 
-/** A machine whose VM is gone (§6.1 `machine_lost`): `failed`, kept for the error sandbox. */
-async function markLost(
-	tx: Tx,
-	machineId: string,
-	detail: string,
-): Promise<void> {
-	await tx.client.query(
-		`UPDATE runtime.machines
-		 SET state = 'failed', error_code = 'machine_lost', error_detail = $2,
-		     state_changed_at = now(), version = version + 1
-		 WHERE id = $1 AND state NOT IN ('failed', 'deleting', 'deleted')`,
-		[machineId, detail],
-	);
-}
-
 async function machineOrNull(
 	ctx: WorkerCtx,
 	sandboxId: string,
@@ -190,7 +186,10 @@ async function machineOrNull(
 	}
 }
 
-/** Stop (§7.5, §6.1): sandbox `stopping → error` (`stop_failed`). The machine stays as it is. */
+/**
+ * Stop (§7.5, §6.1): sandbox `stopping → error` (`stop_failed`). The machine
+ * stays as it is, unless its VM is missing (`machine_lost`, §6.1).
+ */
 export async function compensateStop(
 	ctx: WorkerCtx,
 	fenced: Fenced,
@@ -200,7 +199,7 @@ export async function compensateStop(
 	const code = sandboxErrorCode("stop_failed", error);
 	await fenced.finish("failed", error, async (tx) => {
 		if (m !== null && code === "machine_lost")
-			await markLost(tx, m.id, error.message);
+			await markMachineLost(tx, m.id, error.message);
 		await sandboxToError(
 			tx,
 			fenced.sandboxId,
@@ -216,7 +215,8 @@ export async function compensateStop(
  * Resume and recover (§7.6): S1 hard stop, machine → `stopped` with
  * `power_observed = stopped`, sandbox `starting → error` with `code`. The
  * disks stay, so resume can be tried again. A lost VM marks the machine
- * `failed` instead; `recover_unsupported` leaves the machine alone.
+ * `failed` instead; `recover_unsupported` and `machine_state_conflict` leave
+ * the machine alone (no hard stop either: it is not where this operation put it).
  */
 export async function compensateStart(
 	ctx: WorkerCtx,
@@ -225,7 +225,9 @@ export async function compensateStart(
 	fallback: "resume_failed",
 ): Promise<void> {
 	const m = await machineOrNull(ctx, fenced.sandboxId);
-	const untouched = error.code === "recover_unsupported";
+	const untouched =
+		error.code === "recover_unsupported" ||
+		error.code === "machine_state_conflict";
 	const code = untouched ? error.code : sandboxErrorCode(fallback, error);
 	if (m !== null && !untouched && code !== "machine_lost") {
 		await fenced.check();
@@ -233,7 +235,8 @@ export async function compensateStart(
 	}
 	await fenced.finish("failed", error, async (tx) => {
 		if (m !== null && !untouched) {
-			if (code === "machine_lost") await markLost(tx, m.id, error.message);
+			if (code === "machine_lost")
+				await markMachineLost(tx, m.id, error.message);
 			else {
 				await tx.client.query(
 					`UPDATE runtime.machines

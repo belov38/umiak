@@ -5,7 +5,7 @@ import {
 	prepareMachine,
 	waitBooted,
 } from "../machine-prep.ts";
-import { isRetryable, type NodeInfra } from "../ports.ts";
+import { isPermanent, type NodeInfra } from "../ports.ts";
 import { FencedOut, type MachineAction, MachineFence } from "../steps.ts";
 
 // machine-op queue (S6 §9.3, §15.1): pool provisioning and machine delete.
@@ -21,7 +21,8 @@ export interface MachineOpData {
  * - `skipped`: nothing to do (unknown machine, already prepared or deleted);
  * - `fenced_out`: another executor or a delete took over;
  * - `failed`: provision failed, the machine is `deleting` with a delete job.
- * Retryable errors are thrown (pg-boss repeats the job).
+ * As in sandbox-op, errors are transient by default and thrown (pg-boss
+ * repeats the job); only `retryable === false` fails the provision.
  */
 export type MachineOpResult = "done" | "skipped" | "fenced_out" | "failed";
 
@@ -72,9 +73,28 @@ async function provision(
 		return "done";
 	} catch (e) {
 		if (e instanceof FencedOut) return fencedOut(ctx, e, "provision");
-		if (isRetryable(e)) throw e;
+		if (!isPermanent(e)) return rethrowUnlessFenced(ctx, fence, e);
 		return failProvision(ctx, fence, e);
 	}
+}
+
+/**
+ * A transient provision error is thrown for a redelivery, unless this
+ * executor was fenced out meanwhile: then the error is a side effect of the
+ * takeover and a redelivery has nothing to do.
+ */
+async function rethrowUnlessFenced(
+	ctx: WorkerCtx,
+	fence: MachineFence,
+	err: unknown,
+): Promise<MachineOpResult> {
+	try {
+		await fence.check();
+	} catch (e) {
+		if (e instanceof FencedOut) return fencedOut(ctx, e, "provision");
+		throw e;
+	}
+	throw err;
 }
 
 async function bootTimeoutOf(ctx: WorkerCtx, buildId: string): Promise<number> {

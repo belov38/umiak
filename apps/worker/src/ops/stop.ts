@@ -1,5 +1,5 @@
 import type { WorkerCtx } from "../context.ts";
-import { MachineGone } from "../machine-prep.ts";
+import { MachineGone, MachineStateConflict } from "../machine-prep.ts";
 import type { Fenced, Step } from "../steps.ts";
 import { currentMachine, runOp, transitionSandbox, vmidOf } from "./common.ts";
 import { compensateStop } from "./compensate.ts";
@@ -135,7 +135,10 @@ export const STOP_OP: SandboxOpHandler = {
 				[machineId],
 			);
 			if (m.rowCount !== 1) {
-				throw new MachineGone(machineId ?? "-", "not stopping at finish");
+				throw new MachineStateConflict(
+					machineId ?? "-",
+					"not stopping at finish",
+				);
 			}
 			// The guest is off: nothing that ran on it survives.
 			await tx.client.query(

@@ -9,7 +9,11 @@ import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { lockSandboxRow } from "../db.ts";
 import { snapshotInUse } from "../handlers/snapshot-op.ts";
-import { sandboxToError, transitionSandbox } from "../ops/common.ts";
+import {
+	markMachineLost,
+	sandboxToError,
+	transitionSandbox,
+} from "../ops/common.ts";
 import type { InfraLv, InfraVm, NodeInfra } from "../ports.ts";
 
 // Controller `reconcile` (S6 §11.2, §11.3; every 60 s). Compares Proxmox
@@ -654,15 +658,11 @@ async function applyLost(ctx: WorkerCtx, m: MachineSnap): Promise<boolean> {
 			await lockSandboxRow(tx, m.sandbox_id);
 			if (await hasActiveOp(tx, m.sandbox_id)) return false;
 		}
-		const u = await tx.client.query(
-			`UPDATE runtime.machines
-			 SET state = 'failed', error_code = 'machine_lost', error_detail = $4,
-			     power_observed = 'stopped', power_observed_at = now(),
-			     state_changed_at = now(), version = version + 1
-			 WHERE id = $1 AND state = $2 AND version = $3`,
-			[m.id, m.state, m.version, detail],
-		);
-		if (u.rowCount !== 1) return false;
+		const lost = await markMachineLost(tx, m.id, detail, {
+			state: m.state,
+			version: m.version,
+		});
+		if (!lost) return false;
 		await commandsLost(tx, m.id);
 		if (m.sandbox_id === null) {
 			await tx.client.query(

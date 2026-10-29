@@ -44,6 +44,11 @@ export class DeadlineExceeded extends Error {
 export interface StepFence {
 	/** Clone slot holder id, unique per executor attempt. */
 	readonly holder: string;
+	/**
+	 * The operation deadline that bounds waits inside steps (capacity, clone
+	 * slot); null = no cap (machine-op, or an operation without a deadline).
+	 */
+	readonly deadline: { at: Date; operationId: string } | null;
 	check(): Promise<unknown>;
 	tx<T>(fn: (tx: Tx) => Promise<T>, opts?: { nodeId?: string }): Promise<T>;
 }
@@ -104,6 +109,11 @@ export class Fenced implements StepFence {
 
 	get holder(): string {
 		return `op:${this.op.id}:${this.attempt}`;
+	}
+
+	get deadline(): { at: Date; operationId: string } | null {
+		const at = this.op.deadlineAt;
+		return at === null ? null : { at, operationId: this.op.id };
 	}
 
 	/**
@@ -374,6 +384,11 @@ export class MachineFence implements StepFence {
 
 	get holder(): string {
 		return `machine:${this.machineId}:${this.attempt}`;
+	}
+
+	/** Machine-op has no operation deadline. */
+	get deadline(): null {
+		return null;
 	}
 
 	static async begin(

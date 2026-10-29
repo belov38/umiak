@@ -3,7 +3,7 @@ import type { Tx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine, type MachineRow } from "../db.ts";
 import {
-	MachineGone,
+	MachineStateConflict,
 	type PrepSource,
 	prepareMachine,
 	waitBooted,
@@ -57,7 +57,9 @@ async function claimingMachine(
 	sandboxId: string,
 ): Promise<MachineRow> {
 	const m = await currentMachine(ctx, sandboxId);
-	if (m.state !== "claiming") throw new MachineGone(m.id, `state ${m.state}`);
+	if (m.state !== "claiming") {
+		throw new MachineStateConflict(m.id, `state ${m.state}`);
+	}
 	return m;
 }
 
@@ -100,7 +102,10 @@ export function createSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					if (r.rowCount === 1) return;
 					const cur = await loadMachine(tx.client, m.id);
 					if (cur?.state !== "claiming") {
-						throw new MachineGone(m.id, `state ${cur?.state ?? "missing"}`);
+						throw new MachineStateConflict(
+							m.id,
+							`state ${cur?.state ?? "missing"}`,
+						);
 					}
 				});
 				return { bootId };
@@ -168,7 +173,7 @@ export async function finishCreate(
 		[machineId],
 	);
 	if (m.rowCount !== 1) {
-		throw new MachineGone(machineId ?? "-", "not claiming at finish");
+		throw new MachineStateConflict(machineId ?? "-", "not claiming at finish");
 	}
 	const ok = await transitionSandbox(
 		tx,
