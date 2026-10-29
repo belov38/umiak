@@ -244,6 +244,8 @@ func TestRejectMapping(t *testing.T) {
 		{"503 retry-after", 503, map[string]string{"Retry-After": "7"}, "draining", transport.RejectError{Status: 503, RetryAfter: 7 * time.Second, Reason: "draining"}},
 		{"503 http-date ignored", 503, map[string]string{"Retry-After": "Wed, 21 Oct 2099 07:28:00 GMT"}, "", transport.RejectError{Status: 503}},
 		{"503 garbage ignored", 503, map[string]string{"Retry-After": "soon"}, "", transport.RejectError{Status: 503}},
+		{"503 huge retry-after clamped", 503, map[string]string{"Retry-After": "9223372036854775807"}, "", transport.RejectError{Status: 503, RetryAfter: 24 * time.Hour}},
+		{"503 out of range retry-after clamped", 503, map[string]string{"Retry-After": "99999999999999999999"}, "", transport.RejectError{Status: 503, RetryAfter: 24 * time.Hour}},
 		{"200 not an upgrade", 200, nil, "hello", transport.RejectError{Status: 200, Reason: "hello"}},
 		{"redirect not followed", 302, map[string]string{"Location": "/elsewhere"}, "", transport.RejectError{Status: 302}},
 		{"reason capped at 1 KiB", 500, nil, strings.Repeat("x", 4096), transport.RejectError{Status: 500, Reason: strings.Repeat("x", 1024)}},
@@ -514,7 +516,10 @@ func TestPingTimeoutCountsFromLastPong(t *testing.T) {
 		readErr <- err
 	}()
 	select {
-	case <-readErr:
+	case err := <-readErr:
+		if err == nil {
+			t.Fatal("Read returned data from a silent peer")
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("conn not closed by the ping loop within 5s")
 	}
