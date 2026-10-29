@@ -40,6 +40,7 @@
 - Additive wire fields: response header `Sbx-Conn-Id`; `ErrorDetail.instance_url`; `421`/`503` from the internal listener carry `Sbx-Error-Code` and `Sbx-Instance-Url` headers so Connect clients can read them from error metadata.
 - Peer TCP between gateway pods (§8.4 `/v1/machines/{id}/tcp/{port}`) is a plain HTTP/2 `CONNECT` with `:authority = <machineId>:<port>` on the internal listener (agreed with S4: plain CONNECT has no `:path`; no extended CONNECT). `DialRemoteTCP` is the Go client for it.
 - buf lint `SERVICE_SUFFIX` is disabled to keep the spec's service names (`Control`, `Events`, `Process`).
+- Final review fixes: `POST /internal/v1/agent-events` carries binary protobuf (`application/proto`), not protojson, because the gateway does not link S3/S6 payload types; `ConnectionEvent.instance_id` is the gateway instance (§9.6) and field 6 `agent_instance_id` carries the agent's; `tunnel_sessions.capabilities` is NULL until `Control/Info` unless the same agent process and version reconnected, and `agent-client` waits while it is NULL; the machine id from the upgrade is canonicalized (lower-case UUID, else 400).
 
 ---
 
