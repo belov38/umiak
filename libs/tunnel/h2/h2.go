@@ -109,10 +109,11 @@ func (*ConnListener) Addr() net.Addr { return listenerAddr{} }
 
 // MaxResponseHeaderBytes bounds the response header block, and the trailer
 // block, the gateway reads from an agent (HTTP/2 size: name, value and 32
-// bytes per field; net/http's default is 10 MiB). A larger block fails that
-// stream; a single field larger than it is an HPACK error that closes the
-// agent's tunnel connection. It is larger than what the gateway forwards
-// (64 KiB) so that an oversized field still gets a clean 502.
+// bytes per field; net/http's default is 10 MiB). A block that crosses it in
+// its last frame fails that stream; a single field larger than it, or a
+// CONTINUATION frame after it is crossed, is an error that closes the agent's
+// tunnel connection (that machine's calls only). It is larger than what the
+// gateway forwards (64 KiB) so that an oversized field still gets a clean 502.
 const MaxResponseHeaderBytes = 1 << 20
 
 // ClientConfig holds the HTTP/2 client parameters of the gateway side.

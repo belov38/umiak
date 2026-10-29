@@ -478,8 +478,20 @@ func TestBadAgentAnswerNotRetryable(t *testing.T) {
 				return
 			}
 			_, _ = w.Write(answer)
-			if r.Header.Get("X-Mode") == "trailer" {
+			switch r.Header.Get("X-Mode") {
+			case "trailer":
 				w.Header().Set(http.TrailerPrefix+"X-Big", overTrailer)
+			case "huge-trailer":
+				// Fields up to h2.MaxResponseHeaderBytes, then one that
+				// crosses it: the gateway->agent transport fails the body
+				// read (isHeaderListTooLarge). The crossing field sorts last,
+				// so it ends the block's last frame; a CONTINUATION frame
+				// after the limit is crossed would close the agent's tunnel.
+				v := strings.Repeat("h", 4<<10)
+				for i := range h2.MaxResponseHeaderBytes / (len("X-Huge-0000") + len(v) + 32) {
+					w.Header().Set(fmt.Sprintf("%sX-Huge-%04d", http.TrailerPrefix, i), v)
+				}
+				w.Header().Set(http.TrailerPrefix+"X-Zz-Over", strings.Repeat("z", 8<<10))
 			}
 		})
 	})
@@ -545,25 +557,28 @@ func TestBadAgentAnswerNotRetryable(t *testing.T) {
 		t.Errorf("raw stream refusal: status %d, type %q, body %q, err %v", sresp.StatusCode, sresp.Header.Get("Content-Type"), body, err)
 	}
 
-	// Trailers over the limit on a unary answer: dropped, the call completes.
-	ureq := connect.NewRequest(&testingv1.EchoRequest{})
-	ureq.Header().Set("X-Mode", "trailer")
-	res, err := pc.Echo(ctx, ureq)
-	if err != nil || string(res.Msg.GetPayload()) != "payload" || res.Trailer().Get("X-Big") != "" {
-		t.Fatalf("unary with trailers over the limit: %v, %v; want the answer without them", res, err)
-	}
-	rreq, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+"/rpc"+testingv1connect.ProcessEchoProcedure, strings.NewReader(""))
-	rreq.Header.Set("Content-Type", "application/proto")
-	rreq.Header.Set("Te", "trailers")
-	rreq.Header.Set("X-Mode", "trailer")
-	raw, err := c.Do(rreq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := io.ReadAll(raw.Body)
-	_ = raw.Body.Close()
-	if err != nil || string(b) != string(answer) || raw.Trailer.Get("X-Big") != "" {
-		t.Errorf("raw unary with trailers over the limit: body %q, err %v, trailer of %d bytes; want the body without the trailer",
-			b, err, len(raw.Trailer.Get("X-Big")))
+	// Trailers over the limit on a unary answer (trailer), and over what the
+	// gateway->agent transport reads (huge-trailer): dropped, the call
+	// completes with the agent's body and no reset.
+	for _, mode := range []string{"trailer", "huge-trailer"} {
+		ureq := connect.NewRequest(&testingv1.EchoRequest{})
+		ureq.Header().Set("X-Mode", mode)
+		res, err := pc.Echo(ctx, ureq)
+		if err != nil || string(res.Msg.GetPayload()) != "payload" || len(res.Trailer()) != 0 {
+			t.Fatalf("unary %s: %v, %v; want the answer without trailers", mode, res, err)
+		}
+		rreq, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+"/rpc"+testingv1connect.ProcessEchoProcedure, strings.NewReader(""))
+		rreq.Header.Set("Content-Type", "application/proto")
+		rreq.Header.Set("Te", "trailers")
+		rreq.Header.Set("X-Mode", mode)
+		raw, err := c.Do(rreq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := io.ReadAll(raw.Body)
+		_ = raw.Body.Close()
+		if err != nil || string(b) != string(answer) || len(raw.Trailer) != 0 {
+			t.Errorf("raw unary %s: body %q, err %v, %d trailers; want the body without them", mode, b, err, len(raw.Trailer))
+		}
 	}
 }
