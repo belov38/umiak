@@ -162,6 +162,13 @@ export class Allocator {
 			) {
 				return { vmid, mac, reused: false };
 			}
+			// A concurrent allocate of the same owner may have won the race
+			// after our first lookup: the store refuses a second live lease of
+			// one owner, so every further insert would fail too.
+			if (ownerId !== undefined) {
+				const own = await this.#findOwned(ownerId);
+				if (own) return { vmid: own.vmid, mac: own.mac, reused: true };
+			}
 		}
 		throw new AllocatorError(
 			"vmid_exhausted",

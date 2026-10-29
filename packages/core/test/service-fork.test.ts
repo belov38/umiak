@@ -3,6 +3,7 @@ import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	expectCode,
+	insertSavedSnapshot,
 	machineRow,
 	readSecrets,
 	sandboxRow,
@@ -237,6 +238,54 @@ describe.skipIf(skipPg())("SandboxService.fork (S6 §7.7)", () => {
 
 		await seedSandbox(t.pool, env, { state: "ready", machineState: null });
 		await expectCode(env.svc.fork(env.p, src.sandboxId, {}), "quota_exceeded");
+		expect(await count()).toBe(2);
+	});
+	it("checks like create: a disabled template and storage over its thresholds refuse the fork", async () => {
+		const env = await serviceEnv(t.pool);
+		const src = await seedSandbox(t.pool, env, { state: "ready" });
+		const count = async () =>
+			(
+				await t.pool.query<{ n: number }>(
+					"SELECT count(*)::int AS n FROM runtime.sandboxes WHERE team_id = $1",
+					[env.p.teamId],
+				)
+			).rows[0]?.n;
+
+		const off = await serviceEnv(t.pool, { enabled: false });
+		const offSrc = await seedSandbox(t.pool, off, { state: "ready" });
+		await expectCode(
+			off.svc.fork(off.p, offSrc.sandboxId, {}),
+			"template_unavailable",
+		);
+		await expectCode(
+			off.svc.fork(off.p, offSrc.sandboxId, { size: "2gb" }),
+			"template_unavailable",
+		);
+
+		await t.pool.query(
+			`UPDATE runtime.storages SET usage = '{"dataPercent": 85, "metadataPercent": 10}'
+			 WHERE id = $1`,
+			[env.topo.storageId],
+		);
+		await expectCode(env.svc.fork(env.p, src.sandboxId, {}), "out_of_capacity");
+		// Create from a saved snapshot on that storage is refused the same way.
+		await insertSavedSnapshot(t.pool, env.topo, {
+			teamId: env.p.teamId,
+			name: "full-disk",
+		});
+		await expectCode(
+			env.svc.create(env.p, { from: { snapshot: "full-disk" } }),
+			"out_of_capacity",
+		);
+		expect(await count()).toBe(1);
+		expect(env.jobs.sent).toEqual([]);
+
+		await t.pool.query(
+			`UPDATE runtime.storages SET usage = '{"dataPercent": 10, "metadataPercent": 10}'
+			 WHERE id = $1`,
+			[env.topo.storageId],
+		);
+		await env.svc.fork(env.p, src.sandboxId, {});
 		expect(await count()).toBe(2);
 	});
 });

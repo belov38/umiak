@@ -1,5 +1,5 @@
 import { type Tx, withTx } from "@sbx/db";
-import { requestHash } from "../canonical.ts";
+import { type RequestHash, requestHash } from "../canonical.ts";
 import { admit, checkQuota, QUOTA_ACTIVE_SANDBOX_STATES } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
 import {
@@ -216,6 +216,15 @@ function machineOrInvalid(
 	return m;
 }
 
+/** `bodyHash` of an active resume (hex) made from the same body. */
+function sameBody(hash: RequestHash, stored: unknown): boolean {
+	return (
+		typeof stored === "string" &&
+		/^[0-9a-f]*$/.test(stored) &&
+		hash.matches(Buffer.from(stored, "hex"))
+	);
+}
+
 export async function resumeSandbox(
 	deps: SandboxServiceDeps,
 	p: Principal,
@@ -223,14 +232,15 @@ export async function resumeSandbox(
 	input: ResumeInput = {},
 ): Promise<Operation> {
 	const patch = validateResumeInput(input);
-	const bodyHash = requestHash(RESUME_SCOPE, input).toString("hex");
+	const hash = requestHash(deps.keys, RESUME_SCOPE, input);
+	const bodyHash = hash.value.toString("hex");
 
 	return withServiceTx(deps.pool, async (tx) => {
 		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
 		const active = await activeOperation(tx.client, row.id);
 		if (active !== null) {
 			// The same body returns the active resume without a new admission.
-			if (active.kind === "resume" && active.request.bodyHash === bodyHash) {
+			if (active.kind === "resume" && sameBody(hash, active.request.bodyHash)) {
 				return active;
 			}
 			throw operationInProgress(active);

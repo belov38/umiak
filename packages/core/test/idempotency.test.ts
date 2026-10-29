@@ -12,6 +12,7 @@ import {
 	idempotencyRows,
 	serviceEnv,
 	teamRowCounts,
+	testKeys,
 } from "./helpers/service.ts";
 import { insertMachine } from "./helpers/topology.ts";
 
@@ -26,11 +27,12 @@ describe.skipIf(skipPg())("idempotency (S6 §14.1, S7 §5.7)", () => {
 	});
 
 	describe("claimIdempotencyKey", () => {
+		const keys = testKeys();
 		const base = () => ({
 			principalId: uuidv7(),
 			scope: "sandboxes.create",
 			key: "k",
-			requestHash: requestHash("sandboxes.create", { a: 1 }),
+			requestHash: requestHash(keys, "sandboxes.create", { a: 1 }),
 			sandboxId: uuidv7(),
 			operationId: uuidv7(),
 		});
@@ -75,7 +77,7 @@ describe.skipIf(skipPg())("idempotency (S6 §14.1, S7 §5.7)", () => {
 				withTx(t.pool, (tx) =>
 					claimIdempotencyKey(tx, {
 						...input,
-						requestHash: requestHash("sandboxes.create", { a: 2 }),
+						requestHash: requestHash(keys, "sandboxes.create", { a: 2 }),
 					}),
 				),
 				"idempotency_key_reused",
@@ -91,7 +93,7 @@ describe.skipIf(skipPg())("idempotency (S6 §14.1, S7 §5.7)", () => {
 			);
 			const fresh = {
 				...input,
-				requestHash: requestHash("sandboxes.create", { other: true }),
+				requestHash: requestHash(keys, "sandboxes.create", { other: true }),
 				sandboxId: uuidv7(),
 			};
 			const r = await withTx(t.pool, (tx) => claimIdempotencyKey(tx, fresh));

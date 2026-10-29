@@ -161,7 +161,11 @@ describe.skipIf(skipPg())(
 				expect(op.request).toEqual({
 					size: null,
 					ttlSeconds: null,
-					bodyHash: requestHash("sandboxes.resume", {}).toString("hex"),
+					bodyHash: requestHash(
+						env.keys,
+						"sandboxes.resume",
+						{},
+					).value.toString("hex"),
 				});
 				expect((await sandboxRow(t.pool, s.sandboxId))?.state).toBe("starting");
 				expect((await machineRow(t.pool, s.machineId ?? ""))?.state).toBe(

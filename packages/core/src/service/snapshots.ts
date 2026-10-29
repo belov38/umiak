@@ -87,7 +87,10 @@ export async function saveSnapshot(
 				principalId: idempotencyPrincipal(p),
 				scope: SNAPSHOT_SCOPE,
 				key: idemKey,
-				requestHash: requestHash(SNAPSHOT_SCOPE, { sandbox: sourceId, name }),
+				requestHash: requestHash(deps.keys, SNAPSHOT_SCOPE, {
+					sandbox: sourceId,
+					name,
+				}),
 				sandboxId: sourceId,
 				operationId,
 			});

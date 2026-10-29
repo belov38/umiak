@@ -68,7 +68,8 @@ export async function createSandbox(
 	idemKey?: string,
 ): Promise<CreateResult> {
 	const sets = validateCreateInput(input);
-	const hash = idemKey === undefined ? null : requestHash(CREATE_SCOPE, input);
+	const hash =
+		idemKey === undefined ? null : requestHash(deps.keys, CREATE_SCOPE, input);
 	const principalId = idemKey === undefined ? null : idempotencyPrincipal(p);
 	const sandboxId = uuidv7();
 	const operationId = uuidv7();
@@ -131,6 +132,8 @@ export async function createSandbox(
 		} else {
 			const claimed = await claimWarm(tx, sandboxId, template.slug, pairKey);
 			if (claimed !== null) placement = claimed;
+			// failFast/pool_exhausted: internal only, not in the public MVP
+			// contract (no pool controller until phase 2); S7 must not expose it.
 			else if (input.failFast === true) {
 				throw poolExhausted(POOL_EXHAUSTED_RETRY_SECONDS);
 			} else {

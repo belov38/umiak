@@ -5,11 +5,13 @@ import {
 	idempotencyKeyReused,
 	notFound,
 	operationInProgress,
+	outOfCapacity,
 	type ValidationIssue,
 	validation,
 } from "../errors.ts";
 import { claimIdempotencyKey } from "../idempotency.ts";
 import { uuidv7 } from "../ids.ts";
+import { nodePlaceable } from "../placement.ts";
 import { idempotencyPrincipal, type Principal } from "../principal.ts";
 import type { Operation, Sandbox } from "../rows.ts";
 import {
@@ -32,8 +34,15 @@ import {
 	type SandboxServiceDeps,
 	sendSandboxOp,
 } from "./common.ts";
-import { resolveDurations, resolveTemplate } from "./create-input.ts";
-import { admitOnNode } from "./create-placement.ts";
+import {
+	checkTemplateEnabled,
+	resolveDurations,
+	resolveTemplate,
+} from "./create-input.ts";
+import {
+	admitOnNode,
+	OUT_OF_CAPACITY_RETRY_SECONDS,
+} from "./create-placement.ts";
 import { insertSandboxRow } from "./sandbox-row.ts";
 import {
 	checkSecretPatch,
@@ -152,7 +161,10 @@ export async function forkSandbox(
 				principalId: idempotencyPrincipal(p),
 				scope: FORK_SCOPE,
 				key: idemKey,
-				requestHash: requestHash(FORK_SCOPE, { sandbox: sourceId, input }),
+				requestHash: requestHash(deps.keys, FORK_SCOPE, {
+					sandbox: sourceId,
+					input,
+				}),
 				sandboxId: targetId,
 				operationId: createOpId,
 			});
@@ -195,6 +207,7 @@ export async function forkSandbox(
 			},
 			defaults,
 		);
+		// As create: a disabled template takes no new sandboxes.
 		let size = {
 			slug: src.size_slug as string,
 			vcpu: src.vcpu as number,
@@ -202,6 +215,8 @@ export async function forkSandbox(
 		};
 		if (input.size !== undefined) {
 			size = (await resolveTemplate(deps, src.template_slug, input.size)).size;
+		} else {
+			await checkTemplateEnabled(deps, src.template_slug);
 		}
 
 		const quota = await deps.config.teamQuota(p.teamId);
@@ -209,6 +224,11 @@ export async function forkSandbox(
 			addSandboxes: 1,
 			addRamMb: size.memoryMb,
 		});
+		// As create (§8.4): the fork's new disks go to the source's storage,
+		// which must be below its thresholds on an active node.
+		if (!(await nodePlaceable(tx, src.node_id, srcMachine.storageId))) {
+			throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS);
+		}
 		await admitOnNode(
 			tx,
 			deps,

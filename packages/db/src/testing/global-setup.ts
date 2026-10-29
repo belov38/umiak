@@ -44,7 +44,9 @@ export async function setup(project: TestProject): Promise<void> {
 
 export async function teardown(): Promise<void> {
 	if (containerId !== undefined) {
-		await run("docker", ["rm", "-f", containerId]).catch(() => {});
+		// -v: the image declares a data volume; without it every run leaves an
+		// anonymous volume behind.
+		await run("docker", ["rm", "-f", "-v", containerId]).catch(() => {});
 		containerId = undefined;
 	}
 }

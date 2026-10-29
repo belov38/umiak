@@ -1,4 +1,5 @@
 import type { Tx } from "@sbx/db";
+import type { RequestHash } from "./canonical.ts";
 import { idempotencyKeyReused, validation } from "./errors.ts";
 
 // Idempotency keys (S6 §14.1, S7 §5.7, decision 3). The key row is written
@@ -32,8 +33,8 @@ export interface IdempotencyClaimInput {
 	/** `sandboxes.create`, `sandboxes.fork`, `commands.create`, `snapshots.create`. */
 	scope: string;
 	key: string;
-	/** `requestHash(scope, body)` over the full body, secrets included. */
-	requestHash: Buffer;
+	/** `requestHash(keys, scope, body)` over the full body, secrets included (keyed). */
+	requestHash: RequestHash;
 	sandboxId?: string | null;
 	operationId?: string | null;
 	ttlSeconds?: number;
@@ -71,7 +72,7 @@ export async function claimIdempotencyKey(
 			principalId,
 			key,
 			scope,
-			input.requestHash,
+			input.requestHash.value,
 			operationId,
 			sandboxId,
 			JSON.stringify({ sandboxId, operationId }),
@@ -95,7 +96,9 @@ export async function claimIdempotencyKey(
 	if (!row) {
 		throw new Error("claimIdempotencyKey: conflicting key row disappeared");
 	}
-	if (!row.request_hash.equals(input.requestHash)) throw idempotencyKeyReused();
+	if (!input.requestHash.matches(row.request_hash)) {
+		throw idempotencyKeyReused();
+	}
 	return {
 		kind: "replay",
 		sandboxId: row.sandbox_id,

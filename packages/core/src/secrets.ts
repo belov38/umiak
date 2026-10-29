@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import {
+	createCipheriv,
+	createDecipheriv,
+	createHmac,
+	hkdfSync,
+	randomBytes,
+} from "node:crypto";
 import { readFileSync } from "node:fs";
 import { type ValidationIssue, validation } from "./errors.ts";
 
@@ -406,6 +412,36 @@ export class KeyRing {
 			secrets: parsed.secrets ?? {},
 			secretFiles: parsed.secretFiles ?? [],
 		};
+	}
+
+	/**
+	 * HMAC-SHA256 of `data` under a subkey of data key `version` (default:
+	 * current) for `purpose`: HKDF-SHA256(dataKey, salt = "", info = purpose).
+	 * The data key itself never keys anything but AES-GCM. Throws for a version
+	 * that is not in the ring.
+	 */
+	mac(
+		purpose: string,
+		data: string,
+		version: number = this.currentVersion,
+	): Buffer {
+		return createHmac("sha256", this.#subkey(purpose, version))
+			.update(data, "utf8")
+			.digest();
+	}
+
+	readonly #subkeys = new Map<string, Buffer>();
+
+	#subkey(purpose: string, version: number): Buffer {
+		const id = `${version}:${purpose}`;
+		let k = this.#subkeys.get(id);
+		if (k === undefined) {
+			k = Buffer.from(
+				hkdfSync("sha256", this.#key(version), Buffer.alloc(0), purpose, 32),
+			);
+			this.#subkeys.set(id, k);
+		}
+		return k;
 	}
 
 	#key(version: number): Buffer {

@@ -37,7 +37,11 @@ export interface CreateInput {
 	idleTimeoutSeconds?: number | null;
 	/** Create from a saved snapshot of the team (always cold). */
 	from?: { snapshot: string };
-	/** Warm pool only, else `pool_exhausted` (S6 §7.3). */
+	/**
+	 * Warm pool only, else `pool_exhausted` (S6 §7.3). Not part of the public
+	 * MVP contract: the pool controller is phase 2 (decision 17), so S7 must
+	 * not expose `failFast` or `pool_exhausted` until it exists.
+	 */
 	failFast?: boolean;
 	/** S8 §10; only null/absent until S8 provides environments. */
 	environment?: string | null;
@@ -127,15 +131,24 @@ export function validateCreateInput(input: CreateInput): SecretSets {
 	return sets;
 }
 
+/** `template_unavailable` for an unknown or disabled template (create's check). */
+export async function checkTemplateEnabled(
+	deps: SandboxServiceDeps,
+	templateSlug: string,
+): Promise<TemplateConfig> {
+	const template = await deps.config.template(templateSlug);
+	if (template === null || !template.enabled) {
+		throw templateUnavailable(templateSlug);
+	}
+	return template;
+}
+
 export async function resolveTemplate(
 	deps: SandboxServiceDeps,
 	templateSlug: string,
 	sizeSlug: string | undefined,
 ): Promise<{ template: TemplateConfig; size: SizeConfig }> {
-	const template = await deps.config.template(templateSlug);
-	if (template === null || !template.enabled) {
-		throw templateUnavailable(templateSlug);
-	}
+	const template = await checkTemplateEnabled(deps, templateSlug);
 	const slug = sizeSlug ?? template.defaultSize;
 	const size = template.allowedSizes.includes(slug)
 		? await deps.config.size(slug)

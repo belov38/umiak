@@ -140,6 +140,30 @@ describe("Allocator", () => {
 		expect((await store.get(1, c.vmid))?.ownerId).toBe("m1");
 	});
 
+	it("returns the owner's lease when a concurrent allocate of the same owner wins the insert", async () => {
+		const real = new SqliteStateStore(":memory:");
+		let raced = false;
+		// The other executor of owner m1 inserts its lease just before ours.
+		const racy: AllocatorStore = {
+			...bind(real),
+			tryInsert(l: VmidLease) {
+				if (!raced && l.ownerId === "m1") {
+					raced = true;
+					real.tryInsert({ ...l });
+					return false;
+				}
+				return real.tryInsert(l);
+			},
+		};
+		const { alloc } = make({ store: racy });
+		expect(await alloc.allocate("m1")).toEqual({
+			vmid: 500,
+			mac: macFor(1, 500),
+			reused: true,
+		});
+		expect(await alloc.list()).toHaveLength(1);
+	});
+
 	it("does not record an owner when none is given", async () => {
 		const { alloc, store } = make();
 		await alloc.allocate();

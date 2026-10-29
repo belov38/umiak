@@ -19,6 +19,14 @@ export const RESERVED_SLUGS: readonly string[] = [
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const ENDS_WITH_DIGITS_RE = /-[0-9]+$/;
+/**
+ * Core resolves `{sandbox}` by id when the string is a UUID (findSandboxRow,
+ * sshTarget), so a UUID-shaped slug would be unreachable by its slug and could
+ * shadow another sandbox's id. Public ids with a prefix (S7 §5.3: `sb_`,
+ * `op_`, ...) need no rule here: the grammar has no `_`.
+ */
+const UUID_SHAPE_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Returns why `s` is not a valid slug, or null if it is. */
 export function slugProblem(s: string): string | null {
@@ -27,6 +35,7 @@ export function slugProblem(s: string): string | null {
 		return "must be lowercase letters and digits in groups separated by single '-'";
 	}
 	if (ENDS_WITH_DIGITS_RE.test(s)) return "must not end with '-<digits>'";
+	if (UUID_SHAPE_RE.test(s)) return "must not have the form of a UUID";
 	for (const suffix of RESERVED_SLUG_SUFFIXES) {
 		if (s.endsWith(suffix))
 			return `must not end with reserved suffix '${suffix}'`;

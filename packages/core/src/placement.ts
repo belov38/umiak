@@ -1,6 +1,13 @@
 import type { Tx } from "@sbx/db";
 import { RESERVED_SQL } from "./capacity.ts";
 
+/**
+ * Storage below its data/metadata thresholds (S6 §8.4, S1: 80% / 70%); no
+ * usage sample yet counts as below. Alias `st` = storages.
+ */
+export const STORAGE_BELOW_THRESHOLDS_SQL = `(COALESCE((st.usage ->> 'dataPercent')::numeric, 0) < st.data_max_pct
+  AND COALESCE((st.usage ->> 'metadataPercent')::numeric, 0) < st.meta_max_pct)`;
+
 export interface PlaceInput {
 	templateSlug: string;
 	needMb: number;
@@ -27,6 +34,26 @@ export interface PlacementCandidate {
  * counts as below the thresholds. RAM is read without node locks: the caller
  * confirms with `admit` on each candidate in order.
  */
+/**
+ * The fixed node of an admission that makes new disks there (fork, create
+ * from a saved snapshot): provider and node `active` and the storage below
+ * its thresholds, as `place` requires of a candidate.
+ */
+export async function nodePlaceable(
+	tx: Tx,
+	nodeId: string,
+	storageId: string,
+): Promise<boolean> {
+	const r = await tx.client.query(
+		`SELECT 1 FROM runtime.nodes n
+		 JOIN runtime.providers p ON p.id = n.provider_id AND p.state = 'active'
+		 JOIN runtime.storages st ON st.id = $2
+		 WHERE n.id = $1 AND n.state = 'active' AND ${STORAGE_BELOW_THRESHOLDS_SQL}`,
+		[nodeId, storageId],
+	);
+	return r.rowCount === 1;
+}
+
 export async function place(
 	tx: Tx,
 	input: PlaceInput,
@@ -54,8 +81,7 @@ export async function place(
 		   WHERE m.node_id = n.id AND m.state <> 'deleted'
 		 ) ram
 		 WHERE n.state = 'active'
-		   AND COALESCE((st.usage ->> 'dataPercent')::numeric, 0) < st.data_max_pct
-		   AND COALESCE((st.usage ->> 'metadataPercent')::numeric, 0) < st.meta_max_pct
+		   AND ${STORAGE_BELOW_THRESHOLDS_SQL}
 		   AND n.ram_cap_mb - ram.reserved_mb
 		       + CASE WHEN $3::boolean THEN ram.evictable_mb ELSE 0 END >= $2
 		 ORDER BY free_mb DESC, n.id`,
