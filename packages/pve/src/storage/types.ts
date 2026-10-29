@@ -70,7 +70,12 @@ export interface QuiesceHook {
 
 export interface StorageDriver {
 	cloneFromTemplate(tpl: TemplateRef, target: VmTarget): Promise<DiskSet>;
-	snapshot(m: MachineRef, hook: QuiesceHook): Promise<SnapshotRef>;
+	/** opts.id fixes the snapshot id; it must match ^[a-z0-9]{1,32}$ (used in LV names). */
+	snapshot(
+		m: MachineRef,
+		hook: QuiesceHook,
+		opts?: { id?: string },
+	): Promise<SnapshotRef>;
 	cloneFromSnapshot(s: SnapshotRef, target: VmTarget): Promise<DiskSet>;
 	delete(ref: MachineDisksRef | SnapshotRef): Promise<void>;
 	usage(node: NodeRef): Promise<StorageUsage>;

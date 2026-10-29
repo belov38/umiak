@@ -23,7 +23,9 @@ export interface Ctx {
 	close(): void;
 }
 
-export function makeContext(opts: { cloneConcurrency?: number } = {}): Ctx {
+export async function makeContext(
+	opts: { cloneConcurrency?: number } = {},
+): Promise<Ctx> {
 	const cfg = loadConfig();
 	const api = new PveApi({
 		url: cfg.pveUrl,
@@ -51,7 +53,7 @@ export function makeContext(opts: { cloneConcurrency?: number } = {}): Ctx {
 		templateVmid: cfg.templateVmid,
 		occupied: () => (machines as Machines).occupiedVmids(),
 	});
-	allocator.ensureTemplate();
+	await allocator.ensureTemplate();
 	machines = new Machines({
 		api,
 		node,

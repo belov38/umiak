@@ -1,0 +1,52 @@
+# PoC configuration for the local compose stack, matching the real host `pve`.
+# Read by the worker and by `sbx-admin bootstrap` (topology).
+# After editing, re-run: docker compose -f deploy/compose/compose.yaml up -d
+templates:
+  - slug: linux
+    os: linux
+    enabled: true
+    defaultSize: 2gb
+    allowedSizes: [2gb]
+
+sizes:
+  - slug: 2gb
+    vcpu: 2
+    memoryMb: 2048
+
+# Decision 17: warm pools are off. The worker must not create VMs on pve by
+# itself. Set a target here (and SBX_RECONCILE_DRY_RUN=0) to enable one.
+pools: []
+
+quotas:
+  default:
+    maxActiveSandboxes: 3
+    maxRamMb: 6144
+    maxSavedSnapshots: 10
+
+topology:
+  providers:
+    - name: pve
+      clusterMacId: 1
+      vmidMin: 500
+      vmidMax: 598
+      apiUrl: https://100.64.10.2:8006
+      tlsName: pve
+      secretRef: pve
+      nodes:
+        - name: pve
+          ramCapMb: 8192
+          cloneConcurrency: 4
+          nodeAgentRef: pve
+          storages:
+            - name: local-lvm
+              driver: lvmthin
+              dataMaxPct: 80
+              metaMaxPct: 70
+  templateBuilds:
+    - templateSlug: linux
+      version: 599-seed
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 599
+      bootTimeoutS: 300

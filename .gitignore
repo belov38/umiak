@@ -31,3 +31,6 @@ coverage/
 
 # Bench output
 bench-results/
+
+# Compose stack
+/deploy/compose/secrets/

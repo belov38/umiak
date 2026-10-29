@@ -17,6 +17,7 @@ interface LeaseRow {
 	purpose: VmidLease["purpose"];
 	created_at: number;
 	updated_at: number;
+	owner_id: string | null;
 }
 
 const toLease = (r: LeaseRow): VmidLease => ({
@@ -27,6 +28,7 @@ const toLease = (r: LeaseRow): VmidLease => ({
 	purpose: r.purpose,
 	createdAt: r.created_at,
 	updatedAt: r.updated_at,
+	...(r.owner_id !== null ? { ownerId: r.owner_id } : {}),
 });
 
 /** PoC state in SQLite (node:sqlite). Snapshot metadata never contains smbios1 or vmgenid. */
@@ -58,13 +60,19 @@ export class SqliteStateStore implements AllocatorStore, SnapshotStore {
 				created_at INTEGER NOT NULL
 			);
 		`);
+		// Databases created before owner_id existed.
+		const cols = this.#db.prepare("PRAGMA table_info(vmid_lease)").all() as {
+			name: string;
+		}[];
+		if (!cols.some((c) => c.name === "owner_id"))
+			this.#db.exec("ALTER TABLE vmid_lease ADD COLUMN owner_id TEXT");
 	}
 
 	tryInsert(l: VmidLease): boolean {
 		const r = this.#db
 			.prepare(
-				`INSERT INTO vmid_lease (cluster, vmid, mac, state, purpose, created_at, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+				`INSERT INTO vmid_lease (cluster, vmid, mac, state, purpose, created_at, updated_at, owner_id)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
 			)
 			.run(
 				l.cluster,
@@ -74,6 +82,7 @@ export class SqliteStateStore implements AllocatorStore, SnapshotStore {
 				l.purpose,
 				l.createdAt,
 				l.updatedAt,
+				l.ownerId ?? null,
 			);
 		return Number(r.changes) === 1;
 	}
@@ -92,6 +101,15 @@ export class SqliteStateStore implements AllocatorStore, SnapshotStore {
 			.map((r) => toLease(r as unknown as LeaseRow));
 	}
 
+	findByOwner(cluster: number, ownerId: string): VmidLease | undefined {
+		const r = this.#db
+			.prepare(
+				"SELECT * FROM vmid_lease WHERE cluster = ? AND owner_id = ? AND state != 'releasing' ORDER BY vmid LIMIT 1",
+			)
+			.get(cluster, ownerId);
+		return r ? toLease(r as unknown as LeaseRow) : undefined;
+	}
+
 	setState(cluster: number, vmid: number, state: LeaseState): void {
 		this.#db
 			.prepare(
@@ -104,6 +122,19 @@ export class SqliteStateStore implements AllocatorStore, SnapshotStore {
 		this.#db
 			.prepare("DELETE FROM vmid_lease WHERE cluster = ? AND vmid = ?")
 			.run(cluster, vmid);
+	}
+
+	removeReleasing(
+		cluster: number,
+		vmid: number,
+		ownerId: string | null,
+	): boolean {
+		const r = this.#db
+			.prepare(
+				"DELETE FROM vmid_lease WHERE cluster = ? AND vmid = ? AND state = 'releasing' AND owner_id IS ?",
+			)
+			.run(cluster, vmid, ownerId);
+		return Number(r.changes) === 1;
 	}
 
 	putSnapshot(s: SnapshotRef): void {

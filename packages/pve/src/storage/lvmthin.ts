@@ -101,6 +101,9 @@ interface SnapshotItem {
 	activationSkip: boolean;
 }
 
+/** The sbx-node guard for snapshot ids; they end up in LV names and tags. */
+const SNAPSHOT_ID_RE = /^[a-z0-9]{1,32}$/;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function randomId(): string {
@@ -190,9 +193,17 @@ export class LvmThinDriver implements StorageDriver {
 		return disks;
 	}
 
-	async snapshot(m: MachineRef, hook: QuiesceHook): Promise<SnapshotRef> {
+	async snapshot(
+		m: MachineRef,
+		hook: QuiesceHook,
+		opts: { id?: string } = {},
+	): Promise<SnapshotRef> {
+		if (opts.id !== undefined && !SNAPSHOT_ID_RE.test(opts.id))
+			throw new Error(
+				`invalid snapshot id ${JSON.stringify(opts.id)}: expected ${SNAPSHOT_ID_RE.source}`,
+			);
 		await this.#assertCapacity(m);
-		const id = this.#o.newSnapshotId();
+		const id = opts.id ?? this.#o.newSnapshotId();
 		const items: SnapshotItem[] = [];
 		const disks: DiskSet = [];
 		for (const d of sorted(m.disks)) {

@@ -277,7 +277,7 @@ unique (sandbox_id) where state in ('pending', 'running')
 idempotency_keys(
   principal_id uuid, key text,      -- principal = API key or user
   scope text,                       -- 'sandboxes.create', 'sandboxes.fork', ...
-  request_hash bytea,               -- sha256 of the canonical request body
+  request_hash bytea,               -- key version || HMAC of the canonical request body (§13.1)
   operation_id uuid, sandbox_id uuid,
   response jsonb,                   -- what the service returned the first time
   created_at, expires_at,           -- 24 h
@@ -424,6 +424,8 @@ interface ConfigReader {
 | `creating`, `ready`, `stopped`, `starting`, `stopping` без активной операции | VM machine пропала в Proxmox | `error` (`machine_lost`) | reconciler |
 
 `error` с `machine_lost` терминален по смыслу: VM-конфига нет, а восстановления VM из оставшихся дисков в фазе 1 нет. Разрешён только delete. Если пропажу обнаруживает шаг активной операции, операция сама падает с тем же кодом.
+
+`error` с `machine_state_conflict`: шаг create (и fork-цели), stop, resume или recover нашёл machine не в том состоянии, которого ждал (её сдвинул другой участник — reconcile, delete, устаревший исполнитель; у sandbox нет machine; не записан VMID). VM при этом может существовать, поэтому machine не помечается `machine_lost`. Как и `machine_lost`, этот код побеждает код операции (`create_failed`, `stop_failed`, `resume_failed`). Create и fork-цель отдают свои machine на удаление (`deleting`, `machine-op delete`); stop, resume и recover machine не трогают (без hard stop) — её разбирает reconcile (§11). Дальше действуют общие правила `error`: delete — всегда; resume — если machine `stopped`; recover — если machine не `failed`/`deleting`/`deleted`.
 
 `health` и `activity` — поля, а не состояния:
 - `health = degraded`, если `state = ready` и агента нет дольше 60 s (§11.1). Возврат в `ok` — по событию `connected`.
@@ -586,6 +588,8 @@ API: состояние `stopped` или `error` с machine в `stopped` (§6.1)
 
 Ошибки: провал или вытеснение операции на источнике → обработчик цели (по `parent_operation_id`, §7.1) переводит её операцию в `failed`, цель → `error` (`fork_failed`). Источник сам цель не трогает: каждая sandbox меняется только своей операцией.
 
+Нода источника должна быть `active` (и её провайдер тоже): на ноде, выведенной из размещения (`cordoned`, провайдер `draining`), новые machine не создаются (§8.4), fork тоже; ошибка — `out_of_capacity` с `details.reason = node_not_active` (хранилище выше порогов — `storage_over_threshold`).
+
 Fork наследует от источника: диск, env и секреты (с наложением значений из запроса), `template_slug`, `size` (если не передан), `labels` (если не переданы), `exclude_owner_secrets` (S8 §10.1). Environment заново не применяется (S8 §10.1). Не наследует: TTL (берётся из запроса или из дефолта), hosted ports, историю команд.
 
 ### 7.8 Saved snapshot, recover, reprovision, update
@@ -633,6 +637,8 @@ RAM machine = `memory_mb` (S1: `balloon=0`, overcommit нет). Лимит — `
 3. Иначе — `out_of_capacity`.
 
 Пул пополняется только из свободной RAM (без вытеснения).
+
+**Блокировки нод и повторы.** Отказ admission отдаёт блокировку своей ноды: `admit` берёт её в savepoint и при отказе откатывает его (ничего не записано). Поэтому транзакция сервиса держит не больше одной блокировки ноды: create перебирает кандидатов (§8.4) по одному, fork, resume, recover и create из снапшота работают на одной ноде. Транзакции create, fork, resume и recover при `40P01` (deadlock) или `40001` (serialization failure) целиком повторяются до 3 раз с короткой случайной паузой (10–50 ms × номер повтора); после этого — `out_of_capacity` (retryable), в лог — только SQLSTATE.
 
 **Проверка перед стартом** — в шаге, который запускает VM (§7.4 шаг 6, `start` в resume и recover), под той же блокировкой: `powered + need ≤ cap`. Если да — в той же транзакции machine переходит в `booting`/`starting` (теперь она входит в `powered`), затем вызывается S1 `start`. Если нет — ждать с опросом 1 s (проверяя `superseded`, §7.1): вытесненные machine ещё останавливаются. Delete пишет `power_observed = stopped` сразу после S1 stop, поэтому ожидание — секунды.
 
@@ -778,7 +784,8 @@ VM machine в `running` выключена без нашей операции (�
 
 - **Где хранятся.** Env, секреты и secret-файлы sandbox (из create, fork, resume и `PUT`/`PATCH /env`, S7 §8.3) хранятся в `sandbox_secrets` в виде одного зашифрованного блоба `{env, secrets, secretFiles}`.
 - **Шифрование.** AES-256-GCM через `node:crypto`, случайный 96-битный nonce на запись, AAD = `sandbox:<sandboxId>:v<keyVersion>`.
-- **Ключи.** Кольцо из Kubernetes Secret, файл `SBX_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Ротация: новый ключ становится `current`, контроллер `cleanup` перешифровывает строки со старой версией, старый ключ убирается после нуля строк (метрика).
+- **Ключи.** Кольцо из Kubernetes Secret, файл `SBX_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Ротация: новый ключ сначала раздаётся всем репликам `api` и `worker` как не-`current` (каждая уже может им расшифровать и проверить hash), затем становится `current`; контроллер `cleanup` перешифровывает строки со старой версией; старый ключ убирается, когда строк с ним ноль (метрика) **и** с ротации прошло не меньше 24 h (срок идемпотентности, см. ниже).
+- **Hash тела запроса.** Тела create, fork и resume содержат значения env и секретов, поэтому `idempotency_keys.request_hash` и `operations.request.bodyHash` — не голый sha256, а `версия ключа (uint32 BE) || HMAC-SHA256(подключ, scope "\n" каноническое тело)`; подключ — HKDF-SHA256 от ключа данных этой версии (`info = sbx-request-hash/v1`). Сравнение пересчитывает HMAC на версии из сохранённого hash, поэтому ротация в пределах 24 h не ломает повтор с тем же `Idempotency-Key`. Отсюда правило удаления ключа выше (ноль строк и не раньше 24 h после ротации): hash, чей ключ уже убран, не совпадает ни с чем (`idempotency_key_reused`, дубля нет).
 - **Доставка.** Секреты передаются агенту при каждом claim, resume, recover и reprovision (`System/Claim`). В госте они живут только в tmpfs (Linux) или в каталоге с ACL SYSTEM (Windows) и стираются при stop (S3).
 - **Fork.** Наследует env и секреты источника: расшифровка, наложение значений из запроса (§7.7) и шифрование с AAD цели. Saved snapshot секретов не несёт.
 - **Delete.** Строка `sandbox_secrets` удаляется (crypto-erase для этой sandbox).
@@ -860,11 +867,12 @@ S5 пишет `template_builds` (через `sbx-admin template register|promote
 | `sandbox-op` | `singleton` | `sandboxId` | `{operationId}` | `heartbeatSeconds 30`, `expireInSeconds 3600`, `retryLimit 20`, `retryBackoff`, `retryDelay 2`, `retryDelayMax 120`, dead letter `sandbox-op-dlq` |
 | `machine-op` | `singleton` | `machineId` | `{machineId, action: provision \| delete}` | как выше |
 | `snapshot-op` | `singleton` | `snapshotId` | `{snapshotId, action: delete}` | как выше |
-| `machine-events` | `stately` | `machineId` | `{machineId}` | `retryLimit 10`, `retryBackoff` |
-| `ctl-pool`, `ctl-health`, `ctl-autostop`, `ctl-reconcile`, `ctl-cleanup` | `exclusive` | — | `{}` | см. ниже |
+| `machine-events` | `stately` | `machineId` | `{machineId}` | `heartbeatSeconds 30`, `expireInSeconds 300`, `retryLimit 10`, `retryBackoff` (без heartbeat задание умершего пода держало бы события machine до истечения, 15 min) |
+| `ctl-pool`, `ctl-health`, `ctl-autostop`, `ctl-reconcile`, `ctl-cleanup` | `exclusive` | — | `{}` | `heartbeatSeconds 30`, `expireInSeconds 900`; см. ниже |
 
 - Задание операции — только триггер; источник правды — строка `operations`. Повторная доставка безопасна (§7.1).
 - **Fencing.** Singleton и heartbeat pg-boss не защищают от зависшего пода, который потерял связь с БД, но ещё ходит в Proxmox: задание вернётся, и исполнителей станет два. Поэтому каждый обработчик при старте увеличивает счётчик (`operations.attempt`, `machines.exec_attempt` для `machine-op`) и пишет каждый шаг условно по своему значению (§7.1). Старый исполнитель на первой же записи получает ноль строк и выходит. Его вызов Proxmox в полёте безвреден: шаги идемпотентны, аллокатор выдаёт одной machine один lease (§5.3), а частичная подготовка выбрасывается при повторе (§7.4).
+- **Блокировка питания ноды** (2026-10-30). Proxmox start, stop, запрос shutdown, delete и откат create/fork в S1 (`MachinesOptions.powerLock`) на одной ноде идут по одному: сначала очередь в процессе (не больше одного ожидающего клиента пула на ноду), затем `pg_advisory_lock` по ключу `power:<nodeId>` на отдельном соединении. Причина — гонка записи `ethers` и IPAM при параллельных start/delete (S1 §12). Блокировка никогда не берётся внутри транзакции БД. Под ней, после ожидания и прямо перед вызовом Proxmox, идут проверка владельца S1 (§16) и колбэк вызывающего: у start — повторная проверка fence (исполнитель, вытесненный за время ожидания, VM не запускает), у reconcile (§11.2, расхождение питания) — повторная проверка, что machine не изменилась. Ожидание завершения shutdown гостем идёт уже вне блокировки. Клоны (create, fork) под неё не попадают и идут параллельно в пределах слотов (§8.3).
 - Задание в dead letter означает исчерпанные повторы: операция → `failed` с `error_code = retries_exhausted` и компенсацией, метрика тревоги. Для delete dead letter не используется: `retryLimit` без предела, alert по `sbx_delete_stuck`.
 - **Контроллеры.** Каждый контроллер — очередь `exclusive` (не больше одного ждущего или активного задания во всём кластере). Задание в конце ставит себя снова с `startAfter` (10 s пул и health, 15 s autostop, 60 s reconcile, 10 min cleanup). Страховка — cron pg-boss раз в минуту на каждую очередь (`exclusive` отбрасывает дубль). Выбор лидера не нужен.
 - **Heartbeat.** Долгие шаги (ожидание загрузки, shutdown) идут в заданиях с `heartbeatSeconds 30`. Если под умер, задание вернётся через ~30 s, и шаги продолжатся с последнего записанного.
@@ -875,7 +883,7 @@ S5 пишет `template_builds` (через `sbx-admin template register|promote
 - `localConcurrency` на под: `sandbox-op` 16, `machine-op` 8, `snapshot-op` 4, `machine-events` 8, контроллеры 1. Общая нагрузка на Proxmox ограничена слотами клонирования (§8.3), а не числом подов.
 - SIGTERM: `boss.stop({ graceful: true, timeout: 60_000 })`, `terminationGracePeriodSeconds: 90`. Незавершённые задания вернутся по heartbeat; шаги идемпотентны.
 - Readiness: pg-boss запущен и Postgres отвечает. Liveness: цикл событий не завис.
-- Пул соединений: `pg` Pool на под, 20 соединений (pg-boss и Drizzle делят один пул через адаптер) [решение S6].
+- Пул соединений: `pg` Pool на под, 30 соединений по умолчанию (`SBX_DB_POOL_MAX`; было 20 до блокировки питания) (pg-boss и Drizzle делят один пул через адаптер) [решение S6]. Блокировка питания (§15.1) держит по одному соединению на ноду и ещё одно берёт под ней (проверки владельца и fence), поэтому размер пула (`SBX_DB_POOL_MAX`) должен заметно превышать число нод.
 
 ### 15.3 `sbx-admin`
 
@@ -899,6 +907,10 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
   - `lv.list` по тегам наружу (для reconcile);
   - QGA `exec` через PVE API (перезапуск агента, §11.1);
   - фабрика клиентов на (провайдер, нода) вместо глобальной конфигурации из env (§8.4); env S1 остаётся для `apps/bench`.
+  - проверка владельца у `start`/`stop`/`shutdown`/`delete` (2026-10-30): необязательный `expectedOwner` (`machineId`; у `delete` ещё `null` — VM-сирота без lease). Прямо перед действием S1 читает lease VMID (`checkLeaseOwner`) и при чужом или пропавшем lease бросает `OwnerMismatchError` (постоянная, код `owner_mismatch`), не трогая Proxmox; delete, у которого нет ни lease владельца, ни VM, ничего не делает;
+  - `Allocator.reserveForDelete(vmid)`: delete VMID без lease сначала занимает его lease-ом `releasing` без владельца, чтобы create не выдал этот VMID до конца delete; финальное освобождение снимает только строку `releasing` своего владельца (`null` для резерва), чужой lease не трогает;
+  - `MachinesOptions.powerLock`: обёртка, под которой S1 выполняет откат create/fork (delete), — та же блокировка питания ноды, что у worker (§15.1);
+  - `allocate(ownerId)` в гонке двух вызовов одного владельца возвращает уже вставленный lease этого владельца (`reused`), а не перебирает диапазон.
 - **S2.** Таблицы `tunnel.*`, `POST /v1/machines/{id}/rotate-token` на внутреннем listener-е gateway, синтетические события, `agent-client` с повторами и ожиданием до 30 s.
 - **S3.** RPC (имена — S3):
   - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secrets, secretFiles, authorizedKeys}` — идемпотентен по `requestId`, отвечает после применения (или стримит фазы, итог `ready`); после загрузки (resume, recover, reprovision) наборы доставляются `System/UpdateEnv` и `System/UpdateSecrets` (S3 §8.1; шаг `provision`, §7.6);
