@@ -985,3 +985,70 @@ func TestAgentConnectAnswerNotForwarded(t *testing.T) {
 		t.Errorf("CONNECT: agent header X-Agent reached the peer: %v", resp.Header)
 	}
 }
+
+// noRedirects is a peer client that returns redirects instead of following them.
+func noRedirects(t *testing.T) *http.Client {
+	c := peerClient(t, apiToken1)
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
+}
+
+// An agent's redirect would make a caller (Go clients follow same-host
+// redirects with Authorization) resend the call to another machine's route:
+// a 3xx becomes 502, and Location-like headers never pass.
+func TestAgentRedirectsRefused(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	other := uuid.NewString()
+	target := gw.machineURL(other) + "/files?path=/secret"
+	answer := func(status int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Location", target)
+			w.Header().Set("Content-Location", target)
+			w.Header().Set("Refresh", "0; url="+target)
+			w.Header().Set("X-Agent", "kept")
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, "agent body")
+		}
+	}
+	cfg := agentConfig(e, id, bs, defaultIdentity())
+	mux := http.NewServeMux()
+	for _, st := range []int{200, 302, 304, 307} {
+		mux.HandleFunc("/files/s"+strconv.Itoa(st), answer(st))
+		mux.HandleFunc("/sbx.testing.v1.Forge/S"+strconv.Itoa(st), answer(st))
+	}
+	cfg.Handler = mux
+	e.startAgent(cfg).waitConnected()
+	waitMachine(t, gw.testGW, id)
+	c := noRedirects(t)
+
+	for _, st := range []int{200, 302, 304, 307} {
+		for _, path := range []string{"/files/s" + strconv.Itoa(st), "/rpc/sbx.testing.v1.Forge/S" + strconv.Itoa(st)} {
+			for _, method := range []string{http.MethodGet, http.MethodPut} {
+				resp, body := do(t, c, method, gw.machineURL(id)+path, "application/json", []byte(`{}`))
+				want := st
+				if st == 302 || st == 307 {
+					want = http.StatusBadGateway
+				}
+				if resp.StatusCode != want {
+					t.Errorf("%s %s: status %d, want %d (body %s)", method, path, resp.StatusCode, want, body)
+				}
+				for _, h := range []string{"Location", "Content-Location", "Refresh"} {
+					if v := resp.Header.Get(h); v != "" {
+						t.Errorf("%s %s: agent %s %q reached the caller", method, path, h, v)
+					}
+				}
+				if want == http.StatusBadGateway && !strings.Contains(string(body), strconv.Itoa(st)) {
+					t.Errorf("%s %s: body %s does not name the agent status", method, path, body)
+				}
+			}
+		}
+	}
+	// With the default redirect policy nothing reaches the other machine's route.
+	resp, _ := do(t, peerClient(t, apiToken1), http.MethodPut, gw.machineURL(id)+"/files/s307", "", []byte("x"))
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("following client: status %d, want 502", resp.StatusCode)
+	}
+}

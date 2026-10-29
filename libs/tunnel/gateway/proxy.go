@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/textproto"
@@ -53,13 +54,34 @@ func copyHeader(dst, src http.Header) {
 // are routing signals (Sbx-Error-Code, Sbx-Instance-Url) a caller acts on.
 func isSbxHeader(k string) bool { return len(k) >= 4 && strings.EqualFold(k[:4], "sbx-") }
 
-// dropSbxHeaders removes every Sbx-* header from h.
-func dropSbxHeaders(h http.Header) {
+// isRedirectHeader reports whether a header points the caller at another
+// URL (Location, Content-Location, Refresh): an agent must not choose where
+// a caller sends its next request.
+func isRedirectHeader(k string) bool {
+	switch textproto.CanonicalMIMEHeaderKey(k) {
+	case "Location", "Content-Location", "Refresh":
+		return true
+	}
+	return false
+}
+
+// blockedAgentHeader reports whether an agent response header or trailer is
+// never passed to callers: Sbx-* and redirect headers.
+func blockedAgentHeader(k string) bool { return isSbxHeader(k) || isRedirectHeader(k) }
+
+// dropAgentHeaders removes the blocked agent headers from h.
+func dropAgentHeaders(h http.Header) {
 	for k := range h {
-		if isSbxHeader(k) {
+		if blockedAgentHeader(k) {
 			delete(h, k)
 		}
 	}
+}
+
+// isRedirect reports whether an agent status is a redirect a client may
+// follow: every 3xx but 304 Not Modified, which conditional /files GETs need.
+func isRedirect(status int) bool {
+	return status >= 300 && status < 400 && status != http.StatusNotModified
 }
 
 // wantsTrailers reports whether the request carries "TE: trailers".
@@ -140,15 +162,30 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// The agent's Sbx-* headers and trailers are dropped: a compromised agent
-	// must not be able to forge a gateway answer such as 421 machine_moved
-	// with an Sbx-Instance-Url of its choosing (spec 16.1).
+	// A redirect would make the caller resend the request, with its service
+	// token when the host stays the same, to a URL the agent chose (another
+	// machine's route, any server): it is refused (spec 16.1).
+	if isRedirect(resp.StatusCode) {
+		s.log.Warn("gateway: agent answered with a redirect, refused", "status", resp.StatusCode, "path", u.Path)
+		msg := fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode)
+		if f == fmtRPC {
+			h.writeConnectUnary(w, http.StatusBadGateway, connect.NewError(connect.CodeInternal, errors.New(msg)))
+		} else {
+			writeJSONError(w, http.StatusBadGateway, jsonError{Code: "bad_agent_response", Message: msg})
+		}
+		return
+	}
+
+	// The agent's Sbx-* and redirect headers and trailers are dropped: a
+	// compromised agent must not be able to forge a gateway answer such as
+	// 421 machine_moved with an Sbx-Instance-Url of its choosing, nor point
+	// the caller elsewhere (spec 16.1).
 	hdr := w.Header()
 	copyHeader(hdr, resp.Header)
-	dropSbxHeaders(hdr)
+	dropAgentHeaders(hdr)
 	declared := make(map[string]bool, len(resp.Trailer))
 	for k := range resp.Trailer {
-		if isSbxHeader(k) {
+		if blockedAgentHeader(k) {
 			continue
 		}
 		hdr.Add("Trailer", k)
@@ -166,7 +203,7 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		return
 	}
 	for k, vv := range resp.Trailer {
-		if isSbxHeader(k) {
+		if blockedAgentHeader(k) {
 			continue
 		}
 		if declared[k] {
