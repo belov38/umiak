@@ -12,8 +12,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 |---|---|---|
 | `linux` | Ubuntu 26.04 LTS (сборка: `docs/specs/s5-linux-template.md`) | exec, files, SSH |
 | `linux-desktop` | Ubuntu + X11/openbox + Chrome | + рабочий стол в браузере, computer-use |
-| `windows` | Windows 11 (образ и лицензия пользователя) | exec (PowerShell), files, рабочий стол |
-| `windows-core` | Windows Server Core | exec (PowerShell), files |
+| `windows` | Windows 11 (образ и лицензия пользователя; сборка: `docs/specs/s9-windows.md`) | exec (PowerShell), files, SSH, рабочий стол |
+| `windows-core` | Windows Server 2025 Core (образ и лицензия пользователя), **фаза 2** (S9 §22) | exec (PowerShell), files, SSH |
 
 **Не входит в фазу 1:** биллинг, публичные IP у sandbox, ZFS, Ceph, встроенные coding-агенты (prompt/steer/events), AI credentials proxy, мультирегион.
 
@@ -77,7 +77,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 ## 4. Гостевой агент (Go)
 
-Подробно: `docs/specs/s3-guest-agent.md` (Linux), Windows — S9. Работает с правами root или SYSTEM. Команды по умолчанию идут от непривилегированного `user` с NOPASSWD sudo (граница доверия — VM, S2 §16). Устанавливается в шаблон.
+Подробно: `docs/specs/s3-guest-agent.md` (Linux), `docs/specs/s9-windows.md` §12 (Windows). Работает с правами root или SYSTEM. Команды по умолчанию идут от непривилегированного `user` с NOPASSWD sudo (граница доверия — VM, S2 §16). Устанавливается в шаблон.
 
 - **Транспорт.** Агент сам открывает WSS к `gateway`, внутри — HTTP/2, где агент сервер. Входящих портов нет. По соединению идут RPC (exec, files) и TCP-потоки (порты, SSH, moonlight). См. ниже и S2.
 - **Регистрация в пуле.** При загрузке агент подключается к gateway и сообщает о себе (machineId, bootId, vmgenid, версия); VMID ему не известен. Machine становится warm.
@@ -86,7 +86,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Files.** read, write (поток), list, stat, delete, mkdir, move, chmod, каталог одним tar-потоком туда и обратно (`/files/archive`).
 - **Ports.** Список слушающих портов; проксирование входящих потоков на `localhost:port` (127.0.0.1, затем ::1, затем адреса интерфейсов).
 - **Хуки снапшота.** `quiesce` (Docker pause, fsfreeze / VSS) и `thaw`, с watchdog авто-разморозки. QEMU guest agent fsfreeze — запасной путь, когда агента нет.
-- **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние; на Windows — имя машины. На Linux vmgenid из userspace не читается, поэтому признак — только `machineId`; на Windows используется и vmgenid.
+- **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние. На Windows вместо этого — имя компьютера `SBX<12 hex>`, `MachineGuid` и host keys; переименование требует одной перезагрузки, поэтому hostname из claim на Windows не применяется (S9 §11). Признак смены — `machineId`; vmgenid на Windows читается, но только информационно.
 - **Health.** Heartbeat, CPU/RAM/disk, признак простоя.
 - **Self-update.** Подписанный ed25519 пакет (бинарник + бандл tunnel CA) приходит через туннель; неудачная версия откатывается сама.
 
@@ -124,9 +124,10 @@ API-платформа, которая выдаёт AI-агентам и люд�
 ## 6. Warm pool
 
 - Для каждой пары (шаблон, размер) держим N загруженных machine в статусе warm. Агент подключён, ОС готова.
-- **Create** = claim warm machine (миллисекунды + provisioning через агент) → `ready`. Если пул пуст — холодный старт: клон шаблона и загрузка, Linux ~15–30 s, Windows ~40–90 s. С `failFast` — только пул, иначе `503 pool_exhausted`, ничего не создаётся.
+- **Create** = claim warm machine (миллисекунды + provisioning через агент) → `ready`. Если пул пуст — холодный старт: клон шаблона и загрузка, Linux ~15–30 s, Windows 3–5 min (specialize и первый вход). С `failFast` — только пул, иначе `503 pool_exhausted`, ничего не создаётся.
 - Пул пополняется в фоне с ограничением параллельных клонов на ноду и storage.
 - Fork и resume идут мимо пула: у них свои диски.
+- Windows-машины пула спят на диске (`qm suspend --todisk`) и RAM не занимают; claim = admission RAM, пробуждение, синхронизация часов, claim (S9 §14). Решение подтверждается спайком при реализации.
 - Учёт RAM на ноде: работающие + warm + загружающиеся machine ≤ лимита ноды (8 GB в PoC). Пул пополняется только из свободной RAM. Create или resume при нехватке вытесняет warm machine других пар (шаблон, размер), иначе — `503 out_of_capacity`.
 - Identity machine (`machineId`, bootstrap secret в smbios) задаётся при подготовке machine для пула; при claim worker ротирует machine token и передаёт агенту env, секреты и SSH-ключи.
 - Новая сборка шаблона меняет поколение пула: старые warm machine заменяются, sandbox на старой сборке не трогаются.
@@ -148,7 +149,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Linux и Windows: Sunshine (захват экрана, кодирование) + moonlight-web (WebRTC в браузер). Стример запускается по требованию.
 - URL рабочего стола с коротким токеном, встраивается в iframe дашборда.
 - Computer-use: cua-driver (MIT) в пользовательской сессии гостя. API платформы проксирует screenshot, click, type и т.п. через агента; MCP-обёртка в `apps/mcp`.
-- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; cua-driver и Sunshine стартуют при входе.
+- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; helper `sbx-session` в интерактивной сессии (фаза `desktop`), через него S10 запускает cua-driver и Sunshine (S9 §13).
 
 ## 9. Публичное API (v1, кратко)
 
@@ -209,7 +210,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 - Командные API-ключи со scopes «ресурс × действие» (`sandboxes:read`, `commands:exec`, …) и обязательным сроком жизни, хранятся хешами в Payload. У людей долгоживущих ключей нет: CLI работает по коротким JWT Keycloak. Тип ключа `sandbox` (одна sandbox, для CLI в VM) зарезервирован, в MVP не выпускается (S7 §7.2–7.3).
 - У каждой machine свой bootstrap secret в `smbios1` и машинный токен для туннеля только в памяти агента; токен перевыпускается при claim. Machine не переиспользуется между sandbox (S2).
-- Секреты в госте в tmpfs (Linux) или в каталоге с ACL только для SYSTEM (Windows); стираются при stop.
+- Секреты в госте в tmpfs (Linux). На Windows `secret_env` только в памяти, `secret_files` — в каталоге с ACL (SYSTEM и `user`), стираются при каждой загрузке до входа пользователя, при stop и перед saved snapshot; pagefile с очисткой при выключении. Остатки в pagefile и метаданных NTFS у снапшота работающей VM — принятый риск (S9 §12.8).
 - Proxmox: отдельный пользователь и API-токен с правами только на pool `sandbox` и нужные хранилища.
 
 ## 12. Фазы
@@ -217,8 +218,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | Фаза | Содержание |
 |---|---|
 | **PoC** (homelab `pve`) | Шаблон `linux`, guest-agent v0 (туннель, exec, files), gateway (туннели, HTTP-порты), worker (claim из warm pool, create, delete), драйвер lvmthin (clone из шаблона, snapshot, fork), минимальный API и CLI. Замеры: claim-to-ready, холодный старт, fork |
-| **MVP** | + `windows`, `windows-core`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, рабочий стол, Payload admin/dashboard, API-ключи, auto-stop, SDK TS/Python, MCP |
-| **Фаза 2** | Несколько нод и кластеров, PBS-архив и перенос, computer-use API, история команд вне VM, встроенные coding-агенты, egress-политики, OTel, webhooks |
+| **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, рабочий стол, Payload admin/dashboard, API-ключи, auto-stop, SDK TS/Python, MCP |
+| **Фаза 2** | `windows-core` (Windows Server Core, S9 §22), несколько нод и кластеров, PBS-архив и перенос, computer-use API, история команд вне VM, встроенные coding-агенты, egress-политики, OTel, webhooks |
 
 ## 13. Открытые вопросы
 
