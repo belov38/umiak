@@ -117,11 +117,19 @@ func TestHelloRedactsSecret(t *testing.T) {
 		fmt.Sprintf("%x", secret[:4]),
 	}
 	type wrapped struct{ H transport.Hello }
-	out := map[string]string{}
-	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
+	// fmt prints an unexported field by reflection, without calling any
+	// method: a Hello kept in a struct must have dropped its secret first.
+	type private struct{ h transport.Hello }
+	out, leakOnly := map[string]string{}, map[string]string{}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d", "%x", "%X", "%q", "%o", "%10.3v", "%-v"} {
 		out[verb] = fmt.Sprintf(verb, h)
 		out[verb+" pointer"] = fmt.Sprintf(verb, &h)
 		out[verb+" nested"] = fmt.Sprintf(verb, wrapped{h})
+		// Only checked for leaks: reflection may print the fields in hex.
+		leakOnly[verb+" unexported without secret"] = fmt.Sprintf(verb, private{h.WithoutSecret()})
+	}
+	if h.Secret == nil || h.WithoutSecret().Secret != nil || h.WithoutSecret().MachineID != h.MachineID {
+		t.Fatal("WithoutSecret must clear only the copy's secret")
 	}
 	for name, newHandler := range map[string]func(io.Writer) slog.Handler{
 		"text": func(w io.Writer) slog.Handler { return slog.NewTextHandler(w, nil) },
@@ -133,6 +141,13 @@ func TestHelloRedactsSecret(t *testing.T) {
 		l.With("hello", h).Info("with")
 		l.Info("nested", "w", wrapped{h})
 		out["slog "+name] = buf.String()
+	}
+	for name, s := range leakOnly {
+		for _, leak := range leaks {
+			if strings.Contains(s, leak) {
+				t.Errorf("%s prints the secret (%q): %s", name, leak, s)
+			}
+		}
 	}
 	for name, s := range out {
 		for _, leak := range leaks {

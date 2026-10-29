@@ -69,7 +69,9 @@ func (a admitter) Admit(ctx context.Context, hello transport.Hello) (transport.A
 	}
 	log.Info("gateway: connection admitted", "conn_id", connID, "epoch", res.Epoch,
 		"auth", authName(hello.Scheme), "agent_version", hello.AgentVersion)
-	return &admission{g: g, hello: hello, res: res, info: transport.ConnInfo{
+	// The secret was only needed for the hash: nothing past admission
+	// keeps it (fmt prints unexported Hello fields by reflection).
+	return &admission{g: g, hello: hello.WithoutSecret(), res: res, info: transport.ConnInfo{
 		GatewayInstance: g.cfg.InstanceID,
 		Epoch:           res.Epoch,
 		ConnID:          connID,

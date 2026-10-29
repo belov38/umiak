@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -29,7 +30,8 @@ const (
 )
 
 // Hello is the handshake data sent by the agent in the upgrade request. Its
-// String, GoString, LogValue and MarshalJSON never print Secret.
+// Format, String, GoString, LogValue and MarshalJSON never print Secret;
+// a Hello kept in an unexported field must use WithoutSecret.
 type Hello struct {
 	MachineID       string
 	BootID          string
@@ -52,6 +54,14 @@ func (h Hello) schemeName() string {
 	return "token"
 }
 
+// WithoutSecret returns a copy of h with Secret nil, for keeping a Hello
+// after the secret was checked: fmt prints a Hello in an unexported field
+// by reflection, past every method below.
+func (h Hello) WithoutSecret() Hello {
+	h.Secret = nil
+	return h
+}
+
 // String formats h like %+v without the secret.
 func (h Hello) String() string {
 	return fmt.Sprintf("{MachineID:%s BootID:%s AgentInstanceID:%s Vmgenid:%s AgentVersion:%s Scheme:%s Secret:%s ProtoVersion:%s}",
@@ -62,6 +72,17 @@ func (h Hello) String() string {
 func (h Hello) GoString() string {
 	return fmt.Sprintf("transport.Hello{MachineID:%q, BootID:%q, AgentInstanceID:%q, Vmgenid:%q, AgentVersion:%q, Scheme:%d, Secret:%s, ProtoVersion:%q}",
 		h.MachineID, h.BootID, h.AgentInstanceID, h.Vmgenid, h.AgentVersion, h.Scheme, redacted, h.ProtoVersion)
+}
+
+// Format makes every verb print the redacted form: %#v the GoString form,
+// any other verb (%d, %x, ...) the String form, so no verb reaches the
+// secret bytes through fmt's reflection.
+func (h Hello) Format(f fmt.State, verb rune) {
+	if verb == 'v' && f.Flag('#') {
+		_, _ = io.WriteString(f, h.GoString())
+		return
+	}
+	_, _ = io.WriteString(f, h.String())
 }
 
 // LogValue logs h without the secret.
