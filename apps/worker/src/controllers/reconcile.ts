@@ -795,6 +795,7 @@ async function applyPowerDrift(
 ): Promise<boolean> {
 	if (!(await machineUnchanged(ctx.pool, m))) return false;
 	const owned = { expectedOwner: m.id };
+	let op: "shutdown" | "stop" = "shutdown";
 	try {
 		const res = await infra.shutdown(
 			vmid,
@@ -804,11 +805,12 @@ async function applyPowerDrift(
 		if (res === "timeout") {
 			// The guest ignored the shutdown; hard stop only if nothing took the machine meanwhile.
 			if (!(await machineUnchanged(ctx.pool, m))) return false;
+			op = "stop";
 			await infra.stop(vmid, owned);
 		}
 	} catch (e) {
 		if (!isOwnerMismatch(e)) throw e;
-		noteOwnerMismatch(ctx, e, { op: "shutdown", machineId: m.id, vmid });
+		noteOwnerMismatch(ctx, e, { op, machineId: m.id, vmid });
 		return false;
 	}
 	await ctx.pool.query(

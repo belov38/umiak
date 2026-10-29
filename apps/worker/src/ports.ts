@@ -79,9 +79,10 @@ export interface StartOpts extends OwnedVm {
 	/**
 	 * Runs under the power lock after the wait for it and before the owner
 	 * check and S1 start (the executor's fence check, M3): a throw cancels
-	 * the start and passes through unchanged.
+	 * the start and passes through unchanged. Required, so no start path can
+	 * drop the re-check.
 	 */
-	beforeAct?: () => Promise<unknown>;
+	beforeAct: () => Promise<unknown>;
 }
 
 /**

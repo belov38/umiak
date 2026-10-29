@@ -101,10 +101,13 @@ const machineIds: string[] = [];
 const vmids = new Set<number>();
 /** VMID → machine id of its lease (the owner NodeInfra power operations check). */
 const owners = new Map<number, string>();
-function owned(vmid: number): { expectedOwner: string } {
+function owned(vmid: number): {
+	expectedOwner: string;
+	beforeAct: () => Promise<void>;
+} {
 	const expectedOwner = owners.get(vmid);
 	if (expectedOwner === undefined) throw new Error(`VM ${vmid}: no owner`);
-	return { expectedOwner };
+	return { expectedOwner, beforeAct: async () => {} };
 }
 /** Every VMID and snapshot id this run ever created (for the final LV check). */
 const createdVmids = new Set<number>();

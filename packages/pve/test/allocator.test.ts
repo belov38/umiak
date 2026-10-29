@@ -37,6 +37,20 @@ describe("macFor", () => {
 });
 
 describe("Allocator", () => {
+	it("reserveForDelete takes an ownerless releasing lease that allocate skips; false when taken", async () => {
+		const { alloc } = make();
+		expect(await alloc.reserveForDelete(500)).toBe(true);
+		expect(await alloc.get(500)).toMatchObject({
+			state: "releasing",
+			purpose: "machine",
+			mac: macFor(1, 500),
+		});
+		expect((await alloc.get(500))?.ownerId).toBeUndefined();
+		expect((await alloc.allocate("m-a")).vmid).toBe(501);
+		expect(await alloc.reserveForDelete(501)).toBe(false);
+		expect((await alloc.get(501))?.ownerId).toBe("m-a");
+	});
+
 	it("hands out the lowest free VMID with its MAC and reserves it", async () => {
 		const { alloc, store } = make();
 		expect(await alloc.allocate()).toEqual({

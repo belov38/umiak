@@ -635,25 +635,37 @@ export class Machines {
 	/**
 	 * Deletes a machine and frees its VMID only after verifying no traces remain (spec §6.3).
 	 * With `expectedOwner` the lease is checked first (checkLeaseOwner); nothing is touched
-	 * on a mismatch.
+	 * on a mismatch. A VMID without a lease is reserved (an ownerless `releasing` lease)
+	 * before anything is deleted, so no create can take it until the final release.
 	 */
 	async delete(vmid: number, opts: PowerOpts = {}): Promise<void> {
 		const { api, allocator, cfg } = this.#o;
 		if (vmid === cfg.templateVmid)
 			throw new Error(`refusing to delete the template VM ${vmid}`);
-		const lease = await allocator.get(vmid);
 		const listed = async () =>
 			(await this.#resources()).some((r) => r.vmid === vmid);
-		if (
-			!(await checkLeaseOwner({
-				op: "delete",
-				vmid,
-				lease,
-				expectedOwner: opts.expectedOwner,
-				vmExists: listed,
-			}))
-		)
-			return;
+		let lease = await allocator.get(vmid);
+		for (let attempt = 0; ; attempt++) {
+			if (
+				!(await checkLeaseOwner({
+					op: "delete",
+					vmid,
+					lease,
+					expectedOwner: opts.expectedOwner,
+					vmExists: listed,
+				}))
+			)
+				return;
+			if (lease) break;
+			// No lease (an orphan VM): reserve the VMID first, or a create could
+			// allocate it after the destroy, and the final release (and the LV
+			// cleanup) would hit the new owner. Lost the insert: re-check whoever
+			// holds the lease now.
+			if (await allocator.reserveForDelete(vmid)) break;
+			if (attempt >= 2)
+				throw new Error(`VM ${vmid}: the lease keeps changing during delete`);
+			lease = await allocator.get(vmid);
+		}
 		const mac = lease?.mac ?? macFor(cfg.clusterId, vmid);
 		if (lease) await allocator.markReleasing(vmid);
 

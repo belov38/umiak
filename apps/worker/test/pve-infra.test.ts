@@ -40,6 +40,9 @@ afterAll(async () => {
 
 const SIZE = { vcpu: 2, memoryMb: 2048 };
 
+/** A caller without a fence to re-check. */
+const noFence = async () => {};
+
 function smbiosFor(machineId: string): InfraSmbios {
 	return {
 		uuid: machineId,
@@ -166,7 +169,7 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(await e.infra.vmSize(500)).toEqual({ vcpu: 3, memoryMb: 3072 });
 
 		expect(await e.infra.status(500)).toBe("stopped");
-		await e.infra.start(500, { expectedOwner: machineId });
+		await e.infra.start(500, { expectedOwner: machineId, beforeAct: noFence });
 		expect(await e.infra.status(500)).toBe("running");
 		expect(await e.infra.qgaPing(500)).toBe(true);
 		expect(await e.infra.qgaExec(500, ["true"])).toEqual({ exitCode: 0 });
@@ -211,7 +214,7 @@ describe("PveNodeInfra lifecycle", () => {
 		});
 		expect(stopped.consistency).toBe("powered_off");
 
-		await e.infra.start(vmid, { expectedOwner: m });
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
 		const hookCalls: string[] = [];
 		const snap = await e.infra.snapshot(vmid, {
 			lvId: randomUUID().replaceAll("-", ""),
@@ -237,7 +240,7 @@ describe("PveNodeInfra lifecycle", () => {
 			size: SIZE,
 			smbios: smbiosFor(m),
 		});
-		await e.infra.start(vmid, { expectedOwner: m });
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
 		e.api.agentUp = false;
 		const err = await e.infra
 			.snapshot(vmid, { lvId: randomUUID().replaceAll("-", "") })
@@ -299,11 +302,11 @@ describe("PveNodeInfra lifecycle", () => {
 			size: SIZE,
 			smbios: smbiosFor(m),
 		});
-		await e.infra.start(vmid, { expectedOwner: m });
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
 		expect(await e.infra.shutdown(vmid, 30, { expectedOwner: m })).toBe(
 			"stopped",
 		);
-		await e.infra.start(vmid, { expectedOwner: m });
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
 		e.api.fail[`POST /nodes/${e.name}/qemu/${vmid}/status/shutdown`] =
 			new PveTaskError("UPID:x", "VM quit/powerdown failed - got timeout");
 		expect(await e.infra.shutdown(vmid, 1, { expectedOwner: m })).toBe(
@@ -411,7 +414,7 @@ describe("PveNodeInfra lifecycle", () => {
 			size: SIZE,
 			smbios: smbiosFor(m),
 		});
-		await e.infra.start(vmid, { expectedOwner: m });
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
 		e.node.fail["dhcp.release"] = new NodeOpsError(
 			"dhcp.release",
 			"busy",
@@ -462,9 +465,9 @@ describe("PveNodeInfra lifecycle", () => {
 			size: SIZE,
 			smbios: smbiosFor(m),
 		});
-		await e.infra.start(vmid, { expectedOwner: m });
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
 		e.api.calls.length = 0;
-		const other = { expectedOwner: randomUUID() };
+		const other = { expectedOwner: randomUUID(), beforeAct: noFence };
 		for (const call of [
 			() => e.infra.start(vmid, other),
 			() => e.infra.stop(vmid, other),

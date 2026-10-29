@@ -427,13 +427,11 @@ export class PveNodeInfra implements NodeInfra {
 		let fromCaller: { err: unknown } | undefined;
 		return this.#run("start", () =>
 			this.#powerSerialized(async () => {
-				if (o.beforeAct) {
-					try {
-						await o.beforeAct();
-					} catch (err) {
-						fromCaller = { err };
-						throw err;
-					}
+				try {
+					await o.beforeAct();
+				} catch (err) {
+					fromCaller = { err };
+					throw err;
 				}
 				await this.#base.start(vmid, { expectedOwner: o.expectedOwner });
 			}),

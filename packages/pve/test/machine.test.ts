@@ -720,6 +720,52 @@ describe("owner-checked power operations", () => {
 		expect(api.vms.has(b.vmid)).toBe(true);
 	});
 
+	it("an orphan delete reserves the VMID: a create during it gets another VMID and keeps its lease", async () => {
+		const { api, allocator, machines, node, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		store.remove(1, a.vmid);
+		let b: { vmid: number } | undefined;
+		let stateDuringDelete: string | undefined;
+		node.handlers["dhcp.release"] = async () => {
+			stateDuringDelete ??= store.get(1, a.vmid)?.state;
+			b ??= await allocator.allocate("m-b");
+			return { released: true };
+		};
+		await machines.delete(a.vmid, { expectedOwner: null });
+		expect(api.vms.has(a.vmid)).toBe(false);
+		expect(stateDuringDelete).toBe("releasing");
+		expect(b?.vmid).toBeDefined();
+		expect(b?.vmid).not.toBe(a.vmid);
+		expect(store.get(1, b?.vmid ?? 0)?.ownerId).toBe("m-b");
+		expect(store.get(1, a.vmid)).toBeUndefined();
+	});
+
+	it("an orphan delete that loses the reservation re-checks the new lease and refuses", async () => {
+		const { api, allocator, machines, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		store.remove(1, a.vmid);
+		const reserve = allocator.reserveForDelete.bind(allocator);
+		allocator.reserveForDelete = async (vmid) => {
+			// A create takes the VMID between the lease read and the reservation.
+			store.tryInsert({
+				cluster: 1,
+				vmid,
+				mac: "02:01:00:00:01:F4",
+				state: "reserved",
+				purpose: "machine",
+				createdAt: 0,
+				updatedAt: 0,
+				ownerId: "m-c",
+			});
+			return reserve(vmid);
+		};
+		await expect(
+			machines.delete(a.vmid, { expectedOwner: null }),
+		).rejects.toBeInstanceOf(OwnerMismatchError);
+		expect(api.vms.has(a.vmid)).toBe(true);
+		expect(store.get(1, a.vmid)?.ownerId).toBe("m-c");
+	});
+
 	it("start, stop and shutdown act only for the lease owner", async () => {
 		const { api, machines } = setup();
 		const a = await machines.create({ ownerId: "m-a" });

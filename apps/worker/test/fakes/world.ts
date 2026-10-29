@@ -251,7 +251,7 @@ export async function leaseVm(
 	providerId: string,
 	vmid: number,
 	machineId: string = randomUUID(),
-): Promise<{ expectedOwner: string }> {
+): Promise<{ expectedOwner: string; beforeAct: () => Promise<void> }> {
 	await q.query(
 		`INSERT INTO runtime.vmid_leases (provider_id, vmid, mac, state, purpose, machine_id)
 		 VALUES ($1, $2, $3, 'active', 'machine', $4)`,
@@ -262,7 +262,7 @@ export async function leaseVm(
 			machineId,
 		],
 	);
-	return { expectedOwner: machineId };
+	return { expectedOwner: machineId, beforeAct: async () => {} };
 }
 
 export interface TopologyOptions {

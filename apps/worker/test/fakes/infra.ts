@@ -250,7 +250,7 @@ export class FakeInfra implements NodeInfra {
 	start(vmid: number, o: StartOpts): Promise<void> {
 		this.#call("start", vmid);
 		return this.#powerSerialized(async () => {
-			await o.beforeAct?.();
+			await o.beforeAct();
 			await this.#ownerCheck("start", vmid, o.expectedOwner);
 			const vm = this.#vm(vmid);
 			if (vm.status === "running") return;
@@ -313,7 +313,22 @@ export class FakeInfra implements NodeInfra {
 			);
 		}
 		return this.#powerSerialized(async () => {
-			if (!(await this.#ownerCheck("delete", vmid, o.expectedOwner))) return;
+			// As S1: a VMID without a lease is reserved before anything is deleted.
+			let lease = await this.allocator.get(vmid);
+			for (let attempt = 0; ; attempt++) {
+				const go = await checkLeaseOwner({
+					op: "delete",
+					vmid,
+					lease,
+					expectedOwner: o.expectedOwner,
+					vmExists: async () => this.vms.has(vmid),
+				});
+				if (!go) return;
+				if (lease) break;
+				if (await this.allocator.reserveForDelete(vmid)) break;
+				if (attempt >= 2) throw new Error(`VM ${vmid}: lease keeps changing`);
+				lease = await this.allocator.get(vmid);
+			}
 			await this.#destroy(vmid);
 		});
 	}

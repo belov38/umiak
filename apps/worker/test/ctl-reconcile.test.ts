@@ -353,6 +353,21 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
 	});
 
+	it("an ownerless releasing lease (a failed orphan delete's reservation) is finished by lease_release", async () => {
+		const w = await createWorld(db);
+		await insertLease(w, 593, "releasing", null, 700);
+		w.infra.addVm({ vmid: 593, status: "stopped" });
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["lease_release", "lease:593"]]);
+		expect(actions[0]?.applied).toBe(true);
+		expect(w.infra.vms.has(593)).toBe(false);
+		const l = await w.pool.query(
+			"SELECT vmid FROM runtime.vmid_leases WHERE provider_id = $1 AND vmid = 593",
+			[w.topo.providerId],
+		);
+		expect(l.rows).toEqual([]);
+	});
+
 	it("lease_release passes the lease's owner: a VMID whose lease changed owner is not deleted", async () => {
 		const w = await createWorld(db);
 		const m = await insertMachine(w, { state: "deleted" });

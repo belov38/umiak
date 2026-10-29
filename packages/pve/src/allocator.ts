@@ -110,6 +110,26 @@ export class Allocator {
 	}
 
 	/**
+	 * Takes an ownerless `releasing` lease of a VMID that has none, so that
+	 * allocate skips it while a delete of a lease-less (orphan) VM runs; the
+	 * delete's final release removes this row. False if a lease exists
+	 * (someone else's: the caller re-reads it).
+	 */
+	async reserveForDelete(vmid: number): Promise<boolean> {
+		const { store, clusterId } = this.#o;
+		const t = this.#now();
+		return store.tryInsert({
+			cluster: clusterId,
+			vmid,
+			mac: macFor(clusterId, vmid),
+			state: "releasing",
+			purpose: "machine",
+			createdAt: t,
+			updatedAt: t,
+		});
+	}
+
+	/**
 	 * With ownerId, repeated calls return the owner's existing lease unless it
 	 * is releasing; `reused` tells the caller so. A reused lease may already
 	 * have a VM (another executor of the same owner made it), so the caller

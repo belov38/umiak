@@ -197,7 +197,7 @@ describe("PveNodeInfra start and delete serialization", () => {
 			a.topo.nodeId,
 		);
 		const vmids = [530, 531, 532, 533, 534];
-		const own = new Map<number, { expectedOwner: string }>();
+		const own = new Map<number, Awaited<ReturnType<typeof leaseVm>>>();
 		for (const v of vmids) {
 			a.api.addStopped(v);
 			own.set(v, await leaseVm(db.pool, a.topo.providerId, v));
@@ -225,7 +225,7 @@ describe("PveNodeInfra start and delete serialization", () => {
 		const apis = new Map([[a.topo.nodeId, a.api]]);
 		const p1: NodeInfra = await registryFor(apis).forNode(a.topo.nodeId);
 		const p2: NodeInfra = await registryFor(apis).forNode(a.topo.nodeId);
-		const own = new Map<number, { expectedOwner: string }>();
+		const own = new Map<number, Awaited<ReturnType<typeof leaseVm>>>();
 		for (const v of [540, 541, 542, 543]) {
 			a.api.addStopped(v);
 			own.set(v, await leaseVm(db.pool, a.topo.providerId, v));
