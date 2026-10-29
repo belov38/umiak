@@ -1,15 +1,15 @@
 # S8. Web (Payload): админка, дашборд, пользователи и команды — спецификация
 
-Статус: согласовано (master-сессия от имени Ильи), 2026-10-29; политика увольнения (§20) ждёт подтверждения Ильи. Область S8 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§2, §10, §11). Опирается на `docs/specs/s7-public-api.md` (listener-ы, ключи, scopes, `IdentityStore`, §17.3, §22), `docs/specs/s6-control-plane.md` (§5.11 `ConfigReader`, §8.5 квоты, §13.1 секреты), `docs/specs/s4-gateway.md` (§6.1–6.2 маршруты и блокировки, §8.4 SSO, §14.1 cookie).
+Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. IdP — Keycloak, offboarding — вариант A (решение Ильи 2026-10-29, §5, §9.8, §20.1). Дополнено MVP-рекомендациями R3, R4 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S8 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§2, §10, §11). Опирается на `docs/specs/s7-public-api.md` (listener-ы, ключи, scopes, `IdentityStore`, §17.3, §22), `docs/specs/s6-control-plane.md` (§5.11 `ConfigReader`, §8.5 квоты, §13.1 секреты), `docs/specs/s4-gateway.md` (§6.1–6.2 маршруты и блокировки, §8.4 SSO, §14.1 cookie).
 
 Ответы на Q1–Q3 и решения автора согласованы master-сессией от имени Ильи (2026-10-29). Пометка **[решение S8]** — решение автора спеки в рамках брифа (одобрено master-сессией); его можно менять при планировании, если причина записана. Пометка **[изменение S7]** / **[изменение S6]** — место, где S8 добавляет что-то в уже согласованную спеку; сводка — §17.
 
 ## 1. Зачем
 
-S8 — человеческое лицо платформы. Операторы настраивают её в `/admin` (шаблоны, размеры, квоты, пул, пользователи, ключи). Пользователи в `/app` создают sandbox, смотрят логи, открывают терминал, работают с файлами и портами, выпускают API-ключи для агентов и CLI. Кроме того, S8 даёт `api` и `worker` два источника правды: кто пользователь и что он может (`IdentityStore`), и как настроена платформа (`ConfigReader`).
+S8 — человеческое лицо платформы. Операторы настраивают её в `/admin` (шаблоны, размеры, квоты, пул, пользователи, ключи). Пользователи в `/app` создают sandbox, смотрят логи, открывают терминал, работают с файлами и портами, `owner`-ы выпускают командные API-ключи для агентов и CI (люди в CLI входят через Keycloak, S7 §7.6). Кроме того, S8 даёт `api` и `worker` два источника правды: кто пользователь и что он может (`IdentityStore`), и как настроена платформа (`ConfigReader`).
 
 Что считается успехом:
-1. Новый сотрудник открывает `https://app.<domain>`, входит через IdP и через минуту работает в терминале своей sandbox. Ни регистрации, ни оператора не нужно.
+1. Новый сотрудник открывает `https://app.<domain>`, входит через Keycloak и через минуту работает в терминале своей sandbox. Ни регистрации, ни оператора не нужно.
 2. Изменение в `/admin` (выключен шаблон, снижена квота, отозван ключ, выключен `public`) действует на всех подах `api`, `worker` и gateway за секунды, без перезапуска.
 3. Дашборд умеет всё то же, что CLI, по тому же публичному API. Отдельного пути к runtime-данным в обход API нет.
 4. Ни одна учётная запись платформы не принимается по заголовку, пришедшему не от oauth2-proxy, а значение секрета нельзя прочитать ни из дашборда, ни из `/admin`.
@@ -27,8 +27,8 @@ S8 — человеческое лицо платформы. Операторы 
 - Локальная разработка без oauth2-proxy (§13), миграции схемы `payload` (§12), форма сборки и деплоя (§14).
 
 **Не-цели (другие области)**
-- Публичное API и его внутренности (S7), машины состояний и worker (S6), gateway (S4), рабочий стол (S10), MCP (S11), Helm-чарты и настройка IdP (S12), репозитории в environments (S13).
-- Страница входа CLI (`/cli/*`) и SSO для портов (`/sbx-auth/*`): их отдаёт `api` (S7 §7.6–7.7), S8 только хранит данные, которые они читают.
+- Публичное API и его внутренности (S7), машины состояний и worker (S6), gateway (S4), рабочий стол (S10), MCP (S11), Helm-чарты и настройка IdP (S12), клон репозиториев из environments (S13; список репозиториев S8 только хранит, §10.1).
+- SSO для портов (`/sbx-auth/*`): его отдаёт `api` (S7 §7.7), S8 только хранит данные, которые он читает. Вход CLI — device grant Keycloak (S7 §7.6): своих страниц у `web` и `api` для него нет.
 - Биллинг, организации с кошельками, публичная регистрация.
 
 **Анти-цели (провал, даже если всё работает)**
@@ -44,7 +44,7 @@ S8 — человеческое лицо платформы. Операторы 
 - Toolchain из `mise.toml` (Node 26.13.0, pnpm 12.16.1). Версии библиотек — §16, проверены 2026-10-29; при реализации перепроверить и взять последние стабильные (`CLAUDE.md`).
 - Раскладка по `CLAUDE.md`: `apps/web`, `packages/payload`; тесты vitest и Playwright; линт biome.
 - Postgres один (S6 §3): схема `payload` принадлежит S8. `runtime` S8 не читает и не пишет из `web` (§14.3); runtime-таблицы для environments и блокировок добавляются миграциями в диапазоне S8 (§17.3) и используются только `api`/`worker`.
-- Внутренняя платформа компании; пользователи — только из IdP за oauth2-proxy.
+- Внутренняя платформа компании; пользователи — только из Keycloak (realm `sbx`, architecture §10): в браузере — за oauth2-proxy, в CLI, SDK и MCP — по JWT Keycloak (S7 §7.10). Позже Keycloak может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет.
 - Интерфейсы `IdentityStore` и `ConfigReader` заданы S7/S6; S8 их реализует и расширяет только добавлениями (§17).
 
 ## 4. Обзор
@@ -53,11 +53,11 @@ S8 — человеческое лицо платформы. Операторы 
  browser
    |  https://app.<domain>
    v
- ingress (TLS, HTTP/2) ──> oauth2-proxy (OIDC, cookie __Host-oauth2_proxy)
+ ingress (TLS, HTTP/2) ──> oauth2-proxy (Keycloak OIDC, cookie __Host-oauth2_proxy)
                               |  injects X-Auth-Request-Email/-User/-Groups/-Preferred-Username,
                               |  strips client-supplied copies
           ┌───────────────────┼───────────────────────────────┐
-          | /api/* (strip /api), /cli/*, /sbx-auth/*           | everything else
+          | /api/* (strip /api), /sbx-auth/*                   | everything else
           v                                                    v
    apps/api :8081 (proxied listener, S7)              apps/web :3000 (Next.js 16 + Payload 3)
      IdentityStore ── packages/payload ──┐              /admin   Payload admin (operators)
@@ -87,8 +87,8 @@ S8 — человеческое лицо платформы. Операторы 
 
 ### 5.1 Цепочка доверия
 
-- Весь `app.<domain>` закрыт oauth2-proxy в режиме reverse proxy (upstream) [решение S8; конфиг — S12]. Через alpha config `injectRequestHeaders` oauth2-proxy ставит upstream-у `X-Auth-Request-Email` (claim `email`), `X-Auth-Request-User` (claim **`sub`** — неизменяемый идентификатор IdP, а не логин или email), `X-Auth-Request-Groups` (claim групп), `X-Auth-Request-Preferred-Username` из claims и вырезает присланные клиентом копии (`preserveRequestValue: false`, значение по умолчанию). Неподтверждённый email не принимается (oauth2-proxy по умолчанию требует `email_verified`; `--insecure-oidc-allow-unverified-email` не включается).
-- Требования к сессии oauth2-proxy (S12): `--cookie-refresh` не больше 5 min (при обновлении IdP заново проверяет пользователя и отдаёт актуальные группы), `--cookie-expire` не больше 12 h. Только так выключение пользователя и снятие группы в IdP доходят до `web` и `api` (§11). Маршрутизация по путям — тоже в alpha config: `/api/` → `api:8081` с `rewriteTarget` без `/api`, `/cli/` и `/sbx-auth/` → `api:8081`, остальное → `web:3000`. Если S12 выберет nginx-подобный `auth_request`, контракт для `web` и `api` тот же: эти четыре заголовка ставит только oauth2-proxy.
+- Весь `app.<domain>` закрыт oauth2-proxy в режиме reverse proxy (upstream) [решение S8; конфиг — S12]. Провайдер — Keycloak: в alpha config `providers[].provider: keycloak-oidc`, `oidcConfig.issuerURL: https://<keycloak>/realms/sbx`, конфиденциальный клиент `oauth2-proxy` с Audience mapper на себя (oauth2-proxy сверяет `aud` с `client-id`) и mapper-ом Group Membership в claim `groups` (architecture §10). Через alpha config `injectRequestHeaders` oauth2-proxy ставит upstream-у `X-Auth-Request-Email` (claim `email`), `X-Auth-Request-User` (claim **`sub`** — неизменяемый идентификатор IdP, а не логин или email), `X-Auth-Request-Groups` (claim групп), `X-Auth-Request-Preferred-Username` из claims и вырезает присланные клиентом копии (`preserveRequestValue: false`, значение по умолчанию). Неподтверждённый email не принимается (oauth2-proxy по умолчанию требует `email_verified`; `--insecure-oidc-allow-unverified-email` не включается).
+- Требования к сессии oauth2-proxy (S12): `--cookie-refresh=5m` (флаг, в alpha config его нет; при обновлении Keycloak отказывает выключенному пользователю и отдаёт актуальные группы), `--cookie-expire` не больше 12 h. Только так выключение пользователя и снятие группы в IdP доходят до `web` и `api` (§11). Маршрутизация по путям — тоже в alpha config: `/api/` → `api:8081` с `rewriteTarget` без `/api`, `/sbx-auth/` → `api:8081`, остальное → `web:3000`. Если S12 выберет nginx-подобный `auth_request`, контракт для `web` и `api` тот же: эти четыре заголовка ставит только oauth2-proxy.
 - Cookie oauth2-proxy — `__Host-oauth2_proxy`, host-only, `Secure`, без `--cookie-domain` (S4 §14.1).
 - `web` доверяет заголовкам только потому, что к его порту пускает лишь oauth2-proxy (NetworkPolicy, S12), как `api :8081` (S7 §7.1). Отдельного секрета между oauth2-proxy и `web` нет [решение S8]: NetworkPolicy — та же граница, что у `api`, и второй механизм только усложнил бы dev.
 - Пробы — **exec-пробы** внутри контейнера (`node healthcheck.js` → `http://127.0.0.1:3000/healthz`), а не HTTP-пробы kubelet [решение S8 по ревью]: тогда NetworkPolicy пускает на `:3000` только поды oauth2-proxy, без адресов нод (иначе любой hostNetwork-под или процесс ноды мог бы прислать поддельный `X-Auth-Request-*`). `/healthz` не требует заголовков и отдаёт только `200 ok` (Postgres, инициализация Payload, миграции §12).
@@ -102,7 +102,7 @@ S8 — человеческое лицо платформы. Операторы 
 
 ### 5.3 JIT и `resolveSession`
 
-`resolveSession({email, user, groups, preferredUsername})` живёт в `@sbx/payload` и используется дважды: auth-стратегией Payload в `web` и `PayloadIdentityStore.resolveSession` в `api` (S7 §7.4). Логика одна:
+`resolveSession({email, user, groups, preferredUsername})` живёт в `@sbx/payload` и используется трижды: auth-стратегией Payload в `web`, `PayloadIdentityStore.resolveSession` в `api` для браузера (S7 §7.4) и для Keycloak JWT из CLI, SDK и MCP (S7 §7.10, вход из claims `email`, `sub`, `groups`, `preferred_username`). Логика одна, поэтому браузер и CLI — одна и та же личность по `sub`:
 
 Идентичность привязана к `sub` (`idpSubject`, уникальный индекс); email — второй ключ для первого входа и приглашений [решение S8 по ревью]. `X-Auth-Request-User` обязателен (без него `401`).
 
@@ -123,12 +123,12 @@ S8 — человеческое лицо платформы. Операторы 
 - Коллекция `users`: `auth: { disableLocalStrategy: true, strategies: [{ name: "oauth2-proxy", authenticate }] }`. `authenticate({ headers, payload })` вызывает `resolveSession` и возвращает `{ user: { ...user, collection: "users", _strategy: "oauth2-proxy" } }` или `{ user: null }`.
 - Паролей, логина, logout, JWT и cookie Payload нет: стратегия выполняется на каждом запросе по заголовкам. `admin.user = "users"`.
 - `cookiePrefix` Payload — `__Host-payload` [решение S8]: служебные cookie админки (язык, тема) тоже host-only. Если Payload не сможет выставить их с этим префиксом, исполнитель фиксирует это в плане; эти cookie не дают доступа и не являются учётными данными.
-- Выход из системы — ссылка на `/oauth2/sign_out` oauth2-proxy (с `rd` на страницу выхода IdP, настраивает S12).
+- Выход из системы — ссылка на `/oauth2/sign_out` oauth2-proxy (с `rd` на страницу выхода Keycloak, настраивает S12). Выход в Keycloak завершает SSO-сессию, к которой привязан и refresh token CLI (S7 §7.6): после выхода из дашборда CLI попросит `sbx login`. Это записывается в подсказке у кнопки выхода.
 
 ### 5.5 Роль оператора
 
 - Оператор — пользователь, у которого в текущей сессии есть группа из `SBX_OPERATOR_GROUPS`. Поле `users.isOperator` — только чтение в `/admin`, обновляется при каждом `resolveSession`.
-- **Права оператора действуют только в браузерной сессии** [решение S8, изменение S7 C6]: у principal-а по API-ключу `isOperator = false`, даже если владелец ключа оператор. Так ключ, утёкший из CI, не даёт доступа ко всем командам, а снятие группы в IdP отнимает права при следующем обновлении сессии oauth2-proxy (§5.1, §11), а не после ручных действий.
+- **Права оператора действуют только в браузерной сессии** [решение S8, изменение S7 C6]: у principal-а по API-ключу и по Keycloak JWT из CLI `isOperator = false`. Так ключ, утёкший из CI, не даёт доступа ко всем командам, а снятие группы в IdP отнимает права при следующем обновлении сессии oauth2-proxy (§5.1, §11), а не после ручных действий.
 - **SSH тоже без операторского исключения** [решение S8 по ревью, изменение S7 C6]: `ssh/authorize` пускает только участников команды sandbox; правило S7 §12.1 «или оператор» убирается. В сессии SSH нет свежих групп, а сохранённый флаг мог устареть. Оператору, которому нужен shell в чужой sandbox, хватает терминала в браузере (раздел «Оператор»).
 - Сохранённое `users.isOperator` служит только для отображения в `/admin` и фильтров.
 
@@ -153,10 +153,12 @@ S8 — человеческое лицо платформы. Операторы 
 | Действие | `member` | `owner` | Оператор |
 |---|---|---|---|
 | Все sandbox команды в пределах scopes (S7 §7.5): создать, смотреть, exec, файлы, порты, stop/resume/fork/delete, снапшоты | да | да | да (любая команда) |
-| Свои API-ключи в команде, свои SSH-ключи | да | да | да |
+| Свои SSH-ключи | да | да | да |
+| Видеть командные API-ключи (кто создал, scopes, сроки) | да | да | да |
 | Использовать environments команды при create | да | да | да |
 | Создавать, менять, удалять environments команды | нет | да | да |
-| Видеть и отзывать API-ключи других участников команды | нет | да | да |
+| Выпускать и ротировать командные API-ключи | нет | да | нет |
+| Отзывать командные API-ключи | нет | да | да |
 | Приглашать, удалять участников, менять роли | нет | да | да (в `/admin`) |
 | Переименовать команду | нет | да | да |
 | Выйти из команды | да | да, если останется другой `owner` | — |
@@ -164,7 +166,7 @@ S8 — человеческое лицо платформы. Операторы 
 | Квота команды | только смотреть | только смотреть | менять (`/admin`) |
 
 - У команды всегда есть хотя бы один `owner`: снять роль или удалить последнего `owner` нельзя (проверка в server action и в хуке `beforeChange`/`beforeDelete` коллекции `memberships`, чтобы и `/admin` не обошёл).
-- Удаление участника не трогает sandbox команды (они принадлежат команде); его ключи в этой команде перестают работать сразу (S7 §7.2, `NOTIFY sbx_identity`).
+- Удаление участника не трогает sandbox команды и командные ключи, которые он создал (они принадлежат команде, S7 §7.2): ключи работают, `owner`-ы видят их с пометкой «создатель вышел» (§9.8). Его открытые стримы, PTY и SSH-сессии в этой команде закрываются сразу (C9, S4 §9.5).
 
 ### 6.3 Приглашение по email
 
@@ -188,15 +190,16 @@ S8 — человеческое лицо платформы. Операторы 
 
 | Коллекция | Поля | Заметки |
 |---|---|---|
-| `users` | `email` (unique, lower), `name`, `idpSubject` (`sub`, unique, null у заготовок), `preferredUsername`, `groups` (json, последние из IdP), `isOperator` (read-only), `active`, `defaultTeam` → teams, `personalTeam` → teams, `lastLoginAt`, `createdAt` | auth-коллекция (§5.4). Удаление запрещено всем [решение S8]: строки нужны для `created_by` в runtime и аудита; вместо удаления — `active: false`. Исключение — заготовки без входа и без членств |
+| `users` | `email` (unique, lower), `name`, `idpSubject` (`sub` Keycloak, unique, null у заготовок), `deactivatedReason` (`operator` \| `idp_disabled` \| `idp_deleted`, null), `deactivatedAt`, `preferredUsername`, `groups` (json, последние из IdP), `isOperator` (read-only), `active`, `defaultTeam` → teams, `personalTeam` → teams, `lastLoginAt`, `createdAt` | auth-коллекция (§5.4). Удаление запрещено всем [решение S8]: строки нужны для `created_by` в runtime и аудита; вместо удаления — `active: false`. Исключение — заготовки без входа и без членств |
 | `teams` | `name` (1–64), `personal` (bool), `createdBy` → users, `quota` (group: `maxActiveSandboxes`, `maxRamMb`, `maxSavedSnapshots`; пустое — значение по умолчанию), `createdAt` | `quota` меняет только оператор. Удаление — §6.4 |
 | `memberships` | `user` → users, `team` → teams, `role` (`owner` \| `member`), `invitedBy` → users, `createdAt` | unique (`user`, `team`); правило последнего `owner` (§6.2) |
-| `api-keys` | по S7 §17.3: `name`, `user`, `team`, `secretHash` (unique, скрыто в админке), `prefix`, `last4`, `scopes` (json), `expiresAt`, `revokedAt`, `revokedBy` → users, `lastUsedAt`, `createdVia` | создание в админке запрещено (ключи выпускает только `api` через `packages/auth`, S7 §17.3). Оператор может только отозвать (кнопка ставит `revokedAt`, `revokedBy`) |
+| `api-keys` | по S7 §17.3: `name`, `team`, `createdBy` → users (аудит), `revokedByKey` (ключ, отозвавший этот ключ или сам себя), `kind` (`team`; `sandbox` зарезервирован, S7 §7.2), `sandbox` (uuid, null), `secretHash` (unique, скрыто в админке), `prefix`, `last4`, `scopes` (json, имена S7 §7.3), `expiresAt` (обязателен), `revokedAt`, `revokedBy` → users, `lastUsedAt`, `createdVia` | создание в админке запрещено (ключи выпускает только `api` через `packages/auth`, S7 §17.3). Оператор может только отозвать (кнопка ставит `revokedAt`, `revokedBy`) |
+| `team-notices` | `team` → teams, `kind` (`member_deactivated`), `user` → users, `apiKeys` (json: id, name, prefix), `createdAt`, `acknowledgedBy` → users, `acknowledgedAt` | пишет синхронизация с Keycloak (§20.1); читают и подтверждают `owner`-ы команды через server action `acknowledgeNotice` |
 | `ssh-keys` | по S7 §17.3: `user`, `name`, `publicKey`, `fingerprint` (unique), `type`, `lastUsedAt`, `createdAt` | оператор может удалить |
 | `templates` | `slug` (unique, `[a-z0-9-]{1,40}`), `name`, `description`, `os` (`linux` \| `windows`), `enabled`, `defaultSize` (slug), `allowedSizes` (slugs), `loginUser` (по умолчанию `user`), `capabilities` (`exec`, `files`, `ssh`, `desktop`), `sortOrder` | S6 §5.11, S7 §13. Валидация: `defaultSize ∈ allowedSizes`, slug размеров существуют. Slug не меняется после создания (его хранят `template_builds` и `sandboxes`) |
 | `sizes` | `slug` (unique, например `2gb`), `vcpu`, `memoryMb`, `sortOrder` | slug не меняется; удалить размер, указанный в шаблоне или цели пула, нельзя |
 | `pool-targets` | `template` (slug), `size` (slug), `providerId` (uuid, необязательно, S6 `providers`), `target` (0–50), `maxAgeHours` | unique (`template`, `size`, `providerId`). `providerId` вводится как текст: топология живёт в runtime, список провайдеров — `sbx-admin` до фазы 2 |
-| global `platform-defaults` | S6: `ttlSeconds` (null), `maxTtlSeconds`, `idleTimeoutSeconds` (900), `stoppedRetentionDays` (null), `errorRetentionDays` (7), `recoverMinIntervalSeconds` (600); S7: `defaultTemplate`, `publicPortsEnabled` (true), `ssoPortPolicy` (`any`), `rateLimits {requestsPerSecond, burst, startsPerMinute}`; S8: `defaultQuota {maxActiveSandboxes, maxRamMb, maxSavedSnapshots}` (для личных команд и пустых полей), `newSharedTeamQuota` (копируется в `teams.quota` при создании общей команды), `maxOwnedTeamsPerUser` (3), `apiKeyOwnerInactivityDays` (30, `null` выключает, §20), `ssoPolicyEpoch` (только чтение, §8) | значения по умолчанию — первая миграция-сид. Квота PoC: 3 sandbox, 6144 MB, 10 снапшотов [решение S8, из бюджета 8 GB] |
+| global `platform-defaults` | S6: `ttlSeconds` (null), `maxTtlSeconds`, `idleTimeoutSeconds` (900), `stoppedRetentionDays` (null), `errorRetentionDays` (7), `recoverMinIntervalSeconds` (600); S7: `defaultTemplate`, `publicPortsEnabled` (true), `ssoPortPolicy` (`any`), `rateLimits {requestsPerSecond, burst, startsPerMinute}`; S8: `defaultQuota {maxActiveSandboxes, maxRamMb, maxSavedSnapshots}` (для личных команд и пустых полей), `newSharedTeamQuota` (копируется в `teams.quota` при создании общей команды), `maxOwnedTeamsPerUser` (3), `ssoPolicyEpoch` (только чтение, §8) | значения по умолчанию — первая миграция-сид. Квота PoC: 3 sandbox, 6144 MB, 10 снапшотов [решение S8, из бюджета 8 GB] |
 
 `ConfigReader.teamQuota(teamId)` = поля `teams.quota`, где пусто — `defaultQuota` [изменение S6 S3]. Удалённая или несуществующая команда → квота из нулей (create отказывает `quota_exceeded`).
 
@@ -207,6 +210,7 @@ S8 — человеческое лицо платформы. Операторы 
 | `sbx_identity` | `'<collection>:<id>'` | хуки `users`, `teams`, `memberships`, `api-keys`, `ssh-keys` | `api` (кэш сессий и ключей, S7 §7.2, §7.4), `web` (кэш `resolveSession`) |
 | `sbx_config` | `'<collection-or-global>:<id>'` | хуки `templates`, `sizes`, `pool-targets`, `teams` (квота), global `platform-defaults` | `api`, `worker` (`ConfigReader`, S6 §5.11) |
 | `sbx_routes` | `'*'` | хук `platform-defaults`, если изменились `publicPortsEnabled` или `ssoPortPolicy` | gateway (S4 §6.2, S7 O7) |
+| `sbx_ssh_revoke` | `'user:<id>'`, `'member:<team>:<user>'`, `'key:<id>'`, `'team:<id>'` | хуки `users` (стал неактивным), `memberships` (`afterDelete`), `api-keys` (`revokedAt`), `teams` (`afterDelete`) | gateway: закрыть SSH-сессии (S4 §9.5) |
 
 - `NOTIFY` выполняется **в транзакции запроса Payload** (через сессию адаптера для `req.transactionID`), поэтому Postgres доставляет его только после коммита: слушатель, получив уведомление, читает уже новые данные. Если транзакции нет (вызов Local API без `req`), хук открывает свою короткую транзакцию после записи. Ошибка `NOTIFY` откатывает запись [решение S8]: тихо устаревший кэш хуже явной ошибки.
 - **Порядок для `public`.** Gateway по `'*'` сразу перезапрашивает маршруты у `api`, а `api` мог ещё не обработать `sbx_config`; любой кэш в `api` здесь даёт гонку, после которой gateway закэширует старый ответ. Поэтому `routes.lookup` читает `publicPortsEnabled`, `ssoPortPolicy` и `ssoPolicyEpoch` **без кэша**: одна строка global из Payload на промах кэша gateway [изменение S7 C7]. Нагрузка мала (gateway кэширует маршруты), а приёмка S4 «`403` не позже чем через 1 s» выполняется.
@@ -358,12 +362,13 @@ Listening (not published)
 ### 9.8 API-ключи
 
 ```
-API keys (team platform-dev)                                           [+ New key]
- name           prefix…last4    scopes      created via  expires      last used   
- cli: ilia-mbp  sbx_a1B2…9xYz   full        cli          2027-01-27   2 min ago   [Rotate] [Revoke]
+Team API keys (team platform-dev)                                      [+ New key]
+ name        prefix…last4   scopes  created by               expires     last used
+ ci-main     sbx_a1B2…9xYz  ci      ilia@… (left the team)   2027-01-27  2 min ago   [Rotate] [Revoke]
 ```
 
-- `GET /v1/api-keys`; `owner` переключает «мои / все ключи команды» (`?all=true`, [изменение S7 C5]).
+- Ключи — **командные** [решение Ильи 2026-10-29, изменение S7 C5]: принадлежат команде, создатель записан для аудита. `GET /v1/api-keys` видят все участники; кнопки New, Rotate, Revoke — только у `owner`. Людям ключи для CLI не нужны: страница подсказывает `sbx login` (Keycloak, S7 §7.6).
+- Создатель деактивирован или вышел из команды — у ключа пометка, ключ работает; над таблицей — уведомление синхронизации (§20.1) со списком таких ключей и кнопкой «отозвать выбранные».
 - Создание: имя, пресет (`read-only`, `ci`, `full`) или выбор scopes галочками, срок (по умолчанию 90 дней, максимум 365, S7 §7.2). Секрет — один раз в диалоге с копированием и примерами `export SBX_API_KEY=…` и `sbx login --key-stdin`.
 - Rotate (новый секрет в том же диалоге), Revoke (подтверждение). Отозванные и просроченные — свёрнуты внизу.
 
@@ -392,6 +397,7 @@ API keys (team platform-dev)                                           [+ New ke
 | `setRole(membershipId, role)` | `owner`, оператор | правило последнего `owner` |
 | `removeMember(membershipId)` / `leaveTeam(teamId)` | `owner`, оператор / сам участник | правило последнего `owner`; личную команду покинуть нельзя |
 | `setDefaultTeam(teamId)` | сам пользователь, команда из его списка | |
+| `acknowledgeNotice(noticeId)` | `owner` команды уведомления | ставит `acknowledgedBy`, `acknowledgedAt` |
 
 Каждое действие: пользователь — из `payload.auth({ headers })` (та же стратегия), права проверяются по `memberships` в той же транзакции, вход валидируется zod, запись — Local API с `overrideAccess: true` и `req` (чтобы хуки `NOTIFY` шли в транзакции). Ответ — `{ok}` или `{error: {code, message}}` с кодами `forbidden`, `not_found`, `validation`, `last_owner`, `team_limit`, `already_member`.
 
@@ -399,13 +405,16 @@ API keys (team platform-dev)                                           [+ New ke
 
 ### 10.1 Смысл
 
-Environment — именованный набор настроек команды, который новая sandbox получает при создании: `env`, `secrets`, `secretFiles` (те же три набора, что у sandbox, S7 §8.3). Позже сюда же добавятся репозитории и учётные данные git (S13).
+Environment — именованный набор настроек команды, который новая sandbox получает при создании: `env`, `secrets`, `secretFiles` (те же три набора, что у sandbox, S7 §8.3), список репозиториев `repositories` и флаг `excludeOwnerSecrets`. Учётные данные git добавятся позже (S13).
+
+- **`repositories`** — `[{url, branch?, path?}]`, до 20: `url` — `https://…` или `ssh://…`/`git@host:org/repo.git` без учётных данных в URL; `branch` — ветка или тег; `path` — каталог относительно домашнего каталога `user` (по умолчанию имя репозитория). В MVP список **только хранится и отдаётся** в API: клон при claim и доступ к приватным репозиториям — S13, фаза 2.
+- **`excludeOwnerSecrets`** — «не передавать в sandbox личные секреты владельца» (того, кто создаёт sandbox): учётные данные, привязанные к пользователю, а не к команде или environment (будущие ключ `sandbox` в VM — S7 §7.2, личные AI credentials — S16, личные токены git — S13). В MVP таких секретов платформа в VM не кладёт, поэтому флаг только хранится; функции фазы 2 обязаны его соблюдать. Флаг есть и в `POST /v1/sandboxes`; действует `true`, если он `true` в запросе или в выбранной environment. Sandbox хранит итог, fork его наследует.
 
 - У команды может быть одна environment по умолчанию.
 - При create (`POST /v1/sandboxes`) поле `environment`: имя → эта environment; отсутствует → environment команды по умолчанию, если есть; `null` → никакой [изменение S7 C1].
 - Значения **копируются** в `sandbox_secrets` при create; поверх каждого набора накладываются значения из самого запроса (тот же ключ — побеждает запрос; secret-файлы — по имени). Лимиты S7 §8.3 проверяются на результате слияния.
 - Версий и автообновления, как у boat, нет [решение S8]: изменение environment действует только на новые sandbox. Sandbox помнит, из какой environment и какой ревизии создана (`environment: {id, name, revision}` в ресурсе Sandbox), дашборд показывает «environment изменилась после создания». Применить заново — фаза 2.
-- Fork наследует env и секреты источника (S6 §7.7), а не environment. Create из saved snapshot берёт environment как обычный create.
+- Fork наследует env и секреты источника (S6 §7.7), а не environment; значения `env`, `secrets`, `secretFiles` из запроса fork накладываются поверх (S7 §8.2). Create из saved snapshot берёт environment как обычный create.
 - Удаление environment не трогает sandbox, созданные из неё.
 - **От участников команды секреты environment не скрыты** [решение S8 по ревью, как у boat]: любой, кто может создать sandbox и выполнить в ней команду, прочитает `env` внутри. Роль `owner` для записи защищает целостность (кто меняет, что получат все), а не конфиденциальность. Environment по умолчанию применяется ко всем create команды, включая create по API-ключам агентов и CI: в этом её смысл (агент получает нужные ключи без передачи в каждом запросе). Для существующих клиентов поведение не меняется, пока `owner` не назначит environment по умолчанию; клиент, которому она не нужна, передаёт `environment: null`.
 
@@ -413,14 +422,14 @@ Environment — именованный набор настроек команд�
 
 | Метод и путь | Что | Scope |
 |---|---|---|
-| `GET /v1/environments` | список команды: `{id, name, isDefault, revision, envKeys, secretKeys, secretFiles[{name, mode, linkPath, sizeBytes}], createdAt, updatedAt, updatedBy}` | `sandboxes:read` |
-| `GET /v1/environments/{environment}` | то же + значения `env` (не секретов) | `sandboxes:read` |
-| `POST /v1/environments` | `{name, isDefault?, env?, secrets?, secretFiles?}` → `201` | `environments:write` + роль `owner` |
-| `PATCH /v1/environments/{environment}` | `{name?, isDefault?, env?, secrets?, secretFiles?}`; наборы — merge, `null` удаляет ключ (как `PATCH /env`, C2); `revision+1` | `environments:write` + `owner` |
+| `GET /v1/environments` | список команды: `{id, name, isDefault, revision, envKeys, secretKeys, secretFiles[{name, mode, linkPath, sizeBytes}], repositories, excludeOwnerSecrets, createdAt, updatedAt, updatedBy}` | `environments:read` |
+| `GET /v1/environments/{environment}` | то же + значения `env` (не секретов) | `environments:read` |
+| `POST /v1/environments` | `{name, isDefault?, env?, secrets?, secretFiles?, repositories?, excludeOwnerSecrets?}` → `201` | `environments:write` + роль `owner` |
+| `PATCH /v1/environments/{environment}` | `{name?, isDefault?, env?, secrets?, secretFiles?, repositories?, excludeOwnerSecrets?}`; наборы — merge, `null` удаляет ключ (как `PATCH /env`, C2); `repositories` — полная замена; `revision+1` | `environments:write` + `owner` |
 | `DELETE /v1/environments/{environment}` | `204` | `environments:write` + `owner` |
 
 - `{environment}` — ID (`env_...`) или имя; имя `^[a-z0-9][a-z0-9-]{0,62}$`, уникально в команде.
-- Новый scope `environments:write` входит только в пресет `full`. Роль `member` получает `403 forbidden` (`details.reason: "role"`), даже если scope есть: роль проверяется для сессий и для ключей.
+- Scopes `environments:read` (в пресетах `read-only`, `ci`, `full`) и `environments:write` (только в `full`), S7 §7.3. На запись (`environments:write`) роль `member` получает `403 forbidden` (`details.reason: "role"`), даже если scope есть: роль проверяется для сессий и для Keycloak JWT. У командного ключа роли нет, ему достаточно scope (S7 §7.5).
 - Значения секретов не отдаются никогда; логгер `api` вырезает `env`, `secrets`, `secretFiles` (как S7 §8.3).
 - CLI (`sbx env-sets list|show|create|set|unset|rm`, `sbx create --environment`) и SDK получают это из OpenAPI; имена команд CLI — исполнителю S7/S8.
 
@@ -433,6 +442,8 @@ environments(                       -- schema runtime, migration in the S8 range
   is_default bool,
   revision int,                     -- +1 on every change
   env_keys text[], secret_keys text[], secret_files jsonb,  -- names and metadata only, for listing
+  repositories jsonb,               -- [{url, branch, path}], stored only in the MVP (S13)
+  exclude_owner_secrets bool,       -- default false
   key_version int, nonce bytea, ciphertext bytea,           -- AES-256-GCM blob {env, secrets, secretFiles}, S6 §13.1
   created_by uuid, updated_by uuid,
   created_at, updated_at, deleted_at null)
@@ -443,7 +454,7 @@ unique (team_id) where is_default and deleted_at is null
 - Шифрование и кольцо ключей — как `sandbox_secrets` (S6 §13.1), AAD = `environment:<id>:v<keyVersion>`; ротация ключа перешифровывает и эти строки (тот же контроллер cleanup).
 - Сервис — `EnvironmentService` в `packages/core` (`list`, `get`, `create`, `patch`, `delete`, `resolveForCreate(teamId, name|undefined|null)`); `SandboxService.create` вызывает `resolveForCreate` и сливает наборы до шифрования `sandbox_secrets`.
 - Значения не попадают в `operations.request`, `idempotency_keys.response`, логи и метрики (S6 §13.1). Hash идемпотентности create считается от тела запроса (с именем environment, без её значений).
-- В `sandboxes` добавляются `environment_id uuid null`, `environment_revision int null`.
+- В `sandboxes` добавляются `environment_id uuid null`, `environment_revision int null`, `exclude_owner_secrets bool not null default false`.
 
 ## 11. Сроки распространения изменений
 
@@ -451,11 +462,13 @@ unique (team_id) where is_default and deleted_at is null
 |---|---|---|
 | Отзыв ключа, удаление участника, деактивация пользователя в `/admin` | новые запросы `api` | сразу по `NOTIFY`, не позже 30 s (S7 §7.2) |
 | То же | уже открытые стримы и PTY `api` | закрываются по `NOTIFY` (кадр `error` `unauthorized` / close `4401`) [изменение S7 C9] |
-| То же | SSH-сессии gateway | живут до конца (до 15 min при деплое, иначе до разрыва); новые входы отклоняются сразу. Принудительный разрыв — фаза 2 |
+| Удаление участника, деактивация пользователя, отзыв ключа | SSH-сессии gateway | закрываются сразу (`NOTIFY sbx_ssh_revoke`, S4 §9.5); новые входы отклоняются сразу |
 | Деактивация пользователя в `/admin` | `web`, сессии `api` | сразу по `NOTIFY`, не позже 30 s |
 | Деактивация пользователя | `sso`-порты | до 12 h (cookie gateway, S4 §8.4); немедленный отзыв — фаза 2 (§18) |
-| Выключение пользователя или снятие группы в IdP | браузер (`web`, `api`) | не позже `cookie-refresh` (5 min) + 30 s кэша (§5.1) |
-| Выключение пользователя в IdP | API-ключи | после деактивации оператором в `/admin` — сразу; без неё — через `apiKeyOwnerInactivityDays` (30 дней) без браузерной сессии (§20, ждёт подтверждения Ильи) |
+| Выключение пользователя или снятие группы в Keycloak | браузер (`web`, `api`) | не позже `cookie-refresh` (5 min) + 30 s кэша (§5.1) |
+| Выключение или удаление пользователя в Keycloak | CLI, SDK, MCP (JWT) | refresh отклоняется сразу; выданный access token — до 5 min, а после синхронизации (≤ 5 min, §20.1) `api` отклоняет и его |
+| То же | `users.active`, стримы, PTY, SSH | синхронизация ≤ 5 min (§20.1), затем как деактивация в `/admin` |
+| То же | командные ключи, которые он создал | не меняются; `owner`-ы получают уведомление (§20.1) |
 | Шаблоны, размеры, квоты, цели пула, `PlatformDefaults` | `api`, `worker` | сразу по `NOTIFY`, не позже 10 s (S6 §5.11) |
 | `publicPortsEnabled`, `ssoPortPolicy` | gateway | ≤ 1 s (§8) |
 | Блокировка sandbox или порта оператором | gateway, SSH | сразу (триггер `sbx_routes`, S4 §6.2) |
@@ -475,10 +488,11 @@ unique (team_id) where is_default and deleted_at is null
   - слушает только `127.0.0.1:3000` (отказывается от других адресов);
   - на каждом запросе вырезает присланные `X-Auth-Request-*` и ставит их из dev-cookie `sbx_dev_identity`;
   - `/__dev/login` — страница выбора личности: email, имя, группы (готовые кнопки «user», «second user», «operator»); `/__dev/logout`;
-  - маршруты как в проде (§5.1): `/api/*` → `127.0.0.1:8081` без `/api`, `/cli/*` и `/sbx-auth/*` → `127.0.0.1:8081`, остальное → `next dev` на `127.0.0.1:3001`; WebSocket upgrade проксируется.
+  - маршруты как в проде (§5.1): `/api/*` → `127.0.0.1:8081` без `/api`, `/sbx-auth/*` → `127.0.0.1:8081`, остальное → `next dev` на `127.0.0.1:3001`; WebSocket upgrade проксируется.
 - В `web` и `api` нет ни флагов, ни веток кода «dev auth»: они получают те же заголовки, что в проде. Каталог `dev/` исключён из сборки образа (`.dockerignore`, проверка в CI, что в `.next/standalone` нет `auth-proxy`).
 - `pnpm --filter @sbx/web dev` поднимает `next dev` и прокси; Postgres — из общего dev-окружения S6 (docker compose или testcontainers); `api` с `PayloadIdentityStore` — по инструкции S7. Без `api` работают `/admin` и страницы команд, дашборд sandbox показывает «API недоступен».
 - `SBX_OPERATOR_GROUPS` в dev — `sbx-operators`.
+- CLI в dev: командный ключ (`sbx login --key-stdin`) или Keycloak из общего dev-окружения (`kc.sh start-dev` в контейнере с импортом realm `sbx` из `infra/keycloak/`, S12) для проверки device grant и JWT.
 
 ## 14. Сборка и деплой (форма; детали — S12)
 
@@ -521,10 +535,12 @@ unique (team_id) where is_default and deleted_at is null
 - порт: публикация `token` (токен виден один раз), ротация, `public` при выключенном переключателе — понятная ошибка;
 - API-ключ: создание → `curl https://…/v1/me` с ним работает → отзыв → `401`;
 - команды: `owner` приглашает email → второй пользователь входит и видит sandbox команды; `member` не видит кнопок управления, а прямой вызов server action даёт `forbidden`;
-- оператор: видит sandbox чужой команды, блокирует её → маршрут gateway (фейк или S4) получает `blocked`; владелец получает `sandbox_blocked` на exec, fork, save snapshot, resume, rename и может только читать, остановить, удалить; снять и заново опубликовать заблокированный порт нельзя; не-оператор получает `403` на `/app/operator`, `/admin` и `GET /v1/sandboxes?allTeams=true`; API-ключ оператора не даёт операторских прав;
+- оператор: видит sandbox чужой команды, блокирует её → маршрут gateway (фейк или S4) получает `blocked`; владелец получает `sandbox_blocked` на exec, fork, save snapshot, resume, rename и может только читать, остановить, удалить; снять и заново опубликовать заблокированный порт нельзя; не-оператор получает `403` на `/app/operator`, `/admin` и `GET /v1/sandboxes?allTeams=true`; ни Keycloak JWT оператора, ни командный ключ не дают операторских прав;
 - `ssoPortPolicy` `any` → `team`: старая `sso`-cookie постороннего пользователя перестаёт действовать (эпоха выросла); выключение `public` → `routes.lookup` сразу отдаёт `blocked`;
 - отзыв ключа при открытом стриме и PTY → стрим получает `error unauthorized`, PTY закрывается `4401`;
 - вход: смена email в IdP при том же `sub` обновляет пользователя; чужой `sub` с занятым email → `403`;
+- Keycloak (тестовый realm в контейнере): вход в браузер и `sbx login` дают одного пользователя по `sub`; выключение пользователя в Keycloak → после прохода `ctl-idp-sync` `active: false`, открытый стрим получает `error unauthorized`, PTY закрывается `4401`, SSH-сессия закрыта, `owner`-ы видят уведомление со списком его командных ключей, ключи работают; удаление пользователя → `idp_deleted`; включение обратно → снова активен; ответ Keycloak с пустым списком не деактивирует никого (`sbx_idp_sync_aborted`);
+- командный ключ: создатель вышел из команды → ключ работает, у ключа пометка; `member` не видит кнопок выпуска;
 - environments (вторая очередь): создание `owner`-ом, create с ней, значения в госте (фейковый агент получил наборы), `member` не может изменить, значения секретов нигде в ответах.
 
 **Безопасность:**
@@ -568,22 +584,21 @@ unique (team_id) where is_default and deleted_at is null
 
 | # | Что | Подробно |
 |---|---|---|
-| C1 | Environments: ручки `/v1/environments`, scope `environments:write` (в пресете `full`), поле `environment` в `POST /v1/sandboxes`, поле `environment {id, name, revision}` в ресурсе Sandbox, префикс ID `env_` | §10.2 |
+| C1 | Environments: ручки `/v1/environments`, scopes `environments:read` и `environments:write` (S7 §7.3), поля `environment` и `excludeOwnerSecrets` в `POST /v1/sandboxes`, поля `environment {id, name, revision}` и `excludeOwnerSecrets` в ресурсе Sandbox, префикс ID `env_` | §10.2 |
 | C2 | `PATCH /v1/sandboxes/{sandbox}/env` — merge по ключам (`{env?: {K: v \| null}, secrets?: {K: v \| null}, secretFiles?: {name: file \| null}}`, `null` удаляет), ответ как у `PUT /env`. `PUT /env` остаётся | §9.6 Env |
 | C3 | Операторские ручки, только для сессии оператора (`403 forbidden` для остальных и для любых API-ключей): `GET /v1/sandboxes?allTeams=true[&teamId=]`; `POST /v1/sandboxes/{sandbox}/block {reason: "operator" \| "abuse", note?}` и `/unblock`; `POST /v1/sandboxes/{sandbox}/ports/{port}/block {reason, note?}` и `/unblock`. В ресурсах Sandbox и HostedPort — `blocked`, `blockReason`. Снять блокировку может только оператор. Заметка — в `sandbox_events`. Семантика — ниже | §9.10 |
 | C4 | Proxied listener принимает команду в query `team=team_...` для `GET`/`HEAD` и WebSocket upgrade (браузер не ставит заголовки). Если есть и заголовок, и query, они должны совпадать (`400 validation`) | §9.2 |
-| C5 | `GET /v1/api-keys?all=true` и `DELETE /v1/api-keys/{key}` для чужого ключа той же команды разрешены `owner` команды (а не только оператору) | §9.8 |
-| C6 | `Principal.isOperator = true` только для браузерной сессии; у principal-а по API-ключу — всегда `false`. `ssh/authorize` пускает только участников команды sandbox (правило «или оператор» из S7 §12.1 убирается) | §5.5 |
+| C5 | Командные ключи (S7 §7.2): выпускает и ротирует `owner`-человек, видят все участники, отзывают `owner`, оператор или ключ с `keys:admin`; ключ не зависит от создателя | §9.8 |
+| C6 | `Principal.isOperator = true` только для браузерной сессии; у principal-а по API-ключу и по Keycloak JWT — всегда `false`. `ssh/authorize` пускает только участников команды sandbox (правило «или оператор» из S7 §12.1 убирается) | §5.5 |
 | C7 | `routes.lookup` читает `publicPortsEnabled`, `ssoPortPolicy`, `ssoPolicyEpoch` без кэша; для `sso`-маршрутов `authEpoch = hosted_ports.auth_epoch + ssoPolicyEpoch`, то же значение — в `port_auth_codes` и проверке SSO (S7 §7.7) | §8 |
 | C8 | `resolveSession` у деактивированного пользователя → `403 forbidden` (`details.reason: "user_disabled"`), а не JIT; у `SessionIdentity` есть `defaultTeamId`; `X-Auth-Request-User` (`sub`) обязателен, поиск — §5.3 | §5.3 |
-| C9 | `api` ведёт реестр открытых NDJSON-стримов и PTY WebSocket по `(userId, apiKeyId, teamId)` и по `NOTIFY sbx_identity` закрывает те, чей principal больше не проходит проверку (ключ отозван, участник удалён, пользователь деактивирован): кадр `error` с `code: unauthorized`, `retryable: false` / close `4401` | §11 |
+| C9 | `api` ведёт реестр открытых NDJSON-стримов и PTY WebSocket по `(userId, apiKeyId, teamId)` и по `NOTIFY sbx_identity` закрывает те, чей principal больше не проходит проверку (ключ отозван, участник удалён, пользователь деактивирован): кадр `error` с `code: unauthorized`, `retryable: false` / close `4401`. SSH-сессии в тех же случаях закрывает gateway по `NOTIFY sbx_ssh_revoke` из хуков (§8, S4 §9.5) | §11 |
+| C10 | Keycloak: `api` принимает access token Keycloak (S7 §7.10) и вызывает тот же `resolveSession`; `/v1/meta.oidc`. Правило `owner_inactive` (30 дней без браузерной сессии) отменено: его заменяет синхронизация с Keycloak (§20.1) | §20.1 |
 
 **Семантика блокировки (C3)** [решение S8 по ревью]:
 - **Sandbox заблокирована:** все её маршруты приходят gateway с `blocked: true` и её `blockReason` (S4 §6.1); `ssh/authorize` отказывает. Для всех, кроме оператора, разрешены только чтение (get, list, operations, список команд, вывод команд, чтение и список файлов, `GET /env`, `GET /ports`) и `stop`, `delete`. Остальное — `403 forbidden` с `details.reason: "sandbox_blocked"`: exec и PTY, запись файлов, публикация и смена режима портов, `resume`, `fork`, `recover`, `extend`, save snapshot, `PUT`/`PATCH /env`, `PATCH` (в том числе slug). Так блокировку нельзя обойти через fork, снапшот или переименование.
 - **Порт заблокирован:** gateway получает `blocked: true`. Для всех, кроме оператора, `PUT /ports/{port}`, `rotate-token` и `DELETE /ports/{port}` этого порта — `403 forbidden` (`details.reason: "port_blocked"`): блокировка переживает попытку снять и заново опубликовать порт.
 - Оператор может всё; `unblock` снимает ограничения сразу (триггер `sbx_routes`).
-
-| C10 | Проверка ключа: если `users.lastLoginAt` владельца старше `apiKeyOwnerInactivityDays` (`PlatformDefaults`; `null` выключает) — `401 unauthorized` с `details.reason: "owner_inactive"`; CLI и SDK показывают подсказку войти в дашборд. Ждёт подтверждения Ильи (§20) | §20 |
 
 Исполнитель: изменения C1–C10 вносит исполнитель S8 в `apps/api` (по прецеденту S7 §20.2), согласуя с треком `s7-impl`; если `s7-impl` ещё не слит — передаёт ему как дополнения к замороженному интерфейсу. OpenAPI регенерируется, `oasdiff` не должен находить ломающих изменений (всё — добавления). C6 и семантика блокировки — уточнения поведения, а не формы API.
 
@@ -591,11 +606,12 @@ unique (team_id) where is_default and deleted_at is null
 
 | # | Что |
 |---|---|
-| S1 | Таблица `runtime.environments` и `EnvironmentService` (§10.3); в `sandboxes` — `environment_id`, `environment_revision`; `create` принимает `environment` и сливает наборы до шифрования; ротация ключей данных перешифровывает и `environments` |
+| S1 | Таблица `runtime.environments` и `EnvironmentService` (§10.3); в `sandboxes` — `environment_id`, `environment_revision`, `exclude_owner_secrets`; `create` принимает `environment` и сливает наборы до шифрования; ротация ключей данных перешифровывает и `environments` |
 | S2 | `patchEnv(p, id, patch)` — merge по ключам внутри `core` (расшифровать, слить, зашифровать), с доставкой агенту как у `updateEnv` |
 | S3 | `teamQuota(teamId)` = `teams.quota` с подстановкой `PlatformDefaults.defaultQuota` для пустых полей; несуществующая команда → нули |
 | S4 | Блокировки: столбцы и триггер уже входят в добавление S7 §20.2 п. 3 (`hosted_ports.blocked`, `block_reason`, «блокировка sandbox оператором»); S8 их не дублирует, а уточняет: в `sandboxes` — `blocked bool`, `block_reason text null`, `blocked_at`, `blocked_by uuid null`; триггер `sbx_routes` (S7 O7) срабатывает и на изменение этих полей; `routes.lookup` отдаёт `blocked` = блокировка порта ИЛИ блокировка sandbox ИЛИ `public` при выключенном `publicPortsEnabled`, причина — в этом порядке; проверки семантики блокировки (§17.1) в `SandboxService`; `list` с `allTeams` для операторов. Кто первый реализует (S7 или S8) — по готовности треков, второй использует |
 | S5 | `ConfigReader.defaults()` возвращает и поля S7/S8 `PlatformDefaults` (§7) |
+| S6 | Контроллер `ctl-idp-sync` в `apps/worker` (очередь `exclusive`, раз в 300 s, как контроллеры S6 §15.1); логика — в `@sbx/payload` (§20.1) |
 
 ### 17.3 Миграции runtime
 
@@ -605,11 +621,11 @@ unique (team_id) where is_default and deleted_at is null
 
 ### 17.4 S4
 
-Нет изменений: `blockReason` уже содержит `operator`, `public_disabled`, `abuse` (S4 §6.1); `'*'` в `sbx_routes` шлёт хук S8 (§8).
+`blockReason` уже содержит `operator`, `public_disabled`, `abuse` (S4 §6.1); `'*'` в `sbx_routes` шлёт хук S8 (§8). Новое: вход по SSH-сертификатам и `NOTIFY sbx_ssh_revoke` (S4 §9.2, §9.5).
 
 ### 17.5 S12
 
-oauth2-proxy в upstream-режиме с alpha config (§5.1): заголовки из claims (`X-Auth-Request-User` = `sub`), маршрутизация по путям, `--cookie-refresh` ≤ 5 min, `--cookie-expire` ≤ 12 h, только подтверждённый email; HTTP/2 на ingress; Job миграций Payload до выката; роли Postgres (§12); exec-пробы и NetworkPolicy для `web` только от oauth2-proxy (§5.1, §14.2); группа операторов (`SBX_OPERATOR_GROUPS`) в IdP.
+Keycloak в кластере рядом с control plane, realm `sbx` и клиенты по architecture §10; секрет клиента `sbx-worker` для `worker`. oauth2-proxy в upstream-режиме с alpha config и провайдером `keycloak-oidc` (§5.1): заголовки из claims (`X-Auth-Request-User` = `sub`), маршрутизация по путям, `--cookie-refresh=5m`, `--cookie-expire` ≤ 12 h, только подтверждённый email; HTTP/2 на ingress; Job миграций Payload до выката; роли Postgres (§12); exec-пробы и NetworkPolicy для `web` только от oauth2-proxy (§5.1, §14.2); группа операторов (`SBX_OPERATOR_GROUPS`) в IdP.
 
 ### 17.6 `docs/architecture.md`
 
@@ -619,9 +635,9 @@ oauth2-proxy в upstream-режиме с alpha config (§5.1): заголовк�
 
 | Фаза | Что входит |
 |---|---|
-| **MVP, первая очередь** | `packages/payload` (коллекции, стратегия, JIT, хуки), `PayloadIdentityStore`, `PayloadConfigReader`, миграции и Job; `/admin`; `/app`: список и создание sandbox, страница sandbox (overview, terminal, commands, files, ports, ssh, env, заглушка desktop), снапшоты, API-ключи, SSH-ключи, команды и участники, раздел «Оператор»; изменения S7 C2–C10 и S6 S2–S5; dev-прокси; образ и форма деплоя |
+| **MVP, первая очередь** | `packages/payload` (коллекции, стратегия, JIT, хуки), `PayloadIdentityStore`, `PayloadConfigReader`, миграции и Job; `/admin`; `/app`: список и создание sandbox, страница sandbox (overview, terminal, commands, files, ports, ssh, env, заглушка desktop), снапшоты, API-ключи, SSH-ключи, команды и участники, раздел «Оператор»; изменения S7 C2–C10 и S6 S2–S6; синхронизация с Keycloak (§20.1); dev-прокси; образ и форма деплоя |
 | **MVP, вторая очередь** | Environments: S7 C1, S6 S1, страница `/app/t/<team>/environments`, выбор при create |
-| **Фаза 2** | Синхронизация пользователей и команд с IdP (автоматическая деактивация уволенных, группы → команды); принудительный разрыв SSH-сессий при отзыве; состояние пула и нод в разделе «Оператор»; немедленный отзыв `sso`-сессий пользователя (`authEpoch+1` на его маршрутах); повторное применение environment к живой sandbox; редактор файлов; превью порта в iframe; полный файл вывода команды; рабочий стол (S10); репозитории в environment (S13); аудит действий в `/admin` |
+| **Фаза 2** | Синхронизация команд с группами Keycloak (группы → команды); брокеринг корпоративного IdP в Keycloak; состояние пула и нод в разделе «Оператор»; немедленный отзыв `sso`-сессий пользователя (`authEpoch+1` на его маршрутах); повторное применение environment к живой sandbox; редактор файлов; превью порта в iframe; полный файл вывода команды; рабочий стол (S10); клон репозиториев environment (S13); аудит действий в `/admin` |
 
 ## 19. Оставлено исполнителю
 
@@ -633,12 +649,22 @@ oauth2-proxy в upstream-режиме с alpha config (§5.1): заголовк�
 - Имена команд CLI для environments.
 - Метрики `web` (минимум): запросы по маршруту и статусу, отказы аутентификации по причине, длительность `resolveSession`, ошибки server actions по коду.
 
-## 20. Открытые вопросы
+## 20. Offboarding и открытые вопросы
 
-- **Увольнение и выключение в IdP — текущее решение, ждёт подтверждения Ильи.** В MVP:
-  1. процесс увольнения включает шаг «деактивировать пользователя в `/admin`» (ключи сразу перестают работать, S7 §7.2);
-  2. страховка: API-ключи пользователя перестают работать, если у него не было браузерной сессии через oauth2-proxy дольше `apiKeyOwnerInactivityDays` (30 дней, `platform-defaults`; `lastLoginAt` обновляет `resolveSession`, §5.3). Ответ — `401 unauthorized` с `details.reason: "owner_inactive"`; CLI и SDK показывают «войдите в дашборд, чтобы снова включить ключи» [изменение S7 C10]. Вход в браузер сразу возвращает ключам силу (если их срок не истёк).
+### 20.1 Offboarding: синхронизация с Keycloak [решение Ильи 2026-10-29, вариант A]
 
-  Браузерный доступ выключенного в IdP пользователя пропадает за ~5 min (§5.1). Синхронизация с IdP (SCIM или опрос) — фаза 2.
-- Имя группы операторов в IdP и сам IdP — S12 / Илья (architecture §13).
+- **Браузер.** Выключенный в Keycloak пользователь теряет `/app` и `/admin` при следующем `cookie-refresh` oauth2-proxy (5 min, §5.1).
+- **CLI, SDK, MCP.** Личных долгоживущих ключей у людей нет (S7 §7.6): выключенный пользователь не может обновить токен, доступ кончается в пределах срока access token (5 min).
+- **Командные ключи** принадлежат команде и уходом создателя не выключаются (S7 §7.2); решение об их отзыве принимают `owner`-ы.
+- **Синхронизация.** Контроллер `ctl-idp-sync` в `worker` раз в 300 s (`SBX_IDP_SYNC_INTERVAL`) читает Keycloak Admin REST API клиентом `sbx-worker` (client credentials, service account с ролью `view-users` клиента `realm-management`, architecture §10): `GET /admin/realms/sbx/users?briefRepresentation=true&first=&max=` постранично (библиотека не нужна, хватает `fetch`). Сопоставление — `users.idpSubject` = `id` пользователя Keycloak (= `sub`).
+  - Активный пользователь платформы, у которого в Keycloak `enabled: false`, — деактивируется с `deactivatedReason: idp_disabled`; отсутствующий в полном списке — с `idp_deleted`, но только если `GET /admin/realms/sbx/users/{id}` подтверждает `404` (постраничный обход может пропустить пользователя, если список меняется во время прохода). Заготовки (без `idpSubject`) не трогаются.
+  - Изменения применяются только после полного успешного обхода. Если за один проход выходит деактивировать больше 20% активных пользователей (и больше 5), контроллер ничего не меняет и поднимает метрику тревоги `sbx_idp_sync_aborted`: так ошибка конфигурации или пустой ответ не выключат всех.
+  - Деактивация — тот же путь, что деактивация оператором в `/admin` и удаление участника: `active: false`, `deactivatedAt` через Local API, хуки шлют `NOTIFY sbx_identity` → `api` отклоняет сессии и JWT (`403 user_disabled`), закрывает стримы и PTY (C9), и `NOTIFY sbx_ssh_revoke 'user:<id>'` → gateway закрывает SSH-сессии (§8, S4 §9.5). Членства остаются для аудита и доступа не дают.
+  - Пользователь, снова включённый в Keycloak, активируется при следующем проходе, если его выключила синхронизация (`idp_*`). Деактивацию оператором (`operator`) синхронизация не снимает.
+  - **Уведомление `owner`-ам** каждой команды, где пользователь был участником: запись в коллекции `team-notices` (`team`, `kind: member_deactivated`, `user`, `apiKeys[]` — командные ключи, которые он создал, `createdAt`, `acknowledgedBy`), баннер на странице ключей и команды (§9.8). Писем нет (как в §6.3). Ключи автоматически не отзываются. Если у команды не осталось активного `owner`, уведомление видят операторы (список «команды без активного owner» в `/admin`), они назначают нового `owner` или отзывают ключи.
+- Правило «30 дней без браузерной сессии» (`apiKeyOwnerInactivityDays`, `owner_inactive`) отменено.
+
+### 20.2 Открытые вопросы
+
+- Имя группы операторов в Keycloak — S12 / Илья (architecture §13).
 - Квота по умолчанию для команды (PoC: 3 sandbox, 6144 MB, 10 снапшотов) — пересмотреть после замеров S6 и появления второй ноды.

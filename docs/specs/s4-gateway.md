@@ -1,6 +1,6 @@
 # S4. Gateway: публичные URL портов, SSH, edge
 
-Статус: черновик на согласование, 2026-10-29. Область S4 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §10, §11). Основа: `docs/specs/s2-tunnel-protocol.md` (дальше «S2»).
+Статус: черновик на согласование, 2026-10-29. Дополнено решением Ильи 2026-10-29 (Keycloak, offboarding вариант A): вход по коротким SSH-сертификатам и разрыв сессий при деактивации (§9.2, §9.3, §9.5). Область S4 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §10, §11). Основа: `docs/specs/s2-tunnel-protocol.md` (дальше «S2»).
 
 S2 уже задал в gateway приём туннелей, реестр `machine → gateway`, drain и внутренний listener для `api`/`worker`. Этот документ добавляет всё, что смотрит наружу:
 - HTTP-прокси портов sandbox на `https://<slug>-<port>.sbx.<domain>`;
@@ -442,8 +442,8 @@ sequenceDiagram
 ### 9.1 Схема
 
 ```
-ssh client --(SSH, user key)--> gateway :2222 (x/crypto/ssh server, one host key)
-                                   | api: ssh/authorize(sandbox, public key)
+ssh client --(SSH, user key or short-lived cert from api)--> gateway :2222 (x/crypto/ssh server, one host key)
+                                   | api: ssh/authorize(sandbox, public key | cert identity)
                                    | owner: DialTCP(22) local or CONNECT via owner pod
                                    v
                     VM sshd 127.0.0.1:22 <--(SSH, short-lived user cert from gateway SSH CA)
@@ -458,16 +458,20 @@ Gateway терминирует SSH, потому что только так мо
 - `ssh <sandbox>@ssh.<domain>`, где `<sandbox>` — slug или sandboxId. Синтаксис `<sandbox>+<osuser>` зарезервирован на будущее. Пользователь ОС в VM приходит от `api` (`loginUser`, по умолчанию пользователь шаблона, S5/S9).
 - **Host key gateway** — ed25519 и ecdsa-p256 из Secret, общие для всех подов. Публичные ключи `api` отдаёт клиентам (S7: CLI пишет запись `known_hosts` для `ssh.<domain>` и обходится без TOFU). Fork и resume не меняют host key, который видит клиент.
 - **Аутентификация** только `publickey`. Пароль и keyboard-interactive выключены. `MaxAuthTries` 6, handshake и аутентификация — 20 s.
-- **Проверка ключа.** `PublicKeyCallback` вызывает `api`:
+- **Два вида `publickey`** [решение Ильи 2026-10-29]:
+  - **короткий сертификат** — основной путь CLI и единственный для командных ключей. Его выпускает `api` (S7 §11.3) по Keycloak JWT человека или по командному ключу, подписывая **SSH login CA** (отдельный от SSH user CA §9.3). Gateway проверяет его сам через `ssh.CertChecker`: `CertType = UserCert`, подписант — один из ключей `SBX_GATEWAY_SSH_LOGIN_CA_KEYS` (публичные, текущий и следующий), ровно один principal (ID sandbox `sb_…`; имя пользователя в SSH — slug, поэтому вызывается `CheckCert(cert.ValidPrincipals[0], cert)`, а не `Authenticate` по имени), подпись, `ValidAfter`/`ValidBefore` (допуск 60 s), `KeyId` вида `sbx:user:<id>` или `sbx:key:<id>`. Только затем — `ssh/authorize` с полями сертификата; `api` проверяет, что principal равен ID sandbox, и личность (§9.2 ниже);
+  - **зарегистрированный ключ пользователя** (дашборд, `sbx ssh-keys`) — для людей с обычным `ssh` без CLI.
+- **Проверка.** `PublicKeyCallback` вызывает `api`:
 
 ```
 POST /internal/v1/gateway/ssh/authorize
 { "sandbox": "quiet-otter-lamp", "publicKey": "ssh-ed25519 AAAA...", "fingerprint": "SHA256:..." }
-200 { "allowed": true, "userId", "email", "sandboxId", "machineId", "sandboxState", "loginUser" }
+{ "sandbox": "quiet-otter-lamp", "certificate": { "keyId": "sbx:key:key_...", "serial": "...", "principal": "sb_...", "validBefore": "..." } }
+200 { "allowed": true, "actor": { "kind": "user", "userId", "email" } | { "kind": "team_key", "apiKeyId" }, "userId", "email", "sandboxId", "machineId", "sandboxState", "loginUser" }
 200 { "allowed": false }
 ```
 
-Кто может входить в sandbox, решает `api`. Рекомендация S4: то же право, что на exec через API (владелец и его команда, S6/S8). Ключи пользователи регистрируют в дашборде или через CLI (S7/S8). Результат кэшируется на соединение. Идентичность берётся только из `ssh.Permissions`, возвращённых callback-ом для ключа, который прошёл проверку подписи, а не из «последнего ключа, переданного в callback» (урок CVE-2024-45337). Нужен актуальный `golang.org/x/crypto`.
+Кто может входить в sandbox, решает `api` (S7 §12.1): человек — активный участник команды sandbox; командный ключ — не отозван, не истёк, из команды sandbox, со scope `ssh:connect`. Проверка идёт на каждом подключении, поэтому деактивация и отзыв действуют сразу, а не по истечении сертификата (10 min). Ключи пользователи регистрируют в дашборде или через CLI (S7/S8). Результат кэшируется на соединение. Идентичность берётся только из `ssh.Permissions`, возвращённых callback-ом для ключа, который прошёл проверку подписи, а не из «последнего ключа, переданного в callback» (урок CVE-2024-45337). Нужен актуальный `golang.org/x/crypto`.
 
 ### 9.3 Соединение с VM
 
@@ -475,7 +479,7 @@ POST /internal/v1/gateway/ssh/authorize
 - Ключ: эфемерный ed25519 на каждую сессию и сертификат пользователя от **SSH user CA** gateway:
   - `ValidPrincipals: [loginUser]`;
   - `ValidAfter` = сейчас − 60 s, `ValidBefore` = сейчас + 5 min (sshd проверяет сертификат только при входе, сессия живёт дольше);
-  - `KeyId: sbx:<userId>:<sessionId>`, чтобы журнал sshd в VM показывал, кто вошёл;
+  - `KeyId: sbx:user:<userId>:<sessionId>` или `sbx:key:<apiKeyId>:<sessionId>` (из `actor` ответа `ssh/authorize`), чтобы журнал sshd в VM показывал, кто вошёл — та же личность, что во входящем сертификате или ключе;
   - расширения `permit-pty`, `permit-port-forwarding`, `permit-agent-forwarding`, `permit-X11-forwarding`, `permit-user-rc`.
 - Закрытый ключ CA лежит в Secret. Публичный ключ CA (текущий и следующий, для ротации) S5 запекает в шаблон, а S3 обновляет при claim.
 - Host key sshd в VM gateway не проверяет **[исполнитель]**. Поток идёт через туннель, аутентифицированный как именно эта machine (S2 §5), а host key VM меняется при fork. Отпечаток пишется в лог.
@@ -507,6 +511,13 @@ Gateway — прозрачный посредник на уровне SSH-кан
 Реализация — на `golang.org/x/crypto/ssh` **[исполнитель]**. Альтернатива для сравнения перед реализацией — `tg123/sshpiper` (MIT, v1.6.1): он проксирует на уровне пакетов после аутентификации, но на своём форке `crypto/ssh`. Решает исполнитель, критерий — тесты §15.4.
 
 Keepalive: gateway шлёт `keepalive@openssh.com` клиенту и backend раз в 30 s, соединение мёртво после 3 пропусков. Простой сессии сам по себе соединение не закрывает.
+
+### 9.5 Разрыв сессий при отзыве доступа
+
+Деактивация пользователя (оператором или синхронизацией с Keycloak, S8 §20.1), удаление участника из команды и отзыв командного ключа закрывают уже открытые SSH-сессии сразу [решение Ильи 2026-10-29]:
+- `NOTIFY sbx_ssh_revoke` шлют хуки Payload в `@sbx/payload` в той же транзакции, что и изменение (S8 §8), поэтому неважно, кто его сделал — `web` (оператор, server action), `api` или `worker` (синхронизация): `users` стал неактивным → `user:<userId>`; удалено членство (`afterDelete`, запись ещё есть) → `member:<teamId>:<userId>`; ключу поставлен `revokedAt` → `key:<apiKeyId>`; удалена команда → `team:<teamId>` (публичный формат ID). Это тот же повод, по которому `api` закрывает стримы и PTY (S8 C9).
+- Каждый под gateway держит `LISTEN sbx_ssh_revoke` (то же соединение pgx, что `sbx_routes`) и индекс открытых сессий по `actor` и команде sandbox. Подходящим сессиям он пишет в stderr каналов `session` сообщение (`sbx: access revoked`) и закрывает соединение.
+- Если `LISTEN` оборвался, при переподключении gateway заново проверяет все открытые сессии через `ssh/authorize` и закрывает отклонённые.
 
 ## 10. Деплой и drain
 
@@ -620,7 +631,7 @@ JSON, одна строка на запрос в stdout:
 
 Долгие потоки пишут строку при закрытии.
 
-SSH-лог: `sessionId`, `clientIp`, `userId`, `fingerprint`, `sandboxId`, начало, конец, байты, типы открытых каналов и причина закрытия. Содержимое сессий не пишется.
+SSH-лог: `sessionId`, `clientIp`, `actor` (`userId` или `apiKeyId`), `fingerprint` или serial сертификата, `sandboxId`, начало, конец, байты, типы открытых каналов и причина закрытия. Содержимое сессий не пишется.
 
 ### 12.3 Health
 
@@ -715,7 +726,8 @@ SSH-лог: `sessionId`, `clientIp`, `userId`, `fingerprint`, `sandboxId`, на�
 Через gateway на стенде с реальной VM:
 - `ssh`, `ssh -t … tmux`, `scp`, `sftp`, `rsync`, `ssh -L`, `ssh -R`, `ssh -A` (агент виден в VM);
 - VS Code Remote-SSH подключается и ставит свой сервер;
-- в журнале sshd в VM — `KeyId` с userId;
+- в журнале sshd в VM — `KeyId` с `sbx:user:<id>` или `sbx:key:<id>`;
+- вход по сертификату от `api` (человек и командный ключ); сертификат чужого CA, истёкший, с principal другой sandbox → отказ; деактивация пользователя и отзыв ключа закрывают открытую сессию за секунды (§9.5);
 - неверный ключ → отказ; остановленный sandbox → понятное сообщение в stderr;
 - после fork запись `known_hosts` для `ssh.<domain>` действует;
 - `hostkeys-00@openssh.com` от sshd VM до клиента не доходит; в выводе `ssh -v` нет ошибок `hostkeys`;
@@ -770,7 +782,7 @@ SSH-лог: `sessionId`, `clientIp`, `userId`, `fingerprint`, `sandboxId`, на�
 | `SBX_GATEWAY_AUTH_URL` | authorize endpoint (§8.4) |
 | `SBX_GATEWAY_COOKIE_KEYS_FILE`, `SBX_GATEWAY_COOKIE_CROSS_SITE` | §8.2 |
 | `SBX_GATEWAY_STRIP_COOKIE_PREFIXES` | §7.4 |
-| `SBX_GATEWAY_SSH_HOST_KEY_FILES`, `SBX_GATEWAY_SSH_USER_CA_KEY_FILE` | §9 |
+| `SBX_GATEWAY_SSH_HOST_KEY_FILES`, `SBX_GATEWAY_SSH_USER_CA_KEY_FILE`, `SBX_GATEWAY_SSH_LOGIN_CA_KEYS` (публичные ключи SSH login CA) | §9 |
 | `SBX_GATEWAY_RESERVED_PORTS`, `SBX_GATEWAY_RESERVED_SUFFIXES` | §4.2 |
 | `SBX_GATEWAY_RATELIMIT_*`, `SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS` | §11 |
 | `SBX_GATEWAY_HTTP_DRAIN_DEADLINE` (2m), `SBX_GATEWAY_SSH_DRAIN_DEADLINE` (15m) | §10 |
@@ -806,20 +818,21 @@ SSH-лог: `sessionId`, `clientIp`, `userId`, `fingerprint`, `sandboxId`, на�
   - HostedPort: `port`, `access`, токен (хеш), `authEpoch`, `hostRewrite`, `appProtocol`, `blocked`;
   - валидация slug и портов (§4.2), rename;
   - лимит 50 портов на sandbox;
-  - эндпоинты §6.1, §8.4 (`authorize`, `exchange`), §9.2;
+  - эндпоинты §6.1, §8.4 (`authorize`, `exchange`), §9.2 (включая вход по сертификату), выпуск SSH-сертификатов (S7 §11.3);
   - отдача host keys SSH;
   - документация пользователей (§7.5).
 - **S8:**
   - регистрация SSH-ключей;
   - выключатели оператора (блокировка, `public`);
   - cookie платформы по §14.1;
-  - отзыв доступа пользователя через `authEpoch`.
+  - отзыв доступа пользователя через `authEpoch`;
+  - деактивация пользователей по Keycloak (S8 §20.1); `NOTIFY sbx_ssh_revoke` из хуков Payload при деактивации, удалении участника, отзыве ключа и удалении команды (§9.5).
 - **S10:** суффикс `-desktop`, TURN (§13).
 - **S12:**
   - Service `gateway-edge` (L4, PROXY protocol v2, 443 и 22);
   - DNS (§4.1);
   - cert-manager (DNS-01 wildcard, tunnel CA);
-  - Secrets: ключи cookie, SSH host keys, SSH user CA, service tokens;
+  - Secrets: ключи cookie, SSH host keys, SSH user CA, публичные ключи SSH login CA, service tokens;
   - `terminationGracePeriodSeconds: 960`;
   - IPSet `sbx-gateway` = IP `gateway-edge` (только TCP 443);
   - egress-адреса нод Proxmox в `SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS`;
