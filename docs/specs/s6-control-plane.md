@@ -588,6 +588,8 @@ API: состояние `stopped` или `error` с machine в `stopped` (§6.1)
 
 Ошибки: провал или вытеснение операции на источнике → обработчик цели (по `parent_operation_id`, §7.1) переводит её операцию в `failed`, цель → `error` (`fork_failed`). Источник сам цель не трогает: каждая sandbox меняется только своей операцией.
 
+Нода источника должна быть `active` (и её провайдер тоже): на ноде, выведенной из размещения (`cordoned`, провайдер `draining`), новые machine не создаются (§8.4), fork тоже; ошибка — `out_of_capacity` с `details.reason = node_not_active` (хранилище выше порогов — `storage_over_threshold`).
+
 Fork наследует от источника: диск, env и секреты (с наложением значений из запроса), `template_slug`, `size` (если не передан), `labels` (если не переданы), `exclude_owner_secrets` (S8 §10.1). Environment заново не применяется (S8 §10.1). Не наследует: TTL (берётся из запроса или из дефолта), hosted ports, историю команд.
 
 ### 7.8 Saved snapshot, recover, reprovision, update
@@ -870,6 +872,7 @@ S5 пишет `template_builds` (через `sbx-admin template register|promote
 
 - Задание операции — только триггер; источник правды — строка `operations`. Повторная доставка безопасна (§7.1).
 - **Fencing.** Singleton и heartbeat pg-boss не защищают от зависшего пода, который потерял связь с БД, но ещё ходит в Proxmox: задание вернётся, и исполнителей станет два. Поэтому каждый обработчик при старте увеличивает счётчик (`operations.attempt`, `machines.exec_attempt` для `machine-op`) и пишет каждый шаг условно по своему значению (§7.1). Старый исполнитель на первой же записи получает ноль строк и выходит. Его вызов Proxmox в полёте безвреден: шаги идемпотентны, аллокатор выдаёт одной machine один lease (§5.3), а частичная подготовка выбрасывается при повторе (§7.4).
+- **Блокировка питания ноды** (2026-10-30). Proxmox start, stop, запрос shutdown, delete и откат create/fork в S1 (`MachinesOptions.powerLock`) на одной ноде идут по одному: сначала очередь в процессе (не больше одного ожидающего клиента пула на ноду), затем `pg_advisory_lock` по ключу `power:<nodeId>` на отдельном соединении. Причина — гонка записи `ethers` и IPAM при параллельных start/delete (S1 §12). Блокировка никогда не берётся внутри транзакции БД. Под ней, после ожидания и прямо перед вызовом Proxmox, идут проверка владельца S1 (§16) и колбэк вызывающего: у start — повторная проверка fence (исполнитель, вытесненный за время ожидания, VM не запускает), у reconcile (§11.2, расхождение питания) — повторная проверка, что machine не изменилась. Ожидание завершения shutdown гостем идёт уже вне блокировки. Клоны (create, fork) под неё не попадают и идут параллельно в пределах слотов (§8.3).
 - Задание в dead letter означает исчерпанные повторы: операция → `failed` с `error_code = retries_exhausted` и компенсацией, метрика тревоги. Для delete dead letter не используется: `retryLimit` без предела, alert по `sbx_delete_stuck`.
 - **Контроллеры.** Каждый контроллер — очередь `exclusive` (не больше одного ждущего или активного задания во всём кластере). Задание в конце ставит себя снова с `startAfter` (10 s пул и health, 15 s autostop, 60 s reconcile, 10 min cleanup). Страховка — cron pg-boss раз в минуту на каждую очередь (`exclusive` отбрасывает дубль). Выбор лидера не нужен.
 - **Heartbeat.** Долгие шаги (ожидание загрузки, shutdown) идут в заданиях с `heartbeatSeconds 30`. Если под умер, задание вернётся через ~30 s, и шаги продолжатся с последнего записанного.
@@ -880,7 +883,7 @@ S5 пишет `template_builds` (через `sbx-admin template register|promote
 - `localConcurrency` на под: `sandbox-op` 16, `machine-op` 8, `snapshot-op` 4, `machine-events` 8, контроллеры 1. Общая нагрузка на Proxmox ограничена слотами клонирования (§8.3), а не числом подов.
 - SIGTERM: `boss.stop({ graceful: true, timeout: 60_000 })`, `terminationGracePeriodSeconds: 90`. Незавершённые задания вернутся по heartbeat; шаги идемпотентны.
 - Readiness: pg-boss запущен и Postgres отвечает. Liveness: цикл событий не завис.
-- Пул соединений: `pg` Pool на под, 20 соединений (pg-boss и Drizzle делят один пул через адаптер) [решение S6].
+- Пул соединений: `pg` Pool на под, 20 соединений (pg-boss и Drizzle делят один пул через адаптер) [решение S6]. Блокировка питания (§15.1) держит по одному соединению на ноду и ещё одно берёт под ней (проверки владельца и fence), поэтому размер пула (`SBX_DB_POOL_MAX`) должен заметно превышать число нод.
 
 ### 15.3 `sbx-admin`
 
@@ -904,6 +907,10 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
   - `lv.list` по тегам наружу (для reconcile);
   - QGA `exec` через PVE API (перезапуск агента, §11.1);
   - фабрика клиентов на (провайдер, нода) вместо глобальной конфигурации из env (§8.4); env S1 остаётся для `apps/bench`.
+  - проверка владельца у `start`/`stop`/`shutdown`/`delete` (2026-10-30): необязательный `expectedOwner` (`machineId`; у `delete` ещё `null` — VM-сирота без lease). Прямо перед действием S1 читает lease VMID (`checkLeaseOwner`) и при чужом или пропавшем lease бросает `OwnerMismatchError` (постоянная, код `owner_mismatch`), не трогая Proxmox; delete, у которого нет ни lease владельца, ни VM, ничего не делает;
+  - `Allocator.reserveForDelete(vmid)`: delete VMID без lease сначала занимает его lease-ом `releasing` без владельца, чтобы create не выдал этот VMID до конца delete; финальное освобождение снимает только строку `releasing` своего владельца (`null` для резерва), чужой lease не трогает;
+  - `MachinesOptions.powerLock`: обёртка, под которой S1 выполняет откат create/fork (delete), — та же блокировка питания ноды, что у worker (§15.1);
+  - `allocate(ownerId)` в гонке двух вызовов одного владельца возвращает уже вставленный lease этого владельца (`reused`), а не перебирает диапазон.
 - **S2.** Таблицы `tunnel.*`, `POST /v1/machines/{id}/rotate-token` на внутреннем listener-е gateway, синтетические события, `agent-client` с повторами и ожиданием до 30 s.
 - **S3.** RPC (имена — S3):
   - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secrets, secretFiles, authorizedKeys}` — идемпотентен по `requestId`, отвечает после применения (или стримит фазы, итог `ready`); после загрузки (resume, recover, reprovision) наборы доставляются `System/UpdateEnv` и `System/UpdateSecrets` (S3 §8.1; шаг `provision`, §7.6);

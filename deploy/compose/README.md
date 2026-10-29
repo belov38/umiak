@@ -63,13 +63,14 @@ docker compose -f deploy/compose/compose.yaml down -v     # чистый ста�
   Worker перечитывает конфиг. Если менялись топология или сборки шаблонов (их в базу загружает `bootstrap`), пересоздать и `migrate`: `... up -d --force-recreate migrate worker` (bootstrap идемпотентен). То же для правок `deploy/compose/.env` и файлов секретов.
 - `deploy/compose/.env` (git-ignored) переопределяет: `SBX_NODE_SSH_HOST` (по умолчанию `100.64.10.2`), `SBX_PVE_TOKEN_ID`, `SBX_PVE_SECRETS_DIR`, `SBX_RECONCILE_DRY_RUN`. URL API и TLS-имя PVE берутся из `topology.providers` в `config/sbx.yaml` (`apiUrl`, `tlsName`).
 - Учётные данные Postgres `sbx/sbx/sbx` — только для разработки; порт опубликован на `127.0.0.1:5432`.
+- `SBX_DB_POOL_MAX` (по умолчанию 30) — размер пула соединений worker. Блокировка питания (`power:<nodeId>`, S6 §15.1) держит по одному соединению на ноду в каждом процессе и под ней берёт ещё одно, плюс соединения pg-boss и операций. Значение должно с запасом превышать число нод.
 
 ## Что worker делает сам, а чего нет
 
 - Reconcile работает в dry-run (`SBX_RECONCILE_DRY_RUN=1`): читает список VM на `pve` (только чтение) и логирует, что сделал бы.
 - Целевые размеры пулов в `sbx.yaml` равны 0 (`pools: []`, решение 17), поэтому worker сам не создаёт VM на `pve`.
 - Пока нет агента (S3) и gateway (S2), создание sandbox не может дойти до `ready`: агентский порт недоступен, а без `SBX_GATEWAY_SERVICE_TOKEN_FILE` ротация токена падает по таймауту. Worker при этом предупреждает об этом в логе при старте.
-- Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой (`migrate --tunnel-fixture`, флага больше нет), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
+- Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой схемы `tunnel` (до этой миграции), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
 - С `SBX_GATEWAY_SERVICE_TOKEN_FILE` worker находит gateway, который держит туннель machine, через `PgRegistry` из `@sbx/agent-client` (своё небольшое подключение к Postgres и LISTEN `tunnel_sessions`) и вызывает на нём `rotate-token`.
 
 ## Smoke-тест реального адаптера Proxmox
