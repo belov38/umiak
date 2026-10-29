@@ -163,7 +163,9 @@ export class AgentClient {
 	 * 421, 503 with Sbx-Error-Code: agent_unavailable and network errors before a
 	 * response are retried when the body is absent, resendable or a factory. A
 	 * ReadableStream body is sent once: after a 421/503 that Response is
-	 * returned. Every other status is returned as is with a streamed body.
+	 * returned. Every other status is returned as is with a streamed body;
+	 * redirects are never followed (init.redirect is ignored), a 3xx is
+	 * returned as the Response.
 	 */
 	fetch(
 		machineId: string,

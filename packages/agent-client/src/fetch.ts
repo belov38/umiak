@@ -14,6 +14,11 @@ export interface AgentFetchInit extends Omit<RequestInit, "body"> {
 	 * once and never retried after it started.
 	 */
 	body?: BodyInit | null | (() => BodyInit);
+	/**
+	 * Ignored: redirects are never followed (always "manual"). A 3xx from
+	 * the agent is returned as the Response.
+	 */
+	redirect?: RequestRedirect;
 }
 
 type FetchRouting = Omit<CallRoutingOptions, "signal" | "abortError">;
@@ -50,6 +55,9 @@ export async function routedFetch(
 			const req: RequestInit & { duplex?: "half" } = {
 				...rest,
 				headers: h,
+				// Never follow: a redirect comes from the agent and would carry
+				// the request (and the service token) to a URL it chose.
+				redirect: "manual",
 			};
 			if (b != null) {
 				req.body = b;

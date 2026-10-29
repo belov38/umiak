@@ -141,6 +141,39 @@ describe("AgentClient.fetch", () => {
 		});
 	}
 
+	for (const method of ["GET", "PUT"]) {
+		it(`returns an agent redirect (${method}) without following it`, async () => {
+			const trap = await startTrap();
+			try {
+				registry.set(route(m, a.url));
+				const other = randomUUID();
+				for (const [status, location] of [
+					[307, `/v1/machines/${other}/files?path=/secret`],
+					[302, `${trap.url}/steal`],
+					[308, `${b.url}/v1/machines/${other}/files?path=/secret`],
+				] as const) {
+					a.script.push({ answer: { kind: "redirect", status, location } });
+					const before = a.requests.length;
+					const res = await agent().fetch(m, "/uploads/u9?offset=0", {
+						method,
+						body: method === "PUT" ? "payload" : undefined,
+						// A caller's "follow" does not apply.
+						redirect: "follow",
+					});
+					expect(res.status).toBe(status);
+					expect(res.headers.get("location")).toBe(location);
+					await res.body?.cancel();
+					expect(a.requests.length - before).toBe(1);
+				}
+				expect(trap.connections).toBe(0);
+				expect(b.requests).toHaveLength(0);
+				expect(a.requests.some((r) => r.url.includes(other))).toBe(false);
+			} finally {
+				await trap.close();
+			}
+		});
+	}
+
 	it("waits for a registry change after 503 agent_unavailable", async () => {
 		registry.set(route(m, a.url));
 		a.script.push({

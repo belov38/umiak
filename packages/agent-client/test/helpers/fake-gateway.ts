@@ -52,7 +52,9 @@ export type ScriptedAnswer =
 	/** 200 Connect stream, half an envelope, then RST_STREAM INTERNAL_ERROR. */
 	| { kind: "reset-mid-envelope" }
 	/** A plain status without the gateway's Sbx-Error-Code (an agent answer). */
-	| { kind: "plain"; status: number };
+	| { kind: "plain"; status: number }
+	/** A redirect (an agent answer passed through) to location. */
+	| { kind: "redirect"; status: number; location: string };
 
 export interface Scripted {
 	answer: ScriptedAnswer;
@@ -163,6 +165,14 @@ function writeScripted(
 			"sbx-error-code": "agent_unavailable",
 		});
 		res.end(body);
+		return;
+	}
+	if (answer.kind === "redirect") {
+		res.writeHead(answer.status, {
+			"content-type": "text/plain",
+			location: answer.location,
+		});
+		res.end("moved elsewhere");
 		return;
 	}
 	if (answer.kind === "plain") {
