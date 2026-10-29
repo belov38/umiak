@@ -188,7 +188,7 @@ IPSet `sbx-gateway` — место для будущего адреса ingress 
 | `pool.usage` | data% и metadata% thin pool, размер и занятость наших LV | только чтение |
 | `dhcp.leases` | содержимое lease-файла dnsmasq зоны `sbx` | только чтение |
 | `dhcp.release` | освободить lease по MAC (если понадобится, §6.3) | только MAC из диапазона нашего аллокатора |
-| `inventory` | наличие заданной строки в journal и task log (только да/нет), `qm list`, `pct list`, все LV без тега `sbx` (имя, размер, атрибуты), хеши `/etc/pve/sdn/*`, `cluster.fw`, `host.fw`, `/etc/network/interfaces*`, значения sysctl forwarding, link-local адрес хоста на `sbx0` | только чтение |
+| `inventory` | наличие заданной строки в journal и task log (только да/нет; сама строка не логируется), `qm list`, `pct list`, все LV без тега `sbx` (имя, размер, атрибуты), хеши `/etc/pve/sdn/*`, `cluster.fw`, `host.fw`, `/etc/network/interfaces*`, значения sysctl forwarding, link-local адрес хоста на `sbx0` | только чтение |
 
 - Тесты: unit-тесты на разбор запросов, белый список и защиту по тегам и именам (LVM за интерфейсом, в тестах фейк). Проверка `golangci-lint`.
 - Позже тот же код становится демоном с тем же набором операций (S12). LVM сам блокирует метаданные VG, поэтому параллельные вызовы `sbx-node` и операции Proxmox на том же VG безопасны; имена у нас уникальны благодаря аллокатору.
