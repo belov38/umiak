@@ -26,6 +26,9 @@ const (
 	rotateTimeout = 30 * time.Second
 	// unavailableRetryAfter is the Retry-After of 503 agent_unavailable.
 	unavailableRetryAfter = "1"
+	// selfOwnerWait bounds how long a call waits for a local session the
+	// registry already assigns to this instance (spec 7, make-before-break).
+	selfOwnerWait = 2 * time.Second
 )
 
 // NewInternalServer returns the http.Server for the internal listener: HTTP/1
@@ -144,22 +147,35 @@ const (
 )
 
 // target returns the local session that serves calls for a machine. When
-// there is none it answers 421 or 503 itself and returns nil.
+// there is none it answers 421 or 503 itself and returns nil. When the
+// registry already names this instance (make-before-break: admitted, not
+// registered locally yet) it waits up to selfOwnerWait for the session.
 func (h *internalHandler) target(w http.ResponseWriter, r *http.Request, id string, f errFormat) *session {
 	if s, st := h.g.lookup(id); s != nil && st.serving() {
 		return s
 	}
-	h.notServed(w, r, id, f)
+	u, self := h.owner(r.Context(), id)
+	if self {
+		if s := h.g.waitLocal(r.Context(), id, selfOwnerWait); s != nil {
+			return s
+		}
+		u, _ = h.owner(r.Context(), id)
+	}
+	h.writeNotServed(w, f, u)
 	return nil
 }
 
 // notServed answers a call this instance cannot serve: 421 with the owner's
 // URL when another live instance holds the machine, 503 otherwise (no owner,
-// the owner is this instance but the session is not local yet or no longer
+// the owner is this instance but the session is not local or no longer
 // serves, or the registry failed).
 func (h *internalHandler) notServed(w http.ResponseWriter, r *http.Request, id string, f errFormat) {
-	if u := h.otherOwner(r.Context(), id); u != "" {
-		h.writeUnavailable(w, f, http.StatusMisdirectedRequest, wire.CodeMachineMoved, u)
+	h.writeNotServed(w, f, h.otherOwner(r.Context(), id))
+}
+
+func (h *internalHandler) writeNotServed(w http.ResponseWriter, f errFormat, ownerURL string) {
+	if ownerURL != "" {
+		h.writeUnavailable(w, f, http.StatusMisdirectedRequest, wire.CodeMachineMoved, ownerURL)
 		return
 	}
 	h.writeUnavailable(w, f, http.StatusServiceUnavailable, wire.CodeAgentUnavailable, "")
@@ -168,6 +184,16 @@ func (h *internalHandler) notServed(w http.ResponseWriter, r *http.Request, id s
 // otherOwner returns the internal URL of the live instance other than this
 // one that owns the machine, or "".
 func (h *internalHandler) otherOwner(ctx context.Context, id string) string {
+	u, _ := h.owner(ctx, id)
+	return u
+}
+
+// owner looks the machine's owner up in the registry. It returns the
+// owner's internal URL when another live instance holds it, and self when
+// the owner is this instance. An owner row with this instance's URL but
+// another id (an earlier instance on the same pod IP) counts as no owner:
+// a 421 would send the caller back here.
+func (h *internalHandler) owner(ctx context.Context, id string) (url string, self bool) {
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	o, ok, err := h.g.store.Owner(ctx, id, h.g.cfg.Timing.StaleAfter)
@@ -175,12 +201,22 @@ func (h *internalHandler) otherOwner(ctx context.Context, id string) string {
 		if ctx.Err() == nil {
 			h.g.log.Warn("gateway: owner lookup failed", "machine_id", id, "err", err)
 		}
-		return ""
+		return "", false
 	}
-	if !ok || o.InstanceID == h.g.cfg.InstanceID {
-		return ""
+	switch {
+	case !ok:
+		return "", false
+	case o.InstanceID == h.g.cfg.InstanceID:
+		return "", true
+	case sameURL(o.InternalURL, h.g.cfg.InternalURL):
+		return "", false
 	}
-	return o.InternalURL
+	return o.InternalURL, false
+}
+
+// sameURL compares two internal URLs ignoring a trailing slash.
+func sameURL(a, b string) bool {
+	return strings.TrimSuffix(a, "/") == strings.TrimSuffix(b, "/")
 }
 
 // unavailableError is the Connect error of 421/503 answers and aborted

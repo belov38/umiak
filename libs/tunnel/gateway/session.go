@@ -147,6 +147,8 @@ func (s *session) start() {
 	default:
 		old = cur
 		g.sessions[s.machineID] = s
+		close(g.sessUp)
+		g.sessUp = make(chan struct{})
 	}
 	g.mu.Unlock()
 	if old != nil {

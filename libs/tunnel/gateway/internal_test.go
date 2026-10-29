@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	xhttp2 "golang.org/x/net/http2"
 
+	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
 	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
@@ -775,5 +776,82 @@ func TestTCPDrainDeadlineClamped(t *testing.T) {
 	echo(t, local, "hello")
 	if d := s.longestTCPDeadline(); d != 5*time.Minute {
 		t.Fatalf("drain deadline from TCPOptions = %s, want the 5m cap", d)
+	}
+}
+
+// ownerRow records a connected session of machine id owned by instanceID
+// without a tunnel behind it.
+func ownerRow(t *testing.T, e *env, id string, bs []byte, instanceID string) {
+	t.Helper()
+	_, err := e.store.Admit(context.Background(), registry.AdmitParams{
+		MachineID: id, InstanceID: instanceID, ConnID: "conn-" + uuid.NewString(),
+		AgentInstanceID: "agent-x", BootID: "boot", Vmgenid: "vmgen", AgentVersion: "1.0.0", ProtoVersion: "1",
+		Scheme: transport.AuthBootstrap, SecretHash: wire.HashSecret(bs),
+	})
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+}
+
+// A gateway restarted on the same pod IP must not send callers to itself:
+// the old instance's row (fresh heartbeat, same URL) counts as no owner.
+func TestOwnerWithOwnURLIsUnavailable(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-new", nil)
+	if err := e.store.RegisterInstance(context.Background(), "gw-old", gw.url+"/"); err != nil {
+		t.Fatal(err)
+	}
+	id, bs := e.machine()
+	ownerRow(t, e, id, bs, "gw-old")
+
+	start := time.Now()
+	_, err := setLabel(context.Background(), t, gw, id, apiToken1)
+	checkUnavailable(t, err, wire.CodeAgentUnavailable, "")
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("answered after %s, want at once", d)
+	}
+	c := peerClient(t, apiToken1)
+	resp, body := do(t, c, http.MethodGet, gw.machineURL(id)+"/files?path=x", "", nil)
+	checkRaw(t, resp, body, http.StatusServiceUnavailable, wire.CodeAgentUnavailable, "")
+}
+
+// Make-before-break: the registry already names this instance, but the
+// session is not local yet. The call waits for it instead of failing.
+func TestSelfOwnerWaitsForLocalSession(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	ctx := context.Background()
+
+	// No session appears: 503 after the wait.
+	idGone, bsGone := e.machine()
+	ownerRow(t, e, idGone, bsGone, "gw-a")
+	start := time.Now()
+	_, err := setLabel(ctx, t, gw, idGone, apiToken1)
+	checkUnavailable(t, err, wire.CodeAgentUnavailable, "")
+	if d := time.Since(start); d < selfOwnerWait-100*time.Millisecond || d > selfOwnerWait+time.Second {
+		t.Fatalf("503 after %s, want about %s", d, selfOwnerWait)
+	}
+
+	// The session appears during the wait: the call is served.
+	id, bs := e.machine()
+	ownerRow(t, e, id, bs, "gw-a")
+	type result struct {
+		err error
+		d   time.Duration
+	}
+	res := make(chan result, 1)
+	start = time.Now()
+	go func() {
+		_, err := setLabel(ctx, t, gw, id, apiToken1)
+		res <- result{err, time.Since(start)}
+	}()
+	time.Sleep(200 * time.Millisecond)
+	e.startStubAgent(id, bs, newStubAgent(), nil)
+	r := <-res
+	if r.err != nil {
+		t.Fatalf("SetLabel while the session comes up: %v", r.err)
+	}
+	if r.d >= selfOwnerWait {
+		t.Fatalf("served after %s, want before the %s wait ended", r.d, selfOwnerWait)
 	}
 }

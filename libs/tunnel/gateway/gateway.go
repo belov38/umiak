@@ -178,6 +178,7 @@ type Gateway struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session // by machine id, every state but closed
+	sessUp   chan struct{}       // closed and replaced whenever a session registers
 	closing  bool                // no new sessions: Run is shutting down or the gateway was abandoned
 	sessWG   sync.WaitGroup      // session goroutines, Add only under mu while !closing
 	evWG     sync.WaitGroup      // connection event deliveries, see goEvents
@@ -223,6 +224,7 @@ func New(cfg Config) (*Gateway, error) {
 		fenceQ:    newMachineQueue(),
 		instQ:     newIDQueue(),
 		sessions:  map[string]*session{},
+		sessUp:    make(chan struct{}),
 	}
 	if g.sink == nil {
 		g.sink = logSink{log: g.log}
@@ -284,6 +286,28 @@ func (g *Gateway) lookup(machineID string) (*session, sessionState) {
 		return nil, stateClosed
 	}
 	return s, st
+}
+
+// waitLocal waits up to d for a serving local session of the machine and
+// returns it, or nil.
+func (g *Gateway) waitLocal(ctx context.Context, machineID string, d time.Duration) *session {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	for {
+		g.mu.Lock()
+		up := g.sessUp
+		g.mu.Unlock()
+		if s, st := g.lookup(machineID); s != nil && st.serving() {
+			return s
+		}
+		select {
+		case <-up:
+		case <-t.C:
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
 // snapshotSessions returns the registered sessions.
