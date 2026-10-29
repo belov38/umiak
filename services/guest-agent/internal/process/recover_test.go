@@ -206,3 +206,51 @@ func TestRecoverRestoresPTYIdle(t *testing.T) {
 		t.Fatalf("kill %+v", k)
 	}
 }
+
+// An agent killed between the STARTING record and the launch leaves a record
+// without shim.json and without a unit. Recover in the same boot must leave
+// it STARTING, so the caller's retry launches it (spec 9.2 step 5), exactly
+// once, and it does not count toward max_running_commands meanwhile. Found
+// on the pve stand: the retry got an EXITED LOST/SHIM_LOST command that
+// never ran.
+func TestRecoverKeepsUnlaunchedStarting(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.Config.MaxRunningCommands = 1 })
+	spec := argvSpec("/bin/sleep", "1")
+	putStarting(t, h, "c1", spec)
+	h.restart("boot-1")
+
+	info, err := h.get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.GetState() != agentv1.CommandState_COMMAND_STATE_STARTING {
+		t.Fatalf("after Recover: state %v exit %v, want STARTING", info.GetState(), info.GetExit())
+	}
+	if got := h.rec.Of(events.TypeCommandExited); len(got) != 0 {
+		t.Fatalf("command.exited events = %d, want 0", len(got))
+	}
+	// The unlaunched record holds no slot.
+	h.start("c2", argvSpec("/bin/sleep", "100"))
+	if err := h.run("c2").Exit(0); err != nil {
+		t.Fatal(err)
+	}
+	h.waitExited("c2")
+
+	res := h.start("c1", spec)
+	if res.GetCreated() {
+		t.Error("created = true for an existing record")
+	}
+	if res.GetCommand().GetState() != agentv1.CommandState_COMMAND_STATE_RUNNING {
+		t.Fatalf("retry: state %v exit %v, want RUNNING", res.GetCommand().GetState(), res.GetCommand().GetExit())
+	}
+	h.start("c1", spec)
+	launches := 0
+	for _, l := range h.fake.Launches() {
+		if l.ID == "c1" {
+			launches++
+		}
+	}
+	if launches != 1 {
+		t.Fatalf("launches of c1 = %d (%v), want 1", launches, h.fake.Launches())
+	}
+}

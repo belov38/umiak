@@ -12,7 +12,9 @@ import (
 // (spec 6 step 3 and 9.6). After a reboot (another boot id) every STARTING
 // or RUNNING command without exit.json is LOST/REBOOT. Within the same boot
 // each command is finalized from exit.json, reconnected to its live unit,
-// or marked LOST/SHIM_LOST. PTY idle timers resume from pty_detached_at.
+// or marked LOST/SHIM_LOST; a STARTING record that was never launched (no
+// shim.json, no unit) stays STARTING for a retry of Start. PTY idle timers
+// resume from pty_detached_at.
 func (m *Manager) Recover(ctx context.Context) error {
 	var recs []*store.Command
 	// Collect first: writing while a bbolt read transaction is open can
@@ -87,8 +89,11 @@ func (m *Manager) recoverOne(ctx context.Context, rec *store.Command) error {
 
 	err = m.settleLocked(ctx, c, rec, false)
 	if errors.Is(err, errNotLaunched) {
-		err = m.finalizeLocked(ctx, c, m.lostExit(rec.ID, rec.PTY, reasonShimLost), true)
-		m.markGone(c)
+		// The previous agent died between the STARTING record and the
+		// launch: nothing ran. The record stays STARTING without a slot,
+		// so the caller's retry of Start launches it (spec 9.2 step 5).
+		m.log.Info("process: recover: command was never launched; a retry of Start launches it", "id", rec.ID)
+		return nil
 	}
 	if err != nil {
 		return err
