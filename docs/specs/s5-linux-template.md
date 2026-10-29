@@ -1,6 +1,6 @@
 # S5. Шаблон Linux: спецификация
 
-Статус: согласовано (master-сессия), 2026-10-29; ревью исполнителем пройдено, замечания внесены. Область S5 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4 агент, §5 хранилище, §6 warm pool). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, `packages/pve`, `sbx-bench`), `docs/specs/s3-guest-agent.md` (§7.3 `seal`, §17 пакет, §20 требования к шаблону), `docs/specs/s6-control-plane.md` (§5.2 `template_builds`, §9 warm pool, §14.3 регистрация), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios, §5.4 TLS).
+Статус: согласовано (master-сессия), 2026-10-29; ревью исполнителем пройдено, замечания внесены. Дополнено MVP-рекомендациями R5, R6 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S5 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4 агент, §5 хранилище, §6 warm pool). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, `packages/pve`, `sbx-bench`), `docs/specs/s3-guest-agent.md` (§7.3 `seal`, §17 пакет, §20 требования к шаблону), `docs/specs/s6-control-plane.md` (§5.2 `template_builds`, §9 warm pool, §14.3 регистрация), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios, §5.4 TLS).
 
 Решения в разделах 1–4 вопросов согласованы с master-сессией 2026-10-29. Пометка **[S5]** — решение автора спеки в рамках согласованного; его можно менять без нового согласования, если причина записана.
 
@@ -152,14 +152,21 @@ uv = { version = "0.13.6", sha256 = "..." }
 gh = { version = "2.103.3", sha256 = "..." }
 rust = { version = "1.99.1", rustup_init_sha256 = "..." }
 
+[chrome]           # .deb from dl.google.com by exact version, sha256 from the signed repo index
+google_chrome_stable = { version = "156.0.8078.73-1", sha256 = "..." }
+
 [npm]              # global CLIs, exact versions; npm checks integrity from the registry
 "@anthropic-ai/claude-code" = "2.1.312"
 "@openai/codex" = "0.165.0"
 "opencode-ai" = "1.19.5"
 "@google/gemini-cli" = "0.66.0"
+"pnpm" = "12.16.1"
+
+[sbx]              # our CLI (S7 §15.5): linux-x64 binary, sha256 from the release SHA256SUMS
+cli = { version = "...", sha256 = "..." }
 ```
 
-- `sbx-tpl versions linux --update` находит последние стабильные версии (свежий serial образа, снапшот «сейчас», последняя Node LTS, последние Go/Rust/Bun/uv/gh/Docker, последние версии npm-пакетов), скачивает официальные файлы контрольных сумм и переписывает `versions.toml`. Значения выше проверены 2026-10-29 и даны как пример; в коммит идёт результат `--update`.
+- `sbx-tpl versions linux --update` находит последние стабильные версии (свежий serial образа, снапшот «сейчас», последняя Node LTS, последние Go/Rust/Bun/uv/gh/Docker/Chrome, последние версии npm-пакетов, последний релиз `sbx` CLI), скачивает официальные файлы контрольных сумм и переписывает `versions.toml`. Значения выше проверены 2026-10-29 (`npm view`, Chrome — versionhistory API Google) и даны как пример; в коммит идёт результат `--update`. Пакеты Ubuntu (JDK, ffmpeg, xdotool) закреплены снапшотом apt (§6.2), отдельной строки им не нужно.
 - `sbx-tpl build` использует файл как есть. `--refresh` = `versions --update` перед сборкой (обычный режим для новой сборки; файл после этого коммитится).
 - Воспроизводимость: тот же рецепт, `versions.toml` и git-коммит дают тот же список пакетов (`dpkg-query`) и те же версии инструментов. Побитовой одинаковости дисков не требуется.
 
@@ -173,7 +180,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 |---|---|
 | `preflight [--node]` | только чтение: права токена (включая upload и чтение `local`, §17.1), content `import`/`iso` у `local`, свободная RAM под сборочную VM, инструмент для ISO, ключ подписи образов |
 | `versions <slug> [--update]` | показать или обновить `versions.toml` (§6.3) |
-| `build <slug> [--node pve] --agent-package <tar> [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure] [--no-verify]` | сборка (§7.2) и проверка (§10); итог — сборка в статусе `ready` |
+| `build <slug> [--node pve] --agent-package <tar> [--sbx-cli <file>] [--api-url <url>] [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure] [--no-verify]` | сборка (§7.2) и проверка (§10); итог — сборка в статусе `ready` |
 | `verify <buildId>` | повторная проверка (§10) |
 | `promote <buildId>` | сделать сборку активной (§12.2); тот же вызов для отката |
 | `list [<slug>]`, `show <buildId>` | реестр и манифест |
@@ -190,7 +197,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
    - `meta-data`: `instance-id: <buildId>`, `local-hostname: sbx-build`;
    - `network-config`: v2, `match: {name: "en*"}`, `dhcp4: true`;
    - `user-data`: без пользователей и ключей (`users: []`, `ssh_pwauth: false`, `disable_root: true`), apt на снапшот (§6.2), `packages: [qemu-guest-agent]`, `runcmd: systemctl enable --now qemu-guest-agent`;
-   - `build/`: шаги, `files/`, `versions.toml`, пакет агента, `agent.toml` (с URL туннеля по умолчанию, §14), ключи SSH CA шаблона (если переданы).
+   - `build/`: шаги, `files/`, `versions.toml`, пакет агента, бинарник `sbx` CLI и `config.json` с `--api-url` (§8.9), `agent.toml` (с URL туннеля по умолчанию, §14), ключи SSH CA шаблона (если переданы).
 
    Инструмент: `xorriso` (Linux, CI) или `hdiutil makehybrid -iso -joliet` (macOS) **[S5]**. Шаги запускаются как `bash <file>`, поэтому exec-биты на ISO не нужны. Загрузка: `local:iso/sbx-seed-<buildId>.iso`.
 4. **Сборочная VM.** VMID из аллокатора с `purpose=template` (§17.1). `POST /nodes/{node}/qemu`: `name=sbx-tpl-<slug>-<version с дефисами>`, `pool=sandbox`, `tags=sbx-tpl` (по этому тегу уборка S1 и reconcile S6 не трогают сборочные VM и шаблоны, §17.1 п. 8, §17.4 п. 6), железо из `hw` рецепта, `cores`/`memory` из `build_vm`, `balloon=0`, `scsi0=local-lvm:0,import-from=local:import/<image>,discard=on,iothread=1,ssd=1`, `ide2=local:iso/sbx-seed-<buildId>.iso,media=cdrom`, `net0=virtio=<MAC>,bridge=sbx0,firewall=1`, `boot=order=scsi0`, `description` с buildId и git-коммитом. Затем `PUT resize scsi0 64G` и firewall как у sandbox (S1 §4.4). Перед стартом — проверка RAM: в PoC до S6 как в `sbx-bench` (сумма `memory` работающих VM pool + сборочная ≤ `--ram-cap`, дефолт 8 GB); при S6 — учёт строки `building` в admission (§17.4).
@@ -211,13 +218,13 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 ### 8.1 Пакеты и ядро (`00-base`)
 
 - `apt full-upgrade` из снапшота, одно ядро `linux-image-virtual` (generic flavour); после `reboot` все ядра, кроме работающего, удаляются.
-- Ставится: `build-essential`, `pkg-config`, `libssl-dev`, `git`, `git-lfs`, `curl`, `wget`, `ca-certificates`, `gnupg`, `jq`, `ripgrep`, `fd-find` (+ symlink `fd`), `tmux`, `vim`, `nano`, `less`, `man-db`, `htop`, `rsync`, `unzip`, `zip`, `xz-utils`, `zstd`, `file`, `tree`, `sqlite3`, `make`, `cmake`, `openssh-server`, `openssh-client`, `sudo`, `bash-completion`, `python3`, `python3-venv`, `python3-pip`, `python3-dev`, `qemu-guest-agent`, `chrony`, `iproute2`, `iputils-ping`, `dnsutils`, `netcat-openbsd`, `lsof`, `strace`.
+- Ставится: `build-essential`, `pkg-config`, `libssl-dev`, `git`, `git-lfs`, `curl`, `wget`, `ca-certificates`, `gnupg`, `jq`, `ripgrep`, `fd-find` (+ symlink `fd`), `tmux`, `vim`, `nano`, `less`, `man-db`, `htop`, `rsync`, `unzip`, `zip`, `xz-utils`, `zstd`, `file`, `tree`, `sqlite3`, `make`, `cmake`, `openssh-server`, `openssh-client`, `sudo`, `bash-completion`, `python3`, `python3-venv`, `python3-pip`, `python3-dev`, `openjdk-25-jdk-headless` (текущий LTS в `resolute`), `ffmpeg`, `xdotool`, `qemu-guest-agent`, `chrony`, `iproute2`, `iputils-ping`, `dnsutils`, `netcat-openbsd`, `lsof`, `strace`.
 - Удаляется (purge), если есть в образе: `snapd`, `apport`, `unattended-upgrades`, `ubuntu-pro-client`, `update-notifier-common`, `landscape-common`, `pollinate`, `fwupd`, `modemmanager`, `multipath-tools`, `open-iscsi`, `udisks2`, `lxd-installer`, `ufw`, `open-vm-tools`, `rsyslog`, `sysstat`, `avahi-daemon`, `cups*`, `tailscale`.
 - Маскируется: `apt-daily.timer`, `apt-daily-upgrade.timer`, `motd-news.timer`, `man-db.timer`, `e2scrub_all.timer`, `systemd-oomd.service` (если есть; OOM — только ядро, политика `oom_score_adj` у S3). Остаются: `fstrim.timer` (thin pool возвращает место), `logrotate.timer`, `systemd-tmpfiles-clean.timer`, `cron`, `chrony`.
 
 ### 8.2 Пользователи и вход (`10-system`)
 
-- Пользователь `user`: uid/gid 1000, shell `/bin/bash`, группы `sudo` и `docker` (`docker` добавляется в `20-docker`), пароль заблокирован, `/etc/sudoers.d/90-sbx-user` `user ALL=(ALL) NOPASSWD:ALL` (0440, проверка `visudo -c`), `loginctl enable-linger user`. Пользователя `ubuntu` и других пользователей с uid ≥ 1000 нет. Пароль root заблокирован.
+- Пользователь `user`: uid/gid 1000, shell `/bin/bash`, группы `sudo`, `docker` (добавляется в `20-docker`) и `kvm` (§8.6), пароль заблокирован, `/etc/sudoers.d/90-sbx-user` `user ALL=(ALL) NOPASSWD:ALL` (0440, проверка `visudo -c`), `loginctl enable-linger user`. Пользователя `ubuntu` и других пользователей с uid ≥ 1000 нет. Пароль root заблокирован.
 - `authorized_keys` нет ни у кого.
 - Локаль `C.UTF-8`, часовой пояс `UTC`.
 
@@ -256,6 +263,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
   - `kernel.apparmor_restrict_unprivileged_userns = 0` — непривилегированные user namespaces нужны песочницам coding-агентов (bubblewrap) и rootless-инструментам; граница доверия — VM (S3 §4);
   - `fs.inotify.max_user_watches = 524288`, `fs.inotify.max_user_instances = 1024` — dev-серверы и сборщики следят за файлами.
 - `/etc/systemd/system.conf.d/90-sbx.conf`: `DefaultLimitNOFILE=65536:524288` **[S5]**.
+- **KVM в госте — best-effort, не гарантия платформы в MVP** (MVP-рек. R6). `/dev/kvm` появляется, только если хост пробрасывает виртуализацию: `cpu: host` (§9) передаёт флаг `vmx`/`svm`, если на хосте модуль `kvm_intel`/`kvm_amd` загружен с `nested=1` (runbook S1 его не меняет, S1 §12). Шаблон ничего не включает сам: модули KVM есть в ядре `linux-image-virtual`, udev отдаёт `/dev/kvm` группе `kvm`, `user` в ней состоит (§8.2). Есть ли KVM в сборке, пишет проверка §10 п. 19; API это не обещает.
 - Swap нет: ни раздела, ни файла, ни zram (`systemd-zram-generator` не ставится). Проверка в `90-cleanup` и в §10.
 
 ### 8.7 journald
@@ -280,12 +288,16 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 | Rust | `rustup-init` от имени `user` (`~/.rustup`, `~/.cargo`), toolchain из `versions.toml`, компоненты `rustfmt`, `clippy`; symlink-и прокси (`cargo`, `rustc`, `rustup`, `rustfmt`, `cargo-clippy`, `clippy-driver`) в `/usr/local/bin` |
 | Python 3 | системный (`python3`, `venv`, `pip`); `uv`, `uvx` → `/usr/local/bin` |
 | gh | официальный tarball → `/usr/local/bin/gh` |
-| Claude Code, Codex, OpenCode, Gemini CLI | `npm install -g <pkg>@<version>` от root (`/usr/local/lib/node_modules`, bin в `/usr/local/bin`) |
+| Claude Code, Codex, OpenCode, Gemini CLI, pnpm | `npm install -g <pkg>@<version>` от root (`/usr/local/lib/node_modules`, bin в `/usr/local/bin`) |
+| Java (OpenJDK 25 LTS: `java`, `javac`, `jar`) | apt `openjdk-25-jdk-headless` в `00-base` |
+| ffmpeg, xdotool | apt в `00-base`; `xdotool` работает только при X-дисплее (S10 или свой Xvfb пользователя) |
+| Google Chrome (`google-chrome`, `google-chrome-stable`) | `.deb` из `dl.google.com` по точной версии из `versions.toml` (sha256 сверяется), `apt install ./<deb>` в `30-toolchains`; для headless-запусков агентов и Playwright/Puppeteer. Песочница Chrome работает от `user` благодаря user namespaces (§8.6). Источник apt Google, который ставит пакет, остаётся: пользователь обновляет Chrome сам |
+| `sbx` CLI (S7 §14) | бинарник из `--sbx-cli` (linux-x64 релиз S7 §15.5, sha256 = `versions.toml`) → `/usr/local/bin/sbx` в `40-coding-agents`; `/etc/sbx/config.json` `{"apiUrl": "<--api-url>"}` (S7 §14.1). Ключа в образе нет: пользователь передаёт `SBX_API_KEY` секретом sandbox; ключ типа `sandbox` в VM — фаза 2 (S7 §7.2). Внутри VM sandbox по умолчанию — `SBX_SANDBOX_ID` (S3 §8.2). Пока у S7 нет релиза, `--sbx-cli` необязателен, в манифесте `tools.sbx = null` |
 
 - Версии и sha256 — из `versions.toml`, итоговые версии (`--version` каждого) — в манифесте.
 - Автообновление CLI агентов в sandbox выключено там, где это настраивается системно (например, managed settings Claude Code); версии обновляются новой сборкой шаблона **[S5]**. Пользователь может обновить их сам через `sudo`.
 - Кэши (`npm`, `go build`, `rustup` downloads, `uv`, `pip`) чистятся в `90-cleanup`.
-- В `linux` не входит (решение master-сессии): Chrome и всё для рабочего стола (S10), JVM/Scala/Kotlin/Gradle, Android, GitHub Actions runner.
+- Набор доведён до паритета с boat по MVP-рек. R5 (`docs/roadmap-phase2.md` §6): Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool, CLI coding-агентов и `sbx`. В `linux` не входит: рабочий стол (X-сервер, оконный менеджер, Sunshine — S10), Scala/Kotlin/Gradle/Maven, Deno, Ruby, PHP, .NET, R, Android, GitHub Actions runner; их пользователь ставит сам через `sudo`.
 - Env по умолчанию шаблон не добавляет: `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` и остальной платформенный env ставит агент (S3 §8.2).
 
 ### 8.10 Агент (`50-sbx-agent`) и очистка (`90-cleanup`)
@@ -313,6 +325,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 - `tablet: 0`: USB-планшет headless-VM не нужен.
 - `vga: std` оставлен для консоли оператора; `serial0` — для xterm.js и логов загрузки.
 - Диска cloud-init у шаблона и у sandbox нет (`cloudinit: false`, §17.1).
+- `cpu: host`: гостю видны все флаги CPU хоста (AVX-512, `vmx`/`svm` для вложенного KVM, §8.6), и это лучшая производительность. Цена — живая миграция возможна только между нодами с одинаковым CPU. В PoC нода одна, поэтому `cpu: host` остаётся; для кластера со смешанными CPU нужна именованная модель (например, `x86-64-v3`) — решение S12 / фазы 2 (S1 §12).
 
 `disk_layout` и `hw` (ключи из белого списка S1 + `rng0`) записываются в манифест и в `template_builds`.
 
@@ -340,6 +353,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 16. **Жёсткая остановка:** S1 `stop` (без shutdown), затем start. Время до `agent/ping` не больше времени первой загрузки + 3 s; в `grubenv` нет `recordfail` или он не даёт ожидания (`GRUB_RECORDFAIL_TIMEOUT=0` в `grub.cfg`).
 17. Диск: размер корня ≈ 64 GiB; `fstrim -v /` работает.
 18. Замеры загрузки (первая загрузка и загрузка после жёсткой остановки): метрики §13.1 пишутся в манифест (`verify.boot`).
+19. **KVM (best-effort, не валит сборку):** если в `/proc/cpuinfo` есть `vmx` или `svm`, `/dev/kvm` существует и `user` открывает его на чтение и запись; результат — `verify.kvm` (`available` / `unavailable` с причиной) в манифесте.
 
 ## 11. Версия, манифест, реестр
 
@@ -518,7 +532,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 ## 19. Приёмка
 
 На `pve`:
-1. `sbx-tpl preflight` зелёный; `sbx-tpl build linux --refresh --agent-package <tar> --tunnel-url <url>` проходит от официального образа без ручных действий; сборка `ready`, все проверки §10 зелёные.
+1. `sbx-tpl preflight` зелёный; `sbx-tpl build linux --refresh --agent-package <tar> --sbx-cli <bin> --api-url <url> --tunnel-url <url>` проходит от официального образа без ручных действий; сборка `ready`, все проверки §10 зелёные.
 2. Повторная сборка с тем же `versions.toml` и коммитом даёт тот же `packages` и `tools` в манифесте.
 3. `smbios1` с `family` максимальной разрешённой длины (URL 200 байт) принимается Proxmox; агент видит URL; строка длиннее 512 символов отклоняется сборщиком до вызова API.
 4. **GC безопасен:** machine A из сборки X работает, saved snapshot (или S1 snapshot) A есть; `promote` сборки Y; `gc` с принудительным порогом удаляет X; A продолжает работать, перезагружается, fork из снапшота A загружается; LV `base-<X>-*` нет, VMID X освобождён.
@@ -538,4 +552,6 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 - Загрузка образа с Mac через Tailscale (~420 MB) — раз на serial; если медленно, позже `download-url` на ноде (требует `Sys.Modify` на ноде, сейчас не берём).
 - В Ubuntu 26.04 sshd через `ssh.socket` и генератор: проверить, что `ListenAddress` из `sshd_config.d` действительно даёт только loopback (проверка §10 п. 4).
 - Автообновление CLI агентов: какие из них настраиваются системно — проверить при реализации; где нельзя, оставить как есть и записать.
+- Google держит в `dl.google.com` только свежие версии Chrome: повторная сборка со старым `versions.toml` может не найти `.deb`. Тогда сборка падает на шаге `30-toolchains`, и нужен `--refresh`.
+- Размер образа вырастет из-за Chrome, JDK и ffmpeg (оценка +1 GB в thin pool); на время загрузки это не влияет (сервисов они не добавляют), проверка — `sbx-bench s5`.
 - `systemd.machine_id=firmware` с пустым `/etc/machine-id`: убедиться, что systemd не считает загрузку first boot и machine-id записывается на диск (`systemd-machine-id-commit`), проверка §10 п. 2 и 13.

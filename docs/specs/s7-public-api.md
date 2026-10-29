@@ -1,6 +1,6 @@
 # S7. Публичное API v1, SDK, CLI: спецификация
 
-Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. Область S7 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§2, §9, §10, §11). Опирается на `docs/specs/s6-control-plane.md` (`SandboxService`, состояния, идемпотентность), `docs/specs/s2-tunnel-protocol.md` (§8.4 `agent-client`, §9 возобновляемость), `docs/specs/s3-guest-agent.md` (RPC агента), `docs/specs/s4-gateway.md` (внутренние ручки для gateway).
+Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. Дополнено MVP-рекомендациями R1, R2, R4, R7, R9–R11 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S7 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§2, §9, §10, §11). Опирается на `docs/specs/s6-control-plane.md` (`SandboxService`, состояния, идемпотентность), `docs/specs/s2-tunnel-protocol.md` (§8.4 `agent-client`, §9 возобновляемость), `docs/specs/s3-guest-agent.md` (RPC агента), `docs/specs/s4-gateway.md` (внутренние ручки для gateway).
 
 Решения Q1–Q4 и способ закрыть расхождения между спеками согласованы master-сессией от имени Ильи (2026-10-29). Пометка **[решение S7]** — решение автора спеки в рамках брифа; его можно менять при планировании, если причина записана. Пометка **[переопределяет S4]** / **[переопределяет S6]** — место, где S7 меняет уже согласованную спеку. Исполнители S4 и S6 обязаны учесть такие места; сводка — §20.
 
@@ -118,11 +118,12 @@ S7 — внешний интерфейс платформы. Им пользую
 | Saved snapshot | `snap_` | `snapshots.id` |
 | API key (id, не секрет) | `key_` | Payload |
 | SSH key | `sshk_` | Payload |
+| Environment | `env_` | `environments.id` (S8 §10) |
 | User / Team | `usr_` / `team_` | Payload |
 | Upload | `upl_` | ULID, генерирует `api` |
 | Request | `req_` | ULID на каждый запрос |
 
-- Секрет API-ключа — единственное значение с префиксом `sbx_` (§7.2). Токен порта — `sbxp_` (S4 §8.3).
+- Секрет API-ключа — единственное значение с префиксом `sbx_` (§7.2). Префикс `sbxs_` зарезервирован за секретом ключа типа `sandbox` (§7.2, в MVP не выпускается). Токен порта — `sbxp_` (S4 §8.3).
 - Декодер принимает ID в любом регистре. Ошибка формата — `404 not_found` (не `400`): клиенту всё равно, «плохой» ID или несуществующий.
 - В пути `{sandbox}` можно передать ID (`sb_...`) или slug. Строка с префиксом `sb_` — всегда ID, иначе — slug.
 
@@ -134,7 +135,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 - По умолчанию `api` генерирует **три слова** (`quiet-otter-lamp`) из встроенного словаря примерно в 1 500 коротких (3–7 букв) нейтральных английских слов, это около 3,4 · 10⁹ сочетаний. При коллизии — до 5 новых попыток, затем добавляется четвёртое слово.
 - Пользователь может задать slug при create/fork и сменить его через `PATCH` (`slug_taken` при занятом). Смена slug меняет метки всех опубликованных портов: старые URL и cookie сразу перестают работать (S4 §8.2).
 - Slug занят, пока жива строка sandbox, включая надгробие `deleted` (30 дней, S6 §5.6).
-- Комментарий S6 «10 chars [a-z0-9]» устарел; колонка `text unique` подходит без изменений.
+- S6 §5.6 и §14.2 приведены к этой грамматике (MVP-рек. R10); колонка `text unique` подходит без изменений.
 
 ### 5.5 Ошибки
 
@@ -150,6 +151,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 }
 ```
 
+- В каждом теле ошибки есть `code`, `message`, `retryable` и `requestId`, на любом listener-е и с любым статусом, включая `401`, `404` и ошибки до аутентификации; `details` — объект (может быть пустым). Клиент, SDK и CLI полагаются на это без проверок.
 - `code` — стабильная строка `snake_case`, часть контракта v1: новые коды добавлять можно, существующие менять нельзя. HTTP-статус дублирует класс ошибки.
 - `message` — по-английски, пишется для человека и LLM: что случилось и что делать дальше.
 - **`retryable: true` означает, что повтор того же запроса безопасен и может пройти позже**: либо ничего не произошло, либо запрос идемпотентен (метод `GET`, естественная идемпотентность или `Idempotency-Key`). Если исход неизвестен (команда могла запуститься), ставится `retryable: false` и `details.outcome: "unknown"`.
@@ -183,12 +185,14 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 416 | `range_not_satisfiable` | нет | |
 | 422 | `template_unavailable` | нет | шаблон выключен или размер не разрешён |
 | 422 | `checksum_mismatch` | нет | commit загрузки |
+| 428 | `confirmation_required` | нет | нет `Sbx-Confirm-Delete` или он не совпадает с удаляемым ресурсом (§5.12); `details.reason: missing \| mismatch` |
 | 429 | `rate_limited` | да | §5.8 |
 | 429 | `recover_rate_limited` | да | S6 §7.8 |
 | 500 | `internal` | нет | |
 | 502 | `agent_error` | нет | агент вернул неожиданную ошибку; `details.agentCode` |
 | 503 | `agent_unavailable` | да | агента нет дольше 30 s (S2 §8.4) |
 | 503 | `out_of_capacity` | да | нет RAM на ноде (S6 §8.2) |
+| 503 | `pool_exhausted` | да | create с `failFast`, а тёплой machine нет (§8.2); ничего не создано |
 | 503 | `server_shutting_down` | да* | под `api` останавливается; *только для запросов, которые безопасно повторить (§9.4) |
 | 507 | `no_space` | нет | `ENOSPC`/`EDQUOT` в госте |
 
@@ -206,7 +210,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 - Хранение — таблица S6 `idempotency_keys`: `(principal, scope, key)`, hash канонического тела, 24 h. Тот же ключ и тело → сохранённый результат (тот же ресурс), заголовок `Idempotency-Replayed: true`. Другое тело → `409 idempotency_key_reused`. Параллельный дубль ждёт первого (S6 §14.1). Principal для ключа — API-ключ или пользователь сессии.
 - Для команд ключ превращается в `commandId`; `Process/Start` агента идемпотентен по нему (S2 §9.1). Поэтому повтор `POST /commands` с тем же ключом **никогда** не запускает команду второй раз, а подключается к уже запущенной (§9.3).
 - Мутирующие вызовы агента без публичного ключа получают `Sbx-Request-Id` = новый UUID на каждый HTTP-запрос (повторы внутри `agent-client` его сохраняют). С публичным ключом — UUIDv5 от `(principal, scope, key)`.
-- Остальные действия естественно идемпотентны: `stop`, `resume`, `recover`, `delete` при активной операции того же вида возвращают её (§8.2); `PUT /ports/{port}` с теми же настройками ничего не меняет; `DELETE` повторяем.
+- Остальные действия естественно идемпотентны: `stop`, `recover`, `delete` при активной операции того же вида возвращают её, `resume` — если совпадает и тело (§8.2); `PUT /ports/{port}` с теми же настройками ничего не меняет; `DELETE` повторяем.
 - **SDK сам генерирует `Idempotency-Key`** (UUIDv4) для всех ручек из списка, если вызывающий не передал свой, и держит его на все свои повторы.
 
 ### 5.8 Лимиты частоты
@@ -236,11 +240,18 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | Ручка | Предел |
 |---|---|
 | JSON по умолчанию | 1 MiB |
-| `POST /sandboxes`, `fork`, `PUT /env` | 12 MiB (env и секреты + base64 secret-файлов, §8.3) |
+| `POST /sandboxes`, `fork`, `resume`, `PUT /env` | 12 MiB (env и секреты + base64 secret-файлов, §8.3) |
 | `PUT /files/content` | без предела (поток) |
+| `PUT /files/archive` | без предела на тело; пределы распаковки — §11.1 |
 | `PUT /files/uploads/{upload}` | 8 MiB на чанк |
 | `POST /commands` | 1 MiB (сама команда до 256 KiB) |
 | `POST /internal/v1/agent-events` | 16 MiB |
+
+### 5.12 Подтверждение удаления
+
+- `DELETE /v1/sandboxes/{sandbox}` и `DELETE /v1/snapshots/{name}` требуют заголовок `Sbx-Confirm-Delete: <id>`. Значение — ID удаляемого ресурса (`sb_...`, `snap_...`) или его slug / имя; оно должно указывать на тот же ресурс, что и путь. Нет заголовка или он указывает на другой ресурс → `428 confirmation_required`, ничего не удаляется.
+- Заголовок защищает от ошибок агентов и скриптов (не тот slug, подстановка пустой переменной), а не от злоумышленника: у него и так есть `sandboxes:delete`.
+- SDK (`sb.delete()`, `stopAndDelete()`, `snapshots.delete()`) ставит заголовок сам из ID уже полученного ресурса. CLI `sbx rm` ставит его после подтверждения в TTY или с `--yes`. Повтор удаления (`deleted`, §8.2) тоже требует заголовок.
 
 ## 6. Ресурсы и ручки: сводка
 
@@ -248,11 +259,11 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 
 | Метод и путь | Что | Scope | S6 / агент | Фаза |
 |---|---|---|---|---|
-| `POST /v1/sandboxes` | create | `sandboxes:write` (+`snapshots:read` с `from`) | `create` | P |
+| `POST /v1/sandboxes` | create | `sandboxes:write` (+`snapshots:read` с `from`, +`environments:read` с явным `environment`; environment по умолчанию применяется без него, S8 §10.1) | `create` | P |
 | `GET /v1/sandboxes` | list | `sandboxes:read` | `list` | P |
 | `GET /v1/sandboxes/{sandbox}` | get, long-poll | `sandboxes:read` | `get`, `waitForState` | P |
 | `PATCH /v1/sandboxes/{sandbox}` | name, slug, labels, ttl, idle | `sandboxes:write` | `update`, `rename` | P (slug — M) |
-| `DELETE /v1/sandboxes/{sandbox}` | delete | `sandboxes:delete` | `delete` | P |
+| `DELETE /v1/sandboxes/{sandbox}` | delete (заголовок `Sbx-Confirm-Delete`, §5.12) | `sandboxes:delete` | `delete` | P |
 | `POST /v1/sandboxes/{sandbox}/stop` | stop | `sandboxes:write` | `stop` | M |
 | `POST /v1/sandboxes/{sandbox}/resume` | resume | `sandboxes:write` | `resume` | M |
 | `POST /v1/sandboxes/{sandbox}/fork` | fork | `sandboxes:write` | `fork` | M |
@@ -261,17 +272,17 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | `GET /v1/sandboxes/{sandbox}/env` | env и имена секретов | `sandboxes:read` | `getEnv` | M |
 | `PUT /v1/sandboxes/{sandbox}/env` | заменить env/секреты | `sandboxes:write` | `updateEnv` | M |
 | `GET /v1/operations/{operation}` | операция, long-poll | `sandboxes:read` | `getOperation` | P |
-| `POST /v1/sandboxes/{sandbox}/commands` | sync / stream / detached | `exec` | `createCommand`; `Process/Start`, `Attach` | P |
-| `GET /v1/sandboxes/{sandbox}/commands` | список | `exec` | `listCommands` | P |
-| `GET /v1/sandboxes/{sandbox}/commands/{command}` | статус | `exec` | `getCommand`; `Process/Get` | P |
-| `GET /v1/sandboxes/{sandbox}/commands/{command}/stream` | attach NDJSON | `exec` | `Process/Attach` | P |
-| `GET /v1/sandboxes/{sandbox}/commands/{command}/output` | кусок вывода по offset | `exec` | `Process/Attach{follow:false}` | P |
-| `POST /v1/sandboxes/{sandbox}/commands/{command}/input` | stdin | `exec` | `Process/SendInput` | P |
-| `POST /v1/sandboxes/{sandbox}/commands/{command}/kill` | kill | `exec` | `Process/Kill` | P |
-| `POST /v1/sandboxes/{sandbox}/commands/{command}/signal` | сигнал | `exec` | `Process/Signal` | P |
-| `POST /v1/sandboxes/{sandbox}/ptys` | создать PTY | `exec` | `createCommand`; `Process/Start{pty}` | M |
-| `GET /v1/sandboxes/{sandbox}/ptys/{command}/connect` | WebSocket | `exec` | `Attach`, `SendInput`, `Update` | M |
-| `POST /v1/sandboxes/{sandbox}/ptys/{command}/resize` | размер окна | `exec` | `Process/Update` | M |
+| `POST /v1/sandboxes/{sandbox}/commands` | sync / stream / detached | `commands:exec` | `createCommand`; `Process/Start`, `Attach` | P |
+| `GET /v1/sandboxes/{sandbox}/commands` | список | `commands:read` | `listCommands` | P |
+| `GET /v1/sandboxes/{sandbox}/commands/{command}` | статус | `commands:read` | `getCommand`; `Process/Get` | P |
+| `GET /v1/sandboxes/{sandbox}/commands/{command}/stream` | attach NDJSON | `commands:read` | `Process/Attach` | P |
+| `GET /v1/sandboxes/{sandbox}/commands/{command}/output` | кусок вывода по offset | `commands:read` | `Process/Attach{follow:false}` | P |
+| `POST /v1/sandboxes/{sandbox}/commands/{command}/input` | stdin | `commands:exec` | `Process/SendInput` | P |
+| `POST /v1/sandboxes/{sandbox}/commands/{command}/kill` | kill | `commands:exec` | `Process/Kill` | P |
+| `POST /v1/sandboxes/{sandbox}/commands/{command}/signal` | сигнал | `commands:exec` | `Process/Signal` | P |
+| `POST /v1/sandboxes/{sandbox}/ptys` | создать PTY | `commands:exec` | `createCommand`; `Process/Start{pty}` | M |
+| `GET /v1/sandboxes/{sandbox}/ptys/{command}/connect` | WebSocket | `commands:exec` | `Attach`, `SendInput`, `Update` | M |
+| `POST /v1/sandboxes/{sandbox}/ptys/{command}/resize` | размер окна | `commands:exec` | `Process/Update` | M |
 | `GET/HEAD /v1/sandboxes/{sandbox}/files/content` | чтение, Range | `files:read` | `GET /files` | P |
 | `PUT /v1/sandboxes/{sandbox}/files/content` | запись потоком | `files:write` | `PUT /files` | P |
 | `POST /v1/sandboxes/{sandbox}/files/uploads` | начать загрузку | `files:write` | — | M |
@@ -282,22 +293,25 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | `POST /v1/sandboxes/{sandbox}/files/mkdir` | mkdir | `files:write` | `Filesystem/MakeDir` | P |
 | `POST /v1/sandboxes/{sandbox}/files/move` | move | `files:write` | `Filesystem/Move` | P |
 | `POST /v1/sandboxes/{sandbox}/files/chmod` | chmod/chown | `files:write` | `Filesystem/Chmod` | M |
+| `GET /v1/sandboxes/{sandbox}/files/archive` | каталог одним tar-потоком | `files:read` | `GET /files/archive` | M |
+| `PUT /v1/sandboxes/{sandbox}/files/archive` | распаковать tar-поток в каталог | `files:write` | `PUT /files/archive` | M |
 | `DELETE /v1/sandboxes/{sandbox}/files` | удалить | `files:write` | `Filesystem/Remove` | P |
 | `GET /v1/sandboxes/{sandbox}/ports` | опубликованные и слушающие | `sandboxes:read` | `listHostedPorts`, `System/ListPorts` | M |
-| `PUT /v1/sandboxes/{sandbox}/ports/{port}` | опубликовать / сменить режим | `ports` | `hostPort` | M |
-| `POST /v1/sandboxes/{sandbox}/ports/{port}/rotate-token` | новый токен | `ports` | `rotatePortToken` | M |
-| `DELETE /v1/sandboxes/{sandbox}/ports/{port}` | снять | `ports` | `unhostPort` | M |
-| `GET /v1/sandboxes/{sandbox}/ssh` | как подключиться | `ssh` | — | M |
-| `GET/POST /v1/ssh-keys`, `DELETE /v1/ssh-keys/{key}` | SSH-ключи пользователя | `ssh` | `IdentityStore` (S8) | M |
+| `PUT /v1/sandboxes/{sandbox}/ports/{port}` | опубликовать / сменить режим | `ports:write` | `hostPort` | M |
+| `POST /v1/sandboxes/{sandbox}/ports/{port}/rotate-token` | новый токен | `ports:write` | `rotatePortToken` | M |
+| `DELETE /v1/sandboxes/{sandbox}/ports/{port}` | снять | `ports:write` | `unhostPort` | M |
+| `GET /v1/sandboxes/{sandbox}/ssh` | как подключиться | `ssh:connect` | — | M |
+| `GET/POST /v1/ssh-keys`, `DELETE /v1/ssh-keys/{key}` | SSH-ключи пользователя | `ssh:connect` | `IdentityStore` (S8) | M |
 | `GET /v1/snapshots`, `GET /v1/snapshots/{name}` | saved snapshots | `snapshots:read` | `listSavedSnapshots`, `getSavedSnapshot` | M |
 | `POST /v1/snapshots` | сохранить | `snapshots:write` | `saveSnapshot` | M |
-| `DELETE /v1/snapshots/{name}` | удалить | `snapshots:write` | `deleteSavedSnapshot` | M |
+| `DELETE /v1/snapshots/{name}` | удалить (`Sbx-Confirm-Delete`, §5.12) | `snapshots:write` | `deleteSavedSnapshot` | M |
 | `GET /v1/templates`, `GET /v1/sizes` | каталог | любой ключ | `ConfigReader`, `template_builds` | P |
-| `GET /v1/api-keys`, `POST /v1/api-keys` | ключи | `keys:manage` | `IdentityStore` | M |
-| `POST /v1/api-keys/{key}/rotate`, `DELETE /v1/api-keys/{key}` | ротация, отзыв | `keys:manage` | `IdentityStore` | M |
+| `GET /v1/api-keys`, `POST /v1/api-keys` | ключи | `keys:admin` | `IdentityStore` | M |
+| `POST /v1/api-keys/{key}/rotate`, `DELETE /v1/api-keys/{key}` | ротация, отзыв | `keys:admin` | `IdentityStore` | M |
 | `DELETE /v1/api-keys/self` | отозвать текущий ключ (`sbx logout`) | любой ключ | `IdentityStore` | M |
 | `GET /v1/me` | кто я | любой | — | P |
-| `GET /v1/limits` | квоты и использование | любой | `usage` | M |
+| `GET /v1/limits` | квоты, остаток, допустимые шаблоны и размеры | любой | `usage` | M |
+| `/v1/environments` (S8 §10.2) | environments команды | `environments:read` / `environments:write` | `EnvironmentService` (S8) | M |
 | `GET /v1/meta` | платформа: домены, SSH host keys, версии | без auth | — | P |
 | `POST /v1/cli/device`, `POST /v1/cli/token` | вход CLI | без auth | §7.6 | M |
 
@@ -323,32 +337,39 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 - `lastUsedAt` обновляется не чаще раза в 60 s на ключ.
 - Ключ принадлежит паре (пользователь, команда). Если пользователь деактивирован (S8) или вышел из команды, ключ не работает (`401 unauthorized`).
 - Секрет показывается один раз: в ответе `POST /api-keys`, `rotate` и `POST /cli/token`.
+- **Тип ключа** (`kind`): `user` — ключ пользователя в команде, всё выше; `sandbox` — **зарезервирован, в MVP не реализуется**. Ключ `sandbox` будет привязан к одной sandbox (`sandboxId`), с секретом `sbxs_` + тот же формат (регулярное выражение для сканеров — `\bsbxs?_[0-9A-Za-z]{49}\b`), и предназначен для CLI внутри VM: видит только свою sandbox, scopes не шире пресета `sandbox-self` (§7.3) и не шире прав создателя. В MVP в схеме есть поля `kind` (всегда `user`) и `sandboxId` (всегда `null`); `POST /api-keys` с `kind: "sandbox"` → `400 validation`. Выпуск, доставка в VM и отзыв при delete sandbox — фаза 2 (S24).
 
 ### 7.3 Scopes и пресеты
+
+Scope — пара «ресурс × действие» в форме `<resource>:<action>`. Набор scopes — часть контракта v1: новые можно добавлять, существующие не переименовываются и не расширяются по смыслу.
 
 | Scope | Что разрешает |
 |---|---|
 | `sandboxes:read` | get, list, long-poll, operations, env (значения env и имена секретов), ports list |
 | `sandboxes:write` | create, update, stop, resume, fork, recover, extend, `PUT /env` |
 | `sandboxes:delete` | delete |
-| `exec` | commands и PTY: запуск, attach, вывод, input, kill |
-| `files:read` / `files:write` | чтение / изменение файлов |
-| `ports` | публикация портов, режимы, токены |
-| `ssh` | SSH-ключи пользователя и `GET /sandboxes/{sandbox}/ssh` |
+| `commands:read` | список и статус команд, attach, вывод по offset |
+| `commands:exec` | запуск команд и PTY, input, kill, signal, resize |
+| `files:read` / `files:write` | чтение / изменение файлов, архив каталога (§11.1) |
+| `ports:write` | публикация портов, режимы, токены |
+| `ssh:connect` | SSH-ключи пользователя и `GET /sandboxes/{sandbox}/ssh` |
 | `snapshots:read` / `snapshots:write` | saved snapshots: список и create из них / сохранение и удаление |
-| `keys:manage` | API-ключи своего пользователя в своей команде |
+| `environments:read` / `environments:write` | environments команды (S8 §10.2): список и значения env / создание, изменение, удаление |
+| `keys:admin` | API-ключи своего пользователя в своей команде |
 
 `/me`, `/limits`, `/templates`, `/sizes`, `DELETE /api-keys/self` доступны любому валидному ключу.
 
 | Пресет | Scopes |
 |---|---|
-| `read-only` | `sandboxes:read`, `files:read`, `snapshots:read` |
-| `ci` | `sandboxes:read`, `sandboxes:write`, `sandboxes:delete`, `exec`, `files:read`, `files:write`, `ports`, `snapshots:read` |
+| `read-only` | `sandboxes:read`, `commands:read`, `files:read`, `snapshots:read`, `environments:read` |
+| `ci` | `sandboxes:read`, `sandboxes:write`, `sandboxes:delete`, `commands:read`, `commands:exec`, `files:read`, `files:write`, `ports:write`, `snapshots:read`, `environments:read` |
 | `full` | все scopes |
+| `sandbox-self` | зарезервирован для ключей `sandbox` (§7.2): `sandboxes:read`, `commands:read`, `commands:exec`, `files:read`, `files:write`, `ports:write` в пределах своей sandbox |
 
-- **Правило подмножества:** ключ с `keys:manage` выпускает и ротирует только ключи, у которых scopes ⊆ его scopes и `expiresAt` ≤ его `expiresAt`. Иначе `403 forbidden` (`details.reason: "scope_escalation"`). Сессия браузера может выпустить любой набор.
+- **Правило подмножества:** ключ с `keys:admin` выпускает и ротирует только ключи, у которых scopes ⊆ его scopes и `expiresAt` ≤ его `expiresAt`. Иначе `403 forbidden` (`details.reason: "scope_escalation"`). Сессия браузера может выпустить любой набор.
 - Нехватка scope — `403 forbidden`, `details.requiredScope`.
-- Ограничение ключа конкретными sandbox или labels — позже (§19).
+- Неизвестный scope — `400 validation`. Срок есть у каждого ключа (§7.2).
+- Ограничение ключа пользователя конкретными sandbox, environments или labels — позже (§19); случай «одна sandbox» закрывает тип `sandbox` (§7.2).
 
 ### 7.4 Браузер: proxied listener
 
@@ -453,6 +474,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - `origin`: `{kind: "template"}` | `{kind: "snapshot", snapshot: "<name>", snapshotId}` | `{kind: "fork", sandboxId}`.
 - `error`: `{code, message}` из S6 (`create_failed`, `resume_failed`, `machine_lost`, ...).
 - `activeOperation` — операция (§8.4) или `null`.
+- `environment` (`{id, name, revision}` или `null`) и `excludeOwnerSecrets` — S8 §10.
 - Надгробие `deleted` отдаётся по `GET` 30 дней (S6 §5.6), затем `404`. В списке `deleted` только при явном `state=deleted`.
 
 ### 8.2 Ручки
@@ -471,11 +493,16 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
   "secretFiles": [{ "name": "gcp.json", "contentBase64": "...", "mode": 288, "linkPath": "/home/user/.config/gcloud/key.json" }],
   "ttlSeconds": 3600,
   "idleTimeoutSeconds": 900,
-  "from": { "snapshot": "web-stack" }
+  "from": { "snapshot": "web-stack" },
+  "environment": "base",
+  "excludeOwnerSecrets": false,
+  "failFast": false
 }
 ```
 
-Все поля необязательны. `template` по умолчанию — из `PlatformDefaults` (S8; в PoC `linux`), `size` — `defaultSize` шаблона. С `from` поле `template` игнорируется (берётся из снапшота). Ответ `202 {sandbox, operation}`.
+Все поля необязательны. `template` по умолчанию — из `PlatformDefaults` (S8; в PoC `linux`), `size` — `defaultSize` шаблона. С `from` поле `template` игнорируется (берётся из снапшота). `environment` и `excludeOwnerSecrets` — S8 §10. Ответ `202 {sandbox, operation}`.
+
+**`failFast: true`** — только тёплый пул (S6 §7.3). Есть `warm` machine пары (шаблон, размер) — обычный claim. Нет — `503 pool_exhausted` (`retryable: true`, `Retry-After` и `details.retryAfterSeconds` — оценка пополнения пула): sandbox, операция и запись `Idempotency-Key` не создаются, повтор с тем же ключом безопасен. Холодный старт и вытеснение warm других пар не применяются. С `from` → `400 validation` (create из снапшота всегда холодный, S6 §7.3). Проверки шаблона и квоты идут раньше, поэтому `quota_exceeded` и `template_unavailable` отдаются как обычно. Сколько тёплых machine сейчас есть — `GET /v1/limits` (§13), это подсказка, а не резерв.
 
 **`GET /v1/sandboxes`**: фильтры `state` (через запятую), `label=k=v` (можно повторять, И), `template`, `q` (префикс name или slug); новые первыми.
 
@@ -483,13 +510,15 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 
 **Действия** (ответ `202 {sandbox, operation}`):
 - `POST /stop`;
-- `POST /resume {size?, ttlSeconds?}`;
-- `POST /fork {name?, slug?, labels?, ttlSeconds?, idleTimeoutSeconds?, size?}` (`Idempotency-Key`): ответ `{sandbox: <новая>, operation: <create цели>, sourceOperation: <fork на источнике>}`;
+- `POST /resume {size?, ttlSeconds?, env?, secrets?, secretFiles?}`;
+- `POST /fork {name?, slug?, labels?, ttlSeconds?, idleTimeoutSeconds?, size?, env?, secrets?, secretFiles?}` (`Idempotency-Key`): ответ `{sandbox: <новая>, operation: <create цели>, sourceOperation: <fork на источнике>}`;
 - `POST /recover`;
 - `DELETE /v1/sandboxes/{sandbox}` → `202 {sandbox, operation}`; на `deleted` → `200 {sandbox, operation: null}`.
 - `POST /extend {ttlSeconds?}` → `200 Sandbox` (без операции, S6 §7.8).
 
-**Повтор при активной операции.** Если S6 вернул `operation_in_progress`, а активная операция того же вида (`stop`, `resume`, `recover`, `delete`), `api` отвечает `202` с этой операцией. Другой вид — `409 operation_in_progress`. Для `resume` и `recover` это добавление к S6 (§20.2).
+**Повтор при активной операции.** Если S6 вернул `operation_in_progress`, а активная операция того же вида (`stop`, `resume`, `recover`, `delete`), `api` отвечает `202` с этой операцией. Другой вид — `409 operation_in_progress`. Для `resume` и `recover` это добавление к S6 (§20.2). `resume` возвращает активный `resume`, только если hash канонического тела совпадает (пустое тело — тоже тело; S6 §7.6); иначе `409 operation_in_progress`.
+
+**Env и секреты на fork и resume.** `env`, `secrets`, `secretFiles` — те же правила, лимиты и шифрование, что у create (§8.3), но форма — как у `PATCH /env` (S8 C2): `env` и `secrets` — `{K: v | null}`, `secretFiles` — `{<name>: {contentBase64, mode?, linkPath?} | null}`; схема OpenAPI общая с `PATCH /env`. Наборы накладываются по ключу на унаследованные (fork — копия наборов источника, resume — наборы самой sandbox): тот же ключ — побеждает запрос, secret-файлы — по имени, `null` удаляет ключ. Лимиты проверяются на результате. У resume результат сохраняется в sandbox (как `PUT /env`), даже если resume потом не удался; у fork меняется только цель, источник не трогается.
 
 ### 8.3 Env и секреты
 
@@ -501,7 +530,8 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 | `secrets` | `secret_env` | tmpfs, заново после каждой загрузки | только через fork (S6 перешифровывает) |
 | `secretFiles` | `secret_files` | tmpfs, `linkPath` — symlink на диске | только через fork |
 
-- Лимиты: до 100 переменных в каждом наборе; ключ `[A-Za-z_][A-Za-z0-9_]{0,127}`; значение до 32 KiB без NUL; всего до 256 KiB на набор. Префикс `SBX_` зарезервирован (`400 validation`). Значения с переводом строки в SSH-сессиях не видны (S3 §8.2) — это пишется в описании поля.
+- Наборы принимают create, fork и resume (§8.2), `PUT /env` и environments (S8 §10).
+- Лимиты: до 100 переменных в каждом наборе; ключ `[A-Za-z_][A-Za-z0-9_]{0,127}`; значение до 32 KiB без NUL; всего до 256 KiB на набор. Префикс `SBX_` зарезервирован (`400 validation`), кроме переменных CLI `sbx` (§14.1): `SBX_API_KEY`, `SBX_API_URL`, `SBX_TEAM`, `SBX_PROFILE` — так CLI внутри VM получает ключ секретом sandbox (S5 §8.9). Значения с переводом строки в SSH-сессиях не видны (S3 §8.2) — это пишется в описании поля.
 - `secretFiles`: до 32 файлов, каждый до 1 MiB, всего до 8 MiB (S3), имя `[A-Za-z0-9._-]{1,128}`, `mode` по умолчанию `0440`, `linkPath` — абсолютный путь.
 - **`GET /env`** → `{env: {k: v}, secretKeys: [...], secretFiles: [{name, mode, linkPath, sizeBytes}]}`. Значения секретов не отдаются никогда.
 - **`PUT /env {env?, secrets?, secretFiles?}`** — каждое переданное поле заменяет свой набор целиком, непереданное не меняется. Ответ `200 {delivered: bool}` + то же, что `GET`. Новые значения видят новые команды; уже запущенные — нет. `delivered: false` значит, что sandbox не `ready` или агент недоступен: S6 доставит набор при следующем resume/reprovision. Метод S6 `updateEnv` — добавление (§20.2).
@@ -613,7 +643,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 | `heartbeat` | — | после 15 s тишины |
 | `reconnect` | `stdoutOffset`, `stderrOffset`, `ptyOffset?`, `reason: "max_duration" \| "server_shutdown"` | последний кадр; клиент сразу открывает `/stream` с этими offset-ами |
 | `exit` | `status`, `exitCode`, `signal`, `reason`, `stdoutOffset`, `stderrOffset`, `ptyOffset?` | последний кадр; приходит только после всего вывода до этих offset-ов |
-| `error` | `code`, `message`, `retryable`, `stdoutOffset`, `stderrOffset`, `ptyOffset?` | последний кадр; при `retryable` клиент открывает `/stream` с этими offset-ами |
+| `error` | `code`, `message`, `retryable`, `requestId`, `stdoutOffset`, `stderrOffset`, `ptyOffset?` | последний кадр; при `retryable` клиент открывает `/stream` с этими offset-ами |
 
 - `status` в `exit`: `exited | killed | timed_out | lost | failed_to_start` (S6 §5.8; S3 `reason TIMEOUT` → `timed_out`, `START_FAILED` → `failed_to_start`). `reason` — значение S3 в нижнем регистре (`none`, `signal`, `timeout`, `oom`, `pty_idle`, `reboot`, `shim_lost`, `start_failed`).
 - **Кодировка.** `base64`: `data` — base64 ровно байтов `[offset, nextOffset)`. `utf8`: `api` декодирует каждый поток потоковым декодером UTF-8; незаконченная многобайтовая последовательность в конце куска (до 3 байт) придерживается до следующего куска, поэтому `nextOffset` всегда стоит на границе символа и повторный attach с `nextOffset` не рвёт символ. Некорректные байты заменяются на U+FFFD, а offset-ы считаются по исходным байтам. Для бинарного вывода — `base64`.
@@ -672,7 +702,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - Аутентификация: `Authorization: Bearer` (CLI, SDK на Node/Bun/Python) или сессия oauth2-proxy (браузер, с проверкой Origin, §7.4). Браузерный `WebSocket` не умеет ставить заголовки, поэтому из браузера PTY доступен только через `app.<domain>`.
 - **Сервер → клиент:**
   - бинарный кадр — подряд идущие байты вывода PTY;
-  - текстовый кадр — JSON: `{"type":"attached","offset":N}` (первым), `{"type":"truncated","availableFrom":N}`, `{"type":"exit",...}` (как NDJSON), `{"type":"error","code","message","retryable"}`, `{"type":"reconnect","offset":N,"reason"}`.
+  - текстовый кадр — JSON: `{"type":"attached","offset":N}` (первым), `{"type":"truncated","availableFrom":N}`, `{"type":"exit",...}` (как NDJSON), `{"type":"error","code","message","retryable","details","requestId"}`, `{"type":"reconnect","offset":N,"reason"}`.
   - Клиент считает offset сам: `attached.offset` (или `availableFrom` после `truncated`) плюс число полученных байтов.
 - **Клиент → сервер:** бинарный кадр — ввод; текстовый — `{"type":"resize","cols":N,"rows":N}`.
 - **Ввод.** `api` назначает `inputSessionId` на каждое WebSocket-соединение и нумерует `seq`; повторы `api` → агент дедуплицируются (S2 §9.3). Байты, которые клиент отправил в момент обрыва WebSocket, могут потеряться: нажатие клавиши теряется, но не повторяется дважды. Склейка нажатий за 5 ms.
@@ -697,10 +727,13 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
   5. `DELETE /files/uploads/{upload}` — отмена.
   `api` буферизует чанк в памяти (до 8 MiB), чтобы `agent-client` мог повторить его при обрыве туннеля.
 - **`GET /files/stat?path=&noFollow=false`**, **`GET /files/list?path=&depth=1&includeHidden=true&limit=&cursor=`**, **`POST /files/mkdir {path, parents?, mode?}`**, **`POST /files/move {from, to, overwrite?}`**, **`POST /files/chmod {path, mode?, owner?, group?, recursive?}`**, **`DELETE /files?path=&recursive=false`** → `200 {existed}`.
+- **Архив каталога** (агент — S3 §11.2, правила путей и ошибок — те же, что у остальных ручек `/files`):
+  - **`GET /files/archive?path=&format=tar|tar.gz`** — каталог `path` одним потоком tar (по умолчанию `tar`, POSIX pax), проксируется от агента без буферизации; `Content-Type: application/x-tar` или `application/gzip`, `Content-Disposition: attachment`. Имена в архиве — относительно `path`. Не каталог → `409 not_directory`. Без `Range` и без докачки; ошибка посреди потока обрывает ответ без завершающих блоков tar, и клиент видит неполный архив.
+  - **`PUT /files/archive?path=&format=tar|tar.gz&overwrite=true&makeParents=true`** (по умолчанию `format=tar`) — тело потоком, распаковка в каталог `path` → `200 {path, entries, sizeBytes}`. Владелец — пользователь `user` запроса, uid/gid из архива игнорируются. Пределы (агент, S3 §11.2): до 200 000 записей, до 16 GiB распакованных данных, путь записи до 4 096 байт, иначе `413 payload_too_large`. Запись с абсолютным путём или `..`, hardlink на путь вне архива и спецфайлы (устройства, FIFO) — `400 invalid_path`. Symlink-и создаются как есть, но распаковка не проходит через symlink внутри `path` (ни из архива, ни уже лежащий на диске; такая запись — `400 invalid_path`), поэтому запись не выходит за `path`. Распаковка не атомарна: при ошибке записанное остаётся (`details.entriesWritten`); кому нужна атомарность, распаковывает в новый каталог и делает `move`. Не возобновляется: SDK повторяет весь архив (с `overwrite=true` повтор безопасен).
 - `FileInfo`: `{path, name, type: "file"|"dir"|"symlink"|"other", sizeBytes, mode, owner, group, uid, gid, modifiedAt, symlinkTarget}`.
-- Capabilities `files.v1`, для загрузок `files.upload.v1`. Состояние sandbox — как у команд (§9.1, шаг 2).
+- Capabilities `files.v1`, для загрузок `files.upload.v1`, для архива `files.archive.v1`. Состояние sandbox — как у команд (§9.1, шаг 2).
 - Ошибки агента — по S3 §11.1 и таблице §5.5.
-- Не в v1: скачивание каталога архивом, наблюдение за каталогом, поиск, подписанные URL (§19). Каталог передаётся через `tar` в exec + файл (CLI `push`, §14).
+- Не в v1: наблюдение за каталогом, поиск, подписанные URL (§19).
 
 ### 11.2 Порты
 
@@ -800,7 +833,11 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 - **`GET /v1/templates`** → `{data: [{slug, name, os, enabled, defaultSize, allowedSizes, loginUser, capabilities: ["exec","files","ssh","desktop"], version}]}`. `version` — активная сборка (S6 `template_builds`). Выключенные шаблоны видят только операторы.
 - **`GET /v1/sizes`** → `{data: [{slug, vcpu, memoryMb}]}`.
 - **`GET /v1/me`** → `{user: {id, email, name}, team: {id, name, role}, teams: [{id, name, role}], isOperator, auth: {kind: "api_key" | "session", apiKeyId?, scopes, expiresAt?}}`.
-- **`GET /v1/limits`** → `{quota: {maxActiveSandboxes, maxRamMb, maxSavedSnapshots}, usage: {activeSandboxes, ramMb, savedSnapshots}, canCreate, rateLimits: {requestsPerSecond, burst, startsPerMinute}}`. `usage` — метод S6 (добавление, §20.2).
+- **`GET /v1/limits`** → `{quota: {maxActiveSandboxes, maxRamMb, maxSavedSnapshots}, usage: {activeSandboxes, ramMb, savedSnapshots}, remaining: {activeSandboxes, ramMb, savedSnapshots}, canCreate, templates: [{slug, enabled, defaultSize, sizes: [{slug, vcpu, memoryMb, allowed, reason, warmAvailable}]}], rateLimits: {requestsPerSecond, burst, startsPerMinute}}`. Для команды запроса; `usage` и `remaining` считаются по правилам квот S6 §8.5.
+  - `canCreate` — можно ли сейчас создать sandbox хотя бы одного допустимого размера.
+  - `sizes` — все размеры из `allowedSizes` шаблона; `allowed: false` с `reason`: `template_disabled`, `quota_active_sandboxes`, `quota_ram`. Выключенные шаблоны видят только операторы (как в `/templates`).
+  - `warmAvailable` — число `warm` machine пары сейчас (подсказка для `failFast`, §8.2; не резерв). Ёмкость нод (`out_of_capacity`) заранее не обещается.
+  - `usage` и счётчики пула — метод S6 (добавление, §20.2).
 - **`GET /v1/meta`** (без auth) → `{apiVersion: "v1", build, appUrl, apiUrl, sbxDomain, ssh: {host, port, hostKeys}, minCliVersion, latestCliVersion}`.
 - **Saved snapshots** (адресуются по имени внутри команды; имя `^[a-z0-9][a-z0-9-]{0,62}$`):
   - `POST /v1/snapshots {sandbox, name}` (`Idempotency-Key`) → `202 {snapshot, operation}`. Существующий снапшот с тем же именем заменяется, когда новый станет `ready` (S6 §7.8).
@@ -810,17 +847,17 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
   - Create из снапшота — `POST /v1/sandboxes {from: {snapshot: name}}`.
 - **API-ключи:**
   - `GET /v1/api-keys` — ключи пользователя в текущей команде (оператор: `?all=true` — все ключи команды);
-  - `POST /v1/api-keys {name, scopes? | preset?, expiresInSeconds?}` → `201 {apiKey, secret}`;
+  - `POST /v1/api-keys {name, scopes? | preset?, expiresInSeconds?, kind?}` → `201 {apiKey, secret}`; `expiresInSeconds` по умолчанию 90 дней, максимум 365 (§7.2); `kind` — только `user` (по умолчанию), пресет `sandbox-self` ключам `user` не выдаётся;
   - `POST /v1/api-keys/{key}/rotate` → `200 {apiKey, secret}`: новый секрет, старый перестаёт работать сразу;
   - `DELETE /v1/api-keys/{key}` → `204`; `DELETE /v1/api-keys/self` → `204`.
-  - Ресурс: `{id: "key_...", name, prefix, last4, scopes, createdVia: "api"|"cli"|"dashboard", createdAt, expiresAt, lastUsedAt, revokedAt}`.
+  - Ресурс: `{id: "key_...", kind: "user", sandboxId: null, name, prefix, last4, scopes, createdVia: "api"|"cli"|"dashboard", createdAt, expiresAt, lastUsedAt, revokedAt}`; `kind: "sandbox"` зарезервирован (§7.2).
 
 ## 14. CLI `sbx`
 
 ### 14.1 Сборка и конфигурация
 
 - `apps/cli` на `@sbx/sdk`, разбор аргументов — `commander`. Сборка `bun build --compile --target=bun-<os>-<arch>` для `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `windows-x64`. Бинарники и `SHA256SUMS` — в GitHub Releases (§15.5).
-- Конфиг `$XDG_CONFIG_HOME/sbx/config.json` (по умолчанию `~/.config/sbx/`, Windows — `%APPDATA%\sbx\`), права `0600`: профили `{name: {apiUrl, apiKey, team}}`, текущий профиль. Порядок: флаги > env (`SBX_API_URL`, `SBX_API_KEY`, `SBX_TEAM`, `SBX_PROFILE`) > профиль. Хранилище ключей ОС — позже.
+- Конфиг `$XDG_CONFIG_HOME/sbx/config.json` (по умолчанию `~/.config/sbx/`, Windows — `%APPDATA%\sbx\`), права `0600`: профили `{name: {apiUrl, apiKey, team}}`, текущий профиль. Порядок: флаги > env (`SBX_API_URL`, `SBX_API_KEY`, `SBX_TEAM`, `SBX_PROFILE`) > профиль > системный `/etc/sbx/config.json` (только `apiUrl`; его кладёт шаблон, S5 §8.9). Хранилище ключей ОС — позже.
 - Кэш `known_hosts` для SSH — `~/.config/sbx/known_hosts`, обновляется из `/v1/meta`.
 
 ### 14.2 Команды
@@ -828,9 +865,10 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | Команда | Что делает |
 |---|---|
 | `sbx login [--device] [--key-stdin] [--api-url]`, `logout`, `whoami` | §7.6; `whoami` = `/me` |
-| `sbx create [--template] [--size] [--name] [--slug] [--label k=v] [--env K=V] [--secret K=V] [--env-file f] [--ttl] [--idle] [--from snap] [--wait]` | create; `--wait` ждёт `ready` и печатает его |
+| `sbx create [--template] [--size] [--name] [--slug] [--label k=v] [--env K=V] [--secret K=V] [--env-file f] [--ttl] [--idle] [--from snap] [--fail-fast] [--wait]` | create; `--wait` ждёт `ready` и печатает его; `--fail-fast` — §8.2 |
 | `sbx list [--state] [--label]`, `sbx info <sb>` | |
-| `sbx stop|resume|recover <sb> [--wait]`, `sbx fork <sb> [--name] [--wait]`, `sbx rm <sb>... [--yes]` | `rm` спрашивает подтверждение в TTY без `--yes` |
+| `sbx stop\|resume\|recover <sb> [--wait]`, `sbx fork <sb> [--name] [--wait]`, `sbx rm <sb>... [--yes]` | `resume` и `fork` принимают `--env K=V`, `--secret K=V`, `--env-file f` (§8.2); `rm` спрашивает подтверждение в TTY без `--yes` и шлёт `Sbx-Confirm-Delete` (§5.12); без TTY и без `--yes` — ошибка аргументов |
+| `sbx current [<sb> \| --clear]` | печатает текущую sandbox этого shell; с `<sb>` — делает её текущей |
 | `sbx rename <sb> <slug>`, `sbx extend <sb> [--ttl]`, `sbx label <sb> k=v...` | |
 | `sbx env <sb> [--set K=V] [--secret K=V] [--unset K]` | `GET`/`PUT /env` |
 | `sbx exec <sb> [--cwd] [--env] [--user] [--timeout] [--detach] [--stdin] -- <cmd...>` | по умолчанию — стрим вывода живьём (stdout в stdout, stderr в stderr), код выхода `sbx` = код команды. Автоматический reattach. `--detach` печатает `commandId` |
@@ -838,8 +876,8 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx shell <sb> [-- <cmd>]` | PTY по WebSocket в raw-режиме TTY; размер по `SIGWINCH`; переподключение само |
 | `sbx ssh <sb> [-- ssh args]` | запускает системный `ssh` с `-o UserKnownHostsFile=<кэш>` к `<slug>@ssh.<domain>`; без SSH-ключей в аккаунте предлагает `sbx ssh-keys add` |
 | `sbx ssh-keys list|add [file]|rm` | по умолчанию `~/.ssh/id_ed25519.pub` |
-| `sbx cp <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range` |
-| `sbx push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz → загрузка → `tar xzf` через exec |
+| `sbx cp [-r] <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range`; `-r` — каталог через `/files/archive` (§11.1) |
+| `sbx push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz потоком в `PUT /files/archive` |
 | `sbx port <sb> <port> [--public|--sso|--token]`, `sbx ports <sb>`, `sbx unport <sb> <port>`, `sbx port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
 | `sbx snapshot save <sb> <name>`, `snapshot list|rm` | |
 | `sbx templates`, `sbx sizes`, `sbx limits` | |
@@ -847,13 +885,16 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |
 | `sbx completion bash|zsh|fish|powershell`, `sbx version` | |
 
-`<sb>` — ID или slug. Если не указан, берётся `SBX_SANDBOX`.
+`<sb>` — ID или slug. Если не указан, берётся `SBX_SANDBOX`, затем текущая sandbox shell, затем (внутри VM) `SBX_SANDBOX_ID` из env платформы (S3 §8.2; там UUID из S6, CLI сам переводит его в `sb_…`, §5.3).
+
+**Текущая sandbox** [MVP-рек. R1]. `create`, `fork` и любая команда с явным `<sb>` делают эту sandbox текущей для shell. Ключ shell — `SBX_SESSION`, если задан, иначе PID родительского процесса и время его старта; состояние — `$XDG_STATE_HOME/sbx/current/<key>` (на Windows — `%LOCALAPPDATA%\sbx\`), старше 7 дней удаляется. `sbx current` печатает `{sandbox}` (ресурс §8.1) или выходит с кодом `3`, если текущей нет или она удалена.
 
 ### 14.3 Вывод и коды выхода
 
-- По умолчанию — таблицы и строки для человека. `--json` (или `SBX_OUTPUT=json`): одна JSON-структура (ресурс API как есть) для обычных команд; JSON Lines для потоковых (`create --wait`: `{"event":"created",...}`, `{"event":"state",...}`, `{"event":"ready",...}`; `exec`/`logs`: кадры NDJSON как в API). Автоматически `--json` не включается: `sbx exec sb -- cat f > out` должен писать сырой вывод.
-- Ошибка в `--json` — в stderr конверт API `{"error": {...}}`.
-- Коды выхода: `0` — успех; `1` — ошибка API или CLI; `2` — ошибка аргументов; `3` — не найдено; `4` — нет прав или нет входа; `75` — временная ошибка (retryable, исчерпаны повторы); для `exec`/`run` — код команды (`128 + n` для сигнала, `124` для `timed_out`, `125` для `lost`/`failed_to_start`).
+- **JSON, когда stdout не TTY** [MVP-рек. R1]. В TTY — таблицы и строки для человека; если stdout не TTY — JSON, как с `--json`. `--json` (или `SBX_OUTPUT=json`) включает JSON и в TTY, `--human` (`SBX_OUTPUT=human`) — текст и без TTY. Исключение — команды, чей stdout — это данные: `exec`, `run`, `logs`, `shell`, `ssh`, `cp`/`push` в stdout пишут сырой вывод при любом stdout (`sbx exec sb -- cat f > out` пишет байты файла); для `exec`, `run`, `logs` с явным `--json` — кадры NDJSON как в API.
+- **Форма JSON.** Обычные команды — одна JSON-структура (ресурс API как есть). Ждущие команды (`create --wait`, `fork --wait`, `resume --wait`, `recover --wait`, `stop --wait`) — JSON Lines: `{"event":"accepted","sandbox":{...},"operation":{...}}`, `{"event":"state",...}` при смене состояния, последним — `{"event":"ready","sandbox":{...}}` (у `stop --wait` — `{"event":"stopped",...}`). Поле-дискриминатор строк JSONL у CLI всегда `event`: кадры API (§9.5) в `exec`/`run`/`logs --json` печатаются с `event` вместо `type`.
+- **Ошибка — последняя строка stdout** в режиме JSON: `{"event":"error","code","message","retryable","details","requestId"}` (поля из §5.5; ошибка CLI без ответа API — те же поля, `requestId: null`), у любой команды, в том числе после строк JSONL. Текст для человека — в stderr. У команд с сырым выводом (`exec`, `run`, `logs`, `cp`, `push`) без явного `--json` stdout занят данными, поэтому эта строка идёт в stderr.
+- Коды выхода (одинаковы в TTY и в JSON): `0` — успех; `1` — ошибка API или CLI; `2` — ошибка аргументов; `3` — не найдено; `4` — нет прав или нет входа; `75` — временная ошибка (retryable, исчерпаны повторы); для `exec`/`run` — код команды (`128 + n` для сигнала, `124` для `timed_out`, `125` для `lost`/`failed_to_start`).
 
 ## 15. OpenAPI и SDK [решение Q4]
 
@@ -907,12 +948,13 @@ await sb.delete()
 | `start(cmd)` + `follow(from)` | detached + attach с автопереподключением (45 s без строк = обрыв) | как `run_command` + `follow_command` у boat, но с повтором `start` по ключу |
 | `readText`/`writeText`, `readBytes`/`writeBytes` | `/files/content` | у boat через JSON с base64 до 5 MiB |
 | `upload(path, src)`, `download(path, dest)` | чанки 4 MiB с докачкой по `HEAD`; скачивание с `Range` и `If-Range` | у boat signed URL без докачки |
+| `uploadDir(local, path)`, `downloadDir(path, local)` | каталог одним tar-потоком через `/files/archive` | у boat только в CLI |
 | `pty(opts)` | WebSocket с автопереподключением по offset | у boat нет |
-| `stopAndDelete()` | delete (stop не нужен) | |
+| `stopAndDelete()` | delete с `Sbx-Confirm-Delete` (§5.12; stop не нужен) | |
 | `sandboxes.list()` | итератор по всем страницам | |
 
 **Политика повторов транспорта SDK** [решение S7]:
-- Повторяются: `GET`/`HEAD`/`PUT`/`DELETE` на сетевых ошибках, `502`, `503`, `504`, `429`; `POST` — только если у запроса есть `Idempotency-Key` (SDK ставит его сам для ручек из §5.7) или в ответе `retryable: true`.
+- Повторяются: `GET`/`HEAD`/`PUT`/`DELETE` на сетевых ошибках, `502`, `503`, `504`, `429`; `POST` — только если у запроса есть `Idempotency-Key` (SDK ставит его сам для ручек из §5.7) или в ответе `retryable: true`. Исключение — `503 pool_exhausted`: SDK и CLI его не повторяют, а сразу отдают вызывающему (иначе `failFast` теряет смысл; CLI выходит с кодом `75`).
 - Backoff: 0,5 s × 2 до 8 s с full jitter, `Retry-After` имеет приоритет, всего до 60 s (настраивается). `retryable: false` не повторяется никогда.
 - Стримы (`run`, `follow`, PTY) переподключаются с offset-ами без общего лимита времени, пока есть прогресс; 20 подряд неудачных попыток без новых байтов — ошибка.
 
@@ -943,7 +985,8 @@ await sb.delete()
 - **Chaos стрима (главный).** SDK `run()` команды на 3000 строк × 512 B; каждые 100–400 ms случайный сбой: обрыв туннеля, drain gateway, перезапуск агента, **остановка процесса `api`** (второй экземпляр `api` подхватывает). sha256 stdout и stderr совпадают с ожидаемыми, код выхода верный, `Start` агента выполнен один раз.
 - **Идемпотентность команд.** Повтор `POST /commands` с тем же ключом после обрыва в каждой точке (до `Start`, после `Start` до ответа, в середине стрима) — одна команда у агента.
 - **Безопасность:** `X-Auth-Request-Email` на public listener-е игнорируется; запрос на proxied без `Origin` или с чужим `Origin` — `403`; WebSocket upgrade с чужим `Origin` — отказ; код `port-auth` второй раз и с чужим `label` — `invalid_code`; PKCE с чужим verifier — отказ; повторное использование кода CLI — отказ; ключ не может выпустить ключ шире себя; секреты не попадают в логи (перехват логгера в тестах create, `PUT /env`, `cli/token`).
-- **Файлы:** загрузка 100 MiB с обрывом в середине и докачкой через `HEAD`; `Range` и `If-Range`; `checksum_mismatch`.
+- **Файлы:** загрузка 100 MiB с обрывом в середине и докачкой через `HEAD`; `Range` и `If-Range`; `checksum_mismatch`; архив каталога туда и обратно (sha256 файлов совпадают), отказ на `..`, абсолютном пути и записи через symlink, пределы `413`.
+- **Контракт CLI и ошибок:** без TTY CLI печатает JSON, `create --wait` даёт JSONL с последней строкой `ready`, ошибка — последняя строка `{"event":"error",…}`; у любой ошибки API есть `retryable` и `requestId`; `DELETE` без `Sbx-Confirm-Delete` или с чужим ID — `428`, ничего не удалено; `failFast` при пустом пуле — `503 pool_exhausted`, в БД нет новой sandbox, операции и ключа идемпотентности.
 - **PTY:** эхо, resize, обрыв WebSocket и переподключение с offset без потерь вывода; закрытие `1012` при остановке пода.
 - **Long-poll:** `waitFor=ready` возвращается по `NOTIFY` до таймаута.
 - **Контракт:** запросы и ответы всех интеграционных тестов валидируются по `openapi/v1.json`.
@@ -963,7 +1006,7 @@ await sb.delete()
 
 ### 17.2 S3
 
-Отдельных требований нет: используются `Process` (§9), `Filesystem` и `/files/*` (§11.1), `System/ListPorts`, `UpdateEnv`/`UpdateSecrets` (через S6), capabilities из S3 §13.
+Отдельных требований нет: используются `Process` (§9), `Filesystem` и `/files/*` (§11.1, включая `/files/archive` с capability `files.archive.v1`), `System/ListPorts`, `UpdateEnv`/`UpdateSecrets` (через S6), capabilities из S3 §13.
 
 ### 17.3 S8 (Payload)
 
@@ -987,7 +1030,7 @@ interface IdentityStore {
 ```
 
 - **ID в Payload — UUID** (`idType: 'uuid'` адаптера Postgres): S6 хранит `team_id`, `created_by`, `principal_id` как `uuid`, а кодеки `usr_`/`team_`/`key_`/`sshk_` (§5.3) рассчитаны на 128 бит. Это требование к S8.
-- Коллекции: `users` (email, name, active, isOperator из групп IdP, defaultTeam), `teams`, `memberships` (user, team, role), `api-keys` (`name`, `user`, `team`, `secretHash` unique, `prefix`, `last4`, `scopes[]`, `expiresAt`, `revokedAt`, `lastUsedAt`, `createdVia`), `ssh-keys` (`user`, `name`, `publicKey`, `fingerprint` unique, `type`, `lastUsedAt`).
+- Коллекции: `users` (email, name, active, isOperator из групп IdP, defaultTeam), `teams`, `memberships` (user, team, role), `api-keys` (`name`, `user`, `team`, `kind` (`user`; `sandbox` зарезервирован, §7.2), `sandbox` (uuid, null), `secretHash` unique, `prefix`, `last4`, `scopes[]` (имена §7.3), `expiresAt` (обязателен), `revokedAt`, `lastUsedAt`, `createdVia`), `ssh-keys` (`user`, `name`, `publicKey`, `fingerprint` unique, `type`, `lastUsedAt`).
 - `Template`: + `loginUser` (по умолчанию `user`), `capabilities`. `PlatformDefaults`: + `defaultTemplate`, `publicPortsEnabled`, `ssoPortPolicy (any | team)`, лимиты частоты. Блокировки портов и sandbox оператором — поля, которые читает `routes.lookup`.
 - `afterChange`-хуки коллекций `users`, `memberships`, `api-keys`, `ssh-keys` шлют `NOTIFY sbx_identity '<collection>:<id>'`.
 - Ключи создаются только через `packages/auth` (формат §7.2). UI ключей в дашборде вызывает API S7, а не пишет в коллекцию напрямую.
@@ -1002,7 +1045,7 @@ interface IdentityStore {
 
 ### 17.5 S11 (MCP): что нужно от API
 
-- **Инструменты** строятся поверх `@sbx/sdk`: create/list/get/stop/resume/fork/delete, `exec` (sync с таймаутом, хвост вывода, `commandId`), `start` + чтение вывода по offset (`/output` — для опроса без стримов), `kill`, файлы (read text с ограничением размера, write, list, stat, mkdir, move, delete), порты (host, list), snapshots, templates/sizes.
+- **Инструменты** строятся поверх `@sbx/sdk`: create (с `failFast`)/list/get/stop/resume/fork/delete (с `Sbx-Confirm-Delete`, §5.12), `limits`, `exec` (sync с таймаутом, хвост вывода, `commandId`), `start` + чтение вывода по offset (`/output` — для опроса без стримов), `kill`, файлы (read text с ограничением размера, write, list, stat, mkdir, move, delete), порты (host, list), snapshots, templates/sizes.
 - **Описания:** `summary`/`description` операций и полей в OpenAPI пишутся так, чтобы из них получались описания инструментов (§15.1).
 - **Безопасные повторы:** `Idempotency-Key` для create/fork/commands, чтобы повтор вызова инструмента не создавал второй ресурс и не запускал команду дважды.
 - **Ответы для LLM:** ошибки с понятным `message` и `retryable`; большие выводы — с флагами усечения и offset-ами, а не огромными телами; `waitFor` long-poll вместо опроса.
@@ -1052,9 +1095,9 @@ interface IdentityStore {
 | Фаза | Что входит |
 |---|---|
 | **PoC** | Public и internal listener-ы; `StaticIdentityStore` и ключи из YAML; create/get/list/patch (без slug)/delete, operations, long-poll; команды: sync, stream, detached, attach, output, input, kill, signal, list; файлы: content (чтение с `Range`, запись потоком), stat, list, mkdir, move, delete; templates, sizes, `/me`, `/meta`; `agent-events`; ошибки, пагинация, идемпотентность, лимиты; OpenAPI + CI; CLI: `login --key-stdin`, `create`, `list`, `info`, `rm`, `exec`, `logs`, `kill`, `cp` (без докачки) |
-| **MVP** | stop/resume/fork/recover/extend; rename slug; `GET`/`PUT /env`; PTY по WebSocket; загрузка чанками; chmod; порты и режимы доступа, ручки gateway (routes, port-auth, SSO authorize); SSH-ключи, `/ssh`, `ssh/authorize`; saved snapshots; API-ключи; proxied listener (реализация `IdentityStore` на Payload — S8); `sbx login` (loopback и device); `/limits`; SDK TS и Python с хелперами; полный CLI; релизы |
+| **MVP** | stop/resume/fork/recover/extend; rename slug; `GET`/`PUT /env`; PTY по WebSocket; загрузка чанками; chmod; порты и режимы доступа, ручки gateway (routes, port-auth, SSO authorize); SSH-ключи, `/ssh`, `ssh/authorize`; saved snapshots; API-ключи; proxied listener (реализация `IdentityStore` на Payload — S8); `sbx login` (loopback и device); `/limits`; SDK TS и Python с хелперами; полный CLI; релизы. По MVP-рекомендациям: архив каталога (`/files/archive`), `failFast`, env и секреты на fork и resume, `Sbx-Confirm-Delete`, scopes «ресурс × действие», контракт вывода CLI и `sbx current` |
 | **Граница с S8** | MVP S7 считается готовым против `StaticIdentityStore` (с сессиями из заголовков для теста proxied listener-а) и `StaticConfigReader`, расширенного полями из §17.3 (`loginUser`, `capabilities`, `defaultTemplate`, `publicPortsEnabled`, `ssoPortPolicy`). Реализация `IdentityStore` и этих полей на Payload — работа S8; S7 её не ждёт |
-| **Позже** | Подписанные URL файлов; архив каталога; история вывода команд вне VM; webhooks; `ps`; desktop и computer-use (S10); ключи с ограничением по sandbox или labels; программный доступ к `sso`-портам (S4 §17); хранилище ключей ОС в CLI; self-update CLI; публикация в GitHub Packages |
+| **Позже** | Подписанные URL файлов; история вывода команд вне VM; webhooks; `ps`; desktop и computer-use (S10); ключи типа `sandbox` (§7.2) и ключи пользователя с ограничением по sandbox, environments или labels (S24); программный доступ к `sso`-портам (S4 §17); хранилище ключей ОС в CLI; self-update CLI; публикация в GitHub Packages |
 
 ## 20. Сводка изменений в других спеках
 
@@ -1079,7 +1122,7 @@ interface IdentityStore {
 2. `createCommand(p, id, spec, idemKey?)` — по ключу возвращает существующую команду (scope `commands.create`); в `commands` добавить `user`, `tags jsonb`, `argv jsonb null`. `listCommands`, `getCommand`.
 3. `hostPort(p, id, port, {access, hostRewrite, appProtocol})`; в `hosted_ports` — `host_rewrite`, `app_protocol`, `blocked`, `block_reason`; `listHostedPorts`; блокировка sandbox оператором. `routes.lookup` отдаёт поля S4 §6.1.
 4. `rename(p, id, slug)` — меняет `hosted_ports.label` всех портов, `authEpoch+1`, `NOTIFY sbx_routes` со старым и новым slug.
-5. `usage(teamId)` для `/limits`.
+5. `usage(teamId)` для `/limits` и число `warm` machine по парам (шаблон, размер).
 6. `listSavedSnapshots` отдаёт и `creating` (по `pending_name`), и `failed` за сутки; `getSavedSnapshot(p, name)`.
 7. `resume` и `recover` при активной операции того же вида возвращают её (как `stop`).
 8. Последний снимок `ports.changed` по sandbox (`listeningPorts(id)`).
@@ -1088,6 +1131,8 @@ interface IdentityStore {
 11. Общий для `api` и `core` механизм идемпотентности по scope (`sandboxes.create`, `sandboxes.fork`, `commands.create`, `snapshots.create`); `saveSnapshot` принимает `idemKey`. В hash входит и sandbox из пути.
 12. `extend(p, id, ttlSeconds?)`.
 13. `NOTIFY sbx_operations '<operationId>'` при переходе операции в терминальное состояние (триггер) — для `GET /operations/{id}?waitSeconds` (`save_snapshot` и fork на источнике не меняют `state` sandbox, поэтому `sbx_sandboxes` их не покрывает).
+
+MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в S6 и делаются в `s6-impl`, а не этим списком: `failFast` и `pool_exhausted` (S6 §7.3, §14.1), env и секреты на fork и resume (S6 §7.6, §7.7).
 
 ### 20.3 Добавления к S2
 

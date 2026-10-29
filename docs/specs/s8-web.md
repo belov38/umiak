@@ -1,6 +1,6 @@
 # S8. Web (Payload): админка, дашборд, пользователи и команды — спецификация
 
-Статус: согласовано (master-сессия от имени Ильи), 2026-10-29; политика увольнения (§20) ждёт подтверждения Ильи. Область S8 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§2, §10, §11). Опирается на `docs/specs/s7-public-api.md` (listener-ы, ключи, scopes, `IdentityStore`, §17.3, §22), `docs/specs/s6-control-plane.md` (§5.11 `ConfigReader`, §8.5 квоты, §13.1 секреты), `docs/specs/s4-gateway.md` (§6.1–6.2 маршруты и блокировки, §8.4 SSO, §14.1 cookie).
+Статус: согласовано (master-сессия от имени Ильи), 2026-10-29; политика увольнения (§20) ждёт подтверждения Ильи. Дополнено MVP-рекомендациями R3, R4 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S8 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§2, §10, §11). Опирается на `docs/specs/s7-public-api.md` (listener-ы, ключи, scopes, `IdentityStore`, §17.3, §22), `docs/specs/s6-control-plane.md` (§5.11 `ConfigReader`, §8.5 квоты, §13.1 секреты), `docs/specs/s4-gateway.md` (§6.1–6.2 маршруты и блокировки, §8.4 SSO, §14.1 cookie).
 
 Ответы на Q1–Q3 и решения автора согласованы master-сессией от имени Ильи (2026-10-29). Пометка **[решение S8]** — решение автора спеки в рамках брифа (одобрено master-сессией); его можно менять при планировании, если причина записана. Пометка **[изменение S7]** / **[изменение S6]** — место, где S8 добавляет что-то в уже согласованную спеку; сводка — §17.
 
@@ -27,7 +27,7 @@ S8 — человеческое лицо платформы. Операторы 
 - Локальная разработка без oauth2-proxy (§13), миграции схемы `payload` (§12), форма сборки и деплоя (§14).
 
 **Не-цели (другие области)**
-- Публичное API и его внутренности (S7), машины состояний и worker (S6), gateway (S4), рабочий стол (S10), MCP (S11), Helm-чарты и настройка IdP (S12), репозитории в environments (S13).
+- Публичное API и его внутренности (S7), машины состояний и worker (S6), gateway (S4), рабочий стол (S10), MCP (S11), Helm-чарты и настройка IdP (S12), клон репозиториев из environments (S13; список репозиториев S8 только хранит, §10.1).
 - Страница входа CLI (`/cli/*`) и SSO для портов (`/sbx-auth/*`): их отдаёт `api` (S7 §7.6–7.7), S8 только хранит данные, которые они читают.
 - Биллинг, организации с кошельками, публичная регистрация.
 
@@ -191,7 +191,7 @@ S8 — человеческое лицо платформы. Операторы 
 | `users` | `email` (unique, lower), `name`, `idpSubject` (`sub`, unique, null у заготовок), `preferredUsername`, `groups` (json, последние из IdP), `isOperator` (read-only), `active`, `defaultTeam` → teams, `personalTeam` → teams, `lastLoginAt`, `createdAt` | auth-коллекция (§5.4). Удаление запрещено всем [решение S8]: строки нужны для `created_by` в runtime и аудита; вместо удаления — `active: false`. Исключение — заготовки без входа и без членств |
 | `teams` | `name` (1–64), `personal` (bool), `createdBy` → users, `quota` (group: `maxActiveSandboxes`, `maxRamMb`, `maxSavedSnapshots`; пустое — значение по умолчанию), `createdAt` | `quota` меняет только оператор. Удаление — §6.4 |
 | `memberships` | `user` → users, `team` → teams, `role` (`owner` \| `member`), `invitedBy` → users, `createdAt` | unique (`user`, `team`); правило последнего `owner` (§6.2) |
-| `api-keys` | по S7 §17.3: `name`, `user`, `team`, `secretHash` (unique, скрыто в админке), `prefix`, `last4`, `scopes` (json), `expiresAt`, `revokedAt`, `revokedBy` → users, `lastUsedAt`, `createdVia` | создание в админке запрещено (ключи выпускает только `api` через `packages/auth`, S7 §17.3). Оператор может только отозвать (кнопка ставит `revokedAt`, `revokedBy`) |
+| `api-keys` | по S7 §17.3: `name`, `user`, `team`, `kind` (`user`; `sandbox` зарезервирован, S7 §7.2), `sandbox` (uuid, null), `secretHash` (unique, скрыто в админке), `prefix`, `last4`, `scopes` (json, имена S7 §7.3), `expiresAt` (обязателен), `revokedAt`, `revokedBy` → users, `lastUsedAt`, `createdVia` | создание в админке запрещено (ключи выпускает только `api` через `packages/auth`, S7 §17.3). Оператор может только отозвать (кнопка ставит `revokedAt`, `revokedBy`) |
 | `ssh-keys` | по S7 §17.3: `user`, `name`, `publicKey`, `fingerprint` (unique), `type`, `lastUsedAt`, `createdAt` | оператор может удалить |
 | `templates` | `slug` (unique, `[a-z0-9-]{1,40}`), `name`, `description`, `os` (`linux` \| `windows`), `enabled`, `defaultSize` (slug), `allowedSizes` (slugs), `loginUser` (по умолчанию `user`), `capabilities` (`exec`, `files`, `ssh`, `desktop`), `sortOrder` | S6 §5.11, S7 §13. Валидация: `defaultSize ∈ allowedSizes`, slug размеров существуют. Slug не меняется после создания (его хранят `template_builds` и `sandboxes`) |
 | `sizes` | `slug` (unique, например `2gb`), `vcpu`, `memoryMb`, `sortOrder` | slug не меняется; удалить размер, указанный в шаблоне или цели пула, нельзя |
@@ -399,13 +399,16 @@ API keys (team platform-dev)                                           [+ New ke
 
 ### 10.1 Смысл
 
-Environment — именованный набор настроек команды, который новая sandbox получает при создании: `env`, `secrets`, `secretFiles` (те же три набора, что у sandbox, S7 §8.3). Позже сюда же добавятся репозитории и учётные данные git (S13).
+Environment — именованный набор настроек команды, который новая sandbox получает при создании: `env`, `secrets`, `secretFiles` (те же три набора, что у sandbox, S7 §8.3), список репозиториев `repositories` и флаг `excludeOwnerSecrets`. Учётные данные git добавятся позже (S13).
+
+- **`repositories`** — `[{url, branch?, path?}]`, до 20: `url` — `https://…` или `ssh://…`/`git@host:org/repo.git` без учётных данных в URL; `branch` — ветка или тег; `path` — каталог относительно домашнего каталога `user` (по умолчанию имя репозитория). В MVP список **только хранится и отдаётся** в API: клон при claim и доступ к приватным репозиториям — S13, фаза 2.
+- **`excludeOwnerSecrets`** — «не передавать в sandbox личные секреты владельца» (того, кто создаёт sandbox): учётные данные, привязанные к пользователю, а не к команде или environment (будущие ключ `sandbox` в VM — S7 §7.2, личные AI credentials — S16, личные токены git — S13). В MVP таких секретов платформа в VM не кладёт, поэтому флаг только хранится; функции фазы 2 обязаны его соблюдать. Флаг есть и в `POST /v1/sandboxes`; действует `true`, если он `true` в запросе или в выбранной environment. Sandbox хранит итог, fork его наследует.
 
 - У команды может быть одна environment по умолчанию.
 - При create (`POST /v1/sandboxes`) поле `environment`: имя → эта environment; отсутствует → environment команды по умолчанию, если есть; `null` → никакой [изменение S7 C1].
 - Значения **копируются** в `sandbox_secrets` при create; поверх каждого набора накладываются значения из самого запроса (тот же ключ — побеждает запрос; secret-файлы — по имени). Лимиты S7 §8.3 проверяются на результате слияния.
 - Версий и автообновления, как у boat, нет [решение S8]: изменение environment действует только на новые sandbox. Sandbox помнит, из какой environment и какой ревизии создана (`environment: {id, name, revision}` в ресурсе Sandbox), дашборд показывает «environment изменилась после создания». Применить заново — фаза 2.
-- Fork наследует env и секреты источника (S6 §7.7), а не environment. Create из saved snapshot берёт environment как обычный create.
+- Fork наследует env и секреты источника (S6 §7.7), а не environment; значения `env`, `secrets`, `secretFiles` из запроса fork накладываются поверх (S7 §8.2). Create из saved snapshot берёт environment как обычный create.
 - Удаление environment не трогает sandbox, созданные из неё.
 - **От участников команды секреты environment не скрыты** [решение S8 по ревью, как у boat]: любой, кто может создать sandbox и выполнить в ней команду, прочитает `env` внутри. Роль `owner` для записи защищает целостность (кто меняет, что получат все), а не конфиденциальность. Environment по умолчанию применяется ко всем create команды, включая create по API-ключам агентов и CI: в этом её смысл (агент получает нужные ключи без передачи в каждом запросе). Для существующих клиентов поведение не меняется, пока `owner` не назначит environment по умолчанию; клиент, которому она не нужна, передаёт `environment: null`.
 
@@ -413,14 +416,14 @@ Environment — именованный набор настроек команд�
 
 | Метод и путь | Что | Scope |
 |---|---|---|
-| `GET /v1/environments` | список команды: `{id, name, isDefault, revision, envKeys, secretKeys, secretFiles[{name, mode, linkPath, sizeBytes}], createdAt, updatedAt, updatedBy}` | `sandboxes:read` |
-| `GET /v1/environments/{environment}` | то же + значения `env` (не секретов) | `sandboxes:read` |
-| `POST /v1/environments` | `{name, isDefault?, env?, secrets?, secretFiles?}` → `201` | `environments:write` + роль `owner` |
-| `PATCH /v1/environments/{environment}` | `{name?, isDefault?, env?, secrets?, secretFiles?}`; наборы — merge, `null` удаляет ключ (как `PATCH /env`, C2); `revision+1` | `environments:write` + `owner` |
+| `GET /v1/environments` | список команды: `{id, name, isDefault, revision, envKeys, secretKeys, secretFiles[{name, mode, linkPath, sizeBytes}], repositories, excludeOwnerSecrets, createdAt, updatedAt, updatedBy}` | `environments:read` |
+| `GET /v1/environments/{environment}` | то же + значения `env` (не секретов) | `environments:read` |
+| `POST /v1/environments` | `{name, isDefault?, env?, secrets?, secretFiles?, repositories?, excludeOwnerSecrets?}` → `201` | `environments:write` + роль `owner` |
+| `PATCH /v1/environments/{environment}` | `{name?, isDefault?, env?, secrets?, secretFiles?, repositories?, excludeOwnerSecrets?}`; наборы — merge, `null` удаляет ключ (как `PATCH /env`, C2); `repositories` — полная замена; `revision+1` | `environments:write` + `owner` |
 | `DELETE /v1/environments/{environment}` | `204` | `environments:write` + `owner` |
 
 - `{environment}` — ID (`env_...`) или имя; имя `^[a-z0-9][a-z0-9-]{0,62}$`, уникально в команде.
-- Новый scope `environments:write` входит только в пресет `full`. Роль `member` получает `403 forbidden` (`details.reason: "role"`), даже если scope есть: роль проверяется для сессий и для ключей.
+- Scopes `environments:read` (в пресетах `read-only`, `ci`, `full`) и `environments:write` (только в `full`), S7 §7.3. На запись (`environments:write`) роль `member` получает `403 forbidden` (`details.reason: "role"`), даже если scope есть: роль проверяется для сессий и для ключей.
 - Значения секретов не отдаются никогда; логгер `api` вырезает `env`, `secrets`, `secretFiles` (как S7 §8.3).
 - CLI (`sbx env-sets list|show|create|set|unset|rm`, `sbx create --environment`) и SDK получают это из OpenAPI; имена команд CLI — исполнителю S7/S8.
 
@@ -433,6 +436,8 @@ environments(                       -- schema runtime, migration in the S8 range
   is_default bool,
   revision int,                     -- +1 on every change
   env_keys text[], secret_keys text[], secret_files jsonb,  -- names and metadata only, for listing
+  repositories jsonb,               -- [{url, branch, path}], stored only in the MVP (S13)
+  exclude_owner_secrets bool,       -- default false
   key_version int, nonce bytea, ciphertext bytea,           -- AES-256-GCM blob {env, secrets, secretFiles}, S6 §13.1
   created_by uuid, updated_by uuid,
   created_at, updated_at, deleted_at null)
@@ -443,7 +448,7 @@ unique (team_id) where is_default and deleted_at is null
 - Шифрование и кольцо ключей — как `sandbox_secrets` (S6 §13.1), AAD = `environment:<id>:v<keyVersion>`; ротация ключа перешифровывает и эти строки (тот же контроллер cleanup).
 - Сервис — `EnvironmentService` в `packages/core` (`list`, `get`, `create`, `patch`, `delete`, `resolveForCreate(teamId, name|undefined|null)`); `SandboxService.create` вызывает `resolveForCreate` и сливает наборы до шифрования `sandbox_secrets`.
 - Значения не попадают в `operations.request`, `idempotency_keys.response`, логи и метрики (S6 §13.1). Hash идемпотентности create считается от тела запроса (с именем environment, без её значений).
-- В `sandboxes` добавляются `environment_id uuid null`, `environment_revision int null`.
+- В `sandboxes` добавляются `environment_id uuid null`, `environment_revision int null`, `exclude_owner_secrets bool not null default false`.
 
 ## 11. Сроки распространения изменений
 
@@ -568,7 +573,7 @@ unique (team_id) where is_default and deleted_at is null
 
 | # | Что | Подробно |
 |---|---|---|
-| C1 | Environments: ручки `/v1/environments`, scope `environments:write` (в пресете `full`), поле `environment` в `POST /v1/sandboxes`, поле `environment {id, name, revision}` в ресурсе Sandbox, префикс ID `env_` | §10.2 |
+| C1 | Environments: ручки `/v1/environments`, scopes `environments:read` и `environments:write` (S7 §7.3), поля `environment` и `excludeOwnerSecrets` в `POST /v1/sandboxes`, поля `environment {id, name, revision}` и `excludeOwnerSecrets` в ресурсе Sandbox, префикс ID `env_` | §10.2 |
 | C2 | `PATCH /v1/sandboxes/{sandbox}/env` — merge по ключам (`{env?: {K: v \| null}, secrets?: {K: v \| null}, secretFiles?: {name: file \| null}}`, `null` удаляет), ответ как у `PUT /env`. `PUT /env` остаётся | §9.6 Env |
 | C3 | Операторские ручки, только для сессии оператора (`403 forbidden` для остальных и для любых API-ключей): `GET /v1/sandboxes?allTeams=true[&teamId=]`; `POST /v1/sandboxes/{sandbox}/block {reason: "operator" \| "abuse", note?}` и `/unblock`; `POST /v1/sandboxes/{sandbox}/ports/{port}/block {reason, note?}` и `/unblock`. В ресурсах Sandbox и HostedPort — `blocked`, `blockReason`. Снять блокировку может только оператор. Заметка — в `sandbox_events`. Семантика — ниже | §9.10 |
 | C4 | Proxied listener принимает команду в query `team=team_...` для `GET`/`HEAD` и WebSocket upgrade (браузер не ставит заголовки). Если есть и заголовок, и query, они должны совпадать (`400 validation`) | §9.2 |
@@ -591,7 +596,7 @@ unique (team_id) where is_default and deleted_at is null
 
 | # | Что |
 |---|---|
-| S1 | Таблица `runtime.environments` и `EnvironmentService` (§10.3); в `sandboxes` — `environment_id`, `environment_revision`; `create` принимает `environment` и сливает наборы до шифрования; ротация ключей данных перешифровывает и `environments` |
+| S1 | Таблица `runtime.environments` и `EnvironmentService` (§10.3); в `sandboxes` — `environment_id`, `environment_revision`, `exclude_owner_secrets`; `create` принимает `environment` и сливает наборы до шифрования; ротация ключей данных перешифровывает и `environments` |
 | S2 | `patchEnv(p, id, patch)` — merge по ключам внутри `core` (расшифровать, слить, зашифровать), с доставкой агенту как у `updateEnv` |
 | S3 | `teamQuota(teamId)` = `teams.quota` с подстановкой `PlatformDefaults.defaultQuota` для пустых полей; несуществующая команда → нули |
 | S4 | Блокировки: столбцы и триггер уже входят в добавление S7 §20.2 п. 3 (`hosted_ports.blocked`, `block_reason`, «блокировка sandbox оператором»); S8 их не дублирует, а уточняет: в `sandboxes` — `blocked bool`, `block_reason text null`, `blocked_at`, `blocked_by uuid null`; триггер `sbx_routes` (S7 O7) срабатывает и на изменение этих полей; `routes.lookup` отдаёт `blocked` = блокировка порта ИЛИ блокировка sandbox ИЛИ `public` при выключенном `publicPortsEnabled`, причина — в этом порядке; проверки семантики блокировки (§17.1) в `SandboxService`; `list` с `allTeams` для операторов. Кто первый реализует (S7 или S8) — по готовности треков, второй использует |
@@ -621,7 +626,7 @@ oauth2-proxy в upstream-режиме с alpha config (§5.1): заголовк�
 |---|---|
 | **MVP, первая очередь** | `packages/payload` (коллекции, стратегия, JIT, хуки), `PayloadIdentityStore`, `PayloadConfigReader`, миграции и Job; `/admin`; `/app`: список и создание sandbox, страница sandbox (overview, terminal, commands, files, ports, ssh, env, заглушка desktop), снапшоты, API-ключи, SSH-ключи, команды и участники, раздел «Оператор»; изменения S7 C2–C10 и S6 S2–S5; dev-прокси; образ и форма деплоя |
 | **MVP, вторая очередь** | Environments: S7 C1, S6 S1, страница `/app/t/<team>/environments`, выбор при create |
-| **Фаза 2** | Синхронизация пользователей и команд с IdP (автоматическая деактивация уволенных, группы → команды); принудительный разрыв SSH-сессий при отзыве; состояние пула и нод в разделе «Оператор»; немедленный отзыв `sso`-сессий пользователя (`authEpoch+1` на его маршрутах); повторное применение environment к живой sandbox; редактор файлов; превью порта в iframe; полный файл вывода команды; рабочий стол (S10); репозитории в environment (S13); аудит действий в `/admin` |
+| **Фаза 2** | Синхронизация пользователей и команд с IdP (автоматическая деактивация уволенных, группы → команды); принудительный разрыв SSH-сессий при отзыве; состояние пула и нод в разделе «Оператор»; немедленный отзыв `sso`-сессий пользователя (`authEpoch+1` на его маршрутах); повторное применение environment к живой sandbox; редактор файлов; превью порта в iframe; полный файл вывода команды; рабочий стол (S10); клон репозиториев environment (S13); аудит действий в `/admin` |
 
 ## 19. Оставлено исполнителю
 

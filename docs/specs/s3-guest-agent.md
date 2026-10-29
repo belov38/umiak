@@ -1,6 +1,6 @@
 # S3. Гостевой агент v0 (Linux)
 
-Статус: согласовано, 2026-10-29 (master-сессия; ревью исполнителем пройдено, замечания внесены). Область S3 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` §4. Контракт, на котором стоит агент: `docs/specs/s2-tunnel-protocol.md` (особенно §5, §9, §10, §15). Соседние области: S1 `docs/specs/s1-proxmox-foundation.md` (quiesce, smbios), S4 (gateway, SSH), S5 (шаблон), S6 (control plane).
+Статус: согласовано, 2026-10-29 (master-сессия; ревью исполнителем пройдено, замечания внесены). Дополнено MVP-рекомендациями R7 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S3 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` §4. Контракт, на котором стоит агент: `docs/specs/s2-tunnel-protocol.md` (особенно §5, §9, §10, §15). Соседние области: S1 `docs/specs/s1-proxmox-foundation.md` (quiesce, smbios), S4 (gateway, SSH), S5 (шаблон), S6 (control plane).
 
 Пометка **[исполнитель]** — решение автора спеки в рамках брифа; его можно менять без нового согласования, если причина записана. Остальные решения согласованы с master-сессией (2026-10-29).
 
@@ -452,8 +452,10 @@ Shim запускается из `versions/<v>/`; эта версия не уд�
 | `HEAD /files/uploads/{uploadId}` | `Sbx-Upload-Offset`; `404`, если загрузки нет |
 | `POST /files/uploads/{uploadId}/commit` | JSON `{path, sha256?, mode?, owner?, overwrite=true, make_parents=true}` → `FileInfo`. Идемпотентен по `uploadId`: повтор возвращает сохранённый результат 24 h. Несовпадение `sha256` → `422 checksum_mismatch`, загрузка удаляется |
 | `DELETE /files/uploads/{uploadId}` | Отмена |
+| `GET /files/archive?path=&user=&format=tar\|tar.gz` | Каталог `path` одним потоком tar (POSIX pax; `tar.gz` — gzip потоком), имена относительно `path`. Обход без перехода по symlink-ам (они пишутся как symlink), hardlink-и — как отдельные файлы, сокеты, FIFO и устройства пропускаются. Не каталог → `400 not_directory`. Файлы, которые меняются во время чтения, отдаются как прочитаны: снимка каталога нет. Ошибка посреди потока обрывает ответ без завершающих блоков tar |
+| `PUT /files/archive?path=&user=&format=tar\|tar.gz&overwrite=true&make_parents=true` | Распаковка tar-потока (по умолчанию `format=tar`) в каталог `path` (создаётся при `make_parents`). Записи: файлы, каталоги, symlink-и, hardlink-и внутри архива; абсолютный путь, `..`, hardlink наружу, устройства и FIFO → `400 invalid_path`. Пути разрешаются от `path` без перехода по symlink-ам (`openat2` с `RESOLVE_BENEATH \| RESOLVE_NO_SYMLINKS`), поэтому запись не выходит за `path` ни через symlink из архива, ни через уже лежащий (такая запись → `400 invalid_path`). Владелец — `owner` (по умолчанию пользователь запроса), uid/gid архива игнорируются; режим — из архива без setuid/setgid; mtime сохраняется. `overwrite=false` и файл есть → `already_exists`. Пределы: 200 000 записей, 16 GiB распакованных данных, путь до 4 096 байт → `413 payload_too_large`. Не атомарна: при ошибке записанное остаётся, в ответе ошибки `entries_written`. Ответ — `{path, entries, size}` JSON. Повтор с `overwrite=true` даёт тот же результат |
 
-Временные загрузки без активности удаляются через 24 h.
+Временные загрузки без активности удаляются через 24 h. Архив каталога (MVP-рек. R7) идёт через тот же `/files/*`, поэтому gateway и `AgentClient.fetch` его не различают (S2 §9.5, S7 §17.1); capability `files.archive.v1`.
 
 ### 11.3 Где лежит временный файл загрузки
 
@@ -474,7 +476,7 @@ Shim запускается из `versions/<v>/`; эта версия не уд�
 
 `FileInfo`: `path, name, type (FILE/DIR/SYMLINK/OTHER), size, mode, owner, group, uid, gid, mtime, symlink_target`.
 
-Не в v0 (позже, по capability): наблюдение за каталогом (`WatchDir`, как в E2B envd), скачивание каталога архивом (`/files/archive`).
+Не в v0 (позже, по capability): наблюдение за каталогом (`WatchDir`, как в E2B envd).
 
 ## 12. Порты и CONNECT
 
@@ -506,7 +508,7 @@ Shim запускается из `versions/<v>/`; эта версия не уд�
 | `Quiesce`, `Thaw` | §14 | `Sbx-Request-Id` |
 | `ApplyUpdate` | §17.4 | `Sbx-Request-Id` |
 
-Capabilities (`Control/Info`, S2 §10.2) — строки: `process.v1`, `process.pty`, `process.stdin`, `files.v1`, `files.upload.v1`, `system.claim.v1`, `system.quiesce.v1`, `system.update.v1`, `system.ports.v1`, `system.metrics.v1`.
+Capabilities (`Control/Info`, S2 §10.2) — строки: `process.v1`, `process.pty`, `process.stdin`, `files.v1`, `files.upload.v1`, `files.archive.v1`, `system.claim.v1`, `system.quiesce.v1`, `system.update.v1`, `system.ports.v1`, `system.metrics.v1`.
 
 Метрики control plane запрашивает сам, когда нужно; в журнал событий они не пишутся.
 
@@ -756,7 +758,7 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 6. **Leftovers:** `sleep 1000 &` переживает выход команды, `has_leftovers = true`; `Kill` убивает. `on_exit: KILL_LEFTOVERS` убивает сразу.
 7. **Таймаут и OOM:** `timeout_ms` → `KILLED/TIMEOUT`; процесс, превысивший память, → `KILLED/OOM`, агент жив.
 8. **Retention:** команда пишет 1 GiB в stdout → занятое место команды ≤ 128 MiB + 1 s записи; attach с 0 получает `truncated`, offset-ы сходятся с размером файла.
-9. **Файлы:** `Range`-скачивание 1 GiB с обрывом и докачкой (sha256); загрузка чанками с обрывом, `HEAD`, продолжение, `commit` дважды → один результат; `sha256` не совпал → `422`.
+9. **Файлы:** `Range`-скачивание 1 GiB с обрывом и докачкой (sha256); загрузка чанками с обрывом, `HEAD`, продолжение, `commit` дважды → один результат; `sha256` не совпал → `422`. Архив: каталог с вложенными каталогами, symlink-ами, hardlink-ом и файлом 1 GiB — `GET /files/archive` и `PUT /files/archive` в другой каталог дают те же sha256, режимы и цели symlink-ов; архив с `../x`, `/etc/x`, записью через symlink на `/etc` и устройством → `invalid_path`, вне `path` ничего не создано; 200 001 запись → `413`.
 10. **Порты:** `python3 -m http.server` на `127.0.0.1`, `::1`, `0.0.0.0` и адресе интерфейса → `ports.changed` за ≤ 3 s; CONNECT на `localhost:<port>` работает во всех четырёх случаях; CONNECT на соседнюю VM → `403`.
 11. **Quiesce:** при записи в файл и в Docker-контейнере `Quiesce` → запись блокируется, снимок S1, `Thaw`; fork из снимка загружается, данные согласованы. Без `Thaw` → авто-разморозка не позже `deadline + 5 s`, событие. `SIGKILL` агента в заморозке → разморозка при его старте. Заморозка QGA с «забытым» thaw при работающем агенте → агент размораживает через 15–20 s.
 12. **Идентичность:** fork → новые machine-id, host keys, hostname, пустое состояние агента, `seq` с 1, `identity.reset` первым событием, IP отличается; исходная VM не затронута.
@@ -824,7 +826,7 @@ Docker Engine API — простые HTTP-вызовы по unix-сокету ч
 ## 25. Открытые вопросы
 
 - Порты Docker при `userland-proxy=false` — через Docker API (позже).
-- `WatchDir`, скачивание каталога архивом, лимиты ресурсов на команду, список всех процессов ОС (`ps`) — по запросу S7.
+- `WatchDir`, лимиты ресурсов на команду, список всех процессов ОС (`ps`) — по запросу S7.
 - Копия вывода команд вне VM (история после удаления sandbox) — фаза 2 (architecture §3).
 - Principal-ы SSH-сертификатов (`user`, `root`) — S4.
 - Производственный ключ подписи и offline root — S12.

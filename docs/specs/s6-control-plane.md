@@ -1,6 +1,6 @@
 # S6. Ядро control plane: спецификация
 
-Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. Область S6 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§3 модель данных, §6 warm pool, §10 развёртывание, §11 безопасность). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, аллокатор, SMBIOS §6.4, драйвер хранилища) и `docs/specs/s2-tunnel-protocol.md` (реестр, события, `agent-client`, §15).
+Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. Дополнено MVP-рекомендациями R2, R10, R11 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S6 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§3 модель данных, §6 warm pool, §10 развёртывание, §11 безопасность). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, аллокатор, SMBIOS §6.4, драйвер хранилища) и `docs/specs/s2-tunnel-protocol.md` (реестр, события, `agent-client`, §15).
 
 Пометка **[решение S6]** — решение автора спеки в рамках брифа без отдельного согласования; его можно менять при планировании, если причина записана. Решения [решение S6] и правки по итогам независимого ревью тоже одобрены master-сессией. Остальное согласовано master-сессией от имени Ильи (ответы на Q1–Q7 и на открытые вопросы §21, 2026-10-29).
 
@@ -215,7 +215,7 @@ unique (team_id, name) where kind = 'saved' and state = 'ready'
 ```
 sandboxes(
   id uuid pk,
-  slug text unique,                 -- 10 chars [a-z0-9], DNS label part, hostname sbx-<slug>
+  slug text unique,                 -- S4 §4.2 grammar, 3-40 chars, default three words (S7 §5.4); DNS label part, hostname sbx-<slug>
   team_id uuid, created_by uuid,    -- Payload ids
   name text null, labels jsonb,
   template_slug text, size_slug text,
@@ -498,12 +498,14 @@ Machine из пула (`pool_key` не null) после claim теряет `pool
 
 ### 7.3 Create
 
-Вход: `template`, `size`, `name`, `labels`, `env`, `secretFiles`, `ttlSeconds`, `idleTimeoutSeconds`, `from` (saved snapshot) — форму задаёт S7.
+Вход: `template`, `size`, `name`, `slug`, `labels`, `env`, `secrets`, `secretFiles`, `ttlSeconds`, `idleTimeoutSeconds`, `from` (saved snapshot), `environment` и `excludeOwnerSecrets` (S8 §10), `failFast` — форму задаёт S7.
 
 **API (синхронно):** проверить шаблон (`enabled`, размер разрешён) и квоту команды. Затем admission (§8):
 - **claim:** есть `warm` machine этой пары с активной сборкой → в той же транзакции machine → `claiming`, `sandbox_id` установлен, `sandbox.machine_id`, `node_id` заполнены;
 - **cold:** иначе, если RAM хватает (с учётом вытеснения warm других пар) → новая machine `allocating` с `sandbox_id`;
 - иначе → `out_of_capacity` (S7 отдаёт `503`), ничего не создано.
+
+**`failFast`** (MVP-рек. R2): admission — только claim. Нет `warm` machine пары с активной сборкой → `pool_exhausted` (retryable), транзакция откатывается: нет sandbox, `sandbox_secrets`, операции, задания и строки `idempotency_keys`. Ветка cold и вытеснение warm не применяются. С `from` → `validation` (create из снапшота всегда cold). Шаблон и квота проверяются раньше, как обычно. `failFast` пишется в `operations.request`; повтор claim после отказа агента (ниже) тоже только из пула.
 
 Sandbox `creating`, `sandbox_secrets` (зашифрованные env и файлы), операция `create`.
 
@@ -514,12 +516,12 @@ Sandbox `creating`, `sandbox_secrets` (зашифрованные env и фай�
 | `provision` (только cold) | §7.4, включая проверку RAM и start | machine не в `allocating`/`provisioning` |
 | `boot` (только cold) | ждать подключения и фазы агента `pool_ready` (не дольше `boot_timeout_s`) | machine подключена, фаза получена |
 | `rotate_token` | `POST /v1/machines/{id}/rotate-token` на gateway (S2 §5.2) | идемпотентно само |
-| `claim` | `System/Claim{reason: claim, sandboxId, hostname: sbx-<slug>, env, secretFiles, authorizedKeys}` с `requestId`; ждать ответа с фазой `ready`; записать `provisioned_boot_id` | `requestId` агента |
+| `claim` | `System/Claim{reason: claim, sandboxId, hostname: sbx-<slug>, env, secrets, secretFiles, authorizedKeys}` с `requestId`; ждать ответа с фазой `ready`; записать `provisioned_boot_id` | `requestId` агента |
 | `finish` | machine → `running`, sandbox → `ready`, `ready_at`, `deadline_at = now + ttl`, `sandbox_events`, `NOTIFY sbx_routes` | состояние |
 
 Ошибки:
 - Агент недоступен — временная ошибка (повтор по S2 до 30 s на вызов, затем повтор задания).
-- Claim отклонён агентом или не прошёл до дедлайна: machine → `deleting` (к ней прикоснулся арендатор). Если machine была из пула, операция один раз пробует заново (admission: другой warm или cold), иначе — sandbox `error` (`create_failed`).
+- Claim отклонён агентом или не прошёл до дедлайна: machine → `deleting` (к ней прикоснулся арендатор). Если machine была из пула, операция один раз пробует заново (admission: другой warm или cold; с `failFast` — только другой warm), иначе — sandbox `error` (`create_failed`).
 - Холодная подготовка не удалась: machine `failed → deleting`, sandbox `error` (`create_failed`).
 
 `authorizedKeys` — публичные SSH-ключи пользователя (S8); если S8 их не даёт, пустой список.
@@ -554,22 +556,24 @@ Durable-маркер шага — состояние machine: `allocating`/`prov
 
 API: состояние `stopped` или `error` с machine в `stopped` (§6.1). Квота и admission (§8.2) на ноде sandbox: RAM machine (с вытеснением warm других пар; если передан `size`, считается его RAM [решение S6]); если не хватает → `out_of_capacity`. Sandbox → `starting`, операция `resume`; machine остаётся `stopped` до шага `start`.
 
+Вход: `size`, `ttlSeconds`, `env`, `secrets`, `secretFiles` (MVP-рек. R11). Переданные наборы в той же транзакции накладываются по ключу на `sandbox_secrets` sandbox (расшифровать, слить, проверить лимиты S7 §8.3, зашифровать): тот же ключ — побеждает запрос, secret-файлы — по имени, `null` удаляет ключ. Результат остаётся у sandbox, даже если resume потом не удался. В `operations.request` пишутся несекретные параметры (`size`, `ttlSeconds`) и hash канонического тела, значений env и секретов там нет; повтор resume при активном resume возвращает его, если hash совпадает (пустое тело — тоже тело), иначе `operation_in_progress` (S7 §8.2). Значения доходят до агента в шаге `provision`.
+
 | Шаг | Что делает |
 |---|---|
 | `resize` (если `size` изменился) | `PUT config` cores и memory, пока VM выключена |
 | `start` | проверка RAM перед стартом (§8.1, ждать с опросом 1 s), затем S1 `start` |
 | `wait_agent` | новое подключение (`tunnel_sessions` с `boot_id`, отличным от `provisioned_boot_id`) |
-| `provision` | `System/Claim{reason: resume, env, secretFiles, authorizedKeys}` — секреты передаются заново (в госте их после загрузки нет, фаза `secrets: missing` у S3); записать `provisioned_boot_id` |
+| `provision` | `System/UpdateEnv{env}` и `System/UpdateSecrets{secret_env, secret_files}` (S3 §8.1: claim — один раз на идентичность, после загрузки наборы доставляются этими вызовами) — env и секреты передаются заново целиком (в госте секретов после загрузки нет, фаза `secrets: missing` у S3); записать `provisioned_boot_id` |
 | `finish` | machine → `running`, sandbox → `ready`, `deadline_at = now + ttl` (TTL можно передать заново), `health=ok` |
 
 Ошибка или дедлайн: S1 `stop` (жёстко), machine → `stopped`, sandbox → `error` (`resume_failed`). Диски целы, resume можно повторить.
 
 ### 7.7 Fork
 
-Вход: источник в `ready` или `stopped` без активной операции; параметры цели (`name`, `labels`, `ttlSeconds`, `size`).
+Вход: источник в `ready` или `stopped` без активной операции; параметры цели (`name`, `slug`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`, `size`, `env`, `secrets`, `secretFiles`).
 
 **API:** admission RAM для цели на ноде источника (вытеснение warm разрешено; других нод нет — LV локальны). Создаются:
-- цель: sandbox `creating` (`origin = fork`, `forked_from_sandbox_id`), `sandbox_secrets` — копия env и секретов источника, перешифрованная с AAD цели; machine цели `allocating`;
+- цель: sandbox `creating` (`origin = fork`, `forked_from_sandbox_id`), `sandbox_secrets` — копия env и секретов источника, поверх которой по ключу наложены `env`, `secrets`, `secretFiles` из запроса (MVP-рек. R11: правила, лимиты и `null` — как у resume, §7.6), зашифрованная с AAD цели; machine цели `allocating`;
 - операция `fork` на источнике (`pending`) и операция `create` на цели (`pending`, `parent_operation_id` = fork). Задание ставится только для `fork`.
 
 **Worker, операция `fork` на источнике:**
@@ -582,7 +586,7 @@ API: состояние `stopped` или `error` с machine в `stopped` (§6.1)
 
 Ошибки: провал или вытеснение операции на источнике → обработчик цели (по `parent_operation_id`, §7.1) переводит её операцию в `failed`, цель → `error` (`fork_failed`). Источник сам цель не трогает: каждая sandbox меняется только своей операцией.
 
-Fork наследует от источника: диск, env и секреты, `template_slug`, `size` (если не передан), `labels` (если не переданы). Не наследует: TTL (берётся из запроса или из дефолта), hosted ports, историю команд.
+Fork наследует от источника: диск, env и секреты (с наложением значений из запроса), `template_slug`, `size` (если не передан), `labels` (если не переданы), `exclude_owner_secrets` (S8 §10.1). Environment заново не применяется (S8 §10.1). Не наследует: TTL (берётся из запроса или из дефолта), hosted ports, историю команд.
 
 ### 7.8 Saved snapshot, recover, reprovision, update
 
@@ -592,7 +596,7 @@ Fork наследует от источника: диск, env и секреты
 
 **Recover** (`ready` или `error` с machine; не чаще раза в `recoverMinIntervalSeconds` = 600): sandbox → `starting`; шаги `reset` (S1 `stop` + `start`, жёсткий power-cycle), `wait_agent`, `provision`, `finish`. Автоматически не запускается никогда.
 
-**Reprovision** (внутренняя, ставит обработчик событий): если sandbox `ready`, а агент сообщил о перезагрузке гостя или фазе `secrets: missing` с `boot_id`, отличным от `machines.provisioned_boot_id`, — `System/Claim{reason: resume}` и новое `provisioned_boot_id`. Не ставится, если активна другая операция (её шаг `provision` всё сделает) или если `boot_id` события уже провижен (запоздавшее событие той же загрузки, которую обработал resume или recover).
+**Reprovision** (внутренняя, ставит обработчик событий): если sandbox `ready`, а агент сообщил о перезагрузке гостя или фазе `secrets: missing` с `boot_id`, отличным от `machines.provisioned_boot_id`, — доставка как в шаге `provision` resume (§7.6) и новое `provisioned_boot_id`. Не ставится, если активна другая операция (её шаг `provision` всё сделает) или если `boot_id` события уже провижен (запоздавшее событие той же загрузки, которую обработал resume или recover).
 
 **Update** (`name`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`) и **extend** (`deadline_at = now + ttl`) — без операции, обычный `UPDATE` с проверкой `version`.
 
@@ -772,13 +776,13 @@ VM machine в `running` выключена без нашей операции (�
 
 ### 13.1 Env и секреты (решение Q7, согласовано master-сессией; Илья информирован и может пересмотреть)
 
-- **Где хранятся.** Env и secret-файлы sandbox (из create и из PATCH, если S7 его даст) хранятся в `sandbox_secrets` в виде одного зашифрованного блоба `{env, secretFiles}`.
+- **Где хранятся.** Env, секреты и secret-файлы sandbox (из create, fork, resume и `PUT`/`PATCH /env`, S7 §8.3) хранятся в `sandbox_secrets` в виде одного зашифрованного блоба `{env, secrets, secretFiles}`.
 - **Шифрование.** AES-256-GCM через `node:crypto`, случайный 96-битный nonce на запись, AAD = `sandbox:<sandboxId>:v<keyVersion>`.
 - **Ключи.** Кольцо из Kubernetes Secret, файл `SBX_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Ротация: новый ключ становится `current`, контроллер `cleanup` перешифровывает строки со старой версией, старый ключ убирается после нуля строк (метрика).
 - **Доставка.** Секреты передаются агенту при каждом claim, resume, recover и reprovision (`System/Claim`). В госте они живут только в tmpfs (Linux) или в каталоге с ACL SYSTEM (Windows) и стираются при stop (S3).
-- **Fork.** Наследует env и секреты источника: расшифровка и перешифровка с AAD цели. Saved snapshot секретов не несёт.
+- **Fork.** Наследует env и секреты источника: расшифровка, наложение значений из запроса (§7.7) и шифрование с AAD цели. Saved snapshot секретов не несёт.
 - **Delete.** Строка `sandbox_secrets` удаляется (crypto-erase для этой sandbox).
-- **Утечки.** Значения не попадают в логи, `operations.request`, `idempotency_keys.response`, данные заданий pg-boss (там только id), метрики и `commands` (там только имена переменных). Логгер редактирует поля `env`, `secretFiles`, `bs`, `token`. Hash тела для `Idempotency-Key` считается от канонического тела вместе с секретами, но сам секрет не хранится.
+- **Утечки.** Значения не попадают в логи, `operations.request`, `idempotency_keys.response`, данные заданий pg-boss (там только id), метрики и `commands` (там только имена переменных). Логгер редактирует поля `env`, `secrets`, `secretFiles`, `bs`, `token`. Hash тела для `Idempotency-Key` считается от канонического тела вместе с секретами, но сам секрет не хранится.
 
 ### 13.2 Учётные данные machine
 
@@ -824,7 +828,7 @@ interface SandboxService {
 }
 ```
 
-Доменные ошибки (`SbxError{code, retryable, details}`), которые S7 отображает в HTTP: `not_found`, `invalid_state` (с текущим `state`), `operation_in_progress` (retryable, `operationId`), `out_of_capacity` (retryable, `retryAfterSeconds`), `quota_exceeded`, `idempotency_key_reused` (тот же ключ, другое тело), `template_unavailable`, `snapshot_not_found`, `sandbox_not_ready`, `recover_rate_limited`, `validation`.
+Доменные ошибки (`SbxError{code, retryable, details}`), которые S7 отображает в HTTP: `not_found`, `invalid_state` (с текущим `state`), `operation_in_progress` (retryable, `operationId`), `out_of_capacity` (retryable, `retryAfterSeconds`), `pool_exhausted` (retryable, `retryAfterSeconds`; create с `failFast`, §7.3), `quota_exceeded`, `idempotency_key_reused` (тот же ключ, другое тело), `template_unavailable`, `snapshot_not_found`, `sandbox_not_ready`, `recover_rate_limited`, `validation`.
 
 Идемпотентность: тот же `(principal, scope, key)` с тем же hash тела → сохранённый ответ (та же sandbox и операция); с другим hash → `idempotency_key_reused`; параллельный дубль ждёт коммита первого (уникальный ключ в транзакции). Срок 24 h. Повтор без ключа создаёт новую sandbox.
 
@@ -832,7 +836,7 @@ interface SandboxService {
 
 ### 14.2 S4 (gateway): маршруты и SSH
 
-- `core.routes.lookup(label)` и ручка `GET /internal/v1/routes/{label}` в `api` → `{sandboxId, machineId, port, mode, tokenHash, authEpoch, state}`. `state` — состояние sandbox: gateway сам решает, что показать для не-`ready` (страница «остановлена» и т.п.). Метка — `<slug>-<port>`; `slug` только `[a-z0-9]`, поэтому номер порта — всё после последнего `-`.
+- `core.routes.lookup(label)` и ручка `GET /internal/v1/routes/{label}` в `api` → `{sandboxId, machineId, port, mode, tokenHash, authEpoch, state}`. `state` — состояние sandbox: gateway сам решает, что показать для не-`ready` (страница «остановлена» и т.п.). Метка — `<slug>-<port>`; slug по грамматике S4 §4.2 не заканчивается на `-<цифры>`, поэтому номер порта — всё после последнего `-`.
 - `NOTIFY sbx_routes '<label>'` при изменении `hosted_ports`; при смене `state` или `machine_id` sandbox — по одному уведомлению на каждую её метку (триггеры).
 - `POST /internal/v1/ssh/authorize {sandbox, user, publicKeyFingerprint}` → `{allowed, machineId, state}`. S6 даёт разрешение sandbox и её состояние; проверка ключа против ключей пользователя и прав на sandbox — S7/S8 (ключи и доступы в Payload).
 - Обмен SSO-кода для режима `sso` — S7/S8, не S6.
@@ -897,7 +901,7 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
   - фабрика клиентов на (провайдер, нода) вместо глобальной конфигурации из env (§8.4); env S1 остаётся для `apps/bench`.
 - **S2.** Таблицы `tunnel.*`, `POST /v1/machines/{id}/rotate-token` на внутреннем listener-е gateway, синтетические события, `agent-client` с повторами и ожиданием до 30 s.
 - **S3.** RPC (имена — S3):
-  - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secretFiles, authorizedKeys}` — идемпотентен по `requestId`, отвечает после применения (или стримит фазы, итог `ready`);
+  - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secrets, secretFiles, authorizedKeys}` — идемпотентен по `requestId`, отвечает после применения (или стримит фазы, итог `ready`); после загрузки (resume, recover, reprovision) наборы доставляются `System/UpdateEnv` и `System/UpdateSecrets` (S3 §8.1; шаг `provision`, §7.6);
   - `System/PrepareStop` — best effort;
   - `System/Quiesce` с lease и watchdog и `Thaw` — реализация `QuiesceHook`;
   - `System/Info` — версия, capabilities, фаза готовности;

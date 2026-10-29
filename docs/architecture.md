@@ -71,7 +71,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Command** — процесс: `id`, `sandboxId`, `cmd`, `cwd`, имена переменных env, `mode`, `status`, `exitCode`, `startedAt`, `endedAt`. Вывод хранит агент, позже — копия в хранилище.
 - **HostedPort** — порт sandbox, опубликованный на URL: `port`, `label`, режим `token` / `sso` / `public`.
 - **User**, **Team**, **Membership** (`owner`/`member`), **ApiKey**, **SshKey**, **Template**, **Size**, квоты команд, цели warm pool, `PlatformDefaults` — в Payload (схема `payload`, `docs/specs/s8-web.md` §7); `api` и `worker` читают через Payload Local API (`IdentityStore`, `ConfigReader`, кэш 10–30 s, сброс по `NOTIFY`).
-- **Environment** — именованный набор env, секретов и secret-файлов команды; хранится в `runtime` зашифрованным, как `sandbox_secrets`, управляется через `/v1/environments`; при create значения копируются в sandbox (S8 §10).
+- **Environment** — именованный набор env, секретов и secret-файлов команды, плюс список репозиториев (в MVP только хранится, клон — S13, фаза 2) и флаг `excludeOwnerSecrets`; хранится в `runtime` зашифрованным, как `sandbox_secrets`, управляется через `/v1/environments`; при create значения копируются в sandbox (S8 §10).
 
 **Состояния sandbox:** `creating → ready → stopping → stopped → starting → ready`. Плюс `error` и `deleting → deleted`. `fork` создаёт новый sandbox в `creating`. Здоровье (`health: ok | degraded`, degraded — агента нет дольше 60 s) и активность (`activity: busy | idle`) — отдельные поля, а не состояния.
 
@@ -83,7 +83,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Регистрация в пуле.** При загрузке агент подключается к gateway и сообщает о себе (machineId, bootId, vmgenid, версия); VMID ему не известен. Machine становится warm.
 - **Claim.** Получает env, секреты (в tmpfs без swap или в защищённый каталог; после каждой перезагрузки control plane присылает их заново), файлы-секреты, публичный ключ SSH CA gateway (`TrustedUserCAKeys`; ключи пользователя проверяет gateway, S4 §9), hostname. Отвечает о готовности по фазам.
 - **Exec.** sync / stream (NDJSON-события `started`, `stdout`, `stderr`, `exit`) / detached + attach по offset / kill / timeout. Linux — bash, Windows — PowerShell. PTY/ConPTY для терминала. Каждая команда работает в своём systemd unit-е под shim, который пишет её вывод в файлы.
-- **Files.** read, write (поток), list, stat, delete, mkdir, move, chmod.
+- **Files.** read, write (поток), list, stat, delete, mkdir, move, chmod, каталог одним tar-потоком туда и обратно (`/files/archive`).
 - **Ports.** Список слушающих портов; проксирование входящих потоков на `localhost:port` (127.0.0.1, затем ::1, затем адреса интерфейсов).
 - **Хуки снапшота.** `quiesce` (Docker pause, fsfreeze / VSS) и `thaw`, с watchdog авто-разморозки. QEMU guest agent fsfreeze — запасной путь, когда агента нет.
 - **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние; на Windows — имя машины. На Linux vmgenid из userspace не читается, поэтому признак — только `machineId`; на Windows используется и vmgenid.
@@ -124,7 +124,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 ## 6. Warm pool
 
 - Для каждой пары (шаблон, размер) держим N загруженных machine в статусе warm. Агент подключён, ОС готова.
-- **Create** = claim warm machine (миллисекунды + provisioning через агент) → `ready`. Если пул пуст — холодный старт: клон шаблона и загрузка, Linux ~15–30 s, Windows ~40–90 s.
+- **Create** = claim warm machine (миллисекунды + provisioning через агент) → `ready`. Если пул пуст — холодный старт: клон шаблона и загрузка, Linux ~15–30 s, Windows ~40–90 s. С `failFast` — только пул, иначе `503 pool_exhausted`, ничего не создаётся.
 - Пул пополняется в фоне с ограничением параллельных клонов на ноду и storage.
 - Fork и resume идут мимо пула: у них свои диски.
 - Учёт RAM на ноде: работающие + warm + загружающиеся machine ≤ лимита ноды (8 GB в PoC). Пул пополняется только из свободной RAM. Create или resume при нехватке вытесняет warm machine других пар (шаблон, размер), иначе — `503 out_of_capacity`.
@@ -154,8 +154,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 Подробно: `docs/specs/s7-public-api.md`.
 
-- `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
-- ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды.
+- `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, tar каталога, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/environments`, `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
+- ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды. Удаление sandbox и saved snapshot — только с `Sbx-Confirm-Delete: <id>`. CLI без TTY печатает JSON и JSONL (S7 §14.3).
 - Три listener-а `api`: публичный (только API-ключи), за oauth2-proxy (браузер, проверка Origin), внутренний (gateway, service tokens).
 - OpenAPI генерируется из zod-схем; SDK TS (`openapi-typescript` + `openapi-fetch`) и Python (`openapi-python-client`) с рукописными хелперами; CLI `sbx` на TS SDK через Bun compile.
 
@@ -187,7 +187,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 ## 11. Безопасность
 
-- API-ключи со scope, хранятся хешами в Payload.
+- API-ключи со scopes «ресурс × действие» (`sandboxes:read`, `commands:exec`, …) и обязательным сроком жизни, хранятся хешами в Payload. Тип ключа `sandbox` (одна sandbox, для CLI в VM) зарезервирован, в MVP не выпускается (S7 §7.2–7.3).
 - У каждой machine свой bootstrap secret в `smbios1` и машинный токен для туннеля только в памяти агента; токен перевыпускается при claim. Machine не переиспользуется между sandbox (S2).
 - Секреты в госте в tmpfs (Linux) или в каталоге с ACL только для SYSTEM (Windows); стираются при stop.
 - Proxmox: отдельный пользователь и API-токен с правами только на pool `sandbox` и нужные хранилища.
