@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	AgentClient,
 	type AgentClientOptions,
 	AgentUnavailableError,
+	readBodyCapped,
 } from "../src/index.js";
 import {
 	type FakeGateway,
@@ -343,5 +346,72 @@ describe("AgentClient.fetch", () => {
 	it("rejects a path that does not start with /", async () => {
 		registry.set(route(m, a.url));
 		await expect(agent().fetch(m, "uploads/x")).rejects.toThrow(TypeError);
+	});
+
+	describe("compression", () => {
+		it("sends Accept-Encoding: identity by default", async () => {
+			registry.set(route(m, a.url));
+			const res = await agent().fetch(m, "?path=/data/f.bin");
+			await res.body?.cancel();
+			expect(fileRequests(a)[0]?.headers["accept-encoding"]).toBe("identity");
+		});
+
+		it("keeps a caller's Accept-Encoding", async () => {
+			registry.set(route(m, a.url));
+			const res = await agent().fetch(m, "?path=/data/f.bin", {
+				headers: { "accept-encoding": "gzip" },
+			});
+			await res.body?.cancel();
+			expect(fileRequests(a)[0]?.headers["accept-encoding"]).toBe("gzip");
+		});
+	});
+
+	describe("readBodyCapped", () => {
+		it("returns a body within the cap", async () => {
+			registry.set(route(m, a.url));
+			const res = await agent().fetch(m, "?path=/data/f.bin");
+			const body = await readBodyCapped(res, file.length);
+			expect(Buffer.from(body)).toEqual(Buffer.from(file));
+		});
+
+		it("stops past the cap", async () => {
+			registry.set(route(m, a.url));
+			const res = await agent().fetch(m, "?path=/data/f.bin");
+			const err = await readBodyCapped(res, file.length - 1).catch(
+				(e: unknown) => e,
+			);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
+			expect(res.bodyUsed).toBe(true);
+		});
+
+		it("counts decoded bytes of a compressed body", async () => {
+			registry.set(route(m, a.url));
+			const zipped = gzipSync(Buffer.alloc(16 * 1024 * 1024));
+			a.script.push({
+				route: "files",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/octet-stream",
+						"content-encoding": "gzip",
+						"content-length": String(zipped.length),
+					},
+					body: zipped,
+				},
+			});
+			const res = await agent().fetch(m, "?path=/bomb", {
+				headers: { "accept-encoding": "gzip" },
+			});
+			const err = await readBodyCapped(res, 1024 * 1024).catch(
+				(e: unknown) => e,
+			);
+			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
+		});
+
+		it("reads an absent body as empty", async () => {
+			expect(await readBodyCapped(new Response(null), 0)).toHaveLength(0);
+		});
 	});
 });

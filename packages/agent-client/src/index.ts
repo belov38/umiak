@@ -12,7 +12,7 @@ export {
 	classify,
 	isConnectionError,
 } from "./errors.js";
-export type { AgentFetchInit } from "./fetch.js";
+export { type AgentFetchInit, readBodyCapped } from "./fetch.js";
 export {
 	LISTEN_APPLICATION_NAME,
 	PgRegistry,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { ErrorDetailSchema } from "@sbx/proto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,6 +9,7 @@ import {
 	AgentOutdatedError,
 	AgentUnavailableError,
 	classify,
+	MAX_MESSAGE_BYTES,
 	RegistryClosedError,
 } from "../src/index.js";
 import { Process } from "./gen/sbx/testing/v1/process_pb.js";
@@ -576,7 +578,148 @@ describe("AgentClient transport", () => {
 			.catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(AgentUnavailableError);
 	});
+
+	describe("oversized and compressed agent answers", () => {
+		const MiB = 1024 * 1024;
+
+		it("does not advertise response compression", async () => {
+			registry.set(route(m, a.url));
+			const process = createClient(Process, agent().transport(m));
+			await process.setLabel({ commandId: "c1", label: "x" });
+			for await (const _ of process.attach({ commandId: "c1" })) {
+				// drain
+			}
+			const reqs = rpcRequests(a);
+			expect(reqs).toHaveLength(2);
+			for (const r of reqs) {
+				for (const h of ["accept-encoding", "connect-accept-encoding"]) {
+					expect(String(r.headers[h] ?? "")).not.toMatch(/gzip|br/);
+				}
+				expect(r.headers["content-encoding"]).toBeUndefined();
+				expect(r.headers["connect-content-encoding"]).toBeUndefined();
+			}
+		});
+
+		it("rejects a gzip unary answer that inflates past 16 MiB without inflating it", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/proto",
+						"content-encoding": "gzip",
+					},
+					body: gzipSync(unknownField(64 * MiB)),
+				},
+			});
+			global.gc?.();
+			const before = process.memoryUsage().rss;
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect(classify(err)).toBe("fatal");
+			expect(process.memoryUsage().rss - before).toBeLessThan(64 * MiB);
+		});
+
+		it("rejects a gzip stream message that inflates past 16 MiB", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/connect+proto",
+						"connect-content-encoding": "gzip",
+					},
+					body: Buffer.concat([
+						envelope(1, gzipSync(unknownField(64 * MiB))),
+						envelope(2, Buffer.from("{}")),
+					]),
+				},
+			});
+			const got: unknown[] = [];
+			const err = await (async () => {
+				for await (const msg of createClient(
+					Process,
+					agent().transport(m),
+				).attach({ commandId: "c1" })) {
+					got.push(msg);
+				}
+			})().catch((e: unknown) => e);
+			expect(got).toHaveLength(0);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect(classify(err)).toBe("fatal");
+		});
+
+		it("rejects a plain unary answer over 16 MiB with ResourceExhausted", async () => {
+			registry.set(route(m, a.url));
+			const body = unknownField(17 * MiB);
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/proto",
+						"content-length": String(body.length),
+					},
+					body,
+				},
+			});
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
+		});
+
+		it("honours a smaller readMaxBytes", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: { "content-type": "application/proto" },
+					body: unknownField(2048),
+				},
+			});
+			const err = await createClient(
+				Process,
+				agent({ readMaxBytes: 1024 }).transport(m),
+			)
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
+			expect(MAX_MESSAGE_BYTES).toBe(16 * MiB);
+		});
+	});
 });
+
+/** A protobuf message holding only an unknown bytes field 15 of n zero bytes. */
+function unknownField(n: number): Buffer {
+	const len: number[] = [];
+	let v = n;
+	while (v >= 0x80) {
+		len.push((v & 0x7f) | 0x80);
+		v >>>= 7;
+	}
+	len.push(v);
+	return Buffer.concat([Buffer.from([0x7a, ...len]), Buffer.alloc(n)]);
+}
+
+/** A Connect stream envelope. */
+function envelope(flags: number, data: Uint8Array): Buffer {
+	const head = Buffer.alloc(5);
+	head.writeUInt8(flags, 0);
+	head.writeUInt32BE(data.length, 1);
+	return Buffer.concat([head, data]);
+}
 
 describe("classify", () => {
 	it("maps gateway metadata, details and codes", () => {

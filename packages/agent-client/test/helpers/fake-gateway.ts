@@ -54,7 +54,14 @@ export type ScriptedAnswer =
 	/** A plain status without the gateway's Sbx-Error-Code (an agent answer). */
 	| { kind: "plain"; status: number }
 	/** A redirect (an agent answer passed through) to location. */
-	| { kind: "redirect"; status: number; location: string };
+	| { kind: "redirect"; status: number; location: string }
+	/** Exactly this status, headers and body: a compromised agent's answer. */
+	| {
+			kind: "raw";
+			status: number;
+			headers: Record<string, string>;
+			body: Uint8Array;
+	  };
 
 export interface Scripted {
 	answer: ScriptedAnswer;
@@ -173,6 +180,11 @@ function writeScripted(
 			location: answer.location,
 		});
 		res.end("moved elsewhere");
+		return;
+	}
+	if (answer.kind === "raw") {
+		res.writeHead(answer.status, answer.headers);
+		res.end(answer.body);
 		return;
 	}
 	if (answer.kind === "plain") {

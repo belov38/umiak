@@ -12,11 +12,16 @@ import {
 	type Transport,
 	type UnaryResponse,
 } from "@connectrpc/connect";
-import { createAsyncIterable } from "@connectrpc/connect/protocol";
 import {
-	createConnectTransport,
+	createAsyncIterable,
+	validateReadWriteMaxBytes,
+} from "@connectrpc/connect/protocol";
+import { createTransport as createConnectProtocolTransport } from "@connectrpc/connect/protocol-connect";
+import {
+	createNodeHttpClient,
 	Http2SessionManager,
 } from "@connectrpc/connect-node";
+import { MAX_MESSAGE_BYTES } from "./constants.js";
 import {
 	AgentOutdatedError,
 	classify,
@@ -50,10 +55,16 @@ export interface AgentClientOptions {
 	/** Timeout of establishing an HTTP/2 connection to a gateway instance (default transport). Default 5000. */
 	connectTimeoutMs?: number;
 	/**
+	 * Maximum size of one response message of the default transport, after
+	 * decompression. Default MAX_MESSAGE_BYTES (16 MiB).
+	 */
+	readMaxBytes?: number;
+	/**
 	 * Creates the Connect transport for one base URL
 	 * (<internal_url>/v1/machines/<id>/rpc) with the given request headers.
 	 * Default: connect-node Connect protocol over HTTP/2 (h2c), one HTTP/2
-	 * session per gateway instance.
+	 * session per gateway instance, no compression either way, messages up to
+	 * readMaxBytes.
 	 */
 	createTransport?: (
 		baseUrl: string,
@@ -77,6 +88,7 @@ export class AgentClient {
 	private readonly pollIntervalMs: number;
 	private readonly maxAttempts: number;
 	private readonly connectTimeoutMs: number;
+	private readonly limits: ReturnType<typeof validateReadWriteMaxBytes>;
 	private readonly createTransport: (
 		baseUrl: string,
 		headers: Record<string, string>,
@@ -91,6 +103,11 @@ export class AgentClient {
 		this.pollIntervalMs = opts.pollIntervalMs ?? 1000;
 		this.maxAttempts = opts.maxAttempts ?? 10;
 		this.connectTimeoutMs = opts.connectTimeoutMs ?? 5000;
+		this.limits = validateReadWriteMaxBytes(
+			opts.readMaxBytes ?? MAX_MESSAGE_BYTES,
+			MAX_MESSAGE_BYTES,
+			undefined,
+		);
 		this.createTransport =
 			opts.createTransport ??
 			((baseUrl, headers) => this.defaultTransport(baseUrl, headers));
@@ -166,6 +183,11 @@ export class AgentClient {
 	 * returned. Every other status is returned as is with a streamed body;
 	 * redirects are never followed (init.redirect is ignored), a 3xx is
 	 * returned as the Response.
+	 *
+	 * Without a caller Accept-Encoding, "Accept-Encoding: identity" is sent.
+	 *
+	 * The body is agent-controlled and of any size: stream response.body, or
+	 * use readBodyCapped; never call arrayBuffer(), text() or json() on it.
 	 */
 	fetch(
 		machineId: string,
@@ -228,10 +250,20 @@ export class AgentClient {
 			});
 			this.sessions.set(origin, session);
 		}
-		return createConnectTransport({
+		const manager = session;
+		// No compression: the tunnel is internal, and accepting it would let
+		// an agent send a small body that inflates in the api (a bomb).
+		// readMaxBytes bounds a message after decompression in connect-es.
+		return createConnectProtocolTransport({
 			baseUrl,
-			httpVersion: "2",
-			sessionManager: session,
+			httpClient: createNodeHttpClient({
+				httpVersion: "2",
+				sessionProvider: () => manager,
+			}),
+			useBinaryFormat: true,
+			acceptCompression: [],
+			sendCompression: null,
+			...this.limits,
 			interceptors: [
 				(next) => (req) => {
 					for (const [k, v] of Object.entries(headers)) {

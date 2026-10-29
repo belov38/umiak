@@ -1,3 +1,4 @@
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
 	CODE_AGENT_UNAVAILABLE,
 	HEADER_ERROR_CODE,
@@ -33,7 +34,13 @@ export async function routedFetch(
 		throw new TypeError(`agent fetch path must start with "/": ${path}`);
 	}
 	const { body, headers, signal, ...rest } = init;
-	const headerEntries = [...new Headers(headers).entries()];
+	const h0 = new Headers(headers);
+	// undici would advertise gzip, deflate, br and inflate the answer
+	// transparently: an agent's small body could become a huge one.
+	if (!h0.has("accept-encoding")) {
+		h0.set("accept-encoding", "identity");
+	}
+	const headerEntries = [...h0.entries()];
 	const factory =
 		typeof body === "function" ? (body as () => BodyInit) : undefined;
 	const fixed =
@@ -109,6 +116,46 @@ export async function routedFetch(
 			return { kind: "unavailable", cause };
 		},
 	);
+}
+
+/**
+ * Reads a whole Response body, failing with ResourceExhausted as soon as it
+ * exceeds maxBytes (decoded bytes, as the body yields them); the rest of the
+ * body is cancelled. Use it instead of arrayBuffer(), text() or json() on an
+ * agent answer.
+ */
+export async function readBodyCapped(
+	response: Response,
+	maxBytes: number,
+): Promise<Uint8Array> {
+	const reader = response.body?.getReader();
+	if (reader === undefined) {
+		return new Uint8Array();
+	}
+	const parts: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) {
+			break;
+		}
+		size += value.byteLength;
+		if (size > maxBytes) {
+			await reader.cancel().catch(() => {});
+			throw new ConnectError(
+				`agent response body is larger than ${maxBytes} bytes`,
+				Code.ResourceExhausted,
+			);
+		}
+		parts.push(value);
+	}
+	const out = new Uint8Array(size);
+	let at = 0;
+	for (const part of parts) {
+		out.set(part, at);
+		at += part.byteLength;
+	}
+	return out;
 }
 
 /** undici error codes of a failed or broken connection. */

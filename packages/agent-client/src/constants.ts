@@ -33,3 +33,9 @@ export const NOTIFY_INSTANCES_CHANNEL = "gateway_instances";
 export const SERVICE_PREFIX_AGENT = "sbx.agent.v1.";
 /** Service prefix of the tunnel API; the gateway refuses it on the internal listener. */
 export const SERVICE_PREFIX_TUNNEL = "sbx.tunnel.v1.";
+
+/**
+ * Maximum Connect message size in bytes (spec section 4.3), after
+ * decompression; the gateway and the agent use the same limit.
+ */
+export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
