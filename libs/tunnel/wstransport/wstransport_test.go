@@ -467,6 +467,67 @@ func TestPingTimeoutClosesConn(t *testing.T) {
 	}
 }
 
+// The ping timeout counts from the last pong, not from the ping that was
+// sent after it: a peer that stops answering is dropped PingTimeout after
+// its last pong.
+func TestPingTimeoutCountsFromLastPong(t *testing.T) {
+	var (
+		pings     atomic.Int32
+		firstPong atomic.Int64 // unix nanos
+	)
+	ts, pool := newTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(wire.HeaderGatewayInstance, "gw-ping")
+		w.Header().Set(wire.HeaderConnEpoch, "1")
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			Subprotocols: []string{wire.Subprotocol},
+			OnPingReceived: func(context.Context, []byte) bool {
+				if pings.Add(1) == 1 {
+					firstPong.Store(time.Now().UnixNano())
+					return true
+				}
+				return false
+			},
+		})
+		if err != nil {
+			return
+		}
+		nc := websocket.NetConn(context.Background(), c, websocket.MessageBinary) //nolint:contextcheck // the conn outlives the request
+		go func() {
+			_, _ = io.Copy(io.Discard, nc)
+			_ = nc.Close()
+		}()
+	}))
+	cfg := testConfig(ts, pool)
+	// An interval close to the timeout: counting from the next ping would
+	// close only interval + timeout (350 ms) after the last pong.
+	cfg.PingInterval = 150 * time.Millisecond
+	cfg.PingTimeout = 200 * time.Millisecond
+	conn, _, err := wstransport.NewDialer(cfg).Dial(context.Background(), testHello(transport.AuthToken))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	readErr := make(chan error, 1)
+	go func() {
+		_, err := conn.Read(make([]byte, 1))
+		readErr <- err
+	}()
+	select {
+	case <-readErr:
+	case <-time.After(5 * time.Second):
+		t.Fatal("conn not closed by the ping loop within 5s")
+	}
+	closed := time.Now()
+	if firstPong.Load() == 0 {
+		t.Fatal("no pong was sent")
+	}
+	since := closed.Sub(time.Unix(0, firstPong.Load()))
+	if since < 150*time.Millisecond || since >= 300*time.Millisecond {
+		t.Fatalf("conn closed %s after the last pong, want PingTimeout (200ms) + margin, < 300ms", since)
+	}
+}
+
 func TestHealthyConnStaysOpenAndCloseStopsPings(t *testing.T) {
 	var pings atomic.Int32
 	ts, pool := newTLSServer(t, pingCountingHandler(t, false, &pings))

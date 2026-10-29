@@ -43,8 +43,9 @@ type DialerConfig struct {
 	RootCAs *x509.CertPool
 	// PingInterval is the time between WebSocket pings (default 5s).
 	PingInterval time.Duration
-	// PingTimeout is how long to wait for a pong before the connection is
-	// considered dead and closed (default 15s).
+	// PingTimeout is how long the connection may go without a pong (counted
+	// from the last pong, or from connect) before it is considered dead and
+	// closed (default 15s).
 	PingTimeout time.Duration
 	// KeepAlive is the TCP keepalive idle time and probe interval (default 15s).
 	KeepAlive time.Duration
@@ -201,19 +202,20 @@ func (c *conn) Close() error {
 	return c.closeErr
 }
 
-// pingLoop pings every interval and closes the connection when a pong does not
-// arrive within timeout. It returns when ctx is cancelled (by Close) or the
-// connection is dead.
+// pingLoop pings every interval and closes the connection when no pong
+// arrived for timeout since the last one (or since connect). It returns when
+// ctx is cancelled (by Close) or the connection is dead.
 func (c *conn) pingLoop(ctx context.Context, interval, timeout time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
+	lastPong := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
-		pctx, cancel := context.WithTimeout(ctx, timeout)
+		pctx, cancel := context.WithDeadline(ctx, lastPong.Add(timeout))
 		err := c.ws.Ping(pctx)
 		cancel()
 		if err != nil {
@@ -222,5 +224,6 @@ func (c *conn) pingLoop(ctx context.Context, interval, timeout time.Duration) {
 			}
 			return
 		}
+		lastPong = time.Now()
 	}
 }
