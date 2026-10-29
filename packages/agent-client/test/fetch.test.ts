@@ -378,6 +378,11 @@ describe("AgentClient.fetch", () => {
 			"/a\\b",
 			"/..\\x",
 			"/%zz",
+			// A later layer holds an escape and is malformed after it.
+			"/%252f%25zz",
+			"/%252e%25zz",
+			"/a%25252f%2525zz",
+			"/%2541%25%25",
 			// The URL parser drops tabs: only the final pathname check sees "..".
 			"/.\t./x",
 		]) {
@@ -398,6 +403,10 @@ describe("AgentClient.fetch", () => {
 			"/100%25",
 			"/%25%25",
 			"/%2525",
+			// Later layers without an escape sequence are literal "%".
+			"/%25%25%25",
+			"/%25zz",
+			"/%25252",
 		]) {
 			it(`allows ${JSON.stringify(path)}`, async () => {
 				registry.set(route(m, a.url));

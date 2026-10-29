@@ -156,9 +156,11 @@ function isIdentity(encoding: string | null): boolean {
  * holding "/" or "\", at any layer: the first decode (as the gateway and the
  * agent do) and every further one, so a multiply encoded traversal or
  * separator (%252e, %25%32%65, ...) is refused too, like the gateway's
- * /files check. A segment that fails the first decode is malformed; a later
- * layer that fails to decode, or does not change, ends the check for that
- * segment, so a literal "%" (%25) is allowed. The query is not checked.
+ * /files check. A segment that fails the first decode is malformed, and so
+ * is one whose later layer holds an escape sequence (%XX) but fails to
+ * decode (%252f%25zz). A layer without an escape sequence ends the check
+ * for that segment, so a literal "%" (%25, %25%25) is allowed. The query is
+ * not checked.
  */
 function checkPathSegments(path: string): void {
 	const q = path.indexOf("?");
@@ -177,16 +179,14 @@ function checkPathSegments(path: string): void {
 					`agent fetch path must not hold ".", ".." or separators in a segment: ${path}`,
 				);
 			}
-			let next: string;
+			if (!/%[0-9A-Fa-f]{2}/.test(seg)) {
+				break;
+			}
 			try {
-				next = decodeURIComponent(seg);
+				seg = decodeURIComponent(seg);
 			} catch {
-				break;
+				throw new TypeError(`agent fetch path is malformed: ${path}`);
 			}
-			if (next === seg) {
-				break;
-			}
-			seg = next;
 		}
 	}
 }
