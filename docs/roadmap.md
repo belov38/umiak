@@ -18,5 +18,6 @@
 | S10 | Рабочий стол и computer-use | Sunshine + moonlight-web + TURN, cua-driver, шаблон `linux-desktop`, Windows desktop | S4, S9 | |
 | S11 | MCP-сервер | Инструменты поверх публичного API | S7 | |
 | S12 | Эксплуатация | Деплой в Kubernetes (Helm, ingress, oauth2-proxy, Postgres), метрики, логи, несколько нод, PBS | S6 | |
+| S13 | Git и приватные зависимости | Репозитории в environment, клон при claim, доступ к приватным репо (GitHub App: токен установки на sandbox с минимальными правами через credential helper агента; позже git-прокси в gateway без токена в VM), политика push, приватные registry (npm, pip, Docker) | S3, S6 | ждёт ответов Ильи: git-хостинг, от чьего имени коммиты, политика push |
 
-Порядок: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12.
+Порядок: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12. S13 — после ответов Ильи, параллельно с реализацией S3/S6.
