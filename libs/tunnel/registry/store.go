@@ -68,8 +68,13 @@ type Session struct {
 	AgentVersion    string
 	ProtoVersion    string
 	Epoch           uint64
-	Capabilities    []string
-	State           string
+	// Capabilities are the ones reported by the agent in Control/Info. They
+	// are unknown (CapabilitiesKnown false, Capabilities nil; NULL in the
+	// table) from an admission until Info, unless the same agent process
+	// and version reconnected.
+	Capabilities      []string
+	CapabilitiesKnown bool
+	State             string
 	ConnectedAt     time.Time
 	DisconnectedAt  *time.Time
 }
@@ -81,10 +86,17 @@ func scanSession(row pgx.Row) (Session, error) {
 	var (
 		s     Session
 		epoch int64
+		caps  *[]string
 	)
 	err := row.Scan(&s.MachineID, &s.InstanceID, &epoch, &s.ConnID, &s.AgentInstanceID, &s.BootID, &s.Vmgenid,
-		&s.AgentVersion, &s.ProtoVersion, &s.Capabilities, &s.State, &s.ConnectedAt, &s.DisconnectedAt)
+		&s.AgentVersion, &s.ProtoVersion, &caps, &s.State, &s.ConnectedAt, &s.DisconnectedAt)
 	s.Epoch = uint64(epoch) //nolint:gosec // epoch starts at 1 and only grows
+	if caps != nil {
+		s.Capabilities, s.CapabilitiesKnown = *caps, true
+		if s.Capabilities == nil {
+			s.Capabilities = []string{}
+		}
+	}
 	return s, err
 }
 
@@ -190,13 +202,16 @@ func (s *Store) Admit(ctx context.Context, p AdmitParams) (AdmitResult, error) {
 	_, err = tx.Exec(ctx, `INSERT INTO tunnel.tunnel_sessions
 		(machine_id, instance_id, epoch, conn_id, agent_instance_id, boot_id, vmgenid,
 		 agent_version, proto_version, capabilities, state, connected_at, disconnected_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}', 'connected', now(), NULL)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, 'connected', now(), NULL)
 		ON CONFLICT (machine_id) DO UPDATE SET
 		 instance_id = EXCLUDED.instance_id, epoch = EXCLUDED.epoch, conn_id = EXCLUDED.conn_id,
 		 agent_instance_id = EXCLUDED.agent_instance_id, boot_id = EXCLUDED.boot_id,
 		 vmgenid = EXCLUDED.vmgenid, agent_version = EXCLUDED.agent_version,
-		 proto_version = EXCLUDED.proto_version, capabilities = '{}', state = 'connected',
-		 connected_at = now(), disconnected_at = NULL`,
+		 proto_version = EXCLUDED.proto_version,
+		 capabilities = CASE WHEN tunnel_sessions.agent_instance_id = EXCLUDED.agent_instance_id
+		   AND tunnel_sessions.agent_version = EXCLUDED.agent_version
+		   THEN tunnel_sessions.capabilities END,
+		 state = 'connected', connected_at = now(), disconnected_at = NULL`,
 		p.MachineID, p.InstanceID, int64(epoch), p.ConnID, p.AgentInstanceID, p.BootID, p.Vmgenid, //nolint:gosec // bounded by int64 epoch column
 		p.AgentVersion, p.ProtoVersion)
 	if err != nil {
@@ -216,7 +231,8 @@ func equalHash(a, b []byte) bool {
 	return subtle.ConstantTimeCompare(a, b) == 1
 }
 
-// UpdateSessionInfo stores the capabilities reported by the agent. It reports
+// UpdateSessionInfo stores the capabilities reported by the agent (nil is
+// stored as a known empty list). It reports
 // false when the session is no longer the connected one with this epoch.
 func (s *Store) UpdateSessionInfo(ctx context.Context, machineID string, epoch uint64, capabilities []string) (bool, error) {
 	if capabilities == nil {

@@ -24,7 +24,8 @@ CREATE TABLE tunnel.tunnel_sessions (
   vmgenid           text NOT NULL,
   agent_version     text NOT NULL,
   proto_version     text NOT NULL,
-  capabilities      text[] NOT NULL DEFAULT '{}',
+  -- NULL: unknown until the agent reports them (Control/Info).
+  capabilities      text[],
   state             text NOT NULL CHECK (state IN ('connected', 'disconnected')),
   connected_at      timestamptz NOT NULL,
   disconnected_at   timestamptz

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -268,8 +269,59 @@ func TestUpdateSessionInfo(t *testing.T) {
 	if ok, err := s.UpdateSessionInfo(ctx, id, 1, nil); err != nil || !ok {
 		t.Fatalf("nil capabilities: %v, %v", ok, err)
 	}
+	if sess, _ := s.Session(ctx, id); !sess.CapabilitiesKnown || len(sess.Capabilities) != 0 {
+		t.Fatalf("after reporting none: known %v, %v", sess.CapabilitiesKnown, sess.Capabilities)
+	}
 	if _, err := s.Session(ctx, uuid.NewString()); !errors.Is(err, registry.ErrNotFound) {
 		t.Fatalf("unknown session: err = %v, want ErrNotFound", err)
+	}
+}
+
+// Capabilities survive a reconnect of the same agent process and version;
+// any other admission makes them unknown until Control/Info.
+func TestAdmitKeepsCapabilitiesOfSameAgent(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	id, bs := machine(t, s)
+	p := params(id, "gw-1", transport.AuthBootstrap, bs)
+	if _, err := s.Admit(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if sess, _ := s.Session(ctx, id); sess.CapabilitiesKnown || sess.Capabilities != nil {
+		t.Fatalf("first admission: known %v, %v; want unknown", sess.CapabilitiesKnown, sess.Capabilities)
+	}
+	if ok, err := s.UpdateSessionInfo(ctx, id, 1, []string{"exec"}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+
+	// Same agent instance and version on another gateway: kept.
+	p.InstanceID, p.ConnID = "gw-2", "conn-2"
+	if _, err := s.Admit(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if sess, _ := s.Session(ctx, id); !sess.CapabilitiesKnown || !slices.Equal(sess.Capabilities, []string{"exec"}) {
+		t.Fatalf("same agent: known %v, %v; want [exec]", sess.CapabilitiesKnown, sess.Capabilities)
+	}
+
+	// New agent version: unknown.
+	p.AgentVersion = "1.1.0"
+	if _, err := s.Admit(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if sess, _ := s.Session(ctx, id); sess.CapabilitiesKnown {
+		t.Fatalf("new version: capabilities %v, want unknown", sess.Capabilities)
+	}
+	if ok, err := s.UpdateSessionInfo(ctx, id, 3, []string{"exec"}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+
+	// New agent instance: unknown.
+	p.AgentInstanceID = "agent-restarted"
+	if _, err := s.Admit(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if sess, _ := s.Session(ctx, id); sess.CapabilitiesKnown {
+		t.Fatalf("new agent instance: capabilities %v, want unknown", sess.Capabilities)
 	}
 }
 
