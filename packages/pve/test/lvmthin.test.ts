@@ -7,7 +7,12 @@ import {
 	StorageFullError,
 	ThawFailedError,
 } from "../src/storage/lvmthin.ts";
-import type { DiskSet, MachineRef, QuiesceHook } from "../src/storage/types.ts";
+import type {
+	Disk,
+	DiskSet,
+	MachineRef,
+	QuiesceHook,
+} from "../src/storage/types.ts";
 import { FakeClock, FakeNode } from "./fakes.ts";
 
 const linuxTpl: DiskSet = parseDiskSet(
@@ -62,6 +67,8 @@ function setup(opts: { budgetMs?: number } = {}) {
 	return { log, node, clock, driver, hook };
 }
 
+const tplDisk = linuxTpl[0] as Disk;
+
 const machine = (disks: DiskSet, running = true): MachineRef => ({
 	node: "pve",
 	vmid: 500,
@@ -84,9 +91,9 @@ describe("parseDiskSet / formatDisk", () => {
 			"scsi0",
 			"tpmstate0",
 		]);
-		expect(
-			formatDisk({ ...linuxTpl[0]!, volid: "local-lvm:vm-500-disk-0" }),
-		).toBe("local-lvm:vm-500-disk-0,discard=on,iothread=1,ssd=1");
+		expect(formatDisk({ ...tplDisk, volid: "local-lvm:vm-500-disk-0" })).toBe(
+			"local-lvm:vm-500-disk-0,discard=on,iothread=1,ssd=1",
+		);
 	});
 });
 
@@ -154,7 +161,7 @@ describe("snapshot", () => {
 	it("freezes, snapshots and thaws a running single-disk machine without pausing", async () => {
 		const { log, node, driver, hook } = setup();
 		const s = await driver.snapshot(
-			machine([{ ...linuxTpl[0]!, lv: "vm-500-disk-0" }]),
+			machine([{ ...tplDisk, lv: "vm-500-disk-0" }]),
 			hook,
 		);
 		expect(log).toEqual([
