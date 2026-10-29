@@ -202,6 +202,28 @@ describe("create", () => {
 	});
 });
 
+describe("lease owner", () => {
+	it("records ownerId on create and fork and reuses the lease for the same owner", async () => {
+		const { allocator, machines } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		expect((await allocator.get(a.vmid))?.ownerId).toBe("m-a");
+		await machines.start(a.vmid);
+		const s = await machines.snapshot(a.vmid);
+		const f = await machines.fork(s, { ownerId: "m-f" });
+		expect((await allocator.get(f.vmid))?.ownerId).toBe("m-f");
+		expect(f.vmid).not.toBe(a.vmid);
+	});
+
+	it("frees the lease with the owner on delete", async () => {
+		const { allocator, machines } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		await machines.delete(a.vmid);
+		expect(await allocator.get(a.vmid)).toBeUndefined();
+		const b = await machines.create({ ownerId: "m-a" });
+		expect(b.vmid).toBe(a.vmid);
+	});
+});
+
 describe("snapshot and fork", () => {
 	it("snapshots a running machine with QGA freeze and stores metadata without identity", async () => {
 		const { api, log, machines, store } = setup();
@@ -224,6 +246,41 @@ describe("snapshot and fork", () => {
 		expect(store.getSnapshot(s.id)).toEqual(s);
 		expect(JSON.stringify(store.getSnapshot(s.id))).not.toContain("ua");
 		expect(api.vms.get(500)?.status).toBe("running");
+	});
+
+	it("uses an external quiesce hook and snapshot id instead of QGA", async () => {
+		const { log, node, machines, store } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		log.length = 0;
+		const hook = {
+			freeze: async () => {
+				log.push("hook:freeze");
+			},
+			thaw: async () => {
+				log.push("hook:thaw");
+			},
+		};
+		const s = await machines.snapshot(a.vmid, { hook, id: "abc" });
+		expect(log.filter((l) => /fsfreeze|lv\.snapshot|hook:/.test(l))).toEqual([
+			"hook:freeze",
+			"node:lv.snapshot",
+			"hook:thaw",
+		]);
+		expect(s.id).toBe("abc");
+		expect(node.lvs.map((l) => l.name)).toContain("sbx-snap-abc-scsi0");
+		expect(store.getSnapshot("abc")).toEqual(s);
+	});
+
+	it("does not require QGA when an external hook is given", async () => {
+		const { api, machines } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		api.agentUp = false;
+		const hook = { freeze: async () => {}, thaw: async () => {} };
+		await expect(
+			machines.snapshot(a.vmid, { hook, id: "abc" }),
+		).resolves.toMatchObject({ id: "abc" });
 	});
 
 	it("refuses to snapshot a running machine without QGA unless crash-consistent", async () => {

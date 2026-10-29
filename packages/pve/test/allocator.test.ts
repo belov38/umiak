@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
 	Allocator,
@@ -39,7 +43,7 @@ describe("Allocator", () => {
 			vmid: 500,
 			mac: "02:01:00:00:01:F4",
 		});
-		expect(store.get(1, 500)?.state).toBe("reserved");
+		expect((await store.get(1, 500))?.state).toBe("reserved");
 		expect((await alloc.allocate()).vmid).toBe(501);
 	});
 
@@ -81,27 +85,92 @@ describe("Allocator", () => {
 	it("keeps releasing rows occupied and frees the VMID only on release", async () => {
 		const { alloc, store } = make();
 		await alloc.allocate();
-		alloc.markActive(500);
-		expect(store.get(1, 500)?.state).toBe("active");
-		alloc.markReleasing(500);
+		await alloc.markActive(500);
+		expect((await store.get(1, 500))?.state).toBe("active");
+		await alloc.markReleasing(500);
 		expect((await alloc.allocate()).vmid).toBe(501);
-		alloc.release(500);
-		expect(store.get(1, 500)).toBeUndefined();
+		await alloc.release(500);
+		expect(await store.get(1, 500)).toBeUndefined();
 		expect((await alloc.allocate()).vmid).toBe(500);
 	});
 
 	it("records the template row without handing it out", async () => {
 		const { alloc, store } = make();
-		alloc.ensureTemplate();
-		alloc.ensureTemplate();
-		expect(store.get(1, 599)).toMatchObject({
+		await alloc.ensureTemplate();
+		await alloc.ensureTemplate();
+		expect(await store.get(1, 599)).toMatchObject({
 			purpose: "template",
 			state: "active",
 			mac: "02:01:00:00:02:57",
 		});
-		expect(store.list(1).filter((l) => l.purpose === "machine")).toHaveLength(
-			0,
-		);
+		expect(
+			(await store.list(1)).filter((l) => l.purpose === "machine"),
+		).toHaveLength(0);
+	});
+
+	it("returns the same VMID for the same owner while the lease is not releasing", async () => {
+		const { alloc, store } = make();
+		const a = await alloc.allocate("m1");
+		const b = await alloc.allocate("m1");
+		expect(b).toEqual(a);
+		expect((await store.get(1, a.vmid))?.ownerId).toBe("m1");
+		expect((await alloc.allocate("m2")).vmid).toBe(a.vmid + 1);
+		await alloc.markActive(a.vmid);
+		expect((await alloc.allocate("m1")).vmid).toBe(a.vmid);
+		await alloc.markReleasing(a.vmid);
+		const c = await alloc.allocate("m1");
+		expect(c.vmid).not.toBe(a.vmid);
+		expect((await store.get(1, c.vmid))?.ownerId).toBe("m1");
+	});
+
+	it("does not record an owner when none is given", async () => {
+		const { alloc, store } = make();
+		await alloc.allocate();
+		expect((await store.get(1, 500))?.ownerId).toBeUndefined();
+	});
+
+	it("works with a store whose methods are asynchronous", async () => {
+		const rows = new Map<number, VmidLease>();
+		const tick = () => Promise.resolve();
+		const asyncStore: AllocatorStore = {
+			async tryInsert(l) {
+				await tick();
+				if (rows.has(l.vmid)) return false;
+				rows.set(l.vmid, { ...l });
+				return true;
+			},
+			async get(_c, vmid) {
+				await tick();
+				return rows.get(vmid);
+			},
+			async list() {
+				await tick();
+				return [...rows.values()];
+			},
+			async setState(_c, vmid, state) {
+				await tick();
+				const r = rows.get(vmid);
+				if (r) r.state = state;
+			},
+			async remove(_c, vmid) {
+				await tick();
+				rows.delete(vmid);
+			},
+			async findByOwner(_c, ownerId) {
+				await tick();
+				return [...rows.values()].find((r) => r.ownerId === ownerId);
+			},
+		};
+		const { alloc } = make({ store: asyncStore });
+		await alloc.ensureTemplate();
+		const a = await alloc.allocate("o1");
+		expect(await alloc.allocate("o1")).toEqual(a);
+		await alloc.markActive(a.vmid);
+		expect((await alloc.get(a.vmid))?.state).toBe("active");
+		expect(await alloc.list()).toHaveLength(2);
+		await alloc.markReleasing(a.vmid);
+		await alloc.release(a.vmid);
+		expect(await alloc.get(a.vmid)).toBeUndefined();
 	});
 });
 
@@ -120,6 +189,67 @@ describe("SqliteStateStore", () => {
 		expect(s.tryInsert(row(500, "A"))).toBe(true);
 		expect(s.tryInsert(row(500, "B"))).toBe(false);
 		expect(s.tryInsert(row(501, "A"))).toBe(false);
+	});
+
+	it("stores the owner and finds a lease by owner", () => {
+		const s = new SqliteStateStore(":memory:");
+		const row = (vmid: number, ownerId?: string): VmidLease => ({
+			cluster: 1,
+			vmid,
+			mac: `M${vmid}`,
+			state: "reserved",
+			purpose: "machine",
+			createdAt: 1,
+			updatedAt: 1,
+			...(ownerId ? { ownerId } : {}),
+		});
+		s.tryInsert(row(500, "m1"));
+		s.tryInsert(row(501));
+		expect(s.get(1, 500)?.ownerId).toBe("m1");
+		expect(s.get(1, 501)?.ownerId).toBeUndefined();
+		expect(s.findByOwner(1, "m1")?.vmid).toBe(500);
+		expect(s.findByOwner(1, "nope")).toBeUndefined();
+		expect(s.findByOwner(2, "m1")).toBeUndefined();
+	});
+
+	it("adds owner_id to a database created before the column existed", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-sqlite-"));
+		try {
+			const path = join(dir, "state.db");
+			const old = new DatabaseSync(path);
+			old.exec(`
+				CREATE TABLE vmid_lease (
+					cluster INTEGER NOT NULL,
+					vmid INTEGER NOT NULL,
+					mac TEXT NOT NULL,
+					state TEXT NOT NULL CHECK (state IN ('reserved', 'active', 'releasing')),
+					purpose TEXT NOT NULL CHECK (purpose IN ('machine', 'template')),
+					created_at INTEGER NOT NULL,
+					updated_at INTEGER NOT NULL,
+					PRIMARY KEY (cluster, vmid),
+					UNIQUE (cluster, mac)
+				);
+				INSERT INTO vmid_lease VALUES (1, 500, 'A', 'active', 'machine', 1, 1);
+			`);
+			old.close();
+			const s = new SqliteStateStore(path);
+			expect(s.get(1, 500)?.ownerId).toBeUndefined();
+			s.tryInsert({
+				cluster: 1,
+				vmid: 501,
+				mac: "B",
+				state: "reserved",
+				purpose: "machine",
+				createdAt: 1,
+				updatedAt: 1,
+				ownerId: "m9",
+			});
+			expect(s.findByOwner(1, "m9")?.vmid).toBe(501);
+			s.close();
+			new SqliteStateStore(path).close(); // reopening must not fail on the existing column
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("stores snapshots", () => {
@@ -148,5 +278,6 @@ function bind(s: SqliteStateStore): AllocatorStore {
 		list: (c) => s.list(c),
 		setState: (c, v, st) => s.setState(c, v, st),
 		remove: (c, v) => s.remove(c, v),
+		findByOwner: (c, o) => s.findByOwner(c, o),
 	};
 }

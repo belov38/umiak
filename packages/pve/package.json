@@ -5,7 +5,8 @@
 	"type": "module",
 	"description": "Proxmox foundation: PVE API client, sbx-node client, lvmthin driver, machine primitives, VMID/MAC allocator",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./testing": "./test/fakes.ts"
 	},
 	"scripts": {
 		"test": "vitest run",

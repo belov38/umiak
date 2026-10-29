@@ -202,21 +202,21 @@ export class Machines {
 	}
 
 	create(
-		opts: { size?: MachineSize; smbios?: Smbios } = {},
+		opts: { size?: MachineSize; smbios?: Smbios; ownerId?: string } = {},
 	): Promise<MachineInfo> {
 		return this.#sem.run(() => this.#build({ kind: "template" }, opts));
 	}
 
 	fork(
 		snap: SnapshotRef,
-		opts: { size?: MachineSize; smbios?: Smbios } = {},
+		opts: { size?: MachineSize; smbios?: Smbios; ownerId?: string } = {},
 	): Promise<MachineInfo> {
 		return this.#sem.run(() => this.#build({ kind: "snapshot", snap }, opts));
 	}
 
 	async #build(
 		src: Source,
-		opts: { size?: MachineSize; smbios?: Smbios },
+		opts: { size?: MachineSize; smbios?: Smbios; ownerId?: string },
 	): Promise<MachineInfo> {
 		const { api, allocator, driver, cfg } = this.#o;
 		const hardware: Record<string, string> = {};
@@ -232,7 +232,7 @@ export class Machines {
 		const size =
 			opts.size ?? (src.kind === "snapshot" ? undefined : DEFAULT_SIZE);
 
-		const { vmid, mac } = await allocator.allocate();
+		const { vmid, mac } = await allocator.allocate(opts.ownerId);
 		try {
 			const params: Params = {
 				vmid,
@@ -269,7 +269,7 @@ export class Machines {
 				diskParams.boot = "order=scsi0";
 			await api.put(this.#vmPath(vmid, "/config"), diskParams);
 			await this.#firewall(vmid, mac);
-			allocator.markActive(vmid);
+			await allocator.markActive(vmid);
 			return { vmid, mac, node: this.#node, disks };
 		} catch (err) {
 			// Roll back through delete even if the POST failed: a broken connection may hide a
@@ -306,7 +306,7 @@ export class Machines {
 					tags: "sbx",
 				});
 				await this.#firewall(vmid, mac);
-				allocator.markActive(vmid);
+				await allocator.markActive(vmid);
 				const disks = parseDiskSet(await this.config(vmid), cfg.storage);
 				return { vmid, mac, node: this.#node, disks };
 			} catch (err) {
@@ -428,12 +428,15 @@ export class Machines {
 
 	async snapshot(
 		vmid: number,
-		opts: { crashConsistent?: boolean } = {},
+		opts: { crashConsistent?: boolean; hook?: QuiesceHook; id?: string } = {},
 	): Promise<SnapshotRef> {
 		const config = await this.config(vmid);
 		const running = (await this.status(vmid)) === "running";
 		let hook: QuiesceHook = { freeze: async () => {}, thaw: async () => {} };
-		if (running && !opts.crashConsistent) {
+		if (opts.hook) {
+			// External quiesce (S3 agent): QGA is not involved.
+			hook = opts.hook;
+		} else if (running && !opts.crashConsistent) {
 			if (!(await this.qga.ping(vmid))) throw new QgaUnavailableError(vmid);
 			hook = {
 				freeze: () => this.qga.fsfreezeFreeze(vmid),
@@ -448,6 +451,7 @@ export class Machines {
 				running,
 			},
 			hook,
+			opts.id !== undefined ? { id: opts.id } : undefined,
 		);
 		const hardware: Record<string, string> = {};
 		for (const k of SNAPSHOT_HW_KEYS)
@@ -501,9 +505,9 @@ export class Machines {
 		const { api, allocator, cfg } = this.#o;
 		if (vmid === cfg.templateVmid)
 			throw new Error(`refusing to delete the template VM ${vmid}`);
-		const lease = allocator.get(vmid);
+		const lease = await allocator.get(vmid);
 		const mac = lease?.mac ?? macFor(cfg.clusterId, vmid);
-		if (lease) allocator.markReleasing(vmid);
+		if (lease) await allocator.markReleasing(vmid);
 
 		const vm = (await this.#resources()).find((r) => r.vmid === vmid);
 		if (vm) {
@@ -516,7 +520,7 @@ export class Machines {
 		}
 		await this.#o.driver.delete({ kind: "machine", node: this.#node, vmid });
 		await this.verifyGone(vmid, mac);
-		allocator.release(vmid);
+		await allocator.release(vmid);
 	}
 
 	async verifyGone(vmid: number, mac: string): Promise<void> {
