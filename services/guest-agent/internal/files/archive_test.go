@@ -8,6 +8,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"net/http"
@@ -375,5 +376,118 @@ func TestArchivePutModesAndOwner(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dst, "dot")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestArchiveSymlinkedRoot(t *testing.T) {
+	h := newHarness(t)
+	h.writeFile("real/a/f.txt", []byte("f"), 0o644)
+	h.writeFile("real/g.txt", []byte("g"), 0o600)
+	link := h.path("link")
+	if err := os.Symlink(h.path("real"), link); err != nil {
+		t.Fatal(err)
+	}
+	res := h.do(http.MethodGet, "/files/archive", q("path", link), nil, nil)
+	archive := wantStatus(t, res, http.StatusOK)
+	names := tarNames(t, archive, false)
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"a/", "a/f.txt", "g.txt"}) {
+		t.Fatalf("names = %v", names)
+	}
+	dst := h.path("dst")
+	res = h.do(http.MethodPut, "/files/archive", q("path", dst), bytes.NewReader(archive), nil)
+	wantStatus(t, res, http.StatusOK)
+	want, got := snapshot(t, h.path("real")), snapshot(t, dst)
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Fatalf("%s = %+v, want %+v", k, got[k], w)
+		}
+	}
+}
+
+func TestArchivePutGlobalHeader(t *testing.T) {
+	h := newHarness(t)
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	// git archive starts with a pax global header carrying the commit id.
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeXGlobalHeader, Name: "pax_global_header", PAXRecords: map[string]string{"comment": "0123456789abcdef"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: "repo/README", Mode: 0o644, Size: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dst := h.path("g")
+	res := h.do(http.MethodPut, "/files/archive", q("path", dst), bytes.NewReader(buf.Bytes()), nil)
+	var out struct{ Entries int }
+	if err := json.Unmarshal(wantStatus(t, res, http.StatusOK), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Entries != 1 {
+		t.Fatalf("entries = %d, want 1", out.Entries)
+	}
+	if b, err := os.ReadFile(filepath.Join(dst, "repo", "README")); err != nil || string(b) != "hi" {
+		t.Fatalf("README = %q, %v", b, err)
+	}
+	if _, err := os.Lstat(filepath.Join(dst, "pax_global_header")); !os.IsNotExist(err) {
+		t.Fatalf("global header written as a file: %v", err)
+	}
+
+	// The global header counts toward the entry limit.
+	h2 := newHarness(t, func(o *Options) { o.ArchiveMaxEntries = 1 })
+	res = h2.do(http.MethodPut, "/files/archive", q("path", h2.path("g")), bytes.NewReader(buf.Bytes()), nil)
+	wantError(t, res, http.StatusRequestEntityTooLarge, errs.PayloadTooLarge)
+}
+
+func TestArchiveGetAbortsMidStream(t *testing.T) {
+	h := newHarness(t)
+	h.writeFile("src/a.bin", randomBytes(64<<10), 0o644)
+	big := h.writeFile("src/b.bin", randomBytes(1<<20), 0o644)
+	h.svc.testHookAfterHeader = func(name string) {
+		if name == "b.bin" {
+			// The file shrinks after its header promised 1 MiB.
+			_ = os.Truncate(big, 1000)
+		}
+	}
+	req, err := http.NewRequestWithContext(h.ctx(), http.MethodGet, h.srv.URL+"/files/archive?"+q("path", h.path("src")).Encode(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := h.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	data, err := io.ReadAll(res.Body)
+	if err == nil {
+		t.Fatalf("the response ended cleanly (%d bytes); want an aborted stream", len(data))
+	}
+	end := make([]byte, 1024)
+	if len(data) >= len(end) && bytes.Equal(data[len(data)-len(end):], end) {
+		t.Fatal("the aborted stream ends with tar end blocks")
+	}
+	tr := tar.NewReader(bytes.NewReader(data))
+	for {
+		_, err := tr.Next()
+		if err == nil {
+			_, err = io.Copy(io.Discard, tr)
+		}
+		if errors.Is(err, io.EOF) {
+			t.Fatal("the partial archive parses as complete")
+		}
+		if err != nil {
+			break
+		}
 	}
 }

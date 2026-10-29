@@ -58,6 +58,10 @@ func tooLarge(format string, args ...any) error {
 	return errs.Newf(connect.CodeResourceExhausted, errs.PayloadTooLarge, format, args...)
 }
 
+// typeGNUVolume is the GNU tar volume label entry ('V'), which archive/tar
+// has no constant for.
+const typeGNUVolume byte = 'V'
+
 // archiveResult is the JSON response of PUT /files/archive.
 type archiveResult struct {
 	Path    string `json:"path"`
@@ -188,6 +192,12 @@ func (x *extractor) run(tr *tar.Reader) error {
 			return tooLarge("the archive has more than %d entries", x.s.opts.ArchiveMaxEntries)
 		}
 		x.headers++
+		switch hdr.Typeflag {
+		case tar.TypeXGlobalHeader, typeGNUVolume:
+			// Metadata, not files: a pax global header (the first entry
+			// of every git archive) and a GNU volume label.
+			continue
+		}
 		if max(len(hdr.Name), len(hdr.Linkname)) > x.s.opts.ArchiveMaxPath {
 			return tooLarge("an entry path is longer than %d bytes", x.s.opts.ArchiveMaxPath)
 		}

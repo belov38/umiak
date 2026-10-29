@@ -129,6 +129,11 @@ type Service struct {
 	opts    Options
 	st      *store.Store
 	uploads keyedMutex
+
+	// Test hooks: after an upload is moved to its target, and after the
+	// header of an archived file is written.
+	testHookAfterPlace  func()
+	testHookAfterHeader func(name string)
 }
 
 // New returns a Service.
@@ -499,14 +504,15 @@ func (s *Service) move(ctx context.Context, req *agentv1.MoveRequest) (*agentv1.
 	if err != nil {
 		return nil, fsError(err)
 	}
-	if !req.GetOverwrite() {
-		if _, err := os.Lstat(dst); err == nil {
-			return nil, errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists, "%s already exists", dst)
-		}
+	if req.GetOverwrite() {
+		err = os.Rename(src, dst)
+	} else {
+		err = renameNoReplace(src, dst)
 	}
-	err = os.Rename(src, dst)
 	switch {
 	case err == nil:
+	case !req.GetOverwrite() && errors.Is(err, fs.ErrExist):
+		return nil, errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists, "%s already exists", dst)
 	case errors.Is(err, syscall.EXDEV):
 		if sfi.IsDir() {
 			return nil, errs.Newf(connect.CodeFailedPrecondition, errs.CrossDevice, "cannot move directory %s across filesystems", src)
@@ -527,6 +533,15 @@ func (s *Service) move(ctx context.Context, req *agentv1.MoveRequest) (*agentv1.
 		return nil, fsError(err)
 	}
 	return info, nil
+}
+
+// renameCheckFirst renames src to dst after checking that dst does not
+// exist (fs.ErrExist otherwise). The two steps are not atomic.
+func renameCheckFirst(src, dst string) error {
+	if _, err := os.Lstat(dst); err == nil {
+		return &os.LinkError{Op: "rename", Old: src, New: dst, Err: fs.ErrExist}
+	}
+	return os.Rename(src, dst)
 }
 
 // copyAcross copies the file or symlink src to dst on another filesystem

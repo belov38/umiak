@@ -368,6 +368,12 @@ func (s *Service) commitUpload(r *http.Request, id string) ([]byte, error) {
 		return nil, err
 	}
 
+	if done, err := s.movedEarlier(rec); err != nil {
+		return nil, err
+	} else if done {
+		// An earlier attempt moved the file but lost its result.
+		return s.storeCommit(r.Context(), rec)
+	}
 	if _, err := os.Lstat(rec.TempPath); errors.Is(err, fs.ErrNotExist) {
 		if err := s.deleteUploadRecord(r.Context(), id); err != nil {
 			return nil, err
@@ -390,10 +396,53 @@ func (s *Service) commitUpload(r *http.Request, id string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The intent is durable before the file moves, so a retry after a lost
+	// result finds the file at its target instead of a missing upload.
+	rec.CommitPath, rec.CommitTarget = p, target
+	if err := s.putUpload(r.Context(), rec); err != nil {
+		return nil, err
+	}
 	if err := finishUpload(rec.TempPath, target, mode, o, overwrite); err != nil {
 		return nil, err
 	}
-	info, err := statInfo(p, true, newNames())
+	if s.testHookAfterPlace != nil {
+		s.testHookAfterPlace()
+	}
+	return s.storeCommit(r.Context(), rec)
+}
+
+// movedEarlier reports whether an earlier commit of rec already moved the
+// upload to its recorded target: the upload file is gone (or is the same
+// file as the target, a hard link not yet removed) and the target exists.
+func (s *Service) movedEarlier(rec *store.Upload) (bool, error) {
+	if rec.CommitTarget == "" {
+		return false, nil
+	}
+	tfi, err := os.Stat(rec.CommitTarget)
+	if err != nil {
+		return false, nil
+	}
+	ufi, err := os.Lstat(rec.TempPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return true, nil
+	case err != nil:
+		return false, fsError(err)
+	case os.SameFile(tfi, ufi):
+		if err := os.Remove(rec.TempPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, fsError(err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// storeCommit stores the FileInfo of a committed upload as its result and
+// returns it. The write is detached from the call (bounded by
+// DurableTimeout): a client that gave up after the move must still find the
+// result when it retries.
+func (s *Service) storeCommit(ctx context.Context, rec *store.Upload) ([]byte, error) {
+	info, err := statInfo(rec.CommitPath, true, newNames())
 	if err != nil {
 		return nil, fsError(err)
 	}
@@ -404,7 +453,7 @@ func (s *Service) commitUpload(r *http.Request, id string) ([]byte, error) {
 	rec.Commit = body
 	rec.TempPath = ""
 	rec.LastActivity = s.opts.Now()
-	if err := s.putUpload(r.Context(), rec); err != nil {
+	if err := s.putUpload(context.WithoutCancel(ctx), rec); err != nil {
 		return nil, err
 	}
 	return body, nil
@@ -476,6 +525,11 @@ func (s *Service) UploadPath(id string) (string, error) {
 		}
 		return info.GetPath(), nil
 	}
+	if rec.CommitPath != "" {
+		if _, err := os.Lstat(rec.TempPath); errors.Is(err, fs.ErrNotExist) {
+			return rec.CommitPath, nil // moved; the result is not stored yet
+		}
+	}
 	return rec.TempPath, nil
 }
 
@@ -514,7 +568,6 @@ func (s *Service) sweep(ctx context.Context) {
 	for _, id := range expired {
 		if err := s.expire(ctx, id, now); err != nil {
 			s.opts.Log.Warn("files: remove expired upload", "upload", id, "err", err)
-			return
 		}
 	}
 	entries, err := os.ReadDir(s.opts.Layout.UploadsDir)

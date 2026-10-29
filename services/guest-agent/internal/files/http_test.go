@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -383,5 +384,66 @@ func TestJanitorRemovesExpired(t *testing.T) {
 	}
 	if _, ok, _ := h.st.GetUpload("fresh"); !ok {
 		t.Fatal("fresh upload removed")
+	}
+}
+
+// commitDirect posts a commit through the handler directly with ctx.
+func (h *harness) commitDirect(ctx context.Context, id string, body map[string]any) *httptest.ResponseRecorder {
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/files/uploads/"+id+"/commit", bytes.NewReader(b))
+	rec := httptest.NewRecorder()
+	h.svc.HTTPHandler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestCommitIdempotentAfterLostResult(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.DurableTimeout = 100 * time.Millisecond })
+	dst := h.path("c", "file.txt")
+
+	// The result write fails after the move (a freeze lands in between):
+	// the retry rebuilds the result from the target.
+	res := h.do(http.MethodPut, "/files/uploads/lost", q("offset", "0"), strings.NewReader("content"), nil)
+	wantStatus(t, res, http.StatusOK)
+	h.svc.testHookAfterPlace = func() { h.st.SetFrozen(true) }
+	rec := h.commitDirect(h.ctx(), "lost", map[string]any{"path": dst})
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("commit during freeze = %d %s", rec.Code, rec.Body)
+	}
+	h.svc.testHookAfterPlace = nil
+	h.st.SetFrozen(false)
+	if p, err := h.svc.UploadPath("lost"); err != nil || p != dst {
+		t.Fatalf("UploadPath before the retry = %q, %v", p, err)
+	}
+	rec = h.commitDirect(h.ctx(), "lost", map[string]any{"path": dst})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry = %d %s", rec.Code, rec.Body)
+	}
+	fi := fileInfo(t, rec.Body.Bytes())
+	if fi.GetPath() != dst || fi.GetSize() != 7 {
+		t.Fatalf("FileInfo %v", fi)
+	}
+	first := rec.Body.String()
+	rec = h.commitDirect(h.ctx(), "lost", map[string]any{"path": dst})
+	if rec.Code != http.StatusOK || rec.Body.String() != first {
+		t.Fatalf("replay = %d %s, want %s", rec.Code, rec.Body, first)
+	}
+
+	// A client that gives up after the move does not cost the result.
+	res = h.do(http.MethodPut, "/files/uploads/gone", q("offset", "0"), strings.NewReader("other"), nil)
+	wantStatus(t, res, http.StatusOK)
+	ctx, cancel := context.WithCancel(h.ctx())
+	h.svc.testHookAfterPlace = cancel
+	dst2 := h.path("c", "other.txt")
+	h.commitDirect(ctx, "gone", map[string]any{"path": dst2})
+	h.svc.testHookAfterPlace = nil
+	rec = h.commitDirect(h.ctx(), "gone", map[string]any{"path": dst2})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry after cancel = %d %s", rec.Code, rec.Body)
+	}
+	if fi := fileInfo(t, rec.Body.Bytes()); fi.GetPath() != dst2 || fi.GetSize() != 5 {
+		t.Fatalf("FileInfo %v", fi)
+	}
+	if b, _ := os.ReadFile(dst2); string(b) != "other" {
+		t.Fatalf("content %q", b)
 	}
 }

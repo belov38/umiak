@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
 	"golang.org/x/sys/unix"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 )
 
 // resolveFlags confine every lookup to the directory and refuse symlinks in
@@ -42,6 +45,8 @@ func confined(op, rel string, err error) error {
 		return nil
 	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.EXDEV):
 		return errInvalidPath("%s: the path passes through a symlink or leaves the directory", rel)
+	case errors.Is(err, unix.ENOSYS):
+		return errs.New(connect.CodeInternal, errs.Internal, "openat2 is not supported: archive upload needs Linux 5.6 or later")
 	default:
 		return &fs.PathError{Op: op, Path: rel, Err: err}
 	}

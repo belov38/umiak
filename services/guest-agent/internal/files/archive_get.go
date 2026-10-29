@@ -57,6 +57,12 @@ func (s *Service) archiveGet(w http.ResponseWriter, r *http.Request) {
 		errs.WriteHTTP(w, errs.Newf(connect.CodeFailedPrecondition, errs.NotDirectory, "%s is not a directory", root))
 		return
 	}
+	// WalkDir does not follow a symlinked root: walk the directory it
+	// points to (names stay relative to it).
+	if root, err = filepath.EvalSymlinks(root); err != nil {
+		errs.WriteHTTP(w, fsError(err))
+		return
+	}
 	if gz {
 		w.Header().Set("Content-Type", "application/gzip")
 	} else {
@@ -85,7 +91,7 @@ func (s *Service) archiveGet(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return writeTarEntry(tw, p, filepath.ToSlash(rel), d)
+		return s.writeTarEntry(tw, p, filepath.ToSlash(rel), d)
 	})
 	if err == nil {
 		err = tw.Close()
@@ -101,7 +107,7 @@ func (s *Service) archiveGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeTarEntry archives the entry d found at p under name.
-func writeTarEntry(tw *tar.Writer, p, name string, d fs.DirEntry) error {
+func (s *Service) writeTarEntry(tw *tar.Writer, p, name string, d fs.DirEntry) error {
 	typ := d.Type()
 	switch {
 	case typ.IsDir(), typ&fs.ModeSymlink != 0, typ.IsRegular():
@@ -109,7 +115,7 @@ func writeTarEntry(tw *tar.Writer, p, name string, d fs.DirEntry) error {
 		return nil // sockets, FIFOs, devices
 	}
 	if typ.IsRegular() {
-		return writeTarFile(tw, p, name)
+		return s.writeTarFile(tw, p, name)
 	}
 	fi, err := d.Info()
 	if err != nil {
@@ -135,7 +141,7 @@ func writeTarEntry(tw *tar.Writer, p, name string, d fs.DirEntry) error {
 }
 
 // writeTarFile archives a regular file with the size it has when opened.
-func writeTarFile(tw *tar.Writer, p, name string) error {
+func (s *Service) writeTarFile(tw *tar.Writer, p, name string) error {
 	f, err := openRead(p)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -157,6 +163,9 @@ func writeTarFile(tw *tar.Writer, p, name string) error {
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
 		return err
+	}
+	if s.testHookAfterHeader != nil {
+		s.testHookAfterHeader(name)
 	}
 	// A file that grew is cut at the header size; one that shrank fails.
 	_, err = io.CopyN(tw, f, hdr.Size)

@@ -8,6 +8,9 @@ import (
 
 // Upload is the durable record of a resumable upload (spec 11.2). Commit
 // holds the committed result, replayed for repeated commit calls.
+// CommitPath and CommitTarget record a commit in progress (the request path
+// and the file it replaces), written before the file is moved, so a retry
+// after a lost result can rebuild it.
 type Upload struct {
 	ID           string          `json:"id"`
 	TempPath     string          `json:"temp_path"`
@@ -15,6 +18,8 @@ type Upload struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	LastActivity time.Time       `json:"last_activity"`
 	Commit       json.RawMessage `json:"commit,omitempty"`
+	CommitPath   string          `json:"commit_path,omitempty"`
+	CommitTarget string          `json:"commit_target,omitempty"`
 }
 
 // GetUpload returns the upload with id.
