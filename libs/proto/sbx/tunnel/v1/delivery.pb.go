@@ -21,7 +21,11 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Body of POST /internal/v1/agent-events in api, sent as protojson.
+// Body of POST /internal/v1/agent-events in api, sent as binary protobuf
+// (Content-Type: application/proto). Event payloads are google.protobuf.Any
+// of S3/S6 types the gateway does not link; api resolves them with its own
+// registry. The response is binary protobuf or protojson, by its
+// Content-Type.
 type AgentEventsRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	MachineId        string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`

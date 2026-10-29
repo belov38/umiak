@@ -15,7 +15,11 @@ export const file_sbx_tunnel_v1_delivery: GenFile = /*@__PURE__*/
   fileDesc("ChxzYngvdHVubmVsL3YxL2RlbGl2ZXJ5LnByb3RvEg1zYngudHVubmVsLnYxIokBChJBZ2VudEV2ZW50c1JlcXVlc3QSEgoKbWFjaGluZV9pZBgBIAEoCRIkCgZldmVudHMYAiADKAsyFC5zYngudHVubmVsLnYxLkV2ZW50EjkKEWNvbm5lY3Rpb25fZXZlbnRzGAMgAygLMh4uc2J4LnR1bm5lbC52MS5Db25uZWN0aW9uRXZlbnQiKAoTQWdlbnRFdmVudHNSZXNwb25zZRIRCglhY2tlZF9zZXEYASABKARCRVpDZ2l0aHViLmNvbS9iZWxvdjM4L2JvYXQtZGV2LWNsb25lL2xpYnMvcHJvdG8vc2J4L3R1bm5lbC92MTt0dW5uZWx2MWIGcHJvdG8z", [file_sbx_tunnel_v1_event]);
 
 /**
- * Body of POST /internal/v1/agent-events in api, sent as protojson.
+ * Body of POST /internal/v1/agent-events in api, sent as binary protobuf
+ * (Content-Type: application/proto). Event payloads are google.protobuf.Any
+ * of S3/S6 types the gateway does not link; api resolves them with its own
+ * registry. The response is binary protobuf or protojson, by its
+ * Content-Type.
  *
  * @generated from message sbx.tunnel.v1.AgentEventsRequest
  */

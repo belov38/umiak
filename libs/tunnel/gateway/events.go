@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 )
@@ -39,9 +41,11 @@ const (
 	maxSinkResponse = 1 << 20
 )
 
-// NewHTTPSink returns a sink that POSTs protojson AgentEventsRequest bodies
-// to {apiURL}/internal/v1/agent-events with the gateway's service token. A
-// nil client uses http.DefaultClient.
+// NewHTTPSink returns a sink that POSTs binary protobuf AgentEventsRequest
+// bodies to {apiURL}/internal/v1/agent-events with the gateway's service
+// token. Binary, not protojson: event payloads are Any of S3/S6 types the
+// gateway does not link, and protojson would have to resolve them. A nil
+// client uses http.DefaultClient.
 func NewHTTPSink(apiURL, serviceToken string, client *http.Client) EventSink {
 	if client == nil {
 		client = http.DefaultClient
@@ -76,7 +80,7 @@ func (h *httpSink) DeliverConnectionEvent(ctx context.Context, ev *tunnelv1.Conn
 }
 
 func (h *httpSink) post(ctx context.Context, body *tunnelv1.AgentEventsRequest) (*tunnelv1.AgentEventsResponse, error) {
-	data, err := protojson.Marshal(body)
+	data, err := proto.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +89,8 @@ func (h *httpSink) post(ctx context.Context, body *tunnelv1.AgentEventsRequest) 
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/proto")
+	req.Header.Set("Accept", "application/proto, application/json")
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -102,12 +107,19 @@ func (h *httpSink) post(ctx context.Context, body *tunnelv1.AgentEventsRequest) 
 		}
 		return nil, fmt.Errorf("agent-events: status %d: %s", resp.StatusCode, msg)
 	}
-	// An empty body is an error: it would read as ackedSeq 0.
-	if len(bytes.TrimSpace(out)) == 0 {
-		return nil, fmt.Errorf("agent-events: status %d with an empty body", resp.StatusCode)
-	}
 	var res tunnelv1.AgentEventsResponse
-	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(out, &res); err != nil {
+	if mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type")); mt == "application/proto" {
+		// An empty binary body is a valid ackedSeq 0.
+		err = proto.Unmarshal(out, &res)
+	} else {
+		// An empty body without the proto content type is an error: it
+		// would read as ackedSeq 0.
+		if len(bytes.TrimSpace(out)) == 0 {
+			return nil, fmt.Errorf("agent-events: status %d with an empty body", resp.StatusCode)
+		}
+		err = (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(out, &res)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("agent-events: decode response: %w", err)
 	}
 	return &res, nil

@@ -6,7 +6,11 @@ import "sbx/tunnel/v1/event.proto";
 
 option go_package = "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1;tunnelv1";
 
-// Body of POST /internal/v1/agent-events in api, sent as protojson.
+// Body of POST /internal/v1/agent-events in api, sent as binary protobuf
+// (Content-Type: application/proto). Event payloads are google.protobuf.Any
+// of S3/S6 types the gateway does not link; api resolves them with its own
+// registry. The response is binary protobuf or protojson, by its
+// Content-Type.
 message AgentEventsRequest {
   string machine_id = 1;
   repeated Event events = 2;
