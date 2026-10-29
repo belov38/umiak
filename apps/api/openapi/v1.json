@@ -1,0 +1,225 @@
+{
+	"components": {
+		"parameters": {},
+		"schemas": {
+			"Error": {
+				"description": "Error envelope of every non-2xx response (S7 §5.5)",
+				"properties": {
+					"error": {
+						"properties": {
+							"code": {
+								"description": "Stable snake_case error code; new codes may be added within v1",
+								"example": "operation_in_progress",
+								"type": "string"
+							},
+							"details": {
+								"additionalProperties": {},
+								"description": "Code-specific details; may be empty",
+								"type": "object"
+							},
+							"message": {
+								"description": "What happened and what to do next, in English",
+								"type": "string"
+							},
+							"requestId": {
+								"example": "req_01jbx2v7d3m6c8q9w0e4r5t6y7",
+								"type": "string"
+							},
+							"retryable": {
+								"description": "Repeating the same request is safe and may succeed later",
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"code",
+							"message",
+							"retryable",
+							"details",
+							"requestId"
+						],
+						"type": "object"
+					}
+				},
+				"required": [
+					"error"
+				],
+				"type": "object"
+			},
+			"Meta": {
+				"properties": {
+					"apiUrl": {
+						"example": "https://api.example.com",
+						"format": "uri",
+						"type": "string"
+					},
+					"apiVersion": {
+						"example": "v1",
+						"type": "string"
+					},
+					"appUrl": {
+						"example": "https://app.example.com",
+						"format": "uri",
+						"type": "string"
+					},
+					"build": {
+						"description": "Build of the api",
+						"example": "1.4.0+3f2c1a9",
+						"type": "string"
+					},
+					"latestCliVersion": {
+						"example": "0.5.1",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"minCliVersion": {
+						"description": "Older CLIs warn and keep working",
+						"example": "0.4.0",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"oidc": {
+						"description": "Keycloak for people (device flow of `sbx login`); null when only team keys work",
+						"properties": {
+							"audience": {
+								"example": "sbx-api",
+								"type": "string"
+							},
+							"clientId": {
+								"example": "sbx-cli",
+								"type": "string"
+							},
+							"issuer": {
+								"format": "uri",
+								"type": "string"
+							}
+						},
+						"required": [
+							"issuer",
+							"clientId",
+							"audience"
+						],
+						"type": [
+							"object",
+							"null"
+						]
+					},
+					"sbxDomain": {
+						"description": "Domain of published ports: https://<slug>-<port>.<sbxDomain>",
+						"example": "sbx.example.com",
+						"type": "string"
+					},
+					"ssh": {
+						"properties": {
+							"host": {
+								"example": "ssh.example.com",
+								"type": "string"
+							},
+							"hostKeys": {
+								"description": "Gateway host keys for known_hosts, \"<type> <base64>\"",
+								"items": {
+									"type": "string"
+								},
+								"type": "array"
+							},
+							"port": {
+								"maximum": 65535,
+								"minimum": 1,
+								"type": "integer"
+							}
+						},
+						"required": [
+							"host",
+							"port",
+							"hostKeys"
+						],
+						"type": "object"
+					}
+				},
+				"required": [
+					"apiVersion",
+					"build",
+					"appUrl",
+					"apiUrl",
+					"sbxDomain",
+					"oidc",
+					"ssh",
+					"minCliVersion",
+					"latestCliVersion"
+				],
+				"type": "object"
+			}
+		},
+		"securitySchemes": {
+			"keycloak": {
+				"description": "Keycloak access token of a person (CLI, SDK, MCP)",
+				"openIdConnectUrl": "https://auth.example.com/realms/sbx/.well-known/openid-configuration",
+				"type": "openIdConnect"
+			},
+			"teamKey": {
+				"bearerFormat": "sbx_",
+				"description": "Team API key (sbx_...) for automation and CI",
+				"scheme": "bearer",
+				"type": "http"
+			}
+		}
+	},
+	"info": {
+		"description": "API of sbx: VM sandboxes for AI agents on Proxmox VE.\n\nErrors always have the shape {error: {code, message, retryable, details, requestId}}.\nEvery response carries a Request-Id header.",
+		"title": "sbx API",
+		"version": "v1"
+	},
+	"openapi": "3.1.0",
+	"paths": {
+		"/v1/meta": {
+			"get": {
+				"description": "Public facts about this deployment: API and dashboard URLs, the domain of published ports, the Keycloak issuer for `sbx login`, the SSH endpoint with its host keys, and CLI versions. Needs no authentication; clients call it first to configure themselves.",
+				"operationId": "meta.get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Meta"
+								}
+							}
+						},
+						"description": "Platform information"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [],
+				"summary": "Platform information",
+				"tags": [
+					"meta"
+				]
+			}
+		}
+	},
+	"security": [
+		{
+			"keycloak": []
+		},
+		{
+			"teamKey": []
+		}
+	],
+	"servers": [
+		{
+			"url": "https://api.example.com"
+		}
+	],
+	"webhooks": {}
+}

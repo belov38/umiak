@@ -1,0 +1,36 @@
+{
+	"name": "@sbx/api",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Public API v1: Hono + zod-openapi app with the public, proxied, internal and ops listeners",
+	"exports": {
+		".": "./src/index.ts",
+		"./testing": "./src/testing/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p .",
+		"openapi": "node scripts/openapi.ts"
+	},
+	"dependencies": {
+		"@hono/node-server": "2.1.5",
+		"@hono/zod-openapi": "1.6.3",
+		"@sbx/agent-client": "workspace:*",
+		"@sbx/auth": "workspace:*",
+		"@sbx/config": "workspace:*",
+		"@sbx/core": "workspace:*",
+		"@sbx/db": "workspace:*",
+		"@scalar/hono-api-reference": "0.12.16",
+		"hono": "4.13.14",
+		"pg": "8.23.1",
+		"pino": "10.4.0",
+		"prom-client": "15.1.3",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@types/pg": "8.23.1",
+		"ajv": "8.20.0",
+		"ajv-formats": "3.0.1"
+	}
+}

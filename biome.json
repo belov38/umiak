@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": true,
-		"includes": ["**", "!**/*.md", "!**/gen"]
+		"includes": ["**", "!**/*.md", "!**/gen", "!apps/api/openapi"]
 	},
 	"formatter": {
 		"enabled": true,
