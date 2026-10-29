@@ -271,8 +271,9 @@ EOF
 		printf -- '+ write %s/known_hosts from %s:/etc/ssh/ssh_host_ed25519_key.pub\n' "$CFG_DIR" "$HOST"
 		return 0
 	fi
-	# Pin the host key over the already trusted root channel, not via keyscan.
-	printf '%s %s\n' "$TS_NAME" "$(ssh -o BatchMode=yes "$HOST" cat /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f1,2)" >"$CFG_DIR/known_hosts"
+	# Pin the host key over the already trusted root channel, not via keyscan. The Tailscale IP is
+	# pinned too, so clients can use SBX_NODE_SSH_HOST=<IP> and do without MagicDNS.
+	printf '%s,%s %s\n' "$TS_NAME" "$TS_IP" "$(ssh -o BatchMode=yes "$HOST" cat /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f1,2)" >"$CFG_DIR/known_hosts"
 	verify_node
 }
 
@@ -289,6 +290,10 @@ verify_node() {
 	out=$(echo '{"op":"version","requestId":"setup-2"}' | ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
 		-i "$CFG_DIR/sbx-node_ed25519" -o UserKnownHostsFile="$CFG_DIR/known_hosts" "root@$TS_NAME" "id" 2>/dev/null || true)
 	[[ "$out" == *'"ok":true'* ]] || die "node: forced command not enforced: $out"
+	out=$(echo '{"op":"version","requestId":"setup-3"}' | ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
+		-i "$CFG_DIR/sbx-node_ed25519" -o UserKnownHostsFile="$CFG_DIR/known_hosts" -o StrictHostKeyChecking=yes \
+		"root@$TS_IP" sbx-node 2>/dev/null || true)
+	[[ "$out" == *'"ok":true'* ]] || die "node: host key not pinned for $TS_IP: $out"
 	log "node: sbx-node answers over the restricted key"
 }
 
