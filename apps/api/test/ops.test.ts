@@ -2,7 +2,7 @@ import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ApiMetrics, bodyLimitFor } from "../src/index.ts";
-import { captureLogs } from "../src/testing/index.ts";
+import { captureLogs, TEST_API_KEY } from "../src/testing/index.ts";
 import { createHarness } from "./helpers/harness.ts";
 
 describe("ops listener", () => {
@@ -114,7 +114,7 @@ describe("request log", () => {
 
 	it("an internal error is logged with its message; errors carry their code", async () => {
 		const logs = captureLogs();
-		const h = createHarness({ deps: { log: logs.log } });
+		const h = createHarness({ deps: { log: logs.log }, bearer: TEST_API_KEY });
 		h.app.get("/v1/__test/boom", () => {
 			throw new Error("db exploded");
 		});

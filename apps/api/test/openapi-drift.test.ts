@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+	ANONYMOUS_ROUTES,
 	buildOpenApiDocument,
 	createPublicApp,
 	serializeOpenApiDocument,
@@ -98,6 +99,21 @@ describe("openapi/v1.json", () => {
 			"meta.openapi",
 		);
 		expect(doc.paths["/v1/docs"]?.get?.operationId).toBe("meta.docs");
+	});
+
+	it("operations with security: [] are exactly the routes the listeners leave anonymous", () => {
+		const anonymous: string[] = [];
+		for (const [path, item] of Object.entries(doc.paths)) {
+			for (const m of METHODS) {
+				const sec = item[m]?.security;
+				if (Array.isArray(sec) && sec.length === 0) anonymous.push(path);
+			}
+		}
+		// Hono templates use :param, the document {param}.
+		const routes = [...ANONYMOUS_ROUTES].map((r) =>
+			r.replace(/:([^/]+)/g, "{$1}"),
+		);
+		expect(anonymous.sort()).toEqual(routes.sort());
 	});
 
 	it("has no warm pool terms (no failFast, pool_exhausted, warmAvailable)", () => {

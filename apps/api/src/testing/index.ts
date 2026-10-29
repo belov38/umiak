@@ -1,10 +1,26 @@
 // Test helpers of the api, exported as `@sbx/api/testing` (also used by the
 // SDK and CLI tests that run the api in process).
+import { PgIdentityStore } from "@sbx/auth";
 import type { Logger } from "pino";
+import { IdentityListener } from "../auth/identity-listener.ts";
+import { ServiceTokens } from "../auth/internal.ts";
+import { KeyCache } from "../auth/key-cache.ts";
+import { OidcVerifier } from "../auth/oidc.ts";
+import { SessionResolver } from "../auth/principal.ts";
+import { RateLimits } from "../auth/rate-limit.ts";
 import type { ApiDeps } from "../deps.ts";
 import { createApiLogger } from "../http/logger.ts";
 import { ApiMetrics } from "../http/metrics.ts";
 import { loadSettings, type Settings } from "../settings.ts";
+import {
+	TEST_API_KEY,
+	TEST_TEAM_ID,
+	TEST_TEAM_NAME,
+	testIdentityStore,
+} from "./identity.ts";
+
+export * from "./identity.ts";
+export * from "./oidc-server.ts";
 
 /** A complete valid environment with test values (no files are read). */
 export const TEST_ENV: Readonly<Record<string, string>> = {
@@ -49,15 +65,44 @@ export function captureLogs(): CapturedLogs {
 
 /**
  * Deps for tests: test settings, a silent logger, fresh metrics, no
- * database, no host keys. `over` replaces any field.
+ * database, no host keys. `over` replaces any field; the auth services are
+ * built from the final settings, pool, identity and identityEvents:
+ * - identity: PgIdentityStore over `pool` if given, else `testIdentityStore`
+ *   that knows `TEST_API_KEY` (all scopes, team `TEST_TEAM_ID`);
+ * - identityEvents: without a notifier (never emits, ready);
+ * - oidc: a verifier when the settings have SBX_OIDC_ISSUER;
+ * - serviceTokens: none accepted.
  */
 export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
+	const settings = over.settings ?? testSettings();
+	const pool = over.pool ?? null;
+	const identity =
+		over.identity ??
+		(pool === null
+			? testIdentityStore({
+					keys: [
+						{
+							secret: TEST_API_KEY,
+							teamId: TEST_TEAM_ID,
+							teamName: TEST_TEAM_NAME,
+						},
+					],
+				})
+			: new PgIdentityStore({ pool, operatorGroups: settings.operatorGroups }));
+	const identityEvents = over.identityEvents ?? new IdentityListener(null);
 	return {
-		settings: testSettings(),
+		settings,
 		log: createApiLogger({ level: "silent" }),
 		metrics: new ApiMetrics(),
-		pool: null,
+		pool,
 		hostKeys: [],
+		identity,
+		identityEvents,
+		keyCache: new KeyCache(identity, identityEvents),
+		sessions: new SessionResolver(identity, identityEvents),
+		oidc: settings.oidc === null ? null : new OidcVerifier(settings.oidc),
+		serviceTokens: new ServiceTokens({}),
+		rateLimits: new RateLimits(settings.rate),
 		...over,
 	};
 }

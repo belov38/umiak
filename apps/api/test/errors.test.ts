@@ -6,8 +6,10 @@ import {
 	ApiError,
 	ERROR_RESPONSES,
 	jsonBody,
+	ServiceTokens,
 	toHttpError,
 } from "../src/index.ts";
+import { TEST_API_KEY } from "../src/testing/index.ts";
 import {
 	createHarness,
 	type Harness,
@@ -76,8 +78,20 @@ const echoRoute = createRoute({
  * A harness with test routes: `/v1/__test/throw` throws `make()`,
  * `/v1/__test/echo` validates a strict JSON body and answers 204.
  */
+const SERVICE_TOKEN = "internal-test-token";
+
+/** A harness with an authenticated caller (test key, or a service token on internal). */
 function throwing(make: () => unknown, listener: Listener = "public"): Harness {
-	const h = createHarness({ listener });
+	const h =
+		listener === "internal"
+			? createHarness({
+					listener,
+					deps: {
+						serviceTokens: new ServiceTokens({ gateway: [SERVICE_TOKEN] }),
+					},
+					bearer: SERVICE_TOKEN,
+				})
+			: createHarness({ listener, bearer: TEST_API_KEY });
 	h.app.get("/v1/__test/throw", () => {
 		throw make();
 	});
@@ -184,7 +198,7 @@ describe("error envelope on every response", () => {
 	});
 
 	it("an HTTPException thrown by middleware keeps the envelope", async () => {
-		const h = createHarness();
+		const h = createHarness({ bearer: TEST_API_KEY });
 		h.app.use("/v1/__test/limited", () => {
 			throw new HTTPException(429);
 		});

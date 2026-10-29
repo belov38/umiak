@@ -54,6 +54,11 @@ export interface Harness {
 export interface HarnessOptions {
 	listener?: Listener;
 	deps?: Partial<ApiDeps>;
+	/**
+	 * Sent as `Authorization: Bearer <bearer>` unless a request sets its own
+	 * Authorization header. `TEST_API_KEY` works with the default test deps.
+	 */
+	bearer?: string;
 }
 
 function build(listener: Listener, deps: ApiDeps): ApiApp {
@@ -81,6 +86,9 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 		init: HarnessRequest = {},
 	): Promise<HarnessResponse> {
 		const headers = new Headers(init.headers);
+		if (o.bearer !== undefined && !headers.has("authorization")) {
+			headers.set("authorization", `Bearer ${o.bearer}`);
+		}
 		let body = init.body;
 		if (init.json !== undefined) {
 			body = JSON.stringify(init.json);

@@ -10,6 +10,17 @@ import {
 } from "../openapi/document.ts";
 import { ERROR_RESPONSES, jsonResponse, NO_AUTH } from "../openapi/registry.ts";
 
+/**
+ * Route templates that need no authentication on the public and proxied
+ * listeners; they are exactly the operations with `security: []` (the
+ * drift test checks this).
+ */
+export const ANONYMOUS_ROUTES: ReadonlySet<string> = new Set([
+	"/v1/meta",
+	"/v1/openapi.json",
+	"/v1/docs",
+]);
+
 /** Public client of the CLI device flow; also used by the SDK and MCP. */
 export const OIDC_CLI_CLIENT_ID = "sbx-cli";
 
