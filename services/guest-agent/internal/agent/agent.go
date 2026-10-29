@@ -27,6 +27,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
@@ -215,8 +216,11 @@ type agent struct {
 	gopsutil *system.GopsutilMetrics // nil when Deps.Metrics is set
 	mux      http.Handler
 	confirm  *confirmer
+	reqcache *reqcache.Cache
 	tunnel   *tunnelState
 	identity *identityState
+
+	stopOnce sync.Once
 
 	// bg tracks the background goroutines that end with the run context.
 	bg sync.WaitGroup
@@ -253,8 +257,18 @@ func (a *agent) run(ctx context.Context) error {
 	}
 	<-ctx.Done()
 	a.log.Info("agent: shutting down")
+	a.notifyStopping()
 	a.shutdown() //nolint:contextcheck // the shutdown outlives the cancelled run context
 	return nil
+}
+
+// notifyStopping sends STOPPING=1 to systemd once.
+func (a *agent) notifyStopping() {
+	a.stopOnce.Do(func() {
+		if err := a.d.SdNotify("STOPPING=1"); err != nil {
+			a.log.Warn("agent: sd_notify STOPPING=1", "err", err)
+		}
+	})
 }
 
 // shutdown stops everything started so far, in reverse order.
@@ -271,7 +285,15 @@ func (a *agent) shutdown() {
 		a.writeStatus()
 	}
 	if a.st != nil {
+		// One budget for both flushes. The request cache goes first: its
+		// outcomes buffered during a freeze are lost once the store closes,
+		// and a retry would run the mutation again.
 		fctx, cancel := context.WithTimeout(context.Background(), shutdownFlush)
+		if a.reqcache != nil {
+			if err := a.reqcache.Flush(fctx); err != nil {
+				a.log.Warn("agent: flush request cache", "err", err)
+			}
+		}
 		if err := a.st.Flush(fctx); err != nil {
 			a.log.Warn("agent: flush state.db", "err", err)
 		}
@@ -323,6 +345,7 @@ func (a *agent) startLoops(ctx context.Context) {
 	a.goBG(func() { a.quiesce.RunProbe(ctx) })
 	a.goBG(func() { a.statusLoop(ctx) })
 	a.goBG(func() { a.gcLoop(ctx) })
+	a.goBG(func() { a.confirm.run(ctx) })
 }
 
 // gcLoop removes old agent versions every GCEvery, keeping the versions of

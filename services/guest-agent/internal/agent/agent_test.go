@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,10 +23,12 @@ import (
 	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
 )
@@ -98,18 +101,89 @@ func TestReadyBeforeTunnel(t *testing.T) {
 	h.dialer.block = true
 	h.start()
 	h.waitReady()
-	// READY=1 came while the tunnel is not connected; the tunnel client is
-	// started after it and keeps trying.
+	// The tunnel client starts after READY=1 and keeps trying.
 	select {
 	case <-h.dialer.dialed:
 	case <-time.After(10 * time.Second):
 		t.Fatal("no dial attempt after READY=1")
+	}
+	order := h.order.all()
+	ready, dial := slices.Index(order, "notify READY=1"), slices.Index(order, "dial")
+	if ready < 0 || dial < 0 || ready > dial {
+		t.Fatalf("order = %v, want READY=1 before the first dial", order)
 	}
 	s := h.readStatus()
 	if s.Tunnel.Connected {
 		t.Error("status reports a connected tunnel")
 	}
 	h.stop()
+}
+
+func TestExpiredUpdateStopsBeforeReady(t *testing.T) {
+	h := newHarness(t)
+	h.seedIdentity(machineA)
+	p := update.Pending{From: "1.2.2", To: "1.2.3", Deadline: time.Now().Add(-time.Second)}
+	if err := fsutil.WriteJSONAtomic(h.l.PendingUpdateFile, p, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(context.Background(), h.l, h.cfg, "1.2.3", h.buildDeps()); err != nil {
+		t.Fatalf("Run = %v, want a graceful exit", err)
+	}
+	states := h.notify.all()
+	if !slices.Contains(states, "STOPPING=1") || slices.Contains(states, "READY=1") {
+		t.Errorf("sd_notify states = %v, want STOPPING=1 without READY=1", states)
+	}
+	if cur, _ := update.LinkVersion(h.l.CurrentLink); cur != "1.2.2" {
+		t.Errorf("current = %q, want the reverted 1.2.2", cur)
+	}
+}
+
+func TestConfirmerConditions(t *testing.T) {
+	tests := []struct {
+		name         string
+		debugConfirm bool
+		signals      []string
+		want         bool
+	}{
+		{"nothing", false, nil, false},
+		{"connected only", false, []string{"up"}, false},
+		{"tunnel info only", false, []string{"info"}, false},
+		{"connected then info", false, []string{"up", "info"}, true},
+		{"info then connected", false, []string{"info", "up"}, true},
+		{"debug info without flag", false, []string{"debug"}, false},
+		{"debug info and connection without flag", false, []string{"up", "debug"}, false},
+		{"debug info with flag", true, []string{"debug"}, true},
+		{"flag without debug info", true, []string{"up"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			c := newConfirmer(tt.debugConfirm, func() { calls.Add(1) })
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() { c.run(ctx); close(done) }()
+			for _, s := range tt.signals {
+				switch s {
+				case "up":
+					c.connected()
+				case "info":
+					c.tunnelInfo()
+				case "debug":
+					c.debugInfo()
+				}
+			}
+			if tt.want {
+				eventually(t, "Confirm", func() bool { return calls.Load() > 0 })
+			} else {
+				time.Sleep(50 * time.Millisecond)
+				if n := calls.Load(); n != 0 {
+					t.Errorf("Confirm called %d times, want 0", n)
+				}
+			}
+			cancel()
+			<-done
+		})
+	}
 }
 
 func TestIdentityFailedRetries(t *testing.T) {
@@ -395,3 +469,69 @@ func TestStartupErrorFailsRun(t *testing.T) {
 	}
 	_ = st.Close()
 }
+
+// nopFreezer reports one freezable mount and freezes nothing.
+type nopFreezer struct{}
+
+func (nopFreezer) Mounts() ([]quiesce.Mount, error) {
+	return []quiesce.Mount{{Path: "/", Source: "/dev/test", FSType: "ext4"}}, nil
+}
+func (nopFreezer) Freeze(string) error { return nil }
+func (nopFreezer) Thaw(string) error   { return nil }
+
+func TestShutdownFlushesBufferedOutcome(t *testing.T) {
+	h := newHarness(t)
+	h.seedIdentity(machineA)
+	dir, err := os.MkdirTemp("", "sbxdbg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "a.sock")
+	h.debugListen = "unix:" + sock
+	h.freezer = nopFreezer{}
+	h.start()
+	h.waitReady()
+
+	hc := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		},
+	}}
+	sys := agentv1connect.NewSystemClient(hc, "http://agent")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// The Quiesce outcome is produced while the store is frozen, so the
+	// request cache buffers it in memory.
+	qreq := connect.NewRequest(&agentv1.QuiesceRequest{})
+	qreq.Header().Set(wire.HeaderRequestID, reqQuiesce)
+	q, err := sys.Quiesce(ctx, qreq)
+	if err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+	treq := connect.NewRequest(&agentv1.ThawRequest{LeaseId: q.Msg.GetLeaseId()})
+	treq.Header().Set(wire.HeaderRequestID, "0192f1a4-7c3e-7b2a-9d4f-000000000002")
+	if _, err := sys.Thaw(ctx, treq); err != nil {
+		t.Fatalf("Thaw: %v", err)
+	}
+	// Shut down right after the thaw: the buffered outcome must be durable.
+	h.stop()
+
+	st, err := store.Open(h.l.StateDB, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	rec, ok, err := st.GetRequest(reqQuiesce)
+	if err != nil || !ok {
+		t.Fatalf("Quiesce outcome after shutdown: %v, found %v", err, ok)
+	}
+	if rec.Procedure != agentv1connect.SystemQuiesceProcedure {
+		t.Errorf("stored procedure = %q", rec.Procedure)
+	}
+}
+
+// reqQuiesce is the request id of the Quiesce call in
+// TestShutdownFlushesBufferedOutcome.
+const reqQuiesce = "0192f1a4-7c3e-7b2a-9d4f-000000000001"

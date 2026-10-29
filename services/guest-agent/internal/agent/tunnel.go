@@ -110,36 +110,67 @@ func (a *agent) onConnEvent(ev tunnelagent.ConnEvent) {
 }
 
 // confirmer confirms a pending update (spec 17.4 step 6) once a tunnel
-// connection came up and Control/Info was served. A Control/Info on the
-// debug socket counts as served; with debugConfirm it confirms without a
-// connection. Confirm is called on every qualifying event: it does nothing
-// without a pending update and retries a failed confirmation.
+// connection came up and the gateway's Control/Info was answered. A
+// Control/Info on the debug socket is a separate signal: it counts only with
+// debugConfirm, and then confirms alone, without a connection.
+//
+// The signals only set flags and wake run, which calls Confirm on its own
+// goroutine: never on the tunnel library's callback goroutines, and only after
+// the Info response was built. Confirm is called on every qualifying wake-up:
+// it does nothing without a pending update and retries a failed confirmation.
 type confirmer struct {
 	debugConfirm bool
 	confirm      func()
+	wake         chan struct{}
 
-	mu         sync.Mutex
-	wasUp      bool
-	infoServed bool
+	mu        sync.Mutex
+	wasUp     bool // a tunnel connection came up
+	tunnelInf bool // Control/Info was answered over the tunnel
+	debugInf  bool // Control/Info was answered on the debug socket
 }
 
-func (c *confirmer) connected() {
+func newConfirmer(debugConfirm bool, confirm func()) *confirmer {
+	return &confirmer{debugConfirm: debugConfirm, confirm: confirm, wake: make(chan struct{}, 1)}
+}
+
+// connected records a tunnel connection.
+func (c *confirmer) connected() { c.set(func() { c.wasUp = true }) }
+
+// tunnelInfo records an answered Control/Info over the tunnel.
+func (c *confirmer) tunnelInfo() { c.set(func() { c.tunnelInf = true }) }
+
+// debugInfo records an answered Control/Info on the debug socket.
+func (c *confirmer) debugInfo() { c.set(func() { c.debugInf = true }) }
+
+func (c *confirmer) set(f func()) {
 	c.mu.Lock()
-	c.wasUp = true
-	ok := c.infoServed
+	f()
 	c.mu.Unlock()
-	if ok {
-		c.confirm()
+	select {
+	case c.wake <- struct{}{}:
+	default:
 	}
 }
 
-func (c *confirmer) info() {
+// ready reports whether the confirmation condition holds.
+func (c *confirmer) ready() bool {
 	c.mu.Lock()
-	c.infoServed = true
-	ok := c.wasUp || c.debugConfirm
-	c.mu.Unlock()
-	if ok {
-		c.confirm()
+	defer c.mu.Unlock()
+	return (c.wasUp && c.tunnelInf) || (c.debugConfirm && c.debugInf)
+}
+
+// run calls Confirm after every wake-up that finds the condition true,
+// until ctx ends.
+func (c *confirmer) run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.wake:
+		}
+		if c.ready() {
+			c.confirm()
+		}
 	}
 }
 

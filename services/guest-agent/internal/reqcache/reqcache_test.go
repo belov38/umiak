@@ -871,3 +871,86 @@ func TestCanceledWaiterReturnsPromptly(t *testing.T) {
 		t.Fatalf("executions = %d, want 1", n)
 	}
 }
+
+func TestCacheFlushWritesBufferedOutcome(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(dbPath, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := reqcache.NewCache(st)
+	stub := &fsStub{}
+	path, h := agentv1connect.NewFilesystemHandler(stub, cache.Options()...)
+	mux := http.NewServeMux()
+	mux.Handle(path, h)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := agentv1connect.NewFilesystemClient(srv.Client(), srv.URL)
+
+	st.SetFrozen(true)
+	first, err := makeDir(c, id1, "/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Flush waits for the thaw.
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		done <- cache.Flush(ctx)
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("Flush returned %v while the store is frozen", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	// The shutdown order: thaw, flush, close. The outcome is durable when
+	// Flush returns, before the background flusher had to run.
+	st.SetFrozen(false)
+	if err := <-done; err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if _, ok, _ := st.GetRequest(id1); !ok {
+		t.Fatal("outcome not stored after Flush")
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st2 := openStore(t, dbPath)
+	c2 := newClient(t, st2, reqcache.Options{}, stub)
+	second, err := makeDir(c2, id1, "/a")
+	if err != nil || !proto.Equal(first, second) {
+		t.Fatalf("after reopen = %v, %v", second, err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 1 {
+		t.Fatalf("executions = %d, want 1", n)
+	}
+}
+
+func TestCacheFlushBoundedWhileFrozen(t *testing.T) {
+	st := openStore(t, filepath.Join(t.TempDir(), "state.db"))
+	cache := reqcache.NewCache(st)
+	stub := &fsStub{}
+	path, h := agentv1connect.NewFilesystemHandler(stub, cache.Options()...)
+	mux := http.NewServeMux()
+	mux.Handle(path, h)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := agentv1connect.NewFilesystemClient(srv.Client(), srv.URL)
+
+	st.SetFrozen(true)
+	t.Cleanup(func() { st.SetFrozen(false) })
+	if _, err := makeDir(c, id1, "/a"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := cache.Flush(ctx); err == nil {
+		t.Fatal("Flush on a frozen store returned nil")
+	}
+	// An empty cache flushes at once.
+	if err := reqcache.NewCache(st).Flush(ctx); err != nil {
+		t.Fatalf("empty Flush: %v", err)
+	}
+}

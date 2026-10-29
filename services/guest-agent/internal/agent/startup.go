@@ -151,7 +151,10 @@ func (a *agent) startup(ctx context.Context) error {
 		a.log.Warn("agent: check pending update", "err", err)
 	}
 	if ctx.Err() != nil {
-		// CheckPending reverted an expired update and asked to exit.
+		// CheckPending reverted an expired update and asked to exit, before
+		// READY=1. STOPPING=1 tells systemd that this is a deliberate stop;
+		// Restart=always then starts the reverted version.
+		a.notifyStopping()
 		return nil
 	}
 
@@ -195,7 +198,8 @@ func (a *agent) startup(ctx context.Context) error {
 // buildServices creates the managers and Connect services that serve the
 // tunnel. The request cache interceptors are created once and shared.
 func (a *agent) buildServices() error {
-	interceptors := reqcache.Interceptors(a.st)
+	a.reqcache = reqcache.NewCache(a.st)
+	interceptors := a.reqcache.Options()
 	var err error
 	a.proc, err = process.New(process.Options{
 		Store:          a.st,
@@ -249,7 +253,7 @@ func (a *agent) buildServices() error {
 	if err != nil {
 		return err
 	}
-	a.confirm = &confirmer{debugConfirm: a.d.DebugConfirm, confirm: a.updater.Confirm}
+	a.confirm = newConfirmer(a.d.DebugConfirm, a.updater.Confirm)
 
 	a.idle = &system.IdleLoop{
 		Counts: a.proc,

@@ -21,7 +21,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -100,18 +102,46 @@ func (o *Options) setDefaults() {
 
 // Interceptors returns the handler options every agent service with mutating
 // calls uses: the Sbx-Request-Id requirement followed by the response cache.
-// Process.Start is exempt from both, it is idempotent by its own command id.
-// Call it once and pass the options to every service handler: the services
-// then share their in-flight calls and buffered outcomes, so the same id sent
-// to two services is still one call.
+// It is NewCache(st).Options(); the agent uses NewCache to flush the cache at
+// shutdown.
 func Interceptors(st *store.Store) []connect.HandlerOption {
+	return NewCache(st).Options()
+}
+
+// Cache is the request cache shared by the agent's services. Create it once
+// and pass Options to every service handler: the services then share their
+// in-flight calls and buffered outcomes, so the same id sent to two services
+// is still one call.
+type Cache struct {
+	ic   *interceptor
+	opts []connect.HandlerOption
+}
+
+// NewCache returns the agent's request cache over st: the Sbx-Request-Id
+// requirement followed by the response cache. Process.Start is exempt from
+// both, it is idempotent by its own command id.
+func NewCache(st *store.Store) *Cache {
 	exempt := []string{agentv1connect.ProcessStartProcedure}
-	return []connect.HandlerOption{
-		connect.WithInterceptors(
-			rpcconv.RequireRequestID(exempt...),
-			New(st, Options{Exempt: exempt}),
-		),
+	ic := newInterceptor(st, Options{Exempt: exempt})
+	return &Cache{
+		ic:   ic,
+		opts: []connect.HandlerOption{connect.WithInterceptors(rpcconv.RequireRequestID(exempt...), ic)},
 	}
+}
+
+// Options returns the handler options of the cache.
+func (c *Cache) Options() []connect.HandlerOption {
+	return slices.Clone(c.opts)
+}
+
+// Flush writes the outcomes buffered while the store was frozen, waiting for
+// the thaw, and returns when the buffer is empty. Call it at shutdown before
+// the store is flushed and closed: the background flusher discards what it
+// has not written when the store closes, and a retry of a lost outcome would
+// run the mutation again. It fails when ctx ends first or the store is
+// closed.
+func (c *Cache) Flush(ctx context.Context) error {
+	return c.ic.flush(ctx)
 }
 
 // New returns the response cache interceptor. It acts on unary handler calls
@@ -120,6 +150,10 @@ func Interceptors(st *store.Store) []connect.HandlerOption {
 // rpcconv.RequireRequestID, which rejects mutating calls without an id. One
 // interceptor value may be used by any number of services.
 func New(st *store.Store, opts Options) connect.Interceptor {
+	return newInterceptor(st, opts)
+}
+
+func newInterceptor(st *store.Store, opts Options) *interceptor {
 	opts.setDefaults()
 	exempt := make(map[string]struct{}, len(opts.Exempt))
 	for _, p := range opts.Exempt {
@@ -352,6 +386,40 @@ func (i *interceptor) flushPending(ctx context.Context) {
 		}
 		if !i.flushBatch(ctx, batch) {
 			return
+		}
+	}
+}
+
+// flush writes the buffered outcomes now (Cache.Flush). It runs alongside
+// the background flusher: both write the same records, and an entry leaves
+// the buffer only while it still holds the written record.
+func (i *interceptor) flush(ctx context.Context) error {
+	for {
+		batch := i.pending.snapshot()
+		if len(batch) == 0 {
+			return nil
+		}
+		select {
+		case <-i.st.Thawed():
+		case <-ctx.Done():
+			return fmt.Errorf("reqcache: %d buffered outcomes not written: %w", len(batch), ctx.Err())
+		}
+	writes:
+		for _, e := range batch {
+			err := i.put(ctx, e.id, e.rec)
+			switch {
+			case err == nil:
+				i.pending.remove(e.id, e.rec)
+			case errors.Is(err, store.ErrFrozen):
+				break writes // frozen again: wait for the next thaw
+			case errors.Is(err, store.ErrClosed):
+				return err
+			case ctx.Err() != nil:
+				return fmt.Errorf("reqcache: buffered outcomes not written: %w", ctx.Err())
+			default:
+				i.opts.Log.Warn("reqcache: flush buffered outcome", "err", err)
+				i.pending.remove(e.id, e.rec)
+			}
 		}
 	}
 }

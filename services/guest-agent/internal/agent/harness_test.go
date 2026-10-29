@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
 )
@@ -60,6 +62,24 @@ func (s *switchSource) set(raw ident.Raw) {
 	s.raw = raw
 }
 
+// orderLog records events of several fakes in one order.
+type orderLog struct {
+	mu    sync.Mutex
+	items []string
+}
+
+func (o *orderLog) add(item string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.items = append(o.items, item)
+}
+
+func (o *orderLog) all() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.items)
+}
+
 // fakeDialer counts tunnel dial attempts. Every attempt fails; with block
 // set an attempt waits until its context ends.
 type fakeDialer struct {
@@ -67,15 +87,19 @@ type fakeDialer struct {
 	attempts int
 	block    bool
 	dialed   chan struct{} // receives one value per attempt (non-blocking)
+	order    *orderLog     // gets "dial" per attempt
 }
 
-func newFakeDialer() *fakeDialer { return &fakeDialer{dialed: make(chan struct{}, 64)} }
+func newFakeDialer(order *orderLog) *fakeDialer {
+	return &fakeDialer{dialed: make(chan struct{}, 64), order: order}
+}
 
 func (d *fakeDialer) Dial(ctx context.Context, _ transport.Hello) (net.Conn, transport.ConnInfo, error) {
 	d.mu.Lock()
 	d.attempts++
 	block := d.block
 	d.mu.Unlock()
+	d.order.add("dial")
 	select {
 	case d.dialed <- struct{}{}:
 	default:
@@ -95,18 +119,29 @@ func (d *fakeDialer) count() int {
 
 // notifier records sd_notify states.
 type notifier struct {
+	order  *orderLog // gets "notify <state>"
 	mu     sync.Mutex
 	states []string
 	ready  chan struct{}
 	once   sync.Once
 }
 
-func newNotifier() *notifier { return &notifier{ready: make(chan struct{})} }
+func newNotifier(order *orderLog) *notifier {
+	return &notifier{order: order, ready: make(chan struct{})}
+}
+
+// all returns the states sent so far.
+func (n *notifier) all() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return slices.Clone(n.states)
+}
 
 func (n *notifier) notify(state string) error {
 	n.mu.Lock()
 	n.states = append(n.states, state)
 	n.mu.Unlock()
+	n.order.add("notify " + state)
 	if state == "READY=1" {
 		n.once.Do(func() { close(n.ready) })
 	}
@@ -123,11 +158,13 @@ type harness struct {
 	resetter *ident.FakeResetter
 	dialer   *fakeDialer
 	notify   *notifier
+	order    *orderLog
 	bootID   string
 	deps     Deps
 
 	debugListen  string
 	debugConfirm bool
+	freezer      quiesce.Freezer
 
 	cancel context.CancelFunc
 	done   chan error
@@ -139,15 +176,17 @@ func newHarness(t *testing.T) *harness {
 	cfg := config.Defaults()
 	cfg.DockerEnabled = false
 	cfg.TunnelURL = "wss://tunnel.test/v1/connect"
+	order := &orderLog{}
 	h := &harness{
 		t:        t,
+		order:    order,
 		l:        l,
 		cfg:      cfg,
 		src:      &switchSource{raw: rawFor(machineA)},
 		sup:      supervisor.NewFake(l),
 		resetter: &ident.FakeResetter{},
-		dialer:   newFakeDialer(),
-		notify:   newNotifier(),
+		dialer:   newFakeDialer(order),
+		notify:   newNotifier(order),
 		bootID:   bootOne,
 	}
 	t.Cleanup(func() { _ = h.sup.Close() })
@@ -187,6 +226,7 @@ func (h *harness) buildDeps() Deps {
 		StatusEvery:   20 * time.Millisecond,
 		DebugListen:   h.debugListen,
 		DebugConfirm:  h.debugConfirm,
+		Freezer:       h.freezer,
 	}
 }
 
@@ -196,7 +236,7 @@ func (h *harness) start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	h.done = make(chan error, 1)
-	h.notify = newNotifier()
+	h.notify = newNotifier(h.order)
 	deps := h.buildDeps()
 	if h.deps.Dialer != nil {
 		deps.Dialer = h.deps.Dialer

@@ -53,8 +53,9 @@ func (a *agent) infoResponse() *tunnelv1.InfoResponse {
 // tunnelInfo is tunnelagent.Config.Info: Control/Info served over the
 // tunnel, which counts toward the update confirmation.
 func (a *agent) tunnelInfo(context.Context) *tunnelv1.InfoResponse {
-	a.confirm.info()
-	return a.infoResponse()
+	res := a.infoResponse()
+	a.confirm.tunnelInfo()
+	return res
 }
 
 // newMux routes the agent API: the Process, Filesystem and System Connect
