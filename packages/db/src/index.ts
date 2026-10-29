@@ -10,7 +10,6 @@ export {
 	readMigrations,
 } from "./migrate.ts";
 export * from "./schema/index.ts";
-export { applyTunnelFixture, TUNNEL_FIXTURE } from "./tunnel-fixture.ts";
 export {
 	type CreatePoolOptions,
 	createPool,

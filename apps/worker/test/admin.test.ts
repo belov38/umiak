@@ -428,27 +428,26 @@ describe("sbx-admin misc", () => {
 		expect(out.at(-1)).toEqual({ kind: "migrate", applied: [] });
 	});
 
-	it("migrate --tunnel-fixture applies the temporary tunnel schema once", async () => {
+	it("migrate on an empty database creates the tunnel schema from S2's 0100", async () => {
 		const empty = await createTestDatabase({ migrated: false });
 		try {
 			const lines: Record<string, unknown>[] = [];
-			const run = () =>
-				runAdmin(["migrate", "--tunnel-fixture"], {
+			const run = (...args: string[]) =>
+				runAdmin(["migrate", ...args], {
 					pool: empty.pool,
 					out: (o) => lines.push(o),
 					err: (o) => lines.push(o),
 					log: testLogger("warn").log,
 				});
-			const tunnel = async () =>
-				(await empty.pool.query("SELECT to_regnamespace('tunnel')::text AS n"))
-					.rows[0].n;
-			expect(await tunnel()).toBeNull();
+			// The temporary fixture flag is gone.
+			expect(await run("--tunnel-fixture")).toBe(1);
 			expect(await run()).toBe(0);
-			expect(lines.at(-1)).toEqual({ kind: "tunnel_fixture", applied: true });
-			expect(await tunnel()).toBe("tunnel");
-			// A second run leaves the existing schema alone.
-			expect(await run()).toBe(0);
-			expect(lines.at(-1)).toEqual({ kind: "tunnel_fixture", applied: false });
+			const applied = lines.at(-1)?.applied as string[];
+			expect(applied[0]).toMatch(/^0100_tunnel_init/);
+			const t = await empty.pool.query(
+				"SELECT to_regclass('tunnel.tunnel_sessions')::text AS n",
+			);
+			expect(t.rows[0].n).toBe("tunnel.tunnel_sessions");
 		} finally {
 			await empty.drop();
 		}

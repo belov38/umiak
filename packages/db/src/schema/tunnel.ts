@@ -1,5 +1,6 @@
-// Drizzle description of schema `tunnel`, owned by S2 (db/migrations/01xx_*.sql
-// on s2-impl). Described here only for types and queries (S6 §5.10).
+// Drizzle description of schema `tunnel`, owned by S2
+// (db/migrations/0100_tunnel_init.sql). Described here only for types and
+// queries (S6 §5.10); the drift test keeps it equal to the migration.
 import { bigint, pgSchema, text, uuid } from "drizzle-orm/pg-core";
 import { bytea, tstz } from "./types.ts";
 

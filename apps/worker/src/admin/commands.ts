@@ -17,14 +17,7 @@ import {
 	loadOperation,
 	TERMINAL_OPERATION_STATES,
 } from "@sbx/core";
-import {
-	applyTunnelFixture,
-	dbOf,
-	MIGRATIONS_DIR,
-	migrate,
-	type Tx,
-	withTx,
-} from "@sbx/db";
+import { dbOf, MIGRATIONS_DIR, migrate, type Tx, withTx } from "@sbx/db";
 import type pg from "pg";
 import type { Logger } from "pino";
 import { DEFAULT_TIMING, NoopMetrics, type WorkerCtx } from "../context.ts";
@@ -53,7 +46,7 @@ export interface AdminDeps {
 }
 
 export const USAGE = `usage: sbx-admin <command>
-  migrate [--tunnel-fixture]                 (--tunnel-fixture: temporary, until S2 is merged)
+  migrate                                    apply db/migrations (S2 tunnel and S6 runtime schemas)
   bootstrap                                  topology and template builds from SBX_CONFIG_FILE
   providers add --name N --cluster-mac-id N --vmid-min N --vmid-max N --api-url URL --secret-ref R [--tls-name T]
   nodes add --provider P --name N --ram-cap-mb N --node-agent-ref R [--clone-concurrency 4] [--storage local-lvm]
@@ -190,19 +183,12 @@ async function dispatch(argv: string[], d: AdminDeps): Promise<void> {
 // migrate
 
 async function cmdMigrate(args: string[], d: AdminDeps): Promise<void> {
-	const { values } = parse(args, { "tunnel-fixture": { type: "boolean" } });
+	parse(args, {});
 	const r = await migrate(d.pool, {
 		dir: d.migrationsDir ?? MIGRATIONS_DIR,
 		log: (msg) => d.log.info(msg),
 	});
 	d.out({ kind: "migrate", applied: r.applied });
-	// TEMPORARY (decision 16): removed after the S2 merge.
-	if (values["tunnel-fixture"] === true) {
-		d.out({
-			kind: "tunnel_fixture",
-			applied: await applyTunnelFixture(d.pool),
-		});
-	}
 }
 
 // ---------------------------------------------------------------------------

@@ -1,12 +1,11 @@
 // Per-test-file Postgres databases. Each one is a copy of the template database
-// sbx_tmpl, which is migrated from db/migrations (plus the tunnel fixture while
-// S2 is not merged, decision 16). The admin DSN comes from global-setup.ts.
+// sbx_tmpl, which is migrated from db/migrations (S2's 0100 tunnel schema and
+// S6's runtime schema). The admin DSN comes from global-setup.ts.
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import Pg from "pg";
 import { inject } from "vitest";
 import { MIGRATIONS_DIR, migrate } from "../migrate.ts";
-import { applyTunnelFixture, TUNNEL_FIXTURE } from "../tunnel-fixture.ts";
 import { createPool, type Db, dbOf } from "../tx.ts";
 import "./provided.ts";
 
@@ -14,8 +13,6 @@ export const TEMPLATE_DB = "sbx_tmpl";
 
 /** Advisory lock on the admin database: template creation and cloning are serialized. */
 const TEMPLATE_LOCK_KEY = 727002;
-
-export { TUNNEL_FIXTURE };
 
 export interface TestDatabase {
 	/** Connection string of the new database. */
@@ -101,8 +98,8 @@ export async function createTestDatabase(
 }
 
 // Brings sbx_tmpl up to date. An existing template (SBX_TEST_DATABASE_URL reused
-// across runs) is migrated forward; if that fails (changed file, S2's real
-// tunnel migration over the fixture) it is rebuilt from scratch.
+// across runs) is migrated forward; if that fails (a changed migration file, a
+// template left by an older layout) it is rebuilt from scratch.
 async function ensureTemplate(
 	admin: pg.Client,
 	adminUrl: string,
@@ -129,7 +126,6 @@ async function prepareTemplate(url: string): Promise<void> {
 	const pool = createPool(url, 1);
 	try {
 		await migrate(pool, { dir: MIGRATIONS_DIR });
-		await applyTunnelFixture(pool);
 	} finally {
 		await pool.end();
 	}

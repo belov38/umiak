@@ -26,8 +26,6 @@ COPY packages/config/src packages/config/src
 COPY packages/core/src packages/core/src
 COPY packages/db/src packages/db/src
 COPY packages/pve/src packages/pve/src
-# TEMPORARY (decision 16): stand-in for S2's tunnel migration, removed after the S2 merge.
-COPY packages/db/test/fixtures packages/db/test/fixtures
 COPY apps/worker/src apps/worker/src
 
 ENV NODE_ENV=production

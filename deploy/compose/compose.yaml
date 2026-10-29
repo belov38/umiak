@@ -63,13 +63,11 @@ services:
     <<: *service-defaults
     image: sbx-worker:dev
     build: *worker-build
-    # `--tunnel-fixture` is temporary: it stands in for S2's tunnel schema until
-    # S2 is merged. Remove the flag then.
     command:
       - sh
       - -c
       - >-
-        node apps/worker/src/admin/main.ts migrate --tunnel-fixture
+        node apps/worker/src/admin/main.ts migrate
         && node apps/worker/src/admin/main.ts bootstrap
     environment:
       <<: *db-env
