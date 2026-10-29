@@ -20,6 +20,7 @@ func testUser() *process.User {
 }
 
 func TestFormatEnvFile(t *testing.T) {
+	long := strings.Repeat("x", maxEnvFileLine-len(`L=""`+"\n"))
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -27,13 +28,17 @@ func TestFormatEnvFile(t *testing.T) {
 	}{
 		{"empty", nil, ""},
 		{"sorted", map[string]string{"B": "2", "A": "1", "_C": "3"}, "A=\"1\"\nB=\"2\"\n_C=\"3\"\n"},
-		{"quote", map[string]string{"Q": `say "hi"`}, `Q="say \"hi\""` + "\n"},
-		{"backslash", map[string]string{"P": `C:\dir\`}, `P="C:\\dir\\"` + "\n"},
+		{"quote raw", map[string]string{"Q": `say "hi"`}, `Q="say "hi""` + "\n"},
+		{"backslash raw", map[string]string{"P": `C:\dir\`}, `P="C:\dir\"` + "\n"},
+		{"single quote raw", map[string]string{"S": `it's`}, `S="it's"` + "\n"},
 		{"spaces and empty", map[string]string{"S": "a b", "E": ""}, "E=\"\"\nS=\"a b\"\n"},
+		{"hash skipped", map[string]string{"H": "a#b", "OK": "x"}, "OK=\"x\"\n"},
 		{"newline skipped", map[string]string{"N": "a\nb", "OK": "x"}, "OK=\"x\"\n"},
 		{"cr skipped", map[string]string{"R": "a\rb"}, ""},
 		{"nul skipped", map[string]string{"Z": "a\x00b"}, ""},
 		{"bad keys skipped", map[string]string{"1A": "x", "A-B": "x", "": "x", "A B": "x", "GOOD_1": "y"}, "GOOD_1=\"y\"\n"},
+		{"longest line kept", map[string]string{"L": long}, `L="` + long + "\"\n"},
+		{"too long skipped", map[string]string{"L": long + "x"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -41,6 +46,49 @@ func TestFormatEnvFile(t *testing.T) {
 				t.Errorf("FormatEnvFile = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// pamEnvParse reads a file the way pam_env (readenv=1) does for the lines
+// FormatEnvFile writes: the value ends at the first '#', the opening quote
+// and a final quote are removed, nothing is unescaped.
+func pamEnvParse(data string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(data, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		k, v, _ := strings.Cut(line, "=")
+		if strings.HasPrefix(v, `"`) || strings.HasPrefix(v, `'`) {
+			q := v[0]
+			v = v[1:]
+			if strings.HasSuffix(v, string(q)) {
+				v = v[:len(v)-1]
+			}
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func TestFormatEnvFileRoundTrip(t *testing.T) {
+	env := map[string]string{
+		"QUOTES":    `a "quoted" b`,
+		"END_QUOTE": `ends with "`,
+		"BACKSLASH": `C:\path\to`,
+		"TRAILING":  `trailing\`,
+		"SINGLE":    `it's 'x'`,
+		"DOLLAR":    `$HOME and ${X}`,
+		"EMPTY":     "",
+	}
+	got := pamEnvParse(string(FormatEnvFile(env)))
+	for k, v := range env {
+		if got[k] != v {
+			t.Errorf("%s round-trips to %q, want %q", k, got[k], v)
+		}
 	}
 }
 
@@ -185,27 +233,29 @@ func TestWatchDocker(t *testing.T) {
 				func(context.Context) error { return *pingErr.Load() },
 				time.Millisecond, 5*time.Millisecond)
 		}()
-		waitState := func(want agentv1.PhaseState) {
+		waitPhase := func(want agentv1.PhaseState, wantMsg string) {
 			t.Helper()
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
-				if st, _ := tr.State(readiness.PhaseDocker); st == want {
+				if st, msg := tr.State(readiness.PhaseDocker); st == want && strings.Contains(msg, wantMsg) {
 					return
 				}
 				time.Sleep(time.Millisecond)
 			}
 			st, msg := tr.State(readiness.PhaseDocker)
-			t.Fatalf("docker = %v %q, want %v", st, msg, want)
+			t.Fatalf("docker = %v %q, want %v %q", st, msg, want, wantMsg)
 		}
-		waitState(pending)
+		waitState := func(want agentv1.PhaseState) { t.Helper(); waitPhase(want, "") }
+		waitPhase(pending, "docker.service is not active")
 		active.Store(true)
 		waitState(ready)
 		down := errors.New("connection refused")
 		pingErr.Store(&down)
-		waitState(pending)
-		if _, msg := tr.State(readiness.PhaseDocker); !strings.Contains(msg, "connection refused") {
-			t.Errorf("error = %q", msg)
-		}
+		waitPhase(agentv1.PhaseState_PHASE_STATE_FAILED, "connection refused")
+		pingErr.Store(&ok)
+		waitState(ready)
+		active.Store(false)
+		waitPhase(agentv1.PhaseState_PHASE_STATE_FAILED, "docker.service is not active")
 		cancel()
 		select {
 		case <-done:

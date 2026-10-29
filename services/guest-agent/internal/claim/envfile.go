@@ -1,6 +1,7 @@
 package claim
 
 import (
+	"log/slog"
 	"maps"
 	"regexp"
 	"slices"
@@ -18,27 +19,32 @@ import (
 // envFileKey is a key pam_env accepts.
 var envFileKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// maxEnvFileLine is the longest line FormatEnvFile writes, newline
+// included: pam_env reads a line into an 8 KiB buffer that also holds the
+// terminating NUL.
+const maxEnvFileLine = 8<<10 - 1
+
 // FormatEnvFile renders env for pam_env (readenv=1, spec 8.2): one
-// KEY="VALUE" line per entry sorted by key, with `\` and `"` escaped by a
-// backslash. Keys that are not shell identifiers and values containing a
-// newline, a carriage return or NUL are skipped: commands of the agent still
-// see them, SSH sessions do not.
+// KEY="VALUE" line per entry sorted by key, the value written raw. pam_env
+// does not unescape: it removes the opening quote and a final quote, keeps
+// backslashes and inner quotes, and ends the value at the first '#'. So
+// entries are skipped when the key is not a shell identifier, the value
+// contains '#', a newline, a carriage return or NUL, or the line exceeds
+// the pam_env buffer. Commands of the agent still see skipped entries, SSH
+// sessions do not.
 func FormatEnvFile(env map[string]string) []byte {
 	var sb strings.Builder
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		v := env[k]
-		if !envFileKey.MatchString(k) || strings.ContainsAny(v, "\n\r\x00") {
+		if !envFileKey.MatchString(k) || strings.ContainsAny(v, "#\n\r\x00") {
 			continue
 		}
-		sb.WriteString(k)
-		sb.WriteString(`="`)
-		for i := 0; i < len(v); i++ {
-			if v[i] == '\\' || v[i] == '"' {
-				sb.WriteByte('\\')
-			}
-			sb.WriteByte(v[i])
+		line := k + `="` + v + "\"\n"
+		if len(line) > maxEnvFileLine {
+			slog.Warn("env entry too long for the PAM env file, skipped", "key", k)
+			continue
 		}
-		sb.WriteString("\"\n")
+		sb.WriteString(line)
 	}
 	return []byte(sb.String())
 }

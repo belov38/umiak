@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
@@ -255,16 +256,29 @@ func (m *Manager) chownGroup(path string) error {
 	return nil
 }
 
-// placeLink makes the link_path symlink point at target, replacing a file or
-// symlink in its place. Missing parent directories are created for the
-// default user.
+// placeLink makes the link_path symlink point at target. An existing
+// symlink is replaced; an existing file or directory is moved aside to
+// <path>.sbx-orig (or <path>.sbx-orig.<unix nanos> if that is taken) with a
+// warning. Missing parent directories are created (see mkdirAllOwned).
 func (m *Manager) placeLink(linkPath, target string) error {
 	link, err := m.l.Rooted(linkPath)
 	if err != nil {
 		return invalid("secret_files: " + err.Error())
 	}
-	if cur, err := os.Readlink(link); err == nil && cur == target {
-		return nil
+	fi, err := os.Lstat(link)
+	switch {
+	case err == nil && fi.Mode()&fs.ModeSymlink != 0:
+		if cur, err := os.Readlink(link); err == nil && cur == target {
+			return nil
+		}
+	case err == nil:
+		aside, err := m.moveAside(link)
+		if err != nil {
+			return internal("move existing link_path aside", err)
+		}
+		m.log.Warn("link_path was occupied, moved aside", "path", linkPath, "moved_to", aside)
+	case !errors.Is(err, fs.ErrNotExist):
+		return internal("inspect link_path", err)
 	}
 	if err := m.mkdirAllOwned(filepath.Dir(link)); err != nil {
 		return internal("create link_path parent", err)
@@ -279,6 +293,20 @@ func (m *Manager) placeLink(linkPath, target string) error {
 		return internal("create link_path", err)
 	}
 	return nil
+}
+
+// moveAside renames path to a free <path>.sbx-orig name and returns it.
+func (m *Manager) moveAside(path string) (string, error) {
+	aside := path + ".sbx-orig"
+	if _, err := os.Lstat(aside); err == nil {
+		aside = path + ".sbx-orig." + strconv.FormatInt(m.opts.Now().UnixNano(), 10)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	if err := os.Rename(path, aside); err != nil {
+		return "", err
+	}
+	return aside, nil
 }
 
 // removeLink deletes a link_path symlink that still points into files/.
@@ -296,8 +324,10 @@ func (m *Manager) removeLink(linkPath string) {
 	}
 }
 
-// mkdirAllOwned creates dir and its missing parents (0755) and gives the
-// created ones to the default user.
+// mkdirAllOwned creates dir and its missing parents (0755, root). Created
+// directories inside the default user's home (after resolving symlinks, so
+// a symlink in the home cannot hand out directories elsewhere) are given to
+// the user; the others stay root-owned.
 func (m *Manager) mkdirAllOwned(dir string) error {
 	var missing []string
 	for d := dir; ; d = filepath.Dir(d) {
@@ -317,11 +347,25 @@ func (m *Manager) mkdirAllOwned(dir string) error {
 	m.mu.RLock()
 	u := m.user
 	m.mu.RUnlock()
-	if u == nil {
+	if u == nil || u.Home == "" || len(missing) == 0 {
+		return nil
+	}
+	home, err := m.l.Rooted(u.Home)
+	if err != nil {
+		return nil
+	}
+	if home, err = filepath.EvalSymlinks(home); err != nil {
 		return nil
 	}
 	for _, d := range missing {
-		if err := os.Lchown(d, int(u.UID), int(u.GID)); err != nil {
+		resolved, err := filepath.EvalSymlinks(d)
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(resolved, home+string(filepath.Separator)) {
+			continue
+		}
+		if err := os.Lchown(resolved, int(u.UID), int(u.GID)); err != nil {
 			return fmt.Errorf("chown %s: %w", d, err)
 		}
 	}

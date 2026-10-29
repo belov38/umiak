@@ -255,11 +255,13 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 		case reapply && req.GetSandboxId() == cur.SandboxID:
 			files := normalizeFiles(req.GetSecretFiles())
 			err := m.applyLocked(ctx, update{
-				env:     req.GetEnv(),
-				setEnv:  true,
-				secrets: &secretSet{env: req.GetSecretEnv(), files: files},
-				ca:      req.GetSshUserCaKeys(),
-				setCA:   true,
+				env:         req.GetEnv(),
+				setEnv:      true,
+				secrets:     &secretSet{env: req.GetSecretEnv(), files: files},
+				ca:          req.GetSshUserCaKeys(),
+				setCA:       true,
+				authKeys:    req.GetAuthorizedKeys(),
+				setAuthKeys: true,
 			})
 			if err != nil {
 				return nil, err
@@ -282,26 +284,20 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 	if err := m.writeSbxEnv(req.GetSandboxId(), req.GetPortDomain(), req.GetEnv()); err != nil {
 		return nil, err
 	}
-	if err := m.writeSecrets(req.GetSecretEnv(), files); err != nil {
-		return nil, err
-	}
-	if err := m.writeCA(ctx, req.GetSshUserCaKeys()); err != nil {
-		return nil, err
-	}
-
 	stripped := strip(req)
-	body, err := encodeRequest(stripped)
-	if err != nil {
-		return nil, internal("encode claim", err)
-	}
 	rec := &store.Claim{
-		Request:       body,
 		RequestHash:   hash,
 		SecretsDigest: SecretsDigest(req.GetSecretEnv(), files),
 		SandboxID:     req.GetSandboxId(),
 		ClaimedAt:     m.opts.Now().UTC(),
 	}
-	if err := m.putClaim(ctx, rec); err != nil {
+	if err := m.claimSecretsAndRecord(ctx, req, files, stripped, rec); err != nil {
+		// Leave no secrets of a failed first claim behind; the machine is
+		// still unclaimed, so its secret set is empty.
+		if werr := m.wipeSecrets(); werr != nil {
+			m.log.Warn("wipe secrets of a failed claim failed", "err", werr)
+		}
+		m.resyncSecrets("")
 		return nil, err
 	}
 	m.mu.Lock()
@@ -329,6 +325,23 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 	}
 	m.afterClaim(ctx, true)
 	return resp, nil
+}
+
+// claimSecretsAndRecord runs the claim steps from the secrets on: secrets,
+// SSH CA keys, then the claim record (rec.Request is filled in here).
+func (m *Manager) claimSecretsAndRecord(ctx context.Context, req *agentv1.ClaimRequest, files []*agentv1.SecretFile, stripped *agentv1.ClaimRequest, rec *store.Claim) error {
+	if err := m.writeSecrets(req.GetSecretEnv(), files); err != nil {
+		return err
+	}
+	if err := m.writeCA(ctx, req.GetSshUserCaKeys()); err != nil {
+		return err
+	}
+	body, err := encodeRequest(stripped)
+	if err != nil {
+		return internal("encode claim", err)
+	}
+	rec.Request = body
+	return m.putClaim(ctx, rec)
 }
 
 // storedResponse decodes the response kept with the claim, or reports the
@@ -389,20 +402,15 @@ func (m *Manager) UpdateSshCa(ctx context.Context, req *agentv1.UpdateSshCaReque
 	return &agentv1.UpdateSshCaResponse{}, nil
 }
 
-// PrepareStop flushes state.db and wipes the secrets from the tmpfs before
+// PrepareStop wipes the secrets from the tmpfs and flushes state.db before
 // the VM stops (Decision 3). The secrets phase becomes pending if the
 // applied set was not empty. It is idempotent.
 func (m *Manager) PrepareStop(ctx context.Context) error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
-	dctx, cancel := m.durableCtx(ctx)
-	defer cancel()
-	if err := m.opts.Store.Flush(dctx); err != nil {
-		return storeError(err)
-	}
-	if err := m.wipeSecrets(); err != nil {
-		return err
-	}
+	// Secrets go first: wiping them does not depend on the store, which may
+	// be frozen or slow.
+	wipeErr := m.wipeSecrets()
 	m.mu.Lock()
 	digest := ""
 	if m.rec != nil {
@@ -412,6 +420,15 @@ func (m *Manager) PrepareStop(ctx context.Context) error {
 	m.mu.Unlock()
 	if digest != "" {
 		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_PENDING, "")
+	}
+	dctx, cancel := m.durableCtx(ctx)
+	defer cancel()
+	flushErr := m.opts.Store.Flush(dctx)
+	if wipeErr != nil {
+		return wipeErr
+	}
+	if flushErr != nil {
+		return storeError(flushErr)
 	}
 	return nil
 }
@@ -466,10 +483,15 @@ type update struct {
 	secrets *secretSet
 	ca      []string
 	setCA   bool
+	// authKeys replaces the stored authorized_keys (RESUME/RECOVER).
+	authKeys    []string
+	setAuthKeys bool
 }
 
 // applyLocked applies u to the claimed machine: files first, then one
-// state.db write, then memory and phases. The caller holds opMu.
+// state.db write, then memory and phases. The caller holds opMu. If a
+// secrets update fails, the secrets phase and the env cache are recomputed
+// from what the tmpfs holds now.
 func (m *Manager) applyLocked(ctx context.Context, u update) error {
 	m.mu.RLock()
 	cur, curReq := m.rec, m.req
@@ -479,6 +501,27 @@ func (m *Manager) applyLocked(ctx context.Context, u update) error {
 	}
 	next := proto.CloneOf(curReq)
 	rec := *cur
+	if err := m.applyFiles(ctx, u, next, &rec); err != nil {
+		if u.secrets != nil {
+			m.resyncSecrets(cur.SecretsDigest)
+		}
+		return err
+	}
+	m.mu.Lock()
+	m.rec, m.req = &rec, next
+	if u.secrets != nil {
+		m.secretEnv = maps.Clone(u.secrets.env)
+	}
+	m.mu.Unlock()
+	if u.secrets != nil {
+		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_READY, "")
+	}
+	return nil
+}
+
+// applyFiles writes the files of u, updates next and rec to match and
+// stores rec.
+func (m *Manager) applyFiles(ctx context.Context, u update, next *agentv1.ClaimRequest, rec *store.Claim) error {
 	if u.setEnv {
 		if err := m.writeSbxEnv(next.GetSandboxId(), next.GetPortDomain(), u.env); err != nil {
 			return err
@@ -499,24 +542,36 @@ func (m *Manager) applyLocked(ctx context.Context, u update) error {
 		}
 		next.SshUserCaKeys = slices.Clone(u.ca)
 	}
+	if u.setAuthKeys {
+		next.AuthorizedKeys = slices.Clone(u.authKeys)
+	}
 	body, err := encodeRequest(next)
 	if err != nil {
 		return internal("encode claim", err)
 	}
 	rec.Request = body
-	if err := m.putClaim(ctx, &rec); err != nil {
-		return err
+	return m.putClaim(ctx, rec)
+}
+
+// resyncSecrets makes the secrets phase and the env cache match the tmpfs
+// after a failed write: ready with the env loaded if the tmpfs holds the
+// set with digest want, pending without env otherwise.
+func (m *Manager) resyncSecrets(want string) {
+	var env map[string]string
+	ok := false
+	if _, err := os.Lstat(m.l.SecretsStateFile); errors.Is(err, fs.ErrNotExist) {
+		ok = want == ""
+	} else if e, files, err := m.loadSecrets(); err == nil && SecretsDigest(e, files) == want {
+		env, ok = e, true
 	}
 	m.mu.Lock()
-	m.rec, m.req = &rec, next
-	if u.secrets != nil {
-		m.secretEnv = maps.Clone(u.secrets.env)
-	}
+	m.secretEnv = env
 	m.mu.Unlock()
-	if u.secrets != nil {
+	if ok {
 		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_READY, "")
+	} else {
+		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_PENDING, "")
 	}
-	return nil
 }
 
 // afterClaim runs the extensions' post-claim work; failures are logged.

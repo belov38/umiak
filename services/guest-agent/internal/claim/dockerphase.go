@@ -19,8 +19,10 @@ const (
 // WatchDocker drives the docker readiness phase (spec 8.5) until ctx ends.
 // Disabled sets the phase to disabled and returns. Otherwise the phase is
 // ready while active reports docker.service active and ping (GET /_ping)
-// succeeds, pending with the reason otherwise; it is checked every 2 s
-// until ready, then every 30 s. A nil active or ping skips that check.
+// succeeds. A failing check keeps the phase pending (with the reason) until
+// docker was ready once and marks it failed afterwards. It is checked every
+// 2 s while not ready, every 30 s while ready. A nil active or ping skips
+// that check.
 func WatchDocker(ctx context.Context, tr *readiness.Tracker, enabled bool, active func(context.Context) bool, ping func(context.Context) error) {
 	watchDocker(ctx, tr, enabled, active, ping, dockerPollPending, dockerPollReady)
 }
@@ -30,10 +32,16 @@ func watchDocker(ctx context.Context, tr *readiness.Tracker, enabled bool, activ
 		tr.Set(readiness.PhaseDocker, agentv1.PhaseState_PHASE_STATE_DISABLED, "")
 		return
 	}
+	wasReady := false
 	for {
 		state, msg := checkDocker(ctx, active, ping)
 		if ctx.Err() != nil {
 			return
+		}
+		if state == agentv1.PhaseState_PHASE_STATE_READY {
+			wasReady = true
+		} else if wasReady {
+			state = agentv1.PhaseState_PHASE_STATE_FAILED
 		}
 		tr.Set(readiness.PhaseDocker, state, msg)
 		wait := fast
