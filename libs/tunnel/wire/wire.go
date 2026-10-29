@@ -72,6 +72,7 @@ const (
 	CodeAgentUnavailable  = "agent_unavailable"
 	CodeAgentOutdated     = "agent_outdated"
 	CodeRequestIDRequired = "request_id_required"
+	CodeBadAgentResponse  = "bad_agent_response"
 )
 
 // EventTypeTooLarge is the type of the stub the agent sends in place of a

@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 
@@ -104,7 +105,8 @@ func dropAgentHeaders(h http.Header) {
 // headerBlockSize). A Node HTTP/2 client destroys its whole session, every
 // machine's calls on it included, on a block of about 128 KiB; the gateway's
 // HTTP/2 server does not enforce the caller's SETTINGS_MAX_HEADER_LIST_SIZE.
-// A larger answer is a 502 for that call, larger trailers reset that stream.
+// A larger answer is refused (writeBadAgent), larger trailers reset that
+// stream or are dropped (trailersOverLimit).
 const maxForwardHeaderBytes = 64 << 10
 
 // maxDeclaredTrailers and maxTrailerNameBytes bound the trailer names an
@@ -243,6 +245,14 @@ func upstreamHeader(r *http.Request) http.Header {
 // isConnectStream reports whether a content type is a Connect streaming one.
 func isConnectStream(ct string) bool { return strings.HasPrefix(ct, "application/connect+") }
 
+// isConnectUnary reports whether r is a Connect unary call: an /rpc/ request
+// that is neither a Connect stream nor gRPC. HTTP trailers carry nothing in
+// that protocol (its trailers travel as Trailer- headers).
+func isConnectUnary(r *http.Request, f errFormat) bool {
+	ct := r.Header.Get("Content-Type")
+	return f == fmtRPC && !isConnectStream(ct) && !strings.HasPrefix(ct, "application/grpc")
+}
+
 // proxy forwards r to the agent of machine id: path is the upstream path
 // (rpc), or escPath the escaped upstream path (files). The request body is
 // streamed as is, the response is copied with a flush after every read.
@@ -283,7 +293,7 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 			return // the caller went away
 		}
 		if isHeaderListTooLarge(err) {
-			h.badAgentHeaders(w, s, f, u.Path)
+			h.badAgentHeaders(w, r, s, f, u.Path)
 			return
 		}
 		s.log.Debug("gateway: proxied request failed before the response", "err", err, "path", u.Path)
@@ -298,7 +308,7 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 	// machine's route, any server): it is refused (spec 16.1).
 	if isRedirect(resp.StatusCode) {
 		s.log.Warn("gateway: agent answered with a redirect, refused", "status", resp.StatusCode, "path", u.Path)
-		h.writeBadAgent(w, f, fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode))
+		h.writeBadAgent(w, r, f, fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode))
 		return
 	}
 	// The agent's Sbx-* (but agentSbxHeaders) and redirect headers and
@@ -311,7 +321,7 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 	// re-emitted trailer names included: a Node HTTP/2 client destroys the
 	// whole session, every machine's calls on it included.
 	if !ok || headerOverLimit(hdr, fwd) {
-		h.badAgentHeaders(w, s, f, u.Path)
+		h.badAgentHeaders(w, r, s, f, u.Path)
 		return
 	}
 	for k, vv := range fwd {
@@ -326,15 +336,15 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 			return
 		}
 		if isHeaderListTooLarge(err) {
-			s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
-			panic(http.ErrAbortHandler)
+			h.trailersOverLimit(r, s, f, u.Path)
+			return
 		}
 		h.abortBody(w, rc, r, id, ct, err)
 		return
 	}
 	if trailerBlockOverLimit(resp.Trailer) {
-		s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
-		panic(http.ErrAbortHandler)
+		h.trailersOverLimit(r, s, f, u.Path)
+		return
 	}
 	for k, vv := range resp.Trailer {
 		// Go's client keeps a declared trailer the agent never sent as a nil
@@ -352,23 +362,54 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 	}
 }
 
-// writeBadAgent answers 502 bad_agent_response in the route's format.
-func (h *internalHandler) writeBadAgent(w http.ResponseWriter, f errFormat, msg string) {
-	if f == fmtRPC {
-		h.writeConnectUnary(w, http.StatusBadGateway, connect.NewError(connect.CodeInternal, errors.New(msg)))
-	} else {
-		writeJSONError(w, http.StatusBadGateway, jsonError{Code: "bad_agent_response", Message: msg})
+// trailersOverLimit ends a response whose agent trailers are over
+// maxForwardHeaderBytes, maxForwardHeaderFields or h2.MaxResponseHeaderBytes;
+// the body was passed whole. A Connect unary answer ends normally without
+// them: a reset would make the client retry a call the agent already
+// answered, up to its wait budget. Every other stream is reset (a caller
+// may need its trailers, gRPC status for one).
+func (h *internalHandler) trailersOverLimit(r *http.Request, s *session, f errFormat, path string) {
+	if isConnectUnary(r, f) {
+		s.log.Warn("gateway: agent trailers over the limit, dropped", "path", path, "max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
+		return
 	}
+	s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", path, "max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
+	panic(http.ErrAbortHandler)
+}
+
+// writeBadAgent answers bad_agent_response in the route's format: 502 with a
+// JSON body (Connect unary error or jsonError), or for a Connect stream a 200
+// with an end-stream error, as Connect streams carry errors. Connect clients
+// read a stream's 502 as unavailable and retry it. The Connect error is
+// internal with a non-retryable ErrorDetail.
+func (h *internalHandler) writeBadAgent(w http.ResponseWriter, r *http.Request, f errFormat, msg string) {
+	if f != fmtRPC {
+		writeJSONError(w, http.StatusBadGateway, jsonError{Code: wire.CodeBadAgentResponse, Message: msg})
+		return
+	}
+	err := connect.NewError(connect.CodeInternal, errors.New(msg))
+	if d, derr := connect.NewErrorDetail(&tunnelv1.ErrorDetail{Code: wire.CodeBadAgentResponse}); derr == nil {
+		err.AddDetail(d)
+	}
+	if ct := r.Header.Get("Content-Type"); isConnectStream(ct) {
+		if end := h.endStreamEnvelope(ct, err); end != nil {
+			w.Header().Set("Content-Type", ct)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(end)
+			return
+		}
+	}
+	h.writeConnectUnary(w, http.StatusBadGateway, err)
 }
 
 // badAgentHeaders refuses an agent answer whose header block is over
 // maxForwardHeaderBytes, maxForwardHeaderFields or h2.MaxResponseHeaderBytes,
 // or whose trailer declarations are over maxDeclaredTrailers or
 // maxTrailerNameBytes.
-func (h *internalHandler) badAgentHeaders(w http.ResponseWriter, s *session, f errFormat, path string) {
+func (h *internalHandler) badAgentHeaders(w http.ResponseWriter, r *http.Request, s *session, f errFormat, path string) {
 	s.log.Warn("gateway: agent response headers over the limit, refused", "path", path,
 		"max_bytes", maxForwardHeaderBytes, "max_fields", maxForwardHeaderFields)
-	h.writeBadAgent(w, f, fmt.Sprintf("agent response headers are over %d bytes or %d fields (or over %d declared trailers of up to %d bytes), which the gateway does not pass on",
+	h.writeBadAgent(w, r, f, fmt.Sprintf("agent response headers are over %d bytes or %d fields (or over %d declared trailers of up to %d bytes), which the gateway does not pass on",
 		maxForwardHeaderBytes, maxForwardHeaderFields, maxDeclaredTrailers, maxTrailerNameBytes))
 }
 

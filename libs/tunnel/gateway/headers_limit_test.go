@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,10 +11,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
+	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
 	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 
 // An agent answer with a header block over 64 KiB would make the gateway
@@ -427,5 +431,139 @@ func TestDeclaredTrailerNeverSent(t *testing.T) {
 		if resp.StatusCode != http.StatusOK || resp.Trailer.Get("X-Sent") != want || resp.Trailer.Get("X-Never") != "" {
 			t.Errorf("%s: status %d, trailers %v; want 200 with X-Sent %q only", tc.path, resp.StatusCode, resp.Trailer, want)
 		}
+	}
+}
+
+// A refused agent answer ends a Connect call with a non-retryable error: a
+// Connect stream gets it as the end-stream message of a 200 answer (Connect
+// clients read a stream's 502 as unavailable and retry it until their wait
+// budget ends), a unary call as a 502 JSON error; both are Code internal with
+// ErrorDetail bad_agent_response. Trailers over the limit on a Connect unary
+// answer are dropped and the call completes: a reset would make the client
+// retry a call the agent already answered.
+func TestBadAgentAnswerNotRetryable(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	big := strings.Repeat("a", 200<<10)
+	overTrailer := strings.Repeat("t", maxForwardHeaderBytes)
+	answer, err := proto.Marshal(&testingv1.EchoResponse{Payload: []byte("payload")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := agentConfig(e, id, bs, defaultIdentity())
+	cfg.Handler = newStubAgent().handlerWith(func(mux *http.ServeMux) {
+		mux.HandleFunc(testingv1connect.ProcessEchoStreamProcedure, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			switch r.Header.Get("X-Mode") {
+			case "header":
+				w.Header().Set("X-Big", big)
+			case "redirect":
+				w.Header().Set("Location", "http://example.invalid/")
+				w.WriteHeader(http.StatusTemporaryRedirect)
+				return
+			}
+			w.Header().Set("Content-Type", r.Header.Get("Content-Type"))
+			_, _ = w.Write([]byte{2, 0, 0, 0, 2, '{', '}'})
+		})
+		mux.HandleFunc(testingv1connect.ProcessEchoProcedure, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "application/proto")
+			switch r.Header.Get("X-Mode") {
+			case "header":
+				w.Header().Set("X-Big", big)
+			case "redirect":
+				w.Header().Set("Location", "http://example.invalid/")
+				w.WriteHeader(http.StatusTemporaryRedirect)
+				return
+			}
+			_, _ = w.Write(answer)
+			if r.Header.Get("X-Mode") == "trailer" {
+				w.Header().Set(http.TrailerPrefix+"X-Big", overTrailer)
+			}
+		})
+	})
+	e.startAgent(cfg).waitConnected()
+	waitMachine(t, gw.testGW, id)
+	c := peerClient(t, apiToken1)
+	pc := processClientFor(c, gw, id)
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+
+	badAgent := func(what string, err error) {
+		t.Helper()
+		if connect.CodeOf(err) != connect.CodeInternal {
+			t.Errorf("%s: err %v, want Code internal", what, err)
+			return
+		}
+		var ce *connect.Error
+		if !errors.As(err, &ce) {
+			t.Errorf("%s: %T is not a connect error", what, err)
+			return
+		}
+		for _, d := range ce.Details() {
+			if v, derr := d.Value(); derr == nil {
+				if ed, ok := v.(*tunnelv1.ErrorDetail); ok && ed.GetCode() == wire.CodeBadAgentResponse && !ed.GetRetryable() {
+					return
+				}
+			}
+		}
+		t.Errorf("%s: err %v has no ErrorDetail bad_agent_response", what, err)
+	}
+	for _, mode := range []string{"header", "redirect"} {
+		req := connect.NewRequest(&testingv1.EchoStreamRequest{Count: 1})
+		req.Header().Set("X-Mode", mode)
+		st, err := pc.EchoStream(ctx, req)
+		if err != nil {
+			t.Fatalf("stream %s: %v", mode, err)
+		}
+		if st.Receive() {
+			t.Errorf("stream %s: got a message", mode)
+		}
+		badAgent("stream "+mode, st.Err())
+		_ = st.Close()
+
+		ureq := connect.NewRequest(&testingv1.EchoRequest{})
+		ureq.Header().Set("X-Mode", mode)
+		_, err = pc.Echo(ctx, ureq)
+		badAgent("unary "+mode, err)
+	}
+
+	// Raw: the stream refusal is a 200 with the request's content type.
+	sreq, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+"/rpc"+testingv1connect.ProcessEchoStreamProcedure,
+		strings.NewReader("\x00\x00\x00\x00\x02{}"))
+	sreq.Header.Set("Content-Type", "application/connect+json")
+	sreq.Header.Set("X-Mode", "header")
+	sresp, err := c.Do(sreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(sresp.Body)
+	_ = sresp.Body.Close()
+	if err != nil || sresp.StatusCode != http.StatusOK || sresp.Header.Get("Content-Type") != "application/connect+json" ||
+		len(body) < 5 || body[0] != 2 || !strings.Contains(string(body), wire.CodeBadAgentResponse) || sresp.Header.Get("X-Big") != "" {
+		t.Errorf("raw stream refusal: status %d, type %q, body %q, err %v", sresp.StatusCode, sresp.Header.Get("Content-Type"), body, err)
+	}
+
+	// Trailers over the limit on a unary answer: dropped, the call completes.
+	ureq := connect.NewRequest(&testingv1.EchoRequest{})
+	ureq.Header().Set("X-Mode", "trailer")
+	res, err := pc.Echo(ctx, ureq)
+	if err != nil || string(res.Msg.GetPayload()) != "payload" || res.Trailer().Get("X-Big") != "" {
+		t.Fatalf("unary with trailers over the limit: %v, %v; want the answer without them", res, err)
+	}
+	rreq, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+"/rpc"+testingv1connect.ProcessEchoProcedure, strings.NewReader(""))
+	rreq.Header.Set("Content-Type", "application/proto")
+	rreq.Header.Set("Te", "trailers")
+	rreq.Header.Set("X-Mode", "trailer")
+	raw, err := c.Do(rreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(raw.Body)
+	_ = raw.Body.Close()
+	if err != nil || string(b) != string(answer) || raw.Trailer.Get("X-Big") != "" {
+		t.Errorf("raw unary with trailers over the limit: body %q, err %v, trailer of %d bytes; want the body without the trailer",
+			b, err, len(raw.Trailer.Get("X-Big")))
 	}
 }
