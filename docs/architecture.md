@@ -11,7 +11,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | Шаблон | ОС | Доступ |
 |---|---|---|
 | `linux` | Ubuntu 26.04 LTS (сборка: `docs/specs/s5-linux-template.md`) | exec, files, SSH |
-| `linux-desktop` | Ubuntu + X11/openbox + Chrome | + рабочий стол в браузере, computer-use |
+| `linux-desktop` | Ubuntu + X11/openbox + Chrome (сборка: `docs/specs/s10-desktop.md`) | + рабочий стол в браузере, computer-use |
 | `windows` | Windows 11 (образ и лицензия пользователя; сборка: `docs/specs/s9-windows.md`) | exec (PowerShell), files, SSH, рабочий стол |
 | `windows-core` | Windows Server 2025 Core (образ и лицензия пользователя), **фаза 2** (S9 §22) | exec (PowerShell), files, SSH |
 
@@ -49,7 +49,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | `apps/worker` | TS, pg-boss | Машины состояний sandbox и machine, warm pool, операции Proxmox, снапшоты и fork, auto-stop, очистка |
 | `apps/web` | TS, Next.js + Payload 3 | `/admin`: операторы (пользователи, команды, ключи, шаблоны, размеры, квоты). `/app`: клиентский дашборд (список sandbox, терминал xterm.js, iframe рабочего стола, логи). С sandbox работает только через `apps/api` |
 | `apps/cli` | TS (Bun compile) | Клиент публичного API |
-| `apps/mcp` | TS | MCP-сервер поверх публичного API |
+| `apps/mcp` | TS | MCP-сервер поверх публичного API и `@sbx/sdk`: stdio (`sbx mcp` в бинарнике CLI) и Streamable HTTP (`api.<domain>/mcp`, Deployment `mcp`); `docs/specs/s11-mcp.md` |
 | `packages/sdk-ts`, `sdk-py` | генерация + фасады | Из OpenAPI; хелперы ожидания, стрима с переподключением, загрузки, PTY |
 | `packages/auth` | TS | Формат API-ключей, scopes, интерфейс `IdentityStore` (общий для `api` и `web`) |
 | `services/guest-agent` | Go | Агент внутри VM (Linux: systemd unit, Windows: служба) |
@@ -142,20 +142,23 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Весь входящий трафик идёт через туннель агента к `gateway`:
   - **HTTP:** `https://<slug>-<port>.sbx.<domain>` → любой под gateway → туннель (локально или через под-владелец) → `localhost:port`. Режимы доступа `token`, `sso`, `public`. Подробно: `docs/specs/s4-gateway.md`.
   - **SSH:** `ssh <sandbox>@ssh.<domain>` → gateway терминирует SSH и проверяет короткий сертификат от `api` или ключ пользователя через `api` → туннель → системный sshd VM на `127.0.0.1:22` с короткоживущим сертификатом от SSH CA gateway (`TrustedUserCAKeys`). Ключи пользователей в VM не копируются.
-  - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.sbx`); медиа WebRTC через отдельный TURN (coturn, S10).
+  - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.sbx`); медиа WebRTC через отдельный TURN (coturn, только relay между своими allocation), запасной транспорт — WebSocket через gateway и туннель (S10 §9).
 
 ## 8. Рабочий стол и computer-use
 
-- Linux и Windows: Sunshine (захват экрана, кодирование) + moonlight-web (WebRTC в браузер). Стример запускается по требованию.
-- URL рабочего стола с коротким токеном, встраивается в iframe дашборда.
-- Computer-use: cua-driver (MIT) в пользовательской сессии гостя. API платформы проксирует screenshot, click, type и т.п. через агента; MCP-обёртка в `apps/mcp`.
-- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; helper `sbx-session` в интерактивной сессии (фаза `desktop`), через него S10 запускает cua-driver и Sunshine (S9 §13).
+Подробно: `docs/specs/s10-desktop.md`.
+
+- Linux и Windows: Sunshine (захват экрана, x264 на CPU) + moonlight-web (WebRTC в браузер), upstream без форка, только на loopback VM. Стример запускается по требованию.
+- Ссылка рабочего стола с одноразовым билетом на 10 min, встраивается в iframe дашборда. Режимы доступа `token`, `sso` (только команда), `public` (выключен по умолчанию).
+- Computer-use API (скриншот, мышь, клавиатура, буфер обмена) — собственные примитивы агента через helper `sbx-session` в пользовательской сессии (Linux и Windows), не зависят от стримера. MCP-обёртка в `apps/mcp`.
+- cua-driver (MIT) ставится в шаблоны как MCP для агентов внутри VM (регистрация — S15).
+- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; helper `sbx-session` в интерактивной сессии (фаза `desktop`, S9 §13).
 
 ## 9. Публичное API (v1, кратко)
 
 Подробно: `docs/specs/s7-public-api.md`.
 
-- `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, tar каталога, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/environments`, `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
+- `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, tar каталога, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/desktop` (ссылки, доступ, скриншот, действия, буфер; S10 §13), `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/environments`, `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
 - ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды. Удаление sandbox и saved snapshot — только с `Sbx-Confirm-Delete: <id>`. CLI без TTY печатает JSON и JSONL (S7 §14.3).
 - Три listener-а `api`: публичный (Keycloak JWT и командные ключи), за oauth2-proxy (браузер, проверка Origin), внутренний (gateway, service tokens).
 - OpenAPI генерируется из zod-схем; SDK TS (`openapi-typescript` + `openapi-fetch`) и Python (`openapi-python-client`) с рукописными хелперами; CLI `sbx` на TS SDK через Bun compile.
@@ -172,13 +175,13 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Роли берутся из групп Keycloak: группа из `SBX_OPERATOR_GROUPS` → оператор платформы. Права оператора действуют только в браузерной сессии, не по API-ключу и не по JWT CLI. Команды и роли `owner`/`member` — в Payload, при первом входе создаётся личная команда (S8 §6).
 - Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy. oauth2-proxy работает в upstream-режиме и маршрутизирует `app.<domain>`: `/api/*` (без `/api`), `/sbx-auth/*` → `api :8081`, остальное → `web` (S8 §5.1).
 
-**Люди в CLI, SDK и локальном MCP — Keycloak JWT, без личных долгоживущих ключей** (S7 §7.6, §7.10).
+**Люди в CLI, SDK и MCP — Keycloak JWT, без личных долгоживущих ключей** (S7 §7.6, §7.10). Удалённый MCP принимает тот же JWT; вход через браузер — клиент `sbx-mcp` (S11 §6.4).
 - `sbx login` — OAuth 2.0 Device Authorization Grant с публичным клиентом `sbx-cli`. Access token живёт 5 min, refresh token привязан к SSO-сессии Keycloak и лежит в хранилище ОС (запасной вариант — файл `0600`). SDK и MCP берут токен у CLI (`sbx auth token`).
 - `api` сам проверяет JWT (JWKS, `iss`, `aud=sbx-api`, `exp`), без introspection на запрос; `sub` → тот же пользователь Payload, что в браузере. Выключенный пользователь не обновит токен: доступ кончается за 5 min.
 
 **Автоматизация и CI — командные ключи `sbx_`** (S7 §7.2). Принадлежат команде, выпускает `owner` в дашборде, создатель записан для аудита; scopes «ресурс × действие», срок 90 d по умолчанию, максимум 365 d. Уход создателя ключи не выключает, их отзывают `owner`-ы.
 
-Маршруты `/v1/*` с `Authorization: Bearer` (JWT или `sbx_`) идут на `api.<domain>` мимо oauth2-proxy: oauth2-proxy — только для браузера.
+Маршруты `/v1/*` с `Authorization: Bearer` (JWT или `sbx_`) идут на `api.<domain>` мимо oauth2-proxy: oauth2-proxy — только для браузера. Пути `/mcp` и `/.well-known/oauth-protected-resource/mcp` на том же хосте идут в Deployment `mcp` (S11 §6.2).
 
 **Деактивация (offboarding, вариант A, S8 §20.1).** `worker` раз в 5 min читает пользователей через Keycloak Admin API (клиент `sbx-worker`). Выключенный или удалённый пользователь деактивируется в Payload; его стримы, PTY и SSH-сессии закрываются сразу; `owner`-ы его команд получают список командных ключей, которые он создал. Ключи автоматически не отзываются.
 
@@ -186,9 +189,10 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 | Что | Настройка |
 |---|---|
-| Общий client scope `groups` | Group Membership mapper → claim `groups`, Full group path выключен; подключён по умолчанию к `oauth2-proxy` и `sbx-cli`, чтобы браузер и CLI получали группы в одном формате |
+| Общий client scope `groups` | Group Membership mapper → claim `groups`, Full group path выключен; подключён по умолчанию к `oauth2-proxy`, `sbx-cli` и `sbx-mcp`, чтобы браузер и CLI получали группы в одном формате |
 | Клиент `oauth2-proxy` | конфиденциальный (Client authentication on), Standard flow; Audience mapper на себя; scope `groups` |
 | Клиент `sbx-cli` | публичный (Client authentication off), только OAuth 2.0 Device Authorization Grant; Audience mapper (Included Client Audience `sbx-api`, Add to access token); default scopes `basic` (`sub`), `email`, `profile`, `groups`; `offline_access` убран и из default, и из optional (refresh не переживает SSO-сессию); lightweight access token выключен |
+| Клиент `sbx-mcp` | публичный, только Standard flow (authorization code) с PKCE `S256`; redirect URIs `http://127.0.0.1:33418/*`, `http://localhost:33418/*`; Audience mapper `sbx-api`; scopes и запрет `offline_access` — как у `sbx-cli`; вход в удалённый MCP через браузер (S11 §6.4) |
 | Клиент `sbx-api` | только аудитория: без flow, токенов себе не получает |
 | Клиент `sbx-worker` | конфиденциальный, только Service accounts; роль `view-users` клиента `realm-management` |
 | Сроки | Access Token Lifespan 5 min; SSO Session Idle 24 h; SSO Session Max 7 d (вход в CLI раз в неделю, при ежедневной работе); Client Session Idle/Max — как у realm; Revoke Refresh Token выключен (CLI обновляет под блокировкой); device code 600 s, интервал опроса 5 s |
@@ -204,7 +208,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 **Деплой gateway.** Rolling update: `preStop` запускает drain (S2, S4 §10). HTTP-потоки живут до 2 min, SSH-сессии до 15 min с предупреждением, `terminationGracePeriodSeconds: 960`.
 
-**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу `gateway-edge` (`tunnel.<domain>:443`, IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный сервис с UDP LoadBalancer или hostNetwork (S10).
+**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу `gateway-edge` (`tunnel.<domain>:443`, IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный coturn `turn.<domain>` с hostNetwork на выделенной ноде или UDP LoadBalancer (S12); sandbox ходят к нему по UDP 3478 (IPSet `sbx-turn`, S10 §9.2).
 
 ## 11. Безопасность
 
@@ -218,8 +222,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | Фаза | Содержание |
 |---|---|
 | **PoC** (homelab `pve`) | Шаблон `linux`, guest-agent v0 (туннель, exec, files), gateway (туннели, HTTP-порты), worker (claim из warm pool, create, delete), драйвер lvmthin (clone из шаблона, snapshot, fork), минимальный API и CLI. Замеры: claim-to-ready, холодный старт, fork |
-| **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, рабочий стол, Payload admin/dashboard, API-ключи, auto-stop, SDK TS/Python, MCP |
-| **Фаза 2** | `windows-core` (Windows Server Core, S9 §22), несколько нод и кластеров, PBS-архив и перенос, computer-use API, история команд вне VM, встроенные coding-агенты, egress-политики, OTel, webhooks |
+| **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, рабочий стол, computer-use API (скриншот, мышь, клавиатура, буфер), Payload admin/dashboard, API-ключи, auto-stop, SDK TS/Python, MCP |
+| **Фаза 2** | `windows-core` (Windows Server Core, S9 §22), несколько нод и кластеров, PBS-архив и перенос, computer-use v2 и рабочий стол v2 (S29), история команд вне VM, встроенные coding-агенты, egress-политики, OTel, webhooks |
 
 ## 13. Открытые вопросы
 

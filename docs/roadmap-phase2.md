@@ -182,7 +182,7 @@
 | D3 | Только браузер: Chrome без рамки, профили Chrome | `docs:desktop-streaming/browser-only.md`, `cli:browser.txt` | Нет | ✗ | S29, P2 |
 | D4 | Запись рабочего стола в mp4 | `docs:desktop-streaming/drive-and-record.md` | Нет | ✗ | S29, P2 (демо, разбор работы агента) |
 | D5 | MCP `computer` (cua-driver) зарегистрирован во всех harness | `docs:integrated-agents/computer-use.md` | S10 cua-driver; регистрация в harness нет | ◐ | S15 |
-| D6 | Computer-use через HTTP API (у boat только через harness) | — | Архитектура §8, §12 (фаза 2) | ◐ | S29 |
+| D6 | Computer-use через HTTP API (у boat только через harness) | — | S10 §13 (MVP) | ✓ | — |
 | D7 | Обои, буфер обмена | `docs:desktop-streaming/background.md` | S10 (буфер — по возможностям moonlight-web) | ◐ | S29, P3 |
 | D8 | `lux` (автоматизация рабочего стола с записью демо) | `vr:cloud-sandbox-vm-skills/skills/computer-use-browser-desktop/SKILL.md` | — | ⊘ | Проприетарный инструмент; наш путь — S15 + cua |
 | D9 | Anti-bot Chromium (обход CAPTCHA и детекта) | `vr:battleships/research/cards/boat.json` | — | ⊘ | Не нужно внутренней платформе |
@@ -421,7 +421,7 @@
 | S26 | CI-раннеры | Эфемерные раннеры GitHub Actions (или GitLab — по ответу S13): метки размеров, `from=<saved snapshot>`, `debug`, отказ публичных репо, лимит времени; API и CLI заданий и логов; аннотация OOM | S13, S22; S28 по желанию | M | P2/P3 |
 | S27 | Evals и адаптеры | Harbor `BaseEnvironment`, Eve backend, по запросу E2B-совместимая обёртка; гайд RL/evals; использует пакетный create и тёплый пул под snapshot из S30 | S7, S22, S28, S17, S30 | M | P3 |
 | S28 | Свои образы и шаблоны v2 | Шаблон из Dockerfile/OCI или скрипта (сборка на ноде, кэш); пользовательские шаблоны команды; версии и откат; каталог шаблонов в админке | S5, S9 | L | P2 |
-| S29 | Рабочий стол v2 и computer-use API | Computer-use через API (screenshot, click, type, scroll, key) для Linux и Windows; браузер-только с профилями Chrome; запись рабочего стола; noVNC; буфер обмена, обои | S10, S9 | M | P2 |
+| S29 | Рабочий стол v2 | Computer-use API уже в MVP (S10); здесь: браузер-только с профилями Chrome; запись рабочего стола; noVNC; буфер обмена, обои | S10, S9 | M | P2 |
 | S30 | Жизненный цикл v2 | Пробуждение остановленной sandbox по HTTP/SSH (gateway держит запрос); гибернация через снапшот памяти QEMU; пакетный create (`count`); тёплый пул под saved snapshot (для `failFast` с `from`); идемпотентность resume; рост диска при смене размера; пользовательский pre-stop хук; политика для зависших `degraded` | S1, S4, S6 | L | P2 |
 
 Порядок волн:
@@ -670,6 +670,8 @@
 
 ### 5.2 Список инструментов MCP-сервера (S11 и фаза 2)
 
+Обновление 2026-10-29: итоговый список MVP — `docs/specs/s11-mcp.md` (38 инструментов). `computer_*` и `desktop_url` вошли в S11; `files_mkdir`, `files_move`, `sandbox_extend` не вводятся; добавлены `files_edit`, `sandbox_recover`, `computer_move`, `computer_clipboard_*`; `exec_input` и PTY — S22. Таблица ниже — исходный черновик.
+
 Транспорт: Streamable HTTP за `api.<domain>` (Bearer-ключ, позже OAuth по RFC 9728 через S24) и stdio через `sbx mcp`. Аннотации инструментов: `readOnlyHint` и `destructiveHint`. Delete требует повторить id (как заголовок подтверждения).
 
 Длинные операции: `exec_start` + `exec_output` с offset, без удержания одного вызова. Вывод в ответе обрезается с явным `next_offset`.
@@ -688,7 +690,7 @@
 | `port_expose`, `port_list`, `port_unexpose` | URL порта (`token`/`sso`/`public`) | S11 |
 | `snapshot_save`, `snapshot_list`, `snapshot_delete` | Saved snapshots | S11 |
 | `desktop_url` | Ссылка на рабочий стол | S11 (после S10) |
-| `computer_screenshot`, `computer_click`, `computer_type`, `computer_key`, `computer_scroll`, `computer_drag` | Computer-use | S29 |
+| `computer_screenshot`, `computer_click`, `computer_type`, `computer_key`, `computer_scroll`, `computer_drag` | Computer-use | S11 (поверх S10 §13) |
 | `agent_prompt`, `agent_events`, `agent_steer`, `agent_interrupt`, `agent_conversations` | Встроенные агенты | S15 |
 | `history_list`, `history_output`, `processes_list` | История и процессы | S19 |
 | `env_list`, `env_get`, `env_set_var`, `env_add_repo` | Environments | S14 |

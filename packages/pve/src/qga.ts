@@ -1,4 +1,4 @@
-import type { PveClient } from "./pve-api.ts";
+import { PveApiError, type PveClient, QgaTimeoutError } from "./pve-api.ts";
 
 export interface ExecResult {
 	exitCode: number;
@@ -14,6 +14,26 @@ export interface GuestInterface {
 		"ip-address": string;
 		prefix: number;
 	}[];
+}
+
+/**
+ * qemu-ga no longer knows a PID we started and have not read an exit status for: it restarted
+ * (a restarted agent forgets all PIDs), or an exec-status call that timed out was answered later
+ * and consumed the status (qemu-ga hands out the status of an exited process once). The exit code
+ * and output are gone; the command did start.
+ */
+export class QgaExecStatusLostError extends Error {
+	readonly vmid: number;
+	readonly pid: number;
+	constructor(vmid: number, pid: number, cause: unknown) {
+		super(
+			`exit status of guest PID ${pid} on VM ${vmid} was lost (qemu-ga restarted or a timed-out call consumed it)`,
+			{ cause },
+		);
+		this.name = "QgaExecStatusLostError";
+		this.vmid = vmid;
+		this.pid = pid;
+	}
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -69,13 +89,29 @@ export class Qga {
 		);
 		const deadline = Date.now() + (opts.timeoutMs ?? 30_000);
 		for (let delay = 50; ; delay = Math.min(delay * 2, 500)) {
-			const st = await this.#api.get<{
-				exited: number;
-				exitcode?: number;
-				"out-data"?: string;
-				"err-data"?: string;
-			}>(this.#path(vmid, "exec-status"), { pid });
-			if (st.exited)
+			let st:
+				| {
+						exited: number;
+						exitcode?: number;
+						"out-data"?: string;
+						"err-data"?: string;
+				  }
+				| undefined;
+			try {
+				st = await this.#api.get(this.#path(vmid, "exec-status"), { pid });
+			} catch (err) {
+				if (!(err instanceof PveApiError)) throw err;
+				if (/PID \d+ does not exist/.test(err.message))
+					throw new QgaExecStatusLostError(vmid, pid, err);
+				// Polling on after a timeout or while the agent restarts is harmless: the status of a
+				// running process is not consumed, and a lost one shows up as a missing PID.
+				if (
+					!(err instanceof QgaTimeoutError) &&
+					!/guest agent is not running/i.test(err.message)
+				)
+					throw err;
+			}
+			if (st?.exited)
 				return {
 					exitCode: st.exitcode ?? -1,
 					stdout: st["out-data"] ?? "",

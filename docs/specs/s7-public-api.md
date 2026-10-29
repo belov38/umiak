@@ -440,7 +440,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 ### 7.10 Keycloak JWT
 
 - **Какой bearer.** Начинается с `sbx_` — командный ключ (§7.2); `sbxs_` зарезервирован; иначе это должен быть JWS compact (три части base64url), иначе `401 unauthorized`.
-- **Проверка в `api`, без introspection на запрос:** подпись ключом из JWKS (`jwks_uri` из `{issuer}/.well-known/openid-configuration`), алгоритм из списка `RS256`, `ES256` (`none` и `HS*` — отказ); `iss` равен `SBX_OIDC_ISSUER` (`https://<keycloak>/realms/sbx`); `aud` содержит `sbx-api` (`SBX_OIDC_AUDIENCE`); `exp`, `nbf`, `iat` с допуском 60 s; claim `typ` = `Bearer` (так ID token и refresh token не пройдут); `azp` из `SBX_OIDC_ALLOWED_CLIENTS` (по умолчанию `sbx-cli`); `email_verified = true`. Библиотека — `jose` (`createRemoteJWKSet`, `jwtVerify`).
+- **Проверка в `api`, без introspection на запрос:** подпись ключом из JWKS (`jwks_uri` из `{issuer}/.well-known/openid-configuration`), алгоритм из списка `RS256`, `ES256` (`none` и `HS*` — отказ); `iss` равен `SBX_OIDC_ISSUER` (`https://<keycloak>/realms/sbx`); `aud` содержит `sbx-api` (`SBX_OIDC_AUDIENCE`); `exp`, `nbf`, `iat` с допуском 60 s; claim `typ` = `Bearer` (так ID token и refresh token не пройдут); `azp` из `SBX_OIDC_ALLOWED_CLIENTS` (по умолчанию `sbx-cli`, `sbx-mcp` — вход в удалённый MCP через браузер, S11 §6.4); `email_verified = true`. Библиотека — `jose` (`createRemoteJWKSet`, `jwtVerify`).
 - **Адреса.** `iss` сверяется с публичным `SBX_OIDC_ISSUER`; discovery и JWKS `api` может брать по внутреннему адресу (`SBX_OIDC_DISCOVERY_URL`, по умолчанию от issuer), если публичное имя Keycloak из кластера недоступно.
 - **JWKS** кэшируется в поде: обновление раз в 10 min и при неизвестном `kid` (не чаще раза в 30 s). Если Keycloak недоступен, кэш ключей продолжает работать, токены проверяются офлайн.
 - **Та же личность, что в браузере.** `sub` токена — тот же claim, который oauth2-proxy шлёт в `X-Auth-Request-User` (S8 §5.1). `api` вызывает `IdentityStore.resolveSession({email, user: sub, groups, preferredUsername})` из claims `email`, `sub`, `groups`, `preferred_username`: JIT, привязка к `idpSubject`, кэш 30 s — как для браузера (S8 §5.3). Деактивированный пользователь (`active: false`, в том числе по синхронизации S8 §20.1) — `403 forbidden` с `details.reason: "user_disabled"`, даже если токен не истёк.
@@ -890,6 +890,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx templates`, `sbx sizes`, `sbx limits` | |
 | `sbx keys list\|create [--preset] [--scope]...\|rotate\|rm` | командные ключи; `create`, `rotate` — только `owner` с входом Keycloak |
 | `sbx run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |
+| `sbx mcp [--toolsets] [--read-only] [--sandbox]` | MCP-сервер по stdio на учётных данных CLI (S11 §6.1) |
 | `sbx completion bash\|zsh\|fish\|powershell`, `sbx version` | |
 
 `<sb>` — ID или slug. Если не указан, берётся `SBX_SANDBOX`, затем текущая sandbox shell, затем (внутри VM) `SBX_SANDBOX_ID` из env платформы (S3 §8.2; там UUID из S6, CLI сам переводит его в `sb_…`, §5.3).
@@ -939,6 +940,7 @@ await sb.delete()
 - Низкоуровневый клиент (`sbx.raw`) — сам `openapi-fetch` со всеми операциями.
 - Учётные данные — цепочка §7.6 (явные параметры → `SBX_API_KEY` → `SBX_ACCESS_TOKEN` → `sbx auth token --json`); на `401 token_expired` SDK один раз берёт новый токен и повторяет запрос.
 - Ошибки — класс `SbxError {status, code, message, retryable, details, requestId}`.
+- Каждый метод фасада и `sbx.raw` принимает `signal: AbortSignal` (прерывает запрос, long-poll, чтение стрима и повторы) и `retryBudgetMs` (общий срок повторов на этот вызов вместо 60 s, §15.4). Нужно MCP для срока вызова инструмента (S11 §7.5).
 
 ### 15.3 Python: `sbx-sdk`
 
@@ -1063,6 +1065,7 @@ interface IdentityStore {
 - **Ответы для LLM:** ошибки с понятным `message` и `retryable`; большие выводы — с флагами усечения и offset-ами, а не огромными телами; `waitFor` long-poll вместо опроса.
 - **Аутентификация:** MCP по stdio — цепочка SDK (§7.6): вход человека через `sbx auth token` или командный ключ `SBX_API_KEY`; удалённый MCP по HTTP — решает S11 (вероятно, OAuth через Keycloak с `aud=sbx-api`). Ключи с ограничением по sandbox — позже (§19), если S11 их попросит.
 - Чего нет в v1 и может понадобиться S11: скриншоты и computer-use (S10), поиск по файлам (через exec).
+- Решено в S11 (`docs/specs/s11-mcp.md`): новых ручек MCP не нужно; удалённый MCP принимает те же bearer и проверяет их через `GET /v1/me`; добавлен клиент Keycloak `sbx-mcp` (§7.10) и команда `sbx mcp` (§14.2).
 
 ### 17.6 S12
 
@@ -1070,7 +1073,7 @@ interface IdentityStore {
 - NetworkPolicy: `:8081` — только от oauth2-proxy; `:8082` — только от gateway; `:9090` — от Prometheus.
 - Deployment `api`: 2 реплики, `terminationGracePeriodSeconds: 30`, readiness `/readyz` (Postgres, Payload, `LISTEN`-соединения).
 - Secrets: service tokens (`SBX_API_SERVICE_TOKENS_FILE`), `SBX_API_CURSOR_KEY`, ключи данных S6 (`SBX_DATA_KEYS_FILE`), публичные SSH host keys gateway, закрытый ключ SSH login CA (`SBX_SSH_LOGIN_CA_KEY_FILE`, §11.3).
-- Keycloak (realm `sbx`, клиенты и сроки — architecture §10): `SBX_OIDC_ISSUER`, `SBX_OIDC_AUDIENCE=sbx-api`, `SBX_OIDC_ALLOWED_CLIENTS=sbx-cli`; `api` ходит к Keycloak только за discovery и JWKS.
+- Keycloak (realm `sbx`, клиенты и сроки — architecture §10): `SBX_OIDC_ISSUER`, `SBX_OIDC_AUDIENCE=sbx-api`, `SBX_OIDC_ALLOWED_CLIENTS=sbx-cli,sbx-mcp`; `api` ходит к Keycloak только за discovery и JWKS.
 
 ## 18. Библиотеки и инструменты
 

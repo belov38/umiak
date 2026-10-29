@@ -25,8 +25,8 @@ func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, erro
 			return nil, err
 		}
 	}
-	// A vm-<id>-* origin is trusted by its tags, not by its number: a non-sandbox guest may use
-	// a VMID in our range.
+	// A vm-<id>-* or sbx-snap-<id>-* origin is trusted by its tags, not by its name: a non-sandbox
+	// guest may use a VMID in our range, and anyone may name an LV sbx-snap-*.
 	all, err := s.LVM.List(ctx)
 	if err != nil {
 		return nil, err
@@ -36,12 +36,16 @@ func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, erro
 		byName[l.Name] = l
 	}
 	for _, it := range args.Items {
-		m := vmAnyRe.FindStringSubmatch(it.Origin)
-		if m == nil {
+		var owner string
+		if m := vmAnyRe.FindStringSubmatch(it.Origin); m != nil {
+			owner = "sbx-vm-" + m[1]
+		} else if m := snapLVRe.FindStringSubmatch(it.Origin); m != nil {
+			owner = "sbx-snap-" + m[1]
+		} else {
 			continue
 		}
 		l, ok := byName[it.Origin]
-		if !ok || !ours(l) || !slices.Contains(l.Tags, "sbx-vm-"+m[1]) {
+		if !ok || !ours(l) || !slices.Contains(l.Tags, owner) {
 			return nil, forbidden("origin %q is not a sandbox disk", it.Origin)
 		}
 	}
