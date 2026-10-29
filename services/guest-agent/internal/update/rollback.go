@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 )
 
@@ -71,34 +70,12 @@ func rollbackTo(l paths.Layout, v string) error {
 	if !fi.Mode().IsRegular() {
 		return fmt.Errorf("rollback: version %s has no agent binary", v)
 	}
-	cur, err := LinkVersion(l.CurrentLink)
+	cur, err := makeCurrent(l, v)
 	if err != nil {
 		return err
 	}
-	if cur != v {
-		if cur != "" {
-			if err := pointLink(l, l.PreviousLink, cur); err != nil {
-				return err
-			}
-		}
-		if err := pointLink(l, l.CurrentLink, v); err != nil {
-			return err
-		}
-	}
-	p, ok, err := readPending(l)
-	if err != nil {
-		slog.Warn("rollback: removing an unreadable pending update", "err", err)
-	}
-	if ok {
-		res := rollbackResult{From: p.From, To: p.To, Error: "manual rollback to " + v}
-		if err := fsutil.WriteJSONAtomic(rollbackResultFile(l), res, 0o644); err != nil {
-			return err
-		}
-	}
-	if ok || err != nil {
-		if err := removePending(l); err != nil {
-			return err
-		}
+	if err := abandonPending(l, "manual rollback to "+v); err != nil {
+		return err
 	}
 	slog.Info("rollback: switched version", "from", cur, "to", v)
 	return nil

@@ -91,6 +91,26 @@ func TestRollback(t *testing.T) {
 		if !slices.EqualFunc(sc.calls, want, slices.Equal) {
 			t.Errorf("systemctl = %v, want %v", sc.calls, want)
 		}
+		// With a pending update: it is abandoned, nothing is marked bad.
+		if err := writePending(l, Pending{From: "v2", To: "v3", Deadline: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := Rollback(l, "v1", sc.run, func(time.Duration) {}); err != nil {
+			t.Fatal(err)
+		}
+		if cur, prev := linkTarget(t, l.CurrentLink), linkTarget(t, l.PreviousLink); cur != "v1" || prev != "v3" {
+			t.Errorf("current, previous = %q, %q; want v1, v3", cur, prev)
+		}
+		if _, err := os.Stat(l.PendingUpdateFile); !os.IsNotExist(err) {
+			t.Error("pending kept")
+		}
+		var res rollbackResult
+		if err := readRollbackResult(l, &res); err != nil || res.From != "v2" || res.To != "v3" || res.Error == "" {
+			t.Errorf("rollback marker = %+v, %v", res, err)
+		}
+		if bad, _ := readBadVersions(l); len(bad) != 0 {
+			t.Errorf("bad versions = %v", bad)
+		}
 		if err := Rollback(l, "v9", sc.run, func(time.Duration) {}); err == nil {
 			t.Error("rollback to a missing version succeeded")
 		}

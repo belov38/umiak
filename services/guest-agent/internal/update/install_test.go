@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 )
@@ -131,5 +132,50 @@ func TestInstallRejects(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(l.VersionsDir, "v1")); !os.IsNotExist(err) {
 		t.Errorf("rejected version installed: %v", err)
+	}
+}
+
+func TestInstallActivateAbandonsPending(t *testing.T) {
+	pub, priv := testKey(t)
+	l := paths.ForRoot(t.TempDir())
+	keys := []ed25519.PublicKey{pub}
+	if _, err := Install(l, packTest(t, "v1", priv), keys, InstallOptions{Activate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePending(l, Pending{From: "v0", To: "v1", Deadline: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(l, packTest(t, "v2", priv), keys, InstallOptions{Activate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(l.PendingUpdateFile); !os.IsNotExist(err) {
+		t.Error("pending kept")
+	}
+	var res rollbackResult
+	if err := readRollbackResult(l, &res); err != nil || res.From != "v0" || res.To != "v1" {
+		t.Errorf("marker = %+v, %v", res, err)
+	}
+}
+
+func TestPlaceVersionForcesExecutable(t *testing.T) {
+	pub, priv := testKey(t)
+	l := paths.ForRoot(t.TempDir())
+	keys := []ed25519.PublicKey{pub}
+	pkgDir, cleanup, m, err := stage(l, packTest(t, "v1", priv), keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if err := os.Chmod(filepath.Join(pkgDir, BinaryName), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := placeVersion(l, pkgDir, m, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.commit()
+	fi, err := os.Stat(filepath.Join(l.VersionsDir, "v1", BinaryName))
+	if err != nil || fi.Mode().Perm() != 0o755 {
+		t.Errorf("binary mode = %v, %v", fi.Mode(), err)
 	}
 }

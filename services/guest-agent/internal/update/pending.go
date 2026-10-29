@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -125,4 +126,23 @@ func revert(l paths.Layout, p Pending, reason string) error {
 		return fmt.Errorf("update: remove pending update: %w", err)
 	}
 	return nil
+}
+
+// abandonPending drops an unfinished self-update because an operator chose a
+// version (install-package, rollback --to): the update is recorded for
+// update.result{rolled_back} at the next start, no version is marked bad.
+func abandonPending(l paths.Layout, reason string) error {
+	p, ok, err := readPending(l)
+	if err != nil {
+		slog.Warn("update: removing an unreadable pending update", "err", err)
+		return removePending(l)
+	}
+	if !ok {
+		return nil
+	}
+	slog.Warn("update: abandoning the pending update", "from", p.From, "to", p.To, "reason", reason)
+	if err := fsutil.WriteJSONAtomic(rollbackResultFile(l), rollbackResult{From: p.From, To: p.To, Error: reason}, 0o644); err != nil {
+		return fmt.Errorf("update: record abandoned update: %w", err)
+	}
+	return removePending(l)
 }

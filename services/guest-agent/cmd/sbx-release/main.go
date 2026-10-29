@@ -3,11 +3,13 @@
 //
 //	sbx-release keygen --out <dir> [--comment c]
 //	sbx-release pack --version v --os linux --arch amd64 --binary <path> \
-//	    --tunnel-ca <pem> --update-keys <file> --key <ed25519.key> --out <tar>
+//	    --tunnel-ca <pem> --update-keys <file> --key <ed25519.key> --out <tar> \
+//	    [--skip-version-check] [--allow-foreign-signer]
 //	sbx-release verify --keys <file> <tar>
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -16,7 +18,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
@@ -29,7 +35,9 @@ commands:
         write <dir>/ed25519.key (0600) and print the public key line
   pack --version v --os linux --arch amd64 --binary <path> --tunnel-ca <pem>
        --update-keys <file> --key <ed25519.key> --out <tar>
-        build and sign a package
+       [--skip-version-check] [--allow-foreign-signer]
+        build and sign a package; the binary must report the version and
+        the signing key must be in --update-keys
   verify --keys <file> <tar>
         verify a package against an update keys file
 `
@@ -144,6 +152,8 @@ func pack(args []string, stdout, stderr io.Writer) error {
 	f.StringVar(&o.UpdateKeys, "update-keys", "", "update keys file")
 	f.StringVar(&keyPath, "key", "", "signing key (ed25519.key)")
 	f.StringVar(&o.Out, "out", "", "package tar to write")
+	skipVersion := f.Bool("skip-version-check", false, "do not run `<binary> version` (required when the binary is for another platform)")
+	foreignSigner := f.Bool("allow-foreign-signer", false, "sign with a key that is not in --update-keys")
 	if err := f.Parse(args); err != nil || f.NArg() != 0 {
 		return usageError{"bad arguments"}
 	}
@@ -157,7 +167,8 @@ func pack(args []string, stdout, stderr io.Writer) error {
 	}
 	// The packed keys file must parse, or the installed version could not
 	// verify its own updates.
-	if _, err := update.ReadKeys(o.UpdateKeys); err != nil {
+	pinned, err := update.ReadKeys(o.UpdateKeys)
+	if err != nil {
 		return fmt.Errorf("%s: %w", o.UpdateKeys, err)
 	}
 	keyPEM, err := os.ReadFile(keyPath)
@@ -167,12 +178,46 @@ func pack(args []string, stdout, stderr io.Writer) error {
 	if o.Key, err = update.ParsePrivateKey(keyPEM); err != nil {
 		return err
 	}
+	signer := o.Key.Public().(ed25519.PublicKey)
+	if !slices.ContainsFunc(pinned, func(k ed25519.PublicKey) bool { return k.Equal(signer) }) {
+		if !*foreignSigner {
+			return fmt.Errorf("the signing key is not in %s; the installed version could not verify its next update (use --allow-foreign-signer to override)", o.UpdateKeys)
+		}
+		_, _ = fmt.Fprintf(stderr, "warning: the signing key is not in %s\n", o.UpdateKeys)
+	}
+	if err := checkBinaryVersion(o, *skipVersion, stderr); err != nil {
+		return err
+	}
 	m, err := update.Pack(o)
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(stdout, "%s: %s %s/%s\n", o.Out, m.Version, m.OS, m.Arch)
 	return err
+}
+
+// checkBinaryVersion makes sure `<binary> version` prints the package
+// version: the agent finds out whether it is the target of a pending update
+// by its compiled version. A binary for another platform cannot be run, so
+// it needs skip (with a warning).
+func checkBinaryVersion(o update.PackOptions, skip bool, stderr io.Writer) error {
+	if skip {
+		_, _ = fmt.Fprintf(stderr, "warning: not checking that %s reports version %s\n", o.Binary, o.Version)
+		return nil
+	}
+	if o.OS != runtime.GOOS || o.Arch != runtime.GOARCH {
+		return fmt.Errorf("the binary is for %s/%s and cannot be run here to check its version; pass --skip-version-check", o.OS, o.Arch)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, o.Binary, "version").Output()
+	if err != nil {
+		return fmt.Errorf("%s version: %w", o.Binary, err)
+	}
+	if got := strings.TrimSpace(string(out)); got != o.Version {
+		return fmt.Errorf("%s reports version %q, want %q (build with -ldflags \"-X main.version=%s\")", o.Binary, got, o.Version, o.Version)
+	}
+	return nil
 }
 
 // verify checks a package against a keys file.

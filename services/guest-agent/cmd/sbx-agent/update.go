@@ -106,7 +106,7 @@ func selftestCmd(d deps, args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "sbx-agent selftest: %v\n", err)
 		return 1
 	}
-	if err := update.SelfTest(d.layout, filepath.Dir(exe), *schema, protos); err != nil {
+	if err := update.SelfTest(d.layout, filepath.Dir(exe), d.version, *schema, protos); err != nil {
 		_, _ = fmt.Fprintf(stderr, "sbx-agent selftest: %v\n", err)
 		return 1
 	}

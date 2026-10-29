@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -66,11 +67,12 @@ func (e *applyEnv) manager(t *testing.T, running string, pub ed25519.PublicKey) 
 			e.selftest = append(e.selftest, bin)
 			return nil
 		},
-		Exit:      func() { e.exits.Add(1) },
-		Emit:      e.rec,
-		Now:       func() time.Time { return testNow },
-		Version:   running,
-		ExitDelay: 10 * time.Millisecond,
+		Exit:        func() { e.exits.Add(1) },
+		Emit:        e.rec,
+		Now:         func() time.Time { return testNow },
+		Version:     running,
+		ExitDelay:   time.Millisecond,
+		ExitWaitMax: time.Hour, // Exit can only follow the end of the handler
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -125,14 +127,34 @@ func TestApplyFlow(t *testing.T) {
 		t.Errorf("status = %v", st)
 	}
 
+	// A second Apply is refused: by the pending file, and by the switched
+	// state even without it.
+	e.uploads["up3"] = packTest(t, "v3", e.priv)
+	if _, err := e.m.Apply(context.Background(), "up3", false); detailCode(err) != "update_in_progress" {
+		t.Errorf("second apply: %v", err)
+	}
+	if err := os.Remove(e.l.PendingUpdateFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Apply(context.Background(), "up3", false); detailCode(err) != "update_in_progress" {
+		t.Errorf("apply after switch: %v", err)
+	}
+	// GC skips while the agent is about to exit into the new version.
+	ageVersions(t, e.l)
+	if err := e.m.GC(nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(e.l.VersionsDir, "v2")); err != nil {
+		t.Errorf("GC during apply: %v", err)
+	}
+
 	// Exit waits for the handler to return (request context done).
-	time.Sleep(50 * time.Millisecond)
 	if n := e.exits.Load(); n != 0 {
 		t.Fatalf("exit called %d times before the handler returned", n)
 	}
 	cancel()
 	waitFor(t, func() bool { return e.exits.Load() == 1 })
-	time.Sleep(50 * time.Millisecond)
+	e.m.exit()
 	if n := e.exits.Load(); n != 1 {
 		t.Errorf("exit called %d times", n)
 	}
@@ -210,6 +232,27 @@ func TestApplySelfTestFails(t *testing.T) {
 	}
 }
 
+func TestApplySelfTestFailsKeepsOldBuild(t *testing.T) {
+	e := newApplyEnv(t, "v1")
+	installed(t, e.l, "v2", e.priv)
+	before, err := os.ReadFile(filepath.Join(e.l.VersionsDir, "v2", ManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.uploads["up"] = packBuild(t, "v2", runtime.GOOS, runtime.GOARCH, e.priv, "another build")
+	e.m.opts.SelfTest = func(context.Context, string) error { return errors.New("broken") }
+	if _, err := e.m.Apply(context.Background(), "up", false); err == nil {
+		t.Fatal("apply succeeded")
+	}
+	after, err := os.ReadFile(filepath.Join(e.l.VersionsDir, "v2", ManifestName))
+	if err != nil || string(after) != string(before) {
+		t.Errorf("old build not restored: %v", err)
+	}
+	if entries, _ := filepath.Glob(filepath.Join(e.l.VersionsDir, ".*")); len(entries) != 0 {
+		t.Errorf("leftovers: %v", entries)
+	}
+}
+
 func TestApplyRejectsForeignSignature(t *testing.T) {
 	e := newApplyEnv(t, "v1")
 	_, other := testKey(t)
@@ -266,27 +309,57 @@ func TestCheckPendingDeadlinePassed(t *testing.T) {
 	}
 }
 
+func TestCheckPendingTargetByCurrentLink(t *testing.T) {
+	e := newApplyEnv(t, "v1")
+	installed(t, e.l, "v2", e.priv)
+	setLinks(t, e.l, "v2", "v1")
+	if err := writePending(e.l, Pending{From: "v1", To: "v2", Deadline: testNow.Add(-time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	// A binary that reports "dev" but runs as current=v2 is the target.
+	m := e.manager(t, "dev", e.priv.Public().(ed25519.PublicKey))
+	if err := m.CheckPending(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if cur := linkTarget(t, e.l.CurrentLink); cur != "v1" {
+		t.Errorf("current = %q, want v1 (rolled back)", cur)
+	}
+	if n := e.exits.Load(); n != 1 {
+		t.Errorf("exit called %d times", n)
+	}
+	if got := e.rec.Of(events.TypeUpdateResult); len(got) != 0 {
+		t.Errorf("target emitted %v", got)
+	}
+}
+
 func TestCheckPendingTimerAndConfirm(t *testing.T) {
 	for _, confirm := range []bool{false, true} {
 		t.Run(map[bool]string{false: "deadline", true: "confirm"}[confirm], func(t *testing.T) {
 			e := newApplyEnv(t, "v1")
 			installed(t, e.l, "v2", e.priv)
 			setLinks(t, e.l, "v2", "v1")
-			if err := writePending(e.l, Pending{From: "v1", To: "v2", Deadline: time.Now().Add(100 * time.Millisecond)}); err != nil {
+			if err := writePending(e.l, Pending{From: "v1", To: "v2", Deadline: testNow.Add(90 * time.Second)}); err != nil {
 				t.Fatal(err)
 			}
 			m := e.manager(t, "v2", e.priv.Public().(ed25519.PublicKey))
-			m.opts.Now = time.Now
+			timers := &fakeTimers{}
+			m.afterFunc = timers.afterFunc
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if err := m.CheckPending(ctx); err != nil {
 				t.Fatal(err)
 			}
+			if len(timers.all) != 1 || timers.all[0].d != 90*time.Second {
+				t.Fatalf("timers = %+v", timers.all)
+			}
 			if n := e.exits.Load(); n != 0 {
 				t.Fatalf("exit before deadline: %d", n)
 			}
 			if !confirm {
-				waitFor(t, func() bool { return e.exits.Load() == 1 })
+				timers.all[0].f()
+				if n := e.exits.Load(); n != 1 {
+					t.Errorf("exit called %d times", n)
+				}
 				if cur := linkTarget(t, e.l.CurrentLink); cur != "v1" {
 					t.Errorf("current = %q", cur)
 				}
@@ -294,7 +367,10 @@ func TestCheckPendingTimerAndConfirm(t *testing.T) {
 			}
 			m.Confirm()
 			m.Confirm() // idempotent
-			time.Sleep(200 * time.Millisecond)
+			if !timers.all[0].stopped {
+				t.Error("timer not stopped by Confirm")
+			}
+			timers.all[0].f() // a timer that fired anyway does nothing
 			if n := e.exits.Load(); n != 0 {
 				t.Errorf("exit after confirm: %d", n)
 			}

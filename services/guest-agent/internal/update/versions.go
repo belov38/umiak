@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
@@ -101,11 +102,22 @@ func randHex() string {
 	return hex.EncodeToString(b[:])
 }
 
-// GCVersions removes installed versions other than current, previous and
-// keep (the versions of live shims, see ShimVersions; spec 17.4 step 7).
-// Temporary entries are left to CleanTemp.
+// gcMinAge protects a version placed recently (an Apply in its selftest
+// window, an install-package without activation) from GCVersions.
+const gcMinAge = 10 * time.Minute
+
+// GCVersions removes installed versions other than current, previous, the
+// two versions of a pending update, keep (the versions of live shims, see
+// ShimVersions; spec 17.4 step 7) and versions whose directory changed in
+// the last 10 minutes. Temporary entries are left to CleanTemp. In the
+// agent use Manager.GC, which also skips while an update is applied.
 func GCVersions(l paths.Layout, keep []string) error {
 	kept := slices.Clone(keep)
+	if p, ok, err := readPending(l); err != nil {
+		return fmt.Errorf("update: gc: %w", err)
+	} else if ok {
+		kept = append(kept, p.From, p.To)
+	}
 	for _, link := range []string{l.CurrentLink, l.PreviousLink} {
 		v, err := LinkVersion(link)
 		if err != nil {
@@ -126,6 +138,9 @@ func GCVersions(l paths.Layout, keep []string) error {
 	for _, e := range entries {
 		name := e.Name()
 		if !e.IsDir() || strings.HasPrefix(name, ".") || slices.Contains(kept, name) {
+			continue
+		}
+		if fi, err := e.Info(); err != nil || time.Since(fi.ModTime()) < gcMinAge {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(l.VersionsDir, name)); err != nil {

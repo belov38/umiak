@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -239,6 +240,19 @@ func TestUnpackSizeLimit(t *testing.T) {
 	}
 	if err := Unpack(p, filepath.Join(t.TempDir(), "dst")); err == nil {
 		t.Fatal("unpack of an oversized archive succeeded")
+	}
+}
+
+func TestUnpackEntryLimit(t *testing.T) {
+	var many []entry
+	for i := 0; i <= maxUnpackEntries; i++ {
+		many = append(many, entry{hdr: tar.Header{Name: fmt.Sprintf("f%d", i), Typeflag: tar.TypeReg, Mode: 0o644}, body: "x"})
+	}
+	if err := Unpack(tarOf(t, many...), filepath.Join(t.TempDir(), "dst")); detailCode(err) != "invalid_argument" {
+		t.Errorf("unpack of %d entries: %v", len(many), err)
+	}
+	if err := Unpack(tarOf(t, many[:maxUnpackEntries]...), filepath.Join(t.TempDir(), "dst")); err != nil {
+		t.Errorf("unpack of %d entries: %v", maxUnpackEntries, err)
 	}
 }
 

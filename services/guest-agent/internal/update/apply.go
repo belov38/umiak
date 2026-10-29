@@ -73,11 +73,19 @@ type Manager struct {
 	opts     Options
 	exitOnce sync.Once
 
+	// afterFunc schedules the confirmation deadline; tests replace it.
+	afterFunc func(time.Duration, func()) stopper
+
 	mu       sync.Mutex
-	applying bool        // Apply switched versions; the agent is about to exit
-	pending  *Pending    // unconfirmed update of this version
-	timer    *time.Timer // rolls back pending at its deadline
+	applying bool     // Apply switched versions; the agent is about to exit
+	pending  *Pending // unconfirmed update of this version
+	timer    stopper  // rolls back pending at its deadline
 }
+
+// stopper is a cancellable timer.
+type stopper interface{ Stop() bool }
+
+func realAfterFunc(d time.Duration, f func()) stopper { return time.AfterFunc(d, f) }
 
 // New returns a Manager for opts.
 func New(opts Options) (*Manager, error) {
@@ -102,7 +110,7 @@ func New(opts Options) (*Manager, error) {
 	if opts.ExitWaitMax <= 0 {
 		opts.ExitWaitMax = DefaultExitWaitMax
 	}
-	return &Manager{opts: opts}, nil
+	return &Manager{opts: opts, afterFunc: realAfterFunc}, nil
 }
 
 // Apply implements system.Updater: spec 17.4 steps 2-5. The package of
@@ -153,49 +161,57 @@ func (m *Manager) Apply(ctx context.Context, uploadID string, allowBad bool) (*a
 		return nil, errs.Newf(connect.CodeFailedPrecondition, errs.FailedPrecondition, "running version %s is not installed in %s", from, l.VersionsDir)
 	}
 
-	created, err := placeVersion(l, pkgDir, man, m.opts.Keys())
+	placed, err := placeVersion(l, pkgDir, man, m.opts.Keys())
 	if err != nil {
 		return nil, errs.Newf(connect.CodeInternal, errs.Internal, "install version %s: %v", to, err)
 	}
-	dropNew := func() {
-		if created {
-			if err := os.RemoveAll(VersionDir(l, to)); err != nil {
-				slog.Warn("update: cannot remove rejected version", "version", to, "err", err)
-			}
-		}
-	}
 	if err := m.selfTest(ctx, filepath.Join(VersionDir(l, to), BinaryName)); err != nil {
-		dropNew()
+		placed.undo()
 		return nil, errs.Newf(connect.CodeFailedPrecondition, errs.FailedPrecondition, "selftest of version %s failed: %v", to, err)
 	}
 
 	p := Pending{From: from, To: to, Deadline: m.opts.Now().Add(ConfirmWindow).UTC()}
 	if err := writePending(l, p); err != nil {
-		dropNew()
+		placed.undo()
 		return nil, errs.Newf(connect.CodeInternal, errs.Internal, "write pending update: %v", err)
 	}
 	if err := m.switchTo(p); err != nil {
-		if rerr := pointLink(l, l.CurrentLink, from); rerr != nil {
-			slog.Error("update: cannot restore current", "version", from, "err", rerr)
-		}
 		if rerr := removePending(l); rerr != nil {
 			slog.Error("update: cannot remove pending update", "err", rerr)
 		}
+		placed.undo()
 		return nil, errs.Newf(connect.CodeInternal, errs.Internal, "switch to version %s: %v", to, err)
 	}
+	placed.commit()
 	m.applying = true
 	slog.Info("update: switched version, restarting", "from", from, "to", to, "deadline", p.Deadline)
 	go m.exitAfter(ctx)
 	return &agentv1.ApplyUpdateResponse{From: from, To: to}, nil
 }
 
-// switchTo points previous at p.From and current at p.To.
+// switchTo points previous at p.From and current at p.To. On failure both
+// links are restored to what they were.
 func (m *Manager) switchTo(p Pending) error {
 	l := m.opts.Layout
+	oldPrev, err := LinkVersion(l.PreviousLink)
+	if err != nil {
+		return err
+	}
 	if err := pointLink(l, l.PreviousLink, p.From); err != nil {
 		return err
 	}
-	return pointLink(l, l.CurrentLink, p.To)
+	if err := pointLink(l, l.CurrentLink, p.To); err != nil {
+		if rerr := pointLink(l, l.CurrentLink, p.From); rerr != nil {
+			slog.Error("update: cannot restore current", "version", p.From, "err", rerr)
+		}
+		if oldPrev != "" && oldPrev != p.From {
+			if rerr := pointLink(l, l.PreviousLink, oldPrev); rerr != nil {
+				slog.Error("update: cannot restore previous", "version", oldPrev, "err", rerr)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // selfTest runs the configured or the default selftest.
@@ -258,7 +274,14 @@ func (m *Manager) CheckPending(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	if p.To != m.opts.Version {
+	// The process is the target if its version is p.To, or if current
+	// points at p.To (a binary that reports another version must still be
+	// confirmed or rolled back by the deadline).
+	cur, err := LinkVersion(l.CurrentLink)
+	if err != nil {
+		slog.Warn("update: cannot read the current link", "err", err)
+	}
+	if p.To != m.opts.Version && cur != p.To {
 		slog.Warn("update: pending update is not for this version, dropping it", "from", p.From, "to", p.To, "running", m.opts.Version)
 		if err := removePending(l); err != nil {
 			return err
@@ -279,7 +302,7 @@ func (m *Manager) CheckPending(ctx context.Context) error {
 		return nil
 	}
 	m.pending = &p
-	m.timer = time.AfterFunc(remaining, m.deadlineExpired)
+	m.timer = m.afterFunc(remaining, m.deadlineExpired)
 	go func() {
 		<-ctx.Done()
 		m.mu.Lock()
@@ -376,6 +399,18 @@ func (m *Manager) Status() *agentv1.UpdateStatus {
 		return nil
 	}
 	return st
+}
+
+// GC removes old versions (GCVersions); the janitor calls it with the
+// versions of live shims. It waits for a running Apply (which holds the
+// lock through its selftest) and does nothing once Apply switched versions.
+func (m *Manager) GC(keep []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.applying {
+		return nil
+	}
+	return GCVersions(m.opts.Layout, keep)
 }
 
 // updateInProgress is the error of an Apply during an unconfirmed update.

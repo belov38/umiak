@@ -24,8 +24,11 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 )
 
-// maxUnpackBytes caps the total size of the regular files of a package.
-const maxUnpackBytes = 512 << 20
+// Package limits: total size of the regular files and number of entries.
+const (
+	maxUnpackBytes   = 512 << 20
+	maxUnpackEntries = 64
+)
 
 // PackOptions describes a package to build.
 type PackOptions struct {
@@ -187,8 +190,8 @@ func entryName(raw string) (name string, ok bool, err error) {
 
 // Unpack extracts the tar at tarPath into dst (created if needed). Only
 // regular files and directories are accepted, every name must stay inside
-// dst, an entry may appear once, and the regular files may total at most
-// 512 MiB. Format violations are invalid_argument errors; dst may hold a
+// dst, an entry may appear once, there may be at most 64 entries and the
+// regular files may total at most 512 MiB. Format violations are invalid_argument errors; dst may hold a
 // partial tree on error and is the caller's to remove.
 func Unpack(tarPath, dst string) error {
 	f, err := os.Open(tarPath)
@@ -201,6 +204,7 @@ func Unpack(tarPath, dst string) error {
 	}
 	tr := tar.NewReader(bufio.NewReader(f))
 	var total int64
+	entries := 0
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -211,6 +215,9 @@ func Unpack(tarPath, dst string) error {
 		}
 		if hdr.Typeflag == tar.TypeXGlobalHeader {
 			continue
+		}
+		if entries++; entries > maxUnpackEntries {
+			return invalidPackage("package has more than %d entries", maxUnpackEntries)
 		}
 		name, ok, err := entryName(hdr.Name)
 		if err != nil {

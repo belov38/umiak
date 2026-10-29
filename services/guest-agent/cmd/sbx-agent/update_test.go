@@ -152,6 +152,7 @@ func TestSelftestCLI(t *testing.T) {
 	}
 	// The binary runs through the CLI link.
 	d.executable = func() (string, error) { return d.layout.BinLink, nil }
+	d.version = "v1"
 
 	var out, errOut bytes.Buffer
 	if code := runWith(ctx, d, []string{"selftest", "--schema", "1", "--shim-protos", "1"}, &out, &errOut); code != 0 || strings.TrimSpace(out.String()) != "ok" {
@@ -160,5 +161,11 @@ func TestSelftestCLI(t *testing.T) {
 	errOut.Reset()
 	if code := runWith(ctx, d, []string{"selftest", "--schema", "99"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "schema 99") {
 		t.Errorf("exit = %d, stderr = %q", code, errOut.String())
+	}
+	// A binary compiled with another version fails.
+	d.version = "dev"
+	errOut.Reset()
+	if code := runWith(ctx, d, []string{"selftest", "--schema", "1"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), `"dev"`) {
+		t.Errorf("dev binary: exit = %d, stderr = %q", code, errOut.String())
 	}
 }

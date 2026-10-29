@@ -4,26 +4,43 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
 )
 
-func TestKeygenPackVerify(t *testing.T) {
-	dir := t.TempDir()
-	keyDir := filepath.Join(dir, "signing")
-
+// keygenTo runs keygen into dir and returns the key file and public line.
+func keygenTo(t *testing.T, dir string) (keyFile, line string) {
+	t.Helper()
 	var out, errOut bytes.Buffer
-	if code := run([]string{"keygen", "--out", keyDir, "--comment", "poc"}, &out, &errOut); code != 0 {
+	if code := run([]string{"keygen", "--out", dir, "--comment", "poc"}, &out, &errOut); code != 0 {
 		t.Fatalf("keygen exit = %d: %s", code, errOut.String())
 	}
-	line := strings.TrimSpace(out.String())
+	return filepath.Join(dir, "ed25519.key"), strings.TrimSpace(out.String())
+}
+
+func writeTestFile(t *testing.T, p, data string, perm os.FileMode) string {
+	t.Helper()
+	if err := os.WriteFile(p, []byte(data), perm); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestKeygenPackVerify(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake binary is a shell script")
+	}
+	dir := t.TempDir()
+	keyDir := filepath.Join(dir, "signing")
+	keyFile, line := keygenTo(t, keyDir)
+
 	keys, err := update.ParseKeys([]byte(line))
 	if err != nil || len(keys) != 1 || !strings.HasSuffix(line, " poc") {
 		t.Fatalf("public line %q: %v", line, err)
 	}
-	keyFile := filepath.Join(keyDir, "ed25519.key")
 	fi, err := os.Stat(keyFile)
 	if err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("key file: %v %v", fi, err)
@@ -31,53 +48,61 @@ func TestKeygenPackVerify(t *testing.T) {
 	if di, err := os.Stat(keyDir); err != nil || di.Mode().Perm() != 0o700 {
 		t.Errorf("key dir: %v %v", di, err)
 	}
-
-	// keygen never overwrites a key.
+	var out, errOut bytes.Buffer
 	if code := run([]string{"keygen", "--out", keyDir}, &out, &errOut); code == 0 {
 		t.Error("keygen overwrote an existing key")
 	}
 
-	pubFile := filepath.Join(dir, "update-keys.pub")
-	if err := os.WriteFile(pubFile, []byte("# keys\n"+line+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bin := filepath.Join(dir, "sbx-agent")
-	ca := filepath.Join(dir, "ca.pem")
-	for p, data := range map[string]string{bin: "binary", ca: "ca"} {
-		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tarPath := filepath.Join(dir, "sbx-agent-1.0.0-linux-amd64.tar")
-	out.Reset()
-	errOut.Reset()
-	code := run([]string{
-		"pack", "--version", "1.0.0", "--os", "linux", "--arch", "amd64",
-		"--binary", bin, "--tunnel-ca", ca, "--update-keys", pubFile,
-		"--key", keyFile, "--out", tarPath,
-	}, &out, &errOut)
-	if code != 0 {
-		t.Fatalf("pack exit = %d: %s", code, errOut.String())
+	pubFile := writeTestFile(t, filepath.Join(dir, "update-keys.pub"), "# keys\n"+line+"\n", 0o644)
+	bin := writeTestFile(t, filepath.Join(dir, "sbx-agent"), "#!/bin/sh\necho 1.0.0\n", 0o755)
+	ca := writeTestFile(t, filepath.Join(dir, "ca.pem"), "ca", 0o644)
+	tarPath := filepath.Join(dir, "sbx-agent-1.0.0.tar")
+	packArgs := func(version, goos, goarch, keys string, extra ...string) []string {
+		return append([]string{
+			"pack", "--version", version, "--os", goos, "--arch", goarch,
+			"--binary", bin, "--tunnel-ca", ca, "--update-keys", keys,
+			"--key", keyFile, "--out", tarPath,
+		}, extra...)
 	}
 
+	if code := run(packArgs("1.0.0", runtime.GOOS, runtime.GOARCH, pubFile), &out, &errOut); code != 0 {
+		t.Fatalf("pack exit = %d: %s", code, errOut.String())
+	}
 	out.Reset()
 	if code := run([]string{"verify", "--keys", pubFile, tarPath}, &out, &errOut); code != 0 {
 		t.Fatalf("verify exit = %d: %s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "1.0.0 linux/amd64") {
-		t.Errorf("verify output = %q", out.String())
+	if want := "1.0.0 " + runtime.GOOS + "/" + runtime.GOARCH; !strings.Contains(out.String(), want) {
+		t.Errorf("verify output = %q, want %q", out.String(), want)
 	}
 
-	// A foreign key list fails.
-	other := filepath.Join(dir, "other")
-	if code := run([]string{"keygen", "--out", other}, &out, &errOut); code != 0 {
-		t.Fatal("second keygen failed")
+	// The binary must report the package version.
+	errOut.Reset()
+	if code := run(packArgs("1.0.1", runtime.GOOS, runtime.GOARCH, pubFile), &out, &errOut); code != 1 || !strings.Contains(errOut.String(), `reports version "1.0.0"`) {
+		t.Errorf("version mismatch: exit = %d, stderr = %q", code, errOut.String())
 	}
-	otherPub := filepath.Join(dir, "other.pub")
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if err := os.WriteFile(otherPub, []byte(lines[len(lines)-1]+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+	// A binary for another platform needs --skip-version-check.
+	errOut.Reset()
+	if code := run(packArgs("1.0.0", "plan9", "mips", pubFile), &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "--skip-version-check") {
+		t.Errorf("foreign platform: exit = %d, stderr = %q", code, errOut.String())
 	}
+	errOut.Reset()
+	if code := run(packArgs("1.0.0", "plan9", "mips", pubFile, "--skip-version-check"), &out, &errOut); code != 0 || !strings.Contains(errOut.String(), "warning") {
+		t.Errorf("foreign platform with skip: exit = %d, stderr = %q", code, errOut.String())
+	}
+
+	// The signer must be pinned in the packed keys.
+	_, otherLine := keygenTo(t, filepath.Join(dir, "other"))
+	otherPub := writeTestFile(t, filepath.Join(dir, "other.pub"), otherLine+"\n", 0o644)
+	errOut.Reset()
+	if code := run(packArgs("1.0.0", runtime.GOOS, runtime.GOARCH, otherPub), &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "--allow-foreign-signer") {
+		t.Errorf("foreign signer: exit = %d, stderr = %q", code, errOut.String())
+	}
+	if code := run(packArgs("1.0.0", runtime.GOOS, runtime.GOARCH, otherPub, "--allow-foreign-signer"), &out, &errOut); code != 0 {
+		t.Errorf("foreign signer allowed: exit = %d, stderr = %q", code, errOut.String())
+	}
+
+	// That package does not verify against the other key list.
 	errOut.Reset()
 	if code := run([]string{"verify", "--keys", otherPub, tarPath}, &out, &errOut); code == 0 {
 		t.Error("verify with a foreign key succeeded")

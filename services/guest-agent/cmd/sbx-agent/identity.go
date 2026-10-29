@@ -24,7 +24,9 @@ import (
 // deps holds what the CLI subcommands touch, so tests can point them at a
 // temporary tree and fakes.
 type deps struct {
-	layout    paths.Layout
+	layout paths.Layout
+	// version is the compiled agent version.
+	version   string
 	source    ident.Source
 	resetter  ident.Resetter
 	stopAgent func() error
@@ -48,7 +50,8 @@ type deps struct {
 func defaultDeps() deps {
 	l := paths.Default()
 	return deps{
-		layout: l,
+		layout:  l,
+		version: version,
 		source: ident.SysfsSource{
 			Dir:        "/sys/class/dmi/id",
 			BootIDPath: "/proc/sys/kernel/random/boot_id",

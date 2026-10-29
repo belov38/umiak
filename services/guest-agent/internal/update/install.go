@@ -46,6 +46,7 @@ var enabledUnits = []string{"sbx-identity.service", "sbx-agent.service"}
 // running platform, move to versions/<v> and, per opts, activate it, install
 // the units and write the config. An already installed identical version is
 // kept as is; reinstalling the current version leaves previous alone.
+// Activating abandons an unfinished self-update (see abandonPending).
 func Install(l paths.Layout, tarPath string, keys []ed25519.PublicKey, opts InstallOptions) (*Manifest, error) {
 	m, err := stageAndPlace(l, tarPath, keys)
 	if err != nil {
@@ -81,9 +82,11 @@ func stageAndPlace(l paths.Layout, tarPath string, keys []ed25519.PublicKey) (*M
 		return nil, err
 	}
 	defer cleanup()
-	if _, err := placeVersion(l, pkgDir, m, keys); err != nil {
+	p, err := placeVersion(l, pkgDir, m, keys)
+	if err != nil {
 		return nil, err
 	}
+	p.commit()
 	return m, nil
 }
 
@@ -126,49 +129,107 @@ func checkPlatform(m *Manifest) error {
 	return nil
 }
 
+// placement is a version placed by placeVersion. The caller ends it with
+// commit (keep the new build) or undo (restore what was there).
+type placement struct {
+	dir     string // versions/<v>
+	old     string // a replaced build moved aside, or ""
+	created bool   // dir was (re)written by this placement
+}
+
+// commit drops a replaced build.
+func (p *placement) commit() {
+	if p.old == "" {
+		return
+	}
+	if err := os.RemoveAll(p.old); err != nil {
+		slog.Warn("update: cannot remove replaced version", "dir", p.old, "err", err)
+	}
+	p.old = ""
+}
+
+// undo removes a newly placed build and puts a replaced build back.
+func (p *placement) undo() {
+	if !p.created {
+		return
+	}
+	if err := os.RemoveAll(p.dir); err != nil {
+		slog.Warn("update: cannot remove rejected version", "dir", p.dir, "err", err)
+		return
+	}
+	if p.old != "" {
+		if err := os.Rename(p.old, p.dir); err != nil {
+			slog.Error("update: cannot restore replaced version", "dir", p.dir, "err", err)
+		}
+		p.old = ""
+	}
+	p.created = false
+}
+
 // placeVersion moves the verified package in pkgDir to versions/<v>. An
 // existing directory with the same signed manifest that still verifies is
-// kept (created is false); anything else there is replaced.
-func placeVersion(l paths.Layout, pkgDir string, m *Manifest, keys []ed25519.PublicKey) (created bool, err error) {
-	dst := VersionDir(l, m.Version)
+// kept (created is false); a different build there is moved aside until the
+// placement is committed or undone. The directory's mtime is set to now, so
+// GCVersions leaves a freshly placed version alone.
+func placeVersion(l paths.Layout, pkgDir string, m *Manifest, keys []ed25519.PublicKey) (*placement, error) {
+	p := &placement{dir: VersionDir(l, m.Version)}
 	if err := os.MkdirAll(l.VersionsDir, 0o755); err != nil {
-		return false, err
+		return nil, err
 	}
-	var old string
-	if _, err := os.Lstat(dst); err == nil {
-		if sameVersion(pkgDir, dst, keys) {
-			return false, nil
+	if _, err := os.Lstat(p.dir); err == nil {
+		if sameVersion(pkgDir, p.dir, keys) {
+			now := time.Now()
+			if err := os.Chtimes(p.dir, now, now); err != nil {
+				return nil, err
+			}
+			return p, nil
 		}
-		old = filepath.Join(l.VersionsDir, incomingPrefix+"old-"+randHex())
-		if err := os.Rename(dst, old); err != nil {
-			return false, err
+		p.old = filepath.Join(l.VersionsDir, incomingPrefix+"old-"+randHex())
+		if err := os.Rename(p.dir, p.old); err != nil {
+			return nil, err
 		}
 		slog.Warn("update: replacing a different build of an installed version", "version", m.Version)
 	}
-	if err := os.Chmod(pkgDir, 0o755); err != nil {
-		return false, err
+	restoreOld := func() {
+		if p.old != "" {
+			if err := os.Rename(p.old, p.dir); err != nil {
+				slog.Error("update: cannot restore replaced version", "dir", p.dir, "err", err)
+			}
+		}
 	}
-	if err := os.Rename(pkgDir, dst); err != nil {
+	if err := os.Chmod(pkgDir, 0o755); err != nil {
+		restoreOld()
+		return nil, err
+	}
+	if err := os.Chmod(filepath.Join(pkgDir, BinaryName), 0o755); err != nil {
+		restoreOld()
+		return nil, err
+	}
+	if err := os.Rename(pkgDir, p.dir); err != nil {
 		// StagingDir and VersionsDir may be on different filesystems.
 		tmp := filepath.Join(l.VersionsDir, incomingPrefix+randHex())
 		if cerr := copyTree(pkgDir, tmp); cerr != nil {
 			_ = os.RemoveAll(tmp)
-			return false, errors.Join(err, cerr)
+			restoreOld()
+			return nil, errors.Join(err, cerr)
 		}
-		if err := os.Rename(tmp, dst); err != nil {
+		if err := os.Rename(tmp, p.dir); err != nil {
 			_ = os.RemoveAll(tmp)
-			return false, err
+			restoreOld()
+			return nil, err
 		}
+	}
+	p.created = true
+	now := time.Now()
+	if err := os.Chtimes(p.dir, now, now); err != nil {
+		p.undo()
+		return nil, err
 	}
 	if err := syncDir(l.VersionsDir); err != nil {
-		return false, err
+		p.undo()
+		return nil, err
 	}
-	if old != "" {
-		if err := os.RemoveAll(old); err != nil {
-			slog.Warn("update: cannot remove replaced version", "dir", old, "err", err)
-		}
-	}
-	return true, nil
+	return p, nil
 }
 
 // sameVersion reports whether dst holds the same signed manifest as pkgDir
@@ -233,27 +294,41 @@ func copyFile(src, dst string, perm fs.FileMode) (err error) {
 	return out.Sync()
 }
 
-// activate makes v the current version: previous becomes the old current
-// (unless v is current already) and the CLI link points at current.
+// activate makes v the current version (see makeCurrent) and points the
+// CLI link at current. An unfinished self-update is abandoned: the operator
+// chose the version.
 func activate(l paths.Layout, v string) error {
-	cur, err := LinkVersion(l.CurrentLink)
-	if err != nil {
+	if _, err := makeCurrent(l, v); err != nil {
 		return err
 	}
-	if cur != v {
-		if cur != "" {
-			if err := pointLink(l, l.PreviousLink, cur); err != nil {
-				return fmt.Errorf("update: switch previous: %w", err)
-			}
-		}
-		if err := pointLink(l, l.CurrentLink, v); err != nil {
-			return fmt.Errorf("update: switch current: %w", err)
-		}
+	if err := abandonPending(l, "abandoned by install-package "+v); err != nil {
+		return err
 	}
 	if err := pointBinLink(l); err != nil {
 		return fmt.Errorf("update: link %s: %w", l.BinLink, err)
 	}
 	return nil
+}
+
+// makeCurrent points current at v and previous at the old current, unless v
+// is current already. It returns the old current ("" if none).
+func makeCurrent(l paths.Layout, v string) (string, error) {
+	cur, err := LinkVersion(l.CurrentLink)
+	if err != nil {
+		return "", err
+	}
+	if cur == v {
+		return cur, nil
+	}
+	if cur != "" {
+		if err := pointLink(l, l.PreviousLink, cur); err != nil {
+			return cur, fmt.Errorf("update: switch previous: %w", err)
+		}
+	}
+	if err := pointLink(l, l.CurrentLink, v); err != nil {
+		return cur, fmt.Errorf("update: switch current: %w", err)
+	}
+	return cur, nil
 }
 
 // installUnits writes every file at the root of units into SystemdUnitDir,

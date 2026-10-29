@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
@@ -23,14 +24,26 @@ import (
 const SelfTestTimeout = 10 * time.Second
 
 // SelfTest is `sbx-agent selftest`: the version in versionDir (the
-// directory of the running binary) checks that it can take over this
-// machine. The config must parse, the trust files of the version must be
+// directory of the running binary, compiled as binVersion) checks that it
+// can take over this machine. binVersion must equal the directory name and
+// the manifest version: a binary that reports another version would not
+// recognise itself as the target of the pending update. The config must
+// parse, the trust files of the version must be
 // present, schema (the state.db schema; 0 for none) must not be newer than
 // store.SchemaVersion, and every shim protocol in shimProtos must be in
 // [shimproto.MinVersion, shimproto.Version]. state.db itself is not opened:
 // the running agent holds its lock.
-func SelfTest(l paths.Layout, versionDir string, schema int, shimProtos []int) error {
+func SelfTest(l paths.Layout, versionDir, binVersion string, schema int, shimProtos []int) error {
 	var errs []error
+	if dir := filepath.Base(versionDir); binVersion != dir {
+		errs = append(errs, fmt.Errorf("binary version %q does not match its version directory %q", binVersion, dir))
+	}
+	var m Manifest
+	if err := fsutil.ReadJSON(filepath.Join(versionDir, ManifestName), &m); err != nil {
+		errs = append(errs, fmt.Errorf("manifest: %w", err))
+	} else if m.Version != binVersion {
+		errs = append(errs, fmt.Errorf("binary version %q does not match the manifest version %q", binVersion, m.Version))
+	}
 	if _, err := config.Load(l.ConfigFile); err != nil {
 		errs = append(errs, err)
 	}

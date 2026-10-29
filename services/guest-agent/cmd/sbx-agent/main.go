@@ -50,7 +50,7 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 	}
 	switch args[0] {
 	case "version":
-		_, _ = fmt.Fprintln(stdout, version)
+		_, _ = fmt.Fprintln(stdout, d.version)
 		return 0
 	case "identity":
 		if len(args) < 2 || args[1] != "apply" {
