@@ -195,7 +195,20 @@ importers:
         version: 4.6.7
 
   packages/core:
+    dependencies:
+      '@sbx/config':
+        specifier: workspace:*
+        version: link:../config
+      '@sbx/db':
+        specifier: workspace:*
+        version: link:../db
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
     devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
       fast-check:
         specifier: 4.10.2
         version: 4.10.2

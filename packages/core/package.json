@@ -3,7 +3,7 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Control plane domain: errors, ids, slugs, secrets crypto, state machines",
+	"description": "Control plane domain: errors, ids, slugs, secrets crypto, state machines, capacity",
 	"exports": {
 		".": "./src/index.ts"
 	},
@@ -11,7 +11,13 @@
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit -p ."
 	},
+	"dependencies": {
+		"@sbx/config": "workspace:*",
+		"@sbx/db": "workspace:*",
+		"pg": "8.23.1"
+	},
 	"devDependencies": {
+		"@types/pg": "8.23.1",
 		"fast-check": "4.10.2"
 	}
 }
