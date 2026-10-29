@@ -51,7 +51,8 @@ const (
 )
 
 // selfOwnerPoll is the poll interval while the registry names this instance
-// as the owner but the session is not registered locally yet.
+// as the owner but the session is not registered locally yet, or names an
+// owner that answered 503 (no session).
 const selfOwnerPoll = 20 * time.Millisecond
 
 // errDialTimeout is the cancel cause of a dial that used up DialTimeout.
@@ -181,7 +182,12 @@ func (d *Dialer) dial(ctx context.Context, id string, port uint16, drain time.Du
 		bctx, cancel := context.WithTimeoutCause(ctx, d.cfg.DialTimeout, errDialTimeout)
 		c, self, err := d.resolve(bctx, id, port, opts)
 		cancel()
-		if c != nil || err != nil {
+		// The owner answered 503: it holds no session for the machine any
+		// more, the agent is reconnecting. Wait for it like for a machine
+		// without an owner, polling, because the registry may still name
+		// that owner for a moment.
+		poll := ownerWithoutSession(err)
+		if !poll && (c != nil || err != nil) {
 			return c, err
 		}
 
@@ -190,7 +196,7 @@ func (d *Dialer) dial(ctx context.Context, id string, port uint16, drain time.Du
 		if waitUntil.IsZero() {
 			waitUntil = time.Now().Add(d.cfg.AgentWait)
 		}
-		if err := d.waitAgent(ctx, id, self, waitUntil); err != nil {
+		if err := d.waitAgent(ctx, id, self || poll, waitUntil); err != nil {
 			return nil, err
 		}
 	}
@@ -215,15 +221,23 @@ func (d *Dialer) resolve(ctx context.Context, id string, port uint16, opts gatew
 	return nil, ok, nil
 }
 
+// ownerWithoutSession reports a peer CONNECT refused with 503: the owner
+// instance has no serving session for the machine.
+func ownerWithoutSession(err error) bool {
+	var de *transport.DialError
+	return errors.As(err, &de) && de.Status == http.StatusServiceUnavailable
+}
+
 // waitAgent waits until waitUntil for the machine to get an owner, or, when
-// the owner is already this instance, for a short poll interval. It returns
+// poll is set (the owner is already this instance, or the registry's owner
+// had no session), for a short poll interval. It returns
 // errAgentUnavailable when the time is up without an owner.
-func (d *Dialer) waitAgent(ctx context.Context, id string, self bool, waitUntil time.Time) error {
+func (d *Dialer) waitAgent(ctx context.Context, id string, poll bool, waitUntil time.Time) error {
 	left := time.Until(waitUntil)
 	if left <= 0 {
 		return errAgentUnavailable
 	}
-	if self {
+	if poll {
 		t := time.NewTimer(min(selfOwnerPoll, left))
 		defer t.Stop()
 		select {

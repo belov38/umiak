@@ -304,6 +304,67 @@ func TestDialMovedToLiveInstance(t *testing.T) {
 	echoRoundTrip(t, c, "followed")
 }
 
+// An owner that answers 503 has no session for the machine: the agent is
+// reconnecting (spec 6.4). The dial waits for the new owner instead of
+// failing at once.
+func TestDialOwnerWithoutSessionWaits(t *testing.T) {
+	env := testenv.New(t, testenv.Options{})
+	a := env.StartInstance(nil)
+	m := env.NewMachine()
+	m.ServeTCP(7000, testenv.Echo)
+	b := env.StartInstance(nil)
+
+	var hits atomic.Int64
+	fake := fakePeer(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set(wire.HeaderErrorCode, wire.CodeAgentUnavailable)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	staleOwner(t, env, a, b, m.ID, fake.URL)
+
+	c := mustDial(t, b, m.ID, 7000)
+	if c.Via != upstream.ViaPeer || c.OwnerInstance != a.Name {
+		t.Fatalf("Via, OwnerInstance = %q, %q; want peer, %s", c.Via, c.OwnerInstance, a.Name)
+	}
+	echoRoundTrip(t, c, "after the owner's 503")
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("stale owner got %d CONNECTs, want 1", n)
+	}
+}
+
+// An owner that keeps answering 503 ends in agent_unavailable after
+// AgentWait, polling the registry rather than spinning.
+func TestDialOwnerWithoutSessionTimeout(t *testing.T) {
+	const wait = 500 * time.Millisecond
+	env := testenv.New(t, testenv.Options{})
+	a := env.StartInstance(nil)
+	m := env.NewMachine()
+	b := env.StartInstance(func(c *config.Config) { c.Timeouts.AgentWait = wait })
+
+	var hits atomic.Int64
+	fake := fakePeer(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	// The registry keeps naming the fake: every lookup gets its URL.
+	if _, err := env.Pool.Exec(context.Background(),
+		`UPDATE tunnel.gateway_instances SET internal_url = $2 WHERE id = $1`, a.Name, fake.URL); err != nil {
+		t.Fatal(err)
+	}
+	b.Owners().Invalidate(m.ID)
+
+	start := time.Now()
+	_, err := dial(t, b, m.ID, 7000)
+	el := time.Since(start)
+	wantError(t, err, http.StatusServiceUnavailable, "agent_unavailable", "agent_unavailable")
+	if el < wait*9/10 || el > wait+2*time.Second {
+		t.Fatalf("agent_unavailable after %s, want about %s", el, wait)
+	}
+	if n := hits.Load(); n < 2 || n > 100 {
+		t.Fatalf("owner got %d CONNECTs in %s, want a bounded poll", n, el)
+	}
+}
+
 // DialTimeout is one budget for the whole dial: a 421 that arrives late
 // leaves the retry only the rest of it.
 func TestDialSingleBudget(t *testing.T) {
