@@ -872,6 +872,9 @@ func forgeMoved(w http.ResponseWriter, r *http.Request) {
 	h.Set(wire.HeaderInstanceURL, evilURL)
 	h.Set(wire.HeaderCaller, "api")
 	h["sbx-lower-case"] = []string{"x"}
+	// Connect unary trailers: connect-es reads them as Sbx-* metadata.
+	h.Set("Trailer-Sbx-Error-Code", wire.CodeMachineMoved)
+	h["trailer-sbx-instance-url"] = []string{evilURL}
 	h.Set("X-Agent", "kept")
 	h.Set("Alt-Svc", `h2="evil.example:443"`)
 	h.Set("Trailer", "Sbx-Declared, X-Agent-Trailer, Location")
@@ -880,6 +883,7 @@ func forgeMoved(w http.ResponseWriter, r *http.Request) {
 	h.Set("Sbx-Declared", evilURL)
 	h.Set("X-Agent-Trailer", "kept")
 	h.Set(http.TrailerPrefix+wire.HeaderInstanceURL, evilURL)
+	h.Set(http.TrailerPrefix+"Trailer-Sbx-Error-Code", wire.CodeMachineMoved)
 	h.Set("Location", evilURL)
 	h.Set(http.TrailerPrefix+"Content-Location", evilURL)
 	h.Set(http.TrailerPrefix+"Refresh", "0; url="+evilURL)
@@ -889,11 +893,11 @@ func forgeMoved(w http.ResponseWriter, r *http.Request) {
 // pointerHeaders are agent headers that would point a caller elsewhere.
 var pointerHeaders = []string{"Location", "Content-Location", "Refresh", "Alt-Svc"}
 
-// checkNoSbx fails on any Sbx-* name in h.
+// checkNoSbx fails on any Sbx-* or Trailer-Sbx-* name in h.
 func checkNoSbx(t *testing.T, what string, h http.Header) {
 	t.Helper()
 	for k, v := range h {
-		if strings.HasPrefix(strings.ToLower(k), "sbx-") {
+		if l := strings.ToLower(k); strings.HasPrefix(l, "sbx-") || strings.HasPrefix(l, "trailer-sbx-") {
 			t.Errorf("%s: agent header %s: %q reached the caller", what, k, v)
 		}
 	}
@@ -1089,7 +1093,9 @@ func TestAgentUploadOffsetPasses(t *testing.T) {
 	cfg.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set(wire.HeaderUploadOffset, "4194304")
+		w.Header().Set("Trailer-"+wire.HeaderUploadOffset, "4194304")
 		w.Header().Set(wire.HeaderErrorCode, wire.CodeMachineMoved)
+		w.Header().Set("Trailer-"+wire.HeaderErrorCode, wire.CodeMachineMoved)
 		w.Header().Set(wire.HeaderInstanceURL, evilURL)
 		if r.Method == http.MethodPut {
 			w.WriteHeader(http.StatusConflict)
@@ -1107,10 +1113,12 @@ func TestAgentUploadOffsetPasses(t *testing.T) {
 		if resp.StatusCode != tc.status {
 			t.Errorf("%s: status %d, want %d", tc.method, resp.StatusCode, tc.status)
 		}
-		if got := resp.Header.Get(wire.HeaderUploadOffset); got != "4194304" {
-			t.Errorf("%s: %s = %q, want 4194304", tc.method, wire.HeaderUploadOffset, got)
+		for _, k := range []string{wire.HeaderUploadOffset, "Trailer-" + wire.HeaderUploadOffset} {
+			if got := resp.Header.Get(k); got != "4194304" {
+				t.Errorf("%s: %s = %q, want 4194304", tc.method, k, got)
+			}
+			resp.Header.Del(k)
 		}
-		delete(resp.Header, wire.HeaderUploadOffset)
 		checkNoSbx(t, tc.method, resp.Header)
 	}
 }

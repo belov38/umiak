@@ -70,11 +70,20 @@ func isRedirectHeader(k string) bool {
 // routing signals.
 var agentSbxHeaders = map[string]bool{wire.HeaderUploadOffset: true}
 
+// connectTrailerPrefix prefixes Connect unary trailers sent as headers;
+// Connect clients merge them, without the prefix, into the call metadata.
+const connectTrailerPrefix = "trailer-"
+
 // blockedAgentHeader reports whether an agent response header or trailer is
-// never passed to callers: Sbx-* except agentSbxHeaders, and redirect headers.
+// never passed to callers: Sbx-* and Trailer-Sbx-* except agentSbxHeaders
+// (after the Trailer- prefix), and redirect headers.
 func blockedAgentHeader(k string) bool {
-	if isSbxHeader(k) {
-		return !agentSbxHeaders[textproto.CanonicalMIMEHeaderKey(k)]
+	name := k
+	if len(name) > len(connectTrailerPrefix) && strings.EqualFold(name[:len(connectTrailerPrefix)], connectTrailerPrefix) {
+		name = name[len(connectTrailerPrefix):]
+	}
+	if isSbxHeader(name) {
+		return !agentSbxHeaders[textproto.CanonicalMIMEHeaderKey(name)]
 	}
 	return isRedirectHeader(k)
 }
