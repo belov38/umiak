@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -160,5 +161,76 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 	}
 	if _, err := processClientFor(c, gw, id).SetLabel(ctx, connect.NewRequest(&testingv1.SetLabelRequest{CommandId: "c1"})); err != nil {
 		t.Fatalf("call after the oversized answers: %v", err)
+	}
+}
+
+// A trailer the agent declares but never sends is not emitted: an empty
+// declared trailer would keep the gateway's HTTP/2 server from ending the
+// stream, and the call would hang until the caller's deadline.
+func TestDeclaredTrailerNeverSent(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	declareOnly := func(ct string, body []byte, send bool) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", ct)
+			w.Header().Set("Trailer", "X-Never, X-Sent")
+			_, _ = w.Write(body)
+			if send {
+				w.Header().Set("X-Sent", "yes")
+			}
+		}
+	}
+	cfg := agentConfig(e, id, bs, defaultIdentity())
+	cfg.Handler = newStubAgent().handlerWith(func(mux *http.ServeMux) {
+		for _, send := range []bool{false, true} {
+			sfx := map[bool]string{false: "Absent", true: "Sent"}[send]
+			mux.HandleFunc("/files/declared"+sfx, declareOnly("application/octet-stream", []byte("body"), send))
+			mux.HandleFunc("/sbx.testing.v1.Forge/Declared"+sfx, declareOnly("application/json", []byte(`{}`), send))
+			mux.HandleFunc("/sbx.testing.v1.Forge/DeclaredStream"+sfx, declareOnly("application/connect+json", []byte{2, 0, 0, 0, 2, '{', '}'}, send))
+		}
+	})
+	e.startAgent(cfg).waitConnected()
+	waitMachine(t, gw.testGW, id)
+	c := peerClient(t, apiToken1)
+
+	for _, tc := range []struct {
+		path, ct string
+		sent     bool
+	}{
+		{"/files/declaredAbsent", "", false},
+		{"/rpc/sbx.testing.v1.Forge/DeclaredAbsent", "application/json", false},
+		{"/rpc/sbx.testing.v1.Forge/DeclaredStreamAbsent", "application/connect+json", false},
+		{"/files/declaredSent", "", true},
+		{"/rpc/sbx.testing.v1.Forge/DeclaredSent", "application/json", true},
+		{"/rpc/sbx.testing.v1.Forge/DeclaredStreamSent", "application/connect+json", true},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+tc.path, strings.NewReader(`{}`))
+		if tc.ct != "" {
+			req.Header.Set("Content-Type", tc.ct)
+		}
+		req.Header.Set("Te", "trailers")
+		start := time.Now()
+		resp, err := c.Do(req)
+		if err != nil {
+			cancel()
+			t.Fatalf("%s: %v", tc.path, err)
+		}
+		_, err = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		cancel()
+		if d := time.Since(start); err != nil || d > 2*time.Second {
+			t.Errorf("%s: status %d, body ended after %s with %v; want a prompt end", tc.path, resp.StatusCode, d, err)
+			continue
+		}
+		want := ""
+		if tc.sent {
+			want = "yes"
+		}
+		if resp.StatusCode != http.StatusOK || resp.Trailer.Get("X-Sent") != want || resp.Trailer.Get("X-Never") != "" {
+			t.Errorf("%s: status %d, trailers %v; want 200 with X-Sent %q only", tc.path, resp.StatusCode, resp.Trailer, want)
+		}
 	}
 }

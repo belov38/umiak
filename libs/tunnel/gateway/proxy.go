@@ -263,7 +263,11 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		panic(http.ErrAbortHandler)
 	}
 	for k, vv := range resp.Trailer {
-		if blockedAgentHeader(k) {
+		// Go's client keeps a declared trailer the agent never sent as a nil
+		// value. Set as is, the HTTP/2 server counts it as a trailer to send;
+		// when no trailer has a value the block is empty, never written, and
+		// the stream never ends.
+		if len(vv) == 0 || blockedAgentHeader(k) {
 			continue
 		}
 		if declared[k] {
