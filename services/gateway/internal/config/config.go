@@ -78,6 +78,10 @@ type Config struct {
 	ProxyProtocolCIDRs []netip.Prefix
 	TrustedProxyCIDRs  []netip.Prefix
 
+	// TLSMaxHandshakesPerIP caps the TLS handshakes in flight per client
+	// IP on the TLS listener; RateLimit.Exempt IPs skip it.
+	TLSMaxHandshakesPerIP int
+
 	// API.
 	APIURL   string
 	APIToken string
@@ -184,6 +188,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	}
 	c.ProxyProtocolCIDRs = l.cidrs("PROXY_PROTOCOL_CIDRS")
 	c.TrustedProxyCIDRs = l.cidrs("TRUSTED_PROXY_CIDRS")
+	c.TLSMaxHandshakesPerIP = l.integer("TLS_MAX_HANDSHAKES_PER_IP", 64)
 
 	c.APIURL = l.str("API_URL", "")
 	c.APIToken = l.fileText("API_TOKEN_FILE", false)

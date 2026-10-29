@@ -15,6 +15,7 @@ import (
 	proxyproto "github.com/pires/go-proxyproto"
 
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
 )
 
 const (
@@ -22,6 +23,12 @@ const (
 	defaultHandshakeTimeout = 10 * time.Second
 	// defaultMaxHandshakes caps the handshakes in flight.
 	defaultMaxHandshakes = 4096
+	// defaultMaxHandshakesPerIP caps the handshakes in flight of one
+	// client IP (IPv4 /32, IPv6 /64).
+	defaultMaxHandshakesPerIP = 64
+	// defaultMaxExemptHandshakes caps the handshakes in flight of the
+	// exempt client IPs (node SNAT).
+	defaultMaxExemptHandshakes = 4096
 	// Accept retry backoff, like net/http.
 	acceptBackoffMin = 5 * time.Millisecond
 	acceptBackoffMax = time.Second
@@ -48,9 +55,23 @@ type DispatchConfig struct {
 	Sbx, Tunnel *CertSource
 	// HandshakeTimeout bounds each TLS handshake; 0 means 10 s.
 	HandshakeTimeout time.Duration
-	// MaxHandshakes caps the handshakes in flight; a conn over the cap is
-	// closed at once. 0 means 4096.
+	// MaxHandshakes caps the handshakes in flight of the non-exempt
+	// clients, a last resort behind MaxHandshakesPerIP; a conn over the
+	// cap is closed at once. 0 means 4096.
 	MaxHandshakes int
+	// MaxHandshakesPerIP caps the handshakes in flight of one client IP
+	// (ratelimit.Key: IPv4 /32, IPv6 /64), from the accept to the end of
+	// the TLS handshake, so the time before the PROXY header and the
+	// ClientHello counts. A conn over the cap is closed at once and counted
+	// as sbx_gateway_ratelimited_total{limit="handshakes"}. 0 means 64.
+	MaxHandshakesPerIP int
+	// HandshakeExempt are the client IPs (node SNAT) that skip
+	// MaxHandshakesPerIP and MaxHandshakes; they use MaxExemptHandshakes
+	// instead, so non-exempt clients cannot starve the agent tunnels.
+	HandshakeExempt []netip.Prefix
+	// MaxExemptHandshakes caps the handshakes in flight of the exempt
+	// clients. 0 means 4096.
+	MaxExemptHandshakes int
 	// ConnLimit counts one open sbx conn of the client IP; ok false refuses
 	// it. It runs when the ClientHello names an sbx host; release is called
 	// once when the conn closes. nil means no limit. Tunnel conns are never
@@ -74,7 +95,11 @@ type Dispatcher struct {
 	rejectTLS *tls.Config
 
 	sbx, tunnel *connListener
-	handshakes  chan struct{} // semaphore of the handshakes in flight
+	// Semaphores of the handshakes in flight: general (non-exempt
+	// clients) and exempt, and the per-IP counts of non-exempt clients.
+	handshakes       chan struct{}
+	exemptHandshakes chan struct{}
+	perIP            *ipSlots
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -91,6 +116,13 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	if cfg.MaxHandshakes <= 0 {
 		cfg.MaxHandshakes = defaultMaxHandshakes
 	}
+	if cfg.MaxHandshakesPerIP <= 0 {
+		cfg.MaxHandshakesPerIP = defaultMaxHandshakesPerIP
+	}
+	if cfg.MaxExemptHandshakes <= 0 {
+		cfg.MaxExemptHandshakes = defaultMaxExemptHandshakes
+	}
+	cfg.HandshakeExempt = append([]netip.Prefix(nil), cfg.HandshakeExempt...)
 	cfg.SbxDomain = strings.ToLower(strings.TrimSuffix(cfg.SbxDomain, "."))
 	cfg.TunnelHost = strings.ToLower(strings.TrimSuffix(cfg.TunnelHost, "."))
 	log := cfg.Logger
@@ -100,10 +132,12 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
 		ln: ln, cfg: cfg, log: log,
-		sbx:        newConnListener(ln.Addr()),
-		tunnel:     newConnListener(ln.Addr()),
-		handshakes: make(chan struct{}, cfg.MaxHandshakes),
-		ctx:        ctx, cancel: cancel,
+		sbx:              newConnListener(ln.Addr()),
+		tunnel:           newConnListener(ln.Addr()),
+		handshakes:       make(chan struct{}, cfg.MaxHandshakes),
+		exemptHandshakes: make(chan struct{}, cfg.MaxExemptHandshakes),
+		perIP:            newIPSlots(cfg.MaxHandshakesPerIP),
+		ctx:              ctx, cancel: cancel,
 	}
 	certOf := func(cs *CertSource) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		return func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return cs.Get(), nil }
@@ -209,29 +243,197 @@ func (d *Dispatcher) Serve(ctx context.Context) error {
 			}
 		}
 		backoff = 0
-		select {
-		case d.handshakes <- struct{}{}:
-		default:
-			// Too many handshakes in flight: shed the conn at once.
+		s, ok := d.admit(c)
+		if !ok {
+			// Over a handshake cap: shed the conn at once.
 			_ = c.Close()
-			if d.cfg.Metrics != nil {
-				d.cfg.Metrics.TLSHandshakeErrors.WithLabelValues(kindUnknown).Inc()
-			}
 			continue
 		}
-		d.wg.Go(func() { d.handle(c) }) //nolint:contextcheck // handshakes run on the dispatcher context, ended by Close
+		d.wg.Go(func() { d.handle(c, s) }) //nolint:contextcheck // handshakes run on the dispatcher context, ended by Close
 	}
 }
 
-// handle runs the handshake of one conn off the accept loop.
-func (d *Dispatcher) handle(raw net.Conn) {
+// admit takes the handshake slots of a new conn in the accept loop, without
+// I/O. The client IP of a conn from a trusted PROXY source is known only
+// once the header is read, so such a conn gets a general slot (or, with the
+// general budget full, an exempt one) and handle settles its slots after the
+// header. Any other conn's client IP is its transport peer: the go-proxyproto
+// conn is unwrapped with Raw, since its RemoteAddr would wait for the header.
+func (d *Dispatcher) admit(c net.Conn) (*slots, bool) {
+	transport := c
+	if pc, ok := c.(*proxyproto.Conn); ok {
+		transport = pc.Raw()
+		if pc.ProxyHeaderPolicy == proxyproto.USE || pc.ProxyHeaderPolicy == proxyproto.REQUIRE {
+			s := &slots{d: d, viaProxy: true}
+			switch {
+			case tryAcquire(d.handshakes):
+				s.general = true
+			case tryAcquire(d.exemptHandshakes):
+				s.exempt = true
+			default:
+				d.shedGeneral()
+				return nil, false
+			}
+			return s, true
+		}
+	}
+	s := &slots{d: d}
+	if !s.forClient(addrIP(transport.RemoteAddr())) {
+		return nil, false
+	}
+	return s, true
+}
+
+// shedGeneral counts a conn shed because no general (or exempt) slot was
+// free.
+func (d *Dispatcher) shedGeneral() {
+	if d.cfg.Metrics != nil {
+		d.cfg.Metrics.TLSHandshakeErrors.WithLabelValues(kindUnknown).Inc()
+	}
+}
+
+func (d *Dispatcher) exempt(ip netip.Addr) bool {
+	return ip.IsValid() && inPrefixes(ip.Unmap(), d.cfg.HandshakeExempt)
+}
+
+// slots are the handshake slots one conn holds. Only the goroutine that owns
+// the conn (the accept loop, then handle) touches them; release frees each
+// slot exactly once.
+type slots struct {
+	d *Dispatcher
+	// viaProxy: the conn comes from a trusted PROXY source and its client
+	// IP is not known yet.
+	viaProxy        bool
+	general, exempt bool
+	ipKey           netip.Prefix
+	hasIP           bool
+}
+
+// forClient moves s to the slots of a client IP: the exempt budget for an
+// exempt IP, else a per-IP slot and a general slot. It reuses a held slot
+// of the right budget and releases the other. On false s holds nothing and
+// the refusal is counted.
+func (s *slots) forClient(ip netip.Addr) bool {
+	d := s.d
+	if d.exempt(ip) {
+		if !s.exempt {
+			if !tryAcquire(d.exemptHandshakes) {
+				s.release()
+				d.shedGeneral()
+				return false
+			}
+			s.exempt = true
+		}
+		if s.general {
+			s.general = false
+			<-d.handshakes
+		}
+		return true
+	}
+	k := ratelimit.Key(ip)
+	if !d.perIP.acquire(k) {
+		s.release()
+		if d.cfg.Metrics != nil {
+			d.cfg.Metrics.RateLimited.WithLabelValues(ratelimit.LimitHandshakes).Inc()
+		}
+		return false
+	}
+	s.ipKey, s.hasIP = k, true
+	if !s.general {
+		if !tryAcquire(d.handshakes) {
+			s.release()
+			d.shedGeneral()
+			return false
+		}
+		s.general = true
+	}
+	if s.exempt {
+		s.exempt = false
+		<-d.exemptHandshakes
+	}
+	return true
+}
+
+// release frees every slot s holds; later calls do nothing.
+func (s *slots) release() {
+	d := s.d
+	if s.general {
+		s.general = false
+		<-d.handshakes
+	}
+	if s.exempt {
+		s.exempt = false
+		<-d.exemptHandshakes
+	}
+	if s.hasIP {
+		s.hasIP = false
+		d.perIP.release(s.ipKey)
+	}
+}
+
+func tryAcquire(sem chan struct{}) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// ipSlots counts the handshakes in flight per client IP key.
+type ipSlots struct {
+	max int
+	mu  sync.Mutex
+	m   map[netip.Prefix]int
+}
+
+func newIPSlots(maxPerKey int) *ipSlots {
+	return &ipSlots{max: maxPerKey, m: map[netip.Prefix]int{}}
+}
+
+func (s *ipSlots) acquire(k netip.Prefix) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m[k] >= s.max {
+		return false
+	}
+	s.m[k]++
+	return true
+}
+
+func (s *ipSlots) release(k netip.Prefix) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m[k] <= 1 {
+		delete(s.m, k)
+		return
+	}
+	s.m[k]--
+}
+
+func (s *ipSlots) count(ip netip.Addr) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.m[ratelimit.Key(ip)]
+}
+
+// handle runs the handshake of one conn off the accept loop. s are the
+// slots admit took; they are released when the handshake ends, whatever the
+// outcome.
+func (d *Dispatcher) handle(raw net.Conn, s *slots) {
+	defer s.release()
+	ctx, cancel := context.WithTimeout(d.ctx, d.cfg.HandshakeTimeout)
+	defer cancel()
+	if s.viaProxy && !d.settleProxy(ctx, raw, s) {
+		_ = raw.Close()
+		return
+	}
 	ec := &edgeConn{Conn: raw}
 	ec.kind.Store(kindUnknown)
 	tc := tls.Server(ec, d.base)
-	ctx, cancel := context.WithTimeout(d.ctx, d.cfg.HandshakeTimeout)
 	err := tc.HandshakeContext(ctx)
 	cancel()
-	<-d.handshakes
+	s.release()
 	kind, _ := ec.kind.Load().(string)
 	if err != nil {
 		_ = ec.Close()
@@ -257,6 +459,23 @@ func (d *Dispatcher) handle(raw net.Conn) {
 	default:
 		_ = tc.Close()
 	}
+}
+
+// settleProxy reads the PROXY header of a conn from a trusted source
+// (bounded by ctx and the header timeout of the listener) and moves s to the
+// slots of the client IP it names; false means the conn must be closed.
+// Without a header (or with a refused one) the client IP is the transport
+// peer; a refused header then fails the handshake on the first read.
+func (d *Dispatcher) settleProxy(ctx context.Context, c net.Conn, s *slots) bool {
+	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	ip := addrIP(c.RemoteAddr()) // reads the header
+	if !stop() {
+		// The handshake timeout or Close ended the wait.
+		d.shedGeneral()
+		return false
+	}
+	s.viaProxy = false
+	return s.forClient(ip)
 }
 
 // Close stops accepting, closes both destination listeners and aborts the

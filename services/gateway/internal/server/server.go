@@ -522,9 +522,12 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 		Sbx:              sbx,
 		Tunnel:           tun,
 		HandshakeTimeout: i.cfg.Timeouts.TLSHandshake,
-		ConnLimit:        i.limits.AcquireConn,
-		Metrics:          i.metrics,
-		Logger:           i.log,
+		// Node SNAT (spec 11) has its own handshake budget.
+		MaxHandshakesPerIP: i.cfg.TLSMaxHandshakesPerIP,
+		HandshakeExempt:    i.cfg.RateLimit.Exempt,
+		ConnLimit:          i.limits.AcquireConn,
+		Metrics:            i.metrics,
+		Logger:             i.log,
 	})
 	return d, []*edge.CertSource{sbx, tun}, nil
 }

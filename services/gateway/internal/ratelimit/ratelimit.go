@@ -25,6 +25,8 @@ const (
 	LimitSSHConn    = "ssh_conn"
 	LimitSSHAuth    = "ssh_auth_fail"
 	LimitSSHSession = "ssh_sessions"
+	// LimitHandshakes is the per-IP cap of TLS handshakes in flight (edge).
+	LimitHandshakes = "handshakes"
 )
 
 const (
