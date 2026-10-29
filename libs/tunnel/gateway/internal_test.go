@@ -1186,3 +1186,101 @@ func TestProxyKeepsContentEncoding(t *testing.T) {
 			resp.StatusCode, resp.Header.Get("Content-Encoding"), len(body), gz.Len())
 	}
 }
+
+// dialErrorAgent is a raw agent that answers every CONNECT with 502 and the
+// given Sbx-Dial-Error value (a header is omitted for "").
+func dialErrorAgent(reason string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.NotFound(w, r)
+			return
+		}
+		if reason != "" {
+			w.Header().Set(wire.HeaderDialError, reason)
+		}
+		w.Header().Set("X-Agent", "dropped")
+		w.WriteHeader(http.StatusBadGateway)
+	})
+}
+
+func TestDialTCPReason(t *testing.T) {
+	for _, tc := range []struct{ sent, want string }{
+		{wire.DialErrorRefused, wire.DialErrorRefused},
+		{wire.DialErrorTimeout, wire.DialErrorTimeout},
+		{"<script>", ""},
+		{"Refused", ""},
+		{"", ""},
+	} {
+		t.Run("sent="+tc.sent, func(t *testing.T) {
+			e := newEnv(t)
+			gw := e.internalGateway("gw-a", nil)
+			id, bs := e.machine()
+			e.rawAgent(id, bs, dialErrorAgent(tc.sent))
+			waitMachine(t, gw.testGW, id)
+			s, _ := gw.lookup(id)
+			_, err := s.mc.DialTCPWith(context.Background(), 1234, TCPOptions{})
+			var de *transport.DialError
+			if !errors.As(err, &de) || de.Status != http.StatusBadGateway || de.Reason != tc.want {
+				t.Fatalf("err %v, want DialError{502, %q}", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPeerConnectReason(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	idRefused, bsRefused := e.machine()
+	e.rawAgent(idRefused, bsRefused, dialErrorAgent(wire.DialErrorRefused))
+	idForged, bsForged := e.machine()
+	e.rawAgent(idForged, bsForged, dialErrorAgent("<script>"))
+	idReal, bsReal := e.machine()
+	e.startStubAgent(idReal, bsReal, newStubAgent(), nil)
+	for _, id := range []string{idRefused, idForged, idReal} {
+		waitMachine(t, gw.testGW, id)
+	}
+	ctx := context.Background()
+	rt := NewPeerTransport()
+	t.Cleanup(rt.CloseIdleConnections)
+
+	ln := listenLocal(t)
+	closed := uint16(ln.Addr().(*net.TCPAddr).Port) //nolint:gosec // a TCP port fits in uint16
+	_ = ln.Close()
+
+	for _, tc := range []struct {
+		name, id string
+		port     uint16
+		want     string
+	}{
+		{"refused by a raw agent", idRefused, 1234, wire.DialErrorRefused},
+		{"forged value", idForged, 1234, ""},
+		{"real agent, closed port", idReal, closed, wire.DialErrorRefused},
+	} {
+		_, err := DialRemoteTCP(ctx, rt, gw.url, apiToken1, tc.id, tc.port, TCPOptions{})
+		var de *transport.DialError
+		if !errors.As(err, &de) || de.Status != http.StatusBadGateway || de.Reason != tc.want {
+			t.Errorf("%s: err %v, want DialError{502, %q}", tc.name, err, tc.want)
+		}
+
+		// On the wire the peer gets only the normalised header.
+		req, _ := http.NewRequestWithContext(ctx, http.MethodConnect, gw.url, http.NoBody)
+		req.Host = net.JoinHostPort(tc.id, strconv.Itoa(int(tc.port)))
+		req.Header.Set("Authorization", "Bearer "+apiToken1)
+		resp, err := rt.RoundTrip(req)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get(wire.HeaderDialError); got != tc.want {
+			t.Errorf("%s: peer header %s = %q, want %q", tc.name, wire.HeaderDialError, got, tc.want)
+		}
+		for k := range resp.Header {
+			if l := strings.ToLower(k); strings.HasPrefix(l, "sbx-") && l != strings.ToLower(wire.HeaderDialError) {
+				t.Errorf("%s: unexpected header %s on the peer answer", tc.name, k)
+			}
+		}
+		if resp.Header.Get("X-Agent") != "" {
+			t.Errorf("%s: agent header X-Agent reached the peer", tc.name)
+		}
+	}
+}

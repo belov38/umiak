@@ -41,6 +41,27 @@ const (
 	HeaderTCPDrainDeadline = "Sbx-Tcp-Drain-Deadline-Ms"
 )
 
+// HeaderDialError carries why a CONNECT dial failed. The agent sets it on its
+// 502 answer, and the gateway repeats it on the peer CONNECT 502. Its value
+// is one of the DialError* constants. A gateway never copies an arbitrary
+// value: anything outside the closed set is dropped.
+const HeaderDialError = "Sbx-Dial-Error"
+
+// Values of HeaderDialError.
+const (
+	DialErrorRefused = "refused"
+	DialErrorTimeout = "timeout"
+)
+
+// NormalizeDialError returns v if it is a known HeaderDialError value, else "".
+func NormalizeDialError(v string) string {
+	switch v {
+	case DialErrorRefused, DialErrorTimeout:
+		return v
+	}
+	return ""
+}
+
 // Agent-defined response headers the gateway passes to callers. Every other
 // Sbx-* header of an agent response is dropped: Sbx-* are gateway routing
 // signals, so an addition here needs a security review.

@@ -11,9 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/internal/pgtest"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
 )
 
 // freezeProxy forwards TCP to a target. freeze makes every connection open

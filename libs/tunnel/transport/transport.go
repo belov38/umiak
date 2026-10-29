@@ -169,9 +169,19 @@ type MachineConn interface {
 }
 
 // DialError reports a CONNECT refused by the agent (400, 403 or 502).
-type DialError struct{ Status int }
+//
+// Reason says why a dial failed, from a closed set: "refused" (connection
+// refused by the target), "timeout" or "" (unknown or not a dial failure).
+// Callers must treat any other value as "".
+type DialError struct {
+	Status int
+	Reason string
+}
 
 func (e *DialError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("agent refused tcp dial: status %d (%s)", e.Status, e.Reason)
+	}
 	return fmt.Sprintf("agent refused tcp dial: status %d", e.Status)
 }
 
