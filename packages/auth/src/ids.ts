@@ -49,7 +49,11 @@ function splitBody(kind: IdKind, publicId: unknown): string | null {
 	if (typeof publicId !== "string") return null;
 	const prefix = `${ID_PREFIXES[kind]}_`;
 	if (publicId.length !== prefix.length + BODY_LEN) return null;
-	if (publicId.slice(0, prefix.length).toLowerCase() !== prefix) return null;
+	// ASCII-only case folding: Unicode toLowerCase maps e.g. U+212A (Kelvin) to "k".
+	const head = publicId
+		.slice(0, prefix.length)
+		.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+	if (head !== prefix) return null;
 	const body = publicId.slice(prefix.length);
 	// The first char must be 0-7: 26 chars carry 130 bits, the top 2 are zero.
 	return BODY_RE.test(body) ? body : null;

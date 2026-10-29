@@ -42,6 +42,19 @@ describe("isWellFormedApiKey", () => {
 		expect(isWellFormedApiKey(`${k.slice(0, -1)}${swapped}`)).toBe(false);
 	});
 
+	it("accepts fixed vectors computed independently (Python zlib.crc32)", () => {
+		// body = base62(bytes 0x00..0x1f), CRC = base62(zlib.crc32("sbx_" + body)) padded to 6.
+		expect(
+			isWellFormedApiKey(
+				"sbx_003aUlTJC7tjlCTQj2uNU3MFagCXG9LRKRcwGkBIDlf2fn8MG",
+			),
+		).toBe(true);
+		expect(isWellFormedApiKey(`sbx_${"0".repeat(43)}3UvflE`)).toBe(true);
+		// CRC 637950070 < 62^5: base62 is 5 chars, left-padded with "0".
+		expect(isWellFormedApiKey(`sbx_${"0".repeat(42)}30hAlxG`)).toBe(true);
+		expect(isWellFormedApiKey(`sbx_${"0".repeat(42)}3hAlxG0`)).toBe(false);
+	});
+
 	it("rejects wrong shape", () => {
 		const k = generateApiKeySecret();
 		expect(isWellFormedApiKey("")).toBe(false);

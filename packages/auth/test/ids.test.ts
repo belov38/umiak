@@ -108,6 +108,15 @@ describe("encodeUuid / decodeUuid", () => {
 		expect(decodeUuid("snapshot", ok)).toBeNull();
 	});
 
+	it("compares the prefix ASCII-only (no Unicode case folding)", () => {
+		const ok = encodeUuid("apiKey", uuidv7(1_700_000_000_000));
+		const body = ok.slice("key_".length);
+		// U+212A KELVIN SIGN lower-cases to "k" under Unicode rules.
+		expect("Key_".toLowerCase()).toBe("key_");
+		expect(decodeUuid("apiKey", `Key_${body}`)).toBeNull();
+		expect(decodeUuid("apiKey", `KEY_${body}`)).not.toBeNull();
+	});
+
 	it("throws on an invalid uuid in encode", () => {
 		expect(() => encodeUuid("sandbox", "not-a-uuid")).toThrow();
 	});
