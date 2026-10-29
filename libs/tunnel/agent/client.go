@@ -40,7 +40,7 @@ type Credentials interface {
 }
 
 // RejectDelays are the waits after specific upgrade refusals (spec 5.3).
-// Zero fields take the defaults: 60s, 5m, 5m.
+// Zero fields take the defaults: 60s, 5m, 5m, 5m.
 type RejectDelays struct {
 	// BadBootstrap follows a 401 to the bootstrap secret.
 	BadBootstrap time.Duration
@@ -48,6 +48,8 @@ type RejectDelays struct {
 	Retired time.Duration
 	// Outdated follows a 426 (protocol or agent version not accepted).
 	Outdated time.Duration
+	// MaxRetryAfter caps the Retry-After of a 503 (draining gateway).
+	MaxRetryAfter time.Duration
 }
 
 // ConnEvent kinds.
@@ -113,6 +115,7 @@ const (
 	defaultBadBootstrap    = 60 * time.Second
 	defaultRetired         = 5 * time.Minute
 	defaultOutdated        = 5 * time.Minute
+	defaultMaxRetryAfter   = 5 * time.Minute
 	defaultDrainJitter     = 250 * time.Millisecond
 	defaultDrainCloseExtra = 10 * time.Second
 	// dialTimeout bounds one transport dial and one Bootstrap call.
@@ -166,6 +169,9 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.RejectDelays.Outdated <= 0 {
 		cfg.RejectDelays.Outdated = defaultOutdated
+	}
+	if cfg.RejectDelays.MaxRetryAfter <= 0 {
+		cfg.RejectDelays.MaxRetryAfter = defaultMaxRetryAfter
 	}
 	if cfg.DrainJitter <= 0 {
 		cfg.DrainJitter = defaultDrainJitter
@@ -428,7 +434,9 @@ func (c *Client) dialFailed(err error, hello transport.Hello, bo *Backoff) (time
 	case ev.Status == http.StatusUpgradeRequired:
 		wait = c.cfg.RejectDelays.Outdated
 	case ev.Status == http.StatusServiceUnavailable && rej.RetryAfter > 0:
-		wait = rej.RetryAfter + c.rand(rej.RetryAfter/5)
+		// Any gateway (or something posing as one) may send a Retry-After.
+		ra := min(rej.RetryAfter, c.cfg.RejectDelays.MaxRetryAfter)
+		wait = ra + c.rand(ra/5)
 	default:
 		wait = bo.Next()
 	}

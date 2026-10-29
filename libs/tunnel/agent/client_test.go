@@ -142,6 +142,25 @@ func TestRejectDelays(t *testing.T) {
 	}
 }
 
+// A huge Retry-After is capped at RejectDelays.MaxRetryAfter.
+func TestRetryAfterCapped(t *testing.T) {
+	const capped = 100 * time.Millisecond
+	cfg := fastConfig()
+	cfg.RejectDelays.MaxRetryAfter = capped
+	e := startEnv(t, cfg, func(g *fakeGateway) {
+		g.reject = func(int, transport.Hello) error {
+			return &transport.RejectError{Status: http.StatusServiceUnavailable, RetryAfter: 1000 * time.Hour}
+		}
+	})
+	as := e.gw.waitAttempts(3)
+	for i := 1; i < len(as); i++ {
+		// The cap plus at most 20% jitter, with scheduling slack.
+		if gap := as[i].at.Sub(as[i-1].at); gap < capped || gap > capped*6/5+500*time.Millisecond {
+			t.Fatalf("gap %d = %v, want about %v", i, gap, capped)
+		}
+	}
+}
+
 func TestInfoDefaults(t *testing.T) {
 	e := startEnv(t, fastConfig(), nil)
 	c := e.gw.nextConn()

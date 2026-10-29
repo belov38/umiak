@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -25,6 +26,10 @@ import (
 
 // maxReasonLen caps the response body kept as RejectError.Reason.
 const maxReasonLen = 1024
+
+// maxRetryAfter bounds a parsed Retry-After; the agent applies its own,
+// lower cap.
+const maxRetryAfter = 24 * time.Hour
 
 // Default timings (spec sections 6 and 7); zero fields of DialerConfig use them.
 const (
@@ -148,9 +153,14 @@ func (d *dialer) Dial(ctx context.Context, hello transport.Hello) (net.Conn, tra
 // rejectFromResponse maps a non-101 response to a *transport.RejectError.
 func rejectFromResponse(resp *http.Response) *transport.RejectError {
 	rej := &transport.RejectError{Status: resp.StatusCode}
-	// Only integer seconds are honoured; an HTTP-date is ignored.
-	if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs > 0 {
-		rej.RetryAfter = time.Duration(secs) * time.Second
+	// Only integer seconds are honoured; an HTTP-date is ignored. Values are
+	// clamped to maxRetryAfter so the Duration cannot overflow.
+	secs, err := strconv.ParseUint(strings.TrimSpace(resp.Header.Get("Retry-After")), 10, 64)
+	if errors.Is(err, strconv.ErrRange) {
+		secs, err = math.MaxUint64, nil
+	}
+	if err == nil && secs > 0 {
+		rej.RetryAfter = time.Duration(min(secs, uint64(maxRetryAfter/time.Second))) * time.Second //nolint:gosec // bounded by maxRetryAfter
 	}
 	if resp.Body != nil {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxReasonLen))
