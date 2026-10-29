@@ -9,8 +9,13 @@ on:
       - "packages/proto/**"
       - "packages/agent-client/**"
       - "go.work"
+      - "go.work.sum"
       - "mise.toml"
+      - "package.json"
       - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "biome.json"
+      - "tsconfig.base.json"
       - ".github/workflows/tunnel.yml"
   pull_request:
     paths: *paths
@@ -20,7 +25,7 @@ permissions:
 
 concurrency:
   group: tunnel-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   # Admin DSN for the Postgres service container; the test helper creates a database per test.
@@ -73,17 +78,26 @@ jobs:
       - uses: jdx/mise-action@v5
       - run: buf lint
       - name: Generation drift check
-        if: env.BUF_TOKEN != ''
         run: |
+          if [ -z "$BUF_TOKEN" ]; then
+            echo "drift check skipped: no BUF_TOKEN"
+            exit 0
+          fi
           buf generate
           buf generate --template buf.gen.test.yaml
-          git status --porcelain
-          test -z "$(git status --porcelain)"
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            git diff --stat
+            exit 1
+          fi
       - name: Breaking changes
+        # Run from the repo root: the git input must resolve to the repo's .git, and actions/checkout
+        # creates no local main branch, so compare against the remote-tracking ref.
         # Skipped until main contains proto/buf.yaml (first push of the module).
+        working-directory: .
         run: |
           if git cat-file -e origin/main:proto/buf.yaml 2>/dev/null; then
-            buf breaking --against '.git#branch=main,subdir=proto'
+            buf breaking proto --against '.git#ref=refs/remotes/origin/main,subdir=proto'
           else
             echo "origin/main has no proto/buf.yaml yet, skipping buf breaking"
           fi
