@@ -97,8 +97,7 @@ policy_out: ACCEPT
 169.254.0.0/16
 224.0.0.0/4
 
-[IPSET sbx-deny-public] # boat-dev-clone S1 PoC: own public egress IPs (hairpin NAT)
-203.211.74.240
+[IPSET sbx-deny-public] # boat-dev-clone S1 PoC: own public egress IPs (hairpin NAT), empty in the PoC
 
 [group sbx-egress] # boat-dev-clone S1 PoC
 OUT DROP -dest +sbx-deny-public
@@ -122,10 +121,9 @@ Firewall каждой sandbox (через API при create/fork):
 - `ipfilter` требует, чтобы в `ipfilter-net0` был IP из IPAM (или сгенерированный IPAM IPSet гостя, если PVE его даёт). Если это окажется хрупким, в S1 допустимо оставить только `macfilter`: правила egress фильтруют по адресу назначения, и подмена источника доступа к LAN не даёт. Решение записать в раздел результатов.
 - Исходящий IPv6 закрыт целиком (кроме NDP): иначе VM дотянется до link-local адреса хоста на `sbx0`, а sshd хоста слушает `::`. Точная форма правила (IPSet `::/0` или отдельное правило) на усмотрение builder, проверяется стендом.
 
-IPSet `sbx-deny-public` — собственные публичные egress-адреса: сейчас домашний роутер (`203.211.74.240` на 2026-10-29), позже egress-адреса компании. Без него sandbox через hairpin NAT достаёт до проброшенных портов LAN-сервисов и до самого роутера. Правило стоит первым, раньше разрешений.
-- Список задаётся конфигом runbook (`SBX_DENY_PUBLIC_IPS`); обновление IPSet — отдельный шаг runbook.
-- Статический ли домашний IP, пока не известно, поэтому считаем его динамическим: `preflight` узнаёт текущий публичный IP хоста и падает, если его нет в `sbx-deny-public`.
-- Стенд проверяет изнутри VM, что TCP 22, 80, 443 на каждом адресе списка закрыты.
+IPSet `sbx-deny-public` — собственные публичные egress-адреса (защита от hairpin NAT до проброшенных портов и роутера). **В PoC пустой** (решение Ильи, 2026-10-29): платформа работает локально, тесты идут через Tailscale, внешний IP не используется. Заполняется при выходе в прод вместе с выбором кластера (S12).
+- Список задаётся конфигом runbook (`SBX_DENY_PUBLIC_IPS`, по умолчанию пустой); обновление IPSet — отдельный шаг runbook.
+- Если список не пуст, стенд проверяет изнутри VM, что TCP 22, 80, 443 на каждом его адресе закрыты.
 - Если адрес ingress туннеля когда-нибудь совпадёт с адресом из этого списка, нужно точечное исключение до DROP; это решается вместе с S4/S12.
 
 IPSet `sbx-gateway` — место для будущего адреса ingress `tunnel.<domain>:443` в Kubernetes (architecture §10). В S1 он пустой.
@@ -300,7 +298,7 @@ interface QuiesceHook {
 
 ### 7.1 Команды
 
-- `sbx-bench preflight` — только чтение: текущий публичный IP хоста есть в `sbx-deny-public`; journal ноды не читается никем, кроме root и `adm`; токен отвечает и имеет права на каждую операцию стенда (проверяется на «пустых» вызовах, где это возможно), `sbx-node version`, `sbx0` и группы firewall на месте, `ip_forward=1`, IPv6 forwarding 0, thin pool ниже порогов, шаблон 599 существует и является template, нет хвостов прошлых прогонов (VM в pool кроме 599, LV с тегом `sbx`, строки аллокатора).
+- `sbx-bench preflight` — только чтение: journal ноды не читается никем, кроме root и `adm`; токен отвечает и имеет права на каждую операцию стенда (проверяется на «пустых» вызовах, где это возможно), `sbx-node version`, `sbx0` и группы firewall на месте, `ip_forward=1`, IPv6 forwarding 0, thin pool ниже порогов, шаблон 599 существует и является template, нет хвостов прошлых прогонов (VM в pool кроме 599, LV с тегом `sbx`, строки аллокатора).
 - `sbx-bench s1 [--runs 3] [--size 2g] [--parallel 1,2,4] [--clone-only 8] [--ram-cap 8g] [--no-baseline] [--keep]` — полный прогон. Таблица в stdout, JSON в `bench-results/s1-<timestamp>.json` (каталог в `.gitignore`).
 - `sbx-bench cleanup` — уборка после сбоя: VM в pool `sandbox` кроме 599, LV с тегом `sbx`, строки аллокатора, lease-записи наших MAC. Шаблон 599 и LV с тегом `sbx-tpl` не трогает.
 
@@ -311,7 +309,7 @@ interface QuiesceHook {
    1. **Create A** с тестовым `smbios1` (случайный uuid, serial размером с payload S2). Start, `waitReady`, IP.
    2. **Сеть изнутри A** (QGA exec; TCP-проверки через `timeout 3 bash -c '</dev/tcp/<ip>/<port>'`, ping `-c1 -W2`):
       - работает: `getent hosts example.com`; `curl -fsS --max-time 10 https://example.com`;
-      - не отвечает: ping и TCP 80 `192.168.68.1`; TCP 22, 80, 443 каждого адреса из `sbx-deny-public`; TCP `192.168.68.116:22`, `:8006`; TCP `100.64.10.2:22`, `:8006`; TCP `10.88.0.1:22`, `:8006`, `:53`;
+      - не отвечает: ping и TCP 80 `192.168.68.1`; TCP 22, 80, 443 каждого адреса из `sbx-deny-public` (если список не пуст); TCP `192.168.68.116:22`, `:8006`; TCP `100.64.10.2:22`, `:8006`; TCP `10.88.0.1:22`, `:8006`, `:53`;
       - IPv6: нет глобального адреса, нет IPv6 default route; ping6 и TCP `:22` на link-local адрес хоста на `sbx0` (из `inventory`) не проходят;
       - `/sys/class/dmi/id/product_serial` и `product_uuid` совпадают с переданными.
    3. Записать `/root/marker1` (случайное содержимое), `sync`. **Snapshot** A. Записать `/root/marker2`.
