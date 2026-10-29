@@ -70,7 +70,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Operation** — операция над sandbox (create, fork, stop, resume, recover, delete, save_snapshot); одна активная на sandbox, delete вытесняет.
 - **Command** — процесс: `id`, `sandboxId`, `cmd`, `cwd`, имена переменных env, `mode`, `status`, `exitCode`, `startedAt`, `endedAt`. Вывод хранит агент, позже — копия в хранилище.
 - **HostedPort** — порт sandbox, опубликованный на URL: `port`, `label`, режим `token` / `sso` / `public`.
-- **ApiKey**, **User**, **Team**, **Template**, **Size**, **Quota**, цели warm pool — в Payload; `api` и `worker` читают через Payload Local API (`ConfigReader`, кэш 10 s, сброс по `NOTIFY`).
+- **User**, **Team**, **Membership** (`owner`/`member`), **ApiKey**, **SshKey**, **Template**, **Size**, квоты команд, цели warm pool, `PlatformDefaults` — в Payload (схема `payload`, `docs/specs/s8-web.md` §7); `api` и `worker` читают через Payload Local API (`IdentityStore`, `ConfigReader`, кэш 10–30 s, сброс по `NOTIFY`).
+- **Environment** — именованный набор env, секретов и secret-файлов команды; хранится в `runtime` зашифрованным, как `sandbox_secrets`, управляется через `/v1/environments`; при create значения копируются в sandbox (S8 §10).
 
 **Состояния sandbox:** `creating → ready → stopping → stopped → starting → ready`. Плюс `error` и `deleting → deleted`. `fork` создаёт новый sandbox в `creating`. Здоровье (`health: ok | degraded`, degraded — агента нет дольше 60 s) и активность (`activity: busy | idle`) — отдельные поля, а не состояния.
 
@@ -165,8 +166,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 **Пользователи (браузер) — через oauth2-proxy.**
 - `web` (`/admin`, `/app`) и браузерные вызовы API закрыты oauth2-proxy.
 - Пользователь создаётся при первом входе (JIT) из заголовков oauth2-proxy: `X-Auth-Request-Email`, `-User`, `-Groups`. Это кастомная auth-стратегия Payload; API читает того же пользователя.
-- Роли берутся из групп IdP: например, группа администраторов → оператор платформы.
-- Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy, oauth2-proxy работает как sidecar или единственный upstream.
+- Роли берутся из групп IdP: группа из `SBX_OPERATOR_GROUPS` → оператор платформы. Права оператора действуют только в браузерной сессии, не по API-ключу. Команды и роли `owner`/`member` — в Payload, при первом входе создаётся личная команда (S8 §6).
+- Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy. oauth2-proxy работает в upstream-режиме и маршрутизирует `app.<domain>`: `/api/*` (без `/api`), `/cli/*`, `/sbx-auth/*` → `api :8081`, остальное → `web` (S8 §5.1).
 
 **Программный доступ (CLI, SDK, MCP, AI-агенты) — API-ключи.**
 - Ключ создаёт JIT-пользователь в дашборде. `sbx login` в CLI открывает браузер (через oauth2-proxy) и получает ключ.
