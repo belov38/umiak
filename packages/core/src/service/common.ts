@@ -1,0 +1,194 @@
+import type { ConfigReader } from "@sbx/config";
+import type { Tx } from "@sbx/db";
+import type pg from "pg";
+import { notFound } from "../errors.ts";
+import { uuidv7 } from "../ids.ts";
+import type { JobSender } from "../jobs.ts";
+import type { Notifier } from "../notifier.ts";
+import type { Principal } from "../principal.ts";
+import {
+	type Operation,
+	type OperationKind,
+	operationFromRow,
+	type Sandbox,
+	sandboxFromRow,
+} from "../rows.ts";
+import type { KeyRing } from "../secrets.ts";
+import type { RandomInt } from "../slug.ts";
+import type { SandboxState } from "../states.ts";
+
+// Helpers shared by the SandboxService methods (this task and later ones).
+
+export interface SandboxServiceDeps {
+	pool: pg.Pool;
+	config: ConfigReader;
+	keys: KeyRing;
+	jobs: JobSender;
+	/** LISTEN connection for `waitForState`; without it, polling only. */
+	notifier?: Notifier;
+	/** Random source of generated slugs (tests). */
+	slugRandom?: RandomInt;
+	/** Fallback poll of `waitForState` (default 2000 ms, 500 ms without a notifier). */
+	waitPollMs?: number;
+}
+
+/** A pool, a pooled client or `tx.client`. */
+export type Queryable = Pick<pg.PoolClient, "query">;
+
+const UUID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(s: unknown): s is string {
+	return typeof s === "string" && UUID_RE.test(s);
+}
+
+export async function loadOperation(
+	q: Queryable,
+	id: string,
+): Promise<Operation | null> {
+	if (!isUuid(id)) return null;
+	const r = await q.query("SELECT * FROM runtime.operations WHERE id = $1", [
+		id,
+	]);
+	return r.rows[0] ? operationFromRow(r.rows[0]) : null;
+}
+
+/** Pending/running operations of the sandboxes, by sandbox id. */
+export async function activeOperations(
+	q: Queryable,
+	sandboxIds: string[],
+): Promise<Map<string, Operation>> {
+	const out = new Map<string, Operation>();
+	if (sandboxIds.length === 0) return out;
+	const r = await q.query(
+		`SELECT * FROM runtime.operations
+		 WHERE sandbox_id = ANY($1::uuid[]) AND state IN ('pending', 'running')`,
+		[sandboxIds],
+	);
+	for (const row of r.rows) {
+		const op = operationFromRow(row);
+		out.set(op.sandboxId, op);
+	}
+	return out;
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: rows of node-postgres are untyped
+export type SandboxRow = Record<string, any> & {
+	id: string;
+	state: SandboxState;
+	team_id: string;
+};
+
+export async function toSandbox(
+	q: Queryable,
+	row: SandboxRow,
+): Promise<Sandbox> {
+	const ops = await activeOperations(q, [row.id]);
+	return sandboxFromRow(row, ops.get(row.id) ?? null);
+}
+
+export async function loadSandbox(
+	q: Queryable,
+	id: string,
+): Promise<Sandbox | null> {
+	if (!isUuid(id)) return null;
+	const r = await q.query<SandboxRow>(
+		"SELECT * FROM runtime.sandboxes WHERE id = $1",
+		[id],
+	);
+	return r.rows[0] ? toSandbox(q, r.rows[0]) : null;
+}
+
+/**
+ * The principal's team sandbox by id (UUID) or slug; another team's sandbox
+ * is `not_found` (S7 §7.5). `lock` takes `FOR UPDATE` (inside a transaction).
+ */
+export async function findSandboxRow(
+	q: Queryable,
+	p: Principal,
+	idOrSlug: string,
+	opts: { lock?: boolean } = {},
+): Promise<SandboxRow> {
+	if (typeof idOrSlug !== "string" || idOrSlug === "") {
+		throw notFound("sandbox");
+	}
+	const byId = isUuid(idOrSlug);
+	const r = await q.query<SandboxRow>(
+		`SELECT * FROM runtime.sandboxes WHERE ${byId ? "id" : "slug"} = $1 AND team_id = $2
+		 ${opts.lock ? "FOR UPDATE" : ""}`,
+		[idOrSlug, p.teamId],
+	);
+	const row = r.rows[0];
+	if (!row) throw notFound("sandbox");
+	return row;
+}
+
+export interface NewOperation {
+	id?: string;
+	sandboxId: string;
+	kind: OperationKind;
+	/** Non-secret parameters only (S6 §13.1). */
+	request: Record<string, unknown>;
+	/** null: no principal (system operation). */
+	principal: Principal | null;
+	/** `operationDeadline(...)`; null for delete. */
+	deadlineMs: number | null;
+	parentOperationId?: string | null;
+}
+
+/** Inserts a `pending` operation; the active-operation index rejects a second one. */
+export async function insertOperation(
+	tx: Tx,
+	op: NewOperation,
+): Promise<string> {
+	const id = op.id ?? uuidv7();
+	await tx.client.query(
+		`INSERT INTO runtime.operations
+		   (id, sandbox_id, kind, state, request, requested_by, requested_by_key,
+		    parent_operation_id, deadline_at)
+		 VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7,
+		         CASE WHEN $8::bigint IS NULL THEN NULL
+		              ELSE now() + make_interval(secs => $8::bigint / 1000.0) END)`,
+		[
+			id,
+			op.sandboxId,
+			op.kind,
+			JSON.stringify(op.request),
+			op.principal?.userId ?? null,
+			op.principal?.apiKeyId ?? null,
+			op.parentOperationId ?? null,
+			op.deadlineMs,
+		],
+	);
+	return id;
+}
+
+export interface NewSandboxEvent {
+	sandboxId: string;
+	type: string;
+	fromState?: string | null;
+	toState?: string | null;
+	reason?: string | null;
+	data?: Record<string, unknown> | null;
+}
+
+export async function insertSandboxEvent(
+	tx: Tx,
+	ev: NewSandboxEvent,
+): Promise<void> {
+	await tx.client.query(
+		`INSERT INTO runtime.sandbox_events (id, sandbox_id, type, from_state, to_state, reason, data)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		[
+			uuidv7(),
+			ev.sandboxId,
+			ev.type,
+			ev.fromState ?? null,
+			ev.toState ?? null,
+			ev.reason ?? null,
+			ev.data === undefined || ev.data === null
+				? null
+				: JSON.stringify(ev.data),
+		],
+	);
+}

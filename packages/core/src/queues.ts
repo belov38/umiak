@@ -1,3 +1,5 @@
+import type { PgBoss } from "pg-boss";
+
 // pg-boss queues of the worker (S6 §15.1, decision 15). Plain option objects
 // whose keys match pg-boss `Queue` options; `ensureQueues(boss)` creates them.
 
@@ -76,3 +78,41 @@ export const QUEUES = {
 	"ctl-cleanup": CONTROLLER,
 	"ctl-idp-sync": CONTROLLER,
 } as const satisfies Record<QueueName, QueueOptions>;
+
+/** Dead-letter targets first: pg-boss requires them to exist. */
+function creationOrder(): QueueName[] {
+	const dlq = new Set<QueueName>();
+	for (const name of QUEUE_NAMES) {
+		const target = (QUEUES[name] as QueueOptions).deadLetter;
+		if (target !== undefined) dlq.add(target);
+	}
+	return [...dlq, ...QUEUE_NAMES.filter((n) => !dlq.has(n))];
+}
+
+/**
+ * Creates the queues of §15.1, or brings the options of existing ones back to
+ * `QUEUES`. A policy cannot change in place: a queue with another policy is an
+ * error (it needs a manual migration).
+ */
+export async function ensureQueues(boss: PgBoss): Promise<void> {
+	for (const name of creationOrder()) {
+		const opts: QueueOptions = QUEUES[name];
+		const { policy, ...rest } = opts;
+		const existing = await boss.getQueue(name);
+		if (existing === null) {
+			await boss.createQueue(name, { policy, ...rest });
+			continue;
+		}
+		if (existing.policy !== policy) {
+			throw new Error(
+				`ensureQueues: queue ${name} has policy ${existing.policy}, expected ${policy}`,
+			);
+		}
+		await boss.updateQueue(name, {
+			...rest,
+			deadLetter: opts.deadLetter ?? null,
+			retryDelayMax: opts.retryDelayMax ?? null,
+			heartbeatSeconds: opts.heartbeatSeconds ?? null,
+		});
+	}
+}

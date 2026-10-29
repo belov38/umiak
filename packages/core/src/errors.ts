@@ -125,3 +125,39 @@ export function validation(issues: ValidationIssue[]): SbxError {
 		: "validation failed";
 	return new SbxError("validation", message, { details: { issues } });
 }
+
+export function templateUnavailable(
+	template: string,
+	size: string | null = null,
+): SbxError {
+	return new SbxError(
+		"template_unavailable",
+		size === null
+			? `template '${template}' is not available`
+			: `size '${size}' is not available for template '${template}'`,
+		{ details: { template, size } },
+	);
+}
+
+export function snapshotNotFound(name: string): SbxError {
+	return new SbxError(
+		"snapshot_not_found",
+		`saved snapshot '${name}' not found`,
+		{
+			details: { name },
+		},
+	);
+}
+
+export function idempotencyKeyReused(): SbxError {
+	return new SbxError(
+		"idempotency_key_reused",
+		"the Idempotency-Key was already used with a different request",
+	);
+}
+
+export function slugTaken(slug: string): SbxError {
+	return new SbxError("slug_taken", `slug '${slug}' is already taken`, {
+		details: { slug },
+	});
+}
