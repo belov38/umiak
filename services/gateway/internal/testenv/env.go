@@ -88,10 +88,6 @@ type Env struct {
 	// Timing is the tunnel timing given to every instance.
 	Timing gateway.Timing
 
-	// refusedAddr is a 127.0.0.1 port that was bound and closed: dialing it
-	// gives a real ECONNREFUSED.
-	refusedAddr string
-
 	mu    sync.Mutex
 	seq   int
 	insts []*Inst
@@ -124,19 +120,12 @@ func New(t testing.TB, opts Options) *Env {
 		Keys:   keys,
 		Timing: timing,
 	}
-	e.refusedAddr = closedAddr(t)
 	return e
 }
 
-func closedAddr(t testing.TB) string {
-	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("testenv: %v", err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
-}
+// refusedAddr is dialed for a port without an app: nothing listens on
+// 127.0.0.1:1, so the dial fails with a real ECONNREFUSED.
+const refusedAddr = "127.0.0.1:1"
 
 // Logger returns a discarding logger, or a debug logger on stderr when
 // SBX_TEST_LOG is set.

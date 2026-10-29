@@ -196,8 +196,10 @@ func (i *Instance) onInstanceChange(id string) {
 // during a Postgres outage.
 func (i *Instance) onRoutesNotify(payload string) {
 	if payload == "" {
-		i.listenStarted.Store(true)
+		// Flush first: a test that waits for ListenStarted must never race
+		// the initial flush.
 		i.routes.Flush()
+		i.listenStarted.Store(true)
 		return
 	}
 	i.routes.InvalidateSlug(payload)
@@ -325,6 +327,11 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 		if terr := <-tunnelDone; err == nil {
 			err = terr
 		}
+	}
+	// A cancelled ctx is a normal stop, also when the cancellation hit the
+	// startup (the instance registration) and surfaced as a context error.
+	if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		err = nil
 	}
 	_ = i.internal.Close()
 	_ = i.metricsSrv.Close()

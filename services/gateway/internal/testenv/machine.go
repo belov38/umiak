@@ -213,7 +213,7 @@ func (m *Machine) dial(ctx context.Context, _ string, port int) (net.Conn, error
 		return nil, &timeoutError{err: ctx.Err()}
 	}
 	if !ok {
-		addr = m.e.refusedAddr
+		addr = refusedAddr
 	}
 	return (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 }

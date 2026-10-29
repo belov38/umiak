@@ -103,6 +103,23 @@ func TestInstanceRunReady(t *testing.T) {
 	}
 }
 
+// A cancelled ctx is a normal stop, also when it interrupts the startup
+// (the instance registration fails with the context error).
+func TestInstanceRunCancelledAtStartup(t *testing.T) {
+	env := testenv.New(t, testenv.Options{})
+	for range 5 {
+		inst, err := server.New(env.InstanceConfig("gw-cancel", "http://127.0.0.1:1"), env.Deps())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := inst.Run(ctx, server.Listeners{}); err != nil {
+			t.Fatalf("Run with a cancelled ctx = %v, want nil", err)
+		}
+	}
+}
+
 // A peer CONNECT from instance B reaches a machine whose tunnel is on A.
 func TestInstanceInternalListener(t *testing.T) {
 	env := testenv.New(t, testenv.Options{})
