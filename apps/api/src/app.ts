@@ -32,6 +32,7 @@ import { registerLimitsRoutes } from "./routes/limits.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerMetaRoutes } from "./routes/meta.ts";
 import { registerOperationRoutes } from "./routes/operations.ts";
+import { registerPtyRoutes } from "./routes/ptys.ts";
 import { registerSandboxRoutes } from "./routes/sandboxes.ts";
 
 /** Common middleware and error handling of the listener apps. */
@@ -73,6 +74,7 @@ export function mountV1(app: ApiApp, deps: ApiDeps): void {
 	registerEnvRoutes(app, deps);
 	registerOperationRoutes(app, deps);
 	registerCommandRoutes(app, deps);
+	registerPtyRoutes(app, deps);
 	registerCatalogRoutes(app, deps);
 	registerLimitsRoutes(app, deps);
 }

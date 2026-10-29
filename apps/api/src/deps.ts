@@ -15,6 +15,7 @@ import type { OidcVerifier } from "./auth/oidc.ts";
 import type { AuthContext, SessionResolver } from "./auth/principal.ts";
 import type { RateLimits } from "./auth/rate-limit.ts";
 import type { CommandTimings } from "./commands/attach.ts";
+import type { PtyTimings } from "./commands/pty-socket.ts";
 import type { StreamRegistry } from "./commands/registry.ts";
 import type { ApiMetrics } from "./http/metrics.ts";
 import type { Settings } from "./settings.ts";
@@ -52,6 +53,8 @@ export interface ApiDeps {
 	streams: StreamRegistry;
 	/** Ready wait, heartbeat and max duration of command streams. */
 	commandTimings: CommandTimings;
+	/** Ping, input coalescing and backpressure of PTY WebSockets. */
+	ptyTimings: PtyTimings;
 }
 
 /** Hono env of every listener app. */

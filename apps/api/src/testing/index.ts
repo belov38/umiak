@@ -11,6 +11,7 @@ import { OidcVerifier } from "../auth/oidc.ts";
 import { SessionResolver } from "../auth/principal.ts";
 import { RateLimits } from "../auth/rate-limit.ts";
 import { DEFAULT_COMMAND_TIMINGS } from "../commands/attach.ts";
+import { DEFAULT_PTY_TIMINGS } from "../commands/pty-socket.ts";
 import { StreamRegistry } from "../commands/registry.ts";
 import type { ApiDeps } from "../deps.ts";
 import { createApiLogger } from "../http/logger.ts";
@@ -111,7 +112,8 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  * - svc: `unconfiguredService()`, config: an empty StaticConfigReader,
  *   environments: `emptyEnvironmentStore()`, agent: a FakeAgent;
  * - streams: a StreamRegistry over the final identity and identityEvents;
- *   commandTimings: the defaults (60 s, 15 s, 60 min).
+ *   commandTimings: the defaults (60 s, 15 s, 60 min); ptyTimings: the
+ *   defaults (ping 15 s, input 5 ms, 1 MiB).
  */
 export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 	const settings = over.settings ?? testSettings();
@@ -157,6 +159,7 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 				log,
 			}),
 		commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
+		ptyTimings: { ...DEFAULT_PTY_TIMINGS },
 		...over,
 	};
 }

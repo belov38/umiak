@@ -607,6 +607,65 @@
 				],
 				"type": "object"
 			},
+			"CreatePtyRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"cols": {
+						"description": "Columns, 1 to 1000 (default 80)",
+						"example": 120,
+						"maximum": 1000,
+						"minimum": 1,
+						"type": "integer"
+					},
+					"command": {
+						"description": "Shell command line run by `bash -lc` in the terminal; null or absent: the user's login shell",
+						"example": null,
+						"minLength": 1,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"cwd": {
+						"description": "Working directory; relative to the user's home (default)",
+						"maxLength": 4096,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"env": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Variables of this terminal only; values are never stored"
+							}
+						]
+					},
+					"rows": {
+						"description": "Rows, 1 to 1000 (default 24)",
+						"example": 32,
+						"maximum": 1000,
+						"minimum": 1,
+						"type": "integer"
+					},
+					"term": {
+						"description": "TERM of the terminal (default xterm-256color)",
+						"example": "xterm-256color",
+						"pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$",
+						"type": "string"
+					},
+					"user": {
+						"description": "Guest user (default `user`; `root` is allowed)",
+						"maxLength": 64,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
 			"CreateSandboxRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -1430,6 +1489,28 @@
 					"object",
 					"null"
 				]
+			},
+			"ResizePtyRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"cols": {
+						"example": 120,
+						"maximum": 1000,
+						"minimum": 1,
+						"type": "integer"
+					},
+					"rows": {
+						"example": 32,
+						"maximum": 1000,
+						"minimum": 1,
+						"type": "integer"
+					}
+				},
+				"required": [
+					"cols",
+					"rows"
+				],
+				"type": "object"
 			},
 			"ResumeSandboxRequest": {
 				"additionalProperties": false,
@@ -4437,6 +4518,327 @@
 				"summary": "Fork a sandbox",
 				"tags": [
 					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ptys": {
+			"post": {
+				"description": "Starts a PTY command in a ready sandbox (a creating or starting one is awaited up to 60 s): the user's login shell, or `command` run by `bash -lc` in the terminal. Answers 201 Command (mode `pty`, one output stream `pty`). Connect with GET .../connect (WebSocket), or read it with GET .../commands/{command}/stream?ptyOffset= and write with POST .../commands/{command}/input. A PTY with no client connected is closed by the agent after 10 min (reason pty_idle). With an Idempotency-Key a repeat returns the same command with 200 and `Idempotency-Replayed: true`. Needs the agent capability process.pty.",
+				"operationId": "ptys.create",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the same PTY instead of starting another one (24 h)",
+						"in": "header",
+						"name": "Idempotency-Key",
+						"required": false,
+						"schema": {
+							"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the same PTY instead of starting another one (24 h)",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreatePtyRequest"
+							}
+						}
+					},
+					"description": "The terminal",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Command"
+								}
+							}
+						},
+						"description": "Repeat with the same Idempotency-Key",
+						"headers": {
+							"Idempotency-Replayed": {
+								"description": "`true`: an earlier request with this key started it",
+								"schema": {
+									"enum": [
+										"true"
+									],
+									"type": "string"
+								}
+							},
+							"Sbx-Command-Id": {
+								"description": "Id (`cmd_...`) of the command",
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Command"
+								}
+							}
+						},
+						"description": "The started PTY command",
+						"headers": {
+							"Sbx-Command-Id": {
+								"description": "Id (`cmd_...`) of the command",
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or PTY (another sandbox's command and non-PTY commands too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability process.pty), `idempotency_key_reused` or `invalid_state`"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`agent_unavailable`: retryable with an Idempotency-Key; without one `details.outcome: unknown` (see `details.commandId`)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Open a terminal",
+				"tags": [
+					"ptys"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ptys/{command}/connect": {
+			"get": {
+				"description": "WebSocket upgrade with the subprotocol `sbx.pty.v1` (required). Server → client: binary frames are consecutive PTY output bytes; text frames are JSON: `{\"type\":\"attached\",\"offset\":N}` first, `{\"type\":\"truncated\",\"availableFrom\":N}`, `{\"type\":\"exit\",...}` (as in NDJSON), `{\"type\":\"error\",\"code\",\"message\",\"retryable\",\"details\",\"requestId\"}`, `{\"type\":\"reconnect\",\"offset\":N,\"reason\"}`. The client counts the offset itself: `attached.offset` (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are input (a key typed while the socket drops may be lost, never applied twice); text `{\"type\":\"resize\",\"cols\":N,\"rows\":N}`. Close codes: 1000 after exit; 1012 server shutdown (after `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4503 agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; `tailBytes` for scrollback. Pings every 15 s. Authentication as for other requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team header.",
+				"operationId": "ptys.connect",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Output from this byte offset (default 0): the offset counted by the client, `attached.offset` (or `truncated.availableFrom`) plus the bytes received",
+						"in": "query",
+						"name": "offset",
+						"required": false,
+						"schema": {
+							"description": "Output from this byte offset (default 0): the offset counted by the client, `attached.offset` (or `truncated.availableFrom`) plus the bytes received",
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"description": "Start this many bytes before the end of the output (scrollback; ignores offset)",
+						"in": "query",
+						"name": "tailBytes",
+						"required": false,
+						"schema": {
+							"description": "Start this many bytes before the end of the output (scrollback; ignores offset)",
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					}
+				],
+				"responses": {
+					"101": {
+						"description": "Switching Protocols: the WebSocket with the subprotocol sbx.pty.v1"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: the subprotocol sbx.pty.v1 was not offered, or a bad query"
+					},
+					"426": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`upgrade_required`: not a WebSocket upgrade"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`rate_limited`: too many open streams and terminals of this key or user"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Connect to a terminal (WebSocket)",
+				"tags": [
+					"ptys"
+				],
+				"x-sbx-websocket": {
+					"subprotocol": "sbx.pty.v1"
+				}
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ptys/{command}/resize": {
+			"post": {
+				"description": "Sets the window size of a PTY (the process gets SIGWINCH). The same as the `resize` control frame of the WebSocket. Idempotent.",
+				"operationId": "ptys.resize",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ResizePtyRequest"
+							}
+						}
+					},
+					"description": "The size",
+					"required": true
+				},
+				"responses": {
+					"204": {
+						"description": "Resized"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or PTY (another sandbox's command and non-PTY commands too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`command_exited` or `sandbox_not_ready`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Resize a terminal",
+				"tags": [
+					"ptys"
 				]
 			}
 		},

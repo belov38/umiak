@@ -116,6 +116,13 @@ describe("openapi/v1.json", () => {
 		expect(anonymous.sort()).toEqual(routes.sort());
 	});
 
+	it("the PTY WebSocket is a GET with 101 and x-sbx-websocket (§15.1)", () => {
+		const op = doc.paths["/v1/sandboxes/{sandbox}/ptys/{command}/connect"]?.get;
+		expect(op?.operationId).toBe("ptys.connect");
+		expect(Object.keys(op?.responses as object)).toContain("101");
+		expect(op?.["x-sbx-websocket"]).toEqual({ subprotocol: "sbx.pty.v1" });
+	});
+
 	it("has no warm pool terms (no failFast, pool_exhausted, warmAvailable)", () => {
 		for (const s of ["failFast", "pool_exhausted", "warmAvailable"]) {
 			expect(COMMITTED).not.toContain(s);

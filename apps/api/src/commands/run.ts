@@ -119,15 +119,50 @@ function startUnavailable(commandId: string, keyed: boolean): ApiError {
 	);
 }
 
+/** What to start: the command row, the agent spec and the capabilities. */
+export interface StartPlan {
+	/** Agent capabilities the command needs. */
+	capabilities: string[];
+	/** The command row (the requestId is added by the start). */
+	core: Omit<CommandSpec, "requestId">;
+	agent: AgentCommandSpec;
+	/** Hashed with the Idempotency-Key: the validated client body. */
+	hashBody: unknown;
+}
+
+/** The plan of `POST .../commands`. */
+export function commandPlan(body: StartCommandBody): StartPlan {
+	const { requestId: _, ...core } = coreSpec(body, "");
+	return {
+		capabilities:
+			body.stdin === true ? ["process.v1", "process.stdin"] : ["process.v1"],
+		core,
+		agent: agentSpec(body),
+		hashBody: body,
+	};
+}
+
 /**
  * Steps 1-5 of §9.1. `ref` is the core reference of the sandbox; `body` the
  * validated request body (hashed with the key).
  */
-export async function startCommand(
+export function startCommand(
 	deps: ApiDeps,
 	auth: AuthContext,
 	ref: string,
 	body: StartCommandBody,
+	idemKey?: string,
+	signal?: AbortSignal,
+): Promise<StartedCommand> {
+	return startPlanned(deps, auth, ref, commandPlan(body), idemKey, signal);
+}
+
+/** `startCommand` of any plan (commands, PTYs). */
+export async function startPlanned(
+	deps: ApiDeps,
+	auth: AuthContext,
+	ref: string,
+	plan: StartPlan,
 	idemKey?: string,
 	signal?: AbortSignal,
 ): Promise<StartedCommand> {
@@ -138,23 +173,28 @@ export async function startCommand(
 	);
 	const { machineId } = await svc.resolveAgentTarget(p, sandbox.id);
 	try {
-		await deps.agent.requireCapability(machineId, "process.v1", signal);
-		if (body.stdin === true) {
-			await deps.agent.requireCapability(machineId, "process.stdin", signal);
+		for (const cap of plan.capabilities) {
+			await deps.agent.requireCapability(machineId, cap, signal);
 		}
 	} catch (e) {
 		throw agentErrorToHttp(e);
 	}
 
 	const requestId = startRequestId(auth, idemKey);
-	const spec = coreSpec(body, requestId);
+	const spec: CommandSpec = { ...plan.core, requestId };
 	const { command, replayed } =
 		idemKey === undefined
 			? {
 					command: await svc.createCommand(p, sandbox.id, spec),
 					replayed: false,
 				}
-			: await svc.createCommandWithKey(p, sandbox.id, spec, idemKey, body);
+			: await svc.createCommandWithKey(
+					p,
+					sandbox.id,
+					spec,
+					idemKey,
+					plan.hashBody,
+				);
 	// A replay of a command of an earlier machine: its process is gone.
 	requireSameMachine(command, machineId);
 	if (replayed && isTerminalStatus(command.status)) {
@@ -166,7 +206,7 @@ export async function startCommand(
 	try {
 		const r = await deps.agent.start(
 			machineId,
-			{ commandId: command.id, spec: agentSpec(body) },
+			{ commandId: command.id, spec: plan.agent },
 			// Not aborted with the request: a Start cut short has an unknown outcome.
 			{ requestId },
 		);
