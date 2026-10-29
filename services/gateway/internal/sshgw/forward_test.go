@@ -587,6 +587,33 @@ func TestSSHAPIDownNotAFailure(t *testing.T) {
 	}
 }
 
+// TestSSHAllowedWithoutTeamFailsClosed: an allowed answer without teamId
+// would make the member and team revocations miss the session, so the
+// login is refused as an api failure, for users and team keys alike.
+func TestSSHAllowedWithoutTeamFailsClosed(t *testing.T) {
+	f := newFixture(t, nil)
+	user := f.userAuth("usr_1")
+	user.TeamID = ""
+	teamKey := f.userAuth("")
+	teamKey.Actor = cpapi.SSHActor{Kind: "team_key", APIKeyID: "key_1"}
+	teamKey.UserID, teamKey.Email, teamKey.TeamID = "", "", ""
+	for i, auth := range []cpapi.SSHAuthorization{user, teamKey} {
+		key := newSigner(t)
+		f.allowKey(key.PublicKey(), auth)
+		if _, err := f.dial(f.slug, ssh.PublicKeys(key)); err == nil {
+			t.Fatalf("%s: login allowed without teamId", auth.Actor.Kind)
+		}
+		want := float64(i + 1)
+		eventually(t, "the unavailable metric", func() bool { return f.authMetric("unavailable") == want })
+	}
+	if got := f.authMetric("fail"); got != 0 {
+		t.Fatalf("ssh_auth_total{fail} = %v", got)
+	}
+	if n := len(f.sshd.KeyIDs()); n != 0 {
+		t.Fatalf("backend reached %d times", n)
+	}
+}
+
 // TestExecThenImmediateEOF: like ssh -n, the client sends exec and its EOF
 // back to back; the command still sees its stdin end.
 func TestExecThenImmediateEOF(t *testing.T) {

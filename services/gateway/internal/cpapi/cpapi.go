@@ -114,7 +114,8 @@ type SSHActor struct {
 }
 
 // SSHAuthorization is the answer of ssh/authorize. TeamID is the sandbox's
-// team in public format; the revoke matching of spec 9.5 needs it.
+// team in public format; the revoke matching of spec 9.5 needs it, so an
+// allowed answer without it is refused as an api failure.
 type SSHAuthorization struct {
 	Allowed      bool     `json:"allowed"`
 	Actor        SSHActor `json:"actor"`

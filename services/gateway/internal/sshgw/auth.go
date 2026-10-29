@@ -133,6 +133,12 @@ func (s *Server) authenticate(ctx context.Context, meta ssh.ConnMetadata, key ss
 		s.log.Error("sshgw: ssh/authorize allowed without a valid actor", "user", user, "actor_kind", auth.Actor.Kind)
 		return nil, errUnavailable
 	}
+	// The member and team revocations match on the team (spec 9.5): a
+	// session without one could not be revoked that way. Fail closed.
+	if auth.TeamID == "" {
+		s.log.Error("sshgw: ssh/authorize allowed without a teamId", "user", user, "sandbox_id", auth.SandboxID)
+		return nil, errUnavailable
+	}
 	id.Auth = auth
 	b, err := json.Marshal(id)
 	if err != nil {
