@@ -165,8 +165,18 @@ describe("parseKnownHosts host forms", () => {
 		expect(parseKnownHosts(text, "100.64.10.3")).toHaveLength(0);
 	});
 
-	it("ignores @revoked and @cert-authority lines", () => {
-		const text = `@revoked pve ssh-ed25519 ${key}\n@cert-authority pve ssh-ed25519 ${key}\n`;
+	it("never pins a key that a @revoked line lists, for any host pattern", () => {
+		const other = Buffer.from("OTHER").toString("base64");
+		for (const revoked of ["pve", "*", "elsewhere"]) {
+			const text = `pve ssh-ed25519 ${key}\npve ssh-ed25519 ${other}\n@revoked ${revoked} ssh-ed25519 ${key}\n`;
+			expect(
+				parseKnownHosts(text, "pve").map((b) => b.toString("base64")),
+			).toEqual([other]);
+		}
+	});
+
+	it("does not take @cert-authority keys as host keys", () => {
+		const text = `@cert-authority pve ssh-ed25519 ${key}\n`;
 		expect(parseKnownHosts(text, "pve")).toHaveLength(0);
 	});
 });

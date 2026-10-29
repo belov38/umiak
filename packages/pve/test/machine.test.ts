@@ -213,7 +213,9 @@ describe("create", () => {
 describe("snapshot and fork", () => {
 	it("snapshots a running machine with QGA freeze and stores metadata without identity", async () => {
 		const { api, log, machines, store } = setup();
-		const a = await machines.create({ smbios: { uuid: "ua", serial: "sa" } });
+		const a = await machines.create({
+			smbios: { uuid: "uuid-src-a", serial: "serial-src-a" },
+		});
 		await machines.start(a.vmid);
 		log.length = 0;
 		const s = await machines.snapshot(a.vmid);
@@ -230,7 +232,10 @@ describe("snapshot and fork", () => {
 			memory: "2048",
 		});
 		expect(store.getSnapshot(s.id)).toEqual(s);
-		expect(JSON.stringify(store.getSnapshot(s.id))).not.toContain("ua");
+		// Identity values contain "-", which random snapshot ids ([a-z0-9]) never do.
+		const stored = JSON.stringify(store.getSnapshot(s.id));
+		expect(stored).not.toContain("uuid-src-a");
+		expect(stored).not.toContain("serial-src-a");
 		expect(api.vms.get(500)?.status).toBe("running");
 	});
 
@@ -270,7 +275,9 @@ describe("snapshot and fork", () => {
 
 	it("forks with new identity and the snapshot's hardware and disks", async () => {
 		const { api, node, machines } = setup();
-		const a = await machines.create({ smbios: { uuid: "ua", serial: "sa" } });
+		const a = await machines.create({
+			smbios: { uuid: "uuid-src-a", serial: "serial-src-a" },
+		});
 		await machines.start(a.vmid);
 		const s = await machines.snapshot(a.vmid);
 		const f = await machines.fork(s, { smbios: { uuid: "uf", serial: "sf" } });
@@ -293,7 +300,9 @@ describe("snapshot and fork", () => {
 
 	it("never copies smbios1 from the source even without a caller value", async () => {
 		const { api, machines } = setup();
-		const a = await machines.create({ smbios: { uuid: "ua", serial: "sa" } });
+		const a = await machines.create({
+			smbios: { uuid: "uuid-src-a", serial: "serial-src-a" },
+		});
 		const s = await machines.snapshot(a.vmid);
 		await machines.fork(s, {});
 		const post =
@@ -467,7 +476,23 @@ describe("review fixes", () => {
 		};
 		await machines.delete(a.vmid);
 		expect(releases).toBe(2);
+		expect(machines.dhcpReleaseRetries).toBe(1);
 		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("releases even when the first lease read comes back empty", async () => {
+		const { node, machines } = setup();
+		const a = await machines.create({});
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		let reads = 0;
+		node.handlers["dhcp.leases"] = () => ({
+			leases: ++reads === 1 ? [] : node.leases,
+			ethers: [],
+		});
+		await machines.delete(a.vmid);
+		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(1);
+		expect(node.leases).toEqual([]);
+		expect(machines.dhcpReleaseRetries).toBe(0);
 	});
 
 	it("reports a lease that survives every release", async () => {

@@ -30,7 +30,10 @@ function hostMatches(pattern: string, names: string[]): boolean {
 
 /**
  * Raw public keys pinned for host in an OpenSSH known_hosts file. Like OpenSSH, a non-standard
- * port is written as [host]:port; hashed names are supported, wildcards and markers are not.
+ * port is written as [host]:port, and hashed names are supported; wildcard patterns are not.
+ * A key on any @revoked line is never pinned, whatever its host pattern (stricter than OpenSSH,
+ * since wildcards such as "@revoked *" are not matched here). @cert-authority lines are ignored:
+ * host certificates are not supported.
  */
 export function parseKnownHosts(
 	text: string,
@@ -39,15 +42,19 @@ export function parseKnownHosts(
 ): Buffer[] {
 	const names = port === 22 ? [host, `[${host}]:22`] : [`[${host}]:${port}`];
 	const keys: Buffer[] = [];
+	const revoked: Buffer[] = [];
 	for (const line of text.split("\n")) {
 		const t = line.trim();
-		if (!t || t.startsWith("#") || t.startsWith("@")) continue;
-		const [hosts, , blob] = t.split(/\s+/);
+		if (!t || t.startsWith("#")) continue;
+		const fields = t.split(/\s+/);
+		const marker = fields[0]?.startsWith("@") ? fields.shift() : undefined;
+		const [hosts, , blob] = fields;
 		if (!hosts || !blob) continue;
-		if (hosts.split(",").some((p) => hostMatches(p, names)))
+		if (marker === "@revoked") revoked.push(Buffer.from(blob, "base64"));
+		else if (!marker && hosts.split(",").some((p) => hostMatches(p, names)))
 			keys.push(Buffer.from(blob, "base64"));
 	}
-	return keys;
+	return keys.filter((k) => !revoked.some((r) => r.equals(k)));
 }
 
 export interface SshNodeOpsOptions {

@@ -167,6 +167,8 @@ type Source = { kind: "template" } | { kind: "snapshot"; snap: SnapshotRef };
 /** Machine primitives on top of the PVE API, sbx-node and a storage driver (spec §6.3). */
 export class Machines {
 	readonly qga: Qga;
+	/** Extra dhcp.release rounds in delete verification, reported by the bench. */
+	dhcpReleaseRetries = 0;
 	readonly #o: MachinesOptions;
 	readonly #sem: Semaphore;
 	#template:
@@ -557,12 +559,13 @@ export class Machines {
 				(d.ethers ?? []).some((l) => l.mac === m)
 			);
 		};
-		let left = await hasLease();
-		// Proxmox removes neither the dnsmasq lease nor the ethers mapping on VM delete.
-		// dhcp_release only sends a DHCPRELEASE packet: dnsmasq rewrites its lease file shortly
-		// after, and may drop the packet (seen with concurrent releases), so it is sent again.
-		// Releasing a lease that is already gone does nothing.
+		// Proxmox removes neither the dnsmasq lease nor the ethers mapping on VM delete, so release
+		// always, without trusting a first read. dhcp_release only sends a DHCPRELEASE packet:
+		// dnsmasq rewrites its lease file shortly after, and may drop the packet (seen with
+		// concurrent releases), so it is sent again. Releasing a lease that is gone does nothing.
+		let left = true;
 		for (let round = 0; round < 3 && left; round++) {
+			if (round > 0) this.dhcpReleaseRetries++;
 			await node.call("dhcp.release", { mac });
 			for (let i = 0; i < 10 && left; i++) {
 				left = await hasLease();

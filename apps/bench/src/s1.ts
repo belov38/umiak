@@ -355,6 +355,7 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 			serialVisibility,
 			checks,
 			worldDiff,
+			dhcpReleaseRetries: machines.dhcpReleaseRetries,
 		},
 		secrets,
 	);
@@ -373,6 +374,7 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 		`s1-${startedAt.toISOString().replace(/[:.]/g, "-")}.json`,
 	);
 	writeFileSync(file, `${JSON.stringify(result, null, 2)}\n`);
+	log(`DHCP release retries: ${machines.dhcpReleaseRetries}`);
 	log(`results: ${file}`);
 	return result.checks.every((c) => c.ok) ? 0 : 1;
 }
