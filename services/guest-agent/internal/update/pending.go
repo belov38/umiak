@@ -36,6 +36,19 @@ func readPending(l paths.Layout) (p Pending, ok bool, err error) {
 	return p, true, nil
 }
 
+// ReadPending returns pending-update.json; ok is false when there is none.
+// The agent reads it before CheckPending to name the reason of its start.
+func ReadPending(l paths.Layout) (p Pending, ok bool, err error) {
+	return readPending(l)
+}
+
+// RollbackRecorded reports whether a rollback waits to be reported as
+// update.result{rolled_back} by the next CheckPending.
+func RollbackRecorded(l paths.Layout) bool {
+	_, err := os.Stat(rollbackResultFile(l))
+	return err == nil
+}
+
 // writePending records p durably.
 func writePending(l paths.Layout, p Pending) error {
 	if err := os.MkdirAll(filepath.Dir(l.PendingUpdateFile), 0o755); err != nil {

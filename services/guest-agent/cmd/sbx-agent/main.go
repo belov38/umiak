@@ -16,14 +16,15 @@ var version = "dev"
 const usage = `usage: sbx-agent <command>
 
 commands:
-  run               run the agent daemon
+  run [--debug-listen unix:<path> [--debug-confirm]]
+                    run the agent daemon (the debug flags are a test aid)
   shim --id <id>    command supervisor (started by the agent)
   identity apply    apply the machine identity (sbx-identity.service)
   quiesce-watchdog --lease <id>
                     thaw a quiesce lease when it expires (started by the agent)
   rollback [--to <version>]
                     roll back an unfinished update, or switch to a version
-  doctor            print diagnostics
+  doctor [--json]   print diagnostics
   thaw --force      thaw every filesystem and unpause every paused container
   install-package [--no-activate] [--no-units] [--write-config] <tar>
                     install a signed agent package
@@ -73,16 +74,13 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 		return rollbackCmd(d, args[1:], stderr)
 	case "selftest":
 		return selftestCmd(d, args[1:], stdout, stderr)
-	case "run", "doctor":
-		return notImplemented(stderr, args[0])
+	case "run":
+		return runAgent(ctx, d, args[1:], stderr)
+	case "doctor":
+		return doctorCmd(ctx, d, args[1:], stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "sbx-agent: unknown command %q\n\n", args[0])
 		_, _ = io.WriteString(stderr, usage)
 		return 2
 	}
-}
-
-func notImplemented(stderr io.Writer, name string) int {
-	_, _ = fmt.Fprintf(stderr, "sbx-agent %s: not implemented\n", name)
-	return 1
 }

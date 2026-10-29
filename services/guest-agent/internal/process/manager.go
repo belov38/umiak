@@ -471,6 +471,16 @@ func (m *Manager) RemoveRecord(id string) error {
 	return nil
 }
 
+// UnitAlive reports whether the unit of command id still runs (main process
+// or leftovers), as Counts counts it. It is the running filter of
+// update.ShimVersions: only the shims of such commands are alive.
+func (m *Manager) UnitAlive(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.cmds[id]
+	return ok && (c.unitAlive || c.mainAlive)
+}
+
 func (m *Manager) unitAliveOf(c *command) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

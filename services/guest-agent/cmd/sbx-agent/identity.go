@@ -13,8 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/agent"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/docker"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
@@ -39,6 +41,10 @@ type deps struct {
 	sleep func(time.Duration)
 	// executable returns the path of the running binary (selftest).
 	executable func() (string, error)
+	// isActive returns `systemctl is-active <unit>` (doctor, docker phase).
+	isActive func(ctx context.Context, unit string) string
+	// statfs reports the size and free space of a filesystem (doctor).
+	statfs func(path string) (total, free uint64, err error)
 	// embeddedKeys, units and configTemplate are the packaging files
 	// embedded in the binary.
 	embeddedKeys   []byte
@@ -64,6 +70,8 @@ func defaultDeps() deps {
 		systemctl:      update.Systemctl,
 		sleep:          time.Sleep,
 		executable:     os.Executable,
+		isActive:       agent.SystemctlIsActive,
+		statfs:         output.DefaultStatfs,
 		embeddedKeys:   packaging.UpdateKeys,
 		units:          packaging.Units,
 		configTemplate: packaging.AgentTOML,
