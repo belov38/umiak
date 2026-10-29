@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -52,10 +53,16 @@ const pgInvalidText = "22P02"
 // Store reads and writes the tunnel registry tables.
 type Store struct {
 	pool *pgxpool.Pool
+	// listenIdle and listenPingTimeout drive the liveness check of the
+	// LISTEN connection (see Listen); tests shorten them.
+	listenIdle, listenPingTimeout time.Duration
+	listenPings                   atomic.Int64
 }
 
 // New returns a Store on top of pool.
-func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func New(pool *pgxpool.Pool) *Store {
+	return &Store{pool: pool, listenIdle: listenIdle, listenPingTimeout: listenPingTimeout}
+}
 
 // Session is a row of tunnel.tunnel_sessions.
 type Session struct {
