@@ -277,7 +277,7 @@ unique (sandbox_id) where state in ('pending', 'running')
 idempotency_keys(
   principal_id uuid, key text,      -- principal = API key or user
   scope text,                       -- 'sandboxes.create', 'sandboxes.fork', ...
-  request_hash bytea,               -- sha256 of the canonical request body
+  request_hash bytea,               -- key version || HMAC of the canonical request body (§13.1)
   operation_id uuid, sandbox_id uuid,
   response jsonb,                   -- what the service returned the first time
   created_at, expires_at,           -- 24 h
@@ -424,6 +424,8 @@ interface ConfigReader {
 | `creating`, `ready`, `stopped`, `starting`, `stopping` без активной операции | VM machine пропала в Proxmox | `error` (`machine_lost`) | reconciler |
 
 `error` с `machine_lost` терминален по смыслу: VM-конфига нет, а восстановления VM из оставшихся дисков в фазе 1 нет. Разрешён только delete. Если пропажу обнаруживает шаг активной операции, операция сама падает с тем же кодом.
+
+`error` с `machine_state_conflict`: шаг create (и fork-цели), stop, resume или recover нашёл machine не в том состоянии, которого ждал (её сдвинул другой участник — reconcile, delete, устаревший исполнитель; у sandbox нет machine; не записан VMID). VM при этом может существовать, поэтому machine не помечается `machine_lost`. Как и `machine_lost`, этот код побеждает код операции (`create_failed`, `stop_failed`, `resume_failed`). Create и fork-цель отдают свои machine на удаление (`deleting`, `machine-op delete`); stop, resume и recover machine не трогают (без hard stop) — её разбирает reconcile (§11). Дальше действуют общие правила `error`: delete — всегда; resume — если machine `stopped`; recover — если machine не `failed`/`deleting`/`deleted`.
 
 `health` и `activity` — поля, а не состояния:
 - `health = degraded`, если `state = ready` и агента нет дольше 60 s (§11.1). Возврат в `ok` — по событию `connected`.
@@ -779,6 +781,7 @@ VM machine в `running` выключена без нашей операции (�
 - **Где хранятся.** Env, секреты и secret-файлы sandbox (из create, fork, resume и `PUT`/`PATCH /env`, S7 §8.3) хранятся в `sandbox_secrets` в виде одного зашифрованного блоба `{env, secrets, secretFiles}`.
 - **Шифрование.** AES-256-GCM через `node:crypto`, случайный 96-битный nonce на запись, AAD = `sandbox:<sandboxId>:v<keyVersion>`.
 - **Ключи.** Кольцо из Kubernetes Secret, файл `SBX_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Ротация: новый ключ становится `current`, контроллер `cleanup` перешифровывает строки со старой версией, старый ключ убирается после нуля строк (метрика).
+- **Hash тела запроса.** Тела create, fork и resume содержат значения env и секретов, поэтому `idempotency_keys.request_hash` и `operations.request.bodyHash` — не голый sha256, а `версия ключа (uint32 BE) || HMAC-SHA256(подключ, scope "\n" каноническое тело)`; подключ — HKDF-SHA256 от ключа данных этой версии (`info = sbx-request-hash/v1`). Сравнение пересчитывает HMAC на версии из сохранённого hash, поэтому ротация в пределах 24 h не ломает повтор с тем же `Idempotency-Key`. Старый ключ держать в кольце не меньше 24 h после ротации: hash, чей ключ уже убран, не совпадает ни с чем (`idempotency_key_reused`, дубля нет).
 - **Доставка.** Секреты передаются агенту при каждом claim, resume, recover и reprovision (`System/Claim`). В госте они живут только в tmpfs (Linux) или в каталоге с ACL SYSTEM (Windows) и стираются при stop (S3).
 - **Fork.** Наследует env и секреты источника: расшифровка, наложение значений из запроса (§7.7) и шифрование с AAD цели. Saved snapshot секретов не несёт.
 - **Delete.** Строка `sandbox_secrets` удаляется (crypto-erase для этой sandbox).
@@ -860,8 +863,8 @@ S5 пишет `template_builds` (через `sbx-admin template register|promote
 | `sandbox-op` | `singleton` | `sandboxId` | `{operationId}` | `heartbeatSeconds 30`, `expireInSeconds 3600`, `retryLimit 20`, `retryBackoff`, `retryDelay 2`, `retryDelayMax 120`, dead letter `sandbox-op-dlq` |
 | `machine-op` | `singleton` | `machineId` | `{machineId, action: provision \| delete}` | как выше |
 | `snapshot-op` | `singleton` | `snapshotId` | `{snapshotId, action: delete}` | как выше |
-| `machine-events` | `stately` | `machineId` | `{machineId}` | `retryLimit 10`, `retryBackoff` |
-| `ctl-pool`, `ctl-health`, `ctl-autostop`, `ctl-reconcile`, `ctl-cleanup` | `exclusive` | — | `{}` | см. ниже |
+| `machine-events` | `stately` | `machineId` | `{machineId}` | `heartbeatSeconds 30`, `expireInSeconds 300`, `retryLimit 10`, `retryBackoff` (без heartbeat задание умершего пода держало бы события machine до истечения, 15 min) |
+| `ctl-pool`, `ctl-health`, `ctl-autostop`, `ctl-reconcile`, `ctl-cleanup` | `exclusive` | — | `{}` | `heartbeatSeconds 30`, `expireInSeconds 900`; см. ниже |
 
 - Задание операции — только триггер; источник правды — строка `operations`. Повторная доставка безопасна (§7.1).
 - **Fencing.** Singleton и heartbeat pg-boss не защищают от зависшего пода, который потерял связь с БД, но ещё ходит в Proxmox: задание вернётся, и исполнителей станет два. Поэтому каждый обработчик при старте увеличивает счётчик (`operations.attempt`, `machines.exec_attempt` для `machine-op`) и пишет каждый шаг условно по своему значению (§7.1). Старый исполнитель на первой же записи получает ноль строк и выходит. Его вызов Proxmox в полёте безвреден: шаги идемпотентны, аллокатор выдаёт одной machine один lease (§5.3), а частичная подготовка выбрасывается при повторе (§7.4).
