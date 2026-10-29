@@ -1,0 +1,23 @@
+{
+	"name": "@sbx/db",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Postgres foundation: SQL migration runner, Drizzle schema, transactions, test Postgres helpers",
+	"exports": {
+		".": "./src/index.ts",
+		"./testing": "./src/testing/index.ts",
+		"./testing/global-setup": "./src/testing/global-setup.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"drizzle-orm": "0.45.4",
+		"pg": "8.23.1"
+	},
+	"devDependencies": {
+		"@types/pg": "8.23.1"
+	}
+}
