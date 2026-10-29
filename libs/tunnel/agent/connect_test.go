@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 
 func TestConnectPolicy(t *testing.T) {
@@ -126,6 +128,50 @@ func TestCustomDialHook(t *testing.T) {
 		if calls[i] != want[i] {
 			t.Fatalf("calls = %v, want %v", calls, want)
 		}
+	}
+}
+
+func TestConnectDialErrorHeader(t *testing.T) {
+	cfg := fastConfig()
+	var (
+		mu  sync.Mutex
+		err error
+	)
+	cfg.Dial = func(context.Context, string, int) (net.Conn, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return nil, err
+	}
+	e := startEnv(t, cfg, nil)
+	c := e.gw.nextConn()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"refused", &agent.DialError{Reason: "refused", Err: errors.New("connection refused")}, "refused"},
+		{"timeout", &agent.DialError{Reason: "timeout"}, "timeout"},
+		{"wrapped", fmt.Errorf("dial: %w", &agent.DialError{Reason: "refused"}), "refused"},
+		{"empty reason", &agent.DialError{Err: errors.New("x")}, ""},
+		{"plain", errors.New("no route"), ""},
+	} {
+		mu.Lock()
+		err = tc.err
+		mu.Unlock()
+		s := dialConnect(t, c, "127.0.0.1:1234")
+		if s.status != http.StatusBadGateway {
+			t.Errorf("%s: status %d, want 502", tc.name, s.status)
+		}
+		if got := s.header.Get(wire.HeaderDialError); got != tc.want {
+			t.Errorf("%s: %s = %q, want %q", tc.name, wire.HeaderDialError, got, tc.want)
+		}
+	}
+
+	var de *agent.DialError
+	inner := errors.New("inner")
+	if !errors.As(error(&agent.DialError{Reason: "refused", Err: inner}), &de) || !errors.Is(de, inner) {
+		t.Error("DialError does not unwrap to Err")
 	}
 }
 

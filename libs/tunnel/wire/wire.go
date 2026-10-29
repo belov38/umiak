@@ -39,6 +39,9 @@ const (
 	// HeaderTCPDrainDeadline carries the drain deadline in milliseconds of a
 	// peer CONNECT stream on the gateway internal listener (additive, S4).
 	HeaderTCPDrainDeadline = "Sbx-Tcp-Drain-Deadline-Ms"
+	// HeaderDialError carries the reason ("refused", "timeout") on the 502
+	// answer of a CONNECT whose target dial failed (additive, S4).
+	HeaderDialError = "Sbx-Dial-Error"
 )
 
 // Agent-defined response headers the gateway passes to callers. Every other
