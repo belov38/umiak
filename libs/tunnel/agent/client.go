@@ -102,6 +102,9 @@ type Config struct {
 	// Events/Subscribe (default 1 MiB, the gateway's read limit). A larger
 	// event is replaced by a wire.EventTypeTooLarge stub with the same seq,
 	// time and boot_id, and logged, so the stream neither breaks nor skips.
+	// It must not exceed the gateway's Timing.MaxEventBytes: an event between
+	// the two sizes would end the stream at every resubscribe and stall the
+	// machine's events.
 	MaxEventBytes int
 	// DialPolicy checks CONNECT targets; nil is LocalOnly().
 	DialPolicy DialPolicy

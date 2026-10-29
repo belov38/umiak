@@ -56,7 +56,10 @@ type Timing struct {
 	// MaxEventBytes is the largest Events/Subscribe message the gateway reads
 	// (1 MiB, plus a small envelope allowance). A larger one ends the stream;
 	// the pump resubscribes with its backoff. Agents replace such events
-	// with an sbx.tunnel.event_too_large stub before sending.
+	// with an sbx.tunnel.event_too_large stub before sending. The agents'
+	// agent.Config.MaxEventBytes must not exceed it: an event between the
+	// two sizes would end the stream at every resubscribe and stall the
+	// machine's events.
 	MaxEventBytes int
 	// EventBatchInterval is the longest a batch waits after its first event (1 s).
 	EventBatchInterval time.Duration
