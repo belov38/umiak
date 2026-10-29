@@ -190,10 +190,7 @@ func (c *Client) call(ctx context.Context, req Message, want string) (Message, e
 		c.mu.Unlock()
 	}()
 
-	c.wmu.Lock()
-	err := Write(c.conn, req)
-	c.wmu.Unlock()
-	if err != nil {
+	if err := c.write(ctx, req); err != nil {
 		return Message{}, err
 	}
 
@@ -203,7 +200,7 @@ func (c *Client) call(ctx context.Context, req Message, want string) (Message, e
 		case want:
 			return r, nil
 		case TypeError:
-			return Message{}, &Error{Code: r.Code, Message: r.Text}
+			return Message{}, &Error{Code: r.Code, Message: r.Text, Written: r.Written}
 		default:
 			return Message{}, fmt.Errorf("shimproto: %s: unexpected reply %q", req.Type, r.Type)
 		}
@@ -212,6 +209,26 @@ func (c *Client) call(ctx context.Context, req Message, want string) (Message, e
 	case <-ctx.Done():
 		return Message{}, ctx.Err()
 	}
+}
+
+// write sends one frame under the deadline of ctx. A failed write may leave
+// half a frame on the stream, so it closes the connection.
+func (c *Client) write(ctx context.Context, m Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	dl, _ := ctx.Deadline()
+	_ = c.conn.SetWriteDeadline(dl)
+	stop := context.AfterFunc(ctx, func() { _ = c.conn.SetWriteDeadline(time.Unix(1, 0)) })
+	err := Write(c.conn, m)
+	stop()
+	if err != nil {
+		_ = c.conn.Close()
+		return ctxErr(ctx, err)
+	}
+	return nil
 }
 
 func (c *Client) closedErr() error {

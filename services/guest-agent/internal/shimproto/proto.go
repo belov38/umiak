@@ -162,9 +162,11 @@ type Message struct {
 	Sig    int  `json:"sig,omitempty"`
 	Cgroup bool `json:"cgroup,omitempty"`
 
-	// Code and Text form an error reply.
-	Code string `json:"code,omitempty"`
-	Text string `json:"message,omitempty"`
+	// Code and Text form an error reply. Written is the number of input
+	// bytes that reached the process before a failed input.
+	Code    string `json:"code,omitempty"`
+	Text    string `json:"message,omitempty"`
+	Written uint64 `json:"written,omitempty"`
 
 	// Exit is the payload of an exited push.
 	Exit *ExitFile `json:"exit,omitempty"`
@@ -176,6 +178,9 @@ type Error struct {
 	Code string
 	// Message is a human-readable description.
 	Message string
+	// Written is the number of input bytes the process got before a failed
+	// input; its seq then counts as applied.
+	Written uint64
 }
 
 // Error implements error.

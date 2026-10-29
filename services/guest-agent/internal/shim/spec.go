@@ -33,9 +33,9 @@ const (
 // DefaultTerm is TERM for a PTY command whose spec names none.
 const DefaultTerm = "xterm-256color"
 
-// TimeoutGrace is the grace between SIGTERM and the cgroup kill when
-// Spec.TimeoutMs expires.
-const TimeoutGrace = 10 * time.Second
+// DefaultKillGrace is the grace between SIGTERM and the cgroup kill when
+// Spec.TimeoutMs expires and Spec.KillGraceMs is 0.
+const DefaultKillGrace = 10 * time.Second
 
 // Spec is the full command description the agent writes to CmdSpec(id) (mode
 // 0600, tmpfs) before starting the unit. The shim reads and deletes it. The
@@ -62,6 +62,8 @@ type Spec struct {
 	Stdin bool `json:"stdin"`
 	// TimeoutMs kills the command (reason TIMEOUT) after this long; 0 = none.
 	TimeoutMs uint64 `json:"timeoutMs"`
+	// KillGraceMs is the grace of the timeout kill; 0 = DefaultKillGrace.
+	KillGraceMs uint64 `json:"killGraceMs"`
 	// KillLeftovers kills the rest of the payload when the main process exits.
 	KillLeftovers bool `json:"killLeftovers"`
 	// AgentVersion is the version of the agent that started the shim.

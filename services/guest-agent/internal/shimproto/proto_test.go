@@ -25,7 +25,7 @@ func TestFrameRoundTrip(t *testing.T) {
 			LastSeq: map[string]uint64{"s1": 7}, Leftovers: true}},
 		{"input", Message{Type: TypeInput, ID: 3, Session: "s", Seq: 9, Data: []byte{0, 1, 0xff}, CloseStdin: true}},
 		{"kill", Message{Type: TypeKill, ID: 4, GraceMs: 100, FirstSignal: int(syscall.SIGHUP), Reason: ReasonPTYIdle}},
-		{"error", Message{Type: TypeError, ID: 5, Code: CodeShimOutdated, Text: "too old"}},
+		{"error", Message{Type: TypeError, ID: 5, Code: CodeInternal, Text: "partial", Written: 7}},
 		{"exited", Message{Type: TypeExited, Exit: &ExitFile{Status: StatusKilled, Code: 137, Signal: "SIGKILL",
 			Reason: ReasonOOM, StdoutEnd: 10, StderrEnd: 20, EndedAt: ended}}},
 	}
@@ -174,7 +174,7 @@ func TestClientCalls(t *testing.T) {
 			}
 			return []Message{{Type: TypeOK, ID: m.ID}}
 		case TypeSignal:
-			return []Message{{Type: TypeError, ID: m.ID, Code: CodeCommandExited, Text: "gone"}}
+			return []Message{{Type: TypeError, ID: m.ID, Code: CodeCommandExited, Text: "gone", Written: 3}}
 		case TypeResize:
 			if m.Cols != 100 || m.Rows != 40 {
 				return []Message{{Type: TypeError, ID: m.ID, Code: CodeInvalidArgument}}
@@ -219,8 +219,15 @@ func TestClientCalls(t *testing.T) {
 	}
 	err = c.Signal(ctx, syscall.SIGKILL, true)
 	var pe *Error
-	if !errors.As(err, &pe) || pe.Code != CodeCommandExited {
-		t.Errorf("Signal: err = %v, want %s", err, CodeCommandExited)
+	if !errors.As(err, &pe) || pe.Code != CodeCommandExited || pe.Written != 3 {
+		t.Errorf("Signal: err = %#v, want %s with written 3", err, CodeCommandExited)
+	}
+
+	// A cancelled context fails the call and closes the connection.
+	cctx, ccancel := context.WithCancel(ctx)
+	ccancel()
+	if _, err := c.Status(cctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("Status with cancelled ctx: err = %v", err)
 	}
 
 	_ = c.Close()

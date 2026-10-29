@@ -26,6 +26,9 @@ const (
 	// drainLimit bounds the final drain of one stream after the exit: the
 	// pipe buffer holds far less, so more means a leftover keeps writing.
 	drainLimit = 16 << 20
+	// maxPopulatedErrors is how many failed cgroup.events reads in a row
+	// (one per tick) make the payload count as empty.
+	maxPopulatedErrors = 20
 )
 
 // loop is the event loop: it copies output to the log files, detects the
@@ -63,7 +66,7 @@ func (s *shim) loop() {
 			}
 		}
 
-		ws, ok := s.reap(mainExited)
+		ws, ok := s.reap()
 		if ok && !mainExited {
 			mainExited = true
 			s.onExit(ws, buf)
@@ -150,8 +153,12 @@ func (s *shim) copy(st *stream, buf []byte, limit int) {
 
 // reap collects every exited child: the main process and orphans adopted as
 // subreaper, so leftovers never stay zombies. It returns the wait status of
-// the main process if it was reaped in this call.
-func (s *shim) reap(mainExited bool) (ws unix.WaitStatus, ok bool) {
+// the main process if it was reaped in this call. mainReaped is set under
+// mu together with the reap, so a request never signals the group of a
+// reaped (reusable) pid.
+func (s *shim) reap() (ws unix.WaitStatus, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for {
 		var st unix.WaitStatus
 		pid, err := unix.Wait4(-1, &st, unix.WNOHANG, nil)
@@ -161,7 +168,8 @@ func (s *shim) reap(mainExited bool) (ws unix.WaitStatus, ok bool) {
 		if err != nil || pid <= 0 {
 			return ws, ok
 		}
-		if pid == s.pid && !mainExited {
+		if pid == s.pid && !s.mainReaped {
+			s.mainReaped = true
 			ws, ok = st, true
 		}
 	}
@@ -215,13 +223,15 @@ func (s *shim) onExit(ws unix.WaitStatus, buf []byte) {
 
 	s.mu.Lock()
 	s.exited = true
-	s.exit = e
 	s.timeoutAt = time.Time{}
 	var conns []*conn
 	for c, ready := range s.conns {
 		if ready {
 			conns = append(conns, c)
 		}
+	}
+	if s.spec.KillLeftovers {
+		s.hardKillLocked()
 	}
 	s.mu.Unlock()
 	s.log.Info("shim: command exited", "status", e.Status, "code", e.Code, "signal", e.Signal, "reason", e.Reason)
@@ -231,43 +241,52 @@ func (s *shim) onExit(ws unix.WaitStatus, buf []byte) {
 			_ = c.c.Close()
 		}
 	}
-	if s.spec.KillLeftovers {
-		s.hardKill()
+
+	// Input is refused from now on; leftovers reading stdin get EOF.
+	s.reqMu.Lock()
+	if s.stdinFd >= 0 {
+		_ = unix.Close(s.stdinFd)
+		s.stdinFd = -1
 	}
+	s.reqMu.Unlock()
 }
 
 // runTimers fires the timeout and the cgroup kill after a grace.
 func (s *shim) runTimers() {
 	now := time.Now()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.timeoutAt.IsZero() && !now.Before(s.timeoutAt) {
 		s.timeoutAt = time.Time{}
 		if !s.exited {
 			s.log.Info("shim: timeout, killing the command")
-			s.killLocked(syscall.SIGTERM, TimeoutGrace, shimproto.ReasonTimeout)
+			s.killLocked(syscall.SIGTERM, s.spec.killGrace(), shimproto.ReasonTimeout)
 		}
 	}
-	hard := !s.hardKillAt.IsZero() && !now.Before(s.hardKillAt)
-	if hard {
+	if !s.hardKillAt.IsZero() && !now.Before(s.hardKillAt) {
 		s.hardKillAt = time.Time{}
-	}
-	s.mu.Unlock()
-	if hard {
-		s.hardKill()
+		s.hardKillLocked()
 	}
 }
 
 // finished reports whether the shim may exit after the main process has
 // exited: with a cgroup when the payload is empty (one last drain picks up
-// the final leftover output), without one when every stream is at EOF.
+// the final leftover output), without one when every stream is at EOF. A
+// cgroup.events that stays unreadable for maxPopulatedErrors checks counts
+// as empty, so a broken cgroup cannot keep the shim forever.
 func (s *shim) finished(buf []byte) bool {
 	if s.cg != nil {
 		populated, err := s.cg.populated()
 		if err != nil {
-			s.log.Error("shim: read cgroup.events", "err", err)
-			return false
+			s.popErrs++
+			if s.popErrs < maxPopulatedErrors {
+				return false
+			}
+			s.log.Error("shim: cgroup.events unreadable, treating the payload as empty", "err", err)
+			populated = false
 		}
 		if populated {
+			s.popErrs = 0
 			return false
 		}
 		for _, st := range s.streams {
@@ -285,16 +304,19 @@ func (s *shim) finished(buf []byte) bool {
 	return true
 }
 
-// killLocked sends sig to the process group and schedules the cgroup kill
-// after grace (now when grace is 0). The first kill before the exit sets the
-// exit reason. s.mu is held.
+// killLocked sends sig to the command and schedules the hard kill after
+// grace (now when grace is 0). Before the exit the first kill sets the exit
+// reason. After the exit it acts on leftovers only and is a no-op without
+// them (spec section 9.5). s.mu is held.
 func (s *shim) killLocked(sig syscall.Signal, grace time.Duration, reason string) {
-	if !s.exited && s.killReason == "" {
+	if s.exited {
+		if !s.leftoversLocked() {
+			return
+		}
+	} else if s.killReason == "" {
 		s.killReason = reason
 	}
-	if err := unix.Kill(-s.pid, sig); err != nil && !errors.Is(err, unix.ESRCH) {
-		s.log.Warn("shim: signal process group", "signal", unix.SignalName(sig), "err", err)
-	}
+	s.signalLocked(sig)
 	at := time.Now().Add(grace)
 	if s.hardKillAt.IsZero() || at.Before(s.hardKillAt) {
 		s.hardKillAt = at
@@ -302,27 +324,74 @@ func (s *shim) killLocked(sig syscall.Signal, grace time.Duration, reason string
 	s.wake()
 }
 
-// hardKill kills the whole payload: cgroup.kill, or SIGKILL to the process
-// group without a cgroup (or if cgroup.kill fails).
-func (s *shim) hardKill() {
+// signalLocked sends sig to the process group of the main process while it
+// is not reaped, afterwards to each leftover process. s.mu is held.
+func (s *shim) signalLocked(sig syscall.Signal) {
+	if !s.mainReaped {
+		// Not reaped yet (at worst a zombie): the pid and its group id
+		// cannot be reused.
+		if err := unix.Kill(-s.pid, sig); err != nil && !errors.Is(err, unix.ESRCH) {
+			s.log.Warn("shim: signal process group", "signal", unix.SignalName(sig), "err", err)
+		}
+		return
+	}
+	s.signalLeftovers(sig)
+}
+
+// signalLeftovers signals every process of the command one by one: the
+// payload members with a cgroup, the shim's descendants without one. It
+// returns how many were signalled.
+func (s *shim) signalLeftovers(sig syscall.Signal) int {
+	var pids []int
+	var owned func(int) bool
+	var err error
+	if s.cg != nil {
+		pids, err = s.cg.procs()
+		owned = s.cg.contains
+	} else {
+		pids, err = descendants(s.selfPid)
+		owned = func(pid int) bool { return isDescendant(pid, s.selfPid) }
+	}
+	if err != nil {
+		s.log.Warn("shim: list leftovers", "err", err)
+		return 0
+	}
+	n := 0
+	for _, pid := range pids {
+		if signalPid(pid, sig, owned) {
+			n++
+		}
+	}
+	return n
+}
+
+// hardKillLocked kills the whole command: cgroup.kill on the payload, or
+// SIGKILL to every process of the command without a cgroup (or if
+// cgroup.kill fails). s.mu is held.
+func (s *shim) hardKillLocked() {
 	if s.cg != nil {
 		err := s.cg.kill()
 		if err == nil {
 			return
 		}
-		s.log.Warn("shim: cgroup.kill failed, killing the process group", "err", err)
+		s.log.Warn("shim: cgroup.kill failed, killing process by process", "err", err)
 	}
-	if err := unix.Kill(-s.pid, syscall.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
-		s.log.Warn("shim: kill process group", "err", err)
+	if !s.mainReaped {
+		if err := unix.Kill(-s.pid, syscall.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+			s.log.Warn("shim: kill process group", "err", err)
+		}
 	}
+	// Also catches processes that left the group (setsid).
+	s.signalLeftovers(syscall.SIGKILL)
 }
 
-// leftovers reports whether processes of the command are still alive.
-func (s *shim) leftovers() bool {
+// leftoversLocked reports whether processes of the command are still alive
+// after the main process exited. s.mu is held.
+func (s *shim) leftoversLocked() bool {
 	if s.cg != nil {
 		populated, err := s.cg.populated()
 		return err == nil && populated
 	}
-	err := unix.Kill(-s.pid, 0)
-	return err == nil || errors.Is(err, unix.EPERM)
+	pids, err := descendants(s.selfPid)
+	return err == nil && len(pids) > 0
 }

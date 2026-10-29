@@ -6,10 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -33,17 +35,24 @@ const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 const shimOOMScoreAdj = "-900"
 
 // Main runs `sbx-agent shim --id <id> [--layout-root <dir>] [--no-cgroup]`
-// and returns the process exit code: 0 once the command and its leftovers
-// are done (also after a start failure, which is recorded in exit.json), 1 if
-// the shim itself fails before it can record anything, 2 on bad arguments.
+// with its log on os.Stderr (the unit's journal). See Run.
+func Main(args []string) int {
+	return Run(args, os.Stderr)
+}
+
+// Run is Main with an explicit log writer. It returns the process exit
+// code: 0 once the command and its leftovers are done (also after a start
+// failure, which is recorded in exit.json), 1 if the shim itself fails
+// before it can record anything, 2 on bad arguments.
 //
 // --layout-root runs against paths.ForRoot (tests and dev runs). --no-cgroup
-// skips the cgroup setup: the command runs in the shim's cgroup and is
-// killed through its process group (tests without systemd).
-func Main(args []string) int {
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+// skips the cgroup setup: the command runs in the shim's cgroup, its group
+// is signalled until the main process is reaped and the shim's descendants
+// afterwards (tests without systemd).
+func Run(args []string, stderr io.Writer) int {
+	log := slog.New(slog.NewTextHandler(stderr, nil))
 	fs := flag.NewFlagSet("shim", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	id := fs.String("id", "", "command id")
 	root := fs.String("layout-root", "", "use the agent layout under this directory")
 	noCgroup := fs.Bool("no-cgroup", false, "do not create the payload cgroup")
@@ -100,17 +109,22 @@ type shim struct {
 	wakeW     int
 	oomBase   uint64
 	ln        *net.UnixListener
+	// selfPid is the root of the process tree searched for leftovers
+	// without a cgroup: the shim itself, which is their subreaper.
+	selfPid int
+	// popErrs counts failed cgroup.events reads in a row (loop only).
+	popErrs int
 
 	// reqMu serializes the requests that touch the input state, so applying
 	// an input and advancing its seq are atomic.
 	reqMu   sync.Mutex
-	stdinFd int               // write end of the stdin pipe; -1 when none or closed
-	lastSeq map[string]uint64 // highest applied input seq per session
+	stdinFd int // write end of the stdin pipe; -1 when none or closed
+	seqs    seqTable
 
 	// mu guards the state shared between the event loop and the server.
 	mu         sync.Mutex
 	exited     bool
-	exit       ExitFile
+	mainReaped bool      // the main pid is reaped and may be reused
 	killReason string    // reason of the first kill before the exit
 	signalled  bool      // a signal request reached the group before the exit
 	timeoutAt  time.Time // Spec.TimeoutMs deadline; zero once fired or unset
@@ -130,7 +144,8 @@ func newShim(log *slog.Logger, l paths.Layout, id string) *shim {
 		wakeR:   -1,
 		wakeW:   -1,
 		stdinFd: -1,
-		lastSeq: make(map[string]uint64),
+		selfPid: os.Getpid(),
+		seqs:    newSeqTable(maxSessions),
 		conns:   make(map[*conn]bool),
 	}
 }
@@ -155,6 +170,13 @@ func (s *shim) run(useCgroup bool) error {
 	startErr := spec.validate(s.id)
 	if startErr == nil && useCgroup {
 		s.cg, startErr = setupCgroup(s.log)
+		if startErr == nil {
+			// Baseline before the start: an OOM kill of the main process
+			// shows as a growth past it.
+			if n, err := s.cg.oomKills(); err == nil {
+				s.oomBase = n
+			}
+		}
 	}
 	if startErr == nil {
 		if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
@@ -173,6 +195,10 @@ func (s *shim) run(useCgroup bool) error {
 	if startErr != nil {
 		return s.startFailed(startErr)
 	}
+	// The journal stream on fd 2 may break (journald restart); a write
+	// there must fail with EPIPE instead of killing the shim. Ignored only
+	// after the start: an ignored SIGPIPE would be inherited by the command.
+	signal.Ignore(syscall.SIGPIPE)
 
 	startedAt := time.Now()
 	if err := os.WriteFile("/proc/self/oom_score_adj", []byte(shimOOMScoreAdj), 0); err != nil {
@@ -182,11 +208,6 @@ func (s *shim) run(useCgroup bool) error {
 		ShimProto: shimproto.Version, Pid: s.pid, StartedAt: startedAt.UTC()}); err != nil {
 		// The process runs; exit.json and the socket still work.
 		s.log.Error("shim: write shim.json", "err", err)
-	}
-	if s.cg != nil {
-		if n, err := s.cg.oomKills(); err == nil {
-			s.oomBase = n
-		}
 	}
 	if spec.TimeoutMs > 0 {
 		s.timeoutAt = startedAt.Add(time.Duration(spec.TimeoutMs) * time.Millisecond) //nolint:gosec // bounded by the agent
@@ -370,6 +391,14 @@ func credential(s Spec) *syscall.Credential {
 	return &syscall.Credential{Uid: s.UID, Gid: s.GID, Groups: s.Groups}
 }
 
+// killGrace returns the grace of the timeout kill.
+func (s Spec) killGrace() time.Duration {
+	if s.KillGraceMs == 0 {
+		return DefaultKillGrace
+	}
+	return time.Duration(s.KillGraceMs) * time.Millisecond //nolint:gosec // bounded by the agent
+}
+
 // lookPath resolves a program without a slash in the PATH of env.
 func lookPath(prog string, env []string) (string, error) {
 	if strings.Contains(prog, "/") {
@@ -378,7 +407,8 @@ func lookPath(prog string, env []string) (string, error) {
 	search := defaultPath
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
-			search = v
+			search = v // the first one wins, as with getenv
+			break
 		}
 	}
 	for _, dir := range filepath.SplitList(search) {

@@ -21,7 +21,7 @@ func TestRun(t *testing.T) {
 		{"identity without apply", []string{"identity"}, 2, "", "usage"},
 		{"identity bad action", []string{"identity", "x"}, 2, "", "usage"},
 		{"run", []string{"run"}, 1, "", "not implemented"},
-		{"shim without id", []string{"shim"}, shimUsageCode(), "", ""},
+		{"shim without id", []string{"shim"}, shimUsageCode(), "", shimUsageErr()},
 		{"quiesce-watchdog", []string{"quiesce-watchdog"}, 1, "", "not implemented"},
 		{"rollback", []string{"rollback"}, 1, "", "not implemented"},
 		{"doctor", []string{"doctor"}, 1, "", "not implemented"},
@@ -53,4 +53,12 @@ func shimUsageCode() int {
 		return 2
 	}
 	return 1
+}
+
+// shimUsageErr is what `sbx-agent shim` without --id prints.
+func shimUsageErr() string {
+	if runtime.GOOS == "linux" {
+		return "usage: sbx-agent shim --id"
+	}
+	return "unsupported"
 }

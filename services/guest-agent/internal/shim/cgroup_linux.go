@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ var payloadControllers = []string{"memory", "pids", "cpu"}
 // and everything it spawns).
 type cgroup struct {
 	dir string // payload directory
+	rel string // payload path below the cgroup mount, as in /proc/<pid>/cgroup
 	fd  int    // open payload directory for CLONE_INTO_CGROUP
 }
 
@@ -63,7 +65,7 @@ func setupCgroup(log *slog.Logger) (*cgroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("shim: open payload cgroup: %w", err)
 	}
-	return &cgroup{dir: payload, fd: fd}, nil
+	return &cgroup{dir: payload, rel: path.Join(rel, "payload"), fd: fd}, nil
 }
 
 // ownCgroup returns the cgroup v2 path of the process from a
@@ -101,6 +103,27 @@ func writeCgroupFile(path, value string) error {
 // kill kills every process in the payload (cgroup.kill, kernel 5.14+).
 func (c *cgroup) kill() error {
 	return writeCgroupFile(filepath.Join(c.dir, "cgroup.kill"), "1")
+}
+
+// procs lists the processes in the payload.
+func (c *cgroup) procs() ([]int, error) {
+	data, err := os.ReadFile(filepath.Join(c.dir, "cgroup.procs"))
+	if err != nil {
+		return nil, err
+	}
+	var pids []int
+	for f := range strings.FieldsSeq(string(data)) {
+		if pid, err := strconv.Atoi(f); err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids, nil
+}
+
+// contains reports whether pid is currently in the payload.
+func (c *cgroup) contains(pid int) bool {
+	rel, err := ownCgroup("/proc/" + strconv.Itoa(pid) + "/cgroup")
+	return err == nil && rel == c.rel
 }
 
 // populated reports whether a process is left in the payload.

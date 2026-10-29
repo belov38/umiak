@@ -5,7 +5,6 @@ package shim
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"net"
 	"os"
 	"sync"
@@ -25,6 +24,8 @@ const (
 	// inputTimeout bounds one input write to a process that does not read
 	// its stdin.
 	inputTimeout = 5 * time.Second
+	// maxSessionLen is the longest accepted input session id.
+	maxSessionLen = 256
 )
 
 // conn is one agent connection.
@@ -115,6 +116,19 @@ func (s *shim) serve(sc *conn) {
 		if err != nil {
 			return
 		}
+		if m.Type == shimproto.TypeKill || m.Type == shimproto.TypeSignal {
+			// Kill and signal never wait behind an input blocked on a full
+			// stdin pipe, also on the same connection; the reply carries
+			// the request ID, so it may overtake earlier replies.
+			go func() {
+				reply := s.handle(m)
+				reply.ID = m.ID
+				if err := sc.send(reply); err != nil {
+					_ = sc.c.Close()
+				}
+			}()
+			continue
+		}
 		reply := s.handle(m)
 		reply.ID = m.ID
 		if err := sc.send(reply); err != nil {
@@ -145,7 +159,8 @@ func errReply(code, format string, args ...any) shimproto.Message {
 }
 
 // handle answers one request. Status, input and resize run under reqMu, one
-// at a time. Kill and signal only touch the loop state under mu, so a
+// at a time. Kill and signal only touch the loop state under mu and are
+// dispatched outside the connection's request order (see serve), so a
 // blocked input write cannot delay them.
 func (s *shim) handle(m shimproto.Message) shimproto.Message {
 	switch m.Type {
@@ -176,12 +191,14 @@ func (s *shim) handleStatus() shimproto.Message {
 	s.reqMu.Lock()
 	defer s.reqMu.Unlock()
 	r := shimproto.Message{Type: shimproto.TypeStatusReply, Pid: s.pid, State: shimproto.StateRunning,
-		LastSeq: maps.Clone(s.lastSeq)}
-	if s.isExited() {
+		LastSeq: s.seqs.snapshot()}
+	s.mu.Lock()
+	if s.exited {
 		r.State = shimproto.StateExited
 		r.Exited = true
-		r.Leftovers = s.leftovers()
+		r.Leftovers = s.leftoversLocked()
 	}
+	s.mu.Unlock()
 	return r
 }
 
@@ -193,13 +210,13 @@ func (s *shim) handleInput(m shimproto.Message) shimproto.Message {
 	if s.isExited() {
 		return errReply(shimproto.CodeCommandExited, "command exited")
 	}
-	if m.Session == "" {
-		return errReply(shimproto.CodeInvalidArgument, "empty input session")
+	if m.Session == "" || len(m.Session) > maxSessionLen {
+		return errReply(shimproto.CodeInvalidArgument, "input session must be 1..%d bytes", maxSessionLen)
 	}
 	if m.CloseStdin && s.ptyFd >= 0 {
 		return errReply(shimproto.CodeFailedPrecondition, "close_stdin does not apply to a pty, send ^D")
 	}
-	if m.Seq <= s.lastSeq[m.Session] {
+	if m.Seq <= s.seqs.last(m.Session) {
 		return shimproto.Message{Type: shimproto.TypeInputReply, Applied: false}
 	}
 	fd := s.stdinFd
@@ -215,16 +232,18 @@ func (s *shim) handleInput(m shimproto.Message) shimproto.Message {
 			if n > 0 {
 				// Part of the data reached the process: a retry must not
 				// write it again.
-				s.lastSeq[m.Session] = m.Seq
+				s.seqs.set(m.Session, m.Seq)
 			}
-			return errReply(shimproto.CodeInternal, "input: wrote %d of %d bytes: %v", n, len(m.Data), err)
+			r := errReply(shimproto.CodeInternal, "input: wrote %d of %d bytes: %v", n, len(m.Data), err)
+			r.Written = uint64(n) //nolint:gosec // n >= 0
+			return r
 		}
 	}
 	if m.CloseStdin && s.stdinFd >= 0 {
 		_ = unix.Close(s.stdinFd)
 		s.stdinFd = -1
 	}
-	s.lastSeq[m.Session] = m.Seq
+	s.seqs.set(m.Session, m.Seq)
 	return shimproto.Message{Type: shimproto.TypeInputReply, Applied: true}
 }
 
@@ -279,7 +298,8 @@ func (s *shim) handleResize(m shimproto.Message) shimproto.Message {
 
 // handleKill sends the first signal (default SIGTERM) to the process group
 // and kills the payload after the grace (spec section 9.5). After the exit
-// it acts on leftovers only and does not change exit.json.
+// it acts on leftovers only, is a no-op without them and never changes
+// exit.json.
 func (s *shim) handleKill(m shimproto.Message) shimproto.Message {
 	sig := syscall.SIGTERM
 	if m.FirstSignal != 0 {
@@ -303,22 +323,26 @@ func (s *shim) handleKill(m shimproto.Message) shimproto.Message {
 }
 
 // handleSignal sends a signal to the process group, or kills the whole
-// payload with cgroup set.
+// payload with cgroup set. After the exit it reaches the leftovers one by
+// one (SIGKILL with a cgroup: cgroup.kill) and is a no-op without them.
 func (s *shim) handleSignal(m shimproto.Message) shimproto.Message {
 	if err := checkSignal(m.Sig); err != nil {
 		return errReply(shimproto.CodeInvalidArgument, "sig %d: %v", m.Sig, err)
 	}
+	sig := syscall.Signal(m.Sig)
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.exited && !s.leftoversLocked() {
+		return shimproto.Message{Type: shimproto.TypeOK}
+	}
 	if !s.exited {
 		s.signalled = true
 	}
-	s.mu.Unlock()
-	if m.Cgroup {
-		s.hardKill()
-		return shimproto.Message{Type: shimproto.TypeOK}
-	}
-	if err := unix.Kill(-s.pid, syscall.Signal(m.Sig)); err != nil && !errors.Is(err, unix.ESRCH) {
-		return errReply(shimproto.CodeInternal, "signal: %v", err)
+	switch {
+	case m.Cgroup, s.exited && sig == syscall.SIGKILL && s.cg != nil:
+		s.hardKillLocked()
+	default:
+		s.signalLocked(sig)
 	}
 	return shimproto.Message{Type: shimproto.TypeOK}
 }

@@ -57,8 +57,8 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 	case "seal":
 		return sealCmd(ctx, d, stdout, stderr)
 	case "shim":
-		// The shim logs to its own stderr (the unit's journal).
-		return shim.Main(args[1:])
+		// The shim logs to stderr (the unit's journal).
+		return shim.Run(args[1:], stderr)
 	case "run", "quiesce-watchdog", "rollback", "doctor", "thaw",
 		"install-package", "selftest":
 		return notImplemented(stderr, args[0])

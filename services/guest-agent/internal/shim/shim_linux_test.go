@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
@@ -443,18 +446,115 @@ func TestShimPTYResizeAndEcho(t *testing.T) {
 }
 
 func TestShimTimeout(t *testing.T) {
-	s := spec("/bin/sleep", "30")
-	s.TimeoutMs = 200
-	h := startShim(t, s)
-	start := time.Now()
-	e := h.waitExitFile(10 * time.Second)
-	h.waitShim(10 * time.Second)
-	if e.Status != shimproto.StatusKilled || e.Reason != shimproto.ReasonTimeout ||
-		e.Signal != "SIGTERM" || e.Code != 128+int32(syscall.SIGTERM) {
-		t.Errorf("exit = %+v, want killed by SIGTERM, TIMEOUT", e)
+	tests := []struct {
+		name   string
+		argv   []string
+		status string
+		signal syscall.Signal
+	}{
+		{"dies on TERM", []string{"/bin/sleep", "30"}, shimproto.StatusKilled, syscall.SIGTERM},
+		{"ignores TERM", []string{"/bin/sh", "-c", "trap '' TERM; exec sleep 30"}, shimproto.StatusKilled, syscall.SIGKILL},
 	}
-	if d := time.Since(start); d > 5*time.Second {
-		t.Errorf("timeout took %v", d)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := spec(tt.argv...)
+			s.TimeoutMs = 200
+			s.KillGraceMs = 100
+			h := startShim(t, s)
+			start := time.Now()
+			e := h.waitExitFile(10 * time.Second)
+			h.waitShim(10 * time.Second)
+			if e.Status != tt.status || e.Reason != shimproto.ReasonTimeout ||
+				e.Signal != unix.SignalName(tt.signal) || e.Code != 128+int32(tt.signal) {
+				t.Errorf("exit = %+v, want killed by %v, TIMEOUT", e, tt.signal)
+			}
+			if d := time.Since(start); d > 3*time.Second {
+				t.Errorf("timeout took %v", d)
+			}
+		})
+	}
+}
+
+// TestShimSignalDaemonizedLeftover: after the reap, a signal reaches a
+// leftover that left the process group (setsid).
+func TestShimSignalDaemonizedLeftover(t *testing.T) {
+	h := startShim(t, spec("/bin/sh", "-c", `setsid sleep 30 & echo done`))
+	e := h.waitExitFile(10 * time.Second)
+	if e.Code != 0 {
+		t.Errorf("exit = %+v", e)
+	}
+	c := h.dial()
+	st, err := c.Status(ctx(t))
+	if err != nil || !st.Leftovers {
+		t.Fatalf("status = %+v, %v; want leftovers", st, err)
+	}
+	if err := c.Signal(ctx(t), syscall.SIGTERM, false); err != nil {
+		t.Fatal(err)
+	}
+	h.waitShim(10 * time.Second)
+}
+
+func TestShimKillLeftovers(t *testing.T) {
+	s := spec("/bin/sh", "-c", `setsid sleep 30 & sleep 30 & echo done`)
+	s.KillLeftovers = true
+	h := startShim(t, s)
+	e := h.waitExitFile(10 * time.Second)
+	h.waitShim(5 * time.Second)
+	if e.Code != 0 || e.Status != shimproto.StatusExited || e.Reason != shimproto.ReasonNone {
+		t.Errorf("exit = %+v", e)
+	}
+}
+
+// TestSignalAfterReapIsNoop: once the main pid is reaped, neither signal nor
+// kill touches the old process group (the pid may be reused) when the
+// command has no leftovers.
+func TestSignalAfterReapIsNoop(t *testing.T) {
+	start := func(pgid bool) *exec.Cmd {
+		c := exec.CommandContext(context.Background(), "/bin/sleep", "30")
+		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: pgid}
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Process.Kill(); _ = c.Wait() })
+		return c
+	}
+	victim := start(true) // a group leader that happens to reuse the pid
+	lonely := start(false)
+
+	s := newShim(slog.New(slog.DiscardHandler), paths.ForRoot(t.TempDir()), "c1")
+	s.pid = victim.Process.Pid
+	s.selfPid = lonely.Process.Pid // a tree without leftovers
+	s.mainReaped = true
+	s.exited = true
+	reqs := []shimproto.Message{
+		{Type: shimproto.TypeSignal, Sig: int(syscall.SIGKILL)},
+		{Type: shimproto.TypeSignal, Sig: int(syscall.SIGTERM), Cgroup: true},
+		{Type: shimproto.TypeKill, GraceMs: 0},
+	}
+	for _, m := range reqs {
+		if r := s.handle(m); r.Type != shimproto.TypeOK {
+			t.Errorf("%s: reply %+v, want ok", m.Type, r)
+		}
+	}
+	if !s.hardKillAt.IsZero() {
+		t.Error("kill without leftovers scheduled a hard kill")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := victim.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Errorf("victim was signalled: %v", err)
+	}
+	var ws unix.WaitStatus
+	if pid, _ := unix.Wait4(victim.Process.Pid, &ws, unix.WNOHANG, nil); pid != 0 {
+		t.Errorf("victim exited: %v", ws)
+	}
+
+	// With the victim below the tree root it is a leftover and gets it.
+	s.selfPid = os.Getpid()
+	if r := s.handle(shimproto.Message{Type: shimproto.TypeSignal, Sig: int(syscall.SIGTERM)}); r.Type != shimproto.TypeOK {
+		t.Fatalf("signal: %+v", r)
+	}
+	if err := victim.Wait(); err == nil {
+		t.Error("victim survived SIGTERM as a leftover")
 	}
 }
 
