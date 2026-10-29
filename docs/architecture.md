@@ -50,7 +50,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | `apps/web` | TS, Next.js + Payload 3 | `/admin`: операторы (пользователи, команды, ключи, шаблоны, размеры, квоты). `/app`: клиентский дашборд (список sandbox, терминал xterm.js, iframe рабочего стола, логи). С sandbox работает только через `apps/api` |
 | `apps/cli` | TS (Bun compile) | Клиент публичного API |
 | `apps/mcp` | TS | MCP-сервер поверх публичного API |
-| `packages/sdk-ts`, `sdk-py` | генерация | Из OpenAPI |
+| `packages/sdk-ts`, `sdk-py` | генерация + фасады | Из OpenAPI; хелперы ожидания, стрима с переподключением, загрузки, PTY |
+| `packages/auth` | TS | Формат API-ключей, scopes, интерфейс `IdentityStore` (общий для `api` и `web`) |
 | `services/guest-agent` | Go | Агент внутри VM (Linux: systemd unit, Windows: служба) |
 | `services/gateway` | Go | Приём туннелей агентов, HTTP-прокси портов, SSH gateway, TLS-edge для `*.sbx`, `tunnel`, `ssh` (S2, S4). TURN — отдельный coturn (S10) |
 | `services/node-agent` | Go | На каждой ноде Proxmox: операции LVM-thin, QMP, метрики ноды. В PoC можно заменить на SSH-исполнитель с тем же интерфейсом |
@@ -150,7 +151,12 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 ## 9. Публичное API (v1, кратко)
 
-`/v1/sandboxes` (create, get, list, update, delete), `/stop`, `/resume`, `/fork`, `/commands` (sync, stream, detached, attach, kill), `/files`, `/ports`, `/desktop`, `/snapshots` (saved), `/templates`, `/api-keys`, `/me`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой. OpenAPI генерируется из zod-схем.
+Подробно: `docs/specs/s7-public-api.md`.
+
+- `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
+- ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды.
+- Три listener-а `api`: публичный (только API-ключи), за oauth2-proxy (браузер, проверка Origin), внутренний (gateway, service tokens).
+- OpenAPI генерируется из zod-схем; SDK TS (`openapi-typescript` + `openapi-fetch`) и Python (`openapi-python-client`) с рукописными хелперами; CLI `sbx` на TS SDK через Bun compile.
 
 ## 10. Развёртывание и аутентификация
 
