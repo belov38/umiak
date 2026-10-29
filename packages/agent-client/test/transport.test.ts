@@ -1,0 +1,878 @@
+import { randomUUID } from "node:crypto";
+import http2 from "node:http2";
+import net from "node:net";
+import { gzipSync } from "node:zlib";
+import { Code, ConnectError, createClient } from "@connectrpc/connect";
+import { ErrorDetailSchema } from "@sbx/proto";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	AgentClient,
+	type AgentClientOptions,
+	AgentOutdatedError,
+	AgentUnavailableError,
+	classify,
+	MAX_MESSAGE_BYTES,
+	RegistryClosedError,
+} from "../src/index.js";
+import { Process } from "./gen/sbx/testing/v1/process_pb.js";
+import {
+	expectNothingStolen,
+	type FakeGateway,
+	startFakeGateway,
+	startTrap,
+	type Trap,
+} from "./helpers/fake-gateway.js";
+import { MemoryRegistry, route } from "./helpers/memory-registry.js";
+
+const token = "svc-token";
+
+describe("AgentClient transport", () => {
+	let a: FakeGateway;
+	let b: FakeGateway;
+	let registry: MemoryRegistry;
+	let clients: AgentClient[];
+	const m = randomUUID();
+
+	beforeEach(async () => {
+		a = await startFakeGateway({ token });
+		b = await startFakeGateway({ token });
+		registry = new MemoryRegistry();
+		clients = [];
+	});
+
+	afterEach(async () => {
+		for (const c of clients) {
+			await c.close();
+		}
+		await a.close();
+		await b.close();
+	});
+
+	function agent(opts: Partial<AgentClientOptions> = {}): AgentClient {
+		const c = new AgentClient({
+			registry,
+			serviceToken: token,
+			waitForAgentMs: 5000,
+			pollIntervalMs: 1000,
+			...opts,
+		});
+		clients.push(c);
+		return c;
+	}
+
+	function rpcRequests(gw: FakeGateway) {
+		return gw.requests.filter((r) => r.url.includes("/rpc/"));
+	}
+
+	it("routes a unary call to the owning instance with the service token", async () => {
+		registry.set(route(m, a.url));
+		const process = createClient(Process, agent().transport(m));
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		const reqs = rpcRequests(a);
+		expect(reqs).toHaveLength(1);
+		expect(reqs[0]?.protocol).toBe("h2");
+		expect(reqs[0]?.url).toBe(
+			`/v1/machines/${m}/rpc/sbx.testing.v1.Process/SetLabel`,
+		);
+	});
+
+	it("follows 421 to Sbx-Instance-Url with the same Sbx-Request-Id", async () => {
+		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
+		a.script.push({ answer: { kind: "moved", instanceUrl: b.url } });
+		const process = createClient(Process, agent().transport(m));
+		const res = await process.setLabel(
+			{ commandId: "c1", label: "x" },
+			{ headers: { "Sbx-Request-Id": "req-1" } },
+		);
+		expect(res.calls).toBe(1n);
+		expect(rpcRequests(a)).toHaveLength(1);
+		expect(rpcRequests(b)).toHaveLength(1);
+		expect(rpcRequests(a)[0]?.headers["sbx-request-id"]).toBe("req-1");
+		expect(rpcRequests(b)[0]?.headers["sbx-request-id"]).toBe("req-1");
+		expect(registry.invalidations).toContain(m);
+	});
+
+	describe("a 421 hint that is not a live instance", () => {
+		let trap: Trap;
+		beforeEach(async () => {
+			trap = await startTrap();
+		});
+		afterEach(async () => {
+			await trap.close();
+		});
+
+		it("the trap records h1 and h2c requests, not bare connects", async () => {
+			const u = new URL(trap.url);
+			await new Promise<void>((resolve) => {
+				const sock = net.connect(Number(u.port), u.hostname, () => {
+					sock.destroy();
+					resolve();
+				});
+			});
+			// A probe: no credentials, no route.
+			await fetch(`${trap.url}/`).catch(() => {});
+			expect(() => expectNothingStolen(trap, m)).not.toThrow();
+			await fetch(`${trap.url}/x`, {
+				headers: { authorization: "Bearer t" },
+			}).catch(() => {});
+			await new Promise<void>((resolve) => {
+				const s = http2.connect(trap.url);
+				s.on("error", () => {});
+				const r = s.request({ ":path": `/v1/machines/${m}/rpc` });
+				r.on("error", () => {});
+				r.on("close", () => {
+					s.close();
+					resolve();
+				});
+				r.end();
+			});
+			expect(trap.requests.map((r) => r.protocol)).toEqual(["h1", "h1", "h2"]);
+			expect(() => expectNothingStolen(trap, m)).toThrow(/service token/);
+			trap.requests.splice(1, 1); // the h2c request alone, without a token
+			expect(trap.requests[1]?.headers.authorization).toBeUndefined();
+			expect(() => expectNothingStolen(trap, m)).toThrow(/service token/);
+			trap.requests.length = 0;
+		});
+
+		it("is not followed from the headers: the Connect code decides", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				answer: {
+					kind: "moved",
+					instanceUrl: trap.url,
+					code: "permission_denied",
+				},
+			});
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expectNothingStolen(trap, m);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+			expect(rpcRequests(a)).toHaveLength(1);
+			expect(registry.liveChecks).toContain(trap.url);
+		});
+
+		it("is not followed from the ErrorDetail of the body", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				answer: { kind: "moved", instanceUrl: trap.url, headers: false },
+				times: Infinity,
+			});
+			const err = await createClient(
+				Process,
+				agent({ waitForAgentMs: 300, pollIntervalMs: 50 }).transport(m),
+			)
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expectNothingStolen(trap, m);
+			// An ordinary unavailable answer: retried at the registry's route only.
+			expect(err).toBeInstanceOf(AgentUnavailableError);
+			expect(rpcRequests(a).length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("is not followed by a server stream", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				answer: { kind: "moved", instanceUrl: trap.url },
+			});
+			const process = createClient(Process, agent().transport(m));
+			const err = await (async () => {
+				for await (const _ of process.attach({ commandId: "c1" })) {
+					// The call fails before any message.
+				}
+			})().catch((e: unknown) => e);
+			expectNothingStolen(trap, m);
+			// A stream call maps the 421 status itself to Unknown: fatal.
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.Unknown);
+			expect(rpcRequests(a)).toHaveLength(1);
+		});
+	});
+
+	it("follows a live hint with a trailing slash", async () => {
+		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
+		a.script.push({ answer: { kind: "moved", instanceUrl: `${b.url}/` } });
+		const res = await createClient(Process, agent().transport(m)).setLabel({
+			commandId: "c1",
+			label: "x",
+		});
+		expect(res.calls).toBe(1n);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("prefers the registry's new owner over a live hint", async () => {
+		const c = await startFakeGateway({ token });
+		try {
+			registry.set(route(m, a.url));
+			registry.addInstance(b.url);
+			a.script.push({
+				answer: { kind: "moved", instanceUrl: b.url },
+				after: () => registry.set(route(m, c.url)),
+			});
+			const res = await createClient(Process, agent().transport(m)).setLabel({
+				commandId: "c1",
+				label: "x",
+			});
+			expect(res.calls).toBe(1n);
+			expect(rpcRequests(b)).toHaveLength(0);
+			expect(rpcRequests(c)).toHaveLength(1);
+		} finally {
+			await c.close();
+		}
+	});
+
+	it("waits for a registry change after 503 agent_unavailable", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({
+			answer: { kind: "unavailable" },
+			after: () => setTimeout(() => registry.set(route(m, b.url)), 50),
+		});
+		// A long poll interval: only the registry change can wake the client in time.
+		const process = createClient(
+			Process,
+			agent({ pollIntervalMs: 10_000, waitForAgentMs: 20_000 }).transport(m),
+		);
+		const start = Date.now();
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		expect(Date.now() - start).toBeLessThan(2000);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("fails with a retryable AgentUnavailableError when the machine never connects", async () => {
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 300, pollIntervalMs: 50 }).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		const elapsed = Date.now() - start;
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		const e = err as AgentUnavailableError;
+		expect(e.retryable).toBe(true);
+		expect(e.code).toBe(Code.Unavailable);
+		expect(e.findDetails(ErrorDetailSchema)[0]?.code).toBe("agent_unavailable");
+		expect(elapsed).toBeGreaterThanOrEqual(290);
+		expect(elapsed).toBeLessThan(3000);
+	});
+
+	it("does not retry InvalidArgument", async () => {
+		registry.set(route(m, a.url));
+		const process = createClient(Process, agent().transport(m));
+		const err = await process
+			.setLabel({ commandId: "c1", label: "bad" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(ConnectError);
+		expect((err as ConnectError).code).toBe(Code.InvalidArgument);
+		expect(rpcRequests(a)).toHaveLength(1);
+	});
+
+	it("retries a server stream that got 421 before the response headers", async () => {
+		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
+		a.script.push({ answer: { kind: "moved", instanceUrl: b.url } });
+		const process = createClient(Process, agent().transport(m));
+		const chunks: string[] = [];
+		let exit = false;
+		for await (const ev of process.attach({
+			commandId: "c1",
+			stdoutOffset: 0n,
+		})) {
+			if (ev.event.case === "data") {
+				chunks.push(new TextDecoder().decode(ev.event.value.data));
+			}
+			if (ev.event.case === "exit") {
+				exit = true;
+			}
+		}
+		expect(chunks.join("")).toBe("0123456789abcdefghij");
+		expect(exit).toBe(true);
+		expect(rpcRequests(a)).toHaveLength(1);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("retries a server stream after 503 and a registry change", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({
+			answer: { kind: "unavailable" },
+			after: () => setTimeout(() => registry.set(route(m, b.url)), 20),
+		});
+		const process = createClient(Process, agent().transport(m));
+		let n = 0;
+		for await (const _ of process.attach({
+			commandId: "c1",
+			stdoutOffset: 16n,
+		})) {
+			n++;
+		}
+		expect(n).toBe(2); // one data event (bytes 16-19) and exit
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("caps immediate attempts with maxAttempts", async () => {
+		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
+		// A and B send the caller to each other.
+		a.script.push({
+			answer: { kind: "moved", instanceUrl: b.url },
+			times: Infinity,
+		});
+		b.script.push({
+			answer: { kind: "moved", instanceUrl: a.url },
+			times: Infinity,
+		});
+		const process = createClient(
+			Process,
+			agent({ maxAttempts: 3 }).transport(m),
+		);
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect(rpcRequests(a)).toHaveLength(2);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("waits after a 421 that points at the answering instance, then follows the registry", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({
+			answer: { kind: "moved", instanceUrl: `${a.url}/` },
+			times: Infinity,
+			after: () => setTimeout(() => registry.set(route(m, b.url)), 100),
+		});
+		// A long poll interval: only the registry change can wake the client in time.
+		const process = createClient(
+			Process,
+			agent({ pollIntervalMs: 10_000 }).transport(m),
+		);
+		const start = Date.now();
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		expect(Date.now() - start).toBeLessThan(2000);
+		expect(rpcRequests(a).length).toBeLessThanOrEqual(2);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("gives up on a 421 loop to itself after the wait budget, without a hot loop", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({
+			answer: { kind: "moved", instanceUrl: a.url },
+			times: Infinity,
+		});
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 400, pollIntervalMs: 50 }).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect(Date.now() - start).toBeGreaterThanOrEqual(390);
+		// At most one attempt per poll interval, plus the first.
+		expect(rpcRequests(a).length).toBeGreaterThanOrEqual(2);
+		expect(rpcRequests(a).length).toBeLessThanOrEqual(400 / 50 + 2);
+	});
+
+	it("keeps retrying a stale route for the whole wait budget, not maxAttempts", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({ answer: { kind: "unavailable" }, times: Infinity });
+		const process = createClient(
+			Process,
+			agent({
+				maxAttempts: 2,
+				waitForAgentMs: 600,
+				pollIntervalMs: 50,
+			}).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect(Date.now() - start).toBeGreaterThanOrEqual(590);
+		expect(rpcRequests(a).length).toBeGreaterThan(2);
+	});
+
+	it("treats registry lookup errors as a miss within the wait budget", async () => {
+		registry.set(route(m, a.url));
+		let failures = 3;
+		const lookup = registry.lookup.bind(registry);
+		registry.lookup = async (id) => {
+			if (failures > 0) {
+				failures--;
+				throw new Error("connection to the database lost");
+			}
+			return lookup(id);
+		};
+		const process = createClient(
+			Process,
+			agent({ pollIntervalMs: 20 }).transport(m),
+		);
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		expect(failures).toBe(0);
+
+		// Failing for longer than the budget: AgentUnavailableError with the cause.
+		const dbDown = new Error("database down");
+		registry.lookup = async () => {
+			throw dbDown;
+		};
+		const err = await createClient(
+			Process,
+			agent({ waitForAgentMs: 200, pollIntervalMs: 20 }).transport(m),
+		)
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect((err as AgentUnavailableError).cause).toBe(dbDown);
+
+		// A TypeError (an invalid machine id) is not retried.
+		registry.lookup = async () => {
+			throw new TypeError("invalid machine id");
+		};
+		const start = Date.now();
+		const bad = await createClient(Process, agent().transport(m))
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(bad).toBeInstanceOf(TypeError);
+		expect(Date.now() - start).toBeLessThan(500);
+	});
+
+	it("does not spin when lookup fails and waitForChange resolves at once", async () => {
+		let lookups = 0;
+		registry.lookup = async () => {
+			lookups++;
+			throw new Error("database down");
+		};
+		registry.waitForChange = async () => {};
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 300, pollIntervalMs: 50 }).transport(m),
+		);
+		const timerStart = Date.now();
+		let firedAfter = -1;
+		setTimeout(() => {
+			firedAfter = Date.now() - timerStart;
+		}, 10);
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect(firedAfter).toBeGreaterThanOrEqual(0);
+		expect(firedAfter).toBeLessThan(100);
+		// One lookup per event loop turn at most, not a synchronous spin.
+		expect(lookups).toBeLessThan(1000);
+	});
+
+	it("ends at once with RegistryClosedError from a closed registry", async () => {
+		registry.lookup = async () => {
+			throw new RegistryClosedError();
+		};
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 5000 }).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(RegistryClosedError);
+		expect(Date.now() - start).toBeLessThan(500);
+		await expect(agent().requireCapability(m, "x")).rejects.toBeInstanceOf(
+			RegistryClosedError,
+		);
+	});
+
+	it("bounds the HTTP/2 connect with connectTimeoutMs", async () => {
+		// TEST-NET-1 is not routed: the TCP connect hangs (or fails at once
+		// without a route). Either way the call must not wait for the
+		// 20 s connect-node default.
+		const blackhole = "http://192.0.2.1:81";
+		registry.set(route(m, blackhole));
+		setTimeout(() => registry.set(route(m, a.url)), 300);
+		const c = agent({ connectTimeoutMs: 200, pollIntervalMs: 100 });
+		const process = createClient(Process, c.transport(m));
+		const start = Date.now();
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		expect(Date.now() - start).toBeLessThan(3000);
+		// The option reaches the session manager; 5000 by default.
+		const sessionOptions = (cl: AgentClient) =>
+			(
+				cl as unknown as {
+					sessions: Map<string, { options: { connectTimeoutMs: number } }>;
+				}
+			).sessions.get(new URL(blackhole).origin)?.options.connectTimeoutMs;
+		expect(sessionOptions(c)).toBe(200);
+		const d = agent({ waitForAgentMs: 100, pollIntervalMs: 50 });
+		await createClient(Process, d.transport(m))
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch(() => {});
+		registry.set(route(m, blackhole));
+		await createClient(Process, d.transport(m))
+			.setLabel({ commandId: "c1", label: "x" }, { timeoutMs: 50 })
+			.catch(() => {});
+		expect(sessionOptions(d)).toBe(5000);
+	});
+
+	it("retries after a connection error to a dead instance", async () => {
+		const dead = await startFakeGateway({ token });
+		await dead.close();
+		registry.set(route(m, dead.url));
+		setTimeout(() => registry.set(route(m, a.url)), 100);
+		const process = createClient(Process, agent().transport(m));
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+	});
+
+	it("does not retry when the caller aborts", async () => {
+		const ac = new AbortController();
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 5000 }).transport(m),
+		);
+		setTimeout(() => ac.abort(), 50);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" }, { signal: ac.signal })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(ConnectError);
+		expect((err as ConnectError).code).toBe(Code.Canceled);
+		expect(Date.now() - start).toBeLessThan(1000);
+	});
+
+	it("honours the Connect deadline across retries", async () => {
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 5000 }).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" }, { timeoutMs: 200 })
+			.catch((e: unknown) => e);
+		expect((err as ConnectError).code).toBe(Code.DeadlineExceeded);
+		expect(Date.now() - start).toBeLessThan(1000);
+	});
+
+	it("classifies a stream reset inside an envelope as retryable", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({ answer: { kind: "reset-mid-envelope" } });
+		const process = createClient(Process, agent().transport(m));
+		const err = await (async () => {
+			for await (const _ of process.attach({ commandId: "c1" })) {
+				// No complete message can arrive.
+			}
+		})().catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(ConnectError);
+		expect(classify(err)).not.toBe("fatal");
+		// The truncated stream invalidates the cached route.
+		expect(registry.invalidations).toContain(m);
+	});
+
+	it("requireCapability throws AgentOutdatedError when the capability is missing", async () => {
+		registry.set(route(m, a.url, { capabilities: ["process.pty"] }));
+		const c = agent();
+		await expect(
+			c.requireCapability(m, "process.pty"),
+		).resolves.toBeUndefined();
+		const err = await c
+			.requireCapability(m, "files.upload.v1")
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentOutdatedError);
+		const e = err as AgentOutdatedError;
+		expect(e.code).toBe(Code.FailedPrecondition);
+		expect(e.capability).toBe("files.upload.v1");
+		expect(e.findDetails(ErrorDetailSchema)[0]?.code).toBe("agent_outdated");
+	});
+
+	it("requireCapability waits while the capabilities are unknown", async () => {
+		registry.set(route(m, a.url, { capabilities: null }));
+		setTimeout(
+			() =>
+				registry.set(route(m, a.url, { capabilities: ["files.upload.v1"] })),
+			100,
+		);
+		const c = agent({ pollIntervalMs: 10_000 });
+		const start = Date.now();
+		await expect(
+			c.requireCapability(m, "files.upload.v1"),
+		).resolves.toBeUndefined();
+		expect(Date.now() - start).toBeLessThan(2000);
+	});
+
+	it("requireCapability fails with AgentUnavailableError when the capabilities stay unknown", async () => {
+		registry.set(route(m, a.url, { capabilities: null }));
+		const err = await agent({ waitForAgentMs: 200, pollIntervalMs: 50 })
+			.requireCapability(m, "files.upload.v1")
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+	});
+
+	describe("oversized and compressed agent answers", () => {
+		const MiB = 1024 * 1024;
+
+		it("does not advertise response compression", async () => {
+			registry.set(route(m, a.url));
+			const process = createClient(Process, agent().transport(m));
+			await process.setLabel({ commandId: "c1", label: "x" });
+			for await (const _ of process.attach({ commandId: "c1" })) {
+				// drain
+			}
+			const reqs = rpcRequests(a);
+			expect(reqs).toHaveLength(2);
+			for (const r of reqs) {
+				for (const h of ["accept-encoding", "connect-accept-encoding"]) {
+					expect(String(r.headers[h] ?? "")).not.toMatch(/gzip|br/);
+				}
+				expect(r.headers["content-encoding"]).toBeUndefined();
+				expect(r.headers["connect-content-encoding"]).toBeUndefined();
+			}
+		});
+
+		it("rejects a gzip unary answer that inflates past 16 MiB without inflating it", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/proto",
+						"content-encoding": "gzip",
+					},
+					body: gzipSync(unknownField(64 * MiB)),
+				},
+			});
+			global.gc?.();
+			const before = process.memoryUsage().rss;
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect(classify(err)).toBe("fatal");
+			expect(process.memoryUsage().rss - before).toBeLessThan(64 * MiB);
+		});
+
+		it("rejects a gzip stream message that inflates past 16 MiB", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/connect+proto",
+						"connect-content-encoding": "gzip",
+					},
+					body: Buffer.concat([
+						envelope(1, gzipSync(unknownField(64 * MiB))),
+						envelope(2, Buffer.from("{}")),
+					]),
+				},
+			});
+			const got: unknown[] = [];
+			const err = await (async () => {
+				for await (const msg of createClient(
+					Process,
+					agent().transport(m),
+				).attach({ commandId: "c1" })) {
+					got.push(msg);
+				}
+			})().catch((e: unknown) => e);
+			expect(got).toHaveLength(0);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect(classify(err)).toBe("fatal");
+		});
+
+		it("rejects a plain unary answer over 16 MiB with ResourceExhausted", async () => {
+			registry.set(route(m, a.url));
+			const body = unknownField(17 * MiB);
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/proto",
+						"content-length": String(body.length),
+					},
+					body,
+				},
+			});
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
+		});
+
+		it("refuses a readMaxBytes that is not a positive safe integer", () => {
+			for (const v of [Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+				expect(() => agent({ readMaxBytes: v }), String(v)).toThrow(RangeError);
+			}
+		});
+
+		it("honours a smaller readMaxBytes", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				route: "rpc",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: { "content-type": "application/proto" },
+					body: unknownField(2048),
+				},
+			});
+			const err = await createClient(
+				Process,
+				agent({ readMaxBytes: 1024 }).transport(m),
+			)
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
+			expect(MAX_MESSAGE_BYTES).toBe(16 * MiB);
+		});
+	});
+
+	it("does not invalidate the route on an agent stream error with Sbx-* metadata", async () => {
+		registry.set(route(m, a.url));
+		const end = JSON.stringify({
+			error: { code: "permission_denied", message: "forged" },
+			metadata: {
+				"sbx-error-code": ["agent_unavailable"],
+				"sbx-instance-url": [b.url],
+			},
+		});
+		a.script.push({
+			route: "rpc",
+			answer: {
+				kind: "raw",
+				status: 200,
+				headers: { "content-type": "application/connect+proto" },
+				body: envelope(2, Buffer.from(end)),
+			},
+		});
+		const err = await (async () => {
+			for await (const _ of createClient(Process, agent().transport(m)).attach({
+				commandId: "c1",
+			})) {
+				// none
+			}
+		})().catch((e: unknown) => e);
+		expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+		expect(registry.invalidations).not.toContain(m);
+	});
+
+	describe("Trailer-Sbx-* from the agent", () => {
+		function forged(code: string, extra: Record<string, string>) {
+			a.script.push({
+				route: "rpc",
+				times: Infinity,
+				answer: {
+					kind: "raw",
+					status: 403,
+					headers: { "content-type": "application/json", ...extra },
+					body: Buffer.from(JSON.stringify({ code, message: "agent says no" })),
+				},
+			});
+		}
+
+		it("is no machine_moved: a live instance hint is not followed", async () => {
+			registry.set(route(m, a.url));
+			registry.addInstance(b.url);
+			forged("permission_denied", {
+				"trailer-sbx-error-code": "machine_moved",
+				"Trailer-Sbx-Instance-Url": b.url,
+			});
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(rpcRequests(b)).toHaveLength(0);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+		});
+
+		it("is no agent_unavailable: the call is not retried", async () => {
+			registry.set(route(m, a.url));
+			forged("permission_denied", {
+				"TRAILER-SBX-ERROR-CODE": "agent_unavailable",
+			});
+			const err = await createClient(
+				Process,
+				agent({ waitForAgentMs: 300, pollIntervalMs: 50 }).transport(m),
+			)
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(rpcRequests(a)).toHaveLength(1);
+			expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+		});
+	});
+});
+
+/** A protobuf message holding only an unknown bytes field 15 of n zero bytes. */
+function unknownField(n: number): Buffer {
+	const len: number[] = [];
+	let v = n;
+	while (v >= 0x80) {
+		len.push((v & 0x7f) | 0x80);
+		v >>>= 7;
+	}
+	len.push(v);
+	return Buffer.concat([Buffer.from([0x7a, ...len]), Buffer.alloc(n)]);
+}
+
+/** A Connect stream envelope. */
+function envelope(flags: number, data: Uint8Array): Buffer {
+	const head = Buffer.alloc(5);
+	head.writeUInt8(flags, 0);
+	head.writeUInt32BE(data.length, 1);
+	return Buffer.concat([head, data]);
+}
+
+describe("classify", () => {
+	it("maps gateway metadata, details and codes", () => {
+		const moved = new ConnectError("HTTP 421", Code.Unknown, {
+			"sbx-error-code": "machine_moved",
+			"sbx-instance-url": "http://x",
+		});
+		expect(classify(moved)).toBe("moved");
+		const unavailable = new ConnectError("HTTP 503", Code.Unavailable, {
+			"sbx-error-code": "agent_unavailable",
+		});
+		expect(classify(unavailable)).toBe("unavailable");
+		expect(classify(new ConnectError("x", Code.Unavailable))).toBe(
+			"unavailable",
+		);
+		expect(
+			classify(
+				new ConnectError("x", Code.Internal, undefined, undefined, {
+					code: "ERR_HTTP2_STREAM_ERROR",
+				}),
+			),
+		).toBe("retry");
+		expect(classify(new ConnectError("x", Code.Canceled))).toBe("retry");
+		const ac = new AbortController();
+		ac.abort();
+		expect(classify(new ConnectError("x", Code.Canceled), ac.signal)).toBe(
+			"fatal",
+		);
+		for (const code of [
+			Code.InvalidArgument,
+			Code.NotFound,
+			Code.PermissionDenied,
+			Code.FailedPrecondition,
+			Code.DeadlineExceeded,
+			Code.Unknown,
+		]) {
+			expect(classify(new ConnectError("x", code))).toBe("fatal");
+		}
+	});
+});

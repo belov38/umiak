@@ -1,3 +1,7 @@
 go 1.27.3
 
-use ./services/node-agent
+use (
+	./libs/proto
+	./libs/tunnel
+	./services/node-agent
+)

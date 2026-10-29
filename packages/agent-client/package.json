@@ -1,0 +1,28 @@
+{
+	"name": "@sbx/agent-client",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"source": "./src/index.ts",
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@bufbuild/protobuf": "2.16.0",
+		"@connectrpc/connect": "2.3.0",
+		"@connectrpc/connect-node": "2.3.0",
+		"@sbx/proto": "workspace:*",
+		"pg": "8.23.1"
+	},
+	"devDependencies": {
+		"@types/pg": "8.23.1"
+	}
+}

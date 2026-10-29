@@ -1,0 +1,133 @@
+name: tunnel
+
+on:
+  push:
+    paths: &paths
+      - "libs/**"
+      - "proto/**"
+      - "db/migrations/**"
+      - "packages/proto/**"
+      - "packages/agent-client/**"
+      - "go.work"
+      - "go.work.sum"
+      - "mise.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "biome.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/tunnel.yml"
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tunnel-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Admin DSN for the Postgres service container; the test helper creates a database per test.
+  SBX_TEST_DATABASE_URL: postgres://postgres:sbx@127.0.0.1:5432/postgres?sslmode=disable
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [libs/proto, libs/tunnel]
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_PASSWORD: sbx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - run: go test -race ./...
+      - run: golangci-lint run ./...
+      - name: Windows amd64 build and vet
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./... && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
+      - name: Windows arm64 build
+        run: GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build ./...
+
+  proto:
+    runs-on: ubuntu-latest
+    env:
+      # Remote BSR plugins may be rate-limited without a token; secrets are not available to fork PRs.
+      BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+    defaults:
+      run:
+        working-directory: proto
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v5
+      - run: buf lint
+      - name: Generation drift check
+        run: |
+          if [ -z "$BUF_TOKEN" ]; then
+            echo "drift check skipped: no BUF_TOKEN"
+            exit 0
+          fi
+          buf generate
+          buf generate --template buf.gen.test.yaml
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            git diff --stat
+            exit 1
+          fi
+      - name: Breaking changes
+        # Run from the repo root: the git input must resolve to the repo's .git, and actions/checkout
+        # creates no local main branch, so compare against the remote-tracking ref.
+        # Skipped until main contains proto/buf.yaml (first push of the module).
+        working-directory: .
+        run: |
+          if git cat-file -e origin/main:proto/buf.yaml 2>/dev/null; then
+            buf breaking proto --against '.git#ref=refs/remotes/origin/main,subdir=proto'
+          else
+            echo "origin/main has no proto/buf.yaml yet, skipping buf breaking"
+          fi
+
+  ts:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_PASSWORD: sbx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      # mise provides node, pnpm and go (the e2e tests build the Go tunnel harness).
+      - uses: jdx/mise-action@v5
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm -r typecheck
+      - name: Agent client tests
+        # packages/agent-client has no package.json until the TS client lands.
+        run: |
+          if [ -f packages/agent-client/package.json ]; then
+            pnpm --filter @sbx/agent-client test
+          else
+            echo "packages/agent-client/package.json not found, skipping"
+          fi
