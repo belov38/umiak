@@ -1,3 +1,4 @@
+export { PgAllocatorStore } from "./allocator-store.ts";
 export {
 	MIGRATION_LOCK_KEY,
 	MIGRATIONS_DIR,
