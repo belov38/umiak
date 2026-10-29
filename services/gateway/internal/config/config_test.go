@@ -117,6 +117,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"SSHDrainDeadline", cfg.SSHDrainDeadline, 15 * time.Minute},
 		{"SSHKeepaliveInterval", cfg.SSHKeepaliveInterval, 30 * time.Second},
 		{"SSHKeepaliveMax", cfg.SSHKeepaliveMax, 3},
+		{"SSHMaxChannels", cfg.SSHMaxChannels, 256},
 		{"TLSHandshake", cfg.Timeouts.TLSHandshake, 10 * time.Second},
 		{"ReadHeader", cfg.Timeouts.ReadHeader, 10 * time.Second},
 		{"MaxHeaderBytes", cfg.Timeouts.MaxHeaderBytes, 64 << 10},

@@ -586,3 +586,144 @@ func TestSSHAPIDownNotAFailure(t *testing.T) {
 		t.Fatalf("exec: %v", r)
 	}
 }
+
+// TestExecThenImmediateEOF: like ssh -n, the client sends exec and its EOF
+// back to back; the command still sees its stdin end.
+func TestExecThenImmediateEOF(t *testing.T) {
+	_, c, _ := userClient(t, nil)
+	for i := range 20 {
+		ch, reqs, err := c.OpenChannel("session", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		go ssh.DiscardRequests(reqs)
+		if _, err := ch.SendRequest("exec", false, ssh.Marshal(struct{ Command string }{"cat; echo done"})); err != nil {
+			t.Fatal(err)
+		}
+		if err := ch.CloseWrite(); err != nil {
+			t.Fatal(err)
+		}
+		got := make(chan string, 1)
+		go func() {
+			b, _ := io.ReadAll(ch)
+			got <- string(b)
+		}()
+		select {
+		case out := <-got:
+			if out != "done\n" {
+				t.Fatalf("run %d: stdout %q", i, out)
+			}
+		case <-time.After(testenv.WaitTimeout):
+			t.Fatalf("run %d: command did not see EOF", i)
+		}
+		_ = ch.Close()
+	}
+}
+
+// TestExitStatusAfterOutput: an exit status never overtakes output that
+// is still on its way to the client (more than one window here).
+func TestExitStatusAfterOutput(t *testing.T) {
+	_, c, _ := userClient(t, nil)
+	const size = 3 << 20
+	ch, reqs, err := c.OpenChannel("session", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ch.Close() }()
+	ok, err := ch.SendRequest("exec", true, ssh.Marshal(struct{ Command string }{"bytes 3145728; exit 5"}))
+	if err != nil || !ok {
+		t.Fatalf("exec: %v %v", ok, err)
+	}
+	// The client does not read: the VM finishes and exits meanwhile.
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case r := <-reqs:
+		t.Fatalf("%s arrived before the output was read", r.Type)
+	default:
+	}
+	b, err := io.ReadAll(ch)
+	if err != nil || len(b) != size {
+		t.Fatalf("read %d bytes, %v", len(b), err)
+	}
+	select {
+	case r := <-reqs:
+		var st struct{ Status uint32 }
+		if r.Type != "exit-status" || ssh.Unmarshal(r.Payload, &st) != nil || st.Status != 5 {
+			t.Fatalf("request %s % x", r.Type, r.Payload)
+		}
+	case <-time.After(testenv.WaitTimeout):
+		t.Fatal("no exit status")
+	}
+}
+
+func TestMaxChannels(t *testing.T) {
+	_, c, _ := userClient(t, func(c *config.Config) { c.SSHMaxChannels = 3 })
+	addr := echoServer(t)
+	s1, err := c.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s1.Close() }()
+	s2, err := c.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	tc, err := c.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRefused := func(err error) {
+		t.Helper()
+		var oce *ssh.OpenChannelError
+		if !errors.As(err, &oce) || oce.Reason != ssh.ResourceShortage || oce.Message != "sbx: too many open channels" {
+			t.Fatalf("channel over the cap: %v", err)
+		}
+	}
+	_, err = c.Dial("tcp", addr)
+	wantRefused(err)
+	_, err = c.NewSession()
+	wantRefused(err)
+	// Closing a channel frees its slot.
+	_ = tc.Close()
+	eventually(t, "a free channel slot", func() bool {
+		tc, err := c.Dial("tcp", addr)
+		if err != nil {
+			return false
+		}
+		_ = tc.Close()
+		return true
+	})
+}
+
+// TestAgentX11NotRequested: the VM may open auth-agent and x11 channels
+// only after the client asked for that forwarding.
+func TestAgentX11NotRequested(t *testing.T) {
+	_, c, _ := userClient(t, nil)
+	refused := "sbx: forwarding not requested"
+	r := run(t, c, "open auth-agent@openssh.com; open x11")
+	if want := "open auth-agent@openssh.com: " + refused + "\nopen x11: " + refused + "\n"; r.stdout != want {
+		t.Fatalf("stdout %q, want %q", r.stdout, want)
+	}
+	// After x11-req the x11 channel reaches the client (which has no X11
+	// handler and refuses it itself); the agent stays refused.
+	s, err := c.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SendRequest("x11-req", true, ssh.Marshal(struct {
+		Single   bool
+		Protocol string
+		Cookie   string
+		Screen   uint32
+	}{false, "MIT-MAGIC-COOKIE-1", "00", 0})); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.Output("open x11; open auth-agent@openssh.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "open x11: unknown channel type: x11\nopen auth-agent@openssh.com: " + refused + "\n"; string(out) != want {
+		t.Fatalf("stdout %q, want %q", out, want)
+	}
+}

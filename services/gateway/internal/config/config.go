@@ -108,6 +108,8 @@ type Config struct {
 	// connection is closed after max consecutive misses.
 	SSHKeepaliveInterval time.Duration
 	SSHKeepaliveMax      int
+	// SSHMaxChannels caps the open channels per SSH connection.
+	SSHMaxChannels int
 
 	Timeouts Timeouts
 
@@ -202,6 +204,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.SSHDrainDeadline = l.duration("SSH_DRAIN_DEADLINE", 15*time.Minute)
 	c.SSHKeepaliveInterval = l.duration("SSH_KEEPALIVE_INTERVAL", 30*time.Second)
 	c.SSHKeepaliveMax = l.integer("SSH_KEEPALIVE_MAX", 3)
+	c.SSHMaxChannels = l.integer("SSH_MAX_CHANNELS", 256)
 
 	c.Timeouts = Timeouts{
 		TLSHandshake:   l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),

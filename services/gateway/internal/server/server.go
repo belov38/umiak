@@ -270,6 +270,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 			DrainDeadline:     cfg.SSHDrainDeadline,
 			KeepaliveInterval: cfg.SSHKeepaliveInterval,
 			KeepaliveMax:      cfg.SSHKeepaliveMax,
+			MaxChannels:       cfg.SSHMaxChannels,
 			Now:               deps.Now,
 			Self:              cfg.InstanceID,
 			Instances:         i.store,

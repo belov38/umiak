@@ -9,8 +9,11 @@
 //     "echo <text>" (text and "\n" to stdout), "stderr <text>" (to stderr),
 //     "env" (the session's env as NAME=VALUE lines, sorted), "cat" (copy
 //     stdin to stdout until EOF), "closewrite" (send EOF on stdout now),
-//     "sleep <duration>", "signal <NAME>" (send exit-signal and stop
-//     without an exit-status) and "exit <N>" (stop with status N).
+//     "sleep <duration>", "bytes <N>" (N bytes "x" to stdout), "open
+//     <type>" (open a channel of that type to the client and print "open
+//     <type>: ok" or "open <type>: <refusal message>"), "signal <NAME>"
+//     (send exit-signal and stop without an exit-status) and "exit <N>"
+//     (stop with status N).
 //     Unknown commands are written to stdout followed by "\n". Without
 //     "exit" the status is 0. A command containing "stderr" anywhere also
 //     writes "err\n" to stderr;
@@ -458,7 +461,7 @@ func (c *conn) session(ch ssh.Channel, reqs <-chan *ssh.Request) {
 			go func() {
 				defer close(done)
 				if r.Type == "exec" {
-					runScript(ch, cmd, envCopy)
+					c.runScript(ch, cmd, envCopy)
 				} else {
 					_, _ = io.Copy(ch, ch)
 					sendExit(ch, 0)
@@ -484,7 +487,7 @@ func sendExit(ch ssh.Channel, status uint32) {
 }
 
 // runScript runs an exec command (see the package doc).
-func runScript(ch ssh.Channel, cmd string, env map[string]string) {
+func (c *conn) runScript(ch ssh.Channel, cmd string, env map[string]string) {
 	if strings.Contains(cmd, "stderr") {
 		_, _ = io.WriteString(ch.Stderr(), "err\n")
 	}
@@ -510,6 +513,23 @@ func runScript(ch ssh.Channel, cmd string, env map[string]string) {
 			_, _ = io.Copy(ch, ch)
 		case "closewrite":
 			_ = ch.CloseWrite()
+		case "bytes":
+			n, _ := strconv.Atoi(arg)
+			_, _ = ch.Write(bytes.Repeat([]byte("x"), n))
+		case "open":
+			res := "ok"
+			och, oreqs, err := c.sconn.OpenChannel(arg, nil)
+			if err != nil {
+				res = err.Error()
+				var oce *ssh.OpenChannelError
+				if errors.As(err, &oce) {
+					res = oce.Message
+				}
+			} else {
+				go ssh.DiscardRequests(oreqs)
+				_ = och.Close()
+			}
+			_, _ = io.WriteString(ch, "open "+arg+": "+res+"\n")
 		case "sleep":
 			if d, err := time.ParseDuration(arg); err == nil {
 				time.Sleep(d)

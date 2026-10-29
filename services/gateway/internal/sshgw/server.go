@@ -33,6 +33,7 @@ const (
 	DefaultMaxAuthTries      = 6
 	DefaultClockSkew         = 60 * time.Second
 	DefaultBackendCertTTL    = 5 * time.Minute
+	DefaultMaxChannels       = 256
 )
 
 const (
@@ -74,6 +75,9 @@ type Config struct {
 	MaxAuthTries      int
 	ClockSkew         time.Duration
 	BackendCertTTL    time.Duration
+	// MaxChannels caps the open channels of one connection (all types,
+	// both directions); each can hold a 2 MiB window.
+	MaxChannels int
 	// Now is the clock of certificate checks and backend certificates.
 	Now func() time.Time
 
@@ -134,6 +138,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.BackendCertTTL <= 0 {
 		cfg.BackendCertTTL = DefaultBackendCertTTL
+	}
+	if cfg.MaxChannels <= 0 {
+		cfg.MaxChannels = DefaultMaxChannels
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

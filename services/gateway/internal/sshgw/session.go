@@ -58,6 +58,11 @@ type session struct {
 
 	bytesIn  atomic.Int64 // channel data from the client
 	bytesOut atomic.Int64 // channel data to the client
+	// nchans counts the open (or opening) proxied channels.
+	nchans atomic.Int64
+	// agentRequested and x11Requested are set once the client sent
+	// auth-agent-req@openssh.com or x11-req on a session channel.
+	agentRequested, x11Requested atomic.Bool
 
 	// mu guards the fields below. It is a leaf lock: nothing else is
 	// locked or blocked on while it is held.
@@ -220,7 +225,9 @@ func (ss *session) run(ctx context.Context, chans <-chan ssh.NewChannel, reqs <-
 	defer func() { _ = ss.conn.Close() }()
 
 	// Client global requests wait in their channel while the backend
-	// connects; they need it.
+	// connects; they need it. x/crypto buffers 16 of them; beyond that its
+	// read loop blocks, so the client conn stalls until the backend is up
+	// (bounded by the dial and handshake timeouts).
 	b, msg := ss.connectBackend(ctx)
 	if b == nil {
 		// Without a backend every global request is refused. The
