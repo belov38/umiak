@@ -315,7 +315,7 @@ func validName(s string) bool {
 	if s == "" {
 		return false
 	}
-	if c := s[0]; !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_') {
+	if c := s[0]; (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && c != '_' {
 		return false
 	}
 	for _, c := range s {
