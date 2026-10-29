@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,11 @@ func main() {
 
 // run dispatches a subcommand and returns the process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
+	return runWith(context.Background(), defaultDeps(), args, stdout, stderr)
+}
+
+// runWith is run with explicit dependencies.
+func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = io.WriteString(stderr, usage)
 		return 2
@@ -45,9 +51,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			_, _ = io.WriteString(stderr, usage)
 			return 2
 		}
-		return notImplemented(stderr, "identity apply")
+		return identityApply(ctx, d, stderr)
+	case "seal":
+		return sealCmd(ctx, d, stdout, stderr)
 	case "run", "shim", "quiesce-watchdog", "rollback", "doctor", "thaw",
-		"install-package", "seal", "selftest":
+		"install-package", "selftest":
 		return notImplemented(stderr, args[0])
 	default:
 		_, _ = fmt.Fprintf(stderr, "sbx-agent: unknown command %q\n\n", args[0])

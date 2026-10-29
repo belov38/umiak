@@ -21,13 +21,11 @@ func TestRun(t *testing.T) {
 		{"identity bad action", []string{"identity", "x"}, 2, "", "usage"},
 		{"run", []string{"run"}, 1, "", "not implemented"},
 		{"shim", []string{"shim", "id"}, 1, "", "not implemented"},
-		{"identity apply", []string{"identity", "apply"}, 1, "", "not implemented"},
 		{"quiesce-watchdog", []string{"quiesce-watchdog"}, 1, "", "not implemented"},
 		{"rollback", []string{"rollback"}, 1, "", "not implemented"},
 		{"doctor", []string{"doctor"}, 1, "", "not implemented"},
 		{"thaw", []string{"thaw"}, 1, "", "not implemented"},
 		{"install-package", []string{"install-package"}, 1, "", "not implemented"},
-		{"seal", []string{"seal"}, 1, "", "not implemented"},
 		{"selftest", []string{"selftest"}, 1, "", "not implemented"},
 	}
 	for _, tt := range tests {
