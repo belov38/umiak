@@ -63,10 +63,34 @@ export interface InfraSnapshotResult {
 }
 
 /**
+ * Owner of the VMID a power operation acts on (S6 H1). The adapter checks the
+ * VMID's lease under the node's power lock right before acting (S1
+ * `checkLeaseOwner`) and throws S1 `OwnerMismatchError` (permanent, code
+ * `owner_mismatch`) without touching Proxmox when the lease is not
+ * `expectedOwner`'s: the machine's own lease was freed and the VMID may be
+ * another machine's now. `delete` also takes `null` (reconcile's orphan VM):
+ * the VMID must have no owned lease.
+ */
+export interface OwnedVm {
+	expectedOwner: string;
+}
+
+export interface StartOpts extends OwnedVm {
+	/**
+	 * Runs under the power lock after the wait for it and before the owner
+	 * check and S1 start (the executor's fence check, M3): a throw cancels
+	 * the start and passes through unchanged.
+	 */
+	beforeAct?: () => Promise<unknown>;
+}
+
+/**
  * S1 primitives of one node. `create` and `fork` allocate the VMID/MAC lease
  * with `machineId` as owner (idempotent per machine, S6 §5.3); `delete`
  * verifies that no traces remain and frees the lease, and tolerates a missing
- * VM.
+ * VM. start, stop, shutdown and delete are serialized per node (power lock)
+ * and owner-checked (OwnedVm); a delete whose owner's lease and VM are both
+ * gone does nothing.
  */
 export interface NodeInfra {
 	readonly vmidRange: { min: number; max: number };
@@ -83,14 +107,18 @@ export interface NodeInfra {
 		size?: InfraSize;
 		smbios: InfraSmbios;
 	}): Promise<CreatedVm>;
-	start(vmid: number): Promise<void>;
-	shutdown(vmid: number, timeoutS: number): Promise<"stopped" | "timeout">;
-	stop(vmid: number): Promise<void>;
+	start(vmid: number, o: StartOpts): Promise<void>;
+	shutdown(
+		vmid: number,
+		timeoutS: number,
+		o: OwnedVm,
+	): Promise<"stopped" | "timeout">;
+	stop(vmid: number, o: OwnedVm): Promise<void>;
 	status(vmid: number): Promise<VmStatus>;
 	configure(vmid: number, size: InfraSize): Promise<void>;
 	/** Cores and memory in the VM config (resume compares them with the machine row). */
 	vmSize(vmid: number): Promise<InfraSize>;
-	delete(vmid: number): Promise<void>;
+	delete(vmid: number, o: { expectedOwner: string | null }): Promise<void>;
 	/** The machine's VMID lease (`vmid_leases.machine_id`); a non-releasing one first. */
 	leaseOf(
 		machineId: string,

@@ -142,6 +142,12 @@ export const METRIC_DEFS: readonly MetricDef[] = [
 		labels: ["queue", "kind", "action"],
 	},
 	{
+		name: "sbx_owner_mismatch_total",
+		kind: "counter",
+		help: "Power operations S1 refused because the VMID's lease is not the machine's (freed and maybe reused)",
+		labels: ["op"],
+	},
+	{
 		name: "sbx_claim_retried_total",
 		kind: "counter",
 		help: "Creates that retried after a rejected pool claim",

@@ -335,6 +335,46 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(w.infra.vms.has(556)).toBe(true);
 	});
 
+	it("TOCTOU: a lease taken right before S1 delete (after the evidence re-check) saves an orphan VM", async () => {
+		const w = await createWorld(db);
+		w.infra.addVm({ vmid: 558 });
+		await seenLongAgo(w);
+		const m = await insertMachine(w, { state: "provisioning" });
+		hookInfra(w, {
+			delete: async (_n, next) => {
+				await insertLease(w, 558, "reserved", m);
+				return next();
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["orphan_vm", "vm:558"]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.vms.has(558)).toBe(true);
+		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
+	});
+
+	it("lease_release passes the lease's owner: a VMID whose lease changed owner is not deleted", async () => {
+		const w = await createWorld(db);
+		const m = await insertMachine(w, { state: "deleted" });
+		await insertLease(w, 592, "releasing", m, 700);
+		w.infra.addVm({ vmid: 592, machineId: m, status: "stopped" });
+		const other = randomUUID();
+		hookInfra(w, {
+			delete: async (_n, next) => {
+				await w.pool.query(
+					"UPDATE runtime.vmid_leases SET machine_id = $3 WHERE provider_id = $1 AND vmid = $2",
+					[w.topo.providerId, 592, other],
+				);
+				return next();
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["lease_release", "lease:592"]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.vms.has(592)).toBe(true);
+		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
+	});
+
 	it("TOCTOU: a machine row that appears between planning and apply saves an orphan VM", async () => {
 		const w = await createWorld(db);
 		w.infra.addVm({ vmid: 557 });

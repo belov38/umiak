@@ -278,10 +278,13 @@ describe("delete", () => {
 		const op = await e.svc.delete(e.p, sandboxId);
 		const orig = w.infra.delete.bind(w.infra);
 		let n = 0;
-		w.infra.delete = async (vmid: number) => {
+		w.infra.delete = async (
+			vmid: number,
+			o: { expectedOwner: string | null },
+		) => {
 			n += 1;
 			if (n === 1) throw new Error("permanent-looking S1 error");
-			return orig(vmid);
+			return orig(vmid, o);
 		};
 		await expect(
 			handleSandboxOp(w.ctx, { operationId: op.id }),

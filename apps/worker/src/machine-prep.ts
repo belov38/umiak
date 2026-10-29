@@ -56,6 +56,76 @@ export class MachineStateConflict extends Error {
 	}
 }
 
+/** S1 refused a power operation: the VMID's lease is not the machine's (H1). */
+export function isOwnerMismatch(e: unknown): boolean {
+	return (
+		typeof e === "object" &&
+		e !== null &&
+		(e as { code?: unknown }).code === "owner_mismatch"
+	);
+}
+
+export type OwnedPowerOp = "start" | "stop" | "shutdown" | "delete";
+
+/** Log and `sbx_owner_mismatch_total{op}` of a refused power operation. */
+export function noteOwnerMismatch(
+	ctx: WorkerCtx,
+	e: unknown,
+	fields: { op: OwnedPowerOp; machineId?: string; vmid?: number },
+): void {
+	ctx.log.warn(
+		{ ...errFields(e), ...fields },
+		"S1 refused a power operation: the VMID is not leased to the machine",
+	);
+	ctx.metrics.inc("sbx_owner_mismatch_total", { op: fields.op });
+}
+
+/**
+ * Start, stop or shutdown of the machine's own VM. An owner mismatch means
+ * its VMID is not its own any more: the operation fails with
+ * MachineStateConflict (permanent) and Proxmox was not touched.
+ */
+export async function ownedPowerOp<T>(
+	ctx: WorkerCtx,
+	machineId: string,
+	vmid: number,
+	op: Exclude<OwnedPowerOp, "delete">,
+	fn: () => Promise<T>,
+): Promise<T> {
+	try {
+		return await fn();
+	} catch (e) {
+		if (!isOwnerMismatch(e)) throw e;
+		noteOwnerMismatch(ctx, e, { op, machineId, vmid });
+		throw new MachineStateConflict(
+			machineId,
+			`${op} refused: VM ${vmid} is not leased to this machine`,
+		);
+	}
+}
+
+/**
+ * Stop or delete on a teardown path (delete, discard, compensation). An
+ * owner mismatch means the machine's own VM is gone already (another deleter
+ * freed the VMID, maybe to a new machine): nothing is done, false.
+ */
+export async function ownedTeardown(
+	ctx: WorkerCtx,
+	machineId: string,
+	vmid: number,
+	op: "stop" | "delete",
+	fn: () => Promise<unknown>,
+): Promise<boolean> {
+	try {
+		await fn();
+		return true;
+	} catch (e) {
+		if (!isOwnerMismatch(e)) throw e;
+		noteOwnerMismatch(ctx, e, { op, machineId, vmid });
+		return false;
+	}
+}
+
 /** Waited too long for powered RAM or a clone slot. Retryable: the job runs again. */
 export class CapacityWaitTimeout extends Error {
 	readonly retryable = true;
@@ -229,7 +299,12 @@ export async function prepareMachine(
 		}
 		throw e;
 	}
-	await infra.start(created.vmid);
+	await ownedPowerOp(ctx, machineId, created.vmid, "start", () =>
+		infra.start(created.vmid, {
+			expectedOwner: machineId,
+			beforeAct: () => fence.check(),
+		}),
+	);
 	await markPowered(fence, machineId);
 }
 
@@ -265,7 +340,9 @@ async function discardPartial(
 			{ machineId: m.id, vmid: again.vmid },
 			"discarding a partial preparation",
 		);
-		await infra.delete(again.vmid);
+		await ownedTeardown(ctx, m.id, again.vmid, "delete", () =>
+			infra.delete(again.vmid, { expectedOwner: m.id }),
+		);
 	}
 	await fence.tx(async (tx) => {
 		await tx.client.query(
@@ -307,7 +384,9 @@ async function abandonCreated(
 			{ machineId, vmid, state: cur?.state ?? "missing" },
 			"fenced out after S1 create: deleting the VM nobody will use",
 		);
-		await infra.delete(vmid);
+		await ownedTeardown(ctx, machineId, vmid, "delete", () =>
+			infra.delete(vmid, { expectedOwner: machineId }),
+		);
 	} catch (e) {
 		ctx.log.warn(
 			{ ...errFields(e), machineId, vmid },
@@ -379,7 +458,13 @@ async function ensureStarted(
 			{ machineId: m.id, vmid: m.vmid },
 			"starting a booting machine again",
 		);
-		await infra.start(m.vmid);
+		const vmid = m.vmid;
+		await ownedPowerOp(ctx, m.id, vmid, "start", () =>
+			infra.start(vmid, {
+				expectedOwner: m.id,
+				beforeAct: () => fence.check(),
+			}),
+		);
 	}
 	await markPowered(fence, m.id);
 }

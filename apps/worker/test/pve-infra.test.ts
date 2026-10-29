@@ -6,6 +6,7 @@ import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import {
 	formatSmbios1,
 	NodeOpsError,
+	OwnerMismatchError,
 	PveApi,
 	PveApiError,
 	PveTaskError,
@@ -24,6 +25,7 @@ import {
 	isRetryable,
 	type NodeInfra,
 } from "../src/ports.ts";
+import { FencedOut } from "../src/steps.ts";
 import { createTopology, type Topology } from "./fakes/world.ts";
 
 let db: TestDatabase;
@@ -164,7 +166,7 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(await e.infra.vmSize(500)).toEqual({ vcpu: 3, memoryMb: 3072 });
 
 		expect(await e.infra.status(500)).toBe("stopped");
-		await e.infra.start(500);
+		await e.infra.start(500, { expectedOwner: machineId });
 		expect(await e.infra.status(500)).toBe("running");
 		expect(await e.infra.qgaPing(500)).toBe(true);
 		expect(await e.infra.qgaExec(500, ["true"])).toEqual({ exitCode: 0 });
@@ -187,7 +189,7 @@ describe("PveNodeInfra lifecycle", () => {
 			`sbx-snap-${lvId}-scsi0`,
 		);
 
-		await e.infra.delete(500);
+		await e.infra.delete(500, { expectedOwner: machineId });
 		expect(e.api.vms.has(500)).toBe(false);
 		expect(await e.infra.status(500)).toBe("missing");
 		expect(await e.infra.leaseOf(machineId)).toBeUndefined();
@@ -209,7 +211,7 @@ describe("PveNodeInfra lifecycle", () => {
 		});
 		expect(stopped.consistency).toBe("powered_off");
 
-		await e.infra.start(vmid);
+		await e.infra.start(vmid, { expectedOwner: m });
 		const hookCalls: string[] = [];
 		const snap = await e.infra.snapshot(vmid, {
 			lvId: randomUUID().replaceAll("-", ""),
@@ -235,7 +237,7 @@ describe("PveNodeInfra lifecycle", () => {
 			size: SIZE,
 			smbios: smbiosFor(m),
 		});
-		await e.infra.start(vmid);
+		await e.infra.start(vmid, { expectedOwner: m });
 		e.api.agentUp = false;
 		const err = await e.infra
 			.snapshot(vmid, { lvId: randomUUID().replaceAll("-", "") })
@@ -297,14 +299,18 @@ describe("PveNodeInfra lifecycle", () => {
 			size: SIZE,
 			smbios: smbiosFor(m),
 		});
-		await e.infra.start(vmid);
-		expect(await e.infra.shutdown(vmid, 30)).toBe("stopped");
-		await e.infra.start(vmid);
+		await e.infra.start(vmid, { expectedOwner: m });
+		expect(await e.infra.shutdown(vmid, 30, { expectedOwner: m })).toBe(
+			"stopped",
+		);
+		await e.infra.start(vmid, { expectedOwner: m });
 		e.api.fail[`POST /nodes/${e.name}/qemu/${vmid}/status/shutdown`] =
 			new PveTaskError("UPID:x", "VM quit/powerdown failed - got timeout");
-		expect(await e.infra.shutdown(vmid, 1)).toBe("timeout");
+		expect(await e.infra.shutdown(vmid, 1, { expectedOwner: m })).toBe(
+			"timeout",
+		);
 		expect(await e.infra.status(vmid)).toBe("running");
-		await e.infra.stop(vmid);
+		await e.infra.stop(vmid, { expectedOwner: m });
 		expect(await e.infra.status(vmid)).toBe("stopped");
 	});
 
@@ -376,7 +382,9 @@ describe("PveNodeInfra lifecycle", () => {
 			smbios: smbiosFor(m),
 		});
 		e.api.keepIpamOnDelete = true;
-		const err = await e.infra.delete(vmid).catch((x: unknown) => x);
+		const err = await e.infra
+			.delete(vmid, { expectedOwner: m })
+			.catch((x: unknown) => x);
 		expect((err as { code?: string }).code).toBe("traces_remain");
 		expect(isRetryable(err)).toBe(true);
 		expect(
@@ -389,7 +397,7 @@ describe("PveNodeInfra lifecycle", () => {
 
 		// The IPAM entry goes away (Proxmox catches up); the repeated delete finishes.
 		e.api.ipam = e.api.ipam.filter((x) => x.vmid !== vmid);
-		await e.infra.delete(vmid);
+		await e.infra.delete(vmid, { expectedOwner: m });
 		expect(
 			(await leases(e.topo.providerId)).filter((l) => l.vmid === vmid),
 		).toEqual([]);
@@ -403,13 +411,15 @@ describe("PveNodeInfra lifecycle", () => {
 			size: SIZE,
 			smbios: smbiosFor(m),
 		});
-		await e.infra.start(vmid);
+		await e.infra.start(vmid, { expectedOwner: m });
 		e.node.fail["dhcp.release"] = new NodeOpsError(
 			"dhcp.release",
 			"busy",
 			"leases file is being rewritten",
 		);
-		const err = await e.infra.delete(vmid).catch((x: unknown) => x);
+		const err = await e.infra
+			.delete(vmid, { expectedOwner: m })
+			.catch((x: unknown) => x);
 		expect((err as { code?: string }).code).toBe("node_busy");
 		expect(isRetryable(err)).toBe(true);
 		expect(e.api.vms.has(vmid)).toBe(true);
@@ -418,13 +428,15 @@ describe("PveNodeInfra lifecycle", () => {
 		).toBe("releasing");
 
 		delete e.node.fail["dhcp.release"];
-		await e.infra.delete(vmid);
+		await e.infra.delete(vmid, { expectedOwner: m });
 		expect(e.api.vms.has(vmid)).toBe(false);
 		expect(await e.infra.leaseOf(m)).toBeUndefined();
 	});
 
 	it("delete refuses a template and tolerates a missing VM", async () => {
-		const err = await e.infra.delete(599).catch((x: unknown) => x);
+		const err = await e.infra
+			.delete(599, { expectedOwner: null })
+			.catch((x: unknown) => x);
 		expect(String(err)).toMatch(/template/);
 		expect(isPermanent(err)).toBe(true);
 
@@ -438,8 +450,93 @@ describe("PveNodeInfra lifecycle", () => {
 		e.api.vms.delete(vmid);
 		e.api.ipam = e.api.ipam.filter((x) => x.vmid !== vmid);
 		e.node.lvs = e.node.lvs.filter((l) => !l.name.startsWith(`vm-${vmid}-`));
-		await e.infra.delete(vmid);
+		await e.infra.delete(vmid, { expectedOwner: m });
 		expect(await e.infra.leaseOf(m)).toBeUndefined();
+	});
+
+	it("power operations for another owner are refused before Proxmox is touched", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m });
+		e.api.calls.length = 0;
+		const other = { expectedOwner: randomUUID() };
+		for (const call of [
+			() => e.infra.start(vmid, other),
+			() => e.infra.stop(vmid, other),
+			() => e.infra.shutdown(vmid, 5, other),
+			() => e.infra.delete(vmid, other),
+			() => e.infra.delete(vmid, { expectedOwner: null }),
+		]) {
+			const err = await call().catch((x: unknown) => x);
+			expect(err).toBeInstanceOf(OwnerMismatchError);
+			expect(isPermanent(err)).toBe(true);
+		}
+		expect(e.api.calls.filter((c) => c.method !== "GET")).toEqual([]);
+		expect(e.api.vms.get(vmid)?.status).toBe("running");
+		expect(
+			(await leases(e.topo.providerId)).find((l) => l.vmid === vmid)?.state,
+		).toBe("active");
+	});
+
+	it("delete with expectedOwner null removes an orphan VM that has no lease", async () => {
+		e.api.vms.set(570, {
+			config: { tags: "sbx" },
+			status: "running",
+			firewall: { rules: [], ipsets: {} },
+		});
+		await e.infra.delete(570, { expectedOwner: null });
+		expect(e.api.vms.has(570)).toBe(false);
+	});
+
+	it("start re-checks the caller's fence after waiting for the power lock (M3)", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		// Another worker holds the node's power lock.
+		const holder = await db.pool.connect();
+		const key = `power:${e.topo.nodeId}`;
+		await holder.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+			key,
+		]);
+		let fenced = false;
+		const fencedOut = new FencedOut("attempt 1 fenced out");
+		const start = e.infra
+			.start(vmid, {
+				expectedOwner: m,
+				beforeAct: async () => {
+					if (fenced) throw fencedOut;
+				},
+			})
+			.catch((x: unknown) => x);
+		const deadline = Date.now() + 5000;
+		for (;;) {
+			const r = await db.pool.query<{ n: number }>(
+				`SELECT count(*)::int AS n FROM pg_locks
+				 WHERE locktype = 'advisory' AND NOT granted
+				   AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+			);
+			if ((r.rows[0]?.n ?? 0) > 0) break;
+			if (Date.now() > deadline) throw new Error("start never waited");
+			await new Promise((res) => setTimeout(res, 5));
+		}
+		// Superseded while it waited.
+		fenced = true;
+		await holder.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
+			key,
+		]);
+		holder.release();
+		expect(await start).toBe(fencedOut);
+		expect(e.api.paths().some((p) => p.endsWith("/status/start"))).toBe(false);
+		expect(e.api.vms.get(vmid)?.status).toBe("stopped");
 	});
 
 	it("create again for the same machine reuses its lease and never rolls it back", async () => {

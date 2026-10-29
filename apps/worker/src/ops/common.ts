@@ -14,6 +14,8 @@ import {
 	capacityWait,
 	MachineGone,
 	MachineStateConflict,
+	ownedPowerOp,
+	ownedTeardown,
 } from "../machine-prep.ts";
 import { AgentUnavailable } from "../ports.ts";
 import {
@@ -270,20 +272,35 @@ export async function startMachine(
 	if (status === "missing") throw new MachineGone(m.id, `VM ${vmid} missing`);
 	if (status !== "running") {
 		await fenced.check();
-		await infra.start(vmid);
+		await ownedPowerOp(ctx, m.id, vmid, "start", () =>
+			infra.start(vmid, {
+				expectedOwner: m.id,
+				beforeAct: () => fenced.check(),
+			}),
+		);
 	}
 	await markPowered(fenced, m.id);
 }
 
-/** S1 hard stop if the VM runs; a missing VM is fine. Returns the VM status before. */
+/**
+ * S1 hard stop if the VM runs; a missing VM is fine. Returns the VM status
+ * before; `missing` also when the VMID is no longer the machine's (owner
+ * mismatch: nothing stopped).
+ */
 export async function hardStop(
 	ctx: WorkerCtx,
 	m: MachineRow,
 ): Promise<"running" | "stopped" | "paused" | "missing" | "none"> {
-	if (m.vmid === null) return "none";
+	const vmid = m.vmid;
+	if (vmid === null) return "none";
 	const infra = await ctx.infra.forNode(m.node_id);
-	const status = await infra.status(m.vmid);
-	if (status === "running" || status === "paused") await infra.stop(m.vmid);
+	const status = await infra.status(vmid);
+	if (status === "running" || status === "paused") {
+		const own = await ownedTeardown(ctx, m.id, vmid, "stop", () =>
+			infra.stop(vmid, { expectedOwner: m.id }),
+		);
+		if (!own) return "missing";
+	}
 	return status;
 }
 

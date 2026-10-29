@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withNodePowerLock } from "../src/adapters/power-lock.ts";
 import { PveInfraRegistry } from "../src/adapters/pve-infra.ts";
 import type { NodeInfra } from "../src/ports.ts";
-import { createTopology } from "./fakes/world.ts";
+import { createTopology, leaseVm } from "./fakes/world.ts";
 
 let db: TestDatabase;
 
@@ -28,6 +28,10 @@ function deferred(): Deferred {
 		resolve = r;
 	});
 	return { promise, resolve };
+}
+
+function never(): never {
+	throw new Error("missing owner");
 }
 
 /** Polls cond until it holds (condition-based, no fixed ordering sleeps). */
@@ -193,8 +197,12 @@ describe("PveNodeInfra start and delete serialization", () => {
 			a.topo.nodeId,
 		);
 		const vmids = [530, 531, 532, 533, 534];
-		for (const v of vmids) a.api.addStopped(v);
-		const starts = vmids.map((v) => infra.start(v));
+		const own = new Map<number, { expectedOwner: string }>();
+		for (const v of vmids) {
+			a.api.addStopped(v);
+			own.set(v, await leaseVm(db.pool, a.topo.providerId, v));
+		}
+		const starts = vmids.map((v) => infra.start(v, own.get(v) ?? never()));
 		await a.api.began(530);
 		await settle();
 		// The other four wait in process, not on Postgres.
@@ -217,8 +225,18 @@ describe("PveNodeInfra start and delete serialization", () => {
 		const apis = new Map([[a.topo.nodeId, a.api]]);
 		const p1: NodeInfra = await registryFor(apis).forNode(a.topo.nodeId);
 		const p2: NodeInfra = await registryFor(apis).forNode(a.topo.nodeId);
-		for (const v of [540, 541, 542, 543]) a.api.addStopped(v);
-		const s = [p1.start(540), p2.start(541), p1.start(542), p2.start(543)];
+		const own = new Map<number, { expectedOwner: string }>();
+		for (const v of [540, 541, 542, 543]) {
+			a.api.addStopped(v);
+			own.set(v, await leaseVm(db.pool, a.topo.providerId, v));
+		}
+		const o = (v: number) => own.get(v) ?? never();
+		const s = [
+			p1.start(540, o(540)),
+			p2.start(541, o(541)),
+			p1.start(542, o(542)),
+			p2.start(543, o(543)),
+		];
 		// Either process may win the lock first.
 		await Promise.race([a.api.began(540), a.api.began(541)]);
 		await waitFor(
@@ -253,10 +271,13 @@ describe("PveNodeInfra start and delete serialization", () => {
 		const infraB = await registry.forNode(b.topo.nodeId);
 		a.api.addStopped(510);
 		b.api.addStopped(520);
-		const held = infraA.start(510);
+		const held = infraA.start(
+			510,
+			await leaseVm(db.pool, a.topo.providerId, 510),
+		);
 		await a.api.began(510);
 		b.api.release(520);
-		await infraB.start(520);
+		await infraB.start(520, await leaseVm(db.pool, b.topo.providerId, 520));
 		expect(b.api.events).toEqual(["begin:520", "end:520"]);
 		expect(a.api.events).toEqual(["begin:510"]);
 		a.api.release(510);
@@ -271,8 +292,10 @@ describe("PveNodeInfra start and delete serialization", () => {
 		);
 		a.api.addStopped(550);
 		a.api.release(550);
-		await expect(infra.start(999)).rejects.toThrow();
-		await infra.start(550);
+		await expect(
+			infra.start(999, await leaseVm(db.pool, a.topo.providerId, 999)),
+		).rejects.toThrow();
+		await infra.start(550, await leaseVm(db.pool, a.topo.providerId, 550));
 		expect(await infra.status(550)).toBe("running");
 	});
 
@@ -283,9 +306,10 @@ describe("PveNodeInfra start and delete serialization", () => {
 		const p2 = await registryFor(apis).forNode(a.topo.nodeId);
 		a.api.addStopped(560);
 		a.api.addStopped(561);
-		const start = p1.start(560);
+		const own561 = await leaseVm(db.pool, a.topo.providerId, 561);
+		const start = p1.start(560, await leaseVm(db.pool, a.topo.providerId, 560));
 		await a.api.began(560);
-		const del = p2.delete(561);
+		const del = p2.delete(561, own561);
 		await waitFor(
 			async () => (await advisoryLocks()).waiting === 1,
 			"the delete waits for the power lock",
@@ -312,9 +336,13 @@ describe("PveNodeInfra start and delete serialization", () => {
 		);
 		a.api.addStopped(562);
 		a.api.addStopped(563);
-		const del = infra.delete(562);
+		const own563 = await leaseVm(db.pool, a.topo.providerId, 563);
+		const del = infra.delete(
+			562,
+			await leaseVm(db.pool, a.topo.providerId, 562),
+		);
 		await a.api.began(562);
-		const start = infra.start(563);
+		const start = infra.start(563, own563);
 		await settle();
 		expect(await advisoryLocks()).toEqual({ granted: 1, waiting: 0 });
 		expect(a.api.events).toEqual(["begin:del:562"]);
@@ -343,9 +371,12 @@ describe("PveNodeInfra start and delete serialization", () => {
 		a.api.addStopped(564);
 		b.api.addStopped(565);
 		b.api.release(565);
-		const held = infraA.start(564);
+		const held = infraA.start(
+			564,
+			await leaseVm(db.pool, a.topo.providerId, 564),
+		);
 		await a.api.began(564);
-		await infraB.delete(565);
+		await infraB.delete(565, await leaseVm(db.pool, b.topo.providerId, 565));
 		expect(b.api.vms.has(565)).toBe(false);
 		expect(a.api.events).toEqual(["begin:564"]);
 		a.api.release(564);
@@ -358,7 +389,10 @@ describe("PveNodeInfra start and delete serialization", () => {
 			a.topo.nodeId,
 		);
 		a.api.addStopped(512);
-		const held = infra.start(512);
+		const held = infra.start(
+			512,
+			await leaseVm(db.pool, a.topo.providerId, 512),
+		);
 		await a.api.began(512);
 		const m = randomUUID();
 		const vm = await infra.create({

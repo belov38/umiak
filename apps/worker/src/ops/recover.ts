@@ -1,5 +1,5 @@
 import type { WorkerCtx } from "../context.ts";
-import { MachineGone } from "../machine-prep.ts";
+import { MachineGone, ownedPowerOp } from "../machine-prep.ts";
 import type { Fenced, Step } from "../steps.ts";
 import {
 	currentMachine,
@@ -66,15 +66,25 @@ function recoverSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 						throw new MachineGone(m.id, `VM ${vmid} missing`);
 					}
 					await fenced.check();
-					if (status !== "stopped") await infra.stop(vmid);
+					if (status !== "stopped")
+						await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
+							infra.stop(vmid, { expectedOwner: m.id }),
+						);
 					await fenced.check();
-					await infra.start(vmid);
+					await ownedPowerOp(ctx, m.id, vmid, "start", () =>
+						infra.start(vmid, {
+							expectedOwner: m.id,
+							beforeAct: () => fenced.check(),
+						}),
+					);
 					await markPowered(fenced, m.id);
 				} else {
 					const status = await infra.status(vmid);
 					if (status === "running" || status === "paused") {
 						await fenced.check();
-						await infra.stop(vmid);
+						await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
+							infra.stop(vmid, { expectedOwner: m.id }),
+						);
 					}
 					await startMachine(ctx, fenced, m);
 				}

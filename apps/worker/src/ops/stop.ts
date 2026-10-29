@@ -1,5 +1,9 @@
 import type { WorkerCtx } from "../context.ts";
-import { MachineGone, MachineStateConflict } from "../machine-prep.ts";
+import {
+	MachineGone,
+	MachineStateConflict,
+	ownedPowerOp,
+} from "../machine-prep.ts";
 import type { Fenced, Step } from "../steps.ts";
 import { currentMachine, runOp, transitionSandbox, vmidOf } from "./common.ts";
 import { compensateStop } from "./compensate.ts";
@@ -86,13 +90,18 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 				}
 				if (status === "stopped") return { shutdown: "already" };
 				await fenced.check();
-				const res = await infra.shutdown(
-					vmid,
-					ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S,
+				const res = await ownedPowerOp(ctx, m.id, vmid, "shutdown", () =>
+					infra.shutdown(
+						vmid,
+						ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S,
+						{ expectedOwner: m.id },
+					),
 				);
 				if (res === "timeout") {
 					await fenced.check();
-					await infra.stop(vmid);
+					await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
+						infra.stop(vmid, { expectedOwner: m.id }),
+					);
 					return { shutdown: "hard" };
 				}
 				return { shutdown: "clean" };
@@ -110,7 +119,9 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 				}
 				if (status !== "stopped") {
 					await fenced.check();
-					await infra.stop(vmid);
+					await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
+						infra.stop(vmid, { expectedOwner: m.id }),
+					);
 					status = await infra.status(vmid);
 				}
 				if (status !== "stopped") throw new StopNotConfirmed(vmid, status);

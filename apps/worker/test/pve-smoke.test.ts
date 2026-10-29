@@ -99,6 +99,13 @@ let lvsBefore: string[];
 /** Every machine id handed to create/fork (their leases find partial VMs). */
 const machineIds: string[] = [];
 const vmids = new Set<number>();
+/** VMID → machine id of its lease (the owner NodeInfra power operations check). */
+const owners = new Map<number, string>();
+function owned(vmid: number): { expectedOwner: string } {
+	const expectedOwner = owners.get(vmid);
+	if (expectedOwner === undefined) throw new Error(`VM ${vmid}: no owner`);
+	return { expectedOwner };
+}
 /** Every VMID and snapshot id this run ever created (for the final LV check). */
 const createdVmids = new Set<number>();
 const createdLvIds = new Set<string>();
@@ -184,6 +191,7 @@ async function createVm(label: string): Promise<number> {
 		}),
 	);
 	vmids.add(vm.vmid);
+	owners.set(vm.vmid, machineId);
 	createdVmids.add(vm.vmid);
 	expect(inRange(vm.vmid)).toBe(true);
 	log(`${label} = VM ${vm.vmid}`);
@@ -194,7 +202,9 @@ async function deleteVm(label: string, vmid: number): Promise<void> {
 	await timed(`delete ${label}`, async () => {
 		for (let attempt = 1; ; attempt++) {
 			try {
-				await infra.delete(vmid);
+				await infra.delete(vmid, {
+					expectedOwner: owners.get(vmid) ?? null,
+				});
 				break;
 			} catch (err) {
 				// A retried delete is safe (the lease stays `releasing`).
@@ -215,7 +225,10 @@ async function cleanup(): Promise<void> {
 	if (!infra) return;
 	for (const id of machineIds) {
 		const l = await infra.leaseOf(id).catch(() => undefined);
-		if (l) vmids.add(l.vmid);
+		if (l) {
+			vmids.add(l.vmid);
+			owners.set(l.vmid, id);
+		}
 	}
 	const sources = new Set([...snapshots.values()].map((s) => s.sourceVmid));
 	const del = async (v: number) => {
@@ -307,12 +320,15 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 
 			await assertRoomFor(1);
 			const vmA = a;
-			await timed("start A", () => infra.start(vmA));
+			await timed("start A", () => infra.start(vmA, owned(vmA)));
 			expect(await infra.status(vmA)).toBe("running");
 
-			const r = await timed("shutdown A (60 s)", () => infra.shutdown(vmA, 60));
+			const r = await timed("shutdown A (60 s)", () =>
+				infra.shutdown(vmA, 60, owned(vmA)),
+			);
 			log(`shutdown A: ${r}`);
-			if (r === "timeout") await timed("stop A", () => infra.stop(vmA));
+			if (r === "timeout")
+				await timed("stop A", () => infra.stop(vmA, owned(vmA)));
 			await until(
 				"A stopped",
 				() => infra.status(vmA),
@@ -357,6 +373,7 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 				}),
 			);
 			vmids.add(b.vmid);
+			owners.set(b.vmid, machineB);
 			createdVmids.add(b.vmid);
 			log(`B = VM ${b.vmid} (fork of snapshot of ${vmA})`);
 			expect(inRange(b.vmid)).toBe(true);
@@ -403,7 +420,7 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 				Promise.all(
 					[c, d].map(async (v) => {
 						const s = Date.now();
-						await infra.start(v);
+						await infra.start(v, owned(v));
 						spans.push({ vmid: v, t0: s - t0, t1: Date.now() - t0 });
 					}),
 				),

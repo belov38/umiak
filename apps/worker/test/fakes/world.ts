@@ -242,6 +242,29 @@ export interface Topology {
 	clusterMacId: number;
 }
 
+/**
+ * Test setup: an active machine lease of `vmid` owned by `machineId` (a VM
+ * made outside S1); returns the owner, as NodeInfra power operations expect.
+ */
+export async function leaseVm(
+	q: Pick<pg.Pool, "query">,
+	providerId: string,
+	vmid: number,
+	machineId: string = randomUUID(),
+): Promise<{ expectedOwner: string }> {
+	await q.query(
+		`INSERT INTO runtime.vmid_leases (provider_id, vmid, mac, state, purpose, machine_id)
+		 VALUES ($1, $2, $3, 'active', 'machine', $4)`,
+		[
+			providerId,
+			vmid,
+			`02:ee:00:00:${(vmid >> 8).toString(16).padStart(2, "0")}:${(vmid & 255).toString(16).padStart(2, "0")}`,
+			machineId,
+		],
+	);
+	return { expectedOwner: machineId };
+}
+
 export interface TopologyOptions {
 	ramCapMb?: number;
 	cloneConcurrency?: number;

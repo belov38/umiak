@@ -1,10 +1,17 @@
 // In-memory S1 for one node. VMIDs and MACs come from the real Allocator over
 // PgAllocatorStore, so leases are real rows of runtime.vmid_leases and
 // `leaseOf` reads them. `start` hands the VM to the FakeAgentWorld, which
-// "boots" it (tunnel session + agent events).
+// "boots" it (tunnel session + agent events). start, stop, shutdown and delete
+// go through an in-process power gate (as the adapter's per-node power lock)
+// and S1's owner check (checkLeaseOwner) on the real lease rows.
 import { randomUUID } from "node:crypto";
 import { PgAllocatorStore } from "@sbx/db";
-import { Allocator, type QuiesceHook } from "@sbx/pve";
+import {
+	Allocator,
+	checkLeaseOwner,
+	type PowerOp,
+	type QuiesceHook,
+} from "@sbx/pve";
 import type pg from "pg";
 import type {
 	CreatedVm,
@@ -17,6 +24,8 @@ import type {
 	InfraSnapshotResult,
 	InfraVm,
 	NodeInfra,
+	OwnedVm,
+	StartOpts,
 	VmStatus,
 } from "../../src/ports.ts";
 
@@ -75,6 +84,7 @@ export class FakeInfra implements NodeInfra {
 	readonly #pool: pg.Pool;
 	readonly #providerId: string;
 	readonly #storage: string;
+	#powerGate: Promise<void> = Promise.resolve();
 
 	constructor(o: FakeInfraOptions) {
 		this.#pool = o.pool;
@@ -94,6 +104,44 @@ export class FakeInfra implements NodeInfra {
 
 	#call(method: string, ...args: unknown[]): void {
 		this.calls.push({ method, args });
+	}
+
+	/** FIFO like the adapter's power gate; settles on success and failure. */
+	#powerSerialized<T>(fn: () => Promise<T>): Promise<T> {
+		const run = this.#powerGate.then(fn);
+		this.#powerGate = run.then(
+			() => {},
+			() => {},
+		);
+		return run;
+	}
+
+	/**
+	 * Test control: takes the power lock until the returned function is
+	 * called (another power operation of the node in flight).
+	 */
+	holdPower(): () => void {
+		let release: () => void = () => {};
+		const held = new Promise<void>((r) => {
+			release = r;
+		});
+		void this.#powerSerialized(() => held);
+		return release;
+	}
+
+	/** S1's owner check against the lease row; false: a delete with nothing to do. */
+	async #ownerCheck(
+		op: PowerOp,
+		vmid: number,
+		expectedOwner: string | null,
+	): Promise<boolean> {
+		return checkLeaseOwner({
+			op,
+			vmid,
+			lease: await this.allocator.get(vmid),
+			expectedOwner,
+			vmExists: async () => this.vms.has(vmid),
+		});
 	}
 
 	callsOf(method: string): InfraCall[] {
@@ -199,27 +247,38 @@ export class FakeInfra implements NodeInfra {
 		return { vmid, mac, disks: structuredClone(disks) };
 	}
 
-	async start(vmid: number): Promise<void> {
+	start(vmid: number, o: StartOpts): Promise<void> {
 		this.#call("start", vmid);
-		const vm = this.#vm(vmid);
-		if (vm.status === "running") return;
-		vm.status = "running";
-		vm.starts += 1;
-		this.lifecycle?.boot(this, vm);
+		return this.#powerSerialized(async () => {
+			await o.beforeAct?.();
+			await this.#ownerCheck("start", vmid, o.expectedOwner);
+			const vm = this.#vm(vmid);
+			if (vm.status === "running") return;
+			vm.status = "running";
+			vm.starts += 1;
+			this.lifecycle?.boot(this, vm);
+		});
 	}
 
-	async shutdown(
+	shutdown(
 		vmid: number,
 		_timeoutS: number,
+		o: OwnedVm,
 	): Promise<"stopped" | "timeout"> {
 		this.#call("shutdown", vmid);
-		await this.#powerOff(this.#vm(vmid));
-		return "stopped";
+		return this.#powerSerialized(async () => {
+			await this.#ownerCheck("shutdown", vmid, o.expectedOwner);
+			await this.#powerOff(this.#vm(vmid));
+			return "stopped" as const;
+		});
 	}
 
-	async stop(vmid: number): Promise<void> {
+	stop(vmid: number, o: OwnedVm): Promise<void> {
 		this.#call("stop", vmid);
-		await this.#powerOff(this.#vm(vmid));
+		return this.#powerSerialized(async () => {
+			await this.#ownerCheck("stop", vmid, o.expectedOwner);
+			await this.#powerOff(this.#vm(vmid));
+		});
 	}
 
 	async #powerOff(vm: FakeVm): Promise<void> {
@@ -245,12 +304,21 @@ export class FakeInfra implements NodeInfra {
 		return { vcpu: vm.vcpu, memoryMb: vm.memoryMb };
 	}
 
-	/** S1 delete: lease to releasing, VM and its LVs gone, then the lease is freed. */
-	async delete(vmid: number): Promise<void> {
+	/** S1 delete: owner check, lease to releasing, VM and its LVs gone, then the lease is freed. */
+	delete(vmid: number, o: { expectedOwner: string | null }): Promise<void> {
 		this.#call("delete", vmid);
 		if (this.templateVmids.includes(vmid)) {
-			throw new Error(`refusing to delete the template VM ${vmid}`);
+			return Promise.reject(
+				new Error(`refusing to delete the template VM ${vmid}`),
+			);
 		}
+		return this.#powerSerialized(async () => {
+			if (!(await this.#ownerCheck("delete", vmid, o.expectedOwner))) return;
+			await this.#destroy(vmid);
+		});
+	}
+
+	async #destroy(vmid: number): Promise<void> {
 		const lease = await this.allocator.get(vmid);
 		if (lease) await this.allocator.markReleasing(vmid);
 		const vm = this.vms.get(vmid);

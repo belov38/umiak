@@ -1,6 +1,7 @@
 import type { WorkerCtx } from "../context.ts";
 import { loadSnapshot, snapshotRef } from "../db.ts";
 import { handleMachineOp } from "../handlers/machine-op.ts";
+import { ownedTeardown } from "../machine-prep.ts";
 import { type Fenced, FencedOut, MachineFence } from "../steps.ts";
 import { runOp, transitionSandbox } from "./common.ts";
 import type { SandboxOpHandler } from "./kind.ts";
@@ -71,9 +72,14 @@ async function stopMachine(
 		if (lease !== undefined) {
 			await fence.check();
 			await fenced.check();
-			const status = await infra.status(lease.vmid);
+			const vmid = lease.vmid;
+			const status = await infra.status(vmid);
 			if (status === "running" || status === "paused") {
-				await infra.stop(lease.vmid);
+				// A mismatch: the VMID is not this machine's any more; destroy
+				// finds the machine's VM gone.
+				await ownedTeardown(ctx, machineId, vmid, "stop", () =>
+					infra.stop(vmid, { expectedOwner: machineId }),
+				);
 			}
 		}
 		await fence.tx(async (tx) => {

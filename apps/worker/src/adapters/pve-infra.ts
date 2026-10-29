@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { PgAllocatorStore } from "@sbx/db";
 import {
 	Allocator,
+	checkLeaseOwner,
 	type Disk,
 	type DiskSet,
 	LvmThinDriver,
 	Machines,
 	type NodeOps,
+	OwnerMismatchError,
 	PveApi,
 	PveApiError,
 	type PveClient,
@@ -33,6 +35,8 @@ import type {
 	InfraSnapshotResult,
 	InfraVm,
 	NodeInfra,
+	OwnedVm,
+	StartOpts,
 	VmStatus,
 } from "../ports.ts";
 import {
@@ -324,6 +328,10 @@ export class PveNodeInfra implements NodeInfra {
 				},
 				cloneConcurrency: this.#t.cloneConcurrency,
 				ipfilter: true,
+				// The rollback delete of a failed create/fork is a delete like any
+				// other: serialized with starts. No deadlock: create/fork never run
+				// under the power lock, and power operations never wait for a clone.
+				powerLock: (fn) => this.#powerSerialized(fn),
 				...(this.#o.pollMs !== undefined ? { pollMs: this.#o.pollMs } : {}),
 			});
 			this.#machines.set(templateVmid, m);
@@ -409,11 +417,29 @@ export class PveNodeInfra implements NodeInfra {
 		});
 	}
 
-	/** Serialized per node with delete (power-lock.ts): ethers/IPAM writes race. */
-	start(vmid: number): Promise<void> {
+	/**
+	 * Serialized per node with delete (power-lock.ts): ethers/IPAM writes race.
+	 * Under the lock: the caller's `beforeAct` (its fence: an executor fenced
+	 * out while it waited never starts the VM), then S1 start with the owner
+	 * check. Errors of `beforeAct` pass through unclassified.
+	 */
+	start(vmid: number, o: StartOpts): Promise<void> {
+		let fromCaller: { err: unknown } | undefined;
 		return this.#run("start", () =>
-			this.#powerSerialized(() => this.#base.start(vmid)),
-		);
+			this.#powerSerialized(async () => {
+				if (o.beforeAct) {
+					try {
+						await o.beforeAct();
+					} catch (err) {
+						fromCaller = { err };
+						throw err;
+					}
+				}
+				await this.#base.start(vmid, { expectedOwner: o.expectedOwner });
+			}),
+		).catch((err: unknown) => {
+			throw fromCaller ? fromCaller.err : err;
+		});
 	}
 
 	/**
@@ -431,11 +457,35 @@ export class PveNodeInfra implements NodeInfra {
 		return run;
 	}
 
-	shutdown(vmid: number, timeoutS: number): Promise<"stopped" | "timeout"> {
+	/**
+	 * The owner check and the shutdown request run under the power lock, the
+	 * wait for the guest (up to timeoutS) outside it: once Proxmox accepted the
+	 * task it acts on that VM, and holding the lock that long would stall
+	 * every start and delete of the node. Same rule as S1 (checkLeaseOwner).
+	 */
+	shutdown(
+		vmid: number,
+		timeoutS: number,
+		o: OwnedVm,
+	): Promise<"stopped" | "timeout"> {
 		return this.#run("shutdown", async () => {
 			try {
-				await this.#base.shutdown(vmid, timeoutS);
+				const upid = await this.#powerSerialized(async () => {
+					await checkLeaseOwner({
+						op: "shutdown",
+						vmid,
+						lease: await this.#allocator.get(vmid),
+						expectedOwner: o.expectedOwner,
+						vmExists: async () => true,
+					});
+					return this.#c.api.post<string>(
+						this.#vmPath(vmid, "/status/shutdown"),
+						{ timeout: timeoutS },
+					);
+				});
+				await this.#c.api.waitTask(this.#t.nodeName, upid);
 			} catch (err) {
+				if (err instanceof OwnerMismatchError) throw err;
 				// The shutdown task fails when the guest ignores ACPI within the timeout.
 				const s = await this.#statusOf(vmid).catch(() => undefined);
 				if (s === "stopped") return "stopped";
@@ -446,8 +496,13 @@ export class PveNodeInfra implements NodeInfra {
 		});
 	}
 
-	stop(vmid: number): Promise<void> {
-		return this.#run("stop", () => this.#base.stop(vmid));
+	/** Under the power lock: the owner check and the stop are one step for other power operations. */
+	stop(vmid: number, o: OwnedVm): Promise<void> {
+		return this.#run("stop", () =>
+			this.#powerSerialized(() =>
+				this.#base.stop(vmid, { expectedOwner: o.expectedOwner }),
+			),
+		);
 	}
 
 	/**
@@ -530,10 +585,11 @@ export class PveNodeInfra implements NodeInfra {
 
 	/**
 	 * Never a template: neither an active one of this node nor any build of
-	 * the provider. Serialized per node with start. A failed delete leaves the
-	 * lease `releasing` and is safe to repeat (S1 tolerates a missing VM).
+	 * the provider. Serialized per node with start; S1 checks the owner under
+	 * the lock. A failed delete leaves the lease `releasing` and is safe to
+	 * repeat (S1 tolerates a missing VM).
 	 */
-	delete(vmid: number): Promise<void> {
+	delete(vmid: number, o: { expectedOwner: string | null }): Promise<void> {
 		return this.#run("delete", async () => {
 			const r = await this.#db.query<{ vmid: number }>(
 				"SELECT DISTINCT pve_vmid AS vmid FROM runtime.template_builds WHERE provider_id = $1",
@@ -545,7 +601,9 @@ export class PveNodeInfra implements NodeInfra {
 					`refusing to delete the template VM ${vmid}`,
 					"delete",
 				);
-			await this.#powerSerialized(() => this.#base.delete(vmid));
+			await this.#powerSerialized(() =>
+				this.#base.delete(vmid, { expectedOwner: o.expectedOwner }),
+			);
 		});
 	}
 

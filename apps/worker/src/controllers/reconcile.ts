@@ -9,6 +9,7 @@ import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { lockSandboxRow } from "../db.ts";
 import { snapshotInUse } from "../handlers/snapshot-op.ts";
+import { isOwnerMismatch, noteOwnerMismatch } from "../machine-prep.ts";
 import {
 	markMachineLost,
 	sandboxToError,
@@ -272,8 +273,11 @@ const ACTIVE_OP_OF_MACHINE = `EXISTS (
 
 interface Evidence {
 	machineVmids: Set<number>;
-	/** VMID → lease state and whether its owner machine is alive (not deleted). */
-	leases: Map<number, { state: string; ownerAlive: boolean }>;
+	/** VMID → lease state, owner machine id, and whether that machine is alive (not deleted). */
+	leases: Map<
+		number,
+		{ state: string; owner: string | null; ownerAlive: boolean }
+	>;
 	templates: Set<number>;
 	diskLvs: Set<string>;
 	snapshots: Map<string, { id: string; state: string }>;
@@ -293,9 +297,10 @@ async function loadEvidence(
 		vmid: number;
 		state: string;
 		purpose: string;
+		machine_id: string | null;
 		owner_alive: boolean;
 	}>(
-		`SELECT l.vmid, l.state, l.purpose,
+		`SELECT l.vmid, l.state, l.purpose, l.machine_id,
 		        COALESCE(m.state <> 'deleted', false) AS owner_alive
 		 FROM runtime.vmid_leases l
 		 LEFT JOIN runtime.machines m ON m.id = l.machine_id
@@ -320,10 +325,14 @@ async function loadEvidence(
 		...infra.templateVmids,
 		...t.rows.map((x) => x.vmid),
 	]);
-	const leases = new Map<number, { state: string; ownerAlive: boolean }>();
+	const leases: Evidence["leases"] = new Map();
 	for (const x of l.rows) {
 		if (x.purpose === "template") templates.add(x.vmid);
-		leases.set(x.vmid, { state: x.state, ownerAlive: x.owner_alive });
+		leases.set(x.vmid, {
+			state: x.state,
+			owner: x.machine_id,
+			ownerAlive: x.owner_alive,
+		});
 	}
 	return {
 		machineVmids: new Set(m.rows.map((x) => x.vmid)),
@@ -566,7 +575,12 @@ async function planNode(
 				if ((await infra.status(vm.vmid)) === "missing") return false;
 				const fresh = await loadEvidence(ctx.pool, provider.id, infra);
 				if (vmidClaimed(fresh, vm.vmid)) return false;
-				await infra.delete(vm.vmid);
+				// S1 re-checks under the power lock that the lease is still the
+				// one seen here (a dead owner's, or none): a VMID leased to a new
+				// machine meanwhile is refused.
+				const owner = fresh.leases.get(vm.vmid)?.owner ?? null;
+				if (!(await ownerCheckedDelete(ctx, infra, vm.vmid, owner)))
+					return false;
 				await forgetSeen(ctx.pool, provider.id, "vm", name);
 				return true;
 			},
@@ -780,14 +794,22 @@ async function applyPowerDrift(
 	vmid: number,
 ): Promise<boolean> {
 	if (!(await machineUnchanged(ctx.pool, m))) return false;
-	const res = await infra.shutdown(
-		vmid,
-		ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S,
-	);
-	if (res === "timeout") {
-		// The guest ignored the shutdown; hard stop only if nothing took the machine meanwhile.
-		if (!(await machineUnchanged(ctx.pool, m))) return false;
-		await infra.stop(vmid);
+	const owned = { expectedOwner: m.id };
+	try {
+		const res = await infra.shutdown(
+			vmid,
+			ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S,
+			owned,
+		);
+		if (res === "timeout") {
+			// The guest ignored the shutdown; hard stop only if nothing took the machine meanwhile.
+			if (!(await machineUnchanged(ctx.pool, m))) return false;
+			await infra.stop(vmid, owned);
+		}
+	} catch (e) {
+		if (!isOwnerMismatch(e)) throw e;
+		noteOwnerMismatch(ctx, e, { op: "shutdown", machineId: m.id, vmid });
+		return false;
 	}
 	await ctx.pool.query(
 		`UPDATE runtime.machines SET power_observed = 'stopped', power_observed_at = now()
@@ -816,6 +838,30 @@ function leaseVmUnsafe(
 	if (vm.pool !== SANDBOX_POOL) return "not_in_pool";
 	if (!vm.tags.includes(SBX_TAG)) return "no_sbx_tag";
 	return null;
+}
+
+/**
+ * S1 delete for the owner reconcile saw (null: no owned lease). An owner
+ * mismatch (the VMID changed hands since) is a skip, not a failure.
+ */
+async function ownerCheckedDelete(
+	ctx: WorkerCtx,
+	infra: NodeInfra,
+	vmid: number,
+	expectedOwner: string | null,
+): Promise<boolean> {
+	try {
+		await infra.delete(vmid, { expectedOwner });
+		return true;
+	} catch (e) {
+		if (!isOwnerMismatch(e)) throw e;
+		noteOwnerMismatch(ctx, e, {
+			op: "delete",
+			vmid,
+			...(expectedOwner !== null ? { machineId: expectedOwner } : {}),
+		});
+		return false;
+	}
 }
 
 function countSkip(
@@ -889,14 +935,14 @@ async function planLeases(
 					countSkip(ctx, why, { kind: "lease_release", vmid, nodeId: node_id });
 					return false;
 				}
-				const still = await ctx.pool.query(
-					`SELECT 1 FROM runtime.vmid_leases
+				const still = await ctx.pool.query<{ machine_id: string | null }>(
+					`SELECT machine_id FROM runtime.vmid_leases
 					 WHERE provider_id = $1 AND vmid = $2 AND state = 'releasing'`,
 					[provider.id, vmid],
 				);
-				if (still.rowCount !== 1) return false;
-				await infra.delete(vmid);
-				return true;
+				const lease = still.rows[0];
+				if (lease === undefined) return false;
+				return ownerCheckedDelete(ctx, infra, vmid, lease.machine_id);
 			},
 		});
 	}

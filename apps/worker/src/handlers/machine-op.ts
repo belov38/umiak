@@ -1,6 +1,7 @@
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import type { WorkerCtx } from "../context.ts";
 import {
+	ownedTeardown,
 	type PrepSource,
 	prepareMachine,
 	waitBooted,
@@ -171,7 +172,7 @@ async function deleteMachine(
 			);
 		});
 		const infra = await ctx.infra.forNode(fence.machine.node_id);
-		await destroyVms(fence, infra, machineId);
+		await destroyVms(ctx, fence, infra, machineId);
 		await fence.tx(async (tx) => {
 			await tx.client.query(
 				`UPDATE runtime.disks SET state = 'deleted', deleted_at = now()
@@ -193,8 +194,14 @@ async function deleteMachine(
 	}
 }
 
-/** Stops and deletes every VM leased to the machine. */
+/**
+ * Stops and deletes every VM leased to the machine. S1 checks under the
+ * power lock that the VMID is still leased to this machine: a second deleter
+ * whose lease read went stale (the first one freed the VMID and a new machine
+ * may have it) gets an owner mismatch and treats the machine's VM as gone.
+ */
 export async function destroyVms(
+	ctx: WorkerCtx,
 	fence: MachineFence,
 	infra: NodeInfra,
 	machineId: string,
@@ -210,11 +217,18 @@ export async function destroyVms(
 		}
 		last = lease.vmid;
 		await fence.check();
-		const status = await infra.status(lease.vmid);
-		if (status === "running" || status === "paused")
-			await infra.stop(lease.vmid);
+		const vmid = lease.vmid;
+		const status = await infra.status(vmid);
+		if (status === "running" || status === "paused") {
+			const own = await ownedTeardown(ctx, machineId, vmid, "stop", () =>
+				infra.stop(vmid, { expectedOwner: machineId }),
+			);
+			if (!own) continue;
+		}
 		await markStopped(fence, machineId);
-		await infra.delete(lease.vmid);
+		await ownedTeardown(ctx, machineId, vmid, "delete", () =>
+			infra.delete(vmid, { expectedOwner: machineId }),
+		);
 	}
 	await markStopped(fence, machineId);
 }
