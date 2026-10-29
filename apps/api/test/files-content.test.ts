@@ -14,7 +14,13 @@ import {
 	readySandbox,
 	sha256,
 } from "./helpers/commands.ts";
-import { bytesOf, filesUrl, qs, rawRequest } from "./helpers/files.ts";
+import {
+	bytesOf,
+	filesUrl,
+	qs,
+	rawRequest,
+	withFiles,
+} from "./helpers/files.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
@@ -146,6 +152,15 @@ describe.skipIf(skipPg())("files content", () => {
 			);
 			expect(r.status).toBe(400);
 			expect(err(r).code).toBe("invalid_path");
+		});
+
+		it("an agent 2xx other than 200/206 is 502 agent_error (bad_response)", async () => {
+			const agent = withFiles(w, () => new Response(null, { status: 204 }));
+			const r = await w
+				.harness({ deps: { agent } })
+				.request("GET", content({ path: "data.bin" }));
+			expect(r.status).toBe(502);
+			expect(err(r).details).toEqual({ agentCode: "bad_response" });
 		});
 
 		it("no path is 400 validation", async () => {

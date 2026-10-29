@@ -6282,6 +6282,9 @@
 					"404": {
 						"description": "No such sandbox or upload"
 					},
+					"409": {
+						"description": "The sandbox is not ready, or the agent lacks files.upload.v1 (agent_outdated)"
+					},
 					"default": {
 						"content": {
 							"application/json": {

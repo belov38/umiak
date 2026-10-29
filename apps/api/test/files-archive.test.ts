@@ -28,6 +28,7 @@ import {
 	rawRequest,
 	tarEntry,
 	tarOf,
+	withFiles,
 } from "./helpers/files.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -185,6 +186,56 @@ describe.skipIf(skipPg())("files archive", () => {
 		expect(r.status).toBe(400);
 		expect(err(r).code).toBe("invalid_path");
 		expect(readdirSync(join(home, "elsewhere"))).toEqual([]);
+	});
+
+	it("HEAD starts no tar: the headers after a Stat; a file is 409, a missing path 404", async () => {
+		const calls: string[] = [];
+		const agent = withFiles(w, (path) => {
+			calls.push(path);
+			return undefined;
+		});
+		const hs = w.harness({ deps: { agent } });
+		const head = await rawRequest(
+			hs,
+			"HEAD",
+			archive({ path: "proj", format: "tar.gz" }),
+		);
+		expect(head.status).toBe(200);
+		expect(head.body).toBeNull();
+		expect(head.headers.get("content-type")).toBe("application/gzip");
+		expect(head.headers.get("content-disposition")).toBe(
+			"attachment; filename*=UTF-8''proj.tar.gz",
+		);
+		expect(
+			(await rawRequest(hs, "HEAD", archive({ path: "proj/README.md" })))
+				.status,
+		).toBe(409);
+		expect(
+			(await rawRequest(hs, "HEAD", archive({ path: "nope" }))).status,
+		).toBe(404);
+		expect(calls).toEqual([]);
+		// GET still streams through the agent.
+		const get = await rawRequest(hs, "GET", archive({ path: "proj" }));
+		expect(get.status).toBe(200);
+		await get.body?.cancel();
+		expect(calls).toEqual(["/archive?path=proj&format=tar"]);
+	});
+
+	it("an agent 2xx without entries or size is 502 agent_error (bad_response)", async () => {
+		const agent = withFiles(w, (path, init) => {
+			if (path.startsWith("/archive") && init.method === "PUT") {
+				return Response.json({ path: "/home/user/x", entries: 1 });
+			}
+			return undefined;
+		});
+		const r = await w
+			.harness({ deps: { agent } })
+			.request("PUT", archive({ path: "x" }), {
+				headers: { "content-type": "application/x-tar" },
+				body: tarOf(),
+			});
+		expect(r.status).toBe(502);
+		expect(err(r).details).toEqual({ agentCode: "bad_response" });
 	});
 
 	it("limits of the agent are 413 payload_too_large", async () => {

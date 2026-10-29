@@ -21,6 +21,7 @@ import {
 	onErrorHandler,
 	zodValidationError,
 } from "./http/errors.ts";
+import { cancelHeadBodies } from "./http/head.ts";
 import { requestLog } from "./http/logger.ts";
 import { requestMetrics } from "./http/metrics.ts";
 import { requestId } from "./http/request-id.ts";
@@ -56,6 +57,7 @@ function listenerApp(
 		requestLog(deps.log),
 		requestMetrics(deps.metrics),
 		bodyLimits(),
+		cancelHeadBodies(),
 	);
 	app.onError(onErrorHandler(deps.log, o));
 	app.notFound(notFoundHandler(() => app.routes, o));

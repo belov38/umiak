@@ -28,6 +28,7 @@ import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import { waitUntilReady } from "../commands/wait-ready.ts";
 import type { ApiApp, ApiDeps, ApiEnv } from "../deps.ts";
+import { incompleteBodyError } from "../http/body-limit.ts";
 import {
 	decodeCursor,
 	encodeCursor,
@@ -37,7 +38,6 @@ import {
 	ApiError,
 	methodNotAllowedError,
 	payloadTooLargeError,
-	validationError,
 } from "../http/errors.ts";
 import { toFileInfo } from "../map/file.ts";
 import { resolveSandboxRef } from "../map/sandbox.ts";
@@ -507,6 +507,16 @@ async function fileTarget(
 	sandbox: string,
 	capability: Capability,
 ): Promise<string> {
+	return (await fileSandbox(deps, c, sandbox, capability)).machineId;
+}
+
+/** `fileTarget` with the sandbox id. */
+async function fileSandbox(
+	deps: ApiDeps,
+	c: Context<ApiEnv>,
+	sandbox: string,
+	capability: Capability,
+): Promise<{ sandboxId: string; machineId: string }> {
 	const p = authOf(c).principal;
 	const signal = c.req.raw.signal;
 	const s = await waitUntilReady(
@@ -522,7 +532,7 @@ async function fileTarget(
 	} catch (e) {
 		throw agentErrorToHttp(e);
 	}
-	return machineId;
+	return { sandboxId: s.id, machineId };
 }
 
 /** `/files<path>` of the agent; transport failures map to the public errors. */
@@ -544,6 +554,17 @@ async function ensureOk(res: Response): Promise<void> {
 	if (!res.ok) throw agentErrorToHttp(await agentHttpError(res));
 }
 
+function badResponse(message: string): ApiError {
+	return agentErrorToHttp(new AgentCallError("bad_response", message));
+}
+
+/** A non-negative integer field of an agent answer; else 502 agent_error. */
+function agentCount(v: unknown, what: string): number {
+	const n = typeof v === "string" && /^[0-9]{1,16}$/.test(v) ? Number(v) : v;
+	if (typeof n === "number" && Number.isSafeInteger(n) && n >= 0) return n;
+	throw badResponse(`the agent answered without a valid ${what}`);
+}
+
 /** The agent's JSON answer; an unreadable one is 502 agent_error. */
 async function agentJson(res: Response): Promise<Record<string, unknown>> {
 	try {
@@ -553,9 +574,7 @@ async function agentJson(res: Response): Promise<Record<string, unknown>> {
 	} catch {
 		// reported below
 	}
-	throw agentErrorToHttp(
-		new AgentCallError("bad_response", "the agent answered with invalid JSON"),
-	);
+	throw badResponse("the agent answered with invalid JSON");
 }
 
 /** RPC call with the agent errors mapped. */
@@ -619,12 +638,7 @@ async function readChunk(req: Request): Promise<Uint8Array<ArrayBuffer>> {
 		try {
 			r = await reader.read();
 		} catch {
-			throw validationError([
-				{
-					path: "body",
-					message: "the request body ended before it was complete",
-				},
-			]);
+			throw incompleteBodyError();
 		}
 		if (r.done) break;
 		size += r.value.byteLength;
@@ -648,22 +662,38 @@ function flag(v: "true" | "false" | undefined): boolean | undefined {
 	return v === undefined ? undefined : v === "true";
 }
 
-function num(v: unknown): number {
-	if (typeof v === "number" && Number.isFinite(v)) return v;
-	if (typeof v === "string" && /^[0-9]+$/.test(v)) return Number(v);
-	return 0;
+/** What a files/list cursor is bound to: the same listing, page after page. */
+interface ListScope {
+	sandboxId: string;
+	path: string;
+	depth: number;
+	includeHidden: boolean;
 }
 
-/** Inner value of a files/list cursor: the agent page_token, bound to the path. */
-function listCursor(path: string, token: string): string {
-	return JSON.stringify({ path, token });
+/** Inner value of a files/list cursor: the agent page_token and its listing. */
+function listCursor(scope: ListScope, token: string): string {
+	return JSON.stringify({
+		s: scope.sandboxId,
+		p: scope.path,
+		d: scope.depth,
+		h: scope.includeHidden,
+		t: token,
+	});
 }
 
-function listToken(cursor: string, path: string, key: Buffer): string {
-	const inner = decodeCursor(cursor, key);
+/** The page_token of a verified cursor; 400 invalid_cursor unless it is of this listing. */
+function listToken(inner: string, scope: ListScope): string {
 	try {
-		const v = JSON.parse(inner) as { path?: unknown; token?: unknown };
-		if (v.path === path && typeof v.token === "string") return v.token;
+		const v = JSON.parse(inner) as Record<string, unknown>;
+		if (
+			v.s === scope.sandboxId &&
+			v.p === scope.path &&
+			v.d === scope.depth &&
+			v.h === scope.includeHidden &&
+			typeof v.t === "string"
+		) {
+			return v.t;
+		}
 	} catch {
 		// reported below
 	}
@@ -721,7 +751,12 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 			const v = res.headers.get(name);
 			if (v !== null) out[name] = v;
 		}
-		const status = res.status as 200;
+		// Only the documented statuses pass; any other 2xx is not a download.
+		if (res.status !== 200 && res.status !== 206) {
+			await res.body?.cancel().catch(() => {});
+			throw badResponse(`the agent answered ${res.status} to a download`);
+		}
+		const status = res.status;
 		if (head || res.body === null) {
 			await res.body?.cancel().catch(() => {});
 			return c.body(null, status, out) as never;
@@ -808,7 +843,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const header = parseUploadOffset(res.headers.get("sbx-upload-offset"));
 		const offset =
 			header === undefined
-				? num((await agentJson(res)).offset)
+				? agentCount((await agentJson(res)).offset, "offset")
 				: Number(header);
 		if (header !== undefined) await res.body?.cancel().catch(() => {});
 		return c.json({ offset }, 200, { "Sbx-Upload-Offset": String(offset) });
@@ -837,12 +872,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 			await ensureOk(res);
 			const offset = parseUploadOffset(res.headers.get("sbx-upload-offset"));
 			if (offset === undefined) {
-				throw agentErrorToHttp(
-					new AgentCallError(
-						"bad_response",
-						"the agent sent no Sbx-Upload-Offset",
-					),
-				);
+				throw badResponse("the agent sent no Sbx-Upload-Offset");
 			}
 			return c.body(null, 200, { "Sbx-Upload-Offset": String(offset) });
 		},
@@ -861,6 +891,10 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		responses: {
 			200: { description: "The upload exists", headers: uploadOffsetHeader },
 			404: { description: "No such sandbox or upload" },
+			409: {
+				description:
+					"The sandbox is not ready, or the agent lacks files.upload.v1 (agent_outdated)",
+			},
 			...ERROR_RESPONSES,
 		},
 	});
@@ -923,15 +957,28 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
 		const key = deps.settings.cursorKey;
-		const pageToken =
-			q.cursor === undefined ? undefined : listToken(q.cursor, q.path, key);
-		const m = await fileTarget(deps, c, sandbox, "files.v1");
+		// The signature first: a forged cursor is 400 whatever the sandbox state.
+		const inner =
+			q.cursor === undefined ? undefined : decodeCursor(q.cursor, key);
+		const { sandboxId, machineId: m } = await fileSandbox(
+			deps,
+			c,
+			sandbox,
+			"files.v1",
+		);
+		const scope: ListScope = {
+			sandboxId,
+			path: q.path,
+			depth: q.depth ?? 1,
+			includeHidden: q.includeHidden !== "false",
+		};
+		const pageToken = inner === undefined ? undefined : listToken(inner, scope);
 		const r = await rpc(() =>
 			deps.agent.list(m, {
 				path: q.path,
 				...(q.user === undefined ? {} : { user: q.user }),
-				depth: q.depth ?? 1,
-				includeHidden: q.includeHidden !== "false",
+				depth: scope.depth,
+				includeHidden: scope.includeHidden,
 				pageSize: q.limit ?? LIST_DEFAULT_LIMIT,
 				...(pageToken === undefined ? {} : { pageToken }),
 			}),
@@ -942,7 +989,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 				nextCursor:
 					r.nextPageToken === ""
 						? null
-						: encodeCursor(listCursor(q.path, r.nextPageToken), key),
+						: encodeCursor(listCursor(scope, r.nextPageToken), key),
 			},
 			200,
 		);
@@ -1021,6 +1068,32 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const q = c.req.valid("query");
 		const format = q.format ?? "tar";
 		const m = await fileTarget(deps, c, sandbox, "files.archive.v1");
+		const headers = {
+			"Content-Type":
+				format === "tar" ? "application/x-tar" : "application/gzip",
+			"Content-Disposition": attachment(
+				`${downloadName(q.path, "archive")}.${format}`,
+			),
+			"X-Content-Type-Options": "nosniff",
+		};
+		if (c.req.raw.method === "HEAD") {
+			// No tar is started for HEAD: the headers, after a Stat that gives
+			// the same path_not_found / not_directory answers as GET.
+			const info = await rpc(() =>
+				deps.agent.stat(m, {
+					path: q.path,
+					...(q.user === undefined ? {} : { user: q.user }),
+				}),
+			);
+			if (info.type !== "dir") {
+				throw new ApiError(
+					409,
+					"not_directory",
+					`${info.path} is not a directory`,
+				);
+			}
+			return c.body(null, 200, headers) as never;
+		}
 		const res = await agentFiles(
 			deps,
 			m,
@@ -1028,14 +1101,8 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 			{ method: "GET", signal: c.req.raw.signal },
 		);
 		await ensureOk(res);
-		return c.body(res.body as ReadableStream, 200, {
-			"Content-Type":
-				format === "tar" ? "application/x-tar" : "application/gzip",
-			"Content-Disposition": attachment(
-				`${downloadName(q.path, "archive")}.${format}`,
-			),
-			"X-Content-Type-Options": "nosniff",
-		}) as never;
+		if (res.body === null) throw badResponse("the agent sent no archive");
+		return c.body(res.body, 200, headers) as never;
 	});
 
 	app.openapi(putArchiveRoute, async (c) => {
@@ -1062,11 +1129,14 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		);
 		await ensureOk(res);
 		const r = await agentJson(res);
+		if (typeof r.path !== "string" || r.path === "") {
+			throw badResponse("the agent answered without the archive path");
+		}
 		return c.json(
 			{
-				path: typeof r.path === "string" ? r.path : q.path,
-				entries: num(r.entries),
-				sizeBytes: num(r.size),
+				path: r.path,
+				entries: agentCount(r.entries, "entry count"),
+				sizeBytes: agentCount(r.size, "size"),
 			},
 			200,
 		);

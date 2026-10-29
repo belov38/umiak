@@ -353,4 +353,21 @@ describe.skipIf(skipPg())("command streams", () => {
 		}
 		expect(h.deps.streams.size).toBe(0);
 	});
+
+	it("HEAD of /stream answers no body and frees its registry slot", async () => {
+		const r = await h.request("POST", sb.commands, {
+			json: { mode: "detached", command: "sleep 5" },
+		});
+		const id = (r.body as Any).id as string;
+		const head = await h.app.request(`${sb.commands}/${id}/stream`, {
+			method: "HEAD",
+			headers: { authorization: `Bearer ${h.bearer}` },
+		});
+		expect(head.status).toBe(200);
+		expect(head.body).toBeNull();
+		for (let i = 0; i < 50 && h.deps.streams.size > 0; i++) {
+			await new Promise((r) => setTimeout(r, 20));
+		}
+		expect(h.deps.streams.size).toBe(0);
+	});
 });

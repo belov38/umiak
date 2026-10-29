@@ -12,7 +12,7 @@ import {
 	readySandbox,
 	sha256,
 } from "./helpers/commands.ts";
-import { filesUrl, qs, rawRequest } from "./helpers/files.ts";
+import { filesUrl, qs, rawRequest, withFiles } from "./helpers/files.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
@@ -106,7 +106,7 @@ describe.skipIf(skipPg())("files uploads", () => {
 				} else ctl.error(new Error("connection reset"));
 			},
 		});
-		await rawRequest(
+		const cut = await rawRequest(
 			h,
 			"PUT",
 			uploads(sb, `/${id}${qs({ offset: 3 * size })}`),
@@ -114,7 +114,9 @@ describe.skipIf(skipPg())("files uploads", () => {
 				headers: { "content-type": "application/octet-stream" },
 				body: broken,
 			},
-		).catch(() => null);
+		);
+		expect(cut.status).toBe(400);
+		expect(((await cut.json()) as Any).error.code).toBe("validation");
 		let at = await offsetOf(id);
 		expect(at).toBe(3 * size);
 		// A repeat of the 3rd chunk: 409 with the current offset.
@@ -153,6 +155,25 @@ describe.skipIf(skipPg())("files uploads", () => {
 		expect(repeat.status).toBe(200);
 		expect(repeat.body).toEqual(commit.body);
 	}, 120_000);
+
+	it("an agent 2xx without an offset is 502 agent_error (bad_response)", async () => {
+		const agent = withFiles(w, () => Response.json({}));
+		const r = await w
+			.harness({ deps: { agent } })
+			.request(
+				"PUT",
+				uploads(sb, `/${await begin("bad.bin")}${qs({ offset: 0 })}`),
+				{
+					headers: { "content-type": "application/octet-stream" },
+					body: Buffer.from("x") as Uint8Array<ArrayBuffer>,
+				},
+			);
+		expect(r.status).toBe(502);
+		expect(err(r)).toMatchObject({
+			code: "agent_error",
+			details: { agentCode: "bad_response" },
+		});
+	});
 
 	it("a chunk above 8 MiB is 413 payload_too_large", async () => {
 		const id = await begin("x.bin");

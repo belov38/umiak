@@ -1,7 +1,9 @@
 // Helpers of the file route tests: raw requests with byte or streamed
 // bodies (the harness reads answers as text), the files URL of a sandbox,
 // and a minimal ustar writer for hostile archives.
+import type { AgentApi } from "../../src/index.ts";
 import type { Harness } from "./harness.ts";
+import type { ApiWorld } from "./world.ts";
 
 const REQUEST_ID_RE = /^req_[0-9a-z]{26}$/;
 
@@ -91,4 +93,31 @@ export function tarEntry(
 /** A tar stream of the entries with the two end blocks. */
 export function tarOf(...entries: Buffer[]): Uint8Array<ArrayBuffer> {
 	return new Uint8Array(Buffer.concat([...entries, Buffer.alloc(1024)]));
+}
+
+/**
+ * The world's FakeAgent with `files` replaced: `answer` returns a Response
+ * to send instead, or undefined to call the fake. Other methods are the
+ * fake's (bound: it has private fields).
+ */
+export function withFiles(
+	w: ApiWorld,
+	answer: (
+		path: string,
+		init: Parameters<AgentApi["files"]>[2],
+	) => Response | undefined,
+): AgentApi {
+	return new Proxy(w.agent, {
+		get(target, prop, receiver) {
+			if (prop === "files") {
+				return (
+					m: string,
+					path: string,
+					init: Parameters<AgentApi["files"]>[2],
+				) => Promise.resolve(answer(path, init) ?? target.files(m, path, init));
+			}
+			const v = Reflect.get(target, prop, receiver);
+			return typeof v === "function" ? v.bind(target) : v;
+		},
+	});
 }

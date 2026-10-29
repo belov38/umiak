@@ -25,6 +25,7 @@ export * from "./http/body-limit.ts";
 export * from "./http/confirm-delete.ts";
 export * from "./http/cursor.ts";
 export * from "./http/errors.ts";
+export * from "./http/head.ts";
 export * from "./http/idempotency.ts";
 export * from "./http/logger.ts";
 export * from "./http/metrics.ts";

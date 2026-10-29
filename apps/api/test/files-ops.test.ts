@@ -150,6 +150,24 @@ describe.skipIf(skipPg())("files ops", () => {
 			);
 			expect(elsewhere.status).toBe(400);
 			expect(err(elsewhere).code).toBe("invalid_cursor");
+			// Bound to depth, includeHidden and the sandbox too.
+			for (const q of [{ depth: 2 }, { includeHidden: "false" }] as Record<
+				string,
+				string | number
+			>[]) {
+				const r = await h.request(
+					"GET",
+					url("/list", { path: "l", cursor: next, ...q }),
+				);
+				expect(err(r).code).toBe("invalid_cursor");
+			}
+			const other = await readySandbox(w);
+			mkdirSync(join(w.agent.machine(other.machineId).home, "l"));
+			const theirs = await h.request(
+				"GET",
+				filesUrl(other.ref, `/list${qs({ path: "l", cursor: next })}`),
+			);
+			expect(err(theirs).code).toBe("invalid_cursor");
 		});
 
 		it("a file is 409 not_directory; bad depth is 400", async () => {
