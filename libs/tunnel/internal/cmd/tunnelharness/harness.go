@@ -291,6 +291,14 @@ func (h *harness) starts(commandID string) int {
 	return n
 }
 
+func (h *harness) invocations(commandID string) int {
+	n := 0
+	for _, m := range h.machines {
+		n += m.procs.Invocations(commandID)
+	}
+	return n
+}
+
 func (h *harness) labelCalls(commandID string) uint64 {
 	var n uint64
 	for _, m := range h.machines {

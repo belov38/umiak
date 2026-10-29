@@ -54,8 +54,10 @@ export interface Harness extends HarnessInfo {
 	 * the same kind is still in progress, or the machine has no live link.
 	 */
 	fault(kind: FaultKind, machine: string): Promise<FaultResult | "busy">;
-	/** How many times the double started the command (all machines). */
+	/** How many times the double started the command's work (all machines). */
 	starts(commandId: string): Promise<number>;
+	/** How many Start/Run calls for the command reached an agent (retries included). */
+	invocations(commandId: string): Promise<number>;
 	/** How many SetLabel calls the double executed for the command. */
 	labelCalls(commandId: string): Promise<number>;
 	/** Closes stdin and waits for the exit; returns the exit code. */
@@ -205,6 +207,12 @@ export async function startHarness(opts: HarnessOptions): Promise<Harness> {
 		async starts(commandId) {
 			return (await getJson(info.control, "starts", commandId)).starts ?? -1;
 		},
+		async invocations(commandId) {
+			return (
+				(await getJson(info.control, "invocations", commandId)).invocations ??
+				-1
+			);
+		},
 		async labelCalls(commandId) {
 			return (await getJson(info.control, "labels", commandId)).calls ?? -1;
 		},
@@ -216,14 +224,18 @@ async function getJson(
 	control: string,
 	what: string,
 	commandId: string,
-): Promise<{ starts?: number; calls?: number }> {
+): Promise<{ starts?: number; invocations?: number; calls?: number }> {
 	const res = await fetch(
 		`${control}/${what}?command=${encodeURIComponent(commandId)}`,
 	);
 	if (res.status !== 200) {
 		throw new Error(`GET /${what}: HTTP ${res.status}: ${await res.text()}`);
 	}
-	return (await res.json()) as { starts?: number; calls?: number };
+	return (await res.json()) as {
+		starts?: number;
+		invocations?: number;
+		calls?: number;
+	};
 }
 
 function readInfo(

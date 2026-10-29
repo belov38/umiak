@@ -43,8 +43,11 @@ func (f fault) String() string {
 }
 
 // injectFaults injects one random fault every 50-300 ms until stop is
-// closed. It runs on its own goroutine and reports problems as errors.
+// closed. Kinds come from a shuffled bag, so every kind is injected once per
+// round; a kind that could not be injected (no live link or owner) goes back
+// into the bag. It runs on its own goroutine and reports problems as errors.
 func (e *env) injectFaults(ctx context.Context, m *machine, stop <-chan struct{}, counts *[numFaults]int, skipped *int) error {
+	var bag []fault
 	for {
 		wait := 50*time.Millisecond + time.Duration(e.rng.Int64N(int64(250*time.Millisecond)))
 		select {
@@ -52,12 +55,21 @@ func (e *env) injectFaults(ctx context.Context, m *machine, stop <-chan struct{}
 			return nil
 		case <-time.After(wait):
 		}
-		f := fault(e.rng.IntN(int(numFaults)))
+		if len(bag) == 0 {
+			for f := range numFaults {
+				bag = append(bag, f)
+			}
+			e.rng.Shuffle(len(bag), func(i, j int) { bag[i], bag[j] = bag[j], bag[i] })
+		}
+		f := bag[len(bag)-1]
+		bag = bag[:len(bag)-1]
+		retry := func() { bag = append([]fault{f}, bag...) }
 		switch f {
 		case faultCut, faultStall:
 			l := m.newestLink()
 			if l == nil {
 				*skipped++
+				retry()
 				continue
 			}
 			if f == faultCut {
@@ -69,6 +81,7 @@ func (e *env) injectFaults(ctx context.Context, m *machine, stop <-chan struct{}
 			owner := m.ownerGateway()
 			if owner == nil {
 				*skipped++
+				retry()
 				continue
 			}
 			// The replacement comes up first, as in a rolling update.
@@ -141,8 +154,16 @@ func TestLongCommandSurvivesFaults(t *testing.T) {
 	if total < 5 {
 		t.Errorf("only %d faults injected", total)
 	}
+	for f := range numFaults {
+		if counts[f] == 0 {
+			t.Errorf("fault %s was never injected", f)
+		}
+	}
 	if n := m.procs.Starts("long-1"); n != 1 {
 		t.Errorf("Starts = %d, want 1", n)
+	}
+	if n := m.procs.Invocations("long-1"); n < 1 {
+		t.Errorf("Invocations = %d, want >= 1", n)
 	}
 }
 
@@ -162,8 +183,9 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	}
 	e.routeAll()
 
-	sp := spec(300, 1024, 5*time.Millisecond, 7)
+	sp := spec(400, 1024, 5*time.Millisecond, 7)
 	wantOut, wantErr := process.Expected(sp)
+	total := int64(len(wantOut) + len(wantErr))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*waitTimeout)
 	defer cancel()
 	type job struct {
@@ -187,6 +209,12 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	errsBefore := make([]int64, len(jobs))
 	for i, j := range jobs {
 		errsBefore[i] = j.r.errCount.Load()
+	}
+	// Every reader is still attached when the drain starts.
+	for _, j := range jobs {
+		if b := j.r.bytes.Load(); b >= total {
+			t.Fatalf("%s: reader finished (%d of %d bytes) before the drain; the command is too short", j.m.id, b, total)
+		}
 	}
 
 	timing := fastTiming()
@@ -249,6 +277,9 @@ func TestDrainMovesAllAgents(t *testing.T) {
 		if n := j.m.procs.Starts("cmd"); n != 1 {
 			t.Errorf("%s: Starts = %d, want 1", j.m.id, n)
 		}
+		if n := j.m.procs.Invocations("cmd"); n < 1 {
+			t.Errorf("%s: Invocations = %d, want >= 1", j.m.id, n)
+		}
 	}
 	onA := map[*machine]bool{}
 	for _, m := range byGW[gA] {
@@ -266,6 +297,11 @@ func TestDrainMovesAllAgents(t *testing.T) {
 		}
 	}
 	t.Logf("readers resumed after the drain: %d of %d on A; readers on B and C disturbed: %d", resumedA, perGateway, disturbed)
+	// Each reader on A had an open attach when A drained, so each lost its
+	// stream to the move and resumed elsewhere.
+	if resumedA != perGateway {
+		t.Errorf("%d of %d readers on A resumed after the drain, want all", resumedA, perGateway)
+	}
 	if disturbed != 0 {
 		t.Errorf("%d readers of machines on B or C saw errors during A's drain", disturbed)
 	}
@@ -462,6 +498,9 @@ func TestAgentRestartKeepsCommands(t *testing.T) {
 	r.check(t, "reader", wantOut, wantErr, 42)
 	if n := m.procs.Starts("build"); n != 1 {
 		t.Errorf("Starts = %d, want 1", n)
+	}
+	if n := m.procs.Invocations("build"); n < 1 {
+		t.Errorf("Invocations = %d, want >= 1", n)
 	}
 }
 

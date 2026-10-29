@@ -20,8 +20,9 @@
 //	     {"kind","applied":true,"links":N,"gateway":"<id>","agent":"<id>"};
 //	     409 while a fault of the same kind is in progress or when the
 //	     machine has no live link.
-//	GET  /starts?command=<id>  {"starts":N}
-//	GET  /labels?command=<id>  {"calls":N}
+//	GET  /starts?command=<id>       {"starts":N}       generators launched
+//	GET  /invocations?command=<id>  {"invocations":N}  Start/Run calls that reached an agent
+//	GET  /labels?command=<id>       {"calls":N}
 //
 // It stops everything and exits 0 on stdin EOF, SIGINT or SIGTERM.
 package main
@@ -136,6 +137,9 @@ func serveControl(h *harness) (*control, error) {
 	mux.HandleFunc("POST /fault", h.handleFault)
 	mux.HandleFunc("GET /starts", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]int{"starts": h.starts(r.URL.Query().Get("command"))})
+	})
+	mux.HandleFunc("GET /invocations", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]int{"invocations": h.invocations(r.URL.Query().Get("command"))})
 	})
 	mux.HandleFunc("GET /labels", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]uint64{"calls": h.labelCalls(r.URL.Query().Get("command"))})

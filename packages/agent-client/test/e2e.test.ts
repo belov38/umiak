@@ -466,6 +466,7 @@ describe.skipIf(skipPg())("e2e: agent-client against the Go tunnel", () => {
 			).toBeGreaterThanOrEqual(1);
 		}
 		expect(await h.starts(commandId)).toBe(1);
+		expect(await h.invocations(commandId)).toBeGreaterThanOrEqual(1);
 
 		// A mutating unary call right after a gateway crash. The cached route
 		// may be dead (then the client retries until the agent is back), or the
