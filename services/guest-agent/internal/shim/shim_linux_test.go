@@ -548,13 +548,74 @@ func TestSignalAfterReapIsNoop(t *testing.T) {
 		t.Errorf("victim exited: %v", ws)
 	}
 
-	// With the victim below the tree root it is a leftover and gets it.
-	s.selfPid = os.Getpid()
+	// A process below the tree root is a leftover and gets the signal; the
+	// root itself does not. The tree is a shell of this test only.
+	tree := exec.CommandContext(context.Background(), "/bin/sh", "-c", "sleep 30 & wait $!")
+	if err := tree.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tree.Process.Kill(); _ = tree.Wait() })
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if pids, _ := descendants(tree.Process.Pid); len(pids) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the tree has no child")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.selfPid = tree.Process.Pid
 	if r := s.handle(shimproto.Message{Type: shimproto.TypeSignal, Sig: int(syscall.SIGTERM)}); r.Type != shimproto.TypeOK {
 		t.Fatalf("signal: %+v", r)
 	}
-	if err := victim.Wait(); err == nil {
-		t.Error("victim survived SIGTERM as a leftover")
+	// The shell's wait returns once its sleep is dead.
+	done := make(chan error, 1)
+	go func() { done <- tree.Wait() }()
+	select {
+	case err := <-done:
+		// sh exits with the status of the waited-for, killed sleep.
+		if err == nil {
+			t.Error("tree exited 0, want the status of a killed child")
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the leftover below the tree root survived SIGTERM")
+	}
+	if err := victim.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Errorf("victim outside the tree was signalled: %v", err)
+	}
+}
+
+// TestStatusFrameFits: the largest status reply (maxSessions sessions with
+// ids of maxSessionLen bytes, maximal seqs) fits in one frame, and session
+// ids outside the safe charset are refused.
+func TestStatusFrameFits(t *testing.T) {
+	s := newShim(slog.New(slog.DiscardHandler), paths.ForRoot(t.TempDir()), "c1")
+	for _, bad := range []string{"", "a<b", "a b", "\x01", strings.Repeat("a", maxSessionLen+1)} {
+		r := s.handle(shimproto.Message{Type: shimproto.TypeInput, Session: bad, Seq: 1})
+		if r.Type != shimproto.TypeError || r.Code != shimproto.CodeInvalidArgument {
+			t.Errorf("session %q: reply %+v, want invalid_argument", bad, r)
+		}
+	}
+	for i := range maxSessions {
+		id := fmt.Sprintf("%0*d", maxSessionLen, i)
+		r := s.handle(shimproto.Message{Type: shimproto.TypeInput, Session: id, Seq: ^uint64(0)})
+		if r.Type != shimproto.TypeInputReply || !r.Applied {
+			t.Fatalf("input %d: %+v", i, r)
+		}
+	}
+	st := s.handle(shimproto.Message{Type: shimproto.TypeStatus})
+	if len(st.LastSeq) != maxSessions {
+		t.Fatalf("last_seq has %d sessions", len(st.LastSeq))
+	}
+	st.ID = ^uint64(0)
+	st.Pid = 1 << 22
+	var buf bytes.Buffer
+	if err := shimproto.Write(&buf, st); err != nil {
+		t.Fatalf("status frame: %v", err)
+	}
+	if buf.Len() >= shimproto.MaxFrame/2 {
+		t.Errorf("status frame = %d bytes, want well under %d", buf.Len(), shimproto.MaxFrame)
 	}
 }
 
@@ -596,4 +657,33 @@ func TestShimKillAfterGrace(t *testing.T) {
 func isCode(err error, code string) bool {
 	var pe *shimproto.Error
 	return errors.As(err, &pe) && pe.Code == code
+}
+
+// TestShimInputAbortedOnExit: an input stuck on a full stdin pipe (a
+// leftover holds it without reading) gives up when the main process exits,
+// instead of holding the request lock for the whole input timeout.
+func TestShimInputAbortedOnExit(t *testing.T) {
+	// An async list gets /dev/null as stdin; fd 3 keeps the pipe for it.
+	s := spec("/bin/sh", "-c", `exec 3<&0; sleep 30 <&3 & sleep 0.5`)
+	s.Stdin = true
+	h := startShim(t, s)
+	c := h.dial()
+	start := time.Now()
+	_, err := c.Input(ctx(t), "s", 1, make([]byte, 512<<10), false)
+	var pe *shimproto.Error
+	if !errors.As(err, &pe) || pe.Code != shimproto.CodeCommandExited || pe.Written == 0 || pe.Written >= 512<<10 {
+		t.Errorf("input: err = %#v, want command_exited after a partial write", err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("input returned after %v, want soon after the exit", d)
+	}
+	h.waitExitFile(5 * time.Second)
+	st, err := c.Status(ctx(t))
+	if err != nil || !st.Exited || st.LastSeq["s"] != 1 {
+		t.Errorf("status = %+v, %v; want exited with seq 1 applied", st, err)
+	}
+	if err := c.Signal(ctx(t), syscall.SIGKILL, true); err != nil {
+		t.Fatal(err)
+	}
+	h.waitShim(10 * time.Second)
 }

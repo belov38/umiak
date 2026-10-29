@@ -221,9 +221,17 @@ func (c *Client) write(ctx context.Context, m Message) error {
 	defer c.wmu.Unlock()
 	dl, _ := ctx.Deadline()
 	_ = c.conn.SetWriteDeadline(dl)
-	stop := context.AfterFunc(ctx, func() { _ = c.conn.SetWriteDeadline(time.Unix(1, 0)) })
+	fired := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(fired)
+		_ = c.conn.SetWriteDeadline(time.Unix(1, 0))
+	})
 	err := Write(c.conn, m)
-	stop()
+	if !stop() {
+		// The callback runs or has run: wait for it, so it cannot set a
+		// past deadline on the next caller's write.
+		<-fired
+	}
 	if err != nil {
 		_ = c.conn.Close()
 		return ctxErr(ctx, err)

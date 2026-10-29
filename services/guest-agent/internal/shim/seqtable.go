@@ -1,8 +1,30 @@
 package shim
 
-// maxSessions bounds the input sessions the shim remembers; with the
-// session id length limit of the server it keeps a status reply far below shimproto.MaxFrame.
+// maxSessions bounds the input sessions the shim remembers; with
+// validSession it keeps a status reply far below shimproto.MaxFrame.
 const maxSessions = 1024
+
+// maxSessionLen is the longest accepted input session id.
+const maxSessionLen = 128
+
+// validSession reports whether id matches [A-Za-z0-9._:-]{1,maxSessionLen}.
+// None of these bytes is escaped by encoding/json, so a session id costs
+// its own length in a status reply.
+func validSession(id string) bool {
+	if id == "" || len(id) > maxSessionLen {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '.', c == '_', c == ':', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // seqTable holds the last applied input seq per session, dropping the least
 // recently used session beyond its capacity. A dropped session starts over:

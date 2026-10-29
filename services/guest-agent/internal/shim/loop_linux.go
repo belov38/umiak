@@ -242,13 +242,13 @@ func (s *shim) onExit(ws unix.WaitStatus, buf []byte) {
 		}
 	}
 
-	// Input is refused from now on; leftovers reading stdin get EOF.
-	s.reqMu.Lock()
-	if s.stdinFd >= 0 {
-		_ = unix.Close(s.stdinFd)
-		s.stdinFd = -1
+	// Input is refused from now on; leftovers reading stdin get EOF. An
+	// input stuck on a full pipe holds reqMu: it sees the request, gives up
+	// and closes stdin itself, so the loop never waits for it.
+	s.stdinCloseReq.Store(true)
+	if s.reqMu.TryLock() {
+		s.unlockReq()
 	}
-	s.reqMu.Unlock()
 }
 
 // runTimers fires the timeout and the cgroup kill after a grace.

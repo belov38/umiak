@@ -24,9 +24,13 @@ const (
 	// inputTimeout bounds one input write to a process that does not read
 	// its stdin.
 	inputTimeout = 5 * time.Second
-	// maxSessionLen is the longest accepted input session id.
-	maxSessionLen = 256
+	// inputPollSlice bounds one wait for POLLOUT, so a blocked input notices
+	// the exit of the command quickly.
+	inputPollSlice = 50 * time.Millisecond
 )
+
+// errInputAborted ends an input write when the command exits meanwhile.
+var errInputAborted = errors.New("command exited")
 
 // conn is one agent connection.
 type conn struct {
@@ -189,7 +193,7 @@ func (s *shim) isExited() bool {
 
 func (s *shim) handleStatus() shimproto.Message {
 	s.reqMu.Lock()
-	defer s.reqMu.Unlock()
+	defer s.unlockReq()
 	r := shimproto.Message{Type: shimproto.TypeStatusReply, Pid: s.pid, State: shimproto.StateRunning,
 		LastSeq: s.seqs.snapshot()}
 	s.mu.Lock()
@@ -206,12 +210,12 @@ func (s *shim) handleStatus() shimproto.Message {
 // last applied one of the session is a duplicate (spec section 9.4).
 func (s *shim) handleInput(m shimproto.Message) shimproto.Message {
 	s.reqMu.Lock()
-	defer s.reqMu.Unlock()
+	defer s.unlockReq()
 	if s.isExited() {
 		return errReply(shimproto.CodeCommandExited, "command exited")
 	}
-	if m.Session == "" || len(m.Session) > maxSessionLen {
-		return errReply(shimproto.CodeInvalidArgument, "input session must be 1..%d bytes", maxSessionLen)
+	if !validSession(m.Session) {
+		return errReply(shimproto.CodeInvalidArgument, "input session must match [A-Za-z0-9._:-]{1,%d}", maxSessionLen)
 	}
 	if m.CloseStdin && s.ptyFd >= 0 {
 		return errReply(shimproto.CodeFailedPrecondition, "close_stdin does not apply to a pty, send ^D")
@@ -227,14 +231,18 @@ func (s *shim) handleInput(m shimproto.Message) shimproto.Message {
 		if fd < 0 {
 			return errReply(shimproto.CodeFailedPrecondition, "stdin is not open")
 		}
-		n, err := writeAll(fd, m.Data, inputTimeout)
+		n, err := writeAll(fd, m.Data, inputTimeout, s.stdinCloseReq.Load)
 		if err != nil {
 			if n > 0 {
 				// Part of the data reached the process: a retry must not
 				// write it again.
 				s.seqs.set(m.Session, m.Seq)
 			}
-			r := errReply(shimproto.CodeInternal, "input: wrote %d of %d bytes: %v", n, len(m.Data), err)
+			code := shimproto.CodeInternal
+			if errors.Is(err, errInputAborted) {
+				code = shimproto.CodeCommandExited
+			}
+			r := errReply(code, "input: wrote %d of %d bytes: %v", n, len(m.Data), err)
 			r.Written = uint64(n) //nolint:gosec // n >= 0
 			return r
 		}
@@ -248,8 +256,8 @@ func (s *shim) handleInput(m shimproto.Message) shimproto.Message {
 }
 
 // writeAll writes data to a non-blocking fd, waiting for POLLOUT up to
-// timeout in total.
-func writeAll(fd int, data []byte, timeout time.Duration) (int, error) {
+// timeout in total. It gives up with errInputAborted once abort reports true.
+func writeAll(fd int, data []byte, timeout time.Duration, abort func() bool) (int, error) {
 	deadline := time.Now().Add(timeout)
 	done := 0
 	for done < len(data) {
@@ -261,12 +269,16 @@ func writeAll(fd int, data []byte, timeout time.Duration) (int, error) {
 		case err == nil:
 		case errors.Is(err, unix.EINTR):
 		case errors.Is(err, unix.EAGAIN):
+			if abort() {
+				return done, errInputAborted
+			}
 			left := time.Until(deadline)
 			if left <= 0 {
 				return done, errors.New("timed out")
 			}
+			wait := min(left, inputPollSlice)
 			pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}} //nolint:gosec // fd fits
-			if _, err := unix.Poll(pfd, int(left/time.Millisecond)+1); err != nil && !errors.Is(err, unix.EINTR) {
+			if _, err := unix.Poll(pfd, int(wait/time.Millisecond)+1); err != nil && !errors.Is(err, unix.EINTR) {
 				return done, err
 			}
 		default:
@@ -278,7 +290,7 @@ func writeAll(fd int, data []byte, timeout time.Duration) (int, error) {
 
 func (s *shim) handleResize(m shimproto.Message) shimproto.Message {
 	s.reqMu.Lock()
-	defer s.reqMu.Unlock()
+	defer s.unlockReq()
 	if s.isExited() {
 		return errReply(shimproto.CodeCommandExited, "command exited")
 	}

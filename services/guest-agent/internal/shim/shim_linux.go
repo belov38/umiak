@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -120,6 +121,8 @@ type shim struct {
 	reqMu   sync.Mutex
 	stdinFd int // write end of the stdin pipe; -1 when none or closed
 	seqs    seqTable
+	// stdinCloseReq asks whoever holds reqMu to close stdin (set on exit).
+	stdinCloseReq atomic.Bool
 
 	// mu guards the state shared between the event loop and the server.
 	mu         sync.Mutex
@@ -478,6 +481,20 @@ func (s *shim) setEnds(e *ExitFile) {
 func (s *shim) notifyReady() {
 	if _, err := daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
 		s.log.Warn("shim: sd_notify", "err", err)
+	}
+}
+
+// unlockReq releases reqMu, first closing stdin if the exit asked for it.
+// Unlock comes before the check, so either this holder or the exit path
+// (TryLock after setting the request) closes it.
+func (s *shim) unlockReq() {
+	s.reqMu.Unlock()
+	if s.stdinCloseReq.Load() && s.reqMu.TryLock() {
+		if s.stdinFd >= 0 {
+			_ = unix.Close(s.stdinFd)
+			s.stdinFd = -1
+		}
+		s.reqMu.Unlock()
 	}
 }
 
