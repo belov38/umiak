@@ -871,13 +871,21 @@ func forgeMoved(w http.ResponseWriter, r *http.Request) {
 	h.Set(wire.HeaderCaller, "api")
 	h["sbx-lower-case"] = []string{"x"}
 	h.Set("X-Agent", "kept")
-	h.Set("Trailer", "Sbx-Declared, X-Agent-Trailer")
+	h.Set("Alt-Svc", `h2="evil.example:443"`)
+	h.Set("Trailer", "Sbx-Declared, X-Agent-Trailer, Location")
 	w.WriteHeader(http.StatusMisdirectedRequest)
 	_, _ = io.WriteString(w, `{"code":"unavailable","message":"machine_moved"}`)
 	h.Set("Sbx-Declared", evilURL)
 	h.Set("X-Agent-Trailer", "kept")
 	h.Set(http.TrailerPrefix+wire.HeaderInstanceURL, evilURL)
+	h.Set("Location", evilURL)
+	h.Set(http.TrailerPrefix+"Content-Location", evilURL)
+	h.Set(http.TrailerPrefix+"Refresh", "0; url="+evilURL)
+	h.Set(http.TrailerPrefix+"Alt-Svc", `h2="evil.example:443"`)
 }
+
+// pointerHeaders are agent headers that would point a caller elsewhere.
+var pointerHeaders = []string{"Location", "Content-Location", "Refresh", "Alt-Svc"}
 
 // checkNoSbx fails on any Sbx-* name in h.
 func checkNoSbx(t *testing.T, what string, h http.Header) {
@@ -927,6 +935,11 @@ func TestAgentSbxHeadersStripped(t *testing.T) {
 		}
 		checkNoSbx(t, tc.name+" header", resp.Header)
 		checkNoSbx(t, tc.name+" trailer", resp.Trailer)
+		for _, k := range pointerHeaders {
+			if v := resp.Header.Get(k) + resp.Trailer.Get(k); v != "" {
+				t.Errorf("%s: agent %s %q reached the caller", tc.name, k, v)
+			}
+		}
 		if resp.Header.Get("X-Agent") != "kept" || resp.Trailer.Get("X-Agent-Trailer") != "kept" {
 			t.Errorf("%s: other agent headers lost: header %v trailer %v", tc.name, resp.Header, resp.Trailer)
 		}

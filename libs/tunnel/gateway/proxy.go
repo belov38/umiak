@@ -55,11 +55,11 @@ func copyHeader(dst, src http.Header) {
 func isSbxHeader(k string) bool { return len(k) >= 4 && strings.EqualFold(k[:4], "sbx-") }
 
 // isRedirectHeader reports whether a header points the caller at another
-// URL (Location, Content-Location, Refresh): an agent must not choose where
-// a caller sends its next request.
+// URL or endpoint (Location, Content-Location, Refresh, Alt-Svc): an agent
+// must not choose where a caller sends its next request.
 func isRedirectHeader(k string) bool {
 	switch textproto.CanonicalMIMEHeaderKey(k) {
-	case "Location", "Content-Location", "Refresh":
+	case "Location", "Content-Location", "Refresh", "Alt-Svc":
 		return true
 	}
 	return false
