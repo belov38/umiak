@@ -1,6 +1,6 @@
 import pg from "pg";
 import { NOTIFY_CHANNEL } from "./constants.js";
-import type { Registry, Route } from "./registry.js";
+import { type Registry, RegistryClosedError, type Route } from "./registry.js";
 
 export interface PgRegistryOptions {
 	/** Postgres connection string of the database with the tunnel schema. */
@@ -90,6 +90,9 @@ export class PgRegistry implements Registry {
 	}
 
 	async lookup(machineId: string): Promise<Route | undefined> {
+		if (this.closed) {
+			throw new RegistryClosedError();
+		}
 		const key = machineId.toLowerCase();
 		if (!uuidRe.test(key)) {
 			throw new TypeError(`invalid machine id: ${machineId}`);
@@ -104,10 +107,16 @@ export class PgRegistry implements Registry {
 		const token = {};
 		this.inflight.set(key, token);
 		try {
-			const res = await this.pool.query<Row>(lookupSql, [
-				key,
-				this.staleAfterSec,
-			]);
+			let res: pg.QueryResult<Row>;
+			try {
+				res = await this.pool.query<Row>(lookupSql, [key, this.staleAfterSec]);
+			} catch (err) {
+				// close() ended the pool while the query was in flight.
+				if (this.closed) {
+					throw new RegistryClosedError();
+				}
+				throw err;
+			}
 			const row = res.rows[0];
 			const route =
 				row === undefined

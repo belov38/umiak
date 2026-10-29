@@ -18,5 +18,9 @@ export {
 	PgRegistry,
 	type PgRegistryOptions,
 } from "./pg-registry.js";
-export type { Registry, Route } from "./registry.js";
+export {
+	type Registry,
+	RegistryClosedError,
+	type Route,
+} from "./registry.js";
 export { AgentClient, type AgentClientOptions } from "./transport.js";

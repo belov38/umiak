@@ -8,6 +8,7 @@ import {
 	AgentOutdatedError,
 	AgentUnavailableError,
 	classify,
+	RegistryClosedError,
 } from "../src/index.js";
 import { Process } from "./gen/sbx/testing/v1/process_pb.js";
 import { type FakeGateway, startFakeGateway } from "./helpers/fake-gateway.js";
@@ -298,6 +299,51 @@ describe("AgentClient transport", () => {
 			.catch((e: unknown) => e);
 		expect(bad).toBeInstanceOf(TypeError);
 		expect(Date.now() - start).toBeLessThan(500);
+	});
+
+	it("does not spin when lookup fails and waitForChange resolves at once", async () => {
+		let lookups = 0;
+		registry.lookup = async () => {
+			lookups++;
+			throw new Error("database down");
+		};
+		registry.waitForChange = async () => {};
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 300, pollIntervalMs: 50 }).transport(m),
+		);
+		const timerStart = Date.now();
+		let firedAfter = -1;
+		setTimeout(() => {
+			firedAfter = Date.now() - timerStart;
+		}, 10);
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect(firedAfter).toBeGreaterThanOrEqual(0);
+		expect(firedAfter).toBeLessThan(100);
+		// One lookup per event loop turn at most, not a synchronous spin.
+		expect(lookups).toBeLessThan(1000);
+	});
+
+	it("ends at once with RegistryClosedError from a closed registry", async () => {
+		registry.lookup = async () => {
+			throw new RegistryClosedError();
+		};
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 5000 }).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(RegistryClosedError);
+		expect(Date.now() - start).toBeLessThan(500);
+		await expect(agent().requireCapability(m, "x")).rejects.toBeInstanceOf(
+			RegistryClosedError,
+		);
 	});
 
 	it("bounds the HTTP/2 connect with connectTimeoutMs", async () => {

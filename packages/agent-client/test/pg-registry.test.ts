@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { PgRegistry } from "../src/index.js";
+import { AgentClient, PgRegistry, RegistryClosedError } from "../src/index.js";
 import { createTestDatabase, skipPg, type TestDatabase } from "./helpers/pg.js";
 
 describe.skipIf(skipPg())("PgRegistry", () => {
@@ -152,6 +152,36 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		await instance("gw-n", "http://10.0.3.1:8081");
 		await session(m, "gw-n", { caps: null });
 		expect((await registry.lookup(m))?.capabilities).toBeNull();
+	});
+
+	it("a closed registry ends routed calls at once without starving timers", async () => {
+		const closed = await PgRegistry.connect({
+			connectionString: db.connectionString,
+		});
+		await closed.close();
+		await expect(closed.lookup(randomUUID())).rejects.toBeInstanceOf(
+			RegistryClosedError,
+		);
+		const client = new AgentClient({
+			registry: closed,
+			serviceToken: "t",
+			waitForAgentMs: 2000,
+		});
+		const timerStart = Date.now();
+		let firedAfter = -1;
+		setTimeout(() => {
+			firedAfter = Date.now() - timerStart;
+		}, 10);
+		const start = Date.now();
+		const res = await client
+			.fetch(randomUUID(), "?path=x")
+			.catch((e: unknown) => e);
+		expect(res).toBeInstanceOf(RegistryClosedError);
+		expect(Date.now() - start).toBeLessThan(500);
+		await new Promise((r) => setTimeout(r, 30));
+		expect(firedAfter).toBeGreaterThanOrEqual(0);
+		expect(firedAfter).toBeLessThan(100);
+		await client.close();
 	});
 
 	it("enables TCP keepalive on the LISTEN connection", () => {

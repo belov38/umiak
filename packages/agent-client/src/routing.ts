@@ -1,7 +1,12 @@
 // The routing loop shared by the Connect transport and fetch: resolve the
 // owning gateway instance, run one attempt, and act on its outcome.
 import { AgentUnavailableError } from "./errors.js";
-import { type Registry, type Route, sameRoute } from "./registry.js";
+import {
+	type Registry,
+	RegistryClosedError,
+	type Route,
+	sameRoute,
+} from "./registry.js";
 
 /** Result of one attempt against a gateway instance. Fatal errors are thrown. */
 export type AttemptOutcome<T> =
@@ -159,7 +164,10 @@ class MissBudget {
 
 	/**
 	 * Waits for a registry change, at most pollIntervalMs, or throws
-	 * AgentUnavailableError when the budget is spent.
+	 * AgentUnavailableError when the budget is spent. It always yields to
+	 * the macrotask queue first: a registry whose lookup fails and whose
+	 * waitForChange resolves at once must not turn the loop into a
+	 * synchronous spin that starves timers and abort signals.
 	 */
 	async wait(cause: unknown): Promise<void> {
 		const { opts } = this;
@@ -169,6 +177,7 @@ class MissBudget {
 		if (left <= 0) {
 			throw new AgentUnavailableError(opts.machineId, cause);
 		}
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 		await opts.registry.waitForChange(
 			opts.machineId,
 			boundedWait(opts, Math.min(opts.pollIntervalMs, left)),
@@ -177,14 +186,17 @@ class MissBudget {
 	}
 }
 
-/** A registry lookup; errors other than TypeError come back as a miss. */
+/**
+ * A registry lookup; errors come back as a miss, except TypeError (an
+ * invalid machine id) and RegistryClosedError, which are thrown.
+ */
 async function lookupOrMiss(
 	opts: RoutingOptions,
 ): Promise<{ route?: Route | undefined; error?: unknown }> {
 	try {
 		return { route: await opts.registry.lookup(opts.machineId) };
 	} catch (err) {
-		if (err instanceof TypeError) {
+		if (err instanceof TypeError || err instanceof RegistryClosedError) {
 			throw err;
 		}
 		return { error: err };

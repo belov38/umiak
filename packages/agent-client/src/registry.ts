@@ -15,9 +15,23 @@ export interface Route {
 	capabilities: string[] | null;
 }
 
+/**
+ * Thrown by Registry.lookup after close(). It is terminal: the routing loop
+ * does not treat it as a miss and does not wait for the registry.
+ */
+export class RegistryClosedError extends Error {
+	constructor() {
+		super("registry is closed");
+		this.name = "RegistryClosedError";
+	}
+}
+
 /** Looks up the gateway instance that serves a machine. */
 export interface Registry {
-	/** Returns the current route, or undefined when the machine is not connected. */
+	/**
+	 * Returns the current route, or undefined when the machine is not
+	 * connected. Throws RegistryClosedError after close().
+	 */
 	lookup(machineId: string): Promise<Route | undefined>;
 	/** Drops any cached route of the machine. */
 	invalidate(machineId: string): void;
