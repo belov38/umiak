@@ -137,9 +137,11 @@ const DEFAULTS = {
 /**
  * After the main process exits, its pipes may still deliver its last
  * output, or leftovers may hold them: the end comes after this much
- * silence. Later leftover output is dropped.
+ * silence, and at the latest LEFTOVER_MAX_WAIT_MS after the exit (chatty
+ * leftovers). Later leftover output is dropped.
  */
 const LEFTOVER_SILENCE_MS = 100;
+const LEFTOVER_MAX_WAIT_MS = 1000;
 
 export class FakeAgent implements AgentApi {
 	/** Max bytes of one attach data event; 1 for UTF-8 boundary tests. */
@@ -252,7 +254,7 @@ export class FakeAgent implements AgentApi {
 			Promise.all(live.map((c) => c.finished)),
 			new Promise((r) => setTimeout(r, 5000).unref()),
 		]);
-		for (const c of this.#allCommands()) c.clearTimers();
+		for (const c of this.#allCommands()) c.clearTimers(true);
 		this.#removeRoot();
 		FakeAgent.#live.delete(this);
 	}
@@ -578,7 +580,9 @@ export class FakeAgent implements AgentApi {
 				killGroup(pid, "SIGKILL");
 			} else {
 				killGroup(pid, "SIGTERM");
-				cmd.addTimer(
+				// Kept past the exit: leftovers that ignore SIGTERM get it too
+				// (cgroup.kill after the grace, S3 §9.5).
+				cmd.addGraceTimer(
 					setTimeout(() => killGroup(pid, "SIGKILL"), req.graceMs ?? 10_000),
 				);
 			}
@@ -755,12 +759,16 @@ class FakeCommand {
 
 	readonly #retain: () => number | null;
 	readonly #timers = new Set<NodeJS.Timeout>();
+	/** Kill grace timers: they outlive the main process. */
+	readonly #graceTimers = new Set<NodeJS.Timeout>();
 	#tick = Promise.withResolvers<void>();
 	#markStarted: () => void = () => {};
 	#markFinished: () => void = () => {};
 	#exitedWith: { code: number | null; signal: NodeJS.Signals | null } | null =
 		null;
 	#silence: NodeJS.Timeout | null = null;
+	/** When the main process exited (Date.now()). */
+	#exitedAt = 0;
 
 	constructor(
 		id: string,
@@ -806,9 +814,19 @@ class FakeCommand {
 		this.#timers.add(t);
 	}
 
-	clearTimers(): void {
+	addGraceTimer(t: NodeJS.Timeout): void {
+		t.unref();
+		this.#graceTimers.add(t);
+	}
+
+	/** Timers of the running command; with `all` also the Kill grace timers. */
+	clearTimers(all = false): void {
 		for (const t of this.#timers) clearTimeout(t);
 		this.#timers.clear();
+		if (all) {
+			for (const t of this.#graceTimers) clearTimeout(t);
+			this.#graceTimers.clear();
+		}
 		if (this.#silence !== null) clearTimeout(this.#silence);
 		this.#silence = null;
 	}
@@ -821,15 +839,22 @@ class FakeCommand {
 		if (this.#exitedWith !== null) this.#armSilence();
 	}
 
-	/** (Re)starts the wait for silence after the main process exited. */
+	/**
+	 * (Re)starts the wait for silence after the main process exited, never
+	 * past LEFTOVER_MAX_WAIT_MS after the exit.
+	 */
 	#armSilence(): void {
 		if (this.#silence !== null) clearTimeout(this.#silence);
 		const child = this.child;
-		this.#silence = setTimeout(() => {
-			child?.stdout?.destroy();
-			child?.stderr?.destroy();
-			this.#finish();
-		}, LEFTOVER_SILENCE_MS);
+		const left = this.#exitedAt + LEFTOVER_MAX_WAIT_MS - Date.now();
+		this.#silence = setTimeout(
+			() => {
+				child?.stdout?.destroy();
+				child?.stderr?.destroy();
+				this.#finish();
+			},
+			Math.max(0, Math.min(LEFTOVER_SILENCE_MS, left)),
+		);
 		this.#silence.unref();
 	}
 
@@ -851,6 +876,7 @@ class FakeCommand {
 		});
 		child.once("exit", (code, signal) => {
 			this.#exitedWith = { code, signal };
+			this.#exitedAt = Date.now();
 			this.#armSilence();
 		});
 		child.once("close", (code, signal) => {

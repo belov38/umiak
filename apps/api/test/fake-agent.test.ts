@@ -259,6 +259,47 @@ describe("Start", () => {
 		expect(pids.some(pidAlive)).toBe(false);
 	});
 
+	it("a chatty leftover does not hold the exit for more than about a second", async () => {
+		const m = newMachine();
+		const t0 = Date.now();
+		const r = await run(
+			m,
+			spec({
+				shell:
+					"(while :; do echo noise; sleep 0.02; done) & echo $! > bg.pid; echo main",
+			}),
+		);
+		expect(Date.now() - t0).toBeLessThan(2500);
+		expect(r.exit).toMatchObject({ status: "exited", code: 0 });
+		expect(r.out.stdout).toContain("main\n");
+		await fake.kill(m, { commandId: r.commandId });
+	});
+
+	it("the grace SIGKILL of Kill reaches leftovers after the main process died on SIGTERM", async () => {
+		const m = newMachine();
+		const commandId = await start(
+			m,
+			spec({
+				shell:
+					"(trap '' TERM; exec sh -c 'echo $$ > bg.pid; while :; do sleep 0.05; done') & sleep 30",
+			}),
+		);
+		const pidFile = join(fake.machine(m).home, "bg.pid");
+		const readPid = () =>
+			existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : 0;
+		for (let i = 0; i < 100 && readPid() === 0; i++) {
+			await new Promise((res) => setTimeout(res, 20));
+		}
+		const bg = readPid();
+		expect(bg).toBeGreaterThan(0);
+		await fake.kill(m, { commandId, graceMs: 300 });
+		const r = await collect(attachAll(m, commandId));
+		expect(r.exit).toMatchObject({ status: "killed", signal: "SIGTERM" });
+		expect(pidAlive(bg)).toBe(true);
+		await new Promise((res) => setTimeout(res, 600));
+		expect(pidAlive(bg)).toBe(false);
+	});
+
 	it("a missing program is start_failed with code 127 and the error in stderr", async () => {
 		const m = newMachine();
 		const r = await run(m, spec({ argv: ["/nonexistent/prog"] }));
