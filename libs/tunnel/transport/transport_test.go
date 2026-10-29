@@ -112,7 +112,7 @@ func TestHelloRedactsSecret(t *testing.T) {
 		base64.StdEncoding.EncodeToString(secret),
 		base64.RawStdEncoding.EncodeToString(secret),
 		base64.RawURLEncoding.EncodeToString(secret),
-		fmt.Sprint(secret),         // [160 161 ...]
+		fmt.Sprintf("%d", secret),  // [160 161 ...]
 		fmt.Sprintf("%#v", secret), // []byte{0xa0, ...}
 		fmt.Sprintf("%x", secret[:4]),
 	}
