@@ -9,6 +9,7 @@ import {
 	runReconcile,
 } from "../src/controllers/reconcile.ts";
 import type { NodeInfra } from "../src/ports.ts";
+import { FakeInfra } from "./fakes/infra.ts";
 import {
 	createWorld,
 	insertMachine,
@@ -363,6 +364,38 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(w.infra.vms.has(593)).toBe(false);
 		const l = await w.pool.query(
 			"SELECT vmid FROM runtime.vmid_leases WHERE provider_id = $1 AND vmid = 593",
+			[w.topo.providerId],
+		);
+		expect(l.rows).toEqual([]);
+	});
+
+	it("an ownerless releasing lease goes to the node that lists its VM (two nodes)", async () => {
+		const w = await createWorld(db);
+		// Node B sorts after the world's node, so "the first node" is the wrong one.
+		const nodeB = `ffffffff-ffff-4fff-8fff-${randomUUID().slice(-12)}`;
+		await w.pool.query(
+			`INSERT INTO runtime.nodes (id, provider_id, name, ram_cap_mb, clone_concurrency, node_agent_ref)
+			 VALUES ($1, $2, $3, 8192, 4, 'sbx-node')`,
+			[nodeB, w.topo.providerId, `node-b-${nodeB.slice(-6)}`],
+		);
+		const infraB = new FakeInfra({
+			pool: w.pool,
+			providerId: w.topo.providerId,
+			clusterMacId: w.topo.clusterMacId,
+		});
+		w.registry.set(nodeB, infraB);
+		// An orphan delete on B reserved the VMID and died before the destroy.
+		infraB.addVm({ vmid: 560, status: "running" });
+		await insertLease(w, 560, "releasing", null, 700);
+
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["lease_release", "lease:560"]]);
+		expect(actions[0]?.nodeId).toBe(nodeB);
+		expect(actions[0]?.applied).toBe(true);
+		expect(w.infra.callsOf("delete")).toEqual([]);
+		expect(infraB.vms.has(560)).toBe(false);
+		const l = await w.pool.query(
+			"SELECT vmid FROM runtime.vmid_leases WHERE provider_id = $1 AND vmid = 560",
 			[w.topo.providerId],
 		);
 		expect(l.rows).toEqual([]);

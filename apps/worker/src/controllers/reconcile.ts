@@ -9,6 +9,7 @@ import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { lockSandboxRow } from "../db.ts";
 import { snapshotInUse } from "../handlers/snapshot-op.ts";
+import { errFields } from "../log.ts";
 import { isOwnerMismatch, noteOwnerMismatch } from "../machine-prep.ts";
 import {
 	markMachineLost,
@@ -878,7 +879,10 @@ function countSkip(
 /**
  * §6.4 p. 5: a `releasing` lease older than the grace (its delete died
  * midway). S1 delete again; the verified delete frees the lease. The VM of a
- * lease lives on its owner's node (else the provider's first node). S1
+ * lease lives on its owner machine's node. A lease without one (an orphan
+ * delete's reservation, or its machine row is gone) goes to the node whose
+ * listing has the VMID; when no node lists it, any node only verifies and
+ * frees the lease; when a node's listing fails, the lease waits. S1
  * delete stops and purges whatever VM has the VMID, so the VM (if any) must
  * be in pool `sandbox`, tagged `sbx` and not a template, at planning and
  * again right before the delete.
@@ -888,9 +892,7 @@ async function planLeases(
 	provider: ProviderRow,
 ): Promise<Plan[]> {
 	const r = await ctx.pool.query<{ vmid: number; node_id: string | null }>(
-		`SELECT l.vmid,
-		        COALESCE(m.node_id, (SELECT n.id FROM runtime.nodes n
-		                             WHERE n.provider_id = l.provider_id ORDER BY n.id LIMIT 1)) AS node_id
+		`SELECT l.vmid, m.node_id
 		 FROM runtime.vmid_leases l
 		 LEFT JOIN runtime.machines m ON m.id = l.machine_id
 		 WHERE l.provider_id = $1 AND l.state = 'releasing' AND l.purpose = 'machine'
@@ -899,20 +901,47 @@ async function planLeases(
 		[provider.id, RECONCILE_GRACE_S],
 	);
 	const plans: Plan[] = [];
-	const nodes = new Map<
-		string,
-		{ infra: NodeInfra; vms: InfraVm[]; templates: Set<number> }
-	>();
-	for (const { vmid, node_id } of r.rows) {
-		if (node_id === null) continue;
-		let n = nodes.get(node_id);
+	type NodeView = { infra: NodeInfra; vms: InfraVm[]; templates: Set<number> };
+	const nodes = new Map<string, NodeView>();
+	const view = async (nodeId: string): Promise<NodeView> => {
+		let n = nodes.get(nodeId);
 		if (n === undefined) {
-			const infra = await ctx.infra.forNode(node_id);
+			const infra = await ctx.infra.forNode(nodeId);
 			const vms = await infra.listVms();
 			const ev = await loadEvidence(ctx.pool, provider.id, infra);
 			n = { infra, vms, templates: ev.templates };
-			nodes.set(node_id, n);
+			nodes.set(nodeId, n);
 		}
+		return n;
+	};
+	let providerNodes: string[] | undefined;
+	/** The node whose listing has the VMID; the first node if none; null if unknown. */
+	const nodeOfVm = async (vmid: number): Promise<string | null> => {
+		providerNodes ??= (
+			await ctx.pool.query<{ id: string }>(
+				`SELECT id FROM runtime.nodes WHERE provider_id = $1 AND state <> 'down' ORDER BY id`,
+				[provider.id],
+			)
+		).rows.map((x) => x.id);
+		let unknown = false;
+		for (const id of providerNodes) {
+			try {
+				if ((await view(id)).vms.some((v) => v.vmid === vmid)) return id;
+			} catch (e) {
+				unknown = true;
+				ctx.log.warn(
+					{ ...errFields(e), nodeId: id, vmid },
+					"reconcile: node listing failed; an ownerless lease waits",
+				);
+			}
+		}
+		return unknown ? null : (providerNodes[0] ?? null);
+	};
+	for (const row of r.rows) {
+		const vmid = row.vmid;
+		const node_id = row.node_id ?? (await nodeOfVm(vmid));
+		if (node_id === null) continue;
+		const n = await view(node_id);
 		const { infra } = n;
 		const range = rangeOf(provider, infra);
 		if (vmid < range.min || vmid > range.max) continue;
