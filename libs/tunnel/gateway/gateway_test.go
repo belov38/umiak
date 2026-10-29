@@ -181,6 +181,7 @@ func TestReconnectToOtherGatewayFencesOld(t *testing.T) {
 		t.Fatalf("owner = %+v ok=%v err=%v, want gw-b epoch 2", owner, ok, err)
 	}
 	waitDone(t, sA)
+	gwA.waitEventsIdle()
 	for _, ev := range gwA.sink.connEvents(id) {
 		if ev.GetType() == "disconnected" {
 			t.Fatalf("A sent %v although it was fenced", ev)
@@ -222,6 +223,7 @@ func TestConnectionEvents(t *testing.T) {
 		eventually(t, waitTimeout, "connected event", func() bool { return gw.sink.hasConnEvent(id, ev.Epoch, "connected") })
 		a.stop()
 		waitDone(t, s)
+		gw.waitEventsIdle()
 		var types []string
 		for _, ce := range gw.sink.connEvents(id) {
 			if ce.GetEpoch() == ev.Epoch {
@@ -564,8 +566,13 @@ func TestFenceWhileDrainingMoves(t *testing.T) {
 	if err := mc.Drain(ctx, transport.DrainOptions{Reason: "test", TCPDeadline: 10 * time.Second}); err != nil {
 		t.Fatalf("Drain: %v", err)
 	}
-	if s, st := gwA.lookup(id); s == nil || st != stateDraining {
+	sDraining, st := gwA.lookup(id)
+	if sDraining == nil || st != stateDraining {
 		t.Fatalf("state after Drain = %v", st)
+	}
+	// Only the active session of a machine rotates the token.
+	if err := sDraining.rotateToken(ctx); !errors.Is(err, errNotActive) {
+		t.Fatalf("rotateToken on a draining session: err = %v, want errNotActive", err)
 	}
 	a.waitEvent("connected to gw-b", func(ev agent.ConnEvent) bool {
 		return ev.Kind == agent.KindConnected && ev.Gateway == "gw-b"
@@ -611,6 +618,7 @@ func TestFenceWhileDrainingMoves(t *testing.T) {
 		t.Fatalf("tcp read error = %v, want ErrMachineMoved", err)
 	}
 	waitDone(t, sA)
+	gwA.waitEventsIdle()
 	if s, _ := gwA.lookup(id); s != nil {
 		t.Fatal("moved session still registered after its streams ended")
 	}
@@ -653,13 +661,16 @@ func TestRunShutdownDisconnects(t *testing.T) {
 
 func TestHeartbeatReRegistersAfterSweep(t *testing.T) {
 	e := newEnv(t)
-	gw := e.gateway("gw-a", nil)
+	// The test drives the heartbeat itself, so the order is fixed: the
+	// re-registration happens after the post-sweep session is up.
+	gw := e.gateway("gw-a", func(c *Config) { c.Timing.Heartbeat = time.Hour })
 	id, bs := e.machine()
 	a := e.startAgent(agentConfig(e, id, bs, defaultIdentity()))
 	a.waitConnected()
 	waitMachine(t, gw, id)
 
-	// Another instance sweeps A as if its heartbeat were stale.
+	// Another instance sweeps A as if its heartbeat were stale: A fences the
+	// swept session (same epoch and instance, now disconnected).
 	swept, err := e.store.SweepStale(context.Background(), "other", 0)
 	if err != nil || len(swept) != 1 {
 		t.Fatalf("SweepStale = %v, %v", swept, err)
@@ -670,8 +681,144 @@ func TestHeartbeatReRegistersAfterSweep(t *testing.T) {
 	if ev.Gateway != "gw-a" {
 		t.Fatalf("reconnected to %s", ev.Gateway)
 	}
-	eventually(t, waitTimeout, "instance registered again", func() bool {
-		inst, err := e.store.Instance(context.Background(), "gw-a")
-		return err == nil && inst.State == registry.InstanceActive
+	waitMachine(t, gw, id)
+
+	resyncs := gw.resyncs.Load()
+	gw.heartbeatOnce(context.Background())
+	inst, err := e.store.Instance(context.Background(), "gw-a")
+	if err != nil || inst.State != registry.InstanceActive {
+		t.Fatalf("instance after re-register = %+v, %v", inst, err)
+	}
+	eventually(t, waitTimeout, "resync after re-register", func() bool { return gw.resyncs.Load() > resyncs })
+
+	// The post-sweep session survives the resync.
+	s, st := gw.lookup(id)
+	if s == nil || st != stateActive || s.info.Epoch != 2 {
+		t.Fatalf("session after resync = %v %v", s, st)
+	}
+	if reg := e.session(id); reg.Epoch != 2 || reg.State != registry.SessionConnected {
+		t.Fatalf("registry after resync = %+v", reg)
+	}
+	select {
+	case ev := <-a.events:
+		t.Fatalf("agent saw %+v after the resync", ev)
+	default:
+	}
+}
+
+func TestSlowSinkDoesNotDelayDisconnectOrShutdown(t *testing.T) {
+	e := newEnv(t)
+	gw := e.gateway("gw-a", func(c *Config) { c.Sink = hangSink{} })
+	id, bs := e.machine()
+	a := e.startAgent(agentConfig(e, id, bs, defaultIdentity()))
+	a.waitConnected()
+	waitMachine(t, gw, id)
+
+	a.stop()
+	eventually(t, time.Second, "registry disconnected while the sink hangs", func() bool {
+		return e.session(id).State == registry.SessionDisconnected
 	})
+
+	start := time.Now()
+	gw.cancel()
+	select {
+	case err := <-gw.done:
+		if err != nil {
+			t.Fatalf("Run = %v", err)
+		}
+		gw.done <- nil // for the cleanup
+	case <-time.After(waitTimeout):
+		t.Fatal("Run did not return")
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("Run took %s to return with a hanging sink", d)
+	}
+}
+
+func TestEventsAckMismatch(t *testing.T) {
+	e := newEnv(t)
+	gw := e.gateway("gw-a", nil)
+	id, bs := e.machine()
+	j := journal.New()
+	for range 20 {
+		j.Append("test.event", nil)
+	}
+	// First successful call acks beyond the batch (must be retried), the
+	// second acks 5 below its end (the rest must be resent).
+	gw.sink.setAdjust(100, -5)
+	cfg := agentConfig(e, id, bs, defaultIdentity())
+	cfg.Journal = j
+	e.startAgent(cfg).waitConnected()
+
+	eventually(t, waitTimeout, "journal acked 20", func() bool { return j.AckedSeq() == 20 })
+	attempts, _ := gw.sink.snapshot()
+	if len(attempts) < 3 {
+		t.Fatalf("attempts = %d, want at least 3", len(attempts))
+	}
+	b0 := attempts[0]
+	if attempts[1][0].GetSeq() != b0[0].GetSeq() || len(attempts[1]) != len(b0) {
+		t.Fatalf("an ack beyond the batch must retry the same batch: %d then %d", b0[0].GetSeq(), attempts[1][0].GetSeq())
+	}
+	last := b0[len(b0)-1].GetSeq()
+	if got := attempts[2][0].GetSeq(); got != last-5+1 {
+		t.Fatalf("after a partial ack of %d the next batch starts at %d, want %d", last-5, got, last-4)
+	}
+	// Every seq was delivered at least once.
+	seen := map[uint64]bool{}
+	for _, a := range attempts[1:] {
+		for _, ev := range a {
+			seen[ev.GetSeq()] = true
+		}
+	}
+	for seq := uint64(1); seq <= 20; seq++ {
+		if !seen[seq] {
+			t.Fatalf("seq %d never delivered", seq)
+		}
+	}
+}
+
+func TestTCPStreamReleasedWhenBothDirectionsDone(t *testing.T) {
+	e := newEnv(t)
+	gw := e.gateway("gw-a", func(c *Config) { c.MaxTCPStreamsPerMachine = 1 })
+	id, bs := e.machine()
+	e.startAgent(agentConfig(e, id, bs, defaultIdentity())).waitConnected()
+	mc := waitMachine(t, gw, id)
+	ctx := context.Background()
+	bye, echoPort := startBye(t), startEcho(t)
+
+	// The agent side ends first: the stream is half-closed and still counts.
+	c1, err := mc.DialTCP(ctx, bye)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c1.Close() }()
+	if got, err := io.ReadAll(c1); err != nil || string(got) != "bye" {
+		t.Fatalf("read = %q, %v", got, err)
+	}
+	if _, err := mc.DialTCP(ctx, echoPort); !errors.Is(err, ErrTooManyStreams) {
+		t.Fatalf("dial while half-closed: err = %v, want ErrTooManyStreams", err)
+	}
+	// Closing our side too finishes the stream.
+	if err := c1.(interface{ CloseWrite() error }).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := mc.DialTCP(ctx, echoPort)
+	if err != nil {
+		t.Fatalf("dial after both directions finished: %v", err)
+	}
+	defer func() { _ = c2.Close() }()
+
+	// Our side ends first, then the agent's: released without Close.
+	echo(t, c2, "x")
+	if err := c2.(interface{ CloseWrite() error }).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	if rest, err := io.ReadAll(c2); err != nil || string(rest) != "|eof" {
+		t.Fatalf("after half-close: %q, %v", rest, err)
+	}
+	c3, err := mc.DialTCP(ctx, echoPort)
+	if err != nil {
+		t.Fatalf("dial after the second stream finished: %v", err)
+	}
+	_ = c3.Close()
 }

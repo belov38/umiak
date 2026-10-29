@@ -71,6 +71,9 @@ const (
 	maxMessageBytes = 16 << 20
 )
 
+// errNotActive refuses token rotation on a session that is not active.
+var errNotActive = errors.New("gateway: token rotation needs an active session")
+
 // session is one admitted agent connection on this instance.
 type session struct {
 	g         *Gateway
@@ -159,7 +162,7 @@ func (s *session) start() {
 			s.conn.markDead()
 		}
 	})
-	s.wg.Go(s.sendConnectedEvents)
+	s.sendConnectedEvents()
 	s.wg.Go(s.pumpEvents)
 	s.wg.Go(s.infoAndRotation)
 	<-s.conn.done
@@ -239,9 +242,10 @@ func (s *session) fence(reason string) {
 }
 
 // finish tears the session down after its connection died: it aborts the
-// tracked requests, unregisters the session, waits for its goroutines,
-// marks it disconnected in the registry (fenced by epoch) and reports
-// disconnected when that write changed the row.
+// tracked requests, unregisters the session, marks it disconnected in the
+// registry (fenced by epoch), queues disconnected when that write changed
+// the row, and waits for its goroutines. The registry write never waits for
+// event delivery.
 func (s *session) finish() {
 	g := s.g
 	s.mu.Lock()
@@ -270,7 +274,6 @@ func (s *session) finish() {
 		delete(g.sessions, s.machineID)
 	}
 	g.mu.Unlock()
-	s.wg.Wait()
 
 	if !g.abandoned.Load() {
 		ctx, cancel := context.WithTimeout(g.bg, dbTimeout)
@@ -280,15 +283,16 @@ func (s *session) finish() {
 		case err != nil:
 			s.log.Warn("gateway: marking session disconnected failed", "err", err)
 		case changed:
-			g.deliverConnectionEvent(g.bg, newConnectionEvent(s.machineID, s.info.Epoch, evDisconnected,
+			g.goEvents(newConnectionEvent(s.machineID, s.info.Epoch, evDisconnected,
 				s.hello.AgentInstanceID, time.Now()))
 		}
 	}
+	s.wg.Wait()
 	s.log.Info("gateway: session closed", "reason", reason)
 	close(s.done)
 }
 
-// sendConnectedEvents reports connected and the identity changes derived
+// sendConnectedEvents queues connected and the identity changes derived
 // from the previous session (spec 5.1).
 func (s *session) sendConnectedEvents() {
 	now := time.Now()
@@ -304,14 +308,18 @@ func (s *session) sendConnectedEvents() {
 			types = append(types, evIdentityChanged)
 		}
 	}
+	evs := make([]*tunnelv1.ConnectionEvent, 0, len(types))
 	for _, typ := range types {
-		s.g.deliverConnectionEvent(s.g.bg, newConnectionEvent(s.machineID, s.info.Epoch, typ, s.hello.AgentInstanceID, now))
+		evs = append(evs, newConnectionEvent(s.machineID, s.info.Epoch, typ, s.hello.AgentInstanceID, now))
 	}
+	s.g.goEvents(evs...)
 }
 
 // infoAndRotation stores the agent's capabilities, then keeps the machine
 // token fresh: right away after a bootstrap login or when the token is
-// missing or older than TokenMaxAge, then every TokenMaxAge.
+// missing or older than TokenMaxAge, then every TokenMaxAge. It stops once
+// the session is no longer active: only the active session of a machine
+// rotates, so a draining or moved one cannot hand the agent a stale token.
 func (s *session) infoAndRotation() {
 	ctx := s.ctx
 	ictx, cancel := context.WithTimeout(ctx, infoTimeout)
@@ -348,8 +356,11 @@ func (s *session) infoAndRotation() {
 			case <-t.C:
 			}
 		}
+		if s.state() != stateActive {
+			return
+		}
 		if err := s.rotateToken(ctx); err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || errors.Is(err, errNotActive) {
 				return
 			}
 			s.log.Warn("gateway: machine token rotation failed", "err", err, "retry_in", rotateRetry)
@@ -363,13 +374,14 @@ func (s *session) infoAndRotation() {
 // rotateToken issues a new machine token in two phases (spec 5.2):
 // BeginRotation stores the next hash, Control/SetToken hands the token to the
 // agent, CompleteRotation promotes it. If the agent reconnects with the next
-// token first, Admit promotes it and CompleteRotation is a no-op. Task 8's
-// rotate-token endpoint calls this too.
+// token first, Admit promotes it and CompleteRotation is a no-op. Only an
+// active session rotates (errNotActive otherwise). Task 8's rotate-token
+// endpoint calls this too.
 func (s *session) rotateToken(ctx context.Context) error {
 	s.rotMu.Lock()
 	defer s.rotMu.Unlock()
-	if st := s.state(); !st.serving() {
-		return fmt.Errorf("rotate token: session %s", st)
+	if st := s.state(); st != stateActive {
+		return fmt.Errorf("%w (%s)", errNotActive, st)
 	}
 	tok, err := wire.NewSecret()
 	if err != nil {

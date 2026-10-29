@@ -58,6 +58,7 @@ type recSink struct {
 	batches  [][]*tunnelv1.Event // successful DeliverEvents calls
 	conn     []*tunnelv1.ConnectionEvent
 	failNext int
+	adjust   []int64 // added to the acked seq of the next successful calls
 }
 
 func (s *recSink) DeliverEvents(_ context.Context, _ string, evs []*tunnelv1.Event) (uint64, error) {
@@ -69,7 +70,32 @@ func (s *recSink) DeliverEvents(_ context.Context, _ string, evs []*tunnelv1.Eve
 		return 0, errors.New("sink: injected failure")
 	}
 	s.batches = append(s.batches, evs)
-	return evs[len(evs)-1].GetSeq(), nil
+	acked := evs[len(evs)-1].GetSeq()
+	if len(s.adjust) > 0 {
+		acked = uint64(int64(acked) + s.adjust[0]) //nolint:gosec // test values stay positive
+		s.adjust = s.adjust[1:]
+	}
+	return acked, nil
+}
+
+func (s *recSink) setAdjust(adj ...int64) {
+	s.mu.Lock()
+	s.adjust = adj
+	s.mu.Unlock()
+}
+
+// hangSink blocks every delivery until its context ends, like an api that
+// accepts connections but never answers.
+type hangSink struct{}
+
+func (hangSink) DeliverEvents(ctx context.Context, _ string, _ []*tunnelv1.Event) (uint64, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+func (hangSink) DeliverConnectionEvent(ctx context.Context, _ *tunnelv1.ConnectionEvent) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (s *recSink) DeliverConnectionEvent(_ context.Context, ev *tunnelv1.ConnectionEvent) error {
@@ -191,6 +217,14 @@ func (e *env) gateway(name string, mod func(*Config)) *testGW {
 	e.t.Cleanup(tg.stop)
 	eventually(e.t, waitTimeout, name+" ready", g.Ready)
 	return tg
+}
+
+// waitEventsIdle waits until no connection event delivery is pending.
+func (tg *testGW) waitEventsIdle() {
+	tg.t.Helper()
+	eventually(tg.t, waitTimeout, tg.name+" connection events delivered", func() bool {
+		return tg.evPending.Load() == 0
+	})
 }
 
 // stop cancels Run and waits for it to return.
@@ -421,6 +455,28 @@ func startEcho(t *testing.T) uint16 {
 				}
 				_, _ = io.WriteString(c, "|eof")
 			}()
+		}
+	}()
+	return uint16(ln.Addr().(*net.TCPAddr).Port) //nolint:gosec // a TCP port fits in uint16
+}
+
+// startBye listens on 127.0.0.1; every connection gets "bye" and is closed
+// without reading.
+func startBye(t *testing.T) uint16 {
+	t.Helper()
+	ln, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.AcceptTCP()
+			if err != nil {
+				return
+			}
+			_, _ = io.WriteString(c, "bye")
+			_ = c.Close()
 		}
 	}()
 	return uint16(ln.Addr().(*net.TCPAddr).Port) //nolint:gosec // a TCP port fits in uint16

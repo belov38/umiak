@@ -59,12 +59,16 @@ func (g *Gateway) fenceWorker(ctx context.Context) {
 			}
 			g.checkFence(ctx, id)
 		}
+		if all {
+			g.resyncs.Add(1)
+		}
 	}
 }
 
 // checkFence closes or moves the local session of a machine when the
 // registry says it is superseded: a higher epoch (or another instance), the
-// machine retired, or the row at our epoch already disconnected (swept).
+// machine retired, or the row with our epoch and instance already
+// disconnected (this instance was swept while alive).
 // Registry errors re-queue the machine after fenceRetry.
 func (g *Gateway) checkFence(ctx context.Context, machineID string) {
 	s, st := g.lookup(machineID)
@@ -94,8 +98,8 @@ func (g *Gateway) checkFence(ctx context.Context, machineID string) {
 		s.fence("session row missing")
 	case reg.Epoch > epoch || (reg.Epoch == epoch && reg.InstanceID != g.cfg.InstanceID):
 		s.fence(fmt.Sprintf("superseded by epoch %d on %s", reg.Epoch, reg.InstanceID))
-	case reg.Epoch == epoch && reg.State == registry.SessionDisconnected:
-		s.fence("registry marked the session disconnected")
+	case reg.Epoch == epoch && reg.InstanceID == g.cfg.InstanceID && reg.State == registry.SessionDisconnected:
+		s.fence("registry marked the session disconnected (swept)")
 	}
 }
 

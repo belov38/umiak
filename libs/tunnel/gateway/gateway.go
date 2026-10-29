@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
@@ -117,8 +118,9 @@ const (
 	dbTimeout = 5 * time.Second
 	// fenceRetry is the wait before re-checking a machine after a registry error.
 	fenceRetry = time.Second
-	// shutdownEventWait bounds how long Run waits for pending event deliveries.
-	shutdownEventWait = 5 * time.Second
+	// shutdownEventGrace bounds how long Run waits for pending connection
+	// event deliveries before dropping them.
+	shutdownEventGrace = 2 * time.Second
 )
 
 // Errors.
@@ -161,7 +163,10 @@ type Gateway struct {
 	sessions map[string]*session // by machine id, every state but closed
 	closing  bool                // no new sessions: Run is shutting down or the gateway was abandoned
 	sessWG   sync.WaitGroup      // session goroutines, Add only under mu while !closing
-	evWG     sync.WaitGroup      // sweep-originated event deliveries
+	evWG     sync.WaitGroup      // connection event deliveries, see goEvents
+
+	evPending atomic.Int64 // running goEvents deliveries (observability, tests)
+	resyncs   atomic.Int64 // completed "check every session" fence passes (tests)
 }
 
 // New validates cfg and fills defaults.
@@ -337,8 +342,8 @@ func (g *Gateway) shutdown(ctx context.Context) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(shutdownEventWait):
-		g.log.Warn("gateway: pending event deliveries dropped at shutdown")
+	case <-time.After(shutdownEventGrace):
+		g.log.Warn("gateway: pending connection events dropped at shutdown", "pending", g.evPending.Load())
 	}
 	g.bgCancel()
 	g.log.Info("gateway: instance stopped")
@@ -371,9 +376,9 @@ func (g *Gateway) Abandon() {
 }
 
 // heartbeatLoop refreshes heartbeat_at. When the row is gone (another
-// instance swept this one while it was alive) it registers again and closes
-// every local session: they were marked disconnected by the sweep, so their
-// agents must reconnect and get a fresh epoch.
+// instance swept this one while it was alive) it registers again; the swept
+// sessions are fenced by the resync so their agents reconnect with a fresh
+// epoch.
 func (g *Gateway) heartbeatLoop(ctx context.Context) {
 	t := time.NewTicker(g.cfg.Timing.Heartbeat)
 	defer t.Stop()
@@ -383,22 +388,29 @@ func (g *Gateway) heartbeatLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		hctx, cancel := context.WithTimeout(ctx, dbTimeout)
-		err := g.store.Heartbeat(hctx, g.cfg.InstanceID)
-		cancel()
-		switch {
-		case err == nil:
-		case errors.Is(err, registry.ErrNotFound):
-			g.log.Error("gateway: instance row was swept while alive; registering again and closing local sessions")
-			g.reRegister(ctx)
-		case ctx.Err() != nil:
-			return
-		default:
-			g.log.Warn("gateway: heartbeat failed", "err", err)
-		}
+		g.heartbeatOnce(ctx)
 	}
 }
 
+// heartbeatOnce sends one heartbeat and registers again when the row is gone.
+func (g *Gateway) heartbeatOnce(ctx context.Context) {
+	hctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	err := g.store.Heartbeat(hctx, g.cfg.InstanceID)
+	cancel()
+	switch {
+	case err == nil:
+	case errors.Is(err, registry.ErrNotFound):
+		g.log.Error("gateway: instance row was swept while alive; registering again")
+		g.reRegister(ctx)
+	case ctx.Err() != nil:
+	default:
+		g.log.Warn("gateway: heartbeat failed", "err", err)
+	}
+}
+
+// reRegister registers the instance again and re-checks every local
+// session: the ones the sweep marked disconnected are fenced, sessions
+// admitted after the sweep keep running.
 func (g *Gateway) reRegister(ctx context.Context) {
 	rctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
@@ -411,9 +423,21 @@ func (g *Gateway) reRegister(ctx context.Context) {
 			g.log.Warn("gateway: restoring draining state failed", "err", err)
 		}
 	}
-	for _, s := range g.snapshotSessions() {
-		s.close("instance swept")
-	}
+	g.fenceQ.push("")
+}
+
+// goEvents delivers connection events in the background. They are not
+// ordered (spec 9.6), so nothing waits for them except Run's shutdown, which
+// gives them shutdownEventGrace. Callers are session goroutines (tracked by
+// sessWG) and the sweep loop, so no Add happens after shutdown's Wait starts.
+func (g *Gateway) goEvents(evs ...*tunnelv1.ConnectionEvent) {
+	g.evPending.Add(1)
+	g.evWG.Go(func() {
+		defer g.evPending.Add(-1)
+		for _, ev := range evs {
+			g.deliverConnectionEvent(g.bg, ev)
+		}
+	})
 }
 
 // sweepLoop marks the sessions of dead instances disconnected and reports
@@ -443,10 +467,10 @@ func (g *Gateway) sweepLoop(ctx context.Context) {
 			g.log.Info("gateway: session of a dead instance marked disconnected", "machine_id", sw.MachineID,
 				"epoch", sw.Epoch, "dead_instance", sw.InstanceID, "reason", "instance stale")
 		}
-		g.evWG.Go(func() {
-			for _, sw := range swept {
-				g.deliverConnectionEvent(g.bg, newConnectionEvent(sw.MachineID, sw.Epoch, evDisconnected, "", sw.DisconnectedAt))
-			}
-		})
+		evs := make([]*tunnelv1.ConnectionEvent, 0, len(swept))
+		for _, sw := range swept {
+			evs = append(evs, newConnectionEvent(sw.MachineID, sw.Epoch, evDisconnected, "", sw.DisconnectedAt))
+		}
+		g.goEvents(evs...)
 	}
 }

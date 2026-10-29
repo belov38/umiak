@@ -220,7 +220,7 @@ func (b *trackedBody) Close() error {
 }
 
 // DialTCP opens a TCP stream to localhost:port inside the machine with the
-// default drain deadline.
+// default drain deadline. See DialTCPWith.
 func (m *MachineConn) DialTCP(ctx context.Context, port uint16) (net.Conn, error) {
 	return m.DialTCPWith(ctx, port, TCPOptions{})
 }
@@ -228,8 +228,14 @@ func (m *MachineConn) DialTCP(ctx context.Context, port uint16) (net.Conn, error
 // DialTCPWith opens a TCP stream to localhost:port inside the machine as an
 // HTTP/2 CONNECT. ctx bounds the dial only. The stream counts against
 // MaxTCPStreamsPerMachine (ErrTooManyStreams beyond it) until the returned
-// conn is closed or the stream ends. A refusal by the agent is a
+// conn is closed, the stream is reset, or both directions are finished
+// (read EOF and CloseWrite). A refusal by the agent is a
 // *transport.DialError.
+//
+// The returned conn does not support deadlines: SetDeadline,
+// SetReadDeadline and SetWriteDeadline return an error wrapping
+// errors.ErrUnsupported. Callers must not rely on them; Close unblocks a
+// pending Read or Write.
 func (m *MachineConn) DialTCPWith(ctx context.Context, port uint16, opts TCPOptions) (net.Conn, error) {
 	s := m.s
 	deadline := opts.DrainDeadline
@@ -284,6 +290,11 @@ func (m *MachineConn) DialTCPWith(ctx context.Context, port uint16, opts TCPOpti
 }
 
 // tcpConn is a TCP stream over an HTTP/2 CONNECT. Deadlines are not supported.
+//
+// The stream is released (untracked) on Close, on a reset (non-EOF read
+// error), or once both directions are finished: the agent's EOF was read and
+// the write side was closed (CloseWrite or a failed write). A half-closed
+// stream still counts: on a moved session the gateway may still be uploading.
 type tcpConn struct {
 	s      *session
 	st     *stream
@@ -295,16 +306,30 @@ type tcpConn struct {
 
 	closed    atomic.Bool
 	closeOnce sync.Once
+	readDone  atomic.Bool
+	writeDone atomic.Bool
+}
+
+// halfDone records that one direction finished and releases the stream
+// once both did.
+func (c *tcpConn) halfDone(flag *atomic.Bool) {
+	flag.Store(true)
+	if c.readDone.Load() && c.writeDone.Load() {
+		c.s.untrack(c.st)
+	}
 }
 
 func (c *tcpConn) Read(p []byte) (int, error) {
 	n, err := c.body.Read(p)
 	if err != nil {
-		c.s.untrack(c.st)
 		switch {
 		case c.closed.Load():
 			err = net.ErrClosed
-		case !errors.Is(err, io.EOF):
+		case errors.Is(err, io.EOF):
+			c.halfDone(&c.readDone)
+		default:
+			// The stream was reset: both directions are gone.
+			c.s.untrack(c.st)
 			err = abortErr(c.ctx, err)
 		}
 	}
@@ -317,13 +342,18 @@ func (c *tcpConn) Write(p []byte) (int, error) {
 		if c.closed.Load() {
 			return n, net.ErrClosed
 		}
+		c.halfDone(&c.writeDone)
 		err = abortErr(c.ctx, err)
 	}
 	return n, err
 }
 
 // CloseWrite half-closes the stream: the agent sees EOF and half-closes the target.
-func (c *tcpConn) CloseWrite() error { return c.pw.Close() }
+func (c *tcpConn) CloseWrite() error {
+	err := c.pw.Close()
+	c.halfDone(&c.writeDone)
+	return err
+}
 
 func (c *tcpConn) Close() error {
 	c.closeOnce.Do(func() {

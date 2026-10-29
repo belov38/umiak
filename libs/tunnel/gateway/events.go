@@ -102,11 +102,13 @@ func (h *httpSink) post(ctx context.Context, body *tunnelv1.AgentEventsRequest) 
 		}
 		return nil, fmt.Errorf("agent-events: status %d: %s", resp.StatusCode, msg)
 	}
+	// An empty body is an error: it would read as ackedSeq 0.
+	if len(bytes.TrimSpace(out)) == 0 {
+		return nil, fmt.Errorf("agent-events: status %d with an empty body", resp.StatusCode)
+	}
 	var res tunnelv1.AgentEventsResponse
-	if len(bytes.TrimSpace(out)) > 0 {
-		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(out, &res); err != nil {
-			return nil, fmt.Errorf("agent-events: decode response: %w", err)
-		}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(out, &res); err != nil {
+		return nil, fmt.Errorf("agent-events: decode response: %w", err)
 	}
 	return &res, nil
 }
@@ -148,6 +150,10 @@ func (g *Gateway) deliverConnectionEvent(ctx context.Context, ev *tunnelv1.Conne
 			"epoch", ev.GetEpoch(), "type", ev.GetType(), "err", err)
 	}
 }
+
+// errPartialAck ends a Subscribe stream after the sink stored only part of a
+// batch: the agent resends the rest after its acked seq on the next stream.
+var errPartialAck = errors.New("sink acknowledged part of the batch, resubscribing")
 
 // sleepCtx waits d and reports false if ctx ended first.
 func sleepCtx(ctx context.Context, d time.Duration) bool {
@@ -238,6 +244,7 @@ func (s *session) pumpOnce(ctx context.Context) (bool, error) {
 		if len(batch) == 0 {
 			return nil
 		}
+		last := batch[len(batch)-1].GetSeq()
 		n, err := s.deliverBatch(ctx, batch)
 		if err != nil {
 			return err
@@ -249,6 +256,10 @@ func (s *session) pumpOnce(ctx context.Context) (bool, error) {
 				return fmt.Errorf("Events/Ack: %w", err)
 			}
 			acked = n
+		}
+		if n < last {
+			// Reading on would skip the events after n.
+			return fmt.Errorf("%w (acked %d of %d)", errPartialAck, n, last)
 		}
 		return nil
 	}
@@ -293,14 +304,19 @@ func (s *session) pumpOnce(ctx context.Context) (bool, error) {
 }
 
 // deliverBatch retries DeliverEvents with backoff until it succeeds or ctx
-// ends.
+// ends. An ackedSeq above the batch's last seq would acknowledge events
+// never sent, so it counts as a failure.
 func (s *session) deliverBatch(ctx context.Context, batch []*tunnelv1.Event) (uint64, error) {
 	tm := s.g.cfg.Timing
 	wait := tm.EventRetryMin
+	last := batch[len(batch)-1].GetSeq()
 	for {
 		dctx, cancel := context.WithTimeout(ctx, deliverTimeout)
 		acked, err := s.g.sink.DeliverEvents(dctx, s.machineID, batch)
 		cancel()
+		if err == nil && acked > last {
+			err = fmt.Errorf("sink acked seq %d beyond the batch's last seq %d", acked, last)
+		}
 		if err == nil {
 			return acked, nil
 		}

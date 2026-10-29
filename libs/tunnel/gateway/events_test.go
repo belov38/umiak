@@ -15,9 +15,10 @@ import (
 
 func TestHTTPSink(t *testing.T) {
 	var (
-		mu   sync.Mutex
-		reqs []*tunnelv1.AgentEventsRequest
-		fail bool
+		mu    sync.Mutex
+		reqs  []*tunnelv1.AgentEventsRequest
+		fail  bool
+		empty bool
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/internal/v1/agent-events" {
@@ -36,10 +37,14 @@ func TestHTTPSink(t *testing.T) {
 		}
 		mu.Lock()
 		reqs = append(reqs, &req)
-		f := fail
+		f, emp := fail, empty
 		mu.Unlock()
 		if f {
 			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		if emp {
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 		var acked uint64
@@ -74,5 +79,12 @@ func TestHTTPSink(t *testing.T) {
 	}
 	if err := sink.DeliverConnectionEvent(ctx, &tunnelv1.ConnectionEvent{MachineId: "m-1"}); err == nil {
 		t.Fatal("DeliverConnectionEvent must fail on 503")
+	}
+	// A 2xx without a body would read as ackedSeq 0: it is an error.
+	mu.Lock()
+	fail, empty = false, true
+	mu.Unlock()
+	if acked, err := sink.DeliverEvents(ctx, "m-1", []*tunnelv1.Event{{Seq: 6}}); err == nil {
+		t.Fatalf("DeliverEvents with an empty 200 body = %d, want an error", acked)
 	}
 }
