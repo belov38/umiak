@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -27,10 +26,12 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 	stub := newStubAgent()
 	release := make(chan struct{})
 	big := strings.Repeat("a", 200<<10)
-	// Many small fields over the gateway->agent transport limit: that stream fails.
-	many := http.Header{}
-	for i := range h2.MaxResponseHeaderBytes/(32+16) + 1 {
-		many.Set(fmt.Sprintf("X-Many-%08d", i), "v")
+	// Many small fields (48 bytes each) over the gateway->agent transport
+	// limit, which net/http pads by 320 bytes: the transport fails that
+	// stream (isHeaderListTooLarge), the block is never read.
+	var many []string
+	for i := range (h2.MaxResponseHeaderBytes+8<<10)/48 + 1 {
+		many = append(many, fmt.Sprintf("X-Many-%08d", i))
 	}
 	// Just over the forwarded limit.
 	edge := strings.Repeat("e", maxForwardHeaderBytes-32-len("X-Edge")+1)
@@ -61,8 +62,20 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 		mux.HandleFunc("/files/edge-header", header("X-Edge", edge))
 		mux.HandleFunc("/files/many-headers", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.Copy(io.Discard, r.Body)
-			maps.Copy(w.Header(), many)
+			for _, k := range many {
+				w.Header().Set(k, "v")
+			}
 			_, _ = io.WriteString(w, `{}`)
+		})
+		mux.HandleFunc("/sbx.testing.v1.Forge/ManyTrailers", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "application/connect+proto")
+			// A whole envelope: without the reset the gateway would end the
+			// stream with agent_unavailable at this boundary.
+			_, _ = w.Write([]byte{0, 0, 0, 0, 0})
+			for _, k := range many {
+				w.Header().Set(http.TrailerPrefix+k, "v")
+			}
 		})
 		mux.HandleFunc("/files/fit-header", header("X-Fit", strings.Repeat("f", 32<<10)))
 		mux.HandleFunc("/files/big-trailer", trailer("application/octet-stream"))
@@ -122,6 +135,7 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 	for _, tc := range []struct{ path, ct string }{
 		{"/files/big-trailer", ""},
 		{"/rpc/sbx.testing.v1.Forge/BigTrailer", "application/connect+json"},
+		{"/rpc/sbx.testing.v1.Forge/ManyTrailers", "application/connect+json"},
 	} {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+tc.path, strings.NewReader(`{}`))
 		if tc.ct != "" {
