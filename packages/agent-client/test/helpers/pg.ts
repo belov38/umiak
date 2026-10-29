@@ -21,8 +21,18 @@ export function skipPg(): boolean {
 	return inject("sbxPgAdminDsn") === "" && inject("sbxPgError") === "";
 }
 
+export interface TestDatabaseOptions {
+	/**
+	 * Apply db/migrations/01??_*.sql (default true). The Go tunnel harness
+	 * applies them itself, so its database is created empty.
+	 */
+	migrate?: boolean;
+}
+
 /** Creates a fresh database and applies db/migrations/01??_*.sql in name order. */
-export async function createTestDatabase(): Promise<TestDatabase> {
+export async function createTestDatabase(
+	opts: TestDatabaseOptions = {},
+): Promise<TestDatabase> {
 	const admin = inject("sbxPgAdminDsn");
 	const startErr = inject("sbxPgError");
 	if (startErr !== "") {
@@ -44,7 +54,8 @@ export async function createTestDatabase(): Promise<TestDatabase> {
 	const connectionString = url.toString();
 	const pool = new pg.Pool({ connectionString, max: 4 });
 	pool.on("error", () => {});
-	for (const file of await migrationFiles()) {
+	const files = opts.migrate === false ? [] : await migrationFiles();
+	for (const file of files) {
 		const sql = await readFile(file, "utf8");
 		const client = await pool.connect();
 		try {
