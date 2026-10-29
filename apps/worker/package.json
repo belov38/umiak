@@ -1,0 +1,26 @@
+{
+	"name": "@sbx/worker",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Control plane worker: pg-boss handlers for operations, machine and snapshot jobs, agent events and controllers",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"@sbx/config": "workspace:*",
+		"@sbx/core": "workspace:*",
+		"@sbx/db": "workspace:*",
+		"@sbx/pve": "workspace:*",
+		"pg": "8.23.1",
+		"pg-boss": "12.38.0",
+		"pino": "10.4.0"
+	},
+	"devDependencies": {
+		"@types/pg": "8.23.1"
+	}
+}
