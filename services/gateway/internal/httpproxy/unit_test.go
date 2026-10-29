@@ -2,8 +2,10 @@ package httpproxy
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/netip"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -321,6 +323,39 @@ func TestDropUpgrade(t *testing.T) {
 		}
 		if got := h.Values("Connection"); strings.Join(got, "|") != strings.Join(c.want, "|") {
 			t.Errorf("Connection %q -> %q, want %q", c.conn, got, c.want)
+		}
+	}
+}
+
+type errBody struct{ err error }
+
+func (b errBody) Read([]byte) (int, error) { return 0, b.err }
+func (errBody) Close() error               { return nil }
+
+// Only net/http's own HTTP/1.x trailer read errors end the body cleanly;
+// a look-alike text, or any error of an HTTP/2 response, stays an error.
+func TestTrailerGuardErrors(t *testing.T) {
+	cases := []struct {
+		proto int
+		err   error
+		eof   bool
+	}{
+		{1, errors.New("http: unexpected EOF reading trailer"), true},
+		{1, errors.New("http: suspiciously long trailer after chunked body"), true},
+		{1, errors.New("message too large"), true},
+		{1, textproto.ProtocolError("malformed MIME header line: x"), true},
+		{1, errors.New("read tcp: the peer said trailer"), false},
+		{1, io.ErrUnexpectedEOF, false},
+		{2, errors.New("http2: server sent GOAWAY and closed the connection; LastStreamID=1, ErrCode=NO_ERROR, debug=\"http: unexpected EOF reading trailer\""), false},
+		{2, errors.New("http: unexpected EOF reading trailer"), false},
+		{2, textproto.ProtocolError("x"), false},
+	}
+	for _, tc := range cases {
+		res := &http.Response{ProtoMajor: tc.proto, Trailer: http.Header{"X": {"v"}}}
+		g := &trailerGuard{ReadCloser: errBody{tc.err}, res: res}
+		_, err := g.Read(make([]byte, 1))
+		if got := errors.Is(err, io.EOF); got != tc.eof {
+			t.Errorf("HTTP/%d %q: read error %v, want EOF %v", tc.proto, tc.err, err, tc.eof)
 		}
 	}
 }

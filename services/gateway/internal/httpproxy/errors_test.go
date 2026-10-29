@@ -2,6 +2,7 @@ package httpproxy_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/hpack"
 
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
@@ -449,6 +451,57 @@ func TestTrailerReadFailure(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if _, err := io.ReadAll(resp.Body); err == nil {
 		t.Fatal("a body cut inside a chunk ended cleanly")
+	}
+}
+
+// An h2c app that cuts its answer with a GOAWAY whose debug text mentions
+// a trailer read error: the body error must reach the client as an error,
+// never as a clean end of a truncated body.
+func TestH2CGoAwayNotTrailerEOF(t *testing.T) {
+	f := newFixture(t, nil)
+	f.m.ServeTCP(5001, func(c net.Conn) {
+		defer func() { _ = c.Close() }()
+		preface := make([]byte, len(http2.ClientPreface))
+		if _, err := io.ReadFull(c, preface); err != nil {
+			return
+		}
+		fr := http2.NewFramer(c, c)
+		if err := fr.WriteSettings(); err != nil {
+			return
+		}
+		var stream uint32
+		for stream == 0 {
+			fm, err := fr.ReadFrame()
+			if err != nil {
+				return
+			}
+			switch fm := fm.(type) {
+			case *http2.SettingsFrame:
+				if !fm.IsAck() {
+					_ = fr.WriteSettingsAck()
+				}
+			case *http2.HeadersFrame:
+				stream = fm.StreamID
+			}
+		}
+		var hb bytes.Buffer
+		enc := hpack.NewEncoder(&hb)
+		_ = enc.WriteField(hpack.HeaderField{Name: ":status", Value: "200"})
+		_ = enc.WriteField(hpack.HeaderField{Name: "content-type", Value: "text/plain"})
+		_ = fr.WriteHeaders(http2.HeadersFrameParam{StreamID: stream, BlockFragment: hb.Bytes(), EndHeaders: true})
+		_ = fr.WriteData(stream, false, []byte("part"))
+		_ = fr.WriteGoAway(stream, http2.ErrCodeNo, []byte("http: unexpected EOF reading trailer"))
+		time.Sleep(50 * time.Millisecond)
+	})
+	rt := f.env.Route(f.m, 5001, func(r *cpapi.Route) { r.AppProtocol = "h2c" })
+	resp := do(t, f.c, newReq(t, http.MethodGet, testenv.Host(rt.Label), "/", nil))
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Fatalf("the cut h2c body %q ended cleanly", b)
 	}
 }
 

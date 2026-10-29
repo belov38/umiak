@@ -230,7 +230,7 @@ func (g *trailerGuard) Read(p []byte) (int, error) {
 	switch {
 	case err == io.EOF:
 		g.check()
-	case err != nil && trailerReadError(err):
+	case err != nil && g.res.ProtoMajor == 1 && trailerReadError(err):
 		// The body is complete; only the trailer block failed. Drop the
 		// trailers and end the body cleanly. The transport does not reuse
 		// the conn: its body never reached EOF.
@@ -245,20 +245,29 @@ func (g *trailerGuard) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// trailerReadError reports an error that net/http's HTTP/1.1 body reader
-// returns only after the last chunk, while reading the trailer block: a
-// block longer than its buffer ("suspiciously long trailer"), an EOF inside
-// it ("unexpected EOF reading trailer"), a malformed line
-// (textproto.ProtocolError) or too many fields ("message too large"). A
-// body cut inside a chunk is io.ErrUnexpectedEOF, which is not one of them.
-// The messages are not exported; TestTrailerReadFailure pins them.
+// Errors net/http's HTTP/1.x body reader returns only after the last
+// chunk, while reading the trailer block. They are not exported;
+// TestTrailerReadFailure pins them.
+var trailerErrorTexts = map[string]bool{
+	// EOF inside the block.
+	"http: unexpected EOF reading trailer": true,
+	// A block longer than the reader's buffer.
+	"http: suspiciously long trailer after chunked body": true,
+	// Too many fields (textproto).
+	"message too large": true,
+}
+
+// trailerReadError reports a trailer read error of an HTTP/1.x response:
+// one of trailerErrorTexts or a malformed line (textproto.ProtocolError).
+// A body cut inside a chunk is io.ErrUnexpectedEOF, which is not one of
+// them. Callers check the protocol: HTTP/2 errors (GOAWAY debug text, for
+// one) carry peer-chosen text and are never taken for these.
 func trailerReadError(err error) bool {
 	var pe textproto.ProtocolError
 	if errors.As(err, &pe) {
 		return true
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "trailer") || msg == "message too large"
+	return trailerErrorTexts[err.Error()]
 }
 
 func (g *trailerGuard) Close() error {
