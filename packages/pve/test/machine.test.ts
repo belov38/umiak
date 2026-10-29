@@ -8,6 +8,7 @@ import {
 	s2SerialPayload,
 	TracesRemainError,
 } from "../src/machine.ts";
+import { NodeOpsError } from "../src/node-client.ts";
 import { PveApiError, QgaTimeoutError } from "../src/pve-api.ts";
 import { SqliteStateStore } from "../src/state-sqlite.ts";
 import { LvmThinDriver } from "../src/storage/lvmthin.ts";
@@ -553,12 +554,12 @@ describe("review fixes", () => {
 		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
 		let releases = 0;
 		node.handlers["dhcp.release"] = () => {
-			// The first DHCPRELEASE packet never reaches dnsmasq.
-			if (++releases > 1) node.leases = [];
+			// The releases before destroy and right after it never reach dnsmasq.
+			if (++releases > 2) node.leases = [];
 			return { released: true };
 		};
 		await machines.delete(a.vmid);
-		expect(releases).toBe(2);
+		expect(releases).toBe(3);
 		expect(machines.dhcpReleaseRetries).toBe(1);
 		expect(store.get(1, 500)).toBeUndefined();
 	});
@@ -573,7 +574,8 @@ describe("review fixes", () => {
 			ethers: [],
 		});
 		await machines.delete(a.vmid);
-		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(1);
+		// One release before destroy, one in verification.
+		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(2);
 		expect(node.leases).toEqual([]);
 		expect(machines.dhcpReleaseRetries).toBe(0);
 	});
@@ -585,8 +587,53 @@ describe("review fixes", () => {
 		node.handlers["dhcp.release"] = () => ({ released: true });
 		const err = await machines.delete(a.vmid).catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(TracesRemainError);
-		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(3);
+		// One release before destroy, then three rounds in verification.
+		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(4);
 		expect(store.get(1, 500)?.state).toBe("releasing");
+	});
+
+	it("releases the DHCP lease before destroy, while the IP still belongs to the VM", async () => {
+		const { api, node, machines, store } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		const x = "02:01:00:00:01:f4";
+		node.leases.push({ mac: x, ip: "10.88.0.101" });
+		// Right after destroy frees the IP, a new VM Y takes it and dnsmasq moves the lease to Y.
+		const destroy = api.delete.bind(api);
+		api.delete = async <T>(path: string, params?: Record<string, unknown>) => {
+			const r = await destroy<T>(path, params);
+			node.leases = node.leases.map((l) =>
+				l.mac === x ? { ...l, mac: "02:01:00:00:01:ff" } : l,
+			);
+			return r;
+		};
+		let effective = 0;
+		node.handlers["dhcp.release"] = (args) => {
+			const m = String(args.mac).toLowerCase();
+			if (node.leases.some((l) => l.mac === m)) effective++;
+			node.leases = node.leases.filter((l) => l.mac !== m);
+			return { released: true };
+		};
+		await machines.delete(a.vmid);
+		expect(effective).toBe(1);
+		const order = node.log.filter(
+			(l) => l === "node:dhcp.release" || l.startsWith("api:DELETE"),
+		);
+		expect(order[0]).toBe("node:dhcp.release");
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("retries a lease read while the lease file is being rewritten", async () => {
+		const { node, machines, store } = setup();
+		const a = await machines.create({});
+		let reads = 0;
+		node.handlers["dhcp.leases"] = () => {
+			if (++reads <= 2)
+				throw new NodeOpsError("dhcp.leases", "busy", "keeps changing");
+			return { leases: [], ethers: [] };
+		};
+		await machines.delete(a.vmid);
+		expect(store.get(1, 500)).toBeUndefined();
 	});
 
 	it("refuses to delete the template", async () => {

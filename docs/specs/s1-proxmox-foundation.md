@@ -280,10 +280,11 @@ interface QuiesceHook {
 - **waitReady(timeout)** — опрос `agent/ping`; IP из `agent/network-get-interfaces` (IPv4 в `10.88.0.0/24`).
 - **delete(vmid)**:
   1. `status/stop` (жёсткий, sandbox одноразовая).
-  2. `DELETE /nodes/pve/qemu/<vmid>?purge=1&destroy-unreferenced-disks=1`, ожидание задачи.
-  3. `sbx-node lv.remove` оставшихся LV с тегом `sbx-vm-<vmid>`.
-  4. Проверка: конфига нет (404), firewall-файла VM нет, в IPAM нет записи с MAC, в lease-файле нет MAC. Если Proxmox не убирает lease при удалении VM — `sbx-node dhcp.release`.
-  5. Освободить VMID и MAC в аллокаторе. Только после успешной проверки; иначе запись остаётся в состоянии `releasing` и её добирает `cleanup`.
+  2. `sbx-node dhcp.release` — до destroy, пока IP, строка ethers и lease ещё принадлежат этой VM: после destroy IP в IPAM свободен, его может занять новая VM, и dnsmasq переносит lease на её MAC.
+  3. `DELETE /nodes/pve/qemu/<vmid>?purge=1&destroy-unreferenced-disks=1`, ожидание задачи.
+  4. `sbx-node lv.remove` оставшихся LV с тегом `sbx-vm-<vmid>`.
+  5. Проверка: конфига нет (404), firewall-файла VM нет, в IPAM нет записи с MAC, в lease-файле нет MAC; повторный `dhcp.release` удаляет строку ethers (MAC уже нет в `mac-cache.json`).
+  6. Освободить VMID и MAC в аллокаторе. Только после успешной проверки; иначе запись остаётся в состоянии `releasing` и её добирает `cleanup`.
 - Лимит параллельных clone на ноду настраивается (дефолт 4) [решение S1]; стенд даёт данные для выбора.
 
 ### 6.4 SMBIOS (интерфейс для S2)
@@ -430,7 +431,7 @@ p95 считается по nearest-rank; при n = 3 он равен max.
 ### Решения по пунктам «проверить при реализации» (§12)
 
 - **`ipfilter`: оставлен включённым.** С `ipfilter=1` и пустым `ipfilter-net0` весь IPv4 гостя, кроме DHCP, дропается; PVE создаёт IPSet `guest-ipam-<vmid>`, но в ipfilter его не подставляет. IP выдаётся IPAM уже при `POST /qemu`, поэтому create после firewall-опций читает IP из IPAM и кладёт его в ipset `ipfilter-net0` до start. Стенд проверяет DNS и HTTPS из A и F.
-- **Lease при delete.** Proxmox не удаляет ни lease в файле dnsmasq, ни строку `MAC,IP` в `/etc/dnsmasq.d/sbx/ethers`: `PVE::Network::SDN::Dhcp::remove_mapping` нигде не вызывается, а `del_ip_mapping` в плагине dnsmasq не реализован. Строки без MAC в IPAM PVE выбрасывает только при следующем старте любой VM. Поэтому delete вызывает `sbx-node dhcp.release`: `dhcp_release` и удаление строки ethers под `flock` (как PVE), только для нашего MAC и только если его уже нет в `mac-cache.json`, затем `reload dnsmasq@sbx`. IPAM и mac-cache Proxmox чистит сам.
+- **Lease при delete.** Proxmox не удаляет ни lease в файле dnsmasq, ни строку `MAC,IP` в `/etc/dnsmasq.d/sbx/ethers`: `PVE::Network::SDN::Dhcp::remove_mapping` нигде не вызывается, а `del_ip_mapping` в плагине dnsmasq не реализован. Строки без MAC в IPAM PVE выбрасывает только при следующем старте любой VM. Поэтому delete вызывает `sbx-node dhcp.release` до destroy и ещё раз при проверке после него: `dhcp_release` и удаление строки ethers под `flock` (как PVE), только для нашего MAC и только если его уже нет в `mac-cache.json`, затем `reload dnsmasq@sbx`. IPAM и mac-cache Proxmox чистит сам.
 - **Продление lease через firewall.** Диапазон subnet создаётся как `infinite`: lease бессрочный, продления нет. Кроме того, в `tapN-OUT` правило `-p udp --sport 68 --dport 67` стоит до ipfilter и до `GROUP-sbx-egress-OUT`, ответ `--sport 67 --dport 68` в `tapN-IN` — до группы. Опция `dhcp=1` так же пропускает DHCPv6-клиента (546 → 547); IPv6-диапазона у dnsmasq нет.
 - **`isolate-ports` с firewall-bridge.** У порта `fwprNp0` в `sbx0` стоит `isolated on`. Стенд проверяет ping и TCP 22 A ↔ F в обе стороны с позитивным контролем (sshd слушает локально в A и F).
 - **Разные IP у A и F:** да, IPAM привязывает IP к MAC (проверка в каждом прогоне).
@@ -463,4 +464,5 @@ p95 считается по nearest-rank; при n = 3 он равен max.
 - QLC-диск `local-lvm` занижает цифры при долгой записи; для функционального PoC нормально, в отчёте указать storage.
 - Длина `smbios1` serial.
 - Исходящий трафик sandbox выходит в интернет с домашнего публичного IP Ильи. Для PoC это принято; политика egress для production — в S12/фазе 2.
+- **Запись ethers при параллельных start (риск для S6).** Proxmox (`PVE::Network::SDN::Dhcp::Dnsmasq::add_ip_mapping`) берёт `flock` на сам файл `ethers`, пишет `ethers.tmp` и делает `rename` поверх. Ожидающий writer может получить lock на уже заменённом inode, и тогда два writer работают одновременно: в эмуляции с двумя конкурентными writer Proxmox терялось ~47% добавлений. `mac-cache.json` читается вне lock. Потерянная статическая привязка даёт VM динамический IP не из IPAM, и `ipfilter` её блокирует. `sbx-node` проверяет inode перед своим `rename` и своё изменение после него (`hostfs.ReplaceLocked`), но запись Proxmox, попавшая между проверкой и нашим `rename`, теряется. **S6 сериализует start и delete на ноде** (как минимум шаги, которые пишут ethers). Порядок delete: stop → `dhcp.release` → destroy → проверка следов; release идёт до destroy, пока IP ещё принадлежит VM.
 - **`cpu host` и вложенный KVM** (MVP-рек. R6, решение master 2026-10-29). Вложенная виртуализация в MVP не гарантируется: `/dev/kvm` в госте есть, только если на хосте `kvm_intel`/`kvm_amd` загружен с `nested=1` (проверить на `pve`: `cat /sys/module/kvm_*/parameters/nested`); runbook и код S1 это не меняют, шаблон S5 только даёт доступ (S5 §8.6, §10 п. 19). `cpu host` остаётся, пока нода одна. Живая миграция между нодами с разными CPU с `cpu host` невозможна: для такого кластера нужна именованная модель CPU (например, `x86-64-v3`) в шаблоне — решение S12 / фазы 2.

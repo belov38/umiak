@@ -82,7 +82,7 @@ func TestReplaceLockedDoesNotOverwriteAConcurrentRename(t *testing.T) {
 		calls++
 		if calls == 1 {
 			tmp := filepath.Join(dir, "ethers.tmp")
-			if err := os.WriteFile(tmp, []byte(string(b)+"new\n"), 0o600); err != nil {
+			if err := os.WriteFile(tmp, []byte(string(b)+"new\n"), 0o600); err != nil { //nolint:gosec // test temp file
 				return nil, err
 			}
 			if err := os.Rename(tmp, p); err != nil {
@@ -95,7 +95,37 @@ func TestReplaceLockedDoesNotOverwriteAConcurrentRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(p) //nolint:gosec // test temp file
-	if string(got) != "old\nnew\n" || calls != 2 {
+	if string(got) != "old\nnew\n" || calls < 2 {
 		t.Errorf("content %q after %d edits", got, calls)
+	}
+}
+
+// A Proxmox writer that read the file before our rename may rename its version over ours right
+// after, dropping our change; ReplaceLocked checks its change again and reapplies it.
+func TestReplaceLockedReappliesAChangeLostToALaterRename(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ethers")
+	if err := os.WriteFile(p, []byte("old\ngone\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fired := false
+	afterRename = func() {
+		if fired {
+			return
+		}
+		fired = true
+		tmp := filepath.Join(dir, "ethers.tmp")
+		_ = os.WriteFile(tmp, []byte("old\ngone\nnew\n"), 0o600)
+		_ = os.Rename(tmp, p)
+	}
+	t.Cleanup(func() { afterRename = func() {} })
+	err := ReplaceLocked(p, func(b []byte) ([]byte, error) {
+		return []byte(strings.Replace(string(b), "gone\n", "", 1)), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != "old\nnew\n" { //nolint:gosec // test temp file
+		t.Errorf("content %q", got)
 	}
 }

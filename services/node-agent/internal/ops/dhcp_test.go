@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"encoding/json"
 	"io/fs"
 	"strings"
 	"testing"
@@ -90,7 +91,16 @@ func TestDHCPReleaseFailsOnAFileThatNeverSettles(t *testing.T) {
 		q = append(q, strings.Repeat("x", i)+"\n")
 	}
 	h, _ := seqHarness(map[string][]string{leaseFile: q}, nil)
-	if r := h.call(t, "dhcp.leases", nil); r.OK {
-		t.Errorf("unstable lease file accepted: %+v", r)
+	if r := h.call(t, "dhcp.leases", nil); r.OK || r.Error.Code != "busy" {
+		t.Errorf("unstable lease file: got %+v, want error code busy", r)
+	}
+}
+
+func TestDHCPReleaseWithoutIPsReportsAnEmptyList(t *testing.T) {
+	h := newHarness(fstest.MapFS{leaseFile: {Data: []byte("")}})
+	r := h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:F4"})
+	b, _ := json.Marshal(r.Result)
+	if !strings.Contains(string(b), `"ips":[]`) {
+		t.Errorf("result = %s", b)
 	}
 }
