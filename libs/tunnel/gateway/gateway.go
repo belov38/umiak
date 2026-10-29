@@ -49,6 +49,15 @@ type Timing struct {
 	TokenMaxAge time.Duration
 	// EventBatchMax is the largest event batch sent to the sink (500).
 	EventBatchMax int
+	// EventBatchMaxBytes caps the summed proto size of the events of one
+	// batch (4 MiB): a batch is sent before an event that would exceed it is
+	// added, so one larger event forms a batch alone.
+	EventBatchMaxBytes int
+	// MaxEventBytes is the largest Events/Subscribe message the gateway reads
+	// (1 MiB, plus a small envelope allowance). A larger one ends the stream;
+	// the pump resubscribes with its backoff. Agents replace such events
+	// with an sbx.tunnel.event_too_large stub before sending.
+	MaxEventBytes int
 	// EventBatchInterval is the longest a batch waits after its first event (1 s).
 	EventBatchInterval time.Duration
 	// EventRetryMin and EventRetryMax bound the backoff of failed sink
@@ -77,6 +86,12 @@ func (t Timing) withDefaults() Timing {
 	def(&t.EventRetryMax, 30*time.Second)
 	if t.EventBatchMax <= 0 {
 		t.EventBatchMax = 500
+	}
+	if t.EventBatchMaxBytes <= 0 {
+		t.EventBatchMaxBytes = 4 << 20
+	}
+	if t.MaxEventBytes <= 0 {
+		t.MaxEventBytes = 1 << 20
 	}
 	t.EventRetryMax = max(t.EventRetryMax, t.EventRetryMin)
 	t.MaxTCPDrainDeadline = max(t.MaxTCPDrainDeadline, t.TCPDeadline)

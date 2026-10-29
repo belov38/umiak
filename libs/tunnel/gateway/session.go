@@ -69,6 +69,9 @@ const (
 	rotateRetry = 30 * time.Second
 	// maxMessageBytes is the Connect message limit (spec 4.3).
 	maxMessageBytes = 16 << 20
+	// eventEnvelopeBytes is the SubscribeResponse framing allowed on top of
+	// Timing.MaxEventBytes: the field tag and length of the event.
+	eventEnvelopeBytes = 64
 )
 
 // errNotActive refuses token rotation on a session that is not active.
@@ -123,7 +126,9 @@ func newSession(g *Gateway, hello transport.Hello, info transport.ConnInfo, res 
 	hc := &http.Client{Transport: s.mc}
 	opts := []connect.ClientOption{connect.WithReadMaxBytes(maxMessageBytes), connect.WithSendMaxBytes(maxMessageBytes)}
 	s.control = tunnelv1connect.NewControlClient(hc, agentBaseURL, opts...)
-	s.events = tunnelv1connect.NewEventsClient(hc, agentBaseURL, opts...)
+	// A larger event is never buffered: connect discards it and ends the stream.
+	s.events = tunnelv1connect.NewEventsClient(hc, agentBaseURL,
+		connect.WithReadMaxBytes(g.cfg.Timing.MaxEventBytes+eventEnvelopeBytes), connect.WithSendMaxBytes(maxMessageBytes))
 	return s
 }
 

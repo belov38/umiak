@@ -194,7 +194,12 @@ func (s *session) pumpEvents() {
 		if delivered {
 			wait = tm.EventRetryMin
 		}
-		s.log.Warn("gateway: event stream ended, resubscribing", "err", err, "retry_in", wait)
+		if connect.CodeOf(err) == connect.CodeResourceExhausted {
+			s.log.Warn("gateway: agent sent an event above MaxEventBytes, resubscribing",
+				"max_event_bytes", tm.MaxEventBytes, "err", err, "retry_in", wait)
+		} else {
+			s.log.Warn("gateway: event stream ended, resubscribing", "err", err, "retry_in", wait)
+		}
 		if !sleepCtx(ctx, wait) {
 			return
 		}
@@ -203,10 +208,13 @@ func (s *session) pumpEvents() {
 }
 
 // pumpOnce runs one Events/Subscribe stream. Events are batched up to
-// EventBatchMax, or EventBatchInterval after the first event of the batch.
-// A batch is retried until the sink takes it, without reading further from
-// the stream; then the sink's ackedSeq is acknowledged to the agent. It
-// reports whether any batch was delivered.
+// EventBatchMax events or EventBatchMaxBytes (proto size; a batch is sent
+// before an event that would exceed it), or EventBatchInterval after the
+// first event of the batch. A batch is retried until the sink takes it,
+// without reading further from the stream; then the sink's ackedSeq is
+// acknowledged to the agent. A session thus buffers at most a batch, the
+// event that closed it and the one message the reader holds, each message
+// at most MaxEventBytes. It reports whether any batch was delivered.
 func (s *session) pumpOnce(ctx context.Context) (bool, error) {
 	tm := s.g.cfg.Timing
 	sctx, cancel := context.WithCancel(ctx)
@@ -243,6 +251,7 @@ func (s *session) pumpOnce(ctx context.Context) (bool, error) {
 
 	var (
 		batch     []*tunnelv1.Event
+		size      int // summed proto size of batch
 		timer     *time.Timer
 		timerC    <-chan time.Time
 		delivered bool
@@ -261,7 +270,7 @@ func (s *session) pumpOnce(ctx context.Context) (bool, error) {
 		if err != nil {
 			return err
 		}
-		batch = nil
+		batch, size = nil, 0
 		delivered = true
 		if n > acked {
 			if _, err := s.events.Ack(ctx, connect.NewRequest(&tunnelv1.AckRequest{Seq: n})); err != nil {
@@ -297,12 +306,19 @@ func (s *session) pumpOnce(ctx context.Context) (bool, error) {
 				}
 				return delivered, err
 			}
+			n := proto.Size(ev)
+			if len(batch) > 0 && size+n > tm.EventBatchMaxBytes {
+				if err := flush(); err != nil {
+					return delivered, err
+				}
+			}
 			batch = append(batch, ev)
+			size += n
 			if len(batch) == 1 {
 				timer = time.NewTimer(tm.EventBatchInterval)
 				timerC = timer.C
 			}
-			if len(batch) >= tm.EventBatchMax {
+			if len(batch) >= tm.EventBatchMax || size >= tm.EventBatchMaxBytes {
 				if err := flush(); err != nil {
 					return delivered, err
 				}
