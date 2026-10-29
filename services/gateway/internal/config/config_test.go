@@ -469,3 +469,52 @@ func TestValidateServe(t *testing.T) {
 		})
 	}
 }
+
+// TestFromEnvMappedCIDRs: an IPv4-mapped prefix of /96 or longer becomes the
+// IPv4 prefix (client addresses are unmapped before matching); a shorter one
+// is refused, naming its variable.
+func TestFromEnvMappedCIDRs(t *testing.T) {
+	vars := []string{"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS", "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS", "SBX_GATEWAY_TRUSTED_PROXY_CIDRS"}
+	got := func(c Config, name string) []netip.Prefix {
+		switch name {
+		case "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":
+			return c.RateLimit.Exempt
+		case "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":
+			return c.ProxyProtocolCIDRs
+		default:
+			return c.TrustedProxyCIDRs
+		}
+	}
+	for _, name := range vars {
+		f := newFixture(t)
+		f.env[name] = "::ffff:10.1.2.0/120, ::ffff:192.0.2.7, ::ffff:0:0/96, 2001:db8::/32"
+		cfg, err := FromEnv(f.getenv)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		want := []netip.Prefix{
+			netip.MustParsePrefix("10.1.2.0/24"),
+			netip.MustParsePrefix("192.0.2.7/32"),
+			netip.MustParsePrefix("0.0.0.0/0"),
+			netip.MustParsePrefix("2001:db8::/32"),
+		}
+		p := got(cfg, name)
+		if len(p) != len(want) {
+			t.Fatalf("%s = %v, want %v", name, p, want)
+		}
+		for i := range want {
+			if p[i] != want[i] {
+				t.Errorf("%s[%d] = %s, want %s", name, i, p[i], want[i])
+			}
+		}
+		if !p[0].Contains(netip.MustParseAddr("::ffff:10.1.2.3").Unmap()) {
+			t.Errorf("%s: %s does not match the unmapped client 10.1.2.3", name, p[0])
+		}
+
+		f = newFixture(t)
+		f.env[name] = "::ffff:10.0.0.0/95"
+		if _, err := FromEnv(f.getenv); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s=::ffff:10.0.0.0/95: err = %v, want one naming %s", name, err, name)
+		}
+	}
+}

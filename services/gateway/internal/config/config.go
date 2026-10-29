@@ -521,20 +521,29 @@ func (l *loader) ports(name string, def []int) []int {
 }
 
 // cidrs reads a comma-separated list of prefixes. A bare address is a
-// single-host prefix.
+// single-host prefix. Client addresses are unmapped before they are matched,
+// so an IPv4-mapped prefix (::ffff:a.b.c.d/n) of /96 or longer becomes the
+// IPv4 prefix /n-96; a shorter one is refused, as it would never match.
 func (l *loader) cidrs(name string) []netip.Prefix {
 	var out []netip.Prefix
 	for _, it := range l.list(name, nil) {
-		if p, err := netip.ParsePrefix(it); err == nil {
-			out = append(out, p.Masked())
-			continue
-		}
-		a, err := netip.ParseAddr(it)
+		p, err := netip.ParsePrefix(it)
 		if err != nil {
-			l.fail(name, fmt.Errorf("invalid CIDR %q", it))
-			return nil
+			a, aerr := netip.ParseAddr(it)
+			if aerr != nil || a.Zone() != "" {
+				l.fail(name, fmt.Errorf("invalid CIDR %q", it))
+				return nil
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
 		}
-		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+		if p.Addr().Is4In6() {
+			if p.Bits() < 96 {
+				l.fail(name, fmt.Errorf("IPv4-mapped CIDR %q is shorter than /96, write it as an IPv4 CIDR", it))
+				return nil
+			}
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+		}
+		out = append(out, p.Masked())
 	}
 	return out
 }
