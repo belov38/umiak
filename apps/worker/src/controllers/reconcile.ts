@@ -787,7 +787,20 @@ async function applyUnexpectedStop(
 	});
 }
 
-/** §11.2: the VM of a `stopped` machine runs (started by hand): S1 shutdown, hard stop on timeout. */
+/** beforeAct of a power-drift action: the machine changed while it waited for the power lock. */
+class MachineChanged extends Error {
+	constructor() {
+		super("machine changed while reconcile waited for the power lock");
+		this.name = "MachineChanged";
+	}
+}
+
+/**
+ * §11.2: the VM of a `stopped` machine runs (started by hand): S1 shutdown,
+ * hard stop on timeout. The machine is re-checked under the node's power
+ * lock (beforeAct) too: the wait for it can be seconds behind a delete, and
+ * a resume that starts meanwhile must not have its VM shut down.
+ */
 async function applyPowerDrift(
 	ctx: WorkerCtx,
 	infra: NodeInfra,
@@ -795,7 +808,12 @@ async function applyPowerDrift(
 	vmid: number,
 ): Promise<boolean> {
 	if (!(await machineUnchanged(ctx.pool, m))) return false;
-	const owned = { expectedOwner: m.id };
+	const owned = {
+		expectedOwner: m.id,
+		beforeAct: async () => {
+			if (!(await machineUnchanged(ctx.pool, m))) throw new MachineChanged();
+		},
+	};
 	let op: "shutdown" | "stop" = "shutdown";
 	try {
 		const res = await infra.shutdown(
@@ -810,6 +828,7 @@ async function applyPowerDrift(
 			await infra.stop(vmid, owned);
 		}
 	} catch (e) {
+		if (e instanceof MachineChanged) return false;
 		if (!isOwnerMismatch(e)) throw e;
 		noteOwnerMismatch(ctx, e, { op, machineId: m.id, vmid });
 		return false;
@@ -903,13 +922,21 @@ async function planLeases(
 	const plans: Plan[] = [];
 	type NodeView = { infra: NodeInfra; vms: InfraVm[]; templates: Set<number> };
 	const nodes = new Map<string, NodeView>();
+	/** Nodes whose listing failed in this run: not asked again per lease. */
+	const unlisted = new Map<string, unknown>();
 	const view = async (nodeId: string): Promise<NodeView> => {
 		let n = nodes.get(nodeId);
 		if (n === undefined) {
-			const infra = await ctx.infra.forNode(nodeId);
-			const vms = await infra.listVms();
-			const ev = await loadEvidence(ctx.pool, provider.id, infra);
-			n = { infra, vms, templates: ev.templates };
+			if (unlisted.has(nodeId)) throw unlisted.get(nodeId);
+			try {
+				const infra = await ctx.infra.forNode(nodeId);
+				const vms = await infra.listVms();
+				const ev = await loadEvidence(ctx.pool, provider.id, infra);
+				n = { infra, vms, templates: ev.templates };
+			} catch (e) {
+				unlisted.set(nodeId, e);
+				throw e;
+			}
 			nodes.set(nodeId, n);
 		}
 		return n;
@@ -923,19 +950,18 @@ async function planLeases(
 				[provider.id],
 			)
 		).rows.map((x) => x.id);
-		let unknown = false;
 		for (const id of providerNodes) {
+			if (unlisted.has(id)) continue;
 			try {
 				if ((await view(id)).vms.some((v) => v.vmid === vmid)) return id;
 			} catch (e) {
-				unknown = true;
 				ctx.log.warn(
 					{ ...errFields(e), nodeId: id, vmid },
-					"reconcile: node listing failed; an ownerless lease waits",
+					"reconcile: node listing failed; ownerless leases wait for the next run",
 				);
 			}
 		}
-		return unknown ? null : (providerNodes[0] ?? null);
+		return unlisted.size > 0 ? null : (providerNodes[0] ?? null);
 	};
 	for (const row of r.rows) {
 		const vmid = row.vmid;

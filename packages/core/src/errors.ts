@@ -90,15 +90,22 @@ export function operationInProgress(op: {
 	);
 }
 
+/** `reason`: why a fixed node refused, e.g. `node_not_active` (placement.ts). */
 export function outOfCapacity(
 	retryAfterSeconds: number,
 	cause?: unknown,
+	reason?: string,
 ): SbxError {
 	return new SbxError(
 		"out_of_capacity",
-		`not enough capacity; retry in ${retryAfterSeconds} s`,
+		reason === undefined
+			? `not enough capacity; retry in ${retryAfterSeconds} s`
+			: `not enough capacity (${reason}); retry in ${retryAfterSeconds} s`,
 		{
-			details: { retryAfterSeconds },
+			details: {
+				retryAfterSeconds,
+				...(reason === undefined ? {} : { reason }),
+			},
 			...(cause === undefined ? {} : { cause }),
 		},
 	);

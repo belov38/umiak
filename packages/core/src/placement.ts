@@ -34,24 +34,31 @@ export interface PlacementCandidate {
  * counts as below the thresholds. RAM is read without node locks: the caller
  * confirms with `admit` on each candidate in order.
  */
+/** Why a fixed node takes no new disks (§8.4), carried as `details.reason` of `out_of_capacity`. */
+export type UnplaceableReason = "node_not_active" | "storage_over_threshold";
+
 /**
  * The fixed node of an admission that makes new disks there (fork, create
- * from a saved snapshot): provider and node `active` and the storage below
- * its thresholds, as `place` requires of a candidate.
+ * from a saved snapshot): provider and node `active` (a draining node takes
+ * no new machines) and the storage below its thresholds, as `place` requires
+ * of a candidate. Null when the node is placeable.
  */
-export async function nodePlaceable(
+export async function nodeUnplaceable(
 	tx: Tx,
 	nodeId: string,
 	storageId: string,
-): Promise<boolean> {
-	const r = await tx.client.query(
-		`SELECT 1 FROM runtime.nodes n
-		 JOIN runtime.providers p ON p.id = n.provider_id AND p.state = 'active'
-		 JOIN runtime.storages st ON st.id = $2
-		 WHERE n.id = $1 AND n.state = 'active' AND ${STORAGE_BELOW_THRESHOLDS_SQL}`,
+): Promise<UnplaceableReason | null> {
+	const r = await tx.client.query<{ active: boolean; below: boolean }>(
+		`SELECT (n.state = 'active' AND p.state = 'active') AS active,
+		   COALESCE((SELECT ${STORAGE_BELOW_THRESHOLDS_SQL} FROM runtime.storages st WHERE st.id = $2), false) AS below
+		 FROM runtime.nodes n
+		 JOIN runtime.providers p ON p.id = n.provider_id
+		 WHERE n.id = $1`,
 		[nodeId, storageId],
 	);
-	return r.rowCount === 1;
+	const row = r.rows[0];
+	if (row === undefined || !row.active) return "node_not_active";
+	return row.below ? null : "storage_over_threshold";
 }
 
 export async function place(

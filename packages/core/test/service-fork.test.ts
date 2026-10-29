@@ -267,7 +267,11 @@ describe.skipIf(skipPg())("SandboxService.fork (S6 §7.7)", () => {
 			 WHERE id = $1`,
 			[env.topo.storageId],
 		);
-		await expectCode(env.svc.fork(env.p, src.sandboxId, {}), "out_of_capacity");
+		const full = await expectCode(
+			env.svc.fork(env.p, src.sandboxId, {}),
+			"out_of_capacity",
+		);
+		expect(full.details).toMatchObject({ reason: "storage_over_threshold" });
 		// Create from a saved snapshot on that storage is refused the same way.
 		await insertSavedSnapshot(t.pool, env.topo, {
 			teamId: env.p.teamId,
@@ -287,5 +291,31 @@ describe.skipIf(skipPg())("SandboxService.fork (S6 §7.7)", () => {
 		);
 		await env.svc.fork(env.p, src.sandboxId, {});
 		expect(await count()).toBe(2);
+	});
+
+	it("a source on a cordoned node or a draining provider cannot be forked: out_of_capacity, reason node_not_active (§8.4)", async () => {
+		for (const sql of [
+			"UPDATE runtime.nodes SET state = 'cordoned' WHERE id = $1",
+			"UPDATE runtime.providers SET state = 'draining' WHERE id = (SELECT provider_id FROM runtime.nodes WHERE id = $1)",
+		]) {
+			const env = await serviceEnv(t.pool);
+			const src = await seedSandbox(t.pool, env, { state: "ready" });
+			await t.pool.query(sql, [env.topo.nodeId]);
+			const err = await expectCode(
+				env.svc.fork(env.p, src.sandboxId, {}),
+				"out_of_capacity",
+			);
+			expect(err.retryable).toBe(true);
+			expect(err.details).toMatchObject({
+				reason: "node_not_active",
+				retryAfterSeconds: 30,
+			});
+			expect(env.jobs.sent).toEqual([]);
+			const n = await t.pool.query<{ n: number }>(
+				"SELECT count(*)::int AS n FROM runtime.sandboxes WHERE team_id = $1",
+				[env.p.teamId],
+			);
+			expect(n.rows[0]?.n).toBe(1);
+		}
 	});
 });

@@ -35,7 +35,7 @@ import type {
 	InfraSnapshotResult,
 	InfraVm,
 	NodeInfra,
-	OwnedVm,
+	PowerOpts,
 	StartOpts,
 	VmStatus,
 } from "../ports.ts";
@@ -258,9 +258,9 @@ export class PveNodeInfra implements NodeInfra {
 	readonly #machines = new Map<number, Machines>();
 	#templates: number[] = [];
 	/**
-	 * In-process power gate (starts and deletes): at most one of them on this
-	 * node waits for (or holds) the advisory lock, so a burst holds one pool
-	 * client.
+	 * In-process power gate (start, stop, shutdown request, delete, S1
+	 * rollback): at most one of them on this node waits for (or holds) the
+	 * advisory lock, so a burst holds one pool client.
 	 */
 	#powerGate: Promise<void> = Promise.resolve();
 
@@ -424,24 +424,46 @@ export class PveNodeInfra implements NodeInfra {
 	 * check. Errors of `beforeAct` pass through unclassified.
 	 */
 	start(vmid: number, o: StartOpts): Promise<void> {
-		let fromCaller: { err: unknown } | undefined;
-		return this.#run("start", () =>
-			this.#powerSerialized(async () => {
-				try {
-					await o.beforeAct();
-				} catch (err) {
-					fromCaller = { err };
-					throw err;
-				}
-				await this.#base.start(vmid, { expectedOwner: o.expectedOwner });
-			}),
-		).catch((err: unknown) => {
-			throw fromCaller ? fromCaller.err : err;
-		});
+		return this.#guarded(o.beforeAct, (g) =>
+			this.#run("start", () =>
+				this.#powerSerialized(async () => {
+					await g.before();
+					await this.#base.start(vmid, { expectedOwner: o.expectedOwner });
+				}),
+			),
+		);
 	}
 
 	/**
-	 * One queue per node for start and delete: the in-process gate first
+	 * Runs `fn` with a `before` that calls the caller's `beforeAct` (if any);
+	 * an error of `beforeAct` reaches the caller unchanged, not classified.
+	 */
+	async #guarded<T>(
+		beforeAct: (() => Promise<unknown>) | undefined,
+		fn: (g: {
+			before: () => Promise<void>;
+			failed: () => boolean;
+		}) => Promise<T>,
+	): Promise<T> {
+		let fromCaller: { err: unknown } | undefined;
+		const before = async (): Promise<void> => {
+			if (beforeAct === undefined) return;
+			try {
+				await beforeAct();
+			} catch (err) {
+				fromCaller = { err };
+				throw err;
+			}
+		};
+		try {
+			return await fn({ before, failed: () => fromCaller !== undefined });
+		} catch (err) {
+			throw fromCaller ? fromCaller.err : err;
+		}
+	}
+
+	/**
+	 * One queue per node for the power operations: the in-process gate first
 	 * (FIFO, settles on success and failure), then the advisory lock.
 	 */
 	#powerSerialized<T>(fn: () => Promise<T>): Promise<T> {
@@ -456,49 +478,61 @@ export class PveNodeInfra implements NodeInfra {
 	}
 
 	/**
-	 * The owner check and the shutdown request run under the power lock, the
-	 * wait for the guest (up to timeoutS) outside it: once Proxmox accepted the
-	 * task it acts on that VM, and holding the lock that long would stall
-	 * every start and delete of the node. Same rule as S1 (checkLeaseOwner).
+	 * The caller's `beforeAct`, the owner check and the shutdown request run
+	 * under the power lock, the wait for the guest (up to timeoutS) outside
+	 * it: once Proxmox accepted the task it acts on that VM, and holding the
+	 * lock that long would stall every start and delete of the node. Same
+	 * rule as S1 (checkLeaseOwner).
 	 */
 	shutdown(
 		vmid: number,
 		timeoutS: number,
-		o: OwnedVm,
+		o: PowerOpts,
 	): Promise<"stopped" | "timeout"> {
-		return this.#run("shutdown", async () => {
-			try {
-				const upid = await this.#powerSerialized(async () => {
-					await checkLeaseOwner({
-						op: "shutdown",
-						vmid,
-						lease: await this.#allocator.get(vmid),
-						expectedOwner: o.expectedOwner,
-						vmExists: async () => true,
+		return this.#guarded(o.beforeAct, (g) =>
+			this.#run("shutdown", async () => {
+				try {
+					const upid = await this.#powerSerialized(async () => {
+						await g.before();
+						await checkLeaseOwner({
+							op: "shutdown",
+							vmid,
+							lease: await this.#allocator.get(vmid),
+							expectedOwner: o.expectedOwner,
+							vmExists: async () => true,
+						});
+						return this.#c.api.post<string>(
+							this.#vmPath(vmid, "/status/shutdown"),
+							{ timeout: timeoutS },
+						);
 					});
-					return this.#c.api.post<string>(
-						this.#vmPath(vmid, "/status/shutdown"),
-						{ timeout: timeoutS },
-					);
-				});
-				await this.#c.api.waitTask(this.#t.nodeName, upid);
-			} catch (err) {
-				if (err instanceof OwnerMismatchError) throw err;
-				// The shutdown task fails when the guest ignores ACPI within the timeout.
-				const s = await this.#statusOf(vmid).catch(() => undefined);
-				if (s === "stopped") return "stopped";
-				if (s === "running" || s === "paused") return "timeout";
-				throw err;
-			}
-			return (await this.#statusOf(vmid)) === "stopped" ? "stopped" : "timeout";
-		});
+					await this.#c.api.waitTask(this.#t.nodeName, upid);
+				} catch (err) {
+					if (err instanceof OwnerMismatchError || g.failed()) throw err;
+					// The shutdown task fails when the guest ignores ACPI within the timeout.
+					const s = await this.#statusOf(vmid).catch(() => undefined);
+					if (s === "stopped") return "stopped";
+					if (s === "running" || s === "paused") return "timeout";
+					throw err;
+				}
+				return (await this.#statusOf(vmid)) === "stopped"
+					? "stopped"
+					: "timeout";
+			}),
+		);
 	}
 
-	/** Under the power lock: the owner check and the stop are one step for other power operations. */
-	stop(vmid: number, o: OwnedVm): Promise<void> {
-		return this.#run("stop", () =>
-			this.#powerSerialized(() =>
-				this.#base.stop(vmid, { expectedOwner: o.expectedOwner }),
+	/**
+	 * Under the power lock: the caller's `beforeAct`, the owner check and the
+	 * stop are one step for other power operations.
+	 */
+	stop(vmid: number, o: PowerOpts): Promise<void> {
+		return this.#guarded(o.beforeAct, (g) =>
+			this.#run("stop", () =>
+				this.#powerSerialized(async () => {
+					await g.before();
+					await this.#base.stop(vmid, { expectedOwner: o.expectedOwner });
+				}),
 			),
 		);
 	}

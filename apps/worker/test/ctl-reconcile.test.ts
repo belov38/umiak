@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { PgBoss } from "pg-boss";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CONTROLLERS } from "../src/controllers/index.ts";
 import {
 	type ReconcileAction,
@@ -401,6 +401,36 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(l.rows).toEqual([]);
 	});
 
+	it("a node whose listing failed is not asked again for every ownerless lease in the run", async () => {
+		const w = await createWorld(db);
+		const nodeB = `ffffffff-ffff-4fff-8fff-${randomUUID().slice(-12)}`;
+		await w.pool.query(
+			`INSERT INTO runtime.nodes (id, provider_id, name, ram_cap_mb, clone_concurrency, node_agent_ref)
+			 VALUES ($1, $2, $3, 8192, 4, 'sbx-node')`,
+			[nodeB, w.topo.providerId, `node-b-${nodeB.slice(-6)}`],
+		);
+		const infraB = new FakeInfra({
+			pool: w.pool,
+			providerId: w.topo.providerId,
+			clusterMacId: w.topo.clusterMacId,
+		});
+		let listings = 0;
+		infraB.listVms = async () => {
+			listings++;
+			throw new Error("node B unreachable");
+		};
+		w.registry.set(nodeB, infraB);
+		for (const vmid of [561, 562, 563]) {
+			await insertLease(w, vmid, "releasing", null, 700);
+		}
+
+		// Node B is unknown: the leases wait, none goes to the first node.
+		expect(await reconcile(w)).toEqual([]);
+		expect(w.infra.callsOf("delete")).toEqual([]);
+		// One listing for B's node part, one for the leases part.
+		expect(listings).toBe(2);
+	});
+
 	it("lease_release passes the lease's owner: a VMID whose lease changed owner is not deleted", async () => {
 		const w = await createWorld(db);
 		const m = await insertMachine(w, { state: "deleted" });
@@ -514,6 +544,36 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 			},
 		});
 		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["power_drift", `machine:${r.machineId}`]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.callsOf("stop").length).toBe(stops);
+		expect(vm.status).toBe("running");
+	});
+
+	it("power_drift: a resume that begins while reconcile waits for the power lock gets no shutdown or stop", async () => {
+		const w = await createWorld(db);
+		const r = await stoppedSandbox(w, opsEnv(w));
+		const vmid = (await row(w, "machines", r.machineId)).vmid as number;
+		const vm = w.infra.vms.get(vmid);
+		if (!vm) throw new Error("no VM");
+		vm.status = "running";
+		const shutdowns = w.infra.callsOf("shutdown").length;
+		const stops = w.infra.callsOf("stop").length;
+		// A delete of another machine holds the node's power lock.
+		const release = w.infra.holdPower();
+		const pending = reconcile(w);
+		await vi.waitFor(() =>
+			expect(w.infra.callsOf("shutdown").length).toBe(shutdowns + 1),
+		);
+		// A resume takes the machine while reconcile waits.
+		await setRow(
+			w,
+			"machines",
+			r.machineId,
+			"state = 'starting', version = version + 1",
+		);
+		release();
+		const actions = await pending;
 		expect(kinds(actions)).toEqual([["power_drift", `machine:${r.machineId}`]]);
 		expect(actions[0]?.applied).toBe(false);
 		expect(w.infra.callsOf("stop").length).toBe(stops);

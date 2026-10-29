@@ -542,6 +542,42 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(e.api.vms.get(vmid)?.status).toBe("stopped");
 	});
 
+	it("stop and shutdown run the caller's beforeAct under the power lock; its error cancels them unchanged", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		e.api.calls.length = 0;
+		const changed = new Error("machine changed");
+		const abort = {
+			expectedOwner: m,
+			beforeAct: async () => {
+				throw changed;
+			},
+		};
+		expect(
+			await e.infra.shutdown(vmid, 5, abort).catch((x: unknown) => x),
+		).toBe(changed);
+		expect(await e.infra.stop(vmid, abort).catch((x: unknown) => x)).toBe(
+			changed,
+		);
+		expect(e.api.calls.filter((c) => c.method !== "GET")).toEqual([]);
+		expect(e.api.vms.get(vmid)?.status).toBe("running");
+		let ran = 0;
+		await e.infra.stop(vmid, {
+			expectedOwner: m,
+			beforeAct: async () => {
+				ran++;
+			},
+		});
+		expect(ran).toBe(1);
+		expect(e.api.vms.get(vmid)?.status).toBe("stopped");
+	});
+
 	it("create again for the same machine reuses its lease and never rolls it back", async () => {
 		const m = randomUUID();
 		const first = await e.infra.create({

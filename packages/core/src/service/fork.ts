@@ -11,7 +11,7 @@ import {
 } from "../errors.ts";
 import { claimIdempotencyKey } from "../idempotency.ts";
 import { uuidv7 } from "../ids.ts";
-import { nodePlaceable } from "../placement.ts";
+import { nodeUnplaceable } from "../placement.ts";
 import { idempotencyPrincipal, type Principal } from "../principal.ts";
 import type { Operation, Sandbox } from "../rows.ts";
 import {
@@ -225,9 +225,19 @@ export async function forkSandbox(
 			addRamMb: size.memoryMb,
 		});
 		// As create (§8.4): the fork's new disks go to the source's storage,
-		// which must be below its thresholds on an active node.
-		if (!(await nodePlaceable(tx, src.node_id, srcMachine.storageId))) {
-			throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS);
+		// which must be below its thresholds on an active node (a draining
+		// node takes no new machines, forks included).
+		const unplaceable = await nodeUnplaceable(
+			tx,
+			src.node_id,
+			srcMachine.storageId,
+		);
+		if (unplaceable !== null) {
+			throw outOfCapacity(
+				OUT_OF_CAPACITY_RETRY_SECONDS,
+				undefined,
+				unplaceable,
+			);
 		}
 		await admitOnNode(
 			tx,

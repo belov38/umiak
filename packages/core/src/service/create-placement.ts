@@ -2,7 +2,7 @@ import type { Tx } from "@sbx/db";
 import { admit } from "../capacity.ts";
 import { outOfCapacity, snapshotNotFound } from "../errors.ts";
 import { uuidv7 } from "../ids.ts";
-import { nodePlaceable, place } from "../placement.ts";
+import { nodeUnplaceable, place } from "../placement.ts";
 import type { SandboxServiceDeps } from "./common.ts";
 
 // Admission paths of create (S6 §7.3, §8.2, §9.5): warm claim, cold on a
@@ -149,15 +149,16 @@ export async function admitOnSnapshotNode(
 	pairKey: string,
 	needMb: number,
 ): Promise<Placement> {
-	const res = (await nodePlaceable(tx, snap.nodeId, snap.storageId))
-		? await admit(tx, {
-				nodeId: snap.nodeId,
-				needMb,
-				pairKey,
-				evict: true,
-				jobs: deps.jobs,
-			})
-		: { ok: false as const };
+	const unplaceable = await nodeUnplaceable(tx, snap.nodeId, snap.storageId);
+	if (unplaceable !== null)
+		throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS, undefined, unplaceable);
+	const res = await admit(tx, {
+		nodeId: snap.nodeId,
+		needMb,
+		pairKey,
+		evict: true,
+		jobs: deps.jobs,
+	});
 	if (!res.ok) throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS);
 	return {
 		fromPool: false,

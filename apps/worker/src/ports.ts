@@ -75,12 +75,20 @@ export interface OwnedVm {
 	expectedOwner: string;
 }
 
-export interface StartOpts extends OwnedVm {
+export interface PowerOpts extends OwnedVm {
 	/**
 	 * Runs under the power lock after the wait for it and before the owner
-	 * check and S1 start (the executor's fence check, M3): a throw cancels
-	 * the start and passes through unchanged. Required, so no start path can
-	 * drop the re-check.
+	 * check and the Proxmox call: a throw cancels the operation and passes
+	 * through unchanged. Reconcile re-checks here that the machine did not
+	 * change while it waited.
+	 */
+	beforeAct?: () => Promise<unknown>;
+}
+
+export interface StartOpts extends PowerOpts {
+	/**
+	 * As PowerOpts.beforeAct, here the executor's fence check (M3). Required,
+	 * so no start path can drop the re-check.
 	 */
 	beforeAct: () => Promise<unknown>;
 }
@@ -112,9 +120,9 @@ export interface NodeInfra {
 	shutdown(
 		vmid: number,
 		timeoutS: number,
-		o: OwnedVm,
+		o: PowerOpts,
 	): Promise<"stopped" | "timeout">;
-	stop(vmid: number, o: OwnedVm): Promise<void>;
+	stop(vmid: number, o: PowerOpts): Promise<void>;
 	status(vmid: number): Promise<VmStatus>;
 	configure(vmid: number, size: InfraSize): Promise<void>;
 	/** Cores and memory in the VM config (resume compares them with the machine row). */

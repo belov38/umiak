@@ -24,7 +24,7 @@ import type {
 	InfraSnapshotResult,
 	InfraVm,
 	NodeInfra,
-	OwnedVm,
+	PowerOpts,
 	StartOpts,
 	VmStatus,
 } from "../../src/ports.ts";
@@ -263,19 +263,21 @@ export class FakeInfra implements NodeInfra {
 	shutdown(
 		vmid: number,
 		_timeoutS: number,
-		o: OwnedVm,
+		o: PowerOpts,
 	): Promise<"stopped" | "timeout"> {
 		this.#call("shutdown", vmid);
 		return this.#powerSerialized(async () => {
+			await o.beforeAct?.();
 			await this.#ownerCheck("shutdown", vmid, o.expectedOwner);
 			await this.#powerOff(this.#vm(vmid));
 			return "stopped" as const;
 		});
 	}
 
-	stop(vmid: number, o: OwnedVm): Promise<void> {
+	stop(vmid: number, o: PowerOpts): Promise<void> {
 		this.#call("stop", vmid);
 		return this.#powerSerialized(async () => {
+			await o.beforeAct?.();
 			await this.#ownerCheck("stop", vmid, o.expectedOwner);
 			await this.#powerOff(this.#vm(vmid));
 		});
@@ -344,7 +346,8 @@ export class FakeInfra implements NodeInfra {
 		for (const name of [...this.lvs.keys()]) {
 			if (name.startsWith(`vm-${vmid}-`)) this.lvs.delete(name);
 		}
-		await this.allocator.release(vmid);
+		// As S1: only this delete's releasing row (owner, or null for the reservation).
+		await this.allocator.releaseOwned(vmid, lease?.ownerId ?? null);
 	}
 
 	async leaseOf(
