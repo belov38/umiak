@@ -152,32 +152,34 @@ function isIdentity(encoding: string | null): boolean {
 }
 
 /**
- * Rejects a path whose segment is, or decodes (repeatedly) to, "." or "..",
- * or decodes to one holding "/" or "\": like the gateway's /files check, so
- * a path cannot reach another machine's route or another endpoint. The query
- * is not checked.
+ * A percent-encoded "%" followed, after any further "%25" layers, by an
+ * encoded ".", "/" or "\" (%252e, %252f, %255c, %25252e, ...).
+ */
+const multiEncodedSeparator = /%25(?:25)*(?:2e|2f|5c)/i;
+
+/**
+ * Rejects a path whose segment decodes (once, as the gateway and the agent
+ * do) to "." or ".." or to one holding "/" or "\", or holds a multiply
+ * encoded ".", "/" or "\": like the gateway's /files check, so a path
+ * cannot reach another machine's route or another endpoint. A literal "%"
+ * (%25) is allowed otherwise. The query is not checked.
  */
 function checkPathSegments(path: string): void {
 	const q = path.indexOf("?");
 	const p = q >= 0 ? path.slice(0, q) : path;
 	for (const raw of p.split("/")) {
-		let seg = raw;
-		for (let i = 0; ; i++) {
-			let next: string;
-			try {
-				next = decodeURIComponent(seg);
-			} catch {
-				throw new TypeError(`agent fetch path is malformed: ${path}`);
-			}
-			if (next === seg) {
-				break;
-			}
-			if (i >= 8) {
-				throw new TypeError(`agent fetch path is malformed: ${path}`);
-			}
-			seg = next;
+		let seg: string;
+		try {
+			seg = decodeURIComponent(raw);
+		} catch {
+			throw new TypeError(`agent fetch path is malformed: ${path}`);
 		}
-		if (seg === "." || seg === ".." || /[/\\]/.test(seg)) {
+		if (
+			seg === "." ||
+			seg === ".." ||
+			/[/\\]/.test(seg) ||
+			multiEncodedSeparator.test(raw)
+		) {
 			throw new TypeError(
 				`agent fetch path must not hold ".", ".." or separators in a segment: ${path}`,
 			);

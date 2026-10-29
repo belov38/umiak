@@ -359,6 +359,12 @@ describe("AgentClient.fetch", () => {
 			"/%2e%2e/x",
 			"/%2E%2e/x",
 			"/%252e%252e/x",
+			"/%252E%252E/x",
+			"/a%252fb",
+			"/a%252Fb",
+			"/a%255cb",
+			"/a%255Cb",
+			"/%25252e%25252e/x",
 			"/./x",
 			"/a%2fb",
 			"/a%2Fb",
@@ -376,7 +382,16 @@ describe("AgentClient.fetch", () => {
 			});
 		}
 
-		for (const path of ["/.bashrc", "/a..b", "/x/...", "?path=/x/../y"]) {
+		for (const path of [
+			"/.bashrc",
+			"/a..b",
+			"/x/...",
+			"?path=/x/../y",
+			"/50%25off.txt",
+			"/a%25b",
+			"/100%25",
+			"/%25%25",
+		]) {
 			it(`allows ${JSON.stringify(path)}`, async () => {
 				registry.set(route(m, a.url));
 				const res = await agent().fetch(m, path);
