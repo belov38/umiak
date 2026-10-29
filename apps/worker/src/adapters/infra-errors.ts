@@ -88,9 +88,16 @@ function messageOf(err: unknown): string {
 
 const TRANSIENT_4XX_RE = /can't lock|lock file|locked|timeout|timed out/i;
 
+/**
+ * A pool-scoped token gets this 403 for a VM that no longer exists (or was
+ * just deleted): a retry re-checks existence instead of failing for good.
+ */
+const VM_PERMISSION_RE = /Permission check failed \(\/vms\/\d+/;
+
 function pveApiRetryable(err: PveApiError): boolean {
 	if (err.status < 400 || err.status >= 500) return true;
 	if (err.status === 404 || err.status === 409) return true;
+	if (err.status === 403 && VM_PERMISSION_RE.test(err.message)) return true;
 	return TRANSIENT_4XX_RE.test(err.message);
 }
 
@@ -99,7 +106,8 @@ function pveApiRetryable(err: PveApiError): boolean {
  *
  * Permanent (`retryable: false`): quiesce failures of a snapshot (QGA does not
  * answer, freeze budget exceeded, thaw failed) as `QuiesceFailed`, and PVE API
- * 4xx answers other than 404, 409 and lock or timeout messages. Port errors
+ * 4xx answers other than 404, 409, lock or timeout messages and the 403
+ * "Permission check failed (/vms/<id>, ...)" of a VM that is gone. Port errors
  * with their own `retryable` flag (AgentUnavailable, AgentRejected from the
  * hook) pass through. Everything else is transient, including
  * TracesRemainError (the verified delete is repeated).

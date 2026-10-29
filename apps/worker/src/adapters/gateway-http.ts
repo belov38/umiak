@@ -53,7 +53,8 @@ export class HttpGatewayPort implements GatewayPort {
 			 FROM tunnel.tunnel_sessions s
 			 JOIN tunnel.gateway_instances g ON g.id = s.instance_id
 			 WHERE s.machine_id = $1 AND s.state = 'connected'
-			   AND g.heartbeat_at > now() - make_interval(secs => $2)`,
+			   AND g.heartbeat_at > now() - make_interval(secs => $2)
+			 ORDER BY s.epoch DESC LIMIT 1`,
 			[machineId, this.#staleAfterS],
 		);
 		return r.rows[0]?.internal_url;

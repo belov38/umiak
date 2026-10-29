@@ -127,6 +127,16 @@ describe("classifyInfraError", () => {
 		expect(t(400)).toBe(false);
 		expect(t(401)).toBe(false);
 		expect(t(403, "Permission check failed")).toBe(false);
+		// A pool-scoped token's answer for a VM that is gone: re-check on retry.
+		expect(
+			t(
+				403,
+				"GET /nodes/pve/qemu/512/config: Permission check failed (/vms/512, VM.Audit)",
+			),
+		).toBe(true);
+		expect(t(403, "Permission check failed (/pool/sandbox, VM.Allocate)")).toBe(
+			false,
+		);
 		expect(t(500, "VM 512 is running - destroy failed")).toBe(true);
 		expect(t(503)).toBe(true);
 	});

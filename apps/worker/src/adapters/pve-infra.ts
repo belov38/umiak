@@ -37,6 +37,7 @@ import type {
 } from "../ports.ts";
 import {
 	classifyInfraError,
+	InfraError,
 	type InfraOp,
 	infraRejected,
 } from "./infra-errors.ts";
@@ -252,6 +253,11 @@ export class PveNodeInfra implements NodeInfra {
 	readonly #allocator: Allocator;
 	readonly #machines = new Map<number, Machines>();
 	#templates: number[] = [];
+	/**
+	 * In-process start gate: at most one start of this node waits for (or
+	 * holds) the advisory lock, so a burst of starts holds one pool client.
+	 */
+	#startGate: Promise<void> = Promise.resolve();
 
 	constructor(
 		db: pg.Pool,
@@ -405,8 +411,22 @@ export class PveNodeInfra implements NodeInfra {
 	/** Serialized per node (start-lock.ts): Proxmox ethers/IPAM writes race. */
 	start(vmid: number): Promise<void> {
 		return this.#run("start", () =>
-			withNodeStartLock(this.#db, this.#t.nodeId, () => this.#base.start(vmid)),
+			this.#gated(() =>
+				withNodeStartLock(this.#db, this.#t.nodeId, () =>
+					this.#base.start(vmid),
+				),
+			),
 		);
+	}
+
+	/** Runs fn after every earlier start of this instance has settled (FIFO). */
+	#gated<T>(fn: () => Promise<T>): Promise<T> {
+		const run = this.#startGate.then(fn);
+		this.#startGate = run.then(
+			() => {},
+			() => {},
+		);
+		return run;
 	}
 
 	shutdown(vmid: number, timeoutS: number): Promise<"stopped" | "timeout"> {
@@ -428,17 +448,40 @@ export class PveNodeInfra implements NodeInfra {
 		return this.#run("stop", () => this.#base.stop(vmid));
 	}
 
+	/**
+	 * Whether /cluster/resources lists the VM. The list is filtered by the
+	 * token's permissions, so an empty answer may mean a lost pool ACL rather
+	 * than no VMs: absence counts only when the list also shows an anchor, an
+	 * active template of this node or another VM with an active lease.
+	 */
 	async #listed(vmid: number): Promise<boolean> {
 		const rs = await this.#c.api.get<Resource[]>("/cluster/resources", {
 			type: "vm",
 		});
-		return rs.some((r) => r.vmid === vmid);
+		if (rs.some((r) => r.vmid === vmid)) return true;
+		const listed = new Set(rs.map((r) => r.vmid));
+		let anchored = this.#templates.some((t) => listed.has(t));
+		if (!anchored && listed.size > 0) {
+			const l = await this.#db.query<{ vmid: number }>(
+				`SELECT vmid FROM runtime.vmid_leases
+				 WHERE provider_id = $1 AND state = 'active' AND vmid <> $2`,
+				[this.#t.providerId, vmid],
+			);
+			anchored = l.rows.some((x) => listed.has(x.vmid));
+		}
+		if (!anchored)
+			throw new InfraError(
+				"pve_listing_unverified",
+				`VM ${vmid} is not listed, but /cluster/resources shows none of our known VMs either (token permissions?)`,
+				{ retryable: true, op: "status" },
+			);
+		return false;
 	}
 
 	/**
 	 * status/current, with `missing` only when /cluster/resources (right about
-	 * existence, S1) does not list the VM. A token scoped to the pool gets 403,
-	 * not 404, for a VM that does not exist.
+	 * existence, S1) does not list the VM and the listing is anchored. A token
+	 * scoped to the pool gets 403, not 404, for a VM that does not exist.
 	 */
 	async #statusOf(vmid: number): Promise<VmStatus> {
 		let st: { status?: string; qmpstatus?: string };

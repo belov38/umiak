@@ -80,6 +80,12 @@ async function setup(): Promise<Env> {
 	const topo = await createTopology(db.pool);
 	const name = await nodeName(topo.nodeId);
 	const api = new FakePve([], { node: name });
+	// The template is visible in the pool: the anchor of "missing" detection.
+	api.vms.set(599, {
+		config: { ...TEMPLATE_CONFIG },
+		status: "stopped",
+		firewall: { rules: [], ipsets: {} },
+	});
 	const node = new FakeNode();
 	const env = { topo, name, api, node, factoryCalls: 0 } as Env;
 	env.registry = new PveInfraRegistry(db.pool, {
@@ -329,6 +335,35 @@ describe("PveNodeInfra lifecycle", () => {
 		e.api.fail[`GET /nodes/${e.name}/qemu/${vmid}/status/current`] =
 			new PveApiError(403, "Permission check failed");
 		await expect(e.infra.status(vmid)).rejects.toThrow(/Permission/);
+	});
+
+	it("status: an unanchored listing (lost pool ACL) is a transient error, not missing", async () => {
+		e.api.vms.delete(599);
+		const err = await e.infra.status(555).catch((x: unknown) => x);
+		expect((err as { code?: string }).code).toBe("pve_listing_unverified");
+		expect(isRetryable(err)).toBe(true);
+	});
+
+	it("status: another leased VM in the listing is an anchor too", async () => {
+		e.api.vms.delete(599);
+		const m = randomUUID();
+		await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		expect(await e.infra.status(555)).toBe("missing");
+	});
+
+	it("status: a failing /cluster/resources rethrows", async () => {
+		e.api.fail["GET /cluster/resources"] = new PveApiError(
+			500,
+			"GET /cluster/resources: proxy loop",
+		);
+		const err = await e.infra.status(555).catch((x: unknown) => x);
+		expect(String(err)).toMatch(/proxy loop/);
+		expect(isRetryable(err)).toBe(true);
 	});
 
 	it("delete refuses a template and tolerates a missing VM", async () => {
