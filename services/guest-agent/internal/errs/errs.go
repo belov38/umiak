@@ -59,6 +59,17 @@ const (
 	// Unimplemented: the agent build does not wire the feature (for
 	// example quiesce or update before they are installed).
 	Unimplemented = "unimplemented"
+	// LeaseExpired (aborted): a Quiesce reached its own lease deadline, or
+	// the watchdog unit thawed the lease, before all steps were done; the
+	// lease was rolled back.
+	LeaseExpired = "lease_expired"
+	// QuiesceTimeout (deadline_exceeded, retryable): the freeze steps of a
+	// Quiesce took longer than the 5 s budget; the lease was rolled back.
+	QuiesceTimeout = "quiesce_timeout"
+	// StoreBusy (unavailable, retryable): the state store did not stop
+	// writing in time for a freeze, probably because a commit hangs on a
+	// filesystem frozen by someone else.
+	StoreBusy = "store_busy"
 
 	// PermissionDenied and Internal have no entry in the spec list; they keep
 	// the JSON body of /files uniform.

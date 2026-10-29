@@ -16,6 +16,8 @@ var freezableFS = map[string]bool{"ext4": true, "xfs": true, "btrfs": true}
 // mountEntry is one line of /proc/self/mountinfo.
 type mountEntry struct {
 	Path, Source, FSType string
+	// Dev is the major:minor field.
+	Dev string
 	// RO is set when the mount or the superblock is read-only.
 	RO bool
 }
@@ -41,6 +43,7 @@ func parseMountInfo(r io.Reader) ([]mountEntry, error) {
 			return nil, fmt.Errorf("quiesce: mountinfo line %d: malformed", n)
 		}
 		e := mountEntry{
+			Dev:    fields[2],
 			Path:   unescapeMount(fields[4]),
 			FSType: fields[sep+1],
 			Source: unescapeMount(fields[sep+2]),
@@ -86,8 +89,10 @@ func unescapeMount(s string) string {
 // read-only, with a /dev/ source; one per source, since bind mounts and
 // btrfs subvolumes share a superblock and a second FIFREEZE would fail with
 // EBUSY. The shallowest mount point of a source names it. devOf maps a
-// source to its device number; sources it cannot resolve are grouped by
-// name. The result is in freeze order: deepest first.
+// source to its device number; a source it cannot resolve is grouped by
+// the mountinfo major:minor, except on btrfs, where every subvolume has its
+// own anonymous major:minor and the source name groups them. The result is
+// in freeze order: deepest first.
 func selectMounts(entries []mountEntry, devOf func(source string) (uint64, bool)) []Mount {
 	// The last entry at a path hides the earlier ones.
 	visible := make(map[string]int, len(entries))
@@ -99,7 +104,10 @@ func selectMounts(entries []mountEntry, devOf func(source string) (uint64, bool)
 		if visible[e.Path] != i || e.RO || !freezableFS[e.FSType] || !strings.HasPrefix(e.Source, "/dev/") {
 			continue
 		}
-		key := "src:" + e.Source
+		key := "mm:" + e.Dev
+		if e.FSType == "btrfs" {
+			key = "src:" + e.Source
+		}
 		if devOf != nil {
 			if dev, ok := devOf(e.Source); ok {
 				key = "dev:" + strconv.FormatUint(dev, 10)

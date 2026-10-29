@@ -79,6 +79,11 @@ func (m *Manager) startProbe() (<-chan struct{}, uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.probeDone != nil {
+		if m.cur == nil && m.probeGen != m.gen {
+			// The agent's own leases since the probe began have ended: a
+			// write still hanging now is not blocked by them.
+			m.probeGen = m.gen
+		}
 		return m.probeDone, m.probeGen
 	}
 	done := make(chan struct{})

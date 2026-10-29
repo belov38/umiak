@@ -3,7 +3,6 @@ package quiesce
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 
 func TestWatchdog(t *testing.T) {
 	newSteps := func(e *env) steps {
-		return steps{freezer: e.fz, docker: e.dk, runHook: e.m.steps.runHook, log: slog.Default()}
+		return steps{freezer: e.fz, docker: e.dk, runHook: e.m.steps.runHook, log: testLog}
 	}
 	t.Run("expired lease", func(t *testing.T) {
 		e := newEnv(t, nil)
@@ -39,24 +38,24 @@ func TestWatchdog(t *testing.T) {
 			}
 		}
 		mk, ok := readMarker(e.l.QuiesceThawedDir, "w-1", time.Now())
-		if !ok || mk.By != ByWatchdog || mk.Reported {
-			t.Errorf("marker = %+v, %v; want unreported watchdog marker", mk, ok)
+		if !ok || mk.By != ByWatchdog || mk.Reported || len(mk.Hooks) != 1 || mk.Hooks[0] != "/hooks/10-a" {
+			t.Errorf("marker = %+v, %v; want unreported watchdog marker with the thawed hook", mk, ok)
 		}
-		if fileExists(e.l.QuiesceFile) {
-			t.Error("lease file left")
+		if fileExists(e.l.QuiesceFile) || fileExists(claimPath(e.l)) {
+			t.Error("lease file or claim left")
 		}
 	})
 	t.Run("waits for the deadline", func(t *testing.T) {
 		e := newEnv(t, nil)
-		if err := writeLease(e.l.QuiesceFile, &Lease{ID: "w-2", Deadline: time.Now().Add(-watchdogGrace + 50*time.Millisecond)}); err != nil {
+		deadline := time.Now().Add(-watchdogGrace + 50*time.Millisecond)
+		if err := writeLease(e.l.QuiesceFile, &Lease{ID: "w-2", Deadline: deadline}); err != nil {
 			t.Fatal(err)
 		}
-		start := time.Now()
 		if code := runWatchdog(context.Background(), e.l, "w-2", newSteps(e), time.Now); code != 0 {
 			t.Fatalf("exit %d", code)
 		}
-		if d := time.Since(start); d < 40*time.Millisecond {
-			t.Errorf("returned after %v, before the deadline", d)
+		if wake := deadline.Add(watchdogGrace); time.Now().Before(wake) {
+			t.Errorf("returned before deadline + grace (%v)", wake)
 		}
 		if _, ok := readMarker(e.l.QuiesceThawedDir, "w-2", time.Now()); !ok {
 			t.Error("no marker")

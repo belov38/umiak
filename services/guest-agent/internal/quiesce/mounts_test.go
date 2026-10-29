@@ -38,10 +38,10 @@ func TestParseMountInfo(t *testing.T) {
 		i    int
 		want mountEntry
 	}{
-		{0, mountEntry{Path: "/", Source: "/dev/sda1", FSType: "ext4"}},
-		{4, mountEntry{Path: "/data/ro dir", Source: "/dev/sdb1", FSType: "xfs", RO: true}},
-		{9, mountEntry{Path: "/mnt/space dir", Source: "/dev/sdd1", FSType: "ext4"}},
-		{13, mountEntry{Path: "/srv/x", Source: "/dev/sdf1", FSType: "ext4", RO: true}},
+		{0, mountEntry{Path: "/", Source: "/dev/sda1", FSType: "ext4", Dev: "8:1"}},
+		{4, mountEntry{Path: "/data/ro dir", Source: "/dev/sdb1", FSType: "xfs", Dev: "8:17", RO: true}},
+		{9, mountEntry{Path: "/mnt/space dir", Source: "/dev/sdd1", FSType: "ext4", Dev: "8:49"}},
+		{13, mountEntry{Path: "/srv/x", Source: "/dev/sdf1", FSType: "ext4", Dev: "8:81", RO: true}},
 	}
 	for _, tt := range tests {
 		if got := entries[tt.i]; got != tt.want {
@@ -75,11 +75,11 @@ func TestSelectMounts(t *testing.T) {
 	if got := selectMounts(entries, devOf); !reflect.DeepEqual(got, want) {
 		t.Errorf("selectMounts:\n got %+v\nwant %+v", got, want)
 	}
-	// Without device numbers the sources group by name: the by-uuid alias
-	// becomes a mount of its own.
-	got := selectMounts(entries, nil)
-	if len(got) != 5 || got[0].Path != "/mnt/space dir" || got[1].Path != "/var/b" {
-		t.Errorf("selectMounts by name = %+v", got)
+	// Without device numbers the mountinfo major:minor groups the by-uuid
+	// alias with /, and the btrfs subvolumes (anonymous 0:33 and 0:34)
+	// group by source.
+	if got := selectMounts(entries, nil); !reflect.DeepEqual(got, want) {
+		t.Errorf("selectMounts without devOf:\n got %+v\nwant %+v", got, want)
 	}
 }
 

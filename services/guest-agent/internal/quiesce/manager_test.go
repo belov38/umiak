@@ -339,11 +339,13 @@ func TestWatchdogMarkerAdopted(t *testing.T) {
 	t.Run("poll", func(t *testing.T) {
 		e := newEnv(t, nil)
 		e.m.markerEvery = 10 * time.Millisecond
+		hook := e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
 		if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
 			t.Fatal(err)
 		}
+		// The unit ran the hook's thaw; the agent must not run it again.
 		at := time.Now().Add(-time.Second).UTC()
-		if err := writeMarker(e.l.QuiesceThawedDir, marker{LeaseID: "lease-1", At: at, By: ByWatchdog}); err != nil {
+		if err := writeMarker(e.l.QuiesceThawedDir, marker{LeaseID: "lease-1", At: at, By: ByWatchdog, Hooks: []string{hook}}); err != nil {
 			t.Fatal(err)
 		}
 		waitFor(t, "adoption", func() bool {
@@ -360,8 +362,13 @@ func TestWatchdogMarkerAdopted(t *testing.T) {
 		if mk, ok := readMarker(e.l.QuiesceThawedDir, "lease-1", time.Now()); !ok || !mk.Reported {
 			t.Errorf("marker = %+v, %v; want reported", mk, ok)
 		}
-		if e.log.count("thaw") != 0 {
-			t.Errorf("the agent thawed again: %q", e.log.all())
+		// FITHAW and unpause are repeated from the in-memory lease (the
+		// fake unit above thawed nothing), the hook thaw is not.
+		if e.fz.isFrozen("/") || e.fz.isFrozen("/data") || len(e.dk.pausedIDs()) != 0 {
+			t.Errorf("left frozen or paused: %q", e.log.all())
+		}
+		if e.log.count("hook 10-a thaw") != 0 {
+			t.Errorf("the agent ran the hook thaw again: %q", e.log.all())
 		}
 	})
 	t.Run("thaw first", func(t *testing.T) {

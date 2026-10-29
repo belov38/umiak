@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 )
 
 // MarkerTTL is how long an auto-thaw marker answers Thaw (decision 3).
@@ -45,6 +47,18 @@ type marker struct {
 	// Reported is set once the agent emitted quiesce.auto_thawed for it.
 	// The watchdog unit writes markers unreported.
 	Reported bool `json:"reported"`
+	// Hooks lists the hooks the watchdog unit ran with thaw.
+	Hooks []string `json:"hooks,omitempty"`
+}
+
+// claimSuffix names the lease file once the watchdog unit claimed it: the
+// unit renames the lease file before it thaws, so the agent can tell that a
+// thaw by the unit is in progress.
+const claimSuffix = ".watchdog"
+
+// claimPath returns the lease file as claimed by the watchdog unit.
+func claimPath(l paths.Layout) string {
+	return l.QuiesceFile + claimSuffix
 }
 
 // validLeaseID accepts the ids that form a unit name and a file name:

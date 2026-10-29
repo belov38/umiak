@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +21,9 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
 )
+
+// testLog discards the logs of the code under test.
+var testLog = slog.New(slog.DiscardHandler)
 
 // recLog records the actions of the fakes in order.
 type recLog struct {
@@ -261,6 +265,7 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 		Supervisor: e.sv,
 		Emit:       e.rec,
 		Self:       "/usr/local/bin/sbx-agent",
+		Log:        testLog,
 	}
 	if mod != nil {
 		mod(&opts)

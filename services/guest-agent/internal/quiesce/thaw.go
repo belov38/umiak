@@ -157,10 +157,12 @@ func ForceThaw(l paths.Layout, f Freezer, d DockerAPI) error {
 	log := slog.Default()
 	s := steps{freezer: f, docker: d, runHook: execHook, log: log}
 	var extra []string
-	if lease, err := readLease(l.QuiesceFile); err != nil {
-		log.Warn("quiesce: unreadable lease file", "err", err)
-	} else if lease != nil {
-		extra = lease.Frozen
+	for _, p := range []string{l.QuiesceFile, claimPath(l)} {
+		if lease, err := readLease(p); err != nil {
+			log.Warn("quiesce: unreadable lease file", "err", err)
+		} else if lease != nil {
+			extra = append(extra, lease.Frozen...)
+		}
 	}
 	thawed, ferr := s.thawAllMounts(extra)
 	for _, p := range thawed {

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -50,13 +51,20 @@ const (
 const (
 	// markerPoll is how often an active lease looks for a watchdog marker.
 	markerPoll = time.Second
+	// freezeBudget caps the freeze steps of Quiesce (docker, hooks, sync,
+	// store, FIFREEZE): S1 allows 5 s for Quiesce. A shorter lease caps
+	// them at its deadline instead.
+	freezeBudget = 5 * time.Second
 	// syncTimeout bounds the wait for sync(2); a foreign freeze can hang
 	// it, FIFREEZE then reports the freeze.
 	syncTimeout = 2 * time.Second
 	// storeFreezeTimeout bounds SetFrozen(true), which waits for a commit
-	// in flight; a commit hanging that long means someone else froze the
-	// state filesystem.
+	// in flight; a commit hanging that long probably hangs on a filesystem
+	// frozen by someone else.
 	storeFreezeTimeout = 2 * time.Second
+	// unitMarkerWait is how long a thaw waits for the marker of a watchdog
+	// unit that already claimed the lease file.
+	unitMarkerWait = 2 * time.Second
 	// flushTimeout bounds the store flush after a thaw.
 	flushTimeout = 5 * time.Second
 	// prunePeriod is how often RunProbe drops expired markers.
@@ -93,6 +101,12 @@ type DockerAPI interface {
 	Paused(ctx context.Context) ([]string, error)
 	Pause(ctx context.Context, id string) error
 	Unpause(ctx context.Context, id string) error
+}
+
+// frozenStore is the part of *store.Store a lease uses.
+type frozenStore interface {
+	SetFrozen(frozen bool)
+	Flush(ctx context.Context) error
 }
 
 // Supervisor starts and stops the watchdog unit; supervisor.Supervisor
@@ -142,10 +156,13 @@ type Manager struct {
 	steps steps
 
 	// Seams for tests.
-	newID       func() string
-	syncFS      func()
-	probeWrite  func() error
-	markerEvery time.Duration
+	newID              func() string
+	syncFS             func()
+	probeWrite         func() error
+	markerEvery        time.Duration
+	freezeBudget       time.Duration
+	storeFreezeTimeout time.Duration
+	unitMarkerWait     time.Duration
 
 	// opMu serializes Quiesce, Thaw, the automatic thaws and the foreign
 	// thaw; it is held for a whole operation.
@@ -153,8 +170,8 @@ type Manager struct {
 
 	mu         sync.Mutex
 	cur        *active
-	gen        uint64 // incremented by every Quiesce
-	st         *store.Store
+	gen        uint64      // incremented by every Quiesce
+	st         frozenStore // nil without a store
 	emit       events.Emitter
 	queued     []*agentv1.QuiesceAutoThawed
 	probeDone  chan struct{} // the probe write in flight, or nil
@@ -196,13 +213,18 @@ func New(opts Options) *Manager {
 		}
 	}
 	m := &Manager{
-		opts:        opts,
-		steps:       steps{freezer: opts.Freezer, docker: opts.Docker, runHook: execHook, log: opts.Log},
-		newID:       uuid.NewString,
-		syncFS:      syncAll,
-		markerEvery: markerPoll,
-		st:          opts.Store,
-		emit:        opts.Emit,
+		opts:               opts,
+		steps:              steps{freezer: opts.Freezer, docker: opts.Docker, runHook: execHook, log: opts.Log},
+		newID:              uuid.NewString,
+		syncFS:             syncAll,
+		markerEvery:        markerPoll,
+		freezeBudget:       freezeBudget,
+		storeFreezeTimeout: storeFreezeTimeout,
+		unitMarkerWait:     unitMarkerWait,
+		emit:               opts.Emit,
+	}
+	if opts.Store != nil {
+		m.st = opts.Store
 	}
 	m.probeWrite = func() error { return writeProbe(opts.Layout.StateDir) }
 	return m
@@ -213,7 +235,10 @@ func New(opts Options) *Manager {
 func (m *Manager) SetStore(st *store.Store, emit events.Emitter) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.st, m.emit = st, emit
+	m.st, m.emit = nil, emit
+	if st != nil {
+		m.st = st
+	}
 	if emit == nil {
 		return
 	}
@@ -224,7 +249,7 @@ func (m *Manager) SetStore(st *store.Store, emit events.Emitter) {
 }
 
 // store returns the store, or nil.
-func (m *Manager) store() *store.Store {
+func (m *Manager) store() frozenStore {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.st
@@ -273,6 +298,12 @@ func internalErr(step string, err error) error {
 	return errs.New(connect.CodeInternal, errs.Internal, "quiesce: "+step+": "+err.Error())
 }
 
+// leaseExpired is the error of a Quiesce that ran into its lease deadline
+// or found its lease thawed by the watchdog unit.
+func leaseExpired(id string) error {
+	return errs.New(connect.CodeAborted, errs.LeaseExpired, "quiesce: lease "+id+" expired before the freeze completed")
+}
+
 // frozenByOther is the error of a filesystem frozen by someone else.
 func frozenByOther(what string) error {
 	return errs.New(connect.CodeFailedPrecondition, errs.FrozenByOther, what+" is frozen by someone else")
@@ -309,7 +340,20 @@ func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs bool) 
 	res, err := m.freeze(ctx, a, docker, fs)
 	if err != nil {
 		m.opts.Log.Warn("quiesce failed, rolling back", "lease", id, "err", err)
-		m.release(context.WithoutCancel(ctx), a, true)
+		rctx := context.WithoutCancel(ctx)
+		if m.unitFired(a.id) {
+			// The watchdog unit took the lease: undo what it did not see.
+			// The lease was never handed out, so its marker is not
+			// reported as an event.
+			mk, ok := m.waitMarker(a.id)
+			m.thawAfterUnit(rctx, a, mk)
+			m.release(rctx, a, false)
+			if ok {
+				m.silenceMarker(mk)
+			}
+		} else {
+			m.release(rctx, a, true)
+		}
 		return nil, err
 	}
 	m.opts.Log.Info("quiesced", "lease", id, "deadline", a.deadline,
@@ -317,7 +361,10 @@ func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs bool) 
 	return res, nil
 }
 
-// freeze runs the steps of Quiesce after the lease file is written.
+// freeze runs the steps of Quiesce after the lease file is written. The
+// docker, hook, sync, store and FIFREEZE steps end by freezeBudget or the
+// lease deadline, whichever comes first, and stop early if the watchdog
+// unit took the lease: a Quiesce never runs past its own deadline.
 func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool) (*agentv1.QuiesceResponse, error) {
 	l := a.lease
 	res := &agentv1.QuiesceResponse{LeaseId: a.id, Deadline: timestamppb.New(a.deadline)}
@@ -334,16 +381,45 @@ func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool
 	a.timer = time.AfterFunc(a.deadline.Sub(m.opts.Now()), func() { m.autoThaw(a.id, ByWatchdog) }) //nolint:contextcheck // the timer outlives the request
 	go m.watchMarker(a)                                                                             //nolint:contextcheck // the watch outlives the request
 
+	cutoff := m.opts.Now().Add(m.freezeBudget)
+	var cutoffErr error = errs.Newf(connect.CodeDeadlineExceeded, errs.QuiesceTimeout,
+		"quiesce: the freeze steps took longer than %s", m.freezeBudget)
+	if !a.deadline.After(cutoff) {
+		cutoff, cutoffErr = a.deadline, leaseExpired(a.id)
+	}
+	ctx, cancel := context.WithDeadline(ctx, cutoff)
+	defer cancel()
+	check := func() error {
+		if m.unitFired(a.id) {
+			return leaseExpired(a.id)
+		}
+		if !m.opts.Now().Before(cutoff) {
+			return cutoffErr
+		}
+		return nil
+	}
+	// fail reports a failed step; a step cut short by the cutoff or by the
+	// watchdog unit reports that instead.
+	fail := func(step string, err error) error {
+		if cerr := check(); cerr != nil {
+			return cerr
+		}
+		return internalErr(step, err)
+	}
+
 	// Docker.
 	if withDocker && m.opts.Docker != nil {
-		dctx, cancel := context.WithTimeout(ctx, dockerBudget)
-		defer cancel()
+		if err := check(); err != nil {
+			return nil, err
+		}
+		dctx, dcancel := context.WithTimeout(ctx, dockerBudget)
+		defer dcancel()
 		ids, err := m.opts.Docker.Running(dctx)
 		switch {
 		case errors.Is(err, docker.ErrNoDaemon):
 			m.opts.Log.Info("quiesce: docker is not running, nothing to pause")
 		case err != nil:
-			return nil, internalErr("list containers", err)
+			return nil, fail("list containers", err)
 		case len(ids) > 0:
 			// Every id is recorded before its pause.
 			l.Paused = ids
@@ -353,7 +429,7 @@ func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool
 			paused, err := m.steps.pauseAll(dctx, ids)
 			res.PausedContainers = paused
 			if err != nil {
-				return nil, internalErr("pause containers", err)
+				return nil, fail("pause containers", err)
 			}
 		}
 	}
@@ -364,30 +440,45 @@ func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool
 		return nil, internalErr("hooks", err)
 	}
 	for _, h := range hooks {
+		if err := check(); err != nil {
+			return nil, err
+		}
 		l.Hooks = append(l.Hooks, h)
 		if err := save(); err != nil {
 			return nil, internalErr("lease", err)
 		}
 		if err := m.steps.runHook(ctx, h, hookFreeze); err != nil {
-			return nil, internalErr("freeze hook", err)
+			return nil, fail("freeze hook", err)
 		}
 	}
 
 	if !withFS || m.opts.Freezer == nil {
-		return res, nil
+		return res, check()
 	}
-	m.syncBounded()
+	if err := check(); err != nil {
+		return nil, err
+	}
+	m.syncBounded(ctx)
 	mounts, err := m.opts.Freezer.Mounts()
 	if err != nil {
-		return nil, internalErr("list mounts", err)
+		return nil, fail("list mounts", err)
 	}
 	if len(mounts) == 0 {
-		return res, nil
+		return res, check()
 	}
-	if err := m.freezeStore(a); err != nil {
+	if err := check(); err != nil {
+		return nil, err
+	}
+	if err := m.freezeStore(ctx, a); err != nil {
+		if cerr := check(); cerr != nil {
+			return nil, cerr
+		}
 		return nil, err
 	}
 	for _, mt := range mounts {
+		if err := check(); err != nil {
+			return nil, err
+		}
 		// Recorded before FIFREEZE, dropped again if it fails: a mount
 		// frozen by someone else must not be thawed by the rollback.
 		l.Frozen = append(l.Frozen, mt.Path)
@@ -403,15 +494,19 @@ func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool
 			if errors.Is(err, syscall.EBUSY) {
 				return nil, frozenByOther(mt.Path)
 			}
-			return nil, internalErr("freeze "+mt.Path, err)
+			return nil, fail("freeze "+mt.Path, err)
 		}
 		res.FrozenMounts = append(res.FrozenMounts, mt.Path)
+	}
+	if err := check(); err != nil {
+		return nil, err
 	}
 	return res, nil
 }
 
-// syncBounded runs sync(2) and waits for it at most syncTimeout.
-func (m *Manager) syncBounded() {
+// syncBounded runs sync(2) and waits for it at most syncTimeout or until
+// ctx ends.
+func (m *Manager) syncBounded(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {
 		m.syncFS()
@@ -421,16 +516,18 @@ func (m *Manager) syncBounded() {
 	defer t.Stop()
 	select {
 	case <-done:
+	case <-ctx.Done():
 	case <-t.C:
 		m.opts.Log.Warn("quiesce: sync is hanging, continuing")
 	}
 }
 
-// freezeStore freezes the store for a, waiting at most storeFreezeTimeout.
-// A store that cannot freeze in time has a commit hanging on a filesystem
-// frozen by someone else: the lease fails with frozen_by_other, and the
-// late freeze is undone once it lands unless a lease is active by then.
-func (m *Manager) freezeStore(a *active) error {
+// freezeStore freezes the store for a, waiting at most storeFreezeTimeout
+// or until ctx ends. A store that cannot freeze in time has a commit
+// hanging, most likely on a filesystem frozen by someone else: the lease
+// fails with unavailable/store_busy, and the late freeze is undone once it
+// lands unless the lease active by then froze the store itself.
+func (m *Manager) freezeStore(ctx context.Context, a *active) error {
 	st := m.store()
 	if st == nil {
 		return nil
@@ -440,23 +537,84 @@ func (m *Manager) freezeStore(a *active) error {
 		st.SetFrozen(true)
 		close(done)
 	}()
-	t := time.NewTimer(storeFreezeTimeout)
+	t := time.NewTimer(m.storeFreezeTimeout)
 	defer t.Stop()
 	select {
 	case <-done:
 		a.storeFrozen = true
 		return nil
+	case <-ctx.Done():
 	case <-t.C:
 	}
 	go func() {
 		<-done
 		m.opMu.Lock()
 		defer m.opMu.Unlock()
-		if m.current() == nil {
+		if cur := m.current(); cur == nil || !cur.storeFrozen {
 			st.SetFrozen(false)
 		}
 	}()
-	return frozenByOther("the state filesystem")
+	return errs.Newf(connect.CodeUnavailable, errs.StoreBusy,
+		"quiesce: the state store did not stop writing within %s (a commit hangs; the filesystem may be frozen by someone else)",
+		m.storeFreezeTimeout)
+}
+
+// unitFired reports whether the watchdog unit of lease id claimed the lease
+// file or left its marker.
+func (m *Manager) unitFired(id string) bool {
+	if _, ok := readMarker(m.opts.Layout.QuiesceThawedDir, id, m.opts.Now()); ok {
+		return true
+	}
+	l, err := readLease(claimPath(m.opts.Layout))
+	return err == nil && l != nil && l.ID == id
+}
+
+// waitMarker waits up to unitMarkerWait for the marker of lease id.
+func (m *Manager) waitMarker(id string) (marker, bool) {
+	deadline := time.Now().Add(m.unitMarkerWait)
+	for {
+		if mk, ok := readMarker(m.opts.Layout.QuiesceThawedDir, id, m.opts.Now()); ok {
+			return mk, true
+		}
+		if time.Now().After(deadline) {
+			return marker{}, false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// awaitUnitMarker returns the watchdog unit's marker of a. If there is none
+// yet but the unit already claimed the lease file (it is thawing right
+// now), it waits up to unitMarkerWait for it.
+func (m *Manager) awaitUnitMarker(a *active) (marker, bool) {
+	if mk, ok := readMarker(m.opts.Layout.QuiesceThawedDir, a.id, m.opts.Now()); ok {
+		return mk, true
+	}
+	if !a.watchdog {
+		return marker{}, false
+	}
+	if _, err := os.Stat(m.opts.Layout.QuiesceFile); err == nil {
+		return marker{}, false
+	}
+	return m.waitMarker(a.id)
+}
+
+// thawAfterUnit completes the watchdog unit's thaw of a (marker mk, zero if
+// the unit left none). The unit thawed what it read from the lease file,
+// and the agent may have frozen, paused or run more after that read: FITHAW
+// and unpause are repeated from the in-memory lease (EINVAL and "not
+// paused" are harmless), hooks the unit did not thaw get thaw now.
+func (m *Manager) thawAfterUnit(ctx context.Context, a *active, mk marker) {
+	m.steps.thawMounts(a.lease.Frozen)
+	for _, h := range slices.Backward(a.lease.Hooks) {
+		if slices.Contains(mk.Hooks, h) {
+			continue
+		}
+		if err := m.steps.runHook(ctx, h, hookThaw); err != nil {
+			m.opts.Log.Warn("quiesce: thaw hook failed", "hook", h, "err", err)
+		}
+	}
+	m.steps.unpauseAll(ctx, a.lease.Paused)
 }
 
 // release ends a: with thaw it undoes the lease steps first (FITHAW, store
@@ -510,10 +668,12 @@ func (m *Manager) flush(ctx context.Context) {
 func (m *Manager) Thaw(ctx context.Context, leaseID string) (*agentv1.ThawResponse, error) {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
-	now := m.opts.Now()
-	a := m.current()
-	mk, auto := readMarker(m.opts.Layout.QuiesceThawedDir, leaseID, now)
-	if a != nil && a.id == leaseID {
+	var (
+		mk   marker
+		auto bool
+	)
+	if a := m.current(); a != nil && a.id == leaseID {
+		mk, auto = m.awaitUnitMarker(a)
 		if !auto {
 			m.release(context.WithoutCancel(ctx), a, true)
 			m.flush(ctx)
@@ -522,6 +682,8 @@ func (m *Manager) Thaw(ctx context.Context, leaseID string) (*agentv1.ThawRespon
 		}
 		// The watchdog unit got there first.
 		m.adopt(context.WithoutCancel(ctx), a, mk)
+	} else {
+		mk, auto = readMarker(m.opts.Layout.QuiesceThawedDir, leaseID, m.opts.Now())
 	}
 	res := &agentv1.ThawResponse{AlreadyThawed: true}
 	if auto {
@@ -549,13 +711,12 @@ func (m *Manager) autoThaw(id, by string) {
 	if a == nil || a.id != id {
 		return
 	}
-	now := m.opts.Now()
-	if mk, ok := readMarker(m.opts.Layout.QuiesceThawedDir, id, now); ok {
+	if mk, ok := m.awaitUnitMarker(a); ok {
 		m.adopt(context.Background(), a, mk)
 		return
 	}
-	m.opts.Log.Warn("quiesce lease expired, thawing", "lease", id, "by", by)
 	m.release(context.Background(), a, true)
+	m.opts.Log.Warn("quiesce lease expired, thawed", "lease", id, "by", by)
 	m.markAndReport(id, m.opts.Now(), by)
 	m.flush(context.Background())
 }
@@ -570,13 +731,25 @@ func (m *Manager) markAndReport(id string, at time.Time, by string) {
 	m.report(id, at, by)
 }
 
-// adopt ends a after the watchdog unit thawed it (marker mk): the store is
-// unfrozen, the lease forgotten and the event emitted unless reported.
-// opMu is held.
+// adopt ends a after the watchdog unit thawed it (marker mk): what the unit
+// did not see is thawed too, the store is unfrozen, the lease forgotten and
+// the event emitted unless reported. opMu is held.
 func (m *Manager) adopt(ctx context.Context, a *active, mk marker) {
-	m.opts.Log.Warn("quiesce lease thawed by the watchdog unit", "lease", a.id, "at", mk.At)
+	m.thawAfterUnit(ctx, a, mk)
 	m.release(ctx, a, false)
+	m.opts.Log.Warn("quiesce lease thawed by the watchdog unit", "lease", a.id, "at", mk.At)
 	m.reportMarker(mk)
+}
+
+// silenceMarker marks mk reported without an event.
+func (m *Manager) silenceMarker(mk marker) {
+	if mk.Reported {
+		return
+	}
+	mk.Reported = true
+	if err := writeMarker(m.opts.Layout.QuiesceThawedDir, mk); err != nil {
+		m.opts.Log.Error("quiesce: write marker", "err", err)
+	}
 }
 
 // reportMarker emits the event of an unreported marker and marks it.
@@ -623,29 +796,40 @@ func (m *Manager) watchMarker(a *active) {
 func (m *Manager) Startup(ctx context.Context) {
 	m.opMu.Lock()
 	l, err := readLease(m.opts.Layout.QuiesceFile)
+	if l == nil && err == nil {
+		// A watchdog unit that died while thawing leaves its claim.
+		l, err = readLease(claimPath(m.opts.Layout))
+	}
+	removeBoth := func() {
+		for _, p := range []string{m.opts.Layout.QuiesceFile, claimPath(m.opts.Layout)} {
+			if rerr := removeLease(p); rerr != nil {
+				m.opts.Log.Error("quiesce: remove lease", "err", rerr)
+			}
+		}
+	}
 	switch {
 	case err != nil:
 		// The lease is unreadable: thaw every mount and container.
-		m.opts.Log.Error("quiesce: lease left by an earlier run is unreadable, thawing everything", "err", err)
-		if _, ferr := m.steps.thawAllMounts(nil); ferr != nil {
+		thawed, ferr := m.steps.thawAllMounts(nil)
+		if ferr != nil {
 			m.opts.Log.Error("quiesce: thaw mounts", "err", ferr)
 		}
-		m.unpauseAllPaused(ctx)
-		if rerr := removeLease(m.opts.Layout.QuiesceFile); rerr != nil {
-			m.opts.Log.Error("quiesce: remove lease", "err", rerr)
+		unpaused := m.unpauseAllPaused(ctx)
+		removeBoth()
+		m.opts.Log.Error("quiesce: lease left by an earlier run was unreadable, thawed everything",
+			"err", err, "mounts", thawed, "containers", unpaused)
+		if len(thawed) > 0 || len(unpaused) > 0 {
+			m.report("", m.opts.Now(), ByAgentStart)
 		}
-		m.report("", m.opts.Now(), ByAgentStart)
 	case l != nil:
-		m.opts.Log.Warn("quiesce lease left by an earlier run, thawing", "lease", l.ID)
 		m.steps.thawLease(ctx, l, nil)
 		if m.opts.Supervisor != nil && validLeaseID(l.ID) {
 			if serr := m.opts.Supervisor.StopWatchdog(ctx, l.ID); serr != nil {
 				m.opts.Log.Warn("quiesce: stop watchdog", "lease", l.ID, "err", serr)
 			}
 		}
-		if rerr := removeLease(m.opts.Layout.QuiesceFile); rerr != nil {
-			m.opts.Log.Error("quiesce: remove lease", "err", rerr)
-		}
+		removeBoth()
+		m.opts.Log.Warn("quiesce lease left by an earlier run, thawed", "lease", l.ID)
 		m.markAndReport(l.ID, m.opts.Now(), ByAgentStart)
 	}
 	m.opMu.Unlock()
@@ -657,10 +841,10 @@ func (m *Manager) Startup(ctx context.Context) {
 	}
 }
 
-// unpauseAllPaused unpauses every paused container.
-func (m *Manager) unpauseAllPaused(ctx context.Context) {
+// unpauseAllPaused unpauses every paused container and returns their ids.
+func (m *Manager) unpauseAllPaused(ctx context.Context) []string {
 	if m.opts.Docker == nil {
-		return
+		return nil
 	}
 	dctx, cancel := context.WithTimeout(ctx, dockerBudget)
 	defer cancel()
@@ -669,7 +853,8 @@ func (m *Manager) unpauseAllPaused(ctx context.Context) {
 		if !errors.Is(err, docker.ErrNoDaemon) {
 			m.opts.Log.Warn("quiesce: list paused containers", "err", err)
 		}
-		return
+		return nil
 	}
 	m.steps.unpauseAll(ctx, ids)
+	return ids
 }
