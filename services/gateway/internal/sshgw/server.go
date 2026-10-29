@@ -80,10 +80,14 @@ type Config struct {
 	MaxChannels int
 	// Now is the clock of certificate checks and backend certificates.
 	Now func() time.Time
+	// Clock drives the drain deadlines; nil means Now with real timers.
+	Clock Clock
 
-	// Self is this instance's id; Instances reads the registry.
+	// Self is this instance's id; Instances reads the registry and Owners
+	// gives the current tunnel owner of a machine (drain deadlines).
 	Self      string
 	Instances InstanceSource
+	Owners    OwnerSource
 }
 
 // Server is the SSH gateway.
@@ -96,14 +100,40 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu     sync.Mutex
-	closed bool
-	lns    map[net.Listener]struct{}
-	wg     sync.WaitGroup
+	clock Clock
+	// jobs runs revocations and registry reads, rechecks runs Recheck;
+	// both are started by the first enqueue and end with Close.
+	jobs, rechecks *jobQueue
 
-	active   atomic.Int64
-	sessMu   sync.Mutex
-	sessions map[*session]struct{}
+	mu       sync.Mutex
+	closed   bool
+	noAccept bool // StopAccepting was called
+	workers  bool // the queue workers run
+	lns      map[net.Listener]struct{}
+	wg       sync.WaitGroup
+
+	active atomic.Int64
+	// sessMu guards the fields below. It is a leaf lock: no session
+	// method is called while it is held.
+	sessMu sync.Mutex
+	// sessions are the open authenticated sessions with their drain
+	// deadlines.
+	sessions map[target]*drainEntry
+	// ownStart is the start of this instance's drain; zero before Drain.
+	ownStart time.Time
+	// ownerDrain holds the drain starts of the owner instances that drain.
+	ownerDrain map[string]time.Time
+}
+
+// target is what revocation and the drain need from a session; *session
+// implements it, unit tests use fakes.
+type target interface {
+	ident() identity
+	// ownerInstance is the gateway instance holding the tunnel of the
+	// backend stream, "" before the backend is connected.
+	ownerInstance() string
+	notify(msg string, interactiveOnly bool) <-chan struct{}
+	closeWithReason(reason string)
 }
 
 // New validates cfg and returns a server. It opens no listener.
@@ -148,11 +178,18 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.Clock == nil {
+		cfg.Clock = realClock{now: cfg.Now}
+	}
 	s := &Server{
-		cfg:      cfg,
-		log:      cfg.Logger,
-		lns:      map[net.Listener]struct{}{},
-		sessions: map[*session]struct{}{},
+		cfg:        cfg,
+		log:        cfg.Logger,
+		clock:      cfg.Clock,
+		jobs:       newJobQueue(),
+		rechecks:   newJobQueue(),
+		lns:        map[net.Listener]struct{}{},
+		sessions:   map[target]*drainEntry{},
+		ownerDrain: map[string]time.Time{},
 	}
 	for _, k := range cfg.LoginCAKeys {
 		s.loginCAs = append(s.loginCAs, k.Marshal())
@@ -173,7 +210,7 @@ func New(cfg Config) (*Server, error) {
 // accept errors are retried with a backoff. Serve closes ln when it returns.
 func (s *Server) Serve(ln net.Listener) error {
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.noAccept {
 		s.mu.Unlock()
 		_ = ln.Close()
 		return nil
@@ -223,38 +260,85 @@ func (s *Server) Close() error {
 	s.mu.Unlock()
 	s.cancel()
 	s.wg.Wait()
+	s.sessMu.Lock()
+	for _, e := range s.sessions {
+		e.stop()
+	}
+	s.sessMu.Unlock()
 	return nil
+}
+
+// enqueue pushes a job to q, starting the workers on first use. Nothing
+// is queued after Close.
+func (s *Server) enqueue(q *jobQueue, key string, fn func(ctx context.Context)) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	if !s.workers {
+		s.workers = true
+		s.wg.Go(func() { s.jobs.run(s.ctx) })
+		s.wg.Go(func() { s.rechecks.run(s.ctx) })
+	}
+	s.mu.Unlock()
+	q.push(key, fn)
 }
 
 // Sessions returns the number of open authenticated connections.
 func (s *Server) Sessions() int { return int(s.active.Load()) }
 
-// snapshot returns the open sessions (authenticated connections), for
-// revocation and drain.
+// snapshot returns the open sessions (authenticated connections).
 func (s *Server) snapshot() []*session {
-	s.sessMu.Lock()
-	defer s.sessMu.Unlock()
-	out := make([]*session, 0, len(s.sessions))
-	for ss := range s.sessions {
-		out = append(out, ss)
+	var out []*session
+	for _, t := range s.targets() {
+		if ss, ok := t.(*session); ok {
+			out = append(out, ss)
+		}
 	}
 	return out
 }
 
-func (s *Server) addSession(ss *session) {
+// targets returns the open sessions, for revocation and drain.
+func (s *Server) targets() []target {
 	s.sessMu.Lock()
-	s.sessions[ss] = struct{}{}
+	defer s.sessMu.Unlock()
+	out := make([]target, 0, len(s.sessions))
+	for t := range s.sessions {
+		out = append(out, t)
+	}
+	return out
+}
+
+// register adds t to the open sessions and applies a drain deadline that
+// is already known.
+func (s *Server) register(t target) {
+	s.sessMu.Lock()
+	s.sessions[t] = &drainEntry{}
 	s.sessMu.Unlock()
+	s.applyDeadline(t)
+}
+
+// unregister removes t and stops its drain timers.
+func (s *Server) unregister(t target) {
+	s.sessMu.Lock()
+	if e, ok := s.sessions[t]; ok {
+		e.stop()
+		delete(s.sessions, t)
+	}
+	s.sessMu.Unlock()
+}
+
+func (s *Server) addSession(ss *session) {
 	s.active.Add(1)
 	if m := s.cfg.Metrics; m != nil {
 		m.SSHConnectionsActive.Inc()
 	}
+	s.register(ss)
 }
 
 func (s *Server) removeSession(ss *session) {
-	s.sessMu.Lock()
-	delete(s.sessions, ss)
-	s.sessMu.Unlock()
+	s.unregister(ss)
 	s.active.Add(-1)
 	if m := s.cfg.Metrics; m != nil {
 		m.SSHConnectionsActive.Dec()

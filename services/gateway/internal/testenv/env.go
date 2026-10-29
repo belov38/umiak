@@ -430,6 +430,12 @@ func (e *Env) NotifyRoutes(payload string) {
 	e.notify(server.ChannelRoutes, payload)
 }
 
+// Notify sends pg_notify(channel, payload).
+func (e *Env) Notify(channel, payload string) {
+	e.T.Helper()
+	e.notify(channel, payload)
+}
+
 func (e *Env) notify(channel, payload string) {
 	e.T.Helper()
 	if _, err := e.Pool.Exec(context.Background(), `SELECT pg_notify($1, $2)`, channel, payload); err != nil {

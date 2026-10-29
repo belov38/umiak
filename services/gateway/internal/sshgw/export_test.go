@@ -17,3 +17,12 @@ func NotifyInteractive(srv *Server, msg string) {
 		<-ss.notify(msg, true)
 	}
 }
+
+// SessionChannels returns the number of open session channels on srv.
+func SessionChannels(srv *Server) int {
+	n := 0
+	for _, ss := range srv.snapshot() {
+		n += len(ss.sessionChannels(false))
+	}
+	return n
+}

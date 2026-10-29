@@ -115,6 +115,13 @@ func (f *Fake) SetSSH(match func(cpapi.SSHAuthorizeRequest) bool, a cpapi.SSHAut
 	f.ssh = append(f.ssh, sshRule{match: match, auth: a})
 }
 
+// ClearSSH removes every SSH rule: AuthorizeSSH denies everything.
+func (f *Fake) ClearSSH() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ssh = nil
+}
+
 // Calls returns how many times a method was called: "LookupRoute",
 // "ExchangePortAuthCode" or "AuthorizeSSH". Calls that failed because the
 // fake is down count too.

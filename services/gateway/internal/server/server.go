@@ -129,8 +129,11 @@ type Instance struct {
 	started       atomic.Bool
 	draining      atomic.Bool
 	listenStarted atomic.Bool
-	drainOnce     sync.Once
+	drainStarted  atomic.Bool
 	drained       chan struct{} // closed when Drain finished
+	drainErr      error         // written before drained is closed
+	// disp is the TLS dispatcher once Run built it; Drain closes it.
+	disp atomic.Pointer[edge.Dispatcher]
 
 	hookMu        sync.Mutex
 	instanceHooks []func(string)
@@ -191,7 +194,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		MinAgentVersion:         cfg.MinAgentVersion,
 		MaxTCPStreamsPerMachine: deps.MaxTCPStreamsPerMachine,
 		OnInstanceChange:        i.onInstanceChange,
-		OnSessionChange:         i.owners.Invalidate,
+		OnSessionChange:         i.onSessionChange,
 		ListenChannels: map[string]func(string){
 			ChannelRoutes:    i.onRoutesNotify,
 			ChannelSSHRevoke: i.onRevokeNotify,
@@ -274,10 +277,15 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 			Now:               deps.Now,
 			Self:              cfg.InstanceID,
 			Instances:         i.store,
+			Owners:            i.owners,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: %w", err)
 		}
+		// Revocations and the owner drain signals (spec 9.5, 10.3); sshgw
+		// queues the work, so the LISTEN and hook goroutines never block.
+		i.SetRevokeHook(i.ssh.Revoke)
+		i.AddInstanceHook(i.ssh.NotifyInstance)
 	}
 	rateLimit, burst := cfg.TunnelAdmitRate, cfg.TunnelAdmitBurst
 	if rateLimit <= 0 {
@@ -334,6 +342,17 @@ func (i *Instance) onInstanceChange(id string) {
 	i.hookMu.Unlock()
 	for _, h := range hooks {
 		h(id)
+	}
+}
+
+// onSessionChange runs on a tunnel gateway goroutine for every
+// tunnel_sessions NOTIFY ("" to resync everything). The owner cache drops
+// the machine; a moved machine may mean that the old owner of SSH backend
+// streams drains (spec 10.3).
+func (i *Instance) onSessionChange(machineID string) {
+	i.owners.Invalidate(machineID)
+	if i.ssh != nil {
+		i.ssh.NotifyMachine(machineID)
 	}
 }
 
@@ -505,7 +524,12 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	fatal := make(chan error, 8) // at most one per server
 	serve := func(name string, srv *http.Server, ln net.Listener) {
 		wg.Go(func() {
-			if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+			err := srv.Serve(ln)
+			// Drain closes the public listeners itself.
+			if errors.Is(err, net.ErrClosed) && i.draining.Load() {
+				return
+			}
+			if !errors.Is(err, http.ErrServerClosed) {
 				fatal <- fmt.Errorf("server: %s listener: %w", name, err)
 			}
 		})
@@ -520,6 +544,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 		serve("plain", i.plain, ls.Plain)
 	}
 	if disp != nil {
+		i.disp.Store(disp)
 		serve("tls sbx", i.sbxSrv, disp.Sbx())
 		serve("tls tunnel", i.tunnelSrv, disp.Tunnel())
 		// Not cancelled with runCtx: the dispatcher is closed after its
@@ -601,20 +626,6 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 		}
 	}
 	wg.Wait()
-	return err
-}
-
-// Drain takes the instance out of service: Ready turns false, the tunnel
-// gateway drains (spec 7), and then the internal listener is shut down
-// gracefully so proxied streams can finish. Run returns afterwards. Drain is
-// idempotent; Run must have been started.
-func (i *Instance) Drain(ctx context.Context) error {
-	i.draining.Store(true)
-	err := i.tunnel.Drain(ctx)
-	if serr := i.internal.Shutdown(ctx); serr != nil {
-		err = errors.Join(err, fmt.Errorf("server: internal listener shutdown: %w", serr))
-	}
-	i.drainOnce.Do(func() { close(i.drained) })
 	return err
 }
 

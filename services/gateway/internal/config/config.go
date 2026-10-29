@@ -121,6 +121,12 @@ type Config struct {
 	LogLevel string
 }
 
+// Defaults of the drain deadlines (spec 10.2, 10.3).
+const (
+	DefaultHTTPDrainDeadline = 2 * time.Minute
+	DefaultSSHDrainDeadline  = 15 * time.Minute
+)
+
 // FromEnv reads and validates the configuration. getenv is normally os.Getenv;
 // an empty value means "unset". Errors name the offending variable.
 func FromEnv(getenv func(string) string) (Config, error) {
@@ -200,8 +206,8 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		Exempt:             l.cidrs("RATELIMIT_EXEMPT_CIDRS"),
 	}
 
-	c.HTTPDrainDeadline = l.duration("HTTP_DRAIN_DEADLINE", 2*time.Minute)
-	c.SSHDrainDeadline = l.duration("SSH_DRAIN_DEADLINE", 15*time.Minute)
+	c.HTTPDrainDeadline = l.duration("HTTP_DRAIN_DEADLINE", DefaultHTTPDrainDeadline)
+	c.SSHDrainDeadline = l.duration("SSH_DRAIN_DEADLINE", DefaultSSHDrainDeadline)
 	c.SSHKeepaliveInterval = l.duration("SSH_KEEPALIVE_INTERVAL", 30*time.Second)
 	c.SSHKeepaliveMax = l.integer("SSH_KEEPALIVE_MAX", 3)
 	c.SSHMaxChannels = l.integer("SSH_MAX_CHANNELS", 256)

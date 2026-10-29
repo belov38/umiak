@@ -37,13 +37,15 @@ const (
 	resultRejected = "rejected"
 )
 
-// Close reasons in the SSH log. Task 13 adds revoked and drain.
+// Close reasons in the SSH log.
 const (
 	reasonClient      = "client_closed"
 	reasonBackend     = "backend_closed"
 	reasonKeepalive   = "keepalive_timeout"
 	reasonShutdown    = "shutdown"
 	reasonUnavailable = "sandbox_unavailable"
+	reasonRevoked     = "revoked"
+	reasonDrain       = "drain"
 )
 
 // session is one authenticated client connection.
@@ -107,6 +109,20 @@ func newSessionID() string {
 		panic(err) // crypto/rand does not fail
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// ident returns the immutable identity of the session.
+func (ss *session) ident() identity { return ss.id }
+
+// ownerInstance returns the instance holding the tunnel of the backend
+// stream, or "" before the backend is connected.
+func (ss *session) ownerInstance() string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if ss.backend == nil {
+		return ""
+	}
+	return ss.backend.owner
 }
 
 // setReason records the first close reason.
@@ -243,6 +259,8 @@ func (ss *session) run(ctx context.Context, chans <-chan ssh.NewChannel, reqs <-
 	ss.mu.Lock()
 	ss.backend = b
 	ss.mu.Unlock()
+	// The owner instance of the stream may already drain.
+	ss.srv.applyDeadline(ss)
 	go func() {
 		_ = b.conn.Wait()
 		ss.setReason(reasonBackend)
