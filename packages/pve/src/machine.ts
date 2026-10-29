@@ -232,7 +232,7 @@ export class Machines {
 		const size =
 			opts.size ?? (src.kind === "snapshot" ? undefined : DEFAULT_SIZE);
 
-		const { vmid, mac } = await allocator.allocate(opts.ownerId);
+		const { vmid, mac, reused } = await allocator.allocate(opts.ownerId);
 		try {
 			const params: Params = {
 				vmid,
@@ -272,6 +272,9 @@ export class Machines {
 			await allocator.markActive(vmid);
 			return { vmid, mac, node: this.#node, disks };
 		} catch (err) {
+			// A reused lease belongs to the owner's other attempt, which may have created
+			// the VM (S6: a stale executor of the same machine): never delete it here.
+			if (reused) throw err;
 			// Roll back through delete even if the POST failed: a broken connection may hide a
 			// created VM. delete() tolerates a missing VM and keeps the row in releasing on failure.
 			await this.delete(vmid).catch(() => {});

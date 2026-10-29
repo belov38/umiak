@@ -1,7 +1,11 @@
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
-import { prepareMachine, waitBooted } from "../src/machine-prep.ts";
+import {
+	CapacityWaitTimeout,
+	prepareMachine,
+	waitBooted,
+} from "../src/machine-prep.ts";
 import { Fenced } from "../src/steps.ts";
 import {
 	crashAfter,
@@ -25,6 +29,17 @@ import {
 } from "./fakes/world.ts";
 
 let db: TestDatabase;
+
+async function until(
+	cond: () => Promise<boolean>,
+	timeoutMs = 5000,
+): Promise<void> {
+	const end = Date.now() + timeoutMs;
+	while (!(await cond())) {
+		if (Date.now() > end) throw new Error("condition not reached");
+		await new Promise((r) => setTimeout(r, 5));
+	}
+}
 
 beforeAll(async () => {
 	db = await createTestDatabase();
@@ -125,8 +140,9 @@ describe("crash matrix of the preparation", () => {
 
 	for (const c of cases) {
 		it(`${c.name}: the retry reaches warm with one VM, no extra LV or lease`, async () => {
-			// The agent connects 100 ms after start, so the retry finds the machine still booting.
-			const w = await createWorld(db, { bootDelayMs: 100 });
+			// Boots wait for the gate, so the retry finds the machine as the crash left it.
+			const w = await createWorld(db);
+			w.agentWorld.holdBoots();
 			const id = await insertMachine(w);
 			w.useInfra(c.wrap(w));
 
@@ -138,13 +154,15 @@ describe("crash matrix of the preparation", () => {
 			expect(bsBefore).toBeDefined();
 			expect(await heldCloneSlots(w)).toBe(0);
 
-			// Redelivery of the job.
-			const again = await handleMachineOp(w.ctx, {
+			// Redelivery of the job; boots go on once the retry holds the fence.
+			const retry = handleMachineOp(w.ctx, {
 				machineId: id,
 				action: "provision",
 			});
+			await until(async () => (await machine(w, id)).exec_attempt === 2);
+			w.agentWorld.releaseBoots();
+			expect(await retry).toBe("done");
 			await w.agentWorld.settled();
-			expect(again).toBe("done");
 			const m = await machine(w, id);
 			expect(m.state).toBe("warm");
 			await expectSingleVm(w, id);
@@ -162,6 +180,97 @@ describe("crash matrix of the preparation", () => {
 			}
 		});
 	}
+
+	it("vmid and disks recorded, still provisioning: the retry deletes the VM and marks the old disks deleted", async () => {
+		// The first attempt waits at the start gate (powered RAM short) and gives up retryably.
+		const w = await createWorld(db, {
+			ramCapMb: 4096,
+			timing: { ramWaitTimeoutMs: 100 },
+		});
+		const other = await insertMachine(w, {
+			state: "deleting",
+			poolKey: null,
+			memoryMb: 3072,
+			powerObserved: "running",
+		});
+		const id = await insertMachine(w);
+		await expect(
+			handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
+		).rejects.toBeInstanceOf(CapacityWaitTimeout);
+		const first = await machine(w, id);
+		expect(first.state).toBe("provisioning");
+		expect(first.vmid).not.toBeNull();
+		expect(await activeDisks(w, id)).toHaveLength(1);
+
+		await w.pool.query(
+			"UPDATE runtime.machines SET power_observed = 'stopped' WHERE id = $1",
+			[other],
+		);
+		expect(
+			await handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
+		).toBe("done");
+		await w.agentWorld.settled();
+		expect(w.infra.callsOf("delete").map((c) => c.args[0])).toEqual([
+			first.vmid,
+		]);
+		const d = await w.pool.query<{ state: string }>(
+			"SELECT state FROM runtime.disks WHERE machine_id = $1 ORDER BY created_at",
+			[id],
+		);
+		expect(d.rows.map((r) => r.state)).toEqual(["deleted", "active"]);
+		expect((await machine(w, id)).state).toBe("warm");
+		await expectSingleVm(w, id);
+	});
+
+	it("discardPartial deletes only a VMID that is still leased to the machine", async () => {
+		const w = await createWorld(db);
+		const neighbour = await insertMachine(w);
+		expect(
+			await handleMachineOp(w.ctx, {
+				machineId: neighbour,
+				action: "provision",
+			}),
+		).toBe("done");
+		const neighbourVmid = (await machine(w, neighbour)).vmid as number;
+		const id = await insertMachine(w);
+		w.useInfra(crashAfter(w.infra, "create"));
+		await expect(
+			handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
+		).rejects.toThrow(SimulatedCrash);
+		await w.agentWorld.settled();
+
+		// The first lease read is stale: that VMID was released and now belongs to the neighbour.
+		let reads = 0;
+		const real = w.infra;
+		w.useInfra(
+			new Proxy(real, {
+				get(t, p) {
+					if (p === "leaseOf") {
+						return async (machineId: string) => {
+							reads += 1;
+							if (machineId === id && reads === 1) {
+								return { vmid: neighbourVmid, mac: "00:00:00:00:00:00" };
+							}
+							return t.leaseOf(machineId);
+						};
+					}
+					const v = Reflect.get(t, p, t);
+					return typeof v === "function" ? v.bind(t) : v;
+				},
+			}),
+		);
+		expect(
+			await handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
+		).toBe("done");
+		await w.agentWorld.settled();
+		expect(w.infra.callsOf("delete").map((c) => c.args[0])).not.toContain(
+			neighbourVmid,
+		);
+		expect(w.infra.vmsOf(neighbour)).toHaveLength(1);
+		expect(w.infra.vmsOf(id)).toHaveLength(1);
+		expect((await machine(w, neighbour)).state).toBe("warm");
+		expect((await machine(w, id)).state).toBe("warm");
+	});
 
 	it("crash between S1 create and recording vmid: the lease has machine_id, the machine has no vmid", async () => {
 		const w = await createWorld(db);

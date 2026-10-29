@@ -2,7 +2,7 @@ import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
-import { blockAfter, spyBefore } from "./fakes/crash.ts";
+import { blockAfter, blockBefore, spyBefore } from "./fakes/crash.ts";
 import {
 	activeDisks,
 	createWorld,
@@ -174,6 +174,37 @@ describe("machine-op delete", () => {
 			await handleMachineOp(w.ctx, { machineId: id, action: "delete" }),
 		).toBe("done");
 		expect((await machine(w, id)).state).toBe("deleted");
+	});
+
+	it("delete wins over a provision stuck before S1 create allocates; the late VM is removed", async () => {
+		const w = await createWorld(db);
+		const id = await insertMachine(w);
+		const blocked = blockBefore(w.infra, "create");
+		w.useInfra(blocked.port);
+		const provision = handleMachineOp(w.ctx, {
+			machineId: id,
+			action: "provision",
+		});
+		await blocked.reached;
+
+		// The delete finds no lease yet and finishes.
+		await w.pool.query(
+			"UPDATE runtime.machines SET state = 'deleting' WHERE id = $1",
+			[id],
+		);
+		expect(
+			await handleMachineOp(w.ctx, { machineId: id, action: "delete" }),
+		).toBe("done");
+		expect((await machine(w, id)).state).toBe("deleted");
+
+		// The stale provision now creates a VM with a fresh lease, is fenced out
+		// at its next write and deletes that VM itself.
+		blocked.release();
+		expect(await provision).toBe("fenced_out");
+		await w.agentWorld.settled();
+		expect(w.infra.callsOf("create")).toHaveLength(1);
+		expect(w.infra.callsOf("start")).toHaveLength(0);
+		await expectGone(w, id);
 	});
 
 	it("delete wins over a provision stuck inside S1 create", async () => {

@@ -66,6 +66,13 @@ export class AllocatorError extends Error {
 	}
 }
 
+export interface AllocatedVmid {
+	vmid: number;
+	mac: string;
+	/** The owner's existing lease was returned instead of a new one. */
+	reused: boolean;
+}
+
 export interface AllocatorOptions {
 	store: AllocatorStore;
 	clusterId: number;
@@ -102,12 +109,17 @@ export class Allocator {
 		});
 	}
 
-	/** With ownerId, repeated calls return the owner's existing lease unless it is releasing. */
-	async allocate(ownerId?: string): Promise<{ vmid: number; mac: string }> {
+	/**
+	 * With ownerId, repeated calls return the owner's existing lease unless it
+	 * is releasing; `reused` tells the caller so. A reused lease may already
+	 * have a VM (another executor of the same owner made it), so the caller
+	 * must not roll it back on failure.
+	 */
+	async allocate(ownerId?: string): Promise<AllocatedVmid> {
 		const { store, clusterId, range, templateVmid } = this.#o;
 		if (ownerId !== undefined) {
 			const own = await this.#findOwned(ownerId);
-			if (own) return { vmid: own.vmid, mac: own.mac };
+			if (own) return { vmid: own.vmid, mac: own.mac, reused: true };
 		}
 		const occupied = await this.#o.occupied();
 		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
@@ -128,7 +140,7 @@ export class Allocator {
 					...(ownerId !== undefined ? { ownerId } : {}),
 				})
 			) {
-				return { vmid, mac };
+				return { vmid, mac, reused: false };
 			}
 		}
 		throw new AllocatorError(

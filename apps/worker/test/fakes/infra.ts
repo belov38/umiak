@@ -161,8 +161,16 @@ export class FakeInfra implements NodeInfra {
 		smbios: InfraSmbios,
 		_snap: InfraSnapshotRef | undefined,
 	): Promise<CreatedVm> {
-		const { vmid, mac } = await this.allocator.allocate(machineId);
-		if (this.vms.has(vmid)) throw new Error(`VM ${vmid} already exists`);
+		// As S1 (packages/pve Machines): a reused lease belongs to the owner's
+		// other attempt; if its VM exists the create fails and nothing is
+		// rolled back. Only a newly allocated VMID would be rolled back.
+		const { vmid, mac, reused } = await this.allocator.allocate(machineId);
+		if (this.vms.has(vmid)) {
+			if (!reused) await this.allocator.release(vmid);
+			throw new Error(
+				`unable to create VM ${vmid} - config file already exists`,
+			);
+		}
 		const lv = `vm-${vmid}-disk-0`;
 		this.lvs.set(lv, { name: lv, tags: ["sbx"] });
 		const disks: InfraDisk[] = [

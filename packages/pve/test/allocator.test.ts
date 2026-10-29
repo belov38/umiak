@@ -42,6 +42,7 @@ describe("Allocator", () => {
 		expect(await alloc.allocate()).toEqual({
 			vmid: 500,
 			mac: "02:01:00:00:01:F4",
+			reused: false,
 		});
 		expect((await store.get(1, 500))?.state).toBe("reserved");
 		expect((await alloc.allocate()).vmid).toBe(501);
@@ -112,7 +113,8 @@ describe("Allocator", () => {
 		const { alloc, store } = make();
 		const a = await alloc.allocate("m1");
 		const b = await alloc.allocate("m1");
-		expect(b).toEqual(a);
+		expect(a.reused).toBe(false);
+		expect(b).toEqual({ ...a, reused: true });
 		expect((await store.get(1, a.vmid))?.ownerId).toBe("m1");
 		expect((await alloc.allocate("m2")).vmid).toBe(a.vmid + 1);
 		await alloc.markActive(a.vmid);
@@ -120,6 +122,7 @@ describe("Allocator", () => {
 		await alloc.markReleasing(a.vmid);
 		const c = await alloc.allocate("m1");
 		expect(c.vmid).not.toBe(a.vmid);
+		expect(c.reused).toBe(false);
 		expect((await store.get(1, c.vmid))?.ownerId).toBe("m1");
 	});
 
@@ -164,7 +167,7 @@ describe("Allocator", () => {
 		const { alloc } = make({ store: asyncStore });
 		await alloc.ensureTemplate();
 		const a = await alloc.allocate("o1");
-		expect(await alloc.allocate("o1")).toEqual(a);
+		expect(await alloc.allocate("o1")).toEqual({ ...a, reused: true });
 		await alloc.markActive(a.vmid);
 		expect((await alloc.get(a.vmid))?.state).toBe("active");
 		expect(await alloc.list()).toHaveLength(2);

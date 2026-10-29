@@ -10,7 +10,7 @@ import {
 	runSteps,
 } from "../src/steps.ts";
 import { waitUntil } from "../src/wait.ts";
-import { blockAfter } from "./fakes/crash.ts";
+import { blockAfter, blockBefore } from "./fakes/crash.ts";
 import {
 	createWorld,
 	insertMachine,
@@ -76,6 +76,45 @@ describe("machine-op fencing", () => {
 		const m = await machine(w, id);
 		expect(m.state).toBe("warm");
 		expect(m.vmid).toBe(afterB.vmid);
+	});
+});
+
+describe("machine-op fencing before S1 create allocates", () => {
+	it("a stale executor that passed its fence check gets the new executor's lease, fails and is fenced out", async () => {
+		const w = await createWorld(db);
+		const id = await insertMachine(w);
+		const blocked = blockBefore(w.infra, "create");
+		w.useInfra(blocked.port);
+
+		const a = handleMachineOp(w.ctx, { machineId: id, action: "provision" });
+		await blocked.reached;
+		expect(w.infra.vms.size).toBe(0);
+
+		expect(
+			await handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
+		).toBe("done");
+		await w.agentWorld.settled();
+		const afterB = await machine(w, id);
+		expect(afterB.state).toBe("warm");
+
+		// A's allocate returns B's lease (same owner); its VM exists, so S1
+		// create fails without rolling back, and A's failure handling is fenced.
+		blocked.release();
+		expect(await a).toBe("fenced_out");
+		expect(w.infra.callsOf("create")).toHaveLength(2);
+		expect(w.infra.callsOf("delete")).toHaveLength(0);
+		expect(w.infra.callsOf("start").map((c) => c.args[0])).toEqual([
+			afterB.vmid,
+		]);
+		expect(w.infra.vms.size).toBe(1);
+		expect(w.infra.vmsOf(id)[0]?.status).toBe("running");
+		expect(await leases(w)).toEqual([
+			{ vmid: afterB.vmid, state: "active", machine_id: id },
+		]);
+		const m = await machine(w, id);
+		expect(m.state).toBe("warm");
+		expect(m.error_code).toBeNull();
+		expect(w.metrics.count("sbx_machine_provision_failed_total")).toBe(0);
 	});
 });
 

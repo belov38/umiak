@@ -105,6 +105,35 @@ export function blockAfter<T extends object>(
 	return { port, reached, release: () => releaseResolve() };
 }
 
+/**
+ * The first call of `method` waits for `release()` before doing anything (an
+ * executor that passed its fence check and is stuck on the way into a
+ * Proxmox call). Later calls pass through.
+ */
+export function blockBefore<T extends object>(
+	target: T,
+	method: keyof T,
+): Blocked<T> {
+	let reachedResolve: () => void = () => {};
+	let releaseResolve: () => void = () => {};
+	const reached = new Promise<void>((r) => {
+		reachedResolve = r;
+	});
+	const released = new Promise<void>((r) => {
+		releaseResolve = r;
+	});
+	let first = true;
+	const port = wrapMethod(target, method, (orig) => async (...args) => {
+		if (first) {
+			first = false;
+			reachedResolve();
+			await released;
+		}
+		return orig(...args);
+	});
+	return { port, reached, release: () => releaseResolve() };
+}
+
 /** Records every call of `method` and runs `spy` before it (to observe state at call time). */
 export function spyBefore<T extends object>(
 	target: T,

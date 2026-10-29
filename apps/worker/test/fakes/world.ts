@@ -19,7 +19,6 @@ import {
 } from "../../src/context.ts";
 import { handleMachineEvents } from "../../src/handlers/machine-events.ts";
 import type { NodeInfra } from "../../src/ports.ts";
-import { sleep } from "../../src/wait.ts";
 import { FakeAgent } from "./agent.ts";
 import { FakeGateway } from "./gateway.ts";
 import {
@@ -40,7 +39,6 @@ export interface FakeAgentWorldOptions {
 	pool: pg.Pool;
 	jobs: JobSender;
 	behavior?: BootBehavior;
-	bootDelayMs?: number;
 	/** Run handleMachineEvents right after ingest (no pg-boss). Default true. */
 	processEvents?: boolean;
 }
@@ -53,7 +51,6 @@ export interface FakeAgentWorldOptions {
  */
 export class FakeAgentWorld implements VmLifecycle {
 	behavior: BootBehavior;
-	bootDelayMs: number;
 	processEvents: boolean;
 	ctx: WorkerCtx | undefined;
 	/** Machines whose bootstrap secret was refused. */
@@ -63,12 +60,12 @@ export class FakeAgentWorld implements VmLifecycle {
 	readonly #jobs: JobSender;
 	readonly #pending = new Set<Promise<void>>();
 	readonly #seq = new Map<string, number>();
+	#gate: { promise: Promise<void>; release: () => void } | undefined;
 
 	constructor(o: FakeAgentWorldOptions) {
 		this.#pool = o.pool;
 		this.#jobs = o.jobs;
 		this.behavior = o.behavior ?? "ready";
-		this.bootDelayMs = o.bootDelayMs ?? 0;
 		this.processEvents = o.processEvents ?? true;
 	}
 
@@ -83,9 +80,25 @@ export class FakeAgentWorld implements VmLifecycle {
 		this.#pending.add(p);
 	}
 
+	/** Boots started from now on wait until `releaseBoots()` (deterministic ordering in tests). */
+	holdBoots(): void {
+		if (this.#gate) return;
+		let release: () => void = () => {};
+		const promise = new Promise<void>((r) => {
+			release = r;
+		});
+		this.#gate = { promise, release };
+	}
+
+	releaseBoots(): void {
+		const g = this.#gate;
+		this.#gate = undefined;
+		g?.release();
+	}
+
 	async #boot(infra: FakeInfra, vm: FakeVm): Promise<void> {
+		if (this.#gate) await this.#gate.promise;
 		if (this.behavior === "never") return;
-		if (this.bootDelayMs > 0) await sleep(this.bootDelayMs);
 		if (infra.vms.get(vm.vmid) !== vm || vm.status !== "running") return;
 		const machineId = vm.machineId;
 		if (!(await this.#bsAccepted(vm))) {
@@ -292,7 +305,6 @@ export interface TestWorld {
 
 export interface WorldOptions extends TopologyOptions {
 	boot?: BootBehavior;
-	bootDelayMs?: number;
 	processEvents?: boolean;
 	timing?: Partial<Timing>;
 }
@@ -308,7 +320,6 @@ export async function createWorld(
 		pool,
 		jobs,
 		...(o.boot !== undefined ? { behavior: o.boot } : {}),
-		...(o.bootDelayMs !== undefined ? { bootDelayMs: o.bootDelayMs } : {}),
 		...(o.processEvents !== undefined
 			? { processEvents: o.processEvents }
 			: {}),

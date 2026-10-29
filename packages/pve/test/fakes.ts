@@ -169,6 +169,12 @@ export class FakePve {
 		if (key === "GET /nodes/pve/qemu/599/config") return { ...TEMPLATE_CONFIG };
 		if (key === "POST /nodes/pve/qemu") {
 			const vmid = Number(p.vmid);
+			if (this.vms.has(vmid)) {
+				throw new PveApiError(
+					500,
+					`unable to create VM ${vmid} - config file already exists`,
+				);
+			}
 			const config: Record<string, string> = {};
 			for (const [k, v] of Object.entries(p))
 				if (k !== "vmid" && k !== "pool") config[k] = String(v);

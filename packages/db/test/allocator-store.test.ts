@@ -67,7 +67,7 @@ describe.skipIf(skipPg())("PgAllocatorStore", () => {
 		const owner = randomUUID();
 		const first = await a.allocate(owner);
 		const second = await a.allocate(owner);
-		expect(second).toEqual(first);
+		expect(second).toEqual({ ...first, reused: true });
 		expect(await a.list()).toHaveLength(1);
 		expect((await a.get(first.vmid))?.ownerId).toBe(owner);
 	});

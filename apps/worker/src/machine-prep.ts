@@ -147,39 +147,47 @@ export async function prepareMachine(
 		return vm;
 	});
 
-	// 4. Record VMID, MAC and disks. A stale executor stops here.
-	await fence.tx(async (tx) => {
-		const r = await tx.client.query(
-			`UPDATE runtime.machines SET vmid = $2, mac = $3, version = version + 1
-			 WHERE id = $1 AND state = 'provisioning'`,
-			[machineId, created.vmid, created.mac],
+	// 4. Record VMID, MAC and disks; 6. start gate (powered RAM check and
+	// -> booting in one transaction), then S1 start. A stale executor stops
+	// at the first fenced write and gives up what it created if nobody else
+	// will (see abandonCreated).
+	try {
+		await fence.tx(async (tx) => {
+			const r = await tx.client.query(
+				`UPDATE runtime.machines SET vmid = $2, mac = $3, version = version + 1
+				 WHERE id = $1 AND state = 'provisioning'`,
+				[machineId, created.vmid, created.mac],
+			);
+			if (r.rowCount !== 1)
+				throw new FencedOut(`machine ${machineId}: left provisioning`);
+			await insertDisks(tx, { machineId }, m.storage_id, created.disks);
+		});
+		await waitUntil(
+			ctx,
+			fence,
+			async () =>
+				(await fence.tx(
+					(tx) => tryPoweredStart(tx, { machineId, toState: "booting" }),
+					{ nodeId: m.node_id },
+				))
+					? true
+					: undefined,
+			{
+				timeoutMs: ctx.timing.ramWaitTimeoutMs,
+				pollMs: ctx.timing.ramWaitPollMs,
+				timeoutError: () =>
+					new CapacityWaitTimeout(
+						`machine ${machineId} start gate`,
+						ctx.timing.ramWaitTimeoutMs,
+					),
+			},
 		);
-		if (r.rowCount !== 1)
-			throw new FencedOut(`machine ${machineId}: left provisioning`);
-		await insertDisks(tx, { machineId }, m.storage_id, created.disks);
-	});
-
-	// 6. Start gate: powered RAM check and -> booting in one transaction, then S1 start.
-	await waitUntil(
-		ctx,
-		fence,
-		async () =>
-			(await fence.tx(
-				(tx) => tryPoweredStart(tx, { machineId, toState: "booting" }),
-				{ nodeId: m.node_id },
-			))
-				? true
-				: undefined,
-		{
-			timeoutMs: ctx.timing.ramWaitTimeoutMs,
-			pollMs: ctx.timing.ramWaitPollMs,
-			timeoutError: () =>
-				new CapacityWaitTimeout(
-					`machine ${machineId} start gate`,
-					ctx.timing.ramWaitTimeoutMs,
-				),
-		},
-	);
+	} catch (e) {
+		if (e instanceof FencedOut) {
+			await abandonCreated(ctx, infra, machineId, created.vmid);
+		}
+		throw e;
+	}
 	await infra.start(created.vmid);
 	await markPowered(fence, machineId);
 }
@@ -195,7 +203,8 @@ async function discardPartial(
 	m: MachineRow,
 ): Promise<void> {
 	let last: number | undefined;
-	for (;;) {
+	for (let i = 0; ; i++) {
+		if (i >= 10) throw new Error(`machine ${m.id}: leases keep changing`);
 		const lease = await infra.leaseOf(m.id);
 		if (lease === undefined) break;
 		if (lease.vmid === last) {
@@ -203,13 +212,19 @@ async function discardPartial(
 				`machine ${m.id}: lease of VM ${lease.vmid} survived delete`,
 			);
 		}
-		last = lease.vmid;
 		await fence.check();
+		// Re-read right before the delete: the VMID read above may have been
+		// released and handed to someone else meanwhile. Delete only a VMID
+		// that is still leased to this machine.
+		const again = await infra.leaseOf(m.id);
+		if (again === undefined) break;
+		if (again.vmid !== lease.vmid) continue;
+		last = again.vmid;
 		ctx.log.info(
-			{ machineId: m.id, vmid: lease.vmid },
+			{ machineId: m.id, vmid: again.vmid },
 			"discarding a partial preparation",
 		);
-		await infra.delete(lease.vmid);
+		await infra.delete(again.vmid);
 	}
 	await fence.tx(async (tx) => {
 		await tx.client.query(
@@ -223,6 +238,41 @@ async function discardPartial(
 			[m.id],
 		);
 	});
+}
+
+/** Machine states in which no preparation will pick up a VM of this machine. */
+const ORPHANING: readonly MachineState[] = ["failed", "deleting", "deleted"];
+
+/**
+ * A stale executor created a VM and then lost its fence before the VM was
+ * recorded as started. If the machine is being (or was) deleted, or is gone,
+ * no other executor will find this VM through the lease any more (a delete
+ * may have looked before the lease existed), so delete it here — but only
+ * while the lease of that VMID is still this machine's. If the machine is
+ * still being prepared, the current executor's discardPartial owns it.
+ */
+async function abandonCreated(
+	ctx: WorkerCtx,
+	infra: NodeInfra,
+	machineId: string,
+	vmid: number,
+): Promise<void> {
+	try {
+		const cur = await loadMachine(ctx.pool, machineId);
+		if (cur !== null && !ORPHANING.includes(cur.state)) return;
+		const lease = await infra.leaseOf(machineId);
+		if (lease?.vmid !== vmid) return;
+		ctx.log.info(
+			{ machineId, vmid, state: cur?.state ?? "missing" },
+			"fenced out after S1 create: deleting the VM nobody will use",
+		);
+		await infra.delete(vmid);
+	} catch (e) {
+		ctx.log.warn(
+			{ err: e, machineId, vmid },
+			"could not delete an abandoned VM; reconcile will find it",
+		);
+	}
 }
 
 async function templateVmidOf(ctx: WorkerCtx, m: MachineRow): Promise<number> {

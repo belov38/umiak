@@ -214,6 +214,32 @@ describe("lease owner", () => {
 		expect(f.vmid).not.toBe(a.vmid);
 	});
 
+	it("an owner's second create on its active lease fails without deleting the existing VM", async () => {
+		const { api, allocator, machines, node } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		const lvsBefore = [...node.lvs];
+		await expect(machines.create({ ownerId: "m-a" })).rejects.toThrow(
+			/already exists/,
+		);
+		expect(api.paths()).not.toContain(`DELETE /nodes/pve/qemu/${a.vmid}`);
+		expect(api.vms.has(a.vmid)).toBe(true);
+		expect(node.lvs).toEqual(lvsBefore);
+		const lease = await allocator.get(a.vmid);
+		expect(lease?.state).toBe("active");
+		expect(lease?.ownerId).toBe("m-a");
+	});
+
+	it("a new lease is still rolled back on failure", async () => {
+		const { api, allocator, machines } = setup();
+		api.fail["PUT /nodes/pve/qemu/500/firewall/options"] = new PveApiError(
+			500,
+			"boom",
+		);
+		await expect(machines.create({ ownerId: "m-b" })).rejects.toThrow(/boom/);
+		expect(api.vms.has(500)).toBe(false);
+		expect(await allocator.get(500)).toBeUndefined();
+	});
+
 	it("frees the lease with the owner on delete", async () => {
 		const { allocator, machines } = setup();
 		const a = await machines.create({ ownerId: "m-a" });

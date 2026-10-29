@@ -97,8 +97,6 @@ async function failProvision(
 			? (err as { code: string }).code
 			: "provision_failed";
 	const detail = err instanceof Error ? err.message : String(err);
-	ctx.log.warn({ machineId, code, err: detail }, "pool provision failed");
-	ctx.metrics.inc("sbx_machine_provision_failed_total", { code });
 	try {
 		await fence.tx(async (tx) => {
 			await tx.client.query(
@@ -122,9 +120,12 @@ async function failProvision(
 			);
 		});
 	} catch (e) {
+		// Another executor or a delete took over; this error was a side effect of that.
 		if (e instanceof FencedOut) return fencedOut(ctx, e, "provision");
 		throw e;
 	}
+	ctx.log.warn({ machineId, code, err: detail }, "pool provision failed");
+	ctx.metrics.inc("sbx_machine_provision_failed_total", { code });
 	return "failed";
 }
 
