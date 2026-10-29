@@ -59,6 +59,9 @@ type Layout struct {
 	SecretsEnvFile string
 	// SecretFilesDir holds secret files by name.
 	SecretFilesDir string
+	// SecretsStateFile is the agent's root-only record of the applied
+	// secret set (full secret env and file metadata) inside the tmpfs.
+	SecretsStateFile string
 	// CmdSpecDir holds command specs until the shim reads them.
 	CmdSpecDir string
 	// SbxEnvFile is the non-secret sandbox environment read by PAM.
@@ -174,12 +177,13 @@ func build(f func(string) string, root string) Layout {
 		QuiesceThawedDir: f(j(run, "quiesce-thawed")),
 		StatusFile:       f(j(run, "status.json")),
 
-		SecretsMount:   f(sbx),
-		SecretsDir:     f(j(sbx, "secrets")),
-		SecretsEnvFile: f(j(sbx, "secrets", "env")),
-		SecretFilesDir: f(j(sbx, "secrets", "files")),
-		CmdSpecDir:     f(j(sbx, "cmd-spec")),
-		SbxEnvFile:     f("/etc/sbx/env"),
+		SecretsMount:     f(sbx),
+		SecretsDir:       f(j(sbx, "secrets")),
+		SecretsEnvFile:   f(j(sbx, "secrets", "env")),
+		SecretFilesDir:   f(j(sbx, "secrets", "files")),
+		SecretsStateFile: f(j(sbx, "secrets.json")),
+		CmdSpecDir:       f(j(sbx, "cmd-spec")),
+		SbxEnvFile:       f("/etc/sbx/env"),
 
 		EtcDir:          f(etc),
 		ConfigFile:      f(j(etc, "agent.toml")),

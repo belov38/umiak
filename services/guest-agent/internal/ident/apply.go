@@ -209,15 +209,15 @@ func applyHostname(l paths.Layout, r Resetter, name string) error {
 	if err := fsutil.WriteFileAtomic(l.HostnameFile, []byte(name+"\n"), 0o644); err != nil {
 		return fmt.Errorf("ident: write hostname: %w", err)
 	}
-	if err := setHostsBlock(l.HostsFile, name); err != nil {
+	if err := SetHostsBlock(l.HostsFile, name); err != nil {
 		return fmt.Errorf("ident: write hosts: %w", err)
 	}
 	return nil
 }
 
-// setHostsBlock replaces the managed block of the hosts file with a single
-// 127.0.1.1 line for name, or appends the block if there is none.
-func setHostsBlock(path, name string) error {
+// SetHostsBlock replaces the managed block of the hosts file at path with a
+// single 127.0.1.1 line for name, or appends the block if there is none.
+func SetHostsBlock(path, name string) error {
 	b, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err

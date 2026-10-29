@@ -225,7 +225,7 @@ func TestApplyHostsBlockReplacedNotDuplicated(t *testing.T) {
 func TestHostsBlockKeepsSurroundingLines(t *testing.T) {
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.HostsFile, "a\n# BEGIN sbx\n127.0.1.1 old\n# END sbx\nb\n")
-	if err := setHostsBlock(l.HostsFile, "new"); err != nil {
+	if err := SetHostsBlock(l.HostsFile, "new"); err != nil {
 		t.Fatal(err)
 	}
 	want := "a\n# BEGIN sbx\n127.0.1.1 new\n# END sbx\nb\n"

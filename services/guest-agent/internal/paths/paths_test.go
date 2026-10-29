@@ -25,6 +25,7 @@ func TestDefaultLayoutMatchesSpec(t *testing.T) {
 		{"SecretsDir", l.SecretsDir, "/run/sbx/secrets"},
 		{"SecretsEnvFile", l.SecretsEnvFile, "/run/sbx/secrets/env"},
 		{"SecretFilesDir", l.SecretFilesDir, "/run/sbx/secrets/files"},
+		{"SecretsStateFile", l.SecretsStateFile, "/run/sbx/secrets.json"},
 		{"CmdSpecDir", l.CmdSpecDir, "/run/sbx/cmd-spec"},
 		{"SbxEnvFile", l.SbxEnvFile, "/etc/sbx/env"},
 		{"ConfigFile", l.ConfigFile, "/etc/sbx-agent/agent.toml"},
