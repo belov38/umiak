@@ -335,7 +335,7 @@ func TestDialOwnerWithoutSessionWaits(t *testing.T) {
 // An owner that keeps answering 503 ends in agent_unavailable after
 // AgentWait, polling the registry rather than spinning.
 func TestDialOwnerWithoutSessionTimeout(t *testing.T) {
-	const wait = 500 * time.Millisecond
+	const wait = 1500 * time.Millisecond
 	env := testenv.New(t, testenv.Options{})
 	a := env.StartInstance(nil)
 	m := env.NewMachine()
@@ -360,8 +360,10 @@ func TestDialOwnerWithoutSessionTimeout(t *testing.T) {
 	if el < wait*9/10 || el > wait+2*time.Second {
 		t.Fatalf("agent_unavailable after %s, want about %s", el, wait)
 	}
-	if n := hits.Load(); n < 2 || n > 100 {
-		t.Fatalf("owner got %d CONNECTs in %s, want a bounded poll", n, el)
+	// The poll backs off from 20 ms, doubling, to 200 ms: about 11 polls
+	// in 1.5 s (a fixed 20 ms would be 75).
+	if n := hits.Load(); n < 2 || n > 16 {
+		t.Fatalf("owner got %d CONNECTs in %s, want a backed-off poll", n, el)
 	}
 }
 
