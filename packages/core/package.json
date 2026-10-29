@@ -1,0 +1,17 @@
+{
+	"name": "@sbx/core",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Control plane domain: errors, ids, slugs, secrets crypto, state machines",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"devDependencies": {
+		"fast-check": "4.10.2"
+	}
+}
