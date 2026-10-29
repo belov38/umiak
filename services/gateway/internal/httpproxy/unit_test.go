@@ -205,11 +205,15 @@ func TestCleanResponseHeader(t *testing.T) {
 	h.Set("Alt-Svc", `h3=":443"`)
 	h.Set("X-Sbx-App", "1")
 	h.Set("X-Request-Id", "app")
+	h.Set("X-Sbx-User-Email", "forged@example.com")
+	h["x-sbx-user_email"] = []string{"forged@example.com"}
 	cleanResponseHeader(h)
 	if got := h.Values("Set-Cookie"); len(got) != 3 || got[0] != "keep=1; Path=/" || got[1] != "__Host-sbx_authx=2" || got[2] != "=other" {
 		t.Fatalf("Set-Cookie = %q", got)
 	}
-	for _, k := range []string{"Sbx-Error", "Sbx-Instance-Url", "sbx-lower", "Alt-Svc", "X-Request-Id"} {
+	// X-Sbx-User-Email is the gateway's identity header (spec 8.4): an app
+	// must not make a client believe the gateway set it.
+	for _, k := range []string{"Sbx-Error", "Sbx-Instance-Url", "sbx-lower", "Alt-Svc", "X-Request-Id", "X-Sbx-User-Email", "x-sbx-user_email"} {
 		if _, ok := h[k]; ok {
 			t.Errorf("%s kept", k)
 		}

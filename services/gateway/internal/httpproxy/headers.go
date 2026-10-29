@@ -103,14 +103,20 @@ func dropUpgrade(h http.Header) {
 	h["Connection"] = []string{strings.Join(kept, ", ")}
 }
 
+// userEmailHeader is the identity header the gateway sets on sso requests
+// (spec 8.4), compared after normalizeName.
+const userEmailHeader = "x-sbx-user-email"
+
 // cleanResponseHeader applies the response policy of spec 7.4 to an
 // application's headers: no Set-Cookie of a gateway cookie (the app shares
 // the host), no Sbx-* (an app must not forge a gateway error) and no Alt-Svc
 // (the app does not know how it is published). X-Request-Id is removed too:
-// the gateway sets its own.
+// the gateway sets its own; and X-Sbx-User-Email, in any spelling, so an app
+// cannot pass off an identity as the gateway's.
 func cleanResponseHeader(h http.Header) {
 	for k := range h {
-		if hasPrefixFold(k, "sbx-") || strings.EqualFold(k, "alt-svc") || strings.EqualFold(k, "x-request-id") {
+		if hasPrefixFold(k, "sbx-") || strings.EqualFold(k, "alt-svc") || strings.EqualFold(k, "x-request-id") ||
+			normalizeName(k) == userEmailHeader {
 			delete(h, k)
 		}
 	}
