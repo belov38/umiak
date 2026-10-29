@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 
@@ -135,7 +137,8 @@ func (h Hello) Header() http.Header {
 }
 
 // ParseHello parses upgrade request headers. A malformed or missing
-// Authorization yields *RejectError{Status: 401}; a missing machine id 400.
+// Authorization yields *RejectError{Status: 401}; a missing or non-UUID
+// machine id 400. The machine id is returned in canonical lower-case form.
 func ParseHello(h http.Header) (Hello, error) {
 	var out Hello
 	auth := h.Get("Authorization")
@@ -157,10 +160,18 @@ func ParseHello(h http.Header) (Hello, error) {
 	}
 	out.Secret = secret
 
-	out.MachineID = h.Get(wire.HeaderMachineID)
-	if out.MachineID == "" {
+	rawID := h.Get(wire.HeaderMachineID)
+	if rawID == "" {
 		return Hello{}, &RejectError{Status: http.StatusBadRequest, Reason: "missing " + wire.HeaderMachineID}
 	}
+	// The registry, NOTIFY payloads and the internal listener use the
+	// canonical lower-case form; agents may report upper-case or braced ids
+	// (Windows WMI).
+	id, err := uuid.Parse(rawID)
+	if err != nil {
+		return Hello{}, &RejectError{Status: http.StatusBadRequest, Reason: "malformed " + wire.HeaderMachineID}
+	}
+	out.MachineID = id.String()
 	out.BootID = h.Get(wire.HeaderBootID)
 	out.AgentInstanceID = h.Get(wire.HeaderAgentInstanceID)
 	out.Vmgenid = h.Get(wire.HeaderVmgenid)

@@ -155,7 +155,7 @@ func testHello(scheme transport.AuthScheme) transport.Hello {
 		secret[i] = byte(i + 1)
 	}
 	return transport.Hello{
-		MachineID:       "m-1",
+		MachineID:       "0f8fad5b-d9cb-469f-a165-70867728950e",
 		BootID:          "boot-1",
 		AgentInstanceID: "inst-1",
 		Vmgenid:         "vmgen-1",

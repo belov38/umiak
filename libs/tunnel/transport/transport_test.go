@@ -14,7 +14,7 @@ func TestHelloHeaderRoundTrip(t *testing.T) {
 	secret := bytes.Repeat([]byte{7}, wire.SecretLen)
 	for _, scheme := range []transport.AuthScheme{transport.AuthBootstrap, transport.AuthToken} {
 		in := transport.Hello{
-			MachineID:       "m1",
+			MachineID:       "0f8fad5b-d9cb-469f-a165-70867728950e",
 			BootID:          "boot-1",
 			AgentInstanceID: "inst-1",
 			Vmgenid:         "vg-1",
@@ -30,7 +30,7 @@ func TestHelloHeaderRoundTrip(t *testing.T) {
 		if got, want := h.Get("Authorization"), prefix+" "+wire.EncodeSecret(secret); got != want {
 			t.Fatalf("Authorization = %q, want %q", got, want)
 		}
-		if h.Get(wire.HeaderMachineID) != "m1" {
+		if h.Get(wire.HeaderMachineID) != in.MachineID {
 			t.Fatalf("machine id header = %q", h.Get(wire.HeaderMachineID))
 		}
 		out, err := transport.ParseHello(h)
@@ -52,11 +52,12 @@ func TestParseHelloErrors(t *testing.T) {
 		header http.Header
 		status int
 	}{
-		{"no auth", http.Header{wire.HeaderMachineID: {"m1"}}, 401},
-		{"bad scheme", http.Header{wire.HeaderMachineID: {"m1"}, "Authorization": {"Basic " + secret}}, 401},
-		{"bad secret", http.Header{wire.HeaderMachineID: {"m1"}, "Authorization": {"Bearer short"}}, 401},
-		{"no space", http.Header{wire.HeaderMachineID: {"m1"}, "Authorization": {"Bearer"}}, 401},
+		{"no auth", http.Header{wire.HeaderMachineID: {"0f8fad5b-d9cb-469f-a165-70867728950e"}}, 401},
+		{"bad scheme", http.Header{wire.HeaderMachineID: {"0f8fad5b-d9cb-469f-a165-70867728950e"}, "Authorization": {"Basic " + secret}}, 401},
+		{"bad secret", http.Header{wire.HeaderMachineID: {"0f8fad5b-d9cb-469f-a165-70867728950e"}, "Authorization": {"Bearer short"}}, 401},
+		{"no space", http.Header{wire.HeaderMachineID: {"0f8fad5b-d9cb-469f-a165-70867728950e"}, "Authorization": {"Bearer"}}, 401},
 		{"no machine id", http.Header{"Authorization": {"Bearer " + secret}}, 400},
+		{"machine id not a uuid", http.Header{wire.HeaderMachineID: {"garbage"}, "Authorization": {"Bearer " + secret}}, 400},
 	}
 	for _, c := range cases {
 		_, err := transport.ParseHello(c.header)
@@ -67,6 +68,23 @@ func TestParseHelloErrors(t *testing.T) {
 		}
 		if rej.Status != c.status {
 			t.Errorf("%s: status = %d, want %d", c.name, rej.Status, c.status)
+		}
+	}
+}
+
+func TestParseHelloCanonicalMachineID(t *testing.T) {
+	const want = "0f8fad5b-d9cb-469f-a165-70867728950e"
+	secret := wire.EncodeSecret(bytes.Repeat([]byte{1}, wire.SecretLen))
+	for _, in := range []string{
+		want,
+		"0F8FAD5B-D9CB-469F-A165-70867728950E",
+		"{0F8FAD5B-D9CB-469F-A165-70867728950E}",
+		"urn:uuid:0f8fad5b-d9cb-469f-a165-70867728950e",
+	} {
+		h := http.Header{wire.HeaderMachineID: {in}, "Authorization": {"Bearer " + secret}}
+		out, err := transport.ParseHello(h)
+		if err != nil || out.MachineID != want {
+			t.Errorf("ParseHello(%q) = %q, %v; want %q", in, out.MachineID, err, want)
 		}
 	}
 }
