@@ -1,0 +1,18 @@
+{
+	"name": "@sbx/bench",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "sbx-bench: S1 Proxmox foundation checks and measurements",
+	"bin": {
+		"sbx-bench": "./src/main.ts"
+	},
+	"scripts": {
+		"sbx-bench": "node src/main.ts",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"@sbx/pve": "workspace:*"
+	}
+}

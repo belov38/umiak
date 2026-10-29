@@ -160,6 +160,16 @@ func (s *Server) hashFile(dst map[string]string, p string) error {
 	if err != nil {
 		return err
 	}
+	// Proxmox writes its JSON state files from Perl hashes in random key order;
+	// hash the canonical form (encoding/json sorts map keys) so only content changes count.
+	if strings.HasSuffix(p, ".json") {
+		var v any
+		if json.Unmarshal(data, &v) == nil {
+			if canon, err := json.Marshal(v); err == nil {
+				data = canon
+			}
+		}
+	}
 	sum := sha256.Sum256(data)
 	dst["/"+p] = hex.EncodeToString(sum[:])
 	return nil

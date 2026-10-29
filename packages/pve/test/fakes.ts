@@ -184,6 +184,28 @@ export class FakePve {
 			this.ipam.push({ vmid, mac, ip: `10.88.0.${this.#nextIp++}` });
 			return this.#task();
 		}
+		if (key === "POST /nodes/pve/qemu/599/clone") {
+			const vmid = Number(p.newid);
+			const config: Record<string, string> = {
+				...TEMPLATE_CONFIG,
+				name: String(p.name),
+			};
+			delete config.template;
+			config.scsi0 = `local-lvm:vm-${vmid}-disk-0,discard=on,iothread=1,size=40G,ssd=1`;
+			config.net0 = "virtio=BC:24:11:00:00:01,bridge=sbx0,firewall=1";
+			config.vmgenid = `gen-clone-${vmid}`;
+			this.vms.set(vmid, {
+				config,
+				status: "stopped",
+				firewall: { rules: [], ipsets: {} },
+			});
+			this.ipam.push({
+				vmid,
+				mac: "BC:24:11:00:00:01",
+				ip: `10.88.0.${this.#nextIp++}`,
+			});
+			return this.#task();
+		}
 		if (key === "GET /cluster/sdn/ipams/pve/status") {
 			return this.ipam.map((e) => ({
 				vmid: e.vmid,
@@ -218,9 +240,15 @@ export class FakePve {
 		switch (`${method} ${sub}`) {
 			case "GET /config":
 				return { ...vm.config };
-			case "PUT /config":
+			case "PUT /config": {
 				for (const [k, v] of Object.entries(p)) vm.config[k] = String(v);
+				const mac = /virtio=([0-9A-F:]+)/i.exec(String(p.net0 ?? ""))?.[1];
+				const entry = this.ipam.find(
+					(e) => e.vmid === Number(/\/qemu\/(\d+)/.exec(path)?.[1]),
+				);
+				if (mac && entry) entry.mac = mac;
 				return null;
+			}
 			case "GET /status/current":
 				return {
 					status: vm.status === "paused" ? "running" : vm.status,

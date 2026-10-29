@@ -125,3 +125,18 @@ func TestInventoryRejectsUnknownSection(t *testing.T) {
 		t.Errorf("got %+v", r)
 	}
 }
+
+func TestInventoryHashesJSONCanonically(t *testing.T) {
+	hash := func(body string) any {
+		fs := inventoryFS()
+		fs["etc/pve/sdn/pve-ipam-state.json"] = &fstest.MapFile{Data: []byte(body)}
+		m := resultMap(t, newHarness(fs).call(t, "inventory", map[string]any{"sections": []string{"hashes"}}))
+		return m["hashes"].(map[string]any)["/etc/pve/sdn/pve-ipam-state.json"]
+	}
+	a := hash(`{"zones":{"sbx":{"ips":{"10.88.0.1":{"gateway":1},"10.88.0.100":{"vmid":"599","mac":"x"}}}}}`)
+	b := hash(`{"zones":{"sbx":{"ips":{"10.88.0.100":{"mac":"x","vmid":"599"},"10.88.0.1":{"gateway":1}}}}}`)
+	c := hash(`{"zones":{"sbx":{"ips":{"10.88.0.1":{"gateway":1}}}}}`)
+	if a != b || a == c {
+		t.Errorf("a=%v b=%v c=%v", a, b, c)
+	}
+}

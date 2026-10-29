@@ -285,6 +285,46 @@ export class Machines {
 		}
 	}
 
+	/**
+	 * Baseline for the bench (spec §7.2 step 4): a linked clone through the Proxmox API (qm clone),
+	 * then the same MAC, size and firewall as create.
+	 */
+	createViaQmClone(opts: { size?: MachineSize } = {}): Promise<MachineInfo> {
+		return this.#sem.run(async () => {
+			const { api, allocator, cfg } = this.#o;
+			const size = opts.size ?? DEFAULT_SIZE;
+			const { vmid, mac } = await allocator.allocate();
+			let posted = false;
+			try {
+				const upid = await api.post<string>(
+					this.#vmPath(cfg.templateVmid, "/clone"),
+					{
+						newid: vmid,
+						full: 0,
+						pool: cfg.pool,
+						name: `sbx-${vmid}`,
+					},
+				);
+				posted = true;
+				await api.waitTask(this.#node, upid);
+				await api.put(this.#vmPath(vmid, "/config"), {
+					net0: `virtio=${mac},bridge=${cfg.vnet},firewall=1`,
+					cores: size.cores,
+					memory: size.memoryMb,
+					tags: "sbx",
+				});
+				await this.#firewall(vmid, mac);
+				allocator.markActive(vmid);
+				const disks = parseDiskSet(await this.config(vmid), cfg.storage);
+				return { vmid, mac, node: this.#node, disks };
+			} catch (err) {
+				if (posted) await this.delete(vmid).catch(() => {});
+				else allocator.release(vmid);
+				throw err;
+			}
+		});
+	}
+
 	async #ipamIp(mac: string): Promise<string | undefined> {
 		const entries = await this.#o.api.get<{ mac?: string; ip?: string }[]>(
 			"/cluster/sdn/ipams/pve/status",

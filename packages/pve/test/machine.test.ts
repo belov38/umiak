@@ -338,3 +338,34 @@ describe("waitReady", () => {
 		expect(r.ipAt).toBeGreaterThanOrEqual(r.pingAt);
 	});
 });
+
+describe("createViaQmClone (baseline)", () => {
+	it("clones the template through the API, then applies our MAC, size and firewall", async () => {
+		const { api, machines, store } = setup();
+		const m = await machines.createViaQmClone({});
+		expect(m.vmid).toBe(500);
+		expect(api.paths().slice(0, 3)).toEqual([
+			"POST /nodes/pve/qemu/599/clone",
+			"PUT /nodes/pve/qemu/500/config",
+			"PUT /nodes/pve/qemu/500/firewall/options",
+		]);
+		const clone = api.calls[0]?.params;
+		expect(clone).toEqual({
+			newid: 500,
+			full: 0,
+			pool: "sandbox",
+			name: "sbx-500",
+		});
+		expect(api.vms.get(500)?.config).toMatchObject({
+			net0: "virtio=02:01:00:00:01:F4,bridge=sbx0,firewall=1",
+			cores: "2",
+			memory: "2048",
+			tags: "sbx",
+		});
+		expect(api.vms.get(500)?.firewall.ipsets).toEqual({
+			"ipfilter-net0": ["10.88.0.101"],
+		});
+		expect(m.disks[0]?.volid).toBe("local-lvm:vm-500-disk-0");
+		expect(store.get(1, 500)?.state).toBe("active");
+	});
+});
