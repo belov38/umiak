@@ -41,7 +41,7 @@ import {
 	type InfraOp,
 	infraRejected,
 } from "./infra-errors.ts";
-import { withNodeStartLock } from "./start-lock.ts";
+import { withNodePowerLock } from "./power-lock.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -254,10 +254,11 @@ export class PveNodeInfra implements NodeInfra {
 	readonly #machines = new Map<number, Machines>();
 	#templates: number[] = [];
 	/**
-	 * In-process start gate: at most one start of this node waits for (or
-	 * holds) the advisory lock, so a burst of starts holds one pool client.
+	 * In-process power gate (starts and deletes): at most one of them on this
+	 * node waits for (or holds) the advisory lock, so a burst holds one pool
+	 * client.
 	 */
-	#startGate: Promise<void> = Promise.resolve();
+	#powerGate: Promise<void> = Promise.resolve();
 
 	constructor(
 		db: pg.Pool,
@@ -408,21 +409,22 @@ export class PveNodeInfra implements NodeInfra {
 		});
 	}
 
-	/** Serialized per node (start-lock.ts): Proxmox ethers/IPAM writes race. */
+	/** Serialized per node with delete (power-lock.ts): ethers/IPAM writes race. */
 	start(vmid: number): Promise<void> {
 		return this.#run("start", () =>
-			this.#gated(() =>
-				withNodeStartLock(this.#db, this.#t.nodeId, () =>
-					this.#base.start(vmid),
-				),
-			),
+			this.#powerSerialized(() => this.#base.start(vmid)),
 		);
 	}
 
-	/** Runs fn after every earlier start of this instance has settled (FIFO). */
-	#gated<T>(fn: () => Promise<T>): Promise<T> {
-		const run = this.#startGate.then(fn);
-		this.#startGate = run.then(
+	/**
+	 * One queue per node for start and delete: the in-process gate first
+	 * (FIFO, settles on success and failure), then the advisory lock.
+	 */
+	#powerSerialized<T>(fn: () => Promise<T>): Promise<T> {
+		const run = this.#powerGate.then(() =>
+			withNodePowerLock(this.#db, this.#t.nodeId, fn),
+		);
+		this.#powerGate = run.then(
 			() => {},
 			() => {},
 		);
@@ -526,7 +528,11 @@ export class PveNodeInfra implements NodeInfra {
 		});
 	}
 
-	/** Never a template: neither an active one of this node nor any build of the provider. */
+	/**
+	 * Never a template: neither an active one of this node nor any build of
+	 * the provider. Serialized per node with start. A failed delete leaves the
+	 * lease `releasing` and is safe to repeat (S1 tolerates a missing VM).
+	 */
 	delete(vmid: number): Promise<void> {
 		return this.#run("delete", async () => {
 			const r = await this.#db.query<{ vmid: number }>(
@@ -539,7 +545,7 @@ export class PveNodeInfra implements NodeInfra {
 					`refusing to delete the template VM ${vmid}`,
 					"delete",
 				);
-			await this.#base.delete(vmid);
+			await this.#powerSerialized(() => this.#base.delete(vmid));
 		});
 	}
 

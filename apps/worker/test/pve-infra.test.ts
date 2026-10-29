@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import {
 	formatSmbios1,
+	NodeOpsError,
 	PveApi,
 	PveApiError,
 	PveTaskError,
@@ -364,6 +365,62 @@ describe("PveNodeInfra lifecycle", () => {
 		const err = await e.infra.status(555).catch((x: unknown) => x);
 		expect(String(err)).toMatch(/proxy loop/);
 		expect(isRetryable(err)).toBe(true);
+	});
+
+	it("a delete that fails on traces stays releasing and a retry finishes", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		e.api.keepIpamOnDelete = true;
+		const err = await e.infra.delete(vmid).catch((x: unknown) => x);
+		expect((err as { code?: string }).code).toBe("traces_remain");
+		expect(isRetryable(err)).toBe(true);
+		expect(
+			(await leases(e.topo.providerId)).find((l) => l.vmid === vmid)?.state,
+		).toBe("releasing");
+		expect(await e.infra.leaseOf(m)).toEqual({
+			vmid,
+			mac: expect.any(String),
+		});
+
+		// The IPAM entry goes away (Proxmox catches up); the repeated delete finishes.
+		e.api.ipam = e.api.ipam.filter((x) => x.vmid !== vmid);
+		await e.infra.delete(vmid);
+		expect(
+			(await leases(e.topo.providerId)).filter((l) => l.vmid === vmid),
+		).toEqual([]);
+	});
+
+	it("sbx-node busy during delete is transient; the VM survives and a retry finishes", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid);
+		e.node.fail["dhcp.release"] = new NodeOpsError(
+			"dhcp.release",
+			"busy",
+			"leases file is being rewritten",
+		);
+		const err = await e.infra.delete(vmid).catch((x: unknown) => x);
+		expect((err as { code?: string }).code).toBe("node_busy");
+		expect(isRetryable(err)).toBe(true);
+		expect(e.api.vms.has(vmid)).toBe(true);
+		expect(
+			(await leases(e.topo.providerId)).find((l) => l.vmid === vmid)?.state,
+		).toBe("releasing");
+
+		delete e.node.fail["dhcp.release"];
+		await e.infra.delete(vmid);
+		expect(e.api.vms.has(vmid)).toBe(false);
+		expect(await e.infra.leaseOf(m)).toBeUndefined();
 	});
 
 	it("delete refuses a template and tolerates a missing VM", async () => {

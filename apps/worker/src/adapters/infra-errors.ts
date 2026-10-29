@@ -163,7 +163,9 @@ export function classifyInfraError(err: unknown, op?: InfraOp): Error {
 		return transient("qga_exec_status_lost");
 	if (err instanceof StorageFullError) return transient("storage_full");
 	if (err instanceof AllocatorError) return transient(err.code);
-	if (err instanceof NodeOpsError) return transient("node_ops_error");
+	if (err instanceof NodeOpsError)
+		// busy: sbx-node found a file it guards mid-rewrite (dnsmasq leases).
+		return transient(err.code === "busy" ? "node_busy" : "node_ops_error");
 	return transient("infra_error");
 }
 

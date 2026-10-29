@@ -150,6 +150,39 @@ describe("classifyInfraError", () => {
 		expect((e as InfraError).code).toBe("traces_remain");
 	});
 
+	it("delete failures seen on the host are transient", () => {
+		const task = classifyInfraError(
+			new PveTaskError(
+				"UPID:pve:00001:destroy",
+				"got no worker upid - start worker failed",
+			),
+			"delete",
+		);
+		expect(isRetryable(task)).toBe(true);
+		expect((task as InfraError).code).toBe("pve_task_failed");
+		const api = classifyInfraError(
+			new PveApiError(
+				500,
+				"DELETE /nodes/pve/qemu/512: got no worker upid - start worker failed",
+			),
+			"delete",
+		);
+		expect(isRetryable(api)).toBe(true);
+		const busy = classifyInfraError(
+			new NodeOpsError("dhcp.leases", "busy", "lease file is being rewritten"),
+			"delete",
+		);
+		expect(isRetryable(busy)).toBe(true);
+		expect((busy as InfraError).code).toBe("node_busy");
+		const traces = classifyInfraError(
+			new TracesRemainError(512, [
+				"DHCP lease or ethers entry for 02:01:00:00:02:00 remains",
+			]),
+			"delete",
+		);
+		expect(isRetryable(traces)).toBe(true);
+	});
+
 	it("everything else is transient", () => {
 		for (const err of [
 			new PveTaskError("UPID:pve:1", "start failed"),

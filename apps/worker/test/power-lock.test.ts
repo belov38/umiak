@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { FakeNode, FakePve } from "@sbx/pve/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { withNodePowerLock } from "../src/adapters/power-lock.ts";
 import { PveInfraRegistry } from "../src/adapters/pve-infra.ts";
-import { withNodeStartLock } from "../src/adapters/start-lock.ts";
 import type { NodeInfra } from "../src/ports.ts";
 import { createTopology } from "./fakes/world.ts";
 
@@ -60,20 +60,20 @@ async function settle(turns = 20): Promise<void> {
 	for (let i = 0; i < turns; i++) await new Promise((r) => setImmediate(r));
 }
 
-describe("withNodeStartLock", () => {
+describe("withNodePowerLock", () => {
 	it("serializes callers on one node", async () => {
 		const node = randomUUID();
 		const log: string[] = [];
 		const aIn = deferred();
 		const gate = deferred();
-		const a = withNodeStartLock(db.pool, node, async () => {
+		const a = withNodePowerLock(db.pool, node, async () => {
 			log.push("a:in");
 			aIn.resolve();
 			await gate.promise;
 			log.push("a:out");
 		});
 		await aIn.promise;
-		const b = withNodeStartLock(db.pool, node, async () => {
+		const b = withNodePowerLock(db.pool, node, async () => {
 			log.push("b:in");
 		});
 		await waitFor(
@@ -89,14 +89,14 @@ describe("withNodeStartLock", () => {
 	it("callers on different nodes overlap", async () => {
 		const aIn = deferred();
 		const gate = deferred();
-		const a = withNodeStartLock(db.pool, randomUUID(), async () => {
+		const a = withNodePowerLock(db.pool, randomUUID(), async () => {
 			aIn.resolve();
 			await gate.promise;
 		});
 		await aIn.promise;
 		// Completes while node A's lock is held.
 		expect(
-			await withNodeStartLock(db.pool, randomUUID(), async () => "b"),
+			await withNodePowerLock(db.pool, randomUUID(), async () => "b"),
 		).toBe("b");
 		gate.resolve();
 		await a;
@@ -105,11 +105,11 @@ describe("withNodeStartLock", () => {
 	it("unlocks when the function throws", async () => {
 		const node = randomUUID();
 		await expect(
-			withNodeStartLock(db.pool, node, async () => {
+			withNodePowerLock(db.pool, node, async () => {
 				throw new Error("boom");
 			}),
 		).rejects.toThrow("boom");
-		const r = await withNodeStartLock(db.pool, node, async () => "ok");
+		const r = await withNodePowerLock(db.pool, node, async () => "ok");
 		expect(r).toBe("ok");
 		expect(await advisoryLocks()).toEqual({ granted: 0, waiting: 0 });
 	});
@@ -120,6 +120,19 @@ class GatedPve extends FakePve {
 	readonly gates = new Map<number, Deferred>();
 	readonly beganAt = new Map<number, Deferred>();
 	readonly events: string[] = [];
+
+	/** DELETE /qemu/<vmid> waits for the VM's gate too (when it has one). */
+	override async delete<T>(path: string, params?: Record<string, unknown>) {
+		const m = /\/qemu\/(\d+)$/.exec(path);
+		if (!m) return super.delete<T>(path, params);
+		const vmid = Number(m[1]);
+		this.events.push(`begin:del:${vmid}`);
+		this.beganAt.get(vmid)?.resolve();
+		await this.gates.get(vmid)?.promise;
+		const r = await super.delete<T>(path, params);
+		this.events.push(`end:del:${vmid}`);
+		return r;
+	}
 
 	override async post<T>(path: string, params?: Record<string, unknown>) {
 		const m = /\/qemu\/(\d+)\/status\/start$/.exec(path);
@@ -162,7 +175,7 @@ async function gatedNode() {
 	return { topo, api };
 }
 
-/** A registry = one worker process; each has its own in-process start gate. */
+/** A registry = one worker process; each has its own in-process power gate. */
 function registryFor(apis: Map<string, GatedPve>): PveInfraRegistry {
 	return new PveInfraRegistry(db.pool, {
 		secretsDir: "/nonexistent",
@@ -173,7 +186,7 @@ function registryFor(apis: Map<string, GatedPve>): PveInfraRegistry {
 	});
 }
 
-describe("PveNodeInfra.start serialization", () => {
+describe("PveNodeInfra start and delete serialization", () => {
 	it("N starts on one node in one process: one advisory lock session, run in order", async () => {
 		const a = await gatedNode();
 		const infra = await registryFor(new Map([[a.topo.nodeId, a.api]])).forNode(
@@ -263,7 +276,83 @@ describe("PveNodeInfra.start serialization", () => {
 		expect(await infra.status(550)).toBe("running");
 	});
 
-	it("clones are not serialized by the start lock", async () => {
+	it("a delete and a start on one node never overlap (two processes)", async () => {
+		const a = await gatedNode();
+		const apis = new Map([[a.topo.nodeId, a.api]]);
+		const p1 = await registryFor(apis).forNode(a.topo.nodeId);
+		const p2 = await registryFor(apis).forNode(a.topo.nodeId);
+		a.api.addStopped(560);
+		a.api.addStopped(561);
+		const start = p1.start(560);
+		await a.api.began(560);
+		const del = p2.delete(561);
+		await waitFor(
+			async () => (await advisoryLocks()).waiting === 1,
+			"the delete waits for the power lock",
+		);
+		await settle();
+		// Nothing of the delete reached Proxmox while the start is in flight.
+		expect(a.api.paths().filter((p) => p.includes("/561"))).toEqual([]);
+		a.api.release(560);
+		a.api.release(561);
+		await Promise.all([start, del]);
+		expect(a.api.events).toEqual([
+			"begin:560",
+			"end:560",
+			"begin:del:561",
+			"end:del:561",
+		]);
+		expect(a.api.vms.has(561)).toBe(false);
+	});
+
+	it("a start waits for a delete queued before it in the same process", async () => {
+		const a = await gatedNode();
+		const infra = await registryFor(new Map([[a.topo.nodeId, a.api]])).forNode(
+			a.topo.nodeId,
+		);
+		a.api.addStopped(562);
+		a.api.addStopped(563);
+		const del = infra.delete(562);
+		await a.api.began(562);
+		const start = infra.start(563);
+		await settle();
+		expect(await advisoryLocks()).toEqual({ granted: 1, waiting: 0 });
+		expect(a.api.events).toEqual(["begin:del:562"]);
+		a.api.release(562);
+		a.api.release(563);
+		await Promise.all([del, start]);
+		expect(a.api.events).toEqual([
+			"begin:del:562",
+			"end:del:562",
+			"begin:563",
+			"end:563",
+		]);
+	});
+
+	it("a delete on another node overlaps a held start", async () => {
+		const a = await gatedNode();
+		const b = await gatedNode();
+		const registry = registryFor(
+			new Map([
+				[a.topo.nodeId, a.api],
+				[b.topo.nodeId, b.api],
+			]),
+		);
+		const infraA = await registry.forNode(a.topo.nodeId);
+		const infraB = await registry.forNode(b.topo.nodeId);
+		a.api.addStopped(564);
+		b.api.addStopped(565);
+		b.api.release(565);
+		const held = infraA.start(564);
+		await a.api.began(564);
+		await infraB.delete(565);
+		expect(b.api.vms.has(565)).toBe(false);
+		expect(a.api.events).toEqual(["begin:564"]);
+		a.api.release(564);
+		await held;
+	});
+
+	it("clones are not serialized by the power lock", async () => {
 		const a = await gatedNode();
 		const infra = await registryFor(new Map([[a.topo.nodeId, a.api]])).forNode(
 			a.topo.nodeId,
