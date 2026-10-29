@@ -38,6 +38,7 @@ const (
 	SignatureInvalid     = "signature_invalid"
 	UpdateInProgress     = "update_in_progress"
 	ShimOutdated         = "shim_outdated"
+	RequestIDReused      = "request_id_reused"
 
 	InvalidPath     = "invalid_path"
 	PayloadTooLarge = "payload_too_large"

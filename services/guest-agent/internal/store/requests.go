@@ -11,7 +11,8 @@ import (
 
 // Request is a cached outcome of a mutating call keyed by its request id
 // (spec 15). Code is a connect.Code, 0 for success; Response is the encoded
-// response message, empty when the outcome is an error or too large.
+// response message, empty when the outcome is an error, an empty message or
+// too large; Truncated marks the last case: only the hash is kept.
 type Request struct {
 	Procedure string    `json:"procedure"`
 	Hash      string    `json:"hash"`
@@ -19,6 +20,7 @@ type Request struct {
 	Detail    string    `json:"detail,omitempty"`
 	Message   string    `json:"message,omitempty"`
 	Response  []byte    `json:"response,omitempty"`
+	Truncated bool      `json:"truncated,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
