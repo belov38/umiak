@@ -175,12 +175,16 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	e := newEnv(t)
 	// The drain is a CPU burst (20 agents reconnect at once, more under
 	// -race): the harness's 200 ms ping budget could close a session of B or
-	// C and disturb its reader. Gateway-side session moves (when a moved
+	// C and disturb its reader. Under load a heartbeat write can also lag
+	// past the harness's 500 ms StaleAfter, and the other gateways sweep the
+	// instance's sessions; this test does not exercise sweeps, so its
+	// gateways allow 3 s. Gateway-side session moves (when a moved
 	// session aborts its RPC streams) and closes are recorded: the moves
 	// time the expected stream errors of A's readers, both feed the diagnosis.
 	closes := &closeLog{}
 	mod := func(c *gateway.Config) {
 		c.HTTP2 = h2.ClientConfig{PingIdle: time.Second, PingTimeout: time.Second}
+		c.Timing.StaleAfter = 3 * time.Second
 		c.Logger = slog.New(&closeHandler{log: closes, next: c.Logger.Handler()})
 	}
 	gA, gB, gC := e.mustGateway(mod), e.mustGateway(mod), e.mustGateway(mod)
@@ -235,8 +239,12 @@ func TestDrainMovesAllAgents(t *testing.T) {
 			if ev, ok := m.findEvent(func(ev connEv) bool {
 				return ev.Kind != agent.KindConnected || ev.Gateway != g.name
 			}); ok {
-				t.Fatalf("setup disturbed before the drain: agent of %s (on %s) had event %s gw=%s reason=%q %v ago",
-					m.id, g.name, ev.Kind, ev.Gateway, ev.Reason, time.Since(ev.at).Round(time.Millisecond))
+				var gwCloses []string
+				for _, c := range closes.of(m.id) {
+					gwCloses = append(gwCloses, fmt.Sprintf("%s %v ago: %q", c.gw, time.Since(c.at).Round(time.Millisecond), c.reason))
+				}
+				t.Fatalf("setup disturbed before the drain: agent of %s (on %s) had event %s gw=%s reason=%q %v ago; gateway session closes: %v",
+					m.id, g.name, ev.Kind, ev.Gateway, ev.Reason, time.Since(ev.at).Round(time.Millisecond), gwCloses)
 			}
 		}
 	}
