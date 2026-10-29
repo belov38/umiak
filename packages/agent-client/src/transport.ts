@@ -14,6 +14,7 @@ import {
 } from "@connectrpc/connect";
 import {
 	createAsyncIterable,
+	type UniversalClientFn,
 	validateReadWriteMaxBytes,
 } from "@connectrpc/connect/protocol";
 import { createTransport as createConnectProtocolTransport } from "@connectrpc/connect/protocol-connect";
@@ -64,7 +65,7 @@ export interface AgentClientOptions {
 	 * (<internal_url>/v1/machines/<id>/rpc) with the given request headers.
 	 * Default: connect-node Connect protocol over HTTP/2 (h2c), one HTTP/2
 	 * session per gateway instance, no compression either way, messages up to
-	 * readMaxBytes.
+	 * readMaxBytes, and Trailer-Sbx-* response headers dropped.
 	 */
 	createTransport?: (
 		baseUrl: string,
@@ -256,10 +257,12 @@ export class AgentClient {
 		// readMaxBytes bounds a message after decompression in connect-es.
 		return createConnectProtocolTransport({
 			baseUrl,
-			httpClient: createNodeHttpClient({
-				httpVersion: "2",
-				sessionProvider: () => manager,
-			}),
+			httpClient: dropTrailerSbx(
+				createNodeHttpClient({
+					httpVersion: "2",
+					sessionProvider: () => manager,
+				}),
+			),
 			useBinaryFormat: true,
 			acceptCompression: [],
 			sendCompression: null,
@@ -401,6 +404,26 @@ export class AgentClient {
 			throw err;
 		}
 	}
+}
+
+/**
+ * Drops Trailer-Sbx-* response headers. Connect unary trailers travel as
+ * Trailer-<name> headers and connect-es merges them, without the prefix, into
+ * the error metadata, where they would read as the gateway's Sbx-* routing
+ * signals. Only the gateway produces those, and never as trailers; it strips
+ * the agent's (spec 16.1), this is defence in depth.
+ */
+function dropTrailerSbx(client: UniversalClientFn): UniversalClientFn {
+	return async (req) => {
+		const res = await client(req);
+		const header = new Headers();
+		res.header.forEach((v, k) => {
+			if (!k.toLowerCase().startsWith("trailer-sbx-")) {
+				header.append(k, v);
+			}
+		});
+		return { ...res, header };
+	};
 }
 
 function snapshot(header: HeadersInit | undefined): [string, string][] {

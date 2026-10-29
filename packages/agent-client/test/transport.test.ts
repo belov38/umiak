@@ -699,6 +699,51 @@ describe("AgentClient transport", () => {
 			expect(MAX_MESSAGE_BYTES).toBe(16 * MiB);
 		});
 	});
+
+	describe("Trailer-Sbx-* from the agent", () => {
+		function forged(code: string, extra: Record<string, string>) {
+			a.script.push({
+				route: "rpc",
+				times: Infinity,
+				answer: {
+					kind: "raw",
+					status: 403,
+					headers: { "content-type": "application/json", ...extra },
+					body: Buffer.from(JSON.stringify({ code, message: "agent says no" })),
+				},
+			});
+		}
+
+		it("is no machine_moved: a live instance hint is not followed", async () => {
+			registry.set(route(m, a.url));
+			registry.addInstance(b.url);
+			forged("permission_denied", {
+				"trailer-sbx-error-code": "machine_moved",
+				"Trailer-Sbx-Instance-Url": b.url,
+			});
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(rpcRequests(b)).toHaveLength(0);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+		});
+
+		it("is no agent_unavailable: the call is not retried", async () => {
+			registry.set(route(m, a.url));
+			forged("permission_denied", {
+				"TRAILER-SBX-ERROR-CODE": "agent_unavailable",
+			});
+			const err = await createClient(
+				Process,
+				agent({ waitForAgentMs: 300, pollIntervalMs: 50 }).transport(m),
+			)
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(rpcRequests(a)).toHaveLength(1);
+			expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+		});
+	});
 });
 
 /** A protobuf message holding only an unknown bytes field 15 of n zero bytes. */
