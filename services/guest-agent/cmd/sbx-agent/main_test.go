@@ -22,10 +22,11 @@ func TestRun(t *testing.T) {
 		{"identity bad action", []string{"identity", "x"}, 2, "", "usage"},
 		{"run", []string{"run"}, 1, "", "not implemented"},
 		{"shim without id", []string{"shim"}, shimUsageCode(), "", shimUsageErr()},
-		{"quiesce-watchdog", []string{"quiesce-watchdog"}, 1, "", "not implemented"},
+		{"quiesce-watchdog without lease", []string{"quiesce-watchdog"}, 2, "", "usage: sbx-agent quiesce-watchdog --lease"},
+		{"quiesce-watchdog extra arg", []string{"quiesce-watchdog", "--lease", "x", "y"}, 2, "", "usage"},
 		{"rollback", []string{"rollback"}, 1, "", "not implemented"},
 		{"doctor", []string{"doctor"}, 1, "", "not implemented"},
-		{"thaw", []string{"thaw"}, 1, "", "not implemented"},
+		{"thaw without force", []string{"thaw"}, 2, "", "usage: sbx-agent thaw --force"},
 		{"install-package", []string{"install-package"}, 1, "", "not implemented"},
 		{"selftest", []string{"selftest"}, 1, "", "not implemented"},
 	}

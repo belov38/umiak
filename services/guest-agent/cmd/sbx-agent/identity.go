@@ -11,17 +11,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/docker"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
 )
 
-// deps holds what the identity subcommands touch, so tests can point them at
-// a temporary tree.
+// deps holds what the CLI subcommands touch, so tests can point them at a
+// temporary tree and fakes.
 type deps struct {
 	layout    paths.Layout
 	source    ident.Source
 	resetter  ident.Resetter
 	stopAgent func() error
+	freezer   quiesce.Freezer
+	docker    quiesce.DockerAPI
 }
 
 // defaultDeps returns the production dependencies.
@@ -35,6 +39,8 @@ func defaultDeps() deps {
 		},
 		resetter:  ident.LinuxResetter{Layout: l},
 		stopAgent: stopAgentService,
+		freezer:   quiesce.NewFreezer(),
+		docker:    &docker.Client{},
 	}
 }
 
