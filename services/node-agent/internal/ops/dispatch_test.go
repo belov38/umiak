@@ -113,8 +113,9 @@ func TestUnknownOpAndBadJSON(t *testing.T) {
 }
 
 func TestVersionReturnsConfig(t *testing.T) {
-	m := resultMap(t, newHarness(nil).call(t, "version", nil))
-	if m["version"] != "test" || m["config"].(map[string]any)["vg"] != "pve" {
+	h := newHarness(fstest.MapFS{"proc/sys/kernel/osrelease": {Data: []byte("7.0.14-25-pve\n")}})
+	m := resultMap(t, h.call(t, "version", nil))
+	if m["version"] != "test" || m["config"].(map[string]any)["vg"] != "pve" || m["kernel"] != "7.0.14-25-pve" {
 		t.Errorf("version = %v", m)
 	}
 }

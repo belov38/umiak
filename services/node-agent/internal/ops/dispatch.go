@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 	"time"
 
 	"github.com/belov38/boat-dev-clone/services/node-agent/internal/config"
@@ -145,5 +146,6 @@ func redactArgs(op string, raw json.RawMessage) string {
 }
 
 func (s *Server) version(context.Context, json.RawMessage) (any, error) {
-	return map[string]any{"version": s.Version, "config": s.Cfg}, nil
+	kernel, _ := fs.ReadFile(s.Host.FS, "proc/sys/kernel/osrelease")
+	return map[string]any{"version": s.Version, "config": s.Cfg, "kernel": strings.TrimSpace(string(kernel))}, nil
 }
