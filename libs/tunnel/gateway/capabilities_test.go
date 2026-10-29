@@ -37,6 +37,11 @@ func TestCapabilitiesBounded(t *testing.T) {
 	var logs logBuffer
 	e.gateway("gw-a", func(c *Config) { c.Logger = slog.New(slog.NewTextHandler(&logs, nil)) })
 
+	// The total binds for long lists: count x per-entry max exceeds it.
+	if maxCapabilities*maxCapabilityBytes <= maxCapabilitiesTotal || 100 > maxCapabilities || 1<<10 > maxCapabilityBytes {
+		t.Fatalf("limits: %d x %d bytes do not exceed the %d total, or the over-total case is not within count and entry limits",
+			maxCapabilities, maxCapabilityBytes, maxCapabilitiesTotal)
+	}
 	many := make([]string, maxCapabilities+1)
 	for i := range many {
 		many[i] = "cap"
@@ -48,7 +53,10 @@ func TestCapabilitiesBounded(t *testing.T) {
 		log   string // expected in the gateway log
 	}{
 		{"ok", &tunnelv1.InfoResponse{Capabilities: []string{"process.pty", "files.upload.v1"}}, true, ""},
-		{"max", &tunnelv1.InfoResponse{Capabilities: slices.Repeat([]string{strings.Repeat("c", maxCapabilityBytes)}, maxCapabilities)}, true, ""},
+		{"max count", &tunnelv1.InfoResponse{Capabilities: slices.Repeat([]string{strings.Repeat("c", maxCapabilitiesTotal/maxCapabilities)}, maxCapabilities)}, true, ""},
+		{"max total", &tunnelv1.InfoResponse{Capabilities: slices.Repeat([]string{strings.Repeat("c", 1<<10)}, maxCapabilitiesTotal/(1<<10))}, true, ""},
+		// Within the count and per-entry limits, over the total.
+		{"over total", &tunnelv1.InfoResponse{Capabilities: slices.Repeat([]string{strings.Repeat("c", 1<<10)}, 100)}, false, "capabilities over the limits"},
 		{"too many", &tunnelv1.InfoResponse{Capabilities: many}, false, "capabilities over the limits"},
 		{"too long", &tunnelv1.InfoResponse{Capabilities: []string{strings.Repeat("c", maxCapabilityBytes+1)}}, false, "capabilities over the limits"},
 		{"huge info", &tunnelv1.InfoResponse{Os: strings.Repeat("x", 2<<20), Capabilities: []string{"a"}}, false, "Control/Info failed"},

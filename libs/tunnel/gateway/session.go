@@ -80,7 +80,7 @@ const (
 // set is not stored (capabilities stay unknown).
 const (
 	maxCapabilities      = 256
-	maxCapabilityBytes   = 256
+	maxCapabilityBytes   = 1 << 10
 	maxCapabilitiesTotal = 64 << 10
 )
 
