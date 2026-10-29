@@ -184,6 +184,33 @@ describe("snapshot", () => {
 		expect(s.disks[0]?.lv).toBe("sbx-snap-snap1-scsi0");
 	});
 
+	it("uses the caller-supplied snapshot id for LV names and tags", async () => {
+		const { node, driver, hook } = setup();
+		const s = await driver.snapshot(machine(linuxTpl), hook, { id: "abc123" });
+		expect(s.id).toBe("abc123");
+		expect(s.disks[0]?.lv).toBe("sbx-snap-abc123-scsi0");
+		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
+			.items as { name: string; tags: string[] }[];
+		expect(items[0]).toMatchObject({
+			name: "sbx-snap-abc123-scsi0",
+			tags: ["sbx", "sbx-snap-abc123", "sbx-src-500"],
+		});
+	});
+
+	it("accepts a 32-character hex id and rejects ids the sbx-node guard would refuse", async () => {
+		const { node, driver, hook } = setup();
+		await driver.snapshot(machine(linuxTpl), hook, {
+			id: "0123456789abcdef0123456789abcdef",
+		});
+		const before = node.calls.length;
+		for (const id of ["", "ABC", "a-b", "a_b", "a b", "x".repeat(33), "../x"]) {
+			await expect(
+				driver.snapshot(machine(linuxTpl), hook, { id }),
+			).rejects.toThrow(/invalid snapshot id/);
+		}
+		expect(node.calls.length).toBe(before);
+	});
+
 	it("pauses vCPUs between freeze and thaw when there are several disks", async () => {
 		const { log, driver, hook } = setup();
 		await driver.snapshot(machine(winTpl), hook);

@@ -22,7 +22,7 @@ func TestStartsCountsGenerators(t *testing.T) {
 	if n := s.Starts("dup"); n != 1 {
 		t.Fatalf("Starts = %d, want 1", n)
 	}
-	c.launch(0)
+	c.launch(0, nil)
 	if n := s.Starts("dup"); n != 2 {
 		t.Fatalf("Starts after a second generator = %d, want 2", n)
 	}

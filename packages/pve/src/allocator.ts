@@ -11,16 +11,39 @@ export interface VmidLease {
 	purpose: LeasePurpose;
 	createdAt: number;
 	updatedAt: number;
+	/** Opaque id of the entity that owns the lease (S6: machine id). Makes allocate idempotent. */
+	ownerId?: string;
 }
 
-/** Allocator state. SQLite in the PoC, Postgres in S6. */
+type MaybePromise<T> = T | Promise<T>;
+
+/** Allocator state. SQLite in the PoC (synchronous), Postgres in S6 (asynchronous). */
 export interface AllocatorStore {
 	/** Inserts the row; false on a uniqueness conflict. The insert is the lock. */
-	tryInsert(l: VmidLease): boolean;
-	get(cluster: number, vmid: number): VmidLease | undefined;
-	list(cluster: number): VmidLease[];
-	setState(cluster: number, vmid: number, state: LeaseState): void;
-	remove(cluster: number, vmid: number): void;
+	tryInsert(l: VmidLease): MaybePromise<boolean>;
+	get(cluster: number, vmid: number): MaybePromise<VmidLease | undefined>;
+	list(cluster: number): MaybePromise<VmidLease[]>;
+	setState(
+		cluster: number,
+		vmid: number,
+		state: LeaseState,
+	): MaybePromise<void>;
+	remove(cluster: number, vmid: number): MaybePromise<void>;
+	/**
+	 * Removes the row only while it is `releasing` and owned by `ownerId`
+	 * (null: an ownerless reservation); true if a row was removed. Optional:
+	 * without it the allocator reads, compares and removes.
+	 */
+	removeReleasing?(
+		cluster: number,
+		vmid: number,
+		ownerId: string | null,
+	): MaybePromise<boolean>;
+	/** Lease of the owner that is not in the releasing state, if any. */
+	findByOwner?(
+		cluster: number,
+		ownerId: string,
+	): MaybePromise<VmidLease | undefined>;
 }
 
 export interface SnapshotStore {
@@ -53,6 +76,13 @@ export class AllocatorError extends Error {
 	}
 }
 
+export interface AllocatedVmid {
+	vmid: number;
+	mac: string;
+	/** The owner's existing lease was returned instead of a new one. */
+	reused: boolean;
+}
+
 export interface AllocatorOptions {
 	store: AllocatorStore;
 	clusterId: number;
@@ -74,11 +104,11 @@ export class Allocator {
 		return (this.#o.now ?? Date.now)();
 	}
 
-	ensureTemplate(): void {
+	async ensureTemplate(): Promise<void> {
 		const { store, clusterId, templateVmid } = this.#o;
-		if (store.get(clusterId, templateVmid)) return;
+		if (await store.get(clusterId, templateVmid)) return;
 		const t = this.#now();
-		store.tryInsert({
+		await store.tryInsert({
 			cluster: clusterId,
 			vmid: templateVmid,
 			mac: macFor(clusterId, templateVmid),
@@ -89,17 +119,47 @@ export class Allocator {
 		});
 	}
 
-	async allocate(): Promise<{ vmid: number; mac: string }> {
+	/**
+	 * Takes an ownerless `releasing` lease of a VMID that has none, so that
+	 * allocate skips it while a delete of a lease-less (orphan) VM runs; the
+	 * delete's final release removes this row. False if a lease exists
+	 * (someone else's: the caller re-reads it).
+	 */
+	async reserveForDelete(vmid: number): Promise<boolean> {
+		const { store, clusterId } = this.#o;
+		const t = this.#now();
+		return store.tryInsert({
+			cluster: clusterId,
+			vmid,
+			mac: macFor(clusterId, vmid),
+			state: "releasing",
+			purpose: "machine",
+			createdAt: t,
+			updatedAt: t,
+		});
+	}
+
+	/**
+	 * With ownerId, repeated calls return the owner's existing lease unless it
+	 * is releasing; `reused` tells the caller so. A reused lease may already
+	 * have a VM (another executor of the same owner made it), so the caller
+	 * must not roll it back on failure.
+	 */
+	async allocate(ownerId?: string): Promise<AllocatedVmid> {
 		const { store, clusterId, range, templateVmid } = this.#o;
+		if (ownerId !== undefined) {
+			const own = await this.#findOwned(ownerId);
+			if (own) return { vmid: own.vmid, mac: own.mac, reused: true };
+		}
 		const occupied = await this.#o.occupied();
-		const taken = new Set(store.list(clusterId).map((l) => l.vmid));
+		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
 		for (let vmid = range.min; vmid <= range.max; vmid++) {
 			if (vmid === templateVmid || taken.has(vmid) || occupied.has(vmid))
 				continue;
 			const t = this.#now();
 			const mac = macFor(clusterId, vmid);
 			if (
-				store.tryInsert({
+				await store.tryInsert({
 					cluster: clusterId,
 					vmid,
 					mac,
@@ -107,9 +167,17 @@ export class Allocator {
 					purpose: "machine",
 					createdAt: t,
 					updatedAt: t,
+					...(ownerId !== undefined ? { ownerId } : {}),
 				})
 			) {
-				return { vmid, mac };
+				return { vmid, mac, reused: false };
+			}
+			// A concurrent allocate of the same owner may have won the race
+			// after our first lookup: the store refuses a second live lease of
+			// one owner, so every further insert would fail too.
+			if (ownerId !== undefined) {
+				const own = await this.#findOwned(ownerId);
+				if (own) return { vmid: own.vmid, mac: own.mac, reused: true };
 			}
 		}
 		throw new AllocatorError(
@@ -118,24 +186,51 @@ export class Allocator {
 		);
 	}
 
-	markActive(vmid: number): void {
-		this.#o.store.setState(this.#o.clusterId, vmid, "active");
+	async #findOwned(ownerId: string): Promise<VmidLease | undefined> {
+		const { store, clusterId } = this.#o;
+		const found = store.findByOwner
+			? await store.findByOwner(clusterId, ownerId)
+			: (await store.list(clusterId)).find(
+					(l) => l.ownerId === ownerId && l.state !== "releasing",
+				);
+		return found && found.state !== "releasing" ? found : undefined;
 	}
 
-	markReleasing(vmid: number): void {
-		this.#o.store.setState(this.#o.clusterId, vmid, "releasing");
+	async markActive(vmid: number): Promise<void> {
+		await this.#o.store.setState(this.#o.clusterId, vmid, "active");
+	}
+
+	async markReleasing(vmid: number): Promise<void> {
+		await this.#o.store.setState(this.#o.clusterId, vmid, "releasing");
 	}
 
 	/** Frees the VMID and MAC. Call only after delete verified that no traces remain. */
-	release(vmid: number): void {
-		this.#o.store.remove(this.#o.clusterId, vmid);
+	async release(vmid: number): Promise<void> {
+		await this.#o.store.remove(this.#o.clusterId, vmid);
 	}
 
-	get(vmid: number): VmidLease | undefined {
+	/**
+	 * The final release of a delete: frees the VMID only while its lease is
+	 * still the `releasing` one of `ownerId` (null: a delete's ownerless
+	 * reservation), so a release never frees a lease that changed hands.
+	 * False if no such row was there.
+	 */
+	async releaseOwned(vmid: number, ownerId: string | null): Promise<boolean> {
+		const { store, clusterId } = this.#o;
+		if (store.removeReleasing)
+			return store.removeReleasing(clusterId, vmid, ownerId);
+		const l = await store.get(clusterId, vmid);
+		if (l?.state !== "releasing" || (l.ownerId ?? null) !== ownerId)
+			return false;
+		await store.remove(clusterId, vmid);
+		return true;
+	}
+
+	async get(vmid: number): Promise<VmidLease | undefined> {
 		return this.#o.store.get(this.#o.clusterId, vmid);
 	}
 
-	list(): VmidLease[] {
+	async list(): Promise<VmidLease[]> {
 		return this.#o.store.list(this.#o.clusterId);
 	}
 }

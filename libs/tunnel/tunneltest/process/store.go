@@ -38,6 +38,10 @@ type Options struct {
 	// RetainBytes is how many bytes of each stream are kept (0 keeps all).
 	// Older output is dropped and attaching below it yields truncated.
 	RetainBytes uint64
+	// Hold, when set, keeps every command from exiting until it is closed:
+	// the command writes all its output, then waits for Hold (or a kill)
+	// before its exit. Attach streams stay open meanwhile.
+	Hold <-chan struct{}
 }
 
 // Store holds the commands of one machine.
@@ -114,14 +118,14 @@ func (s *Store) start(id string, spec *testingv1.CommandSpec) (*command, bool, e
 		done:    make(chan struct{}),
 	}
 	s.cmds[id] = c
-	c.launch(s.opts.RetainBytes)
+	c.launch(s.opts.RetainBytes, s.opts.Hold)
 	return c, true, nil
 }
 
 // launch starts the output generator; Starts counts launches.
-func (c *command) launch(retain uint64) {
+func (c *command) launch(retain uint64, hold <-chan struct{}) {
 	c.starts.Add(1)
-	go c.run(retain)
+	go c.run(retain, hold)
 }
 
 // invoked records a Start or Run call for id.
@@ -255,7 +259,8 @@ func Expected(spec *testingv1.CommandSpec) (stdout, stderr []byte) {
 // run generates the output, one line per interval (as fast as possible with
 // a yield when the interval is 0), and exits with the spec's code. Line k is
 // due at start + k*interval, so slow timers do not stretch the command.
-func (c *command) run(retain uint64) {
+// With hold set it waits for hold to close before the exit.
+func (c *command) run(retain uint64, hold <-chan struct{}) {
 	lb := lineBytes(c.spec)
 	n := int(c.spec.GetLines())
 	interval := c.spec.GetInterval().AsDuration()
@@ -292,6 +297,14 @@ func (c *command) run(retain uint64) {
 		}
 		i, b := line(k, lb)
 		c.write(i, b, retain)
+	}
+	if hold != nil {
+		select {
+		case <-c.kill:
+			c.finish()
+			return
+		case <-hold:
+		}
 	}
 	c.mu.Lock()
 	if c.status == testingv1.ExitStatus_EXIT_STATUS_UNSPECIFIED { // not killed meanwhile

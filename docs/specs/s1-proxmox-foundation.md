@@ -285,6 +285,7 @@ interface QuiesceHook {
   4. `sbx-node lv.remove` оставшихся LV с тегом `sbx-vm-<vmid>`.
   5. Проверка: конфига нет (404), firewall-файла VM нет, в IPAM нет записи с MAC, в lease-файле нет MAC; повторный `dhcp.release` удаляет строку ethers (MAC уже нет в `mac-cache.json`).
   6. Освободить VMID и MAC в аллокаторе. Только после успешной проверки; иначе запись остаётся в состоянии `releasing` и её добирает `cleanup`.
+- **Проверка владельца** (дополнение S6, 2026-10-30). `start`, `stop`, `shutdown` и `delete` принимают необязательный `expectedOwner` (id владельца lease, в S6 `machineId`; у `delete` ещё `null` — VM без lease). Прямо перед действием читается lease VMID: если он не этого владельца (у `start` ещё и если он `releasing`), бросается `OwnerMismatchError` (код `owner_mismatch`, повтор не поможет) и Proxmox не трогается; delete, у которого нет ни lease владельца, ни VM, ничего не делает. Delete VMID без lease (VM-сирота) перед шагом 1 занимает VMID строкой `releasing` без владельца (`reserveForDelete`), чтобы create не взял его посреди delete; шаг 6 удаляет только строку `releasing` своего владельца (`null` для такого резерва). Без `expectedOwner` поведение прежнее. Откат create/fork выполняется под обёрткой `powerLock`, если её передал вызывающий (S6 сериализует под ней питание ноды, S6 §15.1).
 - Лимит параллельных clone на ноду настраивается (дефолт 4) [решение S1]; стенд даёт данные для выбора.
 
 ### 6.4 SMBIOS (интерфейс для S2)

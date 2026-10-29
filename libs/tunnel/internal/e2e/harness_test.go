@@ -610,6 +610,7 @@ type reader struct {
 
 	out      [2][]byte
 	exit     *testingv1.ExitEvent
+	exitAt   time.Time    // when exit arrived
 	attaches atomic.Int64 // Attach calls made, readable while running
 	// attachBytes counts the bytes accepted from the current Attach call.
 	attachBytes atomic.Int64
@@ -717,7 +718,7 @@ func (r *reader) attachOnce(ctx context.Context, url string) (bool, error) {
 				return true, &fatalError{fmt.Sprintf("exit %v before the output end (%d/%d bytes read)",
 					ev.Exit, len(r.out[0]), len(r.out[1]))}
 			}
-			r.exit = ev.Exit
+			r.exit, r.exitAt = ev.Exit, time.Now()
 			return true, nil
 		case *testingv1.AttachResponse_Truncated:
 			return true, &fatalError{fmt.Sprintf("unexpected truncated event %v", ev.Truncated)}

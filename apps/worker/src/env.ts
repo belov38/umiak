@@ -1,0 +1,158 @@
+// Environment of the worker process and of sbx-admin, validated once at
+// start. An invalid environment is a fatal error that lists every problem.
+import { z } from "zod";
+
+export class EnvError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "EnvError";
+	}
+}
+
+export const LOG_LEVELS = [
+	"fatal",
+	"error",
+	"warn",
+	"info",
+	"debug",
+	"trace",
+	"silent",
+] as const;
+
+type Env = Record<string, string | undefined>;
+
+// Empty strings count as unset (compose files often pass `VAR=`).
+const unsetEmpty = (v: unknown) => (v === "" ? undefined : v);
+
+const required = (what: string) =>
+	z.preprocess(
+		unsetEmpty,
+		z.string({
+			error: (iss) =>
+				iss.input === undefined ? `required (${what})` : "must be a string",
+		}),
+	);
+
+const optional = z.preprocess(unsetEmpty, z.string().optional());
+
+const databaseUrl = required("postgres connection string").refine(
+	(v) => {
+		try {
+			const u = new URL(v);
+			return u.protocol === "postgres:" || u.protocol === "postgresql:";
+		} catch {
+			return false;
+		}
+	},
+	{ message: "must be a postgres:// or postgresql:// URL" },
+);
+
+const bool = (dflt: boolean) =>
+	z.preprocess(
+		unsetEmpty,
+		z
+			.enum(["1", "0", "true", "false", "yes", "no"], {
+				error: () => "must be 1/0, true/false or yes/no",
+			})
+			.default(dflt ? "1" : "0")
+			.transform((v) => v === "1" || v === "true" || v === "yes"),
+	);
+
+const int = (dflt: number, min: number, max: number) =>
+	z.preprocess(
+		unsetEmpty,
+		z.coerce
+			.number({ error: () => "must be an integer" })
+			.int({ error: () => "must be an integer" })
+			.min(min)
+			.max(max)
+			.default(dflt),
+	);
+
+const workerSchema = z.object({
+	DATABASE_URL: databaseUrl,
+	SBX_CONFIG_FILE: required("path of the YAML config"),
+	SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
+	SBX_SECRETS_DIR: required("directory with the PVE and sbx-node secrets"),
+	SBX_GATEWAY_SERVICE_TOKEN_FILE: optional,
+	SBX_RECONCILE_DRY_RUN: bool(true),
+	SBX_HTTP_PORT: int(9090, 0, 65535),
+	SBX_MIGRATE_ON_START: bool(true),
+	SBX_LOG_LEVEL: z.preprocess(
+		unsetEmpty,
+		z
+			.enum(LOG_LEVELS, {
+				error: () => `must be one of ${LOG_LEVELS.join(", ")}`,
+			})
+			.default("info"),
+	),
+	SBX_DB_POOL_MAX: int(30, 2, 1000),
+	SBX_IDP_SYNC_INTERVAL: int(300, 10, 86_400),
+});
+
+const adminSchema = z.object({
+	DATABASE_URL: databaseUrl,
+	SBX_CONFIG_FILE: optional,
+	SBX_DATA_KEYS_FILE: optional,
+	SBX_SECRETS_DIR: optional,
+	SBX_LOG_LEVEL: workerSchema.shape.SBX_LOG_LEVEL,
+});
+
+export interface WorkerEnv {
+	databaseUrl: string;
+	configFile: string;
+	dataKeysFile: string;
+	secretsDir: string;
+	gatewayServiceTokenFile: string | undefined;
+	reconcileDryRun: boolean;
+	httpPort: number;
+	migrateOnStart: boolean;
+	logLevel: (typeof LOG_LEVELS)[number];
+	dbPoolMax: number;
+	idpSyncIntervalMs: number;
+}
+
+export interface AdminEnv {
+	databaseUrl: string;
+	configFile: string | undefined;
+	dataKeysFile: string | undefined;
+	secretsDir: string | undefined;
+	logLevel: (typeof LOG_LEVELS)[number];
+}
+
+function fail(err: z.ZodError): never {
+	const lines = err.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`);
+	throw new EnvError(`invalid environment:\n${lines.join("\n")}`);
+}
+
+export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
+	const r = workerSchema.safeParse(env);
+	if (!r.success) fail(r.error);
+	const e = r.data;
+	return {
+		databaseUrl: e.DATABASE_URL,
+		configFile: e.SBX_CONFIG_FILE,
+		dataKeysFile: e.SBX_DATA_KEYS_FILE,
+		secretsDir: e.SBX_SECRETS_DIR,
+		gatewayServiceTokenFile: e.SBX_GATEWAY_SERVICE_TOKEN_FILE,
+		reconcileDryRun: e.SBX_RECONCILE_DRY_RUN,
+		httpPort: e.SBX_HTTP_PORT,
+		migrateOnStart: e.SBX_MIGRATE_ON_START,
+		logLevel: e.SBX_LOG_LEVEL,
+		dbPoolMax: e.SBX_DB_POOL_MAX,
+		idpSyncIntervalMs: e.SBX_IDP_SYNC_INTERVAL * 1000,
+	};
+}
+
+export function parseAdminEnv(env: Env = process.env): AdminEnv {
+	const r = adminSchema.safeParse(env);
+	if (!r.success) fail(r.error);
+	const e = r.data;
+	return {
+		databaseUrl: e.DATABASE_URL,
+		configFile: e.SBX_CONFIG_FILE,
+		dataKeysFile: e.SBX_DATA_KEYS_FILE,
+		secretsDir: e.SBX_SECRETS_DIR,
+		logLevel: e.SBX_LOG_LEVEL,
+	};
+}
