@@ -114,9 +114,13 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 	};
 	const del = async (vmid: number) => {
 		const t0 = Date.now();
-		await machines.delete(vmid);
-		live.delete(vmid);
-		ram.release(vmid);
+		try {
+			await machines.delete(vmid);
+			live.delete(vmid);
+		} finally {
+			// Safe even if delete failed: RamGuard counts a VM that still runs by its real status.
+			ram.release(vmid);
+		}
 		return ms(t0);
 	};
 

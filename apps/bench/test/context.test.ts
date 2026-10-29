@@ -60,6 +60,16 @@ describe("RamGuard", () => {
 		expect(r.filter((x) => x.status === "rejected")).toHaveLength(1);
 	});
 
+	it("still counts a VM whose reservation was released while it runs", async () => {
+		// The bench releases a reservation even when delete fails; a VM left running is still counted.
+		const { vm, ram } = guard(4096);
+		vm(500, "running");
+		await ram.reserve(500, 2048);
+		ram.release(500);
+		await ram.reserve(501, 2048);
+		await expect(ram.reserve(502, 2048)).rejects.toThrow(/running 2048 MB/);
+	});
+
 	it("does not count the VM being reserved twice", async () => {
 		const { vm, ram } = guard(2048);
 		vm(500, "running");

@@ -557,17 +557,19 @@ export class Machines {
 				(d.ethers ?? []).some((l) => l.mac === m)
 			);
 		};
-		if (await hasLease()) {
-			// Proxmox removes neither the dnsmasq lease nor the ethers mapping on VM delete.
+		let left = await hasLease();
+		// Proxmox removes neither the dnsmasq lease nor the ethers mapping on VM delete.
+		// dhcp_release only sends a DHCPRELEASE packet: dnsmasq rewrites its lease file shortly
+		// after, and may drop the packet (seen with concurrent releases), so it is sent again.
+		// Releasing a lease that is already gone does nothing.
+		for (let round = 0; round < 3 && left; round++) {
 			await node.call("dhcp.release", { mac });
-			// dhcp_release only sends a DHCPRELEASE packet; dnsmasq rewrites its lease file shortly after.
-			let left = true;
 			for (let i = 0; i < 10 && left; i++) {
 				left = await hasLease();
 				if (left) await sleep(this.#o.pollMs ?? 200);
 			}
-			if (left) problems.push(`DHCP lease or ethers entry for ${mac} remains`);
 		}
+		if (left) problems.push(`DHCP lease or ethers entry for ${mac} remains`);
 		if (problems.length > 0) throw new TracesRemainError(vmid, problems);
 	}
 }

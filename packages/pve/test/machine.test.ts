@@ -455,6 +455,32 @@ describe("review fixes", () => {
 		expect(store.get(1, 500)).toBeUndefined();
 	});
 
+	it("sends dhcp_release again when dnsmasq dropped the first one", async () => {
+		const { node, machines, store } = setup();
+		const a = await machines.create({});
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		let releases = 0;
+		node.handlers["dhcp.release"] = () => {
+			// The first DHCPRELEASE packet never reaches dnsmasq.
+			if (++releases > 1) node.leases = [];
+			return { released: true };
+		};
+		await machines.delete(a.vmid);
+		expect(releases).toBe(2);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("reports a lease that survives every release", async () => {
+		const { node, machines, store } = setup();
+		const a = await machines.create({});
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		node.handlers["dhcp.release"] = () => ({ released: true });
+		const err = await machines.delete(a.vmid).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(TracesRemainError);
+		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(3);
+		expect(store.get(1, 500)?.state).toBe("releasing");
+	});
+
 	it("refuses to delete the template", async () => {
 		const { api, machines } = setup();
 		await expect(machines.delete(599)).rejects.toThrow(/template/);
