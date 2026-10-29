@@ -343,9 +343,13 @@ func TestServerSettings(t *testing.T) {
 	if s.Protocols == nil || !s.Protocols.HTTP1() || !s.Protocols.HTTP2() || s.Protocols.UnencryptedHTTP2() {
 		t.Errorf("sbx server protocols = %v", s.Protocols)
 	}
-	tn := edge.NewTunnelServer(http.NotFoundHandler())
-	if tn.ReadHeaderTimeout != 10*time.Second || tn.MaxHeaderBytes != 16<<10 {
-		t.Errorf("tunnel server: ReadHeader %s MaxHeaderBytes %d", tn.ReadHeaderTimeout, tn.MaxHeaderBytes)
+	tn := edge.NewTunnelServer(http.NotFoundHandler(), config.Timeouts{})
+	if tn.ReadHeaderTimeout != 5*time.Second || tn.IdleTimeout != 5*time.Second || tn.MaxHeaderBytes != 16<<10 {
+		t.Errorf("tunnel server: ReadHeader %s Idle %s MaxHeaderBytes %d", tn.ReadHeaderTimeout, tn.IdleTimeout, tn.MaxHeaderBytes)
+	}
+	tn = edge.NewTunnelServer(http.NotFoundHandler(), config.Timeouts{ReadHeader: time.Minute, TunnelReadHeader: 2 * time.Second})
+	if tn.ReadHeaderTimeout != 2*time.Second || tn.IdleTimeout != 2*time.Second {
+		t.Errorf("tunnel server with TunnelReadHeader 2s: ReadHeader %s Idle %s", tn.ReadHeaderTimeout, tn.IdleTimeout)
 	}
 	if tn.Protocols == nil || !tn.Protocols.HTTP1() || tn.Protocols.HTTP2() || tn.Protocols.UnencryptedHTTP2() {
 		t.Errorf("tunnel server protocols = %v", tn.Protocols)

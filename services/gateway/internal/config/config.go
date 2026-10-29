@@ -44,6 +44,10 @@ type Timeouts struct {
 	Dial           time.Duration
 	ResponseHeader time.Duration
 	StreamIdle     time.Duration
+	// TunnelReadHeader is the header timeout of the tunnel server (TLS
+	// edge), also its idle timeout between requests: a tunnel conn that has
+	// not sent the upgrade is closed after it.
+	TunnelReadHeader time.Duration
 }
 
 // Config is the validated gateway configuration.
@@ -242,6 +246,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		AuthFailPerMin:     l.integer("RATELIMIT_AUTH_FAIL_PER_MIN", 20),
 		AuthBlock:          l.duration("RATELIMIT_AUTH_BLOCK", 5*time.Minute),
 		ConnsPerIP:         l.integer("RATELIMIT_CONNS_PER_IP", 512),
+		TunnelConnsPerIP:   l.integer("RATELIMIT_TUNNEL_CONNS_PER_IP", 512),
 		SSHConnPerMin:      l.integer("RATELIMIT_SSH_CONN_PER_MIN", 10),
 		SSHConnBurst:       l.integer("RATELIMIT_SSH_CONN_BURST", 20),
 		SSHAuthFailPerMin:  l.integer("RATELIMIT_SSH_AUTH_FAIL_PER_MIN", 10),
@@ -259,15 +264,16 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.SSHLoginCertMaxValidity = l.duration("SSH_LOGIN_CERT_MAX_VALIDITY", 24*time.Hour)
 
 	c.Timeouts = Timeouts{
-		TLSHandshake:   l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),
-		ReadHeader:     l.duration("TIMEOUT_READ_HEADER", 10*time.Second),
-		MaxHeaderBytes: l.integer("MAX_HEADER_BYTES", 64<<10),
-		ClientIdle:     l.duration("TIMEOUT_CLIENT_IDLE", 120*time.Second),
-		RouteLookup:    l.duration("TIMEOUT_ROUTE_LOOKUP", 3*time.Second),
-		AgentWait:      l.duration("TIMEOUT_AGENT_WAIT", 10*time.Second),
-		Dial:           l.duration("TIMEOUT_DIAL", 10*time.Second),
-		ResponseHeader: l.duration("TIMEOUT_RESPONSE_HEADER", 5*time.Minute),
-		StreamIdle:     l.duration("TIMEOUT_STREAM_IDLE", 60*time.Minute),
+		TLSHandshake:     l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),
+		ReadHeader:       l.duration("TIMEOUT_READ_HEADER", 10*time.Second),
+		MaxHeaderBytes:   l.integer("MAX_HEADER_BYTES", 64<<10),
+		ClientIdle:       l.duration("TIMEOUT_CLIENT_IDLE", 120*time.Second),
+		RouteLookup:      l.duration("TIMEOUT_ROUTE_LOOKUP", 3*time.Second),
+		AgentWait:        l.duration("TIMEOUT_AGENT_WAIT", 10*time.Second),
+		Dial:             l.duration("TIMEOUT_DIAL", 10*time.Second),
+		ResponseHeader:   l.duration("TIMEOUT_RESPONSE_HEADER", 5*time.Minute),
+		StreamIdle:       l.duration("TIMEOUT_STREAM_IDLE", 60*time.Minute),
+		TunnelReadHeader: l.duration("TIMEOUT_TUNNEL_READ_HEADER", 5*time.Second),
 	}
 
 	c.TunnelAdmitRate = l.float("TUNNEL_ADMIT_RATE", 200)

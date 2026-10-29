@@ -14,8 +14,9 @@ import (
 // TunnelHandler serves the tunnel endpoint: GET wire.ConnectPath goes to
 // the WebSocket upgrade handler of libs/tunnel behind the admission token
 // bucket lim (nil: unlimited); over the limit the answer is 503 with
-// Retry-After: 1. Anything else is 404. There is no per-IP limit: all VMs of
-// a node share one SNAT address (spec 11).
+// Retry-After: 1. Anything else is 404. The per-IP cap of open tunnel conns
+// is applied by the dispatcher at the handshake (DispatchConfig.
+// TunnelConnLimit); the node SNAT address is exempt from it.
 func TunnelHandler(adm transport.Admitter, lim *rate.Limiter, m *obs.Metrics) http.Handler {
 	ws := wstransport.NewHandler(adm, wstransport.HandlerOptions{})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
