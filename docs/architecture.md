@@ -10,7 +10,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 | Шаблон | ОС | Доступ |
 |---|---|---|
-| `linux` | Ubuntu (cloud-init) | exec, files, SSH |
+| `linux` | Ubuntu 26.04 LTS (сборка: `docs/specs/s5-linux-template.md`) | exec, files, SSH |
 | `linux-desktop` | Ubuntu + X11/openbox + Chrome | + рабочий стол в браузере, computer-use |
 | `windows` | Windows 11 (образ и лицензия пользователя) | exec (PowerShell), files, рабочий стол |
 | `windows-core` | Windows Server Core | exec (PowerShell), files |
@@ -64,7 +64,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Sandbox** — логическая сущность для пользователя: `id`, `slug` (для URL и hostname), `template`, `size`, `state`, `health`, `activity`, TTL и idle-stop, labels, текущая `machineId`. Env и секреты — в отдельной таблице, зашифрованы (AES-256-GCM).
 - **Machine** — конкретная VM: `id` (= `machineId` в smbios), `vmid`, `node`, `provider` (кластер), MAC, `state` (provisioning / booting / warm / claiming / running / stopped / deleting …). Привязка к sandbox ставится один раз и не меняется; у sandbox может быть несколько machine по истории (задел на перенос).
 - **Provider / Node / Storage** — топология: кластер Proxmox, нода, хранилище с драйвером. Модель рассчитана на несколько кластеров и нод, PoC — одна нода.
-- **TemplateBuild** — сборка шаблона на ноде (VMID шаблона, раскладка дисков, версия агента), пишет S5.
+- **TemplateBuild** — сборка шаблона на ноде (VMID шаблона, раскладка дисков, версия агента, манифест), пишет S5: `building → ready → active → deprecated → retired` (или `failed`), подробно `docs/specs/s5-linux-template.md` §11–§12.
 - **Disk** — LV на ноде: принадлежит machine или снапшоту.
 - **Snapshot** — набор LV-снимков всех дисков machine: `kind` (saved / fork_source; `auto` зарезервирован на фазу 2), `name` для saved.
 - **Operation** — операция над sandbox (create, fork, stop, resume, recover, delete, save_snapshot); одна активная на sandbox, delete вытесняет.
