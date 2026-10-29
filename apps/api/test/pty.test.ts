@@ -92,6 +92,8 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 	 * call reaches the agent, or after it applied the input.
 	 */
 	const inputFaults: ("before" | "after")[] = [];
+	/** Each sendInput takes this long (a slow agent). */
+	let inputDelayMs = 0;
 	const reset = () =>
 		Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
 	/** Data bytes the agent attach delivered, by command (core id). */
@@ -123,6 +125,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 				if (p === "sendInput") {
 					return async (m: string, req: AgentSendInputRequest) => {
 						inputs.push({ ...req, data: Buffer.from(req.data) });
+						if (inputDelayMs > 0) await sleep(inputDelayMs);
 						const fault = inputFaults.shift();
 						if (fault === "before") throw reset();
 						const r = await t.sendInput(m, req);
@@ -710,24 +713,113 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 				},
 			}).app,
 		);
-		const c = connect(connectPath(id), { base: srv.base });
-		await c.opened;
-		// Stop reading the TCP socket before anything arrives: the kernel
-		// buffers fill, then the server's ws buffer.
-		const sock = (c.ws as Any)._socket;
-		sock.pause();
-		await sleep(1000);
-		const r = await h.request("GET", `${sb.commands}/${id}`);
-		expect((r.body as Any).streams.pty.sizeBytes).toBe(total);
-		// What the server pulled from the agent is bounded by the socket
-		// buffers, not the whole output.
-		const pulled = attachProgress(id);
-		expect(pulled).toBeLessThan(total / 2);
-		sock.resume();
-		const closed = await c.closed;
-		expect(closed.code).toBe(1000);
-		expect(c.bytes().length).toBe(total);
-		await srv.close();
+		try {
+			const c = connect(connectPath(id), { base: srv.base });
+			await c.opened;
+			// Stop reading the TCP socket before anything arrives: the kernel
+			// buffers fill, then the server's ws buffer.
+			const sock = (c.ws as Any)._socket;
+			sock.pause();
+			await sleep(1000);
+			const r = await h.request("GET", `${sb.commands}/${id}`);
+			expect((r.body as Any).streams.pty.sizeBytes).toBe(total);
+			// What the server pulled from the agent is bounded by the socket
+			// buffers, not the whole output.
+			const pulled = attachProgress(id);
+			expect(pulled).toBeLessThan(total / 2);
+			sock.resume();
+			const closed = await c.closed;
+			expect(closed.code).toBe(1000);
+			expect(c.bytes().length).toBe(total);
+		} finally {
+			await srv.close();
+		}
+	});
+
+	it("a large paste while the agent is slow: the socket is not read above 1 MiB queued, input arrives whole in 64 KiB batches", async () => {
+		const total = 8 * 1024 * 1024;
+		const id = await pty({ command: `head -c ${total} | wc -c` });
+		const c = connect(connectPath(id));
+		await until(() => c.texts.length > 0);
+		const before = inputs.length;
+		inputDelayMs = 50;
+		try {
+			const frame = Buffer.alloc(64 * 1024, 0x61);
+			for (let i = 0; i < total / frame.length; i++) c.send(frame);
+			await sleep(600);
+			// The server stopped reading: most of the paste still waits in the
+			// client's buffer (TCP buffers hold far less than 6 MiB).
+			expect(c.ws.bufferedAmount).toBeGreaterThan(2 * 1024 * 1024);
+			// A paused socket is not dropped by the ping (100 ms here).
+			expect(c.ws.readyState).toBe(WebSocket.OPEN);
+		} finally {
+			inputDelayMs = 0;
+		}
+		await until(
+			() => c.bytes().toString().includes(String(total)),
+			20_000,
+			"wc",
+		);
+		expect((await c.closed).code).toBe(1000);
+		const mine = inputs.slice(before);
+		expect(mine.every((i) => i.data.length <= 64 * 1024)).toBe(true);
+		expect(mine.reduce((n, i) => n + i.data.length, 0)).toBe(total);
+		expect(mine.map((i) => i.seq)).toEqual(mine.map((_, k) => k + 1));
+	});
+
+	it("Connection: Upgrade on other routes is a normal request: an NDJSON stream with its abort signal, a POST with its body", async () => {
+		const { createConnection } = await import("node:net");
+		const port = Number(new URL(base).port);
+		const raw = (head: string, body = "") =>
+			new Promise<{ text: () => string; close: () => void }>((resolve) => {
+				let text = "";
+				const sock = createConnection(port, "127.0.0.1", () => {
+					sock.write(head + body);
+					resolve({ text: () => text, close: () => sock.destroy() });
+				});
+				sock.on("data", (d) => {
+					text += d.toString();
+				});
+				sock.on("error", () => {});
+			});
+		const auth = `Authorization: Bearer ${w.secret}\r\nHost: x\r\n`;
+
+		const body = JSON.stringify({ command: "printf posted", mode: "sync" });
+		const post = await raw(
+			`POST ${sb.commands} HTTP/1.1\r\n${auth}Connection: Upgrade\r\nUpgrade: h2c\r\n` +
+				`Content-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n`,
+			body,
+		);
+		await until(
+			() => post.text().includes('"stdout":"posted"'),
+			10_000,
+			"sync",
+		);
+		expect(post.text()).toMatch(/^HTTP\/1\.1 200/);
+		post.close();
+
+		const cmd = await h.request("POST", sb.commands, {
+			json: { command: "sleep 30", mode: "detached" },
+		});
+		const cid = (cmd.body as Any).id;
+		const stream = await raw(
+			`GET ${sb.commands}/${cid}/stream?follow=true HTTP/1.1\r\n${auth}` +
+				"Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n" +
+				"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+		);
+		await until(
+			() => stream.text().includes('"type":"attached"'),
+			5000,
+			"attached",
+		);
+		expect(stream.text()).toMatch(/^HTTP\/1\.1 200/);
+		expect(stream.text().toLowerCase()).toContain("application/x-ndjson");
+		expect(h.deps.streams.size).toBe(1);
+		stream.close();
+		await until(() => h.deps.streams.size === 0, 3000, "stream released");
+		await h.request("POST", `${sb.commands}/${cid}/kill`, {
+			json: { graceMs: 0 },
+		});
 	});
 
 	it("ping every pingMs; a peer that never answers is dropped", async () => {

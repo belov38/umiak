@@ -61,6 +61,10 @@ export const DEFAULT_PTY_TIMINGS: PtyTimings = {
 
 /** At most this much input per Process/SendInput. */
 export const PTY_INPUT_MAX_BATCH = 64 * 1024;
+/** Above this much queued input the socket is not read (a large paste). */
+export const PTY_INPUT_MAX_QUEUED = 1024 * 1024;
+/** touchApiActivity of the sandbox at most this often while typing. */
+export const PTY_TOUCH_INTERVAL_MS = 30_000;
 export const PTY_MAX_SIZE = 1000;
 
 /** WebSocket close codes of sbx.pty.v1. */
@@ -195,6 +199,8 @@ export async function runPtySocket(
 
 	let alive = true;
 	const ping = setInterval(() => {
+		// Paused by input backpressure: pongs wait in the unread socket.
+		if (writer.paused) alive = true;
 		if (!alive) {
 			ws.terminate();
 			return;
@@ -202,7 +208,25 @@ export async function runPtySocket(
 		alive = false;
 		if (ws.readyState === WebSocket.OPEN) ws.ping();
 	}, t.pingMs);
-	const writer = new PtyWriter(deps, t, (e) => fail(e));
+	const writer = new PtyWriter(deps, t, (e) => fail(e), {
+		pause: () => ws.pause(),
+		resume: () => ws.resume(),
+	});
+	// Typing keeps the sandbox from idle-stopping (touch at most every 30 s).
+	let sandboxId: string | null = null;
+	let touchedAt = 0;
+	const touch = () => {
+		if (sandboxId === null) return;
+		const now = Date.now();
+		if (now - touchedAt < PTY_TOUCH_INTERVAL_MS) return;
+		touchedAt = now;
+		void deps.svc.touchApiActivity(sandboxId).catch((err: unknown) => {
+			deps.log.warn(
+				{ err, requestId: conn.requestId },
+				"touchApiActivity failed",
+			);
+		});
+	};
 	ws.on("pong", () => {
 		alive = true;
 	});
@@ -219,6 +243,7 @@ export async function runPtySocket(
 		if (closing) return;
 		if (isBinary) {
 			writer.push(rawBytes(data));
+			touch();
 			return;
 		}
 		const m = controlMessage(rawBytes(data).toString("utf8"));
@@ -255,6 +280,8 @@ export async function runPtySocket(
 	}
 	if (closing) return;
 	const { command, machineId } = target;
+	sandboxId = command.sandboxId;
+	touch();
 	writer.ready(machineId, command.id);
 
 	let offset = conn.offset ?? 0;
@@ -386,8 +413,13 @@ class PtyWriter {
 	readonly #t: PtyTimings;
 	readonly #fail: (e: ErrorInfo) => void;
 	readonly #session = randomUUID();
+	readonly #flow: { pause(): void; resume(): void };
 	#seq = 0;
+	/** Input chunks from #head on; #queued bytes in all. */
 	#queue: Buffer[] = [];
+	#head = 0;
+	#queued = 0;
+	#paused = false;
 	#size: { cols: number; rows: number } | null = null;
 	#timer: NodeJS.Timeout | null = null;
 	#busy = false;
@@ -395,15 +427,31 @@ class PtyWriter {
 	#done = false;
 	#gone = false;
 
-	constructor(deps: ApiDeps, t: PtyTimings, fail: (e: ErrorInfo) => void) {
+	constructor(
+		deps: ApiDeps,
+		t: PtyTimings,
+		fail: (e: ErrorInfo) => void,
+		flow: { pause(): void; resume(): void },
+	) {
 		this.#deps = deps;
 		this.#t = t;
 		this.#fail = fail;
+		this.#flow = flow;
+	}
+
+	/** The socket is not read until the queued input drains. */
+	get paused(): boolean {
+		return this.#paused;
 	}
 
 	push(b: Buffer): void {
 		if (this.#done || b.length === 0) return;
 		this.#queue.push(b);
+		this.#queued += b.length;
+		if (!this.#paused && this.#queued >= PTY_INPUT_MAX_QUEUED) {
+			this.#paused = true;
+			this.#flow.pause();
+		}
 		this.#schedule(this.#t.inputCoalesceMs);
 	}
 
@@ -430,7 +478,7 @@ class PtyWriter {
 
 	#schedule(ms: number): void {
 		if (this.#target === null || this.#busy || this.#done) return;
-		if (this.#queue.length === 0 && this.#size === null) return;
+		if (this.#queued === 0 && this.#size === null) return;
 		if (this.#timer !== null) {
 			if (ms > 0) return;
 			clearTimeout(this.#timer);
@@ -476,15 +524,42 @@ class PtyWriter {
 		}
 	}
 
+	/** The next batch: only the leading chunks it needs (at most 64 KiB). */
 	#take(): Buffer | null {
-		if (this.#queue.length === 0) return null;
-		const all = Buffer.concat(this.#queue);
-		this.#queue = [];
-		if (all.length > PTY_INPUT_MAX_BATCH) {
-			this.#queue.push(all.subarray(PTY_INPUT_MAX_BATCH));
-			return all.subarray(0, PTY_INPUT_MAX_BATCH);
+		if (this.#queued === 0) return null;
+		const parts: Buffer[] = [];
+		let n = 0;
+		while (this.#head < this.#queue.length && n < PTY_INPUT_MAX_BATCH) {
+			const chunk = this.#queue[this.#head] as Buffer;
+			const room = PTY_INPUT_MAX_BATCH - n;
+			if (chunk.length <= room) {
+				parts.push(chunk);
+				this.#head++;
+				n += chunk.length;
+			} else {
+				parts.push(chunk.subarray(0, room));
+				this.#queue[this.#head] = chunk.subarray(room);
+				n += room;
+			}
 		}
-		return all;
+		// Drop consumed slots now and then (amortized O(1) per chunk).
+		if (this.#head === this.#queue.length) {
+			this.#queue = [];
+			this.#head = 0;
+		} else if (this.#head > 1024 && this.#head * 2 > this.#queue.length) {
+			this.#queue = this.#queue.slice(this.#head);
+			this.#head = 0;
+		}
+		this.#queued -= n;
+		this.#resumeBelowMark();
+		return parts.length === 1 ? (parts[0] as Buffer) : Buffer.concat(parts, n);
+	}
+
+	#resumeBelowMark(): void {
+		if (this.#paused && this.#queued < PTY_INPUT_MAX_QUEUED) {
+			this.#paused = false;
+			this.#flow.resume();
+		}
 	}
 
 	async #call(fn: () => Promise<unknown>): Promise<void> {
@@ -503,6 +578,11 @@ class PtyWriter {
 				if (unreachable && !this.#gone && Date.now() + delay < deadline) {
 					await sleep(delay);
 					delay = Math.min(delay * 2, 1000);
+					// Closed meanwhile: what was received is sent once, never repeated.
+					if (this.#gone) {
+						this.#stop();
+						return;
+					}
 					continue;
 				}
 				this.#stop();
@@ -519,6 +599,9 @@ class PtyWriter {
 	#stop(): void {
 		this.#done = true;
 		this.#queue = [];
+		this.#head = 0;
+		this.#queued = 0;
+		this.#resumeBelowMark();
 		this.#size = null;
 		if (this.#timer !== null) clearTimeout(this.#timer);
 		this.#timer = null;

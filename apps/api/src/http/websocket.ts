@@ -4,9 +4,12 @@
 // `?team=` on proxied), scopes and validation. A route that accepts it
 // calls `acceptWebSocket(c, ...)`; anything else the app answers (401,
 // 403 origin_forbidden, 400, 429, ...) is written to the socket as a full
-// HTTP response with the error envelope. (@hono/node-server's
-// `upgradeWebSocket` writes refusals without a body, so this module owns
-// the `upgrade` event instead.)
+// HTTP response with the error envelope (capped at 64 KiB).
+// (@hono/node-server's `upgradeWebSocket` writes refusals without a body,
+// so this module owns the `upgrade` event instead.) Only `Upgrade:
+// websocket` requests to a WebSocket route (`upgradePaths`) take this
+// path; any other request with `Connection: Upgrade` (h2c, another path)
+// is served as a normal request, with its body and abort signal.
 import { type IncomingMessage, type Server, STATUS_CODES } from "node:http";
 import type { Duplex } from "node:stream";
 import { createAdaptorServer } from "@hono/node-server";
@@ -16,6 +19,24 @@ import type { ApiEnv } from "../deps.ts";
 
 /** Largest client message (input bytes or a control frame). */
 export const WS_MAX_PAYLOAD = 1024 * 1024;
+
+/** Largest body of a refused upgrade (error envelopes are small). */
+export const WS_REFUSAL_MAX_BODY = 64 * 1024;
+
+/** Paths of the WebSocket routes: `GET .../ptys/{command}/connect`. */
+export const WEBSOCKET_PATHS: readonly RegExp[] = [
+	/^\/v1\/sandboxes\/[^/]+\/ptys\/[^/]+\/connect$/,
+];
+
+/** True for an `Upgrade: websocket` request to one of `paths`. */
+export function isWebSocketRequest(
+	req: IncomingMessage,
+	paths: readonly RegExp[] = WEBSOCKET_PATHS,
+): boolean {
+	if (req.headers.upgrade?.toLowerCase() !== "websocket") return false;
+	const path = (req.url ?? "/").split("?")[0] ?? "/";
+	return paths.some((p) => p.test(path));
+}
 
 /** What a route does with an accepted upgrade. */
 export interface WebSocketAccept {
@@ -112,7 +133,8 @@ function headerLines(h: Headers): string[] {
 	return out;
 }
 
-function toRequest(req: IncomingMessage): Request {
+/** The upgrade request; its signal aborts when the socket closes. */
+function toRequest(req: IncomingMessage, socket: Duplex): Request {
 	const tls = (req.socket as { encrypted?: boolean }).encrypted === true;
 	const url = new URL(
 		req.url ?? "/",
@@ -123,17 +145,44 @@ function toRequest(req: IncomingMessage): Request {
 		if (v === undefined) continue;
 		for (const one of Array.isArray(v) ? v : [v]) headers.append(k, one);
 	}
-	return new Request(url, { headers });
+	const ac = new AbortController();
+	if (socket.destroyed) ac.abort();
+	else socket.once("close", () => ac.abort());
+	return new Request(url, { headers, signal: ac.signal });
 }
 
-/** The app's answer as a plain HTTP response; the connection closes. */
+/** The body of `res` up to `max` bytes; null when it is longer. */
+async function cappedBody(res: Response, max: number): Promise<Buffer | null> {
+	if (res.body === null) return Buffer.alloc(0);
+	const reader = res.body.getReader();
+	const parts: Uint8Array[] = [];
+	let n = 0;
+	try {
+		for (;;) {
+			const r = await reader.read();
+			if (r.done) return Buffer.concat(parts);
+			n += r.value.length;
+			if (n > max) return null;
+			parts.push(r.value);
+		}
+	} catch {
+		return Buffer.alloc(0);
+	} finally {
+		void reader.cancel().catch(() => {});
+	}
+}
+
+/**
+ * The app's answer as a plain HTTP response; the connection closes. A body
+ * over WS_REFUSAL_MAX_BODY is not read further: 500 without a body.
+ */
 async function refuse(socket: Duplex, res: Response): Promise<void> {
-	const body = Buffer.from(
-		await res.arrayBuffer().catch(() => new ArrayBuffer(0)),
-	);
+	const capped = await cappedBody(res, WS_REFUSAL_MAX_BODY);
 	if (socket.destroyed) return;
+	const status = capped === null ? 500 : res.status;
+	const body = capped ?? Buffer.alloc(0);
 	const lines = [
-		`HTTP/1.1 ${res.status} ${STATUS_CODES[res.status] ?? ""}`,
+		`HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ""}`,
 		...headerLines(res.headers),
 		"Connection: close",
 		`Content-Length: ${body.length}`,
@@ -151,6 +200,11 @@ async function upgrade(
 	head: Buffer,
 ): Promise<void> {
 	socket.on("error", () => socket.destroy());
+	if (!isWebSocketRequest(req)) {
+		// Only reachable on a server built without the shouldUpgradeCallback.
+		await refuse(socket, new Response(null, { status: 400 }));
+		return;
+	}
 	const env: UpgradeEnv = {
 		incoming: req,
 		outgoing: undefined,
@@ -158,7 +212,7 @@ async function upgrade(
 	};
 	let res: Response;
 	try {
-		const r = await fetch(toRequest(req), env);
+		const r = await fetch(toRequest(req, socket), env);
 		res = r instanceof Response ? r : new Response(null, { status: 500 });
 	} catch {
 		res = new Response(null, { status: 500 });
@@ -197,8 +251,10 @@ async function upgrade(
 /**
  * Completes WebSocket upgrades of `server` through `fetch` (the listener
  * app's `fetch`). Returns the WebSocket server; it is closed with `server`.
+ * The server must be created with `shouldUpgradeCallback:
+ * isWebSocketRequest`, else other upgrade requests are refused with 400.
  */
-export function handleUpgrades(
+function handleUpgrades(
 	server: Server,
 	fetch: (request: Request, env: never) => unknown,
 	wss: WebSocketServer = createWebSocketServer(),
@@ -217,7 +273,11 @@ export function handleUpgrades(
 export function createApiServer(app: {
 	fetch: (request: Request, env: never) => unknown;
 }): { server: Server; wss: WebSocketServer } {
-	const server = createAdaptorServer({ fetch: app.fetch as never }) as Server;
+	const server = createAdaptorServer({
+		fetch: app.fetch as never,
+		// Other requests with Connection: Upgrade stay normal requests.
+		serverOptions: { shouldUpgradeCallback: (req) => isWebSocketRequest(req) },
+	}) as Server;
 	const wss = handleUpgrades(server, app.fetch);
 	return { server, wss };
 }
