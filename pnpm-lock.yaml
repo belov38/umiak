@@ -179,6 +179,12 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6))
 
+  packages/proto:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+
 packages:
 
   '@biomejs/biome@2.6.4':
@@ -249,6 +255,9 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@bufbuild/protobuf@2.16.0':
+    resolution: {integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==}
 
   '@jridgewell/resolve-uri@3.1.2':
     resolution: {integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==}
@@ -806,6 +815,8 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.6.4':
     optional: true
+
+  '@bufbuild/protobuf@2.16.0': {}
 
   '@jridgewell/resolve-uri@3.1.2': {}
 

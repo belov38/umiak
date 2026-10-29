@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package sbx.tunnel.v1;
+
+option go_package = "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1;tunnelv1";
+
+// ErrorDetail is attached to Connect errors returned by the gateway.
+message ErrorDetail {
+  // Stable machine-readable error code, for example "machine_moved".
+  string code = 1;
+  // True if the caller may retry the same request.
+  bool retryable = 2;
+  // Base URL of the gateway instance that owns the machine.
+  // Set only when code is "machine_moved".
+  string instance_url = 3;
+}
