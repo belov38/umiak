@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # Service names are fixed by the spec: Control, Events, Process.
+    - SERVICE_SUFFIX
+breaking:
+  use:
+    - FILE
