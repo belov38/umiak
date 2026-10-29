@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1110,5 +1111,33 @@ func TestAgentUploadOffsetPasses(t *testing.T) {
 		}
 		delete(resp.Header, wire.HeaderUploadOffset)
 		checkNoSbx(t, tc.method, resp.Header)
+	}
+}
+
+// The gateway's own Control/Events calls never follow an agent redirect.
+func TestControlDoesNotFollowRedirects(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	var redirected atomic.Int64
+	e.rawAgent(id, bs, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if strings.HasPrefix(r.URL.Path, "/redirected") {
+			redirected.Add(1)
+			w.Header().Set("Content-Type", "application/proto")
+			return
+		}
+		// 303: followed with a GET, no replayable body needed.
+		http.Redirect(w, r, "/redirected"+r.URL.Path, http.StatusSeeOther)
+	}))
+	mc := waitMachine(t, gw.testGW, id)
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	if err := mc.Ping(ctx); err == nil {
+		t.Error("Ping succeeded through a redirect")
+	}
+	time.Sleep(100 * time.Millisecond) // the session's own Info and Subscribe
+	if n := redirected.Load(); n != 0 {
+		t.Errorf("%d gateway calls followed the agent's redirect", n)
 	}
 }

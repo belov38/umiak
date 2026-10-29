@@ -133,7 +133,10 @@ func newSession(g *Gateway, hello transport.Hello, info transport.ConnInfo, res 
 	}
 	s.ctx, s.cancel = context.WithCancel(g.bg)
 	s.mc = &MachineConn{s: s}
-	hc := &http.Client{Transport: s.mc}
+	// The gateway's own calls never follow an agent redirect.
+	hc := &http.Client{Transport: s.mc, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
 	s.control = tunnelv1connect.NewControlClient(hc, agentBaseURL,
 		connect.WithReadMaxBytes(maxControlResponseBytes), connect.WithSendMaxBytes(maxMessageBytes))
 	// A larger event is never buffered: connect discards it and ends the stream.
