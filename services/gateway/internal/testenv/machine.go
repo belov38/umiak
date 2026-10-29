@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -15,15 +16,20 @@ import (
 )
 
 // MachineOptions configure NewMachine.
-type MachineOptions struct{}
+type MachineOptions struct {
+	// Handler serves the agent's non-CONNECT requests (sbx.agent.v1, test
+	// services such as the tunneltest/process double); nil answers 404.
+	Handler http.Handler
+}
 
 // Machine is one VM: credentials, the local apps behind its ports and the
 // current agent client.
 type Machine struct {
 	ID string
 
-	e  *Env
-	bs []byte
+	e       *Env
+	bs      []byte
+	handler http.Handler
 
 	appMu     sync.Mutex
 	apps      map[uint16]string // port -> 127.0.0.1 address of the app
@@ -50,7 +56,10 @@ func (c staticCreds) Bootstrap(context.Context) (string, []byte, error) { return
 // Env.Net and waits until a running instance serves its tunnel.
 func (e *Env) NewMachine(opts ...MachineOptions) *Machine {
 	e.T.Helper()
-	_ = opts // no options yet
+	var o MachineOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	bs, err := wire.NewSecret()
 	if err != nil {
 		e.T.Fatal(err)
@@ -59,6 +68,7 @@ func (e *Env) NewMachine(opts ...MachineOptions) *Machine {
 		ID:        uuid.NewString(),
 		e:         e,
 		bs:        bs,
+		handler:   o.Handler,
 		apps:      map[uint16]string{},
 		blackhole: map[uint16]bool{},
 	}
@@ -86,6 +96,7 @@ func (m *Machine) Start() {
 		Credentials: staticCreds{id: m.ID, bs: m.bs},
 		Identity:    agent.Identity{BootID: "boot-" + m.ID, InstanceID: inst, Vmgenid: "gen-1", Version: "1.0.0"},
 		Dial:        m.dial,
+		Handler:     m.handler,
 		Backoff:     agent.Backoff{First: 5 * time.Millisecond, Base: 10 * time.Millisecond, Max: 100 * time.Millisecond, ResetAfter: time.Minute},
 		RejectDelays: agent.RejectDelays{
 			BadBootstrap: 50 * time.Millisecond, Retired: 50 * time.Millisecond,

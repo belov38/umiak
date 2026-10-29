@@ -81,6 +81,10 @@ type Deps struct {
 	// MaxTCPStreamsPerMachine is the per-machine CONNECT stream limit this
 	// instance enforces as the owner; 0 means 800. Tests shrink it.
 	MaxTCPStreamsPerMachine int
+	// AllowedServicePrefixes are the services the internal /rpc/ proxy
+	// passes to agents; nil keeps the libs/tunnel default (sbx.agent.v1).
+	// Tests add the sbx.testing.v1 Process double.
+	AllowedServicePrefixes []string
 }
 
 // Listeners are the sockets an instance serves. A nil listener is not
@@ -193,6 +197,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		ServiceTokens:           cfg.ServiceTokens,
 		MinAgentVersion:         cfg.MinAgentVersion,
 		MaxTCPStreamsPerMachine: deps.MaxTCPStreamsPerMachine,
+		AllowedServicePrefixes:  deps.AllowedServicePrefixes,
 		OnInstanceChange:        i.onInstanceChange,
 		OnSessionChange:         i.onSessionChange,
 		ListenChannels: map[string]func(string){

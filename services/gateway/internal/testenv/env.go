@@ -17,6 +17,7 @@ import (
 	"net/http/cookiejar"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -243,6 +244,8 @@ type Inst struct {
 	Config      config.Config
 	AccessLog   *LogBuffer
 
+	internalH2 atomic.Int64
+
 	e        *Env
 	routed   atomic.Bool
 	cancel   context.CancelFunc
@@ -304,6 +307,7 @@ func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	i.cancel = cancel
+	internal = &h2CountingListener{Listener: internal, n: &i.internalH2}
 	go func() {
 		i.runErr <- inst.Run(ctx, server.Listeners{Internal: internal, Metrics: metrics, Plain: plain, TLS: tlsLn, SSH: sshLn})
 	}()
@@ -360,6 +364,55 @@ func (e *Env) StopInstance(i *Inst, graceful bool) {
 			e.T.Errorf("testenv: %s: Run did not return", i.Name)
 		}
 	})
+}
+
+// InternalH2Conns returns how many HTTP/2 conns the internal listener of i
+// has accepted: peer conns of other instances (and h2c internal API
+// clients). Conns that do not start with the HTTP/2 preface, such as port
+// probes of other local processes, are not counted.
+func (i *Inst) InternalH2Conns() int64 { return i.internalH2.Load() }
+
+// h2Preface starts every prior-knowledge HTTP/2 conn.
+const h2Preface = "PRI * HTTP/2.0\r\n"
+
+// h2CountingListener counts accepted conns that start with the HTTP/2
+// preface.
+type h2CountingListener struct {
+	net.Listener
+	n *atomic.Int64
+}
+
+func (l *h2CountingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &prefaceConn{Conn: c, n: l.n}, nil
+}
+
+// prefaceConn checks the first bytes read for the HTTP/2 preface.
+type prefaceConn struct {
+	net.Conn
+	n    *atomic.Int64
+	seen []byte
+	done bool
+}
+
+// The preface is read on the server goroutine of the conn before any other
+// reader of the conn starts.
+func (c *prefaceConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if !c.done && n > 0 {
+		c.seen = append(c.seen, b[:min(n, len(h2Preface)-len(c.seen))]...)
+		if len(c.seen) == len(h2Preface) || !strings.HasPrefix(h2Preface, string(c.seen)) {
+			c.done = true
+			if string(c.seen) == h2Preface {
+				c.n.Add(1)
+			}
+			c.seen = nil
+		}
+	}
+	return n, err
 }
 
 // Instances returns the running instances, oldest first.

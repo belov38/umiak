@@ -5,7 +5,9 @@ go 1.27
 toolchain go1.27.3
 
 require (
+	connectrpc.com/connect v1.21.1
 	github.com/belov38/boat-dev-clone/libs/tunnel v0.0.0
+	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
@@ -18,11 +20,9 @@ require (
 )
 
 require (
-	connectrpc.com/connect v1.21.1 // indirect
 	github.com/belov38/boat-dev-clone/libs/proto v0.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
