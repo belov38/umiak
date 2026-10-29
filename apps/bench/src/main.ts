@@ -37,7 +37,7 @@ async function main(argv: string[]): Promise<number> {
 		return 2;
 	}
 	// The bench measures contention itself, so the per-node clone limit is not applied here.
-	const ctx = makeContext({ cloneConcurrency: 64 });
+	const ctx = await makeContext({ cloneConcurrency: 64 });
 	try {
 		if (cmd === "preflight") {
 			const { checks } = await preflight(ctx);
