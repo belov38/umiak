@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # boat-dev-clone S1 PoC: sanitize the root filesystem of template 599 offline, before it ever boots.
-# 599 is a thin snapshot of Ilia's personal dev template 9000, so this removes Tailscale, personal
-# credentials and build-time state. Runs on the Proxmox host as root:
+# 599 is a thin snapshot of Ilia's personal dev template 9000, so this removes Tailscale, the personal
+# account with all its data, and build-time state. Runs on the Proxmox host as root:
 #   template-sanitize.sh <mounted root>
-# S5 replaces 599 with a clean Ubuntu 26.04 minimal build; this script is PoC-only.
+# Deleted blocks must also be discarded (fstrim) by the caller, otherwise they stay readable from the
+# raw disk inside every sandbox. S5 replaces 599 with a clean Ubuntu 26.04 minimal build; PoC only.
 set -euo pipefail
 
 R="${1:?usage: template-sanitize.sh <mounted root>}"
@@ -28,16 +29,17 @@ if [[ -e "$R/usr/sbin/tailscaled" || -e "$R/usr/bin/tailscale" ]]; then
 	exit 1
 fi
 
-# 2. Personal credentials, keys, tokens, browser and agent state, shell history.
-rm -f "$R/root/.ssh/authorized_keys" "$R/home/ib/.ssh/authorized_keys"
-rm -rf "$R/home/ib/.ssh/agent" \
-	"$R/home/ib/.claude" "$R/home/ib/.claude.json" "$R/home/ib/.codex" "$R/home/ib/.npmrc" "$R/home/ib/.npm" \
-	"$R/home/ib/.gnupg" "$R/home/ib/.config/google-chrome" "$R/home/ib/.config/agent-desktop" \
-	"$R/home/ib/.local/share/claude" "$R/home/ib/.local/share/pki" "$R/home/ib/.local/share/chrome-devtools-mcp" \
-	"$R/home/ib/.local/share/keyrings" "$R/home/ib/.t3" "$R/home/ib/.cache" "$R/home/ib/recordings" \
-	"$R/home/ib/.dbus" "$R/home/ib/.ICEauthority"
-find "$R/home" "$R/root" -xdev \( -name '.*history' -o -name '.netrc' -o -name '.git-credentials' -o -name 'id_*' \
-	-o -name '.docker' -o -name '.aws' -o -name '.kube' -o -name 'gh' \) -prune -exec rm -rf {} +
+# 2. The personal account and everything it owned; root's keys and history; personal software.
+if chroot "$R" id ib >/dev/null 2>&1; then
+	chroot "$R" userdel --remove ib 2>/dev/null || chroot "$R" userdel ib
+fi
+rm -rf "$R/home/ib" "$R/etc/sudoers.d/90-cloud-init-users" "$R/opt/agent-desktop"
+find "$R/root" -mindepth 1 -maxdepth 1 ! -name .bashrc ! -name .profile -exec rm -rf {} +
+rm -rf "$R"/var/spool/cron/crontabs/* "$R"/var/mail/* "$R"/var/tmp/* "$R"/tmp/*
+if [[ -n "$(find "$R/home" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
+	echo "unexpected home directories remain" >&2
+	exit 1
+fi
 
 # 3. Machine identity and first-boot state: new machine-id, SSH host keys and cloud-init instance on every clone.
 chroot "$R" cloud-init clean --logs --machine-id --seed
@@ -46,6 +48,8 @@ chroot "$R" cloud-init clean --logs --machine-id --seed
 printf 'uninitialized\n' >"$R/etc/machine-id"
 rm -f "$R"/etc/ssh/ssh_host_*
 rm -rf "$R"/var/log/journal/* "$R"/var/cache/apt/archives/*.deb
+find "$R/var/log" -type f \( -name '*.gz' -o -name '*.[0-9]' \) -delete
+find "$R/var/log" -type f -exec truncate -s 0 {} +
 # The build VM's netplan file is bound to its MAC. cloud-init writes a new one from ipconfig0;
 # the fallback below gives any en* NIC DHCP if cloud-init does not.
 rm -f "$R/etc/netplan/50-cloud-init.yaml"

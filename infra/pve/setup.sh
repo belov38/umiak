@@ -522,16 +522,84 @@ fi
 lvs pve/vm-$ID-disk-0 >/dev/null 2>&1 || lvcreate -s -kn -n vm-$ID-disk-0 --addtag sbx-tpl pve/base-9000-disk-0
 lvchange -ay pve/vm-$ID-disk-0
 # 9000 is a personal dev template: sanitize the root filesystem before 599 ever boots.
+# The root partition is mapped with dm-linear (not loop) so that fstrim discards reach the thin LV:
+# deleted files must not stay readable from the raw disk of a sandbox.
+dev=/dev/pve/vm-$ID-disk-0
 mnt=/mnt/sbx-tpl
+needle=/root/.sbx-tpl-needle
 mkdir -p "$mnt"
-loop=$(losetup -P --show -f /dev/pve/vm-$ID-disk-0)
-trap 'umount "$mnt" 2>/dev/null || true; losetup -d "$loop" 2>/dev/null || true' EXIT
-root_part=$(blkid -t LABEL=cloudimg-rootfs -o device "$loop"p* | head -1)
-mount "$root_part" "$mnt"
+read -r start sectors < <(partx -g -o START,SECTORS,NAME "$dev" | awk '$3 == "cloudimg-rootfs" {print $1, $2}')
+[ -n "$sectors" ] || { echo "template: root partition cloudimg-rootfs not found" >&2; exit 1; }
+dmsetup create sbx-tpl-root --table "0 $sectors linear $dev $start"
+trap 'umount "$mnt" 2>/dev/null || true; dmsetup remove sbx-tpl-root 2>/dev/null || true; rm -f "$needle"' EXIT
+mount /dev/mapper/sbx-tpl-root "$mnt"
+# A 64-byte sample of a personal file that is about to be deleted; kept on the host only, never printed.
+rm -f "$needle"
+f="$mnt/home/ib/.claude.json"
+[ -f "$f" ] || f=$(find "$mnt/home/ib" -type f -size +2k -print -quit 2>/dev/null || true)
+if [ -n "$f" ] && [ -f "$f" ]; then (umask 077; dd if="$f" of="$needle" bs=1 skip=128 count=64 status=none); fi
 bash /tmp/sbx-template-sanitize.sh "$mnt"
-fstrim "$mnt" 2>/dev/null || echo "template: fstrim not supported on the loop device, skipped"
+fstrim -v "$mnt"
 umount "$mnt"
-losetup -d "$loop"
+# dm-thin discards whole 64 KiB chunks only; free filesystem blocks inside chunks that still hold live
+# data keep their old content. Overwrite every free block that is not already zero.
+zeroed=$(python3 - /dev/mapper/sbx-tpl-root <<'PY'
+import os, re, subprocess, sys
+dev = sys.argv[1]
+out = subprocess.run(["dumpe2fs", dev], capture_output=True, text=True, check=True).stdout
+bs = int(re.search(r"^Block size:\s+(\d+)", out, re.M).group(1))
+ranges = []
+for m in re.finditer(r"^\s+Free blocks: (.*)$", out, re.M):
+    for part in m.group(1).split(","):
+        part = part.strip()
+        if part:
+            a, _, b = part.partition("-")
+            ranges.append((int(a), int(b or a)))
+zero = bytes(bs)
+written = 0
+with open(dev, "r+b", buffering=0) as f:
+    for a, b in ranges:
+        blk = a
+        while blk <= b:
+            n = min(2048, b - blk + 1)
+            f.seek(blk * bs)
+            data = f.read(n * bs)
+            for i in range(n):
+                if data[i * bs:(i + 1) * bs] != zero:
+                    f.seek((blk + i) * bs)
+                    f.write(zero)
+                    written += 1
+            blk += n
+    os.fsync(f.fileno())
+print(written)
+PY
+)
+echo "template: zeroed $zeroed free filesystem blocks that still held old data"
+if [ -s "$needle" ]; then
+	found=$(python3 - /dev/mapper/sbx-tpl-root "$needle" <<'PY'
+import sys
+dev, nf = sys.argv[1], sys.argv[2]
+needle = open(nf, "rb").read()
+prev, found = b"", 0
+with open(dev, "rb") as f:
+    while True:
+        b = f.read(16 << 20)
+        if not b:
+            break
+        if needle in prev + b:
+            found = 1
+            break
+        prev = b[-(len(needle) - 1):]
+print(found)
+PY
+)
+	[ "$found" = 0 ] || { echo "template: deleted personal data is still readable from the raw partition" >&2; exit 1; }
+	echo "template: verified that deleted personal data is not readable from the raw partition"
+else
+	echo "template: WARNING no personal file found to verify the discard" >&2
+fi
+dmsetup remove sbx-tpl-root
+rm -f "$needle"
 trap - EXIT
 rm -f /tmp/sbx-template-sanitize.sh
 qm create "$ID" --pool sandbox --name sbx-ubuntu-poc --description "$COMMENT template" --tags sbx-tpl \
