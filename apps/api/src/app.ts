@@ -6,11 +6,11 @@
 // Public and proxied serve the same `/v1` resources (`mountV1`); they differ
 // only in authentication.
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { Scalar } from "@scalar/hono-api-reference";
 import type pg from "pg";
 import type { ApiApp, ApiDeps, ApiEnv } from "./deps.ts";
 import { bodyLimits } from "./http/body-limit.ts";
 import {
+	ApiError,
 	type ErrorRenderOptions,
 	notFoundHandler,
 	onErrorHandler,
@@ -19,10 +19,6 @@ import {
 import { requestLog } from "./http/logger.ts";
 import { requestMetrics } from "./http/metrics.ts";
 import { requestId } from "./http/request-id.ts";
-import {
-	buildOpenApiDocument,
-	type OpenApiDocument,
-} from "./openapi/document.ts";
 import { registerSecuritySchemes } from "./openapi/registry.ts";
 import { registerMetaRoutes } from "./routes/meta.ts";
 
@@ -50,22 +46,7 @@ function listenerApp(deps: ApiDeps, o: ErrorRenderOptions = {}): ApiApp {
 /** Mounts the `/v1` resources shared by the public and proxied listeners. */
 export function mountV1(app: ApiApp, deps: ApiDeps): void {
 	registerSecuritySchemes(app);
-	registerDocRoutes(app, deps);
 	registerMetaRoutes(app, deps);
-}
-
-/** `GET /v1/openapi.json` and `GET /v1/docs` (Scalar), without auth. */
-function registerDocRoutes(app: ApiApp, deps: ApiDeps): void {
-	let doc: OpenApiDocument | undefined;
-	app.get("/v1/openapi.json", (c) => {
-		doc ??= buildOpenApiDocument(app, {
-			apiUrl: deps.settings.apiUrl,
-			issuer: deps.settings.oidc?.issuer ?? null,
-		});
-		return c.json(doc);
-	});
-	// Relative URL: the proxied listener is reached under /api/v1/docs.
-	app.get("/v1/docs", Scalar({ url: "openapi.json", pageTitle: "sbx API" }));
 }
 
 export function createPublicApp(deps: ApiDeps): ApiApp {
@@ -114,8 +95,13 @@ export function createOpsApp(deps: ApiDeps): ApiApp {
 		if (deps.pool !== null && !(await postgresAnswers(deps.pool))) {
 			reasons.push("postgres");
 		}
-		const ready = reasons.length === 0;
-		return c.json({ ready, reasons }, ready ? 200 : 503);
+		if (reasons.length > 0) {
+			throw new ApiError(503, "not_ready", `not ready: ${reasons.join(", ")}`, {
+				retryable: true,
+				details: { reasons },
+			});
+		}
+		return c.json({ ready: true, reasons });
 	});
 	app.get("/metrics", async (c) => {
 		const r = deps.metrics.registry;

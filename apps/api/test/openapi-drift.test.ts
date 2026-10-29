@@ -90,8 +90,14 @@ describe("openapi/v1.json", () => {
 		expect(count).toBeGreaterThan(0);
 	});
 
-	it("/v1/meta needs no auth", () => {
-		expect(doc.paths["/v1/meta"]?.get?.security).toEqual([]);
+	it("meta, openapi.json and docs need no auth", () => {
+		for (const p of ["/v1/meta", "/v1/openapi.json", "/v1/docs"]) {
+			expect(doc.paths[p]?.get?.security, p).toEqual([]);
+		}
+		expect(doc.paths["/v1/openapi.json"]?.get?.operationId).toBe(
+			"meta.openapi",
+		);
+		expect(doc.paths["/v1/docs"]?.get?.operationId).toBe("meta.docs");
 	});
 
 	it("has no warm pool terms (no failFast, pool_exhausted, warmAvailable)", () => {
@@ -134,6 +140,33 @@ describe("openapi/v1.json", () => {
 			expect(
 				assertConforms(d, "GET", "/v1/nope", 404, "application/json", error),
 			).toEqual({ operationId: null });
+		});
+
+		it("is strict: undocumented response fields fail, at any depth", () => {
+			expect(() =>
+				assertConforms(d, "GET", "/v1/meta", 200, "application/json", {
+					...meta,
+					request: { bodyHash: "x" },
+				}),
+			).toThrow(/unevaluated/);
+			expect(() =>
+				assertConforms(d, "GET", "/v1/meta", 200, "application/json", {
+					...meta,
+					ssh: { ...meta.ssh, extra: 1 },
+				}),
+			).toThrow(/unevaluated/);
+			expect(() =>
+				assertConforms(d, "GET", "/v1/nope", 404, "application/json", {
+					...error,
+					code: "x",
+				}),
+			).toThrow(/unevaluated/);
+			// Free-form maps stay open.
+			expect(() =>
+				assertConforms(d, "GET", "/v1/nope", 404, "application/json", {
+					error: { ...error.error, details: { anything: 1 } },
+				}),
+			).not.toThrow();
 		});
 
 		it("rejects bodies, statuses and paths the document does not describe", () => {

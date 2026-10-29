@@ -23,9 +23,6 @@ export const validatedOperations = new Set<string>();
 
 export type Listener = "public" | "proxied" | "internal" | "ops";
 
-/** JSON responses of these paths are served as is, outside the document. */
-const UNDOCUMENTED = new Set(["/v1/openapi.json"]);
-
 const REQUEST_ID_RE = /^req_[0-9a-z]{26}$/;
 
 export interface HarnessRequest {
@@ -106,20 +103,31 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 		if (rid === null || !REQUEST_ID_RE.test(rid)) {
 			throw new Error(`${where}: no valid Request-Id header (${rid})`);
 		}
-		const bare = path.split("?")[0] ?? path;
-		if (isJson && text !== "" && !UNDOCUMENTED.has(bare)) {
-			// Ops answers (readiness) are not API responses; its errors are
-			// checked by the tests themselves.
-			if (documented || (listener === "internal" && res.status >= 400)) {
+		if (res.status >= 400 && !isJson) {
+			throw new Error(`${where}: error without a JSON envelope`);
+		}
+		if (isJson && text !== "") {
+			let body = parsed;
+			if (listener === "internal" && res.status >= 400) {
+				// The internal listener repeats the code at the top level (S4
+				// gateway reads it); the rest is the common envelope.
+				const { code, ...rest } = parsed as { code?: unknown };
+				const inner = (rest as { error?: { code?: unknown } }).error?.code;
+				if (code !== inner) {
+					throw new Error(`${where}: top-level code ${code} != ${inner}`);
+				}
+				body = rest;
+			}
+			// Internal and ops answers are not in the document: only their
+			// errors are checked, against the Error schema.
+			if (documented || res.status >= 400) {
 				const r = assertConforms(
 					OPENAPI_DOC,
 					method,
-					// Internal and ops paths are not in the document: their errors
-					// are checked against the Error schema.
 					documented ? path : `/__undocumented${path}`,
 					res.status,
 					contentType,
-					parsed,
+					body,
 				);
 				if (r.operationId !== null) validatedOperations.add(r.operationId);
 			}

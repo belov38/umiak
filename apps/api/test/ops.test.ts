@@ -22,7 +22,15 @@ describe("ops listener", () => {
 			const h = createHarness({ listener: "ops", deps: { pool } });
 			const r = await h.request("GET", "/readyz");
 			expect(r.status).toBe(503);
-			expect(r.body).toMatchObject({ ready: false, reasons: ["postgres"] });
+			expect(r.headers.get("retry-after")).toBe("5");
+			expect(r.body).toMatchObject({
+				error: {
+					code: "not_ready",
+					retryable: true,
+					details: { reasons: ["postgres"], retryAfterSeconds: 5 },
+					requestId: r.headers.get("request-id"),
+				},
+			});
 		} finally {
 			await pool.end();
 		}
@@ -46,6 +54,7 @@ describe("ops listener", () => {
 	it("/metrics exposes request counts per route, method and status", async () => {
 		const metrics = new ApiMetrics();
 		const pub = createHarness({ deps: { metrics } });
+		pub.app.post("/v1/__test/upload", (c) => c.body(null, 204));
 		await pub.request("GET", "/v1/meta");
 		await pub.request("GET", "/v1/nope/123");
 		const ops = createHarness({ listener: "ops", deps: { metrics } });
@@ -55,6 +64,16 @@ describe("ops listener", () => {
 		const text = r.text;
 		expect(text).toMatch(
 			/sbx_api_requests_total\{[^}]*route="\/v1\/meta"[^}]*method="GET"[^}]*status="200"[^}]*\} 1/,
+		);
+		// Answers produced in middleware keep the route label (413 here).
+		const big = await pub.request("POST", "/v1/__test/upload", {
+			headers: { "content-type": "application/json" },
+			body: "x".repeat(1024 * 1024 + 1),
+		});
+		expect(big.status).toBe(413);
+		const text2 = (await ops.request("GET", "/metrics")).text;
+		expect(text2).toMatch(
+			/sbx_api_requests_total\{[^}]*route="\/v1\/__test\/upload"[^}]*status="413"[^}]*\} 1/,
 		);
 		// Unknown paths share one label value (no cardinality from URLs).
 		expect(text).toMatch(/route="unmatched"[^}]*status="404"/);
@@ -100,8 +119,16 @@ describe("request log", () => {
 			throw new Error("db exploded");
 		});
 		await h.request("GET", "/v1/__test/boom");
-		const err = logs.entries().find((e) => e.level === 50);
-		expect(err).toMatchObject({ err: "db exploded" });
+		await h.request("GET", "/v1/__test/boom", {
+			headers: { "request-id": "client-7" },
+		});
+		const errs = logs.entries().filter((e) => e.level === 50);
+		expect(errs[0]).toMatchObject({ err: "db exploded" });
+		expect(errs[0]).not.toHaveProperty("clientRequestId");
+		expect(errs[1]).toMatchObject({
+			err: "db exploded",
+			clientRequestId: "client-7",
+		});
 		const line = logs.entries().find((e) => e.msg === "request");
 		expect(line).toMatchObject({ status: 500, code: "internal" });
 	});

@@ -164,15 +164,31 @@ export function toHttpError(e: unknown): ApiError {
 	return internalError();
 }
 
-/** Hono's own exceptions: validators, body limits, media type checks. */
+/**
+ * Hono's own exceptions (validators, body limits, media type checks, and
+ * middleware that throws HTTPException) by status.
+ */
 function fromHttpException(e: HTTPException): ApiError {
 	switch (e.status) {
 		case 400:
 			return /malformed json/i.test(e.message)
 				? invalidJsonError()
 				: validationError([{ path: "", message: e.message }]);
+		case 401:
+			return new ApiError(401, "unauthorized", "authentication required");
+		case 403:
+			return new ApiError(403, "forbidden", "access denied");
 		case 404:
 			return notFoundError();
+		case 429:
+			return new ApiError(
+				429,
+				"rate_limited",
+				"too many requests; retry later",
+				{
+					retryable: true,
+				},
+			);
 		case 413:
 			return new ApiError(
 				413,
@@ -252,6 +268,7 @@ export function onErrorHandler(
 			log.error(
 				{
 					requestId: c.var.requestId,
+					clientRequestId: c.var.clientRequestId,
 					err: err instanceof Error ? err.message : String(err),
 					stack: err instanceof Error ? err.stack : undefined,
 					code: (err as { code?: unknown } | null)?.code,
@@ -283,14 +300,14 @@ export function notFoundHandler(
 					.map((r) => ({ method: r.method, re: pathPattern(r.path) })),
 			};
 		}
-		const allow = [
-			...new Set(
-				cached.list.filter((r) => r.re.test(c.req.path)).map((r) => r.method),
-			),
-		];
+		const allow = new Set(
+			cached.list.filter((r) => r.re.test(c.req.path)).map((r) => r.method),
+		);
+		// Hono answers HEAD with the GET handler.
+		if (allow.has("GET")) allow.add("HEAD");
 		const e =
-			allow.length > 0
-				? methodNotAllowedError(allow.sort())
+			allow.size > 0
+				? methodNotAllowedError([...allow].sort())
 				: new ApiError(
 						404,
 						"not_found",
@@ -300,7 +317,10 @@ export function notFoundHandler(
 	};
 }
 
-/** Hono route path (`/v1/sandboxes/:sandbox`, `*`) to a RegExp. */
+/**
+ * Hono route path (`/v1/sandboxes/:sandbox`, `*`) to a RegExp. Strict like
+ * Hono's router: a trailing slash is another path.
+ */
 function pathPattern(path: string): RegExp {
 	const src = path
 		.split("/")
@@ -311,5 +331,5 @@ function pathPattern(path: string): RegExp {
 			return seg.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&");
 		})
 		.join("/");
-	return new RegExp(`^${src}/?$`);
+	return new RegExp(`^${src}$`);
 }

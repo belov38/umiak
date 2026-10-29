@@ -1,6 +1,13 @@
-// GET /v1/meta (S7 §13): platform facts for clients, without auth.
+// Routes without auth on the public and proxied listeners: GET /v1/meta
+// (S7 §13, platform facts for clients), GET /v1/openapi.json and GET /v1/docs
+// (S7 §15.1).
 import { createRoute, z } from "@hono/zod-openapi";
-import type { ApiApp, ApiDeps } from "../deps.ts";
+import { Scalar } from "@scalar/hono-api-reference";
+import type { ApiApp, ApiDeps, ApiEnv } from "../deps.ts";
+import {
+	buildOpenApiDocument,
+	type OpenApiDocument,
+} from "../openapi/document.ts";
 import { ERROR_RESPONSES, jsonResponse, NO_AUTH } from "../openapi/registry.ts";
 
 /** Public client of the CLI device flow; also used by the SDK and MCP. */
@@ -64,6 +71,43 @@ const getMeta = createRoute({
 	},
 });
 
+const getOpenApi = createRoute({
+	method: "get",
+	path: "/v1/openapi.json",
+	operationId: "meta.openapi",
+	summary: "OpenAPI document",
+	description:
+		"This OpenAPI 3.1 document, with the server URL and Keycloak issuer of this deployment. " +
+		"Needs no authentication. SDKs are generated from it.",
+	tags: ["meta"],
+	security: NO_AUTH,
+	responses: {
+		200: jsonResponse(
+			z.record(z.string(), z.unknown()),
+			"OpenAPI 3.1 document",
+		),
+		...ERROR_RESPONSES,
+	},
+});
+
+const getDocs = createRoute({
+	method: "get",
+	path: "/v1/docs",
+	operationId: "meta.docs",
+	summary: "API reference page",
+	description:
+		"Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.",
+	tags: ["meta"],
+	security: NO_AUTH,
+	responses: {
+		200: {
+			description: "HTML page",
+			content: { "text/html": { schema: z.string() } },
+		},
+		...ERROR_RESPONSES,
+	},
+});
+
 export function metaOf(deps: ApiDeps): Meta {
 	const s = deps.settings;
 	return {
@@ -89,4 +133,20 @@ export function metaOf(deps: ApiDeps): Meta {
 export function registerMetaRoutes(app: ApiApp, deps: ApiDeps): void {
 	const meta = metaOf(deps);
 	app.openapi(getMeta, (c) => c.json(meta, 200));
+
+	let doc: OpenApiDocument | undefined;
+	app.openapi(getOpenApi, (c) => {
+		doc ??= buildOpenApiDocument(app, {
+			apiUrl: deps.settings.apiUrl,
+			issuer: deps.settings.oidc?.issuer ?? null,
+		});
+		return c.json(doc, 200);
+	});
+
+	// Relative URL: the proxied listener is reached under /api/v1/docs.
+	const scalar = Scalar<ApiEnv>({ url: "openapi.json", pageTitle: "sbx API" });
+	app.openapi(getDocs, async (c) => {
+		const res = await scalar(c, async () => {});
+		return res ?? c.notFound();
+	});
 }

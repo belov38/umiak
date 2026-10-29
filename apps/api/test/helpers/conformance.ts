@@ -2,6 +2,12 @@
 // content type and body of a JSON response must be described by the
 // operation (S7 §15.1). Schemas are validated with ajv (JSON Schema 2020-12,
 // the dialect of OpenAPI 3.1) and ajv-formats.
+//
+// Strict: response objects may not carry undocumented fields. The document
+// leaves objects open (clients must ignore new fields, §5.9), so before
+// compiling, every object schema without `additionalProperties` gets
+// `unevaluatedProperties: false` (see `strictCopy`). A leaked field
+// (`request`, `bodyHash`) fails the test.
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import addFormatsModule from "ajv-formats";
 
@@ -50,10 +56,99 @@ function ajvFor(doc: OpenApiDoc): Ajv2020 {
 		ajv = new Ajv2020({ strict: false, allErrors: true });
 		addFormats(ajv);
 		// The whole document under one id, so "#/components/..." refs resolve.
-		ajv.addSchema(doc, "openapi");
+		ajv.addSchema(strictCopy(doc), "openapi");
 		ajvByDoc.set(doc, ajv);
 	}
 	return ajv;
+}
+
+type Node = Record<string, unknown>;
+
+const isNode = (v: unknown): v is Node =>
+	v !== null && typeof v === "object" && !Array.isArray(v);
+
+const SCHEMA_MAPS = ["properties", "patternProperties", "$defs"];
+const SCHEMA_ONE = [
+	"items",
+	"additionalProperties",
+	"not",
+	"if",
+	"then",
+	"else",
+	"contains",
+	"propertyNames",
+];
+const SCHEMA_LISTS = ["prefixItems", "oneOf", "anyOf"];
+const COMPONENT_REF = "#/components/schemas/";
+
+/**
+ * Closes an object schema in place, then its sub-schemas. Members of `allOf`
+ * stay open (each sees only its own properties); the schema holding the
+ * `allOf` is closed instead and sees the properties of all members.
+ */
+function closeSchema(s: unknown, inAllOf: boolean): void {
+	if (!isNode(s)) return;
+	const types = Array.isArray(s.type) ? s.type : [s.type];
+	const objectLike =
+		types.includes("object") || "properties" in s || "allOf" in s;
+	if (
+		objectLike &&
+		!inAllOf &&
+		!("additionalProperties" in s) &&
+		!("unevaluatedProperties" in s)
+	) {
+		s.unevaluatedProperties = false;
+	}
+	for (const k of SCHEMA_MAPS) {
+		const m = s[k];
+		if (isNode(m)) for (const v of Object.values(m)) closeSchema(v, false);
+	}
+	for (const k of SCHEMA_ONE) closeSchema(s[k], false);
+	for (const k of SCHEMA_LISTS) {
+		const l = s[k];
+		if (Array.isArray(l)) for (const v of l) closeSchema(v, false);
+	}
+	if (Array.isArray(s.allOf)) for (const v of s.allOf) closeSchema(v, true);
+}
+
+/** Names of components used as `allOf` members: they must stay open. */
+function allOfComponents(v: unknown, out = new Set<string>()): Set<string> {
+	if (Array.isArray(v)) {
+		for (const x of v) allOfComponents(x, out);
+	} else if (isNode(v)) {
+		if (Array.isArray(v.allOf)) {
+			for (const m of v.allOf) {
+				const ref = isNode(m) ? m.$ref : undefined;
+				if (typeof ref === "string" && ref.startsWith(COMPONENT_REF)) {
+					out.add(ref.slice(COMPONENT_REF.length));
+				}
+			}
+		}
+		for (const x of Object.values(v)) allOfComponents(x, out);
+	}
+	return out;
+}
+
+/** A copy of the document with closed response and component schemas. */
+export function strictCopy(doc: OpenApiDoc): OpenApiDoc {
+	const copy = structuredClone(doc);
+	const open = allOfComponents(copy);
+	for (const [name, s] of Object.entries(copy.components?.schemas ?? {})) {
+		closeSchema(s, open.has(name));
+	}
+	for (const item of Object.values(copy.paths)) {
+		for (const op of Object.values(item)) {
+			if (!isNode(op) || !isNode(op.responses)) continue;
+			for (const r of Object.values(op.responses)) {
+				const content = isNode(r) ? r.content : undefined;
+				if (!isNode(content)) continue;
+				for (const media of Object.values(content)) {
+					if (isNode(media)) closeSchema(media.schema, false);
+				}
+			}
+		}
+	}
+	return copy;
 }
 
 function pointer(...parts: string[]): string {

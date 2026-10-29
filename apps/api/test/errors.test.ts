@@ -1,5 +1,6 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { SbxError } from "@sbx/core";
+import { HTTPException } from "hono/http-exception";
 import { describe, expect, it } from "vitest";
 import {
 	ApiError,
@@ -117,6 +118,26 @@ describe("toHttpError: core codes (S7 §5.5)", () => {
 		expect(toHttpError(new Error("boom")).code).toBe("internal");
 		expect(toHttpError("a string").code).toBe("internal");
 		expect(toHttpError(null).status).toBe(500);
+		expect(toHttpError(new HTTPException(502)).code).toBe("internal");
+	});
+
+	it("Hono HTTPException by status", () => {
+		const cases: [number, number, string, boolean][] = [
+			[401, 401, "unauthorized", false],
+			[403, 403, "forbidden", false],
+			[404, 404, "not_found", false],
+			[413, 413, "payload_too_large", false],
+			[415, 400, "validation", false],
+			[429, 429, "rate_limited", true],
+		];
+		for (const [from, status, code, retryable] of cases) {
+			const e = toHttpError(new HTTPException(from as 401));
+			expect([e.status, e.code, e.retryable]).toEqual([
+				status,
+				code,
+				retryable,
+			]);
+		}
 	});
 
 	it("machine_state_conflict -> 409 invalid_state", () => {
@@ -152,7 +173,29 @@ describe("error envelope on every response", () => {
 		const r = await h.request("DELETE", "/v1/meta");
 		expect(r.status).toBe(405);
 		expect(expectEnvelope(r.body, r.headers).code).toBe("method_not_allowed");
-		expect(r.headers.get("allow")).toContain("GET");
+		expect(r.headers.get("allow")).toBe("GET, HEAD");
+	});
+
+	it("a trailing slash is another path: 404, not 405", async () => {
+		const h = createHarness();
+		const r = await h.request("GET", "/v1/meta/");
+		expect(r.status).toBe(404);
+		expect(expectEnvelope(r.body, r.headers).code).toBe("not_found");
+	});
+
+	it("an HTTPException thrown by middleware keeps the envelope", async () => {
+		const h = createHarness();
+		h.app.use("/v1/__test/limited", () => {
+			throw new HTTPException(429);
+		});
+		h.app.get("/v1/__test/limited", (c) => c.body(null, 204));
+		const r = await h.request("GET", "/v1/__test/limited");
+		expect(r.status).toBe(429);
+		expect(expectEnvelope(r.body, r.headers)).toMatchObject({
+			code: "rate_limited",
+			retryable: true,
+		});
+		expect(r.headers.get("retry-after")).toBe("5");
 	});
 
 	it("malformed JSON: 400 invalid_json", async () => {

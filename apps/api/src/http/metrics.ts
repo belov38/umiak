@@ -87,10 +87,14 @@ export class ApiMetrics {
 	}
 }
 
-/** Route template of the handler that answered, or `unmatched`. */
+/**
+ * Route template the request matched, or `unmatched`. Taken from the
+ * matched routes (last non-middleware entry), not from the handler that ran,
+ * so answers produced in middleware (413, 401, 429) keep their route.
+ */
 export function routeLabel(c: Context): string {
-	const r = matchedRoutes(c)[c.req.routeIndex];
-	return r !== undefined && r.method !== "ALL" ? r.path : UNMATCHED_ROUTE;
+	const r = matchedRoutes(c).findLast((m) => m.method !== "ALL");
+	return r?.path ?? UNMATCHED_ROUTE;
 }
 
 export function requestMetrics(m: ApiMetrics): MiddlewareHandler<ApiEnv> {
