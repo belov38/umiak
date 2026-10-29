@@ -406,7 +406,12 @@ export class AgentClient {
 		});
 	}
 
-	/** Invalidates the cached route when a started stream fails retryably. */
+	/**
+	 * Invalidates the cached route when a started stream fails retryably.
+	 * After the headers, error metadata and details come from the end-stream
+	 * message the agent wrote (the gateway's own ends use Code.Unavailable),
+	 * so only the Connect code decides.
+	 */
 	private async *watch<T>(
 		machineId: string,
 		messages: AsyncIterable<T>,
@@ -415,7 +420,7 @@ export class AgentClient {
 		try {
 			yield* messages;
 		} catch (err) {
-			if (classify(err, signal) !== "fatal") {
+			if (classifyByCode(err, signal) !== "fatal") {
 				this.registry.invalidate(machineId);
 			}
 			throw err;

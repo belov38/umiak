@@ -1,5 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import { AgentUnavailableError, classify } from "./errors.js";
+import { AgentUnavailableError, classifyByCode } from "./errors.js";
 
 /** What resumableAttach needs to know about one attach event. */
 export type AttachView =
@@ -43,9 +43,12 @@ const maxBackoffMs = 1000;
  * from the expected offsets; truncated is yielded and moves the expected
  * offset to availableFrom. exit is yielded and ends the generator only when
  * every end equals the expected offset, otherwise the stream is reopened.
- * Retryable errors (classify != "fatal") and a stream that ends without exit
- * reopen from the expected offsets; fatal errors and AgentUnavailableError
- * (the routing budget is spent) are thrown.
+ * Retryable errors and a stream that ends without exit reopen from the
+ * expected offsets; fatal errors and AgentUnavailableError (the routing
+ * budget is spent) are thrown. Errors are classified by their Connect code
+ * and connection state only (classifyByCode): Sbx-* metadata and details of
+ * a stream error come from the agent's end-stream message, while the
+ * gateway's own stream ends use Code.Unavailable.
  */
 export async function* resumableAttach<E>(
 	opts: ResumableAttachOptions<E>,
@@ -136,7 +139,10 @@ export async function* resumableAttach<E>(
 			}
 		} catch (err) {
 			throwIfAborted(opts.signal);
-			if (err instanceof AgentUnavailableError || classify(err) === "fatal") {
+			if (
+				err instanceof AgentUnavailableError ||
+				classifyByCode(err) === "fatal"
+			) {
 				throw err;
 			}
 			lastErr = err;

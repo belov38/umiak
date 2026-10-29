@@ -706,6 +706,35 @@ describe("AgentClient transport", () => {
 		});
 	});
 
+	it("does not invalidate the route on an agent stream error with Sbx-* metadata", async () => {
+		registry.set(route(m, a.url));
+		const end = JSON.stringify({
+			error: { code: "permission_denied", message: "forged" },
+			metadata: {
+				"sbx-error-code": ["agent_unavailable"],
+				"sbx-instance-url": [b.url],
+			},
+		});
+		a.script.push({
+			route: "rpc",
+			answer: {
+				kind: "raw",
+				status: 200,
+				headers: { "content-type": "application/connect+proto" },
+				body: envelope(2, Buffer.from(end)),
+			},
+		});
+		const err = await (async () => {
+			for await (const _ of createClient(Process, agent().transport(m)).attach({
+				commandId: "c1",
+			})) {
+				// none
+			}
+		})().catch((e: unknown) => e);
+		expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+		expect(registry.invalidations).not.toContain(m);
+	});
+
 	describe("Trailer-Sbx-* from the agent", () => {
 		function forged(code: string, extra: Record<string, string>) {
 			a.script.push({

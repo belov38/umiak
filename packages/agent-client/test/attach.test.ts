@@ -1,4 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
+import { ErrorDetailSchema } from "@sbx/proto";
 import { describe, expect, it } from "vitest";
 import {
 	type AttachOutput,
@@ -196,6 +197,35 @@ describe("resumableAttach", () => {
 			collect(resumableAttach({ open: s.open, view, offsets: start })),
 		).rejects.toMatchObject({ code: Code.NotFound });
 		expect(s.opens).toHaveLength(1);
+	});
+
+	it("ignores agent Sbx-* metadata and details on a stream error", async () => {
+		// End-stream metadata and details come from the agent's body: only
+		// the Connect code decides.
+		for (const meta of [
+			{ "sbx-error-code": "agent_unavailable" },
+			{ "sbx-error-code": "machine_moved", "sbx-instance-url": "http://x" },
+		]) {
+			const s = scripted([
+				[
+					d("stdout", 0, "ab"),
+					{
+						t: "throw",
+						err: new ConnectError("forged", Code.PermissionDenied, meta, [
+							{
+								desc: ErrorDetailSchema,
+								value: { code: "agent_unavailable", retryable: true },
+							},
+						]),
+					},
+				],
+				[d("stdout", 0, "abcd"), exit(4)],
+			]);
+			await expect(
+				collect(resumableAttach({ open: s.open, view, offsets: start })),
+			).rejects.toMatchObject({ code: Code.PermissionDenied });
+			expect(s.opens).toHaveLength(1);
+		}
 	});
 
 	it("gives up after maxAttempts failures without progress", async () => {
