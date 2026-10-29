@@ -67,6 +67,14 @@ export interface AgentClientOptions {
 	 * Default: connect-node Connect protocol over HTTP/2 (h2c), one HTTP/2
 	 * session per gateway instance, no compression either way, messages up to
 	 * readMaxBytes, and Trailer-Sbx-* response headers dropped.
+	 *
+	 * A custom transport gets none of that: answers come from an untrusted
+	 * agent, so it must set readMaxBytes (MAX_MESSAGE_BYTES) and
+	 * writeMaxBytes, acceptCompression: [] (connect-node accepts gzip and br
+	 * by default) and no sendCompression, and drop Trailer-Sbx-* response
+	 * headers before connect-es merges them into the error metadata, where
+	 * they would read as gateway routing signals. readMaxBytes of these
+	 * options does not apply to it.
 	 */
 	createTransport?: (
 		baseUrl: string,
