@@ -1,3 +1,7 @@
+export * from "./agent/errors.ts";
+export * from "./agent/files-http.ts";
+export * from "./agent/types.ts";
+export * from "./agent/unwired.ts";
 export * from "./app.ts";
 export * from "./auth/identity-listener.ts";
 export * from "./auth/internal.ts";

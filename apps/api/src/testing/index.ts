@@ -19,6 +19,7 @@ import {
 	testIdentityStore,
 } from "./identity.ts";
 
+export * from "./fake-agent.ts";
 export * from "./identity.ts";
 export * from "./oidc-server.ts";
 
