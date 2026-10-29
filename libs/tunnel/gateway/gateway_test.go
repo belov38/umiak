@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -540,6 +541,102 @@ func TestInstanceChangeHook(t *testing.T) {
 		}
 	case <-time.After(waitTimeout):
 		t.Fatal("OnInstanceChange was not called for gw-a")
+	}
+}
+
+// OnSessionChange gets "" after the LISTEN connection is established and the
+// machine id on admission. A blocked hook delays neither fencing nor the
+// extra channel handlers.
+func TestGatewayOnSessionChange(t *testing.T) {
+	e := newEnv(t)
+	got := make(chan string, 256)
+	block := make(chan struct{})
+	var blockOnce sync.Once
+	routes := make(chan string, 64)
+	gw := e.gateway("gw-a", func(c *Config) {
+		c.OnSessionChange = func(id string) {
+			got <- id
+			if id == "" {
+				// Hold the first call until the end of the test part that
+				// checks fencing is not delayed.
+				<-block
+			}
+		}
+		c.ListenChannels = map[string]func(string){"sbx_routes": func(p string) { routes <- p }}
+	})
+	t.Cleanup(func() { blockOnce.Do(func() { close(block) }) })
+	select {
+	case id := <-got:
+		if id != "" {
+			t.Fatalf("first hook call %q, want \"\"", id)
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("OnSessionChange was not called after LISTEN")
+	}
+	select {
+	case p := <-routes:
+		if p != "" {
+			t.Fatalf("first sbx_routes call %q, want \"\"", p)
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("ListenChannels handler was not called after LISTEN")
+	}
+
+	// The hook is blocked; a reconnect to another gateway still fences the
+	// old session, and extra channels still deliver.
+	id, bs := e.machine()
+	a := e.startAgent(agentConfig(e, id, bs, defaultIdentity()))
+	a.waitConnected()
+	old := localSession(t, gw, id)
+	gw.routed.Store(false)
+	e.gateway("gw-b", nil)
+	// Half-open link: only the NOTIFY can tell gw-a that the machine moved.
+	e.net.Links(id)[0].Stall(time.Minute)
+	a.waitEvent("connected to gw-b", func(ev agent.ConnEvent) bool {
+		return ev.Kind == agent.KindConnected && ev.Gateway == "gw-b"
+	})
+	eventually(t, waitTimeout, "gw-a fences its session", func() bool {
+		_, ok := gw.Machine(id)
+		return !ok
+	})
+	waitDone(t, old)
+	if _, err := e.pool.Exec(context.Background(), `SELECT pg_notify('sbx_routes', 'r1')`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-routes:
+		if p != "r1" {
+			t.Fatalf("sbx_routes payload %q, want r1", p)
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("sbx_routes notification not delivered while OnSessionChange is blocked")
+	}
+
+	blockOnce.Do(func() { close(block) })
+	deadline := time.After(waitTimeout)
+	for {
+		select {
+		case got := <-got:
+			if got == id {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("OnSessionChange was not called with %s", id)
+		}
+	}
+}
+
+func TestNewRejectsTunnelListenChannels(t *testing.T) {
+	e := newEnv(t)
+	for _, ch := range []string{wire.NotifyChannel, wire.NotifyInstancesChannel} {
+		_, err := New(Config{
+			InstanceID:     "gw-x",
+			Store:          e.store,
+			ListenChannels: map[string]func(string){ch: func(string) {}},
+		})
+		if err == nil {
+			t.Errorf("New accepted ListenChannels[%q]", ch)
+		}
 	}
 }
 
