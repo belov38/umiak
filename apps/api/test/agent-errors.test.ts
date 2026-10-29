@@ -31,6 +31,7 @@ const TABLE: [agentCode: string, status: number, code: string][] = [
 	["range_not_satisfiable", 416, "range_not_satisfiable"],
 	["invalid_argument", 400, "validation"],
 	["too_many_commands", 409, "invalid_state"],
+	["failed_precondition", 409, "invalid_state"],
 ];
 
 describe("agentErrorToHttp", () => {
@@ -49,6 +50,25 @@ describe("agentErrorToHttp", () => {
 		expect(e.details).toEqual({
 			issues: [{ path: "", message: "depth 9 is above 8" }],
 		});
+	});
+
+	it("not_found keeps the agent's message; command_not_found does not", () => {
+		expect(
+			agentErrorToHttp(new AgentCallError("not_found", "no such endpoint"))
+				.message,
+		).toBe("no such endpoint");
+		expect(
+			agentErrorToHttp(new AgentCallError("command_not_found", "cmd x"))
+				.message,
+		).toBe("command not found");
+	});
+
+	it("failed_precondition → invalid_state with details.agentCode", () => {
+		const e = agentErrorToHttp(
+			new AgentCallError("failed_precondition", "not a PTY command"),
+		);
+		expect(e.message).toBe("not a PTY command");
+		expect(e.details).toEqual({ agentCode: "failed_precondition" });
 	});
 
 	it("too_many_commands → invalid_state with details.reason", () => {

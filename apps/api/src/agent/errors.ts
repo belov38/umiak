@@ -87,8 +87,15 @@ export function agentErrorToHttp(e: unknown): ApiError {
 	}
 	switch (e.code) {
 		case "command_not_found":
-		case "not_found":
 			return new ApiError(404, "not_found", "command not found");
+		case "not_found":
+			return new ApiError(404, "not_found", e.message);
+		case "failed_precondition":
+			// Generic: stdin closed or not enabled, resize of a non-PTY command,
+			// a non-empty directory without recursive, a chunk after commit.
+			return new ApiError(409, "invalid_state", e.message, {
+				details: { agentCode: e.code },
+			});
 		case "permission_denied":
 			return new ApiError(403, "path_forbidden", e.message);
 		case "invalid_argument":

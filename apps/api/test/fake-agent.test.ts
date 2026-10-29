@@ -11,6 +11,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import {
@@ -160,6 +161,41 @@ describe("Start", () => {
 		);
 	});
 
+	it("concurrent Start of one commandId launches one process", async () => {
+		const m = newMachine();
+		const commandId = randomUUID();
+		const s = spec({ shell: "echo once" });
+		const both = await Promise.all(
+			[0, 1].map(() =>
+				fake.start(m, { commandId, spec: s }, { requestId: randomUUID() }),
+			),
+		);
+		expect(both.filter((r) => r.created)).toHaveLength(1);
+		expect(fake.startCount(commandId, m)).toBe(1);
+		expect((await collect(attachAll(m, commandId))).out.stdout).toBe("once\n");
+	});
+
+	it("equal command ids on two machines are separate commands", async () => {
+		const m1 = newMachine();
+		const m2 = newMachine();
+		const id = randomUUID();
+		const a = await fake.start(
+			m1,
+			{ commandId: id, spec: spec({ shell: "printf one" }) },
+			{ requestId: "r" },
+		);
+		const b = await fake.start(
+			m2,
+			{ commandId: id, spec: spec({ shell: "printf two" }) },
+			{ requestId: "r" },
+		);
+		expect([a.created, b.created]).toEqual([true, true]);
+		expect((await collect(attachAll(m1, id))).out.stdout).toBe("one");
+		expect((await collect(attachAll(m2, id))).out.stdout).toBe("two");
+		expect(fake.startCount(id, m1)).toBe(1);
+		expect(fake.startCount(id)).toBe(2);
+	});
+
 	it("rejects the same commandId with another spec: already_exists", async () => {
 		const m = newMachine();
 		const commandId = randomUUID();
@@ -192,6 +228,35 @@ describe("Start", () => {
 		);
 		expect(r.out.stdout).toBe(`${join(fake.machine(m).home, "sub")}\nbar baz`);
 		expect(r.exit).toMatchObject({ status: "exited", code: 0, reason: "none" });
+		// An absolute guest cwd maps into the machine root.
+		const abs = await run(m, spec({ shell: "pwd", cwd: "/home/user/sub" }));
+		expect(abs.out.stdout).toBe(`${join(fake.machine(m).home, "sub")}\n`);
+		const out = await run(m, spec({ shell: "pwd", cwd: "/../.." }));
+		expect(out.exit?.reason).toBe("start_failed");
+	});
+
+	it("output of leftovers after exit is not counted; kill reaches leftovers", async () => {
+		const m = newMachine();
+		const r = await run(
+			m,
+			spec({
+				shell:
+					"echo main; (sleep 0.4; echo late) & echo $! > bg.pid; sleep 30 & echo $! >> bg.pid",
+			}),
+		);
+		expect(r.out.stdout).toBe("main\n");
+		expect(r.exit).toMatchObject({ status: "exited", code: 0, stdoutEnd: 5 });
+		const pids = readFileSync(join(fake.machine(m).home, "bg.pid"), "utf8")
+			.trim()
+			.split("\n")
+			.map(Number);
+		expect(pids.some(pidAlive)).toBe(true);
+		await new Promise((res) => setTimeout(res, 600));
+		const info = await fake.get(m, r.commandId);
+		expect(info.streams.stdout).toEqual({ size: 5, availableFrom: 0, end: 5 });
+		await fake.kill(m, { commandId: r.commandId });
+		await new Promise((res) => setTimeout(res, 100));
+		expect(pids.some(pidAlive)).toBe(false);
 	});
 
 	it("a missing program is start_failed with code 127 and the error in stderr", async () => {
@@ -655,7 +720,7 @@ describe("files HTTP", () => {
 		const m = newMachine();
 		const info = await put(m, "dir/a.txt", "hello world");
 		expect(info).toMatchObject({
-			path: join(fake.machine(m).home, "dir/a.txt"),
+			path: "/home/user/dir/a.txt",
 			name: "a.txt",
 			type: "file",
 			size: 11,
@@ -722,6 +787,66 @@ describe("files HTTP", () => {
 		expect(head.status).toBe(200);
 		expect(head.headers.get("content-length")).toBe("10");
 		expect(await head.text()).toBe("");
+	});
+
+	it("guest paths stay inside the machine root", async () => {
+		const f = new FakeAgent();
+		try {
+			const m = randomUUID();
+			const root = f.machine(m).root;
+			const name = `sbx-fake-${randomUUID()}`;
+			const res = await f.files(
+				m,
+				`?path=${encodeURIComponent(`/tmp/${name}`)}`,
+				{
+					method: "PUT",
+					body: "x",
+				},
+			);
+			expect(parseAgentFileInfo(await res.json()).path).toBe(`/tmp/${name}`);
+			expect(existsSync(join(root, "tmp", name))).toBe(true);
+			expect(existsSync(join("/tmp", name))).toBe(false);
+			expect((await f.stat(m, { path: `/tmp/${name}` })).size).toBe(1);
+
+			// Guest /etc/passwd is not the host's.
+			const inside = await f.files(m, "?path=..%2F..%2Fetc%2Fpasswd", {});
+			expect((await agentHttpError(inside)).code).toBe("path_not_found");
+			for (const p of [
+				"../../../etc/passwd",
+				"/../etc/passwd",
+				"~/../../../x",
+			]) {
+				const out = await f.files(m, `?path=${encodeURIComponent(p)}`, {});
+				expect((await agentHttpError(out)).code).toBe("invalid_path");
+				const rpc = await f.stat(m, { path: p }).catch((e: unknown) => e);
+				expect((rpc as AgentCallError).code).toBe("invalid_path");
+			}
+			const rm = await f
+				.remove(m, { path: "../../..", recursive: true, requestId: "r" })
+				.catch((e: unknown) => e);
+			expect((rm as AgentCallError).code).toBe("invalid_path");
+
+			// A symlink that leaves the root is not followed.
+			symlinkSync(tmpdir(), join(f.machine(m).home, "out"));
+			const via = await f.files(m, "?path=out%2Fx", {
+				method: "PUT",
+				body: "x",
+			});
+			expect((await agentHttpError(via)).code).toBe("invalid_path");
+			const link = await f.stat(m, { path: "out", noFollow: true });
+			expect(link.type).toBe("symlink");
+			expect(
+				(
+					(await f
+						.list(m, { path: "out" })
+						.catch((e: unknown) => e)) as AgentCallError
+				).code,
+			).toBe("invalid_path");
+			await f.close();
+			expect(existsSync(root)).toBe(false);
+		} finally {
+			await f.close();
+		}
 	});
 
 	it("errors: missing file, directory, empty path, unknown endpoint", async () => {
@@ -895,7 +1020,7 @@ describe("files archive", () => {
 			expect(putRes.status).toBe(200);
 			const result = (await putRes.json()) as Record<string, unknown>;
 			expect(result).toEqual({
-				path: join(home, "dst"),
+				path: "/home/user/dst",
 				entries: 6,
 				size: 3 + 70_000 + 9,
 			});
@@ -917,10 +1042,11 @@ describe("files archive", () => {
 		type: string,
 		body = "",
 		linkname = "",
+		mode = 0o644,
 	): Buffer {
 		const h = Buffer.alloc(512);
 		h.write(name, 0, 100);
-		h.write("0000644\0", 100);
+		h.write(`${mode.toString(8).padStart(7, "0")}\0`, 100);
 		h.write("0000000\0", 108);
 		h.write("0000000\0", 116);
 		h.write(`${Buffer.byteLength(body).toString(8).padStart(11, "0")}\0`, 124);
@@ -1005,11 +1131,27 @@ describe("files archive", () => {
 			body: gzip(tarOf(tarEntry("g", "0", "new"), tarEntry("h", "1", "", "g"))),
 		});
 		expect(await ok2.json()).toEqual({
-			path: join(home, "dst"),
+			path: "/home/user/dst",
 			entries: 2,
 			size: 3,
 		});
 		expect(readFileSync(join(home, "dst/h"), "utf8")).toBe("new");
+	});
+
+	it("PUT drops setuid and setgid from archived modes", async () => {
+		const m = newMachine();
+		const res = await fake.files(m, "/archive?path=dst", {
+			method: "PUT",
+			body: tarOf(
+				tarEntry("s", "0", "x", "", 0o4755),
+				tarEntry("g", "0", "x", "", 0o2750),
+				tarEntry("d", "5", "", "", 0o2775),
+			),
+		});
+		expect(res.status).toBe(200);
+		const mode = (p: string) =>
+			lstatSync(join(fake.machine(m).home, "dst", p)).mode & 0o7777;
+		expect([mode("s"), mode("g"), mode("d")]).toEqual([0o755, 0o750, 0o775]);
 	});
 
 	it("PUT over the entry limit → 413 payload_too_large", async () => {
@@ -1050,7 +1192,7 @@ describe("Filesystem RPC", () => {
 		expect(link).toMatchObject({ type: "symlink", symlinkTarget: "a.txt" });
 
 		const names = (r: { entries: { path: string }[] }) =>
-			r.entries.map((e) => e.path.slice(join(home, "d").length + 1));
+			r.entries.map((e) => e.path.slice("/home/user/d/".length));
 		expect(names(await fake.list(m, { path: "d" }))).toEqual([
 			".hidden",
 			"a.txt",
@@ -1119,7 +1261,7 @@ describe("Filesystem RPC", () => {
 			dst: "x/y/f",
 			requestId: r,
 		});
-		expect(moved.path).toBe(join(home, "x/y/f"));
+		expect(moved.path).toBe("/home/user/x/y/f");
 		const clash = await fake
 			.move(m, { src: "x/g", dst: "x/y/f", overwrite: false, requestId: r })
 			.catch((e: unknown) => e);
