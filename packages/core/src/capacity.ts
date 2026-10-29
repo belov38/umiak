@@ -237,6 +237,11 @@ export interface QuotaDelta {
 	addSandboxes?: number;
 	addRamMb?: number;
 	addSavedSnapshots?: number;
+	/**
+	 * Save that replaces the team's `ready` snapshot of this name (S6 §7.8):
+	 * that snapshot is not counted, since it is deleted when the new one is ready.
+	 */
+	replacingSavedName?: string;
 }
 
 /**
@@ -277,8 +282,9 @@ export async function checkQuota(
 	if (addSaved > 0) {
 		const r = await tx.client.query<{ n: number }>(
 			`SELECT count(*)::int AS n FROM runtime.snapshots
-			 WHERE team_id = $1 AND kind = 'saved' AND state IN ('creating', 'ready')`,
-			[teamId],
+			 WHERE team_id = $1 AND kind = 'saved' AND state IN ('creating', 'ready')
+			   AND NOT (state = 'ready' AND $2::text IS NOT NULL AND name = $2::text)`,
+			[teamId, delta.replacingSavedName ?? null],
 		);
 		const n = r.rows[0]?.n ?? 0;
 		if (n + addSaved > quota.maxSavedSnapshots) {

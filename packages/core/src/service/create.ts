@@ -2,17 +2,11 @@ import { type Tx, withTx } from "@sbx/db";
 import { requestHash } from "../canonical.ts";
 import { checkQuota } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
-import {
-	idempotencyKeyReused,
-	notFound,
-	poolExhausted,
-	slugTaken,
-} from "../errors.ts";
+import { idempotencyKeyReused, notFound, poolExhausted } from "../errors.ts";
 import { claimIdempotencyKey } from "../idempotency.ts";
 import { uuidv7 } from "../ids.ts";
 import { idempotencyPrincipal, type Principal } from "../principal.ts";
 import type { Operation, Sandbox } from "../rows.ts";
-import { generateSlug, slugProblem } from "../slug.ts";
 import {
 	insertOperation,
 	insertSandboxEvent,
@@ -34,6 +28,7 @@ import {
 	type Placement,
 	POOL_EXHAUSTED_RETRY_SECONDS,
 } from "./create-placement.ts";
+import { insertSandboxRow } from "./sandbox-row.ts";
 
 // Create (S6 §7.3): one transaction writes the idempotency key (first), the
 // sandbox `creating`, its secrets, the machine (claimed `claiming` or new
@@ -52,48 +47,6 @@ export interface CreateResult {
 }
 
 export const CREATE_SCOPE = "sandboxes.create";
-// Generated slugs (S7 §5.4): the first try plus 5 retries with three words,
-// then four-word tries.
-const SLUG_THREE_WORD_TRIES = 6;
-const SLUG_FOUR_WORD_TRIES = 6;
-
-/**
- * Inserts the sandbox row with the given slug (`slug_taken` if taken) or a
- * generated one (see SLUG_THREE_WORD_TRIES).
- * `ON CONFLICT (slug) DO NOTHING` keeps the transaction usable on a collision.
- */
-async function insertSandboxRow(
-	tx: Tx,
-	deps: SandboxServiceDeps,
-	requested: string | undefined,
-	values: unknown[],
-): Promise<string> {
-	const tryInsert = async (slug: string): Promise<boolean> => {
-		const r = await tx.client.query(
-			`INSERT INTO runtime.sandboxes
-			   (slug, id, team_id, created_by, created_by_key, name, labels, template_slug, size_slug,
-			    vcpu, memory_mb, template_build_id, origin, origin_snapshot_id, provider_id, node_id,
-			    machine_id, state, ttl_seconds, idle_timeout_seconds)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-			         'creating', $18, $19)
-			 ON CONFLICT (slug) DO NOTHING
-			 RETURNING slug`,
-			[slug, ...values],
-		);
-		return r.rowCount === 1;
-	};
-	if (requested !== undefined) {
-		if (await tryInsert(requested)) return requested;
-		throw slugTaken(requested);
-	}
-	for (let i = 0; i < SLUG_THREE_WORD_TRIES + SLUG_FOUR_WORD_TRIES; i++) {
-		const words = i < SLUG_THREE_WORD_TRIES ? 3 : 4;
-		const slug = generateSlug(words, deps.slugRandom);
-		if (slugProblem(slug) !== null) continue;
-		if (await tryInsert(slug)) return slug;
-	}
-	throw new Error("create: could not generate a free slug");
-}
 
 async function loadResult(
 	tx: Tx,
@@ -190,26 +143,27 @@ export async function createSandbox(
 			}
 		}
 
-		const slug = await insertSandboxRow(tx, deps, input.slug, [
-			sandboxId,
-			p.teamId,
-			p.userId,
-			p.apiKeyId ?? null,
-			input.name ?? null,
-			JSON.stringify(input.labels ?? {}),
-			template.slug,
-			size.slug,
-			size.vcpu,
-			size.memoryMb,
-			placement.templateBuildId,
-			snap ? "snapshot" : "template",
-			placement.originSnapshotId,
-			placement.providerId,
-			placement.nodeId,
-			placement.machineId,
+		const slug = await insertSandboxRow(tx, deps, input.slug, {
+			id: sandboxId,
+			teamId: p.teamId,
+			createdBy: p.userId,
+			createdByKey: p.apiKeyId ?? null,
+			name: input.name ?? null,
+			labels: input.labels ?? {},
+			templateSlug: template.slug,
+			sizeSlug: size.slug,
+			vcpu: size.vcpu,
+			memoryMb: size.memoryMb,
+			templateBuildId: placement.templateBuildId,
+			origin: snap ? "snapshot" : "template",
+			originSnapshotId: placement.originSnapshotId,
+			forkedFromSandboxId: null,
+			providerId: placement.providerId,
+			nodeId: placement.nodeId,
+			machineId: placement.machineId,
 			ttlSeconds,
 			idleTimeoutSeconds,
-		]);
+		});
 
 		if (!placement.fromPool) {
 			// The row is the RAM reservation admitted above (S6 §8.2).

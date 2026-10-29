@@ -1,4 +1,4 @@
-import type { ConfigReader } from "@sbx/config";
+import type { ConfigReader, TemplateOs } from "@sbx/config";
 import type { Tx } from "@sbx/db";
 import type pg from "pg";
 import { notFound } from "../errors.ts";
@@ -15,7 +15,7 @@ import {
 } from "../rows.ts";
 import type { KeyRing } from "../secrets.ts";
 import type { RandomInt } from "../slug.ts";
-import type { SandboxState } from "../states.ts";
+import type { MachineState, SandboxState } from "../states.ts";
 
 // Helpers shared by the SandboxService methods (this task and later ones).
 
@@ -191,4 +191,99 @@ export async function insertSandboxEvent(
 				: JSON.stringify(ev.data),
 		],
 	);
+}
+
+/** The pending/running operation of one sandbox. */
+export async function activeOperation(
+	q: Queryable,
+	sandboxId: string,
+): Promise<Operation | null> {
+	const ops = await activeOperations(q, [sandboxId]);
+	return ops.get(sandboxId) ?? null;
+}
+
+/** `FOR UPDATE` of a sandbox row by id, without a team check (system callers). */
+export async function lockSandboxById(
+	tx: Tx,
+	sandboxId: string,
+): Promise<SandboxRow> {
+	if (!isUuid(sandboxId)) throw notFound("sandbox");
+	const r = await tx.client.query<SandboxRow>(
+		"SELECT * FROM runtime.sandboxes WHERE id = $1 FOR UPDATE",
+		[sandboxId],
+	);
+	const row = r.rows[0];
+	if (!row) throw notFound("sandbox");
+	return row;
+}
+
+/** OS of a template build (deadlines, S6 §7.9); the build row always exists. */
+export async function buildOs(
+	q: Queryable,
+	templateBuildId: string,
+): Promise<TemplateOs> {
+	const r = await q.query<{ os: TemplateOs }>(
+		"SELECT os FROM runtime.template_builds WHERE id = $1",
+		[templateBuildId],
+	);
+	const os = r.rows[0]?.os;
+	if (os === undefined) throw notFound("template build");
+	return os;
+}
+
+export interface MachineInfo {
+	id: string;
+	state: MachineState;
+	memoryMb: number;
+	storageId: string;
+}
+
+/** The sandbox's current machine (plain read, no lock). */
+export async function machineInfo(
+	q: Queryable,
+	machineId: string | null,
+): Promise<MachineInfo | null> {
+	if (machineId === null) return null;
+	const r = await q.query<{
+		id: string;
+		state: MachineState;
+		memory_mb: number;
+		storage_id: string;
+	}>(
+		"SELECT id, state, memory_mb, storage_id FROM runtime.machines WHERE id = $1",
+		[machineId],
+	);
+	const m = r.rows[0];
+	if (!m) return null;
+	return {
+		id: m.id,
+		state: m.state,
+		memoryMb: m.memory_mb,
+		storageId: m.storage_id,
+	};
+}
+
+/** `sandbox-op {operationId}` with `singletonKey = sandboxId` (S6 §7.1). */
+export async function sendSandboxOp(
+	tx: Tx,
+	jobs: JobSender,
+	operationId: string,
+	sandboxId: string,
+): Promise<void> {
+	await jobs.send(
+		tx,
+		"sandbox-op",
+		{ operationId },
+		{ singletonKey: sandboxId },
+	);
+}
+
+/** Loads an operation that this transaction has just written. */
+export async function mustLoadOperation(
+	q: Queryable,
+	id: string,
+): Promise<Operation> {
+	const op = await loadOperation(q, id);
+	if (op === null) throw notFound("operation");
+	return op;
 }

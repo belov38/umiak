@@ -170,3 +170,24 @@ export async function admitOnSnapshotNode(
 		originSnapshotId: snap.id,
 	};
 }
+
+/**
+ * Admission on a fixed node (resume, recover, fork: the disks are local to
+ * it), evicting warm machines of other pairs; `out_of_capacity` otherwise.
+ */
+export async function admitOnNode(
+	tx: Tx,
+	deps: Pick<SandboxServiceDeps, "jobs">,
+	nodeId: string,
+	needMb: number,
+	pairKey: string,
+): Promise<void> {
+	const res = await admit(tx, {
+		nodeId,
+		needMb,
+		pairKey,
+		evict: true,
+		jobs: deps.jobs,
+	});
+	if (!res.ok) throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS);
+}

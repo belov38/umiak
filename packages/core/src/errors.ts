@@ -161,3 +161,22 @@ export function slugTaken(slug: string): SbxError {
 		details: { slug },
 	});
 }
+
+export function sandboxNotReady(
+	state: string,
+	extra: Record<string, unknown> = {},
+): SbxError {
+	return new SbxError(
+		"sandbox_not_ready",
+		`sandbox is not ready (state '${state}')`,
+		{ details: { state, ...extra } },
+	);
+}
+
+export function recoverRateLimited(retryAfterSeconds: number): SbxError {
+	return new SbxError(
+		"recover_rate_limited",
+		`recover was called recently; retry in ${retryAfterSeconds} s`,
+		{ details: { retryAfterSeconds } },
+	);
+}
