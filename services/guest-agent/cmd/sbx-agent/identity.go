@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,6 +17,8 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/packaging"
 )
 
 // deps holds what the CLI subcommands touch, so tests can point them at a
@@ -26,6 +30,18 @@ type deps struct {
 	stopAgent func() error
 	freezer   quiesce.Freezer
 	docker    quiesce.DockerAPI
+
+	// systemctl runs systemctl (install-package, rollback).
+	systemctl func(args ...string) error
+	// sleep pauses rollback.
+	sleep func(time.Duration)
+	// executable returns the path of the running binary (selftest).
+	executable func() (string, error)
+	// embeddedKeys, units and configTemplate are the packaging files
+	// embedded in the binary.
+	embeddedKeys   []byte
+	units          fs.FS
+	configTemplate []byte
 }
 
 // defaultDeps returns the production dependencies.
@@ -41,6 +57,13 @@ func defaultDeps() deps {
 		stopAgent: stopAgentService,
 		freezer:   quiesce.NewFreezer(),
 		docker:    &docker.Client{},
+
+		systemctl:      update.Systemctl,
+		sleep:          time.Sleep,
+		executable:     os.Executable,
+		embeddedKeys:   packaging.UpdateKeys,
+		units:          packaging.Units,
+		configTemplate: packaging.AgentTOML,
 	}
 }
 

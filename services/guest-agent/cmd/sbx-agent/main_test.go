@@ -24,11 +24,12 @@ func TestRun(t *testing.T) {
 		{"shim without id", []string{"shim"}, shimUsageCode(), "", shimUsageErr()},
 		{"quiesce-watchdog without lease", []string{"quiesce-watchdog"}, 2, "", "usage: sbx-agent quiesce-watchdog --lease"},
 		{"quiesce-watchdog extra arg", []string{"quiesce-watchdog", "--lease", "x", "y"}, 2, "", "usage"},
-		{"rollback", []string{"rollback"}, 1, "", "not implemented"},
+		{"rollback extra arg", []string{"rollback", "x"}, 2, "", "usage: sbx-agent rollback"},
 		{"doctor", []string{"doctor"}, 1, "", "not implemented"},
 		{"thaw without force", []string{"thaw"}, 2, "", "usage: sbx-agent thaw --force"},
-		{"install-package", []string{"install-package"}, 1, "", "not implemented"},
-		{"selftest", []string{"selftest"}, 1, "", "not implemented"},
+		{"install-package without tar", []string{"install-package"}, 2, "", "usage: sbx-agent install-package"},
+		{"selftest without schema", []string{"selftest"}, 2, "", "usage: sbx-agent selftest"},
+		{"selftest bad protos", []string{"selftest", "--schema", "1", "--shim-protos", "x"}, 2, "", "bad shim protocol"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -21,12 +21,15 @@ commands:
   identity apply    apply the machine identity (sbx-identity.service)
   quiesce-watchdog --lease <id>
                     thaw a quiesce lease when it expires (started by the agent)
-  rollback          roll back an unfinished update
+  rollback [--to <version>]
+                    roll back an unfinished update, or switch to a version
   doctor            print diagnostics
   thaw --force      thaw every filesystem and unpause every paused container
-  install-package   install an agent package
+  install-package [--no-activate] [--no-units] [--write-config] <tar>
+                    install a signed agent package
   seal              prepare a VM for use as a template
-  selftest          run built-in checks
+  selftest --schema <n> [--shim-protos 1,2]
+                    check that this version can take over the machine
   version           print the version
 `
 
@@ -64,7 +67,13 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 		return quiesceWatchdog(d, args[1:], stderr) //nolint:contextcheck // the watchdog runs to completion on its own clock
 	case "thaw":
 		return thawCmd(d, args[1:], stdout, stderr) //nolint:contextcheck // an emergency thaw runs to completion
-	case "run", "rollback", "doctor", "install-package", "selftest":
+	case "install-package":
+		return installPackage(d, args[1:], stdout, stderr)
+	case "rollback":
+		return rollbackCmd(d, args[1:], stderr)
+	case "selftest":
+		return selftestCmd(d, args[1:], stdout, stderr)
+	case "run", "doctor":
 		return notImplemented(stderr, args[0])
 	default:
 		_, _ = fmt.Fprintf(stderr, "sbx-agent: unknown command %q\n\n", args[0])

@@ -1,0 +1,21 @@
+[Unit]
+Description=sbx guest agent
+After=network-online.target sbx-identity.service
+Wants=network-online.target sbx-identity.service
+OnFailure=sbx-agent-rollback.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=notify
+ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run
+Restart=always
+RestartSec=1
+TimeoutStopSec=15
+OOMScoreAdjust=-900
+MemoryMin=64M
+CPUWeight=500
+IOWeight=500
+
+[Install]
+WantedBy=multi-user.target
