@@ -670,6 +670,8 @@
 
 ### 5.2 Список инструментов MCP-сервера (S11 и фаза 2)
 
+Обновление 2026-10-29: итоговый список MVP — `docs/specs/s11-mcp.md` (38 инструментов). `computer_*` и `desktop_url` вошли в S11; `files_mkdir`, `files_move`, `sandbox_extend` не вводятся; добавлены `files_edit`, `sandbox_recover`, `computer_move`, `computer_clipboard_*`; `exec_input` и PTY — S22. Таблица ниже — исходный черновик.
+
 Транспорт: Streamable HTTP за `api.<domain>` (Bearer-ключ, позже OAuth по RFC 9728 через S24) и stdio через `sbx mcp`. Аннотации инструментов: `readOnlyHint` и `destructiveHint`. Delete требует повторить id (как заголовок подтверждения).
 
 Длинные операции: `exec_start` + `exec_output` с offset, без удержания одного вызова. Вывод в ответе обрезается с явным `next_offset`.

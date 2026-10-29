@@ -16,7 +16,7 @@
 | S8 | Web (Payload) | Админка, клиентский дашборд, JIT-пользователи из заголовков oauth2-proxy (Keycloak), роли из групп Keycloak, команды, командные API-ключи, offboarding через опрос Keycloak (`sbx login` — S7). Требования S7: ID в Payload — UUID, `IdentityStore`/`ConfigReader` на Payload, роли member/owner | S7 | ✅ спецификация `docs/specs/s8-web.md` |
 | S9 | Windows | Шаблон Win11 (образ пользователя, autounattend, sysprep), агент как служба, ConPTY, VSS, autologon. Server Core — фаза 2 | S3, S5 | ✅ спецификация `docs/specs/s9-windows.md` (первым в реализации спайк: vTPM + `suspend --todisk`) |
 | S10 | Рабочий стол и computer-use | Sunshine + moonlight-web + TURN, cua-driver, шаблон `linux-desktop`, Windows desktop, computer-use API | S4, S9 | ✅ спецификация `docs/specs/s10-desktop.md` |
-| S11 | MCP-сервер | Инструменты поверх публичного API | S7 | |
+| S11 | MCP-сервер | Инструменты поверх публичного API: `sbx mcp` (stdio) и удалённый `/mcp`, вход через Keycloak (`sbx-mcp`) или командный ключ, computer-use | S7, S10 | ✅ спецификация `docs/specs/s11-mcp.md` |
 | S12 | Эксплуатация | Деплой в Kubernetes (Helm, ingress, oauth2-proxy, Postgres), метрики, логи, несколько нод, PBS | S6 | |
 | S13 | Git и приватные зависимости | Репозитории в environment, клон при claim, доступ к приватным репо (GitHub App: токен установки на sandbox с минимальными правами через credential helper агента; позже git-прокси в gateway без токена в VM), политика push, приватные registry (npm, pip, Docker) | S3, S6 | фаза 2, в MVP не реализуем |
 
