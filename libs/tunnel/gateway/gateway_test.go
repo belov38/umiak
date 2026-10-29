@@ -978,3 +978,30 @@ func TestTCPStreamReleasedWhenBothDirectionsDone(t *testing.T) {
 	}
 	_ = c3.Close()
 }
+
+// MachineConn.Epoch is the epoch of the local session, the one the registry
+// holds for it, so callers need no registry query for a local machine.
+func TestMachineConnEpoch(t *testing.T) {
+	e := newEnv(t)
+	gwA := e.gateway("gw-a", nil)
+	gwB := e.gateway("gw-b", nil)
+	gwB.routed.Store(false)
+	id, bs := e.machine()
+	a := e.startAgent(agentConfig(e, id, bs, defaultIdentity()))
+	a.waitConnected()
+	mc := waitMachine(t, gwA, id).(*MachineConn)
+	if got, want := mc.Epoch(), e.session(id).Epoch; got != want || got == 0 {
+		t.Fatalf("Epoch = %d, want %d (registry)", got, want)
+	}
+
+	gwA.routed.Store(false)
+	gwB.routed.Store(true)
+	e.net.Links(id)[0].Stall(time.Minute)
+	a.waitEvent("connected to gw-b", func(ev agent.ConnEvent) bool {
+		return ev.Kind == agent.KindConnected && ev.Gateway == "gw-b"
+	})
+	mcB := waitMachine(t, gwB, id).(*MachineConn)
+	if got := mcB.Epoch(); got != mc.Epoch()+1 {
+		t.Fatalf("Epoch on B = %d, want %d", got, mc.Epoch()+1)
+	}
+}

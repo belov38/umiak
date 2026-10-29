@@ -2,8 +2,11 @@ package registry
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // defaultOwnerTTL bounds how long a positive owner entry is served without
@@ -11,15 +14,23 @@ import (
 // not swept yet; regular changes arrive through Invalidate.
 const defaultOwnerTTL = 5 * time.Second
 
+// ownerFetchTimeout bounds one shared registry query. Callers still leave on
+// their own context; the query itself must not outlive every caller forever
+// on a hung database.
+const ownerFetchTimeout = 10 * time.Second
+
+// OwnerSource answers one owner query, like Store.Owner.
+type OwnerSource func(ctx context.Context, machineID string) (Owner, bool, error)
+
 // OwnerCache caches Store.Owner answers per machine. Positive answers are
 // kept up to ttl or until Invalidate; "no owner" answers and errors are never
-// cached. The caller wires Invalidate to the session notifications
-// (ListenHandlers.Session, gateway.Config.OnSessionChange). It is safe for
-// concurrent use.
+// cached. Concurrent misses of one machine share a single query. The caller
+// wires Invalidate to the session notifications (ListenHandlers.Session,
+// gateway.Config.OnSessionChange). It is safe for concurrent use.
 type OwnerCache struct {
-	store      *Store
-	staleAfter time.Duration
-	ttl        time.Duration
+	src OwnerSource
+	ttl time.Duration
+	sf  singleflight.Group
 
 	mu        sync.Mutex
 	entries   map[string]ownerEntry
@@ -51,17 +62,29 @@ type ownerWaiters struct {
 // NewOwnerCache returns a cache over s.Owner(ctx, machineID, staleAfter).
 // ttl <= 0 means 5 s.
 func NewOwnerCache(s *Store, staleAfter, ttl time.Duration) *OwnerCache {
+	return NewOwnerCacheFunc(func(ctx context.Context, machineID string) (Owner, bool, error) {
+		return s.Owner(ctx, machineID, staleAfter)
+	}, ttl)
+}
+
+// NewOwnerCacheFunc returns a cache over src. ttl <= 0 means 5 s.
+func NewOwnerCacheFunc(src OwnerSource, ttl time.Duration) *OwnerCache {
 	if ttl <= 0 {
 		ttl = defaultOwnerTTL
 	}
 	return &OwnerCache{
-		store:      s,
-		staleAfter: staleAfter,
-		ttl:        ttl,
-		entries:    map[string]ownerEntry{},
-		inflight:   map[string]*ownerFlight{},
-		waiters:    map[string]*ownerWaiters{},
+		src:      src,
+		ttl:      ttl,
+		entries:  map[string]ownerEntry{},
+		inflight: map[string]*ownerFlight{},
+		waiters:  map[string]*ownerWaiters{},
 	}
+}
+
+// ownerResult is what one shared query produced.
+type ownerResult struct {
+	owner Owner
+	ok    bool
 }
 
 // Lookup returns the owner of a machine, from the cache when a positive
@@ -80,9 +103,45 @@ func (c *OwnerCache) Lookup(ctx context.Context, machineID string) (Owner, bool,
 	return c.fetch(ctx, machineID)
 }
 
-// fetch asks the registry and caches a positive answer unless the machine
-// was invalidated meanwhile.
+// fetch asks the registry, sharing the query with concurrent callers for the
+// same machine. The query runs on its own timeout, detached from the caller
+// that starts it; each caller leaves when its ctx is done.
 func (c *OwnerCache) fetch(ctx context.Context, machineID string) (Owner, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Owner{}, false, err
+	}
+	c.mu.Lock()
+	// An Invalidate("") changes the key, an Invalidate(machineID) forgets
+	// it: callers arriving after an invalidation never join a query that
+	// started before it.
+	key := c.flightKeyLocked(machineID)
+	c.mu.Unlock()
+	ch := c.sf.DoChan(key, func() (any, error) {
+		qctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ownerFetchTimeout)
+		defer cancel()
+		o, ok, err := c.query(qctx, machineID)
+		return ownerResult{owner: o, ok: ok}, err
+	})
+	select {
+	case <-ctx.Done():
+		return Owner{}, false, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return Owner{}, false, res.Err
+		}
+		r := res.Val.(ownerResult)
+		return r.owner, r.ok, nil
+	}
+}
+
+// flightKeyLocked is the singleflight key of a machine. The caller holds c.mu.
+func (c *OwnerCache) flightKeyLocked(machineID string) string {
+	return strconv.FormatUint(c.allGen, 10) + "/" + machineID
+}
+
+// query asks the registry and caches a positive answer unless the machine
+// was invalidated meanwhile.
+func (c *OwnerCache) query(ctx context.Context, machineID string) (Owner, bool, error) {
 	c.mu.Lock()
 	f := c.inflight[machineID]
 	if f == nil {
@@ -93,7 +152,7 @@ func (c *OwnerCache) fetch(ctx context.Context, machineID string) (Owner, bool, 
 	gen, allGen := f.gen, c.allGen
 	c.mu.Unlock()
 
-	o, ok, err := c.store.Owner(ctx, machineID, c.staleAfter)
+	o, ok, err := c.src(ctx, machineID)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -136,6 +195,7 @@ func (c *OwnerCache) Invalidate(machineID string) {
 		return
 	}
 	delete(c.entries, machineID)
+	c.sf.Forget(c.flightKeyLocked(machineID))
 	if f := c.inflight[machineID]; f != nil {
 		f.gen++
 	}

@@ -3,6 +3,8 @@ package registry_test
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -143,5 +145,109 @@ func TestOwnerCacheTTL(t *testing.T) {
 	cancel()
 	if _, _, err := c.Lookup(cctx, id); err == nil {
 		t.Fatal("Lookup with a cancelled context: want an error")
+	}
+}
+
+// Concurrent misses of one machine share a single registry query.
+func TestOwnerCacheCollapsesMisses(t *testing.T) {
+	s, _ := setup(t)
+	ctx := context.Background()
+	if err := s.RegisterInstance(ctx, "gw-1", "http://10.0.0.1:8080"); err != nil {
+		t.Fatal(err)
+	}
+	id, bs := machine(t, s)
+	if _, err := s.Admit(ctx, params(id, "gw-1", transport.AuthBootstrap, bs)); err != nil {
+		t.Fatal(err)
+	}
+	var queries atomic.Int32
+	release := make(chan struct{})
+	c := registry.NewOwnerCacheFunc(func(ctx context.Context, machineID string) (registry.Owner, bool, error) {
+		queries.Add(1)
+		<-release
+		return s.Owner(ctx, machineID, 15*time.Second)
+	}, 0)
+	c.Invalidate(id)
+
+	const n = 50
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range n {
+		wg.Go(func() {
+			o, ok, err := c.Lookup(ctx, id)
+			switch {
+			case err != nil:
+				errs <- err
+			case !ok || o.InstanceID != "gw-1":
+				errs <- errors.New("no owner")
+			}
+		})
+	}
+	// Let every caller join the flight before it completes.
+	time.Sleep(200 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if q := queries.Load(); q != 1 {
+		t.Fatalf("registry queries = %d, want 1", q)
+	}
+
+	// A caller that gives up does not end the shared query of the others.
+	queries.Store(0)
+	c.Invalidate(id)
+	hold := make(chan struct{})
+	c2 := registry.NewOwnerCacheFunc(func(ctx context.Context, machineID string) (registry.Owner, bool, error) {
+		queries.Add(1)
+		<-hold
+		return s.Owner(ctx, machineID, 15*time.Second)
+	}, 0)
+	cctx, cancel := context.WithCancel(ctx)
+	first := make(chan error, 1)
+	go func() {
+		_, _, err := c2.Lookup(cctx, id)
+		first <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	second := make(chan error, 1)
+	go func() {
+		_, ok, err := c2.Lookup(ctx, id)
+		if err == nil && !ok {
+			err = errors.New("no owner")
+		}
+		second <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first = %v, want context.Canceled", err)
+	}
+	close(hold)
+	if err := <-second; err != nil {
+		t.Fatalf("second = %v", err)
+	}
+	if q := queries.Load(); q != 1 {
+		t.Fatalf("registry queries = %d, want 1", q)
+	}
+
+	// An Invalidate during a query: later callers do not join it.
+	queries.Store(0)
+	gate := make(chan struct{})
+	c3 := registry.NewOwnerCacheFunc(func(ctx context.Context, machineID string) (registry.Owner, bool, error) {
+		if queries.Add(1) == 1 {
+			<-gate
+		}
+		return s.Owner(ctx, machineID, 15*time.Second)
+	}, 0)
+	go func() { _, _, _ = c3.Lookup(ctx, id) }()
+	time.Sleep(50 * time.Millisecond)
+	c3.Invalidate(id)
+	if _, ok, err := c3.Lookup(ctx, id); err != nil || !ok {
+		t.Fatalf("Lookup after Invalidate: ok=%v err=%v", ok, err)
+	}
+	close(gate)
+	if q := queries.Load(); q != 2 {
+		t.Fatalf("registry queries = %d, want 2", q)
 	}
 }

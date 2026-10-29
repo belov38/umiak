@@ -161,6 +161,10 @@ type MachineConn struct{ s *session }
 
 var _ transport.MachineConn = (*MachineConn)(nil)
 
+// Epoch returns the tunnel epoch of the session, the one the registry holds
+// for it. It needs no registry query.
+func (m *MachineConn) Epoch() uint64 { return m.s.info.Epoch }
+
 // RoundTrip sends req to the agent. The URL is rewritten to http://agent/...
 // (CONNECT requests keep their authority). The request is tracked until its
 // response body is drained or closed; on a moved session RPC streams are

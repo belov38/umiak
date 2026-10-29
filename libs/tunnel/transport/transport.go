@@ -168,11 +168,22 @@ type MachineConn interface {
 	Close() error
 }
 
-// DialError reports a CONNECT refused by the agent (400, 403 or 502).
+// DialError reports a TCP dial refused with a non-200 status.
+//
+// Status is the status of the refusal:
+//   - over the local tunnel (MachineConn.DialTCP) it is the agent's own
+//     answer: normally 400 (bad authority), 403 (policy) or 502 (the dial
+//     failed), but any other status the agent sends is passed as is;
+//   - over a peer CONNECT (gateway.DialRemoteTCP) it is the owner
+//     instance's answer: 400, 403 or 502 forwarded from the agent (any
+//     other agent status becomes 502), or the owner's own refusal, such as
+//     401 (service token) or 503 (no session for the machine). 421 and 429
+//     are not DialErrors: they are MovedError and gateway.ErrTooManyStreams.
 //
 // Reason says why a dial failed, from a closed set: "refused" (connection
 // refused by the target), "timeout" or "" (unknown or not a dial failure).
-// Callers must treat any other value as "".
+// The agent sends it with a 502 only; callers should read it with a 502
+// only. Callers must treat any other value as "".
 type DialError struct {
 	Status int
 	Reason string
