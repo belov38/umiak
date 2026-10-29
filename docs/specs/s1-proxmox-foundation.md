@@ -167,7 +167,7 @@ IPSet `sbx-gateway` — место для будущего адреса ingress 
 1. Thin-снимок `base-9000-disk-0` → `vm-599-disk-0` (тег `sbx-tpl`); корневой раздел подключается на хосте через dm-linear (не loop), чтобы discard доходил до thin LV.
 2. В chroot: purge всех пакетов `tailscale*` (`tailscale`, `tailscale-archive-keyring`) и их state; удаление пользователя `ib` с `/home/ib`, его sudoers, `/opt/agent-desktop`, всего в `/root` кроме `.bashrc`/`.profile`, crontab, логов и journal; `cloud-init clean --logs --machine-id --seed`, `/etc/machine-id` = `uninitialized` (в chroot cloud-init удаляет файл, и без него networkd не получает DHCP), удаление SSH host keys; netplan-файл с MAC сборочной VM заменён fallback-файлом `en*` + DHCP; замаскированы `systemd-networkd-wait-online`, `unattended-upgrades`, `apt-daily*.timer`. `qemu-guest-agent` в 9000 уже есть, snippet не нужен.
 3. `fstrim` (33.5 GiB), затем обнуление свободных блоков ФС, в которых ещё остались данные (dm-thin освобождает только целые чанки по 64 KiB): 6297 блоков. Проверка: 64 байта из удалённого личного файла (хранятся только на хосте, не печатаются) не находятся на сыром разделе.
-4. `qm create 599` без cicustom, диск, firewall, `qm template 599`.
+4. `qm create 599` без cicustom и с `ciupgrade 0`, диск, firewall, `qm template 599`.
 
 599 — шаблон PoC; S5 заменит его чистой сборкой Ubuntu 26.04 minimal.
 
@@ -269,7 +269,7 @@ interface QuiesceHook {
 
 - **create(template, size, opts)**:
   1. Выделить VMID и MAC (§6.5).
-  2. `POST /nodes/pve/qemu` без дисков: `vmid`, `pool=sandbox`, `name=sbx-<vmid>`, `tags=sbx`; железо копируется из конфига шаблона по белому списку ключей (`machine`, `cpu`, `bios`, `ostype`, `scsihw`, `agent`, `serial0`, `vga`, `tablet`); размер по умолчанию 2 vCPU / 2 GB, `balloon=0`; `net0=virtio=<MAC>,bridge=sbx0,firewall=1`; `ide2=local-lvm:cloudinit`, `ipconfig0=ip=dhcp`, `ciuser=sbx` без ключей и пароля (в S1 доступ к гостю только через QGA); `vmgenid` новый; `smbios1` от вызывающего или новый от Proxmox (§6.4).
+  2. `POST /nodes/pve/qemu` без дисков: `vmid`, `pool=sandbox`, `name=sbx-<vmid>`, `tags=sbx`; железо копируется из конфига шаблона по белому списку ключей (`machine`, `cpu`, `bios`, `ostype`, `scsihw`, `agent`, `serial0`, `vga`, `tablet`); размер по умолчанию 2 vCPU / 2 GB, `balloon=0`; `net0=virtio=<MAC>,bridge=sbx0,firewall=1`; `ide2=local-lvm:cloudinit`, `ipconfig0=ip=dhcp`, `ciuser=sbx` без ключей и пароля (в S1 доступ к гостю только через QGA); `ciupgrade=0` (дефолт Proxmox 1: cloud-init делает `apt upgrade` при первой загрузке и через ~2 минуты перезапускает `qemu-guest-agent`, который забывает PID запущенных exec); `vmgenid` новый; `smbios1` от вызывающего или новый от Proxmox (§6.4).
   3. `driver.cloneFromTemplate`.
   4. `PUT config`: подключить диски с опциями, `boot=order=scsi0`.
   5. Firewall: options и `GROUP sbx-egress` (§4.4).
