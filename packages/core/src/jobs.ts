@@ -5,6 +5,8 @@ export interface JobSendOptions {
 	singletonKey?: string;
 	/** Seconds from now. */
 	startAfter?: number;
+	/** Overrides the queue's retry limit (delete jobs: DELETE_RETRY_LIMIT). */
+	retryLimit?: number;
 }
 
 /**

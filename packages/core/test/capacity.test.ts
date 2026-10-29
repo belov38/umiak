@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	admit,
 	checkQuota,
+	DELETE_RETRY_LIMIT,
 	isSbxError,
 	lockNode,
 	lockTeam,
@@ -246,11 +247,12 @@ describe.skipIf(skipPg())("capacity", () => {
 			expect(await machineState(oldOther)).toBe("deleting");
 			expect(await machineState(newOther)).toBe("warm");
 			expect(await machineState(ownPair)).toBe("warm");
-			expect(jobs.sent).toEqual([
+			// Strict: a missing retryLimit must fail (delete never gives up, §15.1).
+			expect(jobs.sent).toStrictEqual([
 				{
 					queue: "machine-op",
 					data: { machineId: oldOther, action: "delete" },
-					opts: { singletonKey: oldOther },
+					opts: { singletonKey: oldOther, retryLimit: DELETE_RETRY_LIMIT },
 				},
 			]);
 			expect((await ram(topo.nodeId)).reservedMb).toBe(6144);

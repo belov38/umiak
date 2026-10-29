@@ -3,6 +3,7 @@ import type { Tx } from "@sbx/db";
 import { invalidState, notFound, quotaExceeded } from "./errors.ts";
 import type { JobSender } from "./jobs.ts";
 import { lockNode, lockTeam } from "./locks.ts";
+import { DELETE_RETRY_LIMIT } from "./queues.ts";
 import {
 	type MachineState,
 	POWERED_MACHINE_STATES,
@@ -101,8 +102,8 @@ export type AdmitResult = { ok: true; evicted: string[] } | { ok: false };
  * 1. `reserved + need <= cap` -> admitted.
  * 2. With `evict`: warm machines of other pairs on the node, oldest `warm_at`
  *    first, until the RAM fits. They go to `deleting` and get a `machine-op
- *    delete` job in this transaction. If all of them are not enough, nothing
- *    changes.
+ *    delete` job in this transaction (unlimited retries, S6 §15.1). If all
+ *    of them are not enough, nothing changes.
  * 3. Otherwise refused; the caller maps it to `out_of_capacity`.
  */
 export async function admit(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
@@ -147,7 +148,7 @@ export async function admit(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
 			tx,
 			"machine-op",
 			{ machineId, action: "delete" },
-			{ singletonKey: machineId },
+			{ singletonKey: machineId, retryLimit: DELETE_RETRY_LIMIT },
 		);
 	}
 	return { ok: true, evicted: chosen };

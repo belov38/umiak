@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { QUEUE_NAMES, QUEUES, RecordingJobSender } from "../src/index.ts";
+import {
+	DELETE_RETRY_LIMIT,
+	QUEUE_NAMES,
+	QUEUES,
+	RecordingJobSender,
+} from "../src/index.ts";
 
 describe("QUEUES (S6 §15.1)", () => {
 	it("lists every queue", () => {
@@ -36,7 +41,12 @@ describe("QUEUES (S6 §15.1)", () => {
 			deadLetter: "sandbox-op-dlq",
 		});
 		expect(QUEUES["machine-op"]).toEqual(op);
-		expect(QUEUES["snapshot-op"]).toEqual(op);
+		// snapshot-op only deletes: retries without limit, no dead letter (§15.1).
+		expect(QUEUES["snapshot-op"]).toEqual({
+			...op,
+			retryLimit: DELETE_RETRY_LIMIT,
+		});
+		expect(DELETE_RETRY_LIMIT).toBeGreaterThanOrEqual(1_000_000);
 	});
 
 	it("machine-events is stately; controllers are exclusive", () => {
@@ -68,6 +78,7 @@ describe("RecordingJobSender", () => {
 			{ operationId: "o1" },
 			{
 				singletonKey: "s1",
+				retryLimit: DELETE_RETRY_LIMIT,
 			},
 		);
 		await jobs.send(tx, "ctl-pool", {});
@@ -75,7 +86,7 @@ describe("RecordingJobSender", () => {
 			{
 				queue: "sandbox-op",
 				data: { operationId: "o1" },
-				opts: { singletonKey: "s1" },
+				opts: { singletonKey: "s1", retryLimit: DELETE_RETRY_LIMIT },
 			},
 			{ queue: "ctl-pool", data: {} },
 		]);

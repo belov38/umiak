@@ -37,6 +37,15 @@ const OPERATION_RETRIES = {
 	retryDelayMax: 120,
 } as const;
 
+/**
+ * Retry limit for delete jobs: effectively unlimited. S6 §15.1: a delete never
+ * gives up and has no dead letter (alert via `sbx_delete_stuck`). Used as the
+ * `snapshot-op` queue limit (delete-only) and passed per job on every
+ * `machine-op` delete send. `sandbox-op` delete jobs must also be sent with
+ * `retryLimit: DELETE_RETRY_LIMIT` (otherwise they reach `sandbox-op-dlq`).
+ */
+export const DELETE_RETRY_LIMIT = 1_000_000;
+
 const CONTROLLER = { policy: "exclusive" } as const;
 
 export const QUEUES = {
@@ -49,10 +58,15 @@ export const QUEUES = {
 	// Exhausted sandbox-op jobs (decision 8). Handling is idempotent, so no
 	// singleton; it is retried like an operation job.
 	"sandbox-op-dlq": { policy: "standard", ...OPERATION_RETRIES },
-	// Key: machineId, data {machineId, action: provision | delete}.
+	// Key: machineId, data {machineId, action: provision | delete}. The limit
+	// of 20 applies to provision; delete sends pass DELETE_RETRY_LIMIT.
 	"machine-op": { policy: "singleton", ...OPERATION_RETRIES },
-	// Key: snapshotId, data {snapshotId, action: delete}.
-	"snapshot-op": { policy: "singleton", ...OPERATION_RETRIES },
+	// Key: snapshotId, data {snapshotId, action: delete}. Delete-only.
+	"snapshot-op": {
+		policy: "singleton",
+		...OPERATION_RETRIES,
+		retryLimit: DELETE_RETRY_LIMIT,
+	},
 	// Key: machineId, data {machineId}.
 	"machine-events": { policy: "stately", retryLimit: 10, retryBackoff: true },
 	"ctl-pool": CONTROLLER,
