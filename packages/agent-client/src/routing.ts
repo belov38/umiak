@@ -23,7 +23,7 @@ export type AttemptOutcome<T> =
 	 * which the agent may have forged: it is followed only when the registry
 	 * confirms a live instance at that URL. Otherwise the answer is not a
 	 * move and notMoved() decides what it is (it may throw a fatal error).
-	 * discard() releases the response when the move is followed.
+	 * discard() releases the response when it is treated as a move.
 	 */
 	| {
 			kind: "moved";
@@ -161,6 +161,7 @@ export async function routeCall<T>(
 		const hint = outcome.instanceUrl || undefined;
 		if (hint !== undefined && sameUrl(hint, url)) {
 			// Following it would ask the same instance again at once.
+			outcome.discard?.();
 			failed = current;
 			mustWait = true;
 			continue;
