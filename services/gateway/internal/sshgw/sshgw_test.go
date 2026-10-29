@@ -141,6 +141,7 @@ func TestSSHCertSkew(t *testing.T) {
 		"not yet valid beyond skew":    {after: now.Add(2 * time.Minute), before: now.Add(5 * time.Minute)},
 		"expired beyond skew":          {after: now.Add(-5 * time.Minute), before: now.Add(-2 * time.Minute)},
 		"valid before not after after": {after: now.Add(-time.Minute), before: now.Add(-time.Minute)},
+		"validity of exactly 24 h":     {after: now.Add(-time.Minute), before: now.Add(24*time.Hour - time.Minute), ok: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -156,7 +157,12 @@ func TestSSHCertSkew(t *testing.T) {
 }
 
 func TestSSHCertRejects(t *testing.T) {
-	f := newFixture(t, nil)
+	// High per-IP SSH limits: a blocked IP would refuse every later case
+	// before api, whatever its certificate.
+	f := newFixture(t, func(c *config.Config) {
+		c.RateLimit.SSHAuthFailPerMin = 1000
+		c.RateLimit.SSHConnPerMin, c.RateLimit.SSHConnBurst = 1000, 1000
+	})
 	f.env.API.SetSSH(func(r cpapi.SSHAuthorizeRequest) bool {
 		return r.Certificate != nil && r.Certificate.Principal == "sb_x"
 	}, f.userAuth("usr_1"))
@@ -182,6 +188,10 @@ func TestSSHCertRejects(t *testing.T) {
 			c.CriticalOptions = map[string]string{"force-command": "/bin/true"}
 		}},
 		{name: "infinite validity", mod: func(c *ssh.Certificate) { c.ValidBefore = ssh.CertTimeInfinity }},
+		{name: "validity over 24 h", mod: func(c *ssh.Certificate) {
+			c.ValidAfter = uint64(time.Now().Add(-time.Minute).Unix())
+			c.ValidBefore = uint64(time.Now().Add(24 * time.Hour).Unix())
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

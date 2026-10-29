@@ -26,14 +26,15 @@ import (
 
 // Defaults for zero Config values (spec 9.2, 9.3, 10.3).
 const (
-	DefaultDrainDeadline     = 15 * time.Minute
-	DefaultKeepaliveInterval = 30 * time.Second
-	DefaultKeepaliveMax      = 3
-	DefaultAuthTimeout       = 20 * time.Second
-	DefaultMaxAuthTries      = 6
-	DefaultClockSkew         = 60 * time.Second
-	DefaultBackendCertTTL    = 5 * time.Minute
-	DefaultMaxChannels       = 256
+	DefaultDrainDeadline        = 15 * time.Minute
+	DefaultKeepaliveInterval    = 30 * time.Second
+	DefaultKeepaliveMax         = 3
+	DefaultAuthTimeout          = 20 * time.Second
+	DefaultMaxAuthTries         = 6
+	DefaultClockSkew            = 60 * time.Second
+	DefaultLoginCertMaxValidity = 24 * time.Hour
+	DefaultBackendCertTTL       = 5 * time.Minute
+	DefaultMaxChannels          = 256
 )
 
 const (
@@ -74,7 +75,10 @@ type Config struct {
 	AuthTimeout       time.Duration
 	MaxAuthTries      int
 	ClockSkew         time.Duration
-	BackendCertTTL    time.Duration
+	// LoginCertMaxValidity caps ValidBefore - ValidAfter of a login
+	// certificate (they live minutes); 0 means 24 h.
+	LoginCertMaxValidity time.Duration
+	BackendCertTTL       time.Duration
 	// MaxChannels caps the open channels of one connection (all types,
 	// both directions); each can hold a 2 MiB window.
 	MaxChannels int
@@ -167,6 +171,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.ClockSkew <= 0 {
 		cfg.ClockSkew = DefaultClockSkew
+	}
+	if cfg.LoginCertMaxValidity <= 0 {
+		cfg.LoginCertMaxValidity = DefaultLoginCertMaxValidity
 	}
 	if cfg.BackendCertTTL <= 0 {
 		cfg.BackendCertTTL = DefaultBackendCertTTL

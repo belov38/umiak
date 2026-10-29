@@ -119,6 +119,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"SSHKeepaliveMax", cfg.SSHKeepaliveMax, 3},
 		{"SSHMaxChannels", cfg.SSHMaxChannels, 256},
 		{"TLSMaxHandshakesPerIP", cfg.TLSMaxHandshakesPerIP, 64},
+		{"SSHLoginCertMaxValidity", cfg.SSHLoginCertMaxValidity, 24 * time.Hour},
 		{"TLSHandshake", cfg.Timeouts.TLSHandshake, 10 * time.Second},
 		{"ReadHeader", cfg.Timeouts.ReadHeader, 10 * time.Second},
 		{"MaxHeaderBytes", cfg.Timeouts.MaxHeaderBytes, 64 << 10},
@@ -156,31 +157,32 @@ func TestFromEnvDefaults(t *testing.T) {
 func TestFromEnvOverrides(t *testing.T) {
 	f := newFixture(t)
 	for k, v := range map[string]string{
-		"SBX_GATEWAY_INSTANCE_ID":               "gw-1",
-		"SBX_GATEWAY_TLS_LISTEN":                ":443",
-		"SBX_GATEWAY_HTTP_LISTEN":               ":8080",
-		"SBX_GATEWAY_PROXY_PROTOCOL":            "v2",
-		"SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":      "10.0.0.0/8, fd00::/8",
-		"SBX_GATEWAY_TRUSTED_PROXY_CIDRS":       "192.168.0.0/16",
-		"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":    "203.0.113.0/24",
-		"SBX_GATEWAY_RATELIMIT_IP_RATE":         "5.5",
-		"SBX_GATEWAY_RATELIMIT_AUTH_BLOCK":      "1m",
-		"SBX_GATEWAY_RESERVED_PORTS":            "22, 8080",
-		"SBX_GATEWAY_TIMEOUT_DIAL":              "3s",
-		"SBX_GATEWAY_TIMEOUT_STREAM_IDLE":       "30m",
-		"SBX_GATEWAY_MAX_HEADER_BYTES":          "1024",
-		"SBX_GATEWAY_COOKIE_CROSS_SITE":         "true",
-		"SBX_GATEWAY_HTTP_DRAIN_DEADLINE":       "30s",
-		"SBX_GATEWAY_TUNNEL_ADMIT_RATE":         "50",
-		"SBX_GATEWAY_TUNNEL_ADMIT_BURST":        "60",
-		"SBX_GATEWAY_MIN_AGENT_VERSION":         "1.2.3",
-		"SBX_GATEWAY_LOG_LEVEL":                 "debug",
-		"SBX_GATEWAY_STRIP_COOKIE_PREFIXES":     "a,b",
-		"SBX_GATEWAY_AUTH_URL":                  "https://app.example.com/authorize",
-		"SBX_GATEWAY_RESERVED_SUFFIXES":         "desktop,vnc",
-		"SBX_GATEWAY_RESERVED_SLUGS":            "api",
-		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER":   "1m",
-		"SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP": "16",
+		"SBX_GATEWAY_INSTANCE_ID":                 "gw-1",
+		"SBX_GATEWAY_TLS_LISTEN":                  ":443",
+		"SBX_GATEWAY_HTTP_LISTEN":                 ":8080",
+		"SBX_GATEWAY_PROXY_PROTOCOL":              "v2",
+		"SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":        "10.0.0.0/8, fd00::/8",
+		"SBX_GATEWAY_TRUSTED_PROXY_CIDRS":         "192.168.0.0/16",
+		"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":      "203.0.113.0/24",
+		"SBX_GATEWAY_RATELIMIT_IP_RATE":           "5.5",
+		"SBX_GATEWAY_RATELIMIT_AUTH_BLOCK":        "1m",
+		"SBX_GATEWAY_RESERVED_PORTS":              "22, 8080",
+		"SBX_GATEWAY_TIMEOUT_DIAL":                "3s",
+		"SBX_GATEWAY_TIMEOUT_STREAM_IDLE":         "30m",
+		"SBX_GATEWAY_MAX_HEADER_BYTES":            "1024",
+		"SBX_GATEWAY_COOKIE_CROSS_SITE":           "true",
+		"SBX_GATEWAY_HTTP_DRAIN_DEADLINE":         "30s",
+		"SBX_GATEWAY_TUNNEL_ADMIT_RATE":           "50",
+		"SBX_GATEWAY_TUNNEL_ADMIT_BURST":          "60",
+		"SBX_GATEWAY_MIN_AGENT_VERSION":           "1.2.3",
+		"SBX_GATEWAY_LOG_LEVEL":                   "debug",
+		"SBX_GATEWAY_STRIP_COOKIE_PREFIXES":       "a,b",
+		"SBX_GATEWAY_AUTH_URL":                    "https://app.example.com/authorize",
+		"SBX_GATEWAY_RESERVED_SUFFIXES":           "desktop,vnc",
+		"SBX_GATEWAY_RESERVED_SLUGS":              "api",
+		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER":     "1m",
+		"SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP":   "16",
+		"SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY": "1h",
 	} {
 		f.env[k] = v
 	}
@@ -211,6 +213,9 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.TLSMaxHandshakesPerIP != 16 {
 		t.Errorf("TLSMaxHandshakesPerIP = %d", cfg.TLSMaxHandshakesPerIP)
+	}
+	if cfg.SSHLoginCertMaxValidity != time.Hour {
+		t.Errorf("SSHLoginCertMaxValidity = %s", cfg.SSHLoginCertMaxValidity)
 	}
 	if strings.Join(cfg.StripCookiePrefixes, "|") != "a|b" || strings.Join(cfg.ReservedSuffixes, "|") != "desktop|vnc" || cfg.AuthURL == "" {
 		t.Errorf("lists: %+v", cfg)

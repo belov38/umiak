@@ -96,6 +96,9 @@ type Config struct {
 	SSHHostKeys    []ssh.Signer
 	SSHUserCA      ssh.Signer
 	SSHLoginCAKeys []ssh.PublicKey
+	// SSHLoginCertMaxValidity caps ValidBefore - ValidAfter of a login
+	// certificate; longer ones are refused.
+	SSHLoginCertMaxValidity time.Duration
 
 	// Reserved names.
 	ReservedPorts    []int
@@ -231,6 +234,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.SSHKeepaliveInterval = l.duration("SSH_KEEPALIVE_INTERVAL", 30*time.Second)
 	c.SSHKeepaliveMax = l.integer("SSH_KEEPALIVE_MAX", 3)
 	c.SSHMaxChannels = l.integer("SSH_MAX_CHANNELS", 256)
+	c.SSHLoginCertMaxValidity = l.duration("SSH_LOGIN_CERT_MAX_VALIDITY", 24*time.Hour)
 
 	c.Timeouts = Timeouts{
 		TLSHandshake:   l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),

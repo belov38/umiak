@@ -44,6 +44,8 @@ var loginKeyID = regexp.MustCompile(`^sbx:(user|key):[A-Za-z0-9_]+$`)
 var (
 	errRefused     = errors.New("sshgw: access denied")
 	errUnavailable = errors.New("sshgw: authorization unavailable")
+	// errCertTooLong: the login certificate's validity exceeds the cap.
+	errCertTooLong = errors.New("certificate valid for too long")
 )
 
 // identity is the result of a successful authentication.
@@ -94,6 +96,11 @@ func (s *Server) authenticate(ctx context.Context, meta ssh.ConnMetadata, key ss
 	id := identity{Request: cpapi.SSHAuthorizeRequest{Sandbox: user}}
 	if cert, ok := key.(*ssh.Certificate); ok {
 		if err := s.checkLoginCert(cert); err != nil {
+			if errors.Is(err, errCertTooLong) {
+				// A login CA signed it: worth an operator's attention.
+				s.log.Warn("sshgw: login certificate refused", "user", user, "key_id", cert.KeyId, "serial", cert.Serial, "err", err)
+				return nil, errRefused
+			}
 			s.log.Debug("sshgw: login certificate refused", "user", user, "key_id", cert.KeyId, "serial", cert.Serial, "err", err)
 			return nil, errRefused
 		}
@@ -148,8 +155,9 @@ func (s *Server) authenticate(ctx context.Context, meta ssh.ConnMetadata, key ss
 }
 
 // checkLoginCert verifies a client certificate (spec 9.2): a user cert
-// from a login CA, exactly one principal, valid now within the clock skew
-// on both bounds, a supported KeyId and no critical options.
+// from a login CA, exactly one principal, a validity no longer than
+// LoginCertMaxValidity, valid now within the clock skew on both bounds, a
+// supported KeyId and no critical options.
 func (s *Server) checkLoginCert(cert *ssh.Certificate) error {
 	if cert.CertType != ssh.UserCert {
 		return fmt.Errorf("certificate type %d", cert.CertType)
@@ -171,6 +179,11 @@ func (s *Server) checkLoginCert(cert *ssh.Certificate) error {
 	if after >= before {
 		return errors.New("empty validity")
 	}
+	// Compared in seconds: a Duration of a huge validity would overflow.
+	if v := before - after; v > int64(s.cfg.LoginCertMaxValidity/time.Second) {
+		return fmt.Errorf("%w: validity %s exceeds the maximum %s (SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY)",
+			errCertTooLong, validityString(v), s.cfg.LoginCertMaxValidity)
+	}
 	now := s.cfg.Now().Unix()
 	skew := int64(s.cfg.ClockSkew / time.Second)
 	if now+skew < after {
@@ -185,6 +198,15 @@ func (s *Server) checkLoginCert(cert *ssh.Certificate) error {
 	at := min(max(now, after), before-1)
 	checker := &ssh.CertChecker{Clock: func() time.Time { return time.Unix(at, 0) }}
 	return checker.CheckCert(cert.ValidPrincipals[0], cert)
+}
+
+// validityString formats a validity in seconds as a Duration, or as seconds
+// when it does not fit one.
+func validityString(secs int64) string {
+	if secs > int64(math.MaxInt64/time.Second) {
+		return strconv.FormatInt(secs, 10) + "s"
+	}
+	return (time.Duration(secs) * time.Second).String()
 }
 
 func (s *Server) isLoginCA(k ssh.PublicKey) bool {
