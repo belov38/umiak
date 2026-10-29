@@ -78,7 +78,10 @@ type Config struct {
 	ProxyProtocolCIDRs []netip.Prefix
 	TrustedProxyCIDRs  []netip.Prefix
 	// ProxyHeaderTimeout bounds the wait for the PROXY v2 header of a conn
-	// from ProxyProtocolCIDRs (TLS and SSH listeners).
+	// from ProxyProtocolCIDRs. On the TLS edge a conn without a complete
+	// header by then is closed. On the SSH listener it goes on header-less
+	// (go-proxyproto "no header"), keyed by the LB address; a client that
+	// waits for the server banner first stalls that long.
 	ProxyHeaderTimeout time.Duration
 
 	// TLSMaxHandshakesPerIP caps the TLS handshakes in flight per client
@@ -306,6 +309,18 @@ func (c Config) ValidateServe() error {
 	// PROXY v2 from anyone would let any client spoof its address.
 	if c.ProxyProtocol && len(c.ProxyProtocolCIDRs) == 0 {
 		errs = append(errs, fmt.Errorf("%sPROXY_PROTOCOL_CIDRS: is required with %sPROXY_PROTOCOL=v2", envPrefix, envPrefix))
+	}
+	// An exempt LB address would make every header-less conn of the LB
+	// exempt from the per-IP limits.
+	if c.ProxyProtocol {
+		for _, e := range c.RateLimit.Exempt {
+			for _, pp := range c.ProxyProtocolCIDRs {
+				if e.Overlaps(pp) {
+					errs = append(errs, fmt.Errorf("%sRATELIMIT_EXEMPT_CIDRS: %s overlaps %s of %sPROXY_PROTOCOL_CIDRS",
+						envPrefix, e, pp, envPrefix))
+				}
+			}
+		}
 	}
 	// The drain must end within the pod's grace period, with the timing
 	// the process uses (only EndpointWait is configurable).

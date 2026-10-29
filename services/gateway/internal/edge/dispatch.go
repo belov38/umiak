@@ -78,8 +78,10 @@ type DispatchConfig struct {
 	// ProxyHeaderTimeout bounds the wait for the PROXY header of a conn
 	// from a trusted PROXY source, and so how long the general (or
 	// borrowed exempt) slot it takes before its client IP is known is
-	// held. A conn without a complete header by then is closed. Use the
-	// same value as the listener's (WrapProxyProtocol). 0 means 2 s.
+	// held. A conn without a complete header by then is closed (the SSH
+	// listener, which has no dispatcher, instead goes on header-less, keyed
+	// by the LB address). Use the same value as the listener's
+	// (WrapProxyProtocol). 0 means 2 s.
 	ProxyHeaderTimeout time.Duration
 	// ConnLimit counts one open sbx conn of the client IP; ok false refuses
 	// it. It runs when the ClientHello names an sbx host; release is called

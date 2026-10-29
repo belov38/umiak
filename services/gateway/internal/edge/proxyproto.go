@@ -19,7 +19,9 @@ var errProxyVersion = errors.New("edge: only PROXY protocol v2 is accepted")
 // does (the server then closes it). A v1 header fails the same way, also
 // from a trusted peer. headerTimeout bounds the wait for the
 // header (0 means DefaultProxyHeaderTimeout); use the dispatcher's
-// ProxyHeaderTimeout.
+// ProxyHeaderTimeout. When it passes, the conn goes on as one without a
+// header (its RemoteAddr is the peer); the TLS dispatcher closes such a
+// conn instead.
 //
 // The policy runs in Accept without I/O. RemoteAddr of an accepted conn
 // blocks until the header is read, so call it only after the first read

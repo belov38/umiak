@@ -391,6 +391,21 @@ func TestValidateServe(t *testing.T) {
 	if err := edge.ValidateServe(); err != nil {
 		t.Fatalf("drain budget of exactly the grace period: %v", err)
 	}
+	// Disjoint exempt and PROXY CIDRs are fine, and an overlap does not
+	// matter with PROXY off.
+	disjoint := valid(t)
+	disjoint.ProxyProtocol = true
+	disjoint.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	disjoint.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("fd00::/8")}
+	if err := disjoint.ValidateServe(); err != nil {
+		t.Fatalf("disjoint exempt and PROXY CIDRs: %v", err)
+	}
+	off := valid(t)
+	off.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	off.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	if err := off.ValidateServe(); err != nil {
+		t.Fatalf("overlap with PROXY off: %v", err)
+	}
 	// Equal HTTP and SSH drain deadlines are fine.
 	eq := valid(t)
 	eq.HTTPDrainDeadline, eq.SSHDrainDeadline = 2*time.Minute, 2*time.Minute
@@ -424,6 +439,16 @@ func TestValidateServe(t *testing.T) {
 			c.EndpointWait = 6 * time.Second
 			c.SSHDrainDeadline = 15*time.Minute + 10*time.Second
 		}, "SBX_GATEWAY_SSH_DRAIN_DEADLINE"},
+		{"exempt cidr inside the proxy cidrs", func(c *Config) {
+			c.ProxyProtocol = true
+			c.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+			c.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("10.1.0.0/16")}
+		}, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
+		{"exempt cidr containing a proxy cidr", func(c *Config) {
+			c.ProxyProtocol = true
+			c.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.5/32")}
+			c.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}
+		}, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
 		{"http drain longer than ssh drain", func(c *Config) { c.HTTPDrainDeadline = 3 * time.Minute; c.SSHDrainDeadline = 2 * time.Minute }, "SBX_GATEWAY_HTTP_DRAIN_DEADLINE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
