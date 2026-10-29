@@ -111,6 +111,8 @@ describe("AgentClient transport", () => {
 					resolve();
 				});
 			});
+			// A probe: no credentials, no route.
+			await fetch(`${trap.url}/`).catch(() => {});
 			expect(() => expectNothingStolen(trap, m)).not.toThrow();
 			await fetch(`${trap.url}/x`, {
 				headers: { authorization: "Bearer t" },
@@ -126,7 +128,10 @@ describe("AgentClient transport", () => {
 				});
 				r.end();
 			});
-			expect(trap.requests.map((r) => r.protocol)).toEqual(["h1", "h2"]);
+			expect(trap.requests.map((r) => r.protocol)).toEqual(["h1", "h1", "h2"]);
+			expect(() => expectNothingStolen(trap, m)).toThrow(/service token/);
+			trap.requests.splice(1, 1); // the h2c request alone, without a token
+			expect(trap.requests[1]?.headers.authorization).toBeUndefined();
 			expect(() => expectNothingStolen(trap, m)).toThrow(/service token/);
 			trap.requests.length = 0;
 		});

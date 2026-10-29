@@ -523,19 +523,21 @@ export async function startTrap(): Promise<Trap> {
 }
 
 /**
- * Asserts that nothing reached the trap: no HTTP request at all, and in
- * particular none with an Authorization header or the machine id.
+ * Asserts that no client request reached the trap: none with an
+ * Authorization header, under /v1/ or naming the machine. Other requests
+ * are local port probes (seen: a desktop app sending GET / without
+ * credentials to every new localhost listener).
  */
 export function expectNothingStolen(trap: Trap, machineId: string): void {
 	const leaks = trap.requests.filter(
-		(r) => r.headers.authorization !== undefined || r.url.includes(machineId),
+		(r) =>
+			r.headers.authorization !== undefined ||
+			r.url.startsWith("/v1/") ||
+			r.url.includes(machineId),
 	);
 	if (leaks.length > 0) {
 		throw new Error(
-			`trap got the service token or the machine: ${JSON.stringify(leaks)}`,
+			`trap got a client request (service token, route or machine): ${JSON.stringify(leaks)}`,
 		);
-	}
-	if (trap.requests.length > 0) {
-		throw new Error(`trap got requests: ${JSON.stringify(trap.requests)}`);
 	}
 }
