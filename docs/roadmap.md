@@ -1,13 +1,13 @@
 # Roadmap: области для brainstorm
 
-Каждая область — отдельная дочерняя сессия: brainstorm → спецификация в `docs/specs/` → согласование с пользователем. Реализация идёт после спецификации, отдельным шагом. Архитектура: `docs/architecture.md`.
+Каждая область — отдельный тред T3 Code (независимые области идут параллельно, каждая в своём git worktree и ветке): brainstorm → спецификация в `docs/specs/` → согласование с пользователем. Реализация идёт после спецификации, отдельным шагом. Архитектура: `docs/architecture.md`.
 
 Ограничения PoC на `pve`: VMID от 500, не больше 8 GB RAM на всё, хранилище `local-lvm`. Разрешено создать пользователя, токен, pool и SDN Simple zone + VNet. Существующие VM, LXC и `vmbr0` не трогать.
 
 | # | Область | Что решаем | Зависит от | Статус |
 |---|---|---|---|---|
-| S1 | **Proxmox foundation** | Подготовка хоста (пользователь, токен, pool, SDN Simple zone + VNet, firewall); драйвер LVM-thin; примитивы machine (из шаблона, start/stop, snapshot с хуком quiesce, fork, delete); выделение VMID и MAC; транспорт операций на ноде (`node-agent` на Go или SSH); стенд для замеров | — | brainstorm |
-| S2 | Протокол туннеля агент ↔ gateway | Формат на проводе, auth, мультиплексирование, переподключение, `requestId`, offset, реестр `machine → gateway` | — | |
+| S1 | **Proxmox foundation** | Подготовка хоста (пользователь, токен, pool, SDN Simple zone + VNet, firewall); драйвер LVM-thin; примитивы machine (из шаблона, start/stop, snapshot с хуком quiesce, fork, delete); выделение VMID и MAC; транспорт операций на ноде (`node-agent` на Go или SSH); стенд для замеров | — | brainstorm (тред в main) |
+| S2 | Протокол туннеля агент ↔ gateway | Формат на проводе, auth, мультиплексирование, переподключение, `requestId`, offset, реестр `machine → gateway` | — | brainstorm (ветка `s2-tunnel-protocol`) |
 | S3 | Guest agent v0 (Linux) | exec / files / ports, claim, смена идентичности, quiesce, установка и обновление | S2 | |
 | S4 | Gateway | Приём туннелей, HTTP-прокси `*.sbx`, маршрутизация, несколько экземпляров, позже SSH gateway и TURN | S2 | |
 | S5 | Шаблон Linux | Сборка образа (cloud-init / Packer), встроенный агент, версии шаблонов | S1, S3 | |
