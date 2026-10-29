@@ -214,8 +214,8 @@ func (s *shim) handleInput(m shimproto.Message) shimproto.Message {
 	if s.isExited() {
 		return errReply(shimproto.CodeCommandExited, "command exited")
 	}
-	if !validSession(m.Session) {
-		return errReply(shimproto.CodeInvalidArgument, "input session must match [A-Za-z0-9._:-]{1,%d}", maxSessionLen)
+	if !shimproto.ValidSession(m.Session) {
+		return errReply(shimproto.CodeInvalidArgument, "input session must match [A-Za-z0-9._:-]{1,%d}", shimproto.MaxSessionLen)
 	}
 	if m.CloseStdin && s.ptyFd >= 0 {
 		return errReply(shimproto.CodeFailedPrecondition, "close_stdin does not apply to a pty, send ^D")
@@ -315,7 +315,7 @@ func (s *shim) handleResize(m shimproto.Message) shimproto.Message {
 func (s *shim) handleKill(m shimproto.Message) shimproto.Message {
 	sig := syscall.SIGTERM
 	if m.FirstSignal != 0 {
-		if err := checkSignal(m.FirstSignal); err != nil {
+		if err := shimproto.CheckSignal(m.FirstSignal); err != nil {
 			return errReply(shimproto.CodeInvalidArgument, "first_signal %d: %v", m.FirstSignal, err)
 		}
 		sig = syscall.Signal(m.FirstSignal)
@@ -338,7 +338,7 @@ func (s *shim) handleKill(m shimproto.Message) shimproto.Message {
 // payload with cgroup set. After the exit it reaches the leftovers one by
 // one (SIGKILL with a cgroup: cgroup.kill) and is a no-op without them.
 func (s *shim) handleSignal(m shimproto.Message) shimproto.Message {
-	if err := checkSignal(m.Sig); err != nil {
+	if err := shimproto.CheckSignal(m.Sig); err != nil {
 		return errReply(shimproto.CodeInvalidArgument, "sig %d: %v", m.Sig, err)
 	}
 	sig := syscall.Signal(m.Sig)

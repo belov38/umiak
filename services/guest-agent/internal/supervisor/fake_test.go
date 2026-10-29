@@ -479,6 +479,9 @@ func TestCheckCommandID(t *testing.T) {
 		{"a/b", false},
 		{"a b", false},
 		{`a\x2d`, false},
+		{".", false},
+		{"..", false},
+		{"...", true},
 	}
 	for _, tt := range tests {
 		if err := checkCommandID(tt.id); (err == nil) != tt.ok {
@@ -510,5 +513,118 @@ func TestFakeExitWithKeepsEndsAndLateWrites(t *testing.T) {
 	}
 	if err := r.Exit(1); err == nil {
 		t.Fatal("second exit succeeded")
+	}
+}
+
+func TestFakeKillGraceReachesLeftovers(t *testing.T) {
+	tests := []struct {
+		name    string
+		graceMs uint32
+	}{
+		{"grace 0", 0},
+		{"grace 300ms", 300},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, l := newTestFake(t)
+			r := launch(t, f, l, shim.Spec{ID: "c1", Argv: []string{"sh", "-c", "sleep 60 & sleep 60"}})
+			r.SetLeftovers(true)
+			c := dialShim(t, l, "c1")
+			start := time.Now()
+			if err := c.Kill(t.Context(), tt.graceMs, 0, ""); err != nil {
+				t.Fatal(err)
+			}
+			// SIGTERM ends the main process at once.
+			if e := waitExited(t, c); e.Signal != "SIGTERM" || e.Reason != shimproto.ReasonSignal {
+				t.Fatalf("exited = %+v", e)
+			}
+			if tt.graceMs > 0 {
+				if s, _ := f.State(t.Context(), "c1"); s != UnitActive {
+					t.Fatalf("state before the grace = %v, want leftovers alive", s)
+				}
+			}
+			// The hard kill at the grace kills the leftovers; the shim ends.
+			waitState(t, f, "c1", UnitNotFound)
+			if d := time.Since(start); d < time.Duration(tt.graceMs)*time.Millisecond {
+				t.Fatalf("leftovers killed after %v, before the grace", d)
+			}
+			if e := readExit(t, l, "c1"); e.Signal != "SIGTERM" {
+				t.Fatalf("exit.json changed by the leftover kill: %+v", e)
+			}
+		})
+	}
+}
+
+func TestFakeGraceOutlivesNaturalExit(t *testing.T) {
+	f, l := newTestFake(t)
+	f.Setup("c1", func(r *FakeRun) { r.IgnoreSignals() })
+	r := launch(t, f, l, shim.Spec{ID: "c1", Argv: []string{"sleep", "60"}})
+	r.SetLeftovers(true)
+	c := dialShim(t, l, "c1")
+	if err := c.Kill(t.Context(), 200, 0, shimproto.ReasonTimeout); err != nil {
+		t.Fatal(err)
+	}
+	// The main process handles SIGTERM and exits on its own.
+	if err := r.Exit(0); err != nil {
+		t.Fatal(err)
+	}
+	if e := waitExited(t, c); e.Code != 0 || e.Reason != shimproto.ReasonTimeout {
+		t.Fatalf("exited = %+v", e)
+	}
+	waitState(t, f, "c1", UnitNotFound)
+}
+
+func TestFakeKillKeepsEarliestDeadline(t *testing.T) {
+	tests := []struct {
+		name  string
+		first uint32
+		then  uint32
+	}{
+		{"later then earlier", 60000, 10},
+		{"earlier then later", 10, 60000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, l := newTestFake(t)
+			f.Setup("c1", func(r *FakeRun) { r.IgnoreSignals() })
+			launch(t, f, l, shim.Spec{ID: "c1", Argv: []string{"sleep", "60"}})
+			c := dialShim(t, l, "c1")
+			ctx := t.Context()
+			if err := c.Kill(ctx, tt.first, 0, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Kill(ctx, tt.then, 0, ""); err != nil && !errors.Is(err, shimproto.ErrClosed) {
+				t.Fatal(err)
+			}
+			e := waitExited(t, c)
+			if e.Signal != "SIGKILL" || e.Reason != shimproto.ReasonSignal {
+				t.Fatalf("exited = %+v", e)
+			}
+		})
+	}
+}
+
+func TestFakeRejectsInvalidIDs(t *testing.T) {
+	f, _ := newTestFake(t)
+	ctx := t.Context()
+	for _, id := range []string{"", ".", "..", "a/b"} {
+		if _, err := f.State(ctx, id); err == nil {
+			t.Errorf("State(%q) accepted", id)
+		}
+		if err := f.Stop(ctx, id); err == nil {
+			t.Errorf("Stop(%q) accepted", id)
+		}
+		if err := f.KillCgroup(ctx, id); err == nil || errors.Is(err, ErrUnitNotFound) {
+			t.Errorf("KillCgroup(%q) = %v", id, err)
+		}
+		if err := f.StopWatchdog(ctx, id); err == nil {
+			t.Errorf("StopWatchdog(%q) accepted", id)
+		}
+		if err := f.StartWatchdog(ctx, id, []string{"/bin/true"}); err == nil {
+			t.Errorf("StartWatchdog(%q) accepted", id)
+		}
+	}
+	if err := f.StartWatchdog(ctx, "l1", nil); err == nil {
+		t.Error("StartWatchdog with empty argv accepted")
 	}
 }

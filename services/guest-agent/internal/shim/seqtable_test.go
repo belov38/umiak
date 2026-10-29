@@ -2,7 +2,6 @@ package shim
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -30,29 +29,5 @@ func TestSeqTableBounded(t *testing.T) {
 	}
 	if n := len(tab.snapshot()); n != maxSessions {
 		t.Errorf("sessions = %d, want %d", n, maxSessions)
-	}
-}
-
-func TestValidSession(t *testing.T) {
-	tests := []struct {
-		id string
-		ok bool
-	}{
-		{"a", true},
-		{"Az09._:-", true},
-		{strings.Repeat("x", maxSessionLen), true},
-		{"", false},
-		{strings.Repeat("x", maxSessionLen+1), false},
-		{"a<b", false},
-		{"a&b", false},
-		{"a b", false},
-		{"a/b", false},
-		{"a\x00", false},
-		{"é", false},
-	}
-	for _, tt := range tests {
-		if got := validSession(tt.id); got != tt.ok {
-			t.Errorf("validSession(%q) = %v, want %v", tt.id, got, tt.ok)
-		}
 	}
 }

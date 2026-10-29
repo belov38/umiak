@@ -587,18 +587,18 @@ func TestSignalAfterReapIsNoop(t *testing.T) {
 }
 
 // TestStatusFrameFits: the largest status reply (maxSessions sessions with
-// ids of maxSessionLen bytes, maximal seqs) fits in one frame, and session
+// ids of shimproto.MaxSessionLen bytes, maximal seqs) fits in one frame, and session
 // ids outside the safe charset are refused.
 func TestStatusFrameFits(t *testing.T) {
 	s := newShim(slog.New(slog.DiscardHandler), paths.ForRoot(t.TempDir()), "c1")
-	for _, bad := range []string{"", "a<b", "a b", "\x01", strings.Repeat("a", maxSessionLen+1)} {
+	for _, bad := range []string{"", "a<b", "a b", "\x01", strings.Repeat("a", shimproto.MaxSessionLen+1)} {
 		r := s.handle(shimproto.Message{Type: shimproto.TypeInput, Session: bad, Seq: 1})
 		if r.Type != shimproto.TypeError || r.Code != shimproto.CodeInvalidArgument {
 			t.Errorf("session %q: reply %+v, want invalid_argument", bad, r)
 		}
 	}
 	for i := range maxSessions {
-		id := fmt.Sprintf("%0*d", maxSessionLen, i)
+		id := fmt.Sprintf("%0*d", shimproto.MaxSessionLen, i)
 		r := s.handle(shimproto.Message{Type: shimproto.TypeInput, Session: id, Seq: ^uint64(0)})
 		if r.Type != shimproto.TypeInputReply || !r.Applied {
 			t.Fatalf("input %d: %+v", i, r)

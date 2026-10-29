@@ -3,7 +3,6 @@
 package shim
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -529,14 +528,4 @@ func (s *shim) closeAll() {
 	if s.cg != nil {
 		_ = unix.Close(s.cg.fd)
 	}
-}
-
-// errSignalRange rejects a signal number outside 1..64.
-var errSignalRange = errors.New("signal out of range")
-
-func checkSignal(sig int) error {
-	if sig < 1 || sig > 64 {
-		return errSignalRange
-	}
-	return nil
 }

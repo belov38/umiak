@@ -67,6 +67,11 @@ type Supervisor interface {
 	// `shimPath shim --id <id> extraArgs...` and returns once the shim sent
 	// READY=1 (the command started or its start failure is recorded) or the
 	// unit failed. It returns ErrUnitExists if the unit is still loaded.
+	//
+	// If ctx ends while the start job is pending, Launch returns ctx.Err()
+	// but the unit may still start: the caller checks State (and shim.json),
+	// and a repeated Launch then fails with ErrUnitExists instead of
+	// starting the command twice.
 	Launch(ctx context.Context, id string, shimPath string, extraArgs []string) error
 	// State returns the state of the unit of command id.
 	State(ctx context.Context, id string) (UnitState, error)
@@ -113,6 +118,10 @@ func checkLeaseID(id string) error {
 func checkNamePart(what, id string, overhead int) error {
 	if id == "" || len(id)+overhead > maxUnitName {
 		return fmt.Errorf("supervisor: %s must be 1..%d bytes", what, maxUnitName-overhead)
+	}
+	if id == "." || id == ".." {
+		// Command ids also name files and directories in the layout.
+		return fmt.Errorf("supervisor: %s %q is not a valid name", what, id)
 	}
 	for i := 0; i < len(id); i++ {
 		c := id[i]

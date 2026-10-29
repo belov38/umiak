@@ -68,9 +68,15 @@ func uniqueID(t *testing.T) string {
 // launch writes the spec of a shell command and launches its shim.
 func (e *itEnv) launch(t *testing.T, id, script string) {
 	t.Helper()
+	e.launchArgv(t, id, []string{"/bin/sh", "-c", script})
+}
+
+// launchArgv writes the spec of argv and launches its shim.
+func (e *itEnv) launchArgv(t *testing.T, id string, argv []string) {
+	t.Helper()
 	spec := shim.Spec{
 		ID:   id,
-		Argv: []string{"/bin/sh", "-c", script},
+		Argv: argv,
 		Env:  []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
 		Cwd:  "/",
 	}
@@ -202,6 +208,25 @@ func TestSystemdKillCgroup(t *testing.T) {
 	if err := e.sv.KillCgroup(t.Context(), id); !errors.Is(err, ErrUnitNotFound) {
 		t.Fatalf("KillCgroup of a gone unit = %v", err)
 	}
+}
+
+func TestSystemdLaunchStartFailed(t *testing.T) {
+	e := newIT(t)
+	id := uniqueID(t)
+	// The shim records the start failure and sends READY=1: Launch succeeds.
+	e.launchArgv(t, id, []string{"/nonexistent/sbx-no-such-binary"})
+	x := e.waitExit(t, id)
+	if x.Code != 127 || x.Reason != shimproto.ReasonStartFailed || x.StartFailed == "" {
+		t.Fatalf("exit = %+v", x)
+	}
+	stderr, err := os.ReadFile(filepath.Join(e.layout.CommandDir(id), shim.StderrFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stderr), "cannot start command") || x.StderrEnd != int64(len(stderr)) {
+		t.Fatalf("stderr = %q, exit = %+v", stderr, x)
+	}
+	e.waitState(t, id, UnitNotFound)
 }
 
 func TestSystemdLaunchFailsWithoutSpec(t *testing.T) {
