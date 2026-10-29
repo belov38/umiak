@@ -1,0 +1,51 @@
+# PoC configuration: one Proxmox node, one Linux template, one size.
+templates:
+  - slug: linux
+    os: linux
+    enabled: true
+    defaultSize: 2gb
+    allowedSizes: [2gb]
+
+sizes:
+  - slug: 2gb
+    vcpu: 2
+    memoryMb: 2048
+
+pools:
+  - templateSlug: linux
+    sizeSlug: 2gb
+    target: 1
+
+quotas:
+  default:
+    maxActiveSandboxes: 3
+    maxRamMb: 6144
+    maxSavedSnapshots: 10
+
+topology:
+  providers:
+    - name: pve
+      clusterMacId: 1
+      vmidMin: 500
+      vmidMax: 598
+      apiUrl: https://pve.tail0000.ts.net:8006
+      tlsName: pve
+      secretRef: pve
+      nodes:
+        - name: pve
+          ramCapMb: 8192
+          cloneConcurrency: 4
+          nodeAgentRef: pve
+          storages:
+            - name: local-lvm
+              driver: lvmthin
+              dataMaxPct: 80
+              metaMaxPct: 70
+  templateBuilds:
+    - templateSlug: linux
+      version: 599-seed
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 599
+      bootTimeoutS: 300
