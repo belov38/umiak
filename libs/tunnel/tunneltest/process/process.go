@@ -56,6 +56,7 @@ func (v service) startCommand(id string, spec *testingv1.CommandSpec) (*command,
 
 func (v service) Start(_ context.Context, req *connect.Request[testingv1.StartRequest]) (*connect.Response[testingv1.StartResponse], error) {
 	id := req.Msg.GetCommandId()
+	v.s.invoked(id)
 	_, created, err := v.startCommand(id, req.Msg.GetSpec())
 	if err != nil {
 		return nil, err
@@ -81,6 +82,7 @@ func (v service) Attach(ctx context.Context, req *connect.Request[testingv1.Atta
 
 func (v service) Run(ctx context.Context, req *connect.Request[testingv1.RunRequest], stream *connect.ServerStream[testingv1.AttachResponse]) error {
 	id := req.Msg.GetCommandId()
+	v.s.invoked(id)
 	c, _, err := v.startCommand(id, req.Msg.GetSpec())
 	if err != nil {
 		return err

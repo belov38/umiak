@@ -46,6 +46,9 @@ type Store struct {
 
 	mu   sync.Mutex
 	cmds map[string]*command
+	// invocations counts Start and Run calls per command_id, including
+	// retries and calls that found the command already started.
+	invocations map[string]int
 }
 
 // NewStore returns an empty store.
@@ -53,7 +56,7 @@ func NewStore(opts Options) *Store {
 	if opts.HeartbeatAfter <= 0 {
 		opts.HeartbeatAfter = defaultHeartbeatAfter
 	}
-	return &Store{opts: opts, cmds: map[string]*command{}}
+	return &Store{opts: opts, cmds: map[string]*command{}, invocations: map[string]int{}}
 }
 
 // output is one stream: the retained bytes and the offset of the first one.
@@ -71,7 +74,7 @@ type command struct {
 	id   string
 	spec *testingv1.CommandSpec
 
-	starts int // guarded by Store.mu
+	starts atomic.Int32 // generators launched
 
 	mu      sync.Mutex
 	out     [2]output
@@ -85,6 +88,7 @@ type command struct {
 	kill     chan struct{}
 	killOnce sync.Once
 	done     chan struct{} // closed when the command exited
+	doneOnce sync.Once
 	sent     atomic.Uint64 // data bytes handed to stream.Send
 }
 
@@ -105,14 +109,26 @@ func (s *Store) start(id string, spec *testingv1.CommandSpec) (*command, bool, e
 	c := &command{
 		id:      id,
 		spec:    proto.CloneOf(spec),
-		starts:  1,
 		changed: make(chan struct{}),
 		kill:    make(chan struct{}),
 		done:    make(chan struct{}),
 	}
 	s.cmds[id] = c
-	go c.run(s.opts.RetainBytes)
+	c.launch(s.opts.RetainBytes)
 	return c, true, nil
+}
+
+// launch starts the output generator; Starts counts launches.
+func (c *command) launch(retain uint64) {
+	c.starts.Add(1)
+	go c.run(retain)
+}
+
+// invoked records a Start or Run call for id.
+func (s *Store) invoked(id string) {
+	s.mu.Lock()
+	s.invocations[id]++
+	s.mu.Unlock()
 }
 
 func (s *Store) get(id string) *command {
@@ -121,15 +137,23 @@ func (s *Store) get(id string) *command {
 	return s.cmds[id]
 }
 
-// Starts returns how many times the command really started (the marker of
-// spec 14.1): 0 for an unknown command, 1 after any number of retries.
+// Starts returns how many times the command's work really began (its
+// output generator was launched; the marker of spec 14.1): 0 for an unknown
+// command, 1 after any number of retries.
 func (s *Store) Starts(commandID string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if c, ok := s.cmds[commandID]; ok {
-		return c.starts
+	if c := s.get(commandID); c != nil {
+		return int(c.starts.Load())
 	}
 	return 0
+}
+
+// Invocations returns how many Start and Run calls for the command reached
+// the agent, retries included. Invocations > Starts shows that retries
+// happened and were deduplicated.
+func (s *Store) Invocations(commandID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.invocations[commandID]
 }
 
 // SentBytes returns the data bytes Attach and Run handed to stream.Send for
@@ -303,7 +327,7 @@ func (c *command) finish() {
 	c.exited = true
 	c.notifyLocked()
 	c.mu.Unlock()
-	close(c.done)
+	c.doneOnce.Do(func() { close(c.done) })
 }
 
 // signalKill kills a running command: it exits with status killed. A

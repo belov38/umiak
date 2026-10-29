@@ -147,6 +147,10 @@ func TestStartIdempotent(t *testing.T) {
 	if n := st.Starts("cmd-1"); n != 1 {
 		t.Fatalf("Starts = %d, want 1", n)
 	}
+	// Three calls reached the double; one started the work.
+	if n := st.Invocations("cmd-1"); n != 3 {
+		t.Fatalf("Invocations = %d, want 3", n)
+	}
 	for _, bad := range []*testingv1.StartRequest{
 		{CommandId: "", Spec: sp},
 		{CommandId: "x"},
