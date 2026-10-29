@@ -21,20 +21,41 @@ func (m *Manager) armIdleLocked(c *command, d time.Duration) {
 	if m.closed || !c.pty || !c.mainAlive || c.attaches > 0 {
 		return
 	}
-	c.idle = time.AfterFunc(d, func() { m.idleExpired(c) })
+	c.idleGen++
+	gen := c.idleGen
+	c.idle = time.AfterFunc(d, func() { m.idleExpired(c, gen) })
+}
+
+// ensureIdleLocked arms the idle timer of a live, detached PTY command
+// that has none, counting from the recorded detach (the creation time for a
+// PTY that was never attached). m.mu is held.
+func (m *Manager) ensureIdleLocked(c *command) {
+	if c.idle != nil {
+		return
+	}
+	d := m.opts.PTYIdle
+	if !c.detachedAt.IsZero() {
+		d = max(c.detachedAt.Add(m.opts.PTYIdle).Sub(m.opts.Now()), 0)
+	}
+	m.armIdleLocked(c, d)
 }
 
 // idleExpired hangs up an idle PTY command (spec 9.4): SIGHUP to the
 // session, the cgroup kill after PTYHangupGrace, reason PTY_IDLE. Without a
 // shim connection it retries after Poll; an outdated shim gets the cgroup
-// kill at once.
-func (m *Manager) idleExpired(c *command) {
+// kill at once. gen identifies the timer that fired; a timer stopped or
+// replaced after it fired does nothing.
+func (m *Manager) idleExpired(c *command, gen uint64) {
 	m.mu.Lock()
-	if m.closed || c.attaches > 0 || !c.mainAlive || !c.pty {
+	if c.idle == nil || c.idleGen != gen {
 		m.mu.Unlock()
 		return
 	}
 	c.idle = nil
+	if m.closed || c.attaches > 0 || !c.mainAlive || !c.pty {
+		m.mu.Unlock()
+		return
+	}
 	client, outdated := c.client, c.outdated
 	m.wg.Add(1)
 	m.mu.Unlock()
@@ -48,11 +69,11 @@ func (m *Manager) idleExpired(c *command) {
 		if err == nil {
 			return
 		}
-		m.log.Warn("process: pty idle kill", "id", c.id, "err", err)
+		m.warnUnlessClosed("process: pty idle kill", c.id, err)
 	}
 	if outdated {
 		if err := m.sup.KillCgroup(ctx, c.id); err != nil && !errors.Is(err, supervisor.ErrUnitNotFound) {
-			m.log.Warn("process: pty idle cgroup kill", "id", c.id, "err", err)
+			m.warnUnlessClosed("process: pty idle cgroup kill", c.id, err)
 		}
 		return
 	}
@@ -77,7 +98,7 @@ func (m *Manager) addAttach(c *command) {
 	m.notifyLocked(c)
 	m.mu.Unlock()
 	if first {
-		m.goBackground(func() { m.syncDetached(c) })
+		m.queueSync(c)
 	}
 }
 
@@ -94,19 +115,41 @@ func (m *Manager) dropAttach(c *command) {
 	m.notifyLocked(c)
 	m.mu.Unlock()
 	if last {
-		m.goBackground(func() { m.syncDetached(c) })
+		m.queueSync(c)
 	}
 }
 
-// syncDetached writes the current detach time of c (none while attached)
-// into its record. Each write takes the latest live value, so writes that
-// race each other still end with the right one.
-func (m *Manager) syncDetached(c *command) {
-	c.recMu.Lock()
-	defer c.recMu.Unlock()
+// queueSync schedules syncDetached for c unless one is already queued, so
+// attach churn does not pile up goroutines (they would all wait on the
+// record lock during a freeze).
+func (m *Manager) queueSync(c *command) {
 	m.mu.Lock()
+	if m.closed || c.syncing {
+		m.mu.Unlock()
+		return
+	}
+	c.syncing = true
+	m.wg.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		m.syncDetached(c)
+	}()
+}
+
+// syncDetached writes the current detach time of c (none while attached)
+// into its record. The queued flag is cleared before the value is read, so
+// a change after that read queues another write.
+func (m *Manager) syncDetached(c *command) {
+	locked := m.lockLive(c)
+	m.mu.Lock()
+	c.syncing = false
 	at := c.detachedAt
 	m.mu.Unlock()
+	if !locked {
+		return
+	}
+	defer c.unlock()
 	rec, ok, err := m.st.GetCommand(c.id)
 	if err != nil || !ok || rec.State == StateExited {
 		return
@@ -116,12 +159,14 @@ func (m *Manager) syncDetached(c *command) {
 		return
 	case at.IsZero():
 		rec.PTYDetachedAt = nil
+	case rec.PTYDetachedAt != nil && rec.PTYDetachedAt.Equal(at):
+		return
 	default:
 		t := at.UTC()
 		rec.PTYDetachedAt = &t
 	}
 	if err := m.st.PutCommand(m.ctx, rec); err != nil {
-		m.log.Warn("process: record pty detach", "id", c.id, "err", err)
+		m.warnUnlessClosed("process: record pty detach", c.id, err)
 	}
 }
 

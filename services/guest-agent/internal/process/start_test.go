@@ -102,7 +102,8 @@ func putStarting(t *testing.T, h *harness, id string, spec *agentv1.CommandSpec)
 		t.Fatal(err)
 	}
 	err = h.st.PutCommand(t.Context(), &store.Command{ID: id, SpecHash: hash, Spec: stored, EnvKeys: keys,
-		State: StateStarting, BootID: h.opts.BootID, CreatedAt: time.Now().UTC(), AgentVersion: "1.2.3"})
+		State: StateStarting, BootID: h.opts.BootID, CreatedAt: time.Now().UTC(), AgentVersion: "1.2.3",
+		PTY: spec.GetPty() != nil})
 	if err != nil {
 		t.Fatal(err)
 	}

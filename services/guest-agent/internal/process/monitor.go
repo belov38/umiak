@@ -101,10 +101,12 @@ func (m *Manager) isPTY(c *command) bool {
 
 // finalizeLocked records the end of the main process: the EXITED record,
 // command.exited and, for a PTY, pty.closed. An already exited record is
-// left alone. The events are emitted before the record is written, so a
-// crash in between repeats them after Recover instead of losing them.
-// c.recMu is held.
-func (m *Manager) finalizeLocked(ctx context.Context, c *command, ex exitInfo) error {
+// left alone. Background callers (emitFirst) emit before the write, so a
+// crash in between repeats the events after Recover instead of losing
+// them. RPC paths emit after a successful write only: their write fails on
+// a deadline, and a retry must not see a duplicate event. The record lock
+// of c is held.
+func (m *Manager) finalizeLocked(ctx context.Context, c *command, ex exitInfo, emitFirst bool) error {
 	rec, ok, err := m.st.GetCommand(c.id)
 	if err != nil {
 		return err
@@ -120,9 +122,14 @@ func (m *Manager) finalizeLocked(ctx context.Context, c *command, ex exitInfo) e
 		rec.EndedAt = m.opts.Now().UTC()
 	}
 	rec.Ends = ex.ends
-	m.emitExit(rec)
+	if emitFirst {
+		m.emitExit(rec)
+	}
 	if err := m.st.PutCommand(ctx, rec); err != nil {
 		return err
+	}
+	if !emitFirst {
+		m.emitExit(rec)
 	}
 	m.mainExited(c, true)
 	return nil
@@ -191,7 +198,7 @@ func exitReasonEnum(s string) agentv1.ExitReason {
 }
 
 // markRunningLocked moves a STARTING record to RUNNING with the pid and the
-// start time of the shim. c.recMu is held.
+// start time of the shim. the record lock of c is held.
 func (m *Manager) markRunningLocked(ctx context.Context, c *command, pid int, sf shim.ShimFile) error {
 	rec, ok, err := m.st.GetCommand(c.id)
 	if err != nil || !ok || rec.State != StateStarting {
@@ -231,11 +238,12 @@ func (m *Manager) setUnit(c *command, mainAlive, leftovers bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	leftovers = leftovers && !mainAlive
-	if c.unitAlive && c.mainAlive == mainAlive && c.leftovers == leftovers {
-		return
-	}
+	changed := !c.unitAlive || c.mainAlive != mainAlive || c.leftovers != leftovers
 	c.unitAlive, c.mainAlive, c.leftovers = true, mainAlive, leftovers
-	m.notifyLocked(c)
+	m.ensureIdleLocked(c)
+	if changed {
+		m.notifyLocked(c)
+	}
 }
 
 // unitState returns whether the unit of id is alive.
@@ -251,8 +259,9 @@ func (m *Manager) unitState(ctx context.Context, id string) (bool, error) {
 // the unit (spec 9.2 step 5 and 9.6): exit.json present → finalize; unit
 // alive → monitor; shim.json present (or RUNNING) → LOST/SHIM_LOST.
 // A STARTING record without shim.json and without a unit returns
-// errNotLaunched and is left alone. c.recMu is held.
-func (m *Manager) settleLocked(ctx context.Context, c *command, rec *store.Command) error {
+// errNotLaunched and is left alone. the record lock of c is held.
+// rpc selects the event order of finalizeLocked.
+func (m *Manager) settleLocked(ctx context.Context, c *command, rec *store.Command, rpc bool) error {
 	alive, err := m.unitState(ctx, c.id)
 	if err != nil {
 		return storeError(err)
@@ -261,22 +270,22 @@ func (m *Manager) settleLocked(ctx context.Context, c *command, rec *store.Comma
 	if e, ok := m.readExit(c.id); ok {
 		dctx, cancel := m.durableCtx(ctx)
 		defer cancel()
-		if err := m.finalizeLocked(dctx, c, exitFromFile(e, pty)); err != nil {
+		if err := m.finalizeLocked(dctx, c, exitFromFile(e, pty), !rpc); err != nil {
 			return storeError(err)
 		}
 		if alive {
 			// The shim still runs: leftovers or its own shutdown. The
 			// monitor asks it.
-			m.setUnit(c, false, false)
-			m.startMonitor(c) //nolint:contextcheck // the monitor outlives the request
+			m.setUnit(c, false, false) //nolint:contextcheck // the idle timer outlives the request
+			m.startMonitor(c)          //nolint:contextcheck // the monitor outlives the request
 		} else {
 			m.markGone(c)
 		}
 		return nil
 	}
 	if alive {
-		m.setUnit(c, true, false)
-		m.startMonitor(c) //nolint:contextcheck // the monitor outlives the request
+		m.setUnit(c, true, false) //nolint:contextcheck // the idle timer outlives the request
+		m.startMonitor(c)         //nolint:contextcheck // the monitor outlives the request
 		return nil
 	}
 	if rec.State == StateStarting && !fileExists(m.cmdPath(c.id, shim.ShimJSON)) {
@@ -284,7 +293,7 @@ func (m *Manager) settleLocked(ctx context.Context, c *command, rec *store.Comma
 	}
 	dctx, cancel := m.durableCtx(ctx)
 	defer cancel()
-	if err := m.finalizeLocked(dctx, c, m.lostExit(c.id, pty, reasonShimLost)); err != nil {
+	if err := m.finalizeLocked(dctx, c, m.lostExit(c.id, pty, reasonShimLost), !rpc); err != nil {
 		return storeError(err)
 	}
 	m.markGone(c)
@@ -299,6 +308,7 @@ func (m *Manager) startMonitor(c *command) {
 		return
 	}
 	c.monitoring = true
+	m.ensureIdleLocked(c)
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -397,29 +407,43 @@ func (m *Manager) settleGone(c *command, e shimproto.ExitFile, hasExit, pty bool
 		m.markGone(c)
 		return
 	}
-	c.recMu.Lock()
+	if !m.lockLive(c) {
+		m.markGone(c)
+		return
+	}
 	rec, ok, err := m.st.GetCommand(c.id)
 	if err == nil && ok && rec.State != StateExited {
 		if rec.State == StateStarting && !fileExists(m.cmdPath(c.id, shim.ShimJSON)) {
-			c.recMu.Unlock()
+			c.unlock()
 			m.markGone(c)
 			return
 		}
-		if err := m.finalizeLocked(m.ctx, c, m.lostExit(c.id, pty, reasonShimLost)); err != nil {
-			m.log.Warn("process: record lost command", "id", c.id, "err", err)
+		if err := m.finalizeLocked(m.ctx, c, m.lostExit(c.id, pty, reasonShimLost), true); err != nil {
+			m.warnUnlessClosed("process: record lost command", c.id, err)
 		}
 	}
-	c.recMu.Unlock()
+	c.unlock()
 	m.markGone(c)
 }
 
 // finalize is finalizeLocked for background callers.
 func (m *Manager) finalize(c *command, ex exitInfo) {
-	c.recMu.Lock()
-	defer c.recMu.Unlock()
-	if err := m.finalizeLocked(m.ctx, c, ex); err != nil {
-		m.log.Warn("process: record exit", "id", c.id, "err", err)
+	if !m.lockLive(c) {
+		return
 	}
+	defer c.unlock()
+	if err := m.finalizeLocked(m.ctx, c, ex, true); err != nil {
+		m.warnUnlessClosed("process: record exit", c.id, err)
+	}
+}
+
+// warnUnlessClosed logs a failed background write, except the expected
+// failures while the manager closes.
+func (m *Manager) warnUnlessClosed(msg, id string, err error) {
+	if m.ctx.Err() != nil {
+		return
+	}
+	m.log.Warn(msg, "id", id, "err", err)
 }
 
 // serve uses one shim connection until it closes.
@@ -447,11 +471,12 @@ func (m *Manager) serve(c *command, client *shimproto.Client) {
 	} else {
 		var sf shim.ShimFile
 		_ = fsutil.ReadJSON(m.cmdPath(c.id, shim.ShimJSON), &sf)
-		c.recMu.Lock()
-		if err := m.markRunningLocked(m.ctx, c, st.Pid, sf); err != nil {
-			m.log.Warn("process: record running command", "id", c.id, "err", err)
+		if m.lockLive(c) {
+			if err := m.markRunningLocked(m.ctx, c, st.Pid, sf); err != nil {
+				m.warnUnlessClosed("process: record running command", c.id, err)
+			}
+			c.unlock()
 		}
-		c.recMu.Unlock()
 		m.setUnit(c, true, false)
 	}
 	for {

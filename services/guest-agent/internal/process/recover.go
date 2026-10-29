@@ -33,13 +33,18 @@ func (m *Manager) Recover(ctx context.Context) error {
 }
 
 func (m *Manager) recoverOne(ctx context.Context, rec *store.Command) error {
-	c := m.entry(rec.ID)
-	c.recMu.Lock()
-	defer c.recMu.Unlock()
+	c, err := m.lockEntry(ctx, rec.ID)
+	if err != nil {
+		return err
+	}
+	defer c.unlock()
+	// A PTY without a recorded detach (records of older agents) counts from
+	// now: an agent restart drops every attach. The value is persisted below.
+	persistDetach := rec.PTY && rec.PTYDetachedAt == nil && rec.State != StateExited
 	m.mu.Lock()
-	c.pty = rec.PTY
-	if rec.PTYDetachedAt != nil {
-		c.detachedAt = *rec.PTYDetachedAt
+	m.loadLiveLocked(c, rec)
+	if persistDetach {
+		c.detachedAt = m.opts.Now()
 	}
 	m.mu.Unlock()
 
@@ -49,14 +54,18 @@ func (m *Manager) recoverOne(ctx context.Context, rec *store.Command) error {
 		if !sameBoot {
 			return nil
 		}
-		// Leftovers may still run in the unit.
+		// Leftovers may still run in the unit. A live shim keeps its
+		// socket, so only those records need a unit query.
+		if !fileExists(m.opts.Layout.ShimSocket(rec.ID)) {
+			return nil
+		}
 		alive, err := m.unitState(ctx, rec.ID)
 		if err != nil {
 			return err
 		}
 		if alive {
-			m.setUnit(c, false, false)
-			m.startMonitor(c) //nolint:contextcheck // the monitor outlives Recover
+			m.setUnit(c, false, false) //nolint:contextcheck // the idle timer outlives Recover
+			m.startMonitor(c)          //nolint:contextcheck // the monitor outlives Recover
 		}
 		return nil
 	case StateStarting, StateRunning:
@@ -69,40 +78,24 @@ func (m *Manager) recoverOne(ctx context.Context, rec *store.Command) error {
 		if e, ok := m.readExit(rec.ID); ok {
 			ex = exitFromFile(e, rec.PTY)
 		}
-		if err := m.finalizeLocked(ctx, c, ex); err != nil {
+		if err := m.finalizeLocked(ctx, c, ex, true); err != nil {
 			return err
 		}
 		m.markGone(c)
 		return nil
 	}
 
-	err := m.settleLocked(ctx, c, rec)
+	err = m.settleLocked(ctx, c, rec, false)
 	if errors.Is(err, errNotLaunched) {
-		err = m.finalizeLocked(ctx, c, m.lostExit(rec.ID, rec.PTY, reasonShimLost))
+		err = m.finalizeLocked(ctx, c, m.lostExit(rec.ID, rec.PTY, reasonShimLost), true)
 		m.markGone(c)
 	}
 	if err != nil {
 		return err
 	}
-	m.restoreIdle(c, rec) //nolint:contextcheck // the idle timer outlives Recover
+	// The idle timer was armed by setUnit from the detach time.
+	if persistDetach {
+		m.queueSync(c) //nolint:contextcheck // the write outlives Recover
+	}
 	return nil
-}
-
-// restoreIdle arms the PTY idle timer of a recovered command: from the
-// recorded detach, or from now when none is recorded (an agent restart
-// drops every attach, so it counts as a detach).
-func (m *Manager) restoreIdle(c *command, rec *store.Command) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !c.pty || !c.mainAlive {
-		return
-	}
-	now := m.opts.Now()
-	after := m.opts.PTYIdle
-	if rec.PTYDetachedAt != nil {
-		after = max(rec.PTYDetachedAt.Add(m.opts.PTYIdle).Sub(now), 0)
-	} else {
-		c.detachedAt = now
-	}
-	m.armIdleLocked(c, after)
 }

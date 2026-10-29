@@ -49,7 +49,8 @@ const (
 	// running (or has live leftovers).
 	CommandRunning = "command_running"
 	// ShimUnavailable: the shim of a running command cannot be reached at
-	// the moment; the call may be retried.
+	// the moment. It is always sent with connect.CodeUnavailable, so the
+	// detail is retryable and the caller retries the call.
 	ShimUnavailable = "shim_unavailable"
 	// InvalidArgument and FailedPrecondition are the generic details of
 	// requests that no specific code describes.

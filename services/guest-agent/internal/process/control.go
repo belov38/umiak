@@ -147,9 +147,11 @@ func (m *Manager) Signal(ctx context.Context, req *agentv1.SignalRequest) (*agen
 }
 
 // Kill stops a command: SIGTERM, then the cgroup kill after the grace
-// (default DefaultKillGraceMs), run by the shim; without a shim the agent
-// kills the cgroup itself. On an exited command without leftovers it does
-// nothing.
+// (default DefaultKillGraceMs), run by the shim. Without a shim (unit gone,
+// or an outdated shim and grace_ms 0) the agent kills the cgroup itself. A
+// live shim that cannot be reached right now answers shim_unavailable
+// (retryable) rather than skipping the grace. On an exited command without
+// leftovers it does nothing.
 func (m *Manager) Kill(ctx context.Context, req *agentv1.KillRequest) (*agentv1.CommandInfo, error) {
 	if err := validateID(req.GetCommandId()); err != nil {
 		return nil, err
@@ -172,7 +174,18 @@ func (m *Manager) Kill(ctx context.Context, req *agentv1.KillRequest) (*agentv1.
 	case outdated && grace > 0:
 		return nil, errs.Newf(connect.CodeFailedPrecondition, errs.ShimOutdated,
 			"the shim of %q speaks an unsupported protocol; kill with grace_ms 0", id)
+	case outdated:
+		if err := m.killCgroup(ctx, id); err != nil {
+			return nil, err
+		}
 	default:
+		alive, err := m.unitState(ctx, id)
+		if err != nil {
+			return nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
+		}
+		if alive {
+			return nil, errs.Newf(connect.CodeUnavailable, errs.ShimUnavailable, "the shim of %q is not connected", id)
+		}
 		if err := m.killCgroup(ctx, id); err != nil {
 			return nil, err
 		}
@@ -277,9 +290,11 @@ func (m *Manager) Remove(ctx context.Context, id string) (bool, error) {
 	if err := validateID(id); err != nil {
 		return false, err
 	}
-	c := m.entry(id)
-	c.recMu.Lock()
-	defer c.recMu.Unlock()
+	c, err := m.lockRPC(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	defer c.unlock()
 	rec, ok, err := m.st.GetCommand(id)
 	if err != nil {
 		return false, errs.New(connect.CodeInternal, errs.Internal, err.Error())

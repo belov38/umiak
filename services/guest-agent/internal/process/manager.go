@@ -206,8 +206,9 @@ type Manager struct {
 type command struct {
 	id string
 
-	// recMu serializes Start and every read-modify-write of the record.
-	recMu sync.Mutex
+	// sem serializes Start and every read-modify-write of the record. It is
+	// a one-slot semaphore, so a waiter can give up with its context.
+	sem chan struct{}
 
 	// Guarded by Manager.mu.
 	pty        bool
@@ -219,9 +220,24 @@ type command struct {
 	client     *shimproto.Client
 	outdated   bool
 	monitoring bool
+	syncing    bool // a syncDetached write is queued
 	idle       *time.Timer
+	idleGen    uint64        // identifies the armed idle timer
 	wake       chan struct{} // closed and replaced on every change
 }
+
+// lock takes the record lock of c or gives up when ctx ends.
+func (c *command) lock(ctx context.Context) error {
+	select {
+	case c.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// unlock releases the record lock of c.
+func (c *command) unlock() { <-c.sem }
 
 // New returns a Manager. Call Recover before serving requests.
 func New(opts Options) (*Manager, error) {
@@ -271,30 +287,68 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-// goBackground runs fn in a goroutine tracked by Close, unless closed.
-func (m *Manager) goBackground(fn func()) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed {
-		return
-	}
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		fn()
-	}()
-}
-
 // entry returns the live state of id, creating it.
 func (m *Manager) entry(id string) *command {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	c := m.cmds[id]
 	if c == nil {
-		c = &command{id: id, wake: make(chan struct{})}
+		c = &command{id: id, sem: make(chan struct{}, 1), wake: make(chan struct{})}
 		m.cmds[id] = c
 	}
 	return c
+}
+
+// lockEntry returns the live entry of id with its record lock held. An
+// entry that its previous holder forgot while we waited (refused or failed
+// Start, Remove) is dropped for a fresh one, so nobody acts on an entry
+// outside m.cmds.
+func (m *Manager) lockEntry(ctx context.Context, id string) (*command, error) {
+	for {
+		c := m.entry(id)
+		if err := c.lock(ctx); err != nil {
+			return nil, err
+		}
+		if m.current(c) {
+			return c, nil
+		}
+		c.unlock()
+	}
+}
+
+// lockLive takes the record lock of c for a background caller. It fails
+// when the manager closes or c was forgotten meanwhile.
+func (m *Manager) lockLive(c *command) bool {
+	if c.lock(m.ctx) != nil {
+		return false
+	}
+	if !m.current(c) {
+		c.unlock()
+		return false
+	}
+	return true
+}
+
+// current reports whether c is the live entry of its id.
+func (m *Manager) current(c *command) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cmds[c.id] == c
+}
+
+// lockRPC is lockEntry for a handler: the wait is bounded like a durable
+// write, and a wait cut short during a freeze answers quiesced.
+func (m *Manager) lockRPC(ctx context.Context, id string) (*command, error) {
+	lctx, cancel := m.durableCtx(ctx)
+	defer cancel()
+	c, err := m.lockEntry(lctx, id)
+	if err != nil {
+		if m.st.Frozen() {
+			return nil, storeError(store.ErrFrozen)
+		}
+		return nil, storeError(err)
+	}
+	return c, nil
 }
 
 // lookup returns the live state of id or nil.
@@ -387,9 +441,11 @@ func (m *Manager) JanitorCommands() []output.JanitorCommand {
 // RemoveRecord deletes the record of an exited command for the janitor,
 // which removes the log directory itself.
 func (m *Manager) RemoveRecord(id string) error {
-	c := m.entry(id)
-	c.recMu.Lock()
-	defer c.recMu.Unlock()
+	c, err := m.lockEntry(m.ctx, id)
+	if err != nil {
+		return err
+	}
+	defer c.unlock()
 	rec, ok, err := m.st.GetCommand(id)
 	if err != nil {
 		return err

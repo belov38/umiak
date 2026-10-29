@@ -49,9 +49,11 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 		return nil, false, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 
-	c := m.entry(id)
-	c.recMu.Lock()
-	defer c.recMu.Unlock()
+	c, err := m.lockRPC(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	defer c.unlock()
 
 	rec, ok, err := m.st.GetCommand(id)
 	if err != nil {
@@ -63,13 +65,15 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 			return nil, false, errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists,
 				"command %q exists with another spec", id)
 		}
-		m.setPTY(c, rec.PTY)
+		m.mu.Lock()
+		m.loadLiveLocked(c, rec)
+		m.mu.Unlock()
 		if rec.State != StateStarting {
 			return m.info(rec), false, nil
 		}
 		// A STARTING record: a previous Start may or may not have launched
 		// the unit. Settle what is on disk first; launch only without a trace.
-		if err := m.settleLocked(ctx, c, rec); !errors.Is(err, errNotLaunched) {
+		if err := m.settleLocked(ctx, c, rec, true); !errors.Is(err, errNotLaunched) {
 			if err != nil {
 				return nil, false, err
 			}
@@ -86,18 +90,16 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 	if err := m.launchLocked(ctx, c, rec, spec); err != nil {
 		return nil, false, err
 	}
-	// A PTY that nobody attaches to closes PTYIdle after the start.
+	// A PTY that nobody attaches to closes PTYIdle after its creation.
 	m.mu.Lock()
-	if c.idle == nil {
-		m.armIdleLocked(c, m.opts.PTYIdle) //nolint:contextcheck // the idle timer outlives the request
-	}
+	m.ensureIdleLocked(c) //nolint:contextcheck // the idle timer outlives the request
 	m.mu.Unlock()
 	info, _, err := m.currentInfo(id)
 	return info, created, err
 }
 
 // create checks the user and the limit and writes the STARTING record.
-// c.recMu is held.
+// the record lock of c is held.
 func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec *agentv1.CommandSpec) (*store.Command, error) {
 	if _, err := m.lookupUser(spec); err != nil {
 		return nil, err
@@ -120,6 +122,7 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 		m.release(c)
 		return nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
+	now := m.opts.Now().UTC()
 	rec := &store.Command{
 		ID:           id,
 		SpecHash:     hash,
@@ -127,10 +130,15 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 		EnvKeys:      keys,
 		State:        StateStarting,
 		BootID:       m.opts.BootID,
-		CreatedAt:    m.opts.Now().UTC(),
+		CreatedAt:    now,
 		Tags:         spec.GetTags(),
 		PTY:          spec.GetPty() != nil,
 		AgentVersion: m.opts.AgentVersion,
+	}
+	if rec.PTY {
+		// A PTY that is never attached closes PTYIdle after its creation,
+		// also across an agent restart; the first attach clears this.
+		rec.PTYDetachedAt = &now
 	}
 	dctx, cancel := m.durableCtx(ctx)
 	defer cancel()
@@ -138,6 +146,9 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 		m.release(c)
 		return nil, storeError(err)
 	}
+	m.mu.Lock()
+	m.loadLiveLocked(c, rec)
+	m.mu.Unlock()
 	return rec, nil
 }
 
@@ -156,6 +167,15 @@ func (m *Manager) dropIfUnused(c *command) {
 	}
 }
 
+// loadLiveLocked copies the PTY flag and the recorded detach time of rec
+// into the live state of c. m.mu is held.
+func (m *Manager) loadLiveLocked(c *command, rec *store.Command) {
+	c.pty = rec.PTY
+	if c.attaches == 0 && rec.PTYDetachedAt != nil {
+		c.detachedAt = *rec.PTYDetachedAt
+	}
+}
+
 func (m *Manager) setPTY(c *command, pty bool) {
 	m.mu.Lock()
 	c.pty = pty
@@ -163,7 +183,7 @@ func (m *Manager) setPTY(c *command, pty bool) {
 }
 
 // launchLocked writes the shim spec, starts the unit and records the
-// outcome. c.recMu is held and rec is STARTING without a trace of a launch.
+// outcome. the record lock of c is held and rec is STARTING without a trace of a launch.
 func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Command, spec *agentv1.CommandSpec) error {
 	m.mu.Lock()
 	c.mainAlive, c.unitAlive = true, true
@@ -215,7 +235,7 @@ func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Comma
 			}
 		}
 	}
-	err = m.settleLocked(ctx, c, rec)
+	err = m.settleLocked(ctx, c, rec, true)
 	if errors.Is(err, errNotLaunched) {
 		// Launch returned but the shim left nothing behind.
 		return m.startFailedLocked(ctx, c, "the shim did not start")
@@ -234,7 +254,7 @@ func (m *Manager) abortLaunch(c *command, err error) error {
 
 // startFailedLocked records a command that could not start: EXITED with
 // START_FAILED and code 127, the message in its last stream so attach shows
-// it (spec 9.2). c.recMu is held.
+// it (spec 9.2). the record lock of c is held.
 func (m *Manager) startFailedLocked(ctx context.Context, c *command, msg string) error {
 	m.mu.Lock()
 	pty := c.pty
@@ -257,7 +277,7 @@ func (m *Manager) startFailedLocked(ctx context.Context, c *command, msg string)
 	ex.status, ex.reason, ex.code = statusExited, shimproto.ReasonStartFailed, startFailedCode
 	dctx, cancel := m.durableCtx(ctx)
 	defer cancel()
-	if err := m.finalizeLocked(dctx, c, ex); err != nil {
+	if err := m.finalizeLocked(dctx, c, ex, false); err != nil {
 		return storeError(err)
 	}
 	m.markGone(c)
