@@ -85,6 +85,55 @@ describe.skipIf(skipPg())("command control", () => {
 		expect((exited.body as Any).error.code).toBe("command_exited");
 	});
 
+	it("an unreachable agent: input without a session and signal are unknown outcomes; input with a session is retryable", async () => {
+		const s = await readySandbox(w);
+		const id = await start({ command: "cat", stdin: true }, s);
+		w.agent.setUnavailable(s.machineId, true);
+		try {
+			const noSession = await h.request("POST", `${s.commands}/${id}/input`, {
+				json: { data: "x" },
+			});
+			expect(noSession.status).toBe(503);
+			expect((noSession.body as Any).error).toMatchObject({
+				code: "agent_unavailable",
+				retryable: false,
+				details: { commandId: id, outcome: "unknown" },
+			});
+			const session = await h.request("POST", `${s.commands}/${id}/input`, {
+				json: { data: "x", sessionId: "s1", seq: 1 },
+			});
+			expect(session.status).toBe(503);
+			expect((session.body as Any).error).toMatchObject({
+				code: "agent_unavailable",
+				retryable: true,
+			});
+			expect((session.body as Any).error.details.outcome).toBeUndefined();
+			const sig = await h.request("POST", `${s.commands}/${id}/signal`, {
+				json: { signal: "SIGINT" },
+			});
+			expect(sig.status).toBe(503);
+			expect((sig.body as Any).error).toMatchObject({
+				code: "agent_unavailable",
+				retryable: false,
+				details: { commandId: id, outcome: "unknown" },
+			});
+			// Kill is idempotent: retryable.
+			const kill = await h.request("POST", `${s.commands}/${id}/kill`, {
+				json: { graceMs: 0 },
+			});
+			expect(kill.status).toBe(503);
+			expect((kill.body as Any).error).toMatchObject({
+				code: "agent_unavailable",
+				retryable: true,
+			});
+		} finally {
+			w.agent.setUnavailable(s.machineId, false);
+		}
+		await h.request("POST", `${s.commands}/${id}/kill`, {
+			json: { graceMs: 0 },
+		});
+	});
+
 	it("input validation: sessionId and seq together, base64, no stdin", async () => {
 		const id = await start({ command: "sleep 2" });
 		const input = (json: unknown) =>

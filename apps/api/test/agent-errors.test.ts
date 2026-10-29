@@ -8,6 +8,7 @@ import {
 	agentFileInfoJson,
 	agentHttpError,
 	filesQuery,
+	isAgentUnreachable,
 	parseAgentFileInfo,
 } from "../src/index.ts";
 
@@ -98,6 +99,96 @@ describe("agentErrorToHttp", () => {
 			"agent_unavailable",
 			true,
 		]);
+	});
+
+	describe("isAgentUnreachable", () => {
+		// ConnectError of @connectrpc/connect: the base class of AgentUnavailableError.
+		const ConnectError = Object.getPrototypeOf(AgentUnavailableError) as new (
+			message: string,
+			code: number,
+		) => Error;
+		// connectrpc Code values.
+		const CODES = {
+			Canceled: 1,
+			InvalidArgument: 3,
+			DeadlineExceeded: 4,
+			NotFound: 5,
+			PermissionDenied: 7,
+			FailedPrecondition: 9,
+			Internal: 13,
+			Unavailable: 14,
+		};
+
+		it("the base class is the real ConnectError", () => {
+			expect(new ConnectError("x", CODES.Unavailable).name).toBe(
+				"ConnectError",
+			);
+		});
+
+		it.each([
+			["AgentUnavailableError", () => new AgentUnavailableError("m1")],
+			[
+				"a connection error (ECONNRESET)",
+				() => Object.assign(new Error("reset"), { code: "ECONNRESET" }),
+			],
+			[
+				"a ConnectError caused by a connection error",
+				() =>
+					Object.assign(new ConnectError("x", CODES.Internal), {
+						cause: Object.assign(new Error("refused"), {
+							code: "ECONNREFUSED",
+						}),
+					}),
+			],
+			[
+				"ConnectError Unavailable",
+				() => new ConnectError("x", CODES.Unavailable),
+			],
+			["ConnectError Canceled", () => new ConnectError("x", CODES.Canceled)],
+		])("%s → unreachable, 503 agent_unavailable", (_name, make) => {
+			const err = make();
+			expect(isAgentUnreachable(err)).toBe(true);
+			expect(agentErrorToHttp(err)).toMatchObject({
+				status: 503,
+				code: "agent_unavailable",
+				retryable: true,
+			});
+		});
+
+		it.each(
+			(
+				[
+					"InvalidArgument",
+					"DeadlineExceeded",
+					"NotFound",
+					"PermissionDenied",
+					"FailedPrecondition",
+					"Internal",
+				] as const
+			).map((n) => [n]),
+		)("ConnectError %s is an answer, not an outage", (name) => {
+			const err = new ConnectError("x", CODES[name]);
+			expect(isAgentUnreachable(err)).toBe(false);
+			expect(agentErrorToHttp(err).code).not.toBe("agent_unavailable");
+		});
+
+		it("Canceled by the caller's own abort is not an outage", () => {
+			const ac = new AbortController();
+			ac.abort();
+			expect(
+				isAgentUnreachable(new ConnectError("x", CODES.Canceled), ac.signal),
+			).toBe(false);
+		});
+
+		it("AgentOutdatedError, AgentCallError and plain errors are not outages", () => {
+			expect(
+				isAgentUnreachable(new AgentOutdatedError("m", "process.v1")),
+			).toBe(false);
+			expect(isAgentUnreachable(new AgentCallError("not_found", "x"))).toBe(
+				false,
+			);
+			expect(isAgentUnreachable(new Error("boom"))).toBe(false);
+		});
 	});
 
 	it("AgentOutdatedError → 409 agent_outdated with details.capability", () => {

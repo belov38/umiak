@@ -3435,7 +3435,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/commands/{command}/input": {
 			"post": {
-				"description": "Writes `data` to the command's stdin (started with `stdin: true`, or a PTY). With `sessionId` and `seq` a repeat is applied once; without them every request is new. `closeStdin` sends EOF (not for PTY: send ^D).",
+				"description": "Writes `data` to the command's stdin (started with `stdin: true`, or a PTY). With `sessionId` and `seq` a repeat is applied once; without them every request is new. `closeStdin` sends EOF (not for PTY: send ^D). If the agent is unreachable the answer is 503 agent_unavailable: retryable with sessionId+seq, else `retryable: false` with `details.outcome: unknown`.",
 				"operationId": "commands.input",
 				"parameters": [
 					{
@@ -3769,7 +3769,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/commands/{command}/signal": {
 			"post": {
-				"description": "Sends a signal to the process group (SIGKILL: to everything of the command). Idempotent.",
+				"description": "Sends a signal to the process group (SIGKILL: to everything of the command). If the agent is unreachable the answer is 503 agent_unavailable with `retryable: false` and `details.outcome: unknown` (a repeat may deliver the signal twice).",
 				"operationId": "commands.signal",
 				"parameters": [
 					{

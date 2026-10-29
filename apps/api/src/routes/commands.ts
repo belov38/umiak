@@ -14,7 +14,7 @@ import {
 	type Principal,
 	uuidv5,
 } from "@sbx/core";
-import { agentErrorToHttp } from "../agent/errors.ts";
+import { agentErrorToHttp, isAgentUnreachable } from "../agent/errors.ts";
 import type { AgentCommandInfo, AgentStream } from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
@@ -288,7 +288,9 @@ const inputCommandRoute = createRoute({
 	description:
 		"Writes `data` to the command's stdin (started with `stdin: true`, or a PTY). With " +
 		"`sessionId` and `seq` a repeat is applied once; without them every request is new. " +
-		"`closeStdin` sends EOF (not for PTY: send ^D).",
+		"`closeStdin` sends EOF (not for PTY: send ^D). If the agent is unreachable the answer is " +
+		"503 agent_unavailable: retryable with sessionId+seq, else `retryable: false` with " +
+		"`details.outcome: unknown`.",
 	tags: TAGS,
 	middleware: [requireScope("commands:exec")] as const,
 	request: {
@@ -336,7 +338,9 @@ const signalCommandRoute = createRoute({
 	operationId: "commands.signal",
 	summary: "Send a signal",
 	description:
-		"Sends a signal to the process group (SIGKILL: to everything of the command). Idempotent.",
+		"Sends a signal to the process group (SIGKILL: to everything of the command). If the " +
+		"agent is unreachable the answer is 503 agent_unavailable with `retryable: false` and " +
+		"`details.outcome: unknown` (a repeat may deliver the signal twice).",
 	tags: TAGS,
 	middleware: [requireScope("commands:exec")] as const,
 	request: {
@@ -819,6 +823,13 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				closeStdin: b.closeStdin ?? false,
 			});
 		} catch (e) {
+			// Without sessionId+seq the agent cannot drop a repeat.
+			if (b.sessionId === undefined && isAgentUnreachable(e)) {
+				throw unknownOutcomeError(
+					command.id,
+					"the input may have been written",
+				);
+			}
 			throw agentErrorToHttp(e);
 		}
 		return c.body(null, 204);
@@ -853,10 +864,30 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				signal: b.signal,
 			});
 		} catch (e) {
+			// A repeat would send the signal twice.
+			if (isAgentUnreachable(e)) {
+				throw unknownOutcomeError(command.id, "the signal may have been sent");
+			}
 			throw agentErrorToHttp(e);
 		}
 		return c.json(toCommandResource(command, info), 200);
 	});
+}
+
+/**
+ * 503 agent_unavailable of a non-idempotent agent call whose outcome is
+ * unknown (§5.5): not retryable, `details.outcome: "unknown"`.
+ */
+function unknownOutcomeError(commandId: string, what: string): ApiError {
+	return new ApiError(
+		503,
+		"agent_unavailable",
+		`the sandbox agent is not reachable and ${what}; check the command before repeating`,
+		{
+			retryable: false,
+			details: { commandId: publicCommandId(commandId), outcome: "unknown" },
+		},
+	);
 }
 
 function commandExitedError(): ApiError {

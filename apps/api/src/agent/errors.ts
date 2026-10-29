@@ -53,19 +53,26 @@ const SAME_CODE: Record<string, number> = {
 	no_space: 507,
 };
 
+// Connect codes (connectrpc Code) that mean the transport, not the agent,
+// failed; the classifyByCode semantics of @sbx/agent-client.
+const CONNECT_CANCELED = 1;
+const CONNECT_UNAVAILABLE = 14;
+
 /**
  * The agent could not be reached or the transport failed, so the outcome of
  * the call is unknown: AgentUnavailableError, a connection error (reset,
- * refused), or a Connect error that is not an answer of the agent (agent
- * answers are AgentCallError; AgentOutdatedError is a capability check).
+ * refused), or a Connect error with code Unavailable, or Canceled without a
+ * caller abort (a listener reset). Application codes (InvalidArgument,
+ * NotFound, FailedPrecondition, DeadlineExceeded, ...) are answers, not
+ * outages. Mirrors `classifyByCode` of @sbx/agent-client (not exported).
  */
-export function isAgentUnreachable(e: unknown): boolean {
+export function isAgentUnreachable(e: unknown, signal?: AbortSignal): boolean {
+	if (signal?.aborted) return false;
 	if (e instanceof AgentUnavailableError || isConnectionError(e)) return true;
-	return (
-		e instanceof Error &&
-		e.name === "ConnectError" &&
-		!(e instanceof AgentOutdatedError)
-	);
+	if (!(e instanceof Error) || e.name !== "ConnectError") return false;
+	if (e instanceof AgentOutdatedError) return false;
+	const code = (e as { code?: unknown }).code;
+	return code === CONNECT_UNAVAILABLE || code === CONNECT_CANCELED;
 }
 
 /** 503 agent_unavailable (retryable) for an unreachable agent. */
