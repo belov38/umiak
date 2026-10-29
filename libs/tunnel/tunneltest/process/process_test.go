@@ -363,3 +363,46 @@ func TestAttachStopsWithCaller(t *testing.T) {
 	}
 	_ = s.Close()
 }
+
+func TestHoldDelaysExit(t *testing.T) {
+	hold := make(chan struct{})
+	st, c := newClient(t, process.Options{Hold: hold})
+	sp := spec(10, 32, 0, 3)
+	wantOut, wantErr := process.Expected(sp)
+	start(t, c, "held", sp)
+	start(t, c, "killed", sp)
+	deadline := time.Now().Add(waitTimeout)
+	for _, id := range []string{"held", "killed"} {
+		for {
+			o, e := st.Produced(id)
+			if o == uint64(len(wantOut)) && e == uint64(len(wantErr)) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: output %d/%d bytes, want %d/%d", id, o, e, len(wantOut), len(wantErr))
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// A negative check: without Hold the exit follows the last line at once.
+	select {
+	case <-st.Done("held"):
+		t.Fatal("command exited while held")
+	case <-time.After(100 * time.Millisecond):
+	}
+	// A kill ends a held command.
+	if _, err := c.Signal(context.Background(), connect.NewRequest(&testingv1.SignalRequest{CommandId: "killed", Signal: "SIGKILL"})); err != nil {
+		t.Fatal(err)
+	}
+	if got := attach(t, c, "killed", [2]uint64{}); got.exit.GetStatus() != testingv1.ExitStatus_EXIT_STATUS_KILLED {
+		t.Fatalf("killed: exit = %v, want killed", got.exit)
+	}
+	close(hold)
+	got := attach(t, c, "held", [2]uint64{})
+	if !bytes.Equal(got.out[0], wantOut) || !bytes.Equal(got.out[1], wantErr) {
+		t.Fatal("held: output differs")
+	}
+	if got.exit.GetStatus() != testingv1.ExitStatus_EXIT_STATUS_EXITED || got.exit.GetCode() != 3 {
+		t.Fatalf("held: exit = %v, want exited 3", got.exit)
+	}
+}
