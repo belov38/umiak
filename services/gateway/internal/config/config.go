@@ -77,6 +77,9 @@ type Config struct {
 	ProxyProtocol      bool
 	ProxyProtocolCIDRs []netip.Prefix
 	TrustedProxyCIDRs  []netip.Prefix
+	// ProxyHeaderTimeout bounds the wait for the PROXY v2 header of a conn
+	// from ProxyProtocolCIDRs (TLS and SSH listeners).
+	ProxyHeaderTimeout time.Duration
 
 	// TLSMaxHandshakesPerIP caps the TLS handshakes in flight per client
 	// IP on the TLS listener; RateLimit.Exempt IPs skip it.
@@ -206,6 +209,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	}
 	c.ProxyProtocolCIDRs = l.cidrs("PROXY_PROTOCOL_CIDRS")
 	c.TrustedProxyCIDRs = l.cidrs("TRUSTED_PROXY_CIDRS")
+	c.ProxyHeaderTimeout = l.duration("PROXY_HEADER_TIMEOUT", 2*time.Second)
 	c.TLSMaxHandshakesPerIP = l.integer("TLS_MAX_HANDSHAKES_PER_IP", 64)
 
 	c.APIURL = l.str("API_URL", "")

@@ -155,9 +155,9 @@ func (s *Server) authenticate(ctx context.Context, meta ssh.ConnMetadata, key ss
 }
 
 // checkLoginCert verifies a client certificate (spec 9.2): a user cert
-// from a login CA, exactly one principal, a validity no longer than
-// LoginCertMaxValidity, valid now within the clock skew on both bounds, a
-// supported KeyId and no critical options.
+// from a login CA, exactly one principal, valid now within the clock skew
+// on both bounds, a supported KeyId, no critical options and, once the
+// signature is verified, a validity no longer than LoginCertMaxValidity.
 func (s *Server) checkLoginCert(cert *ssh.Certificate) error {
 	if cert.CertType != ssh.UserCert {
 		return fmt.Errorf("certificate type %d", cert.CertType)
@@ -179,11 +179,6 @@ func (s *Server) checkLoginCert(cert *ssh.Certificate) error {
 	if after >= before {
 		return errors.New("empty validity")
 	}
-	// Compared in seconds: a Duration of a huge validity would overflow.
-	if v := before - after; v > int64(s.cfg.LoginCertMaxValidity/time.Second) {
-		return fmt.Errorf("%w: validity %s exceeds the maximum %s (SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY)",
-			errCertTooLong, validityString(v), s.cfg.LoginCertMaxValidity)
-	}
 	now := s.cfg.Now().Unix()
 	skew := int64(s.cfg.ClockSkew / time.Second)
 	if now+skew < after {
@@ -197,7 +192,17 @@ func (s *Server) checkLoginCert(cert *ssh.Certificate) error {
 	// inside the validity, so the skew above is what applies.
 	at := min(max(now, after), before-1)
 	checker := &ssh.CertChecker{Clock: func() time.Time { return time.Unix(at, 0) }}
-	return checker.CheckCert(cert.ValidPrincipals[0], cert)
+	if err := checker.CheckCert(cert.ValidPrincipals[0], cert); err != nil {
+		return err
+	}
+	// Checked once the signature is verified: errCertTooLong is logged at
+	// Warn, so it must describe a certificate a login CA really signed.
+	// Compared in seconds: a Duration of a huge validity would overflow.
+	if v := before - after; v > int64(s.cfg.LoginCertMaxValidity/time.Second) {
+		return fmt.Errorf("%w: validity %s exceeds the maximum %s (SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY)",
+			errCertTooLong, validityString(v), s.cfg.LoginCertMaxValidity)
+	}
+	return nil
 }
 
 // validityString formats a validity in seconds as a Duration, or as seconds

@@ -26,6 +26,9 @@ const (
 	// defaultMaxHandshakesPerIP caps the handshakes in flight of one
 	// client IP (IPv4 /32, IPv6 /64).
 	defaultMaxHandshakesPerIP = 64
+	// DefaultProxyHeaderTimeout bounds the wait for a PROXY header: the
+	// load balancer sends it at once on connect.
+	DefaultProxyHeaderTimeout = 2 * time.Second
 	// defaultMaxExemptHandshakes caps the handshakes in flight of the
 	// exempt client IPs (node SNAT).
 	defaultMaxExemptHandshakes = 4096
@@ -72,6 +75,12 @@ type DispatchConfig struct {
 	// MaxExemptHandshakes caps the handshakes in flight of the exempt
 	// clients. 0 means 4096.
 	MaxExemptHandshakes int
+	// ProxyHeaderTimeout bounds the wait for the PROXY header of a conn
+	// from a trusted PROXY source, and so how long the general (or
+	// borrowed exempt) slot it takes before its client IP is known is
+	// held. A conn without a complete header by then is closed. Use the
+	// same value as the listener's (WrapProxyProtocol). 0 means 2 s.
+	ProxyHeaderTimeout time.Duration
 	// ConnLimit counts one open sbx conn of the client IP; ok false refuses
 	// it. It runs when the ClientHello names an sbx host; release is called
 	// once when the conn closes. nil means no limit. Tunnel conns are never
@@ -118,6 +127,9 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	}
 	if cfg.MaxHandshakesPerIP <= 0 {
 		cfg.MaxHandshakesPerIP = defaultMaxHandshakesPerIP
+	}
+	if cfg.ProxyHeaderTimeout <= 0 {
+		cfg.ProxyHeaderTimeout = DefaultProxyHeaderTimeout
 	}
 	if cfg.MaxExemptHandshakes <= 0 {
 		cfg.MaxExemptHandshakes = defaultMaxExemptHandshakes
@@ -462,15 +474,24 @@ func (d *Dispatcher) handle(raw net.Conn, s *slots) {
 }
 
 // settleProxy reads the PROXY header of a conn from a trusted source
-// (bounded by ctx and the header timeout of the listener) and moves s to the
-// slots of the client IP it names; false means the conn must be closed.
-// Without a header (or with a refused one) the client IP is the transport
-// peer; a refused header then fails the handshake on the first read.
+// (bounded by ProxyHeaderTimeout, ctx and the header timeout of the
+// listener) and moves s to the slots of the client IP it names; false means
+// the conn must be closed. Without a header (the first bytes are no PROXY
+// signature, or a refused header) the client IP is the transport peer; a
+// refused header then fails the handshake on the first read.
 func (d *Dispatcher) settleProxy(ctx context.Context, c net.Conn, s *slots) bool {
-	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	deadline := time.Now().Add(d.cfg.ProxyHeaderTimeout)
+	hctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	stop := context.AfterFunc(hctx, func() { _ = c.Close() })
 	ip := addrIP(c.RemoteAddr()) // reads the header
-	if !stop() {
-		// The handshake timeout or Close ended the wait.
+	// The listener's own header timeout may end the wait first and report
+	// "no header"; past the deadline the conn is closed either way, so a
+	// silent conn never goes on as a header-less one.
+	if !stop() || !time.Now().Before(deadline) {
+		// The header timeout, the handshake timeout or Close ended the
+		// wait.
+		_ = c.Close()
 		d.shedGeneral()
 		return false
 	}

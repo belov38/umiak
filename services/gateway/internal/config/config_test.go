@@ -121,6 +121,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"SSHKeepaliveMax", cfg.SSHKeepaliveMax, 3},
 		{"SSHMaxChannels", cfg.SSHMaxChannels, 256},
 		{"TLSMaxHandshakesPerIP", cfg.TLSMaxHandshakesPerIP, 64},
+		{"ProxyHeaderTimeout", cfg.ProxyHeaderTimeout, 2 * time.Second},
 		{"SSHLoginCertMaxValidity", cfg.SSHLoginCertMaxValidity, 24 * time.Hour},
 		{"TLSHandshake", cfg.Timeouts.TLSHandshake, 10 * time.Second},
 		{"ReadHeader", cfg.Timeouts.ReadHeader, 10 * time.Second},
@@ -185,6 +186,7 @@ func TestFromEnvOverrides(t *testing.T) {
 		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER":     "1m",
 		"SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP":   "16",
 		"SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY": "1h",
+		"SBX_GATEWAY_PROXY_HEADER_TIMEOUT":        "500ms",
 	} {
 		f.env[k] = v
 	}
@@ -215,6 +217,9 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.TLSMaxHandshakesPerIP != 16 {
 		t.Errorf("TLSMaxHandshakesPerIP = %d", cfg.TLSMaxHandshakesPerIP)
+	}
+	if cfg.ProxyHeaderTimeout != 500*time.Millisecond {
+		t.Errorf("ProxyHeaderTimeout = %s", cfg.ProxyHeaderTimeout)
 	}
 	if cfg.SSHLoginCertMaxValidity != time.Hour {
 		t.Errorf("SSHLoginCertMaxValidity = %s", cfg.SSHLoginCertMaxValidity)

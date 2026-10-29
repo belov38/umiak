@@ -93,9 +93,28 @@ func TestLoginCertMaxValidity(t *testing.T) {
 	if _, err := s.authenticate(context.Background(), fakeMeta{user: "quiet-otter"}, cert(time.Hour+time.Second)); err == nil {
 		t.Fatal("a certificate over the validity cap was accepted")
 	}
+	// A forged certificate (signed by another key, naming the login CA)
+	// with a long validity is refused without the Warn: nothing chosen by
+	// an attacker reaches the Warn log.
+	forged := cert(48 * time.Hour)
+	other := newKey()
+	if err := forged.SignCert(rand.Reader, other); err != nil {
+		t.Fatal(err)
+	}
+	forged.SignatureKey = ca.PublicKey()
+	before := logs.String()
+	if _, err := s.authenticate(context.Background(), fakeMeta{user: "quiet-otter"}, forged); err == nil {
+		t.Fatal("a forged certificate was accepted")
+	}
+	if l := strings.TrimPrefix(logs.String(), before); strings.Contains(l, "level=WARN") || strings.Contains(l, "exceeds the maximum") {
+		t.Fatalf("a forged certificate was logged as too long: %q", l)
+	}
 	// A validity too long for a Duration does not overflow the check.
 	huge := cert(time.Hour)
-	huge.ValidAfter, huge.ValidBefore = 0, math.MaxInt64
+	huge.ValidAfter, huge.ValidBefore = uint64(now.Add(-time.Minute).Unix()), math.MaxInt64
+	if err := huge.SignCert(rand.Reader, ca); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.checkLoginCert(huge); !errors.Is(err, errCertTooLong) {
 		t.Fatalf("a validity of MaxInt64 s: %v", err)
 	}

@@ -18,14 +18,15 @@ var errProxyVersion = errors.New("edge: only PROXY protocol v2 is accepted")
 // when it sends no header, and its conn fails on the first read when it
 // does (the server then closes it). A v1 header fails the same way, also
 // from a trusted peer. headerTimeout bounds the wait for the
-// header; use the TLS handshake timeout.
+// header (0 means DefaultProxyHeaderTimeout); use the dispatcher's
+// ProxyHeaderTimeout.
 //
 // The policy runs in Accept without I/O. RemoteAddr of an accepted conn
 // blocks until the header is read, so call it only after the first read
 // (the TLS handshake or the SSH version exchange).
 func WrapProxyProtocol(ln net.Listener, trusted []netip.Prefix, headerTimeout time.Duration) net.Listener {
 	if headerTimeout <= 0 {
-		headerTimeout = defaultHandshakeTimeout
+		headerTimeout = DefaultProxyHeaderTimeout
 	}
 	trusted = append([]netip.Prefix(nil), trusted...)
 	return &proxyproto.Listener{

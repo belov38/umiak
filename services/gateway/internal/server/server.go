@@ -515,7 +515,7 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 	}
 	i.AddReadyCheck(func() bool { return sbx.Loaded() && tun.Loaded() })
 	if i.cfg.ProxyProtocol {
-		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.Timeouts.TLSHandshake)
+		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.ProxyHeaderTimeout)
 	}
 	d := edge.NewDispatcher(ln, edge.DispatchConfig{
 		SbxDomain:        i.cfg.SbxDomain,
@@ -525,6 +525,7 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 		HandshakeTimeout: i.cfg.Timeouts.TLSHandshake,
 		// Node SNAT (spec 11) has its own handshake budget.
 		MaxHandshakesPerIP: i.cfg.TLSMaxHandshakesPerIP,
+		ProxyHeaderTimeout: i.cfg.ProxyHeaderTimeout,
 		HandshakeExempt:    i.cfg.RateLimit.Exempt,
 		ConnLimit:          i.limits.AcquireConn,
 		Metrics:            i.metrics,
@@ -606,7 +607,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	if ls.SSH != nil && i.ssh != nil {
 		ln := ls.SSH
 		if i.cfg.ProxyProtocol {
-			ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.Timeouts.TLSHandshake)
+			ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.ProxyHeaderTimeout)
 		}
 		wg.Go(func() { //nolint:contextcheck // SSH conns run on the sshgw server context, ended by Close
 			if err := i.ssh.Serve(ln); err != nil {

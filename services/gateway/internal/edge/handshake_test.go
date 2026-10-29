@@ -280,3 +280,72 @@ func TestDispatcherHandshakeFloodRegression(t *testing.T) {
 	}
 	_ = c.Close()
 }
+
+// TestDispatcherProxyHeaderTimeout: a conn from the trusted LB that sends
+// nothing holds its slot (a borrowed exempt one when the general budget is
+// full) at most ProxyHeaderTimeout, not the handshake timeout.
+func TestDispatcherProxyHeaderTimeout(t *testing.T) {
+	const headerTimeout = 300 * time.Millisecond
+	d, addr, _, _ := capDispatcher(t, true, func(c *edge.DispatchConfig) {
+		c.MaxHandshakes = 1
+		c.MaxExemptHandshakes = 4
+		c.HandshakeExempt = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+		c.ProxyHeaderTimeout = headerTimeout
+	})
+	silentClosed := func(what string) {
+		t.Helper()
+		start := time.Now()
+		c := idleConn(t, addr, nil)
+		if !closedWithin(c, 5*time.Second) {
+			t.Fatalf("%s: a silent LB conn was not closed", what)
+		}
+		if el := time.Since(start); el < headerTimeout/2 || el > 3*time.Second {
+			t.Fatalf("%s: closed after %s, want about %s", what, el, headerTimeout)
+		}
+	}
+	// The general slot is free.
+	silentClosed("general budget free")
+	eventually(t, 10*time.Second, "no slot held", func() bool {
+		g, e := d.HandshakesInFlight()
+		return g == 0 && e == 0
+	})
+	// The general budget is full: the silent conn borrows an exempt slot
+	// and gives it back after the header timeout.
+	idleConn(t, addr, header(t, "192.0.2.1"))
+	waitInFlight(t, d, "192.0.2.1", 1)
+	silentClosed("general budget full")
+	eventually(t, 10*time.Second, "the borrowed exempt slot released", func() bool {
+		g, e := d.HandshakesInFlight()
+		return g == 1 && e == 0
+	})
+}
+
+// TestDispatcherHeaderlessLBConn: a conn from the trusted LB without a PROXY
+// header is keyed by the LB address.
+func TestDispatcherHeaderlessLBConn(t *testing.T) {
+	const perIP = 2
+	d, addr, roots, m := capDispatcher(t, true, func(c *edge.DispatchConfig) {
+		c.MaxHandshakesPerIP = perIP
+		c.ProxyHeaderTimeout = 5 * time.Second
+	})
+	// The first byte of a TLS record: not a PROXY signature, so the conn
+	// goes on without a header and waits for the rest of the ClientHello.
+	var held []net.Conn
+	for range perIP {
+		held = append(held, idleConn(t, addr, []byte{0x16}))
+	}
+	waitInFlight(t, d, "127.0.0.1", perIP)
+	if !closedWithin(idleConn(t, addr, []byte{0x16}), promptClose) {
+		t.Fatal("a header-less LB conn over the LB's per-IP cap was not closed")
+	}
+	eventually(t, 10*time.Second, "the refusal counted", func() bool { return handshakesLimited(m) == 1 })
+	for _, c := range held {
+		_ = c.Close()
+	}
+	waitInFlight(t, d, "127.0.0.1", 0)
+	c, err := tlsVia(addr, nil, "tunnel.test", roots)
+	if err != nil {
+		t.Fatalf("header-less handshake from the LB: %v", err)
+	}
+	_ = c.Close()
+}
