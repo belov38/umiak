@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,9 +48,16 @@ const (
 	DefaultStateTTL = 10 * time.Minute
 )
 
-// maxRDLen caps the redirect target kept in the state cookie, so the cookie
-// stays well below the 4 KiB browser limit. Longer targets become "/".
-const maxRDLen = 2048
+// maxRDLen caps the redirect target kept in the state cookie, so that
+// maxStateCookies of them stay far below the Cookie header limits. Longer
+// targets become "/".
+const maxRDLen = 512
+
+// maxStateCookies caps the state cookies (logins in flight) of one host. An
+// sso redirect that would exceed it clears the oldest ones, so repeated
+// navigations cannot grow the Cookie header until the callback and logout
+// become unreachable.
+const maxStateCookies = 8
 
 // Config configures Auth.
 type Config struct {
@@ -195,9 +203,55 @@ func (a *Auth) checkSSO(w http.ResponseWriter, r *http.Request, l routes.Label, 
 		Expiry: a.cfg.Codec.now().Add(a.cfg.StateTTL),
 	})
 	name, _ := stateCookieName(state) // 22 characters: always long enough
+	for _, old := range a.evictStates(r, l, name) {
+		w.Header().Add("Set-Cookie", a.cookie(old, "", 0).String())
+	}
 	w.Header().Add("Set-Cookie", a.cookie(name, v, a.cfg.StateTTL).String())
 	a.redirect(w, a.authURL(l.Raw, state))
 	return Result{AuthResult: ResultRedirect}
+}
+
+// evictStates returns the state cookies of r to clear so that, with the new
+// cookie fresh, at most maxStateCookies remain: first the ones that do not
+// open as a state of l (forged, expired, another key or label), then the
+// ones that expire first.
+func (a *Auth) evictStates(r *http.Request, l routes.Label, fresh string) []string {
+	type entry struct {
+		name   string
+		ok     bool
+		expiry time.Time
+	}
+	var es []entry
+	seen := map[string]bool{fresh: true}
+	for _, c := range r.Cookies() {
+		if !isStateCookie(c.Name) || seen[c.Name] {
+			continue
+		}
+		seen[c.Name] = true
+		e := entry{name: c.Name}
+		if st, err := a.cfg.Codec.OpenState(c.Value); err == nil && st.Label == l.Raw {
+			e.ok, e.expiry = true, st.Expiry
+		}
+		es = append(es, e)
+	}
+	n := len(es) - (maxStateCookies - 1)
+	if n <= 0 {
+		return nil
+	}
+	slices.SortStableFunc(es, func(x, y entry) int {
+		if x.ok != y.ok {
+			if !x.ok {
+				return -1
+			}
+			return 1
+		}
+		return x.expiry.Compare(y.expiry)
+	})
+	out := make([]string, n)
+	for i := range out {
+		out[i] = es[i].name
+	}
+	return out
 }
 
 // validSession looks for a valid auth cookie of l with mode and epoch. present
