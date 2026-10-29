@@ -4,8 +4,11 @@
 package paths
 
 import (
+	"errors"
+	"fmt"
 	"path"
 	"path/filepath"
+	"strings"
 )
 
 // Layout holds every filesystem path the agent uses.
@@ -83,18 +86,44 @@ type Layout struct {
 	QuiesceHooksDir string
 	// SystemdUnitDir is where the agent installs its unit files.
 	SystemdUnitDir string
+
+	// root is the directory the layout is mounted under; empty for Default.
+	root string
 }
 
 // Default returns the production layout.
 func Default() Layout {
-	return build(func(p string) string { return p })
+	return build(func(p string) string { return p }, "")
 }
 
 // ForRoot returns the same tree under root, for tests and dev runs.
 func ForRoot(root string) Layout {
 	return build(func(p string) string {
 		return filepath.Join(root, filepath.FromSlash(p))
-	})
+	}, root)
+}
+
+// Rooted maps a production path (such as /etc/foo from a managed-files list)
+// to its location in this layout: unchanged for Default, under the root for
+// ForRoot. It rejects relative paths, paths with a ".." element and the
+// filesystem root, so a mapped path can never leave the layout.
+func (l Layout) Rooted(abs string) (string, error) {
+	if !strings.HasPrefix(abs, "/") {
+		return "", fmt.Errorf("paths: %q is not absolute", abs)
+	}
+	for _, elem := range strings.Split(abs, "/") {
+		if elem == ".." {
+			return "", fmt.Errorf("paths: %q contains \"..\"", abs)
+		}
+	}
+	clean := path.Clean(abs)
+	if clean == "/" {
+		return "", errors.New("paths: refusing the filesystem root")
+	}
+	if l.root == "" {
+		return filepath.FromSlash(clean), nil
+	}
+	return filepath.Join(l.root, filepath.FromSlash(clean)), nil
 }
 
 // CommandDir returns the directory of command id.
@@ -113,7 +142,7 @@ func (l Layout) CmdSpec(id string) string {
 }
 
 // build maps the slash-separated production paths through f.
-func build(f func(string) string) Layout {
+func build(f func(string) string, root string) Layout {
 	const (
 		lib   = "/usr/local/lib/sbx-agent"
 		state = "/var/lib/sbx-agent"
@@ -163,5 +192,7 @@ func build(f func(string) string) Layout {
 		HostsFile:       f("/etc/hosts"),
 		QuiesceHooksDir: f(j(etc, "quiesce.d")),
 		SystemdUnitDir:  f("/etc/systemd/system"),
+
+		root: root,
 	}
 }

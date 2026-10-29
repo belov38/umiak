@@ -1,11 +1,13 @@
 package ident
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -111,9 +113,12 @@ func TestApplyChangedResetsState(t *testing.T) {
 	mustWrite(t, filepath.Join(l.CommandsDir, "c1", "stdout"), "out")
 	mustWrite(t, filepath.Join(l.UploadsDir, "u1"), "up")
 	mustWrite(t, l.PendingUpdateFile, "{}")
-	managed := filepath.Join(t.TempDir(), "managed.conf")
+	managed, err := l.Rooted("/etc/managed.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
 	mustWrite(t, managed, "x")
-	mustWrite(t, l.ManagedFilesList, "# comment\n\nrelative/path\n"+managed+"\n"+filepath.Join(t.TempDir(), "absent")+"\n")
+	mustWrite(t, l.ManagedFilesList, "# comment\n\nrelative/path\n/etc/managed.conf\n/etc/absent\n")
 	mustWrite(t, l.SbxEnvFile, "SECRET_ISH=1\n")
 	mustWrite(t, l.SSHUserCA, "ssh-ed25519 OLD\n")
 	mustWrite(t, l.TemplateSSHCA, "ssh-ed25519 TEMPLATE\n")
@@ -183,7 +188,9 @@ func TestApplyFirstBootAfterSeal(t *testing.T) {
 	if got := mustRead(t, l.MachineIDFile); got != testHex+"\n" {
 		t.Errorf("machine-id = %q", got)
 	}
-	mustNotExist(t, l.SbxEnvFile+".tmp")
+	if m, _ := filepath.Glob(filepath.Join(filepath.Dir(l.SbxEnvFile), ".*.tmp-*")); len(m) != 0 {
+		t.Errorf("temporary files left behind: %v", m)
+	}
 	if got := mustRead(t, l.SSHUserCA); got != "" {
 		t.Errorf("ssh ca = %q, want empty", got)
 	}
@@ -355,9 +362,12 @@ func TestSealWipes(t *testing.T) {
 	mustWrite(t, l.StateDB, "db")
 	mustWrite(t, filepath.Join(l.CommandsDir, "c1", "stdout"), "out")
 	mustWrite(t, l.IdentityFile, "{}")
-	managed := filepath.Join(t.TempDir(), "managed.conf")
+	managed, err := l.Rooted("/etc/managed.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
 	mustWrite(t, managed, "x")
-	mustWrite(t, l.ManagedFilesList, managed+"\n")
+	mustWrite(t, l.ManagedFilesList, "/etc/managed.conf\n")
 	mustWrite(t, l.SbxEnvFile, "A=1\n")
 	mustWrite(t, l.SSHUserCA, "ssh-ed25519 OLD\n")
 	mustWrite(t, l.TemplateSSHCA, "ssh-ed25519 TEMPLATE\n")
@@ -421,5 +431,113 @@ func TestSealThenApplyIsFirstBoot(t *testing.T) {
 	}
 	if got := mustRead(t, l.MachineIDFile); got != testHex+"\n" {
 		t.Errorf("machine-id = %q", got)
+	}
+}
+
+func TestManagedFilesConfinedToLayout(t *testing.T) {
+	root := t.TempDir()
+	l := paths.ForRoot(root)
+	// Files that the list must never reach: outside the layout root.
+	outside := filepath.Join(t.TempDir(), "outside")
+	mustWrite(t, outside, "keep")
+	inside, err := l.Rooted("/etc/inside.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, inside, "x")
+	sentinel := filepath.Join(root, "etc", "sentinel")
+	mustWrite(t, sentinel, "keep")
+	rel, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, l.ManagedFilesList, strings.Join([]string{
+		"/",
+		"../x",
+		"/../x",
+		"/etc/../../" + rel,
+		outside, // an absolute host path is re-rooted under the layout, so the real file is untouched
+		"/etc/inside.conf",
+		"",
+	}, "\n"))
+
+	got := managedFiles(l)
+	if len(got) != 2 || got[1] != inside {
+		// outside is re-rooted to <root><outside>, inside is the second entry.
+		t.Fatalf("managedFiles = %v", got)
+	}
+	for _, p := range got {
+		if !strings.HasPrefix(p, root+string(filepath.Separator)) {
+			t.Errorf("%q escapes the layout root", p)
+		}
+	}
+
+	r, _ := newFake(t, l)
+	if _, err := Apply(context.Background(), l, testIdentity(testMachineID), r, false); err != nil {
+		t.Fatal(err)
+	}
+	mustNotExist(t, inside)
+	if mustRead(t, outside) != "keep" || mustRead(t, sentinel) != "keep" {
+		t.Error("a file outside the managed list was removed")
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Errorf("layout root removed: %v", err)
+	}
+}
+
+func TestApplyFailureKeepsOldIdentityFileAndRetryRewipes(t *testing.T) {
+	l := paths.ForRoot(t.TempDir())
+	oldFile := &File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", WrittenMachineID: "aaaaaaaabbbbccccddddeeeeeeeeeeee"}
+	if err := oldFile.Save(l.IdentityFile); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, l.StateDB, "db")
+	r, _ := newFake(t, l)
+	r.Errs = map[string]error{"SetHostname": errors.New("boom")}
+	if _, err := Apply(context.Background(), l, testIdentity(testMachineID), r, false); err == nil {
+		t.Fatal("want error")
+	}
+	got, err := LoadFile(l.IdentityFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, oldFile) {
+		t.Errorf("identity.json = %+v, want the old %+v", got, oldFile)
+	}
+
+	// Retry: state reappears (as if the agent ran in between) and is wiped again.
+	mustWrite(t, l.StateDB, "db2")
+	r.Errs = nil
+	changed, err := Apply(context.Background(), l, testIdentity(testMachineID), r, false)
+	if err != nil || !changed {
+		t.Fatalf("retry: changed = %v, err = %v", changed, err)
+	}
+	mustNotExist(t, l.StateDB)
+	got, err = LoadFile(l.IdentityFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MachineID != testMachineID || !got.ResetPending {
+		t.Errorf("identity.json after retry = %+v", got)
+	}
+}
+
+func TestHostKeyFingerprintsWarnsWhenNoneParse(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "ssh_host_rsa_key.pub"), "garbage\n")
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	fps, err := hostKeyFingerprints(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fps) != 0 {
+		t.Errorf("fps = %v", fps)
+	}
+	if !strings.Contains(buf.String(), "no usable ssh host keys") {
+		t.Errorf("log = %q, want a no-usable-keys warning", buf.String())
 	}
 }

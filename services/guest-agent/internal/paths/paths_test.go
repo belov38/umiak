@@ -44,6 +44,9 @@ func TestForRootPrefixesEveryPath(t *testing.T) {
 	l := ForRoot(root)
 	v := reflect.ValueOf(l)
 	for i := range v.NumField() {
+		if !v.Type().Field(i).IsExported() {
+			continue
+		}
 		name := v.Type().Field(i).Name
 		got := v.Field(i).String()
 		if got == "" {
@@ -63,6 +66,9 @@ func TestDefaultFieldsAreAbsoluteAndDistinct(t *testing.T) {
 	v := reflect.ValueOf(Default())
 	seen := map[string]string{}
 	for i := range v.NumField() {
+		if !v.Type().Field(i).IsExported() {
+			continue
+		}
 		name := v.Type().Field(i).Name
 		got := v.Field(i).String()
 		if !strings.HasPrefix(got, "/") {
@@ -85,5 +91,39 @@ func TestPerIDPaths(t *testing.T) {
 	}
 	if got, want := l.CmdSpec("c1"), "/run/sbx/cmd-spec/c1"; got != want {
 		t.Errorf("CmdSpec = %q, want %q", got, want)
+	}
+}
+
+func TestRooted(t *testing.T) {
+	root := t.TempDir()
+	for _, tt := range []struct {
+		name    string
+		layout  Layout
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"default is identity", Default(), "/etc/foo", filepath.FromSlash("/etc/foo"), false},
+		{"default cleans", Default(), "/etc//a/../foo", "", true},
+		{"default dotdot", Default(), "/etc/../foo", "", true},
+		{"default root", Default(), "/", "", true},
+		{"default relative", Default(), "etc/foo", "", true},
+		{"default empty", Default(), "", "", true},
+		{"rooted maps under root", ForRoot(root), "/etc/foo", filepath.Join(root, "etc", "foo"), false},
+		{"rooted redundant slashes", ForRoot(root), "/etc//foo/", filepath.Join(root, "etc", "foo"), false},
+		{"rooted slash", ForRoot(root), "/", "", true},
+		{"rooted dotdot", ForRoot(root), "/../x", "", true},
+		{"rooted relative dotdot", ForRoot(root), "../x", "", true},
+		{"rooted relative", ForRoot(root), "etc/foo", "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.layout.Rooted(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

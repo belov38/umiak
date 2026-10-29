@@ -116,8 +116,11 @@ func wipeState(l paths.Layout) error {
 	return nil
 }
 
-// managedFiles returns the absolute paths listed in the managed-files list,
-// one per line; blank lines, comments and relative paths are skipped.
+// managedFiles returns the files listed in the managed-files list, one
+// production path per line, mapped into the layout. Blank lines and comments
+// are skipped. Entries that are relative, contain "..", name the filesystem
+// root or cannot be mapped are logged and skipped: a bad list must not wipe
+// the machine or fail the boot.
 func managedFiles(l paths.Layout) []string {
 	f, err := os.Open(l.ManagedFilesList)
 	if err != nil {
@@ -128,10 +131,15 @@ func managedFiles(l paths.Layout) []string {
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") || !filepath.IsAbs(line) {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		out = append(out, filepath.Clean(line))
+		p, err := l.Rooted(line)
+		if err != nil {
+			slog.Warn("ignoring invalid managed-files entry", "err", err)
+			continue
+		}
+		out = append(out, p)
 	}
 	return out
 }
@@ -271,6 +279,9 @@ func hostKeyFingerprints(dir string) ([]string, error) {
 			continue
 		}
 		fps = append(fps, ssh.FingerprintSHA256(pub))
+	}
+	if len(fps) == 0 {
+		slog.Warn("no usable ssh host keys found after regeneration", "dir", dir)
 	}
 	sort.Strings(fps)
 	return fps, nil
