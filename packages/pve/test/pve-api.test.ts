@@ -1,0 +1,203 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer, type Server } from "node:https";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import { PveApi, PveApiError, PveTaskError } from "../src/pve-api.ts";
+import { makePki } from "./tls.ts";
+
+type Handler = (
+	req: IncomingMessage,
+	body: string,
+	res: ServerResponse,
+) => void;
+
+const pvePki = makePki("pve");
+const otherPki = makePki("other");
+let server: Server | undefined;
+
+async function serve(handler: Handler, pki = pvePki): Promise<string> {
+	server = createServer({ key: pki.key, cert: pki.cert }, (req, res) => {
+		let body = "";
+		req.on("data", (c) => {
+			body += c;
+		});
+		req.on("end", () => handler(req, body, res));
+	});
+	await new Promise<void>((r) => server?.listen(0, "127.0.0.1", r));
+	return `https://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+function api(url: string, ca = pvePki.ca) {
+	return new PveApi({
+		url,
+		tokenId: "sbx@pve!poc",
+		tokenSecret: "sec",
+		ca,
+		tlsName: "pve",
+		retryDelayMs: 1,
+	});
+}
+
+function json(
+	res: ServerResponse,
+	status: number,
+	body: unknown,
+	statusMessage?: string,
+) {
+	res.writeHead(status, statusMessage ?? "", {
+		"content-type": "application/json",
+	});
+	res.end(JSON.stringify(body));
+}
+
+afterEach(async () => {
+	const s = server;
+	server = undefined;
+	if (s) await new Promise((r) => s.close(r));
+});
+
+describe("PveApi", () => {
+	it("sends the token header and a form body, and unwraps data", async () => {
+		let seen: Record<string, string | undefined> = {};
+		const url = await serve((req, body, res) => {
+			seen = {
+				auth: req.headers.authorization,
+				body,
+				path: req.url,
+				type: req.headers["content-type"],
+			};
+			json(res, 200, { data: "UPID:x" });
+		});
+		const r = await api(url).post<string>("/nodes/pve/qemu", {
+			vmid: 500,
+			net0: "virtio=02:01:00:00:01:F4,bridge=sbx0",
+			command: ["bash", "-c"],
+		});
+		expect(r).toBe("UPID:x");
+		expect(seen.auth).toBe("PVEAPIToken=sbx@pve!poc=sec");
+		expect(seen.path).toBe("/api2/json/nodes/pve/qemu");
+		expect(seen.type).toBe("application/x-www-form-urlencoded");
+		expect(seen.body).toBe(
+			"vmid=500&net0=virtio%3D02%3A01%3A00%3A00%3A01%3AF4%2Cbridge%3Dsbx0&command=bash&command=-c",
+		);
+	});
+
+	it("puts GET and DELETE params into the query string", async () => {
+		const paths: string[] = [];
+		const url = await serve((req, _b, res) => {
+			paths.push(`${req.method} ${req.url}`);
+			json(res, 200, { data: null });
+		});
+		await api(url).get("/cluster/resources", { type: "vm" });
+		await api(url).delete("/nodes/pve/qemu/500", {
+			purge: 1,
+			"destroy-unreferenced-disks": 1,
+		});
+		expect(paths).toEqual([
+			"GET /api2/json/cluster/resources?type=vm",
+			"DELETE /api2/json/nodes/pve/qemu/500?purge=1&destroy-unreferenced-disks=1",
+		]);
+	});
+
+	it("retries lock timeouts and counts the retries", async () => {
+		let n = 0;
+		const url = await serve((_req, _b, res) => {
+			n++;
+			if (n < 3)
+				json(
+					res,
+					500,
+					{ data: null },
+					"can't lock file '/var/lock/qemu-server/lock-500.conf' - got timeout",
+				);
+			else json(res, 200, { data: 1 });
+		});
+		const a = api(url);
+		expect(await a.put("/nodes/pve/qemu/500/config", { cores: 2 })).toBe(1);
+		expect(n).toBe(3);
+		expect(a.retryCount).toBe(2);
+	});
+
+	it("throws PveApiError with the message and parameter errors", async () => {
+		const url = await serve((_req, _b, res) =>
+			json(res, 400, {
+				data: null,
+				message: "Parameter verification failed.",
+				errors: { smbios1: "too long" },
+			}),
+		);
+		const err = await api(url)
+			.post("/nodes/pve/qemu", {})
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(PveApiError);
+		expect((err as PveApiError).status).toBe(400);
+		expect((err as PveApiError).errors).toEqual({ smbios1: "too long" });
+		expect((err as PveApiError).message).toMatch(
+			/Parameter verification failed/,
+		);
+	});
+
+	it("verifies the certificate against the CA and the configured name", async () => {
+		const url = await serve(
+			(_req, _b, res) => json(res, 200, { data: 1 }),
+			otherPki,
+		);
+		await expect(api(url, otherPki.ca).get("/version")).rejects.toThrow(
+			/pve|altnames|hostname/i,
+		);
+	});
+
+	it("parses responses with raw control characters inside strings", async () => {
+		const url = await serve((_req, _b, res) => {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end('{"data":{"out-data":"a\tb\u0001c\n"}}');
+		});
+		expect(await api(url).get("/x")).toEqual({ "out-data": "a\tb\u0001c\n" });
+	});
+
+	it("treats a task that ended with warnings as successful", async () => {
+		const url = await serve((_req, _b, res) =>
+			json(res, 200, {
+				data: { status: "stopped", exitstatus: "WARNINGS: 1" },
+			}),
+		);
+		await api(url).waitTask("pve", "UPID:w", { pollMs: 1 });
+	});
+
+	it("does not repeat a POST after a connection error, but repeats a GET", async () => {
+		const counts: Record<string, number> = {};
+		const url = await serve((req, _b, res) => {
+			const m = req.method ?? "";
+			counts[m] = (counts[m] ?? 0) + 1;
+			if (counts[m] === 1) req.socket.destroy();
+			else json(res, 200, { data: "ok" });
+		});
+		await expect(
+			api(url).post("/nodes/pve/qemu", { vmid: 1 }),
+		).rejects.toThrow();
+		expect(counts.POST).toBe(1);
+		expect(await api(url).get("/version")).toBe("ok");
+		expect(counts.GET).toBe(2);
+	});
+
+	it("waitTask polls until stopped and reports failures", async () => {
+		const states = [
+			{ status: "running" },
+			{ status: "stopped", exitstatus: "OK" },
+		];
+		const url = await serve((req, _b, res) => {
+			if (req.url?.includes("UPID%3Aok"))
+				json(res, 200, { data: states.shift() });
+			else
+				json(res, 200, {
+					data: { status: "stopped", exitstatus: "unable to create VM 500" },
+				});
+		});
+		await api(url).waitTask("pve", "UPID:ok", { pollMs: 1 });
+		const err = await api(url)
+			.waitTask("pve", "UPID:bad", { pollMs: 1 })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(PveTaskError);
+		expect((err as Error).message).toMatch(/unable to create VM 500/);
+	});
+});
