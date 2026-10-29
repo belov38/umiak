@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { dbOf, schema, withTx } from "../src/index.ts";
+import { createPool, dbOf, schema, withTx } from "../src/index.ts";
 import {
 	createTestDatabase,
 	skipPg,
@@ -78,5 +78,20 @@ describe.skipIf(skipPg())("withTx", () => {
 		expect(row?.sandboxId).toBe(sb);
 		expect(row?.fromState).toBe("creating");
 		expect(row?.createdAt).toBeInstanceOf(Date);
+	});
+});
+
+describe("createPool", () => {
+	it("reports idle client errors to onError and never crashes without it", async () => {
+		const seen: string[] = [];
+		const pool = createPool("postgres://u:p@127.0.0.1:1/x", 1, {
+			onError: (e) => seen.push(e.message),
+		});
+		pool.emit("error", new Error("connection reset"));
+		expect(seen).toEqual(["connection reset"]);
+		const quiet = createPool("postgres://u:p@127.0.0.1:1/x", 1);
+		expect(() => quiet.emit("error", new Error("x"))).not.toThrow();
+		await pool.end();
+		await quiet.end();
 	});
 });

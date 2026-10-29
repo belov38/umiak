@@ -477,7 +477,7 @@ describe("machine-events (§10.2)", () => {
 			machineState: "booting",
 		});
 		await synthetic(w, fork.machineId, "identity_changed");
-		expect(w.metrics.count("sbx_unexpected_identity_change")).toBe(0);
+		expect(w.metrics.count("sbx_unexpected_identity_change_total")).toBe(0);
 
 		const provisionedFork = await linkedSandbox(w, {
 			origin: "snapshot",
@@ -486,7 +486,7 @@ describe("machine-events (§10.2)", () => {
 		await synthetic(w, provisionedFork.machineId, "identity_changed");
 		const plain = await linkedSandbox(w);
 		await synthetic(w, plain.machineId, "identity_changed");
-		expect(w.metrics.count("sbx_unexpected_identity_change")).toBe(2);
+		expect(w.metrics.count("sbx_unexpected_identity_change_total")).toBe(2);
 	});
 
 	it("agent_restarted is only logged; disconnected changes nothing", async () => {

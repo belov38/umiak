@@ -64,6 +64,8 @@ describe("QUEUES (S6 §15.1)", () => {
 			"ctl-idp-sync",
 		] as const) {
 			expect(QUEUES[q].policy).toBe("exclusive");
+			// A pod that dies mid-run must not block the queue until expiry.
+			expect(QUEUES[q].heartbeatSeconds).toBe(30);
 		}
 	});
 });

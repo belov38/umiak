@@ -10,4 +10,11 @@ export {
 	readMigrations,
 } from "./migrate.ts";
 export * from "./schema/index.ts";
-export { createPool, type Db, dbOf, type Tx, withTx } from "./tx.ts";
+export {
+	type CreatePoolOptions,
+	createPool,
+	type Db,
+	dbOf,
+	type Tx,
+	withTx,
+} from "./tx.ts";

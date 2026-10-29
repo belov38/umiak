@@ -4,7 +4,10 @@ import type { AddressInfo } from "node:net";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { UnavailableAgentPort } from "../src/adapters/agent-unavailable.ts";
-import { HttpGatewayPort } from "../src/adapters/gateway-http.ts";
+import {
+	HttpGatewayPort,
+	UnconfiguredGatewayPort,
+} from "../src/adapters/gateway-http.ts";
 import {
 	AgentUnavailable,
 	GatewayRejected,
@@ -210,5 +213,16 @@ describe("UnavailableAgentPort", () => {
 			expect(err).toBeInstanceOf(AgentUnavailable);
 			expect(isRetryable(err)).toBe(true);
 		}
+	});
+});
+
+describe("UnconfiguredGatewayPort", () => {
+	it("every rotation is a transient gateway_unavailable", async () => {
+		const err = await new UnconfiguredGatewayPort()
+			.rotateToken(randomUUID())
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(GatewayUnavailable);
+		expect(isRetryable(err)).toBe(true);
+		expect(String((err as Error).message)).toMatch(/not configured/);
 	});
 });

@@ -433,7 +433,7 @@ async function onIdentityChanged(
 		s.ctx.log.info({ machineId: m.id }, "identity changed (expected)");
 		return;
 	}
-	s.ctx.metrics.inc("sbx_unexpected_identity_change");
+	s.ctx.metrics.inc("sbx_unexpected_identity_change_total");
 	s.ctx.log.warn(
 		{ machineId: m.id, epoch: e.epoch, origin: m.origin },
 		"unexpected identity change",

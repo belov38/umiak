@@ -48,7 +48,10 @@ const OPERATION_RETRIES = {
  */
 export const DELETE_RETRY_LIMIT = 1_000_000;
 
-const CONTROLLER = { policy: "exclusive" } as const;
+// Controllers: the heartbeat gives the run of a dead pod back after ~30 s;
+// without it the exclusive queue (and its cron) would be blocked until the
+// job expires (15 min).
+const CONTROLLER = { policy: "exclusive", heartbeatSeconds: 30 } as const;
 
 export const QUEUES = {
 	// Key: sandboxId, data {operationId}.

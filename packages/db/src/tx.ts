@@ -10,12 +10,22 @@ export interface Tx {
 	client: pg.PoolClient;
 }
 
-export function createPool(url: string, max = 20): pg.Pool {
+export interface CreatePoolOptions {
+	/** Called for errors of idle clients (a dropped connection); default: ignored. */
+	onError?: (err: Error) => void;
+}
+
+export function createPool(
+	url: string,
+	max = 20,
+	opts: CreatePoolOptions = {},
+): pg.Pool {
 	const pool = new pg.Pool({ connectionString: url, max });
 	// An idle client that loses its connection emits 'error' on the pool; without
 	// a listener that crashes the process. The pool drops the client itself and
 	// the next query gets a fresh connection or fails visibly.
-	pool.on("error", () => {});
+	const onError = opts.onError;
+	pool.on("error", (err) => onError?.(err));
 	return pool;
 }
 

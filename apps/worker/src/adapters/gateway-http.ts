@@ -99,3 +99,17 @@ export class HttpGatewayPort implements GatewayPort {
 		);
 	}
 }
+
+/**
+ * GatewayPort when the worker has no service token
+ * (`SBX_GATEWAY_SERVICE_TOKEN_FILE` unset): every rotation is the transient
+ * `GatewayUnavailable`, so a create waits in retries until the deadline
+ * instead of failing at once.
+ */
+export class UnconfiguredGatewayPort implements GatewayPort {
+	async rotateToken(machineId: string): Promise<void> {
+		throw new GatewayUnavailable(
+			`gateway not configured (SBX_GATEWAY_SERVICE_TOKEN_FILE unset); cannot rotate the token of machine ${machineId}`,
+		);
+	}
+}
