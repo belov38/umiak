@@ -1,0 +1,194 @@
+package gateway
+
+import (
+	"errors"
+	"io"
+	"net/http"
+	"net/textproto"
+	"net/url"
+	"strings"
+
+	"connectrpc.com/connect"
+
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+)
+
+// copyBufSize is the read size of the streaming proxy; every read is
+// written and flushed at once, nothing is buffered beyond it.
+const copyBufSize = 32 << 10
+
+// hopHeaders are the hop-by-hop headers (RFC 9110 7.6.1) never forwarded.
+var hopHeaders = []string{
+	"Connection",
+	"Keep-Alive",
+	"Proxy-Connection",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te",
+	"Trailer",
+	"Transfer-Encoding",
+	"Upgrade",
+}
+
+// copyHeader copies src into dst without the hop-by-hop headers and the
+// headers named in Connection.
+func copyHeader(dst, src http.Header) {
+	for k, vv := range src {
+		dst[k] = append([]string(nil), vv...)
+	}
+	for _, v := range src["Connection"] {
+		for f := range strings.SplitSeq(v, ",") {
+			if f = textproto.TrimString(f); f != "" {
+				dst.Del(f)
+			}
+		}
+	}
+	for _, k := range hopHeaders {
+		dst.Del(k)
+	}
+}
+
+// wantsTrailers reports whether the request carries "TE: trailers".
+func wantsTrailers(h http.Header) bool {
+	for _, v := range h["Te"] {
+		for f := range strings.SplitSeq(v, ",") {
+			f, _, _ = strings.Cut(f, ";")
+			if strings.EqualFold(textproto.TrimString(f), "trailers") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// upstreamHeader builds the headers sent to the agent: the client's
+// headers without hop-by-hop ones, Authorization, Expect and any
+// client-sent Sbx-Caller; Sbx-Caller is set to the authenticated caller.
+func upstreamHeader(r *http.Request) http.Header {
+	h := make(http.Header, len(r.Header)+1)
+	copyHeader(h, r.Header)
+	if wantsTrailers(r.Header) {
+		h.Set("Te", "trailers")
+	}
+	h.Del("Authorization")
+	h.Del("Expect")
+	h.Del(wire.HeaderCaller)
+	h.Set(wire.HeaderCaller, callerOf(r.Context()))
+	return h
+}
+
+// isConnectStream reports whether a content type is a Connect streaming one.
+func isConnectStream(ct string) bool { return strings.HasPrefix(ct, "application/connect+") }
+
+// proxy forwards r to the agent of machine id: path is the upstream path
+// (rpc), or escPath the escaped upstream path (files). The request body is
+// streamed as is, the response is copied with a flush after every read.
+func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path, escPath string, f errFormat) {
+	u := &url.URL{Scheme: "http", Host: agentHost, Path: path, RawQuery: r.URL.RawQuery}
+	if escPath != "" {
+		p, err := url.PathUnescape(escPath)
+		if err != nil {
+			h.writeRequestError(w, f, connect.CodeInvalidArgument, "malformed path")
+			return
+		}
+		u.Path, u.RawPath = p, escPath
+	}
+	s := h.target(w, r, id, f)
+	if s == nil {
+		return
+	}
+	out, err := http.NewRequestWithContext(r.Context(), r.Method, u.String(), nil)
+	if err != nil {
+		h.writeRequestError(w, f, connect.CodeInvalidArgument, "malformed request")
+		return
+	}
+	out.URL = u
+	out.Host = agentHost
+	out.Header = upstreamHeader(r)
+	out.Body, out.ContentLength = r.Body, r.ContentLength
+	if r.ContentLength == 0 {
+		out.Body = http.NoBody
+	}
+
+	rc := http.NewResponseController(w)
+	// HTTP/1.1 callers stream the request body while the response flows.
+	_ = rc.EnableFullDuplex()
+
+	resp, err := s.mc.RoundTrip(out)
+	if err != nil {
+		if r.Context().Err() != nil {
+			return // the caller went away
+		}
+		s.log.Debug("gateway: proxied request failed before the response", "err", err, "path", u.Path)
+		// The session may have moved or closed meanwhile: route again.
+		h.notServed(w, r, id, f)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	hdr := w.Header()
+	copyHeader(hdr, resp.Header)
+	declared := make(map[string]bool, len(resp.Trailer))
+	for k := range resp.Trailer {
+		hdr.Add("Trailer", k)
+		declared[k] = true
+	}
+	w.WriteHeader(resp.StatusCode)
+	_ = rc.Flush()
+
+	ct := resp.Header.Get("Content-Type")
+	if err := h.copyBody(w, rc, resp.Body, isConnectStream(ct)); err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
+		h.abortBody(w, rc, r, id, ct, err)
+		return
+	}
+	for k, vv := range resp.Trailer {
+		if declared[k] {
+			hdr[k] = vv
+		} else {
+			hdr[http.TrailerPrefix+k] = vv
+		}
+	}
+}
+
+// copyBody copies the upstream body with a flush after every read. It
+// returns nil at the upstream EOF and when the caller went away, and the
+// upstream read error otherwise. For Connect streams it tracks envelope
+// boundaries in tr so abortBody can end the stream cleanly.
+func (h *internalHandler) copyBody(w http.ResponseWriter, rc *http.ResponseController, src io.Reader, connectStream bool) error {
+	var tr *envelopeTracker
+	if connectStream {
+		tr = &envelopeTracker{}
+	}
+	buf := make([]byte, copyBufSize)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			if tr != nil {
+				tr.feed(buf[:n])
+			}
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return nil // the caller went away; its context ends the upstream call
+			}
+			_ = rc.Flush()
+		}
+		switch {
+		case err == nil:
+		case errors.Is(err, io.EOF):
+			return nil
+		default:
+			return &upstreamError{err: err, tr: tr}
+		}
+	}
+}
+
+// upstreamError is an upstream body failure after the response started.
+type upstreamError struct {
+	err error
+	tr  *envelopeTracker // nil when the body is not a Connect stream
+}
+
+func (e *upstreamError) Error() string { return e.err.Error() }
+func (e *upstreamError) Unwrap() error { return e.err }

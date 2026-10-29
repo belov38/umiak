@@ -36,6 +36,9 @@ const (
 	HeaderCaller      = "Sbx-Caller"
 	HeaderErrorCode   = "Sbx-Error-Code"
 	HeaderInstanceURL = "Sbx-Instance-Url"
+	// HeaderTCPDrainDeadline carries the drain deadline in milliseconds of a
+	// peer CONNECT stream on the gateway internal listener (additive, S4).
+	HeaderTCPDrainDeadline = "Sbx-Tcp-Drain-Deadline-Ms"
 )
 
 // Authorization header schemes.
