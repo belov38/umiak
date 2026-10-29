@@ -109,6 +109,10 @@ func (e *DialError) Error() string {
 
 // MovedError reports that the machine is connected to another gateway
 // instance (a remote /tcp/ request was answered with 421).
+//
+// InstanceURL is a hint taken from a response, not a trusted route: callers
+// must check it against the registry (registry.Store.InstanceByURL, or a fresh
+// Owner lookup) before sending a service token or other credentials there.
 type MovedError struct{ InstanceURL string }
 
 func (e *MovedError) Error() string {

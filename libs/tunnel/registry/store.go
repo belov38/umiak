@@ -409,6 +409,28 @@ func (s *Store) Instance(ctx context.Context, id string) (Instance, error) {
 	return i, err
 }
 
+// InstanceByURL returns the live gateway instance whose internal URL is
+// internalURL (compared ignoring a trailing slash): heartbeat newer than
+// staleAfter, the freshest one when an old row shares the URL. A caller that
+// got an instance URL from a response (a 421 Sbx-Instance-Url, a
+// transport.MovedError) checks it here before sending a service token there.
+func (s *Store) InstanceByURL(ctx context.Context, internalURL string, staleAfter time.Duration) (Instance, bool, error) {
+	var i Instance
+	err := s.pool.QueryRow(ctx, `SELECT id, internal_url, state, started_at, heartbeat_at, drain_started_at
+		FROM tunnel.gateway_instances
+		WHERE rtrim(internal_url, '/') = rtrim($1, '/')
+		  AND heartbeat_at > now() - $2::float8 * interval '1 second'
+		ORDER BY heartbeat_at DESC LIMIT 1`, internalURL, staleAfter.Seconds()).
+		Scan(&i.ID, &i.InternalURL, &i.State, &i.StartedAt, &i.HeartbeatAt, &i.DrainStartedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Instance{}, false, nil
+	}
+	if err != nil {
+		return Instance{}, false, err
+	}
+	return i, true, nil
+}
+
 // DeleteInstance removes a gateway instance row. Deleting a missing row is not an error.
 func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM tunnel.gateway_instances WHERE id = $1`, id)

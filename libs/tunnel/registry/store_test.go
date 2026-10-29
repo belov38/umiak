@@ -368,6 +368,47 @@ func TestOwnerIgnoresStaleInstance(t *testing.T) {
 	}
 }
 
+func TestInstanceByURL(t *testing.T) {
+	s, pool := setup(t)
+	ctx := context.Background()
+	if err := s.RegisterInstance(ctx, "gw-1", "http://10.0.0.1:8080"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RegisterInstance(ctx, "gw-2", "http://10.0.0.2:8080/"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ url, id string }{
+		{"http://10.0.0.1:8080", "gw-1"},
+		{"http://10.0.0.1:8080/", "gw-1"},
+		{"http://10.0.0.2:8080", "gw-2"},
+	} {
+		i, ok, err := s.InstanceByURL(ctx, tc.url, 15*time.Second)
+		if err != nil || !ok || i.ID != tc.id {
+			t.Fatalf("InstanceByURL(%s) = %+v, %v, %v; want %s", tc.url, i, ok, err, tc.id)
+		}
+	}
+	for _, u := range []string{"http://10.0.0.1:808", "http://10.0.0.1:8080/x", "http://evil:9999", "", "%"} {
+		if i, ok, err := s.InstanceByURL(ctx, u, 15*time.Second); err != nil || ok {
+			t.Fatalf("InstanceByURL(%q) = %+v, %v, %v; want not found", u, i, ok, err)
+		}
+	}
+
+	// A stale instance is not live; a fresh one with the same URL (a pod
+	// restarted on the same IP) is.
+	if _, err := pool.Exec(ctx, `UPDATE tunnel.gateway_instances SET heartbeat_at = now() - interval '20 seconds'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.InstanceByURL(ctx, "http://10.0.0.1:8080", 15*time.Second); err != nil || ok {
+		t.Fatalf("stale instance: ok=%v err=%v; want not found", ok, err)
+	}
+	if err := s.RegisterInstance(ctx, "gw-1b", "http://10.0.0.1:8080"); err != nil {
+		t.Fatal(err)
+	}
+	if i, ok, err := s.InstanceByURL(ctx, "http://10.0.0.1:8080", 15*time.Second); err != nil || !ok || i.ID != "gw-1b" {
+		t.Fatalf("restarted instance: %+v, %v, %v; want gw-1b", i, ok, err)
+	}
+}
+
 func TestSweepStale(t *testing.T) {
 	s, pool := setup(t)
 	ctx := context.Background()

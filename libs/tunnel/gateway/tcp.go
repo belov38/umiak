@@ -223,6 +223,10 @@ func NewPeerTransport() *http.Transport {
 // Errors: 421 → *transport.MovedError with the owner's URL; 429 →
 // ErrTooManyStreams; any other non-200 → *transport.DialError. The returned
 // conn supports CloseWrite; deadlines are not supported.
+//
+// serviceToken is sent to instanceURL: it must come from the registry. A
+// MovedError's InstanceURL must be validated (registry.Store.InstanceByURL
+// or a fresh Owner lookup) before it is passed back in here.
 func DialRemoteTCP(ctx context.Context, rt http.RoundTripper, instanceURL, serviceToken, machineID string, port uint16, opts TCPOptions) (net.Conn, error) {
 	base, err := url.Parse(instanceURL)
 	if err != nil || base.Host == "" {
