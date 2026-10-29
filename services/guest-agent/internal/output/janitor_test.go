@@ -169,7 +169,7 @@ func TestJanitorTotalTrimsRunningAfterExited(t *testing.T) {
 	if err := e.j.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, held := e.held(t, "running", "stdout"); held > 50*kib+4095 || held == 100*kib {
+	if _, held := e.held(t, "running", "stdout"); held < 50*kib || held > 50*kib+4095 {
 		t.Fatalf("running held %d, want trimmed to about 50 KiB", held)
 	}
 }
@@ -285,6 +285,48 @@ func TestJanitorRecordRetention(t *testing.T) {
 	}
 	if _, err := os.Stat(e.layout.CommandDir("fresh-exited")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestJanitorRecordZeroEndedAtNotExpired(t *testing.T) {
+	e := newJanitorEnv(t)
+	e.add(t, "no-end-time", true, time.Time{}, map[string]int{"stdout": kib})
+
+	if err := e.j.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.removed) != 0 {
+		t.Fatalf("removed = %v, want none", e.removed)
+	}
+	if _, err := os.Stat(e.layout.CommandDir("no-end-time")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJanitorRefusesUnsafeIDs(t *testing.T) {
+	e := newJanitorEnv(t)
+	e.j.MaxRecords = 1
+	old := testNow.Add(-30 * 24 * time.Hour)
+	e.add(t, "keep", false, time.Time{}, map[string]int{"stdout": kib})
+	for _, id := range []string{"", ".", "..", "../escape", "a/b"} {
+		e.cmds = append(e.cmds, output.JanitorCommand{ID: id, Exited: true, EndedAt: old})
+	}
+	outside := filepath.Join(filepath.Dir(e.layout.CommandsDir), "escape")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := e.j.RunOnce(context.Background())
+	if err == nil {
+		t.Fatal("RunOnce returned nil, want an error for invalid ids")
+	}
+	if len(e.removed) != 0 {
+		t.Fatalf("RemoveRecord called for %v", e.removed)
+	}
+	for _, p := range []string{e.layout.CommandDir("keep"), outside} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%s was removed: %v", p, err)
+		}
 	}
 }
 

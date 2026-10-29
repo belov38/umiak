@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -266,7 +267,7 @@ func (j *Janitor) removeRecords(ctx context.Context, cmds []JanitorCommand) ([]J
 
 	doomed := map[string]bool{}
 	for _, c := range cmds {
-		if c.Exited && now.Sub(c.EndedAt) > ttl {
+		if c.Exited && !c.EndedAt.IsZero() && now.Sub(c.EndedAt) > ttl {
 			doomed[c.ID] = true
 		}
 	}
@@ -291,6 +292,11 @@ func (j *Janitor) removeRecords(ctx context.Context, cmds []JanitorCommand) ([]J
 			continue
 		}
 		if ctx.Err() != nil {
+			kept = append(kept, c)
+			continue
+		}
+		if !validCommandID(c.ID) {
+			errs = append(errs, fmt.Errorf("output: refusing to remove record with invalid id %q", c.ID))
 			kept = append(kept, c)
 			continue
 		}
@@ -361,4 +367,10 @@ func orDefault[T int64 | time.Duration](v, def T) T {
 		return def
 	}
 	return v
+}
+
+// validCommandID reports whether id is a plain directory name, so that
+// CommandDir(id) can never be the commands directory itself or leave it.
+func validCommandID(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, `/\`) && !strings.ContainsRune(id, 0)
 }
