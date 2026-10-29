@@ -3,6 +3,7 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -1139,5 +1140,41 @@ func TestControlDoesNotFollowRedirects(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // the session's own Info and Subscribe
 	if n := redirected.Load(); n != 0 {
 		t.Errorf("%d gateway calls followed the agent's redirect", n)
+	}
+}
+
+// The proxy is transparent to content coding: no Accept-Encoding is added
+// towards the agent, and a gzip body reaches the caller as sent.
+func TestProxyKeepsContentEncoding(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	_, _ = zw.Write(bytes.Repeat([]byte("compressible "), 1000))
+	_ = zw.Close()
+	stub := newStubAgent()
+	cfg := agentConfig(e, id, bs, defaultIdentity())
+	cfg.Handler = stub.handlerWith(func(mux *http.ServeMux) {
+		mux.HandleFunc("GET /files/gz", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(gz.Bytes())
+		})
+	})
+	e.startAgent(cfg).waitConnected()
+	waitMachine(t, gw.testGW, id)
+	tr := NewPeerTransport()
+	tr.DisableCompression = true
+	t.Cleanup(tr.CloseIdleConnections)
+	c := &http.Client{Transport: bearerRT{rt: tr, token: apiToken1}}
+
+	resp, body := do(t, c, http.MethodGet, gw.machineURL(id)+"/files/gz", "", nil)
+	if got := stub.header("/files/gz").Values("Accept-Encoding"); len(got) != 0 {
+		t.Errorf("agent saw Accept-Encoding %q, the caller sent none", got)
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Encoding") != "gzip" || !bytes.Equal(body, gz.Bytes()) {
+		t.Errorf("caller got status %d, Content-Encoding %q, %d bytes; want 200 gzip %d identical bytes",
+			resp.StatusCode, resp.Header.Get("Content-Encoding"), len(body), gz.Len())
 	}
 }

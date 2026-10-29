@@ -137,6 +137,9 @@ func NewClientConn(ctx context.Context, conn net.Conn, cfg ClientConfig) (*http.
 	var once sync.Once
 	tr := &http.Transport{
 		Protocols: &p,
+		// Transparent proxying: no Accept-Encoding is added and no body is
+		// decompressed, so bytes, sizes and ETags stay the agent's.
+		DisableCompression: true,
 		HTTP2: &http.HTTP2Config{
 			MaxReceiveBufferPerStream:     cfg.StreamWindow,
 			MaxReceiveBufferPerConnection: cfg.ConnWindow,

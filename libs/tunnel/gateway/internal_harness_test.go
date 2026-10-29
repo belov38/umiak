@@ -184,8 +184,14 @@ func newStubAgent() *stubAgent {
 	return &stubAgent{headers: map[string]http.Header{}, attachOpen: make(chan struct{}, 16)}
 }
 
-func (s *stubAgent) handler() http.Handler {
+func (s *stubAgent) handler() http.Handler { return s.handlerWith(nil) }
+
+// handlerWith is handler with extra routes added by more.
+func (s *stubAgent) handlerWith(more func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
+	if more != nil {
+		more(mux)
+	}
 	path, h := testingv1connect.NewProcessHandler(s)
 	mux.Handle(path, h)
 	mux.HandleFunc("GET /files", func(w http.ResponseWriter, r *http.Request) {
