@@ -28,6 +28,7 @@ import {
 	parseAgentFileInfo,
 } from "../src/index.ts";
 import { FakeAgent } from "../src/testing/index.ts";
+import { tarEntry, tarOf } from "./helpers/files.ts";
 
 const fake = new FakeAgent();
 afterAll(() => fake.close());
@@ -1077,34 +1078,6 @@ describe("files archive", () => {
 		expect((await agentHttpError(res)).code).toBe("not_directory");
 	});
 
-	// A minimal ustar writer for hostile archives.
-	function tarEntry(
-		name: string,
-		type: string,
-		body = "",
-		linkname = "",
-		mode = 0o644,
-	): Buffer {
-		const h = Buffer.alloc(512);
-		h.write(name, 0, 100);
-		h.write(`${mode.toString(8).padStart(7, "0")}\0`, 100);
-		h.write("0000000\0", 108);
-		h.write("0000000\0", 116);
-		h.write(`${Buffer.byteLength(body).toString(8).padStart(11, "0")}\0`, 124);
-		h.write("00000000000\0", 136);
-		h.write("        ", 148);
-		h.write(type, 156);
-		h.write(linkname, 157, 100);
-		h.write("ustar\u000000", 257);
-		let sum = 0;
-		for (const b of h) sum += b;
-		h.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
-		const data = Buffer.alloc(Math.ceil(Buffer.byteLength(body) / 512) * 512);
-		data.write(body);
-		return Buffer.concat([h, data]);
-	}
-	const tarOf = (...entries: Buffer[]) =>
-		new Uint8Array(Buffer.concat([...entries, Buffer.alloc(1024)]));
 	const gzip = (b: Uint8Array) => new Uint8Array(gzipSync(b));
 
 	const hostile: [string, Uint8Array<ArrayBuffer>][] = [

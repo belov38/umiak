@@ -28,6 +28,7 @@ import { registerSecuritySchemes } from "./openapi/registry.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
 import { registerCommandRoutes } from "./routes/commands.ts";
 import { registerEnvRoutes } from "./routes/env.ts";
+import { registerFileRoutes } from "./routes/files.ts";
 import { registerLimitsRoutes } from "./routes/limits.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerMetaRoutes } from "./routes/meta.ts";
@@ -75,6 +76,7 @@ export function mountV1(app: ApiApp, deps: ApiDeps): void {
 	registerOperationRoutes(app, deps);
 	registerCommandRoutes(app, deps);
 	registerPtyRoutes(app, deps);
+	registerFileRoutes(app, deps);
 	registerCatalogRoutes(app, deps);
 	registerLimitsRoutes(app, deps);
 }

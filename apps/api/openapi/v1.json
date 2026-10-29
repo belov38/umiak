@@ -2,6 +2,64 @@
 	"components": {
 		"parameters": {},
 		"schemas": {
+			"ArchiveResult": {
+				"properties": {
+					"entries": {
+						"minimum": 0,
+						"type": "integer"
+					},
+					"path": {
+						"description": "The directory unpacked into",
+						"type": "string"
+					},
+					"sizeBytes": {
+						"description": "Bytes of regular file data written",
+						"minimum": 0,
+						"type": "integer"
+					}
+				},
+				"required": [
+					"path",
+					"entries",
+					"sizeBytes"
+				],
+				"type": "object"
+			},
+			"ChmodRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"group": {
+						"maxLength": 64,
+						"minLength": 1,
+						"type": "string"
+					},
+					"mode": {
+						"maximum": 4095,
+						"minimum": 0,
+						"type": "integer"
+					},
+					"owner": {
+						"maxLength": 64,
+						"minLength": 1,
+						"type": "string"
+					},
+					"path": {
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"example": "src/app.py",
+						"maxLength": 4096,
+						"minLength": 1,
+						"type": "string"
+					},
+					"recursive": {
+						"description": "Apply to the directory's contents too (default false)",
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"path"
+				],
+				"type": "object"
+			},
 			"Command": {
 				"description": "A process started in a sandbox (S7 §9.6)",
 				"properties": {
@@ -607,6 +665,47 @@
 				],
 				"type": "object"
 			},
+			"CommitUploadRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"makeParents": {
+						"description": "Create missing parent directories (default true)",
+						"type": "boolean"
+					},
+					"mode": {
+						"description": "File mode (default 420 = 0644)",
+						"maximum": 4095,
+						"minimum": 0,
+						"type": "integer"
+					},
+					"overwrite": {
+						"description": "Replace an existing file (default true)",
+						"type": "boolean"
+					},
+					"owner": {
+						"description": "Owner of the file (default `user`)",
+						"maxLength": 64,
+						"minLength": 1,
+						"type": "string"
+					},
+					"path": {
+						"description": "Destination of the file. Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"example": "src/app.py",
+						"maxLength": 4096,
+						"minLength": 1,
+						"type": "string"
+					},
+					"sha256": {
+						"description": "Hex SHA-256 of the whole file; a mismatch is 422 checksum_mismatch and drops the upload",
+						"pattern": "^[0-9a-fA-F]{64}$",
+						"type": "string"
+					}
+				},
+				"required": [
+					"path"
+				],
+				"type": "object"
+			},
 			"CreatePtyRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -760,6 +859,22 @@
 				},
 				"type": "object"
 			},
+			"CreateUploadRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"path": {
+						"description": "Destination of the file. Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"example": "src/app.py",
+						"maxLength": 4096,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"path"
+				],
+				"type": "object"
+			},
 			"EnvPatchRequest": {
 				"additionalProperties": false,
 				"description": "Merge by key: a value sets the key, null deletes it; files by name",
@@ -878,6 +993,111 @@
 						"type": "integer"
 					}
 				},
+				"type": "object"
+			},
+			"FileInfo": {
+				"description": "A file, directory or symlink",
+				"properties": {
+					"gid": {
+						"type": "integer"
+					},
+					"group": {
+						"type": "string"
+					},
+					"mode": {
+						"description": "Permission bits (0o7777 mask) as a number: 420 = 0644",
+						"type": "integer"
+					},
+					"modifiedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"name": {
+						"description": "Last path component",
+						"type": "string"
+					},
+					"owner": {
+						"type": "string"
+					},
+					"path": {
+						"description": "Absolute path in the sandbox",
+						"type": "string"
+					},
+					"sizeBytes": {
+						"minimum": 0,
+						"type": "integer"
+					},
+					"symlinkTarget": {
+						"description": "Target of a symlink; null for other types",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"type": {
+						"enum": [
+							"file",
+							"dir",
+							"symlink",
+							"other"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"uid": {
+						"type": "integer"
+					}
+				},
+				"required": [
+					"path",
+					"name",
+					"type",
+					"sizeBytes",
+					"mode",
+					"owner",
+					"group",
+					"uid",
+					"gid",
+					"modifiedAt",
+					"symlinkTarget"
+				],
+				"type": "object"
+			},
+			"FileList": {
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/FileInfo"
+						},
+						"type": "array"
+					},
+					"nextCursor": {
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"data",
+					"nextCursor"
+				],
+				"type": "object"
+			},
+			"FileRemoveResult": {
+				"properties": {
+					"existed": {
+						"description": "false: there was nothing at the path (still a success)",
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"existed"
+				],
 				"type": "object"
 			},
 			"ForkSandboxRequest": {
@@ -1114,6 +1334,32 @@
 					"canCreate",
 					"templates",
 					"rateLimits"
+				],
+				"type": "object"
+			},
+			"MakeDirRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"mode": {
+						"description": "Directory mode (default 493 = 0755)",
+						"maximum": 4095,
+						"minimum": 0,
+						"type": "integer"
+					},
+					"parents": {
+						"description": "Create missing parents too (default false)",
+						"type": "boolean"
+					},
+					"path": {
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"example": "src/app.py",
+						"maxLength": 4096,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"path"
 				],
 				"type": "object"
 			},
@@ -1383,6 +1629,34 @@
 					"ssh",
 					"minCliVersion",
 					"latestCliVersion"
+				],
+				"type": "object"
+			},
+			"MoveRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"from": {
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"example": "src/app.py",
+						"maxLength": 4096,
+						"minLength": 1,
+						"type": "string"
+					},
+					"overwrite": {
+						"description": "Replace an existing destination (default false)",
+						"type": "boolean"
+					},
+					"to": {
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"example": "src/app.py",
+						"maxLength": 4096,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"from",
+					"to"
 				],
 				"type": "object"
 			},
@@ -2440,6 +2714,49 @@
 						]
 					}
 				},
+				"type": "object"
+			},
+			"Upload": {
+				"properties": {
+					"chunkSizeBytes": {
+						"description": "Recommended chunk size (4 MiB)",
+						"example": 4194304,
+						"type": "integer"
+					},
+					"expiresAt": {
+						"description": "The partial upload is dropped after 24 h without activity",
+						"format": "date-time",
+						"type": "string"
+					},
+					"maxChunkSizeBytes": {
+						"description": "Largest accepted chunk (8 MiB); larger is 413",
+						"example": 8388608,
+						"type": "integer"
+					},
+					"uploadId": {
+						"example": "upl_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					}
+				},
+				"required": [
+					"uploadId",
+					"chunkSizeBytes",
+					"maxChunkSizeBytes",
+					"expiresAt"
+				],
+				"type": "object"
+			},
+			"UploadOffset": {
+				"properties": {
+					"offset": {
+						"description": "Bytes received so far: the offset of the next chunk",
+						"minimum": 0,
+						"type": "integer"
+					}
+				},
+				"required": [
+					"offset"
+				],
 				"type": "object"
 			}
 		},
@@ -4401,6 +4718,1836 @@
 				"summary": "Extend the TTL",
 				"tags": [
 					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files": {
+			"delete": {
+				"description": "Removes a file, symlink or directory (a non-empty directory needs recursive=true, else 409 invalid_state). A missing path is a success with existed: false.",
+				"operationId": "files.delete",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Remove a directory with its contents (default false); symlinks are not followed",
+						"in": "query",
+						"name": "recursive",
+						"required": false,
+						"schema": {
+							"description": "Remove a directory with its contents (default false); symlinks are not followed",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileRemoveResult"
+								}
+							}
+						},
+						"description": "Removed (or nothing was there)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state` (not empty), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Delete a path",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/archive": {
+			"get": {
+				"description": "The directory `path` as one tar stream (POSIX pax; `format=tar.gz` gzips it); names are relative to `path`, symlinks are stored as symlinks, sockets, FIFOs and devices are skipped. No Range and no resume: an error mid-stream cuts the response without the tar end blocks, so the client sees an incomplete archive. Not a directory is 409 not_directory.",
+				"operationId": "files.downloadArchive",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "The directory. Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "The directory. Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "tar (POSIX pax, default) or tar.gz",
+						"in": "query",
+						"name": "format",
+						"required": false,
+						"schema": {
+							"description": "tar (POSIX pax, default) or tar.gz",
+							"enum": [
+								"tar",
+								"tar.gz"
+							],
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/gzip": {
+								"schema": {
+									"format": "binary",
+									"type": "string"
+								}
+							},
+							"application/x-tar": {
+								"schema": {
+									"format": "binary",
+									"type": "string"
+								}
+							}
+						},
+						"description": "The archive",
+						"headers": {
+							"Content-Disposition": {
+								"description": "`attachment; filename*=UTF-8''<name>`",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"X-Content-Type-Options": {
+								"schema": {
+									"enum": [
+										"nosniff"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_directory`, `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Download a directory as tar",
+				"tags": [
+					"files"
+				]
+			},
+			"put": {
+				"description": "Unpacks the streamed body (tar, or tar.gz with format=tar.gz) into the directory `path`. Owner is `user`; uid/gid of the archive are ignored, setuid/setgid dropped. Limits: 200 000 entries, 16 GiB of data, 4 096-byte paths, else 413. Absolute paths, `..`, hard links out of the archive, devices and FIFOs, and writing through a symlink (from the archive or already on disk) are 400 invalid_path. Not atomic: on an error what was written stays (details.entriesWritten); unpack into a new directory and move it for atomicity. Not resumable: repeat the whole archive (safe with overwrite=true).",
+				"operationId": "files.uploadArchive",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "The directory. Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "The directory. Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "tar (POSIX pax, default) or tar.gz",
+						"in": "query",
+						"name": "format",
+						"required": false,
+						"schema": {
+							"description": "tar (POSIX pax, default) or tar.gz",
+							"enum": [
+								"tar",
+								"tar.gz"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"description": "Replace existing files (default true); false: 409 already_exists",
+						"in": "query",
+						"name": "overwrite",
+						"required": false,
+						"schema": {
+							"description": "Replace existing files (default true); false: 409 already_exists",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"description": "Create the directory and its parents (default true)",
+						"in": "query",
+						"name": "makeParents",
+						"required": false,
+						"schema": {
+							"description": "Create the directory and its parents (default true)",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/octet-stream": {
+							"schema": {
+								"format": "binary",
+								"type": "string"
+							}
+						}
+					},
+					"description": "The archive",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ArchiveResult"
+								}
+							}
+						},
+						"description": "Unpacked"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_path` (details.entriesWritten) or `validation` (not a tar stream)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_directory`, `already_exists` (overwrite=false), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`payload_too_large`: an unpack limit"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Unpack a tar into a directory",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/chmod": {
+			"post": {
+				"description": "Sets the mode and/or owner and group of a path (recursively when `recursive`; symlinks inside are not followed).",
+				"operationId": "files.chmod",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ChmodRequest"
+							}
+						}
+					},
+					"description": "What to change",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileInfo"
+								}
+							}
+						},
+						"description": "The path"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Change mode or owner",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/content": {
+			"get": {
+				"description": "The bytes of a file, streamed from the sandbox. One `Range` (`bytes=a-b`, `a-`, `-n`; several ranges give the whole file with 200) and `If-Range` (ETag or date); ETag, Last-Modified, Accept-Ranges. Always `application/octet-stream` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. A directory is 409 is_directory. In the browser (dashboard origin) `?team=` may replace the Sbx-Team header.",
+				"operationId": "files.download",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/octet-stream": {
+								"schema": {
+									"format": "binary",
+									"type": "string"
+								}
+							}
+						},
+						"description": "The file",
+						"headers": {
+							"Accept-Ranges": {
+								"schema": {
+									"enum": [
+										"bytes"
+									],
+									"type": "string"
+								}
+							},
+							"Content-Disposition": {
+								"description": "`attachment; filename*=UTF-8''<name>`",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"Content-Length": {
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"ETag": {
+								"description": "Strong validator for If-Range",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"Last-Modified": {
+								"schema": {
+									"type": "string"
+								}
+							},
+							"X-Content-Type-Options": {
+								"schema": {
+									"enum": [
+										"nosniff"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"206": {
+						"content": {
+							"application/octet-stream": {
+								"schema": {
+									"format": "binary",
+									"type": "string"
+								}
+							}
+						},
+						"description": "The requested range",
+						"headers": {
+							"Accept-Ranges": {
+								"schema": {
+									"enum": [
+										"bytes"
+									],
+									"type": "string"
+								}
+							},
+							"Content-Disposition": {
+								"description": "`attachment; filename*=UTF-8''<name>`",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"Content-Length": {
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Content-Range": {
+								"description": "`bytes a-b/size`",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"ETag": {
+								"description": "Strong validator for If-Range",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"Last-Modified": {
+								"schema": {
+									"type": "string"
+								}
+							},
+							"X-Content-Type-Options": {
+								"schema": {
+									"enum": [
+										"nosniff"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`is_directory`, `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"416": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`range_not_satisfiable` (the header `Content-Range: bytes */<size>`)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Download a file",
+				"tags": [
+					"files"
+				]
+			},
+			"head": {
+				"description": "The headers of GET .../files/content (size in Content-Length, ETag, Last-Modified) without the body. Errors have no body either: see the status.",
+				"operationId": "files.downloadHead",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The file exists",
+						"headers": {
+							"Accept-Ranges": {
+								"schema": {
+									"enum": [
+										"bytes"
+									],
+									"type": "string"
+								}
+							},
+							"Content-Disposition": {
+								"description": "`attachment; filename*=UTF-8''<name>`",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"Content-Length": {
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"ETag": {
+								"description": "Strong validator for If-Range",
+								"schema": {
+									"type": "string"
+								}
+							},
+							"Last-Modified": {
+								"schema": {
+									"type": "string"
+								}
+							},
+							"X-Content-Type-Options": {
+								"schema": {
+									"enum": [
+										"nosniff"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such sandbox or path"
+					},
+					"409": {
+						"description": "A directory, or the sandbox is not ready"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "File headers",
+				"tags": [
+					"files"
+				]
+			},
+			"put": {
+				"description": "Writes the request body (any size and content type, streamed) to `path` atomically: a temporary file in the same directory, then rename. Not resumable: a broken request writes nothing and is repeated whole (the same body gives the same result). For files over 64 MiB use the resumable upload (POST .../files/uploads).",
+				"operationId": "files.write",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Octal mode of the file (default 644)",
+						"in": "query",
+						"name": "mode",
+						"required": false,
+						"schema": {
+							"description": "Octal mode of the file (default 644)",
+							"example": "0755",
+							"pattern": "^0?[0-7]{3,4}$",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Create missing parent directories (default true)",
+						"in": "query",
+						"name": "makeParents",
+						"required": false,
+						"schema": {
+							"description": "Create missing parent directories (default true)",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"description": "Replace an existing file (default true); false: 409 already_exists",
+						"in": "query",
+						"name": "overwrite",
+						"required": false,
+						"schema": {
+							"description": "Replace an existing file (default true); false: 409 already_exists",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/octet-stream": {
+							"schema": {
+								"format": "binary",
+								"type": "string"
+							}
+						}
+					},
+					"description": "The file content",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileInfo"
+								}
+							}
+						},
+						"description": "The written file"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` or `path_not_found` (a missing parent with makeParents=false)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`is_directory`, `already_exists` (overwrite=false), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"507": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`no_space` in the sandbox"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Write a file",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/list": {
+			"get": {
+				"description": "Entries under `path` (down to `depth` levels), ordered by path; symlinks are listed as symlinks and not followed. Pages of `limit` (default 50, at most 200); pass nextCursor as `cursor` with the same path. A file is 409 not_directory.",
+				"operationId": "files.list",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Levels below path, 1-8 (default 1)",
+						"in": "query",
+						"name": "depth",
+						"required": false,
+						"schema": {
+							"description": "Levels below path, 1-8 (default 1)",
+							"maximum": 8,
+							"minimum": 1,
+							"type": "integer"
+						}
+					},
+					{
+						"description": "Include dot files (default true)",
+						"in": "query",
+						"name": "includeHidden",
+						"required": false,
+						"schema": {
+							"description": "Include dot files (default true)",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"description": "Page size, 1-200 (default 50)",
+						"in": "query",
+						"name": "limit",
+						"required": false,
+						"schema": {
+							"description": "Page size, 1-200 (default 50)",
+							"maximum": 200,
+							"minimum": 1,
+							"type": "integer"
+						}
+					},
+					{
+						"description": "`nextCursor` of the previous page, unchanged",
+						"in": "query",
+						"name": "cursor",
+						"required": false,
+						"schema": {
+							"description": "`nextCursor` of the previous page, unchanged",
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileList"
+								}
+							}
+						},
+						"description": "A page of entries"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation` or `invalid_cursor`"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_directory`, `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List a directory",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/mkdir": {
+			"post": {
+				"description": "Creates a directory (with missing parents when `parents` is true). 201 when created, 200 when the directory already existed; another file there is 409 already_exists.",
+				"operationId": "files.mkdir",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/MakeDirRequest"
+							}
+						}
+					},
+					"description": "The directory",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileInfo"
+								}
+							}
+						},
+						"description": "The directory already existed"
+					},
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileInfo"
+								}
+							}
+						},
+						"description": "Created"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`already_exists`, `not_directory`, `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Create a directory",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/move": {
+			"post": {
+				"description": "Renames `from` to `to`. An existing destination is 409 already_exists unless overwrite is true. Across filesystems files are copied; directories are 409 cross_device.",
+				"operationId": "files.move",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/MoveRequest"
+							}
+						}
+					},
+					"description": "Source and destination",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileInfo"
+								}
+							}
+						},
+						"description": "The destination"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`already_exists`, `cross_device`, `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Move or rename",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/stat": {
+			"get": {
+				"description": "FileInfo of a path; follows symlinks unless noFollow=true. A missing path is 404 path_not_found.",
+				"operationId": "files.stat",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+						"in": "query",
+						"name": "path",
+						"required": true,
+						"schema": {
+							"description": "Absolute, or relative to the home directory of `user` (`~` and `~/...` too)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "true: describe a symlink itself (default false)",
+						"in": "query",
+						"name": "noFollow",
+						"required": false,
+						"schema": {
+							"description": "true: describe a symlink itself (default false)",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileInfo"
+								}
+							}
+						},
+						"description": "The path"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` (no such sandbox) or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Describe a path",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/uploads": {
+			"post": {
+				"description": "Starts a resumable upload of a large file. Nothing is stored by the api; the partial file lives in the sandbox and is dropped after 24 h without activity. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"operationId": "files.createUpload",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateUploadRequest"
+							}
+						}
+					},
+					"description": "Destination of the file",
+					"required": true
+				},
+				"responses": {
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Upload"
+								}
+							}
+						},
+						"description": "The upload"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Start a resumable upload",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/uploads/{upload}": {
+			"delete": {
+				"description": "Drops a partial upload. An unknown upload is 404 upload_not_found.",
+				"operationId": "files.deleteUpload",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Upload id (`upl_...`) from POST .../files/uploads",
+						"in": "path",
+						"name": "upload",
+						"required": true,
+						"schema": {
+							"description": "Upload id (`upl_...`) from POST .../files/uploads",
+							"example": "upl_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Cancelled"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` or `upload_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Cancel an upload",
+				"tags": [
+					"files"
+				]
+			},
+			"head": {
+				"description": "Sbx-Upload-Offset: the bytes received so far, where the next chunk starts. 404 when the upload does not exist (expired, cancelled, committed with a bad checksum, or no chunk yet). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"operationId": "files.uploadOffset",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Upload id (`upl_...`) from POST .../files/uploads",
+						"in": "path",
+						"name": "upload",
+						"required": true,
+						"schema": {
+							"description": "Upload id (`upl_...`) from POST .../files/uploads",
+							"example": "upl_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The upload exists",
+						"headers": {
+							"Sbx-Upload-Offset": {
+								"description": "Bytes received so far",
+								"schema": {
+									"type": "integer"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such sandbox or upload"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Offset of an upload",
+				"tags": [
+					"files"
+				]
+			},
+			"put": {
+				"description": "Appends the body (up to 8 MiB, any content type) at `offset`. Send the destination as `path` too: it tells the sandbox where to keep the partial file. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"operationId": "files.putChunk",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Upload id (`upl_...`) from POST .../files/uploads",
+						"in": "path",
+						"name": "upload",
+						"required": true,
+						"schema": {
+							"description": "Upload id (`upl_...`) from POST .../files/uploads",
+							"example": "upl_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Must equal the bytes received so far (HEAD gives it)",
+						"in": "query",
+						"name": "offset",
+						"required": false,
+						"schema": {
+							"description": "Must equal the bytes received so far (HEAD gives it)",
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"description": "The destination from POST (a hint where the agent keeps the partial file)",
+						"in": "query",
+						"name": "path",
+						"required": false,
+						"schema": {
+							"description": "The destination from POST (a hint where the agent keeps the partial file)",
+							"example": "src/app.py",
+							"maxLength": 4096,
+							"minLength": 1,
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/octet-stream": {
+							"schema": {
+								"format": "binary",
+								"type": "string"
+							}
+						}
+					},
+					"description": "Bytes of the chunk",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/UploadOffset"
+								}
+							}
+						},
+						"description": "Bytes received so far",
+						"headers": {
+							"Sbx-Upload-Offset": {
+								"description": "Bytes received so far",
+								"schema": {
+									"type": "integer"
+								}
+							}
+						}
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found` or `upload_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`upload_offset_mismatch` (details.offset, header Sbx-Upload-Offset), `invalid_state` (already committed), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"413": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`payload_too_large`: the chunk is over 8 MiB"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Upload a chunk",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/files/uploads/{upload}/commit": {
+			"post": {
+				"description": "Moves the uploaded bytes to `path`. Idempotent by upload id: a repeat returns the same FileInfo (24 h). A `sha256` that does not match is 422 checksum_mismatch and the upload is dropped (start over). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"operationId": "files.commitUpload",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Upload id (`upl_...`) from POST .../files/uploads",
+						"in": "path",
+						"name": "upload",
+						"required": true,
+						"schema": {
+							"description": "Upload id (`upl_...`) from POST .../files/uploads",
+							"example": "upl_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+						"in": "query",
+						"name": "user",
+						"required": false,
+						"schema": {
+							"description": "Guest user whose home relative paths start from and who owns new files (default `user`)",
+							"maxLength": 64,
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CommitUploadRequest"
+							}
+						}
+					},
+					"description": "Destination and checks",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FileInfo"
+								}
+							}
+						},
+						"description": "The file"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`, `upload_not_found` or `path_not_found`"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`is_directory`, `already_exists`, `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`checksum_mismatch`: the upload was dropped"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Finish an upload",
+				"tags": [
+					"files"
 				]
 			}
 		},
