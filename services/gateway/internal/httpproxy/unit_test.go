@@ -42,7 +42,8 @@ func TestClientIP(t *testing.T) {
 		{"all trusted takes left-most", "10.0.0.1:80", []string{"10.9.9.9, 10.1.1.1"}, trusted, "10.9.9.9"},
 		{"trusted peer without xff", "10.0.0.1:80", nil, trusted, "10.0.0.1"},
 		{"malformed xff falls back", "10.0.0.1:80", []string{"6.6.6.6, not-an-ip"}, trusted, "10.0.0.1"},
-		{"empty xff element falls back", "10.0.0.1:80", []string{"6.6.6.6,,10.1.1.1"}, trusted, "10.0.0.1"},
+		{"malformed entry: last trusted hop", "10.0.0.1:80", []string{"6.6.6.6,,10.1.1.1"}, trusted, "10.1.1.1"},
+		{"malformed entry left of the client", "10.0.0.1:80", []string{"garbage, 198.51.100.7, 10.1.1.1"}, trusted, "198.51.100.7"},
 		{"ipv6 remote", "[2001:db8::1]:443", nil, nil, "2001:db8::1"},
 		{"ipv4-mapped remote is unmapped", "[::ffff:203.0.113.9]:443", nil, nil, "203.0.113.9"},
 		{"trusted v6 peer", "[fd00::1]:80", []string{"2001:db8::7"}, trusted, "2001:db8::7"},
@@ -77,7 +78,9 @@ func TestForwardedFor(t *testing.T) {
 		{"trusted chain kept from the client on", "10.0.0.1:1", []string{"6.6.6.6, 198.51.100.7, 10.1.1.1"}, trusted, "198.51.100.7, 10.1.1.1, 10.0.0.1"},
 		{"all trusted keeps everything", "10.0.0.1:1", []string{"10.9.9.9, 10.1.1.1"}, trusted, "10.9.9.9, 10.1.1.1, 10.0.0.1"},
 		{"trusted peer without xff", "10.0.0.1:1", nil, trusted, "10.0.0.1"},
-		{"malformed chain is dropped", "10.0.0.1:1", []string{"x, 10.1.1.1"}, trusted, "10.0.0.1"},
+		{"malformed entry: chain from the last trusted hop", "10.0.0.1:1", []string{"x, 10.1.1.1"}, trusted, "10.1.1.1, 10.0.0.1"},
+		{"malformed entry left of the client", "10.0.0.1:1", []string{"x, 198.51.100.7, 10.1.1.1"}, trusted, "198.51.100.7, 10.1.1.1, 10.0.0.1"},
+		{"malformed right-most entry", "10.0.0.1:1", []string{"198.51.100.7, x"}, trusted, "10.0.0.1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -144,11 +147,21 @@ func TestStripRequestHeaders(t *testing.T) {
 		"X-Forwarded-Email", "X-Forwarded-User", "X-Forwarded-Groups",
 		"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", "X-Real-Ip",
 		"X-Forwarded-Port", "X-Request-Id",
+		"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
+		"True-Client-Ip", "X-Client-Ip", "Client-Ip", "Cf-Connecting-Ip", "X-Original-Forwarded-For",
 	}
 	for _, k := range drop {
 		h.Set(k, "v")
 	}
 	h["sbx-lower"] = []string{"v"} // a non-canonical key
+	// Underscore spellings: CGI-style servers map them to the same variable.
+	for _, k := range []string{
+		"X_Sbx_User_Email", "Sbx_Foo", "X_Forwarded_For", "X_Forwarded_Email", "X_Real_Ip",
+		"X_Auth_Request_Email", "X_forwarded_host", "X_Forwarded_Proto", "X_Forwarded_Port",
+		"True_Client_Ip", "Cf_Connecting_Ip", "X_Original_Forwarded_For", "X_Request_Id",
+	} {
+		h[k] = []string{"v"}
+	}
 	keep := []string{"Authorization", "X-Sbxish", "Sbxfoo", "X-Forwarded-Prefix", "Cookie"}
 	for _, k := range keep {
 		h.Set(k, "v")
@@ -183,6 +196,9 @@ func TestCleanResponseHeader(t *testing.T) {
 	h.Add("Set-Cookie", "__HOST-SBX_STATE=z")
 	h.Add("Set-Cookie", "keep=1; Path=/")
 	h.Add("Set-Cookie", "__Host-sbx_authx=2")
+	h.Add("Set-Cookie", "=__Host-sbx_auth=v; Path=/")
+	h.Add("Set-Cookie", "= __host-SBX_STATE_x=1")
+	h.Add("Set-Cookie", "=other")
 	h.Set("Sbx-Error", "fake")
 	h.Set("Sbx-Instance-Url", "http://x")
 	h["sbx-lower"] = []string{"1"}
@@ -190,7 +206,7 @@ func TestCleanResponseHeader(t *testing.T) {
 	h.Set("X-Sbx-App", "1")
 	h.Set("X-Request-Id", "app")
 	cleanResponseHeader(h)
-	if got := h.Values("Set-Cookie"); len(got) != 2 || got[0] != "keep=1; Path=/" || got[1] != "__Host-sbx_authx=2" {
+	if got := h.Values("Set-Cookie"); len(got) != 3 || got[0] != "keep=1; Path=/" || got[1] != "__Host-sbx_authx=2" || got[2] != "=other" {
 		t.Fatalf("Set-Cookie = %q", got)
 	}
 	for _, k := range []string{"Sbx-Error", "Sbx-Instance-Url", "sbx-lower", "Alt-Svc", "X-Request-Id"} {
@@ -274,5 +290,33 @@ func TestStreamTracker(t *testing.T) {
 	doneC()
 	if st.Count() != 0 {
 		t.Fatalf("Count = %d, want 0", st.Count())
+	}
+}
+
+func TestDropUpgrade(t *testing.T) {
+	cases := []struct {
+		conn []string
+		want []string
+	}{
+		{[]string{"Upgrade"}, nil},
+		{[]string{"keep-alive, Upgrade"}, []string{"keep-alive"}},
+		{[]string{"upgrade", "X-Hop, close"}, []string{"X-Hop, close"}},
+		{nil, nil},
+	}
+	for _, c := range cases {
+		h := http.Header{"Upgrade": {"h2c"}}
+		if c.conn != nil {
+			h["Connection"] = c.conn
+		}
+		if !hasUpgrade(h) {
+			t.Errorf("hasUpgrade(%v) = false", h)
+		}
+		dropUpgrade(h)
+		if h.Get("Upgrade") != "" || hasUpgrade(h) {
+			t.Errorf("Upgrade kept: %v", h)
+		}
+		if got := h.Values("Connection"); strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("Connection %q -> %q, want %q", c.conn, got, c.want)
+		}
 	}
 }

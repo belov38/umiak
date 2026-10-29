@@ -3,25 +3,26 @@ package httpproxy
 import (
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
 // ClientIP returns the address of the client of r. It is the peer of the
-// connection (RemoteAddr), unless that peer is a trusted proxy: then it is
-// the right-most X-Forwarded-For entry that is not trusted, or the left-most
-// one when every entry is trusted (spec 5.2, 7.4). A malformed
-// X-Forwarded-For is ignored and the peer is the client. IPv4-mapped
-// addresses are unmapped. An unparsable RemoteAddr gives the zero Addr.
+// connection (RemoteAddr), unless that peer is a trusted proxy: then the
+// X-Forwarded-For entries are walked right to left (see xffTail) and the
+// client is the right-most untrusted entry, the left-most one when every
+// entry is trusted, or the last trusted hop before a malformed entry.
+// IPv4-mapped addresses are unmapped. An unparsable RemoteAddr gives the
+// zero Addr.
 func ClientIP(r *http.Request, trusted []netip.Prefix) netip.Addr {
 	peer := remoteIP(r.RemoteAddr)
 	if !peer.IsValid() || !isTrusted(peer, trusted) {
 		return peer
 	}
-	chain, ok := xffChain(r.Header)
-	if !ok || len(chain) == 0 {
-		return peer
+	if tail := xffTail(r.Header, trusted); len(tail) > 0 {
+		return tail[0]
 	}
-	return chain[clientIndex(chain, trusted)]
+	return peer
 }
 
 // forwardedFor returns the X-Forwarded-For value sent to the application.
@@ -38,12 +39,8 @@ func forwardedFor(r *http.Request, trusted []netip.Prefix) string {
 	if !isTrusted(peer, trusted) {
 		return peer.String()
 	}
-	chain, ok := xffChain(r.Header)
-	if !ok || len(chain) == 0 {
-		return peer.String()
-	}
 	var b strings.Builder
-	for _, a := range chain[clientIndex(chain, trusted):] {
+	for _, a := range xffTail(r.Header, trusted) {
 		b.WriteString(a.String())
 		b.WriteString(", ")
 	}
@@ -92,15 +89,6 @@ func isTokenChar(c rune) bool {
 	return strings.ContainsRune("!#$%&'*+-.^_`|~", c)
 }
 
-func clientIndex(chain []netip.Addr, trusted []netip.Prefix) int {
-	for i := len(chain) - 1; i >= 0; i-- {
-		if !isTrusted(chain[i], trusted) {
-			return i
-		}
-	}
-	return 0
-}
-
 func isTrusted(a netip.Addr, trusted []netip.Prefix) bool {
 	a = a.WithZone("")
 	for _, p := range trusted {
@@ -122,18 +110,29 @@ func remoteIP(s string) netip.Addr {
 	return netip.Addr{}
 }
 
-// xffChain parses every X-Forwarded-For line, left to right. ok is false
-// when any entry is not an address (with or without a port).
-func xffChain(h http.Header) ([]netip.Addr, bool) {
-	var chain []netip.Addr
+// xffTail walks the X-Forwarded-For entries (all lines, left to right)
+// from the right, as seen by a trusted peer. Trusted valid entries are
+// collected and skipped; the first untrusted valid entry is the client and
+// ends the walk; a malformed entry also ends it, and the client is then the
+// last trusted hop collected (the proxy closest to the malformed value), or
+// the peer when there is none. It returns the entries from the client to
+// the right end, so tail[0] is the client; empty means the peer is.
+func xffTail(h http.Header, trusted []netip.Prefix) []netip.Addr {
+	var parts []string
 	for _, line := range h.Values("X-Forwarded-For") {
-		for part := range strings.SplitSeq(line, ",") {
-			a := remoteIP(strings.TrimSpace(part))
-			if !a.IsValid() {
-				return nil, false
-			}
-			chain = append(chain, a)
+		parts = append(parts, strings.Split(line, ",")...)
+	}
+	var tail []netip.Addr
+	for i := len(parts) - 1; i >= 0; i-- {
+		a := remoteIP(strings.TrimSpace(parts[i]))
+		if !a.IsValid() {
+			break
+		}
+		tail = append(tail, a)
+		if !isTrusted(a, trusted) {
+			break
 		}
 	}
-	return chain, true
+	slices.Reverse(tail)
+	return tail
 }

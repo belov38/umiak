@@ -101,9 +101,12 @@ func (w *recorder) Header() http.Header { return w.rw.Header() }
 func (w *recorder) Unwrap() http.ResponseWriter { return w.rw }
 
 func (w *recorder) WriteHeader(code int) {
-	// Informational answers (100, 103) pass through; ReverseProxy sends them
-	// from the transport's goroutine, so they must not touch the fields.
+	// Informational answers (100, 103) pass through with the response
+	// policy applied: ReverseProxy copies their headers here unfiltered.
+	// It sends them from the transport's goroutine, so they must not touch
+	// the recorder's fields.
 	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		cleanResponseHeader(w.rw.Header())
 		w.rw.WriteHeader(code)
 		return
 	}

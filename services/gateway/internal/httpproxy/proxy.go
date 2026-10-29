@@ -160,8 +160,11 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 		return
 	}
 
+	// A preflight skips the access check (spec 8.5), but never one that asks
+	// for an upgrade: that would open a raw channel without authorization.
 	var auth portauth.Result
-	if rt.Access != accessPublic && !portauth.IsPreflight(r) {
+	preflight := portauth.IsPreflight(r) && !hasUpgrade(r.Header)
+	if rt.Access != accessPublic && !preflight {
 		auth = h.cfg.Auth.Check(x.w, r, l, rt, x.ip, x.rid)
 		x.authResult, x.userID = auth.AuthResult, auth.UserID
 		if !auth.Proceed {
@@ -169,13 +172,18 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 		}
 	}
 
+	// Only a WebSocket upgrade on GET is forwarded (spec 7.3). Any other
+	// upgrade (h2c, custom tokens) is dropped and the request proxied as a
+	// plain one, so a lenient app cannot be switched to another protocol.
 	if up := upgradeType(r.Header); up != "" {
-		if rt.AppProtocol == upstream.AppProtocolH2C {
-			// HTTP/2 has no Upgrade; ReverseProxy cannot bridge it.
-			x.fail(upstreamError())
-			return
-		}
-		if strings.EqualFold(up, "websocket") {
+		if !strings.EqualFold(up, "websocket") || r.Method != http.MethodGet {
+			dropUpgrade(r.Header)
+		} else {
+			if rt.AppProtocol == upstream.AppProtocolH2C {
+				// HTTP/2 has no Upgrade; ReverseProxy cannot bridge it.
+				x.fail(upstreamError())
+				return
+			}
 			x.upgrade = "websocket"
 		}
 	}

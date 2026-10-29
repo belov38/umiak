@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	// maxLogField caps client-controlled access log fields (host, userAgent).
+	// maxLogField caps client-controlled access log fields (host, method,
+	// path, userAgent).
 	maxLogField = 512
 	// maxRequestID is the longest client X-Request-Id kept (spec 7.4).
 	maxRequestID = 128
@@ -123,8 +124,8 @@ func (x *exchange) finish() {
 		ClientIP:   addrString(x.ip),
 		Host:       capField(x.r.Host),
 		Label:      x.label.Raw,
-		Method:     x.r.Method,
-		Path:       x.r.URL.Path,
+		Method:     capField(x.r.Method),
+		Path:       capField(x.r.URL.Path),
 		Status:     status,
 		SbxError:   x.w.sbxError,
 		BytesIn:    x.in.Load(),

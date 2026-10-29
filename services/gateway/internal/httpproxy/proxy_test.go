@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
+	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,21 +135,34 @@ func TestStripAll(t *testing.T) {
 		"X-Auth-Request-Email", "X-Auth-Request-User", "X-Auth-Request-Preferred-Username",
 		"X-Forwarded-Email", "X-Forwarded-User", "X-Forwarded-Groups",
 		"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", "X-Real-Ip",
+		// Hardening beyond spec 7.4.
+		"True-Client-Ip", "X-Client-Ip", "Client-Ip", "Cf-Connecting-Ip", "X-Original-Forwarded-For",
 	}
 	for _, k := range stripped {
 		req.Header.Set(k, "forged")
+	}
+	// Underscore spellings (CGI/WSGI/Rack map them to the same variable),
+	// including the headers the gateway sets itself.
+	for _, k := range []string{
+		"X_Sbx_User_Email", "Sbx_Foo", "X_Forwarded_For", "X_Forwarded_Email", "X_Real_Ip",
+		"X_Auth_Request_Email", "X_Forwarded_Host", "X_Forwarded_Proto", "X_Forwarded_Port",
+		"True_Client_Ip", "Cf_Connecting_Ip", "X_Request_Id",
+	} {
+		req.Header[k] = []string{"forged"}
 	}
 	cookies := `a=1; __Host-sbx_auth=forged; b="q w"; __host-SBX_STATE_abcdefgh=s; _oauth2_proxy=z; __Host-oauth2_proxy_1=z; __Secure-oauth2_proxy=z; c=3`
 	req.Header.Set("Cookie", cookies)
 	e, hdr := getEcho(t, f.c, req)
 
-	for k := range e.Header {
-		lk := strings.ToLower(k)
-		for _, s := range stripped {
-			if lk == strings.ToLower(s) {
-				t.Errorf("app saw %s: %q", k, e.Header.Values(k))
+	for k, vv := range e.Header {
+		for _, v := range vv {
+			if strings.Contains(v, "forged") {
+				t.Errorf("app saw %s: %q", k, v)
 			}
 		}
+	}
+	if got := e.Header.Get("X-Forwarded-For"); got != "127.0.0.1" {
+		t.Errorf("X-Forwarded-For = %q", got)
 	}
 	if got := e.Header.Values("Cookie"); len(got) != 1 || got[0] != `a=1; b="q w"; c=3` {
 		t.Errorf("app Cookie = %q", got)
@@ -181,6 +197,10 @@ func TestResponseStrip(t *testing.T) {
 		hd.Set("Alt-Svc", `h3=":443"`)
 		hd.Set("X-Robots-Tag", "all")
 		switch r.URL.Path {
+		case "/hints":
+			hd.Set("Link", "</app.css>; rel=preload")
+			w.WriteHeader(http.StatusEarlyHints)
+			_, _ = io.WriteString(w, "body")
 		case "/many":
 			_, _ = io.WriteString(w, "body")
 			for i := range 101 {
@@ -226,6 +246,44 @@ func TestResponseStrip(t *testing.T) {
 	if _, ok := resp.Trailer["Sbx-X"]; ok {
 		t.Errorf("trailer Sbx-X reached the client: %v", resp.Trailer)
 	}
+
+	t.Run("1xx", func(t *testing.T) {
+		var mu sync.Mutex
+		var hints []textproto.MIMEHeader
+		trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, h textproto.MIMEHeader) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if code == http.StatusEarlyHints {
+				hints = append(hints, h)
+			}
+			return nil
+		}}
+		req := newReq(t, http.MethodGet, host, "/hints", nil)
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+		resp := do(t, f.c, req)
+		defer func() { _ = resp.Body.Close() }()
+		_ = readBody(t, resp)
+		mu.Lock()
+		defer mu.Unlock()
+		if len(hints) != 1 {
+			t.Fatalf("got %d early hints", len(hints))
+		}
+		hh := http.Header(hints[0])
+		if hh.Get("Link") == "" {
+			t.Errorf("Link missing from the 103: %v", hh)
+		}
+		for _, k := range []string{"Sbx-Error", "Sbx-Instance-Url", "Alt-Svc", "Set-Cookie"} {
+			if k == "Set-Cookie" {
+				if got := hh.Values(k); len(got) != 1 || got[0] != "keep=1" {
+					t.Errorf("103 Set-Cookie = %q", got)
+				}
+				continue
+			}
+			if v := hh.Values(k); len(v) != 0 {
+				t.Errorf("103 %s = %q reached the client", k, v)
+			}
+		}
+	})
 
 	for _, path := range []string{"/many", "/big"} {
 		resp := do(t, f.c, newReq(t, http.MethodGet, host, path, nil))
@@ -545,5 +603,59 @@ func TestLargeUploadStreams(t *testing.T) {
 	}
 	if growth >= 64<<20 {
 		t.Fatalf("heap in use grew by %d MiB, want < 64 MiB", growth>>20)
+	}
+}
+
+func TestUpgradeFiltering(t *testing.T) {
+	f := newFixture(t, nil)
+	f.m.ServeHTTP(3000, echoApp())
+	public := testenv.Host(f.env.Route(f.m, 3000, nil).Label)
+	token := testenv.Host(f.env.Route(f.m, 3000, func(r *cpapi.Route) {
+		r.Access = "token"
+		r.TokenHash = tokenHash("t")
+	}).Label)
+
+	t.Run("preflight with upgrade is not exempt", func(t *testing.T) {
+		req := newReq(t, http.MethodOptions, token, "/ws", nil)
+		req.Header.Set("Origin", "https://other-5173.sbx.test")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		expectError(t, f.c, req, 401, "auth_required", -1)
+	})
+
+	noUpgrade := func(t *testing.T, e echoed) {
+		t.Helper()
+		if v := e.Header.Values("Upgrade"); len(v) != 0 {
+			t.Errorf("app saw Upgrade %q", v)
+		}
+		for _, v := range e.Header.Values("Connection") {
+			if strings.Contains(strings.ToLower(v), "upgrade") {
+				t.Errorf("app saw Connection %q", v)
+			}
+		}
+	}
+	rows := []struct {
+		name, method, upgrade string
+	}{
+		{"preflight websocket on a public route", http.MethodOptions, "websocket"},
+		{"h2c on GET", http.MethodGet, "h2c"},
+		{"custom token on GET", http.MethodGet, "x-tunnel"},
+		{"websocket on POST", http.MethodPost, "websocket"},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			req := newReq(t, row.method, public, "/up", nil)
+			req.Header.Set("Origin", "https://other-5173.sbx.test")
+			req.Header.Set("Access-Control-Request-Method", "GET")
+			req.Header.Set("Connection", "Upgrade, X-Hop")
+			req.Header.Set("Upgrade", row.upgrade)
+			req.Header.Set("HTTP2-Settings", "AAMAAABkAAQAAP__")
+			e, _ := getEcho(t, f.c, req)
+			if e.Method != row.method {
+				t.Fatalf("app saw %s", e.Method)
+			}
+			noUpgrade(t, e)
+		})
 	}
 }
