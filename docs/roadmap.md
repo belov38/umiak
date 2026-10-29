@@ -21,3 +21,5 @@
 | S13 | Git и приватные зависимости | Репозитории в environment, клон при claim, доступ к приватным репо (GitHub App: токен установки на sandbox с минимальными правами через credential helper агента; позже git-прокси в gateway без токена в VM), политика push, приватные registry (npm, pip, Docker) | S3, S6 | фаза 2, в MVP не реализуем |
 
 Порядок: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12. S13 перенесена в фазу 2.
+
+Фаза 2 (паритет с boat.dev, области S14–S30): `docs/roadmap-phase2.md`.
