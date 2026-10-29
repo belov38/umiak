@@ -53,6 +53,21 @@ export function jsonBody<T extends z.ZodType>(schema: T, description: string) {
 	} as const;
 }
 
+/**
+ * Optional JSON request body: absent is `{}`. A body still needs
+ * `Content-Type: application/json` (another type is 400 validation).
+ */
+export function optionalJsonBody<T extends z.ZodType>(
+	schema: T,
+	description: string,
+) {
+	return {
+		description,
+		required: false,
+		content: { [JSON_TYPE]: { schema } },
+	} as const;
+}
+
 /** An error response with a description of when it happens. */
 export function errorResponse(description: string) {
 	return jsonResponse(ErrorSchema, description);

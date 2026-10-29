@@ -1,6 +1,8 @@
 // Test helpers of the api, exported as `@sbx/api/testing` (also used by the
 // SDK and CLI tests that run the api in process).
-import { PgIdentityStore } from "@sbx/auth";
+import { type EnvironmentStore, PgIdentityStore } from "@sbx/auth";
+import { StaticConfigReader } from "@sbx/config";
+import type { SandboxService } from "@sbx/core";
 import type { Logger } from "pino";
 import { IdentityListener } from "../auth/identity-listener.ts";
 import { ServiceTokens } from "../auth/internal.ts";
@@ -12,6 +14,7 @@ import type { ApiDeps } from "../deps.ts";
 import { createApiLogger } from "../http/logger.ts";
 import { ApiMetrics } from "../http/metrics.ts";
 import { loadSettings, type Settings } from "../settings.ts";
+import { FakeAgent } from "./fake-agent.ts";
 import {
 	TEST_API_KEY,
 	TEST_TEAM_ID,
@@ -65,6 +68,36 @@ export function captureLogs(): CapturedLogs {
 }
 
 /**
+ * A SandboxService for tests that need none: every method rejects. Tests
+ * of the resource routes pass a real one (`apiWorld` in the api tests).
+ */
+export function unconfiguredService(): SandboxService {
+	return new Proxy({} as SandboxService, {
+		get(_t, name) {
+			if (typeof name !== "string" || name === "then") return undefined;
+			return () =>
+				Promise.reject(
+					new Error(`SandboxService.${name}: no service in these test deps`),
+				);
+		},
+	});
+}
+
+/** An EnvironmentStore without environments; writes throw. */
+export function emptyEnvironmentStore(): EnvironmentStore {
+	const refuse = () =>
+		Promise.reject(new Error("emptyEnvironmentStore: read only"));
+	return {
+		list: async () => [],
+		get: async () => null,
+		getDefault: async () => null,
+		create: refuse,
+		patch: refuse,
+		delete: refuse,
+	};
+}
+
+/**
  * Deps for tests: test settings, a silent logger, fresh metrics, no
  * database, no host keys. `over` replaces any field; the auth services are
  * built from the final settings, pool, identity and identityEvents:
@@ -72,7 +105,9 @@ export function captureLogs(): CapturedLogs {
  *   that knows `TEST_API_KEY` (all scopes, team `TEST_TEAM_ID`);
  * - identityEvents: without a notifier (never emits, ready);
  * - oidc: a verifier when the settings have SBX_OIDC_ISSUER;
- * - serviceTokens: none accepted.
+ * - serviceTokens: none accepted;
+ * - svc: `unconfiguredService()`, config: an empty StaticConfigReader,
+ *   environments: `emptyEnvironmentStore()`, agent: a FakeAgent.
  */
 export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 	const settings = over.settings ?? testSettings();
@@ -104,6 +139,10 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 		oidc: settings.oidc === null ? null : new OidcVerifier(settings.oidc),
 		serviceTokens: new ServiceTokens({}),
 		rateLimits: new RateLimits(settings.rate),
+		svc: unconfiguredService(),
+		config: StaticConfigReader.fromObject({}),
+		environments: emptyEnvironmentStore(),
+		agent: new FakeAgent(),
 		...over,
 	};
 }

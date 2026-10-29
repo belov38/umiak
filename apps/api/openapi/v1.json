@@ -2,6 +2,166 @@
 	"components": {
 		"parameters": {},
 		"schemas": {
+			"CreateSandboxRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"env": {
+						"$ref": "#/components/schemas/EnvVars"
+					},
+					"environment": {
+						"description": "Environment name or `env_...` (needs environments:read); absent: the team's default environment; null: none. Its sets are applied first, the request's sets on top",
+						"example": "base",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"excludeOwnerSecrets": {
+						"description": "Do not pass the creator's personal secrets into the sandbox (S8 §10)",
+						"type": "boolean"
+					},
+					"from": {
+						"additionalProperties": false,
+						"description": "Create from a saved snapshot of the team (needs snapshots:read)",
+						"properties": {
+							"snapshot": {
+								"example": "web-stack",
+								"type": "string"
+							}
+						},
+						"required": [
+							"snapshot"
+						],
+						"type": "object"
+					},
+					"idleTimeoutSeconds": {
+						"description": "Stop after this many idle seconds (at least 60); null disables idle-stop",
+						"minimum": 60,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"labels": {
+						"$ref": "#/components/schemas/Labels"
+					},
+					"name": {
+						"description": "Display name, up to 255 characters",
+						"example": "ci-run-42",
+						"maxLength": 255,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"secretFiles": {
+						"items": {
+							"$ref": "#/components/schemas/SecretFileInput"
+						},
+						"type": "array"
+					},
+					"secrets": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Secret variables: on tmpfs in the guest, never returned"
+							}
+						]
+					},
+					"size": {
+						"description": "Size slug; default: the template's default size",
+						"example": "2gb",
+						"type": "string"
+					},
+					"slug": {
+						"description": "3-40 characters `[a-z0-9]+(-[a-z0-9]+)*`, not ending in -<digits>; default: three random words",
+						"example": "my-box",
+						"type": "string"
+					},
+					"template": {
+						"description": "Template slug (GET /v1/templates); ignored with `from`",
+						"example": "linux",
+						"type": "string"
+					},
+					"ttlSeconds": {
+						"description": "Lifetime from ready in seconds; the deadline is ready + ttl; null: no TTL",
+						"exclusiveMinimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					}
+				},
+				"type": "object"
+			},
+			"EnvPatchRequest": {
+				"additionalProperties": false,
+				"description": "Merge by key: a value sets the key, null deletes it; files by name",
+				"properties": {
+					"env": {
+						"$ref": "#/components/schemas/EnvVarsPatch"
+					},
+					"secretFiles": {
+						"$ref": "#/components/schemas/SecretFilesPatch"
+					},
+					"secrets": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVarsPatch"
+							},
+							{
+								"description": "Secret variables (tmpfs in the guest); merged like env"
+							}
+						]
+					}
+				},
+				"type": "object"
+			},
+			"EnvReplaceRequest": {
+				"additionalProperties": false,
+				"description": "Each given set replaces its set whole; the others stay",
+				"properties": {
+					"env": {
+						"$ref": "#/components/schemas/EnvVars"
+					},
+					"secretFiles": {
+						"items": {
+							"$ref": "#/components/schemas/SecretFileInput"
+						},
+						"type": "array"
+					},
+					"secrets": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Secret variables (tmpfs in the guest)"
+							}
+						]
+					}
+				},
+				"type": "object"
+			},
+			"EnvVars": {
+				"additionalProperties": {
+					"type": "string"
+				},
+				"description": "Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a newline are not visible in SSH sessions.",
+				"type": "object"
+			},
+			"EnvVarsPatch": {
+				"additionalProperties": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"description": "Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a newline are not visible in SSH sessions. Merged by key: null deletes the key.",
+				"type": "object"
+			},
 			"Error": {
 				"description": "Error envelope of every non-2xx response (S7 §5.5)",
 				"properties": {
@@ -42,6 +202,254 @@
 				},
 				"required": [
 					"error"
+				],
+				"type": "object"
+			},
+			"ExtendSandboxRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"ttlSeconds": {
+						"description": "New deadline = now + ttlSeconds; default: the sandbox's TTL",
+						"exclusiveMinimum": 0,
+						"type": "integer"
+					}
+				},
+				"type": "object"
+			},
+			"ForkSandboxRequest": {
+				"additionalProperties": false,
+				"description": "Sets merge onto a copy of the source's sets; the source is not changed",
+				"properties": {
+					"env": {
+						"$ref": "#/components/schemas/EnvVarsPatch"
+					},
+					"idleTimeoutSeconds": {
+						"description": "Stop after this many idle seconds (at least 60); null disables idle-stop",
+						"minimum": 60,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"labels": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Labels"
+							},
+							{
+								"description": "Default: the source's labels"
+							}
+						]
+					},
+					"name": {
+						"description": "Display name, up to 255 characters",
+						"example": "ci-run-42",
+						"maxLength": 255,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"secretFiles": {
+						"$ref": "#/components/schemas/SecretFilesPatch"
+					},
+					"secrets": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVarsPatch"
+							},
+							{
+								"description": "Secret variables (tmpfs in the guest); merged like env"
+							}
+						]
+					},
+					"size": {
+						"description": "Default: the source's size",
+						"type": "string"
+					},
+					"slug": {
+						"description": "3-40 characters `[a-z0-9]+(-[a-z0-9]+)*`, not ending in -<digits>; default: three random words",
+						"example": "my-box",
+						"type": "string"
+					},
+					"ttlSeconds": {
+						"description": "Lifetime from ready in seconds; the deadline is ready + ttl; null: no TTL",
+						"exclusiveMinimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					}
+				},
+				"type": "object"
+			},
+			"Labels": {
+				"additionalProperties": {
+					"type": "string"
+				},
+				"description": "Free-form string labels: up to 64, keys up to 128 and values up to 256 characters",
+				"example": {
+					"session": "42"
+				},
+				"type": "object"
+			},
+			"Limits": {
+				"description": "Quota of the request's team and what it can create; node capacity is not promised",
+				"properties": {
+					"canCreate": {
+						"description": "A sandbox of at least one allowed size fits the quota now",
+						"type": "boolean"
+					},
+					"quota": {
+						"properties": {
+							"maxActiveSandboxes": {
+								"type": "integer"
+							},
+							"maxRamMb": {
+								"type": "integer"
+							},
+							"maxSavedSnapshots": {
+								"type": "integer"
+							}
+						},
+						"required": [
+							"maxActiveSandboxes",
+							"maxRamMb",
+							"maxSavedSnapshots"
+						],
+						"type": "object"
+					},
+					"rateLimits": {
+						"properties": {
+							"burst": {
+								"type": "integer"
+							},
+							"requestsPerSecond": {
+								"type": "integer"
+							},
+							"startsPerMinute": {
+								"description": "create, fork and resume per team",
+								"type": "integer"
+							}
+						},
+						"required": [
+							"requestsPerSecond",
+							"burst",
+							"startsPerMinute"
+						],
+						"type": "object"
+					},
+					"remaining": {
+						"properties": {
+							"activeSandboxes": {
+								"type": "integer"
+							},
+							"ramMb": {
+								"type": "integer"
+							},
+							"savedSnapshots": {
+								"type": "integer"
+							}
+						},
+						"required": [
+							"activeSandboxes",
+							"ramMb",
+							"savedSnapshots"
+						],
+						"type": "object"
+					},
+					"templates": {
+						"items": {
+							"properties": {
+								"defaultSize": {
+									"type": "string"
+								},
+								"enabled": {
+									"type": "boolean"
+								},
+								"sizes": {
+									"items": {
+										"properties": {
+											"allowed": {
+												"type": "boolean"
+											},
+											"memoryMb": {
+												"type": "integer"
+											},
+											"reason": {
+												"description": "Why the size is not allowed now",
+												"enum": [
+													"template_disabled",
+													"quota_active_sandboxes",
+													"quota_ram",
+													null
+												],
+												"type": [
+													"string",
+													"null"
+												],
+												"x-extensible-enum": true
+											},
+											"slug": {
+												"type": "string"
+											},
+											"vcpu": {
+												"type": "integer"
+											}
+										},
+										"required": [
+											"slug",
+											"vcpu",
+											"memoryMb",
+											"allowed",
+											"reason"
+										],
+										"type": "object"
+									},
+									"type": "array"
+								},
+								"slug": {
+									"type": "string"
+								}
+							},
+							"required": [
+								"slug",
+								"enabled",
+								"defaultSize",
+								"sizes"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
+					"usage": {
+						"description": "Counted like the quota: sandboxes and their RAM while creating, ready, starting or stopping; saved snapshots creating or ready",
+						"properties": {
+							"activeSandboxes": {
+								"type": "integer"
+							},
+							"ramMb": {
+								"type": "integer"
+							},
+							"savedSnapshots": {
+								"type": "integer"
+							}
+						},
+						"required": [
+							"activeSandboxes",
+							"ramMb",
+							"savedSnapshots"
+						],
+						"type": "object"
+					}
+				},
+				"required": [
+					"quota",
+					"usage",
+					"remaining",
+					"canCreate",
+					"templates",
+					"rateLimits"
 				],
 				"type": "object"
 			},
@@ -313,6 +721,918 @@
 					"latestCliVersion"
 				],
 				"type": "object"
+			},
+			"Operation": {
+				"description": "The running operation, or null",
+				"properties": {
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"error": {
+						"description": "Why the operation failed; null otherwise",
+						"properties": {
+							"code": {
+								"type": "string"
+							},
+							"message": {
+								"type": "string"
+							},
+							"retryable": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"code",
+							"message",
+							"retryable"
+						],
+						"type": [
+							"object",
+							"null"
+						]
+					},
+					"finishedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"id": {
+						"example": "op_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"kind": {
+						"enum": [
+							"create",
+							"fork",
+							"stop",
+							"resume",
+							"recover",
+							"delete",
+							"save_snapshot"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"sandboxId": {
+						"example": "sb_01jbx4q3m7f8r2t6v9w0y1z2a3",
+						"type": "string"
+					},
+					"startedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"state": {
+						"description": "pending and running are active; succeeded, failed and superseded are final",
+						"enum": [
+							"pending",
+							"running",
+							"succeeded",
+							"failed",
+							"superseded"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"step": {
+						"description": "Last completed step, for debugging; values may change",
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"id",
+					"sandboxId",
+					"kind",
+					"state",
+					"step",
+					"error",
+					"createdAt",
+					"startedAt",
+					"finishedAt"
+				],
+				"type": [
+					"object",
+					"null"
+				]
+			},
+			"ResumeSandboxRequest": {
+				"additionalProperties": false,
+				"description": "Sets merge onto the sandbox's own and are stored even if the resume fails",
+				"properties": {
+					"env": {
+						"$ref": "#/components/schemas/EnvVarsPatch"
+					},
+					"secretFiles": {
+						"$ref": "#/components/schemas/SecretFilesPatch"
+					},
+					"secrets": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVarsPatch"
+							},
+							{
+								"description": "Secret variables (tmpfs in the guest); merged like env"
+							}
+						]
+					},
+					"size": {
+						"description": "Another size allowed for the template",
+						"type": "string"
+					},
+					"ttlSeconds": {
+						"description": "Lifetime from ready in seconds; the deadline is ready + ttl; null: no TTL",
+						"exclusiveMinimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					}
+				},
+				"type": "object"
+			},
+			"Sandbox": {
+				"description": "A VM sandbox. Work with it while `state` is `ready`; deleted sandboxes stay readable for 30 days",
+				"properties": {
+					"activeOperation": {
+						"$ref": "#/components/schemas/Operation"
+					},
+					"activity": {
+						"enum": [
+							"busy",
+							"idle",
+							"unknown"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"createdBy": {
+						"description": "The person (`usr_...`); null when a team key created it",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"createdByKey": {
+						"description": "The team key (`key_...`) that created it, else null",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"deadlineAt": {
+						"description": "When the TTL deletes the sandbox; null without a TTL",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"degradedSince": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"deletedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"endpoints": {
+						"properties": {
+							"portUrlTemplate": {
+								"description": "URL of a published port; replace {port}",
+								"example": "https://quiet-otter-lamp-{port}.sbx.example.com",
+								"type": "string"
+							},
+							"ssh": {
+								"description": "SSH command (needs a certificate or a registered key)",
+								"example": "ssh quiet-otter-lamp@ssh.example.com",
+								"type": "string"
+							}
+						},
+						"required": [
+							"portUrlTemplate",
+							"ssh"
+						],
+						"type": "object"
+					},
+					"environment": {
+						"description": "Environment the sandbox was created from (S8 §10)",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"name": {
+								"type": "string"
+							},
+							"revision": {
+								"type": "integer"
+							}
+						},
+						"required": [
+							"id",
+							"name",
+							"revision"
+						],
+						"type": [
+							"object",
+							"null"
+						]
+					},
+					"error": {
+						"description": "Why the sandbox is in `error` (create_failed, resume_failed, machine_lost, ...)",
+						"properties": {
+							"code": {
+								"type": "string"
+							},
+							"message": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"code",
+							"message"
+						],
+						"type": [
+							"object",
+							"null"
+						]
+					},
+					"excludeOwnerSecrets": {
+						"type": "boolean"
+					},
+					"health": {
+						"description": "degraded: the agent is not reachable; calls wait up to 30 s and give 503 agent_unavailable",
+						"enum": [
+							"ok",
+							"degraded"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"healthReason": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"id": {
+						"example": "sb_01jbx4q3m7f8r2t6v9w0y1z2a3",
+						"type": "string"
+					},
+					"idleTimeoutSeconds": {
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"labels": {
+						"$ref": "#/components/schemas/Labels"
+					},
+					"lastActivityAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"memoryMb": {
+						"type": "integer"
+					},
+					"name": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"origin": {
+						"description": "What the sandbox was created from",
+						"properties": {
+							"kind": {
+								"enum": [
+									"template",
+									"snapshot",
+									"fork"
+								],
+								"type": "string",
+								"x-extensible-enum": true
+							},
+							"sandboxId": {
+								"description": "kind fork: the source sandbox `sb_...`",
+								"type": "string"
+							},
+							"snapshot": {
+								"description": "kind snapshot: name of the saved snapshot (null once it is deleted)",
+								"type": [
+									"string",
+									"null"
+								]
+							},
+							"snapshotId": {
+								"description": "kind snapshot: `snap_...`",
+								"type": "string"
+							}
+						},
+						"required": [
+							"kind"
+						],
+						"type": "object"
+					},
+					"readyAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"size": {
+						"example": "2gb",
+						"type": "string"
+					},
+					"slug": {
+						"description": "Name in port URLs, SSH and the guest hostname",
+						"example": "quiet-otter-lamp",
+						"type": "string"
+					},
+					"state": {
+						"$ref": "#/components/schemas/SandboxState"
+					},
+					"stopReason": {
+						"description": "Why the sandbox stopped",
+						"enum": [
+							"user",
+							"ttl",
+							"idle",
+							"unexpected_shutdown",
+							"retention",
+							null
+						],
+						"type": [
+							"string",
+							"null"
+						],
+						"x-extensible-enum": true
+					},
+					"stoppedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"teamId": {
+						"example": "team_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"template": {
+						"example": "linux",
+						"type": "string"
+					},
+					"templateVersion": {
+						"description": "Version of the template build the sandbox runs",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"ttlSeconds": {
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"updatedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"vcpu": {
+						"type": "integer"
+					}
+				},
+				"required": [
+					"id",
+					"slug",
+					"name",
+					"teamId",
+					"createdBy",
+					"createdByKey",
+					"template",
+					"templateVersion",
+					"size",
+					"vcpu",
+					"memoryMb",
+					"state",
+					"health",
+					"healthReason",
+					"degradedSince",
+					"activity",
+					"lastActivityAt",
+					"stopReason",
+					"error",
+					"origin",
+					"labels",
+					"ttlSeconds",
+					"deadlineAt",
+					"idleTimeoutSeconds",
+					"activeOperation",
+					"endpoints",
+					"environment",
+					"excludeOwnerSecrets",
+					"createdAt",
+					"readyAt",
+					"stoppedAt",
+					"deletedAt",
+					"updatedAt"
+				],
+				"type": "object"
+			},
+			"SandboxAction": {
+				"description": "The sandbox now and the operation that was started",
+				"properties": {
+					"operation": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Operation"
+							},
+							{
+								"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
+							}
+						]
+					},
+					"sandbox": {
+						"$ref": "#/components/schemas/Sandbox"
+					}
+				},
+				"required": [
+					"sandbox",
+					"operation"
+				],
+				"type": "object"
+			},
+			"SandboxDelete": {
+				"description": "The sandbox and its delete operation; operation is null when it was already deleted",
+				"properties": {
+					"operation": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Operation"
+							},
+							{
+								"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
+							}
+						]
+					},
+					"sandbox": {
+						"$ref": "#/components/schemas/Sandbox"
+					}
+				},
+				"required": [
+					"sandbox",
+					"operation"
+				],
+				"type": "object"
+			},
+			"SandboxEnv": {
+				"description": "Env of the sandbox, names of its secrets and secret files",
+				"properties": {
+					"env": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Variables with their values"
+							}
+						]
+					},
+					"secretFiles": {
+						"items": {
+							"properties": {
+								"linkPath": {
+									"type": [
+										"string",
+										"null"
+									]
+								},
+								"mode": {
+									"type": "integer"
+								},
+								"name": {
+									"type": "string"
+								},
+								"sizeBytes": {
+									"type": "integer"
+								}
+							},
+							"required": [
+								"name",
+								"mode",
+								"linkPath",
+								"sizeBytes"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
+					"secretKeys": {
+						"description": "Names of the secret variables (values never)",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"env",
+					"secretKeys",
+					"secretFiles"
+				],
+				"type": "object"
+			},
+			"SandboxEnvUpdate": {
+				"properties": {
+					"delivered": {
+						"description": "The running agent got the new sets; false when the sandbox is not ready or the agent is unreachable (they are applied at the next resume). New commands see them, running ones do not",
+						"type": "boolean"
+					},
+					"env": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Variables with their values"
+							}
+						]
+					},
+					"secretFiles": {
+						"items": {
+							"properties": {
+								"linkPath": {
+									"type": [
+										"string",
+										"null"
+									]
+								},
+								"mode": {
+									"type": "integer"
+								},
+								"name": {
+									"type": "string"
+								},
+								"sizeBytes": {
+									"type": "integer"
+								}
+							},
+							"required": [
+								"name",
+								"mode",
+								"linkPath",
+								"sizeBytes"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
+					"secretKeys": {
+						"description": "Names of the secret variables (values never)",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"delivered",
+					"env",
+					"secretKeys",
+					"secretFiles"
+				],
+				"type": "object"
+			},
+			"SandboxFork": {
+				"properties": {
+					"operation": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Operation"
+							},
+							{
+								"description": "`create` of the new sandbox"
+							}
+						]
+					},
+					"sandbox": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Sandbox"
+							},
+							{
+								"description": "The new sandbox"
+							}
+						]
+					},
+					"sourceOperation": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Operation"
+							},
+							{
+								"description": "`fork` on the source sandbox"
+							}
+						]
+					}
+				},
+				"required": [
+					"sandbox",
+					"operation",
+					"sourceOperation"
+				],
+				"type": "object"
+			},
+			"SandboxList": {
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/Sandbox"
+						},
+						"type": "array"
+					},
+					"nextCursor": {
+						"description": "Cursor of the next page; null on the last page",
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"data",
+					"nextCursor"
+				],
+				"type": "object"
+			},
+			"SandboxState": {
+				"description": "`ready` means usable; creating, stopping, stopped, starting, error, deleting, deleted",
+				"enum": [
+					"creating",
+					"ready",
+					"stopping",
+					"stopped",
+					"starting",
+					"error",
+					"deleting",
+					"deleted"
+				],
+				"type": "string",
+				"x-extensible-enum": true
+			},
+			"SecretFileInput": {
+				"additionalProperties": false,
+				"description": "A secret file on tmpfs in the guest: up to 32 files, 8 MiB in total",
+				"properties": {
+					"contentBase64": {
+						"description": "File content, base64 (up to 1 MiB decoded)",
+						"type": "string"
+					},
+					"linkPath": {
+						"description": "Absolute path of a symlink to the file in the guest",
+						"example": "/home/user/.config/gcloud/key.json",
+						"type": "string"
+					},
+					"mode": {
+						"description": "File mode (default 0440 = 288)",
+						"example": 288,
+						"maximum": 4095,
+						"minimum": 0,
+						"type": "integer"
+					},
+					"name": {
+						"description": "`[A-Za-z0-9._-]{1,128}`",
+						"example": "gcp.json",
+						"type": "string"
+					}
+				},
+				"required": [
+					"name",
+					"contentBase64"
+				],
+				"type": "object"
+			},
+			"SecretFilesPatch": {
+				"additionalProperties": {
+					"additionalProperties": false,
+					"properties": {
+						"contentBase64": {
+							"description": "File content, base64 (up to 1 MiB decoded)",
+							"type": "string"
+						},
+						"linkPath": {
+							"description": "Absolute path of a symlink to the file in the guest",
+							"example": "/home/user/.config/gcloud/key.json",
+							"type": "string"
+						},
+						"mode": {
+							"description": "File mode (default 0440 = 288)",
+							"example": 288,
+							"maximum": 4095,
+							"minimum": 0,
+							"type": "integer"
+						}
+					},
+					"required": [
+						"contentBase64"
+					],
+					"type": [
+						"object",
+						"null"
+					]
+				},
+				"description": "Secret files by name: a file replaces the one with that name, null deletes it",
+				"type": "object"
+			},
+			"Size": {
+				"properties": {
+					"memoryMb": {
+						"type": "integer"
+					},
+					"slug": {
+						"example": "2gb",
+						"type": "string"
+					},
+					"vcpu": {
+						"type": "integer"
+					}
+				},
+				"required": [
+					"slug",
+					"vcpu",
+					"memoryMb"
+				],
+				"type": "object"
+			},
+			"SizeList": {
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/Size"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"data"
+				],
+				"type": "object"
+			},
+			"Template": {
+				"properties": {
+					"allowedSizes": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"capabilities": {
+						"description": "What the template supports: exec, files, ssh, desktop",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"defaultSize": {
+						"example": "2gb",
+						"type": "string"
+					},
+					"enabled": {
+						"description": "Disabled templates are listed for operators only",
+						"type": "boolean"
+					},
+					"loginUser": {
+						"description": "Guest user of SSH logins",
+						"example": "user",
+						"type": "string"
+					},
+					"name": {
+						"type": "string"
+					},
+					"os": {
+						"enum": [
+							"linux",
+							"windows"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"slug": {
+						"example": "linux",
+						"type": "string"
+					},
+					"version": {
+						"description": "Version of the active build; null while none is active",
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"slug",
+					"name",
+					"os",
+					"enabled",
+					"defaultSize",
+					"allowedSizes",
+					"loginUser",
+					"capabilities",
+					"version"
+				],
+				"type": "object"
+			},
+			"TemplateList": {
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/Template"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"data"
+				],
+				"type": "object"
+			},
+			"UpdateSandboxRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"idleTimeoutSeconds": {
+						"description": "Stop after this many idle seconds (at least 60); null disables idle-stop",
+						"minimum": 60,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"labels": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Labels"
+							},
+							{
+								"description": "Replaces all labels"
+							}
+						]
+					},
+					"name": {
+						"description": "Display name, up to 255 characters",
+						"example": "ci-run-42",
+						"maxLength": 255,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"slug": {
+						"description": "New slug; published port URLs and their cookies change at once",
+						"type": "string"
+					},
+					"ttlSeconds": {
+						"description": "New TTL: deadline = now + ttl on a ready sandbox; null removes it",
+						"exclusiveMinimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					}
+				},
+				"type": "object"
 			}
 		},
 		"securitySchemes": {
@@ -366,6 +1686,38 @@
 				"summary": "API reference page",
 				"tags": [
 					"meta"
+				]
+			}
+		},
+		"/v1/limits": {
+			"get": {
+				"description": "Quota of the request's team, its usage and the remainder, every allowed size of each template with `allowed` and the `reason` when not (template_disabled, quota_active_sandboxes, quota_ram), `canCreate`, and the rate limits. Node capacity is not promised: a create can still get 503 out_of_capacity. Any valid credential.",
+				"operationId": "limits.get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Limits"
+								}
+							}
+						},
+						"description": "Limits of the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Quota and what can be created",
+				"tags": [
+					"account"
 				]
 			}
 		},
@@ -465,6 +1817,1268 @@
 				"summary": "OpenAPI document",
 				"tags": [
 					"meta"
+				]
+			}
+		},
+		"/v1/operations/{operation}": {
+			"get": {
+				"description": "An operation of the team's sandboxes. With `waitSeconds` (up to 60) the answer comes as soon as the operation is final (succeeded, failed, superseded), else after the timeout with its current state; 200 either way.",
+				"operationId": "operations.get",
+				"parameters": [
+					{
+						"description": "Operation id (`op_...`)",
+						"in": "path",
+						"name": "operation",
+						"required": true,
+						"schema": {
+							"description": "Operation id (`op_...`)",
+							"example": "op_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Long-poll: answer once the operation is final or after this many seconds (0-60)",
+						"in": "query",
+						"name": "waitSeconds",
+						"required": false,
+						"schema": {
+							"description": "Long-poll: answer once the operation is final or after this many seconds (0-60)",
+							"maximum": 60,
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"allOf": [
+										{
+											"$ref": "#/components/schemas/Operation"
+										},
+										{
+											"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
+										}
+									]
+								}
+							}
+						},
+						"description": "The operation"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such operation in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Get an operation (long-poll)",
+				"tags": [
+					"operations"
+				]
+			}
+		},
+		"/v1/sandboxes": {
+			"get": {
+				"description": "Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters: `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must match), `template`, `q` (prefix of name or slug).",
+				"operationId": "sandboxes.list",
+				"parameters": [
+					{
+						"description": "Comma-separated states; default: all but deleted (deleted only when asked)",
+						"in": "query",
+						"name": "state",
+						"required": false,
+						"schema": {
+							"description": "Comma-separated states; default: all but deleted (deleted only when asked)",
+							"example": "ready,stopped",
+							"type": "string"
+						}
+					},
+					{
+						"description": "`key=value`; repeat for several (all must match)",
+						"in": "query",
+						"name": "label",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"items": {
+										"type": "string"
+									},
+									"type": "array"
+								}
+							],
+							"description": "`key=value`; repeat for several (all must match)",
+							"example": "session=42"
+						}
+					},
+					{
+						"in": "query",
+						"name": "template",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"description": "Prefix of the name or slug, case-insensitive",
+						"in": "query",
+						"name": "q",
+						"required": false,
+						"schema": {
+							"description": "Prefix of the name or slug, case-insensitive",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Page size, 1-200 (default 50)",
+						"in": "query",
+						"name": "limit",
+						"required": false,
+						"schema": {
+							"description": "Page size, 1-200 (default 50)",
+							"maximum": 200,
+							"minimum": 1,
+							"type": "integer"
+						}
+					},
+					{
+						"description": "`nextCursor` of the previous page, unchanged",
+						"in": "query",
+						"name": "cursor",
+						"required": false,
+						"schema": {
+							"description": "`nextCursor` of the previous page, unchanged",
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxList"
+								}
+							}
+						},
+						"description": "A page of sandboxes"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation` or `invalid_cursor`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List sandboxes",
+				"tags": [
+					"sandboxes"
+				]
+			},
+			"post": {
+				"description": "Starts a new VM sandbox from a template (or a saved snapshot with `from`) and answers 202 at once with the sandbox in `creating` and its `create` operation. Wait for it with GET /v1/sandboxes/{sandbox}?waitFor=ready. All fields are optional. The team's environment (or the one named in `environment`) is applied first, the request's env, secrets and secret files on top. Send an Idempotency-Key to retry safely.",
+				"operationId": "sandboxes.create",
+				"parameters": [
+					{
+						"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the stored result instead of creating again (24 h)",
+						"in": "header",
+						"name": "Idempotency-Key",
+						"required": false,
+						"schema": {
+							"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the stored result instead of creating again (24 h)",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateSandboxRequest"
+							}
+						}
+					},
+					"description": "What to create",
+					"required": false
+				},
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxAction"
+								}
+							}
+						},
+						"description": "The new sandbox and its create",
+						"headers": {
+							"Idempotency-Replayed": {
+								"description": "`true` when the answer is the stored result of an earlier request with this Idempotency-Key",
+								"schema": {
+									"enum": [
+										"true"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`quota_exceeded` (details quota, limit, current) or `forbidden`"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`snapshot_not_found` or `not_found` (environment)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`slug_taken` or `idempotency_key_reused`"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`template_unavailable`: template disabled or size not allowed"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`out_of_capacity` (retryable, Retry-After)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Create a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}": {
+			"delete": {
+				"description": "Deletes the sandbox and its VM; any running operation is superseded. Needs the header Sbx-Confirm-Delete with the sandbox id (or slug) — otherwise 428 and nothing happens. Answers 202 with the delete operation; on an already deleted sandbox 200 with `operation: null`. Repeating is safe.",
+				"operationId": "sandboxes.delete",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Required: the id (`sb_...`) or slug of the sandbox in the path; without it or with another sandbox the answer is 428 and nothing is deleted",
+						"in": "header",
+						"name": "Sbx-Confirm-Delete",
+						"required": false,
+						"schema": {
+							"description": "Required: the id (`sb_...`) or slug of the sandbox in the path; without it or with another sandbox the answer is 428 and nothing is deleted",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxDelete"
+								}
+							}
+						},
+						"description": "Already deleted"
+					},
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxDelete"
+								}
+							}
+						},
+						"description": "Deleting"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"428": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`confirmation_required`: Sbx-Confirm-Delete is missing or names another resource"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Delete a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			},
+			"get": {
+				"description": "The sandbox by id or slug. With `waitFor=ready,stopped` (and `waitSeconds`, up to 60, default 30) the answer comes as soon as the state is one of them or becomes error/deleting/deleted, else after the timeout with the current state; 200 either way. Deleted sandboxes stay readable for 30 days.",
+				"operationId": "sandboxes.get",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Long-poll: comma-separated states; answers once the state is one of them or error/deleting/deleted, else after waitSeconds",
+						"in": "query",
+						"name": "waitFor",
+						"required": false,
+						"schema": {
+							"description": "Long-poll: comma-separated states; answers once the state is one of them or error/deleting/deleted, else after waitSeconds",
+							"example": "ready",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Long-poll timeout, 0-60 seconds (default 30 with waitFor)",
+						"in": "query",
+						"name": "waitSeconds",
+						"required": false,
+						"schema": {
+							"description": "Long-poll timeout, 0-60 seconds (default 30 with waitFor)",
+							"maximum": 60,
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Sandbox"
+								}
+							}
+						},
+						"description": "The sandbox"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Get a sandbox (long-poll)",
+				"tags": [
+					"sandboxes"
+				]
+			},
+			"patch": {
+				"description": "Changes name, slug, labels (replaced whole), ttlSeconds (deadline = now + ttl on a ready sandbox; null removes it) and idleTimeoutSeconds. A new slug changes the URLs of published ports at once; old URLs and cookies stop working.",
+				"operationId": "sandboxes.update",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UpdateSandboxRequest"
+							}
+						}
+					},
+					"description": "Fields to change",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Sandbox"
+								}
+							}
+						},
+						"description": "The updated sandbox"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`slug_taken` or `invalid_state` (deleting, deleted)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Update a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/env": {
+			"get": {
+				"description": "The sandbox's env variables with values, the names of its secret variables and the metadata of its secret files. Secret values are never returned.",
+				"operationId": "sandboxes.getEnv",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxEnv"
+								}
+							}
+						},
+						"description": "Env and secret names"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Get env and secret names",
+				"tags": [
+					"sandboxes"
+				]
+			},
+			"patch": {
+				"description": "Merges by key: a value sets the variable, null deletes it; secret files by name (a file replaces the one with its name, null deletes it). Answers like PUT.",
+				"operationId": "sandboxes.patchEnv",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/EnvPatchRequest"
+							}
+						}
+					},
+					"description": "Changes by key",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxEnvUpdate"
+								}
+							}
+						},
+						"description": "The stored sets and delivery"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: a name, a value or a limit of §8.3 (checked on the result)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`: deleting or deleted"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Change env and secrets by key",
+				"tags": [
+					"sandboxes"
+				]
+			},
+			"put": {
+				"description": "Each given set (env, secrets, secretFiles) replaces that set whole; the others stay. New commands see the new values, running ones do not. `delivered: false` means the sandbox is not ready or its agent is unreachable: the sets apply at the next resume.",
+				"operationId": "sandboxes.replaceEnv",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/EnvReplaceRequest"
+							}
+						}
+					},
+					"description": "Sets to replace",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxEnvUpdate"
+								}
+							}
+						},
+						"description": "The stored sets and delivery"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: a name, a value or a limit of §8.3 (checked on the result)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`: deleting or deleted"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Replace env and secrets",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/extend": {
+			"post": {
+				"description": "Moves the deadline of a ready sandbox to now + ttlSeconds (default: its TTL). The sandbox's TTL itself does not change. No operation.",
+				"operationId": "sandboxes.extend",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ExtendSandboxRequest"
+							}
+						}
+					},
+					"description": "New lifetime",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Sandbox"
+								}
+							}
+						},
+						"description": "The sandbox with its new deadline"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`: not ready"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Extend the TTL",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/fork": {
+			"post": {
+				"description": "Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on the source. Send an Idempotency-Key to retry safely.",
+				"operationId": "sandboxes.fork",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the stored result instead of creating again (24 h)",
+						"in": "header",
+						"name": "Idempotency-Key",
+						"required": false,
+						"schema": {
+							"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the stored result instead of creating again (24 h)",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ForkSandboxRequest"
+							}
+						}
+					},
+					"description": "Settings of the new sandbox",
+					"required": false
+				},
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxFork"
+								}
+							}
+						},
+						"description": "Forking",
+						"headers": {
+							"Idempotency-Replayed": {
+								"description": "`true` when the answer is the stored result of an earlier request with this Idempotency-Key",
+								"schema": {
+									"enum": [
+										"true"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`quota_exceeded`"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`, `operation_in_progress`, `slug_taken` or `idempotency_key_reused`"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`out_of_capacity` (retryable)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Fork a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/recover": {
+			"post": {
+				"description": "Reboots a sandbox in `error` (or a stuck one) on its disk. Rate limited per sandbox (429 recover_rate_limited). A repeat while the recover runs returns it.",
+				"operationId": "sandboxes.recover",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxAction"
+								}
+							}
+						},
+						"description": "Recovering"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state` (details.state) or `operation_in_progress` (retryable; details.operationId, kind)"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`recover_rate_limited` (retryable, Retry-After)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Recover a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/resume": {
+			"post": {
+				"description": "Starts a stopped sandbox again, optionally with another size or TTL. env, secrets and secretFiles merge onto the sandbox's own (null deletes) and are kept even if the resume fails. A repeat with the same body while the resume runs returns it.",
+				"operationId": "sandboxes.resume",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ResumeSandboxRequest"
+							}
+						}
+					},
+					"description": "Optional changes",
+					"required": false
+				},
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxAction"
+								}
+							}
+						},
+						"description": "Starting"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`quota_exceeded`"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state` (details.state) or `operation_in_progress` (retryable; details.operationId, kind)"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`out_of_capacity` (retryable)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Resume a stopped sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/stop": {
+			"post": {
+				"description": "Shuts the VM down and keeps its disk; resume brings it back. Only from `ready`. A repeat while the stop runs returns the same operation.",
+				"operationId": "sandboxes.stop",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxAction"
+								}
+							}
+						},
+						"description": "Stopping"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state` (details.state) or `operation_in_progress` (retryable; details.operationId, kind)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Stop a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sizes": {
+			"get": {
+				"description": "Sizes (vCPU and memory) the templates allow, smallest first. Any valid credential.",
+				"operationId": "sizes.list",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SizeList"
+								}
+							}
+						},
+						"description": "Sizes"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List sizes",
+				"tags": [
+					"catalog"
+				]
+			}
+		},
+		"/v1/templates": {
+			"get": {
+				"description": "Templates a sandbox can be created from, with their default and allowed sizes, the SSH login user, capabilities and the version of the active build. Disabled templates are listed for operators only. Any valid credential.",
+				"operationId": "templates.list",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TemplateList"
+								}
+							}
+						},
+						"description": "Templates"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List templates",
+				"tags": [
+					"catalog"
 				]
 			}
 		}

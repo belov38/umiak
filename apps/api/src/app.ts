@@ -25,8 +25,13 @@ import { requestLog } from "./http/logger.ts";
 import { requestMetrics } from "./http/metrics.ts";
 import { requestId } from "./http/request-id.ts";
 import { registerSecuritySchemes } from "./openapi/registry.ts";
+import { registerCatalogRoutes } from "./routes/catalog.ts";
+import { registerEnvRoutes } from "./routes/env.ts";
+import { registerLimitsRoutes } from "./routes/limits.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerMetaRoutes } from "./routes/meta.ts";
+import { registerOperationRoutes } from "./routes/operations.ts";
+import { registerSandboxRoutes } from "./routes/sandboxes.ts";
 
 /** Common middleware and error handling of the listener apps. */
 function listenerApp(
@@ -63,6 +68,11 @@ export function mountV1(app: ApiApp, deps: ApiDeps): void {
 	registerSecuritySchemes(app);
 	registerMetaRoutes(app, deps);
 	registerMeRoutes(app, deps);
+	registerSandboxRoutes(app, deps);
+	registerEnvRoutes(app, deps);
+	registerOperationRoutes(app, deps);
+	registerCatalogRoutes(app, deps);
+	registerLimitsRoutes(app, deps);
 }
 
 export function createPublicApp(deps: ApiDeps): ApiApp {

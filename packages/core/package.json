@@ -5,7 +5,8 @@
 	"type": "module",
 	"description": "Control plane domain: errors, ids, slugs, secrets crypto, state machines, capacity",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./testing": "./test/helpers/index.ts"
 	},
 	"scripts": {
 		"test": "vitest run",

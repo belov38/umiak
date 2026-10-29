@@ -2,9 +2,12 @@
 // add fields (svc, agent, streams, ...); tests build deps with
 // `makeTestDeps(over)` from `@sbx/api/testing`.
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { IdentityStore } from "@sbx/auth";
+import type { EnvironmentStore, IdentityStore } from "@sbx/auth";
+import type { ConfigReader } from "@sbx/config";
+import type { SandboxService } from "@sbx/core";
 import type pg from "pg";
 import type { Logger } from "pino";
+import type { AgentApi } from "./agent/types.ts";
 import type { IdentityListener } from "./auth/identity-listener.ts";
 import type { ServiceTokens } from "./auth/internal.ts";
 import type { KeyCache } from "./auth/key-cache.ts";
@@ -35,6 +38,14 @@ export interface ApiDeps {
 	/** Accepted service tokens of the internal listener. */
 	serviceTokens: ServiceTokens;
 	rateLimits: RateLimits;
+	/** Sandboxes, operations, env (S6 SandboxService). */
+	svc: SandboxService;
+	/** Templates, sizes, quotas, platform defaults. */
+	config: ConfigReader;
+	/** Environments of the teams (PgEnvironmentStore until S8). */
+	environments: EnvironmentStore;
+	/** RPCs of the guest agents (UnwiredAgentApi until S3 is merged). */
+	agent: AgentApi;
 }
 
 /** Hono env of every listener app. */

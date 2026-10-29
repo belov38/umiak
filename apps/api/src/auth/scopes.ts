@@ -7,17 +7,25 @@ import type { ApiEnv } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { authOf } from "./principal.ts";
 
-/** 403 forbidden with `details.requiredScope` unless the caller has the scope. */
+/** 403 forbidden with `details.requiredScope` unless `p` has the scope. */
+export function checkScope(
+	p: { scopes: readonly Scope[] },
+	scope: Scope,
+): void {
+	if (!p.scopes.includes(scope)) {
+		throw new ApiError(
+			403,
+			"forbidden",
+			`the API key lacks the scope ${scope}; a team owner can issue a key with it`,
+			{ details: { requiredScope: scope } },
+		);
+	}
+}
+
+/** Route guard of `checkScope`. */
 export function requireScope(scope: Scope): MiddlewareHandler<ApiEnv> {
 	return async (c, next) => {
-		if (!authOf(c).principal.scopes.includes(scope)) {
-			throw new ApiError(
-				403,
-				"forbidden",
-				`the API key lacks the scope ${scope}; a team owner can issue a key with it`,
-				{ details: { requiredScope: scope } },
-			);
-		}
+		checkScope(authOf(c).principal, scope);
 		await next();
 	};
 }

@@ -2,7 +2,8 @@
 //   {"error": {code, message, retryable, details, requestId}} + Request-Id
 // Routes throw ApiError (or a core SbxError); `toHttpError` maps anything
 // thrown to an ApiError and `renderError` renders it.
-import { isSbxError } from "@sbx/core";
+import { encodeUuid } from "@sbx/auth";
+import { isSbxError, isUuid, type SbxError } from "@sbx/core";
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Logger } from "pino";
@@ -146,10 +147,7 @@ export function toHttpError(e: unknown): ApiError {
 	if (isSbxError(e)) {
 		const status = CORE_STATUS[e.code];
 		if (status === undefined) return internalError();
-		return new ApiError(status, e.code, e.message, {
-			retryable: e.retryable,
-			details: e.details,
-		});
+		return publicCoreError(status, e);
 	}
 	if (e instanceof HTTPException) return fromHttpException(e);
 	// A worker-side machine state check that surfaced through a core call.
@@ -162,6 +160,27 @@ export function toHttpError(e: unknown): ApiError {
 		});
 	}
 	return internalError();
+}
+
+/**
+ * Details of core errors carry UUIDs and internal operations: operation ids
+ * become `op_...`, and an active internal `reprovision` is not named.
+ */
+function publicCoreError(status: number, e: SbxError): ApiError {
+	const details: Record<string, unknown> = { ...e.details };
+	let message = e.message;
+	if (e.code === "operation_in_progress" && details.kind === "reprovision") {
+		delete details.operationId;
+		delete details.kind;
+		message = "the platform is repairing this sandbox; retry after it finishes";
+	}
+	if (isUuid(details.operationId)) {
+		details.operationId = encodeUuid("operation", details.operationId);
+	}
+	return new ApiError(status, e.code, message, {
+		retryable: e.retryable,
+		details,
+	});
 }
 
 /**

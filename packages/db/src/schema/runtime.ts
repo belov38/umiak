@@ -343,6 +343,8 @@ export const sandboxes = runtime.table("sandboxes", {
 	/** Operator block (S8; migration 0204): every port of the sandbox is blocked. */
 	blocked: boolean("blocked").notNull().default(false),
 	blockReason: text("block_reason"),
+	/** Last change of the row, set by a trigger (migration 0205). */
+	updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
 
 export const sandboxSecrets = runtime.table("sandbox_secrets", {
