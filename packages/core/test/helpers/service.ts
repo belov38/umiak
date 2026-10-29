@@ -133,7 +133,10 @@ export async function serviceEnv(
 	};
 }
 
-/** Rows a create may write, counted for one team (for "nothing was created"). */
+/**
+ * Sandbox-side rows a create may write, counted for one team (for "nothing
+ * was created"). Machines are checked per node with `nodeMachines`.
+ */
 export async function teamRowCounts(
 	q: Queryable,
 	teamId: string,
@@ -144,11 +147,30 @@ export async function teamRowCounts(
 		   (SELECT count(*)::int FROM s) AS sandboxes,
 		   (SELECT count(*)::int FROM runtime.sandbox_secrets WHERE sandbox_id IN (SELECT id FROM s)) AS secrets,
 		   (SELECT count(*)::int FROM runtime.operations WHERE sandbox_id IN (SELECT id FROM s)) AS operations,
-		   (SELECT count(*)::int FROM runtime.sandbox_events WHERE sandbox_id IN (SELECT id FROM s)) AS events,
-		   (SELECT count(*)::int FROM runtime.machines WHERE sandbox_id IN (SELECT id FROM s)) AS machines`,
+		   (SELECT count(*)::int FROM runtime.sandbox_events WHERE sandbox_id IN (SELECT id FROM s)) AS events`,
 		[teamId],
 	);
 	return r.rows[0] ?? {};
+}
+
+export interface MachineSnapshot {
+	id: string;
+	state: string;
+	pool_key: string | null;
+	sandbox_id: string | null;
+}
+
+/** Every machine of a node with the fields a create may change, by id. */
+export async function nodeMachines(
+	q: Queryable,
+	nodeId: string,
+): Promise<MachineSnapshot[]> {
+	const r = await q.query<MachineSnapshot>(
+		`SELECT id, state, pool_key, sandbox_id FROM runtime.machines
+		 WHERE node_id = $1 ORDER BY id`,
+		[nodeId],
+	);
+	return r.rows;
 }
 
 export async function idempotencyRows(

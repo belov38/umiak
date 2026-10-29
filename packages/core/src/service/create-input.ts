@@ -39,6 +39,10 @@ export interface CreateInput {
 	from?: { snapshot: string };
 	/** Warm pool only, else `pool_exhausted` (S6 §7.3). */
 	failFast?: boolean;
+	/** S8 §10; only null/absent until S8 provides environments. */
+	environment?: string | null;
+	/** S8 §10; only false/absent until S8 provides environments. */
+	excludeOwnerSecrets?: boolean;
 }
 
 const CREATE_KEYS: readonly (keyof CreateInput)[] = [
@@ -54,7 +58,11 @@ const CREATE_KEYS: readonly (keyof CreateInput)[] = [
 	"idleTimeoutSeconds",
 	"from",
 	"failFast",
+	"environment",
+	"excludeOwnerSecrets",
 ];
+
+const NO_ENVIRONMENTS = "environments are not available until S8";
 
 export function validateCreateInput(input: CreateInput): SecretSets {
 	if (!isPlainObject(input as unknown)) {
@@ -82,6 +90,21 @@ export function validateCreateInput(input: CreateInput): SecretSets {
 			checkKnownKeys(input.from, ["snapshot"], issues);
 			checkString("from.snapshot", input.from.snapshot, issues);
 		}
+	}
+	if (input.environment !== undefined && input.environment !== null) {
+		issues.push({ path: "environment", message: NO_ENVIRONMENTS });
+	}
+	if (
+		input.excludeOwnerSecrets !== undefined &&
+		input.excludeOwnerSecrets !== false
+	) {
+		issues.push({
+			path: "excludeOwnerSecrets",
+			message:
+				typeof input.excludeOwnerSecrets === "boolean"
+					? NO_ENVIRONMENTS
+					: "must be a boolean",
+		});
 	}
 	if (input.failFast !== undefined && typeof input.failFast !== "boolean") {
 		issues.push({ path: "failFast", message: "must be a boolean" });

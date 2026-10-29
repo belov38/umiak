@@ -6,12 +6,14 @@ import {
 	idempotencyRows,
 	insertSavedSnapshot,
 	machineRow,
+	nodeMachines,
 	serviceEnv,
 	teamRowCounts,
 } from "./helpers/service.ts";
-import { insertMachine } from "./helpers/topology.ts";
+import { insertMachine, insertTemplateBuild } from "./helpers/topology.ts";
 
 const SECRET = "SECRET-MARKER-7f3a";
+const NOTHING = { sandboxes: 0, secrets: 0, operations: 0, events: 0 };
 
 describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 	let t: TestDatabase;
@@ -109,9 +111,26 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 			sizeSlug: "4gb",
 			memoryMb: 4096,
 		});
-		const { sandbox } = await env.svc.create(env.p, {});
+		// Same pair, but its build was superseded by a promote (S6 §9.4).
+		const oldBuild = await insertTemplateBuild(t.pool, env.topo, {
+			templateSlug: env.template,
+			status: "deprecated",
+		});
+		const stale = await insertMachine(
+			t.pool,
+			{ ...env.topo, templateBuildId: oldBuild },
+			{ state: "warm", poolKey: env.pairKey },
+		);
+		const { sandbox, operation } = await env.svc.create(env.p, {});
 		expect(sandbox.machineId).not.toBe(other);
+		expect(sandbox.machineId).not.toBe(stale);
+		expect(sandbox.templateBuildId).toBe(env.topo.templateBuildId);
+		expect(operation.request).toMatchObject({ fromPool: false });
 		expect((await machineRow(t.pool, other))?.state).toBe("warm");
+		expect(await machineRow(t.pool, stale)).toMatchObject({
+			state: "warm",
+			sandbox_id: null,
+		});
 	});
 
 	it("goes cold without a warm machine: machine allocating with sandbox_id", async () => {
@@ -171,29 +190,32 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		]);
 	});
 
-	it("out_of_capacity without RAM: nothing new in the database", async () => {
+	it("out_of_capacity without RAM: nothing new, no allocating or evicted machine", async () => {
 		const env = await serviceEnv(t.pool, {
-			topology: { node: { ramCapMb: 2048 } },
+			topology: { node: { ramCapMb: 4096 } },
 		});
 		await insertMachine(t.pool, env.topo, { state: "running" });
+		// Evictable, but 1024 free + 1024 evictable < 4096 needed.
+		await insertMachine(t.pool, env.topo, {
+			state: "warm",
+			poolKey: `${env.template}/1gb`,
+			sizeSlug: "1gb",
+			memoryMb: 1024,
+		});
+		const before = await nodeMachines(t.pool, env.topo.nodeId);
 		const err = await expectCode(
-			env.svc.create(env.p, {}, "key-1"),
+			env.svc.create(env.p, { size: "4gb" }, "key-1"),
 			"out_of_capacity",
 		);
 		expect(err.retryable).toBe(true);
 		expect(err.details.retryAfterSeconds).toBe(30);
-		expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual({
-			sandboxes: 0,
-			secrets: 0,
-			operations: 0,
-			events: 0,
-			machines: 0,
-		});
+		expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual(NOTHING);
+		expect(await nodeMachines(t.pool, env.topo.nodeId)).toEqual(before);
 		expect(await idempotencyRows(t.pool, env.p.apiKeyId as string)).toBe(0);
 		expect(env.jobs.sent).toEqual([]);
 	});
 
-	it("failFast without warm: pool_exhausted and no rows, key or jobs", async () => {
+	it("failFast without warm: pool_exhausted and no rows, key, machine or jobs", async () => {
 		const env = await serviceEnv(t.pool);
 		const err = await expectCode(
 			env.svc.create(
@@ -205,15 +227,52 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		);
 		expect(err.retryable).toBe(true);
 		expect(err.details.retryAfterSeconds).toBe(60);
-		expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual({
-			sandboxes: 0,
-			secrets: 0,
-			operations: 0,
-			events: 0,
-			machines: 0,
-		});
+		expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual(NOTHING);
+		expect(await nodeMachines(t.pool, env.topo.nodeId)).toEqual([]);
 		expect(await idempotencyRows(t.pool, env.p.apiKeyId as string)).toBe(0);
 		expect(env.jobs.sent).toEqual([]);
+	});
+
+	it("failFast on a full node does not evict another pair's warm machine", async () => {
+		const env = await serviceEnv(t.pool, {
+			topology: { node: { ramCapMb: 2048 } },
+		});
+		const other = await insertMachine(t.pool, env.topo, {
+			state: "warm",
+			poolKey: `${env.template}/4gb`,
+			sizeSlug: "4gb",
+			memoryMb: 2048,
+		});
+		const before = await nodeMachines(t.pool, env.topo.nodeId);
+		await expectCode(
+			env.svc.create(env.p, { failFast: true }),
+			"pool_exhausted",
+		);
+		expect((await machineRow(t.pool, other))?.state).toBe("warm");
+		expect(await nodeMachines(t.pool, env.topo.nodeId)).toEqual(before);
+		expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual(NOTHING);
+		expect(env.jobs.sent).toEqual([]);
+	});
+
+	it("slug_taken after a claim rolls the claim back: the machine is warm again", async () => {
+		const env = await serviceEnv(t.pool);
+		const slug = `taken-${env.template}`;
+		await env.svc.create(env.p, { slug }); // cold: no warm machine yet
+		const warm = await insertMachine(t.pool, env.topo, {
+			state: "warm",
+			poolKey: env.pairKey,
+		});
+		const before = await nodeMachines(t.pool, env.topo.nodeId);
+		env.jobs.clear();
+		await expectCode(env.svc.create(env.p, { slug }), "slug_taken");
+		expect(await machineRow(t.pool, warm)).toMatchObject({
+			state: "warm",
+			pool_key: env.pairKey,
+			sandbox_id: null,
+			claimed_at: null,
+		});
+		expect(await nodeMachines(t.pool, env.topo.nodeId)).toEqual(before);
+		expect((await teamRowCounts(t.pool, env.p.teamId)).sandboxes).toBe(1);
 	});
 
 	it("failFast with warm claims as usual", async () => {
@@ -307,13 +366,55 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		expect((await teamRowCounts(t.pool, env.p.teamId)).sandboxes).toBe(1);
 	});
 
-	it("retries a generated slug on collision and then uses four words", async () => {
-		// Index 0 always: every three-word slug is the same; four words differ.
-		const env = await serviceEnv(t.pool, { slugRandom: () => 0 });
+	it("generated slug: first try plus 5 retries with three words, then four words", async () => {
+		// Index 0 always: every three-word slug is the same, so the second create
+		// collides on every three-word try.
+		let calls = 0;
+		const env = await serviceEnv(t.pool, {
+			slugRandom: () => {
+				calls += 1;
+				return 0;
+			},
+		});
 		const a = await env.svc.create(env.p, {});
-		const b = await env.svc.create(env.p, {});
 		expect(a.sandbox.slug.split("-")).toHaveLength(3);
+		expect(calls).toBe(3);
+		calls = 0;
+		const b = await env.svc.create(env.p, {});
 		expect(b.sandbox.slug.split("-")).toHaveLength(4);
+		// 6 three-word slugs (3 draws each), then one four-word slug.
+		expect(calls).toBe(6 * 3 + 4);
+	});
+
+	it("accepts environment fields only in their pre-S8 form", async () => {
+		const env = await serviceEnv(t.pool, {
+			topology: { node: { ramCapMb: 1_000_000 } },
+		});
+		const ok = await env.svc.create(env.p, {
+			environment: null,
+			excludeOwnerSecrets: false,
+		});
+		expect(ok.sandbox.state).toBe("creating");
+		const e1 = await expectCode(
+			env.svc.create(env.p, { environment: "base" }),
+			"validation",
+		);
+		expect(e1.message).toContain("environments are not available until S8");
+		const e2 = await expectCode(
+			env.svc.create(env.p, { excludeOwnerSecrets: true }),
+			"validation",
+		);
+		expect(e2.message).toContain("environments are not available until S8");
+		await expectCode(
+			env.svc.create(env.p, {
+				excludeOwnerSecrets: "no" as unknown as boolean,
+			}),
+			"validation",
+		);
+		await expectCode(
+			env.svc.create(env.p, { bogus: 1 } as unknown as object),
+			"validation",
+		);
 	});
 
 	it("stores secrets encrypted; request and job data carry no secret values", async () => {

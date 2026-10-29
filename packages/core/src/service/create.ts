@@ -52,12 +52,14 @@ export interface CreateResult {
 }
 
 export const CREATE_SCOPE = "sandboxes.create";
-/** Generated slugs: this many three-word tries, then as many four-word ones. */
-const SLUG_TRIES = 5;
+// Generated slugs (S7 §5.4): the first try plus 5 retries with three words,
+// then four-word tries.
+const SLUG_THREE_WORD_TRIES = 6;
+const SLUG_FOUR_WORD_TRIES = 6;
 
 /**
  * Inserts the sandbox row with the given slug (`slug_taken` if taken) or a
- * generated one (decision 11: five three-word tries, then four words).
+ * generated one (see SLUG_THREE_WORD_TRIES).
  * `ON CONFLICT (slug) DO NOTHING` keeps the transaction usable on a collision.
  */
 async function insertSandboxRow(
@@ -84,8 +86,9 @@ async function insertSandboxRow(
 		if (await tryInsert(requested)) return requested;
 		throw slugTaken(requested);
 	}
-	for (let i = 0; i < 2 * SLUG_TRIES; i++) {
-		const slug = generateSlug(i < SLUG_TRIES ? 3 : 4, deps.slugRandom);
+	for (let i = 0; i < SLUG_THREE_WORD_TRIES + SLUG_FOUR_WORD_TRIES; i++) {
+		const words = i < SLUG_THREE_WORD_TRIES ? 3 : 4;
+		const slug = generateSlug(words, deps.slugRandom);
 		if (slugProblem(slug) !== null) continue;
 		if (await tryInsert(slug)) return slug;
 	}
