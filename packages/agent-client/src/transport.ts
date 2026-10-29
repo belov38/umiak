@@ -187,10 +187,17 @@ export class AgentClient {
 	 *
 	 * A path segment that is or decodes to "." or "..", or decodes to one
 	 * holding "/" or "\", is rejected with a TypeError before any request.
-	 * Without a caller Accept-Encoding, "Accept-Encoding: identity" is sent.
+	 * Compression: fetch (undici) inflates any Content-Encoding the answer
+	 * names, whatever Accept-Encoding asked for. Without a caller
+	 * Accept-Encoding, "Accept-Encoding: identity" is sent and an answer with
+	 * another Content-Encoding is refused: its body is cancelled and fetch
+	 * throws a ConnectError (Code.Internal, ErrorDetail bad_agent_response).
+	 * With the caller's own Accept-Encoding the answer is returned decoded,
+	 * so its body can be far larger than its Content-Length.
 	 *
 	 * The body is agent-controlled and of any size: stream response.body, or
-	 * use readBodyCapped; never call arrayBuffer(), text() or json() on it.
+	 * use readBodyCapped (which counts decoded bytes); never call
+	 * arrayBuffer(), text() or json() on it.
 	 */
 	fetch(
 		machineId: string,

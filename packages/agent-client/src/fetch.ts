@@ -1,6 +1,8 @@
 import { Code, ConnectError } from "@connectrpc/connect";
+import { ErrorDetailSchema } from "@sbx/proto";
 import {
 	CODE_AGENT_UNAVAILABLE,
+	CODE_BAD_AGENT_RESPONSE,
 	HEADER_ERROR_CODE,
 	HEADER_INSTANCE_URL,
 } from "./constants.js";
@@ -36,9 +38,11 @@ export async function routedFetch(
 	checkPathSegments(path);
 	const { body, headers, signal, ...rest } = init;
 	const h0 = new Headers(headers);
-	// undici would advertise gzip, deflate, br and inflate the answer
-	// transparently: an agent's small body could become a huge one.
-	if (!h0.has("accept-encoding")) {
+	// undici inflates any Content-Encoding the answer names, whatever was
+	// asked for: an agent's small body could become a huge one. Without a
+	// caller's Accept-Encoding, ask for identity and refuse anything else.
+	const ownEncoding = !h0.has("accept-encoding");
+	if (ownEncoding) {
 		h0.set("accept-encoding", "identity");
 	}
 	const headerEntries = [...h0.entries()];
@@ -49,7 +53,7 @@ export async function routedFetch(
 	const oneShot = fixed != null && !resendable(fixed);
 	let sent = false;
 
-	return routeCall(
+	const res = await routeCall(
 		{
 			...routing,
 			signal: signal ?? undefined,
@@ -124,6 +128,27 @@ export async function routedFetch(
 			return { kind: "unavailable", cause };
 		},
 	);
+	if (ownEncoding && !isIdentity(res.headers.get("content-encoding"))) {
+		res.body?.cancel().catch(() => {});
+		throw new ConnectError(
+			`agent answered with Content-Encoding ${JSON.stringify(res.headers.get("content-encoding"))} to Accept-Encoding: identity`,
+			Code.Internal,
+			undefined,
+			[
+				{
+					desc: ErrorDetailSchema,
+					value: { code: CODE_BAD_AGENT_RESPONSE, retryable: false },
+				},
+			],
+		);
+	}
+	return res;
+}
+
+/** True for an absent, empty or identity Content-Encoding. */
+function isIdentity(encoding: string | null): boolean {
+	const e = encoding?.trim().toLowerCase() ?? "";
+	return e === "" || e === "identity";
 }
 
 /**

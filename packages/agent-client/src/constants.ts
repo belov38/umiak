@@ -21,6 +21,8 @@ export const CODE_MACHINE_MOVED = "machine_moved";
 export const CODE_AGENT_UNAVAILABLE = "agent_unavailable";
 /** The agent lacks a required capability (API answers 409). */
 export const CODE_AGENT_OUTDATED = "agent_outdated";
+/** The agent's answer cannot be passed on (gateway 502, AgentClient.fetch). */
+export const CODE_BAD_AGENT_RESPONSE = "bad_agent_response";
 /** A mutating unary call came without Sbx-Request-Id. */
 export const CODE_REQUEST_ID_REQUIRED = "request_id_required";
 

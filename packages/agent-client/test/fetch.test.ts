@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { Code, ConnectError } from "@connectrpc/connect";
+import { ErrorDetailSchema } from "@sbx/proto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	AgentClient,
@@ -392,6 +393,53 @@ describe("AgentClient.fetch", () => {
 			const res = await agent().fetch(m, "?path=/data/f.bin");
 			await res.body?.cancel();
 			expect(fileRequests(a)[0]?.headers["accept-encoding"]).toBe("identity");
+		});
+
+		function encoded(encoding: string, body: Uint8Array) {
+			a.script.push({
+				route: "files",
+				answer: {
+					kind: "raw",
+					status: 200,
+					headers: {
+						"content-type": "application/octet-stream",
+						"content-encoding": encoding,
+						"content-length": String(body.length),
+					},
+					body,
+				},
+			});
+		}
+
+		const zeros = Buffer.alloc(8 * 1024 * 1024);
+		for (const [name, encoding, body] of [
+			["gzip", "gzip", gzipSync(zeros)],
+			["stacked gzip", "gzip, gzip, gzip", gzipSync(gzipSync(gzipSync(zeros)))],
+			["br", "br", Buffer.from("x")],
+			["unknown", "x-agent", Buffer.from("x")],
+		] as const) {
+			it(`refuses a ${name} answer to the default Accept-Encoding`, async () => {
+				registry.set(route(m, a.url));
+				encoded(encoding, body);
+				const err = await agent()
+					.fetch(m, "?path=/bomb")
+					.catch((e: unknown) => e);
+				expect(err).toBeInstanceOf(ConnectError);
+				expect((err as ConnectError).code).toBe(Code.Internal);
+				expect(
+					(err as ConnectError).findDetails(ErrorDetailSchema)[0]?.code,
+				).toBe("bad_agent_response");
+				expect(fileRequests(a)).toHaveLength(1);
+			});
+		}
+
+		it("passes an identity answer to the default Accept-Encoding", async () => {
+			registry.set(route(m, a.url));
+			encoded("Identity", Buffer.from("plain"));
+			const res = await agent().fetch(m, "?path=/plain");
+			expect(Buffer.from(await readBodyCapped(res, 100)).toString()).toBe(
+				"plain",
+			);
 		});
 
 		it("keeps a caller's Accept-Encoding", async () => {
