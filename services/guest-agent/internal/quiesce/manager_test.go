@@ -300,7 +300,9 @@ func TestDockerNotRunning(t *testing.T) {
 func TestAutoThawTimer(t *testing.T) {
 	e := newEnv(t, nil)
 	ctx := context.Background()
-	if _, err := e.m.Quiesce(ctx, 100, true, true); err != nil {
+	// 1 s, not less: under a loaded full-suite run Quiesce itself can take longer
+	// than a shorter lease.
+	if _, err := e.m.Quiesce(ctx, 1000, true, true); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "auto thaw", func() bool { return len(autoThawed(e.rec)) > 0 })

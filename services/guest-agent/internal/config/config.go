@@ -40,7 +40,17 @@ type Config struct {
 	MaxRunningCommands int
 	// IdleWindow is how long the VM must be inactive to count as idle.
 	IdleWindow time.Duration
+	// IdentityDir is the directory with the smbios files (product_serial,
+	// product_uuid, product_family). A test aid: the Linux integration
+	// tests point it at a fake directory. Default /sys/class/dmi/id.
+	IdentityDir string
+	// PTYIdle overrides the idle timeout of PTY commands. A test aid
+	// ([process] pty_idle); 0 keeps the default of the process package.
+	PTYIdle time.Duration
 }
+
+// DefaultIdentityDir is the sysfs directory of the smbios identity.
+const DefaultIdentityDir = "/sys/class/dmi/id"
 
 // Defaults returns the configuration used when agent.toml is absent.
 func Defaults() Config {
@@ -54,6 +64,7 @@ func Defaults() Config {
 		TotalFraction:      0.10,
 		MaxRunningCommands: 256,
 		IdleWindow:         5 * time.Minute,
+		IdentityDir:        DefaultIdentityDir,
 	}
 }
 
@@ -87,6 +98,12 @@ type file struct {
 	Idle struct {
 		Window *string `toml:"window"`
 	} `toml:"idle"`
+	Identity struct {
+		SysfsDir *string `toml:"sysfs_dir"`
+	} `toml:"identity"`
+	Process struct {
+		PTYIdle *string `toml:"pty_idle"`
+	} `toml:"process"`
 }
 
 // Load reads the configuration at path. A missing file yields the defaults.
@@ -163,6 +180,19 @@ func (f *file) apply(cfg *Config) error {
 			return fmt.Errorf("idle.window %q is not a positive duration", *f.Idle.Window)
 		}
 		cfg.IdleWindow = d
+	}
+	if f.Identity.SysfsDir != nil {
+		if *f.Identity.SysfsDir == "" {
+			return errors.New("identity.sysfs_dir is empty")
+		}
+		cfg.IdentityDir = *f.Identity.SysfsDir
+	}
+	if f.Process.PTYIdle != nil {
+		d, err := time.ParseDuration(*f.Process.PTYIdle)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("process.pty_idle %q is not a positive duration", *f.Process.PTYIdle)
+		}
+		cfg.PTYIdle = d
 	}
 	return nil
 }

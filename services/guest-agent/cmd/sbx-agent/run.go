@@ -41,6 +41,11 @@ func runAgent(ctx context.Context, d deps, args []string, stderr io.Writer) int 
 		return 2
 	}
 
+	if d.failRun {
+		_, _ = io.WriteString(stderr, "sbx-agent run: this build has failRun set (integration test package), exiting\n")
+		return 1
+	}
+
 	h := logx.NewHandler(stderr, slog.LevelInfo, logBuffer)
 	defer closeLog(h)
 	log := slog.New(h)

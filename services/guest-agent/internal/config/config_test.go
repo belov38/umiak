@@ -34,6 +34,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.TunnelURL != "" || cfg.TrustDir != "" {
 		t.Errorf("TunnelURL = %q, TrustDir = %q, want empty", cfg.TunnelURL, cfg.TrustDir)
 	}
+	if cfg.IdentityDir != "/sys/class/dmi/id" || cfg.PTYIdle != 0 {
+		t.Errorf("IdentityDir = %q, PTYIdle = %v; want the sysfs DMI dir and 0", cfg.IdentityDir, cfg.PTYIdle)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -64,6 +67,12 @@ max_running_commands = 8
 
 [idle]
 window = "30s"
+
+[identity]
+sysfs_dir = "/run/fake-dmi"
+
+[process]
+pty_idle = "3s"
 `
 	path := filepath.Join(t.TempDir(), "agent.toml")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
@@ -85,6 +94,8 @@ window = "30s"
 		TotalFraction:      0.25,
 		MaxRunningCommands: 8,
 		IdleWindow:         30 * time.Second,
+		IdentityDir:        "/run/fake-dmi",
+		PTYIdle:            3 * time.Second,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("cfg = %+v, want %+v", cfg, want)
@@ -113,6 +124,8 @@ func TestLoadErrors(t *testing.T) {
 		{"bad port", "[ports]\nexclude = [70000]\n"},
 		{"bad fraction", "[output]\ntotal_fraction = 1.5\n"},
 		{"bad max", "[limits]\nmax_running_commands = 0\n"},
+		{"empty sysfs dir", "[identity]\nsysfs_dir = \"\"\n"},
+		{"bad pty idle", "[process]\npty_idle = \"0s\"\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -212,6 +212,7 @@ func (a *agent) buildServices() error {
 		AgentVersion:   a.version,
 		BootID:         a.bootID,
 		Now:            a.d.Now,
+		PTYIdle:        a.cfg.PTYIdle,
 		HandlerOptions: interceptors,
 		Log:            a.log,
 	})

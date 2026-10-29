@@ -180,7 +180,7 @@ func applyMachineID(l paths.Layout, hexID, oldWritten string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(l.MachineIDFile), 0o755); err != nil {
 		return "", err
 	}
-	if err := fsutil.WriteFileAtomic(l.MachineIDFile, []byte(hexID+"\n"), 0o644); err != nil {
+	if err := fsutil.ReplaceFile(l.MachineIDFile, []byte(hexID+"\n"), 0o644); err != nil {
 		return "", fmt.Errorf("ident: write machine-id: %w", err)
 	}
 	return hexID, nil
@@ -201,12 +201,14 @@ func linkDbusMachineID(l paths.Layout) error {
 }
 
 // applyHostname sets the kernel hostname, /etc/hostname and the managed block
-// in /etc/hosts.
+// in /etc/hosts. Those files and /etc/machine-id may be bind mounts (a
+// container, systemd's transient machine-id), so they are written with
+// fsutil.ReplaceFile.
 func applyHostname(l paths.Layout, r Resetter, name string) error {
 	if err := r.SetHostname(name); err != nil {
 		return fmt.Errorf("ident: set hostname: %w", err)
 	}
-	if err := fsutil.WriteFileAtomic(l.HostnameFile, []byte(name+"\n"), 0o644); err != nil {
+	if err := fsutil.ReplaceFile(l.HostnameFile, []byte(name+"\n"), 0o644); err != nil {
 		return fmt.Errorf("ident: write hostname: %w", err)
 	}
 	if err := SetHostsBlock(l.HostsFile, name); err != nil {
@@ -257,7 +259,7 @@ func SetHostsBlock(path, name string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return fsutil.WriteFileAtomic(path, []byte(res), 0o644)
+	return fsutil.ReplaceFile(path, []byte(res), 0o644)
 }
 
 // hostKeyFingerprints returns the sorted SHA256 fingerprints of the public

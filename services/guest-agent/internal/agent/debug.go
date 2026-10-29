@@ -2,9 +2,11 @@ package agent
 
 // The debug socket is a test and QGA aid, not a production interface:
 // `sbx-agent run --debug-listen unix:<path>` serves the agent mux (the same
-// handler the tunnel serves) and sbx.tunnel.v1.Control/Info on a local unix
-// socket, over HTTP/1.1 or h2c, without the tunnel library. It lets tests
-// drive the agent without a gateway.
+// handler the tunnel serves), sbx.tunnel.v1.Control/Info and a read-only
+// sbx.tunnel.v1.Events/Subscribe on a local unix socket, over HTTP/1.1 or
+// h2c, without the tunnel library. It lets tests drive the agent and read
+// its journal without a gateway. Events/Ack is not served, so a debug
+// client never drops events the gateway has not seen.
 //
 // A Control/Info call on the socket is not the gateway's Control/Info: it does
 // not count toward the update confirmation (spec 17.4 step 6) unless the flag
@@ -48,12 +50,16 @@ func (a *agent) startDebug(ctx context.Context) error {
 		return err
 	}
 	ctlPath, ctl := tunnelv1connect.NewControlHandler(debugControl{a: a})
+	evPath, ev := tunnelv1connect.NewEventsHandler(debugEvents{a: a})
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, ctlPath) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, ctlPath):
 			ctl.ServeHTTP(w, r)
-			return
+		case strings.HasPrefix(r.URL.Path, evPath):
+			ev.ServeHTTP(w, r)
+		default:
+			a.mux.ServeHTTP(w, r)
 		}
-		a.mux.ServeHTTP(w, r)
 	})
 	var protos http.Protocols
 	protos.SetHTTP1(true)
@@ -119,4 +125,40 @@ func (c debugControl) Info(context.Context, *connect.Request[tunnelv1.InfoReques
 	}
 	c.a.confirm.debugInfo()
 	return connect.NewResponse(res), nil
+}
+
+// debugEventsBatch is the most events read from the journal per Read.
+const debugEventsBatch = 100
+
+// debugEvents serves Events/Subscribe on the debug socket; Ack is
+// unimplemented.
+type debugEvents struct {
+	tunnelv1connect.UnimplementedEventsHandler
+	a *agent
+}
+
+// Subscribe implements tunnelv1connect.EventsHandler: it streams the journal
+// after after_seq (default 0, the whole journal) until the client goes away.
+func (e debugEvents) Subscribe(ctx context.Context, req *connect.Request[tunnelv1.SubscribeRequest], stream *connect.ServerStream[tunnelv1.SubscribeResponse]) error {
+	after := req.Msg.GetAfterSeq()
+	// Send the headers now: the journal may stay quiet for a long time.
+	if err := stream.Send(nil); err != nil {
+		return err
+	}
+	j := e.a.st.Journal()
+	for {
+		evs, err := j.Read(ctx, after, debugEventsBatch)
+		if err != nil {
+			if ctx.Err() != nil {
+				return connect.NewError(connect.CodeCanceled, ctx.Err())
+			}
+			return connect.NewError(connect.CodeInternal, err)
+		}
+		for _, ev := range evs {
+			if err := stream.Send(&tunnelv1.SubscribeResponse{Event: ev}); err != nil {
+				return err
+			}
+			after = ev.GetSeq()
+		}
+	}
 }

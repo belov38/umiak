@@ -50,6 +50,9 @@ func TestUnitsMatchSpec(t *testing.T) {
 		"CPUWeight=500",
 		"IOWeight=500",
 		"Restart=always",
+		// systemd >= 254 runs OnFailure= on every failed start unless the
+		// restart is direct; the rollback must wait for StartLimitBurst.
+		"RestartMode=direct",
 		"RestartSec=1",
 		"TimeoutStopSec=15",
 		"StartLimitIntervalSec=120",

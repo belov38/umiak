@@ -50,6 +50,8 @@ type deps struct {
 	embeddedKeys   []byte
 	units          fs.FS
 	configTemplate []byte
+	// failRun makes `run` exit 1 at once (the failRun build-time test aid).
+	failRun bool
 }
 
 // defaultDeps returns the production dependencies.
@@ -58,9 +60,9 @@ func defaultDeps() deps {
 	return deps{
 		layout:  l,
 		version: version,
-		source: ident.SysfsSource{
-			Dir:        "/sys/class/dmi/id",
-			BootIDPath: "/proc/sys/kernel/random/boot_id",
+		source: configuredSource{
+			configFile: l.ConfigFile,
+			bootIDPath: "/proc/sys/kernel/random/boot_id",
 		},
 		resetter:  ident.LinuxResetter{Layout: l},
 		stopAgent: stopAgentService,
@@ -72,9 +74,10 @@ func defaultDeps() deps {
 		executable:     os.Executable,
 		isActive:       agent.SystemctlIsActive,
 		statfs:         output.DefaultStatfs,
-		embeddedKeys:   packaging.UpdateKeys,
+		embeddedKeys:   embeddedKeys(packaging.UpdateKeys, devUpdateKey),
 		units:          packaging.Units,
 		configTemplate: packaging.AgentTOML,
+		failRun:        failRun == "1",
 	}
 }
 

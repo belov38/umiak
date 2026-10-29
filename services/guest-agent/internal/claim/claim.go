@@ -647,7 +647,7 @@ func HostnameWriter(l paths.Layout, set func(string) error) func(string) error {
 		if err := os.MkdirAll(filepath.Dir(l.HostnameFile), 0o755); err != nil {
 			return err
 		}
-		if err := fsutil.WriteFileAtomic(l.HostnameFile, []byte(name+"\n"), 0o644); err != nil {
+		if err := fsutil.ReplaceFile(l.HostnameFile, []byte(name+"\n"), 0o644); err != nil {
 			return fmt.Errorf("claim: write hostname: %w", err)
 		}
 		if err := ident.SetHostsBlock(l.HostsFile, name); err != nil {

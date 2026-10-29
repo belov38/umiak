@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
@@ -535,3 +536,50 @@ func TestShutdownFlushesBufferedOutcome(t *testing.T) {
 // reqQuiesce is the request id of the Quiesce call in
 // TestShutdownFlushesBufferedOutcome.
 const reqQuiesce = "0192f1a4-7c3e-7b2a-9d4f-000000000001"
+
+func TestDebugEventsSubscribe(t *testing.T) {
+	h := newHarness(t)
+	h.seedIdentity(machineA)
+	dir, err := os.MkdirTemp("", "sbxdbg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "a.sock")
+	h.debugListen = "unix:" + sock
+	h.start()
+	h.waitReady()
+
+	hc := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		},
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ev := tunnelv1connect.NewEventsClient(hc, "http://agent")
+	stream, err := ev.Subscribe(ctx, connect.NewRequest(&tunnelv1.SubscribeRequest{AfterSeq: proto.Uint64(0)}))
+	if err != nil {
+		t.Fatalf("Events/Subscribe over the debug socket: %v", err)
+	}
+	var types []string
+	for stream.Receive() {
+		e := stream.Msg().GetEvent()
+		if e == nil {
+			continue
+		}
+		types = append(types, e.GetType())
+		if e.GetType() == events.TypeAgentStarted {
+			break
+		}
+	}
+	_ = stream.Close()
+	if !slices.Contains(types, events.TypeAgentStarted) {
+		t.Fatalf("events = %v (%v), want agent.started", types, stream.Err())
+	}
+	// Ack is not served: the debug socket must not drop the gateway's events.
+	if _, err := ev.Ack(ctx, connect.NewRequest(&tunnelv1.AckRequest{Seq: 1})); connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Errorf("Events/Ack over the debug socket = %v, want unimplemented", err)
+	}
+}

@@ -3,12 +3,17 @@ package fsutil
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 )
+
+// rename is os.Rename; tests replace it.
+var rename = os.Rename
 
 // WriteFileAtomic writes data to path through a temporary file in the same
 // directory: write, fsync, rename, fsync of the directory. A reader sees either
@@ -37,10 +42,37 @@ func WriteFileAtomic(path string, data []byte, perm fs.FileMode) (err error) {
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmp.Name(), path); err != nil {
+	if err = rename(tmp.Name(), path); err != nil {
 		return err
 	}
 	return syncDir(dir)
+}
+
+// ReplaceFile is WriteFileAtomic for files that may be mount points: when the
+// rename fails with EBUSY (a file bind-mounted over the target, like the
+// /etc/hostname and /etc/hosts of a container), it rewrites the existing file
+// in place (truncate, write, fsync) and keeps its mode. That write is not
+// atomic: a crash in between can leave the file truncated.
+func ReplaceFile(path string, data []byte, perm fs.FileMode) error {
+	err := WriteFileAtomic(path, data, perm)
+	if !errors.Is(err, syscall.EBUSY) {
+		return err
+	}
+	f, oerr := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	if oerr != nil {
+		return errors.Join(err, oerr)
+	}
+	_, werr := f.Write(data)
+	if werr == nil {
+		werr = f.Sync()
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return fmt.Errorf("fsutil: rewrite %s in place: %w", path, werr)
+	}
+	return nil
 }
 
 // syncDir fsyncs a directory so a rename into it survives a crash. Windows

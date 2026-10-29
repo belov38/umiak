@@ -294,6 +294,30 @@ func TestShimDevStderrReopen(t *testing.T) {
 	}
 }
 
+// A command of another user reopens /dev/stdout and /dev/stderr
+// (/proc/self/fd/N): the pipes must belong to that user, not to the root
+// shim, or the open fails with EACCES (spec 21 item 1).
+func TestShimDevStderrReopenAsOtherUser(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to run the command as another user")
+	}
+	s := spec("/bin/sh", "-c", `echo x >/dev/stderr; echo y >/dev/stdout; id -u`)
+	s.UID, s.GID, s.Groups = 65534, 65534, []uint32{65534}
+	s.Cwd = "/"
+	h := startShim(t, s)
+	e := h.waitExitFile(10 * time.Second)
+	h.waitShim(10 * time.Second)
+	if got := h.read(StdoutFile); got != "y\n65534\n" {
+		t.Errorf("stdout = %q, want %q", got, "y\n65534\n")
+	}
+	if got := h.read(StderrFile); got != "x\n" {
+		t.Errorf("stderr = %q, want %q", got, "x\n")
+	}
+	if e.Code != 0 {
+		t.Errorf("exit = %+v", e)
+	}
+}
+
 func TestShimExitAfterLastByte(t *testing.T) {
 	const lines = 3000
 	var want strings.Builder
@@ -442,6 +466,28 @@ func TestShimPTYResizeAndEcho(t *testing.T) {
 	}
 	if _, err := os.Stat(h.path(StdoutFile)); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("pty command has a stdout file: %v", err)
+	}
+}
+
+// A PTY command of another user reopens its terminal (/dev/stderr is
+// /proc/self/fd/2, the PTY slave): the slave must belong to that user.
+func TestShimPTYDevStderrAsOtherUser(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to run the command as another user")
+	}
+	s := spec("/bin/sh", "-c", `echo tty-$((40+2)) >/dev/stderr; echo rc=$?`)
+	s.UID, s.GID, s.Groups = 65534, 65534, []uint32{65534}
+	s.Cwd = "/"
+	s.PTY = &PTYSpec{Cols: 80, Rows: 24}
+	h := startShim(t, s)
+	e := h.waitExitFile(10 * time.Second)
+	h.waitShim(10 * time.Second)
+	out := h.read(PtyFile)
+	if !strings.Contains(out, "tty-42") || !strings.Contains(out, "rc=0") {
+		t.Errorf("pty = %q, want tty-42 and rc=0", out)
+	}
+	if e.Code != 0 {
+		t.Errorf("exit = %+v", e)
 	}
 }
 

@@ -295,13 +295,32 @@ func (s *shim) start() error {
 func (s *shim) startPTY(cmd *exec.Cmd, attr *syscall.SysProcAttr) error {
 	attr.Setsid = true
 	attr.Setctty = true
-	var ws *pty.Winsize
-	if p := s.spec.PTY; p.Cols > 0 && p.Rows > 0 {
-		ws = &pty.Winsize{Cols: p.Cols, Rows: p.Rows}
-	}
-	master, err := pty.StartWithAttrs(cmd, ws, attr)
+	master, tty, err := pty.Open()
 	if err != nil {
 		return err
+	}
+	defer func() { _ = tty.Close() }()
+	fail := func(err error) error {
+		_ = master.Close()
+		return err
+	}
+	if p := s.spec.PTY; p.Cols > 0 && p.Rows > 0 {
+		if err := pty.Setsize(master, &pty.Winsize{Cols: p.Cols, Rows: p.Rows}); err != nil {
+			return fail(err)
+		}
+	}
+	// The slave belongs to the creator (root); a command of another user
+	// reopens it as /dev/stdout or /dev/stderr (/proc/self/fd/N), like after
+	// a login, which gives the terminal to the user.
+	if s.ownsOther() {
+		if err := unix.Fchown(int(tty.Fd()), int(s.spec.UID), -1); err != nil { //nolint:gosec // fd and uid fit in int
+			return fail(fmt.Errorf("shim: chown pty: %w", err))
+		}
+	}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	cmd.SysProcAttr = attr
+	if err := cmd.Start(); err != nil {
+		return fail(err)
 	}
 	// Fd switches the file to blocking mode; the loop needs it non-blocking.
 	fd := int(master.Fd()) //nolint:gosec // fd fits in int
@@ -335,6 +354,11 @@ func (s *shim) startPipes(cmd *exec.Cmd, attr *syscall.SysProcAttr) (err error) 
 	pipe := func(name string) (r, w int, err error) {
 		var p [2]int
 		if err := unix.Pipe2(p[:], unix.O_CLOEXEC); err != nil {
+			return -1, -1, fmt.Errorf("shim: %s pipe: %w", name, err)
+		}
+		if err := s.chownPipe(p[0]); err != nil {
+			_ = unix.Close(p[0])
+			_ = unix.Close(p[1])
 			return -1, -1, fmt.Errorf("shim: %s pipe: %w", name, err)
 		}
 		return p[0], p[1], nil
@@ -380,6 +404,23 @@ func (s *shim) startPipes(cmd *exec.Cmd, attr *syscall.SysProcAttr) (err error) 
 		s.stdinFd = parentEnds[len(parentEnds)-1]
 	}
 	return nil
+}
+
+// chownPipe gives the pipe of fd to the user of the command. A pipe belongs
+// to its creator with mode 0600, and `echo x >/dev/stderr` reopens it through
+// /proc/self/fd/2, which checks those permissions: a command of another user
+// would get EACCES from a pipe of the root shim. Both ends share the inode.
+func (s *shim) chownPipe(fd int) error {
+	if !s.ownsOther() {
+		return nil
+	}
+	return unix.Fchown(fd, int(s.spec.UID), int(s.spec.GID)) //nolint:gosec // uid and gid fit in int
+}
+
+// ownsOther reports whether the command runs with other credentials than
+// the shim, so the descriptors it reopens must be given to it.
+func (s *shim) ownsOther() bool {
+	return credential(s.spec) != nil && (int(s.spec.UID) != os.Geteuid() || int(s.spec.GID) != os.Getegid()) //nolint:gosec // uid and gid fit in int
 }
 
 // credential returns the credentials of the process. A non-root shim (tests)

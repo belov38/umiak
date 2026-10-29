@@ -636,6 +636,7 @@ StartLimitBurst=5
 Type=notify
 ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run
 Restart=always
+RestartMode=direct
 RestartSec=1
 TimeoutStopSec=15
 OOMScoreAdjust=-900
@@ -647,6 +648,7 @@ IOWeight=500
 WantedBy=multi-user.target
 ```
 
+- `RestartMode=direct` (systemd ≥ 254): автоматический перезапуск минует состояние failed, поэтому `OnFailure=` (откат) срабатывает только после исчерпания `StartLimitBurst`, а не на первом падении.
 - `OOMScoreAdjust=-900`, а не -1000 (как у boat): при нехватке памяти ядро сначала убивает задачи пользователя, но агент не может довести VM до паники.
 - `sbx-agent-rollback.service` — oneshot `/usr/local/lib/sbx-agent/previous/sbx-agent rollback` (если `previous` нет — из `current`). Поведение описано в §17.4.
 - `sbx-cmd.slice` — общий slice команд (место для будущих лимитов).
