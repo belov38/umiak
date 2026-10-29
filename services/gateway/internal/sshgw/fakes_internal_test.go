@@ -293,15 +293,23 @@ var flushSeq struct {
 	n int
 }
 
-// flushJobs waits until every job queued on s.jobs before it has run.
+// flushJobs waits until every job queued on s.jobs and s.revokes before
+// it has run.
 func flushJobs(t *testing.T, s *Server) {
+	t.Helper()
+	flushQueue(t, s, s.jobs)
+	flushQueue(t, s, s.revokes)
+}
+
+// flushQueue waits until every job queued on q before it has run.
+func flushQueue(t *testing.T, s *Server, q *jobQueue) {
 	t.Helper()
 	flushSeq.Lock()
 	flushSeq.n++
 	key := fmt.Sprintf("flush-%d", flushSeq.n)
 	flushSeq.Unlock()
 	done := make(chan struct{})
-	s.enqueue(s.jobs, key, func(context.Context) { close(done) })
+	s.enqueue(q, key, func(context.Context) { close(done) })
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):

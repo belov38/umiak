@@ -218,8 +218,8 @@ func (ss *session) proxyChannel(nc ssh.NewChannel, dst ssh.Conn, fromClient bool
 			}
 		}
 		p.onAReply = func(r *ssh.Request, ok bool) {
-			if ok && r.Type == "pty-req" {
-				ch.interactive.Store(true)
+			if ok && r.Type == "pty-req" && !ch.interactive.Swap(true) {
+				ss.ptyOpened(ch)
 			}
 		}
 	}

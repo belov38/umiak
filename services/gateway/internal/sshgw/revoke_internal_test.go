@@ -94,7 +94,7 @@ func TestRevokeDoesNotBlock(t *testing.T) {
 	ft := userTarget("u1", "usr_1", "team_1")
 	s.register(ft)
 	release := make(chan struct{})
-	s.enqueue(s.jobs, "busy", func(context.Context) { <-release })
+	s.enqueue(s.revokes, "busy", func(context.Context) { <-release })
 	done := make(chan struct{})
 	go func() {
 		for range 1000 {
@@ -118,6 +118,25 @@ func TestRevokeDoesNotBlock(t *testing.T) {
 	// The 1000 identical revocations were coalesced while waiting.
 	if n := ft.allNotes(); len(n) != 1 {
 		t.Fatalf("%d notices, want 1", len(n))
+	}
+}
+
+// Revocations have their own worker: a slow registry read (owner drain
+// lookups) does not hold them up.
+func TestRevokeNotBehindRegistryReads(t *testing.T) {
+	s := newUnitServer(t, nil)
+	ft := userTarget("u1", "usr_1", "team_1")
+	s.register(ft)
+	release := make(chan struct{})
+	defer close(release)
+	s.enqueue(s.jobs, "slow-read", func(context.Context) { <-release })
+	s.Revoke("user:usr_1")
+	deadline := time.Now().Add(5 * time.Second)
+	for ft.closedWith() != reasonRevoked {
+		if time.Now().After(deadline) {
+			t.Fatal("the revocation waited for the registry read")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 

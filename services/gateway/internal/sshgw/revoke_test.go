@@ -9,6 +9,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/sshgw"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
@@ -200,4 +201,17 @@ func TestOwnerDrainE2E(t *testing.T) {
 	if l := f.waitLog(t); l["closeReason"] != "drain" {
 		t.Fatalf("log %v", l)
 	}
+}
+
+// A PTY opened after the drain deadline became known gets the warning at
+// once (the first one went out before it was interactive).
+func TestDrainWarnOnPTY(t *testing.T) {
+	f, c, _ := userClient(t, func(cfg *config.Config) { cfg.SSHDrainDeadline = 10 * time.Minute })
+	f.inst.SSH().Drain(time.Now())
+	if r := run(t, c, "echo still"); r.err != nil || r.stdout != "still\n" {
+		t.Fatalf("exec during the drain: %v", r)
+	}
+	stderr := openShell(t, c)
+	want := "sbx: gateway restarting, this SSH session will close in 10 min; reconnect to continue\r\n"
+	readWithin(t, stderr, want, 5*time.Second)
 }

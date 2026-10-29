@@ -91,7 +91,7 @@ func (s *Server) Revoke(payload string) {
 		s.log.Warn("sshgw: ignoring sbx_ssh_revoke payload", "payload", payload, "err", err)
 		return
 	}
-	s.enqueue(s.jobs, "revoke:"+payload, func(context.Context) {
+	s.enqueue(s.revokes, "revoke:"+payload, func(context.Context) {
 		var hit []target
 		for _, t := range s.targets() {
 			if r.matches(t.ident()) {

@@ -208,6 +208,28 @@ func (ss *session) notify(msg string, interactiveOnly bool) <-chan struct{} {
 	return done
 }
 
+// ptyOpened announces a known drain deadline on ch, which just became
+// interactive: the announcement of the deadline went out before. The
+// write runs in the background like notify's.
+func (ss *session) ptyOpened(ch *channel) {
+	remaining := ss.srv.drainRemaining(ss)
+	if remaining <= 0 {
+		return
+	}
+	ss.mu.Lock()
+	if ss.ended {
+		ss.mu.Unlock()
+		return
+	}
+	ss.wg.Add(1)
+	ss.mu.Unlock()
+	line := []byte(drainWarning(remaining) + "\r\n")
+	go func() {
+		defer ss.wg.Done()
+		_, _ = lockedStderr{ch}.Write(line)
+	}()
+}
+
 // closeWithReason records reason (unless an earlier one is set) and closes
 // the client and backend conns, which ends the session.
 func (ss *session) closeWithReason(reason string) {

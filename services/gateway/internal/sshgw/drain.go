@@ -41,6 +41,11 @@ const drainWarningFormat = "sbx: gateway restarting, this SSH session will close
 // lastWarning is how long before the deadline the second warning goes out.
 const lastWarning = time.Minute
 
+// rewarnShift is how much earlier a new deadline must be to be announced
+// again; a smaller shift (the same drain seen through two clocks) only
+// moves the timers.
+const rewarnShift = time.Second
+
 // jobTimeout bounds one queued registry read or recheck call batch.
 const jobTimeout = 30 * time.Second
 
@@ -100,12 +105,17 @@ func (s *Server) StopAccepting() {
 // the tunnel of some sessions' backend streams and moves their deadlines
 // earlier when it drains. "" re-reads every owner of an open session. An
 // instance that is gone is forgotten: its streams end by themselves.
+//
+// The own instance is never read: its drain is known from Drain, and its
+// row's drain_started_at is a slightly different instant.
 func (s *Server) InstanceChanged(ctx context.Context, id string) {
 	if id != "" {
-		s.readOwner(ctx, id)
+		if id != s.cfg.Self {
+			s.readOwner(ctx, id)
+		}
 		return
 	}
-	seen := map[string]bool{}
+	seen := map[string]bool{s.cfg.Self: true}
 	for _, t := range s.targets() {
 		if o := t.ownerInstance(); o != "" && !seen[o] {
 			seen[o] = true
@@ -148,7 +158,9 @@ func (s *Server) MachineChanged(ctx context.Context, machineID string) {
 		}
 	}
 	for o := range stale {
-		s.readOwner(ctx, o)
+		if o != s.cfg.Self {
+			s.readOwner(ctx, o)
+		}
 	}
 }
 
@@ -208,9 +220,10 @@ func (s *Server) readOwner(ctx context.Context, id string) {
 
 // applyDeadline recomputes the deadline of t: min(own drain start, drain
 // start of its owner instance) + DrainDeadline. A deadline only ever moves
-// earlier. Each new deadline is announced at once and, when more than a
-// minute is left, again a minute before it; at the deadline the connection
-// closes.
+// earlier. Each new deadline is announced at once (unless it moved by less
+// than rewarnShift) and, when more than a minute is left, again a minute
+// before it; at the deadline the connection closes. A PTY opened later
+// gets the announcement when it opens (session.ptyOpened).
 func (s *Server) applyDeadline(t target) {
 	owner := t.ownerInstance()
 	s.sessMu.Lock()
@@ -232,6 +245,9 @@ func (s *Server) applyDeadline(t target) {
 		s.sessMu.Unlock()
 		return
 	}
+	// A first deadline, or one that moved earlier by rewarnShift or more,
+	// is announced.
+	announce := e.at.IsZero() || e.at.Sub(at) >= rewarnShift
 	e.stop()
 	e.at = at
 	e.gen++
@@ -248,7 +264,25 @@ func (s *Server) applyDeadline(t target) {
 		t.closeWithReason(reasonDrain)
 		return
 	}
-	t.notify(drainWarning(remaining), true)
+	if announce {
+		t.notify(drainWarning(remaining), true)
+	}
+}
+
+// drainRemaining returns the time left until t's drain deadline, or 0
+// when none is known or it has passed.
+func (s *Server) drainRemaining(t target) time.Duration {
+	s.sessMu.Lock()
+	e, ok := s.sessions[t]
+	var at time.Time
+	if ok {
+		at = e.at
+	}
+	s.sessMu.Unlock()
+	if at.IsZero() {
+		return 0
+	}
+	return max(at.Sub(s.clock.Now()), 0)
 }
 
 // drainTimer is the second warning (final false) or the close at the

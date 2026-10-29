@@ -183,6 +183,78 @@ func TestOwnerDrainDeadline(t *testing.T) {
 	s.InstanceChanged(context.Background(), "gw-gone")
 }
 
+// The own drain is authoritative: the NOTIFY of the own instance row does
+// not re-read it (its drain_started_at is written a moment earlier than
+// Drain's start, which would warn a second time).
+func TestOwnDrainNotReread(t *testing.T) {
+	clk := newFakeClock()
+	insts := &fakeInstances{}
+	s := drainServer(t, clk, func(c *Config) {
+		c.Instances = insts
+		c.Self = "gw-self"
+	})
+	ft := userTarget("u1", "usr_1", "team_1")
+	ft.owner = "gw-self"
+	s.register(ft)
+	t0 := clk.Now()
+	dbStart := t0.Add(-400 * time.Millisecond)
+	insts.set("gw-self", &dbStart)
+	s.Drain(t0)
+	expectMessages(t, ft, warning(15))
+	s.InstanceChanged(context.Background(), "gw-self")
+	s.InstanceChanged(context.Background(), "")
+	if got := insts.readIDs(); len(got) != 0 {
+		t.Fatalf("instance reads %q, want none", got)
+	}
+	expectMessages(t, ft, warning(15))
+	clk.Advance(15*time.Minute - time.Millisecond)
+	if ft.closedWith() != "" {
+		t.Fatal("closed before the own deadline")
+	}
+	clk.Advance(time.Millisecond)
+	if ft.closedWith() != reasonDrain {
+		t.Fatalf("close reason %q", ft.closedWith())
+	}
+}
+
+// A deadline that moves earlier by less than a second is rescheduled
+// without a second warning; by a second or more it warns again.
+func TestDrainSmallShiftNoRewarn(t *testing.T) {
+	clk := newFakeClock()
+	insts := &fakeInstances{}
+	s := drainServer(t, clk, func(c *Config) { c.Instances = insts })
+	ft := userTarget("u1", "usr_1", "team_1")
+	ft.owner = "gw-a"
+	s.register(ft)
+	t0 := clk.Now()
+	s.Drain(t0)
+	expectMessages(t, ft, warning(15))
+
+	near := t0.Add(-500 * time.Millisecond)
+	insts.set("gw-a", &near)
+	s.InstanceChanged(context.Background(), "gw-a")
+	expectMessages(t, ft, warning(15))
+
+	clk.Advance(14 * time.Minute)
+	expectMessages(t, ft, warning(15), warning(1))
+	clk.Advance(time.Minute - 500*time.Millisecond)
+	if ft.closedWith() != reasonDrain {
+		t.Fatalf("close reason %q at the moved deadline", ft.closedWith())
+	}
+
+	ft2 := userTarget("u2", "usr_2", "team_1")
+	ft2.owner = "gw-b"
+	clk2 := newFakeClock()
+	insts2 := &fakeInstances{}
+	s2 := drainServer(t, clk2, func(c *Config) { c.Instances = insts2 })
+	s2.register(ft2)
+	s2.Drain(clk2.Now())
+	far := clk2.Now().Add(-time.Second)
+	insts2.set("gw-b", &far)
+	s2.InstanceChanged(context.Background(), "gw-b")
+	expectMessages(t, ft2, warning(15), warning(15))
+}
+
 func TestMachineChanged(t *testing.T) {
 	clk := newFakeClock()
 	insts := &fakeInstances{}

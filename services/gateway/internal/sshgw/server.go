@@ -101,9 +101,11 @@ type Server struct {
 	cancel context.CancelFunc
 
 	clock Clock
-	// jobs runs revocations and registry reads, rechecks runs Recheck;
-	// both are started by the first enqueue and end with Close.
-	jobs, rechecks *jobQueue
+	// revokes runs revocations, jobs the registry reads of owner drains,
+	// rechecks runs Recheck: a slow registry or api does not delay a
+	// revocation. The workers are started by the first enqueue and end
+	// with Close.
+	revokes, jobs, rechecks *jobQueue
 
 	mu       sync.Mutex
 	closed   bool
@@ -185,6 +187,7 @@ func New(cfg Config) (*Server, error) {
 		cfg:        cfg,
 		log:        cfg.Logger,
 		clock:      cfg.Clock,
+		revokes:    newJobQueue(),
 		jobs:       newJobQueue(),
 		rechecks:   newJobQueue(),
 		lns:        map[net.Listener]struct{}{},
@@ -278,6 +281,7 @@ func (s *Server) enqueue(q *jobQueue, key string, fn func(ctx context.Context)) 
 	}
 	if !s.workers {
 		s.workers = true
+		s.wg.Go(func() { s.revokes.run(s.ctx) })
 		s.wg.Go(func() { s.jobs.run(s.ctx) })
 		s.wg.Go(func() { s.rechecks.run(s.ctx) })
 	}
