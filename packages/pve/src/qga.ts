@@ -17,16 +17,17 @@ export interface GuestInterface {
 }
 
 /**
- * An exec-status call timed out and the guest answered it later (qemu-ga hands out the status of
- * an exited process once), or qemu-ga restarted and forgot the PID. The exit code and output are
- * gone; the command did start.
+ * qemu-ga no longer knows a PID we started and have not read an exit status for: it restarted
+ * (a restarted agent forgets all PIDs), or an exec-status call that timed out was answered later
+ * and consumed the status (qemu-ga hands out the status of an exited process once). The exit code
+ * and output are gone; the command did start.
  */
 export class QgaExecStatusLostError extends Error {
 	readonly vmid: number;
 	readonly pid: number;
 	constructor(vmid: number, pid: number, cause: unknown) {
 		super(
-			`exit status of guest PID ${pid} on VM ${vmid} was lost after a QGA timeout or restart`,
+			`exit status of guest PID ${pid} on VM ${vmid} was lost (qemu-ga restarted or a timed-out call consumed it)`,
 			{ cause },
 		);
 		this.name = "QgaExecStatusLostError";
@@ -87,10 +88,6 @@ export class Qga {
 			params,
 		);
 		const deadline = Date.now() + (opts.timeoutMs ?? 30_000);
-		// exec-status is polled again after a timeout or while the agent restarts: harmless while
-		// the process runs, and the only way to tell a slow guest from a consumed status. A restarted
-		// qemu-ga does not know the PID any more.
-		let interrupted = false;
 		for (let delay = 50; ; delay = Math.min(delay * 2, 500)) {
 			let st:
 				| {
@@ -103,19 +100,16 @@ export class Qga {
 			try {
 				st = await this.#api.get(this.#path(vmid, "exec-status"), { pid });
 			} catch (err) {
-				if (
-					err instanceof QgaTimeoutError ||
-					(err instanceof PveApiError &&
-						/guest agent is not running/i.test(err.message))
-				)
-					interrupted = true;
-				else if (
-					interrupted &&
-					err instanceof PveApiError &&
-					/PID \d+ does not exist/.test(err.message)
-				)
+				if (!(err instanceof PveApiError)) throw err;
+				if (/PID \d+ does not exist/.test(err.message))
 					throw new QgaExecStatusLostError(vmid, pid, err);
-				else throw err;
+				// Polling on after a timeout or while the agent restarts is harmless: the status of a
+				// running process is not consumed, and a lost one shows up as a missing PID.
+				if (
+					!(err instanceof QgaTimeoutError) &&
+					!/guest agent is not running/i.test(err.message)
+				)
+					throw err;
 			}
 			if (st?.exited)
 				return {

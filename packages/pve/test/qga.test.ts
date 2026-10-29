@@ -104,15 +104,16 @@ describe("Qga.exec", () => {
 		).rejects.toBeInstanceOf(QgaExecStatusLostError);
 	});
 
-	it("passes through a vanished PID without a prior timeout", async () => {
+	it("reports a lost exit status when the agent restarted between two polls", async () => {
 		const api = new ScriptedPve({
 			exec: [{ pid: 42 }],
-			"exec-status": [pidGone],
+			"exec-status": [running, pidGone],
 		});
 		const err = await new Qga(api, "pve")
 			.exec(500, ["true"])
 			.catch((e: unknown) => e);
-		expect(err).toBe(pidGone);
+		expect(err).toBeInstanceOf(QgaExecStatusLostError);
+		expect((err as QgaExecStatusLostError).cause).toBe(pidGone);
 	});
 
 	it("never repeats exec after a timeout of the exec call itself", async () => {
