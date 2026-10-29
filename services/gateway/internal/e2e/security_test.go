@@ -455,11 +455,21 @@ func TestSSHPrincipalsAcrossInstances(t *testing.T) {
 
 	t.Run("cert for X used for Y", func(t *testing.T) {
 		for _, front := range []*testenv.Inst{c.A, c.B} {
+			before := c.env.API.Calls("AuthorizeSSH")
+			_, nrec := rec.last()
 			if cl, err := dial(front, slugY, certX); err == nil {
 				_ = cl.Close()
 				t.Fatalf("via %s: login to Y with X's certificate allowed", front.Name)
 			}
-			r, _ := rec.last()
+			// This front asked api itself: a fresh call, not the other
+			// front's earlier one.
+			if n := c.env.API.Calls("AuthorizeSSH") - before; n < 1 {
+				t.Fatalf("via %s: api not called", front.Name)
+			}
+			r, n := rec.last()
+			if n == nrec {
+				t.Fatalf("via %s: no new request recorded", front.Name)
+			}
 			if r.Sandbox != slugY || r.Certificate == nil || r.Certificate.Principal != "sb_X" || r.Certificate.KeyID != "sbx:user:usr_1" {
 				t.Fatalf("via %s: api got %+v (certificate %+v)", front.Name, r, r.Certificate)
 			}

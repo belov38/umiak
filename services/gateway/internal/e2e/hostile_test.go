@@ -194,13 +194,19 @@ func containsStr(list []string, s string) bool {
 }
 
 // prefaceListener counts the conns whose first bytes are the HTTP/2
-// preface or carry the peer service token: what a gateway instance would
-// send to an address it believed to be a peer. Port probes of other local
-// processes (a plain GET, a TLS hello) are not counted.
+// preface, a CONNECT or the peer service token: what a gateway instance
+// would send to an address it believed to be a peer. Port probes of other
+// local processes (a plain GET, a TLS hello) are not counted. Every conn
+// is counted on accept; hits waits until each accepted conn was
+// classified, so a late or slow conn cannot slip past the assertion.
 type prefaceListener struct {
-	ln  net.Listener
-	hit atomic.Int64
+	ln                   net.Listener
+	accepted, classified atomic.Int64
+	hit                  atomic.Int64
 }
+
+// prefaceReadTimeout bounds the classification read of one conn.
+const prefaceReadTimeout = 2 * time.Second
 
 func newPrefaceListener(t *testing.T) *prefaceListener {
 	t.Helper()
@@ -217,10 +223,15 @@ func newPrefaceListener(t *testing.T) *prefaceListener {
 			if err != nil {
 				return
 			}
+			p.accepted.Add(1)
 			go func() {
+				defer p.classified.Add(1)
 				defer func() { _ = c.Close() }()
-				_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
-				b, _ := io.ReadAll(io.LimitReader(c, 4096))
+				_ = c.SetReadDeadline(time.Now().Add(prefaceReadTimeout))
+				// The first bytes decide; a peer sends them at once.
+				b := make([]byte, 4096)
+				n, _ := io.ReadAtLeast(c, b, len("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"))
+				b = b[:n]
 				if bytes.HasPrefix(b, []byte("PRI * HTTP/2.0")) || bytes.Contains(b, []byte(testenv.PeerToken)) ||
 					bytes.HasPrefix(b, []byte("CONNECT")) {
 					p.hit.Add(1)
@@ -233,6 +244,21 @@ func newPrefaceListener(t *testing.T) *prefaceListener {
 		<-done
 	})
 	return p
+}
+
+// hits returns the number of peer-like conns once every conn accepted so
+// far (and any that arrives within the next 100 ms) was classified.
+func (p *prefaceListener) hits(t *testing.T) int64 {
+	t.Helper()
+	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(prefaceReadTimeout + time.Second)
+	for p.classified.Load() < p.accepted.Load() {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d conns not classified", p.accepted.Load()-p.classified.Load(), p.accepted.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return p.hit.Load()
 }
 
 func (p *prefaceListener) URL() string { return "http://" + p.ln.Addr().String() }
@@ -392,8 +418,7 @@ func TestHostileApp(t *testing.T) {
 				t.Fatalf("answer = %v, Location %q; want 302 %s", a, a.header.Get("Location"), loc)
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
-		if n := attacker.hit.Load(); n != 0 {
+		if n := attacker.hits(t); n != 0 {
 			t.Fatalf("redirect target contacted %d times", n)
 		}
 	})
@@ -459,13 +484,31 @@ func TestHostileApp(t *testing.T) {
 				"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nsmuggled", true
 		})
 		r := dialRawH1(t, c, c.A, host)
-		expectGatewayError(t, "h1 answer", r.do(t, "GET / HTTP/1.1\r\nHost: "+host+"\r\n\r\n"), http.StatusBadGateway, "upstream_error")
-		a := r.do(t, "GET /next HTTP/1.1\r\nHost: "+echoHost+"\r\n\r\n")
-		if a.status != http.StatusOK || !bytes.Contains(a.body, []byte(`"Path":"/next"`)) {
-			t.Fatalf("next request on the same client conn = %v", a)
+		noSmuggle := func(what string, a answer) {
+			t.Helper()
+			if bytes.Contains(a.body, []byte("smuggled")) {
+				t.Fatalf("%s: the smuggled response reached the client: %v", what, a)
+			}
 		}
-		// And the h2 path.
-		expectGatewayError(t, "h2 answer", browserGet(t, host, nil), http.StatusBadGateway, "upstream_error")
+		for i := range 3 {
+			// The bad label again on the same client conn: another 502
+			// each time, never the bytes the app queued behind its answer.
+			what := fmt.Sprintf("h1 answer %d", i)
+			a := r.do(t, "GET / HTTP/1.1\r\nHost: "+host+"\r\n\r\n")
+			noSmuggle(what, a)
+			expectGatewayError(t, what, a, http.StatusBadGateway, "upstream_error")
+			a = r.do(t, "GET /next HTTP/1.1\r\nHost: "+echoHost+"\r\n\r\n")
+			noSmuggle("next request", a)
+			if a.status != http.StatusOK || !bytes.Contains(a.body, []byte(`"Path":"/next"`)) {
+				t.Fatalf("next request on the same client conn = %v", a)
+			}
+		}
+		// And the h2 path, twice.
+		for range 2 {
+			a := browserGet(t, host, nil)
+			noSmuggle("h2 answer", a)
+			expectGatewayError(t, "h2 answer", a, http.StatusBadGateway, "upstream_error")
+		}
 	})
 }
 
@@ -600,8 +643,7 @@ func TestHostileAgent(t *testing.T) {
 			})
 		}
 	}
-	time.Sleep(100 * time.Millisecond)
-	if n := attacker.hit.Load(); n != 0 {
+	if n := attacker.hits(t); n != 0 {
 		t.Fatalf("the attacker's instance URL was contacted %d times", n)
 	}
 }
