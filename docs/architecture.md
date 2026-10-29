@@ -49,7 +49,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | `apps/worker` | TS, pg-boss | Машины состояний sandbox и machine, warm pool, операции Proxmox, снапшоты и fork, auto-stop, очистка |
 | `apps/web` | TS, Next.js + Payload 3 | `/admin`: операторы (пользователи, команды, ключи, шаблоны, размеры, квоты). `/app`: клиентский дашборд (список sandbox, терминал xterm.js, iframe рабочего стола, логи). С sandbox работает только через `apps/api` |
 | `apps/cli` | TS (Bun compile) | Клиент публичного API |
-| `apps/mcp` | TS | MCP-сервер поверх публичного API |
+| `apps/mcp` | TS | MCP-сервер поверх публичного API и `@sbx/sdk`: stdio (`sbx mcp` в бинарнике CLI) и Streamable HTTP (`api.<domain>/mcp`, Deployment `mcp`); `docs/specs/s11-mcp.md` |
 | `packages/sdk-ts`, `sdk-py` | генерация + фасады | Из OpenAPI; хелперы ожидания, стрима с переподключением, загрузки, PTY |
 | `packages/auth` | TS | Формат API-ключей, scopes, интерфейс `IdentityStore` (общий для `api` и `web`) |
 | `services/guest-agent` | Go | Агент внутри VM (Linux: systemd unit, Windows: служба) |
@@ -175,13 +175,13 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Роли берутся из групп Keycloak: группа из `SBX_OPERATOR_GROUPS` → оператор платформы. Права оператора действуют только в браузерной сессии, не по API-ключу и не по JWT CLI. Команды и роли `owner`/`member` — в Payload, при первом входе создаётся личная команда (S8 §6).
 - Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy. oauth2-proxy работает в upstream-режиме и маршрутизирует `app.<domain>`: `/api/*` (без `/api`), `/sbx-auth/*` → `api :8081`, остальное → `web` (S8 §5.1).
 
-**Люди в CLI, SDK и локальном MCP — Keycloak JWT, без личных долгоживущих ключей** (S7 §7.6, §7.10).
+**Люди в CLI, SDK и MCP — Keycloak JWT, без личных долгоживущих ключей** (S7 §7.6, §7.10). Удалённый MCP принимает тот же JWT; вход через браузер — клиент `sbx-mcp` (S11 §6.4).
 - `sbx login` — OAuth 2.0 Device Authorization Grant с публичным клиентом `sbx-cli`. Access token живёт 5 min, refresh token привязан к SSO-сессии Keycloak и лежит в хранилище ОС (запасной вариант — файл `0600`). SDK и MCP берут токен у CLI (`sbx auth token`).
 - `api` сам проверяет JWT (JWKS, `iss`, `aud=sbx-api`, `exp`), без introspection на запрос; `sub` → тот же пользователь Payload, что в браузере. Выключенный пользователь не обновит токен: доступ кончается за 5 min.
 
 **Автоматизация и CI — командные ключи `sbx_`** (S7 §7.2). Принадлежат команде, выпускает `owner` в дашборде, создатель записан для аудита; scopes «ресурс × действие», срок 90 d по умолчанию, максимум 365 d. Уход создателя ключи не выключает, их отзывают `owner`-ы.
 
-Маршруты `/v1/*` с `Authorization: Bearer` (JWT или `sbx_`) идут на `api.<domain>` мимо oauth2-proxy: oauth2-proxy — только для браузера.
+Маршруты `/v1/*` с `Authorization: Bearer` (JWT или `sbx_`) идут на `api.<domain>` мимо oauth2-proxy: oauth2-proxy — только для браузера. Пути `/mcp` и `/.well-known/oauth-protected-resource/mcp` на том же хосте идут в Deployment `mcp` (S11 §6.2).
 
 **Деактивация (offboarding, вариант A, S8 §20.1).** `worker` раз в 5 min читает пользователей через Keycloak Admin API (клиент `sbx-worker`). Выключенный или удалённый пользователь деактивируется в Payload; его стримы, PTY и SSH-сессии закрываются сразу; `owner`-ы его команд получают список командных ключей, которые он создал. Ключи автоматически не отзываются.
 
@@ -189,9 +189,10 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 | Что | Настройка |
 |---|---|
-| Общий client scope `groups` | Group Membership mapper → claim `groups`, Full group path выключен; подключён по умолчанию к `oauth2-proxy` и `sbx-cli`, чтобы браузер и CLI получали группы в одном формате |
+| Общий client scope `groups` | Group Membership mapper → claim `groups`, Full group path выключен; подключён по умолчанию к `oauth2-proxy`, `sbx-cli` и `sbx-mcp`, чтобы браузер и CLI получали группы в одном формате |
 | Клиент `oauth2-proxy` | конфиденциальный (Client authentication on), Standard flow; Audience mapper на себя; scope `groups` |
 | Клиент `sbx-cli` | публичный (Client authentication off), только OAuth 2.0 Device Authorization Grant; Audience mapper (Included Client Audience `sbx-api`, Add to access token); default scopes `basic` (`sub`), `email`, `profile`, `groups`; `offline_access` убран и из default, и из optional (refresh не переживает SSO-сессию); lightweight access token выключен |
+| Клиент `sbx-mcp` | публичный, только Standard flow (authorization code) с PKCE `S256`; redirect URIs `http://127.0.0.1:33418/*`, `http://localhost:33418/*`; Audience mapper `sbx-api`; scopes и запрет `offline_access` — как у `sbx-cli`; вход в удалённый MCP через браузер (S11 §6.4) |
 | Клиент `sbx-api` | только аудитория: без flow, токенов себе не получает |
 | Клиент `sbx-worker` | конфиденциальный, только Service accounts; роль `view-users` клиента `realm-management` |
 | Сроки | Access Token Lifespan 5 min; SSO Session Idle 24 h; SSO Session Max 7 d (вход в CLI раз в неделю, при ежедневной работе); Client Session Idle/Max — как у realm; Revoke Refresh Token выключен (CLI обновляет под блокировкой); device code 600 s, интервал опроса 5 s |
