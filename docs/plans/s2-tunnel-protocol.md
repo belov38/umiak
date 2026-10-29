@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the S2 contract and shared parts: `sbx.tunnel.v1` proto, a Go tunnel library (agent client, gateway acceptor, registry, drain, reverse proxy) and the TS `@sbx/agent-client`, verified with an in-memory transport with fault injection and a `Process` test double.
+**Goal:** Ship the S2 contract and shared parts (incl. a routing `fetch` for agent files, requested by S7): `sbx.tunnel.v1` proto, a Go tunnel library (agent client, gateway acceptor, registry, drain, reverse proxy) and the TS `@sbx/agent-client`, verified with an in-memory transport with fault injection and a `Process` test double.
 
 **Architecture:** One Go module `libs/tunnel` holds everything shared by the guest agent (S3) and the gateway binary (S4): transport interfaces, a WebSocket transport and an in-memory one, the agent-side client (HTTP/2 server on the tunnel), the gateway-side library (HTTP/2 client per tunnel, Postgres registry, fencing, drain, internal reverse proxy). Generated proto code lives in `libs/proto` (Go) and `packages/proto` (TS). `packages/agent-client` routes Connect calls to the owning gateway pod and resumes attach streams by offset.
 
@@ -485,7 +485,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 
 ### Task 11: TS `@sbx/agent-client`
 
-**Files:** Create `packages/agent-client/{package.json,tsconfig.json,vitest.config.ts}`, `src/{index.ts,constants.ts,registry.ts,pg-registry.ts,transport.ts,errors.ts,attach.ts}`, `test/{pg-registry.test.ts,transport.test.ts,attach.test.ts,helpers/pg.ts,helpers/fake-gateway.ts}`.
+**Files:** Create `packages/agent-client/{package.json,tsconfig.json,vitest.config.ts}`, `src/{index.ts,constants.ts,registry.ts,pg-registry.ts,routing.ts,transport.ts,fetch.ts,errors.ts,attach.ts}`, `test/{pg-registry.test.ts,transport.test.ts,fetch.test.ts,attach.test.ts,helpers/pg.ts,helpers/fake-gateway.ts}`.
 
 **Interfaces:**
 - `package.json`: name `@sbx/agent-client`, deps `@sbx/proto` (`workspace:*`), `@connectrpc/connect`, `@connectrpc/connect-node`, `@bufbuild/protobuf`, `pg`; dev `@types/pg`. Same exports pattern as `@sbx/proto`; vitest resolves the `source` condition (`resolve.conditions` and `ssr.resolve.conditions`), tsconfig `customConditions: ["source"]`. Scripts `build`, `typecheck`, `test` (`vitest run`).
@@ -515,8 +515,16 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
     constructor(opts: AgentClientOptions);
     transport(machineId: string): Transport;  // Connect Transport with routing and retries
     requireCapability(machineId: string, capability: string): Promise<void>; // AgentOutdatedError
+    // Routed plain HTTP to the agent's /files/* (S7: Range downloads, chunked resumable uploads).
+    fetch(machineId: string, path: string, init?: AgentFetchInit): Promise<Response>;
+  }
+  export interface AgentFetchInit extends Omit<RequestInit, "body"> {
+    // Resendable bodies (string, Uint8Array, Blob, ArrayBuffer) or a factory are retried;
+    // a one-shot ReadableStream body is sent once and never retried after it started.
+    body?: BodyInit | (() => BodyInit);
   }
   ```
+  `fetch` builds `<internal_url>/v1/machines/<machineId>/files<path>` (`path` is `""` or starts with `/`, query kept), adds `Authorization: Bearer <serviceToken>`, keeps caller headers (`Range`, `If-Range`, `Sbx-Request-Id`) on every attempt, and uses the same lookup/421/503/30 s wait/attempt-cap loop as the Connect transport (one shared routing helper, not a copy). Retried: `421` (to `sbx-instance-url`), `503` with `sbx-error-code: agent_unavailable` (wait for change), network errors before a response — only when the body is absent or resendable. Any other status (including agent `4xx/5xx` and `503` without our code) is returned to the caller as the `Response`; the response body is streamed, never buffered. After `waitForAgentMs` → `AgentUnavailableError`.
   `baseUrl = <internal_url>/v1/machines/<machineId>/rpc`, header `Authorization: Bearer <serviceToken>`. Retry loop for `unary` and for `stream` until response headers arrive: `moved` (header `sbx-error-code: machine_moved`) → invalidate, next attempt goes to `sbx-instance-url`; `unavailable` (`agent_unavailable`, `Code.Unavailable`, connection errors) → invalidate, if lookup is empty wait with `waitForChange(pollIntervalMs)` until `waitForAgentMs` from the first miss, then `AgentUnavailableError`; `fatal` (`InvalidArgument`, `NotFound`, `PermissionDenied`, `FailedPrecondition`, everything else) → rethrow. Server-stream input is buffered so it can be resent. Retries keep the caller's headers (`Sbx-Request-Id`) unchanged.
 - `attach.ts`:
   ```ts
@@ -543,6 +551,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 - [ ] **Step 1: Failing tests:**
   - `pg-registry.test.ts` (Postgres via `helpers/pg.ts`: env `SBX_TEST_DATABASE_URL` or Docker `postgres:18.6-alpine`, applies `libs/tunnel/registry/migrations/*.sql`): lookup connected session returns route; stale instance → `undefined` (Review Focus 5); disconnected → `undefined`; cache served without DB hit until a NOTIFY (update row → next lookup sees the new instance within 1 s); `waitForChange` resolves on NOTIFY before timeout and on timeout otherwise.
   - `transport.test.ts` with `helpers/fake-gateway.ts` (Node `http2` servers using `connectNodeAdapter` and the generated `sbx.testing.v1` service under prefix `/v1/machines/<id>/rpc`, plus scripted 421/503 responses with the same headers and JSON bodies as Task 8): unary succeeds; 421 → second attempt hits the URL from `sbx-instance-url` with the same `sbx-request-id`; 503 `agent_unavailable` then registry change → succeeds after `waitForChange`; never connected → `AgentUnavailableError` after `waitForAgentMs` (test 300 ms) with `retryable === true`; `InvalidArgument` → thrown on first attempt (one request seen by the server); stream 421 before headers → retried transparently; `requireCapability` → `AgentOutdatedError` when missing.
+  - `fetch.test.ts` with the fake gateway's `/v1/machines/<id>/files/*` routes: `GET` with `Range: bytes=10-` → `206` body streamed; `421` → retried on the URL from `sbx-instance-url` with `Range` and `Authorization` intact; `503 agent_unavailable` then registry change → succeeds; `PUT ?offset=0` with a `Uint8Array` body retried after `421` with identical bytes; `PUT` with a `ReadableStream` body hitting `421` → not resent (the `421` response is surfaced as `AgentUnavailableError`-free `Response`, status 421, caller decides); agent `404` → returned as the `Response`, one request; never connected → `AgentUnavailableError` after `waitForAgentMs`.
   - `attach.test.ts` with scripted iterables: exact pass-through; overlap trimmed; gap triggers reopen from expected (assert `open` offsets); truncated advances expected; exit with matching ends finishes; exit with lagging ends reopens; retryable error mid-stream reopens; fatal error throws; more than `maxAttempts` failures without progress throws.
 - [ ] **Step 2:** `pnpm --filter @sbx/agent-client test` → FAIL.
 - [ ] **Step 3:** Implement.
