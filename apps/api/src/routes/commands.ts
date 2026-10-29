@@ -18,7 +18,11 @@ import { agentErrorToHttp, isAgentUnreachable } from "../agent/errors.ts";
 import type { AgentCommandInfo, AgentStream } from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
-import { commandResultOf, followCommand } from "../commands/attach.ts";
+import {
+	commandResultOf,
+	DEFAULT_ATTACH_MAX_ATTEMPTS,
+	followCommand,
+} from "../commands/attach.ts";
 import { collectSync, type SyncResult } from "../commands/collect.ts";
 import {
 	type CloseFrame,
@@ -521,6 +525,8 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 					]),
 					maxDurationMs: timings.maxDurationMs,
 					heartbeatMs: timings.heartbeatMs,
+					attachMaxAttempts:
+						timings.attachMaxAttempts ?? DEFAULT_ATTACH_MAX_ATTEMPTS,
 					requestId: c.var.requestId,
 					head: () => ({
 						type: "started",
@@ -554,6 +560,8 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 						signal: AbortSignal.any([close.signal, c.req.raw.signal]),
 						maxDurationMs: Number.POSITIVE_INFINITY,
 						heartbeatMs: timings.heartbeatMs,
+						attachMaxAttempts:
+							timings.attachMaxAttempts ?? DEFAULT_ATTACH_MAX_ATTEMPTS,
 						requestId: c.var.requestId,
 					},
 				),
@@ -694,6 +702,8 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				signal: AbortSignal.any([close.signal, gone.signal, c.req.raw.signal]),
 				maxDurationMs: deps.commandTimings.maxDurationMs,
 				heartbeatMs: deps.commandTimings.heartbeatMs,
+				attachMaxAttempts:
+					deps.commandTimings.attachMaxAttempts ?? DEFAULT_ATTACH_MAX_ATTEMPTS,
 				requestId: c.var.requestId,
 				pty,
 				head: (o) => ({ type: "attached", commandId: pub, encoding, ...o }),

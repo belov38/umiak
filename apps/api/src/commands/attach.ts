@@ -42,13 +42,32 @@ export interface CommandTimings {
 	heartbeatMs: number;
 	/** A stream ends with `reconnect {max_duration}` after this (§9.7). */
 	maxDurationMs: number;
+	/** Reopens of the agent attach without progress before giving up (default 20). */
+	attachMaxAttempts?: number;
 }
+
+export const DEFAULT_ATTACH_MAX_ATTEMPTS = 20;
 
 export const DEFAULT_COMMAND_TIMINGS: CommandTimings = {
 	readyWaitMs: 60_000,
 	heartbeatMs: 15_000,
 	maxDurationMs: 3_600_000,
+	attachMaxAttempts: DEFAULT_ATTACH_MAX_ATTEMPTS,
 };
+
+/**
+ * resumableAttach gave up after `attempts` reopens without progress. A
+ * reattach is a read, so the stream ends with a retryable
+ * `agent_unavailable` (§9.7 step 1).
+ */
+export class AttachGaveUpError extends Error {
+	constructor(attempts: number, cause: unknown) {
+		super(`the agent attach made no progress after ${attempts} attempts`, {
+			cause,
+		});
+		this.name = "AttachGaveUpError";
+	}
+}
 
 export type StreamOffsets = Record<AgentStream, number>;
 
@@ -64,6 +83,8 @@ export interface FollowOptions {
 	heartbeatMs: number;
 	/** Request-Id of `error` frames. */
 	requestId: string;
+	/** See CommandTimings.attachMaxAttempts. */
+	attachMaxAttempts?: number;
 	/** A PTY command (one stream `pty`); else stdout and stderr. */
 	pty?: boolean;
 	/** The first frame, from the resolved start offsets (`attached`, `started`). */
@@ -194,6 +215,7 @@ async function* source(
 	start: StreamOffsets,
 	follow: boolean,
 	signal: AbortSignal,
+	maxAttempts: number,
 ): AsyncGenerator<Ev> {
 	if (!follow) {
 		const req = {
@@ -208,9 +230,14 @@ async function* source(
 		}
 		return;
 	}
+	// Opens since the last progress: a fatal error fails the first one, so
+	// an error after maxAttempts of them is resumableAttach giving up.
+	let opens = 0;
 	const it = resumableAttach<AgentAttachEvent>({
-		open: (o, sig) =>
-			deps.agent.attach(
+		maxAttempts,
+		open: (o, sig) => {
+			opens++;
+			return deps.agent.attach(
 				machineId,
 				{
 					commandId,
@@ -219,7 +246,8 @@ async function* source(
 					ptyOffset: Number(o.pty ?? 0n),
 				},
 				sig,
-			),
+			);
+		},
 		view,
 		offsets: {
 			stdout: BigInt(start.stdout),
@@ -228,7 +256,17 @@ async function* source(
 		},
 		signal,
 	});
-	for await (const o of it) yield fromOutput(o);
+	try {
+		for await (const o of it) {
+			if (o.type === "data" || o.type === "truncated") opens = 0;
+			yield fromOutput(o);
+		}
+	} catch (e) {
+		if (!signal.aborted && opens >= maxAttempts && !isAgentUnreachable(e)) {
+			throw new AttachGaveUpError(opens, e);
+		}
+		throw e;
+	}
 }
 
 type Wake =
@@ -273,7 +311,7 @@ function nextWake(
 function errorOf(
 	e: unknown,
 ): Pick<ErrorFrame, "code" | "message" | "retryable"> {
-	if (isAgentUnreachable(e)) {
+	if (isAgentUnreachable(e) || e instanceof AttachGaveUpError) {
 		return {
 			code: "agent_unavailable",
 			message:
@@ -379,6 +417,7 @@ export async function* followCommand(
 		start,
 		opts.follow,
 		inner.signal,
+		opts.attachMaxAttempts ?? DEFAULT_ATTACH_MAX_ATTEMPTS,
 	);
 	const deadline = Date.now() + opts.maxDurationMs;
 	let lastFrameAt = Date.now();

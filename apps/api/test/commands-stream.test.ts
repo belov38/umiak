@@ -4,7 +4,7 @@
 // (Review Focus 3), heartbeats and the max duration.
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { Frame } from "../src/index.ts";
+import { type AgentApi, AgentCallError, type Frame } from "../src/index.ts";
 import {
 	type Any,
 	bytesOf,
@@ -190,6 +190,104 @@ describe.skipIf(skipPg())("command streams", () => {
 			expect(data.map((f) => f.data).join("")).toBe("x�y�");
 			expect(data.at(-1).nextOffset).toBe(5);
 			expect(frames.at(-1)).toMatchObject({ type: "exit", stdoutOffset: 5 });
+		});
+	});
+
+	describe("when the agent attach fails for good", () => {
+		const timings = {
+			readyWaitMs: 1000,
+			heartbeatMs: 15_000,
+			maxDurationMs: 60_000,
+			attachMaxAttempts: 3,
+		};
+
+		/** Replaces attach for one machine; returns the restore function. */
+		function patchAttach(
+			machineId: string,
+			impl: AgentApi["attach"],
+		): () => void {
+			const real = w.agent.attach.bind(w.agent);
+			w.agent.attach = ((m, req, signal) =>
+				m === machineId
+					? impl(m, req, signal)
+					: real(m, req, signal)) as typeof w.agent.attach;
+			return () => {
+				w.agent.attach = real;
+			};
+		}
+
+		it("resumableAttach gives up without progress: error agent_unavailable, retryable, with offsets", async () => {
+			const s = await readySandbox(w);
+			const fast = w.harness({ deps: { commandTimings: timings } });
+			const start = await fast.request("POST", s.commands, {
+				json: { command: "printf abc; sleep 2", mode: "detached" },
+			});
+			const id = (start.body as Any).id;
+			let opens = 0;
+			// Every attach ends at once without exit: no progress, reopened.
+			const restore = patchAttach(s.machineId, async function* () {
+				opens++;
+				yield* [];
+			});
+			try {
+				const r = await fast.request(
+					"GET",
+					`${s.commands}/${id}/stream?stdoutOffset=2&stderrOffset=0`,
+				);
+				const frames = r.body as Any[];
+				expect(frames.map((f) => f.type)).toEqual(["attached", "error"]);
+				expect(frames[1]).toMatchObject({
+					code: "agent_unavailable",
+					retryable: true,
+					stdoutOffset: 2,
+					stderrOffset: 0,
+				});
+				expect(opens).toBe(3);
+			} finally {
+				restore();
+			}
+			// The retry the frame invites works once the agent is back.
+			const again = await fast.request(
+				"GET",
+				`${s.commands}/${id}/stream?stdoutOffset=2&stderrOffset=0&follow=false`,
+			);
+			expect(
+				bytesOf(again.body as Frame[], "utf8", { stdout: 2 }).stdout.toString(),
+			).toBe("c");
+			await fast.request("POST", `${s.commands}/${id}/kill`, {
+				json: { graceMs: 0 },
+			});
+		});
+
+		it("a fatal agent error (command not found) is not retryable", async () => {
+			const s = await readySandbox(w);
+			const fast = w.harness({ deps: { commandTimings: timings } });
+			const start = await fast.request("POST", s.commands, {
+				json: { command: "sleep 2", mode: "detached" },
+			});
+			const id = (start.body as Any).id;
+			let opens = 0;
+			const restore = patchAttach(s.machineId, async function* () {
+				opens++;
+				yield* [];
+				throw new AgentCallError("command_not_found", "gone");
+			});
+			try {
+				const r = await fast.request("GET", `${s.commands}/${id}/stream`);
+				const frames = r.body as Any[];
+				expect(frames.at(-1)).toMatchObject({
+					type: "error",
+					code: "not_found",
+					retryable: false,
+					stdoutOffset: 0,
+				});
+				expect(opens).toBe(1);
+			} finally {
+				restore();
+			}
+			await fast.request("POST", `${s.commands}/${id}/kill`, {
+				json: { graceMs: 0 },
+			});
 		});
 	});
 
