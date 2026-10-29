@@ -1,23 +1,9 @@
 // Caller identity passed by `api` to SandboxService (S7 §7.5).
 
-/** Scopes of S7 §7.3 (part of the v1 contract: add only, never rename). */
-export const SCOPES = [
-	"sandboxes:read",
-	"sandboxes:write",
-	"sandboxes:delete",
-	"commands:read",
-	"commands:exec",
-	"files:read",
-	"files:write",
-	"ports:write",
-	"ssh:connect",
-	"snapshots:read",
-	"snapshots:write",
-	"environments:read",
-	"environments:write",
-	"keys:admin",
-] as const;
-export type Scope = (typeof SCOPES)[number];
+import type { Scope } from "@sbx/auth";
+
+// Scopes live in @sbx/auth (S7 §7.3); re-exported for core consumers.
+export { SCOPES, type Scope } from "@sbx/auth";
 
 export interface Principal {
 	/** browser session, Keycloak JWT (S7 §7.10) or team API key (S7 §7.2) */

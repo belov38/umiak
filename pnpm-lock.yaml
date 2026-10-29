@@ -244,6 +244,12 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
+  packages/auth:
+    dependencies:
+      ulid:
+        specifier: 3.0.2
+        version: 3.0.2
+
   packages/config:
     dependencies:
       yaml:
@@ -255,6 +261,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@sbx/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@sbx/config':
         specifier: workspace:*
         version: link:../config

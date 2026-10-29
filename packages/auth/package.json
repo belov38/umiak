@@ -1,0 +1,17 @@
+{
+	"name": "@sbx/auth",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Public ids, team API key format, scopes, bearer classification and the IdentityStore contract",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"ulid": "3.0.2"
+	}
+}
