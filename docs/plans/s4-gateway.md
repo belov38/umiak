@@ -104,16 +104,53 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
   - It calls `api` with `SBX_GATEWAY_API_TOKEN_FILE`.
   - The cookie keys env is `SBX_GATEWAY_COOKIE_KEYS_FILE` (§16.2; §8.2 says `SBX_GATEWAY_COOKIE_KEYS`).
 - **Database URL:** `SBX_GATEWAY_DATABASE_URL`, falling back to `DATABASE_URL`, which the compose `*db-env` anchor sets.
-- **State cookie:** `__Host-sbx_state` uses the auth cookie codec with a distinct version tag `v1s`. An auth cookie can never be accepted as a state cookie, and vice versa.
+- **State cookie:** `__Host-sbx_state_<first 8 chars of state>`, one per login in flight, so parallel SSO logins on one label (tabs, session restore) do not overwrite each other. It uses the auth cookie codec with a distinct version tag `v1s`: an auth cookie can never be accepted as a state cookie, and vice versa. The callback reads the cookie of its own state; a callback without one is `401` and is not counted as an auth failure (only a mismatching state cookie or a failed code exchange is). The strip removes every `__Host-sbx_state*` cookie.
 - **SSH auth-failure limit:** counted per failed connection (no successful auth before the handshake ends), not per offered key. Clients with many agent keys would otherwise trip it at once.
 - **h2c apps:** an HTTP/1.1 client request to an `appProtocol: h2c` route is still proxied over h2c, except `Upgrade` requests, which get `502 upstream_error`.
 - **Response header and trailer caps** (not in the spec; protects coalesced browser connections):
   - header block ≤ 64 KiB, else `502 upstream_error`;
   - trailers ≤ 64 KiB and ≤ 100 fields, else dropped and logged.
+- **Upgrades:** only `Upgrade: websocket` on `GET` is forwarded (§7.3 names only WebSocket). Other upgrade tokens are stripped and the request is proxied plainly, which closes h2c smuggling. The preflight bypass never applies to upgrades.
+- **Rate-limit buckets:** the per-IP bucket is checked before the route lookup, the per-label bucket only after a route is found, so unknown labels cannot grow the bucket map. `Retry-After` is rounded up to at least 1 s.
+- **SSH channels:** at most 256 open channels per SSH connection (client- and backend-initiated, all types; `SBX_GATEWAY_SSH_MAX_CHANNELS`). Over the cap the open fails with `ResourceShortage` "sbx: too many open channels". §11 is silent; without a cap one user could pin about 2 MB of gateway memory per channel.
+- **SSH re-check:** the re-check of open sessions after a LISTEN reconnect (§9.5) sends `ssh/authorize` with `"recheck": true`. `api` checks the identity as on a login and skips the certificate validity: the gateway validated the certificate at login, and sessions outlive the 10-minute certificates.
+- **Host case:** an upper-case Host routes to the same label (Host is lower-cased, §4.2). A Host with a port other than `:443` is `404 route_not_found`, also in the local stack (see `deploy/compose/README.gateway.md`).
+- **Tests:**
+  - 1000 WebSockets through one peer are split across two machines on the owner, because the per-machine limit is 800 streams. One A→C h2 connection is asserted.
+  - The refused port in tests is `127.0.0.1:1` (a stable `ECONNREFUSED`).
+  - The 512 MiB upload test uses 64 MiB under the race detector.
+  - OpenSSH e2e: a missing `ssh`/`sshd` skips the test. A failing sshd start or a failing direct-login preflight skips locally, but fails when `CI` is set: the CI job installs OpenSSH for it.
+- **Process (Task 17):**
+  - `SBX_GATEWAY_API_URL` is required. `none` is a dev mode: every route lookup is `503 route_lookup_unavailable`, SSH logins fail, and agent events are logged, acknowledged and dropped (`server.Deps.Sink` is nil and no HTTP sink is built). Other values must be `http(s)` URLs and need `SBX_GATEWAY_API_TOKEN_FILE`.
+  - `serve` also requires `SBX_GATEWAY_SBX_DOMAIN`, `SBX_GATEWAY_TUNNEL_HOST`, the database URL and an `http(s)` `SBX_GATEWAY_INTERNAL_URL` (`config.ValidateServe`). `check-config` runs the same checks.
+  - Two drain knobs for local runs and tests: `SBX_GATEWAY_ENDPOINT_WAIT` (default 5 s, `Timing.EndpointWait`) and `SBX_GATEWAY_DRAIN_TIMEOUT` (default `server.DrainBudget` + 30 s = 950 s). A second SIGTERM/SIGINT cancels the drain and exits with status 1 within 5 s.
+  - `sbx-gateway healthcheck [-url]` exists because the distroless image has no shell or curl.
+  - `sbx-gateway dev-secrets` creates the local secrets (`internal/devsecrets`): a dev CA name-constrained to the stack's names, 397-day leaf certificates, `-owner`/`-worker-owner` to hand the files to the container users.
+  - Image: `golang:1.27.3-trixie` → `gcr.io/distroless/static-debian13:nonroot` (debian13 is the current distroless base). The build runs with `GOWORK=off` through the module's `replace` directives. `services/gateway/Dockerfile.dockerignore` replaces the root `.dockerignore`, which excludes `services/`.
+  - Compose: `deploy/compose/gateway.yaml` works with `-f` or `include:`. It also extends `worker` with `SBX_GATEWAY_SERVICE_TOKEN_FILE` and mounts the secrets directory read-only, not the token file: Docker would create a missing file source as a directory. Host ports are overridable (`GATEWAY_HTTPS_PORT` and others); browsers need `GATEWAY_HTTPS_PORT=443`, since a Host with a port does not route.
 - **Not in this thread:**
   - desktop/TURN (S10): seams only — the desktop kind, the cookie mode `d` allowed by the codec, and a nil `httpproxy.Config.Desktop`;
   - the k8s manifests (S12);
   - the real `api` endpoints (S7).
+
+## Contract changes for other scopes
+
+- **S3 (guest agent):** a failed TCP dial must return an error that wraps `syscall.ECONNREFUSED` (Windows: `WSAECONNREFUSED`) or a timeout `net.Error`. `libs/tunnel` turns it into `502` with `Sbx-Dial-Error: refused|timeout`, and the gateway maps that to `502 app_not_listening` / `504 app_timeout`. The S3 §12 header `Sbx-Error: connection_refused` is replaced by it.
+- **S6 (control plane):**
+  - Sandbox states as in S7 O3: `ready` proxies; `creating`/`starting` → `503 sandbox_starting`; `stopping`/`stopped` → `503 sandbox_stopped`; `deleting`/`deleted` → `404`. `running`/`resuming` are accepted as aliases.
+  - The `sbx_routes` triggers send the slug as the payload, the old and the new slug on a rename, and `*` to flush every route (the global `public` switch).
+- **S7 (api):**
+  - Route response: the optional `kind` (`port` by default, `desktop`).
+  - `ssh/authorize` answers `teamId` in public format, and accepts `"recheck": true` (identity check without the certificate validity).
+  - `api` checks the label of a route lookup: the gateway rejects a route whose `label` differs from the requested one.
+  - Service tokens: the gateway accepts `{"api":[..],"worker":[..],"gateway":[..]}` from `SBX_GATEWAY_SERVICE_TOKENS_FILE` and calls `api` with `SBX_GATEWAY_API_TOKEN_FILE`, which `api` must accept under `gateway` in `SBX_API_SERVICE_TOKENS_FILE`. In the local stack both come from `deploy/compose/secrets/gateway/` (`api-token`, `service-tokens.json` → `api[0]`).
+- **S8 (web):** the IDs in `sbx_ssh_revoke` payloads (`user:`, `member:`, `team:`, `key:`) are compared as opaque strings with `userId`/`apiKeyId`/`teamId` from `ssh/authorize`. Both must be in the public format of the `api` IDs.
+- **S10 (desktop):** seams only. `<slug>-desktop` is parsed as kind `desktop`, the cookie mode `d` is accepted by the codec, and `httpproxy.Config.Desktop` is nil (`404 route_not_found`) until S10 sets a handler. Reserved ports `22,47800,47984,47989,47990,48010`.
+- **S12 (operations):**
+  - `terminationGracePeriodSeconds: 960`; the process bounds its drain at 950 s.
+  - Ports: 8443 TLS (SNI `*.<sbx domain>` and the tunnel host), 2222 SSH, 7000 internal, 9090 metrics/health.
+  - Only PROXY protocol v2 is accepted (`SBX_GATEWAY_PROXY_PROTOCOL=v2`, from `SBX_GATEWAY_PROXY_PROTOCOL_CIDRS`).
+  - Readiness: `/readyz` is 200 while the tunnel gateway runs, the instance does not drain and the certificates are loaded; Postgres and `api` health do not count (§12.3). `/healthz` is liveness only.
 
 ---
 

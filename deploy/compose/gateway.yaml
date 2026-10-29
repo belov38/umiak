@@ -83,7 +83,12 @@ services:
         condition: service_completed_successfully
     healthcheck:
       # Distroless has no shell or curl; the binary checks /readyz itself.
-      test: ["CMD", "/sbx-gateway", "healthcheck", "-url", "http://127.0.0.1:9090/readyz"]
+      test:
+        - CMD
+        - /sbx-gateway
+        - healthcheck
+        - -url
+        - http://127.0.0.1:9090/readyz
       interval: 5s
       timeout: 5s
       retries: 12
