@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import ssh2, { type Client as SshClient } from "ssh2";
 
 /** Transport-independent sbx-node interface; tests use a fake. */
@@ -18,17 +18,43 @@ export class NodeOpsError extends Error {
 	}
 }
 
-/** Raw public keys pinned for host in an OpenSSH known_hosts file (plain host names only). */
-export function parseKnownHosts(text: string, host: string): Buffer[] {
+function hostMatches(pattern: string, names: string[]): boolean {
+	const h = /^\|1\|([^|]+)\|([^|]+)$/.exec(pattern);
+	if (!h) return names.includes(pattern);
+	const salt = Buffer.from(h[1] ?? "", "base64");
+	const want = Buffer.from(h[2] ?? "", "base64");
+	return names.some((n) =>
+		createHmac("sha1", salt).update(n).digest().equals(want),
+	);
+}
+
+/**
+ * Raw public keys pinned for host in an OpenSSH known_hosts file. Like OpenSSH, a non-standard
+ * port is written as [host]:port, and hashed names are supported; wildcard patterns are not.
+ * A key on any @revoked line is never pinned, whatever its host pattern (stricter than OpenSSH,
+ * since wildcards such as "@revoked *" are not matched here). @cert-authority lines are ignored:
+ * host certificates are not supported.
+ */
+export function parseKnownHosts(
+	text: string,
+	host: string,
+	port = 22,
+): Buffer[] {
+	const names = port === 22 ? [host, `[${host}]:22`] : [`[${host}]:${port}`];
 	const keys: Buffer[] = [];
+	const revoked: Buffer[] = [];
 	for (const line of text.split("\n")) {
 		const t = line.trim();
 		if (!t || t.startsWith("#")) continue;
-		const [hosts, , blob] = t.split(/\s+/);
+		const fields = t.split(/\s+/);
+		const marker = fields[0]?.startsWith("@") ? fields.shift() : undefined;
+		const [hosts, , blob] = fields;
 		if (!hosts || !blob) continue;
-		if (hosts.split(",").includes(host)) keys.push(Buffer.from(blob, "base64"));
+		if (marker === "@revoked") revoked.push(Buffer.from(blob, "base64"));
+		else if (!marker && hosts.split(",").some((p) => hostMatches(p, names)))
+			keys.push(Buffer.from(blob, "base64"));
 	}
-	return keys;
+	return keys.filter((k) => !revoked.some((r) => r.equals(k)));
 }
 
 export interface SshNodeOpsOptions {
@@ -38,42 +64,61 @@ export interface SshNodeOpsOptions {
 	privateKey: string | Buffer;
 	/** known_hosts content; the host key must be listed for host. */
 	knownHosts: string;
-	/** OpenSSH allows 10 sessions per connection by default (MaxSessions). */
+	/** SSH connections calls are spread over. */
+	connections?: number;
+	/**
+	 * Concurrent channels per connection. OpenSSH allows 10 sessions per connection (MaxSessions)
+	 * and frees a closed session only in a later pass of its main loop, so a channel opened right
+	 * after another closed may still be refused: keep well below the limit.
+	 */
 	maxChannels?: number;
+	/** Retries of a refused channel open; the request never reached sbx-node, so this is safe. */
+	openRetries?: number;
+	openRetryDelayMs?: number;
 	/** Per-call deadline; a hung call must not hold a channel slot forever. */
 	callTimeoutMs?: number;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** After a timeout, how long to wait for the channel close before giving the slot back anyway. */
+const CLOSE_GRACE_MS = 5_000;
+
 /**
- * sbx-node over SSH: one connection, one exec channel per call. The server side is a forced
+ * sbx-node over SSH: a few connections, one exec channel per call. The server side is a forced
  * command, so the exec command string is ignored there.
  */
 export class SshNodeOps implements NodeOps {
 	readonly #opts: SshNodeOpsOptions;
 	readonly #pinned: Buffer[];
-	#conn: Promise<SshClient> | undefined;
-	#active = 0;
-	#waiters: (() => void)[] = [];
+	readonly #conns: (Promise<SshClient> | undefined)[];
+	readonly #active: number[];
+	#waiters: ((slot: number) => void)[] = [];
 
 	constructor(opts: SshNodeOpsOptions) {
 		this.#opts = opts;
-		this.#pinned = parseKnownHosts(opts.knownHosts, opts.host);
+		this.#pinned = parseKnownHosts(opts.knownHosts, opts.host, opts.port);
 		if (this.#pinned.length === 0)
 			throw new Error(`no pinned host key for ${opts.host}`);
+		const n = Math.max(1, opts.connections ?? 2);
+		this.#conns = new Array(n).fill(undefined);
+		this.#active = new Array(n).fill(0);
 	}
 
-	#connect(): Promise<SshClient> {
-		if (this.#conn) return this.#conn;
+	#connect(slot: number): Promise<SshClient> {
+		const existing = this.#conns[slot];
+		if (existing) return existing;
 		const conn = new ssh2.Client();
 		const p = new Promise<SshClient>((resolve, reject) => {
+			const forget = () => {
+				if (this.#conns[slot] === p) this.#conns[slot] = undefined;
+			};
 			conn.on("ready", () => resolve(conn));
 			conn.on("error", (err) => {
-				this.#conn = undefined;
+				forget();
 				reject(err);
 			});
-			conn.on("close", () => {
-				this.#conn = undefined;
-			});
+			conn.on("close", forget);
 			conn.connect({
 				host: this.#opts.host,
 				port: this.#opts.port ?? 22,
@@ -84,59 +129,91 @@ export class SshNodeOps implements NodeOps {
 				readyTimeout: 20_000,
 			});
 		});
-		this.#conn = p;
+		this.#conns[slot] = p;
 		return p;
 	}
 
-	async #acquire(): Promise<void> {
-		if (this.#active < (this.#opts.maxChannels ?? 8)) {
-			this.#active++;
-			return;
+	/** Takes a channel slot on the least busy connection. */
+	async #acquire(): Promise<number> {
+		const max = this.#opts.maxChannels ?? 5;
+		let best = -1;
+		for (let i = 0; i < this.#active.length; i++) {
+			const a = this.#active[i] ?? 0;
+			if (a < max && (best < 0 || a < (this.#active[best] ?? 0))) best = i;
 		}
-		await new Promise<void>((r) => this.#waiters.push(r));
+		if (best >= 0) {
+			this.#active[best] = (this.#active[best] ?? 0) + 1;
+			return best;
+		}
+		return new Promise<number>((r) => this.#waiters.push(r));
 	}
 
-	#release(): void {
+	#release(slot: number): void {
 		const next = this.#waiters.shift();
-		if (next) next();
-		else this.#active--;
+		if (next) next(slot);
+		else this.#active[slot] = (this.#active[slot] ?? 1) - 1;
+	}
+
+	async #exec(conn: SshClient): Promise<ssh2.ClientChannel> {
+		const retries = this.#opts.openRetries ?? 6;
+		for (let attempt = 0; ; attempt++) {
+			try {
+				return await new Promise<ssh2.ClientChannel>((resolve, reject) =>
+					conn.exec("sbx-node", (err, stream) =>
+						err ? reject(err) : resolve(stream),
+					),
+				);
+			} catch (err) {
+				if (
+					attempt >= retries ||
+					!/Channel open failure/.test((err as Error).message)
+				)
+					throw err;
+				await sleep((this.#opts.openRetryDelayMs ?? 20) * 2 ** attempt);
+			}
+		}
+	}
+
+	/** Sends the request and waits for the channel to close completely, also after a timeout. */
+	#roundTrip(
+		stream: ssh2.ClientChannel,
+		op: string,
+		args: object,
+	): Promise<string> {
+		return new Promise<string>((resolve, reject) => {
+			let stdout = "";
+			let stderr = "";
+			let timedOut = false;
+			let grace: NodeJS.Timeout | undefined;
+			const fail = () => reject(new Error(`sbx-node ${op}: timed out`));
+			const timer = setTimeout(() => {
+				timedOut = true;
+				stream.close();
+				grace = setTimeout(fail, CLOSE_GRACE_MS);
+			}, this.#opts.callTimeoutMs ?? 120_000);
+			stream.on("data", (d: Buffer) => {
+				stdout += d.toString("utf8");
+			});
+			stream.stderr.on("data", (d: Buffer) => {
+				stderr += d.toString("utf8");
+			});
+			stream.on("close", () => {
+				clearTimeout(timer);
+				clearTimeout(grace);
+				if (timedOut) fail();
+				else if (stdout.trim()) resolve(stdout);
+				else
+					reject(new Error(`sbx-node ${op}: empty response ${stderr.trim()}`));
+			});
+			stream.end(`${JSON.stringify({ op, args, requestId: randomUUID() })}\n`);
+		});
 	}
 
 	async call<T = unknown>(op: string, args: object = {}): Promise<T> {
-		await this.#acquire();
+		const slot = await this.#acquire();
 		try {
-			const conn = await this.#connect();
-			const out = await new Promise<string>((resolve, reject) => {
-				conn.exec("sbx-node", (err, stream) => {
-					if (err) {
-						reject(err);
-						return;
-					}
-					let stdout = "";
-					let stderr = "";
-					const timer = setTimeout(() => {
-						stream.close();
-						reject(new Error(`sbx-node ${op}: timed out`));
-					}, this.#opts.callTimeoutMs ?? 120_000);
-					stream.on("data", (d: Buffer) => {
-						stdout += d.toString("utf8");
-					});
-					stream.stderr.on("data", (d: Buffer) => {
-						stderr += d.toString("utf8");
-					});
-					stream.on("close", () => {
-						clearTimeout(timer);
-						if (stdout.trim()) resolve(stdout);
-						else
-							reject(
-								new Error(`sbx-node ${op}: empty response ${stderr.trim()}`),
-							);
-					});
-					stream.end(
-						`${JSON.stringify({ op, args, requestId: randomUUID() })}\n`,
-					);
-				});
-			});
+			const conn = await this.#connect(slot);
+			const out = await this.#roundTrip(await this.#exec(conn), op, args);
 			const resp = JSON.parse(out) as {
 				ok: boolean;
 				result?: T;
@@ -150,12 +227,14 @@ export class SshNodeOps implements NodeOps {
 				);
 			return resp.result as T;
 		} finally {
-			this.#release();
+			this.#release(slot);
 		}
 	}
 
 	close(): void {
-		void this.#conn?.then((c) => c.end()).catch(() => {});
-		this.#conn = undefined;
+		for (let i = 0; i < this.#conns.length; i++) {
+			void this.#conns[i]?.then((c) => c.end()).catch(() => {});
+			this.#conns[i] = undefined;
+		}
 	}
 }

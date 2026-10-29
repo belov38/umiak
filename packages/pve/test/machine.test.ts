@@ -8,7 +8,7 @@ import {
 	s2SerialPayload,
 	TracesRemainError,
 } from "../src/machine.ts";
-import { PveApiError } from "../src/pve-api.ts";
+import { PveApiError, QgaTimeoutError } from "../src/pve-api.ts";
 import { SqliteStateStore } from "../src/state-sqlite.ts";
 import { LvmThinDriver } from "../src/storage/lvmthin.ts";
 import { FakeNode, FakePve } from "./fakes.ts";
@@ -121,6 +121,14 @@ describe("create", () => {
 		expect(vm?.firewall.ipsets).toEqual({ "ipfilter-net0": ["10.88.0.101"] });
 	});
 
+	it("turns off the cloud-init package upgrade on first boot", async () => {
+		const { api, machines } = setup();
+		await machines.create({});
+		await machines.createViaQmClone({});
+		expect(api.vms.get(500)?.config.ciupgrade).toBe("0");
+		expect(api.vms.get(501)?.config.ciupgrade).toBe("0");
+	});
+
 	it("copies only whitelisted hardware keys and never identity from the template", async () => {
 		const { api, machines } = setup();
 		await machines.create({});
@@ -205,7 +213,9 @@ describe("create", () => {
 describe("snapshot and fork", () => {
 	it("snapshots a running machine with QGA freeze and stores metadata without identity", async () => {
 		const { api, log, machines, store } = setup();
-		const a = await machines.create({ smbios: { uuid: "ua", serial: "sa" } });
+		const a = await machines.create({
+			smbios: { uuid: "uuid-src-a", serial: "serial-src-a" },
+		});
 		await machines.start(a.vmid);
 		log.length = 0;
 		const s = await machines.snapshot(a.vmid);
@@ -222,8 +232,32 @@ describe("snapshot and fork", () => {
 			memory: "2048",
 		});
 		expect(store.getSnapshot(s.id)).toEqual(s);
-		expect(JSON.stringify(store.getSnapshot(s.id))).not.toContain("ua");
+		// Identity values contain "-", which random snapshot ids ([a-z0-9]) never do.
+		const stored = JSON.stringify(store.getSnapshot(s.id));
+		expect(stored).not.toContain("uuid-src-a");
+		expect(stored).not.toContain("serial-src-a");
 		expect(api.vms.get(500)?.status).toBe("running");
+	});
+
+	it("thaws after a freeze timeout and does not repeat the freeze", async () => {
+		const { api, log, machines, node } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		api.fail["POST /nodes/pve/qemu/500/agent/fsfreeze-freeze"] =
+			new QgaTimeoutError(
+				500,
+				"VM 500 qga command 'guest-fsfreeze-freeze' failed - got timeout",
+				"guest-fsfreeze-freeze",
+			);
+		log.length = 0;
+		await expect(machines.snapshot(a.vmid)).rejects.toBeInstanceOf(
+			QgaTimeoutError,
+		);
+		expect(log.filter((l) => /fsfreeze|lv\.snapshot/.test(l))).toEqual([
+			"api:POST /nodes/pve/qemu/500/agent/fsfreeze-freeze",
+			"api:POST /nodes/pve/qemu/500/agent/fsfreeze-thaw",
+		]);
+		expect(node.lvs.some((l) => l.name.startsWith("sbx-snap-"))).toBe(false);
 	});
 
 	it("refuses to snapshot a running machine without QGA unless crash-consistent", async () => {
@@ -241,7 +275,9 @@ describe("snapshot and fork", () => {
 
 	it("forks with new identity and the snapshot's hardware and disks", async () => {
 		const { api, node, machines } = setup();
-		const a = await machines.create({ smbios: { uuid: "ua", serial: "sa" } });
+		const a = await machines.create({
+			smbios: { uuid: "uuid-src-a", serial: "serial-src-a" },
+		});
 		await machines.start(a.vmid);
 		const s = await machines.snapshot(a.vmid);
 		const f = await machines.fork(s, { smbios: { uuid: "uf", serial: "sf" } });
@@ -264,7 +300,9 @@ describe("snapshot and fork", () => {
 
 	it("never copies smbios1 from the source even without a caller value", async () => {
 		const { api, machines } = setup();
-		const a = await machines.create({ smbios: { uuid: "ua", serial: "sa" } });
+		const a = await machines.create({
+			smbios: { uuid: "uuid-src-a", serial: "serial-src-a" },
+		});
 		const s = await machines.snapshot(a.vmid);
 		await machines.fork(s, {});
 		const post =
@@ -296,6 +334,33 @@ describe("delete", () => {
 		expect(stateDuringVerify).toBe("releasing");
 		expect(store.get(1, 500)).toBeUndefined();
 		expect(node.lvs).toEqual([]);
+	});
+
+	it("stops a just-started VM that /cluster/resources still shows as stopped", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		api.staleStatus.set(a.vmid, "stopped");
+		await machines.delete(a.vmid);
+		expect(api.paths()).toContain("POST /nodes/pve/qemu/500/status/stop");
+		expect(api.vms.has(500)).toBe(false);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("completes a failed delete on retry", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		api.fail["POST /nodes/pve/qemu/500/status/stop"] = new PveApiError(
+			500,
+			"stop failed",
+		);
+		await expect(machines.delete(a.vmid)).rejects.toThrow(/stop failed/);
+		expect(store.get(1, 500)?.state).toBe("releasing");
+		delete api.fail["POST /nodes/pve/qemu/500/status/stop"];
+		await machines.delete(a.vmid);
+		expect(api.vms.has(500)).toBe(false);
+		expect(store.get(1, 500)).toBeUndefined();
 	});
 
 	it("keeps the row in releasing when traces remain", async () => {
@@ -397,6 +462,48 @@ describe("review fixes", () => {
 		};
 		await machines.delete(a.vmid);
 		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("sends dhcp_release again when dnsmasq dropped the first one", async () => {
+		const { node, machines, store } = setup();
+		const a = await machines.create({});
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		let releases = 0;
+		node.handlers["dhcp.release"] = () => {
+			// The first DHCPRELEASE packet never reaches dnsmasq.
+			if (++releases > 1) node.leases = [];
+			return { released: true };
+		};
+		await machines.delete(a.vmid);
+		expect(releases).toBe(2);
+		expect(machines.dhcpReleaseRetries).toBe(1);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("releases even when the first lease read comes back empty", async () => {
+		const { node, machines } = setup();
+		const a = await machines.create({});
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		let reads = 0;
+		node.handlers["dhcp.leases"] = () => ({
+			leases: ++reads === 1 ? [] : node.leases,
+			ethers: [],
+		});
+		await machines.delete(a.vmid);
+		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(1);
+		expect(node.leases).toEqual([]);
+		expect(machines.dhcpReleaseRetries).toBe(0);
+	});
+
+	it("reports a lease that survives every release", async () => {
+		const { node, machines, store } = setup();
+		const a = await machines.create({});
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		node.handlers["dhcp.release"] = () => ({ released: true });
+		const err = await machines.delete(a.vmid).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(TracesRemainError);
+		expect(node.ops().filter((o) => o === "dhcp.release")).toHaveLength(3);
+		expect(store.get(1, 500)?.state).toBe("releasing");
 	});
 
 	it("refuses to delete the template", async () => {

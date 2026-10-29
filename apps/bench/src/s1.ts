@@ -114,9 +114,13 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 	};
 	const del = async (vmid: number) => {
 		const t0 = Date.now();
-		await machines.delete(vmid);
-		live.delete(vmid);
-		ram.release(vmid);
+		try {
+			await machines.delete(vmid);
+			live.delete(vmid);
+		} finally {
+			// Safe even if delete failed: RamGuard counts a VM that still runs by its real status.
+			ram.release(vmid);
+		}
 		return ms(t0);
 	};
 
@@ -351,6 +355,7 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 			serialVisibility,
 			checks,
 			worldDiff,
+			dhcpReleaseRetries: machines.dhcpReleaseRetries,
 		},
 		secrets,
 	);
@@ -369,6 +374,7 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 		`s1-${startedAt.toISOString().replace(/[:.]/g, "-")}.json`,
 	);
 	writeFileSync(file, `${JSON.stringify(result, null, 2)}\n`);
+	log(`DHCP release retries: ${machines.dhcpReleaseRetries}`);
 	log(`results: ${file}`);
 	return result.checks.every((c) => c.ok) ? 0 : 1;
 }

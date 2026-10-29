@@ -339,3 +339,26 @@ func TestLogRedactsSearchKeyCaseInsensitively(t *testing.T) {
 		t.Errorf("log line leaks or contains a raw newline: %q", last)
 	}
 }
+
+func TestSnapshotRefusesUntaggedSnapshotOrigin(t *testing.T) {
+	h := newHarness(nil)
+	h.lvm.lvs = append(h.lvm.lvs,
+		lvm.LV{Name: "sbx-snap-foreign-scsi0", Tags: []string{}},
+		lvm.LV{Name: "sbx-snap-other-scsi0", Tags: []string{"sbx", "sbx-snap-abc"}},
+		lvm.LV{Name: "sbx-snap-good-scsi0", Tags: []string{"sbx", "sbx-snap-good", "sbx-src-500"}},
+	)
+	for _, origin := range []string{"sbx-snap-foreign-scsi0", "sbx-snap-other-scsi0", "sbx-snap-missing-scsi0"} {
+		r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
+			{Origin: origin, Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
+		}})
+		if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
+			t.Errorf("origin %s: got %+v", origin, r)
+		}
+	}
+	r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
+		{Origin: "sbx-snap-good-scsi0", Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
+	}})
+	if !r.OK {
+		t.Fatalf("tagged snapshot origin refused: %+v", r.Error)
+	}
+}
