@@ -203,7 +203,7 @@ export async function networkChecks(
 		await check(`${p} no tailscaled process and no tailscale0`, async () => {
 			const r = await qga.bash(
 				vmid,
-				"pgrep -a tailscaled; ip -o link show tailscale0 2>/dev/null; true",
+				"command -v pgrep >/dev/null || echo no-pgrep; pgrep -a tailscaled; ip -o link show tailscale0 2>/dev/null; true",
 			);
 			return { ok: r.stdout.trim() === "", detail: r.stdout.trim() };
 		}),

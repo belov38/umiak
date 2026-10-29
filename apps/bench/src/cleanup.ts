@@ -19,16 +19,19 @@ export async function cleanup(ctx: Ctx): Promise<string[]> {
 			report.push(`VM ${v.vmid}: ${(err as Error).message}`);
 		}
 	}
-	const { lvs } = await node.call<{ lvs: { name: string; tags: string[] }[] }>(
-		"lv.list",
-		{ tags: ["sbx"] },
-	);
-	const ours = lvs
-		.filter((l) => !l.tags.includes("sbx-tpl"))
-		.map((l) => l.name);
-	if (ours.length > 0) {
-		await node.call("lv.remove", { names: ours });
-		report.push(`removed LVs ${ours.join(",")}`);
+	try {
+		const { lvs } = await node.call<{
+			lvs: { name: string; tags: string[] }[];
+		}>("lv.list", { tags: ["sbx"] });
+		const ours = lvs
+			.filter((l) => !l.tags.includes("sbx-tpl"))
+			.map((l) => l.name);
+		if (ours.length > 0) {
+			await node.call("lv.remove", { names: ours });
+			report.push(`removed LVs ${ours.join(",")}`);
+		}
+	} catch (err) {
+		report.push(`LVs: ${(err as Error).message}`);
 	}
 	const tpl = macFor(cfg.clusterId, cfg.templateVmid).toLowerCase();
 	const prefix = `02:${cfg.clusterId.toString(16).padStart(2, "0")}:`;
@@ -45,10 +48,16 @@ export async function cleanup(ctx: Ctx): Promise<string[]> {
 			report.push(`DHCP ${mac}: ${(err as Error).message}`);
 		}
 	}
+	// A VMID and MAC are freed only when nothing of the machine is left (spec §6.3).
 	for (const row of store.list(cfg.clusterId)) {
 		if (row.purpose === "template") continue;
-		store.remove(cfg.clusterId, row.vmid);
-		report.push(`dropped allocator row ${row.vmid} (${row.state})`);
+		try {
+			await machines.verifyGone(row.vmid, row.mac);
+			store.remove(cfg.clusterId, row.vmid);
+			report.push(`dropped allocator row ${row.vmid} (${row.state})`);
+		} catch (err) {
+			report.push(`kept allocator row ${row.vmid}: ${(err as Error).message}`);
+		}
 	}
 	for (const s of store.listSnapshots()) {
 		store.removeSnapshot(s.id);

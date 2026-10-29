@@ -369,3 +369,39 @@ describe("createViaQmClone (baseline)", () => {
 		expect(store.get(1, 500)?.state).toBe("active");
 	});
 });
+
+describe("review fixes", () => {
+	it("rolls back through delete even when the create POST itself fails", async () => {
+		const { api, node, machines, store } = setup();
+		api.fail["POST /nodes/pve/qemu"] = new PveApiError(
+			500,
+			"connection reset after create",
+		);
+		await expect(machines.create({})).rejects.toThrow(/connection reset/);
+		expect(node.ops()).toContain("inventory");
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("waits for an asynchronous dhcp_release before reporting traces", async () => {
+		const { node, machines, store } = setup();
+		const a = await machines.create({});
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		let readsAfterRelease = -1;
+		node.handlers["dhcp.release"] = () => {
+			readsAfterRelease = 0;
+			return { released: true };
+		};
+		node.handlers["dhcp.leases"] = () => {
+			if (readsAfterRelease >= 0 && ++readsAfterRelease > 2) node.leases = [];
+			return { leases: node.leases, ethers: [] };
+		};
+		await machines.delete(a.vmid);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("refuses to delete the template", async () => {
+		const { api, machines } = setup();
+		await expect(machines.delete(599)).rejects.toThrow(/template/);
+		expect(api.paths().some((p) => p.startsWith("DELETE"))).toBe(false);
+	});
+});

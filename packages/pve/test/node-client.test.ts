@@ -41,6 +41,7 @@ async function startServer(): Promise<{ port: number; requests: unknown[] }> {
 						requestId: string;
 					};
 					requests.push(req);
+					if (req.op === "hang") return;
 					if (req.op === "boom") {
 						stream.write(
 							`${JSON.stringify({ ok: false, error: { code: "forbidden", message: "no" } })}\n`,
@@ -63,6 +64,7 @@ async function startServer(): Promise<{ port: number; requests: unknown[] }> {
 
 function client(port: number, knownHostKey = hostKeys.public): SshNodeOps {
 	const c = new SshNodeOps({
+		callTimeoutMs: 500,
 		host: "127.0.0.1",
 		port,
 		privateKey: clientKeys.private,
@@ -124,5 +126,12 @@ describe("SshNodeOps", () => {
 		await expect(
 			client(port, otherHostKeys.public).call("version"),
 		).rejects.toThrow(/host key|verification/i);
+	});
+});
+
+describe("SshNodeOps timeouts", () => {
+	it("fails a call that gets no answer", async () => {
+		const { port } = await startServer();
+		await expect(client(port).call("hang")).rejects.toThrow(/timed out/);
 	});
 });

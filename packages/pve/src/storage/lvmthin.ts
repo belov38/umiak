@@ -228,6 +228,7 @@ export class LvmThinDriver implements StorageDriver {
 		let frozen = false;
 		let paused = false;
 		let created: string[] = [];
+		let opError: unknown;
 		try {
 			frozen = true; // thaw even if freeze itself fails half-way
 			await hook.freeze();
@@ -238,10 +239,21 @@ export class LvmThinDriver implements StorageDriver {
 			created = (
 				await this.#o.node.call<{ created: string[] }>("lv.snapshot", { items })
 			).created;
-		} finally {
-			if (paused) await this.#o.vcpu.resume(m.vmid);
-			if (frozen) await this.#thaw(m.vmid, hook);
+		} catch (err) {
+			opError = err;
 		}
+		// Thaw even if resume fails: a frozen guest is worse than a paused one.
+		let resumeError: unknown;
+		if (paused) {
+			try {
+				await this.#o.vcpu.resume(m.vmid);
+			} catch (err) {
+				resumeError = err;
+			}
+		}
+		if (frozen) await this.#thaw(m.vmid, hook);
+		if (opError) throw opError;
+		if (resumeError) throw resumeError;
 		const freezeMs = this.#o.now() - start;
 		if (freezeMs > this.#o.freezeBudgetMs) {
 			if (created.length > 0)

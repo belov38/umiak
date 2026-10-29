@@ -239,6 +239,35 @@ describe("snapshot", () => {
 		expect(bad.log.filter((l) => l === "thaw")).toHaveLength(3);
 	});
 
+	it("still thaws when resume fails", async () => {
+		const log: string[] = [];
+		const node = new FakeNode(log);
+		const driver = new LvmThinDriver({
+			node,
+			vcpu: {
+				suspend: async () => {},
+				resume: async () => {
+					throw new Error("resume failed");
+				},
+			},
+			storage: "local-lvm",
+			thawRetryDelayMs: 0,
+			newSnapshotId: () => "snap1",
+		});
+		const hook = {
+			freeze: async () => {
+				log.push("freeze");
+			},
+			thaw: async () => {
+				log.push("thaw");
+			},
+		};
+		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toThrow(
+			/resume failed/,
+		);
+		expect(log).toContain("thaw");
+	});
+
 	it("skips freeze and pause for a stopped machine", async () => {
 		const { log, driver, hook } = setup();
 		await driver.snapshot(machine(winTpl, false), hook);

@@ -136,6 +136,36 @@ export async function preflight(
 	);
 
 	checks.push(
+		await check(
+			"VMID range not used by any guest outside the pool",
+			async () => {
+				const g = await node.call<{
+					guests: { qm: { vmid: number }[]; pct: { vmid: number }[] };
+				}>("inventory", {
+					sections: ["guests"],
+				});
+				const inRange = (v: number) =>
+					v >= cfg.vmidRange.min && v <= cfg.vmidRange.max;
+				const vms = await api.get<{ vmid: number; pool?: string }[]>(
+					"/cluster/resources",
+					{ type: "vm" },
+				);
+				const ours = new Set(
+					vms.filter((v) => v.pool === cfg.pool).map((v) => v.vmid),
+				);
+				const foreign = [
+					...g.guests.qm
+						.filter((r) => inRange(r.vmid) && !ours.has(r.vmid))
+						.map((r) => `qm ${r.vmid}`),
+					...g.guests.pct
+						.filter((r) => inRange(r.vmid) || r.vmid === cfg.templateVmid)
+						.map((r) => `pct ${r.vmid}`),
+				];
+				return { ok: foreign.length === 0, detail: foreign.join(",") };
+			},
+		),
+	);
+	checks.push(
 		await check("no leftover VMs in the pool", async () => {
 			const vms = await api.get<{ vmid: number; pool?: string }[]>(
 				"/cluster/resources",

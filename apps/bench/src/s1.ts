@@ -318,6 +318,16 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 		});
 	}
 
+	// Leftovers the world diff does not cover: sandbox LVs, leases and ethers, allocator rows, pool VMs.
+	if (!o.keep) {
+		const after = await preflight(ctx);
+		for (const c of after.checks.filter((x) =>
+			x.name.startsWith("no leftover"),
+		)) {
+			checks.push({ ...c, name: `after run: ${c.name}` });
+		}
+	}
+
 	const summary = Object.fromEntries(
 		METRICS.map((m) => [m, summarize(samples[m])]),
 	) as Record<Metric, Summary>;
@@ -395,6 +405,26 @@ async function forkChecks(
 		machines.config(a.vmid),
 		machines.config(f.vmid),
 	]);
+	c.push(
+		await check(`${p} https works (egress positive control)`, async () => {
+			const r = await q.exec(
+				f.vmid,
+				[
+					"curl",
+					"-fsS",
+					"-o",
+					"/dev/null",
+					"--max-time",
+					"10",
+					"https://example.com",
+				],
+				{
+					timeoutMs: 30_000,
+				},
+			);
+			return { ok: r.exitCode === 0, detail: r.stderr.trim() };
+		}),
+	);
 	c.push({
 		name: `${p} VMID and MAC differ from A`,
 		ok: a.vmid !== f.vmid && a.mac !== f.mac,

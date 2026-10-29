@@ -80,14 +80,18 @@ export function parseJsonLenient(text: string): unknown {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function isRetryable(err: unknown): boolean {
+/**
+ * Lock timeouts mean the request was not executed, so any method may be retried. A broken connection
+ * may hide an executed request, so only GET is retried then.
+ */
+function isRetryable(err: unknown, method: string): boolean {
 	if (err instanceof PveApiError) {
 		return (
 			err.status === 503 || /can't lock file|got timeout/i.test(err.message)
 		);
 	}
 	const code = (err as { code?: string }).code;
-	return code === "ECONNRESET" || code === "EPIPE";
+	return method === "GET" && (code === "ECONNRESET" || code === "EPIPE");
 }
 
 export class PveApi implements PveClient {
@@ -126,7 +130,8 @@ export class PveApi implements PveClient {
 			try {
 				return (await this.#once(method, path, params)) as T;
 			} catch (err) {
-				if (attempt >= this.#opts.retries || !isRetryable(err)) throw err;
+				if (attempt >= this.#opts.retries || !isRetryable(err, method))
+					throw err;
 				this.retryCount++;
 				await sleep(this.#opts.retryDelayMs * 2 ** attempt);
 			}
@@ -213,7 +218,7 @@ export class PveApi implements PveClient {
 				`/nodes/${node}/tasks/${encodeURIComponent(upid)}/status`,
 			);
 			if (st.status === "stopped") {
-				if (st.exitstatus !== "OK")
+				if (st.exitstatus !== "OK" && !st.exitstatus?.startsWith("WARNINGS"))
 					throw new PveTaskError(upid, st.exitstatus ?? "unknown");
 				return;
 			}

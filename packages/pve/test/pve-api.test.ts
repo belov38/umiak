@@ -155,6 +155,31 @@ describe("PveApi", () => {
 		expect(await api(url).get("/x")).toEqual({ "out-data": "a\tb\u0001c\n" });
 	});
 
+	it("treats a task that ended with warnings as successful", async () => {
+		const url = await serve((_req, _b, res) =>
+			json(res, 200, {
+				data: { status: "stopped", exitstatus: "WARNINGS: 1" },
+			}),
+		);
+		await api(url).waitTask("pve", "UPID:w", { pollMs: 1 });
+	});
+
+	it("does not repeat a POST after a connection error, but repeats a GET", async () => {
+		const counts: Record<string, number> = {};
+		const url = await serve((req, _b, res) => {
+			const m = req.method ?? "";
+			counts[m] = (counts[m] ?? 0) + 1;
+			if (counts[m] === 1) req.socket.destroy();
+			else json(res, 200, { data: "ok" });
+		});
+		await expect(
+			api(url).post("/nodes/pve/qemu", { vmid: 1 }),
+		).rejects.toThrow();
+		expect(counts.POST).toBe(1);
+		expect(await api(url).get("/version")).toBe("ok");
+		expect(counts.GET).toBe(2);
+	});
+
 	it("waitTask polls until stopped and reports failures", async () => {
 		const states = [
 			{ status: "running" },

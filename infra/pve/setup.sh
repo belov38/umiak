@@ -476,8 +476,9 @@ EOF
 	fi
 	hostcheck=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" '
 		pve-firewall status
-		if iptables-save | grep -E -- "(tap|veth)1[0-9]{2}i" >/dev/null; then echo "rules-on-existing-guests"; fi
-		if ip6tables-save | grep -E -- "(tap|veth)1[0-9]{2}i" >/dev/null; then echo "rules6-on-existing-guests"; fi
+		guest_if="(tap|veth)[0-9]+i"; sandbox_if="(tap|veth)5[0-9]{2}i"
+		if iptables-save | grep -E -- "$guest_if" | grep -vE -- "$sandbox_if" | grep -q .; then echo "rules-on-existing-guests"; fi
+		if ip6tables-save | grep -E -- "$guest_if" | grep -vE -- "$sandbox_if" | grep -q .; then echo "rules6-on-existing-guests"; fi
 		echo "bridge-nf-call-iptables=$(cat /proc/sys/net/bridge/bridge-nf-call-iptables 2>/dev/null)"
 		iptables -S PVEFW-FORWARD 2>/dev/null | grep -q "ctstate INVALID -j DROP" && echo "invalid-drop-present" || true
 	' 2>&1 || echo "host-unreachable")
@@ -488,7 +489,9 @@ EOF
 	fi
 
 	if ((failed)); then
-		log "fw: checks failed; NOT cancelling the rollback timer. The firewall switches off within 5 min."
+		log "fw: checks failed; switching the firewall off now (the rollback timer stays as a backstop)"
+		ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "pvesh set /cluster/firewall/options --enable 0" ||
+			log "fw: host unreachable; the rollback timer switches the firewall off within 5 min"
 		exit 1
 	fi
 	# Step 6: everything that was green is still green.

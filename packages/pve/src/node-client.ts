@@ -40,6 +40,8 @@ export interface SshNodeOpsOptions {
 	knownHosts: string;
 	/** OpenSSH allows 10 sessions per connection by default (MaxSessions). */
 	maxChannels?: number;
+	/** Per-call deadline; a hung call must not hold a channel slot forever. */
+	callTimeoutMs?: number;
 }
 
 /**
@@ -112,6 +114,10 @@ export class SshNodeOps implements NodeOps {
 					}
 					let stdout = "";
 					let stderr = "";
+					const timer = setTimeout(() => {
+						stream.close();
+						reject(new Error(`sbx-node ${op}: timed out`));
+					}, this.#opts.callTimeoutMs ?? 120_000);
 					stream.on("data", (d: Buffer) => {
 						stdout += d.toString("utf8");
 					});
@@ -119,6 +125,7 @@ export class SshNodeOps implements NodeOps {
 						stderr += d.toString("utf8");
 					});
 					stream.on("close", () => {
+						clearTimeout(timer);
 						if (stdout.trim()) resolve(stdout);
 						else
 							reject(
