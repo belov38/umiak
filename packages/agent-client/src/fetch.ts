@@ -188,13 +188,19 @@ function checkPathSegments(path: string): void {
 /**
  * Reads a whole Response body, failing with ResourceExhausted as soon as it
  * exceeds maxBytes (decoded bytes, as the body yields them); the rest of the
- * body is cancelled. Use it instead of arrayBuffer(), text() or json() on an
- * agent answer.
+ * body is cancelled. maxBytes is a non-negative safe integer (else it
+ * rejects with a RangeError). Use it instead of arrayBuffer(), text() or
+ * json() on an agent answer.
  */
 export async function readBodyCapped(
 	response: Response,
 	maxBytes: number,
 ): Promise<Uint8Array> {
+	if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+		throw new RangeError(
+			`maxBytes must be a non-negative safe integer: ${maxBytes}`,
+		);
+	}
 	const reader = response.body?.getReader();
 	if (reader === undefined) {
 		return new Uint8Array();

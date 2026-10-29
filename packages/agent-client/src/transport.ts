@@ -57,7 +57,8 @@ export interface AgentClientOptions {
 	connectTimeoutMs?: number;
 	/**
 	 * Maximum size of one response message of the default transport, after
-	 * decompression. Default MAX_MESSAGE_BYTES (16 MiB).
+	 * decompression: a positive safe integer (else the constructor throws a
+	 * RangeError). Default MAX_MESSAGE_BYTES (16 MiB).
 	 */
 	readMaxBytes?: number;
 	/**
@@ -104,8 +105,15 @@ export class AgentClient {
 		this.pollIntervalMs = opts.pollIntervalMs ?? 1000;
 		this.maxAttempts = opts.maxAttempts ?? 10;
 		this.connectTimeoutMs = opts.connectTimeoutMs ?? 5000;
+		const readMaxBytes = opts.readMaxBytes ?? MAX_MESSAGE_BYTES;
+		// connect-es lets NaN through, which would disable the limit.
+		if (!Number.isSafeInteger(readMaxBytes) || readMaxBytes < 1) {
+			throw new RangeError(
+				`readMaxBytes must be a positive safe integer: ${readMaxBytes}`,
+			);
+		}
 		this.limits = validateReadWriteMaxBytes(
-			opts.readMaxBytes ?? MAX_MESSAGE_BYTES,
+			readMaxBytes,
 			MAX_MESSAGE_BYTES,
 			undefined,
 		);

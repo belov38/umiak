@@ -677,6 +677,12 @@ describe("AgentClient transport", () => {
 			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
 		});
 
+		it("refuses a readMaxBytes that is not a positive safe integer", () => {
+			for (const v of [Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+				expect(() => agent({ readMaxBytes: v }), String(v)).toThrow(RangeError);
+			}
+		});
+
 		it("honours a smaller readMaxBytes", async () => {
 			registry.set(route(m, a.url));
 			a.script.push({

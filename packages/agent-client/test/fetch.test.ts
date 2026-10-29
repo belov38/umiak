@@ -496,6 +496,15 @@ describe("AgentClient.fetch", () => {
 			expect((err as ConnectError).code).toBe(Code.ResourceExhausted);
 		});
 
+		it("refuses a cap that is not a non-negative safe integer", async () => {
+			for (const v of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) {
+				await expect(
+					readBodyCapped(new Response("x"), v),
+					String(v),
+				).rejects.toThrow(RangeError);
+			}
+		});
+
 		it("reads an absent body as empty", async () => {
 			expect(await readBodyCapped(new Response(null), 0)).toHaveLength(0);
 		});
