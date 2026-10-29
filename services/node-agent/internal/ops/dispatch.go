@@ -123,6 +123,8 @@ func errorCode(err error) string {
 		return "forbidden"
 	case errors.Is(err, fs.ErrNotExist):
 		return "not_found"
+	case errors.Is(err, ErrBusy):
+		return "busy"
 	default:
 		return "exec_failed"
 	}

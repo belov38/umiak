@@ -1,6 +1,6 @@
 import { type Allocator, macFor, type SnapshotStore } from "./allocator.ts";
 import type { Config } from "./config.ts";
-import type { NodeOps } from "./node-client.ts";
+import { type NodeOps, NodeOpsError } from "./node-client.ts";
 import type { Params, PveClient } from "./pve-api.ts";
 import { Qga } from "./qga.ts";
 import {
@@ -519,6 +519,11 @@ export class Machines {
 		const vm = (await this.#resources()).find((r) => r.vmid === vmid);
 		if (vm) {
 			if ((await this.status(vmid)) !== "stopped") await this.stop(vmid);
+			// Release while the IP, the ethers line and the lease still belong to this VM: once
+			// destroy frees the IP in IPAM, a new VM may take it and dnsmasq moves the lease to the
+			// new MAC, after which a release for our MAC finds nothing. sbx-node keeps the ethers
+			// line while the MAC is in IPAM; verifyGone removes it after destroy.
+			await this.#o.node.call("dhcp.release", { mac });
 			const upid = await api.delete<string>(this.#vmPath(vmid), {
 				purge: 1,
 				"destroy-unreferenced-disks": 1,
@@ -528,6 +533,25 @@ export class Machines {
 		await this.#o.driver.delete({ kind: "machine", node: this.#node, vmid });
 		await this.verifyGone(vmid, mac);
 		allocator.release(vmid);
+	}
+
+	/** dhcp.leases, repeated while sbx-node finds the lease file in the middle of a rewrite. */
+	async #dhcpLeases(): Promise<{
+		leases: { mac: string }[];
+		ethers?: { mac: string }[];
+	}> {
+		for (let attempt = 0; ; attempt++) {
+			try {
+				return await this.#o.node.call("dhcp.leases");
+			} catch (err) {
+				if (
+					attempt >= 4 ||
+					!(err instanceof NodeOpsError && err.code === "busy")
+				)
+					throw err;
+				await sleep(this.#o.pollMs ?? 200);
+			}
+		}
 	}
 
 	async verifyGone(vmid: number, mac: string): Promise<void> {
@@ -549,10 +573,7 @@ export class Machines {
 				problems.push(`LV ${l.name} remains`);
 
 		const hasLease = async () => {
-			const d = await node.call<{
-				leases: { mac: string }[];
-				ethers?: { mac: string }[];
-			}>("dhcp.leases");
+			const d = await this.#dhcpLeases();
 			const m = mac.toLowerCase();
 			return (
 				d.leases.some((l) => l.mac === m) ||
