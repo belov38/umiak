@@ -17,10 +17,12 @@
 		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
 	},
 	"dependencies": {
+		"@connectrpc/connect": "2.3.0",
 		"@sbx/agent-client": "workspace:*",
 		"@sbx/config": "workspace:*",
 		"@sbx/core": "workspace:*",
 		"@sbx/db": "workspace:*",
+		"@sbx/proto": "workspace:*",
 		"@sbx/pve": "workspace:*",
 		"pg": "8.23.1",
 		"pg-boss": "12.38.0",

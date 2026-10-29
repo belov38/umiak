@@ -1,0 +1,252 @@
+// AgentPort over the guest agent's Connect API (sbx.agent.v1 System service,
+// S3 §8.1). Calls go through `AgentClient.transport(machineId)`: the client
+// finds the gateway instance that owns the machine's tunnel (S2 §8.4) and
+// follows 421/503 answers. Request bodies carry secrets: never log them.
+import { randomUUID } from "node:crypto";
+import { Code, ConnectError, createClient } from "@connectrpc/connect";
+import {
+	type AgentClient,
+	AgentUnavailableError,
+	classify,
+	HEADER_REQUEST_ID,
+} from "@sbx/agent-client";
+import type { SecretFile } from "@sbx/core";
+import { ErrorDetailSchema } from "@sbx/proto";
+import { ClaimReason, System } from "@sbx/proto/agent/v1";
+import type { QuiesceHook } from "@sbx/pve";
+import { QuiesceFailed } from "../ops/snapshot-step.ts";
+import {
+	type AgentActivity,
+	type AgentPort,
+	AgentRejected,
+	AgentUnavailable,
+	type ClaimRequest,
+} from "../ports.ts";
+
+export interface ConnectAgentPortOptions {
+	/** Receives one debug line per failed call (machine, method, code); never bodies. */
+	log?: { debug(obj: object, msg: string): void };
+	/**
+	 * Deadline of one call, including the client's wait for the machine's
+	 * route. Default 45 s.
+	 */
+	timeoutMs?: number;
+}
+
+/** Mode of a secret file when S6 does not set one (S3 §10). */
+const DEFAULT_SECRET_FILE_MODE = 0o440;
+
+const CLAIM_REASONS: Record<ClaimRequest["reason"], ClaimReason> = {
+	claim: ClaimReason.CLAIM,
+};
+
+/** `FailedPrecondition` -> `failed_precondition`, the wire name of a Connect code. */
+function codeName(code: Code): string {
+	return (Code[code] ?? "unknown")
+		.replace(/([a-z])([A-Z])/g, "$1_$2")
+		.toLowerCase();
+}
+
+function errorDetail(err: ConnectError) {
+	try {
+		return err.findDetails(ErrorDetailSchema)[0];
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Maps a failed call to a port error. Retryable (`AgentUnavailable`): no
+ * route within the wait budget, Connect `unavailable`/`deadline_exceeded`,
+ * connection errors, and any answer whose `ErrorDetail.retryable` is set
+ * (e.g. `identity_not_ready`). Any other Connect error is the permanent
+ * `AgentRejected` with the detail's code, else the Connect code name. Errors
+ * that are not Connect errors pass through unchanged.
+ */
+function toPortError(err: unknown): unknown {
+	if (err instanceof AgentUnavailableError) {
+		return new AgentUnavailable(err.message, { cause: err });
+	}
+	if (!(err instanceof ConnectError)) {
+		return classify(err) === "retry"
+			? new AgentUnavailable(
+					err instanceof Error ? err.message : "connection error",
+					{ cause: err },
+				)
+			: err;
+	}
+	const detail = errorDetail(err);
+	if (
+		detail?.retryable ||
+		err.code === Code.Unavailable ||
+		err.code === Code.DeadlineExceeded ||
+		classify(err) !== "fatal"
+	) {
+		return new AgentUnavailable(err.rawMessage || err.message, { cause: err });
+	}
+	const code = detail?.code || codeName(err.code);
+	return new AgentRejected(code, `agent rejected the call: ${code}`);
+}
+
+function toProtoFile(f: SecretFile) {
+	return {
+		name: f.name,
+		content: Buffer.from(f.contentBase64, "base64"),
+		mode: f.mode ?? DEFAULT_SECRET_FILE_MODE,
+		linkPath: f.linkPath ?? "",
+	};
+}
+
+export class ConnectAgentPort implements AgentPort {
+	readonly #client: AgentClient;
+	readonly #log: ConnectAgentPortOptions["log"];
+	readonly #timeoutMs: number;
+
+	constructor(client: AgentClient, opts: ConnectAgentPortOptions = {}) {
+		this.#client = client;
+		this.#log = opts.log;
+		this.#timeoutMs = opts.timeoutMs ?? 45_000;
+	}
+
+	/**
+	 * Runs one System call. `requestId` goes in `Sbx-Request-Id` (mutating
+	 * calls only). A failure is logged without the request and mapped by
+	 * `toPortError`.
+	 */
+	async #call<T>(
+		machineId: string,
+		method: string,
+		requestId: string | undefined,
+		fn: (
+			c: ReturnType<typeof createClient<typeof System>>,
+			o: { headers?: Record<string, string>; timeoutMs: number },
+		) => Promise<T>,
+	): Promise<T> {
+		const c = createClient(System, this.#client.transport(machineId));
+		try {
+			return await fn(c, {
+				...(requestId === undefined
+					? {}
+					: { headers: { [HEADER_REQUEST_ID]: requestId } }),
+				timeoutMs: this.#timeoutMs,
+			});
+		} catch (err) {
+			const mapped = toPortError(err);
+			this.#log?.debug(
+				{
+					machineId,
+					method,
+					code: (mapped as { code?: unknown } | null)?.code,
+				},
+				"agent call failed",
+			);
+			throw mapped;
+		}
+	}
+
+	async claim(
+		machineId: string,
+		req: ClaimRequest,
+		requestId: string,
+	): Promise<void> {
+		await this.#call(machineId, "claim", requestId, (c, o) =>
+			c.claim(
+				{
+					reason: CLAIM_REASONS[req.reason],
+					sandboxId: req.sandboxId,
+					hostname: req.hostname,
+					env: req.env,
+					secretEnv: req.secretEnv,
+					secretFiles: req.secretFiles.map(toProtoFile),
+					authorizedKeys: req.authorizedKeys,
+				},
+				o,
+			),
+		);
+	}
+
+	async updateEnv(
+		machineId: string,
+		env: Record<string, string>,
+		requestId: string,
+	): Promise<void> {
+		await this.#call(machineId, "updateEnv", requestId, (c, o) =>
+			c.updateEnv({ env }, o),
+		);
+	}
+
+	async updateSecrets(
+		machineId: string,
+		secrets: { secretEnv: Record<string, string>; secretFiles: SecretFile[] },
+		requestId: string,
+	): Promise<void> {
+		await this.#call(machineId, "updateSecrets", requestId, (c, o) =>
+			c.updateSecrets(
+				{
+					secretEnv: secrets.secretEnv,
+					secretFiles: secrets.secretFiles.map(toProtoFile),
+				},
+				o,
+			),
+		);
+	}
+
+	async prepareStop(machineId: string): Promise<void> {
+		await this.#call(machineId, "prepareStop", undefined, (c, o) =>
+			c.prepareStop({}, o),
+		);
+	}
+
+	async activity(machineId: string): Promise<AgentActivity> {
+		const r = await this.#call(machineId, "activity", undefined, (c, o) =>
+			c.activity({}, o),
+		);
+		return {
+			runningCommands: r.runningCommands,
+			openPtys: r.openPtys,
+			tcpStreams: r.tcpStreams,
+		};
+	}
+
+	/**
+	 * Freeze = `System/Quiesce`, thaw = `System/Thaw` with the lease from the
+	 * freeze. Each call gets its request id once per hook, so a retry of the
+	 * same step replays the agent's cached answer instead of taking a second
+	 * lease. A thaw answered with `auto_thawed` means the watchdog released the
+	 * guest before the snapshot was done: the snapshot is not consistent, so
+	 * thaw rejects with `QuiesceFailed`. Thaw without a successful freeze does
+	 * nothing.
+	 */
+	quiesceHook(machineId: string, leaseMs: number): QuiesceHook {
+		const freezeId = randomUUID();
+		const thawId = randomUUID();
+		let leaseId: string | undefined;
+		return {
+			freeze: async () => {
+				const r = await this.#call(machineId, "quiesce", freezeId, (c, o) =>
+					c.quiesce({ leaseMs }, o),
+				);
+				leaseId = r.leaseId;
+			},
+			thaw: async () => {
+				if (leaseId === undefined) return;
+				const lease = leaseId;
+				const r = await this.#call(machineId, "thaw", thawId, (c, o) =>
+					c.thaw({ leaseId: lease }, o),
+				);
+				leaseId = undefined;
+				if (r.autoThawed) {
+					const at = r.autoThawedAt
+						? new Date(
+								Number(r.autoThawedAt.seconds) * 1000 +
+									Math.floor(r.autoThawedAt.nanos / 1e6),
+							).toISOString()
+						: "unknown time";
+					throw new QuiesceFailed(
+						`quiesce lease ${lease} of machine ${machineId} expired: the agent auto-thawed the guest at ${at}`,
+					);
+				}
+			},
+		};
+	}
+}
