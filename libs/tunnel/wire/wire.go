@@ -49,6 +49,11 @@ const (
 // NotifyChannel is the Postgres LISTEN/NOTIFY channel for session changes.
 const NotifyChannel = "tunnel_sessions"
 
+// NotifyInstancesChannel is the Postgres LISTEN/NOTIFY channel for gateway
+// instance changes (insert, delete, state or drain start). The payload is the
+// instance id.
+const NotifyInstancesChannel = "gateway_instances"
+
 // Error codes carried in tunnelv1.ErrorDetail.Code and the Sbx-Error-Code header.
 const (
 	CodeMachineMoved      = "machine_moved"
