@@ -3,7 +3,7 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Public ids, team API key format, scopes, bearer classification and the IdentityStore contract",
+	"description": "Public ids, team API key format, scopes, bearer classification, SSH keys and login certificates, the IdentityStore contract",
 	"exports": {
 		".": "./src/index.ts"
 	},
