@@ -38,8 +38,9 @@ API-платформа, которая выдаёт AI-агентам и люд�
  |  services/node-agent (Go) |         | - agent tunnels (WS)      |
  |  VMs: guest-agent (Go)  --+--WS---->| - HTTP *.sbx.<domain>     |
  |  SDN VNet + SNAT          |  out    | - SSH gateway             |
- +---------------------------+         | - TURN (coturn)           |
+ +---------------------------+         | - TLS edge, L4 LB         |
                                        +---------------------------+
+                                         coturn (TURN) — отдельный сервис (S10)
 ```
 
 | Компонент | Язык | Ответственность |
@@ -51,7 +52,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | `apps/mcp` | TS | MCP-сервер поверх публичного API |
 | `packages/sdk-ts`, `sdk-py` | генерация | Из OpenAPI |
 | `services/guest-agent` | Go | Агент внутри VM (Linux: systemd unit, Windows: служба) |
-| `services/gateway` | Go | Приём туннелей агентов, HTTP-прокси портов, SSH gateway, TURN |
+| `services/gateway` | Go | Приём туннелей агентов, HTTP-прокси портов, SSH gateway, TLS-edge для `*.sbx`, `tunnel`, `ssh` (S2, S4). TURN — отдельный coturn (S10) |
 | `services/node-agent` | Go | На каждой ноде Proxmox: операции LVM-thin, QMP, метрики ноды. В PoC можно заменить на SSH-исполнитель с тем же интерфейсом |
 | Postgres | — | Одна БД: схема Payload (конфигурация) + схема API (рантайм) |
 
@@ -73,7 +74,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 - **Транспорт.** Агент сам открывает WSS к `gateway`, внутри — HTTP/2, где агент сервер. Входящих портов нет. По соединению идут RPC (exec, files) и TCP-потоки (порты, SSH, moonlight). См. ниже и S2.
 - **Регистрация в пуле.** При загрузке агент подключается к gateway и сообщает о себе (machineId, bootId, vmgenid, версия); VMID ему не известен. Machine становится warm.
-- **Claim.** Получает env, секреты (в tmpfs без swap или в защищённый каталог; после каждой перезагрузки control plane присылает их заново), файлы-секреты, публичный ключ SSH CA gateway (`TrustedUserCAKeys`; ключи пользователя проверяет gateway, S4), hostname. Отвечает о готовности по фазам.
+- **Claim.** Получает env, секреты (в tmpfs без swap или в защищённый каталог; после каждой перезагрузки control plane присылает их заново), файлы-секреты, публичный ключ SSH CA gateway (`TrustedUserCAKeys`; ключи пользователя проверяет gateway, S4 §9), hostname. Отвечает о готовности по фазам.
 - **Exec.** sync / stream (NDJSON-события `started`, `stdout`, `stderr`, `exit`) / detached + attach по offset / kill / timeout. Linux — bash, Windows — PowerShell. PTY/ConPTY для терминала. Каждая команда работает в своём systemd unit-е под shim, который пишет её вывод в файлы.
 - **Files.** read, write (поток), list, stat, delete, mkdir, move, chmod.
 - **Ports.** Список слушающих портов; проксирование входящих потоков на `localhost:port` (127.0.0.1, затем ::1, затем адреса интерфейсов).
@@ -127,9 +128,9 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Firewall: sandbox не видят друг друга (isolate ports), LAN и management-интерфейс хоста; исходящий интернет разрешён; входящего нет.
 - Вместо SDN можно вручную настроить bridge без физического порта, nftables masquerade и dnsmasq. Результат тот же; SDN выбран, потому что управляется через API Proxmox.
 - Весь входящий трафик идёт через туннель агента к `gateway`:
-  - **HTTP:** `https://<sandbox>-<port>.sbx.<domain>` → gateway → туннель → `localhost:port`. Доступ по токену или публичный.
-  - **SSH:** `ssh <sandbox>@ssh.<domain>` → gateway проверяет ключ пользователя → туннель → sshd или встроенный shell агента.
-  - **Рабочий стол:** сигналинг moonlight-web через туннель; медиа WebRTC через TURN на gateway.
+  - **HTTP:** `https://<slug>-<port>.sbx.<domain>` → любой под gateway → туннель (локально или через под-владелец) → `localhost:port`. Режимы доступа `token`, `sso`, `public`. Подробно: `docs/specs/s4-gateway.md`.
+  - **SSH:** `ssh <sandbox>@ssh.<domain>` → gateway терминирует SSH и проверяет ключ пользователя через `api` → туннель → системный sshd VM на `127.0.0.1:22` с короткоживущим сертификатом от SSH CA gateway (`TrustedUserCAKeys`). Ключи пользователей в VM не копируются.
+  - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.sbx`); медиа WebRTC через отдельный TURN (coturn, S10).
 
 ## 8. Рабочий стол и computer-use
 
@@ -157,13 +158,16 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Маршруты `/v1/*` с `Authorization: Bearer sbx_...` идут мимо OIDC-проверки oauth2-proxy (отдельный host `api.<domain>` или `skip_auth_routes`), ключ проверяет `api`.
 
 **Мимо oauth2-proxy (своя аутентификация):**
-- `tunnel.<domain>`: туннели агентов (WSS, bootstrap secret / machine token, см. S2). Ingress с длинными таймаутами для WebSocket.
+- `tunnel.<domain>`: туннели агентов (WSS, bootstrap secret / machine token, см. S2).
 - Внутренний listener gateway (ClusterIP) для вызовов `api` и `worker`, авторизация сервисными токенами.
-- `*.sbx.<domain>`: публичные URL портов. Режимы доступа: `token` (как у boat), `sso` (через oauth2-proxy, только сотрудники компании), `public`.
+- `*.sbx.<domain>`: публичные URL портов. Режимы доступа: `token` (как у boat), `sso` (вход через oauth2-proxy на основном домене и одноразовый код, cookie IdP на sbx не попадает), `public`.
+- `ssh.<domain>`: SSH gateway, ключи пользователей проверяет `api`.
 
-**Деплой gateway.** Rolling update: `preStop` запускает drain (S2), `terminationGracePeriodSeconds` покрывает переезд агентов и закрытие TCP-потоков.
+**Edge gateway.** `tunnel.<domain>`, `*.sbx.<domain>` и `ssh.<domain>` идут не через ingress, а через отдельный L4 LoadBalancer Service `gateway-edge` (443 и 22; IP клиента — PROXY protocol v2 или `externalTrafficPolicy: Local`). TLS терминирует сам gateway: wildcard `*.sbx` от cert-manager (DNS-01), `tunnel` — от tunnel CA. Запасной режим «за ingress» поддерживается (S4 §5). Все cookie платформы на основном домене — host-only с префиксом `__Host-`, иначе код в sandbox может их подбросить (S4 §14.1).
 
-**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу ingress `tunnel.<domain>:443` (IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный сервис с UDP LoadBalancer или hostNetwork (S10).
+**Деплой gateway.** Rolling update: `preStop` запускает drain (S2, S4 §10). HTTP-потоки живут до 2 min, SSH-сессии до 15 min с предупреждением, `terminationGracePeriodSeconds: 960`.
+
+**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу `gateway-edge` (`tunnel.<domain>:443`, IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный сервис с UDP LoadBalancer или hostNetwork (S10).
 
 ## 11. Безопасность
 
@@ -183,6 +187,6 @@ API-платформа, которая выдаёт AI-агентам и люд�
 ## 13. Открытые вопросы
 
 - Ресурсы под PoC на `pve`: RAM, диапазон VMID, согласие на изменения хоста (пользователь и токен, SDN, pool).
-- Домен для `*.sbx.<domain>` и TLS (внутренний CA или Let's Encrypt через DNS-01).
+- Домен для `*.sbx`: по умолчанию `sbx.<domain>`; отдельный регистрируемый домен — выбор Ильи, можно позже (S4 §14.1). TLS: wildcard через cert-manager DNS-01 (S4 §5).
 - Kubernetes: какой кластер и ingress controller; какой IdP за oauth2-proxy и какая группа даёт роль оператора.
-- SSH в госте: системный sshd через туннель или встроенный SSH-сервер в агенте.
+- ~~SSH в госте: системный sshd или встроенный SSH-сервер в агенте.~~ Решено в S4: системный sshd на loopback с сертификатами от SSH CA gateway.
