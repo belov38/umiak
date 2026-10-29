@@ -141,14 +141,37 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 `/v1/sandboxes` (create, get, list, update, delete), `/stop`, `/resume`, `/fork`, `/commands` (sync, stream, detached, attach, kill), `/files`, `/ports`, `/desktop`, `/snapshots` (saved), `/templates`, `/api-keys`, `/me`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой. OpenAPI генерируется из zod-схем.
 
-## 10. Безопасность
+## 10. Развёртывание и аутентификация
+
+**Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`. Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `sbx-node` остаются вне Kubernetes.
+
+**Пользователи (браузер) — через oauth2-proxy.**
+- `web` (`/admin`, `/app`) и браузерные вызовы API закрыты oauth2-proxy.
+- Пользователь создаётся при первом входе (JIT) из заголовков oauth2-proxy: `X-Auth-Request-Email`, `-User`, `-Groups`. Это кастомная auth-стратегия Payload; API читает того же пользователя.
+- Роли берутся из групп IdP: например, группа администраторов → оператор платформы.
+- Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy, oauth2-proxy работает как sidecar или единственный upstream.
+
+**Программный доступ (CLI, SDK, MCP, AI-агенты) — API-ключи.**
+- Ключ создаёт JIT-пользователь в дашборде. `sbx login` в CLI открывает браузер (через oauth2-proxy) и получает ключ.
+- Маршруты `/v1/*` с `Authorization: Bearer sbx_...` идут мимо OIDC-проверки oauth2-proxy (отдельный host `api.<domain>` или `skip_auth_routes`), ключ проверяет `api`.
+
+**Мимо oauth2-proxy (своя аутентификация):**
+- `tunnel.<domain>`: туннели агентов (WSS, bootstrap secret / machine token, см. S2). Ingress с длинными таймаутами для WebSocket.
+- Внутренний listener gateway (ClusterIP) для вызовов `api` и `worker`, авторизация сервисными токенами.
+- `*.sbx.<domain>`: публичные URL портов. Режимы доступа: `token` (как у boat), `sso` (через oauth2-proxy, только сотрудники компании), `public`.
+
+**Деплой gateway.** Rolling update: `preStop` запускает drain (S2), `terminationGracePeriodSeconds` покрывает переезд агентов и закрытие TCP-потоков.
+
+**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу ingress `tunnel.<domain>:443` (IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный сервис с UDP LoadBalancer или hostNetwork (S10).
+
+## 11. Безопасность
 
 - API-ключи со scope, хранятся хешами в Payload.
 - У каждой machine свой токен для туннеля; выдаётся при регистрации в пуле, перевыпускается при claim.
 - Секреты в госте в tmpfs (Linux) или в каталоге с ACL только для SYSTEM (Windows); стираются при stop.
 - Proxmox: отдельный пользователь и API-токен с правами только на pool `sandbox` и нужные хранилища.
 
-## 11. Фазы
+## 12. Фазы
 
 | Фаза | Содержание |
 |---|---|
@@ -156,8 +179,9 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | **MVP** | + `windows`, `windows-core`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, рабочий стол, Payload admin/dashboard, API-ключи, auto-stop, SDK TS/Python, MCP |
 | **Фаза 2** | Несколько нод и кластеров, PBS-архив и перенос, computer-use API, история команд вне VM, встроенные coding-агенты, egress-политики, OTel, webhooks |
 
-## 12. Открытые вопросы
+## 13. Открытые вопросы
 
 - Ресурсы под PoC на `pve`: RAM, диапазон VMID, согласие на изменения хоста (пользователь и токен, SDN, pool).
 - Домен для `*.sbx.<domain>` и TLS (внутренний CA или Let's Encrypt через DNS-01).
+- Kubernetes: какой кластер и ingress controller; какой IdP за oauth2-proxy и какая группа даёт роль оператора.
 - SSH в госте: системный sshd через туннель или встроенный SSH-сервер в агенте.

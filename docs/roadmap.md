@@ -13,10 +13,10 @@
 | S5 | Шаблон Linux | Сборка образа (cloud-init / Packer), встроенный агент, версии шаблонов | S1, S3 | |
 | S6 | Ядро control plane | Модель данных, машины состояний sandbox и machine, worker, warm pool, оркестрация create / stop / resume / fork / delete | S1, S2 | |
 | S7 | Публичное API v1 | Hono + OpenAPI, генерация SDK, CLI | S6 | |
-| S8 | Web (Payload) | Админка, клиентский дашборд, пользователи, команды, API-ключи | S7 | |
+| S8 | Web (Payload) | Админка, клиентский дашборд, JIT-пользователи из заголовков oauth2-proxy, роли из групп IdP, команды, API-ключи, `sbx login` | S7 | |
 | S9 | Windows | Шаблоны Win11 и Server Core (образ пользователя, autounattend, sysprep), агент как служба, ConPTY, VSS, autologon | S3, S5 | |
 | S10 | Рабочий стол и computer-use | Sunshine + moonlight-web + TURN, cua-driver, шаблон `linux-desktop`, Windows desktop | S4, S9 | |
 | S11 | MCP-сервер | Инструменты поверх публичного API | S7 | |
-| S12 | Эксплуатация | Деплой платформы, метрики, логи, несколько нод, PBS | S6 | |
+| S12 | Эксплуатация | Деплой в Kubernetes (Helm, ingress, oauth2-proxy, Postgres), метрики, логи, несколько нод, PBS | S6 | |
 
 Порядок: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12.
