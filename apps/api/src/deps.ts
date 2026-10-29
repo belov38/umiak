@@ -14,6 +14,8 @@ import type { KeyCache } from "./auth/key-cache.ts";
 import type { OidcVerifier } from "./auth/oidc.ts";
 import type { AuthContext, SessionResolver } from "./auth/principal.ts";
 import type { RateLimits } from "./auth/rate-limit.ts";
+import type { CommandTimings } from "./commands/attach.ts";
+import type { StreamRegistry } from "./commands/registry.ts";
 import type { ApiMetrics } from "./http/metrics.ts";
 import type { Settings } from "./settings.ts";
 
@@ -46,6 +48,10 @@ export interface ApiDeps {
 	environments: EnvironmentStore;
 	/** RPCs of the guest agents (UnwiredAgentApi until S3 is merged). */
 	agent: AgentApi;
+	/** Open NDJSON streams, sync waits and PTYs (limits, revocation, shutdown). */
+	streams: StreamRegistry;
+	/** Ready wait, heartbeat and max duration of command streams. */
+	commandTimings: CommandTimings;
 }
 
 /** Hono env of every listener app. */

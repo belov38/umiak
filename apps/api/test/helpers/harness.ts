@@ -42,6 +42,8 @@ export interface HarnessResponse {
 
 export interface Harness {
 	deps: ApiDeps;
+	/** The default bearer of requests, if any. */
+	bearer: string | undefined;
 	/** The listener app: tests may add their own routes to it. */
 	app: ApiApp;
 	request(
@@ -104,9 +106,29 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 		const text = method.toUpperCase() === "HEAD" ? "" : await res.text();
 		const contentType = res.headers.get("content-type") ?? "";
 		const isJson = /^application\/(.+\+)?json\b/i.test(contentType);
-		const parsed: unknown = isJson && text !== "" ? JSON.parse(text) : text;
+		const isNdjson = /^application\/x-ndjson\b/i.test(contentType);
+		const parsed: unknown =
+			isJson && text !== ""
+				? JSON.parse(text)
+				: isNdjson
+					? parseNdjson(text)
+					: text;
 
 		const where = `${method} ${path} -> ${res.status}`;
+		if (isNdjson && documented) {
+			// Every frame of an NDJSON stream conforms to the document.
+			for (const frame of parsed as unknown[]) {
+				const r = assertConforms(
+					OPENAPI_DOC,
+					method,
+					path,
+					res.status,
+					contentType,
+					frame,
+				);
+				if (r.operationId !== null) validatedOperations.add(r.operationId);
+			}
+		}
 		const rid = res.headers.get("request-id");
 		if (rid === null || !REQUEST_ID_RE.test(rid)) {
 			throw new Error(`${where}: no valid Request-Id header (${rid})`);
@@ -143,5 +165,16 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 		return { status: res.status, headers: res.headers, body: parsed, text };
 	}
 
-	return { deps, app, request };
+	return { deps, app, bearer: o.bearer, request };
+}
+
+/** Lines of an NDJSON body; each must end with "\n". */
+export function parseNdjson(text: string): unknown[] {
+	if (text === "") return [];
+	if (!text.endsWith("\n"))
+		throw new Error("NDJSON body does not end with a newline");
+	return text
+		.slice(0, -1)
+		.split("\n")
+		.map((l) => JSON.parse(l) as unknown);
 }

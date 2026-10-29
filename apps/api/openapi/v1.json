@@ -2,6 +2,611 @@
 	"components": {
 		"parameters": {},
 		"schemas": {
+			"Command": {
+				"description": "A process started in a sandbox (S7 §9.6)",
+				"properties": {
+					"argv": {
+						"items": {
+							"type": "string"
+						},
+						"type": [
+							"array",
+							"null"
+						]
+					},
+					"command": {
+						"description": "Shell command line (first 64 KiB); null for argv",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"createdBy": {
+						"description": "The user (`usr_...`) who started it; null for a team key",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"createdByKey": {
+						"description": "The team key (`key_...`) that started it; null for a person",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"cwd": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"endedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"envKeys": {
+						"description": "Names of the command's env (never values)",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"exitCode": {
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"id": {
+						"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"mode": {
+						"enum": [
+							"sync",
+							"stream",
+							"detached",
+							"pty"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"pid": {
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"reason": {
+						"description": "Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"sandboxId": {
+						"example": "sb_01jbx4q3m7f8r2t6v9w0y1z2a3",
+						"type": "string"
+					},
+					"signal": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"startedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"status": {
+						"enum": [
+							"starting",
+							"running",
+							"exited",
+							"killed",
+							"timed_out",
+							"lost",
+							"failed_to_start"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"streams": {
+						"description": "Output sizes: live from the agent while the sandbox is ready, else the stored totals; null when unknown",
+						"properties": {
+							"pty": {
+								"$ref": "#/components/schemas/CommandStream"
+							},
+							"stderr": {
+								"$ref": "#/components/schemas/CommandStream"
+							},
+							"stdout": {
+								"$ref": "#/components/schemas/CommandStream"
+							}
+						},
+						"type": [
+							"object",
+							"null"
+						]
+					},
+					"tags": {
+						"$ref": "#/components/schemas/Labels"
+					},
+					"timeoutSeconds": {
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"user": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"id",
+					"sandboxId",
+					"mode",
+					"command",
+					"argv",
+					"cwd",
+					"user",
+					"envKeys",
+					"tags",
+					"timeoutSeconds",
+					"status",
+					"exitCode",
+					"signal",
+					"reason",
+					"pid",
+					"streams",
+					"createdBy",
+					"createdByKey",
+					"createdAt",
+					"startedAt",
+					"endedAt"
+				],
+				"type": "object"
+			},
+			"CommandAttachedFrame": {
+				"properties": {
+					"commandId": {
+						"type": "string"
+					},
+					"encoding": {
+						"enum": [
+							"utf8",
+							"base64"
+						],
+						"type": "string"
+					},
+					"ptyOffset": {
+						"description": "PTY commands only",
+						"type": "integer"
+					},
+					"stderrOffset": {
+						"type": "integer"
+					},
+					"stdoutOffset": {
+						"type": "integer"
+					},
+					"type": {
+						"enum": [
+							"attached"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type",
+					"commandId",
+					"encoding",
+					"stdoutOffset",
+					"stderrOffset"
+				],
+				"type": "object"
+			},
+			"CommandErrorFrame": {
+				"properties": {
+					"code": {
+						"type": "string"
+					},
+					"message": {
+						"type": "string"
+					},
+					"ptyOffset": {
+						"description": "PTY commands only",
+						"type": "integer"
+					},
+					"requestId": {
+						"type": "string"
+					},
+					"retryable": {
+						"type": "boolean"
+					},
+					"stderrOffset": {
+						"type": "integer"
+					},
+					"stdoutOffset": {
+						"type": "integer"
+					},
+					"type": {
+						"enum": [
+							"error"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type",
+					"code",
+					"message",
+					"retryable",
+					"requestId",
+					"stdoutOffset",
+					"stderrOffset"
+				],
+				"type": "object"
+			},
+			"CommandExitFrame": {
+				"properties": {
+					"exitCode": {
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"ptyOffset": {
+						"description": "PTY commands only",
+						"type": "integer"
+					},
+					"reason": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"signal": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"status": {
+						"enum": [
+							"exited",
+							"killed",
+							"timed_out",
+							"lost",
+							"failed_to_start"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"stderrOffset": {
+						"type": "integer"
+					},
+					"stdoutOffset": {
+						"type": "integer"
+					},
+					"type": {
+						"enum": [
+							"exit"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type",
+					"status",
+					"exitCode",
+					"signal",
+					"reason",
+					"stdoutOffset",
+					"stderrOffset"
+				],
+				"type": "object"
+			},
+			"CommandFrame": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/CommandStartedFrame"
+					},
+					{
+						"$ref": "#/components/schemas/CommandAttachedFrame"
+					},
+					{
+						"$ref": "#/components/schemas/CommandOutputFrame"
+					},
+					{
+						"$ref": "#/components/schemas/CommandTruncatedFrame"
+					},
+					{
+						"$ref": "#/components/schemas/CommandHeartbeatFrame"
+					},
+					{
+						"$ref": "#/components/schemas/CommandReconnectFrame"
+					},
+					{
+						"$ref": "#/components/schemas/CommandExitFrame"
+					},
+					{
+						"$ref": "#/components/schemas/CommandErrorFrame"
+					}
+				],
+				"description": "One line of an application/x-ndjson command stream (S7 §9.5). Output frames carry offsets; the last frame is exit, reconnect (reopen /stream with its offsets) or error (reopen when retryable). Ignore frame types you do not know."
+			},
+			"CommandHeartbeatFrame": {
+				"properties": {
+					"type": {
+						"enum": [
+							"heartbeat"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type"
+				],
+				"type": "object"
+			},
+			"CommandInputRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"closeStdin": {
+						"description": "Close stdin after the data (not for PTY: send ^D)",
+						"type": "boolean"
+					},
+					"data": {
+						"description": "Bytes to write (\"\" with closeStdin)",
+						"type": "string"
+					},
+					"encoding": {
+						"enum": [
+							"utf8",
+							"base64"
+						],
+						"type": "string"
+					},
+					"seq": {
+						"description": "Order of this chunk within sessionId; repeats (seq <= last) are dropped",
+						"minimum": 0,
+						"type": "integer"
+					},
+					"sessionId": {
+						"description": "Writer id; with seq a repeat is applied once",
+						"pattern": "^[A-Za-z0-9._-]{1,128}$",
+						"type": "string"
+					}
+				},
+				"required": [
+					"data"
+				],
+				"type": "object"
+			},
+			"CommandKillRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"graceMs": {
+						"description": "SIGTERM, then SIGKILL after this many ms (default 10 000)",
+						"maximum": 600000,
+						"minimum": 0,
+						"type": "integer"
+					}
+				},
+				"type": "object"
+			},
+			"CommandList": {
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/Command"
+						},
+						"type": "array"
+					},
+					"nextCursor": {
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"data",
+					"nextCursor"
+				],
+				"type": "object"
+			},
+			"CommandOutputFrame": {
+				"properties": {
+					"data": {
+						"description": "Text (utf8) or base64 of exactly the bytes [offset, nextOffset)",
+						"type": "string"
+					},
+					"nextOffset": {
+						"type": "integer"
+					},
+					"offset": {
+						"type": "integer"
+					},
+					"type": {
+						"enum": [
+							"stdout",
+							"stderr",
+							"pty"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type",
+					"offset",
+					"nextOffset",
+					"data"
+				],
+				"type": "object"
+			},
+			"CommandReconnectFrame": {
+				"properties": {
+					"ptyOffset": {
+						"description": "PTY commands only",
+						"type": "integer"
+					},
+					"reason": {
+						"enum": [
+							"max_duration",
+							"server_shutdown"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"stderrOffset": {
+						"type": "integer"
+					},
+					"stdoutOffset": {
+						"type": "integer"
+					},
+					"type": {
+						"enum": [
+							"reconnect"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type",
+					"reason",
+					"stdoutOffset",
+					"stderrOffset"
+				],
+				"type": "object"
+			},
+			"CommandSignalRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"signal": {
+						"enum": [
+							"SIGINT",
+							"SIGTERM",
+							"SIGKILL",
+							"SIGHUP",
+							"SIGUSR1",
+							"SIGUSR2",
+							"SIGQUIT"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"signal"
+				],
+				"type": "object"
+			},
+			"CommandStartedFrame": {
+				"properties": {
+					"commandId": {
+						"type": "string"
+					},
+					"encoding": {
+						"enum": [
+							"utf8",
+							"base64"
+						],
+						"type": "string"
+					},
+					"pid": {
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"replayed": {
+						"description": "A repeat with the same Idempotency-Key: the same command, from offset 0",
+						"type": "boolean"
+					},
+					"type": {
+						"enum": [
+							"started"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type",
+					"commandId",
+					"pid",
+					"encoding"
+				],
+				"type": "object"
+			},
+			"CommandStream": {
+				"properties": {
+					"availableFromBytes": {
+						"description": "Oldest offset still kept by the agent; null when unknown (sandbox not ready)",
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"endBytes": {
+						"description": "Final size once the stream ended",
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"sizeBytes": {
+						"description": "Bytes produced so far",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"sizeBytes",
+					"availableFromBytes",
+					"endBytes"
+				],
+				"type": "object"
+			},
+			"CommandTruncatedFrame": {
+				"properties": {
+					"availableFrom": {
+						"type": "integer"
+					},
+					"stream": {
+						"enum": [
+							"stdout",
+							"stderr",
+							"pty"
+						],
+						"type": "string"
+					},
+					"type": {
+						"enum": [
+							"truncated"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"type",
+					"stream",
+					"availableFrom"
+				],
+				"type": "object"
+			},
 			"CreateSandboxRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -1511,6 +2116,128 @@
 				],
 				"type": "object"
 			},
+			"StartCommandRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"argv": {
+						"description": "Program and arguments, run without a shell",
+						"example": [
+							"node",
+							"--version"
+						],
+						"items": {
+							"type": "string"
+						},
+						"maxItems": 4096,
+						"minItems": 1,
+						"type": [
+							"array",
+							"null"
+						]
+					},
+					"command": {
+						"description": "Shell command line, run by `bash -lc` (up to 256 KiB). Exactly one of command and argv.",
+						"example": "npm test",
+						"minLength": 1,
+						"type": "string"
+					},
+					"cwd": {
+						"description": "Working directory; relative to the user's home (default)",
+						"maxLength": 4096,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"encoding": {
+						"description": "Output in frames and the sync answer: utf8 (default; invalid bytes become U+FFFD) or base64",
+						"enum": [
+							"utf8",
+							"base64"
+						],
+						"type": "string"
+					},
+					"env": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Variables of this command only; values are never stored"
+							}
+						]
+					},
+					"mode": {
+						"description": "`sync` (default): 200 with the output once the command exits. `stream`: 200 NDJSON frames. `detached`: 201 Command right after the start.",
+						"enum": [
+							"sync",
+							"stream",
+							"detached"
+						],
+						"type": "string"
+					},
+					"stdin": {
+						"description": "Keep stdin open for POST .../input (needs the agent capability process.stdin)",
+						"type": "boolean"
+					},
+					"tags": {
+						"$ref": "#/components/schemas/Labels"
+					},
+					"timeoutSeconds": {
+						"description": "Process timeout (status timed_out). sync: default 60, at most 600. stream and detached: default none.",
+						"minimum": 1,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"user": {
+						"description": "Guest user (default `user`; `root` is allowed)",
+						"maxLength": 64,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
+			"SyncCommandResult": {
+				"description": "The result of a sync command: the tail (up to 4 MiB) of each stream",
+				"properties": {
+					"command": {
+						"$ref": "#/components/schemas/Command"
+					},
+					"stderr": {
+						"type": "string"
+					},
+					"stderrFrom": {
+						"type": "integer"
+					},
+					"stderrTruncated": {
+						"type": "boolean"
+					},
+					"stdout": {
+						"type": "string"
+					},
+					"stdoutFrom": {
+						"description": "Offset of the first stdout byte returned",
+						"type": "integer"
+					},
+					"stdoutTruncated": {
+						"description": "The answer holds only the tail; read the start with GET .../output from 0",
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"command",
+					"stdout",
+					"stderr",
+					"stdoutTruncated",
+					"stderrTruncated",
+					"stdoutFrom",
+					"stderrFrom"
+				],
+				"type": "object"
+			},
 			"Template": {
 				"properties": {
 					"allowedSizes": {
@@ -2363,6 +3090,927 @@
 				"summary": "Update a sandbox",
 				"tags": [
 					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/commands": {
+			"get": {
+				"description": "Commands of the sandbox, newest first, kept 90 days; works while the sandbox is stopped. Filters: `status` (comma-separated), `mode`.",
+				"operationId": "commands.list",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Comma-separated statuses: starting, running, exited, killed, timed_out, lost, failed_to_start",
+						"in": "query",
+						"name": "status",
+						"required": false,
+						"schema": {
+							"description": "Comma-separated statuses: starting, running, exited, killed, timed_out, lost, failed_to_start",
+							"example": "running",
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "mode",
+						"required": false,
+						"schema": {
+							"enum": [
+								"sync",
+								"stream",
+								"detached",
+								"pty"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"description": "Page size, 1-200 (default 50)",
+						"in": "query",
+						"name": "limit",
+						"required": false,
+						"schema": {
+							"description": "Page size, 1-200 (default 50)",
+							"maximum": 200,
+							"minimum": 1,
+							"type": "integer"
+						}
+					},
+					{
+						"description": "`nextCursor` of the previous page, unchanged",
+						"in": "query",
+						"name": "cursor",
+						"required": false,
+						"schema": {
+							"description": "`nextCursor` of the previous page, unchanged",
+							"minLength": 1,
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/CommandList"
+								}
+							}
+						},
+						"description": "A page of commands"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation` or `invalid_cursor`"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List commands",
+				"tags": [
+					"commands"
+				]
+			},
+			"post": {
+				"description": "Starts a process in a ready sandbox (a creating or starting one is awaited up to 60 s). Exactly one of `command` (bash -lc) and `argv`. Modes: `sync` (default) answers 200 SyncCommandResult once the process exits (timeout at most 600 s; the connection is silent until then, so proxies may cut it: SDKs use stream); `stream` answers 200 application/x-ndjson frames (first `started`, last `exit`, `reconnect` or `error`) with `Sbx-Command-Id`; `detached` answers 201 Command right after the start. With an Idempotency-Key a repeat never starts the command twice: sync waits for the same command, stream streams it from offset 0 with `started.replayed: true`, detached answers 200.",
+				"operationId": "commands.create",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "1-255 printable ASCII characters; a repeat with the same key and body attaches to the same command instead of starting it again (24 h)",
+						"in": "header",
+						"name": "Idempotency-Key",
+						"required": false,
+						"schema": {
+							"description": "1-255 printable ASCII characters; a repeat with the same key and body attaches to the same command instead of starting it again (24 h)",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/StartCommandRequest"
+							}
+						}
+					},
+					"description": "What to run",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"$ref": "#/components/schemas/SyncCommandResult"
+										},
+										{
+											"$ref": "#/components/schemas/Command"
+										}
+									]
+								}
+							},
+							"application/x-ndjson": {
+								"schema": {
+									"$ref": "#/components/schemas/CommandFrame"
+								}
+							}
+						},
+						"description": "sync: the result (application/json); stream: NDJSON frames; detached repeat: the Command",
+						"headers": {
+							"Idempotency-Replayed": {
+								"description": "`true` when the command was started by an earlier request with this key",
+								"schema": {
+									"enum": [
+										"true"
+									],
+									"type": "string"
+								}
+							},
+							"Sbx-Command-Id": {
+								"description": "Id (`cmd_...`) of the command",
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Command"
+								}
+							}
+						},
+						"description": "detached: the started command",
+						"headers": {
+							"Sbx-Command-Id": {
+								"description": "Id (`cmd_...`) of the command",
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation` (also: command and argv, sync timeout over 600)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated`, `idempotency_key_reused` or `invalid_state` (details.reason too_many_commands)"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`rate_limited`: too many open streams of this key or user"
+					},
+					"503": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`agent_unavailable`: retryable with an Idempotency-Key; without one `details.outcome` says whether the command may run (`unknown`) or runs (`running`), see `details.commandId`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Run a command",
+				"tags": [
+					"commands"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/commands/{command}": {
+			"get": {
+				"description": "The command; while the sandbox is ready, pid and stream sizes are live from the agent.",
+				"operationId": "commands.get",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Command"
+								}
+							}
+						},
+						"description": "The command"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Get a command",
+				"tags": [
+					"commands"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/commands/{command}/input": {
+			"post": {
+				"description": "Writes `data` to the command's stdin (started with `stdin: true`, or a PTY). With `sessionId` and `seq` a repeat is applied once; without them every request is new. `closeStdin` sends EOF (not for PTY: send ^D).",
+				"operationId": "commands.input",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CommandInputRequest"
+							}
+						}
+					},
+					"description": "The input",
+					"required": true
+				},
+				"responses": {
+					"204": {
+						"description": "Written"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`command_exited`, `invalid_state` (no stdin) or `sandbox_not_ready`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Write to stdin",
+				"tags": [
+					"commands"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/commands/{command}/kill": {
+			"post": {
+				"description": "SIGTERM to the process group, SIGKILL to everything left after `graceMs` (default 10 000). Idempotent; an ended command is returned as is.",
+				"operationId": "commands.kill",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CommandKillRequest"
+							}
+						}
+					},
+					"description": "Grace period",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Command"
+								}
+							}
+						},
+						"description": "The command (status changes once it exits)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready` (details.state), `sandbox_starting` (retryable), `agent_outdated` (details.capability) or `invalid_state`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Kill a command",
+				"tags": [
+					"commands"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/commands/{command}/output": {
+			"get": {
+				"description": "Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: Sbx-Offset (where the bytes start), Sbx-Next-Offset, Sbx-Available-From, Sbx-Stream-End (only once the stream ended), Sbx-Truncated: true when `offset` was already evicted and reading started at Sbx-Available-From. For polling without streams.",
+				"operationId": "commands.output",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Default stdout",
+						"in": "query",
+						"name": "stream",
+						"required": false,
+						"schema": {
+							"description": "Default stdout",
+							"enum": [
+								"stdout",
+								"stderr",
+								"pty"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "offset",
+						"required": false,
+						"schema": {
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"description": "Bytes, at most 4 MiB (default 1 MiB)",
+						"in": "query",
+						"name": "limit",
+						"required": false,
+						"schema": {
+							"description": "Bytes, at most 4 MiB (default 1 MiB)",
+							"maximum": 4194304,
+							"minimum": 1,
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/octet-stream": {
+								"schema": {
+									"format": "binary",
+									"type": "string"
+								}
+							}
+						},
+						"description": "The bytes",
+						"headers": {
+							"Sbx-Available-From": {
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Next-Offset": {
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Offset": {
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Stream-End": {
+								"description": "Final size of the stream, once it ended",
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Truncated": {
+								"schema": {
+									"enum": [
+										"true"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation` (a stream the command does not have)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready` (details.state), `sandbox_starting` (retryable), `agent_outdated` (details.capability) or `invalid_state`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Read output by offset",
+				"tags": [
+					"commands"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/commands/{command}/signal": {
+			"post": {
+				"description": "Sends a signal to the process group (SIGKILL: to everything of the command). Idempotent.",
+				"operationId": "commands.signal",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CommandSignalRequest"
+							}
+						}
+					},
+					"description": "The signal",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Command"
+								}
+							}
+						},
+						"description": "The command"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready` (details.state), `sandbox_starting` (retryable), `agent_outdated` (details.capability) or `invalid_state`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Send a signal",
+				"tags": [
+					"commands"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/commands/{command}/stream": {
+			"get": {
+				"description": "NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s; heartbeats come every 15 s).",
+				"operationId": "commands.stream",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Command id (`cmd_...`)",
+						"in": "path",
+						"name": "command",
+						"required": true,
+						"schema": {
+							"description": "Command id (`cmd_...`)",
+							"example": "cmd_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "stdoutOffset",
+						"required": false,
+						"schema": {
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"in": "query",
+						"name": "stderrOffset",
+						"required": false,
+						"schema": {
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"in": "query",
+						"name": "ptyOffset",
+						"required": false,
+						"schema": {
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"description": "Start each stream this many bytes before its end (ignores the offsets)",
+						"in": "query",
+						"name": "tailBytes",
+						"required": false,
+						"schema": {
+							"description": "Start each stream this many bytes before its end (ignores the offsets)",
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"description": "false: send what exists and close (exit if it has exited); default true",
+						"in": "query",
+						"name": "follow",
+						"required": false,
+						"schema": {
+							"description": "false: send what exists and close (exit if it has exited); default true",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "encoding",
+						"required": false,
+						"schema": {
+							"enum": [
+								"utf8",
+								"base64"
+							],
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/x-ndjson": {
+								"schema": {
+									"$ref": "#/components/schemas/CommandFrame"
+								}
+							}
+						},
+						"description": "NDJSON frames",
+						"headers": {
+							"Sbx-Command-Id": {
+								"description": "Id (`cmd_...`) of the command",
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox or command (another sandbox's command too)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`sandbox_not_ready` (details.state), `sandbox_starting` (retryable), `agent_outdated` (details.capability) or `invalid_state`"
+					},
+					"429": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`rate_limited`: too many open streams of this key or user"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Attach to a command's output",
+				"tags": [
+					"commands"
 				]
 			}
 		},

@@ -26,6 +26,7 @@ import { requestMetrics } from "./http/metrics.ts";
 import { requestId } from "./http/request-id.ts";
 import { registerSecuritySchemes } from "./openapi/registry.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
+import { registerCommandRoutes } from "./routes/commands.ts";
 import { registerEnvRoutes } from "./routes/env.ts";
 import { registerLimitsRoutes } from "./routes/limits.ts";
 import { registerMeRoutes } from "./routes/me.ts";
@@ -71,6 +72,7 @@ export function mountV1(app: ApiApp, deps: ApiDeps): void {
 	registerSandboxRoutes(app, deps);
 	registerEnvRoutes(app, deps);
 	registerOperationRoutes(app, deps);
+	registerCommandRoutes(app, deps);
 	registerCatalogRoutes(app, deps);
 	registerLimitsRoutes(app, deps);
 }

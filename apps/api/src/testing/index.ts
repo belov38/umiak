@@ -10,6 +10,8 @@ import { KeyCache } from "../auth/key-cache.ts";
 import { OidcVerifier } from "../auth/oidc.ts";
 import { SessionResolver } from "../auth/principal.ts";
 import { RateLimits } from "../auth/rate-limit.ts";
+import { DEFAULT_COMMAND_TIMINGS } from "../commands/attach.ts";
+import { StreamRegistry } from "../commands/registry.ts";
 import type { ApiDeps } from "../deps.ts";
 import { createApiLogger } from "../http/logger.ts";
 import { ApiMetrics } from "../http/metrics.ts";
@@ -107,7 +109,9 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  * - oidc: a verifier when the settings have SBX_OIDC_ISSUER;
  * - serviceTokens: none accepted;
  * - svc: `unconfiguredService()`, config: an empty StaticConfigReader,
- *   environments: `emptyEnvironmentStore()`, agent: a FakeAgent.
+ *   environments: `emptyEnvironmentStore()`, agent: a FakeAgent;
+ * - streams: a StreamRegistry over the final identity and identityEvents;
+ *   commandTimings: the defaults (60 s, 15 s, 60 min).
  */
 export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 	const settings = over.settings ?? testSettings();
@@ -126,9 +130,10 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 				})
 			: new PgIdentityStore({ pool, operatorGroups: settings.operatorGroups }));
 	const identityEvents = over.identityEvents ?? new IdentityListener(null);
+	const log = over.log ?? createApiLogger({ level: "silent" });
 	return {
 		settings,
-		log: createApiLogger({ level: "silent" }),
+		log,
 		metrics: new ApiMetrics(),
 		pool,
 		hostKeys: [],
@@ -143,6 +148,15 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 		config: StaticConfigReader.fromObject({}),
 		environments: emptyEnvironmentStore(),
 		agent: new FakeAgent(),
+		streams:
+			over.streams ??
+			new StreamRegistry({
+				identity,
+				events: identityEvents,
+				maxPerPrincipal: settings.maxStreams,
+				log,
+			}),
+		commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 		...over,
 	};
 }
