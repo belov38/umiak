@@ -31,10 +31,21 @@ export interface OidcVerifierOptions {
 	jwksMaxAgeMs?: number;
 	/** Timeout of discovery and JWKS requests (default 5 s). */
 	timeoutMs?: number;
+	/**
+	 * After a failed JWKS fetch, verify offline with the last good keys and
+	 * do not try Keycloak again for this long (default 30 s), so a hanging
+	 * Keycloak does not cost every request the timeout.
+	 */
+	outageBackoffMs?: number;
+	/** After a failed discovery, answer 503 without retrying for this long (default 5 s). */
+	discoveryRetryMs?: number;
 }
 
 const ALGORITHMS = ["RS256", "ES256"];
 const CLOCK_TOLERANCE_S = 60;
+
+type RemoteKeySet = ReturnType<typeof createRemoteJWKSet>;
+type KeyArgs = Parameters<JWTVerifyGetKey>;
 
 function idpUnavailable(cause: unknown): ApiError {
 	return new ApiError(
@@ -45,19 +56,29 @@ function idpUnavailable(cause: unknown): ApiError {
 	);
 }
 
-/** Network-level failures of fetching discovery or keys (not token errors). */
-function isFetchFailure(e: unknown): boolean {
+/**
+ * A failure to fetch or read the key set (network, timeout, non-200, bad
+ * JSON, not a JWKS), as opposed to a token that matches no key.
+ */
+function isKeySetOutage(e: unknown): boolean {
+	if (!(e instanceof errors.JOSEError)) return true;
 	return (
 		e instanceof errors.JWKSTimeout ||
-		(e instanceof Error && !(e instanceof errors.JOSEError))
+		e instanceof errors.JWKSInvalid ||
+		e.code === "ERR_JOSE_GENERIC"
 	);
 }
 
 export class OidcVerifier {
 	readonly #s: OidcSettings;
 	readonly #o: Required<OidcVerifierOptions>;
-	#jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
-	#jwksPending: Promise<ReturnType<typeof createRemoteJWKSet>> | null = null;
+	#jwks: RemoteKeySet | null = null;
+	#jwksPending: Promise<RemoteKeySet> | null = null;
+	/** No discovery attempt before this time (ms) after a failure. */
+	#discoveryRetryAt = 0;
+	/** Keycloak's key set is unreachable: offline until this time (ms). */
+	#outageUntil = 0;
+	readonly #getKey: JWTVerifyGetKey = (...args) => this.#resolveKey(...args);
 
 	constructor(s: OidcSettings, o: OidcVerifierOptions = {}) {
 		this.#s = s;
@@ -65,38 +86,64 @@ export class OidcVerifier {
 			jwksCooldownMs: o.jwksCooldownMs ?? 30_000,
 			jwksMaxAgeMs: o.jwksMaxAgeMs ?? 600_000,
 			timeoutMs: o.timeoutMs ?? 5_000,
+			outageBackoffMs: o.outageBackoffMs ?? 30_000,
+			discoveryRetryMs: o.discoveryRetryMs ?? 5_000,
 		};
 	}
 
 	/** Verifies an access token; throws ApiError 401 (or 503 when Keycloak is unreachable). */
 	async verify(token: string): Promise<OidcClaims> {
-		const jwks = await this.#keySet();
 		let payload: JWTPayload;
 		try {
-			payload = await this.#jwtVerify(token, jwks);
+			payload = (
+				await jwtVerify(token, this.#getKey, {
+					issuer: this.#s.issuer,
+					audience: this.#s.audience,
+					algorithms: ALGORITHMS,
+					clockTolerance: CLOCK_TOLERANCE_S,
+					requiredClaims: ["exp"],
+				})
+			).payload;
 		} catch (e) {
-			// Keycloak is down and the cached keys are stale: keep verifying
-			// offline with the last keys we have (S7 §7.10).
-			const cached = jwks.jwks();
-			if (!isFetchFailure(e) || cached === undefined) throw this.#mapError(e);
-			try {
-				payload = await this.#jwtVerify(token, createLocalJWKSet(cached));
-			} catch (e2) {
-				throw this.#mapError(e2);
-			}
+			throw this.#mapError(e);
 		}
 		return this.#checkClaims(payload);
 	}
 
-	async #jwtVerify(token: string, keys: JWTVerifyGetKey): Promise<JWTPayload> {
-		const r = await jwtVerify(token, keys, {
-			issuer: this.#s.issuer,
-			audience: this.#s.audience,
-			algorithms: ALGORITHMS,
-			clockTolerance: CLOCK_TOLERANCE_S,
-			requiredClaims: ["exp"],
-		});
-		return r.payload;
+	/**
+	 * Key of a token: from Keycloak's JWKS, or, while Keycloak's key set
+	 * cannot be fetched, from the last good set (S7 §7.10: tokens are
+	 * verified offline). An unknown kid during an outage is a 503.
+	 */
+	async #resolveKey(...[header, token]: KeyArgs) {
+		const remote = await this.#keySet();
+		if (Date.now() < this.#outageUntil)
+			return this.#offline(remote, header, token, null);
+		try {
+			return await remote(header, token);
+		} catch (e) {
+			if (!isKeySetOutage(e)) throw e;
+			this.#outageUntil = Date.now() + this.#o.outageBackoffMs;
+			return this.#offline(remote, header, token, e);
+		}
+	}
+
+	async #offline(
+		remote: RemoteKeySet,
+		header: KeyArgs[0],
+		token: KeyArgs[1],
+		cause: unknown,
+	) {
+		// The remote set keeps its last successfully fetched keys.
+		const last = remote.jwks();
+		if (last === undefined) throw idpUnavailable(cause);
+		try {
+			return await createLocalJWKSet(last)(header, token);
+		} catch (e) {
+			if (e instanceof errors.JWKSNoMatchingKey)
+				throw idpUnavailable(cause ?? e);
+			throw e;
+		}
 	}
 
 	#mapError(e: unknown): unknown {
@@ -107,7 +154,6 @@ export class OidcVerifier {
 				"token_expired",
 			);
 		}
-		if (isFetchFailure(e)) return idpUnavailable(e);
 		return invalidToken("the access token is not valid");
 	}
 
@@ -120,6 +166,13 @@ export class OidcVerifier {
 			throw bad("issued to a client that may not call the API");
 		}
 		if (p.email_verified !== true) throw bad("the email is not verified");
+		// jose checks iat only with maxTokenAge; a token from the future is forged or skewed.
+		if (
+			typeof p.iat === "number" &&
+			p.iat > Date.now() / 1000 + CLOCK_TOLERANCE_S
+		) {
+			throw bad("issued in the future");
+		}
 		if (typeof p.sub !== "string" || p.sub.trim() === "") {
 			throw bad("no subject");
 		}
@@ -142,15 +195,23 @@ export class OidcVerifier {
 	}
 
 	/** Remote key set from the discovery document, created once. */
-	async #keySet(): Promise<ReturnType<typeof createRemoteJWKSet>> {
+	async #keySet(): Promise<RemoteKeySet> {
 		if (this.#jwks !== null) return this.#jwks;
-		this.#jwksPending ??= this.#discover().finally(() => {
-			this.#jwksPending = null;
-		});
+		if (this.#jwksPending === null && Date.now() < this.#discoveryRetryAt) {
+			throw idpUnavailable(new Error("discovery failed recently"));
+		}
+		this.#jwksPending ??= this.#discover()
+			.catch((e: unknown) => {
+				this.#discoveryRetryAt = Date.now() + this.#o.discoveryRetryMs;
+				throw e;
+			})
+			.finally(() => {
+				this.#jwksPending = null;
+			});
 		return this.#jwksPending;
 	}
 
-	async #discover(): Promise<ReturnType<typeof createRemoteJWKSet>> {
+	async #discover(): Promise<RemoteKeySet> {
 		let url = this.#s.jwksUrl;
 		if (url === null) {
 			let doc: unknown;
@@ -170,7 +231,13 @@ export class OidcVerifier {
 			}
 			url = uri;
 		}
-		this.#jwks = createRemoteJWKSet(new URL(url), {
+		let jwksUrl: URL;
+		try {
+			jwksUrl = new URL(url);
+		} catch (e) {
+			throw idpUnavailable(e);
+		}
+		this.#jwks = createRemoteJWKSet(jwksUrl, {
 			cooldownDuration: this.#o.jwksCooldownMs,
 			cacheMaxAge: this.#o.jwksMaxAgeMs,
 			timeoutDuration: this.#o.timeoutMs,

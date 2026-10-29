@@ -3,6 +3,7 @@
 
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
+import { OpenAPIHono } from "@hono/zod-openapi";
 import {
 	apiKeyHash,
 	encodeUuid,
@@ -11,7 +12,7 @@ import {
 } from "@sbx/auth";
 import { skipPg } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { IdentityListener } from "../src/index.ts";
+import { type ApiEnv, IdentityListener, needsAuth } from "../src/index.ts";
 import { issueApiKey, TEST_API_KEY } from "../src/testing/index.ts";
 import {
 	eventually,
@@ -119,6 +120,26 @@ describe("public listener without credentials", () => {
 		h.app.get("/v1/__test/wild/*", (c) => c.body(null, 204));
 		expect((await h.request("GET", "/v1/__test/all")).status).toBe(401);
 		expect((await h.request("GET", "/v1/__test/wild/x/y")).status).toBe(401);
+	});
+
+	it("needsAuth: an anonymous route matched last does not hide an earlier non-anonymous one", async () => {
+		const app = new OpenAPIHono<ApiEnv>();
+		app.get("/v1/:anything", async (_c, next) => next());
+		app.get("/v1/meta", (c) =>
+			c.body(null, 204, { "x-needs-auth": String(needsAuth(c)) }),
+		);
+		app.get("/v1/docs", (c) =>
+			c.body(null, 204, { "x-needs-auth": String(needsAuth(c)) }),
+		);
+		const r = await app.request("/v1/meta");
+		expect(r.headers.get("x-needs-auth")).toBe("true");
+		const only = new OpenAPIHono<ApiEnv>();
+		only.get("/v1/meta", (c) =>
+			c.body(null, 204, { "x-needs-auth": String(needsAuth(c)) }),
+		);
+		expect((await only.request("/v1/meta")).headers.get("x-needs-auth")).toBe(
+			"false",
+		);
 	});
 
 	it("an invalid bearer with a malformed Sbx-Team: 401, not 400", async () => {

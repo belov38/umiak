@@ -59,18 +59,18 @@ export function authOf(c: Context<ApiEnv>): AuthContext {
 const LISTENER_MIDDLEWARE_PATHS = new Set(["*", "/*", "/v1/*"]);
 
 /**
- * Whether the listener's authentication applies: every matched route except
- * the anonymous ones (`/v1/meta`, `/v1/openapi.json`, `/v1/docs`). Paths
- * that match only the listener-wide middleware skip it, so they answer
- * 404/405 as before. A route registered with `app.all` or a wildcard path
- * still counts as a route (authenticated).
+ * Whether the listener's authentication applies: skipped only when every
+ * matched route is anonymous (`/v1/meta`, `/v1/openapi.json`, `/v1/docs`)
+ * or nothing but the listener-wide middleware matched (then the answer is
+ * 404/405). A route registered with `app.all` or a wildcard path counts as
+ * a route (authenticated).
  */
 export function needsAuth(c: Context<ApiEnv>): boolean {
-	const routes = matchedRoutes(c).filter(
-		(r) => r.method !== "ALL" || !LISTENER_MIDDLEWARE_PATHS.has(r.path),
+	return matchedRoutes(c).some(
+		(r) =>
+			(r.method !== "ALL" || !LISTENER_MIDDLEWARE_PATHS.has(r.path)) &&
+			!ANONYMOUS_ROUTES.has(r.path),
 	);
-	const route = routes.at(-1)?.path;
-	return route !== undefined && !ANONYMOUS_ROUTES.has(route);
 }
 
 // --- errors ---

@@ -113,6 +113,16 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 			"a bad signature",
 			async () => `${(await oidc.token(person())).slice(0, -4)}AAAA`,
 		],
+		[
+			"nbf 5 min in the future",
+			() =>
+				oidc.token({ ...person(), nbf: Math.floor(Date.now() / 1000) + 300 }),
+		],
+		[
+			"iat 5 min in the future",
+			() =>
+				oidc.token({ ...person(), iat: Math.floor(Date.now() / 1000) + 300 }),
+		],
 	];
 	for (const [name, make] of rejected) {
 		it(`${name}: 401 unauthorized invalid_token`, async () => {
@@ -138,6 +148,85 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 		);
 		const ok = await me(h, await oidc.token(person(), { expiresIn: -30 }));
 		expect(ok.status).toBe(200);
+	});
+
+	it("nbf and iat within the 60 s tolerance are accepted", async () => {
+		const soon = Math.floor(Date.now() / 1000) + 30;
+		const r = await me(
+			harness(),
+			await oidc.token({ ...person(), nbf: soon, iat: soon }),
+		);
+		expect(r.status).toBe(200);
+	});
+
+	it("Keycloak's JWKS fails: cached keys keep working offline, an unknown kid is 503", async () => {
+		const settings = testSettings({ SBX_OIDC_ISSUER: oidc.issuer });
+		const h = createHarness({
+			deps: {
+				settings,
+				pool: w.db.pool,
+				identity: w.identity,
+				identityEvents: w.events,
+				oidc: new OidcVerifier(settings.oidc as OidcSettings, {
+					jwksMaxAgeMs: 100,
+					jwksCooldownMs: 100,
+					outageBackoffMs: 400,
+				}),
+			},
+		});
+		const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+		try {
+			expect((await me(h, await oidc.token(person()))).status).toBe(200);
+			oidc.fail({ jwks: 503 });
+			await sleep(150); // the cached set is stale now
+			const before = oidc.stats.jwks;
+			expect((await me(h, await oidc.token(person()))).status).toBe(200);
+			expect(oidc.stats.jwks).toBe(before + 1); // one failed fetch
+			// Inside the backoff Keycloak is not asked again.
+			expect((await me(h, await oidc.token(person()))).status).toBe(200);
+			expect(oidc.stats.jwks).toBe(before + 1);
+			oidc.rotateKey();
+			const unknown = await me(h, await oidc.token(person()));
+			expect(unknown.status).toBe(503);
+			expect(errorOf(unknown.body)).toMatchObject({
+				code: "idp_unavailable",
+				retryable: true,
+			});
+			oidc.fail({ jwks: null });
+			await sleep(450); // backoff over: the new key is fetched
+			expect((await me(h, await oidc.token(person()))).status).toBe(200);
+		} finally {
+			oidc.fail({ jwks: null });
+		}
+	});
+
+	it("a failed discovery is not retried for a short while", async () => {
+		const other = await startTestOidcServer();
+		const settings = testSettings({ SBX_OIDC_ISSUER: other.issuer });
+		const h = createHarness({
+			deps: {
+				settings,
+				pool: w.db.pool,
+				identity: w.identity,
+				identityEvents: w.events,
+				oidc: new OidcVerifier(settings.oidc as OidcSettings, {
+					discoveryRetryMs: 300,
+				}),
+			},
+		});
+		try {
+			other.fail({ discovery: 500 });
+			const token = await other.token(person());
+			expect((await me(h, token)).status).toBe(503);
+			expect((await me(h, token)).status).toBe(503);
+			expect(other.stats.discovery).toBe(1);
+			other.fail({ discovery: null });
+			await new Promise((r) => setTimeout(r, 350));
+			expect((await me(h, token)).status).toBe(200);
+			expect(other.stats.discovery).toBe(2);
+		} finally {
+			await other.close();
+		}
 	});
 
 	it("an ES256 token is accepted", async () => {

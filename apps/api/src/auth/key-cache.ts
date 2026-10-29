@@ -76,7 +76,10 @@ export class KeyCache {
 		}
 		const running = this.#inflight.get(hash);
 		if (running !== undefined) return running;
-		const p = this.#load(hash, now).finally(() => this.#inflight.delete(hash));
+		const p: Promise<CachedKey | null> = this.#load(hash, now).finally(() => {
+			// An invalidation may have replaced it with a newer load.
+			if (this.#inflight.get(hash) === p) this.#inflight.delete(hash);
+		});
 		this.#inflight.set(hash, p);
 		return p;
 	}
@@ -100,6 +103,8 @@ export class KeyCache {
 
 	flush(): void {
 		this.#generation++;
+		// Loads started before the change must not be joined by new requests.
+		this.#inflight.clear();
 		this.#byHash.clear();
 		this.#hashOf.clear();
 	}
@@ -123,8 +128,9 @@ export class KeyCache {
 	}
 
 	#invalidateKey(id: string): void {
-		// In-flight loads must not cache a pre-change answer.
+		// In-flight loads must neither cache nor serve a pre-change answer.
 		this.#generation++;
+		this.#inflight.clear();
 		const hash = this.#hashOf.get(id);
 		if (hash !== undefined) this.#drop(hash);
 		// A new key may have a negative entry under its hash (id unknown).

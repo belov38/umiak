@@ -74,6 +74,8 @@ export interface TestOidcServer {
 	deviceFlow: TestDeviceFlow;
 	/** Every refresh token stops working (`invalid_grant`), like a disabled user. */
 	revokeRefreshTokens(): void;
+	/** Make discovery and/or JWKS answer this HTTP status (null: work again). */
+	fail(f: { discovery?: number | null; jwks?: number | null }): void;
 	close(): Promise<void>;
 }
 
@@ -153,6 +155,10 @@ export async function startTestOidcServer(
 	/** refresh token -> claims of the session (null: revoked). */
 	const refreshTokens = new Map<string, TestClaims | null>();
 	let auto: TestClaims | null = null;
+	const failures: { discovery: number | null; jwks: number | null } = {
+		discovery: null,
+		jwks: null,
+	};
 	const stats: TestOidcStats = {
 		discovery: 0,
 		jwks: 0,
@@ -256,6 +262,10 @@ export async function startTestOidcServer(
 			path === "/realms/sbx/.well-known/openid-configuration"
 		) {
 			stats.discovery++;
+			if (failures.discovery !== null) {
+				send(res, failures.discovery, { error: "unavailable" });
+				return;
+			}
 			send(res, 200, {
 				issuer,
 				authorization_endpoint: `${issuer}/protocol/openid-connect/auth`,
@@ -274,6 +284,10 @@ export async function startTestOidcServer(
 		}
 		if (req.method === "GET" && path === `${oidcPath}/certs`) {
 			stats.jwks++;
+			if (failures.jwks !== null) {
+				send(res, failures.jwks, { error: "unavailable" });
+				return;
+			}
 			send(res, 200, { keys: [...rsaKeys, ecKey].map((k) => k.jwk) });
 			return;
 		}
@@ -400,6 +414,10 @@ export async function startTestOidcServer(
 			autoApprove(claims) {
 				auto = claims;
 			},
+		},
+		fail(f) {
+			if (f.discovery !== undefined) failures.discovery = f.discovery;
+			if (f.jwks !== undefined) failures.jwks = f.jwks;
 		},
 		revokeRefreshTokens() {
 			for (const t of refreshTokens.keys()) refreshTokens.set(t, null);
