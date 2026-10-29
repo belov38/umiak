@@ -1,0 +1,30 @@
+# Local research material (not part of the product)
+/research/
+/sdks/
+/vendor-repos/
+/scripts/
+
+# Node / TS
+node_modules/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+coverage/
+
+# Go
+/bin/
+*.test
+*.out
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
