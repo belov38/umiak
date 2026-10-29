@@ -72,6 +72,16 @@ const (
 	// eventEnvelopeBytes is the SubscribeResponse framing allowed on top of
 	// Timing.MaxEventBytes: the field tag and length of the event.
 	eventEnvelopeBytes = 64
+	// maxControlResponseBytes bounds Control responses (Info, SetToken, Drain).
+	maxControlResponseBytes = 1 << 20
+)
+
+// Limits of the agent-reported capabilities stored in the registry: a larger
+// set is not stored (capabilities stay unknown).
+const (
+	maxCapabilities      = 256
+	maxCapabilityBytes   = 256
+	maxCapabilitiesTotal = 64 << 10
 )
 
 // errNotActive refuses token rotation on a session that is not active.
@@ -124,8 +134,8 @@ func newSession(g *Gateway, hello transport.Hello, info transport.ConnInfo, res 
 	s.ctx, s.cancel = context.WithCancel(g.bg)
 	s.mc = &MachineConn{s: s}
 	hc := &http.Client{Transport: s.mc}
-	opts := []connect.ClientOption{connect.WithReadMaxBytes(maxMessageBytes), connect.WithSendMaxBytes(maxMessageBytes)}
-	s.control = tunnelv1connect.NewControlClient(hc, agentBaseURL, opts...)
+	s.control = tunnelv1connect.NewControlClient(hc, agentBaseURL,
+		connect.WithReadMaxBytes(maxControlResponseBytes), connect.WithSendMaxBytes(maxMessageBytes))
 	// A larger event is never buffered: connect discards it and ends the stream.
 	s.events = tunnelv1connect.NewEventsClient(hc, agentBaseURL,
 		connect.WithReadMaxBytes(g.cfg.Timing.MaxEventBytes+eventEnvelopeBytes), connect.WithSendMaxBytes(maxMessageBytes))
@@ -340,9 +350,9 @@ func (s *session) infoAndRotation() {
 		if ctx.Err() == nil {
 			s.log.Warn("gateway: Control/Info failed", "err", err)
 		}
-	} else {
+	} else if caps := resp.Msg.GetCapabilities(); s.capabilitiesFit(caps) {
 		uctx, cancel := context.WithTimeout(ctx, dbTimeout)
-		ok, err := s.g.store.UpdateSessionInfo(uctx, s.machineID, s.info.Epoch, resp.Msg.GetCapabilities())
+		ok, err := s.g.store.UpdateSessionInfo(uctx, s.machineID, s.info.Epoch, caps)
 		cancel()
 		switch {
 		case err != nil:
@@ -380,6 +390,23 @@ func (s *session) infoAndRotation() {
 		}
 		wait = maxAge
 	}
+}
+
+// capabilitiesFit reports whether the agent's capabilities are within the
+// stored limits; it logs the sizes of a set that is not.
+func (s *session) capabilitiesFit(caps []string) bool {
+	total, longest := 0, 0
+	for _, c := range caps {
+		total += len(c)
+		longest = max(longest, len(c))
+	}
+	if len(caps) <= maxCapabilities && longest <= maxCapabilityBytes && total <= maxCapabilitiesTotal {
+		return true
+	}
+	s.log.Warn("gateway: agent capabilities over the limits, not stored",
+		"count", len(caps), "longest_bytes", longest, "total_bytes", total,
+		"max_count", maxCapabilities, "max_bytes", maxCapabilityBytes, "max_total_bytes", maxCapabilitiesTotal)
+	return false
 }
 
 // rotateToken issues a new machine token in two phases (spec 5.2):
