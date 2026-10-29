@@ -150,6 +150,41 @@ describe.skipIf(skipPg())("ingestAgentEvents (S6 §10.1)", () => {
 		});
 	});
 
+	it("replaces lone UTF-16 surrogates with U+FFFD (jsonb rejects them) instead of failing the batch", async () => {
+		const machineId = randomUUID();
+		const jobs = new RecordingJobSender();
+		const res = await ingestAgentEvents(t.pool, jobs, {
+			machineId,
+			events: [
+				ev(1, "command.output", {
+					hi: "a\uD800b",
+					lo: "\uDC00",
+					pair: "\uD83D\uDE00",
+					nested: [{ "k\uDBFFey": ["x\uDFFF", 2] }],
+				}),
+				{ ...ev(2, "t\uD800"), bootId: "b\uDC001" },
+			],
+			synthetic: [
+				{ epoch: 1, type: "connected", instanceId: "gw\uD800", time: T0 },
+			],
+		});
+		expect(res).toEqual({ ackedSeq: 2 });
+		const stored = await rows(machineId);
+		expect(stored.map((r) => r.seq)).toEqual([1, 2]);
+		expect(stored[0]?.payload).toEqual({
+			hi: "a\uFFFDb",
+			lo: "\uFFFD",
+			pair: "\uD83D\uDE00",
+			nested: [{ "k\uFFFDey": ["x\uFFFD", 2] }],
+		});
+		expect(stored[1]).toMatchObject({ type: "t\uFFFD", boot_id: "b\uFFFD1" });
+		const syn = await t.pool.query(
+			"SELECT instance_id FROM runtime.agent_synthetic_events WHERE machine_id = $1",
+			[machineId],
+		);
+		expect(syn.rows).toEqual([{ instance_id: "gw\uFFFD" }]);
+	});
+
 	it("an empty batch writes nothing and sends no job", async () => {
 		const jobs = new RecordingJobSender();
 		expect(

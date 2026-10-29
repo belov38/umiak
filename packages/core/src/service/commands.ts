@@ -106,7 +106,8 @@ export async function resolveAgentTarget(
 ): Promise<AgentTarget> {
 	const row = await findSandboxRow(deps.pool, p, idOrSlug);
 	const machineId = readyTarget(row);
-	const s = await deps.pool.query<{ capabilities: string[] }>(
+	// NULL until the agent reports its capabilities: none known yet.
+	const s = await deps.pool.query<{ capabilities: string[] | null }>(
 		"SELECT capabilities FROM tunnel.tunnel_sessions WHERE machine_id = $1",
 		[machineId],
 	);

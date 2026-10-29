@@ -24,7 +24,8 @@ export const tunnelSessions = tunnel.table("tunnel_sessions", {
 	vmgenid: text("vmgenid").notNull(),
 	agentVersion: text("agent_version").notNull(),
 	protoVersion: text("proto_version").notNull(),
-	capabilities: text("capabilities").array().notNull().default([]),
+	// NULL: unknown until the agent reports them (Control/Info).
+	capabilities: text("capabilities").array(),
 	state: text("state", { enum: ["connected", "disconnected"] }).notNull(),
 	connectedAt: tstz("connected_at").notNull(),
 	disconnectedAt: tstz("disconnected_at"),

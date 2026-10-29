@@ -51,13 +51,19 @@ export function validateSlug(s: string): void {
 /** Random integer in [0, n). */
 export type RandomInt = (n: number) => number;
 
+/** Five 7-letter words are 39 characters; six would exceed the 40 limit. */
+export const SLUG_MAX_WORDS = 5;
+
 /**
- * Random slug of `words` dictionary words joined by '-' (S7 §5.4). Callers retry
- * on collision and switch to four words after five attempts (decision 11).
+ * Random slug of `words` (1..SLUG_MAX_WORDS) dictionary words joined by '-'
+ * (S7 §5.4). Callers retry on collision and switch to four words after five
+ * attempts (decision 11).
  */
 export function generateSlug(words = 3, rnd: RandomInt = randomInt): string {
-	if (!Number.isInteger(words) || words < 1 || words > 6) {
-		throw new RangeError(`generateSlug: words must be 1..6, got ${words}`);
+	if (!Number.isInteger(words) || words < 1 || words > SLUG_MAX_WORDS) {
+		throw new RangeError(
+			`generateSlug: words must be 1..${SLUG_MAX_WORDS}, got ${words}`,
+		);
 	}
 	const parts: string[] = [];
 	for (let i = 0; i < words; i++) {

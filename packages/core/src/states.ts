@@ -301,7 +301,8 @@ const OPERATION_RULES: Record<
 > = {
 	start: { from: ["pending"], to: "running" },
 	retry: { from: ["running"], to: "running" },
-	succeed: { from: ACTIVE_OPERATION_STATES, to: "succeeded" },
+	// Only a running operation finishes its steps.
+	succeed: { from: ["running"], to: "succeeded" },
 	fail: { from: ACTIVE_OPERATION_STATES, to: "failed" },
 	supersede: { from: ACTIVE_OPERATION_STATES, to: "superseded" },
 };

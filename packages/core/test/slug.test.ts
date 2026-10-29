@@ -99,8 +99,17 @@ describe("generateSlug", () => {
 		expect(generateSlug(3, rnd)).toBe(SLUG_WORDS.slice(0, 3).join("-"));
 	});
 
-	it("rejects a bad word count", () => {
+	it("rejects a bad word count (at most 5: six 7-letter words exceed 40 characters)", () => {
 		expect(() => generateSlug(0)).toThrow();
+		expect(() => generateSlug(6)).toThrow();
 		expect(() => generateSlug(7)).toThrow();
+	});
+
+	it("five of the longest words still pass validateSlug", () => {
+		const longest = Math.max(...SLUG_WORDS.map((w) => w.length));
+		const i = SLUG_WORDS.findIndex((w) => w.length === longest);
+		const slug = generateSlug(5, () => i);
+		expect(slug.length).toBeLessThanOrEqual(40);
+		expect(() => validateSlug(slug)).not.toThrow();
 	});
 });

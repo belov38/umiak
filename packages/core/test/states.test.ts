@@ -281,7 +281,7 @@ function expectedOperation(
 		case "retry":
 			return from === "running" ? "running" : "invalid";
 		case "succeed":
-			return active ? "succeeded" : "invalid";
+			return from === "running" ? "succeeded" : "invalid";
 		case "fail":
 			return active ? "failed" : "invalid";
 		case "supersede":

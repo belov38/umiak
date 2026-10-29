@@ -43,24 +43,27 @@ export interface AgentEventBatch {
 }
 
 /**
- * Copy of a decoded payload without U+0000 in strings and keys: Postgres
- * jsonb rejects it, and one bad event would fail the batch on every
- * redelivery and stall the machine's events.
+ * Copy of a decoded payload with every string and key made storable (see
+ * `cleanText`): Postgres jsonb rejects U+0000 and lone surrogate escapes,
+ * and one bad event would fail the batch on every redelivery and stall the
+ * machine's events.
  */
-export function stripNul(v: unknown): unknown {
-	if (typeof v === "string") return noNul(v);
-	if (Array.isArray(v)) return v.map(stripNul);
+export function cleanPayload(v: unknown): unknown {
+	if (typeof v === "string") return cleanText(v);
+	if (Array.isArray(v)) return v.map(cleanPayload);
 	if (typeof v === "object" && v !== null) {
 		// fromEntries keeps a `__proto__` key as an own property.
 		return Object.fromEntries(
-			Object.entries(v).map(([k, val]) => [noNul(k), stripNul(val)]),
+			Object.entries(v).map(([k, val]) => [cleanText(k), cleanPayload(val)]),
 		);
 	}
 	return v;
 }
 
-function noNul(s: string): string {
-	return s.includes("\0") ? s.replaceAll("\0", "") : s;
+/** U+0000 dropped, lone UTF-16 surrogates replaced with U+FFFD. */
+function cleanText(s: string): string {
+	const noNul = s.includes("\0") ? s.replaceAll("\0", "") : s;
+	return noNul.isWellFormed() ? noNul : noNul.toWellFormed();
 }
 
 function isNonNegInt(v: unknown): v is number {
@@ -162,10 +165,10 @@ export async function ingestAgentEvents(
 				[
 					machineId,
 					events.map((e) => e.seq),
-					events.map((e) => noNul(e.bootId)),
-					events.map((e) => noNul(e.type)),
+					events.map((e) => cleanText(e.bootId)),
+					events.map((e) => cleanText(e.type)),
 					events.map((e) => toDate(e.time)),
-					events.map((e) => JSON.stringify(stripNul(e.payload ?? {}))),
+					events.map((e) => JSON.stringify(cleanPayload(e.payload ?? {}))),
 				],
 			);
 		}
@@ -180,7 +183,7 @@ export async function ingestAgentEvents(
 					machineId,
 					synthetic.map((e) => e.epoch),
 					synthetic.map((e) => e.type),
-					synthetic.map((e) => noNul(e.instanceId)),
+					synthetic.map((e) => cleanText(e.instanceId)),
 					synthetic.map((e) => toDate(e.time)),
 				],
 			);

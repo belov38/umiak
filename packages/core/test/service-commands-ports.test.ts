@@ -13,14 +13,18 @@ import type { Queryable } from "./helpers/topology.ts";
 async function insertSession(
 	q: Queryable,
 	machineId: string,
-	opts: { bootId?: string; capabilities?: string[] } = {},
+	opts: { bootId?: string; capabilities?: string[] | null } = {},
 ): Promise<void> {
 	await q.query(
 		`INSERT INTO tunnel.tunnel_sessions
 		   (machine_id, instance_id, epoch, conn_id, agent_instance_id, boot_id, vmgenid,
 		    agent_version, proto_version, capabilities, state, connected_at)
 		 VALUES ($1, 'gw-1', 1, 'c1', 'ai-1', $2, 'vmgen', '1.0.0', '1', $3, 'connected', now())`,
-		[machineId, opts.bootId ?? "boot-1", opts.capabilities ?? []],
+		[
+			machineId,
+			opts.bootId ?? "boot-1",
+			opts.capabilities === undefined ? [] : opts.capabilities,
+		],
 	);
 }
 
@@ -69,6 +73,16 @@ describe.skipIf(skipPg())(
 				expect(await env.svc.resolveAgentTarget(env.p, s.sandboxId)).toEqual({
 					machineId: s.machineId,
 					capabilities: ["pty", "files"],
+				});
+			});
+
+			it("NULL capabilities (not reported yet) resolve to none", async () => {
+				const env = await serviceEnv(t.pool);
+				const s = await seedSandbox(t.pool, env, { state: "ready" });
+				await insertSession(t.pool, s.machineId ?? "", { capabilities: null });
+				expect(await env.svc.resolveAgentTarget(env.p, s.sandboxId)).toEqual({
+					machineId: s.machineId,
+					capabilities: [],
 				});
 			});
 
