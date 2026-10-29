@@ -99,6 +99,32 @@ func dropAgentHeaders(h http.Header) {
 	}
 }
 
+// maxForwardHeaderBytes bounds the agent's response header block, and its
+// trailer block, passed to a caller (HTTP/2 size, see headerBlockSize). A
+// Node HTTP/2 client destroys its whole session, every machine's calls on it
+// included, on a block of about 128 KiB; the gateway's HTTP/2 server does not
+// enforce the caller's SETTINGS_MAX_HEADER_LIST_SIZE. A larger agent answer
+// is a 502 for that call, larger trailers reset that stream.
+const maxForwardHeaderBytes = 64 << 10
+
+// headerBlockSize is the HTTP/2 size of h: name, value and 32 bytes per field.
+func headerBlockSize(h http.Header) int {
+	n := 0
+	for k, vv := range h {
+		for _, v := range vv {
+			n += len(k) + len(v) + 32
+		}
+	}
+	return n
+}
+
+// isHeaderListTooLarge reports whether err is the gateway->agent transport
+// refusing a header or trailer block over h2.MaxResponseHeaderBytes (net/http
+// has no exported error for it).
+func isHeaderListTooLarge(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "header list larger than")
+}
+
 // isRedirect reports whether an agent status is a redirect a client may
 // follow: every 3xx but 304 Not Modified, which conditional /files GETs need.
 func isRedirect(status int) bool {
@@ -176,6 +202,10 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		if r.Context().Err() != nil {
 			return // the caller went away
 		}
+		if isHeaderListTooLarge(err) {
+			h.badAgentHeaders(w, s, f, u.Path)
+			return
+		}
 		s.log.Debug("gateway: proxied request failed before the response", "err", err, "path", u.Path)
 		// The session may have moved or closed meanwhile: route again.
 		h.notServed(w, r, id, f)
@@ -188,12 +218,13 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 	// machine's route, any server): it is refused (spec 16.1).
 	if isRedirect(resp.StatusCode) {
 		s.log.Warn("gateway: agent answered with a redirect, refused", "status", resp.StatusCode, "path", u.Path)
-		msg := fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode)
-		if f == fmtRPC {
-			h.writeConnectUnary(w, http.StatusBadGateway, connect.NewError(connect.CodeInternal, errors.New(msg)))
-		} else {
-			writeJSONError(w, http.StatusBadGateway, jsonError{Code: "bad_agent_response", Message: msg})
-		}
+		h.writeBadAgent(w, f, fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode))
+		return
+	}
+	// A caller may not take a larger block: a Node HTTP/2 client destroys
+	// the whole session, every machine's calls on it included.
+	if headerBlockSize(resp.Header) > maxForwardHeaderBytes {
+		h.badAgentHeaders(w, s, f, u.Path)
 		return
 	}
 
@@ -220,8 +251,16 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		if r.Context().Err() != nil {
 			return
 		}
+		if isHeaderListTooLarge(err) {
+			s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes)
+			panic(http.ErrAbortHandler)
+		}
 		h.abortBody(w, rc, r, id, ct, err)
 		return
+	}
+	if headerBlockSize(resp.Trailer) > maxForwardHeaderBytes {
+		s.log.Warn("gateway: agent trailers over the limit, stream reset", "path", u.Path, "max_bytes", maxForwardHeaderBytes)
+		panic(http.ErrAbortHandler)
 	}
 	for k, vv := range resp.Trailer {
 		if blockedAgentHeader(k) {
@@ -233,6 +272,22 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 			hdr[http.TrailerPrefix+k] = vv
 		}
 	}
+}
+
+// writeBadAgent answers 502 bad_agent_response in the route's format.
+func (h *internalHandler) writeBadAgent(w http.ResponseWriter, f errFormat, msg string) {
+	if f == fmtRPC {
+		h.writeConnectUnary(w, http.StatusBadGateway, connect.NewError(connect.CodeInternal, errors.New(msg)))
+	} else {
+		writeJSONError(w, http.StatusBadGateway, jsonError{Code: "bad_agent_response", Message: msg})
+	}
+}
+
+// badAgentHeaders refuses an agent answer whose header block is over
+// maxForwardHeaderBytes or h2.MaxResponseHeaderBytes.
+func (h *internalHandler) badAgentHeaders(w http.ResponseWriter, s *session, f errFormat, path string) {
+	s.log.Warn("gateway: agent response headers over the limit, refused", "path", path, "max_bytes", maxForwardHeaderBytes)
+	h.writeBadAgent(w, f, fmt.Sprintf("agent response headers are larger than %d bytes, which the gateway does not pass on", maxForwardHeaderBytes))
 }
 
 // copyBody copies the upstream body with a flush after every read. It
