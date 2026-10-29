@@ -261,3 +261,58 @@ func TestSetFrozenWaitsForCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func isClosed(c <-chan struct{}) bool {
+	select {
+	case <-c:
+		return true
+	default:
+		return false
+	}
+}
+
+func TestThawedFollowsFreezeGate(t *testing.T) {
+	s, _ := openTest(t, Options{})
+	if !isClosed(s.Thawed()) {
+		t.Fatal("Thawed() of a new store is open")
+	}
+
+	s.SetFrozen(true)
+	frozenGate := s.Thawed()
+	if isClosed(frozenGate) {
+		t.Fatal("Thawed() is closed while frozen")
+	}
+	// A repeated freeze keeps the same gate.
+	s.SetFrozen(true)
+	if s.Thawed() != frozenGate {
+		t.Fatal("repeated SetFrozen(true) replaced the gate")
+	}
+
+	s.SetFrozen(false)
+	if !isClosed(frozenGate) || !isClosed(s.Thawed()) {
+		t.Fatal("Thawed() is open after the thaw")
+	}
+	// A repeated thaw must not panic on a closed gate.
+	s.SetFrozen(false)
+
+	// Re-armed by the next freeze.
+	s.SetFrozen(true)
+	if isClosed(s.Thawed()) {
+		t.Fatal("Thawed() is closed after a second freeze")
+	}
+	s.SetFrozen(false)
+}
+
+func TestCloseReleasesThawedWaiters(t *testing.T) {
+	s, _ := openTest(t, Options{})
+	s.SetFrozen(true)
+	gate := s.Thawed()
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !isClosed(gate) {
+		t.Fatal("Close left a waiter on Thawed() blocked")
+	}
+	// The cleanup Close and a late thaw are harmless.
+	s.SetFrozen(false)
+}

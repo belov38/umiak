@@ -122,6 +122,8 @@ type Store struct {
 	pendingBytes int64           // summed size of pending
 	dropped      uint64          // pending events dropped on overflow, not yet journaled as a gap
 	frozen       bool            // own freeze active: no transactions
+	thawed       chan struct{}   // closed while not frozen and after Close; replaced by a new open channel on freeze
+	thawedOpen   bool            // thawed is open (a freeze is waiting for its thaw)
 	closed       bool            // Close called
 	bootID       string          // BootId of new events
 	acked        uint64          // highest acked seq (persisted or about to be)
@@ -152,9 +154,12 @@ func Open(path string, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
+	thawed := make(chan struct{})
+	close(thawed)
 	s := &Store{
 		db:      db,
 		opts:    opts,
+		thawed:  thawed,
 		notify:  make(chan struct{}),
 		kick:    make(chan struct{}, 1),
 		closing: make(chan struct{}),
@@ -216,6 +221,7 @@ func (s *Store) Close() error {
 	}
 	s.closed = true
 	close(s.closing)
+	s.releaseThawedLocked()
 	s.mu.Unlock()
 	<-s.done
 	return s.db.Close()

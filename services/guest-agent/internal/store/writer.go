@@ -110,9 +110,36 @@ func (s *Store) SetFrozen(frozen bool) {
 	}
 	s.mu.Lock()
 	s.frozen = frozen
+	if frozen {
+		if !s.thawedOpen && !s.closed {
+			s.thawed = make(chan struct{})
+			s.thawedOpen = true
+		}
+	} else {
+		s.releaseThawedLocked()
+	}
 	s.mu.Unlock()
 	if !frozen {
 		s.wakeWriter()
+	}
+}
+
+// Thawed returns a channel that is closed while the store is not frozen and
+// is open while it is frozen: a freeze replaces it with an open one, the
+// thaw closes it. Take a fresh channel for every wait. A closed store
+// releases it too, so a waiter never blocks forever.
+func (s *Store) Thawed() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.thawed
+}
+
+// releaseThawedLocked closes the thaw channel if it is open. s.mu must be
+// held.
+func (s *Store) releaseThawedLocked() {
+	if s.thawedOpen {
+		close(s.thawed)
+		s.thawedOpen = false
 	}
 }
 

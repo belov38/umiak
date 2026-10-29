@@ -2,9 +2,11 @@ package reqcache_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -35,10 +37,15 @@ type fsStub struct {
 	statCalls    atomic.Int32
 	// makeDir overrides the MakeDir body; the call is counted before it runs.
 	makeDir func(path string) (*agentv1.MakeDirResponse, error)
+	// onCtx runs with the handler context right after the call is counted.
+	onCtx func(ctx context.Context)
 }
 
-func (f *fsStub) MakeDir(_ context.Context, req *connect.Request[agentv1.MakeDirRequest]) (*connect.Response[agentv1.MakeDirResponse], error) {
+func (f *fsStub) MakeDir(ctx context.Context, req *connect.Request[agentv1.MakeDirRequest]) (*connect.Response[agentv1.MakeDirResponse], error) {
 	n := f.makeDirCalls.Add(1)
+	if f.onCtx != nil {
+		f.onCtx(ctx)
+	}
 	if f.makeDir != nil {
 		res, err := f.makeDir(req.Msg.GetPath())
 		if err != nil {
@@ -69,13 +76,31 @@ func openStore(t *testing.T, path string) *store.Store {
 
 func newClient(t *testing.T, st *store.Store, opts reqcache.Options, stub *fsStub) agentv1connect.FilesystemClient {
 	t.Helper()
-	path, h := agentv1connect.NewFilesystemHandler(stub,
-		connect.WithInterceptors(rpcconv.RequireRequestID(), reqcache.New(st, opts)))
+	return newClientWith(t, st, opts, stub)
+}
+
+// newClientWith is newClient with extra handler interceptors in front of the
+// cache and client options.
+func newClientWith(
+	t *testing.T, st *store.Store, opts reqcache.Options, stub *fsStub,
+	outer ...connect.Interceptor,
+) agentv1connect.FilesystemClient {
+	t.Helper()
+	return newClientOpts(t, st, opts, stub, outer)
+}
+
+func newClientOpts(
+	t *testing.T, st *store.Store, opts reqcache.Options, stub *fsStub,
+	outer []connect.Interceptor, copts ...connect.ClientOption,
+) agentv1connect.FilesystemClient {
+	t.Helper()
+	chain := append(slices.Clone(outer), rpcconv.RequireRequestID(), reqcache.New(st, opts))
+	path, h := agentv1connect.NewFilesystemHandler(stub, connect.WithInterceptors(chain...))
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return agentv1connect.NewFilesystemClient(srv.Client(), srv.URL)
+	return agentv1connect.NewFilesystemClient(srv.Client(), srv.URL, copts...)
 }
 
 func makeDir(c agentv1connect.FilesystemClient, id, path string) (*agentv1.MakeDirResponse, error) {
@@ -235,7 +260,7 @@ func TestNonRetryableErrorCached(t *testing.T) {
 		_, err := makeDir(c, id1, "/a")
 		wantCode(t, err, connect.CodeAlreadyExists, errs.AlreadyExists)
 		var cerr *connect.Error
-		if !asConnect(err, &cerr) || cerr.Message() != "exists already" {
+		if !errors.As(err, &cerr) || cerr.Message() != "exists already" {
 			t.Fatalf("message = %v", err)
 		}
 	}
@@ -247,7 +272,7 @@ func TestNonRetryableErrorCached(t *testing.T) {
 func TestErrorWithoutDetailCached(t *testing.T) {
 	stub := &fsStub{}
 	stub.makeDir = func(string) (*agentv1.MakeDirResponse, error) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errsString("plain"))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("plain"))
 	}
 	c := newClient(t, openStore(t, filepath.Join(t.TempDir(), "state.db")), reqcache.Options{}, stub)
 	for range 2 {
@@ -266,7 +291,7 @@ func TestCanceledNotCached(t *testing.T) {
 	stub := &fsStub{}
 	stub.makeDir = func(string) (*agentv1.MakeDirResponse, error) {
 		if stub.makeDirCalls.Load() == 1 {
-			return nil, connect.NewError(connect.CodeCanceled, errsString("canceled"))
+			return nil, connect.NewError(connect.CodeCanceled, errors.New("canceled"))
 		}
 		return &agentv1.MakeDirResponse{Created: true}, nil
 	}
@@ -493,5 +518,356 @@ func TestPrunesExpiredEntries(t *testing.T) {
 	}
 	if _, ok, _ := st.GetRequest(id1); !ok {
 		t.Fatal("fresh entry was pruned")
+	}
+}
+
+// processStub counts executions of Process.Start.
+type processStub struct {
+	agentv1connect.UnimplementedProcessHandler
+	calls atomic.Int32
+}
+
+func (p *processStub) Start(_ context.Context, _ *connect.Request[agentv1.StartRequest]) (*connect.Response[agentv1.StartResponse], error) {
+	n := p.calls.Add(1)
+	// created is true only for the first execution, like the real handler.
+	return connect.NewResponse(&agentv1.StartResponse{Created: n == 1}), nil
+}
+
+func TestProcessStartNotCached(t *testing.T) {
+	st := openStore(t, filepath.Join(t.TempDir(), "state.db"))
+	stub := &processStub{}
+	path, h := agentv1connect.NewProcessHandler(stub, reqcache.Interceptors(st)...)
+	mux := http.NewServeMux()
+	mux.Handle(path, h)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := agentv1connect.NewProcessClient(srv.Client(), srv.URL)
+
+	var created []bool
+	for range 2 {
+		req := connect.NewRequest(&agentv1.StartRequest{CommandId: "c1"})
+		req.Header().Set(wire.HeaderRequestID, id1)
+		res, err := c.Start(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		created = append(created, res.Msg.GetCreated())
+	}
+	if n := stub.calls.Load(); n != 2 {
+		t.Fatalf("executions = %d, want 2 (Start is idempotent by command_id)", n)
+	}
+	if created[0] != true || created[1] != false {
+		t.Fatalf("created = %v, want [true false]", created)
+	}
+	if _, ok, err := st.GetRequest(id1); err != nil || ok {
+		t.Fatalf("GetRequest = %v, %v; Start must not be stored", ok, err)
+	}
+}
+
+func TestExemptOption(t *testing.T) {
+	st := openStore(t, filepath.Join(t.TempDir(), "state.db"))
+	stub := &fsStub{}
+	c := newClient(t, st, reqcache.Options{Exempt: []string{agentv1connect.FilesystemMakeDirProcedure}}, stub)
+	for range 2 {
+		if _, err := makeDir(c, id1, "/a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := stub.makeDirCalls.Load(); n != 2 {
+		t.Fatalf("executions = %d, want 2", n)
+	}
+}
+
+func TestReplayJSONCodec(t *testing.T) {
+	stub := &fsStub{}
+	c := newClientOpts(t, openStore(t, filepath.Join(t.TempDir(), "state.db")), reqcache.Options{}, stub,
+		nil, connect.WithProtoJSON())
+
+	first, err := makeDir(c, id1, "/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := makeDir(c, id1, "/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 1 {
+		t.Fatalf("executions = %d, want 1", n)
+	}
+	if !proto.Equal(first, second) || !second.GetCreated() || second.GetInfo().GetPath() != "/a" {
+		t.Fatalf("responses differ: %v vs %v", first, second)
+	}
+}
+
+func TestOutcomeStoredAfterClientCancel(t *testing.T) {
+	st := openStore(t, filepath.Join(t.TempDir(), "state.db"))
+	stub := &fsStub{}
+	callCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stub.onCtx = func(ctx context.Context) {
+		if stub.makeDirCalls.Load() != 1 {
+			return
+		}
+		// The client gives up while the handler runs; the response is
+		// produced after the call context is gone.
+		cancel()
+		<-ctx.Done()
+	}
+	c := newClient(t, st, reqcache.Options{}, stub)
+
+	req := connect.NewRequest(&agentv1.MakeDirRequest{Path: "/a"})
+	req.Header().Set(wire.HeaderRequestID, id1)
+	if _, err := c.MakeDir(callCtx, req); connect.CodeOf(err) != connect.CodeCanceled {
+		t.Fatalf("first call = %v, want canceled", err)
+	}
+
+	// The retry replays the outcome (it may first wait for the leader).
+	res, err := makeDir(c, id1, "/a")
+	if err != nil || !res.GetCreated() {
+		t.Fatalf("retry = %v, %v", res, err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 1 {
+		t.Fatalf("executions = %d, want 1", n)
+	}
+	waitStored(t, st, id1)
+}
+
+// waitStored waits until the outcome of id is in the store.
+func waitStored(t *testing.T, st *store.Store, id string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, ok, err := st.GetRequest(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("outcome of %s was not stored", id)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestFrozenStoreBuffersOutcome(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(dbPath, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	stub := &fsStub{}
+	c := newClient(t, st, reqcache.Options{}, stub)
+
+	st.SetFrozen(true)
+	start := time.Now()
+	first, err := makeDir(c, id1, "/a")
+	if err != nil || !first.GetCreated() {
+		t.Fatalf("first = %v, %v", first, err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("response took %v on a frozen store", d)
+	}
+
+	// Replay is served from memory while the store is frozen.
+	second, err := makeDir(c, id1, "/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 1 {
+		t.Fatalf("executions = %d, want 1", n)
+	}
+	if !proto.Equal(first, second) {
+		t.Fatalf("responses differ: %v vs %v", first, second)
+	}
+	_, err = makeDir(c, id1, "/b")
+	wantCode(t, err, connect.CodeInvalidArgument, errs.RequestIDReused)
+	if _, ok, _ := st.GetRequest(id1); ok {
+		t.Fatal("outcome reached the store while frozen")
+	}
+
+	// The thaw flushes the buffer.
+	st.SetFrozen(false)
+	waitStored(t, st, id1)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st2 := openStore(t, dbPath)
+	c2 := newClient(t, st2, reqcache.Options{}, stub)
+	third, err := makeDir(c2, id1, "/a")
+	if err != nil || !proto.Equal(first, third) {
+		t.Fatalf("after reopen = %v, %v", third, err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 1 {
+		t.Fatalf("executions = %d, want 1", n)
+	}
+}
+
+func TestFrozenBufferIsBounded(t *testing.T) {
+	st := openStore(t, filepath.Join(t.TempDir(), "state.db"))
+	stub := &fsStub{}
+	c := newClient(t, st, reqcache.Options{MaxPending: 2}, stub)
+
+	ids := []string{
+		"0f8fad5b-d9cb-469f-a165-70867728950a",
+		"0f8fad5b-d9cb-469f-a165-70867728950b",
+		"0f8fad5b-d9cb-469f-a165-70867728950c",
+	}
+	st.SetFrozen(true)
+	for _, id := range ids {
+		if _, err := makeDir(c, id, "/a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The oldest was dropped: its id executes again; the others replay.
+	if _, err := makeDir(c, ids[2], "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 3 {
+		t.Fatalf("executions = %d, want 3", n)
+	}
+	if _, err := makeDir(c, ids[0], "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 4 {
+		t.Fatalf("executions = %d, want 4 (oldest dropped)", n)
+	}
+	st.SetFrozen(false)
+	waitStored(t, st, ids[2])
+}
+
+func TestFreezeDuringHandlerBuffers(t *testing.T) {
+	// The store freezes while the handler runs (System/Quiesce).
+	st := openStore(t, filepath.Join(t.TempDir(), "state.db"))
+	stub := &fsStub{}
+	stub.onCtx = func(context.Context) { st.SetFrozen(true) }
+	c := newClient(t, st, reqcache.Options{}, stub)
+
+	if _, err := makeDir(c, id1, "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := makeDir(c, id1, "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 1 {
+		t.Fatalf("executions = %d, want 1", n)
+	}
+	st.SetFrozen(false)
+	waitStored(t, st, id1)
+}
+
+func TestWaiterRunsHandlerAfterRetryableLeader(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	stub := &fsStub{}
+	stub.makeDir = func(path string) (*agentv1.MakeDirResponse, error) {
+		if stub.makeDirCalls.Load() == 1 {
+			started <- struct{}{}
+			<-release
+			return nil, errs.New(connect.CodeUnavailable, errs.Quiesced, "quiesced")
+		}
+		return &agentv1.MakeDirResponse{Created: true, Info: &agentv1.FileInfo{Path: path}}, nil
+	}
+	c := newClient(t, openStore(t, filepath.Join(t.TempDir(), "state.db")), reqcache.Options{}, stub)
+
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := makeDir(c, id1, "/a")
+		leaderErr <- err
+	}()
+	<-started
+
+	type result struct {
+		res *agentv1.MakeDirResponse
+		err error
+	}
+	dup := make(chan result, 1)
+	go func() {
+		res, err := makeDir(c, id1, "/a")
+		dup <- result{res, err}
+	}()
+	select {
+	case r := <-dup:
+		t.Fatalf("duplicate returned before the leader: %+v", r)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(release)
+	wantCode(t, <-leaderErr, connect.CodeUnavailable, errs.Quiesced)
+	select {
+	case r := <-dup:
+		if r.err != nil || !r.res.GetCreated() {
+			t.Fatalf("duplicate = %+v", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("duplicate did not run the handler")
+	}
+	if n := stub.makeDirCalls.Load(); n != 2 {
+		t.Fatalf("executions = %d, want 2", n)
+	}
+}
+
+func TestCanceledWaiterReturnsPromptly(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	stub := &fsStub{}
+	stub.makeDir = func(string) (*agentv1.MakeDirResponse, error) {
+		started <- struct{}{}
+		<-release
+		return &agentv1.MakeDirResponse{Created: true}, nil
+	}
+	// Records when each call leaves the cache, as seen by the server.
+	returned := make(chan error, 4)
+	observe := connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			res, err := next(ctx, req)
+			returned <- err
+			return res, err
+		}
+	})
+	c := newClientWith(t, openStore(t, filepath.Join(t.TempDir(), "state.db")), reqcache.Options{}, stub, observe)
+
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		_, _ = makeDir(c, id1, "/a")
+	}()
+	<-started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	waiterDone := make(chan error, 1)
+	go func() {
+		req := connect.NewRequest(&agentv1.MakeDirRequest{Path: "/a"})
+		req.Header().Set(wire.HeaderRequestID, id1)
+		_, err := c.MakeDir(ctx, req)
+		waiterDone <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-waiterDone:
+		if connect.CodeOf(err) != connect.CodeCanceled {
+			t.Fatalf("waiter = %v, want canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceled waiter did not return")
+	}
+	// The server side of the waiter leaves while the leader still runs.
+	select {
+	case err := <-returned:
+		if err == nil {
+			t.Fatal("server-side call returned success; the leader is still blocked")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not release the canceled waiter")
+	}
+	close(release)
+	<-leaderDone
+	if n := stub.makeDirCalls.Load(); n != 1 {
+		t.Fatalf("executions = %d, want 1", n)
 	}
 }
