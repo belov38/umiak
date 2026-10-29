@@ -47,7 +47,7 @@ func newIT(t *testing.T) *itEnv {
 	if os.Geteuid() != 0 {
 		t.Fatal("integration tests need root")
 	}
-	sv, err := NewSystemd(DefaultSlice, DefaultCgroupRoot)
+	sv, err := NewSystemd(context.Background(), DefaultSlice, DefaultCgroupRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,11 +35,10 @@ type systemd struct {
 
 // NewSystemd connects to systemd over the system bus. Command units go into
 // slice (DefaultSlice in production); cgroupRoot is the cgroup v2 mount
-// (DefaultCgroupRoot).
-func NewSystemd(slice string, cgroupRoot string) (Supervisor, error) {
-	// godbus closes the connection when this context ends, so it must
-	// live as long as the supervisor.
-	conn, err := sddbus.NewSystemConnectionContext(context.Background())
+// (DefaultCgroupRoot). godbus closes the connection when ctx ends, so ctx
+// must live as long as the supervisor.
+func NewSystemd(ctx context.Context, slice string, cgroupRoot string) (Supervisor, error) {
+	conn, err := sddbus.NewSystemConnectionContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("supervisor: connect to systemd: %w", err)
 	}

@@ -56,7 +56,7 @@ func runAgent(ctx context.Context, d deps, args []string, stderr io.Writer) int 
 		log.Error("agent: load config", "err", err)
 		return 1
 	}
-	sup, err := supervisor.NewSystemd(supervisor.DefaultSlice, supervisor.DefaultCgroupRoot)
+	sup, err := supervisor.NewSystemd(ctx, supervisor.DefaultSlice, supervisor.DefaultCgroupRoot)
 	if err != nil {
 		log.Error("agent: connect to systemd", "err", err)
 		return 1

@@ -573,3 +573,70 @@ Library: `wire.HeaderDialError = "Sbx-Dial-Error"`; `type agent.DialError struct
 ## pve stand (after the master frees the host)
 
 Not a task of this plan's execution order: when the master allows, install the package into a VM cloned from 599 (VMID ≥ 500, ≤ 8 GB total, cleanup after) and run spec §21 items 1–15 that the container cannot cover: real fork identity change and different IP (12), Docker pause during quiesce and a snapshot via S1 (11), secrets grep over the LV snapshot (14), reboot → `LOST/REBOOT` and `secrets: pending` (4).
+
+---
+
+## Results and deviations (implementation)
+
+### Decisions added during implementation
+
+- **Request outcome store (Task 4).** The outcome is stored with `context.WithoutCancel` and a 5 s limit, not the call's context. While the agent's own store is frozen (spec §14.4), answers are kept in an in-memory pending map that lookups consult and that is flushed after thaw. A crash during a freeze loses those cache entries (accepted by the spec). Quiesce's own answer is stored while frozen.
+- **Output offsets (Task 6).** The plan's value 294 912 was an arithmetic error; `300000 &^ 4095 = 299 008` is correct.
+- **pam_env (Task 11).** `/etc/security/sbx-env` lines are `KEY="<raw value>"` without escaping, because pam_env does not unescape. Values containing `#`, CR, LF, NUL or lines over 8 KiB are skipped (they reach agent commands only). Replaces the plan's escaping.
+- **link_path (Task 11).** Only an existing symlink or nothing is replaced. An existing regular file is moved to `<path>.sbx-orig` with a warning, so a claim never fails because the user created the file. Parents are created root-owned except under the user's home.
+- **Dial order (Task 12).** `127.0.0.1` tries the ordered address list; strict host matching applies only to other addresses (the spec wins over the brief text).
+- **Activity event (Task 13).** An `activity` event is also emitted once at loop start, so counters are fresh after an agent restart (S6 treats it as latest state).
+- **idle.changed (Task 13).** Leftover-only commands count as busy (stricter than §13), following S6 §12: `runningCommands` includes any process under a shim. A VM with daemonized leftovers never reports `idle.changed{idle:true}`.
+- **Quiesce budget (Task 14).** The freeze phase has a total 5 s cap (S1 budget) with rollback; per-step budgets stay inside it. A VM with many containers or slow hooks fails Quiesce and S1 falls back to the QGA path.
+- **Startup order (Task 16).** Identity apply runs before `store.Open` (`Apply` wipes `state.db`). The agent exits 0 when a late-valid serial belongs to a different machine than `identity.json`, so the restart applies the identity.
+- **Debug socket (Task 16).** `sbx-agent run --debug-listen unix:<path> [--debug-confirm]` serves the agent API and `Control/Info` on a root-only 0600 socket with the same interceptors. Used by the integration tests.
+- **Template contract for S5 (Task 18).** Ubuntu's `~/.bash_logout` clears the screen on login-shell exit, which breaks byte-exact output for `bash -lc ...; exit`. The template must remove `/etc/skel/.bash_logout` and `/home/user/.bash_logout`. The agent is unchanged. The stand also showed that template 599 runs cloud-init, which resets the hostname of a fork; per spec §20 cloud-init must not manage hostname or host keys (S5 plans `/etc/cloud/cloud-init.disabled`).
+- **Shim memory (Task 18).** The 8 MiB target is read as private (non-shared) memory: 3.4-7.2 MiB in the container, 2.9 MiB in the VM. Total VmRSS is 13-17 MiB because the binary's file pages are shared.
+- **systemd restart mode (Task 18).** Spec §17.2 is amended with `RestartMode=direct`: with systemd >= 254 `OnFailure` fires on every auto-restart otherwise.
+- **Recover of an unlaunched command (Task 20).** After a restart in the same boot, a `STARTING` record with no `shim.json` and no unit stays `STARTING` and holds no slot, so the caller's retry of `Start` launches it once (spec §9.2 step 5). After a reboot it is `LOST/REBOOT`. A record nobody retries stays `STARTING`.
+- **Task 17b: worker adapter.** `apps/worker/src/adapters/agent-connect.ts` (`ConnectAgentPort`, on `@sbx/agent-client` and `@sbx/proto/agent/v1`) replaces `UnavailableAgentPort` in the worker wiring when `SBX_GATEWAY_SERVICE_TOKEN_FILE` is set. Claim, `updateEnv` and `updateSecrets` send `Sbx-Request-Id`; the quiesce hook uses one request id per hook for freeze and one for thaw, keeps the outcome of the first thaw that reached the agent (a retried `hook.thaw()` cannot accept an invalid snapshot), and maps `auto_thawed` to `QuiesceFailed`. Only `ClaimReason.CLAIM` is mapped, since `ports.ts` allows only `"claim"`.
+
+### Extra detail codes (beyond spec §19)
+
+- `shim_unavailable` (retryable, `unavailable`), `invalid_argument`, `failed_precondition` (Task 9). S6/S7 must map one more retryable code.
+- `lease_expired` (`aborted`), `quiesce_timeout` (`deadline_exceeded`), `store_busy` (`unavailable`) (Task 14).
+- From the plan header: `invalid_path`, `payload_too_large`, `upload_not_found`, `bad_version`, `quiesced`.
+
+### Lint fix found in Task 19
+
+`GOOS=linux golangci-lint run ./...` reported `contextcheck` at `cmd/sbx-agent/run.go:59` (`supervisor.NewSystemd` used `context.Background()`; invisible on darwin because the Linux file is not type-checked there). `NewSystemd` now takes the caller's context for the godbus connection.
+
+### pve stand (Task 20, 2026-10-29/30)
+
+`sbx-bench s3` on the pve node, VM cloned from template 599 (Ubuntu 26.04.1, systemd 259, kernel 7.0), all checks PASS and all VMs, snapshots and LVs deleted afterwards:
+
+- A. package installed, agent active without a tunnel, `doctor --json` ok.
+- B. the container integration suite inside the VM: exit 0 in 130 s (`TestFreezeLoopExt4` skipped, it asserts the loop fs is the only freezable mount).
+- C. reboot: command `EXITED LOST/REBOOT`, output intact, `secrets` back to `pending`, `UpdateSecrets` restores it (item 4).
+- D. Quiesce with a running Docker container and an S1 snapshot: frozen `[/boot /]`, container paused and resumed, freeze to thaw 3.9 s (S1 budget 10 s); a write during the freeze blocked until Thaw; watchdog auto-thaw verified with `quiesce.auto_thawed{by: watchdog}` (item 11).
+- E. fork from the snapshot: new machine id, `/etc/machine-id`, host keys, hostname `sbx-<serial>`, empty agent state, journal starts at `identity.reset` seq 1, different IP; the source VM unchanged (item 12).
+- F. secrets: raw `/dev/sda` grep of the source VM and of the fork booted from the LV snapshot, 0 matches for env, file and spec-env secrets, positive control found (item 14).
+- G. memory: idle agent VmRSS 18.7 MiB (private 8.8 MiB); shim VmRSS 12.9 MiB, private 2.9 MiB (item 15).
+
+Production fix found on the stand: Recover of an unlaunched `STARTING` command (see Decisions), regression test `TestRecoverKeepsUnlaunchedStarting`.
+
+Observations for other scopes: qemu-ga logs the full argv of every `guest-exec` in the guest journal, so no QGA path may pass secrets in arguments; Proxmox refuses `agent/exec` `input-data` over 64 KiB.
+
+### Full local verification (Task 19, 2026-10-30, darwin/arm64)
+
+All green.
+
+| Command | Result |
+|---|---|
+| `pnpm -r test` | pass: config 16, pve 118, bench 15, db 60, agent-client 143, core 295, worker 331 (+5 skipped) |
+| `pnpm lint` | pass (biome, 275 files) |
+| `pnpm build` | pass |
+| `go test -race -count=1 ./...` in `libs/proto`, `libs/tunnel`, `services/node-agent`, `services/guest-agent` | pass in all four |
+| `go vet ./...` in the same four | clean |
+| `golangci-lint run ./...` in the same four | 0 issues each |
+| `GOOS=linux golangci-lint run ./...` and `--build-tags integration` in `services/guest-agent` | 0 issues (after the `NewSystemd` fix) |
+| `cd proto && buf lint && buf generate && buf generate --template buf.gen.test.yaml` | pass, `git status --porcelain` for `proto/` and generated dirs empty |
+| `GOOS=windows CGO_ENABLED=0 go build ./...` in `libs/tunnel` and `services/guest-agent` | pass |
+| `services/guest-agent/test/linux/run.sh -v` | exit 0: 14 tests PASS (`TestCommandsExactOutput`, `TestLeftovers`, `TestTimeoutAndOOM`, `TestIdentityApply`, `TestContainerSmoke`, `TestPTY`, `TestAgentRestartKeepsCommand`, `TestRetention`, `TestMemory`, `TestClaimEnvAndSSH`, `TestPamEnvFormat`, `TestSecretsNotOnDisk`, `TestUpdateAndRollback`, `TestFreezeLoopExt4`); 6 `TestStand*` SKIP (pve stand only) |
+
+Items the container cannot cover (Docker pause, real fork, LV snapshot grep, reboot) are covered by the pve stand above.
