@@ -240,6 +240,14 @@ export interface SandboxService {
 	): Promise<Command>;
 	completeCommand(commandId: string, result: CommandResult): Promise<void>;
 	touchApiActivity(sandboxId: string): Promise<void>;
+	/**
+	 * Hosts a port or changes its settings with PUT semantics: the call gives
+	 * the full desired settings. An omitted `hostRewrite`/`appProtocol` resets
+	 * to `preserve`/`http1`, also for the legacy string form (`mode` only).
+	 * Same settings: no change (`created: false`, no token). Options only:
+	 * no `authEpoch` bump. A mode change bumps it (and issues a token on a
+	 * switch to `token`).
+	 */
 	hostPort(
 		p: Principal,
 		idOrSlug: string,

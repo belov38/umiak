@@ -6,6 +6,7 @@ import {
 	idempotencyPrincipal,
 	lookupRoute,
 	PgNotifier,
+	type Principal,
 	sshTarget,
 	teamUsage,
 	uuidv7,
@@ -79,6 +80,13 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 				tags: { step: "test" },
 				pid: null,
 				status: "starting",
+				// A team key: no user, the key is recorded (S7 §8.1, §9.6).
+				createdBy: null,
+				createdByKey: env.p.apiKeyId,
+			});
+			expect((await commandRows(s.sandboxId))[0]).toMatchObject({
+				created_by: null,
+				created_by_key: env.p.apiKeyId,
 			});
 
 			// The sandbox is no longer ready: a repeat still returns the command.
@@ -193,6 +201,37 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 				mode: "sync",
 			});
 			expect(c).toMatchObject({ argv: ["ls", "-la"], user: "user", tags: {} });
+		});
+	});
+
+	describe("command creator", () => {
+		it("a user principal is created_by with a null created_by_key", async () => {
+			const env = await serviceEnv(t.pool);
+			const s = await seedSandbox(t.pool, env, { state: "ready" });
+			const { apiKeyId: _key, ...base } = principal();
+			const user: Principal = {
+				...base,
+				kind: "session",
+				userId: randomUUID(),
+				teamId: env.p.teamId,
+				role: "member",
+			};
+			const c = await env.svc.createCommand(user, s.sandboxId, {
+				cmd: "x",
+				mode: "sync",
+			});
+			expect(c).toMatchObject({ createdBy: user.userId, createdByKey: null });
+			const k = await env.svc.createCommandWithKey(
+				user,
+				s.sandboxId,
+				{ cmd: "y", mode: "sync" },
+				"user-key",
+				{ command: "y" },
+			);
+			expect(k.command).toMatchObject({
+				createdBy: user.userId,
+				createdByKey: null,
+			});
 		});
 	});
 

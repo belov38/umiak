@@ -12,9 +12,10 @@ import { lockSandboxRow } from "../db.ts";
 // Retention: idempotency keys past `expires_at`; processed agent and synthetic
 // events older than 7 days; commands older than 90 days; sandbox_events older
 // than 90 days; S7 port SSO codes (`port_auth_codes`, S7 §12.2) older than a
-// day, once S7's migration has created the table; `deleted` sandbox tombstones older than 30 days, with the rows
-// that only exist for them (machines in `deleted` and their disks, operations,
-// events, commands, ports, the `deleted` fork_source snapshots they consumed).
+// day, once S7's migration has created the table; `deleted` sandbox
+// tombstones older than 30 days, with the rows that only exist for them
+// (machines in `deleted` and their disks, operations, events, commands,
+// ports, the `deleted` fork_source snapshots they consumed).
 //
 // Backstops: fork_source snapshots in `ready`/`failed` whose consumer is in
 // `error`/`deleted` (or gone), and any fork_source older than 1 h that is not

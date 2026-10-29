@@ -159,7 +159,10 @@ export interface Command {
 	stdoutBytes: number | null;
 	stderrBytes: number | null;
 	bootId: string | null;
+	/** The user; null when a team key started the command. */
 	createdBy: string | null;
+	/** The team key that started the command, else null. */
+	createdByKey: string | null;
 	requestId: string | null;
 	createdAt: Date;
 	startedAt: Date | null;
@@ -327,6 +330,7 @@ export function commandFromRow(r: Row): Command {
 		stderrBytes: num(r.stderr_bytes),
 		bootId: r.boot_id,
 		createdBy: r.created_by,
+		createdByKey: r.created_by_key ?? null,
 		requestId: r.request_id,
 		createdAt: r.created_at,
 		startedAt: r.started_at,

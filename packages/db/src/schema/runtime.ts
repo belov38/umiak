@@ -442,6 +442,8 @@ export const commands = runtime.table("commands", {
 	tags: jsonb("tags").$type<Record<string, string>>().notNull().default({}),
 	argv: jsonb("argv").$type<string[]>(),
 	pid: integer("pid"),
+	/** The team key that started the command (S7 §20.2 item 9). */
+	createdByKey: uuid("created_by_key"),
 });
 
 export const hostedPorts = runtime.table("hosted_ports", {

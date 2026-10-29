@@ -245,10 +245,10 @@ async function insertCommand(
 	const r = await q.query(
 		`INSERT INTO runtime.commands
 		   (id, sandbox_id, machine_id, cmd, cwd, env_keys, mode, timeout_seconds, status,
-		    boot_id, created_by, request_id, "user", argv, tags)
+		    boot_id, created_by, request_id, "user", argv, tags, created_by_key)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'starting',
 		         (SELECT boot_id FROM tunnel.tunnel_sessions WHERE machine_id = $3), $9, $10,
-		         $11, $12::jsonb, $13::jsonb)
+		         $11, $12::jsonb, $13::jsonb, $14)
 		 RETURNING *`,
 		[
 			id,
@@ -266,6 +266,7 @@ async function insertCommand(
 				? null
 				: JSON.stringify(spec.argv),
 			JSON.stringify(spec.tags ?? {}),
+			p.apiKeyId ?? null,
 		],
 	);
 	return commandFromRow(r.rows[0]);

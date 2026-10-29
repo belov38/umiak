@@ -1,12 +1,14 @@
 -- S7 additions to the S6 tables (S7 §20.2 items 2, 3, operator blocks of S8 C3).
 -- Plain SQL: the migration runner wraps the file in a transaction.
 
--- Commands: guest user, tags, argv (no shell) and the agent's pid (S7 §9.6).
+-- Commands: guest user, tags, argv (no shell), the agent's pid (S7 §9.6) and
+-- the team key that started it (S7 §20.2 item 9; created_by is null then).
 ALTER TABLE runtime.commands
-  ADD COLUMN "user" text NOT NULL DEFAULT 'user',
-  ADD COLUMN tags   jsonb NOT NULL DEFAULT '{}',
-  ADD COLUMN argv   jsonb,
-  ADD COLUMN pid    int;
+  ADD COLUMN "user"         text NOT NULL DEFAULT 'user',
+  ADD COLUMN tags           jsonb NOT NULL DEFAULT '{}',
+  ADD COLUMN argv           jsonb,
+  ADD COLUMN pid            int,
+  ADD COLUMN created_by_key uuid;
 
 -- GET /commands?status= (S7 §9.4).
 CREATE INDEX commands_sandbox_status_idx ON runtime.commands (sandbox_id, status);
