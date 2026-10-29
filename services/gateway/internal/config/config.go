@@ -147,6 +147,21 @@ const (
 	DefaultSSHDrainDeadline  = 15 * time.Minute
 )
 
+// The gateway.Timing defaults the drain budget needs (zero Timing fields
+// take them in libs/tunnel), and the bounds of the process's drain.
+const (
+	DefaultEndpointWait        = 5 * time.Second
+	DefaultDrainSpread         = 5 * time.Second
+	DefaultDrainMargin         = 10 * time.Second
+	DefaultMaxTCPDrainDeadline = 15 * time.Minute
+	// DrainProcessMargin is added to DrainBudget for the process's drain
+	// context.
+	DrainProcessMargin = 30 * time.Second
+	// TerminationGrace is the pod's terminationGracePeriodSeconds (spec
+	// 10.5): DrainBudget + DrainProcessMargin must fit in it.
+	TerminationGrace = 960 * time.Second
+)
+
 // FromEnv reads and validates the configuration. getenv is normally os.Getenv;
 // an empty value means "unset". Errors name the offending variable.
 func FromEnv(getenv func(string) string) (Config, error) {
@@ -288,6 +303,16 @@ func (c Config) ValidateServe() error {
 	if c.ProxyProtocol && len(c.ProxyProtocolCIDRs) == 0 {
 		errs = append(errs, fmt.Errorf("%sPROXY_PROTOCOL_CIDRS: is required with %sPROXY_PROTOCOL=v2", envPrefix, envPrefix))
 	}
+	// The drain must end within the pod's grace period, with the timing
+	// the process uses (only EndpointWait is configurable).
+	if b := DrainBudget(c, gateway.Timing{EndpointWait: c.EndpointWait}) + DrainProcessMargin; b > TerminationGrace {
+		errs = append(errs, fmt.Errorf("%sSSH_DRAIN_DEADLINE: drain budget %s (endpoint wait + drain spread + longest drain deadline + margin + %s process margin) exceeds the %s grace period",
+			envPrefix, b, DrainProcessMargin, TerminationGrace))
+	}
+	if c.HTTPDrainDeadline > c.SSHDrainDeadline {
+		errs = append(errs, fmt.Errorf("%sHTTP_DRAIN_DEADLINE: %s is longer than %sSSH_DRAIN_DEADLINE (%s)",
+			envPrefix, c.HTTPDrainDeadline, envPrefix, c.SSHDrainDeadline))
+	}
 	switch c.APIURL {
 	case "":
 		errs = append(errs, fmt.Errorf("%sAPI_URL: is required (%q runs without api)", envPrefix, APIURLNone))
@@ -299,6 +324,28 @@ func (c Config) ValidateServe() error {
 		need("API_TOKEN_FILE", c.APIToken)
 	}
 	return errors.Join(errs...)
+}
+
+// DrainBudget is the longest a Drain takes with c and timing:
+// EndpointWait + DrainSpread + the longest stream drain deadline +
+// DrainMargin, the bound of the tunnel drain, after which only the
+// graceful shutdown of the internal listener is left. Zero timing fields
+// take the libs/tunnel defaults. With the defaults it is 5 s + 5 s +
+// 15 min + 10 s = 920 s; the process bounds its drain at that plus
+// DrainProcessMargin, within TerminationGrace (spec 10.5).
+func DrainBudget(c Config, timing gateway.Timing) time.Duration {
+	longest := max(c.SSHDrainDeadline, c.HTTPDrainDeadline, orDefault(timing.MaxTCPDrainDeadline, DefaultMaxTCPDrainDeadline))
+	return orDefault(timing.EndpointWait, DefaultEndpointWait) +
+		orDefault(timing.DrainSpread, DefaultDrainSpread) +
+		longest +
+		orDefault(timing.DrainMargin, DefaultDrainMargin)
+}
+
+func orDefault(v, def time.Duration) time.Duration {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 // checkHTTPURL accepts an absolute http or https URL with a host.

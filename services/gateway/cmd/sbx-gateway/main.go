@@ -42,7 +42,7 @@ const (
 	// drainSlack is added to the drain budget for the process's drain
 	// context: 920 s + 30 s = 950 s with the defaults, inside the 960 s
 	// grace period.
-	drainSlack = 30 * time.Second
+	drainSlack = config.DrainProcessMargin
 	// forcedStopWait is how long a second signal waits for the listeners
 	// to close before the process exits anyway.
 	forcedStopWait = 5 * time.Second

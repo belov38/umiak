@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -378,6 +380,21 @@ func TestValidateServe(t *testing.T) {
 	if err := valid(t).ValidateServe(); err != nil {
 		t.Fatalf("valid config: %v", err)
 	}
+	// The largest SSH drain deadline that fits: 5 + 5 + 910 + 10 + 30 = 960 s.
+	edge := valid(t)
+	edge.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+	if err := edge.ValidateServe(); err != nil {
+		t.Fatalf("drain budget of exactly the grace period: %v", err)
+	}
+	// Equal HTTP and SSH drain deadlines are fine.
+	eq := valid(t)
+	eq.HTTPDrainDeadline, eq.SSHDrainDeadline = 2*time.Minute, 2*time.Minute
+	if err := eq.ValidateServe(); err != nil {
+		t.Fatalf("equal drain deadlines: %v", err)
+	}
+	if got := DrainBudget(valid(t), gateway.Timing{}); got != 920*time.Second {
+		t.Fatalf("DrainBudget = %s, want 920s", got)
+	}
 	none := valid(t)
 	none.APIURL, none.APIToken = APIURLNone, ""
 	if err := none.ValidateServe(); err != nil {
@@ -396,6 +413,13 @@ func TestValidateServe(t *testing.T) {
 		{"no api token", func(c *Config) { c.APIToken = "" }, "SBX_GATEWAY_API_TOKEN_FILE"},
 		{"bad internal url", func(c *Config) { c.InternalURL = "gateway:7000" }, "SBX_GATEWAY_INTERNAL_URL"},
 		{"proxy v2 without cidrs", func(c *Config) { c.ProxyProtocol, c.ProxyProtocolCIDRs = true, nil }, "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS"},
+		// 5 s + 5 s + 15 min 11 s + 10 s + 30 s = 961 s > 960 s.
+		{"drain over the grace period", func(c *Config) { c.SSHDrainDeadline = 15*time.Minute + 11*time.Second }, "SBX_GATEWAY_SSH_DRAIN_DEADLINE"},
+		{"endpoint wait over the grace period", func(c *Config) {
+			c.EndpointWait = 6 * time.Second
+			c.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+		}, "SBX_GATEWAY_SSH_DRAIN_DEADLINE"},
+		{"http drain longer than ssh drain", func(c *Config) { c.HTTPDrainDeadline = 3 * time.Minute; c.SSHDrainDeadline = 2 * time.Minute }, "SBX_GATEWAY_HTTP_DRAIN_DEADLINE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid(t)
