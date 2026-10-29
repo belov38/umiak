@@ -199,10 +199,10 @@ func (c *fakeCreds) Bootstrap(context.Context) (string, []byte, error) {
 
 // env is one agent client on a memnet network with one fake gateway.
 type env struct {
-	t      *testing.T
-	net    *memnet.Network
-	gw     *fakeGateway
-	creds  *fakeCreds
+	t        *testing.T
+	net      *memnet.Network
+	gw       *fakeGateway
+	creds    *fakeCreds
 	cancel   context.CancelFunc
 	done     chan error
 	stopOnce sync.Once

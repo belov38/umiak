@@ -17,7 +17,7 @@ import (
 
 func TestHTTPSink(t *testing.T) {
 	var (
-		mu    sync.Mutex
+		mu       sync.Mutex
 		reqs     []*tunnelv1.AgentEventsRequest
 		fail     bool
 		empty    bool

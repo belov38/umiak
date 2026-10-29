@@ -82,8 +82,8 @@ type Session struct {
 	Capabilities      []string
 	CapabilitiesKnown bool
 	State             string
-	ConnectedAt     time.Time
-	DisconnectedAt  *time.Time
+	ConnectedAt       time.Time
+	DisconnectedAt    *time.Time
 }
 
 const sessionColumns = `machine_id::text, instance_id, epoch, conn_id, agent_instance_id, boot_id, vmgenid,

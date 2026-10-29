@@ -13,3 +13,16 @@ linters:
     generated: lax
     paths:
       - tunneltest/testpb
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/belov38/boat-dev-clone
+  exclusions:
+    generated: lax
+    paths:
+      - tunneltest/testpb
