@@ -200,6 +200,21 @@ export async function readBodyCapped(
 	return out;
 }
 
+const maxUploadOffset = (1n << 63n) - 1n;
+
+/**
+ * Parses an Sbx-Upload-Offset value. It comes from the agent: only 1 to 20
+ * ASCII digits up to 2^63-1 are accepted, anything else (signs, spaces,
+ * exponents, a list, an absent header) yields undefined.
+ */
+export function parseUploadOffset(value: string | null): bigint | undefined {
+	if (value === null || !/^[0-9]{1,20}$/.test(value)) {
+		return undefined;
+	}
+	const n = BigInt(value);
+	return n <= maxUploadOffset ? n : undefined;
+}
+
 /** undici error codes of a failed or broken connection. */
 const undiciConnectionCodes = new Set([
 	"UND_ERR_SOCKET",

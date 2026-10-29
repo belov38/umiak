@@ -6,6 +6,7 @@ import {
 	AgentClient,
 	type AgentClientOptions,
 	AgentUnavailableError,
+	parseUploadOffset,
 	readBodyCapped,
 } from "../src/index.js";
 import {
@@ -450,5 +451,35 @@ describe("AgentClient.fetch", () => {
 		it("reads an absent body as empty", async () => {
 			expect(await readBodyCapped(new Response(null), 0)).toHaveLength(0);
 		});
+	});
+});
+
+describe("parseUploadOffset", () => {
+	it("parses decimal digits up to 2^63-1", () => {
+		expect(parseUploadOffset("0")).toBe(0n);
+		expect(parseUploadOffset("4194304")).toBe(4194304n);
+		expect(parseUploadOffset("007")).toBe(7n);
+		expect(parseUploadOffset("9223372036854775807")).toBe(9223372036854775807n);
+	});
+
+	it("rejects everything else", () => {
+		for (const v of [
+			null,
+			"",
+			" 1",
+			"1 ",
+			"+1",
+			"-1",
+			"1.0",
+			"1e3",
+			"0x10",
+			"１",
+			"9223372036854775808",
+			"18446744073709551615",
+			"000000000000000000001",
+			"1,2",
+		]) {
+			expect(parseUploadOffset(v), JSON.stringify(v)).toBeUndefined();
+		}
 	});
 });

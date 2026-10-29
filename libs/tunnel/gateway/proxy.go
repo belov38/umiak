@@ -67,7 +67,9 @@ func isRedirectHeader(k string) bool {
 
 // agentSbxHeaders are the agent-defined Sbx-* response headers passed to
 // callers (canonical names). Additions need review: Sbx-* are gateway
-// routing signals.
+// routing signals. The values are agent-controlled and passed as is:
+// consumers must parse them strictly (Sbx-Upload-Offset: 1 to 20 decimal
+// digits, at most 2^63-1; parseUploadOffset in @sbx/agent-client).
 var agentSbxHeaders = map[string]bool{wire.HeaderUploadOffset: true}
 
 // connectTrailerPrefix prefixes Connect unary trailers sent as headers;
