@@ -86,6 +86,8 @@ export interface NodeInfra {
 	stop(vmid: number): Promise<void>;
 	status(vmid: number): Promise<VmStatus>;
 	configure(vmid: number, size: InfraSize): Promise<void>;
+	/** Cores and memory in the VM config (resume compares them with the machine row). */
+	vmSize(vmid: number): Promise<InfraSize>;
 	delete(vmid: number): Promise<void>;
 	/** The machine's VMID lease (`vmid_leases.machine_id`); a non-releasing one first. */
 	leaseOf(

@@ -239,6 +239,11 @@ export class FakeInfra implements NodeInfra {
 		vm.memoryMb = size.memoryMb;
 	}
 
+	async vmSize(vmid: number): Promise<InfraSize> {
+		const vm = this.#vm(vmid);
+		return { vcpu: vm.vcpu, memoryMb: vm.memoryMb };
+	}
+
 	/** S1 delete: lease to releasing, VM and its LVs gone, then the lease is freed. */
 	async delete(vmid: number): Promise<void> {
 		this.#call("delete", vmid);

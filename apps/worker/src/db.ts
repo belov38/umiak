@@ -27,6 +27,7 @@ export interface MachineRow {
 	state: MachineState;
 	power_observed: string;
 	ready_boot_id: string | null;
+	provisioned_boot_id: string | null;
 	agent_phase: string | null;
 	exec_attempt: number;
 }

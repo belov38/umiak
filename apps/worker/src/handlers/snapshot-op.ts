@@ -1,6 +1,7 @@
 import { withTx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
 import { loadSnapshot, snapshotRef } from "../db.ts";
+import { CREATE_STEPS } from "../ops/create.ts";
 
 // snapshot-op queue (S6 §7.8, §15.1): delete of a snapshot in `deleting`
 // (or `failed`). Key snapshotId; unlimited retries.
@@ -26,18 +27,6 @@ export class SnapshotInUse extends Error {
 }
 
 export type SnapshotOpResult = "done" | "skipped";
-
-/**
- * Steps of a create (§7.3) from `provision` on. A create whose recorded step
- * is not one of these (none yet) has not passed `provision`.
- */
-export const CREATE_STEPS_FROM_PROVISION = [
-	"provision",
-	"boot",
-	"rotate_token",
-	"claim",
-	"finish",
-] as const;
 
 export async function handleSnapshotOp(
 	ctx: WorkerCtx,
@@ -100,7 +89,9 @@ async function inUse(ctx: WorkerCtx, snapshotId: string): Promise<boolean> {
 		   SELECT 1 FROM runtime.machines m
 		   WHERE m.origin_snapshot_id = $1 AND m.state IN ('allocating', 'provisioning')
 		 ) AS busy`,
-		[snapshotId, CREATE_STEPS_FROM_PROVISION],
+		// A create whose recorded step is one of its steps (provision or later)
+		// has passed provision; none recorded yet means it has not.
+		[snapshotId, CREATE_STEPS],
 	);
 	return r.rows[0]?.busy === true;
 }

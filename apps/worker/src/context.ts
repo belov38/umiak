@@ -21,6 +21,10 @@ export interface Timing {
 	cloneSlotTimeoutMs: number;
 	/** Agent connection wait where no template boot timeout applies. */
 	agentConnectTimeoutMs?: number;
+	/** Best-effort `System/PrepareStop` of a stop (S6 §7.5: 10 s). */
+	prepareStopTimeoutMs?: number;
+	/** S1 shutdown timeout of a stop before the hard stop (S6 §7.5: 60 s). */
+	shutdownTimeoutS?: number;
 }
 
 export const DEFAULT_TIMING: Timing = {
