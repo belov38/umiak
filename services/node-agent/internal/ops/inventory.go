@@ -144,7 +144,8 @@ func (s *Server) foreignLVs(ctx context.Context) (any, error) {
 	}
 	out := []row{}
 	for _, l := range all {
-		if !slices.Contains(l.Tags, "sbx") {
+		// LVs outside our pool: neither sandbox disks (sbx) nor our template (sbx-tpl).
+		if !slices.Contains(l.Tags, "sbx") && !slices.Contains(l.Tags, "sbx-tpl") {
 			out = append(out, row{l.Name, l.SizeBytes, l.Attr})
 		}
 	}

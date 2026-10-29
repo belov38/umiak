@@ -63,7 +63,12 @@ func TestInventoryDefaultSections(t *testing.T) {
 			t.Errorf("lvs must exclude sbx-tagged LVs: %v", lvs)
 		}
 	}
-	if len(lvs) != 3 {
+	for _, l := range lvs {
+		if l.(map[string]any)["name"] == "base-599-disk-0" {
+			t.Errorf("lvs must exclude the template LV tagged sbx-tpl: %v", lvs)
+		}
+	}
+	if len(lvs) != 2 {
 		t.Errorf("lvs = %v", lvs)
 	}
 
