@@ -69,8 +69,8 @@ docker compose -f deploy/compose/compose.yaml down -v     # чистый ста�
 - Reconcile работает в dry-run (`SBX_RECONCILE_DRY_RUN=1`): читает список VM на `pve` (только чтение) и логирует, что сделал бы.
 - Целевые размеры пулов в `sbx.yaml` равны 0 (`pools: []`, решение 17), поэтому worker сам не создаёт VM на `pve`.
 - Пока нет агента (S3) и gateway (S2), создание sandbox не может дойти до `ready`: агентский порт недоступен, а без `SBX_GATEWAY_SERVICE_TOKEN_FILE` ротация токена падает по таймауту. Worker при этом предупреждает об этом в логе при старте.
-- Схема `tunnel` создаётся временной фикстурой (`migrate --tunnel-fixture`) до слияния S2; после слияния флаг убрать из `compose.yaml`.
-  Настоящая миграция S2 `0100` не применится поверх тома, созданного с фикстурой (схема уже есть, а записи о миграции нет). После слияния S2 существующий том пересоздать: `docker compose -f deploy/compose/compose.yaml down -v`, затем `up -d --build`.
+- Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой (`migrate --tunnel-fixture`, флага больше нет), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
+- С `SBX_GATEWAY_SERVICE_TOKEN_FILE` worker находит gateway, который держит туннель machine, через `PgRegistry` из `@sbx/agent-client` (своё небольшое подключение к Postgres и LISTEN `tunnel_sessions`) и вызывает на нём `rotate-token`.
 
 ## Smoke-тест реального адаптера Proxmox
 
@@ -95,4 +95,15 @@ SBX_PVE_SMOKE=1 mise exec -- pnpm --filter @sbx/worker exec vitest run test/pve-
 2. Если сервису нужна схема БД, поставить `depends_on: migrate: condition: service_completed_successfully`.
 3. Секреты класть в `deploy/compose/secrets/` (git-ignored) и подключать через `secrets:`; в git — только `*.example`.
 4. Образ собирать из корня репозитория (`context: ../..`, `dockerfile: apps/<name>/Dockerfile`); `.dockerignore` лежит в корне.
-5. Новый пакет workspace (`packages/<name>` или `apps/<name>`) — добавить строку `COPY <dir>/package.json <dir>/` в `apps/worker/Dockerfile` (блок манифестов перед `pnpm install`), иначе `pnpm install --frozen-lockfile` не совпадёт с lockfile. Если пакет входит в зависимости worker, добавить и `COPY <dir>/src <dir>/src`. То же в Dockerfile других сервисов.
+5. Новый пакет workspace (`packages/<name>` или `apps/<name>`) — добавить строку `COPY <dir>/package.json <dir>/` в `apps/worker/Dockerfile` (блок манифестов в стадии `base`), иначе `pnpm install --frozen-lockfile` не совпадёт с lockfile. Если пакет входит в зависимости worker, добавить и `COPY <dir>/src <dir>/src`; если он собирается в `dist` (как `@sbx/proto` и `@sbx/agent-client`), собрать его в стадии `build` и скопировать `dist` в итоговый образ. То же в Dockerfile других сервисов.
+
+## Запуск worker без Docker
+
+Пакеты S6 запускаются из исходников (`node src/main.ts`), а `@sbx/proto` и `@sbx/agent-client` в рантайме берутся из `dist`. Перед первым запуском и после их изменений собрать:
+
+```sh
+mise exec -- pnpm build        # или только нужное: pnpm --filter "@sbx/agent-client..." run build
+mise exec -- pnpm --filter @sbx/worker start
+```
+
+Тесты worker (`vitest`) и `typecheck` от этого не зависят: vitest берёт исходники по условию `source`, а `typecheck` сам собирает `dist`.

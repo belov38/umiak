@@ -1,8 +1,12 @@
-// Worker process entry point: `node src/main.ts` (no build step).
+// Worker process entry point: `node src/main.ts` (type stripping, no build of
+// the worker itself).
 // Reads the environment (src/env.ts), builds the real adapters and runs the
 // worker until SIGTERM/SIGINT: stop taking jobs, give active ones 60 s
-// (S6 §15.2), close the PVE clients, end the pool, exit 0.
+// (S6 §15.2), close the PVE clients, the S2 registry and the pool, exit 0.
+// `@sbx/agent-client` and `@sbx/proto` are loaded from their `dist`: run
+// `pnpm build` once before `node src/main.ts` (the image does it).
 import { readFileSync } from "node:fs";
+import { PgRegistry } from "@sbx/agent-client";
 import { StaticConfigReader } from "@sbx/config";
 import { KeyRing } from "@sbx/core";
 import { createPool } from "@sbx/db";
@@ -43,6 +47,8 @@ async function main(): Promise<void> {
 	});
 
 	let worker: Worker | undefined;
+	// S2 registry for routing rotate-token; its own small pool and LISTEN connection.
+	let registry: PgRegistry | undefined;
 	let exiting = false;
 	const shutdown = async (signal: string) => {
 		if (exiting) {
@@ -53,6 +59,7 @@ async function main(): Promise<void> {
 		log.info({ signal }, "shutting down");
 		try {
 			await worker?.stop({ graceful: true, timeoutMs: STOP_TIMEOUT_MS });
+			await registry?.close();
 			await pool.end();
 		} catch (err) {
 			log.error({ err: errText(err) }, "shutdown failed");
@@ -68,9 +75,12 @@ async function main(): Promise<void> {
 		const keys = KeyRing.fromFile(env.dataKeysFile);
 		let gateway: GatewayPort;
 		if (env.gatewayServiceTokenFile !== undefined) {
-			gateway = new HttpGatewayPort(pool, {
-				serviceToken: readToken(env.gatewayServiceTokenFile),
+			const serviceToken = readToken(env.gatewayServiceTokenFile);
+			registry = await PgRegistry.connect({
+				connectionString: env.databaseUrl,
+				maxConnections: 2,
 			});
+			gateway = new HttpGatewayPort(registry, { serviceToken });
 		} else {
 			log.warn(
 				"SBX_GATEWAY_SERVICE_TOKEN_FILE is not set: token rotation fails (transient) until it is",
@@ -95,6 +105,7 @@ async function main(): Promise<void> {
 	} catch (err) {
 		log.fatal({ err: errText(err) }, "worker failed to start");
 		await worker?.stop({ graceful: false }).catch(() => {});
+		await registry?.close().catch(() => {});
 		await pool.end().catch(() => {});
 		process.exit(1);
 	}
