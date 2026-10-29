@@ -98,6 +98,7 @@ func processClient(t *testing.T, g *internalGW, id, token string) testingv1conne
 // rawResp is a response with its body read.
 type rawResp struct {
 	StatusCode int
+	ProtoMajor int
 	Header     http.Header
 }
 
@@ -122,7 +123,7 @@ func do(t *testing.T, c *http.Client, method, url, contentType string, body []by
 	if err != nil {
 		t.Fatalf("%s %s: read body: %v", method, url, err)
 	}
-	return rawResp{StatusCode: resp.StatusCode, Header: resp.Header}, b
+	return rawResp{StatusCode: resp.StatusCode, ProtoMajor: resp.ProtoMajor, Header: resp.Header}, b
 }
 
 // listenLocal listens on 127.0.0.1 on a random port.

@@ -350,7 +350,12 @@ func TestMachineMoved421(t *testing.T) {
 	if err == nil {
 		t.Fatal("stream to the wrong instance succeeded")
 	}
+	// connect-go's streaming client does not surface the headers of a
+	// non-200 answer: check them on a raw h2c streaming request.
 	resp, body = do(t, c, http.MethodPost, gwA.machineURL(id)+"/rpc/sbx.testing.v1.Process/Run", "application/connect+proto", []byte{0, 0, 0, 0, 0})
+	if resp.ProtoMajor != 2 {
+		t.Fatalf("raw stream request over HTTP/%d, want h2c", resp.ProtoMajor)
+	}
 	checkRaw(t, resp, body, http.StatusMisdirectedRequest, wire.CodeMachineMoved, gwB.url)
 	checkRPCBody(t, body, wire.CodeMachineMoved)
 	t.Logf("421 stream rpc: headers %v body %s", resp.Header, body)
@@ -395,6 +400,12 @@ func TestAgentUnavailable503(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeUnavailable {
 		t.Fatalf("stream err = %v, want unavailable", err)
 	}
+	resp, body = do(t, c, http.MethodPost, gw.machineURL(id)+"/rpc/sbx.testing.v1.Process/Run", "application/connect+proto", []byte{0, 0, 0, 0, 0})
+	if resp.ProtoMajor != 2 {
+		t.Fatalf("raw stream request over HTTP/%d, want h2c", resp.ProtoMajor)
+	}
+	checkRaw(t, resp, body, http.StatusServiceUnavailable, wire.CodeAgentUnavailable, "")
+	checkRPCBody(t, body, wire.CodeAgentUnavailable)
 
 	resp, body = do(t, c, http.MethodGet, gw.machineURL(id)+"/files?path=x", "", nil)
 	checkRaw(t, resp, body, http.StatusServiceUnavailable, wire.CodeAgentUnavailable, "")
