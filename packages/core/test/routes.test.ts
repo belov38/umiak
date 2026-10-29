@@ -36,6 +36,11 @@ describe.skipIf(skipPg())("routes for the gateway (S6 §14.2, S4 §4.2)", () => 
 				.digest("hex"),
 			authEpoch: 0,
 			state: "ready",
+			teamId: env.p.teamId,
+			hostRewrite: "preserve",
+			appProtocol: "http1",
+			blocked: false,
+			blockReason: null,
 		});
 	});
 
@@ -87,6 +92,9 @@ describe.skipIf(skipPg())("routes for the gateway (S6 §14.2, S4 §4.2)", () => 
 			sandboxId: s.sandboxId,
 			machineId: s.machineId,
 			state: "ready",
+			teamId: env.p.teamId,
+			slug: s.slug,
+			templateSlug: env.template,
 		};
 		expect(await sshTarget(t.pool, s.sandboxId)).toEqual(want);
 		expect(await createRoutes(t.pool).sshTarget(s.slug)).toEqual(want);

@@ -112,6 +112,8 @@ export const COMMAND_STATUSES = [
 	"failed_to_start",
 ] as const;
 export const PORT_MODES = ["token", "sso", "public"] as const;
+export const PORT_HOST_REWRITES = ["preserve", "localhost"] as const;
+export const PORT_APP_PROTOCOLS = ["http1", "h2c"] as const;
 
 const createdAt = () => tstz("created_at").notNull().defaultNow();
 const updatedAt = () => tstz("updated_at").notNull().defaultNow();
@@ -338,6 +340,9 @@ export const sandboxes = runtime.table("sandboxes", {
 	deletedAt: tstz("deleted_at"),
 	stateChangedAt: tstz("state_changed_at").notNull().defaultNow(),
 	version: version(),
+	/** Operator block (S8; migration 0204): every port of the sandbox is blocked. */
+	blocked: boolean("blocked").notNull().default(false),
+	blockReason: text("block_reason"),
 });
 
 export const sandboxSecrets = runtime.table("sandbox_secrets", {
@@ -432,6 +437,11 @@ export const commands = runtime.table("commands", {
 	createdAt: createdAt(),
 	startedAt: tstz("started_at"),
 	endedAt: tstz("ended_at"),
+	// S7 §9.6 (migration 0204).
+	user: text("user").notNull().default("user"),
+	tags: jsonb("tags").$type<Record<string, string>>().notNull().default({}),
+	argv: jsonb("argv").$type<string[]>(),
+	pid: integer("pid"),
 });
 
 export const hostedPorts = runtime.table("hosted_ports", {
@@ -444,6 +454,15 @@ export const hostedPorts = runtime.table("hosted_ports", {
 	authEpoch: integer("auth_epoch").notNull().default(0),
 	createdAt: createdAt(),
 	deletedAt: tstz("deleted_at"),
+	// S7 §11.2, S8 operator blocks (migration 0204).
+	hostRewrite: text("host_rewrite", { enum: PORT_HOST_REWRITES })
+		.notNull()
+		.default("preserve"),
+	appProtocol: text("app_protocol", { enum: PORT_APP_PROTOCOLS })
+		.notNull()
+		.default("http1"),
+	blocked: boolean("blocked").notNull().default(false),
+	blockReason: text("block_reason"),
 });
 
 // §5.9 Agent events

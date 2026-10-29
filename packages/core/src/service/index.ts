@@ -1,19 +1,26 @@
 import type { Principal } from "../principal.ts";
 import type {
 	Command,
+	HostedPort,
 	Operation,
 	Page,
 	PortMode,
 	Sandbox,
 	SavedSnapshot,
 } from "../rows.ts";
+import type { SecretPatch, SecretSets } from "../secrets.ts";
 import type { SandboxState } from "../states.ts";
 import {
 	type AgentTarget,
+	type CommandListFilter,
 	type CommandResult,
 	type CommandSpec,
 	completeCommand,
 	createCommand,
+	createCommandWithKey,
+	getCommand,
+	listCommands,
+	markCommandRunning,
 	resolveAgentTarget,
 	touchApiActivity,
 } from "./commands.ts";
@@ -24,6 +31,13 @@ import {
 	createSandbox,
 } from "./create.ts";
 import { deleteSandbox } from "./delete.ts";
+import {
+	type EnvReplaceInput,
+	type EnvUpdateResult,
+	getEnv,
+	patchEnv,
+	replaceEnv,
+} from "./env.ts";
 import { type ForkInput, type ForkResult, forkSandbox } from "./fork.ts";
 import {
 	type ResumeInput,
@@ -32,8 +46,10 @@ import {
 	stopSandbox,
 } from "./lifecycle.ts";
 import {
+	type HostPortOptions,
 	type HostPortResult,
 	hostPort,
+	listHostedPorts,
 	rotatePortToken,
 	unhostPort,
 } from "./ports.ts";
@@ -45,10 +61,13 @@ import {
 	listSandboxes,
 	type UpdateInput,
 	updateSandbox,
+	waitForOperation,
 	waitForSandboxState,
 } from "./read.ts";
+import { renameSandbox } from "./rename.ts";
 import {
 	deleteSavedSnapshot,
+	getSavedSnapshot,
 	listSavedSnapshots,
 	type SaveSnapshotResult,
 	saveSnapshot,
@@ -58,10 +77,14 @@ export {
 	type AgentTarget,
 	API_ACTIVITY_THROTTLE_SECONDS,
 	COMMAND_CMD_MAX_BYTES,
+	COMMAND_DEFAULT_USER,
 	COMMAND_MODES,
+	COMMAND_SCOPE,
+	type CommandListFilter,
 	type CommandResult,
 	type CommandSpec,
 	completeCommand,
+	markCommandRunning,
 	TERMINAL_COMMAND_STATUSES,
 	truncateUtf8,
 } from "./commands.ts";
@@ -91,7 +114,9 @@ export {
 	claimWarm,
 	type Placement,
 } from "./create-placement.ts";
+export { decodeCursor, encodeCursor } from "./cursor.ts";
 export { requestSystemDelete } from "./delete.ts";
+export type { EnvReplaceInput, EnvUpdateResult } from "./env.ts";
 export { FORK_SCOPE, type ForkInput, type ForkResult } from "./fork.ts";
 export {
 	RESUME_SCOPE,
@@ -102,8 +127,11 @@ export {
 	type SystemResumeResult,
 } from "./lifecycle.ts";
 export {
+	type HostPortOptions,
 	type HostPortResult,
 	MAX_HOSTED_PORTS,
+	PORT_APP_PROTOCOLS,
+	PORT_HOST_REWRITES,
 	PORT_MODES,
 	PORT_TOKEN_PREFIX,
 	RESERVED_PORTS,
@@ -153,7 +181,10 @@ export interface SandboxService {
 		idemKey?: string,
 	): Promise<SaveSnapshotResult>;
 	deleteSavedSnapshot(p: Principal, name: string): Promise<void>;
+	/** `ready`, `creating` and `failed` of the last day. */
 	listSavedSnapshots(p: Principal): Promise<SavedSnapshot[]>;
+	/** `ready` by name, else `creating` by pending name, else `snapshot_not_found`. */
+	getSavedSnapshot(p: Principal, name: string): Promise<SavedSnapshot>;
 	getOperation(p: Principal, id: string): Promise<Operation>;
 	/** No access check: the caller has read the sandbox with `get` first. */
 	waitForState(
@@ -161,6 +192,23 @@ export interface SandboxService {
 		states: SandboxState[],
 		timeoutMs: number,
 	): Promise<Sandbox>;
+	/** Until terminal or `timeoutMs`; no access check (read it with `getOperation` first). */
+	waitForOperation(id: string, timeoutMs: number): Promise<Operation>;
+	/** Slug change with new port labels and `authEpoch + 1` (S7 §5.4). */
+	rename(p: Principal, idOrSlug: string, slug: string): Promise<Sandbox>;
+	getEnv(p: Principal, idOrSlug: string): Promise<SecretSets>;
+	/** Each given set replaces its set whole (`PUT /env`). */
+	replaceEnv(
+		p: Principal,
+		idOrSlug: string,
+		input: EnvReplaceInput,
+	): Promise<EnvUpdateResult>;
+	/** `PATCH /env` (S8 C2): `null` deletes a key or a file. */
+	patchEnv(
+		p: Principal,
+		idOrSlug: string,
+		patch: SecretPatch,
+	): Promise<EnvUpdateResult>;
 	/** `sandbox_not_ready` (details.state) unless `ready`. */
 	resolveAgentTarget(p: Principal, idOrSlug: string): Promise<AgentTarget>;
 	createCommand(
@@ -168,14 +216,37 @@ export interface SandboxService {
 		idOrSlug: string,
 		spec: CommandSpec,
 	): Promise<Command>;
+	/** `createCommand` under an Idempotency-Key (scope `commands.create`, S7 §9.3). */
+	createCommandWithKey(
+		p: Principal,
+		idOrSlug: string,
+		spec: CommandSpec,
+		idemKey: string,
+		requestBody: unknown,
+	): Promise<{ command: Command; replayed: boolean }>;
+	/** `starting` → `running` with the agent's pid. */
+	markCommandRunning(commandId: string, pid: number | null): Promise<void>;
+	/** Newest first; any sandbox state but `deleted`. */
+	listCommands(
+		p: Principal,
+		idOrSlug: string,
+		filter: CommandListFilter,
+		cursor?: string,
+	): Promise<Page<Command>>;
+	getCommand(
+		p: Principal,
+		idOrSlug: string,
+		commandId: string,
+	): Promise<Command>;
 	completeCommand(commandId: string, result: CommandResult): Promise<void>;
 	touchApiActivity(sandboxId: string): Promise<void>;
 	hostPort(
 		p: Principal,
 		idOrSlug: string,
 		port: number,
-		mode: PortMode,
+		mode: PortMode | HostPortOptions,
 	): Promise<HostPortResult>;
+	listHostedPorts(p: Principal, idOrSlug: string): Promise<HostedPort[]>;
 	unhostPort(p: Principal, idOrSlug: string, port: number): Promise<void>;
 	rotatePortToken(
 		p: Principal,
@@ -280,6 +351,38 @@ export class SandboxServiceImpl implements SandboxService {
 		return listSavedSnapshots(this.deps, p);
 	}
 
+	getSavedSnapshot(p: Principal, name: string): Promise<SavedSnapshot> {
+		return getSavedSnapshot(this.deps, p, name);
+	}
+
+	waitForOperation(id: string, timeoutMs: number): Promise<Operation> {
+		return waitForOperation(this.deps, id, timeoutMs);
+	}
+
+	rename(p: Principal, idOrSlug: string, slug: string): Promise<Sandbox> {
+		return renameSandbox(this.deps, p, idOrSlug, slug);
+	}
+
+	getEnv(p: Principal, idOrSlug: string): Promise<SecretSets> {
+		return getEnv(this.deps, p, idOrSlug);
+	}
+
+	replaceEnv(
+		p: Principal,
+		idOrSlug: string,
+		input: EnvReplaceInput,
+	): Promise<EnvUpdateResult> {
+		return replaceEnv(this.deps, p, idOrSlug, input);
+	}
+
+	patchEnv(
+		p: Principal,
+		idOrSlug: string,
+		patch: SecretPatch,
+	): Promise<EnvUpdateResult> {
+		return patchEnv(this.deps, p, idOrSlug, patch);
+	}
+
 	resolveAgentTarget(p: Principal, idOrSlug: string): Promise<AgentTarget> {
 		return resolveAgentTarget(this.deps, p, idOrSlug);
 	}
@@ -290,6 +393,44 @@ export class SandboxServiceImpl implements SandboxService {
 		spec: CommandSpec,
 	): Promise<Command> {
 		return createCommand(this.deps, p, idOrSlug, spec);
+	}
+
+	createCommandWithKey(
+		p: Principal,
+		idOrSlug: string,
+		spec: CommandSpec,
+		idemKey: string,
+		requestBody: unknown,
+	): Promise<{ command: Command; replayed: boolean }> {
+		return createCommandWithKey(
+			this.deps,
+			p,
+			idOrSlug,
+			spec,
+			idemKey,
+			requestBody,
+		);
+	}
+
+	markCommandRunning(commandId: string, pid: number | null): Promise<void> {
+		return markCommandRunning(this.deps.pool, commandId, pid);
+	}
+
+	listCommands(
+		p: Principal,
+		idOrSlug: string,
+		filter: CommandListFilter = {},
+		cursor?: string,
+	): Promise<Page<Command>> {
+		return listCommands(this.deps, p, idOrSlug, filter, cursor);
+	}
+
+	getCommand(
+		p: Principal,
+		idOrSlug: string,
+		commandId: string,
+	): Promise<Command> {
+		return getCommand(this.deps, p, idOrSlug, commandId);
 	}
 
 	completeCommand(commandId: string, result: CommandResult): Promise<void> {
@@ -304,9 +445,13 @@ export class SandboxServiceImpl implements SandboxService {
 		p: Principal,
 		idOrSlug: string,
 		port: number,
-		mode: PortMode,
+		mode: PortMode | HostPortOptions,
 	): Promise<HostPortResult> {
 		return hostPort(this.deps, p, idOrSlug, port, mode);
+	}
+
+	listHostedPorts(p: Principal, idOrSlug: string): Promise<HostedPort[]> {
+		return listHostedPorts(this.deps, p, idOrSlug);
 	}
 
 	unhostPort(p: Principal, idOrSlug: string, port: number): Promise<void> {

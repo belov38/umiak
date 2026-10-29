@@ -482,4 +482,43 @@ describe("ctl-cleanup (§15.4)", () => {
 		// No secret in the logs.
 		expect(w.logs.join("\n")).not.toContain("s3cr3t");
 	});
+
+	it("port_auth_codes older than a day, only when the table exists (S7 §12.2)", async () => {
+		const w = await createWorld(db);
+		const exists = async () =>
+			(
+				await w.pool.query<{ ok: boolean }>(
+					"SELECT to_regclass('runtime.port_auth_codes') IS NOT NULL AS ok",
+				)
+			).rows[0]?.ok;
+		if (!(await exists())) {
+			// Before migration 0301 the part is a no-op, not a failure.
+			const res = await runCleanup(w.ctx);
+			expect(res.portAuthCodes).toBe(0);
+			expect(res.failed).not.toContain("port_auth_codes");
+		}
+		// The table of S7 §12.2 (created by migration 0301 when present).
+		await w.pool.query(
+			`CREATE TABLE IF NOT EXISTS runtime.port_auth_codes (
+			   code_hash bytea PRIMARY KEY, label text, user_id text, email text,
+			   auth_epoch int, expires_at timestamptz, used_at timestamptz,
+			   created_at timestamptz NOT NULL DEFAULT now())`,
+		);
+		const tag = randomBytes(8).toString("hex");
+		await w.pool.query(
+			`INSERT INTO runtime.port_auth_codes (code_hash, label, auth_epoch, expires_at, created_at)
+			 VALUES (decode($1 || '01', 'hex'), 'old-3000', 0, now(), now() - interval '25 hours'),
+			        (decode($1 || '02', 'hex'), 'new-3000', 0, now(), now() - interval '23 hours')`,
+			[tag],
+		);
+
+		const res = await runCleanup(w.ctx);
+		expect(res.failed).not.toContain("port_auth_codes");
+		expect(res.portAuthCodes).toBeGreaterThanOrEqual(1);
+		const left = await w.pool.query(
+			"SELECT label FROM runtime.port_auth_codes WHERE code_hash IN (decode($1 || '01', 'hex'), decode($1 || '02', 'hex'))",
+			[tag],
+		);
+		expect(left.rows).toEqual([{ label: "new-3000" }]);
+	});
 });

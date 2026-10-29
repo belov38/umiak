@@ -195,11 +195,16 @@ describe.skipIf(skipPg())("SandboxService saved snapshots (S6 §7.8)", () => {
 			teamId: env.p.teamId,
 			name: "r",
 		});
-		await insertSavedSnapshot(t.pool, env.topo, {
+		// `failed` is listed only within a day (S7 §13; s7-additions.test.ts).
+		const failed = await insertSavedSnapshot(t.pool, env.topo, {
 			teamId: env.p.teamId,
 			name: "f",
 			state: "failed",
 		});
+		await t.pool.query(
+			"UPDATE runtime.snapshots SET created_at = now() - interval '2 days' WHERE id = $1",
+			[failed],
+		);
 		await insertSavedSnapshot(t.pool, env.topo, {
 			teamId: env.p.teamId,
 			name: "d",

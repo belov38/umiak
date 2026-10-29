@@ -183,8 +183,9 @@ export async function deleteSavedSnapshot(
 }
 
 /**
- * The team's saved snapshots in `ready` and `creating` (the expected name is
- * `pendingName`), newest first. `failed` within a day is S7 §20.2 item 6.
+ * The team's saved snapshots in `ready`, `creating` (the expected name is
+ * `pendingName`) and `failed` created within the last day (S7 §13), newest
+ * first.
  */
 export async function listSavedSnapshots(
 	deps: SandboxServiceDeps,
@@ -192,9 +193,35 @@ export async function listSavedSnapshots(
 ): Promise<SavedSnapshot[]> {
 	const r = await deps.pool.query(
 		`SELECT * FROM runtime.snapshots
-		 WHERE team_id = $1 AND kind = 'saved' AND state IN ('ready', 'creating')
+		 WHERE team_id = $1 AND kind = 'saved'
+		   AND (state IN ('ready', 'creating')
+		        OR (state = 'failed' AND created_at > now() - interval '1 day'))
 		 ORDER BY created_at DESC, id DESC`,
 		[p.teamId],
 	);
 	return r.rows.map(snapshotFromRow);
+}
+
+/**
+ * The team's `ready` snapshot of this name, else the newest `creating` one
+ * whose `pendingName` it is (S7 §13), else `snapshot_not_found`.
+ */
+export async function getSavedSnapshot(
+	deps: SandboxServiceDeps,
+	p: Principal,
+	name: string,
+): Promise<SavedSnapshot> {
+	if (typeof name !== "string" || !SNAPSHOT_NAME_RE.test(name)) {
+		throw snapshotNotFound(String(name));
+	}
+	const r = await deps.pool.query(
+		`SELECT * FROM runtime.snapshots
+		 WHERE team_id = $1 AND kind = 'saved'
+		   AND ((state = 'ready' AND name = $2) OR (state = 'creating' AND pending_name = $2))
+		 ORDER BY (state = 'ready') DESC, created_at DESC, id DESC
+		 LIMIT 1`,
+		[p.teamId, name],
+	);
+	if (!r.rows[0]) throw snapshotNotFound(name);
+	return snapshotFromRow(r.rows[0]);
 }

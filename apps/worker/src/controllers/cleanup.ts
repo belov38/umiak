@@ -11,7 +11,8 @@ import { lockSandboxRow } from "../db.ts";
 //
 // Retention: idempotency keys past `expires_at`; processed agent and synthetic
 // events older than 7 days; commands older than 90 days; sandbox_events older
-// than 90 days; `deleted` sandbox tombstones older than 30 days, with the rows
+// than 90 days; S7 port SSO codes (`port_auth_codes`, S7 §12.2) older than a
+// day, once S7's migration has created the table; `deleted` sandbox tombstones older than 30 days, with the rows
 // that only exist for them (machines in `deleted` and their disks, operations,
 // events, commands, ports, the `deleted` fork_source snapshots they consumed).
 //
@@ -36,6 +37,7 @@ export const COMMANDS_RETENTION_DAYS = 90;
 export const SANDBOX_EVENTS_RETENTION_DAYS = 90;
 export const TOMBSTONE_RETENTION_DAYS = 30;
 export const FORK_SOURCE_MAX_AGE_S = 3600;
+export const PORT_AUTH_CODES_RETENTION_HOURS = 24;
 const BATCH = 500;
 const TOMBSTONE_BATCH = 100;
 const REENCRYPT_BATCH = 100;
@@ -47,6 +49,7 @@ export const CLEANUP_PARTS = [
 	"synthetic_events",
 	"commands",
 	"sandbox_events",
+	"port_auth_codes",
 	"tombstones",
 	"fork_sources",
 	"retention",
@@ -60,6 +63,7 @@ export interface CleanupResult {
 	syntheticEvents: number;
 	commands: number;
 	sandboxEvents: number;
+	portAuthCodes: number;
 	tombstones: number;
 	forkSources: string[];
 	errorDeletes: string[];
@@ -78,6 +82,7 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 		syntheticEvents: 0,
 		commands: 0,
 		sandboxEvents: 0,
+		portAuthCodes: 0,
 		tombstones: 0,
 		forkSources: [],
 		errorDeletes: [],
@@ -141,6 +146,20 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 			`DELETE FROM runtime.sandbox_events WHERE id IN (
 			   SELECT id FROM runtime.sandbox_events
 			   WHERE created_at < now() - make_interval(days => ${SANDBOX_EVENTS_RETENTION_DAYS})
+			   LIMIT ${BATCH})`,
+		);
+	});
+	await part("port_auth_codes", async () => {
+		// The table belongs to S7 (migration 0301) and may not exist yet.
+		const t = await ctx.pool.query<{ ok: boolean }>(
+			"SELECT to_regclass('runtime.port_auth_codes') IS NOT NULL AS ok",
+		);
+		if (t.rows[0]?.ok !== true) return;
+		res.portAuthCodes = await deleteBatched(
+			ctx,
+			`DELETE FROM runtime.port_auth_codes WHERE ctid IN (
+			   SELECT ctid FROM runtime.port_auth_codes
+			   WHERE created_at < now() - make_interval(hours => ${PORT_AUTH_CODES_RETENTION_HOURS})
 			   LIMIT ${BATCH})`,
 		);
 	});

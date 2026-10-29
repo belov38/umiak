@@ -23,13 +23,33 @@ const posInt = z.number().int().positive();
 const nonNegInt = z.number().int().nonnegative();
 const os = z.enum(["linux", "windows"]);
 
-const templateSchema = z.strictObject({
-	slug,
-	os,
-	enabled: z.boolean().default(true),
-	defaultSize: slug,
-	allowedSizes: z.array(slug).min(1),
-});
+const DEFAULT_CAPABILITIES = ["exec", "files", "ssh"];
+
+const templateSchema = z
+	.strictObject({
+		slug,
+		name: z.string().min(1).optional(),
+		os,
+		enabled: z.boolean().default(true),
+		defaultSize: slug,
+		allowedSizes: z.array(slug).min(1),
+		loginUser: z.string().min(1).default("user"),
+		capabilities: z
+			.array(z.string().min(1))
+			.default(() => [...DEFAULT_CAPABILITIES]),
+	})
+	.transform(
+		(t): TemplateConfig => ({
+			slug: t.slug,
+			name: t.name ?? t.slug,
+			os: t.os,
+			enabled: t.enabled,
+			defaultSize: t.defaultSize,
+			allowedSizes: t.allowedSizes,
+			loginUser: t.loginUser,
+			capabilities: t.capabilities,
+		}),
+	);
 
 const sizeSchema = z.strictObject({
 	slug,
@@ -77,6 +97,9 @@ const defaultsSchema = z
 		errorRetentionDays: posInt.default(7),
 		recoverMinIntervalSeconds: nonNegInt.default(600),
 		defaultTemplate: slug.default("linux"),
+		publicPortsEnabled: z.boolean().default(true),
+		ssoPortPolicy: z.enum(["any", "team"]).default("any"),
+		ssoPolicyEpoch: nonNegInt.default(0),
 	})
 	.default({
 		ttlSeconds: null,
@@ -86,6 +109,9 @@ const defaultsSchema = z
 		errorRetentionDays: 7,
 		recoverMinIntervalSeconds: 600,
 		defaultTemplate: "linux",
+		publicPortsEnabled: true,
+		ssoPortPolicy: "any",
+		ssoPolicyEpoch: 0,
 	});
 
 const pct = z.number().int().min(1).max(100);

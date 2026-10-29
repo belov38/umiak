@@ -164,9 +164,18 @@ export interface Command {
 	createdAt: Date;
 	startedAt: Date | null;
 	endedAt: Date | null;
+	/** Guest user (S7 §9.1); default `user`. */
+	user: string;
+	/** Program and arguments without a shell; null for a shell command. */
+	argv: string[] | null;
+	tags: Record<string, string>;
+	/** Set when the agent has started the process (`markCommandRunning`). */
+	pid: number | null;
 }
 
 export type PortMode = "token" | "sso" | "public";
+export type PortHostRewrite = "preserve" | "localhost";
+export type PortAppProtocol = "http1" | "h2c";
 
 export interface HostedPort {
 	id: string;
@@ -179,6 +188,11 @@ export interface HostedPort {
 	authEpoch: number;
 	createdAt: Date;
 	deletedAt: Date | null;
+	hostRewrite: PortHostRewrite;
+	appProtocol: PortAppProtocol;
+	/** Blocked by an operator (S8); the sandbox block is separate (`RouteTarget.blocked`). */
+	blocked: boolean;
+	blockReason: string | null;
 }
 
 export interface Page<T> {
@@ -317,6 +331,10 @@ export function commandFromRow(r: Row): Command {
 		createdAt: r.created_at,
 		startedAt: r.started_at,
 		endedAt: r.ended_at,
+		user: r.user,
+		argv: r.argv ?? null,
+		tags: r.tags ?? {},
+		pid: r.pid ?? null,
 	};
 }
 
@@ -331,5 +349,9 @@ export function hostedPortFromRow(r: Row): HostedPort {
 		authEpoch: r.auth_epoch,
 		createdAt: r.created_at,
 		deletedAt: r.deleted_at,
+		hostRewrite: r.host_rewrite,
+		appProtocol: r.app_protocol,
+		blocked: r.blocked,
+		blockReason: r.block_reason,
 	};
 }
