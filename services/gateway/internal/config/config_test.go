@@ -384,6 +384,7 @@ func TestValidateServe(t *testing.T) {
 		{"bad api url", func(c *Config) { c.APIURL = "api:3000" }, "SBX_GATEWAY_API_URL"},
 		{"no api token", func(c *Config) { c.APIToken = "" }, "SBX_GATEWAY_API_TOKEN_FILE"},
 		{"bad internal url", func(c *Config) { c.InternalURL = "gateway:7000" }, "SBX_GATEWAY_INTERNAL_URL"},
+		{"proxy v2 without cidrs", func(c *Config) { c.ProxyProtocol, c.ProxyProtocolCIDRs = true, nil }, "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid(t)

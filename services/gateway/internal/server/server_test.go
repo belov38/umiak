@@ -294,3 +294,13 @@ func TestDrainBeforeRunBounded(t *testing.T) {
 		t.Fatalf("Drain after a failed Run = %v, want nil", err)
 	}
 }
+
+// The metrics listener bounds slow and idle clients.
+func TestMetricsServerTimeouts(t *testing.T) {
+	env := testenv.New(t, testenv.Options{})
+	i := env.StartInstance(nil)
+	srv := i.MetricsServer()
+	if srv.ReadHeaderTimeout != 10*time.Second || srv.IdleTimeout != 120*time.Second {
+		t.Fatalf("ReadHeaderTimeout=%s IdleTimeout=%s, want 10s and 2m", srv.ReadHeaderTimeout, srv.IdleTimeout)
+	}
+}

@@ -27,8 +27,10 @@ const (
 	DefaultMaxEntries  = 50_000
 
 	// retryBackoff is how long an expired entry is served stale without
-	// asking api again after a failed refresh. It keeps a slow or hung api
-	// from adding its full timeout to every request.
+	// asking api again after a failed refresh. Past it the entry is still
+	// served stale at once while a refresh runs in the background, so a
+	// slow or hung api adds its timeout only to the request that found the
+	// entry expired.
 	retryBackoff = time.Second
 )
 
@@ -119,17 +121,21 @@ func (c *Cache) Get(ctx context.Context, label Label) (cpapi.Route, error) {
 			c.mu.Unlock()
 			c.lookup("hit")
 			return r, nil
-		case !e.notFound && now.Before(e.retryAt) && c.staleOK(e, now):
-			r := e.route
+		case !e.notFound && !e.retryAt.IsZero() && c.staleOK(e, now):
+			// A refresh already failed: answer stale and, once the backoff
+			// is over, refresh in the background.
+			r, due := e.route, !now.Before(e.retryAt)
 			c.mu.Unlock()
+			if due {
+				c.refresh(ctx, label, gen)
+			}
 			c.lookup("stale")
 			return r, nil
 		}
 	}
 	c.mu.Unlock()
 
-	key := label.Raw + "\x00" + strconv.FormatUint(gen, 10)
-	ch := c.sf.DoChan(key, func() (any, error) {
+	ch := c.sf.DoChan(c.flightKey(label, gen), func() (any, error) {
 		return c.fetch(ctx, label, gen), nil
 	})
 	select {
@@ -138,6 +144,18 @@ func (c *Cache) Get(ctx context.Context, label Label) (cpapi.Route, error) {
 	case res := <-ch:
 		return c.finish(label, res.Val.(flightResult))
 	}
+}
+
+// refresh starts the shared api call for label without waiting for it; a
+// call already in flight is joined instead. fetch detaches it from ctx.
+func (c *Cache) refresh(ctx context.Context, label Label, gen uint64) {
+	c.sf.DoChan(c.flightKey(label, gen), func() (any, error) {
+		return c.fetch(ctx, label, gen), nil
+	})
+}
+
+func (c *Cache) flightKey(label Label, gen uint64) string {
+	return label.Raw + "\x00" + strconv.FormatUint(gen, 10)
 }
 
 // fetch runs the shared api call. It must not depend on the cancellation of

@@ -91,6 +91,7 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
   - Whole reserved slugs (`api app www ssh tunnel admin static sbx`) give `404` (S7 §5.4).
   - Default reserved ports are `22,47800,47984,47989,47990,48010` (S10).
 - **`ssh/authorize` response:** gains `teamId`, the sandbox's team in public format. The §9.5 revoke matching for `member:`/`team:` needs it, and S7 §12.1 lacks it.
+  - The gateway fails closed: an allowed answer without `teamId` is treated like an `api` failure (login refused, `Error` log, `sbx_gateway_ssh_auth_total{result="unavailable"}`). Otherwise `member:`/`team:` revocations would silently miss the session.
   - The payload IDs of `sbx_ssh_revoke` are compared as opaque strings with the `userId`/`apiKeyId`/`teamId` that `api` returns. Both must use the same format, the public one.
   - Contract note for S7/S8.
 - **Dial errors:**
@@ -115,6 +116,8 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
 - **Rate-limit buckets:** the per-IP bucket is checked before the route lookup, the per-label bucket only after a route is found, so unknown labels cannot grow the bucket map. `Retry-After` is rounded up to at least 1 s.
 - **SSH channels:** at most 256 open channels per SSH connection (client- and backend-initiated, all types; `SBX_GATEWAY_SSH_MAX_CHANNELS`). Over the cap the open fails with `ResourceShortage` "sbx: too many open channels". §11 is silent; without a cap one user could pin about 2 MB of gateway memory per channel.
 - **SSH re-check:** the re-check of open sessions after a LISTEN reconnect (§9.5) sends `ssh/authorize` with `"recheck": true`. `api` checks the identity as on a login and skips the certificate validity: the gateway validated the certificate at login, and sessions outlive the 10-minute certificates.
+- **Owner lookups (§6.4, local first):** the HTTP proxy takes the synthetic host epoch of a machine connected to this instance from the local session (`gateway.MachineConn.Epoch`), without a registry query, so previews of local machines survive a Postgres outage. For other machines the owner lookup for the epoch is bounded by min(`Timeouts.Dial`, 2 s); a failed lookup is logged and the request goes on with epoch 0, and the dial maps its own errors within `Timeouts.Dial` (+ `AgentWait`). Concurrent owner misses of one machine share one registry query (`registry.OwnerCache`, singleflight, 10 s per query).
+- **Route cache under a hung `api`:** after a failed refresh an expired route is served stale at once and refreshed in the background (at most once per 1 s backoff), so only the request that found the route expired waits for the lookup timeout.
 - **Host case:** an upper-case Host routes to the same label (Host is lower-cased, §4.2). A Host with a port other than `:443` is `404 route_not_found`, also in the local stack (see `deploy/compose/README.gateway.md`).
 - **Tests:**
   - 1000 WebSockets through one peer are split across two machines on the owner, because the per-machine limit is 800 streams. One A→C h2 connection is asserted.
@@ -143,15 +146,23 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
   - `sbx_routes` is a contract S6 must implement, not a change: it is already in spec §6.2. The S6 triggers in main send the slug (old and new on a rename). Nobody sends `*` yet; S8 must send it for the global `public` switch, which flushes every route.
 - **S7 (api):**
   - Route response: the optional `kind` (`port` by default, `desktop`).
-  - `ssh/authorize` answers `teamId` in public format, and accepts `"recheck": true` (identity check without the certificate validity).
+  - `ssh/authorize` answers `teamId` in public format, and accepts `"recheck": true` (identity check without the certificate validity). Both are hard requirements: an allowed answer without `teamId` fails the SSH login (the gateway fails closed), and re-checks after a LISTEN reconnect depend on `recheck`.
+  - `POST /internal/v1/agent-events` (the tunnel event sink, `gateway.NewHTTPSink`) must accept the gateway's `api` token (`SBX_GATEWAY_API_TOKEN_FILE`, under `gateway` in `SBX_API_SERVICE_TOKENS_FILE`).
   - `api` checks the label of a route lookup: the gateway rejects a route whose `label` differs from the requested one.
   - Service tokens: the gateway accepts `{"api":[..],"worker":[..],"gateway":[..]}` from `SBX_GATEWAY_SERVICE_TOKENS_FILE` and calls `api` with `SBX_GATEWAY_API_TOKEN_FILE`, which `api` must accept under `gateway` in `SBX_API_SERVICE_TOKENS_FILE`. In the local stack both come from `deploy/compose/secrets/gateway/` (`api-token`, `service-tokens.json` → `api[0]`).
-- **S8 (web):** the IDs in `sbx_ssh_revoke` payloads (`user:`, `member:`, `team:`, `key:`) are compared as opaque strings with `userId`/`apiKeyId`/`teamId` from `ssh/authorize`. Both must be in the public format of the `api` IDs.
+- **S8 (web):**
+  - The IDs in `sbx_ssh_revoke` payloads (`user:`, `member:`, `team:`, `key:`) are compared as opaque strings with `userId`/`apiKeyId`/`teamId` from `ssh/authorize`. Both must be in the public format of the `api` IDs.
+  - The global `public` switch must send `pg_notify('sbx_routes', '*')`, which flushes every cached route.
 - **S10 (desktop):** seams only. `<slug>-desktop` is parsed as kind `desktop`, the cookie mode `d` is accepted by the codec, and `httpproxy.Config.Desktop` is nil (`404 route_not_found`) until S10 sets a handler. Reserved ports `22,47800,47984,47989,47990,48010`.
+  - The desktop handler is called after the host, rate-limit, route and sandbox-state checks, but before the port access check and the upgrade filtering. S10 must do its own authorization and its own upgrade policy (which `Upgrade` tokens on which methods it forwards).
 - **S12 (operations):**
   - `terminationGracePeriodSeconds: 960`; the process bounds its drain at 950 s.
   - Ports: 8443 TLS (SNI `*.<sbx domain>` and the tunnel host), 2222 SSH, 7000 internal, 9090 metrics/health.
-  - Only PROXY protocol v2 is accepted (`SBX_GATEWAY_PROXY_PROTOCOL=v2`, from `SBX_GATEWAY_PROXY_PROTOCOL_CIDRS`).
+  - Only PROXY protocol v2 is accepted (`SBX_GATEWAY_PROXY_PROTOCOL=v2`, from `SBX_GATEWAY_PROXY_PROTOCOL_CIDRS`). `v2` requires a non-empty `SBX_GATEWAY_PROXY_PROTOCOL_CIDRS`: `serve` and `check-config` refuse the config otherwise.
+  - The internal port 7000 (peer CONNECT, `/rpc/`, admin) must be reachable only from the gateway, worker and `api` pods (NetworkPolicy). Its service tokens are the only other guard.
+  - Plain mode (behind an ingress): the gateway applies the sbx-side limits (`ReadHeader`, `MaxHeaderBytes`) to every request of the plain listener, the tunnel host included. The tighter tunnel-listener limits of the TLS edge (10 s header timeout, 16 KiB headers, HTTP/1 only) are not applied there: the ingress must enforce them for the tunnel host.
+  - Drain knobs: `SBX_GATEWAY_ENDPOINT_WAIT` (default 5 s: how long a draining instance keeps accepting while the load balancer drops it) and `SBX_GATEWAY_DRAIN_TIMEOUT` (default 950 s). Keep `SBX_GATEWAY_DRAIN_TIMEOUT` below `terminationGracePeriodSeconds` (960 s).
+  - Probes for the distroless image: `sbx-gateway healthcheck [-url]` (no shell or curl in the image), e.g. as an exec probe or the compose healthcheck.
   - Env names that differ from the spec text: `SBX_GATEWAY_COOKIE_KEYS_FILE` (§8.2: `SBX_GATEWAY_COOKIE_KEYS`) and `SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE` (§9.2, §16.2: `SBX_GATEWAY_SSH_LOGIN_CA_KEYS`); both name files. `SBX_GATEWAY_API_URL` is required (`none` for the dev mode).
   - Readiness: `/readyz` is 200 while the tunnel gateway runs, the instance does not drain and the certificates are loaded; Postgres and `api` health do not count (§12.3). `/healthz` is liveness only.
 

@@ -431,3 +431,59 @@ func TestCacheBounded(t *testing.T) {
 		t.Fatalf("cache holds %d entries, limit 100", n)
 	}
 }
+
+// With a hung api, only the request that finds the route expired waits for
+// the api timeout; after that the stale route is answered at once and the
+// refresh runs in the background, at most once per backoff.
+func TestCacheStaleRefreshInBackground(t *testing.T) {
+	f := cpapitest.NewFake()
+	rt := readyRoute("quiet-otter-lamp-5173", "quiet-otter-lamp", 5173)
+	f.SetRoute(rt)
+	clk := newClock()
+	timeout := 300 * time.Millisecond
+	c := routes.NewCache(f, routes.CacheConfig{Now: clk.Now, Timeout: timeout}, nil)
+	l := label(t, "quiet-otter-lamp-5173")
+	if _, err := c.Get(context.Background(), l); err != nil {
+		t.Fatal(err)
+	}
+
+	f.SetLatency(time.Hour)
+	clk.Advance(31 * time.Second)
+	if r, err := c.Get(context.Background(), l); err != nil || r.SandboxID != "sbx_1" {
+		t.Fatalf("first stale get = %+v, %v", r, err)
+	}
+	for i := range 5 {
+		// Past the retry backoff each time: a refresh is due.
+		clk.Advance(2 * time.Second)
+		start := time.Now()
+		r, err := c.Get(context.Background(), l)
+		if err != nil || r.SandboxID != "sbx_1" {
+			t.Fatalf("stale get %d = %+v, %v", i, r, err)
+		}
+		if el := time.Since(start); el > timeout/2 {
+			t.Fatalf("stale get %d waited %s for the hung api", i, el)
+		}
+	}
+	// Let the background refreshes time out before api recovers.
+	time.Sleep(timeout + 100*time.Millisecond)
+
+	// Once api answers, a background refresh stores the fresh route.
+	f.SetLatency(0)
+	rt.SandboxState = "stopped"
+	f.SetRoute(rt)
+	clk.Advance(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		r, err := c.Get(context.Background(), l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.SandboxState == "stopped" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the background refresh never stored the fresh route")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

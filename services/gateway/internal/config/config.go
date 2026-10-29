@@ -275,6 +275,10 @@ func (c Config) ValidateServe() error {
 	if err := checkHTTPURL(c.InternalURL); err != nil {
 		errs = append(errs, fmt.Errorf("%sINTERNAL_URL: %w", envPrefix, err))
 	}
+	// PROXY v2 from anyone would let any client spoof its address.
+	if c.ProxyProtocol && len(c.ProxyProtocolCIDRs) == 0 {
+		errs = append(errs, fmt.Errorf("%sPROXY_PROTOCOL_CIDRS: is required with %sPROXY_PROTOCOL=v2", envPrefix, envPrefix))
+	}
 	switch c.APIURL {
 	case "":
 		errs = append(errs, fmt.Errorf("%sAPI_URL: is required (%q runs without api)", envPrefix, APIURLNone))
