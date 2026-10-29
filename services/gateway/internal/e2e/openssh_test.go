@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -153,7 +154,7 @@ func signUserCert(t *testing.T, ca ssh.Signer, key ssh.PublicKey, keyID string, 
 type realSSHD struct {
 	port    int
 	logPath string
-	stderr  *bytes.Buffer
+	stderr  *testenv.LogBuffer
 }
 
 func (s *realSSHD) log() string {
@@ -162,9 +163,9 @@ func (s *realSSHD) log() string {
 }
 
 // startSSHD starts sshd on 127.0.0.1:<free port>, trusting userCA for
-// certificates whose principal is the login user. It skips the test when
-// sshd cannot run here.
-func startSSHD(t *testing.T, sshdPath string, userCA ssh.PublicKey) *realSSHD {
+// certificates whose principal is the login user. When sshd cannot run
+// here it returns nil and the reason, promptly.
+func startSSHD(t *testing.T, sshdPath string, userCA ssh.PublicKey) (*realSSHD, string) {
 	t.Helper()
 	dir := shortTempDir(t)
 	writeKey(t, filepath.Join(dir, "host"))
@@ -176,7 +177,7 @@ func startSSHD(t *testing.T, sshdPath string, userCA ssh.PublicKey) *realSSHD {
 			break
 		}
 	}
-	s := &realSSHD{port: freePort(t), logPath: filepath.Join(dir, "sshd.log"), stderr: &bytes.Buffer{}}
+	s := &realSSHD{port: freePort(t), logPath: filepath.Join(dir, "sshd.log"), stderr: &testenv.LogBuffer{}}
 	cfg := strings.Join([]string{
 		"ListenAddress 127.0.0.1",
 		"Port " + strconv.Itoa(s.port),
@@ -202,30 +203,34 @@ func startSSHD(t *testing.T, sshdPath string, userCA ssh.PublicKey) *realSSHD {
 	cmd := exec.CommandContext(context.Background(), sshdPath, "-D", "-e", "-f", cfgPath, "-E", s.logPath)
 	cmd.Stdout, cmd.Stderr = s.stderr, s.stderr
 	if err := cmd.Start(); err != nil {
-		t.Skipf("OpenSSH e2e skipped: sshd does not start: %v", err)
+		return nil, fmt.Sprintf("sshd does not start: %v", err)
 	}
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	// exited is closed once sshd ended; waitErr is set before that. Both
+	// the readiness loop and the cleanup may wait for it.
+	var waitErr error
+	exited := make(chan struct{})
+	go func() {
+		waitErr = cmd.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		if err := <-exited; err != nil {
-			t.Logf("sshd: %v", err) // killed
-		}
+		<-exited
 	})
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		c, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", s.addr())
 		if err == nil {
 			_ = c.Close()
-			return s
+			return s, ""
 		}
 		select {
-		case err := <-exited:
-			t.Skipf("OpenSSH e2e skipped: sshd exited (%v): %s %s", err, s.stderr.String(), s.log())
+		case <-exited:
+			return nil, fmt.Sprintf("sshd exited (%v): %s %s", waitErr, s.stderr.String(), s.log())
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Skipf("OpenSSH e2e skipped: sshd does not listen: %s %s", s.stderr.String(), s.log())
+			return nil, fmt.Sprintf("sshd does not listen: %s %s", s.stderr.String(), s.log())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -343,7 +348,10 @@ func newOpenSSHEnv(t *testing.T) *opensshEnv {
 		cfg.RateLimit.SSHConnPerMin = 1000
 		cfg.RateLimit.SSHConnBurst = 1000
 	})
-	sshd := startSSHD(t, sshdPath, c.env.Keys.UserCA.PublicKey())
+	sshd, why := startSSHD(t, sshdPath, c.env.Keys.UserCA.PublicKey())
+	if sshd == nil {
+		t.Skip("OpenSSH e2e skipped: " + why)
+	}
 	e := &opensshEnv{c: c, sshPath: sshPath, sshd: sshd, dir: shortTempDir(t), slug: opensshSlug, loginUser: u.Username}
 
 	// The environment check: sshd lets the current user in with a
@@ -398,7 +406,13 @@ func (e *opensshEnv) preflight(t *testing.T) {
 		"-o", "LogLevel=ERROR", "-i", key, "-p", strconv.Itoa(e.sshd.port),
 		e.loginUser+"@127.0.0.1", "echo preflight")
 	if r.err != nil || strings.TrimSpace(r.stdout) != "preflight" {
-		t.Skipf("OpenSSH e2e skipped: direct login to the local sshd fails (%v): %s\nsshd log:\n%s", r, e.sshd.stderr.String(), e.sshd.log())
+		msg := fmt.Sprintf("direct login to the local sshd fails (%v): %s\nsshd log:\n%s", r, e.sshd.stderr.String(), e.sshd.log())
+		// On CI the environment is set up for this test: a failing
+		// preflight must not turn the coverage into a silent skip.
+		if os.Getenv("CI") != "" {
+			t.Fatal("OpenSSH e2e: " + msg)
+		}
+		t.Skip("OpenSSH e2e skipped: " + msg)
 	}
 }
 
@@ -516,8 +530,13 @@ func TestOpenSSH(t *testing.T) {
 		writeFile(t, batch, fmt.Sprintf("put %s %s/put.bin\nget %s/put.bin %s\nls -1 %s\n", src, remoteDir, remoteDir, got, remoteDir))
 		args := append(e.scpArgs(), "-b", batch, e.target())
 		r := runCmd(t, nil, clientEnv(), sftp, args...)
-		if r.err != nil || !strings.Contains(r.stdout, "put.bin") {
+		if r.err != nil {
 			t.Fatalf("sftp -b: %v", r)
+		}
+		// sftp echoes each batch command; the listing is what follows
+		// the ls command.
+		if ls := sftpOutputOf(r.stdout, "ls"); !slices.ContainsFunc(ls, func(l string) bool { return filepath.Base(l) == "put.bin" }) {
+			t.Fatalf("sftp ls output %q does not list put.bin (stdout %q)", ls, r.stdout)
 		}
 		if sha256File(t, got) != sha256File(t, src) || sha256File(t, filepath.Join(remoteDir, "put.bin")) != sha256File(t, src) {
 			t.Fatal("sftp files differ")
@@ -553,8 +572,8 @@ func TestOpenSSH(t *testing.T) {
 		defer cancel()
 		cmd := exec.CommandContext(ctx, e.sshPath, e.sshArgs(c.A, "-N", "-o", "ExitOnForwardFailure=yes",
 			"-L", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", lport, appPort), e.target())...)
-		var errb bytes.Buffer
-		cmd.Env, cmd.Stderr = clientEnv(), &errb
+		errb := &testenv.LogBuffer{}
+		cmd.Env, cmd.Stderr = clientEnv(), errb
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
@@ -563,6 +582,8 @@ func TestOpenSSH(t *testing.T) {
 			_ = cmd.Wait()
 		}()
 		url := fmt.Sprintf("http://127.0.0.1:%d/", lport)
+		// Each try is bounded, so the loop deadline holds.
+		hc := &http.Client{Timeout: 2 * time.Second}
 		var body string
 		deadline := time.Now().Add(testenv.WaitTimeout)
 		for body != "vm app" {
@@ -570,7 +591,7 @@ func TestOpenSSH(t *testing.T) {
 				t.Fatalf("no answer through -L; ssh stderr %q", errb.String())
 			}
 			time.Sleep(50 * time.Millisecond)
-			resp, err := http.Get(url) //nolint:noctx // bounded by the loop deadline
+			resp, err := hc.Get(url) //nolint:noctx // bounded by the client timeout
 			if err != nil {
 				continue
 			}
@@ -641,9 +662,15 @@ func TestOpenSSH(t *testing.T) {
 	})
 
 	t.Run("sshd log names the user", func(t *testing.T) {
-		if log := e.sshd.log(); !acceptedWith(log, "ID sbx:user:usr_1:") {
-			t.Fatalf("no accepted certificate line with sbx:user: in the sshd log:\n%s", log)
+		// Its own login: one more accepted line with the user's KeyId.
+		const id = "ID sbx:user:usr_1:"
+		before := acceptedCount(e.sshd.log(), id)
+		if r := e.ssh(t, nil, e.target(), "echo logged"); r.err != nil || r.stdout != "logged\n" {
+			t.Fatalf("ssh: %v", r)
 		}
+		eventually(t, "the accepted line of this login", func() bool {
+			return acceptedCount(e.sshd.log(), id) > before
+		})
 	})
 
 	t.Run("-v shows no hostkeys errors", func(t *testing.T) {
@@ -678,11 +705,67 @@ func (e *opensshEnv) scpArgs(extra ...string) []string {
 
 // acceptedWith reports an "Accepted publickey" line of the sshd log that
 // contains s.
-func acceptedWith(log, s string) bool {
+func acceptedWith(log, s string) bool { return acceptedCount(log, s) > 0 }
+
+// acceptedCount counts the "Accepted publickey" lines of the sshd log that
+// contain s.
+func acceptedCount(log, s string) int {
+	n := 0
 	for line := range strings.SplitSeq(log, "\n") {
 		if strings.Contains(line, "Accepted publickey") && strings.Contains(line, s) {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
+}
+
+// sftpOutputOf returns the output lines of the batch command cmd in the
+// stdout of sftp -b: the lines after the echoed "sftp> cmd ..." up to the
+// next echoed command.
+func sftpOutputOf(stdout, cmd string) []string {
+	var out []string
+	in := false
+	for line := range strings.SplitSeq(stdout, "\n") {
+		if rest, ok := strings.CutPrefix(line, "sftp> "); ok {
+			in = rest == cmd || strings.HasPrefix(rest, cmd+" ")
+			continue
+		}
+		if in && strings.TrimSpace(line) != "" {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return out
+}
+
+// An sshd that exits at once (here: false) is reported promptly; the
+// cleanup does not hang on the exit status that the readiness loop
+// already consumed.
+func TestStartSSHDExitsAtOnce(t *testing.T) {
+	t.Parallel()
+	falsePath, err := exec.LookPath("false")
+	if err != nil {
+		t.Skip("false is not on PATH")
+	}
+	ca := newSSHKey(t).PublicKey()
+	done := make(chan string, 1)
+	go func() {
+		// A subtest runs the cleanups of startSSHD before it returns.
+		var why string
+		t.Run("start", func(t *testing.T) {
+			s, reason := startSSHD(t, falsePath, ca)
+			if s != nil {
+				t.Error("startSSHD returned a server for false")
+			}
+			why = reason
+		})
+		done <- why
+	}()
+	select {
+	case why := <-done:
+		if !strings.Contains(why, "sshd exited") {
+			t.Fatalf("reason %q", why)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("startSSHD or its cleanup hung for an sshd that exited")
+	}
 }
