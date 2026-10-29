@@ -42,6 +42,8 @@ type Host struct {
 	Run     lvm.Runner
 	Now     func() time.Time
 	Replace func(path string, edit func([]byte) ([]byte, error)) error
+	// Sleep defaults to time.Sleep.
+	Sleep func(time.Duration)
 }
 
 // Server executes whitelisted operations.

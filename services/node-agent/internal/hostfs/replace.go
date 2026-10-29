@@ -16,6 +16,13 @@ import (
 //
 // Writers replace the file by rename, so a waiter may get the lock on an inode that is no longer
 // at path; it then retries on the current file instead of overwriting a newer version.
+//
+// Proxmox (PVE::Tools::lock_file on the ethers file itself, no separate lock file) has the same
+// stale-inode problem but does not check for it: a Proxmox writer holding the lock on an old inode
+// may rename its version over the file while we hold the lock on the current one. So the inode is
+// checked again right before our rename, and a changed file is edited again. What remains is the
+// gap between that check and the rename; a lost removal of ours shows up in delete verification
+// and is retried, and Proxmox prunes ethers lines of unknown MACs on every VM start.
 func ReplaceLocked(path string, edit func([]byte) ([]byte, error)) error {
 	for {
 		done, err := replaceOnce(path, edit)
@@ -57,6 +64,10 @@ func replaceOnce(path string, edit func([]byte) ([]byte, error)) (bool, error) {
 	_, _ = rand.Read(suffix)
 	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".sbx-"+hex.EncodeToString(suffix))
 	if err := writeSynced(tmp, out); err != nil {
+		_ = os.Remove(tmp)
+		return false, err
+	}
+	if current, err = os.Stat(path); err != nil || !os.SameFile(locked, current) {
 		_ = os.Remove(tmp)
 		return false, err
 	}
