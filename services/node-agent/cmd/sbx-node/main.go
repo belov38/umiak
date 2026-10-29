@@ -59,8 +59,10 @@ func run(cfgPath string) int {
 	if len(raw) > maxRequestBytes {
 		return fail("bad_request", "request too large")
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-	defer stop()
+	// The SSH channel closing (SIGHUP, broken stdout) must not kill lvcreate/lvremove half-way:
+	// finish the operation and let the caller verify the result.
+	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
+	ctx := context.Background()
 	srv := &ops.Server{
 		Cfg:     cfg,
 		LVM:     &lvm.Exec{VG: cfg.VG, Run: lvm.RunCommand},

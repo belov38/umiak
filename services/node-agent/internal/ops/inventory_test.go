@@ -34,10 +34,10 @@ func inventoryFS() fstest.MapFS {
 		"proc/sys/net/ipv6/conf/all/forwarding": {Data: []byte("0\n")},
 		"proc/net/if_inet6":                     {Data: []byte("fe80000000000000a8bbccfffedd0011 0c 40 20 80     sbx0\nfe800000000000003a0525fffe3aa30a 05 40 20 80    vmbr0\n")},
 		"etc/group":                             {Data: []byte("root:x:0:\nadm:x:4:\nsystemd-journal:x:999:alice,bob\n")},
-		"var/log/pve/tasks/A/UPID:pve:old":      {Data: []byte("TOKEN-X"), ModTime: old},
+		"var/log/pve/tasks/A/UPID:pve:old":      {Data: []byte(testSerial), ModTime: old},
 		"var/log/pve/tasks/B/UPID:pve:recent":   {Data: []byte("nothing here"), ModTime: recent},
-		"proc/1234/cmdline":                     {Data: []byte("/usr/bin/kvm\x00-smbios\x00type=1,serial=TOKEN-X\x00")},
-		"proc/99/cmdline":                       {Data: []byte("/usr/sbin/sshd\x00TOKEN-X\x00")},
+		"proc/1234/cmdline":                     {Data: []byte("/usr/bin/kvm\x00-smbios\x00type=1,serial=" + testSerial + "\x00")},
+		"proc/99/cmdline":                       {Data: []byte("/usr/sbin/sshd\x00" + testSerial + "\x00")},
 	}
 }
 
@@ -114,7 +114,7 @@ func TestInventoryLinkLocal(t *testing.T) {
 func TestInventorySearchScopes(t *testing.T) {
 	h := newHarness(inventoryFS())
 	h.run.out["journalctl"] = "unrelated\n"
-	m := resultMap(t, h.call(t, "inventory", map[string]any{"sections": []string{"search"}, "search": "TOKEN-X", "since": 1793290000}))
+	m := resultMap(t, h.call(t, "inventory", map[string]any{"sections": []string{"search"}, "search": testSerial, "since": 1793290000}))
 	s := m["search"].(map[string]any)
 	if s["journal"] != false || s["tasklog"] != false || s["qemuCmdline"] != true {
 		t.Errorf("search = %v (old task log must be ignored, non-kvm cmdline ignored)", s)

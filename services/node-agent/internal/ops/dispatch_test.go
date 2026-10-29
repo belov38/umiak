@@ -220,13 +220,13 @@ func TestDHCPLeasesMissingFileIsEmpty(t *testing.T) {
 
 func TestLogRedactsSearchString(t *testing.T) {
 	h := newHarness(nil)
-	h.run.out["journalctl"] = "line with SECRET-SERIAL inside\n"
-	m := resultMap(t, h.call(t, "inventory", map[string]any{"sections": []string{"search"}, "search": "SECRET-SERIAL", "since": 1793290000}))
+	h.run.out["journalctl"] = "line with " + testSerial + " inside\n"
+	m := resultMap(t, h.call(t, "inventory", map[string]any{"sections": []string{"search"}, "search": testSerial, "since": 1793290000}))
 	if m["search"].(map[string]any)["journal"] != true {
 		t.Errorf("search = %v", m["search"])
 	}
 	for _, l := range h.logs {
-		if strings.Contains(l, "SECRET-SERIAL") {
+		if strings.Contains(l, testSerial) {
 			t.Errorf("log leaks search string: %s", l)
 		}
 	}
@@ -293,5 +293,49 @@ func TestDHCPLeasesIncludesEthers(t *testing.T) {
 	e := m["ethers"].([]any)
 	if len(e) != 2 || e[1].(map[string]any)["mac"] != "02:01:00:00:01:f4" || e[1].(map[string]any)["ip"] != "10.88.0.101" {
 		t.Errorf("ethers = %v", e)
+	}
+}
+
+// Fake serial payload in the S2 shape, not a credential.
+const (
+	testSerial    = "sbx1:11111111-2222-3333-4444-555555555555:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" //nolint:gosec // fake test value
+	testSerialB64 = "c2J4MToxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTU6QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQ=="
+)
+
+func TestSearchAcceptsOnlySerialShapedNeedles(t *testing.T) {
+	h := newHarness(nil)
+	for _, bad := range []string{"password=", "a", "sbx1:short", "sbx1:11111111-2222-3333-4444-555555555555:" + "A"} {
+		r := h.call(t, "inventory", map[string]any{"sections": []string{"search"}, "search": bad})
+		if r.OK || r.Error.Code != "forbidden" {
+			t.Errorf("search %q: got %+v", bad, r)
+		}
+	}
+	for _, ok := range []string{testSerial, testSerialB64} {
+		if r := h.call(t, "inventory", map[string]any{"sections": []string{"search"}, "search": ok}); !r.OK {
+			t.Errorf("search %q refused: %+v", ok, r.Error)
+		}
+	}
+}
+
+func TestSnapshotRefusesUntaggedVMOrigin(t *testing.T) {
+	h := newHarness(nil)
+	h.lvm.lvs = append(h.lvm.lvs, lvm.LV{Name: "vm-501-disk-0", Tags: []string{}})
+	for _, origin := range []string{"vm-501-disk-0", "vm-502-disk-0"} {
+		r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
+			{Origin: origin, Name: "sbx-snap-abc-scsi0", Tags: []string{"sbx", "sbx-snap-abc"}},
+		}})
+		if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
+			t.Errorf("origin %s: got %+v", origin, r)
+		}
+	}
+}
+
+func TestLogRedactsSearchKeyCaseInsensitively(t *testing.T) {
+	h := newHarness(nil)
+	raw, _ := json.Marshal(map[string]any{"op": "inventory", "requestId": "x\ny", "args": map[string]any{"sections": []string{"search"}, "Search": testSerial}})
+	h.srv.Handle(context.Background(), raw)
+	last := h.logs[len(h.logs)-1]
+	if strings.Contains(last, testSerial) || strings.Contains(last, "\n") {
+		t.Errorf("log line leaks or contains a raw newline: %q", last)
 	}
 }

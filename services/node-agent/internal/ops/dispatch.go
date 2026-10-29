@@ -105,10 +105,10 @@ func (s *Server) Handle(ctx context.Context, raw []byte) Response {
 	args := redactArgs(req.Op, req.Args)
 	if err != nil {
 		code := errorCode(err)
-		s.Log(fmt.Sprintf("requestId=%s op=%s args=%s result=error code=%s msg=%q", req.RequestID, req.Op, args, code, err.Error()))
+		s.Log(fmt.Sprintf("requestId=%q op=%q args=%s result=error code=%s msg=%q", req.RequestID, req.Op, args, code, err.Error()))
 		return Response{Error: &Error{Code: code, Message: err.Error()}}
 	}
-	s.Log(fmt.Sprintf("requestId=%s op=%s args=%s result=ok", req.RequestID, req.Op, args))
+	s.Log(fmt.Sprintf("requestId=%q op=%q args=%s result=ok", req.RequestID, req.Op, args))
 	return Response{OK: true, Result: result}
 }
 
@@ -138,8 +138,11 @@ func redactArgs(op string, raw json.RawMessage) string {
 	if json.Unmarshal(raw, &m) != nil {
 		return "<unparsed>"
 	}
-	if _, ok := m["search"]; ok {
-		m["search"] = "<redacted>"
+	// encoding/json matches field names case-insensitively, so redact any spelling of the key.
+	for k := range m {
+		if strings.EqualFold(k, "search") {
+			m[k] = "<redacted>"
+		}
 	}
 	b, _ := json.Marshal(m)
 	return string(b)

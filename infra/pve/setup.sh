@@ -179,9 +179,11 @@ step_sdn() {
 snap_vmbr0() { ip -d -o link show vmbr0 | sed -E 's/ qlen [0-9]+//; s/[a-z_]*timer +[0-9.]+(us)?//g; s/fdb_n_learned [0-9]+//'; ip -o addr show vmbr0; ip route show default; }
 # ifreload during SDN apply resets mcast_hash_max of vmbr0 to the ifupdown2 default; keep the live value.
 hash_max=$(ip -d link show vmbr0 | grep -o 'mcast_hash_max [0-9]*' | cut -d' ' -f2)
-if ifquery --check -a 2>&1 | grep -q '\[fail\]'; then
+# ifquery exits non-zero when it finds a difference, so capture first (pipefail would hide the match).
+check=$(ifquery --check -a 2>&1 || true)
+if grep -q '\[fail\]' <<<"$check"; then
 	echo "sdn: /etc/network/interfaces differs from the running state, refusing to apply" >&2
-	ifquery --check -a 2>&1 | grep '\[fail\]' >&2
+	grep '\[fail\]' <<<"$check" >&2
 	exit 1
 fi
 before=$(snap_vmbr0)
@@ -216,7 +218,8 @@ fi
 pveum acl modify /sdn/zones/sbx --users sbx@pve --roles PVESDNUser
 pveum acl modify /sdn/zones/sbx --tokens 'sbx@pve!poc' --roles PVESDNUser
 ip -br addr show sbx0
-iptables -t nat -S POSTROUTING | grep -q -- '-s 10.88.0.0/24' || { echo "sdn: SNAT rule missing" >&2; exit 1; }
+nat=$(iptables -t nat -S POSTROUTING)
+grep -q -- '-s 10.88.0.0/24' <<<"$nat" || { echo "sdn: SNAT rule missing" >&2; exit 1; }
 systemctl is-active --quiet dnsmasq@sbx || { echo "sdn: dnsmasq@sbx not running" >&2; exit 1; }
 after=$(snap_vmbr0)
 [ "$before" = "$after" ] || { echo "sdn: vmbr0 changed!" >&2; diff <(echo "$before") <(echo "$after") >&2; exit 1; }

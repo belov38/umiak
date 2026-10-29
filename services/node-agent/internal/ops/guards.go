@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -19,6 +20,7 @@ var (
 	snapLVRe   = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})-([a-z0-9]{1,16})$`)
 	vmTagRe    = regexp.MustCompile(`^sbx-(vm|src)-([0-9]+)$`)
 	snapTagRe  = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})$`)
+	serialRe   = regexp.MustCompile(`^sbx1:[0-9a-fA-F-]{36}:[A-Za-z0-9_-]{43}$`)
 	errBadName = errors.New("invalid LV name")
 )
 
@@ -135,4 +137,16 @@ func ValidMAC(cfg config.Config, mac string) (int, error) {
 		return 0, forbidden("MAC %s is not from our allocator", mac)
 	}
 	return vmid, nil
+}
+
+// ValidSearchNeedle allows only an S2 serial payload (raw or base64): the search would otherwise let
+// the restricted key probe the root journal, task logs and QEMU command lines for arbitrary strings.
+func ValidSearchNeedle(needle string) error {
+	if serialRe.MatchString(needle) {
+		return nil
+	}
+	if raw, err := base64.StdEncoding.DecodeString(needle); err == nil && serialRe.Match(raw) {
+		return nil
+	}
+	return forbidden("search string must be an sbx1 serial payload")
 }

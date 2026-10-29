@@ -60,6 +60,9 @@ func (s *Server) inventory(ctx context.Context, raw json.RawMessage) (any, error
 			if args.Search == "" {
 				return nil, badReq("search section needs a search string")
 			}
+			if err := ValidSearchNeedle(args.Search); err != nil {
+				return nil, err
+			}
 			v, err = s.search(ctx, args.Search, args.Since)
 		default:
 			return nil, badReq("unknown section %q", sec)
