@@ -1,4 +1,3 @@
-import { withTx } from "@sbx/db";
 import { requestHash } from "../canonical.ts";
 import { checkQuota } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
@@ -41,6 +40,7 @@ import {
 	readSandboxSecrets,
 	writeSandboxSecrets,
 } from "./secret-patch.ts";
+import { withServiceTx } from "./tx.ts";
 import {
 	checkKnownKeys,
 	checkLabels,
@@ -146,7 +146,7 @@ export async function forkSandbox(
 	const forkOpId = uuidv7();
 	const createOpId = uuidv7();
 
-	return withTx(deps.pool, async (tx) => {
+	return withServiceTx(deps.pool, async (tx) => {
 		if (idemKey !== undefined) {
 			const claim = await claimIdempotencyKey(tx, {
 				principalId: idempotencyPrincipal(p),

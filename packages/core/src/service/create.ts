@@ -1,4 +1,4 @@
-import { type Tx, withTx } from "@sbx/db";
+import type { Tx } from "@sbx/db";
 import { requestHash } from "../canonical.ts";
 import { checkQuota } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
@@ -29,6 +29,7 @@ import {
 	POOL_EXHAUSTED_RETRY_SECONDS,
 } from "./create-placement.ts";
 import { insertSandboxRow } from "./sandbox-row.ts";
+import { withServiceTx } from "./tx.ts";
 
 // Create (S6 §7.3): one transaction writes the idempotency key (first), the
 // sandbox `creating`, its secrets, the machine (claimed `claiming` or new
@@ -72,7 +73,7 @@ export async function createSandbox(
 	const sandboxId = uuidv7();
 	const operationId = uuidv7();
 
-	return withTx(deps.pool, async (tx) => {
+	return withServiceTx(deps.pool, async (tx) => {
 		if (idemKey !== undefined && hash !== null && principalId !== null) {
 			const claim = await claimIdempotencyKey(tx, {
 				principalId,

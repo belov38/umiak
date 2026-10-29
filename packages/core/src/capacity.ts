@@ -94,10 +94,19 @@ export interface AdmitInput {
 
 export type AdmitResult = { ok: true; evicted: string[] } | { ok: false };
 
+const ADMIT_SAVEPOINT = "sbx_admit";
+
 /**
  * Admission (S6 §8.2). Takes the node lock (the caller takes the team lock
  * first, if any). On `ok` the caller must record the reservation in the same
  * transaction: a machine row in `allocating` or a resume/recover operation.
+ *
+ * A refused admission gives its node lock back (it is taken in a savepoint
+ * that is rolled back; nothing was written). So a caller that tries several
+ * candidates (admitCold) holds at most one node lock at a time and two such
+ * callers can never wait on each other's refused nodes (lock order contract:
+ * never two node locks out of order). A lock the transaction already held
+ * before the call stays held.
  *
  * 1. `reserved + need <= cap` -> admitted.
  * 2. With `evict`: warm machines of other pairs on the node, oldest `warm_at`
@@ -107,6 +116,17 @@ export type AdmitResult = { ok: true; evicted: string[] } | { ok: false };
  * 3. Otherwise refused; the caller maps it to `out_of_capacity`.
  */
 export async function admit(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
+	await tx.client.query(`SAVEPOINT ${ADMIT_SAVEPOINT}`);
+	const res = await admitLocked(tx, input);
+	await tx.client.query(
+		res.ok
+			? `RELEASE SAVEPOINT ${ADMIT_SAVEPOINT}`
+			: `ROLLBACK TO SAVEPOINT ${ADMIT_SAVEPOINT}; RELEASE SAVEPOINT ${ADMIT_SAVEPOINT}`,
+	);
+	return res;
+}
+
+async function admitLocked(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
 	const { nodeId, needMb, pairKey, evict, jobs } = input;
 	await lockNode(tx, nodeId);
 	const ram = await nodeRam(tx, nodeId);

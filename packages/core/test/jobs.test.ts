@@ -3,6 +3,7 @@ import {
 	DELETE_RETRY_LIMIT,
 	QUEUE_NAMES,
 	QUEUES,
+	type QueueOptions,
 	RecordingJobSender,
 } from "../src/index.ts";
 
@@ -49,9 +50,19 @@ describe("QUEUES (S6 §15.1)", () => {
 		expect(DELETE_RETRY_LIMIT).toBeGreaterThanOrEqual(1_000_000);
 	});
 
+	it("every queue has a heartbeat and an expiry (a dead pod's job comes back)", () => {
+		for (const name of QUEUE_NAMES) {
+			const q: QueueOptions = QUEUES[name];
+			expect(q.heartbeatSeconds, name).toBe(30);
+			expect(q.expireInSeconds, name).toBeGreaterThan(q.heartbeatSeconds ?? 0);
+		}
+	});
+
 	it("machine-events is stately; controllers are exclusive", () => {
 		expect(QUEUES["machine-events"]).toEqual({
 			policy: "stately",
+			heartbeatSeconds: 30,
+			expireInSeconds: 300,
 			retryLimit: 10,
 			retryBackoff: true,
 		});

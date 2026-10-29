@@ -99,7 +99,12 @@ export async function claimWarm(
 	};
 }
 
-/** Cold admission (S6 §8.2) on placement candidates, evicting other pairs' warm machines. */
+/**
+ * Cold admission (S6 §8.2) on placement candidates, evicting other pairs' warm
+ * machines. Candidates keep the §8.4 order (most free RAM first): `admit`
+ * gives back the node lock of a refused candidate, so this loop holds at most
+ * one node lock at any time and cannot deadlock with another one.
+ */
 export async function admitCold(
 	tx: Tx,
 	deps: SandboxServiceDeps,

@@ -48,10 +48,19 @@ const OPERATION_RETRIES = {
  */
 export const DELETE_RETRY_LIMIT = 1_000_000;
 
-// Controllers: the heartbeat gives the run of a dead pod back after ~30 s;
-// without it the exclusive queue (and its cron) would be blocked until the
-// job expires (15 min).
-const CONTROLLER = { policy: "exclusive", heartbeatSeconds: 30 } as const;
+// Every queue has a heartbeat: pg-boss refreshes it while the handler runs,
+// and the supervisor fails the job of a dead pod (kill -9, lost node) after
+// ~30-60 s, so it is retried. Without it a stately/exclusive/singleton queue
+// is blocked for that key until the job expires (pg-boss default 15 min).
+// `expireInSeconds` is the hard cap of one run of a live worker.
+
+// Controllers: one run at a time per queue (and its cron); a sweep may call
+// Proxmox for many machines, so the cap is the pg-boss default, made explicit.
+const CONTROLLER = {
+	policy: "exclusive",
+	heartbeatSeconds: 30,
+	expireInSeconds: 900,
+} as const;
 
 export const QUEUES = {
 	// Key: sandboxId, data {operationId}.
@@ -72,8 +81,17 @@ export const QUEUES = {
 		...OPERATION_RETRIES,
 		retryLimit: DELETE_RETRY_LIMIT,
 	},
-	// Key: machineId, data {machineId}.
-	"machine-events": { policy: "stately", retryLimit: 10, retryBackoff: true },
+	// Key: machineId, data {machineId}. Stately: one queued and one active job
+	// per machine, so an orphaned active job (dead pod) holds back the
+	// machine's events, and a create's boot wait with them, until the
+	// heartbeat fails it. A run is database work only (a batch of events).
+	"machine-events": {
+		policy: "stately",
+		heartbeatSeconds: 30,
+		expireInSeconds: 300,
+		retryLimit: 10,
+		retryBackoff: true,
+	},
 	"ctl-pool": CONTROLLER,
 	"ctl-health": CONTROLLER,
 	"ctl-autostop": CONTROLLER,

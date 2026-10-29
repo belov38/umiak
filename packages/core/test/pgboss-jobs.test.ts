@@ -65,6 +65,35 @@ describe.skipIf(skipPg())(
 			});
 		});
 
+		it("machine-events: the job of a dead pod is failed by the heartbeat and comes back (M1)", async () => {
+			const machineId = uuidv7();
+			await withTx(t.pool, (tx) =>
+				jobs.send(
+					tx,
+					"machine-events",
+					{ machineId },
+					{ singletonKey: machineId },
+				),
+			);
+			// A pod takes the job and dies (kill -9): no heartbeat, no completion.
+			const [taken] = await boss.fetch("machine-events");
+			expect(taken?.data).toEqual({ machineId });
+			// Stately: until it is no longer active, no other job of this
+			// machine can run. Its heartbeat is now older than 30 s.
+			await t.pool.query(
+				`UPDATE pgboss.job SET heartbeat_on = now() - interval '31 seconds',
+				   started_on = now() - interval '31 seconds'
+				 WHERE id = $1`,
+				[taken?.id],
+			);
+			await boss.supervise("machine-events");
+			const r = await t.pool.query<{ state: string }>(
+				"SELECT state FROM pgboss.job WHERE id = $1",
+				[taken?.id],
+			);
+			expect(r.rows[0]?.state).toBe("retry");
+		});
+
 		it("ensureQueues brings changed queue options back", async () => {
 			await boss.updateQueue("machine-op", { retryLimit: 3 });
 			await ensureQueues(boss);

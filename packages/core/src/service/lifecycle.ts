@@ -45,6 +45,7 @@ import {
 	readSandboxSecrets,
 	writeSandboxSecrets,
 } from "./secret-patch.ts";
+import { withServiceTx } from "./tx.ts";
 import {
 	checkKnownKeys,
 	checkSeconds,
@@ -224,7 +225,7 @@ export async function resumeSandbox(
 	const patch = validateResumeInput(input);
 	const bodyHash = requestHash(RESUME_SCOPE, input).toString("hex");
 
-	return withTx(deps.pool, async (tx) => {
+	return withServiceTx(deps.pool, async (tx) => {
 		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
 		const active = await activeOperation(tx.client, row.id);
 		if (active !== null) {
@@ -387,7 +388,7 @@ export async function recoverSandbox(
 	p: Principal,
 	idOrSlug: string,
 ): Promise<Operation> {
-	return withTx(deps.pool, async (tx) => {
+	return withServiceTx(deps.pool, async (tx) => {
 		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
 		const active = await activeOperation(tx.client, row.id);
 		if (active !== null) {
