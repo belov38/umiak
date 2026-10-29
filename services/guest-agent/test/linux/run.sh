@@ -18,6 +18,11 @@
 # ./path argument selects another package with integration tests, for example
 # `run.sh -run Systemd ./internal/supervisor`. KEEP=1 leaves the container
 # running for debugging; otherwise it is removed on exit.
+#
+# BUILD_ONLY=<dir> builds the packages and the test binary into <dir>/it
+# (pkg/ and integration.test, the layout the tests expect at /it) and exits
+# without Docker; GOARCH_IT=<arch> overrides the target architecture. The pve
+# stand (apps/bench `s3`) uses this to build for the amd64 VM.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,7 +56,7 @@ if [ "$has_timeout" = 0 ]; then
 	args+=(-test.timeout 30m)
 fi
 
-arch="$(cd "$module" && "${GO[@]}" env GOARCH)"
+arch="${GOARCH_IT:-$(cd "$module" && "${GO[@]}" env GOARCH)}"
 image=sbx-guest-systemd:dev
 name="sbx-it-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/sbx-it.XXXXXX")"
@@ -62,7 +67,9 @@ cleanup() {
 		echo "--- sbx-agent journal (last 150 lines) ---" >&2
 		docker exec "$name" journalctl -m -u sbx-agent -u sbx-identity -u sbx-agent-rollback --no-pager -n 150 >&2 || true
 	fi
-	if [ "${KEEP:-0}" = 1 ]; then
+	if [ -n "${BUILD_ONLY:-}" ]; then
+		:
+	elif [ "${KEEP:-0}" = 1 ]; then
 		echo "KEEP=1: container $name left running; remove with: docker rm -f $name" >&2
 	else
 		docker rm -f "$name" >/dev/null 2>&1 || true
@@ -119,6 +126,14 @@ printf '%s\n%s\n%s\n%s\n' "$v1" "$v2" "$v3" "$v4" >"$work/it/pkg/versions"
 log "build the test binary of $pkg"
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "${GO[@]}" test -c -tags integration -trimpath \
 	-o "$work/it/integration.test" "$pkg"
+
+if [ -n "${BUILD_ONLY:-}" ]; then
+	mkdir -p "$BUILD_ONLY"
+	rm -rf "$BUILD_ONLY/it"
+	cp -R "$work/it" "$BUILD_ONLY/it"
+	log "built into $BUILD_ONLY/it"
+	exit 0
+fi
 
 log "build the image and start the container"
 docker build -q -t "$image" "$here" >/dev/null

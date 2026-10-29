@@ -114,8 +114,14 @@ func TestIdentityApply(t *testing.T) {
 
 // assertBindMounts checks that /etc/hostname and /etc/hosts are still the
 // bind mounts run.sh made, so their rewrite took the in-place (EBUSY) path.
+// Outside the container (the pve stand VM: run.sh's /run/sbx-it/hostname is
+// absent) they are plain files and the check is skipped.
 func assertBindMounts(t *testing.T) {
 	t.Helper()
+	if _, err := os.Stat("/run/sbx-it/hostname"); err != nil {
+		t.Log("no run.sh bind mounts (not the container): bind mount check skipped")
+		return
+	}
 	for _, f := range []string{"/etc/hostname", "/etc/hosts"} {
 		if !strings.Contains(sh(t, "findmnt -no TARGET "+f+" || true"), f) {
 			t.Errorf("%s is no longer a bind mount; the in-place path was not exercised", f)
