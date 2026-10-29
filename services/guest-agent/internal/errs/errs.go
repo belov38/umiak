@@ -56,6 +56,9 @@ const (
 	// requests that no specific code describes.
 	InvalidArgument    = "invalid_argument"
 	FailedPrecondition = "failed_precondition"
+	// Unimplemented: the agent build does not wire the feature (for
+	// example quiesce or update before they are installed).
+	Unimplemented = "unimplemented"
 
 	// PermissionDenied and Internal have no entry in the spec list; they keep
 	// the JSON body of /files uniform.
