@@ -40,6 +40,7 @@ import {
 import {
 	FAULT_KINDS,
 	type FaultKind,
+	type FaultResult,
 	type Harness,
 	removeHarnessBuild,
 	startHarness,
@@ -285,13 +286,20 @@ describe.skipIf(skipPg())("e2e: agent-client against the Go tunnel", () => {
 	}, 180_000);
 
 	afterAll(async () => {
-		await client?.close();
-		for (const s of sessions.values()) {
-			s.abort();
+		let code: number | null | undefined;
+		try {
+			await client?.close();
+			for (const s of sessions.values()) {
+				s.abort();
+			}
+			await registry?.close();
+		} finally {
+			try {
+				code = await harness?.stop();
+			} finally {
+				await db?.drop();
+			}
 		}
-		await registry?.close();
-		const code = await harness?.stop();
-		await db?.drop();
 		if (failed || process.env.SBX_E2E_KEEP_LOG === "1") {
 			console.error(`tunnel harness log kept at ${harness?.logPath ?? "-"}`);
 		} else {
@@ -374,6 +382,7 @@ describe.skipIf(skipPg())("e2e: agent-client against the Go tunnel", () => {
 			"restart-agent": 0,
 		};
 		let busy = 0;
+		const results: FaultResult[] = [];
 		// Kinds come from a shuffled bag so every kind is injected; a kind the
 		// harness refused (busy) goes back into the bag.
 		let bag: FaultKind[] = [];
@@ -387,11 +396,13 @@ describe.skipIf(skipPg())("e2e: agent-client against the Go tunnel", () => {
 					bag = shuffle([...FAULT_KINDS]);
 				}
 				const kind = bag.pop() ?? "cut";
-				if ((await h.fault(kind, machine)) === "ok") {
-					injected[kind]++;
-				} else {
+				const r = await h.fault(kind, machine);
+				if (r === "busy") {
 					busy++;
 					bag.unshift(kind);
+				} else {
+					injected[kind]++;
+					results.push(r);
 				}
 			}
 		})();
@@ -433,11 +444,34 @@ describe.skipIf(skipPg())("e2e: agent-client against the Go tunnel", () => {
 		for (const kind of FAULT_KINDS) {
 			expect(injected[kind], kind).toBeGreaterThanOrEqual(1);
 		}
+		// The faults hit the machine's tunnel and forced the readers to resume.
+		for (const r of results) {
+			expect(r.applied, `${r.kind} applied`).toBe(true);
+		}
+		const linkFaults = results.filter(
+			(r) => (r.kind === "cut" || r.kind === "stall") && r.links >= 1,
+		);
+		expect(
+			linkFaults.length,
+			"cut/stall faults that touched a link",
+		).toBeGreaterThanOrEqual(1);
+		for (const [name, r] of [
+			["reader 1", r1],
+			["reader 2", r2],
+		] as const) {
+			expect(r.opens, `${name} opens`).toBeGreaterThan(1);
+			expect(
+				r.retried.errors.length,
+				`${name} retried errors`,
+			).toBeGreaterThanOrEqual(1);
+		}
 		expect(await h.starts(commandId)).toBe(1);
 
-		// A mutating unary call right after a gateway crash: the cached route
-		// is dead, the client retries until the agent is back, and the double
-		// executes the call exactly once.
+		// A mutating unary call right after a gateway crash. The cached route
+		// may be dead (then the client retries until the agent is back), or the
+		// registry may already point at the new gateway. This check proves
+		// single execution after a dead route; it does not prove that a retry
+		// was forced (attempt errors below are logged, not required).
 		await injectEventually(h, "kill-gateway", machine);
 		const requestId = randomUUID();
 		const res = await proc.setLabel(
@@ -474,7 +508,7 @@ async function injectEventually(
 	machine: string,
 ): Promise<void> {
 	const deadline = Date.now() + 10_000;
-	while ((await h.fault(kind, machine)) !== "ok") {
+	while ((await h.fault(kind, machine)) === "busy") {
 		if (Date.now() > deadline) {
 			throw new Error(`fault ${kind} stayed busy for 10 s`);
 		}

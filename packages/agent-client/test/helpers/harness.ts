@@ -7,6 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { finished } from "node:stream/promises";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -33,6 +34,18 @@ export interface HarnessInfo {
 	control: string;
 }
 
+/** What an injected fault touched (POST /fault 200). */
+export interface FaultResult {
+	kind: FaultKind;
+	/** True when the fault hit links, a gateway or the agent. */
+	applied: boolean;
+	/** Machine links cut or stalled, or served by the drained or killed gateway. */
+	links: number;
+	gateway?: string;
+	/** New agent instance id (restart-agent). */
+	agent?: string;
+}
+
 export interface Harness extends HarnessInfo {
 	/** File with the harness stderr (logs). */
 	readonly logPath: string;
@@ -40,7 +53,7 @@ export interface Harness extends HarnessInfo {
 	 * Injects a fault. "busy" means the harness refused it (409): a fault of
 	 * the same kind is still in progress, or the machine has no live link.
 	 */
-	fault(kind: FaultKind, machine: string): Promise<"ok" | "busy">;
+	fault(kind: FaultKind, machine: string): Promise<FaultResult | "busy">;
 	/** How many times the double started the command (all machines). */
 	starts(commandId: string): Promise<number>;
 	/** How many SetLabel calls the double executed for the command. */
@@ -133,9 +146,17 @@ export async function startHarness(opts: HarnessOptions): Promise<Harness> {
 		],
 		{ cwd: tunnelDir(), stdio: ["pipe", "pipe", "pipe"] },
 	);
+	log.on("error", (err) => {
+		console.error(`harness log ${logPath}: ${String(err)}`);
+	});
+	// pipe ends the log once stderr ends.
 	child.stderr.pipe(log);
 	const exited = new Promise<number | null>((resolve) => {
 		child.once("exit", (code) => resolve(code));
+	});
+	// close comes after exit, once the child's stdio streams are closed.
+	const closed = new Promise<void>((resolve) => {
+		child.once("close", () => resolve());
 	});
 
 	let info: HarnessInfo;
@@ -143,7 +164,7 @@ export async function startHarness(opts: HarnessOptions): Promise<Harness> {
 		info = await readInfo(child, exited, opts.readyTimeoutMs ?? 60_000);
 	} catch (err) {
 		child.kill("SIGKILL");
-		await exited;
+		await closed;
 		throw new Error(`${String(err)} (harness log: ${logPath})`);
 	}
 
@@ -156,7 +177,8 @@ export async function startHarness(opts: HarnessOptions): Promise<Harness> {
 			const code = await exited;
 			clearTimeout(timer);
 			clearTimeout(hard);
-			await new Promise((r) => log.end(r));
+			await closed;
+			await finished(log).catch(() => {});
 			return code;
 		})();
 		return stopping;
@@ -173,7 +195,7 @@ export async function startHarness(opts: HarnessOptions): Promise<Harness> {
 			});
 			const body = await res.text();
 			if (res.status === 200) {
-				return "ok";
+				return JSON.parse(body) as FaultResult;
 			}
 			if (res.status === 409) {
 				return "busy";

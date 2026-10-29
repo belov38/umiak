@@ -316,8 +316,23 @@ func (h *harness) end(kind string) {
 	h.mu.Unlock()
 }
 
-// fault injects one fault into machine id and returns a description of it.
-func (h *harness) fault(kind, id string) (map[string]string, error) {
+// faultResult is the answer of POST /fault: what the fault touched.
+type faultResult struct {
+	Kind string `json:"kind"`
+	// Applied is true when the fault hit something: links, a gateway or
+	// the agent. Faults that would hit nothing are refused with 409.
+	Applied bool `json:"applied"`
+	// Links is the number of the machine's memnet links cut or stalled, or
+	// served by the drained or killed gateway.
+	Links int `json:"links"`
+	// Gateway is the gateway of the affected links, or the one drained or killed.
+	Gateway string `json:"gateway,omitempty"`
+	// Agent is the instance id of the new agent client (restart-agent).
+	Agent string `json:"agent,omitempty"`
+}
+
+// fault injects one fault into machine id and returns what it touched.
+func (h *harness) fault(kind, id string) (*faultResult, error) {
 	switch kind {
 	case faultCut, faultStall, faultDrain, faultKillGateway, faultRestartAgent:
 	default:
@@ -330,7 +345,7 @@ func (h *harness) fault(kind, id string) (map[string]string, error) {
 	if !h.begin(kind) {
 		return nil, busy("a %s fault is in progress", kind)
 	}
-	res := map[string]string{"kind": kind}
+	res := &faultResult{Kind: kind, Applied: true}
 	switch kind {
 	case faultCut:
 		defer h.end(kind)
@@ -341,7 +356,8 @@ func (h *harness) fault(kind, id string) (map[string]string, error) {
 		for _, l := range links {
 			l.Cut()
 		}
-		res["gateway"] = links[len(links)-1].Gateway
+		res.Links = len(links)
+		res.Gateway = links[len(links)-1].Gateway
 	case faultStall:
 		l := m.newestLink()
 		if l == nil {
@@ -349,7 +365,8 @@ func (h *harness) fault(kind, id string) (map[string]string, error) {
 			return nil, busy("machine %s has no live link", m.id)
 		}
 		l.Stall(stallFor)
-		res["gateway"] = l.Gateway
+		res.Links = 1
+		res.Gateway = l.Gateway
 		h.bg.Go(func() {
 			defer h.end(kind)
 			select {
@@ -363,7 +380,12 @@ func (h *harness) fault(kind, id string) (map[string]string, error) {
 			h.end(kind)
 			return nil, err
 		}
-		res["gateway"] = owner.name
+		res.Gateway = owner.name
+		for _, l := range h.net.Links(m.id) {
+			if l.Gateway == owner.name {
+				res.Links++
+			}
+		}
 		if kind == faultKillGateway {
 			defer h.end(kind)
 			// A crash: no drain, no registry writes, listener closed.
@@ -394,7 +416,7 @@ func (h *harness) fault(kind, id string) (map[string]string, error) {
 		if err := m.restart(); err != nil {
 			return nil, err
 		}
-		res["agent"] = m.instanceID()
+		res.Agent = m.instanceID()
 	}
 	return res, nil
 }

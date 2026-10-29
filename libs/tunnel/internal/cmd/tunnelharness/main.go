@@ -16,8 +16,10 @@
 // Logs go to stderr. Control endpoints:
 //
 //	POST /fault {"kind":"cut"|"stall"|"drain"|"kill-gateway"|"restart-agent","machine":"<uuid>"}
-//	     200 once injected; 409 while a fault of the same kind is in
-//	     progress or when the machine has no live link.
+//	     200 once injected, with what it touched:
+//	     {"kind","applied":true,"links":N,"gateway":"<id>","agent":"<id>"};
+//	     409 while a fault of the same kind is in progress or when the
+//	     machine has no live link.
 //	GET  /starts?command=<id>  {"starts":N}
 //	GET  /labels?command=<id>  {"calls":N}
 //
