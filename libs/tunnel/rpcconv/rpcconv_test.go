@@ -16,7 +16,10 @@ import (
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
 )
 
-type stubProcess struct{}
+// stubProcess answers the calls the tests make; the others are unimplemented.
+type stubProcess struct {
+	testingv1connect.UnimplementedProcessHandler
+}
 
 func (stubProcess) Start(context.Context, *connect.Request[testingv1.StartRequest]) (*connect.Response[testingv1.StartResponse], error) {
 	return connect.NewResponse(&testingv1.StartResponse{Created: true}), nil

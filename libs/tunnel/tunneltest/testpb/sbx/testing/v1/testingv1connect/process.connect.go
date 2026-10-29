@@ -43,6 +43,10 @@ const (
 	ProcessSetLabelProcedure = "/sbx.testing.v1.Process/SetLabel"
 	// ProcessSignalProcedure is the fully-qualified name of the Process's Signal RPC.
 	ProcessSignalProcedure = "/sbx.testing.v1.Process/Signal"
+	// ProcessEchoProcedure is the fully-qualified name of the Process's Echo RPC.
+	ProcessEchoProcedure = "/sbx.testing.v1.Process/Echo"
+	// ProcessEchoStreamProcedure is the fully-qualified name of the Process's EchoStream RPC.
+	ProcessEchoStreamProcedure = "/sbx.testing.v1.Process/EchoStream"
 )
 
 // ProcessClient is a client for the sbx.testing.v1.Process service.
@@ -60,6 +64,12 @@ type ProcessClient interface {
 	// SetLabel is a mutating unary call that exercises Sbx-Request-Id dedup.
 	SetLabel(context.Context, *connect.Request[v1.SetLabelRequest]) (*connect.Response[v1.SetLabelResponse], error)
 	Signal(context.Context, *connect.Request[v1.SignalRequest]) (*connect.Response[v1.SignalResponse], error)
+	// Echo returns the payload. The tunnel harness serves it on a hostile
+	// machine with the response headers and trailers named by attack.
+	Echo(context.Context, *connect.Request[v1.EchoRequest]) (*connect.Response[v1.EchoResponse], error)
+	// EchoStream sends count messages with their index and the payload; attack
+	// as in Echo.
+	EchoStream(context.Context, *connect.Request[v1.EchoStreamRequest]) (*connect.ServerStreamForClient[v1.EchoStreamResponse], error)
 }
 
 // NewProcessClient constructs a client for the sbx.testing.v1.Process service. By default, it uses
@@ -105,16 +115,32 @@ func NewProcessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 			connect.WithIdempotency(connect.IdempotencyIdempotent),
 			connect.WithClientOptions(opts...),
 		),
+		echo: connect.NewClient[v1.EchoRequest, v1.EchoResponse](
+			httpClient,
+			baseURL+ProcessEchoProcedure,
+			connect.WithSchema(processMethods.ByName("Echo")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		echoStream: connect.NewClient[v1.EchoStreamRequest, v1.EchoStreamResponse](
+			httpClient,
+			baseURL+ProcessEchoStreamProcedure,
+			connect.WithSchema(processMethods.ByName("EchoStream")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // processClient implements ProcessClient.
 type processClient struct {
-	start    *connect.Client[v1.StartRequest, v1.StartResponse]
-	attach   *connect.Client[v1.AttachRequest, v1.AttachResponse]
-	run      *connect.Client[v1.RunRequest, v1.AttachResponse]
-	setLabel *connect.Client[v1.SetLabelRequest, v1.SetLabelResponse]
-	signal   *connect.Client[v1.SignalRequest, v1.SignalResponse]
+	start      *connect.Client[v1.StartRequest, v1.StartResponse]
+	attach     *connect.Client[v1.AttachRequest, v1.AttachResponse]
+	run        *connect.Client[v1.RunRequest, v1.AttachResponse]
+	setLabel   *connect.Client[v1.SetLabelRequest, v1.SetLabelResponse]
+	signal     *connect.Client[v1.SignalRequest, v1.SignalResponse]
+	echo       *connect.Client[v1.EchoRequest, v1.EchoResponse]
+	echoStream *connect.Client[v1.EchoStreamRequest, v1.EchoStreamResponse]
 }
 
 // Start calls sbx.testing.v1.Process.Start.
@@ -142,6 +168,16 @@ func (c *processClient) Signal(ctx context.Context, req *connect.Request[v1.Sign
 	return c.signal.CallUnary(ctx, req)
 }
 
+// Echo calls sbx.testing.v1.Process.Echo.
+func (c *processClient) Echo(ctx context.Context, req *connect.Request[v1.EchoRequest]) (*connect.Response[v1.EchoResponse], error) {
+	return c.echo.CallUnary(ctx, req)
+}
+
+// EchoStream calls sbx.testing.v1.Process.EchoStream.
+func (c *processClient) EchoStream(ctx context.Context, req *connect.Request[v1.EchoStreamRequest]) (*connect.ServerStreamForClient[v1.EchoStreamResponse], error) {
+	return c.echoStream.CallServerStream(ctx, req)
+}
+
 // ProcessHandler is an implementation of the sbx.testing.v1.Process service.
 type ProcessHandler interface {
 	// Start creates a command. Repeating the same command_id returns created=false.
@@ -157,6 +193,12 @@ type ProcessHandler interface {
 	// SetLabel is a mutating unary call that exercises Sbx-Request-Id dedup.
 	SetLabel(context.Context, *connect.Request[v1.SetLabelRequest]) (*connect.Response[v1.SetLabelResponse], error)
 	Signal(context.Context, *connect.Request[v1.SignalRequest]) (*connect.Response[v1.SignalResponse], error)
+	// Echo returns the payload. The tunnel harness serves it on a hostile
+	// machine with the response headers and trailers named by attack.
+	Echo(context.Context, *connect.Request[v1.EchoRequest]) (*connect.Response[v1.EchoResponse], error)
+	// EchoStream sends count messages with their index and the payload; attack
+	// as in Echo.
+	EchoStream(context.Context, *connect.Request[v1.EchoStreamRequest], *connect.ServerStream[v1.EchoStreamResponse]) error
 }
 
 // NewProcessHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -198,6 +240,20 @@ func NewProcessHandler(svc ProcessHandler, opts ...connect.HandlerOption) (strin
 		connect.WithIdempotency(connect.IdempotencyIdempotent),
 		connect.WithHandlerOptions(opts...),
 	)
+	processEchoHandler := connect.NewUnaryHandler(
+		ProcessEchoProcedure,
+		svc.Echo,
+		connect.WithSchema(processMethods.ByName("Echo")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	processEchoStreamHandler := connect.NewServerStreamHandler(
+		ProcessEchoStreamProcedure,
+		svc.EchoStream,
+		connect.WithSchema(processMethods.ByName("EchoStream")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/sbx.testing.v1.Process/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ProcessStartProcedure:
@@ -210,6 +266,10 @@ func NewProcessHandler(svc ProcessHandler, opts ...connect.HandlerOption) (strin
 			processSetLabelHandler.ServeHTTP(w, r)
 		case ProcessSignalProcedure:
 			processSignalHandler.ServeHTTP(w, r)
+		case ProcessEchoProcedure:
+			processEchoHandler.ServeHTTP(w, r)
+		case ProcessEchoStreamProcedure:
+			processEchoStreamHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -237,4 +297,12 @@ func (UnimplementedProcessHandler) SetLabel(context.Context, *connect.Request[v1
 
 func (UnimplementedProcessHandler) Signal(context.Context, *connect.Request[v1.SignalRequest]) (*connect.Response[v1.SignalResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("sbx.testing.v1.Process.Signal is not implemented"))
+}
+
+func (UnimplementedProcessHandler) Echo(context.Context, *connect.Request[v1.EchoRequest]) (*connect.Response[v1.EchoResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("sbx.testing.v1.Process.Echo is not implemented"))
+}
+
+func (UnimplementedProcessHandler) EchoStream(context.Context, *connect.Request[v1.EchoStreamRequest], *connect.ServerStream[v1.EchoStreamResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("sbx.testing.v1.Process.EchoStream is not implemented"))
 }

@@ -26,6 +26,16 @@ service Process {
   rpc Signal(SignalRequest) returns (SignalResponse) {
     option idempotency_level = IDEMPOTENT;
   }
+  // Echo returns the payload. The tunnel harness serves it on a hostile
+  // machine with the response headers and trailers named by attack.
+  rpc Echo(EchoRequest) returns (EchoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // EchoStream sends count messages with their index and the payload; attack
+  // as in Echo.
+  rpc EchoStream(EchoStreamRequest) returns (stream EchoStreamResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // CommandSpec describes the synthetic output of a test command.
@@ -124,3 +134,25 @@ message SignalRequest {
 }
 
 message SignalResponse {}
+
+message EchoRequest {
+  bytes payload = 1;
+  // An attack case of the tunnel harness's hostile machine; ignored elsewhere.
+  string attack = 2;
+}
+
+message EchoResponse {
+  bytes payload = 1;
+}
+
+message EchoStreamRequest {
+  bytes payload = 1;
+  uint32 count = 2;
+  // As in EchoRequest.
+  string attack = 3;
+}
+
+message EchoStreamResponse {
+  uint32 index = 1;
+  bytes payload = 2;
+}

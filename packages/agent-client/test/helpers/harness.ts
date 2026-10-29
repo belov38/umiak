@@ -60,6 +60,10 @@ export interface Harness extends HarnessInfo {
 	invocations(commandId: string): Promise<number>;
 	/** How many SetLabel calls the double executed for the command. */
 	labelCalls(commandId: string): Promise<number>;
+	/** Requests with X-Call-Id: callId that reached the hostile agent. */
+	hostileRequests(callId: string): Promise<number>;
+	/** The attack names the hostile agent knows. */
+	attacks(): Promise<string[]>;
 	/** Closes stdin and waits for the exit; returns the exit code. */
 	stop(): Promise<number | null>;
 }
@@ -70,6 +74,11 @@ export interface HarnessOptions {
 	serviceToken: string;
 	gateways?: number;
 	agents?: number;
+	/**
+	 * Index of the machine whose agent answers Echo, EchoStream and
+	 * /files/hostile/<attack> with the named header attack. Default none.
+	 */
+	hostile?: number;
 	/** How long to wait for the JSON line. Default 60 s. */
 	readyTimeoutMs?: number;
 }
@@ -145,6 +154,8 @@ export async function startHarness(opts: HarnessOptions): Promise<Harness> {
 			String(opts.gateways ?? 2),
 			"-agents",
 			String(opts.agents ?? 1),
+			"-hostile",
+			String(opts.hostile ?? -1),
 		],
 		{ cwd: tunnelDir(), stdio: ["pipe", "pipe", "pipe"] },
 	);
@@ -215,6 +226,26 @@ export async function startHarness(opts: HarnessOptions): Promise<Harness> {
 		},
 		async labelCalls(commandId) {
 			return (await getJson(info.control, "labels", commandId)).calls ?? -1;
+		},
+		async hostileRequests(callId) {
+			const res = await fetch(
+				`${info.control}/hostile?call=${encodeURIComponent(callId)}`,
+			);
+			if (res.status !== 200) {
+				throw new Error(
+					`GET /hostile: HTTP ${res.status}: ${await res.text()}`,
+				);
+			}
+			return ((await res.json()) as { requests?: number }).requests ?? -1;
+		},
+		async attacks() {
+			const res = await fetch(`${info.control}/attacks`);
+			if (res.status !== 200) {
+				throw new Error(
+					`GET /attacks: HTTP ${res.status}: ${await res.text()}`,
+				);
+			}
+			return ((await res.json()) as { attacks: string[] }).attacks;
 		},
 		stop,
 	};

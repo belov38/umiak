@@ -7,7 +7,10 @@
 // test double. Timings are shrunk as in internal/e2e.
 //
 // Flags: -db <dsn> (an existing, empty database; the tunnel migrations are
-// applied to it), -token <service token>, -gateways N, -agents N.
+// applied to it), -token <service token>, -gateways N, -agents N,
+// -hostile I (machine index, 0-based; -1 for none). The hostile machine's
+// agent answers Process.Echo, Process.EchoStream and /files/hostile/{attack}
+// with the response headers and trailers of the named attack (hostile.go).
 //
 // Once ready it prints one JSON line to stdout:
 //
@@ -23,6 +26,8 @@
 //	GET  /starts?command=<id>       {"starts":N}       generators launched
 //	GET  /invocations?command=<id>  {"invocations":N}  Start/Run calls that reached an agent
 //	GET  /labels?command=<id>       {"calls":N}
+//	GET  /hostile?call=<id>         {"requests":N}     requests with X-Call-Id: <id> that reached the hostile agent
+//	GET  /attacks                   {"attacks":["<name>"]}
 //
 // It stops everything and exits 0 on stdin EOF, SIGINT or SIGTERM.
 package main
@@ -53,6 +58,7 @@ func run() int {
 	flag.StringVar(&cfg.token, "token", "", "service token of the internal listeners (required)")
 	flag.IntVar(&cfg.gateways, "gateways", 2, "number of gateways")
 	flag.IntVar(&cfg.agents, "agents", 1, "number of machines, one agent each")
+	flag.IntVar(&cfg.hostile, "hostile", -1, "index of the machine with the hostile agent, -1 for none")
 	flag.Parse()
 
 	level := slog.LevelInfo
@@ -60,8 +66,8 @@ func run() int {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-	if cfg.dsn == "" || cfg.token == "" || cfg.gateways < 1 || cfg.agents < 1 {
-		log.Error("tunnelharness: -db and -token are required, -gateways and -agents must be at least 1")
+	if cfg.dsn == "" || cfg.token == "" || cfg.gateways < 1 || cfg.agents < 1 || cfg.hostile < -1 || cfg.hostile >= cfg.agents {
+		log.Error("tunnelharness: -db and -token are required, -gateways and -agents must be at least 1, -hostile a machine index or -1")
 		return 2
 	}
 
@@ -105,8 +111,8 @@ func run() int {
 }
 
 type config struct {
-	dsn, token       string
-	gateways, agents int
+	dsn, token                string
+	gateways, agents, hostile int
 }
 
 // readyInfo is the JSON line printed once the harness is ready.
@@ -143,6 +149,12 @@ func serveControl(h *harness) (*control, error) {
 	})
 	mux.HandleFunc("GET /labels", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]uint64{"calls": h.labelCalls(r.URL.Query().Get("command"))})
+	})
+	mux.HandleFunc("GET /hostile", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]int{"requests": h.hostile.get(r.URL.Query().Get("call"))})
+	})
+	mux.HandleFunc("GET /attacks", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string][]string{"attacks": attackNames()})
 	})
 	c := &control{
 		url:  "http://" + ln.Addr().String(),

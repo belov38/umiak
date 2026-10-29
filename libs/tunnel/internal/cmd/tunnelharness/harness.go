@@ -75,6 +75,7 @@ type harness struct {
 	net   *memnet.Network
 
 	machines []*machine // fixed after newHarness
+	hostile  *hostileCalls
 
 	mu   sync.Mutex
 	gws  []*gw // live gateways (not drained or killed), oldest first
@@ -93,13 +94,14 @@ func newHarness(ctx context.Context, cfg config, log *slog.Logger) (*harness, er
 		return nil, fmt.Errorf("database: %w", err)
 	}
 	h := &harness{
-		ctx:   ctx,
-		log:   log,
-		token: cfg.token,
-		pool:  pool,
-		store: registry.New(pool),
-		net:   memnet.New(memnet.Options{DeadAfter: deadAfter}),
-		busy:  map[string]bool{},
+		ctx:     ctx,
+		log:     log,
+		token:   cfg.token,
+		pool:    pool,
+		store:   registry.New(pool),
+		net:     memnet.New(memnet.Options{DeadAfter: deadAfter}),
+		busy:    map[string]bool{},
+		hostile: &hostileCalls{n: map[string]int{}},
 	}
 	if err := pgtest.ApplyMigrations(ctx, pool); err != nil {
 		return h, fmt.Errorf("migrations: %w", err)
@@ -109,8 +111,8 @@ func newHarness(ctx context.Context, cfg config, log *slog.Logger) (*harness, er
 			return h, err
 		}
 	}
-	for range cfg.agents {
-		m, err := h.newMachine(ctx)
+	for i := range cfg.agents {
+		m, err := h.newMachine(ctx, i == cfg.hostile)
 		if err != nil {
 			return h, err
 		}
@@ -449,10 +451,11 @@ func (h *harness) replaceOwner(m *machine) (*gw, error) {
 // machine is one VM: credentials, the Process store (it outlives agent
 // clients, like the shim and the disk) and the current agent client.
 type machine struct {
-	h     *harness
-	id    string
-	bs    []byte
-	procs *process.Store
+	h       *harness
+	id      string
+	bs      []byte
+	procs   *process.Store
+	hostile bool // the agent answers with the attacks of hostile.go
 
 	mu  sync.Mutex
 	cur *agentRun
@@ -474,12 +477,12 @@ type staticCreds struct {
 
 func (c staticCreds) Bootstrap(context.Context) (string, []byte, error) { return c.id, c.bs, nil }
 
-func (h *harness) newMachine(ctx context.Context) (*machine, error) {
+func (h *harness) newMachine(ctx context.Context, hostile bool) (*machine, error) {
 	bs := make([]byte, wire.SecretLen)
 	if _, err := rand.Read(bs); err != nil {
 		return nil, err
 	}
-	m := &machine{h: h, id: uuid.NewString(), bs: bs, procs: process.NewStore(process.Options{}), connected: make(chan struct{})}
+	m := &machine{h: h, id: uuid.NewString(), bs: bs, procs: process.NewStore(process.Options{}), hostile: hostile, connected: make(chan struct{})}
 	if err := h.store.PutCredentials(ctx, m.id, wire.HashSecret(bs)); err != nil {
 		return nil, fmt.Errorf("PutCredentials: %w", err)
 	}
@@ -494,6 +497,9 @@ func (h *harness) newMachine(ctx context.Context) (*machine, error) {
 func (m *machine) startLocked() error {
 	mux := http.NewServeMux()
 	mux.Handle(m.procs.Handler())
+	if m.hostile {
+		hostileHandlers(mux, m.h.hostile)
+	}
 	inst := "agent-" + uuid.NewString()
 	c, err := agent.New(agent.Config{
 		Dialer:      m.h.net.Dialer(),

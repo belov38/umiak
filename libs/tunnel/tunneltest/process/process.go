@@ -120,6 +120,21 @@ func (v service) Signal(_ context.Context, req *connect.Request[testingv1.Signal
 	return connect.NewResponse(&testingv1.SignalResponse{}), nil
 }
 
+// Echo returns the payload; attack is ignored (see the tunnel harness).
+func (service) Echo(_ context.Context, req *connect.Request[testingv1.EchoRequest]) (*connect.Response[testingv1.EchoResponse], error) {
+	return connect.NewResponse(&testingv1.EchoResponse{Payload: req.Msg.GetPayload()}), nil
+}
+
+// EchoStream sends count messages with their index and the payload.
+func (service) EchoStream(_ context.Context, req *connect.Request[testingv1.EchoStreamRequest], stream *connect.ServerStream[testingv1.EchoStreamResponse]) error {
+	for i := range req.Msg.GetCount() {
+		if err := stream.Send(&testingv1.EchoStreamResponse{Index: i, Payload: req.Msg.GetPayload()}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // attach streams c from off (spec 9.1): data chunks of at most 64 KiB from
 // each stream in turn, waiting for new output (an offset beyond the end
 // waits too), truncated for output dropped by retention, a heartbeat after

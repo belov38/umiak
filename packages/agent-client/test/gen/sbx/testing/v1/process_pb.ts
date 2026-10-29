@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file sbx/testing/v1/process.proto.
  */
 export const file_sbx_testing_v1_process: GenFile = /*@__PURE__*/
-  fileDesc("ChxzYngvdGVzdGluZy92MS9wcm9jZXNzLnByb3RvEg5zYngudGVzdGluZy52MSJwCgtDb21tYW5kU3BlYxINCgVsaW5lcxgBIAEoDRISCgpsaW5lX2J5dGVzGAIgASgNEisKCGludGVydmFsGAMgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEhEKCWV4aXRfY29kZRgEIAEoBSJNCgxTdGFydFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIpCgRzcGVjGAIgASgLMhsuc2J4LnRlc3RpbmcudjEuQ29tbWFuZFNwZWMiNAoNU3RhcnRSZXNwb25zZRISCgpjb21tYW5kX2lkGAEgASgJEg8KB2NyZWF0ZWQYAiABKAgiSwoKUnVuUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEikKBHNwZWMYAiABKAsyGy5zYngudGVzdGluZy52MS5Db21tYW5kU3BlYyJRCg1BdHRhY2hSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSFQoNc3Rkb3V0X29mZnNldBgCIAEoBBIVCg1zdGRlcnJfb2Zmc2V0GAMgASgEIooCCg5BdHRhY2hSZXNwb25zZRIpCgRkYXRhGAEgASgLMhkuc2J4LnRlc3RpbmcudjEuRGF0YUV2ZW50SAASMwoJaGVhcnRiZWF0GAIgASgLMh4uc2J4LnRlc3RpbmcudjEuSGVhcnRiZWF0RXZlbnRIABIzCgl0cnVuY2F0ZWQYAyABKAsyHi5zYngudGVzdGluZy52MS5UcnVuY2F0ZWRFdmVudEgAEikKBGV4aXQYBCABKAsyGS5zYngudGVzdGluZy52MS5FeGl0RXZlbnRIABIvCgdzdGFydGVkGAUgASgLMhwuc2J4LnRlc3RpbmcudjEuU3RhcnRlZEV2ZW50SABCBwoFZXZlbnQiUQoJRGF0YUV2ZW50EiYKBnN0cmVhbRgBIAEoDjIWLnNieC50ZXN0aW5nLnYxLlN0cmVhbRIOCgZvZmZzZXQYAiABKAQSDAoEZGF0YRgDIAEoDCIQCg5IZWFydGJlYXRFdmVudCJQCg5UcnVuY2F0ZWRFdmVudBImCgZzdHJlYW0YASABKA4yFi5zYngudGVzdGluZy52MS5TdHJlYW0SFgoOYXZhaWxhYmxlX2Zyb20YAiABKAQifQoJRXhpdEV2ZW50EioKBnN0YXR1cxgBIAEoDjIaLnNieC50ZXN0aW5nLnYxLkV4aXRTdGF0dXMSDAoEY29kZRgCIAEoBRIOCgZzaWduYWwYAyABKAkSEgoKc3Rkb3V0X2VuZBgEIAEoBBISCgpzdGRlcnJfZW5kGAUgASgEIiIKDFN0YXJ0ZWRFdmVudBISCgpjb21tYW5kX2lkGAEgASgJIjQKD1NldExhYmVsUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJIiEKEFNldExhYmVsUmVzcG9uc2USDQoFY2FsbHMYASABKAQiMwoNU2lnbmFsUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEg4KBnNpZ25hbBgCIAEoCSIQCg5TaWduYWxSZXNwb25zZSpWCgZTdHJlYW0SFgoSU1RSRUFNX1VOU1BFQ0lGSUVEEAASEQoNU1RSRUFNX1NURE9VVBABEhEKDVNUUkVBTV9TVERFUlIQAhIOCgpTVFJFQU1fUFRZEAMqbwoKRXhpdFN0YXR1cxIbChdFWElUX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKEkVYSVRfU1RBVFVTX0VYSVRFRBABEhYKEkVYSVRfU1RBVFVTX0tJTExFRBACEhQKEEVYSVRfU1RBVFVTX0xPU1QQAzKBAwoHUHJvY2VzcxJECgVTdGFydBIcLnNieC50ZXN0aW5nLnYxLlN0YXJ0UmVxdWVzdBodLnNieC50ZXN0aW5nLnYxLlN0YXJ0UmVzcG9uc2USTgoGQXR0YWNoEh0uc2J4LnRlc3RpbmcudjEuQXR0YWNoUmVxdWVzdBoeLnNieC50ZXN0aW5nLnYxLkF0dGFjaFJlc3BvbnNlIgOQAgEwARJDCgNSdW4SGi5zYngudGVzdGluZy52MS5SdW5SZXF1ZXN0Gh4uc2J4LnRlc3RpbmcudjEuQXR0YWNoUmVzcG9uc2UwARJNCghTZXRMYWJlbBIfLnNieC50ZXN0aW5nLnYxLlNldExhYmVsUmVxdWVzdBogLnNieC50ZXN0aW5nLnYxLlNldExhYmVsUmVzcG9uc2USTAoGU2lnbmFsEh0uc2J4LnRlc3RpbmcudjEuU2lnbmFsUmVxdWVzdBoeLnNieC50ZXN0aW5nLnYxLlNpZ25hbFJlc3BvbnNlIgOQAgJCWlpYZ2l0aHViLmNvbS9iZWxvdjM4L2JvYXQtZGV2LWNsb25lL2xpYnMvdHVubmVsL3R1bm5lbHRlc3QvdGVzdHBiL3NieC90ZXN0aW5nL3YxO3Rlc3Rpbmd2MWIGcHJvdG8z", [file_google_protobuf_duration]);
+  fileDesc("ChxzYngvdGVzdGluZy92MS9wcm9jZXNzLnByb3RvEg5zYngudGVzdGluZy52MSJwCgtDb21tYW5kU3BlYxINCgVsaW5lcxgBIAEoDRISCgpsaW5lX2J5dGVzGAIgASgNEisKCGludGVydmFsGAMgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEhEKCWV4aXRfY29kZRgEIAEoBSJNCgxTdGFydFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIpCgRzcGVjGAIgASgLMhsuc2J4LnRlc3RpbmcudjEuQ29tbWFuZFNwZWMiNAoNU3RhcnRSZXNwb25zZRISCgpjb21tYW5kX2lkGAEgASgJEg8KB2NyZWF0ZWQYAiABKAgiSwoKUnVuUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEikKBHNwZWMYAiABKAsyGy5zYngudGVzdGluZy52MS5Db21tYW5kU3BlYyJRCg1BdHRhY2hSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSFQoNc3Rkb3V0X29mZnNldBgCIAEoBBIVCg1zdGRlcnJfb2Zmc2V0GAMgASgEIooCCg5BdHRhY2hSZXNwb25zZRIpCgRkYXRhGAEgASgLMhkuc2J4LnRlc3RpbmcudjEuRGF0YUV2ZW50SAASMwoJaGVhcnRiZWF0GAIgASgLMh4uc2J4LnRlc3RpbmcudjEuSGVhcnRiZWF0RXZlbnRIABIzCgl0cnVuY2F0ZWQYAyABKAsyHi5zYngudGVzdGluZy52MS5UcnVuY2F0ZWRFdmVudEgAEikKBGV4aXQYBCABKAsyGS5zYngudGVzdGluZy52MS5FeGl0RXZlbnRIABIvCgdzdGFydGVkGAUgASgLMhwuc2J4LnRlc3RpbmcudjEuU3RhcnRlZEV2ZW50SABCBwoFZXZlbnQiUQoJRGF0YUV2ZW50EiYKBnN0cmVhbRgBIAEoDjIWLnNieC50ZXN0aW5nLnYxLlN0cmVhbRIOCgZvZmZzZXQYAiABKAQSDAoEZGF0YRgDIAEoDCIQCg5IZWFydGJlYXRFdmVudCJQCg5UcnVuY2F0ZWRFdmVudBImCgZzdHJlYW0YASABKA4yFi5zYngudGVzdGluZy52MS5TdHJlYW0SFgoOYXZhaWxhYmxlX2Zyb20YAiABKAQifQoJRXhpdEV2ZW50EioKBnN0YXR1cxgBIAEoDjIaLnNieC50ZXN0aW5nLnYxLkV4aXRTdGF0dXMSDAoEY29kZRgCIAEoBRIOCgZzaWduYWwYAyABKAkSEgoKc3Rkb3V0X2VuZBgEIAEoBBISCgpzdGRlcnJfZW5kGAUgASgEIiIKDFN0YXJ0ZWRFdmVudBISCgpjb21tYW5kX2lkGAEgASgJIjQKD1NldExhYmVsUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJIiEKEFNldExhYmVsUmVzcG9uc2USDQoFY2FsbHMYASABKAQiMwoNU2lnbmFsUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEg4KBnNpZ25hbBgCIAEoCSIQCg5TaWduYWxSZXNwb25zZSIuCgtFY2hvUmVxdWVzdBIPCgdwYXlsb2FkGAEgASgMEg4KBmF0dGFjaxgCIAEoCSIfCgxFY2hvUmVzcG9uc2USDwoHcGF5bG9hZBgBIAEoDCJDChFFY2hvU3RyZWFtUmVxdWVzdBIPCgdwYXlsb2FkGAEgASgMEg0KBWNvdW50GAIgASgNEg4KBmF0dGFjaxgDIAEoCSI0ChJFY2hvU3RyZWFtUmVzcG9uc2USDQoFaW5kZXgYASABKA0SDwoHcGF5bG9hZBgCIAEoDCpWCgZTdHJlYW0SFgoSU1RSRUFNX1VOU1BFQ0lGSUVEEAASEQoNU1RSRUFNX1NURE9VVBABEhEKDVNUUkVBTV9TVERFUlIQAhIOCgpTVFJFQU1fUFRZEAMqbwoKRXhpdFN0YXR1cxIbChdFWElUX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKEkVYSVRfU1RBVFVTX0VYSVRFRBABEhYKEkVYSVRfU1RBVFVTX0tJTExFRBACEhQKEEVYSVRfU1RBVFVTX0xPU1QQAzKlBAoHUHJvY2VzcxJECgVTdGFydBIcLnNieC50ZXN0aW5nLnYxLlN0YXJ0UmVxdWVzdBodLnNieC50ZXN0aW5nLnYxLlN0YXJ0UmVzcG9uc2USTgoGQXR0YWNoEh0uc2J4LnRlc3RpbmcudjEuQXR0YWNoUmVxdWVzdBoeLnNieC50ZXN0aW5nLnYxLkF0dGFjaFJlc3BvbnNlIgOQAgEwARJDCgNSdW4SGi5zYngudGVzdGluZy52MS5SdW5SZXF1ZXN0Gh4uc2J4LnRlc3RpbmcudjEuQXR0YWNoUmVzcG9uc2UwARJNCghTZXRMYWJlbBIfLnNieC50ZXN0aW5nLnYxLlNldExhYmVsUmVxdWVzdBogLnNieC50ZXN0aW5nLnYxLlNldExhYmVsUmVzcG9uc2USTAoGU2lnbmFsEh0uc2J4LnRlc3RpbmcudjEuU2lnbmFsUmVxdWVzdBoeLnNieC50ZXN0aW5nLnYxLlNpZ25hbFJlc3BvbnNlIgOQAgISRgoERWNobxIbLnNieC50ZXN0aW5nLnYxLkVjaG9SZXF1ZXN0Ghwuc2J4LnRlc3RpbmcudjEuRWNob1Jlc3BvbnNlIgOQAgESWgoKRWNob1N0cmVhbRIhLnNieC50ZXN0aW5nLnYxLkVjaG9TdHJlYW1SZXF1ZXN0GiIuc2J4LnRlc3RpbmcudjEuRWNob1N0cmVhbVJlc3BvbnNlIgOQAgEwAUJaWlhnaXRodWIuY29tL2JlbG92MzgvYm9hdC1kZXYtY2xvbmUvbGlicy90dW5uZWwvdHVubmVsdGVzdC90ZXN0cGIvc2J4L3Rlc3RpbmcvdjE7dGVzdGluZ3YxYgZwcm90bzM", [file_google_protobuf_duration]);
 
 /**
  * CommandSpec describes the synthetic output of a test command.
@@ -385,6 +385,98 @@ export const SignalResponseSchema: GenMessage<SignalResponse> = /*@__PURE__*/
   messageDesc(file_sbx_testing_v1_process, 14);
 
 /**
+ * @generated from message sbx.testing.v1.EchoRequest
+ */
+export type EchoRequest = Message<"sbx.testing.v1.EchoRequest"> & {
+  /**
+   * @generated from field: bytes payload = 1;
+   */
+  payload: Uint8Array;
+
+  /**
+   * An attack case of the tunnel harness's hostile machine; ignored elsewhere.
+   *
+   * @generated from field: string attack = 2;
+   */
+  attack: string;
+};
+
+/**
+ * Describes the message sbx.testing.v1.EchoRequest.
+ * Use `create(EchoRequestSchema)` to create a new message.
+ */
+export const EchoRequestSchema: GenMessage<EchoRequest> = /*@__PURE__*/
+  messageDesc(file_sbx_testing_v1_process, 15);
+
+/**
+ * @generated from message sbx.testing.v1.EchoResponse
+ */
+export type EchoResponse = Message<"sbx.testing.v1.EchoResponse"> & {
+  /**
+   * @generated from field: bytes payload = 1;
+   */
+  payload: Uint8Array;
+};
+
+/**
+ * Describes the message sbx.testing.v1.EchoResponse.
+ * Use `create(EchoResponseSchema)` to create a new message.
+ */
+export const EchoResponseSchema: GenMessage<EchoResponse> = /*@__PURE__*/
+  messageDesc(file_sbx_testing_v1_process, 16);
+
+/**
+ * @generated from message sbx.testing.v1.EchoStreamRequest
+ */
+export type EchoStreamRequest = Message<"sbx.testing.v1.EchoStreamRequest"> & {
+  /**
+   * @generated from field: bytes payload = 1;
+   */
+  payload: Uint8Array;
+
+  /**
+   * @generated from field: uint32 count = 2;
+   */
+  count: number;
+
+  /**
+   * As in EchoRequest.
+   *
+   * @generated from field: string attack = 3;
+   */
+  attack: string;
+};
+
+/**
+ * Describes the message sbx.testing.v1.EchoStreamRequest.
+ * Use `create(EchoStreamRequestSchema)` to create a new message.
+ */
+export const EchoStreamRequestSchema: GenMessage<EchoStreamRequest> = /*@__PURE__*/
+  messageDesc(file_sbx_testing_v1_process, 17);
+
+/**
+ * @generated from message sbx.testing.v1.EchoStreamResponse
+ */
+export type EchoStreamResponse = Message<"sbx.testing.v1.EchoStreamResponse"> & {
+  /**
+   * @generated from field: uint32 index = 1;
+   */
+  index: number;
+
+  /**
+   * @generated from field: bytes payload = 2;
+   */
+  payload: Uint8Array;
+};
+
+/**
+ * Describes the message sbx.testing.v1.EchoStreamResponse.
+ * Use `create(EchoStreamResponseSchema)` to create a new message.
+ */
+export const EchoStreamResponseSchema: GenMessage<EchoStreamResponse> = /*@__PURE__*/
+  messageDesc(file_sbx_testing_v1_process, 18);
+
+/**
  * @generated from enum sbx.testing.v1.Stream
  */
 export enum Stream {
@@ -504,6 +596,28 @@ export const Process: GenService<{
     methodKind: "unary";
     input: typeof SignalRequestSchema;
     output: typeof SignalResponseSchema;
+  },
+  /**
+   * Echo returns the payload. The tunnel harness serves it on a hostile
+   * machine with the response headers and trailers named by attack.
+   *
+   * @generated from rpc sbx.testing.v1.Process.Echo
+   */
+  echo: {
+    methodKind: "unary";
+    input: typeof EchoRequestSchema;
+    output: typeof EchoResponseSchema;
+  },
+  /**
+   * EchoStream sends count messages with their index and the payload; attack
+   * as in Echo.
+   *
+   * @generated from rpc sbx.testing.v1.Process.EchoStream
+   */
+  echoStream: {
+    methodKind: "server_streaming";
+    input: typeof EchoStreamRequestSchema;
+    output: typeof EchoStreamResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_sbx_testing_v1_process, 0);

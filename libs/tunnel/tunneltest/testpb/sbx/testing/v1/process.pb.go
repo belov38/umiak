@@ -996,6 +996,216 @@ func (*SignalResponse) Descriptor() ([]byte, []int) {
 	return file_sbx_testing_v1_process_proto_rawDescGZIP(), []int{14}
 }
 
+type EchoRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Payload []byte                 `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	// An attack case of the tunnel harness's hostile machine; ignored elsewhere.
+	Attack        string `protobuf:"bytes,2,opt,name=attack,proto3" json:"attack,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EchoRequest) Reset() {
+	*x = EchoRequest{}
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EchoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EchoRequest) ProtoMessage() {}
+
+func (x *EchoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EchoRequest.ProtoReflect.Descriptor instead.
+func (*EchoRequest) Descriptor() ([]byte, []int) {
+	return file_sbx_testing_v1_process_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *EchoRequest) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *EchoRequest) GetAttack() string {
+	if x != nil {
+		return x.Attack
+	}
+	return ""
+}
+
+type EchoResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Payload       []byte                 `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EchoResponse) Reset() {
+	*x = EchoResponse{}
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EchoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EchoResponse) ProtoMessage() {}
+
+func (x *EchoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EchoResponse.ProtoReflect.Descriptor instead.
+func (*EchoResponse) Descriptor() ([]byte, []int) {
+	return file_sbx_testing_v1_process_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *EchoResponse) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+type EchoStreamRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Payload []byte                 `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	Count   uint32                 `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	// As in EchoRequest.
+	Attack        string `protobuf:"bytes,3,opt,name=attack,proto3" json:"attack,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EchoStreamRequest) Reset() {
+	*x = EchoStreamRequest{}
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EchoStreamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EchoStreamRequest) ProtoMessage() {}
+
+func (x *EchoStreamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EchoStreamRequest.ProtoReflect.Descriptor instead.
+func (*EchoStreamRequest) Descriptor() ([]byte, []int) {
+	return file_sbx_testing_v1_process_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *EchoStreamRequest) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *EchoStreamRequest) GetCount() uint32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *EchoStreamRequest) GetAttack() string {
+	if x != nil {
+		return x.Attack
+	}
+	return ""
+}
+
+type EchoStreamResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EchoStreamResponse) Reset() {
+	*x = EchoStreamResponse{}
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EchoStreamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EchoStreamResponse) ProtoMessage() {}
+
+func (x *EchoStreamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sbx_testing_v1_process_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EchoStreamResponse.ProtoReflect.Descriptor instead.
+func (*EchoStreamResponse) Descriptor() ([]byte, []int) {
+	return file_sbx_testing_v1_process_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *EchoStreamResponse) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *EchoStreamResponse) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
 var File_sbx_testing_v1_process_proto protoreflect.FileDescriptor
 
 const file_sbx_testing_v1_process_proto_rawDesc = "" +
@@ -1061,7 +1271,19 @@ const file_sbx_testing_v1_process_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x16\n" +
 	"\x06signal\x18\x02 \x01(\tR\x06signal\"\x10\n" +
-	"\x0eSignalResponse*V\n" +
+	"\x0eSignalResponse\"?\n" +
+	"\vEchoRequest\x12\x18\n" +
+	"\apayload\x18\x01 \x01(\fR\apayload\x12\x16\n" +
+	"\x06attack\x18\x02 \x01(\tR\x06attack\"(\n" +
+	"\fEchoResponse\x12\x18\n" +
+	"\apayload\x18\x01 \x01(\fR\apayload\"[\n" +
+	"\x11EchoStreamRequest\x12\x18\n" +
+	"\apayload\x18\x01 \x01(\fR\apayload\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\rR\x05count\x12\x16\n" +
+	"\x06attack\x18\x03 \x01(\tR\x06attack\"D\n" +
+	"\x12EchoStreamResponse\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12\x18\n" +
+	"\apayload\x18\x02 \x01(\fR\apayload*V\n" +
 	"\x06Stream\x12\x16\n" +
 	"\x12STREAM_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTREAM_STDOUT\x10\x01\x12\x11\n" +
@@ -1073,13 +1295,16 @@ const file_sbx_testing_v1_process_proto_rawDesc = "" +
 	"\x17EXIT_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12EXIT_STATUS_EXITED\x10\x01\x12\x16\n" +
 	"\x12EXIT_STATUS_KILLED\x10\x02\x12\x14\n" +
-	"\x10EXIT_STATUS_LOST\x10\x032\x81\x03\n" +
+	"\x10EXIT_STATUS_LOST\x10\x032\xa5\x04\n" +
 	"\aProcess\x12D\n" +
 	"\x05Start\x12\x1c.sbx.testing.v1.StartRequest\x1a\x1d.sbx.testing.v1.StartResponse\x12N\n" +
 	"\x06Attach\x12\x1d.sbx.testing.v1.AttachRequest\x1a\x1e.sbx.testing.v1.AttachResponse\"\x03\x90\x02\x010\x01\x12C\n" +
 	"\x03Run\x12\x1a.sbx.testing.v1.RunRequest\x1a\x1e.sbx.testing.v1.AttachResponse0\x01\x12M\n" +
 	"\bSetLabel\x12\x1f.sbx.testing.v1.SetLabelRequest\x1a .sbx.testing.v1.SetLabelResponse\x12L\n" +
-	"\x06Signal\x12\x1d.sbx.testing.v1.SignalRequest\x1a\x1e.sbx.testing.v1.SignalResponse\"\x03\x90\x02\x02BZZXgithub.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1;testingv1b\x06proto3"
+	"\x06Signal\x12\x1d.sbx.testing.v1.SignalRequest\x1a\x1e.sbx.testing.v1.SignalResponse\"\x03\x90\x02\x02\x12F\n" +
+	"\x04Echo\x12\x1b.sbx.testing.v1.EchoRequest\x1a\x1c.sbx.testing.v1.EchoResponse\"\x03\x90\x02\x01\x12Z\n" +
+	"\n" +
+	"EchoStream\x12!.sbx.testing.v1.EchoStreamRequest\x1a\".sbx.testing.v1.EchoStreamResponse\"\x03\x90\x02\x010\x01BZZXgithub.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1;testingv1b\x06proto3"
 
 var (
 	file_sbx_testing_v1_process_proto_rawDescOnce sync.Once
@@ -1094,7 +1319,7 @@ func file_sbx_testing_v1_process_proto_rawDescGZIP() []byte {
 }
 
 var file_sbx_testing_v1_process_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_sbx_testing_v1_process_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_sbx_testing_v1_process_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_sbx_testing_v1_process_proto_goTypes = []any{
 	(Stream)(0),                 // 0: sbx.testing.v1.Stream
 	(ExitStatus)(0),             // 1: sbx.testing.v1.ExitStatus
@@ -1113,10 +1338,14 @@ var file_sbx_testing_v1_process_proto_goTypes = []any{
 	(*SetLabelResponse)(nil),    // 14: sbx.testing.v1.SetLabelResponse
 	(*SignalRequest)(nil),       // 15: sbx.testing.v1.SignalRequest
 	(*SignalResponse)(nil),      // 16: sbx.testing.v1.SignalResponse
-	(*durationpb.Duration)(nil), // 17: google.protobuf.Duration
+	(*EchoRequest)(nil),         // 17: sbx.testing.v1.EchoRequest
+	(*EchoResponse)(nil),        // 18: sbx.testing.v1.EchoResponse
+	(*EchoStreamRequest)(nil),   // 19: sbx.testing.v1.EchoStreamRequest
+	(*EchoStreamResponse)(nil),  // 20: sbx.testing.v1.EchoStreamResponse
+	(*durationpb.Duration)(nil), // 21: google.protobuf.Duration
 }
 var file_sbx_testing_v1_process_proto_depIdxs = []int32{
-	17, // 0: sbx.testing.v1.CommandSpec.interval:type_name -> google.protobuf.Duration
+	21, // 0: sbx.testing.v1.CommandSpec.interval:type_name -> google.protobuf.Duration
 	2,  // 1: sbx.testing.v1.StartRequest.spec:type_name -> sbx.testing.v1.CommandSpec
 	2,  // 2: sbx.testing.v1.RunRequest.spec:type_name -> sbx.testing.v1.CommandSpec
 	8,  // 3: sbx.testing.v1.AttachResponse.data:type_name -> sbx.testing.v1.DataEvent
@@ -1132,13 +1361,17 @@ var file_sbx_testing_v1_process_proto_depIdxs = []int32{
 	5,  // 13: sbx.testing.v1.Process.Run:input_type -> sbx.testing.v1.RunRequest
 	13, // 14: sbx.testing.v1.Process.SetLabel:input_type -> sbx.testing.v1.SetLabelRequest
 	15, // 15: sbx.testing.v1.Process.Signal:input_type -> sbx.testing.v1.SignalRequest
-	4,  // 16: sbx.testing.v1.Process.Start:output_type -> sbx.testing.v1.StartResponse
-	7,  // 17: sbx.testing.v1.Process.Attach:output_type -> sbx.testing.v1.AttachResponse
-	7,  // 18: sbx.testing.v1.Process.Run:output_type -> sbx.testing.v1.AttachResponse
-	14, // 19: sbx.testing.v1.Process.SetLabel:output_type -> sbx.testing.v1.SetLabelResponse
-	16, // 20: sbx.testing.v1.Process.Signal:output_type -> sbx.testing.v1.SignalResponse
-	16, // [16:21] is the sub-list for method output_type
-	11, // [11:16] is the sub-list for method input_type
+	17, // 16: sbx.testing.v1.Process.Echo:input_type -> sbx.testing.v1.EchoRequest
+	19, // 17: sbx.testing.v1.Process.EchoStream:input_type -> sbx.testing.v1.EchoStreamRequest
+	4,  // 18: sbx.testing.v1.Process.Start:output_type -> sbx.testing.v1.StartResponse
+	7,  // 19: sbx.testing.v1.Process.Attach:output_type -> sbx.testing.v1.AttachResponse
+	7,  // 20: sbx.testing.v1.Process.Run:output_type -> sbx.testing.v1.AttachResponse
+	14, // 21: sbx.testing.v1.Process.SetLabel:output_type -> sbx.testing.v1.SetLabelResponse
+	16, // 22: sbx.testing.v1.Process.Signal:output_type -> sbx.testing.v1.SignalResponse
+	18, // 23: sbx.testing.v1.Process.Echo:output_type -> sbx.testing.v1.EchoResponse
+	20, // 24: sbx.testing.v1.Process.EchoStream:output_type -> sbx.testing.v1.EchoStreamResponse
+	18, // [18:25] is the sub-list for method output_type
+	11, // [11:18] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
 	11, // [11:11] is the sub-list for extension extendee
 	0,  // [0:11] is the sub-list for field type_name
@@ -1162,7 +1395,7 @@ func file_sbx_testing_v1_process_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sbx_testing_v1_process_proto_rawDesc), len(file_sbx_testing_v1_process_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   15,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
