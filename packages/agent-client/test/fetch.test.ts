@@ -383,6 +383,9 @@ describe("AgentClient.fetch", () => {
 			"/%252e%25zz",
 			"/a%25252f%2525zz",
 			"/%2541%25%25",
+			// Non-UTF-8 bytes next to an encoded separator or dot segment.
+			"/a%25FF%252fb",
+			"/%25FF%25zz",
 			// The URL parser drops tabs: only the final pathname check sees "..".
 			"/.\t./x",
 		]) {
@@ -407,6 +410,11 @@ describe("AgentClient.fetch", () => {
 			"/%25%25%25",
 			"/%25zz",
 			"/%25252",
+			// A later layer with a well-formed escape that is not UTF-8.
+			"/100%25ab.txt",
+			"/x%25FF",
+			"/%25e9",
+			"/%2525FF",
 		]) {
 			it(`allows ${JSON.stringify(path)}`, async () => {
 				registry.set(route(m, a.url));

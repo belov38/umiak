@@ -155,40 +155,96 @@ function isIdentity(encoding: string | null): boolean {
  * Rejects a path with a segment that decodes to "." or ".." or to one
  * holding "/" or "\", at any layer: the first decode (as the gateway and the
  * agent do) and every further one, so a multiply encoded traversal or
- * separator (%252e, %25%32%65, ...) is refused too, like the gateway's
- * /files check. A segment that fails the first decode is malformed, and so
- * is one whose later layer holds an escape sequence (%XX) but fails to
- * decode (%252f%25zz). A layer without an escape sequence ends the check
- * for that segment, so a literal "%" (%25, %25%25) is allowed. The query is
- * not checked.
+ * separator (%252e, %25%32%65, ...) is refused too. A segment that fails the
+ * first decode is malformed. Later layers are decoded to bytes like Go's
+ * url.PathUnescape: an escape need not be UTF-8 (%25FF is a literal "%FF"),
+ * and only a "%" without two hex digits after it, in a layer that holds an
+ * escape sequence, is malformed (%252f%25zz). A layer without an escape
+ * sequence ends the check for that segment, so a literal "%" (%25, %25%25)
+ * is allowed. The query is not checked.
  */
 function checkPathSegments(path: string): void {
 	const q = path.indexOf("?");
 	const p = q >= 0 ? path.slice(0, q) : path;
 	for (const raw of p.split("/")) {
-		let seg: string;
+		let seg: Uint8Array;
 		try {
-			seg = decodeURIComponent(raw);
+			seg = new TextEncoder().encode(decodeURIComponent(raw));
 		} catch {
 			throw new TypeError(`agent fetch path is malformed: ${path}`);
 		}
 		// Every layer is shorter than the one before, so this ends.
 		for (;;) {
-			if (seg === "." || seg === ".." || /[/\\]/.test(seg)) {
+			if (isDotSegment(seg) || seg.includes(0x2f) || seg.includes(0x5c)) {
 				throw new TypeError(
 					`agent fetch path must not hold ".", ".." or separators in a segment: ${path}`,
 				);
 			}
-			if (!/%[0-9A-Fa-f]{2}/.test(seg)) {
+			if (!hasEscape(seg)) {
 				break;
 			}
-			try {
-				seg = decodeURIComponent(seg);
-			} catch {
+			const next = percentDecode(seg);
+			if (next === undefined) {
 				throw new TypeError(`agent fetch path is malformed: ${path}`);
 			}
+			seg = next;
 		}
 	}
+}
+
+function isHex(b: number | undefined): boolean {
+	return (
+		b !== undefined &&
+		((b >= 0x30 && b <= 0x39) ||
+			(b >= 0x41 && b <= 0x46) ||
+			(b >= 0x61 && b <= 0x66))
+	);
+}
+
+function hexValue(b: number): number {
+	return b <= 0x39 ? b - 0x30 : (b | 0x20) - 0x61 + 10;
+}
+
+/** True for "." or "..". */
+function isDotSegment(b: Uint8Array): boolean {
+	return (
+		(b.length === 1 && b[0] === 0x2e) ||
+		(b.length === 2 && b[0] === 0x2e && b[1] === 0x2e)
+	);
+}
+
+/** True when b holds a "%" followed by two hex digits. */
+function hasEscape(b: Uint8Array): boolean {
+	for (let i = 0; i + 2 < b.length; i++) {
+		if (b[i] === 0x25 && isHex(b[i + 1]) && isHex(b[i + 2])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Decodes %XX escapes to bytes, as Go's url.PathUnescape: undefined when a
+ * "%" is not followed by two hex digits.
+ */
+function percentDecode(b: Uint8Array): Uint8Array | undefined {
+	const out = new Uint8Array(b.length);
+	let n = 0;
+	for (let i = 0; i < b.length; i++) {
+		const c = b[i] as number;
+		if (c !== 0x25) {
+			out[n++] = c;
+			continue;
+		}
+		const hi = b[i + 1];
+		const lo = b[i + 2];
+		if (hi === undefined || lo === undefined || !isHex(hi) || !isHex(lo)) {
+			return undefined;
+		}
+		out[n++] = hexValue(hi) * 16 + hexValue(lo);
+		i += 2;
+	}
+	return out.subarray(0, n);
 }
 
 /**
