@@ -8,16 +8,27 @@ import type { VmStatus } from "../ports.ts";
 // is gone becomes `degraded`; the reason comes from the VM status and a QGA
 // ping. A degraded sandbox is never stopped or rebooted here: `agent_unreachable`
 // gets at most one agent service restart through QGA per 10 min (after 2 min
-// degraded); `vm_unresponsive` waits for the user's recover; `vm_stopped` is
-// left to reconcile (§11.3). Recovery to `ok` is the `connected` event
-// (machine-events).
+// degraded; Linux templates only until S9); `vm_unresponsive` waits for the
+// user's recover; `vm_stopped` is left to reconcile (§11.3).
+//
+// Agent gone: the session is disconnected for more than 60 s; or it says
+// connected while its owner gateway's last heartbeat is older than 60 s (the
+// same grace, counted from the heartbeat; S2 calls an instance stale after
+// 15 s); or there is no session for 60 s after ready. A connected session
+// without a gateway_instances row is not a stale-owner signal: S2 deletes an
+// instance only after its sweep moved the sessions to disconnected.
+//
+// Recovery to `ok` is the `connected` event (machine-events) and, as a
+// fallback, this controller: a degraded sandbox whose session is connected
+// through a gateway with a fresh heartbeat (<= 15 s) is `ok` again
+// (`recovered`). That covers a gateway hiccup, where no new `connected` comes.
 //
 // The last restart is the newest `sandbox_events` row of type
 // `agent_restart` (no extra column); it is written before the QGA call, so a
 // crash after the call never repeats it sooner than the interval.
 //
 // Also cheap here: `deleteStuckCount` (§7.9), delete operations active for
-// more than 30 min, exported as the gauge `sbx_delete_stuck_operations`.
+// more than 30 min, exported as the gauge `sbx_delete_stuck`.
 
 /** Agent absence before `degraded` (§11.1). */
 export const HEALTH_DISCONNECT_GRACE_S = 60;
@@ -44,6 +55,8 @@ export type HealthReason =
 export interface HealthResult {
 	/** Sandboxes that became degraded in this run. */
 	degraded: string[];
+	/** Degraded sandboxes this run found connected again. */
+	recovered: string[];
 	/** Sandboxes whose agent service was restarted in this run. */
 	restarted: string[];
 	deleteStuckCount: number;
@@ -54,12 +67,14 @@ interface DegradedRow {
 	machine_id: string;
 	node_id: string;
 	vmid: number | null;
+	os: string;
 	health_reason: string | null;
 	degraded_long: boolean;
 	restart_due: boolean;
 }
 
 export async function runHealth(ctx: WorkerCtx): Promise<HealthResult> {
+	const recovered = await markRecovered(ctx);
 	const degraded = await markDegraded(ctx);
 	const restarted: string[] = [];
 	for (const row of await degradedSandboxes(ctx)) {
@@ -73,35 +88,78 @@ export async function runHealth(ctx: WorkerCtx): Promise<HealthResult> {
 		}
 	}
 	const deleteStuckCount = await countStuckDeletes(ctx);
-	ctx.metrics.set("sbx_delete_stuck_operations", deleteStuckCount);
+	ctx.metrics.set("sbx_delete_stuck", deleteStuckCount);
 	if (deleteStuckCount > 0) {
 		ctx.log.error({ count: deleteStuckCount }, "delete operations stuck");
 	}
-	return { degraded, restarted, deleteStuckCount };
+	return { degraded, recovered, restarted, deleteStuckCount };
 }
 
 /**
- * The §11.1 condition for a `ready`, `ok` sandbox (alias `s`, session `ts`,
- * gateway instance `gi`): the session is disconnected for longer than the
- * grace; or it says connected while its owner gateway is stale or gone; or
- * there is no session at all for longer than the grace after ready.
+ * The §11.1 condition (alias `s`, session `ts`, gateway instance `gi`): the
+ * session is disconnected for longer than the grace; or it says connected
+ * while its owner gateway's last heartbeat is older than the grace; or there
+ * is no session at all for longer than the grace after ready.
  */
 const AGENT_GONE = `(
 	(ts.state = 'disconnected'
 	  AND ts.disconnected_at < now() - make_interval(secs => ${HEALTH_DISCONNECT_GRACE_S}))
 	OR (ts.state = 'connected'
-	  AND (gi.id IS NULL
-	       OR gi.heartbeat_at < now() - make_interval(secs => ${GATEWAY_HEARTBEAT_STALE_S})))
+	  AND gi.heartbeat_at < now() - make_interval(secs => ${HEALTH_DISCONNECT_GRACE_S}))
 	OR (ts.machine_id IS NULL
 	  AND COALESCE(s.ready_at, s.state_changed_at)
 	      < now() - make_interval(secs => ${HEALTH_DISCONNECT_GRACE_S}))
 )`;
 
-const CANDIDATES_FROM = `
+/** Connected through a live gateway (fresh heartbeat, or no instance row). */
+const AGENT_BACK = `(
+	ts.state = 'connected'
+	AND (gi.id IS NULL
+	     OR gi.heartbeat_at >= now() - make_interval(secs => ${GATEWAY_HEARTBEAT_STALE_S}))
+)`;
+
+const JOINS = `
 	FROM runtime.sandboxes s
 	LEFT JOIN tunnel.tunnel_sessions ts ON ts.machine_id = s.machine_id
 	LEFT JOIN tunnel.gateway_instances gi ON gi.id = ts.instance_id
-	WHERE s.state = 'ready' AND s.health = 'ok' AND s.machine_id IS NOT NULL`;
+	WHERE s.state = 'ready' AND s.machine_id IS NOT NULL`;
+
+const CANDIDATES_FROM = `${JOINS} AND s.health = 'ok'`;
+const DEGRADED_FROM = `${JOINS} AND s.health = 'degraded'`;
+
+/** Degraded sandboxes whose agent is back: `ok` + `recovered` (as `connected` does). */
+async function markRecovered(ctx: WorkerCtx): Promise<string[]> {
+	const r = await ctx.pool.query<{ id: string }>(
+		`SELECT s.id ${DEGRADED_FROM} AND ${AGENT_BACK} ORDER BY s.id LIMIT 500`,
+	);
+	const out: string[] = [];
+	for (const { id } of r.rows) {
+		const done = await withTx(ctx.pool, async (tx) => {
+			if ((await lockSandboxRow(tx, id)) === null) return false;
+			const u = await tx.client.query<{ machine_id: string }>(
+				`UPDATE runtime.sandboxes AS s0
+				 SET health = 'ok', health_reason = NULL, degraded_since = NULL,
+				     version = s0.version + 1
+				 WHERE s0.id = $1 AND EXISTS (
+				   SELECT 1 ${DEGRADED_FROM} AND s.id = s0.id AND ${AGENT_BACK})
+				 RETURNING machine_id`,
+				[id],
+			);
+			if (u.rowCount !== 1) return false;
+			await insertSandboxEvent(tx, {
+				sandboxId: id,
+				type: "recovered",
+				data: { machineId: u.rows[0]?.machine_id, by: "health" },
+			});
+			return true;
+		});
+		if (done) {
+			out.push(id);
+			ctx.log.info({ sandboxId: id }, "sandbox recovered: agent connected");
+		}
+	}
+	return out;
+}
 
 async function markDegraded(ctx: WorkerCtx): Promise<string[]> {
 	const r = await ctx.pool.query<{ id: string }>(
@@ -135,7 +193,7 @@ async function markDegraded(ctx: WorkerCtx): Promise<string[]> {
 
 async function degradedSandboxes(ctx: WorkerCtx): Promise<DegradedRow[]> {
 	const r = await ctx.pool.query<DegradedRow>(
-		`SELECT s.id, s.machine_id, m.node_id, m.vmid, s.health_reason,
+		`SELECT s.id, s.machine_id, m.node_id, m.vmid, tb.os, s.health_reason,
 		        s.degraded_since <= now() - make_interval(secs => $1) AS degraded_long,
 		        NOT EXISTS (
 		          SELECT 1 FROM runtime.sandbox_events e
@@ -144,6 +202,7 @@ async function degradedSandboxes(ctx: WorkerCtx): Promise<DegradedRow[]> {
 		        ) AS restart_due
 		 FROM runtime.sandboxes s
 		 JOIN runtime.machines m ON m.id = s.machine_id
+		 JOIN runtime.template_builds tb ON tb.id = m.template_build_id
 		 WHERE s.state = 'ready' AND s.health = 'degraded'
 		 ORDER BY s.id LIMIT 500`,
 		[AGENT_RESTART_AFTER_S, AGENT_RESTART_INTERVAL_S],
@@ -168,6 +227,8 @@ async function probe(ctx: WorkerCtx, row: DegradedRow): Promise<boolean> {
 	if (!(await setReason(ctx, row, reason))) return false;
 	if (reason !== "agent_unreachable" || !row.degraded_long || !row.restart_due)
 		return false;
+	// The restart argv is a Linux unit; Windows (S9) has no equivalent yet.
+	if (row.os !== "linux") return false;
 
 	const claimed = await withTx(ctx.pool, async (tx) => {
 		if ((await lockSandboxRow(tx, row.id)) === null) return false;

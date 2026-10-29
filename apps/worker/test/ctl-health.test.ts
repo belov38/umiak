@@ -170,17 +170,78 @@ describe("ctl-health (§11.1)", () => {
 		expect(restarts(w)).toEqual([]);
 	});
 
-	it("connected session whose owner gateway heartbeat is stale (> 15 s): degraded", async () => {
+	it("connected through a stale gateway: degraded only 60 s after its last heartbeat", async () => {
 		const w = await createWorld(db);
-		const fresh = await linkedSandbox(w);
-		await setGateway(w, "gw-fresh", 2);
-		await setSession(w, fresh.machineId, { instanceId: "gw-fresh" });
-		const stale = await linkedSandbox(w);
-		await setGateway(w, "gw-stale", 20);
-		await setSession(w, stale.machineId, { instanceId: "gw-stale" });
+		const mk = async (gw: string, agoS: number) => {
+			const l = await linkedSandbox(w);
+			await setGateway(w, gw, agoS);
+			await setSession(w, l.machineId, { instanceId: gw });
+			return l;
+		};
+		const fresh = await mk("gw-fresh", 2);
+		const hiccup = await mk("gw-hiccup", 20);
+		const dead = await mk("gw-dead", 61);
+		// No instance row: not a stale-owner signal (S2 removes an instance only
+		// after its sweep moved the sessions to disconnected).
+		const u = await linkedSandbox(w);
+		await setSession(w, u.machineId, { instanceId: "gw-no-row" });
 		const res = await runHealth(w.ctx);
-		expect(res.degraded).toContain(stale.sandboxId);
-		expect(res.degraded).not.toContain(fresh.sandboxId);
+		expect(res.degraded).toContain(dead.sandboxId);
+		for (const l of [fresh, hiccup, u]) {
+			expect(res.degraded).not.toContain(l.sandboxId);
+		}
+	});
+
+	it("a degraded sandbox whose session is connected through a live gateway recovers in health", async () => {
+		const w = await createWorld(db);
+		const l = await linkedSandbox(w);
+		await setGateway(w, "gw-r", 61);
+		await setSession(w, l.machineId, { instanceId: "gw-r" });
+		expect((await runHealth(w.ctx)).degraded).toContain(l.sandboxId);
+		expect((await health(w, l.sandboxId)).health).toBe("degraded");
+
+		// Still stale: stays degraded.
+		await setGateway(w, "gw-r", 30);
+		expect((await runHealth(w.ctx)).recovered).not.toContain(l.sandboxId);
+		expect((await health(w, l.sandboxId)).health).toBe("degraded");
+
+		// The gateway is back (heartbeat fresh), no `connected` event needed.
+		await setGateway(w, "gw-r", 1);
+		const res = await runHealth(w.ctx);
+		expect(res.recovered).toContain(l.sandboxId);
+		expect(await health(w, l.sandboxId)).toEqual({
+			health: "ok",
+			reason: null,
+			degraded: false,
+		});
+		expect((await eventTypes(w, l.sandboxId)).map((e) => e.type)).toEqual([
+			"degraded",
+			"recovered",
+		]);
+		expect(w.infra.callsOf("qgaExec")).toEqual([]);
+	});
+
+	it("no agent restart for a non-Linux template", async () => {
+		const w = await createWorld(db);
+		const r = await live(w);
+		await w.pool.query(
+			"UPDATE runtime.template_builds SET os = 'windows' WHERE id = $1",
+			[w.topo.templateBuildId],
+		);
+		await setSession(w, r.machineId, {
+			state: "disconnected",
+			disconnectedAgoS: 90,
+		});
+		await runHealth(w.ctx);
+		await setRow(
+			w,
+			"sandboxes",
+			r.sandboxId,
+			"degraded_since = now() - interval '10 minutes'",
+		);
+		await runHealth(w.ctx);
+		expect((await health(w, r.sandboxId)).reason).toBe("agent_unreachable");
+		expect(restarts(w)).toEqual([]);
 	});
 
 	it("no session at all: degraded only 60 s after ready", async () => {
@@ -232,9 +293,7 @@ describe("ctl-health (§11.1)", () => {
 		const res = await runHealth(w.ctx);
 		expect(res.deleteStuckCount).toBe(base + 1);
 		expect(
-			w.metrics.calls
-				.filter((c) => c.name === "sbx_delete_stuck_operations")
-				.at(-1),
+			w.metrics.calls.filter((c) => c.name === "sbx_delete_stuck").at(-1),
 		).toMatchObject({ kind: "set", value: base + 1 });
 	});
 });

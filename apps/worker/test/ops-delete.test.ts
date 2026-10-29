@@ -265,7 +265,7 @@ describe("delete", () => {
 				},
 			},
 		]);
-		expect(w.metrics.count("sbx_delete_stuck")).toBe(1);
+		expect(w.metrics.count("sbx_delete_dead_letter_total")).toBe(1);
 		expect((await row(w, "operations", op.id)).state).toBe("pending");
 		expect(await run(w, op.id)).toBe("succeeded");
 		await expectAllGone(w, sandboxId);

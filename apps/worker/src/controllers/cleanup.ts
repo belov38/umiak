@@ -6,6 +6,9 @@ import { lockSandboxRow } from "../db.ts";
 // Controller `cleanup` (S6 §15.4, every 10 min). Each part is idempotent and
 // works in bounded batches; what is left goes to the next run.
 //
+// Every part runs in its own try/catch (log + `sbx_cleanup_failed_total{part}`),
+// so one failure does not skip the others.
+//
 // Retention: idempotency keys past `expires_at`; processed agent and synthetic
 // events older than 7 days; commands older than 90 days; sandbox_events older
 // than 90 days; `deleted` sandbox tombstones older than 30 days, with the rows
@@ -38,6 +41,19 @@ const TOMBSTONE_BATCH = 100;
 const REENCRYPT_BATCH = 100;
 const REENCRYPT_MAX_BATCHES = 10;
 
+export const CLEANUP_PARTS = [
+	"idempotency_keys",
+	"agent_events",
+	"synthetic_events",
+	"commands",
+	"sandbox_events",
+	"tombstones",
+	"fork_sources",
+	"retention",
+	"reencrypt",
+] as const;
+export type CleanupPart = (typeof CLEANUP_PARTS)[number];
+
 export interface CleanupResult {
 	idempotencyKeys: number;
 	agentEvents: number;
@@ -50,76 +66,118 @@ export interface CleanupResult {
 	retentionDeletes: string[];
 	reencrypted: number;
 	reencryptFailed: number;
+	/** Parts that threw in this run (logged, `sbx_cleanup_failed_total{part}`). */
+	failed: CleanupPart[];
 }
 
+/** Each part runs on its own: a failure is logged and counted, the rest goes on. */
 export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 	const res: CleanupResult = {
-		idempotencyKeys: await deleteBatched(
+		idempotencyKeys: 0,
+		agentEvents: 0,
+		syntheticEvents: 0,
+		commands: 0,
+		sandboxEvents: 0,
+		tombstones: 0,
+		forkSources: [],
+		errorDeletes: [],
+		retentionDeletes: [],
+		reencrypted: 0,
+		reencryptFailed: 0,
+		failed: [],
+	};
+	const part = async (name: CleanupPart, fn: () => Promise<void>) => {
+		try {
+			await fn();
+		} catch (err) {
+			res.failed.push(name);
+			ctx.metrics.inc("sbx_cleanup_failed_total", { part: name });
+			ctx.log.error(
+				{ part: name, err: err instanceof Error ? err.message : String(err) },
+				"cleanup part failed",
+			);
+		}
+	};
+
+	await part("idempotency_keys", async () => {
+		res.idempotencyKeys = await deleteBatched(
 			ctx,
 			`DELETE FROM runtime.idempotency_keys WHERE ctid IN (
 			   SELECT ctid FROM runtime.idempotency_keys WHERE expires_at < now() LIMIT ${BATCH})`,
-		),
-		agentEvents: await deleteBatched(
+		);
+	});
+	await part("agent_events", async () => {
+		res.agentEvents = await deleteBatched(
 			ctx,
 			`DELETE FROM runtime.agent_events WHERE ctid IN (
 			   SELECT ctid FROM runtime.agent_events
 			   WHERE processed_at IS NOT NULL
 			     AND received_at < now() - make_interval(days => ${AGENT_EVENTS_RETENTION_DAYS})
 			   LIMIT ${BATCH})`,
-		),
-		syntheticEvents: await deleteBatched(
+		);
+	});
+	await part("synthetic_events", async () => {
+		res.syntheticEvents = await deleteBatched(
 			ctx,
 			`DELETE FROM runtime.agent_synthetic_events WHERE ctid IN (
 			   SELECT ctid FROM runtime.agent_synthetic_events
 			   WHERE processed_at IS NOT NULL
 			     AND received_at < now() - make_interval(days => ${AGENT_EVENTS_RETENTION_DAYS})
 			   LIMIT ${BATCH})`,
-		),
-		commands: await deleteBatched(
+		);
+	});
+	await part("commands", async () => {
+		res.commands = await deleteBatched(
 			ctx,
 			`DELETE FROM runtime.commands WHERE id IN (
 			   SELECT id FROM runtime.commands
 			   WHERE created_at < now() - make_interval(days => ${COMMANDS_RETENTION_DAYS})
 			   LIMIT ${BATCH})`,
-		),
-		sandboxEvents: await deleteBatched(
+		);
+	});
+	await part("sandbox_events", async () => {
+		res.sandboxEvents = await deleteBatched(
 			ctx,
 			`DELETE FROM runtime.sandbox_events WHERE id IN (
 			   SELECT id FROM runtime.sandbox_events
 			   WHERE created_at < now() - make_interval(days => ${SANDBOX_EVENTS_RETENTION_DAYS})
 			   LIMIT ${BATCH})`,
-		),
-		tombstones: await purgeTombstones(ctx),
-		forkSources: await retireForkSourceLeftovers(ctx),
-		errorDeletes: [],
-		retentionDeletes: [],
-		reencrypted: 0,
-		reencryptFailed: 0,
-	};
-	const d = await ctx.config.defaults();
-	res.errorDeletes = await systemDeletes(
-		ctx,
-		`s.state = 'error'
-		 AND s.state_changed_at < now() - make_interval(days => $1)
-		 AND NOT EXISTS (SELECT 1 FROM runtime.machines m
-		                 WHERE m.sandbox_id = s.id AND m.state <> 'deleted')
-		 AND NOT EXISTS (SELECT 1 FROM runtime.disks dk JOIN runtime.machines m ON m.id = dk.machine_id
-		                 WHERE m.sandbox_id = s.id AND dk.state <> 'deleted')`,
-		d.errorRetentionDays,
-		"error_retention",
-	);
-	if (d.stoppedRetentionDays !== null) {
-		res.retentionDeletes = await systemDeletes(
-			ctx,
-			`s.state = 'stopped'
-			 AND COALESCE(s.stopped_at, s.state_changed_at) < now() - make_interval(days => $1)`,
-			d.stoppedRetentionDays,
-			"retention",
 		);
-	}
-	const enc = await reencryptSecrets(ctx);
-	res.reencrypted = enc.done;
-	res.reencryptFailed = enc.failed;
+	});
+	await part("tombstones", async () => {
+		res.tombstones = await purgeTombstones(ctx);
+	});
+	await part("fork_sources", async () => {
+		res.forkSources = await retireForkSourceLeftovers(ctx);
+	});
+	await part("retention", async () => {
+		const d = await ctx.config.defaults();
+		res.errorDeletes = await systemDeletes(
+			ctx,
+			`s.state = 'error'
+			 AND s.state_changed_at < now() - make_interval(days => $1)
+			 AND NOT EXISTS (SELECT 1 FROM runtime.machines m
+			                 WHERE m.sandbox_id = s.id AND m.state <> 'deleted')
+			 AND NOT EXISTS (SELECT 1 FROM runtime.disks dk JOIN runtime.machines m ON m.id = dk.machine_id
+			                 WHERE m.sandbox_id = s.id AND dk.state <> 'deleted')`,
+			d.errorRetentionDays,
+			"error_retention",
+		);
+		if (d.stoppedRetentionDays !== null) {
+			res.retentionDeletes = await systemDeletes(
+				ctx,
+				`s.state = 'stopped'
+				 AND COALESCE(s.stopped_at, s.state_changed_at) < now() - make_interval(days => $1)`,
+				d.stoppedRetentionDays,
+				"retention",
+			);
+		}
+	});
+	await part("reencrypt", async () => {
+		const enc = await reencryptSecrets(ctx);
+		res.reencrypted = enc.done;
+		res.reencryptFailed = enc.failed;
+	});
 	ctx.log.info({ ...res }, "cleanup done");
 	return res;
 }

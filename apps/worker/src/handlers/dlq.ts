@@ -9,9 +9,10 @@ import { Fenced, FencedOut, type OperationError } from "../steps.ts";
 import { SANDBOX_OPS, type SandboxOpData } from "./sandbox-op.ts";
 
 // sandbox-op-dlq (decision 8, S6 §15.1): a job whose retries ran out. Delete
-// never gives up: it is enqueued again after 60 s and raises the
-// `sbx_delete_stuck` alarm. Any other operation is compensated and fails with
-// `retries_exhausted`.
+// never gives up: it is enqueued again after 60 s and counted in
+// `sbx_delete_dead_letter_total` (the `sbx_delete_stuck` gauge of deletes
+// active > 30 min is the health controller's, §7.9). Any other operation is
+// compensated and fails with `retries_exhausted`.
 
 export const DELETE_REQUEUE_AFTER_S = 60;
 
@@ -42,7 +43,9 @@ export async function handleSandboxOpDeadLetter(
 			{ operationId: op.id, sandboxId: op.sandboxId, step: op.step },
 			"delete exhausted its retries; enqueued again",
 		);
-		ctx.metrics.inc("sbx_delete_stuck", { step: op.step ?? "none" });
+		ctx.metrics.inc("sbx_delete_dead_letter_total", {
+			step: op.step ?? "none",
+		});
 		return "requeued";
 	}
 

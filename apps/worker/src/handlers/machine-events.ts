@@ -51,6 +51,7 @@ interface AgentRow {
 	boot_id: string;
 	type: string;
 	time: Date;
+	received_at: Date;
 	payload: unknown;
 }
 
@@ -115,7 +116,7 @@ async function processBatch(
 		[machineId],
 	);
 	const agent = await tx.client.query<AgentRow>(
-		`SELECT seq, boot_id, type, time, payload FROM runtime.agent_events
+		`SELECT seq, boot_id, type, time, received_at, payload FROM runtime.agent_events
 		 WHERE machine_id = $1 AND processed_at IS NULL
 		 ORDER BY seq
 		 LIMIT ${BATCH}
@@ -133,6 +134,7 @@ async function processBatch(
 			const ev = normalizeAgentEvent({ type: row.type, payload: row.payload });
 			if (ev === null) continue;
 			if (LATEST_WINS.has(ev.kind) && (await superseded(tx, machineId, row))) {
+				await onSuperseded(scope, ev, row);
 				continue;
 			}
 			const handler = AGENT[ev.kind] as
@@ -179,6 +181,68 @@ async function superseded(
 		[machineId, row.type, row.seq],
 	);
 	return (r.rowCount ?? 0) > 0;
+}
+
+/**
+ * A state-like event that arrived after a newer one of its type. The state
+ * stays as it is, except for facts the newer event does not carry:
+ * - `pool_ready` of the current boot still records `ready_boot_id` (and the
+ *   pool machine's `warm`): the boot gate waits for it (decision 4);
+ * - a non-zero `activity` older than the newest one means the counters were
+ *   not zero all along: the zero mark moves to the first later zero event
+ *   (§12, order independence).
+ */
+async function onSuperseded(
+	s: EventScope,
+	ev: AgentEvent,
+	row: AgentRow,
+): Promise<void> {
+	if (ev.kind === "phase" && ev.phase === "pool_ready") {
+		if (
+			row.boot_id !== s.machine.ready_boot_id &&
+			(await sessionBoot(s)) === row.boot_id
+		) {
+			await setPoolReady(s, row.boot_id, { phase: false });
+		}
+		return;
+	}
+	if (ev.kind === "activity" && !isZero(ev)) await lateBusy(s, row);
+}
+
+function isZero(e: Extract<AgentEvent, { kind: "activity" }>): boolean {
+	return e.runningCommands === 0 && e.openPtys === 0 && e.tcpStreams === 0;
+}
+
+/**
+ * Invariant: `activity_zero_since` is the receive time of the first zero
+ * event after the last non-zero one among the processed events. A late
+ * non-zero event at seq S changes it only when every processed activity
+ * event after S is zero; then the mark is the first of those.
+ */
+async function lateBusy(s: EventScope, row: AgentRow): Promise<void> {
+	const sb = await currentSandbox(s);
+	if (sb === null) return;
+	const later = await s.tx.client.query<AgentRow>(
+		`SELECT seq, boot_id, type, time, received_at, payload FROM runtime.agent_events
+		 WHERE machine_id = $1 AND type = $2 AND seq > $3 AND processed_at IS NOT NULL
+		 ORDER BY seq`,
+		[s.machine.id, row.type, row.seq],
+	);
+	let first: Date | null = null;
+	for (const r of later.rows) {
+		const e = normalizeAgentEvent({ type: r.type, payload: r.payload });
+		if (e?.kind !== "activity") continue;
+		// A later non-zero event already reset the mark; this one changes nothing.
+		if (!isZero(e)) return;
+		first ??= r.received_at;
+	}
+	if (first === null) return;
+	await s.tx.client.query(
+		`UPDATE runtime.sandboxes
+		 SET activity_zero_since = GREATEST(activity_zero_since, $2::timestamptz)
+		 WHERE id = $1 AND activity_zero_since IS NOT NULL`,
+		[sb.id, first],
+	);
 }
 
 /** The machine's sandbox, when this machine is its current machine. */
@@ -253,20 +317,35 @@ async function onPhase(
 		}
 		return;
 	}
+	await setPoolReady(s, row.boot_id, { phase: true });
+}
+
+/**
+ * Records the boot of `pool_ready` in `ready_boot_id` (decision 4) and moves
+ * a pool machine that waits in `booting` to `warm`; with `phase`, also sets
+ * `agent_phase`.
+ */
+async function setPoolReady(
+	s: EventScope,
+	bootId: string,
+	o: { phase: boolean },
+): Promise<void> {
+	const m = s.machine;
 	const toWarm =
 		m.state === "booting" && m.pool_key !== null && m.sandbox_id === null;
 	await s.tx.client.query(
 		`UPDATE runtime.machines
-		 SET ready_boot_id = $2, agent_phase = 'pool_ready',
+		 SET ready_boot_id = $2,
+		     agent_phase = CASE WHEN $4 THEN 'pool_ready' ELSE agent_phase END,
 		     state = CASE WHEN $3 THEN 'warm' ELSE state END,
 		     warm_at = CASE WHEN $3 THEN now() ELSE warm_at END,
 		     state_changed_at = CASE WHEN $3 THEN now() ELSE state_changed_at END,
 		     version = version + 1
 		 WHERE id = $1`,
-		[m.id, row.boot_id, toWarm],
+		[m.id, bootId, toWarm, o.phase],
 	);
-	m.ready_boot_id = row.boot_id;
-	m.agent_phase = "pool_ready";
+	m.ready_boot_id = bootId;
+	if (o.phase) m.agent_phase = "pool_ready";
 	if (toWarm) m.state = "warm";
 }
 
@@ -469,9 +548,12 @@ async function onPtyClosed(
 }
 
 /**
- * §10.2 / §12 `activity`: counters, `busy | idle`, `last_activity_at` (the
- * event time, not later than now) and `activity_zero_since` (when the
- * counters became all zero; null while any is non-zero).
+ * §10.2 / §12 `activity`: counters, `busy | idle`, `last_activity_at` and
+ * `activity_zero_since` (when the counters became all zero; null while any is
+ * non-zero). Freshness uses LEAST(event time, received_at): a guest clock
+ * ahead cannot make an old event look fresh. The zero mark uses received_at,
+ * never earlier than the event itself, so a guest clock behind cannot bring
+ * an idle-stop forward either.
  */
 async function onActivity(
 	s: EventScope,
@@ -485,16 +567,22 @@ async function onActivity(
 		openPtys: e.openPtys,
 		tcpStreams: e.tcpStreams,
 	};
-	const idle =
-		e.runningCommands === 0 && e.openPtys === 0 && e.tcpStreams === 0;
+	const idle = isZero(e);
 	await s.tx.client.query(
 		`UPDATE runtime.sandboxes
 		 SET activity_counters = $2, activity = $3,
-		     last_activity_at = LEAST($4::timestamptz, now()),
-		     activity_zero_since = CASE WHEN $5
-		       THEN COALESCE(activity_zero_since, LEAST($4::timestamptz, now())) ELSE NULL END
+		     last_activity_at = LEAST($4::timestamptz, $5::timestamptz),
+		     activity_zero_since = CASE WHEN $6
+		       THEN COALESCE(activity_zero_since, $5::timestamptz) ELSE NULL END
 		 WHERE id = $1`,
-		[sb.id, JSON.stringify(counters), idle ? "idle" : "busy", row.time, idle],
+		[
+			sb.id,
+			JSON.stringify(counters),
+			idle ? "idle" : "busy",
+			row.time,
+			row.received_at,
+			idle,
+		],
 	);
 }
 

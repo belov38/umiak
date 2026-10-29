@@ -188,30 +188,27 @@ describe("machine-events (§10.2)", () => {
 		const w = await createWorld(db);
 		const t0 = Date.now() - 30_000;
 		const at = (s: number) => new Date(t0 + s * 1000);
+		const zero = { runningCommands: 0, openPtys: 0, tcpStreams: 0 };
+		// zero, busy, zero: the sandbox is idle only since the second zero.
 		const script = (bootId: string, cmd: string) => [
-			ev(
-				1,
-				bootId,
-				"activity",
-				{ runningCommands: 1, openPtys: 0, tcpStreams: 2 },
-				at(1),
-			),
+			ev(1, bootId, "activity", zero, at(1)),
 			ev(
 				2,
 				bootId,
-				"command.exited",
-				{ commandId: cmd, status: "exited", code: 3, stdoutEnd: "10" },
+				"activity",
+				{ runningCommands: 1, openPtys: 0, tcpStreams: 2 },
 				at(2),
 			),
 			ev(
 				3,
 				bootId,
-				"activity",
-				{ runningCommands: 0, openPtys: 0, tcpStreams: 0 },
+				"command.exited",
+				{ commandId: cmd, status: "exited", code: 3, stdoutEnd: "10" },
 				at(3),
 			),
-			ev(4, bootId, "ports.changed", { listening: [{ port: 3000 }] }, at(4)),
-			ev(5, bootId, "phase", { phase: "ready" }, at(5)),
+			ev(4, bootId, "activity", zero, at(4)),
+			ev(5, bootId, "ports.changed", { listening: [{ port: 3000 }] }, at(5)),
+			ev(6, bootId, "phase", { phase: "ready" }, at(6)),
 		];
 		const state = async (l: Linked, cmd: string) => {
 			const s = await sandbox(w, l.sandboxId);
@@ -220,52 +217,74 @@ describe("machine-events (§10.2)", () => {
 				"SELECT status, exit_code, stdout_bytes FROM runtime.commands WHERE id = $1",
 				[cmd],
 			);
+			// The zero mark is the receive time of seq 4 (never earlier than the event).
+			const r4 = await w.pool.query(
+				"SELECT received_at FROM runtime.agent_events WHERE machine_id = $1 AND seq = 4",
+				[l.machineId],
+			);
 			return {
 				activity: s.activity,
 				counters: s.activity_counters,
 				lastActivityAt: (s.last_activity_at as Date).toISOString(),
-				zeroSince:
-					(s.activity_zero_since as Date | null)?.toISOString() ?? null,
+				zeroSinceIsSeq4:
+					(s.activity_zero_since as Date | null)?.toISOString() ===
+					(r4.rows[0].received_at as Date).toISOString(),
 				ports: s.listening_ports,
 				phase: m.agent_phase,
 				command: c.rows[0],
 			};
 		};
+		const replay = async (orders: number[][]) => {
+			const l = await linkedSandbox(w);
+			const boot = await setSession(w, l.machineId);
+			const cmd = await insertCommand(w, l, { bootId: boot });
+			const all = script(boot, cmd);
+			for (const seqs of orders) {
+				await agentEvents(
+					w,
+					l.machineId,
+					all.filter((e) => seqs.includes(e.seq)),
+				);
+				// Distinct receive times per batch.
+				await new Promise((r) => setTimeout(r, 5));
+			}
+			return state(l, cmd);
+		};
 
-		// In order, one batch.
-		const a = await linkedSandbox(w);
-		const bootA = await setSession(w, a.machineId);
-		const cmdA = await insertCommand(w, a, { bootId: bootA });
-		await agentEvents(w, a.machineId, script(bootA, cmdA));
-
-		// Newest first, then the older ones, then everything again.
-		const b = await linkedSandbox(w);
-		const bootB = await setSession(w, b.machineId);
-		const cmdB = await insertCommand(w, b, { bootId: bootB });
-		const sb = script(bootB, cmdB);
-		await agentEvents(
-			w,
-			b.machineId,
-			[sb[4], sb[3], sb[2]].filter((x) => x !== undefined),
-		);
-		await agentEvents(
-			w,
-			b.machineId,
-			[sb[0], sb[1]].filter((x) => x !== undefined),
-		);
-		await agentEvents(w, b.machineId, sb);
-
-		const sa = await state(a, cmdA);
-		expect(sa).toEqual({
+		const inOrder = await replay([[1, 2, 3, 4, 5, 6]]);
+		expect(inOrder).toEqual({
 			activity: "idle",
-			counters: { runningCommands: 0, openPtys: 0, tcpStreams: 0 },
-			lastActivityAt: at(3).toISOString(),
-			zeroSince: at(3).toISOString(),
+			counters: zero,
+			lastActivityAt: at(4).toISOString(),
+			zeroSinceIsSeq4: true,
 			ports: [{ port: 3000 }],
 			phase: "ready",
 			command: { status: "exited", exit_code: 3, stdout_bytes: "10" },
 		});
-		expect(await state(b, cmdB)).toEqual(sa);
+		// The busy event arrives after both zeros.
+		expect(await replay([[1], [4, 5, 6], [2, 3], [1, 2, 3, 4, 5, 6]])).toEqual(
+			inOrder,
+		);
+		// Newest first, then the older ones, then everything again.
+		expect(await replay([[4, 5, 6], [2, 3], [1], [1, 2, 3, 4, 5, 6]])).toEqual(
+			inOrder,
+		);
+		expect(await replay([[2], [1], [4], [3, 5, 6]])).toEqual(inOrder);
+	});
+
+	it("pool_ready of the current boot counts even after a later phase was processed", async () => {
+		const w = await createWorld(db);
+		const id = await insertMachine(w, { state: "booting" });
+		const bootId = await setSession(w, id);
+		await agentEvents(w, id, [phase(2, bootId, "ready")]);
+		await agentEvents(w, id, [phase(1, bootId, "pool_ready")]);
+		const m = await machine(w, id);
+		expect(m.ready_boot_id).toBe(bootId);
+		expect(m.state).toBe("warm");
+		expect(m.agent_phase).toBe("ready");
+		// A late pool_ready of an older boot does not move ready_boot_id.
+		await agentEvents(w, id, [phase(0, randomUUID(), "pool_ready")]);
+		expect((await machine(w, id)).ready_boot_id).toBe(bootId);
 	});
 
 	it("activity: non-zero counters make the sandbox busy and clear the zero mark", async () => {

@@ -105,6 +105,68 @@ describe("ctl-cleanup (§15.4)", () => {
 		]);
 	});
 
+	it("a failing part is logged and counted; the other parts still run", async () => {
+		const w = await createWorld(db);
+		const principal = randomUUID();
+		await w.pool.query(
+			`INSERT INTO runtime.idempotency_keys (principal_id, key, scope, request_hash, expires_at)
+			 VALUES ($1, 'old', 's', '\\x00', now() - interval '1 second')`,
+			[principal],
+		);
+		const bare = await insertSandbox(w, { state: "error" });
+		await setRow(
+			w,
+			"sandboxes",
+			bare,
+			"state_changed_at = now() - interval '8 days'",
+		);
+		const cfg = w.ctx.config;
+		w.ctx.config = new Proxy(cfg, {
+			get(t, p) {
+				if (p === "defaults") {
+					return async () => {
+						throw new Error("config down");
+					};
+				}
+				const v = Reflect.get(t, p);
+				return typeof v === "function" ? v.bind(t) : v;
+			},
+		});
+		// The fork_source part fails too: its query sees a broken job sender.
+		const consumer = await insertSandbox(w, { state: "error" });
+		const fs = await insertSnapshot(w, { state: "ready", kind: "fork_source" });
+		await w.pool.query(
+			"UPDATE runtime.snapshots SET consumer_sandbox_id = $2 WHERE id = $1",
+			[fs.snapshotId, consumer],
+		);
+		const send = w.jobs.send.bind(w.jobs);
+		w.jobs.send = async (tx, queue, data, opts) => {
+			if (queue === "snapshot-op") throw new Error("boss down");
+			return send(tx, queue, data, opts);
+		};
+
+		const res = await runCleanup(w.ctx);
+
+		expect(res.idempotencyKeys).toBeGreaterThanOrEqual(1);
+		expect(res.errorDeletes).toEqual([]);
+		expect(res.failed).toEqual(
+			expect.arrayContaining(["retention", "fork_sources"]),
+		);
+		expect((await row(w, "snapshots", fs.snapshotId)).state).toBe("ready");
+		expect(
+			w.metrics.calls
+				.filter((c) => c.name === "sbx_cleanup_failed_total")
+				.map((c) => c.labels.part),
+		).toEqual(expect.arrayContaining(["retention", "fork_sources"]));
+		expect(
+			await count(w, "runtime.idempotency_keys WHERE principal_id = $1", [
+				principal,
+			]),
+		).toBe(0);
+		w.ctx.config = cfg;
+		w.jobs.send = send;
+	});
+
 	it("tombstones older than 30 days go with their machines, disks, operations and events", async () => {
 		const w = await createWorld(db);
 		const mk = async (daysAgo: number) => {
