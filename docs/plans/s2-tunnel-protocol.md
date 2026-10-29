@@ -21,6 +21,7 @@
 - HTTP/2: std `net/http` (spec §18 allows it; `x/net/http2` v0.62.0 is deprecated in favour of std). Server: `Protocols` = UnencryptedHTTP2 only, `HTTP2Config{MaxConcurrentStreams: 1000, MaxReceiveBufferPerStream: 1<<20, MaxReceiveBufferPerConnection: 16<<20, MaxReadFrameSize: 16<<10}`. Client (gateway): same receive buffers and frame size, `SendPingTimeout: 10s`, `PingTimeout: 5s`.
 - Wire names (§4.1): path `/v1/connect`, subprotocol `sbx-tunnel.v1`, headers `Authorization` (`Bearer <MT>` / `Sbx-Bootstrap <BS>`), `Sbx-Machine-Id`, `Sbx-Boot-Id`, `Sbx-Agent-Instance-Id`, `Sbx-Vmgenid`, `Sbx-Agent-Version`; response `Sbx-Gateway-Instance`, `Sbx-Conn-Epoch`, plus `Sbx-Conn-Id` (additive, for agent logs). Secrets on the wire: base64url without padding of the 32 raw bytes; DB stores SHA-256 of the raw bytes.
 - Timings (§6, §7) are defaults in config structs so tests can shrink them: WS ping 5 s / dead 15 s; h2 ping idle 10 s / timeout 5 s; TCP keepalive 15 s; `TCP_USER_TIMEOUT` 20 s (Linux); backoff first 0–250 ms, then 500 ms ×2 to 10 s full jitter, reset after 30 s stable; reject delays 401-BS 60 s, 403 5 min, 426 5 min, 503 `Retry-After` + jitter; heartbeat 5 s, stale 15 s, sweep 5 s; endpoint wait 5 s, `spreadMs` 5000, `tcpDeadline` 2 min, agent closes old conn at `tcpDeadline + 10 s`; event batch 500 / 1 s; MT max age 24 h.
+- Cross-scope requirements from the master (S3, S4, S6 specs, 2026-10-29): agent `Config.Dial` hook for CONNECT (S3); peer CONNECT by `:authority = <machineId>:<port>` and `MaxConcurrentStreams` 10000 on the internal listener (S4); `gateway_instances.drain_started_at` and `NOTIFY gateway_instances` (S4); per-machine TCP stream limit 800, configurable, on the owner pod (S4); TCP drain deadlines configurable per stream (S4: SSH 15 min, other TCP 2 min, `terminationGracePeriodSeconds` 960); migrations as plain ordered SQL in `db/migrations/NNNN_<name>.sql`, range 0100–0199 for the `tunnel` schema, runner owned by S6 (`packages/db`), our tests apply the files directly (S6).
 - Postgres in tests: env `SBX_TEST_DATABASE_URL` if set, otherwise the helper starts `postgres:18.6-alpine` in Docker. No silent skips: missing Docker and no URL is a test failure unless `SBX_TEST_SKIP_PG=1`.
 
 ## Review Focus
@@ -37,7 +38,7 @@
 - `MachineConn.Ping` is a `Control/Info` round trip: std `http.ClientConn` has no PING API. h2 PING liveness itself runs inside std via `SendPingTimeout`/`PingTimeout`.
 - Prometheus metrics (§13) are left to the S4 and S3 binaries; the library logs every connection change with `connId`, `epoch` and reason via `slog`.
 - Additive wire fields: response header `Sbx-Conn-Id`; `ErrorDetail.instance_url`; `421`/`503` from the internal listener carry `Sbx-Error-Code` and `Sbx-Instance-Url` headers so Connect clients can read them from error metadata.
-- `/v1/machines/{id}/tcp/{port}` is served as HTTP/1.1 `CONNECT <path>` with hijack (HTTP/2 CONNECT has no path without extended CONNECT); `DialRemoteTCP` is the Go client for it.
+- Peer TCP between gateway pods (§8.4 `/v1/machines/{id}/tcp/{port}`) is a plain HTTP/2 `CONNECT` with `:authority = <machineId>:<port>` on the internal listener (agreed with S4: plain CONNECT has no `:path`; no extended CONNECT). `DialRemoteTCP` is the Go client for it.
 - buf lint `SERVICE_SUFFIX` is disabled to keep the spec's service names (`Control`, `Events`, `Process`).
 
 ---
@@ -60,7 +61,7 @@ libs/tunnel/
   h2/            HTTP/2 server and client-conn construction with spec parameters, conn listener
   wstransport/   WebSocket dialer (agent) and handler (gateway), socket options
   agent/         agent-side tunnel client
-  registry/      Postgres store, migrations, LISTEN, sweep
+  registry/      Postgres store, LISTEN, sweep (SQL lives in db/migrations, 0100-0199)
   gateway/       admission, sessions, fencing, drain, internal handler, proxy, events, remote TCP
   tunneltest/memnet/   in-memory transport with fault injection
   tunneltest/process/  Process double (commandId/offset/exit contract)
@@ -69,6 +70,7 @@ libs/tunnel/
   internal/pgtest/     Postgres test helper
   internal/e2e/        multi-gateway scenario tests
   internal/cmd/tunnelharness/  process used by TS e2e tests
+db/migrations/0100_tunnel_init.sql   tunnel schema (runner: S6 packages/db)
 packages/proto/         @sbx/proto: generated TS for sbx.tunnel.v1
 packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testing.v1
 ```
@@ -246,6 +248,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
       Info func(ctx context.Context) *tunnelv1.InfoResponse // nil → defaults
       Journal EventJournal          // nil → empty journal
       DialPolicy DialPolicy         // nil → LocalOnly()
+      Dial func(ctx context.Context, host string, port int) (net.Conn, error) // CONNECT target dial after the policy check (S3 tries 127.0.0.1, [::1], interface addrs); nil → net.Dialer{Timeout: 10s} to host:port
       Backoff Backoff; RejectDelays RejectDelays
       DrainJitter time.Duration     // 250ms
       DrainCloseExtra time.Duration // 10s
@@ -264,7 +267,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   - `Info` default: `{agent_version: Identity.Version, os: runtime.GOOS, arch: runtime.GOARCH, proto_packages: ["sbx.tunnel.v1"]}`; a provided `Info` result gets `sbx.tunnel.v1` appended to `proto_packages` if missing.
   - `Drain`: replies immediately; if received on the current conn and no replacement is in progress, after `rand[0, DrainJitter]` dials a replacement while the old conn keeps serving (rejections retried with backoff); when the replacement is up, the old conn is closed after `tcp_deadline + DrainCloseExtra` (spec default `tcp_deadline` 2 min if zero).
   - `Subscribe`: `after = req.after_seq` if set else `Journal.AckedSeq()`; loop `Read` → `Send` one `SubscribeResponse` per event; `Ack` → `Journal.Ack`.
-  - CONNECT: parse `r.Host` (`host:port`), policy, dial with 10 s timeout (failure → 502), `200` + flush, copy both ways; request body EOF → `CloseWrite` on the target; target EOF → return.
+  - CONNECT: parse `r.Host` (`host:port`), policy, `cfg.Dial` (failure → 502), `200` + flush, copy both ways; request body EOF → `CloseWrite` on the target; target EOF → return.
   - Every conn change is logged with `connId`, `epoch`, reason (§13) and passed to `OnConnEvent`.
 - Test harness inside the test package: a fake admitter on memnet that runs `h2.NewClientConn` on the gateway end and exposes it, with scripted reject statuses.
 
@@ -277,6 +280,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   - `TestInfoDefaults` and `TestInfoProvided`.
   - `TestDrainMakeBeforeBreak`: Drain on conn A with `tcp_deadline` 100 ms and `DrainCloseExtra` 50 ms → conn B dialed while an in-flight CONNECT stream on A keeps working; A closed ~150 ms after B is up.
   - `TestConnectPolicy`: CONNECT to a local listener → bytes echo, half-close both directions works; `10.255.255.1:80` → 403; `example.com:80` → 403; port `0` and `70000` → 400; refused local port → 502.
+  - `TestCustomDialHook`: `Config.Dial` set → called with the parsed host and port after the policy passed (not called for a 403 target); its error → 502.
   - `TestEventsSubscribeAndAck`: journal with seq 1..3, acked 1 → Subscribe without `after_seq` yields 2, 3; `Ack(3)` → `AckedSeq()==3`; appending seq 4 is delivered on the open stream.
   - `TestRunExitsOnCancel`: cancel → `Run` returns, conns closed.
 - [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** `go test -race ./agent/... ./tunneltest/journal/...` PASS, lint clean.
@@ -284,14 +288,13 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 
 ### Task 6: Registry (`registry`) and Postgres test helper
 
-**Files:** Create `libs/tunnel/registry/{store.go,listen.go,migrate.go}`, `libs/tunnel/registry/migrations/0001_init.sql`, `libs/tunnel/internal/pgtest/pgtest.go`, `registry/store_test.go`.
+**Files:** Create `db/migrations/0100_tunnel_init.sql` (repo root; range 0100–0199 is ours, S6 owns 0200+ and the runner `packages/db`), `libs/tunnel/registry/{store.go,listen.go}`, `libs/tunnel/internal/pgtest/pgtest.go`, `registry/store_test.go` (`package registry_test`).
 
 **Interfaces:**
-- `pgtest`: `func Main(m *testing.M)` (starts/stops the container once per package when needed) and `func New(t testing.TB) (*pgxpool.Pool, string /*dsn*/)` (fresh database per test, migrated with `registry.Migrate`). Container: `docker run -d --rm -e POSTGRES_PASSWORD=sbx -p 127.0.0.1::5432 postgres:18.6-alpine`, port via `docker port`, ready when `SELECT 1` succeeds.
-- `0001_init.sql`: `CREATE SCHEMA tunnel`; tables per §8.1 with types: `gateway_instances(id text primary key, internal_url text not null, state text not null check (state in ('active','draining')), started_at timestamptz not null, heartbeat_at timestamptz not null)`; `tunnel_sessions(machine_id uuid primary key, instance_id text not null, epoch bigint not null, conn_id text not null, agent_instance_id text not null, boot_id text not null, vmgenid text not null, agent_version text not null, proto_version text not null, capabilities text[] not null default '{}', state text not null check (state in ('connected','disconnected')), connected_at timestamptz not null, disconnected_at timestamptz)` + index on `instance_id`; `tunnel_credentials(machine_id uuid primary key, bs_hash bytea not null, mt_hash bytea, mt_next_hash bytea, mt_issued_at timestamptz, retired_at timestamptz)`. Triggers: after insert or update on `tunnel_sessions` and after update of `retired_at` on `tunnel_credentials` → `pg_notify('tunnel_sessions', machine_id::text)`. `tunnel.schema_migrations(version int primary key, applied_at timestamptz)`.
+- `pgtest`: `func Main(m *testing.M)` (starts/stops the container once per package when needed) and `func New(t testing.TB) (*pgxpool.Pool, string /*dsn*/)` (fresh database per test with the tunnel migrations applied: `func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool) error` reads `db/migrations/01??_*.sql` from the repo root, found by walking up from the working directory, and executes them in file-name order; no tracking table — the S6 runner owns tracking). Container: `docker run -d --rm -e POSTGRES_PASSWORD=sbx -p 127.0.0.1::5432 postgres:18.6-alpine`, port via `docker port`, ready when `SELECT 1` succeeds.
+- `0100_tunnel_init.sql` (plain SQL, no `BEGIN`/`COMMIT` — the runner wraps files in a transaction): `CREATE SCHEMA tunnel`; tables per §8.1 with types: `gateway_instances(id text primary key, internal_url text not null, state text not null check (state in ('active','draining')), started_at timestamptz not null, heartbeat_at timestamptz not null, drain_started_at timestamptz)`; `tunnel_sessions(machine_id uuid primary key, instance_id text not null, epoch bigint not null, conn_id text not null, agent_instance_id text not null, boot_id text not null, vmgenid text not null, agent_version text not null, proto_version text not null, capabilities text[] not null default '{}', state text not null check (state in ('connected','disconnected')), connected_at timestamptz not null, disconnected_at timestamptz)` + index on `instance_id`; `tunnel_credentials(machine_id uuid primary key, bs_hash bytea not null, mt_hash bytea, mt_next_hash bytea, mt_issued_at timestamptz, retired_at timestamptz)`. Triggers: after insert or update on `tunnel_sessions` and after update of `retired_at` on `tunnel_credentials` → `pg_notify('tunnel_sessions', machine_id::text)`; after insert, delete, or update of `state`/`drain_started_at` on `gateway_instances` → `pg_notify('gateway_instances', id)` (S4: non-owner pods learn that an owner started draining).
 - `registry`:
   ```go
-  func Migrate(ctx context.Context, pool *pgxpool.Pool) error // embedded migrations, pg_advisory_xact_lock, idempotent
   func New(pool *pgxpool.Pool) *Store
   var ErrUnauthorized, ErrRetired, ErrNotFound error
   type Session struct { MachineID, InstanceID, ConnID, AgentInstanceID, BootID, Vmgenid, AgentVersion, ProtoVersion string; Epoch uint64; Capabilities []string; State string; ConnectedAt time.Time; DisconnectedAt *time.Time }
@@ -308,11 +311,14 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   func (s *Store) CompleteRotation(ctx context.Context, machineID string, nextHash []byte) (bool, error)
   func (s *Store) RegisterInstance(ctx context.Context, id, internalURL string) error
   func (s *Store) Heartbeat(ctx context.Context, id string) error
-  func (s *Store) SetInstanceState(ctx context.Context, id, state string) error
+  func (s *Store) SetInstanceState(ctx context.Context, id, state string) error // 'draining' also sets drain_started_at = now() once
+  type Instance struct { ID, InternalURL, State string; StartedAt, HeartbeatAt time.Time; DrainStartedAt *time.Time }
+  func (s *Store) Instance(ctx context.Context, id string) (Instance, error) // ErrNotFound after delete
   func (s *Store) DeleteInstance(ctx context.Context, id string) error
   type Swept struct { MachineID, InstanceID string; Epoch uint64; DisconnectedAt time.Time }
   func (s *Store) SweepStale(ctx context.Context, self string, staleAfter time.Duration) ([]Swept, error)
-  func (s *Store) Listen(ctx context.Context, fn func(machineID string)) error // blocks; on (re)connect calls fn("") = resync all
+  type ListenHandlers struct { Session func(machineID string); Instance func(instanceID string) } // nil fields ignored
+  func (s *Store) Listen(ctx context.Context, h ListenHandlers) error // one conn, LISTEN on both channels; blocks; on (re)connect calls each handler with "" = resync all
   // Writers owned by worker (S6); exported for tests and as SQL reference.
   func (s *Store) PutCredentials(ctx context.Context, machineID string, bsHash []byte) error
   func (s *Store) Retire(ctx context.Context, machineID string) error
@@ -323,7 +329,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 - `Owner`: `tunnel_sessions` join `gateway_instances` where `state='connected'` and `heartbeat_at > now() - staleAfter`.
 
 - [ ] **Step 1: Failing tests** (all with `pgtest.New`):
-  - `TestMigrateIdempotent` (twice, concurrently from two goroutines).
+  - `TestMigrationsApply` (`ApplyMigrations` on a fresh DB creates the three tables; `drain_started_at` column exists).
   - `TestAdmitBootstrap` (right BS → epoch 1, `Prev == nil`; wrong → `ErrUnauthorized`; unknown machine → `ErrUnauthorized`).
   - `TestAdmitIncrementsEpochAndReturnsPrev` (second admit → epoch 2 with `Prev.AgentInstanceID` of the first).
   - `TestAdmitRetired` (`Retire` then admit with right BS → `ErrRetired`).
@@ -331,7 +337,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   - `TestDisconnectFencing` (disconnect with stale epoch → false; with current → true, `State == "disconnected"`).
   - `TestOwnerIgnoresStaleInstance` (heartbeat set 20 s in the past via SQL → not found).
   - `TestSweepStale` (instance B stale with 2 connected sessions → both disconnected with `disconnected_at` = B's heartbeat, B deleted, `self` never swept; two concurrent sweepers return disjoint results).
-  - `TestListenNotifies` (Admit, `UpdateSessionInfo`, `Retire` each produce `fn(machineID)`; `pg_terminate_backend` of the listener backend → `fn("")` after reconnect, then notifications resume) — Review Focus 2.
+  - `TestListenNotifies` (Admit, `UpdateSessionInfo`, `Retire` each produce `Session(machineID)`; `RegisterInstance`, `SetInstanceState(draining)` (then `Instance().DrainStartedAt != nil`), `DeleteInstance` each produce `Instance(id)`; `pg_terminate_backend` of the listener backend → both handlers get `""` after reconnect, then notifications resume) — Review Focus 2.
 - [ ] **Step 2:** FAIL. **Step 3:** implement (pgx v5 `pgxpool`; `Listen` uses `pool.Acquire` + `LISTEN` + `WaitForNotification`, reconnect with 250 ms→5 s backoff).
 - [ ] **Step 4:** `go test -race ./registry/...` PASS; lint clean.
 - [ ] **Step 5:** Commit `tunnel: Postgres registry with fencing, sweep and LISTEN`.
@@ -346,7 +352,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   ```go
   type Timing struct {
       Heartbeat, StaleAfter, Sweep time.Duration           // 5s, 15s, 5s
-      EndpointWait, DrainSpread, TCPDeadline time.Duration  // 5s, 5s, 2m
+      EndpointWait, DrainSpread, TCPDeadline time.Duration  // 5s, 5s, 2m (TCPDeadline = default per-stream drain deadline)
       DrainRetryAfter time.Duration                         // 1s, Retry-After for 503 while draining
       TokenMaxAge time.Duration                             // 24h
       EventBatchMax int; EventBatchInterval time.Duration   // 500, 1s
@@ -364,6 +370,8 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
       Sink EventSink                 // nil → log and drop, ack immediately
       MinAgentVersion string         // "" → none; lower → 426
       AllowedServicePrefixes []string // default [wire.ServicePrefixAgent]; sbx.tunnel.v1. is always refused
+      MaxTCPStreamsPerMachine int    // 800 (S4): concurrent CONNECT streams per machine on the owner pod
+      OnInstanceChange func(instanceID string) // optional (S4): called for every NOTIFY gateway_instances, "" = resync; details via Store.Instance
       Timing Timing
       HTTP2 h2.ClientConfig
       Logger *slog.Logger
@@ -374,13 +382,16 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   func (g *Gateway) Machine(machineID string) (transport.MachineConn, bool) // active (not moved/closed) session only
   func (g *Gateway) Ready() bool
   func (g *Gateway) Abandon() // crash simulation for tests: stop loops, drop conns, touch nothing in the registry
+  type TCPOptions struct { DrainDeadline time.Duration } // 0 → Timing.TCPDeadline; S4 passes 15m for SSH
+  var ErrTooManyStreams error // DialTCP over MaxTCPStreamsPerMachine
   ```
+  The concrete `MachineConn` returned by `Machine` also has `DialTCPWith(ctx, port uint16, opts TCPOptions) (net.Conn, error)`; `DialTCP(ctx, port)` = `DialTCPWith(ctx, port, TCPOptions{})`. Both count the stream against `MaxTCPStreamsPerMachine` until the returned conn is closed (or the h2 stream ends) and fail with `ErrTooManyStreams` beyond it.
 - Admission (`Admit`): draining → `RejectError{503, DrainRetryAfter}`; `MinAgentVersion` and agent version lower or unparsable → 426; `registry.Admit` (`ErrUnauthorized` → 401, `ErrRetired` → 403); conn id = new UUIDv7 (`github.com/google/uuid`, check latest). `Abort` → `Disconnect`. `Serve` → `h2.NewClientConn` with `cfg.HTTP2` (h2 ping 10 s / 5 s lives there), register locally (an older local session for the same machine is closed), then in a goroutine: `Control/Info` → `UpdateSessionInfo(capabilities)`; rotate MT when auth was bootstrap, or `MTIssuedAt` is nil or older than `TokenMaxAge`, and every `TokenMaxAge` while connected; start the events pump; send connection events.
 - Token rotation (`session.rotateToken(ctx)`, used by Task 8's `rotate-token` too): `wire.NewSecret` → `BeginRotation(hash)` → `Control/SetToken` → `CompleteRotation(hash)`.
 - Connection events (`DeliverConnectionEvent`, key `(machineId, epoch, type)`): `connected` always; with `Prev`: `rebooted` if `BootID` changed, else `agent_restarted` if `AgentInstanceID` changed; `identity_changed` if `Vmgenid` changed. `disconnected` on local close (only when `Disconnect` returned true) and for every `Swept` row.
 - Events pump: `Events/Subscribe` (no `after_seq`), batch up to `EventBatchMax` or `EventBatchInterval`, `DeliverEvents`; on error retry the same batch with backoff 1 s→30 s without reading further; then `Events/Ack(ackedSeq)`.
-- Session states: `active` → `draining` (Drain sent) → `moved` (fenced while draining: Connect streams aborted, new calls refused with 421, TCP streams kept until `TCPDeadline`, then close) → `closed`. Fenced while not draining → `closed` immediately.
-- Fencing (`fence.go`): on `fn(machineID)` load `Session` and `Retired`; local epoch < registry epoch, or retired → fence as above; `fn("")` → re-check every local session.
+- Session states: `active` → `draining` (Drain sent) → `moved` (fenced while draining: Connect streams aborted, new calls refused with 421, each TCP stream kept until its own drain deadline counted from the move; the conn closes once no TCP streams remain) → `closed`. Fenced while not draining → `closed` immediately.
+- Fencing (`fence.go`): `Store.Listen` with `Session` → fencing, `Instance` → `cfg.OnInstanceChange`. On `Session(machineID)` load `Session` and `Retired`; local epoch < registry epoch, or retired → fence as above; `fn("")` → re-check every local session.
 - `MachineConn` (`machineconn.go`): `RoundTrip` sets `URL.Scheme="http"`, `URL.Host="agent"` and tracks the request kind (`rpc-stream` by `Content-Type: application/connect+*` or `application/grpc*`, `tcp` for CONNECT, else `unary`); `DialTCP` sends `CONNECT localhost:<port>` with an `io.Pipe` body and returns a `net.Conn` with `CloseWrite`; non-200 → `*transport.DialError`; `Ping` = `Control/Info` round trip; `Drain` = `Control/Drain`; `Close` closes the h2 conn.
 - Test harness: memnet + real `agent.Client` + `pgtest` + a recording `EventSink`.
 
@@ -394,6 +405,8 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   - `TestSweepMarksCrashedInstance`: A `Abandon()`; with `StaleAfter` 300 ms, B's sweep marks A's sessions disconnected (if the agent has not yet reconnected) and A's row is gone; sink on B got `disconnected`.
   - `TestResyncOnListenReconnect`: kill the LISTEN backend while a fence-worthy change happens (admit on B via a second agent `Client` with the same machine id) → A still closes its session (Review Focus 2).
   - `TestMachineConnDialTCPAndPing`.
+  - `TestTCPStreamLimit`: `MaxTCPStreamsPerMachine` 3 → the 4th `DialTCP` fails with `ErrTooManyStreams`; after closing one, the next succeeds.
+  - `TestInstanceChangeHook`: B's `OnInstanceChange` receives A's id when A calls `SetInstanceState(draining)`.
 - [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** `go test -race ./gateway/...` PASS; lint clean.
 - [ ] **Step 5:** Commit `tunnel: gateway admission, sessions, fencing and event delivery`.
 
@@ -404,13 +417,15 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 **Interfaces:**
 - Produces:
   ```go
-  func (g *Gateway) InternalHandler() http.Handler // serve with h2c + HTTP/1.1 (S4 sets Protocols)
-  func DialRemoteTCP(ctx context.Context, instanceURL, serviceToken, machineID string, port uint16) (net.Conn, error) // HTTP/1.1 CONNECT; 421 → *transport.MovedError
+  func (g *Gateway) InternalHandler() http.Handler
+  func NewInternalServer(h http.Handler) *http.Server // Protocols HTTP1 + UnencryptedHTTP2, HTTP2.MaxConcurrentStreams 10000 (S4)
+  func NewPeerTransport() *http.Transport // h2c-only client transport for pod-to-pod calls
+  func DialRemoteTCP(ctx context.Context, rt http.RoundTripper, instanceURL, serviceToken, machineID string, port uint16, opts TCPOptions) (net.Conn, error) // h2 CONNECT, :authority <machineId>:<port>; 421 → *transport.MovedError; 429 → ErrTooManyStreams
   ```
 - Routes (all require `Authorization: Bearer <service token>` from `TokenSet`, constant-time compare; else 401; `{id}` must be a UUID, else 400):
   - `* /v1/machines/{id}/rpc/{service}/{method}`: `{service}` starting with `sbx.tunnel.v1.` → 403; not matching `AllowedServicePrefixes` → 403. Upstream path `/{service}/{method}` + query.
   - `* /v1/machines/{id}/files` and `/v1/machines/{id}/files/{rest...}` → upstream `/files[/rest]` + query.
-  - `CONNECT /v1/machines/{id}/tcp/{port}` over HTTP/1.1 (dispatched before the mux): hijack, `HTTP/1.1 200 Connection Established`, splice with `MachineConn.DialTCP`, half-close both ways. Port outside 1–65535 → 400.
+  - Peer TCP (§8.4 `/tcp/`, agreed with S4): plain `CONNECT` with `:authority = <machineId>:<port>` (dispatched before the mux when `r.Method == CONNECT`; works over h2c and HTTP/1.1 authority-form). Optional header `Sbx-Tcp-Drain-Deadline-Ms` → `TCPOptions.DrainDeadline`. `200` + flush, then splice with `DialTCPWith`, half-close both ways (request body EOF → `CloseWrite`). Bad machine id → 400; port outside 1–65535 → 400; over the stream limit → 429; agent refused → the agent's status (400/403/502).
   - `POST /v1/machines/{id}/rotate-token` → `session.rotateToken`, `200 {}`.
 - Routing decision per request: active local session → proxy; local `moved` session or no local session and `Store.Owner` finds a fresh instance other than self → `421` with headers `Sbx-Error-Code: machine_moved`, `Sbx-Instance-Url: <owner internal_url>`; nothing connected → `503`, `Sbx-Error-Code: agent_unavailable`, `Retry-After: 1`. For `/rpc/` these responses carry a Connect JSON error body `{"code":"unavailable","message":"<code>","details":[ErrorDetail]}` (detail `retryable: true`, `instance_url` for moved), `Content-Type: application/json`.
 - Proxy: copy headers minus hop-by-hop and `Authorization`; set `Sbx-Caller: <caller>`; keep `Connect-Timeout-Ms`, `Sbx-Request-Id`, `Content-Type`, `Connect-*`, `Accept-Encoding`; request body streamed as is; response status, headers and trailers copied; body copied with a flush after every read, no buffering.
@@ -424,7 +439,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
   - `TestAgentUnavailable503`.
   - `TestStreamAbortedWithUnavailableOnMove`: open an attach-like stream, fence while draining → client stream ends with Connect `unavailable` (not internal) and the last message received is complete.
   - `TestFilesProxy`: `GET /files?path=x` with `Range` → 206 passes through; `PUT /files/uploads/u1?offset=0` body streamed (4 MiB) intact.
-  - `TestRemoteTCP`: `DialRemoteTCP` to A for a machine on A echoes bytes with half-close; to A for a machine on B → `*transport.MovedError{InstanceURL: B}`.
+  - `TestRemoteTCP`: `DialRemoteTCP` (h2c via `NewPeerTransport`) to A for a machine on A echoes bytes with half-close; to A for a machine on B → `*transport.MovedError{InstanceURL: B}`; over the limit → `ErrTooManyStreams`; `NewInternalServer` advertises `MAX_CONCURRENT_STREAMS=10000`.
   - `TestRotateToken`: `POST rotate-token` → 200; agent's next reconnect uses the new token (old `mt_hash` no longer accepted).
 - [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** `go test -race ./gateway/...` PASS; lint clean.
 - [ ] **Step 5:** Commit `tunnel: gateway internal listener and reverse proxy`.
@@ -434,7 +449,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 **Files:** Create `libs/tunnel/gateway/drain.go`, `libs/tunnel/tunneltest/process/{process.go,store.go}`, `libs/tunnel/internal/e2e/{harness_test.go,scenarios_test.go}`.
 
 **Interfaces:**
-- `func (g *Gateway) Drain(ctx context.Context) error` (§7 steps 1–7): set draining (local flag → `Ready()==false`, admission 503, `SetInstanceState(draining)`); wait `EndpointWait`; call `MachineConn.Drain{reason: "gateway_shutdown", tcp_deadline: TCPDeadline}` on every active session, the i-th of n at `i*DrainSpread/n`; wait until no sessions remain or `EndpointWait + DrainSpread + TCPDeadline + 10s` passes; close the rest (`Disconnect`), `DeleteInstance`, stop loops.
+- `func (g *Gateway) Drain(ctx context.Context) error` (§7 steps 1–7): set draining (local flag → `Ready()==false`, admission 503, `SetInstanceState(draining)`); wait `EndpointWait`; call `MachineConn.Drain{reason: "gateway_shutdown", tcp_deadline: TCPDeadline}` on every active session, the i-th of n at `i*DrainSpread/n`; `tcp_deadline` in the RPC = the longest drain deadline among that session's open TCP streams, at least `TCPDeadline`; wait until no sessions remain or `EndpointWait + DrainSpread + <longest deadline> + 10s` passes (S4 sets `terminationGracePeriodSeconds` 960 for 15-minute SSH deadlines); close the rest (`Disconnect`), `DeleteInstance`, stop loops.
 - `process` (test double of `Process`, honours the §9.1 contract):
   ```go
   type Store struct{...} // outlives agent Clients: plays the shim + on-disk state
@@ -449,7 +464,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 - [ ] **Step 1: Failing tests** (`internal/e2e`, 2–3 gateways on one memnet and DB, shrunk timings):
   - `TestLongCommandSurvivesFaults`: command 4000 lines × 1 KiB at 1 ms, exit 42; an injector every 50–300 ms does one of: `Link.Cut`, `Link.Stall(2*DeadAfter)`, `Abandon` of the owning gateway plus a fresh replacement gateway, `Drain` of the owning gateway plus replacement, replacing the agent `Client` (new `InstanceID`, same `process.Store`). Two readers via `attachAll` through the internal listeners (following 421 to `Sbx-Instance-Url`, re-looking-up the owner on 503) → both get bytes equal to `Expected`, exit 42, `Starts==1`, no single pause longer than 5 s (scaled budget).
   - `TestDrainMovesAllAgents`: 3 gateways, 20 agents each running a command with an open attach; `Drain` gateway A → every agent reconnects to B or C; `Drain` returns before its deadline; 0 lost and 0 double starts; all attach readers complete with exact bytes; a unary `SetLabel` with one `Sbx-Request-Id` sent to A after a move gets 421 and succeeds on the first retry to the given URL with `calls == 1`.
-  - `TestDrainKeepsTCPUntilDeadline`: a TCP stream via `DialRemoteTCP` on A survives the move and is closed at `TCPDeadline` (300 ms) ± margin; RPC streams on A end with `unavailable` right after the move.
+  - `TestDrainKeepsTCPUntilDeadline`: two TCP streams via `DialRemoteTCP` on A, one default (`TCPDeadline` 300 ms) and one with `DrainDeadline` 900 ms, survive the move and close at their own deadlines ± margin; the agent got `tcp_deadline` 900 ms; RPC streams on A end with `unavailable` right after the move.
   - `TestAgentRestartKeepsCommands`: replace the agent `Client` mid-command → reconnect via BS (MT was in memory), `agent_restarted` event, attach completes exactly.
   - `TestCutMidEnvelope` (Review Focus 1): 64 KiB lines, cut during a message → reader gets a retryable error, resumed output exact.
   - `TestSlowConsumerBounded` (Review Focus 4): reader stops reading for 1 s while the command produces 64 MiB → `producedSent - consumed < 4 MiB` (double counts bytes handed to `Send`).
@@ -539,7 +554,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 **Files:** Create `libs/tunnel/internal/cmd/tunnelharness/main.go`, `packages/agent-client/test/e2e.test.ts`, `packages/agent-client/test/helpers/harness.ts`.
 
 **Interfaces:**
-- `tunnelharness` flags: `-db <dsn>` (migrates), `-gateways 2`, `-agents 1`, `-token <service token>`; starts gateways (internal listeners on `127.0.0.1:0` with h2c + HTTP/1.1, shrunk timings), memnet, agents with `process.Store`; prints one JSON line `{"machines":["<uuid>"],"gateways":[{"id","url"}],"control":"http://127.0.0.1:<port>"}`; control `POST /fault` body `{"kind":"cut"|"stall"|"drain"|"kill-gateway"|"restart-agent","machine":"<uuid>"}` → 200 after injecting (drain/kill also start a replacement gateway). Exits on stdin EOF.
+- `tunnelharness` flags: `-db <dsn>` (applies db/migrations 0100–0199 via pgtest.ApplyMigrations), `-gateways 2`, `-agents 1`, `-token <service token>`; starts gateways (internal listeners on `127.0.0.1:0` with h2c + HTTP/1.1, shrunk timings), memnet, agents with `process.Store`; prints one JSON line `{"machines":["<uuid>"],"gateways":[{"id","url"}],"control":"http://127.0.0.1:<port>"}`; control `POST /fault` body `{"kind":"cut"|"stall"|"drain"|"kill-gateway"|"restart-agent","machine":"<uuid>"}` → 200 after injecting (drain/kill also start a replacement gateway). Exits on stdin EOF.
 - `helpers/harness.ts`: builds the harness once (`mise exec -- go build -o <tmp>`), spawns it, parses the JSON line, `fault(kind, machine)`, `stop()`.
 
 - [ ] **Step 1: Failing test** `e2e.test.ts`: `PgRegistry` + `AgentClient` against the harness; `Run` of a command (3000 lines × 512 B, 1 ms, exit 42) consumed with `resumableAttach` (`open` = `Run` first, then `Attach` with offsets); a second reader attaches by `commandId` from offset 0; a loop injects a random fault every 100–400 ms until exit. Assert: both readers' sha256 of stdout and stderr equal the expected (computed in TS from the same line formula), exit code 42, `SetLabel` with one request id returns `calls == 1` after faults, no call rejected except retryable errors that were retried.
