@@ -1,0 +1,7 @@
+#cloud-config
+# boat-dev-clone S1 PoC: vendor data for building template 599 only.
+package_update: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - systemctl enable --now qemu-guest-agent
