@@ -3,15 +3,23 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Public ids, team API key format, scopes, bearer classification, SSH keys and login certificates, the IdentityStore contract",
+	"description": "Public ids, team API key format, scopes, bearer classification, SSH keys and login certificates, the IdentityStore contract and its Postgres stand-in, environments store",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./testing": "./src/testing.ts"
 	},
 	"scripts": {
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit -p ."
 	},
 	"dependencies": {
-		"ulid": "3.0.2"
+		"pg": "8.23.1",
+		"ulid": "3.0.2",
+		"yaml": "2.9.1",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@sbx/db": "workspace:*",
+		"@types/pg": "8.23.1"
 	}
 }

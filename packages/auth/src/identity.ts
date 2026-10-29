@@ -127,7 +127,13 @@ export type IdentityErrorCode =
 	| "user_disabled"
 	| "fingerprint_taken"
 	| "not_found"
-	| "name_taken";
+	| "name_taken"
+	/**
+	 * The IdP identity clashes with another account (S8 §5.3): the email is
+	 * bound to another `sub`, or a changed email belongs to another user.
+	 * The api answers 403; an operator resolves it.
+	 */
+	| "identity_conflict";
 
 export class IdentityError extends Error {
 	readonly code: IdentityErrorCode;

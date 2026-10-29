@@ -506,9 +506,9 @@ describe("ctl-cleanup (§15.4)", () => {
 		);
 		const tag = randomBytes(8).toString("hex");
 		await w.pool.query(
-			`INSERT INTO runtime.port_auth_codes (code_hash, label, auth_epoch, expires_at, created_at)
-			 VALUES (decode($1 || '01', 'hex'), 'old-3000', 0, now(), now() - interval '25 hours'),
-			        (decode($1 || '02', 'hex'), 'new-3000', 0, now(), now() - interval '23 hours')`,
+			`INSERT INTO runtime.port_auth_codes (code_hash, label, user_id, email, auth_epoch, expires_at, created_at)
+			 VALUES (decode($1 || '01', 'hex'), 'old-3000', 'u', 'u@example.com', 0, now(), now() - interval '25 hours'),
+			        (decode($1 || '02', 'hex'), 'new-3000', 'u', 'u@example.com', 0, now(), now() - interval '23 hours')`,
 			[tag],
 		);
 

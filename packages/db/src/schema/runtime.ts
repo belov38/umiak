@@ -529,3 +529,16 @@ export const reconcileSeen = runtime.table(
 	},
 	(t) => [primaryKey({ columns: [t.providerId, t.kind, t.name] })],
 );
+
+// One-time port SSO codes (S7 §7.7, §12.2; migration 0301).
+export const portAuthCodes = runtime.table("port_auth_codes", {
+	/** sha256 of the 32-byte code. */
+	codeHash: bytea("code_hash").primaryKey(),
+	label: text("label").notNull(),
+	userId: text("user_id").notNull(),
+	email: text("email").notNull(),
+	authEpoch: integer("auth_epoch").notNull(),
+	expiresAt: tstz("expires_at").notNull(),
+	usedAt: tstz("used_at"),
+	createdAt: tstz("created_at").notNull().defaultNow(),
+});
