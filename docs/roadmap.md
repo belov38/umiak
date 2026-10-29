@@ -11,7 +11,7 @@
 | S3 | Guest agent v0 (Linux) | exec / files / ports, claim, смена идентичности, quiesce, установка и обновление | S2 | brainstorm (ветка `s3-guest-agent`) |
 | S4 | Gateway | Приём туннелей, HTTP-прокси `*.sbx`, маршрутизация, несколько экземпляров, позже SSH gateway и TURN | S2 | brainstorm (ветка `s4-gateway`) |
 | S5 | Шаблон Linux | Сборка образа (cloud-init / Packer), встроенный агент, версии шаблонов | S1, S3 | |
-| S6 | Ядро control plane | Модель данных, машины состояний sandbox и machine, worker, warm pool, оркестрация create / stop / resume / fork / delete | S1, S2 | |
+| S6 | Ядро control plane | Модель данных, машины состояний sandbox и machine, worker, warm pool, оркестрация create / stop / resume / fork / delete | S1, S2 | brainstorm (ветка `s6-control-plane`) |
 | S7 | Публичное API v1 | Hono + OpenAPI, генерация SDK, CLI | S6 | |
 | S8 | Web (Payload) | Админка, клиентский дашборд, JIT-пользователи из заголовков oauth2-proxy, роли из групп IdP, команды, API-ключи, `sbx login` | S7 | |
 | S9 | Windows | Шаблоны Win11 и Server Core (образ пользователя, autounattend, sysprep), агент как служба, ConPTY, VSS, autologon | S3, S5 | |
