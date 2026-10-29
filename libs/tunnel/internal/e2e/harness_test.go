@@ -669,6 +669,18 @@ func (r *reader) run(ctx context.Context) error {
 	}
 }
 
+// errorsBetween counts the errors seen from from to to (inclusive). Call it
+// after run returned.
+func (r *reader) errorsBetween(from, to time.Time) int {
+	n := 0
+	for _, at := range r.errAt {
+		if !at.Before(from) && !at.After(to) {
+			n++
+		}
+	}
+	return n
+}
+
 func streamIndex(s testingv1.Stream) int {
 	if s == testingv1.Stream_STREAM_STDERR {
 		return 1

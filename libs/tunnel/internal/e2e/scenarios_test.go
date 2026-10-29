@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/process"
@@ -170,7 +173,16 @@ func TestLongCommandSurvivesFaults(t *testing.T) {
 
 func TestDrainMovesAllAgents(t *testing.T) {
 	e := newEnv(t)
-	gA, gB, gC := e.mustGateway(nil), e.mustGateway(nil), e.mustGateway(nil)
+	// The drain is a CPU burst (20 agents reconnect at once, more under
+	// -race): the harness's 200 ms ping budget could close a session of B or
+	// C and disturb its reader. Gateway-side session closes are recorded for
+	// the diagnosis.
+	closes := &closeLog{}
+	mod := func(c *gateway.Config) {
+		c.HTTP2 = h2.ClientConfig{PingIdle: time.Second, PingTimeout: time.Second}
+		c.Logger = slog.New(&closeHandler{log: closes, next: c.Logger.Handler()})
+	}
+	gA, gB, gC := e.mustGateway(mod), e.mustGateway(mod), e.mustGateway(mod)
 	const perGateway = 20
 	byGW := map[*gw][]*machine{}
 	for _, g := range []*gw{gA, gB, gC} {
@@ -206,10 +218,6 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	}
 	for _, j := range jobs {
 		j.r.waitBytes(t, 1)
-	}
-	errsBefore := make([]int64, len(jobs))
-	for i, j := range jobs {
-		errsBefore[i] = j.r.errCount.Load()
 	}
 	// Every reader is still attached when the drain starts.
 	for _, j := range jobs {
@@ -275,7 +283,8 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	}
 	phases = append(phases, drainPhase{"SetLabel retried", time.Since(start)})
 	gA.stopWith(true)
-	phases = append(phases, drainPhase{"A stopped", time.Since(start)})
+	stopped := time.Now()
+	phases = append(phases, drainPhase{"A stopped", stopped.Sub(start)})
 
 	for _, j := range jobs {
 		waitErr(t, j.res, "reader of "+j.m.id)
@@ -291,9 +300,10 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	for _, m := range byGW[gA] {
 		onA[m] = true
 	}
+	// Errors seen from the drain start until A stopped.
 	resumedA, disturbed := 0, 0
-	for i, j := range jobs {
-		if j.r.errCount.Load() == errsBefore[i] {
+	for _, j := range jobs {
+		if j.r.errorsBetween(start, stopped) == 0 {
 			continue
 		}
 		if onA[j.m] {
@@ -302,14 +312,15 @@ func TestDrainMovesAllAgents(t *testing.T) {
 			disturbed++
 		}
 	}
-	t.Logf("readers resumed after the drain: %d of %d on A; readers on B and C disturbed: %d", resumedA, perGateway, disturbed)
+	t.Logf("readers resumed after the drain: %d of %d on A; readers on B and C with errors between the drain start and A stopped: %d",
+		resumedA, perGateway, disturbed)
 	// Each reader on A had an open attach when A drained, so each lost its
 	// stream to the move and resumed elsewhere.
 	if resumedA != perGateway {
 		t.Errorf("%d of %d readers on A resumed after the drain, want all", resumedA, perGateway)
 	}
 	if disturbed != 0 {
-		t.Errorf("%d readers of machines on B or C saw errors during A's drain", disturbed)
+		t.Errorf("%d readers of machines on B or C saw errors between A's drain start and A stopped", disturbed)
 	}
 	if t.Failed() {
 		phases = append(phases, drainPhase{"readers done", time.Since(start)})
@@ -321,9 +332,9 @@ func TestDrainMovesAllAgents(t *testing.T) {
 		}
 		diag := make([]drainDiag, len(jobs))
 		for i, j := range jobs {
-			diag[i] = drainDiag{m: j.m, gw: gwOf[j.m], r: j.r, errsBefore: errsBefore[i]}
+			diag[i] = drainDiag{m: j.m, gw: gwOf[j.m], r: j.r}
 		}
-		logDrainDiag(t, e, gA.name, start, phases, diag)
+		logDrainDiag(t, e, gA.name, start, stopped, phases, diag, closes)
 	}
 }
 
@@ -336,18 +347,18 @@ type drainPhase struct {
 
 // drainDiag is one reader of TestDrainMovesAllAgents and its machine.
 type drainDiag struct {
-	m          *machine
-	gw         string // the gateway the agent was on before the drain
-	r          *reader
-	errsBefore int64
+	m  *machine
+	gw string // the gateway the agent was on before the drain
+	r  *reader
 }
 
 // logDrainDiag logs what a failed TestDrainMovesAllAgents needs for a
-// diagnosis: the phase timings, and for every reader that saw an error after
-// the drain started (or that did not, on the drained gateway) its errors, the
-// agent's connection events and the registry owner and session, with times
-// relative to the drain start.
-func logDrainDiag(t *testing.T, e *env, drained string, start time.Time, phases []drainPhase, jobs []drainDiag) {
+// diagnosis: the phase timings, and for every reader that saw an error
+// between the drain start and stopped (or that did not, on the drained
+// gateway) its errors, the agent's connection events, the gateway-side
+// session closes and the registry owner and session, with times relative to
+// the drain start.
+func logDrainDiag(t *testing.T, e *env, drained string, start, stopped time.Time, phases []drainPhase, jobs []drainDiag, closes *closeLog) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
@@ -357,15 +368,14 @@ func logDrainDiag(t *testing.T, e *env, drained string, start time.Time, phases 
 	}
 	for _, j := range jobs {
 		r := j.r
-		n := r.errCount.Load()
-		if (n == j.errsBefore) == (j.gw != drained) {
+		if (r.errorsBetween(start, stopped) == 0) == (j.gw != drained) {
 			continue
 		}
 		var errs []string
 		for k := range r.errs {
-			mark := "before"
-			if int64(k) >= j.errsBefore {
-				mark = "after"
+			mark := "outside"
+			if at := r.errAt[k]; !at.Before(start) && !at.After(stopped) {
+				mark = "inside"
 			}
 			errs = append(errs, fmt.Sprintf("[%s +%s %s %s] %v", mark, rel(r.errAt[k]), r.errURL[k], connect.CodeOf(r.errs[k]), r.errs[k]))
 		}
@@ -378,10 +388,92 @@ func logDrainDiag(t *testing.T, e *env, drained string, start time.Time, phases 
 		j.m.evMu.Unlock()
 		o, ok, oerr := e.store.Owner(ctx, j.m.id, staleAfter)
 		sess, serr := e.store.Session(ctx, j.m.id)
-		t.Logf("machine %s (was on %s): %d attaches, %d/%d bytes, exit %v\n  errors:\n    %s\n  conn events:\n    %s\n  owner %+v ok=%v err=%v\n  session %+v err=%v",
+		var gwCloses []string
+		for _, c := range closes.of(j.m.id) {
+			gwCloses = append(gwCloses, fmt.Sprintf("+%s %s conn=%s epoch=%s reason=%q", rel(c.at), c.gw, c.conn, c.epoch, c.reason))
+		}
+		t.Logf("machine %s (was on %s): %d attaches, %d/%d bytes, exit %v\n  errors:\n    %s\n  conn events:\n    %s\n  gateway session closes:\n    %s\n  owner %+v ok=%v err=%v\n  session %+v err=%v",
 			j.m.id, j.gw, r.attaches.Load(), len(r.out[0]), len(r.out[1]), r.exit,
-			strings.Join(errs, "\n    "), strings.Join(evs, "\n    "), o, ok, oerr, sess, serr)
+			strings.Join(errs, "\n    "), strings.Join(evs, "\n    "), strings.Join(gwCloses, "\n    "), o, ok, oerr, sess, serr)
 	}
+}
+
+// closeRec is a gateway-side session close ("gateway: session closed").
+type closeRec struct {
+	at                               time.Time
+	gw, machine, conn, epoch, reason string
+}
+
+// closeLog records the session closes of gateways logging through closeHandler.
+type closeLog struct {
+	mu   sync.Mutex
+	recs []closeRec
+}
+
+// of returns the closes of a machine's sessions.
+func (l *closeLog) of(machineID string) []closeRec {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []closeRec
+	for _, r := range l.recs {
+		if r.machine == machineID {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// closeHandler records "gateway: session closed" records in log and passes
+// every record on to next.
+type closeHandler struct {
+	log   *closeLog
+	next  slog.Handler
+	attrs []slog.Attr
+}
+
+func (h *closeHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return l >= slog.LevelInfo || h.next.Enabled(ctx, l)
+}
+
+func (h *closeHandler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message == "gateway: session closed" {
+		rec := closeRec{at: r.Time}
+		set := func(a slog.Attr) bool {
+			v := a.Value.String()
+			switch a.Key {
+			case "instance_id":
+				rec.gw = v
+			case "machine_id":
+				rec.machine = v
+			case "conn_id":
+				rec.conn = v
+			case "epoch":
+				rec.epoch = v
+			case "reason":
+				rec.reason = v
+			}
+			return true
+		}
+		for _, a := range h.attrs {
+			set(a)
+		}
+		r.Attrs(set)
+		h.log.mu.Lock()
+		h.log.recs = append(h.log.recs, rec)
+		h.log.mu.Unlock()
+	}
+	if h.next.Enabled(ctx, r.Level) {
+		return h.next.Handle(ctx, r)
+	}
+	return nil
+}
+
+func (h *closeHandler) WithAttrs(as []slog.Attr) slog.Handler {
+	return &closeHandler{log: h.log, next: h.next.WithAttrs(as), attrs: append(slices.Clone(h.attrs), as...)}
+}
+
+func (h *closeHandler) WithGroup(name string) slog.Handler {
+	return &closeHandler{log: h.log, next: h.next.WithGroup(name), attrs: h.attrs}
 }
 
 // startEcho listens on 127.0.0.1 and echoes until the peer goes away.
