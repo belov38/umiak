@@ -1,4 +1,5 @@
 import { withTx } from "@sbx/db";
+import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { loadSnapshot, snapshotRef } from "../db.ts";
 import { CREATE_STEPS } from "../ops/create.ts";
@@ -46,7 +47,8 @@ export async function handleSnapshotOp(
 		);
 		return "skipped";
 	}
-	if (await inUse(ctx, snapshotId)) throw new SnapshotInUse(snapshotId);
+	if (await snapshotInUse(ctx.pool, snapshotId))
+		throw new SnapshotInUse(snapshotId);
 
 	const infra = await ctx.infra.forNode(s.node_id);
 	await infra.deleteSnapshot(await snapshotRef(ctx.pool, s));
@@ -77,8 +79,11 @@ export async function handleSnapshotOp(
  * `allocating`/`provisioning` (the same condition seen from the machine;
  * it also covers fork targets).
  */
-async function inUse(ctx: WorkerCtx, snapshotId: string): Promise<boolean> {
-	const r = await ctx.pool.query<{ busy: boolean }>(
+export async function snapshotInUse(
+	q: Pick<pg.Pool, "query">,
+	snapshotId: string,
+): Promise<boolean> {
+	const r = await q.query<{ busy: boolean }>(
 		`SELECT EXISTS (
 		   SELECT 1 FROM runtime.sandboxes s
 		   JOIN runtime.operations o

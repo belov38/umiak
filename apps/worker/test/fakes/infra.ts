@@ -2,6 +2,7 @@
 // PgAllocatorStore, so leases are real rows of runtime.vmid_leases and
 // `leaseOf` reads them. `start` hands the VM to the FakeAgentWorld, which
 // "boots" it (tunnel session + agent events).
+import { randomUUID } from "node:crypto";
 import { PgAllocatorStore } from "@sbx/db";
 import { Allocator, type QuiesceHook } from "@sbx/pve";
 import type pg from "pg";
@@ -324,6 +325,41 @@ export class FakeInfra implements NodeInfra {
 		const name = `sbx-snap-${lvId}-scsi0`;
 		this.lvs.set(name, { name, tags: ["sbx", `sbx-snap-${lvId}`] });
 		return name;
+	}
+
+	/** Test setup: a VM that exists in Proxmox outside this fake's history (no lease). */
+	addVm(o: {
+		vmid: number;
+		status?: Exclude<VmStatus, "missing">;
+		pool?: string;
+		tags?: string[];
+		machineId?: string;
+		withDisk?: boolean;
+	}): FakeVm {
+		const vm: FakeVm = {
+			vmid: o.vmid,
+			mac: "02:00:00:00:00:00",
+			machineId: o.machineId ?? randomUUID(),
+			serial: "",
+			status: o.status ?? "running",
+			vcpu: 2,
+			memoryMb: 2048,
+			disks: [],
+			tags: o.tags ?? ["sbx"],
+			pool: o.pool ?? "sandbox",
+			starts: 0,
+		};
+		this.vms.set(o.vmid, vm);
+		if (o.withDisk !== false) {
+			const lv = `vm-${o.vmid}-disk-0`;
+			this.lvs.set(lv, { name: lv, tags: ["sbx", `sbx-vm-${o.vmid}`] });
+		}
+		return vm;
+	}
+
+	/** Test setup: an LV with the given tags. */
+	addLv(name: string, tags: string[]): void {
+		this.lvs.set(name, { name, tags: [...tags] });
 	}
 
 	async listVms(): Promise<InfraVm[]> {

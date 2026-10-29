@@ -55,6 +55,7 @@ describe("drizzle schema", () => {
 				"runtime.agent_events",
 				"runtime.agent_synthetic_events",
 				"runtime.node_clone_slots",
+				"runtime.reconcile_seen",
 				"tunnel.gateway_instances",
 				"tunnel.tunnel_sessions",
 				"tunnel.tunnel_credentials",

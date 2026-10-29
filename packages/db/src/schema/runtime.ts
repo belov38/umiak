@@ -492,3 +492,19 @@ export const nodeCloneSlots = runtime.table(
 	},
 	(t) => [primaryKey({ columns: [t.nodeId, t.slot] })],
 );
+
+// §11.2 Reconcile: first sighting of a VM or LV (grace for fresh objects)
+
+export const RECONCILE_SEEN_KINDS = ["vm", "lv"] as const;
+
+export const reconcileSeen = runtime.table(
+	"reconcile_seen",
+	{
+		providerId: uuid("provider_id").notNull(),
+		kind: text("kind", { enum: RECONCILE_SEEN_KINDS }).notNull(),
+		/** '<node_id>/<vmid>' or '<node_id>/<lv name>'. */
+		name: text("name").notNull(),
+		firstSeenAt: tstz("first_seen_at").notNull().defaultNow(),
+	},
+	(t) => [primaryKey({ columns: [t.providerId, t.kind, t.name] })],
+);

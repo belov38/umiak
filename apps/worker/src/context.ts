@@ -95,6 +95,11 @@ export interface WorkerCtx {
 	metrics: Metrics;
 	/** S8 IdP sync; `ctl-idp-sync` is registered only when set (decision 15). */
 	idpSync?: IdpSync;
+	/**
+	 * `ctl-reconcile` only reports (S6 §11.2 `SBX_RECONCILE_DRY_RUN=1`).
+	 * Default true: the first runs of a PoC are dry (Task 13 reads the env).
+	 */
+	reconcileDryRun?: boolean;
 }
 
 /**

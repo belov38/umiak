@@ -21,11 +21,12 @@ function ctx(idpSync?: IdpSync): WorkerCtx {
 }
 
 describe("CONTROLLERS (§15.1)", () => {
-	it("health 10 s, autostop 15 s, cleanup 10 min, idp-sync 300 s; no pool", () => {
+	it("health 10 s, autostop 15 s, cleanup 10 min, reconcile 60 s, idp-sync 300 s; no pool", () => {
 		expect(CONTROLLERS.map((c) => [c.queue, c.intervalMs])).toEqual([
 			["ctl-health", 10_000],
 			["ctl-autostop", 15_000],
 			["ctl-cleanup", 600_000],
+			["ctl-reconcile", 60_000],
 			["ctl-idp-sync", 300_000],
 		]);
 	});
@@ -35,6 +36,7 @@ describe("CONTROLLERS (§15.1)", () => {
 			"ctl-health",
 			"ctl-autostop",
 			"ctl-cleanup",
+			"ctl-reconcile",
 		]);
 		let runs = 0;
 		const c = ctx({
