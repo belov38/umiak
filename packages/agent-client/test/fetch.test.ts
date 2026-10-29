@@ -220,6 +220,32 @@ describe("AgentClient.fetch", () => {
 		expect(Date.now() - start).toBeGreaterThanOrEqual(290);
 	});
 
+	it("retries after a connection error to a dead instance", async () => {
+		const dead = await startFakeGateway({ token });
+		await dead.close();
+		registry.set(route(m, dead.url));
+		setTimeout(() => registry.set(route(m, a.url)), 100);
+		const res = await agent({ pollIntervalMs: 50 }).fetch(
+			m,
+			"?path=/data/f.bin",
+		);
+		expect(res.status).toBe(200);
+		await res.body?.cancel();
+	});
+
+	it("does not retry a TypeError that is not a connection error", async () => {
+		registry.set(route(m, a.url));
+		const start = Date.now();
+		// fetch refuses a GET with a body before sending anything.
+		const err = await agent()
+			.fetch(m, "?path=/data/f.bin", { method: "GET", body: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(TypeError);
+		expect(err).not.toBeInstanceOf(AgentUnavailableError);
+		expect(Date.now() - start).toBeLessThan(500);
+		expect(fileRequests(a)).toHaveLength(0);
+	});
+
 	it("rejects a path that does not start with /", async () => {
 		registry.set(route(m, a.url));
 		await expect(agent().fetch(m, "uploads/x")).rejects.toThrow(TypeError);

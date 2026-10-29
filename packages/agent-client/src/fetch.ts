@@ -4,6 +4,7 @@ import {
 	HEADER_INSTANCE_URL,
 	SCHEME_BEARER,
 } from "./constants.js";
+import { isConnectionError } from "./errors.js";
 import { type RoutingOptions, routeCall } from "./routing.js";
 
 /** Request options of AgentClient.fetch. */
@@ -71,7 +72,7 @@ export async function routedFetch(
 			try {
 				res = await fetch(url, req);
 			} catch (err) {
-				if (signal?.aborted || oneShot) {
+				if (signal?.aborted || oneShot || !isFetchConnectionError(err)) {
 					throw err;
 				}
 				return { kind: "unavailable", cause: err };
@@ -97,6 +98,38 @@ export async function routedFetch(
 			return { kind: "unavailable", cause };
 		},
 	);
+}
+
+/** undici error codes of a failed or broken connection. */
+const undiciConnectionCodes = new Set([
+	"UND_ERR_SOCKET",
+	"UND_ERR_CONNECT_TIMEOUT",
+	"UND_ERR_HEADERS_TIMEOUT",
+	"UND_ERR_CLOSED",
+]);
+
+/**
+ * True for a network failure of fetch: undici's TypeError("fetch failed")
+ * whose cause carries a network, HTTP/2 or undici socket code. Other errors
+ * (a TypeError for an invalid request, programming errors) are not retried.
+ */
+function isFetchConnectionError(err: unknown): boolean {
+	if (isConnectionError(err)) {
+		return true;
+	}
+	let e: unknown = err;
+	for (
+		let depth = 0;
+		depth < 5 && e != null && typeof e === "object";
+		depth++
+	) {
+		const code = (e as { code?: unknown }).code;
+		if (typeof code === "string" && undiciConnectionCodes.has(code)) {
+			return true;
+		}
+		e = (e as { cause?: unknown }).cause;
+	}
+	return false;
 }
 
 function resendable(body: BodyInit): boolean {
