@@ -34,7 +34,9 @@ type closeWriter interface{ CloseWrite() error }
 // serveTCP serves a peer CONNECT with :authority <machineId>:<port> (spec
 // 8.4, agreed with S4 as plain CONNECT). After 200 it splices the caller
 // with a DialTCPWith stream: the caller's EOF half-closes the target
-// (CloseWrite); the target's EOF ends the stream for the caller.
+// (CloseWrite); the target's EOF ends the stream for the caller. The peer
+// gets only gateway-produced headers: the agent's CONNECT answer headers are
+// never copied, and an agent refusal keeps its status except 421.
 func (h *internalHandler) serveTCP(w http.ResponseWriter, r *http.Request) {
 	authority := r.URL.Host
 	if authority == "" {
@@ -77,7 +79,13 @@ func (h *internalHandler) serveTCP(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrTooManyStreams):
 			writeJSONError(w, http.StatusTooManyRequests, jsonError{Code: "too_many_streams", Message: err.Error()})
 		case errors.As(err, &de):
-			writeJSONError(w, de.Status, jsonError{Code: "dial_refused", Message: err.Error()})
+			status := de.Status
+			if status == http.StatusMisdirectedRequest {
+				// 421 is the gateway's machine_moved signal to peers: an
+				// agent's 421 must not pass for one.
+				status = http.StatusBadGateway
+			}
+			writeJSONError(w, status, jsonError{Code: "dial_refused", Message: err.Error()})
 		default:
 			h.notServed(w, r, id, fmtJSON)
 		}

@@ -855,3 +855,133 @@ func TestSelfOwnerWaitsForLocalSession(t *testing.T) {
 		t.Fatalf("served after %s, want before the %s wait ended", r.d, selfOwnerWait)
 	}
 }
+
+// evilURL is the routing hint a compromised agent tries to plant.
+const evilURL = "http://evil.example:9999"
+
+// forgeMoved answers like a gateway's 421 machine_moved, with Sbx-* headers
+// and trailers pointing at evilURL, plus an X-Agent header and trailer that
+// must pass through.
+func forgeMoved(w http.ResponseWriter, r *http.Request) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	h.Set(wire.HeaderErrorCode, wire.CodeMachineMoved)
+	h.Set(wire.HeaderInstanceURL, evilURL)
+	h.Set(wire.HeaderCaller, "api")
+	h["sbx-lower-case"] = []string{"x"}
+	h.Set("X-Agent", "kept")
+	h.Set("Trailer", "Sbx-Declared, X-Agent-Trailer")
+	w.WriteHeader(http.StatusMisdirectedRequest)
+	_, _ = io.WriteString(w, `{"code":"unavailable","message":"machine_moved"}`)
+	h.Set("Sbx-Declared", evilURL)
+	h.Set("X-Agent-Trailer", "kept")
+	h.Set(http.TrailerPrefix+wire.HeaderInstanceURL, evilURL)
+}
+
+// checkNoSbx fails on any Sbx-* name in h.
+func checkNoSbx(t *testing.T, what string, h http.Header) {
+	t.Helper()
+	for k, v := range h {
+		if strings.HasPrefix(strings.ToLower(k), "sbx-") {
+			t.Errorf("%s: agent header %s: %q reached the caller", what, k, v)
+		}
+	}
+}
+
+// Only the gateway produces routing signals: Sbx-* response headers and
+// trailers from the agent never reach the caller (an agent could otherwise
+// forge a 421 that sends the caller's service token to its own server).
+func TestAgentSbxHeadersStripped(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	stub := newStubAgent()
+	cfg := agentConfig(e, id, bs, defaultIdentity())
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sbx.testing.v1.Forge/Moved", forgeMoved)
+	mux.HandleFunc("/files/forged", forgeMoved)
+	mux.Handle("/", stub.handler())
+	cfg.Handler = mux
+	e.startAgent(cfg).waitConnected()
+	waitMachine(t, gw.testGW, id)
+	c := peerClient(t, apiToken1)
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+
+	for _, tc := range []struct{ name, method, url string }{
+		{"rpc", http.MethodPost, gw.machineURL(id) + "/rpc/sbx.testing.v1.Forge/Moved"},
+		{"files", http.MethodGet, gw.machineURL(id) + "/files/forged"},
+	} {
+		req, _ := http.NewRequestWithContext(ctx, tc.method, tc.url, strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Te", "trailers")
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusMisdirectedRequest {
+			t.Errorf("%s: status %d, want the agent's 421", tc.name, resp.StatusCode)
+		}
+		checkNoSbx(t, tc.name+" header", resp.Header)
+		checkNoSbx(t, tc.name+" trailer", resp.Trailer)
+		if resp.Header.Get("X-Agent") != "kept" || resp.Trailer.Get("X-Agent-Trailer") != "kept" {
+			t.Errorf("%s: other agent headers lost: header %v trailer %v", tc.name, resp.Header, resp.Trailer)
+		}
+		t.Logf("%s: header %v trailer %v", tc.name, resp.Header, resp.Trailer)
+	}
+}
+
+// A compromised agent answering a peer CONNECT: its headers never reach the
+// peer, and its 421 is not passed on as a gateway's machine_moved.
+func TestAgentConnectAnswerNotForwarded(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	e.rawAgent(id, bs, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set(wire.HeaderErrorCode, wire.CodeMachineMoved)
+		w.Header().Set(wire.HeaderInstanceURL, evilURL)
+		w.Header().Set("X-Agent", "dropped")
+		if r.Host == "localhost:1" {
+			w.WriteHeader(http.StatusMisdirectedRequest)
+			return
+		}
+		duplexEcho(w, r)
+	}))
+	waitMachine(t, gw.testGW, id)
+	ctx := context.Background()
+	rt := NewPeerTransport()
+	t.Cleanup(rt.CloseIdleConnections)
+
+	_, err := DialRemoteTCP(ctx, rt, gw.url, apiToken1, id, 1, TCPOptions{})
+	var moved *transport.MovedError
+	var de *transport.DialError
+	if errors.As(err, &moved) || !errors.As(err, &de) || de.Status != http.StatusBadGateway {
+		t.Fatalf("agent 421 on CONNECT: err %v, want DialError 502", err)
+	}
+
+	// The 200 the peer sees carries only gateway headers.
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodConnect, gw.url, pr)
+	req.Host = net.JoinHostPort(id, "2")
+	req.Header.Set("Authorization", "Bearer "+apiToken1)
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT status %d", resp.StatusCode)
+	}
+	checkNoSbx(t, "CONNECT", resp.Header)
+	if resp.Header.Get("X-Agent") != "" {
+		t.Errorf("CONNECT: agent header X-Agent reached the peer: %v", resp.Header)
+	}
+}

@@ -48,6 +48,20 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
+// isSbxHeader reports whether a header name is in the Sbx- namespace
+// (case-insensitive). Towards callers only the gateway produces those: they
+// are routing signals (Sbx-Error-Code, Sbx-Instance-Url) a caller acts on.
+func isSbxHeader(k string) bool { return len(k) >= 4 && strings.EqualFold(k[:4], "sbx-") }
+
+// dropSbxHeaders removes every Sbx-* header from h.
+func dropSbxHeaders(h http.Header) {
+	for k := range h {
+		if isSbxHeader(k) {
+			delete(h, k)
+		}
+	}
+}
+
 // wantsTrailers reports whether the request carries "TE: trailers".
 func wantsTrailers(h http.Header) bool {
 	for _, v := range h["Te"] {
@@ -126,10 +140,17 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// The agent's Sbx-* headers and trailers are dropped: a compromised agent
+	// must not be able to forge a gateway answer such as 421 machine_moved
+	// with an Sbx-Instance-Url of its choosing (spec 16.1).
 	hdr := w.Header()
 	copyHeader(hdr, resp.Header)
+	dropSbxHeaders(hdr)
 	declared := make(map[string]bool, len(resp.Trailer))
 	for k := range resp.Trailer {
+		if isSbxHeader(k) {
+			continue
+		}
 		hdr.Add("Trailer", k)
 		declared[k] = true
 	}
@@ -145,6 +166,9 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		return
 	}
 	for k, vv := range resp.Trailer {
+		if isSbxHeader(k) {
+			continue
+		}
 		if declared[k] {
 			hdr[k] = vv
 		} else {

@@ -16,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
 	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
@@ -287,6 +288,38 @@ func (e *env) startStubAgent(id string, bs []byte, stub *stubAgent, dialer trans
 	a := e.startAgent(cfg)
 	a.waitConnected()
 	return a
+}
+
+// rawAgent connects machine id with bs and serves h on the tunnel instead of
+// agent.Client, so h answers everything, CONNECT included, like a
+// compromised agent would.
+func (e *env) rawAgent(id string, bs []byte, h http.Handler) {
+	e.t.Helper()
+	ident := defaultIdentity()
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	conn, _, err := e.net.Dialer().Dial(ctx, transport.Hello{
+		MachineID: id, BootID: ident.BootID, AgentInstanceID: ident.InstanceID, Vmgenid: ident.Vmgenid,
+		AgentVersion: ident.Version, Scheme: transport.AuthBootstrap, Secret: bs,
+	})
+	if err != nil {
+		e.t.Fatalf("raw agent dial: %v", err)
+	}
+	srv := h2.NewServer(h, h2.DefaultServerConfig())
+	ln := h2.New()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = srv.Serve(ln)
+	}()
+	if err := ln.Push(conn); err != nil {
+		e.t.Fatal(err)
+	}
+	e.t.Cleanup(func() {
+		_ = srv.Close()
+		_ = conn.Close()
+		<-done
+	})
 }
 
 // recDialer records the hello of every dial.
