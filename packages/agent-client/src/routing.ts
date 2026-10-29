@@ -76,7 +76,8 @@ export interface CallRoutingOptions extends RoutingOptions {
  * exhausted (AgentUnavailableError).
  *
  * - moved: invalidate. A hint the registry does not know as a live instance
- *   (or no hint) is not a move: notMoved() decides. A confirmed hint is
+ *   (or no hint) is not a move: notMoved() decides. A hint whose check
+ *   failed is a miss: wait and look up again. A confirmed hint is
  *   followed unless a fresh lookup already names another owner, which is
  *   preferred. A 421 that names the instance that answered it (a restarted
  *   pod on the same IP) counts as unavailable.
@@ -166,7 +167,18 @@ export async function routeCall<T>(
 			mustWait = true;
 			continue;
 		}
-		if (hint === undefined || !(await liveInstance(registry, hint))) {
+		const live =
+			hint === undefined ? false : await liveInstance(registry, hint);
+		if (live instanceof Error) {
+			// The hint could not be checked: a miss. Wait and look up again
+			// within the budget; nothing is sent to the hint.
+			outcome.discard?.();
+			lastCause = live;
+			failed = current;
+			mustWait = true;
+			continue;
+		}
+		if (hint === undefined || !live) {
 			// Only the gateway produces routing signals, and only with the URL
 			// of a live instance: this answer is something else.
 			const alt = outcome.notMoved();
@@ -192,16 +204,20 @@ export async function routeCall<T>(
 
 /**
  * Asks the registry whether url is a live gateway instance. A failed check
- * is a no, except RegistryClosedError, which is thrown.
+ * returns its error (the caller treats it as a miss), except
+ * RegistryClosedError, which is thrown.
  */
-async function liveInstance(registry: Registry, url: string): Promise<boolean> {
+async function liveInstance(
+	registry: Registry,
+	url: string,
+): Promise<boolean | Error> {
 	try {
 		return await registry.isLiveInstance(url);
 	} catch (err) {
 		if (err instanceof RegistryClosedError) {
 			throw err;
 		}
-		return false;
+		return err instanceof Error ? err : new Error(String(err));
 	}
 }
 

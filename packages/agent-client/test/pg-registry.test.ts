@@ -112,6 +112,13 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		).rejects.toBeInstanceOf(RegistryClosedError);
 	});
 
+	it("isLiveInstance notices a just-started instance within 250 ms", async () => {
+		expect(await registry.isLiveInstance("http://10.0.3.1:8081")).toBe(false);
+		await instance("gw-new", "http://10.0.3.1:8081");
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(await registry.isLiveInstance("http://10.0.3.1:8081")).toBe(true);
+	});
+
 	it("does not route to a disconnected session", async () => {
 		const m = randomUUID();
 		await instance("gw-a", "http://10.0.0.1:8081");

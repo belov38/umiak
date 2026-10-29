@@ -13,7 +13,11 @@ export interface PgRegistryOptions {
 	reconnectDelayMs?: number;
 	/** Pool size for lookups. Default 10. */
 	maxConnections?: number;
-	/** How long an isLiveInstance answer is served from cache. Default 1000. */
+	/**
+	 * How long a positive isLiveInstance answer is served from cache.
+	 * Default 1000. A negative one is cached at most 250 ms, so a just
+	 * started instance is followed promptly.
+	 */
 	instanceCacheTtlMs?: number;
 }
 
@@ -43,6 +47,8 @@ interface Row {
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const maxReconnectDelayMs = 5000;
 const cacheSweepSize = 10_000;
+/** Longest cache life of a "not a live instance" answer. */
+const maxNegativeInstanceTtlMs = 250;
 
 /** Application name of the LISTEN connection (visible in pg_stat_activity). */
 export const LISTEN_APPLICATION_NAME = "sbx-agent-client-listen";
@@ -188,7 +194,10 @@ export class PgRegistry implements Registry {
 				this.live.clear();
 			}
 		}
-		this.live.set(key, { live, expiresAt: now + this.instanceCacheTtlMs });
+		const ttl = live
+			? this.instanceCacheTtlMs
+			: Math.min(this.instanceCacheTtlMs, maxNegativeInstanceTtlMs);
+		this.live.set(key, { live, expiresAt: now + ttl });
 		return live;
 	}
 

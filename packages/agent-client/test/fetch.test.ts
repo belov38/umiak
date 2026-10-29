@@ -156,7 +156,7 @@ describe("AgentClient.fetch", () => {
 					const before = a.requests.length;
 					const res = await agent().fetch(m, "/uploads/u9?offset=0", {
 						method,
-						body: method === "PUT" ? "payload" : undefined,
+						body: method === "PUT" ? "payload" : null,
 						// A caller's "follow" does not apply.
 						redirect: "follow",
 					});
@@ -173,6 +173,34 @@ describe("AgentClient.fetch", () => {
 			}
 		});
 	}
+
+	it("retries a 421 whose hint cannot be checked instead of returning it", async () => {
+		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
+		let failures = 1;
+		const live = registry.isLiveInstance.bind(registry);
+		registry.isLiveInstance = async (u) => {
+			if (failures > 0) {
+				failures--;
+				throw new Error("database hiccup");
+			}
+			return live(u);
+		};
+		// undici repeats a 421 once by itself: A keeps answering it.
+		a.script.push({
+			answer: { kind: "moved", instanceUrl: b.url },
+			times: Number.POSITIVE_INFINITY,
+			after: () => registry.set(route(m, b.url)),
+		});
+		const res = await agent({ pollIntervalMs: 50 }).fetch(
+			m,
+			"?path=/data/f.bin",
+		);
+		expect(res.status).toBe(200);
+		expect((await readAll(res)).length).toBe(file.length);
+		expect(failures).toBe(0);
+		expect(fileRequests(b)).toHaveLength(1);
+	});
 
 	it("waits for a registry change after 503 agent_unavailable", async () => {
 		registry.set(route(m, a.url));
