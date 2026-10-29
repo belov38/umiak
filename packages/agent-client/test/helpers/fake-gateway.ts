@@ -453,20 +453,56 @@ function serveFiles(
 	res.end(JSON.stringify({ code: "not_found" }));
 }
 
-/** A listener that counts and drops every TCP connection: a would-be token thief. */
+/**
+ * A would-be token thief: an HTTP/1.1 and h2c listener that records every
+ * request and then drops it. It counts HTTP requests, not TCP connections:
+ * local tools probe new listening ports with plain connects.
+ */
 export interface Trap {
 	url: string;
-	/** TCP connections accepted so far. */
-	connections: number;
+	/** HTTP requests received so far. */
+	requests: RecordedRequest[];
 	close(): Promise<void>;
 }
 
 export async function startTrap(): Promise<Trap> {
-	const trap: Trap = { url: "", connections: 0, close: async () => {} };
+	const trap: Trap = { url: "", requests: [], close: async () => {} };
+	const sockets = new Set<net.Socket>();
+	const record = (protocol: "h1" | "h2", req: Req) => {
+		trap.requests.push({
+			protocol,
+			method: req.method ?? "",
+			url: req.url ?? "",
+			headers: { ...req.headers },
+		});
+	};
+	const h1 = http.createServer((req, res) => {
+		record("h1", req);
+		res.socket?.destroy();
+	});
+	h1.on("clientError", (_err, socket) => socket.destroy());
+	const h2 = http2.createServer((req, res) => {
+		record("h2", req);
+		res.stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
+	});
+	h2.on("sessionError", () => {});
 	const server = net.createServer((socket) => {
-		trap.connections++;
+		sockets.add(socket);
+		socket.on("close", () => sockets.delete(socket));
 		socket.on("error", () => {});
-		socket.destroy();
+		socket.once("readable", () => {
+			const chunk: Buffer | null = socket.read();
+			if (chunk === null) {
+				return;
+			}
+			socket.unshift(chunk);
+			if (chunk.subarray(0, 4).toString() === "PRI ") {
+				h2.emit("connection", socket);
+			} else {
+				h1.emit("connection", socket);
+				socket.resume();
+			}
+		});
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const addr = server.address();
@@ -474,7 +510,32 @@ export async function startTrap(): Promise<Trap> {
 		throw new Error("unexpected listen address");
 	}
 	trap.url = `http://127.0.0.1:${addr.port}`;
-	trap.close = () =>
-		new Promise<void>((resolve) => server.close(() => resolve()));
+	trap.close = async () => {
+		const closed = new Promise<void>((resolve) =>
+			server.close(() => resolve()),
+		);
+		for (const s of sockets) {
+			s.destroy();
+		}
+		await closed;
+	};
 	return trap;
+}
+
+/**
+ * Asserts that nothing reached the trap: no HTTP request at all, and in
+ * particular none with an Authorization header or the machine id.
+ */
+export function expectNothingStolen(trap: Trap, machineId: string): void {
+	const leaks = trap.requests.filter(
+		(r) => r.headers.authorization !== undefined || r.url.includes(machineId),
+	);
+	if (leaks.length > 0) {
+		throw new Error(
+			`trap got the service token or the machine: ${JSON.stringify(leaks)}`,
+		);
+	}
+	if (trap.requests.length > 0) {
+		throw new Error(`trap got requests: ${JSON.stringify(trap.requests)}`);
+	}
 }

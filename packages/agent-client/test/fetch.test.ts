@@ -11,6 +11,7 @@ import {
 	readBodyCapped,
 } from "../src/index.js";
 import {
+	expectNothingStolen,
 	type FakeGateway,
 	startFakeGateway,
 	startTrap,
@@ -131,7 +132,7 @@ describe("AgentClient.fetch", () => {
 				const res = await agent({ waitForAgentMs: 300, pollIntervalMs: 50 })
 					.fetch(m, "?path=/data/f.bin")
 					.catch((e: unknown) => e);
-				expect(trap.connections).toBe(0);
+				expectNothingStolen(trap, m);
 				expect(res).toBeInstanceOf(Response);
 				const r = res as Response;
 				expect(r.status).toBe(421);
@@ -170,7 +171,7 @@ describe("AgentClient.fetch", () => {
 					await res.body?.cancel();
 					expect(a.requests.length - before).toBe(1);
 				}
-				expect(trap.connections).toBe(0);
+				expectNothingStolen(trap, m);
 				expect(b.requests).toHaveLength(0);
 				expect(a.requests.some((r) => r.url.includes(other))).toBe(false);
 			} finally {

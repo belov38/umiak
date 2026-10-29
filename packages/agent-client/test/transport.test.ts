@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import http2 from "node:http2";
+import net from "node:net";
 import { gzipSync } from "node:zlib";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { ErrorDetailSchema } from "@sbx/proto";
@@ -14,6 +16,7 @@ import {
 } from "../src/index.js";
 import { Process } from "./gen/sbx/testing/v1/process_pb.js";
 import {
+	expectNothingStolen,
 	type FakeGateway,
 	startFakeGateway,
 	startTrap,
@@ -100,6 +103,34 @@ describe("AgentClient transport", () => {
 			await trap.close();
 		});
 
+		it("the trap records h1 and h2c requests, not bare connects", async () => {
+			const u = new URL(trap.url);
+			await new Promise<void>((resolve) => {
+				const sock = net.connect(Number(u.port), u.hostname, () => {
+					sock.destroy();
+					resolve();
+				});
+			});
+			expect(() => expectNothingStolen(trap, m)).not.toThrow();
+			await fetch(`${trap.url}/x`, {
+				headers: { authorization: "Bearer t" },
+			}).catch(() => {});
+			await new Promise<void>((resolve) => {
+				const s = http2.connect(trap.url);
+				s.on("error", () => {});
+				const r = s.request({ ":path": `/v1/machines/${m}/rpc` });
+				r.on("error", () => {});
+				r.on("close", () => {
+					s.close();
+					resolve();
+				});
+				r.end();
+			});
+			expect(trap.requests.map((r) => r.protocol)).toEqual(["h1", "h2"]);
+			expect(() => expectNothingStolen(trap, m)).toThrow(/service token/);
+			trap.requests.length = 0;
+		});
+
 		it("is not followed from the headers: the Connect code decides", async () => {
 			registry.set(route(m, a.url));
 			a.script.push({
@@ -112,7 +143,7 @@ describe("AgentClient transport", () => {
 			const err = await createClient(Process, agent().transport(m))
 				.setLabel({ commandId: "c1", label: "x" })
 				.catch((e: unknown) => e);
-			expect(trap.connections).toBe(0);
+			expectNothingStolen(trap, m);
 			expect(err).toBeInstanceOf(ConnectError);
 			expect((err as ConnectError).code).toBe(Code.PermissionDenied);
 			expect(rpcRequests(a)).toHaveLength(1);
@@ -131,7 +162,7 @@ describe("AgentClient transport", () => {
 			)
 				.setLabel({ commandId: "c1", label: "x" })
 				.catch((e: unknown) => e);
-			expect(trap.connections).toBe(0);
+			expectNothingStolen(trap, m);
 			// An ordinary unavailable answer: retried at the registry's route only.
 			expect(err).toBeInstanceOf(AgentUnavailableError);
 			expect(rpcRequests(a).length).toBeGreaterThanOrEqual(1);
@@ -148,7 +179,7 @@ describe("AgentClient transport", () => {
 					// The call fails before any message.
 				}
 			})().catch((e: unknown) => e);
-			expect(trap.connections).toBe(0);
+			expectNothingStolen(trap, m);
 			// A stream call maps the 421 status itself to Unknown: fatal.
 			expect(err).toBeInstanceOf(ConnectError);
 			expect((err as ConnectError).code).toBe(Code.Unknown);
