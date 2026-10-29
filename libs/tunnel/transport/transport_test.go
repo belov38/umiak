@@ -2,8 +2,14 @@ package transport_test
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
@@ -87,4 +93,58 @@ func TestParseHelloCanonicalMachineID(t *testing.T) {
 			t.Errorf("ParseHello(%q) = %q, %v; want %q", in, out.MachineID, err, want)
 		}
 	}
+}
+
+// The secret never shows in formatted or logged output, whatever the verb
+// or handler, also when the Hello is nested or behind a pointer.
+func TestHelloRedactsSecret(t *testing.T) {
+	secret := make([]byte, wire.SecretLen)
+	for i := range secret {
+		secret[i] = byte(0xA0 + i)
+	}
+	h := transport.Hello{
+		MachineID: "0f8fad5b-d9cb-469f-a165-70867728950e", BootID: "boot-1", AgentInstanceID: "inst-1",
+		Vmgenid: "vg-1", AgentVersion: "1.2.3", Scheme: transport.AuthToken, Secret: secret, ProtoVersion: "sbx-tunnel.v1",
+	}
+	leaks := []string{
+		string(secret),
+		hex.EncodeToString(secret),
+		base64.StdEncoding.EncodeToString(secret),
+		base64.RawStdEncoding.EncodeToString(secret),
+		base64.RawURLEncoding.EncodeToString(secret),
+		fmt.Sprint(secret),         // [160 161 ...]
+		fmt.Sprintf("%#v", secret), // []byte{0xa0, ...}
+		fmt.Sprintf("%x", secret[:4]),
+	}
+	type wrapped struct{ H transport.Hello }
+	out := map[string]string{}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
+		out[verb] = fmt.Sprintf(verb, h)
+		out[verb+" pointer"] = fmt.Sprintf(verb, &h)
+		out[verb+" nested"] = fmt.Sprintf(verb, wrapped{h})
+	}
+	for name, newHandler := range map[string]func(io.Writer) slog.Handler{
+		"text": func(w io.Writer) slog.Handler { return slog.NewTextHandler(w, nil) },
+		"json": func(w io.Writer) slog.Handler { return slog.NewJSONHandler(w, nil) },
+	} {
+		var buf bytes.Buffer
+		l := slog.New(newHandler(&buf))
+		l.Info("hello", "hello", h, "ptr", &h)
+		l.With("hello", h).Info("with")
+		l.Info("nested", "w", wrapped{h})
+		out["slog "+name] = buf.String()
+	}
+	for name, s := range out {
+		for _, leak := range leaks {
+			if strings.Contains(s, leak) {
+				t.Errorf("%s prints the secret (%q): %s", name, leak, s)
+			}
+		}
+		if !strings.Contains(s, "REDACTED") || !strings.Contains(s, h.MachineID) {
+			t.Errorf("%s: want the machine id and a redaction mark: %s", name, s)
+		}
+	}
+	t.Logf("%%+v: %s", out["%+v"])
+	t.Logf("%%#v: %s", out["%#v"])
+	t.Logf("slog json: %s", out["slog json"])
 }

@@ -5,7 +5,9 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -26,7 +28,8 @@ const (
 	AuthToken
 )
 
-// Hello is the handshake data sent by the agent in the upgrade request.
+// Hello is the handshake data sent by the agent in the upgrade request. Its
+// String, GoString, LogValue and MarshalJSON never print Secret.
 type Hello struct {
 	MachineID       string
 	BootID          string
@@ -37,6 +40,50 @@ type Hello struct {
 	Secret          []byte
 	// ProtoVersion is the negotiated subprotocol, set by the transport on the gateway side.
 	ProtoVersion string
+}
+
+// redacted stands in for the secret in formatted, logged and JSON output.
+const redacted = "[REDACTED]"
+
+func (h Hello) schemeName() string {
+	if h.Scheme == AuthBootstrap {
+		return "bootstrap"
+	}
+	return "token"
+}
+
+// String formats h like %+v without the secret.
+func (h Hello) String() string {
+	return fmt.Sprintf("{MachineID:%s BootID:%s AgentInstanceID:%s Vmgenid:%s AgentVersion:%s Scheme:%s Secret:%s ProtoVersion:%s}",
+		h.MachineID, h.BootID, h.AgentInstanceID, h.Vmgenid, h.AgentVersion, h.schemeName(), redacted, h.ProtoVersion)
+}
+
+// GoString formats h like %#v without the secret.
+func (h Hello) GoString() string {
+	return fmt.Sprintf("transport.Hello{MachineID:%q, BootID:%q, AgentInstanceID:%q, Vmgenid:%q, AgentVersion:%q, Scheme:%d, Secret:%s, ProtoVersion:%q}",
+		h.MachineID, h.BootID, h.AgentInstanceID, h.Vmgenid, h.AgentVersion, h.Scheme, redacted, h.ProtoVersion)
+}
+
+// LogValue logs h without the secret.
+func (h Hello) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("machine_id", h.MachineID),
+		slog.String("boot_id", h.BootID),
+		slog.String("agent_instance_id", h.AgentInstanceID),
+		slog.String("vmgenid", h.Vmgenid),
+		slog.String("agent_version", h.AgentVersion),
+		slog.String("scheme", h.schemeName()),
+		slog.String("secret", redacted),
+		slog.String("proto_version", h.ProtoVersion),
+	)
+}
+
+// MarshalJSON encodes h without the secret, for a Hello nested in a value
+// that slog's JSON handler or encoding/json serializes.
+func (h Hello) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		MachineID, BootID, AgentInstanceID, Vmgenid, AgentVersion, Scheme, Secret, ProtoVersion string
+	}{h.MachineID, h.BootID, h.AgentInstanceID, h.Vmgenid, h.AgentVersion, h.schemeName(), redacted, h.ProtoVersion})
 }
 
 // ConnInfo identifies an admitted connection.
