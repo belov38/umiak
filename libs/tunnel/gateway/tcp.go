@@ -37,7 +37,8 @@ type closeWriter interface{ CloseWrite() error }
 // (CloseWrite); the target's EOF ends the stream for the caller. The peer
 // gets only gateway-produced headers: the agent's CONNECT answer headers are
 // never copied, and an agent refusal keeps its status only if it is 400,
-// 403 or 502 (502 otherwise).
+// 403 or 502 (502 otherwise). The one exception is Sbx-Dial-Error, which the
+// gateway writes itself from the closed set {refused, timeout}.
 func (h *internalHandler) serveTCP(w http.ResponseWriter, r *http.Request) {
 	authority := r.URL.Host
 	if authority == "" {
@@ -89,6 +90,10 @@ func (h *internalHandler) serveTCP(w http.ResponseWriter, r *http.Request) {
 				// as a gateway signal to the peer: auth, moved, too many
 				// streams, unavailable.
 				status = http.StatusBadGateway
+			}
+			// Gateway-produced, from the closed set only: never the agent's value.
+			if reason := wire.NormalizeDialError(de.Reason); reason != "" {
+				w.Header().Set(wire.HeaderDialError, reason)
 			}
 			writeJSONError(w, status, jsonError{Code: "dial_refused", Message: err.Error()})
 		default:
@@ -226,8 +231,10 @@ func NewPeerTransport() *http.Transport {
 // opts.DrainDeadline is sent as Sbx-Tcp-Drain-Deadline-Ms.
 //
 // Errors: 421 → *transport.MovedError with the owner's URL; 429 →
-// ErrTooManyStreams; any other non-200 → *transport.DialError. The returned
-// conn supports CloseWrite; deadlines are not supported.
+// ErrTooManyStreams; any other non-200 → *transport.DialError, whose Reason
+// is "refused" or "timeout" from the Sbx-Dial-Error header of the answer, and
+// "" for any other value. The returned conn supports CloseWrite; deadlines
+// are not supported.
 //
 // serviceToken is sent to instanceURL: it must come from the registry. A
 // MovedError's InstanceURL must be validated (registry.Store.InstanceByURL
@@ -276,7 +283,10 @@ func DialRemoteTCP(ctx context.Context, rt http.RoundTripper, instanceURL, servi
 		case http.StatusTooManyRequests:
 			return fail(ErrTooManyStreams)
 		default:
-			return fail(&transport.DialError{Status: resp.StatusCode})
+			return fail(&transport.DialError{
+				Status: resp.StatusCode,
+				Reason: wire.NormalizeDialError(resp.Header.Get(wire.HeaderDialError)),
+			})
 		}
 	}
 	return &remoteConn{

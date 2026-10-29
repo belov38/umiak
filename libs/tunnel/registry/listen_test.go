@@ -5,15 +5,17 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/internal/pgtest"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 
 // freezeProxy forwards TCP to a target. freeze makes every connection open
@@ -186,5 +188,95 @@ func TestListenDetectsHalfOpenConnection(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Listen did not return")
+	}
+}
+
+// Extra channels are LISTENed on the same connection: their notifications
+// reach their handlers, and after a reconnect every handler, extra ones
+// included, gets "".
+func TestListenExtraChannels(t *testing.T) {
+	s, pool := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	ev := newEvents()
+	routes := make(chan string, 64)
+	other := make(chan string, 64)
+	h := ev.handlers()
+	h.Channels = map[string]func(string){
+		"sbx_routes":   func(p string) { routes <- p },
+		"Mixed Case.x": func(p string) { other <- p },
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Listen(ctx, h) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("Listen returned %v, want context.Canceled", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("Listen did not return after cancel")
+		}
+	})
+	expect(t, ev.session, "", "initial session resync")
+	expect(t, ev.instance, "", "initial instance resync")
+	expect(t, routes, "", "initial sbx_routes resync")
+	expect(t, other, "", "initial quoted channel resync")
+
+	if _, err := pool.Exec(ctx, `SELECT pg_notify('sbx_routes', 'a')`); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, routes, "a", "sbx_routes notification")
+	if _, err := pool.Exec(ctx, `SELECT pg_notify('Mixed Case.x', 'b')`); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, other, "b", "quoted channel notification")
+
+	// The tunnel channels keep working next to the extra ones.
+	id, bs := machine(t, s)
+	if _, err := s.Admit(ctx, params(id, "gw-1", transport.AuthBootstrap, bs)); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, ev.session, id, "admit")
+
+	drain(ev.session)
+	drain(ev.instance)
+	drain(routes)
+	drain(other)
+	var killed int
+	err := pool.QueryRow(ctx, `SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+		WHERE datname = current_database() AND pid <> pg_backend_pid() AND query ILIKE 'listen %'`).Scan(&killed)
+	if err != nil || killed != 1 {
+		t.Fatalf("terminate listener: killed=%d err=%v", killed, err)
+	}
+	expect(t, ev.session, "", "session resync after reconnect")
+	expect(t, ev.instance, "", "instance resync after reconnect")
+	expect(t, routes, "", "sbx_routes resync after reconnect")
+	expect(t, other, "", "quoted channel resync after reconnect")
+
+	if _, err := pool.Exec(ctx, `SELECT pg_notify('sbx_routes', 'c')`); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, routes, "c", "sbx_routes notification after reconnect")
+}
+
+// Channel names that clash with the tunnel channels, or that Postgres would
+// reject or truncate, are refused before connecting.
+func TestListenRejectsBadChannels(t *testing.T) {
+	for _, name := range []string{wire.NotifyChannel, wire.NotifyInstancesChannel, "", strings.Repeat("x", 64)} {
+		h := registry.ListenHandlers{Channels: map[string]func(string){name: func(string) {}}}
+		if err := h.Validate(); err == nil {
+			t.Errorf("Validate accepted channel %q", name)
+		}
+	}
+	ok := registry.ListenHandlers{Channels: map[string]func(string){"sbx_routes": nil, strings.Repeat("x", 63): func(string) {}}}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("Validate = %v", err)
+	}
+	// Listen refuses them too, without needing a database.
+	s := registry.New(nil)
+	bad := registry.ListenHandlers{Channels: map[string]func(string){wire.NotifyChannel: func(string) {}}}
+	if err := s.Listen(context.Background(), bad); err == nil {
+		t.Fatal("Listen accepted a tunnel channel as an extra channel")
 	}
 }

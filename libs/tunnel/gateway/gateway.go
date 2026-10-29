@@ -11,7 +11,9 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -129,7 +131,19 @@ type Config struct {
 	// the instance id, and with "" after the LISTEN connection is
 	// (re)established. Calls are sequential, from a gateway goroutine.
 	OnInstanceChange func(instanceID string)
-	Timing           Timing
+	// OnSessionChange is called for every NOTIFY on tunnel_sessions with the
+	// machine id, and with "" after the LISTEN connection is (re)established,
+	// meaning "resync everything". Calls are sequential, from a gateway
+	// goroutine fed by a coalescing queue, so a slow hook never delays
+	// fencing; ids queued while the hook runs are delivered once.
+	OnSessionChange func(machineID string)
+	// ListenChannels are extra Postgres channels LISTENed on the gateway's
+	// LISTEN connection (registry.ListenHandlers.Channels). Each handler gets
+	// the NOTIFY payload, and "" after every (re)LISTEN. The handlers run on
+	// the listener goroutine and must not block: queue the work. The tunnel
+	// channels (wire.NotifyChannel, wire.NotifyInstancesChannel) are refused.
+	ListenChannels map[string]func(payload string)
+	Timing         Timing
 	// HTTP2 sets the client parameters on agent connections; zero fields
 	// take h2.DefaultClientConfig.
 	HTTP2  h2.ClientConfig
@@ -193,6 +207,7 @@ type Gateway struct {
 
 	fenceQ *machineQueue
 	instQ  *idQueue
+	sessQ  *machineQueue // OnSessionChange calls
 
 	mu       sync.Mutex
 	sessions map[string]*session // by machine id, every state but closed
@@ -218,6 +233,10 @@ func New(cfg Config) (*Gateway, error) {
 			return nil, errors.New("gateway: Config.MinAgentVersion is not a semver version")
 		}
 	}
+	if err := (registry.ListenHandlers{Channels: cfg.ListenChannels}).Validate(); err != nil {
+		return nil, fmt.Errorf("gateway: Config.ListenChannels: %w", err)
+	}
+	cfg.ListenChannels = maps.Clone(cfg.ListenChannels)
 	if len(cfg.AllowedServicePrefixes) == 0 {
 		cfg.AllowedServicePrefixes = []string{wire.ServicePrefixAgent}
 	}
@@ -241,6 +260,7 @@ func New(cfg Config) (*Gateway, error) {
 		sessGone:  make(chan struct{}, 1),
 		fenceQ:    newMachineQueue(),
 		instQ:     newIDQueue(),
+		sessQ:     newMachineQueue(),
 		sessions:  map[string]*session{},
 		sessUp:    make(chan struct{}),
 	}
@@ -357,7 +377,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 	loopCtx, stopLoops := context.WithCancel(ctx)
 	defer stopLoops()
 	var loops sync.WaitGroup
-	for _, loop := range []func(context.Context){g.heartbeatLoop, g.sweepLoop, g.listenLoop, g.fenceWorker, g.instanceWorker} {
+	for _, loop := range []func(context.Context){g.heartbeatLoop, g.sweepLoop, g.listenLoop, g.fenceWorker, g.instanceWorker, g.sessionWorker} {
 		loops.Go(func() { loop(loopCtx) })
 	}
 	g.running.Store(true)

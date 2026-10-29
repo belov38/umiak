@@ -73,7 +73,7 @@ libs/tunnel/
   tunneltest/process/  Process double (commandId/offset/exit contract)
   tunneltest/journal/  in-memory EventJournal
   tunneltest/testpb/   generated Go for sbx.testing.v1
-  internal/pgtest/     Postgres test helper
+  tunneltest/pgtest/     Postgres test helper
   internal/e2e/        multi-gateway scenario tests
   internal/cmd/tunnelharness/  process used by TS e2e tests
 db/migrations/0100_tunnel_init.sql   tunnel schema (runner: S6 packages/db)
@@ -294,7 +294,7 @@ packages/agent-client/  @sbx/agent-client; test/gen = generated TS for sbx.testi
 
 ### Task 6: Registry (`registry`) and Postgres test helper
 
-**Files:** Create `db/migrations/0100_tunnel_init.sql` (repo root; range 0100–0199 is ours, S6 owns 0200+ and the runner `packages/db`), `libs/tunnel/registry/{store.go,listen.go}`, `libs/tunnel/internal/pgtest/pgtest.go`, `registry/store_test.go` (`package registry_test`).
+**Files:** Create `db/migrations/0100_tunnel_init.sql` (repo root; range 0100–0199 is ours, S6 owns 0200+ and the runner `packages/db`), `libs/tunnel/registry/{store.go,listen.go}`, `libs/tunnel/tunneltest/pgtest/pgtest.go`, `registry/store_test.go` (`package registry_test`).
 
 **Interfaces:**
 - `pgtest`: `func Main(m *testing.M)` (starts/stops the container once per package when needed) and `func New(t testing.TB) (*pgxpool.Pool, string /*dsn*/)` (fresh database per test with the tunnel migrations applied: `func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool) error` reads `db/migrations/01??_*.sql` from the repo root, found by walking up from the working directory, and executes them in file-name order; no tracking table — the S6 runner owns tracking). Container: `docker run -d --rm -e POSTGRES_PASSWORD=sbx -p 127.0.0.1::5432 postgres:18.6-alpine`, port via `docker port`, ready when `SELECT 1` succeeds.
