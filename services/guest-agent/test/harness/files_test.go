@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -108,9 +109,16 @@ func TestHarnessUploadOffsetHeaderPasses(t *testing.T) {
 	if res.status != http.StatusOK {
 		t.Fatalf("commit: %d %s", res.status, res.body)
 	}
+	want := slices.Concat(part1, part2)
 	content, err := os.ReadFile(dst)
-	if err != nil || !bytes.Equal(content, append(part1, part2...)) {
+	if err != nil || !bytes.Equal(content, want) {
 		t.Fatalf("uploaded file: %d bytes, %v", len(content), err)
+	}
+	// Download it back through the gateway (do checks Content-Encoding on
+	// every response above too).
+	res = e.do(http.MethodGet, query("path", dst), nil)
+	if res.status != http.StatusOK || !bytes.Equal(res.body, want) {
+		t.Fatalf("download: %d, %d bytes", res.status, len(res.body))
 	}
 }
 

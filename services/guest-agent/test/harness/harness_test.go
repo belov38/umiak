@@ -106,19 +106,24 @@ type delivery struct {
 	events []*tunnelv1.Event
 }
 
-// recSink records the delivered agent events and acknowledges every batch
-// up to its last seq.
+// recSink records the delivered agent events. It acknowledges every batch
+// up to its last seq, or only up to ackCap while that is set.
 type recSink struct {
 	mu         sync.Mutex
 	deliveries []delivery
 	conn       []*tunnelv1.ConnectionEvent
+	ackCap     uint64 // 0: no cap
 }
 
 func (s *recSink) DeliverEvents(_ context.Context, _ string, evs []*tunnelv1.Event) (uint64, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.deliveries = append(s.deliveries, delivery{at: time.Now(), events: slices.Clone(evs)})
-	s.mu.Unlock()
-	return evs[len(evs)-1].GetSeq(), nil
+	last := evs[len(evs)-1].GetSeq()
+	if s.ackCap != 0 {
+		return min(last, s.ackCap), nil
+	}
+	return last, nil
 }
 
 func (s *recSink) DeliverConnectionEvent(_ context.Context, ev *tunnelv1.ConnectionEvent) error {
@@ -128,7 +133,15 @@ func (s *recSink) DeliverConnectionEvent(_ context.Context, ev *tunnelv1.Connect
 	return nil
 }
 
-// events returns every delivered event in delivery order.
+// capAcks makes the sink acknowledge nothing above seq (0 lifts the cap).
+func (s *recSink) capAcks(seq uint64) {
+	s.mu.Lock()
+	s.ackCap = seq
+	s.mu.Unlock()
+}
+
+// events returns every delivered event in delivery order, redeliveries
+// included.
 func (s *recSink) events() []*tunnelv1.Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,8 +158,8 @@ func (s *recSink) count() int { return len(s.events()) }
 // since returns the events delivered after the first n.
 func (s *recSink) since(n int) []*tunnelv1.Event { return s.events()[n:] }
 
-// acked returns the highest seq acknowledged so far.
-func (s *recSink) acked() uint64 {
+// maxSeq returns the highest seq delivered so far.
+func (s *recSink) maxSeq() uint64 {
 	var top uint64
 	for _, ev := range s.events() {
 		top = max(top, ev.GetSeq())
@@ -522,6 +535,9 @@ func (e *env) do(method, rest string, body io.Reader) *response {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	// Set explicitly, the transport does not decode the body: a compressed
+	// answer keeps its Content-Encoding and fails the check below.
+	req.Header.Set("Accept-Encoding", "gzip")
 	res, err := e.httpClient().Do(req)
 	if err != nil {
 		e.t.Fatalf("%s %s: %v", method, rest, err)
@@ -531,16 +547,23 @@ func (e *env) do(method, rest string, body io.Reader) *response {
 	if err != nil {
 		e.t.Fatalf("%s %s: read body: %v", method, rest, err)
 	}
+	// /files never compresses (global constraint), on success or error.
+	if ce := res.Header.Get("Content-Encoding"); ce != "" {
+		e.t.Errorf("%s %s: Content-Encoding %q", method, rest, ce)
+	}
 	return &response{status: res.StatusCode, header: res.Header, body: b}
 }
 
-// retryable reports whether a client retries err through the gateway.
+// retryable reports whether a client retries err through the gateway:
+// unavailable (agent_unavailable, machine_moved), or a transport error such
+// as an EOF or a stream reset (the gateway resets a Connect stream cut
+// inside an envelope; Connect reports a peer RST_STREAM as internal, and
+// the HTTP/2 stream error type is unexported, hence the message check).
 func retryable(err error) bool {
-	switch connect.CodeOf(err) {
-	case connect.CodeUnavailable, connect.CodeUnknown, connect.CodeCanceled,
-		connect.CodeDeadlineExceeded, connect.CodeAborted, connect.CodeInternal:
+	if connect.CodeOf(err) == connect.CodeUnavailable {
 		return true
 	}
 	var ne net.Error
-	return errors.As(err, &ne) || strings.Contains(err.Error(), "EOF")
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.As(err, &ne) || strings.Contains(err.Error(), "stream error: ")
 }

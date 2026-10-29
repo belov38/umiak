@@ -12,15 +12,14 @@ import (
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
 )
 
 func TestHarnessCapabilities(t *testing.T) {
 	e := newEnv(t)
 	var caps []string
+	c := ctx(t)
 	eventually(t, "capabilities in tunnel_sessions", func() bool {
-		s, err := e.store.Session(ctx(t), e.machineID)
+		s, err := e.store.Session(c, e.machineID)
 		caps = s.Capabilities
 		return err == nil && s.CapabilitiesKnown
 	})
@@ -29,7 +28,7 @@ func TestHarnessCapabilities(t *testing.T) {
 			t.Errorf("capabilities %v lack %s", caps, want)
 		}
 	}
-	s, _ := e.store.Session(ctx(t), e.machineID)
+	s, _ := e.store.Session(c, e.machineID)
 	if s.AgentVersion != agentVersion || s.BootID != bootID {
 		t.Errorf("session %+v", s)
 	}
@@ -104,11 +103,7 @@ func TestHarnessQuiesceThaw(t *testing.T) {
 // exitedOf returns the command.exited event of id among evs.
 func exitedOf(evs []*tunnelv1.Event, id string) *tunnelv1.Event {
 	for _, ev := range evs {
-		if ev.GetType() != events.TypeCommandExited {
-			continue
-		}
-		m := &agentv1.CommandExited{}
-		if ev.GetPayload().UnmarshalTo(m) == nil && m.GetCommandId() == id {
+		if exitedPayload(ev, id) != nil {
 			return ev
 		}
 	}

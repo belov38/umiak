@@ -28,8 +28,9 @@ func chunk(i, n int) []byte {
 }
 
 // slowScript writes count chunks of size bytes to stdout, one every pause,
-// then exits with 0. want receives the whole output.
-func slowScript(count, size int, pause time.Duration) (func(*supervisor.FakeRun), []byte) {
+// then exits with 0; afterExit, when set, runs right after the exit. want
+// receives the whole output.
+func slowScript(count, size int, pause time.Duration, afterExit func()) (func(*supervisor.FakeRun), []byte) {
 	var want []byte
 	for i := range count {
 		want = append(want, chunk(i, size)...)
@@ -42,6 +43,9 @@ func slowScript(count, size int, pause time.Duration) (func(*supervisor.FakeRun)
 			time.Sleep(pause)
 		}
 		_ = r.Exit(0)
+		if afterExit != nil {
+			afterExit()
+		}
 	}, want
 }
 
@@ -66,13 +70,18 @@ func (r *reader) run(ctx context.Context) error {
 			return fmt.Errorf("attach %s: %d attaches, errors %v: %w", r.commandID, r.attaches, r.errs, err)
 		}
 		done, err := r.attachOnce(ctx)
-		if done {
-			return nil
-		}
 		if err != nil {
 			r.mu.Lock()
 			r.errs = append(r.errs, err)
 			r.mu.Unlock()
+		}
+		if done {
+			if err != nil {
+				return fmt.Errorf("attach %s: %w", r.commandID, err)
+			}
+			return nil
+		}
+		if err != nil {
 			if !retryable(err) {
 				return fmt.Errorf("attach %s: %w", r.commandID, err)
 			}
@@ -122,6 +131,17 @@ func (r *reader) attachOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return false, connect.NewError(connect.CodeUnavailable, fmt.Errorf("stream ended without exit"))
+}
+
+// codes counts the attach errors by Connect code, for logs.
+func (r *reader) codes() map[string]int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]int{}
+	for _, err := range r.errs {
+		out[connect.CodeOf(err).String()]++
+	}
+	return out
 }
 
 // goRun runs the reader in a goroutine.
@@ -217,7 +237,9 @@ func TestHarnessRunThroughGateway(t *testing.T) {
 
 func TestHarnessAttachAcrossCut(t *testing.T) {
 	e := newEnv(t)
-	script, want := slowScript(60, 1024, 25*time.Millisecond)
+	// A second cut lands right after the exit, while the exit is being
+	// recorded and its event delivered.
+	script, want := slowScript(60, 1024, 25*time.Millisecond, e.cut)
 	e.sup.Script("cut-1", script)
 	if _, err := e.process().Start(ctx(t), connect.NewRequest(&agentv1.StartRequest{CommandId: "cut-1", Spec: argvSpec("/bin/x")})); err != nil {
 		t.Fatal(err)
@@ -231,25 +253,13 @@ func TestHarnessAttachAcrossCut(t *testing.T) {
 	if r.attaches < 2 {
 		t.Errorf("%d attaches: the cut did not break the stream", r.attaches)
 	}
-	// The command exited once: one command.exited event.
-	eventually(t, "command.exited delivered", func() bool {
-		_, ok := e.sink.find("command.exited", nil)
-		return ok
-	})
-	n := 0
-	for _, ev := range e.sink.events() {
-		if ev.GetType() == "command.exited" {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Errorf("%d command.exited events, want 1", n)
-	}
+	t.Logf("%d attaches, errors by code %v", r.attaches, r.codes())
+	e.checkExitedOnce(t, "cut-1")
 }
 
 func TestHarnessAttachAcrossAgentRestart(t *testing.T) {
 	e := newEnv(t)
-	script, want := slowScript(60, 1024, 25*time.Millisecond)
+	script, want := slowScript(60, 1024, 25*time.Millisecond, nil)
 	e.sup.Script("restart-1", script)
 	if _, err := e.process().Start(ctx(t), connect.NewRequest(&agentv1.StartRequest{CommandId: "restart-1", Spec: argvSpec("/bin/x")})); err != nil {
 		t.Fatal(err)
@@ -263,6 +273,8 @@ func TestHarnessAttachAcrossAgentRestart(t *testing.T) {
 	if r.attaches < 2 {
 		t.Errorf("%d attaches: the restart did not break the stream", r.attaches)
 	}
+	t.Logf("%d attaches, errors by code %v", r.attaches, r.codes())
+	e.checkExitedOnce(t, "restart-1")
 }
 
 func TestHarnessStartRequiresNoRequestID(t *testing.T) {
