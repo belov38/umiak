@@ -507,52 +507,46 @@ EOF
 # ---------------------------------------------------------------- 4.6 template 599
 
 step_template() {
-	log "template: $TEMPLATE_VMID sbx-ubuntu-poc from a thin snapshot of base-9000-disk-0"
-	local_run scp -q "$HERE/snippets/sbx-tpl-vendor.yaml" "$HOST:/var/lib/vz/snippets/sbx-tpl-vendor.yaml"
+	log "template: $TEMPLATE_VMID sbx-ubuntu-poc from a thin snapshot of base-9000-disk-0, sanitized offline"
+	local_run scp -q "$HERE/template-sanitize.sh" "$HOST:/tmp/sbx-template-sanitize.sh"
 	remote "ID=$TEMPLATE_VMID" "MAC=$TEMPLATE_MAC" "COMMENT=$COMMENT" <<'EOF'
 if qm config "$ID" 2>/dev/null | grep -q '^template: 1'; then
 	echo "template: $ID already a template"
 	lvs -o lv_name,lv_tags pve/base-$ID-disk-0
 	exit 0
 fi
-if ! qm config "$ID" >/dev/null 2>&1; then
-	lvs pve/vm-$ID-disk-0 >/dev/null 2>&1 || lvcreate -s -kn -n vm-$ID-disk-0 --addtag sbx-tpl pve/base-9000-disk-0
-	qm create "$ID" --pool sandbox --name sbx-ubuntu-poc --description "$COMMENT template" --tags sbx-tpl \
-		--machine q35 --cpu host --ostype l26 --scsihw virtio-scsi-single --agent enabled=1,fstrim_cloned_disks=1 \
-		--serial0 socket --vga std --cores 2 --memory 2048 --balloon 0 \
-		--net0 "virtio=$MAC,bridge=sbx0,firewall=1" \
-		--ide2 local-lvm:cloudinit --ipconfig0 ip=dhcp --ciuser sbx \
-		--cicustom vendor=local:snippets/sbx-tpl-vendor.yaml
-	qm set "$ID" --scsi0 "local-lvm:vm-$ID-disk-0,discard=on,iothread=1,ssd=1" --boot order=scsi0
-	pvesh set /nodes/$(hostname)/qemu/$ID/firewall/options --enable 1 --policy_in DROP --policy_out ACCEPT \
-		--dhcp 1 --ndp 1 --radv 0 --macfilter 1 --ipfilter 0
-	pvesh create /nodes/$(hostname)/qemu/$ID/firewall/rules --type group --action sbx-egress --iface net0 --enable 1
+if qm config "$ID" >/dev/null 2>&1; then
+	echo "template: VM $ID exists but is not a template; run 'setup.sh revert template' first" >&2
+	exit 1
 fi
-if ! qm status "$ID" | grep -q running; then
-	qm start "$ID"
-fi
-echo "template: waiting for the QEMU guest agent (cloud-init installs it)"
-for i in $(seq 1 120); do
-	qm agent "$ID" ping >/dev/null 2>&1 && break
-	[ "$i" = 120 ] && { echo "template: QGA did not answer in 10 min" >&2; exit 1; }
-	sleep 5
-done
-# QGA answers while cloud-init is still running apt, so poll for the final status.
-echo "template: waiting for cloud-init to finish"
-for i in $(seq 1 120); do
-	qm guest exec "$ID" --timeout 30 -- cloud-init status 2>/dev/null | grep -qE 'status: (done|error)' && break
-	[ "$i" = 120 ] && { echo "template: cloud-init did not finish in 10 min" >&2; exit 1; }
-	sleep 5
-done
-# qm guest exec exits 0 even if the guest command fails, so check the reported exit code.
-qm guest exec "$ID" --timeout 300 -- bash -c 'dpkg -s qemu-guest-agent >/dev/null && cloud-init clean --logs --machine-id && apt-get clean && fstrim -a && sync' |
-	grep -q '"exitcode" : 0' || { echo "template: guest cleanup failed" >&2; exit 1; }
-qm shutdown "$ID" --timeout 300
-qm set "$ID" --delete cicustom
+lvs pve/vm-$ID-disk-0 >/dev/null 2>&1 || lvcreate -s -kn -n vm-$ID-disk-0 --addtag sbx-tpl pve/base-9000-disk-0
+lvchange -ay pve/vm-$ID-disk-0
+# 9000 is a personal dev template: sanitize the root filesystem before 599 ever boots.
+mnt=/mnt/sbx-tpl
+mkdir -p "$mnt"
+loop=$(losetup -P --show -f /dev/pve/vm-$ID-disk-0)
+trap 'umount "$mnt" 2>/dev/null || true; losetup -d "$loop" 2>/dev/null || true' EXIT
+root_part=$(blkid -t LABEL=cloudimg-rootfs -o device "$loop"p* | head -1)
+mount "$root_part" "$mnt"
+bash /tmp/sbx-template-sanitize.sh "$mnt"
+fstrim "$mnt" 2>/dev/null || echo "template: fstrim not supported on the loop device, skipped"
+umount "$mnt"
+losetup -d "$loop"
+trap - EXIT
+rm -f /tmp/sbx-template-sanitize.sh
+qm create "$ID" --pool sandbox --name sbx-ubuntu-poc --description "$COMMENT template" --tags sbx-tpl \
+	--machine q35 --cpu host --ostype l26 --scsihw virtio-scsi-single --agent enabled=1,fstrim_cloned_disks=1 \
+	--serial0 socket --vga std --cores 2 --memory 2048 --balloon 0 \
+	--net0 "virtio=$MAC,bridge=sbx0,firewall=1" \
+	--ide2 local-lvm:cloudinit --ipconfig0 ip=dhcp --ciuser sbx
+qm set "$ID" --scsi0 "local-lvm:vm-$ID-disk-0,discard=on,iothread=1,ssd=1" --boot order=scsi0
+pvesh set /nodes/$(hostname)/qemu/$ID/firewall/options --enable 1 --policy_in DROP --policy_out ACCEPT \
+	--dhcp 1 --ndp 1 --radv 0 --macfilter 1 --ipfilter 0
+pvesh create /nodes/$(hostname)/qemu/$ID/firewall/rules --type group --action sbx-egress --iface net0 --enable 1
 qm template "$ID"
 qm config "$ID" | grep -q '^template: 1'
 lvs -o lv_name,lv_tags,origin pve/base-$ID-disk-0
-lvs -o lv_name,lv_tags pve/base-9000-disk-0
+lvs -o lv_name,lv_attr pve/base-9000-disk-0
 echo "template: ok"
 EOF
 }
@@ -562,7 +556,6 @@ revert_template() {
 qm stop "$ID" 2>/dev/null || true
 qm destroy "$ID" --purge 1 || true
 lvremove -y pve/vm-$ID-disk-0 2>/dev/null || true
-rm -f /var/lib/vz/snippets/sbx-tpl-vendor.yaml
 EOF
 }
 

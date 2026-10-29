@@ -208,3 +208,13 @@
 
 ## Находки (заполняется в задаче 3)
 
+Проверено токеном `sbx@pve!poc` на VM 598 (2026-10-29):
+
+- **Права.** Набора §4.1 хватило для create, PUT config с готовым томом, firewall, ipset, start/stop, QGA exec, delete и чтения IPAM (`GET /cluster/sdn/ipams/pve/status`, достаточно `PVESDNUser` на `/sdn/zones/sbx`). Ограничения: `tags` в `POST /qemu` даёт `403 /vms/N VM.Config.Options` в воркере (проверка тегов идёт по `/vms/N` без pool) — `tags=sbx` ставится отдельным `PUT config` вместе с дисками. `vmgenid` задавать может только root; Proxmox сам генерирует новый `vmgenid` и `smbios1.uuid` при create. После удаления VM токен получает `403`, а не `404` (VM вне pool) — отсутствие конфига проверять через `sbx-node inventory vmfiles` и `/cluster/resources`.
+- **IPAM.** IP выделяется при `POST /qemu` (до start), MAC → IP по `mac-cache.json`. При delete запись IPAM и mac-cache удаляются.
+- **ipfilter.** С `ipfilter=1` и пустым `ipfilter-net0` весь IPv4 гостя, кроме DHCP, дропается. PVE создаёт IPSet `guest-ipam-<vmid>`, но в ipfilter его не подставляет. Рабочая схема: после create прочитать IP из IPAM и записать его в ipset `ipfilter-net0` VM до start. Проверено: DHCP, DNS, HTTPS работают.
+- **DHCP lease.** Диапазон `infinite`: lease бессрочный, продление не нужно. Правило `-p udp --sport 68 --dport 67` в `tapN-OUT` стоит до `GROUP-sbx-egress-OUT` (и до ipfilter), ответ `--sport 67 --dport 68` в `tapN-IN` до группы.
+- **Lease при delete.** Proxmox не удаляет ни lease (файл dnsmasq), ни строку `MAC,IP` в `/etc/dnsmasq.d/sbx/ethers`: `PVE::Network::SDN::Dhcp::remove_mapping` нигде не вызывается, а `del_ip_mapping` в плагине dnsmasq не реализован. Строки ethers без MAC в mac-cache PVE выкидывает только при следующем `add_ip_mapping` (старт любой VM). Нужен `sbx-node dhcp.release`: `dhcp_release` + удаление строки ethers под `flock` (как PVE) только для MAC, которого нет в mac-cache, и `reload dnsmasq@sbx`.
+- **smbios1.** Предел PVE — 512 символов на всю строку (`value may only be 512 characters long`): serial до ~340 байт в сыром виде. Payload S2 — 85 байт (116 base64, 174 символа на строку). 300-байтный serial виден в госте целиком.
+- **QGA exec.** Вывод `exec-status` содержит управляющие символы; парсить терпимо к ним.
+- **Шаблон 599 (срочная правка по сигналу master).** 9000 — личный dev-шаблон Ильи (Tailscale, ключи, токены, Chrome-профиль, Claude/Codex). Первая сборка 599 загружала его с `tailscaled` (state пустой `{}`, в tailnet не вошёл: новых узлов нет). 599 пересобран офлайн (`infra/pve/template-sanitize.sh`, chroot на хосте, без загрузки). `cloud-init clean --machine-id` в chroot удаляет `/etc/machine-id` — без файла networkd не поднимает DHCP; пишем `uninitialized`.
