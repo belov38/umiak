@@ -50,7 +50,8 @@ type DialerConfig struct {
 	PingInterval time.Duration
 	// PingTimeout is how long the connection may go without a pong (counted
 	// from the last pong, or from connect) before it is considered dead and
-	// closed (default 15s).
+	// closed (default 15s). A value not above PingInterval is raised to
+	// twice PingInterval.
 	PingTimeout time.Duration
 	// KeepAlive is the TCP keepalive idle time and probe interval (default 15s).
 	KeepAlive time.Duration
@@ -64,6 +65,12 @@ func (c DialerConfig) withDefaults() DialerConfig {
 	}
 	if c.PingTimeout <= 0 {
 		c.PingTimeout = defaultPingTimeout
+	}
+	// The timeout counts from the last pong, so it must leave a ping sent
+	// one interval later time to be answered; otherwise the first tick
+	// would already be past the deadline.
+	if c.PingTimeout <= c.PingInterval {
+		c.PingTimeout = 2 * c.PingInterval
 	}
 	if c.KeepAlive <= 0 {
 		c.KeepAlive = defaultKeepAlive

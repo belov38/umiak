@@ -533,6 +533,35 @@ func TestPingTimeoutCountsFromLastPong(t *testing.T) {
 	}
 }
 
+// A PingTimeout not above PingInterval is raised to twice the interval:
+// otherwise the first ping's deadline would already be past and every
+// connection would die at the first tick.
+func TestPingTimeoutBelowIntervalIsClamped(t *testing.T) {
+	var pings atomic.Int32
+	ts, pool := newTLSServer(t, pingCountingHandler(t, false, &pings))
+	cfg := testConfig(ts, pool)
+	cfg.PingInterval = 100 * time.Millisecond
+	cfg.PingTimeout = 50 * time.Millisecond
+	conn, _, err := wstransport.NewDialer(cfg).Dial(context.Background(), testHello(transport.AuthToken))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	readErr := make(chan error, 1)
+	go func() {
+		_, err := conn.Read(make([]byte, 1))
+		readErr <- err
+	}()
+	select {
+	case err := <-readErr:
+		t.Fatalf("healthy conn closed within 600ms: %v", err)
+	case <-time.After(600 * time.Millisecond):
+	}
+	if n := pings.Load(); n < 3 {
+		t.Fatalf("server saw %d pings in 600ms, want at least 3", n)
+	}
+}
+
 func TestHealthyConnStaysOpenAndCloseStopsPings(t *testing.T) {
 	var pings atomic.Int32
 	ts, pool := newTLSServer(t, pingCountingHandler(t, false, &pings))
