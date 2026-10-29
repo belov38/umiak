@@ -10,6 +10,7 @@ require (
 	github.com/belov38/boat-dev-clone/libs/tunnel v0.0.0
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/creack/pty v1.1.24
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/pelletier/go-toml/v2 v2.4.3
 	go.etcd.io/bbolt v1.5.0

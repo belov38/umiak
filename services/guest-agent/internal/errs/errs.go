@@ -45,6 +45,17 @@ const (
 	UploadNotFound  = "upload_not_found"
 	BadVersion      = "bad_version"
 
+	// CommandRunning refuses Process.Remove of a command that is still
+	// running (or has live leftovers).
+	CommandRunning = "command_running"
+	// ShimUnavailable: the shim of a running command cannot be reached at
+	// the moment; the call may be retried.
+	ShimUnavailable = "shim_unavailable"
+	// InvalidArgument and FailedPrecondition are the generic details of
+	// requests that no specific code describes.
+	InvalidArgument    = "invalid_argument"
+	FailedPrecondition = "failed_precondition"
+
 	// PermissionDenied and Internal have no entry in the spec list; they keep
 	// the JSON body of /files uniform.
 	PermissionDenied = "permission_denied"
