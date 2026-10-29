@@ -1,4 +1,4 @@
-import type { PveClient } from "./pve-api.ts";
+import { PveApiError, type PveClient, QgaTimeoutError } from "./pve-api.ts";
 
 export interface ExecResult {
 	exitCode: number;
@@ -14,6 +14,25 @@ export interface GuestInterface {
 		"ip-address": string;
 		prefix: number;
 	}[];
+}
+
+/**
+ * An exec-status call timed out and the guest answered it later (qemu-ga hands out the status of
+ * an exited process once), or qemu-ga restarted and forgot the PID. The exit code and output are
+ * gone; the command did start.
+ */
+export class QgaExecStatusLostError extends Error {
+	readonly vmid: number;
+	readonly pid: number;
+	constructor(vmid: number, pid: number, cause: unknown) {
+		super(
+			`exit status of guest PID ${pid} on VM ${vmid} was lost after a QGA timeout or restart`,
+			{ cause },
+		);
+		this.name = "QgaExecStatusLostError";
+		this.vmid = vmid;
+		this.pid = pid;
+	}
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -68,14 +87,37 @@ export class Qga {
 			params,
 		);
 		const deadline = Date.now() + (opts.timeoutMs ?? 30_000);
+		// exec-status is polled again after a timeout or while the agent restarts: harmless while
+		// the process runs, and the only way to tell a slow guest from a consumed status. A restarted
+		// qemu-ga does not know the PID any more.
+		let interrupted = false;
 		for (let delay = 50; ; delay = Math.min(delay * 2, 500)) {
-			const st = await this.#api.get<{
-				exited: number;
-				exitcode?: number;
-				"out-data"?: string;
-				"err-data"?: string;
-			}>(this.#path(vmid, "exec-status"), { pid });
-			if (st.exited)
+			let st:
+				| {
+						exited: number;
+						exitcode?: number;
+						"out-data"?: string;
+						"err-data"?: string;
+				  }
+				| undefined;
+			try {
+				st = await this.#api.get(this.#path(vmid, "exec-status"), { pid });
+			} catch (err) {
+				if (
+					err instanceof QgaTimeoutError ||
+					(err instanceof PveApiError &&
+						/guest agent is not running/i.test(err.message))
+				)
+					interrupted = true;
+				else if (
+					interrupted &&
+					err instanceof PveApiError &&
+					/PID \d+ does not exist/.test(err.message)
+				)
+					throw new QgaExecStatusLostError(vmid, pid, err);
+				else throw err;
+			}
+			if (st?.exited)
 				return {
 					exitCode: st.exitcode ?? -1,
 					stdout: st["out-data"] ?? "",

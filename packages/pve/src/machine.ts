@@ -53,6 +53,12 @@ export const TEMPLATE_HW_KEYS = [
 	"vga",
 	"tablet",
 ];
+/**
+ * Proxmox defaults to ciupgrade=1: cloud-init runs apt upgrade on first boot, which restarts
+ * qemu-guest-agent (forgetting running exec PIDs), journald, networkd and more about two minutes
+ * after the sandbox is ready.
+ */
+const NO_CI_UPGRADE = { ciupgrade: 0 };
 /** Hardware recorded in snapshot metadata: the template keys plus size. Never identity. */
 const SNAPSHOT_HW_KEYS = [...TEMPLATE_HW_KEYS, "cores", "memory", "balloon"];
 
@@ -244,6 +250,7 @@ export class Machines {
 				ide2: `${cfg.storage}:cloudinit`,
 				ipconfig0: "ip=dhcp",
 				ciuser: "sbx",
+				...NO_CI_UPGRADE,
 			};
 			if (size) {
 				params.cores = size.cores;
@@ -304,6 +311,7 @@ export class Machines {
 					cores: size.cores,
 					memory: size.memoryMb,
 					tags: "sbx",
+					...NO_CI_UPGRADE,
 				});
 				await this.#firewall(vmid, mac);
 				allocator.markActive(vmid);
@@ -505,9 +513,10 @@ export class Machines {
 		const mac = lease?.mac ?? macFor(cfg.clusterId, vmid);
 		if (lease) allocator.markReleasing(vmid);
 
+		// /cluster/resources is right about existence but its status lags by seconds; status/current is not.
 		const vm = (await this.#resources()).find((r) => r.vmid === vmid);
 		if (vm) {
-			if (vm.status !== "stopped") await this.stop(vmid);
+			if ((await this.status(vmid)) !== "stopped") await this.stop(vmid);
 			const upid = await api.delete<string>(this.#vmPath(vmid), {
 				purge: 1,
 				"destroy-unreferenced-disks": 1,

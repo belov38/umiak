@@ -136,6 +136,8 @@ export class FakePve {
 	agentUp = true;
 	fail: Record<string, Error> = {};
 	keepIpamOnDelete = false;
+	/** Status /cluster/resources reports instead of the real one: pvestatd lags by seconds. */
+	staleStatus = new Map<number, string>();
 	#nextIp = 101;
 	#upid = 0;
 	#generated = 0;
@@ -218,7 +220,9 @@ export class FakePve {
 			return [...this.vms.entries()].map(([vmid, vm]) => ({
 				vmid,
 				type: "qemu",
-				status: vm.status === "paused" ? "running" : vm.status,
+				status:
+					this.staleStatus.get(vmid) ??
+					(vm.status === "paused" ? "running" : vm.status),
 				pool: "sandbox",
 				maxmem: Number(vm.config.memory ?? 0) * 1024 * 1024,
 				template: vm.config.template === "1" ? 1 : 0,
@@ -230,7 +234,9 @@ export class FakePve {
 		if (!m) throw new Error(`fake: unhandled ${key}`);
 		const sub = m[3] ?? "";
 		if (method === "DELETE" && sub === "") {
-			const [id] = this.#vm(path);
+			const [id, vm] = this.#vm(path);
+			if (vm.status !== "stopped")
+				throw new PveApiError(500, `VM ${id} is running - destroy failed`);
 			this.vms.delete(id);
 			if (!this.keepIpamOnDelete)
 				this.ipam = this.ipam.filter((e) => e.vmid !== id);
@@ -253,6 +259,7 @@ export class FakePve {
 				return {
 					status: vm.status === "paused" ? "running" : vm.status,
 					qmpstatus: vm.status,
+					maxmem: Number(vm.config.memory ?? 0) * 1024 * 1024,
 				};
 			case "POST /status/start":
 				vm.status = "running";

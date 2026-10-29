@@ -8,7 +8,7 @@ import {
 	s2SerialPayload,
 	TracesRemainError,
 } from "../src/machine.ts";
-import { PveApiError } from "../src/pve-api.ts";
+import { PveApiError, QgaTimeoutError } from "../src/pve-api.ts";
 import { SqliteStateStore } from "../src/state-sqlite.ts";
 import { LvmThinDriver } from "../src/storage/lvmthin.ts";
 import { FakeNode, FakePve } from "./fakes.ts";
@@ -121,6 +121,14 @@ describe("create", () => {
 		expect(vm?.firewall.ipsets).toEqual({ "ipfilter-net0": ["10.88.0.101"] });
 	});
 
+	it("turns off the cloud-init package upgrade on first boot", async () => {
+		const { api, machines } = setup();
+		await machines.create({});
+		await machines.createViaQmClone({});
+		expect(api.vms.get(500)?.config.ciupgrade).toBe("0");
+		expect(api.vms.get(501)?.config.ciupgrade).toBe("0");
+	});
+
 	it("copies only whitelisted hardware keys and never identity from the template", async () => {
 		const { api, machines } = setup();
 		await machines.create({});
@@ -226,6 +234,27 @@ describe("snapshot and fork", () => {
 		expect(api.vms.get(500)?.status).toBe("running");
 	});
 
+	it("thaws after a freeze timeout and does not repeat the freeze", async () => {
+		const { api, log, machines, node } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		api.fail["POST /nodes/pve/qemu/500/agent/fsfreeze-freeze"] =
+			new QgaTimeoutError(
+				500,
+				"VM 500 qga command 'guest-fsfreeze-freeze' failed - got timeout",
+				"guest-fsfreeze-freeze",
+			);
+		log.length = 0;
+		await expect(machines.snapshot(a.vmid)).rejects.toBeInstanceOf(
+			QgaTimeoutError,
+		);
+		expect(log.filter((l) => /fsfreeze|lv\.snapshot/.test(l))).toEqual([
+			"api:POST /nodes/pve/qemu/500/agent/fsfreeze-freeze",
+			"api:POST /nodes/pve/qemu/500/agent/fsfreeze-thaw",
+		]);
+		expect(node.lvs.some((l) => l.name.startsWith("sbx-snap-"))).toBe(false);
+	});
+
 	it("refuses to snapshot a running machine without QGA unless crash-consistent", async () => {
 		const { api, log, machines } = setup();
 		const a = await machines.create({});
@@ -296,6 +325,33 @@ describe("delete", () => {
 		expect(stateDuringVerify).toBe("releasing");
 		expect(store.get(1, 500)).toBeUndefined();
 		expect(node.lvs).toEqual([]);
+	});
+
+	it("stops a just-started VM that /cluster/resources still shows as stopped", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		api.staleStatus.set(a.vmid, "stopped");
+		await machines.delete(a.vmid);
+		expect(api.paths()).toContain("POST /nodes/pve/qemu/500/status/stop");
+		expect(api.vms.has(500)).toBe(false);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("completes a failed delete on retry", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		api.fail["POST /nodes/pve/qemu/500/status/stop"] = new PveApiError(
+			500,
+			"stop failed",
+		);
+		await expect(machines.delete(a.vmid)).rejects.toThrow(/stop failed/);
+		expect(store.get(1, 500)?.state).toBe("releasing");
+		delete api.fail["POST /nodes/pve/qemu/500/status/stop"];
+		await machines.delete(a.vmid);
+		expect(api.vms.has(500)).toBe(false);
+		expect(store.get(1, 500)).toBeUndefined();
 	});
 
 	it("keeps the row in releasing when traces remain", async () => {

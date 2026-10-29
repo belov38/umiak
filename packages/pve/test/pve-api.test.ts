@@ -2,7 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { PveApi, PveApiError, PveTaskError } from "../src/pve-api.ts";
+import {
+	PveApi,
+	PveApiError,
+	PveTaskError,
+	QgaTimeoutError,
+} from "../src/pve-api.ts";
 import { makePki } from "./tls.ts";
 
 type Handler = (
@@ -116,6 +121,85 @@ describe("PveApi", () => {
 		expect(await a.put("/nodes/pve/qemu/500/config", { cores: 2 })).toBe(1);
 		expect(n).toBe(3);
 		expect(a.retryCount).toBe(2);
+	});
+
+	it("never retries a QGA timeout and reports it as QgaTimeoutError", async () => {
+		const seen: string[] = [];
+		const url = await serve((req, _b, res) => {
+			seen.push(`${req.method} ${req.url?.split("?")[0]}`);
+			const cmd = /agent\/([\w-]+)/.exec(req.url ?? "")?.[1];
+			json(
+				res,
+				500,
+				{ data: null },
+				`VM 500 qga command 'guest-${cmd}' failed - got timeout`,
+			);
+		});
+		const a = api(url);
+		for (const [method, cmd] of [
+			["GET", "exec-status"],
+			["POST", "exec"],
+			["POST", "fsfreeze-freeze"],
+			["POST", "fsfreeze-thaw"],
+		] as const) {
+			const path = `/nodes/pve/qemu/500/agent/${cmd}`;
+			const err = await a
+				.request(method, path, method === "GET" ? { pid: 1 } : {})
+				.catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(QgaTimeoutError);
+			expect(err).toBeInstanceOf(PveApiError);
+			expect((err as QgaTimeoutError).command).toBe(`guest-${cmd}`);
+		}
+		expect(seen).toEqual([
+			"GET /api2/json/nodes/pve/qemu/500/agent/exec-status",
+			"POST /api2/json/nodes/pve/qemu/500/agent/exec",
+			"POST /api2/json/nodes/pve/qemu/500/agent/fsfreeze-freeze",
+			"POST /api2/json/nodes/pve/qemu/500/agent/fsfreeze-thaw",
+		]);
+		expect(a.retryCount).toBe(0);
+	});
+
+	it("does not repeat a guest agent GET after a connection error", async () => {
+		let n = 0;
+		const url = await serve((req, _b, res) => {
+			n++;
+			if (n === 1) req.socket.destroy();
+			else json(res, 200, { data: { exited: 1 } });
+		});
+		await expect(
+			api(url).get("/nodes/pve/qemu/500/agent/exec-status", { pid: 1 }),
+		).rejects.toThrow();
+		expect(n).toBe(1);
+	});
+
+	it("retries a lock timeout of a non-agent POST but not other timeouts", async () => {
+		const counts: Record<string, number> = {};
+		const url = await serve((req, _b, res) => {
+			const p = req.url ?? "";
+			counts[p] = (counts[p] ?? 0) + 1;
+			if (p.endsWith("/status/start") && counts[p] === 1)
+				json(
+					res,
+					500,
+					{ data: null },
+					"can't lock file '/var/lock/qemu-server/lock-500.conf' - got timeout",
+				);
+			else if (p.endsWith("/status/stop"))
+				json(
+					res,
+					500,
+					{ data: null },
+					"VM 500 qmp command 'stop' failed - got timeout",
+				);
+			else json(res, 200, { data: "UPID:x" });
+		});
+		const a = api(url);
+		expect(await a.post("/nodes/pve/qemu/500/status/start")).toBe("UPID:x");
+		await expect(a.post("/nodes/pve/qemu/500/status/stop")).rejects.toThrow(
+			/got timeout/,
+		);
+		expect(counts["/api2/json/nodes/pve/qemu/500/status/start"]).toBe(2);
+		expect(counts["/api2/json/nodes/pve/qemu/500/status/stop"]).toBe(1);
 	});
 
 	it("throws PveApiError with the message and parameter errors", async () => {
