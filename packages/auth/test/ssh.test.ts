@@ -167,13 +167,84 @@ describe("parseSshPublicKey (hand-built input)", () => {
 					Buffer.from([0xff, 0xff, 0xff, 0xff]),
 				]),
 			), // huge length
-			`ssh-ed25519 ${"A".repeat(20_000)}`,
 		];
 		for (const c of cases)
 			expect(
 				reasonOf(() => parseSshPublicKey(c)),
 				c.slice(0, 60),
 			).toBe("malformed");
+	});
+
+	it("rejects a valid key padded past the line cap", () => {
+		const long = `${edLine} ${"x".repeat(17_000)}`;
+		expect(reasonOf(() => parseSshPublicKey(long))).toBe("malformed");
+		expect(() => parseSshPublicKey(long)).toThrow(/too long/);
+	});
+
+	it("rejects control characters in the comment", () => {
+		for (const c of ["\x1b[31mred", "a\x00b", "a\tb", "a\x7fb", "a\rb"]) {
+			expect(
+				reasonOf(() => parseSshPublicKey(`${edLine}${c}`)),
+				JSON.stringify(c),
+			).toBe("malformed");
+		}
+		expect(parseSshPublicKey(`${edLine} ünïcode ok`).comment).toBe(
+			"me@host ünïcode ok",
+		);
+	});
+
+	it("requires canonical RSA mpints and OpenSSH/Go size limits", () => {
+		const jwk = generateKeyPairSync("rsa", {
+			modulusLength: 3072,
+		}).publicKey.export({ format: "jwk" });
+		const n = Buffer.from(jwk.n as string, "base64url");
+		const e = Buffer.from(jwk.e as string, "base64url");
+		// Minimal mpint: positive, leading 0x00 only before a byte with the high bit set.
+		const mp = (b: Buffer): Buffer =>
+			(b[0] as number) & 0x80 ? Buffer.concat([Buffer.from([0]), b]) : b;
+		const rsa = (eb: Buffer, nb: Buffer): string =>
+			line("ssh-rsa", Buffer.concat([str("ssh-rsa"), str(eb), str(nb)]));
+		const ok = parseSshPublicKey(rsa(mp(e), mp(n)));
+		expect(ok.type).toBe("ssh-rsa");
+		// Same as the fingerprint Go/OpenSSH compute after re-encoding.
+		expect(
+			ok.blob.equals(Buffer.concat([str("ssh-rsa"), str(mp(e)), str(mp(n))])),
+		).toBe(true);
+
+		const bad: [string, string][] = [
+			["padded modulus", rsa(mp(e), Buffer.concat([Buffer.from([0]), mp(n)]))],
+			["padded exponent", rsa(Buffer.concat([Buffer.from([0]), e]), mp(n))],
+			["modulus missing sign byte", rsa(mp(e), n)],
+			["zero exponent as 00", rsa(Buffer.from([0]), mp(n))],
+			["empty exponent", rsa(Buffer.alloc(0), mp(n))],
+			["even exponent", rsa(Buffer.from([0x01, 0x00, 0x00]), mp(n))],
+			["exponent 1", rsa(Buffer.from([1]), mp(n))],
+			// 25-bit exponent 0x01000001.
+			["25-bit exponent", rsa(Buffer.from([0x01, 0x00, 0x00, 0x01]), mp(n))],
+			// 16385-bit modulus: 0x01 followed by 2048 bytes.
+			[
+				"16385-bit modulus",
+				rsa(
+					mp(e),
+					Buffer.concat([Buffer.from([0x01]), Buffer.alloc(2048, 0xff)]),
+				),
+			],
+		];
+		for (const [what, l] of bad)
+			expect(
+				reasonOf(() => parseSshPublicKey(l)),
+				what,
+			).toBe("malformed");
+
+		// Boundaries that must pass: 24-bit exponent, 16384-bit modulus.
+		expect(
+			parseSshPublicKey(rsa(Buffer.from([0, 0xff, 0xff, 0xff]), mp(n))).type,
+		).toBe("ssh-rsa");
+		const n16384 = Buffer.concat([
+			Buffer.from([0x00, 0x80]),
+			Buffer.alloc(2047, 0xff),
+		]);
+		expect(parseSshPublicKey(rsa(mp(e), n16384)).type).toBe("ssh-rsa");
 	});
 
 	it("rejects an ECDSA point that is not on the curve", () => {
@@ -320,6 +391,16 @@ describe("signUserCertificate input checks (no ssh-keygen)", () => {
 		expect(() => signUserCertificate(ca, { ...base, keyId: "" })).toThrow(
 			RangeError,
 		);
+		for (const bad of ["sbx:user x", "a\nb", "a\x00b", "a\tb", "a\x7fb"]) {
+			expect(
+				() => signUserCertificate(ca, { ...base, keyId: bad }),
+				JSON.stringify(bad),
+			).toThrow(RangeError);
+			expect(
+				() => signUserCertificate(ca, { ...base, principals: [bad] }),
+				JSON.stringify(bad),
+			).toThrow(RangeError);
+		}
 		expect(() =>
 			signUserCertificate(ca, { ...base, validBefore: AFTER }),
 		).toThrow(RangeError);

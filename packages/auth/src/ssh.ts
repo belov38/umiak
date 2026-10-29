@@ -41,6 +41,9 @@ export class SshKeyError extends Error {
 }
 
 export const MIN_RSA_BITS = 3072;
+/** Upper limits of Go x/crypto/ssh (the gateway) and OpenSSH. */
+const MAX_RSA_BITS = 16_384;
+const MAX_RSA_EXPONENT_BITS = 24;
 /** Longest accepted key or certificate line; a 16384-bit RSA key is ~2.8 KB. */
 const MAX_LINE = 16_384;
 
@@ -143,7 +146,12 @@ function splitLine(line: string): {
 	if (line.length > MAX_LINE) throw malformed("too long");
 	const m = /^(\S+)[ \t]+(\S+)(?:[ \t]+(.*?))?$/.exec(line.trim());
 	if (!m) throw malformed("expected '<type> <base64> [comment]'");
-	return { type: m[1] as string, b64: m[2] as string, comment: m[3] || null };
+	const comment = m[3] || null;
+	// Comments are shown in listings and terminals: no escape sequences.
+	if (comment !== null && /\p{Cc}/u.test(comment)) {
+		throw malformed("control characters in comment");
+	}
+	return { type: m[1] as string, b64: m[2] as string, comment };
 }
 
 function checkType(type: string): SshKeyType {
@@ -156,13 +164,20 @@ function checkType(type: string): SshKeyType {
 	return type as SshKeyType;
 }
 
+/**
+ * Bit length of an RFC 4251 mpint that must be positive and minimal: zero
+ * is the empty string, a leading 0x00 only before a byte with the high bit
+ * set. Go and OpenSSH re-encode keys canonically, so a padded blob would
+ * have a different fingerprint than the one the gateway computes.
+ */
 function mpintBits(b: Buffer): number {
-	if (b.length > 0 && ((b[0] as number) & 0x80) !== 0) {
-		throw malformed("negative mpint");
+	if (b.length === 0) return 0;
+	const first = b[0] as number;
+	if ((first & 0x80) !== 0) throw malformed("negative mpint");
+	if (first === 0 && (b.length === 1 || ((b[1] as number) & 0x80) === 0)) {
+		throw malformed("non-minimal mpint");
 	}
-	let i = 0;
-	while (i < b.length && b[i] === 0) i++;
-	if (i === b.length) return 0;
+	const i = first === 0 ? 1 : 0;
 	return (b.length - i - 1) * 8 + (b[i] as number).toString(2).length;
 }
 
@@ -178,10 +193,18 @@ function readKeyFields(type: SshKeyType, r: Reader): Buffer {
 	} else if (type === "ssh-rsa") {
 		const e = r.bytes();
 		const n = r.bytes();
-		if (mpintBits(e) < 2 || ((e[e.length - 1] as number) & 1) === 0) {
+		const eBits = mpintBits(e);
+		if (
+			eBits < 2 ||
+			eBits > MAX_RSA_EXPONENT_BITS ||
+			((e[e.length - 1] as number) & 1) === 0
+		) {
 			throw malformed("invalid rsa exponent");
 		}
 		const bits = mpintBits(n);
+		if (bits > MAX_RSA_BITS) {
+			throw malformed(`rsa key is ${bits} bits, at most ${MAX_RSA_BITS}`);
+		}
 		if (bits < MIN_RSA_BITS) {
 			throw new SshKeyError(
 				"rsa_too_short",
@@ -337,6 +360,11 @@ export function loadSshCa(pemOrOpenSsh: string): SshCa {
 
 // --- certificates ---
 
+/** Non-empty, no whitespace and no control characters. */
+function isToken(s: string): boolean {
+	return s.length > 0 && !/[\s\p{Cc}]/u.test(s);
+}
+
 export interface SignUserCertificateInput {
 	/** User public key line; same types as parseSshPublicKey. */
 	publicKey: string;
@@ -361,10 +389,16 @@ export function signUserCertificate(
 ): { certificate: string; serial: bigint } {
 	const key = parseSshPublicKey(input.publicKey);
 	// An empty principal list means "any principal" to OpenSSH.
-	if (input.principals.length === 0 || input.principals.some((p) => !p)) {
-		throw new RangeError("certificate needs non-empty principals");
+	if (input.principals.length === 0 || !input.principals.every(isToken)) {
+		throw new RangeError(
+			"principals must be non-empty, without spaces or controls",
+		);
 	}
-	if (!input.keyId) throw new RangeError("certificate needs a key id");
+	if (!isToken(input.keyId)) {
+		throw new RangeError(
+			"key id must be non-empty, without spaces or controls",
+		);
+	}
 	const after = toUnixSeconds(input.validAfter, "validAfter");
 	const before = toUnixSeconds(input.validBefore, "validBefore");
 	if (before <= after)
@@ -436,8 +470,10 @@ function readNames(buf: Buffer): string[] {
 }
 
 /**
- * Parses an OpenSSH user certificate line and verifies its signature.
- * Only ed25519 signing keys are supported. Validity times are not checked.
+ * Parses an OpenSSH user certificate line and checks that it was signed by
+ * its own embedded signature key (ed25519 only). This does NOT establish
+ * trust: the caller must compare `signatureKey` with the trusted CA public
+ * key. Validity times are not checked either.
  */
 export function parseUserCertificate(line: string): SshUserCertificate {
 	const { type: certType, b64 } = splitLine(line);
