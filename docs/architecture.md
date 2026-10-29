@@ -55,17 +55,22 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | `services/node-agent` | Go | На каждой ноде Proxmox: операции LVM-thin, QMP, метрики ноды. В PoC можно заменить на SSH-исполнитель с тем же интерфейсом |
 | Postgres | — | Одна БД: схема Payload (конфигурация) + схема API (рантайм) |
 
-## 3. Модель данных (рантайм, `apps/api`)
+## 3. Модель данных (рантайм, схема `runtime`)
 
-- **Sandbox** — логическая сущность для пользователя: `id`, `template`, `size`, `state`, `ttl`/auto-stop, `env`, labels, текущая `machineId`, `url`-slug.
-- **Machine** — конкретная VM: `vmid`, `node`, `cluster`, MAC, IP, `vmgenid`, `state`, `poolStatus` (warm / claimed / retired).
-- **Disk** — LV на ноде: принадлежность machine, `origin` (snapshot или шаблон).
-- **Snapshot** — набор LV-снимков всех дисков machine на момент времени: `kind` (auto / saved / fork-source), `name` для saved.
-- **Command** — процесс: `id`, `sandboxId`, `cmd`, `cwd`, `env`, `detached`, `exitCode`, `startedAt`, `endedAt`. Вывод хранит агент, позже — копия в хранилище.
-- **HostedPort** — порт sandbox, опубликованный на URL: `port`, `public`/`token`.
-- **ApiKey**, **User**, **Team**, **Template**, **Size**, **Quota** — в Payload, API читает через Local API.
+Подробно: `docs/specs/s6-control-plane.md`.
 
-**Состояния sandbox:** `creating → ready ↔ running → stopping → stopped → resuming → ready`. Плюс `error` и `deleting → deleted`. `fork` создаёт новый sandbox в `creating`.
+- **Sandbox** — логическая сущность для пользователя: `id`, `slug` (для URL и hostname), `template`, `size`, `state`, `health`, `activity`, TTL и idle-stop, labels, текущая `machineId`. Env и секреты — в отдельной таблице, зашифрованы (AES-256-GCM).
+- **Machine** — конкретная VM: `id` (= `machineId` в smbios), `vmid`, `node`, `provider` (кластер), MAC, `state` (provisioning / booting / warm / claiming / running / stopped / deleting …). Привязка к sandbox ставится один раз и не меняется; у sandbox может быть несколько machine по истории (задел на перенос).
+- **Provider / Node / Storage** — топология: кластер Proxmox, нода, хранилище с драйвером. Модель рассчитана на несколько кластеров и нод, PoC — одна нода.
+- **TemplateBuild** — сборка шаблона на ноде (VMID шаблона, раскладка дисков, версия агента), пишет S5.
+- **Disk** — LV на ноде: принадлежит machine или снапшоту.
+- **Snapshot** — набор LV-снимков всех дисков machine: `kind` (saved / fork_source; `auto` зарезервирован на фазу 2), `name` для saved.
+- **Operation** — операция над sandbox (create, fork, stop, resume, recover, delete, save_snapshot); одна активная на sandbox, delete вытесняет.
+- **Command** — процесс: `id`, `sandboxId`, `cmd`, `cwd`, имена переменных env, `mode`, `status`, `exitCode`, `startedAt`, `endedAt`. Вывод хранит агент, позже — копия в хранилище.
+- **HostedPort** — порт sandbox, опубликованный на URL: `port`, `label`, режим `token` / `sso` / `public`.
+- **ApiKey**, **User**, **Team**, **Template**, **Size**, **Quota**, цели warm pool — в Payload; `api` и `worker` читают через Payload Local API (`ConfigReader`, кэш 10 s, сброс по `NOTIFY`).
+
+**Состояния sandbox:** `creating → ready → stopping → stopped → starting → ready`. Плюс `error` и `deleting → deleted`. `fork` создаёт новый sandbox в `creating`. Здоровье (`health: ok | degraded`, degraded — агента нет дольше 60 s) и активность (`activity: busy | idle`) — отдельные поля, а не состояния.
 
 ## 4. Гостевой агент (Go)
 
@@ -119,6 +124,10 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Create** = claim warm machine (миллисекунды + provisioning через агент) → `ready`. Если пул пуст — холодный старт: клон шаблона и загрузка, Linux ~15–30 s, Windows ~40–90 s.
 - Пул пополняется в фоне с ограничением параллельных клонов на ноду и storage.
 - Fork и resume идут мимо пула: у них свои диски.
+- Учёт RAM на ноде: работающие + warm + загружающиеся machine ≤ лимита ноды (8 GB в PoC). Пул пополняется только из свободной RAM. Create или resume при нехватке вытесняет warm machine других пар (шаблон, размер), иначе — `503 out_of_capacity`.
+- Identity machine (`machineId`, bootstrap secret в smbios) задаётся при подготовке machine для пула; при claim worker ротирует machine token и передаёт агенту env, секреты и SSH-ключи.
+- Новая сборка шаблона меняет поколение пула: старые warm machine заменяются, sandbox на старой сборке не трогаются.
+- Подробно: `docs/specs/s6-control-plane.md` §9.
 
 ## 7. Сеть
 
