@@ -11,7 +11,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | Шаблон | ОС | Доступ |
 |---|---|---|
 | `linux` | Ubuntu 26.04 LTS (сборка: `docs/specs/s5-linux-template.md`) | exec, files, SSH |
-| `linux-desktop` | Ubuntu + X11/openbox + Chrome | + рабочий стол в браузере, computer-use |
+| `linux-desktop` | Ubuntu + X11/openbox + Chrome (сборка: `docs/specs/s10-desktop.md`) | + рабочий стол в браузере, computer-use |
 | `windows` | Windows 11 (образ и лицензия пользователя; сборка: `docs/specs/s9-windows.md`) | exec (PowerShell), files, SSH, рабочий стол |
 | `windows-core` | Windows Server 2025 Core (образ и лицензия пользователя), **фаза 2** (S9 §22) | exec (PowerShell), files, SSH |
 
@@ -142,20 +142,23 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Весь входящий трафик идёт через туннель агента к `gateway`:
   - **HTTP:** `https://<slug>-<port>.sbx.<domain>` → любой под gateway → туннель (локально или через под-владелец) → `localhost:port`. Режимы доступа `token`, `sso`, `public`. Подробно: `docs/specs/s4-gateway.md`.
   - **SSH:** `ssh <sandbox>@ssh.<domain>` → gateway терминирует SSH и проверяет ключ пользователя через `api` → туннель → системный sshd VM на `127.0.0.1:22` с короткоживущим сертификатом от SSH CA gateway (`TrustedUserCAKeys`). Ключи пользователей в VM не копируются.
-  - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.sbx`); медиа WebRTC через отдельный TURN (coturn, S10).
+  - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.sbx`); медиа WebRTC через отдельный TURN (coturn, только relay между своими allocation), запасной транспорт — WebSocket через gateway и туннель (S10 §9).
 
 ## 8. Рабочий стол и computer-use
 
-- Linux и Windows: Sunshine (захват экрана, кодирование) + moonlight-web (WebRTC в браузер). Стример запускается по требованию.
-- URL рабочего стола с коротким токеном, встраивается в iframe дашборда.
-- Computer-use: cua-driver (MIT) в пользовательской сессии гостя. API платформы проксирует screenshot, click, type и т.п. через агента; MCP-обёртка в `apps/mcp`.
-- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; helper `sbx-session` в интерактивной сессии (фаза `desktop`), через него S10 запускает cua-driver и Sunshine (S9 §13).
+Подробно: `docs/specs/s10-desktop.md`.
+
+- Linux и Windows: Sunshine (захват экрана, x264 на CPU) + moonlight-web (WebRTC в браузер), upstream без форка, только на loopback VM. Стример запускается по требованию.
+- Ссылка рабочего стола с одноразовым билетом на 10 min, встраивается в iframe дашборда. Режимы доступа `token`, `sso` (только команда), `public` (выключен по умолчанию).
+- Computer-use API (скриншот, мышь, клавиатура, буфер обмена) — собственные примитивы агента через helper `sbx-session` в пользовательской сессии (Linux и Windows), не зависят от стримера. MCP-обёртка в `apps/mcp`.
+- cua-driver (MIT) ставится в шаблоны как MCP для агентов внутри VM (регистрация — S15).
+- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; helper `sbx-session` в интерактивной сессии (фаза `desktop`, S9 §13).
 
 ## 9. Публичное API (v1, кратко)
 
 Подробно: `docs/specs/s7-public-api.md`.
 
-- `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
+- `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/desktop` (ссылки, доступ, скриншот, действия, буфер; S10 §13), `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
 - ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды.
 - Три listener-а `api`: публичный (только API-ключи), за oauth2-proxy (браузер, проверка Origin), внутренний (gateway, service tokens).
 - OpenAPI генерируется из zod-схем; SDK TS (`openapi-typescript` + `openapi-fetch`) и Python (`openapi-python-client`) с рукописными хелперами; CLI `sbx` на TS SDK через Bun compile.
@@ -184,7 +187,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 **Деплой gateway.** Rolling update: `preStop` запускает drain (S2, S4 §10). HTTP-потоки живут до 2 min, SSH-сессии до 15 min с предупреждением, `terminationGracePeriodSeconds: 960`.
 
-**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу `gateway-edge` (`tunnel.<domain>:443`, IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный сервис с UDP LoadBalancer или hostNetwork (S10).
+**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу `gateway-edge` (`tunnel.<domain>:443`, IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный coturn `turn.<domain>` с hostNetwork на выделенной ноде или UDP LoadBalancer (S12); sandbox ходят к нему по UDP 3478 (IPSet `sbx-turn`, S10 §9.2).
 
 ## 11. Безопасность
 
@@ -198,8 +201,8 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | Фаза | Содержание |
 |---|---|
 | **PoC** (homelab `pve`) | Шаблон `linux`, guest-agent v0 (туннель, exec, files), gateway (туннели, HTTP-порты), worker (claim из warm pool, create, delete), драйвер lvmthin (clone из шаблона, snapshot, fork), минимальный API и CLI. Замеры: claim-to-ready, холодный старт, fork |
-| **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, рабочий стол, Payload admin/dashboard, API-ключи, auto-stop, SDK TS/Python, MCP |
-| **Фаза 2** | `windows-core` (Windows Server Core, S9 §22), несколько нод и кластеров, PBS-архив и перенос, computer-use API, история команд вне VM, встроенные coding-агенты, egress-политики, OTel, webhooks |
+| **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, рабочий стол, computer-use API (скриншот, мышь, клавиатура, буфер), Payload admin/dashboard, API-ключи, auto-stop, SDK TS/Python, MCP |
+| **Фаза 2** | `windows-core` (Windows Server Core, S9 §22), несколько нод и кластеров, PBS-архив и перенос, computer-use v2 и рабочий стол v2 (S29), история команд вне VM, встроенные coding-агенты, egress-политики, OTel, webhooks |
 
 ## 13. Открытые вопросы
 

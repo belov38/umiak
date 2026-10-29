@@ -632,7 +632,7 @@ SSH-лог: `sessionId`, `clientIp`, `userId`, `fingerprint`, `sandboxId`, на�
 ## 13. TURN: заглушка для S10
 
 - TURN — отдельный coturn (Deployment с UDP LoadBalancer или hostNetwork), **не процесс gateway**. Поправка к architecture §2 и §10.
-- Креды TURN — временные, по схеме TURN REST API (`use-auth-secret`, `static-auth-secret` общий с `api`). Выдаёт их `api` вместе с URL рабочего стола. Gateway в медиапути не участвует.
+- Креды TURN — временные, по схеме TURN REST API (`use-auth-secret`). ~~Секрет общий с `api`, креды выдаёт `api` вместе с URL рабочего стола.~~ **Переопределено S10 §9.3:** секрет есть только у `worker` и coturn, креды доставляются агенту через `Desktop/Configure`. Gateway в медиапути не участвует. Рабочий стол целиком — `docs/specs/s10-desktop.md` (gateway — S10 §10).
 - От S4 нужно только:
   - зарезервированный суффикс `<slug>-desktop` (§4.2) для сигналинга moonlight-web через тот же HTTP-прокси и те же режимы доступа;
   - разрешение в firewall sandbox (S1 IPSet) на исходящий UDP к адресам TURN. Порты и форму определяет S10.
