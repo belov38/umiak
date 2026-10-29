@@ -142,3 +142,22 @@ func TestHTTPErrorImplementsError(t *testing.T) {
 		t.Error("empty Error()")
 	}
 }
+
+func TestWriteHTTPFields(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := New(connect.CodeInvalidArgument, InvalidPath, "bad entry")
+	WriteHTTPFields(rec, err, map[string]any{"entries_written": 3, "code": "ignored"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got struct {
+		wantBody
+		EntriesWritten int `json:"entries_written"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.wantBody != (wantBody{InvalidPath, "bad entry", false}) || got.EntriesWritten != 3 {
+		t.Fatalf("body = %s", rec.Body.Bytes())
+	}
+}

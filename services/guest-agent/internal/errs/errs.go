@@ -164,17 +164,34 @@ type httpBody struct {
 // its ErrorDetail code (fallback: the Connect code string); any other error
 // becomes 500 internal without leaking its text.
 func WriteHTTP(w http.ResponseWriter, err error) {
+	WriteHTTPFields(w, err, nil)
+}
+
+// WriteHTTPFields is WriteHTTP with extra top-level fields in the JSON body
+// (for example entries_written of an archive upload). Fields never replace
+// code, message or retryable.
+func WriteHTTPFields(w http.ResponseWriter, err error, fields map[string]any) {
+	status, body := httpResponse(err)
+	out := make(map[string]any, len(fields)+3)
+	for k, v := range fields {
+		out[k] = v
+	}
+	out["code"], out["message"], out["retryable"] = body.Code, body.Message, body.Retryable
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// httpResponse maps err to an HTTP status and error body.
+func httpResponse(err error) (int, httpBody) {
 	var herr HTTPError
 	var cerr *connect.Error
-	var status int
-	var body httpBody
 	switch {
 	case errors.As(err, &herr):
-		status = herr.Status
-		body = httpBody{herr.Code, herr.Message, herr.Retryable}
+		return herr.Status, httpBody{herr.Code, herr.Message, herr.Retryable}
 	case errors.As(err, &cerr):
-		status = HTTPStatus(cerr.Code())
-		body = httpBody{cerr.Code().String(), cerr.Message(), rpcconv.Retryable(cerr.Code())}
+		status := HTTPStatus(cerr.Code())
+		body := httpBody{cerr.Code().String(), cerr.Message(), rpcconv.Retryable(cerr.Code())}
 		if d, ok := rpcconv.Detail(cerr); ok {
 			body.Code, body.Retryable = d.GetCode(), d.GetRetryable()
 			if cerr.Code() == connect.CodeResourceExhausted {
@@ -186,11 +203,8 @@ func WriteHTTP(w http.ResponseWriter, err error) {
 				}
 			}
 		}
+		return status, body
 	default:
-		status = http.StatusInternalServerError
-		body = httpBody{Code: Internal, Message: "internal error"}
+		return http.StatusInternalServerError, httpBody{Code: Internal, Message: "internal error"}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }
