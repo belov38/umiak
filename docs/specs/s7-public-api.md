@@ -11,7 +11,7 @@ S7 — внешний интерфейс платформы. Им пользую
 Что считается успехом:
 1. Агент создаёт sandbox, запускает 40-минутную сборку и получает её вывод **байт в байт** с правильным кодом выхода, даже если за это время обрывался туннель, передеплоился gateway и перезапустился под `api`. Повтор запроса с тем же `Idempotency-Key` не запускает команду второй раз.
 2. Типичный сценарий (create → ждать готовности → exec → файлы → delete) занимает 5–10 строк на TS и на Python, без ручного разбора NDJSON и без ручных повторов.
-3. `sbx login` в браузере выдаёт CLI ключ за один клик; на машине без браузера работает `sbx login --device`.
+3. `sbx login` (device grant Keycloak) входит за одно подтверждение в браузере, в том числе с машины без браузера; личных долгоживущих ключей у людей нет, а выключенный в Keycloak человек теряет доступ за минуты (§7.6, §7.10).
 4. Из ответа на любую ошибку клиент (и LLM) понимает, что случилось и можно ли безопасно повторить запрос.
 5. OpenAPI — единственный источник правды: SDK, CLI, MCP и документация строятся из него, а ломающее изменение `v1` ловит CI.
 
@@ -20,7 +20,7 @@ S7 — внешний интерфейс платформы. Им пользую
 **Цели**
 - `apps/api` на Hono + `@hono/zod-openapi`: публичные ресурсы v1, NDJSON-стримы, PTY по WebSocket, внутренние ручки для gateway и приёма событий агента.
 - Единые конвенции: ID, ошибки, пагинация, идемпотентность, лимиты, версии.
-- Аутентификация: API-ключи со scopes; браузерные вызовы через oauth2-proxy; `sbx login`; контракт с S8.
+- Аутентификация: Keycloak JWT для людей в CLI, SDK и MCP; командные API-ключи со scopes для автоматизации; браузерные вызовы через oauth2-proxy; `sbx login`; контракт с S8.
 - Возобновляемый стрим от агента до клиента.
 - OpenAPI 3.1, SDK TS и Python (генерация и рукописные фасады с хелперами).
 - `apps/cli` (`sbx`) на Bun compile.
@@ -37,7 +37,7 @@ S7 — внешний интерфейс платформы. Им пользую
 - Вывод, который получил клиент после переподключения, отличается от реального хотя бы на байт, а клиент об этом не узнал (событие `truncated` не пришло).
 - Значение env, секрета, секрета API-ключа, токена порта или кода входа попало в лог, метрику, ответ `GET` или URL.
 - Запрос на публичный хост прошёл аутентификацию по заголовку `X-Auth-Request-*`.
-- Ключ получил права, которых не было у выпустившего его ключа.
+- Командный ключ выпущен не `owner`-ом команды или получил права шире выбранных им scopes; принят JWT не от Keycloak realm `sbx` или не для `sbx-api`.
 - `retryable: true` в ответе, после которого повтор того же запроса создаёт второй ресурс или запускает вторую команду.
 
 ## 3. Ограничения
@@ -51,15 +51,15 @@ S7 — внешний интерфейс платформы. Им пользую
 ## 4. Обзор
 
 ```
- agents / CI / CLI / SDK                     browser (dashboard S8, terminal, CLI login page)
-   |  https://api.<domain>/v1/*                 |  https://app.<domain>/api/v1/*, /sbx-auth/*, /cli/*
-   |  Authorization: Bearer sbx_...             v
+ agents / CI / CLI / SDK                     browser (dashboard S8, terminal)
+   |  https://api.<domain>/v1/*                 |  https://app.<domain>/api/v1/*, /sbx-auth/*
+   |  Bearer <Keycloak JWT> | sbx_... (team)    v
    |                                     +--------------+
    |                                     | oauth2-proxy |  OIDC, X-Auth-Request-Email/-User/-Groups
    |                                     +------+-------+
    v                                            v
  +----------------------------- apps/api (one process, one Deployment) --------------------------+
- | :8080 public   - API keys only, X-Auth-Request-* stripped                                      |
+ | :8080 public   - Keycloak JWT or team keys, X-Auth-Request-* stripped                          |
  | :8081 proxied  - trusts oauth2-proxy headers, Origin checks, JIT user via IdentityStore (S8)   |
  | :8082 internal - service tokens: /internal/v1/agent-events, /internal/v1/gateway/*             |
  | :9090 metrics, /healthz, /readyz                                                               |
@@ -77,7 +77,7 @@ S7 — внешний интерфейс платформы. Им пользую
 | Путь | Имя | Что |
 |---|---|---|
 | `apps/api` | `@sbx/api` | Hono-приложение, три listener-а, маршруты, zod-схемы, генерация OpenAPI в `apps/api/openapi/v1.json` (коммитится) |
-| `packages/auth` | `@sbx/auth` | Формат и hash API-ключей, scopes и пресеты, проверка «подмножества», интерфейс `IdentityStore` и его статическая реализация. Используют `api` и S8 (чтобы формат ключа был один) |
+| `packages/auth` | `@sbx/auth` | Формат и hash API-ключей, scopes и пресеты, интерфейс `IdentityStore` и его статическая реализация. Используют `api` и S8 (чтобы формат ключа был один) |
 | `packages/sdk-ts` | `@sbx/sdk` | Сгенерированные типы + `openapi-fetch` + фасад `Sbx` и хелперы |
 | `packages/sdk-py` | `sbx-sdk` (импорт `sbx_sdk`) | Python-проект (uv); сгенерированный клиент + фасады `Sbx`/`AsyncSbx` |
 | `apps/cli` | `sbx` | CLI на `@sbx/sdk`, сборка `bun build --compile` |
@@ -92,7 +92,7 @@ S7 — внешний интерфейс платформы. Им пользую
 |---|---|---|
 | `https://api.<domain>/v1/*` | public `:8080` | SDK, CLI, MCP, CI, агенты |
 | `https://app.<domain>/api/v1/*` (префикс `/api` снимает ingress) | proxied `:8081` | браузер (дашборд S8, терминал) |
-| `https://app.<domain>/sbx-auth/*`, `/cli/*` | proxied `:8081` | SSO для портов (S4 §8.4), вход CLI (§7.6) |
+| `https://app.<domain>/sbx-auth/*` | proxied `:8081` | SSO для портов (S4 §8.4) |
 | `http://api.<ns>.svc:8082/internal/v1/*` | internal `:8082` | gateway |
 | `GET /v1/openapi.json`, `GET /v1/docs` | public и proxied | без аутентификации |
 
@@ -162,9 +162,10 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 |---|---|---|---|
 | 400 | `validation` | нет | схема тела или query; `details.issues[] {path, message}` |
 | 400 | `invalid_json`, `invalid_cursor`, `invalid_path` | нет | |
-| 401 | `unauthorized` | нет | нет ключа, ключ неизвестен или отозван |
+| 401 | `unauthorized` | нет | нет bearer, ключ неизвестен или отозван, JWT не прошёл проверку (`details.reason: "invalid_token"`, §7.10) |
+| 401 | `token_expired` | нет | access token Keycloak истёк: обновить токен и повторить (§7.6) |
 | 401 | `api_key_expired` | нет | |
-| 403 | `forbidden` | нет | не хватает scope (`details.requiredScope`) или роли |
+| 403 | `forbidden` | нет | не хватает scope (`details.requiredScope`) или роли; `details.reason`: `role`, `user_required` (ручка только для человека), `user_disabled` (пользователь деактивирован, S8 §20.1) |
 | 403 | `team_forbidden` | нет | `Sbx-Team` не из команд пользователя или не совпадает с командой ключа |
 | 403 | `origin_forbidden` | нет | проверка Origin на proxied listener-е (§7.4) |
 | 403 | `quota_exceeded` | нет | квота команды (S6 §8.5); `details {quota, limit, current}` |
@@ -207,7 +208,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 ### 5.7 Идемпотентность
 
 - Заголовок `Idempotency-Key` (1–255 печатных ASCII) принимают: `POST /sandboxes`, `POST /sandboxes/{sandbox}/fork`, `POST /sandboxes/{sandbox}/commands`, `POST /sandboxes/{sandbox}/ptys`, `POST /snapshots`.
-- Хранение — таблица S6 `idempotency_keys`: `(principal, scope, key)`, hash канонического тела, 24 h. Тот же ключ и тело → сохранённый результат (тот же ресурс), заголовок `Idempotency-Replayed: true`. Другое тело → `409 idempotency_key_reused`. Параллельный дубль ждёт первого (S6 §14.1). Principal для ключа — API-ключ или пользователь сессии.
+- Хранение — таблица S6 `idempotency_keys`: `(principal, scope, key)`, hash канонического тела, 24 h. Тот же ключ и тело → сохранённый результат (тот же ресурс), заголовок `Idempotency-Replayed: true`. Другое тело → `409 idempotency_key_reused`. Параллельный дубль ждёт первого (S6 §14.1). Principal для ключа — командный API-ключ или пользователь (сессия или Keycloak JWT — один и тот же `userId`).
 - Для команд ключ превращается в `commandId`; `Process/Start` агента идемпотентен по нему (S2 §9.1). Поэтому повтор `POST /commands` с тем же ключом **никогда** не запускает команду второй раз, а подключается к уже запущенной (§9.3).
 - Мутирующие вызовы агента без публичного ключа получают `Sbx-Request-Id` = новый UUID на каждый HTTP-запрос (повторы внутри `agent-client` его сохраняют). С публичным ключом — UUIDv5 от `(principal, scope, key)`.
 - Остальные действия естественно идемпотентны: `stop`, `recover`, `delete` при активной операции того же вида возвращают её, `resume` — если совпадает и тело (§8.2); `PUT /ports/{port}` с теми же настройками ничего не меняет; `DELETE` повторяем.
@@ -301,43 +302,46 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | `POST /v1/sandboxes/{sandbox}/ports/{port}/rotate-token` | новый токен | `ports:write` | `rotatePortToken` | M |
 | `DELETE /v1/sandboxes/{sandbox}/ports/{port}` | снять | `ports:write` | `unhostPort` | M |
 | `GET /v1/sandboxes/{sandbox}/ssh` | как подключиться | `ssh:connect` | — | M |
-| `GET/POST /v1/ssh-keys`, `DELETE /v1/ssh-keys/{key}` | SSH-ключи пользователя | `ssh:connect` | `IdentityStore` (S8) | M |
+| `POST /v1/sandboxes/{sandbox}/ssh/certificate` | короткий SSH-сертификат (§11.3) | `ssh:connect` | — | M |
+| `GET/POST /v1/ssh-keys`, `DELETE /v1/ssh-keys/{key}` | SSH-ключи пользователя (только человек, §7.10) | `ssh:connect` | `IdentityStore` (S8) | M |
 | `GET /v1/snapshots`, `GET /v1/snapshots/{name}` | saved snapshots | `snapshots:read` | `listSavedSnapshots`, `getSavedSnapshot` | M |
 | `POST /v1/snapshots` | сохранить | `snapshots:write` | `saveSnapshot` | M |
 | `DELETE /v1/snapshots/{name}` | удалить (`Sbx-Confirm-Delete`, §5.12) | `snapshots:write` | `deleteSavedSnapshot` | M |
 | `GET /v1/templates`, `GET /v1/sizes` | каталог | любой ключ | `ConfigReader`, `template_builds` | P |
-| `GET /v1/api-keys`, `POST /v1/api-keys` | ключи | `keys:admin` | `IdentityStore` | M |
-| `POST /v1/api-keys/{key}/rotate`, `DELETE /v1/api-keys/{key}` | ротация, отзыв | `keys:admin` | `IdentityStore` | M |
-| `DELETE /v1/api-keys/self` | отозвать текущий ключ (`sbx logout`) | любой ключ | `IdentityStore` | M |
+| `GET /v1/api-keys` | командные ключи (§7.2) | любой участник; ключ — `keys:admin` | `IdentityStore` | M |
+| `POST /v1/api-keys`, `POST /v1/api-keys/{key}/rotate` | выпуск, ротация | `owner` команды, только человек (§7.2) | `IdentityStore` | M |
+| `DELETE /v1/api-keys/{key}` | отзыв | `owner`, оператор; ключ — `keys:admin` | `IdentityStore` | M |
+| `DELETE /v1/api-keys/self` | ключ отзывает сам себя (`sbx logout --revoke`) | любой ключ | `IdentityStore` | M |
 | `GET /v1/me` | кто я | любой | — | P |
 | `GET /v1/limits` | квоты, остаток, допустимые шаблоны и размеры | любой | `usage` | M |
 | `/v1/environments` (S8 §10.2) | environments команды | `environments:read` / `environments:write` | `EnvironmentService` (S8) | M |
 | `GET /v1/meta` | платформа: домены, SSH host keys, версии | без auth | — | P |
-| `POST /v1/cli/device`, `POST /v1/cli/token` | вход CLI | без auth | §7.6 | M |
 
-## 7. Аутентификация и права [решение Q2]
+## 7. Аутентификация и права [решение Q2; модель входа — решение Ильи 2026-10-29: Keycloak, offboarding вариант A]
+
+Два вида bearer на public listener-е: **Keycloak JWT** — люди в CLI, SDK и локальном MCP (§7.6, §7.10), личных долгоживущих ключей у людей нет; **командный ключ `sbx_`** — автоматизация и CI (§7.2). Браузер — через oauth2-proxy (§7.4). IdP — Keycloak, realm `sbx` (architecture §10).
 
 ### 7.1 Три listener-а
 
 | Listener | Принимает | Не принимает |
 |---|---|---|
-| public `:8080` (`api.<domain>`) | `Authorization: Bearer sbx_...`; без auth — только `/v1/meta`, `/v1/openapi.json`, `/v1/docs`, `/v1/cli/device`, `/v1/cli/token` | Заголовки `X-Auth-Request-*`, `X-Forwarded-User`, `X-Forwarded-Email` вырезаются до любой обработки. Cookie игнорируются |
+| public `:8080` (`api.<domain>`) | `Authorization: Bearer <access token Keycloak>` (§7.10) или `Authorization: Bearer sbx_...` (§7.2); без auth — только `/v1/meta`, `/v1/openapi.json`, `/v1/docs` | Заголовки `X-Auth-Request-*`, `X-Forwarded-User`, `X-Forwarded-Email` вырезаются до любой обработки. Cookie игнорируются |
 | proxied `:8081` (`app.<domain>` через oauth2-proxy) | Заголовки oauth2-proxy `X-Auth-Request-Email` (обязателен), `-User`, `-Groups`, `-Preferred-Username` | `Authorization: Bearer` (на этом хосте не нужен, `400`). Запрос без `X-Auth-Request-Email` — `401` |
 | internal `:8082` (ClusterIP) | `Authorization: Bearer <service-token>` gateway | Всё остальное |
 
 - Заголовкам oauth2-proxy можно доверять только потому, что к `:8081` пускает лишь oauth2-proxy (NetworkPolicy S12), а на `:8080` они вырезаются. Это анти-цель №4, у неё отдельный тест (§16).
 - IP клиента для логов и лимитов — из `X-Forwarded-For` только от адресов из `SBX_API_TRUSTED_PROXY_CIDRS` (ingress), иначе адрес соединения.
 
-### 7.2 API-ключи
+### 7.2 Командные API-ключи (`sbx_`)
 
 - **Формат секрета:** `sbx_` + 43 символа base62 (32 случайных байта) + 6 символов base62 CRC32 от предыдущей части. CRC позволяет сканерам секретов (GitHub secret scanning с собственным паттерном, gitleaks) отличать ключ от случайной строки без обращения к серверу. Регулярное выражение для сканеров: `\bsbx_[0-9A-Za-z]{49}\b`.
 - **Хранение:** только `sha256(secret)` в hex (уникальный индекс); высокая энтропия, медленный hash не нужен. Для отображения — `prefix` (первые 8 символов после `sbx_`) и `last4`. Коллекция `api-keys` в Payload (S8, поля — §17.3).
 - **Проверка:** `sha256` → кэш в памяти пода (положительный 30 s, отрицательный 5 s) → `IdentityStore.findApiKeyByHash`. Сброс кэша по `LISTEN sbx_identity` (S8 шлёт `NOTIFY` при изменении ключа; `api` шлёт сам при отзыве). Отозванный ключ перестаёт работать на всех подах не позже чем через 30 s, обычно сразу.
 - **Срок:** по умолчанию 90 дней, максимум 365 [решение S7]; бессрочных ключей нет. `expiresAt` прошёл — `401 api_key_expired`.
 - `lastUsedAt` обновляется не чаще раза в 60 s на ключ.
-- Ключ принадлежит паре (пользователь, команда). Если пользователь деактивирован (S8) или вышел из команды, ключ не работает (`401 unauthorized`).
-- Секрет показывается один раз: в ответе `POST /api-keys`, `rotate` и `POST /cli/token`.
-- **Тип ключа** (`kind`): `user` — ключ пользователя в команде, всё выше; `sandbox` — **зарезервирован, в MVP не реализуется**. Ключ `sandbox` будет привязан к одной sandbox (`sandboxId`), с секретом `sbxs_` + тот же формат (регулярное выражение для сканеров — `\bsbxs?_[0-9A-Za-z]{49}\b`), и предназначен для CLI внутри VM: видит только свою sandbox, scopes не шире пресета `sandbox-self` (§7.3) и не шире прав создателя. В MVP в схеме есть поля `kind` (всегда `user`) и `sandboxId` (всегда `null`); `POST /api-keys` с `kind: "sandbox"` → `400 validation`. Выпуск, доставка в VM и отзыв при delete sandbox — фаза 2 (S24).
+- **Ключ принадлежит команде, а не человеку.** Выпускает и ротирует его `owner` команды — человек в браузерной сессии (дашборд) или с Keycloak JWT (`sbx keys create`, тот же API) (иначе `403 forbidden`, `details.reason: "role"` или `"user_required"`); ключ ключей не выпускает. Создатель записывается в `createdBy` только для аудита. Уход создателя из команды и его деактивация (S8 §20.1) ключ **не выключают**: отзывают его `owner`-ы команды, оператор (только отзыв), ключ с `keys:admin` или сам ключ (`DELETE /v1/api-keys/self`). Удаление команды отзывает все её ключи (S8 §6.4).
+- Секрет показывается один раз: в ответе `POST /api-keys` и `rotate`.
+- **Тип ключа** (`kind`): `team` — командный ключ, всё выше; `sandbox` — **зарезервирован, в MVP не реализуется**. Ключ `sandbox` будет привязан к одной sandbox (`sandboxId`), с секретом `sbxs_` + тот же формат (регулярное выражение для сканеров — `\bsbxs?_[0-9A-Za-z]{49}\b`), и предназначен для CLI внутри VM: видит только свою sandbox, scopes не шире пресета `sandbox-self` (§7.3) и не шире прав создателя. В MVP в схеме есть поля `kind` (всегда `team`) и `sandboxId` (всегда `null`); `POST /api-keys` с `kind: "sandbox"` → `400 validation`. Выпуск, доставка в VM и отзыв при delete sandbox — фаза 2 (S24).
 
 ### 7.3 Scopes и пресеты
 
@@ -352,10 +356,10 @@ Scope — пара «ресурс × действие» в форме `<resource
 | `commands:exec` | запуск команд и PTY, input, kill, signal, resize |
 | `files:read` / `files:write` | чтение / изменение файлов, архив каталога (§11.1) |
 | `ports:write` | публикация портов, режимы, токены |
-| `ssh:connect` | SSH-ключи пользователя и `GET /sandboxes/{sandbox}/ssh` |
+| `ssh:connect` | SSH-сертификат (§11.3), SSH-ключи пользователя и `GET /sandboxes/{sandbox}/ssh` |
 | `snapshots:read` / `snapshots:write` | saved snapshots: список и create из них / сохранение и удаление |
 | `environments:read` / `environments:write` | environments команды (S8 §10.2): список и значения env / создание, изменение, удаление |
-| `keys:admin` | API-ключи своего пользователя в своей команде |
+| `keys:admin` | только для командных ключей: список ключей команды и их отзыв. У людей вместо scope — роль: список видят все участники, отзывают `owner` и оператор, выпускают и ротируют только `owner` (§7.2) |
 
 `/me`, `/limits`, `/templates`, `/sizes`, `DELETE /api-keys/self` доступны любому валидному ключу.
 
@@ -366,17 +370,17 @@ Scope — пара «ресурс × действие» в форме `<resource
 | `full` | все scopes |
 | `sandbox-self` | зарезервирован для ключей `sandbox` (§7.2): `sandboxes:read`, `commands:read`, `commands:exec`, `files:read`, `files:write`, `ports:write` в пределах своей sandbox |
 
-- **Правило подмножества:** ключ с `keys:admin` выпускает и ротирует только ключи, у которых scopes ⊆ его scopes и `expiresAt` ≤ его `expiresAt`. Иначе `403 forbidden` (`details.reason: "scope_escalation"`). Сессия браузера может выпустить любой набор.
+- Человек (браузерная сессия или Keycloak JWT) имеет все scopes в пределах роли (§7.5). Scopes ключа выбирает `owner` при выпуске; ключ выпускать ключи не может, поэтому правило подмножества не нужно.
 - Нехватка scope — `403 forbidden`, `details.requiredScope`.
 - Неизвестный scope — `400 validation`. Срок есть у каждого ключа (§7.2).
-- Ограничение ключа пользователя конкретными sandbox, environments или labels — позже (§19); случай «одна sandbox» закрывает тип `sandbox` (§7.2).
+- Ограничение командного ключа конкретными sandbox, environments или labels — позже (§19); случай «одна sandbox» закрывает тип `sandbox` (§7.2).
 
 ### 7.4 Браузер: proxied listener
 
 - `IdentityStore.resolveSession(headers)` (реализует S8): по заголовкам oauth2-proxy находит или создаёт JIT-пользователя, отдаёт пользователя, его команды с ролями и признак оператора (из групп IdP). Результат кэшируется в поде на 30 s по email; сброс по `LISTEN sbx_identity`.
 - Команда запроса — заголовок `Sbx-Team: team_...`; без него — команда пользователя по умолчанию (S8). Команда не из списка пользователя — `403 team_forbidden`. Оператор может указать любую команду.
 - Сессия имеет все scopes. Ограничения по ролям внутри команды — S8 (S7 передаёт роль в `Principal`).
-- **CSRF.** Для небезопасных методов и для WebSocket upgrade заголовок `Origin` обязателен и равен `SBX_APP_ORIGIN` (`https://app.<domain>`), иначе `403 origin_forbidden`. Тела с JSON принимаются только с `Content-Type: application/json` (простая HTML-форма его не пошлёт). Формы страницы входа CLI (§7.6) проходят ту же проверку Origin.
+- **CSRF.** Для небезопасных методов и для WebSocket upgrade заголовок `Origin` обязателен и равен `SBX_APP_ORIGIN` (`https://app.<domain>`), иначе `403 origin_forbidden`. Тела с JSON принимаются только с `Content-Type: application/json` (простая HTML-форма его не пошлёт).
 - Cookie oauth2-proxy — `__Host-` на `app.<domain>` (architecture §10, S4 §14.1); `api` своих cookie не ставит.
 
 ### 7.5 Principal
@@ -385,34 +389,35 @@ Scope — пара «ресурс × действие» в форме `<resource
 
 ```ts
 interface Principal {
-  userId: string          // Payload user id
+  kind: "session" | "oidc" | "team_key" // browser, Keycloak JWT (§7.10), team key (§7.2)
+  userId: string | null    // Payload user id; null for team keys
   teamId: string
-  role: "owner" | "member" // team role from S8
-  isOperator: boolean     // platform operator (IdP group, S8)
-  apiKeyId?: string       // absent for browser sessions
+  role: "owner" | "member" | null // team role from S8; null for team keys
+  isOperator: boolean     // platform operator (IdP group, S8); browser sessions only
+  apiKeyId?: string       // team keys only
   scopes: Scope[]
 }
 ```
 
-Доступ к sandbox: sandbox принадлежит команде; любой участник команды имеет к ней доступ в пределах scopes [решение S7, как рекомендует S4 §9.2]. Sandbox чужой команды — `404 not_found`.
+Доступ к sandbox: sandbox принадлежит команде; любой участник команды и любой ключ команды имеют к ней доступ в пределах scopes [решение S7, как рекомендует S4 §9.2]. Sandbox чужой команды — `404 not_found`. Проверки роли `owner` в S8 (например, `environments:write`) для командного ключа заменяются наличием scope: ключ выпускает `owner`, и scopes выбирает он. Ручки, которым нужен человек (SSH-ключи пользователя, выпуск ключей), командному ключу отвечают `403 forbidden` с `details.reason: "user_required"`.
 
 ### 7.6 `sbx login`
 
-**Loopback + PKCE (по умолчанию).**
-1. CLI создаёт `state` (16 байт) и PKCE verifier (32 байта, `S256`), поднимает HTTP-сервер на `127.0.0.1:<случайный порт>` и открывает браузер: `https://app.<domain>/cli/authorize?port=<port>&state=<state>&codeChallenge=<c>&name=<hostname>&scopes=full`.
-2. oauth2-proxy при необходимости проводит вход. `api` (proxied listener) отдаёт минимальную HTML-страницу без внешних ресурсов: «CLI на `<name>` просит ключ `full` для команды [выбор команды]» и кнопку подтверждения (POST с проверкой Origin).
-3. После подтверждения `api` создаёт строку `cli_logins` (§12.2): одноразовый код (32 байта, хранится hash), challenge, пользователь, команда, scopes, имя, срок 120 s. Ответ — `302` на `http://127.0.0.1:<port>/callback?code=…&state=…`. Хост редиректа всегда `127.0.0.1`, порт — целое 1024–65535; произвольный URL не принимается.
-4. CLI сверяет `state` и вызывает `POST https://api.<domain>/v1/cli/token {code, codeVerifier}`. `api` атомарно гасит код, проверяет PKCE и **только тогда** создаёт ключ (`name: "cli: <hostname>"`, 90 дней). Ответ: `{secret, apiKey, team, user}`. Ключ в URL не попадает, брошенный вход не оставляет ключей.
+**Люди: OAuth 2.0 Device Authorization Grant (RFC 8628) в Keycloak** [решение Ильи 2026-10-29]. Своих страниц входа у `api` нет.
+1. CLI берёт из `GET /v1/meta` блок `oidc {issuer, clientId: "sbx-cli", audience: "sbx-api"}` и вызывает `POST {issuer}/protocol/openid-connect/auth/device` (`client_id=sbx-cli`, `scope=openid`; публичный клиент, без секрета). Ответ: `device_code`, `user_code`, `verification_uri` (`{issuer}/device`), `verification_uri_complete`, `expires_in` (600), `interval` (5).
+2. CLI печатает код и ссылку и, если есть браузер, открывает `verification_uri_complete` (`--no-browser` — только напечатать). Человек входит в Keycloak (или уже вошёл) и подтверждает.
+3. CLI опрашивает token endpoint (`grant_type=urn:ietf:params:oauth:grant-type:device_code`), обрабатывает `authorization_pending`, `slow_down`, `expired_token`, `access_denied`. Итог — access token (5 min), refresh token, ID token (CLI его не хранит).
+4. CLI вызывает `GET /v1/me` (JIT пользователя по JWT, §7.10), показывает пользователя и команду по умолчанию; `--team` или `SBX_TEAM` выбирают другую.
 
-**Device code (`sbx login --device`)** — для машин без браузера, по смыслу RFC 8628:
-1. `POST /v1/cli/device {name, scopes}` → `{deviceCode, userCode: "WXYZ-2345", verificationUri: "https://app.<domain>/cli/device", verificationUriComplete, expiresInSeconds: 600, intervalSeconds: 5}`.
-2. Человек открывает ссылку в любом браузере, видит код и подтверждает (та же страница, что в loopback).
-3. CLI опрашивает `POST /v1/cli/token {deviceCode}`: `400` с кодами `authorization_pending`, `slow_down`, `expired_token`, `access_denied`; после подтверждения — ключ.
-- `userCode` — 8 символов без похожих (`BCDFGHJKLMNPQRSTVWXZ2345679`); ввод вручную ограничен 10 попытками на пользователя в минуту.
+**Хранение.** Refresh token и текущий access token — в хранилище ОС через `Bun.secrets` (macOS Keychain, libsecret, Windows Credential Manager с `persist: "local"`), запись `service: "sbx"`, `name: "<profile>@<issuer>"`. Если хранилище недоступно (Linux без secret service, контейнер), — файл `$XDG_CONFIG_HOME/sbx/credentials.json` с правами `0600` и предупреждением; `--credential-store keychain|file` выбирает явно. В `config.json` секретов нет.
 
-**`--key-stdin`**: `echo "$SBX_API_KEY" | sbx login --key-stdin` проверяет ключ через `/v1/me` и сохраняет его. Это вход для агентов и CI.
+**Обновление.** Access token используется до `exp − 30 s`, затем `grant_type=refresh_token`. Параллельные процессы обновляют под файловой блокировкой (`$XDG_CONFIG_HOME/sbx/.lock`), второй читает уже обновлённый токен. Refresh привязан к SSO-сессии Keycloak (сроки — architecture §10): закончилась сессия, пользователь выключен или удалён — Keycloak отвечает `invalid_grant`, CLI пишет «войдите снова: `sbx login`» и выходит с кодом `4`. Значит, выключенный в Keycloak человек теряет CLI, SDK и MCP не позже чем через срок жизни access token (5 min), а после синхронизации S8 §20.1 `api` отклоняет и ещё не истёкшие токены.
 
-`sbx logout` вызывает `DELETE /v1/api-keys/self` и стирает ключ из конфига.
+**SDK и локальный MCP используют учётные данные CLI.** `sbx auth token [--json]` печатает действующий bearer текущего профиля — access token (обновляя его при необходимости) или ключ, сохранённый `--key-stdin`, — или выходит с кодом `4`. `--json` → `{kind: "oidc" | "key", token, expiresAt, apiUrl, team}`: SDK берёт `apiUrl` и `team` профиля, если они не заданы явно, и не отправит токен на другой API. Цепочка в SDK TS и Python (§15.2): явные `apiKey` / `accessToken` / `tokenProvider` → `SBX_API_KEY` → `SBX_ACCESS_TOKEN` → `sbx auth token --json` (если `sbx` есть в `PATH`); токен кэшируется в процессе до `exp − 60 s`, на `401 token_expired` SDK один раз берёт новый и повторяет запрос. Локальный MCP по stdio (S11) работает через SDK и получает то же самое. Свой refresh SDK не делает: хранилищем и обновлением владеет CLI.
+
+**Автоматизация: `--key-stdin`.** `echo "$SBX_API_KEY" | sbx login --key-stdin` проверяет командный ключ через `/v1/me` и кладёт его в то же хранилище. `SBX_API_KEY` в env имеет приоритет над сохранённым входом. Это вход для агентов, CI и CLI внутри VM.
+
+`sbx logout` для входа Keycloak отзывает refresh token (`POST {issuer}/protocol/openid-connect/revoke`, `token_type_hint=refresh_token`) и стирает запись; для ключа — только стирает запись, а `--revoke` ещё и вызывает `DELETE /v1/api-keys/self` (ключ общий для команды, по умолчанию его не отзываем).
 
 ### 7.7 SSO для портов (S4 §8.4)
 
@@ -430,7 +435,18 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 
 ### 7.9 PoC до S8
 
-`IdentityStore` имеет статическую реализацию `StaticIdentityStore` (`packages/auth`) из YAML (`SBX_IDENTITY_FILE`): пользователи, команды, API-ключи (только `sha256`), SSH-ключи. Proxied listener в PoC выключен. `sbx-admin` (S6 §15.3) получает команду `api-key hash` для генерации ключа и строки YAML.
+`IdentityStore` имеет статическую реализацию `StaticIdentityStore` (`packages/auth`) из YAML (`SBX_IDENTITY_FILE`): пользователи, команды, API-ключи (только `sha256`), SSH-ключи. Proxied listener в PoC выключен. Без `SBX_OIDC_ISSUER` JWT не принимаются: Keycloak в PoC необязателен. `sbx-admin` (S6 §15.3) получает команду `api-key hash` для генерации ключа и строки YAML.
+
+### 7.10 Keycloak JWT
+
+- **Какой bearer.** Начинается с `sbx_` — командный ключ (§7.2); `sbxs_` зарезервирован; иначе это должен быть JWS compact (три части base64url), иначе `401 unauthorized`.
+- **Проверка в `api`, без introspection на запрос:** подпись ключом из JWKS (`jwks_uri` из `{issuer}/.well-known/openid-configuration`), алгоритм из списка `RS256`, `ES256` (`none` и `HS*` — отказ); `iss` равен `SBX_OIDC_ISSUER` (`https://<keycloak>/realms/sbx`); `aud` содержит `sbx-api` (`SBX_OIDC_AUDIENCE`); `exp`, `nbf`, `iat` с допуском 60 s; claim `typ` = `Bearer` (так ID token и refresh token не пройдут); `azp` из `SBX_OIDC_ALLOWED_CLIENTS` (по умолчанию `sbx-cli`); `email_verified = true`. Библиотека — `jose` (`createRemoteJWKSet`, `jwtVerify`).
+- **Адреса.** `iss` сверяется с публичным `SBX_OIDC_ISSUER`; discovery и JWKS `api` может брать по внутреннему адресу (`SBX_OIDC_DISCOVERY_URL`, по умолчанию от issuer), если публичное имя Keycloak из кластера недоступно.
+- **JWKS** кэшируется в поде: обновление раз в 10 min и при неизвестном `kid` (не чаще раза в 30 s). Если Keycloak недоступен, кэш ключей продолжает работать, токены проверяются офлайн.
+- **Та же личность, что в браузере.** `sub` токена — тот же claim, который oauth2-proxy шлёт в `X-Auth-Request-User` (S8 §5.1). `api` вызывает `IdentityStore.resolveSession({email, user: sub, groups, preferredUsername})` из claims `email`, `sub`, `groups`, `preferred_username`: JIT, привязка к `idpSubject`, кэш 30 s — как для браузера (S8 §5.3). Деактивированный пользователь (`active: false`, в том числе по синхронизации S8 §20.1) — `403 forbidden` с `details.reason: "user_disabled"`, даже если токен не истёк.
+- **Principal:** `kind: "oidc"`, все scopes в пределах роли, команда — `Sbx-Team` или команда по умолчанию (`403 team_forbidden`, как в §7.4), `isOperator: false` (права оператора только в браузере, S8 §5.5).
+- **Ошибки:** токен истёк — `401 token_expired` (клиент обновляет токен и повторяет); подпись, `iss`, `aud`, `typ`, `azp`, алгоритм или формат не прошли — `401 unauthorized` с `details.reason: "invalid_token"`. Всегда заголовок `WWW-Authenticate: Bearer realm="sbx", error="invalid_token"` (RFC 6750).
+- **Долгие соединения.** Стрим NDJSON и PTY WebSocket проверяют bearer при открытии и живут дольше `exp` токена или ключа; их закрывает реестр открытых соединений при деактивации пользователя, удалении из команды и отзыве ключа (S8 C9). Это принятое допущение: стримы всё равно переподключаются каждые 60 min (§9.7), а переподключение требует действующего bearer; PTY без клиента закрывается через 10 min. Выход из Keycloak (logout) без деактивации открытые соединения не закрывает.
 
 ## 8. Sandboxes и операции
 
@@ -443,6 +459,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
   "name": "ci-run-42",
   "teamId": "team_...",
   "createdBy": "usr_...",
+  "createdByKey": null,
   "template": "linux",
   "templateVersion": "2026.10.29-1",
   "size": "2gb",
@@ -474,6 +491,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - `origin`: `{kind: "template"}` | `{kind: "snapshot", snapshot: "<name>", snapshotId}` | `{kind: "fork", sandboxId}`.
 - `error`: `{code, message}` из S6 (`create_failed`, `resume_failed`, `machine_lost`, ...).
 - `activeOperation` — операция (§8.4) или `null`.
+- `createdBy` — пользователь (сессия или JWT) или `null`, если создал командный ключ; тогда `createdByKey: "key_..."`. То же у Command (§9.6).
 - `environment` (`{id, name, revision}` или `null`) и `excludeOwnerSecrets` — S8 §10.
 - Надгробие `deleted` отдаётся по `GET` 30 дней (S6 §5.6), затем `404`. В списке `deleted` только при явном `state=deleted`.
 
@@ -765,8 +783,9 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 ### 11.3 SSH
 
 - **SSH-ключи пользователя** (уровень пользователя, не команды): `GET /v1/ssh-keys`, `POST /v1/ssh-keys {name, publicKey}` → `201 {id: "sshk_...", name, fingerprint: "SHA256:...", type, createdAt, lastUsedAt}`, `DELETE /v1/ssh-keys/{key}`. Типы: `ssh-ed25519`, `ecdsa-sha2-nistp256/384/521`, `ssh-rsa` не короче 3072 бит; сертификаты не принимаются. Отпечаток уникален во всей платформе (`409 ssh_key_in_use`): по нему gateway однозначно находит пользователя. Хранение — коллекция S8 (§17.3).
-- **`GET /v1/sandboxes/{sandbox}/ssh`** → `{host: "ssh.example.com", port: 22, username: "quiet-otter-lamp", loginUser: "user", command: "ssh quiet-otter-lamp@ssh.example.com", knownHosts: ["ssh.example.com ssh-ed25519 AAAA...", "ssh.example.com ecdsa-sha2-nistp256 AAAA..."], hasKeys: true}`. `knownHosts` — host keys gateway из конфига (`SBX_SSH_HOST_KEYS_FILE`, только публичные), одинаковые для всех sandbox (S4 §9.2).
-- Право входа проверяет `ssh/authorize` (§12.1).
+- **`GET /v1/sandboxes/{sandbox}/ssh`** → `{host: "ssh.example.com", port: 22, username: "quiet-otter-lamp", loginUser: "user", command: "ssh quiet-otter-lamp@ssh.example.com", knownHosts: ["ssh.example.com ssh-ed25519 AAAA...", "ssh.example.com ecdsa-sha2-nistp256 AAAA..."], hasKeys: true}`; `hasKeys` — есть ли у человека зарегистрированные SSH-ключи (у командного ключа всегда `false`). `knownHosts` — host keys gateway из конфига (`SBX_SSH_HOST_KEYS_FILE`, только публичные), одинаковые для всех sandbox (S4 §9.2).
+- **`POST /v1/sandboxes/{sandbox}/ssh/certificate {publicKey}`** (`ssh:connect`; человек с JWT или сессией и командный ключ) → `{certificate, principal, validAfter, validBefore, host, port, username, knownHosts}` [решение Ильи 2026-10-29: короткие сертификаты на ту же личность]. `api` подписывает **SSH login CA** (ed25519, закрытый ключ только у `api`: `SBX_SSH_LOGIN_CA_KEY_FILE`; публичный — у gateway, S4 §9.2) сертификат пользователя: `ValidPrincipals: [<sb_… id sandbox>]`, `KeyId: sbx:user:<usr_…>` или `sbx:key:<key_…>`, `ValidAfter` = сейчас − 60 s, `ValidBefore` = сейчас + 10 min (проверяется только при входе, сессия живёт дольше), случайный serial, расширения `permit-pty`, `permit-port-forwarding`, `permit-agent-forwarding`, `permit-X11-forwarding`, `permit-user-rc`. Типы ключа — как у SSH-ключей выше. Состояние sandbox не проверяется (остановленную sandbox gateway объясняет сам, S4 §9.3). Это основной путь для CLI и единственный для командных ключей; зарегистрированные SSH-ключи остаются для людей с обычным `ssh`.
+- Право входа проверяет `ssh/authorize` (§12.1) на каждом подключении, поэтому деактивация пользователя, удаление из команды и отзыв ключа действуют сразу, а не по истечении сертификата.
 
 ## 12. Внутренние ручки и свои таблицы
 
@@ -793,11 +812,11 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - `404 {"code": "route_not_found"}` — нет sandbox со slug, порт не опубликован, sandbox `deleted`, метка вне грамматики или с зарезервированным суффиксом.
 - ID в этом ответе — публичного формата (`sb_`, `team_`), `machineId` — UUID (S2).
 
-**`POST /internal/v1/gateway/ssh/authorize`** [переопределяет S6 §14.2: путь и форма из S4 §9.2] — `{sandbox, publicKey, fingerprint}`:
-1. Найти SSH-ключ по `fingerprint`, проверить, что `publicKey` совпадает с сохранённым.
-2. Пользователь активен; он участник команды sandbox или оператор.
+**`POST /internal/v1/gateway/ssh/authorize`** [переопределяет S6 §14.2: путь и форма из S4 §9.2] — `{sandbox, publicKey, fingerprint}` (зарегистрированный ключ) или `{sandbox, certificate: {keyId, serial, principal, validBefore}}` (сертификат, подпись и срок которого gateway уже проверил, S4 §9.2):
+1. Ключ: найти SSH-ключ по `fingerprint`, проверить, что `publicKey` совпадает с сохранённым. Сертификат: разобрать `keyId` (`sbx:user:<id>` или `sbx:key:<id>`); `principal` равен ID sandbox из запроса.
+2. Пользователь (`sbx:user`, зарегистрированный ключ): активен и участник команды sandbox (S8 C6, без исключения для оператора). Командный ключ (`sbx:key`): не отозван, не истёк, его команда — команда sandbox, есть scope `ssh:connect`.
 3. Sandbox существует и не `deleted`.
-→ `200 {allowed: true, userId, email, sandboxId, machineId, sandboxState, loginUser}` или `200 {allowed: false}` (без причины: gateway её не показывает). `loginUser` — из шаблона (S8 `Template.loginUser`, по умолчанию `user`). Обновить `lastUsedAt` ключа (не чаще раза в 60 s).
+→ `200 {allowed: true, actor: {kind: "user", userId, email} | {kind: "team_key", apiKeyId}, userId, email, sandboxId, machineId, sandboxState, loginUser}` (`userId` и `email` — `null` у командного ключа) или `200 {allowed: false}` (без причины: gateway её не показывает). `loginUser` — из шаблона (S8 `Template.loginUser`, по умолчанию `user`). Обновить `lastUsedAt` ключа (не чаще раза в 60 s).
 
 **`POST /internal/v1/gateway/port-auth/exchange`** `{code, label}` — атомарно: `UPDATE port_auth_codes SET used_at = now() WHERE code_hash = $1 AND label = $2 AND used_at IS NULL AND expires_at > now() RETURNING user_id, email, auth_epoch`. Ответ `{userId, email, label, authEpoch}` или `400 {"code": "invalid_code"}`.
 
@@ -811,34 +830,21 @@ port_auth_codes(
   label text, user_id text, email text, auth_epoch int,
   expires_at timestamptz,       -- now() + 60 s
   used_at timestamptz null, created_at timestamptz)
-
-cli_logins(
-  id uuid pk,
-  kind text,                    -- loopback | device
-  code_hash bytea null unique,  -- loopback one-time code
-  device_code_hash bytea null unique,
-  user_code text null unique,   -- device flow, while pending
-  code_challenge text null,     -- PKCE S256 (loopback)
-  state text,                   -- pending | approved | denied | consumed
-  user_id text null, team_id text null,
-  scopes text[], name text,
-  last_poll_at timestamptz null, -- slow_down enforcement
-  expires_at timestamptz, created_at timestamptz)
 ```
 
-Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 добавляет в него эти две таблицы.
+Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 добавляет в него эту таблицу. Таблицы `cli_logins` нет: вход CLI — device grant Keycloak (§7.6).
 
 ## 13. Каталог, аккаунт, снапшоты, ключи
 
 - **`GET /v1/templates`** → `{data: [{slug, name, os, enabled, defaultSize, allowedSizes, loginUser, capabilities: ["exec","files","ssh","desktop"], version}]}`. `version` — активная сборка (S6 `template_builds`). Выключенные шаблоны видят только операторы.
 - **`GET /v1/sizes`** → `{data: [{slug, vcpu, memoryMb}]}`.
-- **`GET /v1/me`** → `{user: {id, email, name}, team: {id, name, role}, teams: [{id, name, role}], isOperator, auth: {kind: "api_key" | "session", apiKeyId?, scopes, expiresAt?}}`.
+- **`GET /v1/me`** → `{user: {id, email, name} | null, team: {id, name, role}, teams: [{id, name, role}], isOperator, auth: {kind: "session" | "oidc" | "team_key", apiKeyId?, scopes, expiresAt?, createdBy?}}`. У командного ключа `user: null`, `teams` — только его команда, `role: null`.
 - **`GET /v1/limits`** → `{quota: {maxActiveSandboxes, maxRamMb, maxSavedSnapshots}, usage: {activeSandboxes, ramMb, savedSnapshots}, remaining: {activeSandboxes, ramMb, savedSnapshots}, canCreate, templates: [{slug, enabled, defaultSize, sizes: [{slug, vcpu, memoryMb, allowed, reason, warmAvailable}]}], rateLimits: {requestsPerSecond, burst, startsPerMinute}}`. Для команды запроса; `usage` и `remaining` считаются по правилам квот S6 §8.5.
   - `canCreate` — можно ли сейчас создать sandbox хотя бы одного допустимого размера.
   - `sizes` — все размеры из `allowedSizes` шаблона; `allowed: false` с `reason`: `template_disabled`, `quota_active_sandboxes`, `quota_ram`. Выключенные шаблоны видят только операторы (как в `/templates`).
   - `warmAvailable` — число `warm` machine пары сейчас (подсказка для `failFast`, §8.2; не резерв). Ёмкость нод (`out_of_capacity`) заранее не обещается.
   - `usage` и счётчики пула — метод S6 (добавление, §20.2).
-- **`GET /v1/meta`** (без auth) → `{apiVersion: "v1", build, appUrl, apiUrl, sbxDomain, ssh: {host, port, hostKeys}, minCliVersion, latestCliVersion}`.
+- **`GET /v1/meta`** (без auth) → `{apiVersion: "v1", build, appUrl, apiUrl, sbxDomain, oidc: {issuer, clientId: "sbx-cli", audience: "sbx-api"}, ssh: {host, port, hostKeys}, minCliVersion, latestCliVersion}`.
 - **Saved snapshots** (адресуются по имени внутри команды; имя `^[a-z0-9][a-z0-9-]{0,62}$`):
   - `POST /v1/snapshots {sandbox, name}` (`Idempotency-Key`) → `202 {snapshot, operation}`. Существующий снапшот с тем же именем заменяется, когда новый станет `ready` (S6 §7.8).
   - `GET /v1/snapshots` → список, включая `creating` (их `name` — ожидаемое имя) и `failed` за последние сутки; `GET /v1/snapshots/{name}` → ready-снапшот или создающийся с этим именем.
@@ -846,25 +852,25 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
   - Ресурс: `{id: "snap_...", name, state: "creating"|"ready"|"failed"|"deleting", sourceSandboxId, template, templateVersion, size, consistency: "quiesced"|"powered_off", error, createdAt, readyAt}`.
   - Create из снапшота — `POST /v1/sandboxes {from: {snapshot: name}}`.
 - **API-ключи:**
-  - `GET /v1/api-keys` — ключи пользователя в текущей команде (оператор: `?all=true` — все ключи команды);
-  - `POST /v1/api-keys {name, scopes? | preset?, expiresInSeconds?, kind?}` → `201 {apiKey, secret}`; `expiresInSeconds` по умолчанию 90 дней, максимум 365 (§7.2); `kind` — только `user` (по умолчанию), пресет `sandbox-self` ключам `user` не выдаётся;
-  - `POST /v1/api-keys/{key}/rotate` → `200 {apiKey, secret}`: новый секрет, старый перестаёт работать сразу;
-  - `DELETE /v1/api-keys/{key}` → `204`; `DELETE /v1/api-keys/self` → `204`.
-  - Ресурс: `{id: "key_...", kind: "user", sandboxId: null, name, prefix, last4, scopes, createdVia: "api"|"cli"|"dashboard", createdAt, expiresAt, lastUsedAt, revokedAt}`; `kind: "sandbox"` зарезервирован (§7.2).
+  - `GET /v1/api-keys` — все ключи команды запроса; видят все участники и ключ с `keys:admin`;
+  - `POST /v1/api-keys {name, scopes? | preset?, expiresInSeconds?, kind?}` → `201 {apiKey, secret}` — только `owner`-человек (§7.2); `expiresInSeconds` по умолчанию 90 дней, максимум 365; `kind` — только `team` (по умолчанию), пресет `sandbox-self` командным ключам не выдаётся;
+  - `POST /v1/api-keys/{key}/rotate` → `200 {apiKey, secret}` — только `owner`-человек: новый секрет, старый перестаёт работать сразу;
+  - `DELETE /v1/api-keys/{key}` → `204` (`owner`, оператор или ключ с `keys:admin`); `DELETE /v1/api-keys/self` → `204`.
+  - Ресурс: `{id: "key_...", kind: "team", sandboxId: null, teamId, name, prefix, last4, scopes, createdBy: {id, email, active, member}, createdVia: "api"|"cli"|"dashboard", createdAt, expiresAt, lastUsedAt, revokedAt}`; `createdBy.active` и `member` показывают, что создатель деактивирован или вышел из команды (ключ при этом работает, S8 §9.8); `kind: "sandbox"` зарезервирован (§7.2).
 
 ## 14. CLI `sbx`
 
 ### 14.1 Сборка и конфигурация
 
 - `apps/cli` на `@sbx/sdk`, разбор аргументов — `commander`. Сборка `bun build --compile --target=bun-<os>-<arch>` для `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `windows-x64`. Бинарники и `SHA256SUMS` — в GitHub Releases (§15.5).
-- Конфиг `$XDG_CONFIG_HOME/sbx/config.json` (по умолчанию `~/.config/sbx/`, Windows — `%APPDATA%\sbx\`), права `0600`: профили `{name: {apiUrl, apiKey, team}}`, текущий профиль. Порядок: флаги > env (`SBX_API_URL`, `SBX_API_KEY`, `SBX_TEAM`, `SBX_PROFILE`) > профиль > системный `/etc/sbx/config.json` (только `apiUrl`; его кладёт шаблон, S5 §8.9). Хранилище ключей ОС — позже.
+- Конфиг `$XDG_CONFIG_HOME/sbx/config.json` (по умолчанию `~/.config/sbx/`, Windows — `%APPDATA%\sbx\`), права `0600`: профили `{name: {apiUrl, team, auth: "oidc" | "key"}}`, текущий профиль; секреты (токены Keycloak, командный ключ) — в хранилище ОС или `credentials.json` (§7.6). Порядок: флаги > env (`SBX_API_URL`, `SBX_API_KEY`, `SBX_TEAM`, `SBX_PROFILE`) > профиль > системный `/etc/sbx/config.json` (только `apiUrl`; его кладёт шаблон, S5 §8.9).
 - Кэш `known_hosts` для SSH — `~/.config/sbx/known_hosts`, обновляется из `/v1/meta`.
 
 ### 14.2 Команды
 
 | Команда | Что делает |
 |---|---|
-| `sbx login [--device] [--key-stdin] [--api-url]`, `logout`, `whoami` | §7.6; `whoami` = `/me` |
+| `sbx login [--no-browser] [--key-stdin] [--api-url] [--credential-store]`, `logout [--revoke]`, `whoami`, `auth token [--json]` | §7.6; `whoami` = `/me`; `auth token` — для SDK и MCP |
 | `sbx create [--template] [--size] [--name] [--slug] [--label k=v] [--env K=V] [--secret K=V] [--env-file f] [--ttl] [--idle] [--from snap] [--fail-fast] [--wait]` | create; `--wait` ждёт `ready` и печатает его; `--fail-fast` — §8.2 |
 | `sbx list [--state] [--label]`, `sbx info <sb>` | |
 | `sbx stop\|resume\|recover <sb> [--wait]`, `sbx fork <sb> [--name] [--wait]`, `sbx rm <sb>... [--yes]` | `resume` и `fork` принимают `--env K=V`, `--secret K=V`, `--env-file f` (§8.2); `rm` спрашивает подтверждение в TTY без `--yes` и шлёт `Sbx-Confirm-Delete` (§5.12); без TTY и без `--yes` — ошибка аргументов |
@@ -874,16 +880,17 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx exec <sb> [--cwd] [--env] [--user] [--timeout] [--detach] [--stdin] -- <cmd...>` | по умолчанию — стрим вывода живьём (stdout в stdout, stderr в stderr), код выхода `sbx` = код команды. Автоматический reattach. `--detach` печатает `commandId` |
 | `sbx logs <sb> <cmd> [-f] [--tail N]`, `sbx kill <sb> <cmd> [--signal]`, `sbx ps <sb>` | attach, kill, список команд |
 | `sbx shell <sb> [-- <cmd>]` | PTY по WebSocket в raw-режиме TTY; размер по `SIGWINCH`; переподключение само |
-| `sbx ssh <sb> [-- ssh args]` | запускает системный `ssh` с `-o UserKnownHostsFile=<кэш>` к `<slug>@ssh.<domain>`; без SSH-ключей в аккаунте предлагает `sbx ssh-keys add` |
-| `sbx ssh-keys list|add [file]|rm` | по умолчанию `~/.ssh/id_ed25519.pub` |
+| `sbx ssh <sb> [-- ssh args]`, `sbx ssh-config <sb>` | `ssh`: эфемерный ed25519 в каталоге `0700`, сертификат `POST /ssh/certificate` (§11.3), системный `ssh` с `-i`, `CertificateFile` и `-o UserKnownHostsFile=<кэш>` к `<slug>@ssh.<domain>`; файлы удаляются после выхода. `ssh-config` печатает блок `Host` с `Match exec "sbx ssh-cert <sb> --ensure"`, чтобы обычный `ssh` и VS Code Remote-SSH сами получали свежий сертификат. Работает и с командным ключом |
+| `sbx ssh-cert <sb> [--ensure]` | выпускает или обновляет сертификат для `ssh-config` (новый, если до конца срока меньше 2 min) |
+| `sbx ssh-keys list\|add [file]\|rm` | по умолчанию `~/.ssh/id_ed25519.pub` |
 | `sbx cp [-r] <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range`; `-r` — каталог через `/files/archive` (§11.1) |
 | `sbx push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz потоком в `PUT /files/archive` |
-| `sbx port <sb> <port> [--public|--sso|--token]`, `sbx ports <sb>`, `sbx unport <sb> <port>`, `sbx port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
-| `sbx snapshot save <sb> <name>`, `snapshot list|rm` | |
+| `sbx port <sb> <port> [--public\|--sso\|--token]`, `sbx ports <sb>`, `sbx unport <sb> <port>`, `sbx port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
+| `sbx snapshot save <sb> <name>`, `snapshot list\|rm` | |
 | `sbx templates`, `sbx sizes`, `sbx limits` | |
-| `sbx keys list|create [--preset] [--scope]...|rotate|rm` | |
+| `sbx keys list\|create [--preset] [--scope]...\|rotate\|rm` | командные ключи; `create`, `rotate` — только `owner` с входом Keycloak |
 | `sbx run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |
-| `sbx completion bash|zsh|fish|powershell`, `sbx version` | |
+| `sbx completion bash\|zsh\|fish\|powershell`, `sbx version` | |
 
 `<sb>` — ID или slug. Если не указан, берётся `SBX_SANDBOX`, затем текущая sandbox shell, затем (внутри VM) `SBX_SANDBOX_ID` из env платформы (S3 §8.2; там UUID из S6, CLI сам переводит его в `sb_…`, §5.3).
 
@@ -903,6 +910,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 - Маршруты описываются через `createRoute` из `@hono/zod-openapi`; zod-схемы — источник правды для валидации и документа. OpenAPI 3.1.
 - `operationId` — `<resource>.<action>` (`sandboxes.create`, `commands.attach`); у каждой операции `summary` и `description`, написанные для человека и LLM (их использует S11).
 - NDJSON-ручки: `content: application/x-ndjson` со схемой кадра (`oneOf` с `discriminator: type`). WebSocket в OpenAPI 3.1 не описывается: ручка `connect` описана как `GET` с ответом `101` и расширением `x-sbx-websocket: {subprotocol: "sbx.pty.v1"}`, протокол — в документации.
+- **Security schemes:** `keycloak` — `type: openIdConnect`, `openIdConnectUrl: {issuer}/.well-known/openid-configuration` (Keycloak JWT, §7.10); `teamKey` — `type: http`, `scheme: bearer`, `bearerFormat: "sbx_"` (§7.2). Глобально `security: [{keycloak: []}, {teamKey: []}]`; ручки только для человека (SSH-ключи, выпуск и ротация ключей) — `[{keycloak: []}]`; `/v1/meta`, `/v1/openapi.json`, `/v1/docs` — `security: []`. Браузерная сессия (proxied listener) в документе не описывается: она для дашборда того же origin.
 - Enum ответов помечены `x-extensible-enum`; генераторы настроены так, чтобы неизвестное значение не роняло клиент (§15.2, §15.3).
 - `pnpm --filter @sbx/api openapi` пишет `apps/api/openapi/v1.json` (коммитится). CI: регенерация без расхождений, `oasdiff breaking` против `main`.
 - Документация — `GET /v1/docs` (Scalar, `@scalar/hono-api-reference`) по тому же документу.
@@ -913,7 +921,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 - Фасад:
 
 ```ts
-const sbx = new Sbx({ apiKey: process.env.SBX_API_KEY, baseUrl: "https://api.example.com", team?: "team_..." })
+const sbx = new Sbx({ baseUrl: "https://api.example.com", team?: "team_..." }) // credentials: apiKey | accessToken | tokenProvider, else chain §7.6
 
 const sb = await sbx.sandboxes.create({ template: "linux", secrets: { TOKEN: "..." } }, { wait: true })
 const r = await sb.exec("npm test", { cwd: "app", timeoutSeconds: 600 })        // sync result
@@ -929,6 +937,7 @@ await sb.delete()
 ```
 
 - Низкоуровневый клиент (`sbx.raw`) — сам `openapi-fetch` со всеми операциями.
+- Учётные данные — цепочка §7.6 (явные параметры → `SBX_API_KEY` → `SBX_ACCESS_TOKEN` → `sbx auth token --json`); на `401 token_expired` SDK один раз берёт новый токен и повторяет запрос.
 - Ошибки — класс `SbxError {status, code, message, retryable, details, requestId}`.
 
 ### 15.3 Python: `sbx-sdk`
@@ -967,7 +976,7 @@ await sb.delete()
 ## 16. Тесты и приёмка
 
 **Unit (vitest, pytest):**
-- кодек ID (UUID ↔ `sb_...`, ULID ↔ `cmd_...`), парсер и генератор slug (грамматика S4, суффиксы, зарезервированные), формат и CRC ключа, проверка подмножества scopes;
+- кодек ID (UUID ↔ `sb_...`, ULID ↔ `cmd_...`), парсер и генератор slug (грамматика S4, суффиксы, зарезервированные), формат и CRC ключа, разбор bearer (ключ или JWT, §7.10);
 - матрица «ручка × scope»: каждая ручка из §6 отклоняет ключ без нужного scope;
 - таблица ошибок S6/агента → HTTP (§5.5);
 - UTF-8-декодер кадров: разрезы внутри многобайтовых символов, некорректные байты, reattach с `nextOffset` даёт тот же текст;
@@ -984,7 +993,10 @@ await sb.delete()
 Сценарии:
 - **Chaos стрима (главный).** SDK `run()` команды на 3000 строк × 512 B; каждые 100–400 ms случайный сбой: обрыв туннеля, drain gateway, перезапуск агента, **остановка процесса `api`** (второй экземпляр `api` подхватывает). sha256 stdout и stderr совпадают с ожидаемыми, код выхода верный, `Start` агента выполнен один раз.
 - **Идемпотентность команд.** Повтор `POST /commands` с тем же ключом после обрыва в каждой точке (до `Start`, после `Start` до ответа, в середине стрима) — одна команда у агента.
-- **Безопасность:** `X-Auth-Request-Email` на public listener-е игнорируется; запрос на proxied без `Origin` или с чужим `Origin` — `403`; WebSocket upgrade с чужим `Origin` — отказ; код `port-auth` второй раз и с чужим `label` — `invalid_code`; PKCE с чужим verifier — отказ; повторное использование кода CLI — отказ; ключ не может выпустить ключ шире себя; секреты не попадают в логи (перехват логгера в тестах create, `PUT /env`, `cli/token`).
+- **Безопасность:** `X-Auth-Request-Email` на public listener-е игнорируется; запрос на proxied без `Origin` или с чужим `Origin` — `403`; WebSocket upgrade с чужим `Origin` — отказ; код `port-auth` второй раз и с чужим `label` — `invalid_code`; секреты не попадают в логи (перехват логгера в тестах create, `PUT /env`, `POST /api-keys`).
+- **Keycloak JWT** (тестовый Keycloak 26.8 в контейнере или подписанные тестовым JWKS токены): чужой `iss`, нет `aud=sbx-api`, `alg: none` и `HS256`, истёкший (`token_expired`), ID token и refresh token вместо access token, чужой `azp` → `401`; неизвестный `kid` → JWKS перечитывается один раз; первый запрос с JWT создаёт пользователя так же, как браузер, и `sub` совпадает с `X-Auth-Request-User`; деактивированный пользователь с живым токеном → `403 user_disabled`; device grant: `sbx login` → `sbx auth token` → SDK использует тот же токен; выключенный в Keycloak пользователь не обновляет токен.
+- **Командные ключи:** `member` и ключ не могут выпустить ключ (`403`); ключ работает после удаления создателя из команды и после его деактивации; `owner` отзывает ключ; ключ не вызывает человеческие ручки (`user_required`).
+- **SSH-сертификаты:** сертификат от чужого CA, истёкший, с principal другой sandbox, по отозванному ключу или деактивированному пользователю → вход отклонён; `KeyId` в журнале sshd VM (S4 §9.3).
 - **Файлы:** загрузка 100 MiB с обрывом в середине и докачкой через `HEAD`; `Range` и `If-Range`; `checksum_mismatch`; архив каталога туда и обратно (sha256 файлов совпадают), отказ на `..`, абсолютном пути и записи через symlink, пределы `413`.
 - **Контракт CLI и ошибок:** без TTY CLI печатает JSON, `create --wait` даёт JSONL с последней строкой `ready`, ошибка — последняя строка `{"event":"error",…}`; у любой ошибки API есть `retryable` и `requestId`; `DELETE` без `Sbx-Confirm-Delete` или с чужим ID — `428`, ничего не удалено; `failFast` при пустом пуле — `503 pool_exhausted`, в БД нет новой sandbox, операции и ключа идемпотентности.
 - **PTY:** эхо, resize, обрыв WebSocket и переподключение с offset без потерь вывода; закрытие `1012` при остановке пода.
@@ -1017,8 +1029,8 @@ interface IdentityStore {
   resolveSession(h: { email: string; user?: string; groups: string[]; preferredUsername?: string }): Promise<SessionIdentity> // JIT upsert
   findApiKeyByHash(sha256Hex: string): Promise<ApiKeyRecord | null>
   createApiKey(input: NewApiKey): Promise<ApiKeyRecord>          // secretHash computed by packages/auth
-  revokeApiKey(id: string): Promise<void>
-  listApiKeys(q: { userId: string; teamId: string; all?: boolean }): Promise<ApiKeyRecord[]>
+  revokeApiKey(id: string, by: { userId?: string; apiKeyId?: string }): Promise<void> // revokedBy / revokedByKey
+  listApiKeys(q: { teamId: string }): Promise<ApiKeyRecord[]>       // team keys, with creator status
   touchApiKey(id: string): Promise<void>
   listSshKeys(userId: string): Promise<SshKeyRecord[]>
   addSshKey(input: NewSshKey): Promise<SshKeyRecord>             // unique fingerprint
@@ -1030,7 +1042,7 @@ interface IdentityStore {
 ```
 
 - **ID в Payload — UUID** (`idType: 'uuid'` адаптера Postgres): S6 хранит `team_id`, `created_by`, `principal_id` как `uuid`, а кодеки `usr_`/`team_`/`key_`/`sshk_` (§5.3) рассчитаны на 128 бит. Это требование к S8.
-- Коллекции: `users` (email, name, active, isOperator из групп IdP, defaultTeam), `teams`, `memberships` (user, team, role), `api-keys` (`name`, `user`, `team`, `kind` (`user`; `sandbox` зарезервирован, §7.2), `sandbox` (uuid, null), `secretHash` unique, `prefix`, `last4`, `scopes[]` (имена §7.3), `expiresAt` (обязателен), `revokedAt`, `lastUsedAt`, `createdVia`), `ssh-keys` (`user`, `name`, `publicKey`, `fingerprint` unique, `type`, `lastUsedAt`).
+- Коллекции: `users` (email, name, active, isOperator из групп IdP, defaultTeam), `teams`, `memberships` (user, team, role), `api-keys` (`name`, `team`, `createdBy` (аудит, на работу ключа не влияет, §7.2), `kind` (`team`; `sandbox` зарезервирован, §7.2), `sandbox` (uuid, null), `secretHash` unique, `prefix`, `last4`, `scopes[]` (имена §7.3), `expiresAt` (обязателен), `revokedAt`, `lastUsedAt`, `createdVia`), `ssh-keys` (`user`, `name`, `publicKey`, `fingerprint` unique, `type`, `lastUsedAt`).
 - `Template`: + `loginUser` (по умолчанию `user`), `capabilities`. `PlatformDefaults`: + `defaultTemplate`, `publicPortsEnabled`, `ssoPortPolicy (any | team)`, лимиты частоты. Блокировки портов и sandbox оператором — поля, которые читает `routes.lookup`.
 - `afterChange`-хуки коллекций `users`, `memberships`, `api-keys`, `ssh-keys` шлют `NOTIFY sbx_identity '<collection>:<id>'`.
 - Ключи создаются только через `packages/auth` (формат §7.2). UI ключей в дашборде вызывает API S7, а не пишет в коллекцию напрямую.
@@ -1038,7 +1050,7 @@ interface IdentityStore {
 
 ### 17.4 S4
 
-- Пути и формы внутренних ручек — §12.1 (S4 §6.1, §8.4, §9.2 без изменений).
+- Пути и формы внутренних ручек — §12.1 (S4 §6.1, §8.4, §9.2). Вход по SSH-сертификату (S7 §11.3, S4 §9.2) и разрыв сессий `NOTIFY sbx_ssh_revoke` (S4 §9.5) согласованы с S4 решением Ильи 2026-10-29.
 - **[переопределяет S4 §6.3]** `sandboxState` — состояния S6; gateway обрабатывает `starting` как `creating`. Значения `running` и `resuming` не приходят.
 - `sandboxId` и `teamId` в ответах — публичный формат (`sb_...`, `team_...`), а не `sbx_...`, как в примере S4.
 - Slug — грамматика S4 §4.2, генерирует S7 (§5.4). Список зарезервированных суффиксов и портов — общая константа (`packages/auth` экспортирует его и для Go как JSON-файл в `docs/`/конфиге; исполнители договариваются о месте).
@@ -1049,15 +1061,16 @@ interface IdentityStore {
 - **Описания:** `summary`/`description` операций и полей в OpenAPI пишутся так, чтобы из них получались описания инструментов (§15.1).
 - **Безопасные повторы:** `Idempotency-Key` для create/fork/commands, чтобы повтор вызова инструмента не создавал второй ресурс и не запускал команду дважды.
 - **Ответы для LLM:** ошибки с понятным `message` и `retryable`; большие выводы — с флагами усечения и offset-ами, а не огромными телами; `waitFor` long-poll вместо опроса.
-- **Аутентификация:** MCP по stdio — API-ключ пользователя из env; удалённый MCP по HTTP — решает S11 (вероятно, OAuth через oauth2-proxy и выдача ключа по схеме `sbx login`). Ключи с ограничением по sandbox — позже (§19), если S11 их попросит.
+- **Аутентификация:** MCP по stdio — цепочка SDK (§7.6): вход человека через `sbx auth token` или командный ключ `SBX_API_KEY`; удалённый MCP по HTTP — решает S11 (вероятно, OAuth через Keycloak с `aud=sbx-api`). Ключи с ограничением по sandbox — позже (§19), если S11 их попросит.
 - Чего нет в v1 и может понадобиться S11: скриншоты и computer-use (S10), поиск по файлам (через exec).
 
 ### 17.6 S12
 
-- Ingress: `api.<domain>` → `:8080`; `app.<domain>` пути `/api/*` (с отрезанием `/api`), `/sbx-auth/*`, `/cli/*` → oauth2-proxy → `:8081`. Поддержка WebSocket upgrade на обоих хостах; буферизация ответа выключена для `application/x-ndjson`; таймаут чтения ingress и `--upstream-timeout` oauth2-proxy ≥ 660 s (sync-команды до 600 s молчат, §9.2; стримы покрывают heartbeat каждые 15 s); тело запроса без предела для `/files/*`, 16 MiB для остального.
+- Ingress: `api.<domain>` → `:8080`; `app.<domain>` пути `/api/*` (с отрезанием `/api`), `/sbx-auth/*` → oauth2-proxy → `:8081`. Поддержка WebSocket upgrade на обоих хостах; буферизация ответа выключена для `application/x-ndjson`; таймаут чтения ingress и `--upstream-timeout` oauth2-proxy ≥ 660 s (sync-команды до 600 s молчат, §9.2; стримы покрывают heartbeat каждые 15 s); тело запроса без предела для `/files/*`, 16 MiB для остального.
 - NetworkPolicy: `:8081` — только от oauth2-proxy; `:8082` — только от gateway; `:9090` — от Prometheus.
 - Deployment `api`: 2 реплики, `terminationGracePeriodSeconds: 30`, readiness `/readyz` (Postgres, Payload, `LISTEN`-соединения).
-- Secrets: service tokens (`SBX_API_SERVICE_TOKENS_FILE`), `SBX_API_CURSOR_KEY`, ключи данных S6 (`SBX_DATA_KEYS_FILE`), публичные SSH host keys gateway.
+- Secrets: service tokens (`SBX_API_SERVICE_TOKENS_FILE`), `SBX_API_CURSOR_KEY`, ключи данных S6 (`SBX_DATA_KEYS_FILE`), публичные SSH host keys gateway, закрытый ключ SSH login CA (`SBX_SSH_LOGIN_CA_KEY_FILE`, §11.3).
+- Keycloak (realm `sbx`, клиенты и сроки — architecture §10): `SBX_OIDC_ISSUER`, `SBX_OIDC_AUDIENCE=sbx-api`, `SBX_OIDC_ALLOWED_CLIENTS=sbx-cli`; `api` ходит к Keycloak только за discovery и JWKS.
 
 ## 18. Библиотеки и инструменты
 
@@ -1073,6 +1086,9 @@ interface IdentityStore {
 | Документация API | `@scalar/hono-api-reference` | 0.12.16 |
 | Лимиты частоты | `rate-limiter-flexible` | 11.2.3 |
 | Логи / метрики | `pino` / `prom-client` | 10.4.0 / 15.1.3 |
+| Проверка JWT Keycloak | `jose` | 6.2.13 |
+| CLI: хранилище ОС | `Bun.secrets` (Bun ≥ 1.3) | Bun из `mise.toml` |
+| IdP | Keycloak (S12) / oauth2-proxy | 26.8.1 / v7.15.5 |
 | ULID | `ulid` | 3.0.2 |
 | Агент | `@sbx/agent-client` (S2: `@connectrpc/connect`, `-node` 2.3.0) | workspace |
 | TS SDK: типы / клиент | `openapi-typescript` / `openapi-fetch` | 7.13.0 / 0.17.0 |
@@ -1095,9 +1111,9 @@ interface IdentityStore {
 | Фаза | Что входит |
 |---|---|
 | **PoC** | Public и internal listener-ы; `StaticIdentityStore` и ключи из YAML; create/get/list/patch (без slug)/delete, operations, long-poll; команды: sync, stream, detached, attach, output, input, kill, signal, list; файлы: content (чтение с `Range`, запись потоком), stat, list, mkdir, move, delete; templates, sizes, `/me`, `/meta`; `agent-events`; ошибки, пагинация, идемпотентность, лимиты; OpenAPI + CI; CLI: `login --key-stdin`, `create`, `list`, `info`, `rm`, `exec`, `logs`, `kill`, `cp` (без докачки) |
-| **MVP** | stop/resume/fork/recover/extend; rename slug; `GET`/`PUT /env`; PTY по WebSocket; загрузка чанками; chmod; порты и режимы доступа, ручки gateway (routes, port-auth, SSO authorize); SSH-ключи, `/ssh`, `ssh/authorize`; saved snapshots; API-ключи; proxied listener (реализация `IdentityStore` на Payload — S8); `sbx login` (loopback и device); `/limits`; SDK TS и Python с хелперами; полный CLI; релизы. По MVP-рекомендациям: архив каталога (`/files/archive`), `failFast`, env и секреты на fork и resume, `Sbx-Confirm-Delete`, scopes «ресурс × действие», контракт вывода CLI и `sbx current` |
+| **MVP** | stop/resume/fork/recover/extend; rename slug; `GET`/`PUT /env`; PTY по WebSocket; загрузка чанками; chmod; порты и режимы доступа, ручки gateway (routes, port-auth, SSO authorize); SSH-ключи, `/ssh`, `ssh/authorize`; saved snapshots; API-ключи; proxied listener (реализация `IdentityStore` на Payload — S8); `sbx login` (device grant Keycloak), проверка JWT, командные ключи, SSH-сертификаты; `/limits`; SDK TS и Python с хелперами; полный CLI; релизы. По MVP-рекомендациям: архив каталога (`/files/archive`), `failFast`, env и секреты на fork и resume, `Sbx-Confirm-Delete`, scopes «ресурс × действие», контракт вывода CLI и `sbx current` |
 | **Граница с S8** | MVP S7 считается готовым против `StaticIdentityStore` (с сессиями из заголовков для теста proxied listener-а) и `StaticConfigReader`, расширенного полями из §17.3 (`loginUser`, `capabilities`, `defaultTemplate`, `publicPortsEnabled`, `ssoPortPolicy`). Реализация `IdentityStore` и этих полей на Payload — работа S8; S7 её не ждёт |
-| **Позже** | Подписанные URL файлов; история вывода команд вне VM; webhooks; `ps`; desktop и computer-use (S10); ключи типа `sandbox` (§7.2) и ключи пользователя с ограничением по sandbox, environments или labels (S24); программный доступ к `sso`-портам (S4 §17); хранилище ключей ОС в CLI; self-update CLI; публикация в GitHub Packages |
+| **Позже** | Подписанные URL файлов; история вывода команд вне VM; webhooks; `ps`; desktop и computer-use (S10); ключи типа `sandbox` (§7.2) и командные ключи с ограничением по sandbox, environments или labels (S24); программный доступ к `sso`-портам (S4 §17); self-update CLI; публикация в GitHub Packages |
 
 ## 20. Сводка изменений в других спеках
 
@@ -1106,12 +1122,11 @@ interface IdentityStore {
 | # | Где | Было | Стало |
 |---|---|---|---|
 | O1 | S6 §14.2, §4 (схема) | `/internal/v1/routes/{label}`, `/internal/v1/ssh/authorize` | `/internal/v1/gateway/routes/{label}`, `/internal/v1/gateway/ssh/authorize`, `/internal/v1/gateway/port-auth/exchange` (пути S4) |
-| O2 | S6 §14.2 | `ssh/authorize {sandbox, user, publicKeyFingerprint}` → `{allowed, machineId, state}` | форма S4 §9.2: `{sandbox, publicKey, fingerprint}` → `{allowed, userId, email, sandboxId, machineId, sandboxState, loginUser}` |
+| O2 | S6 §14.2 | `ssh/authorize {sandbox, user, publicKeyFingerprint}` → `{allowed, machineId, state}` | форма S4 §9.2: `{sandbox, publicKey, fingerprint}` или `{sandbox, certificate: {keyId, serial, principal, validBefore}}` → `{allowed, actor, userId, email, sandboxId, machineId, sandboxState, loginUser}` (§12.1) |
 | O3 | S4 §6.3 | `sandboxState` может быть `running`, `resuming` | только состояния S6; `starting` обрабатывается как `creating` (§12.1) |
 | O4 | S4 §6.1 (пример) | `sandboxId: "sbx_..."` | `sb_...`; `teamId: "team_..."` |
 | O5 | S6 §5.6 | slug — 10 символов `[a-z0-9]` | грамматика S4 §4.2, по умолчанию три слова, генерирует S7 (§5.4) |
 | O6 | S6 §5.12 | `runtime` — 0200+ | S6 — 0200–0299, S7 — 0300–0399 |
-
 | O7 | S6 §14.2 | `NOTIFY sbx_routes '<label>'`, по одному на метку | payload — **slug** (S4 §6.2): gateway выкидывает все записи со slug; `'*'` очищает весь кэш. Триггеры на `sandboxes` и `hosted_ports` — в миграциях S6 (0200–0299): смена `state`, `machine_id`, slug (два уведомления: старый и новый), любое изменение строки `hosted_ports` (режим, токен, блокировка). `'*'` шлёт hook S8 при смене `publicPortsEnabled` |
 
 ### 20.2 Добавления к S6 (`packages/core`)
@@ -1126,8 +1141,8 @@ interface IdentityStore {
 6. `listSavedSnapshots` отдаёт и `creating` (по `pending_name`), и `failed` за сутки; `getSavedSnapshot(p, name)`.
 7. `resume` и `recover` при активной операции того же вида возвращают её (как `stop`).
 8. Последний снимок `ports.changed` по sandbox (`listeningPorts(id)`).
-9. `Principal` с `role` и `isOperator` (§7.5).
-10. Cleanup удаляет `port_auth_codes` и `cli_logins` старше суток.
+9. `Principal` с `kind`, `role` и `isOperator` (§7.5); `userId` может быть `null` (командный ключ): тогда `sandboxes.created_by`, `commands.created_by` и `operations.requested_by` — `null`, а в новые колонки `created_by_key` / `requested_by_key uuid null` пишется ключ (у системных операций S6 обе колонки `null`); `idempotency_keys.principal_id` — id ключа (как раньше).
+10. Cleanup удаляет `port_auth_codes` старше суток.
 11. Общий для `api` и `core` механизм идемпотентности по scope (`sandboxes.create`, `sandboxes.fork`, `commands.create`, `snapshots.create`); `saveSnapshot` принимает `idemKey`. В hash входит и sandbox из пути.
 12. `extend(p, id, ttlSeconds?)`.
 13. `NOTIFY sbx_operations '<operationId>'` при переходе операции в терминальное состояние (триггер) — для `GET /operations/{id}?waitSeconds` (`save_snapshot` и fork на источнике не меняют `state` sandbox, поэтому `sbx_sandboxes` их не покрывает).
@@ -1146,7 +1161,7 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 
 - Раскладка файлов в `apps/api`, `packages/auth`, SDK и CLI; генерация словаря slug (источник слов, фильтр).
 - Каноническая форма тела для hash идемпотентности (совместно с S6).
-- Вёрстка страниц входа CLI и ошибок SSO (минимальный HTML без внешних ресурсов).
+- Вёрстка страниц ошибок SSO (минимальный HTML без внешних ресурсов).
 - Значения лимитов частоты по результатам нагрузочного теста.
 - Где лежит общий список зарезервированных суффиксов slug и портов для TS и Go.
 - Метрики (минимум): запросы по маршруту, методу и статусу; длительность; открытые стримы и WebSocket; reattach по участку; вызовы агента по методу и исходу; отказы аутентификации по причине; `429`.
@@ -1155,4 +1170,5 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 
 - **SSO-порты:** по умолчанию пускается любой вошедший пользователь платформы; переключатель `ssoPortPolicy = team` остаётся (§7.7).
 - **Срок ключей:** 90 дней по умолчанию, 365 максимум, бессрочных нет (§7.2).
+- **Keycloak и offboarding** (решение Ильи, 2026-10-29): IdP — Keycloak; люди в CLI, SDK и MCP — device grant и JWT (§7.6, §7.10), без личных долгоживущих ключей; автоматизация — командные ключи (§7.2); деактивация — синхронизация с Keycloak (S8 §20.1).
 - **Роли в команде** (`owner`/`member`): решает S8; до этого действует допущение §7.5 (любой участник команды имеет доступ к её sandbox в пределах scopes).

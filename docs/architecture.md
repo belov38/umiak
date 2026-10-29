@@ -45,7 +45,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 | Компонент | Язык | Ответственность |
 |---|---|---|
-| `apps/api` | TS, Hono + `@hono/zod-openapi`, Node 24 | Публичный REST API, OpenAPI, авторизация по API-ключам, NDJSON-стримы, WebSocket терминала. Источник OpenAPI для SDK |
+| `apps/api` | TS, Hono + `@hono/zod-openapi`, Node 24 | Публичный REST API, OpenAPI, авторизация по Keycloak JWT и командным API-ключам, NDJSON-стримы, WebSocket терминала. Источник OpenAPI для SDK |
 | `apps/worker` | TS, pg-boss | Машины состояний sandbox и machine, warm pool, операции Proxmox, снапшоты и fork, auto-stop, очистка |
 | `apps/web` | TS, Next.js + Payload 3 | `/admin`: операторы (пользователи, команды, ключи, шаблоны, размеры, квоты). `/app`: клиентский дашборд (список sandbox, терминал xterm.js, iframe рабочего стола, логи). С sandbox работает только через `apps/api` |
 | `apps/cli` | TS (Bun compile) | Клиент публичного API |
@@ -140,7 +140,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Вместо SDN можно вручную настроить bridge без физического порта, nftables masquerade и dnsmasq. Результат тот же; SDN выбран, потому что управляется через API Proxmox.
 - Весь входящий трафик идёт через туннель агента к `gateway`:
   - **HTTP:** `https://<slug>-<port>.sbx.<domain>` → любой под gateway → туннель (локально или через под-владелец) → `localhost:port`. Режимы доступа `token`, `sso`, `public`. Подробно: `docs/specs/s4-gateway.md`.
-  - **SSH:** `ssh <sandbox>@ssh.<domain>` → gateway терминирует SSH и проверяет ключ пользователя через `api` → туннель → системный sshd VM на `127.0.0.1:22` с короткоживущим сертификатом от SSH CA gateway (`TrustedUserCAKeys`). Ключи пользователей в VM не копируются.
+  - **SSH:** `ssh <sandbox>@ssh.<domain>` → gateway терминирует SSH и проверяет короткий сертификат от `api` или ключ пользователя через `api` → туннель → системный sshd VM на `127.0.0.1:22` с короткоживущим сертификатом от SSH CA gateway (`TrustedUserCAKeys`). Ключи пользователей в VM не копируются.
   - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.sbx`); медиа WebRTC через отдельный TURN (coturn, S10).
 
 ## 8. Рабочий стол и computer-use
@@ -156,28 +156,48 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 - `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, tar каталога, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/environments`, `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
 - ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды. Удаление sandbox и saved snapshot — только с `Sbx-Confirm-Delete: <id>`. CLI без TTY печатает JSON и JSONL (S7 §14.3).
-- Три listener-а `api`: публичный (только API-ключи), за oauth2-proxy (браузер, проверка Origin), внутренний (gateway, service tokens).
+- Три listener-а `api`: публичный (Keycloak JWT и командные ключи), за oauth2-proxy (браузер, проверка Origin), внутренний (gateway, service tokens).
 - OpenAPI генерируется из zod-схем; SDK TS (`openapi-typescript` + `openapi-fetch`) и Python (`openapi-python-client`) с рукописными хелперами; CLI `sbx` на TS SDK через Bun compile.
 
 ## 10. Развёртывание и аутентификация
 
-**Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`. Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `sbx-node` остаются вне Kubernetes.
+**Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `sbx-node` остаются вне Kubernetes.
 
-**Пользователи (браузер) — через oauth2-proxy.**
+**IdP — Keycloak** (решение Ильи 2026-10-29), один realm `sbx`. Позже он может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет. Роли и команды берутся из групп и claims Keycloak (S8 §5).
+
+**Пользователи (браузер) — через oauth2-proxy** (провайдер `keycloak-oidc`, `--cookie-refresh=5m`: выключенный в Keycloak пользователь теряет дашборд и `/admin` за 5 min).
 - `web` (`/admin`, `/app`) и браузерные вызовы API закрыты oauth2-proxy.
 - Пользователь создаётся при первом входе (JIT) из заголовков oauth2-proxy: `X-Auth-Request-Email`, `-User`, `-Groups`. Это кастомная auth-стратегия Payload; API читает того же пользователя.
-- Роли берутся из групп IdP: группа из `SBX_OPERATOR_GROUPS` → оператор платформы. Права оператора действуют только в браузерной сессии, не по API-ключу. Команды и роли `owner`/`member` — в Payload, при первом входе создаётся личная команда (S8 §6).
-- Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy. oauth2-proxy работает в upstream-режиме и маршрутизирует `app.<domain>`: `/api/*` (без `/api`), `/cli/*`, `/sbx-auth/*` → `api :8081`, остальное → `web` (S8 §5.1).
+- Роли берутся из групп Keycloak: группа из `SBX_OPERATOR_GROUPS` → оператор платформы. Права оператора действуют только в браузерной сессии, не по API-ключу и не по JWT CLI. Команды и роли `owner`/`member` — в Payload, при первом входе создаётся личная команда (S8 §6).
+- Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy. oauth2-proxy работает в upstream-режиме и маршрутизирует `app.<domain>`: `/api/*` (без `/api`), `/sbx-auth/*` → `api :8081`, остальное → `web` (S8 §5.1).
 
-**Программный доступ (CLI, SDK, MCP, AI-агенты) — API-ключи.**
-- Ключ создаёт JIT-пользователь в дашборде. `sbx login` в CLI открывает браузер (через oauth2-proxy) и получает ключ.
-- Маршруты `/v1/*` с `Authorization: Bearer sbx_...` идут мимо OIDC-проверки oauth2-proxy (отдельный host `api.<domain>` или `skip_auth_routes`), ключ проверяет `api`.
+**Люди в CLI, SDK и локальном MCP — Keycloak JWT, без личных долгоживущих ключей** (S7 §7.6, §7.10).
+- `sbx login` — OAuth 2.0 Device Authorization Grant с публичным клиентом `sbx-cli`. Access token живёт 5 min, refresh token привязан к SSO-сессии Keycloak и лежит в хранилище ОС (запасной вариант — файл `0600`). SDK и MCP берут токен у CLI (`sbx auth token`).
+- `api` сам проверяет JWT (JWKS, `iss`, `aud=sbx-api`, `exp`), без introspection на запрос; `sub` → тот же пользователь Payload, что в браузере. Выключенный пользователь не обновит токен: доступ кончается за 5 min.
+
+**Автоматизация и CI — командные ключи `sbx_`** (S7 §7.2). Принадлежат команде, выпускает `owner` в дашборде, создатель записан для аудита; scopes «ресурс × действие», срок 90 d по умолчанию, максимум 365 d. Уход создателя ключи не выключает, их отзывают `owner`-ы.
+
+Маршруты `/v1/*` с `Authorization: Bearer` (JWT или `sbx_`) идут на `api.<domain>` мимо oauth2-proxy: oauth2-proxy — только для браузера.
+
+**Деактивация (offboarding, вариант A, S8 §20.1).** `worker` раз в 5 min читает пользователей через Keycloak Admin API (клиент `sbx-worker`). Выключенный или удалённый пользователь деактивируется в Payload; его стримы, PTY и SSH-сессии закрываются сразу; `owner`-ы его команд получают список командных ключей, которые он создал. Ключи автоматически не отзываются.
+
+**Настройки Keycloak** (realm `sbx`, Keycloak 26.8; ставит S12):
+
+| Что | Настройка |
+|---|---|
+| Общий client scope `groups` | Group Membership mapper → claim `groups`, Full group path выключен; подключён по умолчанию к `oauth2-proxy` и `sbx-cli`, чтобы браузер и CLI получали группы в одном формате |
+| Клиент `oauth2-proxy` | конфиденциальный (Client authentication on), Standard flow; Audience mapper на себя; scope `groups` |
+| Клиент `sbx-cli` | публичный (Client authentication off), только OAuth 2.0 Device Authorization Grant; Audience mapper (Included Client Audience `sbx-api`, Add to access token); default scopes `basic` (`sub`), `email`, `profile`, `groups`; `offline_access` убран и из default, и из optional (refresh не переживает SSO-сессию); lightweight access token выключен |
+| Клиент `sbx-api` | только аудитория: без flow, токенов себе не получает |
+| Клиент `sbx-worker` | конфиденциальный, только Service accounts; роль `view-users` клиента `realm-management` |
+| Сроки | Access Token Lifespan 5 min; SSO Session Idle 24 h; SSO Session Max 7 d (вход в CLI раз в неделю, при ежедневной работе); Client Session Idle/Max — как у realm; Revoke Refresh Token выключен (CLI обновляет под блокировкой); device code 600 s, интервал опроса 5 s |
+| Пользователи | email обязателен и подтверждён; группа операторов — `SBX_OPERATOR_GROUPS` |
 
 **Мимо oauth2-proxy (своя аутентификация):**
 - `tunnel.<domain>`: туннели агентов (WSS, bootstrap secret / machine token, см. S2).
 - Внутренний listener gateway (ClusterIP) для вызовов `api` и `worker`, авторизация сервисными токенами.
 - `*.sbx.<domain>`: публичные URL портов. Режимы доступа: `token` (как у boat), `sso` (вход через oauth2-proxy на основном домене и одноразовый код, cookie IdP на sbx не попадает), `public`.
-- `ssh.<domain>`: SSH gateway, ключи пользователей проверяет `api`.
+- `ssh.<domain>`: SSH gateway. Вход по коротким SSH-сертификатам, которые `api` выпускает по JWT человека или командному ключу, или по зарегистрированному ключу человека; личность проверяет `api` на каждом подключении (S4 §9.2, S7 §11.3).
 
 **Edge gateway.** `tunnel.<domain>`, `*.sbx.<domain>` и `ssh.<domain>` идут не через ingress, а через отдельный L4 LoadBalancer Service `gateway-edge` (443 и 22; IP клиента — PROXY protocol v2 или `externalTrafficPolicy: Local`). TLS терминирует сам gateway: wildcard `*.sbx` от cert-manager (DNS-01), `tunnel` — от tunnel CA. Запасной режим «за ingress» поддерживается (S4 §5). Все cookie платформы на основном домене — host-only с префиксом `__Host-`, иначе код в sandbox может их подбросить (S4 §14.1).
 
@@ -187,7 +207,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 ## 11. Безопасность
 
-- API-ключи со scopes «ресурс × действие» (`sandboxes:read`, `commands:exec`, …) и обязательным сроком жизни, хранятся хешами в Payload. Тип ключа `sandbox` (одна sandbox, для CLI в VM) зарезервирован, в MVP не выпускается (S7 §7.2–7.3).
+- Командные API-ключи со scopes «ресурс × действие» (`sandboxes:read`, `commands:exec`, …) и обязательным сроком жизни, хранятся хешами в Payload. У людей долгоживущих ключей нет: CLI работает по коротким JWT Keycloak. Тип ключа `sandbox` (одна sandbox, для CLI в VM) зарезервирован, в MVP не выпускается (S7 §7.2–7.3).
 - У каждой machine свой bootstrap secret в `smbios1` и машинный токен для туннеля только в памяти агента; токен перевыпускается при claim. Machine не переиспользуется между sandbox (S2).
 - Секреты в госте в tmpfs (Linux) или в каталоге с ACL только для SYSTEM (Windows); стираются при stop.
 - Proxmox: отдельный пользователь и API-токен с правами только на pool `sandbox` и нужные хранилища.
@@ -204,5 +224,5 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 - Ресурсы под PoC на `pve`: RAM, диапазон VMID, согласие на изменения хоста (пользователь и токен, SDN, pool).
 - Домен для `*.sbx`: по умолчанию `sbx.<domain>`; отдельный регистрируемый домен — выбор Ильи, можно позже (S4 §14.1). TLS: wildcard через cert-manager DNS-01 (S4 §5).
-- Kubernetes: какой кластер и ingress controller; какой IdP за oauth2-proxy и какая группа даёт роль оператора.
+- Kubernetes: какой кластер и ingress controller; какая группа Keycloak даёт роль оператора. ~~Какой IdP~~ — Keycloak (решение Ильи 2026-10-29).
 - ~~SSH в госте: системный sshd или встроенный SSH-сервер в агенте.~~ Решено в S4: системный sshd на loopback с сертификатами от SSH CA gateway.
