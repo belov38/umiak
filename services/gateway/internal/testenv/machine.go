@@ -30,6 +30,8 @@ type Machine struct {
 	e       *Env
 	bs      []byte
 	handler http.Handler
+	// raw is the hostile agent's handler (NewRawAgent); nil for a real agent.
+	raw http.Handler
 
 	appMu     sync.Mutex
 	apps      map[uint16]string // port -> 127.0.0.1 address of the app
@@ -82,13 +84,18 @@ func (e *Env) NewMachine(opts ...MachineOptions) *Machine {
 
 // Start starts an agent client (a new agent process: new instance id, no
 // machine token, so it connects with the bootstrap secret) and waits until
-// it is connected. A running client is stopped first.
+// it is connected. A running client is stopped first. A raw agent
+// (NewRawAgent) connects again as a raw agent.
 func (m *Machine) Start() {
 	m.e.T.Helper()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.stopLocked(); err != nil {
 		m.e.T.Fatal(err)
+	}
+	if m.raw != nil {
+		m.startRawLocked()
+		return
 	}
 	inst := "agent-" + randHex(8)
 	c, err := agent.New(agent.Config{

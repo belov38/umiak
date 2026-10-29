@@ -453,3 +453,44 @@ func TestErrorUnwrap(t *testing.T) {
 		t.Fatal("empty message")
 	}
 }
+
+// A hostile or broken agent answers a CONNECT with a status that, from a
+// peer, would mean a gateway signal: 503 (no session), 421 (moved), 429
+// (too many streams), 401. From the agent it is only a refused dial: 502
+// upstream_error at once, locally and through a peer. In particular an
+// agent's 503 is not a reason to wait for the agent.
+func TestDialAgentStatuses(t *testing.T) {
+	env := testenv.New(t, testenv.Options{})
+	a := env.StartInstance(func(c *config.Config) { c.Timeouts.AgentWait = 3 * time.Second })
+	m := env.NewRawAgent(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.NotFound(w, r)
+			return
+		}
+		_, port, _ := net.SplitHostPort(r.Host)
+		w.Header().Set("Retry-After", "99999")
+		w.Header().Set(wire.HeaderInstanceURL, "http://127.0.0.1:1")
+		switch port {
+		case "7001":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "7002":
+			w.WriteHeader(http.StatusMisdirectedRequest)
+		case "7003":
+			w.WriteHeader(http.StatusTooManyRequests)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	b := env.StartInstance(func(c *config.Config) { c.Timeouts.AgentWait = 3 * time.Second })
+
+	for _, inst := range []*testenv.Inst{a, b} {
+		for _, port := range []uint16{7001, 7002, 7003, 7004} {
+			start := time.Now()
+			_, err := dial(t, inst, m.ID, port)
+			wantError(t, err, http.StatusBadGateway, "upstream_error", "upstream_error")
+			if el := time.Since(start); el > time.Second {
+				t.Fatalf("%s port %d: answer after %s, want at once", inst.Name, port, el)
+			}
+		}
+	}
+}

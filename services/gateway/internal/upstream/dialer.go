@@ -222,10 +222,11 @@ func (d *Dialer) resolve(ctx context.Context, id string, port uint16, opts gatew
 }
 
 // ownerWithoutSession reports a peer CONNECT refused with 503: the owner
-// instance has no serving session for the machine.
+// instance has no serving session for the machine. An agent's own 503 on a
+// local dial is not one: the agent is connected and refused the dial.
 func ownerWithoutSession(err error) bool {
-	var de *transport.DialError
-	return errors.As(err, &de) && de.Status == http.StatusServiceUnavailable
+	var ne *noSessionError
+	return errors.As(err, &ne)
 }
 
 // waitAgent waits until waitUntil for the machine to get an owner, or, when
@@ -279,6 +280,13 @@ type registryError struct{ err error }
 
 func (e *registryError) Error() string { return "upstream: owner lookup: " + e.err.Error() }
 func (e *registryError) Unwrap() error { return e.err }
+
+// noSessionError is a peer CONNECT refused with 503: the owner instance
+// holds no session for the machine (any more).
+type noSessionError struct{ err error }
+
+func (e *noSessionError) Error() string { return "upstream: owner has no session: " + e.err.Error() }
+func (e *noSessionError) Unwrap() error { return e.err }
 
 // peerError is a transport failure talking to an owner instance.
 type peerError struct{ err error }
@@ -396,6 +404,7 @@ func (d *Dialer) dialPeerOnce(ctx context.Context, id string, o registry.Owner, 
 		if de.Status == http.StatusServiceUnavailable {
 			// The owner has no session (any more): the cached owner is stale.
 			d.cfg.Owners.Invalidate(id)
+			return nil, &noSessionError{err: err}
 		}
 		return nil, err
 	case ctx.Err() != nil:
@@ -414,6 +423,7 @@ func (d *Dialer) mapError(ctx context.Context, err error) *Error {
 	}
 	var (
 		de *transport.DialError
+		ne *noSessionError
 		pe *peerError
 		me *movedError
 		re *registryError
@@ -429,6 +439,8 @@ func (d *Dialer) mapError(ctx context.Context, err error) *Error {
 		return e(http.StatusBadGateway, CodeUpstreamError, ReasonCanceled)
 	case errors.Is(err, gateway.ErrTooManyStreams):
 		return e(http.StatusServiceUnavailable, CodeOverloaded, ReasonOverloaded)
+	case errors.As(err, &ne):
+		return e(http.StatusServiceUnavailable, CodeAgentUnavailable, ReasonAgentUnavailable)
 	case errors.As(err, &de):
 		return d.mapDialError(err, de)
 	case errors.As(err, &me):
@@ -453,13 +465,12 @@ func (d *Dialer) mapDialError(err error, de *transport.DialError) *Error {
 		return e(http.StatusBadGateway, CodeAppNotListening, ReasonRefused)
 	case de.Status == http.StatusBadGateway && de.Reason == wire.DialErrorTimeout:
 		return e(http.StatusGatewayTimeout, CodeAppTimeout, ReasonTimeout)
-	case de.Status == http.StatusServiceUnavailable:
-		return e(http.StatusServiceUnavailable, CodeAgentUnavailable, ReasonAgentUnavailable)
 	case de.Status == http.StatusBadGateway:
 		return e(http.StatusBadGateway, CodeUpstreamError, ReasonUpstreamError)
 	}
-	// 400/403 from the agent, or an unexpected status from a peer (401, 5xx):
-	// a platform error, not the application's.
+	// 400/403 from the agent, any other status from the agent (a 503, 421
+	// or 429 there is not a gateway signal), or an unexpected status from a
+	// peer (401, 5xx): a platform error, not the application's.
 	d.log.Error("upstream: dial refused by the platform", "status", de.Status, "err", err)
 	return e(http.StatusBadGateway, CodeUpstreamError, ReasonUpstreamError)
 }
