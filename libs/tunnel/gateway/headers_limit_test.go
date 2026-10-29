@@ -45,7 +45,7 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 			_, _ = io.WriteString(w, `{}`)
 		}
 	}
-	trailer := func(ct string) http.HandlerFunc {
+	trailer := func(ct, v string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.Copy(io.Discard, r.Body)
 			w.Header().Set("Content-Type", ct)
@@ -55,9 +55,13 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 			} else {
 				_, _ = io.WriteString(w, "body")
 			}
-			w.Header().Set("X-Big", big)
+			w.Header().Set("X-Big", v)
 		}
 	}
+	// A trailer block of exactly maxForwardHeaderBytes is over Node's
+	// default maxHeaderListSize (65535).
+	edgeTrailer := strings.Repeat("e", maxForwardHeaderBytes-32-len("X-Big"))
+	fitTrailer := strings.Repeat("f", 60<<10)
 	cfg := agentConfig(e, id, bs, defaultIdentity())
 	cfg.Handler = stub.handlerWith(func(mux *http.ServeMux) {
 		mux.HandleFunc("/files/big-header", header("X-Big", big))
@@ -80,10 +84,12 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 			}
 		})
 		mux.HandleFunc("/files/fit-header", header("X-Fit", strings.Repeat("f", 32<<10)))
-		mux.HandleFunc("/files/big-trailer", trailer("application/octet-stream"))
+		mux.HandleFunc("/files/big-trailer", trailer("application/octet-stream", big))
+		mux.HandleFunc("/files/edge-trailer", trailer("application/octet-stream", edgeTrailer))
+		mux.HandleFunc("/files/fit-trailer", trailer("application/octet-stream", fitTrailer))
 		mux.HandleFunc("/sbx.testing.v1.Forge/BigHeader", header("X-Big", big))
 		mux.HandleFunc("/sbx.testing.v1.Forge/EdgeHeader", header("X-Edge", edge))
-		mux.HandleFunc("/sbx.testing.v1.Forge/BigTrailer", trailer("application/connect+proto"))
+		mux.HandleFunc("/sbx.testing.v1.Forge/BigTrailer", trailer("application/connect+proto", big))
 		mux.HandleFunc("/files/slow", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, "first ")
 			w.(http.Flusher).Flush()
@@ -136,6 +142,7 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 
 	for _, tc := range []struct{ path, ct string }{
 		{"/files/big-trailer", ""},
+		{"/files/edge-trailer", ""},
 		{"/rpc/sbx.testing.v1.Forge/BigTrailer", "application/connect+json"},
 		{"/rpc/sbx.testing.v1.Forge/ManyTrailers", "application/connect+json"},
 	} {
@@ -153,6 +160,17 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: body %q and trailer of %d bytes passed, want a reset", tc.path, b, len(resp.Trailer.Get("X-Big")))
 		}
+	}
+	fitReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+"/files/fit-trailer", strings.NewReader(`{}`))
+	fitReq.Header.Set("Te", "trailers")
+	fit, err := c.Do(fitReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = io.ReadAll(fit.Body)
+	_ = fit.Body.Close()
+	if err != nil || fit.Trailer.Get("X-Big") != fitTrailer {
+		t.Errorf("fit trailer: %v, trailer of %d bytes; want it passed", err, len(fit.Trailer.Get("X-Big")))
 	}
 
 	close(release)

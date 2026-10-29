@@ -160,10 +160,15 @@ func headerOverLimit(hs ...http.Header) bool {
 	return size > maxForwardHeaderBytes || fields > maxForwardHeaderFields
 }
 
+// trailerReserveBytes keeps the largest trailer block passed below Node's
+// default maxHeaderListSize (65535), which a block of exactly
+// maxForwardHeaderBytes would exceed.
+const trailerReserveBytes = 32
+
 // trailerBlockOverLimit reports whether the trailer block of t would be over
-// maxForwardHeaderBytes or maxForwardHeaderFields.
+// maxForwardHeaderBytes (with trailerReserveBytes) or maxForwardHeaderFields.
 func trailerBlockOverLimit(t http.Header) bool {
-	return headerBlockSize(t) > maxForwardHeaderBytes || headerFields(t) > maxForwardHeaderFields
+	return headerBlockSize(t)+trailerReserveBytes > maxForwardHeaderBytes || headerFields(t) > maxForwardHeaderFields
 }
 
 // forwardHeader builds the agent's response header and trailer declarations
