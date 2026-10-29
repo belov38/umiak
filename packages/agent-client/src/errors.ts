@@ -141,7 +141,9 @@ export function classify(err: unknown, signal?: AbortSignal): Classification {
 /**
  * Classifies an error by its Connect code and connection state only,
  * ignoring Sbx-Error-Code and the ErrorDetail: for a 421 whose hint the
- * registry did not confirm, which is then not a gateway's answer.
+ * registry did not confirm, which is then not a gateway's answer, and for
+ * errors of a started stream (the route watch, resumableAttach), whose
+ * metadata and details come from the agent's end-stream message.
  */
 export function classifyByCode(
 	err: unknown,
