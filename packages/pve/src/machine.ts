@@ -522,7 +522,7 @@ export class Machines {
 			// Release while the IP, the ethers line and the lease still belong to this VM: once
 			// destroy frees the IP in IPAM, a new VM may take it and dnsmasq moves the lease to the
 			// new MAC, after which a release for our MAC finds nothing. sbx-node keeps the ethers
-			// line while the MAC is in IPAM; verifyGone removes it after destroy.
+			// line while the MAC is in mac-cache.json; verifyGone removes it after destroy.
 			await this.#o.node.call("dhcp.release", { mac });
 			const upid = await api.delete<string>(this.#vmPath(vmid), {
 				purge: 1,
