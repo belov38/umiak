@@ -348,6 +348,43 @@ describe("AgentClient.fetch", () => {
 		await expect(agent().fetch(m, "uploads/x")).rejects.toThrow(TypeError);
 	});
 
+	describe("path traversal", () => {
+		const other = randomUUID();
+		for (const path of [
+			"/../rotate-token",
+			`/../../${other}/files/x`,
+			"/%2e%2e/x",
+			"/%2E%2e/x",
+			"/%252e%252e/x",
+			"/./x",
+			"/a%2fb",
+			"/a%2Fb",
+			"/a%5cb",
+			"/a\\b",
+			"/..\\x",
+			"/%zz",
+			// The URL parser drops tabs: only the final pathname check sees "..".
+			"/.\t./x",
+		]) {
+			it(`rejects ${JSON.stringify(path)} without a request`, async () => {
+				registry.set(route(m, a.url));
+				await expect(agent().fetch(m, path)).rejects.toThrow(TypeError);
+				expect(a.requests).toHaveLength(0);
+			});
+		}
+
+		for (const path of ["/.bashrc", "/a..b", "/x/...", "?path=/x/../y"]) {
+			it(`allows ${JSON.stringify(path)}`, async () => {
+				registry.set(route(m, a.url));
+				const res = await agent().fetch(m, path);
+				await res.body?.cancel();
+				expect(fileRequests(a).map((r) => r.url)).toEqual([
+					`/v1/machines/${m}/files${path}`,
+				]);
+			});
+		}
+	});
+
 	describe("compression", () => {
 		it("sends Accept-Encoding: identity by default", async () => {
 			registry.set(route(m, a.url));

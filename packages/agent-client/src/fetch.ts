@@ -33,6 +33,7 @@ export async function routedFetch(
 	if (path !== "" && !path.startsWith("/") && !path.startsWith("?")) {
 		throw new TypeError(`agent fetch path must start with "/": ${path}`);
 	}
+	checkPathSegments(path);
 	const { body, headers, signal, ...rest } = init;
 	const h0 = new Headers(headers);
 	// undici would advertise gzip, deflate, br and inflate the answer
@@ -55,7 +56,14 @@ export async function routedFetch(
 			abortError: (reason) => reason,
 		},
 		async ({ instanceUrl, authorization }) => {
-			const url = `${instanceUrl.replace(/\/+$/, "")}/v1/machines/${routing.machineId}/files${path}`;
+			const base = `${instanceUrl.replace(/\/+$/, "")}/v1/machines/${routing.machineId}/files`;
+			const url = `${base}${path}`;
+			// Belt and braces: the request must stay under this machine's files.
+			const prefix = new URL(base).pathname;
+			const got = new URL(url).pathname;
+			if (got !== prefix && !got.startsWith(`${prefix}/`)) {
+				throw new TypeError(`agent fetch path leaves /files: ${path}`);
+			}
 			const h = new Headers(headerEntries);
 			h.set("Authorization", authorization);
 			const b = factory !== undefined ? factory() : fixed;
@@ -116,6 +124,40 @@ export async function routedFetch(
 			return { kind: "unavailable", cause };
 		},
 	);
+}
+
+/**
+ * Rejects a path whose segment is, or decodes (repeatedly) to, "." or "..",
+ * or decodes to one holding "/" or "\": like the gateway's /files check, so
+ * a path cannot reach another machine's route or another endpoint. The query
+ * is not checked.
+ */
+function checkPathSegments(path: string): void {
+	const q = path.indexOf("?");
+	const p = q >= 0 ? path.slice(0, q) : path;
+	for (const raw of p.split("/")) {
+		let seg = raw;
+		for (let i = 0; ; i++) {
+			let next: string;
+			try {
+				next = decodeURIComponent(seg);
+			} catch {
+				throw new TypeError(`agent fetch path is malformed: ${path}`);
+			}
+			if (next === seg) {
+				break;
+			}
+			if (i >= 8) {
+				throw new TypeError(`agent fetch path is malformed: ${path}`);
+			}
+			seg = next;
+		}
+		if (seg === "." || seg === ".." || /[/\\]/.test(seg)) {
+			throw new TypeError(
+				`agent fetch path must not hold ".", ".." or separators in a segment: ${path}`,
+			);
+		}
+	}
 }
 
 /**

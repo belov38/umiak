@@ -185,6 +185,8 @@ export class AgentClient {
 	 * redirects are never followed (init.redirect is ignored), a 3xx is
 	 * returned as the Response.
 	 *
+	 * A path segment that is or decodes to "." or "..", or decodes to one
+	 * holding "/" or "\", is rejected with a TypeError before any request.
 	 * Without a caller Accept-Encoding, "Accept-Encoding: identity" is sent.
 	 *
 	 * The body is agent-controlled and of any size: stream response.body, or
