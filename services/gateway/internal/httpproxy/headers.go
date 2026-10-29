@@ -1,9 +1,11 @@
 package httpproxy
 
 import (
+	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"sync"
 
@@ -222,10 +224,38 @@ type trailerGuard struct {
 
 func (g *trailerGuard) Read(p []byte) (int, error) {
 	n, err := g.ReadCloser.Read(p)
-	if err == io.EOF {
+	switch {
+	case err == io.EOF:
 		g.check()
+	case err != nil && trailerReadError(err):
+		// The body is complete; only the trailer block failed. Drop the
+		// trailers and end the body cleanly. The transport does not reuse
+		// the conn: its body never reached EOF.
+		g.once.Do(func() {
+			clear(g.res.Trailer)
+			if g.dropped != nil {
+				g.dropped()
+			}
+		})
+		err = io.EOF
 	}
 	return n, err
+}
+
+// trailerReadError reports an error that net/http's HTTP/1.1 body reader
+// returns only after the last chunk, while reading the trailer block: a
+// block longer than its buffer ("suspiciously long trailer"), an EOF inside
+// it ("unexpected EOF reading trailer"), a malformed line
+// (textproto.ProtocolError) or too many fields ("message too large"). A
+// body cut inside a chunk is io.ErrUnexpectedEOF, which is not one of them.
+// The messages are not exported; TestTrailerReadFailure pins them.
+func trailerReadError(err error) bool {
+	var pe textproto.ProtocolError
+	if errors.As(err, &pe) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "trailer") || msg == "message too large"
 }
 
 func (g *trailerGuard) Close() error {

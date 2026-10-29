@@ -408,3 +408,43 @@ func TestResponseHeaderCap(t *testing.T) {
 		}
 	}
 }
+
+// Go's HTTP/1.1 reader refuses a trailer block larger than its 4 KiB buffer
+// (or malformed) after the last chunk: the body is complete then, so the
+// trailers are dropped and the response ends cleanly, like trailers over
+// the caps. A body cut inside a chunk stays an error for the client.
+func TestTrailerReadFailure(t *testing.T) {
+	f := newFixture(t, nil)
+	const head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTrailer: X-Big\r\n\r\n4\r\nbody\r\n"
+	var many strings.Builder
+	for i := range 1000 {
+		many.WriteString("X-T" + strconv.Itoa(i) + ": t\r\n")
+	}
+	clean := map[uint16]string{
+		3000: head + "0\r\nX-Big: " + strings.Repeat("t", 70<<10) + "\r\n\r\n",
+		3001: head + "0\r\n" + many.String() + "\r\n",
+		3002: head + "0\r\nnot a header line\r\n\r\n",
+		3003: head + "0\r\n", // EOF before the end of the trailer block
+	}
+	for port, raw := range clean {
+		rawApp(f.m, port, raw)
+		resp := do(t, f.c, newReq(t, http.MethodGet, testenv.Host(f.env.Route(f.m, port, nil).Label), "/", nil))
+		defer func() { _ = resp.Body.Close() }()
+		b, err := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK || string(b) != "body" || err != nil {
+			t.Fatalf("port %d: %d %q, read error %v", port, resp.StatusCode, b, err)
+		}
+		for k, v := range resp.Trailer {
+			if len(v) > 0 {
+				t.Fatalf("port %d: trailer %s reached the client", port, k)
+			}
+		}
+	}
+
+	rawApp(f.m, 3010, head+"10\r\ncut")
+	resp := do(t, f.c, newReq(t, http.MethodGet, testenv.Host(f.env.Route(f.m, 3010, nil).Label), "/", nil))
+	defer func() { _ = resp.Body.Close() }()
+	if _, err := io.ReadAll(resp.Body); err == nil {
+		t.Fatal("a body cut inside a chunk ended cleanly")
+	}
+}
