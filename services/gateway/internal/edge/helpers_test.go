@@ -159,12 +159,18 @@ func (c *recordConn) Read(p []byte) (int, error) {
 // the alert description the server sent in its first record, or -1.
 func handshakeAlert(t *testing.T, addr, sni string) int {
 	t.Helper()
+	return handshakeAlertVersion(t, addr, sni, tls.VersionTLS12, tls.VersionTLS13)
+}
+
+// handshakeAlertVersion is handshakeAlert with the client's TLS versions.
+func handshakeAlertVersion(t *testing.T, addr, sni string, minV, maxV uint16) int {
+	t.Helper()
 	raw, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(context.Background(), "tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rc := &recordConn{Conn: raw}
-	c := tls.Client(rc, &tls.Config{ServerName: sni, InsecureSkipVerify: sni == "", MinVersion: tls.VersionTLS12}) //nolint:gosec // no SNI needs no verification
+	c := tls.Client(rc, &tls.Config{ServerName: sni, InsecureSkipVerify: sni == "", MinVersion: minV, MaxVersion: maxV}) //nolint:gosec // no SNI needs no verification; old versions are the point
 	defer func() { _ = c.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

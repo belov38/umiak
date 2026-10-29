@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -253,6 +254,14 @@ func TestWrapProxyProtocolPolicy(t *testing.T) {
 			t.Fatal("a PROXY header from an untrusted source was accepted")
 		}
 	})
+	t.Run("trusted with a v1 header", func(t *testing.T) {
+		ln := listen("127.0.0.0/8")
+		dialWrite(t, ln.Addr().String(), []byte("PROXY TCP4 203.0.113.7 127.0.0.1 5555 443\r\nhello\n"))
+		_, line, err := acceptOne(t, ln)
+		if err == nil {
+			t.Fatalf("a PROXY v1 header was accepted (line %q)", line)
+		}
+	})
 	t.Run("untrusted without header", func(t *testing.T) {
 		ln := listen("10.0.0.0/8")
 		dialWrite(t, ln.Addr().String(), []byte("hello\n"))
@@ -310,7 +319,8 @@ func TestPlainHandlerDispatch(t *testing.T) {
 	for host, want := range map[string]string{
 		"tunnel.test":      "tunnel",
 		"TUNNEL.Test:8080": "tunnel",
-		"tunnel.test.":     "sbx",
+		"tunnel.test.":     "tunnel",
+		"TUNNEL.TEST.:80":  "tunnel",
 		"a-80.sbx.test":    "sbx",
 		"x.tunnel.test":    "sbx",
 		"":                 "sbx",
@@ -420,22 +430,20 @@ func TestDispatcherConnLimit(t *testing.T) {
 			return nil
 		}
 	}
-	readClosed := func(c *tls.Conn) bool {
-		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
-		_, err := c.Read(make([]byte, 1))
-		var ne net.Error
-		return err != nil && (!errors.As(err, &ne) || !ne.Timeout())
-	}
 
 	c1, err := dial("a-80.sbx.test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s1 := next()
-	// A second sbx conn from the same IP is over the limit and closed.
-	c2, err := dial("b-80.sbx.test")
-	if err == nil && !readClosed(c2) {
-		t.Fatal("second sbx conn was not closed")
+	// A second sbx conn from the same IP is refused during the handshake,
+	// and that is no TLS handshake error.
+	if c2, err := dial("b-80.sbx.test"); err == nil {
+		_ = c2.Close()
+		t.Fatal("second sbx conn completed its handshake")
+	}
+	if got := testutil.ToFloat64(m.TLSHandshakeErrors.WithLabelValues("sbx")); got != 0 {
+		t.Errorf("tls_handshake_errors_total{sbx} = %v after a conn-limit refusal", got)
 	}
 	// Tunnel conns are not limited.
 	for range 3 {
@@ -462,4 +470,146 @@ func TestDispatcherConnLimit(t *testing.T) {
 	s3 := next()
 	_ = c3.Close()
 	_ = s3.Close()
+}
+
+// flakyListener fails Accept with the queued errors, then hands out the
+// queued conns, then blocks until closed.
+type flakyListener struct {
+	errs  chan error
+	conns chan net.Conn
+	done  chan struct{}
+	once  sync.Once
+}
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	select {
+	case err := <-l.errs:
+		return nil, err
+	default:
+	}
+	select {
+	case c := <-l.conns:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *flakyListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *flakyListener) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 443} }
+
+func newDispatcher(t *testing.T, ln net.Listener, mod func(*edge.DispatchConfig)) (*edge.Dispatcher, *testenv.PKI, chan error) {
+	t.Helper()
+	pki := newTestPKI(t)
+	dir := t.TempDir()
+	m := obs.NewMetrics(prometheus.NewRegistry())
+	cfg := edge.DispatchConfig{
+		SbxDomain: "sbx.test", TunnelHost: "tunnel.test",
+		Sbx: certSource(t, pki, dir, "sbx", "*.sbx.test", m), Tunnel: certSource(t, pki, dir, "tunnel", "tunnel.test", m),
+		HandshakeTimeout: 5 * time.Second, Metrics: m, Logger: testenv.Logger(),
+	}
+	if mod != nil {
+		mod(&cfg)
+	}
+	d := edge.NewDispatcher(ln, cfg)
+	served := make(chan error, 1)
+	go func() { served <- d.Serve(context.Background()) }()
+	return d, pki, served
+}
+
+// TestDispatcherAcceptErrors: accept errors other than a closed listener
+// are retried; Serve returns only after Close.
+func TestDispatcherAcceptErrors(t *testing.T) {
+	ln := &flakyListener{errs: make(chan error, 3), conns: make(chan net.Conn, 1), done: make(chan struct{})}
+	ln.errs <- &net.OpError{Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept4", syscall.EMFILE)}
+	ln.errs <- &net.OpError{Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept4", syscall.ECONNABORTED)}
+	ln.errs <- errors.New("something odd")
+	srvSide, cliSide := net.Pipe()
+	ln.conns <- srvSide
+	d, pki, served := newDispatcher(t, ln, nil)
+
+	hs := make(chan error, 1)
+	go func() {
+		c := tls.Client(cliSide, &tls.Config{ServerName: "tunnel.test", RootCAs: pki.Roots, MinVersion: tls.VersionTLS12})
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		hs <- c.HandshakeContext(ctx)
+	}()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if c, err := d.Tunnel().Accept(); err == nil {
+			accepted <- c
+		}
+	}()
+	select {
+	case c := <-accepted:
+		_ = c.Close()
+	case err := <-served:
+		t.Fatalf("Serve returned %v on a transient accept error", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the conn after the accept errors was not dispatched")
+	}
+	if err := <-hs; err != nil {
+		t.Fatalf("client handshake: %v", err)
+	}
+	_ = d.Close()
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("Serve = %v after Close", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return after Close")
+	}
+}
+
+// TestDispatcherHandshakeCap: over MaxHandshakes in flight, new conns are
+// closed at once.
+func TestDispatcherHandshakeCap(t *testing.T) {
+	raw, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, pki, served := newDispatcher(t, raw, func(c *edge.DispatchConfig) { c.MaxHandshakes = 1 })
+	t.Cleanup(func() {
+		_ = d.Close()
+		if err := <-served; err != nil {
+			t.Errorf("Serve = %v", err)
+		}
+	})
+	go func() {
+		for {
+			c, err := d.Tunnel().Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	addr := raw.Addr().String()
+	silent := dialWrite(t, addr, nil) // holds the only handshake slot
+	time.Sleep(100 * time.Millisecond)
+	second := dialWrite(t, addr, nil)
+	start := time.Now()
+	if !closedWithin(second, 3*time.Second) || time.Since(start) > 2*time.Second {
+		t.Fatal("a conn over the handshake cap was not closed at once")
+	}
+	_ = silent.Close()
+	// The slot is free again.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c, err := dialTLS(addr, &tls.Config{ServerName: "tunnel.test", RootCAs: pki.Roots, MinVersion: tls.VersionTLS12})
+		if err == nil {
+			_ = c.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("handshake after the slot was freed: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

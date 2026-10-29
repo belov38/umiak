@@ -36,7 +36,11 @@ func tlsDial(t *testing.T, env *testenv.Env, inst *testenv.Inst, sni string, alp
 	return c
 }
 
-const alertUnrecognizedName = 112
+// TLS alert descriptions.
+const (
+	alertProtocolVersion  = 70
+	alertUnrecognizedName = 112
+)
 
 func TestSNIDispatch(t *testing.T) {
 	env := testenv.New(t, testenv.Options{})
@@ -76,8 +80,23 @@ func TestSNIDispatch(t *testing.T) {
 			t.Errorf("SNI %q: alert %d, want %d (unrecognized_name)", sni, a, alertUnrecognizedName)
 		}
 	}
+	// TLS 1.2 gets the same alert.
+	if a := handshakeAlertVersion(t, inst.HTTPSAddr, "example.com", tls.VersionTLS12, tls.VersionTLS12); a != alertUnrecognizedName {
+		t.Errorf("TLS 1.2, unknown SNI: alert %d, want %d", a, alertUnrecognizedName)
+	}
+	if c, err := dialTLS(inst.HTTPSAddr, &tls.Config{ServerName: host, RootCAs: env.PKI.Roots, MinVersion: tls.VersionTLS12, MaxVersion: tls.VersionTLS12}); err != nil {
+		t.Errorf("TLS 1.2 to an sbx host: %v", err)
+	} else {
+		_ = c.Close()
+	}
+	// TLS 1.1 is refused (alert protocol_version) for every SNI.
+	for _, sni := range []string{host, testenv.TunnelHost} {
+		if a := handshakeAlertVersion(t, inst.HTTPSAddr, sni, tls.VersionTLS10, tls.VersionTLS11); a != alertProtocolVersion {
+			t.Errorf("TLS 1.1 to %s: alert %d, want %d (protocol_version)", sni, a, alertProtocolVersion)
+		}
+	}
 	eventually(t, 5*time.Second, "handshake error metric", func() bool {
-		return testutil.ToFloat64(inst.Metrics().TLSHandshakeErrors.WithLabelValues("unknown")) >= before+5
+		return testutil.ToFloat64(inst.Metrics().TLSHandshakeErrors.WithLabelValues("unknown")) >= before+6
 	})
 	// Upper-case SNI is matched case-insensitively.
 	c := tlsDial(t, env, inst, strings.ToUpper(host), "h2")
@@ -192,6 +211,30 @@ func TestALPN(t *testing.T) {
 		t.Errorf("nested sbx SNI: negotiated %q", p)
 	}
 	_ = nested.Close()
+	// Session tickets: sbx conns resume, tunnel conns never do.
+	for sni, wantResume := range map[string]bool{"a-80." + testenv.SbxDomain: true, testenv.TunnelHost: false} {
+		cache := tls.NewLRUClientSessionCache(4)
+		cfg := &tls.Config{ServerName: sni, RootCAs: env.PKI.Roots, ClientSessionCache: cache, NextProtos: []string{"http/1.1"}, MinVersion: tls.VersionTLS12}
+		c1, err := dialTLS(inst.HTTPSAddr, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A request and its answer let the client read the TLS 1.3 tickets.
+		_ = c1.SetDeadline(time.Now().Add(reqTimeout))
+		if _, err := io.WriteString(c1, "GET /x HTTP/1.1\r\nHost: "+sni+"\r\nConnection: close\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, c1)
+		_ = c1.Close()
+		c2, err := dialTLS(inst.HTTPSAddr, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c2.ConnectionState().DidResume; got != wantResume {
+			t.Errorf("SNI %s: DidResume %v, want %v", sni, got, wantResume)
+		}
+		_ = c2.Close()
+	}
 	// A client that offers only h2 to the tunnel host fails ALPN.
 	if c, err := env.TLSDial(inst, testenv.TunnelHost, "h2"); err == nil {
 		_ = c.Close()

@@ -17,8 +17,19 @@ import (
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
 )
 
-// defaultHandshakeTimeout bounds a TLS handshake (spec 5.1).
-const defaultHandshakeTimeout = 10 * time.Second
+const (
+	// defaultHandshakeTimeout bounds a TLS handshake (spec 5.1).
+	defaultHandshakeTimeout = 10 * time.Second
+	// defaultMaxHandshakes caps the handshakes in flight.
+	defaultMaxHandshakes = 4096
+	// Accept retry backoff, like net/http.
+	acceptBackoffMin = 5 * time.Millisecond
+	acceptBackoffMax = time.Second
+)
+
+// errConnLimit refuses an sbx conn over the per-IP limit during the
+// handshake, before the certificate work.
+var errConnLimit = errors.New("edge: too many conns from the client IP")
 
 // SNI kinds, also the sni_kind label values.
 const (
@@ -37,9 +48,13 @@ type DispatchConfig struct {
 	Sbx, Tunnel *CertSource
 	// HandshakeTimeout bounds each TLS handshake; 0 means 10 s.
 	HandshakeTimeout time.Duration
+	// MaxHandshakes caps the handshakes in flight; a conn over the cap is
+	// closed at once. 0 means 4096.
+	MaxHandshakes int
 	// ConnLimit counts one open sbx conn of the client IP; ok false refuses
-	// it. release is called once when the conn closes. nil means no limit.
-	// Tunnel conns are never limited per IP (spec 11).
+	// it. It runs when the ClientHello names an sbx host; release is called
+	// once when the conn closes. nil means no limit. Tunnel conns are never
+	// limited per IP (spec 11).
 	ConnLimit func(ip netip.Addr) (release func(), ok bool)
 	Metrics   *obs.Metrics
 	Logger    *slog.Logger
@@ -59,6 +74,7 @@ type Dispatcher struct {
 	rejectTLS *tls.Config
 
 	sbx, tunnel *connListener
+	handshakes  chan struct{} // semaphore of the handshakes in flight
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -72,6 +88,9 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	if cfg.HandshakeTimeout <= 0 {
 		cfg.HandshakeTimeout = defaultHandshakeTimeout
 	}
+	if cfg.MaxHandshakes <= 0 {
+		cfg.MaxHandshakes = defaultMaxHandshakes
+	}
 	cfg.SbxDomain = strings.ToLower(strings.TrimSuffix(cfg.SbxDomain, "."))
 	cfg.TunnelHost = strings.ToLower(strings.TrimSuffix(cfg.TunnelHost, "."))
 	log := cfg.Logger
@@ -81,9 +100,10 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
 		ln: ln, cfg: cfg, log: log,
-		sbx:    newConnListener(ln.Addr()),
-		tunnel: newConnListener(ln.Addr()),
-		ctx:    ctx, cancel: cancel,
+		sbx:        newConnListener(ln.Addr()),
+		tunnel:     newConnListener(ln.Addr()),
+		handshakes: make(chan struct{}, cfg.MaxHandshakes),
+		ctx:        ctx, cancel: cancel,
 	}
 	certOf := func(cs *CertSource) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		return func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return cs.Get(), nil }
@@ -93,15 +113,18 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 		GetCertificate: certOf(cfg.Sbx),
 		NextProtos:     []string{"h2", "http/1.1"},
 	}
+	// Agents reconnect rarely: no session tickets, so no ticket key is
+	// shared with the sbx config.
 	d.tunnelTLS = &tls.Config{
-		MinVersion:     tls.VersionTLS12,
-		GetCertificate: certOf(cfg.Tunnel),
-		NextProtos:     []string{"http/1.1"},
+		MinVersion:             tls.VersionTLS12,
+		GetCertificate:         certOf(cfg.Tunnel),
+		NextProtos:             []string{"http/1.1"},
+		SessionTicketsDisabled: true,
 	}
 	// No certificate at all: crypto/tls answers with the alert
 	// unrecognized_name (an error from GetConfigForClient would give
 	// internal_error).
-	d.rejectTLS = &tls.Config{MinVersion: tls.VersionTLS12}
+	d.rejectTLS = &tls.Config{MinVersion: tls.VersionTLS12, SessionTicketsDisabled: true}
 	d.base = &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		GetConfigForClient: d.configFor,
@@ -133,11 +156,22 @@ func (d *Dispatcher) kind(sni string) string {
 
 func (d *Dispatcher) configFor(chi *tls.ClientHelloInfo) (*tls.Config, error) {
 	k := d.kind(chi.ServerName)
-	if ec, ok := chi.Conn.(*edgeConn); ok {
+	ec, _ := chi.Conn.(*edgeConn)
+	if ec != nil {
 		ec.kind.Store(k)
 	}
 	switch k {
 	case kindSbx:
+		// The per-IP limit applies once the SNI picked sbx, and before
+		// the certificate work. The ClientHello has been read, so the
+		// PROXY header (if any) is too and RemoteAddr does not block.
+		if d.cfg.ConnLimit != nil && ec != nil && !ec.hasRelease() {
+			release, ok := d.cfg.ConnLimit(addrIP(ec.RemoteAddr()))
+			if !ok {
+				return nil, errConnLimit
+			}
+			ec.setRelease(release)
+		}
 		return d.sbxTLS, nil
 	case kindTunnel:
 		return d.tunnelTLS, nil
@@ -159,27 +193,32 @@ func (d *Dispatcher) Serve(ctx context.Context) error {
 	for {
 		c, err := d.ln.Accept()
 		if err != nil {
-			if d.ctx.Err() != nil {
+			if d.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				// Transient; retry like net/http does.
-				backoff = min(max(2*backoff, 5*time.Millisecond), time.Second)
-				d.log.Warn("edge: accept error, retrying", "err", err, "backoff", backoff)
-				select {
-				case <-time.After(backoff):
-					continue
-				case <-d.ctx.Done():
-					return nil
-				}
-			}
-			if errors.Is(err, net.ErrClosed) {
+			// Anything else (EMFILE, ENFILE, ECONNABORTED, ...) is retried
+			// with a backoff: one failed accept must not take down the
+			// instance and the tunnels it owns.
+			backoff = min(max(2*backoff, acceptBackoffMin), acceptBackoffMax)
+			d.log.Warn("edge: accept error, retrying", "err", err, "backoff", backoff)
+			select {
+			case <-time.After(backoff):
+				continue
+			case <-d.ctx.Done():
 				return nil
 			}
-			return err
 		}
 		backoff = 0
+		select {
+		case d.handshakes <- struct{}{}:
+		default:
+			// Too many handshakes in flight: shed the conn at once.
+			_ = c.Close()
+			if d.cfg.Metrics != nil {
+				d.cfg.Metrics.TLSHandshakeErrors.WithLabelValues(kindUnknown).Inc()
+			}
+			continue
+		}
 		d.wg.Go(func() { d.handle(c) }) //nolint:contextcheck // handshakes run on the dispatcher context, ended by Close
 	}
 }
@@ -192,11 +231,16 @@ func (d *Dispatcher) handle(raw net.Conn) {
 	ctx, cancel := context.WithTimeout(d.ctx, d.cfg.HandshakeTimeout)
 	err := tc.HandshakeContext(ctx)
 	cancel()
+	<-d.handshakes
 	kind, _ := ec.kind.Load().(string)
 	if err != nil {
 		_ = ec.Close()
-		if errors.Is(err, proxyproto.ErrSuperfluousProxyHeader) {
-			d.log.Debug("edge: PROXY header from an untrusted source", "peer", raw.RemoteAddr())
+		switch {
+		case errors.Is(err, errConnLimit):
+			// Counted by the rate limiter.
+			return
+		case errors.Is(err, proxyproto.ErrSuperfluousProxyHeader), errors.Is(err, errProxyVersion):
+			d.log.Debug("edge: PROXY header refused", "peer", raw.RemoteAddr(), "err", err)
 			return
 		}
 		if d.cfg.Metrics != nil {
@@ -207,14 +251,6 @@ func (d *Dispatcher) handle(raw net.Conn) {
 	}
 	switch kind {
 	case kindSbx:
-		if d.cfg.ConnLimit != nil {
-			release, ok := d.cfg.ConnLimit(addrIP(tc.RemoteAddr()))
-			if !ok {
-				_ = tc.Close()
-				return
-			}
-			ec.setRelease(release)
-		}
 		d.sbx.push(tc)
 	case kindTunnel:
 		d.tunnel.push(tc)
@@ -248,6 +284,12 @@ type edgeConn struct {
 	mu      sync.Mutex
 	release func()
 	closed  bool
+}
+
+func (c *edgeConn) hasRelease() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.release != nil
 }
 
 func (c *edgeConn) setRelease(f func()) {
