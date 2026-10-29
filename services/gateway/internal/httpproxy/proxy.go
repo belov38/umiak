@@ -256,6 +256,10 @@ func (h *handler) rewrite(x *exchange, pr *httputil.ProxyRequest, rt cpapi.Route
 	pr.Out = out.WithContext(httptrace.WithClientTrace(out.Context(), trace))
 }
 
+// errAmbiguousFraming refuses an application response whose head carried
+// both Content-Length and Transfer-Encoding.
+var errAmbiguousFraming = errors.New("httpproxy: application response with both Content-Length and Transfer-Encoding")
+
 // errHeaderBlockTooLarge refuses an application response whose header block
 // is over maxHeaderBytes as HTTP/2 would carry it.
 var errHeaderBlockTooLarge = errors.New("httpproxy: application response header block over the limit")
@@ -263,6 +267,15 @@ var errHeaderBlockTooLarge = errors.New("httpproxy: application response header 
 // modifyResponse applies the response policy (spec 7.4) and registers long
 // streams. An error makes the answer 502 upstream_error.
 func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *http.Cookie) error {
+	if x.ambiguousFraming() {
+		// RFC 9112 6.3: Content-Length with Transfer-Encoding may be an
+		// attempt at response smuggling. net/http has already framed the
+		// body as chunked; refuse it, and the transport drops the conn
+		// because the body is closed unread.
+		h.log.Warn("httpproxy: response with both Content-Length and Transfer-Encoding refused",
+			"label", x.label.Raw, "request_id", x.rid)
+		return errAmbiguousFraming
+	}
 	if n := responseBlockSize(res); n > maxHeaderBytes {
 		h.log.Warn("httpproxy: response header block over the limit",
 			"label", x.label.Raw, "request_id", x.rid, "bytes", n, "limit", maxHeaderBytes)

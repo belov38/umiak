@@ -114,7 +114,7 @@ func NewAppTransports(d *Dialer, cfg TransportConfig) *AppTransports {
 	if cfg.MaxResponseHeaderBytes <= 0 {
 		cfg.MaxResponseHeaderBytes = defaultMaxResponseHeaderBytes
 	}
-	dialContext := func(ctx context.Context, _, addr string) (net.Conn, error) {
+	dial := func(ctx context.Context, addr string) (*Conn, error) {
 		id, _, port, ok := parseSyntheticHost(addr)
 		if !ok {
 			return nil, fmt.Errorf("upstream: not a synthetic application host: %q", addr)
@@ -126,7 +126,25 @@ func NewAppTransports(d *Dialer, cfg TransportConfig) *AppTransports {
 		c.SetIdleTimeout(cfg.StreamIdle)
 		return c, nil
 	}
-	newTransport := func(p *http.Protocols) *http.Transport {
+	type dialFunc = func(ctx context.Context, network, addr string) (net.Conn, error)
+	dialH1 := func(ctx context.Context, _, addr string) (net.Conn, error) {
+		c, err := dial(ctx, addr)
+		if err != nil {
+			return nil, err
+		}
+		// The first response head may arrive before the first request's
+		// ExpectResponse.
+		c.WatchResponseHeads()
+		return c, nil
+	}
+	dialH2C := func(ctx context.Context, _, addr string) (net.Conn, error) {
+		c, err := dial(ctx, addr)
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
+	newTransport := func(p *http.Protocols, dialContext dialFunc) *http.Transport {
 		return &http.Transport{
 			Proxy:                  nil,
 			DialContext:            dialContext,
@@ -144,7 +162,7 @@ func NewAppTransports(d *Dialer, cfg TransportConfig) *AppTransports {
 	p1.SetHTTP1(true)
 	var p2 http.Protocols
 	p2.SetUnencryptedHTTP2(true)
-	h2cT := newTransport(&p2)
+	h2cT := newTransport(&p2, dialH2C)
 	// Receive windows like the tunnel's own streams: larger ones would not
 	// help, the tunnel stream below has the same window.
 	def := h2.DefaultClientConfig()
@@ -153,7 +171,7 @@ func NewAppTransports(d *Dialer, cfg TransportConfig) *AppTransports {
 		MaxReceiveBufferPerConnection: def.ConnWindow,
 		MaxReadFrameSize:              def.MaxFrame,
 	}
-	return &AppTransports{http1: newTransport(&p1), h2c: h2cT}
+	return &AppTransports{http1: newTransport(&p1, dialH1), h2c: h2cT}
 }
 
 // For returns the transport of a route's appProtocol: h2c, else HTTP/1.1.

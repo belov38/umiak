@@ -51,19 +51,23 @@ type exchange struct {
 
 	in atomic.Int64
 
-	mu    sync.Mutex // guards via and owner, set from a transport hook
+	mu    sync.Mutex // guards via, owner and conn, set from a transport hook
 	via   string
 	owner string
+	conn  *upstream.Conn
 }
 
 // gotConn records where the application stream runs. For h2c the transport
-// reports the conn wrapped in a fake *tls.Conn, so wrappers are peeled.
+// reports the conn wrapped in a fake *tls.Conn, so wrappers are peeled. It
+// runs before the request is written: an HTTP/1.1 conn is told to expect a
+// response head.
 func (x *exchange) gotConn(c net.Conn) {
 	for range 4 {
 		switch t := c.(type) {
 		case *upstream.Conn:
+			t.ExpectResponse()
 			x.mu.Lock()
-			x.via, x.owner = t.Via, t.OwnerInstance
+			x.via, x.owner, x.conn = t.Via, t.OwnerInstance, t
 			x.mu.Unlock()
 			return
 		case interface{ UnencryptedNetConn() net.Conn }:
@@ -74,6 +78,15 @@ func (x *exchange) gotConn(c net.Conn) {
 			return
 		}
 	}
+}
+
+// ambiguousFraming reports that the application conn of this exchange sent
+// a response head with both Content-Length and Transfer-Encoding.
+func (x *exchange) ambiguousFraming() bool {
+	x.mu.Lock()
+	c := x.conn
+	x.mu.Unlock()
+	return c != nil && c.AmbiguousFraming()
 }
 
 // track registers a long stream with the tracker and the active gauge until

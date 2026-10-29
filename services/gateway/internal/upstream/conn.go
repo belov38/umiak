@@ -34,6 +34,9 @@ type Conn struct {
 	mu    sync.Mutex
 	timer *time.Timer
 	done  bool
+
+	// head checks HTTP/1.1 response heads; nil unless WatchResponseHeads.
+	head *headScanner
 }
 
 // SetIdleTimeout makes the conn close itself once no byte was read or
@@ -85,6 +88,9 @@ func (c *Conn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
 	if n > 0 {
 		c.touch()
+		if c.head != nil {
+			c.head.feed(p[:n])
+		}
 	}
 	return n, err
 }

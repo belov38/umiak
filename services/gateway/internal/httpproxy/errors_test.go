@@ -448,3 +448,65 @@ func TestTrailerReadFailure(t *testing.T) {
 		t.Fatal("a body cut inside a chunk ended cleanly")
 	}
 }
+
+// A response head with both Content-Length and Transfer-Encoding is
+// refused (RFC 9112 6.3) rather than reframed as chunked, and the client's
+// conn carries on: the smuggled bytes behind it never reach a client.
+func TestAmbiguousFraming(t *testing.T) {
+	f := newFixture(t, nil)
+	keepAliveApp := func(port uint16, answer func(i int) string) {
+		f.m.ServeTCP(port, func(c net.Conn) {
+			br := bufio.NewReader(c)
+			for i := 0; ; i++ {
+				req, err := http.ReadRequest(br)
+				if err != nil {
+					return
+				}
+				_, _ = io.Copy(io.Discard, req.Body)
+				if _, err := io.WriteString(c, answer(i)); err != nil {
+					return
+				}
+			}
+		})
+	}
+	keepAliveApp(3000, func(int) string {
+		return "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n" +
+			"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nsmuggled"
+	})
+	// A well-behaved keep-alive app: Content-Length and chunked answers
+	// on one conn.
+	keepAliveApp(3001, func(i int) string {
+		if i%2 == 0 {
+			return "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+		}
+		return "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n\r\n"
+	})
+	bad := testenv.Host(f.env.Route(f.m, 3000, nil).Label)
+	good := testenv.Host(f.env.Route(f.m, 3001, nil).Label)
+
+	c := rawConn(t, f.inst)
+	_ = c.SetDeadline(time.Now().Add(reqTimeout))
+	br := bufio.NewReader(c)
+	send := func(host string) (status int, code, body string) {
+		t.Helper()
+		if _, err := io.WriteString(c, "GET / HTTP/1.1\r\nHost: "+host+"\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode, resp.Header.Get("Sbx-Error"), readBody(t, resp)
+	}
+	for range 2 {
+		if status, code, body := send(bad); status != http.StatusBadGateway || code != "upstream_error" {
+			t.Fatalf("ambiguous answer = %d %q %q", status, code, body)
+		}
+		for range 4 {
+			if status, _, body := send(good); status != http.StatusOK || body != "ok" {
+				t.Fatalf("good answer = %d %q", status, body)
+			}
+		}
+	}
+}
