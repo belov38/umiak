@@ -1,4 +1,9 @@
-import { type Allocator, macFor, type SnapshotStore } from "./allocator.ts";
+import {
+	type Allocator,
+	macFor,
+	type SnapshotStore,
+	type VmidLease,
+} from "./allocator.ts";
 import type { Config } from "./config.ts";
 import { type NodeOps, NodeOpsError } from "./node-client.ts";
 import type { Params, PveClient } from "./pve-api.ts";
@@ -96,6 +101,85 @@ export class TracesRemainError extends Error {
 	}
 }
 
+export type PowerOp = "start" | "stop" | "shutdown" | "delete";
+
+/**
+ * The VMID's lease does not belong to the caller's machine (S6 H1): its own
+ * lease was freed and the VMID may be another machine's now. Permanent.
+ * `actualOwner` is null when there is no lease or it has no owner.
+ */
+export class OwnerMismatchError extends Error {
+	readonly retryable = false;
+	readonly code = "owner_mismatch";
+	readonly op: PowerOp;
+	readonly vmid: number;
+	readonly expectedOwner: string | null;
+	readonly actualOwner: string | null;
+	constructor(
+		op: PowerOp,
+		vmid: number,
+		expectedOwner: string | null,
+		actualOwner: string | null,
+		detail?: string,
+	) {
+		super(
+			`${op} of VM ${vmid}: lease owner is ${actualOwner ?? "none"}, expected ${expectedOwner ?? "none"}${detail ? ` (${detail})` : ""}`,
+		);
+		this.name = "OwnerMismatchError";
+		this.op = op;
+		this.vmid = vmid;
+		this.expectedOwner = expectedOwner;
+		this.actualOwner = actualOwner;
+	}
+}
+
+/**
+ * Owner check of a power operation. `expectedOwner`: undefined = no check;
+ * a string = the VMID's lease must be that owner's (start: and not
+ * `releasing`); null = the VMID must have no owned lease (an orphan VM).
+ * Returns false when a delete has nothing to do: the owner's lease is gone
+ * and no VM has the VMID (an earlier delete finished; freeing anything now
+ * could hit a new holder of the VMID). Throws OwnerMismatchError otherwise.
+ * Exported so test doubles of S1 apply the same rule.
+ */
+export async function checkLeaseOwner(o: {
+	op: PowerOp;
+	vmid: number;
+	lease: VmidLease | undefined;
+	expectedOwner: string | null | undefined;
+	vmExists: () => Promise<boolean>;
+}): Promise<boolean> {
+	const { op, vmid, lease, expectedOwner } = o;
+	if (expectedOwner === undefined) return true;
+	const actual = lease?.ownerId ?? null;
+	if (expectedOwner === null) {
+		if (actual !== null)
+			throw new OwnerMismatchError(op, vmid, expectedOwner, actual);
+		return true;
+	}
+	if (lease === undefined) {
+		if (op === "delete" && !(await o.vmExists())) return false;
+		throw new OwnerMismatchError(op, vmid, expectedOwner, null, "no lease");
+	}
+	if (actual !== expectedOwner)
+		throw new OwnerMismatchError(op, vmid, expectedOwner, actual);
+	if (op === "start" && lease.state === "releasing")
+		throw new OwnerMismatchError(
+			op,
+			vmid,
+			expectedOwner,
+			actual,
+			"lease is releasing",
+		);
+	return true;
+}
+
+/** Options of start/stop/shutdown/delete. */
+export interface PowerOpts {
+	/** See checkLeaseOwner. Read right before the action. */
+	expectedOwner?: string | null;
+}
+
 export function pveVcpuControl(api: PveClient, node: string): VcpuControl {
 	return {
 		suspend: async (vmid) =>
@@ -160,6 +244,13 @@ export interface MachinesOptions {
 	ipfilter?: boolean;
 	subnet?: string;
 	pollMs?: number;
+	/**
+	 * Per-node serialization of power operations (S6: in-process gate plus
+	 * advisory lock). S1 takes it only around the rollback delete of a failed
+	 * create/fork; the caller holds it around start/stop/delete itself. Safe
+	 * as long as the caller does not hold it while calling create/fork.
+	 */
+	powerLock?: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 type Source = { kind: "template" } | { kind: "snapshot"; snap: SnapshotRef };
@@ -183,6 +274,16 @@ export class Machines {
 
 	get #node(): string {
 		return this.#o.cfg.node;
+	}
+
+	/** Rollback delete of a VMID this create just leased, under the power lock. */
+	async #rollback(vmid: number, ownerId: string | undefined): Promise<void> {
+		const del = () =>
+			this.delete(
+				vmid,
+				ownerId !== undefined ? { expectedOwner: ownerId } : {},
+			);
+		await (this.#o.powerLock ? this.#o.powerLock(del) : del());
 	}
 
 	#vmPath(vmid: number, sub = ""): string {
@@ -286,7 +387,7 @@ export class Machines {
 			if (reused) throw err;
 			// Roll back through delete even if the POST failed: a broken connection may hide a
 			// created VM. delete() tolerates a missing VM and keeps the row in releasing on failure.
-			await this.delete(vmid).catch(() => {});
+			await this.#rollback(vmid, opts.ownerId).catch(() => {});
 			throw err;
 		}
 	}
@@ -323,7 +424,7 @@ export class Machines {
 				const disks = parseDiskSet(await this.config(vmid), cfg.storage);
 				return { vmid, mac, node: this.#node, disks };
 			} catch (err) {
-				await this.delete(vmid).catch(() => {});
+				await this.#rollback(vmid, undefined).catch(() => {});
 				throw err;
 			}
 		});
@@ -376,16 +477,34 @@ export class Machines {
 		await this.#o.api.waitTask(this.#node, upid);
 	}
 
-	start(vmid: number): Promise<void> {
-		return this.#task(vmid, "start");
+	async #checkOwner(op: PowerOp, vmid: number, opts: PowerOpts): Promise<void> {
+		if (opts.expectedOwner === undefined) return;
+		await checkLeaseOwner({
+			op,
+			vmid,
+			lease: await this.#o.allocator.get(vmid),
+			expectedOwner: opts.expectedOwner,
+			vmExists: async () => true,
+		});
 	}
 
-	stop(vmid: number): Promise<void> {
-		return this.#task(vmid, "stop");
+	async start(vmid: number, opts: PowerOpts = {}): Promise<void> {
+		await this.#checkOwner("start", vmid, opts);
+		await this.#task(vmid, "start");
 	}
 
-	shutdown(vmid: number, timeoutS = 60): Promise<void> {
-		return this.#task(vmid, "shutdown", { timeout: timeoutS });
+	async stop(vmid: number, opts: PowerOpts = {}): Promise<void> {
+		await this.#checkOwner("stop", vmid, opts);
+		await this.#task(vmid, "stop");
+	}
+
+	async shutdown(
+		vmid: number,
+		timeoutS = 60,
+		opts: PowerOpts = {},
+	): Promise<void> {
+		await this.#checkOwner("shutdown", vmid, opts);
+		await this.#task(vmid, "shutdown", { timeout: timeoutS });
 	}
 
 	async status(vmid: number): Promise<string> {
@@ -513,19 +632,36 @@ export class Machines {
 		return ids;
 	}
 
-	/** Deletes a machine and frees its VMID only after verifying no traces remain (spec §6.3). */
-	async delete(vmid: number): Promise<void> {
+	/**
+	 * Deletes a machine and frees its VMID only after verifying no traces remain (spec §6.3).
+	 * With `expectedOwner` the lease is checked first (checkLeaseOwner); nothing is touched
+	 * on a mismatch.
+	 */
+	async delete(vmid: number, opts: PowerOpts = {}): Promise<void> {
 		const { api, allocator, cfg } = this.#o;
 		if (vmid === cfg.templateVmid)
 			throw new Error(`refusing to delete the template VM ${vmid}`);
 		const lease = await allocator.get(vmid);
+		const listed = async () =>
+			(await this.#resources()).some((r) => r.vmid === vmid);
+		if (
+			!(await checkLeaseOwner({
+				op: "delete",
+				vmid,
+				lease,
+				expectedOwner: opts.expectedOwner,
+				vmExists: listed,
+			}))
+		)
+			return;
 		const mac = lease?.mac ?? macFor(cfg.clusterId, vmid);
 		if (lease) await allocator.markReleasing(vmid);
 
 		// /cluster/resources is right about existence but its status lags by seconds; status/current is not.
 		const vm = (await this.#resources()).find((r) => r.vmid === vmid);
 		if (vm) {
-			if ((await this.status(vmid)) !== "stopped") await this.stop(vmid);
+			if ((await this.status(vmid)) !== "stopped")
+				await this.#task(vmid, "stop");
 			// Release while the IP, the ethers line and the lease still belong to this VM: once
 			// destroy frees the IP in IPAM, a new VM may take it and dnsmasq moves the lease to the
 			// new MAC, after which a release for our MAC finds nothing. sbx-node keeps the ethers

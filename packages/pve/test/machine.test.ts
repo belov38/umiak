@@ -3,6 +3,7 @@ import { Allocator } from "../src/allocator.ts";
 import {
 	formatSmbios1,
 	Machines,
+	OwnerMismatchError,
 	pveVcpuControl,
 	QgaUnavailableError,
 	s2SerialPayload,
@@ -14,7 +15,12 @@ import { SqliteStateStore } from "../src/state-sqlite.ts";
 import { LvmThinDriver } from "../src/storage/lvmthin.ts";
 import { FakeNode, FakePve } from "./fakes.ts";
 
-function setup(opts: { cloneConcurrency?: number } = {}) {
+function setup(
+	opts: {
+		cloneConcurrency?: number;
+		powerLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+	} = {},
+) {
 	const log: string[] = [];
 	const api = new FakePve(log);
 	const node = new FakeNode(log);
@@ -49,6 +55,7 @@ function setup(opts: { cloneConcurrency?: number } = {}) {
 		cloneConcurrency: opts.cloneConcurrency ?? 4,
 		ipfilter: true,
 		pollMs: 0,
+		...(opts.powerLock ? { powerLock: opts.powerLock } : {}),
 	});
 	return { log, api, node, store, allocator, machines };
 }
@@ -640,5 +647,189 @@ describe("review fixes", () => {
 		const { api, machines } = setup();
 		await expect(machines.delete(599)).rejects.toThrow(/template/);
 		expect(api.paths().some((p) => p.startsWith("DELETE"))).toBe(false);
+	});
+});
+
+describe("owner-checked power operations", () => {
+	it("delete with the lease owner deletes and frees the VMID", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		await machines.delete(a.vmid, { expectedOwner: "m-a" });
+		expect(api.vms.has(a.vmid)).toBe(false);
+		expect(store.get(1, a.vmid)).toBeUndefined();
+	});
+
+	it("delete for another owner refuses before touching anything", async () => {
+		const { api, machines, store, node } = setup();
+		const b = await machines.create({ ownerId: "m-b" });
+		await machines.start(b.vmid);
+		api.calls.length = 0;
+		node.calls.length = 0;
+		const err = await machines
+			.delete(b.vmid, { expectedOwner: "m-a" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(OwnerMismatchError);
+		expect(err).toMatchObject({
+			code: "owner_mismatch",
+			retryable: false,
+			op: "delete",
+			vmid: b.vmid,
+			expectedOwner: "m-a",
+			actualOwner: "m-b",
+		});
+		expect(api.calls.filter((c) => c.method !== "GET")).toEqual([]);
+		expect(node.ops()).toEqual([]);
+		expect(api.vms.get(b.vmid)?.status).toBe("running");
+		expect(store.get(1, b.vmid)?.state).toBe("active");
+	});
+
+	it("delete for an owner whose lease is gone does nothing when the VM is gone too", async () => {
+		const { api, machines, node } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		await machines.delete(a.vmid);
+		api.calls.length = 0;
+		node.calls.length = 0;
+		await machines.delete(a.vmid, { expectedOwner: "m-a" });
+		expect(api.calls.filter((c) => c.method !== "GET")).toEqual([]);
+		// Nothing freed, no dhcp.release for a MAC a new VM could have by now.
+		expect(node.ops()).toEqual([]);
+	});
+
+	it("delete for an owner whose lease is gone refuses a VM that has the VMID", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		store.remove(1, a.vmid);
+		const err = await machines
+			.delete(a.vmid, { expectedOwner: "m-a" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(OwnerMismatchError);
+		expect((err as OwnerMismatchError).actualOwner).toBeNull();
+		expect(api.vms.has(a.vmid)).toBe(true);
+	});
+
+	it("delete with expectedOwner null removes a VM without a lease and refuses an owned one", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		const b = await machines.create({ ownerId: "m-b" });
+		store.remove(1, a.vmid);
+		await machines.delete(a.vmid, { expectedOwner: null });
+		expect(api.vms.has(a.vmid)).toBe(false);
+		await expect(
+			machines.delete(b.vmid, { expectedOwner: null }),
+		).rejects.toBeInstanceOf(OwnerMismatchError);
+		expect(api.vms.has(b.vmid)).toBe(true);
+	});
+
+	it("start, stop and shutdown act only for the lease owner", async () => {
+		const { api, machines } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		for (const call of [
+			() => machines.start(a.vmid, { expectedOwner: "m-x" }),
+			() => machines.stop(a.vmid, { expectedOwner: "m-x" }),
+			() => machines.shutdown(a.vmid, 5, { expectedOwner: "m-x" }),
+		]) {
+			await expect(call()).rejects.toBeInstanceOf(OwnerMismatchError);
+		}
+		expect(api.paths().filter((p) => p.includes("/status/"))).toEqual([]);
+		await machines.start(a.vmid, { expectedOwner: "m-a" });
+		expect(api.vms.get(a.vmid)?.status).toBe("running");
+		await machines.shutdown(a.vmid, 5, { expectedOwner: "m-a" });
+		await machines.start(a.vmid, { expectedOwner: "m-a" });
+		await machines.stop(a.vmid, { expectedOwner: "m-a" });
+		expect(api.vms.get(a.vmid)?.status).toBe("stopped");
+	});
+
+	it("start refuses a VMID without a lease or with a releasing lease", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		store.setState(1, a.vmid, "releasing");
+		const err = await machines
+			.start(a.vmid, { expectedOwner: "m-a" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(OwnerMismatchError);
+		store.remove(1, a.vmid);
+		await expect(
+			machines.start(a.vmid, { expectedOwner: "m-a" }),
+		).rejects.toBeInstanceOf(OwnerMismatchError);
+		expect(api.paths().filter((p) => p.includes("/status/start"))).toEqual([]);
+	});
+
+	it("without expectedOwner nothing is checked (bench)", async () => {
+		const { api, machines, store } = setup();
+		const a = await machines.create({ ownerId: "m-a" });
+		store.remove(1, a.vmid);
+		await machines.start(a.vmid);
+		await machines.stop(a.vmid);
+		await machines.delete(a.vmid);
+		expect(api.vms.has(a.vmid)).toBe(false);
+	});
+});
+
+describe("rollback under the power lock", () => {
+	it("a failed create rolls back inside the powerLock hook", async () => {
+		const events: string[] = [];
+		const { api, machines } = setup({
+			powerLock: async (fn) => {
+				events.push("lock");
+				try {
+					return await fn();
+				} finally {
+					events.push("unlock");
+				}
+			},
+		});
+		const del = api.delete.bind(api);
+		api.delete = async <T>(path: string, params?: Record<string, unknown>) => {
+			events.push(`DELETE ${path}`);
+			return del<T>(path, params);
+		};
+		api.fail["PUT /nodes/pve/qemu/500/firewall/options"] = new PveApiError(
+			500,
+			"boom",
+		);
+		await expect(machines.create({ ownerId: "m-a" })).rejects.toThrow(/boom/);
+		expect(events).toEqual(["lock", "DELETE /nodes/pve/qemu/500", "unlock"]);
+		expect(api.vms.has(500)).toBe(false);
+
+		// Power operations themselves never take the hook (the caller holds the lock).
+		delete api.fail["PUT /nodes/pve/qemu/500/firewall/options"];
+		events.length = 0;
+		const a = await machines.create({ ownerId: "m-b" });
+		await machines.start(a.vmid);
+		await machines.delete(a.vmid);
+		expect(events.filter((e) => e === "lock")).toEqual([]);
+	});
+
+	it("a rollback waits for a power operation that holds the lock", async () => {
+		let held: Promise<void> = Promise.resolve();
+		const lock = <T>(fn: () => Promise<T>): Promise<T> => {
+			const run = held.then(fn);
+			held = run.then(
+				() => {},
+				() => {},
+			);
+			return run;
+		};
+		const { api, machines } = setup({ powerLock: lock });
+		let release: () => void = () => {};
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		const holder = lock(() => gate);
+		api.fail["PUT /nodes/pve/qemu/500/firewall/options"] = new PveApiError(
+			500,
+			"boom",
+		);
+		let settled = false;
+		const create = machines.create({ ownerId: "m-a" }).finally(() => {
+			settled = true;
+		});
+		await new Promise((r) => setTimeout(r, 20));
+		expect(settled).toBe(false);
+		expect(api.paths()).not.toContain("DELETE /nodes/pve/qemu/500");
+		release();
+		await holder;
+		await expect(create).rejects.toThrow(/boom/);
+		expect(api.paths()).toContain("DELETE /nodes/pve/qemu/500");
 	});
 });
