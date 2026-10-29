@@ -5,6 +5,9 @@ export class MemoryRegistry implements Registry {
 	readonly routes = new Map<string, Route>();
 	lookups = 0;
 	readonly invalidations: string[] = [];
+	/** Internal URLs of live gateway instances besides those of the routes. */
+	readonly instances = new Set<string>();
+	readonly liveChecks: string[] = [];
 	private readonly waiters = new Set<() => void>();
 
 	/** Sets (or replaces) the route of a machine and wakes waiters. */
@@ -22,6 +25,25 @@ export class MemoryRegistry implements Registry {
 	async lookup(machineId: string): Promise<Route | undefined> {
 		this.lookups++;
 		return this.routes.get(machineId);
+	}
+
+	/** Marks an internal URL as a live gateway instance. */
+	addInstance(internalUrl: string): void {
+		this.instances.add(trimSlash(internalUrl));
+	}
+
+	async isLiveInstance(internalUrl: string): Promise<boolean> {
+		this.liveChecks.push(internalUrl);
+		const u = trimSlash(internalUrl);
+		if (this.instances.has(u)) {
+			return true;
+		}
+		for (const r of this.routes.values()) {
+			if (trimSlash(r.internalUrl) === u) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	invalidate(machineId: string): void {
@@ -55,6 +77,10 @@ export class MemoryRegistry implements Registry {
 			w();
 		}
 	}
+}
+
+function trimSlash(u: string): string {
+	return u.replace(/\/+$/, "");
 }
 
 /** Builds a Route with defaults for tests. */

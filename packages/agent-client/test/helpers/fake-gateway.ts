@@ -40,8 +40,13 @@ export interface RecordedRequest {
 }
 
 export type ScriptedAnswer =
-	/** 421 with Sbx-Error-Code: machine_moved and Sbx-Instance-Url. */
-	| { kind: "moved"; instanceUrl: string }
+	/**
+	 * 421 with Sbx-Error-Code: machine_moved and Sbx-Instance-Url, and the
+	 * URL in the body (ErrorDetail.instance_url or instanceUrl). headers:
+	 * false leaves the Sbx-* headers out (the body alone carries the hint);
+	 * code is the Connect code of the rpc body (default unavailable).
+	 */
+	| { kind: "moved"; instanceUrl: string; headers?: boolean; code?: string }
 	/** 503 with Sbx-Error-Code: agent_unavailable and Retry-After: 1. */
 	| { kind: "unavailable" }
 	/** 200 Connect stream, half an envelope, then RST_STREAM INTERNAL_ERROR. */
@@ -105,7 +110,7 @@ function writeScripted(
 		const body =
 			route === "rpc"
 				? JSON.stringify({
-						code: "unavailable",
+						code: answer.code ?? "unavailable",
 						message: "machine_moved",
 						details: [
 							{
@@ -125,9 +130,11 @@ function writeScripted(
 					});
 		const headers: Record<string, string> = {
 			"content-type": "application/json",
-			"sbx-error-code": "machine_moved",
-			"sbx-instance-url": answer.instanceUrl,
 		};
+		if (answer.headers !== false) {
+			headers["sbx-error-code"] = "machine_moved";
+			headers["sbx-instance-url"] = answer.instanceUrl;
+		}
 		if (route === "files") {
 			headers["x-content-type-options"] = "nosniff";
 		}
@@ -422,4 +429,30 @@ function serveFiles(
 	}
 	res.writeHead(404, { "content-type": "application/json" });
 	res.end(JSON.stringify({ code: "not_found" }));
+}
+
+/** A listener that counts and drops every TCP connection: a would-be token thief. */
+export interface Trap {
+	url: string;
+	/** TCP connections accepted so far. */
+	connections: number;
+	close(): Promise<void>;
+}
+
+export async function startTrap(): Promise<Trap> {
+	const trap: Trap = { url: "", connections: 0, close: async () => {} };
+	const server = net.createServer((socket) => {
+		trap.connections++;
+		socket.on("error", () => {});
+		socket.destroy();
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const addr = server.address();
+	if (addr === null || typeof addr === "string") {
+		throw new Error("unexpected listen address");
+	}
+	trap.url = `http://127.0.0.1:${addr.port}`;
+	trap.close = () =>
+		new Promise<void>((resolve) => server.close(() => resolve()));
+	return trap;
 }

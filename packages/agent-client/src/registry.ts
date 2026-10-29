@@ -33,6 +33,12 @@ export interface Registry {
 	 * connected. Throws RegistryClosedError after close().
 	 */
 	lookup(machineId: string): Promise<Route | undefined>;
+	/**
+	 * True when internalUrl (ignoring a trailing slash) is the internal URL of
+	 * a live gateway instance: fresh heartbeat in tunnel.gateway_instances.
+	 * A 421 hint is followed only then. Throws RegistryClosedError after close().
+	 */
+	isLiveInstance(internalUrl: string): Promise<boolean>;
 	/** Drops any cached route of the machine. */
 	invalidate(machineId: string): void;
 	/**

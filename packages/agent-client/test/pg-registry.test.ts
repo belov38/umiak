@@ -85,6 +85,33 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		expect(await registry.lookup(m)).toBeUndefined();
 	});
 
+	it("isLiveInstance knows fresh instances only, ignoring a trailing slash", async () => {
+		const r = await PgRegistry.connect({
+			connectionString: db.connectionString,
+			instanceCacheTtlMs: 100,
+		});
+		try {
+			await instance("gw-live", "http://10.0.2.1:8081/");
+			await instance("gw-old", "http://10.0.2.2:8081", 20);
+			expect(await r.isLiveInstance("http://10.0.2.1:8081")).toBe(true);
+			expect(await r.isLiveInstance("http://10.0.2.1:8081/")).toBe(true);
+			expect(await r.isLiveInstance("http://10.0.2.2:8081")).toBe(false);
+			expect(await r.isLiveInstance("http://10.0.2.1:808")).toBe(false);
+			expect(await r.isLiveInstance("http://10.0.2.1:8081/x")).toBe(false);
+			expect(await r.isLiveInstance("http://evil:9999")).toBe(false);
+			// Answers are cached briefly: a heartbeat shows after the TTL.
+			await instance("gw-old", "http://10.0.2.2:8081");
+			expect(await r.isLiveInstance("http://10.0.2.2:8081")).toBe(false);
+			await new Promise((resolve) => setTimeout(resolve, 150));
+			expect(await r.isLiveInstance("http://10.0.2.2:8081")).toBe(true);
+		} finally {
+			await r.close();
+		}
+		await expect(
+			r.isLiveInstance("http://10.0.2.1:8081"),
+		).rejects.toBeInstanceOf(RegistryClosedError);
+	});
+
 	it("does not route to a disconnected session", async () => {
 		const m = randomUUID();
 		await instance("gw-a", "http://10.0.0.1:8081");

@@ -1,5 +1,6 @@
 // The routing loop shared by the Connect transport and fetch: resolve the
 // owning gateway instance, run one attempt, and act on its outcome.
+import { SCHEME_BEARER } from "./constants.js";
 import { AgentUnavailableError } from "./errors.js";
 import {
 	type Registry,
@@ -8,13 +9,39 @@ import {
 	sameRoute,
 } from "./registry.js";
 
-/** Result of one attempt against a gateway instance. Fatal errors are thrown. */
-export type AttemptOutcome<T> =
+/** An attempt that needs no rerouting. */
+export type FinalOutcome<T> =
 	| { kind: "done"; value: T }
-	/** 421: retry at instanceUrl if given, else after a fresh lookup. */
-	| { kind: "moved"; instanceUrl?: string | undefined; cause?: unknown }
 	/** 503 agent_unavailable or a connection error: look up again, wait if needed. */
 	| { kind: "unavailable"; cause?: unknown };
+
+/** Result of one attempt against a gateway instance. Fatal errors are thrown. */
+export type AttemptOutcome<T> =
+	| FinalOutcome<T>
+	/**
+	 * 421 machine_moved naming instanceUrl. The hint comes from the response,
+	 * which the agent may have forged: it is followed only when the registry
+	 * confirms a live instance at that URL. Otherwise the answer is not a
+	 * move and notMoved() decides what it is (it may throw a fatal error).
+	 * discard() releases the response when the move is followed.
+	 */
+	| {
+			kind: "moved";
+			instanceUrl?: string | undefined;
+			cause?: unknown;
+			notMoved: () => FinalOutcome<T>;
+			discard?: () => void;
+	  };
+
+/**
+ * Where one attempt goes: the internal URL of a registry route or of a
+ * registry-confirmed 421 hint, and the Authorization value for it. Only
+ * routeCall builds it, so the service token cannot go anywhere else.
+ */
+export interface Target {
+	readonly instanceUrl: string;
+	readonly authorization: string;
+}
 
 export interface RoutingOptions {
 	registry: Registry;
@@ -37,14 +64,22 @@ export interface RoutingOptions {
 	deadlineError?: () => unknown;
 }
 
+/** Options of routeCall: the routing options and the service token. */
+export interface CallRoutingOptions extends RoutingOptions {
+	/** Sent as Authorization: Bearer, only to targets from the registry. */
+	serviceToken: string;
+}
+
 /**
- * Runs attempt(instanceUrl) until it is done, a fatal error is thrown, the
+ * Runs attempt(target) until it is done, a fatal error is thrown, the
  * caller aborts, the deadline passes, or the wait budget or attempt cap is
  * exhausted (AgentUnavailableError).
  *
- * - moved: invalidate; the next attempt goes to the URL from Sbx-Instance-Url.
- *   A 421 that names the instance that answered it (a restarted pod on the
- *   same IP) counts as unavailable.
+ * - moved: invalidate. A hint the registry does not know as a live instance
+ *   (or no hint) is not a move: notMoved() decides. A confirmed hint is
+ *   followed unless a fresh lookup already names another owner, which is
+ *   preferred. A 421 that names the instance that answered it (a restarted
+ *   pod on the same IP) counts as unavailable.
  * - unavailable: invalidate and look up again. Without a route, with the
  *   same route that just failed, or after such a self-421, wait for a
  *   registry change (at most pollIntervalMs at a time) until waitForAgentMs
@@ -56,14 +91,17 @@ export interface RoutingOptions {
  * is bounded by waitForAgentMs instead.
  */
 export async function routeCall<T>(
-	opts: RoutingOptions,
-	attempt: (instanceUrl: string) => Promise<AttemptOutcome<T>>,
+	opts: CallRoutingOptions,
+	attempt: (target: Target) => Promise<AttemptOutcome<T>>,
 ): Promise<T> {
 	const { registry, machineId } = opts;
+	const authorization = `${SCHEME_BEARER} ${opts.serviceToken}`;
 	let immediate = 0;
 	let waited = false;
 	const budget = new MissBudget(opts);
+	// A registry-confirmed 421 hint, or the route a lookup found after it.
 	let pinned: string | undefined;
+	let next: Route | undefined;
 	// The route whose attempt failed last; looking it up again means the
 	// registry has not caught up yet, so wait once before trying it again.
 	let failed: Route | undefined;
@@ -78,6 +116,10 @@ export async function routeCall<T>(
 		if (pinned !== undefined) {
 			url = pinned;
 			pinned = undefined;
+		} else if (next !== undefined) {
+			current = next;
+			url = current.internalUrl;
+			next = undefined;
 		} else {
 			const found = await lookupOrMiss(opts);
 			checkStop(opts);
@@ -106,24 +148,59 @@ export async function routeCall<T>(
 			immediate++;
 		}
 		waited = false;
-		const outcome = await attempt(url);
+		const outcome = await attempt({ instanceUrl: url, authorization });
 		if (outcome.kind === "done") {
 			return outcome.value;
 		}
 		lastCause = outcome.cause;
 		registry.invalidate(machineId);
-		if (outcome.kind === "moved" && outcome.instanceUrl) {
-			if (sameUrl(outcome.instanceUrl, url)) {
-				// Following it would ask the same instance again at once.
-				failed = current;
-				mustWait = true;
-			} else {
-				pinned = outcome.instanceUrl;
-				failed = undefined;
-			}
-		} else {
+		if (outcome.kind === "unavailable") {
 			failed = current;
+			continue;
 		}
+		const hint = outcome.instanceUrl || undefined;
+		if (hint !== undefined && sameUrl(hint, url)) {
+			// Following it would ask the same instance again at once.
+			failed = current;
+			mustWait = true;
+			continue;
+		}
+		if (hint === undefined || !(await liveInstance(registry, hint))) {
+			// Only the gateway produces routing signals, and only with the URL
+			// of a live instance: this answer is something else.
+			const alt = outcome.notMoved();
+			if (alt.kind === "done") {
+				return alt.value;
+			}
+			lastCause = alt.cause ?? lastCause;
+			failed = current;
+			continue;
+		}
+		outcome.discard?.();
+		checkStop(opts);
+		const found = await lookupOrMiss(opts);
+		if (found.route !== undefined && !sameUrl(found.route.internalUrl, url)) {
+			next = found.route;
+		} else {
+			// The registry has not caught up yet: the confirmed hint is the owner.
+			pinned = hint;
+		}
+		failed = undefined;
+	}
+}
+
+/**
+ * Asks the registry whether url is a live gateway instance. A failed check
+ * is a no, except RegistryClosedError, which is thrown.
+ */
+async function liveInstance(registry: Registry, url: string): Promise<boolean> {
+	try {
+		return await registry.isLiveInstance(url);
+	} catch (err) {
+		if (err instanceof RegistryClosedError) {
+			throw err;
+		}
+		return false;
 	}
 }
 

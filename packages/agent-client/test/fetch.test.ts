@@ -5,7 +5,11 @@ import {
 	type AgentClientOptions,
 	AgentUnavailableError,
 } from "../src/index.js";
-import { type FakeGateway, startFakeGateway } from "./helpers/fake-gateway.js";
+import {
+	type FakeGateway,
+	startFakeGateway,
+	startTrap,
+} from "./helpers/fake-gateway.js";
 import { MemoryRegistry, route } from "./helpers/memory-registry.js";
 
 const token = "svc-token";
@@ -87,6 +91,7 @@ describe("AgentClient.fetch", () => {
 
 	it("follows 421 to Sbx-Instance-Url keeping Range and Authorization", async () => {
 		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
 		// The machine stays moved on A. undici's fetch itself repeats a 421 once
 		// on a new connection (Fetch spec), so A sees two requests.
 		a.script.push({
@@ -109,6 +114,33 @@ describe("AgentClient.fetch", () => {
 		expect(registry.invalidations).toContain(m);
 	});
 
+	for (const headers of [true, false]) {
+		it(`returns a 421 whose hint (${headers ? "header" : "body"}) is not a live instance`, async () => {
+			const trap = await startTrap();
+			try {
+				registry.set(route(m, a.url));
+				a.script.push({
+					answer: { kind: "moved", instanceUrl: trap.url, headers },
+					times: Number.POSITIVE_INFINITY,
+				});
+				const res = await agent({ waitForAgentMs: 300, pollIntervalMs: 50 })
+					.fetch(m, "?path=/data/f.bin")
+					.catch((e: unknown) => e);
+				expect(trap.connections).toBe(0);
+				expect(res).toBeInstanceOf(Response);
+				const r = res as Response;
+				expect(r.status).toBe(421);
+				expect(await r.json()).toEqual({
+					code: "machine_moved",
+					instanceUrl: trap.url,
+				});
+				expect(fileRequests(b)).toHaveLength(0);
+			} finally {
+				await trap.close();
+			}
+		});
+	}
+
 	it("waits for a registry change after 503 agent_unavailable", async () => {
 		registry.set(route(m, a.url));
 		a.script.push({
@@ -127,6 +159,7 @@ describe("AgentClient.fetch", () => {
 
 	it("resends a Uint8Array upload body after 421", async () => {
 		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
 		a.script.push({
 			answer: { kind: "moved", instanceUrl: b.url },
 			times: Number.POSITIVE_INFINITY,

@@ -2,10 +2,9 @@ import {
 	CODE_AGENT_UNAVAILABLE,
 	HEADER_ERROR_CODE,
 	HEADER_INSTANCE_URL,
-	SCHEME_BEARER,
 } from "./constants.js";
 import { isConnectionError } from "./errors.js";
-import { type RoutingOptions, routeCall } from "./routing.js";
+import { type CallRoutingOptions, routeCall } from "./routing.js";
 
 /** Request options of AgentClient.fetch. */
 export interface AgentFetchInit extends Omit<RequestInit, "body"> {
@@ -17,9 +16,7 @@ export interface AgentFetchInit extends Omit<RequestInit, "body"> {
 	body?: BodyInit | null | (() => BodyInit);
 }
 
-type FetchRouting = Omit<RoutingOptions, "signal" | "abortError"> & {
-	serviceToken: string;
-};
+type FetchRouting = Omit<CallRoutingOptions, "signal" | "abortError">;
 
 /** Implements AgentClient.fetch on the shared routing loop. */
 export async function routedFetch(
@@ -45,10 +42,10 @@ export async function routedFetch(
 			signal: signal ?? undefined,
 			abortError: (reason) => reason,
 		},
-		async (instanceUrl) => {
+		async ({ instanceUrl, authorization }) => {
 			const url = `${instanceUrl.replace(/\/+$/, "")}/v1/machines/${routing.machineId}/files${path}`;
 			const h = new Headers(headerEntries);
-			h.set("Authorization", `${SCHEME_BEARER} ${routing.serviceToken}`);
+			h.set("Authorization", authorization);
 			const b = factory !== undefined ? factory() : fixed;
 			const req: RequestInit & { duplex?: "half" } = {
 				...rest,
@@ -84,17 +81,23 @@ export async function routedFetch(
 			if (!(moved || unavailable) || oneShot) {
 				return { kind: "done", value: res };
 			}
-			await res.body?.cancel().catch(() => {});
 			const cause = new Error(
 				`gateway ${instanceUrl} answered ${res.status} ${res.headers.get(HEADER_ERROR_CODE) ?? ""}`.trim(),
 			);
+			const discard = () => {
+				res.body?.cancel().catch(() => {});
+			};
 			if (moved) {
+				// Not followed (no live instance at the hint): an ordinary answer.
 				return {
 					kind: "moved",
 					instanceUrl: res.headers.get(HEADER_INSTANCE_URL) ?? undefined,
 					cause,
+					notMoved: () => ({ kind: "done", value: res }),
+					discard,
 				};
 			}
+			discard();
 			return { kind: "unavailable", cause };
 		},
 	);

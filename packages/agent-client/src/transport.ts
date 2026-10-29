@@ -17,11 +17,20 @@ import {
 	createConnectTransport,
 	Http2SessionManager,
 } from "@connectrpc/connect-node";
-import { SCHEME_BEARER } from "./constants.js";
-import { AgentOutdatedError, classify, movedInstanceUrl } from "./errors.js";
+import {
+	AgentOutdatedError,
+	classify,
+	classifyByCode,
+	movedInstanceUrl,
+} from "./errors.js";
 import { type AgentFetchInit, routedFetch } from "./fetch.js";
 import type { Registry } from "./registry.js";
-import { type AttemptOutcome, routeCall, waitForRoute } from "./routing.js";
+import {
+	type AttemptOutcome,
+	routeCall,
+	type Target,
+	waitForRoute,
+} from "./routing.js";
 
 export interface AgentClientOptions {
 	/** Where machines are served (PgRegistry in production). */
@@ -161,11 +170,7 @@ export class AgentClient {
 		path: string,
 		init: AgentFetchInit = {},
 	): Promise<Response> {
-		return routedFetch(
-			{ ...this.routingBase(machineId), serviceToken: this.serviceToken },
-			path,
-			init,
-		);
+		return routedFetch(this.routingBase(machineId), path, init);
 	}
 
 	/** Closes the HTTP/2 sessions of the default transports. The registry is not closed. */
@@ -180,6 +185,7 @@ export class AgentClient {
 	private routingBase(machineId: string) {
 		return {
 			registry: this.registry,
+			serviceToken: this.serviceToken,
 			machineId,
 			waitForAgentMs: this.waitForAgentMs,
 			pollIntervalMs: this.pollIntervalMs,
@@ -187,12 +193,13 @@ export class AgentClient {
 		};
 	}
 
-	private underlying(machineId: string, instanceUrl: string): Transport {
-		const baseUrl = `${instanceUrl.replace(/\/+$/, "")}/v1/machines/${machineId}/rpc`;
+	/** The transport for a routing target; it carries the target's Authorization. */
+	private underlying(machineId: string, target: Target): Transport {
+		const baseUrl = `${target.instanceUrl.replace(/\/+$/, "")}/v1/machines/${machineId}/rpc`;
 		let t = this.transports.get(baseUrl);
 		if (t === undefined) {
 			t = this.createTransport(baseUrl, {
-				Authorization: `${SCHEME_BEARER} ${this.serviceToken}`,
+				Authorization: target.authorization,
 			});
 			if (this.transports.size >= maxCachedTransports) {
 				const oldest = this.transports.keys().next().value;
@@ -263,7 +270,18 @@ export class AgentClient {
 			throw err;
 		}
 		if (c === "moved") {
-			return { kind: "moved", instanceUrl: movedInstanceUrl(err), cause: err };
+			return {
+				kind: "moved",
+				instanceUrl: movedInstanceUrl(err),
+				cause: err,
+				// Not a gateway's 421: the Connect code alone decides.
+				notMoved: () => {
+					if (classifyByCode(err, signal) === "fatal") {
+						throw err;
+					}
+					return { kind: "unavailable", cause: err };
+				},
+			};
 		}
 		return { kind: "unavailable", cause: err };
 	}
@@ -279,9 +297,9 @@ export class AgentClient {
 	): Promise<UnaryResponse<I, O>> {
 		const headers = snapshot(header);
 		const routing = this.callRouting(machineId, signal, timeoutMs);
-		return routeCall(routing, async (instanceUrl) => {
+		return routeCall(routing, async (target) => {
 			try {
-				const res = await this.underlying(machineId, instanceUrl).unary(
+				const res = await this.underlying(machineId, target).unary(
 					method,
 					signal,
 					remaining(routing.deadline, timeoutMs),
@@ -313,9 +331,9 @@ export class AgentClient {
 		for await (const m of input) {
 			messages.push(m);
 		}
-		return routeCall(routing, async (instanceUrl) => {
+		return routeCall(routing, async (target) => {
 			try {
-				const res = await this.underlying(machineId, instanceUrl).stream(
+				const res = await this.underlying(machineId, target).stream(
 					method,
 					signal,
 					remaining(routing.deadline, timeoutMs),

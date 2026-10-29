@@ -11,7 +11,12 @@ import {
 	RegistryClosedError,
 } from "../src/index.js";
 import { Process } from "./gen/sbx/testing/v1/process_pb.js";
-import { type FakeGateway, startFakeGateway } from "./helpers/fake-gateway.js";
+import {
+	type FakeGateway,
+	startFakeGateway,
+	startTrap,
+	type Trap,
+} from "./helpers/fake-gateway.js";
 import { MemoryRegistry, route } from "./helpers/memory-registry.js";
 
 const token = "svc-token";
@@ -69,6 +74,7 @@ describe("AgentClient transport", () => {
 
 	it("follows 421 to Sbx-Instance-Url with the same Sbx-Request-Id", async () => {
 		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
 		a.script.push({ answer: { kind: "moved", instanceUrl: b.url } });
 		const process = createClient(Process, agent().transport(m));
 		const res = await process.setLabel(
@@ -81,6 +87,104 @@ describe("AgentClient transport", () => {
 		expect(rpcRequests(a)[0]?.headers["sbx-request-id"]).toBe("req-1");
 		expect(rpcRequests(b)[0]?.headers["sbx-request-id"]).toBe("req-1");
 		expect(registry.invalidations).toContain(m);
+	});
+
+	describe("a 421 hint that is not a live instance", () => {
+		let trap: Trap;
+		beforeEach(async () => {
+			trap = await startTrap();
+		});
+		afterEach(async () => {
+			await trap.close();
+		});
+
+		it("is not followed from the headers: the Connect code decides", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				answer: {
+					kind: "moved",
+					instanceUrl: trap.url,
+					code: "permission_denied",
+				},
+			});
+			const err = await createClient(Process, agent().transport(m))
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(trap.connections).toBe(0);
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.PermissionDenied);
+			expect(rpcRequests(a)).toHaveLength(1);
+			expect(registry.liveChecks).toContain(trap.url);
+		});
+
+		it("is not followed from the ErrorDetail of the body", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				answer: { kind: "moved", instanceUrl: trap.url, headers: false },
+				times: Infinity,
+			});
+			const err = await createClient(
+				Process,
+				agent({ waitForAgentMs: 300, pollIntervalMs: 50 }).transport(m),
+			)
+				.setLabel({ commandId: "c1", label: "x" })
+				.catch((e: unknown) => e);
+			expect(trap.connections).toBe(0);
+			// An ordinary unavailable answer: retried at the registry's route only.
+			expect(err).toBeInstanceOf(AgentUnavailableError);
+			expect(rpcRequests(a).length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("is not followed by a server stream", async () => {
+			registry.set(route(m, a.url));
+			a.script.push({
+				answer: { kind: "moved", instanceUrl: trap.url },
+			});
+			const process = createClient(Process, agent().transport(m));
+			const err = await (async () => {
+				for await (const _ of process.attach({ commandId: "c1" })) {
+					// The call fails before any message.
+				}
+			})().catch((e: unknown) => e);
+			expect(trap.connections).toBe(0);
+			// A stream call maps the 421 status itself to Unknown: fatal.
+			expect(err).toBeInstanceOf(ConnectError);
+			expect((err as ConnectError).code).toBe(Code.Unknown);
+			expect(rpcRequests(a)).toHaveLength(1);
+		});
+	});
+
+	it("follows a live hint with a trailing slash", async () => {
+		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
+		a.script.push({ answer: { kind: "moved", instanceUrl: `${b.url}/` } });
+		const res = await createClient(Process, agent().transport(m)).setLabel({
+			commandId: "c1",
+			label: "x",
+		});
+		expect(res.calls).toBe(1n);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("prefers the registry's new owner over a live hint", async () => {
+		const c = await startFakeGateway({ token });
+		try {
+			registry.set(route(m, a.url));
+			registry.addInstance(b.url);
+			a.script.push({
+				answer: { kind: "moved", instanceUrl: b.url },
+				after: () => registry.set(route(m, c.url)),
+			});
+			const res = await createClient(Process, agent().transport(m)).setLabel({
+				commandId: "c1",
+				label: "x",
+			});
+			expect(res.calls).toBe(1n);
+			expect(rpcRequests(b)).toHaveLength(0);
+			expect(rpcRequests(c)).toHaveLength(1);
+		} finally {
+			await c.close();
+		}
 	});
 
 	it("waits for a registry change after 503 agent_unavailable", async () => {
@@ -133,6 +237,7 @@ describe("AgentClient transport", () => {
 
 	it("retries a server stream that got 421 before the response headers", async () => {
 		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
 		a.script.push({ answer: { kind: "moved", instanceUrl: b.url } });
 		const process = createClient(Process, agent().transport(m));
 		const chunks: string[] = [];
@@ -174,6 +279,7 @@ describe("AgentClient transport", () => {
 
 	it("caps immediate attempts with maxAttempts", async () => {
 		registry.set(route(m, a.url));
+		registry.addInstance(b.url);
 		// A and B send the caller to each other.
 		a.script.push({
 			answer: { kind: "moved", instanceUrl: b.url },

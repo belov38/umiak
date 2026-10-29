@@ -138,6 +138,34 @@ export function classify(err: unknown, signal?: AbortSignal): Classification {
 	}
 }
 
+/**
+ * Classifies an error by its Connect code and connection state only,
+ * ignoring Sbx-Error-Code and the ErrorDetail: for a 421 whose hint the
+ * registry did not confirm, which is then not a gateway's answer.
+ */
+export function classifyByCode(
+	err: unknown,
+	signal?: AbortSignal,
+): Exclude<Classification, "moved"> {
+	if (signal?.aborted) {
+		return "fatal";
+	}
+	if (isConnectionError(err)) {
+		return "retry";
+	}
+	if (!(err instanceof ConnectError)) {
+		return "fatal";
+	}
+	switch (err.code) {
+		case Code.Unavailable:
+			return "unavailable";
+		case Code.Canceled:
+			return "retry";
+		default:
+			return "fatal";
+	}
+}
+
 /** The gateway error code from Sbx-Error-Code metadata or the ErrorDetail. */
 function gatewayCode(err: ConnectError): string | undefined {
 	const header = err.metadata.get(HEADER_ERROR_CODE);

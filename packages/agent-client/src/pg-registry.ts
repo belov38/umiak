@@ -13,6 +13,8 @@ export interface PgRegistryOptions {
 	reconnectDelayMs?: number;
 	/** Pool size for lookups. Default 10. */
 	maxConnections?: number;
+	/** How long an isLiveInstance answer is served from cache. Default 1000. */
+	instanceCacheTtlMs?: number;
 }
 
 const lookupSql = `
@@ -23,6 +25,12 @@ JOIN tunnel.gateway_instances g ON g.id = s.instance_id
 WHERE s.machine_id = $1
   AND s.state = 'connected'
   AND g.heartbeat_at > now() - make_interval(secs => $2)`;
+
+const liveInstanceSql = `
+SELECT 1 FROM tunnel.gateway_instances
+WHERE rtrim(internal_url, '/') = $1
+  AND heartbeat_at > now() - make_interval(secs => $2)
+LIMIT 1`;
 
 interface Row {
 	machine_id: string;
@@ -60,6 +68,11 @@ export class PgRegistry implements Registry {
 	// it so a result read before the change is not cached.
 	private readonly inflight = new Map<string, object>();
 	private readonly waiters = new Map<string, Set<() => void>>();
+	private readonly instanceCacheTtlMs: number;
+	private readonly live = new Map<
+		string,
+		{ live: boolean; expiresAt: number }
+	>();
 	private listener: pg.Client | undefined;
 	private reconnectTimer: NodeJS.Timeout | undefined;
 	private closed = false;
@@ -68,6 +81,7 @@ export class PgRegistry implements Registry {
 		this.staleAfterSec = (opts.staleAfterMs ?? 15_000) / 1000;
 		this.cacheTtlMs = opts.cacheTtlMs ?? 5000;
 		this.reconnectDelayMs = opts.reconnectDelayMs ?? 100;
+		this.instanceCacheTtlMs = opts.instanceCacheTtlMs ?? 1000;
 		this.pool = new pg.Pool({
 			connectionString: opts.connectionString,
 			max: opts.maxConnections ?? 10,
@@ -142,6 +156,40 @@ export class PgRegistry implements Registry {
 				this.inflight.delete(key);
 			}
 		}
+	}
+
+	async isLiveInstance(internalUrl: string): Promise<boolean> {
+		if (this.closed) {
+			throw new RegistryClosedError();
+		}
+		const key = internalUrl.replace(/\/+$/, "");
+		const now = Date.now();
+		const hit = this.live.get(key);
+		if (hit !== undefined && hit.expiresAt > now) {
+			return hit.live;
+		}
+		let res: pg.QueryResult;
+		try {
+			res = await this.pool.query(liveInstanceSql, [key, this.staleAfterSec]);
+		} catch (err) {
+			if (this.closed) {
+				throw new RegistryClosedError();
+			}
+			throw err;
+		}
+		const live = res.rows.length > 0;
+		if (this.live.size >= cacheSweepSize) {
+			for (const [k, v] of this.live) {
+				if (v.expiresAt <= now) {
+					this.live.delete(k);
+				}
+			}
+			if (this.live.size >= cacheSweepSize) {
+				this.live.clear();
+			}
+		}
+		this.live.set(key, { live, expiresAt: now + this.instanceCacheTtlMs });
+		return live;
 	}
 
 	invalidate(machineId: string): void {
