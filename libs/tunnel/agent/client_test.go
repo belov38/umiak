@@ -236,6 +236,9 @@ func TestDrainMakeBeforeBreak(t *testing.T) {
 	for _, ev := range e.connEvents() {
 		if ev.Kind == "drain" && ev.ConnID == a.info.ConnID {
 			drain = true
+			if ev.TCPDeadline != 100*time.Millisecond {
+				t.Fatalf("drain event TCPDeadline = %v, want 100ms", ev.TCPDeadline)
+			}
 		}
 	}
 	if !drain {

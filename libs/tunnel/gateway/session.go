@@ -274,6 +274,10 @@ func (s *session) finish() {
 		delete(g.sessions, s.machineID)
 	}
 	g.mu.Unlock()
+	select {
+	case g.sessGone <- struct{}{}:
+	default:
+	}
 
 	if !g.abandoned.Load() {
 		ctx, cancel := context.WithTimeout(g.bg, dbTimeout)

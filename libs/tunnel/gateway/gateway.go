@@ -37,6 +37,9 @@ type Timing struct {
 	DrainSpread time.Duration
 	// TCPDeadline is the default per-stream drain deadline of TCP streams (2 min).
 	TCPDeadline time.Duration
+	// DrainMargin is added to the overall wait of Drain (10 s): EndpointWait
+	// + DrainSpread + the longest TCP drain deadline + DrainMargin.
+	DrainMargin time.Duration
 	// DrainRetryAfter is the Retry-After of the 503 answered while draining (1 s).
 	DrainRetryAfter time.Duration
 	// TokenMaxAge is the machine token lifetime before rotation (24 h).
@@ -62,6 +65,7 @@ func (t Timing) withDefaults() Timing {
 	def(&t.EndpointWait, 5*time.Second)
 	def(&t.DrainSpread, 5*time.Second)
 	def(&t.TCPDeadline, 2*time.Minute)
+	def(&t.DrainMargin, 10*time.Second)
 	def(&t.DrainRetryAfter, time.Second)
 	def(&t.TokenMaxAge, 24*time.Hour)
 	def(&t.EventBatchInterval, time.Second)
@@ -143,8 +147,16 @@ type Gateway struct {
 
 	started   atomic.Bool
 	running   atomic.Bool // registered and serving: Run is between start and shutdown
-	draining  atomic.Bool // set by Drain (Task 9): Ready false, admission 503
+	draining  atomic.Bool // set by Drain: Ready false, admission 503
 	abandoned atomic.Bool
+
+	// Drain state, see drain.go.
+	drainStarted atomic.Bool
+	drainDone    chan struct{} // closed when the first Drain call finished
+	drainErr     error         // result of the first Drain call, set before drainDone closes
+	drainedCh    chan struct{} // closed by Drain to make Run shut down
+	drainedOnce  sync.Once
+	sessGone     chan struct{} // signalled (non-blocking) whenever a session is unregistered
 
 	// bg is the context of background work that must outlive one session
 	// (connection events, registry writes on close). It is cancelled by
@@ -200,6 +212,9 @@ func New(cfg Config) (*Gateway, error) {
 		sink:      cfg.Sink,
 		abandonCh: make(chan struct{}),
 		runDone:   make(chan struct{}),
+		drainDone: make(chan struct{}),
+		drainedCh: make(chan struct{}),
+		sessGone:  make(chan struct{}, 1),
 		fenceQ:    newMachineQueue(),
 		instQ:     newIDQueue(),
 		sessions:  map[string]*session{},
@@ -278,9 +293,9 @@ func (g *Gateway) snapshotSessions() []*session {
 }
 
 // Run registers the instance and runs the heartbeat, the sweep and the
-// LISTEN loops until ctx is done. Then it closes every session (marking it
-// disconnected), deletes the instance row and returns nil. Run may be called
-// only once.
+// LISTEN loops until ctx is done or Drain finished its waits. Then it closes
+// every session (marking it disconnected), deletes the instance row and
+// returns nil. Run may be called only once.
 func (g *Gateway) Run(ctx context.Context) error {
 	if !g.started.CompareAndSwap(false, true) {
 		return errors.New("gateway: Run called more than once")
@@ -303,6 +318,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 	case <-g.abandonCh:
+	case <-g.drainedCh:
 	}
 	g.running.Store(false)
 	stopLoops()

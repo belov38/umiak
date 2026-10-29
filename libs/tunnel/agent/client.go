@@ -69,6 +69,8 @@ type ConnEvent struct {
 	Auth    transport.AuthScheme
 	Status  int
 	Reason  string
+	// TCPDeadline is the drain's tcp_deadline (Kind drain only).
+	TCPDeadline time.Duration
 }
 
 // Config configures a Client. Zero durations take the spec defaults.
@@ -566,7 +568,7 @@ func (c *Client) requestDrain(tc *tunnelConn, reason string, deadline time.Durat
 	c.log.Info("tunnel: drain requested", "conn_id", tc.info.ConnID, "epoch", tc.info.Epoch,
 		"gateway", tc.info.GatewayInstance, "reason", reason, "tcp_deadline", deadline)
 	c.emit(ConnEvent{Kind: KindDrain, ConnID: tc.info.ConnID, Epoch: tc.info.Epoch,
-		Gateway: tc.info.GatewayInstance, Auth: tc.auth, Reason: reason})
+		Gateway: tc.info.GatewayInstance, Auth: tc.auth, Reason: reason, TCPDeadline: deadline})
 }
 
 func (c *Client) emit(ev ConnEvent) {
