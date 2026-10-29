@@ -1,12 +1,18 @@
 // Fork (S6 §7.7): the `fork` operation on the source (snapshot with quiesce,
 // hand-off to the target), the target's `create` (provision from the
-// fork_source, cleanup_source), their failures and delete during a fork.
+// fork_source; cleanup_source hands the snapshot to snapshot-op), their
+// failures and delete during a fork.
+import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOpDeadLetter } from "../src/handlers/dlq.ts";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
-import type { ClaimRequest, InfraSnapshotResult } from "../src/ports.ts";
+import {
+	AgentUnavailable,
+	type ClaimRequest,
+	type InfraSnapshotResult,
+} from "../src/ports.ts";
 import { blockAfter } from "./fakes/crash.ts";
 import { createWorld, type TestWorld } from "./fakes/world.ts";
 import {
@@ -21,6 +27,7 @@ import {
 	readySandbox,
 	row,
 	run,
+	runSnapshotJobs,
 	SECRETS,
 	sandboxOpJobs,
 	snapshotLvs,
@@ -81,7 +88,7 @@ async function readyFork(
 }
 
 describe("fork of a running source", () => {
-	it("agent quiesce hook, snapshot handed to the target, target ready, cleanup_source deletes it", async () => {
+	it("agent quiesce hook, snapshot handed to the target, target ready, cleanup_source → snapshot-op deletes it", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
 		const f = await readyFork(w, e, {
@@ -161,10 +168,22 @@ describe("fork of a running source", () => {
 				],
 			},
 		]);
-		// cleanup_source: S1 delete of the snapshot, the row deleted.
-		expect((await row(w, "operations", f.createOpId)).step).toBe(
-			"cleanup_source",
+		// cleanup_source, in the final transaction: the snapshot → deleting with
+		// a snapshot-op delete job; no S1 call on the target's path.
+		expect((await row(w, "operations", f.createOpId)).step).toBe("claim");
+		expect((await row(w, "snapshots", snap.id as string)).state).toBe(
+			"deleting",
 		);
+		expect(w.infra.callsOf("deleteSnapshot")).toEqual([]);
+		expect(w.jobs.sent.filter((j) => j.queue === "snapshot-op")).toEqual([
+			{
+				queue: "snapshot-op",
+				data: { snapshotId: snap.id, action: "delete" },
+				opts: { singletonKey: snap.id, retryLimit: DELETE_RETRY_LIMIT },
+			},
+		]);
+		// The in-use check passes: the target machine is running.
+		await runSnapshotJobs(w);
 		const after = await row(w, "snapshots", snap.id as string);
 		expect(after.state).toBe("deleted");
 		expect(after.deleted_at).not.toBeNull();
@@ -257,6 +276,32 @@ describe("fork of a running source", () => {
 		await expectTargetForkFailed(w, f);
 	});
 
+	it("the agent hook fails unavailable: the retry freezes through QGA (progress.quiesceVia)", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const f = await readyFork(w, e);
+		w.agent.fail("freeze", "unavailable");
+
+		await expect(
+			handleSandboxOp(w.ctx, { operationId: f.forkOpId }),
+		).rejects.toBeInstanceOf(AgentUnavailable);
+		const mid = await row(w, "operations", f.forkOpId);
+		expect(mid.state).toBe("running");
+		expect(mid.progress).toMatchObject({ quiesceVia: "qga" });
+
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+
+		// One agent freeze (the failed one), then the QGA path: no hook.
+		expect(w.agent.callsOf("freeze")).toHaveLength(1);
+		expect(w.infra.callsOf("snapshot").map((c) => c.args[1])).toEqual([
+			expect.objectContaining({ hook: true }),
+			expect.objectContaining({ hook: false }),
+		]);
+		const snap = await forkSource(w, f);
+		expect(snap.state).toBe("ready");
+		expect(snap.consistency).toBe("quiesced");
+	});
+
 	it("an agent that rejects the freeze fails the fork; nothing is left", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
@@ -296,8 +341,13 @@ describe("fork of a stopped source", () => {
 		expect((await row(w, "sandboxes", f.targetId)).state).toBe("ready");
 		expect((await row(w, "sandboxes", src.sandboxId)).state).toBe("stopped");
 		expect((await row(w, "snapshots", snap.id as string)).state).toBe(
+			"deleting",
+		);
+		await runSnapshotJobs(w);
+		expect((await row(w, "snapshots", snap.id as string)).state).toBe(
 			"deleted",
 		);
+		expect(snapshotLvs(w, snap.lv_id as string)).toEqual([]);
 	});
 });
 
@@ -471,6 +521,74 @@ describe("delete during a fork", () => {
 		expect(
 			w.infra.callsOf("deleteSnapshot").map((c) => c.args[0]),
 		).toContainEqual({ lvId: snap.lv_id });
+	});
+
+	it("a stale fork executor whose LVs land between the delete's S1 delete and its row mark removes them (op superseded)", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const f = await readyFork(w, e);
+		let release: () => void = () => {};
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		let reached = false;
+		w.infra.snapshot = async (_vmid, opts): Promise<InfraSnapshotResult> => {
+			reached = true;
+			await gate;
+			const name = w.infra.addSnapshotLvs(opts.lvId);
+			return {
+				disks: [{ slot: "scsi0", volume: `local-lvm:${name}`, options: {} }],
+				hw: {},
+				consistency: "quiesced",
+			};
+		};
+		const zombie = handleSandboxOp(w.ctx, { operationId: f.forkOpId });
+		await until("S1 snapshot reached", async () => reached);
+		const del = await e.svc.delete(e.p, f.sourceId);
+		// The delete's S1 delete of the creating snapshot is done; its mark is not.
+		const b = blockAfter(w.infra, "deleteSnapshot");
+		w.useInfra(b.port);
+		const delRun = run(w, del.id);
+		await b.reached;
+		const snap = await forkSource(w, f);
+		expect(snap.state).toBe("creating");
+
+		release();
+		expect(await zombie).toBe("fenced_out");
+		expect(snapshotLvs(w, snap.lv_id as string)).toEqual([]);
+
+		b.release();
+		expect(await delRun).toBe("succeeded");
+		expect((await row(w, "snapshots", snap.id as string)).state).toBe(
+			"deleted",
+		);
+		expect(snapshotLvs(w, snap.lv_id as string)).toEqual([]);
+	});
+
+	it("a stale attempt whose S1 snapshot returns after a newer attempt made it ready leaves its LVs alone", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const f = await readyFork(w, e);
+		// Attempt A: S1 made the LVs, the answer is late (the pod looks dead).
+		const b = blockAfter(w.infra, "snapshot");
+		w.useInfra(b.port);
+		const stale = handleSandboxOp(w.ctx, { operationId: f.forkOpId });
+		await b.reached;
+
+		// Attempt B: removes A's unrecorded LVs, takes the snapshot again, hands off.
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+		const snap = await forkSource(w, f);
+		expect(snap.state).toBe("ready");
+		expect(snapshotLvs(w, snap.lv_id as string)).toHaveLength(1);
+		const deletes = w.infra.callsOf("deleteSnapshot").length;
+
+		b.release();
+		expect(await stale).toBe("fenced_out");
+
+		// The ready snapshot's LVs (same lv_id) survive A.
+		expect(w.infra.callsOf("deleteSnapshot")).toHaveLength(deletes);
+		expect(snapshotLvs(w, snap.lv_id as string)).toHaveLength(1);
+		expect((await row(w, "snapshots", snap.id as string)).state).toBe("ready");
 	});
 
 	it("target delete after the hand-off removes the ready fork_source (ownership moved)", async () => {

@@ -25,6 +25,7 @@ import {
 	restorePorts,
 	row,
 	run,
+	runSnapshotJobs,
 	sessionBoot,
 	stoppedSandbox,
 } from "./helpers/ops.ts";
@@ -199,12 +200,6 @@ const CASES: Case[] = [
 	},
 	{ op: "fork_target", step: "claim", port: "agent", method: "claim" },
 	{
-		op: "fork_target",
-		step: "cleanup_source",
-		port: "infra",
-		method: "deleteSnapshot",
-	},
-	{
 		op: "fork_target_gone",
 		step: "snapshot",
 		port: "infra",
@@ -231,6 +226,8 @@ function wrap(w: TestWorld, port: Port, method: string): void {
 
 /** End state without ids: comparable across worlds. */
 async function summary(w: TestWorld, started: Started) {
+	// Deletions handed to snapshot-op (fork target cleanup_source) run first.
+	await runSnapshotJobs(w);
 	const s = await row(w, "sandboxes", started.sandboxId);
 	const op = await row(w, "operations", started.operationId);
 	const machines = (await machinesOf(w, started.sandboxId))

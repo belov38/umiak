@@ -1,7 +1,7 @@
 import { withTx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
 import { loadSnapshot, snapshotRef } from "../db.ts";
-import { FORK_TARGET_STEPS } from "../ops/create.ts";
+import { CREATE_STEPS } from "../ops/create.ts";
 
 // snapshot-op queue (S6 §7.8, §15.1): delete of a snapshot in `deleting`
 // (or `failed`). Key snapshotId; unlimited retries.
@@ -89,10 +89,9 @@ async function inUse(ctx: WorkerCtx, snapshotId: string): Promise<boolean> {
 		   SELECT 1 FROM runtime.machines m
 		   WHERE m.origin_snapshot_id = $1 AND m.state IN ('allocating', 'provisioning')
 		 ) AS busy`,
-		// A create whose recorded step is one of its steps (provision or later;
-		// FORK_TARGET_STEPS is the superset) has passed provision; none recorded
-		// yet means it has not.
-		[snapshotId, FORK_TARGET_STEPS],
+		// A create whose recorded step is one of its steps (provision or later)
+		// has passed provision; none recorded yet means it has not.
+		[snapshotId, CREATE_STEPS],
 	);
 	return r.rows[0]?.busy === true;
 }

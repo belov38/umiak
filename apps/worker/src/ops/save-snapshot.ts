@@ -57,9 +57,9 @@ async function finishSave(
 		[s.team_id, s.pending_name, snapshotId],
 	);
 	for (const { id } of old.rows) {
-		// The name is kept on the row for audit; the unique index covers ready only.
+		// §7.8: the name is taken off the replaced snapshot.
 		await tx.client.query(
-			`UPDATE runtime.snapshots SET state = 'deleting', version = version + 1
+			`UPDATE runtime.snapshots SET state = 'deleting', name = NULL, version = version + 1
 			 WHERE id = $1`,
 			[id],
 		);

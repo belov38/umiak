@@ -1,10 +1,15 @@
+import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import type { Tx } from "@sbx/db";
 import type { QuiesceHook } from "@sbx/pve";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { insertDisks, loadSnapshot, snapshotRef } from "../db.ts";
 import { MachineGone } from "../machine-prep.ts";
-import type { InfraSnapshotRef, NodeInfra } from "../ports.ts";
+import {
+	AgentUnavailable,
+	type InfraSnapshotRef,
+	type NodeInfra,
+} from "../ports.ts";
 import { type Fenced, FencedOut } from "../steps.ts";
 import { currentMachine, vmidOf } from "./common.ts";
 
@@ -124,24 +129,46 @@ async function discardLeftovers(
 }
 
 /**
- * A stale executor's S1 snapshot finished after it lost its fence. If the
- * row is no longer `creating` (the source's delete removed it), nobody will
- * look for these LVs again: delete them here. If it is still `creating`,
- * the current executor (or the delete that superseded us) owns them.
+ * An executor's S1 snapshot finished, but it cannot record it (fenced out,
+ * or the row left `creating`). All attempts share one `lv_id`, so the LVs are
+ * deleted only when nobody else owns them:
+ * - the row is `deleted`, `failed` or missing: its owner is done with it and
+ *   nobody will look for these LVs again;
+ * - the row is `creating` while the owning operation is `superseded` or
+ *   `failed`: its delete or compensation may have run its S1 delete before
+ *   these LVs appeared and only the row mark is left (S1 delete is
+ *   idempotent, so deleting twice is fine).
+ * Never for `ready`/`deleting` (another attempt finished; snapshot-op owns
+ * it) or for `creating` under a live operation (its current attempt owns it).
+ * The check runs after the S1 call returned, so LVs that land late are seen.
+ * What is left for reconcile: an executor that dies between its S1 call and
+ * this check.
  */
 async function abandonSnapshot(
 	ctx: WorkerCtx,
+	fenced: Fenced,
 	infra: NodeInfra,
 	snapshotId: string,
 	lvId: string,
 	vmid: number,
 ): Promise<void> {
 	try {
-		const cur = await loadSnapshot(ctx.pool, snapshotId);
-		if (cur?.state === "creating") return;
+		const r = await ctx.pool.query<{ snap: string | null; op: string | null }>(
+			`SELECT (SELECT state FROM runtime.snapshots WHERE id = $1) AS snap,
+			        (SELECT state FROM runtime.operations WHERE id = $2) AS op`,
+			[snapshotId, fenced.id],
+		);
+		const snap = r.rows[0]?.snap ?? "missing";
+		const op = r.rows[0]?.op ?? "missing";
+		const orphaned =
+			snap === "deleted" ||
+			snap === "failed" ||
+			snap === "missing" ||
+			(snap === "creating" && (op === "superseded" || op === "failed"));
+		if (!orphaned) return;
 		ctx.log.info(
-			{ snapshotId, lvId, state: cur?.state ?? "missing" },
-			"fenced out after S1 snapshot: deleting LVs nobody will use",
+			{ snapshotId, lvId, state: snap, operationState: op },
+			"S1 snapshot nobody will record: deleting its LVs",
 		);
 		await infra.deleteSnapshot(bareRef(lvId, vmid));
 	} catch (e) {
@@ -150,6 +177,20 @@ async function abandonSnapshot(
 			"could not delete abandoned snapshot LVs; reconcile will find them",
 		);
 	}
+}
+
+/** Merges `progress` into the operation under the fence (no step recorded). */
+async function mergeProgress(
+	fenced: Fenced,
+	progress: Record<string, unknown>,
+): Promise<void> {
+	await fenced.tx(async (tx) => {
+		await tx.client.query(
+			`UPDATE runtime.operations SET progress = progress || $3::jsonb, version = version + 1
+			 WHERE id = $1 AND attempt = $2 AND state = 'running'`,
+			[fenced.id, fenced.attempt, JSON.stringify(progress)],
+		);
+	});
 }
 
 export interface SnapshotTaken {
@@ -162,7 +203,8 @@ export interface SnapshotTaken {
  * row `snapshotId` (§7.7 step 1):
  * - VM running: the agent's `QuiesceHook` if it is connected with
  *   `system.quiesce.v1`, else no hook (S1 freezes through QGA); neither
- *   answers → `QuiesceFailed`;
+ *   answers → `QuiesceFailed`. An agent hook that failed `AgentUnavailable`
+ *   records `progress.quiesceVia = "qga"`: the retry uses the QGA fallback;
  * - VM stopped: no freeze (`powered_off`);
  * - disks, `hw` and `consistency` recorded under the fence;
  * - after the thaw, `quiesce_broken` (set by the `quiesce.watchdog_thawed`
@@ -187,9 +229,19 @@ export async function takeSnapshot(
 		const status = await infra.status(vmid);
 		if (status === "missing") throw new MachineGone(m.id, `VM ${vmid} missing`);
 		let hook: QuiesceHook | undefined;
+		let agentUnavailable = false;
 		if (status === "running") {
-			if (await agentCanQuiesce(ctx, m.id)) {
-				hook = ctx.agent.quiesceHook(m.id, QUIESCE_LEASE_MS);
+			const viaQga = fenced.op.progress.quiesceVia === "qga";
+			if (!viaQga && (await agentCanQuiesce(ctx, m.id))) {
+				const agentHook = ctx.agent.quiesceHook(m.id, QUIESCE_LEASE_MS);
+				const watch = (e: unknown): never => {
+					if (e instanceof AgentUnavailable) agentUnavailable = true;
+					throw e;
+				};
+				hook = {
+					freeze: () => agentHook.freeze().catch(watch),
+					thaw: () => agentHook.thaw().catch(watch),
+				};
 			} else if (!(await infra.qgaPing(vmid))) {
 				throw new QuiesceFailed(
 					`machine ${m.id}: neither the agent nor QGA can freeze the guest`,
@@ -199,7 +251,21 @@ export async function takeSnapshot(
 		await fenced.check();
 		const lvId = s.lv_id;
 		const storageId = s.storage_id;
-		const res = await infra.snapshot(vmid, hook ? { lvId, hook } : { lvId });
+		let res: Awaited<ReturnType<NodeInfra["snapshot"]>>;
+		try {
+			res = await infra.snapshot(vmid, hook ? { lvId, hook } : { lvId });
+		} catch (e) {
+			if (agentUnavailable) {
+				// §7.7 fallback: the agent did not answer; the next attempt freezes
+				// through QGA. The error stays transient (the job is repeated).
+				ctx.log.info(
+					{ operationId: fenced.id, machineId: m.id },
+					"agent quiesce unavailable; the retry uses QGA",
+				);
+				await mergeProgress(fenced, { quiesceVia: "qga" });
+			}
+			throw e;
+		}
 		try {
 			await fenced.tx(async (tx) => {
 				const r = await tx.client.query<{ state: string }>(
@@ -218,8 +284,8 @@ export async function takeSnapshot(
 				);
 			});
 		} catch (e) {
-			if (e instanceof FencedOut) {
-				await abandonSnapshot(ctx, infra, snapshotId, lvId, vmid);
+			if (e instanceof FencedOut || e instanceof SnapshotLost) {
+				await abandonSnapshot(ctx, fenced, infra, snapshotId, lvId, vmid);
 			}
 			throw e;
 		}
@@ -289,6 +355,34 @@ export async function consumedForkSources(
 		 ORDER BY created_at, id`,
 		[sandboxId, CONSUMED_SNAPSHOT_STATES],
 	);
+	return r.rows.map((x) => x.id);
+}
+
+/**
+ * `cleanup_source` of a fork target (§7.7), inside its final transaction:
+ * the fork_source snapshots it owns → `deleting` with a `snapshot-op delete`
+ * job (as deleteSavedSnapshot). Lock order: the target's sandbox and
+ * operation rows are held (Fenced.tx), then the snapshot rows.
+ */
+export async function retireForkSources(
+	ctx: WorkerCtx,
+	tx: Tx,
+	sandboxId: string,
+): Promise<string[]> {
+	const r = await tx.client.query<{ id: string }>(
+		`UPDATE runtime.snapshots SET state = 'deleting', version = version + 1
+		 WHERE kind = 'fork_source' AND consumer_sandbox_id = $1 AND state IN ('ready', 'failed')
+		 RETURNING id`,
+		[sandboxId],
+	);
+	for (const { id } of r.rows) {
+		await ctx.jobs.send(
+			tx,
+			"snapshot-op",
+			{ snapshotId: id, action: "delete" },
+			{ singletonKey: id, retryLimit: DELETE_RETRY_LIMIT },
+		);
+	}
 	return r.rows.map((x) => x.id);
 }
 

@@ -26,12 +26,12 @@ import {
 // its delete); while `creating` this operation (or the source's delete) does.
 //
 // Lock order of the hand-off: the source sandbox row and the fork's operation
-// row (Fenced.tx), the snapshot row, then the target's create row by a
-// conditional UPDATE. The target's sandbox row is not locked: no path that
-// holds the target's create row waits for anything held here (the API delete
-// of the target locks the target row, then its operations; the target's
-// handler never touches the source), and the UPDATE itself is the check —
-// 0 rows means the target's delete superseded it.
+// row (Fenced.tx), a read of the template build, the target's create row by a
+// conditional UPDATE, then the snapshot row. The target's sandbox row is not
+// locked: no path that holds the target's create row waits for anything held
+// here (the API delete of the target locks the target row, then its
+// operations; the target's handler never touches the source), and the UPDATE
+// itself is the check — 0 rows means the target's delete superseded it.
 
 export const FORK_STEPS = ["snapshot", "finish"] as const;
 

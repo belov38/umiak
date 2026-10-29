@@ -113,7 +113,11 @@ describe("save_snapshot", () => {
 			name: "base",
 			pending_name: null,
 		});
-		expect((await row(w, "snapshots", a.snapshotId)).state).toBe("deleting");
+		// §7.8: the name is taken off the replaced snapshot.
+		expect(await row(w, "snapshots", a.snapshotId)).toMatchObject({
+			state: "deleting",
+			name: null,
+		});
 		const jobs = w.jobs.sent.filter(
 			(j) => j.queue === "snapshot-op" && j.data.snapshotId === a.snapshotId,
 		);
@@ -222,6 +226,29 @@ describe("save_snapshot", () => {
 		);
 		expect(after.rows).toEqual([{ state: "active" }]);
 		expect((await row(w, "snapshots", s.snapshotId)).state).toBe("ready");
+	});
+
+	it("the row left creating while S1 ran (snapshot_lost): the new LVs are removed, the save fails", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const src = await readySandbox(w, e);
+		const s = await save(e, src.sandboxId, "base");
+		const orig = w.infra.snapshot.bind(w.infra);
+		w.infra.snapshot = async (vmid, opts) => {
+			const res = await orig(vmid, opts);
+			await w.pool.query(
+				"UPDATE runtime.snapshots SET state = 'failed' WHERE id = $1",
+				[s.snapshotId],
+			);
+			return res;
+		};
+
+		expect(await run(w, s.operationId)).toBe("failed");
+
+		expect((await row(w, "operations", s.operationId)).error_code).toBe(
+			"snapshot_lost",
+		);
+		expect(snapshotLvs(w, s.lvId)).toEqual([]);
 	});
 
 	it("delete of the source during a save removes the creating snapshot; the name stays free", async () => {

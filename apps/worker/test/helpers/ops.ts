@@ -15,6 +15,7 @@ import {
 	handleSandboxOp,
 	type SandboxOpResult,
 } from "../../src/handlers/sandbox-op.ts";
+import { handleSnapshotOp } from "../../src/handlers/snapshot-op.ts";
 import { insertMachine, type TestWorld } from "../fakes/world.ts";
 
 export function principal(): Principal {
@@ -257,4 +258,14 @@ export async function disconnectAgent(
 		 WHERE machine_id = $1`,
 		[machineId],
 	);
+}
+
+/** Runs every `snapshot-op` job sent so far (idempotent: done or skipped). */
+export async function runSnapshotJobs(w: TestWorld): Promise<void> {
+	for (const j of w.jobs.sent.filter((x) => x.queue === "snapshot-op")) {
+		await handleSnapshotOp(w.ctx, {
+			snapshotId: j.data.snapshotId as string,
+			action: "delete",
+		});
+	}
 }
