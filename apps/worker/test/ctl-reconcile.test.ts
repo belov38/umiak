@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { PgBoss } from "pg-boss";
@@ -7,6 +8,7 @@ import {
 	type ReconcileAction,
 	runReconcile,
 } from "../src/controllers/reconcile.ts";
+import type { NodeInfra } from "../src/ports.ts";
 import {
 	createWorld,
 	insertMachine,
@@ -81,6 +83,43 @@ async function insertLease(
 			agoS,
 		],
 	);
+}
+
+type Hooks = {
+	[K in keyof NodeInfra]?: NodeInfra[K] extends (...a: infer A) => infer R
+		? (call: number, next: () => R, ...a: A) => R
+		: never;
+};
+
+/**
+ * Puts a wrapper of the world's FakeInfra in place: a hooked method gets its
+ * 1-based call number and the original call (`next`).
+ */
+function hookInfra(w: TestWorld, hooks: Hooks): void {
+	const target = w.infra;
+	const counts = new Map<string, number>();
+	const proxy = new Proxy(target, {
+		get(t, prop, recv) {
+			const v = Reflect.get(t, prop, recv);
+			if (typeof v !== "function") return v;
+			const hook = (hooks as Record<string | symbol, unknown>)[prop];
+			if (typeof hook !== "function") return v.bind(t);
+			return (...args: unknown[]) => {
+				const n = (counts.get(String(prop)) ?? 0) + 1;
+				counts.set(String(prop), n);
+				return hook(n, () => v.apply(t, args), ...args);
+			};
+		},
+	});
+	w.useInfra(proxy as NodeInfra);
+}
+
+async function seenRows(w: TestWorld): Promise<string[]> {
+	const r = await w.pool.query<{ name: string }>(
+		"SELECT kind || ':' || split_part(name, '/', 2) AS name FROM runtime.reconcile_seen WHERE provider_id = $1 ORDER BY 1",
+		[w.topo.providerId],
+	);
+	return r.rows.map((x) => x.name);
 }
 
 describe("ctl-reconcile (§11.2, §11.3)", () => {
@@ -195,6 +234,204 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(l.rows.map((x) => x.vmid)).toEqual([591]);
 	});
 
+	it("lease_release never deletes a VM outside pool sandbox, without the sbx tag or a template", async () => {
+		const w = await createWorld(db);
+		const m = await insertMachine(w, { state: "deleted" });
+		w.infra.addVm({ vmid: 593, pool: "other", machineId: m });
+		await insertLease(w, 593, "releasing", m, 700);
+		w.infra.addVm({ vmid: 594, tags: ["foo"], machineId: m });
+		await insertLease(w, 594, "releasing", m, 700);
+		// A template build's VMID inside the range.
+		await w.pool.query(
+			"UPDATE runtime.template_builds SET pve_vmid = 595 WHERE id = $1",
+			[w.topo.templateBuildId],
+		);
+		w.infra.addVm({ vmid: 595, machineId: m });
+		await insertLease(w, 595, "releasing", m, 700);
+		expect(await reconcile(w)).toEqual([]);
+		for (const vmid of [593, 594, 595])
+			expect(w.infra.vms.has(vmid)).toBe(true);
+		expect(w.infra.callsOf("delete")).toEqual([]);
+		const skipped = w.metrics.calls
+			.filter((c) => c.name === "sbx_reconcile_skipped_total")
+			.map((c) => c.labels.reason)
+			.sort();
+		expect(skipped).toEqual(["no_sbx_tag", "not_in_pool", "template"]);
+	});
+
+	it("lease_release re-checks the VM at apply: a foreign VM that appears after planning is not deleted", async () => {
+		const w = await createWorld(db);
+		const m = await insertMachine(w, { state: "deleted" });
+		await insertLease(w, 596, "releasing", m, 700);
+		// Planning sees no VM (list 1: the node part, list 2: lease planning);
+		// before the apply's re-list (3) a VM outside the pool shows up.
+		hookInfra(w, {
+			listVms: (n, next) => {
+				if (n === 3) w.infra.addVm({ vmid: 596, pool: "other", machineId: m });
+				return next();
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["lease_release", "lease:596"]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.vms.has(596)).toBe(true);
+		expect(w.infra.callsOf("delete")).toEqual([]);
+	});
+
+	it("grace counts from the first sighting as an orphan: a VMID claimed in between starts over", async () => {
+		const w = await createWorld(db);
+		w.infra.addVm({ vmid: 553 });
+		await seenLongAgo(w);
+		expect(await seenRows(w)).toContain("vm:553");
+		// The VMID gets claimed (a live machine's lease): no longer a candidate.
+		const m = await insertMachine(w, { state: "provisioning" });
+		await insertLease(w, 553, "reserved", m);
+		expect(await reconcile(w)).toEqual([]);
+		expect(await seenRows(w)).not.toContain("vm:553");
+		// The machine is gone, the VM with that VMID is a new orphan: fresh grace.
+		await w.pool.query(
+			"DELETE FROM runtime.vmid_leases WHERE provider_id = $1 AND vmid = 553",
+			[w.topo.providerId],
+		);
+		await setRow(w, "machines", m, "state = 'deleted'");
+		expect(await reconcile(w)).toEqual([]);
+		expect(w.infra.vms.has(553)).toBe(true);
+		await backdateSeen(w);
+		expect(kinds(await reconcile(w))).toEqual([["orphan_vm", "vm:553"]]);
+	});
+
+	it("grace after an applied orphan delete: a new VM with the same VMID is fresh", async () => {
+		const w = await createWorld(db);
+		w.infra.addVm({ vmid: 554 });
+		w.infra.addLv("vm-555-disk-0", ["sbx", "sbx-vm-555"]);
+		await seenLongAgo(w);
+		expect(kinds(await reconcile(w))).toEqual([
+			["orphan_lv", "lv:vm-555-disk-0"],
+			["orphan_vm", "vm:554"],
+		]);
+		w.infra.addVm({ vmid: 554 });
+		w.infra.addLv("vm-555-disk-0", ["sbx", "sbx-vm-555"]);
+		expect(await reconcile(w)).toEqual([]);
+		expect(w.infra.vms.has(554)).toBe(true);
+		expect(w.infra.lvs.has("vm-555-disk-0")).toBe(true);
+	});
+
+	it("TOCTOU: a lease that appears between planning and apply saves an orphan VM", async () => {
+		const w = await createWorld(db);
+		w.infra.addVm({ vmid: 556 });
+		await seenLongAgo(w);
+		const m = await insertMachine(w, { state: "provisioning" });
+		hookInfra(w, {
+			status: async (_n, next) => {
+				await insertLease(w, 556, "reserved", m);
+				return next();
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["orphan_vm", "vm:556"]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(actions[0]?.error).toMatch(/skipped/);
+		expect(w.infra.callsOf("delete")).toEqual([]);
+		expect(w.infra.vms.has(556)).toBe(true);
+	});
+
+	it("TOCTOU: a machine row that appears between planning and apply saves an orphan VM", async () => {
+		const w = await createWorld(db);
+		w.infra.addVm({ vmid: 557 });
+		await seenLongAgo(w);
+		hookInfra(w, {
+			status: async (_n, next) => {
+				await insertMachine(w, { state: "booting", vmid: 557 });
+				return next();
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["orphan_vm", "vm:557"]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.callsOf("delete")).toEqual([]);
+	});
+
+	it("TOCTOU: a snapshot row that appears between planning and apply saves its LVs", async () => {
+		const w = await createWorld(db);
+		const lvId = "abcdef0123456789abcdef0123456789";
+		const lv = w.infra.addSnapshotLvs(lvId);
+		await seenLongAgo(w);
+		hookInfra(w, {
+			listVms: async (n, next) => {
+				// The second list is the apply's re-check.
+				if (n === 2) {
+					await w.pool.query(
+						`INSERT INTO runtime.snapshots
+						   (id, kind, team_id, provider_id, node_id, storage_id, template_build_id, lv_id, state)
+						 VALUES ($1, 'saved', $2, $3, $4, $5, $6, $7, 'creating')`,
+						[
+							randomUUID(),
+							randomUUID(),
+							w.topo.providerId,
+							w.topo.nodeId,
+							w.topo.storageId,
+							w.topo.templateBuildId,
+							lvId,
+						],
+					);
+				}
+				return next();
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["orphan_lv", `lv:${lv}`]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.callsOf("removeLvs")).toEqual([]);
+		expect(w.infra.lvs.has(lv)).toBe(true);
+	});
+
+	it("TOCTOU: machine_lost with a concurrent version bump is skipped", async () => {
+		const w = await createWorld(db);
+		const r = await readySandbox(w, opsEnv(w));
+		const vmid = (await row(w, "machines", r.machineId)).vmid as number;
+		w.infra.vms.delete(vmid);
+		hookInfra(w, {
+			status: async (_n, next) => {
+				await setRow(w, "machines", r.machineId, "version = version + 1");
+				return next();
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([
+			["machine_lost", `machine:${r.machineId}`],
+		]);
+		expect(actions[0]?.applied).toBe(false);
+		expect((await row(w, "machines", r.machineId)).state).toBe("running");
+		expect((await row(w, "sandboxes", r.sandboxId)).state).toBe("ready");
+	});
+
+	it("power_drift: no hard stop after a shutdown timeout when the machine changed meanwhile", async () => {
+		const w = await createWorld(db);
+		const r = await stoppedSandbox(w, opsEnv(w));
+		const vmid = (await row(w, "machines", r.machineId)).vmid as number;
+		const vm = w.infra.vms.get(vmid);
+		if (!vm) throw new Error("no VM");
+		vm.status = "running";
+		const stops = w.infra.callsOf("stop").length;
+		hookInfra(w, {
+			shutdown: async () => {
+				// A resume took the machine while the guest ignored the shutdown.
+				await setRow(
+					w,
+					"machines",
+					r.machineId,
+					"state = 'starting', version = version + 1",
+				);
+				return "timeout";
+			},
+		});
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["power_drift", `machine:${r.machineId}`]]);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.callsOf("stop").length).toBe(stops);
+		expect(vm.status).toBe("running");
+	});
+
 	it("machine running, VM stopped: first time a system resume, second time within the hour stopped unexpected_shutdown", async () => {
 		const w = await createWorld(db);
 		const r = await readySandbox(w, opsEnv(w));
@@ -271,7 +508,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		]);
 		const m = await row(w, "machines", r.machineId);
 		expect(m.state).toBe("failed");
-		expect(m.error_code).toBe("lost");
+		expect(m.error_code).toBe("machine_lost");
 		const s = await row(w, "sandboxes", r.sandboxId);
 		expect(s.state).toBe("error");
 		expect(s.error_code).toBe("machine_lost");
@@ -519,8 +756,9 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		w.infra.addVm({ vmid: 561 });
 		await seenLongAgo(w);
 		// Scope the controller to this world's provider: other worlds share the database.
-		await w.pool.query(
-			"UPDATE runtime.providers SET state = 'disabled' WHERE id <> $1",
+		const disabled = await w.pool.query<{ id: string }>(
+			`UPDATE runtime.providers SET state = 'disabled'
+			 WHERE id <> $1 AND state <> 'disabled' RETURNING id`,
 			[w.topo.providerId],
 		);
 		try {
@@ -530,7 +768,8 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 			expect(w.infra.vms.has(561)).toBe(false);
 		} finally {
 			await w.pool.query(
-				"UPDATE runtime.providers SET state = 'active' WHERE state = 'disabled'",
+				"UPDATE runtime.providers SET state = 'active' WHERE id = ANY($1::uuid[])",
+				[disabled.rows.map((x) => x.id)],
 			);
 		}
 	});

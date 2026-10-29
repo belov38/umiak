@@ -22,9 +22,12 @@ import type { InfraLv, InfraVm, NodeInfra } from "../ports.ts";
 // template VMID is ever deleted. LVs are only ever touched with the `sbx` tag.
 //
 // Grace: S1 lists carry no creation time, so `runtime.reconcile_seen` keeps
-// the first sighting of every eligible VM and LV (rows of objects no longer
-// listed are deleted). An orphan VM or LV is removed only when it was first
-// seen more than 10 min ago AND the database still says it is ours to remove.
+// the first sighting of every VM and LV as an orphan CANDIDATE (guarded and
+// unclaimed by the database at that moment). Rows of claimed or vanished
+// objects are deleted, and so is the row of an applied delete, so a reused
+// VMID or LV name starts its grace again. An orphan VM or LV is removed only
+// when it has been a candidate for more than 10 min AND the database still
+// says it is ours to remove.
 // The tracking is updated in dry run too: it is an observation, not a repair,
 // so switching dry run off acts on objects already seen for 10 min.
 //
@@ -40,7 +43,9 @@ import type { InfraLv, InfraVm, NodeInfra } from "../ports.ts";
 //
 // Metrics: `sbx_reconcile_actions_total{kind, mode}` with mode
 // applied | skipped | failed | dry_run (kinds include the §11.2 names
-// orphan_vm, orphan_lv, power_drift); `sbx_reconcile_failed_total{part}`.
+// orphan_vm, orphan_lv, power_drift); `sbx_reconcile_failed_total{part}`;
+// `sbx_reconcile_skipped_total{reason}` when a guard refused a VM
+// (not_in_pool | no_sbx_tag | template).
 
 /** Age before an orphan VM or LV may be removed, and a releasing lease retried (§11.2). */
 export const RECONCILE_GRACE_S = 600;
@@ -415,7 +420,13 @@ async function lvOrphanReason(
 	return null;
 }
 
-/** Upserts the sightings, drops the vanished ones, returns the names older than the grace. */
+/**
+ * Grace bookkeeping of orphan candidates: upserts the names that are orphan
+ * candidates now, drops every other row of this node (claimed or vanished
+ * objects), returns the candidates first seen longer than the grace ago. A
+ * VMID or LV name that was claimed in between, or reused after an applied
+ * delete (see `forgetSeen`), starts its grace again.
+ */
 async function trackSeen(
 	pool: pg.Pool,
 	providerId: string,
@@ -444,6 +455,18 @@ async function trackSeen(
 		);
 	});
 	return new Set(r.rows.map((x) => x.name));
+}
+
+async function forgetSeen(
+	q: Queryable,
+	providerId: string,
+	kind: "vm" | "lv",
+	name: string,
+): Promise<void> {
+	await q.query(
+		"DELETE FROM runtime.reconcile_seen WHERE provider_id = $1 AND kind = $2 AND name = $3",
+		[providerId, kind, name],
+	);
 }
 
 async function planNode(
@@ -517,44 +540,52 @@ async function planNode(
 		}
 	}
 
-	// Orphan VMs.
-	const eligible = vms.filter((v) => vmEligible(v, range, ev.templates));
-	const vmPrefix = `${nodeId}/`;
+	// Orphan VMs: guarded, unclaimed now, and an unclaimed candidate for the grace.
+	const prefix = `${nodeId}/`;
+	const vmCandidates = vms.filter(
+		(v) => vmEligible(v, range, ev.templates) && !vmidClaimed(ev, v.vmid),
+	);
 	const oldVms = await trackSeen(
 		ctx.pool,
 		provider.id,
 		"vm",
-		vmPrefix,
-		eligible.map((v) => `${vmPrefix}${v.vmid}`),
+		prefix,
+		vmCandidates.map((v) => `${prefix}${v.vmid}`),
 	);
-	for (const vm of eligible) {
-		if (!oldVms.has(`${vmPrefix}${vm.vmid}`)) continue;
-		if (vmidClaimed(ev, vm.vmid)) continue;
+	for (const vm of vmCandidates) {
+		const name = `${prefix}${vm.vmid}`;
+		if (!oldVms.has(name)) continue;
 		plans.push({
 			action: { ...base, kind: "orphan_vm", target: `vm:${vm.vmid}` },
 			apply: async () => {
+				// Infra first, evidence last: a row written meanwhile is seen.
+				if ((await infra.status(vm.vmid)) === "missing") return false;
 				const fresh = await loadEvidence(ctx.pool, provider.id, infra);
 				if (vmidClaimed(fresh, vm.vmid)) return false;
 				await infra.delete(vm.vmid);
+				await forgetSeen(ctx.pool, provider.id, "vm", name);
 				return true;
 			},
 		});
 	}
 
-	// Orphan LVs.
-	const tagged = lvs.filter((l) => l.tags.includes(SBX_TAG));
+	// Orphan LVs: `sbx` tag, an orphan reason now, and the grace as a candidate.
+	const vmids = new Set(vms.map((v) => v.vmid));
+	const lvCandidates: { lv: InfraLv; reason: string }[] = [];
+	for (const lv of lvs) {
+		const reason = await lvOrphanReason(ctx.pool, lv, ev, vmids, range);
+		if (reason !== null) lvCandidates.push({ lv, reason });
+	}
 	const oldLvs = await trackSeen(
 		ctx.pool,
 		provider.id,
 		"lv",
-		vmPrefix,
-		tagged.map((l) => `${vmPrefix}${l.name}`),
+		prefix,
+		lvCandidates.map((c) => `${prefix}${c.lv.name}`),
 	);
-	const vmids = new Set(vms.map((v) => v.vmid));
-	for (const lv of tagged) {
-		if (!oldLvs.has(`${vmPrefix}${lv.name}`)) continue;
-		const reason = await lvOrphanReason(ctx.pool, lv, ev, vmids, range);
-		if (reason === null) continue;
+	for (const { lv, reason } of lvCandidates) {
+		const name = `${prefix}${lv.name}`;
+		if (!oldLvs.has(name)) continue;
 		plans.push({
 			action: {
 				...base,
@@ -563,13 +594,15 @@ async function planNode(
 				detail: reason,
 			},
 			apply: async () => {
-				const fresh = await loadEvidence(ctx.pool, provider.id, infra);
+				// Infra first, evidence last: a row written meanwhile is seen.
 				const nowVmids = new Set((await infra.listVms()).map((v) => v.vmid));
+				const fresh = await loadEvidence(ctx.pool, provider.id, infra);
 				if (
 					(await lvOrphanReason(ctx.pool, lv, fresh, nowVmids, range)) === null
 				)
 					return false;
 				await infra.removeLvs([lv.name]);
+				await forgetSeen(ctx.pool, provider.id, "lv", name);
 				return true;
 			},
 		});
@@ -608,7 +641,8 @@ async function commandsLost(tx: Tx, machineId: string): Promise<void> {
 }
 
 /**
- * §6.1 `machine_lost`: machine `failed` (`lost`), the sandbox whose current
+ * §6.1 `machine_lost`: machine `failed` (`machine_lost`, as a step that
+ * finds the VM gone), the sandbox whose current
  * machine it is → `error machine_lost` (kept for diagnostics; only delete is
  * allowed). A pool machine goes on to `deleting` with a delete job (§6.2).
  * Lock order: sandbox row, then the machine row (the conditional UPDATE).
@@ -622,7 +656,7 @@ async function applyLost(ctx: WorkerCtx, m: MachineSnap): Promise<boolean> {
 		}
 		const u = await tx.client.query(
 			`UPDATE runtime.machines
-			 SET state = 'failed', error_code = 'lost', error_detail = $4,
+			 SET state = 'failed', error_code = 'machine_lost', error_detail = $4,
 			     power_observed = 'stopped', power_observed_at = now(),
 			     state_changed_at = now(), version = version + 1
 			 WHERE id = $1 AND state = $2 AND version = $3`,
@@ -750,7 +784,11 @@ async function applyPowerDrift(
 		vmid,
 		ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S,
 	);
-	if (res === "timeout") await infra.stop(vmid);
+	if (res === "timeout") {
+		// The guest ignored the shutdown; hard stop only if nothing took the machine meanwhile.
+		if (!(await machineUnchanged(ctx.pool, m))) return false;
+		await infra.stop(vmid);
+	}
 	await ctx.pool.query(
 		`UPDATE runtime.machines SET power_observed = 'stopped', power_observed_at = now()
 		 WHERE id = $1 AND state = 'stopped'`,
@@ -763,9 +801,39 @@ async function applyPowerDrift(
 // Per provider: leases, jobs, retired credentials
 
 /**
+ * Why a VM must not be touched by a lease retry, or null. No VM is fine (the
+ * S1 delete then only frees the lease and removes the LVs tagged
+ * `sbx-vm-N`); a present VM must pass the §2 guards like an orphan.
+ */
+function leaseVmUnsafe(
+	vms: InfraVm[],
+	vmid: number,
+	templates: Set<number>,
+): string | null {
+	if (templates.has(vmid)) return "template";
+	const vm = vms.find((v) => v.vmid === vmid);
+	if (vm === undefined) return null;
+	if (vm.pool !== SANDBOX_POOL) return "not_in_pool";
+	if (!vm.tags.includes(SBX_TAG)) return "no_sbx_tag";
+	return null;
+}
+
+function countSkip(
+	ctx: WorkerCtx,
+	reason: string,
+	fields: Record<string, unknown>,
+): void {
+	ctx.metrics.inc("sbx_reconcile_skipped_total", { reason });
+	ctx.log.warn({ ...fields, reason }, "reconcile: refusing to touch a VM");
+}
+
+/**
  * §6.4 p. 5: a `releasing` lease older than the grace (its delete died
  * midway). S1 delete again; the verified delete frees the lease. The VM of a
- * lease lives on its owner's node (else the provider's first node).
+ * lease lives on its owner's node (else the provider's first node). S1
+ * delete stops and purges whatever VM has the VMID, so the VM (if any) must
+ * be in pool `sandbox`, tagged `sbx` and not a template, at planning and
+ * again right before the delete.
  */
 async function planLeases(
 	ctx: WorkerCtx,
@@ -783,12 +851,28 @@ async function planLeases(
 		[provider.id, RECONCILE_GRACE_S],
 	);
 	const plans: Plan[] = [];
+	const nodes = new Map<
+		string,
+		{ infra: NodeInfra; vms: InfraVm[]; templates: Set<number> }
+	>();
 	for (const { vmid, node_id } of r.rows) {
 		if (node_id === null) continue;
-		const infra = await ctx.infra.forNode(node_id);
+		let n = nodes.get(node_id);
+		if (n === undefined) {
+			const infra = await ctx.infra.forNode(node_id);
+			const vms = await infra.listVms();
+			const ev = await loadEvidence(ctx.pool, provider.id, infra);
+			n = { infra, vms, templates: ev.templates };
+			nodes.set(node_id, n);
+		}
+		const { infra } = n;
 		const range = rangeOf(provider, infra);
 		if (vmid < range.min || vmid > range.max) continue;
-		if (infra.templateVmids.includes(vmid)) continue;
+		const unsafe = leaseVmUnsafe(n.vms, vmid, n.templates);
+		if (unsafe !== null) {
+			countSkip(ctx, unsafe, { kind: "lease_release", vmid, nodeId: node_id });
+			continue;
+		}
 		plans.push({
 			action: {
 				kind: "lease_release",
@@ -798,6 +882,13 @@ async function planLeases(
 				nodeId: node_id,
 			},
 			apply: async () => {
+				const vms = await infra.listVms();
+				const ev = await loadEvidence(ctx.pool, provider.id, infra);
+				const why = leaseVmUnsafe(vms, vmid, ev.templates);
+				if (why !== null) {
+					countSkip(ctx, why, { kind: "lease_release", vmid, nodeId: node_id });
+					return false;
+				}
 				const still = await ctx.pool.query(
 					`SELECT 1 FROM runtime.vmid_leases
 					 WHERE provider_id = $1 AND vmid = $2 AND state = 'releasing'`,
