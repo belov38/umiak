@@ -103,6 +103,7 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
   - The gateway accepts callers from `SBX_GATEWAY_SERVICE_TOKENS_FILE`, JSON `{"api":[..],"worker":[..],"gateway":[..]}`, the same shape as S7's `SBX_API_SERVICE_TOKENS_FILE`. It sends `tokens["gateway"][0]` to peers.
   - It calls `api` with `SBX_GATEWAY_API_TOKEN_FILE`.
   - The cookie keys env is `SBX_GATEWAY_COOKIE_KEYS_FILE` (§16.2; §8.2 says `SBX_GATEWAY_COOKIE_KEYS`).
+  - The login CA keys env is `SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE`, a file in authorized_keys format (§9.2 and §16.2 say `SBX_GATEWAY_SSH_LOGIN_CA_KEYS`).
 - **Database URL:** `SBX_GATEWAY_DATABASE_URL`, falling back to `DATABASE_URL`, which the compose `*db-env` anchor sets.
 - **State cookie:** `__Host-sbx_state_<first 8 chars of state>`, one per login in flight, so parallel SSO logins on one label (tabs, session restore) do not overwrite each other. It uses the auth cookie codec with a distinct version tag `v1s`: an auth cookie can never be accepted as a state cookie, and vice versa. The callback reads the cookie of its own state; a callback without one is `401` and is not counted as an auth failure (only a mismatching state cookie or a failed code exchange is). The strip removes every `__Host-sbx_state*` cookie.
 - **SSH auth-failure limit:** counted per failed connection (no successful auth before the handshake ends), not per offered key. Clients with many agent keys would otherwise trip it at once.
@@ -125,7 +126,8 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
   - `serve` also requires `SBX_GATEWAY_SBX_DOMAIN`, `SBX_GATEWAY_TUNNEL_HOST`, the database URL and an `http(s)` `SBX_GATEWAY_INTERNAL_URL` (`config.ValidateServe`). `check-config` runs the same checks.
   - Two drain knobs for local runs and tests: `SBX_GATEWAY_ENDPOINT_WAIT` (default 5 s, `Timing.EndpointWait`) and `SBX_GATEWAY_DRAIN_TIMEOUT` (default `server.DrainBudget` + 30 s = 950 s). A second SIGTERM/SIGINT cancels the drain and exits with status 1 within 5 s.
   - `sbx-gateway healthcheck [-url]` exists because the distroless image has no shell or curl.
-  - `sbx-gateway dev-secrets` creates the local secrets (`internal/devsecrets`): a dev CA name-constrained to the stack's names, 397-day leaf certificates, `-owner`/`-worker-owner` to hand the files to the container users.
+  - `sbx-gateway dev-secrets` creates the local secrets (`internal/devsecrets`): a dev CA name-constrained to the stack's names, and 397-day leaf certificates. The derived `login-ca-keys` and `worker-gateway-token` are rewritten when they differ from their source. `-owner`/`-worker-owner` hand every file of the set, existing ones included, to the container users.
+  - A SIGTERM during startup is not lost: `Instance.Drain` before `Run` waits for Run to serve (bounded by its ctx; nil if Run returned without serving), and the tunnel drain waits for the registration. `serve` stops Run when the drain fails. Every wait for Run also listens for a second signal, and is bounded (30 s after a drain, 5 s after a forced stop). A forced exit does not wait for the database pool.
   - Image: `golang:1.27.3-trixie` → `gcr.io/distroless/static-debian13:nonroot` (debian13 is the current distroless base). The build runs with `GOWORK=off` through the module's `replace` directives. `services/gateway/Dockerfile.dockerignore` replaces the root `.dockerignore`, which excludes `services/`.
   - Compose: `deploy/compose/gateway.yaml` works with `-f` or `include:`. It also extends `worker` with `SBX_GATEWAY_SERVICE_TOKEN_FILE` and mounts the secrets directory read-only, not the token file: Docker would create a missing file source as a directory. Host ports are overridable (`GATEWAY_HTTPS_PORT` and others); browsers need `GATEWAY_HTTPS_PORT=443`, since a Host with a port does not route.
 - **Not in this thread:**
@@ -138,7 +140,7 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
 - **S3 (guest agent):** a failed TCP dial must return an error that wraps `syscall.ECONNREFUSED` (Windows: `WSAECONNREFUSED`) or a timeout `net.Error`. `libs/tunnel` turns it into `502` with `Sbx-Dial-Error: refused|timeout`, and the gateway maps that to `502 app_not_listening` / `504 app_timeout`. The S3 §12 header `Sbx-Error: connection_refused` is replaced by it.
 - **S6 (control plane):**
   - Sandbox states as in S7 O3: `ready` proxies; `creating`/`starting` → `503 sandbox_starting`; `stopping`/`stopped` → `503 sandbox_stopped`; `deleting`/`deleted` → `404`. `running`/`resuming` are accepted as aliases.
-  - The `sbx_routes` triggers send the slug as the payload, the old and the new slug on a rename, and `*` to flush every route (the global `public` switch).
+  - `sbx_routes` is a contract S6 must implement, not a change: it is already in spec §6.2. The S6 triggers in main send the slug (old and new on a rename). Nobody sends `*` yet; S8 must send it for the global `public` switch, which flushes every route.
 - **S7 (api):**
   - Route response: the optional `kind` (`port` by default, `desktop`).
   - `ssh/authorize` answers `teamId` in public format, and accepts `"recheck": true` (identity check without the certificate validity).
@@ -150,6 +152,7 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
   - `terminationGracePeriodSeconds: 960`; the process bounds its drain at 950 s.
   - Ports: 8443 TLS (SNI `*.<sbx domain>` and the tunnel host), 2222 SSH, 7000 internal, 9090 metrics/health.
   - Only PROXY protocol v2 is accepted (`SBX_GATEWAY_PROXY_PROTOCOL=v2`, from `SBX_GATEWAY_PROXY_PROTOCOL_CIDRS`).
+  - Env names that differ from the spec text: `SBX_GATEWAY_COOKIE_KEYS_FILE` (§8.2: `SBX_GATEWAY_COOKIE_KEYS`) and `SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE` (§9.2, §16.2: `SBX_GATEWAY_SSH_LOGIN_CA_KEYS`); both name files. `SBX_GATEWAY_API_URL` is required (`none` for the dev mode).
   - Readiness: `/readyz` is 200 while the tunnel gateway runs, the instance does not drain and the certificates are loaded; Postgres and `api` health do not count (§12.3). `/healthz` is liveness only.
 
 ---

@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -218,4 +219,78 @@ func TestRoutesFlushOnListenReconnect(t *testing.T) {
 		t.Fatalf("terminate listener: killed=%d err=%v", killed, err)
 	}
 	eventually(t, 10*time.Second, "cache flush after LISTEN reconnect", func() bool { return inst.Routes().Len() == 0 })
+}
+
+// A Drain that comes before Run (SIGTERM during startup) waits for Run,
+// drains as usual and lets Run return; it never leaves Run serving.
+func TestDrainBeforeRun(t *testing.T) {
+	env := testenv.New(t, testenv.Options{})
+	inst, err := server.New(env.InstanceConfig("gw-early-drain", "http://127.0.0.1:1"), env.Deps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		drainDone <- inst.Drain(ctx)
+	}()
+	time.Sleep(100 * time.Millisecond) // the drain is waiting for Run
+	select {
+	case err := <-drainDone:
+		t.Fatalf("Drain returned before Run: %v", err)
+	default:
+	}
+
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDone := make(chan error, 1)
+	go func() { runDone <- inst.Run(context.Background(), server.Listeners{Metrics: ln}) }()
+	for name, ch := range map[string]chan error{"Drain": drainDone, "Run": runDone} {
+		select {
+		case err := <-ch:
+			if err != nil {
+				t.Fatalf("%s = %v", name, err)
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatalf("%s did not return", name)
+		}
+	}
+}
+
+// A Drain before Run ends with its ctx when Run never comes, and returns
+// nil at once when Run already returned without serving.
+func TestDrainBeforeRunBounded(t *testing.T) {
+	env := testenv.New(t, testenv.Options{})
+	inst, err := server.New(env.InstanceConfig("gw-no-run", "http://127.0.0.1:1"), env.Deps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := inst.Drain(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Drain without Run = %v, want the ctx error", err)
+	}
+
+	// Run fails at once: TLS on without certificate files.
+	cfg := env.InstanceConfig("gw-bad-tls", "http://127.0.0.1:1")
+	cfg.SbxCertFile, cfg.SbxKeyFile = "/nonexistent.pem", "/nonexistent.key"
+	inst, err = server.New(cfg, env.Deps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inst.Run(context.Background(), server.Listeners{TLS: ln}); err == nil {
+		t.Fatal("Run without certificates succeeded")
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	if err := inst.Drain(ctx2); err != nil {
+		t.Fatalf("Drain after a failed Run = %v, want nil", err)
+	}
 }

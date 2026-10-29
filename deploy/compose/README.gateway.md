@@ -51,6 +51,8 @@ curl -s http://127.0.0.1:9190/metrics | grep '^sbx_gateway' | head
 
 `gateway-secrets` запускает `sbx-gateway dev-secrets -dir /secrets`. Каталог `deploy/compose/secrets/`
 в `.gitignore`. Команда создаёт только отсутствующие файлы, поэтому её можно запускать на каждом `up`.
+Исключение — два производных файла: `login-ca-keys` (из `ssh_login_ca`) и `worker-gateway-token`
+(из `service-tokens.json`). Их команда переписывает, если они разошлись с источником.
 
 | Файл | Права | Назначение |
 |---|---|---|
@@ -67,7 +69,8 @@ curl -s http://127.0.0.1:9190/metrics | grep '^sbx_gateway' | head
 | `worker-gateway-token` | 600 | равен `service-tokens.json` → `worker[0]`. Worker читает его через `SBX_GATEWAY_SERVICE_TOKEN_FILE` |
 
 Владельцы. `gateway-secrets` работает от root и отдаёт файлы пользователю gateway (distroless `nonroot`, 65532),
-а `worker-gateway-token` — пользователю worker (`node`, 1000). В Docker Desktop это не видно: на хосте файлы
+а `worker-gateway-token` — пользователю worker (`node`, 1000). Это делается на каждом запуске и для уже
+существующих файлов. В Docker Desktop это не видно: на хосте файлы
 принадлежат вам. На Linux-хосте закрытые файлы после этого читает только root. Если каталога нет, Docker создаст его
 от root. Чтобы каталог остался вашим и файлы можно было удалять без `sudo`, создайте его заранее:
 

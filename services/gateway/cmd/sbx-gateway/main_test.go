@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/devsecrets"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -125,7 +126,7 @@ func TestMainServeSmoke(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "ca.pem") {
 		t.Fatalf("dev-secrets: code %d\nstdout: %s\nstderr: %s", code, out, errOut)
 	}
-	if out, _, code := runBin(t, bin, cleanEnv(), "dev-secrets", "-dir", dir); code != 0 || strings.Contains(out, "created") {
+	if out, _, code := runBin(t, bin, cleanEnv(), "dev-secrets", "-dir", dir); code != 0 || strings.Contains(out, "wrote") {
 		t.Fatalf("second dev-secrets: code %d, stdout %q", code, out)
 	}
 
@@ -369,5 +370,96 @@ func TestMainServeConfigErrors(t *testing.T) {
 	}
 	if _, errOut, code := runBin(t, bin, base, "bogus"); code != 2 || !strings.Contains(errOut, "usage") {
 		t.Fatalf("unknown command: code %d, stderr %s", code, errOut)
+	}
+}
+
+// getenvOf turns KEY=VALUE pairs into a getenv function.
+func getenvOf(env []string) func(string) string {
+	m := map[string]string{}
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
+	return func(k string) string { return m[k] }
+}
+
+// startupEnv prepares dev secrets and a database for an in-process serve
+// without the TLS and SSH listeners.
+func startupEnv(t *testing.T) []string {
+	t.Helper()
+	_, dsn := pgtest.New(t)
+	dir := t.TempDir()
+	if _, err := devsecrets.Generate(devsecrets.Options{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	return append(serveEnv(dsn, dir, freePort(t), freePort(t)),
+		"SBX_GATEWAY_TLS_LISTEN=off",
+		"SBX_GATEWAY_SSH_LISTEN=off",
+		"SBX_GATEWAY_ENDPOINT_WAIT=100ms",
+		"SBX_GATEWAY_DRAIN_TIMEOUT=10s",
+	)
+}
+
+func serveAsync(o serveOptions) <-chan int {
+	done := make(chan int, 1)
+	go func() { done <- serveWith(o) }()
+	return done
+}
+
+func waitCode(t *testing.T, done <-chan int, timeout time.Duration, stderr *syncBuffer) int {
+	t.Helper()
+	select {
+	case code := <-done:
+		return code
+	case <-time.After(timeout):
+		t.Fatalf("serve did not return within %s; log:\n%s", timeout, stderr.String())
+		return 0
+	}
+}
+
+// A SIGTERM that arrives before Run started (it was queued during the
+// setup) drains once Run is up, and the process exits 0.
+func TestServeSignalBeforeRun(t *testing.T) {
+	env := startupEnv(t)
+	sigs := make(chan os.Signal, 2)
+	sigs <- syscall.SIGTERM
+	var stdout, stderr syncBuffer
+	done := serveAsync(serveOptions{
+		getenv: getenvOf(env), sigs: sigs, stdout: &stdout, stderr: &stderr,
+		beforeRun: func() { time.Sleep(500 * time.Millisecond) },
+	})
+	if code := waitCode(t, done, 15*time.Second, &stderr); code != 0 {
+		t.Fatalf("exit %d, want 0; log:\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "exiting after a clean drain") {
+		t.Fatalf("log lacks the clean drain:\n%s", stderr.String())
+	}
+}
+
+// A second signal while the drain still waits for Run's startup stops the
+// process at once with status 1.
+func TestServeSecondSignalDuringStartup(t *testing.T) {
+	env := startupEnv(t)
+	sigs := make(chan os.Signal, 2)
+	sigs <- syscall.SIGTERM
+	var stdout, stderr syncBuffer
+	start := time.Now()
+	done := serveAsync(serveOptions{
+		getenv: getenvOf(env), sigs: sigs, stdout: &stdout, stderr: &stderr,
+		beforeRun: func() {
+			sigs <- syscall.SIGINT
+			time.Sleep(time.Second)
+		},
+	})
+	if code := waitCode(t, done, 10*time.Second, &stderr); code != 1 {
+		t.Fatalf("exit %d, want 1; log:\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "second signal") {
+		t.Fatalf("log lacks the forced stop:\n%s", stderr.String())
+	}
+	// forcedStopWait bounds the exit after the second signal.
+	if took := time.Since(start); took > forcedStopWait+3*time.Second {
+		t.Fatalf("took %s", took)
 	}
 }

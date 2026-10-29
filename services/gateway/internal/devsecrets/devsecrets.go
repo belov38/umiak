@@ -5,6 +5,7 @@
 package devsecrets
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -98,9 +99,14 @@ type Options struct {
 	Now func() time.Time
 }
 
-// Generate creates the missing files of the set and returns their names.
-// Existing files are never changed. A key pair with one half missing is an
-// error naming the missing file: a new half would not match the old one.
+// Generate creates the missing files of the set and returns the names of
+// the files it wrote. Existing keys, certificates and tokens are never
+// changed. The two derived files, login-ca-keys (from ssh_login_ca) and
+// worker-gateway-token (from service-tokens.json), are rewritten whenever
+// they differ from their source, so a recreated source never leaves them
+// stale. A key pair with one half missing is an error naming the missing
+// file: a new half would not match the old one. With Owner or WorkerOwner
+// set, existing files of the set are handed to them too.
 func Generate(o Options) ([]string, error) {
 	if o.Dir == "" {
 		return nil, errors.New("devsecrets: no directory")
@@ -128,10 +134,11 @@ func Generate(o Options) ([]string, error) {
 		func() error { return g.sshKey(FileHostECDSA, ecdsaKey, "sbx-gateway@"+o.SSHHost) },
 		func() error { return g.sshKey(FileUserCA, ed25519Key, "sbx-gateway user CA") },
 		func() error { return g.sshKey(FileLoginCA, ed25519Key, "sbx login CA") },
-		func() error { return g.once(FileLoginCAKeys, modePublic, g.loginCAKeys) },
+		func() error { return g.derived(FileLoginCAKeys, modePublic, g.loginCAKeys) },
 		func() error { return g.once(FileServiceTokens, modeSecret, serviceTokens) },
 		func() error { return g.once(FileAPIToken, modeSecret, tokenFile) },
-		func() error { return g.once(FileWorkerGWToken, modeSecret, g.workerToken) },
+		func() error { return g.derived(FileWorkerGWToken, modeSecret, g.workerToken) },
+		g.chownAll,
 	}
 	for _, s := range steps {
 		if err := s(); err != nil {
@@ -139,6 +146,50 @@ func Generate(o Options) ([]string, error) {
 		}
 	}
 	return g.created, nil
+}
+
+// allFiles are the files of the set, for chownAll.
+var allFiles = []string{
+	FileCACert, FileCAKey, FileSbxCert, FileSbxKey, FileTunnelCert, FileTunnelKey,
+	FileCookieKeys,
+	FileHostEd25519, FileHostEd25519 + ".pub", FileHostECDSA, FileHostECDSA + ".pub",
+	FileUserCA, FileUserCA + ".pub", FileLoginCA, FileLoginCA + ".pub", FileLoginCAKeys,
+	FileServiceTokens, FileAPIToken, FileWorkerGWToken,
+}
+
+// lchown changes the owner of a file; tests replace it.
+var lchown = os.Lchown
+
+// owner returns the owner of name: WorkerOwner for the worker token when
+// set, else Owner.
+func (g *gen) owner(name string) *Owner {
+	if name == FileWorkerGWToken && g.o.WorkerOwner != nil {
+		return g.o.WorkerOwner
+	}
+	return g.o.Owner
+}
+
+// chownAll hands every existing file of the set to its owner, so files
+// created by an earlier run (or as another user) are readable by the
+// configured users too.
+func (g *gen) chownAll() error {
+	for _, name := range allFiles {
+		o := g.owner(name)
+		if o == nil {
+			continue
+		}
+		ok, err := g.exists(name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := lchown(g.path(name), o.UID, o.GID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type gen struct {
@@ -196,7 +247,24 @@ func (g *gen) once(name string, mode fs.FileMode, content func() ([]byte, error)
 	return g.write(name, data, mode)
 }
 
-// write creates name through a temporary file, so a crash never leaves a
+// derived writes name with the output of content when the file is missing
+// or its content differs.
+func (g *gen) derived(name string, mode fs.FileMode, content func() ([]byte, error)) error {
+	data, err := content()
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	cur, err := os.ReadFile(g.path(name))
+	switch {
+	case err == nil && bytes.Equal(cur, data):
+		return nil
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+	return g.write(name, data, mode)
+}
+
+// write creates (or replaces) name through a temporary file, so a crash never leaves a
 // partial file that a later run would keep.
 func (g *gen) write(name string, data []byte, mode fs.FileMode) error {
 	f, err := os.CreateTemp(g.o.Dir, "."+name+".tmp-*")
@@ -217,11 +285,7 @@ func (g *gen) write(name string, data []byte, mode fs.FileMode) error {
 	if err := f.Chmod(mode); err != nil {
 		return err
 	}
-	owner := g.o.Owner
-	if name == FileWorkerGWToken && g.o.WorkerOwner != nil {
-		owner = g.o.WorkerOwner
-	}
-	if owner != nil {
+	if owner := g.owner(name); owner != nil {
 		if err := f.Chown(owner.UID, owner.GID); err != nil {
 			return err
 		}

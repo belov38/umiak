@@ -140,6 +140,12 @@ type Instance struct {
 	drainStarted  atomic.Bool
 	drained       chan struct{} // closed when Drain finished
 	drainErr      error         // written before drained is closed
+	// runStarted is closed once Run serves its listeners; runEnded when Run
+	// returned; tunnelExited when the tunnel gateway's Run returned. Drain
+	// waits on them, so a drain requested during startup is not lost.
+	runStarted   chan struct{}
+	runEnded     chan struct{}
+	tunnelExited chan struct{}
 	// disp is the TLS dispatcher once Run built it; Drain closes it.
 	disp atomic.Pointer[edge.Dispatcher]
 
@@ -186,6 +192,10 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		store:      registry.New(deps.Pool),
 		pingEvery:  pingInterval,
 		drained:    make(chan struct{}),
+
+		runStarted:   make(chan struct{}),
+		runEnded:     make(chan struct{}),
+		tunnelExited: make(chan struct{}),
 	}
 	i.reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	i.metrics = obs.NewMetrics(i.reg)
@@ -513,6 +523,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	if !i.started.CompareAndSwap(false, true) {
 		return errors.New("server: Run called twice")
 	}
+	defer close(i.runEnded)
 	var disp *edge.Dispatcher
 	var certs []*edge.CertSource
 	if ls.TLS != nil {
@@ -530,7 +541,10 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	defer cancel()
 
 	tunnelDone := make(chan error, 1)
-	go func() { tunnelDone <- i.tunnel.Run(runCtx) }()
+	go func() {
+		defer close(i.tunnelExited)
+		tunnelDone <- i.tunnel.Run(runCtx)
+	}()
 
 	var wg sync.WaitGroup
 	fatal := make(chan error, 8) // at most one per server
@@ -584,6 +598,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	}
 	wg.Go(func() { i.pingLoop(runCtx) })
 	wg.Go(func() { i.limits.Run(runCtx) })
+	close(i.runStarted)
 
 	var err error
 	tunnelExited := false

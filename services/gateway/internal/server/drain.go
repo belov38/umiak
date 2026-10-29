@@ -73,10 +73,18 @@ func orDefault(v, def time.Duration) time.Duration {
 //
 // When ctx ends first, everything is closed and ctx's error is returned.
 // Run returns once Drain finished. Drain is idempotent: later calls wait
-// for the first one (or their own ctx). Run must have been started.
+// for the first one (or their own ctx).
+//
+// A Drain that comes before Run (a signal during startup) waits until Run
+// serves, then drains as usual; it returns ctx's error if ctx ends first,
+// and nil if Run returned without serving (nothing to drain).
 func (i *Instance) Drain(ctx context.Context) error {
-	if !i.started.Load() {
-		return errors.New("server: Drain called before Run")
+	select {
+	case <-i.runStarted:
+	case <-i.runEnded:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	if !i.drainStarted.CompareAndSwap(false, true) {
 		select {
@@ -99,7 +107,7 @@ func (i *Instance) drain(ctx context.Context) error {
 	defer stopGauge()
 
 	tunnelDone := make(chan error, 1)
-	go func() { tunnelDone <- i.tunnel.Drain(ctx) }()
+	go func() { tunnelDone <- i.drainTunnel(ctx) }()
 	if i.ssh != nil {
 		// The SSH deadlines run on the sshgw clock (Deps.Now).
 		i.ssh.Drain(i.deps.Now())
@@ -154,6 +162,23 @@ func (i *Instance) drain(ctx context.Context) error {
 	}
 	i.log.Info("gateway: instance drain finished", "took", time.Since(t0), "err", err)
 	return err
+}
+
+// drainTunnel drains the tunnel gateway once it is registered. Run starts
+// it on its own goroutine, so a drain right after startup waits for the
+// registration; a tunnel gateway that stopped (or never registered before
+// ctx ended) has nothing to drain.
+func (i *Instance) drainTunnel(ctx context.Context) error {
+	for !i.tunnel.Ready() {
+		select {
+		case <-i.tunnelExited:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(drainPoll):
+		}
+	}
+	return i.tunnel.Drain(ctx)
 }
 
 // drainHTTP shuts the public HTTP servers down gracefully until ctx ends,

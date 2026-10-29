@@ -255,3 +255,101 @@ func TestDevSecretsNames(t *testing.T) {
 		t.Fatalf("CA name constraints: critical=%v permitted=%v", ca.PermittedDNSDomainsCritical, ca.PermittedDNSDomains)
 	}
 }
+
+func readTrim(t *testing.T, dir, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// The derived files follow their sources: a recreated service-tokens.json
+// or login CA, or an edited derived file, rewrites them.
+func TestDevSecretsDerivedFollowSource(t *testing.T) {
+	dir := t.TempDir()
+	generate(t, dir)
+	oldWorker := readTrim(t, dir, "worker-gateway-token")
+
+	if err := os.Remove(filepath.Join(dir, "service-tokens.json")); err != nil {
+		t.Fatal(err)
+	}
+	written := generate(t, dir)
+	slices.Sort(written)
+	if want := []string{"service-tokens.json", "worker-gateway-token"}; !slices.Equal(written, want) {
+		t.Fatalf("wrote %v, want %v", written, want)
+	}
+	var tokens map[string][]string
+	if err := json.Unmarshal([]byte(readTrim(t, dir, "service-tokens.json")), &tokens); err != nil {
+		t.Fatal(err)
+	}
+	if w := readTrim(t, dir, "worker-gateway-token"); w != tokens["worker"][0] || w == oldWorker {
+		t.Fatalf("worker-gateway-token %q, tokens.worker %v, old %q", w, tokens["worker"], oldWorker)
+	}
+
+	for _, name := range []string{"ssh_login_ca", "ssh_login_ca.pub"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	written = generate(t, dir)
+	slices.Sort(written)
+	if want := []string{"login-ca-keys", "ssh_login_ca", "ssh_login_ca.pub"}; !slices.Equal(written, want) {
+		t.Fatalf("wrote %v, want %v", written, want)
+	}
+	pub := strings.Fields(readTrim(t, dir, "ssh_login_ca.pub"))
+	if keys := readTrim(t, dir, "login-ca-keys"); !strings.Contains(keys, pub[0]+" "+pub[1]) {
+		t.Fatalf("login-ca-keys %q lacks the new login CA %q", keys, pub[1])
+	}
+
+	// An edited derived file is put back.
+	if err := os.WriteFile(filepath.Join(dir, "worker-gateway-token"), []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if written := generate(t, dir); !slices.Equal(written, []string{"worker-gateway-token"}) {
+		t.Fatalf("wrote %v", written)
+	}
+	if w := readTrim(t, dir, "worker-gateway-token"); w != tokens["worker"][0] {
+		t.Fatalf("worker-gateway-token %q", w)
+	}
+	if written := generate(t, dir); len(written) != 0 {
+		t.Fatalf("a run on a consistent set wrote %v", written)
+	}
+}
+
+// With an owner, the files of an earlier run are handed over too.
+func TestDevSecretsChownExisting(t *testing.T) {
+	dir := t.TempDir()
+	all := generate(t, dir)
+
+	got := map[string][2]int{}
+	restore := devsecrets.SetLchown(func(path string, uid, gid int) error {
+		got[filepath.Base(path)] = [2]int{uid, gid}
+		return nil
+	})
+	defer restore()
+	written, err := devsecrets.Generate(devsecrets.Options{
+		Dir:         dir,
+		Owner:       &devsecrets.Owner{UID: 65532, GID: 65532},
+		WorkerOwner: &devsecrets.Owner{UID: 1000, GID: 1000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) != 0 {
+		t.Fatalf("wrote %v", written)
+	}
+	if len(got) != len(all) {
+		t.Fatalf("chowned %d files, want %d: %v", len(got), len(all), got)
+	}
+	for _, name := range all {
+		want := [2]int{65532, 65532}
+		if name == "worker-gateway-token" {
+			want = [2]int{1000, 1000}
+		}
+		if got[name] != want {
+			t.Errorf("%s chowned to %v, want %v", name, got[name], want)
+		}
+	}
+}

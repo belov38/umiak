@@ -46,6 +46,9 @@ const (
 	// forcedStopWait is how long a second signal waits for the listeners
 	// to close before the process exits anyway.
 	forcedStopWait = 5 * time.Second
+	// runStopWait bounds the wait for Run after a finished drain (the
+	// tunnel shutdown closes sessions and deletes the instance row).
+	runStopWait = 30 * time.Second
 	// healthcheckTimeout bounds the healthcheck request.
 	healthcheckTimeout = 3 * time.Second
 )
@@ -90,8 +93,8 @@ func run(args []string) int {
 }
 
 // loadConfig reads the environment and adds the checks of a serving process.
-func loadConfig() (config.Config, error) {
-	cfg, err := config.FromEnv(os.Getenv)
+func loadConfig(getenv func(string) string) (config.Config, error) {
+	cfg, err := config.FromEnv(getenv)
 	if err != nil {
 		return config.Config{}, err
 	}
@@ -102,7 +105,7 @@ func loadConfig() (config.Config, error) {
 }
 
 func checkConfig() int {
-	if _, err := loadConfig(); err != nil {
+	if _, err := loadConfig(os.Getenv); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -121,31 +124,49 @@ func logLevel(s string) slog.Level {
 	return slog.LevelInfo
 }
 
-// serve runs the gateway until a signal. The first SIGTERM or SIGINT
-// drains it (spec 10); a second one stops it at once.
+// serve runs serveWith on the process environment and signals.
 func serve() int {
-	cfg, err := loadConfig()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sbx-gateway:", err)
-		return 1
-	}
-	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
-	slog.SetDefault(log)
-	log.Info("gateway: starting", "version", version, "instance_id", cfg.InstanceID,
-		"sbx_domain", cfg.SbxDomain, "tunnel_host", cfg.TunnelHost, "api", cfg.APIURL)
-
-	// Signals are caught before anything else, so an early SIGTERM is not
-	// the default (immediate) exit.
+	// Signals are caught before anything else, so an early SIGTERM drains
+	// instead of killing the process.
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(sigs)
+	return serveWith(serveOptions{getenv: os.Getenv, sigs: sigs, stdout: os.Stdout, stderr: os.Stderr})
+}
+
+// serveOptions are the process inputs of serveWith; tests pass their own.
+type serveOptions struct {
+	getenv func(string) string
+	sigs   <-chan os.Signal
+	stdout io.Writer // access log
+	stderr io.Writer // process log
+	// beforeRun runs on the Run goroutine just before Run (a test hook to
+	// widen the startup window).
+	beforeRun func()
+}
+
+// serveWith runs the gateway until a signal. The first SIGTERM or SIGINT
+// drains it (spec 10); a second one stops it at once. It returns the exit
+// status.
+func serveWith(o serveOptions) int {
+	cfg, err := loadConfig(o.getenv)
+	if err != nil {
+		_, _ = fmt.Fprintln(o.stderr, "sbx-gateway:", err)
+		return 1
+	}
+	log := slog.New(slog.NewJSONHandler(o.stderr, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
+	slog.SetDefault(log)
+	log.Info("gateway: starting", "version", version, "instance_id", cfg.InstanceID,
+		"sbx_domain", cfg.SbxDomain, "tunnel_host", cfg.TunnelHost, "api", cfg.APIURL)
 
 	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
 		log.Error("gateway: database", "err", err)
 		return 1
 	}
-	defer pool.Close()
+	// The pool is closed only once Run returned: pool.Close waits for the
+	// acquired conns, which a stuck Run may hold, and a forced exit must not
+	// wait for it.
 
 	var api cpapi.Client
 	if cfg.APIURL == config.APIURLNone {
@@ -160,15 +181,17 @@ func serve() int {
 		Pool:      pool,
 		API:       api,
 		Logger:    log,
-		AccessLog: os.Stdout,
+		AccessLog: o.stdout,
 		Timing:    timing,
 	})
 	if err != nil {
+		pool.Close()
 		log.Error("gateway: setup", "err", err)
 		return 1
 	}
 	ls, err := listen(cfg)
 	if err != nil {
+		pool.Close()
 		log.Error("gateway: listen", "err", err)
 		return 1
 	}
@@ -176,45 +199,46 @@ func serve() int {
 	runCtx, stopRun := context.WithCancel(context.Background())
 	defer stopRun()
 	runDone := make(chan error, 1)
-	go func() { runDone <- inst.Run(runCtx, ls) }()
+	go func() {
+		if o.beforeRun != nil {
+			o.beforeRun()
+		}
+		runDone <- inst.Run(runCtx, ls)
+	}()
 
+	var sig os.Signal
 	select {
 	case err := <-runDone:
+		pool.Close()
 		if err != nil {
 			log.Error("gateway: stopped", "err", err)
 			return 1
 		}
 		return 0
-	case sig := <-sigs:
-		budget := cfg.DrainTimeout
-		if budget <= 0 {
-			budget = server.DrainBudget(cfg, timing) + drainSlack
-		}
-		log.Info("gateway: signal, draining", "signal", sig.String(), "timeout", budget.String())
-		return drain(log, inst, budget, sigs, stopRun, runDone)
+	case sig = <-o.sigs:
 	}
+	budget := cfg.DrainTimeout
+	if budget <= 0 {
+		budget = server.DrainBudget(cfg, timing) + drainSlack
+	}
+	log.Info("gateway: signal, draining", "signal", sig.String(), "timeout", budget.String())
+	return drain(log, inst, pool, budget, o.sigs, stopRun, runDone)
 }
 
-// drain runs the instance drain bounded by budget. A second signal cancels
-// it and stops the instance at once.
-func drain(log *slog.Logger, inst *server.Instance, budget time.Duration, sigs <-chan os.Signal, stopRun func(), runDone <-chan error) int {
+// drain runs the instance drain bounded by budget, then waits for Run. A
+// second signal at any point cancels the drain and Run and exits within
+// forcedStopWait.
+func drain(log *slog.Logger, inst *server.Instance, pool *pgxpool.Pool, budget time.Duration,
+	sigs <-chan os.Signal, stopRun func(), runDone <-chan error,
+) int {
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	drainDone := make(chan error, 1)
 	go func() { drainDone <- inst.Drain(ctx) }()
 
-	select {
-	case err := <-drainDone:
-		// Run returns once the drain is over.
-		rerr := <-runDone
-		if err != nil || rerr != nil {
-			log.Error("gateway: drain ended with errors", "drain_err", err, "run_err", rerr)
-			return 1
-		}
-		log.Info("gateway: exiting after a clean drain")
-		return 0
-	case sig := <-sigs:
-		log.Warn("gateway: second signal, stopping now", "signal", sig.String())
+	// stopNow cancels everything and waits at most forcedStopWait for Run;
+	// the pool is closed only when Run returned.
+	stopNow := func() int {
 		cancel()
 		stopRun()
 		select {
@@ -222,11 +246,51 @@ func drain(log *slog.Logger, inst *server.Instance, budget time.Duration, sigs <
 			if err != nil {
 				log.Warn("gateway: stopped", "err", err)
 			}
+			pool.Close()
 		case <-time.After(forcedStopWait):
+			log.Warn("gateway: Run did not stop in time, exiting anyway")
 		}
 		return 1
+	}
+
+	select {
+	case derr := <-drainDone:
+		if derr != nil {
+			// Run may still serve (the drain never reached it): stop it.
+			log.Error("gateway: drain failed, stopping", "err", derr)
+			stopRun()
+		}
+		// Run returns once the drain is over.
+		select {
+		case rerr := <-runDone:
+			pool.Close()
+			if derr != nil || rerr != nil {
+				log.Error("gateway: drain ended with errors", "drain_err", derr, "run_err", rerr)
+				return 1
+			}
+			log.Info("gateway: exiting after a clean drain")
+			return 0
+		case sig := <-sigs:
+			log.Warn("gateway: second signal, stopping now", "signal", sig.String())
+			return stopNow()
+		case <-time.After(runStopWait):
+			log.Error("gateway: Run did not return after the drain, stopping")
+			return stopNow()
+		}
+	case sig := <-sigs:
+		log.Warn("gateway: second signal, stopping now", "signal", sig.String())
+		return stopNow()
 	case err := <-runDone:
 		log.Error("gateway: stopped during the drain", "err", err)
+		cancel()
+		select {
+		case derr := <-drainDone:
+			if derr != nil {
+				log.Warn("gateway: drain", "err", derr)
+			}
+			pool.Close()
+		case <-time.After(forcedStopWait):
+		}
 		return 1
 	}
 }
@@ -287,18 +351,18 @@ func devSecrets(args []string) int {
 		fmt.Fprintln(os.Stderr, "sbx-gateway dev-secrets:", err)
 		return 2
 	}
-	created, err := devsecrets.Generate(devsecrets.Options{
+	written, err := devsecrets.Generate(devsecrets.Options{
 		Dir: *dir, Domain: *domain, TunnelHost: *tunnelHost, SSHHost: *sshHost,
 		Owner: o, WorkerOwner: wo,
 	})
-	for _, name := range created {
-		fmt.Println("created", name)
+	for _, name := range written {
+		fmt.Println("wrote", name)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sbx-gateway dev-secrets:", err)
 		return 1
 	}
-	if len(created) == 0 {
+	if len(written) == 0 {
 		fmt.Println("all files exist in", *dir)
 	}
 	return 0
