@@ -2,12 +2,11 @@
 // sbx_tmpl, which is migrated from db/migrations (plus the tunnel fixture while
 // S2 is not merged, decision 16). The admin DSN comes from global-setup.ts.
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import type pg from "pg";
 import Pg from "pg";
 import { inject } from "vitest";
 import { MIGRATIONS_DIR, migrate } from "../migrate.ts";
+import { applyTunnelFixture, TUNNEL_FIXTURE } from "../tunnel-fixture.ts";
 import { createPool, type Db, dbOf } from "../tx.ts";
 import "./provided.ts";
 
@@ -16,10 +15,7 @@ export const TEMPLATE_DB = "sbx_tmpl";
 /** Advisory lock on the admin database: template creation and cloning are serialized. */
 const TEMPLATE_LOCK_KEY = 727002;
 
-/** Copy of S2's 0100_tunnel_init.sql, applied only when schema tunnel is missing. */
-export const TUNNEL_FIXTURE = fileURLToPath(
-	new URL("../../test/fixtures/0100_tunnel_init.sql", import.meta.url),
-);
+export { TUNNEL_FIXTURE };
 
 export interface TestDatabase {
 	/** Connection string of the new database. */
@@ -133,23 +129,7 @@ async function prepareTemplate(url: string): Promise<void> {
 	const pool = createPool(url, 1);
 	try {
 		await migrate(pool, { dir: MIGRATIONS_DIR });
-		const t = await pool.query<{ n: string | null }>(
-			"SELECT to_regnamespace('tunnel')::text AS n",
-		);
-		if (t.rows[0]?.n == null) {
-			const sql = await readFile(TUNNEL_FIXTURE, "utf8");
-			const c = await pool.connect();
-			try {
-				await c.query("BEGIN");
-				await c.query(sql);
-				await c.query("COMMIT");
-			} catch (err) {
-				await c.query("ROLLBACK").catch(() => {});
-				throw err;
-			} finally {
-				c.release();
-			}
-		}
+		await applyTunnelFixture(pool);
 	} finally {
 		await pool.end();
 	}

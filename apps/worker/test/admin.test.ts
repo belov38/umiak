@@ -428,6 +428,32 @@ describe("sbx-admin misc", () => {
 		expect(out.at(-1)).toEqual({ kind: "migrate", applied: [] });
 	});
 
+	it("migrate --tunnel-fixture applies the temporary tunnel schema once", async () => {
+		const empty = await createTestDatabase({ migrated: false });
+		try {
+			const lines: Record<string, unknown>[] = [];
+			const run = () =>
+				runAdmin(["migrate", "--tunnel-fixture"], {
+					pool: empty.pool,
+					out: (o) => lines.push(o),
+					err: (o) => lines.push(o),
+					log: testLogger("warn").log,
+				});
+			const tunnel = async () =>
+				(await empty.pool.query("SELECT to_regnamespace('tunnel')::text AS n"))
+					.rows[0].n;
+			expect(await tunnel()).toBeNull();
+			expect(await run()).toBe(0);
+			expect(lines.at(-1)).toEqual({ kind: "tunnel_fixture", applied: true });
+			expect(await tunnel()).toBe("tunnel");
+			// A second run leaves the existing schema alone.
+			expect(await run()).toBe(0);
+			expect(lines.at(-1)).toEqual({ kind: "tunnel_fixture", applied: false });
+		} finally {
+			await empty.drop();
+		}
+	});
+
 	it("unknown command: usage and exit 1", async () => {
 		expect(await admin("frobnicate")).toBe(1);
 		expect(String(err.at(-1)?.error)).toMatch(/usage/i);

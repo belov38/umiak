@@ -1,0 +1,133 @@
+# Local MVP stack. Run from anywhere:
+#   docker compose -f deploy/compose/compose.yaml up -d --build
+# Paths below are relative to this file. See README.md.
+#
+# Each implementation thread adds its own service(s) to this file and reuses the
+# x- anchors, the `sbx` network and the `sbx-image`/`sbx-env` conventions below.
+name: sbx
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Database URL shared by every service that talks to Postgres. Dev-only credentials.
+x-db-env: &db-env
+  DATABASE_URL: postgres://sbx:sbx@postgres:5432/sbx
+
+# Worker image: used by `migrate` and `worker`.
+x-worker-build: &worker-build
+  context: ../..
+  dockerfile: apps/worker/Dockerfile
+
+x-service-defaults: &service-defaults
+  logging: *logging
+  networks: [sbx]
+
+networks:
+  sbx:
+
+volumes:
+  postgres-data:
+
+secrets:
+  # Create it with the command in README.md (git-ignored directory).
+  data-keys:
+    file: ./secrets/data-keys.json
+
+services:
+  postgres:
+    <<: *service-defaults
+    image: postgres:18.6-alpine
+    # Dev-only credentials; the port is published on loopback for psql/debugging.
+    environment:
+      POSTGRES_USER: sbx
+      POSTGRES_PASSWORD: sbx
+      POSTGRES_DB: sbx
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sbx -d sbx"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # One-shot: apply migrations, then load topology and template builds from
+  # config/sbx.yaml. Idempotent, so it is safe to re-run on every `up`.
+  migrate:
+    <<: *service-defaults
+    image: sbx-worker:dev
+    build: *worker-build
+    # `--tunnel-fixture` is temporary: it stands in for S2's tunnel schema until
+    # S2 is merged. Remove the flag then.
+    command:
+      - sh
+      - -c
+      - >-
+        node apps/worker/src/admin/main.ts migrate --tunnel-fixture
+        && node apps/worker/src/admin/main.ts bootstrap
+    environment:
+      <<: *db-env
+      SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
+    volumes:
+      - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  worker:
+    <<: *service-defaults
+    image: sbx-worker:dev
+    build: *worker-build
+    environment:
+      <<: *db-env
+      SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
+      SBX_DATA_KEYS_FILE: /run/secrets/data-keys
+      SBX_SECRETS_DIR: /run/sbx-pve
+      # PVE API URL and TLS name are read from config/sbx.yaml (topology.providers).
+      # These two are read by the PVE/SSH adapter; override them in deploy/compose/.env.
+      SBX_NODE_SSH_HOST: ${SBX_NODE_SSH_HOST:-100.64.10.2}
+      SBX_PVE_TOKEN_ID: ${SBX_PVE_TOKEN_ID:-sbx@pve!poc}
+      # Reconcile only logs what it would do. Keep it on until the stack is trusted.
+      SBX_RECONCILE_DRY_RUN: ${SBX_RECONCILE_DRY_RUN:-1}
+      # The migrate service already applied migrations.
+      SBX_MIGRATE_ON_START: "0"
+      SBX_HTTP_PORT: "9090"
+    volumes:
+      - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
+      # pve-token, pve-root-ca.pem, sbx-node_ed25519, known_hosts.
+      - ${SBX_PVE_SECRETS_DIR:-${HOME}/.config/sbx}:/run/sbx-pve:ro
+    secrets:
+      - data-keys
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:9090/readyz')
+          .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 90s
+    restart: unless-stopped
+
+  # ---- Add the services of later threads below this line --------------------
+  # api            (S7)  depends_on: migrate (service_completed_successfully)
+  # gateway        (S2)  needs the S2 service token shared with the worker
+  #                      (SBX_GATEWAY_SERVICE_TOKEN_FILE on the worker)
+  # web            (S9)
+  # keycloak       (S8)  own database or schema in `postgres`
+  # oauth2-proxy   (S8)  in front of web and api

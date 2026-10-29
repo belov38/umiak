@@ -1,0 +1,32 @@
+# Keep the build context small and free of local-only material and secrets.
+.git
+.gitignore
+.DS_Store
+.idea
+.vscode
+node_modules
+**/node_modules
+dist
+coverage
+*.tsbuildinfo
+bench-results
+
+# Local research material and agent working files
+research
+sdks
+vendor-repos
+scripts
+.superpowers
+.claude
+docs
+
+# Secrets and local env
+.env
+.env.*
+*.pem
+*.key
+deploy/compose/secrets
+
+# Go and unrelated services
+services
+bin
