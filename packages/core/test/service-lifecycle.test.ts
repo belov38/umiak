@@ -376,6 +376,36 @@ describe.skipIf(skipPg())(
 				});
 			});
 
+			it("with a new size that does not fit: out_of_capacity, the machine keeps its size", async () => {
+				const env = await serviceEnv(t.pool, {
+					topology: { node: { ramCapMb: 4096 } },
+				});
+				const s = await seedSandbox(t.pool, env, {
+					state: "stopped",
+					machineState: "stopped",
+				});
+				await insertMachine(t.pool, env.topo, {
+					state: "running",
+					memoryMb: 2048,
+					sandboxId: randomUUID(),
+				});
+				await expectCode(
+					env.svc.resume(env.p, s.sandboxId, { size: "4gb" }),
+					"out_of_capacity",
+				);
+				expect(await machineRow(t.pool, s.machineId ?? "")).toMatchObject({
+					state: "stopped",
+					size_slug: "2gb",
+					memory_mb: 2048,
+				});
+				expect(await sandboxRow(t.pool, s.sandboxId)).toMatchObject({
+					state: "stopped",
+					size_slug: "2gb",
+					memory_mb: 2048,
+				});
+				expect(await opCount(s.sandboxId)).toBe(0);
+			});
+
 			it("checks the team quota", async () => {
 				const env = await serviceEnv(t.pool, { quota: { maxRamMb: 3000 } });
 				const s = await seedSandbox(t.pool, env, {

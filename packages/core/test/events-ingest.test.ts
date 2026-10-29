@@ -111,6 +111,45 @@ describe.skipIf(skipPg())("ingestAgentEvents (S6 §10.1)", () => {
 		expect(jobs.sent).toHaveLength(2);
 	});
 
+	it("a duplicate seq inside one batch is stored once (first copy)", async () => {
+		const machineId = randomUUID();
+		const jobs = new RecordingJobSender();
+		const res = await ingestAgentEvents(t.pool, jobs, {
+			machineId,
+			events: [ev(5, "activity", { n: 1 }), ev(5, "activity", { n: 2 }), ev(6)],
+			synthetic: [],
+		});
+		expect(res).toEqual({ ackedSeq: 6 });
+		const stored = await rows(machineId);
+		expect(stored.map((r) => r.seq)).toEqual([5, 6]);
+		expect(stored[0]?.payload).toEqual({ n: 1 });
+		expect(jobs.sent).toHaveLength(1);
+	});
+
+	it("strips U+0000 from payload strings (jsonb rejects it) instead of failing the batch", async () => {
+		const machineId = randomUUID();
+		const jobs = new RecordingJobSender();
+		const res = await ingestAgentEvents(t.pool, jobs, {
+			machineId,
+			events: [
+				ev(1, "command.exited", {
+					commandId: "a\u0000b",
+					nested: { list: ["x\u0000", 1, null, { "k\u0000ey": "\u0000v" }] },
+				}),
+				{ ...ev(2), bootId: "b\u00001" },
+			],
+			synthetic: [],
+		});
+		expect(res).toEqual({ ackedSeq: 2 });
+		const stored = await rows(machineId);
+		expect(stored.map((r) => r.seq)).toEqual([1, 2]);
+		expect(stored[1]?.boot_id).toBe("b1");
+		expect(stored[0]?.payload).toEqual({
+			commandId: "ab",
+			nested: { list: ["x", 1, null, { key: "v" }] },
+		});
+	});
+
 	it("an empty batch writes nothing and sends no job", async () => {
 		const jobs = new RecordingJobSender();
 		expect(

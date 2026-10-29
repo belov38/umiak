@@ -119,8 +119,14 @@ export async function hostPort(
 			]);
 		}
 		const r = await tx.client.query(
-			`INSERT INTO runtime.hosted_ports (id, sandbox_id, port, label, mode, token_hash)
-			 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+			// The epoch continues above every earlier row of this label, so a
+			// cookie bound to {label, mode, authEpoch} from before an unhost never
+			// becomes valid again (S4 §8.2). Label rows are only written under the
+			// sandbox row lock, so the max is stable.
+			`INSERT INTO runtime.hosted_ports (id, sandbox_id, port, label, mode, token_hash, auth_epoch)
+			 VALUES ($1, $2, $3, $4, $5, $6,
+			         COALESCE((SELECT max(auth_epoch) + 1 FROM runtime.hosted_ports WHERE label = $4), 0))
+			 RETURNING *`,
 			[
 				uuidv7(),
 				row.id,

@@ -151,15 +151,16 @@ describe.skipIf(skipPg())("SandboxService saved snapshots (S6 §7.8)", () => {
 				opts: { singletonKey: id, retryLimit: DELETE_RETRY_LIMIT },
 			},
 		]);
+		// No new create can use the deleted snapshot.
+		await expectCode(
+			env.svc.create(env.p, { from: { snapshot: "web" } }),
+			"snapshot_not_found",
+		);
 		// The name can be used by a new ready snapshot right away.
 		await insertSavedSnapshot(t.pool, env.topo, {
 			teamId: env.p.teamId,
 			name: "web",
 		});
-		await expectCode(
-			env.svc.create(env.p, { from: { snapshot: "missing" } }),
-			"snapshot_not_found",
-		);
 	});
 
 	it("deleteSavedSnapshot of an unknown, non-ready or foreign name is snapshot_not_found", async () => {

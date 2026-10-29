@@ -347,6 +347,35 @@ describe.skipIf(skipPg())(
 					"public",
 				);
 				expect(second.hostedPort.id).not.toBe(first.hostedPort.id);
+				// A cookie bound to an earlier epoch of this label must not
+				// become valid again (S4 §8.2): the new row's epoch is above
+				// every earlier epoch of the label.
+				const epochs = async () =>
+					(
+						await t.pool.query<{ id: string; auth_epoch: number }>(
+							"SELECT id, auth_epoch FROM runtime.hosted_ports WHERE label = $1",
+							[`${s.slug}-4000`],
+						)
+					).rows;
+				const before = (await epochs()).filter(
+					(e) => e.id !== second.hostedPort.id,
+				);
+				expect(before.length).toBeGreaterThan(0);
+				expect(second.hostedPort.authEpoch).toBeGreaterThan(
+					Math.max(...before.map((e) => e.auth_epoch)),
+				);
+				// Again after a token host, rotation and revoke.
+				await env.svc.unhostPort(env.p, s.sandboxId, 4000);
+				await env.svc.hostPort(env.p, s.sandboxId, 4000, "token");
+				await env.svc.rotatePortToken(env.p, s.sandboxId, 4000);
+				await env.svc.unhostPort(env.p, s.sandboxId, 4000);
+				const third = await env.svc.hostPort(env.p, s.sandboxId, 4000, "token");
+				const earlier = (await epochs()).filter(
+					(e) => e.id !== third.hostedPort.id,
+				);
+				expect(third.hostedPort.authEpoch).toBeGreaterThan(
+					Math.max(...earlier.map((e) => e.auth_epoch)),
+				);
 			});
 		});
 	},
