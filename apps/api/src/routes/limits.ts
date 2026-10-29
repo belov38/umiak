@@ -6,7 +6,7 @@ import { authOf } from "../auth/principal.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { ERROR_RESPONSES, jsonResponse } from "../openapi/registry.ts";
 import { type Limits, LimitsSchema } from "../schemas/limits.ts";
-import { catalogTemplates } from "./catalog.ts";
+import { catalogSizes, catalogTemplates } from "./catalog.ts";
 
 const getLimits = createRoute({
 	method: "get",
@@ -49,13 +49,16 @@ export function registerLimitsRoutes(app: ApiApp, deps: ApiDeps): void {
 		const list = await catalogTemplates(deps, {
 			includeDisabled: p.isOperator,
 		});
+		const sizesBySlug = new Map(
+			(await catalogSizes(deps)).map((s) => [s.slug, s]),
+		);
 		let canCreate = false;
 		const templates: Limits["templates"] = [];
 		for (const { template } of list) {
 			const sizes: Limits["templates"][number]["sizes"] = [];
 			for (const slug of template.allowedSizes) {
-				const size = await deps.config.size(slug);
-				if (size === null) continue;
+				const size = sizesBySlug.get(slug);
+				if (size === undefined) continue;
 				let reason: SizeReason = null;
 				if (!template.enabled) reason = "template_disabled";
 				else if (remaining.activeSandboxes < 1)

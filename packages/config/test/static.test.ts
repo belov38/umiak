@@ -126,6 +126,30 @@ describe("StaticConfigReader.fromObject", () => {
 		expect(r.topology()).toEqual({ providers: [], templateBuilds: [] });
 	});
 
+	it("lists every template (also disabled) and size in configuration order, as copies", async () => {
+		const r = StaticConfigReader.fromObject({
+			templates: [
+				...base().templates,
+				{
+					slug: "win",
+					os: "windows",
+					enabled: false,
+					defaultSize: "4gb",
+					allowedSizes: ["4gb"],
+				},
+			],
+			sizes: [...base().sizes, { slug: "4gb", vcpu: 2, memoryMb: 4096 }],
+		});
+		const list = await r.templates();
+		expect(list.map((t) => [t.slug, t.enabled])).toEqual([
+			["linux", true],
+			["win", false],
+		]);
+		expect((await r.sizes()).map((s) => s.slug)).toEqual(["2gb", "4gb"]);
+		list[0]?.allowedSizes.push("x");
+		expect((await r.template("linux"))?.allowedSizes).toEqual(["2gb"]);
+	});
+
 	it("fills the S7 template and platform defaults (name, loginUser, capabilities, ports policy)", async () => {
 		const r = StaticConfigReader.fromObject(base());
 		const t = await r.template("linux");

@@ -295,11 +295,60 @@ describe.skipIf(skipPg())("environment applied at create (S8 §10.1)", () => {
 		expect((await envOf(dflt)).env).toEqual({ FROM_ENV: "e", SHARED: "env" });
 	});
 
-	it("excludeOwnerSecrets is accepted (stored nowhere yet, decision 7)", async () => {
+	it("excludeOwnerSecrets: true is 400 until sandboxes store it; false is accepted", async () => {
 		const r = await h.request("POST", "/v1/sandboxes", {
 			json: { excludeOwnerSecrets: true },
 		});
-		expect(r.status).toBe(202);
-		expect(body(r).sandbox.excludeOwnerSecrets).toBe(false);
+		expect(r.status).toBe(400);
+		expect(body(r).error.code).toBe("validation");
+		expect(JSON.stringify(body(r).error.details)).toContain(
+			"excludeOwnerSecrets",
+		);
+		const ok = await h.request("POST", "/v1/sandboxes", {
+			json: { excludeOwnerSecrets: false },
+		});
+		expect(ok.status).toBe(202);
+		expect(body(ok).sandbox.excludeOwnerSecrets).toBe(false);
+	});
+
+	it("an Idempotency-Key retry replays after the default environment was edited or deleted", async () => {
+		const tmp = await w.environments.create(
+			w.teamId,
+			{ name: "tmp", env: { V: "1" } },
+			null,
+		);
+		// Make `tmp` the default for this test.
+		await w.environments.patch(w.teamId, tmp.id, { isDefault: true }, null);
+		try {
+			const key = `env-retry-${Date.now()}`;
+			const json = { env: { REQ: "1" } };
+			const a = await h.request("POST", "/v1/sandboxes", {
+				json,
+				headers: { "idempotency-key": key },
+			});
+			expect(a.status).toBe(202);
+			expect((await envOf(a)).env).toEqual({ V: "1", REQ: "1" });
+
+			await w.environments.patch(w.teamId, tmp.id, { env: { V: "2" } }, null);
+			const b = await h.request("POST", "/v1/sandboxes", {
+				json,
+				headers: { "idempotency-key": key },
+			});
+			expect(b.status).toBe(202);
+			expect(b.headers.get("idempotency-replayed")).toBe("true");
+			expect(body(b).sandbox.id).toBe(body(a).sandbox.id);
+
+			await w.environments.delete(w.teamId, tmp.id);
+			const c = await h.request("POST", "/v1/sandboxes", {
+				json,
+				headers: { "idempotency-key": key },
+			});
+			expect(c.status).toBe(202);
+			expect(c.headers.get("idempotency-replayed")).toBe("true");
+			expect(body(c).sandbox.id).toBe(body(a).sandbox.id);
+			expect((await envOf(c)).env).toEqual({ V: "1", REQ: "1" });
+		} finally {
+			await w.environments.patch(w.teamId, baseId, { isDefault: true }, null);
+		}
 	});
 });

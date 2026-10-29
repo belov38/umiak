@@ -264,6 +264,18 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			expect(r.status).toBe(404);
 		});
 
+		it("long-poll on another team's sandbox is 404 at once (no wait)", async () => {
+			const other = await w.seed({ state: "creating", teamId: randomUUID() });
+			const t0 = Date.now();
+			const r = await h.request(
+				"GET",
+				`/v1/sandboxes/${encodeUuid("sandbox", other.sandboxId)}?waitFor=ready&waitSeconds=5`,
+			);
+			expect(r.status).toBe(404);
+			expect(errorOf(r).code).toBe("not_found");
+			expect(Date.now() - t0).toBeLessThan(1000);
+		});
+
 		it("long-poll returns on markReady before waitSeconds", async () => {
 			const c = await create({});
 			const { sandbox } = body(c);

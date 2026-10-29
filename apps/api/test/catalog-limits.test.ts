@@ -80,11 +80,11 @@ describe.skipIf(skipPg())("templates, sizes and limits", () => {
 		await db?.drop();
 	});
 
-	it("GET /v1/templates: configured templates with a build or the default; disabled for operators only", async () => {
+	it("GET /v1/templates: configured templates in config order with their active build version; disabled for operators only", async () => {
 		const r = await h.request("GET", "/v1/templates");
 		expect(r.status).toBe(200);
 		const data = body(r).data as Body[];
-		expect(data.map((t) => t.slug)).toEqual([old, w.env.template].sort());
+		expect(data.map((t) => t.slug)).toEqual([w.env.template, old, unbuilt]);
 		expect(data.find((t) => t.slug === w.env.template)).toEqual({
 			slug: w.env.template,
 			name: "Linux",
@@ -105,7 +105,8 @@ describe.skipIf(skipPg())("templates, sizes and limits", () => {
 			headers: operator.headers,
 		});
 		const all = body(op).data as Body[];
-		expect(all.map((t) => t.slug)).toEqual([off, old, w.env.template].sort());
+		expect(all.map((t) => t.slug)).toEqual([w.env.template, off, old, unbuilt]);
+		expect(all.find((t) => t.slug === unbuilt).version).toBeNull();
 		expect(all.find((t) => t.slug === off)).toMatchObject({
 			enabled: false,
 			os: "windows",
@@ -113,19 +114,12 @@ describe.skipIf(skipPg())("templates, sizes and limits", () => {
 		});
 	});
 
-	it("GET /v1/sizes: sizes of the visible templates, smallest first", async () => {
+	it("GET /v1/sizes: every configured size, smallest first", async () => {
 		const r = await h.request("GET", "/v1/sizes");
 		expect(body(r).data).toEqual([
 			{ slug: "2gb", vcpu: 2, memoryMb: 2048 },
 			{ slug: "4gb", vcpu: 2, memoryMb: 4096 },
-		]);
-		const op = await operator.h.request("GET", "/v1/sizes", {
-			headers: operator.headers,
-		});
-		expect(body(op).data.map((s: Body) => s.slug)).toEqual([
-			"2gb",
-			"4gb",
-			"8gb",
+			{ slug: "8gb", vcpu: 4, memoryMb: 8192 },
 		]);
 	});
 

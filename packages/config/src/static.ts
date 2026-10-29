@@ -323,6 +323,18 @@ export class StaticConfigReader implements ConfigReader {
 		return this.#sizes.get(slug) ?? null;
 	}
 
+	async templates(): Promise<TemplateConfig[]> {
+		return [...this.#templates.values()].map((t) => ({
+			...t,
+			allowedSizes: [...t.allowedSizes],
+			capabilities: [...t.capabilities],
+		}));
+	}
+
+	async sizes(): Promise<SizeConfig[]> {
+		return [...this.#sizes.values()].map((s) => ({ ...s }));
+	}
+
 	async poolTargets(): Promise<PoolTarget[]> {
 		return this.#pools.map((p) => ({ ...p }));
 	}

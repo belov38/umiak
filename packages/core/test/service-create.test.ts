@@ -1,12 +1,13 @@
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DELETE_RETRY_LIMIT } from "../src/index.ts";
+import { DELETE_RETRY_LIMIT, type SecretSets } from "../src/index.ts";
 import {
 	expectCode,
 	idempotencyRows,
 	insertSavedSnapshot,
 	machineRow,
 	nodeMachines,
+	readSecrets,
 	serviceEnv,
 	teamRowCounts,
 } from "./helpers/service.ts";
@@ -461,6 +462,90 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		expect(sets.env).toEqual({ PLAIN: `${SECRET}-env` });
 		expect(sets.secrets).toEqual({ TOKEN: SECRET });
 		expect(sets.secretFiles).toHaveLength(1);
+	});
+
+	describe("options of the api (S7 §20.2 item 11)", () => {
+		const BASE = {
+			env: { A: "env", B: "env" },
+			secrets: { S: SECRET },
+			secretFiles: [
+				{ name: "f", contentBase64: "YQ==" },
+				{ name: "g", contentBase64: "YQ==" },
+			],
+		};
+
+		it("hashBody keys the hash; resolveSets runs after the key claim, never on a replay", async () => {
+			const env = await serviceEnv(t.pool);
+			let calls = 0;
+			let base: SecretSets = BASE;
+			const opts = (hashBody: unknown) => ({
+				hashBody,
+				resolveSets: async () => {
+					calls += 1;
+					return base;
+				},
+			});
+			const input = {
+				env: { B: "req" },
+				secretFiles: [{ name: "g", contentBase64: "Yg==" }],
+			};
+			const a = await env.svc.create(env.p, input, "k-env", opts({ x: 1 }));
+			expect(calls).toBe(1);
+			const sets = await readSecrets(t.pool, env.keys, a.sandbox.id);
+			expect(sets.env).toEqual({ A: "env", B: "req" });
+			expect(sets.secrets).toEqual({ S: SECRET });
+			expect(sets.secretFiles.map((f) => [f.name, f.contentBase64])).toEqual([
+				["f", "YQ=="],
+				["g", "Yg=="],
+			]);
+
+			// The base changed (environment edited or deleted): still a replay.
+			base = { env: { OTHER: "1" }, secrets: {}, secretFiles: [] };
+			const b = await env.svc.create(env.p, input, "k-env", opts({ x: 1 }));
+			expect(b.sandbox.id).toBe(a.sandbox.id);
+			expect(b.operation.id).toBe(a.operation.id);
+			expect(calls).toBe(1);
+			// Same input, another client body: another request.
+			await expectCode(
+				env.svc.create(env.p, input, "k-env", opts({ x: 2 })),
+				"idempotency_key_reused",
+			);
+			expect(calls).toBe(1);
+		});
+
+		it("limits are checked on the merged sets; a refused create leaves nothing", async () => {
+			const env = await serviceEnv(t.pool);
+			const many = Object.fromEntries(
+				Array.from({ length: 100 }, (_, i) => [`V${i}`, "x"]),
+			);
+			await expectCode(
+				env.svc.create(env.p, { env: { EXTRA: "1" } }, "k-lim", {
+					hashBody: {},
+					resolveSets: async () => ({
+						env: many,
+						secrets: {},
+						secretFiles: [],
+					}),
+				}),
+				"validation",
+			);
+			expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual(NOTHING);
+			expect(await idempotencyRows(t.pool, env.p.apiKeyId as string)).toBe(0);
+		});
+
+		it("resolveSets returning null keeps the request's sets; it runs without a key too", async () => {
+			const env = await serviceEnv(t.pool);
+			let calls = 0;
+			const r = await env.svc.create(env.p, { env: { ONLY: "1" } }, undefined, {
+				resolveSets: async () => {
+					calls += 1;
+					return null;
+				},
+			});
+			expect(calls).toBe(1);
+			const sets = await readSecrets(t.pool, env.keys, r.sandbox.id);
+			expect(sets.env).toEqual({ ONLY: "1" });
+		});
 	});
 
 	it("records the user principal on sandbox and operation", async () => {

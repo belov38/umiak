@@ -1,7 +1,7 @@
 // GET /v1/templates and GET /v1/sizes (S7 §13); any valid credential.
-// ConfigReader resolves one slug at a time, so the templates are the slugs
-// of the template builds (sbx-admin bootstrap creates them from the same
-// config) plus the default template; disabled ones only for operators.
+// Templates and sizes come from ConfigReader; the version of a template is
+// its newest active build (template_builds), null without one. Disabled
+// templates are listed for operators only.
 import { createRoute } from "@hono/zod-openapi";
 import type { SizeConfig, TemplateConfig } from "@sbx/config";
 import { authOf } from "../auth/principal.ts";
@@ -19,52 +19,36 @@ export interface CatalogTemplate {
 	version: string | null;
 }
 
-/** Every configured template that has a build or is the default, by slug. */
+/** Configured templates in configuration order with their build versions. */
 export async function catalogTemplates(
 	deps: Pick<ApiDeps, "pool" | "config">,
 	opts: { includeDisabled: boolean },
 ): Promise<CatalogTemplate[]> {
-	const versions = new Map<string, string | null>();
-	if (deps.pool !== null) {
-		const r = await deps.pool.query<{
-			template_slug: string;
-			version: string | null;
-		}>(
-			`SELECT DISTINCT ON (template_slug) template_slug,
-			        CASE WHEN status = 'active' THEN version END AS version
+	const templates = (await deps.config.templates()).filter(
+		(t) => t.enabled || opts.includeDisabled,
+	);
+	const versions = new Map<string, string>();
+	if (deps.pool !== null && templates.length > 0) {
+		const r = await deps.pool.query<{ template_slug: string; version: string }>(
+			`SELECT DISTINCT ON (template_slug) template_slug, version
 			 FROM runtime.template_builds
-			 WHERE status <> 'retired'
-			 ORDER BY template_slug, (status = 'active') DESC,
-			          promoted_at DESC NULLS LAST, created_at DESC`,
+			 WHERE status = 'active' AND template_slug = ANY($1::text[])
+			 ORDER BY template_slug, promoted_at DESC NULLS LAST, created_at DESC`,
+			[templates.map((t) => t.slug)],
 		);
 		for (const row of r.rows) versions.set(row.template_slug, row.version);
 	}
-	const { defaultTemplate } = await deps.config.defaults();
-	if (!versions.has(defaultTemplate)) versions.set(defaultTemplate, null);
-	const out: CatalogTemplate[] = [];
-	for (const [slug, version] of [...versions].sort(([a], [b]) =>
-		a < b ? -1 : a > b ? 1 : 0,
-	)) {
-		const template = await deps.config.template(slug);
-		if (template === null) continue;
-		if (!template.enabled && !opts.includeDisabled) continue;
-		out.push({ template, version });
-	}
-	return out;
+	return templates.map((template) => ({
+		template,
+		version: versions.get(template.slug) ?? null,
+	}));
 }
 
-/** Sizes allowed by any of the templates, smallest first. */
+/** Every configured size, smallest first. */
 export async function catalogSizes(
 	deps: Pick<ApiDeps, "config">,
-	templates: readonly CatalogTemplate[],
 ): Promise<SizeConfig[]> {
-	const slugs = new Set(templates.flatMap((t) => t.template.allowedSizes));
-	const sizes: SizeConfig[] = [];
-	for (const slug of slugs) {
-		const size = await deps.config.size(slug);
-		if (size !== null) sizes.push(size);
-	}
-	return sizes.sort(
+	return (await deps.config.sizes()).sort(
 		(a, b) =>
 			a.memoryMb - b.memoryMb || a.vcpu - b.vcpu || (a.slug < b.slug ? -1 : 1),
 	);
@@ -107,7 +91,7 @@ const listSizes = createRoute({
 	operationId: "sizes.list",
 	summary: "List sizes",
 	description:
-		"Sizes (vCPU and memory) the templates allow, smallest first. Any valid credential.",
+		"Sizes (vCPU and memory), smallest first; templates name the sizes they allow. Any valid credential.",
 	tags: ["catalog"],
 	responses: {
 		200: jsonResponse(SizeListSchema, "Sizes"),
@@ -123,9 +107,7 @@ export function registerCatalogRoutes(app: ApiApp, deps: ApiDeps): void {
 	});
 
 	app.openapi(listSizes, async (c) => {
-		const includeDisabled = authOf(c).principal.isOperator;
-		const list = await catalogTemplates(deps, { includeDisabled });
-		const sizes = await catalogSizes(deps, list);
+		const sizes = await catalogSizes(deps);
 		return c.json(
 			{
 				data: sizes.map((s) => ({

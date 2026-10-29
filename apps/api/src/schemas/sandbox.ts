@@ -210,10 +210,14 @@ export const CreateSandboxRequest = z
 					"environment; null: none. Its sets are applied first, the request's sets on top",
 				example: "base",
 			}),
-		excludeOwnerSecrets: z.boolean().optional().openapi({
-			description:
-				"Do not pass the creator's personal secrets into the sandbox (S8 §10)",
-		}),
+		excludeOwnerSecrets: z
+			.boolean()
+			.optional()
+			.openapi({
+				description:
+					"Do not pass the creator's personal secrets into the sandbox (S8 §10). Only false " +
+					"is accepted for now: true is 400 until sandboxes store the flag",
+			}),
 	})
 	.openapi("CreateSandboxRequest");
 

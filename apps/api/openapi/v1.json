@@ -17,7 +17,7 @@
 						]
 					},
 					"excludeOwnerSecrets": {
-						"description": "Do not pass the creator's personal secrets into the sandbox (S8 §10)",
+						"description": "Do not pass the creator's personal secrets into the sandbox (S8 §10). Only false is accepted for now: true is 400 until sandboxes store the flag",
 						"type": "boolean"
 					},
 					"from": {
@@ -3020,7 +3020,7 @@
 		},
 		"/v1/sizes": {
 			"get": {
-				"description": "Sizes (vCPU and memory) the templates allow, smallest first. Any valid credential.",
+				"description": "Sizes (vCPU and memory), smallest first; templates name the sizes they allow. Any valid credential.",
 				"operationId": "sizes.list",
 				"responses": {
 					"200": {

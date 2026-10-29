@@ -56,6 +56,10 @@ export type SsoPortPolicy = "any" | "team";
 export interface ConfigReader {
 	template(slug: string): Promise<TemplateConfig | null>;
 	size(slug: string): Promise<SizeConfig | null>;
+	/** Every template, enabled or not, in configuration order (S7 §13 catalog). */
+	templates(): Promise<TemplateConfig[]>;
+	/** Every size, in configuration order. */
+	sizes(): Promise<SizeConfig[]>;
 	poolTargets(): Promise<PoolTarget[]>;
 	/** Unknown teams get the default quota. */
 	teamQuota(teamId: string): Promise<Quota>;

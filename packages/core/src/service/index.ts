@@ -27,6 +27,7 @@ import {
 import type { SandboxServiceDeps } from "./common.ts";
 import {
 	type CreateInput,
+	type CreateOptions,
 	type CreateResult,
 	createSandbox,
 } from "./create.ts";
@@ -105,6 +106,7 @@ export {
 export {
 	CREATE_SCOPE,
 	type CreateInput,
+	type CreateOptions,
 	type CreateResult,
 	OUT_OF_CAPACITY_RETRY_SECONDS,
 	POOL_EXHAUSTED_RETRY_SECONDS,
@@ -145,10 +147,12 @@ export { type SaveSnapshotResult, SNAPSHOT_SCOPE } from "./snapshots.ts";
  * `not_found`.
  */
 export interface SandboxService {
+	/** `opts`: the api's hash body and environment sets (CreateOptions). */
 	create(
 		p: Principal,
 		input: CreateInput,
 		idemKey?: string,
+		opts?: CreateOptions,
 	): Promise<CreateResult>;
 	get(p: Principal, idOrSlug: string): Promise<Sandbox>;
 	list(
@@ -274,8 +278,9 @@ export class SandboxServiceImpl implements SandboxService {
 		p: Principal,
 		input: CreateInput,
 		idemKey?: string,
+		opts?: CreateOptions,
 	): Promise<CreateResult> {
-		return createSandbox(this.deps, p, input, idemKey);
+		return createSandbox(this.deps, p, input, idemKey, opts);
 	}
 
 	get(p: Principal, idOrSlug: string): Promise<Sandbox> {

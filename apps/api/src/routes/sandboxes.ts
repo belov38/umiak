@@ -6,9 +6,9 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import {
 	decodeUuid,
-	type EnvironmentRecord,
 	type EnvironmentStore,
 	encodeUuid,
+	type SecretSets,
 } from "@sbx/auth";
 import {
 	type CreateInput,
@@ -143,14 +143,21 @@ const createSandbox = createRoute({
 
 const ENV_PREFIX = "env_";
 
-async function resolveEnvironment(
+/**
+ * Sets of the create's environment (S8 §10.1): absent → the team's default,
+ * null → none, a name or `env_...` → that one (404 if unknown). Called by
+ * core inside the create after the Idempotency-Key claim, so a replay does
+ * not depend on the environment. The scope of an explicit environment is
+ * checked before.
+ */
+async function environmentSets(
 	store: EnvironmentStore,
 	p: Principal,
 	ref: string | null | undefined,
-): Promise<EnvironmentRecord | null> {
+): Promise<SecretSets | null> {
 	if (ref === null) return null;
-	if (ref === undefined) return store.getDefault(p.teamId);
-	checkScope(p, "environments:read");
+	if (ref === undefined)
+		return (await store.getDefault(p.teamId))?.sets ?? null;
 	let key = ref;
 	if (ref.slice(0, ENV_PREFIX.length).toLowerCase() === ENV_PREFIX) {
 		const id = decodeUuid("environment", ref);
@@ -159,26 +166,7 @@ async function resolveEnvironment(
 	}
 	const rec = await store.get(p.teamId, key);
 	if (rec === null) throw notFoundError("environment");
-	return rec;
-}
-
-/** The environment's sets, the request's on top (same key or file name wins). */
-function applyEnvironment(
-	input: CreateInput,
-	rec: EnvironmentRecord | null,
-): CreateInput {
-	if (rec === null) return input;
-	const files = input.secretFiles ?? [];
-	const names = new Set(files.map((f) => f.name));
-	return {
-		...input,
-		env: { ...rec.sets.env, ...input.env },
-		secrets: { ...rec.sets.secrets, ...input.secrets },
-		secretFiles: [
-			...rec.sets.secretFiles.filter((f) => !names.has(f.name)),
-			...files,
-		],
-	};
+	return rec.sets;
 }
 
 // --- list / get ---
@@ -455,17 +443,29 @@ export function registerSandboxRoutes(app: ApiApp, deps: ApiDeps): void {
 		},
 		async (c) => {
 			const p = authOf(c).principal;
-			const {
-				environment,
-				excludeOwnerSecrets: _owner,
-				...body
-			} = c.req.valid("json");
+			const raw = c.req.valid("json");
+			const { environment, excludeOwnerSecrets, ...body } = raw;
+			if (excludeOwnerSecrets === true) {
+				throw validationError([
+					{
+						path: "excludeOwnerSecrets",
+						message:
+							"not available until environments store it on the sandbox; omit it or send false",
+					},
+				]);
+			}
 			if (body.from !== undefined) checkScope(p, "snapshots:read");
+			if (typeof environment === "string") {
+				checkScope(p, "environments:read");
+			}
 			const idemKey = idempotencyKeyHeader(c);
-			const env = await resolveEnvironment(deps.environments, p, environment);
-			const input = applyEnvironment(compact(body) as CreateInput, env);
 			const start = await idempotencyStart(deps.pool, idemKey);
-			const r = await svc.create(p, input, idemKey);
+			const r = await svc.create(p, compact(body) as CreateInput, idemKey, {
+				// The client's body: a retry stays a replay whatever the
+				// environment holds by then.
+				hashBody: raw,
+				resolveSets: () => environmentSets(deps.environments, p, environment),
+			});
 			return c.json(
 				{
 					sandbox: await one(r.sandbox),
