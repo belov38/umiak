@@ -41,7 +41,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		opts: {
 			epoch?: bigint;
 			state?: "connected" | "disconnected";
-			caps?: string[];
+			caps?: string[] | null;
 		} = {},
 	): Promise<void> {
 		await db.pool.query(
@@ -53,7 +53,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 				machineId,
 				instanceId,
 				(opts.epoch ?? 1n).toString(),
-				opts.caps ?? [],
+				opts.caps === undefined ? [] : opts.caps,
 				opts.state ?? "connected",
 			],
 		);
@@ -145,6 +145,28 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		ac.abort();
 		await wait;
 		expect(Date.now() - start).toBeLessThan(1000);
+	});
+
+	it("returns null capabilities while they are unknown", async () => {
+		const m = randomUUID();
+		await instance("gw-n", "http://10.0.3.1:8081");
+		await session(m, "gw-n", { caps: null });
+		expect((await registry.lookup(m))?.capabilities).toBeNull();
+	});
+
+	it("enables TCP keepalive on the LISTEN connection", () => {
+		const listener = (
+			registry as unknown as {
+				listener?: {
+					connection: {
+						_keepAlive?: boolean;
+						_keepAliveInitialDelayMillis?: number;
+					};
+				};
+			}
+		).listener;
+		expect(listener?.connection._keepAlive).toBe(true);
+		expect(listener?.connection._keepAliveInitialDelayMillis).toBe(10_000);
 	});
 
 	it("clears the cache and wakes waiters after the LISTEN connection drops", async () => {

@@ -171,11 +171,17 @@ describe("AgentClient transport", () => {
 		expect(rpcRequests(b)).toHaveLength(1);
 	});
 
-	it("caps attempts with maxAttempts", async () => {
+	it("caps immediate attempts with maxAttempts", async () => {
 		registry.set(route(m, a.url));
-		for (let i = 0; i < 5; i++) {
-			a.script.push({ answer: { kind: "moved", instanceUrl: a.url } });
-		}
+		// A and B send the caller to each other.
+		a.script.push({
+			answer: { kind: "moved", instanceUrl: b.url },
+			times: Infinity,
+		});
+		b.script.push({
+			answer: { kind: "moved", instanceUrl: a.url },
+			times: Infinity,
+		});
 		const process = createClient(
 			Process,
 			agent({ maxAttempts: 3 }).transport(m),
@@ -184,7 +190,146 @@ describe("AgentClient transport", () => {
 			.setLabel({ commandId: "c1", label: "x" })
 			.catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(AgentUnavailableError);
-		expect(rpcRequests(a)).toHaveLength(3);
+		expect(rpcRequests(a)).toHaveLength(2);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("waits after a 421 that points at the answering instance, then follows the registry", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({
+			answer: { kind: "moved", instanceUrl: `${a.url}/` },
+			times: Infinity,
+			after: () => setTimeout(() => registry.set(route(m, b.url)), 100),
+		});
+		// A long poll interval: only the registry change can wake the client in time.
+		const process = createClient(
+			Process,
+			agent({ pollIntervalMs: 10_000 }).transport(m),
+		);
+		const start = Date.now();
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		expect(Date.now() - start).toBeLessThan(2000);
+		expect(rpcRequests(a).length).toBeLessThanOrEqual(2);
+		expect(rpcRequests(b)).toHaveLength(1);
+	});
+
+	it("gives up on a 421 loop to itself after the wait budget, without a hot loop", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({
+			answer: { kind: "moved", instanceUrl: a.url },
+			times: Infinity,
+		});
+		const process = createClient(
+			Process,
+			agent({ waitForAgentMs: 400, pollIntervalMs: 50 }).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect(Date.now() - start).toBeGreaterThanOrEqual(390);
+		// At most one attempt per poll interval, plus the first.
+		expect(rpcRequests(a).length).toBeGreaterThanOrEqual(2);
+		expect(rpcRequests(a).length).toBeLessThanOrEqual(400 / 50 + 2);
+	});
+
+	it("keeps retrying a stale route for the whole wait budget, not maxAttempts", async () => {
+		registry.set(route(m, a.url));
+		a.script.push({ answer: { kind: "unavailable" }, times: Infinity });
+		const process = createClient(
+			Process,
+			agent({
+				maxAttempts: 2,
+				waitForAgentMs: 600,
+				pollIntervalMs: 50,
+			}).transport(m),
+		);
+		const start = Date.now();
+		const err = await process
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect(Date.now() - start).toBeGreaterThanOrEqual(590);
+		expect(rpcRequests(a).length).toBeGreaterThan(2);
+	});
+
+	it("treats registry lookup errors as a miss within the wait budget", async () => {
+		registry.set(route(m, a.url));
+		let failures = 3;
+		const lookup = registry.lookup.bind(registry);
+		registry.lookup = async (id) => {
+			if (failures > 0) {
+				failures--;
+				throw new Error("connection to the database lost");
+			}
+			return lookup(id);
+		};
+		const process = createClient(
+			Process,
+			agent({ pollIntervalMs: 20 }).transport(m),
+		);
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		expect(failures).toBe(0);
+
+		// Failing for longer than the budget: AgentUnavailableError with the cause.
+		const dbDown = new Error("database down");
+		registry.lookup = async () => {
+			throw dbDown;
+		};
+		const err = await createClient(
+			Process,
+			agent({ waitForAgentMs: 200, pollIntervalMs: 20 }).transport(m),
+		)
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
+		expect((err as AgentUnavailableError).cause).toBe(dbDown);
+
+		// A TypeError (an invalid machine id) is not retried.
+		registry.lookup = async () => {
+			throw new TypeError("invalid machine id");
+		};
+		const start = Date.now();
+		const bad = await createClient(Process, agent().transport(m))
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch((e: unknown) => e);
+		expect(bad).toBeInstanceOf(TypeError);
+		expect(Date.now() - start).toBeLessThan(500);
+	});
+
+	it("bounds the HTTP/2 connect with connectTimeoutMs", async () => {
+		// TEST-NET-1 is not routed: the TCP connect hangs (or fails at once
+		// without a route). Either way the call must not wait for the
+		// 20 s connect-node default.
+		const blackhole = "http://192.0.2.1:81";
+		registry.set(route(m, blackhole));
+		setTimeout(() => registry.set(route(m, a.url)), 300);
+		const c = agent({ connectTimeoutMs: 200, pollIntervalMs: 100 });
+		const process = createClient(Process, c.transport(m));
+		const start = Date.now();
+		const res = await process.setLabel({ commandId: "c1", label: "x" });
+		expect(res.calls).toBe(1n);
+		expect(Date.now() - start).toBeLessThan(3000);
+		// The option reaches the session manager; 5000 by default.
+		const sessionOptions = (cl: AgentClient) =>
+			(
+				cl as unknown as {
+					sessions: Map<string, { options: { connectTimeoutMs: number } }>;
+				}
+			).sessions.get(new URL(blackhole).origin)?.options.connectTimeoutMs;
+		expect(sessionOptions(c)).toBe(200);
+		const d = agent({ waitForAgentMs: 100, pollIntervalMs: 50 });
+		await createClient(Process, d.transport(m))
+			.setLabel({ commandId: "c1", label: "x" })
+			.catch(() => {});
+		registry.set(route(m, blackhole));
+		await createClient(Process, d.transport(m))
+			.setLabel({ commandId: "c1", label: "x" }, { timeoutMs: 50 })
+			.catch(() => {});
+		expect(sessionOptions(d)).toBe(5000);
 	});
 
 	it("retries after a connection error to a dead instance", async () => {
@@ -255,6 +400,29 @@ describe("AgentClient transport", () => {
 		expect(e.code).toBe(Code.FailedPrecondition);
 		expect(e.capability).toBe("files.upload.v1");
 		expect(e.findDetails(ErrorDetailSchema)[0]?.code).toBe("agent_outdated");
+	});
+
+	it("requireCapability waits while the capabilities are unknown", async () => {
+		registry.set(route(m, a.url, { capabilities: null }));
+		setTimeout(
+			() =>
+				registry.set(route(m, a.url, { capabilities: ["files.upload.v1"] })),
+			100,
+		);
+		const c = agent({ pollIntervalMs: 10_000 });
+		const start = Date.now();
+		await expect(
+			c.requireCapability(m, "files.upload.v1"),
+		).resolves.toBeUndefined();
+		expect(Date.now() - start).toBeLessThan(2000);
+	});
+
+	it("requireCapability fails with AgentUnavailableError when the capabilities stay unknown", async () => {
+		registry.set(route(m, a.url, { capabilities: null }));
+		const err = await agent({ waitForAgentMs: 200, pollIntervalMs: 50 })
+			.requireCapability(m, "files.upload.v1")
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(AgentUnavailableError);
 	});
 });
 

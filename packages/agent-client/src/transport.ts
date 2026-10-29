@@ -32,8 +32,14 @@ export interface AgentClientOptions {
 	waitForAgentMs?: number;
 	/** Upper bound of one registry wait (poll in case a NOTIFY is missed). Default 1000. */
 	pollIntervalMs?: number;
-	/** Maximum attempts against gateway instances per call. Default 10. */
+	/**
+	 * Maximum immediate attempts against gateway instances per call (421
+	 * redirects, connection errors). Attempts after a registry wait are
+	 * bounded by waitForAgentMs instead. Default 10.
+	 */
 	maxAttempts?: number;
+	/** Timeout of establishing an HTTP/2 connection to a gateway instance (default transport). Default 5000. */
+	connectTimeoutMs?: number;
 	/**
 	 * Creates the Connect transport for one base URL
 	 * (<internal_url>/v1/machines/<id>/rpc) with the given request headers.
@@ -61,6 +67,7 @@ export class AgentClient {
 	private readonly waitForAgentMs: number;
 	private readonly pollIntervalMs: number;
 	private readonly maxAttempts: number;
+	private readonly connectTimeoutMs: number;
 	private readonly createTransport: (
 		baseUrl: string,
 		headers: Record<string, string>,
@@ -74,6 +81,7 @@ export class AgentClient {
 		this.waitForAgentMs = opts.waitForAgentMs ?? 30_000;
 		this.pollIntervalMs = opts.pollIntervalMs ?? 1000;
 		this.maxAttempts = opts.maxAttempts ?? 10;
+		this.connectTimeoutMs = opts.connectTimeoutMs ?? 5000;
 		this.createTransport =
 			opts.createTransport ??
 			((baseUrl, headers) => this.defaultTransport(baseUrl, headers));
@@ -114,20 +122,25 @@ export class AgentClient {
 
 	/**
 	 * Resolves when the machine's agent reports the capability; throws
-	 * AgentOutdatedError when it does not, and AgentUnavailableError when the
-	 * machine is not connected within waitForAgentMs.
+	 * AgentOutdatedError when its known capabilities lack it, and
+	 * AgentUnavailableError when the machine is not connected, or its
+	 * capabilities stay unknown (null, before Control/Info), within
+	 * waitForAgentMs.
 	 */
 	async requireCapability(
 		machineId: string,
 		capability: string,
 		signal?: AbortSignal,
 	): Promise<void> {
-		const route = await waitForRoute({
-			...this.routingBase(machineId),
-			signal,
-			abortError: (reason) => reason,
-		});
-		if (!route.capabilities.includes(capability)) {
+		const route = await waitForRoute(
+			{
+				...this.routingBase(machineId),
+				signal,
+				abortError: (reason) => reason,
+			},
+			(r) => r.capabilities !== null,
+		);
+		if (!route.capabilities?.includes(capability)) {
 			throw new AgentOutdatedError(machineId, capability);
 		}
 	}
@@ -202,6 +215,7 @@ export class AgentClient {
 			session = new Http2SessionManager(origin, {
 				pingIntervalMs: 10_000,
 				pingTimeoutMs: 5000,
+				connectTimeoutMs: this.connectTimeoutMs,
 			});
 			this.sessions.set(origin, session);
 		}

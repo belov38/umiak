@@ -28,7 +28,7 @@ interface Row {
 	machine_id: string;
 	instance_id: string;
 	epoch: string;
-	capabilities: string[];
+	capabilities: string[] | null;
 	internal_url: string;
 }
 
@@ -192,6 +192,9 @@ export class PgRegistry implements Registry {
 		const c = new pg.Client({
 			connectionString: this.opts.connectionString,
 			application_name: LISTEN_APPLICATION_NAME,
+			// TCP keepalive notices a half-open LISTEN connection.
+			keepAlive: true,
+			keepAliveInitialDelayMillis: 10_000,
 		});
 		const down = () => this.listenerDown(c);
 		c.on("error", down);

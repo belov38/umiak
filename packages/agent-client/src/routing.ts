@@ -18,7 +18,11 @@ export interface RoutingOptions {
 	waitForAgentMs: number;
 	/** Upper bound of one registry wait (a poll in case a NOTIFY is missed). */
 	pollIntervalMs: number;
-	/** Maximum attempts against gateway instances. */
+	/**
+	 * Maximum immediate attempts against gateway instances (after a 421 or a
+	 * connection error without a registry wait). Attempts made after a wait
+	 * do not count: waitForAgentMs bounds those.
+	 */
 	maxAttempts: number;
 	/** Caller's signal: on abort, abortError(reason) is thrown, never retried. */
 	signal?: AbortSignal | undefined;
@@ -34,21 +38,32 @@ export interface RoutingOptions {
  * exhausted (AgentUnavailableError).
  *
  * - moved: invalidate; the next attempt goes to the URL from Sbx-Instance-Url.
- * - unavailable: invalidate and look up again. Without a route, or with the
- *   same route that just failed, wait for a registry change (at most
- *   pollIntervalMs at a time) until waitForAgentMs from the first miss.
+ *   A 421 that names the instance that answered it (a restarted pod on the
+ *   same IP) counts as unavailable.
+ * - unavailable: invalidate and look up again. Without a route, with the
+ *   same route that just failed, or after such a self-421, wait for a
+ *   registry change (at most pollIntervalMs at a time) until waitForAgentMs
+ *   from the first miss.
+ * - a failed registry lookup is a miss: wait pollIntervalMs and look up again
+ *   within the same budget. A TypeError (an invalid machine id) is thrown.
+ *
+ * maxAttempts caps only immediate attempts; an attempt after a registry wait
+ * is bounded by waitForAgentMs instead.
  */
 export async function routeCall<T>(
 	opts: RoutingOptions,
 	attempt: (instanceUrl: string) => Promise<AttemptOutcome<T>>,
 ): Promise<T> {
 	const { registry, machineId } = opts;
-	let attempts = 0;
-	let missSince: number | undefined;
+	let immediate = 0;
+	let waited = false;
+	const budget = new MissBudget(opts);
 	let pinned: string | undefined;
 	// The route whose attempt failed last; looking it up again means the
 	// registry has not caught up yet, so wait once before trying it again.
 	let failed: Route | undefined;
+	// Wait before the next lookup-based attempt whatever the route.
+	let mustWait = false;
 	let lastCause: unknown;
 
 	for (;;) {
@@ -59,34 +74,33 @@ export async function routeCall<T>(
 			url = pinned;
 			pinned = undefined;
 		} else {
-			current = await registry.lookup(machineId);
+			const found = await lookupOrMiss(opts);
 			checkStop(opts);
+			if (found.error !== undefined) {
+				lastCause = found.error;
+			}
+			current = found.route;
 			const stale =
 				current !== undefined &&
 				failed !== undefined &&
 				sameRoute(current, failed);
-			if (current === undefined || stale) {
+			if (current === undefined || stale || mustWait) {
 				failed = undefined;
-				const now = Date.now();
-				missSince ??= now;
-				const left = opts.waitForAgentMs - (now - missSince);
-				if (left <= 0) {
-					throw new AgentUnavailableError(machineId, lastCause);
-				}
-				await registry.waitForChange(
-					machineId,
-					boundedWait(opts, Math.min(opts.pollIntervalMs, left)),
-					opts.signal,
-				);
+				mustWait = false;
+				await budget.wait(lastCause);
+				waited = true;
 				// A stale route is tried again after this wait (failed is cleared).
 				continue;
 			}
 			url = current.internalUrl;
 		}
-		if (attempts >= opts.maxAttempts) {
-			throw new AgentUnavailableError(machineId, lastCause);
+		if (!waited) {
+			if (immediate >= opts.maxAttempts) {
+				throw new AgentUnavailableError(machineId, lastCause);
+			}
+			immediate++;
 		}
-		attempts++;
+		waited = false;
 		const outcome = await attempt(url);
 		if (outcome.kind === "done") {
 			return outcome.value;
@@ -94,8 +108,14 @@ export async function routeCall<T>(
 		lastCause = outcome.cause;
 		registry.invalidate(machineId);
 		if (outcome.kind === "moved" && outcome.instanceUrl) {
-			pinned = outcome.instanceUrl;
-			failed = undefined;
+			if (sameUrl(outcome.instanceUrl, url)) {
+				// Following it would ask the same instance again at once.
+				failed = current;
+				mustWait = true;
+			} else {
+				pinned = outcome.instanceUrl;
+				failed = undefined;
+			}
 		} else {
 			failed = current;
 		}
@@ -104,20 +124,50 @@ export async function routeCall<T>(
 
 /**
  * Waits until the registry has a route for the machine, up to waitForAgentMs
- * (AgentUnavailableError after that).
+ * (AgentUnavailableError after that). A failed lookup counts as a miss. With
+ * accept, routes it rejects count as misses too.
  */
-export async function waitForRoute(opts: RoutingOptions): Promise<Route> {
-	const start = Date.now();
+export async function waitForRoute(
+	opts: RoutingOptions,
+	accept: (route: Route) => boolean = () => true,
+): Promise<Route> {
+	const budget = new MissBudget(opts);
+	let lastCause: unknown;
 	for (;;) {
 		checkStop(opts);
-		const route = await opts.registry.lookup(opts.machineId);
-		if (route !== undefined) {
-			return route;
+		const found = await lookupOrMiss(opts);
+		if (found.route !== undefined && accept(found.route)) {
+			return found.route;
+		}
+		if (found.error !== undefined) {
+			lastCause = found.error;
 		}
 		checkStop(opts);
-		const left = opts.waitForAgentMs - (Date.now() - start);
+		await budget.wait(lastCause);
+		if (found.route !== undefined) {
+			// Do not serve the rejected route from a cache again.
+			opts.registry.invalidate(opts.machineId);
+		}
+	}
+}
+
+/** The wait budget of a call: waitForAgentMs from the first miss. */
+class MissBudget {
+	private since: number | undefined;
+
+	constructor(private readonly opts: RoutingOptions) {}
+
+	/**
+	 * Waits for a registry change, at most pollIntervalMs, or throws
+	 * AgentUnavailableError when the budget is spent.
+	 */
+	async wait(cause: unknown): Promise<void> {
+		const { opts } = this;
+		const now = Date.now();
+		this.since ??= now;
+		const left = opts.waitForAgentMs - (now - this.since);
 		if (left <= 0) {
-			throw new AgentUnavailableError(opts.machineId);
+			throw new AgentUnavailableError(opts.machineId, cause);
 		}
 		await opts.registry.waitForChange(
 			opts.machineId,
@@ -125,6 +175,25 @@ export async function waitForRoute(opts: RoutingOptions): Promise<Route> {
 			opts.signal,
 		);
 	}
+}
+
+/** A registry lookup; errors other than TypeError come back as a miss. */
+async function lookupOrMiss(
+	opts: RoutingOptions,
+): Promise<{ route?: Route | undefined; error?: unknown }> {
+	try {
+		return { route: await opts.registry.lookup(opts.machineId) };
+	} catch (err) {
+		if (err instanceof TypeError) {
+			throw err;
+		}
+		return { error: err };
+	}
+}
+
+/** Compares two instance URLs ignoring trailing slashes. */
+function sameUrl(a: string, b: string): boolean {
+	return a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
 }
 
 function checkStop(opts: RoutingOptions): void {

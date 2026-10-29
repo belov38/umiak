@@ -8,8 +8,11 @@ export interface Route {
 	internalUrl: string;
 	/** Connection epoch of the session. */
 	epoch: bigint;
-	/** Capabilities reported by the agent (Control/Info). */
-	capabilities: string[];
+	/**
+	 * Capabilities reported by the agent (Control/Info); null while unknown
+	 * (after a reconnect of a new agent process or version, before Info).
+	 */
+	capabilities: string[] | null;
 }
 
 /** Looks up the gateway instance that serves a machine. */

@@ -68,6 +68,6 @@ export function route(
 		instanceId: opts.instanceId ?? internalUrl,
 		internalUrl,
 		epoch: opts.epoch ?? 1n,
-		capabilities: opts.capabilities ?? [],
+		capabilities: opts.capabilities === undefined ? [] : opts.capabilities,
 	};
 }
