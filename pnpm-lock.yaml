@@ -187,6 +187,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@connectrpc/connect':
         specifier: 2.3.0
         version: 2.3.0(@bufbuild/protobuf@2.16.0)

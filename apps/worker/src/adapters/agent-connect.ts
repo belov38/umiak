@@ -3,6 +3,7 @@
 // finds the gateway instance that owns the machine's tunnel (S2 §8.4) and
 // follows 421/503 answers. Request bodies carry secrets: never log them.
 import { randomUUID } from "node:crypto";
+import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import {
 	type AgentClient,
@@ -212,40 +213,53 @@ export class ConnectAgentPort implements AgentPort {
 	 * Freeze = `System/Quiesce`, thaw = `System/Thaw` with the lease from the
 	 * freeze. Each call gets its request id once per hook, so a retry of the
 	 * same step replays the agent's cached answer instead of taking a second
-	 * lease. A thaw answered with `auto_thawed` means the watchdog released the
-	 * guest before the snapshot was done: the snapshot is not consistent, so
-	 * thaw rejects with `QuiesceFailed`. Thaw without a successful freeze does
-	 * nothing.
+	 * lease. A freeze whose response was lost leaves its lease to the agent's
+	 * watchdog, which thaws it at the deadline.
+	 *
+	 * A thaw answered with `auto_thawed` means the watchdog released the guest
+	 * before the snapshot was done: the snapshot is not consistent, so thaw
+	 * rejects with `QuiesceFailed`. The outcome of the first Thaw that reached
+	 * the agent is kept on the hook: callers retry a failed thaw (S1 retries it
+	 * three times), and every later thaw rethrows that `QuiesceFailed` or
+	 * resolves when it was clean. Only a thaw that did not reach the agent
+	 * (unavailable, rejected) stays retryable with the same lease and request
+	 * id. Thaw without a successful freeze does nothing.
 	 */
 	quiesceHook(machineId: string, leaseMs: number): QuiesceHook {
 		const freezeId = randomUUID();
 		const thawId = randomUUID();
 		let leaseId: string | undefined;
+		// Set once a Thaw reached the agent: undefined = not thawed yet, null = clean.
+		let thawOutcome: QuiesceFailed | null | undefined;
 		return {
 			freeze: async () => {
 				const r = await this.#call(machineId, "quiesce", freezeId, (c, o) =>
 					c.quiesce({ leaseMs }, o),
 				);
 				leaseId = r.leaseId;
+				thawOutcome = undefined;
 			},
 			thaw: async () => {
+				if (thawOutcome !== undefined) {
+					if (thawOutcome !== null) throw thawOutcome;
+					return;
+				}
 				if (leaseId === undefined) return;
 				const lease = leaseId;
 				const r = await this.#call(machineId, "thaw", thawId, (c, o) =>
 					c.thaw({ leaseId: lease }, o),
 				);
-				leaseId = undefined;
-				if (r.autoThawed) {
-					const at = r.autoThawedAt
-						? new Date(
-								Number(r.autoThawedAt.seconds) * 1000 +
-									Math.floor(r.autoThawedAt.nanos / 1e6),
-							).toISOString()
-						: "unknown time";
-					throw new QuiesceFailed(
-						`quiesce lease ${lease} of machine ${machineId} expired: the agent auto-thawed the guest at ${at}`,
-					);
+				if (!r.autoThawed) {
+					thawOutcome = null;
+					return;
 				}
+				const at = r.autoThawedAt
+					? timestampDate(r.autoThawedAt).toISOString()
+					: "unknown time";
+				thawOutcome = new QuiesceFailed(
+					`quiesce lease ${lease} of machine ${machineId} expired: the agent auto-thawed the guest at ${at}`,
+				);
+				throw thawOutcome;
 			},
 		};
 	}

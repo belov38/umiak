@@ -215,11 +215,13 @@ describe("ConnectAgentPort", () => {
 	});
 
 	it("thaw of an auto-thawed lease rejects (TestThawAutoThawedRejects)", async () => {
+		let thaws = 0;
 		const port = portFor({
 			async quiesce() {
 				return { leaseId: "lease-9" };
 			},
 			async thaw() {
+				thaws++;
 				return {
 					autoThawed: true,
 					autoThawedAt: { seconds: 1_700_000_000n, nanos: 0 },
@@ -235,6 +237,45 @@ describe("ConnectAgentPort", () => {
 		expect(err).toBeInstanceOf(QuiesceFailed);
 		expect((err as Error).message).toContain("lease-9");
 		expect((err as Error).message).toContain("2023-11-14T22:13:20.000Z");
+		// Retries of a failed thaw (S1 retries three times) keep the outcome.
+		for (let i = 0; i < 2; i++) {
+			await expect(hook.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
+		}
+		expect(thaws).toBe(1);
+	});
+
+	it("a thaw that did not reach the agent is retried with the same ids", async () => {
+		const thaws: { id: string | null; leaseId: string }[] = [];
+		// AgentClient retries Unavailable itself: stay down until the first
+		// port-level call has failed.
+		let down = true;
+		const port = portFor({
+			async quiesce() {
+				return { leaseId: "lease-3" };
+			},
+			async thaw(req, ctx) {
+				thaws.push({
+					id: ctx.requestHeader.get(HEADER_REQUEST_ID),
+					leaseId: req.leaseId,
+				});
+				if (down) throw new ConnectError("down", Code.Unavailable);
+				return {};
+			},
+		});
+		const hook = port.quiesceHook(machineId, 1000);
+		await hook.freeze();
+		await expect(hook.thaw()).rejects.toBeInstanceOf(AgentUnavailable);
+		down = false;
+		await hook.thaw();
+		const reached = thaws.length;
+		// The clean outcome is kept too: no further Thaw RPC.
+		await hook.thaw();
+		// The client's own retry of the failed attempt and the port-level retry
+		// all carry the same lease and request id.
+		expect(thaws).toHaveLength(reached);
+		expect(thaws.length).toBeGreaterThanOrEqual(2);
+		expect(new Set(thaws.map((t) => `${t.id}/${t.leaseId}`)).size).toBe(1);
+		expect(thaws[0]?.leaseId).toBe("lease-3");
 	});
 
 	it("maps errors (TestErrorMapping)", async () => {
