@@ -41,6 +41,15 @@ const (
 	HeaderTCPDrainDeadline = "Sbx-Tcp-Drain-Deadline-Ms"
 )
 
+// Agent-defined response headers the gateway passes to callers. Every other
+// Sbx-* header of an agent response is dropped: Sbx-* are gateway routing
+// signals, so an addition here needs a security review.
+const (
+	// HeaderUploadOffset is the current size of a resumable upload (S3 files
+	// API: HEAD /files/uploads/{id} and the 409 offset mismatch).
+	HeaderUploadOffset = "Sbx-Upload-Offset"
+)
+
 // Authorization header schemes.
 const (
 	// SchemeBearer carries the machine token (MT).

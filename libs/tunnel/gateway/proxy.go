@@ -65,9 +65,19 @@ func isRedirectHeader(k string) bool {
 	return false
 }
 
+// agentSbxHeaders are the agent-defined Sbx-* response headers passed to
+// callers (canonical names). Additions need review: Sbx-* are gateway
+// routing signals.
+var agentSbxHeaders = map[string]bool{wire.HeaderUploadOffset: true}
+
 // blockedAgentHeader reports whether an agent response header or trailer is
-// never passed to callers: Sbx-* and redirect headers.
-func blockedAgentHeader(k string) bool { return isSbxHeader(k) || isRedirectHeader(k) }
+// never passed to callers: Sbx-* except agentSbxHeaders, and redirect headers.
+func blockedAgentHeader(k string) bool {
+	if isSbxHeader(k) {
+		return !agentSbxHeaders[textproto.CanonicalMIMEHeaderKey(k)]
+	}
+	return isRedirectHeader(k)
+}
 
 // dropAgentHeaders removes the blocked agent headers from h.
 func dropAgentHeaders(h http.Header) {
@@ -176,10 +186,10 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		return
 	}
 
-	// The agent's Sbx-* and redirect headers and trailers are dropped: a
-	// compromised agent must not be able to forge a gateway answer such as
-	// 421 machine_moved with an Sbx-Instance-Url of its choosing, nor point
-	// the caller elsewhere (spec 16.1).
+	// The agent's Sbx-* (but agentSbxHeaders) and redirect headers and
+	// trailers are dropped: a compromised agent must not be able to forge a
+	// gateway answer such as 421 machine_moved with an Sbx-Instance-Url of
+	// its choosing, nor point the caller elsewhere (spec 16.1).
 	hdr := w.Header()
 	copyHeader(hdr, resp.Header)
 	dropAgentHeaders(hdr)

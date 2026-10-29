@@ -1062,3 +1062,40 @@ func TestAgentRedirectsRefused(t *testing.T) {
 		t.Errorf("following client: status %d, want 502", resp.StatusCode)
 	}
 }
+
+// Sbx-Upload-Offset is the one agent-defined Sbx-* response header the
+// gateway passes (resumable uploads, S3 files API); gateway signals forged
+// next to it are still dropped.
+func TestAgentUploadOffsetPasses(t *testing.T) {
+	e := newEnv(t)
+	gw := e.internalGateway("gw-a", nil)
+	id, bs := e.machine()
+	cfg := agentConfig(e, id, bs, defaultIdentity())
+	cfg.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set(wire.HeaderUploadOffset, "4194304")
+		w.Header().Set(wire.HeaderErrorCode, wire.CodeMachineMoved)
+		w.Header().Set(wire.HeaderInstanceURL, evilURL)
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusConflict)
+		}
+	})
+	e.startAgent(cfg).waitConnected()
+	waitMachine(t, gw.testGW, id)
+	c := peerClient(t, apiToken1)
+
+	for _, tc := range []struct {
+		method string
+		status int
+	}{{http.MethodHead, http.StatusOK}, {http.MethodPut, http.StatusConflict}} {
+		resp, _ := do(t, c, tc.method, gw.machineURL(id)+"/files/uploads/u1?offset=0", "", []byte("x"))
+		if resp.StatusCode != tc.status {
+			t.Errorf("%s: status %d, want %d", tc.method, resp.StatusCode, tc.status)
+		}
+		if got := resp.Header.Get(wire.HeaderUploadOffset); got != "4194304" {
+			t.Errorf("%s: %s = %q, want 4194304", tc.method, wire.HeaderUploadOffset, got)
+		}
+		delete(resp.Header, wire.HeaderUploadOffset)
+		checkNoSbx(t, tc.method, resp.Header)
+	}
+}
