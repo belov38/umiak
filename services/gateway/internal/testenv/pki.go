@@ -41,6 +41,10 @@ type PKI struct {
 	TunnelCertFile, TunnelKeyFile string
 }
 
+// NewPKI creates a PKI with its PEM files in dir, for tests that need
+// certificates without a whole Env.
+func NewPKI(dir string) (*PKI, error) { return newPKI(dir) }
+
 func newPKI(dir string) (*PKI, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

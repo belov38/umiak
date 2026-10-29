@@ -18,11 +18,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"golang.org/x/time/rate"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/edge"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/httpproxy"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
@@ -60,10 +62,9 @@ const (
 	// metricsReadHeaderTimeout bounds the request headers on the metrics
 	// listener.
 	metricsReadHeaderTimeout = 10 * time.Second
-	// Defaults of the public listeners for zero config values (spec 7.7).
-	defaultReadHeaderTimeout = 10 * time.Second
-	defaultClientIdle        = 120 * time.Second
-	defaultMaxHeaderBytes    = 64 << 10
+	// Defaults of the tunnel admission bucket for zero config values.
+	defaultTunnelAdmitRate  = 200
+	defaultTunnelAdmitBurst = 1000
 )
 
 // Deps are the external dependencies of an instance.
@@ -115,7 +116,11 @@ type Instance struct {
 
 	internal   *http.Server
 	metricsSrv *http.Server
-	plain      *http.Server
+	// The public servers: plain (behind an ingress) and, behind the TLS
+	// dispatcher, sbx and tunnel.
+	plain     *http.Server
+	sbxSrv    *http.Server
+	tunnelSrv *http.Server
 
 	pingEvery time.Duration
 
@@ -248,8 +253,21 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		Streams:             i.streams,
 		Logger:              deps.Logger,
 	})
-	// Task 10 replaces the handler with the Host dispatcher of plain mode.
-	i.plain = newPlainServer(i.proxy, cfg.Timeouts, deps.Logger)
+	rateLimit, burst := cfg.TunnelAdmitRate, cfg.TunnelAdmitBurst
+	if rateLimit <= 0 {
+		rateLimit = defaultTunnelAdmitRate
+	}
+	if burst <= 0 {
+		burst = defaultTunnelAdmitBurst
+	}
+	tunnelHandler := edge.TunnelHandler(g.Admitter(), rate.NewLimiter(rate.Limit(rateLimit), burst), i.metrics)
+	errLog := slog.NewLogLogger(deps.Logger.Handler(), slog.LevelDebug)
+	i.plain = edge.NewPlainServer(edge.PlainHandler(i.proxy, tunnelHandler, cfg.TunnelHost), cfg.Timeouts)
+	i.sbxSrv = edge.NewSbxServer(i.proxy, cfg.Timeouts)
+	i.tunnelSrv = edge.NewTunnelServer(tunnelHandler)
+	for _, s := range i.edgeServers() {
+		s.ErrorLog = errLog
+	}
 
 	i.internal = gateway.NewInternalServer(g.InternalHandler())
 	i.internal.IdleTimeout = internalIdleTimeout
@@ -276,30 +294,6 @@ func grammar(cfg config.Config) routes.Grammar {
 		g.ReservedSlugs = cfg.ReservedSlugs
 	}
 	return g
-}
-
-// newPlainServer serves h over HTTP/1 and cleartext HTTP/2 (prior
-// knowledge). HTTP/2 SETTINGS carry no ENABLE_CONNECT_PROTOCOL: the process
-// never sets GODEBUG=http2xconnect (spec 7.3).
-func newPlainServer(h http.Handler, t config.Timeouts, log *slog.Logger) *http.Server {
-	var p http.Protocols
-	p.SetHTTP1(true)
-	p.SetUnencryptedHTTP2(true)
-	return &http.Server{
-		Handler:           h,
-		Protocols:         &p,
-		ReadHeaderTimeout: orDefault(t.ReadHeader, defaultReadHeaderTimeout),
-		IdleTimeout:       orDefault(t.ClientIdle, defaultClientIdle),
-		MaxHeaderBytes:    orDefault(t.MaxHeaderBytes, defaultMaxHeaderBytes),
-		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelDebug),
-	}
-}
-
-func orDefault[T time.Duration | int](v, def T) T {
-	if v <= 0 {
-		return def
-	}
-	return v
 }
 
 // onInstanceChange runs on a tunnel gateway goroutine. "" means the LISTEN
@@ -414,6 +408,43 @@ func (i *Instance) Streams() *httpproxy.StreamTracker { return i.streams }
 // HTTPHandler returns the public HTTP proxy handler.
 func (i *Instance) HTTPHandler() http.Handler { return i.proxy }
 
+// edgeServers returns the public HTTP servers, for the shutdown and the
+// drain.
+func (i *Instance) edgeServers() []*http.Server {
+	return []*http.Server{i.plain, i.sbxSrv, i.tunnelSrv}
+}
+
+// startEdge loads the certificates and builds the TLS dispatcher of ln
+// (PROXY protocol v2 first when configured).
+func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSource, error) {
+	sbx, err := edge.NewCertSource("sbx", i.cfg.SbxCertFile, i.cfg.SbxKeyFile, i.metrics)
+	if err != nil {
+		return nil, nil, fmt.Errorf("server: %w", err)
+	}
+	tun, err := edge.NewCertSource("tunnel", i.cfg.TunnelCertFile, i.cfg.TunnelKeyFile, i.metrics)
+	if err != nil {
+		return nil, nil, fmt.Errorf("server: %w", err)
+	}
+	for _, c := range []*edge.CertSource{sbx, tun} {
+		c.SetLogger(i.log)
+	}
+	i.AddReadyCheck(func() bool { return sbx.Loaded() && tun.Loaded() })
+	if i.cfg.ProxyProtocol {
+		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.Timeouts.TLSHandshake)
+	}
+	d := edge.NewDispatcher(ln, edge.DispatchConfig{
+		SbxDomain:        i.cfg.SbxDomain,
+		TunnelHost:       i.cfg.TunnelHost,
+		Sbx:              sbx,
+		Tunnel:           tun,
+		HandshakeTimeout: i.cfg.Timeouts.TLSHandshake,
+		ConnLimit:        i.limits.AcquireConn,
+		Metrics:          i.metrics,
+		Logger:           i.log,
+	})
+	return d, []*edge.CertSource{sbx, tun}, nil
+}
+
 // Run serves the non-nil listeners and runs the tunnel gateway until ctx is
 // done, Drain finished, or a server fails. It then stops everything, closes
 // the listeners and returns the first error (nil for a normal stop). Run may
@@ -422,6 +453,19 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	if !i.started.CompareAndSwap(false, true) {
 		return errors.New("server: Run called twice")
 	}
+	var disp *edge.Dispatcher
+	var certs []*edge.CertSource
+	if ls.TLS != nil {
+		var err error
+		if disp, certs, err = i.startEdge(ls.TLS); err != nil {
+			for _, ln := range []net.Listener{ls.Internal, ls.Metrics, ls.TLS, ls.Plain, ls.SSH} {
+				if ln != nil {
+					_ = ln.Close()
+				}
+			}
+			return err
+		}
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -429,7 +473,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	go func() { tunnelDone <- i.tunnel.Run(runCtx) }()
 
 	var wg sync.WaitGroup
-	fatal := make(chan error, 3) // one per served listener
+	fatal := make(chan error, 8) // at most one per server
 	serve := func(name string, srv *http.Server, ln net.Listener) {
 		wg.Go(func() {
 			if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
@@ -445,6 +489,21 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	}
 	if ls.Plain != nil {
 		serve("plain", i.plain, ls.Plain)
+	}
+	if disp != nil {
+		serve("tls sbx", i.sbxSrv, disp.Sbx())
+		serve("tls tunnel", i.tunnelSrv, disp.Tunnel())
+		// Not cancelled with runCtx: the dispatcher is closed after its
+		// servers, so they see ErrServerClosed, not a closed listener.
+		edgeCtx := context.WithoutCancel(runCtx)
+		wg.Go(func() {
+			if err := disp.Serve(edgeCtx); err != nil {
+				fatal <- fmt.Errorf("server: tls listener: %w", err)
+			}
+		})
+		for _, c := range certs {
+			wg.Go(func() { c.Run(runCtx) })
+		}
 	}
 	wg.Go(func() { i.pingLoop(runCtx) })
 	wg.Go(func() { i.limits.Run(runCtx) })
@@ -481,12 +540,18 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	}
 	_ = i.internal.Close()
 	_ = i.metricsSrv.Close()
-	_ = i.plain.Close()
+	for _, s := range i.edgeServers() {
+		_ = s.Close()
+	}
+	if disp != nil {
+		_ = disp.Close()
+	}
 	// Hijacked conns (WebSocket) are not closed by Server.Close.
 	i.streams.CloseAll()
 	i.appTransports.CloseIdleConnections()
 	i.upstream.Close()
-	// Listeners without a server yet (TLS, SSH) are owned here too.
+	// Listeners without a server yet (SSH) are owned here too; the TLS
+	// listener is closed by the dispatcher.
 	for _, ln := range []net.Listener{ls.TLS, ls.SSH} {
 		if ln != nil {
 			_ = ln.Close()

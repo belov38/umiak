@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/ssh"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
 	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
@@ -232,7 +235,7 @@ type Inst struct {
 	*server.Instance
 	Name        string
 	InternalURL string
-	HTTPSAddr   string // empty until the TLS listener exists
+	HTTPSAddr   string
 	PlainAddr   string
 	SSHAddr     string // empty until the SSH listener exists
 	MetricsURL  string
@@ -246,8 +249,8 @@ type Inst struct {
 	stopOnce sync.Once
 }
 
-// StartInstance starts an instance on 127.0.0.1 and waits until it is
-// ready; mod may change the config. The instance is registered in memnet
+// StartInstance starts an instance on 127.0.0.1 (internal, metrics, plain
+// and TLS listeners) and waits until it is ready; mod may change the config. The instance is registered in memnet
 // under its InstanceID while it is Ready (and routed, see RouteOnly).
 func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 	e.T.Helper()
@@ -259,6 +262,7 @@ func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 	internal := e.listen()
 	metrics := e.listen()
 	plain := e.listen()
+	tlsLn := e.listen()
 	cfg := e.InstanceConfig(name, "http://"+internal.Addr().String())
 	if mod != nil {
 		mod(&cfg)
@@ -268,7 +272,7 @@ func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 	deps.Logger = Logger("gw", cfg.InstanceID)
 	inst, err := server.New(cfg, deps)
 	if err != nil {
-		for _, ln := range []net.Listener{internal, metrics, plain} {
+		for _, ln := range []net.Listener{internal, metrics, plain, tlsLn} {
 			_ = ln.Close()
 		}
 		e.T.Fatalf("testenv: server.New: %v", err)
@@ -278,6 +282,7 @@ func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 		Instance:    inst,
 		Name:        cfg.InstanceID,
 		InternalURL: cfg.InternalURL,
+		HTTPSAddr:   tlsLn.Addr().String(),
 		PlainAddr:   plain.Addr().String(),
 		MetricsURL:  "http://" + metrics.Addr().String(),
 		Config:      cfg,
@@ -288,7 +293,7 @@ func (e *Env) StartInstance(mod func(*config.Config)) *Inst {
 	ctx, cancel := context.WithCancel(context.Background())
 	i.cancel = cancel
 	go func() {
-		i.runErr <- inst.Run(ctx, server.Listeners{Internal: internal, Metrics: metrics, Plain: plain})
+		i.runErr <- inst.Run(ctx, server.Listeners{Internal: internal, Metrics: metrics, Plain: plain, TLS: tlsLn})
 	}()
 	e.T.Cleanup(func() { e.StopInstance(i, false) })
 
@@ -435,6 +440,58 @@ func (e *Env) PlainClient(i *Inst) *http.Client {
 		Transport:     tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+}
+
+// HTTPClient returns a client that sends every request to the TLS listener
+// of i, whatever the URL's host; the SNI is the URL's host. It trusts
+// PKI.Roots, speaks HTTP/2 when h2 is set (HTTP/1.1 otherwise), follows no
+// redirects and has no cookie jar.
+func (e *Env) HTTPClient(i *Inst, h2 bool) *http.Client {
+	var p http.Protocols
+	p.SetHTTP1(true)
+	p.SetHTTP2(h2)
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, i.HTTPSAddr)
+		},
+		TLSClientConfig:    &tls.Config{RootCAs: e.PKI.Roots, MinVersion: tls.VersionTLS12},
+		ForceAttemptHTTP2:  h2,
+		Protocols:          &p,
+		DisableCompression: true,
+	}
+	e.T.Cleanup(tr.CloseIdleConnections)
+	return &http.Client{
+		Transport:     tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// TLSDial opens a TLS conn to the TLS listener of i with the SNI sni and the
+// ALPN protocols alpn, verified against PKI.Roots. The caller closes it.
+func (e *Env) TLSDial(i *Inst, sni string, alpn ...string) (*tls.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), WaitTimeout)
+	defer cancel()
+	d := &tls.Dialer{Config: &tls.Config{ServerName: sni, RootCAs: e.PKI.Roots, NextProtos: alpn, MinVersion: tls.VersionTLS12}}
+	c, err := d.DialContext(ctx, "tcp", i.HTTPSAddr)
+	if err != nil {
+		return nil, err
+	}
+	return c.(*tls.Conn), nil
+}
+
+// NewCredentials registers bootstrap credentials of a new machine without
+// starting an agent, for tests that speak the tunnel upgrade themselves.
+func (e *Env) NewCredentials() (machineID string, bootstrapSecret []byte) {
+	e.T.Helper()
+	bs, err := wire.NewSecret()
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	id := uuid.NewString()
+	if err := e.Store.PutCredentials(context.Background(), id, wire.HashSecret(bs)); err != nil {
+		e.T.Fatalf("testenv: PutCredentials: %v", err)
+	}
+	return id, bs
 }
 
 // Jar returns an empty cookie jar.
