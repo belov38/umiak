@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -504,6 +505,11 @@ func TestContainerSmoke(t *testing.T) {
 	}
 	if id, _ := rep["identity"].(map[string]any); id == nil || id["machine_id"] != info.GetMachineId() {
 		t.Errorf("doctor identity = %v, want machine %s", rep["identity"], info.GetMachineId())
+	}
+	// doctor shows that this machine runs a test build with a fake smbios.
+	aids, _ := rep["test_aids"].([]any)
+	if rep["identity_dir"] != dmiDir || !slices.Contains(aids, any("devUpdateKey")) || !slices.Contains(aids, any("identity.sysfs_dir")) {
+		t.Errorf("doctor identity_dir %v, test_aids %v", rep["identity_dir"], aids)
 	}
 	t.Logf("agent %s, machine %s, kernel %s", info.GetVersion(), info.GetMachineId(), info.GetKernel())
 }

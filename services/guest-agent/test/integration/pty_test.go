@@ -74,6 +74,17 @@ func waitPTY(t *testing.T, c *agentClient, id, want string) string {
 	return out
 }
 
+// waitPTYRegexp waits until the PTY log of id matches re.
+func waitPTYRegexp(t *testing.T, c *agentClient, id string, re *regexp.Regexp) string {
+	t.Helper()
+	var out string
+	eventually(t, 15*time.Second, "PTY output matching "+re.String(), func() bool {
+		out = ptyOutput(t, c, id)
+		return re.MatchString(out)
+	})
+	return out
+}
+
 // Spec 21 item 5: resize, duplicate input seq, idle close (pty_idle
 // shortened to 3 s by the test-only [process] pty_idle key).
 func TestPTY(t *testing.T) {
@@ -106,8 +117,9 @@ func TestPTY(t *testing.T) {
 
 		// A PTY command of a non-root user reopens its terminal.
 		in.send(t, "echo tty-ok-$((2+3)) >/dev/stderr; echo rc=$?\n")
-		out = waitPTY(t, c, id, "rc=")
-		if !strings.Contains(out, "tty-ok-5") || strings.Contains(out, "Permission denied") {
+		// The echoed input holds "rc=$?"; wait for the expanded status.
+		out = waitPTYRegexp(t, c, id, regexp.MustCompile(`rc=[0-9]`))
+		if !strings.Contains(out, "tty-ok-5") || !strings.Contains(out, "rc=0") || strings.Contains(out, "Permission denied") {
 			t.Errorf("echo >/dev/stderr on the PTY as user:\n%s", out)
 		}
 

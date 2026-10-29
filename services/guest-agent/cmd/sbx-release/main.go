@@ -4,7 +4,7 @@
 //	sbx-release keygen --out <dir> [--comment c]
 //	sbx-release pack --version v --os linux --arch amd64 --binary <path> \
 //	    --tunnel-ca <pem> --update-keys <file> --key <ed25519.key> --out <tar> \
-//	    [--skip-version-check] [--allow-foreign-signer]
+//	    [--skip-version-check] [--allow-foreign-signer] [--allow-test-build]
 //	sbx-release verify --keys <file> <tar>
 package main
 
@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"debug/buildinfo"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -35,9 +37,10 @@ commands:
         write <dir>/ed25519.key (0600) and print the public key line
   pack --version v --os linux --arch amd64 --binary <path> --tunnel-ca <pem>
        --update-keys <file> --key <ed25519.key> --out <tar>
-       [--skip-version-check] [--allow-foreign-signer]
-        build and sign a package; the binary must report the version and
-        the signing key must be in --update-keys
+       [--skip-version-check] [--allow-foreign-signer] [--allow-test-build]
+        build and sign a package; the binary must report the version, the
+        signing key must be in --update-keys and the binary must not be an
+        integration test build (main.failRun, main.devUpdateKey)
   verify --keys <file> <tar>
         verify a package against an update keys file
 `
@@ -154,6 +157,7 @@ func pack(args []string, stdout, stderr io.Writer) error {
 	f.StringVar(&o.Out, "out", "", "package tar to write")
 	skipVersion := f.Bool("skip-version-check", false, "do not run `<binary> version` (required when the binary is for another platform)")
 	foreignSigner := f.Bool("allow-foreign-signer", false, "sign with a key that is not in --update-keys")
+	testBuild := f.Bool("allow-test-build", false, "pack a binary built with the integration test ldflags (main.failRun, main.devUpdateKey)")
 	if err := f.Parse(args); err != nil || f.NArg() != 0 {
 		return usageError{"bad arguments"}
 	}
@@ -185,6 +189,9 @@ func pack(args []string, stdout, stderr io.Writer) error {
 		}
 		_, _ = fmt.Fprintf(stderr, "warning: the signing key is not in %s\n", o.UpdateKeys)
 	}
+	if err := checkTestBuild(o.Binary, *testBuild, stderr); err != nil {
+		return err
+	}
 	if err := checkBinaryVersion(o, *skipVersion, stderr); err != nil {
 		return err
 	}
@@ -194,6 +201,47 @@ func pack(args []string, stdout, stderr io.Writer) error {
 	}
 	_, err = fmt.Fprintf(stdout, "%s: %s %s/%s\n", o.Out, m.Version, m.OS, m.Arch)
 	return err
+}
+
+// testLDFlags are the -X variables of the integration test builds
+// (cmd/sbx-agent/testaids.go); a release must not carry them.
+var testLDFlags = []string{"main.failRun", "main.devUpdateKey"}
+
+// testBuildFlags returns the test ldflags set in the build info of a binary.
+func testBuildFlags(bi *debug.BuildInfo) []string {
+	var found []string
+	for _, s := range bi.Settings {
+		if s.Key != "-ldflags" {
+			continue
+		}
+		for _, v := range testLDFlags {
+			if strings.Contains(s.Value, v+"=") {
+				found = append(found, v)
+			}
+		}
+	}
+	return found
+}
+
+// checkTestBuild refuses a binary built with the test ldflags unless allow
+// is set (then it warns). The flags are read from the Go build info, which
+// also works for a binary of another platform; a binary without build info
+// is packed with a warning.
+func checkTestBuild(binary string, allow bool, stderr io.Writer) error {
+	bi, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "warning: cannot read the Go build info of %s (%v); not checking for test ldflags\n", binary, err)
+		return nil
+	}
+	flags := testBuildFlags(bi)
+	if len(flags) == 0 {
+		return nil
+	}
+	if !allow {
+		return fmt.Errorf("%s is a test build (ldflags set %s); pass --allow-test-build to pack it anyway", binary, strings.Join(flags, ", "))
+	}
+	_, _ = fmt.Fprintf(stderr, "warning: packing a test build (%s)\n", strings.Join(flags, ", "))
+	return nil
 }
 
 // checkBinaryVersion makes sure `<binary> version` prints the package

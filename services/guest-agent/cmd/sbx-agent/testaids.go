@@ -21,6 +21,18 @@ var (
 	devUpdateKey string
 )
 
+// testAids names the build-time test aids of d for doctor.
+func (d deps) testAids() []string {
+	var out []string
+	if d.failRun {
+		out = append(out, "failRun")
+	}
+	if d.devKey {
+		out = append(out, "devUpdateKey")
+	}
+	return out
+}
+
 // embeddedKeys returns the pinned update keys file with devKey appended as
 // one more key line when it is set.
 func embeddedKeys(pinned []byte, devKey string) []byte {

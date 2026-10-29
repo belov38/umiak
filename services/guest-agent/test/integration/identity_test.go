@@ -85,9 +85,7 @@ func TestIdentityApply(t *testing.T) {
 	if !strings.Contains(string(readFileT(t, "/etc/hosts")), "127.0.1.1 "+wantHost) {
 		t.Errorf("/etc/hosts has no entry for %s:\n%s", wantHost, readFileT(t, "/etc/hosts"))
 	}
-	if !strings.Contains(sh(t, "findmnt -no TARGET /etc/hostname || true"), "/etc/hostname") {
-		t.Error("/etc/hostname is no longer a bind mount; the in-place path was not exercised")
-	}
+	assertBindMounts(t)
 
 	evs := journal(t, 0, 500*time.Millisecond)
 	if len(evs) == 0 {
@@ -111,5 +109,16 @@ func TestIdentityApply(t *testing.T) {
 	served := sh(t, "ssh-keyscan -t ed25519 127.0.0.1 2>/dev/null | awk '$1 !~ /^#/ && NF >= 3 {print $3}'")
 	if f := strings.Fields(string(readFileT(t, "/etc/ssh/ssh_host_ed25519_key.pub"))); len(f) < 2 || strings.TrimSpace(served) != f[1] {
 		t.Errorf("sshd serves host key %q, want the regenerated %v", strings.TrimSpace(served), f)
+	}
+}
+
+// assertBindMounts checks that /etc/hostname and /etc/hosts are still the
+// bind mounts run.sh made, so their rewrite took the in-place (EBUSY) path.
+func assertBindMounts(t *testing.T) {
+	t.Helper()
+	for _, f := range []string{"/etc/hostname", "/etc/hosts"} {
+		if !strings.Contains(sh(t, "findmnt -no TARGET "+f+" || true"), f) {
+			t.Errorf("%s is no longer a bind mount; the in-place path was not exercised", f)
+		}
 	}
 }

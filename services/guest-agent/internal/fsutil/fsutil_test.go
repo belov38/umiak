@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -106,6 +107,14 @@ func TestReplaceFileFallsBackOnBusyTarget(t *testing.T) {
 	}
 	if string(got) != "new\n" {
 		t.Errorf("content = %q, want %q", got, "new\n")
+	}
+	// Growing content is written whole as well.
+	long := strings.Repeat("grown-content-", 100) + "\n"
+	if err := ReplaceFile(path, []byte(long), 0o644); err != nil {
+		t.Fatalf("ReplaceFile (grow): %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != long {
+		t.Errorf("content after growing = %d bytes, want %d", len(got), len(long))
 	}
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {

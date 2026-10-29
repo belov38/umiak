@@ -22,6 +22,9 @@ import (
 const (
 	fzImage = "/var/tmp/it-fz.img"
 	fzMount = "/mnt/fz"
+	// autoThawEpsilon is how much earlier than the lease deadline the
+	// auto-thaw may be observed.
+	autoThawEpsilon = 250 * time.Millisecond
 )
 
 // freezableMounts lists the visible rw ext4/xfs/btrfs mounts with a /dev
@@ -153,6 +156,11 @@ func TestFreezeLoopExt4(t *testing.T) {
 		if blocked(w, time.Until(deadline.Add(5*time.Second))) {
 			t.Fatalf("not thawed %v after the deadline", time.Since(deadline))
 		}
+		// Not before the deadline either (same clock; a small margin for the
+		// write's own completion).
+		if early := time.Until(deadline); early > autoThawEpsilon {
+			t.Errorf("thawed %v before the deadline", early)
+		}
 		t.Logf("thawed %v after Quiesce (deadline %v)", time.Since(frozenAt).Round(10*time.Millisecond), time.Until(deadline).Round(10*time.Millisecond))
 		var ev agentv1.QuiesceAutoThawed
 		waitEvent(t, after, events.TypeQuiesceAutoThawed, 15*time.Second, &ev, func() bool { return ev.GetLeaseId() == q.GetLeaseId() })
@@ -193,7 +201,8 @@ func TestFreezeLoopExt4(t *testing.T) {
 		}
 		took := time.Since(began)
 		t.Logf("foreign freeze thawed after %v", took.Round(10*time.Millisecond))
-		if took > 21*time.Second {
+		// A probe starts within 5 s of the freeze and gives up after 15 s.
+		if took < 14500*time.Millisecond || took > 21*time.Second {
 			t.Errorf("thawed after %v, want within 15-20 s", took)
 		}
 		var ev agentv1.QuiesceAutoThawed

@@ -52,6 +52,8 @@ type deps struct {
 	configTemplate []byte
 	// failRun makes `run` exit 1 at once (the failRun build-time test aid).
 	failRun bool
+	// devKey reports a devUpdateKey build (doctor).
+	devKey bool
 }
 
 // defaultDeps returns the production dependencies.
@@ -78,6 +80,7 @@ func defaultDeps() deps {
 		units:          packaging.Units,
 		configTemplate: packaging.AgentTOML,
 		failRun:        failRun == "1",
+		devKey:         devUpdateKey != "",
 	}
 }
 

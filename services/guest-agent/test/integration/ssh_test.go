@@ -126,6 +126,19 @@ func TestClaimEnvAndSSH(t *testing.T) {
 		SshUserCaKeys: []string{ca.caPub},
 	})
 
+	t.Run("claim hostname", func(t *testing.T) {
+		if got := strings.TrimSpace(sh(t, "hostname")); got != "it-host" {
+			t.Errorf("hostname = %q, want it-host", got)
+		}
+		if got := strings.TrimSpace(string(readFileT(t, "/etc/hostname"))); got != "it-host" {
+			t.Errorf("/etc/hostname = %q, want it-host", got)
+		}
+		if hosts := string(readFileT(t, "/etc/hosts")); !strings.Contains(hosts, "127.0.1.1 it-host\n") || strings.Count(hosts, "# BEGIN sbx") != 1 {
+			t.Errorf("/etc/hosts:\n%s", hosts)
+		}
+		assertBindMounts(t)
+	})
+
 	t.Run("agent command", func(t *testing.T) {
 		env := agentEnv(t, c, map[string]string{"IT_OVERRIDE": "from-spec"})
 		want := map[string]string{

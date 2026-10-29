@@ -11,10 +11,13 @@
 # smbios directory, starts sbx-identity and sbx-agent (with the debug socket)
 # and runs the integration test binary as root inside the container.
 #
-# go test flags (-run, -v, -count, -timeout, ...) are passed to the test
-# binary. A ./path argument selects another package with integration tests,
-# for example `run.sh -run Systemd ./internal/supervisor`. KEEP=1 leaves the
-# container running for debugging; otherwise it is removed on exit.
+# Test binary flags (-run, -v, -count, -timeout, -failfast, ...) are passed to
+# the compiled test binary as -test.*. Build flags of `go test` (-race,
+# -tags, -cover, -gcflags, -ldflags, -c, -o, ...) are rejected: the binary is
+# built here with -tags integration and CGO_ENABLED=0 (no race detector). A
+# ./path argument selects another package with integration tests, for example
+# `run.sh -run Systemd ./internal/supervisor`. KEEP=1 leaves the container
+# running for debugging; otherwise it is removed on exit.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +33,10 @@ pkg=./test/integration
 args=()
 for a in "$@"; do
 	case "$a" in
+	-race | -msan | -asan | -tags* | -cover* | -gcflags* | -ldflags* | -asmflags* | -trimpath | -mod* | -c | -o | -exec* | -json | -vet*)
+		echo "run.sh: $a is a go test build flag; the test binary is prebuilt (see the header)" >&2
+		exit 2
+		;;
 	./*) pkg="$a" ;;
 	-test.*) args+=("$a") ;;
 	-*) args+=("-test.${a#-}") ;;
@@ -94,7 +101,7 @@ build() { # version out [extra ldflags]
 pack() { # version binary key out [flags]
 	"${release[@]}" pack --version "$1" --os linux --arch "$arch" --binary "$2" \
 		--tunnel-ca "$work/tunnel-ca.pem" --update-keys "$work/update-keys.pub" \
-		--key "$3" --out "$4" --skip-version-check "${@:5}" >/dev/null 2>&1
+		--key "$3" --out "$4" --skip-version-check --allow-test-build "${@:5}" >/dev/null
 }
 
 log "build sbx-agent $v1 $v2 $v3 $v4 (linux/$arch)"
@@ -118,11 +125,16 @@ docker build -q -t "$image" "$here" >/dev/null
 docker run -d --name "$name" --hostname sbx-it --privileged --cgroupns=host \
 	-v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
 	"$image" >/dev/null
+booted=0
 for _ in $(seq 1 60); do
 	state="$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)"
-	case "$state" in running | degraded) break ;; esac
+	case "$state" in running | degraded) booted=1 && break ;; esac
 	sleep 1
 done
+if [ "$booted" != 1 ]; then
+	log "systemd in the container did not finish booting in 60 s (state: ${state:-unknown})"
+	exit 1
+fi
 docker cp "$work/it" "$name:/it" >/dev/null
 
 log "install $v1 and start the agent"

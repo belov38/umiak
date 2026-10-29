@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,5 +65,44 @@ func TestIdentityDirFromConfig(t *testing.T) {
 	}
 	if got := identityDir(cfgPath); got != config.DefaultIdentityDir {
 		t.Errorf("with a broken agent.toml = %q, want the default", got)
+	}
+}
+
+func TestDoctorReportsTestAids(t *testing.T) {
+	d, _ := testDeps(t, errSource{})
+	d.isActive = func(context.Context, string) string { return "active" }
+	d.statfs = func(string) (uint64, uint64, error) { return 10, 5, nil }
+	doc := func() map[string]any {
+		var out, errOut bytes.Buffer
+		if code := runWith(context.Background(), d, []string{"doctor", "--json"}, &out, &errOut); code != 0 {
+			t.Fatalf("doctor exit = %d: %s", code, errOut.String())
+		}
+		var m map[string]any
+		if err := json.Unmarshal(out.Bytes(), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	m := doc()
+	if m["identity_dir"] != config.DefaultIdentityDir || m["test_aids"] != nil {
+		t.Errorf("production build: identity_dir %v, test_aids %v", m["identity_dir"], m["test_aids"])
+	}
+
+	if err := os.MkdirAll(filepath.Dir(d.layout.ConfigFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.layout.ConfigFile, []byte("[identity]\nsysfs_dir = \"/run/fake-dmi\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d.failRun, d.devKey = true, true
+	m = doc()
+	aids, _ := m["test_aids"].([]any)
+	if m["identity_dir"] != "/run/fake-dmi" || len(aids) != 3 {
+		t.Errorf("test build: identity_dir %v, test_aids %v; want /run/fake-dmi and three aids", m["identity_dir"], aids)
+	}
+	var out, errOut bytes.Buffer
+	runWith(context.Background(), d, []string{"doctor"}, &out, &errOut)
+	if !strings.Contains(out.String(), "test aids:") || !strings.Contains(out.String(), "/run/fake-dmi") {
+		t.Errorf("doctor text = %s", out.String())
 	}
 }

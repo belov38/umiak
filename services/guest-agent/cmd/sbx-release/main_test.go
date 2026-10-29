@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 
@@ -110,5 +113,56 @@ func TestKeygenPackVerify(t *testing.T) {
 
 	if code := run(nil, &out, &errOut); code != 2 {
 		t.Errorf("no args exit = %d", code)
+	}
+}
+
+func TestTestBuildFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings []debug.BuildSetting
+		want     []string
+	}{
+		{"production", []debug.BuildSetting{{Key: "-ldflags", Value: "-X main.version=1.2.3"}}, nil},
+		{"no ldflags", []debug.BuildSetting{{Key: "CGO_ENABLED", Value: "0"}}, nil},
+		{"failRun", []debug.BuildSetting{{Key: "-ldflags", Value: "-X main.version=1 -X main.failRun=1"}}, []string{"main.failRun"}},
+		{"both", []debug.BuildSetting{{Key: "-ldflags", Value: "-X 'main.devUpdateKey=abc' -X=main.failRun=1"}}, []string{"main.failRun", "main.devUpdateKey"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := testBuildFlags(&debug.BuildInfo{Settings: tt.settings}); !slices.Equal(got, tt.want) {
+				t.Errorf("testBuildFlags = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPackRefusesTestBuild builds a real sbx-agent with a test ldflag and
+// packs it with and without --allow-test-build.
+func TestPackRefusesTestBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary")
+	}
+	dir := t.TempDir()
+	keyFile, line := keygenTo(t, filepath.Join(dir, "signing"))
+	pubFile := writeTestFile(t, filepath.Join(dir, "update-keys.pub"), line+"\n", 0o644)
+	ca := writeTestFile(t, filepath.Join(dir, "ca.pem"), "ca", 0o644)
+	bin := filepath.Join(dir, "sbx-agent")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", bin, "-ldflags", "-X main.version=1.0.0 -X main.failRun=1", "../sbx-agent")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	args := []string{
+		"pack", "--version", "1.0.0", "--os", runtime.GOOS, "--arch", runtime.GOARCH,
+		"--binary", bin, "--tunnel-ca", ca, "--update-keys", pubFile,
+		"--key", keyFile, "--out", filepath.Join(dir, "p.tar"),
+	}
+	var out, errOut bytes.Buffer
+	if code := run(args, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "--allow-test-build") {
+		t.Fatalf("pack of a test build: exit %d, stderr %q", code, errOut.String())
+	}
+	errOut.Reset()
+	if code := run(append(args, "--allow-test-build"), &out, &errOut); code != 0 || !strings.Contains(errOut.String(), "warning") {
+		t.Errorf("pack with --allow-test-build: exit %d, stderr %q", code, errOut.String())
 	}
 }

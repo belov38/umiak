@@ -37,6 +37,9 @@ type DoctorOptions struct {
 	// Statfs reports the size and free space of a filesystem. Default
 	// output.DefaultStatfs.
 	Statfs func(path string) (total, free uint64, err error)
+	// TestAids names the build-time test aids of the binary (failRun,
+	// devUpdateKey); empty for a production build.
+	TestAids []string
 }
 
 // Report is the result of `sbx-agent doctor` (spec 17.6, S5 17.3). It never
@@ -59,6 +62,12 @@ type Report struct {
 	// Quiesce is the active lease file, or null.
 	Quiesce *quiesce.Lease `json:"quiesce"`
 	Disk    DiskReport     `json:"disk"`
+	// IdentityDir is the smbios directory the identity is read from.
+	IdentityDir string `json:"identity_dir"`
+	// TestAids lists the test aids in effect: build-time ones of the binary
+	// and identity.sysfs_dir when it is not the sysfs default. A template
+	// must have none.
+	TestAids []string `json:"test_aids,omitempty"`
 }
 
 // VersionsReport names the targets of the current and previous links.
@@ -149,6 +158,12 @@ func Doctor(ctx context.Context, l paths.Layout, cfg config.Config, opts DoctorO
 		r.Quiesce = &lease
 	}
 
+	r.IdentityDir = cfg.IdentityDir
+	r.TestAids = append(r.TestAids, opts.TestAids...)
+	if cfg.IdentityDir != config.DefaultIdentityDir {
+		r.TestAids = append(r.TestAids, "identity.sysfs_dir")
+	}
+
 	r.Disk.Path = l.StateDir
 	if total, free, err := opts.Statfs(l.StateDir); err != nil {
 		r.Disk.Error = err.Error()
@@ -212,6 +227,10 @@ func (r *Report) WriteText(w io.Writer) {
 	for _, u := range doctorUnits {
 		p("unit:       %s %s\n", u.unit, r.Units[u.key])
 	}
+	if len(r.TestAids) > 0 {
+		p("test aids:  %s (not for production)\n", strings.Join(r.TestAids, ", "))
+	}
+	p("smbios dir: %s\n", r.IdentityDir)
 	if r.Identity != nil {
 		p("identity:   machine %s, reset pending %t\n", r.Identity.MachineID, r.Identity.ResetPending)
 	} else {

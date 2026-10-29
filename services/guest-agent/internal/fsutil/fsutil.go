@@ -51,18 +51,23 @@ func WriteFileAtomic(path string, data []byte, perm fs.FileMode) (err error) {
 // ReplaceFile is WriteFileAtomic for files that may be mount points: when the
 // rename fails with EBUSY (a file bind-mounted over the target, like the
 // /etc/hostname and /etc/hosts of a container), it rewrites the existing file
-// in place (truncate, write, fsync) and keeps its mode. That write is not
-// atomic: a crash in between can leave the file truncated.
+// in place and keeps its mode: the new content is written over the old one
+// from offset 0, then the file is cut to the new length and synced. A reader
+// never sees an empty file unless the content shrinks to nothing, but may see
+// the new head on the old tail; a crash in between can leave that mix.
 func ReplaceFile(path string, data []byte, perm fs.FileMode) error {
 	err := WriteFileAtomic(path, data, perm)
 	if !errors.Is(err, syscall.EBUSY) {
 		return err
 	}
-	f, oerr := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	f, oerr := os.OpenFile(path, os.O_WRONLY, 0)
 	if oerr != nil {
 		return errors.Join(err, oerr)
 	}
-	_, werr := f.Write(data)
+	_, werr := f.WriteAt(data, 0)
+	if werr == nil {
+		werr = f.Truncate(int64(len(data)))
+	}
 	if werr == nil {
 		werr = f.Sync()
 	}

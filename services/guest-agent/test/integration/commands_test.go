@@ -96,8 +96,14 @@ func TestCommandsExactOutput(t *testing.T) {
 			spec := shellSpec("echo started >> "+marker+"; sleep 1", "root")
 			pid := mainPID(t)
 			var wg sync.WaitGroup
+			var firstErr error
+			var firstCreated bool
 			wg.Go(func() {
-				_, _ = newClient().proc.Start(tctx(t, 10*time.Second), connect.NewRequest(&agentv1.StartRequest{CommandId: id, Spec: spec}))
+				res, err := newClient().proc.Start(tctx(t, 10*time.Second), connect.NewRequest(&agentv1.StartRequest{CommandId: id, Spec: spec}))
+				firstErr = err
+				if err == nil {
+					firstCreated = res.Msg.GetCreated()
+				}
 			})
 			time.Sleep(delay)
 			sh(t, fmt.Sprintf("kill -9 %d", pid))
@@ -107,6 +113,7 @@ func TestCommandsExactOutput(t *testing.T) {
 			if err != nil {
 				t.Fatalf("retry %d: Start: %v", i, err)
 			}
+			t.Logf("delay %v: first Start err=%v created=%v; retry created=%v", delay, firstErr, firstCreated, res.Msg.GetCreated())
 			info := waitExited(t, c, id, time.Minute)
 			if got := string(readFileT(t, marker)); got != "started\n" {
 				t.Errorf("delay %v: marker = %q (created on retry: %v, exit %v), want exactly one start",

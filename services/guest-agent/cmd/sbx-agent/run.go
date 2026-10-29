@@ -127,6 +127,7 @@ func doctorCmd(ctx context.Context, d deps, args []string, stdout, stderr io.Wri
 		Source:   d.source,
 		IsActive: d.isActive,
 		Statfs:   d.statfs,
+		TestAids: d.testAids(),
 	})
 	if !*asJSON {
 		rep.WriteText(stdout)
