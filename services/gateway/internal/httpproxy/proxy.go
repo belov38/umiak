@@ -288,7 +288,7 @@ func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *htt
 	}
 	// Declared trailers: ReverseProxy announces res.Trailer's keys.
 	for k := range res.Trailer {
-		if hasPrefixFold(k, "sbx-") {
+		if strippedTrailer(k) {
 			delete(res.Trailer, k)
 		}
 	}

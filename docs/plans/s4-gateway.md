@@ -113,6 +113,7 @@ All versions were checked on 2026-10-30 with `go list -m -versions`. Postgres 18
 - **Response header and trailer caps** (not in the spec; protects coalesced browser connections):
   - header block ≤ 64 KiB, else `502 upstream_error`;
   - trailers ≤ 64 KiB and ≤ 100 fields, else dropped and logged.
+  - `Sbx-*` and `Set-Cookie` trailers (any cookie) are removed, from the trailer block and from the declared `Trailer` list, for HTTP/1 chunked and h2c apps alike: a cookie set by a trailer would bypass the header's `Set-Cookie` filter.
 - **Upgrades:** only `Upgrade: websocket` on `GET` is forwarded (§7.3 names only WebSocket). Other upgrade tokens are stripped and the request is proxied plainly, which closes h2c smuggling. The preflight bypass never applies to upgrades.
 - **Rate-limit buckets:** the per-IP bucket is checked before the route lookup, the per-label bucket only after a route is found, so unknown labels cannot grow the bucket map. `Retry-After` is rounded up to at least 1 s.
 - **SSH channels:** at most 256 open channels per SSH connection (client- and backend-initiated, all types; `SBX_GATEWAY_SSH_MAX_CHANNELS`). Over the cap the open fails with `ResourceShortage` "sbx: too many open channels". §11 is silent; without a cap one user could pin about 2 MB of gateway memory per channel.

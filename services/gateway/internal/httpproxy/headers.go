@@ -196,11 +196,19 @@ func headerSize(h http.Header) int {
 	return n
 }
 
-// sanitizeTrailers removes Sbx-* trailers, then drops every trailer when the
-// block exceeds maxTrailerBytes or maxTrailerFields. It reports the drop.
+// strippedTrailer reports a trailer the client never gets: Sbx-* and any
+// Set-Cookie, whatever the cookie (browsers may apply cookies from
+// trailers, which would bypass the Set-Cookie filter of the header).
+func strippedTrailer(k string) bool {
+	return hasPrefixFold(k, "sbx-") || strings.EqualFold(k, "Set-Cookie")
+}
+
+// sanitizeTrailers removes the stripped trailers, then drops every trailer
+// when the block exceeds maxTrailerBytes or maxTrailerFields. It reports the
+// drop.
 func sanitizeTrailers(t http.Header) bool {
 	for k := range t {
-		if hasPrefixFold(k, "sbx-") {
+		if strippedTrailer(k) {
 			delete(t, k)
 		}
 	}
