@@ -84,6 +84,19 @@ func TestHTTPClientRouteWireFormat(t *testing.T) {
 	}
 }
 
+// A 200 answer for another label is never used: caching it under the
+// requested label would serve one tenant's route for another's host name.
+func TestHTTPClientRejectsRouteForOtherLabel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"label":"other-80","slug":"other","port":80,"sandboxState":"ready","access":"public"}`))
+	}))
+	defer srv.Close()
+	_, err := cpapi.NewHTTPClient(srv.URL, token, nil).LookupRoute(context.Background(), "foo-80")
+	if !errors.Is(err, cpapi.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+}
+
 func TestHTTPClientLabelIsPathEscaped(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

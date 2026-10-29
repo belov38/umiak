@@ -60,6 +60,11 @@ func (c *httpClient) LookupRoute(ctx context.Context, label string) (Route, erro
 		if err := json.Unmarshal(body, &r); err != nil {
 			return Route{}, fmt.Errorf("%w: decode route: %w", ErrUnavailable, err)
 		}
+		// The cache stores the answer under the requested label; a route for
+		// another label would serve one tenant's app on another's host name.
+		if r.Label != label {
+			return Route{}, fmt.Errorf("%w: route lookup: answer for label %q, want %q", ErrUnavailable, r.Label, label)
+		}
 		r.normalize()
 		return r, nil
 	case http.StatusNotFound:
