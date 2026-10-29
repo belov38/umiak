@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,7 @@ func TestRun(t *testing.T) {
 		{"identity without apply", []string{"identity"}, 2, "", "usage"},
 		{"identity bad action", []string{"identity", "x"}, 2, "", "usage"},
 		{"run", []string{"run"}, 1, "", "not implemented"},
-		{"shim", []string{"shim", "id"}, 1, "", "not implemented"},
+		{"shim without id", []string{"shim"}, shimUsageCode(), "", ""},
 		{"quiesce-watchdog", []string{"quiesce-watchdog"}, 1, "", "not implemented"},
 		{"rollback", []string{"rollback"}, 1, "", "not implemented"},
 		{"doctor", []string{"doctor"}, 1, "", "not implemented"},
@@ -43,4 +44,13 @@ func TestRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// shimUsageCode is the exit code of `sbx-agent shim` without --id: a usage
+// error on Linux, "unsupported" elsewhere.
+func shimUsageCode() int {
+	if runtime.GOOS == "linux" {
+		return 2
+	}
+	return 1
 }

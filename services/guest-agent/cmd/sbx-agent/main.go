@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -15,7 +17,7 @@ const usage = `usage: sbx-agent <command>
 
 commands:
   run               run the agent daemon
-  shim              command supervisor (started by the agent)
+  shim --id <id>    command supervisor (started by the agent)
   identity apply    apply the machine identity (sbx-identity.service)
   quiesce-watchdog  thaw a frozen filesystem when the lease expires
   rollback          roll back an unfinished update
@@ -54,7 +56,10 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 		return identityApply(ctx, d, stderr)
 	case "seal":
 		return sealCmd(ctx, d, stdout, stderr)
-	case "run", "shim", "quiesce-watchdog", "rollback", "doctor", "thaw",
+	case "shim":
+		// The shim logs to its own stderr (the unit's journal).
+		return shim.Main(args[1:])
+	case "run", "quiesce-watchdog", "rollback", "doctor", "thaw",
 		"install-package", "selftest":
 		return notImplemented(stderr, args[0])
 	default:
