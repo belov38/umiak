@@ -2,14 +2,21 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 
 // readBatch is the most events read from the journal per Read call.
 const readBatch = 100
+
+// defaultMaxEventBytes is the default Config.MaxEventBytes: the gateway's
+// default read limit of Events/Subscribe messages.
+const defaultMaxEventBytes = 1 << 20
 
 // EventJournal is the agent's durable event journal (spec 9.6), owned by S3.
 type EventJournal interface {
@@ -35,7 +42,24 @@ func (emptyJournal) Read(ctx context.Context, _ uint64, _ int) ([]*tunnelv1.Even
 func (emptyJournal) Ack(context.Context, uint64) error { return nil }
 
 // eventsService implements sbx.tunnel.v1.Events.
-type eventsService struct{ j EventJournal }
+type eventsService struct {
+	j        EventJournal
+	maxBytes int // larger events are sent as a stub
+	log      *slog.Logger
+}
+
+// sendable returns ev, or a wire.EventTypeTooLarge stub with its seq, time
+// and boot_id when ev is above maxBytes: a journal must not be able to wedge
+// the stream at the gateway's read limit, nor may a seq be skipped.
+func (s eventsService) sendable(ev *tunnelv1.Event) *tunnelv1.Event {
+	n := proto.Size(ev)
+	if n <= s.maxBytes {
+		return ev
+	}
+	s.log.Warn("tunnel: event too large, sending a stub", "seq", ev.GetSeq(), "type", ev.GetType(),
+		"bytes", n, "max_bytes", s.maxBytes)
+	return &tunnelv1.Event{Seq: ev.GetSeq(), Time: ev.GetTime(), BootId: ev.GetBootId(), Type: wire.EventTypeTooLarge}
+}
 
 func (s eventsService) Subscribe(ctx context.Context, req *connect.Request[tunnelv1.SubscribeRequest], stream *connect.ServerStream[tunnelv1.SubscribeResponse]) error {
 	after := s.j.AckedSeq()
@@ -56,7 +80,7 @@ func (s eventsService) Subscribe(ctx context.Context, req *connect.Request[tunne
 			return connect.NewError(connect.CodeInternal, err)
 		}
 		for _, ev := range evs {
-			if err := stream.Send(&tunnelv1.SubscribeResponse{Event: ev}); err != nil {
+			if err := stream.Send(&tunnelv1.SubscribeResponse{Event: s.sendable(ev)}); err != nil {
 				return err
 			}
 			after = ev.GetSeq()

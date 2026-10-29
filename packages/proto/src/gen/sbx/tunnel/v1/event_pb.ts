@@ -40,7 +40,11 @@ export type Event = Message<"sbx.tunnel.v1.Event"> & {
   bootId: string;
 
   /**
-   * Event type name. The set of types is defined by S3 and S6, not by the tunnel.
+   * Event type name. The set of types is defined by S3 and S6, not by the
+   * tunnel, except "sbx.tunnel.event_too_large": the agent sends it, without
+   * payload but with the original seq, time and boot_id, in place of a
+   * journal event larger than its MaxEventBytes (1 MiB by default, the
+   * gateway's read limit), so the stream neither breaks nor skips a seq.
    *
    * @generated from field: string type = 4;
    */

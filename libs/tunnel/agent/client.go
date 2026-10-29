@@ -98,6 +98,11 @@ type Config struct {
 	Info func(ctx context.Context) *tunnelv1.InfoResponse
 	// Journal is the event journal served by Events; nil serves no events.
 	Journal EventJournal
+	// MaxEventBytes is the largest event (proto size) sent on
+	// Events/Subscribe (default 1 MiB, the gateway's read limit). A larger
+	// event is replaced by a wire.EventTypeTooLarge stub with the same seq,
+	// time and boot_id, and logged, so the stream neither breaks nor skips.
+	MaxEventBytes int
 	// DialPolicy checks CONNECT targets; nil is LocalOnly().
 	DialPolicy DialPolicy
 	// Dial opens a CONNECT target after the policy check; nil dials
@@ -193,6 +198,9 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Journal == nil {
 		cfg.Journal = emptyJournal{}
 	}
+	if cfg.MaxEventBytes <= 0 {
+		cfg.MaxEventBytes = defaultMaxEventBytes
+	}
 	if cfg.DialPolicy == nil {
 		cfg.DialPolicy = LocalOnly()
 	}
@@ -212,7 +220,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	limit := []connect.HandlerOption{connect.WithReadMaxBytes(maxMessageBytes), connect.WithSendMaxBytes(maxMessageBytes)}
 	c.controlPath, c.control = tunnelv1connect.NewControlHandler(controlService{c}, limit...)
-	c.eventsPath, c.events = tunnelv1connect.NewEventsHandler(eventsService{cfg.Journal}, limit...)
+	c.eventsPath, c.events = tunnelv1connect.NewEventsHandler(eventsService{j: cfg.Journal, maxBytes: cfg.MaxEventBytes, log: cfg.Logger}, limit...)
 
 	c.srv = h2.NewServer(http.HandlerFunc(c.route), cfg.HTTP2)
 	c.srv.ErrorLog = slog.NewLogLogger(c.log.Handler(), slog.LevelDebug)

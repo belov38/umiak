@@ -31,7 +31,11 @@ type Event struct {
 	Time *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=time,proto3" json:"time,omitempty"`
 	// Boot the event was produced in.
 	BootId string `protobuf:"bytes,3,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
-	// Event type name. The set of types is defined by S3 and S6, not by the tunnel.
+	// Event type name. The set of types is defined by S3 and S6, not by the
+	// tunnel, except "sbx.tunnel.event_too_large": the agent sends it, without
+	// payload but with the original seq, time and boot_id, in place of a
+	// journal event larger than its MaxEventBytes (1 MiB by default, the
+	// gateway's read limit), so the stream neither breaks nor skips a seq.
 	Type          string     `protobuf:"bytes,4,opt,name=type,proto3" json:"type,omitempty"`
 	Payload       *anypb.Any `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields

@@ -65,6 +65,11 @@ const (
 	CodeRequestIDRequired = "request_id_required"
 )
 
+// EventTypeTooLarge is the type of the stub the agent sends in place of a
+// journal event above its MaxEventBytes: same seq, time and boot_id, no
+// payload (spec 9.6).
+const EventTypeTooLarge = "sbx.tunnel.event_too_large"
+
 // Service name prefixes used for routing and authorization.
 const (
 	ServicePrefixAgent  = "sbx.agent.v1."
