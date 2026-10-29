@@ -91,6 +91,8 @@ export class FakeClock {
 
 export interface FakeVm {
 	config: Record<string, string>;
+	/** Node /cluster/resources reports; the fake's own node when unset. */
+	node?: string;
 	status: "stopped" | "running" | "paused";
 	firewall: {
 		options?: Record<string, unknown>;
@@ -127,8 +129,10 @@ export const TEMPLATE_CONFIG: Record<string, string> = {
 
 type P = Record<string, unknown> | undefined;
 
-/** In-memory Proxmox API for one node "pve" with pool "sandbox". */
+/** In-memory Proxmox API for one node ("pve" by default) with pool "sandbox". */
 export class FakePve {
+	/** Node name in /nodes/<node>/... paths. */
+	readonly node: string;
 	calls: { method: string; path: string; params: P }[] = [];
 	log: string[];
 	vms = new Map<number, FakeVm>();
@@ -142,8 +146,9 @@ export class FakePve {
 	#upid = 0;
 	#generated = 0;
 
-	constructor(log: string[] = []) {
+	constructor(log: string[] = [], opts: { node?: string } = {}) {
 		this.log = log;
+		this.node = opts.node ?? "pve";
 	}
 
 	#vm(path: string): [number, FakeVm] {
@@ -164,12 +169,13 @@ export class FakePve {
 	async #handle(method: string, path: string, params: P): Promise<unknown> {
 		const p = (params ?? {}) as Record<string, string | number | string[]>;
 		const key = `${method} ${path}`;
+		const n = `/nodes/${this.node}`;
 		this.calls.push({ method, path, params });
 		this.log.push(`api:${key}`);
 		const f = this.fail[key];
 		if (f) throw f;
-		if (key === "GET /nodes/pve/qemu/599/config") return { ...TEMPLATE_CONFIG };
-		if (key === "POST /nodes/pve/qemu") {
+		if (key === `GET ${n}/qemu/599/config`) return { ...TEMPLATE_CONFIG };
+		if (key === `POST ${n}/qemu`) {
 			const vmid = Number(p.vmid);
 			if (this.vms.has(vmid)) {
 				throw new PveApiError(
@@ -192,7 +198,7 @@ export class FakePve {
 			this.ipam.push({ vmid, mac, ip: `10.88.0.${this.#nextIp++}` });
 			return this.#task();
 		}
-		if (key === "POST /nodes/pve/qemu/599/clone") {
+		if (key === `POST ${n}/qemu/599/clone`) {
 			const vmid = Number(p.newid);
 			const config: Record<string, string> = {
 				...TEMPLATE_CONFIG,
@@ -226,6 +232,9 @@ export class FakePve {
 			return [...this.vms.entries()].map(([vmid, vm]) => ({
 				vmid,
 				type: "qemu",
+				node: vm.node ?? this.node,
+				name: vm.config.name,
+				...(vm.config.tags !== undefined ? { tags: vm.config.tags } : {}),
 				status:
 					this.staleStatus.get(vmid) ??
 					(vm.status === "paused" ? "running" : vm.status),
@@ -234,11 +243,12 @@ export class FakePve {
 				template: vm.config.template === "1" ? 1 : 0,
 			}));
 		}
-		let m = /^(GET|PUT|POST|DELETE) \/nodes\/pve\/qemu\/(\d+)(\/.*)?$/.exec(
+		let m = /^(GET|PUT|POST|DELETE) \/nodes\/([^/]+)\/qemu\/(\d+)(\/.*)?$/.exec(
 			key,
 		);
+		if (m && m[2] !== this.node) m = null;
 		if (!m) throw new Error(`fake: unhandled ${key}`);
-		const sub = m[3] ?? "";
+		const sub = m[4] ?? "";
 		if (method === "DELETE" && sub === "") {
 			const [id, vm] = this.#vm(path);
 			if (vm.status !== "stopped")

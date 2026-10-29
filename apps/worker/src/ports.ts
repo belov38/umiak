@@ -47,6 +47,8 @@ export interface InfraVm {
 	status: VmStatus;
 	pool?: string;
 	tags: string[];
+	/** A Proxmox template (template: 1). */
+	template?: boolean;
 }
 
 export interface InfraLv {
