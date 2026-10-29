@@ -3,9 +3,12 @@ package agent_test
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -49,12 +52,44 @@ func TestConnectsWithBootstrapThenToken(t *testing.T) {
 		kinds = append(kinds, ev.Kind)
 	}
 	if len(evs) < 3 || evs[0].Kind != "connected" || evs[0].ConnID != c1.info.ConnID ||
-		evs[0].Epoch != c1.info.Epoch || evs[0].Gateway != "gw-a" || evs[0].Auth != transport.AuthBootstrap {
+		evs[0].Epoch != c1.info.Epoch || evs[0].Gateway != "gw-a" || evs[0].Auth != transport.AuthBootstrap ||
+		evs[0].Reason != agent.ConnectInitial {
 		t.Fatalf("conn events = %+v", evs)
 	}
 	if !slices.Contains(kinds, "disconnected") {
 		t.Fatalf("no disconnected event: %v", kinds)
 	}
+	if reason := connectReason(e, c2.info.ConnID); reason != agent.ConnectReconnect {
+		t.Fatalf("second connect reason = %q, want reconnect", reason)
+	}
+}
+
+// connectReason returns the reason of the connected event of a conn.
+func connectReason(e *env, connID string) string {
+	for _, ev := range e.connEvents() {
+		if ev.Kind == agent.KindConnected && ev.ConnID == connID {
+			return ev.Reason
+		}
+	}
+	return ""
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent use.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func TestUnauthorizedTokenFallsBackToBootstrap(t *testing.T) {
@@ -201,6 +236,8 @@ func TestInfoProvided(t *testing.T) {
 func TestDrainMakeBeforeBreak(t *testing.T) {
 	cfg := fastConfig()
 	cfg.DrainCloseExtra = 50 * time.Millisecond
+	var logs syncBuffer
+	cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 	e := startEnv(t, cfg, nil)
 	a := e.gw.nextConn()
 	links := e.net.Links(testMachineID)
@@ -250,6 +287,20 @@ func TestDrainMakeBeforeBreak(t *testing.T) {
 	}
 	if _, err := b.control.Info(ctx, connect.NewRequest(&tunnelv1.InfoRequest{})); err != nil {
 		t.Fatalf("Info on replacement: %v", err)
+	}
+	if reason := connectReason(e, b.info.ConnID); reason != agent.ConnectDrainReplacement {
+		t.Fatalf("replacement connect reason = %q, want drain_replacement", reason)
+	}
+	for _, want := range []string{"reason=initial", "reason=drain_replacement"} {
+		found := false
+		for line := range strings.Lines(logs.String()) {
+			if strings.Contains(line, `msg="tunnel: connected"`) && strings.Contains(line, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("no connected log line with %s in:\n%s", want, logs.String())
+		}
 	}
 	var drain bool
 	for _, ev := range e.connEvents() {

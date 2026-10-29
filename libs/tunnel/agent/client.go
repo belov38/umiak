@@ -60,6 +60,13 @@ const (
 	KindDrain        = "drain"
 )
 
+// Reasons of a connected event (spec 13).
+const (
+	ConnectInitial          = "initial"
+	ConnectReconnect        = "reconnect"
+	ConnectDrainReplacement = "drain_replacement"
+)
+
 // ConnEvent reports a connection change to Config.OnConnEvent.
 type ConnEvent struct {
 	// Kind is one of connected, disconnected, rejected (a failed dial; Status
@@ -70,7 +77,9 @@ type ConnEvent struct {
 	Gateway string
 	Auth    transport.AuthScheme
 	Status  int
-	Reason  string
+	// Reason explains the event; for connected it is one of
+	// ConnectInitial, ConnectReconnect, ConnectDrainReplacement.
+	Reason string
 	// TCPDeadline is the drain's tcp_deadline (Kind drain only).
 	TCPDeadline time.Duration
 }
@@ -144,6 +153,7 @@ type Client struct {
 	token     []byte // machine token, memory only; nil uses BS
 	current   *tunnelConn
 	replacing bool // a replacement for current is being dialed
+	connected bool // a connection was installed before
 	conns     map[*tunnelConn]struct{}
 }
 
@@ -450,18 +460,26 @@ func (c *Client) dialFailed(err error, hello transport.Hello, bo *Backoff) (time
 func (c *Client) install(ln *h2.ConnListener, raw net.Conn, info transport.ConnInfo, auth transport.AuthScheme) *tunnelConn {
 	tc := &tunnelConn{Conn: raw, info: info, auth: auth, connectedAt: time.Now(), done: make(chan struct{})}
 	c.mu.Lock()
+	reason := ConnectReconnect
+	switch {
+	case c.replacing:
+		reason = ConnectDrainReplacement
+	case !c.connected:
+		reason = ConnectInitial
+	}
 	c.conns[tc] = struct{}{}
 	c.current = tc
 	c.replacing = false
+	c.connected = true
 	c.mu.Unlock()
 	if err := ln.Push(tc); err != nil {
 		tc.closeWith("listener closed")
 		tc.markDone()
 	}
 	c.log.Info("tunnel: connected", "conn_id", info.ConnID, "epoch", info.Epoch,
-		"gateway", info.GatewayInstance, "auth", authName(auth))
+		"gateway", info.GatewayInstance, "auth", authName(auth), "reason", reason)
 	c.emit(ConnEvent{Kind: KindConnected, ConnID: info.ConnID, Epoch: info.Epoch,
-		Gateway: info.GatewayInstance, Auth: auth})
+		Gateway: info.GatewayInstance, Auth: auth, Reason: reason})
 	c.watchers.Add(1)
 	go c.watch(tc)
 	return tc
