@@ -615,6 +615,8 @@ type reader struct {
 	attachBytes atomic.Int64
 	errCount    atomic.Int64 // len(errs), readable while running
 	errs        []error
+	errAt       []time.Time // when each of errs was seen
+	errURL      []string    // the gateway URL of the failed attach
 	overlaps    int
 	gaps        int
 	lastData    time.Time
@@ -645,6 +647,8 @@ func (r *reader) run(ctx context.Context) error {
 			continue // a gap: attach again from the expected offsets
 		}
 		r.errs = append(r.errs, err)
+		r.errAt = append(r.errAt, time.Now())
+		r.errURL = append(r.errURL, url)
 		r.errCount.Add(1)
 		if !retryable(err) {
 			return fmt.Errorf("attach %s: %w", r.commandID, err)

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,6 +225,7 @@ func TestDrainMovesAllAgents(t *testing.T) {
 		t.Fatalf("Drain: %v", err)
 	}
 	took := time.Since(start)
+	phases := []drainPhase{{"drain returned", took}}
 	t.Logf("Drain of %s with %d agents took %v (deadline %v)", gA.name, perGateway, took, budget)
 	if took >= budget {
 		t.Errorf("Drain took %v, deadline %v", took, budget)
@@ -240,6 +242,8 @@ func TestDrainMovesAllAgents(t *testing.T) {
 			t.Errorf("%s: session %+v, %v", m.id, s, err)
 		}
 	}
+
+	phases = append(phases, drainPhase{"agents of A moved", time.Since(start)})
 
 	// A unary call sent to A after the move gets 421 and succeeds on the
 	// first retry to the URL it names; the agent runs it once.
@@ -269,7 +273,9 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	if resp.Msg.GetCalls() != 1 || target.procs.LabelCalls("cmd") != 1 {
 		t.Fatalf("calls = %d (store %d), want 1", resp.Msg.GetCalls(), target.procs.LabelCalls("cmd"))
 	}
+	phases = append(phases, drainPhase{"SetLabel retried", time.Since(start)})
 	gA.stopWith(true)
+	phases = append(phases, drainPhase{"A stopped", time.Since(start)})
 
 	for _, j := range jobs {
 		waitErr(t, j.res, "reader of "+j.m.id)
@@ -304,6 +310,77 @@ func TestDrainMovesAllAgents(t *testing.T) {
 	}
 	if disturbed != 0 {
 		t.Errorf("%d readers of machines on B or C saw errors during A's drain", disturbed)
+	}
+	if t.Failed() {
+		phases = append(phases, drainPhase{"readers done", time.Since(start)})
+		gwOf := map[*machine]string{}
+		for g, ms := range byGW {
+			for _, m := range ms {
+				gwOf[m] = g.name
+			}
+		}
+		diag := make([]drainDiag, len(jobs))
+		for i, j := range jobs {
+			diag[i] = drainDiag{m: j.m, gw: gwOf[j.m], r: j.r, errsBefore: errsBefore[i]}
+		}
+		logDrainDiag(t, e, gA.name, start, phases, diag)
+	}
+}
+
+// drainPhase is a step of TestDrainMovesAllAgents and when it ended,
+// relative to the start of the drain.
+type drainPhase struct {
+	name string
+	at   time.Duration
+}
+
+// drainDiag is one reader of TestDrainMovesAllAgents and its machine.
+type drainDiag struct {
+	m          *machine
+	gw         string // the gateway the agent was on before the drain
+	r          *reader
+	errsBefore int64
+}
+
+// logDrainDiag logs what a failed TestDrainMovesAllAgents needs for a
+// diagnosis: the phase timings, and for every reader that saw an error after
+// the drain started (or that did not, on the drained gateway) its errors, the
+// agent's connection events and the registry owner and session, with times
+// relative to the drain start.
+func logDrainDiag(t *testing.T, e *env, drained string, start time.Time, phases []drainPhase, jobs []drainDiag) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	rel := func(at time.Time) string { return at.Sub(start).Round(time.Millisecond).String() }
+	for _, p := range phases {
+		t.Logf("phase %q at +%v", p.name, p.at.Round(time.Millisecond))
+	}
+	for _, j := range jobs {
+		r := j.r
+		n := r.errCount.Load()
+		if (n == j.errsBefore) == (j.gw != drained) {
+			continue
+		}
+		var errs []string
+		for k := range r.errs {
+			mark := "before"
+			if int64(k) >= j.errsBefore {
+				mark = "after"
+			}
+			errs = append(errs, fmt.Sprintf("[%s +%s %s %s] %v", mark, rel(r.errAt[k]), r.errURL[k], connect.CodeOf(r.errs[k]), r.errs[k]))
+		}
+		j.m.evMu.Lock()
+		var evs []string
+		for _, ev := range j.m.events {
+			evs = append(evs, fmt.Sprintf("+%s gen%d %s gw=%s conn=%s epoch=%d status=%d reason=%q",
+				rel(ev.at), ev.gen, ev.Kind, ev.Gateway, ev.ConnID, ev.Epoch, ev.Status, ev.Reason))
+		}
+		j.m.evMu.Unlock()
+		o, ok, oerr := e.store.Owner(ctx, j.m.id, staleAfter)
+		sess, serr := e.store.Session(ctx, j.m.id)
+		t.Logf("machine %s (was on %s): %d attaches, %d/%d bytes, exit %v\n  errors:\n    %s\n  conn events:\n    %s\n  owner %+v ok=%v err=%v\n  session %+v err=%v",
+			j.m.id, j.gw, r.attaches.Load(), len(r.out[0]), len(r.out[1]), r.exit,
+			strings.Join(errs, "\n    "), strings.Join(evs, "\n    "), o, ok, oerr, sess, serr)
 	}
 }
 
