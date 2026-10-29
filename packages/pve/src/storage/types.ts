@@ -52,6 +52,8 @@ export interface SnapshotRef extends NodeRef {
 	/** Hardware config of the source without identity (smbios1, vmgenid, MAC, name) and disks. */
 	hardware: Record<string, string>;
 	createdAt: number;
+	/** Time from the start of freeze to the end of thaw, for running machines. */
+	freezeMs?: number;
 }
 
 export interface StorageUsage {
