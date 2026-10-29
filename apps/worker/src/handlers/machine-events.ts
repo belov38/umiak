@@ -1,8 +1,12 @@
 import {
 	type AgentEvent,
 	type AgentEventKind,
+	completeCommand,
+	insertOperation,
 	insertSandboxEvent,
 	normalizeAgentEvent,
+	operationDeadline,
+	SbxError,
 	type SyntheticEventType,
 } from "@sbx/core";
 import type { Tx } from "@sbx/db";
@@ -14,8 +18,13 @@ import { type MachineRow, withMachineLocked } from "../db.ts";
 // go by `seq`, synthetic ones by `time`. Connection state is read from
 // tunnel_sessions, not from the event order (S2).
 //
-// This task handles `connected`, agent `phase` and `quiesce.watchdog_thawed`
-// (Task 10b); Task 11 adds the other kinds to the tables below. Events without a handler are marked processed.
+// Lock order: withMachineLocked takes the machine's sandbox row first, then the
+// machine row; everything here (commands, operations, snapshots) comes after.
+//
+// State-like agent events (`phase`, `activity`, `ports.changed`) are "latest
+// wins": an event is skipped when a processed event of the same type with a
+// higher seq exists, so a late batch never rolls state back. Events without a
+// handler are marked processed.
 
 export interface MachineEventsData {
 	machineId: string;
@@ -54,12 +63,27 @@ type AgentHandler<K extends AgentEventKind> = (
 
 const SYNTHETIC: Partial<Record<SyntheticEventType, SyntheticHandler>> = {
 	connected: onConnected,
+	// `disconnected`: nothing at once; the health controller owns the rule (§11.1).
+	agent_restarted: onAgentRestarted,
+	rebooted: onRebooted,
+	identity_changed: onIdentityChanged,
 };
 
 const AGENT: { [K in AgentEventKind]?: AgentHandler<K> } = {
 	phase: onPhase,
+	command_exited: onCommandExited,
+	pty_closed: onPtyClosed,
+	activity: onActivity,
+	ports_changed: onPortsChanged,
 	quiesce_watchdog_thawed: onQuiesceWatchdogThawed,
 };
+
+/** Kinds where only the newest event (by seq) counts. */
+const LATEST_WINS: ReadonlySet<AgentEventKind> = new Set<AgentEventKind>([
+	"phase",
+	"activity",
+	"ports_changed",
+]);
 
 /** Returns the number of events processed. */
 export async function handleMachineEvents(
@@ -108,6 +132,9 @@ async function processBatch(
 		for (const row of agent.rows) {
 			const ev = normalizeAgentEvent({ type: row.type, payload: row.payload });
 			if (ev === null) continue;
+			if (LATEST_WINS.has(ev.kind) && (await superseded(tx, machineId, row))) {
+				continue;
+			}
 			const handler = AGENT[ev.kind] as
 				| AgentHandler<typeof ev.kind>
 				| undefined;
@@ -137,6 +164,47 @@ async function processBatch(
 		);
 	}
 	return synthetic.rows.length + agent.rows.length;
+}
+
+/** A processed event of the same raw type with a higher seq exists. */
+async function superseded(
+	tx: Tx,
+	machineId: string,
+	row: AgentRow,
+): Promise<boolean> {
+	const r = await tx.client.query(
+		`SELECT 1 FROM runtime.agent_events
+		 WHERE machine_id = $1 AND type = $2 AND seq > $3 AND processed_at IS NOT NULL
+		 LIMIT 1`,
+		[machineId, row.type, row.seq],
+	);
+	return (r.rowCount ?? 0) > 0;
+}
+
+/** The machine's sandbox, when this machine is its current machine. */
+async function currentSandbox(s: EventScope): Promise<CurrentSandbox | null> {
+	const sandboxId = s.machine.sandbox_id;
+	if (sandboxId === null) return null;
+	const r = await s.tx.client.query<CurrentSandbox>(
+		`SELECT id, state, template_build_id FROM runtime.sandboxes
+		 WHERE id = $1 AND machine_id = $2`,
+		[sandboxId, s.machine.id],
+	);
+	return r.rows[0] ?? null;
+}
+
+interface CurrentSandbox {
+	id: string;
+	state: string;
+	template_build_id: string;
+}
+
+async function sessionBoot(s: EventScope): Promise<string | null> {
+	const r = await s.tx.client.query<{ boot_id: string }>(
+		"SELECT boot_id FROM tunnel.tunnel_sessions WHERE machine_id = $1",
+		[s.machine.id],
+	);
+	return r.rows[0]?.boot_id ?? null;
 }
 
 /** §10.2 `connected`: a degraded sandbox is healthy again. */
@@ -175,6 +243,14 @@ async function onPhase(
 			[m.id, e.phase],
 		);
 		m.agent_phase = e.phase;
+		if (e.phase === "secrets_missing") {
+			// Only for the boot the machine is on now: an event of an older boot
+			// says nothing about the current one.
+			const sb = await currentSandbox(s);
+			if (sb !== null && (await sessionBoot(s)) === row.boot_id) {
+				await maybeReprovision(s, sb, row.boot_id, "secrets_missing");
+			}
+		}
 		return;
 	}
 	const toWarm =
@@ -218,5 +294,219 @@ async function onQuiesceWatchdogThawed(
 			snapshots: r.rows.map((x) => x.id),
 		},
 		"the agent's quiesce watchdog thawed the guest",
+	);
+}
+
+/** §10.2 `agent_restarted`: log only; commands survive an agent restart (S2). */
+async function onAgentRestarted(s: EventScope, e: SyntheticRow): Promise<void> {
+	s.ctx.log.info(
+		{ machineId: s.machine.id, epoch: e.epoch, instanceId: e.instance_id },
+		"agent restarted",
+	);
+}
+
+/**
+ * §10.2 `rebooted`: `last_reboot_at`; commands of an earlier boot are `lost`;
+ * a `ready` sandbox whose new boot (from tunnel_sessions) is not provisioned
+ * gets a `reprovision`.
+ */
+async function onRebooted(s: EventScope, e: SyntheticRow): Promise<void> {
+	const m = s.machine;
+	const bootId = await sessionBoot(s);
+	if (bootId !== null) {
+		const lost = await s.tx.client.query(
+			`UPDATE runtime.commands SET status = 'lost', ended_at = now()
+			 WHERE machine_id = $1 AND status IN ('starting', 'running')
+			   AND boot_id IS DISTINCT FROM $2`,
+			[m.id, bootId],
+		);
+		if ((lost.rowCount ?? 0) > 0) {
+			s.ctx.log.info(
+				{ machineId: m.id, commands: lost.rowCount },
+				"commands of the previous boot lost",
+			);
+		}
+	}
+	const sb = await currentSandbox(s);
+	if (sb === null) return;
+	await s.tx.client.query(
+		`UPDATE runtime.sandboxes
+		 SET last_reboot_at = GREATEST(COALESCE(last_reboot_at, $2), $2),
+		     last_reboot_reason = 'guest_reboot', version = version + 1
+		 WHERE id = $1`,
+		[sb.id, e.time],
+	);
+	if (bootId !== null) await maybeReprovision(s, sb, bootId, "rebooted");
+}
+
+/**
+ * §10.2 `identity_changed`: expected only on the first boot of a machine made
+ * from a snapshot (fork target, create from a saved snapshot), i.e. before it
+ * was ever provisioned. Anything else is an alarm.
+ */
+async function onIdentityChanged(
+	s: EventScope,
+	e: SyntheticRow,
+): Promise<void> {
+	const m = s.machine;
+	const expected = m.origin === "snapshot" && m.provisioned_boot_id === null;
+	if (expected) {
+		s.ctx.log.info({ machineId: m.id }, "identity changed (expected)");
+		return;
+	}
+	s.ctx.metrics.inc("sbx_unexpected_identity_change");
+	s.ctx.log.warn(
+		{ machineId: m.id, epoch: e.epoch, origin: m.origin },
+		"unexpected identity change",
+	);
+}
+
+/**
+ * Reprovision (§7.8): only for a `ready` sandbox with no active operation
+ * (its provision step covers it) and a boot that is not provisioned yet. The
+ * sandbox row is already locked (withMachineLocked); the unique index on
+ * active operations is the last guard (a conflict is a skip).
+ */
+async function maybeReprovision(
+	s: EventScope,
+	sb: CurrentSandbox,
+	bootId: string,
+	cause: string,
+): Promise<void> {
+	if (sb.state !== "ready") return;
+	if (bootId === s.machine.provisioned_boot_id) return;
+	const active = await s.tx.client.query(
+		`SELECT 1 FROM runtime.operations
+		 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
+		[sb.id],
+	);
+	if ((active.rowCount ?? 0) > 0) return;
+	const os = await s.tx.client.query<{ os: "linux" | "windows" }>(
+		"SELECT os FROM runtime.template_builds WHERE id = $1",
+		[sb.template_build_id],
+	);
+	await s.tx.client.query("SAVEPOINT reprovision");
+	let operationId: string;
+	try {
+		operationId = await insertOperation(s.tx, {
+			sandboxId: sb.id,
+			kind: "reprovision",
+			request: { cause, bootId },
+			principal: null,
+			deadlineMs: operationDeadline("reprovision", os.rows[0]?.os ?? "linux"),
+		});
+	} catch (err) {
+		if ((err as { code?: string }).code !== "23505") throw err;
+		await s.tx.client.query("ROLLBACK TO SAVEPOINT reprovision");
+		return;
+	}
+	await s.tx.client.query("RELEASE SAVEPOINT reprovision");
+	await s.ctx.jobs.send(
+		s.tx,
+		"sandbox-op",
+		{ operationId },
+		{ singletonKey: sb.id },
+	);
+	s.ctx.log.info(
+		{ sandboxId: sb.id, machineId: s.machine.id, operationId, cause },
+		"reprovision enqueued",
+	);
+}
+
+/** Terminal status of a command of this machine, unless it is terminal already. */
+async function finishCommand(
+	s: EventScope,
+	commandId: string,
+	result: Parameters<typeof completeCommand>[2],
+): Promise<void> {
+	const r = await s.tx.client.query<{ machine_id: string }>(
+		"SELECT machine_id FROM runtime.commands WHERE id = $1",
+		[commandId],
+	);
+	const owner = r.rows[0]?.machine_id;
+	if (owner !== s.machine.id) {
+		s.ctx.log.warn(
+			{ machineId: s.machine.id, commandId, known: owner !== undefined },
+			"command event for a command of another or no machine ignored",
+		);
+		return;
+	}
+	try {
+		await completeCommand(s.tx.client, commandId, result);
+	} catch (err) {
+		// A malformed result must not block the machine's event queue.
+		if (!(err instanceof SbxError)) throw err;
+		s.ctx.log.warn(
+			{ machineId: s.machine.id, commandId, code: err.code },
+			"command event rejected",
+		);
+	}
+}
+
+/** §10.2 `command.exited`. */
+async function onCommandExited(
+	s: EventScope,
+	e: Extract<AgentEvent, { kind: "command_exited" }>,
+	row: AgentRow,
+): Promise<void> {
+	await finishCommand(s, e.commandId, {
+		status: e.status,
+		exitCode: e.exitCode,
+		signal: e.signal,
+		stdoutBytes: e.stdoutBytes,
+		stderrBytes: e.stderrBytes,
+		endedAt: row.time,
+	});
+}
+
+/** §10.2 `pty.closed`: a PTY command ends as `exited` (no exit code). */
+async function onPtyClosed(
+	s: EventScope,
+	e: Extract<AgentEvent, { kind: "pty_closed" }>,
+	row: AgentRow,
+): Promise<void> {
+	await finishCommand(s, e.commandId, { status: "exited", endedAt: row.time });
+}
+
+/**
+ * §10.2 / §12 `activity`: counters, `busy | idle`, `last_activity_at` (the
+ * event time, not later than now) and `activity_zero_since` (when the
+ * counters became all zero; null while any is non-zero).
+ */
+async function onActivity(
+	s: EventScope,
+	e: Extract<AgentEvent, { kind: "activity" }>,
+	row: AgentRow,
+): Promise<void> {
+	const sb = await currentSandbox(s);
+	if (sb === null) return;
+	const counters = {
+		runningCommands: e.runningCommands,
+		openPtys: e.openPtys,
+		tcpStreams: e.tcpStreams,
+	};
+	const idle =
+		e.runningCommands === 0 && e.openPtys === 0 && e.tcpStreams === 0;
+	await s.tx.client.query(
+		`UPDATE runtime.sandboxes
+		 SET activity_counters = $2, activity = $3,
+		     last_activity_at = LEAST($4::timestamptz, now()),
+		     activity_zero_since = CASE WHEN $5
+		       THEN COALESCE(activity_zero_since, LEAST($4::timestamptz, now())) ELSE NULL END
+		 WHERE id = $1`,
+		[sb.id, JSON.stringify(counters), idle ? "idle" : "busy", row.time, idle],
+	);
+}
+
+/** §10.2 `ports.changed`: stored for S7 `/ports`. */
+async function onPortsChanged(
+	s: EventScope,
+	e: Extract<AgentEvent, { kind: "ports_changed" }>,
+): Promise<void> {
+	const sb = await currentSandbox(s);
+	if (sb === null) return;
+	await s.tx.client.query(
+		"UPDATE runtime.sandboxes SET listening_ports = $2 WHERE id = $1",
+		[sb.id, JSON.stringify(e.listening)],
 	);
 }

@@ -319,6 +319,8 @@ export const sandboxes = runtime.table("sandboxes", {
 		tcpStreams: number;
 	}>(),
 	lastActivityAt: tstz("last_activity_at"),
+	/** Since when the counters are all zero (idle-stop, S6 §12; migration 0202). */
+	activityZeroSince: tstz("activity_zero_since"),
 	lastApiCallAt: tstz("last_api_call_at"),
 	ttlSeconds: integer("ttl_seconds"),
 	deadlineAt: tstz("deadline_at"),

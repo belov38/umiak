@@ -3,6 +3,7 @@ import type { JobSender, KeyRing } from "@sbx/core";
 import type { Db } from "@sbx/db";
 import type pg from "pg";
 import { type DestinationStream, type Logger, pino } from "pino";
+import type { IdpSync } from "./controllers/idp-sync.ts";
 import type { AgentPort, GatewayPort, InfraRegistry } from "./ports.ts";
 
 /** Poll intervals and limits of the step engine. Tests pass milliseconds. */
@@ -92,6 +93,8 @@ export interface WorkerCtx {
 	timing: Timing;
 	log: Logger;
 	metrics: Metrics;
+	/** S8 IdP sync; `ctl-idp-sync` is registered only when set (decision 15). */
+	idpSync?: IdpSync;
 }
 
 /**

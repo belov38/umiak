@@ -78,6 +78,8 @@ export interface Sandbox {
 	activity: "busy" | "idle" | "unknown";
 	activityCounters: Record<string, number> | null;
 	lastActivityAt: Date | null;
+	/** Since when the activity counters are all zero (idle-stop, S6 §12). */
+	activityZeroSince: Date | null;
 	lastApiCallAt: Date | null;
 	ttlSeconds: number | null;
 	deadlineAt: Date | null;
@@ -247,6 +249,7 @@ export function sandboxFromRow(
 		activity: r.activity,
 		activityCounters: r.activity_counters,
 		lastActivityAt: r.last_activity_at,
+		activityZeroSince: r.activity_zero_since,
 		lastApiCallAt: r.last_api_call_at,
 		ttlSeconds: r.ttl_seconds,
 		deadlineAt: r.deadline_at,

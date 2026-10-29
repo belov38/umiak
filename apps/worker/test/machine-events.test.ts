@@ -7,9 +7,22 @@ import {
 	createWorld,
 	insertMachine,
 	insertSandbox,
+	insertSnapshot,
 	machine,
 	type TestWorld,
 } from "./fakes/world.ts";
+import {
+	activeOps,
+	agentEvents,
+	commandStatus,
+	ev,
+	insertCommand,
+	type Linked,
+	linkedSandbox,
+	setSession,
+	synthetic,
+} from "./helpers/controllers.ts";
+import { opsEnv, readySandbox, row, run } from "./helpers/ops.ts";
 
 let db: TestDatabase;
 
@@ -156,5 +169,342 @@ describe("machine-events (connected, phase)", () => {
 			processed: 1,
 		});
 		expect(await unprocessed(w, id)).toBe(0);
+	});
+});
+
+async function sandbox(
+	w: TestWorld,
+	id: string,
+): Promise<Record<string, unknown>> {
+	const r = await w.pool.query(
+		"SELECT * FROM runtime.sandboxes WHERE id = $1",
+		[id],
+	);
+	return r.rows[0];
+}
+
+describe("machine-events (§10.2)", () => {
+	it("duplicates and reordered batches give the same result", async () => {
+		const w = await createWorld(db);
+		const t0 = Date.now() - 30_000;
+		const at = (s: number) => new Date(t0 + s * 1000);
+		const script = (bootId: string, cmd: string) => [
+			ev(
+				1,
+				bootId,
+				"activity",
+				{ runningCommands: 1, openPtys: 0, tcpStreams: 2 },
+				at(1),
+			),
+			ev(
+				2,
+				bootId,
+				"command.exited",
+				{ commandId: cmd, status: "exited", code: 3, stdoutEnd: "10" },
+				at(2),
+			),
+			ev(
+				3,
+				bootId,
+				"activity",
+				{ runningCommands: 0, openPtys: 0, tcpStreams: 0 },
+				at(3),
+			),
+			ev(4, bootId, "ports.changed", { listening: [{ port: 3000 }] }, at(4)),
+			ev(5, bootId, "phase", { phase: "ready" }, at(5)),
+		];
+		const state = async (l: Linked, cmd: string) => {
+			const s = await sandbox(w, l.sandboxId);
+			const m = await machine(w, l.machineId);
+			const c = await w.pool.query(
+				"SELECT status, exit_code, stdout_bytes FROM runtime.commands WHERE id = $1",
+				[cmd],
+			);
+			return {
+				activity: s.activity,
+				counters: s.activity_counters,
+				lastActivityAt: (s.last_activity_at as Date).toISOString(),
+				zeroSince:
+					(s.activity_zero_since as Date | null)?.toISOString() ?? null,
+				ports: s.listening_ports,
+				phase: m.agent_phase,
+				command: c.rows[0],
+			};
+		};
+
+		// In order, one batch.
+		const a = await linkedSandbox(w);
+		const bootA = await setSession(w, a.machineId);
+		const cmdA = await insertCommand(w, a, { bootId: bootA });
+		await agentEvents(w, a.machineId, script(bootA, cmdA));
+
+		// Newest first, then the older ones, then everything again.
+		const b = await linkedSandbox(w);
+		const bootB = await setSession(w, b.machineId);
+		const cmdB = await insertCommand(w, b, { bootId: bootB });
+		const sb = script(bootB, cmdB);
+		await agentEvents(
+			w,
+			b.machineId,
+			[sb[4], sb[3], sb[2]].filter((x) => x !== undefined),
+		);
+		await agentEvents(
+			w,
+			b.machineId,
+			[sb[0], sb[1]].filter((x) => x !== undefined),
+		);
+		await agentEvents(w, b.machineId, sb);
+
+		const sa = await state(a, cmdA);
+		expect(sa).toEqual({
+			activity: "idle",
+			counters: { runningCommands: 0, openPtys: 0, tcpStreams: 0 },
+			lastActivityAt: at(3).toISOString(),
+			zeroSince: at(3).toISOString(),
+			ports: [{ port: 3000 }],
+			phase: "ready",
+			command: { status: "exited", exit_code: 3, stdout_bytes: "10" },
+		});
+		expect(await state(b, cmdB)).toEqual(sa);
+	});
+
+	it("activity: non-zero counters make the sandbox busy and clear the zero mark", async () => {
+		const w = await createWorld(db);
+		const l = await linkedSandbox(w);
+		const boot = await setSession(w, l.machineId);
+		await agentEvents(w, l.machineId, [
+			ev(1, boot, "activity", {
+				runningCommands: 0,
+				openPtys: 0,
+				tcpStreams: 0,
+			}),
+		]);
+		const zero = (await sandbox(w, l.sandboxId)).activity_zero_since as Date;
+		expect(zero).not.toBeNull();
+		// A later heartbeat with zeros keeps the first zero time.
+		await agentEvents(w, l.machineId, [
+			ev(2, boot, "activity", {
+				runningCommands: 0,
+				openPtys: 0,
+				tcpStreams: 0,
+			}),
+		]);
+		expect((await sandbox(w, l.sandboxId)).activity_zero_since).toEqual(zero);
+		await agentEvents(w, l.machineId, [
+			ev(3, boot, "activity", {
+				runningCommands: 0,
+				openPtys: 1,
+				tcpStreams: 0,
+			}),
+		]);
+		const s = await sandbox(w, l.sandboxId);
+		expect(s.activity).toBe("busy");
+		expect(s.activity_zero_since).toBeNull();
+	});
+
+	it("rebooted: commands of the previous boot are lost, reprovision is enqueued once", async () => {
+		const w = await createWorld(db);
+		const old = randomUUID();
+		const l = await linkedSandbox(w, { provisionedBootId: old });
+		const oldCmd = await insertCommand(w, l, { bootId: old });
+		const doneCmd = await insertCommand(w, l, {
+			bootId: old,
+			status: "exited",
+		});
+		const fresh = await setSession(w, l.machineId);
+		const newCmd = await insertCommand(w, l, { bootId: fresh });
+		w.jobs.clear();
+
+		await synthetic(w, l.machineId, "disconnected", "rebooted", "connected");
+
+		expect(await commandStatus(w, oldCmd)).toBe("lost");
+		expect(await commandStatus(w, doneCmd)).toBe("exited");
+		expect(await commandStatus(w, newCmd)).toBe("running");
+		const s = await sandbox(w, l.sandboxId);
+		expect(s.last_reboot_at).not.toBeNull();
+		expect(s.last_reboot_reason).toBe("guest_reboot");
+		const ops = await activeOps(w, l.sandboxId);
+		expect(ops).toHaveLength(1);
+		expect(ops[0]?.kind).toBe("reprovision");
+		expect(ops[0]?.request).toEqual({ cause: "rebooted", bootId: fresh });
+		const op = await row(w, "operations", ops[0]?.id as string);
+		expect(op.deadline_at).not.toBeNull();
+		expect(op.requested_by).toBeNull();
+		expect(w.jobs.sent.filter((j) => j.queue === "sandbox-op")).toEqual([
+			{
+				queue: "sandbox-op",
+				data: { operationId: ops[0]?.id },
+				opts: { singletonKey: l.sandboxId },
+			},
+		]);
+
+		// A second reboot event while the reprovision is active: nothing more.
+		await synthetic(w, l.machineId, "rebooted");
+		expect(await activeOps(w, l.sandboxId)).toHaveLength(1);
+	});
+
+	it("rebooted: no reprovision for a provisioned boot, another active operation or a non-ready sandbox", async () => {
+		const w = await createWorld(db);
+		const boot = randomUUID();
+		const provisioned = await linkedSandbox(w, { provisionedBootId: boot });
+		await setSession(w, provisioned.machineId, { bootId: boot });
+		await synthetic(w, provisioned.machineId, "rebooted");
+		expect(await activeOps(w, provisioned.sandboxId)).toEqual([]);
+
+		const busy = await linkedSandbox(w, { provisionedBootId: randomUUID() });
+		await setSession(w, busy.machineId);
+		await w.pool.query(
+			"INSERT INTO runtime.operations (sandbox_id, kind, state) VALUES ($1, 'stop', 'running')",
+			[busy.sandboxId],
+		);
+		await synthetic(w, busy.machineId, "rebooted");
+		expect((await activeOps(w, busy.sandboxId)).map((o) => o.kind)).toEqual([
+			"stop",
+		]);
+
+		const stopping = await linkedSandbox(w, {
+			state: "stopping",
+			provisionedBootId: randomUUID(),
+		});
+		await setSession(w, stopping.machineId);
+		await synthetic(w, stopping.machineId, "rebooted");
+		expect(await activeOps(w, stopping.sandboxId)).toEqual([]);
+	});
+
+	it("phase secrets_missing on the current, unprovisioned boot enqueues reprovision", async () => {
+		const w = await createWorld(db);
+		const boot = randomUUID();
+		const done = await linkedSandbox(w, { provisionedBootId: boot });
+		await setSession(w, done.machineId, { bootId: boot });
+		await agentEvents(w, done.machineId, [
+			ev(1, boot, "phase", { phase: "secrets_missing" }),
+		]);
+		expect(await activeOps(w, done.sandboxId)).toEqual([]);
+
+		const l = await linkedSandbox(w, { provisionedBootId: randomUUID() });
+		const cur = await setSession(w, l.machineId);
+		// An event of an older boot says nothing about the current one.
+		await agentEvents(w, l.machineId, [
+			ev(1, randomUUID(), "phase", { phase: "secrets_missing" }),
+		]);
+		expect(await activeOps(w, l.sandboxId)).toEqual([]);
+		await agentEvents(w, l.machineId, [
+			ev(2, cur, "phase", { phase: "secrets_missing" }),
+		]);
+		const ops = await activeOps(w, l.sandboxId);
+		expect(ops.map((o) => o.request)).toEqual([
+			{ cause: "secrets_missing", bootId: cur },
+		]);
+		expect((await machine(w, l.machineId)).agent_phase).toBe("secrets_missing");
+	});
+
+	it("reboot of a real sandbox: the reprovision delivers again and records the new boot", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const r = await readySandbox(w, e);
+		const before = await machine(w, r.machineId);
+		const fresh = await setSession(w, r.machineId);
+		await synthetic(w, r.machineId, "rebooted");
+		const ops = await activeOps(w, r.sandboxId);
+		expect(ops).toHaveLength(1);
+		const updates = w.agent.callsOf("updateSecrets").length;
+		expect(await run(w, ops[0]?.id as string)).toBe("succeeded");
+		const after = await machine(w, r.machineId);
+		expect(before.provisioned_boot_id).not.toBe(fresh);
+		expect(after.provisioned_boot_id).toBe(fresh);
+		expect(w.agent.callsOf("updateSecrets").length).toBe(updates + 1);
+		expect((await sandbox(w, r.sandboxId)).state).toBe("ready");
+	});
+
+	it("command.exited and pty.closed never overwrite a terminal status or another machine's command", async () => {
+		const w = await createWorld(db);
+		const l = await linkedSandbox(w);
+		const other = await linkedSandbox(w);
+		const boot = await setSession(w, l.machineId);
+		const pty = await insertCommand(w, l, { bootId: boot, mode: "pty" });
+		const killed = await insertCommand(w, l, {
+			bootId: boot,
+			status: "killed",
+		});
+		const foreign = await insertCommand(w, other, { bootId: boot });
+		await agentEvents(w, l.machineId, [
+			ev(1, boot, "pty.closed", { commandId: pty }),
+			ev(2, boot, "command.exited", {
+				commandId: killed,
+				status: "exited",
+				code: 0,
+			}),
+			ev(3, boot, "command.exited", {
+				commandId: foreign,
+				status: "exited",
+				code: 0,
+			}),
+			ev(4, boot, "command.exited", {
+				commandId: "nope",
+				status: "exited",
+				code: 0,
+			}),
+		]);
+		expect(await commandStatus(w, pty)).toBe("exited");
+		expect(await commandStatus(w, killed)).toBe("killed");
+		expect(await commandStatus(w, foreign)).toBe("running");
+		expect(await unprocessed(w, l.machineId)).toBe(0);
+	});
+
+	it("identity_changed is expected only on the first boot of a machine from a snapshot", async () => {
+		const w = await createWorld(db);
+		const fork = await linkedSandbox(w, {
+			origin: "snapshot",
+			machineState: "booting",
+		});
+		await synthetic(w, fork.machineId, "identity_changed");
+		expect(w.metrics.count("sbx_unexpected_identity_change")).toBe(0);
+
+		const provisionedFork = await linkedSandbox(w, {
+			origin: "snapshot",
+			provisionedBootId: randomUUID(),
+		});
+		await synthetic(w, provisionedFork.machineId, "identity_changed");
+		const plain = await linkedSandbox(w);
+		await synthetic(w, plain.machineId, "identity_changed");
+		expect(w.metrics.count("sbx_unexpected_identity_change")).toBe(2);
+	});
+
+	it("agent_restarted is only logged; disconnected changes nothing", async () => {
+		const w = await createWorld(db);
+		const l = await linkedSandbox(w);
+		const boot = await setSession(w, l.machineId);
+		const cmd = await insertCommand(w, l, { bootId: boot });
+		const before = await sandbox(w, l.sandboxId);
+		await synthetic(w, l.machineId, "agent_restarted", "disconnected");
+		expect(await commandStatus(w, cmd)).toBe("running");
+		const after = await sandbox(w, l.sandboxId);
+		expect(after.version).toBe(before.version);
+		expect(after.health).toBe("ok");
+		expect(w.logs.some((x) => x.includes("agent restarted"))).toBe(true);
+	});
+
+	it("quiesce.watchdog_thawed marks the machine's creating snapshot quiesce_broken", async () => {
+		const w = await createWorld(db);
+		const l = await linkedSandbox(w);
+		const boot = await setSession(w, l.machineId);
+		const { snapshotId } = await insertSnapshot(w, {
+			state: "creating",
+			kind: "saved",
+		});
+		const { snapshotId: ready } = await insertSnapshot(w, {
+			state: "ready",
+			kind: "saved",
+		});
+		await w.pool.query(
+			"UPDATE runtime.snapshots SET source_machine_id = $2 WHERE id = ANY($1::uuid[])",
+			[[snapshotId, ready], l.machineId],
+		);
+		await agentEvents(w, l.machineId, [
+			ev(1, boot, "quiesce.auto_thawed", { by: "watchdog" }),
+		]);
+		expect((await row(w, "snapshots", snapshotId)).quiesce_broken).toBe(true);
+		expect((await row(w, "snapshots", ready)).quiesce_broken).toBe(false);
+		expect(w.metrics.count("sbx_quiesce_watchdog_thawed_total")).toBe(1);
 	});
 });

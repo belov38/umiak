@@ -61,6 +61,7 @@ export {
 	COMMAND_MODES,
 	type CommandResult,
 	type CommandSpec,
+	completeCommand,
 	TERMINAL_COMMAND_STATUSES,
 	truncateUtf8,
 } from "./commands.ts";
@@ -90,6 +91,7 @@ export {
 	claimWarm,
 	type Placement,
 } from "./create-placement.ts";
+export { requestSystemDelete } from "./delete.ts";
 export { FORK_SCOPE, type ForkInput, type ForkResult } from "./fork.ts";
 export {
 	RESUME_SCOPE,

@@ -1,7 +1,18 @@
+import { withTx } from "@sbx/db";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DELETE_RETRY_LIMIT, uuidv7 } from "../src/index.ts";
-import { expectCode, principal, serviceEnv } from "./helpers/service.ts";
+import {
+	DELETE_RETRY_LIMIT,
+	RecordingJobSender,
+	requestSystemDelete,
+	uuidv7,
+} from "../src/index.ts";
+import {
+	expectCode,
+	principal,
+	seedSandbox,
+	serviceEnv,
+} from "./helpers/service.ts";
 import { insertOperation, insertSandbox } from "./helpers/topology.ts";
 
 describe.skipIf(skipPg())("SandboxService.delete (S6 §7.2)", () => {
@@ -122,5 +133,44 @@ describe.skipIf(skipPg())("SandboxService.delete (S6 §7.2)", () => {
 		await expectCode(env.svc.delete(env.p, uuidv7()), "not_found");
 		await expectCode(env.svc.delete(env.p, "no-such-slug"), "not_found");
 		expect((await env.svc.get(env.p, sandbox.id)).state).toBe("creating");
+	});
+
+	it("requestSystemDelete: no principal, reason in the event and request, same supersede path", async () => {
+		const env = await serviceEnv(t.pool);
+		const s = await seedSandbox(t.pool, env, {
+			state: "stopped",
+			machineState: "stopped",
+		});
+		const stuck = await insertOperation(t.pool, {
+			sandboxId: s.sandboxId,
+			kind: "resume",
+			state: "pending",
+		});
+		const jobs = new RecordingJobSender();
+		const del = await withTx(t.pool, (tx) =>
+			requestSystemDelete(tx, jobs, s.sandboxId, "retention"),
+		);
+		expect(del.kind).toBe("delete");
+		expect(del.requestedBy).toBeNull();
+		expect(del.requestedByKey).toBeNull();
+		expect(del.request).toEqual({ reason: "retention" });
+		expect((await op(stuck)).state).toBe("superseded");
+		expect(jobs.sent).toEqual([
+			{
+				queue: "sandbox-op",
+				data: { operationId: del.id },
+				opts: { singletonKey: s.sandboxId, retryLimit: DELETE_RETRY_LIMIT },
+			},
+		]);
+		const ev = await t.pool.query(
+			"SELECT to_state, reason FROM runtime.sandbox_events WHERE sandbox_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+			[s.sandboxId],
+		);
+		expect(ev.rows[0]).toEqual({ to_state: "deleting", reason: "retention" });
+		// A repeat returns the active delete.
+		const again = await withTx(t.pool, (tx) =>
+			requestSystemDelete(tx, jobs, s.sandboxId, "retention"),
+		);
+		expect(again.id).toBe(del.id);
 	});
 });

@@ -1,4 +1,5 @@
 export * from "./context.ts";
+export * from "./controllers/index.ts";
 export * from "./db.ts";
 export * from "./handlers/dlq.ts";
 export * from "./handlers/machine-events.ts";
