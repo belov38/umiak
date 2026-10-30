@@ -1,3 +1,4 @@
 slug: cycle-a
 os: linux
 extends: cycle-b
+vmids: [597]

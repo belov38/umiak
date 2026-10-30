@@ -307,7 +307,7 @@ export async function stageVm(
 	save: (patch: Partial<Manifest>) => void,
 ): Promise<void> {
 	const { api } = deps;
-	const { vmid, mac } = await deps.allocator.allocateTemplate();
+	const { vmid, mac } = await deps.allocator.allocateTemplate(recipe.vmids);
 	if (isProtectedVmid(vmid))
 		throw new Error(`allocator returned protected VMID ${vmid}`);
 	st.vmid = vmid;
