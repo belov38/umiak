@@ -217,12 +217,12 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 
 | Переменная | Назначение | Дефолт PoC |
 |---|---|---|
-| `SBX_PVE_URL` | Proxmox API | `https://pve.tail0000.ts.net:8006` |
+| `SBX_PVE_URL` | Proxmox API | `https://pve:8006` (свой адрес Proxmox — через env, в compose — `deploy/compose/.env`) |
 | `SBX_PVE_TOKEN_ID` | id токена | `sbx@pve!poc` |
 | `SBX_PVE_TOKEN_SECRET_FILE` | секрет токена | `~/.config/sbx/pve-token` (права 600) |
 | `SBX_PVE_CA_FILE` | CA хоста (`pve-root-ca.pem`), TLS проверяется | `~/.config/sbx/pve-root-ca.pem` |
 | `SBX_PVE_TLS_NAME` | имя, по которому проверяется сертификат `:8006` | `pve` |
-| `SBX_NODE_SSH_HOST`, `SBX_NODE_SSH_KEY_FILE`, `SBX_NODE_SSH_KNOWN_HOSTS` | доступ к `sbx-node` | `pve.tail0000.ts.net`, `~/.config/sbx/sbx-node_ed25519`, `~/.config/sbx/known_hosts` |
+| `SBX_NODE_SSH_HOST`, `SBX_NODE_SSH_KEY_FILE`, `SBX_NODE_SSH_KNOWN_HOSTS` | доступ к `sbx-node` | `pve`, `~/.config/sbx/sbx-node_ed25519`, `~/.config/sbx/known_hosts` |
 | `SBX_VMID_RANGE` | диапазон VMID | `500-598` |
 | `SBX_CLUSTER_ID` | номер кластера для MAC (1 байт) | `1` |
 | `SBX_STATE_DB` | SQLite аллокатора (PoC) | `~/.local/state/sbx/poc.db` |

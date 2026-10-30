@@ -93,8 +93,8 @@ cp deploy/compose/.env.example deploy/compose/.env   # один раз; впис
 mkdir -p deploy/compose/secrets                       # один раз
 docker compose -f deploy/compose/compose.yaml up -d --build
 docker compose -f deploy/compose/compose.yaml ps -a
-# secrets-init, keycloak-db, migrate: Exited (0)
-# postgres, keycloak, api, oauth2-proxy, worker: healthy
+# gateway-secrets, secrets-init, keycloak-db, migrate: Exited (0)
+# postgres, keycloak, api, oauth2-proxy, gateway, worker: healthy
 curl -s http://localhost:8080/v1/meta                                     # api: oidc.issuer = Keycloak
 curl -s http://localhost:9091/readyz                                      # api: {"ready":true,...}
 curl -s http://localhost:8180/realms/sbx/.well-known/openid-configuration # Keycloak
@@ -149,7 +149,9 @@ Email verified, иначе `api` отклонит их токен. Операт�
 http://localhost:4180/api/v1/me → страница входа Keycloak → JSON с пользователем, его личной командой и
 `"auth": {"kind": "session"}`. Пользователь и личная команда создаются при первом входе.
 
-**CLI.** `sbx` (S7, задача 17) входит через Device Authorization Grant:
+**CLI.** `sbx` (`apps/cli`) входит через Device Authorization Grant. Бинарник для своей платформы собирает
+`mise exec -- pnpm --filter @sbx/cli build` (`apps/cli/dist/sbx-<os>-<arch>`), из исходников —
+`mise exec -- pnpm --filter @sbx/cli sbx <команда>`.
 
 ```sh
 sbx login --api-url http://localhost:8080
@@ -254,10 +256,11 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 - Realm импортируется только в пустой Keycloak: после смены `SBX_APP_ORIGIN` или `SBX_OAUTH2_PROXY_REDIRECT_URL`
   нужен чистый Keycloak (см. «Keycloak»).
 - `api` никогда не верит заголовкам `Tailscale-User-*`, `X-Auth-Request-*` и `X-Forwarded-User/Email` на public
-  listener-е: там личность — только `Authorization: Bearer`.
+  listener-е: там личность — только `Authorization: Bearer`. `X-Forwarded-For` от `SBX_API_TRUSTED_PROXY_CIDRS`
+  идёт только в `clientIp` лога.
 - Пример такой раскладки — dev control plane на CT 590 (`infra/dev-cp/compose.dev-cp.yaml`).
-- CLI с частным CA: позже у `sbx` появится `--cacert` / `SBX_CA_FILE` (под Node работает и
-  `NODE_EXTRA_CA_CERTS`). Для dev control plane не нужно: у Tailscale Serve сертификат Let's Encrypt.
+- CLI с частным CA: `sbx --cacert <file>` или `SBX_CA_FILE` (добавляется к системным корням; действует и на
+  Keycloak, и на WebSocket `sbx shell`). Для dev control plane не нужно: у Tailscale Serve сертификат Let's Encrypt.
 
 ## Настройки
 
@@ -289,7 +292,7 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 - Reconcile работает в dry-run (`SBX_RECONCILE_DRY_RUN=1`): читает список VM на Proxmox (только чтение) и логирует, что сделал бы.
 - Целевые размеры пулов в `sbx.yaml` равны 0 (`pools: []`, решение 17), поэтому worker сам не создаёт VM.
 - Gateway (S4) в стеке и worker получает `SBX_GATEWAY_SERVICE_TOKEN_FILE` из `gateway.yaml`, но без VM с агентом (S3) туннеля нет: агентский порт недоступен, и создание sandbox не доходит до `ready`.
-- RPC агента в `api` отвечают `503 agent_unavailable`, пока не подключён S3 (решение 3 плана S7); файлы идут через gateway.
+- RPC агента в `api` отвечают `503 agent_unavailable`, пока не подключён `ConnectAgentApi` (S3 уже в `main`, подключение — по команде master-сессии; решение 3 плана S7, `apps/api/README.md`); файлы идут через gateway.
 - Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой схемы `tunnel` (до этой миграции), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
 - С `SBX_GATEWAY_SERVICE_TOKEN_FILE` worker находит gateway, который держит туннель machine, через `PgRegistry` из `@sbx/agent-client` (своё небольшое подключение к Postgres и LISTEN `tunnel_sessions`) и вызывает на нём `rotate-token`.
 - `SBX_PORT_DOMAIN` (домен опубликованных портов, например `sbx.example.com`) и `SBX_SSH_USER_CA_KEYS_FILE` (файл с публичными ключами SSH user CA, по одному в строке) необязательны: worker передаёт их агенту в каждом Claim (`port_domain`, `ssh_user_ca_keys`). Без них поля пустые.
