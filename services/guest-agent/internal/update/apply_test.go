@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -576,4 +577,70 @@ func TestApplyRemovesStagedPackage(t *testing.T) {
 			t.Errorf("package outside staging removed: %v", err)
 		}
 	})
+}
+
+// A package uploaded into uploads/ is removed after Apply, success or
+// failure, and its upload record is dropped through ForgetUpload; so is
+// the record of a staged package. A package elsewhere and its record are
+// left alone.
+func TestApplyRemovesUploadedPackage(t *testing.T) {
+	putPkg := func(t *testing.T, e *applyEnv, dir, name string) string {
+		t.Helper()
+		data, err := os.ReadFile(packTest(t, "v2", e.priv))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	forgotten := func(e *applyEnv) *[]string {
+		var ids []string
+		e.m.opts.ForgetUpload = func(id string) { ids = append(ids, id) }
+		return &ids
+	}
+	for _, tc := range []struct {
+		name       string
+		dir        func(l paths.Layout) string
+		fail       bool
+		wantRemove bool
+	}{
+		{"uploads success", func(l paths.Layout) string { return l.UploadsDir }, false, true},
+		{"uploads failure", func(l paths.Layout) string { return l.UploadsDir }, true, true},
+		{"staging failure", func(l paths.Layout) string { return l.StagingDir }, true, true},
+		{"outside", func(l paths.Layout) string { return filepath.Join(l.StateDir, "elsewhere") }, true, false},
+		{"uploads sibling", func(l paths.Layout) string { return l.UploadsDir + "-x" }, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newApplyEnv(t, "v1")
+			pkg := putPkg(t, e, tc.dir(e.l), "up")
+			e.uploads["up"] = pkg
+			ids := forgotten(e)
+			if tc.fail {
+				e.m.opts.SelfTest = func(context.Context, string) error { return errors.New("selftest failed") }
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err := e.m.Apply(ctx, "up", false)
+			if (err != nil) != tc.fail {
+				t.Fatalf("Apply err = %v, want failure %v", err, tc.fail)
+			}
+			_, serr := os.Stat(pkg)
+			if removed := os.IsNotExist(serr); removed != tc.wantRemove {
+				t.Errorf("package removed = %v, want %v (%v)", removed, tc.wantRemove, serr)
+			}
+			want := []string(nil)
+			if tc.wantRemove {
+				want = []string{"up"}
+			}
+			if !slices.Equal(*ids, want) {
+				t.Errorf("forgotten uploads = %v, want %v", *ids, want)
+			}
+		})
+	}
 }

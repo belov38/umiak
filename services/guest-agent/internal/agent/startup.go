@@ -258,13 +258,14 @@ func (a *agent) buildServices() error {
 		Log:     a.log,
 	})
 	a.updater, err = update.New(update.Options{
-		Layout:  a.l,
-		Keys:    a.updateKeys,
-		Uploads: a.files.UploadPath,
-		Exit:    a.exit,
-		Emit:    a.emit,
-		Now:     a.d.Now,
-		Version: a.version,
+		Layout:       a.l,
+		Keys:         a.updateKeys,
+		Uploads:      a.files.UploadPath,
+		ForgetUpload: a.files.ForgetUpload,
+		Exit:         a.exit,
+		Emit:         a.emit,
+		Now:          a.d.Now,
+		Version:      a.version,
 		ShimProtos: func() []int {
 			_, protos := update.ShimVersions(a.l, a.proc.UnitAlive)
 			return protos

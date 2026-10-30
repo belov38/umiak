@@ -539,6 +539,28 @@ func (s *Service) UploadPath(id string) (string, error) {
 	return rec.TempPath, nil
 }
 
+// ForgetUpload drops upload id and its temporary file, like DELETE
+// /files/uploads/{id}; ApplyUpdate calls it after it removed the package
+// of the upload. An unknown id is ignored; failures are logged (the
+// janitor expires the record later).
+func (s *Service) ForgetUpload(id string) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.opts.DurableTimeout)
+	defer cancel()
+	unlock, err := s.uploads.lock(ctx, id)
+	if err != nil {
+		s.opts.Log.Warn("files: forget upload", "upload", id, "err", err)
+		return
+	}
+	defer unlock()
+	rec, ok, err := s.getUpload(id)
+	if err == nil && ok {
+		err = s.dropUpload(ctx, rec)
+	}
+	if err != nil {
+		s.opts.Log.Warn("files: forget upload", "upload", id, "err", err)
+	}
+}
+
 // Janitor removes uploads without activity for UploadTTL (and their
 // temporary files), once at the start and then hourly, until ctx ends.
 func (s *Service) Janitor(ctx context.Context) {

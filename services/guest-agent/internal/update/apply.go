@@ -42,6 +42,10 @@ type Options struct {
 	// Uploads maps an upload id to the path of the uploaded package
 	// (files.Service.UploadPath). Required.
 	Uploads func(id string) (string, error)
+	// ForgetUpload drops the upload record of a package Apply removed
+	// (files.Service.ForgetUpload). Nil keeps the record; the files
+	// janitor expires it.
+	ForgetUpload func(id string)
 	// SelfTest runs the selftest of the new binary. Nil runs
 	// ExecSelfTest with Schema and ShimProtos.
 	SelfTest func(ctx context.Context, bin string) error
@@ -138,7 +142,7 @@ func (m *Manager) Apply(ctx context.Context, uploadID string, allowBad bool) (*a
 	if err != nil {
 		return nil, err
 	}
-	defer removeStaged(l, pkgPath)
+	defer m.removePackage(uploadID, pkgPath)
 
 	pkgDir, cleanup, man, err := stage(l, pkgPath, m.opts.Keys())
 	if err != nil {
@@ -191,17 +195,29 @@ func (m *Manager) Apply(ctx context.Context, uploadID string, allowBad bool) (*a
 	return &agentv1.ApplyUpdateResponse{From: from, To: to}, nil
 }
 
-// removeStaged deletes the uploaded package at pkgPath once Apply is done
-// with it, when it lies in StagingDir (spec 17.4 step 1); a package
-// elsewhere belongs to the operator.
-func removeStaged(l paths.Layout, pkgPath string) {
-	rel, err := filepath.Rel(l.StagingDir, pkgPath)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+// removePackage deletes the uploaded package at pkgPath once Apply is done
+// with it, success or failure, when it lies in StagingDir (spec 17.4 step
+// 1) or UploadsDir (an upload never committed), and drops upload uploadID
+// through ForgetUpload. A package elsewhere belongs to the operator: the
+// file and its upload record stay.
+func (m *Manager) removePackage(uploadID, pkgPath string) {
+	l := m.opts.Layout
+	if !within(l.StagingDir, pkgPath) && !within(l.UploadsDir, pkgPath) {
 		return
 	}
 	if err := os.Remove(pkgPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("update: cannot remove the uploaded package", "path", pkgPath, "err", err)
 	}
+	if m.opts.ForgetUpload != nil {
+		m.opts.ForgetUpload(uploadID)
+	}
+}
+
+// within reports whether path lies inside dir (not dir itself).
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) &&
+		!filepath.IsAbs(rel)
 }
 
 // switchTo points previous at p.From and current at p.To. On failure both
