@@ -11,7 +11,10 @@ export interface Config {
 	nodeSshHost: string;
 	nodeSshKeyFile: string;
 	nodeSshKnownHosts: string;
+	/** Sandbox VMIDs (pve: 500-589; 590-596 are dev infrastructure). */
 	vmidRange: { min: number; max: number };
+	/** VMIDs of S5 template builds (pve: 597-598; 599 is the PoC template). */
+	templateVmidRange: { min: number; max: number };
 	clusterId: number;
 	stateDb: string;
 	templateVmid: number;
@@ -27,6 +30,14 @@ function expandHome(p: string, home: string): string {
 	return p === "~" || p.startsWith("~/") ? home + p.slice(1) : p;
 }
 
+function parseRange(name: string, v: string): { min: number; max: number } {
+	const m = /^(\d+)-(\d+)$/.exec(v);
+	if (!m) throw new Error(`${name}: expected <min>-<max>, got ${v}`);
+	const r = { min: Number(m[1]), max: Number(m[2]) };
+	if (r.min < 100 || r.max < r.min) throw new Error(`${name}: invalid ${v}`);
+	return r;
+}
+
 function parseIntStrict(v: string, name: string): number {
 	if (!/^\d+$/.test(v)) throw new Error(`${name}: not a number: ${v}`);
 	return Number(v);
@@ -39,12 +50,18 @@ export function loadConfig(
 	const get = (k: string, d: string) => env[k] ?? d;
 	const path = (k: string, d: string) => expandHome(get(k, d), home);
 
-	const range = get("SBX_VMID_RANGE", "500-598");
-	const m = /^(\d+)-(\d+)$/.exec(range);
-	if (!m) throw new Error(`SBX_VMID_RANGE: expected <min>-<max>, got ${range}`);
-	const vmidRange = { min: Number(m[1]), max: Number(m[2]) };
-	if (vmidRange.min < 100 || vmidRange.max < vmidRange.min)
-		throw new Error(`SBX_VMID_RANGE: invalid ${range}`);
+	const vmidRange = parseRange("SBX_VMID_RANGE", get("SBX_VMID_RANGE", "500-589"));
+	const templateVmidRange = parseRange(
+		"SBX_TEMPLATE_VMID_RANGE",
+		get("SBX_TEMPLATE_VMID_RANGE", "597-598"),
+	);
+	if (
+		templateVmidRange.min <= vmidRange.max &&
+		vmidRange.min <= templateVmidRange.max
+	)
+		throw new Error(
+			"SBX_TEMPLATE_VMID_RANGE overlaps SBX_VMID_RANGE: templates and sandboxes must not share VMIDs",
+		);
 
 	const templateVmid = parseIntStrict(
 		get("SBX_TEMPLATE_VMID", "599"),
@@ -75,6 +92,7 @@ export function loadConfig(
 			"~/.config/sbx/known_hosts",
 		),
 		vmidRange,
+		templateVmidRange,
 		clusterId,
 		stateDb: path("SBX_STATE_DB", "~/.local/state/sbx/poc.db"),
 		templateVmid,

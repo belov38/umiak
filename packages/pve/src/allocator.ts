@@ -88,6 +88,8 @@ export interface AllocatorOptions {
 	clusterId: number;
 	range: { min: number; max: number };
 	templateVmid: number;
+	/** Where allocateTemplate looks; defaults to `range`. */
+	templateRange?: { min: number; max: number };
 	/** VMIDs taken outside our table: VMs in /cluster/resources and LVs vm-<id>-*. */
 	occupied: () => Promise<Set<number>>;
 	now?: () => number;
@@ -125,7 +127,8 @@ export class Allocator {
 	 * caller marks it active once the VM exists, or releases it after a failed build.
 	 */
 	async allocateTemplate(): Promise<AllocatedVmid> {
-		const { store, clusterId, range, templateVmid } = this.#o;
+		const { store, clusterId, templateVmid } = this.#o;
+		const range = this.#o.templateRange ?? this.#o.range;
 		const occupied = await this.#o.occupied();
 		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
 		for (let vmid = range.max; vmid >= range.min; vmid--) {

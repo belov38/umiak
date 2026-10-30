@@ -28,7 +28,7 @@ topology:
     - name: pve
       clusterMacId: 1
       vmidMin: 500
-      vmidMax: 598
+      vmidMax: 589
       apiUrl: https://100.64.10.2:8006
       tlsName: pve
       secretRef: pve

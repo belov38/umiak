@@ -15,7 +15,9 @@ describe("loadConfig", () => {
 		expect(c.nodeSshHost).toBe("pve.tail0000.ts.net");
 		expect(c.nodeSshKeyFile).toBe("/home/u/.config/sbx/sbx-node_ed25519");
 		expect(c.nodeSshKnownHosts).toBe("/home/u/.config/sbx/known_hosts");
-		expect(c.vmidRange).toEqual({ min: 500, max: 598 });
+		// pve layout: 500-589 sandboxes, 590-596 dev infrastructure, 597-599 templates.
+		expect(c.vmidRange).toEqual({ min: 500, max: 589 });
+		expect(c.templateVmidRange).toEqual({ min: 597, max: 598 });
 		expect(c.clusterId).toBe(1);
 		expect(c.stateDb).toBe("/home/u/.local/state/sbx/poc.db");
 		expect(c.templateVmid).toBe(599);
@@ -39,10 +41,21 @@ describe("loadConfig", () => {
 		expect(c.stateDb).toBe("/h/x.db");
 	});
 
-	it("accepts a template VMID inside the range", () => {
-		const c = loadConfig({ SBX_TEMPLATE_VMID: "598" }, "/h");
-		expect(c.templateVmid).toBe(598);
-		expect(c.vmidRange).toEqual({ min: 500, max: 598 });
+	it("accepts a template VMID inside the sandbox range", () => {
+		const c = loadConfig(
+			{ SBX_TEMPLATE_VMID: "520", SBX_TEMPLATE_VMID_RANGE: "590-591" },
+			"/h",
+		);
+		expect(c.templateVmid).toBe(520);
+	});
+
+	it("rejects template and sandbox ranges that overlap", () => {
+		expect(() =>
+			loadConfig({ SBX_TEMPLATE_VMID_RANGE: "585-598" }, "/h"),
+		).toThrow(/overlaps/);
+		expect(() =>
+			loadConfig({ SBX_TEMPLATE_VMID_RANGE: "1-2" }, "/h"),
+		).toThrow(/invalid/);
 	});
 
 	it("rejects a malformed range", () => {

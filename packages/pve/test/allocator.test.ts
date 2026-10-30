@@ -16,6 +16,7 @@ function make(
 		occupied?: number[];
 		store?: AllocatorStore;
 		range?: { min: number; max: number };
+		templateRange?: { min: number; max: number };
 	} = {},
 ) {
 	const store = opts.store ?? new SqliteStateStore(":memory:");
@@ -24,6 +25,7 @@ function make(
 		clusterId: 1,
 		range: opts.range ?? { min: 500, max: 598 },
 		templateVmid: 599,
+		...(opts.templateRange ? { templateRange: opts.templateRange } : {}),
 		occupied: async () => new Set(opts.occupied ?? []),
 	});
 	return { store, alloc };
@@ -50,6 +52,17 @@ describe("Allocator", () => {
 		expect((await alloc.get(597))?.state).toBe("active");
 		await alloc.release(597);
 		expect(await alloc.get(597)).toBeUndefined();
+	});
+
+	it("allocateTemplate uses the template range, never the sandbox range", async () => {
+		const { alloc } = make({
+			range: { min: 500, max: 589 },
+			templateRange: { min: 597, max: 598 },
+		});
+		expect((await alloc.allocateTemplate()).vmid).toBe(598);
+		expect((await alloc.allocateTemplate()).vmid).toBe(597);
+		await expect(alloc.allocateTemplate()).rejects.toThrow(/vmid_exhausted/);
+		expect((await alloc.allocate()).vmid).toBe(500);
 	});
 
 	it("allocateTemplate fails when the range is exhausted", async () => {
