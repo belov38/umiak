@@ -1,7 +1,8 @@
 // Auth header handling over every operation of the public document (S7
 // §2 anti-goal 4, §7.1, §7.4, §7.10, §16 "Безопасность"):
 // - public: no bearer is 401 everywhere but the anonymous operations, and
-//   oauth2-proxy headers (X-Auth-Request-*, X-Forwarded-User/Email) and
+//   oauth2-proxy headers (X-Auth-Request-*, X-Forwarded-User/Email), the
+//   Tailscale-User-* headers of Tailscale Serve and
 //   cookies never authenticate nor change who the caller is;
 // - malformed or foreign bearers are 401, Sbx-Team of another team 403;
 // - proxied: Authorization is refused, every unsafe operation needs the
@@ -58,6 +59,9 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 			"x-auth-request-preferred-username": "root",
 			"x-forwarded-user": owner.headers["x-auth-request-user"] as string,
 			"x-forwarded-email": owner.headers["x-auth-request-email"] as string,
+			// Tailscale Serve (dev control plane) adds these; never an identity.
+			"tailscale-user-login": owner.headers["x-auth-request-email"] as string,
+			"tailscale-user-name": "Root",
 		};
 	});
 	afterAll(async () => {

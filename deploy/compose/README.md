@@ -168,9 +168,12 @@ CLI печатает код и ссылку http://localhost:8180/realms/sbx/dev
   трогается). Клиенты: `oauth2-proxy`, `sbx-cli`, `sbx-mcp`, `sbx-api`, `sbx-worker`; scope `groups`; сроки — по
   architecture §10. Секреты клиентов подставляются из `secrets/keycloak/` через переменные окружения
   (`${SBX_OAUTH2_PROXY_CLIENT_SECRET}`, `${SBX_WORKER_CLIENT_SECRET}`, `${SBX_DEV_PASSWORD}` в файле realm).
-- Адреса: браузер и CLI ходят на публичный http://localhost:8180 (`KC_HOSTNAME`, он же `iss` токенов); `api` и
-  `oauth2-proxy` — на http://keycloak:8080 внутри сети (`SBX_OIDC_DISCOVERY_URL`, `SBX_OIDC_JWKS_URL`, redeem и
-  JWKS у oauth2-proxy).
+- Адреса: браузер и CLI ходят на публичный адрес Keycloak (`SBX_KEYCLOAK_URL` → `KC_HOSTNAME`, по умолчанию
+  http://localhost:8180; issuer `<адрес>/realms/sbx` — `iss` токенов); `api` и `oauth2-proxy` — на
+  http://keycloak:8080 внутри сети (`SBX_OIDC_DISCOVERY_URL`, `SBX_OIDC_JWKS_URL`, redeem и JWKS у oauth2-proxy).
+  `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`: backchannel-адреса берутся из адреса запроса, а `iss` остаётся публичным.
+- Redirect URI и web origin клиента `oauth2-proxy` подставляются при импорте из `${SBX_OAUTH2_PROXY_REDIRECT_URL}`
+  и `${SBX_APP_ORIGIN}` (см. «Публичные адреса»).
 - Применить изменённый `realm-sbx.json` (или новые секреты клиентов): удалить базу Keycloak и перезапустить.
 
   ```sh
@@ -181,13 +184,16 @@ CLI печатает код и ссылку http://localhost:8180/realms/sbx/dev
 
 ## oauth2-proxy
 
-Конфигурация — `oauth2-proxy/oauth2-proxy.yaml` (alpha config: провайдер `keycloak-oidc`, маршруты, заголовки)
-и флаги в `compose.yaml` (cookie). `/api/*` идёт на `api:8081` без префикса `/api`, `/sbx-auth/*` — как есть;
+Конфигурация — `oauth2-proxy/oauth2-proxy.yaml` (alpha config: провайдер `keycloak-oidc`, маршруты, заголовки;
+адрес входа и issuer — из `${SBX_OIDC_ISSUER}`, oauth2-proxy подставляет переменные окружения в этот файл),
+флаги в `compose.yaml` и переменные `OAUTH2_PROXY_*` (redirect URL, cookie, `reverse_proxy`). Настройки
+конкретной установки — переменные, а не флаги: флаг нельзя переопределить override-файлом compose. `/api/*` идёт на `api:8081` без префикса `/api`, `/sbx-auth/*` — как есть;
 таймаут upstream 660 s. В запрос к `api` добавляются `X-Auth-Request-User` (`sub`), `-Email`, `-Groups`,
 `-Preferred-Username`; такие же заголовки от клиента вырезаются. Им можно доверять, потому что `:8081` не
 опубликован на хосте; внутри сети `sbx` его видит любой контейнер (для dev допустимо, в проде закрывает
 NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
-префикса `__Host-`: стек работает по http на localhost (в проде — `__Host-sbx_session`). Сессия обновляется каждые
+префикса `__Host-`: стек работает по http на localhost (за TLS — `__Host-sbx_session` и `Secure`, см. «Публичные
+адреса»). Сессия обновляется каждые
 5 минут (`--cookie-refresh=5m`).
 
 ## Gateway (S4)
@@ -219,6 +225,34 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 
 Стек без `api`: `SBX_GATEWAY_API_URL=none` в `deploy/compose/.env`.
 
+## Публичные адреса
+
+По умолчанию стек живёт на фиксированных портах localhost. За TLS-прокси (ingress, Tailscale Serve и т. п.)
+публичные адреса задаются в `deploy/compose/.env`, все вместе: они записаны в realm, oauth2-proxy и `/v1/meta`.
+
+| Переменная | По умолчанию | Куда идёт |
+|---|---|---|
+| `SBX_API_PUBLIC_URL` | `http://localhost:8080` | `api` `SBX_API_URL` (`/v1/meta` `apiUrl`) |
+| `SBX_APP_ORIGIN` | `http://localhost:4180` | `api` `SBX_APP_URL` и `SBX_APP_ORIGIN` (Origin для небезопасных методов на proxied listener); web origin и post-logout redirect клиента `oauth2-proxy` в realm |
+| `SBX_KEYCLOAK_URL` | `http://localhost:8180` | Keycloak `KC_HOSTNAME` |
+| `SBX_OIDC_ISSUER` | `http://localhost:8180/realms/sbx` | `api` и oauth2-proxy (issuer, адрес входа). Должен быть `<SBX_KEYCLOAK_URL>/realms/sbx` |
+| `SBX_OAUTH2_PROXY_REDIRECT_URL` | `http://localhost:4180/oauth2/callback` | oauth2-proxy `redirect_url`, redirect URI клиента в realm |
+| `SBX_OAUTH2_PROXY_WHITELIST_DOMAIN` | `localhost:4180` | oauth2-proxy `whitelist_domains` (host:port адреса приложения) |
+| `SBX_OAUTH2_PROXY_COOKIE_NAME` | `_sbx_session` | имя cookie сессии; за TLS — `__Host-sbx_session` |
+| `SBX_OAUTH2_PROXY_COOKIE_SECURE` | `false` | `true` за TLS (обязательно для `__Host-`) |
+| `SBX_OAUTH2_PROXY_REVERSE_PROXY` | `false` | `true`, если перед oauth2-proxy стоит прокси с `X-Forwarded-*` |
+| `SBX_SBX_DOMAIN` | `sbx.localhost` | `api` `/v1/meta` `sbxDomain` (домен портов; у gateway — свой `SBX_GATEWAY_SBX_DOMAIN`) |
+| `SBX_SSH_HOST`, `SBX_SSH_PORT` | `ssh.localhost`, `2222` | `/v1/meta` `ssh` и `sbx ssh` |
+| `SBX_API_TRUSTED_PROXY_CIDRS` | пусто | `X-Forwarded-For` идёт в `clientIp` лога `api` только от этих адресов, иначе адрес соединения |
+
+- Realm импортируется только в пустой Keycloak: после смены `SBX_APP_ORIGIN` или `SBX_OAUTH2_PROXY_REDIRECT_URL`
+  нужен чистый Keycloak (см. «Keycloak»).
+- `api` никогда не верит заголовкам `Tailscale-User-*`, `X-Auth-Request-*` и `X-Forwarded-User/Email` на public
+  listener-е: там личность — только `Authorization: Bearer`.
+- Пример такой раскладки — dev control plane на CT 590 (`infra/dev-cp/compose.dev-cp.yaml`).
+- CLI с частным CA: позже у `sbx` появится `--cacert` / `SBX_CA_FILE` (под Node работает и
+  `NODE_EXTRA_CA_CERTS`). Для dev control plane не нужно: у Tailscale Serve сертификат Let's Encrypt.
+
 ## Настройки
 
 - `config/sbx.yaml` — шаблоны, размеры, квоты и топология (узел `pve`, хранилище `local-lvm`, сборка шаблона
@@ -236,11 +270,11 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
   sha256. Загружается при каждом старте `api` (только upsert). В dev пуст: люди появляются при первом входе.
 - `deploy/compose/.env` (git-ignored, пример — `.env.example`): Proxmox (`SBX_PVE_URL`, `SBX_PVE_TLS_NAME`,
   `SBX_NODE_SSH_HOST`, `SBX_PVE_TOKEN_ID`, `SBX_PVE_SECRETS_DIR`), `SBX_RECONCILE_DRY_RUN`, Keycloak
-  (`KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `SBX_DEV_PASSWORD`), `SBX_SSH_HOST`/`SBX_SSH_PORT` для
-  `/v1/meta` (по умолчанию `ssh.localhost:2222`), `SBX_GATEWAY_API_URL`, `SBX_API_LOG_LEVEL`.
+  (`KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `SBX_DEV_PASSWORD`), публичные адреса (см. «Публичные адреса»),
+  `SBX_GATEWAY_API_URL`, `SBX_API_LOG_LEVEL`.
 - Порты на хосте фиксированы: 8080 (api), 9091 (ops api), 8180 (Keycloak), 4180 (oauth2-proxy), плюс 5432
-  и 9090. Адреса `http://localhost:8180` и `http://localhost:4180` записаны в realm (redirect URI, issuer) и в
-  конфиге oauth2-proxy, поэтому другой порт ломает вход.
+  и 9090. Публичные адреса по умолчанию указывают на них (`http://localhost:8180`, `http://localhost:4180`);
+  другой порт — это другие публичные адреса, их надо задать вместе (см. «Публичные адреса»).
 - Учётные данные Postgres `sbx/sbx/sbx` — только для разработки; порт опубликован на `127.0.0.1:5432`.
 - `SBX_DB_POOL_MAX` (по умолчанию 30) — размер пула соединений worker. Блокировка питания (`power:<nodeId>`, S6 §15.1) держит по одному соединению на ноду в каждом процессе и под ней берёт ещё одно, плюс соединения pg-boss и операций. Значение должно с запасом превышать число нод.
 

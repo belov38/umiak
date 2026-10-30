@@ -212,11 +212,11 @@
 			"implicitFlowEnabled": false,
 			"directAccessGrantsEnabled": false,
 			"serviceAccountsEnabled": false,
-			"redirectUris": ["http://localhost:4180/oauth2/callback"],
-			"webOrigins": [],
+			"redirectUris": ["${SBX_OAUTH2_PROXY_REDIRECT_URL}"],
+			"webOrigins": ["${SBX_APP_ORIGIN}"],
 			"frontchannelLogout": true,
 			"attributes": {
-				"post.logout.redirect.uris": "http://localhost:4180/*",
+				"post.logout.redirect.uris": "${SBX_APP_ORIGIN}/*",
 				"oauth2.device.authorization.grant.enabled": "false",
 				"client.use.lightweight.access.token.enabled": "false"
 			},

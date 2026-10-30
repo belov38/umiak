@@ -71,6 +71,8 @@ export interface ApiEnv {
 		requestId: string;
 		/** A valid `Request-Id` sent by the client; logged only. */
 		clientRequestId: string | undefined;
+		/** Client address (X-Forwarded-For from a trusted proxy), for the request log. */
+		clientIp: string | undefined;
 		/** Error code of an error response, for the request log. */
 		errorCode: string | undefined;
 		/** Caller of an authenticated public/proxied route; read it with `authOf(c)`. */

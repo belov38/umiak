@@ -42,8 +42,8 @@ export function createApiLogger(
 
 /**
  * One `request` line per request after the response is ready: request ids,
- * method, path (without the query: it may carry tokens), route template,
- * status, error code and duration.
+ * client address, method, path (without the query: it may carry tokens),
+ * route template, status, error code and duration.
  */
 export function requestLog(log: Logger): MiddlewareHandler<ApiEnv> {
 	return async (c, next) => {
@@ -58,6 +58,7 @@ export function requestLog(log: Logger): MiddlewareHandler<ApiEnv> {
 			status,
 			durationMs: Math.round((performance.now() - started) * 10) / 10,
 		};
+		if (c.var.clientIp !== undefined) fields.clientIp = c.var.clientIp;
 		if (c.var.clientRequestId !== undefined) {
 			fields.clientRequestId = c.var.clientRequestId;
 		}

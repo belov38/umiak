@@ -14,6 +14,7 @@ import { publicAuth, stripProxyHeaders } from "./auth/public.ts";
 import { rateLimit } from "./auth/rate-limit.ts";
 import type { ApiApp, ApiDeps, ApiEnv } from "./deps.ts";
 import { bodyLimits } from "./http/body-limit.ts";
+import { clientIp, TrustedProxies } from "./http/client-ip.ts";
 import {
 	ApiError,
 	type ErrorRenderOptions,
@@ -62,6 +63,7 @@ function listenerApp(
 	app.use(
 		"*",
 		...first,
+		clientIp(new TrustedProxies(deps.settings.trustedProxyCidrs)),
 		requestId(),
 		requestLog(deps.log),
 		requestMetrics(deps.metrics),

@@ -30,6 +30,19 @@ describe("proxied listener without Postgres", () => {
 		expect(errorOf(r.body).code).toBe("unauthorized");
 	});
 
+	it("Tailscale-User-* (set by Tailscale Serve) is not an identity: 401", async () => {
+		const h = createHarness({ listener: "proxied" });
+		h.app.get("/v1/__test/private", (c) => c.body(null, 204));
+		const r = await h.request("GET", "/v1/__test/private", {
+			headers: {
+				"tailscale-user-login": "admin@example.com",
+				"tailscale-user-name": "Admin",
+			},
+		});
+		expect(r.status).toBe(401);
+		expect(errorOf(r.body).code).toBe("unauthorized");
+	});
+
 	it("Authorization on the proxied host: 400 validation", async () => {
 		const h = createHarness({ listener: "proxied" });
 		h.app.get("/v1/__test/private", (c) => c.body(null, 204));

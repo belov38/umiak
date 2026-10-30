@@ -56,6 +56,21 @@ describe("public listener without credentials", () => {
 		expect(r.status).toBe(401);
 	});
 
+	it("Tailscale-User-* (set by Tailscale Serve) without a bearer is ignored: 401", async () => {
+		const h = createHarness();
+		h.app.get("/v1/__test/private", (c) => c.body(null, 204));
+		const r = await h.request("GET", "/v1/__test/private", {
+			headers: {
+				"tailscale-user-login": "admin@example.com",
+				"tailscale-user-name": "Admin",
+				"tailscale-user-profile-pic": "https://example.com/a.png",
+				"tailscale-headers-info": "https://tailscale.com/s/serve-headers",
+			},
+		});
+		expect(r.status).toBe(401);
+		expect(errorOf(r.body).code).toBe("unauthorized");
+	});
+
 	for (const [name, value] of [
 		["reserved sandbox key sbxs_", `Bearer sbxs_${"a".repeat(49)}`],
 		["port token sbxp_", `Bearer sbxp_${"a".repeat(43)}`],
