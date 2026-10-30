@@ -505,6 +505,7 @@ function Test-Services {
 
 # [9] Tool versions as user (direct argv and the pwsh shell path), npm global prefix.
 function Test-Tools {
+    # agent CLI contract — see apps/template-builder/src/windows/verify.ts (agentExecCmd)
     $result = [ordered]@{}
     foreach ($t in @($Tools -split ',' | Where-Object { $_ })) {
         $arg = if ($t -eq 'go') { 'version' } else { '--version' }

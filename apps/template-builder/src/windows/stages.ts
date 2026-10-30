@@ -49,6 +49,7 @@ import {
 	guestManifest,
 	isUpid,
 	MEDIA_STORAGE,
+	type Save,
 	type Stage,
 	type State,
 	sleep,
@@ -119,8 +120,6 @@ export interface WindowsPrepared {
 	/** From --product-key-file; undefined: the generic key of versions.toml. Never recorded. */
 	productKey?: string;
 }
-
-type Save = (patch: Partial<Manifest>) => void;
 
 /** Stage 1 checks of an iso-install build; nothing is recorded or created yet. */
 export function prepareWindows(
@@ -370,6 +369,8 @@ async function checkUserIso(
 			);
 		const written = writeIsoPin(p.recipe, file, r.sha256);
 		deps.log(`--accept-iso-sha256: wrote sha256 ${r.sha256} to ${written}`);
+		// versions.toml is part of the recipe digest.
+		save({ recipeDigest: recipeDigest(p.recipe) });
 	}
 	save({
 		windows: { ...(st.m.windows as WindowsFacts), isoSha256: r.sha256 },
@@ -569,11 +570,16 @@ async function pressKeys(
 	node: string,
 	vmid: number,
 	count: number,
+	/** Runs after every pause between two key presses. */
+	between?: () => Promise<void>,
 ): Promise<void> {
 	const interval = deps.keyIntervalMs ?? DEFAULT_KEY_INTERVAL_MS;
 	for (let i = 0; i < count; i++) {
 		await sendKey(deps.api, node, vmid, "ret");
-		if (i < count - 1) await sleep(interval);
+		if (i < count - 1) {
+			await sleep(interval);
+			await between?.();
+		}
 	}
 }
 
@@ -932,15 +938,19 @@ export async function stageOffline(
 		boot: "order=ide2",
 	});
 	await startVm(deps, o.node, vmid);
-	await pressKeys(deps, o.node, vmid, OFFLINE_KEYS);
+	const sealedDiskBooted = () =>
+		new Error(
+			"sealed disk booted: the guest agent answered during the offline WinPE stage (OVMF booted the disk instead of the CD); this build's disk is spoiled",
+		);
+	// A guest agent answering during the key presses already means the disk booted.
+	await pressKeys(deps, o.node, vmid, OFFLINE_KEYS, async () => {
+		if (await io.ping()) throw sealedDiskBooted();
+	});
 	const timeoutMs = deps.offlineTimeoutMs ?? OFFLINE_TIMEOUT_MS;
 	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
 	const deadline = Date.now() + timeoutMs;
 	while ((await vmStatus(deps, o.node, vmid)) !== "stopped") {
-		if (await io.ping())
-			throw new Error(
-				"sealed disk booted: the guest agent answered during the offline WinPE stage (OVMF booted the disk instead of the CD); this build's disk is spoiled",
-			);
+		if (await io.ping()) throw sealedDiskBooted();
 		if (Date.now() >= deadline)
 			throw new Error(
 				`the offline WinPE boot did not power off within ${timeoutMs} ms (WinPE has no guest agent: look at the console of a --keep-on-failure build)`,
@@ -964,7 +974,11 @@ export async function stageWindowsTemplate(
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
 	await dropBuildFirewall(api, vmPath);
 	const before = await api.get<Record<string, string>>(`${vmPath}/config`);
-	const net0 = (before.net0 ?? "")
+	if (before.net0 === undefined || before.net0 === "")
+		throw new Error(
+			`VM ${vmid} has no net0 in its config: not making a template`,
+		);
+	const net0 = before.net0
 		.split(",")
 		.filter((f) => f !== "" && !f.startsWith("link_down="))
 		.join(",");
@@ -976,8 +990,16 @@ export async function stageWindowsTemplate(
 	const r = await api.post(`${vmPath}/template`);
 	if (isUpid(r)) await api.waitTask(o.node, r, { timeoutMs: TASK_TIMEOUT_MS });
 	if (st.isos !== undefined && st.isos.length > 0) {
-		await deps.node.call("media.remove", { names: st.isos });
-		st.isos = [];
+		// The template is finished: a failure here must not destroy it.
+		try {
+			await deps.node.call("media.remove", { names: st.isos });
+			st.isos = [];
+		} catch (err) {
+			// st.isos stays: a later rollback (red verify) tries again.
+			deps.log(
+				`warning: removing ${st.isos.join(", ")}: ${errorText(err)}; left for sbx-tpl cleanup`,
+			);
+		}
 	}
 	// Proxmox numbers the disks itself: k of base-<vmid>-disk-<k> is read back.
 	const cfg = await api.get<Record<string, string>>(`${vmPath}/config`);

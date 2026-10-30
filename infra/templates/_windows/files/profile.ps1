@@ -2,8 +2,10 @@
 # section 8.4), installed by 50-sbx-agent as $PSHOME\profile.ps1.
 # SSH sessions get the sandbox env from the agent. Commands of the agent come
 # with SBX_ENV_APPLIED=1 and keep their own env.
-# The agent output ($env:NAME = 'value' lines) is parsed, not executed: only
-# assignments of single-quoted constants to $env: variables are applied.
+# The agent output is parsed, not executed: only two assignment forms to $env:K
+# are applied (K matches ^[A-Za-z_][A-Za-z0-9_]*$), everything else is ignored:
+#   $env:K = '<value, single quotes doubled>'
+#   $env:K = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('<base64>'))
 # Keep this file ASCII and 5.1-compatible.
 
 try {
@@ -27,18 +29,23 @@ if (-not $env:SBX_ENV_APPLIED) {
                         if ($sbxSt.Right -isnot [System.Management.Automation.Language.CommandExpressionAst]) { continue }
                         $sbxLeft = $sbxSt.Left
                         $sbxRight = $sbxSt.Right.Expression
-                        if ($sbxLeft -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                            $sbxLeft.VariablePath.DriveName -eq 'env' -and
-                            $sbxRight -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
-                            $sbxRight.StringConstantType -eq 'SingleQuoted') {
-                            [Environment]::SetEnvironmentVariable($sbxLeft.VariablePath.UserPath.Substring(4), $sbxRight.Value, 'Process')
+                        if ($sbxLeft -isnot [System.Management.Automation.Language.VariableExpressionAst] -or $sbxLeft.VariablePath.DriveName -ne 'env') { continue }
+                        $sbxName = $sbxLeft.VariablePath.UserPath.Substring(4)
+                        if ($sbxName -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+                        $sbxValue = $null
+                        if ($sbxRight -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $sbxRight.StringConstantType -eq 'SingleQuoted') {
+                            $sbxValue = $sbxRight.Value
+                        } elseif ($sbxRight -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and
+                            $sbxRight.Extent.Text -match '^\[System\.Text\.Encoding\]::UTF8\.GetString\(\[System\.Convert\]::FromBase64String\(''([A-Za-z0-9+/=]*)''\)\)$') {
+                            try { $sbxValue = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Matches[1])) } catch { $sbxValue = $null }
                         }
+                        if ($null -ne $sbxValue) { [Environment]::SetEnvironmentVariable($sbxName, $sbxValue, 'Process') }
                     }
                     $env:SBX_ENV_APPLIED = '1'
                 }
             }
         } catch { }
     }
-    Remove-Variable -Name sbxAgent, sbxOut, sbxErrors, sbxAst, sbxSt, sbxLeft, sbxRight -ErrorAction SilentlyContinue
+    Remove-Variable -Name sbxAgent, sbxOut, sbxErrors, sbxAst, sbxSt, sbxLeft, sbxRight, sbxName, sbxValue -ErrorAction SilentlyContinue
 }
 Remove-Variable -Name sbxUtf8 -ErrorAction SilentlyContinue
