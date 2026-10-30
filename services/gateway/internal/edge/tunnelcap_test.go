@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -146,6 +147,45 @@ func TestDispatcherTunnelConnCap(t *testing.T) {
 		_ = c.Close()
 	}
 	eventually(t, 10*time.Second, "every tunnel slot released", func() bool { return tc.open.Load() == 0 })
+
+	// A conn closed after its ClientHello, before the handshake completes,
+	// gives its slot back.
+	raw, err := (&net.Dialer{}).DialContext(context.Background(), "tcp", tc.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nc := &notifyConn{Conn: raw, wrote: make(chan struct{}), done: make(chan struct{})}
+	half := tls.Client(nc, &tls.Config{ServerName: "tunnel.test", RootCAs: tc.roots, MinVersion: tls.VersionTLS12})
+	hsDone := make(chan struct{})
+	go func() {
+		defer close(hsDone)
+		_ = half.HandshakeContext(context.Background())
+	}()
+	<-nc.wrote
+	eventually(t, 10*time.Second, "the half-open conn's tunnel slot taken", func() bool { return tc.open.Load() == 1 })
+	close(nc.done)
+	_ = raw.Close()
+	<-hsDone
+	eventually(t, 10*time.Second, "the half-open conn's tunnel slot released", func() bool { return tc.open.Load() == 0 })
+}
+
+// notifyConn closes wrote after the first Write (the ClientHello). Its Read
+// blocks until done and then fails, so the handshake never completes.
+type notifyConn struct {
+	net.Conn
+	wrote, done chan struct{}
+	once        sync.Once
+}
+
+func (c *notifyConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	c.once.Do(func() { close(c.wrote) })
+	return n, err
+}
+
+func (c *notifyConn) Read([]byte) (int, error) {
+	<-c.done
+	return 0, net.ErrClosed
 }
 
 // TestDispatcherTunnelConnHeaderTimeout: a tunnel conn that never sends the

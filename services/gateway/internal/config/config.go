@@ -125,8 +125,9 @@ type Config struct {
 	// load balancer drops it; 0 keeps the libs/tunnel default (5 s).
 	EndpointWait time.Duration
 	// DrainTimeout bounds the whole drain of the process after SIGTERM; 0
-	// means the drain budget plus a margin (950 s with the defaults). Both
-	// knobs exist for local runs and smoke tests.
+	// means the drain budget plus a margin (950 s with the defaults). Either
+	// way it is at most MaxDrainTimeout (ProcessDrainTimeout). Both knobs
+	// exist for local runs and smoke tests.
 	DrainTimeout time.Duration
 
 	// SSH keepalive (spec 9.4): a probe to both ends every interval; the
@@ -394,6 +395,17 @@ func DrainBudget(c Config, timing gateway.Timing) time.Duration {
 		orDefault(timing.DrainSpread, DefaultDrainSpread) +
 		longest +
 		orDefault(timing.DrainMargin, DefaultDrainMargin)
+}
+
+// ProcessDrainTimeout bounds the drain of the process after SIGTERM:
+// c.DrainTimeout when set (ValidateServe caps it at MaxDrainTimeout), else
+// DrainBudget + DrainProcessMargin capped at MaxDrainTimeout, so the process
+// gives up at least 10 s before the grace period ends.
+func ProcessDrainTimeout(c Config, timing gateway.Timing) time.Duration {
+	if c.DrainTimeout > 0 {
+		return c.DrainTimeout
+	}
+	return min(DrainBudget(c, timing)+DrainProcessMargin, MaxDrainTimeout)
 }
 
 func orDefault(v, def time.Duration) time.Duration {

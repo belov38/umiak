@@ -39,10 +39,6 @@ const (
 	// apiTimeout bounds every call to api; the route lookup has its own,
 	// shorter budget in the route cache.
 	apiTimeout = 3 * time.Second
-	// drainSlack is added to the drain budget for the process's drain
-	// context: 920 s + 30 s = 950 s with the defaults, inside the 960 s
-	// grace period.
-	drainSlack = config.DrainProcessMargin
 	// forcedStopWait is how long a second signal waits for the listeners
 	// to close before the process exits anyway.
 	forcedStopWait = 5 * time.Second
@@ -217,10 +213,9 @@ func serveWith(o serveOptions) int {
 		return 0
 	case sig = <-o.sigs:
 	}
-	budget := cfg.DrainTimeout
-	if budget <= 0 {
-		budget = server.DrainBudget(cfg, timing) + drainSlack
-	}
+	// DRAIN_TIMEOUT, or the drain budget + 30 s (950 s with the defaults),
+	// at most 10 s below the 960 s grace period.
+	budget := config.ProcessDrainTimeout(cfg, timing)
 	log.Info("gateway: signal, draining", "signal", sig.String(), "timeout", budget.String())
 	return drain(log, inst, pool, budget, o.sigs, stopRun, runDone)
 }

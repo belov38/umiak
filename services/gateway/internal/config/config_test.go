@@ -597,3 +597,35 @@ func TestValidateServeDrainBudgetCause(t *testing.T) {
 		})
 	}
 }
+
+// TestProcessDrainTimeout: the process's drain timeout is DrainTimeout when
+// set, else the drain budget plus the process margin, capped at
+// MaxDrainTimeout.
+func TestProcessDrainTimeout(t *testing.T) {
+	f := newFixture(t)
+	cfg, err := FromEnv(f.getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{}); got != 950*time.Second {
+		t.Errorf("defaults: %s, want 950s", got)
+	}
+	// 5 + 5 + 910 + 10 + 30 = 960 s, valid for ValidateServe, but the
+	// process bound stays 10 s below the grace period.
+	cfg.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+	if err := cfg.ValidateServe(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{}); got != MaxDrainTimeout {
+		t.Errorf("SSH drain 15m10s: %s, want %s", got, MaxDrainTimeout)
+	}
+	cfg.SSHDrainDeadline, cfg.HTTPDrainDeadline = 2*time.Second, time.Second
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{EndpointWait: 100 * time.Millisecond, DrainSpread: 100 * time.Millisecond, DrainMargin: time.Second}); got != 15*time.Minute+31200*time.Millisecond {
+		// The TCP drain deadline default (15 min) is the longest.
+		t.Errorf("short deadlines: %s", got)
+	}
+	cfg.DrainTimeout = 3 * time.Second
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{}); got != 3*time.Second {
+		t.Errorf("explicit: %s, want 3s", got)
+	}
+}
