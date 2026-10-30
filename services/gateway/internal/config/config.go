@@ -44,6 +44,10 @@ type Timeouts struct {
 	Dial           time.Duration
 	ResponseHeader time.Duration
 	StreamIdle     time.Duration
+	// TunnelReadHeader is the header timeout of the tunnel server (TLS
+	// edge), also its idle timeout between requests: a tunnel conn that has
+	// not sent the upgrade is closed after it.
+	TunnelReadHeader time.Duration
 }
 
 // Config is the validated gateway configuration.
@@ -121,8 +125,9 @@ type Config struct {
 	// load balancer drops it; 0 keeps the libs/tunnel default (5 s).
 	EndpointWait time.Duration
 	// DrainTimeout bounds the whole drain of the process after SIGTERM; 0
-	// means the drain budget plus a margin (950 s with the defaults). Both
-	// knobs exist for local runs and smoke tests.
+	// means the drain budget plus a margin (950 s with the defaults). Either
+	// way it is at most MaxDrainTimeout (ProcessDrainTimeout). Both knobs
+	// exist for local runs and smoke tests.
 	DrainTimeout time.Duration
 
 	// SSH keepalive (spec 9.4): a probe to both ends every interval; the
@@ -166,6 +171,10 @@ const (
 	// TerminationGrace is the pod's terminationGracePeriodSeconds (spec
 	// 10.5): DrainBudget + DrainProcessMargin must fit in it.
 	TerminationGrace = 960 * time.Second
+	// MaxDrainTimeout is the largest DrainTimeout: the grace period minus
+	// 10 s, the default process bound (DrainBudget + DrainProcessMargin =
+	// 950 s).
+	MaxDrainTimeout = TerminationGrace - 10*time.Second
 )
 
 // FromEnv reads and validates the configuration. getenv is normally os.Getenv;
@@ -242,6 +251,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		AuthFailPerMin:     l.integer("RATELIMIT_AUTH_FAIL_PER_MIN", 20),
 		AuthBlock:          l.duration("RATELIMIT_AUTH_BLOCK", 5*time.Minute),
 		ConnsPerIP:         l.integer("RATELIMIT_CONNS_PER_IP", 512),
+		TunnelConnsPerIP:   l.integer("RATELIMIT_TUNNEL_CONNS_PER_IP", 512),
 		SSHConnPerMin:      l.integer("RATELIMIT_SSH_CONN_PER_MIN", 10),
 		SSHConnBurst:       l.integer("RATELIMIT_SSH_CONN_BURST", 20),
 		SSHAuthFailPerMin:  l.integer("RATELIMIT_SSH_AUTH_FAIL_PER_MIN", 10),
@@ -259,15 +269,16 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.SSHLoginCertMaxValidity = l.duration("SSH_LOGIN_CERT_MAX_VALIDITY", 24*time.Hour)
 
 	c.Timeouts = Timeouts{
-		TLSHandshake:   l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),
-		ReadHeader:     l.duration("TIMEOUT_READ_HEADER", 10*time.Second),
-		MaxHeaderBytes: l.integer("MAX_HEADER_BYTES", 64<<10),
-		ClientIdle:     l.duration("TIMEOUT_CLIENT_IDLE", 120*time.Second),
-		RouteLookup:    l.duration("TIMEOUT_ROUTE_LOOKUP", 3*time.Second),
-		AgentWait:      l.duration("TIMEOUT_AGENT_WAIT", 10*time.Second),
-		Dial:           l.duration("TIMEOUT_DIAL", 10*time.Second),
-		ResponseHeader: l.duration("TIMEOUT_RESPONSE_HEADER", 5*time.Minute),
-		StreamIdle:     l.duration("TIMEOUT_STREAM_IDLE", 60*time.Minute),
+		TLSHandshake:     l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),
+		ReadHeader:       l.duration("TIMEOUT_READ_HEADER", 10*time.Second),
+		MaxHeaderBytes:   l.integer("MAX_HEADER_BYTES", 64<<10),
+		ClientIdle:       l.duration("TIMEOUT_CLIENT_IDLE", 120*time.Second),
+		RouteLookup:      l.duration("TIMEOUT_ROUTE_LOOKUP", 3*time.Second),
+		AgentWait:        l.duration("TIMEOUT_AGENT_WAIT", 10*time.Second),
+		Dial:             l.duration("TIMEOUT_DIAL", 10*time.Second),
+		ResponseHeader:   l.duration("TIMEOUT_RESPONSE_HEADER", 5*time.Minute),
+		StreamIdle:       l.duration("TIMEOUT_STREAM_IDLE", 60*time.Minute),
+		TunnelReadHeader: l.duration("TIMEOUT_TUNNEL_READ_HEADER", 5*time.Second),
 	}
 
 	c.TunnelAdmitRate = l.float("TUNNEL_ADMIT_RATE", 200)
@@ -325,8 +336,12 @@ func (c Config) ValidateServe() error {
 	// The drain must end within the pod's grace period, with the timing
 	// the process uses (only EndpointWait is configurable).
 	if b := DrainBudget(c, gateway.Timing{EndpointWait: c.EndpointWait}) + DrainProcessMargin; b > TerminationGrace {
-		errs = append(errs, fmt.Errorf("%sSSH_DRAIN_DEADLINE: drain budget %s (endpoint wait + drain spread + longest drain deadline + margin + %s process margin) exceeds the %s grace period",
-			envPrefix, b, DrainProcessMargin, TerminationGrace))
+		errs = append(errs, fmt.Errorf("%s: drain budget %s (endpoint wait + drain spread + longest drain deadline + margin + %s process margin) exceeds the %s grace period",
+			c.drainBudgetCause(), b, DrainProcessMargin, TerminationGrace))
+	}
+	if c.DrainTimeout > MaxDrainTimeout {
+		errs = append(errs, fmt.Errorf("%sDRAIN_TIMEOUT: %s exceeds %s (the %s grace period minus %s)",
+			envPrefix, c.DrainTimeout, MaxDrainTimeout, TerminationGrace, TerminationGrace-MaxDrainTimeout))
 	}
 	if c.HTTPDrainDeadline > c.SSHDrainDeadline {
 		errs = append(errs, fmt.Errorf("%sHTTP_DRAIN_DEADLINE: %s is longer than %sSSH_DRAIN_DEADLINE (%s)",
@@ -345,6 +360,28 @@ func (c Config) ValidateServe() error {
 	return errors.Join(errs...)
 }
 
+// drainBudgetCause names the drain settings above their defaults that make
+// the drain budget: the endpoint wait, and the SSH or HTTP drain deadline
+// when it is the longest deadline of the budget. With none above its
+// default (not reachable with the default constants) it names all three.
+func (c Config) drainBudgetCause() string {
+	var names []string
+	if c.EndpointWait > DefaultEndpointWait {
+		names = append(names, envPrefix+"ENDPOINT_WAIT")
+	}
+	longest := max(c.SSHDrainDeadline, c.HTTPDrainDeadline, DefaultMaxTCPDrainDeadline)
+	if c.SSHDrainDeadline > DefaultSSHDrainDeadline && c.SSHDrainDeadline == longest {
+		names = append(names, envPrefix+"SSH_DRAIN_DEADLINE")
+	}
+	if c.HTTPDrainDeadline > DefaultHTTPDrainDeadline && c.HTTPDrainDeadline == longest {
+		names = append(names, envPrefix+"HTTP_DRAIN_DEADLINE")
+	}
+	if len(names) == 0 {
+		names = []string{envPrefix + "ENDPOINT_WAIT", envPrefix + "SSH_DRAIN_DEADLINE", envPrefix + "HTTP_DRAIN_DEADLINE"}
+	}
+	return strings.Join(names, ", ")
+}
+
 // DrainBudget is the longest a Drain takes with c and timing:
 // EndpointWait + DrainSpread + the longest stream drain deadline +
 // DrainMargin, the bound of the tunnel drain, after which only the
@@ -358,6 +395,17 @@ func DrainBudget(c Config, timing gateway.Timing) time.Duration {
 		orDefault(timing.DrainSpread, DefaultDrainSpread) +
 		longest +
 		orDefault(timing.DrainMargin, DefaultDrainMargin)
+}
+
+// ProcessDrainTimeout bounds the drain of the process after SIGTERM:
+// c.DrainTimeout when set (ValidateServe caps it at MaxDrainTimeout), else
+// DrainBudget + DrainProcessMargin capped at MaxDrainTimeout, so the process
+// gives up at least 10 s before the grace period ends.
+func ProcessDrainTimeout(c Config, timing gateway.Timing) time.Duration {
+	if c.DrainTimeout > 0 {
+		return c.DrainTimeout
+	}
+	return min(DrainBudget(c, timing)+DrainProcessMargin, MaxDrainTimeout)
 }
 
 func orDefault(v, def time.Duration) time.Duration {
@@ -515,20 +563,29 @@ func (l *loader) ports(name string, def []int) []int {
 }
 
 // cidrs reads a comma-separated list of prefixes. A bare address is a
-// single-host prefix.
+// single-host prefix. Client addresses are unmapped before they are matched,
+// so an IPv4-mapped prefix (::ffff:a.b.c.d/n) of /96 or longer becomes the
+// IPv4 prefix /n-96; a shorter one is refused, as it would never match.
 func (l *loader) cidrs(name string) []netip.Prefix {
 	var out []netip.Prefix
 	for _, it := range l.list(name, nil) {
-		if p, err := netip.ParsePrefix(it); err == nil {
-			out = append(out, p.Masked())
-			continue
-		}
-		a, err := netip.ParseAddr(it)
+		p, err := netip.ParsePrefix(it)
 		if err != nil {
-			l.fail(name, fmt.Errorf("invalid CIDR %q", it))
-			return nil
+			a, aerr := netip.ParseAddr(it)
+			if aerr != nil || a.Zone() != "" {
+				l.fail(name, fmt.Errorf("invalid CIDR %q", it))
+				return nil
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
 		}
-		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+		if p.Addr().Is4In6() {
+			if p.Bits() < 96 {
+				l.fail(name, fmt.Errorf("IPv4-mapped CIDR %q is shorter than /96, write it as an IPv4 CIDR", it))
+				return nil
+			}
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+		}
+		out = append(out, p.Masked())
 	}
 	return out
 }

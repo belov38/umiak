@@ -435,7 +435,7 @@ func TestTunnelAdmissionLimit(t *testing.T) {
 }
 
 // TestTunnelReadHeaderTimeout drives the tunnel server behind a dispatcher.
-// The 10 s production value is asserted in TestServerSettings; here it is
+// The 5 s production value is asserted in TestServerSettings; here it is
 // shrunk.
 func TestTunnelReadHeaderTimeout(t *testing.T) {
 	pki := newTestPKI(t)
@@ -453,8 +453,8 @@ func TestTunnelReadHeaderTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- d.Serve(ctx) }()
-	srv := edge.NewTunnelServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(299) }))
-	srv.ReadHeaderTimeout = 300 * time.Millisecond
+	srv := edge.NewTunnelServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(299) }),
+		config.Timeouts{TunnelReadHeader: 300 * time.Millisecond})
 	go func() { _ = srv.Serve(d.Tunnel()) }()
 	t.Cleanup(func() {
 		_ = srv.Close()

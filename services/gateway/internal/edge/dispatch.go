@@ -37,8 +37,8 @@ const (
 	acceptBackoffMax = time.Second
 )
 
-// errConnLimit refuses an sbx conn over the per-IP limit during the
-// handshake, before the certificate work.
+// errConnLimit refuses an sbx or tunnel conn over its per-IP limit during
+// the handshake, before the certificate work.
 var errConnLimit = errors.New("edge: too many conns from the client IP")
 
 // SNI kinds, also the sni_kind label values.
@@ -85,11 +85,16 @@ type DispatchConfig struct {
 	ProxyHeaderTimeout time.Duration
 	// ConnLimit counts one open sbx conn of the client IP; ok false refuses
 	// it. It runs when the ClientHello names an sbx host; release is called
-	// once when the conn closes. nil means no limit. Tunnel conns are never
-	// limited per IP (spec 11).
+	// once when the conn closes. nil means no limit.
 	ConnLimit func(ip netip.Addr) (release func(), ok bool)
-	Metrics   *obs.Metrics
-	Logger    *slog.Logger
+	// TunnelConnLimit is ConnLimit for the conns whose ClientHello names the
+	// tunnel host. The release follows the conn's lifetime, through the
+	// WebSocket upgrade (the hijacked conn is the same *tls.Conn). The node
+	// SNAT address must be exempt (spec 11 deviation: non-exempt sources
+	// are capped). nil means no limit.
+	TunnelConnLimit func(ip netip.Addr) (release func(), ok bool)
+	Metrics         *obs.Metrics
+	Logger          *slog.Logger
 }
 
 // Dispatcher accepts TLS conns, completes the handshake with the
@@ -210,22 +215,34 @@ func (d *Dispatcher) configFor(chi *tls.ClientHelloInfo) (*tls.Config, error) {
 	}
 	switch k {
 	case kindSbx:
-		// The per-IP limit applies once the SNI picked sbx, and before
-		// the certificate work. The ClientHello has been read, so the
-		// PROXY header (if any) is too and RemoteAddr does not block.
-		if d.cfg.ConnLimit != nil && ec != nil && !ec.hasRelease() {
-			release, ok := d.cfg.ConnLimit(addrIP(ec.RemoteAddr()))
-			if !ok {
-				return nil, errConnLimit
-			}
-			ec.setRelease(release)
+		if err := limitConn(ec, d.cfg.ConnLimit); err != nil {
+			return nil, err
 		}
 		return d.sbxTLS, nil
 	case kindTunnel:
+		if err := limitConn(ec, d.cfg.TunnelConnLimit); err != nil {
+			return nil, err
+		}
 		return d.tunnelTLS, nil
 	default:
 		return d.rejectTLS, nil
 	}
+}
+
+// limitConn takes a per-IP conn slot of ec from limit (nil: no limit), held
+// until ec closes. The per-IP limit applies once the SNI picked the
+// destination, and before the certificate work. The ClientHello has been
+// read, so the PROXY header (if any) is too and RemoteAddr does not block.
+func limitConn(ec *edgeConn, limit func(netip.Addr) (func(), bool)) error {
+	if limit == nil || ec == nil || ec.hasRelease() {
+		return nil
+	}
+	release, ok := limit(addrIP(ec.RemoteAddr()))
+	if !ok {
+		return errConnLimit
+	}
+	ec.setRelease(release)
+	return nil
 }
 
 // Serve accepts conns until ctx is done or Close is called (both return

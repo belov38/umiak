@@ -190,7 +190,7 @@ func (e *Env) InstanceConfig(instanceID, internalURL string) config.Config {
 
 		RateLimit: ratelimit.Config{
 			IPRate: 300, IPBurst: 2000, LabelRate: 1000, LabelBurst: 3000,
-			AuthFailPerMin: 20, AuthBlock: 5 * time.Minute, ConnsPerIP: 512,
+			AuthFailPerMin: 20, AuthBlock: 5 * time.Minute, ConnsPerIP: 512, TunnelConnsPerIP: 512,
 			SSHConnPerMin: 10, SSHConnBurst: 20, SSHAuthFailPerMin: 10, SSHSessionsPerUser: 20,
 		},
 

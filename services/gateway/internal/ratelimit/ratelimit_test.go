@@ -33,7 +33,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 func testConfig(clk *fakeClock) Config {
 	return Config{
 		IPRate: 300, IPBurst: 2000, LabelRate: 1000, LabelBurst: 3000,
-		AuthFailPerMin: 20, AuthBlock: 5 * time.Minute, ConnsPerIP: 512,
+		AuthFailPerMin: 20, AuthBlock: 5 * time.Minute, ConnsPerIP: 512, TunnelConnsPerIP: 512,
 		SSHConnPerMin: 10, SSHConnBurst: 20, SSHAuthFailPerMin: 10, SSHSessionsPerUser: 20,
 		Now: clk.Now,
 	}
@@ -446,6 +446,62 @@ func TestRun(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not stop")
+	}
+}
+
+// TestTunnelConnsPerIP: the tunnel conns of one IP have their own count,
+// separate from the sbx conns; exempt IPs skip it.
+func TestTunnelConnsPerIP(t *testing.T) {
+	l, _, m := newTest(t, func(c *Config) {
+		c.ConnsPerIP = 1
+		c.TunnelConnsPerIP = 3
+		c.Exempt = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	})
+	addr := ip("192.0.2.1")
+	if _, ok := l.AcquireConn(addr); !ok {
+		t.Fatal("sbx conn refused")
+	}
+	var releases []func()
+	for i := range 3 {
+		rel, ok := l.AcquireTunnelConn(addr)
+		if !ok {
+			t.Fatalf("tunnel conn %d refused", i+1)
+		}
+		releases = append(releases, rel)
+	}
+	if rel, ok := l.AcquireTunnelConn(addr); ok || rel != nil {
+		t.Fatal("tunnel conn 4 passed")
+	}
+	if got := refusals(m, LimitTunnelConns); got != 1 {
+		t.Errorf("tunnel_conns refusals = %d, want 1", got)
+	}
+	if got := refusals(m, LimitConns); got != 0 {
+		t.Errorf("conns refusals = %d, want 0", got)
+	}
+	// The /64 of an IPv6 client shares one count.
+	v6 := ip("2001:db8::1")
+	for range 3 {
+		if _, ok := l.AcquireTunnelConn(v6); !ok {
+			t.Fatal("v6 tunnel conn refused")
+		}
+	}
+	if _, ok := l.AcquireTunnelConn(ip("2001:db8::ffff")); ok {
+		t.Fatal("another address of the same /64 passed")
+	}
+	for range 10 {
+		rel, ok := l.AcquireTunnelConn(ip("10.1.2.3"))
+		if !ok {
+			t.Fatal("exempt tunnel conn refused")
+		}
+		rel()
+	}
+	releases[0]()
+	releases[0]() // idempotent
+	if _, ok := l.AcquireTunnelConn(addr); !ok {
+		t.Fatal("tunnel conn after release refused")
+	}
+	if _, ok := l.AcquireTunnelConn(addr); ok {
+		t.Fatal("double release freed two slots")
 	}
 }
 

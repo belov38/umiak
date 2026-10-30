@@ -331,7 +331,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	errLog := slog.NewLogLogger(deps.Logger.Handler(), slog.LevelDebug)
 	i.plain = edge.NewPlainServer(edge.PlainHandler(i.proxy, tunnelHandler, cfg.TunnelHost), cfg.Timeouts)
 	i.sbxSrv = edge.NewSbxServer(i.proxy, cfg.Timeouts)
-	i.tunnelSrv = edge.NewTunnelServer(tunnelHandler)
+	i.tunnelSrv = edge.NewTunnelServer(tunnelHandler, cfg.Timeouts)
 	for _, s := range i.edgeServers() {
 		s.ErrorLog = errLog
 	}
@@ -528,6 +528,7 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 		ProxyHeaderTimeout: i.cfg.ProxyHeaderTimeout,
 		HandshakeExempt:    i.cfg.RateLimit.Exempt,
 		ConnLimit:          i.limits.AcquireConn,
+		TunnelConnLimit:    i.limits.AcquireTunnelConn,
 		Metrics:            i.metrics,
 		Logger:             i.log,
 	})

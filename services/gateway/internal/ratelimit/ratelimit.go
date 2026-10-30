@@ -27,6 +27,8 @@ const (
 	LimitSSHSession = "ssh_sessions"
 	// LimitHandshakes is the per-IP cap of TLS handshakes in flight (edge).
 	LimitHandshakes = "handshakes"
+	// LimitTunnelConns is the per-IP cap of open tunnel conns (edge).
+	LimitTunnelConns = "tunnel_conns"
 )
 
 const (
@@ -55,6 +57,10 @@ type Config struct {
 	AuthBlock      time.Duration // block length after AuthFailPerMin failures
 
 	ConnsPerIP int // concurrent connections per IP
+	// TunnelConnsPerIP caps the open tunnel conns (tunnel SNI on the TLS
+	// edge) per IP. The agents of a node share its SNAT address, which must
+	// be in Exempt.
+	TunnelConnsPerIP int
 
 	SSHConnPerMin     int // new SSH connections per minute per IP
 	SSHConnBurst      int
@@ -96,6 +102,7 @@ type Limits struct {
 	authFail failTracker
 	sshAuth  failTracker
 	conns    map[netip.Prefix]int
+	tunnels  map[netip.Prefix]int
 	sessions map[string]int
 }
 
@@ -115,6 +122,7 @@ func New(cfg Config, m *obs.Metrics) *Limits {
 		authFail: newFailTracker(cfg.AuthFailPerMin, failWindow, cfg.AuthBlock),
 		sshAuth:  newFailTracker(cfg.SSHAuthFailPerMin, failWindow, sshAuthBlock),
 		conns:    map[netip.Prefix]int{},
+		tunnels:  map[netip.Prefix]int{},
 		sessions: map[string]int{},
 	}
 }
@@ -237,19 +245,32 @@ func (l *Limits) AuthBlocked(ip netip.Addr) (bool, time.Duration) {
 // release when the connection closes; release is idempotent. When ok is
 // false, release is nil.
 func (l *Limits) AcquireConn(ip netip.Addr) (release func(), ok bool) {
+	return l.acquire(l.conns, l.cfg.ConnsPerIP, LimitConns, ip)
+}
+
+// AcquireTunnelConn counts one open tunnel conn of the IP, apart from the
+// conns of AcquireConn. The caller must call release when the conn closes;
+// release is idempotent. When ok is false, release is nil.
+func (l *Limits) AcquireTunnelConn(ip netip.Addr) (release func(), ok bool) {
+	return l.acquire(l.tunnels, l.cfg.TunnelConnsPerIP, LimitTunnelConns, ip)
+}
+
+// acquire counts one open conn of the IP in m, capped at maxPerIP; exempt
+// IPs are not counted.
+func (l *Limits) acquire(m map[netip.Prefix]int, maxPerIP int, limit string, ip netip.Addr) (func(), bool) {
 	if l.exempt(ip) {
 		return func() {}, true
 	}
 	k := Key(ip)
 	l.mu.Lock()
-	if l.conns[k] >= l.cfg.ConnsPerIP {
+	if m[k] >= maxPerIP {
 		l.mu.Unlock()
-		l.refused(LimitConns)
+		l.refused(limit)
 		return nil, false
 	}
-	l.conns[k]++
+	m[k]++
 	l.mu.Unlock()
-	return l.releaser(func() { dec(l.conns, k) }), true
+	return l.releaser(func() { dec(m, k) }), true
 }
 
 // AllowSSHConn takes one new SSH connection from the IP bucket.

@@ -132,6 +132,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"Dial", cfg.Timeouts.Dial, 10 * time.Second},
 		{"ResponseHeader", cfg.Timeouts.ResponseHeader, 5 * time.Minute},
 		{"StreamIdle", cfg.Timeouts.StreamIdle, 60 * time.Minute},
+		{"TunnelReadHeader", cfg.Timeouts.TunnelReadHeader, 5 * time.Second},
 		{"TunnelAdmitRate", cfg.TunnelAdmitRate, 200.0},
 		{"TunnelAdmitBurst", cfg.TunnelAdmitBurst, 1000},
 		{"LogLevel", cfg.LogLevel, "info"},
@@ -144,6 +145,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"AuthFailPerMin", cfg.RateLimit.AuthFailPerMin, 20},
 		{"AuthBlock", cfg.RateLimit.AuthBlock, 5 * time.Minute},
 		{"ConnsPerIP", cfg.RateLimit.ConnsPerIP, 512},
+		{"TunnelConnsPerIP", cfg.RateLimit.TunnelConnsPerIP, 512},
 		{"SSHConnPerMin", cfg.RateLimit.SSHConnPerMin, 10},
 		{"SSHConnBurst", cfg.RateLimit.SSHConnBurst, 20},
 		{"SSHAuthFailPerMin", cfg.RateLimit.SSHAuthFailPerMin, 10},
@@ -160,33 +162,35 @@ func TestFromEnvDefaults(t *testing.T) {
 func TestFromEnvOverrides(t *testing.T) {
 	f := newFixture(t)
 	for k, v := range map[string]string{
-		"SBX_GATEWAY_INSTANCE_ID":                 "gw-1",
-		"SBX_GATEWAY_TLS_LISTEN":                  ":443",
-		"SBX_GATEWAY_HTTP_LISTEN":                 ":8080",
-		"SBX_GATEWAY_PROXY_PROTOCOL":              "v2",
-		"SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":        "10.0.0.0/8, fd00::/8",
-		"SBX_GATEWAY_TRUSTED_PROXY_CIDRS":         "192.168.0.0/16",
-		"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":      "203.0.113.0/24",
-		"SBX_GATEWAY_RATELIMIT_IP_RATE":           "5.5",
-		"SBX_GATEWAY_RATELIMIT_AUTH_BLOCK":        "1m",
-		"SBX_GATEWAY_RESERVED_PORTS":              "22, 8080",
-		"SBX_GATEWAY_TIMEOUT_DIAL":                "3s",
-		"SBX_GATEWAY_TIMEOUT_STREAM_IDLE":         "30m",
-		"SBX_GATEWAY_MAX_HEADER_BYTES":            "1024",
-		"SBX_GATEWAY_COOKIE_CROSS_SITE":           "true",
-		"SBX_GATEWAY_HTTP_DRAIN_DEADLINE":         "30s",
-		"SBX_GATEWAY_TUNNEL_ADMIT_RATE":           "50",
-		"SBX_GATEWAY_TUNNEL_ADMIT_BURST":          "60",
-		"SBX_GATEWAY_MIN_AGENT_VERSION":           "1.2.3",
-		"SBX_GATEWAY_LOG_LEVEL":                   "debug",
-		"SBX_GATEWAY_STRIP_COOKIE_PREFIXES":       "a,b",
-		"SBX_GATEWAY_AUTH_URL":                    "https://app.example.com/authorize",
-		"SBX_GATEWAY_RESERVED_SUFFIXES":           "desktop,vnc",
-		"SBX_GATEWAY_RESERVED_SLUGS":              "api",
-		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER":     "1m",
-		"SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP":   "16",
-		"SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY": "1h",
-		"SBX_GATEWAY_PROXY_HEADER_TIMEOUT":        "500ms",
+		"SBX_GATEWAY_INSTANCE_ID":                   "gw-1",
+		"SBX_GATEWAY_TLS_LISTEN":                    ":443",
+		"SBX_GATEWAY_HTTP_LISTEN":                   ":8080",
+		"SBX_GATEWAY_PROXY_PROTOCOL":                "v2",
+		"SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":          "10.0.0.0/8, fd00::/8",
+		"SBX_GATEWAY_TRUSTED_PROXY_CIDRS":           "192.168.0.0/16",
+		"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":        "203.0.113.0/24",
+		"SBX_GATEWAY_RATELIMIT_IP_RATE":             "5.5",
+		"SBX_GATEWAY_RATELIMIT_AUTH_BLOCK":          "1m",
+		"SBX_GATEWAY_RESERVED_PORTS":                "22, 8080",
+		"SBX_GATEWAY_TIMEOUT_DIAL":                  "3s",
+		"SBX_GATEWAY_TIMEOUT_STREAM_IDLE":           "30m",
+		"SBX_GATEWAY_MAX_HEADER_BYTES":              "1024",
+		"SBX_GATEWAY_COOKIE_CROSS_SITE":             "true",
+		"SBX_GATEWAY_HTTP_DRAIN_DEADLINE":           "30s",
+		"SBX_GATEWAY_TUNNEL_ADMIT_RATE":             "50",
+		"SBX_GATEWAY_TUNNEL_ADMIT_BURST":            "60",
+		"SBX_GATEWAY_MIN_AGENT_VERSION":             "1.2.3",
+		"SBX_GATEWAY_LOG_LEVEL":                     "debug",
+		"SBX_GATEWAY_STRIP_COOKIE_PREFIXES":         "a,b",
+		"SBX_GATEWAY_AUTH_URL":                      "https://app.example.com/authorize",
+		"SBX_GATEWAY_RESERVED_SUFFIXES":             "desktop,vnc",
+		"SBX_GATEWAY_RESERVED_SLUGS":                "api",
+		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER":       "1m",
+		"SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP":     "16",
+		"SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY":   "1h",
+		"SBX_GATEWAY_PROXY_HEADER_TIMEOUT":          "500ms",
+		"SBX_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP": "32",
+		"SBX_GATEWAY_TIMEOUT_TUNNEL_READ_HEADER":    "3s",
 	} {
 		f.env[k] = v
 	}
@@ -220,6 +224,9 @@ func TestFromEnvOverrides(t *testing.T) {
 	}
 	if cfg.ProxyHeaderTimeout != 500*time.Millisecond {
 		t.Errorf("ProxyHeaderTimeout = %s", cfg.ProxyHeaderTimeout)
+	}
+	if cfg.RateLimit.TunnelConnsPerIP != 32 || cfg.Timeouts.TunnelReadHeader != 3*time.Second {
+		t.Errorf("TunnelConnsPerIP = %d, TunnelReadHeader = %s", cfg.RateLimit.TunnelConnsPerIP, cfg.Timeouts.TunnelReadHeader)
 	}
 	if cfg.SSHLoginCertMaxValidity != time.Hour {
 		t.Errorf("SSHLoginCertMaxValidity = %s", cfg.SSHLoginCertMaxValidity)
@@ -317,6 +324,7 @@ func TestFromEnvErrors(t *testing.T) {
 		{"bad duration", func(f *fixture) { f.env["SBX_GATEWAY_TIMEOUT_DIAL"] = "ten" }, "SBX_GATEWAY_TIMEOUT_DIAL"},
 		{"non-positive duration", func(f *fixture) { f.env["SBX_GATEWAY_TIMEOUT_DIAL"] = "-1s" }, "SBX_GATEWAY_TIMEOUT_DIAL"},
 		{"bad int", func(f *fixture) { f.env["SBX_GATEWAY_MAX_HEADER_BYTES"] = "x" }, "SBX_GATEWAY_MAX_HEADER_BYTES"},
+		{"bad tunnel conns per ip", func(f *fixture) { f.env["SBX_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP"] = "0" }, "SBX_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP"},
 		{"bad handshakes per ip", func(f *fixture) { f.env["SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"] = "0" }, "SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"},
 		{"bad port", func(f *fixture) { f.env["SBX_GATEWAY_RESERVED_PORTS"] = "22,70000" }, "SBX_GATEWAY_RESERVED_PORTS"},
 		{"bad bool", func(f *fixture) { f.env["SBX_GATEWAY_COOKIE_CROSS_SITE"] = "maybe" }, "SBX_GATEWAY_COOKIE_CROSS_SITE"},
@@ -459,5 +467,165 @@ func TestValidateServe(t *testing.T) {
 				t.Fatalf("err = %v, want one naming %s", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestFromEnvMappedCIDRs: an IPv4-mapped prefix of /96 or longer becomes the
+// IPv4 prefix (client addresses are unmapped before matching); a shorter one
+// is refused, naming its variable.
+func TestFromEnvMappedCIDRs(t *testing.T) {
+	vars := []string{"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS", "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS", "SBX_GATEWAY_TRUSTED_PROXY_CIDRS"}
+	got := func(c Config, name string) []netip.Prefix {
+		switch name {
+		case "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":
+			return c.RateLimit.Exempt
+		case "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":
+			return c.ProxyProtocolCIDRs
+		default:
+			return c.TrustedProxyCIDRs
+		}
+	}
+	for _, name := range vars {
+		f := newFixture(t)
+		f.env[name] = "::ffff:10.1.2.0/120, ::ffff:192.0.2.7, ::ffff:0:0/96, 2001:db8::/32"
+		cfg, err := FromEnv(f.getenv)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		want := []netip.Prefix{
+			netip.MustParsePrefix("10.1.2.0/24"),
+			netip.MustParsePrefix("192.0.2.7/32"),
+			netip.MustParsePrefix("0.0.0.0/0"),
+			netip.MustParsePrefix("2001:db8::/32"),
+		}
+		p := got(cfg, name)
+		if len(p) != len(want) {
+			t.Fatalf("%s = %v, want %v", name, p, want)
+		}
+		for i := range want {
+			if p[i] != want[i] {
+				t.Errorf("%s[%d] = %s, want %s", name, i, p[i], want[i])
+			}
+		}
+		if !p[0].Contains(netip.MustParseAddr("::ffff:10.1.2.3").Unmap()) {
+			t.Errorf("%s: %s does not match the unmapped client 10.1.2.3", name, p[0])
+		}
+
+		f = newFixture(t)
+		f.env[name] = "::ffff:10.0.0.0/95"
+		if _, err := FromEnv(f.getenv); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s=::ffff:10.0.0.0/95: err = %v, want one naming %s", name, err, name)
+		}
+	}
+}
+
+// TestValidateServeDrainTimeout: SBX_GATEWAY_DRAIN_TIMEOUT may not exceed the
+// grace period minus 10 s (950 s, the default process bound).
+func TestValidateServeDrainTimeout(t *testing.T) {
+	f := newFixture(t)
+	f.env["SBX_GATEWAY_DRAIN_TIMEOUT"] = "950s"
+	cfg, err := FromEnv(f.getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateServe(); err != nil {
+		t.Fatalf("DRAIN_TIMEOUT=950s: %v", err)
+	}
+	cfg.DrainTimeout = 951 * time.Second
+	err = cfg.ValidateServe()
+	if err == nil || !strings.Contains(err.Error(), "SBX_GATEWAY_DRAIN_TIMEOUT") {
+		t.Fatalf("DRAIN_TIMEOUT=951s: err = %v, want one naming SBX_GATEWAY_DRAIN_TIMEOUT", err)
+	}
+}
+
+// TestValidateServeDrainBudgetCause: the drain budget error names the
+// variables set above their defaults.
+func TestValidateServeDrainBudgetCause(t *testing.T) {
+	const (
+		endpoint = "SBX_GATEWAY_ENDPOINT_WAIT"
+		ssh      = "SBX_GATEWAY_SSH_DRAIN_DEADLINE"
+		http     = "SBX_GATEWAY_HTTP_DRAIN_DEADLINE"
+	)
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*Config)
+		want    []string
+		notWant []string
+	}{
+		// 5 s + 5 s + 15 min 11 s + 10 s + 30 s = 961 s.
+		{"ssh drain deadline", func(c *Config) { c.SSHDrainDeadline = 15*time.Minute + 11*time.Second }, []string{ssh}, []string{endpoint, http}},
+		// 16 s + 5 s + 15 min + 10 s + 30 s = 961 s.
+		{"endpoint wait", func(c *Config) { c.EndpointWait = 16 * time.Second }, []string{endpoint}, []string{ssh, http}},
+		{"both", func(c *Config) {
+			c.EndpointWait = 6 * time.Second
+			c.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+		}, []string{endpoint, ssh}, []string{http}},
+		// The HTTP deadline enters the budget when it is the longest; the
+		// separate HTTP > SSH check names it too.
+		{"http drain deadline", func(c *Config) { c.HTTPDrainDeadline = 16 * time.Minute }, []string{http}, []string{endpoint, ssh}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			cfg, err := FromEnv(f.getenv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(&cfg)
+			err = cfg.ValidateServe()
+			if err == nil {
+				t.Fatal("ValidateServe passed")
+			}
+			var budget string
+			for line := range strings.SplitSeq(err.Error(), "\n") {
+				if strings.Contains(line, "drain budget") {
+					budget = line
+				}
+			}
+			if budget == "" {
+				t.Fatalf("no drain budget error in %q", err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(budget, w) {
+					t.Errorf("%q does not name %s", budget, w)
+				}
+			}
+			for _, w := range tc.notWant {
+				if strings.Contains(budget, w) {
+					t.Errorf("%q names %s", budget, w)
+				}
+			}
+		})
+	}
+}
+
+// TestProcessDrainTimeout: the process's drain timeout is DrainTimeout when
+// set, else the drain budget plus the process margin, capped at
+// MaxDrainTimeout.
+func TestProcessDrainTimeout(t *testing.T) {
+	f := newFixture(t)
+	cfg, err := FromEnv(f.getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{}); got != 950*time.Second {
+		t.Errorf("defaults: %s, want 950s", got)
+	}
+	// 5 + 5 + 910 + 10 + 30 = 960 s, valid for ValidateServe, but the
+	// process bound stays 10 s below the grace period.
+	cfg.SSHDrainDeadline = 15*time.Minute + 10*time.Second
+	if err := cfg.ValidateServe(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{}); got != MaxDrainTimeout {
+		t.Errorf("SSH drain 15m10s: %s, want %s", got, MaxDrainTimeout)
+	}
+	cfg.SSHDrainDeadline, cfg.HTTPDrainDeadline = 2*time.Second, time.Second
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{EndpointWait: 100 * time.Millisecond, DrainSpread: 100 * time.Millisecond, DrainMargin: time.Second}); got != 15*time.Minute+31200*time.Millisecond {
+		// The TCP drain deadline default (15 min) is the longest.
+		t.Errorf("short deadlines: %s", got)
+	}
+	cfg.DrainTimeout = 3 * time.Second
+	if got := ProcessDrainTimeout(cfg, gateway.Timing{}); got != 3*time.Second {
+		t.Errorf("explicit: %s, want 3s", got)
 	}
 }

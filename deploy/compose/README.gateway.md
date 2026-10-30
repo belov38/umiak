@@ -156,7 +156,7 @@ ssh -p 2222 -o UserKnownHostsFile=/tmp/sbx_known_hosts <slug>@127.0.0.1
 Для локальных прогонов есть две переменные окружения gateway (в `environment:` сервиса или через override):
 
 - `SBX_GATEWAY_ENDPOINT_WAIT` — пауза перед закрытием listener-ов (по умолчанию 5s);
-- `SBX_GATEWAY_DRAIN_TIMEOUT` — общий предел drain (по умолчанию бюджет drain + 30 s = 950 s).
+- `SBX_GATEWAY_DRAIN_TIMEOUT` — общий предел drain (по умолчанию бюджет drain + 30 s = 950 s, больше 950 s не принимается).
 
 `docker compose stop -t 10 gateway` прервёт долгий drain через 10 s (SIGKILL).
 

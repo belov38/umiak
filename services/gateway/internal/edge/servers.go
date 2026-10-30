@@ -14,10 +14,11 @@ const (
 	defaultMaxHeaderBytes    = 64 << 10
 	clientIdleTimeout        = 120 * time.Second
 
-	tunnelReadHeaderTimeout = 10 * time.Second
+	// tunnelReadHeaderTimeout closes a tunnel conn that has not sent its
+	// request header, and (as the idle timeout) a keep-alive tunnel conn
+	// without an upgrade: such conns hold a per-IP tunnel slot.
+	tunnelReadHeaderTimeout = 5 * time.Second
 	tunnelMaxHeaderBytes    = 16 << 10
-	// tunnelIdleTimeout closes a keep-alive tunnel conn without an upgrade.
-	tunnelIdleTimeout = 60 * time.Second
 )
 
 // NewSbxServer returns the server of *.sbx conns from Dispatcher.Sbx: HTTP/1
@@ -39,16 +40,19 @@ func NewSbxServer(h http.Handler, t config.Timeouts) *http.Server {
 }
 
 // NewTunnelServer returns the server of tunnel conns from
-// Dispatcher.Tunnel: HTTP/1 only (WebSocket upgrade), ReadHeaderTimeout
-// 10 s and MaxHeaderBytes 16 KiB.
-func NewTunnelServer(h http.Handler) *http.Server {
+// Dispatcher.Tunnel: HTTP/1 only (WebSocket upgrade), MaxHeaderBytes 16 KiB,
+// and t.TunnelReadHeader (default 5 s) as both the header and the idle
+// timeout, so a conn without an upgrade is closed soon. An upgraded conn is
+// hijacked and no longer subject to either.
+func NewTunnelServer(h http.Handler, t config.Timeouts) *http.Server {
 	var p http.Protocols
 	p.SetHTTP1(true)
+	timeout := orDefault(t.TunnelReadHeader, tunnelReadHeaderTimeout)
 	return &http.Server{
 		Handler:           h,
 		Protocols:         &p,
-		ReadHeaderTimeout: tunnelReadHeaderTimeout,
-		IdleTimeout:       tunnelIdleTimeout,
+		ReadHeaderTimeout: timeout,
+		IdleTimeout:       timeout,
 		MaxHeaderBytes:    tunnelMaxHeaderBytes,
 	}
 }
