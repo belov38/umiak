@@ -18,7 +18,8 @@ function isEmpty(v: unknown): boolean {
 	);
 }
 
-function prune(v: unknown): unknown {
+/** The value without empty fields (objects only; arrays are kept as they are). */
+export function prune(v: unknown): unknown {
 	if (!isPlainObject(v)) return v;
 	const out: Record<string, unknown> = {};
 	for (const [k, val] of Object.entries(v)) {
