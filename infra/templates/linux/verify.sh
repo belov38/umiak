@@ -310,6 +310,13 @@ check_users() {
 	[ -e /root/.bash_history ] && left+=(/root/.bash_history)
 	[ -e /home/user/.bash_history ] && left+=(/home/user/.bash_history)
 	[ -f /etc/sbx-template/build.json ] || left+=("no /etc/sbx-template/build.json")
+	local p
+	for p in /home/user/.local/state/gh/device-id /root/.local/state/gh/device-id \
+		/home/user/.config/go/telemetry /root/.config/go/telemetry \
+		/root/.config/opencode /root/.local/share/opencode /root/.local/state/opencode \
+		/home/user/.config/opencode /home/user/.local/share/opencode /home/user/.local/state/opencode; do
+		[ -e "$p" ] && left+=("$p")
+	done
 	# The build VM's journal (another machine-id) must not ship with the template.
 	local mid j
 	mid=$(cat /etc/machine-id)

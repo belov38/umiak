@@ -35,6 +35,15 @@ for home in /root /home/user; do
 		"$home/.viminfo" "$home/.sudo_as_admin_successful"
 done
 rm -rf /home/user/.rustup/downloads/* /home/user/.rustup/tmp/* /root/go
+# State the CLIs wrote while the steps ran them: gh's device id (would be shared by every
+# sandbox), Go telemetry counters, opencode's data; then the empty directories left behind.
+for home in /root /home/user; do
+	rm -rf "$home/.local/state/gh" "$home/.config/go/telemetry" \
+		"$home/.config/opencode" "$home/.local/share/opencode" "$home/.local/state/opencode"
+	for d in "$home/.config" "$home/.local"; do
+		if [ -d "$d" ]; then find "$d" -mindepth 1 -type d -empty -delete; fi
+	done
+done
 find /tmp /var/tmp -mindepth 1 -maxdepth 1 ! -name 'systemd-private-*' -exec rm -rf {} +
 
 # Logs: contents go, the directory tree stays.

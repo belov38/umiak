@@ -524,4 +524,23 @@ describe("lib.sh gpg_primary_fprs", () => {
 		},
 		60_000,
 	);
+
+	it("90-cleanup drops CLI state written during the build and verify.sh checks it", () => {
+		const cleanup = readFileSync(join(linux, "steps/90-cleanup.sh"), "utf8");
+		const verify = readFileSync(join(linux, "verify.sh"), "utf8");
+		for (const p of [
+			".local/state/gh",
+			".config/go/telemetry",
+			".config/opencode",
+			".local/share/opencode",
+		])
+			expect(cleanup, p).toContain(p);
+		for (const p of [
+			"/home/user/.local/state/gh/device-id",
+			"/home/user/.config/go/telemetry",
+			"/root/.config/opencode",
+			"/root/.local/share/opencode",
+		])
+			expect(verify, p).toContain(p);
+	});
 });
