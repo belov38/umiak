@@ -186,6 +186,17 @@ describe("retire", () => {
 		expect(report.join("\n")).toContain("deleted template VM 598");
 	});
 
+	it("marks the build retired when the VM is deleted but the lease release fails", async () => {
+		const s = await setup();
+		s.node.handlers["dhcp.release"] = () => {
+			throw new Error("forbidden: MAC is not from our allocator");
+		};
+		const report = await retire(s.deps, ID_LIVE, { deleteVm: true });
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(report.join("\n")).toMatch(/lease 598: .*forbidden/);
+		expect(s.registry.get(ID_LIVE)?.status).toBe("retired");
+	});
+
 	it("refuses failed and unknown builds, and is idempotent", async () => {
 		const s = await setup();
 		await expect(retire(s.deps, ID_FAILED, { deleteVm: true })).rejects.toThrow(

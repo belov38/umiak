@@ -87,10 +87,17 @@ export async function retire(
 			const lease = (await d.allocator.list()).find(
 				(l) => l.vmid === vmid && l.purpose === "template",
 			);
+			// The VM is gone: a lease failure is reported and does not keep the build ready.
 			if (lease) {
-				await d.allocator.release(vmid);
-				await d.node.call("dhcp.release", { mac: lease.mac });
-				report.push(`released template lease ${vmid}`);
+				try {
+					await d.allocator.release(vmid);
+					await d.node.call("dhcp.release", { mac: lease.mac });
+					report.push(`released template lease ${vmid}`);
+				} catch (err) {
+					report.push(
+						`lease ${vmid}: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
 			}
 		}
 	}
