@@ -12,8 +12,10 @@
 | `keycloak` | IdP, realm `sbx` (architecture §10) | 8180 |
 | `api` | публичное API v1 (S7) | 8080 (public), 9091 (`/readyz`, `/metrics`) |
 | `oauth2-proxy` | браузерные сессии: `/api/*` и `/sbx-auth/*` → proxied listener `api` | 4180 |
+| `gateway-secrets` | одноразовый (`gateway.yaml`): dev-секреты gateway в `secrets/gateway/` | — |
+| `gateway` | S4: preview-адреса, SSH, туннели агентов (см. «Gateway (S4)» ниже) | 8443 (TLS), 2222 (SSH), 7000, 9190 |
 
-`gateway` (S4) подключается файлом `gateway.yaml` (см. «Gateway (S4)» ниже), `web` (S8) добавится позже.
+`web` (S8) добавится позже.
 Proxmox — любой хост, доступный из контейнеров (см. «Proxmox»).
 
 ## Что нужно
@@ -71,9 +73,9 @@ mkdir -p deploy/compose/secrets
 | `keycloak/admin-password` | `keycloak` | пароль администратора Keycloak, если `KEYCLOAK_ADMIN_PASSWORD` в `.env` не задан |
 | `oauth2-proxy/client-secret`, `oauth2-proxy/cookie-secret` | `oauth2-proxy` | копия секрета клиента, ключ cookie (32 байта) |
 
-- Пока gateway нет, `service-tokens.json`, `gateway-token`, `ssh-login-ca` и `ssh-host-keys.pub` — свои
-  dev-значения. Когда в `secrets/gateway/` есть файлы `gateway-secrets` (S4), `secrets-init` берёт их оттуда и
-  переписывает при расхождении: `gateway/api-token` → `{"gateway": [...]}`, `gateway/service-tokens.json` →
+- `secrets-init` стартует после `gateway-secrets` (S4), поэтому `service-tokens.json`, `gateway-token`,
+  `ssh-login-ca` и `ssh-host-keys.pub` берутся из `secrets/gateway/` и переписываются при расхождении (если
+  `gateway-secrets` убрать из стека, `secrets-init` создаёт свои dev-значения): `gateway/api-token` → `{"gateway": [...]}`, `gateway/service-tokens.json` →
   `api[0]`, `gateway/ssh_login_ca`, `gateway/ssh_host_*_key.pub`.
 - Копии (`api/data-keys.json`, `worker/data-keys.json`, `oauth2-proxy/client-secret`) тоже переписываются из
   источника.
@@ -188,15 +190,32 @@ NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
 
 ## Gateway (S4)
 
-`gateway.yaml` и `services/gateway` живут в ветке `s4-impl`. После слияния S4 и S7:
+`compose.yaml` включает `gateway.yaml` (`include`), так что `up -d --build` поднимает `gateway-secrets` и
+`gateway`. Gateway ходит во внутренний listener `api` (`SBX_GATEWAY_API_URL=http://api:8082`, токены
+согласует `secrets-init`). Подробности, порты и доверие dev CA — `README.gateway.md`.
 
-1. Раскомментировать `include: [gateway.yaml]` в начале `compose.yaml`.
-2. Раскомментировать `depends_on: gateway-secrets` у `secrets-init`: тогда `secrets-init` возьмёт токены, SSH
-   login CA и host keys из `secrets/gateway/`.
-3. В `deploy/compose/.env`: `SBX_GATEWAY_API_URL=http://api:8082`.
-4. `up -d --build`, затем `up -d --force-recreate api gateway`.
+Что работает локально, без VM:
 
-Подробности gateway — `README.gateway.md` (ветка `s4-impl`).
+- Поиск маршрутов: `curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx.localhost/`
+  доходит до `api` и отвечает `404 route_not_found`. Для существующей machine с опубликованным портом
+  маршрут находится так же.
+- SSH-авторизация через `api`: gateway слушает `ssh.localhost:2222`, проверяет ключ или login-сертификат
+  (подписан CA из `secrets/gateway/ssh_login_ca`, его выдаёт `api`) вызовом `api`. `/v1/meta` отдаёт
+  `ssh.localhost:2222` и host keys gateway, `sbx ssh` берёт их оттуда. Домен портов — `sbx.localhost`.
+- Реестр gateway в Postgres, внутренний listener (worker вызывает `rotate-token`), метрики на 9190.
+
+Чего без реальной VM нет: туннеля агента (`sbx-guest-agent` внутри VM подключается к `tunnel.localhost`), поэтому
+нет проксирования preview-трафика и SSH-сессий в VM, нет RPC агента и файлов, а sandbox не доходит до `ready`.
+Для этого нужна VM на Proxmox с шаблоном, в котором есть агент.
+
+Проверка:
+
+```sh
+docker compose -f deploy/compose/compose.yaml ps -a   # gateway, api, keycloak, oauth2-proxy, postgres: healthy
+curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx.localhost/   # 404 route_not_found
+```
+
+Стек без `api`: `SBX_GATEWAY_API_URL=none` в `deploy/compose/.env`.
 
 ## Настройки
 
@@ -216,7 +235,7 @@ NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
 - `deploy/compose/.env` (git-ignored, пример — `.env.example`): Proxmox (`SBX_PVE_URL`, `SBX_PVE_TLS_NAME`,
   `SBX_NODE_SSH_HOST`, `SBX_PVE_TOKEN_ID`, `SBX_PVE_SECRETS_DIR`), `SBX_RECONCILE_DRY_RUN`, Keycloak
   (`KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `SBX_DEV_PASSWORD`), `SBX_SSH_HOST`/`SBX_SSH_PORT` для
-  `/v1/meta`, `SBX_API_LOG_LEVEL`.
+  `/v1/meta` (по умолчанию `ssh.localhost:2222`), `SBX_GATEWAY_API_URL`, `SBX_API_LOG_LEVEL`.
 - Порты на хосте фиксированы: 8080 (api), 9091 (ops api), 8180 (Keycloak), 4180 (oauth2-proxy), плюс 5432
   и 9090. Адреса `http://localhost:8180` и `http://localhost:4180` записаны в realm (redirect URI, issuer) и в
   конфиге oauth2-proxy, поэтому другой порт ломает вход.
@@ -227,7 +246,7 @@ NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
 
 - Reconcile работает в dry-run (`SBX_RECONCILE_DRY_RUN=1`): читает список VM на Proxmox (только чтение) и логирует, что сделал бы.
 - Целевые размеры пулов в `sbx.yaml` равны 0 (`pools: []`, решение 17), поэтому worker сам не создаёт VM.
-- Пока нет агента (S3) и gateway (S4), создание sandbox не может дойти до `ready`: агентский порт недоступен, а без `SBX_GATEWAY_SERVICE_TOKEN_FILE` ротация токена падает по таймауту. Worker при этом предупреждает об этом в логе при старте.
+- Gateway (S4) в стеке и worker получает `SBX_GATEWAY_SERVICE_TOKEN_FILE` из `gateway.yaml`, но без VM с агентом (S3) туннеля нет: агентский порт недоступен, и создание sandbox не доходит до `ready`.
 - RPC агента в `api` отвечают `503 agent_unavailable`, пока не подключён S3 (решение 3 плана S7); файлы идут через gateway.
 - Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой схемы `tunnel` (до этой миграции), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
 - С `SBX_GATEWAY_SERVICE_TOKEN_FILE` worker находит gateway, который держит туннель machine, через `PgRegistry` из `@sbx/agent-client` (своё небольшое подключение к Postgres и LISTEN `tunnel_sessions`) и вызывает на нём `rotate-token`.
