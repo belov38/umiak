@@ -26,11 +26,20 @@ export async function preflight(
 				version: string;
 				config: { vmidMin: number; vmidMax: number; templateVmid: number };
 			}>("version");
+			// sbx-node clones from base-<id> of any VMID in its range (S5 templates), its own
+			// templateVmid is only the legacy 599.
+			const tplOk =
+				v.config.templateVmid === cfg.templateVmid ||
+				(cfg.templateVmid >= v.config.vmidMin &&
+					cfg.templateVmid <= v.config.vmidMax);
 			const ok =
-				v.config.templateVmid === cfg.templateVmid &&
+				tplOk &&
 				v.config.vmidMin <= cfg.vmidRange.min &&
 				v.config.vmidMax >= cfg.vmidRange.max;
-			return { ok, detail: `sbx-node ${v.version}` };
+			return {
+				ok,
+				detail: `sbx-node ${v.version}, range ${v.config.vmidMin}-${v.config.vmidMax}, template ${cfg.templateVmid}`,
+			};
 		}),
 	);
 	checks.push(
