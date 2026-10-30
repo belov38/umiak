@@ -245,6 +245,14 @@ describe("resume", () => {
 				},
 			},
 		]);
+		// The SSH user CA keys reach machines claimed before a CA change.
+		expect(w.agent.callsOf("updateSshCa")).toEqual([
+			{
+				method: "updateSshCa",
+				machineId,
+				requestId: stepRequestId(op.id, "provision:ssh_ca"),
+			},
+		]);
 		// Claim is once per identity (S3 §8.1).
 		expect(w.agent.callsOf("claim")).toHaveLength(1);
 		expect(w.infra.callsOf("configure")).toHaveLength(0);
@@ -449,6 +457,7 @@ describe("recover", () => {
 		expect(vmOf(w, machineId).starts).toBe(2);
 		expect(w.agent.callsOf("updateEnv")).toHaveLength(1);
 		expect(w.agent.callsOf("updateSecrets")).toHaveLength(1);
+		expect(w.agent.callsOf("updateSshCa")).toHaveLength(1);
 	});
 
 	it("from error with a stopped machine: start gate and start", async () => {
@@ -565,6 +574,7 @@ describe("reprovision", () => {
 
 		expect(w.agent.callsOf("updateEnv")).toHaveLength(0);
 		expect(w.agent.callsOf("updateSecrets")).toHaveLength(0);
+		expect(w.agent.callsOf("updateSshCa")).toHaveLength(0);
 		expect((await row(w, "operations", opId)).step).toBe("provision");
 		expect((await row(w, "sandboxes", sandboxId)).state).toBe("ready");
 	});
@@ -589,6 +599,9 @@ describe("reprovision", () => {
 		expect(w.agent.callsOf("updateEnv").map((c) => c.args)).toEqual([ENV]);
 		expect(w.agent.callsOf("updateSecrets").map((c) => c.args)).toMatchObject([
 			{ secretEnv: SECRETS },
+		]);
+		expect(w.agent.callsOf("updateSshCa").map((c) => c.requestId)).toEqual([
+			stepRequestId(opId, "provision:ssh_ca"),
 		]);
 		expect((await row(w, "machines", machineId)).provisioned_boot_id).toBe(
 			newBoot,
