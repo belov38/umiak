@@ -601,6 +601,22 @@ Not a task of this plan's execution order: when the master allows, install the p
 - `shim_unavailable` (retryable, `unavailable`), `invalid_argument`, `failed_precondition` (Task 9). S6/S7 must map one more retryable code.
 - `lease_expired` (`aborted`), `quiesce_timeout` (`deadline_exceeded`), `store_busy` (`unavailable`) (Task 14).
 - From the plan header: `invalid_path`, `payload_too_large`, `upload_not_found`, `bad_version`, `quiesced`.
+- `unimplemented` (`unimplemented`): the agent build does not wire the feature (for example quiesce or update before they are installed).
+
+### `/files` JSON formats (for S7)
+
+- `FileInfo` in `/files` HTTP bodies (commit result, `PUT /files`) is protojson: camelCase field names, `uint64` `size` as a decimal string, enums by name, `mtime` as an RFC 3339 string.
+- The `mode` query parameter (`PUT /files`) is octal (`644`, `0o644`); the `mode` field of the commit body is a decimal JSON number (`420` for 0644).
+
+### Final review fixes (2026-10-30)
+
+- **Worker settings for Claim (B1, note for the master).** New optional worker env vars `SBX_PORT_DOMAIN` (e.g. `sbx.example.com`) and `SBX_SSH_USER_CA_KEYS_FILE` (a file with one CA public key per line; blank lines and `#` comments skipped). `ConnectAgentPort` sends them as `port_domain` and `ssh_user_ca_keys` on every Claim; unset means empty. Before this, production claims never set `SBX_PORT_DOMAIN` in the guest nor `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`.
+- **Quiesce hook after a lost freeze response (B5).** When `Quiesce` failed with `AgentUnavailable`, `thaw()` reads `System/Info` and thaws the active lease; a failed lookup leaves it to the watchdog.
+- **Start timeout and early update deadline (C2).** `TimeoutStartSec=30` is added to `sbx-agent.service` and spec §17.2. The confirmation deadline of an unconfirmed update is armed right after quiesce Startup (`update.StartGuard`), not only in `CheckPending`: an expired deadline reverts at once, a new version that hangs in startup is reverted by the timer.
+- **Shutdown during a lease (C3).** The watchdog unit thaws at once on SIGTERM; the agent thaws its own active lease before it exits (`quiesce.auto_thawed{by: agent_stop}`, a new `by` value). A normal release deletes the lease file before it stops the watchdog unit, so the stop signal finds nothing to thaw.
+- **Kill of an unlaunched command (A3).** `Kill` on a `STARTING` record that was never launched ends it as `KILLED/SIGNAL`; a later `Start` retry returns it without launching. `Kill` with `grace_ms 0` on a live unit with an unreachable shim kills the cgroup (A7). The retry of a kept `STARTING` record takes a slot under `max_running_commands` (A6).
+- **Request cache (C5).** An error returned after the call context ended is not cached, whatever its code; a success still is.
+- **Uploaded update package (C7).** A package in `staging/` is deleted after `ApplyUpdate`, also after a failure; a retry needs a new upload.
 
 ### Lint fix found in Task 19
 
