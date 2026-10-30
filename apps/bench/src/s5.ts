@@ -102,8 +102,8 @@ const GUEST_SCRIPT = [
  * A config lock held for a while by Proxmox (seen right after a start) fails the stop task of a
  * delete with "can't lock file ... got timeout"; delete is safe to repeat.
  */
-async function deleteWithRetry(
-	machines: Machines,
+export async function deleteWithRetry(
+	machines: Pick<Machines, "delete">,
 	vmid: number,
 ): Promise<void> {
 	for (let attempt = 1; ; attempt++) {
@@ -121,20 +121,22 @@ async function deleteWithRetry(
 const log = (s: string) =>
 	process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] ${s}\n`);
 
+/** Machines of the context with another template (the bench runs several templates in turn). */
+export function machinesFor(ctx: Ctx, templateVmid: number): Machines {
+	return new Machines({
+		api: ctx.api,
+		node: ctx.node,
+		driver: ctx.driver,
+		allocator: ctx.allocator,
+		snapshots: ctx.store,
+		cfg: { ...ctx.cfg, templateVmid },
+		ipfilter: true,
+	});
+}
+
 export async function runS5(ctx: Ctx, o: S5Options): Promise<number> {
-	const { cfg } = ctx;
 	const ram = new RamGuard(ctx, o.ramCapMb);
 	const secrets: string[] = [];
-	const machinesFor = (templateVmid: number) =>
-		new Machines({
-			api: ctx.api,
-			node: ctx.node,
-			driver: ctx.driver,
-			allocator: ctx.allocator,
-			snapshots: ctx.store,
-			cfg: { ...cfg, templateVmid },
-			ipfilter: true,
-		});
 
 	const boot = async (
 		machines: Machines,
@@ -175,7 +177,7 @@ export async function runS5(ctx: Ctx, o: S5Options): Promise<number> {
 	};
 
 	const runTemplate = async (templateVmid: number): Promise<RunSample[]> => {
-		const machines = machinesFor(templateVmid);
+		const machines = machinesFor(ctx, templateVmid);
 		const runs: RunSample[] = [];
 		for (let i = 1; i <= o.runs; i++) {
 			const uuid = randomUUID();

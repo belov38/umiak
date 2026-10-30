@@ -1,0 +1,30 @@
+name: guest-agent-windows
+
+# Runs the guest agent tests on a real Windows runner. Optional, not a gate: the gate is
+# `sbx-bench s9 agent-tests` on the pve Windows template.
+# Automatic push/PR triggers are disabled during development (Ilia, 2026-10-30); run manually.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guest-agent-windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/guest-agent
+    steps:
+      - uses: actions/checkout@v7
+      # go.mod carries the same Go version as mise.toml (kept in sync, see CLAUDE.md).
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: services/guest-agent/go.mod
+          cache-dependency-path: services/guest-agent/go.sum
+      - run: go test -count=1 ./...
