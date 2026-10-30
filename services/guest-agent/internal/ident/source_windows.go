@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"golang.org/x/sys/windows/registry"
 
@@ -25,6 +27,9 @@ type FirmwareSource struct {
 	ReadTable func() ([]byte, error)
 	// BootCount returns the boot counter.
 	BootCount func() (uint32, error)
+	// BootTime returns the kernel boot time, the boot id fallback when
+	// BootCount fails; nil leaves BootID empty then.
+	BootTime func() (time.Time, error)
 }
 
 // Read is not supported: Windows has no sysfs. Use FirmwareSource.
@@ -37,11 +42,14 @@ func NewFirmwareSource() FirmwareSource {
 	return FirmwareSource{
 		ReadTable: func() ([]byte, error) { return winapi.GetSystemFirmwareTable(winapi.FirmwareTableRSMB, 0) },
 		BootCount: readBootCount,
+		BootTime:  winapi.KernelBootTime,
 	}
 }
 
 // Read implements Source. vmgenid is not read. A missing SMBIOS table is an
-// error; a boot counter that cannot be read leaves BootID empty.
+// error. The boot id comes from the boot counter; when the counter cannot
+// be read it comes from the kernel boot time (logged), and when neither can
+// be read BootID stays empty.
 func (s FirmwareSource) Read(ctx context.Context) (Raw, error) {
 	if err := ctx.Err(); err != nil {
 		return Raw{}, err
@@ -55,9 +63,21 @@ func (s FirmwareSource) Read(ctx context.Context) (Raw, error) {
 		return Raw{}, err
 	}
 	raw := Raw{Serial: serial, UUID: id, Family: family}
-	if count, err := s.BootCount(); err == nil {
+	count, cerr := s.BootCount()
+	if cerr == nil {
 		raw.BootID = BootIDFor(id, count)
+		return raw, nil
 	}
+	if s.BootTime == nil {
+		return raw, nil
+	}
+	bt, terr := s.BootTime()
+	if terr != nil {
+		slog.Warn("ident: no boot counter and no kernel boot time, boot id unknown", "count_err", cerr, "time_err", terr)
+		return raw, nil
+	}
+	slog.Warn("ident: boot counter unreadable, boot id from the kernel boot time", "err", cerr)
+	raw.BootID = BootIDFromBootTime(id, bt)
 	return raw, nil
 }
 

@@ -168,6 +168,10 @@ type harness struct {
 	preShutdown  chan struct{}
 	// supervisor replaces sup in the agent deps when set.
 	supervisor supervisor.Supervisor
+	// winBoot selects the Windows start; the Linux resetter is then unset.
+	winBoot *WinBoot
+	// identityRetry replaces the 20 ms identity retry period when set.
+	identityRetry time.Duration
 
 	cancel context.CancelFunc
 	done   chan error
@@ -212,10 +216,19 @@ func (h *harness) buildDeps() Deps {
 	if h.supervisor != nil {
 		sup = h.supervisor
 	}
+	retry := 20 * time.Millisecond
+	if h.identityRetry > 0 {
+		retry = h.identityRetry
+	}
+	var resetter ident.Resetter = h.resetter
+	if h.winBoot != nil {
+		resetter = nil
+	}
 	return Deps{
 		Supervisor:   sup,
 		IdentSource:  h.src,
-		Resetter:     h.resetter,
+		Resetter:     resetter,
+		WinBoot:      h.winBoot,
 		Dialer:       h.dialer,
 		SdNotify:     h.notify.notify,
 		BootID:       func() (string, error) { return h.bootID, nil },
@@ -229,7 +242,7 @@ func (h *harness) buildDeps() Deps {
 		ShimPath:   "/usr/local/lib/sbx-agent/versions/test/sbx-agent",
 		Log:        slog.New(slog.DiscardHandler),
 
-		IdentityRetry: 20 * time.Millisecond,
+		IdentityRetry: retry,
 		StatusEvery:   20 * time.Millisecond,
 		DebugListen:   h.debugListen,
 		DebugConfirm:  h.debugConfirm,

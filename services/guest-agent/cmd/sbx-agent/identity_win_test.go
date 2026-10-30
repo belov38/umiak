@@ -11,6 +11,8 @@ import (
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
 )
 
 // winTestDeps returns deps wired like Windows: a FakeWinResetter whose
@@ -119,5 +121,50 @@ func TestSealCLIWindows(t *testing.T) {
 	}
 	if _, err := os.Stat(d.layout.StateDir); !os.IsNotExist(err) {
 		t.Errorf("state dir still there: %v", err)
+	}
+}
+
+func TestEarlyRecreatesMissingCurrent(t *testing.T) {
+	d, _ := winTestDeps(t, ident.WindowsComputerName(cliMachineID))
+	bin := filepath.Join(d.layout.VersionsDir, "1.0.0", update.BinaryName)
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Dir(bin), d.layout.PreviousLink); err != nil {
+		t.Fatal(err)
+	}
+	var errOut bytes.Buffer
+	if code := runWith(context.Background(), d, []string{"early"}, nil, &errOut); code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, errOut.String())
+	}
+	if v, err := update.LinkVersion(d.layout.CurrentLink); err != nil || v != "1.0.0" {
+		t.Errorf("current -> %q, %v; want 1.0.0", v, err)
+	}
+}
+
+func TestVersionShimPath(t *testing.T) {
+	l := paths.ForRoot(t.TempDir())
+	vdir := filepath.Join(l.VersionsDir, "1.2.3")
+	if err := os.MkdirAll(vdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vdir, update.BinaryName), []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(vdir, l.CurrentLink); err != nil {
+		t.Fatal(err)
+	}
+	viaCurrent := filepath.Join(l.CurrentLink, update.BinaryName)
+	got := versionShimPath(l, viaCurrent, filepath.EvalSymlinks)
+	want, _ := filepath.EvalSymlinks(filepath.Join(vdir, update.BinaryName))
+	if got != want {
+		t.Errorf("shim path = %q, want %q (the version directory)", got, want)
+	}
+	// A binary outside the versions directory (a dev run) stays as is.
+	if got := versionShimPath(l, "/opt/dev/sbx-agent", filepath.EvalSymlinks); got != "/opt/dev/sbx-agent" {
+		t.Errorf("dev binary: %q", got)
 	}
 }

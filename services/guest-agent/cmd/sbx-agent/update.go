@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"flag"
 	"fmt"
@@ -93,15 +94,20 @@ func rollbackCmd(d deps, args []string, stderr io.Writer) int {
 }
 
 // selftestCmd implements `sbx-agent selftest --schema N --shim-protos 1,2`
-// (spec 17.4 step 3). It checks the version directory of this binary.
-func selftestCmd(d deps, args []string, stdout, stderr io.Writer) int {
+// (spec 17.4 step 3), which checks the version directory of this binary,
+// and `sbx-agent selftest --pty` (selftestPTY).
+func selftestCmd(ctx context.Context, d deps, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("selftest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	schema := fs.Int("schema", -1, "state.db schema version (0 for none)")
 	protoList := fs.String("shim-protos", "", "comma-separated protocol versions of live shims")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *schema < 0 {
-		_, _ = io.WriteString(stderr, "usage: sbx-agent selftest --schema <n> [--shim-protos 1,2]\n")
+	pty := fs.Bool("pty", false, "run a terminal session through the running agent")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*pty == (*schema >= 0)) || (*pty && *protoList != "") {
+		_, _ = io.WriteString(stderr, "usage: sbx-agent selftest --schema <n> [--shim-protos 1,2] | selftest --pty\n")
 		return 2
+	}
+	if *pty {
+		return selftestPTY(ctx, d, stdout, stderr)
 	}
 	protos, err := update.ParseProtos(*protoList)
 	if err != nil {

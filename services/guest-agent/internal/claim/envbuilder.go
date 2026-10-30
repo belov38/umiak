@@ -1,6 +1,12 @@
 package claim
 
-import "github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
+import (
+	"maps"
+	"slices"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
+)
 
 // Defaults of the base environment.
 const (
@@ -31,4 +37,24 @@ func (b EnvBuilder) claimEnv() (platform, claimed, secret map[string]string) {
 	req, secret := m.req, m.secretEnv
 	m.mu.RUnlock()
 	return m.platformEnv(req), req.GetEnv(), secret
+}
+
+// SessionEnv returns the env an SSH session takes from the agent (S9 spec
+// 12.7, layers 2-4): the platform env with SBX_ENV_APPLIED=1, the claim env
+// and the secret env, later layers winning, as KEY=VALUE entries. Keys
+// compare case-insensitively, as on Windows, the only OS that serves it.
+func (b EnvBuilder) SessionEnv() []string {
+	platform, claimed, secret := b.claimEnv()
+	platform["SBX_ENV_APPLIED"] = "1"
+	return wincmd.MergeEnv(sortedEnv(platform), sortedEnv(claimed), sortedEnv(secret))
+}
+
+// sortedEnv returns m as KEY=VALUE entries sorted by key, so keys that
+// differ only in case merge in a stable order.
+func sortedEnv(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		out = append(out, k+"="+m[k])
+	}
+	return out
 }

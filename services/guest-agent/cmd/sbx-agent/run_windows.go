@@ -20,9 +20,9 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
 )
 
-// The agent log: <LogDir>\agent.log, 10 files of 10 MiB (S9 spec 12.1).
+// The agent log: <LogDir>\agent.log (agentLogName), 10 files of 10 MiB (S9
+// spec 12.1).
 const (
-	agentLogName  = "agent.log"
 	agentLogBytes = 10 << 20
 	agentLogKeep  = 10
 )
@@ -127,22 +127,35 @@ func runWindowsAgent(ctx context.Context, d deps, o runOptions, stderr io.Writer
 }
 
 // platformAgentDeps returns the Windows parts of agent.Deps: the Windows
-// supervisor and the boot id of the identity source. Task 17 completes the
-// wiring (Windows resetter, early wait, admin socket); cleanup releases what
-// it opened.
+// supervisor, the boot id of the identity source, the Windows start
+// (WinBoot: Windows Setup and boot step gates, ident.ApplyWindows in
+// ModeService, sshd) and shims started from the version directory. The
+// admin and env sockets come from the layout. cleanup releases what it
+// opened.
 func platformAgentDeps(ctx context.Context, d deps) (agent.Deps, func(), error) {
+	if d.winResetter == nil {
+		return agent.Deps{}, nil, errors.New("agent: no Windows identity resetter")
+	}
 	sup, err := supervisor.NewWindows(d.layout)
 	if err != nil {
+		return agent.Deps{}, nil, err
+	}
+	exe, err := d.executable()
+	if err != nil {
+		_ = sup.Close()
 		return agent.Deps{}, nil, err
 	}
 	src := d.source
 	return agent.Deps{
 		Supervisor:  sup,
 		IdentSource: src,
-		Resetter:    d.resetter,
+		WinBoot:     &agent.WinBoot{Resetter: d.winResetter},
 		Freezer:     d.freezer,
 		Statfs:      d.statfs,
+		ShimPath:    versionShimPath(d.layout, exe, finalPath),
 		BootID: func() (string, error) {
+			// FirmwareSource falls back to the kernel boot time when the
+			// boot counter cannot be read (S9 spec 12.4).
 			raw, err := src.Read(ctx)
 			if err != nil {
 				return "", err
@@ -150,7 +163,41 @@ func platformAgentDeps(ctx context.Context, d deps) (agent.Deps, func(), error) 
 			if id := strings.TrimSpace(raw.BootID); id != "" {
 				return id, nil
 			}
-			return "", errors.New("agent: the identity source has no boot id")
+			return "", errors.New("agent: neither the boot counter nor the kernel boot time gives a boot id")
 		},
 	}, func() { _ = sup.Close() }, nil
+}
+
+// volumeNameDOS is VOLUME_NAME_DOS of GetFinalPathNameByHandle (a drive
+// letter path); x/sys has no constant for it.
+const volumeNameDOS = 0
+
+// finalPath resolves path with junctions and symlinks followed
+// (GetFinalPathNameByHandle): filepath.EvalSymlinks leaves junctions such
+// as current alone since Go 1.23.
+func finalPath(path string) (string, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", err
+	}
+	h, err := windows.CreateFile(p, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h) //nolint:errcheck // read-only use
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), volumeNameDOS)
+	if err != nil {
+		return "", err
+	}
+	if int(n) > len(buf) {
+		return "", errors.New("agent: final path too long")
+	}
+	s := windows.UTF16ToString(buf[:n])
+	// \\?\C:\x -> C:\x; \\?\UNC\server\x -> \\server\x.
+	if rest, ok := strings.CutPrefix(s, `\\?\UNC\`); ok {
+		return `\\` + rest, nil
+	}
+	return strings.TrimPrefix(s, `\\?\`), nil
 }

@@ -2,8 +2,6 @@ package claim
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 
 	"golang.org/x/sys/windows"
 
@@ -32,17 +30,7 @@ func (b EnvBuilder) Build(u *process.User, spec *agentv1.CommandSpec) []string {
 		// ConPTY speaks xterm-256color whatever the spec's term is.
 		platform["TERM"] = DefaultTerm
 	}
-	return wincmd.MergeEnv(base, envList(platform), envList(claimed), envList(secret), envList(spec.GetEnv()))
-}
-
-// envList returns m as KEY=VALUE entries sorted by key, so keys that differ
-// only in case merge in a stable order.
-func envList(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for _, k := range slices.Sorted(maps.Keys(m)) {
-		out = append(out, k+"="+m[k])
-	}
-	return out
+	return wincmd.MergeEnv(base, sortedEnv(platform), sortedEnv(claimed), sortedEnv(secret), sortedEnv(spec.GetEnv()))
 }
 
 // userEnvBlock returns CreateEnvironmentBlock(token, FALSE) of u: the

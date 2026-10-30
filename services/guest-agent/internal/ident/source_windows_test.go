@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestFirmwareSourceRead(t *testing.T) {
@@ -61,5 +62,33 @@ func TestNewFirmwareSourceRealTable(t *testing.T) {
 	}
 	if _, err := src.BootCount(); err != nil {
 		t.Errorf("boot count: %v", err)
+	}
+}
+
+func TestFirmwareSourceBootTimeFallback(t *testing.T) {
+	table := smbTable(smbType1(smbWireUUID, 1, 0, true, smbSerial), smbEnd)
+	boot := time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC)
+	src := FirmwareSource{
+		ReadTable: func() ([]byte, error) { return table, nil },
+		BootCount: func() (uint32, error) { return 0, errors.New("no key") },
+		BootTime:  func() (time.Time, error) { return boot, nil },
+	}
+	raw, err := src.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const machine = "00112233-4455-6677-8899-aabbccddeeff"
+	if want := BootIDFromBootTime(machine, boot); raw.BootID != want {
+		t.Errorf("boot id = %q, want %q", raw.BootID, want)
+	}
+}
+
+func TestNewFirmwareSourceBootTime(t *testing.T) {
+	bt, err := NewFirmwareSource().BootTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up := time.Since(bt); up <= 0 || up > 365*24*time.Hour {
+		t.Errorf("boot time %v is %v ago", bt, up)
 	}
 }

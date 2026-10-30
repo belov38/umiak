@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -142,4 +143,19 @@ func BootIDFor(machineUUID string, bootCount uint32) string {
 		ns = uuid.Nil
 	}
 	return uuid.NewSHA1(ns, []byte(strconv.FormatUint(uint64(bootCount), 10))).String()
+}
+
+// BootIDFromBootTime derives the boot id from the machine UUID and the
+// kernel boot time, the fallback when the boot counter cannot be read (S9
+// spec 12.4): a UUIDv5 of "boottime:<unix seconds>" in the namespace of the
+// machine UUID. The time is rounded to whole seconds, so the sub-second
+// jitter of the kernel value keeps the id; a step of the system clock moves
+// the kernel boot time and changes it.
+func BootIDFromBootTime(machineUUID string, boot time.Time) string {
+	ns, err := uuid.Parse(machineUUID)
+	if err != nil {
+		ns = uuid.Nil
+	}
+	secs := boot.Round(time.Second).Unix()
+	return uuid.NewSHA1(ns, []byte("boottime:"+strconv.FormatInt(secs, 10))).String()
 }

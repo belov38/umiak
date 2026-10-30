@@ -63,12 +63,27 @@ var (
 //  5. process Recover, update CheckPending;
 //  6. agent.started, the readiness phases, READY=1 — before the tunnel;
 //  7. the tunnel client (identity ready only) and the background loops.
+//
+// On Windows (Deps.WinBoot) the start first waits for Windows Setup and the
+// boot step of this boot (winboot.go), step 2 applies the identity with
+// ident.ApplyWindows, the admin and env sockets of the layout open with the
+// debug socket in step 6, and sshd starts with the tunnel in step 7.
 func (a *agent) startup(ctx context.Context) error {
 	bootID, err := a.d.BootID()
 	if err != nil {
 		return fmt.Errorf("agent: read boot id: %w", err)
 	}
 	a.bootID = bootID
+	if a.d.WinBoot != nil {
+		// Windows: nothing runs before the boot step of this boot.
+		if err := a.windowsBootStep(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			a.log.Error("agent: windows boot step", "err", err)
+			a.bootErr = err
+		}
+	}
 	a.instanceID = uuid.NewString()
 	a.monoRef = newMonoRef()
 	a.tunnel = newTunnelState(a.d.Now)
@@ -109,7 +124,11 @@ func (a *agent) startup(ctx context.Context) error {
 	}
 
 	// 2. Identity.
-	a.applyIdentity(ctx)
+	if a.d.WinBoot != nil {
+		a.applyIdentityWindows(ctx)
+	} else {
+		a.applyIdentity(ctx)
+	}
 
 	// 3. Store.
 	st, err := store.Open(a.l.StateDB, store.Options{
@@ -133,13 +152,17 @@ func (a *agent) startup(ctx context.Context) error {
 	held := &holdEmitter{next: a.emit}
 	a.tracker = readiness.New(a.cfg.ReadinessRequired, held, a.d.Now)
 
-	// 4. Claim.
+	// 4. Claim. Windows applies no hostname from the claim (S9 spec 11.3).
+	var hostname func(string) error
+	if a.d.Resetter != nil {
+		hostname = claim.HostnameWriter(a.l, a.d.Resetter.SetHostname)
+	}
 	a.claim, err = claim.New(claim.Options{
 		Store:        st,
 		Layout:       a.l,
 		Ready:        a.tracker,
 		Emit:         a.emit,
-		Hostname:     claim.HostnameWriter(a.l, a.d.Resetter.SetHostname),
+		Hostname:     hostname,
 		DefaultUser:  a.cfg.DefaultUser,
 		MountSecrets: a.d.MountSecrets,
 		LookupUser:   a.d.LookupUser,
@@ -205,6 +228,7 @@ func (a *agent) startup(ctx context.Context) error {
 			return err
 		}
 	}
+	a.startLocalSockets(ctx)
 	a.writeStatus()
 	if err := a.d.SdNotify("READY=1"); err != nil {
 		a.log.Warn("agent: sd_notify READY=1", "err", err)
@@ -212,6 +236,7 @@ func (a *agent) startup(ctx context.Context) error {
 
 	// 7. Tunnel and background loops.
 	if a.identity.ready() {
+		a.startSSH(ctx)
 		a.startTunnel(ctx)
 	} else {
 		a.goBG(func() { a.retryIdentity(ctx) })
@@ -238,7 +263,7 @@ func (a *agent) buildServices() error {
 		BootID:         a.bootID,
 		Now:            a.d.Now,
 		PTYIdle:        a.cfg.PTYIdle,
-		WaitSecrets:    a.claim.WaitSecrets,
+		WaitSecrets:    a.waitSecrets,
 		HandlerOptions: interceptors,
 		Log:            a.log,
 	})
@@ -300,7 +325,7 @@ func (a *agent) buildServices() error {
 	a.system, err = system.New(system.Options{
 		Info:           staticInfo{a: a},
 		Ready:          a.tracker,
-		Claim:          a.claim,
+		Claim:          gatedClaimer{Claimer: a.claim, a: a},
 		Ports:          a.ports,
 		TCP:            a.tcp,
 		Proc:           a.proc,
@@ -364,6 +389,7 @@ func (a *agent) reportIdentityReset(ctx context.Context) {
 		return
 	}
 	a.st.AppendEvent(events.TypeIdentityReset, &agentv1.IdentityReset{MachineId: f.MachineID})
+	a.log.Info("agent: "+events.TypeIdentityReset, "machine_id", f.MachineID)
 	wctx, cancel := context.WithTimeout(ctx, startupWrite)
 	defer cancel()
 	if err := a.st.Flush(wctx); err != nil {
@@ -399,6 +425,13 @@ func (a *agent) retryIdentity(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		if a.bootErr != nil {
+			// The boot step cannot run under the open store (it may
+			// wipe it): restart and repeat it.
+			a.log.Warn("agent: the windows boot step failed; restarting to repeat it", "err", a.bootErr)
+			a.exit()
+			return
+		}
 		id, err := a.readIdentity(ctx)
 		if err != nil {
 			a.identity.fail(err)
@@ -415,6 +448,7 @@ func (a *agent) retryIdentity(ctx context.Context) {
 		a.identity.set(id)
 		a.setIdentityPhase()
 		a.log.Info("agent: machine identity is valid now", "machine_id", id.MachineID)
+		a.startSSH(ctx)
 		a.startTunnel(ctx)
 		return
 	}

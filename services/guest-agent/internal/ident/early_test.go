@@ -149,3 +149,22 @@ func TestEarlyApplyFailureStillWipes(t *testing.T) {
 	mustNotExist(t, l.EarlyFile)
 	mustNotExist(t, l.IdentityFile)
 }
+
+func TestEarlyDoneForBoot(t *testing.T) {
+	l := winLayout(t)
+	if EarlyDoneForBoot(l.EarlyFile, "boot-1") {
+		t.Error("done without early.json")
+	}
+	mustWrite(t, l.EarlyFile, `{"bootId":""}`)
+	if EarlyDoneForBoot(l.EarlyFile, "") || EarlyDoneForBoot(l.EarlyFile, "boot-1") {
+		t.Error("an empty bootId in early.json counts as this boot")
+	}
+	mustWrite(t, l.EarlyFile, `{"bootId":"boot-0"}`)
+	if EarlyDoneForBoot(l.EarlyFile, "boot-1") {
+		t.Error("early.json of another boot counts")
+	}
+	mustWrite(t, l.EarlyFile, `{"bootId":"boot-1"}`)
+	if !EarlyDoneForBoot(l.EarlyFile, "boot-1") {
+		t.Error("early.json of this boot does not count")
+	}
+}

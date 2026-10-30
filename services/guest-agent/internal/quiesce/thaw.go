@@ -186,3 +186,21 @@ func ForceThaw(l paths.Layout, f Freezer, d DockerAPI) error {
 	}
 	return ferr
 }
+
+// LeaseOnDisk returns the lease recorded in the lease file, or in the
+// watchdog's claim of it, and nil when there is none.
+func LeaseOnDisk(l paths.Layout) (*Lease, error) {
+	lease, err := readLease(l.QuiesceFile)
+	if lease != nil || err != nil {
+		return lease, err
+	}
+	return readLease(claimPath(l))
+}
+
+// DropLease removes the lease file and the watchdog's claim of it:
+// `sbx-agent thaw --force` on Windows when the agent is not running. The
+// filesystem was never frozen by the agent there (VSS thaws itself), and a
+// wiped secret file comes back with the next UpdateSecrets.
+func DropLease(l paths.Layout) error {
+	return errors.Join(removeLease(l.QuiesceFile), removeLease(claimPath(l)))
+}

@@ -30,6 +30,14 @@ func LoadEarly(path string) (*EarlyMarker, error) {
 	return &m, nil
 }
 
+// EarlyDoneForBoot reports whether early.json at path was written for boot
+// bootID. A marker without a boot id (the step could not read one) never
+// counts as the current boot.
+func EarlyDoneForBoot(path, bootID string) bool {
+	m, err := LoadEarly(path)
+	return err == nil && m.BootID != "" && m.BootID == bootID
+}
+
 // Early is the boot step of Windows (sbx-agent early, spec 12.3), run by the
 // computer startup script before any logon, or by the agent service when
 // the script did not run. While Windows Setup runs it does nothing. Under
@@ -42,6 +50,13 @@ func LoadEarly(path string) (*EarlyMarker, error) {
 // An identity that cannot be read or parsed is logged and skipped, the rest
 // still runs: a machine without identity must boot.
 func Early(ctx context.Context, l paths.Layout, src Source, r WinResetter) error {
+	return EarlyIn(ctx, l, src, r, ModeEarly)
+}
+
+// EarlyIn is Early with the apply mode of the caller: ModeEarly for the
+// startup script, ModeService for the agent service that runs the step
+// itself because the script did not.
+func EarlyIn(ctx context.Context, l paths.Layout, src Source, r WinResetter, mode ApplyMode) error {
 	if SetupInProgress() {
 		slog.Info("windows setup is in progress, early step skipped")
 		return nil
@@ -66,7 +81,7 @@ func Early(ctx context.Context, l paths.Layout, src Source, r WinResetter) error
 			for _, w := range id.Warnings {
 				slog.Warn("early: " + w)
 			}
-			changed, need, err := applyWindows(ctx, l, id, r, ModeEarly)
+			changed, need, err := applyWindows(ctx, l, id, r, mode)
 			if err != nil {
 				// No marker: the service repeats the step. The secrets
 				// still go before any logon.
@@ -113,7 +128,7 @@ func wrapWipe(err error) error {
 // the agent's own sockets stay: the service starts in parallel with the
 // startup script and may already listen on them.
 func cleanRunDirOnNewBoot(l paths.Layout, bootID string) error {
-	if m, err := LoadEarly(l.EarlyFile); err == nil && bootID != "" && m.BootID == bootID {
+	if EarlyDoneForBoot(l.EarlyFile, bootID) {
 		return nil
 	}
 	entries, err := os.ReadDir(l.RunDir)

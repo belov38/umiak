@@ -75,8 +75,14 @@ type Deps struct {
 	Supervisor supervisor.Supervisor
 	// IdentSource reads the smbios identity. Required.
 	IdentSource ident.Source
-	// Resetter applies an identity change to the running system. Required.
+	// Resetter applies an identity change to the running system. Required
+	// unless WinBoot is set.
 	Resetter ident.Resetter
+	// WinBoot, when set, makes the start follow Windows (S9 spec 12.3, see
+	// winboot.go): the Windows Setup and boot step gates before the S3
+	// sequence, ident.ApplyWindows instead of ident.Apply, sshd started once
+	// the identity is ready. Nil keeps the Linux start.
+	WinBoot *WinBoot
 	// Freezer freezes filesystems for quiesce; nil skips the freeze.
 	Freezer quiesce.Freezer
 	// Docker pauses containers and answers the docker phase ping; nil
@@ -156,8 +162,15 @@ func (d Deps) withDefaults() (Deps, error) {
 		return d, errors.New("agent: Deps.Supervisor is required")
 	case d.IdentSource == nil:
 		return d, errors.New("agent: Deps.IdentSource is required")
-	case d.Resetter == nil:
+	case d.Resetter == nil && d.WinBoot == nil:
 		return d, errors.New("agent: Deps.Resetter is required")
+	}
+	if d.WinBoot != nil {
+		w, err := d.WinBoot.withDefaults()
+		if err != nil {
+			return d, err
+		}
+		d.WinBoot = w
 	}
 	if d.Now == nil {
 		d.Now = time.Now
@@ -222,7 +235,10 @@ type agent struct {
 
 	bootID     string
 	instanceID string
-	monoRef    monoRef
+	// bootErr is the failure of the Windows boot step (or of the reboot
+	// for the computer name); set during startup, read-only afterwards.
+	bootErr error
+	monoRef monoRef
 
 	st       *store.Store
 	emit     events.Emitter

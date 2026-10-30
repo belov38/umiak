@@ -1,0 +1,235 @@
+package agent
+
+// The Windows start (S9 spec 12.3, 11.2). Before the S3 sequence the agent
+// waits while Windows Setup runs, then waits for early.json of this boot
+// from the startup script `sbx-agent early`, and runs the boot step itself
+// when the script did not finish in time. The identity is then applied with
+// ident.ApplyWindows (ModeService) instead of ident.Apply. Until the boot
+// step is done nothing is served; if it fails, the identity phase fails and
+// Claim, UpdateSecrets and Process/Start (outside the admin socket) answer
+// unavailable identity_not_ready. Once the identity is ready the agent
+// starts sshd. The orchestration has no build tag so the darwin tests run
+// it with fakes.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"connectrpc.com/connect"
+
+	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
+)
+
+// Defaults of the WinBoot timings.
+const (
+	DefaultSetupPoll  = 5 * time.Second
+	DefaultEarlyWait  = 60 * time.Second
+	DefaultEarlyPoll  = time.Second
+	DefaultRebootWait = 2 * time.Minute
+)
+
+// WinBoot configures the Windows start. Zero timings take the defaults.
+type WinBoot struct {
+	// Resetter applies the Windows identity. Required.
+	Resetter ident.WinResetter
+	// SetupInProgress reports a running Windows Setup. Default
+	// ident.SetupInProgress.
+	SetupInProgress func() bool
+	// StartSSH starts the sshd service once the identity is ready; an
+	// already running service is not an error. Default: the service
+	// control manager on Windows, nothing elsewhere.
+	StartSSH func(ctx context.Context) error
+
+	// SetupPoll is the period of the Windows Setup check. Default 5 s.
+	SetupPoll time.Duration
+	// EarlyWait bounds the wait for early.json of this boot. Default 60 s.
+	EarlyWait time.Duration
+	// EarlyPoll is the period of the early.json check. Default 1 s.
+	EarlyPoll time.Duration
+	// RebootWait bounds the wait for a reboot the boot step asked for.
+	// Default 2 min.
+	RebootWait time.Duration
+}
+
+// withDefaults fills the defaults and checks the required fields.
+func (w WinBoot) withDefaults() (*WinBoot, error) {
+	if w.Resetter == nil {
+		return nil, errors.New("agent: WinBoot.Resetter is required")
+	}
+	if w.SetupInProgress == nil {
+		w.SetupInProgress = ident.SetupInProgress
+	}
+	if w.StartSSH == nil {
+		w.StartSSH = defaultStartSSH
+	}
+	if w.SetupPoll <= 0 {
+		w.SetupPoll = DefaultSetupPoll
+	}
+	if w.EarlyWait <= 0 {
+		w.EarlyWait = DefaultEarlyWait
+	}
+	if w.EarlyPoll <= 0 {
+		w.EarlyPoll = DefaultEarlyPoll
+	}
+	if w.RebootWait <= 0 {
+		w.RebootWait = DefaultRebootWait
+	}
+	return &w, nil
+}
+
+// sleepCtx waits for d or until ctx ends.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// windowsBootStep waits out Windows Setup and the boot step of this boot
+// (early.json with a.bootID), running the step in the service when the
+// startup script did not write the marker within EarlyWait. A step that
+// asked for a reboot is given RebootWait to happen. It returns ctx.Err()
+// when the run stops meanwhile, another error when the step failed.
+func (a *agent) windowsBootStep(ctx context.Context) error {
+	w := a.d.WinBoot
+	if w.SetupInProgress() {
+		a.log.Info("agent: windows setup is in progress, waiting")
+		for w.SetupInProgress() {
+			if err := sleepCtx(ctx, w.SetupPoll); err != nil {
+				return err
+			}
+		}
+		a.log.Info("agent: windows setup finished")
+	}
+	deadline := time.Now().Add(w.EarlyWait)
+	for !ident.EarlyDoneForBoot(a.l.EarlyFile, a.bootID) {
+		if !time.Now().Before(deadline) {
+			return a.runEarlyStep(ctx)
+		}
+		if err := sleepCtx(ctx, w.EarlyPoll); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runEarlyStep runs `sbx-agent early` in the service (ModeService).
+func (a *agent) runEarlyStep(ctx context.Context) error {
+	w := a.d.WinBoot
+	a.log.Warn("agent: the startup script did not finish the boot step of this boot, running it in the service",
+		"waited", w.EarlyWait)
+	if err := ident.EarlyIn(ctx, a.l, a.d.IdentSource, w.Resetter, ident.ModeService); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("agent: boot step: %w", err)
+	}
+	if ident.EarlyDoneForBoot(a.l.EarlyFile, a.bootID) {
+		return nil
+	}
+	// No marker: the step rebooted for the computer name, or Windows Setup
+	// started again.
+	a.log.Warn("agent: the boot step asked for a reboot, waiting for it", "wait", w.RebootWait)
+	if err := sleepCtx(ctx, w.RebootWait); err != nil {
+		return err
+	}
+	return errors.New("agent: the boot step asked for a reboot that did not happen")
+}
+
+// applyIdentityWindows is applyIdentity on Windows: after a failed boot
+// step the identity phase fails with its error; otherwise the identity is
+// applied with ident.ApplyWindows (ModeService), rebooting when the
+// computer name is not in effect.
+func (a *agent) applyIdentityWindows(ctx context.Context) {
+	if a.bootErr != nil {
+		a.log.Error("agent: boot step failed, running without identity", "err", a.bootErr)
+		a.identity.fail(a.bootErr)
+		return
+	}
+	w := a.d.WinBoot
+	id, err := a.readIdentity(ctx)
+	if err == nil {
+		var changed, reboot bool
+		changed, reboot, err = ident.ApplyWindows(ctx, a.l, id, w.Resetter, ident.ModeService)
+		if changed {
+			a.log.Warn("agent: the machine identity changed after the boot step; the agent reset the identity",
+				"machine_id", id.MachineID)
+		}
+		if err == nil && reboot {
+			a.log.Warn("agent: the computer name is not in effect, rebooting")
+			if rerr := w.Resetter.Reboot("sbx identity changed"); rerr != nil {
+				err = fmt.Errorf("agent: reboot for the computer name: %w", rerr)
+			} else {
+				_ = sleepCtx(ctx, w.RebootWait)
+				err = errors.New("agent: the reboot for the computer name did not happen")
+			}
+			a.bootErr = err
+		}
+	}
+	if err != nil {
+		a.log.Error("agent: no machine identity, running without the tunnel", "err", err)
+		a.identity.fail(err)
+		return
+	}
+	a.identity.set(id)
+}
+
+// bootGate refuses Claim-like calls while the Windows boot step failed.
+func (a *agent) bootGate() error {
+	if a.d.WinBoot == nil || a.bootErr == nil {
+		return nil
+	}
+	return errs.New(connect.CodeUnavailable, errs.IdentityNotReady, "the boot step of this boot did not complete: "+a.bootErr.Error())
+}
+
+// waitSecrets is process.Options.WaitSecrets: the boot gate, then the
+// claim's wait for pending secrets. Calls on the admin socket skip both.
+func (a *agent) waitSecrets(ctx context.Context) error {
+	if isAdminCall(ctx) {
+		return nil
+	}
+	if err := a.bootGate(); err != nil {
+		return err
+	}
+	return a.claim.WaitSecrets(ctx)
+}
+
+// startSSH starts sshd in the background on Windows once the identity is
+// ready.
+func (a *agent) startSSH(ctx context.Context) {
+	if a.d.WinBoot == nil {
+		return
+	}
+	a.goBG(func() {
+		if err := a.d.WinBoot.StartSSH(ctx); err != nil {
+			a.log.Warn("agent: start sshd", "err", err)
+			return
+		}
+		a.log.Info("agent: sshd started")
+	})
+}
+
+// gatedClaimer is the system.Claimer of the agent: UpdateSecrets passes the
+// boot gate first (Claim checks the identity phase itself).
+type gatedClaimer struct {
+	system.Claimer
+	a *agent
+}
+
+// UpdateSecrets implements system.Claimer.
+func (g gatedClaimer) UpdateSecrets(ctx context.Context, req *agentv1.UpdateSecretsRequest) (*agentv1.UpdateSecretsResponse, error) {
+	if err := g.a.bootGate(); err != nil {
+		return nil, err
+	}
+	return g.Claimer.UpdateSecrets(ctx, req)
+}

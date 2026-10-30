@@ -68,6 +68,11 @@ type deps struct {
 	failRun bool
 	// devKey reports a devUpdateKey build (doctor).
 	devKey bool
+	// stdin feeds `call ... -` and the input of exec.
+	stdin io.Reader
+	// newID returns the id of a command exec or selftest --pty starts;
+	// nil uses newCommandID.
+	newID func() string
 }
 
 // defaultDeps returns the production dependencies.
@@ -96,6 +101,7 @@ func defaultDeps() deps {
 		configTemplate: packaging.AgentTOML,
 		failRun:        failRun == "1",
 		devKey:         devUpdateKey != "",
+		stdin:          os.Stdin,
 	}
 	platformDeps(&d)
 	serviceDeps(&d)
@@ -197,6 +203,13 @@ func earlyCmd(ctx context.Context, d deps, args []string, stderr io.Writer) int 
 	}
 	log, closeLog := windowsLog(d, "early.log", stderr)
 	defer closeLog()
+	// A crash during a self-update can leave current missing; the service
+	// cannot start without it (its image path is under current).
+	if v, err := update.RepairCurrent(d.layout); err != nil {
+		log.Error("early: current is missing and cannot be recreated", "err", err)
+	} else if v != "" {
+		log.Warn("early: recreated the missing current link", "version", v)
+	}
 	if err := ident.Early(ctx, d.layout, d.source, d.winResetter); err != nil {
 		log.Error("early failed", "err", err)
 		return 1

@@ -49,9 +49,17 @@ func (a *agent) startDebug(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	a.log.Warn("agent: debug socket enabled (test aid)", "path", path, "debug_confirm", a.d.DebugConfirm)
+	a.serveLocal(ctx, ln, path, a.apiHandler())
+	return nil
+}
+
+// apiHandler is the handler of the debug and admin sockets: the agent mux,
+// Control/Info and a read-only Events/Subscribe.
+func (a *agent) apiHandler() http.Handler {
 	ctlPath, ctl := tunnelv1connect.NewControlHandler(debugControl{a: a})
 	evPath, ev := tunnelv1connect.NewEventsHandler(debugEvents{a: a})
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, ctlPath):
 			ctl.ServeHTTP(w, r)
@@ -61,11 +69,16 @@ func (a *agent) startDebug(ctx context.Context) error {
 			a.mux.ServeHTTP(w, r)
 		}
 	})
+}
+
+// serveLocal serves h on the local socket ln (HTTP/1.1 and h2c) until ctx
+// ends; then it stops accepting, waits (bounded) for in-flight requests and
+// removes the socket file at path.
+func (a *agent) serveLocal(ctx context.Context, ln net.Listener, path string, h http.Handler) {
 	var protos http.Protocols
 	protos.SetHTTP1(true)
 	protos.SetUnencryptedHTTP2(true)
 	srv := &http.Server{Handler: h, Protocols: &protos, ReadHeaderTimeout: 10 * time.Second}
-	a.log.Warn("agent: debug socket enabled (test aid)", "path", path, "debug_confirm", a.d.DebugConfirm)
 	a.goBG(func() { _ = srv.Serve(ln) })
 	a.goBG(func() {
 		<-ctx.Done()
@@ -76,7 +89,6 @@ func (a *agent) startDebug(ctx context.Context) error {
 		}
 		_ = os.Remove(path)
 	})
-	return nil
 }
 
 // listenPrivate listens on a unix socket at path that nobody but the owner
