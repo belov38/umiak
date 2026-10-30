@@ -11,10 +11,12 @@ import {
 	recipeDigest,
 } from "./recipe.ts";
 import { newBuildId } from "./registry.ts";
+import type { GuestIo } from "./runner.ts";
 import { StepFailedError, StepTimeoutError } from "./runner.ts";
 import { collectFacts, sealGuest, writeGuestFile } from "./seal.ts";
 import {
 	BUILD_TAG,
+	type BuildApi,
 	type BuildDeps,
 	type BuildOptions,
 	DISK_OPTIONS,
@@ -34,6 +36,7 @@ import {
 	TASK_TIMEOUT_MS,
 	vmStatus,
 } from "./stages.ts";
+import { isProtectedVmid } from "./vmid-guard.ts";
 
 export {
 	type BuildApi,
@@ -90,7 +93,7 @@ function prepare(deps: BuildDeps, o: BuildOptions): Prepared {
 	const agent = verifyAgentPackage(o.agentPackage, o.updateKeysFile);
 
 	const now = deps.now();
-	const version = deps.registry.nextVersion(o.slug, now);
+	const version = deps.registry.claimVersion(o.slug, now);
 	const manifest: Manifest = {
 		buildId: newBuildId(),
 		templateSlug: o.slug,
@@ -130,6 +133,44 @@ function prepare(deps: BuildDeps, o: BuildOptions): Prepared {
 	return { recipe, versions, verifyScript, manifest };
 }
 
+/** Proxmox client that fails every call once `signal` is aborted (checked before and after). */
+export function guardApi(api: BuildApi, signal: AbortSignal): BuildApi {
+	const g =
+		<A extends unknown[], R>(fn: (...a: A) => Promise<R>) =>
+		async (...a: A): Promise<R> => {
+			signal.throwIfAborted();
+			const r = await fn(...a);
+			signal.throwIfAborted();
+			return r;
+		};
+	return {
+		get: g((p, q) => api.get(p, q)),
+		post: g((p, q) => api.post(p, q)),
+		put: g((p, q) => api.put(p, q)),
+		delete: g((p, q) => api.delete(p, q)),
+		waitTask: g((n, u, o) => api.waitTask(n, u, o)),
+		upload: g((p, f, file) => api.upload(p, f, file)),
+	} as BuildApi;
+}
+
+function guardIo(io: GuestIo, signal: AbortSignal): GuestIo {
+	const g =
+		<A extends unknown[], R>(fn: (...a: A) => Promise<R>) =>
+		async (...a: A): Promise<R> => {
+			signal.throwIfAborted();
+			const r = await fn(...a);
+			signal.throwIfAborted();
+			return r;
+		};
+	return {
+		exec: g((c: string[], o?: { input?: string; timeoutMs?: number }) =>
+			io.exec(c, o),
+		),
+		readFile: g((p: string, off: number, n: number) => io.readFile(p, off, n)),
+		ping: g(() => io.ping()),
+	};
+}
+
 export async function buildTemplate(
 	deps: BuildDeps,
 	o: BuildOptions,
@@ -142,8 +183,8 @@ export async function buildTemplate(
 		isoUploaded: false,
 		ramReserved: false,
 	};
-	const save = (patch: Partial<Manifest>) => {
-		st.m = deps.registry.update(st.m.buildId, patch);
+	const save = (patch: Partial<Manifest>, unset: (keyof Manifest)[] = []) => {
+		st.m = deps.registry.update(st.m.buildId, patch, unset);
 	};
 	const finished = () => {
 		const at = deps.now();
@@ -157,20 +198,30 @@ export async function buildTemplate(
 		deps.log(`== ${stage}`);
 	};
 	deps.log(`build ${st.m.buildId}: ${st.m.templateSlug} ${st.m.version}`);
+	deps.onStart?.(st.m);
+	// Stages run on guarded clients; the rollback uses the plain ones.
+	const { signal } = deps;
+	const run: BuildDeps = signal
+		? {
+				...deps,
+				api: guardApi(deps.api, signal),
+				io: (vmid) => guardIo(deps.io(vmid), signal),
+			}
+		: deps;
 
 	try {
 		enter("image");
-		const image = await stageImage(deps, o, p.versions);
+		const image = await stageImage(run, o, p.versions);
 		enter("seed");
-		await stageSeed(deps, o, p, st);
+		await stageSeed(run, o, p, st);
 		enter("vm");
-		await stageVm(deps, o, p.recipe, image, st, save);
+		await stageVm(run, o, p.recipe, image, st, save);
 		const vmid = st.vmid as number;
-		const io = deps.io(vmid);
+		const io = run.io(vmid);
 		enter("boot");
-		await stageBoot(deps, o, p.recipe, io, st);
+		await stageBoot(run, o, p.recipe, io, st);
 		enter("steps");
-		await stageSteps(deps, o, p.recipe, io, st);
+		await stageSteps(run, o, p.recipe, io, st);
 		enter("seal");
 		save(await collectFacts(io, p.verifyScript));
 		await writeGuestFile(
@@ -179,17 +230,18 @@ export async function buildTemplate(
 			`${JSON.stringify(guestManifest(st.m), null, 2)}\n`,
 		);
 		await sealGuest(io);
-		await shutdown(deps, o, vmid);
+		await shutdown(run, o, vmid);
 		deps.ramGuard.release(vmid);
 		st.ramReserved = false;
 		enter("template");
-		await stageTemplate(deps, o, st);
+		await stageTemplate(run, o, st);
 		if (!o.noVerify) {
 			enter("verify");
-			const v = await deps.verify(
+			const v = await run.verify(
 				st.m,
 				o.connect !== undefined ? { connect: o.connect } : {},
 			);
+			signal?.throwIfAborted();
 			save({ verify: v });
 			if (!v.ok) {
 				const red = v.checks
@@ -199,19 +251,27 @@ export async function buildTemplate(
 			}
 		}
 		enter("ready");
-		save({ status: "ready", ...finished() });
+		save({ status: "ready", ...finished() }, ["error"]);
 		return st.m;
 	} catch (err) {
-		save({
+		const failed: Partial<Manifest> = {
 			status: "failed",
 			error: buildError(st.stage, st.step, err),
 			...finished(),
-		});
+		};
+		st.m = { ...st.m, ...failed };
 		deps.log(`failed at ${st.stage}: ${errorText(err)}`);
-		if (o.keepOnFailure)
-			deps.log("--keep-on-failure: leaving the VM and the ISO");
-		else await rollback(deps, o, st);
-		if (st.ramReserved && st.vmid !== undefined) deps.ramGuard.release(st.vmid);
+		try {
+			save(failed);
+		} catch (saveErr) {
+			deps.log(`recording the failure: ${errorText(saveErr)}`);
+		} finally {
+			if (o.keepOnFailure)
+				deps.log("--keep-on-failure: leaving the VM and the ISO");
+			else await rollback(deps, o, st);
+			if (st.ramReserved && st.vmid !== undefined)
+				deps.ramGuard.release(st.vmid);
+		}
 		throw new BuildFailedError(st.m, err);
 	}
 }
@@ -259,7 +319,10 @@ async function rollback(
 	const warn = (what: string, err: unknown) =>
 		deps.log(`rollback: ${what}: ${errorText(err)}`);
 	let vmGone = true;
-	if (st.vmid !== undefined) {
+	if (st.vmid !== undefined && isProtectedVmid(st.vmid)) {
+		deps.log(`rollback: VMID ${st.vmid} is protected: left alone`);
+		vmGone = false;
+	} else if (st.vmid !== undefined) {
 		const vmid = st.vmid;
 		const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
 		try {

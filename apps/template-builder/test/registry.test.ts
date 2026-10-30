@@ -86,6 +86,39 @@ describe("FileRegistry.nextVersion", () => {
 	});
 });
 
+describe("FileRegistry.claimVersion", () => {
+	it("two registries on one directory never claim the same version", () => {
+		const { dir } = reg();
+		const a = new FileRegistry(dir);
+		const b = new FileRegistry(dir);
+		expect([
+			a.claimVersion("linux", OCT30),
+			b.claimVersion("linux", OCT30),
+		]).toEqual(["20261030.1", "20261030.2"]);
+		// A claim counts before its manifest exists.
+		expect(a.nextVersion("linux", OCT30)).toBe("20261030.3");
+		expect(a.claimVersion("other", OCT30)).toBe("20261030.1");
+	});
+
+	it("moves on to the next n when the computed version was claimed meanwhile", () => {
+		const { dir } = reg();
+		const a = new FileRegistry(dir);
+		const b = new FileRegistry(dir);
+		// Both computed .1 before either claimed it.
+		const stale = () => "20261030.1";
+		a.nextVersion = stale;
+		b.nextVersion = stale;
+		expect(a.claimVersion("linux", OCT30)).toBe("20261030.1");
+		expect(b.claimVersion("linux", OCT30)).toBe("20261030.2");
+	});
+
+	it("claims are not listed as builds", () => {
+		const { r } = reg();
+		r.claimVersion("linux", OCT30);
+		expect(r.list()).toEqual([]);
+	});
+});
+
 describe("FileRegistry", () => {
 	it("creates, reads, updates and lists manifests", () => {
 		const { r } = reg();
@@ -110,6 +143,15 @@ describe("FileRegistry", () => {
 			b.buildId,
 		]);
 		expect(r.list()).toHaveLength(3);
+	});
+
+	it("removes fields listed in unset", () => {
+		const { r } = reg();
+		const a = manifest({ error: { stage: "x", message: "m" } });
+		r.create(a);
+		const u = r.update(a.buildId, { status: "ready" }, ["error"]);
+		expect(u).not.toHaveProperty("error");
+		expect(r.get(a.buildId)).not.toHaveProperty("error");
 	});
 
 	it("refuses a second build with the same id or slug and version", () => {

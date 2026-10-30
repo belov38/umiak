@@ -222,4 +222,41 @@ describe("cleanup", () => {
 		s.node.handlers["media.list"] = () => ({ iso: [], import: [] });
 		expect(await cleanup(d)).toEqual([]);
 	});
+
+	it("never touches protected VMIDs even when the config range covers them", async () => {
+		const s = await setup();
+		for (const vmid of [450, 599, 9000, 9001])
+			s.pve.vms.set(vmid, {
+				config: { name: `sbx-tpl-linux-x-${vmid}`, tags: "sbx-tpl" },
+				status: "running",
+				firewall: { rules: [], ipsets: {} },
+			});
+		await s.store.tryInsert({
+			cluster: 1,
+			vmid: 450,
+			mac: macFor(1, 450),
+			state: "active",
+			purpose: "template",
+			createdAt: 0,
+			updatedAt: 0,
+		});
+		s.pve.vms.delete(450);
+		await cleanup({
+			api: s.pve,
+			node: s.node,
+			allocator: s.allocator,
+			registry: s.registry,
+			cfg: { ...s.cfg, vmidRange: { min: 100, max: 9999 }, templateVmid: 0 },
+			now: () => NOW,
+		});
+		for (const vmid of [599, 9000, 9001])
+			expect(s.pve.vms.has(vmid)).toBe(true);
+		const touched = s.pve.calls.filter((c) =>
+			/\/qemu\/(450|599|9000|9001)(\/|$)/.test(c.path),
+		);
+		expect(touched).toEqual([]);
+		expect((await s.allocator.get(450))?.state).toBe("active");
+		// The unprotected leftover still goes.
+		expect(s.pve.vms.has(598)).toBe(false);
+	});
 });

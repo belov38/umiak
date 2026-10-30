@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import type { NodeOps, PveClient } from "@sbx/pve";
+import { type NodeOps, PveApiError, type PveClient } from "@sbx/pve";
 import { describe, expect, it } from "vitest";
 import { preflight } from "../src/preflight.ts";
 
@@ -12,7 +12,9 @@ function stub(answers: Record<string, unknown>): PveClient {
 	const get = async (path: string, params?: Record<string, unknown>) => {
 		const key = params?.path ? `${path}?path=${params.path}` : path;
 		if (!(key in answers)) throw new Error(`unexpected GET ${key}`);
-		return answers[key];
+		const a = answers[key];
+		if (a instanceof Error) throw a;
+		return a;
 	};
 	const no = async () => {
 		throw new Error("read-only");
@@ -137,5 +139,44 @@ describe("preflight", () => {
 		const mem = checks.find((c) => c.name.includes("RAM"));
 		expect(mem?.ok).toBe(false);
 		expect(mem?.detail).toMatch(/6144/);
+	});
+
+	it("warns instead of failing when the token may not read the node status", async () => {
+		const noAudit = {
+			...GOOD,
+			"/nodes/pve/status": new PveApiError(
+				403,
+				"GET /nodes/pve/status: Permission check failed (/nodes/pve, Sys.Audit)",
+			),
+		};
+		const checks = await preflight({
+			api: stub(noAudit),
+			node: nodeOk,
+			cfg,
+			keyFile,
+			hasCommand: () => true,
+		});
+		const mem = checks.find((c) => c.name.includes("RAM"));
+		expect(mem).toMatchObject({ ok: true, warn: true });
+		expect(mem?.detail).toMatch(/Sys\.Audit/);
+		expect(mem?.detail).toMatch(/pool running 2048 MB/);
+		expect(checks.filter((c) => !c.ok)).toEqual([]);
+
+		// The fallback still fails over the cap.
+		const full = {
+			...noAudit,
+			"/nodes/pve/qemu/500/status/current": {
+				status: "running",
+				maxmem: 6 * 2 ** 30,
+			},
+		};
+		const again = await preflight({
+			api: stub(full),
+			node: nodeOk,
+			cfg,
+			keyFile,
+			hasCommand: () => true,
+		});
+		expect(again.find((c) => c.name.includes("RAM"))?.ok).toBe(false);
 	});
 });

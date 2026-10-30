@@ -145,6 +145,10 @@ export class FakeGuest implements GuestIo {
 	packages = FAKE_PACKAGES;
 	tools =
 		'{"node":{"direct":"v24.11.0","login":"v24.11.0"},"sbx":{"direct":"missing","login":"missing"}}';
+	/** Called when systemd-run starts a step. */
+	onStep?: (step: string) => void;
+	/** Exit status of `sbx-agent seal`. */
+	sealExit = 0;
 	log: string[];
 	#bootId = 1;
 
@@ -163,6 +167,7 @@ export class FakeGuest implements GuestIo {
 			const script = String(cmd.at(-1));
 			this.started.push({ step, script });
 			this.log.push(`guest:step ${step}`);
+			this.onStep?.(step);
 			return ok();
 		}
 		if (c0 === "systemctl" && c1 === "show")
@@ -183,7 +188,9 @@ export class FakeGuest implements GuestIo {
 		}
 		if (c0 === "sbx-agent" && c1 === "seal") {
 			this.log.push("guest:seal");
-			return ok("sealed\n");
+			return this.sealExit === 0
+				? ok("sealed\n")
+				: { exitCode: this.sealExit, stdout: "", stderr: "seal failed" };
 		}
 		if (c0 === "bash" && c1 === "-s") {
 			this.log.push("guest:verify-tools");
@@ -212,6 +219,7 @@ export class FakeGuest implements GuestIo {
 				this.log.push("guest:rm-build-logs");
 			if (s.includes("/dev/zero")) this.log.push("guest:zero-fill");
 			if (s.includes("fstrim")) this.log.push("guest:fstrim");
+			if (s.includes("systemd-random-seed")) this.log.push("guest:random-seed");
 		}
 		if (c0 === "fstrim") this.log.push("guest:fstrim");
 		if (c0 === "sync") this.log.push("guest:sync");

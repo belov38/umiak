@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import type { NodeOps, PveClient } from "@sbx/pve";
+import { type NodeOps, PveApiError, type PveClient } from "@sbx/pve";
 import { RAM_CAP_MB, RamGuard } from "./context.ts";
 import {
 	assertPinnedKey,
@@ -12,6 +12,8 @@ import {
 export interface Check {
 	name: string;
 	ok: boolean;
+	/** Passed, but with less information than wanted. */
+	warn?: boolean;
 	detail?: string;
 }
 
@@ -20,13 +22,10 @@ const MB = 1024 * 1024;
 
 async function check(
 	name: string,
-	fn: () => Promise<{ ok: boolean; detail?: string }>,
+	fn: () => Promise<Omit<Check, "name">>,
 ): Promise<Check> {
 	try {
-		const r = await fn();
-		return r.detail === undefined
-			? { name, ok: r.ok }
-			: { name, ok: r.ok, detail: r.detail };
+		return { name, ...(await fn()) };
 	} catch (err) {
 		return {
 			name,
@@ -90,19 +89,30 @@ export async function preflight(d: {
 			},
 		),
 		await check(`RAM for the ${buildMb} MB build VM`, async () => {
-			const st = await api.get<{
-				memory: { free: number; available?: number };
-			}>(`/nodes/${cfg.node}/status`);
-			const freeMb = Math.floor((st.memory.available ?? st.memory.free) / MB);
 			const running = await new RamGuard({
 				api,
 				node: cfg.node,
 				pool: cfg.pool,
 				capMb: RAM_CAP_MB,
 			}).runningMb();
+			const pool = `pool running ${running} MB + ${buildMb} MB, cap ${RAM_CAP_MB} MB`;
+			const poolOk = running + buildMb <= RAM_CAP_MB;
+			let st: { memory: { free: number; available?: number } };
+			try {
+				st = await api.get(`/nodes/${cfg.node}/status`);
+			} catch (err) {
+				// Node status needs Sys.Audit on the node, which the PoC token does not have.
+				if (!(err instanceof PveApiError) || err.status !== 403) throw err;
+				return {
+					ok: poolOk,
+					warn: true,
+					detail: `node memory not readable (${err.message}); ${pool}`,
+				};
+			}
+			const freeMb = Math.floor((st.memory.available ?? st.memory.free) / MB);
 			return {
-				ok: freeMb >= buildMb && running + buildMb <= RAM_CAP_MB,
-				detail: `node free ${freeMb} MB; pool running ${running} MB + ${buildMb} MB, cap ${RAM_CAP_MB} MB`,
+				ok: freeMb >= buildMb && poolOk,
+				detail: `node free ${freeMb} MB; ${pool}`,
 			};
 		}),
 		await check(`ISO tool ${isoTool()}`, async () => ({ ok: has(isoTool()) })),

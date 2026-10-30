@@ -218,6 +218,8 @@ describe("buildTemplate: happy path", () => {
 			"guest:seal",
 			"guest:zero-fill",
 			"guest:fstrim",
+			"guest:sync",
+			"guest:random-seed",
 			`api:POST ${vm}/agent/shutdown`,
 			"ram:release 598",
 			`api:PUT ${vm}/config`,
@@ -231,6 +233,35 @@ describe("buildTemplate: happy path", () => {
 				script: `/mnt/seed/build/steps/${step}.sh`,
 			})),
 		);
+	});
+
+	it("drops the random seed and the credential secret as the last guest call before shutdown", async () => {
+		const s = setup();
+		await buildTemplate(s.deps, s.opts);
+		const shutdownAt = s.log.indexOf(`api:POST ${vm}/agent/shutdown`);
+		const lastGuest = s.log
+			.slice(0, shutdownAt)
+			.filter((e) => e.startsWith("guest:"))
+			.at(-1);
+		expect(lastGuest).toBe("guest:random-seed");
+		const last = s.guest.calls.at(-1)?.cmd;
+		expect(last?.slice(0, 2)).toEqual(["bash", "-c"]);
+		// The stop runs ExecStop (which saves a seed) before the file goes.
+		expect(last?.[2]).toMatch(
+			/systemctl stop systemd-random-seed\.service.*rm -f \/var\/lib\/systemd\/random-seed \/var\/lib\/systemd\/credential\.secret/,
+		);
+	});
+
+	it("reports the new build before it starts", async () => {
+		const s = setup();
+		const seen: Manifest[] = [];
+		s.deps.onStart = (m) => {
+			seen.push(m);
+		};
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(seen.map((x) => [x.buildId, x.status])).toEqual([
+			[m.buildId, "building"],
+		]);
 	});
 
 	it("creates the build VM with the spec parameters", async () => {
@@ -577,6 +608,129 @@ describe("buildTemplate: failures", () => {
 		expect(m.verify?.ok).toBe(false);
 		expect(s.pve.vms.has(598)).toBe(false);
 		expect(await s.allocator.get(598)).toBeUndefined();
+	});
+
+	it("rolls back even when recording the failure fails", async () => {
+		const s = setup({ failStep: "00-base" });
+		const update = s.registry.update.bind(s.registry);
+		s.registry.update = (id, patch, unset) => {
+			if (patch.status === "failed") throw new Error("disk full");
+			return update(id, patch, unset);
+		};
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(BuildFailedError);
+		expect((err as BuildFailedError).manifest).toMatchObject({
+			status: "failed",
+			error: { stage: "steps", step: "00-base" },
+		});
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.node.calls.some((c) => c.op === "media.remove")).toBe(true);
+	});
+
+	it("keeps the lease when the VM cannot be deleted", async () => {
+		const s = setup({ failStep: "00-base" });
+		s.pve.fail[`DELETE ${vm}`] = new PveApiError(500, "can't lock file");
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		const m = (err as BuildFailedError).manifest;
+		expect(m.error?.stage).toBe("steps");
+		expect(s.pve.vms.has(598)).toBe(true);
+		expect((await s.allocator.get(598))?.state).toBe("reserved");
+		// The ISO goes anyway.
+		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
+			names: [isoName(m)],
+		});
+	});
+
+	it("a failing seal rolls back", async () => {
+		const s = setup();
+		s.guest.sealExit = 1;
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		const m = (err as BuildFailedError).manifest;
+		expect(m.error?.stage).toBe("seal");
+		expect(m.error?.message).toMatch(/seal/);
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(await s.allocator.get(598)).toBeUndefined();
+	});
+
+	it("a failure while waiting for the shutdown rolls back", async () => {
+		const s = setup();
+		let failed = false;
+		s.pve.before = (method, path) => {
+			if (
+				!failed &&
+				method === "GET" &&
+				path === `${vm}/status/current` &&
+				s.log.includes(`api:POST ${vm}/agent/shutdown`)
+			) {
+				failed = true;
+				throw new Error("GET status/current: timeout");
+			}
+		};
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		expect((err as BuildFailedError).manifest.error?.stage).toBe("seal");
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(await s.allocator.get(598)).toBeUndefined();
+	});
+
+	it("a failing template conversion rolls back", async () => {
+		const s = setup();
+		s.pve.fail[`POST ${vm}/template`] = new PveApiError(500, "convert failed");
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		const m = (err as BuildFailedError).manifest;
+		expect(m.error?.stage).toBe("template");
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
+			names: [isoName(m)],
+		});
+	});
+
+	it("never creates or touches a protected VMID, whatever the allocator says", async () => {
+		for (const vmid of [450, 599, 9000, 9001]) {
+			const s = setup();
+			const released: number[] = [];
+			s.deps.allocator = {
+				allocateTemplate: async () => ({
+					vmid,
+					mac: "02:01:00:00:23:28",
+					reused: false,
+				}),
+				markActive: async () => {},
+				release: async (v) => {
+					released.push(v);
+				},
+			};
+			const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+			const m = (err as BuildFailedError).manifest;
+			expect(m.error?.stage).toBe("vm");
+			expect(m.error?.message).toMatch(/protected/);
+			const touched = s.pve.calls.filter((c) =>
+				c.path.startsWith("/nodes/pve/qemu"),
+			);
+			expect(touched).toEqual([]);
+			expect(released).toEqual([]);
+		}
+	});
+
+	it("an abort signal stops the build and rolls back", async () => {
+		const s = setup();
+		const ac = new AbortController();
+		s.deps.signal = ac.signal;
+		s.guest.onStep = (step) => {
+			if (step === "10-system") ac.abort(new Error("interrupted by SIGINT"));
+		};
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		const m = (err as BuildFailedError).manifest;
+		expect(m.status).toBe("failed");
+		expect(m.error?.message).toBe("interrupted by SIGINT");
+		expect(s.guest.started.map((x) => x.step)).toEqual([
+			"00-base",
+			"10-system",
+		]);
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.registry.get(m.buildId)?.status).toBe("failed");
 	});
 
 	it("rejects bad inputs before anything is recorded or created", async () => {

@@ -132,7 +132,8 @@ export async function collectFacts(
 
 /**
  * Removes the build leftovers 90-cleanup cannot remove itself, runs `sbx-agent seal`, then
- * zero-fills and trims the free space. Nothing may write to the disk afterwards but shutdown.
+ * zero-fills and trims the free space and drops the random seed. Nothing may write to the disk
+ * afterwards but shutdown.
  */
 export async function sealGuest(io: GuestIo): Promise<void> {
 	await must(io, [
@@ -153,4 +154,11 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 	);
 	await must(io, ["fstrim", "-av"], { timeoutMs: 10 * MIN });
 	await must(io, ["sync"], { timeoutMs: 5 * MIN });
+	// Last call before poweroff: stopping systemd-random-seed runs its ExecStop, which saves a
+	// seed; then the seed and the credential secret go, so no two clones share them.
+	await must(io, [
+		"bash",
+		"-c",
+		"systemctl stop systemd-random-seed.service; rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret; sync",
+	]);
 }

@@ -23,6 +23,7 @@ import type { FileRegistry } from "./registry.ts";
 import { type GuestIo, mountSeed, rebootGuest, runStep } from "./runner.ts";
 import { writeGuestFile } from "./seal.ts";
 import { renderSeed, type SeedInput } from "./seed.ts";
+import { isProtectedVmid } from "./vmid-guard.ts";
 
 // Stages of `sbx-tpl build` (spec S5 section 7.2); build.ts runs them in order and rolls back.
 
@@ -81,6 +82,13 @@ export interface BuildDeps {
 	/** Step output as it arrives. */
 	stepOutput?: (step: string, chunk: string) => void;
 	now: () => Date;
+	/** Called once the build is recorded as `building`. */
+	onStart?: (m: Manifest) => void;
+	/**
+	 * Aborting fails the build at the next Proxmox or guest call and rolls it back. The guest
+	 * io of `io` should use an api wrapped with `guardApi`, so long execs stop polling too.
+	 */
+	signal?: AbortSignal;
 	/** Poll interval for the guest and Proxmox (default 2 s). */
 	pollMs?: number;
 }
@@ -277,6 +285,8 @@ export async function stageVm(
 ): Promise<void> {
 	const { api } = deps;
 	const { vmid, mac } = await deps.allocator.allocateTemplate();
+	if (isProtectedVmid(vmid))
+		throw new Error(`allocator returned protected VMID ${vmid}`);
 	st.vmid = vmid;
 	st.mac = mac;
 	save({ pveVmid: vmid });

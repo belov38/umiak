@@ -1,5 +1,6 @@
 import type { Allocator, NodeOps, PveClient } from "@sbx/pve";
 import type { FileRegistry } from "./registry.ts";
+import { isProtectedVmid } from "./vmid-guard.ts";
 
 // `sbx-tpl cleanup`: leftovers of failed builds (spec S5 section 7.1)
 
@@ -34,7 +35,8 @@ const errorText = (err: unknown) =>
 	err instanceof Error ? err.message : String(err);
 
 /**
- * Deletes build VMs (tag sbx-tpl, name sbx-tpl-*, not a template) in the VMID range, unused
+ * Deletes build VMs (tag sbx-tpl, name sbx-tpl-*, not a template) in the VMID range and not
+ * protected (vmid-guard.ts), unused
  * seed ISOs and template leases whose VM is gone, and marks builds that have been `building`
  * for more than 2 h as failed. A build still in progress keeps its VM, ISO and lease.
  */
@@ -65,7 +67,8 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 	const inRange = (vmid: number) =>
 		vmid >= cfg.vmidRange.min &&
 		vmid <= cfg.vmidRange.max &&
-		vmid !== cfg.templateVmid;
+		vmid !== cfg.templateVmid &&
+		!isProtectedVmid(vmid);
 	const vms = await api.get<VmResource[]>("/cluster/resources", { type: "vm" });
 	const present = new Set(vms.map((v) => v.vmid));
 	const buildVms = vms.filter(

@@ -7,6 +7,7 @@ import {
 	type BuildOptions,
 	buildTemplate,
 	type ConnectOptions,
+	guardApi,
 	registerCommand,
 	topologySnippet,
 } from "./build.ts";
@@ -132,6 +133,24 @@ async function cmdBuild(
 	const ctx = await makeContext(
 		str("node") !== undefined ? { node: str("node") as string } : {},
 	);
+	// First signal: fail the build at the next call and roll back. Second: exit at once.
+	const interrupt = new AbortController();
+	let buildId: string | undefined;
+	const onSignal = (sig: NodeJS.Signals) => {
+		if (!interrupt.signal.aborted) {
+			out(
+				`\n[sbx-tpl] ${sig}: rolling back; send it again to exit without cleanup`,
+			);
+			interrupt.abort(new Error(`interrupted by ${sig}`));
+			return;
+		}
+		out(
+			`\n[sbx-tpl] exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run sbx-tpl cleanup`,
+		);
+		process.exit(130);
+	};
+	process.on("SIGINT", onSignal);
+	process.on("SIGTERM", onSignal);
 	try {
 		const { cfg, api } = ctx;
 		const opt = (flag: string, key: keyof BuildOptions) =>
@@ -159,6 +178,10 @@ async function cmdBuild(
 		const m = await buildTemplate(
 			{
 				api,
+				signal: interrupt.signal,
+				onStart: (mf) => {
+					buildId = mf.buildId;
+				},
 				node: ctx.node,
 				allocator: ctx.allocator,
 				registry,
@@ -169,7 +192,9 @@ async function cmdBuild(
 						base,
 						keyFile: UBUNTU_KEY_FILE,
 					}),
-				io: (vmid) => pveGuestIo(api, cfg.node, vmid),
+				// Guarded so a long exec stops polling on an interrupt.
+				io: (vmid) =>
+					pveGuestIo(guardApi(api, interrupt.signal), cfg.node, vmid),
 				makeIso: (files, path) => makeIso(files, path),
 				verify: (mf, o) => {
 					if (verifyBuild === undefined)
@@ -202,8 +227,10 @@ async function cmdBuild(
 		out(`\n${err.message}`);
 		if (e?.tail?.length) out(`last lines of ${e.step}:\n${e.tail.join("\n")}`);
 		out(`step logs: ${join(LOG_DIR, err.manifest.buildId)}`);
-		return 1;
+		return interrupt.signal.aborted ? 130 : 1;
 	} finally {
+		process.off("SIGINT", onSignal);
+		process.off("SIGTERM", onSignal);
 		ctx.close();
 	}
 }
@@ -306,7 +333,7 @@ async function main(argv: string[]): Promise<number> {
 				});
 				for (const c of checks)
 					out(
-						`${c.ok ? "ok  " : "FAIL"}  ${c.name}${c.detail ? `  (${c.detail})` : ""}`,
+						`${c.ok ? (c.warn ? "WARN" : "ok  ") : "FAIL"}  ${c.name}${c.detail ? `  (${c.detail})` : ""}`,
 					);
 				return checks.every((c) => c.ok) ? 0 : 1;
 			} finally {
