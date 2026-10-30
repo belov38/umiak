@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 import { encodeUuid } from "@sbx/auth";
 import type { Frame } from "../../src/index.ts";
 import { assertConforms } from "./conformance.ts";
-import { type Harness, OPENAPI_DOC, validatedOperations } from "./harness.ts";
+import { recordValidated } from "./conformance-coverage.ts";
+import { type Harness, OPENAPI_DOC } from "./harness.ts";
 import type { ApiWorld } from "./world.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: frames and bodies are checked by the conformance harness
@@ -92,7 +93,7 @@ export async function openStream(
 		const parsed =
 			contentType.includes("json") && text !== "" ? JSON.parse(text) : text;
 		if (res.status !== 200 || contentType.includes("json")) {
-			assertConforms(
+			const r = assertConforms(
 				OPENAPI_DOC,
 				method,
 				path,
@@ -100,6 +101,7 @@ export async function openStream(
 				contentType,
 				parsed,
 			);
+			recordValidated(r.operationId, res.status);
 		}
 		const none = async () => {
 			throw new Error(`not a stream: ${res.status} ${text.slice(0, 500)}`);
@@ -136,7 +138,7 @@ export async function openStream(
 					contentType,
 					f,
 				);
-				if (r.operationId !== null) validatedOperations.add(r.operationId);
+				recordValidated(r.operationId, 200);
 				frames.push(f);
 				return f;
 			}

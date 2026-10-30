@@ -13,13 +13,11 @@ import {
 } from "../../src/index.ts";
 import { makeTestDeps } from "../../src/testing/index.ts";
 import { assertConforms, type OpenApiDoc } from "./conformance.ts";
+import { recordValidated } from "./conformance-coverage.ts";
 
 export const OPENAPI_DOC = JSON.parse(
 	readFileSync(new URL("../../openapi/v1.json", import.meta.url), "utf8"),
 ) as OpenApiDoc;
-
-/** Operations with at least one validated response in this test file. */
-export const validatedOperations = new Set<string>();
 
 export type Listener = "public" | "proxied" | "internal" | "ops";
 
@@ -132,7 +130,7 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 					contentType,
 					frame,
 				);
-				if (r.operationId !== null) validatedOperations.add(r.operationId);
+				recordValidated(r.operationId, res.status);
 			}
 		}
 		const rid = res.headers.get("request-id");
@@ -170,7 +168,7 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 					contentType,
 					body,
 				);
-				if (r.operationId !== null) validatedOperations.add(r.operationId);
+				recordValidated(r.operationId, res.status);
 			}
 		}
 		return {

@@ -16,7 +16,11 @@ export default defineConfig({
 	},
 	test: {
 		include: ["test/**/*.test.ts"],
-		globalSetup: ["@sbx/db/testing/global-setup"],
+		globalSetup: [
+			"@sbx/db/testing/global-setup",
+			"./test/helpers/conformance-global.ts",
+		],
+		setupFiles: ["./test/helpers/conformance-setup.ts"],
 		testTimeout: 30_000,
 		hookTimeout: 120_000,
 	},

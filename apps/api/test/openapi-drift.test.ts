@@ -8,6 +8,11 @@ import {
 } from "../src/index.ts";
 import { makeTestDeps } from "../src/testing/index.ts";
 import { assertConforms, type OpenApiDoc } from "./helpers/conformance.ts";
+import {
+	coverageProblems,
+	documentOperations,
+	NON_JSON_SUCCESS,
+} from "./helpers/conformance-global.ts";
 
 const COMMITTED = readFileSync(
 	new URL("../openapi/v1.json", import.meta.url),
@@ -209,5 +214,53 @@ describe("openapi/v1.json", () => {
 				}),
 			).toThrow(/does not match/);
 		});
+	});
+});
+
+describe("conformance coverage (global teardown)", () => {
+	const doc = JSON.parse(COMMITTED) as Doc;
+	const ops = documentOperations(doc);
+	const all = (n: { ok: number; error: number }) =>
+		new Map([...ops.keys()].map((id) => [id, { ...n }]));
+
+	it("NON_JSON_SUCCESS is exactly the document's operations without a JSON success answer", () => {
+		const nonJson = [...ops].filter(([, json]) => !json).map(([id]) => id);
+		expect(nonJson.sort()).toEqual([...NON_JSON_SUCCESS].sort());
+		expect(coverageProblems(ops, all({ ok: 1, error: 0 }))).toEqual([]);
+	});
+
+	it("an operation never validated is a problem; HEAD and the HTML page are exempt", () => {
+		const counts = all({ ok: 1, error: 0 });
+		counts.delete("sandboxes.get");
+		counts.delete("files.downloadHead");
+		counts.delete("meta.docs");
+		expect(coverageProblems(ops, counts)).toEqual([
+			"sandboxes.get: no success answer was validated",
+		]);
+	});
+
+	it("an operation with a JSON success answer needs a validated success; others any validated answer", () => {
+		const counts = all({ ok: 0, error: 1 });
+		const problems = coverageProblems(ops, counts);
+		const missing = problems.map((p) => p.split(":")[0]);
+		expect(missing).toContain("sandboxes.create");
+		expect(missing).not.toContain("files.download");
+		expect(missing.sort()).toEqual(
+			[...ops]
+				.filter(([, json]) => json)
+				.map(([id]) => id)
+				.sort(),
+		);
+	});
+
+	it("a non-JSON operation missing from NON_JSON_SUCCESS is a problem", () => {
+		const extended = new Map(ops).set("things.raw", false);
+		const counts = all({ ok: 1, error: 0 }).set("things.raw", {
+			ok: 0,
+			error: 1,
+		});
+		expect(coverageProblems(extended, counts)).toEqual([
+			"things.raw has no JSON success answer: add it to NON_JSON_SUCCESS",
+		]);
 	});
 });
