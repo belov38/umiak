@@ -19,6 +19,7 @@ function ctx(): {
 	const api = new FakePve();
 	const node = new FakeNode();
 	const store = new SqliteStateStore(":memory:");
+	node.handlers["media.list"] = () => ({ iso: [], import: [] });
 	const cfg = {
 		node: "pve",
 		storage: "local-lvm",
@@ -125,5 +126,41 @@ describe("cleanup", () => {
 		expect(store.listSnapshots()).toEqual([]);
 		expect(node.lvs).toEqual([]);
 		expect(report.join("\n")).toMatch(/deleted VM 500/);
+	});
+
+	it("removes the ISOs of agent-tests but not other media or an ISO still attached", async () => {
+		const { c, api, node } = ctx();
+		node.handlers["media.list"] = () => ({
+			iso: [
+				{ name: "sbx-build-agenttests-20261031050000.iso" },
+				{ name: "sbx-build-agenttests-20261031060000.iso" },
+				{ name: "sbx-build-seed-abc.iso" },
+				{ name: "Win11.iso" },
+			],
+			import: [],
+		});
+		// A VM that cannot be deleted keeps its ISO.
+		api.vms.set(510, {
+			config: {
+				name: "x",
+				ide2: "local:iso/sbx-build-agenttests-20261031060000.iso,media=cdrom",
+			},
+			status: "stopped",
+			firewall: { rules: [], ipsets: {} },
+		});
+		node.handlers["media.remove"] = (a) => ({ removed: a.names });
+		const del = c.machines.delete.bind(c.machines);
+		c.machines.delete = async (vmid, o) => {
+			if (vmid === 510) throw new Error("locked");
+			return del(vmid, o);
+		};
+		const report = await cleanup(c);
+		const removed = node.calls.filter((x) => x.op === "media.remove");
+		expect(removed.map((x) => x.args.names)).toEqual([
+			["sbx-build-agenttests-20261031050000.iso"],
+		]);
+		expect(report.join("\n")).toMatch(
+			/removed ISOs sbx-build-agenttests-20261031050000/,
+		);
 	});
 });

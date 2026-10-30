@@ -13,6 +13,7 @@ import { devCpRegistrar } from "../../template-builder/src/devcp.ts";
 import { type Ctx, RamGuard } from "./context.ts";
 import { redact } from "./report.ts";
 import { deleteWithRetry, machinesFor } from "./s5.ts";
+import { withAbortSignals } from "./signals.ts";
 import { type Summary, summarize } from "./stats.ts";
 
 // sbx-bench s9 (spec S9 section 16): create and fork timings of the Windows template.
@@ -43,36 +44,89 @@ export interface S9Options {
 export interface S9Run {
 	createMs: number;
 	createToAgentReadyMs: number;
+	firstBootToAgentReadyMs: number;
 	bootToAgentReadyMs: number;
 	startToQgaMs: number;
 	tunnelConnectedMs: number | null;
 	hardStopRestartMs: number;
-	snapshotMs: number;
+	forkSnapshotMs: number;
 	freezeMs: number | null;
-	forkMs: number;
-	forkToAgentReadyMs: number;
+	forkCloneMs: number;
+	forkStartToAgentReadyMs: number;
 	forkBootToAgentReadyMs: number;
+	forkToAgentReadyMs: number;
 	forkTunnelConnectedMs: number | null;
 }
 
-export const S9_METRICS: [string, (r: S9Run) => number | null][] = [
-	["create", (r) => r.createMs],
-	["create_to_agent_ready", (r) => r.createToAgentReadyMs],
-	["boot_to_agent_ready", (r) => r.bootToAgentReadyMs],
-	["start_to_qga", (r) => r.startToQgaMs],
-	["tunnel_connected", (r) => r.tunnelConnectedMs],
-	["hard_stop_restart", (r) => r.hardStopRestartMs],
-	["snapshot", (r) => r.snapshotMs],
-	["freeze_ms", (r) => r.freezeMs],
-	["fork", (r) => r.forkMs],
-	["fork_to_agent_ready", (r) => r.forkToAgentReadyMs],
-	["fork_boot_to_agent_ready", (r) => r.forkBootToAgentReadyMs],
-	["fork_tunnel_connected", (r) => r.forkTunnelConnectedMs],
+/** Metric name, how it is measured (printed under the table) and the getter. */
+export const S9_METRICS: [string, string, (r: S9Run) => number | null][] = [
+	["create", "S1 create of A from the template, no boot", (r) => r.createMs],
+	[
+		"create_to_agent_ready",
+		"create call -> start -> agent ready (and tunnel connected with --connect-url)",
+		(r) => r.createToAgentReadyMs,
+	],
+	[
+		"first_boot_to_agent_ready",
+		"start of the new clone -> agent ready, includes specialize",
+		(r) => r.firstBootToAgentReadyMs,
+	],
+	[
+		"boot_to_agent_ready",
+		"start after a graceful shutdown -> agent ready",
+		(r) => r.bootToAgentReadyMs,
+	],
+	[
+		"start_to_qga",
+		"first boot: start -> first QGA ping",
+		(r) => r.startToQgaMs,
+	],
+	[
+		"tunnel_connected",
+		"first boot: start -> tunnel session connected",
+		(r) => r.tunnelConnectedMs,
+	],
+	[
+		"hard_stop_restart",
+		"start after a hard stop -> agent ready",
+		(r) => r.hardStopRestartMs,
+	],
+	[
+		"fork_snapshot_ms",
+		"snapshot of the running A with the QGA fsfreeze hook",
+		(r) => r.forkSnapshotMs,
+	],
+	["freeze_ms", "fsfreeze freeze -> thaw", (r) => r.freezeMs],
+	[
+		"fork_clone_ms",
+		"cloneFromSnapshot of B (disks, config, firewall), no boot",
+		(r) => r.forkCloneMs,
+	],
+	[
+		"fork_start_to_agent_ready",
+		"start of B -> agent ready under the new computer name (rename reboot included)",
+		(r) => r.forkStartToAgentReadyMs,
+	],
+	[
+		"fork_boot_to_agent_ready",
+		"cloneFromSnapshot -> start -> agent ready with the new name",
+		(r) => r.forkBootToAgentReadyMs,
+	],
+	[
+		"fork_to_agent_ready",
+		"fork_snapshot_ms + fork_boot_to_agent_ready (A's shutdown excluded)",
+		(r) => r.forkToAgentReadyMs,
+	],
+	[
+		"fork_tunnel_connected",
+		"start of B -> tunnel session connected",
+		(r) => r.forkTunnelConnectedMs,
+	],
 ];
 
 export function summarizeS9(runs: S9Run[]): Record<string, Summary> {
 	return Object.fromEntries(
-		S9_METRICS.map(([name, get]) => [
+		S9_METRICS.map(([name, , get]) => [
 			name,
 			summarize(runs.map(get).filter((x): x is number => x !== null)),
 		]),
@@ -96,6 +150,9 @@ export function s9Markdown(
 		"| metric | n | median | p95 | min | max |",
 		"|---|---|---|---|---|---|",
 		...rows,
+		"",
+		"Definitions:",
+		...S9_METRICS.map(([name, what]) => `- ${name}: ${what}`),
 	].join("\n");
 }
 
@@ -155,11 +212,13 @@ export async function waitAgentReady(o: {
 	sleep: (ms: number) => Promise<void>;
 	pollMs: number;
 	timeoutMs: number;
+	signal?: AbortSignal;
 }): Promise<{ qgaAt: number | null; readyAt: number }> {
 	const deadline = o.now() + o.timeoutMs;
 	let qgaAt: number | null = null;
 	let last = "no answer";
 	for (;;) {
+		o.signal?.throwIfAborted();
 		if (qgaAt === null && (await o.qga.ping(o.vmid))) qgaAt = o.now();
 		if (qgaAt !== null) {
 			try {
@@ -228,6 +287,8 @@ export interface S9Deps {
 	tunnelTimeoutMs?: number;
 	randomUUID?: () => string;
 	log?: (text: string) => void;
+	/** Aborts the run; what it made is still removed. */
+	signal?: AbortSignal;
 	/** Called with every secret of a run (serial payloads) for redaction of the output. */
 	secret?: (s: string) => void;
 }
@@ -246,6 +307,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 	const tunnelTimeoutMs = deps.tunnelTimeoutMs ?? TUNNEL_TIMEOUT_MS;
 	const uuid = deps.randomUUID ?? randomUUID;
 	const log = deps.log ?? defaultLog;
+	const { signal } = deps;
 	const family = connect ? familyForTunnelUrl(connect.url) : undefined;
 
 	const identity = () => {
@@ -276,6 +338,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 			sleep,
 			pollMs,
 			timeoutMs: bootTimeoutMs,
+			...(signal !== undefined ? { signal } : {}),
 		});
 
 	const waitTunnel = async (id: string, label: string): Promise<number> => {
@@ -283,6 +346,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		const deadline = now() + tunnelTimeoutMs;
 		let last = "no session";
 		for (;;) {
+			signal?.throwIfAborted();
 			try {
 				const st = await connect.registrar.sessionState(id);
 				if (st?.startsWith("connected")) return now();
@@ -332,6 +396,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		vmA = (await machines.create({ size: SIZE, smbios: a.smbios })).vmid;
 		const createMs = now() - createAt;
 		await reserve(vmA);
+		signal?.throwIfAborted();
 
 		log(`VM ${vmA}: start`);
 		const startAt = now();
@@ -343,6 +408,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 			`VM ${vmA}: agent ready ${first.readyAt - startAt} ms after start${tunnelAt !== null ? `, tunnel ${tunnelAt - startAt} ms` : ""}`,
 		);
 
+		signal?.throwIfAborted();
 		log(`VM ${vmA}: hard stop and start`);
 		await machines.stop(vmA);
 		const restartAt = now();
@@ -351,21 +417,38 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		const hardStopRestartMs = again.readyAt - restartAt;
 		log(`VM ${vmA}: restart to agent ready ${hardStopRestartMs} ms`);
 
+		signal?.throwIfAborted();
 		log(`VM ${vmA}: snapshot (QGA fsfreeze hook)`);
 		const snapAt = now();
 		snap = await machines.snapshot(vmA);
-		const snapshotMs = now() - snapAt;
+		const forkSnapshotMs = now() - snapAt;
 		const freezeMs = snap.freezeMs ?? null;
-		log(`snapshot ${snap.id}: ${snapshotMs} ms, frozen ${freezeMs ?? "-"} ms`);
+		log(
+			`snapshot ${snap.id}: ${forkSnapshotMs} ms, frozen ${freezeMs ?? "-"} ms`,
+		);
 
-		// One Windows VM at a time: A must be off before B starts.
-		log(`VM ${vmA}: shutdown`);
-		await machines.shutdown(vmA, SHUTDOWN_TIMEOUT_S).catch(async (err) => {
-			log(`VM ${vmA}: shutdown failed (${String(err)}), hard stop`);
-			await machines.stop(vmA as number);
-		});
+		// One Windows VM at a time: A is off before it starts again and before B starts.
+		const shutdownA = async () => {
+			signal?.throwIfAborted();
+			log(`VM ${vmA}: shutdown`);
+			await machines
+				.shutdown(vmA as number, SHUTDOWN_TIMEOUT_S)
+				.catch(async (err) => {
+					log(`VM ${vmA}: shutdown failed (${String(err)}), hard stop`);
+					await machines.stop(vmA as number);
+				});
+		};
+		await shutdownA();
+		log(`VM ${vmA}: normal boot`);
+		const bootAt = now();
+		await machines.start(vmA);
+		const normal = await waitAgent(vmA, { machineId: a.uuid }, `VM ${vmA}`);
+		const bootToAgentReadyMs = normal.readyAt - bootAt;
+		log(`VM ${vmA}: boot to agent ready ${bootToAgentReadyMs} ms`);
+		await shutdownA();
 		release(vmA);
 
+		signal?.throwIfAborted();
 		if (connect) {
 			await register(b);
 			registered.push(b.uuid);
@@ -373,7 +456,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		log("fork B from the snapshot with a new identity");
 		const forkAt = now();
 		vmB = (await machines.fork(snap, { size: SIZE, smbios: b.smbios })).vmid;
-		const forkMs = now() - forkAt;
+		const forkCloneMs = now() - forkAt;
 		await reserve(vmB);
 		log(`VM ${vmB}: start`);
 		const forkStartAt = now();
@@ -393,15 +476,18 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		result = {
 			createMs,
 			createToAgentReadyMs: readyAt - createAt,
-			bootToAgentReadyMs: readyAt - startAt,
+			firstBootToAgentReadyMs: readyAt - startAt,
+			bootToAgentReadyMs,
 			startToQgaMs: (first.qgaAt ?? first.readyAt) - startAt,
 			tunnelConnectedMs: tunnelAt !== null ? tunnelAt - startAt : null,
 			hardStopRestartMs,
-			snapshotMs,
+			forkSnapshotMs,
 			freezeMs,
-			forkMs,
-			forkToAgentReadyMs: forkReadyAt - forkAt,
-			forkBootToAgentReadyMs: forkReadyAt - forkStartAt,
+			forkCloneMs,
+			forkStartToAgentReadyMs: forkReadyAt - forkStartAt,
+			forkBootToAgentReadyMs: forkReadyAt - forkAt,
+			// Snapshot + (cloneFromSnapshot -> start -> ready), R13.
+			forkToAgentReadyMs: forkSnapshotMs + (forkReadyAt - forkAt),
 			forkTunnelConnectedMs:
 				forkTunnelAt !== null ? forkTunnelAt - forkStartAt : null,
 		};
@@ -471,16 +557,18 @@ export async function runS9(ctx: Ctx, o: S9Options): Promise<number> {
 
 	const runs: S9Run[] = [];
 	let error: string | undefined;
-	for (let i = 1; i <= o.runs; i++) {
-		try {
-			process.stderr.write(`s9 run ${i}/${o.runs}\n`);
-			runs.push(await runS9Once({ ...base, keep: o.keep }));
-		} catch (err) {
-			error = err instanceof Error ? err.message : String(err);
-			process.stderr.write(`s9 run ${i} failed: ${error}\n`);
-			break;
+	await withAbortSignals(async (signal) => {
+		for (let i = 1; i <= o.runs && !signal.aborted; i++) {
+			try {
+				process.stderr.write(`s9 run ${i}/${o.runs}\n`);
+				runs.push(await runS9Once({ ...base, keep: o.keep, signal }));
+			} catch (err) {
+				error = err instanceof Error ? err.message : String(err);
+				process.stderr.write(`s9 run ${i} failed: ${error}\n`);
+				break;
+			}
 		}
-	}
+	});
 
 	const summary = summarizeS9(runs);
 	const md = s9Markdown(summary, runs.length);

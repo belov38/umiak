@@ -18,6 +18,14 @@ const USAGE = `usage:
   sbx-bench s9 agent-tests --template <vmid> --dir <test binaries> [--run <regex>] [--ram-cap 8g] [--keep]
   sbx-bench cleanup`;
 
+/** --runs: a positive integer. */
+export function parseRuns(v: string | undefined, fallback: number): number {
+	if (v === undefined) return fallback;
+	if (!/^[1-9]\d*$/.test(v.trim()))
+		throw new Error(`--runs: not a positive integer: ${v}`);
+	return Number(v);
+}
+
 export function parseSizeMb(v: string): number {
 	const m = /^(\d+)([mg])?$/i.exec(v.trim());
 	if (!m) throw new Error(`bad size ${v}`);
@@ -102,7 +110,7 @@ async function main(argv: string[]): Promise<number> {
 			}
 			return await runS9(ctx, {
 				template,
-				runs: Number(values.runs ?? "3"),
+				runs: parseRuns(values.runs, 3),
 				...(values["connect-url"] !== undefined
 					? { connectUrl: values["connect-url"] }
 					: {}),
@@ -124,7 +132,7 @@ async function main(argv: string[]): Promise<number> {
 			return await runS5(ctx, {
 				template,
 				...(baseline !== undefined ? { baseline } : {}),
-				runs: Number(values.runs ?? "5"),
+				runs: parseRuns(values.runs, 5),
 				ramCapMb: parseSizeMb(values["ram-cap"]),
 				keep: values.keep,
 				outDir: values.out,
@@ -137,7 +145,7 @@ async function main(argv: string[]): Promise<number> {
 				skipSuite: values["skip-suite"],
 			});
 		return await runS1(ctx, {
-			runs: Number(values.runs ?? "3"),
+			runs: parseRuns(values.runs, 3),
 			size: { cores: 2, memoryMb: parseSizeMb(values.size) },
 			parallel: values.parallel
 				.split(",")

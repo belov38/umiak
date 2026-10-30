@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseRuns } from "../src/main.ts";
 import {
 	agentReadiness,
 	computerNameFor,
@@ -9,20 +10,27 @@ import {
 	s9Markdown,
 	summarizeS9,
 } from "../src/s9.ts";
-import { type AgentTestsDeps, runAgentTests } from "../src/win-agent-tests.ts";
+import {
+	type AgentTestsDeps,
+	ISO_NAME_RE,
+	runAgentTests,
+	stamp,
+} from "../src/win-agent-tests.ts";
 
 const run = (n: number): S9Run => ({
 	createMs: 1000 * n,
 	createToAgentReadyMs: 100_000 + n * 1000,
-	bootToAgentReadyMs: 90_000 + n * 1000,
+	firstBootToAgentReadyMs: 90_000 + n * 1000,
+	bootToAgentReadyMs: 40_000 + n * 1000,
 	startToQgaMs: 30_000,
 	tunnelConnectedMs: null,
 	hardStopRestartMs: 50_000 + n,
-	snapshotMs: 2000,
+	forkSnapshotMs: 2000,
 	freezeMs: n === 3 ? null : 800 + n,
-	forkMs: 5000,
-	forkToAgentReadyMs: 150_000,
+	forkCloneMs: 5000,
+	forkStartToAgentReadyMs: 130_000,
 	forkBootToAgentReadyMs: 140_000,
+	forkToAgentReadyMs: 142_000,
 	forkTunnelConnectedMs: null,
 });
 
@@ -45,6 +53,12 @@ describe("s9 summary", () => {
 			"| create_to_agent_ready | 4 | 102500 | 104000 | 101000 | 104000 |",
 		);
 		expect(md).toContain("| tunnel_connected | 0 | - | - | - | - |");
+		// The table says how every metric is measured.
+		expect(md).toContain(
+			"- fork_to_agent_ready: fork_snapshot_ms + fork_boot_to_agent_ready",
+		);
+		expect(md).toContain("- first_boot_to_agent_ready: start of the new clone");
+		expect(Object.keys(s)).toContain("boot_to_agent_ready");
 	});
 });
 
@@ -220,6 +234,8 @@ describe("runS9Once", () => {
 			"start:500",
 			"snapshot:500",
 			"shutdown:500",
+			"start:500",
+			"shutdown:500",
 			"release:500",
 			"fork:501",
 			"reserve:501",
@@ -231,7 +247,39 @@ describe("runS9Once", () => {
 		]);
 		expect(r.freezeMs).toBe(750);
 		expect(r.tunnelConnectedMs).toBeNull();
-		expect(r.forkToAgentReadyMs).toBeGreaterThan(0);
+		// Spec 16.1: a normal boot of A after a graceful shutdown is its own metric (R13: the fork
+		// total is snapshot + clone -> start -> ready).
+		expect(r.bootToAgentReadyMs).toBeGreaterThan(0);
+		expect(r.firstBootToAgentReadyMs).toBeGreaterThan(0);
+		expect(r.forkToAgentReadyMs).toBe(
+			r.forkSnapshotMs + r.forkBootToAgentReadyMs,
+		);
+		expect(r.forkBootToAgentReadyMs).toBeGreaterThanOrEqual(
+			r.forkStartToAgentReadyMs + r.forkCloneMs,
+		);
+	});
+
+	it("stops on abort, then removes what it made", async () => {
+		const { deps, calls } = fakeDeps();
+		const ac = new AbortController();
+		const start = deps.machines.start.bind(deps.machines);
+		let starts = 0;
+		deps.machines.start = async (vmid, o) => {
+			await start(vmid, o);
+			// Interrupted while the first boot is running.
+			if (++starts === 1) ac.abort(new Error("interrupted by SIGINT"));
+		};
+		await expect(runS9Once({ ...deps, signal: ac.signal })).rejects.toThrow(
+			/SIGINT/,
+		);
+		const ops = calls.map((c) => c.op + (c.vmid ? `:${c.vmid}` : ""));
+		expect(ops).toEqual([
+			"create:500",
+			"reserve:500",
+			"start:500",
+			"delete:500",
+			"release:500",
+		]);
 	});
 
 	it("deletes what it made when the fork fails and reports the failure", async () => {
@@ -291,7 +339,11 @@ const INFO_OK = (id: string) =>
 
 /** Machines fake for agent-tests: records calls; test binaries exit with the given codes. */
 function fakeTestsRun(
-	opts: { exitCodes?: Record<string, number>; copyFails?: boolean } = {},
+	opts: {
+		exitCodes?: Record<string, number>;
+		copyFails?: boolean;
+		uploadFails?: boolean;
+	} = {},
 ) {
 	const calls: string[] = [];
 	const execs: string[][] = [];
@@ -349,6 +401,7 @@ function fakeTestsRun(
 		},
 		async upload(name: string) {
 			calls.push(`upload:${name}`);
+			if (opts.uploadFails) throw new Error("upload boom");
 			expect(name).toMatch(/^sbx-build-[a-z0-9-]{1,64}\.iso$/);
 		},
 		async remove(name: string) {
@@ -470,5 +523,71 @@ describe("agent-tests", () => {
 			),
 		).rejects.toThrow(/no \*\.test\.exe/);
 		expect(t.calls).toEqual([]);
+	});
+
+	it("removes the half-uploaded ISO when the upload fails, without creating a VM", async () => {
+		const t = fakeTestsRun({ uploadFails: true });
+		await expect(runAgentTests(t.deps, opts)).rejects.toThrow(/upload boom/);
+		expect(t.calls).toEqual([
+			"make",
+			expect.stringMatching(/^upload:/),
+			"remove:sbx-build-agenttests-<ts>.iso",
+		]);
+	});
+
+	it("stops on abort and still deletes the clone and the ISO", async () => {
+		const t = fakeTestsRun();
+		const ac = new AbortController();
+		const start = t.deps.machines.start.bind(t.deps.machines);
+		t.deps.machines.start = async (vmid, o) => {
+			await start(vmid, o);
+			ac.abort(new Error("interrupted by SIGTERM"));
+		};
+		await expect(
+			runAgentTests({ ...t.deps, signal: ac.signal }, opts),
+		).rejects.toThrow(/SIGTERM/);
+		expect(t.calls.slice(-3)).toEqual([
+			"delete:500",
+			"remove:sbx-build-agenttests-<ts>.iso",
+			"release:500",
+		]);
+		expect(t.execs.some((c) => c[0]?.endsWith(".test.exe"))).toBe(false);
+	});
+
+	it("refuses binary names that are unsafe or too long for Joliet", async () => {
+		for (const name of [
+			"a b.test.exe",
+			"x;calc.test.exe",
+			`${"a".repeat(60)}.test.exe`,
+		]) {
+			const t = fakeTestsRun();
+			await expect(
+				runAgentTests(
+					{
+						...t.deps,
+						files: { list: () => [name], read: () => Buffer.alloc(1) },
+					},
+					opts,
+				),
+			).rejects.toThrow(/unsupported test binary name|Joliet/);
+			expect(t.calls).toEqual([]);
+		}
+	});
+
+	it("names the ISO like the sbx-node media pattern", () => {
+		const name = `sbx-build-agenttests-${stamp(Date.UTC(2026, 9, 31, 5, 4, 3))}.iso`;
+		expect(name).toBe("sbx-build-agenttests-20261031050403.iso");
+		expect(ISO_NAME_RE.test(name)).toBe(true);
+		expect(ISO_NAME_RE.test("sbx-build-Agent.iso")).toBe(false);
+		expect(ISO_NAME_RE.test("agenttests.iso")).toBe(false);
+	});
+});
+
+describe("--runs", () => {
+	it("accepts positive integers only", () => {
+		expect(parseRuns(undefined, 3)).toBe(3);
+		expect(parseRuns("5", 3)).toBe(5);
+		for (const bad of ["0", "-1", "1.5", "abc", "", "3x"])
+			expect(() => parseRuns(bad, 3)).toThrow(/--runs/);
 	});
 });
