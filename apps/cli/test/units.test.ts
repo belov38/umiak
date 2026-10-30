@@ -233,6 +233,45 @@ describe("output", () => {
 		await expect(p).rejects.toBeInstanceOf(OutputClosedError);
 	});
 
+	it("many pending writes share one drain wait (no listener pile-up)", async () => {
+		const stdout = closingPipe();
+		const out = new Output({ stdout, stderr: closingPipe(), isTTY: false });
+		const done: boolean[] = [];
+		const all = Array.from({ length: 50 }, (_, i) =>
+			out.data(`c${i}`).then(() => {
+				done.push(true);
+			}),
+		);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(stdout.written).toHaveLength(50);
+		expect(done).toHaveLength(0);
+		expect(stdout.listenerCount("drain")).toBe(1);
+		stdout.emit("drain");
+		await Promise.all(all);
+		expect(done).toHaveLength(50);
+		expect(stdout.listenerCount("drain")).toBe(0);
+		// A later full write waits again, with a fresh single listener.
+		const p = out.data("next");
+		await new Promise((r) => setTimeout(r, 10));
+		expect(stdout.listenerCount("drain")).toBe(1);
+		stdout.emit("drain");
+		await p;
+		expect(stdout.listenerCount("drain")).toBe(0);
+	});
+
+	it("a closing pipe releases all shared waiters and removes the drain listener", async () => {
+		const stdout = closingPipe();
+		const out = new Output({ stdout, stderr: closingPipe(), isTTY: false });
+		const all = Array.from({ length: 20 }, (_, i) => out.data(`c${i}`));
+		const settled = Promise.allSettled(all);
+		await new Promise((r) => setTimeout(r, 10));
+		expect(stdout.listenerCount("drain")).toBe(1);
+		stdout.emit("close");
+		const results = await settled;
+		expect(results.every((r) => r.status === "rejected")).toBe(true);
+		expect(stdout.listenerCount("drain")).toBe(0);
+	});
+
 	it("event() waits for drain (NDJSON frames of --json raw commands)", async () => {
 		const stdout = closingPipe();
 		const out = new Output({ stdout, stderr: closingPipe(), isTTY: false });

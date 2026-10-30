@@ -45,14 +45,16 @@ export class OutputClosedError extends Error {
 class Sink {
 	closed = false;
 	readonly #w: Writer;
-	readonly #waiters = new Set<() => void>();
+	/** The one wait for 'drain' that all pending writes share. */
+	#pending: Promise<void> | null = null;
+	/** Ends #pending (drain or the reader leaving); null when none is pending. */
+	#release: (() => void) | null = null;
 
 	constructor(w: Writer) {
 		this.#w = w;
 		const onGone = () => {
 			this.closed = true;
-			for (const f of this.#waiters) f();
-			this.#waiters.clear();
+			this.#release?.();
 		};
 		// The listener also keeps an EPIPE from being an uncaught error.
 		w.on?.("error", onGone);
@@ -70,19 +72,25 @@ class Sink {
 		}
 	}
 
-	/** Writes; when the stream is full, waits for 'drain' or the reader leaving. */
+	/**
+	 * Writes; when the stream is full, waits for 'drain' or the reader leaving.
+	 * Writes made while the stream is full share one wait (one 'drain'
+	 * listener), since a 'drain' means everything written so far was flushed.
+	 */
 	async writeDrained(chunk: string | Uint8Array): Promise<void> {
 		if (this.write(chunk) || typeof this.#w.once !== "function") return;
 		if (this.closed) return;
-		await new Promise<void>((resolve) => {
+		this.#pending ??= new Promise<void>((resolve) => {
 			const done = () => {
-				this.#waiters.delete(done);
 				this.#w.off?.("drain", done);
+				this.#pending = null;
+				this.#release = null;
 				resolve();
 			};
-			this.#waiters.add(done);
+			this.#release = done;
 			this.#w.once?.("drain", done);
 		});
+		await this.#pending;
 	}
 }
 
