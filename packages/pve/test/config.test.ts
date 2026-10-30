@@ -17,7 +17,7 @@ describe("loadConfig", () => {
 		expect(c.nodeSshKnownHosts).toBe("/home/u/.config/sbx/known_hosts");
 		// pve layout: 500-589 sandboxes, 590-596 dev infrastructure, 597-599 templates.
 		expect(c.vmidRange).toEqual({ min: 500, max: 589 });
-		expect(c.templateVmidRange).toEqual({ min: 597, max: 598 });
+		expect(c.templateVmidRange).toEqual({ min: 597, max: 599 });
 		expect(c.clusterId).toBe(1);
 		expect(c.stateDb).toBe("/home/u/.local/state/sbx/poc.db");
 		expect(c.templateVmid).toBe(599);

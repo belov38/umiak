@@ -15,12 +15,17 @@ const DefaultPath = "/etc/sbx-node.toml"
 
 // Config describes the node resources sbx-node may touch.
 type Config struct {
-	Node         string `toml:"node" json:"node"`
-	VG           string `toml:"vg" json:"vg"`
-	ThinPool     string `toml:"thinPool" json:"thinPool"`
-	Storage      string `toml:"storage" json:"storage"`
-	VMIDMin      int    `toml:"vmidMin" json:"vmidMin"`
-	VMIDMax      int    `toml:"vmidMax" json:"vmidMax"`
+	Node     string `toml:"node" json:"node"`
+	VG       string `toml:"vg" json:"vg"`
+	ThinPool string `toml:"thinPool" json:"thinPool"`
+	Storage  string `toml:"storage" json:"storage"`
+	// VMIDMin..VMIDMax: sandbox machines (pve: 500-589).
+	VMIDMin int `toml:"vmidMin" json:"vmidMin"`
+	VMIDMax int `toml:"vmidMax" json:"vmidMax"`
+	// TemplateMin..TemplateMax: template slots (pve: 597-599). Their base-<id>-* disks, tagged
+	// sbx-tpl, are clone origins. 590-596 (dev infrastructure) is in neither range.
+	TemplateMin  int    `toml:"templateVmidMin" json:"templateVmidMin"`
+	TemplateMax  int    `toml:"templateVmidMax" json:"templateVmidMax"`
 	TemplateVMID int    `toml:"templateVmid" json:"templateVmid"` // legacy template, 0 = none
 	SDNZone      string `toml:"sdnZone" json:"sdnZone"`
 	VNet         string `toml:"vnet" json:"vnet"`
@@ -40,7 +45,9 @@ func Default() Config {
 		ThinPool:     "data",
 		Storage:      "local-lvm",
 		VMIDMin:      500,
-		VMIDMax:      599,
+		VMIDMax:      589,
+		TemplateMin:  597,
+		TemplateMax:  599,
 		SDNZone:      "sbx",
 		VNet:         "sbx0",
 		ClusterID:    1,
@@ -72,8 +79,12 @@ func (c Config) Validate() error {
 	switch {
 	case c.VMIDMin < 100 || c.VMIDMax < c.VMIDMin:
 		return errors.New("invalid vmid range")
-	case c.TemplateVMID != 0 && (c.TemplateVMID < c.VMIDMin || c.TemplateVMID > c.VMIDMax):
-		return errors.New("templateVmid must be inside the vmid range")
+	case c.TemplateMin < 100 || c.TemplateMax < c.TemplateMin:
+		return errors.New("invalid template vmid range")
+	case c.TemplateMin <= c.VMIDMax && c.VMIDMin <= c.TemplateMax:
+		return errors.New("the template vmid range overlaps the sandbox range")
+	case c.TemplateVMID != 0 && !c.IsTemplateSlot(c.TemplateVMID):
+		return errors.New("templateVmid must be inside the template vmid range")
 	case c.ClusterID < 0 || c.ClusterID > 255:
 		return errors.New("clusterId must fit in one byte")
 	case c.IsoDir == "" || c.ImportDir == "":
@@ -84,8 +95,12 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// InRange reports whether vmid belongs to sandbox machines. Only the legacy template is excluded;
-// templates built later need no config: any base-<id> LV with id in the range is a clone origin.
+// InRange reports whether vmid belongs to sandbox machines.
 func (c Config) InRange(vmid int) bool {
 	return vmid >= c.VMIDMin && vmid <= c.VMIDMax && vmid != c.TemplateVMID
+}
+
+// IsTemplateSlot reports whether vmid is one of the template slots.
+func (c Config) IsTemplateSlot(vmid int) bool {
+	return vmid >= c.TemplateMin && vmid <= c.TemplateMax
 }

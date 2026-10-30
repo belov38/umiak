@@ -5,3 +5,4 @@ hw:
   vga: virtio
 disk: { slot: scsi0, size: 48G }
 steps: ["@parent", "60-desktop"]
+vmids: [597]

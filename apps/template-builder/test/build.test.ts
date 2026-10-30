@@ -82,15 +82,20 @@ function setup(
 	});
 	// The template disk after fstrim: about 6 GiB of 64.
 	const disk = { dataPercent: 9.4 };
+	node.handlers["lv.tagTemplate"] = (a) => ({
+		tagged: [`base-${a.vmid}-disk-0`],
+		already: [],
+	});
 	node.handlers["lv.usage"] = (a) => {
-		if (a.name !== "base-598-disk-0") throw new Error(`lv.usage ${a.name}`);
+		if (a.name !== "base-597-disk-0") throw new Error(`lv.usage ${a.name}`);
 		return { sizeBytes: 64 * 2 ** 30, dataPercent: disk.dataPercent };
 	};
 	const store = new SqliteStateStore(":memory:");
 	const allocator = new Allocator({
 		store,
 		clusterId: 1,
-		range: { min: 500, max: 598 },
+		range: { min: 500, max: 589 },
+		templateRange: { min: 597, max: 599 },
 		templateVmid: 599,
 		occupied: async () => new Set(pve.vms.keys()),
 	});
@@ -188,7 +193,7 @@ function expectInOrder(log: string[], seq: string[]) {
 }
 
 const seedName = (m: Manifest) => `sbx-seed-${m.buildId}.raw`;
-const vm = "/nodes/pve/qemu/598";
+const vm = "/nodes/pve/qemu/597";
 
 describe("buildTemplate: happy path", () => {
 	it("runs the stages in order and records a ready build", async () => {
@@ -198,7 +203,7 @@ describe("buildTemplate: happy path", () => {
 		expect(m.status).toBe("ready");
 		expect(m.version).toBe("20261030.1");
 		expect(m.vmName).toBe("sbx-tpl-linux-20261030-1");
-		expect(m.pveVmid).toBe(598);
+		expect(m.pveVmid).toBe(597);
 		expect(s.registry.get(m.buildId)).toEqual(m);
 
 		expectInOrder(s.log, [
@@ -211,7 +216,7 @@ describe("buildTemplate: happy path", () => {
 			`api:PUT ${vm}/resize`,
 			`api:PUT ${vm}/firewall/options`,
 			`api:POST ${vm}/firewall/ipset/ipfilter-net0`,
-			"ram:reserve 598 4096",
+			"ram:reserve 597 4096",
 			`api:POST ${vm}/status/start`,
 			"guest:step 00-base",
 			"guest:reboot",
@@ -228,12 +233,13 @@ describe("buildTemplate: happy path", () => {
 			"guest:rm-build-logs",
 			"guest:random-seed",
 			"guest:seal",
+			"guest:initrd",
 			"guest:drop-journal",
 			"guest:zero-fill",
 			"guest:fstrim",
 			"guest:sync",
 			`api:POST ${vm}/agent/shutdown`,
-			"ram:release 598",
+			"ram:release 597",
 			`api:PUT ${vm}/config`,
 			`api:POST ${vm}/template`,
 			"node:media.remove",
@@ -270,7 +276,7 @@ describe("buildTemplate: happy path", () => {
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		expect((err as BuildFailedError).manifest.error?.stage).toBe("seal");
 		expect(s.log).not.toContain("guest:seal");
-		expect(s.pve.vms.has(598)).toBe(false);
+		expect(s.pve.vms.has(597)).toBe(false);
 	});
 
 	it("reports the new build before it starts", async () => {
@@ -292,7 +298,7 @@ describe("buildTemplate: happy path", () => {
 			(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
 		);
 		expect(create?.params).toMatchObject({
-			vmid: 598,
+			vmid: 597,
 			name: "sbx-tpl-linux-20261030-1",
 			pool: "sandbox",
 			machine: "q35",
@@ -311,7 +317,7 @@ describe("buildTemplate: happy path", () => {
 			balloon: 0,
 			scsi0: `local-lvm:0,import-from=local:import/${IMAGE_NAME},discard=on,iothread=1,ssd=1`,
 			scsi1: `local-lvm:0,import-from=local:import/sbx-seed-${m.buildId}.raw`,
-			net0: "virtio=02:01:00:00:02:56,bridge=sbx0,firewall=1",
+			net0: "virtio=02:01:00:00:02:55,bridge=sbx0,firewall=1",
 			boot: "order=scsi0",
 		});
 		for (const k of ["ciuser", "ipconfig0", "cloudinit", "sshkeys"])
@@ -340,12 +346,12 @@ describe("buildTemplate: happy path", () => {
 		);
 		// force=1: the seed disk is destroyed, not left as unused0.
 		expect(unlink?.params).toEqual({ idlist: "scsi1", force: 1 });
-		expect(s.pve.vms.get(598)?.config.template).toBe("1");
-		expect(s.pve.vms.get(598)?.config.scsi1).toBeUndefined();
-		expect(s.pve.vms.get(598)?.config.smbios1).toBeUndefined();
+		expect(s.pve.vms.get(597)?.config.template).toBe("1");
+		expect(s.pve.vms.get(597)?.config.scsi1).toBeUndefined();
+		expect(s.pve.vms.get(597)?.config.smbios1).toBeUndefined();
 		const removed = s.node.calls.find((c) => c.op === "media.remove");
 		expect(removed?.args).toEqual({ names: [seedName(m)] });
-		expect((await s.allocator.get(598))?.state).toBe("active");
+		expect((await s.allocator.get(597))?.state).toBe("active");
 	});
 
 	it("uploads the base image and the seed image to local:import with sha256 checksums", async () => {
@@ -421,7 +427,7 @@ describe("buildTemplate: happy path", () => {
 		expect(inGuest).toMatchObject({
 			buildId: m.buildId,
 			version: m.version,
-			pveVmid: 598,
+			pveVmid: 597,
 			packages: m.packages,
 			tools: m.tools,
 			kernel: m.kernel,
@@ -589,14 +595,14 @@ describe("buildTemplate: failures", () => {
 			`api:POST ${vm}/status/stop`,
 			`api:DELETE ${vm}`,
 			"node:media.remove",
-			"ram:release 598",
+			"ram:release 597",
 		]);
 		const del = s.pve.calls.find((c) => c.method === "DELETE" && c.path === vm);
 		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 1 });
 		const removed = s.node.calls.find((c) => c.op === "media.remove");
 		expect(removed?.args).toEqual({ names: [seedName(m)] });
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 		// The base image stays as a cache.
 		expect(s.pve.storage.some((f) => f.volid.endsWith(IMAGE_NAME))).toBe(true);
 	});
@@ -612,21 +618,28 @@ describe("buildTemplate: failures", () => {
 			false,
 		);
 		expect(s.node.calls.some((c) => c.op === "media.remove")).toBe(false);
-		expect(s.pve.vms.get(598)?.status).toBe("running");
-		expect((await s.allocator.get(598))?.state).toBe("reserved");
+		expect(s.pve.vms.get(597)?.status).toBe("running");
+		expect((await s.allocator.get(597))?.state).toBe("reserved");
 	});
 
 	it("records the template disk usage and fails an untrimmed one", async () => {
 		const ok = setup();
 		const m = await buildTemplate(ok.deps, ok.opts);
 		expect(m.diskUsedGiB).toBe(6);
+		// The template disk is tagged sbx-tpl (a clone origin for sbx-node) before it is measured.
+		const ops = ok.node.calls.map((c) => c.op);
+		expect(ops.indexOf("lv.tagTemplate")).toBeGreaterThan(-1);
+		expect(ops.indexOf("lv.tagTemplate")).toBeLessThan(ops.indexOf("lv.usage"));
+		expect(ok.node.calls.find((c) => c.op === "lv.tagTemplate")?.args).toEqual({
+			vmid: 597,
+		});
 		const s = setup();
 		s.disk.dataPercent = 95.2;
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		const f = (err as BuildFailedError).manifest;
 		expect(f.error?.stage).toBe("template");
 		expect(f.error?.message).toMatch(/95.2% allocated.*not trimmed/);
-		expect(s.pve.vms.has(598)).toBe(false);
+		expect(s.pve.vms.has(597)).toBe(false);
 	});
 
 	it("refuses an agent package that changed after its signature was verified", async () => {
@@ -653,23 +666,23 @@ describe("buildTemplate: failures", () => {
 		const s = setup();
 		s.pve.fail["POST /nodes/pve/qemu"] = new PveApiError(
 			500,
-			"unable to create VM 598",
+			"unable to create VM 597",
 		);
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		const m = (err as BuildFailedError).manifest;
 		expect(m.error).toMatchObject({ stage: "vm" });
-		expect(m.error?.message).toContain("unable to create VM 598");
+		expect(m.error?.message).toContain("unable to create VM 597");
 		expect(s.pve.calls.some((c) => c.method === "DELETE")).toBe(false);
 		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
 			names: [seedName(m)],
 		});
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(await s.allocator.get(597)).toBeUndefined();
 	});
 
 	it("leaves no build firewall (ipset, rules) on the template", async () => {
 		const s = setup();
 		await buildTemplate(s.deps, s.opts);
-		const fw = s.pve.vms.get(598)?.firewall;
+		const fw = s.pve.vms.get(597)?.firewall;
 		expect(fw?.rules).toEqual([]);
 		expect(fw?.ipsets).toEqual({});
 		expect(fw?.options).toMatchObject({ enable: 0 });
@@ -709,15 +722,15 @@ describe("buildTemplate: failures", () => {
 		};
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		expect((err as BuildFailedError).manifest.error?.stage).toBe("vm");
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 	});
 
 	it("never deletes a VM whose name or tags are not the build's", async () => {
 		const s = setup();
 		s.pve.before = (method, path) => {
 			if (method === "PUT" && path === `${vm}/resize`) {
-				const v = s.pve.vms.get(598);
+				const v = s.pve.vms.get(597);
 				if (v) v.config.name = "someone-else";
 				throw new PveApiError(500, "resize failed");
 			}
@@ -725,7 +738,7 @@ describe("buildTemplate: failures", () => {
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		expect((err as BuildFailedError).manifest.error?.stage).toBe("vm");
 		expect(s.pve.calls.some((c) => c.method === "DELETE")).toBe(false);
-		expect(s.pve.vms.has(598)).toBe(true);
+		expect(s.pve.vms.has(597)).toBe(true);
 	});
 
 	it("a red verify fails the build and deletes the template", async () => {
@@ -736,8 +749,8 @@ describe("buildTemplate: failures", () => {
 		expect(m.status).toBe("failed");
 		expect(m.error?.stage).toBe("verify");
 		expect(m.verify?.ok).toBe(false);
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 	});
 
 	it("rolls back even when recording the failure fails", async () => {
@@ -753,8 +766,8 @@ describe("buildTemplate: failures", () => {
 			status: "failed",
 			error: { stage: "steps", step: "00-base" },
 		});
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 		expect(s.node.calls.some((c) => c.op === "media.remove")).toBe(true);
 	});
 
@@ -764,8 +777,8 @@ describe("buildTemplate: failures", () => {
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		const m = (err as BuildFailedError).manifest;
 		expect(m.error?.stage).toBe("steps");
-		expect(s.pve.vms.has(598)).toBe(true);
-		expect((await s.allocator.get(598))?.state).toBe("reserved");
+		expect(s.pve.vms.has(597)).toBe(true);
+		expect((await s.allocator.get(597))?.state).toBe("reserved");
 		// The ISO goes anyway.
 		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
 			names: [seedName(m)],
@@ -779,8 +792,8 @@ describe("buildTemplate: failures", () => {
 		const m = (err as BuildFailedError).manifest;
 		expect(m.error?.stage).toBe("seal");
 		expect(m.error?.message).toMatch(/seal/);
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 	});
 
 	it("a failure while waiting for the shutdown rolls back", async () => {
@@ -799,8 +812,8 @@ describe("buildTemplate: failures", () => {
 		};
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		expect((err as BuildFailedError).manifest.error?.stage).toBe("seal");
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 	});
 
 	it("a failing template conversion rolls back", async () => {
@@ -809,8 +822,8 @@ describe("buildTemplate: failures", () => {
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
 		const m = (err as BuildFailedError).manifest;
 		expect(m.error?.stage).toBe("template");
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
 			names: [seedName(m)],
 		});
@@ -858,8 +871,8 @@ describe("buildTemplate: failures", () => {
 			"00-base",
 			"10-system",
 		]);
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 		expect(s.registry.get(m.buildId)?.status).toBe("failed");
 	});
 
@@ -881,8 +894,8 @@ describe("buildTemplate: failures", () => {
 		expect(s.log[create + 1]).toMatch(/^api:wait UPID:/);
 		// Nothing after the wait but the rollback.
 		expect(s.log).not.toContain(`api:PUT ${vm}/resize`);
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(await s.allocator.get(598)).toBeUndefined();
+		expect(s.pve.vms.has(597)).toBe(false);
+		expect(await s.allocator.get(597)).toBeUndefined();
 	});
 
 	it("rejects bad inputs before anything is recorded or created", async () => {
@@ -919,7 +932,7 @@ describe("register output", () => {
 		os: "linux",
 		node: "pve",
 		storage: "local-lvm",
-		pveVmid: 598,
+		pveVmid: 597,
 		bootTimeoutS: 300,
 		agentVersion: "1.2.3",
 		diskLayout: { scsi0: { size: "64G", ssd: "1" } },
@@ -928,7 +941,7 @@ describe("register output", () => {
 
 	it("prints the sbx-admin template register line", () => {
 		expect(registerCommand(m)).toBe(
-			"sbx-admin template register --template linux --version 20261030.1 --os linux --node pve --storage local-lvm --pve-vmid 598 --boot-timeout-s 300 --agent-version 1.2.3 " +
+			"sbx-admin template register --template linux --version 20261030.1 --os linux --node pve --storage local-lvm --pve-vmid 597 --boot-timeout-s 300 --agent-version 1.2.3 " +
 				`--disk-layout '{"scsi0":{"size":"64G","ssd":"1"}}' --hw '{"cpu":"host","cloudinit":false,"note":"it'\\''s"}'`,
 		);
 	});
@@ -942,7 +955,7 @@ describe("register output", () => {
 				os: "linux",
 				node: "pve",
 				storage: "local-lvm",
-				pveVmid: 598,
+				pveVmid: 597,
 				bootTimeoutS: 300,
 				agentVersion: "1.2.3",
 				diskLayout: { scsi0: { size: "64G", ssd: "1" } },

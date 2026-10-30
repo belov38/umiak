@@ -57,6 +57,14 @@ func (LinuxResetter) RestartSSH() error {
 	return run("systemctl", "try-restart", "ssh")
 }
 
+// RestartJournal restarts systemd-journald.service if it is active. The call
+// waits for the restart: sbx-identity.service runs before
+// systemd-journal-flush.service, so the flush to /var/log/journal goes under
+// the new machine-id and takes the earlier entries of the boot with it.
+func (LinuxResetter) RestartJournal() error {
+	return run("systemctl", "try-restart", "systemd-journald.service")
+}
+
 // run executes a helper and wraps a failure with its trimmed output.
 func run(name string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)

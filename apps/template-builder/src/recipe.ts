@@ -55,6 +55,8 @@ const recipeFileSchema = z.strictObject({
 	seal: z.literal("sbx-agent").optional(),
 	boot_timeout_s: z.number().int().positive().optional(),
 	verify: z.string().min(1).optional(),
+	/** Template slots this recipe builds into, in order (not inherited: each template has its own). */
+	vmids: z.array(z.number().int().positive()).min(1),
 });
 
 export interface Recipe {
@@ -71,6 +73,8 @@ export interface Recipe {
 	seal: "sbx-agent";
 	bootTimeoutS: number;
 	verify: string;
+	/** Template slots (VMIDs) this recipe builds into, first free one wins. */
+	vmids: number[];
 	/** Directory of this recipe. */
 	dir: string;
 	/** Parent recipe directories first, this recipe's directory last. */
@@ -214,6 +218,7 @@ function loadRecipeChain(
 			seal,
 			bootTimeoutS,
 			verify,
+			vmids: raw.vmids,
 			dir,
 			stepDirs: [...(parent?.stepDirs ?? []), dir],
 		};

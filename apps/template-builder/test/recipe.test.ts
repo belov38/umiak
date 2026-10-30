@@ -46,6 +46,10 @@ describe("loadRecipe: real linux recipe", () => {
 		]);
 	});
 
+	it("builds into the Linux slots 597 and 599, never the Windows slot 598", () => {
+		expect(r.vmids).toEqual([597, 599]);
+	});
+
 	it("normalizes hw, disk and build vm", () => {
 		expect(r.slug).toBe("linux");
 		expect(r.os).toBe("linux");
@@ -206,6 +210,13 @@ describe("loadRecipe: extends", () => {
 			"10-system",
 			"90-cleanup",
 		]);
+	});
+
+	it("does not inherit the template slots", () => {
+		const dir = copyFixtures();
+		const p = join(dir, "child/template.yaml");
+		writeFileSync(p, readText(p).replace(/^vmids:.*$/m, ""));
+		expect(() => loadRecipe(dir, "child")).toThrow(/vmids/);
 	});
 
 	it("throws on a cycle", () => {

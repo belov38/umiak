@@ -24,14 +24,21 @@ export async function preflight(
 		await check("sbx-node answers with the expected config", async () => {
 			const v = await node.call<{
 				version: string;
-				config: { vmidMin: number; vmidMax: number; templateVmid: number };
+				config: {
+					vmidMin: number;
+					vmidMax: number;
+					templateVmid: number;
+					templateVmidMin?: number;
+					templateVmidMax?: number;
+				};
 			}>("version");
-			// sbx-node clones from base-<id> of any VMID in its range (S5 templates), its own
-			// templateVmid is only the legacy 599.
+			// sbx-node clones from the tagged base-<id> disks of its template slots (S5 templates);
+			// its templateVmid is only the legacy 599.
+			const tplMin = v.config.templateVmidMin ?? v.config.templateVmid;
+			const tplMax = v.config.templateVmidMax ?? v.config.templateVmid;
 			const tplOk =
 				v.config.templateVmid === cfg.templateVmid ||
-				(cfg.templateVmid >= v.config.vmidMin &&
-					cfg.templateVmid <= v.config.vmidMax);
+				(cfg.templateVmid >= tplMin && cfg.templateVmid <= tplMax);
 			const ok =
 				tplOk &&
 				v.config.vmidMin <= cfg.vmidRange.min &&
