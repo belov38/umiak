@@ -22,6 +22,16 @@ export interface OpenApiDoc {
 
 interface OperationObject {
 	operationId?: string;
+	parameters?: {
+		name: string;
+		in: string;
+		required?: boolean;
+		schema?: unknown;
+	}[];
+	requestBody?: {
+		required?: boolean;
+		content?: Record<string, { schema?: unknown }>;
+	};
 	responses?: Record<
 		string,
 		{ content?: Record<string, { schema?: unknown }> }
@@ -248,4 +258,136 @@ export function assertConforms(
 		);
 	}
 	return { operationId };
+}
+
+/** What a test sent, for `assertRequestConforms`. */
+export interface SentRequest {
+	method: string;
+	/** Path with the query string. */
+	path: string;
+	/** Content type of the body, if any. */
+	contentType?: string | null;
+	/** The parsed JSON body; undefined when no JSON body was sent. */
+	json?: unknown;
+	/** Whether any body was sent. */
+	hasBody: boolean;
+}
+
+function schemaTypes(schema: unknown): string[] {
+	if (!isNode(schema)) return [];
+	const out: string[] = [];
+	const t = schema.type;
+	if (typeof t === "string") out.push(t);
+	if (Array.isArray(t)) out.push(...t.filter((x) => typeof x === "string"));
+	for (const k of ["anyOf", "oneOf"]) {
+		const l = schema[k];
+		if (Array.isArray(l)) for (const v of l) out.push(...schemaTypes(v));
+	}
+	return out;
+}
+
+/** A parameter as the schema sees it: numbers for numeric schemas, arrays for repeats. */
+function paramValue(schema: unknown, values: string[]): unknown {
+	const types = schemaTypes(schema);
+	const one = (v: string): unknown =>
+		(types.includes("integer") || types.includes("number")) &&
+		/^-?\d+(\.\d+)?$/.test(v)
+			? Number(v)
+			: v;
+	if (
+		types.includes("array") &&
+		(values.length > 1 || !types.includes("string"))
+	) {
+		return values.map(one);
+	}
+	return one(values[values.length - 1] as string);
+}
+
+/**
+ * Throws unless a request is described by the document: its path and query
+ * parameters (documented ones; required ones present) match their schemas,
+ * and a JSON body matches the operation's JSON request body (S7 §16
+ * "Контракт"). A JSON body to an operation without one, or no body where the
+ * body is required, fails too. Non-JSON bodies are not inspected. Use it for
+ * requests the server accepted (2xx). A request to an operation the document
+ * does not have is left to the response check (`assertConforms` refuses an
+ * undocumented 2xx with a body): the result is then a null operationId.
+ */
+export function assertRequestConforms(
+	doc: OpenApiDoc,
+	req: SentRequest,
+): Conformance {
+	const m = req.method.toLowerCase();
+	const [bare, query = ""] = req.path.split("?", 2) as [string, string?];
+	const template = matchPath(doc, bare);
+	const op =
+		template !== null && METHODS.includes(m)
+			? doc.paths[template]?.[m]
+			: undefined;
+	const where = `request ${req.method.toUpperCase()} ${req.path}`;
+	if (!op || template === null) return { operationId: null };
+	const problems: string[] = [];
+	// Path parameters are found by their position in the template.
+	const values = bare.split("/");
+	const parts = template.split("/");
+	const sent = new URLSearchParams(query);
+	(op.parameters ?? []).forEach((p, i) => {
+		let value: unknown;
+		if (p.in === "path") {
+			const at = parts.indexOf(`{${p.name}}`);
+			if (at < 0) return;
+			value = paramValue(p.schema, [decodeURIComponent(values[at] ?? "")]);
+		} else if (p.in === "query") {
+			const all = sent.getAll(p.name);
+			if (all.length === 0) {
+				if (p.required) problems.push(`query.${p.name} is required`);
+				return;
+			}
+			value = paramValue(p.schema, all);
+		} else {
+			return;
+		}
+		const v = validator(
+			doc,
+			pointer("paths", template, m, "parameters", String(i), "schema"),
+		);
+		if (!v(value)) {
+			problems.push(
+				`${p.in}.${p.name}=${JSON.stringify(value)}: ${(v.errors ?? []).map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`).join("; ")}`,
+			);
+		}
+	});
+	const body = op.requestBody;
+	const jsonSchema = body?.content?.["application/json"]?.schema;
+	if (req.json !== undefined) {
+		if (jsonSchema === undefined) {
+			problems.push("a JSON body was sent, the operation documents none");
+		} else {
+			const v = validator(
+				doc,
+				pointer(
+					"paths",
+					template,
+					m,
+					"requestBody",
+					"content",
+					"application/json",
+					"schema",
+				),
+			);
+			if (!v(req.json)) {
+				problems.push(
+					`body: ${(v.errors ?? []).map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`).join("; ")}`,
+				);
+			}
+		}
+	} else if (body?.required && !req.hasBody) {
+		problems.push("the request body is required");
+	}
+	if (problems.length > 0) {
+		throw new Error(
+			`${where} does not match the document (pass validateRequest: false for deliberate bad input):\n  ${problems.join("\n  ")}\nbody: ${JSON.stringify(req.json)?.slice(0, 1000)}`,
+		);
+	}
+	return { operationId: op.operationId ?? null };
 }

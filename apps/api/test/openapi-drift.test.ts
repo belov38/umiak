@@ -7,7 +7,11 @@ import {
 	serializeOpenApiDocument,
 } from "../src/index.ts";
 import { makeTestDeps } from "../src/testing/index.ts";
-import { assertConforms, type OpenApiDoc } from "./helpers/conformance.ts";
+import {
+	assertConforms,
+	assertRequestConforms,
+	type OpenApiDoc,
+} from "./helpers/conformance.ts";
 import {
 	coverageProblems,
 	documentOperations,
@@ -295,5 +299,61 @@ describe("conformance coverage (global teardown)", () => {
 		expect(coverageProblems(extended, counts)).toEqual([
 			"things.raw has no JSON success answer: add it to NON_JSON_SUCCESS",
 		]);
+	});
+});
+
+describe("assertRequestConforms (requests of 2xx answers)", () => {
+	const d = JSON.parse(COMMITTED) as OpenApiDoc;
+	const check =
+		(
+			method: string,
+			path: string,
+			json?: unknown,
+			hasBody = json !== undefined,
+		) =>
+		() =>
+			assertRequestConforms(d, { method, path, json, hasBody });
+
+	it("accepts documented params and bodies, numbers and repeats from the query", () => {
+		expect(check("GET", "/v1/sandboxes?limit=5&label=a=1&label=b=2")()).toEqual(
+			{
+				operationId: "sandboxes.list",
+			},
+		);
+		expect(
+			check("PUT", "/v1/sandboxes/sb_x/ports/3000", { access: "token" }),
+		).not.toThrow();
+		expect(
+			check("POST", "/v1/sandboxes/sb_x/commands", { command: "true" }),
+		).not.toThrow();
+		expect(
+			check(
+				"GET",
+				"/v1/sandboxes/sb_x/commands/cmd_x/stream?stdoutOffset=0&follow=false",
+			),
+		).not.toThrow();
+	});
+
+	it("refuses unknown body fields, bad types, bad query and path params, missing bodies", () => {
+		expect(check("POST", "/v1/sandboxes", { failFast: true })).toThrow(/body/);
+		expect(
+			check("POST", "/v1/sandboxes/sb_x/commands/cmd_x/signal", {
+				signal: "SIGFOO",
+			}),
+		).toThrow(/body/);
+		expect(check("GET", "/v1/sandboxes?limit=abc")).toThrow(/query.limit/);
+		expect(check("GET", "/v1/sandboxes?limit=500")).toThrow(/query.limit/);
+		expect(check("PUT", "/v1/sandboxes/sb_x/ports/0", {})).toThrow(/path.port/);
+		expect(check("GET", "/v1/sandboxes/sb_x/files/stat")).toThrow(
+			/query.path is required/,
+		);
+		expect(check("POST", "/v1/environments")).toThrow(/body is required/);
+		expect(check("POST", "/v1/sandboxes/sb_x/stop", {})).toThrow(
+			/documents none/,
+		);
+	});
+
+	it("leaves operations the document does not have to the response check", () => {
+		expect(check("GET", "/v1/__test/x")()).toEqual({ operationId: null });
 	});
 });

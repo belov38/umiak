@@ -6,16 +6,11 @@
 // - malformed or foreign bearers are 401, Sbx-Team of another team 403;
 // - proxied: Authorization is refused, every unsafe operation needs the
 //   dashboard Origin, a WebSocket upgrade with a foreign Origin is refused.
-import type { AddressInfo } from "node:net";
 import { encodeUuid, generateApiKeySecret } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import {
-	type ApiDeps,
-	createApiServer,
-	PTY_SUBPROTOCOL,
-} from "../src/index.ts";
+import { type ApiDeps, PTY_SUBPROTOCOL } from "../src/index.ts";
 import { issueApiKey } from "../src/testing/index.ts";
 import {
 	createHarness,
@@ -26,6 +21,8 @@ import { ROUTE_LIST } from "./helpers/route-table.ts";
 import {
 	type Any,
 	buildFixture,
+	errorOf,
+	listen,
 	newTeam,
 	type Person,
 	personOf,
@@ -34,8 +31,6 @@ import {
 } from "./helpers/security.ts";
 import { testSshCa } from "./helpers/ssh.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
-
-const err = (r: HarnessResponse): Any => (r.body as Any)?.error;
 
 const UNSAFE = ["POST", "PUT", "PATCH", "DELETE"];
 
@@ -77,7 +72,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		expect(r.headers.get("www-authenticate"), where).toMatch(
 			/^Bearer realm="sbx"/,
 		);
-		if (r.text !== "") expect(err(r).code, where).toBe("unauthorized");
+		if (r.text !== "") expect(errorOf(r).code, where).toBe("unauthorized");
 	}
 
 	it("public: no bearer is 401 on every authenticated operation, also with oauth2-proxy headers, cookies or a key in the query", async () => {
@@ -113,7 +108,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		// Still a key: person-only operations refuse it.
 		const ssh = await h.request("GET", "/v1/ssh-keys", { headers: operator });
 		expect(ssh.status).toBe(403);
-		expect(err(ssh).details.reason).toBe("user_required");
+		expect(errorOf(ssh).details.reason).toBe("user_required");
 	});
 
 	it("public: malformed, unknown, reserved and revoked bearers are 401 on every operation", async () => {
@@ -150,7 +145,8 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		for (const [id, r] of authenticated) {
 			const res = await send(h, r.method, r.request(f), { "sbx-team": other });
 			expect(res.status, id).toBe(403);
-			if (r.method !== "HEAD") expect(err(res).code, id).toBe("team_forbidden");
+			if (r.method !== "HEAD")
+				expect(errorOf(res).code, id).toBe("team_forbidden");
 		}
 	});
 
@@ -163,7 +159,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 			headers: { "sbx-team": encodeUuid("team", f.teamId) },
 		});
 		expect(res.status).toBe(403);
-		expect(err(res).code).toBe("team_forbidden");
+		expect(errorOf(res).code).toBe("team_forbidden");
 	});
 
 	it("proxied: Authorization is refused (400) on every authenticated operation", async () => {
@@ -174,7 +170,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 			});
 			expect(res.status, id).toBe(400);
 			if (r.method !== "HEAD") {
-				expect(err(res).details.issues[0].path, id).toBe(
+				expect(errorOf(res).details.issues[0].path, id).toBe(
 					"header.authorization",
 				);
 			}
@@ -194,7 +190,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 			]) {
 				const res = await send(owner.h, r.method, r.request(f), headers);
 				expect(res.status, `${id} ${headers.origin}`).toBe(403);
-				expect(err(res).code, id).toBe("origin_forbidden");
+				expect(errorOf(res).code, id).toBe("origin_forbidden");
 			}
 		}
 	});
@@ -208,9 +204,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 	});
 
 	it("proxied: a WebSocket upgrade with a foreign or no Origin is refused with 403 before the upgrade", async () => {
-		const { server } = createApiServer(owner.h.app);
-		await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-		const base = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		const srv = await listen(owner.h.app);
 		const path = `/v1/sandboxes/${f.sandbox}/ptys/${f.pty}/connect`;
 		const { origin: _, ...noOrigin } = owner.headers;
 		try {
@@ -218,7 +212,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 				{ ...noOrigin, origin: "https://evil.example" },
 				noOrigin,
 			]) {
-				const ws = new WebSocket(`${base}${path}`, [PTY_SUBPROTOCOL], {
+				const ws = new WebSocket(`${srv.base}${path}`, [PTY_SUBPROTOCOL], {
 					headers,
 				});
 				const refused = await new Promise<{ status: number; body: string }>(
@@ -240,8 +234,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 				expect(JSON.parse(refused.body).error.code).toBe("origin_forbidden");
 			}
 		} finally {
-			server.closeAllConnections();
-			await new Promise<void>((r) => server.close(() => r()));
+			await srv.close();
 		}
 	});
 

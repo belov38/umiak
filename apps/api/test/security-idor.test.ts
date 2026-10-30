@@ -6,16 +6,11 @@
 // by slug, B's snapshot and environment in a create body, B's operation,
 // environment, SSH key and API key. Afterwards every stored row of team B
 // is unchanged and the agent was never called for B's machine.
-import type { AddressInfo } from "node:net";
 import { newPublicUlid } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import {
-	type ApiDeps,
-	createApiServer,
-	PTY_SUBPROTOCOL,
-} from "../src/index.ts";
+import { type ApiDeps, PTY_SUBPROTOCOL } from "../src/index.ts";
 import { issueApiKey } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
 import {
@@ -27,6 +22,8 @@ import {
 	type AgentCall,
 	type Any,
 	buildFixture,
+	errorOf,
+	listen,
 	newTeam,
 	type Person,
 	personOf,
@@ -125,6 +122,7 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 	let a: TeamFixture;
 	let b: TeamFixture;
 	let before: Record<string, unknown>;
+	let recordedForB = 0;
 
 	beforeAll(async () => {
 		db = await createTestDatabase({ max: 20 });
@@ -142,6 +140,8 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 		ownerB = await personOf(w, teamB, "owner", deps);
 		b = await buildFixture(w, teamB, hB, ownerB);
 		before = await teamState(db.pool, teamB, [ownerB.userId]);
+		// The recorder sees B's machine: building B's fixture went through it.
+		recordedForB = calls.filter((c) => c.machineId === b.machineId).length;
 		calls.length = 0;
 	});
 	afterAll(async () => {
@@ -177,9 +177,13 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 		}
 		expect(r.status, `${where}: ${r.text.slice(0, 300)}`).toBe(404);
 		if (c.method !== "HEAD") {
-			expect(NOT_FOUND, where).toContain((r.body as Any).error.code);
+			expect(NOT_FOUND, where).toContain(errorOf(r).code);
 		}
 	}
+
+	it("the agent recorder saw B's machine while B's fixture was built", () => {
+		expect(recordedForB).toBeGreaterThan(5);
+	});
 
 	it("covers every resource kind of the route table", () => {
 		const named = new Set(ROUTE_LIST.flatMap(([, r]) => r.resources));
@@ -216,14 +220,16 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 	});
 
 	it("a terminal connect is closed 4404 after the upgrade", async () => {
-		const { server } = createApiServer(hA.app);
-		await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-		const base = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		const srv = await listen(hA.app);
 		try {
 			for (const c of cases(a, b).filter((x) => x.websocket)) {
-				const ws = new WebSocket(`${base}${c.req.path}`, [PTY_SUBPROTOCOL], {
-					headers: { authorization: `Bearer ${w.secret}` },
-				});
+				const ws = new WebSocket(
+					`${srv.base}${c.req.path}`,
+					[PTY_SUBPROTOCOL],
+					{
+						headers: { authorization: `Bearer ${w.secret}` },
+					},
+				);
 				const texts: Any[] = [];
 				ws.on("message", (data, binary) => {
 					if (!binary) texts.push(JSON.parse(data.toString()));
@@ -239,8 +245,7 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 				});
 			}
 		} finally {
-			server.closeAllConnections();
-			await new Promise<void>((r) => server.close(() => r()));
+			await srv.close();
 		}
 	});
 

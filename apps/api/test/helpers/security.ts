@@ -2,10 +2,15 @@
 // API (route-table.ts `Fixture`), people of a team, an agent that records
 // which machines it was called for, and a dump of a team's stored state.
 import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 import { encodeUuid, SCOPES, type Scope } from "@sbx/auth";
 import { insertOperation, insertSavedSnapshot } from "@sbx/core/testing";
 import type pg from "pg";
-import type { AgentApi, ApiDeps } from "../../src/index.ts";
+import {
+	type AgentApi,
+	type ApiDeps,
+	createApiServer,
+} from "../../src/index.ts";
 import { issueApiKey } from "../../src/testing/index.ts";
 import {
 	createHarness,
@@ -33,11 +38,34 @@ export function send(
 	});
 }
 
-function ok(r: HarnessResponse, what: string): Any {
+/** The body of a successful answer; throws with the answer otherwise. */
+export function ok(r: HarnessResponse, what = "request"): Any {
 	if (r.status >= 300) {
 		throw new Error(`${what}: ${r.status} ${r.text.slice(0, 500)}`);
 	}
 	return r.body;
+}
+
+/** The `error` object of an error answer (undefined otherwise). */
+export function errorOf(r: HarnessResponse): Any {
+	return (r.body as Any)?.error;
+}
+
+/** A listener app on a real HTTP server (WebSocket upgrades work). */
+export async function listen(app: Harness["app"]): Promise<{
+	/** `ws://127.0.0.1:<port>` */
+	base: string;
+	close(): Promise<void>;
+}> {
+	const { server } = createApiServer(app);
+	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	return {
+		base: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`,
+		async close() {
+			server.closeAllConnections();
+			await new Promise<void>((r) => server.close(() => r()));
+		},
+	};
 }
 
 /** All scopes but one. */

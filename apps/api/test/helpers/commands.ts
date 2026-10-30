@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { encodeUuid } from "@sbx/auth";
 import type { Frame } from "../../src/index.ts";
-import { assertConforms } from "./conformance.ts";
+import { assertConforms, assertRequestConforms } from "./conformance.ts";
 import { recordValidated } from "./conformance-coverage.ts";
 import { type Harness, OPENAPI_DOC } from "./harness.ts";
 import type { ApiWorld } from "./world.ts";
@@ -70,6 +70,8 @@ export async function openStream(
 		json?: unknown;
 		headers?: Record<string, string>;
 		bearer?: string;
+		/** As in the harness: false only for input outside the document. */
+		validateRequest?: boolean;
 	} = {},
 ): Promise<OpenStream> {
 	const headers = new Headers(init.headers);
@@ -87,6 +89,15 @@ export async function openStream(
 		headers,
 		...(body === undefined ? {} : { body }),
 	});
+	if (res.status >= 200 && res.status < 300 && init.validateRequest !== false) {
+		assertRequestConforms(OPENAPI_DOC, {
+			method,
+			path,
+			contentType: headers.get("content-type"),
+			json: init.json,
+			hasBody: body !== undefined,
+		});
+	}
 	const contentType = res.headers.get("content-type") ?? "";
 	if (!contentType.startsWith("application/x-ndjson")) {
 		const text = await res.text();

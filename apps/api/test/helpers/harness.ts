@@ -12,7 +12,11 @@ import {
 	createPublicApp,
 } from "../../src/index.ts";
 import { makeTestDeps } from "../../src/testing/index.ts";
-import { assertConforms, type OpenApiDoc } from "./conformance.ts";
+import {
+	assertConforms,
+	assertRequestConforms,
+	type OpenApiDoc,
+} from "./conformance.ts";
 import { recordValidated } from "./conformance-coverage.ts";
 
 export const OPENAPI_DOC = JSON.parse(
@@ -28,6 +32,12 @@ export interface HarnessRequest {
 	/** Sent as `application/json` unless `headers` sets a content type. */
 	json?: unknown;
 	body?: BodyInit;
+	/**
+	 * A 2xx answer also checks the request against the document (S7 §16):
+	 * params and JSON body. Pass false only for input that is deliberately
+	 * outside the document.
+	 */
+	validateRequest?: boolean;
 }
 
 export interface HarnessResponse {
@@ -133,6 +143,20 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 				recordValidated(r.operationId, res.status);
 			}
 		}
+		if (
+			documented &&
+			res.status >= 200 &&
+			res.status < 300 &&
+			init.validateRequest !== false
+		) {
+			assertRequestConforms(OPENAPI_DOC, {
+				method,
+				path,
+				contentType: headers.get("content-type"),
+				json: sentJson(init, headers),
+				hasBody: body !== undefined,
+			});
+		}
 		const rid = res.headers.get("request-id");
 		if (rid === null || !REQUEST_ID_RE.test(rid)) {
 			throw new Error(`${where}: no valid Request-Id header (${rid})`);
@@ -181,6 +205,20 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 	}
 
 	return { deps, app, bearer: o.bearer, request };
+}
+
+/** The JSON body of a request: `json`, or a string body sent as JSON. */
+export function sentJson(init: HarnessRequest, headers: Headers): unknown {
+	if (init.json !== undefined) return init.json;
+	const type = headers.get("content-type") ?? "";
+	if (typeof init.body !== "string" || !/^application\/json\b/i.test(type)) {
+		return undefined;
+	}
+	try {
+		return JSON.parse(init.body);
+	} catch {
+		return undefined;
+	}
 }
 
 /** Lines of an NDJSON body; each must end with "\n". */

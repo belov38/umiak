@@ -640,6 +640,8 @@ export const ROUTES: Record<string, Route> = {
 		method: "PUT",
 		path: "/v1/sandboxes/{sandbox}/files/uploads/{upload}",
 		scope: "files:write",
+		// Moves the upload's offset on.
+		destructive: true,
 		resources: ["sandbox", "upload"],
 		request: (f) => ({
 			path: `${upl(f)}?offset=${f.uploadOffset}`,

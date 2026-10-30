@@ -16,8 +16,9 @@ import {
 } from "./helpers/harness.ts";
 import { ROUTE_LIST, ROUTES, type Route } from "./helpers/route-table.ts";
 import {
-	type Any,
 	buildFixture,
+	errorOf,
+	ok,
 	type Person,
 	personOf,
 	scopesWithout,
@@ -27,10 +28,28 @@ import {
 import { testSshCa } from "./helpers/ssh.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
-const err = (r: HarnessResponse): Any => (r.body as Any)?.error;
+/**
+ * Operations whose example request is refused past the guards by design;
+ * every other "gets past the guards" row must succeed (status < 400).
+ */
+const PAST_GUARDS_EXCEPTIONS: Record<string, { status: number; code: string }> =
+	{
+		// Without a WebSocket upgrade (app.request): the socket path is
+		// covered over a real server in security-idor and pty.test.
+		"ptys.connect": { status: 426, code: "upgrade_required" },
+		// The fixture's sandbox is ready: resume is for stopped ones.
+		"sandboxes.resume": { status: 409, code: "invalid_state" },
+	};
 
-/** Error codes of a refused credential or right. */
-const ACCESS_CODES = ["unauthorized", "forbidden", "team_forbidden"];
+/** The answer of a request that got past the guards. */
+function expectPastGuards(id: string, r: HarnessResponse): void {
+	const exception = PAST_GUARDS_EXCEPTIONS[id];
+	if (exception !== undefined) {
+		expect({ status: r.status, code: errorOf(r)?.code }, id).toEqual(exception);
+	} else {
+		expect(r.status, `${id}: ${r.text.slice(0, 300)}`).toBeLessThan(400);
+	}
+}
 
 describe("the route table", () => {
 	it("lists exactly the operations of openapi/v1.json, with their method and path", () => {
@@ -60,6 +79,17 @@ describe("the route table", () => {
 			else if (r.human) expect(security, id).toBe('[{"keycloak":[]}]');
 			else expect(security, id).toBe("null");
 		}
+	});
+
+	it("websocket entries are exactly the operations with x-sbx-websocket", () => {
+		for (const [id, r] of ROUTE_LIST) {
+			const op = OPENAPI_DOC.paths[r.path]?.[r.method.toLowerCase()] as Record<
+				string,
+				unknown
+			>;
+			expect(r.websocket === true, id).toBe("x-sbx-websocket" in op);
+		}
+		expect(ROUTE_LIST.filter(([, r]) => r.websocket).length).toBeGreaterThan(0);
 	});
 
 	it("names a resource for every path parameter", () => {
@@ -108,7 +138,11 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 
 	beforeAll(async () => {
 		db = await createTestDatabase({ max: 20 });
-		w = await apiWorld(db.pool);
+		// Room for every create and fork of the matrix on one node.
+		w = await apiWorld(db.pool, {
+			topology: { node: { ramCapMb: 10_000_000 } },
+			quota: { maxSavedSnapshots: 1000 },
+		});
 		deps = { sshCa: testSshCa() };
 		full = w.harness({ deps });
 		owner = await personOf(w, w.teamId, "owner", deps);
@@ -133,7 +167,7 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 			const res = await send(h, r.method, r.request(f));
 			expect(res.status).toBe(403);
 			if (r.method !== "HEAD") {
-				expect(err(res)).toMatchObject({
+				expect(errorOf(res)).toMatchObject({
 					code: "forbidden",
 					details: { requiredScope: r.scope },
 				});
@@ -146,10 +180,7 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 		async (_id, r) => {
 			const h = await withScopes([r.scope as Scope]);
 			const res = await send(h, r.method, r.request(await fixtureFor(r)));
-			expect(res.status, res.text).not.toBe(401);
-			if (res.status === 403) {
-				expect(ACCESS_CODES, res.text).not.toContain(err(res)?.code);
-			}
+			expectPastGuards(_id, res);
 		},
 	);
 
@@ -162,13 +193,12 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 				const without = await withScopes(scopesWithout(scope));
 				const res = await send(without, r.method, req);
 				expect(res.status, scope).toBe(403);
-				expect(err(res)).toMatchObject({
+				expect(errorOf(res)).toMatchObject({
 					code: "forbidden",
 					details: { requiredScope: scope },
 				});
 				const h = await withScopes([r.scope as Scope, scope]);
-				const okRes = await send(h, r.method, req);
-				expect(ACCESS_CODES, okRes.text).not.toContain(err(okRes)?.code);
+				expectPastGuards(_id, await send(h, r.method, req));
 			}
 		},
 	);
@@ -180,14 +210,13 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 		async (_id, r) => {
 			const res = await send(full, r.method, r.request(f));
 			expect(res.status).toBe(403);
-			expect(err(res)).toMatchObject({
+			expect(errorOf(res)).toMatchObject({
 				code: "forbidden",
 				details: { reason: "user_required" },
 			});
 			const fx = await fixtureFor(r);
 			const p = await send(owner.h, r.method, r.request(fx), owner.headers);
-			expect(ACCESS_CODES, p.text).not.toContain(err(p)?.code);
-			expect(p.status, p.text).toBeLessThan(400);
+			expectPastGuards(_id, p);
 		},
 	);
 
@@ -198,13 +227,13 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 		async (_id, r) => {
 			const res = await send(member.h, r.method, r.request(f), member.headers);
 			expect(res.status).toBe(403);
-			expect(err(res)).toMatchObject({
+			expect(errorOf(res)).toMatchObject({
 				code: "forbidden",
 				details: { reason: "role" },
 			});
 			const fx = await fixtureFor(r);
 			const p = await send(owner.h, r.method, r.request(fx), owner.headers);
-			expect(p.status, p.text).toBeLessThan(400);
+			expectPastGuards(_id, p);
 		},
 	);
 
@@ -216,12 +245,19 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 		"%s: a member of the team gets past the guards",
 		async (_id, r) => {
 			if (r.websocket) return;
-			const fx = await fixtureFor(r);
-			const res = await send(member.h, r.method, r.request(fx), member.headers);
-			expect(res.status, res.text).not.toBe(401);
-			if (res.status === 403) {
-				expect(ACCESS_CODES, res.text).not.toContain(err(res)?.code);
+			let fx = await fixtureFor(r);
+			if (r.resources.includes("sshKey")) {
+				// SSH keys belong to a person: the member removes its own.
+				const own = await send(
+					member.h,
+					"POST",
+					(ROUTES["sshKeys.create"] as Route).request(fx),
+					member.headers,
+				);
+				fx = { ...fx, sshKey: ok(own).id };
 			}
+			const res = await send(member.h, r.method, r.request(fx), member.headers);
+			expectPastGuards(_id, res);
 		},
 	);
 
@@ -252,7 +288,7 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 		const r = ROUTES["apiKeys.revokeSelf"] as Route;
 		const res = await send(owner.h, r.method, r.request(f), owner.headers);
 		expect(res.status).toBe(403);
-		expect(err(res)).toMatchObject({
+		expect(errorOf(res)).toMatchObject({
 			code: "forbidden",
 			details: { reason: "api_key_required" },
 		});

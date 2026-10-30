@@ -9,7 +9,7 @@
 // - runtime.operations.request/progress, runtime.idempotency_keys,
 //   runtime.sandbox_events and pgboss.job.data contain none of them;
 // - no other table holds a secret value in clear text;
-// - no response carries a secret or secret file value, a bearer, or a key
+// - no response (headers and body) carries a secret or secret file value, a bearer, or a key
 //   secret or port token other than in the one answer that issues it; env
 //   values only in the answers that show env (GET/PUT/PATCH /env and
 //   environments).
@@ -31,7 +31,7 @@ import {
 	type Harness,
 	type HarnessResponse,
 } from "./helpers/harness.ts";
-import { type Any, type Person, personOf } from "./helpers/security.ts";
+import { type Any, ok, type Person, personOf } from "./helpers/security.ts";
 import { testSshCa } from "./helpers/ssh.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
@@ -91,21 +91,26 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 	const seen: Seen[] = [];
 	const GW = `gw-${RUN}-0123456789abcdef`;
 
-	/** Sends through `hh`, keeping the answer for the response checks. */
+	/** The answer as searched: status, every header, then the body. */
+	const serialized = (r: HarnessResponse) =>
+		[
+			String(r.status),
+			...[...r.headers].map(([k, v]) => `${k}: ${v}`),
+			"",
+			r.text,
+		].join("\n");
+
+	/** Sends through `hh`, keeping the answer (headers and body) for the response checks. */
 	async function call(
 		hh: Harness,
 		method: string,
 		path: string,
 		init: { json?: unknown; headers?: Record<string, string> } = {},
-	): Promise<HarnessResponse> {
+	): Promise<HarnessResponse & { serialized: string }> {
 		const r = await hh.request(method, path, init);
-		seen.push({
-			label: `${method} ${path}`,
-			method,
-			status: r.status,
-			text: r.text,
-		});
-		return r;
+		const text = serialized(r);
+		seen.push({ label: `${method} ${path}`, method, status: r.status, text });
+		return { ...r, serialized: text };
 	}
 
 	/** The worker's end of every active operation of a sandbox. */
@@ -115,11 +120,6 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 			 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
 			[sandboxId],
 		);
-
-	const ok = (r: HarnessResponse): Any => {
-		if (r.status >= 300) throw new Error(`${r.status} ${r.text}`);
-		return r.body;
-	};
 
 	beforeAll(async () => {
 		db = await createTestDatabase({ max: 20 });
@@ -322,11 +322,11 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 				headers,
 			});
 			const k = ok(r);
-			markers.issued.push({ value: k.secret, answer: r.text });
+			markers.issued.push({ value: k.secret, answer: r.serialized });
 			const rot = await call(hh, "POST", `/v1/api-keys/${k.apiKey.id}/rotate`, {
 				headers,
 			});
-			markers.issued.push({ value: ok(rot).secret, answer: rot.text });
+			markers.issued.push({ value: ok(rot).secret, answer: rot.serialized });
 			return ok(rot).secret as string;
 		};
 		const ownerKey = await issue(owner.h, owner.headers);
@@ -360,9 +360,12 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 		const port = await call(h, "PUT", `${sb}/ports/3000`, {
 			json: { access: "token" },
 		});
-		markers.issued.push({ value: ok(port).token, answer: port.text });
+		markers.issued.push({ value: ok(port).token, answer: port.serialized });
 		const rotated = await call(h, "POST", `${sb}/ports/3000/rotate-token`);
-		markers.issued.push({ value: ok(rotated).token, answer: rotated.text });
+		markers.issued.push({
+			value: ok(rotated).token,
+			answer: rotated.serialized,
+		});
 		ok(await call(h, "GET", `${sb}/ports`));
 
 		// port SSO: the browser gets a code, the gateway exchanges it
@@ -381,7 +384,7 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 		) as string;
 		markers.issued.push({
 			value: code,
-			answer: auth.headers.get("location") ?? "",
+			answer: auth.serialized,
 		});
 		const gw = createHarness({
 			listener: "internal",
