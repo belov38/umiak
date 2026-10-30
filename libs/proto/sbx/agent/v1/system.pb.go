@@ -1363,11 +1363,14 @@ func (x *ClaimRequest) GetAuthorizedKeys() []string {
 
 // ClaimResponse returns readiness after the claim is applied.
 type ClaimResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Readiness     []*Phase               `protobuf:"bytes,1,rep,name=readiness,proto3" json:"readiness,omitempty"`
-	Ready         bool                   `protobuf:"varint,2,opt,name=ready,proto3" json:"ready,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Readiness []*Phase               `protobuf:"bytes,1,rep,name=readiness,proto3" json:"readiness,omitempty"`
+	Ready     bool                   `protobuf:"varint,2,opt,name=ready,proto3" json:"ready,omitempty"`
+	// HostnameApplied tells whether the agent set the OS hostname from the
+	// claim. Unset is treated as true by callers that predate the field.
+	HostnameApplied *bool `protobuf:"varint,3,opt,name=hostname_applied,json=hostnameApplied,proto3,oneof" json:"hostname_applied,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ClaimResponse) Reset() {
@@ -1410,6 +1413,13 @@ func (x *ClaimResponse) GetReadiness() []*Phase {
 func (x *ClaimResponse) GetReady() bool {
 	if x != nil {
 		return x.Ready
+	}
+	return false
+}
+
+func (x *ClaimResponse) GetHostnameApplied() bool {
+	if x != nil && x.HostnameApplied != nil {
+		return *x.HostnameApplied
 	}
 	return false
 }
@@ -1737,11 +1747,13 @@ func (*PrepareStopRequest) Descriptor() ([]byte, []int) {
 	return file_sbx_agent_v1_system_proto_rawDescGZIP(), []int{24}
 }
 
-// PrepareStopResponse is empty.
+// PrepareStopResponse reports the outcome of the secret wipe.
 type PrepareStopResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SecretFilesWiped is true when no secret file remains on disk.
+	SecretFilesWiped bool `protobuf:"varint,1,opt,name=secret_files_wiped,json=secretFilesWiped,proto3" json:"secret_files_wiped,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *PrepareStopResponse) Reset() {
@@ -1774,14 +1786,25 @@ func (*PrepareStopResponse) Descriptor() ([]byte, []int) {
 	return file_sbx_agent_v1_system_proto_rawDescGZIP(), []int{25}
 }
 
+func (x *PrepareStopResponse) GetSecretFilesWiped() bool {
+	if x != nil {
+		return x.SecretFilesWiped
+	}
+	return false
+}
+
 // QuiesceRequest starts a lease; docker and fs select what to freeze.
 type QuiesceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	LeaseMs       *uint32                `protobuf:"varint,1,opt,name=lease_ms,json=leaseMs,proto3,oneof" json:"lease_ms,omitempty"`
-	Docker        *bool                  `protobuf:"varint,2,opt,name=docker,proto3,oneof" json:"docker,omitempty"`
-	Fs            *bool                  `protobuf:"varint,3,opt,name=fs,proto3,oneof" json:"fs,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	LeaseMs *uint32                `protobuf:"varint,1,opt,name=lease_ms,json=leaseMs,proto3,oneof" json:"lease_ms,omitempty"`
+	Docker  *bool                  `protobuf:"varint,2,opt,name=docker,proto3,oneof" json:"docker,omitempty"`
+	Fs      *bool                  `protobuf:"varint,3,opt,name=fs,proto3,oneof" json:"fs,omitempty"`
+	// WipeSecretFiles overwrites and deletes the secret files as part of the
+	// freeze (Windows). If a file is held open the lease is rolled back with
+	// secrets_in_use.
+	WipeSecretFiles *bool `protobuf:"varint,4,opt,name=wipe_secret_files,json=wipeSecretFiles,proto3,oneof" json:"wipe_secret_files,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *QuiesceRequest) Reset() {
@@ -1831,6 +1854,13 @@ func (x *QuiesceRequest) GetDocker() bool {
 func (x *QuiesceRequest) GetFs() bool {
 	if x != nil && x.Fs != nil {
 		return *x.Fs
+	}
+	return false
+}
+
+func (x *QuiesceRequest) GetWipeSecretFiles() bool {
+	if x != nil && x.WipeSecretFiles != nil {
+		return *x.WipeSecretFiles
 	}
 	return false
 }
@@ -2246,10 +2276,12 @@ const file_sbx_agent_v1_system_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a<\n" +
 	"\x0eSecretEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"X\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9d\x01\n" +
 	"\rClaimResponse\x121\n" +
 	"\treadiness\x18\x01 \x03(\v2\x13.sbx.agent.v1.PhaseR\treadiness\x12\x14\n" +
-	"\x05ready\x18\x02 \x01(\bR\x05ready\"\x85\x01\n" +
+	"\x05ready\x18\x02 \x01(\bR\x05ready\x12.\n" +
+	"\x10hostname_applied\x18\x03 \x01(\bH\x00R\x0fhostnameApplied\x88\x01\x01B\x13\n" +
+	"\x11_hostname_applied\"\x85\x01\n" +
 	"\x10UpdateEnvRequest\x129\n" +
 	"\x03env\x18\x01 \x03(\v2'.sbx.agent.v1.UpdateEnvRequest.EnvEntryR\x03env\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
@@ -2271,15 +2303,18 @@ const file_sbx_agent_v1_system_proto_rawDesc = "" +
 	"\x12UpdateSshCaRequest\x12\x12\n" +
 	"\x04keys\x18\x01 \x03(\tR\x04keys\"\x15\n" +
 	"\x13UpdateSshCaResponse\"\x14\n" +
-	"\x12PrepareStopRequest\"\x15\n" +
-	"\x13PrepareStopResponse\"\x81\x01\n" +
+	"\x12PrepareStopRequest\"C\n" +
+	"\x13PrepareStopResponse\x12,\n" +
+	"\x12secret_files_wiped\x18\x01 \x01(\bR\x10secretFilesWiped\"\xc8\x01\n" +
 	"\x0eQuiesceRequest\x12\x1e\n" +
 	"\blease_ms\x18\x01 \x01(\rH\x00R\aleaseMs\x88\x01\x01\x12\x1b\n" +
 	"\x06docker\x18\x02 \x01(\bH\x01R\x06docker\x88\x01\x01\x12\x13\n" +
-	"\x02fs\x18\x03 \x01(\bH\x02R\x02fs\x88\x01\x01B\v\n" +
+	"\x02fs\x18\x03 \x01(\bH\x02R\x02fs\x88\x01\x01\x12/\n" +
+	"\x11wipe_secret_files\x18\x04 \x01(\bH\x03R\x0fwipeSecretFiles\x88\x01\x01B\v\n" +
 	"\t_lease_msB\t\n" +
 	"\a_dockerB\x05\n" +
-	"\x03_fs\"\xb6\x01\n" +
+	"\x03_fsB\x14\n" +
+	"\x12_wipe_secret_files\"\xb6\x01\n" +
 	"\x0fQuiesceResponse\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x126\n" +
 	"\bdeadline\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\x12+\n" +
@@ -2439,6 +2474,7 @@ func file_sbx_agent_v1_system_proto_init() {
 		return
 	}
 	file_sbx_agent_v1_common_proto_init()
+	file_sbx_agent_v1_system_proto_msgTypes[17].OneofWrappers = []any{}
 	file_sbx_agent_v1_system_proto_msgTypes[26].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

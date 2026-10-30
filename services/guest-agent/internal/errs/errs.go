@@ -71,6 +71,28 @@ const (
 	// filesystem frozen by someone else.
 	StoreBusy = "store_busy"
 
+	// UnsupportedSignal (invalid_argument): the platform cannot deliver the
+	// requested signal to a command (Windows).
+	UnsupportedSignal = "unsupported_signal"
+	// UnsafeBatchArgs (invalid_argument): an argv for a .cmd or .bat file
+	// cannot be passed to cmd.exe without changing its meaning.
+	UnsafeBatchArgs = "unsafe_batch_args"
+	// FileInUse (failed_precondition): the file is held open by another
+	// process and cannot be replaced or deleted (Windows).
+	FileInUse = "file_in_use"
+	// SecretsInUse (failed_precondition): a secret file is held open, so
+	// Quiesce with wipe_secret_files rolled back.
+	SecretsInUse = "secrets_in_use"
+	// SecretsPending (failed_precondition): the secret files are not
+	// restored yet, for example after an agent restart during a lease.
+	SecretsPending = "secrets_pending"
+	// FsFreezeUnsupported (failed_precondition): Quiesce with fs=true on a
+	// platform without a filesystem freeze (Windows).
+	FsFreezeUnsupported = "fs_freeze_unsupported"
+	// DesktopNotReady (failed_precondition): CommandSpec.desktop is set but
+	// the agent has no interactive desktop session.
+	DesktopNotReady = "desktop_not_ready"
+
 	// PermissionDenied and Internal have no entry in the spec list; they keep
 	// the JSON body of /files uniform.
 	PermissionDenied = "permission_denied"

@@ -283,6 +283,26 @@ func TestClaimAppliesAll(t *testing.T) {
 	}
 }
 
+func TestClaimReportsHostnameApplied(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	resp, err := h.m.Claim(ctx, fullRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.HostnameApplied == nil || !resp.GetHostnameApplied() {
+		t.Errorf("hostname_applied = %v, want true", resp.HostnameApplied)
+	}
+	// A replay is answered from the stored response.
+	replay, err := h.m.Claim(ctx, fullRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.HostnameApplied == nil || !replay.GetHostnameApplied() {
+		t.Errorf("replayed hostname_applied = %v, want true", replay.HostnameApplied)
+	}
+}
+
 func TestClaimReplaySameRequest(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

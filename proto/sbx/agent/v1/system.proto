@@ -205,6 +205,9 @@ message ClaimRequest {
 message ClaimResponse {
   repeated Phase readiness = 1;
   bool ready = 2;
+  // HostnameApplied tells whether the agent set the OS hostname from the
+  // claim. Unset is treated as true by callers that predate the field.
+  optional bool hostname_applied = 3;
 }
 
 // UpdateEnvRequest replaces the environment.
@@ -241,14 +244,21 @@ message UpdateSshCaResponse {}
 // PrepareStopRequest is empty.
 message PrepareStopRequest {}
 
-// PrepareStopResponse is empty.
-message PrepareStopResponse {}
+// PrepareStopResponse reports the outcome of the secret wipe.
+message PrepareStopResponse {
+  // SecretFilesWiped is true when no secret file remains on disk.
+  bool secret_files_wiped = 1;
+}
 
 // QuiesceRequest starts a lease; docker and fs select what to freeze.
 message QuiesceRequest {
   optional uint32 lease_ms = 1;
   optional bool docker = 2;
   optional bool fs = 3;
+  // WipeSecretFiles overwrites and deletes the secret files as part of the
+  // freeze (Windows). If a file is held open the lease is rolled back with
+  // secrets_in_use.
+  optional bool wipe_secret_files = 4;
 }
 
 // QuiesceResponse describes the lease and what was frozen.

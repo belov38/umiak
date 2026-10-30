@@ -533,10 +533,13 @@ type CommandSpec struct {
 	// Pty allocates a terminal; stdout and stderr are merged into STREAM_PTY.
 	Pty *Pty `protobuf:"bytes,7,opt,name=pty,proto3" json:"pty,omitempty"`
 	// Stdin keeps stdin open for SendInput.
-	Stdin         bool              `protobuf:"varint,8,opt,name=stdin,proto3" json:"stdin,omitempty"`
-	TimeoutMs     uint64            `protobuf:"varint,9,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
-	OnExit        OnExit            `protobuf:"varint,10,opt,name=on_exit,json=onExit,proto3,enum=sbx.agent.v1.OnExit" json:"on_exit,omitempty"`
-	Tags          map[string]string `protobuf:"bytes,11,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Stdin     bool              `protobuf:"varint,8,opt,name=stdin,proto3" json:"stdin,omitempty"`
+	TimeoutMs uint64            `protobuf:"varint,9,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	OnExit    OnExit            `protobuf:"varint,10,opt,name=on_exit,json=onExit,proto3,enum=sbx.agent.v1.OnExit" json:"on_exit,omitempty"`
+	Tags      map[string]string `protobuf:"bytes,11,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Desktop runs the command in the interactive desktop session (Windows).
+	// Agents without a desktop helper answer failed_precondition desktop_not_ready.
+	Desktop       bool `protobuf:"varint,12,opt,name=desktop,proto3" json:"desktop,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -657,6 +660,13 @@ func (x *CommandSpec) GetTags() map[string]string {
 		return x.Tags
 	}
 	return nil
+}
+
+func (x *CommandSpec) GetDesktop() bool {
+	if x != nil {
+		return x.Desktop
+	}
+	return false
 }
 
 type isCommandSpec_Cmd interface {
@@ -1251,7 +1261,7 @@ const file_sbx_agent_v1_common_proto_rawDesc = "" +
 	"\x03Pty\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\rR\x04rows\x12\x12\n" +
-	"\x04term\x18\x03 \x01(\tR\x04term\"\x8a\x04\n" +
+	"\x04term\x18\x03 \x01(\tR\x04term\"\xa4\x04\n" +
 	"\vCommandSpec\x12(\n" +
 	"\x04argv\x18\x01 \x01(\v2\x12.sbx.agent.v1.ArgvH\x00R\x04argv\x12\x16\n" +
 	"\x05shell\x18\x02 \x01(\tH\x00R\x05shell\x12\x19\n" +
@@ -1265,7 +1275,8 @@ const file_sbx_agent_v1_common_proto_rawDesc = "" +
 	"timeout_ms\x18\t \x01(\x04R\ttimeoutMs\x12-\n" +
 	"\aon_exit\x18\n" +
 	" \x01(\x0e2\x14.sbx.agent.v1.OnExitR\x06onExit\x127\n" +
-	"\x04tags\x18\v \x03(\v2#.sbx.agent.v1.CommandSpec.TagsEntryR\x04tags\x1a6\n" +
+	"\x04tags\x18\v \x03(\v2#.sbx.agent.v1.CommandSpec.TagsEntryR\x04tags\x12\x18\n" +
+	"\adesktop\x18\f \x01(\bR\adesktop\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a7\n" +

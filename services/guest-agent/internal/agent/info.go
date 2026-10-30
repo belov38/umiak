@@ -22,6 +22,10 @@ import (
 // agentPackage is the proto package of the agent API.
 const agentPackage = "sbx.agent.v1"
 
+// CapQuiesceWipeSecrets is announced on Windows only: Quiesce accepts
+// wipe_secret_files and PrepareStop reports secret_files_wiped.
+const CapQuiesceWipeSecrets = "system.quiesce.wipe_secrets.v1"
+
 // capabilities are announced in Control/Info (spec section 13, S2 10.2).
 var capabilities = []string{
 	"process.v1",

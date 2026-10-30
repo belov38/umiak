@@ -733,6 +733,8 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 
 Коды `ErrorDetail.code` агента: `already_exists`, `command_not_found`, `command_exited`, `too_many_commands`, `start_failed`, `user_not_found`, `path_not_found`, `is_directory`, `not_directory`, `no_space`, `cross_device`, `upload_offset_mismatch`, `checksum_mismatch`, `identity_not_ready`, `already_claimed`, `not_claimed`, `quiesced`, `already_quiesced`, `frozen_by_other`, `signature_invalid`, `update_in_progress`, `shim_outdated`.
 
+Добавлены в S9 (Windows): `unsupported_signal`, `unsafe_batch_args`, `file_in_use`, `secrets_in_use`, `secrets_pending`, `fs_freeze_unsupported`, `desktop_not_ready`. Поля proto S9 (только добавления): `CommandSpec.desktop`, `ClaimResponse.hostname_applied` (Linux всегда `true`), `QuiesceRequest.wipe_secret_files`, `PrepareStopResponse.secret_files_wiped` (Linux `true` после успешной очистки). Capability `system.quiesce.wipe_secrets.v1` объявляет только Windows-агент.
+
 Сгенерированный код кладётся как в реализации S2: Go — в `libs/proto` (`github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1`), TS — в `packages/proto`.
 
 ## 20. Требования к шаблону (S5)

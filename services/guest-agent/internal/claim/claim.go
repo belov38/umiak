@@ -271,8 +271,7 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 				return nil, err
 			}
 			m.afterClaim(ctx, false)
-			phases, ready := m.ready.Snapshot()
-			return &agentv1.ClaimResponse{Readiness: phases, Ready: ready}, nil
+			return m.currentResponse(), nil
 		default:
 			return nil, errs.Newf(connect.CodeFailedPrecondition, errs.AlreadyClaimed,
 				"machine is already claimed by sandbox %q", cur.SandboxID)
@@ -312,8 +311,7 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 	m.opts.Emit.Emit(events.TypeClaimApplied, &agentv1.ClaimApplied{SandboxId: req.GetSandboxId()})
 	m.log.Info("claim applied", "sandbox_id", req.GetSandboxId())
 
-	phases, ready := m.ready.Snapshot()
-	resp := &agentv1.ClaimResponse{Readiness: phases, Ready: ready}
+	resp := m.currentResponse()
 	// Keep the response for replays. The claim itself is durable already; a
 	// failure here only makes a replay answer with the current readiness.
 	if b, err := proto.Marshal(resp); err == nil {
@@ -354,11 +352,19 @@ func (m *Manager) storedResponse(rec *store.Claim) *agentv1.ClaimResponse {
 	if len(rec.Response) > 0 {
 		var resp agentv1.ClaimResponse
 		if err := proto.Unmarshal(rec.Response, &resp); err == nil {
+			// Responses stored before the field existed lack it.
+			resp.HostnameApplied = proto.Bool(true)
 			return &resp
 		}
 	}
+	return m.currentResponse()
+}
+
+// currentResponse reports the current readiness. This agent always applies
+// the claim hostname.
+func (m *Manager) currentResponse() *agentv1.ClaimResponse {
 	phases, ready := m.ready.Snapshot()
-	return &agentv1.ClaimResponse{Readiness: phases, Ready: ready}
+	return &agentv1.ClaimResponse{Readiness: phases, Ready: ready, HostnameApplied: proto.Bool(true)}
 }
 
 // UpdateEnv replaces the claim env (spec 8.1). New commands see it; running

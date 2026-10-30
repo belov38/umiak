@@ -254,7 +254,8 @@ func (s *Service) UpdateSshCa(ctx context.Context, req *connect.Request[agentv1.
 	return connect.NewResponse(res), nil
 }
 
-// PrepareStop implements agentv1connect.SystemHandler.
+// PrepareStop implements agentv1connect.SystemHandler. A nil error from the
+// claim manager means the secrets were wiped.
 func (s *Service) PrepareStop(ctx context.Context, _ *connect.Request[agentv1.PrepareStopRequest]) (*connect.Response[agentv1.PrepareStopResponse], error) {
 	if s.opts.Claim == nil {
 		return nil, unimplemented("claim")
@@ -262,7 +263,7 @@ func (s *Service) PrepareStop(ctx context.Context, _ *connect.Request[agentv1.Pr
 	if err := s.opts.Claim.PrepareStop(ctx); err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&agentv1.PrepareStopResponse{}), nil
+	return connect.NewResponse(&agentv1.PrepareStopResponse{SecretFilesWiped: true}), nil
 }
 
 // Quiesce implements agentv1connect.SystemHandler. Unset fields take the

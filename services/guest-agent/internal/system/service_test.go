@@ -302,6 +302,18 @@ func TestInfoFields(t *testing.T) {
 	}
 }
 
+func TestPrepareStopReportsWiped(t *testing.T) {
+	ce := newClaimEnv(t)
+	client := serve(t, Options{Info: staticInfo{}, Ready: ce.tr, Claim: ce.m, HandlerOptions: reqcache.Interceptors(ce.st)})
+	res, err := client.PrepareStop(t.Context(), connect.NewRequest(&agentv1.PrepareStopRequest{}))
+	if err != nil {
+		t.Fatalf("PrepareStop: %v", err)
+	}
+	if !res.Msg.GetSecretFilesWiped() {
+		t.Fatalf("PrepareStop = %v, want secret_files_wiped", res.Msg)
+	}
+}
+
 func TestInfoWithoutOptionalSources(t *testing.T) {
 	tr := readiness.New(nil, nil, nil)
 	client := serve(t, Options{Info: staticInfo{Version: "1.0.0"}, Ready: tr})
