@@ -66,18 +66,19 @@ const LOG_DIR = "/var/log/sbx-build";
 const SEED_DIR = "/mnt/seed";
 const BOOT_ID_FILE = "/proc/sys/kernel/random/boot_id";
 const STEP_NAME_RE = /^[a-z0-9-]+$/;
-const TAIL_LINES = 200;
+export const TAIL_LINES = 200;
 /** Per file-read call; the Proxmox limit is 16 MiB. */
-const READ_CHUNK = 1024 * 1024;
-const DEFAULT_STEP_TIMEOUT_MS = 60 * 60_000;
-const DEFAULT_POLL_MS = 2000;
+export const READ_CHUNK = 1024 * 1024;
+export const DEFAULT_STEP_TIMEOUT_MS = 60 * 60_000;
+export const DEFAULT_POLL_MS = 2000;
 const START_CHECK_MS = 10_000;
-const DEFAULT_REBOOT_TIMEOUT_MS = 10 * 60_000;
+export const DEFAULT_REBOOT_TIMEOUT_MS = 10 * 60_000;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** File-read errors for a path that does not exist (the guest agent reports the OS error). */
-const NO_SUCH_FILE_RE = /no such file|ENOENT/i;
+const NO_SUCH_FILE_RE =
+	/no such file|ENOENT|cannot find the (file|path)|\(error: [23]\)/i;
 
 export function pveGuestIo(
 	api: PveClient,
@@ -137,7 +138,7 @@ function isNetworkError(err: unknown): boolean {
  * Errors that only mean the guest agent or the connection did not answer; an idempotent call can
  * be repeated.
  */
-function isTransient(err: unknown): boolean {
+export function isTransient(err: unknown): boolean {
 	if (err instanceof QgaTimeoutError || err instanceof QgaExecStatusLostError)
 		return true;
 	if (err instanceof PveApiError)
@@ -155,7 +156,7 @@ const CLIENT_TIMEOUT_RE = /^(GET|POST|PUT|DELETE) \S+: timeout$/;
  * Transient for idempotent calls only (polls, checks): also a client-side timeout and a 502/504
  * from a proxy, where the request may have been executed. Never used for the systemd-run start.
  */
-function isTransientPoll(err: unknown): boolean {
+export function isTransientPoll(err: unknown): boolean {
 	if (isTransient(err)) return true;
 	if (err instanceof PveApiError)
 		return err.status === 502 || err.status === 504;
@@ -163,7 +164,9 @@ function isTransientPoll(err: unknown): boolean {
 }
 
 /** Reports each distinct transient error message once through `log`. */
-function transientNotes(log: (text: string) => void): (err: unknown) => void {
+export function transientNotes(
+	log: (text: string) => void,
+): (err: unknown) => void {
 	const seen = new Set<string>();
 	return (err) => {
 		const msg = errorText(err);
@@ -174,7 +177,7 @@ function transientNotes(log: (text: string) => void): (err: unknown) => void {
 }
 
 /** Repeats an idempotent call on transient errors until `deadline`, then rethrows the last one. */
-async function retryTransient<T>(
+export async function retryTransient<T>(
 	fn: () => Promise<T>,
 	deadline: number,
 	delayMs: number,
@@ -191,7 +194,7 @@ async function retryTransient<T>(
 	}
 }
 
-function errorText(err: unknown): string {
+export function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
@@ -205,7 +208,7 @@ function parseShow(stdout: string): Record<string, string> {
 }
 
 /** Keeps the last `max` complete lines of a text stream. */
-class Tail {
+export class Tail {
 	readonly #max: number;
 	#lines: string[] = [];
 	#partial = "";
@@ -229,6 +232,51 @@ class Tail {
 	lines(): string[] {
 		const all = this.#partial ? [...this.#lines, this.#partial] : this.#lines;
 		return all.slice(-this.#max);
+	}
+}
+
+/**
+ * Follows a growing guest log by byte offset: decodes UTF-8 across read boundaries, passes the
+ * text on and keeps the last lines for error reports.
+ */
+export class LogFollower {
+	readonly #read: (offset: number, count: number) => Promise<Buffer>;
+	readonly #onLog: (chunk: string) => void;
+	readonly #decoder = new TextDecoder("utf-8");
+	readonly #tail = new Tail(TAIL_LINES);
+	#offset = 0;
+
+	constructor(
+		read: (offset: number, count: number) => Promise<Buffer>,
+		onLog: (chunk: string) => void,
+	) {
+		this.#read = read;
+		this.#onLog = onLog;
+	}
+
+	#feed(text: string): void {
+		if (!text) return;
+		this.#tail.push(text);
+		this.#onLog(text);
+	}
+
+	/** While the writer runs a short read ends the poll; once it stopped, read until an empty read. */
+	async drain(untilEmpty: boolean): Promise<void> {
+		for (;;) {
+			const buf = await this.#read(this.#offset, READ_CHUNK);
+			this.#offset += buf.length;
+			this.#feed(this.#decoder.decode(buf, { stream: true }));
+			if (buf.length === 0 || (!untilEmpty && buf.length < READ_CHUNK)) return;
+		}
+	}
+
+	/** Emits a trailing incomplete UTF-8 sequence, if any. */
+	flush(): void {
+		this.#feed(this.#decoder.decode());
+	}
+
+	lines(): string[] {
+		return this.#tail.lines();
 	}
 }
 
@@ -318,23 +366,10 @@ export async function runStep(
 			});
 	}
 
-	const decoder = new TextDecoder("utf-8");
-	const tail = new Tail(TAIL_LINES);
-	let offset = 0;
-	const feed = (text: string) => {
-		if (!text) return;
-		tail.push(text);
-		o.log(text);
-	};
-	// While the unit runs a short read ends the poll; after it stopped, read until an empty read.
-	const drain = async (untilEmpty: boolean) => {
-		for (;;) {
-			const buf = await io.readFile(logPath, offset, READ_CHUNK);
-			offset += buf.length;
-			feed(decoder.decode(buf, { stream: true }));
-			if (buf.length === 0 || (!untilEmpty && buf.length < READ_CHUNK)) return;
-		}
-	};
+	const follower = new LogFollower(
+		(offset, count) => io.readFile(logPath, offset, count),
+		o.log,
+	);
 
 	// One poll: state first, then the log, so a step seen as finished has its whole log drained.
 	const poll = async (): Promise<string | undefined> => {
@@ -348,7 +383,7 @@ export async function runStep(
 		const state = parseShow(show.stdout).ActiveState;
 		// A collected unit reads as inactive.
 		const finished = state === "inactive" || state === "failed";
-		await drain(finished);
+		await follower.drain(finished);
 		if (!finished) return undefined;
 		return (await io.readFile(rcPath, 0, 64)).toString("utf8");
 	};
@@ -365,19 +400,19 @@ export async function runStep(
 		}
 		if (rc !== undefined) break;
 		if (Date.now() >= deadline) {
-			feed(decoder.decode());
-			throw new StepTimeoutError(name, timeoutMs, tail.lines(), lastError);
+			follower.flush();
+			throw new StepTimeoutError(name, timeoutMs, follower.lines(), lastError);
 		}
 		await sleep(pollMs);
 	}
-	feed(decoder.decode());
+	follower.flush();
 
 	const text = rc.trim();
 	if (text === "")
 		throw new StepFailedError(
 			name,
 			-1,
-			tail.lines(),
+			follower.lines(),
 			`unit finished but ${rcPath} is missing or empty`,
 		);
 	// A signal death leaves a name such as TERM instead of a number.
@@ -385,13 +420,13 @@ export async function runStep(
 		throw new StepFailedError(
 			name,
 			-1,
-			tail.lines(),
+			follower.lines(),
 			`unit ended without an exit status (EXIT_STATUS=${text})`,
 		);
 	const exitStatus = Number(text);
 	if (exitStatus !== 0)
-		throw new StepFailedError(name, exitStatus, tail.lines());
-	return { exitStatus, tail: tail.lines() };
+		throw new StepFailedError(name, exitStatus, follower.lines());
+	return { exitStatus, tail: follower.lines() };
 }
 
 /**
