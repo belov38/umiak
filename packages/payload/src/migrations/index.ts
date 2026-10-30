@@ -1,6 +1,6 @@
-// Migrations of the payload schema in order. Payload's writeMigrationIndex
-// emits imports without extensions; under Node type stripping they need .ts,
-// so this file is kept by hand: add each new migration here.
+// Migrations of the payload schema in order. Written by
+// src/create-migration.ts (Payload's own index has imports without the .ts
+// extension that Node type stripping needs).
 import type { MigrateDownArgs, MigrateUpArgs } from "@payloadcms/db-postgres";
 import * as m20261030_164255_initial from "./20261030_164255_initial.ts";
 

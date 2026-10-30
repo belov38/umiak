@@ -40,18 +40,21 @@ components are referenced by import-map path strings from `apps/web`.
   `payload.db.createMigration` without a database (diff against the latest
   `.json` snapshot), then rewrites the generated type imports and `index.ts`
   for Node type stripping (Payload writes imports without `.ts`). Nothing
-  changed → no file. The `payload migrate:create` CLI is not used: it loads
-  the config through its own loader, and there is no `payload.config.ts` in
-  this package.
+  changed → no file. If Payload's import line is not the expected one, it
+  exits 1 and names the file to fix by hand. The `payload migrate:create`
+  CLI is not used: it loads the config through its own loader, and there is
+  no `payload.config.ts` in this package.
 - Drift: `test/schema.test.ts` runs `createMigration({skipEmpty: true})` on a
   copy of `src/migrations`; any schema change without a migration fails it.
 - `src/migrations/index.ts` lists the migrations; commit the `.ts` and the
   `.json` snapshot of every migration.
 
 The initial migration creates the schema and tables (generated), seeds
-`platform-defaults` (S6/S7/S8 defaults), template `linux`, size `2gb`, pool
-target `linux/2gb = 1`, and copies `identity.teams/users/memberships/api_keys/
+`platform-defaults` (S6/S7/S8 defaults), template `linux` and size `2gb`, and
+copies `identity.teams/users/memberships/api_keys/
 ssh_keys` with the same UUIDs when `identity.users` exists (plan decision 1).
+No pool target is seeded (deviation from S8 §12, controller ruling): warm
+pools are not in the MVP, as in `deploy/compose/config/sbx.yaml` (`pools: []`).
 Copy rules: memberships get new ids; a user with an `idp_subject` gets
 `lastLoginAt = createdAt` (so it is not a stub); `personalTeam` is the user's
 personal team where they are `owner`; `createdBy` is set for personal teams
@@ -77,9 +80,11 @@ only; `rotated_at` is copied when 0303 is applied.
   keys (Payload has no per-field `onDelete`). Deleting a team that still has
   memberships, team notices or API keys fails in Postgres: the team delete
   hook (S8 §6.4) has to remove or reassign those rows first.
-- `pool-targets` is unique on (`template`, `size`, `providerId`); Postgres
-  treats null `providerId` values as distinct, so two targets without a
-  provider are not rejected by the index.
+- `pool-targets` is unique on (`template`, `size`, `providerId`) with
+  `NULLS NOT DISTINCT` (Postgres 18), so a second target without a provider
+  for the same template and size is rejected. Payload cannot express it: the
+  clause is a hand edit of the initial migration and is not in the `.json`
+  snapshot, so a later migration that recreates this index must add it again.
 - Multi-valued fields (`groups`, `scopes`, `allowedSizes`, `capabilities`,
   `apiKeys`) are `json`: `select hasMany` would create extra tables.
 - `api-keys.secretHash` has field read access `false` and is hidden in the

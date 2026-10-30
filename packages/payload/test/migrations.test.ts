@@ -90,7 +90,7 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 		});
 	});
 
-	it("seeds the PoC template, size and pool target", async () => {
+	it("seeds the PoC template and size, no pool target", async () => {
 		const tpl = await payload.find({
 			collection: "templates",
 			where: { slug: { equals: "linux" } },
@@ -116,14 +116,28 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			vcpu: 2,
 			memoryMb: 2048,
 		});
+		// Warm pools are not in the MVP: no pool target is seeded.
 		const pool = await payload.find({ collection: "pool-targets" });
-		expect(pool.docs).toHaveLength(1);
-		expect(pool.docs[0]).toMatchObject({
-			template: "linux",
-			size: "2gb",
-			target: 1,
+		expect(pool.docs).toHaveLength(0);
+	});
+
+	it("pool targets are unique per template and size when providerId is empty", async () => {
+		const first = await payload.create({
+			collection: "pool-targets",
+			data: { template: "linux", size: "2gb", target: 1 },
 		});
-		expect(pool.docs[0]?.providerId ?? null).toBeNull();
+		try {
+			await expect(
+				payload.create({
+					collection: "pool-targets",
+					data: { template: "linux", size: "2gb", target: 2 },
+				}),
+			).rejects.toThrow();
+			const r = await payload.find({ collection: "pool-targets" });
+			expect(r.docs).toHaveLength(1);
+		} finally {
+			await payload.delete({ collection: "pool-targets", id: first.id });
+		}
 	});
 
 	it("ids of new documents are UUIDs", async () => {

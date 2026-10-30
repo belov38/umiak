@@ -35,14 +35,25 @@ const files = (await readdir(PAYLOAD_MIGRATIONS_DIR))
 	.filter((f) => /^\d{8}_\d{6}_[a-z0-9_]+\.ts$/.test(f))
 	.sort();
 const latest = files.at(-1);
+// createMigration exits when nothing changed, so `latest` is the new file.
 if (latest) {
 	const file = path.join(PAYLOAD_MIGRATIONS_DIR, latest);
 	const src = await readFile(file, "utf8");
+	const IMPORT_RE =
+		/^import \{ MigrateUpArgs, MigrateDownArgs, sql \} from '@payloadcms\/db-postgres'/m;
+	if (!IMPORT_RE.test(src)) {
+		// Payload changed its template: the value imports of types would break
+		// the migration under type stripping, so stop instead of leaving it.
+		console.error(
+			`${file}: the generated import line is not the expected one; fix it to type imports by hand and update create-migration.ts`,
+		);
+		process.exit(1);
+	}
 	await writeFile(
 		file,
 		src
 			.replace(
-				/^import \{ MigrateUpArgs, MigrateDownArgs, sql \} from '@payloadcms\/db-postgres'/m,
+				IMPORT_RE,
 				"import { type MigrateDownArgs, type MigrateUpArgs, sql } from '@payloadcms/db-postgres'",
 			)
 			.replaceAll("({ db, payload, req }: Migrate", "({ db }: Migrate"),

@@ -1,6 +1,9 @@
 // Initial migration of the payload schema (S8 §7, §12). The DDL is generated
-// by Payload (createMigration); the schema creation, the seeds and the copy of
-// the S7 identity stand-in (S8 plan, decision 1) are written by hand.
+// by Payload (createMigration); the schema creation, NULLS NOT DISTINCT on the
+// pool-targets unique index (a pool target without providerId is unique per
+// template and size; Payload cannot express it, the drift check ignores it),
+// the seeds and the copy of the S7 identity stand-in (S8 plan, decision 1) are
+// written by hand.
 import {
 	type MigrateDownArgs,
 	type MigrateUpArgs,
@@ -284,7 +287,7 @@ export async function up({ db }: MigrateUpArgs): Promise<void> {
   CREATE INDEX "sizes_created_at_idx" ON "payload"."sizes" USING btree ("created_at");
   CREATE INDEX "pool_targets_updated_at_idx" ON "payload"."pool_targets" USING btree ("updated_at");
   CREATE INDEX "pool_targets_created_at_idx" ON "payload"."pool_targets" USING btree ("created_at");
-  CREATE UNIQUE INDEX "template_size_providerId_idx" ON "payload"."pool_targets" USING btree ("template","size","provider_id");
+  CREATE UNIQUE INDEX "template_size_providerId_idx" ON "payload"."pool_targets" USING btree ("template","size","provider_id") NULLS NOT DISTINCT;
   CREATE UNIQUE INDEX "payload_kv_key_idx" ON "payload"."payload_kv" USING btree ("key");
   CREATE INDEX "payload_locked_documents_global_slug_idx" ON "payload"."payload_locked_documents" USING btree ("global_slug");
   CREATE INDEX "payload_locked_documents_updated_at_idx" ON "payload"."payload_locked_documents" USING btree ("updated_at");
@@ -342,7 +345,8 @@ export async function down({ db }: MigrateDownArgs): Promise<void> {
 }
 
 // Defaults of S6 §5.11 (StaticConfigReader), S7 and S8 §7, and the PoC
-// template, size and pool target (S6 §9.1). Ids are UUIDv7 (Postgres 18).
+// template and size (S6 §9.1). No pool target: warm pools are not in the MVP.
+// Ids are UUIDv7 (Postgres 18).
 const SEED = sql`
   INSERT INTO "payload"."platform_defaults" (
     "id", "ttl_seconds", "max_ttl_seconds", "idle_timeout_seconds",
@@ -371,9 +375,7 @@ const SEED = sql`
   ) VALUES (
     uuidv7(), 'linux', 'linux', 'linux', true, '2gb', '["2gb"]',
     'user', '["exec", "files", "ssh"]', 0
-  );
-  INSERT INTO "payload"."pool_targets" ("id", "template", "size", "target")
-  VALUES (uuidv7(), 'linux', '2gb', 1);`;
+  );`;
 
 // Copy of the S7 identity stand-in (db/migrations/0300, 0303) with the same
 // UUIDs, when it exists. The identity schema stays in place (contract phase
