@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { XMLValidator } from "fast-xml-parser";
@@ -225,6 +231,13 @@ describe("buildIsoFiles", () => {
 				"build/sbx-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
 				"build/ssh-user-ca.pub",
 				"build/sbx-unattend.xml",
+				// lib.ps1 and files/ of the shared _windows directory.
+				"build/lib.ps1",
+				"build/files/appx-remove.txt",
+				"build/files/gpt.ini",
+				"build/files/profile.ps1",
+				"build/files/scripts.ini",
+				"build/files/sshd_config",
 			].sort(),
 		);
 		expect(
@@ -322,11 +335,13 @@ describe("buildIsoFiles", () => {
 		expect(text(files, "build/ssh-user-ca.pub")).toBe(
 			"ssh-ed25519 AAAAC3Nza ca\n",
 		);
-		// linux-fixture brings files/etc/...; no lib.ps1 there.
-		expect([...files.keys()].some((k) => k.startsWith("build/files/"))).toBe(
-			true,
+		// linux-fixture brings files/etc/...; no lib.ps1 there, so the shared one stays.
+		expect(
+			[...files.keys()].some((k) => k.startsWith("build/files/etc/")),
+		).toBe(true);
+		expect(text(files, "build/lib.ps1")).toBe(
+			readFileSync(join(WINDOWS_FILES_DIR, "lib.ps1"), "utf8"),
 		);
-		expect(files.has("build/lib.ps1")).toBe(false);
 	});
 
 	it("rejects step and files/ names Joliet would truncate", () => {

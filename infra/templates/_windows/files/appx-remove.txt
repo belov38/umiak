@@ -1,0 +1,46 @@
+# Provisioned Appx packages 00-base removes (spec S9 section 8.1): display
+# names as in Get-AppxProvisionedPackage, `*` matches any text. Kept: Edge,
+# Terminal, Notepad, Calculator, Paint, Snipping Tool, Photos, Store, App
+# Installer and the frameworks they use. A name the image does not have is
+# skipped.
+Clipchamp.Clipchamp
+Microsoft.549981C3F5F10
+Microsoft.BingNews
+Microsoft.BingSearch
+Microsoft.BingWeather
+Microsoft.Copilot
+Microsoft.Edge.GameAssist
+Microsoft.GamingApp
+Microsoft.GetHelp
+Microsoft.Getstarted
+Microsoft.MicrosoftJournal
+Microsoft.MicrosoftOfficeHub
+Microsoft.MicrosoftSolitaireCollection
+Microsoft.MicrosoftStickyNotes
+Microsoft.OutlookForWindows
+Microsoft.People
+Microsoft.PowerAutomateDesktop
+Microsoft.Todos
+Microsoft.Wallet
+Microsoft.Windows.DevHome
+Microsoft.WindowsAlarms
+Microsoft.WindowsCamera
+microsoft.windowscommunicationsapps
+Microsoft.WindowsFeedbackHub
+Microsoft.WindowsMaps
+Microsoft.WindowsSoundRecorder
+Microsoft.Xbox.TCUI
+Microsoft.XboxApp
+Microsoft.XboxGameOverlay
+Microsoft.XboxGamingOverlay
+Microsoft.XboxIdentityProvider
+Microsoft.XboxSpeechToTextOverlay
+Microsoft.YourPhone
+Microsoft.ZuneMusic
+Microsoft.ZuneVideo
+MicrosoftCorporationII.MicrosoftFamily
+MicrosoftCorporationII.QuickAssist
+MicrosoftTeams
+MicrosoftWindows.Client.WebExperience
+MicrosoftWindows.CrossDevice
+MSTeams

@@ -1,0 +1,22 @@
+# sshd of the sandbox (spec S9 section 8.3), installed by 10-system as
+# C:\ProgramData\ssh\sshd_config. Loopback only: SSH reaches it through the
+# agent tunnel. Login only with a certificate of the template CA (principal
+# user); sbx_user_ca.pub is written by identity apply. The agent starts the
+# service (Manual) once the identity is ready.
+
+ListenAddress 127.0.0.1
+ListenAddress ::1
+
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+TrustedUserCAKeys __PROGRAMDATA__/ssh/sbx_user_ca.pub
+AuthorizedKeysFile .ssh/authorized_keys
+
+Subsystem sftp sftp-server.exe
+
+# Windows default: administrators read a shared key file. The file does not
+# exist in the image.
+Match Group administrators
+       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys
