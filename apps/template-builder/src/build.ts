@@ -251,6 +251,7 @@ export async function buildTemplate(
 		st.ramReserved = false;
 		enter("template");
 		await stageTemplate(run, o, st);
+		if (st.m.diskUsedGiB !== undefined) save({ diskUsedGiB: st.m.diskUsedGiB });
 		if (!o.noVerify) {
 			enter("verify");
 			const v = await run.verify(st.m, {

@@ -502,5 +502,31 @@ export async function stageTemplate(
 		await deps.api.waitTask(o.node, r, { timeoutMs: TASK_TIMEOUT_MS });
 	await deps.node.call("media.remove", { names: [seedName(st.m)] });
 	st.seedUploaded = false;
+	await checkTemplateDisk(deps, vmid, st);
 	await deps.allocator.markActive(vmid);
+}
+
+/** A template disk this full kept the zero-fill: the free space was not trimmed. */
+export const MAX_TEMPLATE_DISK_PCT = 40;
+
+/** Records the template disk's thin usage and fails a build whose free space was not trimmed. */
+async function checkTemplateDisk(
+	deps: BuildDeps,
+	vmid: number,
+	st: State,
+): Promise<void> {
+	const name = `base-${vmid}-disk-0`;
+	const { lvs } = await deps.node.call<{
+		lvs: { name: string; sizeBytes: number; dataPercent: number }[];
+	}>("lv.list", {});
+	const lv = lvs.find((l) => l.name === name);
+	if (!lv) throw new Error(`${name} not found after the template conversion`);
+	const usedGiB =
+		Math.round(((lv.sizeBytes * lv.dataPercent) / 100 / 2 ** 30) * 10) / 10;
+	st.m.diskUsedGiB = usedGiB;
+	deps.log(`${name}: ${usedGiB} GiB used (${lv.dataPercent}%)`);
+	if (lv.dataPercent > MAX_TEMPLATE_DISK_PCT)
+		throw new Error(
+			`${name} is ${lv.dataPercent}% allocated (over ${MAX_TEMPLATE_DISK_PCT}%): the free space was not trimmed`,
+		);
 }

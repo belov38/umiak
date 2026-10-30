@@ -80,6 +80,17 @@ function setup(
 		removed: a.names,
 		missing: [],
 	});
+	// The template disk after fstrim: about 6 GiB of 64.
+	const disk = { dataPercent: 9.4 };
+	node.handlers["lv.list"] = () => ({
+		lvs: [
+			{
+				name: "base-598-disk-0",
+				sizeBytes: 64 * 2 ** 30,
+				dataPercent: disk.dataPercent,
+			},
+		],
+	});
 	const store = new SqliteStateStore(":memory:");
 	const allocator = new Allocator({
 		store,
@@ -103,7 +114,10 @@ function setup(
 		registry,
 		fetchImage: async (base) => {
 			log.push(`image:fetch ${base.serial}`);
-			return { path: image, sha256: sha(readFileSync(image)) };
+			return {
+				path: image,
+				sha256: sha(readFileSync(image)),
+			};
 		},
 		io: () => guest,
 		makeIso: (files, out) => {
@@ -146,6 +160,7 @@ function setup(
 		...over,
 	};
 	return {
+		disk,
 		work,
 		log,
 		pve,
@@ -604,6 +619,19 @@ describe("buildTemplate: failures", () => {
 		expect(s.node.calls.some((c) => c.op === "media.remove")).toBe(false);
 		expect(s.pve.vms.get(598)?.status).toBe("running");
 		expect((await s.allocator.get(598))?.state).toBe("reserved");
+	});
+
+	it("records the template disk usage and fails an untrimmed one", async () => {
+		const ok = setup();
+		const m = await buildTemplate(ok.deps, ok.opts);
+		expect(m.diskUsedGiB).toBe(6);
+		const s = setup();
+		s.disk.dataPercent = 95.2;
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		const f = (err as BuildFailedError).manifest;
+		expect(f.error?.stage).toBe("template");
+		expect(f.error?.message).toMatch(/95.2% allocated.*not trimmed/);
+		expect(s.pve.vms.has(598)).toBe(false);
 	});
 
 	it("refuses an agent package that changed after its signature was verified", async () => {

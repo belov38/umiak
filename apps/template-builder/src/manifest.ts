@@ -67,6 +67,8 @@ export interface Manifest {
 	/** Template hardware: recipe `hw` plus `cloudinit`. */
 	hw: Record<string, string | boolean>;
 	diskLayout: Record<string, Record<string, string>>;
+	/** Thin pool space the template disk takes, GiB (spec section 20: image size). */
+	diskUsedGiB?: number;
 	bootTimeoutS: number;
 	buildMemoryMb: number;
 	startedAt: string;

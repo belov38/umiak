@@ -158,12 +158,15 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 		"journalctl --relinquish-var && rm -rf /var/log/journal/* && sync",
 	]);
 	// dd ends with "no space left", so its status does not count. Minutes on a 64 GiB disk.
+	// The sync after rm commits the ext4 journal: fstrim skips blocks freed in a transaction
+	// that is still open, and the template would keep the zero file's thin blocks (95% of 64 GiB
+	// on a real build).
 	await must(
 		io,
 		[
 			"bash",
 			"-c",
-			"dd if=/dev/zero of=/var/tmp/sbx-zero bs=4M status=none || true; sync; rm -f /var/tmp/sbx-zero",
+			"dd if=/dev/zero of=/var/tmp/sbx-zero bs=4M status=none || true; rm -f /var/tmp/sbx-zero; sync",
 		],
 		{ timeoutMs: 30 * MIN },
 	);
