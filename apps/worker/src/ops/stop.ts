@@ -5,7 +5,13 @@ import {
 	ownedPowerOp,
 } from "../machine-prep.ts";
 import type { Fenced, Step } from "../steps.ts";
-import { currentMachine, runOp, transitionSandbox, vmidOf } from "./common.ts";
+import {
+	currentMachine,
+	machineOs,
+	runOp,
+	transitionSandbox,
+	vmidOf,
+} from "./common.ts";
 import { compensateStop } from "./compensate.ts";
 import type { SandboxOpHandler } from "./kind.ts";
 
@@ -14,7 +20,8 @@ import type { SandboxOpHandler } from "./kind.ts";
 export const STOP_STEPS = ["prepare", "shutdown", "verify", "finish"] as const;
 
 const PREPARE_STOP_TIMEOUT_MS = 10_000;
-const SHUTDOWN_TIMEOUT_S = 60;
+/** Windows clears the pagefile at shutdown (S9 §8.1), which takes longer. */
+export const SHUTDOWN_TIMEOUT_S = { linux: 60, windows: 120 } as const;
 
 /** The VM still runs after shutdown and a hard stop; repeated until the deadline. */
 export class StopNotConfirmed extends Error {
@@ -26,12 +33,12 @@ export class StopNotConfirmed extends Error {
 	}
 }
 
-async function withTimeout(p: Promise<void>, ms: number): Promise<void> {
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
-		await Promise.race([
+		return await Promise.race([
 			p,
-			new Promise<void>((_, reject) => {
+			new Promise<never>((_, reject) => {
 				timer = setTimeout(
 					() => reject(new Error(`no answer within ${ms} ms`)),
 					ms,
@@ -49,15 +56,16 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 		{
 			name: "prepare",
 			// System/PrepareStop: the agent flushes buffers and wipes secrets
-			// from tmpfs. Best effort: an unavailable agent does not block a stop.
+			// (tmpfs; secret files on Windows). Best effort: an unavailable agent
+			// does not block a stop. `secretFilesWiped` is the agent's confirmation.
 			run: async () => {
 				const m = await machine();
 				try {
-					await withTimeout(
+					const r = await withTimeout(
 						ctx.agent.prepareStop(m.id),
 						ctx.timing.prepareStopTimeoutMs ?? PREPARE_STOP_TIMEOUT_MS,
 					);
-					return { prepared: true };
+					return { prepared: true, secretFilesWiped: r.secretFilesWiped };
 				} catch (e) {
 					ctx.log.info(
 						{
@@ -66,7 +74,7 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 						},
 						"prepare-stop skipped",
 					);
-					return { prepared: false };
+					return { prepared: false, secretFilesWiped: false };
 				}
 			},
 		},
@@ -89,13 +97,12 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					throw new MachineGone(m.id, `VM ${vmid} missing`);
 				}
 				if (status === "stopped") return { shutdown: "already" };
+				const timeoutS =
+					ctx.timing.shutdownTimeoutS ??
+					SHUTDOWN_TIMEOUT_S[await machineOs(ctx.pool, m)];
 				await fenced.check();
 				const res = await ownedPowerOp(ctx, m.id, vmid, "shutdown", () =>
-					infra.shutdown(
-						vmid,
-						ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S,
-						{ expectedOwner: m.id },
-					),
+					infra.shutdown(vmid, timeoutS, { expectedOwner: m.id }),
 				);
 				if (res === "timeout") {
 					await fenced.check();

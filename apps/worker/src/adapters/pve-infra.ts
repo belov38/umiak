@@ -26,6 +26,7 @@ import {
 	SshNodeOps,
 } from "@sbx/pve";
 import type pg from "pg";
+import { QuiesceFailed } from "../ops/snapshot-step.ts";
 import type {
 	CreatedVm,
 	InfraDisk,
@@ -732,6 +733,47 @@ export class PveNodeInfra implements NodeInfra {
 
 	qgaPing(vmid: number): Promise<boolean> {
 		return this.#run("qgaPing", () => this.#base.qga.ping(vmid));
+	}
+
+	qgaFreezeHook(vmid: number): QuiesceHook {
+		const qga = this.#base.qga;
+		// A freeze was started (it may have taken effect even if the call failed).
+		let attempted = false;
+		let frozen = false;
+		// Set once a thaw reached the guest: null = clean.
+		let outcome: QuiesceFailed | null | undefined;
+		return {
+			freeze: async () => {
+				attempted = true;
+				frozen = false;
+				outcome = undefined;
+				await qga.fsfreezeFreeze(vmid);
+				frozen = true;
+			},
+			thaw: async () => {
+				if (outcome !== undefined) {
+					if (outcome !== null) throw outcome;
+					return;
+				}
+				if (!attempted) return;
+				if (!frozen) {
+					// The freeze failed half-way: release whatever it did; the snapshot is
+					// cancelled anyway, so a failure here only leaves the guest's own timeout.
+					attempted = false;
+					await qga.fsfreezeThaw(vmid).catch(() => {});
+					return;
+				}
+				if ((await qga.fsfreezeStatus(vmid)) === "thawed") {
+					// VSS released the writers at its own deadline: crash-consistent at best.
+					outcome = new QuiesceFailed(
+						`VM ${vmid}: the guest was already thawed before the snapshot was done`,
+					);
+					throw outcome;
+				}
+				await qga.fsfreezeThaw(vmid);
+				outcome = null;
+			},
+		};
 	}
 
 	qgaExec(vmid: number, argv: string[]): Promise<{ exitCode: number }> {

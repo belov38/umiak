@@ -13,6 +13,7 @@ import {
 	type QuiesceHook,
 } from "@sbx/pve";
 import type pg from "pg";
+import { QuiesceFailed } from "../../src/ops/snapshot-step.ts";
 import type {
 	CreatedVm,
 	InfraDisk,
@@ -102,6 +103,12 @@ export class FakeInfra implements NodeInfra {
 		});
 	}
 
+	/** Test control: order of hook calls and snapshots, when a test shares one list with the agent fake. */
+	trace: string[] | undefined;
+	/** Test control: the next QGA freeze (qgaFreezeHook) fails with this error. */
+	qgaFreezeFailure: Error | undefined;
+	/** Test control: the next QGA thaw reports the guest already thawed (QuiesceFailed). */
+	qgaAlreadyThawed = false;
 	/** Test control: the next snapshot with a hook fails with this error (as classified by the adapter). */
 	snapshotFailure: Error | undefined;
 
@@ -265,10 +272,10 @@ export class FakeInfra implements NodeInfra {
 
 	shutdown(
 		vmid: number,
-		_timeoutS: number,
+		timeoutS: number,
 		o: PowerOpts,
 	): Promise<"stopped" | "timeout"> {
-		this.#call("shutdown", vmid);
+		this.#call("shutdown", vmid, timeoutS);
 		return this.#powerSerialized(async () => {
 			await o.beforeAct?.();
 			await this.#ownerCheck("shutdown", vmid, o.expectedOwner);
@@ -386,8 +393,16 @@ export class FakeInfra implements NodeInfra {
 			throw new Error(`snapshot ${opts.lvId}: LV already exists`);
 		}
 		const running = vm.status === "running";
-		if (running && opts.hook) await opts.hook.freeze();
+		if (running && opts.hook) {
+			try {
+				await opts.hook.freeze();
+			} catch (e) {
+				await opts.hook.thaw().catch(() => {});
+				throw e;
+			}
+		}
 		try {
+			this.trace?.push("snapshot");
 			const name = `sbx-snap-${opts.lvId}-scsi0`;
 			this.lvs.set(name, { name, tags: ["sbx", `sbx-snap-${opts.lvId}`] });
 			return {
@@ -479,6 +494,32 @@ export class FakeInfra implements NodeInfra {
 
 	async qgaPing(vmid: number): Promise<boolean> {
 		return this.vms.get(vmid)?.status === "running";
+	}
+
+	qgaFreezeHook(vmid: number): QuiesceHook {
+		this.#call("qgaFreezeHook", vmid);
+		let frozen = false;
+		return {
+			freeze: async () => {
+				const failure = this.qgaFreezeFailure;
+				if (failure) {
+					this.qgaFreezeFailure = undefined;
+					this.trace?.push("qga.freeze(failed)");
+					throw failure;
+				}
+				frozen = true;
+				this.trace?.push("qga.freeze");
+			},
+			thaw: async () => {
+				if (!frozen) return;
+				frozen = false;
+				this.trace?.push("qga.thaw");
+				if (this.qgaAlreadyThawed) {
+					this.qgaAlreadyThawed = false;
+					throw new QuiesceFailed(`VM ${vmid}: the guest was already thawed`);
+				}
+			},
+		};
 	}
 
 	async qgaExec(vmid: number, argv: string[]): Promise<{ exitCode: number }> {

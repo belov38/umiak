@@ -142,6 +142,14 @@ export interface NodeInfra {
 	removeLvs(names: string[]): Promise<void>;
 	qgaPing(vmid: number): Promise<boolean>;
 	qgaExec(vmid: number, argv: string[]): Promise<{ exitCode: number }>;
+	/**
+	 * Freeze through QGA (`fsfreeze-freeze`/`fsfreeze-thaw`; VSS on Windows) as a
+	 * hook, for the composite Windows hook (S9 §12.10). A thaw that finds the guest
+	 * already thawed (VSS released it at its own deadline) does not fail the QGA
+	 * call but rejects with `QuiesceFailed`, like an agent `auto_thawed`. Thaw
+	 * without a successful freeze does nothing.
+	 */
+	qgaFreezeHook(vmid: number): QuiesceHook;
 }
 
 export interface InfraRegistry {
@@ -165,6 +173,15 @@ export interface AgentActivity {
 	tcpStreams: number;
 }
 
+export interface PrepareStopResult {
+	secretFilesWiped: boolean;
+}
+
+export interface QuiesceHookOpts {
+	fs?: boolean;
+	wipeSecretFiles?: boolean;
+}
+
 /**
  * Guest agent RPC (S3) through the gateway. Mutating calls carry a
  * deterministic `requestId` (S6 §7.1 p. 4). Errors: `AgentUnavailable`
@@ -183,8 +200,18 @@ export interface AgentPort {
 		secrets: { secretEnv: Record<string, string>; secretFiles: SecretFile[] },
 		requestId: string,
 	): Promise<void>;
-	prepareStop(machineId: string): Promise<void>;
-	quiesceHook(machineId: string, leaseMs: number): QuiesceHook;
+	/** `secretFilesWiped`: the agent confirms that no secret file remains on disk (Windows). */
+	prepareStop(machineId: string): Promise<PrepareStopResult>;
+	/**
+	 * `opts.fs = false` skips the filesystem freeze (Windows: VSS freezes it through
+	 * QGA); `opts.wipeSecretFiles` makes the agent wipe secret files before the
+	 * freeze and restore them on thaw. Unset options are not sent.
+	 */
+	quiesceHook(
+		machineId: string,
+		leaseMs: number,
+		opts?: QuiesceHookOpts,
+	): QuiesceHook;
 	activity(machineId: string): Promise<AgentActivity>;
 }
 

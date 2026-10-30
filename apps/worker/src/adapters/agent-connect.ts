@@ -22,6 +22,8 @@ import {
 	AgentRejected,
 	AgentUnavailable,
 	type ClaimRequest,
+	type PrepareStopResult,
+	type QuiesceHookOpts,
 } from "../ports.ts";
 
 export interface ConnectAgentPortOptions {
@@ -213,10 +215,11 @@ export class ConnectAgentPort implements AgentPort {
 		);
 	}
 
-	async prepareStop(machineId: string): Promise<void> {
-		await this.#call(machineId, "prepareStop", undefined, (c, o) =>
+	async prepareStop(machineId: string): Promise<PrepareStopResult> {
+		const r = await this.#call(machineId, "prepareStop", undefined, (c, o) =>
 			c.prepareStop({}, o),
 		);
+		return { secretFilesWiped: r.secretFilesWiped };
 	}
 
 	async activity(machineId: string): Promise<AgentActivity> {
@@ -248,7 +251,11 @@ export class ConnectAgentPort implements AgentPort {
 	 * (unavailable, rejected) stays retryable with the same lease and request
 	 * id. Thaw without a successful freeze does nothing.
 	 */
-	quiesceHook(machineId: string, leaseMs: number): QuiesceHook {
+	quiesceHook(
+		machineId: string,
+		leaseMs: number,
+		opts: QuiesceHookOpts = {},
+	): QuiesceHook {
 		const freezeId = randomUUID();
 		const thawId = randomUUID();
 		let leaseId: string | undefined;
@@ -260,7 +267,16 @@ export class ConnectAgentPort implements AgentPort {
 			freeze: async () => {
 				try {
 					const r = await this.#call(machineId, "quiesce", freezeId, (c, o) =>
-						c.quiesce({ leaseMs }, o),
+						c.quiesce(
+							{
+								leaseMs,
+								...(opts.fs !== undefined ? { fs: opts.fs } : {}),
+								...(opts.wipeSecretFiles !== undefined
+									? { wipeSecretFiles: opts.wipeSecretFiles }
+									: {}),
+							},
+							o,
+						),
 					);
 					leaseId = r.leaseId;
 				} catch (err) {

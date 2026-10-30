@@ -143,6 +143,8 @@ export class FakePve {
 	templateConfig: Record<string, string> = { ...TEMPLATE_CONFIG };
 	fail: Record<string, Error> = {};
 	keepIpamOnDelete = false;
+	/** Guest filesystem state reported by fsfreeze-status; a test sets false to model a VSS timeout. */
+	guestFrozen = false;
 	/** When set, PVE-allocated volumes land in its LV list and destroy removes them. */
 	lvStore: FakeNode | undefined;
 	/** Status /cluster/resources reports instead of the real one: pvestatd lags by seconds. */
@@ -365,6 +367,16 @@ export class FakePve {
 					],
 				};
 			}
+			if (sub === "/agent/fsfreeze-freeze") {
+				this.guestFrozen = true;
+				return { result: 1 };
+			}
+			if (sub === "/agent/fsfreeze-thaw") {
+				this.guestFrozen = false;
+				return { result: 1 };
+			}
+			if (sub === "/agent/fsfreeze-status")
+				return { result: this.guestFrozen ? "frozen" : "thawed" };
 			if (sub === "/agent/exec") return { pid: 42 };
 			if (sub === "/agent/exec-status")
 				return { exited: 1, exitcode: 0, "out-data": "ok\n" };
