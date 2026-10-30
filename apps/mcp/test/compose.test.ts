@@ -135,6 +135,19 @@ describe("dev-cp", () => {
 		expect(env.SBX_OIDC_ISSUER).toBe("https://ts.test:10000/realms/sbx");
 	});
 
+	withDocker("admits the Serve Host forms and nothing more", () => {
+		const env =
+			resolve(files, {
+				...required,
+				SBX_MCP_PUBLIC_URL: "https://ts.test:8443/mcp",
+			}).mcp?.environment ?? {};
+		expect(env.SBX_MCP_ALLOWED_HOSTS?.split(",").sort()).toEqual([
+			"127.0.0.1:8090",
+			"ts.test",
+			"ts.test:8443",
+		]);
+	});
+
 	withDocker("refuses to run with a stale .env (no localhost default)", () => {
 		expect(() => resolve(files, required)).toThrow(/SBX_MCP_PUBLIC_URL/);
 	});

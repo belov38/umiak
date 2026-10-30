@@ -50,7 +50,7 @@ SBX_MCP_PORT=8090 mise exec -- node apps/mcp/src/main.ts
 
 ## Client configs
 
-Checked against the documentation of each client on 2026-10-31 (code.claude.com/docs/en/mcp, developers.openai.com/codex, opencode.ai/docs/mcp-servers, geminicli.com and google-gemini/gemini-cli `docs/tools/mcp-server.md`). Replace `https://api.example.com/mcp` with your server (dev control plane: `https://sbx-dev-cp.tail0000.ts.net:8443/mcp`; local stack: `http://localhost:8090/mcp`).
+Checked against the documentation of each client on 2026-10-31 (code.claude.com/docs/en/mcp, developers.openai.com/codex, opencode.ai/docs/mcp-servers, geminicli.com and google-gemini/gemini-cli `docs/tools/mcp-server.md`). Replace `https://api.example.com/mcp` with your server (local stack: `http://localhost:8090/mcp`; dev control plane behind Tailscale Serve: `https://<TS name>:8443/mcp`, see `infra/dev-cp/README.md`).
 
 Browser sign-in uses the Keycloak public client `sbx-mcp` (authorization code + PKCE). Its redirect URIs are `http://127.0.0.1:33418/*` and `http://localhost:33418/*`, so every client below must be told to listen on port **33418**. A client that does not know a `client_id` tries dynamic registration, which the realm refuses.
 
@@ -139,14 +139,12 @@ Verified: `type` `local`/`remote`, `command` array, `url`, `headers` with `{env:
   "sbx": { "command": "sbx", "args": ["mcp"], "timeout": 120000 },
   "sbx-remote": { "httpUrl": "https://api.example.com/mcp",
     "oauth": { "enabled": true, "clientId": "sbx-mcp",
-      "redirectUri": "http://localhost:33418/oauth/callback" } },
-  "sbx-ci": { "httpUrl": "https://api.example.com/mcp",
-    "headers": { "Authorization": "Bearer <team key>" } } } }
+      "redirectUri": "http://localhost:33418/oauth/callback" } } } }
 ```
 
-Or: `gemini mcp add -s user sbx sbx mcp`, and for a remote server `gemini mcp add -s user -t http -H "Authorization: Bearer <key>" sbx-ci https://api.example.com/mcp`. Browser sign-in: `/mcp auth sbx-remote` inside Gemini CLI.
+Or: `gemini mcp add -s user sbx sbx mcp`, and for a remote server `gemini mcp add -s user -t http -H "Authorization: Bearer $SBX_API_KEY" sbx-ci https://api.example.com/mcp` (your shell expands `$SBX_API_KEY` when the command runs). Browser sign-in: `/mcp auth sbx-remote` inside Gemini CLI.
 
-Verified: `command`, `args`, `timeout`, `httpUrl` (streamable HTTP; `url` is the SSE endpoint), `headers`, `oauth.enabled`, `oauth.clientId`, `oauth.redirectUri`, `gemini mcp add [-s|--scope] [-t|--transport] [-H|--header]`. Differences from the spec: the default callback is `http://localhost:<random port>/oauth/callback`, so the snippet uses the same path `/oauth/callback` with port 33418 (the spec had `/callback`; both match the realm's `http://localhost:33418/*`). Headers are stored in the file, so a team key in `settings.json` is a plaintext secret; prefer OAuth there.
+Verified: `command`, `args`, `timeout`, `httpUrl` (streamable HTTP; `url` is the SSE endpoint), `headers`, `oauth.enabled`, `oauth.clientId`, `oauth.redirectUri`, `gemini mcp add [-s|--scope] [-t|--transport] [-H|--header]`. Differences from the spec: the default callback is `http://localhost:<random port>/oauth/callback`, so the snippet uses the same path `/oauth/callback` with port 33418 (the spec had `/callback`; both match the realm's `http://localhost:33418/*`). Gemini CLI documents `$VAR` / `${VAR}` expansion only for the `env` block, not for `headers`, so the team key from `gemini mcp add -H` ends up as plaintext in `settings.json`; prefer OAuth there.
 
 Inside a sandbox `sbx` is in the template and the key is the secret `SBX_API_KEY` (registration in harness configs: S15).
 
