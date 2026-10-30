@@ -25,6 +25,57 @@ components are referenced by import-map path strings from `apps/web`.
 - `notify(req, channel, payload)` — `pg_notify` in the transaction of the
   Payload request (`txQuery(req, sql)` runs any SQL there).
 
+## Identity (S8 §5)
+
+- `parseAuthHeaders(h)` — the oauth2-proxy headers (§5.2): email lowercased
+  and trimmed (none → `null`), `user` = `sub`, groups split by `,`, trimmed,
+  without empty names and duplicates, `preferredUsername`. Takes `Headers`
+  or a Node header record.
+- `resolveSession(payload, h, {operatorGroups, req?})` — JIT of §5.3 in one
+  Payload transaction: user rows are locked (`FOR UPDATE`), writes go
+  through the Local API with the same `req`, so hooks notify in it.
+  Find by `idpSubject`; a changed email is taken over, a stub holding it
+  (no `idpSubject`, never logged in, active) gives its memberships to the
+  user (create, or raise to `owner`, then delete the stub's, one id at a
+  time) and is deleted; any other holder is `identity_conflict`. Else find
+  by email: a stub is bound (`idpSubject`, `name` if empty, personal team
+  if it owns none); another `idpSubject` is `identity_conflict`. Else
+  create user + personal team (`<email>'s team`, the S7 contract name) +
+  `owner` membership, `personalTeam` = `defaultTeam`. `active: false` is
+  `user_disabled`, no `sub` is `subject_required`. Only changed fields are
+  written: `groups` (compared as a set), `isOperator`, `preferredUsername`,
+  `lastLoginAt` (at most once per 60 s; bookkeeping, no `sbx_identity`).
+  Concurrent first logins collide on the unique email/`idpSubject`; the
+  loser retries (3 attempts) and finds the winner's row. With `o.req` that
+  already has a transaction the work joins it and is not retried.
+- `oauth2ProxyStrategy` — the auth strategy of `users` (§5.4):
+  `{user: {...doc, collection: "users", _strategy: "oauth2-proxy"}}` or
+  `{user: null}`. A refused login (`subject_required`, `user_disabled`,
+  `identity_conflict`) also gets the response header
+  `X-Sbx-Auth-Denied: <code>` (Payload copies it to REST responses).
+  Operator groups come from `config.custom.sbx.operatorGroups`.
+- `authenticateHeaders(payload, headers)` — the same check with the reason,
+  for web's own pages: `{kind: "anonymous", status: 401}` (no email),
+  `{kind: "denied", status: 401 | 403, reason}` (`subject_required` → 401,
+  the others → 403), or `{kind: "session", claims, session}`. Other errors
+  (database) are thrown.
+- `PayloadIdentityStore` — `IdentityStore` of `@sbx/auth` over the
+  collections, the semantics of `PgIdentityStore`; passes the contract
+  suite (`test/identity-contract.test.ts`). Reads are SQL over the
+  `payload` schema; writes go through the Local API (NOTIFY from hooks);
+  `touchApiKey`/`touchSshKey` are a plain `UPDATE … last_used_at` without
+  hooks or NOTIFY.
+- `seedPayloadIdentity(payload, yaml)` — `SBX_IDENTITY_FILE` with the
+  format and upsert semantics of `seedIdentity` of `@sbx/auth`, in one
+  transaction. New teams, users and keys keep the file's ids: the Local API
+  cannot create with a given id, so they are inserted by SQL and the
+  NOTIFY of the create hooks is sent explicitly; updates and memberships go
+  through the Local API. Only differing values are written, so a second
+  load writes and sends nothing.
+- `@sbx/payload/testing`: `payloadContractSubject(payload)` (store +
+  seeding of the contract suite). Its `removeMember` is a plain `DELETE`
+  (the suite removes the last owner of a team, which the hook refuses).
+
 ## NOTIFY hooks (S8 §8)
 
 Hooks run inside the transaction of the Payload operation: a Local API call

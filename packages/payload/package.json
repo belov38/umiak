@@ -5,7 +5,8 @@
 	"type": "module",
 	"description": "Payload 3 config of the platform (schema payload): collections, global platform-defaults, migrations and the shared Local API instance",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./testing": "./src/testing.ts"
 	},
 	"scripts": {
 		"test": "vitest run",

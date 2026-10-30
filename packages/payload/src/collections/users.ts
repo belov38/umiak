@@ -1,4 +1,4 @@
-import type { AuthStrategy, CollectionConfig } from "payload";
+import type { CollectionConfig } from "payload";
 import { isOperatorReq, operatorOnly } from "../access.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
 import { usersStubOnlyBeforeDelete } from "../hooks/rules.ts";
@@ -6,13 +6,7 @@ import {
 	usersRevokeAfterChange,
 	usersRevokeAfterDelete,
 } from "../hooks/ssh-revoke.ts";
-
-// Placeholder of the oauth2-proxy strategy (S8 §5.4): it authenticates nobody
-// until resolveSession is wired in (S8 plan, task 3).
-const oauth2ProxyPlaceholder: AuthStrategy = {
-	name: "oauth2-proxy",
-	authenticate: async () => ({ user: null }),
-};
+import { oauth2ProxyStrategy } from "../identity/strategy.ts";
 
 const lowercase = ({ value }: { value?: unknown }) =>
 	typeof value === "string" ? value.trim().toLowerCase() : value;
@@ -21,7 +15,8 @@ export const Users: CollectionConfig = {
 	slug: "users",
 	auth: {
 		disableLocalStrategy: true,
-		strategies: [oauth2ProxyPlaceholder],
+		// The oauth2-proxy headers, on every request (S8 §5.4).
+		strategies: [oauth2ProxyStrategy],
 	},
 	admin: {
 		useAsTitle: "email",
