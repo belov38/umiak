@@ -232,6 +232,7 @@ describe("buildTemplate: happy path", () => {
 			"guest:rm-build-logs",
 			"guest:random-seed",
 			"guest:seal",
+			"guest:initrd",
 			"guest:drop-journal",
 			"guest:zero-fill",
 			"guest:fstrim",

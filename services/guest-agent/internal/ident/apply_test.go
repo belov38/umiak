@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -158,7 +159,7 @@ func TestApplyChangedResetsState(t *testing.T) {
 		t.Errorf("hosts = %q", hosts)
 	}
 
-	wantCalls := []string{"RegenerateHostKeys", "SetHostname " + testHostname}
+	wantCalls := []string{"RegenerateHostKeys", "SetHostname " + testHostname, "RestartJournal"}
 	if !reflect.DeepEqual(r.Calls, wantCalls) {
 		t.Errorf("calls = %v, want %v", r.Calls, wantCalls)
 	}
@@ -583,4 +584,71 @@ func TestSaveCreatesStateDir0700(t *testing.T) {
 	if m := fi.Mode().Perm(); m != 0o700 {
 		t.Errorf("state dir mode = %o, want 700", m)
 	}
+}
+
+// A fork inherits the parent's machine-id, which journald picked up at its
+// start: replacing it restarts journald. A machine-id that systemd chose, or
+// none at all, is no reason to.
+func TestApplyRestartsJournalOnlyWhenReplacingAnID(t *testing.T) {
+	old := "aaaaaaaabbbbccccddddeeeeeeeeeeee"
+	for _, tt := range []struct {
+		name    string
+		current *string
+		restart bool
+	}{
+		{"inherited from old identity", ptr(old + "\n"), true},
+		{"set by systemd", ptr("1234567890abcdef1234567890abcdef\n"), false},
+		{"empty", ptr(""), false},
+		{"uninitialized", ptr("uninitialized\n"), false},
+		{"absent", nil, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			l := paths.ForRoot(t.TempDir())
+			if err := (&File{MachineID: "old", WrittenMachineID: old}).Save(l.IdentityFile); err != nil {
+				t.Fatal(err)
+			}
+			if tt.current != nil {
+				mustWrite(t, l.MachineIDFile, *tt.current)
+			}
+			r, _ := newFake(t, l)
+			r.Errs = map[string]error{"RestartJournal": errors.New("no systemd")}
+			if _, err := Apply(context.Background(), l, testIdentity(testMachineID), r, false); err != nil {
+				t.Fatalf("apply: %v (a journald failure must not fail it)", err)
+			}
+			if got := slices.Contains(r.Calls, "RestartJournal"); got != tt.restart {
+				t.Errorf("RestartJournal called = %v, want %v (calls %v)", got, tt.restart, r.Calls)
+			}
+		})
+	}
+}
+
+// journald restarts after identity.json is saved, so a hang there does not
+// repeat the wipe.
+func TestApplyRestartsJournalAfterSave(t *testing.T) {
+	l := paths.ForRoot(t.TempDir())
+	old := "aaaaaaaabbbbccccddddeeeeeeeeeeee"
+	if err := (&File{MachineID: "old", WrittenMachineID: old}).Save(l.IdentityFile); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, l.MachineIDFile, old+"\n")
+	r, _ := newFake(t, l)
+	jc := &journalCheck{FakeResetter: r, path: l.IdentityFile}
+	if _, err := Apply(context.Background(), l, testIdentity(testMachineID), jc, false); err != nil {
+		t.Fatal(err)
+	}
+	if !jc.saved {
+		t.Error("journald was restarted before identity.json had the new machine")
+	}
+}
+
+type journalCheck struct {
+	*FakeResetter
+	path  string
+	saved bool
+}
+
+func (j *journalCheck) RestartJournal() error {
+	f, err := LoadFile(j.path)
+	j.saved = err == nil && f.MachineID == testMachineID
+	return j.FakeResetter.RestartJournal()
 }

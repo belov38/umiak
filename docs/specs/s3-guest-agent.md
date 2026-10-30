@@ -159,7 +159,7 @@ window = "5m"
 Description=sbx machine identity
 DefaultDependencies=no
 After=local-fs.target systemd-remount-fs.service
-Before=network-pre.target systemd-networkd.service ssh.service ssh.socket cloud-init-local.service sbx-agent.service sysinit.target
+Before=network-pre.target systemd-networkd.service ssh.service ssh.socket cloud-init-local.service sbx-agent.service systemd-journal-flush.service sysinit.target
 Wants=network-pre.target
 
 [Service]
@@ -178,10 +178,11 @@ WantedBy=sysinit.target
 3. **SSH host keys.** Удалить `/etc/ssh/ssh_host_*`, выполнить `ssh-keygen -A`. На Linux вызов системной утилиты допустим: OpenSSH в образе есть; на Windows (S9) свой путь.
 4. **Hostname.** `sbx-<последние 12 hex machineId>` (последние, потому что первые 48 бит UUIDv7 — время создания и у соседних machine совпадают). `sethostname`, `/etc/hostname`, строка `127.0.1.1` в `/etc/hosts` (управляемый блок). Claim потом заменит hostname.
 5. Записать `identity.json` с флагом `resetPending` (fsync).
+6. **journald.** Если шаг 2 заменил действовавший machine-id (форк унаследовал id родителя), `systemctl try-restart systemd-journald` и дождаться перезапуска. journald запомнил старый id на старте и писал бы в `/var/log/journal/<старый id>`, где `journalctl` форка ничего не находит. Юнит идёт до `systemd-journal-flush.service`, поэтому сброс runtime-журнала в `/var/log/journal` идёт уже под новым id и забирает записи начала загрузки. Ошибка перезапуска пишется в лог и apply не валит.
 
 Агент при старте видит `resetPending`, первым событием нового журнала (`seq = 1`) пишет `identity.reset` и снимает флаг.
 
-Так machine-id и DHCP DUID (systemd-networkd выводит его из machine-id) меняются до старта сети. Это закрывает риск S1 «одинаковый IP у A и F». PID 1 кэширует machine-id с ранней загрузки, поэтому без `systemd.machine_id=firmware` журнал systemd до перезагрузки пишется в каталог со старым id. Это косметика и на работу не влияет.
+Так machine-id и DHCP DUID (systemd-networkd выводит его из machine-id) меняются до старта сети. Это закрывает риск S1 «одинаковый IP у A и F». PID 1 кэширует machine-id с ранней загрузки; journald перезапускается шагом 6, остальным процессам хватает нового `/etc/machine-id`.
 
 **Страховка в агенте.** Если агент при старте видит несовпадение (`sbx-identity` выключен или упал), он выполняет те же шаги сам, затем `systemctl try-restart ssh` и `networkctl renew`, пишет предупреждение.
 

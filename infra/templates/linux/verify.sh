@@ -16,7 +16,7 @@
 # passwords_locked no_authorized_keys (8); dns https wait_online (12);
 # system_running failed_units jobs masked_units purged_absent (13);
 # leftovers (14); sysctl userns (15); disk_size fstrim (17); kvm (19, INFO);
-# bash_logout no_tailscale no_unattended no_ci_drive hostname.
+# bash_logout no_tailscale no_unattended no_ci_drive hostname initrd.
 set -uo pipefail
 
 STD_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -325,6 +325,15 @@ check_users() {
 	done
 	[ "${#left[@]}" -eq 0 ]
 	report leftovers $? "${left[*]:-none}"
+
+	# dracut copies /etc/machine-id and /etc/hostname into the initrd; the seal rebuilds it, so
+	# a clone's early boot does not run under the build VM's machine-id and hostname.
+	local initrd imid ihost
+	initrd=/boot/initrd.img-$(uname -r)
+	imid=$(lsinitrd -f etc/machine-id "$initrd" 2>/dev/null)
+	ihost=$(lsinitrd -f etc/hostname "$initrd" 2>/dev/null)
+	[ -f "$initrd" ] && [ -z "$imid" ] && { [ -z "$ihost" ] || [ "$ihost" = sbx ]; }
+	report initrd $? "$initrd machine-id=[${imid}] hostname=[${ihost}]"
 
 	local label
 	label=$(blkid -o value -s LABEL /dev/sr0 2>/dev/null)

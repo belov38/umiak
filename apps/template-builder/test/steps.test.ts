@@ -357,6 +357,7 @@ describe("verify.sh", () => {
 			"no_unattended",
 			"no_ci_drive",
 			"hostname",
+			"initrd",
 		])
 			expect(v, id).toMatch(new RegExp(`report ${id} `));
 	});

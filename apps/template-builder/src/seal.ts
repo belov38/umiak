@@ -132,8 +132,8 @@ export async function collectFacts(
 
 /**
  * Removes the build leftovers 90-cleanup cannot remove itself and the random seed, runs
- * `sbx-agent seal`, then zero-fills and trims the free space. Nothing may write to the disk
- * afterwards but shutdown.
+ * `sbx-agent seal`, rebuilds the initrd, then zero-fills and trims the free space. Nothing may
+ * write to the disk afterwards but shutdown.
  */
 export async function sealGuest(io: GuestIo): Promise<void> {
 	await must(io, [
@@ -148,8 +148,14 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 		"-c",
 		"systemctl stop systemd-random-seed.service && ! systemctl is-active -q systemd-random-seed.service && rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret && sync",
 	]);
-	// After seal only the zero file is written; fstrim then covers the freed blocks.
+	// After seal only the initrd and the zero file are written; fstrim then covers the freed blocks.
 	await must(io, ["sbx-agent", "seal"], { timeoutMs: 2 * MIN });
+	// dracut copies /etc/machine-id and /etc/hostname into the initrd: rebuilt now, it carries
+	// the empty machine-id and the hostname sbx instead of the build VM's, so the early boot of
+	// every clone runs and logs under the clone's own firmware machine-id.
+	await must(io, ["update-initramfs", "-u", "-k", "all"], {
+		timeoutMs: 10 * MIN,
+	});
 	// The persistent journal holds the build's last entries (tools run, seal) under the build
 	// VM's machine-id; journald goes on in /run until poweroff, clones start an empty one.
 	await must(io, [
