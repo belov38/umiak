@@ -1,0 +1,287 @@
+// Stream chaos (S7 §16, adapted per plan decision 3: no tunnel yet). The
+// SDK's run() of a long command that writes 3000 lines × 512 B to stdout and
+// to stderr, while every 100-400 ms one of these happens at random:
+//   - the agent attach of the api breaks (FakeAgent failNextAttach, reset or
+//     unavailable);
+//   - every client connection is cut in the load balancer (a TCP proxy);
+//   - the current api instance stops through its SIGTERM path (close()) and a
+//     new one takes over: rolling (new instance first) or with a gap.
+// The first answer of POST /commands is lost after the api started the
+// command, so the SDK repeats the POST with the same Idempotency-Key.
+// All instances share the Postgres database and the FakeAgent, as the pods of
+// one deployment share the database and the agents. Both streams must arrive
+// byte for byte, the exit code must be right, the command must start once
+// and every close() must end within the shutdown grace.
+//
+// The RNG is seeded; SBX_CHAOS_SEED=<n> replays a run, SBX_CHAOS_LOG=1
+// prints the action counts and timings.
+import { createHash, randomInt } from "node:crypto";
+import { type RunningApi, SHUTDOWN_GRACE_MS, startApi } from "@sbx/api";
+import {
+	FakeAgent,
+	issueApiKey,
+	makeTestDeps,
+	testSettings,
+} from "@sbx/api/testing";
+import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
+import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type Command, type Sandbox, Sbx } from "../src/index.ts";
+import { markSandboxReady, sandboxRow } from "./helpers/api.ts";
+import { startTcpProxy, type TcpProxy } from "./helpers/tcp-proxy.ts";
+
+const LINES = 3000;
+const LINE_BYTES = 512;
+const EXIT_CODE = 3;
+const ALPHABET = "abcdefghijklmnopqrstuvwxyz".repeat(22);
+const FILLER = LINE_BYTES - 11; // "out 00001 " + filler + "\n"
+
+// Lines go out in batches of 100 with a pause, so the command runs ~6 s and
+// the chaos hits it while it still writes, not only while its buffered
+// output is read back.
+const SCRIPT = `a=${ALPHABET}
+for ((i=1;i<=${LINES};i++)); do
+  printf 'out %05d %s\\n' "$i" "\${a:i%26:${FILLER}}"
+  printf 'err %05d %s\\n' "$i" "\${a:(i+13)%26:${FILLER}}" >&2
+  if ((i%100==0)); then sleep 0.2; fi
+done
+exit ${EXIT_CODE}`;
+
+function expectedOutput(prefix: "out" | "err", shift: number): string {
+	let s = "";
+	for (let i = 1; i <= LINES; i++) {
+		const n = String(i).padStart(5, "0");
+		const at = (i + shift) % 26;
+		s += `${prefix} ${n} ${ALPHABET.slice(at, at + FILLER)}\n`;
+	}
+	return s;
+}
+
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** The core id of a `cmd_...` (upper-case ULID). */
+const coreCommandId = (id: string) => id.slice(4).toUpperCase();
+
+/** mulberry32: a small seeded RNG in [0, 1). */
+function rngOf(seed: number): () => number {
+	let a = seed >>> 0;
+	return () => {
+		a = (a + 0x6d2b79f5) >>> 0;
+		let t = a;
+		t = Math.imul(t ^ (t >>> 15), t | 1);
+		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe.skipIf(skipPg())("stream chaos across api restarts", () => {
+	let db: TestDatabase;
+	let env: ServiceEnv;
+	let agent: FakeAgent;
+	let secret: string;
+	let proxy: TcpProxy;
+	let current: RunningApi;
+
+	const settings = testSettings({
+		SBX_API_RATE_BURST: "100000",
+		SBX_API_RATE_STARTS_PER_MIN: "100000",
+		SBX_API_PUBLIC_PORT: "0",
+		SBX_API_PROXIED_PORT: "0",
+		SBX_API_INTERNAL_PORT: "0",
+		SBX_API_METRICS_PORT: "0",
+	});
+
+	/** A new api instance on the shared database and agent (real listeners). */
+	function startInstance(): Promise<RunningApi> {
+		const deps = makeTestDeps({
+			settings,
+			pool: db.pool,
+			svc: env.svc,
+			config: env.config,
+			agent,
+			jobs: env.jobs,
+		});
+		return startApi(settings, deps, { host: "127.0.0.1" });
+	}
+
+	beforeAll(async () => {
+		db = await createTestDatabase({ max: 30 });
+		env = await serviceEnv(db.pool);
+		const teamId = env.p.teamId;
+		await db.pool.query(
+			"INSERT INTO identity.teams (id, name) VALUES ($1, $2)",
+			[teamId, `team-${teamId.slice(0, 8)}`],
+		);
+		agent = new FakeAgent();
+		current = await startInstance();
+		({ secret } = await issueApiKey(current.deps.identity, { teamId }));
+		proxy = await startTcpProxy(current.ports.public);
+	});
+
+	afterAll(async () => {
+		await proxy?.close();
+		await current?.close();
+		await agent?.close();
+		await db?.drop();
+	});
+
+	it("run delivers both streams byte for byte and starts the command once", async () => {
+		const seed = Number(process.env.SBX_CHAOS_SEED ?? randomInt(2 ** 31));
+		const rng = rngOf(seed);
+		const trace: string[] = [];
+		const t0 = Date.now();
+		const note = (s: string) => trace.push(`${Date.now() - t0}ms ${s}`);
+		const counts = { attach: 0, drop: 0, rolling: 0, gap: 0 };
+		const closes: Promise<number>[] = [];
+		const stopped: RunningApi[] = [];
+
+		// Requests the SDK sent while the command ran (its POSTs and reattaches).
+		const sent = { posts: 0, streams: 0 };
+		let counting = false;
+		const sbx = new Sbx({
+			baseUrl: `http://127.0.0.1:${proxy.port}`,
+			apiKey: secret,
+			env: {},
+			fetch: ((req: Request) => {
+				if (counting) {
+					const path = new URL(req.url).pathname;
+					if (req.method === "POST" && path.endsWith("/commands")) {
+						sent.posts += 1;
+					} else if (req.method === "GET" && path.endsWith("/stream")) {
+						sent.streams += 1;
+					}
+				}
+				return globalThis.fetch(req);
+			}) as typeof fetch,
+		});
+		const sb: Sandbox = await sbx.sandboxes.create({
+			labels: { suite: "chaos" },
+		});
+		await markSandboxReady(db.pool, sb.slug);
+		const { machineId } = await sandboxRow(db.pool, sb.slug);
+		if (machineId === null) throw new Error("sandbox without a machine");
+
+		/** close() of an instance, timed; never awaited by the chaos loop. */
+		const stop = (api: RunningApi) => {
+			stopped.push(api);
+			const started = Date.now();
+			closes.push(api.close().then(() => Date.now() - started));
+		};
+
+		counting = true;
+		proxy.cutNextAnswer();
+		let done = false;
+		const chaos = (async () => {
+			while (!done) {
+				await sleep(100 + Math.floor(rng() * 300));
+				if (done) break;
+				const r = rng();
+				if (r < 0.35) {
+					const after = Math.floor(rng() * 200_000);
+					const kind = rng() < 0.5 ? "reset" : "unavailable";
+					agent.failNextAttach(machineId, after, kind);
+					counts.attach += 1;
+					note(`attach fails after ${after} B (${kind})`);
+				} else if (r < 0.7) {
+					const n = proxy.drop();
+					counts.drop += 1;
+					note(`dropped ${n} connections`);
+				} else if (r < 0.92) {
+					// Rolling: the new instance takes traffic before the old one stops.
+					const old = current;
+					current = await startInstance();
+					proxy.target(current.ports.public);
+					stop(old);
+					counts.rolling += 1;
+					note(`rolling restart -> :${current.ports.public}`);
+				} else {
+					// A gap: the only instance stops; until the new one is up, new
+					// connections get 503 server_shutting_down or are refused.
+					const old = current;
+					stop(old);
+					await sleep(50 + Math.floor(rng() * 150));
+					current = await startInstance();
+					proxy.target(current.ports.public);
+					counts.gap += 1;
+					note(`restart with a gap -> :${current.ports.public}`);
+				}
+			}
+		})();
+
+		const out = { stdout: "", stderr: "" };
+		const next = { stdout: 0, stderr: 0 };
+		let truncated = 0;
+		let exit: unknown;
+		let command: Command | undefined;
+		try {
+			try {
+				for await (const ev of sb.run(SCRIPT, {
+					onStart: (c) => {
+						command = c;
+					},
+				})) {
+					if (ev.type === "stdout" || ev.type === "stderr") {
+						expect(ev.offset, `${ev.type} offset`).toBe(next[ev.type]);
+						next[ev.type] = ev.nextOffset;
+						out[ev.type] += ev.data;
+					} else if (ev.type === "truncated") {
+						truncated += 1;
+					} else if (ev.type === "exit") {
+						exit = ev;
+					}
+				}
+			} finally {
+				done = true;
+				await chaos;
+			}
+			const elapsed = Date.now() - t0;
+			const closeMs = await Promise.all(closes);
+
+			const bytes = LINES * LINE_BYTES;
+			expect(truncated).toBe(0);
+			expect(out.stdout.length).toBe(bytes);
+			expect(out.stderr.length).toBe(bytes);
+			expect(sha256(out.stdout)).toBe(sha256(expectedOutput("out", 0)));
+			expect(sha256(out.stderr)).toBe(sha256(expectedOutput("err", 13)));
+			expect(exit).toMatchObject({
+				type: "exit",
+				status: "exited",
+				exitCode: EXIT_CODE,
+				stdoutOffset: bytes,
+				stderrOffset: bytes,
+			});
+			expect(command?.id).toMatch(/^cmd_/);
+			expect(agent.startCount(coreCommandId(command?.id as string))).toBe(1);
+			// Every stopped instance went through its graceful stop in time and
+			// left no stream open.
+			for (const ms of closeMs)
+				expect(ms).toBeLessThanOrEqual(SHUTDOWN_GRACE_MS);
+			for (const api of stopped) expect(api.deps.streams.size).toBe(0);
+			// The chaos actually happened while the command ran.
+			expect(counts.rolling + counts.gap).toBeGreaterThan(0);
+			expect(counts.attach + counts.drop).toBeGreaterThan(0);
+			expect(sent.posts).toBeGreaterThanOrEqual(2);
+			expect(sent.streams).toBeGreaterThanOrEqual(1);
+			const status = await command?.refresh();
+			expect(status).toMatchObject({ status: "exited", exitCode: EXIT_CODE });
+
+			if (process.env.SBX_CHAOS_LOG) {
+				console.log(
+					JSON.stringify({
+						seed,
+						elapsedMs: elapsed,
+						counts,
+						sent,
+						maxCloseMs: Math.max(0, ...closeMs),
+					}),
+				);
+			}
+		} catch (e) {
+			const err = e instanceof Error ? e : new Error(String(e));
+			err.message = `[chaos seed ${seed}; replay with SBX_CHAOS_SEED=${seed}]\n${err.message}\nlast actions:\n${trace.slice(-25).join("\n")}`;
+			throw err;
+		}
+	}, 90_000);
+});

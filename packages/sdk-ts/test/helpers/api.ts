@@ -15,6 +15,8 @@ import {
 import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
 import type { TestDatabase } from "@sbx/db/testing";
 
+type Pool = TestDatabase["pool"];
+
 /** Returns a response to replace the real one, or null to pass the request on. */
 export type Hook = (
 	req: Request,
@@ -91,16 +93,6 @@ export async function startTestApi(db: TestDatabase): Promise<TestApi> {
 		return real(req);
 	};
 
-	const sandboxRow = async (slug: string) => {
-		const r = await pool.query<{ id: string; machine_id: string | null }>(
-			"SELECT id, machine_id FROM runtime.sandboxes WHERE slug = $1",
-			[slug],
-		);
-		const row = r.rows[0];
-		if (row === undefined) throw new Error(`no sandbox ${slug}`);
-		return { id: row.id, machineId: row.machine_id };
-	};
-
 	return {
 		url,
 		secret,
@@ -120,27 +112,8 @@ export async function startTestApi(db: TestDatabase): Promise<TestApi> {
 			hooks.push(hook);
 		},
 		sockets: () => [...wss.clients],
-		sandboxRow,
-		async markReady(slug) {
-			const { id } = await sandboxRow(slug);
-			await pool.query(
-				`UPDATE runtime.sandboxes
-				 SET state = 'ready', ready_at = now(), state_changed_at = now(), version = version + 1
-				 WHERE id = $1`,
-				[id],
-			);
-			await pool.query(
-				`UPDATE runtime.machines SET state = 'running', power_observed = 'running'
-				 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
-				[id],
-			);
-			await pool.query(
-				`UPDATE runtime.operations
-				 SET state = 'succeeded', started_at = COALESCE(started_at, now()), finished_at = now()
-				 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
-				[id],
-			);
-		},
+		sandboxRow: (slug) => sandboxRow(pool, slug),
+		markReady: (slug) => markSandboxReady(pool, slug),
 		async close() {
 			for (const ws of wss.clients) ws.terminate();
 			await new Promise<void>((r) => {
@@ -151,4 +124,43 @@ export async function startTestApi(db: TestDatabase): Promise<TestApi> {
 			await agent.close();
 		},
 	};
+}
+
+/** Core uuid and machine of a sandbox by slug. */
+export async function sandboxRow(
+	pool: Pool,
+	slug: string,
+): Promise<{ id: string; machineId: string | null }> {
+	const r = await pool.query<{ id: string; machine_id: string | null }>(
+		"SELECT id, machine_id FROM runtime.sandboxes WHERE slug = $1",
+		[slug],
+	);
+	const row = r.rows[0];
+	if (row === undefined) throw new Error(`no sandbox ${slug}`);
+	return { id: row.id, machineId: row.machine_id };
+}
+
+/** The worker's end of create/resume: ready, machine running, operations succeeded. */
+export async function markSandboxReady(
+	pool: Pool,
+	slug: string,
+): Promise<void> {
+	const { id } = await sandboxRow(pool, slug);
+	await pool.query(
+		`UPDATE runtime.sandboxes
+		 SET state = 'ready', ready_at = now(), state_changed_at = now(), version = version + 1
+		 WHERE id = $1`,
+		[id],
+	);
+	await pool.query(
+		`UPDATE runtime.machines SET state = 'running', power_observed = 'running'
+		 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
+		[id],
+	);
+	await pool.query(
+		`UPDATE runtime.operations
+		 SET state = 'succeeded', started_at = COALESCE(started_at, now()), finished_at = now()
+		 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
+		[id],
+	);
 }
