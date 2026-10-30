@@ -7,7 +7,7 @@ import { runS1 } from "./s1.ts";
 import { runS3 } from "./s3.ts";
 import { runS5 } from "./s5.ts";
 import { runS9 } from "./s9.ts";
-import { runAgentTests } from "./win-agent-tests.ts";
+import { runAgentTestsOn } from "./win-agent-tests.ts";
 
 const USAGE = `usage:
   sbx-bench preflight
@@ -15,7 +15,7 @@ const USAGE = `usage:
   sbx-bench s3 [--skip-suite] [--keep]
   sbx-bench s5 --template <vmid> [--baseline 599] [--runs 5] [--ram-cap 8g] [--keep]
   sbx-bench s9 --template <vmid> [--runs 3] [--ram-cap 8g] [--connect-url <wss>] [--dev-cp-ssh <host>] [--keep]
-  sbx-bench s9 agent-tests --vmid <running clone> --dir <test binaries>
+  sbx-bench s9 agent-tests --template <vmid> --dir <test binaries> [--run <regex>] [--ram-cap 8g] [--keep]
   sbx-bench cleanup`;
 
 export function parseSizeMb(v: string): number {
@@ -40,7 +40,7 @@ async function main(argv: string[]): Promise<number> {
 			out: { type: "string", default: "bench-results" },
 			template: { type: "string" },
 			baseline: { type: "string" },
-			vmid: { type: "string" },
+			run: { type: "string" },
 			dir: { type: "string" },
 			"connect-url": { type: "string" },
 			"dev-cp-ssh": { type: "string" },
@@ -82,15 +82,18 @@ async function main(argv: string[]): Promise<number> {
 		};
 		if (cmd === "s9") {
 			if (positionals[1] === "agent-tests") {
-				const target = vmid(values.vmid, "vmid");
-				if (target === undefined || values.dir === undefined) {
-					process.stderr.write(`--vmid and --dir are required\n${USAGE}\n`);
+				const tpl = vmid(values.template, "template");
+				if (tpl === undefined || values.dir === undefined) {
+					process.stderr.write(`--template and --dir are required\n${USAGE}\n`);
 					return 2;
 				}
-				return await runAgentTests(
-					{ qga: ctx.machines.qga },
-					{ vmid: target, dir: values.dir },
-				);
+				return await runAgentTestsOn(ctx, {
+					template: tpl,
+					dir: values.dir,
+					...(values.run !== undefined ? { run: values.run } : {}),
+					keep: values.keep,
+					ramCapMb: parseSizeMb(values["ram-cap"]),
+				});
 			}
 			const template = vmid(values.template, "template");
 			if (template === undefined) {

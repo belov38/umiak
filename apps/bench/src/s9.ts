@@ -145,6 +145,60 @@ export function agentReadiness(
 	};
 }
 
+/** Polls System/Info over QGA until the agent is ready for the machine; times are host clock. */
+export async function waitAgentReady(o: {
+	qga: Pick<Qga, "ping" | "exec">;
+	vmid: number;
+	want: { machineId: string; hostname?: string };
+	label: string;
+	now: () => number;
+	sleep: (ms: number) => Promise<void>;
+	pollMs: number;
+	timeoutMs: number;
+}): Promise<{ qgaAt: number | null; readyAt: number }> {
+	const deadline = o.now() + o.timeoutMs;
+	let qgaAt: number | null = null;
+	let last = "no answer";
+	for (;;) {
+		if (qgaAt === null && (await o.qga.ping(o.vmid))) qgaAt = o.now();
+		if (qgaAt !== null) {
+			try {
+				const r = await o.qga.exec(o.vmid, INFO_CMD, {
+					input: "{}",
+					timeoutMs: INFO_TIMEOUT_MS,
+				});
+				if (r.exitCode === 0) {
+					const st = agentReadiness(JSON.parse(r.stdout), o.want);
+					if (st.ready) return { qgaAt, readyAt: o.now() };
+					last = st.detail;
+				} else
+					last = `exit ${r.exitCode}: ${r.stderr.trim() || r.stdout.trim()}`;
+			} catch (err) {
+				// The agent or QGA is not up yet, or the VM reboots (fork rename).
+				last = err instanceof Error ? err.message : String(err);
+			}
+		}
+		if (o.now() >= deadline)
+			throw new Error(
+				`${o.label}: agent not ready after ${o.timeoutMs} ms: ${last}`,
+			);
+		await o.sleep(o.pollMs);
+	}
+}
+
+/** Host rules: sandbox VMIDs 500-589, the Windows template is outside that range. */
+export function checkHostRules(
+	cfg: { vmidRange: { min: number; max: number } },
+	template: number,
+): void {
+	if (cfg.vmidRange.min < 500 || cfg.vmidRange.max > 589)
+		throw new Error(
+			`refusing to run: VMID range ${cfg.vmidRange.min}-${cfg.vmidRange.max} is outside 500-589`,
+		);
+	if (template >= cfg.vmidRange.min && template <= cfg.vmidRange.max)
+		throw new Error(`--template ${template} is a sandbox VMID`);
+}
+
 /** Tunnel registration on the dev control plane (the registrar of sbx-tpl verify --connect-url). */
 export interface TunnelRegistrar {
 	register(machineId: string, bsHashHex: string): Promise<void>;
@@ -208,41 +262,21 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		return { uuid: id, bs, smbios };
 	};
 
-	/** Polls System/Info until the agent is ready for the machine; times are host clock. */
-	const waitAgent = async (
+	const waitAgent = (
 		vmid: number,
 		want: { machineId: string; hostname?: string },
 		label: string,
-	): Promise<{ qgaAt: number | null; readyAt: number }> => {
-		const deadline = now() + bootTimeoutMs;
-		let qgaAt: number | null = null;
-		let last = "no answer";
-		for (;;) {
-			if (qgaAt === null && (await machines.qga.ping(vmid))) qgaAt = now();
-			if (qgaAt !== null) {
-				try {
-					const r = await machines.qga.exec(vmid, INFO_CMD, {
-						input: "{}",
-						timeoutMs: INFO_TIMEOUT_MS,
-					});
-					if (r.exitCode === 0) {
-						const st = agentReadiness(JSON.parse(r.stdout), want);
-						if (st.ready) return { qgaAt, readyAt: now() };
-						last = st.detail;
-					} else
-						last = `exit ${r.exitCode}: ${r.stderr.trim() || r.stdout.trim()}`;
-				} catch (err) {
-					// The agent or QGA is not up yet, or the VM reboots (fork rename).
-					last = err instanceof Error ? err.message : String(err);
-				}
-			}
-			if (now() >= deadline)
-				throw new Error(
-					`${label}: agent not ready after ${bootTimeoutMs} ms: ${last}`,
-				);
-			await sleep(pollMs);
-		}
-	};
+	) =>
+		waitAgentReady({
+			qga: machines.qga,
+			vmid,
+			want,
+			label,
+			now,
+			sleep,
+			pollMs,
+			timeoutMs: bootTimeoutMs,
+		});
 
 	const waitTunnel = async (id: string, label: string): Promise<number> => {
 		if (!connect) throw new Error("no tunnel registrar");
@@ -416,13 +450,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 
 export async function runS9(ctx: Ctx, o: S9Options): Promise<number> {
 	const { cfg } = ctx;
-	// Host rules: sandbox VMIDs 500-589; the Windows template is 598.
-	if (cfg.vmidRange.min < 500 || cfg.vmidRange.max > 589)
-		throw new Error(
-			`refusing to run: VMID range ${cfg.vmidRange.min}-${cfg.vmidRange.max} is outside 500-589`,
-		);
-	if (o.template >= cfg.vmidRange.min && o.template <= cfg.vmidRange.max)
-		throw new Error(`--template ${o.template} is a sandbox VMID`);
+	checkHostRules(cfg, o.template);
 	if (o.connectUrl !== undefined && o.devCpSsh === undefined)
 		throw new Error("--connect-url needs --dev-cp-ssh");
 	const secrets: string[] = [];

@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-import type { Params, PveClient } from "@sbx/pve";
-import { Qga } from "@sbx/pve";
 import { describe, expect, it } from "vitest";
 import {
 	agentReadiness,
@@ -12,7 +9,7 @@ import {
 	s9Markdown,
 	summarizeS9,
 } from "../src/s9.ts";
-import { runAgentTests } from "../src/win-agent-tests.ts";
+import { type AgentTestsDeps, runAgentTests } from "../src/win-agent-tests.ts";
 
 const run = (n: number): S9Run => ({
 	createMs: 1000 * n,
@@ -285,119 +282,193 @@ describe("runS9Once", () => {
 	});
 });
 
-/** PveClient that decodes fileWriteWindows chunks and answers test runs. */
-class FakeGuest implements PveClient {
-	execs: { command: string[]; input: string | undefined }[] = [];
-	files = new Map<string, Buffer>();
-	exitCodes = new Map<string, number>();
-	#last = { exited: 1, exitcode: 0, "out-data": "", "err-data": "" };
-	async get<T>(): Promise<T> {
-		return this.#last as T;
-	}
-	async post<T>(_path: string, p?: Params): Promise<T> {
-		const command = (p?.command ?? []) as string[];
-		const input = p?.["input-data"] as string | undefined;
-		this.execs.push({ command, input });
-		let out = "";
-		let code = 0;
-		if (command[0] === "powershell") {
-			const script = command.at(-2) ?? "";
-			const path = command.at(-1) ?? "";
-			if (/FileMode/.test(script)) {
-				const chunk = Buffer.from(input ?? "", "base64");
-				this.files.set(
-					path,
-					/FileMode\]::Create/.test(script)
-						? chunk
-						: Buffer.concat([this.files.get(path) ?? Buffer.alloc(0), chunk]),
-				);
-				if (/SHA256/.test(script))
-					out = createHash("sha256")
-						.update(this.files.get(path) ?? Buffer.alloc(0))
-						.digest("hex");
-			} else if (/Remove-Item/.test(command.at(-1) ?? "")) this.files.clear();
-		} else {
-			code = this.exitCodes.get(command[0] ?? "") ?? 0;
-			out = `=== RUN ${command[0]}\n${code === 0 ? "PASS" : "FAIL"}\n`;
-		}
-		this.#last = { exited: 1, exitcode: code, "out-data": out, "err-data": "" };
-		return { pid: this.execs.length } as T;
-	}
-	put<T>(): Promise<T> {
-		throw new Error("unexpected put");
-	}
-	delete<T>(): Promise<T> {
-		throw new Error("unexpected delete");
-	}
-	async waitTask(): Promise<void> {}
+const INFO_OK = (id: string) =>
+	JSON.stringify({
+		machine_id: id,
+		hostname: "SBXTEST",
+		readiness: [{ name: "identity", state: "ready" }],
+	});
+
+/** Machines fake for agent-tests: records calls; test binaries exit with the given codes. */
+function fakeTestsRun(
+	opts: { exitCodes?: Record<string, number>; copyFails?: boolean } = {},
+) {
+	const calls: string[] = [];
+	const execs: string[][] = [];
+	let uuid = "";
+	let onCd = false;
+	const machines = {
+		async create(o: { smbios?: { uuid: string } }) {
+			uuid = o.smbios?.uuid ?? "";
+			calls.push("create:500");
+			return { vmid: 500, mac: "", node: "pve", disks: [] };
+		},
+		async start(vmid: number) {
+			calls.push(`start:${vmid}`);
+			expect(onCd).toBe(true);
+		},
+		async delete(vmid: number) {
+			calls.push(`delete:${vmid}`);
+		},
+		qga: {
+			async ping() {
+				return true;
+			},
+			async exec(_vmid: number, cmd: string[]) {
+				execs.push(cmd);
+				if (cmd[0] === "powershell") {
+					if (opts.copyFails)
+						return { exitCode: 1, stdout: "", stderr: "no volume" };
+					return {
+						exitCode: 0,
+						stdout: "internal_a.test.exe\r\ninternal_b.test.exe\r\n",
+						stderr: "",
+					};
+				}
+				if (cmd[0] === "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe")
+					return { exitCode: 0, stdout: INFO_OK(uuid), stderr: "" };
+				const code = opts.exitCodes?.[cmd[0] ?? ""] ?? 0;
+				return {
+					exitCode: code,
+					stdout: `=== RUN ${cmd[0]}\n${code === 0 ? "PASS" : "FAIL"}\n`,
+					stderr: "",
+				};
+			},
+		},
+	};
+	const iso = {
+		made: [] as { names: string[]; label: string; sizes: number[] }[],
+		make(files: Map<string, Buffer>, path: string, label: string) {
+			calls.push("make");
+			expect(path).toMatch(/sbx-build-agenttests-\d{14}\.iso$/);
+			this.made.push({
+				names: [...files.keys()],
+				label,
+				sizes: [...files.values()].map((b) => b.length),
+			});
+		},
+		async upload(name: string) {
+			calls.push(`upload:${name}`);
+			expect(name).toMatch(/^sbx-build-[a-z0-9-]{1,64}\.iso$/);
+		},
+		async remove(name: string) {
+			calls.push(`remove:${name.replace(/\d{14}/, "<ts>")}`);
+		},
+		async attach(vmid: number, name: string) {
+			calls.push(`attach:${vmid}:${name.replace(/\d{14}/, "<ts>")}`);
+			onCd = true;
+		},
+	};
+	let printed = "";
+	const deps = {
+		machines: machines as unknown as AgentTestsDeps["machines"],
+		ram: {
+			async reserve(vmid: number) {
+				calls.push(`reserve:${vmid}`);
+			},
+			release(vmid: number) {
+				calls.push(`release:${vmid}`);
+			},
+		},
+		iso,
+		files: {
+			list: () => ["internal_a.test.exe", "internal_b.test.exe", "notes.txt"],
+			read: (p: string) =>
+				p.endsWith("internal_a.test.exe")
+					? Buffer.alloc(70_000, 7)
+					: Buffer.from("MZ"),
+		},
+		out: (s: string) => {
+			printed += s;
+		},
+		log: () => {},
+		sleep: async () => {},
+		pollMs: 1,
+	} satisfies AgentTestsDeps;
+	return { deps, calls, execs, iso, printed: () => printed };
 }
 
-describe("agent-tests", () => {
-	const big = Buffer.alloc(70_000, 7);
-	const files = {
-		list: () => ["internal_a.test.exe", "internal_b.test.exe", "notes.txt"],
-		read: (p: string) =>
-			p.endsWith("internal_a.test.exe") ? big : Buffer.from("MZ"),
-	};
+const A = "C:\\sbx-tests\\internal_a.test.exe";
+const B = "C:\\sbx-tests\\internal_b.test.exe";
+const opts = { template: 598, dir: "/tmp/x", keep: false, ramCapMb: 8192 };
 
-	it("chunks files ≤ 32 KiB and fails on a non-zero test exit", async () => {
-		const guest = new FakeGuest();
-		guest.exitCodes.set("C:\\sbx-tests\\internal_b.test.exe", 1);
-		let printed = "";
-		const code = await runAgentTests(
-			{
-				qga: new Qga(guest, "pve"),
-				files,
-				out: (s) => {
-					printed += s;
-				},
-				log: () => {},
-			},
-			{ vmid: 540, dir: "/tmp/x" },
-		);
+describe("agent-tests", () => {
+	it("runs every binary from the ISO clone as SYSTEM, fails on a non-zero exit and cleans up", async () => {
+		const t = fakeTestsRun({ exitCodes: { [B]: 1 } });
+		const code = await runAgentTests(t.deps, { ...opts, run: "TestFoo" });
 		expect(code).toBe(1);
-		const writes = guest.execs.filter((e) => e.input !== undefined);
-		// 70000 B = 3 chunks, "MZ" = 1 chunk.
-		expect(writes).toHaveLength(4);
-		for (const w of writes)
-			expect(
-				Buffer.from(w.input as string, "base64").length,
-			).toBeLessThanOrEqual(32 * 1024);
-		const runs = guest.execs
-			.filter((e) => e.command[0]?.endsWith(".test.exe"))
-			.map((e) => e.command);
-		expect(runs).toEqual([
-			["C:\\sbx-tests\\internal_a.test.exe", "-test.v", "-test.timeout", "5m"],
-			["C:\\sbx-tests\\internal_b.test.exe", "-test.v", "-test.timeout", "5m"],
+		// The ISO holds only the test binaries, whole (no chunking), under the SBXTESTS label.
+		expect(t.iso.made).toEqual([
+			{
+				names: ["internal_a.test.exe", "internal_b.test.exe"],
+				label: "SBXTESTS",
+				sizes: [70_000, 2],
+			},
 		]);
-		expect(printed).toContain("internal_a.test.exe");
-		expect(printed).toMatch(/internal_b\.test\.exe\s+FAIL \(exit 1\)/);
-		// The directory is removed at the end, also after a failure.
-		expect(guest.execs.at(-1)?.command.at(-1)).toMatch(
-			/Remove-Item.*sbx-tests/,
-		);
+		expect(t.calls).toEqual([
+			"make",
+			expect.stringMatching(/^upload:sbx-build-agenttests-\d{14}\.iso$/),
+			"create:500",
+			"attach:500:sbx-build-agenttests-<ts>.iso",
+			"reserve:500",
+			"start:500",
+			"delete:500",
+			"remove:sbx-build-agenttests-<ts>.iso",
+			"release:500",
+		]);
+		const runs = t.execs.filter((c) => c[0]?.endsWith(".test.exe"));
+		expect(runs).toEqual([
+			[A, "-test.v", "-test.timeout", "10m", "-test.run", "TestFoo"],
+			[B, "-test.v", "-test.timeout", "10m", "-test.run", "TestFoo"],
+		]);
+		expect(t.printed()).toContain(`=== RUN ${A}`);
+		expect(t.printed()).toMatch(/internal_b\.test\.exe\s+FAIL \(exit 1\)/);
 	});
 
 	it("passes when every binary exits 0", async () => {
-		const guest = new FakeGuest();
-		const code = await runAgentTests(
-			{ qga: new Qga(guest, "pve"), files, out: () => {}, log: () => {} },
-			{ vmid: 540, dir: "/tmp/x" },
-		);
-		expect(code).toBe(0);
+		const t = fakeTestsRun();
+		expect(await runAgentTests(t.deps, opts)).toBe(0);
+		const runs = t.execs.filter((c) => c[0]?.endsWith(".test.exe"));
+		expect(runs[0]).toEqual([A, "-test.v", "-test.timeout", "10m"]);
 	});
 
-	it("refuses an empty directory", async () => {
+	it("deletes the clone and the ISO when the copy fails", async () => {
+		const t = fakeTestsRun({ copyFails: true });
+		let clock = 0;
 		await expect(
 			runAgentTests(
 				{
-					qga: new Qga(new FakeGuest(), "pve"),
-					files: { list: () => ["x.txt"], read: () => Buffer.alloc(0) },
-					out: () => {},
-					log: () => {},
+					...t.deps,
+					now: () => {
+						clock += 30_000;
+						return clock;
+					},
 				},
-				{ vmid: 540, dir: "/tmp/x" },
+				opts,
+			),
+		).rejects.toThrow(/copy from the SBXTESTS CD failed/);
+		expect(t.calls).toContain("delete:500");
+		expect(t.calls.some((c) => c.startsWith("remove:"))).toBe(true);
+	});
+
+	it("keeps the clone and the ISO with keep", async () => {
+		const t = fakeTestsRun();
+		await runAgentTests(t.deps, { ...opts, keep: true });
+		expect(t.calls.some((c) => c.startsWith("delete:"))).toBe(false);
+		expect(t.calls.some((c) => c.startsWith("remove:"))).toBe(false);
+	});
+
+	it("refuses a directory without test binaries", async () => {
+		const t = fakeTestsRun();
+		await expect(
+			runAgentTests(
+				{
+					...t.deps,
+					files: { list: () => ["x.txt"], read: () => Buffer.alloc(0) },
+				},
+				opts,
 			),
 		).rejects.toThrow(/no \*\.test\.exe/);
+		expect(t.calls).toEqual([]);
 	});
 });
