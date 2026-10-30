@@ -454,6 +454,87 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		}
 	});
 
+	const statusOf = async (s: ReadySandbox) =>
+		(
+			await db.pool.query(
+				"SELECT status FROM runtime.commands WHERE sandbox_id = $1",
+				[s.sandboxId],
+			)
+		).rows.map((x) => x.status);
+	const internalId = (pub: string) => pub.slice(4).toUpperCase();
+
+	it("Start failing with internal after the launch, without a key → 503 unknown outcome, row stays starting, the process runs once", async () => {
+		const s = await readySandbox(w);
+		w.agent.failNextStart(s.machineId, "internal", { launched: true });
+		const r = await run({ command: "echo late", mode: "detached" }, s.commands);
+		expect(r.status).toBe(503);
+		const e = (r.body as Any).error;
+		expect(e).toMatchObject({
+			code: "agent_unavailable",
+			retryable: false,
+			details: { outcome: "unknown" },
+		});
+		expect(e.details.commandId).toMatch(/^cmd_/);
+		expect(await statusOf(s)).toEqual(["starting"]);
+		expect(w.agent.startCount(internalId(e.details.commandId))).toBe(1);
+	});
+
+	it("Start failing with internal after the launch, with a key → 503 retryable; the retry joins the process (one launch)", async () => {
+		const s = await readySandbox(w);
+		w.agent.failNextStart(s.machineId, "internal", { launched: true });
+		const headers = { "idempotency-key": `k-${randomUUID()}` };
+		const body = { command: "echo keyed", mode: "detached" };
+		const r = await run(body, s.commands, headers);
+		expect(r.status).toBe(503);
+		const e = (r.body as Any).error;
+		expect(e).toMatchObject({ code: "agent_unavailable", retryable: true });
+		expect(e.details.commandId).toMatch(/^cmd_/);
+		expect(await statusOf(s)).toEqual(["starting"]);
+		const again = await run(body, s.commands, headers);
+		expect(again.status).toBe(200);
+		expect((again.body as Any).id).toBe(e.details.commandId);
+		expect(w.agent.startCount(internalId(e.details.commandId))).toBe(1);
+		const done = await until(async () => {
+			const g = await h.request("GET", `${s.commands}/${e.details.commandId}`);
+			return (g.body as Any).status === "exited" && g;
+		});
+		expect((done.body as Any).exitCode).toBe(0);
+	});
+
+	it("Start failing with Connect Unknown or an unrecognised code → 503 unknown outcome, row stays starting", async () => {
+		for (const code of ["unknown", "data_loss", "something_new"]) {
+			const s = await readySandbox(w);
+			w.agent.failNextStart(s.machineId, code);
+			const r = await run({ command: "true", mode: "detached" }, s.commands);
+			expect(r.status, code).toBe(503);
+			expect((r.body as Any).error, code).toMatchObject({
+				code: "agent_unavailable",
+				retryable: false,
+				details: { outcome: "unknown" },
+			});
+			expect(await statusOf(s), code).toEqual(["starting"]);
+		}
+	});
+
+	it("definite refusals of Start mark the row failed_to_start", async () => {
+		const refusals: [string, number][] = [
+			["invalid_argument", 400],
+			["already_exists", 409],
+			["not_claimed", 409],
+			["failed_precondition", 409],
+			["shim_outdated", 409],
+			["unimplemented", 409],
+			["request_id_reused", 409],
+		];
+		for (const [code, status] of refusals) {
+			const s = await readySandbox(w);
+			w.agent.failNextStart(s.machineId, code);
+			const r = await run({ command: "true", mode: "detached" }, s.commands);
+			expect(r.status, code).toBe(status);
+			expect(await statusOf(s), code).toEqual(["failed_to_start"]);
+		}
+	});
+
 	it("a capability check cut short by a close of the stream answers the close (401), not 500", async () => {
 		const s = await readySandbox(w);
 		const agent = w.agent;

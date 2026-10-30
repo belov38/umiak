@@ -318,7 +318,9 @@ function errorDetail(e: ConnectError) {
  * Unavailable, Canceled and DeadlineExceeded pass unchanged (the transport
  * failed or the outcome is unknown); any other Connect error is an answer
  * of the agent: AgentCallError with the ErrorDetail code, or the Connect
- * code name without one.
+ * code name without one. An answer is not always a refusal: the agent
+ * sends `internal` also after Start launched the process, so callers of
+ * mutations decide per code (commands/run.ts).
  */
 export function toAgentError(e: unknown): unknown {
 	if (!(e instanceof ConnectError)) return e;

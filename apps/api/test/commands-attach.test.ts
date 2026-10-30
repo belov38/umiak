@@ -174,6 +174,89 @@ describe.skipIf(skipPg())("attach and output", () => {
 		});
 	});
 
+	describe("leftovers writing past the end of an exited command", () => {
+		const internalId = (pub: string) => pub.slice(4).toUpperCase();
+
+		async function withLeftovers(): Promise<string> {
+			const id = await detached("printf 0123456789; printf abcdef >&2");
+			await exited(id);
+			w.agent.writePastEnd(internalId(id), "stdout", "LEFTOVER-LEFTOVER");
+			w.agent.writePastEnd(internalId(id), "stderr", "XYZ");
+			return id;
+		}
+
+		it("tailBytes measures from the end: the tail before the end, then exit", async () => {
+			const id = await withLeftovers();
+			const s = await openStream(
+				h,
+				"GET",
+				`${sb.commands}/${id}/stream?tailBytes=4`,
+			);
+			const frames = await s.rest();
+			expect(frames.some((f) => f.type === "error")).toBe(false);
+			expect(frames[0]).toMatchObject({
+				type: "attached",
+				stdoutOffset: 6,
+				stderrOffset: 2,
+			});
+			const b = bytesOf(frames, "utf8", { stdout: 6, stderr: 2 });
+			expect(b.stdout.toString()).toBe("6789");
+			expect(b.stderr.toString()).toBe("cdef");
+			expect(frames.at(-1)).toMatchObject({
+				type: "exit",
+				stdoutOffset: 10,
+				stderrOffset: 6,
+			});
+		});
+
+		it("an offset between the end and the size is 416; the end itself is exit", async () => {
+			const id = await withLeftovers();
+			const r = await h.request(
+				"GET",
+				`${sb.commands}/${id}/stream?stdoutOffset=12`,
+			);
+			expect(r.status).toBe(416);
+			expect((r.body as Any).error).toMatchObject({
+				code: "range_not_satisfiable",
+				details: { stream: "stdout", size: 10 },
+			});
+			const atEnd = await openStream(
+				h,
+				"GET",
+				`${sb.commands}/${id}/stream?stdoutOffset=10&stderrOffset=6`,
+			);
+			const frames = await atEnd.rest();
+			expect(frames.map((f) => f.type)).toEqual(["attached", "exit"]);
+		});
+
+		it("/output stops at the end and sets Sbx-Stream-End; past the end is 416", async () => {
+			const id = await withLeftovers();
+			const r = await h.request("GET", `${sb.commands}/${id}/output`);
+			expect(r.status).toBe(200);
+			expect(r.text).toBe("0123456789");
+			expect(r.headers.get("sbx-next-offset")).toBe("10");
+			expect(r.headers.get("sbx-stream-end")).toBe("10");
+			const beyond = await h.request(
+				"GET",
+				`${sb.commands}/${id}/output?offset=12`,
+			);
+			expect(beyond.status).toBe(416);
+			expect((beyond.body as Any).error).toMatchObject({
+				code: "range_not_satisfiable",
+				details: { size: 10 },
+			});
+		});
+
+		it("the Command resource reports the size up to the end", async () => {
+			const id = await withLeftovers();
+			const g = await h.request("GET", `${sb.commands}/${id}`);
+			expect((g.body as Any).streams).toEqual({
+				stdout: { sizeBytes: 10, availableFromBytes: 0, endBytes: 10 },
+				stderr: { sizeBytes: 6, availableFromBytes: 0, endBytes: 6 },
+			});
+		});
+	});
+
 	it("follow=false: what exists now, then the end (no exit while running)", async () => {
 		const gate = shellGate();
 		const id = await detached(`echo early; ${gate.shell}; echo late`);

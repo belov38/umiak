@@ -130,6 +130,12 @@ principal, то есть после аутентификации; до неё к
   идемпотентности), `MakeDir`/`Move`/`Chmod`/`Remove`, `UpdateEnv`/`UpdateSecrets`. Ответ `request_id_reused`
   значит другой запрос под тем же id → `409 idempotency_key_reused`.
 - `SendInput.seq` начинается с 1: shim отбрасывает `seq <= last`, у новой сессии `last = 0`.
+- Ошибки `Start`: `failed_to_start` — только у отказов до запуска процесса (`invalid_argument`, `user_not_found`,
+  `already_exists`, `too_many_commands`, `not_claimed`, `failed_precondition`, `shim_outdated`, `unimplemented`,
+  `request_id_reused`). `internal` агент шлёт и после запуска процесса, поэтому `internal`, `unknown` и
+  незнакомые коды — исход неизвестен (`503`, строка остаётся `starting`; `commands/run.ts`).
+- `StreamInfo.size` — размер файла потока; после выхода оставшиеся процессы могут писать дальше `end`
+  (S3 §10). Смещения, `tailBytes` и `sizeBytes` считать от `streamSize()` = `min(size, end)`.
 
 ## OpenAPI
 

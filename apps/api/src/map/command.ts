@@ -10,7 +10,11 @@ import {
 	type CommandStatus,
 	storableOutputTruncated,
 } from "@sbx/core";
-import type { AgentCommandInfo, AgentStreamInfo } from "../agent/types.ts";
+import {
+	type AgentCommandInfo,
+	type AgentStreamInfo,
+	streamSize,
+} from "../agent/types.ts";
 import { commandStatus } from "../commands/attach.ts";
 import { notFoundError } from "../http/errors.ts";
 import type { CommandResource } from "../schemas/command.ts";
@@ -59,9 +63,10 @@ function reasonOf(status: CommandStatus): string | null {
 	}
 }
 
+// sizeBytes stops at the end of an exited command (leftovers, S3 §10).
 const streamInfo = (s: AgentStreamInfo) => ({
-	sizeBytes: s.size,
-	availableFromBytes: s.availableFrom,
+	sizeBytes: streamSize(s),
+	availableFromBytes: Math.min(s.availableFrom, streamSize(s)),
 	endBytes: s.end,
 });
 

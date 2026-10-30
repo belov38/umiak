@@ -185,8 +185,12 @@ export function agentUnavailableError(): ApiError {
  * | anything else | 502 agent_error with details.agentCode |
  *
  * ApiError passes through; a non-agent error maps like `toHttpError`
- * (500 internal). A refused Start (an AgentCallError) never ran: the api
- * marks the command `failed_to_start`.
+ * (500 internal). Start is classified in commands/run.ts first: only the
+ * codes the agent sends before it launches anything (invalid_argument,
+ * user_not_found, already_exists, too_many_commands, not_claimed,
+ * request_id_reused, ...) mark the command `failed_to_start`; any other
+ * error of a Start (`internal`, `unknown`, an unknown code) is an unknown
+ * outcome (503, the row stays `starting`).
  */
 export function agentErrorToHttp(e: unknown): ApiError {
 	if (e instanceof ApiError) return e;

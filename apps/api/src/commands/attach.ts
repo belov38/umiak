@@ -14,13 +14,14 @@ import {
 } from "@sbx/agent-client";
 import { type CommandResult, storableOutputTruncated } from "@sbx/core";
 import { agentErrorToHttp, isAgentUnreachable } from "../agent/errors.ts";
-import type {
-	AgentAttachEvent,
-	AgentCommandInfo,
-	AgentExitInfo,
-	AgentExitReason,
-	AgentExitStatus,
-	AgentStream,
+import {
+	type AgentAttachEvent,
+	type AgentCommandInfo,
+	type AgentExitInfo,
+	type AgentExitReason,
+	type AgentExitStatus,
+	type AgentStream,
+	streamSize,
 } from "../agent/types.ts";
 import type { ApiDeps } from "../deps.ts";
 import { ApiError, validationError } from "../http/errors.ts";
@@ -71,7 +72,8 @@ export function withinBudget<T>(
 /**
  * Start offsets of `GET .../stream` (§9.5) and the PTY socket (§10.2): an
  * offset of a stream the command does not have is 400 (0 is ignored); an
- * offset past the stream's size is 416 like `/output`. Without the check
+ * offset past the stream's size (its end once exited, `streamSize`) is 416
+ * like `/output`. Without the check
  * an exited command never reaches its end at such an offset and the attach
  * is reopened until it gives up. `param` names the offset in the message
  * (default `<stream>Offset`, the query of `/stream`).
@@ -109,7 +111,8 @@ export async function checkStreamOffsets(
 		throw agentErrorToHttp(e);
 	}
 	for (const s of asked) {
-		const size = info.streams[s]?.size ?? 0;
+		const si = info.streams[s];
+		const size = si === undefined ? 0 : streamSize(si);
 		const offset = offsets[s] ?? 0;
 		if (offset > size) {
 			throw new ApiError(
@@ -450,8 +453,10 @@ export async function* followCommand(
 			for (const s of streams) {
 				const si = info.streams[s];
 				if (si === undefined) continue;
-				const from = Math.max(si.availableFrom, si.size - opts.tailBytes);
-				start[s] = sent[s] = agentAt[s] = Math.max(from, 0);
+				// From the end of an exited command: leftovers may write past it.
+				const size = streamSize(si);
+				const from = Math.max(si.availableFrom, size - opts.tailBytes);
+				start[s] = sent[s] = agentAt[s] = Math.max(Math.min(from, size), 0);
 			}
 		} catch (e) {
 			if (opts.head) yield opts.head(offsetsNow());

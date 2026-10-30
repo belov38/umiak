@@ -5,6 +5,7 @@
 // never starts a second process: the agent's Start is idempotent by
 // commandId, and a command that already ended is not started again.
 import { randomUUID } from "node:crypto";
+import { AgentOutdatedError } from "@sbx/agent-client";
 import {
 	COMMAND_SCOPE,
 	type Command,
@@ -101,15 +102,52 @@ export function requireSameMachine(
 	}
 }
 
-/** `agent_unavailable` of a Start whose outcome is unknown (§9.1). */
-function startUnavailable(commandId: string, keyed: boolean): ApiError {
+/**
+ * Agent codes of a Start that the agent refuses before it launches anything
+ * (S3 §9.2, services/guest-agent internal/process/start.go and the claim and
+ * request-id interceptors): the process never ran. `failed_precondition`,
+ * `shim_outdated` and `unimplemented` are answers of a call the agent does
+ * not serve. Any other code (`internal` after the launch, a Connect
+ * `unknown`, a code this api does not know) leaves the outcome unknown.
+ */
+const START_REFUSED = new Set([
+	"invalid_argument",
+	"user_not_found",
+	"already_exists",
+	"too_many_commands",
+	"not_claimed",
+	"failed_precondition",
+	"shim_outdated",
+	"unimplemented",
+	"request_id_reused",
+]);
+
+/** The agent refused the Start: its process never started. */
+function isStartRefused(e: unknown): boolean {
+	if (e instanceof AgentOutdatedError) return true;
+	return e instanceof AgentCallError && START_REFUSED.has(e.code);
+}
+
+/**
+ * `agent_unavailable` of a Start whose outcome is unknown (§9.1): the agent
+ * was not reached, the call ran out of time, or the agent failed in a way
+ * that does not say whether the process started (`unreachable` false).
+ */
+function startUnavailable(
+	commandId: string,
+	keyed: boolean,
+	unreachable: boolean,
+): ApiError {
 	const id = publicCommandId(commandId);
+	const what = unreachable
+		? "the sandbox agent is not reachable"
+		: "the sandbox agent failed while starting the command";
 	return new ApiError(
 		503,
 		"agent_unavailable",
 		keyed
-			? "the sandbox agent is not reachable; retry with the same Idempotency-Key (the command starts at most once)"
-			: `the sandbox agent is not reachable and the command may have started; check GET .../commands/${id}`,
+			? `${what}; retry with the same Idempotency-Key (the command starts at most once)`
+			: `${what} and the command may have started; check GET .../commands/${id}`,
 		{
 			retryable: keyed,
 			details: keyed
@@ -214,17 +252,20 @@ export async function startPlanned(
 		);
 		info = r.command;
 	} catch (e) {
-		// Unreachable, Unavailable with a detail, or DeadlineExceeded: the
-		// agent may have started it.
-		if (isAgentOutcomeUnknown(e)) {
-			throw startUnavailable(command.id, idemKey !== undefined);
-		}
-		if (e instanceof AgentCallError) {
+		if (isStartRefused(e)) {
 			// The agent refused it: the process never started. A row that a
 			// concurrent replay already moved on is left alone.
 			await svc.failCommandStart(command.id).catch(() => {});
+			throw agentErrorToHttp(e);
 		}
-		throw agentErrorToHttp(e);
+		// Unreachable, DeadlineExceeded, or an agent error that may come
+		// after the launch (`internal`): the agent may have started it, so
+		// the row stays `starting` and only a keyed retry repeats the Start.
+		throw startUnavailable(
+			command.id,
+			idemKey !== undefined,
+			isAgentOutcomeUnknown(e),
+		);
 	}
 
 	await svc.markCommandRunning(command.id, info.pid);

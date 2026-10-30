@@ -20,7 +20,11 @@ import {
 	isAgentOutcomeUnknown,
 	unknownOutcomeError,
 } from "../agent/errors.ts";
-import type { AgentCommandInfo, AgentStream } from "../agent/types.ts";
+import {
+	type AgentCommandInfo,
+	type AgentStream,
+	streamSize,
+} from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import {
@@ -785,27 +789,32 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			throw agentErrorToHttp(e);
 		}
 		const si = info.streams[stream] ?? { size: 0, availableFrom: 0, end: 0 };
+		// Up to the end of an exited command: leftovers may write past it.
+		const size = streamSize(si);
 		let offset = q.offset ?? 0;
-		let availableFrom = si.availableFrom;
+		let availableFrom = Math.min(si.availableFrom, size);
 		let truncated = false;
 		if (offset < availableFrom) {
 			offset = availableFrom;
 			truncated = true;
 		}
-		if (offset > si.size) {
+		if (offset > size) {
 			throw new ApiError(
 				416,
 				"range_not_satisfiable",
-				`offset ${offset} is past the end of ${stream} (${si.size} bytes so far)`,
-				{ details: { size: si.size } },
+				`offset ${offset} is past the end of ${stream} (${size} bytes so far)`,
+				{ details: { size } },
 			);
 		}
 		const parts: Uint8Array[] = [];
 		let got = 0;
-		if (offset < si.size) {
+		if (offset < size) {
 			const ac = new AbortController();
-			const at = (s: AgentStream) =>
-				s === stream ? offset : (info.streams[s]?.size ?? 0);
+			const at = (s: AgentStream) => {
+				if (s === stream) return offset;
+				const o = info.streams[s];
+				return o === undefined ? 0 : streamSize(o);
+			};
 			try {
 				for await (const ev of deps.agent.attach(
 					machineId,

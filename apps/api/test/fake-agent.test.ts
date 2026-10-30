@@ -705,6 +705,44 @@ describe("input, PTY, signals", () => {
 		expect(other.exit).toMatchObject({ outputTruncated: null });
 	});
 
+	it("writePastEnd: size grows past the end, attach stops at the end", async () => {
+		const m = newMachine();
+		const r = await run(m, spec({ shell: "printf abc" }));
+		fake.writePastEnd(r.commandId, "stdout", "LEFT");
+		const info = await fake.get(m, r.commandId);
+		expect(info.streams.stdout).toEqual({ size: 7, availableFrom: 0, end: 3 });
+		const all = await collect(attachAll(m, r.commandId));
+		expect(all.out.stdout).toBe("abc");
+		expect(all.exit).toMatchObject({ stdoutEnd: 3 });
+		const tail = await collect(attachAll(m, r.commandId, {}, { tailBytes: 2 }));
+		expect(tail.out.stdout).toBe("bc");
+	});
+
+	it("failNextStart: refused before the launch, or failing after it", async () => {
+		const m = newMachine();
+		fake.failNextStart(m, "invalid_argument");
+		const id = randomUUID();
+		const s = spec({ shell: "true" });
+		await expect(
+			fake.start(m, { commandId: id, spec: s }, { requestId: "r" }),
+		).rejects.toMatchObject({
+			name: "AgentCallError",
+			code: "invalid_argument",
+		});
+		expect(fake.startCount(id, m)).toBe(0);
+		fake.failNextStart(m, "internal", { launched: true });
+		await expect(
+			fake.start(m, { commandId: id, spec: s }, { requestId: "r" }),
+		).rejects.toMatchObject({ code: "internal" });
+		const again = await fake.start(
+			m,
+			{ commandId: id, spec: s },
+			{ requestId: "r" },
+		);
+		expect(again.created).toBe(false);
+		expect(fake.startCount(id, m)).toBe(1);
+	});
+
 	it("timeoutMs: SIGTERM like the shim, reason timeout", async () => {
 		const m = newMachine();
 		const r = await run(m, spec({ shell: "sleep 30", timeoutMs: 100 }));

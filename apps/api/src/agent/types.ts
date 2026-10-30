@@ -72,12 +72,24 @@ export interface AgentExitInfo {
 }
 
 export interface AgentStreamInfo {
-	/** Bytes produced so far. */
+	/**
+	 * Bytes in the stream file. On Linux leftovers of an exited command may
+	 * keep writing past `end` (S3 §10): use `streamSize` for offsets.
+	 */
 	size: number;
 	/** Oldest offset still retained. */
 	availableFrom: number;
 	/** Final size once the stream is closed. */
 	end: number | null;
+}
+
+/**
+ * The size of a stream as the api serves it: `size`, capped by `end` once
+ * the command has exited. Bytes past the end (leftovers, S3 §10) are never
+ * sent by attach, so every offset, tail and size derives from this.
+ */
+export function streamSize(s: AgentStreamInfo): number {
+	return s.end === null ? s.size : Math.min(s.size, s.end);
 }
 
 export interface AgentCommandInfo {

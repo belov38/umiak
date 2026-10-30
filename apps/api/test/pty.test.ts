@@ -621,6 +621,28 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		expect(big.texts[0]).toEqual({ type: "attached", offset: 0 });
 	});
 
+	it("leftovers writing past the end of an exited PTY: tailBytes measures from the end, an offset past the end is 4416", async () => {
+		const id = await pty({ command: "printf abcdef" });
+		const first = connect(connectPath(id));
+		expect((await first.closed).code).toBe(1000);
+		expect(first.bytes().toString()).toBe("abcdef");
+		w.agent.writePastEnd(id.slice(4).toUpperCase(), "pty", "LEFTOVER");
+
+		const tail = connect(connectPath(id, "?tailBytes=4"));
+		expect((await tail.closed).code).toBe(1000);
+		expect(tail.texts[0]).toEqual({ type: "attached", offset: 2 });
+		expect(tail.bytes().toString()).toBe("cdef");
+		expect(tail.texts.at(-1)).toMatchObject({ type: "exit", ptyOffset: 6 });
+
+		const past = connect(connectPath(id, "?offset=8"));
+		expect((await past.closed).code).toBe(4416);
+		expect(past.texts[0]).toMatchObject({
+			type: "error",
+			code: "range_not_satisfiable",
+			details: { stream: "pty", size: 6 },
+		});
+	});
+
 	it("before the upgrade: no subprotocol 400, wrong one 400, no bearer 401, no scope 403, plain GET 426 — all with the error envelope", async () => {
 		const id = await pty({ command: "cat" });
 		const none = connect(connectPath(id), { protocols: [] });

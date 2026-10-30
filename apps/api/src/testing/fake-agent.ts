@@ -11,7 +11,8 @@
 // - a PTY command is the same process without a terminal: stdout and stderr
 //   share one pipe into the single stream "pty", `update` records sizes;
 // - attach: truncated, heartbeat, exit only after all output (S2 §9.1);
-// - faults: failNextAttach, setUnavailable, retention, chunkSize.
+// - faults: failNextAttach, failNextStart, setUnavailable, retention,
+//   chunkSize, writePastEnd (leftovers writing past the end of a stream).
 // Call close() (afterAll): it kills every process group and removes the
 // temporary directories.
 import { type ChildProcess, spawn } from "node:child_process";
@@ -121,6 +122,7 @@ interface MachineState {
 	failNext: { afterBytes: number; kind: FakeAttachFailure } | null;
 	/** failNextAttach failures that were thrown. */
 	attachFailures: number;
+	failStart: { code: string; launched: boolean } | null;
 	commands: Map<string, FakeCommand>;
 	/** Process launches by commandId. */
 	starts: Map<string, number>;
@@ -251,6 +253,42 @@ export class FakeAgent implements AgentApi {
 	}
 
 	/**
+	 * The next Start of a new command on the machine fails with the agent
+	 * error `code` (an AgentCallError, as ConnectAgentApi maps it; `unknown`
+	 * stands for a Connect Unknown). With `launched` the process is started
+	 * first: the real agent can fail after the launch (a store error in
+	 * markRunning, a systemd query in settle; S3 §9.2), so the process runs
+	 * and a repeat with the same commandId finds it.
+	 */
+	failNextStart(
+		machineId: string,
+		code: string,
+		opts: { launched?: boolean } = {},
+	): void {
+		this.#state(machineId).failStart = {
+			code,
+			launched: opts.launched ?? false,
+		};
+	}
+
+	/**
+	 * Leftovers of an exited command write `data` to `stream` past its end
+	 * (S3 §10, Linux): the size of the stream grows, its end stays, and
+	 * attach never sends bytes past the end.
+	 */
+	writePastEnd(
+		commandId: string,
+		stream: AgentStream,
+		data: string | Uint8Array,
+	): void {
+		const cmd = this.#allCommands().find((c) => c.id === commandId);
+		if (cmd === undefined) throw new Error(`no command ${commandId}`);
+		if (cmd.exit === null) throw new Error(`command ${commandId} runs`);
+		cmd.buffer(stream).append(Buffer.from(data), this.#retain);
+		cmd.notify();
+	}
+
+	/**
 	 * Marks the command's output as cut by the shim (`output_truncated`,
 	 * e.g. "disk_full"): its exit event and Get carry the reason.
 	 */
@@ -330,6 +368,7 @@ export class FakeAgent implements AgentApi {
 				unavailable: false,
 				failNext: null,
 				attachFailures: 0,
+				failStart: null,
 				commands: new Map(),
 				starts: new Map(),
 			};
@@ -408,12 +447,21 @@ export class FakeAgent implements AgentApi {
 				`at most ${this.#maxRunning} commands may run`,
 			);
 		}
+		const fault = s.failStart;
+		s.failStart = null;
+		const injected = () =>
+			callError(
+				fault?.code ?? "internal",
+				"fake agent: injected Start failure",
+			);
+		if (fault !== null && !fault.launched) throw injected();
 		// Registered before any await: a concurrent Start finds it.
 		const cmd = new FakeCommand(req.commandId, spec, hash, () => this.#retain);
 		s.commands.set(req.commandId, cmd);
 		s.starts.set(req.commandId, (s.starts.get(req.commandId) ?? 0) + 1);
 		this.#launch(s, cmd);
 		await cmd.started;
+		if (fault !== null) throw injected();
 		return { command: cmd.info(), created: true };
 	}
 
@@ -493,13 +541,16 @@ export class FakeAgent implements AgentApi {
 			stderr: req.stderrOffset,
 			pty: req.ptyOffset,
 		};
+		// Bytes past the end of an exited command (leftovers) are never sent.
+		const limit = (b: OutputBuffer) =>
+			cmd.exit !== null && b.end !== null ? Math.min(b.size, b.end) : b.size;
 		const pos = new Map<AgentStream, number>();
 		for (const name of streams) {
 			const b = cmd.buffer(name);
 			pos.set(
 				name,
 				req.tailBytes
-					? Math.max(b.availableFrom, b.size - req.tailBytes)
+					? Math.max(b.availableFrom, limit(b) - req.tailBytes)
 					: requested[name],
 			);
 		}
@@ -519,8 +570,8 @@ export class FakeAgent implements AgentApi {
 					progressed = true;
 					yield { type: "truncated", stream: name, availableFrom: p };
 				}
-				if (p < b.size) {
-					let n = Math.min(Math.max(1, this.chunkSize), b.size - p);
+				if (p < limit(b)) {
+					let n = Math.min(Math.max(1, this.chunkSize), limit(b) - p);
 					if (fail !== null) n = Math.min(n, fail.afterBytes - sent);
 					if (n <= 0) throw failure();
 					const data = b.read(p, n);
@@ -534,14 +585,15 @@ export class FakeAgent implements AgentApi {
 			const exit = cmd.exit;
 			if (
 				exit !== null &&
-				streams.every((n) => (pos.get(n) ?? 0) >= cmd.buffer(n).size)
+				streams.every((n) => (pos.get(n) ?? 0) >= limit(cmd.buffer(n)))
 			) {
+				const end = (n: AgentStream) => cmd.out.get(n)?.end ?? 0;
 				yield {
 					type: "exit",
 					...exit,
-					stdoutEnd: cmd.out.get("stdout")?.size ?? 0,
-					stderrEnd: cmd.out.get("stderr")?.size ?? 0,
-					ptyEnd: cmd.out.get("pty")?.size ?? 0,
+					stdoutEnd: end("stdout"),
+					stderrEnd: end("stderr"),
+					ptyEnd: end("pty"),
 					endedAt: cmd.endedAt,
 					outputTruncated: cmd.outputTruncated,
 				};
