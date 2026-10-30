@@ -14,6 +14,7 @@ import {
 	type Check,
 	check,
 	dmi,
+	hostAddresses,
 	type NetTargets,
 	networkChecks,
 	pingBlocked,
@@ -139,7 +140,7 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 	}
 	const targets: NetTargets = {
 		...DEFAULT_TARGETS,
-		hostAddress: process.env.SBX_NODE_SSH_HOST || DEFAULT_HOST_ADDRESS,
+		hostAddresses: hostAddresses(process.env, DEFAULT_HOST_ADDRESS),
 		hostLinkLocal: pf.inventory?.sbx0.linkLocal ?? "",
 		denyPublic: (process.env.SBX_DENY_PUBLIC_IPS ?? "")
 			.split(/\s+/)

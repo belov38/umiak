@@ -110,7 +110,7 @@ export const SandboxSchema = z
 			.object({ id: z.string(), name: z.string(), revision: z.int() })
 			.nullable()
 			.openapi({
-				description: "Environment the sandbox was created from (S8 §10)",
+				description: "Environment the sandbox was created from",
 			}),
 		excludeOwnerSecrets: z.boolean(),
 		createdAt: Timestamp,
@@ -222,7 +222,7 @@ export const CreateSandboxRequest = z
 			.optional()
 			.openapi({
 				description:
-					"Do not pass the creator's personal secrets into the sandbox (S8 §10). Only false " +
+					"Do not pass the creator's personal secrets into the sandbox. Only false " +
 					"is accepted for now: true is 400 until sandboxes store the flag",
 			}),
 	})

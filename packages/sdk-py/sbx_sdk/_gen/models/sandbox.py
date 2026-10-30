@@ -40,7 +40,7 @@ class Sandbox:
         degraded_since (datetime.datetime | None): ISO 8601 UTC with milliseconds
         deleted_at (datetime.datetime | None): ISO 8601 UTC with milliseconds
         endpoints (SandboxEndpoints):
-        environment (None | SandboxEnvironmentType0): Environment the sandbox was created from (S8 §10)
+        environment (None | SandboxEnvironmentType0): Environment the sandbox was created from
         error (None | SandboxErrorType0): Why the sandbox is in `error` (create_failed, resume_failed, machine_lost,
             ...)
         exclude_owner_secrets (bool):

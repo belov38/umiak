@@ -58,7 +58,7 @@ const getEnv = createRoute({
 const writeResponses = {
 	200: jsonResponse(SandboxEnvUpdateSchema, "The stored sets and delivery"),
 	400: errorResponse(
-		"`validation`: a name, a value or a limit of §8.3 (checked on the result)",
+		"`validation`: a name, a value or a limit of the env sets (checked on the result)",
 	),
 	404: notFound404,
 	409: errorResponse("`invalid_state`: deleting or deleted"),

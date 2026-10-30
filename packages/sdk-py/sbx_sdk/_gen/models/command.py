@@ -20,7 +20,7 @@ T = TypeVar("T", bound="Command")
 
 @_attrs_define
 class Command:
-    """A process started in a sandbox (S7 §9.6)
+    """A process started in a sandbox
 
     Attributes:
         argv (list[str] | None):

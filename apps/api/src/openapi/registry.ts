@@ -31,7 +31,7 @@ export const ErrorSchema = z
 		}),
 	})
 	.openapi("Error", {
-		description: "Error envelope of every non-2xx response (S7 §5.5)",
+		description: "Error envelope of every non-2xx response",
 	});
 
 const JSON_TYPE = "application/json";

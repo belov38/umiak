@@ -15,7 +15,7 @@ T = TypeVar("T", bound="Error")
 
 @_attrs_define
 class Error:
-    """Error envelope of every non-2xx response (S7 §5.5)
+    """Error envelope of every non-2xx response
 
     Attributes:
         error (ErrorError):

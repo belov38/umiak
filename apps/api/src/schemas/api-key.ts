@@ -46,7 +46,7 @@ export const CreateApiKeyRequest = z
 			.optional()
 			.openapi({
 				description:
-					"read-only, ci or full (S7 §7.3); or send `scopes`. Exactly one of the two.",
+					"read-only, ci or full; or send `scopes`. Exactly one of the two.",
 			}),
 		expiresInSeconds: z
 			.int()

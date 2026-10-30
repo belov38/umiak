@@ -23,7 +23,18 @@ const posInt = z.number().int().positive();
 const nonNegInt = z.number().int().nonnegative();
 const os = z.enum(["linux", "windows"]);
 
-const DEFAULT_CAPABILITIES = ["exec", "files", "ssh"];
+/** Capabilities of a template (S7 §13); a typo in the config fails the load. */
+export const TEMPLATE_CAPABILITIES = [
+	"exec",
+	"files",
+	"ssh",
+	"desktop",
+] as const;
+const DEFAULT_CAPABILITIES: (typeof TEMPLATE_CAPABILITIES)[number][] = [
+	"exec",
+	"files",
+	"ssh",
+];
 
 const templateSchema = z
 	.strictObject({
@@ -35,7 +46,7 @@ const templateSchema = z
 		allowedSizes: z.array(slug).min(1),
 		loginUser: z.string().min(1).default("user"),
 		capabilities: z
-			.array(z.string().min(1))
+			.array(z.enum(TEMPLATE_CAPABILITIES))
 			.default(() => [...DEFAULT_CAPABILITIES]),
 	})
 	.transform(

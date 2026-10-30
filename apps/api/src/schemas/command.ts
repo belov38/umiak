@@ -221,7 +221,7 @@ export const CommandSchema = z
 		endedAt: NullableTimestamp,
 	})
 	.openapi("Command", {
-		description: "A process started in a sandbox (S7 §9.6)",
+		description: "A process started in a sandbox",
 	});
 
 export type CommandResource = z.infer<typeof CommandSchema>;
@@ -368,7 +368,7 @@ export const CommandFrameSchema = z
 	])
 	.openapi("CommandFrame", {
 		description:
-			"One line of an application/x-ndjson command stream (S7 §9.5). Output frames carry " +
+			"One line of an application/x-ndjson command stream. Output frames carry " +
 			"offsets; the last frame is exit, reconnect (reopen /stream with its offsets) or error " +
 			"(reopen when retryable). Ignore frame types you do not know.",
 	});

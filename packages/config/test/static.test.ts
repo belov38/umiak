@@ -197,6 +197,13 @@ describe("StaticConfigReader.fromObject", () => {
 				defaults: { ssoPortPolicy: "everyone" },
 			}),
 		).toThrow(/defaults\.ssoPortPolicy/);
+		// Capabilities are a closed set (S7 §13): a typo fails the config.
+		expect(() =>
+			StaticConfigReader.fromObject({
+				...b,
+				templates: [{ ...b.templates[0], capabilities: ["exec", "shh"] }],
+			}),
+		).toThrow(/capabilities/);
 	});
 
 	it("merges a per-team quota over the default", async () => {

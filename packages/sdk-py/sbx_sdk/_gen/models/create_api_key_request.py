@@ -20,8 +20,7 @@ class CreateApiKeyRequest:
         name (str):  Example: ci-main.
         expires_in_seconds (int | Unset): Lifetime; default 90 days (7776000), at most 365 days
         kind (CreateApiKeyRequestKind | Unset): Only `team` (the default)
-        preset (CreateApiKeyRequestPreset | Unset): read-only, ci or full (S7 §7.3); or send `scopes`. Exactly one of
-            the two.
+        preset (CreateApiKeyRequestPreset | Unset): read-only, ci or full; or send `scopes`. Exactly one of the two.
         scopes (list[CreateApiKeyRequestScopesItem] | Unset): Scopes of the key; or send `preset`
     """
 

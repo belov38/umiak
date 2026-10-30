@@ -75,14 +75,18 @@ mkdir -p deploy/compose/secrets
 | `keycloak/admin-password` | `keycloak` | пароль администратора Keycloak, если `KEYCLOAK_ADMIN_PASSWORD` в `.env` не задан |
 | `oauth2-proxy/client-secret`, `oauth2-proxy/cookie-secret` | `oauth2-proxy` | копия секрета клиента, ключ cookie (32 байта) |
 
-- `secrets-init` стартует после `gateway-secrets` (S4), поэтому `service-tokens.json`, `gateway-token`,
-  `ssh-login-ca` и `ssh-host-keys.pub` берутся из `secrets/gateway/` и переписываются при расхождении (если
-  `gateway-secrets` убрать из стека, `secrets-init` создаёт свои dev-значения): `gateway/api-token` → `{"gateway": [...]}`, `gateway/service-tokens.json` →
-  `api[0]`, `gateway/ssh_login_ca`, `gateway/ssh_host_*_key.pub`.
+- `secrets-init` стартует после `gateway-secrets` (S4, `depends_on` с `service_completed_successfully`), поэтому
+  `service-tokens.json`, `gateway-token`, `ssh-login-ca` и `ssh-host-keys.pub` берутся из `secrets/gateway/` и
+  переписываются при расхождении: `gateway/api-token` → `{"gateway": [...]}`, `gateway/service-tokens.json` →
+  `api[0]`, `gateway/ssh_login_ca`, `gateway/ssh_host_*_key.pub`. Стек без `gateway-secrets` не поднимется
+  (`depends_on`); `init.sh` создаёт свои dev-значения только для файлов, которых нет в `secrets/gateway/`
+  (например при запуске `secrets-init` отдельно, с `--no-deps`).
 - Копии (`api/data-keys.json`, `worker/data-keys.json`, `oauth2-proxy/client-secret`) тоже переписываются из
   источника.
 - Пересоздать секрет: удалить файл и выполнить `up -d`. После этого пересоздать его потребителей
-  (`up -d --force-recreate api oauth2-proxy ...`). Секреты клиентов Keycloak попадают в realm только при его
+  (`up -d --force-recreate api oauth2-proxy ...`). На Linux файлы принадлежат root и uid потребителей
+  (`secrets-init` пишет их от root): удалять через `sudo rm` или из контейнера —
+  `docker compose -f deploy/compose/compose.yaml run --rm --no-deps --entrypoint rm secrets-init /secrets/<файл>`. Секреты клиентов Keycloak попадают в realm только при его
   импорте (первый старт): после их смены нужен чистый Keycloak (см. «Keycloak»).
 - `data-keys.json` прежних запусков (созданный вручную по старой инструкции) остаётся на месте и используется.
 
@@ -249,8 +253,8 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 | `SBX_OAUTH2_PROXY_COOKIE_NAME` | `_sbx_session` | имя cookie сессии; за TLS — `__Host-sbx_session` |
 | `SBX_OAUTH2_PROXY_COOKIE_SECURE` | `false` | `true` за TLS (обязательно для `__Host-`) |
 | `SBX_OAUTH2_PROXY_REVERSE_PROXY` | `false` | `true`, если перед oauth2-proxy стоит прокси с `X-Forwarded-*` |
-| `SBX_SBX_DOMAIN` | `sbx.localhost` | `api` `/v1/meta` `sbxDomain` (домен портов; у gateway — свой `SBX_GATEWAY_SBX_DOMAIN`) |
-| `SBX_SSH_HOST`, `SBX_SSH_PORT` | `ssh.localhost`, `2222` | `/v1/meta` `ssh` и `sbx ssh` |
+| `SBX_SBX_DOMAIN` | `sbx.localhost` | `api` `/v1/meta` `sbxDomain` (домен портов). У gateway — свой `SBX_GATEWAY_SBX_DOMAIN` в `gateway.yaml`: при смене нужен и override gateway с тем же значением |
+| `SBX_SSH_HOST`, `SBX_SSH_PORT` | `ssh.localhost`, `${GATEWAY_SSH_PORT:-2222}` | `/v1/meta` `ssh` и `sbx ssh`. Хост gateway — свой `SBX_GATEWAY_SSH_HOST` в `gateway.yaml`: при смене `SBX_SSH_HOST` нужен и override gateway; порт по умолчанию следует за опубликованным `GATEWAY_SSH_PORT` |
 | `SBX_API_TRUSTED_PROXY_CIDRS` | пусто | `X-Forwarded-For` идёт в `clientIp` лога `api` только от этих адресов, иначе адрес соединения |
 
 - Realm импортируется только в пустой Keycloak: после смены `SBX_APP_ORIGIN` или `SBX_OAUTH2_PROXY_REDIRECT_URL`
@@ -259,8 +263,8 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
   listener-е: там личность — только `Authorization: Bearer`. `X-Forwarded-For` от `SBX_API_TRUSTED_PROXY_CIDRS`
   идёт только в `clientIp` лога.
 - Пример такой раскладки — dev control plane на CT 590 (`infra/dev-cp/compose.dev-cp.yaml`).
-- CLI с частным CA: `sbx --cacert <file>` или `SBX_CA_FILE` (добавляется к системным корням; действует и на
-  Keycloak, и на WebSocket `sbx shell`). Для dev control plane не нужно: у Tailscale Serve сертификат Let's Encrypt.
+- CLI с частным CA: `sbx --cacert <file>` или `SBX_CA_FILE` (к встроенным корням Node/Bun, хранилище ОС не
+  используется; действует и на Keycloak, и на WebSocket `sbx shell`). Для dev control plane не нужно: у Tailscale Serve сертификат Let's Encrypt.
 
 ## Настройки
 

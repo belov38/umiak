@@ -18,7 +18,7 @@ class SyncCommandResult:
     """The result of a sync command: the tail (up to 4 MiB) of each stream
 
     Attributes:
-        command (Command): A process started in a sandbox (S7 §9.6)
+        command (Command): A process started in a sandbox
         stderr (str):
         stderr_from (int):
         stderr_truncated (bool):

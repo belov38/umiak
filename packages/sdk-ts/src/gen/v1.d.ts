@@ -1206,7 +1206,7 @@ export interface components {
             /** @description Apply to the directory's contents too (default false) */
             recursive?: boolean;
         };
-        /** @description A process started in a sandbox (S7 §9.6) */
+        /** @description A process started in a sandbox */
         Command: {
             argv: string[] | null;
             /** @description Shell command line (first 64 KiB); null for argv */
@@ -1296,7 +1296,7 @@ export interface components {
             /** @enum {string} */
             type: "exit";
         };
-        /** @description One line of an application/x-ndjson command stream (S7 §9.5). Output frames carry offsets; the last frame is exit, reconnect (reopen /stream with its offsets) or error (reopen when retryable). Ignore frame types you do not know. */
+        /** @description One line of an application/x-ndjson command stream. Output frames carry offsets; the last frame is exit, reconnect (reopen /stream with its offsets) or error (reopen when retryable). Ignore frame types you do not know. */
         CommandFrame: components["schemas"]["CommandStartedFrame"] | components["schemas"]["CommandAttachedFrame"] | components["schemas"]["CommandOutputFrame"] | components["schemas"]["CommandTruncatedFrame"] | components["schemas"]["CommandHeartbeatFrame"] | components["schemas"]["CommandReconnectFrame"] | components["schemas"]["CommandExitFrame"] | components["schemas"]["CommandErrorFrame"];
         CommandHeartbeatFrame: {
             /** @enum {string} */
@@ -1397,7 +1397,7 @@ export interface components {
             /** @example ci-main */
             name: string;
             /**
-             * @description read-only, ci or full (S7 §7.3); or send `scopes`. Exactly one of the two.
+             * @description read-only, ci or full; or send `scopes`. Exactly one of the two.
              * @enum {string}
              */
             preset?: "read-only" | "ci" | "full";
@@ -1454,7 +1454,7 @@ export interface components {
              * @example base
              */
             environment?: string | null;
-            /** @description Do not pass the creator's personal secrets into the sandbox (S8 §10). Only false is accepted for now: true is 400 until sandboxes store the flag */
+            /** @description Do not pass the creator's personal secrets into the sandbox. Only false is accepted for now: true is 400 until sandboxes store the flag */
             excludeOwnerSecrets?: boolean;
             /** @description Create from a saved snapshot of the team (needs snapshots:read) */
             from?: {
@@ -1619,7 +1619,7 @@ export interface components {
             /** @description User (`usr_...`) of the last change; null for a team key */
             updatedBy: string | null;
         };
-        /** @description Error envelope of every non-2xx response (S7 §5.5) */
+        /** @description Error envelope of every non-2xx response */
         Error: {
             error: {
                 /**
@@ -2064,7 +2064,7 @@ export interface components {
                  */
                 ssh: string;
             };
-            /** @description Environment the sandbox was created from (S8 §10) */
+            /** @description Environment the sandbox was created from */
             environment: {
                 id: string;
                 name: string;
@@ -4085,7 +4085,7 @@ export interface operations {
                     "application/json": components["schemas"]["SandboxEnvUpdate"];
                 };
             };
-            /** @description `validation`: a name, a value or a limit of §8.3 (checked on the result) */
+            /** @description `validation`: a name, a value or a limit of the env sets (checked on the result) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4149,7 +4149,7 @@ export interface operations {
                     "application/json": components["schemas"]["SandboxEnvUpdate"];
                 };
             };
-            /** @description `validation`: a name, a value or a limit of §8.3 (checked on the result) */
+            /** @description `validation`: a name, a value or a limit of the env sets (checked on the result) */
             400: {
                 headers: {
                     [name: string]: unknown;

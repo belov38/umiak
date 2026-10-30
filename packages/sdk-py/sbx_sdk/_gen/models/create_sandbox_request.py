@@ -27,8 +27,8 @@ class CreateSandboxRequest:
             newline are not visible in SSH sessions.
         environment (None | str | Unset): Environment name or `env_...` (needs environments:read); absent: the team's
             default environment; null: none. Its sets are applied first, the request's sets on top Example: base.
-        exclude_owner_secrets (bool | Unset): Do not pass the creator's personal secrets into the sandbox (S8 §10). Only
-            false is accepted for now: true is 400 until sandboxes store the flag
+        exclude_owner_secrets (bool | Unset): Do not pass the creator's personal secrets into the sandbox. Only false is
+            accepted for now: true is 400 until sandboxes store the flag
         from_ (CreateSandboxRequestFrom | Unset): Create from a saved snapshot of the team (needs snapshots:read)
         idle_timeout_seconds (int | None | Unset): Stop after this many idle seconds (at least 60); null disables idle-
             stop

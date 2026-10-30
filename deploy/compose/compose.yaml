@@ -289,7 +289,7 @@ services:
       SBX_SBX_DOMAIN: ${SBX_SBX_DOMAIN:-sbx.localhost}
       # The gateway SSH name (gateway.yaml: ssh.localhost) and published port.
       SBX_SSH_HOST: ${SBX_SSH_HOST:-ssh.localhost}
-      SBX_SSH_PORT: ${SBX_SSH_PORT:-2222}
+      SBX_SSH_PORT: ${SBX_SSH_PORT:-${GATEWAY_SSH_PORT:-2222}}
       # Keycloak: tokens carry the public issuer; keys are fetched inside the network.
       SBX_OIDC_ISSUER: *oidc-issuer
       SBX_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/sbx/.well-known/openid-configuration

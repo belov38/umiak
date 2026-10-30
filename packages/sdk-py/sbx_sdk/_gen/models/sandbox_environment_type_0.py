@@ -11,7 +11,7 @@ T = TypeVar("T", bound="SandboxEnvironmentType0")
 
 @_attrs_define
 class SandboxEnvironmentType0:
-    """Environment the sandbox was created from (S8 §10)
+    """Environment the sandbox was created from
 
     Attributes:
         id (str):

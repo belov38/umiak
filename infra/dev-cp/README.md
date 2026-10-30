@@ -104,6 +104,15 @@ On the CT, `cd ~/boat-dev-clone/deploy/compose`; `docker compose ps|logs|exec` p
 
 ### S7 behind Tailscale Serve (api, Keycloak, oauth2-proxy)
 
+> **Не проверено на CT.** This wiring was checked only locally (`docker compose config` with the dev-cp files and a local stack); `deploy.sh` with the S7 services has not been run on CT 590. Until the master allows a deploy, treat the section as a plan. To verify on the CT:
+> - `docker compose config` on the CT with the real `.env` (every `${VAR:?}` set) and `docker compose up -d`: api, keycloak, keycloak-db, oauth2-proxy, secrets-init healthy; api `/readyz` 200 on `127.0.0.1:9091`.
+> - Tailscale Serve: `:8443` → oauth2-proxy and `/v1` → api; `:10000` → Keycloak; discovery at `https://<TS name>:10000/realms/sbx/.well-known/openid-configuration` keeps `:10000` in `issuer` and the endpoints (front channel) while the containers reach `http://keycloak:8080` (back channel, `KC_HOSTNAME_BACKCHANNEL_DYNAMIC`).
+> - A Keycloak database left from an earlier import keeps old redirect URIs: drop the `keycloak` database if the browser login ends in `redirect_uri` mismatch.
+> - Docker bridge addresses on the CT are inside `172.16.0.0/12` (`SBX_API_TRUSTED_PROXY_CIDRS`, Keycloak trusted proxies): `clientIp` in the api log is the tailnet client.
+> - Browser: `https://<TS name>:8443/` → Keycloak login → back with the `__Host-sbx_session` cookie; `https://<TS name>:8443/api/v1/me` answers the user.
+> - CLI from the Mac: `sbx login --api-url https://<TS name>:8443` (device grant), `sbx whoami`, `sbx create --wait` and `sbx exec` once S3 is wired in the api.
+> - SSO port: a port with access `sso` opens through the gateway after the redirect to `/sbx-auth/authorize` (cross-site cookie).
+
 `compose.yaml` has the S7 services and includes `gateway.yaml`; `compose.dev-cp.yaml` publishes them on loopback for Serve and feeds them the `.env` values. The product compose takes the same public URLs as generic variables with localhost defaults (`deploy/compose/README.md`, «Публичные адреса»); the override repeats the ones from `.env` as required values (`${VAR:?}`) so the CT never runs with a localhost default, and adds what the base leaves neutral (Keycloak proxy headers, trusted proxies, the `__Host-` cookie, cross-site port cookies).
 
 | Service | Publish (base compose) | Settings |
