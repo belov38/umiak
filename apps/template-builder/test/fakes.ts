@@ -68,6 +68,30 @@ export class BuildPve extends FakePve {
 			vm.config.template = "1";
 			return { value: `UPID:pve:${++this.#upid}` };
 		}
+		if (key === "GET /firewall/rules") {
+			this.#record(method, path, params);
+			return {
+				value: (vm?.firewall.rules ?? []).map((r, pos) => ({ ...r, pos })),
+			};
+		}
+		if (key === "GET /firewall/ipset") {
+			this.#record(method, path, params);
+			return {
+				value: Object.keys(vm?.firewall.ipsets ?? {}).map((name) => ({ name })),
+			};
+		}
+		const rule = /^DELETE \/firewall\/rules\/(\d+)$/.exec(key);
+		if (rule && vm) {
+			this.#record(method, path, params);
+			vm.firewall.rules.splice(Number(rule[1]), 1);
+			return { value: null };
+		}
+		const set = /^DELETE \/firewall\/ipset\/([\w-]+)$/.exec(key);
+		if (set?.[1] && vm) {
+			this.#record(method, path, params);
+			delete vm.firewall.ipsets[set[1]];
+			return { value: null };
+		}
 		if (key === "PUT /unlink") {
 			this.#record(method, path, params);
 			if (!vm) throw new PveApiError(500, "VM does not exist");
@@ -110,7 +134,8 @@ export class BuildPve extends FakePve {
 	}
 	override delete<T>(path: string, params?: P) {
 		try {
-			this.before?.("DELETE", path, params);
+			const r = this.#own("DELETE", path, params);
+			if (r) return Promise.resolve(r.value as T);
 		} catch (err) {
 			return Promise.reject(err);
 		}

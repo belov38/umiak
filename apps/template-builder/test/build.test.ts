@@ -621,6 +621,21 @@ describe("buildTemplate: failures", () => {
 		expect(await s.allocator.get(598)).toBeUndefined();
 	});
 
+	it("leaves no build firewall (ipset, rules) on the template", async () => {
+		const s = setup();
+		await buildTemplate(s.deps, s.opts);
+		const fw = s.pve.vms.get(598)?.firewall;
+		expect(fw?.rules).toEqual([]);
+		expect(fw?.ipsets).toEqual({});
+		expect(fw?.options).toMatchObject({ enable: 0 });
+		const del = s.pve.calls.find(
+			(c) =>
+				c.method === "DELETE" &&
+				c.path === `${vm}/firewall/ipset/ipfilter-net0`,
+		);
+		expect(del?.params).toEqual({ force: 1 });
+	});
+
 	it("tags the VM right after the create call, not in it", async () => {
 		const s = setup();
 		await buildTemplate(s.deps, s.opts);

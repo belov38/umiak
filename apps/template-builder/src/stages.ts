@@ -455,6 +455,25 @@ export async function shutdown(
 	}
 }
 
+/**
+ * The build VM's firewall (ipfilter with its IPAM address, the sbx-egress rule) must not stay on
+ * the template: a Proxmox clone copies it, and the copy then collides with the clone's own.
+ */
+async function dropBuildFirewall(
+	api: PveClient,
+	vmPath: string,
+): Promise<void> {
+	const rules = await api.get<{ pos: number }[]>(`${vmPath}/firewall/rules`);
+	for (const pos of rules.map((r) => r.pos).sort((a, b) => b - a))
+		await api.delete(`${vmPath}/firewall/rules/${pos}`);
+	const sets = await api.get<{ name: string }[]>(`${vmPath}/firewall/ipset`);
+	for (const { name } of sets)
+		await api.delete(`${vmPath}/firewall/ipset/${encodeURIComponent(name)}`, {
+			force: 1,
+		});
+	await api.put(`${vmPath}/firewall/options`, { enable: 0 });
+}
+
 export async function stageTemplate(
 	deps: BuildDeps,
 	o: BuildOptions,
@@ -462,6 +481,7 @@ export async function stageTemplate(
 ): Promise<void> {
 	const vmid = st.vmid as number;
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
+	await dropBuildFirewall(deps.api, vmPath);
 	// force=1 destroys the seed disk instead of leaving it as unused0.
 	await deps.api.put(`${vmPath}/unlink`, { idlist: SEED_SLOT, force: 1 });
 	await deps.api.put(`${vmPath}/config`, { delete: "smbios1" });
