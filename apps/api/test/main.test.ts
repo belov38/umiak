@@ -5,7 +5,7 @@
 // SIGTERM/SIGINT into one graceful close and the exit code.
 import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { connect } from "node:net";
+import { type AddressInfo, connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apiKeyHash, generateApiKeySecret } from "@sbx/auth";
@@ -161,9 +161,27 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 	it("a broken file fails the start before anything connects", async () => {
 		const bad = join(dir, "bad-tokens.json");
 		writeFileSync(bad, "{");
-		await expect(
-			start({ SBX_API_SERVICE_TOKENS_FILE: bad, SBX_API_PUBLIC_PORT: "0" }),
-		).rejects.toThrow();
+		// A stand-in database that counts the connections it gets.
+		let connections = 0;
+		const fakeDb = createServer((s) => {
+			connections++;
+			s.destroy();
+		});
+		await new Promise<void>((r) => fakeDb.listen(0, "127.0.0.1", r));
+		const port = (fakeDb.address() as AddressInfo).port;
+		try {
+			await expect(
+				start({
+					SBX_API_SERVICE_TOKENS_FILE: bad,
+					DATABASE_URL: `postgres://sbx:sbx@127.0.0.1:${port}/sbx`,
+				}),
+			).rejects.toThrow(/service tokens file/);
+			// Give a pool or LISTEN connection that might have started time to arrive.
+			await new Promise((r) => setTimeout(r, 200));
+			expect(connections).toBe(0);
+		} finally {
+			await new Promise((r) => fakeDb.close(r));
+		}
 	});
 });
 

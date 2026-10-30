@@ -68,6 +68,7 @@ mkdir -p deploy/compose/secrets
 | `api/ssh-login-ca` | `api` | `SBX_SSH_LOGIN_CA_KEY_FILE`: ed25519 CA коротких SSH-сертификатов |
 | `api/ssh-host-keys.pub` | `api` | `SBX_SSH_HOST_KEYS_FILE`: публичные host keys gateway для `/v1/meta` |
 | `keycloak/oauth2-proxy-client-secret`, `keycloak/sbx-worker-client-secret` | `keycloak` | секреты клиентов realm `sbx` |
+| `keycloak/admin-password` | `keycloak` | пароль администратора Keycloak, если `KEYCLOAK_ADMIN_PASSWORD` в `.env` не задан |
 | `oauth2-proxy/client-secret`, `oauth2-proxy/cookie-secret` | `oauth2-proxy` | копия секрета клиента, ключ cookie (32 байта) |
 
 - Пока gateway нет, `service-tokens.json`, `gateway-token`, `ssh-login-ca` и `ssh-host-keys.pub` — свои
@@ -124,9 +125,15 @@ docker compose -f deploy/compose/compose.yaml down -v     # чистый ста�
 
 ## Первый вход
 
-**Администратор Keycloak.** http://localhost:8180/admin, логин и пароль — `KEYCLOAK_ADMIN` /
-`KEYCLOAK_ADMIN_PASSWORD` из `.env` (по умолчанию `admin` / `admin`). Учётка создаётся только при первом старте
-Keycloak; смена значений в `.env` потом на неё не влияет. Realm `sbx`.
+**Администратор Keycloak.** http://localhost:8180/admin, логин `KEYCLOAK_ADMIN` из `.env` (по умолчанию
+`admin`). Пароль — `KEYCLOAK_ADMIN_PASSWORD` из `.env`, а если он не задан, его генерирует `secrets-init`:
+
+```sh
+docker compose -f deploy/compose/compose.yaml exec keycloak cat /run/sbx-secrets/admin-password
+# или на хосте: deploy/compose/secrets/keycloak/admin-password
+```
+
+Учётка создаётся только при первом старте Keycloak; смена значений потом на неё не влияет. Realm `sbx`.
 
 **Тестовый пользователь.** В realm `sbx` уже есть `dev@example.com` (email подтверждён) с временным паролем
 `SBX_DEV_PASSWORD` из `.env` (по умолчанию `dev`). При первом входе Keycloak попросит задать новый пароль.
@@ -159,7 +166,7 @@ CLI печатает код и ссылку http://localhost:8180/realms/sbx/dev
   (`${SBX_OAUTH2_PROXY_CLIENT_SECRET}`, `${SBX_WORKER_CLIENT_SECRET}`, `${SBX_DEV_PASSWORD}` в файле realm).
 - Адреса: браузер и CLI ходят на публичный http://localhost:8180 (`KC_HOSTNAME`, он же `iss` токенов); `api` и
   `oauth2-proxy` — на http://keycloak:8080 внутри сети (`SBX_OIDC_DISCOVERY_URL`, `SBX_OIDC_JWKS_URL`, redeem и
-  JWKS у oauth2-proxy). Другой порт хоста: `KEYCLOAK_PORT` в `.env` (меняет и issuer).
+  JWKS у oauth2-proxy).
 - Применить изменённый `realm-sbx.json` (или новые секреты клиентов): удалить базу Keycloak и перезапустить.
 
   ```sh
@@ -173,7 +180,9 @@ CLI печатает код и ссылку http://localhost:8180/realms/sbx/dev
 Конфигурация — `oauth2-proxy/oauth2-proxy.yaml` (alpha config: провайдер `keycloak-oidc`, маршруты, заголовки)
 и флаги в `compose.yaml` (cookie). `/api/*` идёт на `api:8081` без префикса `/api`, `/sbx-auth/*` — как есть;
 таймаут upstream 660 s. В запрос к `api` добавляются `X-Auth-Request-User` (`sub`), `-Email`, `-Groups`,
-`-Preferred-Username`; такие же заголовки от клиента вырезаются. Cookie `_sbx_session` без `Secure` и без
+`-Preferred-Username`; такие же заголовки от клиента вырезаются. Им можно доверять, потому что `:8081` не
+опубликован на хосте; внутри сети `sbx` его видит любой контейнер (для dev допустимо, в проде закрывает
+NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
 префикса `__Host-`: стек работает по http на localhost (в проде — `__Host-sbx_session`). Сессия обновляется каждые
 5 минут (`--cookie-refresh=5m`).
 
@@ -206,8 +215,11 @@ CLI печатает код и ссылку http://localhost:8180/realms/sbx/dev
   sha256. Загружается при каждом старте `api` (только upsert). В dev пуст: люди появляются при первом входе.
 - `deploy/compose/.env` (git-ignored, пример — `.env.example`): Proxmox (`SBX_PVE_URL`, `SBX_PVE_TLS_NAME`,
   `SBX_NODE_SSH_HOST`, `SBX_PVE_TOKEN_ID`, `SBX_PVE_SECRETS_DIR`), `SBX_RECONCILE_DRY_RUN`, Keycloak
-  (`KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `SBX_DEV_PASSWORD`), порты (`API_PORT`, `API_METRICS_PORT`,
-  `KEYCLOAK_PORT`, `OAUTH2_PROXY_PORT`), `SBX_SSH_HOST`/`SBX_SSH_PORT` для `/v1/meta`, `SBX_API_LOG_LEVEL`.
+  (`KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `SBX_DEV_PASSWORD`), `SBX_SSH_HOST`/`SBX_SSH_PORT` для
+  `/v1/meta`, `SBX_API_LOG_LEVEL`.
+- Порты на хосте фиксированы: 8080 (api), 9091 (ops api), 8180 (Keycloak), 4180 (oauth2-proxy), плюс 5432
+  и 9090. Адреса `http://localhost:8180` и `http://localhost:4180` записаны в realm (redirect URI, issuer) и в
+  конфиге oauth2-proxy, поэтому другой порт ломает вход.
 - Учётные данные Postgres `sbx/sbx/sbx` — только для разработки; порт опубликован на `127.0.0.1:5432`.
 - `SBX_DB_POOL_MAX` (по умолчанию 30) — размер пула соединений worker. Блокировка питания (`power:<nodeId>`, S6 §15.1) держит по одному соединению на ноду в каждом процессе и под ней берёт ещё одно, плюс соединения pg-boss и операций. Значение должно с запасом превышать число нод.
 

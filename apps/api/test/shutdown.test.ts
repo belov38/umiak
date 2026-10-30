@@ -173,7 +173,25 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 			{ "idempotency-key": `k-${randomUUID()}` },
 		);
 		const plain = c.post(sb.commands, { command: "sleep 5" });
-		await sleep(400);
+		// The stream, the PTY and both syncs are registered, and both syncs got
+		// past the agent Start (status running), so they are mid-wait.
+		await until(() => api.deps.streams.size === 4, 5000, "4 open connections");
+		let running = 0;
+		await until(
+			() => {
+				void db.pool
+					.query<{ n: number }>(
+						"SELECT count(*)::int AS n FROM runtime.commands WHERE sandbox_id = $1 AND status = 'running'",
+						[sb.sandboxId],
+					)
+					.then((r) => {
+						running = r.rows[0]?.n ?? 0;
+					});
+				return running === 4;
+			},
+			5000,
+			"4 running commands",
+		);
 
 		const t0 = Date.now();
 		const closing = api.close();

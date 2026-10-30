@@ -62,7 +62,7 @@ export function loadConfig(
 	if (clusterId > 255) throw new Error("SBX_CLUSTER_ID must fit in one byte");
 
 	return {
-		pveUrl: get("SBX_PVE_URL", "https://pve.tail0000.ts.net:8006"),
+		pveUrl: get("SBX_PVE_URL", "https://pve:8006"),
 		tokenId: get("SBX_PVE_TOKEN_ID", "sbx@pve!poc"),
 		tokenSecretFile: path(
 			"SBX_PVE_TOKEN_SECRET_FILE",
@@ -70,7 +70,7 @@ export function loadConfig(
 		),
 		caFile: path("SBX_PVE_CA_FILE", "~/.config/sbx/pve-root-ca.pem"),
 		tlsName: get("SBX_PVE_TLS_NAME", "pve"),
-		nodeSshHost: get("SBX_NODE_SSH_HOST", "pve.tail0000.ts.net"),
+		nodeSshHost: get("SBX_NODE_SSH_HOST", "pve"),
 		nodeSshKeyFile: path(
 			"SBX_NODE_SSH_KEY_FILE",
 			"~/.config/sbx/sbx-node_ed25519",

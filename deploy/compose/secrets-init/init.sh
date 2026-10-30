@@ -8,7 +8,8 @@
 #   api/                  data-keys.json, cursor-key, service-tokens.json,
 #                         gateway-token, ssh-login-ca, ssh-host-keys.pub
 #   worker/               data-keys.json
-#   keycloak/             oauth2-proxy-client-secret, sbx-worker-client-secret
+#   keycloak/             oauth2-proxy-client-secret, sbx-worker-client-secret,
+#                         admin-password
 #   oauth2-proxy/         client-secret, cookie-secret
 # Rules:
 #   - a generated secret is written only when missing, never replaced;
@@ -129,6 +130,8 @@ fi
 # Keycloak and oauth2-proxy: client secrets of the realm `sbx`, cookie key.
 new "$S/keycloak/oauth2-proxy-client-secret" line "$(token)"
 new "$S/keycloak/sbx-worker-client-secret" line "$(token)"
+# Bootstrap admin of Keycloak, used unless KEYCLOAK_ADMIN_PASSWORD is set in .env.
+new "$S/keycloak/admin-password" line "$(token)"
 # oauth2-proxy reads its secret files as they are: no trailing newline.
 synced "$S/oauth2-proxy/client-secret" no_newline "$S/keycloak/oauth2-proxy-client-secret"
 # Exactly 32 bytes (an AES-256 key as is).

@@ -26,8 +26,9 @@ upstreamConfig:
       timeout: 660s
       passHostHeader: true
 
-# The api trusts these headers only because :8081 is reachable from
-# oauth2-proxy alone (S7 §7.1).
+# The api trusts these headers on :8081, which is meant for oauth2-proxy
+# alone (S7 §7.1). In this dev stack any container of the sbx network can
+# reach it (accepted for dev); the NetworkPolicy of S12 closes it in prod.
 injectRequestHeaders:
   - name: X-Auth-Request-User
     values:

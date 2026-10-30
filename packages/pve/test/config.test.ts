@@ -7,12 +7,12 @@ import { loadConfig, readSecretFile } from "../src/config.ts";
 describe("loadConfig", () => {
 	it("uses the PoC defaults from the spec", () => {
 		const c = loadConfig({}, "/home/u");
-		expect(c.pveUrl).toBe("https://pve.tail0000.ts.net:8006");
+		expect(c.pveUrl).toBe("https://pve:8006");
 		expect(c.tokenId).toBe("sbx@pve!poc");
 		expect(c.tokenSecretFile).toBe("/home/u/.config/sbx/pve-token");
 		expect(c.caFile).toBe("/home/u/.config/sbx/pve-root-ca.pem");
 		expect(c.tlsName).toBe("pve");
-		expect(c.nodeSshHost).toBe("pve.tail0000.ts.net");
+		expect(c.nodeSshHost).toBe("pve");
 		expect(c.nodeSshKeyFile).toBe("/home/u/.config/sbx/sbx-node_ed25519");
 		expect(c.nodeSshKnownHosts).toBe("/home/u/.config/sbx/known_hosts");
 		expect(c.vmidRange).toEqual({ min: 500, max: 598 });

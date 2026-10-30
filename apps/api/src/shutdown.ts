@@ -8,7 +8,9 @@
 //      with an Idempotency-Key, else `details {commandId, outcome}`);
 //   3. the listeners stop accepting and in-flight requests may finish;
 //   4. at the deadline whatever still hangs is cut, and the process resources
-//      (LISTEN connections, pg-boss, pools) are released.
+//      (LISTEN connections, pg-boss, pools) are released. Long requests
+//      outside the registry (file uploads and downloads, `?wait=` long polls)
+//      are cut at that deadline too; clients retry them.
 // The whole stop takes at most SHUTDOWN_GRACE_MS (10 s); the pod grace
 // period is 30 s.
 import type { Server } from "node:http";
