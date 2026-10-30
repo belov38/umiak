@@ -1,6 +1,6 @@
 import { macFor } from "@sbx/pve";
 import { type Check, check } from "./checks.ts";
-import type { Ctx } from "./context.ts";
+import { type Ctx, isTemplateVm, type VmResource } from "./context.ts";
 
 interface Inventory {
 	sysctl: Record<string, string>;
@@ -167,12 +167,16 @@ export async function preflight(
 	);
 	checks.push(
 		await check("no leftover VMs in the pool", async () => {
-			const vms = await api.get<{ vmid: number; pool?: string }[]>(
-				"/cluster/resources",
-				{ type: "vm" },
-			);
+			const vms = await api.get<VmResource[]>("/cluster/resources", {
+				type: "vm",
+			});
 			const left = vms
-				.filter((v) => v.pool === cfg.pool && v.vmid !== cfg.templateVmid)
+				.filter(
+					(v) =>
+						v.pool === cfg.pool &&
+						v.vmid !== cfg.templateVmid &&
+						!isTemplateVm(v),
+				)
 				.map((v) => v.vmid);
 			return { ok: left.length === 0, detail: left.join(",") };
 		}),

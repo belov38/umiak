@@ -50,11 +50,6 @@ export function loadConfig(
 		get("SBX_TEMPLATE_VMID", "599"),
 		"SBX_TEMPLATE_VMID",
 	);
-	if (templateVmid >= vmidRange.min && templateVmid <= vmidRange.max) {
-		throw new Error(
-			`SBX_VMID_RANGE ${range} contains the template VMID ${templateVmid}`,
-		);
-	}
 	const clusterId = parseIntStrict(
 		get("SBX_CLUSTER_ID", "1"),
 		"SBX_CLUSTER_ID",

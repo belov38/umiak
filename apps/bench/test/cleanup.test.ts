@@ -63,6 +63,25 @@ function ctx(): {
 }
 
 describe("cleanup", () => {
+	it("never deletes a template VM (tag sbx-tpl or template: 1)", async () => {
+		const { c, api } = ctx();
+		for (const [vmid, config] of [
+			[598, { name: "t1", tags: "sbx-tpl", template: "1" }],
+			[597, { name: "t2", tags: "sbx;sbx-tpl" }],
+			[596, { name: "t3", template: "1" }],
+		] as const) {
+			api.vms.set(vmid, {
+				config: { ...config },
+				status: "stopped",
+				firewall: { rules: [], ipsets: {} },
+			});
+		}
+		const report = await cleanup(c);
+		expect(api.paths().some((p) => p.startsWith("DELETE"))).toBe(false);
+		expect([...api.vms.keys()].sort()).toEqual([596, 597, 598]);
+		expect(report.join("\n")).not.toMatch(/59[678]/);
+	});
+
 	it("keeps an allocator row whose traces cannot be removed", async () => {
 		const { c, node, store } = ctx();
 		await c.machines.create({});

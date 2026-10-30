@@ -120,6 +120,39 @@ export class Allocator {
 	}
 
 	/**
+	 * VMID for a new template (S5): scans from range.max down, so templates stay away from the
+	 * VMIDs machines take from range.min. The lease is a `reserved` purpose=template row; the
+	 * caller marks it active once the VM exists, or releases it after a failed build.
+	 */
+	async allocateTemplate(): Promise<AllocatedVmid> {
+		const { store, clusterId, range, templateVmid } = this.#o;
+		const occupied = await this.#o.occupied();
+		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
+		for (let vmid = range.max; vmid >= range.min; vmid--) {
+			if (vmid === templateVmid || taken.has(vmid) || occupied.has(vmid))
+				continue;
+			const t = this.#now();
+			const mac = macFor(clusterId, vmid);
+			if (
+				await store.tryInsert({
+					cluster: clusterId,
+					vmid,
+					mac,
+					state: "reserved",
+					purpose: "template",
+					createdAt: t,
+					updatedAt: t,
+				})
+			)
+				return { vmid, mac, reused: false };
+		}
+		throw new AllocatorError(
+			"vmid_exhausted",
+			`no free VMID in ${range.min}-${range.max}`,
+		);
+	}
+
+	/**
 	 * Takes an ownerless `releasing` lease of a VMID that has none, so that
 	 * allocate skips it while a delete of a lease-less (orphan) VM runs; the
 	 * delete's final release removes this row. False if a lease exists

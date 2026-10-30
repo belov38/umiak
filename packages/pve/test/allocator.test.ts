@@ -37,6 +37,41 @@ describe("macFor", () => {
 });
 
 describe("Allocator", () => {
+	it("allocateTemplate scans down from range.max and skips leased and occupied VMIDs", async () => {
+		const { alloc } = make({ occupied: [598] });
+		const t = await alloc.allocateTemplate();
+		expect(t).toEqual({ vmid: 597, mac: macFor(1, 597), reused: false });
+		expect(await alloc.get(597)).toMatchObject({
+			state: "reserved",
+			purpose: "template",
+		});
+		expect((await alloc.allocateTemplate()).vmid).toBe(596);
+		await alloc.markActive(597);
+		expect((await alloc.get(597))?.state).toBe("active");
+		await alloc.release(597);
+		expect(await alloc.get(597)).toBeUndefined();
+	});
+
+	it("allocateTemplate fails when the range is exhausted", async () => {
+		const { alloc } = make({ range: { min: 500, max: 500 }, occupied: [500] });
+		await expect(alloc.allocateTemplate()).rejects.toThrow(/vmid_exhausted/);
+	});
+
+	it("allocate skips a template lease", async () => {
+		const { store, alloc } = make();
+		const t = Date.now();
+		await store.tryInsert({
+			cluster: 1,
+			vmid: 500,
+			mac: macFor(1, 500),
+			state: "active",
+			purpose: "template",
+			createdAt: t,
+			updatedAt: t,
+		});
+		expect((await alloc.allocate()).vmid).toBe(501);
+	});
+
 	it("reserveForDelete takes an ownerless releasing lease that allocate skips; false when taken", async () => {
 		const { alloc } = make();
 		expect(await alloc.reserveForDelete(500)).toBe(true);

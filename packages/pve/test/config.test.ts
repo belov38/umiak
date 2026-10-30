@@ -39,10 +39,13 @@ describe("loadConfig", () => {
 		expect(c.stateDb).toBe("/h/x.db");
 	});
 
-	it("rejects a range that contains the template or is malformed", () => {
-		expect(() => loadConfig({ SBX_VMID_RANGE: "500-700" }, "/h")).toThrow(
-			/template/,
-		);
+	it("accepts a template VMID inside the range", () => {
+		const c = loadConfig({ SBX_TEMPLATE_VMID: "598" }, "/h");
+		expect(c.templateVmid).toBe(598);
+		expect(c.vmidRange).toEqual({ min: 500, max: 598 });
+	});
+
+	it("rejects a malformed range", () => {
 		expect(() => loadConfig({ SBX_VMID_RANGE: "600-500" }, "/h")).toThrow();
 		expect(() => loadConfig({ SBX_VMID_RANGE: "abc" }, "/h")).toThrow();
 		expect(() => loadConfig({ SBX_CLUSTER_ID: "256" }, "/h")).toThrow();

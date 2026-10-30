@@ -146,3 +146,16 @@ export class RamGuard {
 		this.#reserved.delete(vmid);
 	}
 }
+
+/** A /cluster/resources VM entry; `tags` is semicolon-separated. */
+export interface VmResource {
+	vmid: number;
+	pool?: string;
+	tags?: string;
+	template?: number;
+}
+
+/** Template VMs and template build VMs (tag sbx-tpl) are never bench leftovers. */
+export function isTemplateVm(v: VmResource): boolean {
+	return v.template === 1 || (v.tags ?? "").split(/[;,]/).includes("sbx-tpl");
+}
