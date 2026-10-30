@@ -590,7 +590,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 
 ### 20.4 Шаблон
 
-Активная сборка в `deploy/compose/config/sbx.yaml`: `linux` **20261030.16**, VMID **597**, агент `0.1.0+20261030.78c73ee` (tunnel CA — dev CA gateway CT 590). `verify`: 99 PASS, 0 FAIL, 2 INFO (добавлены `fork_journal` — журнал форка под своим machine-id с начала загрузки, и `initrd` — без machine-id и hostname сборки). Занято в thin pool: **7.3 GiB** (`sbx-node lv.usage`). Сборка .15 (598) снята (`sbx-tpl retire --delete-vm`), .7 и .11 помечены `retired`; слот 598 отдан шаблону Windows (S9), Linux чередует 597 и 599 (`infra/pve/README.md`). Предыдущая сборка .11 занимала 95%: zero-fill не возвращался в пул, потому что `rm` и `fstrim` шли без commit журнала ext4; теперь `rm; sync; fstrim`, и сборка падает при заполнении больше 40%.
+Активная сборка в `deploy/compose/config/sbx.yaml`: `linux` **20261030.16**, VMID **597**, агент `0.1.0+20261030.78c73ee` (tunnel CA — dev CA gateway CT 590). `verify`: 99 PASS, 0 FAIL, 2 INFO (добавлены `fork_journal` — журнал форка под своим machine-id с начала загрузки, и `initrd` — без machine-id и hostname сборки). Занято в thin pool: **7.3 GiB** (`sbx-node lv.usage`). `sbx-bench s1` против 597: 126/126 (clone 1.4 s, boot 9.2 s, fork 10.1 s). Сборка .15 (598) снята (`sbx-tpl retire --delete-vm`), .7 и .11 помечены `retired`; слот 598 отдан шаблону Windows (S9), Linux чередует 597 и 599 (`infra/pve/README.md`). Предыдущая сборка .11 занимала 95%: zero-fill не возвращался в пул, потому что `rm` и `fstrim` шли без commit журнала ext4; теперь `rm; sync; fstrim`, и сборка падает при заполнении больше 40%.
 
 ## 21. Открытые вопросы и риски
 
