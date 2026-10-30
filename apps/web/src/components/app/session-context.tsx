@@ -24,3 +24,19 @@ export function useAppSession(): AppSession {
 	if (s === null) throw new Error("useAppSession outside SessionProvider");
 	return s;
 }
+
+/**
+ * The caller's place in a team for `can()` (S8 §6.2): role null for an
+ * operator outside the team.
+ */
+export function useTeamPermission(teamId: string): {
+	session: AppSession;
+	team: { role: "owner" | "member" | null; personal: boolean };
+} {
+	const session = useAppSession();
+	const t = session.teams.find((x) => x.id === teamId);
+	return {
+		session,
+		team: { role: t?.role ?? null, personal: t?.personal ?? false },
+	};
+}

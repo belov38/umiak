@@ -12,12 +12,18 @@ Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
 | `/admin` | Payload admin (`app/(payload)`, from Payload's Next.js template). Operators only: `users` admin access; others get Payload's `/admin/unauthorized`. |
 | `/cms-api/*` | Payload REST (collection access: operators). A refused login answers with `X-Sbx-Auth-Denied: <reason>`. |
 | `/app` | Redirect to the default team, `/app/t/<team_…>`. |
-| `/app/t/<team>` | Team frame (S8 §9.3): team switcher, sections, operator links, user menu with sign-out. A team the user is not in: 403 page (operators may open any team). |
+| `/app/t/<team>` | Team frame (S8 §9.3): team switcher, sections, operator links, user menu with sign-out. A team the user is not in: 403 page (operators may open any team). The page itself: sandboxes (§9.4), below. |
+| `/app/t/<team>` (page) | Sandboxes: `GET /v1/sandboxes` with search (`q`), state and `label=k=v` filters, infinite scroll over `nextCursor`; quota line from `GET /v1/limits`. Polled every 5 s while the tab is visible and refetched at once after an action. Transitional states with a spinner and `activeOperation.kind: step`, `error` red with its message, `degraded` with `healthReason`, a lock for a blocked sandbox. Row actions: Stop / Resume, Fork (→ the new sandbox page), Open terminal (`?tab=terminal`), Delete (type the slug; `Sbx-Confirm-Delete` = id). Blocked: Resume and Fork disabled. |
+| `/app/t/<team>/sandboxes/new` | Create (§9.5): template (enabled ones only), size (`allowedSizes`, the quota reason from `/v1/limits`), from a saved snapshot, name, slug (checked live), environment (team default → field omitted, a name, `none` → `environment: null`), labels, env, secrets (`type=password` with a show toggle), secret files (read into memory as base64; name, mode, link path), TTL and idle-stop (platform default → omitted, `none` → `null`). `POST /v1/sandboxes` through the SDK (Idempotency-Key), then the sandbox page. `quota_exceeded`, `out_of_capacity` (with "Try again"), `slug_taken`, `template_unavailable` as text at the form. The URL carries only `template`, `size`, `snapshot` (`newSandboxHref`/`parsePrefill`); inputs have no `name`, so a submit before hydration sends nothing. |
+| `/app/t/<team>/sandboxes/<slug>` | Header of the sandbox (name, slug, state, health, template, size, row actions); the tabs of §9.6 come with plan task 12. |
+| `/app/t/<team>/snapshots` | Saved snapshots (§9.7): `GET /v1/snapshots` (polled while one is creating or deleting), "Create sandbox" → the create form with the snapshot chosen, Delete (`sbx.snapshots.delete`, confirm). |
+| `/app/t/<team>/keys` | Team API keys (§9.8): `GET /v1/api-keys`; presets `read-only`/`ci`/`full` (`@sbx/auth/scopes`) or scopes by hand, lifetime 90 days by default, at most 365; the secret once in a dialog with copy, `export SBX_API_KEY=…` and `sbx login --key-stdin`; Rotate (new secret in the same dialog), Revoke. New and Rotate for owners, Revoke for owners and operators (§6.2). Marks "creator left the team" / "creator deactivated" (`createdBy.member`/`active`); the IdP-sync notice banner above (same loader as settings); revoked and expired keys collapsed at the bottom; the `sbx login` hint for people. |
 | `/app/t/<team>/settings` | Team (S8 §9.9): name (rename: owner, operator), members (email, name, role, "Not signed in yet", last sign-in), invite / role / remove (owner, operator), leave, quota and usage (`GET /v1/limits`), the IdP-sync notice banner (§9.8, §20.1) for owners and operators: "Revoke selected" (`DELETE /v1/api-keys/{key_…}` through the SDK), "Dismiss" (`acknowledgeNotice`, owners). |
 | `/app/teams/new` | New shared team: name → `createTeam` → the new team. |
 | `/app/account` | Profile (read-only), default team (`setDefaultTeam`), SSH keys (`GET/POST/DELETE /v1/ssh-keys`; `ssh_key_in_use` and unsupported types as text), sign-out with the `sbx login` hint. |
 
-Pages of the other sections arrive with later tasks of the S8 plan.
+Environments, the sandbox tabs and the operator section arrive with later
+tasks of the S8 plan.
 
 ## Server actions (S8 §9.11)
 
@@ -95,6 +101,19 @@ clients) and `useSbx(teamId)`. The SDK runs in session mode
 (`new Sbx({baseUrl: "/api", session: true, team})`): no Authorization
 header (the proxied listener refuses one), the oauth2-proxy cookie of the
 same origin is the credential; PTY WebSockets get the team as `?team=`.
+The dashboard's SDK clients retry for at most 5 s (`DASHBOARD_RETRY_BUDGET_MS`;
+the SDK default is 60 s), so a missing api shows "API unavailable" quickly.
+
+- `src/lib/errors.ts`: API error → text (`describeError`), `isApiUnavailable`
+  (no answer, or a 502/503/504 page without the API envelope, or the api
+  shutting down). `src/components/app/query-error.tsx` renders it for a query.
+- `src/lib/client-call.ts`: `attempt(fn)` for server actions and SDK calls
+  from handlers and transitions: an exception becomes a toast, not the error
+  boundary or an unhandled rejection; nothing is logged (bodies may hold
+  secrets).
+- Query keys: `["sandboxes", team, …]`, `["limits", team]`,
+  `["snapshots", team]`, `["api-keys", team]`, `["templates", team]`,
+  `["sizes", team]`, `["environments", team]`.
 
 ## Environment
 
@@ -196,6 +215,10 @@ from the image (`.dockerignore`) and `pnpm check:image` fails if any file of
 ## Tests
 
 `pnpm --filter @sbx/web test`: the role table (`permissions.test.ts`), the
+dashboard logic without a DOM (`errors.test.ts`: a text per create error,
+retry for `out_of_capacity`, "API unavailable"; `create-form.test.ts`: the
+create body, blank rows dropped, `environment: null` for none, secrets never
+in the search params; `api-keys.test.ts`, `sandboxes.test.ts`), the
 server actions against Postgres and Payload (`actions.test.ts`: forbidden
 matrix for member, non-member and operator, last owner, concurrent
 demotions, personal team, team limit, already member, stubs, default team

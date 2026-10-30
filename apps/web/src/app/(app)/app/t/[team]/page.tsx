@@ -1,8 +1,11 @@
-// Sandboxes of the team (S8 §9.4); the list comes with plan task 11.
-export default function SandboxesPage() {
-	return (
-		<section>
-			<h1 className="text-xl font-semibold">Sandboxes</h1>
-		</section>
-	);
+// Sandboxes of the team (S8 §9.4), the team's start page.
+import { SandboxList } from "@/features/sandboxes/sandbox-list";
+
+export default async function SandboxesPage({
+	params,
+}: {
+	params: Promise<{ team: string }>;
+}) {
+	const { team } = await params;
+	return <SandboxList teamId={team} />;
 }

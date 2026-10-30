@@ -36,6 +36,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { useSbx } from "@/lib/api";
+import { attempt } from "@/lib/client-call";
 import { formatMb, formatTime } from "@/lib/format";
 import { can, type TeamRole } from "@/lib/permissions";
 import type { ActionResult } from "@/lib/team-actions/core";
@@ -44,8 +45,12 @@ import type {
 	TeamSettingsData,
 } from "@/lib/team-actions/team-settings";
 
-/** Shows the error of a server action; true on success. */
-function done(r: ActionResult<object>, success?: string): boolean {
+/**
+ * Shows the error of a server action; true on success. `undefined`: the
+ * call itself threw and `attempt` has already shown a toast.
+ */
+function done(r: ActionResult<object> | undefined, success?: string): boolean {
+	if (r === undefined) return false;
 	if ("error" in r) {
 		toast.error(r.error.message);
 		return false;
@@ -113,7 +118,8 @@ function NameSection({
 	const submit = (e: FormEvent) => {
 		e.preventDefault();
 		start(async () => {
-			if (done(await renameTeam(data.team.id, name), "Team renamed")) {
+			const r = await attempt(() => renameTeam(data.team.id, name));
+			if (done(r, "Team renamed")) {
 				router.refresh();
 			}
 		});
@@ -268,7 +274,7 @@ function MemberRow({
 	const [pending, start] = useTransition();
 	const changeRole = (role: TeamRole) =>
 		start(async () => {
-			if (done(await setRole(member.id, role), "Role changed")) {
+			if (done(await attempt(() => setRole(member.id, role)), "Role changed")) {
 				router.refresh();
 			}
 		});
@@ -318,7 +324,10 @@ function MemberRow({
 						confirmLabel="Remove"
 						variant="ghost"
 						onConfirm={async () => {
-							const ok = done(await removeMember(member.id), "Member removed");
+							const ok = done(
+								await attempt(() => removeMember(member.id)),
+								"Member removed",
+							);
 							if (ok) router.refresh();
 							return ok;
 						}}
@@ -339,11 +348,11 @@ function InviteForm({ teamId }: { teamId: string }) {
 	const submit = (e: FormEvent) => {
 		e.preventDefault();
 		start(async () => {
-			const r = await inviteMember(teamId, email, role);
+			const r = await attempt(() => inviteMember(teamId, email, role));
 			if (
 				done(
 					r,
-					"ok" in r && r.stub
+					r !== undefined && "ok" in r && r.stub
 						? `${email.trim()} is invited; they join at their first sign-in.`
 						: "Member added",
 				)
@@ -394,7 +403,10 @@ function LeaveSection({ data }: { data: TeamSettingsData }) {
 				confirmLabel="Leave"
 				variant="destructive"
 				onConfirm={async () => {
-					const ok = done(await leaveTeam(data.team.id), "You left the team");
+					const ok = done(
+						await attempt(() => leaveTeam(data.team.id)),
+						"You left the team",
+					);
 					if (ok) router.push("/app");
 					return ok;
 				}}

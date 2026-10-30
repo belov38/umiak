@@ -29,6 +29,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { useSbx } from "@/lib/api";
+import { attempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
 
 function Section({
@@ -127,7 +128,8 @@ function DefaultTeam() {
 				disabled={pending}
 				onValueChange={(teamId) =>
 					start(async () => {
-						const r = await setDefaultTeam(teamId);
+						const r = await attempt(() => setDefaultTeam(teamId));
+						if (r === undefined) return;
 						if ("error" in r) toast.error(r.error.message);
 						else {
 							toast.success("Default team changed");

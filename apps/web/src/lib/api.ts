@@ -16,6 +16,13 @@ import {
 /** The api behind oauth2-proxy on the same origin (`/api/*` → api, S8 §5.1). */
 export const API_BASE_URL = "/api";
 
+/**
+ * Retry budget of a dashboard request (the SDK default is 60 s): a person
+ * is waiting, and TanStack Query refetches anyway. A missing api then shows
+ * "API unavailable" within seconds instead of a minute of "Loading…".
+ */
+export const DASHBOARD_RETRY_BUDGET_MS = 5_000;
+
 type SbxForTeam = (teamId: string) => Sbx;
 
 const SbxContext = createContext<SbxForTeam | null>(null);
@@ -33,6 +40,7 @@ export function sbxForTeam(teamId: string): Sbx {
 		// Never read SBX_* settings in the browser bundle.
 		env: {},
 		userAgent: "sbx-web",
+		retryBudgetMs: DASHBOARD_RETRY_BUDGET_MS,
 	});
 }
 

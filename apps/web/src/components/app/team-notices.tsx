@@ -13,6 +13,8 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSbx } from "@/lib/api";
+import { attempt } from "@/lib/client-call";
+import { describeError } from "@/lib/errors";
 import { formatTime } from "@/lib/format";
 import type { TeamNoticeView } from "@/lib/team-actions/team-settings";
 
@@ -81,7 +83,7 @@ function Notice({
 					params: { path: { key: id } },
 				});
 			} catch (e) {
-				failed.push(`${id}: ${e instanceof Error ? e.message : String(e)}`);
+				failed.push(`${id}: ${describeError(e).message}`);
 			}
 		}
 		await queryClient.invalidateQueries({ queryKey: ["api-keys", teamId] });
@@ -99,7 +101,8 @@ function Notice({
 	async function dismiss() {
 		setDismissing(true);
 		try {
-			const r = await acknowledgeNotice(notice.id);
+			const r = await attempt(() => acknowledgeNotice(notice.id));
+			if (r === undefined) return;
 			if ("error" in r) toast.error(r.error.message);
 			else router.refresh();
 		} finally {

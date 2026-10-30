@@ -4,6 +4,7 @@ import { type FormEvent, useState, useTransition } from "react";
 import { createTeam } from "@/actions/teams";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { attempt } from "@/lib/client-call";
 import { teamPath } from "@/lib/team-path";
 
 export function NewTeamForm() {
@@ -15,7 +16,8 @@ export function NewTeamForm() {
 		e.preventDefault();
 		setError(null);
 		start(async () => {
-			const r = await createTeam(name);
+			const r = await attempt(() => createTeam(name));
+			if (r === undefined) return;
 			if ("error" in r) setError(r.error.message);
 			else router.push(teamPath(r.teamId));
 		});
