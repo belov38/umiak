@@ -238,6 +238,8 @@ function Update-SessionPath {
 }
 
 function Assert-Command([string]$Name) {
+    # Installers write the system Path; this process only sees it after a refresh.
+    Update-SessionPath
     $c = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $c) { throw "$Name is not found in the system Path" }
     return $c.Source
