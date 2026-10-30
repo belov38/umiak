@@ -138,6 +138,12 @@ func (s *Service) writeChunk(r *http.Request, id string) (int64, error) {
 	if ok && rec.Commit != nil {
 		return rec.Size, errs.HTTPError{Status: http.StatusConflict, Code: errs.FailedPrecondition, Message: "upload " + id + " is already committed"}
 	}
+	if ok && rec.CommitTarget != "" {
+		// A commit started (the file may already be at its target, the
+		// result lost): the upload is complete at its recorded size. Only
+		// a commit retry finishes it.
+		return rec.Size, offsetMismatch(uint64(max(rec.Size, 0)), offset)
+	}
 	var f *os.File
 	if ok {
 		f, err = os.OpenFile(rec.TempPath, os.O_RDWR, 0)

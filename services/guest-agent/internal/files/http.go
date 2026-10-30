@@ -22,12 +22,14 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 )
 
 // HeaderUploadOffset carries the current size of an upload. It is the only
 // Sbx-* response header of /files.
-const HeaderUploadOffset = "Sbx-Upload-Offset"
+const HeaderUploadOffset = wire.HeaderUploadOffset
 
 // uploadIDRE is the syntax of an upload id. It is matched against the
 // escaped path segment, so %2F, %5C and dot segments never pass.

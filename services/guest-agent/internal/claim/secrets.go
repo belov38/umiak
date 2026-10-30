@@ -257,9 +257,10 @@ func (m *Manager) chownGroup(path string) error {
 }
 
 // placeLink makes the link_path symlink point at target. An existing
-// symlink is replaced; an existing file or directory is moved aside to
-// <path>.sbx-orig (or <path>.sbx-orig.<unix nanos> if that is taken) with a
-// warning. Missing parent directories are created (see mkdirAllOwned).
+// symlink is replaced; an existing file is moved aside to <path>.sbx-orig
+// (or <path>.sbx-orig.<unix nanos> if that is taken) with a warning. An
+// existing directory is left alone and the link is skipped with a warning.
+// Missing parent directories are created (see mkdirAllOwned).
 func (m *Manager) placeLink(linkPath, target string) error {
 	link, err := m.l.Rooted(linkPath)
 	if err != nil {
@@ -271,6 +272,9 @@ func (m *Manager) placeLink(linkPath, target string) error {
 		if cur, err := os.Readlink(link); err == nil && cur == target {
 			return nil
 		}
+	case err == nil && fi.IsDir():
+		m.log.Warn("link_path is a directory, secret link skipped", "path", linkPath)
+		return nil
 	case err == nil:
 		aside, err := m.moveAside(link)
 		if err != nil {

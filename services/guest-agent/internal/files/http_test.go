@@ -447,3 +447,36 @@ func TestCommitIdempotentAfterLostResult(t *testing.T) {
 		t.Fatalf("content %q", b)
 	}
 }
+
+// A chunk that arrives after a commit moved the file but lost its result
+// must not drop the upload: it answers 409 with the committed size, and
+// the commit retry still finds the result.
+func TestPutChunkAfterLostCommit(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.DurableTimeout = 100 * time.Millisecond })
+	dst := h.path("c", "file.txt")
+	res := h.do(http.MethodPut, "/files/uploads/lost", q("offset", "0"), strings.NewReader("content"), nil)
+	wantStatus(t, res, http.StatusOK)
+	h.svc.testHookAfterPlace = func() { h.st.SetFrozen(true) }
+	rec := h.commitDirect(h.ctx(), "lost", map[string]any{"path": dst})
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("commit during freeze = %d %s", rec.Code, rec.Body)
+	}
+	h.svc.testHookAfterPlace = nil
+	h.st.SetFrozen(false)
+
+	res = h.do(http.MethodPut, "/files/uploads/lost", q("offset", "7"), strings.NewReader("more"), nil)
+	wantError(t, res, http.StatusConflict, errs.UploadOffsetMismatch)
+	if got := res.Header.Get("Sbx-Upload-Offset"); got != "7" {
+		t.Fatalf("Sbx-Upload-Offset = %q, want 7", got)
+	}
+	if _, ok, _ := h.st.GetUpload("lost"); !ok {
+		t.Fatal("upload record dropped by the chunk")
+	}
+	rec = h.commitDirect(h.ctx(), "lost", map[string]any{"path": dst})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("commit retry = %d %s", rec.Code, rec.Body)
+	}
+	if fi := fileInfo(t, rec.Body.Bytes()); fi.GetPath() != dst || fi.GetSize() != 7 {
+		t.Fatalf("FileInfo %v", fi)
+	}
+}

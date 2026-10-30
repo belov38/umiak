@@ -609,6 +609,7 @@ func TestLinkPathOccupied(t *testing.T) {
 	const linkPath = "/home/user/.config/key.pem"
 	tests := []struct {
 		name    string
+		noLink  bool // link_path stays as it is
 		prepare func(t *testing.T, link, target string)
 		check   func(t *testing.T, link string)
 	}{
@@ -643,13 +644,17 @@ func TestLinkPathOccupied(t *testing.T) {
 			},
 		},
 		{
-			name: "directory moved aside",
+			name:   "directory kept, link skipped",
+			noLink: true,
 			prepare: func(t *testing.T, link, _ string) {
 				mustWrite(t, filepath.Join(link, "inner"), "x")
 			},
 			check: func(t *testing.T, link string) {
-				if b, err := os.ReadFile(filepath.Join(link+".sbx-orig", "inner")); err != nil || string(b) != "x" {
-					t.Errorf("aside dir content = %q (%v)", b, err)
+				if b, err := os.ReadFile(filepath.Join(link, "inner")); err != nil || string(b) != "x" {
+					t.Errorf("dir content = %q (%v)", b, err)
+				}
+				if _, err := os.Lstat(link + ".sbx-orig"); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("directory moved aside (%v)", err)
 				}
 			},
 		},
@@ -695,7 +700,7 @@ func TestLinkPathOccupied(t *testing.T) {
 			if _, err := h.m.Claim(context.Background(), fullRequest()); err != nil {
 				t.Fatal(err)
 			}
-			if got, err := os.Readlink(link); err != nil || got != target {
+			if got, err := os.Readlink(link); !tt.noLink && (err != nil || got != target) {
 				t.Fatalf("link -> %q (%v), want %q", got, err, target)
 			}
 			if tt.name == "correct symlink kept" {
