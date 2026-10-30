@@ -53,9 +53,9 @@ describe("loadConfig", () => {
 		expect(() =>
 			loadConfig({ SBX_TEMPLATE_VMID_RANGE: "585-598" }, "/h"),
 		).toThrow(/overlaps/);
-		expect(() =>
-			loadConfig({ SBX_TEMPLATE_VMID_RANGE: "1-2" }, "/h"),
-		).toThrow(/invalid/);
+		expect(() => loadConfig({ SBX_TEMPLATE_VMID_RANGE: "1-2" }, "/h")).toThrow(
+			/invalid/,
+		);
 	});
 
 	it("rejects a malformed range", () => {

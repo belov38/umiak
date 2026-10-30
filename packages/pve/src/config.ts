@@ -50,7 +50,10 @@ export function loadConfig(
 	const get = (k: string, d: string) => env[k] ?? d;
 	const path = (k: string, d: string) => expandHome(get(k, d), home);
 
-	const vmidRange = parseRange("SBX_VMID_RANGE", get("SBX_VMID_RANGE", "500-589"));
+	const vmidRange = parseRange(
+		"SBX_VMID_RANGE",
+		get("SBX_VMID_RANGE", "500-589"),
+	);
 	const templateVmidRange = parseRange(
 		"SBX_TEMPLATE_VMID_RANGE",
 		get("SBX_TEMPLATE_VMID_RANGE", "597-598"),
