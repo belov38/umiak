@@ -4,5 +4,6 @@ use (
 	./libs/proto
 	./libs/tunnel
 	./services/gateway
+	./services/guest-agent
 	./services/node-agent
 )

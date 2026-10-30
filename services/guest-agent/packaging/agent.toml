@@ -1,0 +1,29 @@
+# sbx guest agent configuration (spec S3 section 5). Every key is optional;
+# an absent key keeps the default shown here.
+
+[tunnel]
+# Gateway WebSocket endpoint. A URL in the SMBIOS family field wins over this.
+# url = "wss://tunnel.example.com/v1/connect"
+
+[user]
+default = "user"
+
+[readiness]
+required = ["identity", "claim", "secrets", "docker"]   # phases that gate "ready"
+
+[docker]
+enabled = true                 # pause on quiesce, "docker" readiness phase
+
+[ports]
+exclude = [22, 53]             # not reported in ports.changed
+
+[output]
+per_stream_bytes = "128MiB"
+total_bytes = "2GiB"
+total_fraction = 0.10          # of the state filesystem; the smaller limit wins
+
+[limits]
+max_running_commands = 256
+
+[idle]
+window = "5m"

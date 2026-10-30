@@ -6,10 +6,11 @@
 // `@sbx/agent-client` and `@sbx/proto` are loaded from their `dist`: run
 // `pnpm build` once before `node src/main.ts` (the image does it).
 import { readFileSync } from "node:fs";
-import { PgRegistry } from "@sbx/agent-client";
+import { AgentClient, PgRegistry } from "@sbx/agent-client";
 import { StaticConfigReader } from "@sbx/config";
 import { KeyRing } from "@sbx/core";
 import { createPool } from "@sbx/db";
+import { ConnectAgentPort, parseCaKeys } from "./adapters/agent-connect.ts";
 import { UnavailableAgentPort } from "./adapters/agent-unavailable.ts";
 import {
 	HttpGatewayPort,
@@ -19,7 +20,7 @@ import { PveInfraRegistry } from "./adapters/pve-infra.ts";
 import { parseWorkerEnv, type WorkerEnv } from "./env.ts";
 import { errText, processLogger } from "./log.ts";
 import { PromMetrics } from "./metrics.ts";
-import type { GatewayPort } from "./ports.ts";
+import type { AgentPort, GatewayPort } from "./ports.ts";
 import { createWorker, STOP_TIMEOUT_MS, type Worker } from "./worker.ts";
 
 function readToken(path: string): string {
@@ -49,6 +50,8 @@ async function main(): Promise<void> {
 	let worker: Worker | undefined;
 	// S2 registry for routing rotate-token; its own small pool and LISTEN connection.
 	let registry: PgRegistry | undefined;
+	// Agent RPC client over the same registry; closed before it.
+	let agentClient: AgentClient | undefined;
 	let exiting = false;
 	const shutdown = async (signal: string) => {
 		if (exiting) {
@@ -59,6 +62,7 @@ async function main(): Promise<void> {
 		log.info({ signal }, "shutting down");
 		try {
 			await worker?.stop({ graceful: true, timeoutMs: STOP_TIMEOUT_MS });
+			await agentClient?.close();
 			await registry?.close();
 			await pool.end();
 		} catch (err) {
@@ -74,6 +78,7 @@ async function main(): Promise<void> {
 		const config = StaticConfigReader.fromFile(env.configFile);
 		const keys = KeyRing.fromFile(env.dataKeysFile);
 		let gateway: GatewayPort;
+		let agent: AgentPort;
 		if (env.gatewayServiceTokenFile !== undefined) {
 			const serviceToken = readToken(env.gatewayServiceTokenFile);
 			registry = await PgRegistry.connect({
@@ -81,18 +86,31 @@ async function main(): Promise<void> {
 				maxConnections: 2,
 			});
 			gateway = new HttpGatewayPort(registry, { serviceToken });
+			agentClient = new AgentClient({ registry, serviceToken });
+			agent = new ConnectAgentPort(agentClient, {
+				log,
+				...(env.portDomain === undefined ? {} : { portDomain: env.portDomain }),
+				...(env.sshUserCaKeysFile === undefined
+					? {}
+					: {
+							sshUserCaKeys: parseCaKeys(
+								readFileSync(env.sshUserCaKeysFile, "utf8"),
+							),
+						}),
+			});
 		} else {
 			log.warn(
-				"SBX_GATEWAY_SERVICE_TOKEN_FILE is not set: token rotation fails (transient) until it is",
+				"SBX_GATEWAY_SERVICE_TOKEN_FILE is not set: token rotation and agent calls fail (transient) until it is",
 			);
 			gateway = new UnconfiguredGatewayPort();
+			agent = new UnavailableAgentPort();
 		}
 		worker = createWorker({
 			pool,
 			config,
 			keys,
 			infra: new PveInfraRegistry(pool, { secretsDir: env.secretsDir }),
-			agent: new UnavailableAgentPort(),
+			agent,
 			gateway,
 			log,
 			metrics: new PromMetrics({ log, defaultMetrics: true }),
@@ -105,6 +123,7 @@ async function main(): Promise<void> {
 	} catch (err) {
 		log.fatal({ err: errText(err) }, "worker failed to start");
 		await worker?.stop({ graceful: false }).catch(() => {});
+		await agentClient?.close().catch(() => {});
 		await registry?.close().catch(() => {});
 		await pool.end().catch(() => {});
 		process.exit(1);
