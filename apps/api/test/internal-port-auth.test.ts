@@ -325,6 +325,17 @@ describe.skipIf(skipPg())(
 				});
 			});
 
+			it("two concurrent exchanges of one code: exactly one succeeds", async () => {
+				const { r0, code } = await issued();
+				const rs = await Promise.all([
+					exchange({ code, label: r0.label }),
+					exchange({ code, label: r0.label }),
+				]);
+				expect(rs.map((r) => r.status).sort()).toEqual([200, 400]);
+				const failed = rs.find((r) => r.status === 400);
+				expect(failed && body(failed).code).toBe("invalid_code");
+			});
+
 			it("another label is invalid_code and does not burn the code", async () => {
 				const { r0, code } = await issued();
 				const other = await hosted("sso");

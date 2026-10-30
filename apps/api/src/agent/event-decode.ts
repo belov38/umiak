@@ -27,15 +27,21 @@ const JSON_PAYLOADS: DescMessage[] = [
 /** Types that protojson request bodies may carry in `Any`. */
 export const AGENT_EVENT_PAYLOAD_REGISTRY = createRegistry(...JSON_PAYLOADS);
 
-/** The payload as JSON; {} when absent. */
+/** The payload as JSON; {} when absent; {"@type"} when unknown or corrupt. */
 export function decodePayload(any: Any | undefined): unknown {
 	if (any === undefined || (any.typeUrl === "" && any.value.length === 0)) {
 		return {};
 	}
 	for (const schema of JSON_PAYLOADS) {
 		if (anyIs(any, schema)) {
-			const m = anyUnpack(any, schema);
-			if (m !== undefined) return toJson(schema, m);
+			// A corrupt payload must not fail the batch: the gateway retries
+			// any non-2xx forever and the machine's events would stall.
+			try {
+				const m = anyUnpack(any, schema);
+				if (m !== undefined) return toJson(schema, m);
+			} catch {
+				break;
+			}
 		}
 	}
 	return { "@type": any.typeUrl };

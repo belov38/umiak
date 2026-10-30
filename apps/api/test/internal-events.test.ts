@@ -163,6 +163,32 @@ describe.skipIf(skipPg())("POST /internal/v1/agent-events", () => {
 		expect(await rows(machineId)).toEqual(stored);
 	});
 
+	it("a corrupt known payload is stored as {@type} instead of failing the batch", async () => {
+		const machineId = randomUUID();
+		const typeUrl = "type.googleapis.com/google.protobuf.Struct";
+		const req = create(AgentEventsRequestSchema, {
+			machineId,
+			events: [
+				create(EventSchema, {
+					seq: 1n,
+					time: timestampFromDate(T0),
+					bootId: "boot-1",
+					type: "activity",
+					// Field 1 (map entry), length-delimited, length 5, 1 byte follows.
+					payload: { typeUrl, value: new Uint8Array([10, 5, 1]) },
+				}),
+				event(2, "activity", { runningCommands: 1 }),
+			],
+		});
+		const r = await postProto(req);
+		expect(r.status, r.text).toBe(200);
+		expect(fromBinary(AgentEventsResponseSchema, r.bytes).ackedSeq).toBe(2n);
+		expect((await rows(machineId)).map((e) => e.payload)).toEqual([
+			{ "@type": typeUrl },
+			{ runningCommands: 1 },
+		]);
+	});
+
 	it("a protojson request gets a protojson answer", async () => {
 		const machineId = randomUUID();
 		const ev = (seq: number, payload?: unknown) => ({

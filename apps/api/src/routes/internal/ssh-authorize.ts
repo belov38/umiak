@@ -100,6 +100,26 @@ function due(lastUsedAt: Date | null): boolean {
 	);
 }
 
+/**
+ * Updates lastUsedAt; a failure is logged and does not refuse an otherwise
+ * valid login (it is bookkeeping, not authorization).
+ */
+async function touch(
+	deps: ApiDeps,
+	what: string,
+	id: string,
+	fn: (id: string) => Promise<void>,
+): Promise<void> {
+	try {
+		await fn(id);
+	} catch (e) {
+		deps.log.warn(
+			{ id, err: e instanceof Error ? e.message : String(e) },
+			`ssh authorize: lastUsedAt of the ${what} not updated`,
+		);
+	}
+}
+
 /** An active member of the team, or null. */
 async function member(
 	deps: ApiDeps,
@@ -129,7 +149,9 @@ async function viaRegisteredKey(
 	const u = await member(deps, stored.userId, t.teamId);
 	if (u === null) return null;
 	if (!recheck && due(stored.lastUsedAt)) {
-		await deps.identity.touchSshKey(stored.id);
+		await touch(deps, "ssh key", stored.id, (id) =>
+			deps.identity.touchSshKey(id),
+		);
 	}
 	return userActor(u);
 }
@@ -170,7 +192,9 @@ async function viaCertificate(
 	) {
 		return null;
 	}
-	if (!recheck && due(k.lastUsedAt)) await deps.identity.touchApiKey(k.id);
+	if (!recheck && due(k.lastUsedAt)) {
+		await touch(deps, "api key", k.id, (id) => deps.identity.touchApiKey(id));
+	}
 	return { kind: "team_key", apiKeyId: encodeUuid("apiKey", k.id) };
 }
 

@@ -7,7 +7,7 @@ import { encodeUuid, parseSshPublicKey } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ServiceTokens } from "../src/index.ts";
-import { issueApiKey } from "../src/testing/index.ts";
+import { captureLogs, issueApiKey } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
 import { ed25519PublicKey } from "./helpers/ssh.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -392,6 +392,49 @@ describe.skipIf(skipPg())("POST /internal/v1/gateway/ssh/authorize", () => {
 			});
 			expect(body(r)).toEqual(DENIED);
 		});
+	});
+
+	it("a failing touch of lastUsedAt does not refuse a valid login: allowed, with a warning", async () => {
+		const logs = captureLogs();
+		const failing = new Proxy(w.identity, {
+			get(t, name, recv) {
+				if (name === "touchSshKey" || name === "touchApiKey") {
+					return () => Promise.reject(new Error("db down for touch"));
+				}
+				const v = Reflect.get(t, name, recv);
+				return typeof v === "function" ? v.bind(t) : v;
+			},
+		});
+		const hf = w.harness({
+			listener: "internal",
+			bearer: GW,
+			deps: {
+				serviceTokens: new ServiceTokens({ gateway: [GW] }),
+				identity: failing,
+				log: logs.log,
+			},
+		});
+		const s = await w.seed({ state: "ready" });
+		const u = await person();
+		const k = await registered(u.userId);
+		const viaKey = await hf.request("POST", PATH, {
+			json: { sandbox: s.slug, publicKey: k.line, fingerprint: k.fingerprint },
+		});
+		expect(viaKey.status, viaKey.text).toBe(200);
+		expect(body(viaKey)).toMatchObject({ allowed: true });
+		const tk = await w.key(["ssh:connect"]);
+		const viaCert = await hf.request("POST", PATH, {
+			json: {
+				sandbox: s.slug,
+				certificate: cert(teamKeyId(tk.id), s.sandboxId),
+			},
+		});
+		expect(viaCert.status, viaCert.text).toBe(200);
+		expect(body(viaCert)).toMatchObject({ allowed: true });
+		const warnings = logs
+			.entries()
+			.filter((e) => e.level === 40 && /lastUsedAt/.test(String(e.msg)));
+		expect(warnings).toHaveLength(2);
 	});
 
 	it("a registered key on recheck does not touch lastUsedAt", async () => {
