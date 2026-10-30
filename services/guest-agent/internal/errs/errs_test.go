@@ -56,6 +56,31 @@ func TestFromErrnoPassthrough(t *testing.T) {
 	}
 }
 
+func TestWrap(t *testing.T) {
+	for _, tt := range []struct {
+		err        error
+		wantCode   connect.Code
+		wantDetail string
+	}{
+		{&fs.PathError{Op: "write", Path: "/x", Err: syscall.ENOSPC}, connect.CodeResourceExhausted, NoSpace},
+		{fmt.Errorf("deep: %w", &fs.PathError{Op: "write", Path: "/x", Err: syscall.EDQUOT}), connect.CodeResourceExhausted, NoSpace},
+		{&fs.PathError{Op: "open", Path: "/x", Err: syscall.ENOENT}, connect.CodeInternal, Internal},
+		{errors.New("plain"), connect.CodeInternal, Internal},
+	} {
+		err := Wrap("step", tt.err)
+		if err.Code() != tt.wantCode {
+			t.Errorf("Wrap(%v) code = %v, want %v", tt.err, err.Code(), tt.wantCode)
+		}
+		if d, ok := rpcconv.Detail(err); !ok || d.GetCode() != tt.wantDetail {
+			t.Errorf("Wrap(%v) detail = %v, want %q", tt.err, d, tt.wantDetail)
+		}
+	}
+	orig := New(connect.CodeAborted, UpdateInProgress, "busy")
+	if got := Wrap("step", fmt.Errorf("wrap: %w", orig)); got != orig {
+		t.Errorf("connect error not passed through: %v", got)
+	}
+}
+
 func TestHTTPStatus(t *testing.T) {
 	tests := []struct {
 		code connect.Code

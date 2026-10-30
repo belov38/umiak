@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -185,7 +186,11 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 	if err := m.writeGroupFile(m.l.SecretsEnvFile, FormatEnvFile(env), 0o440); err != nil {
 		return err
 	}
-	if err := fsutil.WriteJSONAtomic(m.l.SecretsStateFile, st, 0o600); err != nil {
+	data, err := json.Marshal(st)
+	if err != nil {
+		return internal("encode secrets state", err)
+	}
+	if err := m.writeFile(m.l.SecretsStateFile, data, 0o600); err != nil {
 		return internal("write secrets state", err)
 	}
 	return nil
@@ -235,7 +240,7 @@ func (m *Manager) wipeSecrets() error {
 // writeGroupFile writes a tmpfs file with mode and the default user's
 // group.
 func (m *Manager) writeGroupFile(path string, data []byte, mode fs.FileMode) error {
-	if err := fsutil.WriteFileAtomic(path, data, mode); err != nil {
+	if err := m.writeFile(path, data, mode); err != nil {
 		return internal("write secret", err)
 	}
 	return m.chownGroup(path)

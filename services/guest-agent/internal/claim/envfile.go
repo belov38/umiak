@@ -12,7 +12,6 @@ import (
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
 )
 
@@ -70,7 +69,7 @@ func (m *Manager) platformEnv(sandboxID, portDomain string) map[string]string {
 func (m *Manager) writeSbxEnv(sandboxID, portDomain string, env map[string]string) error {
 	all := m.platformEnv(sandboxID, portDomain)
 	maps.Copy(all, env)
-	if err := fsutil.WriteFileAtomic(m.l.SbxEnvFile, FormatEnvFile(all), 0o644); err != nil {
+	if err := m.writeFile(m.l.SbxEnvFile, FormatEnvFile(all), 0o644); err != nil {
 		return internal("write sbx env", err)
 	}
 	return nil

@@ -95,6 +95,10 @@ type Manager struct {
 	rec       *store.Claim          // stored claim; nil before claim
 	req       *agentv1.ClaimRequest // rec.Request decoded: secret values stripped
 	secretEnv map[string]string     // applied secret env; nil if not in the tmpfs
+
+	// writeFile writes the env, secret and SSH CA files; tests replace it
+	// to inject write errors.
+	writeFile func(path string, data []byte, perm fs.FileMode) error
 }
 
 // New returns a Manager. Call Start before any other method.
@@ -123,7 +127,7 @@ func New(opts Options) (*Manager, error) {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
-	return &Manager{opts: opts, l: opts.Layout, ready: opts.Ready, log: opts.Log}, nil
+	return &Manager{opts: opts, l: opts.Layout, ready: opts.Ready, log: opts.Log, writeFile: fsutil.WriteFileAtomic}, nil
 }
 
 // Start prepares the run-time files at boot: it mounts the secrets tmpfs,
@@ -220,7 +224,7 @@ func (m *Manager) prepareDirs() error {
 		return fmt.Errorf("claim: %w", err)
 	}
 	if _, err := os.Lstat(m.l.SbxEnvFile); errors.Is(err, fs.ErrNotExist) {
-		if err := fsutil.WriteFileAtomic(m.l.SbxEnvFile, nil, 0o644); err != nil {
+		if err := m.writeFile(m.l.SbxEnvFile, nil, 0o644); err != nil {
 			return fmt.Errorf("claim: create sbx env: %w", err)
 		}
 	}
@@ -604,7 +608,7 @@ func (m *Manager) writeCA(ctx context.Context, keys []string) error {
 	if err := os.MkdirAll(filepath.Dir(m.l.SSHUserCA), 0o755); err != nil {
 		return internal("write ssh ca", err)
 	}
-	if err := fsutil.WriteFileAtomic(m.l.SSHUserCA, data, 0o644); err != nil {
+	if err := m.writeFile(m.l.SSHUserCA, data, 0o644); err != nil {
 		return internal("write ssh ca", err)
 	}
 	if m.opts.ReloadSSH != nil {
@@ -704,14 +708,17 @@ func storeError(err error) error {
 		return connect.NewError(connect.CodeDeadlineExceeded, err)
 	case errors.Is(err, context.Canceled):
 		return connect.NewError(connect.CodeCanceled, err)
+	case errs.IsNoSpace(err):
+		return errs.New(connect.CodeResourceExhausted, errs.NoSpace, err.Error())
 	default:
 		return errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 }
 
-// internal wraps a local failure; err carries paths, never values.
+// internal wraps a local failure (resource_exhausted/no_space on a full
+// disk, see errs.Wrap); err carries paths, never values.
 func internal(what string, err error) error {
-	return errs.Newf(connect.CodeInternal, errs.Internal, "%s: %v", what, err)
+	return errs.Wrap(what, err)
 }
 
 type discard struct{}

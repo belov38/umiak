@@ -123,6 +123,26 @@ func FromErrno(err error) *connect.Error {
 	}
 }
 
+// IsNoSpace reports whether err is a full disk or an exceeded quota (ENOSPC
+// or EDQUOT anywhere in the chain).
+func IsNoSpace(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
+}
+
+// Wrap maps a local failure of the step what: a *connect.Error in the chain
+// is returned as is, a full disk becomes resource_exhausted/no_space and
+// anything else internal. The message is "what: err".
+func Wrap(what string, err error) *connect.Error {
+	var cerr *connect.Error
+	if errors.As(err, &cerr) {
+		return cerr
+	}
+	if IsNoSpace(err) {
+		return Newf(connect.CodeResourceExhausted, NoSpace, "%s: %v", what, err)
+	}
+	return Newf(connect.CodeInternal, Internal, "%s: %v", what, err)
+}
+
 // HTTPStatus maps a Connect code to an HTTP status like the Connect protocol.
 // WriteHTTP refines ResourceExhausted by detail code.
 func HTTPStatus(code connect.Code) int {
