@@ -31,9 +31,9 @@ export const DEFAULT_NPM_PACKAGES = [
 	"pnpm",
 ];
 
-const UBUNTU_MINIMAL =
+export const UBUNTU_MINIMAL =
 	"https://cloud-images.ubuntu.com/minimal/releases/resolute/";
-const BASE_IMAGE = "ubuntu-26.04-minimal-cloudimg-amd64.img";
+export const BASE_IMAGE = "ubuntu-26.04-minimal-cloudimg-amd64.img";
 const DOCKER_PACKAGES =
 	"https://download.docker.com/linux/ubuntu/dists/resolute/stable/binary-amd64/Packages";
 const CHROME_PACKAGES =
@@ -71,7 +71,11 @@ async function getJson<T>(
 }
 
 /** sha256 for `file` from a `sha256sum`-style listing (`<hex>  name`, `<hex> *name`, `<hex> *./name`). */
-function findChecksum(listing: string, file: string, url: string): string {
+export function findChecksum(
+	listing: string,
+	file: string,
+	url: string,
+): string {
 	for (const line of listing.split("\n")) {
 		const m = /^([0-9a-f]{64})\s+\*?(?:\.\/)?(\S+)\s*$/i.exec(line);
 		if (m?.[1] && m[2] === file) return m[1].toLowerCase();

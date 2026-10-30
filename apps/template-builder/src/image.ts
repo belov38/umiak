@@ -1,0 +1,165 @@
+import { createHash } from "node:crypto";
+import {
+	createReadStream,
+	createWriteStream,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+} from "node:fs";
+import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
+import * as openpgp from "openpgp";
+import type { Versions } from "./recipe.ts";
+import {
+	BASE_IMAGE,
+	type Fetch,
+	findChecksum,
+	UBUNTU_MINIMAL,
+} from "./versions-update.ts";
+
+// Base image: download and verification (spec S5 section 6.1)
+
+/**
+ * A `Fetch` response that also gives the raw bytes and a body stream: the
+ * detached signature is binary and the image is too large to buffer.
+ */
+export type DownloadFetch = (url: string) => Promise<
+	Awaited<ReturnType<Fetch>> & {
+		arrayBuffer(): Promise<ArrayBuffer>;
+		body: AsyncIterable<Uint8Array> | null;
+	}
+>;
+
+/** Global fetch without a total timeout: an image download takes minutes. Node still applies its header and body idle timeouts. */
+export const defaultDownloadFetch: DownloadFetch = (url) =>
+	fetch(url, { headers: { "User-Agent": "sbx-tpl" } });
+
+export function imageFileName(_base: Versions["base"]): string {
+	return BASE_IMAGE;
+}
+
+/** Name of the image in the Proxmox `local:import` storage. */
+export function pveImageName(serial: string): string {
+	return `sbx-ubuntu-26.04-minimal-${serial}.qcow2`;
+}
+
+const ARMOR_PREFIX = "-----BEGIN PGP";
+
+/** Verifies a detached signature (binary or armored) of the SHA256SUMS text against the pinned key. */
+export async function verifySha256Sums(
+	sumsText: string,
+	sigArmoredOrBinary: Uint8Array,
+	pinnedKeyArmored: string,
+): Promise<void> {
+	const verificationKeys = await openpgp.readKey({
+		armoredKey: pinnedKeyArmored,
+	});
+	const armored =
+		Buffer.from(sigArmoredOrBinary.subarray(0, ARMOR_PREFIX.length)).toString(
+			"latin1",
+		) === ARMOR_PREFIX;
+	const signature = armored
+		? await openpgp.readSignature({
+				armoredSignature: Buffer.from(sigArmoredOrBinary).toString("utf8"),
+			})
+		: await openpgp.readSignature({ binarySignature: sigArmoredOrBinary });
+	const result = await openpgp.verify({
+		message: await openpgp.createMessage({ binary: Buffer.from(sumsText) }),
+		signature,
+		verificationKeys,
+	});
+	if (result.signatures.length === 0)
+		throw new Error("SHA256SUMS: no signature");
+	for (const s of result.signatures) {
+		try {
+			await s.verified;
+		} catch (err) {
+			throw new Error(
+				`SHA256SUMS: signature does not verify with the pinned key: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+	}
+}
+
+async function fileSha256(path: string): Promise<string> {
+	const hash = createHash("sha256");
+	for await (const chunk of createReadStream(path)) hash.update(chunk);
+	return hash.digest("hex");
+}
+
+async function getBytes(
+	fetch: DownloadFetch,
+	url: string,
+): Promise<Uint8Array> {
+	const res = await fetch(url);
+	if (res.status !== 200) throw new Error(`GET ${url}: HTTP ${res.status}`);
+	return new Uint8Array(await res.arrayBuffer());
+}
+
+/** Streams the image to `<dest>.part`, hashing on the way, and renames it once the sha256 matches. */
+async function download(
+	fetch: DownloadFetch,
+	url: string,
+	dest: string,
+	want: string,
+): Promise<string> {
+	const res = await fetch(url);
+	if (res.status !== 200) throw new Error(`GET ${url}: HTTP ${res.status}`);
+	if (!res.body) throw new Error(`GET ${url}: empty body`);
+	const part = `${dest}.part`;
+	const hash = createHash("sha256");
+	try {
+		await pipeline(
+			res.body,
+			async function* (source: AsyncIterable<Uint8Array>) {
+				for await (const chunk of source) {
+					hash.update(chunk);
+					yield chunk;
+				}
+			},
+			createWriteStream(part),
+		);
+		const got = hash.digest("hex");
+		if (got !== want)
+			throw new Error(`${url}: sha256 mismatch: got ${got}, want ${want}`);
+		renameSync(part, dest);
+		return got;
+	} catch (err) {
+		rmSync(part, { force: true });
+		throw err;
+	}
+}
+
+/**
+ * Downloads the base image to `<cacheDir>/<serial>/` after checking the
+ * signed SHA256SUMS against the pinned key and `base.sha256` against the
+ * signed listing. A cached file whose sha256 matches is reused.
+ */
+export async function fetchBaseImage(o: {
+	fetch: DownloadFetch;
+	cacheDir: string;
+	base: Versions["base"];
+	keyFile: string;
+}): Promise<{ path: string; sha256: string }> {
+	const name = imageFileName(o.base);
+	const releaseUrl = `${UBUNTU_MINIMAL}release-${o.base.serial}/`;
+	const sums = await getBytes(o.fetch, `${releaseUrl}SHA256SUMS`);
+	const sig = await getBytes(o.fetch, `${releaseUrl}SHA256SUMS.gpg`);
+	const sumsText = Buffer.from(sums).toString("utf8");
+	await verifySha256Sums(sumsText, sig, readFileSync(o.keyFile, "utf8"));
+	const signed = findChecksum(sumsText, name, `${releaseUrl}SHA256SUMS`);
+	if (signed !== o.base.sha256)
+		throw new Error(
+			`${name}: pinned base.sha256 ${o.base.sha256} differs from the signed SHA256SUMS (${signed})`,
+		);
+
+	const dir = join(o.cacheDir, o.base.serial);
+	mkdirSync(dir, { recursive: true });
+	const path = join(dir, name);
+	if (existsSync(path) && (await fileSha256(path)) === signed)
+		return { path, sha256: signed };
+	const sha256 = await download(o.fetch, `${releaseUrl}${name}`, path, signed);
+	return { path, sha256 };
+}
