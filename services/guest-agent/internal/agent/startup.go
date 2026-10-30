@@ -151,6 +151,9 @@ func (a *agent) startup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Quiesce wipes and restores the secret files through the claim (S9
+	// spec 12.10).
+	a.quiesce.SetSecrets(a.claim)
 	if err := a.claim.Start(ctx); err != nil {
 		return err
 	}

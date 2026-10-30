@@ -19,6 +19,7 @@ import (
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 )
@@ -32,8 +33,9 @@ const (
 )
 
 // ErrSecretInUse reports a secret file held open by another process without
-// sharing write and delete access, so it cannot be wiped (Windows).
-var ErrSecretInUse = errors.New("claim: secret file is in use")
+// sharing write and delete access, so it cannot be wiped (Windows). It is
+// errs.ErrSecretInUse, which quiesce tests for.
+var ErrSecretInUse = errs.ErrSecretInUse
 
 // secretFileName is a valid secret file name; "." and ".." are refused
 // separately.
@@ -144,7 +146,20 @@ type secretFileMeta struct {
 // writeSecrets replaces the secrets in the tmpfs with env and files
 // (normalized): files, stale files and links removed, links, secrets/env,
 // then the state record. With SecretEnvInMemory the env stays off the disk.
+// While the files are wiped for a snapshot nothing is written: the caller
+// applies the set in memory and RestoreSecretFiles writes it. opMu is held.
 func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFile) error {
+	if m.filesWiped {
+		m.deferred = true
+		return nil
+	}
+	return m.syncSecrets(env, files, false)
+}
+
+// syncSecrets is writeSecrets; with keepEqual a secret file whose content
+// already matches is left alone (a file held open during the wipe cannot
+// be replaced).
+func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile, keepEqual bool) error {
 	if err := m.prepareDirs(); err != nil {
 		return internal("prepare secrets", err)
 	}
@@ -158,8 +173,11 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 		st.Env = maps.Clone(env)
 	}
 	for _, f := range files {
-		if err := m.writeSecretFile(f); err != nil {
-			return err
+		// A file that was in use during the wipe was never touched.
+		if !keepEqual || !m.secretFileEqual(f) {
+			if err := m.writeSecretFile(f); err != nil {
+				return err
+			}
 		}
 		keep[f.GetName()] = true
 		st.Files = append(st.Files, secretFileMeta{Name: f.GetName(), Mode: f.GetMode(), LinkPath: f.GetLinkPath()})
@@ -207,6 +225,12 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 // writeSecretFile writes one secret file into files/.
 func (m *Manager) writeSecretFile(f *agentv1.SecretFile) error {
 	return m.writeGroupFile(filepath.Join(m.l.SecretFilesDir, f.GetName()), f.GetContent(), fs.FileMode(f.GetMode()))
+}
+
+// secretFileEqual reports whether files/ holds f with its content.
+func (m *Manager) secretFileEqual(f *agentv1.SecretFile) bool {
+	b, err := os.ReadFile(filepath.Join(m.l.SecretFilesDir, f.GetName()))
+	return err == nil && bytes.Equal(b, f.GetContent())
 }
 
 // loadSecrets reads the applied secret set back from the tmpfs. The env is
@@ -257,23 +281,33 @@ func (m *Manager) wipeSecrets() (wiped bool, err error) {
 // applied set in memory, the state record, the secrets phase. It continues
 // past files that are in use and then fails with ErrSecretInUse; wiped
 // reports that no secret file is left. RestoreSecretFiles brings the files
-// back (quiesce for a saved snapshot, S9 spec 12.10).
+// back (quiesce for a saved snapshot, S9 spec 12.10). Until then Claim and
+// UpdateSecrets apply a new secret set in memory only, so no secret file
+// lands in the snapshot.
 func (m *Manager) WipeSecretFiles() (wiped bool, err error) {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
+	m.filesWiped = true
 	return wipeDir(m.l.SecretFilesDir, m.removeFile)
 }
 
 // RestoreSecretFiles rewrites the applied secret files from memory where
-// they are missing or differ, after WipeSecretFiles. Without an applied set
-// in memory (secrets pending, for example after an agent restart) it does
-// nothing: the files come back with UpdateSecrets.
+// they are missing or differ, after WipeSecretFiles; a set applied in
+// memory since the wipe is written in full (stale files, links, state
+// record). Without an applied set in memory (secrets pending, for example
+// after an agent restart) it writes nothing: the files come back with
+// UpdateSecrets.
 func (m *Manager) RestoreSecretFiles() error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
+	deferred := m.deferred
+	m.filesWiped, m.deferred = false, false
 	m.mu.RLock()
-	files := m.secretFiles
+	env, files := m.secretEnv, m.secretFiles
 	m.mu.RUnlock()
+	if deferred {
+		return m.syncSecrets(env, files, true)
+	}
 	if len(files) == 0 {
 		return nil
 	}
@@ -281,9 +315,8 @@ func (m *Manager) RestoreSecretFiles() error {
 		return internal("prepare secrets", err)
 	}
 	for _, f := range files {
-		// A file that was in use was never touched; leave it alone.
-		b, err := os.ReadFile(filepath.Join(m.l.SecretFilesDir, f.GetName()))
-		if err == nil && bytes.Equal(b, f.GetContent()) {
+		if m.secretFileEqual(f) {
+			// A file that was in use was never touched; leave it alone.
 			continue
 		}
 		if err := m.writeSecretFile(f); err != nil {

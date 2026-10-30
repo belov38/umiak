@@ -65,8 +65,9 @@ type Counts interface {
 // Quiescer freezes the machine for snapshots (spec section 14).
 type Quiescer interface {
 	// Quiesce starts a lease of leaseMs; docker and fs select what to
-	// freeze. The defaults are already applied.
-	Quiesce(ctx context.Context, leaseMs uint32, docker, fs bool) (*agentv1.QuiesceResponse, error)
+	// freeze, wipeSecretFiles wipes the secret files until the thaw (S9
+	// spec 12.10). The defaults are already applied.
+	Quiesce(ctx context.Context, leaseMs uint32, docker, fs, wipeSecretFiles bool) (*agentv1.QuiesceResponse, error)
 	// Thaw ends a lease and reports whether it was thawed automatically.
 	Thaw(ctx context.Context, leaseID string) (*agentv1.ThawResponse, error)
 	// Status returns the current lease, or nil.
@@ -270,7 +271,8 @@ func (s *Service) PrepareStop(ctx context.Context, _ *connect.Request[agentv1.Pr
 }
 
 // Quiesce implements agentv1connect.SystemHandler. Unset fields take the
-// spec defaults: lease_ms 30000, docker and fs true.
+// spec defaults: lease_ms 30000, docker and fs true, wipe_secret_files
+// false.
 func (s *Service) Quiesce(ctx context.Context, req *connect.Request[agentv1.QuiesceRequest]) (*connect.Response[agentv1.QuiesceResponse], error) {
 	if s.opts.Quiesce == nil {
 		return nil, unimplemented("quiesce")
@@ -286,7 +288,7 @@ func (s *Service) Quiesce(ctx context.Context, req *connect.Request[agentv1.Quie
 	}
 	docker := m.Docker == nil || m.GetDocker()
 	fs := m.Fs == nil || m.GetFs()
-	res, err := s.opts.Quiesce.Quiesce(ctx, leaseMs, docker, fs)
+	res, err := s.opts.Quiesce.Quiesce(ctx, leaseMs, docker, fs, m.GetWipeSecretFiles())
 	if err != nil {
 		return nil, toConnect("quiesce", err)
 	}

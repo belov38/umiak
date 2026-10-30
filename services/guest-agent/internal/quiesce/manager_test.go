@@ -66,7 +66,7 @@ func TestQuiesceOrderAndRollback(t *testing.T) {
 		e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
 		ctx := context.Background()
 		before := time.Now()
-		res, err := e.m.Quiesce(ctx, 30000, true, true)
+		res, err := e.m.Quiesce(ctx, 30000, true, true, false)
 		if err != nil {
 			t.Fatalf("Quiesce: %v", err)
 		}
@@ -143,7 +143,7 @@ func TestQuiesceOrderAndRollback(t *testing.T) {
 		e.dk.running = []string{"c1", "c2", "c3"}
 		e.dk.failPause["c2"] = errors.New("boom")
 		e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
-		_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+		_, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 		wantErr(t, err, connect.CodeInternal, errs.Internal)
 		if !e.log.has("unpause c1") {
 			t.Errorf("c1 not unpaused: %q", e.log.all())
@@ -166,7 +166,7 @@ func TestQuiesceOrderAndRollback(t *testing.T) {
 		}
 		// A new lease works after the rollback.
 		e.dk.failPause = map[string]error{}
-		if _, err := e.m.Quiesce(context.Background(), 30000, true, true); err != nil {
+		if _, err := e.m.Quiesce(context.Background(), 30000, true, true, false); err != nil {
 			t.Fatalf("Quiesce after rollback: %v", err)
 		}
 	})
@@ -175,7 +175,7 @@ func TestQuiesceOrderAndRollback(t *testing.T) {
 		e := newEnv(t, nil)
 		e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
 		e.fz.mountErr = errors.New("no mountinfo")
-		_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+		_, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 		wantErr(t, err, connect.CodeInternal, errs.Internal)
 		if !e.log.has("hook 10-a thaw") || len(e.dk.pausedIDs()) != 0 || e.st.Frozen() {
 			t.Errorf("rollback incomplete: %q, paused %v, store frozen %v", e.log.all(), e.dk.pausedIDs(), e.st.Frozen())
@@ -186,10 +186,10 @@ func TestQuiesceOrderAndRollback(t *testing.T) {
 func TestQuiesceAlready(t *testing.T) {
 	e := newEnv(t, nil)
 	ctx := context.Background()
-	if _, err := e.m.Quiesce(ctx, 30000, true, true); err != nil {
+	if _, err := e.m.Quiesce(ctx, 30000, true, true, false); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.m.Quiesce(ctx, 30000, true, true)
+	_, err := e.m.Quiesce(ctx, 30000, true, true, false)
 	msg := wantErr(t, err, connect.CodeFailedPrecondition, errs.AlreadyQuiesced)
 	if !strings.Contains(msg, "lease-1") {
 		t.Errorf("message %q does not name the lease", msg)
@@ -200,17 +200,17 @@ func TestQuiesceAlready(t *testing.T) {
 	if _, err := e.m.Thaw(ctx, "lease-1"); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := e.m.Quiesce(ctx, 30000, true, true); err != nil || res.GetLeaseId() != "lease-2" {
+	if res, err := e.m.Quiesce(ctx, 30000, true, true, false); err != nil || res.GetLeaseId() != "lease-2" {
 		t.Fatalf("Quiesce after Thaw = %v, %v", res, err)
 	}
 }
 
 func TestQuiesceLeaseMs(t *testing.T) {
 	e := newEnv(t, nil)
-	_, err := e.m.Quiesce(context.Background(), MaxLeaseMs+1, true, true)
+	_, err := e.m.Quiesce(context.Background(), MaxLeaseMs+1, true, true, false)
 	wantErr(t, err, connect.CodeInvalidArgument, errs.InvalidArgument)
 	before := time.Now()
-	res, err := e.m.Quiesce(context.Background(), 0, false, false)
+	res, err := e.m.Quiesce(context.Background(), 0, false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestFrozenByOther(t *testing.T) {
 	t.Run("first mount", func(t *testing.T) {
 		e := newEnv(t, nil)
 		e.fz.busy["/data"] = true
-		_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+		_, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 		wantErr(t, err, connect.CodeFailedPrecondition, errs.FrozenByOther)
 		if e.log.count("thaw") != 0 {
 			t.Errorf("thawed a mount: %q", e.log.all())
@@ -241,7 +241,7 @@ func TestFrozenByOther(t *testing.T) {
 	t.Run("second mount", func(t *testing.T) {
 		e := newEnv(t, nil)
 		e.fz.busy["/"] = true
-		_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+		_, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 		wantErr(t, err, connect.CodeFailedPrecondition, errs.FrozenByOther)
 		if !e.log.has("thaw /data store=true") || e.log.has("thaw / store=true") || e.log.has("thaw / store=false") {
 			t.Errorf("want only /data thawed: %q", e.log.all())
@@ -258,7 +258,7 @@ func TestFrozenByOther(t *testing.T) {
 func TestStoreFrozenDuringLease(t *testing.T) {
 	e := newEnv(t, nil)
 	ctx := context.Background()
-	if _, err := e.m.Quiesce(ctx, 30000, true, true); err != nil {
+	if _, err := e.m.Quiesce(ctx, 30000, true, true, false); err != nil {
 		t.Fatal(err)
 	}
 	if !e.st.Frozen() {
@@ -277,7 +277,7 @@ func TestStoreFrozenDuringLease(t *testing.T) {
 	}
 
 	// Without fs the store stays writable.
-	if _, err := e.m.Quiesce(ctx, 30000, true, false); err != nil {
+	if _, err := e.m.Quiesce(ctx, 30000, true, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if e.st.Frozen() {
@@ -288,7 +288,7 @@ func TestStoreFrozenDuringLease(t *testing.T) {
 func TestDockerNotRunning(t *testing.T) {
 	e := newEnv(t, nil)
 	e.dk.listErr = fmt.Errorf("%w: dial unix: no such file", docker.ErrNoDaemon)
-	res, err := e.m.Quiesce(context.Background(), 30000, true, true)
+	res, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 	if err != nil {
 		t.Fatalf("Quiesce without a docker daemon: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestAutoThawTimer(t *testing.T) {
 	ctx := context.Background()
 	// 1 s, not less: under a loaded full-suite run Quiesce itself can take longer
 	// than a shorter lease.
-	if _, err := e.m.Quiesce(ctx, 1000, true, true); err != nil {
+	if _, err := e.m.Quiesce(ctx, 1000, true, true, false); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "auto thaw", func() bool { return len(autoThawed(e.rec)) > 0 })
@@ -342,7 +342,7 @@ func TestWatchdogMarkerAdopted(t *testing.T) {
 		e := newEnv(t, nil)
 		e.m.markerEvery = 10 * time.Millisecond
 		hook := e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
-		if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+		if _, err := e.m.Quiesce(context.Background(), 60000, true, true, false); err != nil {
 			t.Fatal(err)
 		}
 		// The unit ran the hook's thaw; the agent must not run it again.
@@ -376,7 +376,7 @@ func TestWatchdogMarkerAdopted(t *testing.T) {
 	t.Run("thaw first", func(t *testing.T) {
 		e := newEnv(t, nil)
 		e.m.markerEvery = time.Hour
-		if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+		if _, err := e.m.Quiesce(context.Background(), 60000, true, true, false); err != nil {
 			t.Fatal(err)
 		}
 		at := time.Now().UTC()
@@ -509,7 +509,7 @@ func TestHooksOrder(t *testing.T) {
 	e.addHook(t, "30-c", script("c"), 0o644)  // not executable
 	e.addHook(t, ".40-d", script("d"), 0o755) // hidden
 	ctx := context.Background()
-	if _, err := e.m.Quiesce(ctx, 30000, false, false); err != nil {
+	if _, err := e.m.Quiesce(ctx, 30000, false, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.m.Thaw(ctx, "lease-1"); err != nil {
@@ -528,7 +528,7 @@ func TestHooksOrder(t *testing.T) {
 	if err := os.Remove(out); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.Quiesce(ctx, 30000, false, false); err == nil {
+	if _, err := e.m.Quiesce(ctx, 30000, false, false, false); err == nil {
 		t.Fatal("Quiesce with a failing hook succeeded")
 	}
 	data, _ = os.ReadFile(out)

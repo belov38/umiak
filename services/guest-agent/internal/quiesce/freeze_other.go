@@ -1,14 +1,22 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package quiesce
 
 import "errors"
 
+// Platform behaviour of Quiesce. Other platforms (macOS, for development
+// and tests) keep the Linux flow.
+const (
+	freezesFS = true
+	// WipesSecretFiles is false: there is no secret file wipe on quiesce.
+	WipesSecretFiles = false
+)
+
 // unsupportedFreezer is the freezer of platforms without FIFREEZE.
 type unsupportedFreezer struct{}
 
-// NewFreezer returns the freezer of this platform; outside Linux every
-// method fails with errors.ErrUnsupported.
+// NewFreezer returns the freezer of this platform; here every method fails
+// with errors.ErrUnsupported.
 func NewFreezer() Freezer {
 	return unsupportedFreezer{}
 }

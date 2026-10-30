@@ -151,8 +151,8 @@ func (s steps) thawAllMounts(extra []string) ([]string, error) {
 // ForceThaw implements `sbx-agent thaw --force` (spec 14.4, 17.6): FITHAW
 // every freezable mount (and every mount named in a lease file, if one is
 // left) and unpause every paused container. It works without the agent and
-// leaves the lease file and the markers to the agent and the watchdog. d may
-// be nil.
+// leaves the lease file and the markers to the agent and the watchdog. f
+// and d may be nil (Windows has no freezer).
 func ForceThaw(l paths.Layout, f Freezer, d DockerAPI) error {
 	log := slog.Default()
 	s := steps{freezer: f, docker: d, runHook: execHook, log: log}

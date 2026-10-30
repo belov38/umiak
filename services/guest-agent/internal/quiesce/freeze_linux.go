@@ -8,6 +8,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Platform behaviour of Quiesce: FIFREEZE and Docker pause; the secret
+// files are on a tmpfs, so wipe_secret_files is accepted and ignored.
+const (
+	freezesFS = true
+	// WipesSecretFiles is false: the secrets tmpfs never reaches a
+	// snapshot.
+	WipesSecretFiles = false
+)
+
 // FIFREEZE and FITHAW from linux/fs.h: _IOWR('X', 119, int) and
 // _IOWR('X', 120, int) in the generic ioctl encoding (amd64, arm64 and the
 // other architectures without their own _IOC layout).

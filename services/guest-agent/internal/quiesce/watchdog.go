@@ -24,8 +24,14 @@ const watchdogGrace = time.Second
 // file and, if the
 // lease is still there, claims the lease file (renames it), thaws it like
 // Thaw, writes an unreported marker for the agent and deletes the claim. It
-// returns the exit code: 0 also when the lease is already gone; d may be
-// nil.
+// returns the exit code: 0 also when the lease is already gone; f and d may
+// be nil.
+//
+// On Windows it runs in the supervisor's watchdog job, which a restarted
+// agent cannot stop: it acts only while its lease is still the one in the
+// lease file. There it has no freezer and no Docker, so it runs the thaw
+// hooks and drops the lease; the secret files are in the agent's memory,
+// the agent restores them when it sees the marker.
 func Watchdog(l paths.Layout, leaseID string, f Freezer, d DockerAPI) int {
 	// SIGTERM (a reboot or poweroff stops every unit) ends the wait: the
 	// lease is thawed at once instead of leaving the guest frozen through

@@ -111,6 +111,12 @@ type Manager struct {
 	// for RestoreSecretFiles; nil when secretEnv is nil.
 	secretFiles []*agentv1.SecretFile
 
+	// filesWiped is set by WipeSecretFiles and cleared by
+	// RestoreSecretFiles: a quiesce lease is taking a snapshot without the
+	// secret files, so secret writes wait (deferred) until the restore.
+	// Guarded by opMu.
+	filesWiped, deferred bool
+
 	// writeFile writes the env, secret and SSH CA files; tests replace it
 	// to inject write errors.
 	writeFile func(path string, data []byte, perm fs.FileMode) error
@@ -659,6 +665,11 @@ func (m *Manager) applyFiles(ctx context.Context, u update, next *agentv1.ClaimR
 // set with digest want, pending without env otherwise. With
 // SecretEnvInMemory the env in memory stands in for the one on disk.
 func (m *Manager) resyncSecrets(want string) {
+	if m.filesWiped {
+		// Nothing was written to disk: the set in memory is still the
+		// applied one.
+		return
+	}
 	var env map[string]string
 	var files []*agentv1.SecretFile
 	ok := false

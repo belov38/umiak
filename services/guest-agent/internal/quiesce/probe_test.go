@@ -51,7 +51,7 @@ func TestProbeIgnoresOwnLease(t *testing.T) {
 		return nil
 	}
 	ctx := context.Background()
-	if _, err := e.m.Quiesce(ctx, 30000, false, true); err != nil {
+	if _, err := e.m.Quiesce(ctx, 30000, false, true, false); err != nil {
 		t.Fatal(err)
 	}
 	n := len(e.log.all())
@@ -66,7 +66,7 @@ func TestProbeIgnoresOwnLease(t *testing.T) {
 	// A probe that started before a lease came and went may have hung on
 	// the agent's own freeze: no foreign thaw for it.
 	_, gen := e.m.startProbe()
-	if _, err := e.m.Quiesce(ctx, 30000, false, false); err != nil {
+	if _, err := e.m.Quiesce(ctx, 30000, false, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.m.Thaw(ctx, "lease-2"); err != nil {

@@ -102,6 +102,11 @@ const (
 	Internal         = "internal"
 )
 
+// ErrSecretInUse reports a secret file held open by another process without
+// sharing write and delete access, so it cannot be wiped (Windows). The
+// claim manager returns it; quiesce maps it to secrets_in_use.
+var ErrSecretInUse = errors.New("secret file is in use")
+
 // New builds a Connect error with an ErrorDetail.
 func New(code connect.Code, detailCode, msg string) *connect.Error {
 	return rpcconv.NewError(code, detailCode, msg)

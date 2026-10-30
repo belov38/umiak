@@ -230,6 +230,55 @@ func TestWipeAndRestoreSecretFiles(t *testing.T) {
 	}
 }
 
+// TestUpdateSecretsWhileWipedDefersFiles: an UpdateSecrets during a quiesce
+// lease with wiped files must not write secret files into the snapshot; the
+// new set is applied in memory and its files come with RestoreSecretFiles.
+func TestUpdateSecretsWhileWipedDefersFiles(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if _, err := h.m.Claim(ctx, twoFiles()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.WipeSecretFiles(); err != nil {
+		t.Fatal(err)
+	}
+	files := []*agentv1.SecretFile{{Name: "key.pem", Content: []byte("rotated"), LinkPath: "/home/user/.config/key.pem"}}
+	if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{
+		SecretEnv: map[string]string{"TOKEN": "rotated-env"}, SecretFiles: files,
+	}); err != nil {
+		t.Fatalf("UpdateSecrets during the wipe: %v", err)
+	}
+	if entries, _ := os.ReadDir(h.l.SecretFilesDir); len(entries) != 0 {
+		t.Errorf("secret files written during the wipe: %v", entries)
+	}
+	if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready {
+		t.Errorf("secrets phase = %v, want ready", st)
+	}
+	if env := h.m.EnvBuilder().Build(testUser(), &agentv1.CommandSpec{}); !slices.Contains(env, "TOKEN=rotated-env") {
+		t.Error("new secret env not applied in memory")
+	}
+	if err := h.m.RestoreSecretFiles(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.read(filepath.Join(h.l.SecretFilesDir, "key.pem")); got != "rotated" {
+		t.Errorf("restored key.pem = %q, want the new content", got)
+	}
+	if _, err := os.Lstat(filepath.Join(h.l.SecretFilesDir, "token")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("token of the old set restored (%v)", err)
+	}
+	link, _ := h.l.Rooted("/home/user/.config/key.pem")
+	if got := h.read(link); got != "rotated" {
+		t.Errorf("link_path after restore = %q", got)
+	}
+	// After the restore, updates write files again.
+	if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretFiles: []*agentv1.SecretFile{{Name: "key.pem", Content: []byte("again")}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.read(filepath.Join(h.l.SecretFilesDir, "key.pem")); got != "again" {
+		t.Errorf("key.pem after a later update = %q", got)
+	}
+}
+
 func TestRestoreWithoutSecretsIsNoop(t *testing.T) {
 	h := newHarness(t)
 	if err := h.m.RestoreSecretFiles(); err != nil {
