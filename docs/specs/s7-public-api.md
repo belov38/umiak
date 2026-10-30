@@ -1231,7 +1231,11 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - **Slug** (§5.4): словарь core, около 300 слов (2,7 · 10⁷ сочетаний из трёх, затем четыре слова); словарь на 1 500 слов — позже (решение 6).
 - **IP клиента** (§7.1): `X-Forwarded-For` берётся только от адресов из `SBX_API_TRUSTED_PROXY_CIDRS` (справа налево, до первого недоверенного адреса) и идёт только в поле `clientIp` лога запроса; лимиты считаются по principal. Заголовки личности, кроме заголовков oauth2-proxy на proxied listener-е, не доверяются нигде (например `Tailscale-User-*` перед `api`); на это есть тесты, как для `X-Auth-Request-*` на public.
 - **`POST /commands`** `200` бывает `application/json` (sync) и `application/x-ndjson` (stream). `GET /commands/{command}` может сам записать терминальный статус в БД по ответу агента.
-- **`agent-events`** (§12.1): тело — binary protobuf `AgentEventsRequest` (`@sbx/proto`), а не protojson (решение 4). Payload `Any` JSON-совместимых типов (`Struct`/`Value`) разбирается, остальные и битые сохраняются как `{"@type": typeUrl}` (иначе gateway повторял бы пакет вечно). Полный разбор — вместе с подключением агента S3.
+- **`agent-events`** (§12.1): тело — binary protobuf `AgentEventsRequest` (`@sbx/proto`), а не protojson (решение 4). Payload `Any` разбирается реестром типов: сообщения S3 (`sbx.agent.v1`, `events.proto` и `common.proto`) и JSON-совместимые (`Struct`/`Value`/`ListValue`) — в protojson с нулевыми полями (код выхода `0`, ноль команд — данные); неизвестные и битые сохраняются как `{"@type": typeUrl}` (иначе gateway повторял бы пакет вечно). `normalizeAgentEvent` (core) переводит `CommandExited.reason` так же, как attach: `TIMEOUT` → `timed_out`, `START_FAILED` → `failed_to_start`; у PTY-команды `pty_end` идёт в `stdout_bytes`.
+- **`GET .../stream`** со смещением больше размера потока → `416 range_not_satisfiable` (`details.stream`, `details.size`), как `/output`; ненулевое смещение потока, которого у команды нет (`ptyOffset` у не-PTY, `stdoutOffset`/`stderrOffset` у PTY), → `400 validation`. Раньше такой стрим завершённой команды переоткрывал attach до отказа и заканчивался `agent_unavailable`.
+- **`POST .../input`**: `seq` — от `1` (схема `minimum: 1`): shim отбрасывает `seq <= last`, у новой сессии `last = 0`, так что `seq: 0` никогда бы не применился.
+- **`outputTruncated`** (proto `output_truncated`): `"disk_full"`, если агент потерял вывод из-за полного диска (концы потоков считают только записанные байты), иначе `null`. Есть в кадре `exit`, в ресурсе Command (живое значение от агента, пока sandbox `ready`; в БД не хранится — без агента `null`) и в `command` ответа sync. Строка, а не boolean, как в proto: причина может добавиться.
+- **`GET /commands/{command}`** и `/output` спрашивают агента (`Process/Get`) с бюджетом 5 s: `GET` по истечении отдаёт строку из БД, `/output` — `503 agent_unavailable` (retryable).
 
 ### 23.4 PTY
 
@@ -1276,7 +1280,9 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - RPC агента — интерфейс `AgentApi` (`apps/api/src/agent/types.ts`): `capabilities`, `requireCapability`, `start`, `attach`, `sendInput`, `update`, `signal`, `kill`, `get`, `stat`, `list`, `makeDir`, `move`, `chmod`, `remove`, `listPorts`, `updateEnv`, `updateSecrets`, `files`.
 - В тестах — `FakeAgent` (`@sbx/api/testing`): настоящие дочерние процессы, PTY без терминала, файлы во временном каталоге.
 - В процессе `api` — `UnwiredAgentApi`: RPC отвечают `503 agent_unavailable`; `/files/*` уже идут через `AgentClient.fetch` (S2), capabilities — из `tunnel.tunnel_sessions`. Без `SBX_API_GATEWAY_TOKEN_FILE` и файлы — `503 agent_unavailable`.
-- S3 уже в `main`. `ConnectAgentApi` поверх `proto/sbx/agent/v1` и транспорта `agent-client` подключается по команде master-сессии (решение 3). Что проверить при этом — `apps/api/README.md`.
+- S3 уже в `main`. `ConnectAgentApi` поверх `proto/sbx/agent/v1` и транспорта `agent-client` подключается по команде master-сессии (решение 3). Что проверить при этом — `apps/api/README.md` (раздел «Wiring S3»).
+- **Коды настоящего агента** (`services/guest-agent/internal/errs`), таблица — doc-комментарий `agentErrorToHttp`: `user_not_found` → `400 validation` (у `Start` строка команды — `failed_to_start`); `shim_outdated`, `unimplemented` → `409 agent_outdated` (`details.agentCode`); `command_running` → `409 invalid_state`; `not_claimed` → `409 sandbox_not_ready`; `request_id_reused` → `409 idempotency_key_reused` (requestId выводится из ключа). Connect `Unavailable` с любым detail (`quiesced`, `shim_unavailable`, `store_busy`, `identity_not_ready`) — агент недоступен: `503 agent_unavailable`, у `Start`/`signal`/`input` без сессии — исход неизвестен (`details.outcome: "unknown"` без ключа), а не `502`. `DeadlineExceeded` — так же: у мутаций исход неизвестен, у чтений `503` retryable.
+- Capability `system.activity.v1` — в списке `AGENT_CAPABILITIES` (как у настоящего агента). `FakeAgent` считает код выхода по сигналу по таблице Linux (`SIGUSR1` = 10 → `138`), а не по ОС хоста.
 
 ### 23.10 Личности и конфиг до S8
 
@@ -1300,6 +1306,7 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - п. 10 — cleanup worker удаляет `port_auth_codes` старше суток (таблица — `0301`);
 - п. 11 — `claimIdempotencyKey` хранит `response` (у команд — `{commandId}`); create принимает `{hashBody, resolveSets}`;
 - `updatedAt` ресурса Sandbox — колонка `sandboxes.updated_at` с триггером (`0205`);
+- `failCommandStart(commandId)` — `starting` → `failed_to_start` одним условным UPDATE (первый пишущий выигрывает); `waitForState(..., signal)` — отмена ожидания (снимает LISTEN и опрос);
 - `parseLabel` принимает `<slug>-desktop` (`kind: desktop`) для S4; `TemplateConfig` + `name`, `loginUser`, `capabilities`; `PlatformDefaults` + `publicPortsEnabled`, `ssoPortPolicy`, `ssoPolicyEpoch`.
 
 Пункты 7, 8, 12 и 13 уже были в S6. Номера `0204`–`0205` заняты S7 в диапазоне S6 — согласовать с треком S6.

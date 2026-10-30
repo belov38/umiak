@@ -541,6 +541,21 @@ export async function completeCommand(
 	}
 }
 
+/**
+ * `starting` → `failed_to_start` in one conditional UPDATE: the first
+ * writer wins, a command already running or ended is not touched.
+ */
+export async function failCommandStart(
+	q: Queryable,
+	commandId: string,
+): Promise<void> {
+	await q.query(
+		`UPDATE runtime.commands SET status = 'failed_to_start', ended_at = now()
+		 WHERE id = $1 AND status = 'starting'`,
+		[commandId],
+	);
+}
+
 /** `last_api_call_at = now()` at most once per 30 s per sandbox (S6 §12). */
 export async function touchApiActivity(
 	q: Queryable,

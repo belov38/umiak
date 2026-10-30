@@ -314,6 +314,7 @@ export function waitForSandboxState(
 	id: string,
 	states: SandboxState[],
 	timeoutMs: number,
+	signal?: AbortSignal,
 ): Promise<Sandbox> {
 	return waitForRow(deps, {
 		id,
@@ -322,6 +323,7 @@ export function waitForSandboxState(
 		load: (q, rowId) => loadSandbox(q, rowId),
 		done: (s) => states.includes(s.state),
 		timeoutMs,
+		...(signal === undefined ? {} : { signal }),
 	});
 }
 
@@ -355,6 +357,8 @@ interface WaitSpec<T> {
 	load: (q: Queryable, id: string) => Promise<T | null>;
 	done: (row: T) => boolean;
 	timeoutMs: number;
+	/** Abort: reject with its reason and stop listening and polling. */
+	signal?: AbortSignal;
 }
 
 function waitForRow<T>(deps: SandboxServiceDeps, w: WaitSpec<T>): Promise<T> {
@@ -370,14 +374,22 @@ function waitForRow<T>(deps: SandboxServiceDeps, w: WaitSpec<T>): Promise<T> {
 		let unsubscribe: (() => void) | null = null;
 		const timers: NodeJS.Timeout[] = [];
 
+		const signal = w.signal;
+		const onAbort = () => finish(signal?.reason);
 		const finish = (err: unknown, row?: T) => {
 			if (done) return;
 			done = true;
 			for (const t of timers) clearTimeout(t); // also clears the interval
 			unsubscribe?.();
+			signal?.removeEventListener("abort", onAbort);
 			if (row !== undefined) resolve(row);
 			else reject(err);
 		};
+		if (signal?.aborted) {
+			finish(signal.reason);
+			return;
+		}
+		signal?.addEventListener("abort", onAbort, { once: true });
 
 		const check = async (): Promise<void> => {
 			if (done) return;

@@ -18,7 +18,7 @@ class CommandInputRequest:
         data (str): Bytes to write ("" with closeStdin)
         close_stdin (bool | Unset): Close stdin after the data (not for PTY: send ^D)
         encoding (CommandInputRequestEncoding | Unset):
-        seq (int | Unset): Order of this chunk within sessionId; repeats (seq <= last) are dropped
+        seq (int | Unset): Order of this chunk within sessionId, from 1; repeats (seq <= last) are dropped
         session_id (str | Unset): Writer id; with seq a repeat is applied once
     """
 

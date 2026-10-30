@@ -248,6 +248,16 @@ export class FakeAgent implements AgentApi {
 		this.#state(machineId).failNext = { afterBytes, kind };
 	}
 
+	/**
+	 * Marks the command's output as cut by the shim (`output_truncated`,
+	 * e.g. "disk_full"): its exit event and Get carry the reason.
+	 */
+	truncateOutput(commandId: string, reason: string): void {
+		const cmd = this.#allCommands().find((c) => c.id === commandId);
+		if (cmd === undefined) throw new Error(`no command ${commandId}`);
+		cmd.outputTruncated = reason;
+	}
+
 	/** While on, every call fails with AgentUnavailableError and open attaches reset. */
 	setUnavailable(machineId: string, on: boolean): void {
 		const s = this.#state(machineId);
@@ -525,6 +535,7 @@ export class FakeAgent implements AgentApi {
 					stderrEnd: cmd.out.get("stderr")?.size ?? 0,
 					ptyEnd: cmd.out.get("pty")?.size ?? 0,
 					endedAt: cmd.endedAt,
+					outputTruncated: cmd.outputTruncated,
 				};
 				return;
 			}
@@ -558,8 +569,9 @@ export class FakeAgent implements AgentApi {
 		if (!cmd.hasStdin || stdin == null) {
 			throw callError("failed_precondition", "the command has no stdin");
 		}
-		const last = cmd.lastSeq.get(req.inputSessionId);
-		if (last !== undefined && req.seq <= last) return { applied: false };
+		// The shim's seq table: an unknown session has last seq 0.
+		const last = cmd.lastSeq.get(req.inputSessionId) ?? 0;
+		if (req.seq <= last) return { applied: false };
 		cmd.lastSeq.set(req.inputSessionId, req.seq);
 		if (!stdin.writableEnded) {
 			if (req.data.length > 0) stdin.write(req.data);
@@ -779,6 +791,8 @@ class FakeCommand {
 	startedAt: Date | null = null;
 	endedAt: Date | null = null;
 	timedOut = false;
+	/** Set by FakeAgent.truncateOutput (the shim dropped output). */
+	outputTruncated: string | null = null;
 
 	readonly #retain: () => number | null;
 	readonly #timers = new Set<NodeJS.Timeout>();
@@ -924,7 +938,7 @@ class FakeCommand {
 	#finish(): void {
 		if (this.exit !== null || this.#exitedWith === null) return;
 		const { code, signal } = this.#exitedWith;
-		const signo = signal === null ? 0 : (osConstants.signals[signal] ?? 0);
+		const signo = signal === null ? 0 : (LINUX_SIGNALS[signal] ?? 0);
 		this.#end({
 			status: signal === null ? "exited" : "killed",
 			code: signal === null ? (code ?? 0) : 128 + signo,
@@ -955,6 +969,7 @@ class FakeCommand {
 			streams,
 			startedAt: this.startedAt,
 			endedAt: this.endedAt,
+			outputTruncated: this.outputTruncated,
 		};
 	}
 }
@@ -967,15 +982,53 @@ function killGroup(pid: number, sig: NodeJS.Signals | number): void {
 	}
 }
 
+/** Signal numbers of Linux (the guest), not of the host running the fake. */
+const LINUX_SIGNALS: Record<string, number> = {
+	SIGHUP: 1,
+	SIGINT: 2,
+	SIGQUIT: 3,
+	SIGILL: 4,
+	SIGTRAP: 5,
+	SIGABRT: 6,
+	SIGBUS: 7,
+	SIGFPE: 8,
+	SIGKILL: 9,
+	SIGUSR1: 10,
+	SIGSEGV: 11,
+	SIGUSR2: 12,
+	SIGPIPE: 13,
+	SIGALRM: 14,
+	SIGTERM: 15,
+	SIGCHLD: 17,
+	SIGCONT: 18,
+	SIGSTOP: 19,
+	SIGTSTP: 20,
+	SIGTTIN: 21,
+	SIGTTOU: 22,
+	SIGURG: 23,
+	SIGXCPU: 24,
+	SIGXFSZ: 25,
+	SIGVTALRM: 26,
+	SIGPROF: 27,
+	SIGWINCH: 28,
+	SIGIO: 29,
+	SIGSYS: 31,
+};
+
+/** A signal name or Linux number → the name (delivered by name on the host). */
 function parseSignal(s: string): NodeJS.Signals {
-	const signals = osConstants.signals as Record<string, number>;
+	const host = osConstants.signals as Record<string, number>;
 	if (/^[0-9]+$/.test(s)) {
 		const n = Number(s);
-		const name = Object.keys(signals).find((k) => signals[k] === n);
-		if (name !== undefined) return name as NodeJS.Signals;
+		const name = Object.keys(LINUX_SIGNALS).find((k) => LINUX_SIGNALS[k] === n);
+		if (name !== undefined && host[name] !== undefined) {
+			return name as NodeJS.Signals;
+		}
 	} else {
 		const name = s.startsWith("SIG") ? s : `SIG${s}`;
-		if (signals[name] !== undefined) return name as NodeJS.Signals;
+		if (LINUX_SIGNALS[name] !== undefined && host[name] !== undefined) {
+			return name as NodeJS.Signals;
+		}
 	}
 	throw callError("invalid_argument", `unknown signal ${JSON.stringify(s)}`);
 }

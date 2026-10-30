@@ -343,6 +343,77 @@ describe.skipIf(skipPg())("command streams", () => {
 		expect(rest.at(-1)).toMatchObject({ type: "exit", stdoutOffset: 13 });
 	});
 
+	it("offsets past the end of an exited command: 416 range_not_satisfiable, not a reopen loop", async () => {
+		const r = await h.request("POST", sb.commands, {
+			json: { command: "printf abc; printf de >&2" },
+		});
+		expect(r.status).toBe(200);
+		const id = (r.body as Any).command.id as string;
+		const path = `${sb.commands}/${id}/stream`;
+		const past = await h.request("GET", `${path}?stdoutOffset=4`);
+		expect(past.status).toBe(416);
+		expect(past.body).toMatchObject({
+			error: { code: "range_not_satisfiable", details: { size: 3 } },
+		});
+		const pastErr = await h.request("GET", `${path}?stderrOffset=9`);
+		expect(pastErr.status).toBe(416);
+		// At the end exactly: attached, then exit.
+		const atEnd = await openStream(
+			h,
+			"GET",
+			`${path}?stdoutOffset=3&stderrOffset=2`,
+		);
+		expect(atEnd.status).toBe(200);
+		const frames = await atEnd.rest();
+		expect(frames.map((f) => f.type)).toEqual(["attached", "exit"]);
+		// A stream this command does not have.
+		const pty = await h.request("GET", `${path}?ptyOffset=1`);
+		expect(pty.status).toBe(400);
+		expect(pty.body).toMatchObject({ error: { code: "validation" } });
+		const ptyZero = await openStream(h, "GET", `${path}?ptyOffset=0`);
+		expect(ptyZero.status).toBe(200);
+		await ptyZero.rest();
+	});
+
+	it("stdout/stderr offsets on a PTY command are a validation error", async () => {
+		const r = await h.request("POST", `/v1/sandboxes/${sb.ref}/ptys`, {
+			json: { cols: 80, rows: 24, command: "true" },
+		});
+		expect(r.status, JSON.stringify(r.body)).toBe(201);
+		const id = (r.body as Any).id as string;
+		const bad = await h.request(
+			"GET",
+			`${sb.commands}/${id}/stream?stdoutOffset=1`,
+		);
+		expect(bad.status).toBe(400);
+		expect(bad.body).toMatchObject({ error: { code: "validation" } });
+	});
+
+	it("output dropped by the agent (output_truncated): exit frame, Command and sync answer carry outputTruncated", async () => {
+		const s = await stream({ command: "sleep 0.3; echo x" });
+		const started = (await s.next()) as Any;
+		expect(started.type).toBe("started");
+		const pub = started.commandId as string;
+		w.agent.truncateOutput(pub.slice(4).toUpperCase(), "disk_full");
+		const frames = await s.rest();
+		expect(frames.at(-1)).toMatchObject({
+			type: "exit",
+			outputTruncated: "disk_full",
+		});
+		const got = await h.request("GET", `${sb.commands}/${pub}`);
+		expect((got.body as Any).outputTruncated).toBe("disk_full");
+
+		const plain = await h.request("POST", sb.commands, {
+			json: { command: "echo y" },
+		});
+		expect((plain.body as Any).command.outputTruncated).toBeNull();
+		const normal = await stream({ command: "true" });
+		expect((await normal.rest()).at(-1)).toMatchObject({
+			type: "exit",
+			outputTruncated: null,
+		});
+	});
+
 	it("the client going away ends the stream and frees its registry slot", async () => {
 		const s = await stream({ command: "sleep 5" });
 		await s.next();

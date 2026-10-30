@@ -115,28 +115,41 @@ function readiness(p: Obj): AgentEvent | null {
 	return { kind: "readiness", phase, state, error: str(p.error) };
 }
 
+/** S3 `ExitReason` values that decide the command status (as attach does). */
+const STATUS_BY_REASON: Record<string, TerminalCommandStatus> = {
+	timeout: "timed_out",
+	start_failed: "failed_to_start",
+};
+
 function commandExited(p: Obj): AgentEvent | null {
 	const commandId = str(field(p, "commandId"));
 	if (commandId === null) return null;
 	const exitCode = int(field(p, "code") ?? field(p, "exitCode"));
 	const signal = str(field(p, "signal"));
-	let status = enumValue(
-		field(p, "status"),
-		TERMINAL,
-	) as TerminalCommandStatus | null;
+	const reason = enumValue(field(p, "reason"), Object.keys(STATUS_BY_REASON));
+	let status =
+		reason === null
+			? (enumValue(
+					field(p, "status"),
+					TERMINAL,
+				) as TerminalCommandStatus | null)
+			: (STATUS_BY_REASON[reason] ?? null);
 	if (status === null) {
 		if (exitCode !== null) status = "exited";
 		else if (signal !== null) status = "killed";
 		else return null;
 	}
+	// A PTY command has the one stream `pty`, kept in stdout_bytes.
+	const ptyEnd = count(field(p, "ptyEnd"));
+	const pty = ptyEnd !== null && ptyEnd > 0;
 	return {
 		kind: "command_exited",
 		commandId,
 		status,
 		exitCode,
 		signal,
-		stdoutBytes: count(field(p, "stdoutEnd")),
-		stderrBytes: count(field(p, "stderrEnd")),
+		stdoutBytes: pty ? ptyEnd : count(field(p, "stdoutEnd")),
+		stderrBytes: pty ? 0 : count(field(p, "stderrEnd")),
 	};
 }
 

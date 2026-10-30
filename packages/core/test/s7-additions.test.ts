@@ -261,6 +261,61 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 		});
 	});
 
+	describe("failCommandStart", () => {
+		it("moves only starting to failed_to_start; running or ended stays", async () => {
+			const env = await serviceEnv(t.pool);
+			const s = await seedSandbox(t.pool, env, { state: "ready" });
+			const spec = { cmd: "x", mode: "detached" as const };
+			const a = await env.svc.createCommand(env.p, s.sandboxId, spec);
+			await env.svc.failCommandStart(a.id);
+			const failed = await env.svc.getCommand(env.p, s.sandboxId, a.id);
+			expect(failed.status).toBe("failed_to_start");
+			expect(failed.endedAt).toBeInstanceOf(Date);
+
+			const b = await env.svc.createCommand(env.p, s.sandboxId, spec);
+			await env.svc.markCommandRunning(b.id, 7);
+			await env.svc.failCommandStart(b.id);
+			expect((await env.svc.getCommand(env.p, s.sandboxId, b.id)).status).toBe(
+				"running",
+			);
+		});
+	});
+
+	describe("waitForState with a signal", () => {
+		it("an abort rejects with the reason and stops the wait (unsubscribed)", async () => {
+			let subscribed = 0;
+			const notifier = {
+				subscribe: () => {
+					subscribed++;
+					return () => {
+						subscribed--;
+					};
+				},
+				close: async () => {},
+			};
+			const env = await serviceEnv(t.pool, { notifier });
+			const s = await seedSandbox(t.pool, env, { state: "starting" });
+			const ac = new AbortController();
+			const waiting = env.svc.waitForState(
+				s.sandboxId,
+				["ready"],
+				20_000,
+				ac.signal,
+			);
+			expect(subscribed).toBe(1);
+			const reason = new Error("client gone");
+			ac.abort(reason);
+			await expect(waiting).rejects.toBe(reason);
+			expect(subscribed).toBe(0);
+			const pre = new AbortController();
+			pre.abort(reason);
+			await expect(
+				env.svc.waitForState(s.sandboxId, ["ready"], 20_000, pre.signal),
+			).rejects.toBe(reason);
+			expect(subscribed).toBe(0);
+		});
+	});
+
 	describe("listCommands and getCommand", () => {
 		it("lists newest first with filters and a cursor, on a stopped sandbox too", async () => {
 			const env = await serviceEnv(t.pool);

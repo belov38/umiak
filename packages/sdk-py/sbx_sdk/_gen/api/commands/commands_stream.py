@@ -190,6 +190,11 @@ def _parse_response(
 
         return response_409
 
+    if response.status_code == 416:
+        response_416 = Error.from_dict(response.json())
+
+        return response_416
+
     if response.status_code == 429:
         response_429 = Error.from_dict(response.json())
 
@@ -248,7 +253,8 @@ def sync_detailed(
      NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many
     bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the
     last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s;
-    heartbeats come every 15 s).
+    heartbeats come every 15 s). An offset past the end of its stream is 416; a non-zero offset of a
+    stream the command does not have is 400.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -316,7 +322,8 @@ def sync(
      NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many
     bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the
     last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s;
-    heartbeats come every 15 s).
+    heartbeats come every 15 s). An offset past the end of its stream is 416; a non-zero offset of a
+    stream the command does not have is 400.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -378,7 +385,8 @@ async def asyncio_detailed(
      NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many
     bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the
     last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s;
-    heartbeats come every 15 s).
+    heartbeats come every 15 s). An offset past the end of its stream is 416; a non-zero offset of a
+    stream the command does not have is 400.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -444,7 +452,8 @@ async def asyncio(
      NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many
     bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the
     last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s;
-    heartbeats come every 15 s).
+    heartbeats come every 15 s). An offset past the end of its stream is 416; a non-zero offset of a
+    stream the command does not have is 400.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.

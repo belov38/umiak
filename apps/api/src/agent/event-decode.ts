@@ -1,12 +1,18 @@
 // AgentEventsRequest (S2 §9.6, @sbx/proto) to the batch of core's
-// ingestAgentEvents (S6 §10.1). Payloads are google.protobuf.Any of S3/S6
-// types (plan decision 4): JSON-compatible ones (Struct, Value, ListValue)
-// are decoded to JSON; the agent's own types are not linked yet (S3), so
-// their payload is stored as {"@type": typeUrl} until the S3 registry lands.
-import { createRegistry, type DescMessage, toJson } from "@bufbuild/protobuf";
+// ingestAgentEvents (S6 §10.1). Payloads are google.protobuf.Any: the S3
+// event messages (sbx.agent.v1, events.proto and the messages they embed)
+// and JSON-compatible ones (Struct, Value, ListValue) are decoded to
+// protojson with zero values emitted (an exit code 0 or zero running
+// commands is data), which core's normalizeAgentEvent reads. Other types
+// are stored as {"@type": typeUrl}.
+import {
+	createRegistry,
+	type DescMessage,
+	type Registry,
+	toJson,
+} from "@bufbuild/protobuf";
 import {
 	type Any,
-	anyIs,
 	anyUnpack,
 	ListValueSchema,
 	StructSchema,
@@ -16,6 +22,10 @@ import {
 } from "@bufbuild/protobuf/wkt";
 import type { AgentEventBatch } from "@sbx/core";
 import type { AgentEventsRequest } from "@sbx/proto";
+import {
+	file_sbx_agent_v1_common,
+	file_sbx_agent_v1_events,
+} from "@sbx/proto/agent/v1";
 import { type Issue, validationError } from "../http/errors.ts";
 
 const JSON_PAYLOADS: DescMessage[] = [
@@ -24,24 +34,37 @@ const JSON_PAYLOADS: DescMessage[] = [
 	ListValueSchema,
 ];
 
-/** Types that protojson request bodies may carry in `Any`. */
-export const AGENT_EVENT_PAYLOAD_REGISTRY = createRegistry(...JSON_PAYLOADS);
+/** Types that event payloads (binary Any or protojson bodies) may carry. */
+export const AGENT_EVENT_PAYLOAD_REGISTRY: Registry = createRegistry(
+	...JSON_PAYLOADS,
+	file_sbx_agent_v1_events,
+	file_sbx_agent_v1_common,
+);
+
+/** The message name of a type URL (`type.googleapis.com/sbx.agent.v1.X`). */
+function typeName(typeUrl: string): string {
+	return typeUrl.slice(typeUrl.lastIndexOf("/") + 1);
+}
 
 /** The payload as JSON; {} when absent; {"@type"} when unknown or corrupt. */
 export function decodePayload(any: Any | undefined): unknown {
 	if (any === undefined || (any.typeUrl === "" && any.value.length === 0)) {
 		return {};
 	}
-	for (const schema of JSON_PAYLOADS) {
-		if (anyIs(any, schema)) {
-			// A corrupt payload must not fail the batch: the gateway retries
-			// any non-2xx forever and the machine's events would stall.
-			try {
-				const m = anyUnpack(any, schema);
-				if (m !== undefined) return toJson(schema, m);
-			} catch {
-				break;
+	const schema = AGENT_EVENT_PAYLOAD_REGISTRY.getMessage(typeName(any.typeUrl));
+	if (schema !== undefined) {
+		// A corrupt payload must not fail the batch: the gateway retries any
+		// non-2xx forever and the machine's events would stall.
+		try {
+			const m = anyUnpack(any, schema);
+			if (m !== undefined) {
+				return toJson(schema, m, {
+					alwaysEmitImplicit: true,
+					registry: AGENT_EVENT_PAYLOAD_REGISTRY,
+				});
 			}
+		} catch {
+			// stored as {"@type"} below
 		}
 	}
 	return { "@type": any.typeUrl };

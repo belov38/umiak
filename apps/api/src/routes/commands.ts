@@ -14,14 +14,16 @@ import {
 	type Principal,
 	uuidv5,
 } from "@sbx/core";
-import { agentErrorToHttp, isAgentUnreachable } from "../agent/errors.ts";
+import { agentErrorToHttp, isAgentOutcomeUnknown } from "../agent/errors.ts";
 import type { AgentCommandInfo, AgentStream } from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import {
 	commandResultOf,
+	DEFAULT_AGENT_READ_BUDGET_MS,
 	DEFAULT_ATTACH_MAX_ATTEMPTS,
 	followCommand,
+	withinBudget,
 } from "../commands/attach.ts";
 import { collectSync, type SyncResult } from "../commands/collect.ts";
 import {
@@ -222,7 +224,8 @@ const streamCommandRoute = createRoute({
 		"NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream " +
 		"that many bytes before its end; `follow=false` sends what exists and closes. Reopen with " +
 		"the offsets of the last frame after `reconnect`, a retryable `error` or a dropped " +
-		"connection (no line for 45 s; heartbeats come every 15 s).",
+		"connection (no line for 45 s; heartbeats come every 15 s). An offset past the end of its " +
+		"stream is 416; a non-zero offset of a stream the command does not have is 400.",
 	tags: TAGS,
 	middleware: [requireScope("commands:read")] as const,
 	request: { params: CommandParams, query: StreamQuery },
@@ -230,6 +233,9 @@ const streamCommandRoute = createRoute({
 		200: { ...ndjson("NDJSON frames"), headers: commandIdHeader },
 		404: notFound404,
 		409: notReady409,
+		416: errorResponse(
+			"`range_not_satisfiable`: an offset past the end of its stream (details.stream, details.size)",
+		),
 		429: errorResponse(
 			"`rate_limited`: too many open streams of this key or user",
 		),
@@ -379,6 +385,61 @@ async function commandTarget(
 
 function streamsOf(mode: string): AgentStream[] {
 	return mode === "pty" ? ["pty"] : ["stdout", "stderr"];
+}
+
+/**
+ * Offsets of `GET .../stream` (§9.5): an offset of a stream the command
+ * does not have is 400 (0 is ignored); an offset past the stream's size is
+ * 416 like `/output`. Without the check an exited command never reaches
+ * its end at such an offset and the attach is reopened until it gives up.
+ */
+async function checkStreamOffsets(
+	deps: ApiDeps,
+	machineId: string,
+	commandId: string,
+	pty: boolean,
+	offsets: Partial<Record<AgentStream, number>>,
+): Promise<void> {
+	const has = pty ? ["pty"] : ["stdout", "stderr"];
+	const asked = (Object.keys(offsets) as AgentStream[]).filter(
+		(s) => (offsets[s] ?? 0) > 0,
+	);
+	const foreign = asked.filter((s) => !has.includes(s));
+	if (foreign.length > 0) {
+		throw validationError(
+			foreign.map((s) => ({
+				path: `query.${s}Offset`,
+				message: `this command has the streams ${has.join(", ")}`,
+			})),
+		);
+	}
+	if (asked.length === 0) return;
+	let info: AgentCommandInfo;
+	try {
+		info = await withinBudget(
+			deps.agent.get(machineId, commandId),
+			readBudget(deps),
+			machineId,
+		);
+	} catch (e) {
+		throw agentErrorToHttp(e);
+	}
+	for (const s of asked) {
+		const size = info.streams[s]?.size ?? 0;
+		const offset = offsets[s] ?? 0;
+		if (offset > size) {
+			throw new ApiError(
+				416,
+				"range_not_satisfiable",
+				`${s}Offset ${offset} is past the end of ${s} (${size} bytes so far)`,
+				{ details: { stream: s, size } },
+			);
+		}
+	}
+}
+
+function readBudget(deps: ApiDeps): number {
+	return deps.commandTimings.agentReadBudgetMs ?? DEFAULT_AGENT_READ_BUDGET_MS;
 }
 
 /** Frame types that end a stream. */
@@ -592,7 +653,10 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		if (r.replayed) headers[IDEMPOTENCY_REPLAYED_HEADER] = "true";
 		return c.json(
 			{
-				command: toCommandResource(done),
+				command: {
+					...toCommandResource(done),
+					outputTruncated: result.exit.outputTruncated,
+				},
 				stdout: result.stdout,
 				stderr: result.stderr,
 				stdoutTruncated: result.stdoutTruncated,
@@ -655,9 +719,12 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		);
 		let live: AgentCommandInfo | null = null;
 		if (s.state === "ready" && s.machineId === command.machineId) {
-			live = await deps.agent
-				.get(command.machineId, command.id)
-				.catch(() => null);
+			// Enrichment only: a slow agent falls back to the stored row.
+			live = await withinBudget(
+				deps.agent.get(command.machineId, command.id),
+				readBudget(deps),
+				command.machineId,
+			).catch(() => null);
 		}
 		const result = live === null ? null : commandResultOf(live);
 		if (result !== null && !isTerminalStatus(command.status)) {
@@ -678,6 +745,17 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		);
 		const encoding = q.encoding ?? "utf8";
 		const pty = command.mode === "pty";
+		await checkStreamOffsets(
+			deps,
+			machineId,
+			command.id,
+			pty,
+			compact({
+				stdout: q.stdoutOffset,
+				stderr: q.stderrOffset,
+				pty: q.ptyOffset,
+			}),
+		);
 		const close = new AbortController();
 		const gone = new AbortController();
 		const unregister = deps.streams.register(
@@ -738,7 +816,11 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const limit = q.limit ?? OUTPUT_DEFAULT_LIMIT;
 		let info: AgentCommandInfo;
 		try {
-			info = await deps.agent.get(machineId, command.id);
+			info = await withinBudget(
+				deps.agent.get(machineId, command.id),
+				readBudget(deps),
+				machineId,
+			);
 		} catch (e) {
 			throw agentErrorToHttp(e);
 		}
@@ -834,7 +916,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			});
 		} catch (e) {
 			// Without sessionId+seq the agent cannot drop a repeat.
-			if (b.sessionId === undefined && isAgentUnreachable(e)) {
+			if (b.sessionId === undefined && isAgentOutcomeUnknown(e)) {
 				throw unknownOutcomeError(
 					command.id,
 					"the input may have been written",
@@ -875,7 +957,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			});
 		} catch (e) {
 			// A repeat would send the signal twice.
-			if (isAgentUnreachable(e)) {
+			if (isAgentOutcomeUnknown(e)) {
 				throw unknownOutcomeError(command.id, "the signal may have been sent");
 			}
 			throw agentErrorToHttp(e);

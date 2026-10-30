@@ -49,24 +49,14 @@ export async function waitUntilReady(
 	let s = await deps.svc.get(p, ref);
 	if (s.state !== "deleted") await found?.(s);
 	if (STARTING.includes(s.state)) {
-		const wait = deps.svc.waitForState(
+		// An abort ends the wait in core too (no LISTEN or poll left behind).
+		s = await deps.svc.waitForState(
 			s.id,
 			WAIT_UNTIL,
 			deps.commandTimings.readyWaitMs,
+			signal,
 		);
-		s = await (signal === undefined ? wait : abortable(wait, signal));
 	}
 	if (s.state !== "ready") throw sandboxNotReadyError(s.state);
 	return s;
-}
-
-function abortable<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
-	if (signal.aborted) return Promise.reject(signal.reason);
-	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(signal.reason);
-		signal.addEventListener("abort", onAbort, { once: true });
-		p.then(resolve, reject).finally(() =>
-			signal.removeEventListener("abort", onAbort),
-		);
-	});
 }

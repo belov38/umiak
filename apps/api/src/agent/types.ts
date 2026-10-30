@@ -18,6 +18,7 @@ export const AGENT_CAPABILITIES = [
 	"system.update.v1",
 	"system.ports.v1",
 	"system.metrics.v1",
+	"system.activity.v1",
 ] as const;
 
 // --- Process ---
@@ -88,6 +89,12 @@ export interface AgentCommandInfo {
 	streams: Partial<Record<AgentStream, AgentStreamInfo>>;
 	startedAt: Date | null;
 	endedAt: Date | null;
+	/**
+	 * `output_truncated`: "disk_full" when the shim dropped output because
+	 * the disk was full (stream ends cover only the bytes written); null
+	 * otherwise (proto "").
+	 */
+	outputTruncated: string | null;
 }
 
 export interface AgentStartRequest {
@@ -126,6 +133,8 @@ export type AgentAttachEvent =
 			stderrEnd: number;
 			ptyEnd: number;
 			endedAt: Date | null;
+			/** See AgentCommandInfo.outputTruncated. */
+			outputTruncated: string | null;
 	  }
 	| { type: "started"; command: AgentCommandInfo };
 

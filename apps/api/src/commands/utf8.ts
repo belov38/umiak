@@ -53,7 +53,10 @@ function heldSuffix(b: Uint8Array): number {
 }
 
 export class Utf8StreamDecoder {
-	readonly #decoder = new TextDecoder("utf-8");
+	// ignoreBOM: a leading U+FEFF is program output, not a stream marker;
+	// every push is a one-shot decode, so it would otherwise be dropped at
+	// the start of each chunk while its bytes are still counted.
+	readonly #decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 	#held: Uint8Array = new Uint8Array(0);
 
 	/** Bytes held back from the last push. */

@@ -376,4 +376,96 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		expect(rows.rows.map((x) => x.status)).toEqual(["failed_to_start"]);
 		expect(before.rows[0].n).toBeGreaterThan(0);
 	});
+
+	it("Start refused with user_not_found → 400 validation, row failed_to_start", async () => {
+		const s = await readySandbox(w);
+		const agent = w.agent;
+		const spy = agent.start.bind(agent);
+		agent.start = async () => {
+			const { AgentCallError } = await import("../src/index.ts");
+			throw new AgentCallError("user_not_found", 'user "bob" not found');
+		};
+		try {
+			const r = await run(
+				{ command: "true", mode: "detached", user: "bob" },
+				s.commands,
+			);
+			expect(r.status).toBe(400);
+			expect((r.body as Any).error.code).toBe("validation");
+		} finally {
+			agent.start = spy;
+		}
+		const rows = await db.pool.query(
+			"SELECT status FROM runtime.commands WHERE sandbox_id = $1",
+			[s.sandboxId],
+		);
+		expect(rows.rows.map((x) => x.status)).toEqual(["failed_to_start"]);
+	});
+
+	it("Start DeadlineExceeded or Unavailable with a detail → 503 unknown outcome, row stays starting", async () => {
+		const { AgentCallError } = await import("../src/index.ts");
+		const { AgentUnavailableError } = await import("@sbx/agent-client");
+		const ConnectError = Object.getPrototypeOf(AgentUnavailableError) as new (
+			message: string,
+			code: number,
+		) => Error;
+		const failures: [string, () => Error][] = [
+			["deadline", () => new ConnectError("deadline", 4)],
+			["quiesced", () => new AgentCallError("quiesced", "frozen")],
+		];
+		for (const [name, make] of failures) {
+			const s = await readySandbox(w);
+			const agent = w.agent;
+			const spy = agent.start.bind(agent);
+			agent.start = async () => {
+				throw make();
+			};
+			try {
+				const r = await run({ command: "true", mode: "detached" }, s.commands);
+				expect(r.status, name).toBe(503);
+				expect((r.body as Any).error).toMatchObject({
+					code: "agent_unavailable",
+					retryable: false,
+					details: { outcome: "unknown" },
+				});
+			} finally {
+				agent.start = spy;
+			}
+			const rows = await db.pool.query(
+				"SELECT status FROM runtime.commands WHERE sandbox_id = $1",
+				[s.sandboxId],
+			);
+			expect(
+				rows.rows.map((x) => x.status),
+				name,
+			).toEqual(["starting"]);
+		}
+	});
+
+	it("a capability check cut short by a close of the stream answers the close (401), not 500", async () => {
+		const s = await readySandbox(w);
+		const agent = w.agent;
+		const spy = agent.requireCapability.bind(agent);
+		let entered: () => void = () => {};
+		const inCheck = new Promise<void>((r) => {
+			entered = r;
+		});
+		agent.requireCapability = (_m: string, _c: string, signal?: AbortSignal) =>
+			new Promise<void>((_resolve, reject) => {
+				entered();
+				signal?.addEventListener("abort", () =>
+					reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+				);
+			});
+		try {
+			const pending = run({ command: "true" }, s.commands);
+			await inCheck;
+			expect(h.deps.streams.revoke({})).toBe(1);
+			const r = await pending;
+			expect(r.status).toBe(401);
+			expect((r.body as Any).error.code).toBe("unauthorized");
+		} finally {
+			agent.requireCapability = spy;
+		}
+	});
 });

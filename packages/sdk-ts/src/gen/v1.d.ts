@@ -445,7 +445,7 @@ export interface paths {
         };
         /**
          * Attach to a command's output
-         * @description NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s; heartbeats come every 15 s).
+         * @description NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s; heartbeats come every 15 s). An offset past the end of its stream is 416; a non-zero offset of a stream the command does not have is 400.
          */
         get: operations["commands.stream"];
         put?: never;
@@ -1233,6 +1233,8 @@ export interface components {
             id: string;
             /** @enum {string} */
             mode: "sync" | "stream" | "detached" | "pty" | (string & {});
+            /** @description Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise. Known from the agent while the sandbox is ready and in the sync answer; null when unknown */
+            outputTruncated: string | null;
             pid: number | null;
             /** @description Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed */
             reason: string | null;
@@ -1281,6 +1283,8 @@ export interface components {
         };
         CommandExitFrame: {
             exitCode: number | null;
+            /** @description Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise */
+            outputTruncated: string | null;
             /** @description PTY commands only */
             ptyOffset?: number;
             reason: string | null;
@@ -1305,7 +1309,7 @@ export interface components {
             data: string;
             /** @enum {string} */
             encoding?: "utf8" | "base64";
-            /** @description Order of this chunk within sessionId; repeats (seq <= last) are dropped */
+            /** @description Order of this chunk within sessionId, from 1; repeats (seq <= last) are dropped */
             seq?: number;
             /** @description Writer id; with seq a repeat is applied once */
             sessionId?: string;
@@ -3978,6 +3982,15 @@ export interface operations {
             };
             /** @description `sandbox_not_ready` (details.state), `sandbox_starting` (retryable), `agent_outdated` (details.capability) or `invalid_state` */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `range_not_satisfiable`: an offset past the end of its stream (details.stream, details.size) */
+            416: {
                 headers: {
                     [name: string]: unknown;
                 };

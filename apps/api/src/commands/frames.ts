@@ -56,6 +56,8 @@ export type ExitFrame = {
 	exitCode: number | null;
 	signal: string | null;
 	reason: string | null;
+	/** "disk_full" when the agent dropped output; null otherwise. */
+	outputTruncated: string | null;
 } & FrameOffsets;
 export type ErrorFrame = {
 	type: "error";

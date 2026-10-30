@@ -28,7 +28,7 @@ import {
 	AgentCallError,
 	agentErrorToHttp,
 	agentUnavailableError,
-	isAgentUnreachable,
+	isAgentOutcomeUnknown,
 } from "../agent/errors.ts";
 import type { AuthContext } from "../auth/principal.ts";
 import type { ApiDeps } from "../deps.ts";
@@ -574,7 +574,8 @@ class PtyWriter {
 					this.#stop();
 					return;
 				}
-				const unreachable = isAgentUnreachable(e);
+				// Repeats carry the same seq: the agent applies them once.
+				const unreachable = isAgentOutcomeUnknown(e);
 				if (unreachable && !this.#gone && Date.now() + delay < deadline) {
 					await sleep(delay);
 					delay = Math.min(delay * 2, 1000);

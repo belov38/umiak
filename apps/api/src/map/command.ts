@@ -113,6 +113,7 @@ export function toCommandResource(
 		signal,
 		reason,
 		pid: live?.pid ?? c.pid,
+		outputTruncated: live?.outputTruncated ?? null,
 		streams,
 		createdBy: c.createdBy === null ? null : encodeUuid("user", c.createdBy),
 		createdByKey:

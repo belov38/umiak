@@ -15,7 +15,7 @@ import {
 import {
 	AgentCallError,
 	agentErrorToHttp,
-	isAgentUnreachable,
+	isAgentOutcomeUnknown,
 } from "../agent/errors.ts";
 import type { AgentCommandInfo, AgentCommandSpec } from "../agent/types.ts";
 import type { AuthContext } from "../auth/principal.ts";
@@ -177,6 +177,8 @@ export async function startPlanned(
 			await deps.agent.requireCapability(machineId, cap, signal);
 		}
 	} catch (e) {
+		// Closed meanwhile (shutdown, revocation): the caller maps the reason.
+		if (signal?.aborted) throw signal.reason ?? e;
 		throw agentErrorToHttp(e);
 	}
 
@@ -212,20 +214,15 @@ export async function startPlanned(
 		);
 		info = r.command;
 	} catch (e) {
-		if (isAgentUnreachable(e)) {
+		// Unreachable, Unavailable with a detail, or DeadlineExceeded: the
+		// agent may have started it.
+		if (isAgentOutcomeUnknown(e)) {
 			throw startUnavailable(command.id, idemKey !== undefined);
 		}
 		if (e instanceof AgentCallError) {
 			// The agent refused it: the process never started. A row that a
 			// concurrent replay already moved on is left alone.
-			const now = await svc
-				.getCommand(p, sandbox.id, command.id)
-				.catch(() => null);
-			if (now?.status === "starting") {
-				await svc
-					.completeCommand(command.id, { status: "failed_to_start" })
-					.catch(() => {});
-			}
+			await svc.failCommandStart(command.id).catch(() => {});
 		}
 		throw agentErrorToHttp(e);
 	}

@@ -8,6 +8,7 @@ import {
 	agentFileInfoJson,
 	agentHttpError,
 	filesQuery,
+	isAgentOutcomeUnknown,
 	isAgentUnreachable,
 	parseAgentFileInfo,
 } from "../src/index.ts";
@@ -33,6 +34,13 @@ const TABLE: [agentCode: string, status: number, code: string][] = [
 	["invalid_argument", 400, "validation"],
 	["too_many_commands", 409, "invalid_state"],
 	["failed_precondition", 409, "invalid_state"],
+	// Codes of the real S3 agent (services/guest-agent/internal/errs).
+	["user_not_found", 400, "validation"],
+	["shim_outdated", 409, "agent_outdated"],
+	["unimplemented", 409, "agent_outdated"],
+	["command_running", 409, "invalid_state"],
+	["not_claimed", 409, "sandbox_not_ready"],
+	["request_id_reused", 409, "idempotency_key_reused"],
 ];
 
 describe("agentErrorToHttp", () => {
@@ -159,7 +167,6 @@ describe("agentErrorToHttp", () => {
 			(
 				[
 					"InvalidArgument",
-					"DeadlineExceeded",
 					"NotFound",
 					"PermissionDenied",
 					"FailedPrecondition",
@@ -170,6 +177,42 @@ describe("agentErrorToHttp", () => {
 			const err = new ConnectError("x", CODES[name]);
 			expect(isAgentUnreachable(err)).toBe(false);
 			expect(agentErrorToHttp(err).code).not.toBe("agent_unavailable");
+		});
+
+		it.each([
+			"quiesced",
+			"shim_unavailable",
+			"store_busy",
+			"identity_not_ready",
+		])(
+			"Unavailable detail %s → unreachable (unknown outcome), never 502",
+			(code) => {
+				const err = new AgentCallError(code, "busy");
+				expect(isAgentUnreachable(err)).toBe(true);
+				expect(isAgentOutcomeUnknown(err)).toBe(true);
+				expect(agentErrorToHttp(err)).toMatchObject({
+					status: 503,
+					code: "agent_unavailable",
+					retryable: true,
+				});
+			},
+		);
+
+		it("DeadlineExceeded: not an outage, but the outcome of a mutation is unknown; a read answers 503 retryable", () => {
+			const err = new ConnectError("x", CODES.DeadlineExceeded);
+			expect(isAgentUnreachable(err)).toBe(false);
+			expect(isAgentOutcomeUnknown(err)).toBe(true);
+			expect(agentErrorToHttp(err)).toMatchObject({
+				status: 503,
+				code: "agent_unavailable",
+				retryable: true,
+			});
+			expect(isAgentOutcomeUnknown(new AgentCallError("not_found", "x"))).toBe(
+				false,
+			);
+			expect(
+				isAgentOutcomeUnknown(new ConnectError("x", CODES.Unavailable)),
+			).toBe(true);
 		});
 
 		it("Canceled by the caller's own abort is not an outage", () => {
@@ -204,14 +247,16 @@ describe("agentErrorToHttp", () => {
 	});
 
 	it("an unknown agent code → 502 agent_error with details.agentCode", () => {
-		const e = agentErrorToHttp(new AgentCallError("quiesced", "frozen"));
+		const e = agentErrorToHttp(
+			new AgentCallError("frozen_by_other", "secret detail"),
+		);
 		expect([e.status, e.code, e.retryable]).toEqual([
 			502,
 			"agent_error",
 			false,
 		]);
-		expect(e.details).toEqual({ agentCode: "quiesced" });
-		expect(e.message).not.toContain("frozen");
+		expect(e.details).toEqual({ agentCode: "frozen_by_other" });
+		expect(e.message).not.toContain("secret detail");
 	});
 
 	it("an ApiError passes through; other errors map like toHttpError", () => {

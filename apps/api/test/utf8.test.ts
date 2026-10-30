@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 import { Utf8StreamDecoder } from "../src/commands/utf8.ts";
 
 const enc = new TextEncoder();
-const reference = (b: Uint8Array) => new TextDecoder().decode(b);
+const reference = (b: Uint8Array) =>
+	new TextDecoder("utf-8", { ignoreBOM: true }).decode(b);
 
 /** Decodes `bytes` pushed in pieces cut at `cuts`; returns text and boundaries. */
 function decodeInPieces(
@@ -91,6 +92,19 @@ describe("Utf8StreamDecoder", () => {
 			expect(r.text).toBe(reference(bytes));
 			expect(r.text).toContain("�");
 		}
+	});
+
+	it("keeps U+FEFF at the start of every chunk (byte-faithful output)", () => {
+		const bom = enc.encode("\uFEFFa");
+		const d = new Utf8StreamDecoder();
+		const a = d.push(bom);
+		const b = d.push(bom);
+		expect(a).toEqual({ text: "\uFEFFa", consumed: 4 });
+		expect(b).toEqual({ text: "\uFEFFa", consumed: 4 });
+		// A BOM cut in pieces comes out whole too.
+		const e = new Utf8StreamDecoder();
+		const parts = [...bom].map((x) => e.push(Uint8Array.of(x)).text).join("");
+		expect(parts).toBe("\uFEFFa");
 	});
 
 	it("flush emits a held incomplete sequence as one U+FFFD", () => {

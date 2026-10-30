@@ -140,6 +140,10 @@ describe.skipIf(skipPg())("command control", () => {
 			h.request("POST", `${sb.commands}/${id}/input`, { json });
 		expect((await input({ data: "x", sessionId: "s" })).status).toBe(400);
 		expect((await input({ data: "x", seq: 1 })).status).toBe(400);
+		// seq starts at 1: the agent drops seq <= last with last = 0.
+		expect((await input({ data: "x", sessionId: "s", seq: 0 })).status).toBe(
+			400,
+		);
 		expect((await input({ data: "@@", encoding: "base64" })).status).toBe(400);
 		const noStdin = await input({ data: "x" });
 		expect(noStdin.status).toBe(409);
@@ -327,5 +331,36 @@ describe.skipIf(skipPg())("command control", () => {
 		const b = bytesOf(frames);
 		expect(b.stdout.toString()).toBe("o1\no2\no3\n");
 		expect(b.stderr.toString()).toBe("e1\ne2\ne3\n");
+	});
+
+	it("a slow agent Get: GET command falls back to the row within the budget; /output answers 503", async () => {
+		const id = await start({ command: "true" });
+		await finalOf(id);
+		const fast = w.harness({
+			deps: {
+				commandTimings: {
+					...h.deps.commandTimings,
+					agentReadBudgetMs: 100,
+				},
+			},
+		});
+		const agent = w.agent;
+		const spy = agent.get.bind(agent);
+		agent.get = () => new Promise(() => {});
+		try {
+			const t0 = Date.now();
+			const g = await fast.request("GET", `${sb.commands}/${id}`);
+			expect(g.status).toBe(200);
+			expect((g.body as Any).status).toBe("exited");
+			expect(Date.now() - t0).toBeLessThan(3000);
+			const out = await fast.request("GET", `${sb.commands}/${id}/output`);
+			expect(out.status).toBe(503);
+			expect((out.body as Any).error).toMatchObject({
+				code: "agent_unavailable",
+				retryable: true,
+			});
+		} finally {
+			agent.get = spy;
+		}
 	});
 });

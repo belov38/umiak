@@ -315,6 +315,13 @@
 						"type": "string",
 						"x-extensible-enum": true
 					},
+					"outputTruncated": {
+						"description": "Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise. Known from the agent while the sandbox is ready and in the sync answer; null when unknown",
+						"type": [
+							"string",
+							"null"
+						]
+					},
 					"pid": {
 						"type": [
 							"integer",
@@ -406,6 +413,7 @@
 					"signal",
 					"reason",
 					"pid",
+					"outputTruncated",
 					"streams",
 					"createdBy",
 					"createdByKey",
@@ -503,6 +511,13 @@
 							"null"
 						]
 					},
+					"outputTruncated": {
+						"description": "Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise",
+						"type": [
+							"string",
+							"null"
+						]
+					},
 					"ptyOffset": {
 						"description": "PTY commands only",
 						"type": "integer"
@@ -549,6 +564,7 @@
 					"exitCode",
 					"signal",
 					"reason",
+					"outputTruncated",
 					"stdoutOffset",
 					"stderrOffset"
 				],
@@ -616,8 +632,8 @@
 						"type": "string"
 					},
 					"seq": {
-						"description": "Order of this chunk within sessionId; repeats (seq <= last) are dropped",
-						"minimum": 0,
+						"description": "Order of this chunk within sessionId, from 1; repeats (seq <= last) are dropped",
+						"minimum": 1,
 						"type": "integer"
 					},
 					"sessionId": {
@@ -6077,7 +6093,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/commands/{command}/stream": {
 			"get": {
-				"description": "NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s; heartbeats come every 15 s).",
+				"description": "NDJSON frames from the given offsets (first `attached`). `tailBytes` starts each stream that many bytes before its end; `follow=false` sends what exists and closes. Reopen with the offsets of the last frame after `reconnect`, a retryable `error` or a dropped connection (no line for 45 s; heartbeats come every 15 s). An offset past the end of its stream is 416; a non-zero offset of a stream the command does not have is 400.",
 				"operationId": "commands.stream",
 				"parameters": [
 					{
@@ -6217,6 +6233,16 @@
 							}
 						},
 						"description": "`sandbox_not_ready` (details.state), `sandbox_starting` (retryable), `agent_outdated` (details.capability) or `invalid_state`"
+					},
+					"416": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`range_not_satisfiable`: an offset past the end of its stream (details.stream, details.size)"
 					},
 					"429": {
 						"content": {

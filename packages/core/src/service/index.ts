@@ -18,6 +18,7 @@ import {
 	completeCommand,
 	createCommand,
 	createCommandWithKey,
+	failCommandStart,
 	getCommand,
 	listCommands,
 	markCommandRunning,
@@ -85,6 +86,7 @@ export {
 	type CommandResult,
 	type CommandSpec,
 	completeCommand,
+	failCommandStart,
 	markCommandRunning,
 	TERMINAL_COMMAND_STATUSES,
 	truncateUtf8,
@@ -195,10 +197,12 @@ export interface SandboxService {
 	getSavedSnapshot(p: Principal, name: string): Promise<SavedSnapshot>;
 	getOperation(p: Principal, id: string): Promise<Operation>;
 	/** No access check: the caller has read the sandbox with `get` first. */
+	/** `signal` aborts the wait: it rejects with the abort reason. */
 	waitForState(
 		id: string,
 		states: SandboxState[],
 		timeoutMs: number,
+		signal?: AbortSignal,
 	): Promise<Sandbox>;
 	/** Until terminal or `timeoutMs`; no access check (read it with `getOperation` first). */
 	waitForOperation(id: string, timeoutMs: number): Promise<Operation>;
@@ -247,6 +251,11 @@ export interface SandboxService {
 		commandId: string,
 	): Promise<Command>;
 	completeCommand(commandId: string, result: CommandResult): Promise<void>;
+	/**
+	 * `starting` → `failed_to_start` (the agent refused Start); a command
+	 * that moved on (a concurrent replay started it) is left alone.
+	 */
+	failCommandStart(commandId: string): Promise<void>;
 	touchApiActivity(sandboxId: string): Promise<void>;
 	/**
 	 * Hosts a port or changes its settings with PUT semantics: the call gives
@@ -323,8 +332,9 @@ export class SandboxServiceImpl implements SandboxService {
 		id: string,
 		states: SandboxState[],
 		timeoutMs: number,
+		signal?: AbortSignal,
 	): Promise<Sandbox> {
-		return waitForSandboxState(this.deps, id, states, timeoutMs);
+		return waitForSandboxState(this.deps, id, states, timeoutMs, signal);
 	}
 	stop(p: Principal, idOrSlug: string): Promise<Operation> {
 		return stopSandbox(this.deps, p, idOrSlug);
@@ -456,6 +466,10 @@ export class SandboxServiceImpl implements SandboxService {
 
 	completeCommand(commandId: string, result: CommandResult): Promise<void> {
 		return completeCommand(this.deps.pool, commandId, result);
+	}
+
+	failCommandStart(commandId: string): Promise<void> {
+		return failCommandStart(this.deps.pool, commandId);
 	}
 
 	touchApiActivity(sandboxId: string): Promise<void> {

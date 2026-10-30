@@ -277,6 +277,62 @@ describe("normalizeAgentEvent (decision 13)", () => {
 		).toEqual({ kind: "quiesce_watchdog_thawed" });
 	});
 
+	it("maps the S3 CommandExited reason like attach: TIMEOUT → timed_out, START_FAILED → failed_to_start; a PTY end is the stdout bytes", () => {
+		const exited = (payload: object) =>
+			normalizeAgentEvent({ type: "command.exited", payload });
+		// protojson of sbx.agent.v1.CommandExited with implicit fields emitted.
+		const base = {
+			commandId: "01T",
+			code: 0,
+			signal: "",
+			stdoutEnd: "4",
+			stderrEnd: "0",
+			ptyEnd: "0",
+			outputTruncated: "",
+		};
+		expect(
+			exited({
+				...base,
+				status: "EXIT_STATUS_KILLED",
+				code: 137,
+				signal: "SIGKILL",
+				reason: "EXIT_REASON_TIMEOUT",
+			}),
+		).toMatchObject({ status: "timed_out", exitCode: 137, signal: "SIGKILL" });
+		expect(
+			exited({
+				...base,
+				status: "EXIT_STATUS_EXITED",
+				code: 127,
+				reason: "EXIT_REASON_START_FAILED",
+			}),
+		).toMatchObject({ status: "failed_to_start", exitCode: 127 });
+		expect(
+			exited({
+				...base,
+				status: "EXIT_STATUS_EXITED",
+				reason: "EXIT_REASON_NONE",
+			}),
+		).toEqual({
+			kind: "command_exited",
+			commandId: "01T",
+			status: "exited",
+			exitCode: 0,
+			signal: null,
+			stdoutBytes: 4,
+			stderrBytes: 0,
+		});
+		expect(
+			exited({
+				...base,
+				status: "EXIT_STATUS_EXITED",
+				reason: "EXIT_REASON_NONE",
+				stdoutEnd: "0",
+				ptyEnd: "9",
+			}),
+		).toMatchObject({ stdoutBytes: 9, stderrBytes: 0 });
+	});
+
 	it("maps S3 aliases (snake_case and protojson camelCase)", () => {
 		expect(
 			normalizeAgentEvent({

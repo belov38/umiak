@@ -194,6 +194,10 @@ export const CommandSchema = z
 				"Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed",
 		}),
 		pid: z.int().nullable(),
+		outputTruncated: z.string().nullable().openapi({
+			description:
+				"Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise. Known from the agent while the sandbox is ready and in the sync answer; null when unknown",
+		}),
 		streams: z
 			.object({
 				stdout: StreamInfo.optional(),
@@ -332,6 +336,10 @@ const ExitFrame = z
 		exitCode: z.int().nullable(),
 		signal: z.string().nullable(),
 		reason: z.string().nullable(),
+		outputTruncated: z.string().nullable().openapi({
+			description:
+				"Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise",
+		}),
 		...offsets,
 	})
 	.openapi("CommandExitFrame");
@@ -411,9 +419,9 @@ export const InputRequest = z
 			.regex(/^[A-Za-z0-9._-]{1,128}$/)
 			.optional()
 			.openapi({ description: "Writer id; with seq a repeat is applied once" }),
-		seq: z.int().min(0).optional().openapi({
+		seq: z.int().min(1).optional().openapi({
 			description:
-				"Order of this chunk within sessionId; repeats (seq <= last) are dropped",
+				"Order of this chunk within sessionId, from 1; repeats (seq <= last) are dropped",
 		}),
 	})
 	.superRefine((b, ctx) => {

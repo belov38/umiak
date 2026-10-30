@@ -7,6 +7,7 @@
 // (StreamClose: shutdown, revocation), and with `error` when the agent is
 // gone. On `exit` the command row is completed (completeCommand).
 import {
+	AgentUnavailableError,
 	type AttachOutput,
 	type AttachView,
 	resumableAttach,
@@ -44,15 +45,34 @@ export interface CommandTimings {
 	maxDurationMs: number;
 	/** Reopens of the agent attach without progress before giving up (default 20). */
 	attachMaxAttempts?: number;
+	/** Budget of a `Process/Get` that only enriches a read (default 5 s). */
+	agentReadBudgetMs?: number;
 }
 
 export const DEFAULT_ATTACH_MAX_ATTEMPTS = 20;
+export const DEFAULT_AGENT_READ_BUDGET_MS = 5_000;
+
+/** `p`, or AgentUnavailableError once `ms` pass (the call is abandoned). */
+export function withinBudget<T>(
+	p: Promise<T>,
+	ms: number,
+	machineId: string,
+): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(
+			() => reject(new AgentUnavailableError(machineId)),
+			ms,
+		);
+		p.then(resolve, reject).finally(() => clearTimeout(timer));
+	});
+}
 
 export const DEFAULT_COMMAND_TIMINGS: CommandTimings = {
 	readyWaitMs: 60_000,
 	heartbeatMs: 15_000,
 	maxDurationMs: 3_600_000,
 	attachMaxAttempts: DEFAULT_ATTACH_MAX_ATTEMPTS,
+	agentReadBudgetMs: DEFAULT_AGENT_READ_BUDGET_MS,
 };
 
 /**
@@ -530,6 +550,7 @@ async function exitFrame(
 		exitCode: e.code,
 		signal: e.signal,
 		reason: e.reason,
+		outputTruncated: e.outputTruncated,
 		stdoutOffset: e.stdoutEnd,
 		stderrOffset: e.stderrEnd,
 		...(pty ? { ptyOffset: e.ptyEnd } : {}),

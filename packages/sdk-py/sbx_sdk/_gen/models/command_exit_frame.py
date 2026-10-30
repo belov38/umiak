@@ -18,6 +18,8 @@ class CommandExitFrame:
     """
     Attributes:
         exit_code (int | None):
+        output_truncated (None | str): Why output is missing: `disk_full` when the agent dropped output because the
+            sandbox disk was full (stream ends count only the bytes written); null otherwise
         reason (None | str):
         signal (None | str):
         status (CommandExitFrameStatus):
@@ -28,6 +30,7 @@ class CommandExitFrame:
     """
 
     exit_code: int | None
+    output_truncated: None | str
     reason: None | str
     signal: None | str
     status: CommandExitFrameStatus
@@ -40,6 +43,9 @@ class CommandExitFrame:
     def to_dict(self) -> dict[str, Any]:
         exit_code: int | None
         exit_code = self.exit_code
+
+        output_truncated: None | str
+        output_truncated = self.output_truncated
 
         reason: None | str
         reason = self.reason
@@ -62,6 +68,7 @@ class CommandExitFrame:
         field_dict.update(
             {
                 "exitCode": exit_code,
+                "outputTruncated": output_truncated,
                 "reason": reason,
                 "signal": signal,
                 "status": status,
@@ -85,6 +92,13 @@ class CommandExitFrame:
             return cast(int | None, data)
 
         exit_code = _parse_exit_code(d.pop("exitCode"))
+
+        def _parse_output_truncated(data: object) -> None | str:
+            if data is None:
+                return data
+            return cast(None | str, data)
+
+        output_truncated = _parse_output_truncated(d.pop("outputTruncated"))
 
         def _parse_reason(data: object) -> None | str:
             if data is None:
@@ -112,6 +126,7 @@ class CommandExitFrame:
 
         command_exit_frame = cls(
             exit_code=exit_code,
+            output_truncated=output_truncated,
             reason=reason,
             signal=signal,
             status=status,

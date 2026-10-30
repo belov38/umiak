@@ -264,6 +264,7 @@ async function pumpStdin(
 	signal: AbortSignal,
 ): Promise<void> {
 	const sessionId = randomUUID();
+	// seq starts at 1: the agent drops seq <= last, and last is 0 at first.
 	let seq = 0;
 	for await (const chunk of ctx.stdin) {
 		const buf =
@@ -271,12 +272,12 @@ async function pumpStdin(
 		for (let i = 0; i < buf.length; i += STDIN_CHUNK) {
 			await c.input(new Uint8Array(buf.subarray(i, i + STDIN_CHUNK)), {
 				sessionId,
-				seq: seq++,
+				seq: ++seq,
 				signal,
 			});
 		}
 	}
-	await c.input("", { closeStdin: true, sessionId, seq: seq++, signal });
+	await c.input("", { closeStdin: true, sessionId, seq: ++seq, signal });
 }
 
 export function register(program: Command, run: Runner): void {

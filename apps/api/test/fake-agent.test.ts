@@ -578,6 +578,8 @@ describe("input, PTY, signals", () => {
 				data: enc.encode(s),
 				closeStdin: close,
 			});
+		// Like the shim: an unknown session has last seq 0, so seq 0 is a repeat.
+		expect(await send("s1", 0, "z")).toEqual({ applied: false });
 		expect(await send("s1", 1, "a")).toEqual({ applied: true });
 		expect(await send("s1", 1, "a")).toEqual({ applied: false });
 		expect(await send("s1", 2, "b")).toEqual({ applied: true });
@@ -657,6 +659,34 @@ describe("input, PTY, signals", () => {
 		expect((bad as AgentCallError).code).toBe("invalid_argument");
 	});
 
+	it("signal exit codes use the Linux numbers (SIGUSR1 = 10 → 138), and a number is a Linux signal", async () => {
+		const m = newMachine();
+		const c1 = await start(m, spec({ shell: "sleep 30" }));
+		await fake.signal(m, { commandId: c1, signal: "SIGUSR1" });
+		expect((await collect(attachAll(m, c1))).exit).toMatchObject({
+			status: "killed",
+			signal: "SIGUSR1",
+			code: 138,
+		});
+		const c2 = await start(m, spec({ shell: "sleep 30" }));
+		await fake.signal(m, { commandId: c2, signal: "12" });
+		expect((await collect(attachAll(m, c2))).exit).toMatchObject({
+			signal: "SIGUSR2",
+			code: 140,
+		});
+	});
+
+	it("truncateOutput simulates output dropped by a full disk (output_truncated)", async () => {
+		const m = newMachine();
+		const commandId = await start(m, spec({ shell: "echo hi" }));
+		fake.truncateOutput(commandId, "disk_full");
+		const r = await collect(attachAll(m, commandId));
+		expect(r.exit).toMatchObject({ outputTruncated: "disk_full" });
+		expect((await fake.get(m, commandId)).outputTruncated).toBe("disk_full");
+		const other = await run(m, spec({ shell: "true" }));
+		expect(other.exit).toMatchObject({ outputTruncated: null });
+	});
+
 	it("timeoutMs kills with reason timeout", async () => {
 		const m = newMachine();
 		const r = await run(m, spec({ shell: "sleep 30", timeoutMs: 100 }));
@@ -706,6 +736,8 @@ describe("faults and capabilities", () => {
 	it("capabilities are configurable per machine", async () => {
 		const m = newMachine();
 		expect(await fake.capabilities(m)).toContain("files.archive.v1");
+		// The full set of the real agent (guest-agent internal/agent/info.go).
+		expect(await fake.capabilities(m)).toContain("system.activity.v1");
 		await fake.requireCapability(m, "process.pty");
 		fake.machine(m).capabilities = ["process.v1"];
 		const err = await fake

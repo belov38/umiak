@@ -100,10 +100,30 @@ OpenAPI — `GET /v1/openapi.json`, документация — `GET /v1/docs` 
 2. В `src/server.ts` заменить `new UnwiredAgentApi(agentClient, pool)` на него (при `agentClient === null` оставить
    `UnwiredAgentApi`).
 3. Сверить с настоящим агентом: имена query у `/files*` (`overwrite`, `user` у чанка и commit, восьмеричный `mode`),
-   коды ошибок Connect → `src/agent/errors.ts`, параллельный повтор `Start` с тем же `commandId`.
-4. Разбирать payload-ы `agent-events` типами S3 (`src/agent/event-decode.ts`; сейчас известны только
-   `Struct`/`Value`).
+   параллельный повтор `Start` с тем же `commandId`. Ошибки — по таблице в doc-комментарии `agentErrorToHttp`
+   (`src/agent/errors.ts`): Connect `Unavailable`/`Canceled`/`DeadlineExceeded` оставлять `ConnectError`
+   (с любым detail: `quiesced`, `shim_unavailable`, `store_busy`, `identity_not_ready`), остальное —
+   `AgentCallError(<код ErrorDetail>)`.
+4. Payload-ы `agent-events` уже разбираются типами S3 (`src/agent/event-decode.ts`: `events.proto` и
+   `common.proto` из `@sbx/proto/agent/v1`), нормализация — `normalizeAgentEvent` в `packages/core`.
 5. Добавить chaos стрима через туннель (spec §16) и E2E `sbx-bench s7` на `pve`.
+
+### Wiring S3: адаптер proto ↔ `AgentApi`
+
+- Enum-ы: `*_UNSPECIFIED` — не значение. `CommandState`/`ExitStatus`/`ExitReason`/`Stream` без префикса в нижнем
+  регистре (`EXIT_REASON_PTY_IDLE` → `pty_idle`); `UNSPECIFIED` у `ExitReason` → `none`, у `ExitStatus` при
+  заданном `exit` → ошибка адаптера (не угадывать), у `Stream` — событие пропустить.
+- Нули proto → `null` в `AgentApi`: `pid = 0` → `null`, `signal = ""` → `null`, пустой `output_truncated` →
+  `null`, отсутствующий `exit` → `null`, `Timestamp` не задан → `null`, `StreamInfo.end` не задан → `null`.
+  `ExitInfo.code` — число всегда (0 — настоящий код).
+- `uint64` (смещения, размеры) приходят `bigint`: перевод в `number` только после проверки
+  `<= Number.MAX_SAFE_INTEGER`, иначе ошибка адаптера (не обрезать). Обратно — `BigInt(n)`.
+- `CommandInfo.streams` — список `StreamInfo` с полем `stream`; в `AgentApi` — объект по имени потока, только
+  потоки команды (у PTY — один `pty`).
+- `Sbx-Request-Id` (S2 §9.2) ставить на мутирующих вызовах: `Start` (`requestId` из `opts`, UUIDv5 ключа
+  идемпотентности), `MakeDir`/`Move`/`Chmod`/`Remove`, `UpdateEnv`/`UpdateSecrets`. Ответ `request_id_reused`
+  значит другой запрос под тем же id → `409 idempotency_key_reused`.
+- `SendInput.seq` начинается с 1: shim отбрасывает `seq <= last`, у новой сессии `last = 0`.
 
 ## OpenAPI
 

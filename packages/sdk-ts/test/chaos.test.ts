@@ -39,14 +39,15 @@ const EXIT_CODE = 3;
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".repeat(22);
 const FILLER = LINE_BYTES - 11; // "out 00001 " + filler + "\n"
 
-// Lines go out in batches of 100 with a pause, so the command runs ~6 s and
+// Lines go out in batches of 100 with a pause (then a UTF-8 BOM + "€😀"
+// line on stdout, so a BOM starts an agent chunk), so the command runs ~6 s and
 // the chaos hits it while it still writes, not only while its buffered
 // output is read back.
 const SCRIPT = `a=${ALPHABET}
 for ((i=1;i<=${LINES};i++)); do
   printf 'out %05d %s\\n' "$i" "\${a:i%26:${FILLER}}"
   printf 'err %05d %s\\n' "$i" "\${a:(i+13)%26:${FILLER}}" >&2
-  if ((i%100==0)); then sleep 0.2; fi
+  if ((i%100==0)); then sleep 0.2; printf '\\xef\\xbb\\xbf\\xe2\\x82\\xac\\xf0\\x9f\\x98\\x80 %05d\\n' "$i"; fi
 done
 exit ${EXIT_CODE}`;
 
@@ -56,6 +57,9 @@ function expectedOutput(prefix: "out" | "err", shift: number): string {
 		const n = String(i).padStart(5, "0");
 		const at = (i + shift) % 26;
 		s += `${prefix} ${n} ${ALPHABET.slice(at, at + FILLER)}\n`;
+		// A BOM and multi-byte characters every 100 lines (stdout only):
+		// kept byte for byte across reattaches.
+		if (prefix === "out" && i % 100 === 0) s += `\uFEFF€😀 ${n}\n`;
 	}
 	return s;
 }
@@ -355,16 +359,20 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 			const closeMs = await Promise.all(closes);
 
 			const bytes = LINES * LINE_BYTES;
+			const expectedOut = expectedOutput("out", 0);
+			// The BOM lines: 3 + 3 + 4 bytes of characters, " 00100\n".
+			const outBytes = Buffer.byteLength(expectedOut);
+			expect(outBytes).toBe(bytes + (LINES / 100) * 17);
 			expect(truncated).toBe(0);
-			expect(out.stdout.length).toBe(bytes);
+			expect(out.stdout.length).toBe(expectedOut.length);
 			expect(out.stderr.length).toBe(bytes);
-			expect(sha256(out.stdout)).toBe(sha256(expectedOutput("out", 0)));
+			expect(sha256(out.stdout)).toBe(sha256(expectedOut));
 			expect(sha256(out.stderr)).toBe(sha256(expectedOutput("err", 13)));
 			expect(exit).toMatchObject({
 				type: "exit",
 				status: "exited",
 				exitCode: EXIT_CODE,
-				stdoutOffset: bytes,
+				stdoutOffset: outBytes,
 				stderrOffset: bytes,
 			});
 			expect(command?.id).toMatch(/^cmd_/);
