@@ -25,6 +25,7 @@ COPY packages/sdk-ts/package.json packages/sdk-ts/
 COPY apps/api/package.json apps/api/
 COPY apps/bench/package.json apps/bench/
 COPY apps/cli/package.json apps/cli/
+COPY apps/template-builder/package.json apps/template-builder/
 COPY apps/worker/package.json apps/worker/
 
 # ---- build: compile @sbx/proto and @sbx/agent-client (needs dev dependencies)
