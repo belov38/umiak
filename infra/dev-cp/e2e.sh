@@ -8,6 +8,8 @@
 # previews, SSH gateway) and `ssh $SBX_E2E_PVE_SSH` (default `pve`, root) for the leftover check.
 # The CLI is built if apps/cli/dist/sbx-<os>-<arch> is missing (SBX_E2E_SBX overrides). It runs
 # with its own config and state directories (mktemp), never the operator's ~/.config/sbx profile.
+# The work dir holds the e2e user's tokens and SSH key; it is removed at the end unless
+# SBX_E2E_KEEP_WORKDIR=1.
 #
 # Steps: login (device grant approved by kc-browser.py), create, exec (codes, signal, timeout,
 # stdin, streaming), detach + logs -f, PTY (e2e-pty.py), cp up/down (80 MB chunked, a directory
@@ -92,18 +94,27 @@ cleanup() {
 	[[ -n "${SSHK_ID:-}" ]] && "$SBX" ssh-keys rm "$SSHK_ID" >/dev/null 2>&1
 	return 0
 }
+FINISHED=0
 finish() {
+	((FINISHED)) && return
+	FINISHED=1
 	cleanup
 	printf '\n%-6s %-28s %s\n' RESULT STEP DETAILS
 	local r
-	for r in "${RESULTS[@]}"; do
+	for r in ${RESULTS[@]+"${RESULTS[@]}"}; do
 		IFS='|' read -r a b c <<<"$r"
 		printf '%-6s %-28s %s\n' "$a" "$b" "$c"
 	done
-	printf '\nwork dir: %s\n' "$W"
+	if [[ "${SBX_E2E_KEEP_WORKDIR:-0}" == 1 ]]; then
+		printf '\nwork dir (tokens, SSH key): %s\n' "$W"
+	else
+		rm -rf "$W"
+	fi
 	exit "$FAILED"
 }
-trap 'finish' INT TERM
+trap 'finish' INT TERM HUP
+# Unexpected exits (set -u, a crash) still delete the sandboxes and the work dir.
+trap '((FINISHED)) || { FAILED=1; finish; }' EXIT
 
 # create_sb <args...>: create --wait; sets SB to the slug and remembers it for cleanup. Not in
 # $(...): CREATED must be set in this shell.

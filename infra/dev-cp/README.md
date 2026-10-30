@@ -129,7 +129,7 @@ Checked on CT 590 by `e2e.sh` (`docs/plans/e2e-devcp.md`): every service healthy
 ## People, e2e and the quick start
 
 - `dev-users.sh` creates `ilia@example.com` (temporary password in `~/.config/sbx/dev-cp/ilia-initial-password` on the Mac, 0600) and `e2e@example.com` (permanent password in `~/.config/sbx/dev-cp/e2e-password`). The realm takes the email as the username; Keycloak 26 needs first and last name, or the login stops at the profile form. Each gets a personal team with the owner role at the first login.
-- `e2e.sh [--keep-going]` runs the whole scenario from the Mac with the real CLI and both SDKs, prints a PASS/FAIL table and checks that nothing is left on `pve`. It uses its own CLI config (mktemp), `kc-browser.py` for the Keycloak pages and `e2e-pty.py` for `sbx shell`. About 10 minutes, at most two 2 GB sandboxes at once.
+- `e2e.sh [--keep-going]` runs the whole scenario from the Mac with the real CLI and both SDKs, prints a PASS/FAIL table and checks that nothing is left on `pve`. It uses its own CLI config (mktemp), `kc-browser.py` for the Keycloak pages and `e2e-pty.py` for `sbx shell`. About 5 minutes, at most two 2 GB sandboxes at once. The work dir (tokens, SSH key) is deleted at the end; `SBX_E2E_KEEP_WORKDIR=1` keeps it.
 - `QUICKSTART.md`: the short guide for Ilia (Russian).
 
 ## Smoke test

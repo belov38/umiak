@@ -72,7 +72,7 @@ Host key gateway CLI кладёт в `~/.config/sbx/known_hosts`; для обы�
 
 ## Если что-то не так
 
-- Проверить стенд целиком: `infra/dev-cp/e2e.sh` (~10 min, своя учётка `e2e@example.com`, за собой убирает).
+- Проверить стенд целиком: `infra/dev-cp/e2e.sh` (~5 мин, своя учётка `e2e@example.com`, за собой убирает).
 - Перевыкатить: `infra/dev-cp/deploy.sh`. Пользователи: `infra/dev-cp/dev-users.sh`.
 - Логи: `ssh sbx@192.168.68.90`, `cd ~/boat-dev-clone/deploy/compose && docker compose logs -f api worker gateway`.
 - Подробности: `infra/dev-cp/README.md`.
