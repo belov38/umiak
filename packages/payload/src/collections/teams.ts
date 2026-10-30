@@ -1,5 +1,6 @@
 import type { CollectionConfig, Field } from "payload";
-import { operatorAccess, operatorByIdOnly } from "../access.ts";
+import { operatorAccess, teamDeleteAccess } from "../access.ts";
+import { DELETE_TEAM_COMPONENT } from "../admin-components.ts";
 import { configAfterDelete, teamsConfigAfterChange } from "../hooks/config.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
 import { teamsBeforeDelete } from "../hooks/rules.ts";
@@ -19,9 +20,12 @@ export const Teams: CollectionConfig = {
 	admin: {
 		useAsTitle: "name",
 		defaultColumns: ["name", "personal", "createdBy", "createdAt"],
+		// The only way to delete a team (S8 §6.4): checks the runtime first.
+		components: { edit: { beforeDocumentControls: [DELETE_TEAM_COMPONENT] } },
 	},
-	// Deleted one at a time through the team page (S8 §6.4), never in bulk.
-	access: { ...operatorAccess, delete: operatorByIdOnly },
+	// Deleted one at a time through the "Delete team" button of the team
+	// page (S8 §6.4), never in bulk and not with Payload's own Delete.
+	access: { ...operatorAccess, delete: teamDeleteAccess },
 	hooks: {
 		beforeDelete: [teamsBeforeDelete],
 		afterChange: [identityAfterChange("teams"), teamsConfigAfterChange],

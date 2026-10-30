@@ -127,8 +127,13 @@ Errors are `APIError(code, 400)` (message = code) or Payload
   Local API either. `user` and `team` are fixed (read-only through access,
   `membership_immutable` with `overrideAccess`): a membership is replaced by
   delete + create, so the delete closes the old SSH sessions.
-- `teams` delete: one team by id only (no bulk delete through access); a
-  personal team is refused (`personal_team`); otherwise
+- `teams` delete: one team by id only (no bulk delete through access) and
+  only with the header `x-sbx-delete-team: checked` (`teamDeleteAccess`),
+  which the "Delete team" button of apps/web sends after asking the api
+  that the team has no sandboxes, snapshots or environments (S8 §6.4). The
+  admin computes its permissions without the header, so Payload's own
+  Delete is not shown for teams (`admin.components.edit.beforeDocumentControls`
+  renders the button instead). A personal team is refused (`personal_team`); otherwise
   `beforeDelete` deletes the team's memberships and team notices and sets
   `revokedAt` (and `revokedBy` = the request user) on its live keys, all
   through the Local API with `req`, so their hooks notify in the same

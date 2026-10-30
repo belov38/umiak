@@ -21,9 +21,21 @@ Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
 | `/app/t/<team>/settings` | Team (S8 §9.9): name (rename: owner, operator), members (email, name, role, "Not signed in yet", last sign-in), invite / role / remove (owner, operator), leave, quota and usage (`GET /v1/limits`), the IdP-sync notice banner (§9.8, §20.1) for owners and operators: "Revoke selected" (`DELETE /v1/api-keys/{key_…}` through the SDK), "Dismiss" (`acknowledgeNotice`, owners). |
 | `/app/teams/new` | New shared team: name → `createTeam` → the new team. |
 | `/app/account` | Profile (read-only), default team (`setDefaultTeam`), SSH keys (`GET/POST/DELETE /v1/ssh-keys`; `ssh_key_in_use` and unsupported types as text), sign-out with the `sbx login` hint. |
+| `/app/t/<team>/environments` | Environments (§10): `GET /v1/environments`, a card per environment with env and secret names (values never), secret file metadata, repositories, default, "no personal secrets", revision, last change and by whom (member names from Payload, like settings). New / Edit / Delete for owners and operators (`can(…, "manageEnvironments")`), members read. Edit reads `GET /v1/environments/{id}` (env values) and sends a merge `PATCH`: only what changed, `null` for removed keys and files, secret values only when typed, `repositories` whole when changed (`src/lib/environment-form.ts`). Repository URLs are checked like the api (https, ssh or `user@host:path`; no credentials, query or fragment), at most 20. `excludeOwnerSecrets` is stored only (S7 decision 7). |
+| `/app/operator` | Operator section (§9.10). The server page checks `isOperator` of the resolved session (`requireOperator`, `src/lib/operator.ts`); others get the 403 page (`operator/forbidden.tsx`). Every team comes from Payload (`toOperatorTeams`) for the team column and filter. `GET /v1/sandboxes?allTeams=true` with team, state and search filters, polled every 5 s. Per row: Ports (hosted ports with Block / Unblock), Block / Unblock (reason `operator`/`abuse`, note ≤ 500), Stop, Delete (type the slug), links to the team and the sandbox page. Actions carry `Sbx-Team` of the sandbox's team. Link to `/admin`. No pool or node status (phase 2). |
 
-Environments and the operator section arrive with later tasks of the S8
-plan.
+## Delete team in /admin (S8 §6.4)
+
+The team edit view shows "Delete team" for shared teams
+(`src/components/admin/delete-team-control.tsx`, a server component
+registered in `@sbx/payload` by path). In the operator's browser it reads
+`/api/v1/sandboxes?allTeams=true&teamId=…&limit=1`, `/api/v1/snapshots` and
+`/api/v1/environments` with `Sbx-Team` of the team and refuses with what is
+left; otherwise it confirms and sends `DELETE /cms-api/teams/<uuid>` with
+`x-sbx-delete-team: checked` (`src/lib/team-delete.ts`), then opens the
+teams list. Payload's own Delete is not offered for teams: teams access
+requires that header. A sandbox created between the check and the delete
+is the known race of §6.4.
 
 ## Sandbox page (S8 §9.6)
 
@@ -173,7 +185,7 @@ the SDK default is 60 s), so a missing api shows "API unavailable" quickly.
   from handlers and transitions: an exception becomes a toast, not the error
   boundary or an unhandled rejection; nothing is logged (bodies may hold
   secrets).
-- Query keys: `["sandboxes", team, …]` (the page: `["sandboxes", team,
+- Query keys: `["operator-sandboxes", filter]`, `["sandboxes", team, …]` (the page: `["sandboxes", team,
   "one", ref]`), `["commands", team, sb]`, `["ptys", team, sb]`,
   `["files", team, sb, …]`, `["ports", team, sb]`, `["env", team, sb]`,
   `["ssh", team, sb]`, `["limits", team]`,
@@ -288,7 +300,9 @@ server actions against Postgres and Payload (`actions.test.ts`: forbidden
 matrix for member, non-member and operator, last owner, concurrent
 demotions, personal team, team limit, already member, stubs, default team
 fallback, notices), proxy and CSRF decisions, security headers,
-env parsing, team paths, the dev proxy over real sockets (header stripping,
+env parsing, team paths, the operator guard and list query
+(`operator-page.test.ts`), the environment form and its merge patch
+(`environment-form.test.ts`), the team-delete checks (`team-delete.test.ts`), the dev proxy over real sockets (header stripping,
 routing, WebSocket upgrade, 127.0.0.1 only), and the web Payload config
 against Postgres (`@sbx/db/testing/global-setup`): strategy, shared session
 cache, public-id session.

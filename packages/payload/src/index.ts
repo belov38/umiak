@@ -1,9 +1,11 @@
 export {
+	DELETE_TEAM_HEADER,
 	isOperatorReq,
 	nobody,
 	operatorAccess,
 	operatorByIdOnly,
 	operatorOnly,
+	teamDeleteAccess,
 } from "./access.ts";
 export {
 	buildSbxConfig,

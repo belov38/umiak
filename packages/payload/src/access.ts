@@ -29,3 +29,22 @@ export const operatorAccess = {
 	update: operatorOnly,
 	delete: operatorOnly,
 } as const;
+
+/**
+ * Header of the "Delete team" button of /admin (apps/web, S8 §6.4): the
+ * button first asks the api whether the team still has sandboxes, saved
+ * snapshots or environments (web cannot see the runtime), then deletes
+ * with this header.
+ */
+export const DELETE_TEAM_HEADER = "x-sbx-delete-team";
+
+/**
+ * Delete of a team: one team by id, operators only, and only with the
+ * button's header. The admin computes its permissions without that header,
+ * so Payload's own Delete never shows and the check cannot be skipped by
+ * accident. A guard for operators, not a security boundary (an operator
+ * may delete teams anyway).
+ */
+export const teamDeleteAccess: Access = ({ req, id }) =>
+	operatorByIdOnly({ req, id } as Parameters<Access>[0]) === true &&
+	req.headers?.get(DELETE_TEAM_HEADER) === "checked";

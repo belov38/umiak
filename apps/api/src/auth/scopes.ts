@@ -70,14 +70,17 @@ export function requireOwner(): MiddlewareHandler<ApiEnv> {
 }
 
 /**
- * A person needs the `owner` role (403 `role`); a team key passes, its
- * scopes stand in for the role (an owner chose them, §7.5). Use after
- * `requireScope`.
+ * A person needs the `owner` role (403 `role`) or platform operator rights
+ * (S8 §6.2: operators manage any team's environments, and remove them
+ * before a team delete, §6.4); a team key passes, its scopes stand in for
+ * the role (an owner chose them, §7.5). Use after `requireScope`.
  */
 export function requireOwnerUnlessKey(): MiddlewareHandler<ApiEnv> {
 	return async (c, next) => {
 		const p = authOf(c).principal;
-		if (p.kind !== "team_key" && p.role !== "owner") throw ownerRequired();
+		if (p.kind !== "team_key" && p.role !== "owner" && !hasOperatorRights(p)) {
+			throw ownerRequired();
+		}
 		await next();
 	};
 }

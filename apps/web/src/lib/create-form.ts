@@ -150,7 +150,7 @@ function isBlank(r: KvRow): boolean {
 }
 
 /** Env or secret rows → a set; blank rows are dropped. */
-function envSet(
+export function envSet(
 	field: "env" | "secrets",
 	rows: KvRow[],
 	errors: FormErrors,
@@ -199,7 +199,8 @@ function labelSet(
 	return n === 0 ? undefined : out;
 }
 
-function secretFiles(
+/** Secret file drafts → the request list, problems into `errors`. */
+export function secretFiles(
 	files: SecretFileDraft[],
 	errors: FormErrors,
 ): CreateSandboxInput["secretFiles"] {

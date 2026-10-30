@@ -13,3 +13,11 @@ export const JSON_FIELD_COMPONENT =
 export const jsonFieldAdmin = {
 	components: { Field: JSON_FIELD_COMPONENT },
 } as const;
+
+/**
+ * "Delete team" on the team edit view (S8 §6.4): a server component that
+ * renders the button for shared teams; the button checks the api for
+ * sandboxes, snapshots and environments of the team before it deletes.
+ */
+export const DELETE_TEAM_COMPONENT =
+	"/src/components/admin/delete-team-control#DeleteTeamControl";

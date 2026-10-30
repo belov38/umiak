@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { APIError, Forbidden, type Payload, ValidationError } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { migrateSbxPayload } from "../src/index.ts";
+import { DELETE_TEAM_HEADER, migrateSbxPayload } from "../src/index.ts";
 import { closePayload, openPayload } from "./helpers.ts";
 
 describe.skipIf(skipPg())("collection rules", () => {
@@ -289,11 +289,23 @@ describe.skipIf(skipPg())("collection rules", () => {
 				data: keyData(otherTeam.id),
 			});
 
+			// Without the header of the /admin button (S8 §6.4): refused.
+			await expect(
+				payload.delete({
+					collection: "teams",
+					id: tm.id,
+					overrideAccess: false,
+					user: operator,
+				}),
+			).rejects.toBeInstanceOf(Forbidden);
+			expect(await count("teams", { id: { equals: tm.id } })).toBe(1);
+
 			await payload.delete({
 				collection: "teams",
 				id: tm.id,
 				overrideAccess: false,
 				user: operator,
+				req: { headers: new Headers({ [DELETE_TEAM_HEADER]: "checked" }) },
 			});
 
 			expect(await count("teams", { id: { equals: tm.id } })).toBe(0);

@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { type CollectionSlug, Forbidden, type Payload } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { isOperatorReq, migrateSbxPayload } from "../src/index.ts";
+import {
+	DELETE_TEAM_HEADER,
+	isOperatorReq,
+	migrateSbxPayload,
+	teamDeleteAccess,
+} from "../src/index.ts";
 import { closePayload, openPayload } from "./helpers.ts";
 
 const COLLECTIONS: CollectionSlug[] = [
@@ -25,6 +30,36 @@ describe("isOperatorReq", () => {
 		expect(isOperatorReq({ user: {} })).toBe(false);
 		expect(isOperatorReq({ user: null })).toBe(false);
 		expect(isOperatorReq({})).toBe(false);
+	});
+});
+
+describe("teamDeleteAccess", () => {
+	const op = { isOperator: true };
+	const req = (user: unknown, headers: Record<string, string> = {}) =>
+		({ user, headers: new Headers(headers) }) as never;
+	const checked = { [DELETE_TEAM_HEADER]: "checked" };
+
+	it("an operator deleting one team by id with the header of the /admin button", () => {
+		expect(teamDeleteAccess({ req: req(op, checked), id: "x" } as never)).toBe(
+			true,
+		);
+	});
+
+	it("refuses without the header (Payload's own Delete never shows), in bulk, and for others", () => {
+		expect(teamDeleteAccess({ req: req(op), id: "x" } as never)).toBe(false);
+		expect(teamDeleteAccess({ req: req(op, checked) } as never)).toBe(false);
+		expect(
+			teamDeleteAccess({
+				req: req({ isOperator: false }, checked),
+				id: "x",
+			} as never),
+		).toBe(false);
+		expect(
+			teamDeleteAccess({
+				req: req(op, { [DELETE_TEAM_HEADER]: "yes" }),
+				id: "x",
+			} as never),
+		).toBe(false);
 	});
 });
 
