@@ -31,6 +31,9 @@ export function proxy(req: NextRequest): NextResponse {
 	return res;
 }
 
+// Exempt: Next's static build files and the favicon only. /_next/image
+// (the image optimizer, which fetches and serves images) is guarded like
+// every other path.
 export const config = {
-	matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+	matcher: ["/((?!_next/static|favicon.ico).*)"],
 };

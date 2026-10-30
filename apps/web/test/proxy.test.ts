@@ -1,3 +1,4 @@
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import { guard } from "../src/lib/guard.ts";
@@ -106,5 +107,36 @@ describe("proxy", () => {
 		expect(res.status).toBe(200);
 		expect(res.headers.get("x-middleware-next")).toBe("1");
 		expect(res.headers.get("referrer-policy")).toBe("same-origin");
+	});
+});
+
+describe("proxy config.matcher", () => {
+	let config: typeof import("../src/proxy.ts").config;
+
+	beforeAll(async () => {
+		for (const [k, v] of Object.entries(ENV)) process.env[k] = v;
+		({ config } = await import("../src/proxy.ts"));
+	});
+
+	const matches = (url: string) =>
+		unstable_doesMiddlewareMatch({ config, url });
+
+	it("runs on pages, the admin, Payload REST and RSC requests", () => {
+		for (const url of [
+			"/",
+			"/app",
+			"/admin",
+			"/admin/collections/users",
+			"/cms-api/teams",
+			"/app/t/x?_rsc=1",
+			"/_next/image?url=%2Fx.png&w=64&q=75",
+		]) {
+			expect(matches(url), url).toBe(true);
+		}
+	});
+
+	it("skips Next's static build files", () => {
+		expect(matches("/_next/static/chunks/a.js")).toBe(false);
+		expect(matches("/_next/static/css/app.css")).toBe(false);
 	});
 });

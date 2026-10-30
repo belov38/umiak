@@ -116,6 +116,11 @@ describe("dev auth proxy (S8 §13)", () => {
 		await web?.close();
 		await api?.close();
 	});
+	const form = (origin = proxy.url) => ({
+		"Content-Type": "application/x-www-form-urlencoded",
+		Origin: origin,
+	});
+
 	beforeEach(() => {
 		web.seen.length = 0;
 		api.seen.length = 0;
@@ -189,7 +194,7 @@ describe("dev auth proxy (S8 §13)", () => {
 		expect(page.body).toContain('value="operator"');
 		const login = await request(proxy, "/__dev/login", {
 			method: "POST",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			headers: form(),
 			body: "preset=user&rd=%2Fapp%2Ft%2Fx",
 		});
 		expect(login.status).toBe(303);
@@ -201,13 +206,13 @@ describe("dev auth proxy (S8 §13)", () => {
 		// An open redirect is not followed.
 		const evil = await request(proxy, "/__dev/login", {
 			method: "POST",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			headers: form(),
 			body: "preset=user&rd=%2F%2Fevil.example",
 		});
 		expect(evil.headers.location).toBe("/app");
 		const back = await request(proxy, "/__dev/login", {
 			method: "POST",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			headers: form(),
 			body: "preset=user&rd=%2F%5Cevil.example",
 		});
 		expect(back.headers.location).toBe("/app");
@@ -215,6 +220,67 @@ describe("dev auth proxy (S8 §13)", () => {
 		expect(out.status).toBe(302);
 		expect(String(out.headers["set-cookie"])).toContain("Max-Age=0");
 		expect(web.seen).toEqual([]);
+	});
+
+	it("POST /__dev/login needs Origin = the proxy's own origin", async () => {
+		for (const headers of [
+			form("http://evil.example"),
+			form("http://localhost:1"),
+			{ "Content-Type": "application/x-www-form-urlencoded" },
+		]) {
+			const r = await request(proxy, "/__dev/login", {
+				method: "POST",
+				headers,
+				body: "preset=operator",
+			});
+			expect(r.status).toBe(403);
+			expect(r.headers["set-cookie"]).toBeUndefined();
+		}
+	});
+
+	it("a custom identity with control characters or a comma in the email is refused", async () => {
+		for (const body of [
+			"email=a%40b.com%0d%0aX-Auth-Request-Groups%3a%20sbx-operators",
+			"email=a%40b.com%2Cevil%40x.com",
+			"email=a%40b.com&user=sub%01",
+			"email=a%40b.com&user=s1%2Cs2",
+			"email=a%40b.com&name=A%0aB",
+			"email=a%40b.com&groups=g%09x",
+		]) {
+			const r = await request(proxy, "/__dev/login", {
+				method: "POST",
+				headers: form(),
+				body,
+			});
+			expect(r.status, body).toBe(400);
+			expect(r.headers["set-cookie"]).toBeUndefined();
+		}
+		const ok = await request(proxy, "/__dev/login", {
+			method: "POST",
+			headers: form(),
+			body: "email=a%40b.com&groups=g1%2Cg2",
+		});
+		expect(ok.status).toBe(303);
+	});
+
+	it("a cookie identity with control characters or a comma in the email sets no headers", async () => {
+		const bad = [
+			{ ...operator, email: "op@example.com\r\nx-evil: 1" },
+			{ ...operator, email: "op@example.com,evil@x.com" },
+			{ ...operator, user: "sub\u0000" },
+			{ ...operator, name: "Op\u007f" },
+			{ ...operator, groups: ["sbx-operators\n"] },
+		];
+		for (const id of bad) {
+			const r = await request(proxy, "/app", {
+				headers: { cookie: `${DEV_IDENTITY_COOKIE}=${encodeIdentity(id)}` },
+			});
+			expect(r.status).toBe(200);
+			const h = web.seen.at(-1)?.headers ?? {};
+			expect(h["x-auth-request-email"]).toBeUndefined();
+			expect(h["x-auth-request-user"]).toBeUndefined();
+			expect(h["x-auth-request-groups"]).toBeUndefined();
+		}
 	});
 
 	it("a WebSocket upgrade reaches the upstream, with the cookie's identity", async () => {

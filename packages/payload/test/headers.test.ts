@@ -109,4 +109,38 @@ describe("parseAuthHeaders (S8 §5.2)", () => {
 			}),
 		).toEqual({ email: "a@b.com", groups: [] });
 	});
+
+	it("a repeated or comma-joined user is no user (resolveSession: subject_required)", () => {
+		const h = new Headers();
+		h.set("x-auth-request-email", "a@b.com");
+		h.append("x-auth-request-user", "sub-1");
+		h.append("x-auth-request-user", "sub-evil");
+		expect(parseAuthHeaders(h)).toEqual({ email: "a@b.com", groups: [] });
+		expect(
+			parseAuthHeaders({
+				"x-auth-request-email": "a@b.com",
+				"x-auth-request-user": ["sub-1", "sub-evil"],
+			}),
+		).toEqual({ email: "a@b.com", groups: [] });
+		expect(
+			parseAuthHeaders({
+				"x-auth-request-email": "a@b.com",
+				"x-auth-request-user": "sub-1,sub-evil",
+			}),
+		).toEqual({ email: "a@b.com", groups: [] });
+		expect(
+			parseAuthHeaders({
+				"X-Auth-Request-Email": "a@b.com",
+				"X-Auth-Request-User": "sub-1",
+				"x-auth-request-user": "sub-evil",
+			}),
+		).toEqual({ email: "a@b.com", groups: [] });
+		// One value next to empty ones is that value.
+		expect(
+			parseAuthHeaders({
+				"x-auth-request-email": "a@b.com",
+				"x-auth-request-user": ["", " sub-1 "],
+			}),
+		).toEqual({ email: "a@b.com", user: "sub-1", groups: [] });
+	});
 });

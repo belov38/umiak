@@ -143,12 +143,17 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				secret: PAYLOAD_SECRET,
 				operatorGroups: [],
 			});
-			await payload.update({
-				collection: "templates",
-				where: { slug: { equals: "linux" } },
-				data: { name: "Linux (Payload)" },
-				overrideAccess: true,
-			});
+			try {
+				await payload.update({
+					collection: "templates",
+					where: { slug: { equals: "linux" } },
+					data: { name: "Linux (Payload)" },
+					overrideAccess: true,
+				});
+			} finally {
+				// Releases this reference only: buildDeps keeps its own.
+				await closeSbxPayload(db.url);
+			}
 			await until(
 				async () => (await get())[0]?.name === "Linux (Payload)",
 				"the renamed template",

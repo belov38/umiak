@@ -6,7 +6,9 @@
 //   - drops every X-Auth-Request-* header the client sent and sets them from
 //     the dev cookie `sbx_dev_identity` (none without the cookie);
 //   - /__dev/login picks an identity ("user", "second user", "operator" or
-//     a custom one), /__dev/logout and /oauth2/sign_out drop it;
+//     a custom one; POST only with Origin = the proxy's own origin; no
+//     control characters, no comma in email or sub), /__dev/logout and
+//     /oauth2/sign_out drop it;
 //   - routes as oauth2-proxy does (deploy/compose/oauth2-proxy): /api/* to
 //     the api's proxied listener without /api, /sbx-auth/* to it unchanged,
 //     everything else to `next dev`; WebSocket upgrades too.
@@ -40,6 +42,11 @@ export interface AuthProxyOptions {
 	web?: Upstream;
 	/** Group of the "operator" preset; default sbx-operators. */
 	operatorGroup?: string;
+	/**
+	 * The only Origin accepted on POST /__dev/login; default the proxy's
+	 * own `http://127.0.0.1:<port>`.
+	 */
+	origin?: string;
 	log?: (line: string) => void;
 }
 
@@ -76,6 +83,26 @@ export function encodeIdentity(i: DevIdentity): string {
 	return Buffer.from(JSON.stringify(i)).toString("base64url");
 }
 
+// C0 controls and DEL: a header value with them could split or smuggle
+// headers upstream.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * The identity if every field is a safe header value: no control
+ * characters anywhere, and no comma in the email or the subject (web reads
+ * a comma-joined value as two headers and refuses it; a comma in a group
+ * name would split it).
+ */
+export function validIdentity(i: DevIdentity): DevIdentity | null {
+	const fields = [i.email, i.user, i.name, ...i.groups];
+	if (fields.some((f) => CONTROL.test(f))) return null;
+	if (i.email.trim() === "" || i.user.trim() === "") return null;
+	if (i.email.includes(",") || i.user.includes(",")) return null;
+	if (i.groups.some((g) => g.includes(","))) return null;
+	return i;
+}
+
 export function decodeIdentity(v: string): DevIdentity | null {
 	try {
 		const o = JSON.parse(Buffer.from(v, "base64url").toString("utf8")) as
@@ -89,14 +116,14 @@ export function decodeIdentity(v: string): DevIdentity | null {
 		) {
 			return null;
 		}
-		return {
+		return validIdentity({
 			email: o.email,
 			user: o.user,
 			name: typeof o.name === "string" ? o.name : "",
 			groups: Array.isArray(o.groups)
 				? o.groups.filter((g): g is string => typeof g === "string")
 				: [],
-		};
+		});
 	} catch {
 		return null;
 	}
@@ -241,6 +268,7 @@ async function devPages(
 	req: http.IncomingMessage,
 	res: http.ServerResponse,
 	all: Record<string, DevIdentity>,
+	origin: () => string,
 ): Promise<boolean> {
 	const url = new URL(req.url ?? "/", "http://dev.invalid");
 	if (url.pathname === "/__dev/logout" || url.pathname === "/oauth2/sign_out") {
@@ -250,6 +278,13 @@ async function devPages(
 	}
 	if (url.pathname !== "/__dev/login") return false;
 	if (req.method === "POST") {
+		// Login CSRF: another site's form must not pick the identity.
+		if (req.headers.origin !== origin()) {
+			res
+				.writeHead(403, { "Content-Type": "text/plain" })
+				.end("cross-origin login refused");
+			return true;
+		}
 		const form = new URLSearchParams(await readBody(req));
 		const preset = form.get("preset");
 		let id: DevIdentity | null = null;
@@ -258,7 +293,7 @@ async function devPages(
 		} else {
 			const email = (form.get("email") ?? "").trim().toLowerCase();
 			if (email !== "") {
-				id = {
+				id = validIdentity({
 					email,
 					user: (form.get("user") ?? "").trim() || `dev:${email}`,
 					name: (form.get("name") ?? "").trim(),
@@ -266,7 +301,7 @@ async function devPages(
 						.split(",")
 						.map((g) => g.trim())
 						.filter((g) => g !== ""),
-				};
+				});
 			}
 		}
 		if (id === null) {
@@ -372,8 +407,9 @@ export function startAuthProxy(o: AuthProxyOptions = {}): Promise<AuthProxy> {
 	};
 	const all = presets(o.operatorGroup ?? "sbx-operators");
 	const log = o.log ?? ((l: string) => console.error(`[auth-proxy] ${l}`));
+	let ownOrigin = o.origin ?? "";
 	const server = http.createServer((req, res) => {
-		devPages(req, res, all)
+		devPages(req, res, all, () => ownOrigin)
 			.then((handled) => {
 				if (!handled) forward(req, res, routes, log);
 			})
@@ -395,6 +431,7 @@ export function startAuthProxy(o: AuthProxyOptions = {}): Promise<AuthProxy> {
 		server.listen(o.port ?? 3000, host, () => {
 			server.off("error", reject);
 			const addr = server.address() as net.AddressInfo;
+			if (ownOrigin === "") ownOrigin = `http://${host}:${addr.port}`;
 			resolve({
 				url: `http://${host}:${addr.port}`,
 				port: addr.port,

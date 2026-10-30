@@ -41,6 +41,8 @@ const proxy = await startAuthProxy({
 	port: PROXY_PORT,
 	web: { host: LOOPBACK, port: NEXT_PORT },
 	api: { host: LOOPBACK, port: API_PORT },
+	// The dev login form posts from the app origin.
+	origin: env.SBX_APP_ORIGIN as string,
 	operatorGroup:
 		(env.SBX_OPERATOR_GROUPS ?? "").split(",")[0]?.trim() || OPERATOR_GROUP,
 });

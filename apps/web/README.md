@@ -264,7 +264,9 @@ open http://127.0.0.1:3000/__dev/login
 `SBX_DEV_API_PORT`). The proxy plays ingress + oauth2-proxy: it listens on
 127.0.0.1 only, drops client `X-Auth-Request-*` headers and sets them from
 the `sbx_dev_identity` cookie chosen at `/__dev/login` (user, second user,
-operator in `sbx-operators`, or custom); `/__dev/logout` and
+operator in `sbx-operators`, or custom; the form's POST needs `Origin` =
+`SBX_APP_ORIGIN`, and an identity with control characters or a comma in the
+email or sub is refused, also from a hand-made cookie); `/__dev/logout` and
 `/oauth2/sign_out` clear it. Routes as in `deploy/compose/oauth2-proxy`:
 `/api/*` → 127.0.0.1:8081 without `/api`, `/sbx-auth/*` → 127.0.0.1:8081,
 the rest → `next dev`; WebSocket upgrades too. Without the api, `/admin` and
