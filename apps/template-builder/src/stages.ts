@@ -30,6 +30,8 @@ import { isProtectedVmid } from "./vmid-guard.ts";
 /** Storage of the base images and seed ISOs. */
 export const MEDIA_STORAGE = "local";
 export const BUILD_TAG = "sbx-tpl";
+/** smbios1 of the build VM: serial "ds=nocloud" (base64). Removed with the seed ISO. */
+export const BUILD_SMBIOS1 = `serial=${Buffer.from("ds=nocloud").toString("base64")},base64=1`;
 export const DISK_OPTIONS = { discard: "on", iothread: "1", ssd: "1" };
 const STEP_DIR = "/mnt/seed/build/steps";
 /** `--fail-step` runs this script instead of the step (the seed stays unchanged). */
@@ -300,6 +302,10 @@ export async function stageVm(
 		name: st.m.vmName,
 		pool: o.pool,
 		...recipe.hw,
+		// The first boot of the cloud image has no initrd, so cloud-init's
+		// generator can run before sr0 shows up and disable cloud-init. The
+		// DMI hint makes ds-identify pick NoCloud; it then finds the seed.
+		smbios1: BUILD_SMBIOS1,
 		cores: recipe.buildVm.cores,
 		memory: recipe.buildVm.memoryMb,
 		balloon: 0,
@@ -448,7 +454,7 @@ export async function stageTemplate(
 ): Promise<void> {
 	const vmid = st.vmid as number;
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
-	await deps.api.put(`${vmPath}/config`, { delete: "ide2" });
+	await deps.api.put(`${vmPath}/config`, { delete: "ide2,smbios1" });
 	const r = await deps.api.post(`${vmPath}/template`);
 	if (isUpid(r))
 		await deps.api.waitTask(o.node, r, { timeoutMs: TASK_TIMEOUT_MS });

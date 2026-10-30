@@ -16,6 +16,8 @@ import { formatVersionsToml } from "./versions-update.ts";
 
 // Seed ISO for the build VM (spec S5 sections 6.2, 7.2 step 3, 14)
 
+/** Seed path of the agent package (step 50-sbx-agent reads it). */
+export const SEED_AGENT_PACKAGE = "build/sbx-agent.tar";
 export interface SeedInput {
 	recipe: Recipe;
 	versions: Versions;
@@ -164,10 +166,9 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 			.map(([k, v]) => `${k}=${shellQuote(v)}\n`)
 			.join(""),
 	);
-	out.set(
-		`build/sbx-agent-${i.agentVersion}-linux-amd64.tar`,
-		readFileSync(i.agentPackage),
-	);
+	// A fixed name: hdiutil keeps one dot per name, so "sbx-agent-0.1.0+x-linux-amd64.tar"
+	// would arrive mangled; the version travels in build/env.
+	out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
 	out.set("build/agent.toml", renderAgentToml(i.tunnelUrl));
 	out.set(
 		"build/ssh-user-ca.pub",

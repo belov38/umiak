@@ -293,6 +293,7 @@ describe("buildTemplate: happy path", () => {
 			vga: "std",
 			tablet: "0",
 			rng0: "source=/dev/urandom",
+			smbios1: "serial=ZHM9bm9jbG91ZA==,base64=1",
 			cores: 4,
 			memory: 4096,
 			balloon: 0,
@@ -321,7 +322,7 @@ describe("buildTemplate: happy path", () => {
 				c.path === `${vm}/config` &&
 				c.params?.delete !== undefined,
 		);
-		expect(template?.params).toEqual({ delete: "ide2" });
+		expect(template?.params).toEqual({ delete: "ide2,smbios1" });
 		expect(s.pve.vms.get(598)?.config.template).toBe("1");
 		expect(s.pve.vms.get(598)?.config.ide2).toBeUndefined();
 		const removed = s.node.calls.find((c) => c.op === "media.remove");

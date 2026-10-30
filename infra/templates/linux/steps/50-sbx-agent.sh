@@ -5,7 +5,7 @@ set -euo pipefail
 # shellcheck source=SCRIPTDIR/../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-pkg=$SBX_BUILD_DIR/sbx-agent-$SBX_AGENT_VERSION-linux-amd64.tar
+pkg=$SBX_BUILD_DIR/sbx-agent.tar
 [ -f "$pkg" ] || die "$pkg not found"
 
 # agent.toml first: --write-config keeps an existing file.

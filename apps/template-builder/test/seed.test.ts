@@ -290,7 +290,7 @@ describe("renderSeed build tree", () => {
 			manifestBase: { slug: "linux-fixture", extra: [1, 2] },
 		});
 		const files = renderSeed(i);
-		const pkg = files.get("build/sbx-agent-1.2.3-linux-amd64.tar");
+		const pkg = files.get("build/sbx-agent.tar");
 		expect(Buffer.isBuffer(pkg)).toBe(true);
 		expect((pkg as Buffer).equals(AGENT_BYTES)).toBe(true);
 		expect(text(files, "build/agent.toml")).toBe(
@@ -390,7 +390,7 @@ describe("makeIso", () => {
 				"meta-data",
 				"network-config",
 				"40-coding-agents.sh",
-				"sbx-agent-1.2.3-linux-amd64.tar",
+				"sbx-agent.tar",
 			]) {
 				expect(iso.includes(ucs2(name)), name).toBe(true);
 			}
