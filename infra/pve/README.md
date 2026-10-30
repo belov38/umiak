@@ -31,7 +31,9 @@ Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (t
 |---|---|
 | 500–589 | sandboxes: the allocator range of the worker, `sbx-bench` and `deploy/compose` (`SBX_VMID_RANGE`, topology `vmidMin`/`vmidMax`) |
 | 590–596 | dev infrastructure, never allocated: CT 590 is the dev control plane (`infra/dev-cp`) |
-| 597–599 | templates: S5 builds take 598, 597 (`sbx-tpl`, `SBX_TEMPLATE_VMID_RANGE`, default `597-598`); 599 is the PoC template |
+| 597–599 | templates: 598 is the Windows template (S9); Linux builds (S5) alternate between 597 and 599, 599 being the PoC template until a Linux build replaces it (`sbx-tpl retire`, then the 599 protection in `sbx-tpl` lifted) |
+
+Template slots are fixed per OS: never build Linux into 598. A Linux rebuild goes into whichever of 597 and 599 is not active, and the previous Linux build is retired (`sbx-tpl retire <buildId> --delete-vm`) only after the new one passes `verify` and the config points to it. `SBX_TEMPLATE_VMID_RANGE` (default `597-598`) and the 599 protection in `sbx-tpl` (`vmid-guard.ts`) do not encode this yet: the next Linux rebuild first moves the PoC users off 599, deletes it, lifts the protection and builds with `SBX_TEMPLATE_VMID_RANGE=599-599`.
 
 `sbx-node` uses the same layout (`vmidMin`/`vmidMax` = 500–589, `templateVmidMin`/`templateVmidMax` = 597–599 in `/etc/sbx-node.toml`); 590–596 is in neither range.
 
