@@ -79,7 +79,7 @@ The `sbx` CLI (S7) is not in `main` yet. It talks to the api on the Serve name, 
 
 ### How agents get the name and the CA
 
-- **URL:** the smbios `family` field, `sbxt1:wss://tunnel.192-168-68-90.sslip.io/v1/connect` (S5 §14), which wins over `agent.toml`. `deploy.sh` sets `SBX_TUNNEL_URL` for the worker; once the worker writes `family` (S5 §7.4 step 4), every sandbox gets it. `smoke.sh` sets it by hand today.
+- **URL:** the smbios `family` field, `sbxt1:wss://tunnel.192-168-68-90.sslip.io/v1/connect` (S5 §14), which wins over `agent.toml`. `deploy.sh` sets `SBX_TUNNEL_URL` for the worker, which writes `family` into `smbios1` of every new machine (S5 §17.4 p. 3); `smoke.sh` sets it by hand for its 599 clone.
 - **CA:** the agent pins `trust/tunnel-ca.pem` from its signed package. S5 template builds for this stack must pack the dev CA: `sbx-release pack --tunnel-ca ~/.config/sbx/dev-ca/ca.pem …` (on the CT, `~/.config/sbx/dev-ca/ca.pem`); `services/guest-agent/test/linux/run.sh` takes `TUNNEL_CA=<pem>` for the same. `[tunnel] trust_dir` in `agent.toml` also works but is not the template path.
 
 ## Deploy
