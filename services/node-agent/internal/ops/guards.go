@@ -17,6 +17,8 @@ var (
 	baseRe     = regexp.MustCompile(`^base-([0-9]+)-[a-z0-9+_.-]+$`)
 	vmAnyRe    = regexp.MustCompile(`^vm-([0-9]+)-[a-z0-9+_.-]+$`)
 	vmDiskRe   = regexp.MustCompile(`^vm-([0-9]+)-disk-[0-9]+$`)
+	mediaISORe = regexp.MustCompile(`^sbx-seed-[a-z0-9-]{1,64}\.iso$`)
+	mediaImgRe = regexp.MustCompile(`^sbx-[a-z0-9.+_-]{1,96}\.(qcow2|img|raw)$`)
 	snapLVRe   = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})-([a-z0-9]{1,16})$`)
 	vmTagRe    = regexp.MustCompile(`^sbx-(vm|src)-([0-9]+)$`)
 	snapTagRe  = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})$`)
@@ -39,12 +41,13 @@ func atoiMatch(m []string, i int) int {
 	return n
 }
 
-// ValidOrigin allows snapshots only of the template, our snapshots and our VM disks.
+// ValidOrigin allows snapshots only of template disks (base-<id> with id in our range), our
+// snapshots and our VM disks.
 func ValidOrigin(cfg config.Config, name string) error {
 	if !lvNameRe.MatchString(name) {
 		return errBadName
 	}
-	if m := baseRe.FindStringSubmatch(name); m != nil && atoiMatch(m, 1) == cfg.TemplateVMID {
+	if m := baseRe.FindStringSubmatch(name); m != nil && inVMIDRange(cfg, atoiMatch(m, 1)) {
 		return nil
 	}
 	if snapLVRe.MatchString(name) {
@@ -54,6 +57,10 @@ func ValidOrigin(cfg config.Config, name string) error {
 		return nil
 	}
 	return forbidden("origin %q is not ours", name)
+}
+
+func inVMIDRange(cfg config.Config, vmid int) bool {
+	return vmid >= cfg.VMIDMin && vmid <= cfg.VMIDMax
 }
 
 // ValidTargetName allows only VM disks in our range and our snapshot names.

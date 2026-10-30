@@ -26,6 +26,21 @@ func TestValidOrigin(t *testing.T) {
 	}
 }
 
+func TestValidOriginAnyTemplateInRange(t *testing.T) {
+	cfg := testConfig()
+	cfg.TemplateVMID = 0
+	for _, name := range []string{"base-598-disk-0", "base-500-disk-0", "base-599-disk-0"} {
+		if err := ValidOrigin(cfg, name); err != nil {
+			t.Errorf("ValidOrigin(%q) = %v, want nil", name, err)
+		}
+	}
+	for _, name := range []string{"base-9000-disk-0", "base-499-disk-0", "base-600-disk-0", "base-9001-disk-0", "base-598"} {
+		if err := ValidOrigin(cfg, name); err == nil {
+			t.Errorf("ValidOrigin(%q) = nil, want error", name)
+		}
+	}
+}
+
 func TestValidTargetName(t *testing.T) {
 	cfg := testConfig()
 	for _, name := range []string{"vm-500-disk-0", "vm-598-disk-2", "sbx-snap-k3j9x2m4qa-scsi0"} {

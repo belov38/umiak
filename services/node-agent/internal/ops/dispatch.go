@@ -72,6 +72,8 @@ var handlers = map[string]handler{
 	"dhcp.leases":  (*Server).dhcpLeases,
 	"dhcp.release": (*Server).dhcpRelease,
 	"inventory":    (*Server).inventory,
+	"media.list":   (*Server).mediaList,
+	"media.remove": (*Server).mediaRemove,
 }
 
 // decodeArgs decodes optional args strictly.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
 )
@@ -34,6 +35,19 @@ func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, erro
 	byName := map[string]lvm.LV{}
 	for _, l := range all {
 		byName[l.Name] = l
+	}
+	// A template disk base-<id>-* protects its VMID: a new disk there would shadow the template.
+	for _, it := range args.Items {
+		m := vmDiskRe.FindStringSubmatch(it.Name)
+		if m == nil {
+			continue
+		}
+		prefix := "base-" + m[1] + "-"
+		for name := range byName {
+			if strings.HasPrefix(name, prefix) {
+				return nil, forbidden("VMID %s belongs to template %q", m[1], name)
+			}
+		}
 	}
 	for _, it := range args.Items {
 		var owner string

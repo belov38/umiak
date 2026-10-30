@@ -5,6 +5,7 @@ thinPool = "data"
 storage = "local-lvm"
 vmidMin = 500
 vmidMax = 599
+# Legacy template 599 stays protected. Later templates (base-<id> with id in the range) need no entry.
 templateVmid = 599
 sdnZone = "sbx"
 vnet = "sbx0"
@@ -12,3 +13,5 @@ clusterId = 1
 leaseFile = "/var/lib/misc/dnsmasq.sbx.leases"
 ethersFile = "/etc/dnsmasq.d/sbx/ethers"
 macCacheFile = "/etc/pve/sdn/mac-cache.json"
+isoDir = "/var/lib/vz/template/iso"
+importDir = "/var/lib/vz/import"
