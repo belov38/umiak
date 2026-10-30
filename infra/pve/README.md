@@ -23,7 +23,7 @@ Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (t
 | `cp-gateway` | dev only: the CT address into IPSet `sbx-gateway`, with a 3-minute automatic rollback and the same checks as `fw` |
 | `cp-tailscale` | dev only: joins the CT to the tailnet; prints the login URL until it is approved |
 
-`sbx-node` also serves `media.list` (files `sbx-seed-*.iso` in `/var/lib/vz/template/iso`, `sbx-*.{qcow2,img,raw}` in `/var/lib/vz/import`) and `media.remove {"names": [...]}`, which deletes only such regular files (no symlinks, no paths). Directories come from `isoDir` and `importDir` in `/etc/sbx-node.toml`. Snapshots (clones) are allowed from any `base-<id>-*` disk with `id` in the VMID range; a template's VMID cannot be reused for a sandbox disk. `templateVmid = 599` stays in the config so the legacy template remains protected; new templates need no config change.
+`sbx-node` also serves `media.list` (files `sbx-seed-*.iso` in `/var/lib/vz/template/iso`, `sbx-*.{qcow2,img,raw}` in `/var/lib/vz/import`) and `media.remove {"names": [...]}`, which deletes only such regular files (no symlinks, no paths). Directories come from `isoDir` and `importDir` in `/etc/sbx-node.toml`. Snapshots (clones) are allowed only from `base-<id>-*` disks of a template slot (`templateVmidMin`..`templateVmidMax`, 597–599) that carry the tag `sbx-tpl`; `lv.tagTemplate {"vmid"}` adds that tag to the disks of a slot VM whose Proxmox config has `template: 1` and the tag `sbx-tpl` (the builder calls it). `lv.scan` and `lv.usage` read only such template disks and sandbox disks `vm-<id>-disk-N` tagged `sbx` and `sbx-vm-<id>`; nothing else is activated or opened. `templateVmid = 599` stays in the config so the legacy template remains protected.
 
 ## VMID layout on `pve`
 
@@ -33,7 +33,7 @@ Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (t
 | 590–596 | dev infrastructure, never allocated: CT 590 is the dev control plane (`infra/dev-cp`) |
 | 597–599 | templates: S5 builds take 598, 597 (`sbx-tpl`, `SBX_TEMPLATE_VMID_RANGE`, default `597-598`); 599 is the PoC template |
 
-`sbx-node` keeps 500–599 as its own range: it clones from the `base-<id>-*` volumes of the templates.
+`sbx-node` uses the same layout (`vmidMin`/`vmidMax` = 500–589, `templateVmidMin`/`templateVmidMax` = 597–599 in `/etc/sbx-node.toml`); 590–596 is in neither range.
 
 Environment: `SBX_SETUP_SSH` (default `pve`), `SBX_DENY_PUBLIC_IPS` (empty in the PoC), `SBX_FW_TS_PEERS` (Tailscale addresses of existing guests used by the `fw` checks, because the Mac is not on the host LAN).
 

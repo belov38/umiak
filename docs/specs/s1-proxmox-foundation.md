@@ -184,7 +184,7 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 | 590–596 | dev-инфраструктура, в выдачу не входит; CT 590 — dev control plane (`infra/dev-cp`) |
 | 597–599 | шаблоны: 597–598 — сборки S5 (`sbx-tpl`, `SBX_TEMPLATE_VMID_RANGE`), 599 — шаблон PoC |
 
-Диапазон самого `sbx-node` остаётся 500–599: он клонирует из томов `base-<id>-*` шаблонов. Токен видит только VM своего pool, поэтому гость вне pool внутри диапазона sandbox (как CT 590 до этой раскладки) аллокатору не виден; preflight `sbx-bench` такие случаи ловит.
+У `sbx-node` та же раскладка: `vmidMin`/`vmidMax` 500–589 и `templateVmidMin`/`templateVmidMax` 597–599; он клонирует только из томов `base-<слот>-*` с тегом `sbx-tpl`, 590–596 не входят ни в один диапазон. Токен видит только VM своего pool, поэтому гость вне pool внутри диапазона sandbox (как CT 590 до этой раскладки) аллокатору не виден; preflight `sbx-bench` такие случаи ловит.
 
 ## 5. Как выполняются операции
 
@@ -203,15 +203,17 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 
 - Go-модуль: `go 1.27`, `toolchain go1.27.3`. Бинарь `sbx-node`, `GOOS=linux GOARCH=amd64`, ставится в `/usr/local/bin/sbx-node` шагом runbook.
 - Режим `--stdio`: один запрос на SSH-вызов (или несколько exec-каналов поверх одного SSH-соединения): JSON на stdin `{op, args, requestId}`, JSON на stdout `{ok, result | error}`, ненулевой exit code при ошибке. Каждая операция пишется в journal (`requestId`, op, аргументы, результат).
-- Конфиг `/etc/sbx-node.toml`: VG (`pve`), thin pool (`data`), диапазон VMID (`500–599`), VMID шаблона (`599`), имя SDN-зоны (`sbx`).
+- Конфиг `/etc/sbx-node.toml`: VG (`pve`), thin pool (`data`), диапазон VMID sandbox (`500–589`), слоты шаблонов (`597–599`), VMID шаблона (`599`), имя SDN-зоны (`sbx`).
 - Белый список операций:
 
 | op | Что делает | Защита |
 |---|---|---|
 | `version` | версия бинаря и конфиг | — |
-| `lv.snapshot` | пачка `lvcreate -s` (`origin`, `name`, `tags`, `activationSkip`); при ошибке удаляет созданное этим вызовом | origin только `base-<template>-*`, `sbx-snap-*`, `vm-<id в диапазоне>-*`; имя только `vm-<id в диапазоне>-disk-<k>` или `sbx-snap-*` |
+| `lv.snapshot` | пачка `lvcreate -s` (`origin`, `name`, `tags`, `activationSkip`); при ошибке удаляет созданное этим вызовом | origin только `base-<слот шаблона>-*` с тегом `sbx-tpl`, `sbx-snap-*`, `vm-<id в диапазоне>-*`; имя только `vm-<id в диапазоне>-disk-<k>` или `sbx-snap-*` |
 | `lv.remove` | `lvremove` по именам | только LV с тегом `sbx` |
 | `lv.list` | LV по тегам | только чтение |
+| `lv.tagTemplate` (S5) | тег `sbx-tpl` на `base-<vmid>-disk-N` | только слот шаблона, конфиг VM с `template: 1` и тегом `sbx-tpl` |
+| `lv.scan`, `lv.usage` (S5) | счёт паттернов на диске, заполнение LV; неактивный LV активируется на время чтения | только `base-<слот>-*` с тегом `sbx-tpl` и `vm-<id в диапазоне>-disk-N` с тегами `sbx`, `sbx-vm-<id>` |
 | `pool.usage` | data% и metadata% thin pool, размер и занятость наших LV | только чтение |
 | `dhcp.leases` | содержимое lease-файла dnsmasq зоны `sbx` | только чтение |
 | `dhcp.release` | освободить lease по MAC (если понадобится, §6.3) | только MAC из диапазона нашего аллокатора |
