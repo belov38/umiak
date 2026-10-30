@@ -128,6 +128,39 @@ describe("openapi/v1.json", () => {
 		expect(op?.["x-sbx-websocket"]).toEqual({ subprotocol: "sbx.pty.v1" });
 	});
 
+	it("every pattern is a JSON Schema regex (ECMA-262 source, no /flags suffix)", () => {
+		const patterns: string[] = [];
+		const walk = (v: unknown): void => {
+			if (Array.isArray(v)) v.forEach(walk);
+			else if (v !== null && typeof v === "object") {
+				for (const [k, x] of Object.entries(v)) {
+					if (k === "pattern" && typeof x === "string") patterns.push(x);
+					else walk(x);
+				}
+			}
+		};
+		walk(JSON.parse(COMMITTED));
+		expect(patterns.length).toBeGreaterThan(5);
+		for (const p of patterns) {
+			expect(p, p).not.toMatch(/\/[a-z]*$/);
+			expect(() => new RegExp(p, "u"), p).not.toThrow();
+		}
+	});
+
+	it("a name refuses control characters, as the API does: C0, DEL and C1", () => {
+		const doc = JSON.parse(COMMITTED) as Doc;
+		const name = (
+			doc.components.schemas.CreateApiKeyRequest as {
+				properties: { name: { pattern: string } };
+			}
+		).properties.name.pattern;
+		const re = new RegExp(name, "u");
+		expect(re.test("ci-main ✓ ключ")).toBe(true);
+		for (const bad of ["a\u0000", "a\nb", "a\u007f", "a\u0085", "a\u009f"]) {
+			expect(re.test(bad), JSON.stringify(bad)).toBe(false);
+		}
+	});
+
 	it("has no warm pool terms (no failFast, pool_exhausted, warmAvailable)", () => {
 		for (const s of ["failFast", "pool_exhausted", "warmAvailable"]) {
 			expect(COMMITTED).not.toContain(s);

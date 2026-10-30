@@ -902,7 +902,7 @@
 						"example": "ci-main",
 						"maxLength": 100,
 						"minLength": 1,
-						"pattern": "^[^\\p{Cc}]+$/u",
+						"pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
 						"type": "string"
 					},
 					"preset": {
@@ -1177,7 +1177,7 @@
 						"example": "laptop",
 						"maxLength": 100,
 						"minLength": 1,
-						"pattern": "^[^\\p{Cc}]+$/u",
+						"pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
 						"type": "string"
 					},
 					"publicKey": {

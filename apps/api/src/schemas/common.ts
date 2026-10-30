@@ -9,6 +9,15 @@ export const Timestamp = z.iso
 
 export const NullableTimestamp = Timestamp.nullable();
 
+/**
+ * A display name without control characters (Unicode Cc: U+0000-U+001F and
+ * U+007F-U+009F). Written without regex flags: the document carries only
+ * the source of the regex as `pattern`, so a `/u` regex (\p{Cc}) would put
+ * a pattern no JSON Schema validator matches into the document.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the range is what is refused
+export const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f-\u009f]+$/;
+
 export const SandboxParams = z.object({
 	sandbox: z.string().openapi({
 		param: { name: "sandbox", in: "path" },

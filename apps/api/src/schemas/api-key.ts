@@ -3,7 +3,7 @@
 import { z } from "@hono/zod-openapi";
 import { SCOPES } from "@sbx/auth";
 import { extensibleEnum } from "../openapi/registry.ts";
-import { NullableTimestamp, Timestamp } from "./common.ts";
+import { NO_CONTROL_CHARS, NullableTimestamp, Timestamp } from "./common.ts";
 
 const DAY_SECONDS = 86_400;
 /** S7 §7.2: 90 days by default, at most 365; no key lives forever. */
@@ -27,7 +27,7 @@ export const CreateApiKeyRequest = z
 			.string()
 			.min(1)
 			.max(100)
-			.regex(/^[^\p{Cc}]+$/u)
+			.regex(NO_CONTROL_CHARS)
 			.openapi({ example: "ci-main" }),
 		scopes: z
 			.array(

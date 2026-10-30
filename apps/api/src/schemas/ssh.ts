@@ -3,7 +3,7 @@
 import { z } from "@hono/zod-openapi";
 import { SSH_KEY_TYPES } from "@sbx/auth";
 import { extensibleEnum } from "../openapi/registry.ts";
-import { NullableTimestamp, Timestamp } from "./common.ts";
+import { NO_CONTROL_CHARS, NullableTimestamp, Timestamp } from "./common.ts";
 
 /** Longest accepted key line; a 16384-bit RSA key is ~2.8 KB. */
 const MAX_KEY_LINE = 16_384;
@@ -88,7 +88,7 @@ export const CreateSshKeyRequest = z
 			.string()
 			.min(1)
 			.max(100)
-			.regex(/^[^\p{Cc}]+$/u)
+			.regex(NO_CONTROL_CHARS)
 			.openapi({ example: "laptop" }),
 		publicKey: PublicKeyLine,
 	})
