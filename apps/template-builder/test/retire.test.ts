@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Allocator, macFor, SqliteStateStore } from "@sbx/pve";
@@ -6,7 +6,7 @@ import { FakeNode } from "@sbx/pve/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "../src/manifest.ts";
 import { FileRegistry } from "../src/registry.ts";
-import { retire } from "../src/retire.ts";
+import { configuredBuilds, type RetireDeps, retire } from "../src/retire.ts";
 import { BuildPve } from "./fakes.ts";
 
 const dirs: string[] = [];
@@ -19,6 +19,8 @@ const ID_LIVE = "0192f000-0000-7000-8000-000000000011";
 const ID_GONE = "0192f000-0000-7000-8000-000000000012";
 const ID_REUSED = "0192f000-0000-7000-8000-000000000013";
 const ID_FAILED = "0192f000-0000-7000-8000-000000000014";
+const ID_NEWEST = "0192f000-0000-7000-8000-000000000015";
+const ID_POC = "0192f000-0000-7000-8000-000000000016";
 
 function row(over: Partial<Manifest>): Manifest {
 	return {
@@ -71,7 +73,7 @@ async function setup() {
 		clusterId: 1,
 		range: { min: 500, max: 589 },
 		templateVmid: 599,
-		templateRange: { min: 597, max: 598 },
+		templateRange: { min: 597, max: 599 },
 		occupied: async () => new Set(pve.vms.keys()),
 	});
 	await allocator.ensureTemplate();
@@ -87,8 +89,14 @@ async function setup() {
 		firewall: { rules: [], ipsets: {} },
 	});
 	pve.vms.set(598, template("sbx-tpl-linux-20261030-15"));
-	// Slot 597 now holds a newer build.
+	// Slot 597 now holds the newest build; 599 a Linux build of the PoC slot.
 	pve.vms.set(597, template("sbx-tpl-linux-20261031-1"));
+	pve.vms.set(599, template("sbx-tpl-linux-20261029-1"));
+	// The fake answers 599's config from templateConfig.
+	pve.templateConfig = {
+		...pve.templateConfig,
+		name: "sbx-tpl-linux-20261029-1",
+	};
 	for (const vmid of [597, 598])
 		await store.tryInsert({
 			cluster: 1,
@@ -123,17 +131,43 @@ async function setup() {
 			status: "failed",
 		}),
 	);
+	registry.create(
+		row({
+			buildId: ID_POC,
+			version: "20261029.1",
+			pveVmid: 599,
+			vmName: "sbx-tpl-linux-20261029-1",
+			startedAt: "2026-10-29T09:00:00.000Z",
+		}),
+	);
+	registry.create(
+		row({
+			buildId: ID_NEWEST,
+			version: "20261031.1",
+			pveVmid: 597,
+			vmName: "sbx-tpl-linux-20261031-1",
+			startedAt: "2026-10-31T09:00:00.000Z",
+		}),
+	);
 	const cfg = {
 		node: "pve",
-		templateVmidRange: { min: 597, max: 598 },
+		templateVmidRange: { min: 597, max: 599 },
 		templateVmid: 599,
 	};
-	const deps = {
+	const deps: RetireDeps = {
 		api: pve,
 		node,
 		allocator,
 		registry,
 		cfg,
+		// The worker config uses the newest build and the PoC seed.
+		configured: {
+			file: "sbx.yaml",
+			builds: [
+				{ templateSlug: "linux", version: "599-seed", pveVmid: 599 },
+				{ templateSlug: "linux", version: "20261031.1", pveVmid: 597 },
+			],
+		},
 		now: () => NOW,
 	};
 	return { pve, node, allocator, registry, deps };
@@ -149,7 +183,7 @@ describe("retire", () => {
 			expect(s.registry.get(id)?.retiredAt).toBe(NOW.toISOString());
 		}
 		expect(s.pve.calls.filter((c) => c.method === "DELETE")).toEqual([]);
-		expect([...s.pve.vms.keys()].sort()).toEqual([597, 598]);
+		expect([...s.pve.vms.keys()].sort()).toEqual([597, 598, 599]);
 		expect((await s.allocator.list()).map((l) => l.vmid).sort()).toEqual([
 			597, 598, 599,
 		]);
@@ -211,5 +245,107 @@ describe("retire", () => {
 		expect(await retire(s.deps, ID_GONE, { deleteVm: false })).toEqual([
 			`build ${ID_GONE} is already retired`,
 		]);
+	});
+
+	it("refuses the build the worker config uses, before any change; --force overrides", async () => {
+		const s = await setup();
+		s.deps.configured.builds.push({
+			templateSlug: "linux",
+			version: "20261030.15",
+		});
+		await expect(retire(s.deps, ID_LIVE, { deleteVm: true })).rejects.toThrow(
+			/sbx\.yaml.*--force/,
+		);
+		expect(s.pve.calls.filter((c) => c.method !== "GET")).toEqual([]);
+		expect(s.registry.get(ID_LIVE)?.status).toBe("ready");
+		await retire(s.deps, ID_LIVE, { deleteVm: true, force: true });
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(s.registry.get(ID_LIVE)?.status).toBe("retired");
+	});
+
+	it("refuses a build whose VM the config uses by VMID", async () => {
+		const s = await setup();
+		s.deps.configured.builds.push({
+			templateSlug: "linux",
+			version: "other",
+			node: "pve",
+			pveVmid: 598,
+		});
+		await expect(retire(s.deps, ID_LIVE, { deleteVm: true })).rejects.toThrow(
+			/topology\.templateBuilds other/,
+		);
+		expect(s.pve.vms.has(598)).toBe(true);
+	});
+
+	it("refuses the newest ready build of its template; --force overrides", async () => {
+		const s = await setup();
+		s.deps.configured.builds = [];
+		await expect(retire(s.deps, ID_NEWEST, { deleteVm: true })).rejects.toThrow(
+			/newest ready linux build/,
+		);
+		expect(s.pve.vms.has(597)).toBe(true);
+		expect(s.registry.get(ID_NEWEST)?.status).toBe("ready");
+		await retire(s.deps, ID_NEWEST, { deleteVm: true, force: true });
+		expect(s.pve.vms.has(597)).toBe(false);
+	});
+
+	it("refuses a build in the PoC slot 599 even with --force, unless --force-poc", async () => {
+		const s = await setup();
+		for (const o of [{ deleteVm: true }, { deleteVm: true, force: true }])
+			await expect(retire(s.deps, ID_POC, o)).rejects.toThrow(/--force-poc/);
+		expect(s.pve.vms.has(599)).toBe(true);
+		// The config still uses VM 599 (599-seed): --force-poc alone does not override that.
+		await expect(
+			retire(s.deps, ID_POC, { deleteVm: true, forcePoc: true }),
+		).rejects.toThrow(/599-seed/);
+		const report = await retire(s.deps, ID_POC, {
+			deleteVm: true,
+			force: true,
+			forcePoc: true,
+		});
+		expect(report.join("\n")).toContain("deleted template VM 599");
+		expect(s.pve.vms.has(599)).toBe(false);
+		expect(s.registry.get(ID_POC)?.status).toBe("retired");
+	});
+});
+
+describe("configuredBuilds", () => {
+	it("reads topology.templateBuilds of a worker config", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-retire-cfg-"));
+		dirs.push(dir);
+		const file = join(dir, "sbx.yaml");
+		writeFileSync(
+			file,
+			[
+				"topology:",
+				"  templateBuilds:",
+				"    - templateSlug: linux",
+				"      version: 599-seed",
+				"      pveVmid: 599",
+				"    - templateSlug: linux",
+				'      version: "20261030.16"',
+				"      node: pve",
+				"      pveVmid: 597",
+				"",
+			].join("\n"),
+		);
+		expect(configuredBuilds(file)).toEqual([
+			{ templateSlug: "linux", version: "599-seed", pveVmid: 599 },
+			{
+				templateSlug: "linux",
+				version: "20261030.16",
+				node: "pve",
+				pveVmid: 597,
+			},
+		]);
+		writeFileSync(file, "templates: []\n");
+		expect(configuredBuilds(file)).toEqual([]);
+	});
+
+	it("reads the dev stand config", () => {
+		const builds = configuredBuilds(
+			join(import.meta.dirname, "../../../deploy/compose/config/sbx.yaml"),
+		);
+		expect(builds.some((b) => b.templateSlug === "linux")).toBe(true);
 	});
 });
