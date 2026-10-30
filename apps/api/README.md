@@ -107,6 +107,11 @@ principal, то есть после аутентификации; до неё к
   идемпотентного ключа (`Start` без ключа, `input` без сессии, `signal`, файловые `mkdir`/`move`/`chmod`/`delete`)
   при неизвестном исходе — `503 agent_unavailable`, `retryable: false`, `details.outcome: "unknown"`
   (`agentMutationErrorToHttp`).
+- Интеграционные тесты против настоящего агента — `test/agent-real.test.ts`: Go-программа
+  `services/guest-agent/cmd/sbx-agent-harness` (собирается в global setup через `mise exec -- go build`) поднимает
+  в одном процессе gateway S2 и агента S3 с фейковыми зависимостями ОС; команды — процессы хоста под текущим
+  пользователем. Без `go` тесты пропускаются с причиной в выводе. Ограничения (нет cgroups, пользователя `user`,
+  claim) — в заголовке файла.
 - Не сделано: chaos стрима через туннель (spec §16) и E2E `sbx-bench s7` на `pve`.
 
 ### Wiring S3: адаптер proto ↔ `AgentApi`

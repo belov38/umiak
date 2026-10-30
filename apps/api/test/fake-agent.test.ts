@@ -705,10 +705,15 @@ describe("input, PTY, signals", () => {
 		expect(other.exit).toMatchObject({ outputTruncated: null });
 	});
 
-	it("timeoutMs kills with reason timeout", async () => {
+	it("timeoutMs: SIGTERM like the shim, reason timeout", async () => {
 		const m = newMachine();
 		const r = await run(m, spec({ shell: "sleep 30", timeoutMs: 100 }));
-		expect(r.exit).toMatchObject({ status: "killed", reason: "timeout" });
+		expect(r.exit).toMatchObject({
+			status: "killed",
+			reason: "timeout",
+			signal: "SIGTERM",
+			code: 143,
+		});
 	});
 });
 

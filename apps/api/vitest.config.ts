@@ -19,6 +19,7 @@ export default defineConfig({
 		globalSetup: [
 			"@sbx/db/testing/global-setup",
 			"./test/helpers/conformance-global.ts",
+			"./test/helpers/agent-harness-global.ts",
 		],
 		setupFiles: ["./test/helpers/conformance-setup.ts"],
 		// A hang guard only: tests wait on conditions (budgets of 30 s each),

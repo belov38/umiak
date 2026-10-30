@@ -143,6 +143,8 @@ const DEFAULTS = {
  * leftovers). Later leftover output is dropped.
  */
 const LEFTOVER_SILENCE_MS = 100;
+/** SIGTERM → SIGKILL of a timed-out command (the shim's default kill grace). */
+const TIMEOUT_KILL_GRACE_MS = 10_000;
 const LEFTOVER_MAX_WAIT_MS = 1000;
 
 export class FakeAgent implements AgentApi {
@@ -455,10 +457,16 @@ export class FakeAgent implements AgentApi {
 		}
 		cmd.attachChild(child, program);
 		if (spec.timeoutMs > 0) {
+			// Like the shim: SIGTERM, then SIGKILL after the kill grace.
 			cmd.addTimer(
 				setTimeout(() => {
 					cmd.timedOut = true;
-					if (cmd.pid !== null) killGroup(cmd.pid, "SIGKILL");
+					const pid = cmd.pid;
+					if (pid === null) return;
+					killGroup(pid, "SIGTERM");
+					cmd.addGraceTimer(
+						setTimeout(() => killGroup(pid, "SIGKILL"), TIMEOUT_KILL_GRACE_MS),
+					);
 				}, spec.timeoutMs),
 			);
 		}

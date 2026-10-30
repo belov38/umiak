@@ -120,7 +120,7 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		expect((t.body as Any).command).toMatchObject({
 			status: "timed_out",
 			reason: "timeout",
-			signal: "SIGKILL",
+			signal: "SIGTERM",
 		});
 		const f = await run({ argv: ["/nonexistent/prog"] });
 		expect(f.status).toBe(200);
