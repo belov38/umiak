@@ -4,10 +4,12 @@ import { cleanup } from "./cleanup.ts";
 import { makeContext } from "./context.ts";
 import { preflight } from "./preflight.ts";
 import { runS1 } from "./s1.ts";
+import { runS3 } from "./s3.ts";
 
 const USAGE = `usage:
   sbx-bench preflight
   sbx-bench s1 [--runs 3] [--size 2g] [--parallel 1,2,4] [--clone-only 8] [--ram-cap 8g] [--no-baseline] [--keep]
+  sbx-bench s3 [--skip-suite] [--keep]
   sbx-bench cleanup`;
 
 export function parseSizeMb(v: string): number {
@@ -28,11 +30,12 @@ async function main(argv: string[]): Promise<number> {
 			"ram-cap": { type: "string", default: "8g" },
 			"no-baseline": { type: "boolean", default: false },
 			keep: { type: "boolean", default: false },
+			"skip-suite": { type: "boolean", default: false },
 			out: { type: "string", default: "bench-results" },
 		},
 	});
 	const cmd = positionals[0];
-	if (!cmd || !["preflight", "s1", "cleanup"].includes(cmd)) {
+	if (!cmd || !["preflight", "s1", "s3", "cleanup"].includes(cmd)) {
 		process.stderr.write(`${USAGE}\n`);
 		return 2;
 	}
@@ -60,6 +63,12 @@ async function main(argv: string[]): Promise<number> {
 				process.stdout.write(`still left: ${c.name} ${c.detail ?? ""}\n`);
 			return left.length === 0 ? 0 : 1;
 		}
+		if (cmd === "s3")
+			return await runS3(ctx, {
+				keep: values.keep,
+				outDir: values.out,
+				skipSuite: values["skip-suite"],
+			});
 		return await runS1(ctx, {
 			runs: Number(values.runs),
 			size: { cores: 2, memoryMb: parseSizeMb(values.size) },

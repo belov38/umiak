@@ -1,0 +1,213 @@
+syntax = "proto3";
+
+package sbx.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+import "sbx/agent/v1/common.proto";
+
+option go_package = "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1;agentv1";
+
+// Process runs and controls commands inside the VM.
+service Process {
+  // Start creates a command. Repeating the same command_id returns created=false.
+  rpc Start(StartRequest) returns (StartResponse);
+  // Run starts a command and streams its output in one call.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Run(RunRequest) returns (stream AttachResponse);
+  // Attach streams output from the given offsets, then an exit event.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Attach(AttachRequest) returns (stream AttachResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SendInput writes to stdin; input_session_id and seq make retries safe.
+  rpc SendInput(SendInputRequest) returns (SendInputResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Update resizes the PTY of a command.
+  rpc Update(UpdateRequest) returns (UpdateResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Signal sends a signal to the main process.
+  rpc Signal(SignalRequest) returns (SignalResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Kill stops the command: SIGTERM, then SIGKILL after the grace period.
+  rpc Kill(KillRequest) returns (KillResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Get returns the state of a command.
+  rpc Get(GetRequest) returns (GetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // List returns commands, optionally filtered by state and tags.
+  rpc List(ProcessListRequest) returns (ProcessListResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Remove forgets an exited command and frees its buffers.
+  rpc Remove(ProcessRemoveRequest) returns (ProcessRemoveResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+// StartRequest creates a command under a client-chosen id.
+message StartRequest {
+  string command_id = 1;
+  CommandSpec spec = 2;
+}
+
+// StartResponse returns the command; created is false for a repeated id.
+message StartResponse {
+  CommandInfo command = 1;
+  bool created = 2;
+}
+
+// RunRequest creates a command and attaches to it.
+message RunRequest {
+  string command_id = 1;
+  CommandSpec spec = 2;
+}
+
+// AttachRequest selects the command and the offsets to resume from.
+message AttachRequest {
+  string command_id = 1;
+  uint64 stdout_offset = 2;
+  uint64 stderr_offset = 3;
+  uint64 pty_offset = 4;
+  // Start this many bytes before the end of each stream instead of at the offsets.
+  uint64 tail_bytes = 5;
+  // Follow keeps the stream open for new output. Unset means true.
+  optional bool follow = 6;
+}
+
+// AttachResponse is one event of an output stream. Field numbers match
+// sbx.testing.v1.AttachResponse.
+message AttachResponse {
+  oneof event {
+    DataEvent data = 1;
+    HeartbeatEvent heartbeat = 2;
+    TruncatedEvent truncated = 3;
+    ExitEvent exit = 4;
+    StartedEvent started = 5;
+  }
+}
+
+// DataEvent is a chunk of output at an offset of its stream.
+message DataEvent {
+  Stream stream = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// HeartbeatEvent keeps an idle stream alive.
+message HeartbeatEvent {}
+
+// TruncatedEvent says the requested offset was dropped from the buffer.
+message TruncatedEvent {
+  Stream stream = 1;
+  // Oldest offset still available.
+  uint64 available_from = 2;
+}
+
+// ExitEvent ends the stream with the outcome and the final stream sizes.
+message ExitEvent {
+  ExitStatus status = 1;
+  int32 code = 2;
+  string signal = 3;
+  uint64 stdout_end = 4;
+  uint64 stderr_end = 5;
+  uint64 pty_end = 6;
+  ExitReason reason = 7;
+  google.protobuf.Timestamp ended_at = 8;
+  // See CommandInfo.output_truncated.
+  string output_truncated = 9;
+}
+
+// StartedEvent is sent first on Run.
+message StartedEvent {
+  string command_id = 1;
+  CommandInfo command = 2;
+}
+
+// SendInputRequest writes data to stdin.
+message SendInputRequest {
+  string command_id = 1;
+  // Identifies one writer; seq orders its chunks.
+  string input_session_id = 2;
+  uint64 seq = 3;
+  bytes data = 4;
+  bool close_stdin = 5;
+}
+
+// SendInputResponse reports whether the chunk was written or was a repeat.
+message SendInputResponse {
+  bool applied = 1;
+}
+
+// UpdateRequest resizes the PTY.
+message UpdateRequest {
+  string command_id = 1;
+  uint32 cols = 2;
+  uint32 rows = 3;
+}
+
+// UpdateResponse is empty.
+message UpdateResponse {}
+
+// SignalRequest names the signal: "SIGINT", "INT" or a decimal number.
+message SignalRequest {
+  string command_id = 1;
+  string signal = 2;
+}
+
+// SignalResponse returns the command after the signal.
+message SignalResponse {
+  CommandInfo command = 1;
+}
+
+// KillRequest stops a command.
+message KillRequest {
+  string command_id = 1;
+  // Time between SIGTERM and SIGKILL. Unset means the agent default.
+  optional uint32 grace_ms = 2;
+}
+
+// KillResponse returns the command after the kill.
+message KillResponse {
+  CommandInfo command = 1;
+}
+
+// GetRequest selects a command.
+message GetRequest {
+  string command_id = 1;
+}
+
+// GetResponse returns the command.
+message GetResponse {
+  CommandInfo command = 1;
+}
+
+// ProcessListRequest filters and pages the command list.
+message ProcessListRequest {
+  CommandState state = 1;
+  map<string, string> tags = 2;
+  uint32 page_size = 3;
+  string page_token = 4;
+}
+
+// ProcessListResponse is one page of commands.
+message ProcessListResponse {
+  repeated CommandInfo commands = 1;
+  string next_page_token = 2;
+}
+
+// ProcessRemoveRequest selects the command to forget.
+message ProcessRemoveRequest {
+  string command_id = 1;
+}
+
+// ProcessRemoveResponse reports whether the command existed.
+message ProcessRemoveResponse {
+  bool removed = 1;
+}

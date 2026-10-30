@@ -88,6 +88,8 @@ const workerSchema = z.object({
 	),
 	SBX_DB_POOL_MAX: int(30, 2, 1000),
 	SBX_IDP_SYNC_INTERVAL: int(300, 10, 86_400),
+	SBX_PORT_DOMAIN: optional,
+	SBX_SSH_USER_CA_KEYS_FILE: optional,
 });
 
 const optionalHttpsUrl = z.preprocess(
@@ -129,6 +131,10 @@ export interface WorkerEnv {
 	logLevel: (typeof LOG_LEVELS)[number];
 	dbPoolMax: number;
 	idpSyncIntervalMs: number;
+	/** Domain of the published ports (`<port>-<sandbox>.<domain>`), sent on every Claim. */
+	portDomain: string | undefined;
+	/** File with the SSH user CA public keys (one per line), sent on every Claim. */
+	sshUserCaKeysFile: string | undefined;
 }
 
 /**
@@ -171,6 +177,8 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 		logLevel: e.SBX_LOG_LEVEL,
 		dbPoolMax: e.SBX_DB_POOL_MAX,
 		idpSyncIntervalMs: e.SBX_IDP_SYNC_INTERVAL * 1000,
+		portDomain: e.SBX_PORT_DOMAIN,
+		sshUserCaKeysFile: e.SBX_SSH_USER_CA_KEYS_FILE,
 	};
 }
 

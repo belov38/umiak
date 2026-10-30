@@ -24,6 +24,10 @@ Self-hosted platform of API-driven VM sandboxes for AI agents on Proxmox VE. Arc
 - Remote: private `github.com/belov38/boat-dev-clone`. Push your work.
 - Never add a `Claude-Session:` trailer or a claude.ai session link to commit messages or PR descriptions.
 
+## CI
+
+- GitHub Actions workflows run only on manual dispatch (`workflow_dispatch`) during development. Do not add `push` or `pull_request` triggers.
+
 ## Conventions
 
 - Talk to the user in Russian; code comments in English.

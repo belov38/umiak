@@ -18,6 +18,7 @@ import (
 
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 
 // agentBaseURL is the base URL of requests sent to the agent; RoundTrip
@@ -160,6 +161,10 @@ type MachineConn struct{ s *session }
 
 var _ transport.MachineConn = (*MachineConn)(nil)
 
+// Epoch returns the tunnel epoch of the session, the one the registry holds
+// for it. It needs no registry query.
+func (m *MachineConn) Epoch() uint64 { return m.s.info.Epoch }
+
 // RoundTrip sends req to the agent. The URL is rewritten to http://agent/...
 // (CONNECT requests keep their authority). The request is tracked until its
 // response body is drained or closed; on a moved session RPC streams are
@@ -247,7 +252,8 @@ func (m *MachineConn) DialTCP(ctx context.Context, port uint16) (net.Conn, error
 // MaxTCPStreamsPerMachine (ErrTooManyStreams beyond it) until the returned
 // conn is closed, the stream is reset, or both directions are finished
 // (read EOF and CloseWrite). A refusal by the agent is a
-// *transport.DialError.
+// *transport.DialError; its Reason is "refused" or "timeout" when the agent
+// said so with Sbx-Dial-Error, and "" for any other value.
 //
 // The returned conn does not support deadlines: SetDeadline,
 // SetReadDeadline and SetWriteDeadline return an error wrapping
@@ -298,7 +304,11 @@ func (m *MachineConn) DialTCPWith(ctx context.Context, port uint16, opts TCPOpti
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
 		_ = pw.Close()
-		return fail(&transport.DialError{Status: resp.StatusCode})
+		// Only the reason is taken from the agent, and only from the closed set.
+		return fail(&transport.DialError{
+			Status: resp.StatusCode,
+			Reason: wire.NormalizeDialError(resp.Header.Get(wire.HeaderDialError)),
+		})
 	}
 	abortOnCancel(sctx, resp.Body, pw)
 	return &tcpConn{

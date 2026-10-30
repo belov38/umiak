@@ -265,6 +265,12 @@ importers:
 
   apps/worker:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@connectrpc/connect':
+        specifier: 2.3.0
+        version: 2.3.0(@bufbuild/protobuf@2.16.0)
       '@sbx/agent-client':
         specifier: workspace:*
         version: link:../../packages/agent-client
@@ -277,6 +283,9 @@ importers:
       '@sbx/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sbx/proto':
+        specifier: workspace:*
+        version: link:../../packages/proto
       '@sbx/pve':
         specifier: workspace:*
         version: link:../../packages/pve

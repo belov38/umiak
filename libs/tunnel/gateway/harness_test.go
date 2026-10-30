@@ -19,11 +19,11 @@ import (
 
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/internal/pgtest"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/journal"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )
 

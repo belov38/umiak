@@ -18,9 +18,9 @@ import (
 	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/internal/pgtest"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/process"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
 )

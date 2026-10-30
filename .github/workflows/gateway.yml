@@ -1,0 +1,64 @@
+name: gateway
+
+# Automatic push/PR triggers are disabled during development (Ilia, 2026-10-30); run manually.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Admin DSN for the Postgres service container; the test helper creates a database per test.
+  SBX_TEST_DATABASE_URL: postgres://postgres:sbx@127.0.0.1:5432/postgres?sslmode=disable
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_PASSWORD: sbx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - name: OpenSSH for the e2e tests
+        # The OpenSSH e2e starts its own sshd as the runner user. With CI set
+        # (Actions sets it) a missing or failing sshd fails the test instead
+        # of skipping it. sshd needs its privilege separation directory, and
+        # with UsePAM no it refuses a locked account.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openssh-server openssh-client rsync
+          sudo mkdir -p /run/sshd
+          sudo usermod -p '*' "$(id -un)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: golangci-lint run ./...
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image
+        run: docker build -f services/gateway/Dockerfile -t sbx-gateway:ci --build-arg "VERSION=${GITHUB_SHA::12}" .
+      - name: Smoke
+        run: |
+          test "$(docker run --rm sbx-gateway:ci version)" = "${GITHUB_SHA::12}"
+          mkdir -m 777 "$RUNNER_TEMP/secrets"
+          docker run --rm -v "$RUNNER_TEMP/secrets:/secrets" sbx-gateway:ci dev-secrets -dir /secrets
+          test -s "$RUNNER_TEMP/secrets/service-tokens.json"

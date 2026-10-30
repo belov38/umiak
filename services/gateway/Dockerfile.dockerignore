@@ -1,0 +1,12 @@
+# Used instead of the root .dockerignore for services/gateway/Dockerfile:
+# the context is only the Go modules of the gateway.
+*
+!libs/proto
+!libs/tunnel
+!services/gateway
+
+# Never send local secrets or env files.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key

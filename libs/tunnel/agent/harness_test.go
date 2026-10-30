@@ -312,6 +312,7 @@ func newToken(t *testing.T) []byte {
 // tcpStream is a CONNECT stream opened by the fake gateway.
 type tcpStream struct {
 	status int
+	header http.Header
 	w      *io.PipeWriter
 	body   io.ReadCloser
 }
@@ -329,7 +330,7 @@ func dialConnect(t *testing.T, c *gwConn, authority string) *tcpStream {
 	if err != nil {
 		t.Fatalf("CONNECT %s: %v", authority, err)
 	}
-	s := &tcpStream{status: resp.StatusCode, w: pw, body: resp.Body}
+	s := &tcpStream{status: resp.StatusCode, header: resp.Header, w: pw, body: resp.Body}
 	t.Cleanup(func() {
 		_ = pw.Close()
 		_ = resp.Body.Close()

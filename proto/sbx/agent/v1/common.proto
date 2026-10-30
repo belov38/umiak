@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package sbx.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1;agentv1";
+
+// Stream identifies an output stream of a command.
+enum Stream {
+  STREAM_UNSPECIFIED = 0;
+  STREAM_STDOUT = 1;
+  STREAM_STDERR = 2;
+  STREAM_PTY = 3;
+}
+
+// CommandState is the lifecycle state of a command.
+enum CommandState {
+  COMMAND_STATE_UNSPECIFIED = 0;
+  COMMAND_STATE_STARTING = 1;
+  COMMAND_STATE_RUNNING = 2;
+  COMMAND_STATE_EXITED = 3;
+}
+
+// ExitStatus is how a command ended.
+enum ExitStatus {
+  EXIT_STATUS_UNSPECIFIED = 0;
+  EXIT_STATUS_EXITED = 1;
+  EXIT_STATUS_KILLED = 2;
+  EXIT_STATUS_LOST = 3;
+}
+
+// ExitReason refines ExitStatus with the cause of the end.
+enum ExitReason {
+  EXIT_REASON_UNSPECIFIED = 0;
+  EXIT_REASON_NONE = 1;
+  EXIT_REASON_SIGNAL = 2;
+  EXIT_REASON_TIMEOUT = 3;
+  EXIT_REASON_OOM = 4;
+  EXIT_REASON_PTY_IDLE = 5;
+  EXIT_REASON_REBOOT = 6;
+  EXIT_REASON_SHIM_LOST = 7;
+  EXIT_REASON_START_FAILED = 8;
+}
+
+// OnExit says what happens to processes left behind by the main process.
+enum OnExit {
+  ON_EXIT_UNSPECIFIED = 0;
+  ON_EXIT_KEEP_LEFTOVERS = 1;
+  ON_EXIT_KILL_LEFTOVERS = 2;
+}
+
+// FileType is the kind of a filesystem entry.
+enum FileType {
+  FILE_TYPE_UNSPECIFIED = 0;
+  FILE_TYPE_FILE = 1;
+  FILE_TYPE_DIR = 2;
+  FILE_TYPE_SYMLINK = 3;
+  FILE_TYPE_OTHER = 4;
+}
+
+// PhaseState is the state of one readiness phase.
+enum PhaseState {
+  PHASE_STATE_UNSPECIFIED = 0;
+  PHASE_STATE_PENDING = 1;
+  PHASE_STATE_READY = 2;
+  PHASE_STATE_FAILED = 3;
+  PHASE_STATE_DISABLED = 4;
+}
+
+// Argv is an explicit argument vector; args[0] is the program.
+message Argv {
+  repeated string args = 1;
+}
+
+// Pty is the terminal size and type of a PTY command.
+message Pty {
+  uint32 cols = 1;
+  uint32 rows = 2;
+  string term = 3;
+}
+
+// CommandSpec describes a command to run.
+message CommandSpec {
+  oneof cmd {
+    Argv argv = 1;
+    // Shell is a command line run by the user's shell.
+    string shell = 2;
+  }
+  // Login runs the shell as a login shell. Unset means the agent default.
+  optional bool login = 3;
+  string cwd = 4;
+  map<string, string> env = 5;
+  string user = 6;
+  // Pty allocates a terminal; stdout and stderr are merged into STREAM_PTY.
+  Pty pty = 7;
+  // Stdin keeps stdin open for SendInput.
+  bool stdin = 8;
+  uint64 timeout_ms = 9;
+  OnExit on_exit = 10;
+  map<string, string> tags = 11;
+}
+
+// ExitInfo is the final outcome of a command.
+message ExitInfo {
+  ExitStatus status = 1;
+  int32 code = 2;
+  // Signal name such as "SIGKILL".
+  string signal = 3;
+  ExitReason reason = 4;
+}
+
+// StreamInfo describes the retained output of one stream.
+message StreamInfo {
+  Stream stream = 1;
+  // Total bytes produced so far.
+  uint64 size = 2;
+  // Oldest offset still retained.
+  uint64 available_from = 3;
+  // Final size, set once the stream is closed.
+  optional uint64 end = 4;
+}
+
+// CommandInfo is the state of a command. Spec.env is always cleared;
+// env_keys lists the names.
+message CommandInfo {
+  string command_id = 1;
+  CommandSpec spec = 2;
+  repeated string env_keys = 3;
+  CommandState state = 4;
+  int32 pid = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp started_at = 7;
+  google.protobuf.Timestamp ended_at = 8;
+  ExitInfo exit = 9;
+  repeated StreamInfo streams = 10;
+  bool has_leftovers = 11;
+  uint32 attached_clients = 12;
+  string agent_version = 13;
+  // "disk_full" when the shim dropped output because the disk was full;
+  // empty otherwise. Stream ends cover only the bytes written.
+  string output_truncated = 14;
+}
+
+// FileInfo describes a filesystem entry.
+message FileInfo {
+  string path = 1;
+  string name = 2;
+  FileType type = 3;
+  uint64 size = 4;
+  uint32 mode = 5;
+  string owner = 6;
+  string group = 7;
+  uint32 uid = 8;
+  uint32 gid = 9;
+  google.protobuf.Timestamp mtime = 10;
+  string symlink_target = 11;
+}
+
+// Port is a listening TCP port inside the VM.
+message Port {
+  uint32 port = 1;
+  repeated string addresses = 2;
+  int32 pid = 3;
+  string process = 4;
+  string user = 5;
+}
+
+// Phase is one readiness phase of the agent.
+message Phase {
+  string name = 1;
+  PhaseState state = 2;
+  string error = 3;
+  google.protobuf.Timestamp changed_at = 4;
+}

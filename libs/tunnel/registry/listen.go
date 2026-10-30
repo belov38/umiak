@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,16 +39,59 @@ type ListenHandlers struct {
 	// Instance is called with the id of a changed gateway instance, or with ""
 	// after (re)connecting, meaning "resync all".
 	Instance func(instanceID string)
+	// Channels are extra channels LISTENed on the same connection, by exact
+	// (case-sensitive) name. Each non-nil handler is called with the NOTIFY
+	// payload, and with "" after every (re)LISTEN. Names must be 1 to 63
+	// bytes and differ from the tunnel channels (see Validate).
+	Channels map[string]func(payload string)
 }
 
-// Listen LISTENs on the session and instance channels over one dedicated
-// connection and calls the handlers until ctx is done. After every successful
+// maxChannelLen is the longest channel name Postgres keeps as is
+// (NAMEDATALEN - 1); longer names are truncated and would never match.
+const maxChannelLen = 63
+
+// Validate checks the extra channel names: they must be 1 to 63 bytes long
+// and must not be one of the tunnel channels (wire.NotifyChannel,
+// wire.NotifyInstancesChannel).
+func (h ListenHandlers) Validate() error {
+	for name := range h.Channels {
+		switch {
+		case name == wire.NotifyChannel || name == wire.NotifyInstancesChannel:
+			return fmt.Errorf("registry: listen channel %q is reserved for the tunnel", name)
+		case name == "" || len(name) > maxChannelLen || strings.IndexByte(name, 0) >= 0:
+			return fmt.Errorf("registry: invalid listen channel name %q", name)
+		}
+	}
+	return nil
+}
+
+// listenSQL returns the LISTEN statements for the tunnel and extra channels.
+func (h ListenHandlers) listenSQL() string {
+	names := []string{wire.NotifyChannel, wire.NotifyInstancesChannel}
+	extra := make([]string, 0, len(h.Channels))
+	for name := range h.Channels {
+		extra = append(extra, name)
+	}
+	sort.Strings(extra)
+	names = append(names, extra...)
+	stmts := make([]string, len(names))
+	for i, name := range names {
+		stmts[i] = "LISTEN " + pgx.Identifier{name}.Sanitize()
+	}
+	return strings.Join(stmts, "; ")
+}
+
+// Listen LISTENs on the session and instance channels, plus h.Channels, over
+// one dedicated connection and calls the handlers until ctx is done. After every successful
 // (re)LISTEN each non-nil handler is called with "" because notifications may
 // have been missed while the connection was down. Connection errors are
 // retried with backoff from 250 ms to 5 s. An idle connection is pinged
 // every 30 s; a ping that fails or takes over 5 s counts as a connection
-// error. Listen returns ctx.Err().
+// error. Listen returns ctx.Err(), or the Validate error of h at once.
 func (s *Store) Listen(ctx context.Context, h ListenHandlers) error {
+	if err := h.Validate(); err != nil {
+		return err
+	}
 	backoff := listenBackoffMin
 	for {
 		err := s.listenOnce(ctx, h, func() { backoff = listenBackoffMin })
@@ -78,9 +123,7 @@ func (s *Store) listenOnce(ctx context.Context, h ListenHandlers, established fu
 		_ = conn.Close(cctx)
 	}()
 
-	_, err = conn.Exec(ctx, "LISTEN "+pgx.Identifier{wire.NotifyChannel}.Sanitize()+
-		"; LISTEN "+pgx.Identifier{wire.NotifyInstancesChannel}.Sanitize())
-	if err != nil {
+	if _, err = conn.Exec(ctx, h.listenSQL()); err != nil {
 		return err
 	}
 	established()
@@ -89,6 +132,11 @@ func (s *Store) listenOnce(ctx context.Context, h ListenHandlers, established fu
 	}
 	if h.Instance != nil {
 		h.Instance("")
+	}
+	for _, fn := range h.Channels {
+		if fn != nil {
+			fn("")
+		}
 	}
 	for {
 		wctx, cancel := context.WithTimeout(ctx, s.listenIdle)
@@ -117,6 +165,10 @@ func (s *Store) listenOnce(ctx context.Context, h ListenHandlers, established fu
 		case wire.NotifyInstancesChannel:
 			if h.Instance != nil {
 				h.Instance(n.Payload)
+			}
+		default:
+			if fn := h.Channels[n.Channel]; fn != nil {
+				fn(n.Payload)
 			}
 		}
 	}

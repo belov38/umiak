@@ -8,6 +8,11 @@
 			"source": "./src/index.ts",
 			"types": "./dist/index.d.ts",
 			"default": "./dist/index.js"
+		},
+		"./agent/v1": {
+			"source": "./src/agent/v1.ts",
+			"types": "./dist/agent/v1.d.ts",
+			"default": "./dist/agent/v1.js"
 		}
 	},
 	"scripts": {

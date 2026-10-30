@@ -53,7 +53,26 @@ describe("worker env", () => {
 			logLevel: "info",
 			dbPoolMax: 30,
 			idpSyncIntervalMs: 300_000,
+			portDomain: undefined,
+			sshUserCaKeysFile: undefined,
 		});
+	});
+
+	it("port domain and SSH user CA keys file", () => {
+		const env = parseWorkerEnv({
+			...BASE,
+			SBX_PORT_DOMAIN: "sbx.example.com",
+			SBX_SSH_USER_CA_KEYS_FILE: "/etc/sbx/ssh-user-ca.pub",
+		});
+		expect(env.portDomain).toBe("sbx.example.com");
+		expect(env.sshUserCaKeysFile).toBe("/etc/sbx/ssh-user-ca.pub");
+		const empty = parseWorkerEnv({
+			...BASE,
+			SBX_PORT_DOMAIN: "",
+			SBX_SSH_USER_CA_KEYS_FILE: "",
+		});
+		expect(empty.portDomain).toBeUndefined();
+		expect(empty.sshUserCaKeysFile).toBeUndefined();
 	});
 
 	it("parses explicit values", () => {
