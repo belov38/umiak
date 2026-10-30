@@ -131,6 +131,10 @@ type File struct {
 	// ResetPending asks the agent to emit identity.reset as the first event of
 	// the new journal and clear the flag.
 	ResetPending bool `json:"resetPending"`
+	// RenameReboots counts the reboots asked for in a row because the
+	// computer name was not in effect while the identity was unchanged
+	// (Windows); at MaxRenameReboots the agent stops rebooting.
+	RenameReboots int `json:"renameReboots,omitempty"`
 }
 
 // LoadFile reads identity.json. A missing file returns an error for which

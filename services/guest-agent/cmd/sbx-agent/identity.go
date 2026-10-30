@@ -207,7 +207,8 @@ const windowsLogBytes = 1 << 20
 // windowsLog returns a logger that writes to stderr and, when the layout
 // has a log directory, to a small rotating file there: the output of a
 // startup script or of the specialize pass is otherwise lost. It also
-// becomes the default logger, which the ident package logs to.
+// becomes the default logger, which the ident package logs to, until the
+// returned close restores the previous one.
 func windowsLog(d deps, name string, stderr io.Writer) (*slog.Logger, func()) {
 	w, closeFn := stderr, func() {}
 	if d.layout.LogDir != "" {
@@ -215,9 +216,13 @@ func windowsLog(d deps, name string, stderr io.Writer) (*slog.Logger, func()) {
 			w, closeFn = io.MultiWriter(stderr, f), func() { _ = f.Close() }
 		}
 	}
+	prev := slog.Default()
 	log := slog.New(slog.NewTextHandler(w, nil))
 	slog.SetDefault(log)
-	return log, closeFn
+	return log, func() {
+		slog.SetDefault(prev)
+		closeFn()
+	}
 }
 
 // sealCmd implements `sbx-agent seal`.

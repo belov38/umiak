@@ -97,7 +97,7 @@ func (WindowsResetter) ActiveComputerName() (string, error) {
 // stores it in the LSA secrets of the agent and of autologon and enables
 // autologon of user. The password never reaches a file.
 func (WindowsResetter) NewUserPassword(user string) error {
-	pw, err := newPassword()
+	pw, err := newPassword(user)
 	if err != nil {
 		return err
 	}

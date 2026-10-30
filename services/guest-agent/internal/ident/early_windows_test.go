@@ -3,10 +3,12 @@ package ident
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -50,7 +52,7 @@ func TestSecureSSHFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := secureSSHFile(p); err != nil {
-		t.Skipf("not elevated: %v", err)
+		t.Fatal(err)
 	}
 	sd, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT,
 		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
@@ -71,8 +73,25 @@ func TestSecureSSHFile(t *testing.T) {
 	if ctl&windows.SE_DACL_PROTECTED == 0 {
 		t.Error("DACL is not protected")
 	}
-	if s := sd.String(); s == "" {
-		t.Error("empty descriptor")
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]windows.ACCESS_MASK{}
+	for i := range uint32(dacl.AceCount) {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			t.Fatalf("ACE %d has type %d", i, ace.Header.AceType)
+		}
+		got[(*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()] |= ace.Mask
+	}
+	const fileAllAccess = 0x1f01ff
+	want := map[string]windows.ACCESS_MASK{"S-1-5-18": fileAllAccess, "S-1-5-32-544": fileAllAccess}
+	if !maps.Equal(got, want) {
+		t.Errorf("DACL = %v, want only SYSTEM and Administrators with full control", got)
 	}
 }
 

@@ -16,6 +16,14 @@ func TestIdentityProcsResolve(t *testing.T) {
 	}
 }
 
+func TestRebootFlagsForceOthers(t *testing.T) {
+	// SHUTDOWN_FORCE_OTHERS | SHUTDOWN_RESTART: a logged-on autologon
+	// session must not block the reboot.
+	if rebootFlags != 0x5 {
+		t.Errorf("rebootFlags = %#x, want 0x5", rebootFlags)
+	}
+}
+
 func TestGetComputerNameEx(t *testing.T) {
 	name, err := GetComputerNameEx(windows.ComputerNamePhysicalDnsHostname)
 	if err != nil {

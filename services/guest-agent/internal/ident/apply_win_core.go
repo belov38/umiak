@@ -11,7 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"unicode/utf16"
+	"unicode/utf8"
+	"unsafe"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
@@ -57,6 +60,9 @@ const (
 	computerNamePrefix = "SBX"
 	// passwordLen is the length of the generated password of DefaultUser.
 	passwordLen = 32
+	// MaxRenameReboots bounds the reboots for a computer name that does not
+	// take effect while the identity is unchanged.
+	MaxRenameReboots = 2
 )
 
 // WinResetter performs the parts of a Windows identity reset that touch the
@@ -129,17 +135,8 @@ func applyWindows(ctx context.Context, l paths.Layout, id Identity, r WinResette
 	switch {
 	case err == nil:
 		if oldHex, _ := machineIDHex(old.MachineID); oldHex == hexID {
-			reboot, err := needReboot(r, name, mode)
-			if err != nil || !reboot {
-				return false, false, err
-			}
-			// The reboot of an earlier apply did not happen, or something
-			// renamed the machine since: set the name again, or the reboot
-			// would not fix it and the next boot would reboot again.
-			if err := r.SetComputerName(name); err != nil {
-				return false, false, fmt.Errorf("ident: set computer name: %w", err)
-			}
-			return false, true, nil
+			reboot, err := renameAgain(l, old, r, name, mode)
+			return false, reboot, err
 		}
 	case errors.Is(err, fs.ErrNotExist):
 		// Only a clone of the template has no identity.json. A fork or a
@@ -192,6 +189,41 @@ func applyWindows(ctx context.Context, l paths.Layout, id Identity, r WinResette
 	return true, reboot, err
 }
 
+// renameAgain handles an unchanged identity whose computer name is not in
+// effect: the reboot of an earlier apply did not happen, or something
+// renamed the machine since. It sets the name again (a reboot alone would
+// not fix a foreign rename) and asks for a reboot, at most MaxRenameReboots
+// times in a row, counted in identity.json; then it logs an error and
+// stops rebooting. A name in effect resets the counter.
+func renameAgain(l paths.Layout, f *File, r WinResetter, name string, mode ApplyMode) (bool, error) {
+	reboot, err := needReboot(r, name, mode)
+	if err != nil {
+		return false, err
+	}
+	if !reboot {
+		if f.RenameReboots != 0 && mode != ModeSpecialize {
+			f.RenameReboots = 0
+			if err := f.Save(l.IdentityFile); err != nil {
+				return false, fmt.Errorf("ident: write identity.json: %w", err)
+			}
+		}
+		return false, nil
+	}
+	if f.RenameReboots >= MaxRenameReboots {
+		slog.Error("the computer name does not take effect, no more reboots",
+			"want", name, "reboots", f.RenameReboots)
+		return false, nil
+	}
+	if err := r.SetComputerName(name); err != nil {
+		return false, fmt.Errorf("ident: set computer name: %w", err)
+	}
+	f.RenameReboots++
+	if err := f.Save(l.IdentityFile); err != nil {
+		return false, fmt.Errorf("ident: write identity.json: %w", err)
+	}
+	return true, nil
+}
+
 // needReboot reports whether the active computer name differs from name
 // outside the specialize pass.
 func needReboot(r WinResetter, name string, mode ApplyMode) (bool, error) {
@@ -240,8 +272,25 @@ var passwordClasses = []string{
 }
 
 // newPassword returns passwordLen random ASCII characters with one of each
-// class at a random position. The caller clears the slice after use.
-func newPassword() ([]byte, error) {
+// class at a random position that do not contain the account name user
+// (case-insensitive; the Windows complexity policy refuses that). The
+// caller clears the slice after use.
+func newPassword(user string) ([]byte, error) {
+	for {
+		pw, err := randomPassword()
+		if err != nil {
+			return nil, err
+		}
+		if !containsFold(pw, user) {
+			return pw, nil
+		}
+		clear(pw)
+	}
+}
+
+// randomPassword returns passwordLen random characters, one of each class
+// at a random position.
+func randomPassword() ([]byte, error) {
 	all := strings.Join(passwordClasses, "")
 	pw := make([]byte, passwordLen)
 	for i := range pw {
@@ -268,6 +317,20 @@ func newPassword() ([]byte, error) {
 	return pw, nil
 }
 
+// containsFold reports whether the ASCII bytes pw contain sub, ignoring
+// case, without copying pw.
+func containsFold(pw []byte, sub string) bool {
+	if sub == "" {
+		return false
+	}
+	for i := 0; i+len(sub) <= len(pw); i++ {
+		if strings.EqualFold(sub, unsafeString(pw[i:i+len(sub)])) {
+			return true
+		}
+	}
+	return false
+}
+
 func randIndex(n int) (int, error) {
 	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
 	if err != nil {
@@ -276,18 +339,27 @@ func randIndex(n int) (int, error) {
 	return int(v.Int64()), nil
 }
 
-// utf16LE encodes UTF-8 b as UTF-16LE without a terminator.
+// utf16LE encodes UTF-8 b as UTF-16LE without a terminator. It decodes b in
+// place, so no other copy of a password is left behind.
 func utf16LE(b []byte) []byte {
-	r := []rune(string(b))
-	u := utf16.Encode(r)
-	out := make([]byte, 2*len(u))
-	for i, c := range u {
-		out[2*i] = byte(c)
-		out[2*i+1] = byte(c >> 8)
+	out := make([]byte, 0, 2*len(b)) // never grows: no stale copies
+	put := func(c rune) { out = append(out, byte(c), byte(c>>8)) }
+	for len(b) > 0 {
+		r, n := utf8.DecodeRune(b)
+		b = b[n:]
+		if r1, r2 := utf16.EncodeRune(r); r1 != unicode.ReplacementChar {
+			put(r1)
+			put(r2)
+		} else {
+			put(r)
+		}
 	}
-	clear(r)
-	clear(u)
 	return out
+}
+
+// unsafeString views b as a string without copying it.
+func unsafeString(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
 // FakeWinResetter records calls instead of changing the system. It is meant

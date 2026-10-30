@@ -123,6 +123,9 @@ type IdentityReport struct {
 	WrittenMachineID    string   `json:"written_machine_id"`
 	HostKeyFingerprints []string `json:"host_key_fingerprints"`
 	ResetPending        bool     `json:"reset_pending"`
+	// RenameReboots counts reboots for a computer name that did not take
+	// effect (Windows); at ident.MaxRenameReboots they stopped.
+	RenameReboots int `json:"rename_reboots,omitempty"`
 }
 
 // TunnelURLReport is the effective tunnel URL and its source (smbios or
@@ -180,6 +183,7 @@ func Doctor(ctx context.Context, l paths.Layout, cfg config.Config, opts DoctorO
 			WrittenMachineID:    f.WrittenMachineID,
 			HostKeyFingerprints: f.HostKeyFingerprints,
 			ResetPending:        f.ResetPending,
+			RenameReboots:       f.RenameReboots,
 		}
 	} else {
 		r.IdentityError = err.Error()

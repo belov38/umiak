@@ -233,6 +233,64 @@ func TestApplyRebootOnlyOutsideSpecialize(t *testing.T) {
 	}
 }
 
+func TestApplyRenameRebootsBounded(t *testing.T) {
+	l := winLayout(t)
+	if err := (&File{MachineID: testMachineID, ResetPending: true}).Save(l.IdentityFile); err != nil {
+		t.Fatal(err)
+	}
+	// Something keeps the old name in effect: two reboots, then none.
+	r := newWinFake(t, l, "WIN-TEMPLATE")
+	for i, want := range []bool{true, true, false, false} {
+		_, reboot, err := ApplyWindows(context.Background(), l, testIdentity(testMachineID), r, ModeEarly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reboot != want {
+			t.Errorf("boot %d: reboot = %v, want %v", i+1, reboot, want)
+		}
+	}
+	f, err := LoadFile(l.IdentityFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.RenameReboots != MaxRenameReboots || !f.ResetPending {
+		t.Errorf("identity.json = %+v, want %d rename reboots and ResetPending kept", f, MaxRenameReboots)
+	}
+
+	// The name takes effect: the counter goes back to zero.
+	r.Active = testComputerName
+	if _, reboot, err := ApplyWindows(context.Background(), l, testIdentity(testMachineID), r, ModeEarly); err != nil || reboot {
+		t.Fatalf("reboot = %v, err = %v", reboot, err)
+	}
+	if f, err := LoadFile(l.IdentityFile); err != nil || f.RenameReboots != 0 {
+		t.Errorf("identity.json = %+v, %v; want the counter reset", f, err)
+	}
+}
+
+func TestApplyInterruptedForkKeepsPassword(t *testing.T) {
+	l := winLayout(t)
+	if err := (&File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}).Save(l.IdentityFile); err != nil {
+		t.Fatal(err)
+	}
+	r := newWinFake(t, l, "SBXEEEEEEEEEEEE")
+	r.Errs = map[string]error{"SetComputerName": errors.New("power loss")}
+	if _, _, err := ApplyWindows(context.Background(), l, testIdentity(testMachineID), r, ModeEarly); err == nil {
+		t.Fatal("apply succeeded with a failing resetter")
+	}
+	f, err := LoadFile(l.IdentityFile)
+	if err != nil || f.MachineID != "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" {
+		t.Fatalf("identity.json after the interrupted apply = %+v, %v; want the old one", f, err)
+	}
+	r.Errs = nil
+	changed, _, err := ApplyWindows(context.Background(), l, testIdentity(testMachineID), r, ModeEarly)
+	if err != nil || !changed {
+		t.Fatalf("changed = %v, err = %v", changed, err)
+	}
+	if slices.Contains(methods(r.Calls), "NewUserPassword") {
+		t.Errorf("an interrupted fork changed the password: %v", r.Calls)
+	}
+}
+
 func TestApplyInterruptedRepeats(t *testing.T) {
 	l := winLayout(t)
 	mustWrite(t, l.StateDB, "db")
@@ -284,7 +342,7 @@ func TestApplyInvalidMachineID(t *testing.T) {
 func TestNewPassword(t *testing.T) {
 	seen := map[string]bool{}
 	for range 50 {
-		pw, err := newPassword()
+		pw, err := newPassword(DefaultUser)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -309,6 +367,9 @@ func TestNewPassword(t *testing.T) {
 		if !upper || !lower || !digit || !other {
 			t.Errorf("%d-char password misses a character class", len(pw))
 		}
+		if containsFold(pw, DefaultUser) {
+			t.Errorf("password contains the account name")
+		}
 		if seen[string(pw)] {
 			t.Error("password repeated")
 		}
@@ -316,9 +377,24 @@ func TestNewPassword(t *testing.T) {
 	}
 }
 
+func TestContainsFold(t *testing.T) {
+	for pw, want := range map[string]bool{
+		"abUsErcd": true,
+		"user":     true,
+		"xxuse":    false,
+		"us-er":    false,
+		"":         false,
+	} {
+		if got := containsFold([]byte(pw), "user"); got != want {
+			t.Errorf("containsFold(%q) = %v, want %v", pw, got, want)
+		}
+	}
+}
+
 func TestUTF16LE(t *testing.T) {
-	got := utf16LE([]byte("aé"))
-	if want := []byte{'a', 0, 0xe9, 0}; !slices.Equal(got, want) {
+	got := utf16LE([]byte("aé\U0001F600"))
+	want := []byte{'a', 0, 0xe9, 0, 0x3d, 0xd8, 0x00, 0xde}
+	if !slices.Equal(got, want) {
 		t.Errorf("utf16LE = %v, want %v", got, want)
 	}
 }
