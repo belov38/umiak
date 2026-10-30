@@ -33,6 +33,10 @@ interface FakeOpts {
 	onRead?: (path: string, n: number) => void;
 	/** systemd-run starts the unit, then the call fails (lost reply). */
 	startError?: Error;
+	/** The unit is already gone (--collect) when it is first looked at; the whole log is readable. */
+	collected?: boolean;
+	/** While true, every guest file reads as missing. */
+	hideFiles?: () => boolean;
 }
 
 /** Fake guest: the log grows by one chunk per `systemctl show`. */
@@ -44,7 +48,12 @@ function fakeGuest(o: FakeOpts = {}) {
 	let shows = 0;
 	let started = false;
 	const log = () =>
-		Buffer.concat(chunks.slice(0, Math.min(shows, chunks.length)));
+		Buffer.concat(
+			chunks.slice(
+				0,
+				o.collected ? chunks.length : Math.min(shows, chunks.length),
+			),
+		);
 	const io: GuestIo = {
 		async exec(cmd, opts) {
 			calls.push({ cmd, input: opts?.input });
@@ -57,7 +66,10 @@ function fakeGuest(o: FakeOpts = {}) {
 			}
 			if (cmd[0] === "systemctl" && cmd[1] === "show") {
 				shows++;
-				if (!started) return ok("LoadState=not-found\nActiveState=inactive\n");
+				if (!started || o.collected)
+					return ok(
+						"LoadState=not-found\nActiveState=inactive\nResult=success\n",
+					);
 				return showOut(
 					shows > activePolls ? "inactive" : "active",
 					"LoadState=loaded\n",
@@ -67,6 +79,7 @@ function fakeGuest(o: FakeOpts = {}) {
 		},
 		async readFile(path, offset, count) {
 			reads.push({ path, offset, count });
+			if (o.hideFiles?.()) return Buffer.alloc(0);
 			o.onRead?.(path, reads.length);
 			if (path.endsWith(".rc"))
 				return o.rc === undefined ? Buffer.alloc(0) : Buffer.from(o.rc);
@@ -80,7 +93,10 @@ function fakeGuest(o: FakeOpts = {}) {
 	return { io, calls, reads };
 }
 
-const fast = { pollMs: 1 };
+const fast = { pollMs: 1, startCheckMs: 20 };
+
+const netError = (msg = "read ECONNRESET", code = "ECONNRESET") =>
+	Object.assign(new Error(msg), { code });
 
 describe("runStep", () => {
 	it("starts the unit with the exact argv and delivers the log in order", async () => {
@@ -334,6 +350,212 @@ describe("runStep", () => {
 	});
 });
 
+describe("runStep robustness", () => {
+	it("delivers log bytes that appear only after the unit was seen inactive", async () => {
+		const reads: number[] = [];
+		const parts = [Buffer.from("a\n"), Buffer.from("b\n"), Buffer.alloc(0)];
+		const io: GuestIo = {
+			async exec(cmd) {
+				if (cmd[0] === "systemctl")
+					return ok("LoadState=not-found\nActiveState=inactive\n");
+				return ok();
+			},
+			async readFile(path, offset) {
+				if (path.endsWith(".rc")) return Buffer.from("0\n");
+				reads.push(offset);
+				return parts[Math.min(reads.length - 1, parts.length - 1)] as Buffer;
+			},
+			async ping() {
+				return true;
+			},
+		};
+		const out: string[] = [];
+		const r = await runStep(io, {
+			name: "s",
+			script: SCRIPT,
+			log: (c) => out.push(c),
+			...fast,
+		});
+		expect(out.join("")).toBe("a\nb\n");
+		expect(r.tail).toEqual(["a", "b"]);
+		expect(reads).toEqual([0, 2, 4]);
+	});
+
+	it("uses the rc file of a unit that was already collected", async () => {
+		const g = fakeGuest({
+			chunks: [Buffer.from("done\n")],
+			rc: "0\n",
+			collected: true,
+		});
+		const r = await runStep(g.io, {
+			name: "s",
+			script: SCRIPT,
+			log: () => {},
+			...fast,
+		});
+		expect(r).toEqual({ exitStatus: 0, tail: ["done"] });
+	});
+
+	it("accepts a collected unit after an ambiguous start error when the rc file exists", async () => {
+		const g = fakeGuest({
+			chunks: [Buffer.from("done\n")],
+			rc: "5\n",
+			collected: true,
+			startError: new QgaTimeoutError(
+				500,
+				"VM 1 qga command 'guest-exec' failed - got timeout",
+				"guest-exec",
+			),
+		});
+		const err = await runStep(g.io, {
+			name: "s",
+			script: SCRIPT,
+			log: () => {},
+			...fast,
+		}).catch((e) => e);
+		expect(err).toBeInstanceOf(StepFailedError);
+		expect(err.exitStatus).toBe(5);
+		expect(g.calls.filter((c) => c.cmd[0] === "systemd-run")).toHaveLength(1);
+	});
+
+	it("re-checks a not-yet-visible unit after an ambiguous start error", async () => {
+		let checks = 0;
+		const g = fakeGuest({
+			chunks: [Buffer.from("hi\n")],
+			rc: "0",
+			startError: netError("socket hang up", "ECONNRESET"),
+			hideFiles: () => checks < 4,
+			onExec: (cmd) => {
+				if (cmd.join(" ").includes("LoadState,ActiveState"))
+					return checks++ < 3
+						? ok("LoadState=not-found\nActiveState=inactive\n")
+						: ok("LoadState=loaded\nActiveState=active\n");
+			},
+		});
+		const r = await runStep(g.io, {
+			name: "s",
+			script: SCRIPT,
+			log: () => {},
+			...fast,
+		});
+		expect(r.exitStatus).toBe(0);
+		expect(checks).toBe(4);
+		expect(g.calls.filter((c) => c.cmd[0] === "systemd-run")).toHaveLength(1);
+	});
+
+	it("does not call the unit not started when the last check got no answer", async () => {
+		const g = fakeGuest({
+			startError: netError(),
+			onExec: (cmd) => {
+				if (cmd.join(" ").includes("LoadState,ActiveState")) throw netError();
+			},
+		});
+		await expect(
+			runStep(g.io, { name: "s", script: SCRIPT, log: () => {}, ...fast }),
+		).rejects.toThrow(/cannot tell whether the unit started.*ECONNRESET/);
+	});
+
+	it.each([
+		["ECONNRESET", "read ECONNRESET"],
+		["EPIPE", "write EPIPE"],
+		["ETIMEDOUT", "connect ETIMEDOUT 10.0.0.1:8006"],
+		[undefined, "socket hang up"],
+	])("retries a connection error (%s) while polling", async (code, msg) => {
+		let showN = 0;
+		let readN = 0;
+		let prepN = 0;
+		const g = fakeGuest({
+			chunks: [Buffer.from("hi\n")],
+			rc: "0",
+			onExec: (cmd) => {
+				if (cmd[0] === "bash" && prepN++ === 0) throw netError(msg, code);
+				if (cmd[0] === "systemctl" && cmd[1] === "show" && showN++ < 2)
+					throw netError(msg, code);
+			},
+			onRead: () => {
+				if (readN++ === 0) throw netError(msg, code);
+			},
+		});
+		const out: string[] = [];
+		const r = await runStep(g.io, {
+			name: "s",
+			script: SCRIPT,
+			log: (c) => out.push(c),
+			...fast,
+		});
+		expect(r.exitStatus).toBe(0);
+		expect(out.join("")).toBe("hi\n");
+		expect(prepN).toBeGreaterThan(1);
+		expect(g.calls.filter((c) => c.cmd[0] === "systemd-run")).toHaveLength(1);
+	});
+
+	it("does not retry unrelated errors as network errors", async () => {
+		const g = fakeGuest({
+			onExec: (cmd) => {
+				if (cmd[0] === "systemctl" && cmd[1] === "show")
+					throw new TypeError("x is not a function");
+			},
+		});
+		await expect(
+			runStep(g.io, { name: "s", script: SCRIPT, log: () => {}, ...fast }),
+		).rejects.toThrow(TypeError);
+	});
+
+	it("includes the last transient error in the timeout error", async () => {
+		const cause = netError("read ECONNRESET");
+		const g = fakeGuest({
+			onExec: (cmd) => {
+				if (cmd[0] === "systemctl" && cmd[1] === "show") throw cause;
+			},
+		});
+		const err = await runStep(g.io, {
+			name: "30-slow",
+			script: SCRIPT,
+			log: () => {},
+			pollMs: 1,
+			timeoutMs: 30,
+		}).catch((e) => e);
+		expect(err).toBeInstanceOf(StepTimeoutError);
+		expect(err.message).toContain("30-slow");
+		expect(err.message).toContain("last error: read ECONNRESET");
+		expect(err.cause).toBe(cause);
+	});
+
+	it("retries the prepare exec until the step timeout and reports the last error", async () => {
+		const g = fakeGuest({
+			onExec: (cmd) => {
+				if (cmd[0] === "bash") throw netError();
+			},
+		});
+		await expect(
+			runStep(g.io, {
+				name: "s",
+				script: SCRIPT,
+				log: () => {},
+				pollMs: 1,
+				timeoutMs: 20,
+			}),
+		).rejects.toThrow(/ECONNRESET/);
+		expect(g.calls.some((c) => c.cmd[0] === "systemd-run")).toBe(false);
+	});
+
+	it("keeps only the last 200 lines of a huge chunk", async () => {
+		const lines = 300_000;
+		const g = fakeGuest({
+			chunks: [Buffer.from(`${"x\n".repeat(lines - 1)}last\n`)],
+			rc: "0",
+		});
+		const r = await runStep(g.io, {
+			name: "s",
+			script: SCRIPT,
+			log: () => {},
+			...fast,
+		});
+		expect(r.tail).toHaveLength(200);
+		expect(r.tail.at(-1)).toBe("last");
+	});
+});
+
 describe("mountSeed", () => {
 	it("mounts the cidata ISO read-only unless already mounted", async () => {
 		const g = fakeGuest();
@@ -402,6 +624,29 @@ describe("rebootGuest", () => {
 			rebootGuest(g.io, { timeoutMs: 30, pollMs: 1 }),
 		).rejects.toThrow(/reboot/);
 		expect(g.calls.some((c) => c.includes("LABEL=cidata"))).toBe(false);
+	});
+
+	it("reports the last error in the reboot timeout", async () => {
+		let rebooted = false;
+		const io: GuestIo = {
+			async exec(cmd) {
+				if (cmd[0] === "cat" && !rebooted) return ok("boot-a\n");
+				if (cmd[0] === "systemctl") {
+					rebooted = true;
+					throw netError();
+				}
+				throw netError("read ECONNRESET");
+			},
+			async readFile() {
+				return Buffer.alloc(0);
+			},
+			async ping() {
+				return true;
+			},
+		};
+		await expect(rebootGuest(io, { timeoutMs: 30, pollMs: 1 })).rejects.toThrow(
+			/last state: read ECONNRESET/,
+		);
 	});
 
 	it("fails fast when systemctl reboot reports an error exit code", async () => {

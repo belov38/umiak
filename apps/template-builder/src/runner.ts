@@ -41,9 +41,22 @@ export class StepFailedError extends Error {
 export class StepTimeoutError extends Error {
 	readonly step: string;
 	readonly tail: string[];
-	constructor(step: string, timeoutMs: number, tail: string[]) {
-		super(`step ${step} did not finish within ${timeoutMs} ms`);
+	/** Last transient error seen while polling, if any. */
+	readonly lastError: unknown;
+	constructor(
+		step: string,
+		timeoutMs: number,
+		tail: string[],
+		lastError?: unknown,
+	) {
+		super(
+			`step ${step} did not finish within ${timeoutMs} ms${
+				lastError === undefined ? "" : `; last error: ${errorText(lastError)}`
+			}`,
+			lastError === undefined ? undefined : { cause: lastError },
+		);
 		this.name = "StepTimeoutError";
+		this.lastError = lastError;
 		this.step = step;
 		this.tail = tail;
 	}
@@ -58,6 +71,7 @@ const TAIL_LINES = 200;
 const READ_CHUNK = 1024 * 1024;
 const DEFAULT_STEP_TIMEOUT_MS = 60 * 60_000;
 const DEFAULT_POLL_MS = 2000;
+const START_CHECK_MS = 10_000;
 const DEFAULT_REBOOT_TIMEOUT_MS = 10 * 60_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -96,14 +110,62 @@ export function pveGuestIo(
 	};
 }
 
-/** Errors that only mean the guest agent did not answer in time; the call can be repeated. */
+const NETWORK_ERROR_CODES = new Set([
+	"ECONNRESET",
+	"ECONNREFUSED",
+	"ECONNABORTED",
+	"EPIPE",
+	"ETIMEDOUT",
+	"EAI_AGAIN",
+	"EHOSTUNREACH",
+	"ENETUNREACH",
+]);
+const NETWORK_ERROR_RE =
+	/socket hang up|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EAI_AGAIN/;
+
+/** Connection-level failure between us and Proxmox (not an HTTP answer from it). */
+function isNetworkError(err: unknown): boolean {
+	if (!(err instanceof Error) || err instanceof PveApiError) return false;
+	for (const e of [err, err.cause]) {
+		const code = (e as { code?: unknown } | undefined)?.code;
+		if (typeof code === "string" && NETWORK_ERROR_CODES.has(code)) return true;
+	}
+	return NETWORK_ERROR_RE.test(err.message);
+}
+
+/**
+ * Errors that only mean the guest agent or the connection did not answer; an idempotent call can
+ * be repeated.
+ */
 function isTransient(err: unknown): boolean {
 	if (err instanceof QgaTimeoutError || err instanceof QgaExecStatusLostError)
 		return true;
 	if (err instanceof PveApiError)
 		return /guest agent is not running|got timeout/i.test(err.message);
 	// Qga.exec gives up with a plain Error.
-	return err instanceof Error && /guest exec .* timed out/.test(err.message);
+	if (err instanceof Error && /guest exec .* timed out/.test(err.message))
+		return true;
+	return isNetworkError(err);
+}
+
+/** Repeats an idempotent call on transient errors until `deadline`, then rethrows the last one. */
+async function retryTransient<T>(
+	fn: () => Promise<T>,
+	deadline: number,
+	delayMs: number,
+): Promise<T> {
+	for (;;) {
+		try {
+			return await fn();
+		} catch (err) {
+			if (!isTransient(err) || Date.now() >= deadline) throw err;
+			await sleep(delayMs);
+		}
+	}
+}
+
+function errorText(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }
 
 function parseShow(stdout: string): Record<string, string> {
@@ -128,7 +190,11 @@ class Tail {
 	push(text: string): void {
 		const parts = (this.#partial + text).split("\n");
 		this.#partial = parts.pop() ?? "";
-		this.#lines.push(...parts);
+		// Only the last `max` lines can survive; a big chunk must not be spread into arguments.
+		for (const line of parts.length > this.#max
+			? parts.slice(-this.#max)
+			: parts)
+			this.#lines.push(line);
 		if (this.#lines.length > this.#max)
 			this.#lines = this.#lines.slice(-this.#max);
 	}
@@ -152,6 +218,8 @@ export interface RunStepOptions {
 	log: (chunk: string) => void;
 	pollMs?: number;
 	timeoutMs?: number;
+	/** How long to re-check the unit after an ambiguous start error (default 10 s). */
+	startCheckMs?: number;
 }
 
 /**
@@ -172,7 +240,12 @@ export async function runStep(
 	const logPath = `${LOG_DIR}/${name}.log`;
 	const rcPath = `${LOG_DIR}/${name}.rc`;
 
-	const prep = await io.exec(["bash", "-c", PREPARE_SCRIPT, "sbx-prep", name]);
+	// Idempotent, so a lost reply is simply repeated.
+	const prep = await retryTransient(
+		() => io.exec(["bash", "-c", PREPARE_SCRIPT, "sbx-prep", name]),
+		deadline,
+		pollMs,
+	);
 	if (prep.exitCode !== 0)
 		throw new Error(
 			`step ${name}: preparing ${LOG_DIR} failed: ${prep.stderr.trim()}`,
@@ -203,7 +276,14 @@ export async function runStep(
 	} catch (err) {
 		if (!isTransient(err)) throw err;
 		// The command may have reached the guest, so it is never sent again blindly.
-		if (!(await unitStarted(io, unit, logPath, rcPath, deadline)))
+		const check = {
+			unit,
+			files: [rcPath, logPath],
+			deadline,
+			windowMs: o.startCheckMs ?? START_CHECK_MS,
+			intervalMs: pollMs,
+		};
+		if (!(await unitStarted(io, name, check)))
 			throw new Error(`step ${name}: unit did not start: ${errorText(err)}`, {
 				cause: err,
 			});
@@ -217,12 +297,13 @@ export async function runStep(
 		tail.push(text);
 		o.log(text);
 	};
-	const drain = async () => {
+	// While the unit runs a short read ends the poll; after it stopped, read until an empty read.
+	const drain = async (untilEmpty: boolean) => {
 		for (;;) {
 			const buf = await io.readFile(logPath, offset, READ_CHUNK);
 			offset += buf.length;
 			feed(decoder.decode(buf, { stream: true }));
-			if (buf.length < READ_CHUNK) return;
+			if (buf.length === 0 || (!untilEmpty && buf.length < READ_CHUNK)) return;
 		}
 	};
 
@@ -236,23 +317,26 @@ export async function runStep(
 			unit,
 		]);
 		const state = parseShow(show.stdout).ActiveState;
-		await drain();
 		// A collected unit reads as inactive.
-		if (state !== "inactive" && state !== "failed") return undefined;
+		const finished = state === "inactive" || state === "failed";
+		await drain(finished);
+		if (!finished) return undefined;
 		return (await io.readFile(rcPath, 0, 64)).toString("utf8");
 	};
 
 	let rc: string | undefined;
+	let lastError: unknown;
 	for (;;) {
 		try {
 			rc = await poll();
 		} catch (err) {
 			if (!isTransient(err)) throw err;
+			lastError = err;
 		}
 		if (rc !== undefined) break;
 		if (Date.now() >= deadline) {
 			feed(decoder.decode());
-			throw new StepTimeoutError(name, timeoutMs, tail.lines());
+			throw new StepTimeoutError(name, timeoutMs, tail.lines(), lastError);
 		}
 		await sleep(pollMs);
 	}
@@ -280,18 +364,24 @@ export async function runStep(
 	return { exitStatus, tail: tail.lines() };
 }
 
-function errorText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
-
-/** After an ambiguous start error: did the unit start (running, loaded, or already finished)? */
+/**
+ * After an ambiguous start error: did the unit start (running, loaded, or already finished and
+ * collected, which leaves its rc or log behind)? The unit may need a moment to show up, so a
+ * "not found" answer is re-checked over `windowMs` before it counts.
+ */
 async function unitStarted(
 	io: GuestIo,
-	unit: string,
-	logPath: string,
-	rcPath: string,
-	deadline: number,
+	step: string,
+	c: {
+		unit: string;
+		files: string[];
+		deadline: number;
+		windowMs: number;
+		intervalMs: number;
+	},
 ): Promise<boolean> {
+	const until = Math.min(c.deadline, Date.now() + c.windowMs);
+	let lastError: unknown;
 	for (;;) {
 		try {
 			const r = await io.exec([
@@ -299,7 +389,7 @@ async function unitStarted(
 				"show",
 				"-p",
 				"LoadState,ActiveState",
-				unit,
+				c.unit,
 			]);
 			const p = parseShow(r.stdout);
 			if (
@@ -307,15 +397,23 @@ async function unitStarted(
 				/^(activ|deactiv)/.test(p.ActiveState ?? "")
 			)
 				return true;
-			// Already finished and collected: it left its rc or log behind.
-			for (const f of [rcPath, logPath])
+			for (const f of c.files)
 				if ((await io.readFile(f, 0, 1)).length > 0) return true;
-			return false;
+			lastError = undefined;
 		} catch (err) {
-			if (!isTransient(err) || Date.now() >= deadline) throw err;
-			await sleep(500);
+			if (!isTransient(err)) throw err;
+			lastError = err;
 		}
+		if (Date.now() >= until) break;
+		await sleep(c.intervalMs);
 	}
+	// The last check did not answer: "not started" would be a guess.
+	if (lastError !== undefined)
+		throw new Error(
+			`step ${step}: cannot tell whether the unit started: ${errorText(lastError)}`,
+			{ cause: lastError },
+		);
+	return false;
 }
 
 /** Mounts the seed ISO read-only at /mnt/seed (idempotent). */
@@ -355,19 +453,25 @@ export async function rebootGuest(
 	}
 	if (reboot && reboot.exitCode !== 0)
 		throw new Error(`systemctl reboot failed: ${reboot.stderr.trim()}`);
+	let last = "the guest agent never answered";
 	for (;;) {
 		await sleep(pollMs);
 		if (Date.now() >= deadline)
 			throw new Error(
-				`guest did not reboot (new boot id and agent) within ${timeoutMs} ms`,
+				`guest did not reboot (new boot id and agent) within ${timeoutMs} ms; last state: ${last}`,
 			);
 		try {
 			// The old system answers for a while after the reboot call.
-			if (!(await io.ping())) continue;
+			if (!(await io.ping())) {
+				last = "ping failed";
+				continue;
+			}
 			const now = await readBootId(io);
 			if (now && now !== before) break;
-		} catch {
+			last = "boot id unchanged";
+		} catch (err) {
 			// The agent is going down or coming up.
+			last = errorText(err);
 		}
 	}
 	await mountSeed(io);
