@@ -1,0 +1,12 @@
+#cloud-config
+# Build VM seed (spec S5 section 7.2): no users, no keys, no passwords.
+users: []
+disable_root: true
+ssh_pwauth: false
+bootcmd:
+  - ["sh", "-c", {{apt_snapshot_script}}, "sh", {{apt_snapshot}}, "/etc/apt/sources.list.d/ubuntu.sources"]
+package_update: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - [systemctl, enable, --now, qemu-guest-agent]

@@ -1,0 +1,235 @@
+import { execFileSync } from "node:child_process";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { REBOOT_STEP, type Recipe, stepFile, type Versions } from "./recipe.ts";
+import { formatVersionsToml } from "./versions-update.ts";
+
+// Seed ISO for the build VM (spec S5 sections 6.2, 7.2 step 3, 14)
+
+export interface SeedInput {
+	recipe: Recipe;
+	versions: Versions;
+	buildId: string;
+	/** Template version, YYYYMMDD.n. */
+	version: string;
+	/** Path of the signed agent package (.tar), already verified. */
+	agentPackage: string;
+	agentVersion: string;
+	/** Path of the `sbx` CLI binary. */
+	sbxCli?: string;
+	apiUrl?: string;
+	tunnelUrl?: string;
+	/** Path of the template SSH user CA public key. */
+	sshUserCa?: string;
+	/** Build manifest without the `verify` section. */
+	manifestBase: object;
+}
+
+/**
+ * POSIX sh for cloud-init `bootcmd`: `$1` is the snapshot timestamp, `$2` the deb822 file.
+ * Appends `Snapshot: <ts>` to every stanza that has `Types:` and no `Snapshot:` line.
+ */
+export const APT_SNAPSHOT_SCRIPT = `set -eu
+awk -v ts="$1" '
+function flush() {
+  for (i = 1; i <= n; i++) print buf[i]
+  if (types && !snap) print "Snapshot: " ts
+  n = 0; types = 0; snap = 0
+}
+/^[[:space:]]*$/ { flush(); print; next }
+{ buf[++n] = $0 }
+/^Types:/ { types = 1 }
+/^Snapshot:/ { snap = 1 }
+END { flush() }
+' "$2" > "$2.new"
+cat "$2.new" > "$2"
+rm -f "$2.new"
+`;
+
+/** Replaces `{{name}}` with the value; a placeholder without a value is an error. */
+function fillTemplate(
+	tmpl: string,
+	values: Record<string, string>,
+	file: string,
+): string {
+	return tmpl.replace(/\{\{(\w+)\}\}/g, (_, name: string) => {
+		const v = values[name];
+		if (v === undefined)
+			throw new Error(`${file}: unknown placeholder {{${name}}}`);
+		return v;
+	});
+}
+
+/** First existing `<dir>/<rel>`, child recipe directory first. */
+function findInRecipe(recipe: Recipe, rel: string): string | undefined {
+	for (const d of [...recipe.stepDirs].reverse()) {
+		const p = join(d, rel);
+		if (existsSync(p)) return p;
+	}
+	return undefined;
+}
+
+function requireInRecipe(recipe: Recipe, rel: string): string {
+	const p = findInRecipe(recipe, rel);
+	if (p === undefined)
+		throw new Error(
+			`${rel} not found for recipe "${recipe.slug}" in: ${recipe.stepDirs.join(", ")}`,
+		);
+	return p;
+}
+
+function shellQuote(v: string): string {
+	return `'${v.replaceAll("'", "'\\''")}'`;
+}
+
+export function renderAgentToml(tunnelUrl?: string): string {
+	const lines: string[] = [];
+	if (tunnelUrl !== undefined)
+		lines.push("[tunnel]", `url = ${JSON.stringify(tunnelUrl)}`, "");
+	lines.push(
+		"[user]",
+		'default = "user"',
+		"",
+		"[readiness]",
+		'required = ["identity", "claim", "secrets", "docker"]',
+		"",
+		"[docker]",
+		"enabled = true",
+		"",
+	);
+	return lines.join("\n");
+}
+
+/** Every file under `<dir>/files/`, as `relative path -> content`. */
+function collectFiles(dir: string, out: Map<string, string | Buffer>): void {
+	const root = join(dir, "files");
+	if (!existsSync(root)) return;
+	const rels = readdirSync(root, { recursive: true, encoding: "utf8" })
+		.filter((rel) => !rel.split("/").includes(".DS_Store"))
+		.sort();
+	for (const rel of rels) {
+		const p = join(root, rel);
+		if (statSync(p).isFile()) out.set(`build/files/${rel}`, readFileSync(p));
+	}
+}
+
+export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
+	const { recipe } = i;
+	const snapshot = i.versions.apt.snapshot;
+	const out = new Map<string, string | Buffer>();
+
+	// Strings are JSON-encoded: a JSON string is a valid YAML double-quoted scalar.
+	const values = {
+		build_id: JSON.stringify(i.buildId),
+		apt_snapshot: JSON.stringify(snapshot),
+		apt_snapshot_script: JSON.stringify(APT_SNAPSHOT_SCRIPT),
+	};
+	for (const name of ["meta-data", "user-data"]) {
+		const file = requireInRecipe(recipe, `seed/${name}.tmpl`);
+		out.set(name, fillTemplate(readFileSync(file, "utf8"), values, file));
+	}
+	out.set(
+		"network-config",
+		readFileSync(requireInRecipe(recipe, "seed/network-config")),
+	);
+
+	for (const step of recipe.steps) {
+		if (step === REBOOT_STEP) continue;
+		out.set(`build/steps/${step}.sh`, readFileSync(stepFile(recipe, step)));
+	}
+	out.set("build/lib.sh", readFileSync(requireInRecipe(recipe, "lib.sh")));
+	for (const dir of recipe.stepDirs) collectFiles(dir, out);
+
+	out.set("build/versions.toml", formatVersionsToml(i.versions));
+	out.set(
+		"build/env",
+		(
+			[
+				["SBX_BUILD_ID", i.buildId],
+				["SBX_BUILD_VERSION", i.version],
+				["SBX_AGENT_VERSION", i.agentVersion],
+				["SBX_APT_SNAPSHOT", snapshot],
+			] satisfies [string, string][]
+		)
+			.map(([k, v]) => `${k}=${shellQuote(v)}\n`)
+			.join(""),
+	);
+	out.set(
+		`build/sbx-agent-${i.agentVersion}-linux-amd64.tar`,
+		readFileSync(i.agentPackage),
+	);
+	out.set("build/agent.toml", renderAgentToml(i.tunnelUrl));
+	out.set(
+		"build/ssh-user-ca.pub",
+		i.sshUserCa === undefined ? "" : readFileSync(i.sshUserCa),
+	);
+	if (i.sbxCli !== undefined) out.set("build/sbx", readFileSync(i.sbxCli));
+	if (i.apiUrl !== undefined)
+		out.set(
+			"build/sbx-config.json",
+			`${JSON.stringify({ apiUrl: i.apiUrl })}\n`,
+		);
+	out.set("build/build.json", `${JSON.stringify(i.manifestBase, null, 2)}\n`);
+	return out;
+}
+
+// ISO
+
+const VOLUME_LABEL = "cidata";
+
+/** Writes the tree to a temp directory and packs it into `out` (volume label `cidata`). */
+export function makeIso(
+	files: Map<string, string | Buffer>,
+	out: string,
+	tool: "hdiutil" | "xorriso" = process.platform === "darwin"
+		? "hdiutil"
+		: "xorriso",
+): void {
+	const root = mkdtempSync(join(tmpdir(), "sbx-seed-"));
+	try {
+		for (const [rel, data] of files) {
+			const p = join(root, rel);
+			mkdirSync(dirname(p), { recursive: true });
+			writeFileSync(p, data);
+		}
+		rmSync(out, { force: true });
+		const args =
+			tool === "hdiutil"
+				? [
+						"makehybrid",
+						"-iso",
+						"-joliet",
+						"-default-volume-name",
+						VOLUME_LABEL,
+						"-o",
+						out,
+						root,
+					]
+				: tool === "xorriso"
+					? ["-as", "mkisofs", "-V", VOLUME_LABEL, "-J", "-R", "-o", out, root]
+					: null;
+		if (args === null) throw new Error(`unknown ISO tool "${tool}"`);
+		try {
+			execFileSync(tool, args, { stdio: ["ignore", "pipe", "pipe"] });
+		} catch (err) {
+			const e = err as NodeJS.ErrnoException & { stderr?: Buffer };
+			if (e.code === "ENOENT")
+				throw new Error(`ISO tool "${tool}" not found in PATH`);
+			throw new Error(
+				`${tool} failed: ${e.stderr?.toString().trim() || e.message}`,
+			);
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+}
