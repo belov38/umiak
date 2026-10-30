@@ -36,7 +36,9 @@ COPY packages/proto/tsconfig.json packages/proto/
 COPY packages/proto/src packages/proto/src
 COPY packages/agent-client/tsconfig.json packages/agent-client/tsconfig.build.json packages/agent-client/
 COPY packages/agent-client/src packages/agent-client/src
-RUN pnpm --filter "@sbx/agent-client..." run build
+# Only these two: "@sbx/agent-client..." also selects its dev dependencies
+# (@sbx/db for the test Postgres guard), whose sources are not copied here.
+RUN pnpm --filter "@sbx/proto" --filter "@sbx/agent-client" run build
 
 # ---- runtime: production dependencies only
 FROM base
