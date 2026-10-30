@@ -12,28 +12,35 @@ services:
     environment:
       # The tunnel URL that the worker writes into smbios family (S5 §14), once it supports it.
       SBX_TUNNEL_URL: ${SBX_TUNNEL_URL:?set by deploy.sh}
+      # The port domain that the worker passes to agents in Claim (port_domain).
+      SBX_PORT_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
     volumes:
       - ./secrets/devcp/sbx.yaml:/etc/sbx/sbx.yaml:ro
 
+  # The gateway certificates: deploy.sh puts the dev CA (infra/dev-cp/dev-ca.sh) into
+  # secrets/gateway, dev-secrets issues the tunnel and *.sbx. certificates with it.
   gateway-secrets:
     command: !override
       - dev-secrets
       - -dir=/secrets
-      - -domain=sbx.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
-      - -tunnel-host=tunnel.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
-      - -ssh-host=ssh.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+      - -domain=${SBX_PORT_DOMAIN:?set by deploy.sh}
+      - -tunnel-host=${SBX_DEVCP_TUNNEL_HOST:?set by deploy.sh}
+      - -ssh-host=${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
       - -owner=65532:65532
       - -worker-owner=1000:1000
 
   gateway:
     environment:
-      SBX_GATEWAY_SBX_DOMAIN: sbx.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
-      SBX_GATEWAY_TUNNEL_HOST: tunnel.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
-      SBX_GATEWAY_SSH_HOST: ssh.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+      SBX_GATEWAY_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
+      SBX_GATEWAY_TUNNEL_HOST: ${SBX_DEVCP_TUNNEL_HOST:?set by deploy.sh}
+      SBX_GATEWAY_SSH_HOST: ${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
     # Public listeners on all addresses of the CT (its firewall admits only the LAN; sandboxes
-    # reach only 443). The internal listener and metrics stay on loopback.
+    # reach only 443). 443 serves the tunnel host on the LAN address and the previews on the
+    # tailnet address: preview hosts route only without a port in Host (S4 4.2), so Tailscale
+    # Serve must not take 443 (it would win on the tailnet address; deploy.sh refuses it).
+    # The internal listener and metrics stay on loopback.
     ports: !override
-      - "443:8443" # TLS: tunnel.<domain> for agents, *.sbx.<domain> previews
+      - "443:8443" # TLS: the tunnel host for agents, *.<port domain> previews
       - "2222:2222" # SSH
       - "127.0.0.1:7000:7000"
       - "127.0.0.1:9190:9090"

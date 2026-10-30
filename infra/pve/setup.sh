@@ -869,7 +869,9 @@ step_cp_tailscale() {
 state() { pct exec "$ID" -- tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("BackendState", ""), d.get("AuthURL", ""))' || true; }
 read -r st url <<<"$(state)"
 if [ "$st" = Running ]; then
-	echo "cp-tailscale: running, $(pct exec "$ID" -- tailscale ip -4) ($(pct exec "$ID" -- tailscale status --self --peers=false | awk '{print $2}'))"
+	# infra/dev-cp/deploy.sh configures Tailscale Serve as sbx.
+	pct exec "$ID" -- tailscale set --operator=sbx
+	echo "cp-tailscale: running, $(pct exec "$ID" -- tailscale ip -4) ($(pct exec "$ID" -- tailscale status --self --peers=false | awk '{print $2}')), operator sbx"
 	exit 0
 fi
 if [ -z "${url:-}" ]; then
@@ -881,9 +883,9 @@ if [ -z "${url:-}" ]; then
 		sleep 1
 	done
 fi
-[ "$st" = Running ] && { echo "cp-tailscale: running"; exit 0; }
+[ "$st" = Running ] && { pct exec "$ID" -- tailscale set --operator=sbx; echo "cp-tailscale: running, operator sbx"; exit 0; }
 [ -n "${url:-}" ] || { echo "cp-tailscale: no login URL (state $st)" >&2; exit 1; }
-echo "cp-tailscale: open to log in: $url"
+echo "cp-tailscale: open to log in: $url, then run cp-tailscale again (sets the Serve operator)"
 EOF
 }
 
