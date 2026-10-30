@@ -138,7 +138,8 @@ func ValidMAC(cfg config.Config, mac string) (int, error) {
 		b[i] = int(v)
 	}
 	vmid := b[2]<<24 | b[3]<<16 | b[4]<<8 | b[5]
-	if b[0] != 0x02 || b[1] != cfg.ClusterID || !cfg.InRange(vmid) {
+	// Template build VMs (template slots) get their MAC from the same allocator.
+	if b[0] != 0x02 || b[1] != cfg.ClusterID || (!cfg.InRange(vmid) && !cfg.IsTemplateSlot(vmid)) {
 		return 0, forbidden("MAC %s is not from our allocator", mac)
 	}
 	return vmid, nil

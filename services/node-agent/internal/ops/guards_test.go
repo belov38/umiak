@@ -110,12 +110,13 @@ func TestValidSnapshotItemRequiresMatchingOwnerTag(t *testing.T) {
 
 func TestValidMAC(t *testing.T) {
 	cfg := testConfig()
-	for _, mac := range []string{"02:01:00:00:01:F4", "02:01:00:00:01:f4", "02:01:00:00:02:4d"} {
+	// 500, 589 (sandboxes), 597 and 598 (template build VMs).
+	for _, mac := range []string{"02:01:00:00:01:F4", "02:01:00:00:01:f4", "02:01:00:00:02:4d", "02:01:00:00:02:55", "02:01:00:00:02:56"} {
 		if _, err := ValidMAC(cfg, mac); err != nil {
 			t.Errorf("ValidMAC(%q) = %v, want nil", mac, err)
 		}
 	}
-	for _, mac := range []string{"02:02:00:00:01:F4", "02:01:00:00:00:6C", "BC:24:11:F4:55:64", "02:01:00:00:02:57", "02:01:00:00:02:56", "02:01:00:00:02:4e", "02:01:00:00:01", "zz:01:00:00:01:F4"} {
+	for _, mac := range []string{"02:02:00:00:01:F4", "02:01:00:00:00:6C", "BC:24:11:F4:55:64", "02:01:00:00:02:58", "02:01:00:00:02:4e", "02:01:00:00:02:54", "02:01:00:00:01", "zz:01:00:00:01:F4"} {
 		if _, err := ValidMAC(cfg, mac); err == nil {
 			t.Errorf("ValidMAC(%q) = nil, want error", mac)
 		}

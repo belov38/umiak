@@ -25,6 +25,8 @@ func inventoryFS() fstest.MapFS {
 		"etc/pve/firewall/cluster.fw":           {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/firewall/500.fw":               {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/firewall/599.fw":               {Data: []byte("[OPTIONS]\n")},
+		"etc/pve/firewall/598.fw":               {Data: []byte("[OPTIONS]\n")},
+		"etc/pve/firewall/590.fw":               {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/nodes/pve/host.fw":             {Data: []byte("[OPTIONS]\nenable: 0\n")},
 		"etc/pve/qemu-server/500.conf":          {Data: []byte("memory: 2048\n")},
 		"etc/pve/qemu-server/101.conf":          {Data: []byte("memory: 2048\n")},
@@ -78,8 +80,13 @@ func TestInventoryDefaultSections(t *testing.T) {
 			t.Errorf("hash missing for %s: %v", p, hashes)
 		}
 	}
-	if _, ok := hashes["/etc/pve/firewall/500.fw"]; ok {
-		t.Error("per-VM firewall files of the range must not be hashed")
+	for _, p := range []string{"/etc/pve/firewall/500.fw", "/etc/pve/firewall/598.fw"} {
+		if _, ok := hashes[p]; ok {
+			t.Errorf("%s: per-VM firewall files of sandboxes and template builds must not be hashed", p)
+		}
+	}
+	if _, ok := hashes["/etc/pve/firewall/590.fw"]; !ok {
+		t.Error("dev infrastructure (590) firewall must be hashed")
 	}
 
 	sysctl := m["sysctl"].(map[string]any)

@@ -208,7 +208,9 @@ func (s *Server) hashes() (any, error) {
 		return nil, err
 	}
 	for _, p := range fws {
-		if s.Cfg.InRange(vmidOfFile(path.Base(p))) {
+		// Sandboxes and template build VMs (their firewall goes before `template`) are ours; the
+		// legacy template keeps its file in the world.
+		if id := vmidOfFile(path.Base(p)); s.Cfg.InRange(id) || (s.Cfg.IsTemplateSlot(id) && id != s.Cfg.TemplateVMID) {
 			continue
 		}
 		if err := s.hashFile(h, p); err != nil {
