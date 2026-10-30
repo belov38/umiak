@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { XMLValidator } from "fast-xml-parser";
 import { parse as parseToml } from "smol-toml";
@@ -129,6 +131,43 @@ describe("offline.cmd", () => {
 		expect(find).not.toMatch(/\bX\b/);
 		// CRLF only: cmd mis-parses labels in LF-only files.
 		expect(cmd.replaceAll("\r\n", "")).not.toMatch(/[\r\n]/);
+	});
+
+	it("always powers off; failures are counted and logged as DONE errors <n>", () => {
+		expect(cmd).not.toMatch(/^:hang/m);
+		const code = cmd.split("\r\n").filter((l) => !/^\s*rem\b/i.test(l));
+		expect(code.filter((l) => l.includes("wpeutil shutdown"))).toEqual([
+			"wpeutil shutdown",
+		]);
+		expect(section(cmd, "shutdown").join("\n")).toContain("wpeutil shutdown");
+		for (const label of ["no_virtio", "no_windows", "no_hive"]) {
+			const body = section(cmd, label).join("\n");
+			expect(body, label).toContain("set /a ERRORS+=1");
+			expect(body, label).toContain("call :log ERROR");
+			expect(body.trim().endsWith("goto finish"), label).toBe(true);
+		}
+		const finish = section(cmd, "finish").join("\n");
+		expect(finish).toContain("call :log DONE errors %ERRORS%");
+		expect(finish).toContain(
+			'copy /y "%LOG%" "%WIN%\\Windows\\Setup\\Scripts\\sbx-offline.log"',
+		);
+		// No path skips the log line or the shutdown: finish falls through to shutdown.
+		expect(finish).not.toMatch(/exit \/b/);
+		expect(cmd.indexOf(":finish")).toBeLessThan(cmd.indexOf(":shutdown"));
+	});
+
+	it("the diskpart fallback brings disk 0 online and writable", () => {
+		const dp = section(cmd, "assign_letter")
+			.filter((l) => l.includes("sbx-diskpart.txt echo"))
+			.map((l) => l.replace(/^.*sbx-diskpart\.txt echo /, ""));
+		expect(dp).toEqual([
+			"select disk 0",
+			"rescan",
+			"online disk noerr",
+			"attributes disk clear readonly noerr",
+			"select partition 3",
+			"assign letter=W noerr",
+		]);
 	});
 });
 
@@ -288,6 +327,39 @@ describe("buildIsoFiles", () => {
 			true,
 		);
 		expect(files.has("build/lib.ps1")).toBe(false);
+	});
+
+	it("rejects step and files/ names Joliet would truncate", () => {
+		const r = recipe();
+		const long = "a".repeat(62);
+		const dir = mkdtempSync(join(tmpdir(), "sbx-media-test-"));
+		try {
+			mkdirSync(join(dir, "steps"));
+			writeFileSync(join(dir, "steps", `${long}.ps1`), "Write-Output 1\n");
+			const withStep = {
+				...r,
+				steps: [...r.steps, long],
+				stepDirs: [...r.stepDirs, dir],
+			};
+			expect(() => buildIsoFiles(input({ recipe: withStep }))).toThrow(
+				new RegExp(`${long}\\.ps1.*64 characters`),
+			);
+
+			rmSync(join(dir, "steps"), { recursive: true });
+			mkdirSync(join(dir, "files", "x"), { recursive: true });
+			writeFileSync(join(dir, "files", "x", `${long}.txt`), "x\n");
+			const withFile = { ...r, stepDirs: [...r.stepDirs, dir] };
+			expect(() => buildIsoFiles(input({ recipe: withFile }))).toThrow(
+				/build\/files\/x\/a+\.txt.*64 characters/,
+			);
+			// 64 characters is still fine.
+			rmSync(join(dir, "files"), { recursive: true });
+			mkdirSync(join(dir, "files"));
+			writeFileSync(join(dir, "files", `${"b".repeat(60)}.txt`), "x\n");
+			expect(() => buildIsoFiles(input({ recipe: withFile }))).not.toThrow();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("rejects an agent version that is not a safe file name", () => {

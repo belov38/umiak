@@ -4,7 +4,9 @@ rem the offline SYSTEM hive of the sealed Windows, then powers the VM off.
 rem WinPE of Windows Setup has no PowerShell: cmd, reg, drvload, diskpart only.
 rem offline-config.cmd (written by sbx-tpl) sets SBX_DRIVERS and SBX_SERVICES.
 rem Log lines: OK / MISSING / ERROR <key>, last line "DONE errors <n>".
-rem Any error: the script hangs, Setup never continues, the builder times out.
+rem The script always ends with wpeutil shutdown, so Setup never continues. On
+rem errors the log (copied to the Windows volume when one was found) records
+rem them and verify fails the template.
 setlocal EnableExtensions
 set "SRC=%~d0"
 set "LOG=X:\sbx-offline.log"
@@ -48,11 +50,15 @@ if errorlevel 1 (
   set /a ERRORS+=1
   call :log ERROR reg unload failed
 )
-if not exist "%WIN%\Windows\Setup\Scripts" mkdir "%WIN%\Windows\Setup\Scripts"
+
+:finish
 call :log DONE errors %ERRORS%
+if not defined WIN goto shutdown
+if not exist "%WIN%\Windows\Setup\Scripts" mkdir "%WIN%\Windows\Setup\Scripts"
 copy /y "%LOG%" "%WIN%\Windows\Setup\Scripts\sbx-offline.log" >nul
-if errorlevel 1 goto hang
-if not %ERRORS% EQU 0 goto hang
+if errorlevel 1 echo ERROR copy of the log to %WIN% failed
+
+:shutdown
 wpeutil shutdown
 exit /b 0
 
@@ -90,8 +96,12 @@ exit /b 0
 
 :assign_letter
 rem No letter from automount: the build put Windows on partition 3 of disk 0.
+rem A disk that WinPE sees as offline or read-only is brought online first.
 call :log assigning W: to disk 0 partition 3
 > X:\sbx-diskpart.txt echo select disk 0
+>> X:\sbx-diskpart.txt echo rescan
+>> X:\sbx-diskpart.txt echo online disk noerr
+>> X:\sbx-diskpart.txt echo attributes disk clear readonly noerr
 >> X:\sbx-diskpart.txt echo select partition 3
 >> X:\sbx-diskpart.txt echo assign letter=W noerr
 diskpart /s X:\sbx-diskpart.txt >> "%LOG%" 2>&1
@@ -103,18 +113,18 @@ echo %*
 exit /b 0
 
 :no_virtio
+set /a ERRORS+=1
 call :log ERROR no drive with vioscsi\%SBX_DRIVERS%\amd64\vioscsi.inf
-goto hang
+rem Without the disk driver no Windows volume shows up: nowhere to copy the log.
+set WIN=
+goto finish
 
 :no_windows
+set /a ERRORS+=1
 call :log ERROR no volume with Windows\System32\config\SYSTEM
-goto hang
+goto finish
 
 :no_hive
+set /a ERRORS+=1
 call :log ERROR reg load of the offline SYSTEM hive failed
-goto hang
-
-:hang
-rem Setup must not continue to its UI: wait here until the builder gives up.
-ping -n 60 127.0.0.1 >nul
-goto hang
+goto finish

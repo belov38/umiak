@@ -245,6 +245,10 @@ describe("renderAutounattend", () => {
 		expect(cmds).toContain(
 			"reg.exe add HKLM\\SYSTEM\\CurrentControlSet\\Control\\BitLocker /v PreventDeviceEncryption /t REG_DWORD /d 1 /f",
 		);
+		// The build OOBE runs with the NIC link down.
+		expect(cmds).toContain(
+			'reg.exe add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f',
+		);
 		const copy = cmds.find((c) => c.includes("SetupComplete.cmd copy"));
 		expect(copy).toBeDefined();
 		expect(copy).toContain("%d:\\build\\SetupComplete.cmd");
@@ -263,6 +267,7 @@ describe("renderAutounattend", () => {
 		const shell = component(oobe, "Microsoft-Windows-Shell-Setup");
 		expect(shell.OOBE).toMatchObject({
 			HideEULAPage: "true",
+			HideLocalAccountScreen: "true",
 			HideOEMRegistrationScreen: "true",
 			HideOnlineAccountScreens: "true",
 			HideWirelessSetupInOOBE: "true",
@@ -317,6 +322,7 @@ describe("SBX_UNATTEND", () => {
 		const shell = component(oobe, "Microsoft-Windows-Shell-Setup");
 		expect(shell.OOBE).toMatchObject({
 			HideEULAPage: "true",
+			HideLocalAccountScreen: "true",
 			HideOEMRegistrationScreen: "true",
 			HideOnlineAccountScreens: "true",
 			HideWirelessSetupInOOBE: "true",

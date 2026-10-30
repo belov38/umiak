@@ -51,12 +51,17 @@ function crlf(s: string): string {
 export function agentPackageName(version: string): string {
 	if (!AGENT_VERSION_RE.test(version))
 		throw new Error(`invalid agent version "${version}"`);
-	const name = `sbx-agent-${version}-windows-amd64.tar`;
-	if (name.length > JOLIET_NAME_MAX)
-		throw new Error(
-			`agent package name "${name}" is longer than ${JOLIET_NAME_MAX} characters (Joliet)`,
-		);
-	return name;
+	return `sbx-agent-${version}-windows-amd64.tar`;
+}
+
+/** Windows reads the Joliet tree; xorriso would silently truncate longer names. */
+function assertJolietNames(files: Map<string, string | Buffer>): void {
+	for (const path of files.keys())
+		for (const name of path.split("/"))
+			if (name.length > JOLIET_NAME_MAX)
+				throw new Error(
+					`ISO file ${path}: name "${name}" is longer than ${JOLIET_NAME_MAX} characters (Joliet)`,
+				);
 }
 
 export interface BuildIsoInput {
@@ -149,6 +154,7 @@ export function buildIsoFiles(i: BuildIsoInput): Map<string, string | Buffer> {
 	// Always present, empty without a CA, so 50-sbx-agent copies it unconditionally.
 	out.set("build/ssh-user-ca.pub", i.sshUserCa ?? "");
 	out.set("build/sbx-unattend.xml", read("sbx-unattend.xml"));
+	assertJolietNames(out);
 	return out;
 }
 

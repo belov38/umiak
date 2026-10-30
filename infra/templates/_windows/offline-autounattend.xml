@@ -2,8 +2,9 @@
 <!--
   Offline WinPE stage after sysprep (spec S9 sections 6.4, 10.3). Windows Setup
   finds this file in the root of the offline ISO (label SBXOFFL) and runs
-  offline.cmd in the windowsPE pass. offline.cmd powers the VM off, so Setup
-  never installs anything; on a failure it hangs and the builder times out.
+  offline.cmd in the windowsPE pass. offline.cmd always powers the VM off, so
+  Setup never installs anything; failures are recorded in sbx-offline.log on
+  the Windows volume ("DONE errors <n>") and verify fails the template.
   An implicitly found answer file suppresses the language page, so no
   International-Core-WinPE (it would have to match the ISO's language).
 -->

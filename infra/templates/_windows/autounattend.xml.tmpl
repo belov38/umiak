@@ -93,13 +93,18 @@
           <Order>1</Order>
           <Path>reg.exe add HKLM\SYSTEM\CurrentControlSet\Control\BitLocker /v PreventDeviceEncryption /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
+        <!-- OOBE of the build runs with the NIC link down: never ask for a network. -->
         <RunSynchronousCommand wcm:action="add">
           <Order>2</Order>
+          <Path>reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
           <Path>cmd.exe /c "if not exist C:\Windows\Setup\Scripts mkdir C:\Windows\Setup\Scripts"</Path>
         </RunSynchronousCommand>
         <!-- The build ISO (label SBXBUILD) is the only drive with build\SetupComplete.cmd. -->
         <RunSynchronousCommand wcm:action="add">
-          <Order>3</Order>
+          <Order>4</Order>
           <Path>cmd.exe /c "for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\build\SetupComplete.cmd copy /y %d:\build\SetupComplete.cmd C:\Windows\Setup\Scripts\SetupComplete.cmd"</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
