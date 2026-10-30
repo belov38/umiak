@@ -315,7 +315,7 @@ message Pty { uint32 cols = 1; uint32 rows = 2; string term = 3; } // term defau
 - `tail_bytes` — начать каждый поток с `max(available_from, size − tail_bytes)`, для scrollback терминала;
 - `follow` — по умолчанию `true`. При `false` отдать имеющееся и закрыть стрим; `exit` придёт, если команда уже завершилась.
 
-`CommandInfo` (в ответах `Start`, `Get`, `List`): `command_id`, spec без значений env (только ключи), `state` (`STARTING`, `RUNNING`, `EXITED`), `pid`, `started_at`, `ended_at`, `exit` (`status`: `EXITED`/`KILLED`/`LOST`; `code`, `signal`, `reason`: `NONE`/`SIGNAL`/`TIMEOUT`/`OOM`/`PTY_IDLE`/`REBOOT`/`SHIM_LOST`/`START_FAILED`), по каждому потоку `size`, `available_from` и `end` (после выхода), `has_leftovers`, `attached_clients`, `agent_version` shim-а. Статусы `exited/killed/lost` — как в S2; `reason` — добавленное поле.
+`CommandInfo` (в ответах `Start`, `Get`, `List`): `command_id`, spec без значений env (только ключи), `state` (`STARTING`, `RUNNING`, `EXITED`), `pid`, `started_at`, `ended_at`, `exit` (`status`: `EXITED`/`KILLED`/`LOST`; `code`, `signal`, `reason`: `NONE`/`SIGNAL`/`TIMEOUT`/`OOM`/`PTY_IDLE`/`REBOOT`/`SHIM_LOST`/`START_FAILED`), по каждому потоку `size`, `available_from` и `end` (после выхода), `has_leftovers`, `attached_clients`, `agent_version` shim-а, `output_truncated` (`""` или `disk_full`: часть вывода не записана из-за нехватки места; offset-ы и `end` относятся только к записанному). Статусы `exited/killed/lost` — как в S2; `reason` — добавленное поле.
 
 ### 9.2 Start: durable и ровно один запуск
 
@@ -492,7 +492,7 @@ Shim запускается из `versions/<v>/`; эта версия не уд�
 **CONNECT** (S2 §4.2). Агент принимает `CONNECT <host>:<port>` от gateway:
 - `host` — `localhost`, `127.0.0.1` или пусто: агент пробует по очереди `127.0.0.1`, `[::1]`, затем адреса интерфейсов VM (сначала IPv4, потом IPv6), на каждую попытку 1 s. Подключение отказано → следующий адрес. Так сервис, который слушает только `::1` или только адрес интерфейса, тоже доступен (так ожидает S4, отдельный флаг `--localhost` не нужен). Порядок можно начать с адреса, на котором порт виден в обнаружении, — результат тот же;
 - другой адрес VM — подключение строго к нему;
-- адрес не из VM → `403`; порт вне 1–65535 → `400`; все попытки отказаны → `502` с `Sbx-Dial-Error: refused` (или `timeout`, если все попытки истекли по времени);
+- адрес не из VM → `403`; порт вне 1–65535 → `400`; все попытки отказаны → `502` с `Sbx-Dial-Error: refused` (или `timeout`, если хотя бы одна попытка или общий срок 10 s истекли по времени);
 - поток полный дуплекс, half-close через END_STREAM; сокеты принадлежат агенту и рвутся при его перезапуске (S2 §11).
 
 ## 13. System: информация, метрики, простой
@@ -604,6 +604,7 @@ Payload — сообщения из `proto/sbx/agent/v1/events.proto`, в кон
 | `disk.low`, `disk.ok` | `mount, free_bytes` | порог §10 |
 | `update.result` | `from, to, ok, rolled_back, error` | после обновления или отката |
 | `journal.gap` | `from_seq, to_seq` | переполнение журнала |
+| `output.truncated` | `command_id, stream, reason (disk_full)` | shim не смог записать часть вывода (`ENOSPC`/`EDQUOT`); один раз на поток, агент узнаёт при подключении к shim или при выходе команды |
 
 `command.started` не нужен: команду создаёт control plane и знает о ней из ответа `Start`.
 
