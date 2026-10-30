@@ -1,0 +1,10 @@
+# Template network (spec S5 section 8.4): DHCP on any en* NIC, no MAC binding.
+network:
+  version: 2
+  ethernets:
+    en:
+      match:
+        name: "en*"
+      dhcp4: true
+      dhcp6: false
+      accept-ra: false
