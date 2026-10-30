@@ -3,8 +3,8 @@
 # Runs on the operator's Mac and executes each step on the host over SSH (root).
 # Spec: docs/specs/s1-proxmox-foundation.md section 4.
 #
-#   infra/pve/setup.sh [--dry-run] <user|net|sdn|node|fw|template|media|cp|cp-gateway|cp-tailscale|status>
-#   infra/pve/setup.sh [--dry-run] revert <user|net|sdn|node|fw|template|media|cp|cp-gateway>
+#   infra/pve/setup.sh [--dry-run] <user|net|sdn|node|fw|template|media|console|cp|cp-gateway|cp-tailscale|status>
+#   infra/pve/setup.sh [--dry-run] revert <user|net|sdn|node|fw|template|media|console|cp|cp-gateway>
 #
 # Every step is idempotent: it checks whether it is already done, applies, then verifies.
 # The cp* steps are dev-only: the control-plane container (CT 590) for end-to-end tests.
@@ -688,6 +688,45 @@ pveum role delete SbxTemplateMedia || true
 EOF
 }
 
+# ---------------------------------------------------------------- console (S9 Windows build: sendkey)
+
+# VM.Console is its own role, not part of SbxPoC: the template builder presses keys at the
+# "Press any key to boot from CD" prompt of the Windows installer (PUT .../qemu/<id>/sendkey).
+step_console() {
+	log "console: role SbxConsole (VM.Console) on /pool/sandbox for sbx@pve and its token"
+	remote <<'EOF'
+if pveum role list --output-format json | grep -q '"roleid":"SbxConsole"'; then
+	pveum role modify SbxConsole --privs VM.Console
+else
+	pveum role add SbxConsole --privs VM.Console
+fi
+pveum acl modify /pool/sandbox --users sbx@pve --roles SbxConsole
+pveum acl modify /pool/sandbox --tokens 'sbx@pve!poc' --roles SbxConsole
+EOF
+	if ((DRY)); then
+		printf -- '+ curl GET https://pve:8006/api2/json/access/permissions?path=/pool/sandbox with the token, expect VM.Console\n'
+		return 0
+	fi
+	verify_console
+}
+
+verify_console() {
+	local out
+	out=$(curl -sS --cacert "$CFG_DIR/pve-root-ca.pem" --resolve "pve:8006:$TS_IP" \
+		-H "Authorization: PVEAPIToken=sbx@pve!poc=$(cat "$CFG_DIR/pve-token")" \
+		"https://pve:8006/api2/json/access/permissions?path=/pool/sandbox")
+	[[ "$out" == *'"VM.Console":1'* ]] || die "console: token lacks VM.Console on /pool/sandbox: $out"
+	log "console: token has VM.Console on /pool/sandbox"
+}
+
+revert_console() {
+	remote <<'EOF'
+pveum acl delete /pool/sandbox --users sbx@pve --roles SbxConsole || true
+pveum acl delete /pool/sandbox --tokens 'sbx@pve!poc' --roles SbxConsole || true
+pveum role delete SbxConsole || true
+EOF
+}
+
 # ---------------------------------------------------------------- dev control plane (CT)
 
 # cp_fw prints the firewall of the CT: inbound only from the LAN. Sandboxes arrive SNAT-ed from
@@ -951,7 +990,8 @@ s "rollback timer inactive"     "! systemctl is-active sbx-fw-rollback.timer"
 s "sbx-node installed"          "test -x /usr/local/bin/sbx-node && test -f /etc/sbx-node.toml"
 s "sbx-node key"                "grep -q 'boat-dev-clone S1 sbx-node' /etc/pve/priv/authorized_keys"
 s "role SbxTemplateMedia"       "pveum role list --output-format json | grep -q '\"roleid\":\"SbxTemplateMedia\"'"
-s "template $ID"                "qm config $ID | grep -q '^template: 1'"
+s "role SbxConsole"             "pveum role list --output-format json | grep -q '\"roleid\":\"SbxConsole\"'"
+s "template $ID"               "qm config $ID | grep -q '^template: 1'"
 s "base-$ID-disk-0 tagged"      "lvs -o lv_tags --noheadings pve/base-$ID-disk-0 | grep -q sbx-tpl"
 s "dev cp CT $CP running"       "pct status $CP | grep -q running"
 s "dev cp $CP_IP in sbx-gateway" "ipset list PVEFW-0-sbx-gateway-v4 | grep -qx $CP_IP"
@@ -967,11 +1007,11 @@ usage() {
 
 cmd="${1:-}"
 case "$cmd" in
-user | net | sdn | node | fw | template | media | cp | status) "step_$cmd" ;;
+user | net | sdn | node | fw | template | media | console | cp | status) "step_$cmd" ;;
 cp-gateway | cp-tailscale) "step_${cmd//-/_}" ;;
 revert)
 	case "${2:-}" in
-	user | net | sdn | node | fw | template | media | cp) "revert_$2" ;;
+	user | net | sdn | node | fw | template | media | console | cp) "revert_$2" ;;
 	cp-gateway) revert_cp_gateway ;;
 	*) usage ;;
 	esac

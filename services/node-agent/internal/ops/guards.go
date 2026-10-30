@@ -19,7 +19,7 @@ var (
 	baseRe     = regexp.MustCompile(`^base-([1-9][0-9]*)-[a-z0-9+_.-]+$`)
 	vmAnyRe    = regexp.MustCompile(`^vm-([1-9][0-9]*)-[a-z0-9+_.-]+$`)
 	vmDiskRe   = regexp.MustCompile(`^vm-([1-9][0-9]*)-disk-[0-9]+$`)
-	mediaISORe = regexp.MustCompile(`^sbx-seed-[a-z0-9-]{1,64}\.iso$`)
+	mediaISORe = regexp.MustCompile(`^sbx-(seed|build|offline)-[a-z0-9-]{1,64}\.iso$|^sbx-virtio-win-[0-9]+\.[0-9]+\.[0-9]+\.iso$`)
 	mediaImgRe = regexp.MustCompile(`^sbx-[a-z0-9.+_-]{1,96}\.(qcow2|img|raw)$`)
 	snapLVRe   = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})-([a-z0-9]{1,16})$`)
 	vmTagRe    = regexp.MustCompile(`^sbx-(vm|src)-([1-9][0-9]*)$`)

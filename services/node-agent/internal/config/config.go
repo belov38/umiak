@@ -30,6 +30,7 @@ type Config struct {
 	MacCacheFile string `toml:"macCacheFile" json:"macCacheFile"`
 	IsoDir       string `toml:"isoDir" json:"isoDir"`
 	ImportDir    string `toml:"importDir" json:"importDir"`
+	StateDir     string `toml:"stateDir" json:"stateDir"` // sbx-node's own cache files (media.sha256)
 }
 
 // Default returns the PoC values from the S1 spec.
@@ -49,6 +50,7 @@ func Default() Config {
 		MacCacheFile: "/etc/pve/sdn/mac-cache.json",
 		IsoDir:       "/var/lib/vz/template/iso",
 		ImportDir:    "/var/lib/vz/import",
+		StateDir:     "/var/lib/sbx-node",
 	}
 }
 
@@ -76,8 +78,8 @@ func (c Config) Validate() error {
 		return errors.New("templateVmid must be inside the vmid range")
 	case c.ClusterID < 0 || c.ClusterID > 255:
 		return errors.New("clusterId must fit in one byte")
-	case c.IsoDir == "" || c.ImportDir == "":
-		return errors.New("isoDir and importDir must not be empty")
+	case c.IsoDir == "" || c.ImportDir == "" || c.StateDir == "":
+		return errors.New("isoDir, importDir and stateDir must not be empty")
 	case c.VG == "" || c.ThinPool == "" || c.VNet == "" || c.Node == "":
 		return errors.New("vg, thinPool, vnet and node are required")
 	}

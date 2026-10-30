@@ -8,7 +8,7 @@ infra/pve/setup.sh [--dry-run] revert <step>
 infra/pve/setup.sh status
 ```
 
-Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (then, for the dev control plane, `cp` → `cp-gateway` → `cp-tailscale`); `media` is independent (S5, run after `user`). Each step checks whether it is already done, applies and verifies. `--dry-run` prints the remote scripts.
+Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (then, for the dev control plane, `cp` → `cp-gateway` → `cp-tailscale`); `media` (S5) and `console` (S9) are independent (run after `user`). Each step checks whether it is already done, applies and verifies. `--dry-run` prints the remote scripts.
 
 | Step | What |
 |---|---|
@@ -19,11 +19,12 @@ Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (t
 | `fw` | `cluster.fw` (IPSets, group `sbx-egress`) and `host.fw` (`enable: 0`), then enables the datacenter firewall with a 5-minute automatic rollback. Cancels the rollback only if every check that passed before still passes |
 | `template` | template 599 from a thin snapshot of `base-9000-disk-0`, sanitized offline by `template-sanitize.sh` before it ever boots (no Tailscale, no personal credentials, clean cloud-init and machine-id, MAC-independent DHCP) |
 | `media` | role `SbxTemplateMedia` (`Datastore.AllocateTemplate`, `Datastore.Audit`) on `/storage/local` for `sbx@pve` and its token, so the template builder can upload seed ISOs and import images. Verified through `GET /access/permissions` with the token. `revert media` removes the ACLs and the role |
+| `console` | role `SbxConsole` (`VM.Console`) on `/pool/sandbox` for `sbx@pve` and its token, so the Windows template builder can `sendkey` at the "Press any key to boot from CD" prompt. Verified through `GET /access/permissions` with the token. `revert console` removes the ACLs and the role |
 | `cp` | dev only: CT 590 `sbx-dev-cp` for the compose stack (unprivileged Debian, Docker, Tailscale package, own firewall). See `infra/dev-cp/README.md` |
 | `cp-gateway` | dev only: the CT address into IPSet `sbx-gateway`, with a 3-minute automatic rollback and the same checks as `fw` |
 | `cp-tailscale` | dev only: joins the CT to the tailnet; prints the login URL until it is approved |
 
-`sbx-node` also serves `media.list` (files `sbx-seed-*.iso` in `/var/lib/vz/template/iso`, `sbx-*.{qcow2,img,raw}` in `/var/lib/vz/import`) and `media.remove {"names": [...]}`, which deletes only such regular files (no symlinks, no paths). Directories come from `isoDir` and `importDir` in `/etc/sbx-node.toml`. Snapshots (clones) are allowed from any `base-<id>-*` disk with `id` in the VMID range; a template's VMID cannot be reused for a sandbox disk. `templateVmid = 599` stays in the config so the legacy template remains protected; new templates need no config change.
+`sbx-node` also serves `media.list` (files `sbx-{seed,build,offline}-*.iso` and `sbx-virtio-win-<x.y.z>.iso` in `/var/lib/vz/template/iso`, `sbx-*.{qcow2,img,raw}` in `/var/lib/vz/import`) and `media.remove {"names": [...]}`, which deletes only such regular files (no symlinks, no paths). `media.sha256 {"name": "<file>.iso"}` is read-only: it hashes any regular `.iso` directly in `isoDir` (the user's own Windows ISO included; no `/`, `..` or symlinks) and caches the digest by name, size and mtime in `<stateDir>/media-sha256.json`. Directories come from `isoDir`, `importDir` and `stateDir` (default `/var/lib/sbx-node`) in `/etc/sbx-node.toml`. Snapshots (clones) are allowed from any `base-<id>-*` disk with `id` in the VMID range; a template's VMID cannot be reused for a sandbox disk. `templateVmid = 599` stays in the config so the legacy template remains protected; new templates need no config change.
 
 ## VMID layout on `pve`
 

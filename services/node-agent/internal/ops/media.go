@@ -2,14 +2,18 @@ package ops
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 // mediaKind is one directory of template builder files and the names allowed in it.
@@ -19,6 +23,8 @@ type mediaKind struct {
 	dir func(s *Server) string
 }
 
+// The iso names are seed, build and offline ISOs plus the pinned virtio-win ISO. The user's own Windows
+// ISO is deliberately not allowed here: the builder only reads it (media.sha256) and never deletes it.
 var mediaKinds = []mediaKind{
 	{"iso", mediaISORe, func(s *Server) string { return s.Cfg.IsoDir }},
 	{"import", mediaImgRe, func(s *Server) string { return s.Cfg.ImportDir }},
@@ -101,4 +107,117 @@ func (s *Server) mediaRemove(_ context.Context, raw json.RawMessage) (any, error
 		removed = append(removed, filepath.Base(path))
 	}
 	return map[string]any{"removed": removed, "missing": missing}, nil
+}
+
+// shaCacheEntry is one remembered digest, valid while the file keeps its size and mtime.
+type shaCacheEntry struct {
+	Size   int64  `json:"size"`
+	MTime  int64  `json:"mtimeNs"`
+	SHA256 string `json:"sha256"`
+}
+
+func (s *Server) shaCachePath() string { return filepath.Join(s.Cfg.StateDir, "media-sha256.json") }
+
+// loadShaCache returns the cache, or an empty one if the file is missing or unreadable: the cache is
+// an optimization and never a reason to fail.
+func (s *Server) loadShaCache() map[string]shaCacheEntry {
+	cache := map[string]shaCacheEntry{}
+	data, err := os.ReadFile(s.shaCachePath())
+	if err != nil || json.Unmarshal(data, &cache) != nil || cache == nil {
+		return map[string]shaCacheEntry{}
+	}
+	return cache
+}
+
+// saveShaCache replaces the cache file atomically. A failure is logged, not returned.
+func (s *Server) saveShaCache(cache map[string]shaCacheEntry) {
+	if err := s.writeShaCache(cache); err != nil && s.Log != nil {
+		s.Log(fmt.Sprintf("media.sha256: cache not saved: %v", err))
+	}
+}
+
+func (s *Server) writeShaCache(cache map[string]shaCacheEntry) error {
+	data, err := json.Marshal(cache)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.Cfg.StateDir, 0o750); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(s.Cfg.StateDir, "media-sha256-*.tmp")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(data)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), s.shaCachePath())
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return err
+}
+
+// mediaSHA256 hashes one .iso file directly in IsoDir. Read-only and not limited to our own name
+// patterns: the builder uses it to verify the user's Windows ISO.
+func (s *Server) mediaSHA256(_ context.Context, raw json.RawMessage) (any, error) {
+	var args struct {
+		Name string `json:"name"`
+	}
+	if err := decodeArgs(raw, &args); err != nil {
+		return nil, err
+	}
+	name := args.Name
+	switch {
+	case name == "":
+		return nil, badReq("name is required")
+	case strings.ContainsAny(name, "/\\\x00") || strings.Contains(name, ".."):
+		return nil, forbidden("media name %q must be a plain file name", name)
+	case !strings.HasSuffix(name, ".iso"):
+		return nil, forbidden("media name %q is not an .iso file", name)
+	}
+	path := filepath.Join(s.Cfg.IsoDir, name)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, forbidden("media %q is not a regular file", name)
+	}
+
+	cache := s.loadShaCache()
+	if e, ok := cache[name]; ok && e.Size == info.Size() && e.MTime == info.ModTime().UnixNano() {
+		return map[string]any{"name": name, "size": e.Size, "sha256": e.SHA256}, nil
+	}
+
+	// O_NOFOLLOW and the SameFile check close the window between Lstat and open.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) //nolint:gosec // name is validated above
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return nil, forbidden("media %q changed while opening", name)
+	}
+	if s.OnHash != nil {
+		s.OnHash(name)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	// Cache only if the file did not change while it was being read.
+	if after, err := f.Stat(); err == nil && after.Size() == opened.Size() && after.ModTime().Equal(opened.ModTime()) {
+		cache[name] = shaCacheEntry{Size: opened.Size(), MTime: opened.ModTime().UnixNano(), SHA256: sum}
+		s.saveShaCache(cache)
+	}
+	return map[string]any{"name": name, "size": opened.Size(), "sha256": sum}, nil
 }

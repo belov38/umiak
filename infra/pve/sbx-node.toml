@@ -15,3 +15,5 @@ ethersFile = "/etc/dnsmasq.d/sbx/ethers"
 macCacheFile = "/etc/pve/sdn/mac-cache.json"
 isoDir = "/var/lib/vz/template/iso"
 importDir = "/var/lib/vz/import"
+# sbx-node's own state (media.sha256 cache); created on first use.
+stateDir = "/var/lib/sbx-node"
