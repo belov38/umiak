@@ -92,6 +92,16 @@ export class Output {
 		this.#stdout.write(chunk);
 	}
 
+	/** Data of a raw command meant for stderr (exec's stderr), as is. */
+	errData(chunk: string | Uint8Array): void {
+		this.#stderr.write(chunk);
+	}
+
+	/** A question for the person on stderr, without a new line. */
+	prompt(question: string): void {
+		this.#stderr.write(question);
+	}
+
 	/** A note for the person (progress, prompts): always stderr. */
 	info(message: string): void {
 		this.#line(this.#stderr, message);

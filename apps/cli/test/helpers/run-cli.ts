@@ -46,6 +46,8 @@ export interface RunOptions {
 	/** The whole env of the process (start from `cliHome().env`); undefined removes. */
 	env: Record<string, string | undefined>;
 	stdin?: string;
+	/** Write `stdin` but keep the pipe open until the process exits. */
+	stdinOpen?: boolean;
 	/** Treat stdout as a terminal (default: not, as a pipe is). */
 	tty?: boolean;
 	timeoutMs?: number;
@@ -54,6 +56,8 @@ export interface RunOptions {
 export interface CliResult {
 	code: number;
 	stdout: string;
+	/** stdout as bytes. */
+	stdoutBytes: Buffer;
 	stderr: string;
 	/** stdout parsed as JSON Lines. */
 	lines(): Record<string, unknown>[];
@@ -71,10 +75,10 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 			env,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
-		let stdout = "";
+		const out: Buffer[] = [];
 		let stderr = "";
-		child.stdout.setEncoding("utf8").on("data", (s: string) => {
-			stdout += s;
+		child.stdout.on("data", (b: Buffer) => {
+			out.push(b);
 		});
 		child.stderr.setEncoding("utf8").on("data", (s: string) => {
 			stderr += s;
@@ -86,6 +90,8 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 		child.on("error", reject);
 		child.on("close", (code) => {
 			clearTimeout(timer);
+			const stdoutBytes = Buffer.concat(out);
+			const stdout = stdoutBytes.toString("utf8");
 			const lines = () =>
 				stdout
 					.split("\n")
@@ -94,6 +100,7 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 			resolve({
 				code: code ?? -1,
 				stdout,
+				stdoutBytes,
 				stderr,
 				lines,
 				last: () => {
@@ -105,6 +112,8 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 				},
 			});
 		});
-		child.stdin.end(o.stdin ?? "");
+		child.stdin.on("error", () => {});
+		if (o.stdinOpen === true) child.stdin.write(o.stdin ?? "");
+		else child.stdin.end(o.stdin ?? "");
 	});
 }

@@ -14,11 +14,29 @@
 import { Command, CommanderError } from "commander";
 import type { SecretsBackend } from "./auth/keychain.ts";
 import { register as registerAuthToken } from "./commands/auth-token.ts";
+import { register as registerCatalog } from "./commands/catalog.ts";
 import { register as registerCompletion } from "./commands/completion.ts";
+import { register as registerCreate } from "./commands/create.ts";
 import { register as registerCurrent } from "./commands/current.ts";
+import { register as registerEnv } from "./commands/env.ts";
+import { register as registerEnvSets } from "./commands/env-sets.ts";
+import { register as registerExec } from "./commands/exec.ts";
+import { register as registerExtend } from "./commands/extend.ts";
+import { register as registerInfo } from "./commands/info.ts";
+import { register as registerKeys } from "./commands/keys.ts";
+import { register as registerKill } from "./commands/kill.ts";
+import { register as registerLabel } from "./commands/label.ts";
+import { register as registerLifecycle } from "./commands/lifecycle.ts";
+import { register as registerList } from "./commands/list.ts";
 import { register as registerLogin } from "./commands/login.ts";
 import { register as registerLogout } from "./commands/logout.ts";
+import { register as registerLogs } from "./commands/logs.ts";
 import { register as registerMcp } from "./commands/mcp.ts";
+import { register as registerPs } from "./commands/ps.ts";
+import { register as registerRename } from "./commands/rename.ts";
+import { register as registerRm } from "./commands/rm.ts";
+import { register as registerRun } from "./commands/run.ts";
+import { register as registerSnapshot } from "./commands/snapshot.ts";
 import {
 	CLI_VERSION,
 	register as registerVersion,
@@ -95,7 +113,25 @@ export function buildProgram(io: CliIo, run: Runner): Command {
 	registerLogout(program, run);
 	registerWhoami(program, run);
 	registerAuthToken(program, run);
+	registerCreate(program, run);
+	registerList(program, run);
+	registerInfo(program, run);
+	registerLifecycle(program, run);
+	registerRm(program, run);
 	registerCurrent(program, run);
+	registerRename(program, run);
+	registerExtend(program, run);
+	registerLabel(program, run);
+	registerEnv(program, run);
+	registerExec(program, run);
+	registerLogs(program, run);
+	registerKill(program, run);
+	registerPs(program, run);
+	registerRun(program, run);
+	registerSnapshot(program, run);
+	registerCatalog(program, run);
+	registerKeys(program, run);
+	registerEnvSets(program, run);
 	registerVersion(program, run);
 	registerCompletion(program, run);
 	registerMcp(program, run);

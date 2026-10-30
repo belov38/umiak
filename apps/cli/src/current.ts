@@ -143,3 +143,18 @@ export async function useSandbox(
 	if (r.explicit) writeCurrent(ctx, sb.id);
 	return sb;
 }
+
+/**
+ * Makes an explicit `<sb>` current when the command's answer has no
+ * sandbox: an id as is, a slug through its id (a rename keeps it current).
+ */
+export async function rememberExplicit(
+	ctx: Context,
+	r: SandboxRef,
+): Promise<void> {
+	if (!r.explicit) return;
+	const id = r.ref.startsWith("sb_")
+		? r.ref
+		: (await ctx.sbx().sandboxes.get(r.ref)).id;
+	writeCurrent(ctx, id);
+}

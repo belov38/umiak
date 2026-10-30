@@ -15,7 +15,8 @@ import {
 	type TestOidcServerOptions,
 	testSettings,
 } from "@sbx/api/testing";
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid, PgEnvironmentStore } from "@sbx/auth";
+import { validateSecretSets } from "@sbx/core";
 import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 
@@ -36,7 +37,31 @@ export interface CliWorld {
 	key(): Promise<string>;
 	/** Creates a sandbox in the team through the api; returns {id, slug}. */
 	createSandbox(): Promise<{ id: string; slug: string }>;
+	/** The worker's end of create/resume/recover: ready, machine running, operations succeeded. */
+	markReady(slug: string): Promise<void>;
+	/** The worker's end of stop: stopped, machine stopped, operations succeeded. */
+	markStopped(slug: string): Promise<void>;
+	/** The worker's end of a failed create: error, operations failed. */
+	markError(slug: string): Promise<void>;
+	/** The worker's end of save_snapshot: the snapshot `name` is ready. */
+	markSnapshotReady(name: string): Promise<void>;
+	/** A ready sandbox created through the api. */
+	readySandbox(): Promise<{ id: string; slug: string }>;
 	close(): Promise<void>;
+}
+
+/** Polls `fn` until it returns a value (not undefined); fails after `ms`. */
+export async function until<T>(
+	fn: () => Promise<T | undefined>,
+	ms = 10_000,
+): Promise<T> {
+	const end = Date.now() + ms;
+	for (;;) {
+		const v = await fn();
+		if (v !== undefined) return v;
+		if (Date.now() > end) throw new Error("until: timed out");
+		await new Promise((r) => setTimeout(r, 50));
+	}
 }
 
 export interface WorldOptions {
@@ -45,13 +70,18 @@ export interface WorldOptions {
 	settings?: Record<string, string>;
 	/** A started OIDC server to use instead of a new one. */
 	oidcServer?: TestOidcServer;
+	/** Logger of the api (captureLogs().log), for debugging. */
+	log?: ApiDeps["log"];
 }
 
 export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 	const db = await createTestDatabase({ max: 20 });
 	const pool = db.pool;
 	const oidc = o.oidcServer ?? (await startTestOidcServer(o.oidc));
-	const env = await serviceEnv(pool);
+	// A node big enough for every sandbox of a suite (the default is 4 × 2 GB).
+	const env = await serviceEnv(pool, {
+		topology: { node: { ramCapMb: 1_048_576 } },
+	});
 	const team = env.p.teamId;
 	await pool.query("INSERT INTO identity.teams (id, name) VALUES ($1, $2)", [
 		team,
@@ -70,11 +100,70 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		config: env.config,
 		jobs: env.jobs,
 		agent,
+		environments: new PgEnvironmentStore(pool, env.keys, {
+			validateSets: validateSecretSets,
+		}),
+		...(o.log === undefined ? {} : { log: o.log }),
 	});
 	const { secret } = await issueApiKey(deps.identity, { teamId: team });
 	const { server } = createApiServer(createPublicApp(deps));
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	const finish = async (
+		slug: string,
+		sandbox: string,
+		machine: string,
+		op: "succeeded" | "failed",
+	) => {
+		const r = await pool.query<{ id: string }>(
+			"SELECT id FROM runtime.sandboxes WHERE slug = $1",
+			[slug],
+		);
+		const id = r.rows[0]?.id;
+		if (id === undefined) throw new Error(`no sandbox ${slug}`);
+		await pool.query(
+			`UPDATE runtime.machines SET state = $2, power_observed = $3
+			 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
+			[id, machine, machine === "running" ? "running" : "stopped"],
+		);
+		await pool.query(
+			`UPDATE runtime.operations
+			 SET state = $2, started_at = COALESCE(started_at, now()), finished_at = now()
+			 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
+			[id, op],
+		);
+		await pool.query(
+			`UPDATE runtime.sandboxes
+			 SET state = $2, state_changed_at = now(), version = version + 1,
+			     ready_at = CASE WHEN $2 = 'ready' THEN now() ELSE ready_at END,
+			     stopped_at = CASE WHEN $2 = 'stopped' THEN now() ELSE stopped_at END
+			 WHERE id = $1`,
+			[id, sandbox],
+		);
+	};
+	const createSandbox = async () => {
+		const res = await fetch(`${url}/v1/sandboxes`, {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${secret}`,
+				"content-type": "application/json",
+				"idempotency-key": crypto.randomUUID(),
+			},
+			body: "{}",
+		});
+		if (res.status !== 202 && res.status !== 201 && res.status !== 200) {
+			throw new Error(`create: ${res.status} ${await res.text()}`);
+		}
+		const b = (await res.json()) as {
+			sandbox?: { id: string; slug: string };
+			id?: string;
+			slug?: string;
+		};
+		const sb = b.sandbox ?? (b as { id: string; slug: string });
+		return { id: sb.id, slug: sb.slug };
+	};
+	const markReady = (slug: string) =>
+		finish(slug, "ready", "running", "succeeded");
 	return {
 		url,
 		oidc,
@@ -86,26 +175,32 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		secret,
 		key: async () =>
 			(await issueApiKey(deps.identity, { teamId: team })).secret,
-		async createSandbox() {
-			const res = await fetch(`${url}/v1/sandboxes`, {
-				method: "POST",
-				headers: {
-					authorization: `Bearer ${secret}`,
-					"content-type": "application/json",
-					"idempotency-key": crypto.randomUUID(),
-				},
-				body: "{}",
-			});
-			if (res.status !== 202 && res.status !== 201 && res.status !== 200) {
-				throw new Error(`create: ${res.status} ${await res.text()}`);
-			}
-			const b = (await res.json()) as {
-				sandbox?: { id: string; slug: string };
-				id?: string;
-				slug?: string;
-			};
-			const sb = b.sandbox ?? (b as { id: string; slug: string });
-			return { id: sb.id, slug: sb.slug };
+		createSandbox,
+		markReady,
+		markStopped: (slug) => finish(slug, "stopped", "stopped", "succeeded"),
+		markError: (slug) => finish(slug, "error", "running", "failed"),
+		async markSnapshotReady(name) {
+			const r = await pool.query<{ id: string; source_sandbox_id: string }>(
+				`UPDATE runtime.snapshots
+				 SET state = 'ready', name = pending_name, pending_name = NULL,
+				     ready_at = now(), consistency = 'quiesced', version = version + 1
+				 WHERE kind = 'saved' AND pending_name = $1 AND state = 'creating'
+				 RETURNING id, source_sandbox_id`,
+				[name],
+			);
+			const snap = r.rows[0];
+			if (snap === undefined) throw new Error(`no creating snapshot ${name}`);
+			await pool.query(
+				`UPDATE runtime.operations
+				 SET state = 'succeeded', started_at = COALESCE(started_at, now()), finished_at = now()
+				 WHERE sandbox_id = $1 AND kind = 'save_snapshot' AND state IN ('pending', 'running')`,
+				[snap.source_sandbox_id],
+			);
+		},
+		async readySandbox() {
+			const sb = await createSandbox();
+			await markReady(sb.slug);
+			return sb;
 		},
 		async close() {
 			await new Promise<void>((r) => {

@@ -2,7 +2,13 @@
 // `exec` and `run` exit with the command's own code instead (128 + n for a
 // signal, 124 for timed_out, 125 for lost or failed_to_start; Task 21).
 
-import { SbxError, type SbxErrorInit, UNEXPECTED_RESPONSE } from "@sbx/sdk";
+import { constants } from "node:os";
+import {
+	type ExitEvent,
+	SbxError,
+	type SbxErrorInit,
+	UNEXPECTED_RESPONSE,
+} from "@sbx/sdk";
 
 export const EXIT_OK = 0;
 /** An API or CLI error. */
@@ -28,8 +34,14 @@ export const LOGIN_FAILED = "login_failed";
 export const NO_CURRENT_SANDBOX = "no_current_sandbox";
 export const NOT_IMPLEMENTED = "not_implemented";
 
+/** Exit code of `exec`/`run` for a command that timed out (like timeout(1)). */
+export const EXIT_TIMED_OUT = 124;
+/** Exit code of `exec`/`run` for a command lost or never started. */
+export const EXIT_LOST = 125;
+
 const NO_AUTH_CODES = new Set([
 	NOT_LOGGED_IN,
+	"user_required",
 	LOGIN_REQUIRED,
 	LOGIN_FAILED,
 	"no_credentials",
@@ -96,4 +108,30 @@ export function exitCodeOf(err: unknown): number {
 		return EXIT_TEMPORARY;
 	}
 	return EXIT_ERROR;
+}
+
+/**
+ * The exit code of `exec`/`run` for the command's exit (S7 §14.3): its own
+ * code; 128 + n for a signal; 124 timed out; 125 lost or failed to start.
+ */
+export function commandExitCode(exit: ExitEvent): number {
+	switch (exit.status) {
+		case "exited":
+			return exit.exitCode ?? EXIT_ERROR;
+		case "killed": {
+			const signals = constants.signals as Record<string, number>;
+			const n = exit.signal === null ? undefined : signals[exit.signal];
+			if (n !== undefined) return 128 + n;
+			return exit.exitCode !== null && exit.exitCode > 128
+				? exit.exitCode
+				: 128 + (signals.SIGKILL ?? 9);
+		}
+		case "timed_out":
+			return EXIT_TIMED_OUT;
+		case "lost":
+		case "failed_to_start":
+			return EXIT_LOST;
+		default:
+			return exit.exitCode ?? EXIT_ERROR;
+	}
 }
