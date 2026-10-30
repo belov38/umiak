@@ -106,13 +106,13 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 	it("the watchdog removes the container once its owner process dies", async () => {
 		const owner = await ownerProcess();
 		const id = await container(owner.owner);
-		const dog = startWatchdog(id, owner.owner.pid);
+		const dog = await startWatchdog(id, owner.owner.pid);
 		try {
 			expect(await exists(id)).toBe(true);
 			await owner.kill();
 			await gone(id);
 		} finally {
-			dog.kill();
+			dog.stop();
 		}
 	});
 
@@ -128,7 +128,7 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 	it("a watchdog started before the container removes one created after its owner died", async () => {
 		const owner = await ownerProcess();
 		const name = containerName();
-		const dog = startWatchdog(name, owner.owner.pid);
+		const dog = await startWatchdog(name, owner.owner.pid);
 		try {
 			await owner.kill();
 			// The daemon finishes a create the dead owner had asked for.
@@ -136,7 +136,7 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 			const id = await container(owner.owner, name);
 			await gone(id);
 		} finally {
-			dog.kill();
+			dog.stop();
 		}
 	});
 });

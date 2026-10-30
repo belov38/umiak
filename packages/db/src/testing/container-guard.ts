@@ -7,8 +7,10 @@
 // (`ps -o lstart=`; with the pid it names one process even when the pid is
 // reused later). Two guards use them:
 //
-// 1. A watchdog: a small detached node process (its own process group, so a
-//    kill of the runner's group does not reach it) that checks the owner pid
+// 1. A watchdog: a small node process started through a launcher that exits
+//    at once (double fork): its parent is init and it has its own session, so
+//    neither a kill of the runner's process group nor a kill of the runner's
+//    process tree reaches it. It checks the owner pid
 //    every second and removes the container once the owner is gone. It is
 //    started before `docker run` and knows the container by its unique name,
 //    so a kill while `docker run` is still running is covered too; it repeats
@@ -22,7 +24,7 @@
 // A container is removed only when its owner is known to be gone; one of a
 // live owner (another session's run, a watch mode), of another host, or
 // without owner labels (started by an older global-setup) is left alone.
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { promisify } from "node:util";
@@ -159,21 +161,52 @@ const t = setInterval(() => {
 }, 1000);
 `;
 
+// The launcher (node -e): starts the watchdog (argv: its program, owner
+// pid, ref) detached, prints its pid and exits.
+const LAUNCHER = `
+const { spawn } = require("node:child_process");
+const [program, pid, ref] = process.argv.slice(1);
+const child = spawn(process.execPath, ["-e", program, pid, ref], {
+	detached: true,
+	stdio: "ignore",
+});
+child.unref();
+process.stdout.write(String(child.pid));
+`;
+
+export interface Watchdog {
+	/** Stops the watchdog (after the owner removed the container itself). */
+	stop(): void;
+}
+
 /**
  * Starts the watchdog of the container `ref` (name or id) owned by
- * `ownerPid` (this process by default). Stop it with `kill()` after the
- * container is removed.
+ * `ownerPid` (this process by default); resolves once it runs.
  */
 export function startWatchdog(
 	ref: string,
 	ownerPid = process.pid,
-): ChildProcess {
-	const child = spawn(
-		process.execPath,
-		["-e", WATCHDOG, String(ownerPid), ref],
-		{ detached: true, stdio: "ignore" },
-	);
-	child.on("error", () => {});
-	child.unref();
-	return child;
+): Promise<Watchdog> {
+	return new Promise((resolve, reject) => {
+		execFile(
+			process.execPath,
+			["-e", LAUNCHER, WATCHDOG, String(ownerPid), ref],
+			(err, stdout) => {
+				const pid = Number(String(stdout).trim());
+				if (err || !Number.isSafeInteger(pid) || pid <= 0) {
+					reject(err ?? new Error(`watchdog launcher printed ${stdout}`));
+					return;
+				}
+				resolve({
+					stop: () => {
+						try {
+							process.kill(pid);
+						} catch {
+							// Already gone.
+						}
+					},
+				});
+			},
+		);
+	});
 }

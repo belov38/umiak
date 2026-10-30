@@ -9,7 +9,7 @@
 //
 // Other packages reference it from vitest.config.ts:
 //   globalSetup: ["@sbx/db/testing/global-setup"]
-import { type ChildProcess, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
 import type { TestProject } from "vitest/node";
@@ -19,6 +19,7 @@ import {
 	ownerLabels,
 	removeOrphans,
 	startWatchdog,
+	type Watchdog,
 } from "./container-guard.ts";
 import "./provided.ts";
 
@@ -27,7 +28,7 @@ const run = promisify(execFile);
 export const TEST_PG_IMAGE = "postgres:18.6-alpine";
 
 let containerId: string | undefined;
-let watchdog: ChildProcess | undefined;
+let watchdog: Watchdog | undefined;
 
 export async function setup(project: TestProject): Promise<void> {
 	const url = process.env.SBX_TEST_DATABASE_URL;
@@ -60,7 +61,7 @@ export async function teardown(): Promise<void> {
 		await run("docker", ["rm", "-f", "-v", containerId]).catch(() => {});
 		containerId = undefined;
 	}
-	watchdog?.kill();
+	watchdog?.stop();
 	watchdog = undefined;
 }
 
@@ -69,7 +70,7 @@ async function startContainer(): Promise<string> {
 	const owner = await currentOwner();
 	// The watchdog is up before the container exists (see container-guard.ts).
 	const name = containerName();
-	watchdog = startWatchdog(name);
+	watchdog = await startWatchdog(name);
 	const { stdout } = await run(
 		"docker",
 		[
