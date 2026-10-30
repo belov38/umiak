@@ -1,15 +1,25 @@
 // Vitest global setup: provides an admin Postgres DSN to the test workers.
 // SBX_TEST_DATABASE_URL is used as is; otherwise a postgres:18.6-alpine
 // container is started once through the docker CLI and removed in teardown.
+// A run killed before its teardown does not leave it behind: a watchdog
+// removes it when this process is gone, and the next setup removes
+// containers of dead owners (container-guard.ts).
 // SBX_TEST_SKIP_PG=1 without a URL makes database tests skip; a missing Docker
 // without that flag makes every createTestDatabase() call fail.
 //
 // Other packages reference it from vitest.config.ts:
 //   globalSetup: ["@sbx/db/testing/global-setup"]
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
 import type { TestProject } from "vitest/node";
+import {
+	containerName,
+	currentOwner,
+	ownerLabels,
+	removeOrphans,
+	startWatchdog,
+} from "./container-guard.ts";
 import "./provided.ts";
 
 const run = promisify(execFile);
@@ -17,6 +27,7 @@ const run = promisify(execFile);
 export const TEST_PG_IMAGE = "postgres:18.6-alpine";
 
 let containerId: string | undefined;
+let watchdog: ChildProcess | undefined;
 
 export async function setup(project: TestProject): Promise<void> {
 	const url = process.env.SBX_TEST_DATABASE_URL;
@@ -49,17 +60,25 @@ export async function teardown(): Promise<void> {
 		await run("docker", ["rm", "-f", "-v", containerId]).catch(() => {});
 		containerId = undefined;
 	}
+	watchdog?.kill();
+	watchdog = undefined;
 }
 
 async function startContainer(): Promise<string> {
+	await removeOrphans();
+	const owner = await currentOwner();
+	// The watchdog is up before the container exists (see container-guard.ts).
+	const name = containerName();
+	watchdog = startWatchdog(name);
 	const { stdout } = await run(
 		"docker",
 		[
 			"run",
 			"-d",
 			"--rm",
-			"--label",
-			"sbx-test=s6",
+			"--name",
+			name,
+			...ownerLabels(owner),
 			"-e",
 			"POSTGRES_PASSWORD=sbx",
 			"-p",
