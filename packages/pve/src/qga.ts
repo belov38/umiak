@@ -205,7 +205,8 @@ export class Qga {
 				if (!(err instanceof PveApiError)) {
 					if (!(err instanceof Error) || !CLIENT_TIMEOUT_RE.test(err.message))
 						throw err;
-				} else if (/PID \d+ does not exist/.test(err.message)) {
+				} else if (/PID \S+ does not exist/.test(err.message)) {
+					// \S+: qemu-ga for Windows prints "PID lld does not exist" (format unexpanded).
 					throw new QgaExecStatusLostError(vmid, pid, err);
 				} else if (
 					!(err instanceof QgaTimeoutError) &&

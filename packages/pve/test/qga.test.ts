@@ -154,6 +154,19 @@ describe("Qga.exec", () => {
 		expect((err as QgaExecStatusLostError).cause).toBe(pidGone);
 	});
 
+	it("reports a lost exit status for the Windows agent's unformatted PID message", async () => {
+		const winGone = new PveApiError(
+			500,
+			"GET /nodes/pve/qemu/598/agent/exec-status: Agent error: PID lld does not exist",
+		);
+		const api = new ScriptedPve({
+			exec: [{ pid: 42 }],
+			"exec-status": [running, winGone],
+		});
+		const err = await new Qga(api, "pve").exec(500, ["true"]).catch((e) => e);
+		expect(err).toBeInstanceOf(QgaExecStatusLostError);
+	});
+
 	it("never repeats exec after a timeout of the exec call itself", async () => {
 		const api = new ScriptedPve({ exec: [qgaTimeout("exec")] });
 		const err = await new Qga(api, "pve")
