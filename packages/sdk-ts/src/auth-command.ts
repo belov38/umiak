@@ -1,37 +1,66 @@
-// Runs `sbx auth token --json` (Node and Bun only). Imported lazily by
-// credentials.ts, so the core client has no Node-only imports.
+// Runs `sbx auth token --json` (Node and Bun only). The child_process module
+// is taken from `process.getBuiltinModule` at call time, not imported, so the
+// SDK has no `node:` import a browser bundler would try to resolve. In a
+// browser (or any runtime without getBuiltinModule) there is no `sbx`:
+// pass apiKey, accessToken or tokenProvider explicitly.
 
-import { execFile } from "node:child_process";
+import type * as ChildProcess from "node:child_process";
 import { AUTH_COMMAND_FAILED, NO_CREDENTIALS, SbxError } from "./errors.ts";
 
 const TIMEOUT_MS = 30_000;
 /** `sbx` exit code for "no permission or not logged in" (S7 §14.3). */
 const EXIT_NO_LOGIN = 4;
 
+interface NodeProcess {
+	getBuiltinModule?: (id: string) => unknown;
+}
+
+/**
+ * A Node built-in module through `process.getBuiltinModule` (Node ≥ 22.3,
+ * Bun, Deno), or undefined where there is none (browsers).
+ */
+export function builtinModule<T>(id: string): T | undefined {
+	const proc = (globalThis as { process?: NodeProcess }).process;
+	if (typeof proc?.getBuiltinModule !== "function") return undefined;
+	return proc.getBuiltinModule(id) as T | undefined;
+}
+
+/** Whether `sbx auth token` can be run here (a runtime with child_process). */
+export function canRunAuthCommand(): boolean {
+	return builtinModule<typeof ChildProcess>("node:child_process") !== undefined;
+}
+
 /** Returns stdout of the command; throws SbxError when it gives no token. */
 export function runAuthCommand(
 	cmd: readonly string[],
 	env: Record<string, string | undefined>,
+	timeoutMs = TIMEOUT_MS,
 ): Promise<string> {
 	const [file, ...args] = cmd;
-	if (file === undefined) {
+	const cp = builtinModule<typeof ChildProcess>("node:child_process");
+	if (file === undefined || cp === undefined) {
 		return Promise.reject(
 			new SbxError({
 				status: 0,
-				code: AUTH_COMMAND_FAILED,
-				message: "authCommand is empty",
+				code: file === undefined ? AUTH_COMMAND_FAILED : NO_CREDENTIALS,
+				message:
+					file === undefined
+						? "authCommand is empty"
+						: "no credentials: this runtime cannot run `sbx`; pass apiKey, accessToken or tokenProvider",
 				retryable: false,
 			}),
 		);
 	}
 	const shown = cmd.join(" ");
 	return new Promise((resolve, reject) => {
-		execFile(
+		cp.execFile(
 			file,
 			args,
 			{
 				env,
-				timeout: TIMEOUT_MS,
+				timeout: timeoutMs,
+				// A command that ignores SIGTERM must not outlive the timeout.
+				killSignal: "SIGKILL",
 				maxBuffer: 1 << 20,
 				windowsHide: true,
 				encoding: "utf8",
@@ -49,6 +78,18 @@ export function runAuthCommand(
 							code: NO_CREDENTIALS,
 							message: `no credentials: no explicit credentials, no SBX_API_KEY or SBX_ACCESS_TOKEN, and \`${file}\` is not in PATH`,
 							retryable: false,
+						}),
+					);
+					return;
+				}
+				if (err.killed) {
+					reject(
+						new SbxError({
+							status: 0,
+							code: AUTH_COMMAND_FAILED,
+							message: `\`${shown}\` timed out after ${timeoutMs} ms`,
+							retryable: false,
+							cause: err,
 						}),
 					);
 					return;

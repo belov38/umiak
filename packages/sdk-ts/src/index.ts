@@ -23,6 +23,7 @@ export {
 	SandboxFailedError,
 	SbxError,
 	type SbxErrorInit,
+	TOKEN_PROVIDER_FAILED,
 	UNEXPECTED_RESPONSE,
 } from "./errors.ts";
 export type { components, operations, paths } from "./gen/v1.d.ts";

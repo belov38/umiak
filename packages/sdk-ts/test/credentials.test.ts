@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runAuthCommand } from "../src/auth-command.ts";
 import { createRawClient } from "../src/client.ts";
 import { resolveCredentials } from "../src/credentials.ts";
 import { type FakeSbx, fakeSbx } from "./fake-sbx.ts";
@@ -218,6 +219,37 @@ describe("sbx auth token --json", () => {
 		await expect(resolveCredentials({ env: sbx.env })).rejects.toMatchObject({
 			code: "auth_command_failed",
 		});
+	});
+
+	it("an abort ends the wait for a slow sbx; the run goes on for others", async () => {
+		await sbx.setOutput(profile());
+		const c = await resolveCredentials({ env: sbx.env });
+		await sbx.setSleep(1);
+		const ac = new AbortController();
+		const started = Date.now();
+		const aborted = c.getToken(true, ac.signal).catch((e: unknown) => e);
+		const other = c.getToken(true);
+		setTimeout(() => ac.abort(), 50);
+		expect(await aborted).toMatchObject({ name: "AbortError" });
+		expect(Date.now() - started).toBeLessThan(800);
+		expect(await other).toBe("jwt-1");
+		expect(await sbx.calls()).toHaveLength(2);
+	});
+
+	it("an sbx that hangs past the timeout is killed (SIGKILL) and fails", async () => {
+		await sbx.setOutput(profile());
+		await sbx.setSleep(10, { ignoreTerm: true });
+		const started = Date.now();
+		const err = await runAuthCommand(
+			["sbx", "auth", "token", "--json"],
+			sbx.env,
+			300,
+		).catch((e: unknown) => e);
+		expect(err).toMatchObject({
+			code: "auth_command_failed",
+			message: expect.stringContaining("timed out"),
+		});
+		expect(Date.now() - started).toBeLessThan(3000);
 	});
 
 	it("authCommand replaces the default command", async () => {

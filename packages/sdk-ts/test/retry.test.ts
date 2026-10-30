@@ -227,6 +227,32 @@ describe("backoff", () => {
 	});
 });
 
+describe("Retry-After that asks for no wait", () => {
+	it("Retry-After: 0 waits at least the backoff", async () => {
+		const { fn, calls } = script(
+			apiError(503, true, { retryAfterMs: 0 }),
+			apiError(503, true, { retryAfterMs: 0 }),
+		);
+		const p = withRetry(fn, { method: "GET", random: () => 1 });
+		await vi.runAllTimersAsync();
+		await expect(p).resolves.toBe("ok");
+		const gaps = calls.slice(1).map((t, i) => t - (calls[i] as number));
+		expect(gaps).toEqual([500, 1000]);
+	});
+
+	it("a budget of 0 never retries, even with a zero wait", async () => {
+		const { fn, calls } = script(apiError(503, true, { retryAfterMs: 0 }));
+		const p = withRetry(fn, {
+			method: "GET",
+			budgetMs: 0,
+			random: () => 0,
+		}).catch((e: unknown) => e);
+		await vi.runAllTimersAsync();
+		expect(await p).toBeInstanceOf(SbxError);
+		expect(calls).toHaveLength(1);
+	});
+});
+
 describe("budget", () => {
 	it("gives up with the last error when the next wait would pass the budget", async () => {
 		const first = rawError(503);

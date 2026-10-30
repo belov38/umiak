@@ -1,17 +1,22 @@
 // Credential chain (S7 §7.6, §15.2):
 //   explicit apiKey / accessToken / tokenProvider → SBX_API_KEY → SBX_ACCESS_TOKEN
 //   → `sbx auth token --json` (Node and Bun only; the CLI owns refresh).
+// Browsers have no `sbx`: they must pass apiKey, accessToken or tokenProvider.
 // The API URL is `baseUrl`, then SBX_API_URL, then the apiUrl of the sbx profile;
 // the team is `team`, then SBX_TEAM, then the team of the profile. A token from
 // the sbx profile is never sent to another API than the profile's apiUrl.
 
+import { canRunAuthCommand, runAuthCommand } from "./auth-command.ts";
 import type { SbxOptions } from "./client.ts";
 import {
 	AUTH_COMMAND_FAILED,
+	isAbortError,
 	NO_API_URL,
 	NO_CREDENTIALS,
 	SbxError,
+	TOKEN_PROVIDER_FAILED,
 } from "./errors.ts";
+import { abortable } from "./retry.ts";
 
 export const DEFAULT_AUTH_COMMAND: readonly string[] = [
 	"sbx",
@@ -26,8 +31,11 @@ export interface Credentials {
 	/** API URL without a trailing slash. */
 	baseUrl: string;
 	team?: string;
-	/** The bearer to send; `force` skips the cache (after `401 token_expired`). */
-	getToken(force?: boolean): Promise<string>;
+	/**
+	 * The bearer to send; `force` skips the cache (after `401 token_expired`).
+	 * `signal` ends the wait; a running `sbx` keeps going for other callers.
+	 */
+	getToken(force?: boolean, signal?: AbortSignal): Promise<string>;
 }
 
 /** Output of `sbx auth token --json`. */
@@ -98,7 +106,10 @@ export async function resolveCredentials(
 			});
 		}
 		return withTeam(
-			{ baseUrl: trimSlash(url), getToken: () => provider() },
+			{
+				baseUrl: trimSlash(url),
+				getToken: (_force, signal) => abortable(provider(), signal),
+			},
 			team,
 		);
 	}
@@ -112,10 +123,44 @@ function tokenSource(
 ): (() => Promise<string>) | undefined {
 	const explicit = nonEmpty(opts.apiKey) ?? nonEmpty(opts.accessToken);
 	if (explicit !== undefined) return async () => explicit;
-	if (opts.tokenProvider) return opts.tokenProvider;
+	const tokenProvider = opts.tokenProvider;
+	if (tokenProvider) return () => callTokenProvider(tokenProvider);
 	const fromEnv = nonEmpty(env.SBX_API_KEY) ?? nonEmpty(env.SBX_ACCESS_TOKEN);
 	if (fromEnv !== undefined) return async () => fromEnv;
 	return undefined;
+}
+
+/**
+ * Calls the caller's tokenProvider. A rejection that is not an SbxError or an
+ * abort becomes `token_provider_failed` (not retryable): the transport must
+ * not repeat a request because a token source failed.
+ */
+async function callTokenProvider(
+	provider: () => Promise<string>,
+): Promise<string> {
+	let token: unknown;
+	try {
+		token = await provider();
+	} catch (err) {
+		if (err instanceof SbxError || isAbortError(err)) throw err;
+		const why = err instanceof Error ? err.message : String(err);
+		throw new SbxError({
+			status: 0,
+			code: TOKEN_PROVIDER_FAILED,
+			message: `tokenProvider failed: ${why}`,
+			retryable: false,
+			cause: err,
+		});
+	}
+	if (typeof token !== "string" || token === "") {
+		throw new SbxError({
+			status: 0,
+			code: TOKEN_PROVIDER_FAILED,
+			message: "tokenProvider returned no token",
+			retryable: false,
+		});
+	}
+	return token;
 }
 
 function withTeam(c: Credentials, team: string | undefined): Credentials {
@@ -128,14 +173,12 @@ async function fromAuthCommand(
 	url: string | undefined,
 	team: string | undefined,
 ): Promise<Credentials> {
-	const proc = (globalThis as { process?: { versions?: { node?: string } } })
-		.process;
-	if (typeof proc?.versions?.node !== "string") {
-		throw noCredentials("no explicit credentials and no `sbx` here");
+	if (!canRunAuthCommand()) {
+		throw noCredentials(
+			"no explicit credentials, and this runtime cannot run `sbx`",
+		);
 	}
 	const cmd = opts.authCommand ?? DEFAULT_AUTH_COMMAND;
-	// Node/Bun only; loaded lazily so the core stays portable.
-	const { runAuthCommand } = await import("./auth-command.ts");
 	const run = async (): Promise<AuthToken> =>
 		parseAuthToken(await runAuthCommand(cmd, env));
 
@@ -162,12 +205,12 @@ async function fromAuthCommand(
 	return withTeam(
 		{
 			baseUrl,
-			async getToken(force = false) {
+			async getToken(force = false, signal) {
 				if (!force && fresh(current)) return current.token;
 				inflight ??= refresh().finally(() => {
 					inflight = undefined;
 				});
-				return (await inflight).token;
+				return (await abortable(inflight, signal)).token;
 			},
 		},
 		team ?? current.team ?? undefined,

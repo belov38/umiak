@@ -4,7 +4,8 @@
 //   on network errors and on 502/503/504/429 without the API envelope.
 // - An API error is repeated when its body says `retryable: true` (any method);
 //   `retryable: false` is never repeated.
-// - Backoff 0.5 s × 2 up to 8 s with full jitter; `Retry-After` wins.
+// - Backoff 0.5 s × 2 up to 8 s with full jitter; a longer `Retry-After`
+//   wins (a zero or past one never makes a zero-wait loop).
 // - All waits of one call fit in `budgetMs` (default 60 s): when the next wait
 //   would end past the budget, the last error is thrown.
 // - `signal` aborts the wait at once with its reason (AbortError by default).
@@ -65,13 +66,41 @@ export async function withRetry<T>(
 		} catch (err) {
 			if (signal?.aborted) throw signal.reason;
 			if (!isRetryable(err, safe)) throw err;
-			const wait =
-				(err instanceof SbxError ? err.retryAfterMs : null) ??
-				backoffMs(attempt, opts.random);
-			if (Date.now() + wait - start > budget) throw err;
+			const wait = retryDelayMs(err, attempt, opts.random);
+			if (budget <= 0 || Date.now() + wait - start > budget) throw err;
 			await sleep(wait, signal);
 		}
 	}
+}
+
+/** The wait before retry number `retry`: the backoff, or a longer Retry-After. */
+export function retryDelayMs(
+	err: unknown,
+	retry: number,
+	random: () => number = Math.random,
+): number {
+	const hint = err instanceof SbxError ? err.retryAfterMs : null;
+	return Math.max(hint ?? 0, backoffMs(retry, random));
+}
+
+/** `p`, or a rejection with the abort reason as soon as `signal` aborts. */
+export function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+	if (!signal) return p;
+	if (signal.aborted) return Promise.reject(signal.reason);
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+		p.then(
+			(v) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(v);
+			},
+			(e: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(e);
+			},
+		);
+	});
 }
 
 /** Waits `ms`; rejects with the abort reason as soon as `signal` aborts. */

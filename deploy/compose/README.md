@@ -256,6 +256,7 @@ SBX_PVE_SMOKE=1 mise exec -- pnpm --filter @sbx/worker exec vitest run test/pve-
 3. Секреты генерировать в `secrets-init/init.sh` в свой каталог `deploy/compose/secrets/<сервис>/` (git-ignored) и монтировать каталог, а не файл; в git — только `*.example`. Сервис ставит `depends_on: secrets-init: condition: service_completed_successfully`.
 4. Образ собирать из корня репозитория (`context: ../..`, `dockerfile: apps/<name>/Dockerfile`); `.dockerignore` лежит в корне.
 5. Новый пакет workspace (`packages/<name>` или `apps/<name>`) — добавить строку `COPY <dir>/package.json <dir>/` в блок манифестов стадии `base` **во всех** Dockerfile (`apps/worker/Dockerfile`, `apps/api/Dockerfile`), иначе `pnpm install --frozen-lockfile` не совпадёт с lockfile. Если пакет входит в зависимости сервиса, добавить и `COPY <dir>/src <dir>/src`; если он собирается в `dist` (как `@sbx/proto` и `@sbx/agent-client`), собрать его в стадии `build` и скопировать `dist` в итоговый образ.
+   Новый Dockerfile для пакета workspace копирует в стадии `base` вместе с `package.json`, `pnpm-lock.yaml` и `pnpm-workspace.yaml` ещё и корневой `.pnpmfile.cjs` (хук `readPackage` для `openapi-typescript`): без него `pnpm install --frozen-lockfile` не сходится с checksum pnpmfile в lockfile.
 
 ## Запуск worker и api без Docker
 

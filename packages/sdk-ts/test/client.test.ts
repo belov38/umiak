@@ -335,6 +335,118 @@ describe("retries", () => {
 	});
 });
 
+describe("request bodies", () => {
+	it("a ReadableStream body is sent once: not cloned, not retried", async () => {
+		let pulls = 0;
+		const body = new ReadableStream<Uint8Array>({
+			pull(c) {
+				pulls += 1;
+				if (pulls > 3) c.close();
+				else c.enqueue(new Uint8Array(1024));
+			},
+		});
+		const f = fakeFetch(
+			apiError(503, "agent_unavailable", true, { "Retry-After": "0" }),
+			json(200, {}),
+		);
+		const p = client(f.fetch)
+			.PUT("/v1/sandboxes/{sandbox}/files/content", {
+				params: { path: { sandbox: "sb_1" }, query: { path: "big.bin" } },
+				body: body as never,
+				bodySerializer: (b: unknown) => b as BodyInit,
+				headers: { "Content-Type": "application/octet-stream" },
+			})
+			.catch((e: unknown) => e);
+		await vi.runAllTimersAsync();
+		expect(await p).toMatchObject({ code: "agent_unavailable" });
+		expect(f.seen).toHaveLength(1);
+		expect(f.seen[0]?.body.length).toBe(3 * 1024);
+	});
+
+	it("a Uint8Array chunk is retried with the same bytes", async () => {
+		const chunk = new TextEncoder().encode("chunk-bytes");
+		const f = fakeFetch(
+			apiError(503, "agent_unavailable", true),
+			json(200, { offset: chunk.length }),
+		);
+		const p = client(f.fetch).PUT(
+			"/v1/sandboxes/{sandbox}/files/uploads/{upload}",
+			{
+				params: {
+					path: { sandbox: "sb_1", upload: "upl_1" },
+					query: { offset: 0 },
+				},
+				body: chunk as never,
+				bodySerializer: (b: unknown) => b as BodyInit,
+			},
+		);
+		await vi.runAllTimersAsync();
+		expect((await p).data).toEqual({ offset: chunk.length });
+		expect(f.seen.map((s) => s.body)).toEqual(["chunk-bytes", "chunk-bytes"]);
+	});
+});
+
+describe("malformed answers and token providers", () => {
+	it("a 2xx with a body that is not JSON is unexpected_response", async () => {
+		const f = fakeFetch(
+			new Response("<html>ok</html>", {
+				status: 200,
+				headers: { "Request-Id": "req_x" },
+			}),
+		);
+		const err = await client(f.fetch)
+			.GET("/v1/me")
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toMatchObject({
+			status: 200,
+			code: "unexpected_response",
+			retryable: false,
+			requestId: "req_x",
+		});
+	});
+
+	it("a rejecting tokenProvider is token_provider_failed, sent nothing, not retried", async () => {
+		const f = fakeFetch(json(200, {}));
+		let calls = 0;
+		const raw = client(f.fetch, {
+			tokenProvider: async () => {
+				calls += 1;
+				throw new Error("vault is down");
+			},
+		});
+		const p = raw.GET("/v1/me").catch((e: unknown) => e);
+		await vi.runAllTimersAsync();
+		const err = await p;
+		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toMatchObject({
+			status: 0,
+			code: "token_provider_failed",
+			retryable: false,
+			message: expect.stringContaining("vault is down"),
+		});
+		expect(calls).toBe(1);
+		expect(f.seen).toHaveLength(0);
+	});
+
+	it("a tokenProvider failing on the refresh after token_expired is not retried", async () => {
+		const f = fakeFetch(apiError(401, "token_expired", false), json(200, {}));
+		let calls = 0;
+		const raw = client(f.fetch, {
+			tokenProvider: async () => {
+				calls += 1;
+				if (calls > 1) throw new Error("refresh failed");
+				return "jwt-1";
+			},
+		});
+		const p = raw.GET("/v1/me").catch((e: unknown) => e);
+		await vi.runAllTimersAsync();
+		expect(await p).toMatchObject({ code: "token_provider_failed" });
+		expect(calls).toBe(2);
+		expect(f.seen).toHaveLength(1);
+	});
+});
+
 describe("401 token_expired", () => {
 	it("takes a new token once and repeats the request", async () => {
 		const f = fakeFetch(
@@ -408,6 +520,21 @@ describe("content types", () => {
 		);
 		expect(data).toBeUndefined();
 	});
+
+	it("HEAD has no data", async () => {
+		const f = fakeFetch(
+			new Response(null, {
+				status: 200,
+				headers: { "Sbx-Upload-Offset": "12" },
+			}),
+		);
+		const { data, response } = await client(f.fetch).HEAD(
+			"/v1/sandboxes/{sandbox}/files/uploads/{upload}",
+			{ params: { path: { sandbox: "sb_1", upload: "upl_1" } } },
+		);
+		expect(data).toBeUndefined();
+		expect(response.headers.get("sbx-upload-offset")).toBe("12");
+	});
 });
 
 describe("generated types", () => {
@@ -430,6 +557,26 @@ describe("generated types", () => {
 		>;
 		expectTypeOf<"stream">().toExtend<Mode>();
 		expectTypeOf<"bogus">().not.toExtend<Mode>();
+	});
+
+	it("data may be undefined for 204 answers and HEAD, not for JSON answers", () => {
+		type Deleted = RawResponse<
+			paths["/v1/sandboxes/{sandbox}/ports/{port}"]["delete"],
+			Record<string, never>
+		>["data"];
+		expectTypeOf<undefined>().toExtend<Deleted>();
+		type Head = RawResponse<
+			paths["/v1/sandboxes/{sandbox}/files/uploads/{upload}"]["head"],
+			Record<string, never>,
+			"head"
+		>["data"];
+		expectTypeOf<undefined>().toExtend<Head>();
+		type Got = RawResponse<
+			paths["/v1/me"]["get"],
+			Record<string, never>,
+			"get"
+		>["data"];
+		expectTypeOf<undefined>().not.toExtend<Got>();
 	});
 
 	it("src/gen/v1.d.ts is fresh (pnpm --filter @sbx/sdk gen)", async () => {

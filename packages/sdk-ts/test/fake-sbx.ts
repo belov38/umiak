@@ -12,12 +12,22 @@ export interface FakeSbx {
 	env: Record<string, string>;
 	setOutput(value: unknown): Promise<void>;
 	setExit(code: number, stderr?: string): Promise<void>;
+	/** Sleep this many seconds before answering; `ignoreTerm`: SIGTERM is ignored. */
+	setSleep(seconds: number, o?: { ignoreTerm?: boolean }): Promise<void>;
 	calls(): Promise<string[]>;
 	cleanup(): Promise<void>;
 }
 
 const SCRIPT = `#!/bin/sh
 echo "$*" >> "$FAKE_SBX_DIR/calls.log"
+if [ -f "$FAKE_SBX_DIR/sleep" ]; then
+  s=$(cat "$FAKE_SBX_DIR/sleep")
+  if [ -f "$FAKE_SBX_DIR/ignore-term" ]; then
+    trap '' TERM
+    exec sleep "$s"
+  fi
+  sleep "$s"
+fi
 code=0
 [ -f "$FAKE_SBX_DIR/exit" ] && code=$(cat "$FAKE_SBX_DIR/exit")
 if [ "$code" != 0 ]; then
@@ -40,6 +50,10 @@ export async function fakeSbx(): Promise<FakeSbx> {
 		async setExit(code, stderr = "") {
 			await writeFile(join(dir, "exit"), String(code));
 			await writeFile(join(dir, "stderr"), stderr);
+		},
+		async setSleep(seconds, o = {}) {
+			await writeFile(join(dir, "sleep"), String(seconds));
+			if (o.ignoreTerm) await writeFile(join(dir, "ignore-term"), "1");
 		},
 		async calls() {
 			try {

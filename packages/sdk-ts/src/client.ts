@@ -4,8 +4,12 @@
 //   none; the key is made once per call, so every retry repeats it;
 // - the retry policy of retry.ts, limited by `retryBudgetMs`, and `signal`;
 // - one new token and one repeat on `401 token_expired`;
-// - every error thrown as SbxError (network errors: status 0, `network_error`).
+// - every error thrown as SbxError (network errors: status 0, `network_error`;
+//   a 2xx body that is not the expected JSON: `unexpected_response`).
 // A call resolves only on 2xx: `{data, response}`.
+// A ReadableStream request body is sent once: it is neither cloned (a tee
+// would buffer the whole payload) nor retried. Retryable uploads send bounded
+// Uint8Array chunks instead.
 
 import createClient, {
 	type FetchOptions,
@@ -27,10 +31,11 @@ import {
 	isAbortError,
 	NETWORK_ERROR,
 	SbxError,
+	UNEXPECTED_RESPONSE,
 } from "./errors.ts";
 import type { paths } from "./gen/v1.d.ts";
 import { newIdempotencyKey, takesIdempotencyKey } from "./ids.ts";
-import { isSafeToRepeat, withRetry } from "./retry.ts";
+import { abortable, isSafeToRepeat, withRetry } from "./retry.ts";
 
 /** Version of @sbx/sdk; sent as `User-Agent: sbx-sdk-ts/<version>`. */
 export const SDK_VERSION = "0.1.0";
@@ -60,21 +65,34 @@ export interface SbxOptions {
 	env?: Record<string, string | undefined>;
 	/** Default ["sbx", "auth", "token", "--json"]. */
 	authCommand?: string[];
+	/**
+	 * A command stream (run, follow) with no line for this long is treated as
+	 * a dead connection and reopened from its offsets; default 45 000 ms.
+	 */
+	streamIdleTimeoutMs?: number;
 }
 
+/** `undefined` when the answer has no body: a HEAD request, or a route with a 204 answer. */
+type EmptyData<T, M> =
+	| (M extends "head" ? undefined : never)
+	| (204 extends keyof ResponseObjectMap<T> ? undefined : never);
+
 /**
- * A successful response: `data` parsed as asked by `parseAs` (JSON by default).
+ * A successful response: `data` parsed as asked by `parseAs` (JSON by default),
+ * `undefined` for HEAD and 204 answers.
  * Unlike openapi-fetch, the type is not wrapped in its `Readable<>`: the
  * generator emits no $Read/$Write markers, and `Readable<>` would turn the
  * `(string & {})` of open enums into an object type.
  */
-export interface RawResponse<T, Init> {
-	data: ResponseObjectMap<T> extends infer R extends Record<
-		string | number,
-		unknown
-	>
-		? ParseAsResponse<SuccessResponse<R, MediaType>, Init>
-		: never;
+export interface RawResponse<T, Init, M = never> {
+	data:
+		| (ResponseObjectMap<T> extends infer R extends Record<
+				string | number,
+				unknown
+		  >
+				? ParseAsResponse<SuccessResponse<R, MediaType>, Init>
+				: never)
+		| EmptyData<T, M>;
 	response: Response;
 }
 
@@ -89,7 +107,7 @@ export type RawMethod<M extends HttpMethod> = <
 >(
 	url: P,
 	...init: RawInitParam<Init>
-) => Promise<RawResponse<paths[P][M], Init>>;
+) => Promise<RawResponse<paths[P][M], Init, M>>;
 
 export interface RawClient {
 	GET: RawMethod<"get">;
@@ -102,7 +120,24 @@ export interface RawClient {
 
 type LooseInit = FetchOptions<unknown> & CallOptions;
 
+/** The raw client plus what the facade needs beside it (WebSocket URL and bearer). */
+export interface ClientCore {
+	raw: RawClient;
+	/** Resolved credentials (memoised; a failure is not kept). */
+	credentials(signal?: AbortSignal): Promise<Credentials>;
+	userAgent: string;
+	streamIdleTimeoutMs: number;
+}
+
+/** Default of `SbxOptions.streamIdleTimeoutMs` (S7 §9.7: 45 s without lines). */
+export const STREAM_IDLE_TIMEOUT_MS = 45_000;
+
 export function createRawClient(opts: SbxOptions = {}): RawClient {
+	return createClientCore(opts).raw;
+}
+
+/** For the facade (`Sbx`): the raw client and its credentials. */
+export function createClientCore(opts: SbxOptions = {}): ClientCore {
 	const fetchImpl: (req: Request) => Promise<Response> =
 		opts.fetch ?? ((req) => globalThis.fetch(req));
 	const userAgent = opts.userAgent ?? `sbx-sdk-ts/${SDK_VERSION}`;
@@ -125,7 +160,10 @@ export function createRawClient(opts: SbxOptions = {}): RawClient {
 		async onRequest({ request, schemaPath }) {
 			const creds = await credentials();
 			const h = request.headers;
-			h.set("Authorization", `Bearer ${await creds.getToken()}`);
+			h.set(
+				"Authorization",
+				`Bearer ${await creds.getToken(false, request.signal)}`,
+			);
 			if (creds.team !== undefined && !h.has("Sbx-Team")) {
 				h.set("Sbx-Team", creds.team);
 			}
@@ -141,23 +179,36 @@ export function createRawClient(opts: SbxOptions = {}): RawClient {
 	};
 	client.use(headers);
 
-	/** fetch for one call: retries, token refresh, errors as SbxError. */
+	/**
+	 * fetch for one call: retries, token refresh, errors as SbxError.
+	 * `oneShot`: the body is a stream, sent once without a clone or a retry
+	 * (the error keeps its `retryable`: the caller may send a new body).
+	 * `seen` keeps the last response, for errors raised after the fetch.
+	 */
 	const transport =
-		(creds: Credentials, signal?: AbortSignal, budgetMs?: number) =>
+		(
+			creds: Credentials,
+			seen: { response?: Response },
+			signal?: AbortSignal,
+			budgetMs?: number,
+			oneShot = false,
+		) =>
 		(request: Request): Promise<Response> => {
 			const keyed = request.headers.has("Idempotency-Key");
 			const send = async (): Promise<Response> => {
 				let res: Response;
 				try {
-					res = await fetchImpl(request.clone());
+					res = await fetchImpl(oneShot ? request : request.clone());
 				} catch (err) {
 					if (signal?.aborted) throw signal.reason;
 					if (isAbortError(err)) throw err;
 					throw networkError(err, request.method, keyed);
 				}
+				seen.response = res;
 				if (!res.ok) throw await errorFromResponse(res);
 				return res;
 			};
+			if (oneShot) return send();
 			let refreshed = false;
 			return withRetry(
 				async () => {
@@ -166,7 +217,7 @@ export function createRawClient(opts: SbxOptions = {}): RawClient {
 					} catch (err) {
 						if (refreshed || !isTokenExpired(err)) throw err;
 						refreshed = true;
-						const token = await creds.getToken(true);
+						const token = await creds.getToken(true, signal);
 						request.headers.set("Authorization", `Bearer ${token}`);
 						return await send();
 					}
@@ -184,28 +235,60 @@ export function createRawClient(opts: SbxOptions = {}): RawClient {
 				idempotencyKey === undefined
 					? rest.headers
 					: mergeHeaders(rest.headers, idempotencyKey);
-			const { data, response } = await client.request(
-				method as "get",
-				url as never,
-				{
-					...rest,
-					...(requestHeaders === undefined ? {} : { headers: requestHeaders }),
-					...(signal === undefined ? {} : { signal }),
-					baseUrl: creds.baseUrl,
-					fetch: transport(creds, signal, retryBudgetMs),
-				} as never,
-			);
-			return { data, response };
+			const oneShot = (rest.body as unknown) instanceof ReadableStream;
+			const seen: { response?: Response } = {};
+			try {
+				const { data, response } = await client.request(
+					method as "get",
+					url as never,
+					{
+						...rest,
+						...(requestHeaders === undefined
+							? {}
+							: { headers: requestHeaders }),
+						...(signal === undefined ? {} : { signal }),
+						// Node and Bun need it for a streamed request body.
+						...(oneShot ? { duplex: "half" } : {}),
+						baseUrl: creds.baseUrl,
+						fetch: transport(creds, seen, signal, retryBudgetMs, oneShot),
+					} as never,
+				);
+				return { data, response };
+			} catch (err) {
+				if (err instanceof SbxError || isAbortError(err)) throw err;
+				if (signal?.aborted) throw signal.reason;
+				if (err instanceof SyntaxError && seen.response?.ok) {
+					throw malformedAnswer(seen.response, err);
+				}
+				throw err;
+			}
 		};
 
 	return {
-		GET: call("get"),
-		PUT: call("put"),
-		POST: call("post"),
-		DELETE: call("delete"),
-		HEAD: call("head"),
-		PATCH: call("patch"),
-	} as unknown as RawClient;
+		raw: {
+			GET: call("get"),
+			PUT: call("put"),
+			POST: call("post"),
+			DELETE: call("delete"),
+			HEAD: call("head"),
+			PATCH: call("patch"),
+		} as unknown as RawClient,
+		credentials: (signal) => abortable(credentials(), signal),
+		userAgent,
+		streamIdleTimeoutMs: opts.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS,
+	};
+}
+
+/** A 2xx answer whose body is not the JSON the route promises. */
+function malformedAnswer(res: Response, cause: unknown): SbxError {
+	return new SbxError({
+		status: res.status,
+		code: UNEXPECTED_RESPONSE,
+		message: `HTTP ${res.status} with a body that is not valid JSON`,
+		retryable: false,
+		requestId: res.headers.get("Request-Id"),
+		cause,
+	});
 }
 
 function mergeHeaders(
@@ -245,23 +328,4 @@ function isTokenExpired(err: unknown): boolean {
 		err.status === 401 &&
 		err.code === "token_expired"
 	);
-}
-
-function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
-	if (!signal) return p;
-	if (signal.aborted) return Promise.reject(signal.reason);
-	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(signal.reason);
-		signal.addEventListener("abort", onAbort, { once: true });
-		p.then(
-			(v) => {
-				signal.removeEventListener("abort", onAbort);
-				resolve(v);
-			},
-			(e: unknown) => {
-				signal.removeEventListener("abort", onAbort);
-				reject(e);
-			},
-		);
-	});
 }
