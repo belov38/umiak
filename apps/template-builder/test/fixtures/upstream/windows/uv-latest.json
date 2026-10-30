@@ -1,0 +1,22 @@
+{
+	"tag_name": "0.13.6",
+	"prerelease": false,
+	"draft": false,
+	"assets": [
+		{
+			"name": "uv-aarch64-pc-windows-msvc.zip",
+			"browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.13.6/uv-aarch64-pc-windows-msvc.zip",
+			"digest": "sha256:c2426c0c8e28b53d8c440e47a18d96ad4db51e159866c0e81435b196d7f0081c"
+		},
+		{
+			"name": "uv-i686-pc-windows-msvc.zip",
+			"browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.13.6/uv-i686-pc-windows-msvc.zip",
+			"digest": "sha256:32ceb64db231cbedfd499f7654c72e4c0b564f2846f9e76c0a4a7b2d03d7e67c"
+		},
+		{
+			"name": "uv-x86_64-pc-windows-msvc.zip",
+			"browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.13.6/uv-x86_64-pc-windows-msvc.zip",
+			"digest": "sha256:a2a8820d5eea32f08ef467ef3b7f66883a9b076d5737a2fc2fbb5f458d1bb50f"
+		}
+	]
+}

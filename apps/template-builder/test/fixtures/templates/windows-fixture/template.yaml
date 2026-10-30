@@ -1,0 +1,26 @@
+slug: windows-fixture
+os: windows
+extends: null
+shared: _winshared
+source:
+  kind: iso-install
+  family: client
+  drivers: w11
+  locale: { formats: en-US, keyboard: en-US, timezone: UTC }
+disk: { slot: scsi0, size: 96G }
+hw:
+  machine: pinned
+  cpu: host
+  bios: ovmf
+  ostype: win11
+  tablet: 1
+  efidisk0: { efitype: 4m, pre-enrolled-keys: 1, ms-cert: 2023k }
+  tpmstate0: { version: v2.0 }
+  cloudinit: false
+build_vm: { cores: 4, memory_mb: 4096 }
+steps: [00-base, reboot, network-up, 10-system, 90-cleanup]
+seal: sysprep
+offline: [defender-off, waasmedic-off]
+options: { vs_buildtools: false }
+boot_timeout_s: 1200
+verify: windows

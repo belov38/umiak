@@ -1,3 +1,11 @@
+import {
+	createHash,
+	generateKeyPairSync,
+	type KeyObject,
+	sign,
+} from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { type ExecResult, PveApiError, type UploadFile } from "@sbx/pve";
 import { FakePve } from "@sbx/pve/testing";
 import { FAIL_STEP_SCRIPT } from "../src/build.ts";
@@ -14,9 +22,36 @@ export interface StorageFile {
 	size: number;
 }
 
+/** Result of a QGA exec in BuildPve.agentExec; "running" never exits. */
+export type AgentExecResult =
+	| { exitcode: number; out?: string; err?: string }
+	| "running";
+
+const FIRMWARE_ORDER = ["efidisk0", "scsi0", "tpmstate0"];
+
 /** FakePve plus what a template build needs. */
 export class BuildPve extends FakePve {
 	storage: StorageFile[] = [];
+	/** GET /nodes/<node>/capabilities/qemu/machines. */
+	machineTypes: { id: string; type: string; version?: string }[] = [
+		{ id: "pc-i440fx-11.0+pve2", type: "i440fx", version: "11.0+pve2" },
+		{ id: "pc-q35-9.2+pve1", type: "q35", version: "9.2+pve1" },
+		{ id: "pc-q35-11.0", type: "q35", version: "11.0" },
+		{ id: "pc-q35-11.0+pve2", type: "q35", version: "11.0+pve2" },
+		{ id: "pc-q35-10.2+pve3", type: "q35", version: "10.2+pve3" },
+		{ id: "pc-q35-11.0+pve1", type: "q35", version: "11.0+pve1" },
+	];
+	/**
+	 * When set, answers agent/exec and agent/exec-status of running VMs (Qga.exec); the result
+	 * of a "running" exec can be replaced later through `execResults`.
+	 */
+	agentExec?: (
+		vmid: number,
+		command: string[],
+		input: string | undefined,
+	) => AgentExecResult;
+	execResults = new Map<number, AgentExecResult>();
+	#pid = 100;
 	uploads: {
 		path: string;
 		fields: Record<string, string>;
@@ -51,11 +86,47 @@ export class BuildPve extends FakePve {
 				value: this.storage.filter((s) => s.content === params?.content),
 			};
 		}
+		if (method === "GET" && path === `${n}/capabilities/qemu/machines`) {
+			this.#record(method, path, params);
+			return { value: this.machineTypes };
+		}
 		const m = /^\/nodes\/[^/]+\/qemu\/\d+(\/.*)$/.exec(path);
 		const sub = m?.[1];
 		if (sub === undefined) return undefined;
 		const vm = this.vms.get(this.#vmid(path));
 		const key = `${method} ${sub}`;
+		if (
+			this.agentExec &&
+			(key === "POST /agent/exec" || key === "GET /agent/exec-status")
+		) {
+			this.#record(method, path, params);
+			if (!this.agentUp || vm?.status !== "running")
+				throw new PveApiError(500, "QEMU guest agent is not running");
+			if (key === "POST /agent/exec") {
+				const pid = ++this.#pid;
+				const command = params?.command as string[];
+				const input = params?.["input-data"] as string | undefined;
+				this.execResults.set(
+					pid,
+					this.agentExec(this.#vmid(path), command, input),
+				);
+				return { value: { pid } };
+			}
+			const pid = Number(params?.pid);
+			const r = this.execResults.get(pid);
+			if (r === undefined)
+				throw new PveApiError(500, `PID ${pid} does not exist`);
+			if (r === "running") return { value: { exited: 0 } };
+			this.execResults.delete(pid);
+			return {
+				value: {
+					exited: 1,
+					exitcode: r.exitcode,
+					"out-data": r.out ?? "",
+					"err-data": r.err ?? "",
+				},
+			};
+		}
 		if (key === "PUT /resize") {
 			this.#record(method, path, params);
 			if (!vm) throw new PveApiError(500, "VM does not exist");
@@ -66,6 +137,9 @@ export class BuildPve extends FakePve {
 			this.#record(method, path, params);
 			if (!vm) throw new PveApiError(500, "VM does not exist");
 			vm.config.template = "1";
+			const id = this.#vmid(path);
+			for (const [k, v] of Object.entries(vm.config))
+				vm.config[k] = v.replaceAll(`:vm-${id}-disk-`, `:base-${id}-disk-`);
 			return { value: `UPID:pve:${++this.#upid}` };
 		}
 		if (key === "GET /firewall/rules") {
@@ -102,6 +176,8 @@ export class BuildPve extends FakePve {
 			this.#record(method, path, params);
 			if (!vm) throw new PveApiError(500, "VM does not exist");
 			for (const k of String(params.delete).split(",")) delete vm.config[k];
+			for (const [k, v] of Object.entries(params))
+				if (k !== "delete") vm.config[k] = String(v);
 			return { value: null };
 		}
 		if (key === "POST /agent/shutdown") {
@@ -119,9 +195,31 @@ export class BuildPve extends FakePve {
 	override post<T>(path: string, params?: P) {
 		try {
 			const r = this.#own("POST", path, params);
-			return r ? Promise.resolve(r.value as T) : super.post<T>(path, params);
+			if (r) return Promise.resolve(r.value as T);
 		} catch (err) {
 			return Promise.reject(err);
+		}
+		const created = super.post<T>(path, params);
+		if (path !== `/nodes/${this.node}/qemu`) return created;
+		return created.then((v) => {
+			this.#allocate(Number(params?.vmid));
+			return v;
+		});
+	}
+
+	/**
+	 * New volumes of a create (`<storage>:<GiB>,...`, not import-from) become
+	 * vm-<vmid>-disk-<k>, k in efidisk0, scsi0, tpmstate0 order.
+	 */
+	#allocate(vmid: number): void {
+		const vm = this.vms.get(vmid);
+		if (!vm) return;
+		let k = 0;
+		for (const slot of FIRMWARE_ORDER) {
+			const v = vm.config[slot];
+			const alloc = v && /^([^:,]+):\d+(,.*)?$/.exec(v);
+			if (!alloc || v.includes("import-from")) continue;
+			vm.config[slot] = `${alloc[1]}:vm-${vmid}-disk-${k++}${alloc[2] ?? ""}`;
 		}
 	}
 	override put<T>(path: string, params?: P) {
@@ -292,4 +390,215 @@ export class FakeGuest implements GuestIo {
 	commands(): string[] {
 		return this.calls.map((c) => c.cmd.join(" "));
 	}
+}
+
+const MISSING_WIN = (path: string) =>
+	new PveApiError(
+		500,
+		`failed to open file '${path}' (mode: 'r'): The system cannot find the file specified.`,
+	);
+
+/** What the facts script of the Windows build reports by default. */
+export const FAKE_WIN_FACTS = {
+	editionId: "Professional",
+	build: "26300",
+	ubr: 9457,
+	displayVersion: "26H1",
+	openssh: "9.8.3.1",
+	tools: { pwsh: "PowerShell 7.6.9", node: "v26.13.0", gh: null },
+	provisioned: ["Microsoft.WindowsStore", "Microsoft.WindowsCalculator"],
+};
+
+/**
+ * Windows guest of the build VM as runWindowsStep and the Windows stages see it: steps finish at
+ * once with exit 0 (or `failRc[step]`), a reboot changes the boot time, `alive()` decides ping.
+ */
+export class FakeWinGuest implements GuestIo {
+	calls: { cmd: string[]; input?: string }[] = [];
+	failRc: Record<string, string> = {};
+	/** Steps whose scheduled task was started, in order. */
+	started: string[] = [];
+	facts: unknown = FAKE_WIN_FACTS;
+	sealExit = 0;
+	/** Content of C:\Windows\System32\Sysprep\Panther\setuperr.log. */
+	setupErr = "";
+	onStep?: (step: string) => void;
+	alive: () => boolean = () => true;
+	log: string[];
+	#boot = 1;
+
+	constructor(log: string[]) {
+		this.log = log;
+	}
+
+	async exec(
+		cmd: string[],
+		o?: { input?: string; timeoutMs?: number },
+	): Promise<ExecResult> {
+		this.calls.push(o?.input === undefined ? { cmd } : { cmd, input: o.input });
+		const [c0, c1] = cmd;
+		const script = String(cmd.at(-1));
+		if (c0 === "schtasks.exe") {
+			const task = String(cmd.at(c1 === "/delete" ? 4 : 3));
+			const step = task.replace(/^sbx-build-/, "");
+			if (c1 === "/run") {
+				this.started.push(step);
+				this.log.push(`guest:step ${step}`);
+				this.onStep?.(step);
+			}
+			if (c1 === "/query") {
+				if (!this.started.includes(step))
+					return { exitCode: 1, stdout: "", stderr: "ERROR: not found" };
+				return ok(`"\\${task}","N/A","Ready"\r\n`);
+			}
+			return ok();
+		}
+		if (c0 === "powershell.exe" && script.includes("Get-Volume"))
+			return ok("D\r\n");
+		if (c0 === "powershell.exe" && script.includes("LastBootUpTime"))
+			return ok(`2026-10-31T10:00:0${this.#boot}.0000000+00:00\r\n`);
+		if (c0 === "shutdown.exe") {
+			this.#boot++;
+			this.log.push("guest:reboot");
+			return ok();
+		}
+		if (c0 === "powershell.exe" && cmd.includes("-EncodedCommand")) {
+			const text = Buffer.from(script, "base64").toString("utf16le");
+			if (text.includes("CurrentVersion")) {
+				this.log.push("guest:facts");
+				return ok(`noise\r\nFACTS ${JSON.stringify(this.facts)}\r\n`);
+			}
+			if (text.includes("C:\\sbx-build")) {
+				this.log.push("guest:rm-sbx-build");
+				return ok();
+			}
+			if (text.includes("sbx-template")) {
+				this.log.push("guest:mkdir-sbx-template");
+				return ok();
+			}
+		}
+		if (c0?.endsWith("sbx-agent.exe") && c1 === "seal") {
+			this.log.push("guest:seal");
+			return this.sealExit === 0
+				? ok("sealed\r\n")
+				: { exitCode: this.sealExit, stdout: "", stderr: "seal failed" };
+		}
+		return ok();
+	}
+
+	async readFile(path: string, offset: number, count: number): Promise<Buffer> {
+		if (path.endsWith("\\setuperr.log"))
+			return Buffer.from(this.setupErr).subarray(offset, offset + count);
+		const m = /^C:\\sbx-build\\logs\\(.+)\.(exit|log)$/.exec(path);
+		if (!m) throw MISSING_WIN(path);
+		const [, step = "", kind] = m;
+		if (!this.started.includes(step)) throw MISSING_WIN(path);
+		if (kind === "exit") return Buffer.from(`${this.failRc[step] ?? "0"}\r\n`);
+		return Buffer.from(`running ${step}\nend of ${step}\n`).subarray(
+			offset,
+			offset + count,
+		);
+	}
+
+	async ping(): Promise<boolean> {
+		return this.alive();
+	}
+
+	commands(): string[] {
+		return this.calls.map((c) => c.cmd.join(" "));
+	}
+}
+
+/**
+ * QGA side of Qga.fileWriteWindows: files written through the PowerShell append script, with the
+ * sha256 printed after the last chunk.
+ */
+export class FakeWinFiles {
+	files = new Map<string, Buffer>();
+
+	/** The result for a matching exec, undefined for any other command. */
+	handle(
+		command: string[],
+		input: string | undefined,
+	): AgentExecResult | undefined {
+		const script = String(command[4] ?? "");
+		if (command[0] !== "powershell" || !script.includes("FromBase64String"))
+			return undefined;
+		const path = String(command.at(-1));
+		const data = Buffer.from((input ?? "").trim(), "base64");
+		const prev = script.includes("FileMode]::Append")
+			? (this.files.get(path) ?? Buffer.alloc(0))
+			: Buffer.alloc(0);
+		const next = Buffer.concat([prev, data]);
+		this.files.set(path, next);
+		return {
+			exitcode: 0,
+			out: script.includes("Get-FileHash")
+				? `${createHash("sha256").update(next).digest("hex").toUpperCase()}\r\n`
+				: "",
+		};
+	}
+}
+
+// Signed agent packages (format of services/guest-agent/internal/update, as agent-package.ts reads it)
+
+function tarEntry(name: string, data: Buffer, type = "0"): Buffer[] {
+	const hdr = Buffer.alloc(512);
+	hdr.write(name, 0, 100, "utf8");
+	hdr.write("0000644\0", 100);
+	hdr.write("0000000\0", 108);
+	hdr.write("0000000\0", 116);
+	hdr.write(`${data.length.toString(8).padStart(11, "0")}\0`, 124);
+	hdr.write("00000000000\0", 136);
+	hdr.write("        ", 148);
+	hdr.write(type, 156);
+	hdr.write("ustar\x0000", 257, "latin1");
+	let sum = 0;
+	for (const b of hdr) sum += b;
+	hdr.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+	return [hdr, data, Buffer.alloc((512 - (data.length % 512)) % 512)];
+}
+
+/** Writes a signed agent package and its update keys file into `dir`. */
+export function writeAgentPackage(
+	dir: string,
+	o: { os: string; arch?: string; version?: string },
+): { tar: string; keys: string } {
+	const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+	const raw = Buffer.from(
+		publicKey.export({ format: "jwk" }).x as string,
+		"base64url",
+	);
+	const keyLine = `ed25519 ${raw.toString("base64")} test`;
+	const binary = o.os === "windows" ? "sbx-agent.exe" : "sbx-agent";
+	const files: Record<string, Buffer> = {
+		[binary]: Buffer.from("agent binary"),
+		"trust/tunnel-ca.pem": Buffer.from("ca"),
+		"trust/update-keys.pub": Buffer.from(`${keyLine}\n`),
+	};
+	const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+	const manifest = Buffer.from(
+		`${JSON.stringify({
+			format: "sbx-agent-manifest/v1",
+			version: o.version ?? "0.4.0-test",
+			os: o.os,
+			arch: o.arch ?? "amd64",
+			files: Object.fromEntries(
+				Object.entries(files).map(([n, d]) => [n, sha(d)]),
+			),
+		})}\n`,
+	);
+	const sig = sign(null, manifest, privateKey as KeyObject);
+	const tar = Buffer.concat([
+		...tarEntry("trust/", Buffer.alloc(0), "5"),
+		...Object.entries(files).flatMap(([n, d]) => tarEntry(n, d)),
+		...tarEntry("manifest.json", manifest),
+		...tarEntry("manifest.sig", sig),
+		Buffer.alloc(1024),
+	]);
+	const tarPath = join(dir, `sbx-agent-${o.os}.tar`);
+	const keysPath = join(dir, `update-keys-${o.os}.pub`);
+	writeFileSync(tarPath, tar);
+	writeFileSync(keysPath, `${keyLine}\n`);
+	return { tar: tarPath, keys: keysPath };
 }

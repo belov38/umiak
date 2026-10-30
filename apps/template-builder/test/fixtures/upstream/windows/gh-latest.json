@@ -1,0 +1,17 @@
+{
+	"tag_name": "v2.103.3",
+	"prerelease": false,
+	"draft": false,
+	"assets": [
+		{
+			"name": "gh_2.103.3_windows_amd64.msi",
+			"browser_download_url": "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_windows_amd64.msi",
+			"digest": "sha256:5073112b7abb5ffbba24b76aee7e89269af531218c0a42751f5f0bfb6440c2cc"
+		},
+		{
+			"name": "gh_2.103.3_windows_amd64.zip",
+			"browser_download_url": "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_windows_amd64.zip",
+			"digest": "sha256:98d0cfa794721665d7973dd728c78aff7bd836d58f10f6d7a03568eccb0a22e0"
+		}
+	]
+}

@@ -345,6 +345,34 @@ describe("verifyAgentPackage", () => {
 		expect(() => verifyAgentPackage(win, keysPath)).toThrow(/linux\/amd64/);
 	});
 
+	it("accepts windows/amd64 with sbx-agent.exe when asked for windows", () => {
+		const key = newKey();
+		const dir = tmp();
+		const win = buildPackage({
+			key,
+			os: "windows",
+			files: (f) => {
+				f["sbx-agent.exe"] = f["sbx-agent"] as Buffer;
+				delete f["sbx-agent"];
+			},
+			mutate: (m) => {
+				const files = m.files as Record<string, string>;
+				files["sbx-agent.exe"] = files["sbx-agent"] as string;
+				delete files["sbx-agent"];
+			},
+		});
+		const [tarPath, keysPath] = write(dir, win, key.line);
+		expect(verifyAgentPackage(tarPath, keysPath, "windows")).toMatchObject({
+			os: "windows",
+			arch: "amd64",
+		});
+		expect(() => verifyAgentPackage(tarPath, keysPath)).toThrow(/linux\/amd64/);
+		const [linux] = write(tmp(), buildPackage({ key }), key.line);
+		expect(() => verifyAgentPackage(linux, keysPath, "windows")).toThrow(
+			/windows\/amd64/,
+		);
+	});
+
 	it("rejects a wrong manifest format and an invalid version", () => {
 		const key = newKey();
 		const dir = tmp();

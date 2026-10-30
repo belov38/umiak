@@ -19,6 +19,7 @@ import {
 	PveInfraRegistry,
 	pveClientsFromSecrets,
 } from "../src/adapters/pve-infra.ts";
+import { QuiesceFailed } from "../src/ops/snapshot-step.ts";
 import {
 	type InfraSmbios,
 	isPermanent,
@@ -274,6 +275,42 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(snap.consistency).toBe("quiesced");
 		expect(hookCalls).toEqual(["freeze", "thaw"]);
 		expect(e.api.paths().some((p) => p.includes("fsfreeze"))).toBe(false);
+	});
+
+	it("qgaFreezeHook freezes and thaws through QGA; an already thawed guest is a QuiesceFailed", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const freeze = `POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-freeze`;
+		const thaw = `POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-thaw`;
+
+		// Thaw without a freeze does nothing.
+		const idle = e.infra.qgaFreezeHook(vmid);
+		await idle.thaw();
+		expect(e.api.paths()).not.toContain(thaw);
+
+		const clean = e.infra.qgaFreezeHook(vmid);
+		await clean.freeze();
+		expect(e.api.guestFrozen).toBe(true);
+		await clean.thaw();
+		expect(e.api.guestFrozen).toBe(false);
+		await clean.thaw();
+		expect(e.api.paths().filter((p) => p === thaw)).toHaveLength(1);
+
+		// VSS released the writers by itself: the thaw is not an error for QGA,
+		// but the snapshot is not consistent. The outcome is kept for retries.
+		const late = e.infra.qgaFreezeHook(vmid);
+		await late.freeze();
+		e.api.guestFrozen = false;
+		await expect(late.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
+		await expect(late.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
+		expect(e.api.paths().filter((p) => p === freeze)).toHaveLength(2);
+		expect(e.api.paths().filter((p) => p === thaw)).toHaveLength(1);
 	});
 
 	it("QGA down during a running snapshot is a permanent quiesce_failed", async () => {

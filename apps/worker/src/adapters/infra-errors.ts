@@ -4,6 +4,7 @@
 import {
 	AllocatorError,
 	FreezeBudgetExceededError,
+	FreezeTimeoutError,
 	NodeOpsError,
 	PveApiError,
 	PveTaskError,
@@ -130,6 +131,9 @@ export function classifyInfraError(err: unknown, op?: InfraOp): Error {
 	}
 	if (err instanceof FreezeBudgetExceededError)
 		return new QuiesceFailed(messageOf(err));
+	// The cause lets the snapshot step tell a slow agent hook from a slow QGA freeze.
+	if (err instanceof FreezeTimeoutError)
+		return new QuiesceFailed(messageOf(err), { cause: err });
 	if (err instanceof QgaUnavailableError) {
 		if (op === "snapshot") return new QuiesceFailed(messageOf(err));
 		return new InfraError("qga_unavailable", messageOf(err), {

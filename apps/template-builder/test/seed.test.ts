@@ -39,7 +39,7 @@ const BUILD_ID = "0199c5a0-7b1e-7a3c-8d3e-5f2a9c1b4e60";
 const AGENT_BYTES = Buffer.from([1, 2, 3, 0, 255]);
 
 function input(slug = "linux-fixture", extra: Partial<SeedInput> = {}) {
-	const recipe = loadRecipe(fixtures, slug);
+	const recipe = loadRecipe(fixtures, slug, "linux");
 	const agentPackage = join(tmp(), "agent.tar");
 	writeFileSync(agentPackage, AGENT_BYTES);
 	const i: SeedInput = {

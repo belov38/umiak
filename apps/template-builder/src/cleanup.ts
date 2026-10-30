@@ -6,8 +6,10 @@ import { isProtectedVmid } from "./vmid-guard.ts";
 
 const BUILD_TAG = "sbx-tpl";
 const STALE_BUILD_MS = 2 * 60 * 60_000;
-// Seeds are raw images in local:import; .iso in local:iso is the earlier CD form.
-const SEED_RE = /^sbx-seed-[a-z0-9-]+\.(?:raw|iso)$/;
+// Seeds are raw images in local:import; .iso in local:iso is the earlier CD form. Build and
+// offline ISOs of iso-install builds go the same way; the user's ISO and virtio-win never do.
+const BUILD_MEDIA_RE =
+	/^sbx-(?:seed-[a-z0-9-]+\.(?:raw|iso)|(?:build|offline)-[a-z0-9-]+\.iso)$/;
 
 export interface CleanupDeps {
 	api: PveClient;
@@ -39,7 +41,7 @@ const errorText = (err: unknown) =>
 /**
  * Deletes build VMs (tag sbx-tpl, name sbx-tpl-*, not a template) in the VMID range and not
  * protected (vmid-guard.ts), unused
- * seed images and template leases whose VM is gone, and marks builds that have been `building`
+ * seed images, build and offline ISOs, and template leases whose VM is gone, and marks builds that have been `building`
  * for more than 2 h as failed. A build still in progress keeps its VM, seed and lease.
  */
 export async function cleanup(d: CleanupDeps): Promise<string[]> {
@@ -68,6 +70,8 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 		active.flatMap((m) => [
 			`sbx-seed-${m.buildId}.raw`,
 			`sbx-seed-${m.buildId}.iso`,
+			`sbx-build-${m.buildId}.iso`,
+			`sbx-offline-${m.buildId}.iso`,
 		]),
 	);
 
@@ -136,7 +140,7 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 		}>("media.list");
 		const unused = [...media.iso, ...media.import]
 			.map((f) => f.name)
-			.filter((n) => SEED_RE.test(n) && !used.has(n));
+			.filter((n) => BUILD_MEDIA_RE.test(n) && !used.has(n));
 		if (unused.length > 0) {
 			await node.call("media.remove", { names: unused });
 			report.push(`removed ${unused.join(", ")}`);

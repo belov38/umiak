@@ -52,7 +52,7 @@ export interface SnapshotRef extends NodeRef {
 	/** Hardware config of the source without identity (smbios1, vmgenid, MAC, name) and disks. */
 	hardware: Record<string, string>;
 	createdAt: number;
-	/** Time from the start of freeze to the end of thaw, for running machines. */
+	/** Time from the return of hook.freeze() to the call of hook.thaw(), for running machines. */
 	freezeMs?: number;
 }
 
@@ -69,7 +69,12 @@ export interface QuiesceHook {
 }
 
 export interface StorageDriver {
-	cloneFromTemplate(tpl: TemplateRef, target: VmTarget): Promise<DiskSet>;
+	/** opts.skipSlots leaves slots out of the clone; the caller creates them (a fresh vTPM, S9 §9). */
+	cloneFromTemplate(
+		tpl: TemplateRef,
+		target: VmTarget,
+		opts?: { skipSlots?: DiskSlot[] },
+	): Promise<DiskSet>;
 	/** opts.id fixes the snapshot id; it must match ^[a-z0-9]{1,32}$ (used in LV names). */
 	snapshot(
 		m: MachineRef,

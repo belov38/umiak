@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { Qga } from "@sbx/pve";
 import {
 	BuildFailedError,
 	type BuildOptions,
@@ -23,22 +24,30 @@ import {
 	registryDir,
 } from "./context.ts";
 import { devCpRegistrar } from "./devcp.ts";
-import { defaultDownloadFetch, fetchBaseImage } from "./image.ts";
+import {
+	defaultDownloadFetch,
+	fetchBaseImage,
+	fetchVirtioWin,
+} from "./image.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
 import { preflight } from "./preflight.ts";
 import { loadRecipe, loadVersions } from "./recipe.ts";
 import { FileRegistry } from "./registry.ts";
 import { pveGuestIo } from "./runner.ts";
 import { makeIso } from "./seed.ts";
+import { fileSha256, MEDIA_STORAGE, TASK_TIMEOUT_MS } from "./stages.ts";
 import { defaultSecretFiles, verifyTemplate } from "./verify.ts";
-import { formatVersionsToml, updateVersionsFile } from "./versions-update.ts";
+import { formatRecipeVersions, updateVersionsFile } from "./versions-update.ts";
 
 const USAGE = `usage:
-  sbx-tpl preflight [--node <node>]
+  sbx-tpl preflight [<slug>] [--node <node>]
   sbx-tpl versions <slug> [--update]
   sbx-tpl build <slug> --agent-package <tar> [--node <node>] [--sbx-cli <file>] [--api-url <url>]
                 [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure]
                 [--no-verify] [--fail-step <step>] [--connect-url <wss-url> --dev-cp-ssh <user@host>]
+                windows: [--iso <file>] [--iso-sha256 <hex> | --accept-iso-sha256] [--edition <name>]
+                [--product-key-file <file>]
+  sbx-tpl iso upload <file> [--node <node>]
   sbx-tpl verify <buildId> [--connect-url <wss-url> --dev-cp-ssh <user@host>]
   sbx-tpl list [<slug>]
   sbx-tpl show <buildId> [--field <name>]
@@ -95,7 +104,10 @@ function trapSignals(lastWords: () => string): {
 	};
 }
 
-/** `verifyTemplate` with the clients of `ctx`; guest calls stop once `signal` is aborted. */
+/**
+ * `verifyTemplate` with the clients of `ctx` (the profile follows `m.os`); guest calls stop once
+ * `signal` is aborted.
+ */
 function runVerify(
 	ctx: Ctx,
 	ramGuard: RamGuard,
@@ -107,6 +119,7 @@ function runVerify(
 	const { cfg, api } = ctx;
 	const recipe = loadRecipe(TEMPLATES_DIR, m.templateSlug);
 	const ioApi = o.signal ? guardApi(api, o.signal) : api;
+	const qga = new Qga(ioApi, cfg.node);
 	return verifyTemplate(
 		{
 			machines: machinesFor(ctx, m.pveVmid),
@@ -114,10 +127,20 @@ function runVerify(
 			node: ctx.node,
 			ramGuard,
 			verifyScript: readFileSync(
-				join(TEMPLATES_DIR, recipe.verify, "verify.sh"),
+				join(
+					TEMPLATES_DIR,
+					recipe.verify,
+					m.os === "windows" ? "verify.ps1" : "verify.sh",
+				),
 				"utf8",
 			),
 			secretFiles: defaultSecretFiles(cfg),
+			windows: {
+				fsfreezeFreeze: (vmid) => qga.fsfreezeFreeze(vmid),
+				fsfreezeThaw: (vmid) => qga.fsfreezeThaw(vmid),
+				fsfreezeStatus: (vmid) => qga.fsfreezeStatus(vmid),
+				writeFile: (vmid, path, data) => qga.fileWriteWindows(vmid, path, data),
+			},
 			log: (msg) => out(`[sbx-tpl] ${msg}`),
 		},
 		m,
@@ -133,6 +156,57 @@ function runVerify(
 			...(o.signal !== undefined ? { signal: o.signal } : {}),
 		},
 	);
+}
+
+/**
+ * `sbx-tpl iso upload <file>`: the user's Windows ISO into local:iso under its own name, through
+ * the PVE API (spec S9 section 6.1). An ISO of that name is never replaced.
+ */
+async function cmdIsoUpload(
+	file: string,
+	nodeOver: { node?: string },
+): Promise<number> {
+	const name = basename(file);
+	if (!/^[A-Za-z0-9._()+-]+\.iso$/.test(name) || name.startsWith("sbx-"))
+		throw new UsageError(
+			`${name}: expected an .iso file name of letters, digits and ._()+- (sbx-* names are the builder's)`,
+		);
+	if (!existsSync(file)) throw new Error(`${file} not found`);
+	const size = statSync(file).size;
+	const ctx = await makeContext(nodeOver);
+	try {
+		const { cfg, api } = ctx;
+		const volid = `${MEDIA_STORAGE}:iso/${name}`;
+		const have = (
+			await api.get<{ volid: string; size?: number }[]>(
+				`/nodes/${cfg.node}/storage/${MEDIA_STORAGE}/content`,
+				{ content: "iso" },
+			)
+		).find((f) => f.volid === volid);
+		if (have?.size === size) {
+			out(`${volid} is present (${size} bytes)`);
+			return 0;
+		}
+		if (have)
+			throw new Error(
+				`${volid} exists with ${have.size} bytes, this file has ${size}: remove it in the Proxmox web UI first`,
+			);
+		out(`hashing ${file}`);
+		const sha256 = await fileSha256(file);
+		out(`uploading ${name} (${size} bytes, sha256 ${sha256})`);
+		const upid = await api.upload<string>(
+			`/nodes/${cfg.node}/storage/${MEDIA_STORAGE}/upload`,
+			{ content: "iso", "checksum-algorithm": "sha256", checksum: sha256 },
+			{ name, path: file, size },
+		);
+		await api.waitTask(cfg.node, upid, { timeoutMs: TASK_TIMEOUT_MS });
+		out(
+			`${volid}: uploaded; pin it in versions.toml [iso]: file = "${name}", sha256 = "${sha256}"`,
+		);
+		return 0;
+	} finally {
+		ctx.close();
+	}
 }
 
 function gitCommit(): string {
@@ -241,6 +315,11 @@ async function cmdBuild(
 			...opt("tunnel-url", "tunnelUrl"),
 			...opt("ssh-user-ca", "sshUserCa"),
 			...opt("fail-step", "failStep"),
+			...opt("iso", "iso"),
+			...opt("iso-sha256", "isoSha256"),
+			...opt("edition", "edition"),
+			...opt("product-key-file", "productKeyFile"),
+			...(v["accept-iso-sha256"] === true ? { acceptIsoSha256: true } : {}),
 			...connectOption(v as Record<string, string | undefined>),
 		};
 		const m = await buildTemplate(
@@ -260,10 +339,16 @@ async function cmdBuild(
 						base,
 						keyFile: UBUNTU_KEY_FILE,
 					}),
+				fetchVirtioWin: (virtioWin) =>
+					fetchVirtioWin({
+						fetch: defaultDownloadFetch,
+						cacheDir: imageCacheDir(),
+						virtioWin,
+					}),
 				// Guarded so a long exec stops polling on an interrupt.
 				io: (vmid) =>
 					pveGuestIo(guardApi(api, interrupt.signal), cfg.node, vmid),
-				makeIso: (files, path) => makeIso(files, path),
+				makeIso: (files, path, label) => makeIso(files, path, label),
 				verify: (mf, o) => runVerify(ctx, ramGuard, mf, o),
 				ramGuard,
 				log: (msg) => out(`[sbx-tpl] ${msg}`),
@@ -309,6 +394,11 @@ async function main(argv: string[]): Promise<number> {
 			"keep-on-failure": { type: "boolean", default: false },
 			"no-verify": { type: "boolean", default: false },
 			"fail-step": { type: "string" },
+			iso: { type: "string" },
+			"iso-sha256": { type: "string" },
+			"accept-iso-sha256": { type: "boolean", default: false },
+			edition: { type: "string" },
+			"product-key-file": { type: "string" },
 			"connect-url": { type: "string" },
 			"dev-cp-ssh": { type: "string" },
 			field: { type: "string" },
@@ -323,16 +413,17 @@ async function main(argv: string[]): Promise<number> {
 		case "versions": {
 			if (!arg || extra.length > 0) break;
 			if (values.update) {
-				const { file, changes } = await updateVersionsFile({
+				const { file, changes, warnings } = await updateVersionsFile({
 					templatesDir: TEMPLATES_DIR,
 					slug: arg,
 				});
+				for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
 				out(
 					`${file}\n${changes.length > 0 ? changes.join("\n") : "no changes"}`,
 				);
 			} else {
 				process.stdout.write(
-					formatVersionsToml(loadVersions(loadRecipe(TEMPLATES_DIR, arg))),
+					formatRecipeVersions(loadRecipe(TEMPLATES_DIR, arg)),
 				);
 			}
 			return 0;
@@ -387,7 +478,10 @@ async function main(argv: string[]): Promise<number> {
 					...o,
 					signal: interrupt.signal,
 				});
-				registry.update(m.buildId, { verify: v });
+				registry.update(m.buildId, {
+					verify: v,
+					...(v.license !== undefined ? { license: v.license } : {}),
+				});
 				out(v.ok ? "verify: ok" : "verify: FAILED");
 				return v.ok ? 0 : 1;
 			} catch (err) {
@@ -399,8 +493,18 @@ async function main(argv: string[]): Promise<number> {
 				ctx.close();
 			}
 		}
+		case "iso": {
+			const [file, ...rest] = extra;
+			if (arg !== "upload" || file === undefined || rest.length > 0) break;
+			return cmdIsoUpload(file, nodeOver);
+		}
 		case "preflight": {
-			if (arg !== undefined) break;
+			if (extra.length > 0) break;
+			// A windows recipe adds its checks (console right, machine types, user ISO).
+			const recipe =
+				arg !== undefined ? loadRecipe(TEMPLATES_DIR, arg) : undefined;
+			const iso =
+				recipe?.os === "windows" ? loadVersions(recipe).iso : undefined;
 			const ctx = await makeContext(nodeOver);
 			try {
 				const checks = await preflight({
@@ -408,6 +512,12 @@ async function main(argv: string[]): Promise<number> {
 					node: ctx.node,
 					cfg: ctx.cfg,
 					keyFile: UBUNTU_KEY_FILE,
+					...(recipe !== undefined
+						? { buildMemoryMb: recipe.buildVm.memoryMb }
+						: {}),
+					...(iso !== undefined
+						? { windows: { isoFile: iso.file, isoSha256: iso.sha256 } }
+						: {}),
 				});
 				for (const c of checks)
 					out(

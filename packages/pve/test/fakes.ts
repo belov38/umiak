@@ -143,6 +143,10 @@ export class FakePve {
 	templateConfig: Record<string, string> = { ...TEMPLATE_CONFIG };
 	fail: Record<string, Error> = {};
 	keepIpamOnDelete = false;
+	/** Guest filesystem state reported by fsfreeze-status; a test sets false to model a VSS timeout. */
+	guestFrozen = false;
+	/** When set, PVE-allocated volumes land in its LV list and destroy removes them. */
+	lvStore: FakeNode | undefined;
 	/** Status /cluster/resources reports instead of the real one: pvestatd lags by seconds. */
 	staleStatus = new Map<number, string>();
 	#nextIp = 101;
@@ -257,6 +261,12 @@ export class FakePve {
 			if (vm.status !== "stopped")
 				throw new PveApiError(500, `VM ${id} is running - destroy failed`);
 			this.vms.delete(id);
+			// destroy-unreferenced-disks: Proxmox removes the VM's own volumes (not our tagged clones,
+			// which sbx-node removes by tag).
+			if (this.lvStore)
+				this.lvStore.lvs = this.lvStore.lvs.filter(
+					(l) => l.tags.includes("sbx") || !l.name.startsWith(`vm-${id}-`),
+				);
 			if (!this.keepIpamOnDelete)
 				this.ipam = this.ipam.filter((e) => e.vmid !== id);
 			return this.#task();
@@ -266,7 +276,25 @@ export class FakePve {
 			case "GET /config":
 				return { ...vm.config };
 			case "PUT /config": {
-				for (const [k, v] of Object.entries(p)) vm.config[k] = String(v);
+				const id = Number(/\/qemu\/(\d+)/.exec(path)?.[1]);
+				for (const [k, v] of Object.entries(p)) {
+					// "<storage>:<size GiB>,opts" asks Proxmox to allocate a new volume.
+					const alloc = /^([^:,]+):\d+(,.*)?$/.exec(String(v));
+					if (k === "tpmstate0" && alloc) {
+						const used = new Set(
+							[
+								...Object.values(vm.config)
+									.join(" ")
+									.matchAll(new RegExp(`vm-${id}-disk-(\\d+)`, "g")),
+							].map((m) => Number(m[1])),
+						);
+						let n = 0;
+						while (used.has(n)) n++;
+						this.lvStore?.lvs.push({ name: `vm-${id}-disk-${n}`, tags: [] });
+						vm.config[k] =
+							`${alloc[1]}:vm-${id}-disk-${n},size=4M${alloc[2] ?? ""}`;
+					} else vm.config[k] = String(v);
+				}
 				const mac = /virtio=([0-9A-F:]+)/i.exec(String(p.net0 ?? ""))?.[1];
 				const entry = this.ipam.find(
 					(e) => e.vmid === Number(/\/qemu\/(\d+)/.exec(path)?.[1]),
@@ -293,6 +321,8 @@ export class FakePve {
 			case "POST /status/resume":
 				vm.status = "running";
 				return this.#task();
+			case "PUT /sendkey":
+				return null;
 			case "PUT /firewall/options":
 				vm.firewall.options = { ...p };
 				return null;
@@ -337,6 +367,16 @@ export class FakePve {
 					],
 				};
 			}
+			if (sub === "/agent/fsfreeze-freeze") {
+				this.guestFrozen = true;
+				return { result: 1 };
+			}
+			if (sub === "/agent/fsfreeze-thaw") {
+				this.guestFrozen = false;
+				return { result: 1 };
+			}
+			if (sub === "/agent/fsfreeze-status")
+				return { result: this.guestFrozen ? "frozen" : "thawed" };
 			if (sub === "/agent/exec") return { pid: 42 };
 			if (sub === "/agent/exec-status")
 				return { exited: 1, exitcode: 0, "out-data": "ok\n" };

@@ -1,0 +1,52 @@
+[
+	{
+		"name": "Python 2.7.18",
+		"slug": "python-2718",
+		"version": 2,
+		"is_published": true,
+		"is_latest": true,
+		"pre_release": false,
+		"release_date": "2020-04-20T14:18:29Z",
+		"resource_uri": "https://www.python.org/api/v2/downloads/release/432/"
+	},
+	{
+		"name": "Python 3.14.10",
+		"slug": "python-31410",
+		"version": 3,
+		"is_published": true,
+		"is_latest": false,
+		"pre_release": false,
+		"release_date": "2026-10-25T04:15:45Z",
+		"resource_uri": "https://www.python.org/api/v2/downloads/release/1171/"
+	},
+	{
+		"name": "Python 3.15.1",
+		"slug": "python-3151",
+		"version": 3,
+		"is_published": true,
+		"is_latest": false,
+		"pre_release": false,
+		"release_date": "2026-10-21T09:59:50Z",
+		"resource_uri": "https://www.python.org/api/v2/downloads/release/1165/"
+	},
+	{
+		"name": "Python 3.15.2",
+		"slug": "python-3152",
+		"version": 3,
+		"is_published": true,
+		"is_latest": true,
+		"pre_release": false,
+		"release_date": "2026-10-25T04:15:38Z",
+		"resource_uri": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "Python 3.9.25",
+		"slug": "python-3925",
+		"version": 3,
+		"is_published": true,
+		"is_latest": false,
+		"pre_release": false,
+		"release_date": "2025-10-31T19:03:29Z",
+		"resource_uri": "https://www.python.org/api/v2/downloads/release/1075/"
+	}
+]
