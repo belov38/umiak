@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package output
 
@@ -9,6 +9,10 @@ import (
 	"strconv"
 	"strings"
 )
+
+// blockSize is the granularity of hole punching. Offsets handed to PunchFront
+// are rounded down to a multiple of it.
+const blockSize = 4096
 
 func defaultStore() Store { return markerStore{} }
 
@@ -63,7 +67,7 @@ func (markerStore) PunchFront(f *os.File, upTo int64) error {
 	return os.Rename(tmp, markerPath(f))
 }
 
-// DefaultStatfs is not supported outside Linux.
+// DefaultStatfs is not supported outside Linux and Windows.
 func DefaultStatfs(string) (total, free uint64, err error) {
 	return 0, 0, errors.ErrUnsupported
 }

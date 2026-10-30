@@ -19,7 +19,8 @@ func TestReadChunkTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.Truncated || c.AvailableFrom != 299_008 || c.Offset != 299_008 || len(c.Data) != 0 {
+	from := alignedDown(300_000)
+	if !c.Truncated || c.AvailableFrom != from || c.Offset != from || len(c.Data) != 0 {
 		t.Fatalf("chunk = %+v", c)
 	}
 
@@ -28,7 +29,7 @@ func TestReadChunkTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Truncated || c.Offset != 299_008 || !bytes.Equal(c.Data, data[299_008:299_008+65536]) {
+	if c.Truncated || c.Offset != from || !bytes.Equal(c.Data, data[from:from+65536]) {
 		t.Fatalf("chunk = truncated %v offset %d len %d", c.Truncated, c.Offset, len(c.Data))
 	}
 }
