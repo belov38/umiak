@@ -216,6 +216,7 @@ type agent struct {
 	ports    *ports.Scanner
 	tcp      *ports.Counter
 	updater  *update.Manager
+	guard    *update.StartGuard // update deadline until CheckPending
 	system   *system.Service
 	idle     *system.IdleLoop
 	gopsutil *system.GopsutilMetrics // nil when Deps.Metrics is set
@@ -276,8 +277,16 @@ func (a *agent) notifyStopping() {
 	})
 }
 
-// shutdown stops everything started so far, in reverse order.
+// shutdown stops everything started so far, in reverse order. An active
+// quiesce lease is thawed first: a reboot or poweroff must not leave the
+// guest frozen, and the store flush below needs it thawed.
 func (a *agent) shutdown() {
+	if a.quiesce != nil {
+		a.quiesce.AutoThaw(quiesce.ByAgentStop)
+	}
+	if a.guard != nil {
+		a.guard.Stop()
+	}
 	a.exit() // ends the background goroutines also after a failed startup
 	a.bg.Wait()
 	if a.proc != nil {

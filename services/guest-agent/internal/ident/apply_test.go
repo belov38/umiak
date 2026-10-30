@@ -309,6 +309,34 @@ func TestApplyFromAgentRestartsServices(t *testing.T) {
 	}
 }
 
+// savedCheck is a FakeResetter that records whether identity.json was
+// already written when sshd is restarted.
+type savedCheck struct {
+	*FakeResetter
+	path  string
+	saved bool
+}
+
+func (s *savedCheck) RestartSSH() error {
+	_, err := os.Stat(s.path)
+	s.saved = err == nil
+	return s.FakeResetter.RestartSSH()
+}
+
+// The agent fallback saves identity.json before it restarts sshd and the
+// network: a hang there must not repeat the wipe on the next start.
+func TestApplyFromAgentSavesBeforeServices(t *testing.T) {
+	l := paths.ForRoot(t.TempDir())
+	r, _ := newFake(t, l)
+	sc := &savedCheck{FakeResetter: r, path: l.IdentityFile}
+	if _, err := Apply(context.Background(), l, testIdentity(testMachineID), sc, true); err != nil {
+		t.Fatal(err)
+	}
+	if !sc.saved {
+		t.Error("identity.json was written after RestartSSH")
+	}
+}
+
 func TestApplyFailureLeavesNoIdentityFile(t *testing.T) {
 	l := paths.ForRoot(t.TempDir())
 	r, _ := newFake(t, l)
@@ -539,5 +567,20 @@ func TestHostKeyFingerprintsWarnsWhenNoneParse(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no usable ssh host keys") {
 		t.Errorf("log = %q, want a no-usable-keys warning", buf.String())
+	}
+}
+
+// identity.json is created in a root 0700 state directory (spec 4).
+func TestSaveCreatesStateDir0700(t *testing.T) {
+	l := paths.ForRoot(t.TempDir())
+	if err := (&File{MachineID: testMachineID}).Save(l.IdentityFile); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Dir(l.IdentityFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := fi.Mode().Perm(); m != 0o700 {
+		t.Errorf("state dir mode = %o, want 700", m)
 	}
 }

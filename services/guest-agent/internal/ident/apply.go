@@ -28,12 +28,13 @@ const (
 // Apply makes the machine state match id (spec section 7.2). If identity.json
 // already records the same machine id it does nothing and returns false.
 // Otherwise it wipes agent state, resets machine-id, SSH host keys and
-// hostname, and writes identity.json with ResetPending set as the last step, so
-// an interrupted apply is repeated on the next boot.
+// hostname, and writes identity.json with ResetPending set as the last reset
+// step, so an interrupted apply is repeated on the next boot.
 //
 // With fromAgent set (the agent found a mismatch itself because
-// sbx-identity.service did not run) it also restarts sshd and renews network
-// leases; failures of those two steps are logged and do not fail the apply.
+// sbx-identity.service did not run) it then also restarts sshd and renews
+// network leases; failures of those two steps are logged and do not fail the
+// apply.
 func Apply(ctx context.Context, l paths.Layout, id Identity, r Resetter, fromAgent bool) (changed bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -79,15 +80,6 @@ func Apply(ctx context.Context, l paths.Layout, id Identity, r Resetter, fromAge
 	if err := applyHostname(l, r, DefaultHostname(id.MachineID)); err != nil {
 		return false, err
 	}
-	if fromAgent {
-		if err := r.RestartSSH(); err != nil {
-			slog.Warn("restart ssh after identity reset failed", "err", err)
-		}
-		if err := r.ReloadNetwork(); err != nil {
-			slog.Warn("renew network after identity reset failed", "err", err)
-		}
-	}
-
 	f := &File{
 		MachineID:           id.MachineID,
 		WrittenMachineID:    written,
@@ -96,6 +88,15 @@ func Apply(ctx context.Context, l paths.Layout, id Identity, r Resetter, fromAge
 	}
 	if err := f.Save(l.IdentityFile); err != nil {
 		return false, fmt.Errorf("ident: write identity.json: %w", err)
+	}
+	// After the save: a hang or a failure here must not repeat the wipe.
+	if fromAgent {
+		if err := r.RestartSSH(); err != nil {
+			slog.Warn("restart ssh after identity reset failed", "err", err)
+		}
+		if err := r.ReloadNetwork(); err != nil {
+			slog.Warn("renew network after identity reset failed", "err", err)
+		}
 	}
 	return true, nil
 }

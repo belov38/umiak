@@ -52,7 +52,8 @@ var (
 // startup brings the agent up (spec section 6, S5 17.3). The order:
 //
 //  1. quiesce Startup: thaw a lease left by the previous process or a
-//     foreign freeze, before anything is written to disk;
+//     foreign freeze, before anything is written to disk; then the start
+//     guard arms the deadline of an unconfirmed update;
 //  2. identity: read smbios and, on a mismatch with identity.json, apply the
 //     new identity (sbx-identity.service did not run). This runs before the
 //     store opens because the reset deletes state.db;
@@ -87,9 +88,23 @@ func (a *agent) startup(ctx context.Context) error {
 	a.quiesce = quiesce.New(qopts)
 	a.quiesce.Startup(ctx)
 
+	// The deadline of an unconfirmed update counts from here, not from
+	// CheckPending: a new version that hangs in the steps below is still
+	// rolled back. An expired deadline reverts at once and asks to exit.
+	a.guard = update.GuardStart(a.l, a.version, a.d.Now, a.exit)
+	if ctx.Err() != nil {
+		a.notifyStopping()
+		return nil
+	}
+
+	// Root 0700 (spec 4), also when an earlier step or an older version
+	// created them.
 	for _, dir := range []string{a.l.StateDir, a.l.RunDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("agent: create %s: %w", dir, err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("agent: chmod %s: %w", dir, err)
 		}
 	}
 
@@ -147,6 +162,11 @@ func (a *agent) startup(ctx context.Context) error {
 		return fmt.Errorf("agent: recover commands: %w", err)
 	}
 	reason := a.startReason()
+	if !a.guard.Stop() {
+		// The guard reverted the update while the agent was starting.
+		a.notifyStopping()
+		return nil
+	}
 	if err := a.updater.CheckPending(ctx); err != nil {
 		a.log.Warn("agent: check pending update", "err", err)
 	}

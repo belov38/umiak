@@ -393,3 +393,187 @@ func TestCheckPendingTimerAndConfirm(t *testing.T) {
 		})
 	}
 }
+
+// An operator who switched versions during the window (install-package
+// --activate, rollback --to) removed or replaced pending-update.json: the
+// timer must not revert from its stale copy.
+func TestDeadlineRereadsPending(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(t *testing.T, l paths.Layout)
+	}{
+		{"removed", func(t *testing.T, l paths.Layout) {
+			if err := removePending(l); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"replaced", func(t *testing.T, l paths.Layout) {
+			if err := writePending(l, Pending{From: "v2", To: "v3", Deadline: testNow.Add(time.Minute)}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newApplyEnv(t, "v1")
+			installed(t, e.l, "v2", e.priv)
+			setLinks(t, e.l, "v2", "v1")
+			if err := writePending(e.l, Pending{From: "v1", To: "v2", Deadline: testNow.Add(90 * time.Second)}); err != nil {
+				t.Fatal(err)
+			}
+			m := e.manager(t, "v2", e.priv.Public().(ed25519.PublicKey))
+			timers := &fakeTimers{}
+			m.afterFunc = timers.afterFunc
+			if err := m.CheckPending(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			tc.change(t, e.l)
+			timers.all[0].f()
+			if n := e.exits.Load(); n != 0 {
+				t.Errorf("exit called %d times", n)
+			}
+			if cur := linkTarget(t, e.l.CurrentLink); cur != "v2" {
+				t.Errorf("current = %q, want v2 (no revert)", cur)
+			}
+			if bad, _ := readBadVersions(e.l); len(bad) != 0 {
+				t.Errorf("bad versions = %v", bad)
+			}
+		})
+	}
+}
+
+// The start guard enforces the deadline before the slow startup steps.
+func TestStartGuard(t *testing.T) {
+	setup := func(t *testing.T, deadline time.Time) (*applyEnv, *atomic.Int32) {
+		e := newApplyEnv(t, "v1")
+		installed(t, e.l, "v2", e.priv)
+		setLinks(t, e.l, "v2", "v1")
+		if err := writePending(e.l, Pending{From: "v1", To: "v2", Deadline: deadline}); err != nil {
+			t.Fatal(err)
+		}
+		return e, &atomic.Int32{}
+	}
+	now := func() time.Time { return testNow }
+	t.Run("expired at start", func(t *testing.T) {
+		e, exits := setup(t, testNow.Add(-time.Second))
+		timers := &fakeTimers{}
+		g := guardStart(e.l, "v2", now, func() { exits.Add(1) }, timers.afterFunc)
+		if exits.Load() != 1 || len(timers.all) != 0 {
+			t.Fatalf("exits %d, timers %d; want an immediate revert", exits.Load(), len(timers.all))
+		}
+		if cur := linkTarget(t, e.l.CurrentLink); cur != "v1" {
+			t.Errorf("current = %q, want v1", cur)
+		}
+		if g.Stop() {
+			t.Error("Stop = true after the revert")
+		}
+	})
+	t.Run("deadline during the start", func(t *testing.T) {
+		e, exits := setup(t, testNow.Add(90*time.Second))
+		timers := &fakeTimers{}
+		g := guardStart(e.l, "v2", now, func() { exits.Add(1) }, timers.afterFunc)
+		if len(timers.all) != 1 || timers.all[0].d != 90*time.Second || exits.Load() != 0 {
+			t.Fatalf("timers %+v, exits %d", timers.all, exits.Load())
+		}
+		timers.all[0].f() // the start hangs past the deadline
+		if exits.Load() != 1 {
+			t.Errorf("exits = %d, want 1", exits.Load())
+		}
+		if cur := linkTarget(t, e.l.CurrentLink); cur != "v1" {
+			t.Errorf("current = %q, want v1", cur)
+		}
+		if g.Stop() {
+			t.Error("Stop = true after the revert")
+		}
+	})
+	t.Run("stopped before the deadline", func(t *testing.T) {
+		e, exits := setup(t, testNow.Add(90*time.Second))
+		timers := &fakeTimers{}
+		g := guardStart(e.l, "v2", now, func() { exits.Add(1) }, timers.afterFunc)
+		if !g.Stop() || !timers.all[0].stopped {
+			t.Fatal("Stop did not disarm the guard")
+		}
+		timers.all[0].f()
+		if exits.Load() != 0 || linkTarget(t, e.l.CurrentLink) != "v2" {
+			t.Error("reverted after Stop")
+		}
+	})
+	t.Run("not the target", func(t *testing.T) {
+		e, exits := setup(t, testNow.Add(-time.Second))
+		setLinks(t, e.l, "v1", "")
+		timers := &fakeTimers{}
+		g := guardStart(e.l, "v1", now, func() { exits.Add(1) }, timers.afterFunc)
+		if exits.Load() != 0 || len(timers.all) != 0 || !g.Stop() {
+			t.Errorf("exits %d, timers %d: the guard acted for another version", exits.Load(), len(timers.all))
+		}
+	})
+	t.Run("pending changed meanwhile", func(t *testing.T) {
+		e, exits := setup(t, testNow.Add(90*time.Second))
+		timers := &fakeTimers{}
+		guardStart(e.l, "v2", now, func() { exits.Add(1) }, timers.afterFunc)
+		if err := removePending(e.l); err != nil {
+			t.Fatal(err)
+		}
+		timers.all[0].f()
+		if exits.Load() != 0 || linkTarget(t, e.l.CurrentLink) != "v2" {
+			t.Error("reverted a pending update that is gone")
+		}
+	})
+}
+
+// The uploaded package in staging/ is removed after Apply, also after a
+// failure; a package elsewhere is left alone.
+func TestApplyRemovesStagedPackage(t *testing.T) {
+	stagePkg := func(t *testing.T, e *applyEnv, version, name string) string {
+		t.Helper()
+		data, err := os.ReadFile(packTest(t, version, e.priv))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(e.l.StagingDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(e.l.StagingDir, name)
+		if err := os.WriteFile(p, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	t.Run("success", func(t *testing.T) {
+		e := newApplyEnv(t, "v1")
+		pkg := stagePkg(t, e, "v2", "sbx-agent-v2.tar")
+		e.uploads["up"] = pkg
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if _, err := e.m.Apply(ctx, "up", false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(pkg); !os.IsNotExist(err) {
+			t.Errorf("staged package kept: %v", err)
+		}
+	})
+	t.Run("failure", func(t *testing.T) {
+		e := newApplyEnv(t, "v1")
+		pkg := stagePkg(t, e, "v2", "sbx-agent-v2.tar")
+		e.uploads["up"] = pkg
+		e.m.opts.SelfTest = func(context.Context, string) error { return errors.New("schema 9 unsupported") }
+		if _, err := e.m.Apply(context.Background(), "up", false); err == nil {
+			t.Fatal("apply succeeded")
+		}
+		if _, err := os.Stat(pkg); !os.IsNotExist(err) {
+			t.Errorf("staged package kept: %v", err)
+		}
+	})
+	t.Run("outside staging", func(t *testing.T) {
+		e := newApplyEnv(t, "v1")
+		pkg := packTest(t, "v2", e.priv)
+		e.uploads["up"] = pkg
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if _, err := e.m.Apply(ctx, "up", false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(pkg); err != nil {
+			t.Errorf("package outside staging removed: %v", err)
+		}
+	})
+}

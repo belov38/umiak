@@ -149,6 +149,31 @@ func TestQuiesceBudget(t *testing.T) {
 	}
 }
 
+// slowSupervisor delays StartWatchdog, like a busy systemd.
+type slowSupervisor struct {
+	Supervisor
+	delay time.Duration
+}
+
+func (s slowSupervisor) StartWatchdog(ctx context.Context, id string, argv []string) error {
+	time.Sleep(s.delay)
+	return s.Supervisor.StartWatchdog(ctx, id, argv)
+}
+
+// TestQuiesceBudgetIncludesWatchdogStart: the freeze budget counts from
+// before the watchdog unit start, so a slow systemd eats into it.
+func TestQuiesceBudgetIncludesWatchdogStart(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		o.Supervisor = slowSupervisor{Supervisor: o.Supervisor, delay: 150 * time.Millisecond}
+	})
+	e.m.freezeBudget = 100 * time.Millisecond
+	_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+	wantErr(t, err, connect.CodeDeadlineExceeded, errs.QuiesceTimeout)
+	if e.log.count("freeze /") != 0 || e.st.Frozen() {
+		t.Errorf("froze past the budget: %q", e.log.all())
+	}
+}
+
 // blockingStore is a store whose SetFrozen(true) waits for gate, like the
 // real store with a commit hanging on a foreign freeze.
 type blockingStore struct {
@@ -258,7 +283,60 @@ func TestThawWaitsForUnitMarker(t *testing.T) {
 		if e.fz.isFrozen("/") || e.fz.isFrozen("/data") || e.st.Frozen() {
 			t.Error("not thawed")
 		}
+		// The claim of the killed unit goes with the lease: the next
+		// start must not thaw it again and report auto_thawed.
+		if fileExists(claimPath(e.l)) {
+			t.Fatal("claim of the stopped watchdog unit left behind")
+		}
+		e.m.Startup(context.Background())
+		if evs := autoThawed(e.rec); len(evs) != 0 {
+			t.Errorf("events after restart = %v, want none", evs)
+		}
 	})
+	t.Run("claim of another lease kept", func(t *testing.T) {
+		e := newEnv(t, nil)
+		e.m.markerEvery = time.Hour
+		if _, err := e.m.Quiesce(context.Background(), 60000, false, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeLease(claimPath(e.l), &Lease{ID: "other", Deadline: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.m.Thaw(context.Background(), "lease-1"); err != nil {
+			t.Fatal(err)
+		}
+		if l, err := readLease(claimPath(e.l)); err != nil || l == nil || l.ID != "other" {
+			t.Fatalf("claim of another lease = %+v, %v; want kept", l, err)
+		}
+	})
+}
+
+// TestWatchdogNeverClobbersNewLease: the watchdog compares the lease id
+// before it claims the file, so a lease the agent started after the old
+// one ended stays in place.
+func TestWatchdogNeverClobbersNewLease(t *testing.T) {
+	e := newEnv(t, nil)
+	if err := writeLease(e.l.QuiesceFile, &Lease{ID: "old", Deadline: time.Now().Add(-watchdogGrace + 100*time.Millisecond)}); err != nil {
+		t.Fatal(err)
+	}
+	// While the watchdog sleeps, the agent ends "old" and starts "new".
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		_ = writeLease(e.l.QuiesceFile, &Lease{ID: "new", Deadline: time.Now().Add(time.Hour)})
+	}()
+	s := steps{freezer: e.fz, docker: e.dk, runHook: e.m.steps.runHook, log: testLog}
+	if code := runWatchdog(context.Background(), e.l, "old", s, time.Now); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if l, err := readLease(e.l.QuiesceFile); err != nil || l == nil || l.ID != "new" {
+		t.Fatalf("lease file = %+v, %v; want the new lease", l, err)
+	}
+	if fileExists(claimPath(e.l)) {
+		t.Error("claim left")
+	}
+	if len(e.log.all()) != 0 {
+		t.Errorf("acted on the new lease: %q", e.log.all())
+	}
 }
 
 // TestStartupClaimedLease: a watchdog unit that died while thawing leaves
@@ -292,5 +370,62 @@ func TestStartupUnreadableLeaseNothingFrozen(t *testing.T) {
 	}
 	if len(autoThawed(e.rec)) != 0 {
 		t.Errorf("events = %v", e.rec.All())
+	}
+}
+
+// leaseCheckSupervisor records whether the lease file still existed when
+// the watchdog unit was stopped.
+type leaseCheckSupervisor struct {
+	Supervisor
+	path string
+	seen *[]bool
+}
+
+func (s leaseCheckSupervisor) StopWatchdog(ctx context.Context, id string) error {
+	*s.seen = append(*s.seen, fileExists(s.path))
+	return s.Supervisor.StopWatchdog(ctx, id)
+}
+
+// TestReleaseRemovesLeaseBeforeStoppingWatchdog: the watchdog unit thaws
+// on its stop signal while the lease file is there, so a normal thaw
+// removes the file first: the unit then finds nothing to do.
+func TestReleaseRemovesLeaseBeforeStoppingWatchdog(t *testing.T) {
+	var seen []bool
+	e := newEnv(t, func(o *Options) {
+		o.Supervisor = leaseCheckSupervisor{Supervisor: o.Supervisor, path: o.Layout.QuiesceFile, seen: &seen}
+	})
+	e.m.markerEvery = time.Hour
+	if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Thaw(context.Background(), "lease-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0] {
+		t.Fatalf("lease file present at the watchdog stop: %v", seen)
+	}
+}
+
+// TestShutdownThawsActiveLease: an agent that stops with an active lease
+// thaws it, leaves a marker for a later Thaw and reports the event.
+func TestShutdownThawsActiveLease(t *testing.T) {
+	e := newEnv(t, nil)
+	e.m.markerEvery = time.Hour
+	if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+		t.Fatal(err)
+	}
+	e.m.AutoThaw(ByAgentStop)
+	if e.fz.isFrozen("/") || e.st.Frozen() || len(e.dk.pausedIDs()) != 0 || e.m.Status() != nil {
+		t.Errorf("not thawed: %q", e.log.all())
+	}
+	if fileExists(e.l.QuiesceFile) {
+		t.Error("lease file left")
+	}
+	if evs := autoThawed(e.rec); len(evs) != 1 || evs[0].GetBy() != ByAgentStop {
+		t.Errorf("events = %v", evs)
+	}
+	tr, err := e.m.Thaw(context.Background(), "lease-1")
+	if err != nil || !tr.GetAutoThawed() {
+		t.Errorf("Thaw after the shutdown thaw = %v, %v; want auto_thawed", tr, err)
 	}
 }

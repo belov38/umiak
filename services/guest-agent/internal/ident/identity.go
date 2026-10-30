@@ -143,9 +143,10 @@ func LoadFile(path string) (*File, error) {
 	return &f, nil
 }
 
-// Save writes identity.json atomically, creating its directory if needed.
+// Save writes identity.json atomically, creating its directory (root 0700,
+// spec 4) if needed.
 func (f *File) Save(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	return fsutil.WriteJSONAtomic(path, f, 0o644)

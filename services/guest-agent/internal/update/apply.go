@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -137,6 +138,7 @@ func (m *Manager) Apply(ctx context.Context, uploadID string, allowBad bool) (*a
 	if err != nil {
 		return nil, err
 	}
+	defer removeStaged(l, pkgPath)
 
 	pkgDir, cleanup, man, err := stage(l, pkgPath, m.opts.Keys())
 	if err != nil {
@@ -187,6 +189,19 @@ func (m *Manager) Apply(ctx context.Context, uploadID string, allowBad bool) (*a
 	slog.Info("update: switched version, restarting", "from", from, "to", to, "deadline", p.Deadline)
 	go m.exitAfter(ctx)
 	return &agentv1.ApplyUpdateResponse{From: from, To: to}, nil
+}
+
+// removeStaged deletes the uploaded package at pkgPath once Apply is done
+// with it, when it lies in StagingDir (spec 17.4 step 1); a package
+// elsewhere belongs to the operator.
+func removeStaged(l paths.Layout, pkgPath string) {
+	rel, err := filepath.Rel(l.StagingDir, pkgPath)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return
+	}
+	if err := os.Remove(pkgPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("update: cannot remove the uploaded package", "path", pkgPath, "err", err)
+	}
 }
 
 // switchTo points previous at p.From and current at p.To. On failure both
@@ -274,14 +289,7 @@ func (m *Manager) CheckPending(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	// The process is the target if its version is p.To, or if current
-	// points at p.To (a binary that reports another version must still be
-	// confirmed or rolled back by the deadline).
-	cur, err := LinkVersion(l.CurrentLink)
-	if err != nil {
-		slog.Warn("update: cannot read the current link", "err", err)
-	}
-	if p.To != m.opts.Version && cur != p.To {
+	if !isTarget(l, p, m.opts.Version) {
 		slog.Warn("update: pending update is not for this version, dropping it", "from", p.From, "to", p.To, "running", m.opts.Version)
 		if err := removePending(l); err != nil {
 			return err
@@ -337,11 +345,19 @@ func (m *Manager) reportRollback() bool {
 	return err == nil
 }
 
-// deadlineExpired is the confirmation timer.
+// deadlineExpired is the confirmation timer. An operator may have removed
+// or replaced pending-update.json during the window (install-package
+// --activate, rollback --to): then the in-memory copy is dropped instead of
+// reverted.
 func (m *Manager) deadlineExpired() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.pending == nil {
+		return
+	}
+	if !pendingUnchanged(m.opts.Layout, *m.pending) {
+		slog.Info("update: pending update changed on disk, not rolling back", "from", m.pending.From, "to", m.pending.To)
+		m.pending, m.timer = nil, nil
 		return
 	}
 	m.revertLocked(*m.pending)

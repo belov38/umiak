@@ -632,6 +632,42 @@ func TestOutcomeStoredAfterClientCancel(t *testing.T) {
 	waitStored(t, st, id1)
 }
 
+// An error produced after the call context ended is not final whatever its
+// code: the handler may have failed because of the cancellation and mapped
+// it to internal. The retry runs the handler again.
+func TestErrorAfterClientCancelNotCached(t *testing.T) {
+	st := openStore(t, filepath.Join(t.TempDir(), "state.db"))
+	stub := &fsStub{}
+	callCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stub.onCtx = func(ctx context.Context) {
+		if stub.makeDirCalls.Load() != 1 {
+			return
+		}
+		cancel()
+		<-ctx.Done()
+	}
+	stub.makeDir = func(string) (*agentv1.MakeDirResponse, error) {
+		if stub.makeDirCalls.Load() == 1 {
+			return nil, errs.New(connect.CodeInternal, errs.Internal, "mkdir: context canceled")
+		}
+		return &agentv1.MakeDirResponse{Created: true}, nil
+	}
+	c := newClient(t, st, reqcache.Options{}, stub)
+	req := connect.NewRequest(&agentv1.MakeDirRequest{Path: "/a"})
+	req.Header().Set(wire.HeaderRequestID, id1)
+	if _, err := c.MakeDir(callCtx, req); err == nil {
+		t.Fatal("first call succeeded")
+	}
+	res, err := makeDir(c, id1, "/a")
+	if err != nil || !res.GetCreated() {
+		t.Fatalf("retry = %v, %v; want a new execution", res, err)
+	}
+	if n := stub.makeDirCalls.Load(); n != 2 {
+		t.Fatalf("executions = %d, want 2", n)
+	}
+}
+
 // waitStored waits until the outcome of id is in the store.
 func waitStored(t *testing.T, st *store.Store, id string) {
 	t.Helper()

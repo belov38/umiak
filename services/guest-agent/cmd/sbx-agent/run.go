@@ -56,7 +56,10 @@ func runAgent(ctx context.Context, d deps, args []string, stderr io.Writer) int 
 		log.Error("agent: load config", "err", err)
 		return 1
 	}
-	sup, err := supervisor.NewSystemd(ctx, supervisor.DefaultSlice, supervisor.DefaultCgroupRoot)
+	// The D-Bus connection lives as long as its context. The shutdown
+	// still needs it (stopping the quiesce watchdog unit after SIGTERM), so
+	// no cancellation reaches it; it is closed by sup.Close.
+	sup, err := supervisor.NewSystemd(context.WithoutCancel(ctx), supervisor.DefaultSlice, supervisor.DefaultCgroupRoot)
 	if err != nil {
 		log.Error("agent: connect to systemd", "err", err)
 		return 1

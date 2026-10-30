@@ -12,6 +12,7 @@ ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run
 Restart=always
 RestartMode=direct
 RestartSec=1
+TimeoutStartSec=30
 TimeoutStopSec=15
 OOMScoreAdjust=-900
 MemoryMin=64M

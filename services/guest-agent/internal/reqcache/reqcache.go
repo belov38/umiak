@@ -315,7 +315,12 @@ func (i *interceptor) execute(
 	}()
 
 	res, err := next(ctx, req)
-	rec := i.outcome(procedure, hash, res, err)
+	var rec *store.Request
+	// An error after the call context ended may come from the cancellation
+	// itself, whatever its code: it is not final. A success is.
+	if err == nil || ctx.Err() == nil {
+		rec = i.outcome(procedure, hash, res, err)
+	}
 	if rec == nil {
 		return res, err
 	}

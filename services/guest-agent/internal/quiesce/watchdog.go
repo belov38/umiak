@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
@@ -18,12 +20,19 @@ const watchdogGrace = time.Second
 
 // Watchdog is `sbx-agent quiesce-watchdog --lease <id>`, run in the
 // transient unit sbx-quiesce-watchdog-<id>.service. It sleeps until the
-// lease deadline (plus watchdogGrace), re-reads the lease file and, if the
+// lease deadline (plus watchdogGrace) or its stop signal, re-reads the lease
+// file and, if the
 // lease is still there, claims the lease file (renames it), thaws it like
-// Thaw, writes an unreported marker for the agent and deletes the claim. It returns the exit code: 0 also
-// when the lease is already gone; d may be nil.
+// Thaw, writes an unreported marker for the agent and deletes the claim. It
+// returns the exit code: 0 also when the lease is already gone; d may be
+// nil.
 func Watchdog(l paths.Layout, leaseID string, f Freezer, d DockerAPI) int {
-	return runWatchdog(context.Background(), l, leaseID, steps{freezer: f, docker: d, runHook: execHook, log: slog.Default()}, time.Now)
+	// SIGTERM (a reboot or poweroff stops every unit) ends the wait: the
+	// lease is thawed at once instead of leaving the guest frozen through
+	// the shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	return runWatchdog(ctx, l, leaseID, steps{freezer: f, docker: d, runHook: execHook, log: slog.Default()}, time.Now)
 }
 
 // runWatchdog is Watchdog with explicit steps and clock.
@@ -47,9 +56,18 @@ func runWatchdog(ctx context.Context, l paths.Layout, leaseID string, s steps, n
 		select {
 		case <-ctx.Done():
 			t.Stop()
-			return 0
+			log.Info("quiesce watchdog: stopped before the deadline, thawing now")
 		case <-t.C:
 		}
+	}
+	// The thaw runs to the end also after the stop signal.
+	ctx = context.WithoutCancel(ctx)
+	// Compare the id before the claim: renaming a lease the agent started
+	// meanwhile and giving it back could clobber a newer one.
+	lease, err = readLease(l.QuiesceFile)
+	if err != nil || lease == nil || lease.ID != leaseID {
+		log.Info("quiesce watchdog: lease ended before its deadline")
+		return 0
 	}
 	// Claim the lease file: from here on the agent sees the unit thawing.
 	claim := claimPath(l)
@@ -60,15 +78,6 @@ func runWatchdog(ctx context.Context, l paths.Layout, leaseID string, s steps, n
 		}
 		log.Error("quiesce watchdog: claim lease", "err", err)
 		return 1
-	}
-	lease, err = readLease(claim)
-	if err != nil || lease == nil || lease.ID != leaseID {
-		// The agent ended the lease and started another one meanwhile.
-		if rerr := os.Rename(claim, l.QuiesceFile); rerr != nil {
-			log.Error("quiesce watchdog: give the lease back", "err", rerr)
-		}
-		log.Info("quiesce watchdog: lease ended before its deadline")
-		return 0
 	}
 	s.thawLease(ctx, lease, nil)
 	log.Warn("quiesce watchdog: lease expired, thawed", "mounts", lease.Frozen, "containers", lease.Paused)

@@ -95,6 +95,46 @@ func TestWatchdog(t *testing.T) {
 			t.Error("marker written for a lease the agent thawed")
 		}
 	})
+	t.Run("stop signal thaws at once", func(t *testing.T) {
+		// A reboot stops the unit long before the deadline: the guest
+		// must not stay frozen through the shutdown.
+		e := newEnv(t, nil)
+		e.fz.st = nil
+		e.fz.frozen["/data"] = true
+		lease := &Lease{ID: "w-5", Deadline: time.Now().Add(time.Hour), Frozen: []string{"/data"}, Hooks: []string{"/hooks/10-a"}}
+		if err := writeLease(e.l.QuiesceFile, lease); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		start := time.Now()
+		if code := runWatchdog(ctx, e.l, "w-5", newSteps(e), time.Now); code != 0 {
+			t.Fatalf("exit %d", code)
+		}
+		if d := time.Since(start); d > 2*time.Second {
+			t.Fatalf("took %v", d)
+		}
+		if e.fz.isFrozen("/data") || !e.log.has("hook 10-a thaw") {
+			t.Errorf("not thawed: %q", e.log.all())
+		}
+		if _, ok := readMarker(e.l.QuiesceThawedDir, "w-5", time.Now()); !ok {
+			t.Error("no marker")
+		}
+		if fileExists(e.l.QuiesceFile) || fileExists(claimPath(e.l)) {
+			t.Error("lease file or claim left")
+		}
+	})
+	t.Run("stop signal after the lease ended", func(t *testing.T) {
+		e := newEnv(t, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if code := runWatchdog(ctx, e.l, "w-6", newSteps(e), time.Now); code != 0 {
+			t.Fatalf("exit %d", code)
+		}
+		if len(e.log.all()) != 0 {
+			t.Errorf("acted: %q", e.log.all())
+		}
+	})
 	t.Run("invalid id", func(t *testing.T) {
 		e := newEnv(t, nil)
 		if code := runWatchdog(context.Background(), e.l, "../x", newSteps(e), time.Now); code != 2 {

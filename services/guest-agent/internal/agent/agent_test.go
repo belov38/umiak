@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -136,6 +137,11 @@ func TestExpiredUpdateStopsBeforeReady(t *testing.T) {
 	}
 	if cur, _ := update.LinkVersion(h.l.CurrentLink); cur != "1.2.2" {
 		t.Errorf("current = %q, want the reverted 1.2.2", cur)
+	}
+	// The deadline is checked before the slow startup steps: a version that
+	// hangs in them is still rolled back.
+	if _, err := os.Stat(h.l.StateDB); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("state.db opened before the expired update was reverted: %v", err)
 	}
 }
 
@@ -531,6 +537,99 @@ func TestShutdownFlushesBufferedOutcome(t *testing.T) {
 	if rec.Procedure != agentv1connect.SystemQuiesceProcedure {
 		t.Errorf("stored procedure = %q", rec.Procedure)
 	}
+}
+
+// TestShutdownThawsActiveLease: an agent stopped (reboot, poweroff) during
+// a lease thaws the guest before it exits and reports quiesce.auto_thawed.
+func TestShutdownThawsActiveLease(t *testing.T) {
+	h := newHarness(t)
+	h.seedIdentity(machineA)
+	dir, err := os.MkdirTemp("", "sbxdbg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "a.sock")
+	h.debugListen = "unix:" + sock
+	fz := &recFreezer{frozen: map[string]bool{}}
+	h.freezer = fz
+	h.start()
+	h.waitReady()
+
+	hc := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		},
+	}}
+	sys := agentv1connect.NewSystemClient(hc, "http://agent")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	qreq := connect.NewRequest(&agentv1.QuiesceRequest{})
+	qreq.Header().Set(wire.HeaderRequestID, "0192f1a4-7c3e-7b2a-9d4f-000000000003")
+	if _, err := sys.Quiesce(ctx, qreq); err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+	if !fz.isFrozen("/") {
+		t.Fatal("not frozen")
+	}
+	h.stop()
+	if fz.isFrozen("/") {
+		t.Error("still frozen after the shutdown")
+	}
+	if _, err := os.Stat(h.l.QuiesceFile); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lease file after the shutdown: %v", err)
+	}
+	if !slices.Contains(types(h.journal()), events.TypeQuiesceAutoThawed) {
+		t.Error("no quiesce.auto_thawed in the journal")
+	}
+}
+
+// The state and run directories are root 0700 (spec 4).
+func TestStateDirsMode(t *testing.T) {
+	h := newHarness(t)
+	h.start()
+	h.waitReady()
+	h.stop()
+	for _, dir := range []string{h.l.StateDir, h.l.RunDir} {
+		fi, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := fi.Mode().Perm(); m != 0o700 {
+			t.Errorf("%s mode = %o, want 700", dir, m)
+		}
+	}
+}
+
+// recFreezer reports one freezable mount and records its state.
+type recFreezer struct {
+	mu     sync.Mutex
+	frozen map[string]bool
+}
+
+func (*recFreezer) Mounts() ([]quiesce.Mount, error) {
+	return []quiesce.Mount{{Path: "/", Source: "/dev/test", FSType: "ext4"}}, nil
+}
+
+func (f *recFreezer) Freeze(p string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.frozen[p] = true
+	return nil
+}
+
+func (f *recFreezer) Thaw(p string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.frozen, p)
+	return nil
+}
+
+func (f *recFreezer) isFrozen(p string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.frozen[p]
 }
 
 // reqQuiesce is the request id of the Quiesce call in

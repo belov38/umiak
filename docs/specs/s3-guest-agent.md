@@ -600,7 +600,7 @@ Payload — сообщения из `proto/sbx/agent/v1/events.proto`, в кон
 | `claim.applied` | `sandbox_id` | claim выполнен |
 | `ports.changed` | полный список портов | изменение набора, debounce 2 s |
 | `idle.changed` | `idle, since` | смена простоя |
-| `quiesce.auto_thawed` | `lease_id, at, by (watchdog / agent_start / foreign)` | авто-разморозка |
+| `quiesce.auto_thawed` | `lease_id, at, by (watchdog / agent_start / agent_stop / foreign)` | авто-разморозка |
 | `disk.low`, `disk.ok` | `mount, free_bytes` | порог §10 |
 | `update.result` | `from, to, ok, rolled_back, error` | после обновления или отката |
 | `journal.gap` | `from_seq, to_seq` | переполнение журнала |
@@ -638,6 +638,7 @@ ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run
 Restart=always
 RestartMode=direct
 RestartSec=1
+TimeoutStartSec=30
 TimeoutStopSec=15
 OOMScoreAdjust=-900
 MemoryMin=64M
@@ -649,6 +650,7 @@ WantedBy=multi-user.target
 ```
 
 - `RestartMode=direct` (systemd ≥ 254): автоматический перезапуск минует состояние failed, поэтому `OnFailure=` (откат) срабатывает только после исчерпания `StartLimitBurst`, а не на первом падении.
+- `TimeoutStartSec=30`: версия, зависшая при старте до `READY=1`, убивается через 30 s, а не через 90 s по умолчанию. Срок подтверждения обновления (§17.4) агент взводит сразу после quiesce Startup, до медленных шагов старта: зависшая новая версия откатывается по сроку, а перезапуск после него сразу возвращает `current` на старую версию.
 - `OOMScoreAdjust=-900`, а не -1000 (как у boat): при нехватке памяти ядро сначала убивает задачи пользователя, но агент не может довести VM до паники.
 - `sbx-agent-rollback.service` — oneshot `/usr/local/lib/sbx-agent/previous/sbx-agent rollback` (если `previous` нет — из `current`). Поведение описано в §17.4.
 - `sbx-cmd.slice` — общий slice команд (место для будущих лимитов).

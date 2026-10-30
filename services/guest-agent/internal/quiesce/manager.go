@@ -32,10 +32,13 @@ import (
 )
 
 // Who thawed a lease automatically (quiesce.auto_thawed.by). The agent's
-// own lease timer reports ByWatchdog like the watchdog unit (decision 5).
+// own lease timer reports ByWatchdog like the watchdog unit (decision 5);
+// ByAgentStop is an agent that stops (reboot, poweroff, restart) during a
+// lease.
 const (
 	ByWatchdog   = "watchdog"
 	ByAgentStart = "agent_start"
+	ByAgentStop  = "agent_stop"
 	ByForeign    = "foreign"
 )
 
@@ -370,6 +373,14 @@ func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool
 	res := &agentv1.QuiesceResponse{LeaseId: a.id, Deadline: timestamppb.New(a.deadline)}
 	save := func() error { return writeLease(m.opts.Layout.QuiesceFile, l) }
 
+	// The budget counts from here: a slow watchdog unit start eats into it.
+	cutoff := m.opts.Now().Add(m.freezeBudget)
+	var cutoffErr error = errs.Newf(connect.CodeDeadlineExceeded, errs.QuiesceTimeout,
+		"quiesce: the freeze steps took longer than %s", m.freezeBudget)
+	if !a.deadline.After(cutoff) {
+		cutoff, cutoffErr = a.deadline, leaseExpired(a.id)
+	}
+
 	// Watchdog unit and the in-process timer.
 	if sv := m.opts.Supervisor; sv != nil {
 		argv := []string{m.opts.Self, "quiesce-watchdog", "--lease", a.id}
@@ -381,12 +392,6 @@ func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool
 	a.timer = time.AfterFunc(a.deadline.Sub(m.opts.Now()), func() { m.autoThaw(a.id, ByWatchdog) }) //nolint:contextcheck // the timer outlives the request
 	go m.watchMarker(a)                                                                             //nolint:contextcheck // the watch outlives the request
 
-	cutoff := m.opts.Now().Add(m.freezeBudget)
-	var cutoffErr error = errs.Newf(connect.CodeDeadlineExceeded, errs.QuiesceTimeout,
-		"quiesce: the freeze steps took longer than %s", m.freezeBudget)
-	if !a.deadline.After(cutoff) {
-		cutoff, cutoffErr = a.deadline, leaseExpired(a.id)
-	}
 	ctx, cancel := context.WithDeadline(ctx, cutoff)
 	defer cancel()
 	check := func() error {
@@ -618,8 +623,9 @@ func (m *Manager) thawAfterUnit(ctx context.Context, a *active, mk marker) {
 }
 
 // release ends a: with thaw it undoes the lease steps first (FITHAW, store
-// unfreeze, hooks, unpause); then it stops the timer, the marker watch and
-// the watchdog unit and deletes the lease file. opMu is held.
+// unfreeze, hooks, unpause); then it stops the timer and the marker watch,
+// deletes the lease file, stops the watchdog unit and deletes the unit's
+// claim of a. opMu is held.
 func (m *Manager) release(ctx context.Context, a *active, thaw bool) {
 	unfreeze := func() {
 		if a.storeFrozen {
@@ -638,13 +644,22 @@ func (m *Manager) release(ctx context.Context, a *active, thaw bool) {
 		a.timer.Stop()
 	}
 	a.stopOnce.Do(func() { close(a.stop) })
+	// The lease file goes before the unit stop: the unit thaws on its stop
+	// signal while the file is there.
+	if err := removeLease(m.opts.Layout.QuiesceFile); err != nil {
+		m.opts.Log.Error("quiesce: remove lease", "err", err)
+	}
 	if a.watchdog {
 		if err := m.opts.Supervisor.StopWatchdog(ctx, a.id); err != nil {
 			m.opts.Log.Warn("quiesce: stop watchdog", "lease", a.id, "err", err)
 		}
-	}
-	if err := removeLease(m.opts.Layout.QuiesceFile); err != nil {
-		m.opts.Log.Error("quiesce: remove lease", "err", err)
+		// A unit stopped mid-thaw leaves its claim of a; the thaw above
+		// covered it, so the next start must not thaw it again.
+		if l, err := readLease(claimPath(m.opts.Layout)); err == nil && l != nil && l.ID == a.id {
+			if err := removeLease(claimPath(m.opts.Layout)); err != nil {
+				m.opts.Log.Error("quiesce: remove watchdog claim", "err", err)
+			}
+		}
 	}
 	m.setCurrent(nil)
 }
