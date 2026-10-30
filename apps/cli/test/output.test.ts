@@ -57,23 +57,28 @@ describe("Output (unit)", () => {
 		expect(outputMode(["--json", "whoami"], {})).toEqual({
 			explicitJson: true,
 			explicitHuman: false,
+			jsonFlag: true,
 		});
 		expect(outputMode(["--json", "--human"], {})).toEqual({
 			explicitJson: false,
 			explicitHuman: true,
+			jsonFlag: false,
 		});
 		expect(outputMode(["whoami"], { SBX_OUTPUT: "json" })).toEqual({
 			explicitJson: true,
 			explicitHuman: false,
+			jsonFlag: false,
 		});
 		expect(outputMode(["--human"], { SBX_OUTPUT: "json" })).toEqual({
 			explicitJson: false,
 			explicitHuman: true,
+			jsonFlag: false,
 		});
 		// After `--` the words belong to the remote command.
 		expect(outputMode(["exec", "sb", "--", "x", "--json"], {})).toEqual({
 			explicitJson: false,
 			explicitHuman: false,
+			jsonFlag: false,
 		});
 	});
 
@@ -131,10 +136,21 @@ describe("Output (unit)", () => {
 			code: "unauthorized",
 		});
 		const b = capture();
-		const j = new Output({ ...b, isTTY: false, explicitJson: true });
+		const j = new Output({
+			...b,
+			isTTY: false,
+			explicitJson: true,
+			jsonFlag: true,
+		});
 		j.rawData = true;
 		j.error(apiErr);
 		expect(JSON.parse(b.out.join(""))).toMatchObject({ event: "error" });
+		// SBX_OUTPUT=json is not the flag: stdout stays the data.
+		const c = capture();
+		const e = new Output({ ...c, isTTY: false, explicitJson: true });
+		e.rawData = true;
+		e.error(apiErr);
+		expect(c.out).toEqual([]);
 	});
 
 	it("exit codes: 4 auth, 3 not found, 75 retryable, 1 other, 2 usage", () => {

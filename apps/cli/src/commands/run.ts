@@ -3,7 +3,7 @@
 // with its output streamed like `exec`, then delete the sandbox (unless
 // --keep, which makes it current). Exits with the command's code. Progress
 // goes to stderr; stdout carries only the command's output (or its frames
-// with --json). Ctrl-C while the sandbox starts deletes it.
+// with --json). Ctrl-C at any point deletes the sandbox (unless --keep).
 // `--push <dir>` (upload a directory first) comes with `sbx push`.
 
 import type { Command } from "commander";
@@ -20,6 +20,7 @@ import {
 	createSandbox,
 } from "./create.ts";
 import {
+	commandSpec,
 	EXIT_INTERRUPTED,
 	type ExecFlags,
 	execIn,
@@ -85,39 +86,58 @@ export function register(program: Command, run: Runner): void {
 					if (f.cwd !== undefined) exec.cwd = f.cwd;
 					if (f.user !== undefined) exec.user = f.user;
 					if (f.timeout !== undefined) exec.timeout = f.timeout;
+					commandSpec(exec); // flags checked before anything is created
 					const timeoutMs =
 						f.waitTimeout === undefined
 							? undefined
 							: parseDuration(f.waitTimeout, "--wait-timeout") * 1000;
 					const body = createBody(f);
-					const created = await createSandbox(ctx, body);
-					const id = created.sandbox.id;
-					ctx.out.info(`sbx: created ${created.sandbox.slug} (${id})`);
+					// Ctrl-C at any point ends with the sandbox deleted (unless
+					// --keep). While the command runs, exec's own forwarding has
+					// it (first Ctrl-C to the command, second detaches); this
+					// handler only keeps the process alive until the cleanup.
 					const ac = new AbortController();
-					const onInt = () => ac.abort();
+					let executing = false;
+					const onInt = () => {
+						if (!executing) ac.abort();
+					};
 					process.on("SIGINT", onInt);
+					let id: string | undefined;
+					let slug = "";
 					try {
+						// The create is not aborted: its answer names the sandbox to delete.
+						const created = await createSandbox(ctx, body);
+						id = created.sandbox.id;
+						slug = created.sandbox.slug;
+						ctx.out.info(`sbx: created ${slug} (${id})`);
+						if (ac.signal.aborted) return EXIT_INTERRUPTED;
 						try {
 							await waitForState(ctx, created.sandbox, "ready", {
 								...(timeoutMs === undefined ? {} : { timeoutMs }),
 								signal: ac.signal,
 								onState: (s) => ctx.out.info(`sbx: ${s.slug} is ${s.state}`),
 							});
+							const sb = await ctx
+								.sbx()
+								.sandboxes.get(id, { signal: ac.signal });
+							executing = true;
+							return await execIn(ctx, sb, cmd, exec, {
+								detachHint: f.keep === true,
+							});
 						} catch (err) {
 							if (ac.signal.aborted) return EXIT_INTERRUPTED;
 							throw err;
-						} finally {
-							process.off("SIGINT", onInt);
 						}
-						const sb = await ctx.sbx().sandboxes.get(id);
-						return await execIn(ctx, sb, cmd, exec);
 					} finally {
-						if (f.keep === true) {
-							writeCurrent(ctx, id);
-							ctx.out.info(`sbx: kept ${created.sandbox.slug} (${id})`);
-						} else {
-							await removeSandbox(ctx, id);
+						if (id !== undefined) {
+							if (f.keep === true) {
+								writeCurrent(ctx, id);
+								ctx.out.info(`sbx: kept ${slug} (${id})`);
+							} else {
+								await removeSandbox(ctx, id);
+							}
 						}
+						process.off("SIGINT", onInt);
 					}
 				},
 				{ rawData: true },

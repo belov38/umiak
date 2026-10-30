@@ -78,7 +78,7 @@ export function register(program: Command, run: Runner): void {
 										: {}),
 								};
 					if (tail === undefined && streams.pty) from.ptyOffset = 0;
-					const json = ctx.out.explicitJson;
+					const json = ctx.out.jsonFlag;
 					const events = cmd.follow({
 						from,
 						encoding: json ? "utf8" : "base64",

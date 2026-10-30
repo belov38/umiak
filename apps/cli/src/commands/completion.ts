@@ -200,7 +200,7 @@ export function register(program: Command, run: Runner): void {
 							`completion: unknown shell ${JSON.stringify(shell)}; use ${SHELLS.join(", ")}`,
 						);
 					}
-					ctx.out.data(completionScript(shell as Shell, program));
+					await ctx.out.data(completionScript(shell as Shell, program));
 				},
 				{ rawData: true },
 			),

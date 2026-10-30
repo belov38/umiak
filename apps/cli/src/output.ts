@@ -6,13 +6,31 @@
 // - error(err): in JSON mode the last line of stdout is
 //   {"event":"error",code,message,retryable,details,requestId}; the text for a
 //   person goes to stderr. Commands whose stdout is data (`rawData`: exec,
-//   run, logs, cp, push, auth token) print that line to stderr unless --json
-//   was given explicitly.
+//   run, logs, cp, push, auth token) print that line to stderr unless the
+//   --json flag was given.
+// - Raw-data commands switch to JSON (NDJSON frames) only with the --json
+//   flag, never with SBX_OUTPUT=json (ruling R25): `sbx exec … > file`
+//   writes bytes whatever the env says.
+// - data()/errData() wait for 'drain' when the stream is full, so large
+//   piped output does not pile up in memory.
 
 import { SbxError } from "@sbx/sdk";
 
 export interface Writer {
+	/** false: the stream is full; wait for 'drain' (Node streams). */
 	write(s: string | Uint8Array): unknown;
+	once?(event: "drain", listener: () => void): unknown;
+}
+
+/** Writes and, when the stream reports it is full, waits for 'drain'. */
+async function writeDrained(
+	w: Writer,
+	chunk: string | Uint8Array,
+): Promise<void> {
+	if (w.write(chunk) !== false || typeof w.once !== "function") return;
+	await new Promise<void>((resolve) => {
+		w.once?.("drain", resolve);
+	});
 }
 
 export interface OutputOptions {
@@ -24,6 +42,8 @@ export interface OutputOptions {
 	explicitJson?: boolean;
 	/** --human given (or SBX_OUTPUT=human). */
 	explicitHuman?: boolean;
+	/** The --json flag itself was given (not SBX_OUTPUT). */
+	jsonFlag?: boolean;
 }
 
 export interface ErrorPayload {
@@ -60,6 +80,11 @@ export class Output {
 	readonly json: boolean;
 	/** --json was asked for, not only implied by a non-terminal stdout. */
 	readonly explicitJson: boolean;
+	/**
+	 * The --json flag was given (and not --human): the only switch of raw-data
+	 * commands to JSON frames (ruling R25).
+	 */
+	readonly jsonFlag: boolean;
 	/** stdout carries data of the command (set by the command runner). */
 	rawData = false;
 	readonly #stdout: Writer;
@@ -69,6 +94,7 @@ export class Output {
 		this.#stdout = o.stdout;
 		this.#stderr = o.stderr;
 		this.explicitJson = o.explicitJson === true && o.explicitHuman !== true;
+		this.jsonFlag = o.jsonFlag === true && o.explicitHuman !== true;
 		this.json = this.explicitJson || (!o.isTTY && o.explicitHuman !== true);
 	}
 
@@ -87,14 +113,14 @@ export class Output {
 		}
 	}
 
-	/** Data of a raw command, written as is. */
-	data(chunk: string | Uint8Array): void {
-		this.#stdout.write(chunk);
+	/** Data of a raw command, written as is (resolves once it is taken). */
+	data(chunk: string | Uint8Array): Promise<void> {
+		return writeDrained(this.#stdout, chunk);
 	}
 
 	/** Data of a raw command meant for stderr (exec's stderr), as is. */
-	errData(chunk: string | Uint8Array): void {
-		this.#stderr.write(chunk);
+	errData(chunk: string | Uint8Array): Promise<void> {
+		return writeDrained(this.#stderr, chunk);
 	}
 
 	/** A question for the person on stderr, without a new line. */
@@ -118,7 +144,7 @@ export class Output {
 			return;
 		}
 		const line = JSON.stringify({ event: "error", ...p });
-		if (this.rawData && !this.explicitJson) {
+		if (this.rawData && !this.jsonFlag) {
 			this.#line(this.#stderr, line);
 			return;
 		}
@@ -170,7 +196,7 @@ export function formatHuman(v: unknown, indent = ""): string {
 export function outputMode(
 	argv: readonly string[],
 	env: Record<string, string | undefined>,
-): { explicitJson: boolean; explicitHuman: boolean } {
+): { explicitJson: boolean; explicitHuman: boolean; jsonFlag: boolean } {
 	let json = false;
 	let human = false;
 	for (const a of argv) {
@@ -178,9 +204,10 @@ export function outputMode(
 		if (a === "--json") json = true;
 		else if (a === "--human") human = true;
 	}
+	const jsonFlag = json && !human;
 	if (!json && !human) {
 		if (env.SBX_OUTPUT === "json") json = true;
 		else if (env.SBX_OUTPUT === "human") human = true;
 	}
-	return { explicitJson: json && !human, explicitHuman: human };
+	return { explicitJson: json && !human, explicitHuman: human, jsonFlag };
 }

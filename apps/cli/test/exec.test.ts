@@ -3,6 +3,7 @@
 // code (128+n for a signal, 124 timed out), --json prints frames with
 // `event`, --detach prints the id; logs, kill, ps; run creates, executes and
 // deletes.
+import type { ChildProcess } from "node:child_process";
 import {
 	afterAll,
 	afterEach,
@@ -127,6 +128,69 @@ describe("exec, logs, kill, ps, run", () => {
 			exitCode: 3,
 		});
 		for (const l of lines) expect(l).not.toHaveProperty("type");
+	});
+
+	it("SBX_OUTPUT=json does not turn exec into frames: stdout stays the bytes", async () => {
+		const r = await runCli(["exec", sb.id, "--", "echo raw"], {
+			env: { ...env, SBX_OUTPUT: "json" },
+		});
+		expect(r.code, r.stderr).toBe(0);
+		expect(r.stdout).toBe("raw\n");
+	});
+
+	it("exec flag combinations are checked before any request", async () => {
+		const r = await sbx([
+			"exec",
+			"no-such-box-here",
+			"--detach",
+			"--stdin",
+			"--",
+			"true",
+		]);
+		expect(r.code).toBe(2);
+		const t = await sbx([
+			"exec",
+			"no-such-box-here",
+			"--timeout",
+			"soon",
+			"--",
+			"true",
+		]);
+		expect(t.code).toBe(2);
+		expect((await sbx(["current"])).code).toBe(3);
+	});
+
+	it("exec --help explains one word (shell) vs several (argv)", async () => {
+		const r = await sbx(["exec", "--help"]);
+		expect(r.stdout).toContain("bash -lc");
+		expect(r.stdout).toMatch(/argv/);
+	});
+
+	it("Ctrl-C while run waits for ready deletes the sandbox and exits 130", async () => {
+		const tag = crypto.randomUUID();
+		let child: ChildProcess | undefined;
+		const run = runCli(["run", "--label", `run=${tag}`, "--", "true"], {
+			env,
+			onSpawn: (c) => {
+				child = c;
+			},
+		});
+		const slug = await until(async () => {
+			const r = await w.db.pool.query<{ slug: string }>(
+				"SELECT slug FROM runtime.sandboxes WHERE labels->>'run' = $1",
+				[tag],
+			);
+			return r.rows[0]?.slug;
+		});
+		await new Promise((r) => setTimeout(r, 300));
+		child?.kill("SIGINT");
+		const r = await run;
+		expect(r.code, r.stderr).toBe(130);
+		const state = await w.db.pool.query<{ state: string }>(
+			"SELECT state FROM runtime.sandboxes WHERE slug = $1",
+			[slug],
+		);
+		expect(state.rows[0]?.state).toBe("deleting");
 	});
 
 	it("exec errors: no `--` is a usage error; an unknown sandbox exits 3 with the error on stderr", async () => {

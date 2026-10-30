@@ -15,10 +15,13 @@ export function parsePairs(
 	flag: string,
 ): Record<string, string> {
 	const out: Record<string, string> = {};
-	for (const item of items ?? []) {
+	for (const [n, item] of (items ?? []).entries()) {
 		const i = item.indexOf("=");
 		if (i <= 0) {
-			throw usageError(`${flag} takes KEY=VALUE, not ${JSON.stringify(item)}`);
+			// The value is never echoed: it may be a secret pasted without its key.
+			throw usageError(
+				`${flag} takes KEY=VALUE; value ${n + 1} of ${flag} has ${i < 0 ? "no =" : "no key"}`,
+			);
 		}
 		out[item.slice(0, i)] = item.slice(i + 1);
 	}

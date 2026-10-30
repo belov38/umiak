@@ -111,10 +111,10 @@ export async function printEvents(
 		switch (ev.type) {
 			case "stdout":
 			case "pty":
-				ctx.out.data(ev.data);
+				await ctx.out.data(ev.data);
 				break;
 			case "stderr":
-				ctx.out.errData(ev.data);
+				await ctx.out.errData(ev.data);
 				break;
 			case "truncated":
 				ctx.out.warn(
@@ -158,14 +158,19 @@ export function forwardInterrupts(
 	};
 }
 
-/** Runs `cmd` in `sb`, printing its output; returns sbx's exit code. */
+/**
+ * Runs `cmd` in `sb`, printing its output; returns sbx's exit code.
+ * `detachHint`: after a second Ctrl-C, tell how to find the command again
+ * (false when the sandbox is about to be deleted, `run`).
+ */
 export async function execIn(
 	ctx: Context,
 	sb: Sandbox,
 	cmd: string | string[],
 	f: ExecFlags & { stdin?: boolean },
+	o: { detachHint?: boolean } = {},
 ): Promise<number> {
-	const json = ctx.out.explicitJson;
+	const json = ctx.out.jsonFlag;
 	const encoding = json ? "utf8" : "base64";
 	const spec = commandSpec(f);
 	let command: SbxCommand | undefined;
@@ -174,6 +179,8 @@ export async function execIn(
 		if (json) ctx.out.event("started", { commandId: c.id });
 	};
 	const fwd = forwardInterrupts(ctx, () => command);
+	// True while this process's stdin is being sent (--stdin).
+	let pumping = false;
 	try {
 		let exit: ExitEvent | undefined;
 		if (f.stdin === true) {
@@ -186,7 +193,7 @@ export async function execIn(
 			onStart(c);
 			// The command may exit before stdin ends (it never reads it):
 			// then the rest of stdin is dropped, not waited for.
-			let pumping = true;
+			pumping = true;
 			let pumpError: unknown;
 			pumpStdin(ctx, c, fwd.signal).then(
 				() => {
@@ -202,9 +209,7 @@ export async function execIn(
 				c.follow({ from: "start", encoding, signal: fwd.signal }),
 				json,
 			);
-			if (pumping) {
-				(ctx.stdin as { destroy?: () => void }).destroy?.();
-			} else if (pumpError !== undefined) {
+			if (!pumping && pumpError !== undefined) {
 				ctx.out.warn(
 					`stdin was not delivered: ${(pumpError as Error).message}`,
 				);
@@ -226,7 +231,7 @@ export async function execIn(
 		return commandExitCode(exit);
 	} catch (err) {
 		if (fwd.interrupted()) {
-			if (command !== undefined) {
+			if (command !== undefined && o.detachHint !== false) {
 				ctx.out.info(
 					`sbx: ${command.id} keeps running; see: sbx logs ${command.id}`,
 				);
@@ -236,6 +241,8 @@ export async function execIn(
 		throw err;
 	} finally {
 		fwd.stop();
+		// The command ended, failed or was left: the rest of stdin is dropped.
+		if (pumping) (ctx.stdin as { destroy?: () => void }).destroy?.();
 	}
 }
 
@@ -268,7 +275,18 @@ export function register(program: Command, run: Runner): void {
 			.description(
 				"run a command in a sandbox: sbx exec [<sb>] [flags] -- <cmd...>",
 			)
-			.argument("[args...]", "sandbox ID or slug, then -- and the command"),
+			.argument("[args...]", "sandbox ID or slug, then -- and the command")
+			.addHelpText(
+				"after",
+				[
+					"",
+					"The command after --:",
+					"  one word runs as a shell line (bash -lc):  sbx exec sb -- 'npm test && ls'",
+					"  several words run as argv, without a shell: sbx exec sb -- ls -la /tmp",
+					"stdout and stderr are the command's own bytes; sbx exits with its code",
+					"(128+n for a signal, 124 timed out, 125 lost). --json prints NDJSON frames.",
+				].join("\n"),
+			),
 	)
 		.option("--detach", "start the command and print its id")
 		.option("--stdin", "send this process's stdin to the command")
@@ -281,16 +299,18 @@ export function register(program: Command, run: Runner): void {
 						(args[0] as string[]) ?? [],
 						1,
 					);
+					// Every flag is checked before a request or a new current sandbox.
+					if (f.detach === true && f.stdin === true) {
+						throw usageError(
+							"--stdin needs the command attached; drop --detach",
+						);
+					}
+					const spec = commandSpec(f);
 					const sb = await useSandbox(ctx, before[0]);
 					if (f.detach === true) {
-						if (f.stdin === true) {
-							throw usageError(
-								"--stdin needs the command attached; drop --detach",
-							);
-						}
-						const c = await sb.start(cmd, commandSpec(f));
-						if (ctx.out.explicitJson) ctx.out.result(c.data);
-						else ctx.out.data(`${c.id}\n`);
+						const c = await sb.start(cmd, spec);
+						if (ctx.out.jsonFlag) ctx.out.result(c.data);
+						else await ctx.out.data(`${c.id}\n`);
 						return;
 					}
 					return execIn(ctx, sb, cmd, f);

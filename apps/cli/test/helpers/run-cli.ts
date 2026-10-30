@@ -3,7 +3,7 @@
 // the file credential store (the OS keychain is never touched) and a fixed
 // shell key. `tty: true` makes the CLI treat stdout as a terminal (SBX_TTY).
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -46,6 +46,8 @@ export interface RunOptions {
 	/** The whole env of the process (start from `cliHome().env`); undefined removes. */
 	env: Record<string, string | undefined>;
 	stdin?: string;
+	/** Gets the child process (to send it signals). */
+	onSpawn?: (child: ChildProcess) => void;
 	/** Write `stdin` but keep the pipe open until the process exits. */
 	stdinOpen?: boolean;
 	/** Treat stdout as a terminal (default: not, as a pipe is). */
@@ -75,6 +77,7 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 			env,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
+		o.onSpawn?.(child);
 		const out: Buffer[] = [];
 		let stderr = "";
 		child.stdout.on("data", (b: Buffer) => {

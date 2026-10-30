@@ -2,7 +2,6 @@
 // `exec` and `run` exit with the command's own code instead (128 + n for a
 // signal, 124 for timed_out, 125 for lost or failed_to_start; Task 21).
 
-import { constants } from "node:os";
 import {
 	type ExitEvent,
 	SbxError,
@@ -111,20 +110,63 @@ export function exitCodeOf(err: unknown): number {
 }
 
 /**
+ * Linux signal numbers (the guest's, whatever OS runs the CLI: macOS has
+ * SIGUSR1 = 30, Linux 10). Windows guests report the same names.
+ */
+const LINUX_SIGNALS: Readonly<Record<string, number>> = {
+	SIGHUP: 1,
+	SIGINT: 2,
+	SIGQUIT: 3,
+	SIGILL: 4,
+	SIGTRAP: 5,
+	SIGABRT: 6,
+	SIGBUS: 7,
+	SIGFPE: 8,
+	SIGKILL: 9,
+	SIGUSR1: 10,
+	SIGSEGV: 11,
+	SIGUSR2: 12,
+	SIGPIPE: 13,
+	SIGALRM: 14,
+	SIGTERM: 15,
+	SIGSTKFLT: 16,
+	SIGCHLD: 17,
+	SIGCONT: 18,
+	SIGSTOP: 19,
+	SIGTSTP: 20,
+	SIGTTIN: 21,
+	SIGTTOU: 22,
+	SIGURG: 23,
+	SIGXCPU: 24,
+	SIGXFSZ: 25,
+	SIGVTALRM: 26,
+	SIGPROF: 27,
+	SIGWINCH: 28,
+	SIGIO: 29,
+	SIGPWR: 30,
+	SIGSYS: 31,
+};
+
+/**
  * The exit code of `exec`/`run` for the command's exit (S7 §14.3): its own
- * code; 128 + n for a signal; 124 timed out; 125 lost or failed to start.
+ * code; 128 + n (Linux numbering) for a signal; an unknown signal name keeps
+ * the agent's code when it is one of a signal (> 128), else 137 (SIGKILL);
+ * 124 timed out; 125 lost or failed to start.
  */
 export function commandExitCode(exit: ExitEvent): number {
 	switch (exit.status) {
 		case "exited":
 			return exit.exitCode ?? EXIT_ERROR;
 		case "killed": {
-			const signals = constants.signals as Record<string, number>;
-			const n = exit.signal === null ? undefined : signals[exit.signal];
+			const name = exit.signal?.toUpperCase();
+			const n =
+				name === undefined
+					? undefined
+					: LINUX_SIGNALS[name.startsWith("SIG") ? name : `SIG${name}`];
 			if (n !== undefined) return 128 + n;
 			return exit.exitCode !== null && exit.exitCode > 128
 				? exit.exitCode
-				: 128 + (signals.SIGKILL ?? 9);
+				: 128 + 9;
 		}
 		case "timed_out":
 			return EXIT_TIMED_OUT;

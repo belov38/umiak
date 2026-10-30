@@ -28,7 +28,7 @@ export function register(program: Command, run: Runner): void {
 				async (ctx) => {
 					const apiUrl = ctx.apiUrl();
 					const b = await ctx.bearer();
-					if (ctx.out.explicitJson) {
+					if (ctx.out.jsonFlag) {
 						const v: AuthTokenJson = {
 							kind: b.kind,
 							token: b.token,
@@ -38,7 +38,7 @@ export function register(program: Command, run: Runner): void {
 						};
 						ctx.out.result(v);
 					} else {
-						ctx.out.data(`${b.token}\n`);
+						await ctx.out.data(`${b.token}\n`);
 					}
 				},
 				{ rawData: true },

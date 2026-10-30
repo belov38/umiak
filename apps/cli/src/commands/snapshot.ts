@@ -114,16 +114,25 @@ export function register(program: Command, run: Runner): void {
 					yes,
 					`Delete snapshot${snaps.length === 1 ? "" : "s"} ${snaps.map(snapshotLine).join(", ")}?`,
 				);
+				let first: unknown;
 				for (const s of snaps) {
-					await sbx.raw.DELETE("/v1/snapshots/{name}", {
-						params: { path: { name: s.name } },
-						headers: { "Sbx-Confirm-Delete": s.id },
-					});
-					ctx.out.result(
-						{ id: s.id, name: s.name, deleted: true },
-						(v) => `Deleted snapshot ${v.name} (${v.id})`,
-					);
+					try {
+						await sbx.raw.DELETE("/v1/snapshots/{name}", {
+							params: { path: { name: s.name } },
+							headers: { "Sbx-Confirm-Delete": s.id },
+						});
+						ctx.out.result(
+							{ id: s.id, name: s.name, deleted: true },
+							(v) => `Deleted snapshot ${v.name} (${v.id})`,
+						);
+					} catch (err) {
+						first ??= err;
+						if (snaps.length > 1) {
+							ctx.out.warn(`${s.name}: ${(err as Error).message}`);
+						}
+					}
 				}
+				if (first !== undefined) throw first;
 			}),
 		);
 }
