@@ -3,6 +3,7 @@
 // pg-boss sender, config, key ring, identity file, service tokens, SSH CA
 // and host keys) and serves the four listeners; `onShutdownSignals` turns
 // SIGTERM/SIGINT into one graceful close and the exit code.
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { type AddressInfo, connect, createServer } from "node:net";
@@ -161,11 +162,22 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 	it("a broken file fails the start before anything connects", async () => {
 		const bad = join(dir, "bad-tokens.json");
 		writeFileSync(bad, "{");
-		// A stand-in database that counts the connections it gets.
+		// A stand-in database that counts the connections of this start: a
+		// Postgres startup message naming this test's database. Other clients
+		// that still retry an ephemeral port this server reuses do not count.
+		const dbName = `broken_${randomUUID().replaceAll("-", "")}`;
 		let connections = 0;
 		const fakeDb = createServer((s) => {
-			connections++;
-			s.destroy();
+			let seen = Buffer.alloc(0);
+			s.on("data", (b: Buffer) => {
+				seen = Buffer.concat([seen, b]);
+				if (seen.includes(dbName)) {
+					connections++;
+					s.destroy();
+				}
+			});
+			s.on("error", () => {});
+			s.setTimeout(2_000, () => s.destroy());
 		});
 		await new Promise<void>((r) => fakeDb.listen(0, "127.0.0.1", r));
 		const port = (fakeDb.address() as AddressInfo).port;
@@ -173,11 +185,11 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 			await expect(
 				start({
 					SBX_API_SERVICE_TOKENS_FILE: bad,
-					DATABASE_URL: `postgres://sbx:sbx@127.0.0.1:${port}/sbx`,
+					DATABASE_URL: `postgres://sbx:sbx@127.0.0.1:${port}/${dbName}`,
 				}),
 			).rejects.toThrow(/service tokens file/);
 			// Give a pool or LISTEN connection that might have started time to arrive.
-			await new Promise((r) => setTimeout(r, 200));
+			await new Promise((r) => setTimeout(r, 500));
 			expect(connections).toBe(0);
 		} finally {
 			await new Promise((r) => fakeDb.close(r));

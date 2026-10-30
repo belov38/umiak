@@ -94,20 +94,25 @@ describe("sbx shell", () => {
 		let child: ChildProcess | undefined;
 		const before = w.requests.length;
 		const run = runCli(["shell", sb.id, "--", "sleep 20"], {
-			env,
+			env: { ...env, COLUMNS: "80", LINES: "24" },
 			stdin: "",
 			stdinOpen: true,
 			onSpawn: (c) => {
 				child = c;
 			},
 		});
-		await until(async () =>
-			w.requests.slice(before).some((r) => r.startsWith("UPGRADE "))
-				? true
-				: undefined,
-		);
-		// Past the attach, when the handlers are in place.
-		await new Promise((r) => setTimeout(r, 500));
+		const cmdId = await until(async () => {
+			const up = w.requests.slice(before).find((r) => r.startsWith("UPGRADE "));
+			return up?.match(/ptys\/cmd_([^/]+)\/connect/)?.[1]?.toUpperCase();
+		});
+		// The SIGTERM handler is installed together with the SIGWINCH one:
+		// once a SIGWINCH reaches the agent as a resize, SIGTERM is handled.
+		await until(async () => {
+			if (w.agent.ptySizes(cmdId).length >= 2) return true;
+			child?.kill("SIGWINCH");
+			await new Promise((r) => setTimeout(r, 100));
+			return undefined;
+		});
 		child?.kill("SIGTERM");
 		const r = await run;
 		expect(r.code, r.stderr).toBe(143);

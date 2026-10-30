@@ -170,7 +170,9 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 				oidc: new OidcVerifier(settings.oidc as OidcSettings, {
 					jwksMaxAgeMs: 100,
 					jwksCooldownMs: 100,
-					outageBackoffMs: 400,
+					// Long enough for the checks inside it on a loaded machine;
+					// its end is awaited by polling, not by a fixed sleep.
+					outageBackoffMs: 3_000,
 				}),
 			},
 		});
@@ -193,8 +195,11 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 				retryable: true,
 			});
 			oidc.fail({ jwks: null });
-			await sleep(450); // backoff over: the new key is fetched
-			expect((await me(h, await oidc.token(person()))).status).toBe(200);
+			// Backoff over: the new key is fetched.
+			await eventually(
+				async () => (await me(h, await oidc.token(person()))).status === 200,
+				15_000,
+			);
 		} finally {
 			oidc.fail({ jwks: null });
 		}
@@ -209,8 +214,9 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 				pool: w.db.pool,
 				identity: w.identity,
 				identityEvents: w.events,
+				// Long enough for the checks inside it on a loaded machine.
 				oidc: new OidcVerifier(settings.oidc as OidcSettings, {
-					discoveryRetryMs: 300,
+					discoveryRetryMs: 3_000,
 				}),
 			},
 		});
@@ -221,8 +227,8 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 			expect((await me(h, token)).status).toBe(503);
 			expect(other.stats.discovery).toBe(1);
 			other.fail({ discovery: null });
-			await new Promise((r) => setTimeout(r, 350));
-			expect((await me(h, token)).status).toBe(200);
+			// Requests inside the window do not fetch; the first one after it does.
+			await eventually(async () => (await me(h, token)).status === 200, 15_000);
 			expect(other.stats.discovery).toBe(2);
 		} finally {
 			await other.close();
@@ -242,9 +248,10 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 				pool: w.db.pool,
 				identity: w.identity,
 				identityEvents: w.events,
-				// 30 s in production; short here so the test need not wait.
+				// 30 s in production; shorter here, but long enough for the
+				// checks inside it on a loaded machine.
 				oidc: new OidcVerifier(settings.oidc as OidcSettings, {
-					jwksCooldownMs: 300,
+					jwksCooldownMs: 3_000,
 				}),
 			},
 		});
@@ -254,8 +261,11 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 		// Inside the cooldown after the first fetch the new kid is unknown.
 		expect((await me(h, await oidc.token(person()))).status).toBe(401);
 		expect(oidc.stats.jwks).toBe(fetched);
-		await new Promise((r) => setTimeout(r, 350));
-		expect((await me(h, await oidc.token(person()))).status).toBe(200);
+		// After the cooldown the unknown kid re-reads the JWKS, exactly once.
+		await eventually(
+			async () => (await me(h, await oidc.token(person()))).status === 200,
+			15_000,
+		);
 		expect(oidc.stats.jwks).toBe(fetched + 1);
 		// Another unknown kid inside the cooldown: no new fetch, rejected.
 		const r = await me(h, await oidc.token(person(), { kid: "no-such-kid" }));

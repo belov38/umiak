@@ -245,9 +245,19 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 			note(`dropped ${n} connections`);
 		};
 		// Rolling: the new instance takes traffic before the old one stops.
-		const rolling = async () => {
+		// With `streamOpen`, the old instance is stopped only while the SDK
+		// streams from it: the start of the new one can take long enough under
+		// load for the stream to be between reattaches.
+		const rolling = async (streamOpen = false) => {
 			const old = current;
-			current = await startInstance();
+			const next = await startInstance();
+			if (streamOpen) {
+				await until(
+					() => old.deps.streams.size > 0 && proxy.size > 0,
+					"an open stream on the old instance",
+				);
+			}
+			current = next;
 			proxy.target(current.ports.public);
 			stop(old);
 			effect.rolling += 1;
@@ -287,8 +297,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 				() => agent.attachFailures(machineId) > 0,
 				"the attach failure to bite",
 			);
-			await streaming();
-			await rolling();
+			await rolling(true);
 			await streaming();
 			await gap();
 			note("prefix done");
