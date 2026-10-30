@@ -1,0 +1,381 @@
+{
+	"realm": "sbx",
+	"displayName": "sbx (local dev)",
+	"enabled": true,
+	"sslRequired": "external",
+	"registrationAllowed": false,
+	"registrationEmailAsUsername": true,
+	"loginWithEmailAllowed": true,
+	"duplicateEmailsAllowed": false,
+	"editUsernameAllowed": false,
+	"resetPasswordAllowed": false,
+	"rememberMe": false,
+	"verifyEmail": false,
+	"accessTokenLifespan": 300,
+	"ssoSessionIdleTimeout": 86400,
+	"ssoSessionMaxLifespan": 604800,
+	"clientSessionIdleTimeout": 0,
+	"clientSessionMaxLifespan": 0,
+	"revokeRefreshToken": false,
+	"oauth2DeviceCodeLifespan": 600,
+	"oauth2DevicePollingInterval": 5,
+	"defaultDefaultClientScopes": ["basic", "email", "profile", "groups"],
+	"defaultOptionalClientScopes": [],
+	"clientScopes": [
+		{
+			"name": "basic",
+			"description": "OpenID Connect scope for add all basic claims to the token",
+			"protocol": "openid-connect",
+			"attributes": {
+				"include.in.token.scope": "false",
+				"display.on.consent.screen": "false"
+			},
+			"protocolMappers": [
+				{
+					"name": "auth_time",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-usersessionmodel-note-mapper",
+					"consentRequired": false,
+					"config": {
+						"user.session.note": "AUTH_TIME",
+						"id.token.claim": "true",
+						"introspection.token.claim": "true",
+						"access.token.claim": "true",
+						"claim.name": "auth_time",
+						"jsonType.label": "long"
+					}
+				},
+				{
+					"name": "sub",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-sub-mapper",
+					"consentRequired": false,
+					"config": {
+						"introspection.token.claim": "true",
+						"access.token.claim": "true"
+					}
+				}
+			]
+		},
+		{
+			"name": "email",
+			"description": "OpenID Connect built-in scope: email",
+			"protocol": "openid-connect",
+			"attributes": {
+				"include.in.token.scope": "true",
+				"display.on.consent.screen": "true"
+			},
+			"protocolMappers": [
+				{
+					"name": "email",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-usermodel-attribute-mapper",
+					"consentRequired": false,
+					"config": {
+						"introspection.token.claim": "true",
+						"userinfo.token.claim": "true",
+						"user.attribute": "email",
+						"id.token.claim": "true",
+						"access.token.claim": "true",
+						"claim.name": "email",
+						"jsonType.label": "String"
+					}
+				},
+				{
+					"name": "email verified",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-usermodel-property-mapper",
+					"consentRequired": false,
+					"config": {
+						"introspection.token.claim": "true",
+						"userinfo.token.claim": "true",
+						"user.attribute": "emailVerified",
+						"id.token.claim": "true",
+						"access.token.claim": "true",
+						"claim.name": "email_verified",
+						"jsonType.label": "boolean"
+					}
+				}
+			]
+		},
+		{
+			"name": "profile",
+			"description": "OpenID Connect built-in scope: profile",
+			"protocol": "openid-connect",
+			"attributes": {
+				"include.in.token.scope": "true",
+				"display.on.consent.screen": "true"
+			},
+			"protocolMappers": [
+				{
+					"name": "family name",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-usermodel-attribute-mapper",
+					"consentRequired": false,
+					"config": {
+						"introspection.token.claim": "true",
+						"userinfo.token.claim": "true",
+						"user.attribute": "lastName",
+						"id.token.claim": "true",
+						"access.token.claim": "true",
+						"claim.name": "family_name",
+						"jsonType.label": "String"
+					}
+				},
+				{
+					"name": "full name",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-full-name-mapper",
+					"consentRequired": false,
+					"config": {
+						"id.token.claim": "true",
+						"introspection.token.claim": "true",
+						"access.token.claim": "true",
+						"userinfo.token.claim": "true"
+					}
+				},
+				{
+					"name": "given name",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-usermodel-attribute-mapper",
+					"consentRequired": false,
+					"config": {
+						"introspection.token.claim": "true",
+						"userinfo.token.claim": "true",
+						"user.attribute": "firstName",
+						"id.token.claim": "true",
+						"access.token.claim": "true",
+						"claim.name": "given_name",
+						"jsonType.label": "String"
+					}
+				},
+				{
+					"name": "username",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-usermodel-attribute-mapper",
+					"consentRequired": false,
+					"config": {
+						"introspection.token.claim": "true",
+						"userinfo.token.claim": "true",
+						"user.attribute": "username",
+						"id.token.claim": "true",
+						"access.token.claim": "true",
+						"claim.name": "preferred_username",
+						"jsonType.label": "String"
+					}
+				}
+			]
+		},
+		{
+			"name": "groups",
+			"description": "Group names of the user (claim groups, no full path)",
+			"protocol": "openid-connect",
+			"attributes": {
+				"include.in.token.scope": "true",
+				"display.on.consent.screen": "false"
+			},
+			"protocolMappers": [
+				{
+					"name": "groups",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-group-membership-mapper",
+					"consentRequired": false,
+					"config": {
+						"full.path": "false",
+						"claim.name": "groups",
+						"access.token.claim": "true",
+						"id.token.claim": "true",
+						"userinfo.token.claim": "true",
+						"introspection.token.claim": "true",
+						"lightweight.claim": "false"
+					}
+				}
+			]
+		}
+	],
+	"groups": [
+		{
+			"name": "sbx-operators",
+			"path": "/sbx-operators"
+		}
+	],
+	"clients": [
+		{
+			"clientId": "oauth2-proxy",
+			"name": "Browser sessions (oauth2-proxy)",
+			"enabled": true,
+			"protocol": "openid-connect",
+			"publicClient": false,
+			"clientAuthenticatorType": "client-secret",
+			"secret": "${SBX_OAUTH2_PROXY_CLIENT_SECRET}",
+			"standardFlowEnabled": true,
+			"implicitFlowEnabled": false,
+			"directAccessGrantsEnabled": false,
+			"serviceAccountsEnabled": false,
+			"redirectUris": ["${SBX_OAUTH2_PROXY_REDIRECT_URL}"],
+			"webOrigins": ["${SBX_APP_ORIGIN}"],
+			"frontchannelLogout": true,
+			"attributes": {
+				"post.logout.redirect.uris": "${SBX_APP_ORIGIN}/*",
+				"oauth2.device.authorization.grant.enabled": "false",
+				"client.use.lightweight.access.token.enabled": "false"
+			},
+			"fullScopeAllowed": false,
+			"defaultClientScopes": ["basic", "email", "profile", "groups"],
+			"optionalClientScopes": [],
+			"protocolMappers": [
+				{
+					"name": "audience oauth2-proxy",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-audience-mapper",
+					"consentRequired": false,
+					"config": {
+						"included.client.audience": "oauth2-proxy",
+						"access.token.claim": "true",
+						"id.token.claim": "false",
+						"introspection.token.claim": "true",
+						"lightweight.claim": "false"
+					}
+				}
+			]
+		},
+		{
+			"clientId": "sbx-cli",
+			"name": "sbx CLI (device login)",
+			"enabled": true,
+			"protocol": "openid-connect",
+			"publicClient": true,
+			"standardFlowEnabled": false,
+			"implicitFlowEnabled": false,
+			"directAccessGrantsEnabled": false,
+			"serviceAccountsEnabled": false,
+			"redirectUris": [],
+			"webOrigins": [],
+			"attributes": {
+				"oauth2.device.authorization.grant.enabled": "true",
+				"client.use.lightweight.access.token.enabled": "false"
+			},
+			"fullScopeAllowed": false,
+			"defaultClientScopes": ["basic", "email", "profile", "groups"],
+			"optionalClientScopes": [],
+			"protocolMappers": [
+				{
+					"name": "audience sbx-api",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-audience-mapper",
+					"consentRequired": false,
+					"config": {
+						"included.client.audience": "sbx-api",
+						"access.token.claim": "true",
+						"id.token.claim": "false",
+						"introspection.token.claim": "true",
+						"lightweight.claim": "false"
+					}
+				}
+			]
+		},
+		{
+			"clientId": "sbx-mcp",
+			"name": "sbx MCP (browser login, PKCE)",
+			"enabled": true,
+			"protocol": "openid-connect",
+			"publicClient": true,
+			"standardFlowEnabled": true,
+			"implicitFlowEnabled": false,
+			"directAccessGrantsEnabled": false,
+			"serviceAccountsEnabled": false,
+			"redirectUris": ["http://127.0.0.1:33418/*", "http://localhost:33418/*"],
+			"webOrigins": [],
+			"attributes": {
+				"pkce.code.challenge.method": "S256",
+				"oauth2.device.authorization.grant.enabled": "false",
+				"client.use.lightweight.access.token.enabled": "false"
+			},
+			"fullScopeAllowed": false,
+			"defaultClientScopes": ["basic", "email", "profile", "groups"],
+			"optionalClientScopes": [],
+			"protocolMappers": [
+				{
+					"name": "audience sbx-api",
+					"protocol": "openid-connect",
+					"protocolMapper": "oidc-audience-mapper",
+					"consentRequired": false,
+					"config": {
+						"included.client.audience": "sbx-api",
+						"access.token.claim": "true",
+						"id.token.claim": "false",
+						"introspection.token.claim": "true",
+						"lightweight.claim": "false"
+					}
+				}
+			]
+		},
+		{
+			"clientId": "sbx-api",
+			"name": "sbx API (audience only)",
+			"enabled": true,
+			"protocol": "openid-connect",
+			"publicClient": false,
+			"bearerOnly": true,
+			"standardFlowEnabled": false,
+			"implicitFlowEnabled": false,
+			"directAccessGrantsEnabled": false,
+			"serviceAccountsEnabled": false,
+			"redirectUris": [],
+			"webOrigins": [],
+			"attributes": {
+				"oauth2.device.authorization.grant.enabled": "false"
+			},
+			"fullScopeAllowed": false,
+			"defaultClientScopes": [],
+			"optionalClientScopes": []
+		},
+		{
+			"clientId": "sbx-worker",
+			"name": "sbx worker (Keycloak Admin API, read users)",
+			"enabled": true,
+			"protocol": "openid-connect",
+			"publicClient": false,
+			"clientAuthenticatorType": "client-secret",
+			"secret": "${SBX_WORKER_CLIENT_SECRET}",
+			"standardFlowEnabled": false,
+			"implicitFlowEnabled": false,
+			"directAccessGrantsEnabled": false,
+			"serviceAccountsEnabled": true,
+			"redirectUris": [],
+			"webOrigins": [],
+			"attributes": {
+				"oauth2.device.authorization.grant.enabled": "false"
+			},
+			"defaultClientScopes": ["basic"],
+			"optionalClientScopes": []
+		}
+	],
+	"users": [
+		{
+			"username": "dev@example.com",
+			"email": "dev@example.com",
+			"emailVerified": true,
+			"enabled": true,
+			"firstName": "Dev",
+			"lastName": "User",
+			"credentials": [
+				{
+					"type": "password",
+					"value": "${SBX_DEV_PASSWORD}",
+					"temporary": true
+				}
+			],
+			"requiredActions": ["UPDATE_PASSWORD"],
+			"groups": []
+		},
+		{
+			"username": "service-account-sbx-worker",
+			"enabled": true,
+			"serviceAccountClientId": "sbx-worker",
+			"clientRoles": {
+				"realm-management": ["view-users"]
+			}
+		}
+	]
+}

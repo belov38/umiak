@@ -12,10 +12,13 @@ describe("StaticConfigReader.fromFile(poc.yaml)", () => {
 	it("reads templates and sizes", async () => {
 		expect(await reader.template("linux")).toEqual({
 			slug: "linux",
+			name: "linux",
 			os: "linux",
 			enabled: true,
 			defaultSize: "2gb",
 			allowedSizes: ["2gb"],
+			loginUser: "user",
+			capabilities: ["exec", "files", "ssh"],
 		});
 		expect(await reader.size("2gb")).toEqual({
 			slug: "2gb",
@@ -41,6 +44,9 @@ describe("StaticConfigReader.fromFile(poc.yaml)", () => {
 			errorRetentionDays: 7,
 			recoverMinIntervalSeconds: 600,
 			defaultTemplate: "linux",
+			publicPortsEnabled: true,
+			ssoPortPolicy: "any",
+			ssoPolicyEpoch: 0,
 		});
 	});
 
@@ -118,6 +124,86 @@ describe("StaticConfigReader.fromObject", () => {
 			maxSavedSnapshots: 10,
 		});
 		expect(r.topology()).toEqual({ providers: [], templateBuilds: [] });
+	});
+
+	it("lists every template (also disabled) and size in configuration order, as copies", async () => {
+		const r = StaticConfigReader.fromObject({
+			templates: [
+				...base().templates,
+				{
+					slug: "win",
+					os: "windows",
+					enabled: false,
+					defaultSize: "4gb",
+					allowedSizes: ["4gb"],
+				},
+			],
+			sizes: [...base().sizes, { slug: "4gb", vcpu: 2, memoryMb: 4096 }],
+		});
+		const list = await r.templates();
+		expect(list.map((t) => [t.slug, t.enabled])).toEqual([
+			["linux", true],
+			["win", false],
+		]);
+		expect((await r.sizes()).map((s) => s.slug)).toEqual(["2gb", "4gb"]);
+		list[0]?.allowedSizes.push("x");
+		expect((await r.template("linux"))?.allowedSizes).toEqual(["2gb"]);
+	});
+
+	it("fills the S7 template and platform defaults (name, loginUser, capabilities, ports policy)", async () => {
+		const r = StaticConfigReader.fromObject(base());
+		const t = await r.template("linux");
+		expect(t?.name).toBe("linux");
+		expect(t?.loginUser).toBe("user");
+		expect(t?.capabilities).toEqual(["exec", "files", "ssh"]);
+		const d = await r.defaults();
+		expect(d.publicPortsEnabled).toBe(true);
+		expect(d.ssoPortPolicy).toBe("any");
+		expect(d.ssoPolicyEpoch).toBe(0);
+	});
+
+	it("reads explicit S7 template and platform fields", async () => {
+		const b = base();
+		const r = StaticConfigReader.fromObject({
+			...b,
+			templates: [
+				{
+					...b.templates[0],
+					name: "Ubuntu 26.04",
+					loginUser: "admin",
+					capabilities: ["exec", "files", "ssh", "desktop"],
+				},
+			],
+			defaults: {
+				publicPortsEnabled: false,
+				ssoPortPolicy: "team",
+				ssoPolicyEpoch: 3,
+			},
+		});
+		expect(await r.template("linux")).toMatchObject({
+			name: "Ubuntu 26.04",
+			loginUser: "admin",
+			capabilities: ["exec", "files", "ssh", "desktop"],
+		});
+		expect(await r.defaults()).toMatchObject({
+			publicPortsEnabled: false,
+			ssoPortPolicy: "team",
+			ssoPolicyEpoch: 3,
+			maxTtlSeconds: 604800,
+		});
+		expect(() =>
+			StaticConfigReader.fromObject({
+				...b,
+				defaults: { ssoPortPolicy: "everyone" },
+			}),
+		).toThrow(/defaults\.ssoPortPolicy/);
+		// Capabilities are a closed set (S7 §13): a typo fails the config.
+		expect(() =>
+			StaticConfigReader.fromObject({
+				...b,
+				templates: [{ ...b.templates[0], capabilities: ["exec", "shh"] }],
+			}),
+		).toThrow(/capabilities/);
 	});
 
 	it("merges a per-team quota over the default", async () => {

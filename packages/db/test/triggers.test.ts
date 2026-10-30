@@ -323,4 +323,18 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 			expect(r.rows[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
 		});
 	});
+
+	it("sets sandboxes.updated_at on every update (0205)", async () => {
+		const id = await insertSandbox(`touch-${randomUUID().slice(0, 8)}`);
+		// The trigger overrides any value an UPDATE sets.
+		await q(
+			"UPDATE runtime.sandboxes SET name = 'n', updated_at = '2000-01-01Z' WHERE id = $1",
+			[id],
+		);
+		const r = await q(
+			"SELECT updated_at > now() - interval '1 minute' AS fresh FROM runtime.sandboxes WHERE id = $1",
+			[id],
+		);
+		expect(r.rows[0].fresh).toBe(true);
+	});
 });

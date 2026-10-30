@@ -11,16 +11,22 @@ ARG PNPM_VERSION=12.16.1
 RUN npm install -g "pnpm@${PNPM_VERSION}" && pnpm --version
 WORKDIR /app
 # Workspace manifests first, so the install layers are cached across source edits.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs tsconfig.base.json ./
 COPY packages/agent-client/package.json packages/agent-client/
+COPY packages/auth/package.json packages/auth/
 COPY packages/config/package.json packages/config/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
 COPY packages/proto/package.json packages/proto/
 COPY packages/pve/package.json packages/pve/
+COPY packages/sdk-py/package.json packages/sdk-py/
+COPY packages/sdk-ts/package.json packages/sdk-ts/
 COPY apps/worker/package.json apps/worker/
 # Part of the workspace and the lockfile, but not of the worker closure.
+COPY apps/api/package.json apps/api/
 COPY apps/bench/package.json apps/bench/
+COPY apps/cli/package.json apps/cli/
+COPY apps/template-builder/package.json apps/template-builder/
 
 # ---- build: compile @sbx/proto and @sbx/agent-client (needs dev dependencies)
 FROM base AS build
@@ -30,7 +36,9 @@ COPY packages/proto/tsconfig.json packages/proto/
 COPY packages/proto/src packages/proto/src
 COPY packages/agent-client/tsconfig.json packages/agent-client/tsconfig.build.json packages/agent-client/
 COPY packages/agent-client/src packages/agent-client/src
-RUN pnpm --filter "@sbx/agent-client..." run build
+# Only these two: "@sbx/agent-client..." also selects its dev dependencies
+# (@sbx/db for the test Postgres guard), whose sources are not copied here.
+RUN pnpm --filter "@sbx/proto" --filter "@sbx/agent-client" run build
 
 # ---- runtime: production dependencies only
 FROM base
@@ -39,6 +47,7 @@ RUN pnpm install --frozen-lockfile --prod --filter "@sbx/worker..."
 COPY db/migrations db/migrations
 COPY --from=build /app/packages/proto/dist packages/proto/dist
 COPY --from=build /app/packages/agent-client/dist packages/agent-client/dist
+COPY packages/auth/src packages/auth/src
 COPY packages/config/src packages/config/src
 COPY packages/core/src packages/core/src
 COPY packages/db/src packages/db/src

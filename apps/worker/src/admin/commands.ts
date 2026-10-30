@@ -23,6 +23,7 @@ import type { Logger } from "pino";
 import { DEFAULT_TIMING, NoopMetrics, type WorkerCtx } from "../context.ts";
 import { runReconcile } from "../controllers/reconcile.ts";
 import { withMachineLocked } from "../db.ts";
+import type { ProviderOverride } from "../env.ts";
 import { errText } from "../log.ts";
 import { nodeRam, poolCounts } from "../pool-status.ts";
 import type { AgentPort, GatewayPort, InfraRegistry } from "../ports.ts";
@@ -41,6 +42,8 @@ export interface AdminDeps {
 	infra?: () => InfraRegistry & { close?(): Promise<void> };
 	/** Data key ring (SBX_DATA_KEYS_FILE); optional for reconcile. */
 	keys?: () => KeyRing;
+	/** bootstrap: apiUrl/tlsName of the first provider (SBX_PVE_URL, SBX_PVE_TLS_NAME). */
+	providerOverride?: ProviderOverride;
 	log: Logger;
 	migrationsDir?: string;
 }
@@ -48,6 +51,7 @@ export interface AdminDeps {
 export const USAGE = `usage: sbx-admin <command>
   migrate                                    apply db/migrations (S2 tunnel and S6 runtime schemas)
   bootstrap                                  topology and template builds from SBX_CONFIG_FILE
+                                             (SBX_PVE_URL, SBX_PVE_TLS_NAME override the first provider)
   providers add --name N --cluster-mac-id N --vmid-min N --vmid-max N --api-url URL --secret-ref R [--tls-name T]
   nodes add --provider P --name N --ram-cap-mb N --node-agent-ref R [--clone-concurrency 4] [--storage local-lvm]
   nodes cordon|uncordon <node> [--provider P]
@@ -461,7 +465,26 @@ function topologyOf(d: AdminDeps): TopologyConfig {
 			"bootstrap needs SBX_CONFIG_FILE (the YAML with a topology section)",
 		);
 	}
-	return d.config().topology();
+	const topo = d.config().topology();
+	const o = d.providerOverride ?? {};
+	const [first, ...rest] = topo.providers;
+	if (
+		first === undefined ||
+		(o.apiUrl === undefined && o.tlsName === undefined)
+	) {
+		return topo;
+	}
+	return {
+		...topo,
+		providers: [
+			{
+				...first,
+				...(o.apiUrl === undefined ? {} : { apiUrl: o.apiUrl }),
+				...(o.tlsName === undefined ? {} : { tlsName: o.tlsName }),
+			},
+			...rest,
+		],
+	};
 }
 
 /**

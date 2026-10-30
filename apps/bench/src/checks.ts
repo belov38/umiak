@@ -98,10 +98,28 @@ export async function pingBlocked(
 export interface NetTargets {
 	lanGateway: string;
 	hostLan: string;
-	hostTailscale: string;
+	/** The operator's addresses of the host (see hostAddresses). */
+	hostAddresses: string[];
 	vnetGateway: string;
 	hostLinkLocal: string;
 	denyPublic: string[];
+}
+
+/**
+ * Host addresses a sandbox must not reach: the default management address,
+ * then SBX_NODE_SSH_HOST and SBX_BENCH_HOST_ADDRESSES (whitespace-separated),
+ * without repeats. An override adds to the default instead of replacing it.
+ */
+export function hostAddresses(
+	env: Record<string, string | undefined>,
+	defaultAddress: string,
+): string[] {
+	const all = [
+		defaultAddress,
+		env.SBX_NODE_SSH_HOST ?? "",
+		...(env.SBX_BENCH_HOST_ADDRESSES ?? "").split(/\s+/),
+	].filter((a) => a !== "");
+	return [...new Set(all)];
 }
 
 /** Network checks from inside a sandbox (spec §7.2 step 1.2). */
@@ -165,10 +183,10 @@ export async function networkChecks(
 			);
 	}
 	for (const [host, ports] of [
-		[t.hostLan, [22, 8006]],
-		[t.hostTailscale, [22, 8006]],
-		[t.vnetGateway, [22, 8006, 53]],
-	] as const) {
+		[t.hostLan, [22, 8006]] as const,
+		...t.hostAddresses.map((a) => [a, [22, 8006]] as const),
+		[t.vnetGateway, [22, 8006, 53]] as const,
+	]) {
 		for (const port of ports)
 			c.push(
 				await check(`${p} tcp ${host}:${port} blocked`, () =>

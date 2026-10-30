@@ -51,8 +51,12 @@ const serviceToken = "e2e-service-token";
 const lines = 3000;
 const lineBytes = 512;
 const exitCode = 42;
-/** Scaled pause budget of spec 14.1 (30 s there). */
-const maxPauseMs = 5000;
+/**
+ * Pause budget of spec 14.1 (30 s). A scaled 5 s budget failed under a fully
+ * loaded `pnpm -r test` (load average 50+): the pause is wall-clock time, so
+ * the spec's own budget is the bound that does not depend on machine load.
+ */
+const maxPauseMs = 30_000;
 
 /** Expected output of the Process double (same formula as Go process.Expected). */
 function expectedOutput(n: number, lb: number): Record<string, Buffer> {

@@ -64,6 +64,8 @@ export interface EnvOptions {
 	};
 	defaults?: Record<string, unknown>;
 	notifier?: Notifier;
+	/** The fallback poll of the waits (default 2 s with a notifier). */
+	waitPollMs?: number;
 	slugRandom?: (n: number) => number;
 }
 
@@ -122,6 +124,7 @@ export async function serviceEnv(
 		keys,
 		jobs,
 		...(opts.notifier ? { notifier: opts.notifier } : {}),
+		...(opts.waitPollMs ? { waitPollMs: opts.waitPollMs } : {}),
 		...(opts.slugRandom ? { slugRandom: opts.slugRandom } : {}),
 	});
 	return {

@@ -7,8 +7,8 @@
 # Copies the working tree (git ls-files, without ignored files) to sbx@<CT>:boat-dev-clone,
 # the PVE secrets and the dev CA (dev-ca.sh) to ~/.config/sbx on the CT (0600), writes
 # deploy/compose/.env and the dev sbx.yaml, then runs `docker compose up -d --build`, waits for
-# worker and gateway, applies the Tailscale Serve mapping (names.sh) and checks the names and
-# certificates from this Mac.
+# worker, gateway, api and oauth2-proxy, applies the Tailscale Serve mapping (names.sh) and
+# checks the names and certificates from this Mac.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -16,10 +16,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/names.sh"
 CT="${SBX_DEVCP_SSH:-sbx@$CT_IP}"
 PVE_LAN_IP="${SBX_PVE_LAN_IP:-192.168.68.116}"
-# Compose files in deploy/compose; the dev override is always appended. Add later services
-# (S7 api, S8 web, ...) here, e.g. SBX_DEVCP_COMPOSE_FILES=compose.yaml:gateway.yaml:api.yaml.
+# Compose files in deploy/compose; the dev override is always appended. compose.yaml has the S7
+# services and includes gateway.yaml; add later files here (SBX_DEVCP_COMPOSE_FILES).
 FILES="${SBX_DEVCP_COMPOSE_FILES:-compose.yaml:gateway.yaml}"
-# Extra lines for deploy/compose/.env, e.g. SBX_DEVCP_ENV='SBX_GATEWAY_API_URL=http://api:8082'.
+# Extra lines for deploy/compose/.env, e.g. SBX_DEVCP_ENV='SBX_API_LOG_LEVEL=debug'.
 EXTRA_ENV="${SBX_DEVCP_ENV:-}"
 CFG_DIR="${SBX_CONFIG_DIR:-$HOME/.config/sbx}"
 DIR=boat-dev-clone
@@ -156,7 +156,8 @@ SBX_DEVCP_TUNNEL_HOST=$TUNNEL_HOST
 SBX_TUNNEL_URL=$TUNNEL_URL
 SBX_PORT_DOMAIN=$PORT_DOMAIN
 SBX_DEVCP_SSH_HOST=$SSH_HOST
-# For the S7/S8 services (README "When S7 and S8 land"); nothing reads them yet.
+# Public URLs behind Tailscale Serve: api, Keycloak, oauth2-proxy and the gateway's port SSO
+# (compose.dev-cp.yaml; README "S7 behind Tailscale Serve").
 SBX_DEVCP_TS_NAME=$TS_NAME
 SBX_APP_ORIGIN=$APP_ORIGIN
 SBX_API_PUBLIC_URL=$API_URL
@@ -168,16 +169,22 @@ $EXTRA_ENV
 ENV
 docker compose config --quiet
 docker compose up -d --build --remove-orphans 2>&1 | grep -vE '^ *#[0-9]+ ' | tail -30
-for _ in $(seq 1 90); do
-	w=$(docker compose ps --format '{{.Health}}' worker)
-	g=$(docker compose ps --format '{{.Health}}' gateway)
-	[ "$w" = healthy ] && [ "$g" = healthy ] && break
+# api and oauth2-proxy wait for Keycloak, whose first start (realm import) takes a minute or two.
+healthy() {
+	local s
+	for s in worker gateway api oauth2-proxy; do
+		[ "$(docker compose ps --format '{{.Health}}' "$s")" = healthy ] || return 1
+	done
+}
+for _ in $(seq 1 150); do
+	healthy && break
 	sleep 2
 done
 docker compose ps -a --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 echo "worker /readyz: $(curl -sS http://127.0.0.1:9090/readyz)"
 echo "gateway /readyz: $(curl -sS http://127.0.0.1:9190/readyz)"
-[ "$w" = healthy ] && [ "$g" = healthy ]
+echo "api /readyz: $(curl -sS http://127.0.0.1:9091/readyz)"
+healthy
 
 # Tailscale Serve (operator sbx, set by `infra/pve/setup.sh cp-tailscale`): rebuilt from SERVE.
 # Serve takes its ports on the tailnet address before Docker sees them; 443 stays with the gateway.
@@ -195,7 +202,8 @@ EOF
 # 4. From this Mac. The tunnel host (LAN address, so only from the LAN) and a preview host
 # (tailnet address) with the dev CA: without api a preview answers 503 route_lookup_unavailable,
 # with api 404 route_not_found; either proves DNS, TLS and routing. Serve with the system trust
-# store: 502 until S7/S8 listen behind it.
+# store: oauth2-proxy on 8443 (a sign-in redirect), Keycloak on 10000, and /v1/meta of the api
+# public listener on 8443.
 # check name url [curl args]: logs the HTTP status and the body.
 check() {
 	local name=$1 url=$2 out code
@@ -213,4 +221,6 @@ for port in $(tr ' ' '\n' <<<"$SERVE" | cut -d: -f1 | sort -u); do
 	check serve "https://$TS_NAME:$port/" -o /dev/null ||
 		log "WARNING: Tailscale Serve on $TS_NAME:$port is not reachable from this Mac"
 done
+check api "$API_URL/v1/meta" ||
+	log "WARNING: the api is not reachable through Tailscale Serve from this Mac"
 log "deployed"

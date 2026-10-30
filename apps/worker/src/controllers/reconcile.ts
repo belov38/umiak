@@ -651,6 +651,7 @@ async function hasActiveOp(tx: Tx, sandboxId: string): Promise<boolean> {
 	return (r.rowCount ?? 0) > 0;
 }
 
+/** The guest is gone or down; the reason stays null (unknown, R32). */
 async function commandsLost(tx: Tx, machineId: string): Promise<void> {
 	await tx.client.query(
 		`UPDATE runtime.commands SET status = 'lost', ended_at = now()

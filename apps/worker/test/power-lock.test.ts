@@ -38,7 +38,8 @@ function never(): never {
 async function waitFor(
 	cond: () => Promise<boolean>,
 	what: string,
-	timeoutMs = 5000,
+	// Only bounds a hang; room for a heavily loaded machine.
+	timeoutMs = 30_000,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!(await cond())) {

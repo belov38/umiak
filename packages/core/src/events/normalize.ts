@@ -1,4 +1,9 @@
-import type { CommandStatus } from "../rows.ts";
+import {
+	COMMAND_EXIT_REASONS,
+	type CommandExitReason,
+	type CommandStatus,
+	storableOutputTruncated,
+} from "../rows.ts";
 
 // Agent event names (decision 13). The machine-events handler works with the
 // S6 §10.2 set; S3 §16 names are mapped here. Payloads arrive as decoded JSON
@@ -25,10 +30,16 @@ export type AgentEvent =
 			status: TerminalCommandStatus;
 			exitCode: number | null;
 			signal: string | null;
+			/** S3 `ExitReason` in lower case; null when unknown. */
+			reason: CommandExitReason | null;
+			/** "disk_full" when the agent dropped output; else null. */
+			outputTruncated: string | null;
 			stdoutBytes: number | null;
 			stderrBytes: number | null;
 	  }
-	| { kind: "pty_closed"; commandId: string }
+	| { kind: "pty_closed"; commandId: string; reason: CommandExitReason | null }
+	/** S3 `output.truncated`: the agent dropped output of the command. */
+	| { kind: "output_truncated"; commandId: string; reason: string }
 	| {
 			kind: "activity";
 			runningCommands: number;
@@ -115,28 +126,46 @@ function readiness(p: Obj): AgentEvent | null {
 	return { kind: "readiness", phase, state, error: str(p.error) };
 }
 
+/** S3 `ExitReason` values that decide the command status (as attach does). */
+const STATUS_BY_REASON: Record<string, TerminalCommandStatus> = {
+	timeout: "timed_out",
+	start_failed: "failed_to_start",
+};
+
+function exitReason(p: Obj): CommandExitReason | null {
+	return enumValue(
+		field(p, "reason"),
+		COMMAND_EXIT_REASONS,
+	) as CommandExitReason | null;
+}
+
 function commandExited(p: Obj): AgentEvent | null {
 	const commandId = str(field(p, "commandId"));
 	if (commandId === null) return null;
 	const exitCode = int(field(p, "code") ?? field(p, "exitCode"));
 	const signal = str(field(p, "signal"));
-	let status = enumValue(
-		field(p, "status"),
-		TERMINAL,
-	) as TerminalCommandStatus | null;
+	const reason = exitReason(p);
+	let status =
+		(reason === null ? undefined : STATUS_BY_REASON[reason]) ??
+		(enumValue(field(p, "status"), TERMINAL) as TerminalCommandStatus | null);
 	if (status === null) {
 		if (exitCode !== null) status = "exited";
 		else if (signal !== null) status = "killed";
 		else return null;
 	}
+	// A PTY command has the one stream `pty`, kept in stdout_bytes.
+	const ptyEnd = count(field(p, "ptyEnd"));
+	const pty = ptyEnd !== null && ptyEnd > 0;
 	return {
 		kind: "command_exited",
 		commandId,
 		status,
 		exitCode,
 		signal,
-		stdoutBytes: count(field(p, "stdoutEnd")),
-		stderrBytes: count(field(p, "stderrEnd")),
+		reason,
+		outputTruncated: storableOutputTruncated(field(p, "outputTruncated")),
+		stdoutBytes: pty ? ptyEnd : count(field(p, "stdoutEnd")),
+		stderrBytes: pty ? 0 : count(field(p, "stderrEnd")),
 	};
 }
 
@@ -161,7 +190,16 @@ export function normalizeAgentEvent(e: {
 			return commandExited(p);
 		case "pty.closed": {
 			const commandId = str(field(p, "commandId"));
-			return commandId === null ? null : { kind: "pty_closed", commandId };
+			return commandId === null
+				? null
+				: { kind: "pty_closed", commandId, reason: exitReason(p) };
+		}
+		case "output.truncated": {
+			const commandId = str(field(p, "commandId"));
+			const reason = storableOutputTruncated(p.reason);
+			return commandId === null || reason === null
+				? null
+				: { kind: "output_truncated", commandId, reason };
 		}
 		case "activity": {
 			const runningCommands = count(field(p, "runningCommands"));

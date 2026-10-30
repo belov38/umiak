@@ -72,6 +72,10 @@ describe.skipIf(skipPg())("idempotency (S6 §14.1, S7 §5.7)", () => {
 				kind: "replay",
 				sandboxId: input.sandboxId,
 				operationId: input.operationId,
+				response: {
+					sandboxId: input.sandboxId,
+					operationId: input.operationId,
+				},
 			});
 			await expectCode(
 				withTx(t.pool, (tx) =>

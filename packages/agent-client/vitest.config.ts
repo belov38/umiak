@@ -14,7 +14,9 @@ export default defineConfig({
 	},
 	test: {
 		globalSetup: ["test/helpers/pg-global-setup.ts"],
-		testTimeout: 20_000,
+		// A hang guard only: under a full parallel `pnpm -r test` on a loaded
+		// machine a test with a few waits can take longer than 20 s.
+		testTimeout: 120_000,
 		hookTimeout: 120_000,
 	},
 });

@@ -2,10 +2,16 @@ export type TemplateOs = "linux" | "windows";
 
 export interface TemplateConfig {
 	slug: string;
+	/** Display name; the slug when not set. */
+	name: string;
 	os: TemplateOs;
 	enabled: boolean;
 	defaultSize: string;
 	allowedSizes: string[];
+	/** Guest user of SSH logins (S7 §12.1); default `user`. */
+	loginUser: string;
+	/** S7 §13: `exec`, `files`, `ssh`, `desktop`; default `["exec", "files", "ssh"]`. */
+	capabilities: string[];
 }
 
 export interface SizeConfig {
@@ -36,12 +42,24 @@ export interface PlatformDefaults {
 	errorRetentionDays: number;
 	recoverMinIntervalSeconds: number;
 	defaultTemplate: string;
+	/** `public` ports allowed (S7 §11.2); default true. */
+	publicPortsEnabled: boolean;
+	/** Who may open `sso` ports (S7 §7.7, S8 C7); default `any`. */
+	ssoPortPolicy: SsoPortPolicy;
+	/** Added to `auth_epoch` of `sso` routes; bumped on a policy change (S8 C7). */
+	ssoPolicyEpoch: number;
 }
+
+export type SsoPortPolicy = "any" | "team";
 
 /** S6 §5.11. Implementations: StaticConfigReader (YAML), PayloadConfigReader (S8). */
 export interface ConfigReader {
 	template(slug: string): Promise<TemplateConfig | null>;
 	size(slug: string): Promise<SizeConfig | null>;
+	/** Every template, enabled or not, in configuration order (S7 §13 catalog). */
+	templates(): Promise<TemplateConfig[]>;
+	/** Every size, in configuration order. */
+	sizes(): Promise<SizeConfig[]>;
 	poolTargets(): Promise<PoolTarget[]>;
 	/** Unknown teams get the default quota. */
 	teamQuota(teamId: string): Promise<Quota>;

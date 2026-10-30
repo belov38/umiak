@@ -101,7 +101,7 @@ describe("regression: power lock covers S1 create rollback", () => {
 				(err: unknown) => err,
 			);
 		// The clone failed; its rollback now waits for the start's power lock.
-		const deadline = Date.now() + 5000;
+		const deadline = Date.now() + 30_000;
 		while (!api.cloneFailed) {
 			if (Date.now() > deadline) throw new Error("the clone never failed");
 			await new Promise((res) => setTimeout(res, 5));

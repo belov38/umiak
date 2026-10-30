@@ -1,18 +1,15 @@
 // Per-test-file Postgres databases. Each one is a copy of the template database
 // sbx_tmpl, which is migrated from db/migrations (S2's 0100 tunnel schema and
-// S6's runtime schema). The admin DSN comes from global-setup.ts.
-import { randomBytes } from "node:crypto";
+// S6's runtime schema). The admin DSN comes from global-setup.ts; the
+// database work itself (lock, template, copy, drop) is in pg.ts, which
+// servers run outside vitest use too.
 import type pg from "pg";
-import Pg from "pg";
 import { inject } from "vitest";
-import { MIGRATIONS_DIR, migrate } from "../migrate.ts";
 import { createPool, type Db, dbOf } from "../tx.ts";
+import { createDatabase, dropDatabase, TEMPLATE_DB } from "./pg.ts";
 import "./provided.ts";
 
-export const TEMPLATE_DB = "sbx_tmpl";
-
-/** Advisory lock on the admin database: template creation and cloning are serialized. */
-const TEMPLATE_LOCK_KEY = 727002;
+export { TEMPLATE_DB };
 
 export interface TestDatabase {
 	/** Connection string of the new database. */
@@ -44,12 +41,6 @@ function adminDsn(): string {
 	return admin;
 }
 
-function dsnFor(admin: string, database: string): string {
-	const url = new URL(admin);
-	url.pathname = `/${database}`;
-	return url.toString();
-}
-
 // Set once the template was checked in this module instance (one per test file
 // with vitest isolation); checking again is cheap but needs a connection.
 let templateChecked = false;
@@ -60,25 +51,11 @@ export async function createTestDatabase(
 ): Promise<TestDatabase> {
 	const admin = adminDsn();
 	const migrated = opts.migrated !== false;
-	const name = `sbx_test_${randomBytes(6).toString("hex")}`;
-	const client = new Pg.Client({ connectionString: admin });
-	await client.connect();
-	try {
-		await client.query("SELECT pg_advisory_lock($1)", [TEMPLATE_LOCK_KEY]);
-		try {
-			if (migrated && !templateChecked) {
-				await ensureTemplate(client, admin);
-				templateChecked = true;
-			}
-			const source = migrated ? TEMPLATE_DB : "template0";
-			await client.query(`CREATE DATABASE ${name} TEMPLATE ${source}`);
-		} finally {
-			await client.query("SELECT pg_advisory_unlock($1)", [TEMPLATE_LOCK_KEY]);
-		}
-	} finally {
-		await client.end();
-	}
-	const url = dsnFor(admin, name);
+	const { name, url } = await createDatabase(admin, {
+		migrated,
+		templateChecked,
+	});
+	if (migrated) templateChecked = true;
 	const pool = createPool(url, opts.max ?? 10);
 	return {
 		url,
@@ -86,47 +63,7 @@ export async function createTestDatabase(
 		db: dbOf(pool),
 		async drop() {
 			await pool.end();
-			const c = new Pg.Client({ connectionString: admin });
-			await c.connect();
-			try {
-				await c.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-			} finally {
-				await c.end();
-			}
+			await dropDatabase(admin, name);
 		},
 	};
-}
-
-// Brings sbx_tmpl up to date. An existing template (SBX_TEST_DATABASE_URL reused
-// across runs) is migrated forward; if that fails (a changed migration file, a
-// template left by an older layout) it is rebuilt from scratch.
-async function ensureTemplate(
-	admin: pg.Client,
-	adminUrl: string,
-): Promise<void> {
-	const url = dsnFor(adminUrl, TEMPLATE_DB);
-	const exists = await admin.query(
-		"SELECT 1 FROM pg_database WHERE datname = $1",
-		[TEMPLATE_DB],
-	);
-	if (exists.rowCount) {
-		try {
-			await prepareTemplate(url);
-			return;
-		} catch {
-			// rebuilt below
-		}
-	}
-	await admin.query(`DROP DATABASE IF EXISTS ${TEMPLATE_DB} WITH (FORCE)`);
-	await admin.query(`CREATE DATABASE ${TEMPLATE_DB} TEMPLATE template0`);
-	await prepareTemplate(url);
-}
-
-async function prepareTemplate(url: string): Promise<void> {
-	const pool = createPool(url, 1);
-	try {
-		await migrate(pool, { dir: MIGRATIONS_DIR });
-	} finally {
-		await pool.end();
-	}
 }

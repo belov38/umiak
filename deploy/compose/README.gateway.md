@@ -9,27 +9,20 @@
 
 ## Подключение
 
-Вариант 1, без правки `compose.yaml`:
+`compose.yaml` включает `gateway.yaml` (`include: [gateway.yaml]` в начале), поэтому gateway поднимается
+обычной командой:
 
 ```sh
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml up -d --build
+docker compose -f deploy/compose/compose.yaml up -d --build
 ```
 
-Этот же набор `-f` нужен и для `ps`, `logs`, `down`. Чтобы не повторять его, можно задать
-`COMPOSE_FILE=compose.yaml:gateway.yaml` в `deploy/compose/.env`.
-
-Вариант 2: одна строка в начале `compose.yaml`:
-
-```yaml
-include:
-  - gateway.yaml
-```
-
-Оба варианта проверены `docker compose config` (Compose v5.6). Сеть `sbx` объявлена в обоих файлах, конфликта нет:
-compose сливает объявления. Через `include` дополнение сервиса `worker` тоже применяется.
+`secrets-init` зависит от `gateway-secrets`: токены `api`, login CA и host keys берутся из
+`secrets/gateway/`. Сеть `sbx` объявлена в обоих файлах, конфликта нет: compose сливает объявления.
+Дополнение сервиса `worker` тоже применяется. `gateway.yaml` можно использовать и отдельно, слоем `-f`
+поверх `compose.yaml` без `include`.
 
 ```sh
-docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml ps -a
+docker compose -f deploy/compose/compose.yaml ps -a
 # gateway-secrets: Exited (0), gateway: healthy
 curl -i http://127.0.0.1:9190/readyz     # 200 ok
 curl -s http://127.0.0.1:9190/metrics | grep '^sbx_gateway' | head
@@ -91,21 +84,18 @@ mkdir -p deploy/compose/secrets/gateway
 создал бы на месте ещё не существующего файла каталог раньше, чем отработает `gateway-secrets`. Worker находит
 gateway через реестр (`tunnel.gateway_instances`, `internal_url = http://gateway:7000`) и вызывает на нём `rotate-token`.
 
-## Без api и с api
+## api
 
-Пока `api` (S7) нет в стеке, gateway работает с `SBX_GATEWAY_API_URL=none`. Все preview-адреса отвечают
-`503 route_lookup_unavailable`, SSH-логины отклоняются, события агентов пишутся в лог и отбрасываются. Туннели
-агентов, реестр и внутренний listener работают.
+По умолчанию `SBX_GATEWAY_API_URL=http://api:8082` (внутренний listener `api`, S7). Через него gateway
+ищет маршруты preview-адресов, проверяет SSH-ключи и сертификаты и шлёт события агентов.
+`secrets-init` берёт токены из `secrets/gateway/`: `api-token` попадает в `api/service-tokens.json` под
+ключом `gateway`, а `service-tokens.json` → `api[0]` становится токеном `api` для внутреннего listener
+gateway (`api/gateway-token`). Если файлы `gateway-secrets` пересоздали, перезапустите `api` и `gateway`
+(`up -d --force-recreate api gateway`).
 
-Когда `api` появится, задайте в `deploy/compose/.env`:
-
-```sh
-SBX_GATEWAY_API_URL=http://api:8082
-```
-
-`api` должен принимать содержимое `secrets/gateway/api-token` (в своём `SBX_API_SERVICE_TOKENS_FILE` под ключом
-`gateway`). Чтобы `api` мог звать внутренний listener gateway, ему нужен токен из `service-tokens.json` → `api[0]`.
-Затем `up -d --force-recreate gateway`.
+Стек без `api`: задайте в `deploy/compose/.env` `SBX_GATEWAY_API_URL=none`. Все preview-адреса тогда
+отвечают `503 route_lookup_unavailable`, SSH-логины отклоняются, события агентов пишутся в лог и
+отбрасываются. Туннели агентов, реестр и внутренний listener работают.
 
 ## HTTPS: доверие dev CA и имена
 
@@ -119,7 +109,7 @@ curl, порт 8443: `--connect-to` подменяет адрес, а Host и SN
 curl --cacert deploy/compose/secrets/gateway/ca.pem \
   --connect-to demo-3000.sbx.localhost:443:127.0.0.1:8443 \
   https://demo-3000.sbx.localhost/
-# без api: 503 {"error":{"code":"route_lookup_unavailable",...}}
+# 404 {"error":{"code":"route_not_found",...}} от api (без api: 503 route_lookup_unavailable)
 ```
 
 Браузер: задайте `GATEWAY_HTTPS_PORT=443` в `deploy/compose/.env` (Docker Desktop и Linux-docker умеют
@@ -144,7 +134,7 @@ printf '[127.0.0.1]:2222 %s\n' "$(cut -d' ' -f1,2 deploy/compose/secrets/gateway
 ssh -p 2222 -o UserKnownHostsFile=/tmp/sbx_known_hosts <slug>@127.0.0.1
 ```
 
-Без `api` SSH-логин всегда отклоняется: авторизация ключа и сертификата идёт через `api`.
+Авторизация ключа и сертификата идёт через `api` (внутренний listener); без `api` SSH-логин всегда отклоняется.
 
 ## Остановка и drain
 

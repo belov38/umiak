@@ -17,3 +17,4 @@ minimumReleaseAgeExclude:
   - "@biomejs/cli-win32-arm64@2.6.4"
   - "@biomejs/cli-win32-x64@2.6.4"
   - "@types/node@26.6.6"
+  - jose@6.2.14

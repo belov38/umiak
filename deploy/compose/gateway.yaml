@@ -1,7 +1,8 @@
-# Gateway (S4) for the local stack, layered on compose.yaml:
-#   docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml up -d --build
-# or with `include: [gateway.yaml]` at the top of compose.yaml. Paths are
-# relative to this directory. See README.gateway.md.
+# Gateway (S4) for the local stack. compose.yaml includes it (`include:
+# [gateway.yaml]`), so a plain
+#   docker compose -f deploy/compose/compose.yaml up -d --build
+# starts it. It can also be layered with -f on a compose.yaml without the
+# include. Paths are relative to this directory. See README.gateway.md.
 #
 # Besides its own services the file extends `worker` of compose.yaml (the
 # gateway service token) and declares the `sbx` network, so it also works
@@ -51,9 +52,12 @@ services:
       SBX_GATEWAY_SBX_DOMAIN: sbx.localhost
       SBX_GATEWAY_TUNNEL_HOST: tunnel.localhost
       SBX_GATEWAY_SSH_HOST: ssh.localhost
-      # "none" until api (S7) is in the stack: every route answers 503
-      # route_lookup_unavailable and SSH logins fail. With api: http://api:8082.
-      SBX_GATEWAY_API_URL: ${SBX_GATEWAY_API_URL:-none}
+      # The api internal listener (route lookups, SSH auth, agent events).
+      # "none" (set in .env) turns it off for a stack without api: every route
+      # then answers 503 route_lookup_unavailable and SSH logins fail.
+      SBX_GATEWAY_API_URL: ${SBX_GATEWAY_API_URL:-http://api:8082}
+      # Port SSO (sso ports): the api's /sbx-auth/authorize behind oauth2-proxy.
+      SBX_GATEWAY_AUTH_URL: ${SBX_GATEWAY_AUTH_URL:-${SBX_APP_ORIGIN:-http://localhost:4180}/sbx-auth/authorize}
       SBX_GATEWAY_API_TOKEN_FILE: /secrets/api-token
       SBX_GATEWAY_SERVICE_TOKENS_FILE: /secrets/service-tokens.json
       SBX_GATEWAY_COOKIE_KEYS_FILE: /secrets/cookie-keys

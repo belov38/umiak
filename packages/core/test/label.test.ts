@@ -3,12 +3,42 @@ import { parseLabel, portLabel } from "../src/index.ts";
 
 describe("parseLabel", () => {
 	it("splits slug and port", () => {
-		expect(parseLabel("my-box-5173")).toEqual({ slug: "my-box", port: 5173 });
+		expect(parseLabel("my-box-5173")).toEqual({
+			kind: "port",
+			slug: "my-box",
+			port: 5173,
+		});
 		expect(parseLabel("quiet-otter-lamp-1")).toEqual({
+			kind: "port",
 			slug: "quiet-otter-lamp",
 			port: 1,
 		});
-		expect(parseLabel("box-65535")).toEqual({ slug: "box", port: 65535 });
+		expect(parseLabel("box-65535")).toEqual({
+			kind: "port",
+			slug: "box",
+			port: 65535,
+		});
+	});
+
+	it("parses <slug>-desktop as the desktop kind (S10 seam, S4 §4.2)", () => {
+		expect(parseLabel("quiet-otter-lamp-desktop")).toEqual({
+			kind: "desktop",
+			slug: "quiet-otter-lamp",
+		});
+		expect(parseLabel("box-desktop")).toEqual({ kind: "desktop", slug: "box" });
+		for (const l of [
+			"desktop",
+			"-desktop",
+			"ab-desktop",
+			"api-desktop",
+			"box-1-desktop",
+			"x-desktop-desktop",
+			"Box-desktop",
+			"box-DESKTOP",
+			"box-desktop-",
+		]) {
+			expect(parseLabel(l), l).toBeNull();
+		}
 	});
 
 	it("rejects labels outside the grammar", () => {
@@ -38,6 +68,7 @@ describe("portLabel", () => {
 	it("joins slug and port", () => {
 		expect(portLabel("my-box", 5173)).toBe("my-box-5173");
 		expect(parseLabel(portLabel("quiet-otter-lamp", 8080))).toEqual({
+			kind: "port",
 			slug: "quiet-otter-lamp",
 			port: 8080,
 		});

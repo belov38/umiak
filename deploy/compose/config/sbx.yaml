@@ -29,7 +29,9 @@ topology:
       clusterMacId: 1
       vmidMin: 500
       vmidMax: 589
-      apiUrl: https://100.64.10.2:8006
+      # Overridden by SBX_PVE_URL / SBX_PVE_TLS_NAME in deploy/compose/.env
+      # (sbx-admin bootstrap in `migrate`).
+      apiUrl: https://pve:8006
       tlsName: pve
       secretRef: pve
       nodes:

@@ -111,7 +111,20 @@ export const COMMAND_STATUSES = [
 	"lost",
 	"failed_to_start",
 ] as const;
+/** S3 `ExitReason` in lower case (S7 §9.6). */
+export const COMMAND_EXIT_REASONS = [
+	"none",
+	"signal",
+	"timeout",
+	"oom",
+	"pty_idle",
+	"reboot",
+	"shim_lost",
+	"start_failed",
+] as const;
 export const PORT_MODES = ["token", "sso", "public"] as const;
+export const PORT_HOST_REWRITES = ["preserve", "localhost"] as const;
+export const PORT_APP_PROTOCOLS = ["http1", "h2c"] as const;
 
 const createdAt = () => tstz("created_at").notNull().defaultNow();
 const updatedAt = () => tstz("updated_at").notNull().defaultNow();
@@ -338,6 +351,11 @@ export const sandboxes = runtime.table("sandboxes", {
 	deletedAt: tstz("deleted_at"),
 	stateChangedAt: tstz("state_changed_at").notNull().defaultNow(),
 	version: version(),
+	/** Operator block (S8; migration 0204): every port of the sandbox is blocked. */
+	blocked: boolean("blocked").notNull().default(false),
+	blockReason: text("block_reason"),
+	/** Last change of the row, set by a trigger (migration 0205). */
+	updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
 
 export const sandboxSecrets = runtime.table("sandbox_secrets", {
@@ -432,6 +450,17 @@ export const commands = runtime.table("commands", {
 	createdAt: createdAt(),
 	startedAt: tstz("started_at"),
 	endedAt: tstz("ended_at"),
+	// S7 §9.6 (migration 0204).
+	user: text("user").notNull().default("user"),
+	tags: jsonb("tags").$type<Record<string, string>>().notNull().default({}),
+	argv: jsonb("argv").$type<string[]>(),
+	pid: integer("pid"),
+	/** The team key that started the command (S7 §20.2 item 9). */
+	createdByKey: uuid("created_by_key"),
+	// S7 §9.6, §23.3 (migration 0304, S7 range).
+	reason: text("reason", { enum: COMMAND_EXIT_REASONS }),
+	/** "disk_full" when the agent dropped output; null otherwise. */
+	outputTruncated: text("output_truncated"),
 });
 
 export const hostedPorts = runtime.table("hosted_ports", {
@@ -444,6 +473,15 @@ export const hostedPorts = runtime.table("hosted_ports", {
 	authEpoch: integer("auth_epoch").notNull().default(0),
 	createdAt: createdAt(),
 	deletedAt: tstz("deleted_at"),
+	// S7 §11.2, S8 operator blocks (migration 0204).
+	hostRewrite: text("host_rewrite", { enum: PORT_HOST_REWRITES })
+		.notNull()
+		.default("preserve"),
+	appProtocol: text("app_protocol", { enum: PORT_APP_PROTOCOLS })
+		.notNull()
+		.default("http1"),
+	blocked: boolean("blocked").notNull().default(false),
+	blockReason: text("block_reason"),
 });
 
 // §5.9 Agent events
@@ -508,3 +546,16 @@ export const reconcileSeen = runtime.table(
 	},
 	(t) => [primaryKey({ columns: [t.providerId, t.kind, t.name] })],
 );
+
+// One-time port SSO codes (S7 §7.7, §12.2; migration 0301).
+export const portAuthCodes = runtime.table("port_auth_codes", {
+	/** sha256 of the 32-byte code. */
+	codeHash: bytea("code_hash").primaryKey(),
+	label: text("label").notNull(),
+	userId: text("user_id").notNull(),
+	email: text("email").notNull(),
+	authEpoch: integer("auth_epoch").notNull(),
+	expiresAt: tstz("expires_at").notNull(),
+	usedAt: tstz("used_at"),
+	createdAt: tstz("created_at").notNull().defaultNow(),
+});

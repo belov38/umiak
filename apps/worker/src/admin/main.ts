@@ -40,6 +40,7 @@ async function main(): Promise<number> {
 		out: (o) => line(process.stdout, o),
 		err: (o) => line(process.stderr, o),
 		log,
+		providerOverride: env.providerOverride,
 		jobs: async () => {
 			if (!boss) {
 				// Send-only: no supervision, cron or registry from the CLI.

@@ -8,6 +8,11 @@ import { uuidv7 } from "../ids.ts";
 import { idempotencyPrincipal, type Principal } from "../principal.ts";
 import type { Operation, Sandbox } from "../rows.ts";
 import {
+	applySecretPatch,
+	type SecretSets,
+	validateSecretSets,
+} from "../secrets.ts";
+import {
 	insertOperation,
 	insertSandboxEvent,
 	loadOperation,
@@ -49,6 +54,34 @@ export interface CreateResult {
 
 export const CREATE_SCOPE = "sandboxes.create";
 
+/** How the api drives a create (S7 §20.2 item 11, environments of S8 §10.1). */
+export interface CreateOptions {
+	/**
+	 * Hashed for the Idempotency-Key instead of `input`: the client's own
+	 * request body, so server-side additions (an environment) do not change
+	 * the hash of a retry.
+	 */
+	hashBody?: unknown;
+	/**
+	 * Base sets under the request's own (an environment), read inside the
+	 * transaction after the key claim, so a replay never calls it. The
+	 * request's env, secrets and secret files are overlaid (same key or file
+	 * name: the request wins); limits are checked on the result. Null: none.
+	 */
+	resolveSets?: (tx: Tx) => Promise<SecretSets | null>;
+}
+
+/** `base` with the request's sets on top (files by name). */
+function overlaySets(base: SecretSets, req: SecretSets): SecretSets {
+	return applySecretPatch(base, {
+		env: req.env,
+		secrets: req.secrets,
+		secretFiles: Object.fromEntries(
+			req.secretFiles.map(({ name, ...f }) => [name, f]),
+		),
+	});
+}
+
 async function loadResult(
 	tx: Tx,
 	sandboxId: string,
@@ -66,10 +99,12 @@ export async function createSandbox(
 	p: Principal,
 	input: CreateInput,
 	idemKey?: string,
+	opts: CreateOptions = {},
 ): Promise<CreateResult> {
-	const sets = validateCreateInput(input);
+	const requestSets = validateCreateInput(input);
+	const hashed = "hashBody" in opts ? opts.hashBody : input;
 	const hash =
-		idemKey === undefined ? null : requestHash(deps.keys, CREATE_SCOPE, input);
+		idemKey === undefined ? null : requestHash(deps.keys, CREATE_SCOPE, hashed);
 	const principalId = idemKey === undefined ? null : idempotencyPrincipal(p);
 	const sandboxId = uuidv7();
 	const operationId = uuidv7();
@@ -95,6 +130,11 @@ export async function createSandbox(
 				return res;
 			}
 		}
+
+		// Base sets after the key, like config: a replay depends on neither.
+		const base = opts.resolveSets ? await opts.resolveSets(tx) : null;
+		const sets = base === null ? requestSets : overlaySets(base, requestSets);
+		if (base !== null) validateSecretSets(sets);
 
 		// Config is read after the key: a replay must not depend on config changes.
 		const defaults = await deps.config.defaults();

@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { COMMAND_CMD_MAX_BYTES, RESERVED_PORTS } from "../src/index.ts";
+import {
+	COMMAND_CMD_MAX_BYTES,
+	markOutputTruncated,
+	RESERVED_PORTS,
+} from "../src/index.ts";
 import {
 	expectCode,
 	sandboxRow,
@@ -217,6 +221,111 @@ describe.skipIf(skipPg())(
 					"validation",
 				);
 			});
+
+			it("completeCommand stores the exit reason and outputTruncated; a later outputTruncated fills an ended row", async () => {
+				const env = await serviceEnv(t.pool);
+				const s = await seedSandbox(t.pool, env, { state: "ready" });
+				const create = () =>
+					env.svc.createCommand(env.p, s.sandboxId, {
+						cmd: "true",
+						mode: "detached",
+					});
+				const a = await create();
+				expect(a).toMatchObject({ reason: null, outputTruncated: null });
+				await env.svc.completeCommand(a.id, {
+					status: "killed",
+					exitCode: 137,
+					signal: "SIGKILL",
+					reason: "oom",
+					outputTruncated: "disk_full",
+				});
+				expect(await cmdRow(a.id)).toMatchObject({
+					status: "killed",
+					reason: "oom",
+					output_truncated: "disk_full",
+				});
+				expect(
+					await env.svc.getCommand(env.p, s.sandboxId, a.id),
+				).toMatchObject({ reason: "oom", outputTruncated: "disk_full" });
+
+				// Terminal already: the reason stays, a known outputTruncated stays.
+				await env.svc.completeCommand(a.id, {
+					status: "lost",
+					reason: "reboot",
+					outputTruncated: "other",
+				});
+				expect(await cmdRow(a.id)).toMatchObject({
+					status: "killed",
+					reason: "oom",
+					output_truncated: "disk_full",
+				});
+
+				// Ended without it (pty.closed first): a later exit adds it.
+				const b = await create();
+				await env.svc.completeCommand(b.id, { status: "exited" });
+				expect(await cmdRow(b.id)).toMatchObject({
+					reason: null,
+					output_truncated: null,
+				});
+				await env.svc.completeCommand(b.id, {
+					status: "exited",
+					exitCode: 0,
+					reason: "none",
+					outputTruncated: "disk_full",
+				});
+				expect(await cmdRow(b.id)).toMatchObject({
+					status: "exited",
+					exit_code: null,
+					reason: null,
+					output_truncated: "disk_full",
+				});
+
+				await expectCode(
+					env.svc.completeCommand(b.id, {
+						status: "exited",
+						reason: "cosmic_ray" as never,
+					}),
+					"validation",
+				);
+				await expectCode(
+					env.svc.completeCommand(b.id, {
+						status: "exited",
+						outputTruncated: "x".repeat(65),
+					}),
+					"validation",
+				);
+				// The database refuses an unknown reason too (0304 CHECK).
+				await expect(
+					t.pool.query(
+						"UPDATE runtime.commands SET reason = 'cosmic_ray' WHERE id = $1",
+						[b.id],
+					),
+				).rejects.toThrow(/commands_reason_check/);
+			});
+
+			it("markOutputTruncated records the first reason on any status of the command", async () => {
+				const env = await serviceEnv(t.pool);
+				const s = await seedSandbox(t.pool, env, { state: "ready" });
+				const c = await env.svc.createCommand(env.p, s.sandboxId, {
+					cmd: "true",
+					mode: "detached",
+				});
+				await markOutputTruncated(t.pool, c.id, "disk_full");
+				expect(await cmdRow(c.id)).toMatchObject({
+					status: "starting",
+					output_truncated: "disk_full",
+				});
+				await markOutputTruncated(t.pool, c.id, "other");
+				await env.svc.completeCommand(c.id, { status: "exited", exitCode: 0 });
+				expect(await cmdRow(c.id)).toMatchObject({
+					status: "exited",
+					output_truncated: "disk_full",
+				});
+				await expectCode(
+					markOutputTruncated(t.pool, "01JBXUNKNOWN0000000000000", "disk_full"),
+					"not_found",
+				);
+			});
 		});
 
 		it("touchApiActivity writes at most once per 30 s", async () => {
@@ -236,7 +345,12 @@ describe.skipIf(skipPg())(
 			await env.svc.touchApiActivity(s.sandboxId);
 			const third = (await sandboxRow(t.pool, s.sandboxId))
 				?.last_api_call_at as Date;
-			expect(Date.now() - third.getTime()).toBeLessThan(5_000);
+			// Moved to now() again (compared on the database clock).
+			const { rows } = await t.pool.query<{ age: number }>(
+				"SELECT extract(epoch FROM clock_timestamp() - $1::timestamptz)::float8 AS age",
+				[third],
+			);
+			expect(rows[0]?.age).toBeLessThan(5);
 			// Garbage ids are ignored.
 			await env.svc.touchApiActivity("not-a-uuid");
 		});
@@ -291,13 +405,20 @@ describe.skipIf(skipPg())(
 			it("rejects port 22, reserved ports, out-of-range ports, bad modes and deleting sandboxes", async () => {
 				const env = await serviceEnv(t.pool);
 				const s = await seedSandbox(t.pool, env, { state: "ready" });
-				expect(RESERVED_PORTS).toContain(22);
+				expect([...RESERVED_PORTS]).toEqual([
+					22, 47800, 47984, 47989, 47990, 48010,
+				]);
 				for (const port of [...RESERVED_PORTS, 0, 65_536, 1.5]) {
 					await expectCode(
 						env.svc.hostPort(env.p, s.sandboxId, port, "public"),
 						"validation",
 					);
 				}
+				// A platform port (S4/S10, shared with the gateway) is refused too.
+				const err = await env.svc
+					.hostPort(env.p, s.sandboxId, 47989, "token")
+					.catch((e: unknown) => e);
+				expect((err as Error).message).toContain("reserved");
 				await expectCode(
 					env.svc.hostPort(env.p, s.sandboxId, 80, "open" as never),
 					"validation",

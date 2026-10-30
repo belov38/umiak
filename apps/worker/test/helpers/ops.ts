@@ -158,11 +158,24 @@ export async function expireDeadline(
 	);
 }
 
-/** Polls the database until `cond` holds (a state reached by a handler running in the background). */
+/**
+ * The database clock in ms. Deadlines are `now()` there; the host clock of
+ * the test may differ from the clock of a Postgres container.
+ */
+export async function dbNow(w: TestWorld): Promise<number> {
+	const r = await w.pool.query<{ t: Date }>("SELECT clock_timestamp() AS t");
+	return (r.rows[0] as { t: Date }).t.getTime();
+}
+
+/**
+ * Polls the database until `cond` holds (a state reached by a handler
+ * running in the background). The budget only bounds a hang; it leaves room
+ * for a heavily loaded machine.
+ */
 export async function until(
 	what: string,
 	cond: () => Promise<boolean>,
-	timeoutMs = 10_000,
+	timeoutMs = 30_000,
 ): Promise<void> {
 	const end = Date.now() + timeoutMs;
 	while (!(await cond())) {

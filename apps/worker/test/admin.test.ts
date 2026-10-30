@@ -146,6 +146,26 @@ describe("sbx-admin bootstrap", () => {
 		expect((await counts()).nodes).toBe(1);
 	});
 
+	it("SBX_PVE_URL / SBX_PVE_TLS_NAME override apiUrl and tlsName of the first provider", async () => {
+		const d = deps();
+		d.providerOverride = { apiUrl: "https://10.9.8.7:8006", tlsName: "pve-x" };
+		expect(await runAdmin(["bootstrap"], d)).toBe(0);
+		const r = await db.pool.query(
+			"SELECT api_url, tls_name FROM runtime.providers WHERE name = 'pve-lab'",
+		);
+		expect(r.rows).toEqual([
+			{ api_url: "https://10.9.8.7:8006", tls_name: "pve-x" },
+		]);
+		// Without the override the YAML values come back.
+		expect(await admin("bootstrap")).toBe(0);
+		const back = await db.pool.query(
+			"SELECT api_url, tls_name FROM runtime.providers WHERE name = 'pve-lab'",
+		);
+		expect(back.rows).toEqual([
+			{ api_url: "https://100.64.0.1:8006", tls_name: "pve" },
+		]);
+	});
+
 	it("needs SBX_CONFIG_FILE", async () => {
 		const d = deps();
 		delete d.config;

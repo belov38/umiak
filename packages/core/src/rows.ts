@@ -142,6 +142,47 @@ export type CommandStatus =
 	| "timed_out"
 	| "lost"
 	| "failed_to_start";
+/** S3 `ExitReason` in lower case: why a command ended (S7 §9.6). */
+export type CommandExitReason =
+	| "none"
+	| "signal"
+	| "timeout"
+	| "oom"
+	| "pty_idle"
+	| "reboot"
+	| "shim_lost"
+	| "start_failed";
+export const COMMAND_EXIT_REASONS: readonly CommandExitReason[] = [
+	"none",
+	"signal",
+	"timeout",
+	"oom",
+	"pty_idle",
+	"reboot",
+	"shim_lost",
+	"start_failed",
+];
+/** Longest `output_truncated` reason stored ("disk_full" today). */
+export const OUTPUT_TRUNCATED_MAX_CHARS = 64;
+
+/** A storable `output_truncated` reason: 1-64 characters, no controls. */
+export function isOutputTruncatedReason(v: unknown): v is string {
+	return (
+		typeof v === "string" &&
+		v.length > 0 &&
+		v.length <= OUTPUT_TRUNCATED_MAX_CHARS &&
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: rejects control characters
+		!/[\x00-\x1f\x7f]/.test(v)
+	);
+}
+
+/**
+ * The agent's `output_truncated` as stored: null for "" and for a value
+ * that cannot be stored, so an odd value never blocks completing a command.
+ */
+export function storableOutputTruncated(v: unknown): string | null {
+	return isOutputTruncatedReason(v) ? v : null;
+}
 
 export interface Command {
 	id: string;
@@ -159,14 +200,30 @@ export interface Command {
 	stdoutBytes: number | null;
 	stderrBytes: number | null;
 	bootId: string | null;
+	/** The user; null when a team key started the command. */
 	createdBy: string | null;
+	/** The team key that started the command, else null. */
+	createdByKey: string | null;
 	requestId: string | null;
 	createdAt: Date;
 	startedAt: Date | null;
 	endedAt: Date | null;
+	/** Guest user (S7 §9.1); default `user`. */
+	user: string;
+	/** Program and arguments without a shell; null for a shell command. */
+	argv: string[] | null;
+	tags: Record<string, string>;
+	/** Set when the agent has started the process (`markCommandRunning`). */
+	pid: number | null;
+	/** Why it ended; null while it runs or when unknown. */
+	reason: CommandExitReason | null;
+	/** "disk_full" when the agent dropped output of the command; else null. */
+	outputTruncated: string | null;
 }
 
 export type PortMode = "token" | "sso" | "public";
+export type PortHostRewrite = "preserve" | "localhost";
+export type PortAppProtocol = "http1" | "h2c";
 
 export interface HostedPort {
 	id: string;
@@ -179,6 +236,11 @@ export interface HostedPort {
 	authEpoch: number;
 	createdAt: Date;
 	deletedAt: Date | null;
+	hostRewrite: PortHostRewrite;
+	appProtocol: PortAppProtocol;
+	/** Blocked by an operator (S8); the sandbox block is separate (`RouteTarget.blocked`). */
+	blocked: boolean;
+	blockReason: string | null;
 }
 
 export interface Page<T> {
@@ -313,10 +375,17 @@ export function commandFromRow(r: Row): Command {
 		stderrBytes: num(r.stderr_bytes),
 		bootId: r.boot_id,
 		createdBy: r.created_by,
+		createdByKey: r.created_by_key ?? null,
 		requestId: r.request_id,
 		createdAt: r.created_at,
 		startedAt: r.started_at,
 		endedAt: r.ended_at,
+		user: r.user,
+		argv: r.argv ?? null,
+		tags: r.tags ?? {},
+		pid: r.pid ?? null,
+		reason: r.reason ?? null,
+		outputTruncated: r.output_truncated ?? null,
 	};
 }
 
@@ -331,5 +400,9 @@ export function hostedPortFromRow(r: Row): HostedPort {
 		authEpoch: r.auth_epoch,
 		createdAt: r.created_at,
 		deletedAt: r.deleted_at,
+		hostRewrite: r.host_rewrite,
+		appProtocol: r.app_protocol,
+		blocked: r.blocked,
+		blockReason: r.block_reason,
 	};
 }

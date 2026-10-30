@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DELETE_RETRY_LIMIT } from "../src/index.ts";
+import { DELETE_RETRY_LIMIT, isSbxError, type SbxError } from "../src/index.ts";
 import {
 	expectCode,
 	insertSavedSnapshot,
@@ -163,6 +163,24 @@ describe.skipIf(skipPg())("SandboxService saved snapshots (S6 §7.8)", () => {
 		});
 	});
 
+	it("deleteSavedSnapshot with an expected id refuses another snapshot of that name", async () => {
+		const env = await serviceEnv(t.pool);
+		const id = await insertSavedSnapshot(t.pool, env.topo, {
+			teamId: env.p.teamId,
+			name: "web",
+		});
+		const err = await env.svc
+			.deleteSavedSnapshot(env.p, "web", randomUUID())
+			.catch((e: unknown) => e);
+		expect(isSbxError(err, "snapshot_not_found")).toBe(true);
+		expect((err as SbxError).details).toMatchObject({ reason: "id_mismatch" });
+		expect((await snap(id)).state).toBe("ready");
+		expect(env.jobs.sent).toEqual([]);
+
+		await env.svc.deleteSavedSnapshot(env.p, "web", id);
+		expect((await snap(id)).state).toBe("deleting");
+	});
+
 	it("deleteSavedSnapshot of an unknown, non-ready or foreign name is snapshot_not_found", async () => {
 		const env = await serviceEnv(t.pool);
 		await insertSavedSnapshot(t.pool, env.topo, {
@@ -195,11 +213,16 @@ describe.skipIf(skipPg())("SandboxService saved snapshots (S6 §7.8)", () => {
 			teamId: env.p.teamId,
 			name: "r",
 		});
-		await insertSavedSnapshot(t.pool, env.topo, {
+		// `failed` is listed only within a day (S7 §13; s7-additions.test.ts).
+		const failed = await insertSavedSnapshot(t.pool, env.topo, {
 			teamId: env.p.teamId,
 			name: "f",
 			state: "failed",
 		});
+		await t.pool.query(
+			"UPDATE runtime.snapshots SET created_at = now() - interval '2 days' WHERE id = $1",
+			[failed],
+		);
 		await insertSavedSnapshot(t.pool, env.topo, {
 			teamId: env.p.teamId,
 			name: "d",
