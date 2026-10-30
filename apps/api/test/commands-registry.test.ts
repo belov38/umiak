@@ -3,17 +3,24 @@
 // of the NOTIFY sbx_identity that revokes the principal, and closed with
 // `reconnect server_shutdown` by closeAll.
 import { randomUUID } from "node:crypto";
+import { type AddressInfo, connect } from "node:net";
 import { PgIdentityStore } from "@sbx/auth";
 import { pgIdentitySeeding } from "@sbx/auth/testing";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type CloseFrame,
+	createApiServer,
+	createPublicApp,
 	type IdentityChange,
 	IdentityListener,
 	StreamRegistry,
 } from "../src/index.ts";
-import { captureLogs, testSettings } from "../src/testing/index.ts";
+import {
+	captureLogs,
+	makeTestDeps,
+	testSettings,
+} from "../src/testing/index.ts";
 import {
 	type Any,
 	openStream,
@@ -108,6 +115,23 @@ describe("StreamRegistry", () => {
 		sync();
 		expect(r.count("k1")).toBe(2);
 		expect(r.size).toBe(3);
+	});
+
+	it("a request signal unregisters on abort, also when it was aborted before register", () => {
+		const { identity, events } = stubs();
+		const r = new StreamRegistry({ identity, events, maxPerPrincipal: 5 });
+		const owner = { userId: null, apiKeyId: "k", teamId: "t" };
+		const gone = new AbortController();
+		gone.abort();
+		r.register(owner, () => {}, { signal: gone.signal });
+		expect(r.size).toBe(0);
+		expect(r.count("k")).toBe(0);
+		const later = new AbortController();
+		r.register(owner, () => {}, { signal: later.signal });
+		expect(r.size).toBe(1);
+		later.abort();
+		expect(r.size).toBe(0);
+		expect(r.count("k")).toBe(0);
 	});
 
 	it("re-checks only the affected principals and closes those that fail", async () => {
@@ -408,6 +432,89 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 		await h.request("POST", `${sb.commands}/${id}/kill`, {
 			json: { graceMs: 0 },
 		});
+	});
+
+	it("a stream whose client went away before the stream registered frees the slot (real server)", async () => {
+		// The key lookup waits on a gate; the client socket is destroyed while
+		// the request waits there, so the request signal is already aborted
+		// when the route registers its stream, and the server never reads the
+		// answer's body.
+		let gate: { hit: () => void; release: Promise<void> } | null = null;
+		const identity = new Proxy(w.identity, {
+			get(t, p) {
+				if (p === "findApiKeyByHash") {
+					return async (hash: string) => {
+						const g = gate;
+						gate = null;
+						if (g !== null) {
+							g.hit();
+							await g.release;
+						}
+						return t.findApiKeyByHash(hash);
+					};
+				}
+				const v = Reflect.get(t, p, t);
+				return typeof v === "function" ? v.bind(t) : v;
+			},
+		});
+		const deps = makeTestDeps(w.deps({ identity, identityEvents: events }));
+		let registered = 0;
+		const register = deps.streams.register.bind(deps.streams);
+		deps.streams.register = (...a) => {
+			registered += 1;
+			return register(...a);
+		};
+		const { server } = createApiServer(createPublicApp(deps));
+		await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+		const port = (server.address() as AddressInfo).port;
+		const detached = await h.request("POST", sb.commands, {
+			json: { mode: "detached", command: "sleep 3" },
+		});
+		const id = (detached.body as Any).id as string;
+		try {
+			const requests = [
+				`GET ${sb.commands}/${id}/stream HTTP/1.1\r\n\r\n`,
+				`POST ${sb.commands} HTTP/1.1\r\ncontent-type: application/json\r\ncontent-length: 39\r\n\r\n{"mode":"stream","command":"sleep 0.1"}`,
+			];
+			for (const [i, raw] of requests.entries()) {
+				const k = await w.key(["commands:exec", "commands:read"]);
+				let release = () => {};
+				const hit = new Promise<void>((resolve) => {
+					gate = {
+						hit: resolve,
+						release: new Promise<void>((r) => {
+							release = r;
+						}),
+					};
+				});
+				const sock = connect(port, "127.0.0.1");
+				const [line, ...rest] = raw.split("\r\n");
+				sock.write(
+					[
+						line,
+						"host: test",
+						`authorization: Bearer ${k.secret}`,
+						...rest,
+					].join("\r\n"),
+				);
+				await hit;
+				sock.destroy();
+				await sleep(50);
+				release();
+				const end = Date.now() + 2000;
+				while (registered <= i && Date.now() < end) await sleep(10);
+				expect(registered, line).toBe(i + 1);
+				while (deps.streams.size > 0 && Date.now() < end) await sleep(20);
+				expect(deps.streams.size, line).toBe(0);
+			}
+		} finally {
+			server.closeAllConnections();
+			await new Promise<void>((r) => server.close(() => r()));
+			deps.streams.close();
+			await h.request("POST", `${sb.commands}/${id}/kill`, {
+				json: { graceMs: 0 },
+			});
+		}
 	});
 
 	it("a sync client that goes away gets no agent_error; the command keeps running", async () => {

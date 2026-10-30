@@ -493,10 +493,9 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const unregister = deps.streams.register(
 			streamOwner(auth),
 			(f) => close.abort(new StreamClose(f)),
-			{ capped: mode === "stream" },
+			// A body that is never read must not keep the slot.
+			{ capped: mode === "stream", signal: c.req.raw.signal },
 		);
-		// A body that is never read must not keep the slot (idempotent).
-		c.req.raw.signal.addEventListener("abort", unregister, { once: true });
 		let r: Awaited<ReturnType<typeof startCommand>>;
 		try {
 			r = await startCommand(deps, auth, ref, body, idemKey, close.signal);
@@ -681,10 +680,11 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const pty = command.mode === "pty";
 		const close = new AbortController();
 		const gone = new AbortController();
-		const unregister = deps.streams.register(streamOwner(auth), (f) =>
-			close.abort(new StreamClose(f)),
+		const unregister = deps.streams.register(
+			streamOwner(auth),
+			(f) => close.abort(new StreamClose(f)),
+			{ signal: c.req.raw.signal },
 		);
-		c.req.raw.signal.addEventListener("abort", unregister, { once: true });
 		const pub = publicCommandId(command.id);
 		const frames = followCommand(
 			deps,

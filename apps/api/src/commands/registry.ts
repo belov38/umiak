@@ -119,12 +119,15 @@ export class StreamRegistry {
 	 * at the per-principal cap and 503 `server_shutting_down` after closeAll.
 	 * `abort` is called at most once. `capped: false` (sync requests) is
 	 * closed on revocation and shutdown like the rest but does not count
-	 * toward the cap.
+	 * toward the cap. `signal` (the request's) unregisters the connection
+	 * when it aborts, also when it already has: a client that went away
+	 * while the request was still being handled leaves an answer whose body
+	 * the server never reads, so nothing else would free the slot.
 	 */
 	register(
 		owner: StreamOwner,
 		abort: StreamAbort,
-		opts: { capped?: boolean } = {},
+		opts: { capped?: boolean; signal?: AbortSignal } = {},
 	): () => void {
 		if (this.#closing) {
 			throw new ApiError(
@@ -151,7 +154,7 @@ export class StreamRegistry {
 		this.#entries.add(entry);
 		if (capped) this.#perPrincipal.set(pk, this.count(pk) + 1);
 		let done = false;
-		return () => {
+		const unregister = () => {
 			if (done) return;
 			done = true;
 			this.#entries.delete(entry);
@@ -162,6 +165,9 @@ export class StreamRegistry {
 			}
 			if (this.#entries.size === 0) this.#notifyDrained();
 		};
+		if (opts.signal?.aborted) unregister();
+		else opts.signal?.addEventListener("abort", unregister, { once: true });
+		return unregister;
 	}
 
 	/** Closes the matching connections with `error unauthorized`; returns how many. */
