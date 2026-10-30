@@ -11,7 +11,7 @@ ARG PNPM_VERSION=12.16.1
 RUN npm install -g "pnpm@${PNPM_VERSION}" && pnpm --version
 WORKDIR /app
 # Workspace manifests first, so the install layers are cached across source edits.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs tsconfig.base.json ./
 COPY packages/agent-client/package.json packages/agent-client/
 COPY packages/auth/package.json packages/auth/
 COPY packages/config/package.json packages/config/
@@ -19,6 +19,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
 COPY packages/proto/package.json packages/proto/
 COPY packages/pve/package.json packages/pve/
+COPY packages/sdk-ts/package.json packages/sdk-ts/
 COPY apps/worker/package.json apps/worker/
 # Part of the workspace and the lockfile, but not of the worker closure.
 COPY apps/api/package.json apps/api/

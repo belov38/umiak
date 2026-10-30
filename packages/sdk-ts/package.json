@@ -1,0 +1,22 @@
+{
+	"name": "@sbx/sdk",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "TypeScript SDK of the sbx public API: generated types, openapi-fetch transport, retries, credential chain",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"gen": "node scripts/gen.ts",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"openapi-fetch": "0.17.0",
+		"openapi-typescript-helpers": "0.1.0"
+	},
+	"devDependencies": {
+		"openapi-typescript": "7.13.0"
+	}
+}
