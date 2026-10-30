@@ -17,7 +17,7 @@ export const limitsGet = defineTool({
 	name: "limits_get",
 	title: "Show identity and limits",
 	description:
-		"Shows who you are (person email or team key id), the team, the sign-in kind and scopes, the team quota with usage and what is left, whether one more sandbox fits (can_create), and for every template the sizes allowed now with the reason when a size is not. Call it before creating many sandboxes or when sandbox_create fails with quota_exceeded. Takes no arguments.",
+		"Shows who you are, the team, scopes, quota with usage and remaining, can_create, and the sizes allowed now per template (with the reason when not). Call before creating many sandboxes or after quota_exceeded.",
 	toolset: "core",
 	scopes: [],
 	annotations: {
@@ -75,7 +75,7 @@ export const templatesList = defineTool({
 	name: "templates_list",
 	title: "List templates and sizes",
 	description:
-		"Lists the templates you can create sandboxes from (slug, os linux or windows, capabilities such as exec, files, ssh, desktop, default and allowed sizes, login user) and all sizes with vcpu and memory. Use it to pick the template and size for sandbox_create; limits_get shows which sizes fit the quota now. Takes no arguments.",
+		"Lists templates (slug, os, capabilities such as exec, files, ssh, desktop, allowed sizes, login user) and sizes with vcpu and memory. Use it to pick template and size for sandbox_create.",
 	toolset: "core",
 	scopes: [],
 	annotations: {

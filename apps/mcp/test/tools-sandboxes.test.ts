@@ -146,6 +146,16 @@ describe("tool list", () => {
 		expect(total / ALL_TOOLS.length).toBeLessThan(700);
 	});
 
+	it("the published list stays within its share of the 40 000 character budget", async () => {
+		const { conn } = await start();
+		const listed = await conn.client.listTools();
+		// 11 of the 38 tools; Task 13 checks the whole list against 40 000.
+		expect(JSON.stringify(listed).length).toBeLessThanOrEqual(
+			Math.floor((11 / 38) * 40_000),
+		);
+		expect(JSON.stringify(listed)).not.toContain("9007199254740991");
+	});
+
 	it("pinned mode hides create, list, fork and delete", () => {
 		const names = selectTools({
 			tools: ALL_TOOLS,
@@ -909,6 +919,10 @@ describe("sandbox_fork", () => {
 			state: "succeeded",
 		});
 		expect(r.json.source_operation).toMatchObject({ kind: "fork" });
+		// Both operations are over once the copy is ready (the fake's source
+		// `fork` operation ends on the same timer as the create).
+		expect(r.json.operation.state).toBe("succeeded");
+		expect(r.json.source_operation.state).toBe("succeeded");
 		expect(r.json.idempotency_key).toMatch(UUID);
 		expect(Object.keys(r.json).filter((k) => !VIEW_KEYS.includes(k))).toEqual(
 			[],
@@ -965,6 +979,43 @@ describe("sandbox_fork", () => {
 		expect(api.state.sandboxes.size).toBe(4);
 	});
 
+	it("an id on the first call and the slug on the retry are one fork", async () => {
+		const { call, api, requests } = await start();
+		const src = await call("sandbox_create", { slug: "fork-src" });
+		const first = await call("sandbox_fork", {
+			sandbox: src.json.id,
+			idempotency_key: "fork-slug",
+		});
+		const again = await call("sandbox_fork", {
+			sandbox: "fork-src",
+			idempotency_key: "fork-slug",
+		});
+		expect(again.isError).toBe(false);
+		expect(again.json.id).toBe(first.json.id);
+		expect(again.json.replayed).toBe(true);
+		expect(api.state.sandboxes.size).toBe(2);
+		const keys = requests
+			.filter((q) => q.method === "POST" && q.path.endsWith("/fork"))
+			.map((q) => q.headers.get("Idempotency-Key"));
+		expect(keys).toEqual([
+			`mcp:sandbox_fork:${src.json.id}:fork-slug`,
+			`mcp:sandbox_fork:${src.json.id}:fork-slug`,
+		]);
+	});
+
+	it("an id is not looked up; an unknown slug falls through to the API's 404", async () => {
+		const { call, to } = await start();
+		const src = await call("sandbox_create", {});
+		const before = to("GET", `/v1/sandboxes/${src.json.id}`).length;
+		await call("sandbox_fork", { sandbox: src.json.id });
+		expect(to("GET", `/v1/sandboxes/${src.json.id}`).length).toBe(before);
+		const r = await call("sandbox_fork", { sandbox: "no-such-box" });
+		expect(r.isError).toBe(true);
+		expect(r.texts[0]).toContain("error: not_found");
+		expect(to("GET", "/v1/sandboxes/no-such-box")).toHaveLength(1);
+		expect(to("POST", "/v1/sandboxes/no-such-box/fork")).toHaveLength(1);
+	});
+
 	it("not ready in time: state creating and the hint", async () => {
 		const { call, api } = await start();
 		const src = await call("sandbox_create", {});
@@ -978,6 +1029,7 @@ describe("sandbox_fork", () => {
 		expect(r.json.operation_id).toBe(r.json.operation.id);
 		expect(r.lines).toContain("wait_for=ready");
 		expect(r.json.idempotency_key).toMatch(UUID);
+		expect(r.json.source_operation.id).toMatch(/^op_/);
 	});
 });
 

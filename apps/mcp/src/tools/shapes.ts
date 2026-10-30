@@ -19,18 +19,14 @@ export function waitShape(waitByDefault: boolean) {
 		wait: z
 			.boolean()
 			.optional()
-			.describe(
-				`Wait for the result before answering (default ${waitByDefault})`,
-			),
+			.describe(`Wait for the result (default ${waitByDefault})`),
 		wait_seconds: z
 			.number()
 			.int()
 			.min(0)
 			.max(MAX_WAIT_SECONDS)
 			.optional()
-			.describe(
-				`Seconds to wait, 0-${MAX_WAIT_SECONDS} (default ${DEFAULT_WAIT_SECONDS})`,
-			),
+			.describe(`Max seconds to wait (default ${DEFAULT_WAIT_SECONDS})`),
 	};
 }
 
@@ -39,58 +35,59 @@ export const idempotencyKeyShape = z
 	.regex(IDEMPOTENCY_KEY_RE)
 	.optional()
 	.describe(
-		"Retry key, 1-128 characters [A-Za-z0-9._-]. Use a new unique value (for example a UUID) per new action; repeat a call with the same key only after a timeout, to get the earlier result instead of acting twice. The answer shows the key used.",
+		"Unique per intended run (for example a UUID); reuse only to retry after a timeout or dropped connection",
 	);
 
 export const envShape = z
 	.record(z.string(), z.string())
 	.optional()
 	.describe(
-		"Environment variables, name -> value. Non-secret values only: arguments appear in client logs. Secrets come from the team environment, never from here.",
+		"Environment variables, name -> value; non-secret values only (arguments appear in client logs)",
 	);
 
 export const unsetEnvShape = z
 	.array(z.string())
 	.optional()
-	.describe("Names of environment variables to remove");
+	.describe("Variable names to remove");
 
 export const labelsShape = z
 	.record(z.string(), z.string())
 	.optional()
-	.describe("Labels, key -> value (up to 64)");
+	.describe("Labels, key -> value");
 
 export const nameShape = z
 	.string()
 	.max(255)
 	.optional()
-	.describe("Display name, up to 255 characters");
+	.describe("Display name");
 
 export const slugShape = z
 	.string()
 	.optional()
-	.describe(
-		"Unique short name, 3-40 characters [a-z0-9-]; default: three random words",
-	);
+	.describe("Unique short name, 3-40 characters [a-z0-9-]; default: random");
 
 export const sizeShape = z
 	.string()
 	.optional()
-	.describe(
-		"Size slug from templates_list, for example 2gb; default: the template's",
-	);
+	.describe("Size slug from templates_list, e.g. 2gb; default: the template's");
+
+/** Longest TTL and idle timeout: 30 days, in seconds. */
+export const MAX_SECONDS = 2_592_000;
 
 export const ttlShape = z
 	.number()
 	.int()
 	.min(1)
+	.max(MAX_SECONDS)
 	.optional()
 	.describe(
-		"Lifetime in seconds from ready, then the sandbox is deleted; default: no limit",
+		"Lifetime in seconds from ready, then it is deleted; default: none",
 	);
 
 export const idleTimeoutShape = z
 	.number()
 	.int()
 	.min(60)
+	.max(MAX_SECONDS)
 	.optional()
-	.describe("Stop after this many idle seconds (at least 60); default: never");
+	.describe("Stop after this many idle seconds; default: never");

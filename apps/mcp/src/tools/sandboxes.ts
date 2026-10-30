@@ -22,6 +22,7 @@ import {
 	idempotencyKeyShape,
 	idleTimeoutShape,
 	labelsShape,
+	MAX_SECONDS,
 	MAX_WAIT_SECONDS,
 	nameShape,
 	sizeShape,
@@ -113,6 +114,26 @@ async function finishAction(
 	});
 }
 
+/**
+ * The id of the sandbox a reference points to. An id is taken as it is; a
+ * slug costs one read. When the read is not allowed or finds nothing, the
+ * typed value stands (the action itself then answers 403 or 404).
+ */
+async function resolveSandboxId(
+	ctx: ToolContext,
+	ref: string,
+): Promise<string> {
+	if (ref.toLowerCase().startsWith("sb_")) return ref;
+	try {
+		return (await getSandbox(ctx, ref)).id;
+	} catch (err) {
+		if (err instanceof SbxError && (err.status === 403 || err.status === 404)) {
+			return ref;
+		}
+		throw err;
+	}
+}
+
 /** `{K: v}` and a list of names to remove -> the API's `{K: v | null}`. */
 function envPatch(
 	env: Record<string, string> | undefined,
@@ -137,7 +158,7 @@ export const sandboxCreate = defineTool({
 	name: "sandbox_create",
 	title: "Create a sandbox",
 	description:
-		"Creates a sandbox (a VM) from a template or a saved snapshot and by default waits until it is ready (up to wait_seconds, default 45). Pick template and size with templates_list; limits_get shows the quota. The sandbox gets the label created-via=mcp. If it is not ready in time the answer has state creating and operation_id: call sandbox_get with wait_for=ready and wait_seconds=50. env takes non-secret values only. Pass idempotency_key (a new UUID per new sandbox) to make a repeat after a timeout safe; the answer always shows the key used. Scope sandboxes:write (snapshots:read for from_snapshot, environments:read for environment).",
+		"Creates a sandbox (VM) from a template or saved snapshot and waits until it is ready. Labels it created-via=mcp. If not ready in time, call sandbox_get with wait_for=ready and wait_seconds=50.",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: NEW_RESOURCE,
@@ -147,9 +168,7 @@ export const sandboxCreate = defineTool({
 		template: z
 			.string()
 			.optional()
-			.describe(
-				"Template slug from templates_list (default linux); ignored with from_snapshot",
-			),
+			.describe("Template slug (default linux); ignored with from_snapshot"),
 		size: sizeShape,
 		name: nameShape,
 		slug: slugShape,
@@ -158,19 +177,17 @@ export const sandboxCreate = defineTool({
 		environment: z
 			.string()
 			.optional()
-			.describe(
-				"Team environment (name or env_... id) to apply; default: the team's default",
-			),
+			.describe("Team environment name or id; default: the team's default"),
 		exclude_owner_secrets: z
 			.boolean()
 			.optional()
-			.describe("Do not pass your personal secrets into the sandbox"),
+			.describe("Skip your personal secrets"),
 		ttl_seconds: ttlShape,
 		idle_timeout_seconds: idleTimeoutShape,
 		from_snapshot: z
 			.string()
 			.optional()
-			.describe("Name of a saved snapshot to start from (snapshot_list)"),
+			.describe("Saved snapshot to start from"),
 		...waitShape(true),
 		idempotency_key: idempotencyKeyShape,
 	},
@@ -215,7 +232,7 @@ export const sandboxList = defineTool({
 	name: "sandbox_list",
 	title: "List sandboxes",
 	description:
-		"Lists the sandboxes of the team, newest first, one page per call. Filters: state (comma-separated, for example ready,stopped; deleted ones only when asked), labels (all must match), template, query (prefix of name or slug). limit is 1-200, default 50. When the answer has next_cursor, pass it as cursor to get the next page. Use it to find your own sandboxes (label created-via=mcp) before creating more or deleting.",
+		"Lists the team's sandboxes, newest first, one page per call; pass next_cursor as cursor for the next page. Filter by labels (created-via=mcp) to find your own.",
 	toolset: "core",
 	scopes: ["sandboxes:read"],
 	annotations: READ_ONLY,
@@ -226,29 +243,26 @@ export const sandboxList = defineTool({
 			.string()
 			.optional()
 			.describe(
-				"Comma-separated states, for example ready,stopped. Default: all but deleted",
+				"Comma-separated states, e.g. ready,stopped; default: all but deleted",
 			),
 		labels: z
 			.record(z.string(), z.string())
 			.optional()
-			.describe("Only sandboxes with all these labels, key -> value"),
+			.describe("Only sandboxes with all these labels"),
 		template: z.string().optional().describe("Only this template slug"),
-		query: z
-			.string()
-			.optional()
-			.describe("Prefix of the name or slug, case-insensitive"),
+		query: z.string().optional().describe("Name or slug prefix"),
 		limit: z
 			.number()
 			.int()
 			.min(1)
 			.max(200)
 			.optional()
-			.describe("Page size, 1-200 (default 50)"),
+			.describe("Page size (default 50)"),
 		cursor: z
 			.string()
 			.min(1)
 			.optional()
-			.describe("next_cursor of the previous page, unchanged"),
+			.describe("next_cursor of the previous page"),
 	},
 	async handler(args, ctx) {
 		const label = Object.entries(args.labels ?? {}).map(
@@ -286,7 +300,7 @@ export const sandboxGet = defineTool({
 	name: "sandbox_get",
 	title: "Get a sandbox",
 	description:
-		"Shows one sandbox: state (creating, ready, stopping, stopped, starting, error, deleting), health, activity, template, size, labels, deadline, running operation, error and endpoints (port URL template, ssh, desktop). With wait_for=ready or stopped it first waits up to wait_seconds (default 30, max 50) for that state: use it after an answer that says state not final yet. A sandbox in state error: sandbox_recover or sandbox_delete.",
+		"Shows one sandbox (state, health, labels, deadline, running operation, error, endpoints). With wait_for (ready or stopped) it first waits up to wait_seconds (default 30). State error: sandbox_recover or sandbox_delete.",
 	toolset: "core",
 	scopes: ["sandboxes:read"],
 	annotations: READ_ONLY,
@@ -302,9 +316,7 @@ export const sandboxGet = defineTool({
 			.min(0)
 			.max(MAX_WAIT_SECONDS)
 			.optional()
-			.describe(
-				`How long to wait for wait_for, 0-${MAX_WAIT_SECONDS} seconds (default ${GET_WAIT_SECONDS})`,
-			),
+			.describe(`Max seconds to wait (default ${GET_WAIT_SECONDS})`),
 	},
 	async handler(args, ctx) {
 		if (args.wait_for === undefined) {
@@ -324,7 +336,7 @@ export const sandboxUpdate = defineTool({
 	name: "sandbox_update",
 	title: "Update a sandbox",
 	description:
-		"Changes the name, slug, labels, ttl_seconds or idle_timeout_seconds of a sandbox without restarting it. labels REPLACES all labels: send the full set. ttl_seconds sets the deadline to now plus the value (this also extends a sandbox that is about to expire); 0 removes the TTL. A new slug changes the port URLs at once. Give at least one field.",
+		"Changes name, slug, labels, ttl_seconds or idle_timeout_seconds. labels REPLACES all labels: send the full set. ttl_seconds sets the deadline to now plus the value (0 removes it).",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: REPEATABLE_WRITE,
@@ -335,11 +347,12 @@ export const sandboxUpdate = defineTool({
 		labels: z
 			.record(z.string(), z.string())
 			.optional()
-			.describe("The new labels, key -> value; they replace all existing ones"),
+			.describe("New labels; they replace all existing ones"),
 		ttl_seconds: z
 			.number()
 			.int()
 			.min(0)
+			.max(MAX_SECONDS)
 			.optional()
 			.describe("New lifetime in seconds from now; 0 removes the limit"),
 		idle_timeout_seconds: idleTimeoutShape,
@@ -377,7 +390,7 @@ export const sandboxStop = defineTool({
 	name: "sandbox_stop",
 	title: "Stop a sandbox",
 	description:
-		"Stops a running sandbox: its processes end, the disk is kept and it stops counting against the quota. Safe to repeat. Prefer it to sandbox_delete. By default it answers at once with the stop operation; wait=true waits for state stopped (up to wait_seconds). Start the sandbox again with sandbox_resume.",
+		"Stops a sandbox: processes end, the disk is kept, it stops counting against the quota. Answers at once unless wait=true. Start it again with sandbox_resume.",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: REPEATABLE_WRITE,
@@ -400,7 +413,7 @@ export const sandboxResume = defineTool({
 	name: "sandbox_resume",
 	title: "Resume a sandbox",
 	description:
-		"Starts a stopped sandbox (or one in state error) again with its disk and by default waits until it is ready (up to wait_seconds, default 45). env sets variables (non-secret values only) and unset_env removes names; size and ttl_seconds are stored with the sandbox. Safe to repeat. If it is not ready in time, call sandbox_get with wait_for=ready and wait_seconds=50.",
+		"Starts a stopped (or errored) sandbox again with its disk and waits until it is ready. If not ready in time, call sandbox_get with wait_for=ready and wait_seconds=50.",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: REPEATABLE_WRITE,
@@ -434,7 +447,7 @@ export const sandboxFork = defineTool({
 	name: "sandbox_fork",
 	title: "Fork a sandbox",
 	description:
-		"Copies a ready or stopped sandbox (disk and settings) into a new sandbox; the source keeps running. Overrides: name, slug, labels (default: the source's), env and unset_env (merged onto the source's; non-secret values only), size, ttl_seconds, idle_timeout_seconds. By default waits until the copy is ready (up to wait_seconds, default 45). The answer is the new sandbox with operation (its create) and source_operation. Pass idempotency_key (a new value per fork) so a repeat after a timeout does not fork twice.",
+		"Copies a ready or stopped sandbox (disk and settings) into a new one; the source keeps running. Same overrides as sandbox_create; env and unset_env merge onto the source's. Waits until the copy is ready.",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: NEW_RESOURCE,
@@ -453,10 +466,13 @@ export const sandboxFork = defineTool({
 		idempotency_key: idempotencyKeyShape,
 	},
 	async handler(args, ctx) {
+		// The key is scoped by the sandbox id, so an id and a slug of the
+		// same sandbox give the same API key on a retry (spec 7.4).
+		const sourceId = await resolveSandboxId(ctx, args.sandbox);
 		const { modelKey, apiKey } = keyFor(
 			"sandbox_fork",
 			args.idempotency_key,
-			args.sandbox,
+			sourceId,
 		);
 		const body = compact({
 			name: args.name,
@@ -489,7 +505,7 @@ export const sandboxRecover = defineTool({
 	name: "sandbox_recover",
 	title: "Recover a sandbox",
 	description:
-		"Reboots a sandbox that is stuck or in state error: running processes are lost, the disk stays. Use it when commands keep failing with agent_unavailable or the state is error. By default waits until the sandbox is ready (up to wait_seconds, default 45). Safe to repeat.",
+		"Reboots a stuck or errored sandbox: running processes are lost, the disk stays. Use it when agent_unavailable persists or the state is error. Waits until ready.",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: REPEATABLE_WRITE,
@@ -512,7 +528,7 @@ export const sandboxDelete = defineTool({
 	name: "sandbox_delete",
 	title: "Delete a sandbox",
 	description:
-		"Deletes a sandbox and its disk forever. Prefer sandbox_stop. Delete only sandboxes you created for this task (label created-via=mcp). confirm is required: pass the same sandbox id as in sandbox. A wrong confirm deletes nothing (confirmation_required). Scope sandboxes:delete.",
+		"Deletes a sandbox and its disk forever. Prefer sandbox_stop; delete only what you created for this task (label created-via=mcp). confirm must equal the sandbox id; a wrong one deletes nothing.",
 	toolset: "core",
 	scopes: ["sandboxes:delete"],
 	annotations: {
@@ -528,7 +544,7 @@ export const sandboxDelete = defineTool({
 			.string()
 			.min(1)
 			.regex(/^[\x20-\x7e]+$/, "must be printable ASCII")
-			.describe("The id (sb_...) of the sandbox you delete, equal to sandbox"),
+			.describe("Id of the sandbox to delete, equal to sandbox"),
 	},
 	async handler(args, ctx) {
 		const { data } = await ctx.sbx().raw.DELETE(SANDBOX_PATH, {

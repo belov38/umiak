@@ -190,7 +190,7 @@ export function sandboxResult(
 	const header: Record<string, unknown> = sandboxView(s);
 	if (o.operation) header.operation = operationNow(o.operation, s, o.target);
 	if (o.sourceOperation) {
-		header.source_operation = operationView(o.sourceOperation);
+		header.source_operation = operationNow(o.sourceOperation, s, o.target);
 	}
 	const lines: string[] = [];
 	if (o.target !== undefined) {
