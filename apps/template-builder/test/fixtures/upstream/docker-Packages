@@ -1,0 +1,125 @@
+Package: docker-ce
+Architecture: amd64
+Version: 5:29.9.0-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-ce_29.9.0-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: cf189d685472a267090cba3a54b9063f8b23df0e6f105565e628f9577e02087a
+Description: Docker: the open-source application container engine
+
+Package: docker-ce
+Architecture: amd64
+Version: 5:29.9.1-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-ce_29.9.1-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: cb283f77ac1a9e010d1dbe656be58063617e1360ca9f48e5ebe61cf72d2ac96b
+Description: Docker: the open-source application container engine
+
+Package: docker-ce
+Architecture: amd64
+Version: 5:29.9.2-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-ce_29.9.2-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: d9e8759e6a88a8aee6cf37905f739d252b96f0bbc41a915398e92357ca774535
+Description: Docker: the open-source application container engine
+
+Package: docker-ce-cli
+Architecture: amd64
+Version: 5:29.9.0-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-ce-cli_29.9.0-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 60eb474c2f867f965a6f9e02be786b5e9083c7f7fcd1dfebfe2d12f9f1ae5f7c
+Description: Docker CLI: the open-source application container engine
+
+Package: docker-ce-cli
+Architecture: amd64
+Version: 5:29.9.1-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-ce-cli_29.9.1-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 3a72d12eccd38f5e0e7b4752ea1912ff36de7238acf7344badebe1c58ae36c82
+Description: Docker CLI: the open-source application container engine
+
+Package: docker-ce-cli
+Architecture: amd64
+Version: 5:29.9.2-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-ce-cli_29.9.2-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 809f799e7a341c9ef9c2a3dd287da468c21de03745f8f2d080a0904549781542
+Description: Docker CLI: the open-source application container engine
+
+Package: containerd.io
+Architecture: amd64
+Version: 2.4.2-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/containerd.io_2.4.2-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 8fe6db6fc1fac03ada4d43630aad7b19e7c829cbfe174de575ae1f9e70fc7070
+Description: An open and reliable container runtime
+
+Package: containerd.io
+Architecture: amd64
+Version: 2.4.2-2~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/containerd.io_2.4.2-2~ubuntu.26.04~resolute_amd64.deb
+SHA256: 6bb52a00ac068d78f0fc090b69bb8e5efe355d2069b9f90d2ebbae23b9d5b36b
+Description: An open and reliable container runtime
+
+Package: containerd.io
+Architecture: amd64
+Version: 2.4.2-3~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/containerd.io_2.4.2-3~ubuntu.26.04~resolute_amd64.deb
+SHA256: e6197cb4f8b9efb2432e0bf242937e9270d25255a276ff7b810d7a0578782655
+Description: An open and reliable container runtime
+
+Package: docker-compose-plugin
+Architecture: amd64
+Version: 5.5.1-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-compose-plugin_5.5.1-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 49b640226e70a6193ddea8115bec3e1b99493c50a15ac3b7d46d2ec6abeb5464
+Description: Docker Compose (V2) plugin for the Docker CLI.
+
+Package: docker-compose-plugin
+Architecture: amd64
+Version: 5.6.0-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-compose-plugin_5.6.0-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: a0b9c82230ed64bed886f7ac569641fd6aa4e30598c72318ce3bf94cfbe884e6
+Description: Docker Compose (V2) plugin for the Docker CLI.
+
+Package: docker-compose-plugin
+Architecture: amd64
+Version: 5.6.1-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-compose-plugin_5.6.1-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 3dfea1021638130095750f372e98e61d8046f84a805c9fa7e072269894f75add
+Description: Docker Compose (V2) plugin for the Docker CLI.
+
+Package: docker-buildx-plugin
+Architecture: amd64
+Version: 0.37.1-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-buildx-plugin_0.37.1-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 7d74d16440db560d3dc45d5f7ac83fb2cefb964f4edfabf82dd17a804ac42331
+Description: Docker Buildx plugin extends build capabilities with BuildKi
+
+Package: docker-buildx-plugin
+Architecture: amd64
+Version: 0.38.0-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-buildx-plugin_0.38.0-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: c1c3fe824d9425d247e99a61b0bb52e1d591fb4d95c5607563a857e7dd49b6be
+Description: Docker Buildx plugin extends build capabilities with BuildKi
+
+Package: docker-buildx-plugin
+Architecture: amd64
+Version: 0.38.1-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-buildx-plugin_0.38.1-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 423e4c264ccd33cd696365d19583b280d5e019ea7f9d00494f749db9b54376f6
+Description: Docker Buildx plugin extends build capabilities with BuildKi
+
+Package: docker-sbx
+Architecture: amd64
+Version: 0.49.2-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-sbx_0.49.2-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: af206c854b398832889b3cdbe3c952a7f0fbb66c6a9da252e40f64398ce818dd
+Description: Docker sbx
+
+Package: docker-sbx
+Architecture: amd64
+Version: 0.50.0-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-sbx_0.50.0-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: 91082b11c616448913042b52fba5f1ed9f3c620a68cfb22714b4a83aea22ecd1
+Description: Docker sbx
+
+Package: docker-sbx
+Architecture: amd64
+Version: 0.50.1-1~ubuntu.26.04~resolute
+Filename: dists/resolute/pool/stable/amd64/docker-sbx_0.50.1-1~ubuntu.26.04~resolute_amd64.deb
+SHA256: ae77453183feeea2a6006cd6c981a4df8aebeb54dfc0721fe1d8af2bfefe74d6
+Description: Docker sbx
