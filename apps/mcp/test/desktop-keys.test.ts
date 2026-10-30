@@ -26,9 +26,12 @@ describe("parseChord", () => {
 		expect(parseChord("f24")).toEqual(["f24"]);
 	});
 
-	it("lowercases names, trims blanks, keeps a typed character", () => {
+	it("lowercases names and ASCII letters, trims blanks, keeps other characters", () => {
 		expect(parseChord(" Ctrl + Enter ")).toEqual(["ctrl", "enter"]);
-		expect(parseChord("ctrl+T")).toEqual(["ctrl", "T"]);
+		expect(parseChord("ctrl+T")).toEqual(["ctrl", "t"]);
+		expect(parseChord("Shift+A")).toEqual(["shift", "a"]);
+		// not a letter of the ASCII vocabulary: kept as typed
+		expect(parseChord("\u00c9")).toEqual(["\u00c9"]);
 	});
 
 	it("reads a plus sign as the last key", () => {

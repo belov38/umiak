@@ -41,11 +41,12 @@ function invalid(message: string, valid: string): ToolError {
 	});
 }
 
-/** One key: a named key in any case, or a single printable character as typed. */
+/** One key: a named key or an ASCII letter in any case (the vocabulary is lowercase), or another printable character as typed. */
 function keyOf(token: string): string {
 	const name = token.toLowerCase();
 	if (NAMED.has(name)) return name;
 	const chars = [...token];
+	if (chars.length === 1 && /^[A-Za-z]$/.test(token)) return name;
 	if (chars.length === 1 && !/[\s\p{Cc}]/u.test(token)) return token;
 	throw invalid(`unknown key name ${JSON.stringify(token)}`, VALID_KEYS);
 }

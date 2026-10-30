@@ -1,11 +1,15 @@
 // Desktop and computer-use tools (S11 8.7, S10 12-13) against the fake API.
+import { Sbx } from "@sbx/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearScreenCache, SCREEN_CACHE_MS } from "../src/desktop/api.ts";
+import { createLogger } from "../src/log.ts";
 import { publishedJsonSchemaOf, selectTools } from "../src/registry.ts";
 import { lintToolName, lintToolSchema } from "../src/schema-rules.ts";
+import { createServer } from "../src/server.ts";
 import { DESKTOP_TOOLS } from "../src/tools/desktop.ts";
 import { ALL_TOOLS } from "../src/tools/index.ts";
 import { FAKE_TOKENS } from "./fake-api/index.ts";
+import { connectInMemory } from "./helpers/connect.ts";
 import { type Answer, type Harness, startHarness } from "./helpers/harness.ts";
 
 let h: Harness | undefined;
@@ -854,27 +858,163 @@ describe("screen cache keys", () => {
 		).json;
 		const slug = created.slug as string;
 		const id = created.id as string;
-		await hh.call("computer_move", {
-			sandbox: id,
+		// a second client (another connection, its own Sbx) on the same API
+		const otherSbx = new Sbx({
+			baseUrl: hh.api.url,
+			apiKey: FAKE_TOKENS.full,
+			env: {},
+		});
+		const other = await connectInMemory(
+			createServer({
+				tools: ALL_TOOLS,
+				sbx: () => otherSbx,
+				transport: "stdio",
+				log: createLogger({ level: "silent" }),
+			}),
+		);
+		try {
+			const move = async (who: "a" | "b", sandbox: string) => {
+				const args = {
+					name: "computer_move",
+					arguments: { sandbox, x: 1, y: 1, screenshot_after: false },
+				};
+				if (who === "a") {
+					expect((await hh.conn.client.callTool(args)).isError).toBeFalsy();
+				} else {
+					expect((await other.client.callTool(args)).isError).toBeFalsy();
+				}
+			};
+			const reads = (ref: string) =>
+				hh.api.journal.filter((l) => l === `GET ${BASE(ref)}`).length;
+
+			await move("a", id);
+			await move("b", id);
+			expect(reads(id)).toBe(1); // the id is shared by both clients
+
+			await move("a", slug);
+			await move("a", slug);
+			expect(reads(slug)).toBe(1); // cached for client a
+			await move("b", slug);
+			expect(reads(slug)).toBe(2); // client b has its own slug cache
+			await move("b", slug);
+			expect(reads(slug)).toBe(2);
+			expect(reads(id)).toBe(1);
+		} finally {
+			await other.close();
+		}
+	});
+});
+
+describe("answers that break the contract", () => {
+	/** The fake's own contract check flags a bad answer on purpose; the test claims it. */
+	function claimContractErrors(hh: Harness, part: string) {
+		expect(hh.api.contractErrors.length).toBeGreaterThan(0);
+		expect(hh.api.contractErrors.every((e) => e.includes(part))).toBe(true);
+		hh.api.contractErrors.length = 0;
+	}
+
+	it("a screenshot without the Sbx-Screen-* headers is an unexpected_response and nothing is cached", async () => {
+		const hh = await start();
+		const sb = await desktop(hh);
+		hh.api.script.badResponse = {
+			path: /^GET .*\/desktop\/screenshot$/,
+			body: {},
+		};
+		const r = await hh.call("computer_screenshot", { sandbox: sb });
+		expect(r.isError).toBe(true);
+		expect(r.texts[0]).toContain("error: unexpected_response");
+		expect(r.texts[0]).toContain("retryable: false");
+		expect(images(r)).toHaveLength(0);
+		claimContractErrors(hh, "/desktop/screenshot");
+
+		// nothing was remembered: a click reads the real screen size
+		const click = await hh.call("computer_click", {
+			sandbox: sb,
+			x: 10,
+			y: 10,
+			screenshot_after: false,
+		});
+		expect(click.isError).toBe(false);
+		expect(hh.to("GET", BASE(sb))).toHaveLength(1);
+		expect(hh.api.state.desktop.actions[0]?.coordinateSpace).toEqual({
+			width: 1280,
+			height: 720,
+		});
+	});
+
+	it("a 0x0 screen from GET /desktop is refused and not cached", async () => {
+		const hh = await start();
+		const sb = await desktop(hh);
+		hh.api.script.badResponse = {
+			path: /^GET .*\/desktop$/,
+			body: {
+				state: "ready",
+				reason: null,
+				screen: { width: 0, height: 0 },
+				cursor: { x: 0, y: 0 },
+				access: "token",
+				url: "https://x.example.com/",
+				streamer: { running: true, streaming: false },
+			},
+		};
+		const r = await hh.call("computer_click", { sandbox: sb, x: 1, y: 1 });
+		expect(r.isError).toBe(true);
+		expect(r.texts[0]).toContain("error: unexpected_response");
+		expect(hh.api.state.desktop.actions).toEqual([]);
+		claimContractErrors(hh, "/desktop ->");
+		const again = await hh.call("computer_click", {
+			sandbox: sb,
 			x: 1,
 			y: 1,
 			screenshot_after: false,
 		});
-		expect(hh.to("GET", BASE(id))).toHaveLength(1);
-		// by slug: another key of the cache, read once more, then cached
-		await hh.call("computer_move", {
-			sandbox: slug,
-			x: 1,
-			y: 1,
+		expect(again.isError).toBe(false);
+		expect(hh.api.state.desktop.actions[0]?.coordinateSpace).toEqual({
+			width: 1280,
+			height: 720,
+		});
+	});
+
+	it("an actions answer with a 0 screen size is refused", async () => {
+		const hh = await start();
+		const sb = await desktop(hh);
+		hh.api.script.badResponse = {
+			path: /^POST .*\/desktop\/actions$/,
+			body: {
+				completed: 1,
+				cursor: { x: 0, y: 0 },
+				screen: { width: 0, height: 5 },
+			},
+		};
+		const r = await hh.call("computer_key", {
+			sandbox: sb,
+			keys: "enter",
 			screenshot_after: false,
 		});
-		await hh.call("computer_move", {
-			sandbox: slug,
-			x: 2,
-			y: 2,
-			screenshot_after: false,
-		});
-		expect(hh.to("GET", BASE(slug))).toHaveLength(1);
-		expect(hh.to("GET", BASE(id))).toHaveLength(1);
+		expect(r.isError).toBe(true);
+		expect(r.texts[0]).toContain("error: unexpected_response");
+		claimContractErrors(hh, "/desktop/actions");
+	});
+
+	it("an unavailable desktop is desktop_not_ready with the reason and not retryable", async () => {
+		const hh = await start();
+		const sb = await desktop(hh);
+		hh.api.script.badResponse = {
+			path: /^GET .*\/desktop$/,
+			body: {
+				state: "unavailable",
+				reason: "session crashed",
+				screen: { width: 1920, height: 1080 },
+				cursor: { x: 0, y: 0 },
+				access: "token",
+				url: "https://x.example.com/",
+				streamer: { running: false, streaming: false },
+			},
+		};
+		const r = await hh.call("computer_click", { sandbox: sb, x: 1, y: 1 });
+		expect(r.isError).toBe(true);
+		expect(r.texts[0]).toContain("error: desktop_not_ready");
+		expect(r.texts[0]).toContain("unavailable: session crashed");
+		expect(r.texts[0]).toContain("retryable: false");
 	});
 });

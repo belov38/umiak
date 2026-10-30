@@ -3,7 +3,7 @@
 // used with a cast and every answer is checked here. When S10 lands, SDK
 // helpers replace this module. Names of JSON fields are camelCase, as in the
 // rest of the public API.
-import { type Sbx, SbxError } from "@sbx/sdk";
+import { type Sbx, SbxError, UNEXPECTED_RESPONSE } from "@sbx/sdk";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
 import type { Size } from "./coords.ts";
@@ -127,8 +127,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function unexpected(what: string): Error {
-	return new Error(`desktop API: unexpected ${what}`);
+/** An answer that does not fit the S10 contract: the API is wrong, not the model. */
+function unexpected(what: string): SbxError {
+	return new SbxError({
+		status: 502,
+		code: UNEXPECTED_RESPONSE,
+		message: `the desktop API sent an unexpected ${what}`,
+		retryable: false,
+	});
 }
 
 function intOf(v: unknown, what: string): number {
@@ -136,9 +142,16 @@ function intOf(v: unknown, what: string): number {
 	return v;
 }
 
+/** A width and height, both at least 1: a 0 would make every coordinate space 1x1. */
 function sizeOf(v: unknown, what: string): Size {
 	if (!isRecord(v)) throw unexpected(what);
-	return { width: intOf(v.width, what), height: intOf(v.height, what) };
+	return sizeFrom(v.width, v.height, what);
+}
+
+function sizeFrom(width: unknown, height: unknown, what: string): Size {
+	const size = { width: intOf(width, what), height: intOf(height, what) };
+	if (size.width < 1 || size.height < 1) throw unexpected(what);
+	return size;
 }
 
 function pointOf(v: unknown, what: string): Point {
@@ -285,10 +298,11 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 			if (cached !== undefined) return cached;
 			const st = await status();
 			if (st.state !== "ready") {
+				// Only a desktop that is starting gets better by itself.
 				throw new ToolError({
 					code: "desktop_not_ready",
-					message: `the desktop is ${st.state}`,
-					retryable: true,
+					message: `the desktop is ${st.state}${st.reason === null ? "" : `: ${st.reason}`}`,
+					retryable: st.state === "starting",
 				});
 			}
 			remember(sbx, sandbox, st.screen);
@@ -318,22 +332,26 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 				),
 			);
 			if (!(data instanceof ArrayBuffer)) throw unexpected("screenshot body");
-			const h = (name: string) => Number(response.headers.get(name));
-			const screen = {
-				width: h("Sbx-Screen-Width"),
-				height: h("Sbx-Screen-Height"),
+			// A missing header is null, and Number(null) is 0: read the text.
+			const h = (name: string): number => {
+				const text = response.headers.get(name);
+				return text !== null && /^-?\d+$/.test(text.trim())
+					? Number(text)
+					: Number.NaN;
 			};
-			const image = {
-				width: h("Sbx-Image-Width"),
-				height: h("Sbx-Image-Height"),
-			};
+			const screen = sizeFrom(
+				h("Sbx-Screen-Width"),
+				h("Sbx-Screen-Height"),
+				"screenshot screen size",
+			);
+			const image = sizeFrom(
+				h("Sbx-Image-Width"),
+				h("Sbx-Image-Height"),
+				"screenshot image size",
+			);
 			const cursor = { x: h("Sbx-Cursor-X"), y: h("Sbx-Cursor-Y") };
-			for (const n of [
-				...Object.values(screen),
-				...Object.values(image),
-				...Object.values(cursor),
-			]) {
-				if (!Number.isInteger(n)) throw unexpected("screenshot headers");
+			if (!Number.isInteger(cursor.x) || !Number.isInteger(cursor.y)) {
+				throw unexpected("screenshot cursor");
 			}
 			remember(sbx, sandbox, screen);
 			return {
@@ -367,8 +385,7 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 					: {
 							screenshot: {
 								contentType: imageType(shot.contentType),
-								width: intOf(shot.width, "screenshot width"),
-								height: intOf(shot.height, "screenshot height"),
+								...sizeFrom(shot.width, shot.height, "screenshot size"),
 								data: shot.data as string,
 							},
 						}),
