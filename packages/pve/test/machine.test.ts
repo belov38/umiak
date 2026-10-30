@@ -89,6 +89,8 @@ describe("smbios", () => {
 			"sbxt1:wss://t.example/v1/connect",
 		);
 		expect(() => familyForTunnelUrl("https://x")).toThrow();
+		expect(() => familyForTunnelUrl("ws://host/x")).toThrow();
+		expect(() => familyForTunnelUrl("wss:///x")).toThrow();
 		expect(() => familyForTunnelUrl("wss://")).toThrow();
 		const url = (n: number) => `wss://h.example/${"a".repeat(n - 16)}`;
 		expect(url(200)).toHaveLength(200);
@@ -212,6 +214,19 @@ describe("create", () => {
 		for (const k of ["ide2", "ipconfig0", "ciuser", "ciupgrade"])
 			expect(post).not.toHaveProperty(k);
 		expect(post).toMatchObject({ name: "sbx-500", balloon: 0 });
+	});
+
+	it("does not take an ISO named cloudinit for a cloud-init drive", async () => {
+		const { api, machines } = setup();
+		const cfg = { ...api.templateConfig };
+		cfg.ide2 = "local:iso/cloudinit-x.iso,media=cdrom";
+		api.templateConfig = cfg;
+		await machines.create({});
+		const post =
+			api.calls.find((c) => c.method === "POST" && c.path === "/nodes/pve/qemu")
+				?.params ?? {};
+		for (const k of ["ide2", "ipconfig0", "ciuser", "ciupgrade"])
+			expect(post).not.toHaveProperty(k);
 	});
 
 	it("detects the cloud-init drive on any ide/scsi/sata key", async () => {

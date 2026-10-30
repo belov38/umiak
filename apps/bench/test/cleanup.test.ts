@@ -63,6 +63,30 @@ function ctx(): {
 }
 
 describe("cleanup", () => {
+	it("keeps the DHCP entries of template lease MACs", async () => {
+		const { c, node, store } = ctx();
+		const t = Date.now();
+		store.tryInsert({
+			cluster: 1,
+			vmid: 598,
+			mac: "02:01:00:00:02:56",
+			state: "active",
+			purpose: "template",
+			createdAt: t,
+			updatedAt: t,
+		});
+		node.leases.push({ mac: "02:01:00:00:02:56", ip: "10.88.0.150" });
+		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
+		const report = await cleanup(c);
+		const released = node.calls
+			.filter((x) => x.op === "dhcp.release")
+			.map((x) => x.args.mac);
+		expect(released).toContain("02:01:00:00:01:f4");
+		expect(released).not.toContain("02:01:00:00:02:56");
+		expect(report.join("\n")).not.toMatch(/02:56/);
+		expect(store.get(1, 598)).toBeDefined();
+	});
+
 	it("never deletes a template VM (tag sbx-tpl or template: 1)", async () => {
 		const { c, api } = ctx();
 		for (const [vmid, config] of [

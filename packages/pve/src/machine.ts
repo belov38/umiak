@@ -60,7 +60,8 @@ export function familyForTunnelUrl(url: string): string {
 	} catch {
 		// Falls through to the check below.
 	}
-	if (!url.startsWith("wss://") || host === "")
+	// URL parsing alone accepts "wss:///x" (host "x"), so the authority is checked textually too.
+	if (!/^wss:\/\/[^/?#]/.test(url) || host === "")
 		throw new Error(`tunnel URL must be wss:// with a host: ${url}`);
 	if (Buffer.byteLength(url, "utf8") > FAMILY_URL_MAX)
 		throw new Error(`tunnel URL is longer than ${FAMILY_URL_MAX} bytes`);
@@ -106,7 +107,8 @@ const NO_CI_UPGRADE = { ciupgrade: 0 };
 function hasCloudInitDrive(config: Record<string, string>): boolean {
 	return Object.entries(config).some(
 		([k, v]) =>
-			/^(ide|scsi|sata)\d+$/.test(k) && String(v).includes("cloudinit"),
+			/^(ide|scsi|sata)\d+$/.test(k) &&
+			/^[^:,]+:(vm-\d+-)?cloudinit(,|$)/.test(String(v)),
 	);
 }
 

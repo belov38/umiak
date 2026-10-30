@@ -1,6 +1,10 @@
-import { macFor } from "@sbx/pve";
 import { type Check, check } from "./checks.ts";
-import { type Ctx, isTemplateVm, type VmResource } from "./context.ts";
+import {
+	type Ctx,
+	isTemplateVm,
+	templateMacs,
+	type VmResource,
+} from "./context.ts";
 
 interface Inventory {
 	sysctl: Record<string, string>;
@@ -205,7 +209,7 @@ export async function preflight(
 		await check(
 			"no leftover DHCP leases or ethers entries of our MACs",
 			async () => {
-				const tpl = macFor(cfg.clusterId, cfg.templateVmid).toLowerCase();
+				const tpl = templateMacs(ctx);
 				const d = await node.call<{
 					leases: { mac: string }[];
 					ethers: { mac: string }[];
@@ -216,7 +220,7 @@ export async function preflight(
 						(m) =>
 							m.startsWith(
 								`02:${cfg.clusterId.toString(16).padStart(2, "0")}:`,
-							) && m !== tpl,
+							) && !tpl.has(m),
 					);
 				return { ok: ours.length === 0, detail: ours.join(",") };
 			},
