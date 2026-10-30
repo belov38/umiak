@@ -22,6 +22,29 @@ describe.skipIf(skipPg())("SandboxService reads and updates", () => {
 			state,
 		]);
 
+	/** The database clock (deadlines are `now()` there, not on this host). */
+	const dbNow = async (): Promise<number> =>
+		(
+			await t.pool.query<{ t: Date }>("SELECT clock_timestamp() AS t")
+		).rows[0]?.t.getTime() ?? Number.NaN;
+
+	/**
+	 * Runs `fn` between two readings of the database clock and checks that
+	 * its deadline is `now() + seconds` of a transaction inside that window.
+	 */
+	async function expectDeadlineIn<T extends { deadlineAt: Date | null }>(
+		seconds: number,
+		fn: () => Promise<T>,
+	): Promise<T> {
+		const before = await dbNow();
+		const r = await fn();
+		const after = await dbNow();
+		const start = (r.deadlineAt?.getTime() ?? 0) - seconds * 1000;
+		expect(start).toBeGreaterThanOrEqual(before);
+		expect(start).toBeLessThanOrEqual(after);
+		return r;
+	}
+
 	describe("get", () => {
 		it("returns the sandbox with its active operation, by id or slug", async () => {
 			const env = await serviceEnv(t.pool);
@@ -171,10 +194,9 @@ describe.skipIf(skipPg())("SandboxService reads and updates", () => {
 			expect(u1.version).toBe(sandbox.version + 1);
 
 			await setState(sandbox.id, "ready");
-			const u2 = await env.svc.update(env.p, sandbox.id, { ttlSeconds: 600 });
-			const ms = (u2.deadlineAt?.getTime() ?? 0) - Date.now();
-			expect(ms).toBeGreaterThan(590_000);
-			expect(ms).toBeLessThanOrEqual(600_000);
+			await expectDeadlineIn(600, () =>
+				env.svc.update(env.p, sandbox.id, { ttlSeconds: 600 }),
+			);
 
 			const u3 = await env.svc.update(env.p, sandbox.id, {
 				ttlSeconds: null,
@@ -218,13 +240,10 @@ describe.skipIf(skipPg())("SandboxService reads and updates", () => {
 			const { sandbox } = await env.svc.create(env.p, { ttlSeconds: 300 });
 			await expectCode(env.svc.extend(env.p, sandbox.id), "invalid_state");
 			await setState(sandbox.id, "ready");
-			const e1 = await env.svc.extend(env.p, sandbox.id);
-			const ms1 = (e1.deadlineAt?.getTime() ?? 0) - Date.now();
-			expect(ms1).toBeGreaterThan(290_000);
-			expect(ms1).toBeLessThanOrEqual(300_000);
-			const e2 = await env.svc.extend(env.p, sandbox.id, 1200);
-			const ms2 = (e2.deadlineAt?.getTime() ?? 0) - Date.now();
-			expect(ms2).toBeGreaterThan(1_190_000);
+			await expectDeadlineIn(300, () => env.svc.extend(env.p, sandbox.id));
+			const e2 = await expectDeadlineIn(1200, () =>
+				env.svc.extend(env.p, sandbox.id, 1200),
+			);
 			expect(e2.ttlSeconds).toBe(300);
 		});
 
@@ -247,15 +266,20 @@ describe.skipIf(skipPg())("SandboxService reads and updates", () => {
 		it("resolves on a transition notified through LISTEN sbx_sandboxes", async () => {
 			const notifier = new PgNotifier({ connectionString: t.url });
 			try {
-				const env = await serviceEnv(t.pool, { notifier });
+				// No fallback poll within the test: only the notification (or the
+				// 20 s timeout) can end the wait.
+				const env = await serviceEnv(t.pool, {
+					notifier,
+					waitPollMs: 3_600_000,
+				});
 				const { sandbox } = await env.svc.create(env.p, {});
 				const started = Date.now();
 				const waiting = env.svc.waitForState(sandbox.id, ["ready"], 20_000);
 				setTimeout(() => void setState(sandbox.id, "ready"), 200);
 				const s = await waiting;
 				expect(s.state).toBe("ready");
-				// Well below the 2 s fallback poll: the notification woke it.
-				expect(Date.now() - started).toBeLessThan(1500);
+				// Well before the timeout: the notification woke it.
+				expect(Date.now() - started).toBeLessThan(10_000);
 			} finally {
 				await notifier.close();
 			}

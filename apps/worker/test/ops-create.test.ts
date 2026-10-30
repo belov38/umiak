@@ -9,6 +9,7 @@ import { spyBefore } from "./fakes/crash.ts";
 import { createWorld, insertSnapshot, type TestWorld } from "./fakes/world.ts";
 import {
 	createSandbox,
+	dbNow,
 	ENV,
 	expireDeadline,
 	infraState,
@@ -69,7 +70,7 @@ describe("create, cold path", () => {
 		expect(s.state).toBe("ready");
 		expect(s.ready_at).not.toBeNull();
 		expect(s.health).toBe("ok");
-		const ttlMs = (s.deadline_at as Date).getTime() - Date.now();
+		const ttlMs = (s.deadline_at as Date).getTime() - (await dbNow(w));
 		expect(ttlMs).toBeGreaterThan(3590_000);
 		expect(ttlMs).toBeLessThanOrEqual(3600_000);
 		expect(m.state).toBe("running");
@@ -235,9 +236,10 @@ describe("create, cold path", () => {
 			[operationId],
 		);
 
+		// Far below the configured 60 s, with room for a loaded machine.
 		const t0 = Date.now();
 		expect(await run(w, operationId)).toBe("failed");
-		expect(Date.now() - t0).toBeLessThan(3000);
+		expect(Date.now() - t0).toBeLessThan(20_000);
 
 		expect((await row(w, "operations", operationId)).error_code).toBe(
 			"deadline_exceeded",
@@ -408,7 +410,7 @@ describe("create, pool claim path", () => {
 		expect(m.sandbox_id).toBe(sandboxId);
 		// The new path gets the cold deadline (6 min on Linux).
 		const op = await row(w, "operations", operationId);
-		const left = (op.deadline_at as Date).getTime() - Date.now();
+		const left = (op.deadline_at as Date).getTime() - (await dbNow(w));
 		expect(left).toBeGreaterThan(5 * 60_000);
 		expect(claimsOf(w).map((c) => c.machineId)).toEqual([warm, m.id]);
 	});

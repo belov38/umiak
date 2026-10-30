@@ -577,7 +577,8 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		const err = await view.connectPty(pty.command.id).catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(SbxError);
 		expect(err).toMatchObject({ status: 403, code: "forbidden" });
-		expect(Date.now() - started).toBeLessThan(2000);
+		// No retries (room for a loaded machine).
+		expect(Date.now() - started).toBeLessThan(10_000);
 		await pty.kill({ graceMs: 0 });
 		pty.close();
 	});
@@ -629,7 +630,8 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 			.catch((e: unknown) => e);
 		setTimeout(() => ac.abort(), 300);
 		expect(await p).toMatchObject({ name: "AbortError" });
-		expect(Date.now() - started).toBeLessThan(2000);
+		// Not at the end of the long-poll (room for a loaded machine).
+		expect(Date.now() - started).toBeLessThan(10_000);
 	});
 
 	it("sandboxes.list iterates every page; get by slug", async () => {

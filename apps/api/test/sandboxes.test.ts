@@ -269,11 +269,12 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			const t0 = Date.now();
 			const r = await h.request(
 				"GET",
-				`/v1/sandboxes/${encodeUuid("sandbox", other.sandboxId)}?waitFor=ready&waitSeconds=5`,
+				`/v1/sandboxes/${encodeUuid("sandbox", other.sandboxId)}?waitFor=ready&waitSeconds=20`,
 			);
 			expect(r.status).toBe(404);
 			expect(errorOf(r).code).toBe("not_found");
-			expect(Date.now() - t0).toBeLessThan(1000);
+			// "At once": well below the 20 s wait, with room for a loaded machine.
+			expect(Date.now() - t0).toBeLessThan(10_000);
 		});
 
 		it("long-poll returns on markReady before waitSeconds", async () => {

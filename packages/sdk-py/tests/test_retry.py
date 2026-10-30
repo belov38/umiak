@@ -483,22 +483,24 @@ def test_sbx_exit_4_or_missing_is_no_credentials_other_failures_are_auth_command
 
 def test_a_hanging_sbx_is_killed_at_the_timeout(fake_sbx: FakeSbx) -> None:
     fake_sbx.profile("jwt-1")
-    (fake_sbx.dir / "sleep").write_text("10")
+    (fake_sbx.dir / "sleep").write_text("30")
     t0 = time.monotonic()
     with pytest.raises(SbxError) as e:
         sync_io.run_auth_command([str(fake_sbx.path)], fake_sbx.env(), timeout=0.3)
     assert e.value.code == "auth_command_failed" and "timed out" in e.value.message
-    assert time.monotonic() - t0 < 3
+    # Killed, not waited for (30 s); room for a loaded machine.
+    assert time.monotonic() - t0 < 15
 
 
 async def test_a_hanging_sbx_is_killed_at_the_timeout_async(fake_sbx: FakeSbx) -> None:
     fake_sbx.profile("jwt-1")
-    (fake_sbx.dir / "sleep").write_text("10")
+    (fake_sbx.dir / "sleep").write_text("30")
     t0 = time.monotonic()
     with pytest.raises(SbxError) as e:
         await async_io.run_auth_command([str(fake_sbx.path)], fake_sbx.env(), timeout=0.3)
     assert e.value.code == "auth_command_failed" and "timed out" in e.value.message
-    assert time.monotonic() - t0 < 3
+    # Killed, not waited for (30 s); room for a loaded machine.
+    assert time.monotonic() - t0 < 15
 
 
 # --- open enums ---

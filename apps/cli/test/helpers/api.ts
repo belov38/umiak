@@ -64,10 +64,13 @@ export interface CliWorld {
 	close(): Promise<void>;
 }
 
-/** Polls `fn` until it returns a value (not undefined); fails after `ms`. */
+/**
+ * Polls `fn` until it returns a value (not undefined); fails after `ms` (a
+ * hang guard with room for a heavily loaded machine).
+ */
 export async function until<T>(
 	fn: () => Promise<T | undefined>,
-	ms = 10_000,
+	ms = 30_000,
 ): Promise<T> {
 	const end = Date.now() + ms;
 	for (;;) {

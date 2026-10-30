@@ -17,6 +17,7 @@ import {
 	type TestWorld,
 } from "./fakes/world.ts";
 import {
+	dbNow,
 	ENV,
 	expireDeadline,
 	opsEnv,
@@ -206,7 +207,7 @@ describe("resume", () => {
 		const m = await row(w, "machines", machineId);
 		expect(s.state).toBe("ready");
 		expect(s.health).toBe("ok");
-		const left = (s.deadline_at as Date).getTime() - Date.now();
+		const left = (s.deadline_at as Date).getTime() - (await dbNow(w));
 		expect(left).toBeGreaterThan(590_000);
 		expect(m.state).toBe("running");
 		expect(m.provisioned_boot_id).not.toBe(oldBoot);
@@ -357,9 +358,10 @@ describe("resume", () => {
 		);
 		const startsBefore = w.infra.callsOf("start").length;
 
+		// Far below the configured 60 s, with room for a loaded machine.
 		const t0 = Date.now();
 		expect(await run(w, op.id)).toBe("failed");
-		expect(Date.now() - t0).toBeLessThan(3000);
+		expect(Date.now() - t0).toBeLessThan(20_000);
 
 		expect((await row(w, "operations", op.id)).error_code).toBe(
 			"deadline_exceeded",

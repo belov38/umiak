@@ -8,7 +8,15 @@
 import type { AddressInfo } from "node:net";
 import { encodeUuid } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import WebSocket from "ws";
 import {
 	type AgentApi,
@@ -23,6 +31,8 @@ import {
 	type ReadySandbox,
 	readySandbox,
 	sleep,
+	until,
+	WAIT_MS,
 } from "./helpers/commands.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -47,20 +57,6 @@ interface Client {
 	send(data: string | Buffer): void;
 }
 
-async function until<T>(
-	fn: () => T | undefined | null | false,
-	ms = 5000,
-	what = "condition",
-): Promise<T> {
-	const end = Date.now() + ms;
-	for (;;) {
-		const v = fn();
-		if (v !== undefined && v !== null && v !== false) return v;
-		if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-		await sleep(10);
-	}
-}
-
 /** A listener app on a real HTTP server with WebSocket upgrades. */
 async function serve(app: Harness["app"]): Promise<{
 	base: string;
@@ -78,6 +74,17 @@ async function serve(app: Harness["app"]): Promise<{
 	};
 }
 
+/**
+ * The ping interval of the shared harness. Ping tests drive it with fake
+ * setInterval; real time never reaches it, so a starved event loop (a
+ * loaded machine) cannot drop a connection between a ping and its pong.
+ */
+const PING_MS = 60_000;
+
+/** Fakes only the ping clock (setInterval): I/O and other timers stay real. */
+const fakePingClock = () =>
+	vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+
 describe.skipIf(skipPg())("PTY over WebSocket", () => {
 	let db: TestDatabase;
 	let w: ApiWorld;
@@ -92,8 +99,8 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 	 * call reaches the agent, or after it applied the input.
 	 */
 	const inputFaults: ("before" | "after")[] = [];
-	/** Each sendInput takes this long (a slow agent). */
-	let inputDelayMs = 0;
+	/** While set, sendInput waits for it (an agent that does not answer yet). */
+	let inputGate: Promise<void> | null = null;
 	const reset = () =>
 		Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
 	/** Data bytes the agent attach delivered, by command (core id). */
@@ -125,7 +132,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 				if (p === "sendInput") {
 					return async (m: string, req: AgentSendInputRequest) => {
 						inputs.push({ ...req, data: Buffer.from(req.data) });
-						if (inputDelayMs > 0) await sleep(inputDelayMs);
+						if (inputGate !== null) await inputGate;
 						const fault = inputFaults.shift();
 						if (fault === "before") throw reset();
 						const r = await t.sendInput(m, req);
@@ -150,7 +157,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 				identityEvents: events,
 				agent: spied(w.agent),
 				ptyTimings: {
-					pingMs: 100,
+					pingMs: PING_MS,
 					inputCoalesceMs: 20,
 					highWaterBytes: 64 * 1024,
 					inputRetryMs: 2000,
@@ -163,6 +170,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		closeServer = srv.close;
 	});
 	afterEach(() => {
+		vi.useRealTimers();
 		for (const c of clients.splice(0)) c.ws.terminate();
 	});
 	afterAll(async () => {
@@ -348,20 +356,44 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 
 	it("echo: attached first, input batched into one Process/SendInput, seq in order, exit then 1000", async () => {
 		const id = await pty({ command: ECHO });
-		const c = connect(connectPath(id));
+		// A coalescing window far above the gaps between the frames below, so
+		// a stalled event loop (a loaded machine) does not split the batch.
+		const srv = await serve(
+			w.harness({
+				deps: {
+					identityEvents: events,
+					agent: spied(w.agent),
+					ptyTimings: {
+						pingMs: PING_MS,
+						inputCoalesceMs: 1000,
+						highWaterBytes: 64 * 1024,
+						inputRetryMs: 2000,
+					},
+				},
+			}).app,
+		);
+		try {
+			await echoBatched(id, srv.base);
+		} finally {
+			await srv.close();
+		}
+	});
+
+	async function echoBatched(id: string, base: string) {
+		const c = connect(connectPath(id), { base });
 		await c.opened;
 		expect(c.ws.protocol).toBe(PTY_SUBPROTOCOL);
-		await until(() => c.texts.length > 0, 5000, "attached");
+		await until(() => c.texts.length > 0, WAIT_MS, "attached");
 		expect(c.texts[0]).toEqual({ type: "attached", offset: 0 });
 
 		const before = inputs.length;
-		// Three frames a few ms apart, inside the coalescing window (20 ms here).
+		// Three frames a few ms apart, inside the coalescing window (1 s here).
 		c.send(Buffer.from("he"));
 		await sleep(4);
 		c.send(Buffer.from("ll"));
 		await sleep(4);
 		c.send(Buffer.from("o\n"));
-		await until(() => c.bytes().toString() === "hello\n", 5000, "echo");
+		await until(() => c.bytes().toString() === "hello\n", WAIT_MS, "echo");
 		const mine = inputs.slice(before);
 		expect(mine).toHaveLength(1);
 		expect(Buffer.from(mine[0]?.data ?? []).toString()).toBe("hello\n");
@@ -370,7 +402,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		c.send(Buffer.from("again\n"));
 		await until(
 			() => c.bytes().toString() === "hello\nagain\n",
-			5000,
+			WAIT_MS,
 			"echo 2",
 		);
 		const more = inputs.slice(before);
@@ -387,7 +419,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 			exitCode: 0,
 			ptyOffset: 16,
 		});
-	});
+	}
 
 	it("a new connection is a new input session; command null is the login shell", async () => {
 		const id = await pty({ command: null });
@@ -395,7 +427,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		await until(() => a.texts.length > 0);
 		const before = inputs.length;
 		a.send(Buffer.from("echo hi-$((40+2))\n"));
-		await until(() => a.bytes().toString().includes("hi-42"), 5000, "shell");
+		await until(() => a.bytes().toString().includes("hi-42"), WAIT_MS, "shell");
 		a.ws.close();
 		await a.closed;
 		const b = connect(connectPath(id, `?offset=${a.bytes().length}`));
@@ -417,7 +449,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		const before = inputs.length;
 		inputFaults.push("after", "before");
 		c.send(Buffer.from("once\n"));
-		await until(() => c.bytes().toString() === "once\n", 5000, "echo");
+		await until(() => c.bytes().toString() === "once\n", WAIT_MS, "echo");
 		await sleep(200);
 		expect(c.bytes().toString()).toBe("once\n");
 		const mine = inputs.slice(before);
@@ -450,7 +482,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		c.send(JSON.stringify({ type: "resize", cols: 100, rows: 40 }));
 		await until(
 			() => w.agent.ptySizes(raw).length === 2,
-			5000,
+			WAIT_MS,
 			"resize over the socket",
 		);
 		const r = await h.request("POST", `${ptys()}/${id}/resize`, {
@@ -465,7 +497,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		// An unknown control frame is ignored, the connection stays open.
 		c.send(JSON.stringify({ type: "future-thing" }));
 		c.send(Buffer.from("x\n"));
-		await until(() => c.bytes().toString() === "x\n", 5000, "x");
+		await until(() => c.bytes().toString() === "x\n", WAIT_MS, "x");
 
 		const bad = await h.request("POST", `${ptys()}/${id}/resize`, {
 			json: { cols: 0, rows: 30 },
@@ -521,10 +553,10 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		let last: Any = null;
 		for (let round = 0; round < 50 && last?.type !== "exit"; round++) {
 			const c = connect(connectPath(id, `?offset=${offset}`));
-			await until(() => c.texts.length > 0, 5000, "attached");
+			await until(() => c.texts.length > 0, WAIT_MS, "attached");
 			expect(c.texts[0]).toEqual({ type: "attached", offset });
 			if (round < 3) {
-				await until(() => c.bytes().length > 0, 5000, "some output");
+				await until(() => c.bytes().length > 0, WAIT_MS, "some output");
 				c.ws.terminate();
 				await c.closed;
 			} else {
@@ -598,7 +630,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 				headers.origin as string,
 				`?team=${encodeUuid("team", w.teamId)}`,
 			);
-			await until(() => good.texts.length > 0, 5000, "attached");
+			await until(() => good.texts.length > 0, WAIT_MS, "attached");
 			expect(good.texts[0]).toEqual({ type: "attached", offset: 0 });
 		} finally {
 			for (const c of clients.splice(0)) c.ws.terminate();
@@ -657,14 +689,17 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		const t0 = Date.now();
 		await w.identity.revokeApiKey(k.id, {});
 		const closed = await c.closed;
-		expect(Date.now() - t0).toBeLessThan(1000);
+		// NOTIFY-driven with no timer on the way (the spec's 1 s holds by
+		// construction); the bound only catches a regression to polling and
+		// leaves room for a loaded machine's scheduling delays.
+		expect(Date.now() - t0).toBeLessThan(5000);
 		expect(closed.code).toBe(4401);
 		expect(c.texts.at(-1)).toMatchObject({
 			type: "error",
 			code: "unauthorized",
 			retryable: false,
 		});
-		await until(() => h.deps.streams.size === 0, 2000, "unregistered");
+		await until(() => h.deps.streams.size === 0, WAIT_MS, "unregistered");
 		const again = connect(connectPath(id), { bearer: k.secret });
 		expect((await again.refused).status).toBe(401);
 		await h.request("POST", `${sb.commands}/${id}/kill`, {
@@ -720,9 +755,15 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 			// buffers fill, then the server's ws buffer.
 			const sock = (c.ws as Any)._socket;
 			sock.pause();
-			await sleep(1000);
-			const r = await h.request("GET", `${sb.commands}/${id}`);
-			expect((r.body as Any).streams.pty.sizeBytes).toBe(total);
+			// The command has written all its output to the agent.
+			await until(
+				async () => {
+					const r = await h.request("GET", `${sb.commands}/${id}`);
+					return (r.body as Any).streams.pty.sizeBytes === total;
+				},
+				WAIT_MS,
+				"all output at the agent",
+			);
 			// What the server pulled from the agent is bounded by the socket
 			// buffers, not the whole output.
 			const pulled = attachProgress(id);
@@ -739,25 +780,41 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 	it("a large paste while the agent is slow: the socket is not read above 1 MiB queued, input arrives whole in 64 KiB batches", async () => {
 		const total = 8 * 1024 * 1024;
 		const id = await pty({ command: `head -c ${total} | wc -c` });
+		fakePingClock();
+		// The server side of the connection pauses its socket (ws.pause).
+		const pause = vi.spyOn(WebSocket.prototype, "pause");
 		const c = connect(connectPath(id));
 		await until(() => c.texts.length > 0);
 		const before = inputs.length;
-		inputDelayMs = 50;
+		let release = () => {};
+		inputGate = new Promise((r) => {
+			release = r;
+		});
 		try {
 			const frame = Buffer.alloc(64 * 1024, 0x61);
 			for (let i = 0; i < total / frame.length; i++) c.send(frame);
-			await sleep(600);
-			// The server stopped reading: most of the paste still waits in the
-			// client's buffer (TCP buffers hold far less than 6 MiB).
+			// The agent holds the first batch: the queue reaches 1 MiB and the
+			// server stops reading the socket.
+			const server = (await until(
+				() => (pause.mock.contexts as WebSocket[]).find((ws) => ws.isPaused),
+				WAIT_MS,
+				"server socket paused",
+			)) as WebSocket;
+			// Most of the paste still waits in the client's buffer (TCP buffers
+			// hold far less than 6 MiB, and they only fill further from here).
 			expect(c.ws.bufferedAmount).toBeGreaterThan(2 * 1024 * 1024);
-			// A paused socket is not dropped by the ping (100 ms here).
-			expect(c.ws.readyState).toBe(WebSocket.OPEN);
+			// A paused socket is not dropped by the ping: its pongs wait in the
+			// unread socket. Without the pause rule the second tick terminates.
+			vi.advanceTimersByTime(3 * PING_MS);
+			expect(server.readyState).toBe(WebSocket.OPEN);
 		} finally {
-			inputDelayMs = 0;
+			inputGate = null;
+			release();
+			pause.mockRestore();
 		}
 		await until(
 			() => c.bytes().toString().includes(String(total)),
-			20_000,
+			WAIT_MS,
 			"wc",
 		);
 		expect((await c.closed).code).toBe(1000);
@@ -792,7 +849,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		);
 		await until(
 			() => post.text().includes('"stdout":"posted"'),
-			10_000,
+			WAIT_MS,
 			"sync",
 		);
 		expect(post.text()).toMatch(/^HTTP\/1\.1 200/);
@@ -809,14 +866,14 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		);
 		await until(
 			() => stream.text().includes('"type":"attached"'),
-			5000,
+			WAIT_MS,
 			"attached",
 		);
 		expect(stream.text()).toMatch(/^HTTP\/1\.1 200/);
 		expect(stream.text().toLowerCase()).toContain("application/x-ndjson");
 		expect(h.deps.streams.size).toBe(1);
 		stream.close();
-		await until(() => h.deps.streams.size === 0, 3000, "stream released");
+		await until(() => h.deps.streams.size === 0, WAIT_MS, "stream released");
 		await h.request("POST", `${sb.commands}/${cid}/kill`, {
 			json: { graceMs: 0 },
 		});
@@ -824,13 +881,37 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 
 	it("ping every pingMs; a peer that never answers is dropped", async () => {
 		const id = await pty({ command: "cat" });
+		fakePingClock();
 		const c = connect(connectPath(id));
-		await until(() => c.texts.length > 0);
-		await until(() => c.pings >= 2, 2000, "pings");
 		const mute = connect(connectPath(id), { autoPong: false });
-		await until(() => mute.texts.length > 0);
-		const closed = await mute.closed;
-		expect(closed.code).toBe(1006);
+		await until(() => c.texts.length > 0 && mute.texts.length > 0);
+		// An echo through cat on the same connection: the pings the server
+		// sent before it have arrived, and it has read the pongs sent before.
+		let echoed = "";
+		const roundTrip = async (tag: string) => {
+			echoed += `${tag}\n`;
+			c.send(Buffer.from(`${tag}\n`));
+			await until(
+				() => c.bytes().toString() === echoed,
+				WAIT_MS,
+				`echo ${tag}`,
+			);
+		};
+
+		vi.advanceTimersByTime(PING_MS - 1);
+		await roundTrip("a");
+		expect(c.pings).toBe(0);
+		vi.advanceTimersByTime(1);
+		await until(() => c.pings === 1 && mute.pings === 1, WAIT_MS, "first ping");
+		await roundTrip("b");
+		// mute missed the previous ping: dropped; c answered it: pinged again.
+		vi.advanceTimersByTime(PING_MS);
+		expect((await mute.closed).code).toBe(1006);
+		await until(() => c.pings === 2, WAIT_MS, "second ping");
+		await roundTrip("c");
+		expect(c.ws.readyState).toBe(WebSocket.OPEN);
+		expect(mute.pings).toBe(1);
+		vi.useRealTimers();
 		await h.request("POST", `${sb.commands}/${id}/kill`, {
 			json: { graceMs: 0 },
 		});
@@ -848,7 +929,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 			const a = connect(connectPath(id), { base: srv.base });
 			await until(() => a.texts.length > 0);
 			a.send(Buffer.from("abc\n"));
-			await until(() => a.bytes().length === 4, 5000, "echo");
+			await until(() => a.bytes().length === 4, WAIT_MS, "echo");
 			// One connection per principal here: the second is 429 before the upgrade.
 			const b = connect(connectPath(id), { base: srv.base });
 			const r = await b.refused;

@@ -11,6 +11,7 @@ import {
 	type ReadySandbox,
 	readySandbox,
 	sleep,
+	until,
 } from "./helpers/commands.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -264,17 +265,28 @@ describe.skipIf(skipPg())("POST /commands", () => {
 	it("a starting sandbox is awaited and the command runs once it is ready", async () => {
 		const s = await w.seed({ state: "starting" });
 		const ref = encodeUuid("sandbox", s.sandboxId);
-		const pending = run(
-			{ command: "echo ok" },
-			`/v1/sandboxes/${ref}/commands`,
-		);
-		await sleep(150);
+		// A wait long enough that markReady below always comes within it (the
+		// 400 ms of the shared harness is for the wait that runs out).
+		const patient = w.harness({
+			deps: {
+				commandTimings: {
+					readyWaitMs: 60_000,
+					heartbeatMs: 15_000,
+					maxDurationMs: 3_600_000,
+				},
+			},
+		});
+		const pending = patient.request("POST", `/v1/sandboxes/${ref}/commands`, {
+			json: { command: "echo ok" },
+		});
 		// API activity is recorded before the wait (§9.1 step 1).
-		const touched = await db.pool.query(
-			"SELECT last_api_call_at FROM runtime.sandboxes WHERE id = $1",
-			[s.sandboxId],
-		);
-		expect(touched.rows[0].last_api_call_at).not.toBeNull();
+		await until(async () => {
+			const touched = await db.pool.query(
+				"SELECT last_api_call_at FROM runtime.sandboxes WHERE id = $1",
+				[s.sandboxId],
+			);
+			return touched.rows[0].last_api_call_at !== null;
+		});
 		await w.markReady(s.sandboxId);
 		const r = await pending;
 		expect(r.status).toBe(200);

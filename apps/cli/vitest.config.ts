@@ -18,7 +18,9 @@ export default defineConfig({
 	test: {
 		include: ["test/**/*.test.ts"],
 		globalSetup: ["@sbx/db/testing/global-setup"],
-		testTimeout: 30_000,
+		// A hang guard only: tests wait on conditions and spawn the CLI, which
+		// takes seconds on a loaded machine under a full parallel `pnpm -r test`.
+		testTimeout: 120_000,
 		hookTimeout: 120_000,
 	},
 });

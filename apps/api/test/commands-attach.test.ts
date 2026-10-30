@@ -10,7 +10,9 @@ import {
 	openStream,
 	type ReadySandbox,
 	readySandbox,
+	shellGate,
 	sleep,
+	until,
 } from "./helpers/commands.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -173,16 +175,20 @@ describe.skipIf(skipPg())("attach and output", () => {
 	});
 
 	it("follow=false: what exists now, then the end (no exit while running)", async () => {
-		const id = await detached("echo early; sleep 1; echo late");
-		await sleep(200);
-		const r = await h.request(
-			"GET",
-			`${sb.commands}/${id}/stream?follow=false`,
-		);
+		const gate = shellGate();
+		const id = await detached(`echo early; ${gate.shell}; echo late`);
+		const r = await until(async () => {
+			const r = await h.request(
+				"GET",
+				`${sb.commands}/${id}/stream?follow=false`,
+			);
+			return (r.body as Frame[]).length > 1 && r;
+		});
 		expect(r.status).toBe(200);
 		const frames = r.body as Frame[];
 		expect(frames.map((f) => f.type)).toEqual(["attached", "stdout"]);
 		expect(frames[1]).toMatchObject({ data: "early\n", nextOffset: 6 });
+		gate.open();
 		await exited(id);
 		const done = await h.request(
 			"GET",
@@ -284,9 +290,11 @@ describe.skipIf(skipPg())("attach and output", () => {
 	});
 
 	it("/output of a running command has no Sbx-Stream-End", async () => {
-		const id = await detached("echo a; sleep 2");
-		await sleep(150);
-		const r = await h.request("GET", `${sb.commands}/${id}/output`);
+		const id = await detached("echo a; sleep 30");
+		const r = await until(async () => {
+			const r = await h.request("GET", `${sb.commands}/${id}/output`);
+			return r.text !== "" && r;
+		});
 		expect(r.text).toBe("a\n");
 		expect(r.headers.get("sbx-stream-end")).toBeNull();
 		await h.request("POST", `${sb.commands}/${id}/kill`, {

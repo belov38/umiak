@@ -690,7 +690,7 @@ describe.skipIf(skipPg())(
 				calls.b++;
 				calls.c++;
 				await others;
-				await watch.settled(5000);
+				await watch.settled(30_000);
 
 				console.log(
 					`HTTP/2 sessions ${watch.sessions.size}, sockets to the gateway ${watch.h2Sockets(gwPort)}, ` +

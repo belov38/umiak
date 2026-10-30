@@ -523,8 +523,9 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 				expect(live.label).toBe(`${newSlug}-3000`);
 				expect(live.auth_epoch).toBe(port.hostedPort.authEpoch + 1);
 				expect(live.id).toBe(port.hostedPort.id);
-				// Delivery after commit; give the listener a moment.
-				for (let i = 0; i < 50 && notes.length < 2; i++) {
+				// Delivery after commit: wait for both notifications.
+				for (const end = Date.now() + 10_000; notes.length < 2; ) {
+					if (Date.now() > end) break;
 					await new Promise((r) => setTimeout(r, 20));
 				}
 				expect(notes).toContain(oldSlug);
@@ -726,7 +727,12 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 		it("returns on the UPDATE to succeeded well before the timeout", async () => {
 			const notifier = new PgNotifier({ connectionString: t.url });
 			try {
-				const env = await serviceEnv(t.pool, { notifier });
+				// No fallback poll within the test: only the notification (or the
+				// 20 s timeout) can end the wait.
+				const env = await serviceEnv(t.pool, {
+					notifier,
+					waitPollMs: 3_600_000,
+				});
 				const s = await seedSandbox(t.pool, env, { state: "ready" });
 				const opId = await insertOperation(t.pool, {
 					id: uuidv7(),
@@ -746,7 +752,8 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 				);
 				const op = await waiting;
 				expect(op.state).toBe("succeeded");
-				expect(Date.now() - started).toBeLessThan(1500);
+				// Well before the timeout: the notification woke it.
+				expect(Date.now() - started).toBeLessThan(10_000);
 
 				// Terminal already: at once. Timeout: the current operation.
 				expect((await env.svc.waitForOperation(opId, 5000)).state).toBe(

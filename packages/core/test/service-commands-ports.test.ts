@@ -236,7 +236,12 @@ describe.skipIf(skipPg())(
 			await env.svc.touchApiActivity(s.sandboxId);
 			const third = (await sandboxRow(t.pool, s.sandboxId))
 				?.last_api_call_at as Date;
-			expect(Date.now() - third.getTime()).toBeLessThan(5_000);
+			// Moved to now() again (compared on the database clock).
+			const { rows } = await t.pool.query<{ age: number }>(
+				"SELECT extract(epoch FROM clock_timestamp() - $1::timestamptz)::float8 AS age",
+				[third],
+			);
+			expect(rows[0]?.age).toBeLessThan(5);
 			// Garbage ids are ignored.
 			await env.svc.touchApiActivity("not-a-uuid");
 		});

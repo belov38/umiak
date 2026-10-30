@@ -11,6 +11,7 @@ import {
 	type ReadySandbox,
 	readySandbox,
 	sleep,
+	until,
 } from "./helpers/commands.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -135,7 +136,7 @@ describe.skipIf(skipPg())("command control", () => {
 	});
 
 	it("input validation: sessionId and seq together, base64, no stdin", async () => {
-		const id = await start({ command: "sleep 2" });
+		const id = await start({ command: "sleep 30" });
 		const input = (json: unknown) =>
 			h.request("POST", `${sb.commands}/${id}/input`, { json });
 		expect((await input({ data: "x", sessionId: "s" })).status).toBe(400);
@@ -181,9 +182,13 @@ describe.skipIf(skipPg())("command control", () => {
 
 	it("signal: a listed signal is delivered; an unknown one is 400", async () => {
 		const id = await start({
-			command: "trap 'echo got-int; exit 7' INT; sleep 30 & wait",
+			command: "trap 'echo got-int; exit 7' INT; echo trapped; sleep 30 & wait",
 		});
-		await sleep(200);
+		// The trap is set before SIGINT is sent.
+		await until(async () => {
+			const out = await h.request("GET", `${sb.commands}/${id}/output`);
+			return out.text === "trapped\n";
+		});
 		const bad = await h.request("POST", `${sb.commands}/${id}/signal`, {
 			json: { signal: "SIGWINCH" },
 		});
@@ -196,16 +201,18 @@ describe.skipIf(skipPg())("command control", () => {
 		const c = await finalOf(id);
 		expect(c).toMatchObject({ status: "exited", exitCode: 7 });
 		const out = await h.request("GET", `${sb.commands}/${id}/output`);
-		expect(out.text).toBe("got-int\n");
+		expect(out.text).toBe("trapped\ngot-int\n");
 		await h.request("POST", `${sb.commands}/${id}/signal`, {
 			json: { signal: "SIGKILL" },
 		});
 	});
 
 	it("get: live pid and stream sizes while running", async () => {
-		const id = await start({ command: "echo hello; sleep 2" });
-		await sleep(200);
-		const g = await h.request("GET", `${sb.commands}/${id}`);
+		const id = await start({ command: "echo hello; sleep 30" });
+		const g = await until(async () => {
+			const g = await h.request("GET", `${sb.commands}/${id}`);
+			return (g.body as Any).streams.stdout.sizeBytes > 0 && g;
+		});
 		expect(g.status).toBe(200);
 		expect(g.body).toMatchObject({
 			status: "running",
@@ -223,7 +230,7 @@ describe.skipIf(skipPg())("command control", () => {
 		const s = await readySandbox(w);
 		const a = await start({ command: "true" }, s);
 		await finalOf(a, s);
-		const b = await start({ command: "sleep 3" }, s);
+		const b = await start({ command: "sleep 30" }, s);
 		const c = await h.request("POST", s.commands, {
 			json: { command: "true" },
 		});
@@ -255,7 +262,7 @@ describe.skipIf(skipPg())("command control", () => {
 
 	it("another sandbox's command under this sandbox is 404 on every route; nothing changes", async () => {
 		const other = await readySandbox(w);
-		const theirs = await start({ command: "sleep 5", stdin: true }, other);
+		const theirs = await start({ command: "sleep 30", stdin: true }, other);
 		const foreignTeam = randomUUID();
 		await db.pool.query(
 			"INSERT INTO identity.teams (id, name) VALUES ($1, $2)",
@@ -293,7 +300,7 @@ describe.skipIf(skipPg())("command control", () => {
 	});
 
 	it("scopes: commands:read reads, commands:exec is needed for input, kill, signal", async () => {
-		const id = await start({ command: "sleep 2" });
+		const id = await start({ command: "sleep 30" });
 		const k = await w.key(["commands:read"]);
 		const auth = { authorization: `Bearer ${k.secret}` };
 		expect(

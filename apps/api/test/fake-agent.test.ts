@@ -28,6 +28,7 @@ import {
 	parseAgentFileInfo,
 } from "../src/index.ts";
 import { FakeAgent } from "../src/testing/index.ts";
+import { shellGate, until, WAIT_MS } from "./helpers/commands.ts";
 import { tarEntry, tarOf } from "./helpers/files.ts";
 
 const fake = new FakeAgent();
@@ -253,12 +254,12 @@ describe("Start", () => {
 			.split("\n")
 			.map(Number);
 		expect(pids.some(pidAlive)).toBe(true);
-		await new Promise((res) => setTimeout(res, 600));
+		// The first leftover has printed "late" and ended.
+		await until(() => !pidAlive(pids[0] as number), WAIT_MS, "late leftover");
 		const info = await fake.get(m, r.commandId);
 		expect(info.streams.stdout).toEqual({ size: 5, availableFrom: 0, end: 5 });
 		await fake.kill(m, { commandId: r.commandId });
-		await new Promise((res) => setTimeout(res, 100));
-		expect(pids.some(pidAlive)).toBe(false);
+		await until(() => !pids.some(pidAlive), WAIT_MS, "leftovers killed");
 	});
 
 	it("a chatty leftover does not hold the exit for more than about a second", async () => {
@@ -271,7 +272,9 @@ describe("Start", () => {
 					"(while :; do echo noise; sleep 0.02; done) & echo $! > bg.pid; echo main",
 			}),
 		);
-		expect(Date.now() - t0).toBeLessThan(2500);
+		// The leftover never stops: without the cap (LEFTOVER_MAX_WAIT_MS, 1 s)
+		// the exit never comes. The bound leaves room for a loaded machine.
+		expect(Date.now() - t0).toBeLessThan(10_000);
 		expect(r.exit).toMatchObject({ status: "exited", code: 0 });
 		expect(r.out.stdout).toContain("main\n");
 		await fake.kill(m, { commandId: r.commandId });
@@ -289,17 +292,16 @@ describe("Start", () => {
 		const pidFile = join(fake.machine(m).home, "bg.pid");
 		const readPid = () =>
 			existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : 0;
-		for (let i = 0; i < 100 && readPid() === 0; i++) {
-			await new Promise((res) => setTimeout(res, 20));
-		}
-		const bg = readPid();
-		expect(bg).toBeGreaterThan(0);
-		await fake.kill(m, { commandId, graceMs: 300 });
+		const bg = await until(() => readPid() || null, WAIT_MS, "bg.pid");
+		const graceMs = 300;
+		const t0 = Date.now();
+		await fake.kill(m, { commandId, graceMs });
 		const r = await collect(attachAll(m, commandId));
 		expect(r.exit).toMatchObject({ status: "killed", signal: "SIGTERM" });
-		expect(pidAlive(bg)).toBe(true);
-		await new Promise((res) => setTimeout(res, 600));
-		expect(pidAlive(bg)).toBe(false);
+		// The leftover outlives SIGTERM and dies only once the grace ran out
+		// (a lower bound: a slow machine only makes it later).
+		await until(() => !pidAlive(bg), WAIT_MS, "leftover killed");
+		expect(Date.now() - t0).toBeGreaterThanOrEqual(graceMs - 20);
 	});
 
 	it("a missing program is start_failed with code 127 and the error in stderr", async () => {
@@ -343,7 +345,7 @@ describe("Start", () => {
 			const m = randomUUID();
 			await f.start(
 				m,
-				{ commandId: "a", spec: spec({ shell: "sleep 5" }) },
+				{ commandId: "a", spec: spec({ shell: "sleep 30" }) },
 				{ requestId: "r" },
 			);
 			const err = await f
@@ -440,8 +442,10 @@ describe("Attach", () => {
 		expect(tail.out.stdout).toBe("6789");
 		expect(tail.exit).toBeDefined();
 
-		const commandId = await start(m, spec({ shell: "printf ab; sleep 5" }));
-		await new Promise((r) => setTimeout(r, 300));
+		const commandId = await start(m, spec({ shell: "printf ab; sleep 30" }));
+		await until(
+			async () => (await fake.get(m, commandId)).streams.stdout?.size === 2,
+		);
 		const now = await collect(attachAll(m, commandId, {}, { follow: false }));
 		expect(now.out.stdout).toBe("ab");
 		expect(now.exit).toBeUndefined();
@@ -451,7 +455,21 @@ describe("Attach", () => {
 	it("sends heartbeats during silence", async () => {
 		const m = newMachine();
 		fake.heartbeatMs = 50;
-		const r = await run(m, spec({ shell: "sleep 0.4; echo done" }));
+		// Silent until two heartbeats came, however long that takes here.
+		const gate = shellGate();
+		const commandId = await start(
+			m,
+			spec({ shell: `${gate.shell}; echo done` }),
+		);
+		let beats = 0;
+		const r = await collect(
+			(async function* () {
+				for await (const ev of attachAll(m, commandId)) {
+					if (ev.type === "heartbeat" && ++beats === 2) gate.open();
+					yield ev;
+				}
+			})(),
+		);
 		expect(
 			r.events.filter((e) => e.type === "heartbeat").length,
 		).toBeGreaterThanOrEqual(2);
@@ -551,7 +569,7 @@ describe("Attach", () => {
 
 	it("stops when the caller aborts", async () => {
 		const m = newMachine();
-		const commandId = await start(m, spec({ shell: "sleep 5" }));
+		const commandId = await start(m, spec({ shell: "sleep 30" }));
 		const ac = new AbortController();
 		const p = collect(
 			fake.attach(
@@ -724,7 +742,7 @@ describe("faults and capabilities", () => {
 	it("an open attach breaks when the machine becomes unavailable", async () => {
 		const m = newMachine();
 		fake.heartbeatMs = 20;
-		const commandId = await start(m, spec({ shell: "sleep 5" }));
+		const commandId = await start(m, spec({ shell: "sleep 30" }));
 		const p = collect(attachAll(m, commandId)).catch((e: unknown) => e);
 		setTimeout(() => fake.setUnavailable(m, true), 50);
 		const err = await p;

@@ -219,7 +219,8 @@ def test_command_wait_and_follow_accept_a_timeout(state: dict[str, Any]) -> None
     with pytest.raises(SbxError) as e:
         c.wait(timeout=0.5)
     assert e.value.code == "wait_timeout"
-    assert time.monotonic() - t0 < 5
+    # Not at the command's end (30 s); room for a loaded machine.
+    assert time.monotonic() - t0 < 15
     with pytest.raises(SbxError) as e2:
         for _ in c.follow(timeout=0.5):
             pass
@@ -400,7 +401,8 @@ def test_wait_until_ready_ends_with_wait_timeout(client: Client, suite: str) -> 
         other.wait_until_ready(timeout=1)
     assert e.value.code == "wait_timeout"
     assert not isinstance(e.value, SandboxFailedError)
-    assert time.monotonic() - t0 < 5
+    # Room for a loaded machine; without the timeout the wait never ends.
+    assert time.monotonic() - t0 < 15
 
 
 def test_list_iterates_every_page_and_get_by_slug(

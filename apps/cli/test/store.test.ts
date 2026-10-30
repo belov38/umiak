@@ -251,7 +251,8 @@ describe("withFileLock", () => {
 		utimesSync(lock, old, old);
 		const started = Date.now();
 		expect(await withFileLock(lock, async () => "got")).toBe("got");
-		expect(Date.now() - started).toBeLessThan(1000);
+		// At once, not after a lock wait (room for a loaded machine).
+		expect(Date.now() - started).toBeLessThan(10_000);
 	});
 
 	it("writes a unique owner token into the lock", async () => {
@@ -337,7 +338,8 @@ describe("getBearer refresh", () => {
 				refreshTimeoutMs: 200,
 			}),
 		).rejects.toMatchObject({ code: "network_error", retryable: true });
-		expect(Date.now() - started).toBeLessThan(2000);
+		// The hanging request never ends by itself (room for a loaded machine).
+		expect(Date.now() - started).toBeLessThan(10_000);
 		expect(existsSync(lock)).toBe(false);
 	});
 

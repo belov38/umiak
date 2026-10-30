@@ -2,6 +2,9 @@
 // stream read line by line while it is open (frames validated against the
 // document), and folding frames into the bytes of each stream.
 import { createHash } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { encodeUuid } from "@sbx/auth";
 import type { Frame } from "../../src/index.ts";
 import { assertConforms, assertRequestConforms } from "./conformance.ts";
@@ -253,3 +256,45 @@ export function sha256(b: Uint8Array | string): string {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * The budget of a condition wait. It only bounds a hang: the condition, not
+ * the time, is what a test checks, so it is far above what any wait takes
+ * on an idle machine and leaves room for a heavily loaded one.
+ */
+export const WAIT_MS = 30_000;
+
+/**
+ * Polls `fn` (sync or async) every 10 ms until it returns a value other than
+ * undefined, null or false; throws after `ms`.
+ */
+export async function until<T>(
+	fn: () =>
+		| T
+		| undefined
+		| null
+		| false
+		| Promise<T | undefined | null | false>,
+	ms = WAIT_MS,
+	what = "condition",
+): Promise<T> {
+	const end = Date.now() + ms;
+	for (;;) {
+		const v = await fn();
+		if (v !== undefined && v !== null && v !== false) return v;
+		if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+		await sleep(10);
+	}
+}
+
+/**
+ * A file the test creates to let a command go on: `shell` waits for it
+ * (the FakeAgent runs commands in the host shell), `open()` creates it.
+ */
+export function shellGate(): { shell: string; open(): void } {
+	const path = join(mkdtempSync(join(tmpdir(), "sbx-gate-")), "open");
+	return {
+		shell: `while [ ! -e '${path}' ]; do sleep 0.01; done`,
+		open: () => writeFileSync(path, ""),
+	};
+}

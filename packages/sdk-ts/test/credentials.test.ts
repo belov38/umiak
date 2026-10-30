@@ -224,21 +224,24 @@ describe("sbx auth token --json", () => {
 	it("an abort ends the wait for a slow sbx; the run goes on for others", async () => {
 		await sbx.setOutput(profile());
 		const c = await resolveCredentials({ env: sbx.env });
-		await sbx.setSleep(1);
+		await sbx.setSleep(2);
 		const ac = new AbortController();
-		const started = Date.now();
 		const aborted = c.getToken(true, ac.signal).catch((e: unknown) => e);
-		const other = c.getToken(true);
+		let otherDone = false;
+		const other = c.getToken(true).finally(() => {
+			otherDone = true;
+		});
 		setTimeout(() => ac.abort(), 50);
 		expect(await aborted).toMatchObject({ name: "AbortError" });
-		expect(Date.now() - started).toBeLessThan(800);
+		// The abort did not wait for the run, which still goes on.
+		expect(otherDone).toBe(false);
 		expect(await other).toBe("jwt-1");
 		expect(await sbx.calls()).toHaveLength(2);
 	});
 
 	it("an sbx that hangs past the timeout is killed (SIGKILL) and fails", async () => {
 		await sbx.setOutput(profile());
-		await sbx.setSleep(10, { ignoreTerm: true });
+		await sbx.setSleep(30, { ignoreTerm: true });
 		const started = Date.now();
 		const err = await runAuthCommand(
 			["sbx", "auth", "token", "--json"],
@@ -249,7 +252,8 @@ describe("sbx auth token --json", () => {
 			code: "auth_command_failed",
 			message: expect.stringContaining("timed out"),
 		});
-		expect(Date.now() - started).toBeLessThan(3000);
+		// Killed, not waited for (30 s); room for a loaded machine.
+		expect(Date.now() - started).toBeLessThan(15_000);
 	});
 
 	it("authCommand replaces the default command", async () => {

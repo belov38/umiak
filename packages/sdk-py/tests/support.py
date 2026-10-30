@@ -79,7 +79,7 @@ class TestApi:
         self._control.close()
 
 
-def until(fn: Callable[[], Any], timeout: float = 10.0, what: str = "condition") -> Any:
+def until(fn: Callable[[], Any], timeout: float = 30.0, what: str = "condition") -> Any:
     """Polls ``fn`` until it returns a truthy value."""
     end = time.monotonic() + timeout
     while True:

@@ -81,7 +81,8 @@ describe.skipIf(skipPg())("GET /v1/operations/{operation}", () => {
 			"GET",
 			`/v1/operations/${op.id}?waitSeconds=20`,
 		);
-		expect(Date.now() - t1).toBeLessThan(2000);
+		// "At once": well below the 20 s wait, with room for a loaded machine.
+		expect(Date.now() - t1).toBeLessThan(10_000);
 		expect(body(done).error).toEqual({
 			code: "create_failed",
 			message: "boom",

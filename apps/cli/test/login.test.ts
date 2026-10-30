@@ -17,7 +17,7 @@ import { deviceLogin } from "../src/auth/device-grant.ts";
 import type { SecretsBackend } from "../src/auth/keychain.ts";
 import { browserCommand } from "../src/commands/login.ts";
 import { runCli as runCliInProcess } from "../src/program.ts";
-import { type CliWorld, startWorld } from "./helpers/api.ts";
+import { type CliWorld, startWorld, until } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 import { startTlsFront, type TlsFront } from "./helpers/tls.ts";
 
@@ -255,14 +255,10 @@ describe("sbx login", () => {
 			const run = runCli(["login", "--no-browser", "--api-url", w2.url], {
 				env: home.env,
 			});
-			let code: string | undefined;
-			for (let i = 0; i < 100 && code === undefined; i++) {
-				await new Promise((r) => setTimeout(r, 50));
-				code = oidc.deviceFlow.pending()[0];
-			}
-			expect(code).toBeDefined();
-			await new Promise((r) => setTimeout(r, 1600));
-			oidc.deviceFlow.approve(code as string, {
+			const code = await until(async () => oidc.deviceFlow.pending()[0]);
+			// The CLI has polled at least once and got authorization_pending.
+			await until(async () => (oidc.stats.token >= 1 ? true : undefined));
+			oidc.deviceFlow.approve(code, {
 				sub,
 				email: `${sub}@example.com`,
 			});
@@ -303,13 +299,8 @@ describe("sbx login", () => {
 		const run = runCli(["login", "--no-browser", "--api-url", w.url], {
 			env: home.env,
 		});
-		let code: string | undefined;
-		for (let i = 0; i < 200 && code === undefined; i++) {
-			await new Promise((r) => setTimeout(r, 20));
-			code = w.oidc.deviceFlow.pending()[0];
-		}
-		expect(code).toBeDefined();
-		w.oidc.deviceFlow.deny(code as string);
+		const code = await until(async () => w.oidc.deviceFlow.pending()[0]);
+		w.oidc.deviceFlow.deny(code);
 		const r = await run;
 		expect(r.code).toBe(4);
 		expect(r.last()).toMatchObject({

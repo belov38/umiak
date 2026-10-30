@@ -98,7 +98,8 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
 			reject(new Error(`sbx ${args.join(" ")} timed out\n${stderr}`));
-		}, o.timeoutMs ?? 20_000);
+			// A hang guard only; a spawn on a loaded machine can take seconds.
+		}, o.timeoutMs ?? 60_000);
 		child.on("error", reject);
 		child.on("close", (code) => {
 			clearTimeout(timer);

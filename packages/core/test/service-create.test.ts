@@ -73,10 +73,11 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 			fromPool: true,
 			failFast: false,
 		});
-		// 2 min deadline for a linux pool claim.
-		const ms = (operation.deadlineAt?.getTime() ?? 0) - Date.now();
-		expect(ms).toBeGreaterThan(100_000);
-		expect(ms).toBeLessThanOrEqual(120_000);
+		// 2 min deadline for a linux pool claim (both are now() of the insert,
+		// on the database clock).
+		const ms =
+			(operation.deadlineAt?.getTime() ?? 0) - operation.createdAt.getTime();
+		expect(ms).toBe(120_000);
 
 		const m = await machineRow(t.pool, older);
 		expect(m).toMatchObject({
@@ -155,10 +156,10 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 			memory_mb: 4096,
 		});
 		expect(operation.request).toMatchObject({ fromPool: false, size: "4gb" });
-		// Windows cold create: 20 min.
-		const ms = (operation.deadlineAt?.getTime() ?? 0) - Date.now();
-		expect(ms).toBeGreaterThan(19 * 60_000);
-		expect(ms).toBeLessThanOrEqual(20 * 60_000);
+		// Windows cold create: 20 min after the insert.
+		const ms =
+			(operation.deadlineAt?.getTime() ?? 0) - operation.createdAt.getTime();
+		expect(ms).toBe(20 * 60_000);
 		expect(env.jobs.sent).toHaveLength(1);
 	});
 

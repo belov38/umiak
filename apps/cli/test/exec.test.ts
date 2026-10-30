@@ -143,7 +143,7 @@ describe("exec, logs, kill, ps, run", () => {
 					"--",
 					"yes sbx-pipe-test",
 				],
-				{ env, closeStdoutAfter: 1, timeoutMs: 20_000 },
+				{ env, closeStdoutAfter: 1 },
 			);
 			expect(r.code, r.stderr).toBe(141);
 			expect(r.stderr).toBe("");

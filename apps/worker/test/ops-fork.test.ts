@@ -16,6 +16,7 @@ import {
 import { blockAfter } from "./fakes/crash.ts";
 import { createWorld, type TestWorld } from "./fakes/world.ts";
 import {
+	dbNow,
 	disconnectAgent,
 	ENV,
 	type Forked,
@@ -138,7 +139,7 @@ describe("fork of a running source", () => {
 
 		// Hand-off: the target's create got its deadline (cold, 6 min) and a job.
 		const createOp = await row(w, "operations", f.createOpId);
-		const left = (createOp.deadline_at as Date).getTime() - Date.now();
+		const left = (createOp.deadline_at as Date).getTime() - (await dbNow(w));
 		expect(left).toBeGreaterThan(350_000);
 		expect(left).toBeLessThanOrEqual(360_000);
 		const jobs = sandboxOpJobs(w, f.createOpId);

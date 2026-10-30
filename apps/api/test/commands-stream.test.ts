@@ -12,6 +12,9 @@ import {
 	type ReadySandbox,
 	readySandbox,
 	sha256,
+	shellGate,
+	until,
+	WAIT_MS,
 } from "./helpers/commands.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -96,13 +99,19 @@ describe.skipIf(skipPg())("command streams", () => {
 			type: "error",
 			code: "agent_unavailable",
 			retryable: true,
-			stdoutOffset: 150_001,
+			stdoutOffset: expect.any(Number),
 			stderrOffset: expect.any(Number),
 		});
 		expect(last.requestId).toBe(s.headers.get("request-id"));
 		expect(last.ptyOffset).toBeUndefined();
+		// The fake counts data bytes of both streams. When the attach lags
+		// behind the command (a loaded machine), stderr "tail\n" may come
+		// before the budget is reached: the split between the streams is
+		// timing, their sum and the delivered bytes are not.
+		expect(last.stdoutOffset + last.stderrOffset).toBe(150_001);
 		const head = bytesOf(frames);
-		expect(head.stdout.length).toBe(150_001);
+		expect(head.stdout.length).toBe(last.stdoutOffset);
+		expect(head.stderr.length).toBe(last.stderrOffset);
 
 		const id = commandIdOf(frames);
 		const again = await openStream(
@@ -115,7 +124,8 @@ describe.skipIf(skipPg())("command streams", () => {
 		expect(rest[0]).toMatchObject({
 			type: "attached",
 			commandId: id,
-			stdoutOffset: 150_001,
+			stdoutOffset: last.stdoutOffset,
+			stderrOffset: last.stderrOffset,
 			encoding: "utf8",
 		});
 		const tail = bytesOf(rest, "utf8", {
@@ -301,8 +311,14 @@ describe.skipIf(skipPg())("command streams", () => {
 				},
 			},
 		});
-		const s = await stream({ command: "sleep 0.45; echo x" }, fast);
-		const frames = await s.rest();
+		// Silent until two heartbeats came, however long that takes here.
+		const gate = shellGate();
+		const s = await stream({ command: `${gate.shell}; echo x` }, fast);
+		await s.until((f) => f.type === "heartbeat");
+		await s.until((f) => f.type === "heartbeat");
+		gate.open();
+		await s.rest();
+		const frames = s.frames;
 		const beats = frames.filter((f) => f.type === "heartbeat").length;
 		expect(beats).toBeGreaterThanOrEqual(2);
 		expect(frames.map((f) => f.type).at(-1)).toBe("exit");
@@ -319,27 +335,31 @@ describe.skipIf(skipPg())("command streams", () => {
 				},
 			},
 		});
+		// "second" only after the reconnect. Whether "first" made it before
+		// the 300 ms is timing: the offsets must match what was delivered.
+		const gate = shellGate();
 		const s = await stream(
-			{ command: "echo first; sleep 0.8; echo second" },
+			{ command: `echo first; ${gate.shell}; echo second` },
 			short,
 		);
 		const frames = await s.rest();
 		const last = frames.at(-1) as Any;
+		const head = bytesOf(frames).stdout;
 		expect(last).toMatchObject({
 			type: "reconnect",
 			reason: "max_duration",
-			stdoutOffset: 6,
+			stdoutOffset: head.length,
 			stderrOffset: 0,
 		});
+		gate.open();
 		const again = await openStream(
 			h,
 			"GET",
-			`${sb.commands}/${commandIdOf(frames)}/stream?stdoutOffset=6&stderrOffset=0`,
+			`${sb.commands}/${commandIdOf(frames)}/stream?stdoutOffset=${head.length}&stderrOffset=0`,
 		);
 		const rest = await again.rest();
-		expect(bytesOf(rest, "utf8", { stdout: 6 }).stdout.toString()).toBe(
-			"second\n",
-		);
+		const tail = bytesOf(rest, "utf8", { stdout: head.length }).stdout;
+		expect(Buffer.concat([head, tail]).toString()).toBe("first\nsecond\n");
 		expect(rest.at(-1)).toMatchObject({ type: "exit", stdoutOffset: 13 });
 	});
 
@@ -390,11 +410,13 @@ describe.skipIf(skipPg())("command streams", () => {
 	});
 
 	it("output dropped by the agent (output_truncated): exit frame, Command and sync answer carry outputTruncated", async () => {
-		const s = await stream({ command: "sleep 0.3; echo x" });
+		const gate = shellGate();
+		const s = await stream({ command: `${gate.shell}; echo x` });
 		const started = (await s.next()) as Any;
 		expect(started.type).toBe("started");
 		const pub = started.commandId as string;
 		w.agent.truncateOutput(pub.slice(4).toUpperCase(), "disk_full");
+		gate.open();
 		const frames = await s.rest();
 		expect(frames.at(-1)).toMatchObject({
 			type: "exit",
@@ -415,14 +437,11 @@ describe.skipIf(skipPg())("command streams", () => {
 	});
 
 	it("the client going away ends the stream and frees its registry slot", async () => {
-		const s = await stream({ command: "sleep 5" });
+		const s = await stream({ command: "sleep 30" });
 		await s.next();
 		expect(h.deps.streams.size).toBe(1);
 		await s.cancel();
-		for (let i = 0; i < 50 && h.deps.streams.size > 0; i++) {
-			await new Promise((r) => setTimeout(r, 20));
-		}
-		expect(h.deps.streams.size).toBe(0);
+		await until(() => h.deps.streams.size === 0, WAIT_MS, "slot freed");
 	});
 
 	it("HEAD of /stream answers no body and frees its registry slot", async () => {
@@ -436,9 +455,6 @@ describe.skipIf(skipPg())("command streams", () => {
 		});
 		expect(head.status).toBe(200);
 		expect(head.body).toBeNull();
-		for (let i = 0; i < 50 && h.deps.streams.size > 0; i++) {
-			await new Promise((r) => setTimeout(r, 20));
-		}
-		expect(h.deps.streams.size).toBe(0);
+		await until(() => h.deps.streams.size === 0, WAIT_MS, "slot freed");
 	});
 });

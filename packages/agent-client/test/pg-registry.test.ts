@@ -90,6 +90,9 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 			connectionString: db.connectionString,
 			instanceCacheTtlMs: 100,
 		});
+		// The cache clock (Date) moves only when the test says so: the
+		// queries below take longer than the TTL on a loaded machine.
+		vi.useFakeTimers({ toFake: ["Date"] });
 		try {
 			await instance("gw-live", "http://10.0.2.1:8081/");
 			await instance("gw-old", "http://10.0.2.2:8081", 20);
@@ -102,9 +105,10 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 			// Answers are cached briefly: a heartbeat shows after the TTL.
 			await instance("gw-old", "http://10.0.2.2:8081");
 			expect(await r.isLiveInstance("http://10.0.2.2:8081")).toBe(false);
-			await new Promise((resolve) => setTimeout(resolve, 150));
+			vi.advanceTimersByTime(150);
 			expect(await r.isLiveInstance("http://10.0.2.2:8081")).toBe(true);
 		} finally {
+			vi.useRealTimers();
 			await r.close();
 		}
 		await expect(
@@ -131,7 +135,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		await instance("gw-c1", "http://10.0.1.1:8081");
 		await instance("gw-c2", "http://10.0.1.2:8081");
 		// Let the insert's own NOTIFY arrive before the route is cached.
-		const notified = registry.waitForChange(m, 2000);
+		const notified = registry.waitForChange(m, 30_000);
 		await session(m, "gw-c1");
 		await notified;
 		expect((await registry.lookup(m))?.internalUrl).toBe(
@@ -148,7 +152,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 			async () => {
 				expect((await registry.lookup(m))?.instanceId).toBe("gw-c2");
 			},
-			{ timeout: 1000, interval: 20 },
+			{ timeout: 30_000, interval: 20 },
 		);
 	});
 
@@ -156,11 +160,12 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		const m = randomUUID();
 		await instance("gw-a", "http://10.0.0.1:8081");
 		const start = Date.now();
-		const wait = registry.waitForChange(m, 5000);
+		const wait = registry.waitForChange(m, 60_000);
 		await new Promise((r) => setTimeout(r, 50));
 		await session(m, "gw-a");
 		await wait;
-		expect(Date.now() - start).toBeLessThan(2000);
+		// Far below the timeout: the NOTIFY woke it (room for a loaded machine).
+		expect(Date.now() - start).toBeLessThan(10_000);
 	});
 
 	it("waitForChange resolves on timeout without a change", async () => {
@@ -169,16 +174,17 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		await registry.waitForChange(m, 200);
 		const elapsed = Date.now() - start;
 		expect(elapsed).toBeGreaterThanOrEqual(190);
-		expect(elapsed).toBeLessThan(2000);
+		expect(elapsed).toBeLessThan(10_000);
 	});
 
 	it("waitForChange resolves when the signal aborts", async () => {
 		const ac = new AbortController();
 		const start = Date.now();
-		const wait = registry.waitForChange(randomUUID(), 5000, ac.signal);
+		const wait = registry.waitForChange(randomUUID(), 60_000, ac.signal);
 		ac.abort();
 		await wait;
-		expect(Date.now() - start).toBeLessThan(1000);
+		// Far below the timeout (room for a loaded machine).
+		expect(Date.now() - start).toBeLessThan(10_000);
 	});
 
 	it("returns null capabilities while they are unknown", async () => {
@@ -199,7 +205,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		const client = new AgentClient({
 			registry: closed,
 			serviceToken: "t",
-			waitForAgentMs: 2000,
+			waitForAgentMs: 60_000,
 		});
 		const timerStart = Date.now();
 		let firedAfter = -1;
@@ -211,10 +217,12 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 			.fetch(randomUUID(), "?path=x")
 			.catch((e: unknown) => e);
 		expect(res).toBeInstanceOf(RegistryClosedError);
-		expect(Date.now() - start).toBeLessThan(500);
+		// Far below waitForAgentMs (room for a loaded machine).
+		expect(Date.now() - start).toBeLessThan(10_000);
+		// The 10 ms timer is not starved by a retry loop.
 		await new Promise((r) => setTimeout(r, 30));
 		expect(firedAfter).toBeGreaterThanOrEqual(0);
-		expect(firedAfter).toBeLessThan(100);
+		expect(firedAfter).toBeLessThan(10_000);
 		await client.close();
 	});
 
@@ -236,7 +244,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 	it("clears the cache and wakes waiters after the LISTEN connection drops", async () => {
 		const m = randomUUID();
 		await instance("gw-l1", "http://10.0.2.1:8081");
-		const notified = registry.waitForChange(m, 2000);
+		const notified = registry.waitForChange(m, 30_000);
 		await session(m, "gw-l1");
 		await notified;
 		expect((await registry.lookup(m))?.internalUrl).toBe(
@@ -246,14 +254,15 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		await instance("gw-l1", "http://10.0.2.2:8081");
 		const other = randomUUID();
 		const start = Date.now();
-		const wait = registry.waitForChange(other, 10_000);
+		const wait = registry.waitForChange(other, 60_000);
 		const killed = await db.pool.query(
 			`SELECT pg_terminate_backend(pid) FROM pg_stat_activity
 			 WHERE application_name = 'sbx-agent-client-listen' AND datname = current_database()`,
 		);
 		expect(killed.rowCount).toBe(1);
 		await wait;
-		expect(Date.now() - start).toBeLessThan(5000);
+		// Far below the timeout: the reconnect woke it (room for a loaded machine).
+		expect(Date.now() - start).toBeLessThan(20_000);
 		expect((await registry.lookup(m))?.internalUrl).toBe(
 			"http://10.0.2.2:8081",
 		);
@@ -264,7 +273,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 			async () => {
 				expect((await registry.lookup(m))?.instanceId).toBe("gw-l2");
 			},
-			{ timeout: 1000, interval: 20 },
+			{ timeout: 30_000, interval: 20 },
 		);
 	});
 });

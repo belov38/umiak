@@ -216,12 +216,13 @@ describe("AgentClient.fetch", () => {
 		});
 		const start = Date.now();
 		const res = await agent({
-			pollIntervalMs: 10_000,
-			waitForAgentMs: 20_000,
+			pollIntervalMs: 60_000,
+			waitForAgentMs: 60_000,
 		}).fetch(m, "?path=/data/f.bin");
 		expect(res.status).toBe(200);
 		expect((await readAll(res)).length).toBe(file.length);
-		expect(Date.now() - start).toBeLessThan(2000);
+		// Far below the poll interval (room for a loaded machine).
+		expect(Date.now() - start).toBeLessThan(20_000);
 	});
 
 	it("resends a Uint8Array upload body after 421", async () => {
@@ -342,7 +343,8 @@ describe("AgentClient.fetch", () => {
 			.catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(TypeError);
 		expect(err).not.toBeInstanceOf(AgentUnavailableError);
-		expect(Date.now() - start).toBeLessThan(500);
+		// Far below the 30 s waitForAgentMs (room for a loaded machine).
+		expect(Date.now() - start).toBeLessThan(10_000);
 		expect(fileRequests(a)).toHaveLength(0);
 	});
 

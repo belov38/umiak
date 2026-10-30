@@ -395,7 +395,9 @@ describe("retry budget of interactive commands", () => {
 				},
 			});
 			expect(r.code, r.stderr).toBe(EXIT_TEMPORARY);
-			expect(Date.now() - started).toBeLessThan(6000);
+			// Within the 1 s budget plus the CLI's start, far below the 60 s
+			// default (room for a loaded machine).
+			expect(Date.now() - started).toBeLessThan(20_000);
 			expect(hits).toBeGreaterThan(1);
 		} finally {
 			home.rm();

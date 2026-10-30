@@ -15,6 +15,8 @@ import {
 	type ReadySandbox,
 	readySandbox,
 	sleep,
+	until,
+	WAIT_MS,
 } from "./helpers/commands.ts";
 import type { Harness } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -155,7 +157,8 @@ describe.skipIf(skipPg())("Idempotency-Key on POST /commands", () => {
 				headers: { "idempotency-key": k },
 			}),
 			(async () => {
-				await sleep(100);
+				// The first request has reserved the key and called Start.
+				await until(() => requestIds.length === 1, WAIT_MS, "first Start");
 				return h.request("POST", sb.commands, {
 					json: body,
 					headers: { "idempotency-key": k },

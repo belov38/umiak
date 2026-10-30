@@ -22,25 +22,19 @@ import {
 	type Any,
 	type ReadySandbox,
 	readySandbox,
-	sleep,
+	until,
+	WAIT_MS,
 } from "./helpers/commands.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
 const ECHO = `while IFS= read -r l; do printf '%s\\n' "$l"; [ "$l" = bye ] && exit 0; done`;
 
-async function until<T>(
-	fn: () => T | undefined | null | false,
-	ms = 5000,
-	what = "condition",
-): Promise<T> {
-	const end = Date.now() + ms;
-	for (;;) {
-		const v = fn();
-		if (v !== undefined && v !== null && v !== false) return v;
-		if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-		await sleep(10);
-	}
-}
+/**
+ * "At once" in these tests: well below the drain deadline, so a close that
+ * waited for the deadline fails, with room for a loaded machine's
+ * scheduling delays (a few hundred ms there are not a defect).
+ */
+const AT_ONCE_MS = SHUTDOWN_GRACE_MS / 2;
 
 /** NDJSON frames of a streaming response, read as they arrive. */
 function ndjson(res: Response) {
@@ -164,13 +158,13 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 
 		const streamRes = await c.post(sb.commands, {
 			mode: "stream",
-			command: "echo a; sleep 5",
+			command: "echo a; sleep 30",
 		});
 		expect(streamRes.status).toBe(200);
 		const stream = ndjson(streamRes);
 		await until(
 			() => stream.frames.some((f) => f.type === "stdout"),
-			5000,
+			WAIT_MS,
 			"stdout",
 		);
 
@@ -199,19 +193,23 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 			ws.once("open", () => r());
 			ws.once("error", j);
 		});
-		await until(() => texts.length > 0, 5000, "attached");
+		await until(() => texts.length > 0, WAIT_MS, "attached");
 		ws.send(Buffer.from("abc\n"));
-		await until(() => echoed === 4, 5000, "echo");
+		await until(() => echoed === 4, WAIT_MS, "echo");
 
 		const keyed = c.post(
 			sb.commands,
-			{ command: "sleep 5" },
+			{ command: "sleep 30" },
 			{ "idempotency-key": `k-${randomUUID()}` },
 		);
-		const plain = c.post(sb.commands, { command: "sleep 5" });
+		const plain = c.post(sb.commands, { command: "sleep 30" });
 		// The stream, the PTY and both syncs are registered, and both syncs got
 		// past the agent Start (status running), so they are mid-wait.
-		await until(() => api.deps.streams.size === 4, 5000, "4 open connections");
+		await until(
+			() => api.deps.streams.size === 4,
+			WAIT_MS,
+			"4 open connections",
+		);
 		let running = 0;
 		await until(
 			() => {
@@ -265,7 +263,7 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 
 		await closing;
 		// Nothing hangs here: no waiting for the deadline.
-		expect(Date.now() - t0).toBeLessThan(2000);
+		expect(Date.now() - t0).toBeLessThan(AT_ONCE_MS);
 		expect(api.deps.streams.size).toBe(0);
 	});
 
@@ -301,7 +299,7 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 		expect(refused).toMatch(/\r\nretry-after: 1\r\n/i);
 		expect(refused).toContain('"retryAfterSeconds":1');
 		await kept.closed;
-		expect(Date.now() - t0).toBeLessThan(2000);
+		expect(Date.now() - t0).toBeLessThan(AT_ONCE_MS);
 
 		const ready = await fetch(`http://127.0.0.1:${api.ports.metrics}/readyz`);
 		expect(ready.status).toBe(503);
@@ -337,7 +335,7 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 		expect(r.status).toBe(200);
 		const t0 = Date.now();
 		await api.close();
-		expect(Date.now() - t0).toBeLessThan(1000);
+		expect(Date.now() - t0).toBeLessThan(AT_ONCE_MS);
 		// A second close is the same promise.
 		await api.close();
 	});
