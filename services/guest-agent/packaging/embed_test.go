@@ -54,9 +54,10 @@ func TestUnitsMatchSpec(t *testing.T) {
 		// restart is direct; the rollback must wait for StartLimitBurst.
 		"RestartMode=direct",
 		"RestartSec=1",
-		// A version that hangs while starting is killed early, so its
+		// Above the identity fallbacks (up to 60 s) before READY=1; a
+		// version that hangs while starting is still killed, so its
 		// restarts reach the update deadline and StartLimitBurst.
-		"TimeoutStartSec=30",
+		"TimeoutStartSec=90",
 		"TimeoutStopSec=15",
 		"StartLimitIntervalSec=120",
 		"StartLimitBurst=5",

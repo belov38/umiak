@@ -593,7 +593,7 @@ Not a task of this plan's execution order: when the master allows, install the p
 - **Template contract for S5 (Task 18).** Ubuntu's `~/.bash_logout` clears the screen on login-shell exit, which breaks byte-exact output for `bash -lc ...; exit`. The template must remove `/etc/skel/.bash_logout` and `/home/user/.bash_logout`. The agent is unchanged. The stand also showed that template 599 runs cloud-init, which resets the hostname of a fork; per spec §20 cloud-init must not manage hostname or host keys (S5 plans `/etc/cloud/cloud-init.disabled`).
 - **Shim memory (Task 18).** The 8 MiB target is read as private (non-shared) memory: 3.4-7.2 MiB in the container, 2.9 MiB in the VM. Total VmRSS is 13-17 MiB because the binary's file pages are shared.
 - **systemd restart mode (Task 18).** Spec §17.2 is amended with `RestartMode=direct`: with systemd >= 254 `OnFailure` fires on every auto-restart otherwise.
-- **Recover of an unlaunched command (Task 20).** After a restart in the same boot, a `STARTING` record with no `shim.json` and no unit stays `STARTING` and holds no slot, so the caller's retry of `Start` launches it once (spec §9.2 step 5). After a reboot it is `LOST/REBOOT`. A record nobody retries stays `STARTING`.
+- **Recover of an unlaunched command (Task 20).** After a restart in the same boot, a `STARTING` record with no `shim.json` and no unit stays `STARTING` and holds no slot, so the caller's retry of `Start` launches it once (spec §9.2 step 5). After a reboot it is `LOST/REBOOT`. A record nobody retries ends after 24 h (see Post-acceptance fixes).
 - **Task 17b: worker adapter.** `apps/worker/src/adapters/agent-connect.ts` (`ConnectAgentPort`, on `@sbx/agent-client` and `@sbx/proto/agent/v1`) replaces `UnavailableAgentPort` in the worker wiring when `SBX_GATEWAY_SERVICE_TOKEN_FILE` is set. Claim, `updateEnv` and `updateSecrets` send `Sbx-Request-Id`; the quiesce hook uses one request id per hook for freeze and one for thaw, keeps the outcome of the first thaw that reached the agent (a retried `hook.thaw()` cannot accept an invalid snapshot), and maps `auto_thawed` to `QuiesceFailed`. Only `ClaimReason.CLAIM` is mapped, since `ports.ts` allows only `"claim"`.
 
 ### Extra detail codes (beyond spec §19)
@@ -612,11 +612,28 @@ Not a task of this plan's execution order: when the master allows, install the p
 
 - **Worker settings for Claim (B1, note for the master).** New optional worker env vars `SBX_PORT_DOMAIN` (e.g. `sbx.example.com`) and `SBX_SSH_USER_CA_KEYS_FILE` (a file with one CA public key per line; blank lines and `#` comments skipped). `ConnectAgentPort` sends them as `port_domain` and `ssh_user_ca_keys` on every Claim; unset means empty. Before this, production claims never set `SBX_PORT_DOMAIN` in the guest nor `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`.
 - **Quiesce hook after a lost freeze response (B5).** When `Quiesce` failed with `AgentUnavailable`, `thaw()` reads `System/Info` and thaws the active lease; a failed lookup leaves it to the watchdog.
-- **Start timeout and early update deadline (C2).** `TimeoutStartSec=30` is added to `sbx-agent.service` and spec §17.2. The confirmation deadline of an unconfirmed update is armed right after quiesce Startup (`update.StartGuard`), not only in `CheckPending`: an expired deadline reverts at once, a new version that hangs in startup is reverted by the timer.
+- **Start timeout and early update deadline (C2).** `TimeoutStartSec=30` (raised to 90 later, see Post-acceptance fixes) is added to `sbx-agent.service` and spec §17.2. The confirmation deadline of an unconfirmed update is armed right after quiesce Startup (`update.StartGuard`), not only in `CheckPending`: an expired deadline reverts at once, a new version that hangs in startup is reverted by the timer.
 - **Shutdown during a lease (C3).** The watchdog unit thaws at once on SIGTERM; the agent thaws its own active lease before it exits (`quiesce.auto_thawed{by: agent_stop}`, a new `by` value). A normal release deletes the lease file before it stops the watchdog unit, so the stop signal finds nothing to thaw.
 - **Kill of an unlaunched command (A3).** `Kill` on a `STARTING` record that was never launched ends it as `KILLED/SIGNAL`; a later `Start` retry returns it without launching. `Kill` with `grace_ms 0` on a live unit with an unreachable shim kills the cgroup (A7). The retry of a kept `STARTING` record takes a slot under `max_running_commands` (A6).
 - **Request cache (C5).** An error returned after the call context ended is not cached, whatever its code; a success still is.
 - **Uploaded update package (C7).** A package in `staging/` is deleted after `ApplyUpdate`, also after a failure; a retry needs a new upload.
+
+### Post-acceptance fixes (2026-10-30)
+
+- **Full disk on claim.** Claim, `UpdateEnv`, `UpdateSecrets` and `UpdateSshCa` return `resource_exhausted/no_space` when a write fails with ENOSPC or EDQUOT (`/etc/sbx/env`, hostname and hosts, SSH CA file, the secrets tmpfs, the claim record in `state.db`), instead of `internal` (`errs.Wrap`, `errs.IsNoSpace`).
+- **Output dropped on a full disk.** The shim keeps draining the pipe when a log write fails, so the command never blocks; bytes lost to ENOSPC/EDQUOT are counted per stream. `exit.json` and the shim status reply carry `outputTruncated: "disk_full"` and `droppedBytes{stream: n}` (additive JSON fields). Proto (additive): `CommandInfo.output_truncated = 14`, `ExitEvent.output_truncated = 9`, `CommandExited.output_truncated = 10` (`""` or `"disk_full"`), and the new event `output.truncated` with payload `OutputTruncated{command_id = 1; Stream stream = 2; string reason = 3}`, once per stream when the agent first learns of the loss (from the shim status when it connects, or from `exit.json`). Stream ends still equal the file sizes: dropped bytes never get offsets. A running command reports the loss only after an agent reconnect or at its exit, since the agent asks the shim for its status only on connect.
+- **Failed update upload.** `ApplyUpdate` deletes the package after success or failure also when it lies in `uploads/` (an upload never committed), and drops the upload record through `files.Service.ForgetUpload` (`update.Options.ForgetUpload`). A package outside `staging/` and `uploads/` and its record are left alone.
+- **`TimeoutStartSec=90`.** Raised from 30 in `sbx-agent.service` and spec §17.2: the start before `READY=1` may wait for the identity fallbacks (up to 60 s).
+- **Unretried `STARTING`.** An unlaunched `STARTING` record (no unit, no `shim.json`) older than 24 h (`process.Options.StartingTTL`) ends as `EXITED/START_FAILED` code 127 with the stderr line `sbx-agent: cannot start command: start was never retried within 24h`, emits `command.exited` and its stale cmd-spec file is removed. Checked in Recover and on each output janitor tick (only `STARTING` records).
+- **Spec §12.** A refused CONNECT is `502` with `Sbx-Dial-Error: refused` (or `timeout`), as implemented.
+
+### Known issues (accepted)
+
+- OOM inside a shell pipeline (child killed, main shell exits 137) reports `EXITED 137`, not `KILLED/OOM`.
+- No downgrade floor for updates: any signed older version can be applied; `min_rollback_version` is not implemented.
+- Unsalted sha256 hashes covering secrets in `state.db` (`secretsDigest`, request hashes); phase 2: HMAC with a per-VM key.
+- Quiesce thaw hooks must be idempotent: they can run twice (agent and watchdog, or after a crash during a lease).
+- Recover skips a command on a transient error (no monitor until the next agent restart); a background retry is phase 2.
 
 ### Lint fix found in Task 19
 
