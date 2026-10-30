@@ -195,6 +195,9 @@ const facts = (over: Partial<Facts> = {}): Facts => ({
 	hostname: `sbx-${hex(UUID_A).slice(-12)}`,
 	hostKey: "SHA256:aaaa",
 	ip: "10.88.0.10",
+	randomSeed: "a".repeat(64),
+	credentialSecret: "absent",
+	agentMachineId: UUID_A,
 	...over,
 });
 const forkFacts = () =>
@@ -205,6 +208,8 @@ const forkFacts = () =>
 		hostname: `sbx-${hex(UUID_F).slice(-12)}`,
 		hostKey: "SHA256:ffff",
 		ip: "10.88.0.11",
+		randomSeed: "f".repeat(64),
+		agentMachineId: UUID_F,
 	});
 
 describe("checkForkIdentity", () => {
@@ -216,6 +221,23 @@ describe("checkForkIdentity", () => {
 			"fork_hostname",
 			"fork_host_keys",
 			"fork_ip",
+			"fork_random_seed",
+			"fork_credential_secret",
+			"fork_agent_state",
+		]);
+	});
+
+	it("fails on a shared random seed, credential secret or agent state", () => {
+		const cs = checkForkIdentity(facts({ credentialSecret: "c".repeat(64) }), {
+			...forkFacts(),
+			randomSeed: "a".repeat(64),
+			credentialSecret: "c".repeat(64),
+			agentMachineId: UUID_A,
+		});
+		expect(failed(cs)).toEqual([
+			"fork_random_seed",
+			"fork_credential_secret",
+			"fork_agent_state",
 		]);
 	});
 
@@ -397,6 +419,7 @@ class World {
 	};
 	execs: { vmid: number; cmd: string[]; input?: string }[] = [];
 	hostKeyOf = (vmid: number) => `SHA256:key-${vmid}`;
+	seedOf = (vmid: number) => `seed${vmid}`.padEnd(64, "0");
 	onExec?: (vmid: number, cmd: string[]) => void;
 
 	machines: VerifyDeps["machines"] = {
@@ -525,6 +548,9 @@ class World {
 							`product_uuid=${uuid.toUpperCase()}`,
 							`hostname=sbx-${hex(uuid).slice(-12)}`,
 							`host_key=${this.hostKeyOf(vmid)}`,
+							`random-seed=${this.seedOf(vmid)}`,
+							"credential.secret=absent",
+							`agent_machine_id=${uuid}`,
 							"",
 						].join("\n"),
 					);

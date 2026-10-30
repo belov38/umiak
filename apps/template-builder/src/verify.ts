@@ -271,6 +271,12 @@ export interface Facts {
 	hostKey: string;
 	/** DHCP IPv4 */
 	ip: string;
+	/** sha256 of /var/lib/systemd/random-seed, or "absent". */
+	randomSeed: string;
+	/** sha256 of /var/lib/systemd/credential.secret, or "absent". */
+	credentialSecret: string;
+	/** machineId in the agent's /var/lib/sbx-agent/identity.json. */
+	agentMachineId: string;
 }
 
 /** A fork must not share its source's identity (spec section 2 anti-goals). */
@@ -297,6 +303,23 @@ export function checkForkIdentity(a: Facts, f: Facts): CheckResult[] {
 			`A ${a.hostKey}, F ${f.hostKey}`,
 		),
 		pass("fork_ip", differ(a.ip, f.ip), `A ${a.ip}, F ${f.ip}`),
+		pass(
+			"fork_random_seed",
+			differ(a.randomSeed, f.randomSeed) && a.randomSeed !== "absent",
+			`A ${a.randomSeed.slice(0, 16)}, F ${f.randomSeed.slice(0, 16)}`,
+		),
+		pass(
+			"fork_credential_secret",
+			(a.credentialSecret === "absent" && f.credentialSecret === "absent") ||
+				differ(a.credentialSecret, f.credentialSecret),
+			`A ${a.credentialSecret.slice(0, 16)}, F ${f.credentialSecret.slice(0, 16)}`,
+		),
+		pass(
+			"fork_agent_state",
+			uuidHex(a.agentMachineId) === uuidHex(a.uuid) &&
+				uuidHex(f.agentMachineId) === uuidHex(f.uuid),
+			`A ${a.agentMachineId || "none"}, F ${f.agentMachineId || "none"}`,
+		),
 	];
 }
 
@@ -426,6 +449,10 @@ const FACTS_SCRIPT = [
 	'echo "product_uuid=$(cat /sys/class/dmi/id/product_uuid)"',
 	'echo "hostname=$(hostname)"',
 	"echo \"host_key=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{ print $2 }')\"",
+	"for f in random-seed credential.secret; do",
+	'  if [ -e "/var/lib/systemd/$f" ]; then echo "$f=$(sha256sum "/var/lib/systemd/$f" | cut -d" " -f1)"; else echo "$f=absent"; fi',
+	"done",
+	'echo "agent_machine_id=$(grep -o \'"machineId": *"[^"]*"\' /var/lib/sbx-agent/identity.json | cut -d\'"\' -f4)"',
 ].join("\n");
 
 const DOCKER_SCRIPT = "docker info >/dev/null && docker run --rm hello-world";
@@ -563,6 +590,9 @@ export async function verifyTemplate(
 			hostname: kv.hostname ?? "",
 			hostKey: kv.host_key ?? "",
 			ip: c.ready?.ip ?? "",
+			randomSeed: kv["random-seed"] ?? "",
+			credentialSecret: kv["credential.secret"] ?? "",
+			agentMachineId: kv.agent_machine_id ?? "",
 		};
 	};
 
