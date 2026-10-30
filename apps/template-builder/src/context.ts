@@ -59,6 +59,8 @@ export async function makeContext(over: { node?: string } = {}): Promise<Ctx> {
 		host: cfg.nodeSshHost,
 		privateKey: readFileSync(cfg.nodeSshKeyFile),
 		knownHosts: readFileSync(cfg.nodeSshKnownHosts, "utf8"),
+		// lv.scan reads a whole 64 GiB disk.
+		callTimeoutMs: 15 * 60_000,
 	});
 	const store = new SqliteStateStore(cfg.stateDb);
 	let machines: Machines | undefined;

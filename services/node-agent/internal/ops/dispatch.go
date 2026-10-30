@@ -53,6 +53,8 @@ type Server struct {
 	Host    Host
 	Log     func(string)
 	Version string
+	// ScanOpen opens LV devices for lv.scan; nil reads /dev/<vg>/<lv>.
+	ScanOpen ScanOpener
 }
 
 type badRequest struct{ msg string }
@@ -74,6 +76,7 @@ var handlers = map[string]handler{
 	"inventory":    (*Server).inventory,
 	"media.list":   (*Server).mediaList,
 	"media.remove": (*Server).mediaRemove,
+	"lv.scan":      (*Server).lvScan,
 }
 
 // decodeArgs decodes optional args strictly.
@@ -137,7 +140,8 @@ func redactArgs(op string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return "{}"
 	}
-	if op != "inventory" {
+	secret := map[string]string{"inventory": "search", "lv.scan": "patterns"}[op]
+	if secret == "" {
 		return string(raw)
 	}
 	var m map[string]any
@@ -146,7 +150,7 @@ func redactArgs(op string, raw json.RawMessage) string {
 	}
 	// encoding/json matches field names case-insensitively, so redact any spelling of the key.
 	for k := range m {
-		if strings.EqualFold(k, "search") {
+		if strings.EqualFold(k, secret) {
 			m[k] = "<redacted>"
 		}
 	}

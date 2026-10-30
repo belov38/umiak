@@ -111,6 +111,7 @@ function runVerify(
 		{
 			machines: machinesFor(ctx, m.pveVmid),
 			io: (vmid) => pveGuestIo(ioApi, cfg.node, vmid),
+			node: ctx.node,
 			ramGuard,
 			verifyScript: readFileSync(
 				join(TEMPLATES_DIR, recipe.verify, "verify.sh"),

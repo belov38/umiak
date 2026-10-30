@@ -10,6 +10,7 @@ import { join } from "node:path";
 import {
 	familyForTunnelUrl,
 	type Machines,
+	type NodeOps,
 	type ReadyInfo,
 	type Smbios,
 	type SnapshotRef,
@@ -35,8 +36,6 @@ const AGENT_ACTIVE_TIMEOUT_MS = MIN;
 const TUNNEL_TIMEOUT_MS = MIN;
 const VERIFY_SH_TIMEOUT_MS = 30 * MIN;
 const DOCKER_TIMEOUT_MS = 5 * MIN;
-/** The scan reads the whole virtual disk (64 GiB, mostly unallocated thin blocks). */
-const SCAN_TIMEOUT_MS = 20 * MIN;
 /** Spec section 10 item 16: a hard restart may take at most this much longer than the first boot. */
 export const HARD_RESTART_SLACK_MS = 3000;
 /** Shorter key body lines (the tail of a PEM block) are too generic to scan for. */
@@ -94,6 +93,8 @@ export interface VerifyDeps {
 		| "deleteSnapshot"
 	>;
 	io: (vmid: number) => GuestIo;
+	/** sbx-node: lv.scan of the template and clone disks. */
+	node: Pick<NodeOps, "call">;
 	ramGuard: {
 		reserve(vmid: number, memoryMb: number): Promise<void>;
 		release(vmid: number): void;
@@ -385,45 +386,27 @@ function redactor(patterns: string[]): (text: string) => string {
 	};
 }
 
-/**
- * Patterns arrive on stdin, which grep reads through fd 3. NUL bytes become line ends:
- * with `-a` a disk full of zeros would otherwise be one line held in memory. `-c` counts the
- * matching lines.
- */
-const SCAN_SCRIPT = [
-	"exec 3<&0 </dev/null",
-	"tr '\\0' '\\n' </dev/sda | LC_ALL=C grep -a -c -F -f /dev/fd/3",
-	// biome-ignore lint/suspicious/noTemplateCurlyInString: bash
-	'echo "rc=${PIPESTATUS[0]} ${PIPESTATUS[1]}"',
-].join("\n");
+/** Result of `sbx-node lv.scan`: the patterns stay on the host (never sent to a guest). */
+export interface ScanResult {
+	matches: number;
+	scannedBytes: number;
+}
 
-export function parseScan(r: {
-	exitCode: number;
-	stdout: string;
-	stderr: string;
-}): CheckResult {
-	const m = /^(\d+)\nrc=(\d+) (\d+)\s*$/.exec(r.stdout.trim());
-	if (!m)
-		return pass(
-			"raw_disk_secrets",
-			false,
-			`scan did not run: exit ${r.exitCode}: ${r.stderr.trim() || r.stdout.trim()}`,
-		);
-	const [, count = "", trRc, grepRc] = m;
-	if (trRc !== "0" || (grepRc !== "0" && grepRc !== "1"))
-		return pass(
-			"raw_disk_secrets",
-			false,
-			`scan failed (tr ${trRc}, grep ${grepRc}): ${r.stderr.trim()}`,
-		);
-	const n = Number(count);
-	return pass(
-		"raw_disk_secrets",
-		n === 0,
-		n === 0
-			? "no build secret on /dev/sda"
-			: `${n} lines of /dev/sda contain a build secret`,
+/** One `raw_disk_secrets` check from the host-side scans of the template and the clone. */
+export function scanCheck(
+	results: { disk: string; r?: ScanResult; error?: string }[],
+): CheckResult {
+	const failed = results.filter(
+		(x) => x.error !== undefined || (x.r?.matches ?? 1) > 0,
 	);
+	const text = results
+		.map((x) =>
+			x.error !== undefined
+				? `${x.disk}: scan failed: ${x.error}`
+				: `${x.disk}: ${x.r?.matches} matches in ${Math.round((x.r?.scannedBytes ?? 0) / 2 ** 30)} GiB`,
+		)
+		.join("; ");
+	return pass("raw_disk_secrets", failed.length === 0, text);
 }
 
 /**
@@ -673,14 +656,23 @@ export async function verifyTemplate(
 			status: "INFO",
 			evidence: [`${scan.patterns.length} patterns`, ...scan.notes].join("; "),
 		});
-		add(
-			parseScan(
-				await io.exec(["bash", "-c", SCAN_SCRIPT], {
-					input: `${scan.patterns.join("\n")}\n`,
-					timeoutMs: SCAN_TIMEOUT_MS,
-				}),
-			),
-		);
+		// On the host through sbx-node: the template disk (build secrets) and A's disk after a boot
+		// (the BS must not reach it). The guest never sees the patterns.
+		const scans: { disk: string; r?: ScanResult; error?: string }[] = [];
+		for (const disk of [`base-${tplVmid}-disk-0`, `vm-${A.vmid}-disk-0`]) {
+			try {
+				scans.push({
+					disk,
+					r: await deps.node.call<ScanResult>("lv.scan", {
+						name: disk,
+						patterns: scan.patterns,
+					}),
+				});
+			} catch (err) {
+				scans.push({ disk, error: errorText(err) });
+			}
+		}
+		add(scanCheck(scans));
 
 		step(`hard stop and restart of VM ${A.vmid}`);
 		await machines.stop(A.vmid);

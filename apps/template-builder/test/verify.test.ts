@@ -339,7 +339,7 @@ function manifest(): Manifest {
 		status: "building",
 		node: "pve",
 		storage: "local-lvm",
-		pveVmid: 590,
+		pveVmid: 597,
 		vmName: "sbx-tpl-linux-20261030-1",
 		gitCommit: "abc",
 		recipeDigest: "sha256:x",
@@ -385,7 +385,16 @@ class World {
 	bootMs = [6000, 6500];
 	agentActive = true;
 	scanCount = 0;
-	scanInputs: string[] = [];
+	scans: { name: string; patterns: string[]; at: number }[] = [];
+	/** sbx-node: lv.scan on the host. */
+	node = {
+		call: async <T>(op: string, args?: object): Promise<T> => {
+			if (op !== "lv.scan") throw new Error(`unexpected op ${op}`);
+			const a = args as { name: string; patterns: string[] };
+			this.scans.push({ ...a, at: this.execs.length });
+			return { matches: this.scanCount, scannedBytes: 64 * 2 ** 30 } as T;
+		},
+	};
 	execs: { vmid: number; cmd: string[]; input?: string }[] = [];
 	hostKeyOf = (vmid: number) => `SHA256:key-${vmid}`;
 	onExec?: (vmid: number, cmd: string[]) => void;
@@ -507,10 +516,6 @@ class World {
 					);
 				if (c0 === "bash" && c2.includes("hello-world"))
 					return ok("\nHello from Docker!\nThis message shows ...\n");
-				if (c0 === "bash" && c2.includes("/dev/sda")) {
-					this.scanInputs.push(o?.input ?? "");
-					return ok(`${this.scanCount}\nrc=0 ${this.scanCount > 0 ? 0 : 1}\n`);
-				}
 				if (c0 === "bash" && c2.includes("grubenv"))
 					return ok("CHECK grub_recordfail PASS no recordfail in grubenv\n");
 				if (c0 === "bash" && c2.includes("machine-id"))
@@ -539,6 +544,7 @@ function setup(over: Partial<VerifyDeps> = {}) {
 	const deps: VerifyDeps = {
 		machines: w.machines,
 		io: (vmid) => w.io(vmid),
+		node: w.node,
 		ramGuard: {
 			reserve: async (vmid, mb) => {
 				ram.push(`reserve ${vmid} ${mb}`);
@@ -665,7 +671,7 @@ describe("verifyTemplate", () => {
 		expect(f.serial.split(":")[2]).not.toBe(a.serial.split(":")[2]);
 	});
 
-	it("passes the expected values and the scan patterns through stdin only", async () => {
+	it("passes the expected values through stdin and scans for secrets on the host only", async () => {
 		const { w, deps, logs } = setup();
 		const v = await verifyTemplate(deps, manifest(), {});
 		const run = w.execs.find((e) => e.cmd[0] === "bash" && e.cmd[1] === "-s");
@@ -673,17 +679,19 @@ describe("verifyTemplate", () => {
 		expect(run?.input).toBe(
 			`export MACHINE_ID=${UUID_A}\nexport EXPECT_SUBNET=10.88.0.0/24\n${VERIFY_SH}`,
 		);
-		// The scan runs on A before the hard stop.
-		const scan = w.execs.findIndex((e) =>
-			String(e.cmd[2]).includes("/dev/sda"),
-		);
+		// The scans run on the host (sbx-node), on the template and on A, before the hard stop.
 		const stopAt = w.execs.findIndex((e) =>
 			String(e.cmd[2]).includes("grubenv"),
 		);
-		expect(scan).toBeGreaterThan(-1);
-		expect(scan).toBeLessThan(stopAt);
-		expect(w.execs[scan]?.vmid).toBe(501);
-		const patterns = (w.scanInputs[0] ?? "").split("\n").filter(Boolean);
+		expect(w.scans.map((s) => s.name)).toEqual([
+			"base-597-disk-0",
+			"vm-501-disk-0",
+		]);
+		for (const s of w.scans) expect(s.at).toBeLessThan(stopAt);
+		const patterns = w.scans[0]?.patterns ?? [];
+		// Nothing of the scan reaches a guest.
+		for (const e of w.execs)
+			for (const p of patterns) expect(e.input ?? "").not.toContain(p);
 		expect(patterns).toContain("5b2b6c4e-aaaa-bbbb-cccc-0123456789ab");
 		const a = w.execs.find((e) => e.vmid === 501);
 		expect(a).toBeDefined();
