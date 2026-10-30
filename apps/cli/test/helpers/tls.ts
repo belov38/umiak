@@ -1,12 +1,13 @@
 // A TLS front for the CLI's --cacert tests: a self-signed certificate for
 // 127.0.0.1 (made by the system `openssl`) and an HTTPS reverse proxy that
-// forwards by path prefix to plain HTTP servers in the test process.
+// forwards by path prefix to plain HTTP servers in the test process, WebSocket
+// upgrades included (raw bytes both ways).
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { createServer } from "node:https";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -71,6 +72,30 @@ export async function startTlsFront(): Promise<TlsFront> {
 			req.pipe(up);
 		},
 	);
+	server.on("upgrade", (req, socket, head) => {
+		const r = routes.find((x) => (req.url ?? "").startsWith(x.prefix));
+		if (r === undefined) {
+			socket.destroy();
+			return;
+		}
+		const up = connect(Number(r.target.port), r.target.hostname, () => {
+			const lines = [`${req.method} ${req.url} HTTP/1.1`];
+			for (let i = 0; i < req.rawHeaders.length; i += 2) {
+				const name = req.rawHeaders[i] as string;
+				const value =
+					name.toLowerCase() === "host"
+						? r.target.host
+						: (req.rawHeaders[i + 1] as string);
+				lines.push(`${name}: ${value}`);
+			}
+			up.write(`${lines.join("\r\n")}\r\n\r\n`);
+			if (head.length > 0) up.write(head);
+			up.pipe(socket);
+			socket.pipe(up);
+		});
+		up.on("error", () => socket.destroy());
+		socket.on("error", () => up.destroy());
+	});
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const port = (server.address() as AddressInfo).port;
 	return {

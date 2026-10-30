@@ -9,7 +9,8 @@
 	},
 	"scripts": {
 		"sbx": "bun src/main.ts",
-		"compile": "bun build --compile src/main.ts --outfile dist/sbx",
+		"build": "bun scripts/build.ts",
+		"build:all": "bun scripts/build.ts --all",
 		"test": "vitest run",
 		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
 	},

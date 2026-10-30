@@ -499,6 +499,32 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		);
 	});
 
+	it("uploadDir with `entries` packs only those paths (and their parent directories)", async () => {
+		const src = join(tmp, "listed");
+		await mkdir(join(src, "a", "b"), { recursive: true });
+		await mkdir(join(src, "skip"), { recursive: true });
+		await writeFile(join(src, "a", "b", "kept.txt"), "kept\n");
+		await writeFile(join(src, "top.txt"), "top\n");
+		await writeFile(join(src, "skip", "no.txt"), "no\n");
+		await writeFile(join(src, "a", "no.txt"), "no\n");
+		const r = await sb.files.uploadDir(src, "listed", {
+			entries: ["a/b/kept.txt", "top.txt"],
+		});
+		// a, a/b, a/b/kept.txt, top.txt
+		expect(r.entries).toBe(4);
+		expect(await sb.files.readText("listed/a/b/kept.txt")).toBe("kept\n");
+		expect(await sb.files.readText("listed/top.txt")).toBe("top\n");
+		const names: string[] = [];
+		for await (const f of sb.files.list("listed", { depth: 3 })) {
+			names.push(f.path.slice(f.path.indexOf("listed/") + 7));
+		}
+		expect(names.sort()).toEqual(["a", "a/b", "a/b/kept.txt", "top.txt"]);
+		// No entries: only the directory.
+		const none = await sb.files.uploadDir(src, "listed-empty", { entries: [] });
+		expect(none.entries).toBe(0);
+		expect((await sb.files.stat("listed-empty")).type).toBe("dir");
+	});
+
 	it("ports: host with a token, list, rotate, unhost", async () => {
 		const p = await sb.ports.host(8000, { access: "token" });
 		expect(p).toMatchObject({ port: 8000, access: "token" });

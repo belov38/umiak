@@ -1,16 +1,17 @@
-// `sbx run [create flags] [--cwd] [--user] [--timeout] [--keep] -- <cmd...>`
-// (S7 §14.2): create a sandbox, wait until it is ready, run the command
-// with its output streamed like `exec`, then delete the sandbox (unless
-// --keep, which makes it current). Exits with the command's code. Progress
-// goes to stderr; stdout carries only the command's output (or its frames
-// with --json). Ctrl-C at any point deletes the sandbox (unless --keep).
-// `--push <dir>` (upload a directory first) comes with `sbx push`.
+// `sbx run [create flags] [--push dir] [--cwd] [--user] [--timeout] [--keep]
+// -- <cmd...>` (S7 §14.2): create a sandbox, wait until it is ready, push
+// `dir` (like `sbx push`) to `~/<name of dir>`, which becomes the command's
+// working directory unless --cwd, run the command with its output streamed
+// like `exec`, then delete the sandbox (unless --keep, which makes it
+// current). Exits with the command's code. Progress goes to stderr; stdout
+// carries only the command's output (or its frames with --json). Ctrl-C at
+// any point deletes the sandbox (unless --keep).
 
+import { basename, resolve } from "node:path";
 import type { Command } from "commander";
 import { parseDuration } from "../args.ts";
 import type { Context } from "../context.ts";
 import { writeCurrent } from "../current.ts";
-import { CliError, NOT_IMPLEMENTED } from "../exit-codes.ts";
 import type { Runner } from "../program.ts";
 import { waitForState } from "../wait.ts";
 import {
@@ -26,6 +27,7 @@ import {
 	execIn,
 	remoteCommand,
 } from "./exec.ts";
+import { checkPushDir, pushDir } from "./push.ts";
 
 interface RunFlags extends CreateFlags {
 	cwd?: string;
@@ -68,22 +70,23 @@ export function register(program: Command, run: Runner): void {
 			"--wait-timeout <duration>",
 			"limit of the wait for ready (default 5m)",
 		)
-		.option("--push <dir>", "upload this directory before the command")
+		.option(
+			"--push <dir>",
+			"upload this directory (like sbx push) to ~/<its name> and run the command there",
+		)
 		.option("--keep", "keep the sandbox (it becomes current)")
 		.action(
 			run(
 				async (ctx, args, opts) => {
 					const f = opts as RunFlags;
 					const { cmd } = remoteCommand(ctx, (args[0] as string[]) ?? [], 0);
-					if (f.push !== undefined) {
-						throw new CliError({
-							code: NOT_IMPLEMENTED,
-							message: "run --push is not implemented yet",
-							retryable: false,
-						});
-					}
+					// Checked before anything is created.
+					if (f.push !== undefined) checkPushDir(f.push);
+					const pushTo =
+						f.push === undefined ? undefined : basename(resolve(f.push));
 					const exec: ExecFlags = {};
 					if (f.cwd !== undefined) exec.cwd = f.cwd;
+					else if (pushTo !== undefined) exec.cwd = pushTo;
 					if (f.user !== undefined) exec.user = f.user;
 					if (f.timeout !== undefined) exec.timeout = f.timeout;
 					commandSpec(exec); // flags checked before anything is created
@@ -120,6 +123,12 @@ export function register(program: Command, run: Runner): void {
 							const sb = await ctx
 								.sbx()
 								.sandboxes.get(id, { signal: ac.signal });
+							if (f.push !== undefined && pushTo !== undefined) {
+								const r = await pushDir(ctx, sb, f.push, pushTo, ac.signal);
+								ctx.out.info(
+									`sbx: pushed ${r.entries} entries to ${slug}:${r.path}`,
+								);
+							}
 							executing = true;
 							return await execIn(ctx, sb, cmd, exec, {
 								detachHint: f.keep === true,

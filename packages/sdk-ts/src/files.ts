@@ -532,14 +532,20 @@ export class Files {
 	/**
 	 * Packs a local directory with the system tar (gzip) and unpacks it into
 	 * `path` (created if missing). The whole archive is repeated on failure.
+	 * `entries`: pack only these paths (relative to `localDir`, e.g. the
+	 * output of `git ls-files`) and their parent directories; directories in
+	 * the list are not recursed into.
 	 */
 	async uploadDir(
 		localDir: string,
 		path: string,
-		opts: CallOptions & UserOption & { overwrite?: boolean } = {},
+		opts: CallOptions &
+			UserOption & { overwrite?: boolean; entries?: readonly string[] } = {},
 	): Promise<ArchiveResult> {
 		const fs = fsPromises("uploadDir");
-		const names = await fs.readdir(localDir);
+		const listed =
+			opts.entries === undefined ? null : withParents(opts.entries);
+		const names = listed ?? (await fs.readdir(localDir));
 		const call = callOf(opts);
 		if (names.length === 0) {
 			const info = await this.mkdir(path, { ...opts, parents: true });
@@ -547,7 +553,7 @@ export class Files {
 		}
 		return withRetry(
 			async () => {
-				const tar = tarCreate(localDir, names);
+				const tar = tarCreate(localDir, names, { listed: listed !== null });
 				let tarError: unknown;
 				tar.done.catch((e: unknown) => {
 					tarError = e;
@@ -637,6 +643,20 @@ export class Files {
 			},
 		);
 	}
+}
+
+/**
+ * The listed paths with every parent directory before its children, without
+ * duplicates (an archive whose files come with their directories).
+ */
+function withParents(entries: readonly string[]): string[] {
+	const out = new Set<string>();
+	for (const e of entries) {
+		const parts = e.split("/").filter((p) => p !== "" && p !== ".");
+		for (let i = 1; i < parts.length; i++) out.add(parts.slice(0, i).join("/"));
+		if (parts.length > 0) out.add(parts.join("/"));
+	}
+	return [...out];
 }
 
 function writeQuery(path: string, o: WriteOptions) {

@@ -4,6 +4,7 @@
 // test OIDC server (device flow, refresh, revocation) as Keycloak. Built from
 // the exported pieces of @sbx/api/testing, like the SDK's test helper.
 
+import { generateKeyPairSync } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { type ApiDeps, createApiServer, createPublicApp } from "@sbx/api";
 import {
@@ -15,7 +16,12 @@ import {
 	type TestOidcServerOptions,
 	testSettings,
 } from "@sbx/api/testing";
-import { encodeUuid, PgEnvironmentStore } from "@sbx/auth";
+import {
+	encodeUuid,
+	loadSshCa,
+	PgEnvironmentStore,
+	type SshCa,
+} from "@sbx/auth";
 import { validateSecretSets } from "@sbx/core";
 import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
@@ -33,6 +39,14 @@ export interface CliWorld {
 	teamId: string;
 	/** Secret of a team key with every scope. */
 	secret: string;
+	/** The SSH login CA of the api (certificates of `sbx ssh`). */
+	sshCa: SshCa;
+	/** Gateway host keys ("<type> <base64>") served by /v1/meta. */
+	hostKeys: string[];
+	/** SSH endpoint of /v1/meta: host ssh.sbx.test, port 2222. */
+	ssh: { host: string; port: number };
+	/** "METHOD /path?query" of every request the api received. */
+	requests: string[];
 	/** A new key of the team. */
 	key(): Promise<string>;
 	/** Creates a sandbox in the team through the api; returns {id, slug}. */
@@ -88,13 +102,25 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		`team-${team.slice(0, 8)}`,
 	]);
 	const agent = new FakeAgent();
+	const sshCa = loadSshCa(
+		generateKeyPairSync("ed25519")
+			.privateKey.export({ format: "pem", type: "pkcs8" })
+			.toString(),
+	);
+	// Any ed25519 public key stands for the gateway's host key.
+	const hostKeys = [sshCa.publicKey];
+	const ssh = { host: "ssh.sbx.test", port: 2222 };
 	const deps = makeTestDeps({
 		settings: testSettings({
 			SBX_API_RATE_BURST: "100000",
 			SBX_API_RATE_STARTS_PER_MIN: "100000",
 			SBX_OIDC_ISSUER: oidc.issuer,
+			SBX_SSH_HOST: ssh.host,
+			SBX_SSH_PORT: String(ssh.port),
 			...o.settings,
 		}),
+		sshCa,
+		hostKeys,
 		pool,
 		svc: env.svc,
 		config: env.config,
@@ -107,6 +133,13 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 	});
 	const { secret } = await issueApiKey(deps.identity, { teamId: team });
 	const { server } = createApiServer(createPublicApp(deps));
+	const requests: string[] = [];
+	server.on("request", (req) => {
+		requests.push(`${req.method} ${req.url}`);
+	});
+	server.on("upgrade", (req) => {
+		requests.push(`UPGRADE ${req.url}`);
+	});
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 	const finish = async (
@@ -173,6 +206,10 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		agent,
 		teamId: encodeUuid("team", team),
 		secret,
+		sshCa,
+		hostKeys,
+		ssh,
+		requests,
 		key: async () =>
 			(await issueApiKey(deps.identity, { teamId: team })).secret,
 		createSandbox,

@@ -12,7 +12,7 @@ import { type Bearer, getBearer, REFRESH_MARGIN_MS } from "./auth/token.ts";
 import { CLI_VERSION } from "./commands/version.ts";
 import { type Env, type Paths, type Profile, pathsOf } from "./config.ts";
 import { CliError, NOT_LOGGED_IN } from "./exit-codes.ts";
-import { caFetch, type Fetch } from "./http.ts";
+import { caFetch, caWebSocket, type Fetch } from "./http.ts";
 import type { Output } from "./output.ts";
 import {
 	type GlobalOptions,
@@ -28,6 +28,12 @@ import {
  * SBX_RETRY_BUDGET_MS overrides it.
  */
 export const INTERACTIVE_RETRY_BUDGET_MS = 15_000;
+
+/**
+ * Retry budget of a file transfer (cp, push): a whole archive is repeated
+ * within it, so it is longer. SBX_RETRY_BUDGET_MS overrides it too.
+ */
+export const TRANSFER_RETRY_BUDGET_MS = 120_000;
 
 export interface ContextOptions {
 	out: Output;
@@ -91,10 +97,19 @@ export class Context {
 
 	/** See INTERACTIVE_RETRY_BUDGET_MS. */
 	get retryBudgetMs(): number {
+		return this.#budgetOverride() ?? INTERACTIVE_RETRY_BUDGET_MS;
+	}
+
+	/** See TRANSFER_RETRY_BUDGET_MS. */
+	get transferBudgetMs(): number {
+		return this.#budgetOverride() ?? TRANSFER_RETRY_BUDGET_MS;
+	}
+
+	#budgetOverride(): number | undefined {
 		const v = Number(this.env.SBX_RETRY_BUDGET_MS);
 		return Number.isInteger(v) && v >= 0 && this.env.SBX_RETRY_BUDGET_MS !== ""
 			? v
-			: INTERACTIVE_RETRY_BUDGET_MS;
+			: undefined;
 	}
 
 	/** The API URL or CliError `no_api_url` (exit 4). */
@@ -181,7 +196,9 @@ export class Context {
 	sbx(): Sbx {
 		if (this.#sbx !== undefined) return this.#sbx;
 		const team = this.resolved.team;
+		const webSocket = caWebSocket(this.globals.cacert ?? this.env.SBX_CA_FILE);
 		this.#sbx = new Sbx({
+			...(webSocket === undefined ? {} : { webSocket }),
 			baseUrl: this.apiUrl(),
 			...(team === undefined ? {} : { team }),
 			tokenProvider: async ({ force }) => (await this.bearer(force)).token,

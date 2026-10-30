@@ -60,6 +60,24 @@ export interface TokenProviderOptions {
 	force: boolean;
 }
 
+/** What the SDK passes when it opens a WebSocket (the PTY, S7 §10.2). */
+export interface WebSocketInit {
+	protocols: string[];
+	headers: Record<string, string>;
+}
+
+/**
+ * Opens a WebSocket. The default is the global WebSocket with
+ * `{protocols, headers}` in the second argument (Node's undici and Bun take
+ * that). Pass one for a private CA or a proxy, e.g. in Bun
+ * `(url, init) => new WebSocket(url, { ...init, tls: { ca } })`.
+ */
+export type WebSocketFactory = (url: string, init: WebSocketInit) => WebSocket;
+
+/** The default WebSocketFactory: the global WebSocket. */
+export const defaultWebSocket: WebSocketFactory = (url, init) =>
+	new WebSocket(url, init as unknown as string[]);
+
 export interface SbxOptions {
 	/** API URL, e.g. https://api.example.com; else SBX_API_URL, else the sbx profile. */
 	baseUrl?: string;
@@ -82,6 +100,8 @@ export interface SbxOptions {
 	 * 60 000 ms. Long-poll waits keep their own per-poll budget.
 	 */
 	retryBudgetMs?: number;
+	/** Opens the PTY WebSocket (TLS options, proxies); default the global WebSocket. */
+	webSocket?: WebSocketFactory;
 	/** Default ["sbx", "auth", "token", "--json"]. */
 	authCommand?: string[];
 	/**
@@ -148,6 +168,8 @@ export interface ClientCore {
 	streamIdleTimeoutMs: number;
 	/** `SbxOptions.retryBudgetMs` or the default. */
 	retryBudgetMs: number;
+	/** `SbxOptions.webSocket` or the global WebSocket. */
+	webSocket: WebSocketFactory;
 }
 
 /** Default of `SbxOptions.streamIdleTimeoutMs` (S7 §9.7: 45 s without lines). */
@@ -305,6 +327,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 		userAgent,
 		streamIdleTimeoutMs: opts.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS,
 		retryBudgetMs: defaultBudgetMs,
+		webSocket: opts.webSocket ?? defaultWebSocket,
 	};
 }
 

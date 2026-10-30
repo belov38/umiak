@@ -16,6 +16,7 @@ import type { SecretsBackend } from "./auth/keychain.ts";
 import { register as registerAuthToken } from "./commands/auth-token.ts";
 import { register as registerCatalog } from "./commands/catalog.ts";
 import { register as registerCompletion } from "./commands/completion.ts";
+import { register as registerCp } from "./commands/cp.ts";
 import { register as registerCreate } from "./commands/create.ts";
 import { register as registerCurrent } from "./commands/current.ts";
 import { register as registerEnv } from "./commands/env.ts";
@@ -32,11 +33,18 @@ import { register as registerLogin } from "./commands/login.ts";
 import { register as registerLogout } from "./commands/logout.ts";
 import { register as registerLogs } from "./commands/logs.ts";
 import { register as registerMcp } from "./commands/mcp.ts";
+import { register as registerPort } from "./commands/port.ts";
 import { register as registerPs } from "./commands/ps.ts";
+import { register as registerPush } from "./commands/push.ts";
 import { register as registerRename } from "./commands/rename.ts";
 import { register as registerRm } from "./commands/rm.ts";
 import { register as registerRun } from "./commands/run.ts";
+import { register as registerShell } from "./commands/shell.ts";
 import { register as registerSnapshot } from "./commands/snapshot.ts";
+import { register as registerSsh } from "./commands/ssh.ts";
+import { register as registerSshCert } from "./commands/ssh-cert.ts";
+import { register as registerSshConfig } from "./commands/ssh-config.ts";
+import { register as registerSshKeys } from "./commands/ssh-keys.ts";
 import {
 	CLI_VERSION,
 	register as registerVersion,
@@ -133,6 +141,14 @@ export function buildProgram(io: CliIo, run: Runner): Command {
 	registerLogs(program, run);
 	registerKill(program, run);
 	registerPs(program, run);
+	registerShell(program, run);
+	registerSsh(program, run);
+	registerSshConfig(program, run);
+	registerSshCert(program, run);
+	registerSshKeys(program, run);
+	registerCp(program, run);
+	registerPush(program, run);
+	registerPort(program, run);
 	registerRun(program, run);
 	registerSnapshot(program, run);
 	registerCatalog(program, run);

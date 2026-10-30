@@ -338,7 +338,7 @@ describe("exec, logs, kill, ps, run", () => {
 		expect((await sbx(["current"])).code).toBe(3);
 	});
 
-	it("run --keep keeps the sandbox and makes it current; --push is not here yet", async () => {
+	it("run --keep keeps the sandbox and makes it current", async () => {
 		const tag = crypto.randomUUID();
 		const run = sbx(["run", "--keep", "--label", `run=${tag}`, "--", "true"]);
 		const slug = await until(async () => {
@@ -353,8 +353,5 @@ describe("exec, logs, kill, ps, run", () => {
 		expect(r.code, r.stderr).toBe(0);
 		const cur = JSON.parse((await sbx(["current"])).stdout);
 		expect(cur.sandbox).toMatchObject({ slug, state: "ready" });
-		const push = await sbx(["run", "--push", ".", "--", "true"]);
-		expect(push.code).not.toBe(0);
-		expect(push.stderr).toContain("not_implemented");
 	});
 });

@@ -7,18 +7,22 @@
 // (`tls.rootCertificates`, Mozilla's list) plus that PEM: the OS trust store
 // is no longer consulted, so a corporate root installed only in the OS must
 // be in the PEM too. The bundled roots stay because Keycloak and the api may
-// sit behind different CAs. Bun takes it as `fetch(req, {tls: {ca}})`.
+// sit behind different CAs. Bun takes it as `fetch(req, {tls: {ca}})`, and
+// the PTY WebSocket of `sbx shell` as `new WebSocket(url, {tls: {ca}})`.
 
 import { readFileSync } from "node:fs";
 import { rootCertificates } from "node:tls";
-import { NETWORK_ERROR, SbxError } from "@sbx/sdk";
+import { NETWORK_ERROR, SbxError, type WebSocketFactory } from "@sbx/sdk";
 import { usageError } from "./exit-codes.ts";
 
 export type Fetch = (req: Request) => Promise<Response>;
 
-/** fetch with the extra CA of `caFile`, or plain fetch without one. */
-export function caFetch(caFile: string | undefined): Fetch {
-	if (caFile === undefined || caFile === "") return (req) => fetch(req);
+/**
+ * The trusted roots of `caFile` (Node's bundled roots plus its PEM), or
+ * undefined without one.
+ */
+export function caRoots(caFile: string | undefined): string[] | undefined {
+	if (caFile === undefined || caFile === "") return undefined;
 	let pem: string;
 	try {
 		pem = readFileSync(caFile, "utf8");
@@ -30,9 +34,29 @@ export function caFetch(caFile: string | undefined): Fetch {
 	if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
 		throw usageError(`${caFile} holds no PEM certificate`);
 	}
-	const ca = [...rootCertificates, pem];
+	return [...rootCertificates, pem];
+}
+
+/** fetch with the extra CA of `caFile`, or plain fetch without one. */
+export function caFetch(caFile: string | undefined): Fetch {
+	const ca = caRoots(caFile);
+	if (ca === undefined) return (req) => fetch(req);
 	// `tls` is Bun's extension of RequestInit.
 	return (req) => fetch(req, { tls: { ca } } as RequestInit);
+}
+
+/**
+ * The SDK's WebSocket factory (the PTY of `sbx shell`) with the same roots,
+ * or undefined (the SDK default) without a CA file. `tls` is Bun's
+ * extension of the WebSocket constructor options.
+ */
+export function caWebSocket(
+	caFile: string | undefined,
+): WebSocketFactory | undefined {
+	const ca = caRoots(caFile);
+	if (ca === undefined) return undefined;
+	return (url, init) =>
+		new WebSocket(url, { ...init, tls: { ca } } as unknown as string[]);
 }
 
 /** Sends a request; a failure to connect is SbxError `network_error` (retryable). */

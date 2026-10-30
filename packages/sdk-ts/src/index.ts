@@ -3,6 +3,7 @@
 export {
 	type CallOptions,
 	createRawClient,
+	defaultWebSocket,
 	type RawClient,
 	type RawMethod,
 	type RawResponse,
@@ -10,6 +11,8 @@ export {
 	SDK_VERSION,
 	STREAM_IDLE_TIMEOUT_MS,
 	type TokenProviderOptions,
+	type WebSocketFactory,
+	type WebSocketInit,
 } from "./client.ts";
 export {
 	Command,

@@ -1,8 +1,10 @@
 // PTY over WebSocket, subprotocol sbx.pty.v1 (S7 §10.2).
 //
-// The global WebSocket with `{protocols, headers}` (undici in Node, Bun)
-// carries `Authorization: Bearer`. Browsers cannot set that header: there
-// the PTY is reached only through the dashboard origin, not this SDK.
+// The WebSocket comes from `SbxOptions.webSocket` (default: the global
+// WebSocket with `{protocols, headers}`, undici in Node, Bun) and carries
+// `Authorization: Bearer`. A factory can add TLS options (a private CA) or a
+// proxy. Browsers cannot set that header: there the PTY is reached only
+// through the dashboard origin, not this SDK.
 //
 // The connection is reopened by offset (the bytes received so far) after a
 // drop, close 1012 (server shutdown), 1011, 4503 (agent unavailable) or a
@@ -11,7 +13,11 @@
 // queued (up to 1 MiB) and sent after the next `attached`; input in flight
 // when a connection drops may be lost, never applied twice.
 
-import type { CallOptions, ClientCore } from "./client.ts";
+import {
+	type CallOptions,
+	type ClientCore,
+	defaultWebSocket,
+} from "./client.ts";
 import {
 	Command,
 	callOf,
@@ -260,11 +266,10 @@ export class Pty {
 		this.#attached = false;
 		let ws: WebSocket;
 		try {
-			// Node (undici) and Bun take headers in the second argument.
-			ws = new WebSocket(target.url, {
+			ws = (this.#core.webSocket ?? defaultWebSocket)(target.url, {
 				protocols: [PTY_SUBPROTOCOL],
 				headers: target.headers,
-			} as unknown as string[]);
+			});
 		} catch (err) {
 			this.#finish(
 				new SbxError({
