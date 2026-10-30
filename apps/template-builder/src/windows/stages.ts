@@ -93,8 +93,10 @@ const BUILD_DIR = "C:\\sbx-build";
 /** build.json is written right before this step; the step keeps it. */
 export const CLEANUP_STEP = "90-cleanup";
 /** "Press any key to boot from CD": one press per interval. */
-const INSTALL_KEYS = 20;
-const OFFLINE_KEYS = 30;
+// OVMF on a fresh efidisk can take well over 20 s to reach the prompt; Enter in WinPE is harmless,
+// and the first reboot from the disk comes minutes later.
+const INSTALL_KEYS = 60;
+const OFFLINE_KEYS = 60;
 const DEFAULT_KEY_INTERVAL_MS = 1000;
 const SYSPREP_TIMEOUT_MS = 30 * MIN;
 const OFFLINE_TIMEOUT_MS = 10 * MIN;
