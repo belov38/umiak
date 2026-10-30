@@ -138,6 +138,14 @@ const CORE_STATUS: Record<string, number> = {
 export const DEFAULT_RETRY_AFTER_SECONDS = 5;
 
 /**
+ * `Retry-After` of `server_shutting_down`. A stopping instance is out of the
+ * balancer (readiness false), so it only sees requests on reused keep-alive
+ * connections; its answer closes the connection and the retry, on a new
+ * connection, reaches a healthy instance at once.
+ */
+export const SHUTTING_DOWN_RETRY_AFTER_SECONDS = 1;
+
+/**
  * Maps anything thrown to an ApiError. `pool_exhausted` is not part of the
  * contract (no warm pool in the MVP) and maps to 500 like any unknown code;
  * so does an Error that is not an ApiError or SbxError.
@@ -258,10 +266,13 @@ export function renderError(
 	const headers: Record<string, string> = { ...(e.headers ?? {}) };
 	if (e.status === 429 || e.status === 503) {
 		const hint = e.details.retryAfterSeconds;
+		const shuttingDown = e.code === "server_shutting_down";
 		const seconds =
 			typeof hint === "number" && Number.isFinite(hint) && hint > 0
 				? Math.ceil(hint)
-				: DEFAULT_RETRY_AFTER_SECONDS;
+				: shuttingDown
+					? SHUTTING_DOWN_RETRY_AFTER_SECONDS
+					: DEFAULT_RETRY_AFTER_SECONDS;
 		if (hint !== seconds) {
 			err = new ApiError(e.status, e.code, e.message, {
 				retryable: e.retryable,
@@ -269,6 +280,7 @@ export function renderError(
 			});
 		}
 		headers["Retry-After"] = String(seconds);
+		if (shuttingDown) headers.Connection = "close";
 	}
 	const requestId = c.var.requestId;
 	headers[REQUEST_ID_HEADER] = requestId;

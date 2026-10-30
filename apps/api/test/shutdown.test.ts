@@ -68,6 +68,42 @@ function ndjson(res: Response) {
 	return { frames, done, ended: () => ended };
 }
 
+/** A raw keep-alive HTTP/1.1 connection; `request` returns the head and body. */
+function keepAlive(port: number) {
+	const sock = connect(port, "127.0.0.1");
+	sock.on("error", () => {});
+	const closed = new Promise<void>((r) => sock.once("close", () => r()));
+	let buf = "";
+	let waiter: (() => void) | null = null;
+	sock.on("data", (d: Buffer) => {
+		buf += d.toString("latin1");
+		waiter?.();
+	});
+	/** A whole response in `buf` (Content-Length framing), else null. */
+	const take = (): string | null => {
+		const end = buf.indexOf("\r\n\r\n");
+		if (end < 0) return null;
+		const len = Number(/\r\ncontent-length: (\d+)/i.exec(buf)?.[1] ?? 0);
+		if (buf.length < end + 4 + len) return null;
+		const res = buf.slice(0, end + 4 + len);
+		buf = buf.slice(end + 4 + len);
+		return res;
+	};
+	return {
+		closed,
+		async request(path: string): Promise<string> {
+			sock.write(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`);
+			for (;;) {
+				const res = take();
+				if (res !== null) return res;
+				await new Promise<void>((r) => {
+					waiter = r;
+				});
+			}
+		},
+	};
+}
+
 describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 	let db: TestDatabase;
 	let w: ApiWorld;
@@ -248,9 +284,24 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 		slow.write("GET /v1/meta HTTP/1.1\r\nHost: x\r\n");
 		const slowClosed = new Promise<void>((r) => slow.once("close", () => r()));
 		slow.on("error", () => {});
+		// A keep-alive connection served before the stop (a client of the load
+		// balancer that reuses its socket).
+		const kept = keepAlive(api.ports.public);
+		expect(await kept.request("/v1/meta")).toMatch(/^HTTP\/1\.1 200/);
 
 		const t0 = Date.now();
 		const closing = api.close();
+
+		// Its next request is refused with Connection: close and a short
+		// Retry-After, and the socket is closed: the retry opens a new
+		// connection, which the balancer sends to a healthy instance.
+		const refused = await kept.request("/v1/meta");
+		expect(refused).toMatch(/^HTTP\/1\.1 503/);
+		expect(refused).toMatch(/\r\nconnection: close\r\n/i);
+		expect(refused).toMatch(/\r\nretry-after: 1\r\n/i);
+		expect(refused).toContain('"retryAfterSeconds":1');
+		await kept.closed;
+		expect(Date.now() - t0).toBeLessThan(2000);
 
 		const ready = await fetch(`http://127.0.0.1:${api.ports.metrics}/readyz`);
 		expect(ready.status).toBe(503);
