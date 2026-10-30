@@ -12,7 +12,7 @@ import { fenceUntrusted } from "../output/fence.ts";
 import { IMAGE_MAX_BYTES, sniffImage } from "../output/image.ts";
 import { toolText } from "../output/result.ts";
 import { sanitizeForLlm } from "../output/sanitize.ts";
-import { decodeWindow } from "../output/utf8.ts";
+import { decodeWindow, type Window } from "../output/utf8.ts";
 import { defineTool } from "../registry.ts";
 import { compact } from "./view.ts";
 
@@ -23,15 +23,20 @@ export const WRITE_MAX_BYTES = 1024 * 1024;
 
 const FILES_PATH = "/v1/sandboxes/{sandbox}/files";
 const DEFAULT_READ_BYTES = 32_768;
-const MAX_READ_BYTES = 131_072;
+const MAX_READ_BYTES = 65_536;
 /** Below this a window could hold nothing but a split character. */
 const MIN_READ_BYTES = 1_024;
 /**
- * The most one call returns, whatever max_bytes says: a response holds at
- * most 80 000 characters (S11 9.2), and base64 is 4/3 of the bytes.
+ * A base64 window is at most this many bytes: base64 is 4/3 of them and a
+ * response holds at most 80 000 characters (S11 9.2).
  */
-const TEXT_WINDOW_BYTES = 65_536;
 const BASE64_WINDOW_BYTES = 49_152;
+/**
+ * Sanitizing can write one byte as up to 9 characters, so a text window is
+ * shortened until its sanitized text fits this many characters (the header
+ * and notes come on top of it, under the 80 000 of the whole response).
+ */
+const TEXT_CHARS_BUDGET = 70_000;
 /** The binary check and the image sniff look at this much of the head. */
 const SNIFF_BYTES = 8_192;
 const LIST_MAX = 200;
@@ -120,7 +125,8 @@ interface FileRef {
 /**
  * `GET /files/content` with `Range: bytes=start-(start+length-1)`. An API
  * that ignores the range (200) is handled: the part is cut from the body. A
- * start at or past the end (416) is an empty part that knows the size.
+ * start at or past the end is a 416 SbxError (the real API sends the size
+ * only in a header the SDK drops): see `readWindow`.
  */
 async function readRange(
 	ctx: ToolContext,
@@ -128,7 +134,7 @@ async function readRange(
 	start: number,
 	length: number,
 ): Promise<Part> {
-	try {
+	{
 		const { data, response } = await ctx
 			.sbx()
 			.raw.GET(`${FILES_PATH}/content`, {
@@ -160,16 +166,35 @@ async function readRange(
 			size: total === null ? start + body.length : Number(total[1]),
 			...extra,
 		};
+	}
+}
+
+/**
+ * `readRange`, but a start at or past the end (416) is an empty part: the
+ * size comes from a stat, so offset == size is eof and offset > size is
+ * reported by `checkOffset`.
+ */
+async function readWindow(
+	ctx: ToolContext,
+	f: FileRef,
+	start: number,
+	length: number,
+): Promise<Part> {
+	try {
+		return await readRange(ctx, f, start, length);
 	} catch (err) {
-		const size = err instanceof SbxError ? err.details.size : undefined;
-		if (
-			err instanceof SbxError &&
-			err.status === 416 &&
-			typeof size === "number"
-		) {
-			return { bytes: new Uint8Array(), start, size };
-		}
-		throw err;
+		if (!(err instanceof SbxError) || err.status !== 416) throw err;
+		const info = await ctx
+			.sbx()
+			.sandboxes.handle(f.sandbox)
+			.files.stat(f.path, { ...compact({ user: f.user }), ...ctx.call });
+		const modifiedAt = info.modifiedAt ?? undefined;
+		return {
+			bytes: new Uint8Array(),
+			start,
+			size: info.sizeBytes,
+			...(modifiedAt === undefined ? {} : { modifiedAt }),
+		};
 	}
 }
 
@@ -184,10 +209,10 @@ function windowHeader(f: FileRef, from: number, to: number, part: Part) {
 	};
 }
 
-function continueNote(to: number, size: number, limited: boolean): string[] {
+function continueNote(to: number, size: number, extra = ""): string[] {
 	if (to >= size) return [];
 	return [
-		`bytes up to ${to} of ${size}. Continue: files_read with offset=${to}${limited ? ` (a call returns at most ${TEXT_WINDOW_BYTES} bytes of text)` : ""}.`,
+		`bytes up to ${to} of ${size}. Continue: files_read with offset=${to}${extra}.`,
 	];
 }
 
@@ -201,19 +226,28 @@ function checkOffset(offset: number, part: Part): void {
 	}
 }
 
-function textAnswer(
-	f: FileRef,
-	part: Part,
-	offset: number,
-	limited: boolean,
-): CallToolResult {
+/**
+ * Decodes a text window, shortened (on a character boundary) until its
+ * sanitized text fits TEXT_CHARS_BUDGET, so `to` is what the model gets.
+ */
+function fittingWindow(part: Part): Window {
+	let n = part.bytes.length;
+	for (;;) {
+		const w = decodeWindow(part.bytes.subarray(0, n), part.start, part.size, {
+			atStart: part.start === 0,
+			final: part.start + n >= part.size,
+		});
+		const chars = sanitizeForLlm(w.text).length;
+		if (chars <= TEXT_CHARS_BUDGET) return w;
+		// Proportional, with a margin; always shorter than before.
+		n = Math.min(n - 1, Math.floor((n * TEXT_CHARS_BUDGET * 0.9) / chars));
+	}
+}
+
+function textAnswer(f: FileRef, part: Part, offset: number): CallToolResult {
 	checkOffset(offset, part);
-	const final = part.start + part.bytes.length >= part.size;
-	const w = decodeWindow(part.bytes, part.start, part.size, {
-		atStart: part.start === 0,
-		final,
-	});
-	const notes = continueNote(w.to, part.size, limited);
+	const w = fittingWindow(part);
+	const notes = continueNote(w.to, part.size);
 	return toolText(windowHeader(f, w.from, w.to, part), [
 		...(notes.length > 0 ? [notes.join("\n")] : []),
 		...(w.text === ""
@@ -225,7 +259,11 @@ function textAnswer(
 function base64Answer(f: FileRef, part: Part, offset: number): CallToolResult {
 	checkOffset(offset, part);
 	const to = part.start + part.bytes.length;
-	const notes = continueNote(to, part.size, true);
+	const notes = continueNote(
+		to,
+		part.size,
+		`, at most ${BASE64_WINDOW_BYTES} bytes per call as base64`,
+	);
 	return toolText(
 		{
 			...windowHeader(f, part.start, to, part),
@@ -321,7 +359,9 @@ export const filesRead = defineTool({
 			.min(MIN_READ_BYTES)
 			.max(MAX_READ_BYTES)
 			.optional()
-			.describe(`Window size (default ${DEFAULT_READ_BYTES})`),
+			.describe(
+				`Window size (default ${DEFAULT_READ_BYTES}; base64: at most ${BASE64_WINDOW_BYTES})`,
+			),
 		as: z
 			.enum(["auto", "text", "base64", "image"])
 			.optional()
@@ -337,28 +377,20 @@ export const filesRead = defineTool({
 		const as = args.as ?? "auto";
 		const offset = args.offset ?? 0;
 		const max = args.max_bytes ?? DEFAULT_READ_BYTES;
-		const limit = Math.min(max, TEXT_WINDOW_BYTES);
 
 		if (as === "text") {
-			return textAnswer(
-				f,
-				await readRange(ctx, f, offset, limit),
-				offset,
-				max > limit,
-			);
+			return textAnswer(f, await readWindow(ctx, f, offset, max), offset);
 		}
 		if (as === "base64") {
 			const window = Math.min(max, BASE64_WINDOW_BYTES);
-			return base64Answer(f, await readRange(ctx, f, offset, window), offset);
+			return base64Answer(f, await readWindow(ctx, f, offset, window), offset);
 		}
 
 		// auto and image look at the head of the file. At offset 0 the same
 		// request is the first text window; later windows cost one more request.
 		const first =
-			as === "auto" && offset === 0
-				? Math.max(limit, SNIFF_BYTES)
-				: SNIFF_BYTES;
-		const head = await readRange(ctx, f, 0, first);
+			as === "auto" && offset === 0 ? Math.max(max, SNIFF_BYTES) : SNIFF_BYTES;
+		const head = await readWindow(ctx, f, 0, first);
 		const mime = sniffImage(head.bytes);
 		if (mime !== null && head.size <= IMAGE_MAX_BYTES) {
 			return imageAnswer(ctx, f, head, mime);
@@ -380,11 +412,22 @@ export const filesRead = defineTool({
 		if (mime !== null || head.bytes.subarray(0, SNIFF_BYTES).includes(0)) {
 			return binaryAnswer(f, head);
 		}
-		const part =
-			offset === 0
-				? { ...head, bytes: head.bytes.subarray(0, limit) }
-				: await readRange(ctx, f, offset, limit);
-		return textAnswer(f, part, offset, max > limit);
+		if (offset === 0) {
+			return textAnswer(
+				f,
+				{ ...head, bytes: head.bytes.subarray(0, max) },
+				offset,
+			);
+		}
+		// The head says how long the file is: no request for a start past its end.
+		if (offset >= head.size) {
+			return textAnswer(
+				f,
+				{ ...head, bytes: new Uint8Array(), start: offset },
+				offset,
+			);
+		}
+		return textAnswer(f, await readRange(ctx, f, offset, max), offset);
 	},
 });
 
@@ -660,7 +703,7 @@ export const filesList = defineTool({
 	name: "files_list",
 	title: "List a directory",
 	description:
-		"Lists a directory, one line per entry: d|f|l (directory, file, symlink), size, modified time, path, symlink target. Up to 200 entries per call; continue with cursor.",
+		"Lists a directory, one line per entry: d|f|l|o (directory, file, symlink, other), size, modified time, path, symlink target. Up to 200 entries per call; continue with cursor.",
 	toolset: "files",
 	scopes: ["files:read"],
 	annotations: READ_ONLY,

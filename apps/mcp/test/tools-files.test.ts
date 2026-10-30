@@ -189,7 +189,7 @@ describe("tool list", () => {
 			"base64",
 			"image",
 		]);
-		expect(schemaOf("files_read").properties.max_bytes?.maximum).toBe(131_072);
+		expect(schemaOf("files_read").properties.max_bytes?.maximum).toBe(65_536);
 		expect(schemaOf("files_write").properties.encoding?.enum).toEqual([
 			"utf8",
 			"base64",
@@ -357,6 +357,57 @@ describe("files_read: text", () => {
 		expect(past.texts[0]).toContain("past the end");
 	});
 
+	it("as: text and as: base64 at offset == size are eof, past the end an error; the real API gives no size in a 416", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		await put(hh, sb, "six", "abcdef");
+		await put(hh, sb, "empty", "");
+		for (const as of ["text", "base64"] as const) {
+			const at = await hh.call("files_read", {
+				sandbox: sb,
+				path: "six",
+				offset: 6,
+				as,
+			});
+			expect(at.isError, as).toBe(false);
+			expect(at.json, as).toMatchObject({
+				size: 6,
+				range: { from: 6, to: 6 },
+				eof: true,
+			});
+			expect(at.texts, as).toHaveLength(1);
+			const past = await hh.call("files_read", {
+				sandbox: sb,
+				path: "six",
+				offset: 9,
+				as,
+			});
+			expect(past.isError, as).toBe(true);
+			expect(past.texts[0], as).toContain("error: validation");
+			expect(past.texts[0], as).toContain("past the end");
+			const empty = await hh.call("files_read", {
+				sandbox: sb,
+				path: "empty",
+				as,
+			});
+			expect(empty.json, as).toMatchObject({ size: 0, eof: true });
+		}
+		// The 416 carries the size in a header only, as the real API's does.
+		const err = await hh.sbx.raw
+			.GET(
+				`${FILES(sb)}/content` as never,
+				{
+					params: { path: { sandbox: sb }, query: { path: "six" } },
+					headers: { Range: "bytes=6-9" },
+				} as never,
+			)
+			.catch((e: unknown) => e);
+		expect(err).toMatchObject({ status: 416, code: "range_not_satisfiable" });
+		expect(
+			(err as { details: Record<string, unknown> }).details.size,
+		).toBeUndefined();
+	});
+
 	it("as: text reads once, without sniffing, and writes NUL as an escape", async () => {
 		const hh = await start();
 		const sb = await sandbox(hh);
@@ -387,6 +438,43 @@ describe("files_read: text", () => {
 		expect(body).toContain("<<<end id=0123456789ab>>>");
 		expect(body).toContain("\\u{E0041}");
 		expect(r.json.path).toBe(name);
+	});
+
+	it("sanitizing never makes a window bigger than a response: the window is shortened and next_offset is honest", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		// Each U+200B is 3 bytes and becomes 8 characters.
+		const count = 30_000;
+		await put(hh, sb, "zw.txt", "\u200b".repeat(count));
+		let offset = 0;
+		let escapes = 0;
+		let pages = 0;
+		for (;;) {
+			const r = await hh.call("files_read", {
+				sandbox: sb,
+				path: "zw.txt",
+				offset,
+				max_bytes: 65_536,
+			});
+			expect(r.isError).toBe(false);
+			pages++;
+			const all = r.texts.join("\n");
+			expect(all.length).toBeLessThanOrEqual(80_000);
+			expect(all).not.toContain("response cut");
+			const { from, to } = r.json.range as { from: number; to: number };
+			expect(from).toBe(offset);
+			expect(from % 3).toBe(0);
+			expect(to % 3).toBe(0);
+			const body = fenced(r, "kind=file") as string;
+			// Every byte of the window is in the text: 3 bytes, one escape.
+			expect(body.split("\\u{200B}").length - 1).toBe((to - from) / 3);
+			escapes += (to - from) / 3;
+			if (r.json.eof) break;
+			expect(r.json.next_offset).toBe(to);
+			offset = to;
+		}
+		expect(escapes).toBe(count);
+		expect(pages).toBeGreaterThan(1);
 	});
 
 	it("a missing path and a directory are API errors with hints", async () => {
@@ -551,6 +639,9 @@ describe("files_read: images, binary, base64", () => {
 		expect(fenced(a, "kind=file encoding=base64")).toBe(
 			Buffer.from(bin.subarray(0, 1_024)).toString("base64"),
 		);
+		expect(a.lines).toContain("offset=1024");
+		expect(a.lines).toContain("49152 bytes per call as base64");
+		expect(a.lines).not.toContain("of text");
 		const b = await hh.call("files_read", {
 			sandbox: sb,
 			path: "d.bin",

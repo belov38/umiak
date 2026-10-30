@@ -23,7 +23,6 @@ function pathOptions(c: Context<FakeEnv>): PathOptions {
 
 function rangeNotSatisfiable(size: number, detail: string): FakeApiError {
 	return new FakeApiError(416, "range_not_satisfiable", detail, {
-		details: { size },
 		headers: { "Content-Range": `bytes */${size}` },
 	});
 }
