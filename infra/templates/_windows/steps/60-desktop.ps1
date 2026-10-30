@@ -56,7 +56,8 @@ Invoke-WithDefaultUserHive {
     $adv = "$cv\Explorer\Advanced"
     Set-RegValue $adv Start_IrisRecommendations 0
     Set-RegValue $adv Start_AccountNotifications 0
-    Set-RegValue $adv TaskbarDa 0
+    # No TaskbarDa: the User Choice Protection driver denies writes to it (unauthorized
+    # operation); Widgets are off by the machine policy Dsh\AllowNewsAndInterests in 00-base.
     Set-RegValue $adv ShowCopilotButton 0
     # Privacy: no advertising id, no tailored experiences.
     Set-RegValue "$cv\AdvertisingInfo" Enabled 0

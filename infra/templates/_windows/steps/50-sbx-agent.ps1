@@ -43,7 +43,8 @@ $current = [string]$doctor.versions.current
 if ($current -ne $versions.agent.version) { throw "agent current is '$current', want $($versions.agent.version)" }
 # test_aids is omitted when empty.
 $aidsProp = $doctor.PSObject.Properties['test_aids']
-$aids = if ($aidsProp) { @($aidsProp.Value | Where-Object { $_ }) } else { @() }
+# @() around the if: an empty array result is unrolled to $null otherwise.
+$aids = @(if ($aidsProp) { $aidsProp.Value | Where-Object { $_ } })
 if ($aids.Count -gt 0) { throw "agent has test aids: $($aids -join ', ')" }
 Write-BuildLog "agent $current, test_aids none"
 

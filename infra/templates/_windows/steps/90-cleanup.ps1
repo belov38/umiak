@@ -34,7 +34,7 @@ function Get-PendingReboot {
 }
 
 # The FoD and the MSIs leave servicing operations that finish at the next boot.
-$pending = Get-PendingReboot
+$pending = @(Get-PendingReboot)
 if ($pending.Count -gt 0) {
     throw "a reboot is pending ($($pending -join ', ')): the recipe needs a reboot step after the last install step, before 90-cleanup"
 }
@@ -46,7 +46,7 @@ foreach ($s in $SbxUpdateServices) { Disable-SbxService -Name $s -StopNow }
 # Sysprep follows this step without a reboot: DISM must not leave one pending.
 $dismCode = Invoke-Native -FilePath (Join-Path $env:SystemRoot 'System32\Dism.exe') -ArgumentList @('/Online', '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase') -SuccessCodes @(0, 3010) -PassThru
 if ($dismCode -eq 3010) { throw 'DISM /StartComponentCleanup /ResetBase: exit code 3010 (a reboot is required), and there is no reboot after 90-cleanup before sysprep' }
-$pending = Get-PendingReboot
+$pending = @(Get-PendingReboot)
 if ($pending.Count -gt 0) {
     throw "DISM /StartComponentCleanup /ResetBase left a reboot pending ($($pending -join ', ')): a reboot after 90-cleanup is not allowed (sysprep follows)"
 }
@@ -97,6 +97,7 @@ foreach ($p in @(
 }
 
 # --- Event logs (last, after everything above logged) ---
+# Get-NativeOutput already returns an array (return , $out); @() would nest it.
 $logs = Get-NativeOutput -FilePath wevtutil.exe -ArgumentList @('el')
 $failed = 0
 foreach ($l in $logs) {
@@ -142,6 +143,10 @@ $winlogon = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\C
 if ($winlogon.PSObject.Properties['DefaultPassword']) { $problems.Add('Winlogon has DefaultPassword') }
 $autoLogon = $winlogon.PSObject.Properties['AutoAdminLogon']
 if ($autoLogon -and "$($autoLogon.Value)" -ne '0') { $problems.Add("Winlogon AutoAdminLogon is '$($autoLogon.Value)'") }
+# Installers and updates since 00-base add their own rules (Edge and WebView2 add mDNS-In).
+$late = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
+foreach ($r in $late) { Write-BuildLog "firewall: disabling late inbound allow rule $($r.Name) ($($r.DisplayName))" }
+if ($late.Count -gt 0) { $late | Disable-NetFirewallRule }
 $allow = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
 foreach ($r in $allow) { $problems.Add("firewall rule $($r.Name) allows inbound") }
 foreach ($fp in @(Get-NetFirewallProfile)) {
