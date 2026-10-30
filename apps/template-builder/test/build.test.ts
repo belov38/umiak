@@ -82,6 +82,10 @@ function setup(
 	});
 	// The template disk after fstrim: about 6 GiB of 64.
 	const disk = { dataPercent: 9.4 };
+	node.handlers["lv.tagTemplate"] = (a) => ({
+		tagged: [`base-${a.vmid}-disk-0`],
+		already: [],
+	});
 	node.handlers["lv.usage"] = (a) => {
 		if (a.name !== "base-598-disk-0") throw new Error(`lv.usage ${a.name}`);
 		return { sizeBytes: 64 * 2 ** 30, dataPercent: disk.dataPercent };
@@ -620,6 +624,13 @@ describe("buildTemplate: failures", () => {
 		const ok = setup();
 		const m = await buildTemplate(ok.deps, ok.opts);
 		expect(m.diskUsedGiB).toBe(6);
+		// The template disk is tagged sbx-tpl (a clone origin for sbx-node) before it is measured.
+		const ops = ok.node.calls.map((c) => c.op);
+		expect(ops.indexOf("lv.tagTemplate")).toBeGreaterThan(-1);
+		expect(ops.indexOf("lv.tagTemplate")).toBeLessThan(ops.indexOf("lv.usage"));
+		expect(ok.node.calls.find((c) => c.op === "lv.tagTemplate")?.args).toEqual({
+			vmid: 598,
+		});
 		const s = setup();
 		s.disk.dataPercent = 95.2;
 		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);

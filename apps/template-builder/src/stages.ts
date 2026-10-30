@@ -502,6 +502,8 @@ export async function stageTemplate(
 		await deps.api.waitTask(o.node, r, { timeoutMs: TASK_TIMEOUT_MS });
 	await deps.node.call("media.remove", { names: [seedName(st.m)] });
 	st.seedUploaded = false;
+	// The sbx-tpl tag on the disk makes it a clone origin for sbx-node (as 599's).
+	await deps.node.call("lv.tagTemplate", { vmid });
 	await checkTemplateDisk(deps, vmid, st);
 	await deps.allocator.markActive(vmid);
 }

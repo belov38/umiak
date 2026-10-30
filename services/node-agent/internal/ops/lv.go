@@ -51,6 +51,13 @@ func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, erro
 	}
 	for _, it := range args.Items {
 		var owner string
+		if baseRe.MatchString(it.Origin) {
+			// A template disk: Proxmox names any template's disk base-*, so the tag decides.
+			if l, ok := byName[it.Origin]; !ok || !slices.Contains(l.Tags, "sbx-tpl") {
+				return nil, forbidden("origin %q is not a tagged template disk", it.Origin)
+			}
+			continue
+		}
 		if m := vmAnyRe.FindStringSubmatch(it.Origin); m != nil {
 			owner = "sbx-vm-" + m[1]
 		} else if m := snapLVRe.FindStringSubmatch(it.Origin); m != nil {

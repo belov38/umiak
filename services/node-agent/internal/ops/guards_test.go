@@ -8,33 +8,34 @@ import (
 
 func testConfig() config.Config {
 	c := config.Default()
-	c.VMIDMin, c.VMIDMax, c.TemplateVMID, c.ClusterID = 500, 599, 599, 1
+	c.VMIDMin, c.VMIDMax, c.TemplateMin, c.TemplateMax, c.TemplateVMID, c.ClusterID = 500, 589, 597, 599, 599, 1
 	return c
 }
 
 func TestValidOrigin(t *testing.T) {
 	cfg := testConfig()
-	for _, name := range []string{"base-599-disk-0", "sbx-snap-abc-scsi0", "vm-500-disk-0", "vm-598-disk-1"} {
+	for _, name := range []string{"base-599-disk-0", "sbx-snap-abc-scsi0", "vm-500-disk-0", "vm-589-disk-1"} {
 		if err := ValidOrigin(cfg, name); err != nil {
 			t.Errorf("ValidOrigin(%q) = %v, want nil", name, err)
 		}
 	}
-	for _, name := range []string{"base-9000-disk-0", "vm-108-disk-1", "vm-599-disk-0", "vm-600-disk-0", "root", "data", "../x", "vm-500-disk-0;rm", "", "sbx-snap-", "base-599-disk-0 ", "base-0598-disk-0", "vm-0500-disk-0"} {
+	for _, name := range []string{"base-9000-disk-0", "vm-108-disk-1", "vm-599-disk-0", "vm-590-disk-0", "vm-598-disk-1", "vm-600-disk-0", "root", "data", "../x", "vm-500-disk-0;rm", "", "sbx-snap-", "base-599-disk-0 ", "base-0598-disk-0", "vm-0500-disk-0"} {
 		if err := ValidOrigin(cfg, name); err == nil {
 			t.Errorf("ValidOrigin(%q) = nil, want error", name)
 		}
 	}
 }
 
-func TestValidOriginAnyTemplateInRange(t *testing.T) {
+func TestValidOriginOnlyTemplateSlots(t *testing.T) {
 	cfg := testConfig()
 	cfg.TemplateVMID = 0
-	for _, name := range []string{"base-598-disk-0", "base-500-disk-0", "base-599-disk-0"} {
+	for _, name := range []string{"base-597-disk-0", "base-598-disk-0", "base-599-disk-0"} {
 		if err := ValidOrigin(cfg, name); err != nil {
 			t.Errorf("ValidOrigin(%q) = %v, want nil", name, err)
 		}
 	}
-	for _, name := range []string{"base-9000-disk-0", "base-499-disk-0", "base-600-disk-0", "base-9001-disk-0", "base-598"} {
+	// Sandbox VMIDs and dev infrastructure (590-596) are never template origins.
+	for _, name := range []string{"base-500-disk-0", "base-589-disk-0", "base-590-disk-0", "base-596-disk-0", "base-9000-disk-0", "base-499-disk-0", "base-600-disk-0", "base-9001-disk-0", "base-598"} {
 		if err := ValidOrigin(cfg, name); err == nil {
 			t.Errorf("ValidOrigin(%q) = nil, want error", name)
 		}
@@ -43,12 +44,12 @@ func TestValidOriginAnyTemplateInRange(t *testing.T) {
 
 func TestValidTargetName(t *testing.T) {
 	cfg := testConfig()
-	for _, name := range []string{"vm-500-disk-0", "vm-598-disk-2", "sbx-snap-k3j9x2m4qa-scsi0"} {
+	for _, name := range []string{"vm-500-disk-0", "vm-589-disk-2", "sbx-snap-k3j9x2m4qa-scsi0"} {
 		if err := ValidTargetName(cfg, name); err != nil {
 			t.Errorf("ValidTargetName(%q) = %v, want nil", name, err)
 		}
 	}
-	for _, name := range []string{"base-599-disk-0", "vm-599-disk-0", "vm-108-disk-0", "vm-500-cloudinit", "vm-500-disk-x", "Vm-500-disk-0", "sbx-snap-UPPER-scsi0", "sbx-tpl", "data", "vm-0598-disk-0", "vm-00500-disk-0"} {
+	for _, name := range []string{"base-599-disk-0", "vm-599-disk-0", "vm-590-disk-0", "vm-598-disk-0", "vm-108-disk-0", "vm-500-cloudinit", "vm-500-disk-x", "Vm-500-disk-0", "sbx-snap-UPPER-scsi0", "sbx-tpl", "data", "vm-0598-disk-0", "vm-00500-disk-0"} {
 		if err := ValidTargetName(cfg, name); err == nil {
 			t.Errorf("ValidTargetName(%q) = nil, want error", name)
 		}
@@ -109,12 +110,12 @@ func TestValidSnapshotItemRequiresMatchingOwnerTag(t *testing.T) {
 
 func TestValidMAC(t *testing.T) {
 	cfg := testConfig()
-	for _, mac := range []string{"02:01:00:00:01:F4", "02:01:00:00:01:f4", "02:01:00:00:02:56"} {
+	for _, mac := range []string{"02:01:00:00:01:F4", "02:01:00:00:01:f4", "02:01:00:00:02:4d"} {
 		if _, err := ValidMAC(cfg, mac); err != nil {
 			t.Errorf("ValidMAC(%q) = %v, want nil", mac, err)
 		}
 	}
-	for _, mac := range []string{"02:02:00:00:01:F4", "02:01:00:00:00:6C", "BC:24:11:F4:55:64", "02:01:00:00:02:57", "02:01:00:00:01", "zz:01:00:00:01:F4"} {
+	for _, mac := range []string{"02:02:00:00:01:F4", "02:01:00:00:00:6C", "BC:24:11:F4:55:64", "02:01:00:00:02:57", "02:01:00:00:02:56", "02:01:00:00:02:4e", "02:01:00:00:01", "zz:01:00:00:01:F4"} {
 		if _, err := ValidMAC(cfg, mac); err == nil {
 			t.Errorf("ValidMAC(%q) = nil, want error", mac)
 		}
