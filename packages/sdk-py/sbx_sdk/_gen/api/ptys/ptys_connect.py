@@ -103,11 +103,12 @@ def sync_detailed(
     (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are
     input (a key typed while the socket drops may be lost, never applied twice); text
     `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after
-    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4503
-    agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your
-    count; `tailBytes` for scrollback. Pings every 15 s. Authentication as for other requests; in the
-    browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team
-    header.
+    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416
+    `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent
+    unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count;
+    `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other
+    requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead
+    of the Sbx-Team header.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -157,11 +158,12 @@ def sync(
     (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are
     input (a key typed while the socket drops may be lost, never applied twice); text
     `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after
-    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4503
-    agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your
-    count; `tailBytes` for scrollback. Pings every 15 s. Authentication as for other requests; in the
-    browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team
-    header.
+    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416
+    `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent
+    unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count;
+    `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other
+    requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead
+    of the Sbx-Team header.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -206,11 +208,12 @@ async def asyncio_detailed(
     (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are
     input (a key typed while the socket drops may be lost, never applied twice); text
     `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after
-    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4503
-    agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your
-    count; `tailBytes` for scrollback. Pings every 15 s. Authentication as for other requests; in the
-    browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team
-    header.
+    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416
+    `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent
+    unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count;
+    `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other
+    requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead
+    of the Sbx-Team header.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -258,11 +261,12 @@ async def asyncio(
     (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are
     input (a key typed while the socket drops may be lost, never applied twice); text
     `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after
-    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4503
-    agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your
-    count; `tailBytes` for scrollback. Pings every 15 s. Authentication as for other requests; in the
-    browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team
-    header.
+    `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416
+    `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent
+    unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count;
+    `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other
+    requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead
+    of the Sbx-Team header.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.

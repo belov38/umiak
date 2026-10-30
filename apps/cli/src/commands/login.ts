@@ -3,8 +3,9 @@
 //   clientId}`; the code and the link are printed (and the browser opened,
 //   unless --no-browser or not in a terminal); then `GET /v1/me` with the
 //   new access token;
-// - automation: `--key-stdin` reads a team key from stdin and checks it with
-//   `GET /v1/me`.
+// - automation: `--key-stdin` reads a team key from stdin (the only
+//   non-empty line; format and CRC checked offline, else exit 2 before any
+//   request) and checks it with `GET /v1/me`.
 // The credentials go to the credential store, the profile (apiUrl, team,
 // auth, issuer, store) to config.json, and the profile becomes current.
 // Re-login into a profile replaces its old entry: the old secret is deleted
@@ -14,6 +15,7 @@
 // `{"event":"logged_in","profile","apiUrl","me"}`.
 
 import { spawn } from "node:child_process";
+import { isWellFormedApiKey } from "@sbx/auth/api-key";
 import { Sbx } from "@sbx/sdk";
 import type { Command } from "commander";
 import { deviceLogin, revokeRefreshToken } from "../auth/device-grant.ts";
@@ -109,6 +111,30 @@ async function deviceFlow(
 	return { cred: { kind: "oidc", issuer, clientId, ...t }, issuer };
 }
 
+/**
+ * The team key of `--key-stdin`: the only non-empty line, well-formed
+ * (format and CRC, S7 §7.2). Messages never quote the input: it is a secret.
+ */
+export function keyFromStdin(text: string): string {
+	const lines = text
+		.split(/\r?\n/)
+		.map((l) => l.trim())
+		.filter((l) => l !== "");
+	const key = lines[0];
+	if (key === undefined) throw usageError("--key-stdin: stdin is empty");
+	if (lines.length > 1) {
+		throw usageError(
+			`--key-stdin: stdin must hold only the team key, found ${lines.length} non-empty lines`,
+		);
+	}
+	if (!isWellFormedApiKey(key)) {
+		throw usageError(
+			"--key-stdin: stdin is not a well-formed team API key (sbx_ and 49 letters or digits with a valid checksum)",
+		);
+	}
+	return key;
+}
+
 async function login(
 	ctx: Context,
 	opts: { browser?: boolean; keyStdin?: boolean },
@@ -121,8 +147,7 @@ async function login(
 	let cred: StoredCredential;
 	let profile: Profile;
 	if (opts.keyStdin === true) {
-		const key = (await readAll(ctx.stdin)).trim();
-		if (key === "") throw usageError("--key-stdin: stdin is empty");
+		const key = keyFromStdin(await readAll(ctx.stdin));
 		cred = { kind: "key", token: key };
 		profile = { apiUrl, auth: "key" };
 	} else {

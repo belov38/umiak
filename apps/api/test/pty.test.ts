@@ -106,6 +106,8 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
 	/** Data bytes the agent attach delivered, by command (core id). */
 	const attached = new Map<string, number>();
+	/** Process/Attach calls so far. */
+	let attachCalls = 0;
 	const clients: Client[] = [];
 
 	/**
@@ -121,6 +123,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 						req: Parameters<AgentApi["attach"]>[1],
 						signal: AbortSignal,
 					) {
+						attachCalls++;
 						for await (const ev of t.attach(m, req, signal)) {
 							if (ev.type === "data") {
 								const n = attached.get(req.commandId) ?? 0;
@@ -579,6 +582,43 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 			offset: expected.length - 10,
 		});
 		expect(t.bytes().toString()).toBe(expected.slice(-10));
+	});
+
+	it("offset past the end of an exited PTY: error frame range_not_satisfiable, close 4416, no reopen loop", async () => {
+		const id = await pty({ command: "printf abcdef" });
+		const first = connect(connectPath(id));
+		expect((await first.closed).code).toBe(1000);
+		const size = first.bytes().length;
+		expect(size).toBe(6);
+
+		const attachesBefore = attachCalls;
+		const past = connect(connectPath(id, `?offset=${size + 1}`));
+		const closed = await past.closed;
+		expect(closed.code).toBe(4416);
+		expect(past.texts).toHaveLength(1);
+		expect(past.texts[0]).toMatchObject({
+			type: "error",
+			code: "range_not_satisfiable",
+			retryable: false,
+			details: { stream: "pty", size },
+		});
+		expect(past.texts[0].requestId).toMatch(/^req_/);
+		expect(past.bytes().length).toBe(0);
+		// Refused before any attach (an attach would reopen until it gave up).
+		expect(attachCalls).toBe(attachesBefore);
+
+		// At the end exactly: attached, exit, 1000.
+		const atEnd = connect(connectPath(id, `?offset=${size}`));
+		expect((await atEnd.closed).code).toBe(1000);
+		expect(atEnd.texts.map((f) => f.type)).toEqual(["attached", "exit"]);
+		// tailBytes wins over offset and never resolves past the end.
+		const tail = connect(connectPath(id, `?offset=${size + 100}&tailBytes=4`));
+		expect((await tail.closed).code).toBe(1000);
+		expect(tail.texts[0]).toEqual({ type: "attached", offset: size - 4 });
+		expect(tail.bytes().toString()).toBe("cdef");
+		const big = connect(connectPath(id, "?tailBytes=1000"));
+		expect((await big.closed).code).toBe(1000);
+		expect(big.texts[0]).toEqual({ type: "attached", offset: 0 });
 	});
 
 	it("before the upgrade: no subprotocol 400, wrong one 400, no bearer 401, no scope 403, plain GET 426 — all with the error envelope", async () => {

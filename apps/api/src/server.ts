@@ -292,8 +292,8 @@ export async function startApi(
 		// Uploads to /files may take longer than Node's 300 s default, so
 		// there is no server-wide request timeout: the headers timeout bounds
 		// clients that never finish the headers, and bodyLimits bounds every
-		// limited (non-file) body to 60 s; bodies are read only by handlers,
-		// after authentication.
+		// limited (non-file) body to 60 s, an upload chunk to 30 s without
+		// bytes; bodies are read only by handlers, after authentication.
 		l.server.requestTimeout = 0;
 	}
 

@@ -73,6 +73,63 @@ describe("Pty WebSocket factory (SbxOptions.webSocket)", () => {
 	});
 });
 
+describe("Pty offset past the end", () => {
+	it("close 4416 after range_not_satisfiable is final: no reconnect, exited rejects with the frame", async () => {
+		const sockets: Record<string, unknown>[] = [];
+		const factory: WebSocketFactory = () => {
+			const s = { readyState: 1, close() {}, send() {} };
+			sockets.push(s);
+			return s as unknown as WebSocket;
+		};
+		const core = createClientCore({
+			baseUrl: "https://api.example.com",
+			apiKey: "sbx_test",
+			webSocket: factory,
+		});
+		const pty = new Pty(core, new Command({ core, id: "sb_1" }, "cmd_1"), {
+			offset: 7,
+		});
+		pty.ready.catch(() => {});
+		for (let i = 0; i < 50 && sockets.length === 0; i++) {
+			await new Promise((r) => setTimeout(r, 10));
+		}
+		const s = sockets[0] as {
+			onopen: () => void;
+			onmessage: (ev: { data: unknown }) => void;
+			onclose: (ev: { code: number; reason: string }) => void;
+		};
+		s.onopen();
+		s.onmessage({
+			data: JSON.stringify({
+				type: "error",
+				code: "range_not_satisfiable",
+				message: "offset 7 is past the end of pty (6 bytes so far)",
+				retryable: false,
+				details: { stream: "pty", size: 6 },
+				requestId: "req_1",
+			}),
+		});
+		s.onclose({ code: 4416, reason: "" });
+		// The bound only turns a reconnect loop into a quick failure.
+		const err = await Promise.race([
+			pty.exited.then(
+				() => null,
+				(e: unknown) => e,
+			),
+			new Promise((r) => setTimeout(() => r("still running"), 5000)),
+		]);
+		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toMatchObject({
+			code: "range_not_satisfiable",
+			retryable: false,
+			details: { size: 6 },
+		});
+		// Give a reconnect timer the chance to fire: none is set.
+		await new Promise((r) => setTimeout(r, 50));
+		expect(sockets).toHaveLength(1);
+	});
+});
+
 describe("Pty truncated", () => {
 	it("onTruncated reports where the output goes on after a gap; offset follows", async () => {
 		let socket: Record<string, unknown> | undefined;

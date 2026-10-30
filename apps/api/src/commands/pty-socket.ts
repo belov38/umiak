@@ -17,8 +17,11 @@
 // `inputSessionId` per connection and `seq` in order, one call at a time;
 // a call the agent did not answer is repeated with the same seq (the agent
 // drops repeats). Close codes: 1000 after exit, 1012 after `reconnect`
-// (shutdown), 4401/4403/4404/4409/4503 after an `error` frame, 1008 for a
-// malformed control frame, 1011 otherwise. A ping goes out every `pingMs`;
+// (shutdown), 4401/4403/4404/4409/4416/4503 after an `error` frame, 1008
+// for a malformed control frame, 1011 otherwise. An `offset` past the end
+// of the output is refused before any attach (4416 range_not_satisfiable):
+// an exited PTY would never reach it, and the attach would be reopened
+// until it gave up. A ping goes out every `pingMs`;
 // a peer that missed the previous one is dropped.
 import { randomUUID } from "node:crypto";
 import { z } from "@hono/zod-openapi";
@@ -35,7 +38,11 @@ import type { ApiDeps } from "../deps.ts";
 import { type ApiError, notFoundError } from "../http/errors.ts";
 import { resolveCommandRef } from "../map/command.ts";
 import { resolveSandboxRef } from "../map/sandbox.ts";
-import { DEFAULT_ATTACH_MAX_ATTEMPTS, followCommand } from "./attach.ts";
+import {
+	checkStreamOffsets,
+	DEFAULT_ATTACH_MAX_ATTEMPTS,
+	followCommand,
+} from "./attach.ts";
 import type { ExitFrame } from "./frames.ts";
 import { requireSameMachine } from "./run.ts";
 
@@ -77,6 +84,8 @@ export const PTY_CLOSE = {
 	forbidden: 4403,
 	notFound: 4404,
 	notReady: 4409,
+	/** `offset` past the end of the output; final, like HTTP 416. */
+	rangeNotSatisfiable: 4416,
 	unavailable: 4503,
 } as const;
 
@@ -85,6 +94,7 @@ const CLOSE_BY_STATUS: Record<number, number> = {
 	403: PTY_CLOSE.forbidden,
 	404: PTY_CLOSE.notFound,
 	409: PTY_CLOSE.notReady,
+	416: PTY_CLOSE.rangeNotSatisfiable,
 	503: PTY_CLOSE.unavailable,
 };
 
@@ -94,6 +104,7 @@ const CLOSE_BY_CODE: Record<string, number> = {
 	not_found: PTY_CLOSE.notFound,
 	sandbox_not_ready: PTY_CLOSE.notReady,
 	invalid_state: PTY_CLOSE.notReady,
+	range_not_satisfiable: PTY_CLOSE.rangeNotSatisfiable,
 	agent_unavailable: PTY_CLOSE.unavailable,
 };
 
@@ -267,6 +278,17 @@ export async function runPtySocket(
 	let target: { command: Command; machineId: string };
 	try {
 		target = await ptyTarget(deps, conn.auth.principal, conn);
+		// tailBytes wins over offset and never resolves past the end.
+		if (conn.tailBytes === undefined && (conn.offset ?? 0) > 0) {
+			await checkStreamOffsets(
+				deps,
+				target.machineId,
+				target.command.id,
+				true,
+				{ pty: conn.offset ?? 0 },
+				() => "offset",
+			);
+		}
 	} catch (e) {
 		const h = agentErrorToHttp(e);
 		if (h.status >= 500) {

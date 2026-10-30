@@ -6,6 +6,7 @@
 	"description": "Public ids, team API key format, scopes, bearer classification, SSH keys and login certificates, the IdentityStore contract and its Postgres stand-in, environments store",
 	"exports": {
 		".": "./src/index.ts",
+		"./api-key": "./src/api-key.ts",
 		"./testing": "./src/testing.ts"
 	},
 	"scripts": {

@@ -3,7 +3,7 @@
 // GET handler's streamed body.
 import { Hono } from "hono";
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiEnv } from "../src/deps.ts";
 import { bodyLimits } from "../src/http/body-limit.ts";
 import { onErrorHandler } from "../src/http/errors.ts";
@@ -128,6 +128,143 @@ describe("body limit", () => {
 			error: { code: string; message: string };
 		};
 		expect(body.error.code).toBe("validation");
+	});
+
+	describe("upload chunks: an idle timeout instead of the total deadline", () => {
+		const CHUNK = "/v1/sandboxes/sb_x/files/uploads/upl_y";
+		afterEach(() => vi.useRealTimers());
+
+		function app() {
+			const a = new Hono<ApiEnv>();
+			a.use(
+				"*",
+				requestId(),
+				bodyLimits({ timeoutMs: 60_000, idleTimeoutMs: 30_000 }),
+			);
+			a.onError(onErrorHandler(pino({ level: "silent" })));
+			a.put("/v1/sandboxes/:sb/files/uploads/:up", async (c) =>
+				c.text(String((await c.req.arrayBuffer()).byteLength)),
+			);
+			a.post("/v1/x", async (c) =>
+				c.text(String((await c.req.arrayBuffer()).byteLength)),
+			);
+			return a;
+		}
+
+		/** A client body the test feeds piece by piece; `waiting` while read. */
+		function trickle() {
+			let give: ((b: Uint8Array | null) => void) | null = null;
+			const stream = new ReadableStream<Uint8Array>(
+				{
+					pull: (ctl) =>
+						new Promise<void>((r) => {
+							give = (b) => {
+								give = null;
+								if (b === null) ctl.close();
+								else ctl.enqueue(b);
+								r();
+							};
+						}),
+				},
+				{ highWaterMark: 0 },
+			);
+			return {
+				stream,
+				/** Waits (on real I/O turns, not timers) until the body is read. */
+				async waiting() {
+					for (let i = 0; i < 1000 && give === null; i++) {
+						await new Promise((r) => setImmediate(r));
+					}
+					expect(give, "the body is being read").not.toBeNull();
+				},
+				send: (b: Uint8Array | null) => give?.(b),
+			};
+		}
+
+		const send = (
+			a: Hono<ApiEnv>,
+			method: string,
+			path: string,
+			body: ReadableStream,
+		): Promise<Response> =>
+			Promise.resolve(
+				a.request(
+					new Request(`http://api.test${path}`, {
+						method,
+						body,
+						duplex: "half",
+					} as RequestInit),
+				),
+			);
+
+		it("a slow but steady chunk (a piece every 25 s, 250 s in all) is accepted", async () => {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+			const t = trickle();
+			const res = send(app(), "PUT", CHUNK, t.stream);
+			for (let i = 0; i < 10; i++) {
+				await t.waiting();
+				await vi.advanceTimersByTimeAsync(25_000);
+				t.send(new Uint8Array(1000));
+			}
+			await t.waiting();
+			t.send(null);
+			const r = await res;
+			expect(r.status).toBe(200);
+			expect(await r.text()).toBe("10000");
+		});
+
+		it("a stalled chunk is 408 request_timeout, retryable, after 30 s without bytes", async () => {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+			const t = trickle();
+			let done = false;
+			const res = send(app(), "PUT", CHUNK, t.stream).finally(() => {
+				done = true;
+			});
+			await t.waiting();
+			t.send(new Uint8Array(1000));
+			await t.waiting();
+			await vi.advanceTimersByTimeAsync(29_000);
+			expect(done).toBe(false);
+			await vi.advanceTimersByTimeAsync(1_000);
+			const r = await res;
+			expect(r.status).toBe(408);
+			expect(r.headers.get("connection")).toBe("close");
+			const body = (await r.json()) as {
+				error: { code: string; retryable: boolean; message: string };
+			};
+			expect(body.error).toMatchObject({
+				code: "request_timeout",
+				retryable: true,
+			});
+			expect(body.error.message).toMatch(/30 s/);
+		});
+
+		it("other bounded bodies keep the total deadline: the same slow client is 400 at 60 s", async () => {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+			const t = trickle();
+			let done = false;
+			const res = send(app(), "POST", "/v1/x", t.stream).finally(() => {
+				done = true;
+			});
+			for (let i = 0; i < 2; i++) {
+				await t.waiting();
+				await vi.advanceTimersByTimeAsync(25_000);
+				t.send(new Uint8Array(1000));
+			}
+			await t.waiting();
+			await vi.advanceTimersByTimeAsync(9_000);
+			expect(done).toBe(false);
+			await vi.advanceTimersByTimeAsync(1_000);
+			const r = await res;
+			expect(r.status).toBe(400);
+			const body = (await r.json()) as {
+				error: { code: string; retryable: boolean };
+			};
+			expect(body.error).toMatchObject({
+				code: "validation",
+				retryable: false,
+			});
+		});
 	});
 
 	it("a body without Content-Length is read and handed on", async () => {

@@ -184,6 +184,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 409 | `command_exited` | нет | input/resize для завершённой команды |
 | 409 | `upload_offset_mismatch` | нет | `details.offset`, заголовок `Sbx-Upload-Offset` |
 | 409 | `not_directory`, `is_directory`, `cross_device` | нет | файлы (S3 §11.1) |
+| 408 | `request_timeout` | да | добавлено в реализации (§23.2): чанк загрузки застыл (§23.3) |
 | 413 | `payload_too_large` | нет | |
 | 416 | `range_not_satisfiable` | нет | |
 | 422 | `template_unavailable` | нет | шаблон выключен или размер не разрешён |
@@ -734,7 +735,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - **Клиент → сервер:** бинарный кадр — ввод; текстовый — `{"type":"resize","cols":N,"rows":N}`.
 - **Ввод.** `api` назначает `inputSessionId` на каждое WebSocket-соединение и нумерует `seq`; повторы `api` → агент дедуплицируются (S2 §9.3). Байты, которые клиент отправил в момент обрыва WebSocket, могут потеряться: нажатие клавиши теряется, но не повторяется дважды. Склейка нажатий за 5 ms.
 - **Backpressure.** Если `bufferedAmount` сокета больше 1 MiB, `api` перестаёт читать `Attach` (поток агента ждёт по flow control HTTP/2).
-- **Закрытие:** `1000` после `exit`; `1012` при остановке пода (перед ним кадр `reconnect`); `4401` не авторизован, `4403` нет прав, `4404` нет команды, `4409` sandbox не `ready`, `4503` агент недоступен (переподключиться позже). В реализации ещё `1008` и `1011` (§23.4). WebSocket ping от `api` каждые 15 s.
+- **Закрытие:** `1000` после `exit`; `1012` при остановке пода (перед ним кадр `reconnect`); `4401` не авторизован, `4403` нет прав, `4404` нет команды, `4409` sandbox не `ready`, `4503` агент недоступен (переподключиться позже). В реализации ещё `1008`, `1011` и `4416` (§23.4). WebSocket ping от `api` каждые 15 s.
 - Клиент (SDK, CLI) переподключается сам с текущим offset; scrollback после переподключения — `tailBytes` (CLI: 64 KiB).
 - `POST .../ptys/{command}/resize {cols, rows}` — то же без WebSocket. PTY-вывод также читается NDJSON-ручкой `/commands/{command}/stream?ptyOffset=`, а ввод — `/input`; так PTY доступен клиентам без WebSocket.
 
@@ -1212,6 +1213,7 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 | HTTP | `code` | `retryable` | Когда |
 |---|---|---|---|
 | 405 | `method_not_allowed` | нет | путь есть, метода нет; заголовок `Allow`, `details.allow` |
+| 408 | `request_timeout` | да | `PUT /files/uploads/{upload}`: обработчик ждёт байты чанка 30 s, а их нет (§23.3); `details.idleTimeoutSeconds`, `Connection: close`. Агенту ничего не ушло, `offset` защищает повтор: SDK продолжает с offset из `HEAD` |
 | 426 | `upgrade_required` | нет | `GET .../ptys/{command}/connect` без WebSocket upgrade |
 | 503 | `idp_unavailable` | да | discovery или JWKS Keycloak недоступны, а ключей в кэше нет. Не `401`, чтобы CLI не уходил в повторный вход |
 | 503 | `not_ready` | да | `/readyz`: `details.reasons`, `Retry-After`; тот же конверт ошибки, что на остальных listener-ах |
@@ -1227,7 +1229,7 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 
 - **Лимиты** (§5.8): fixed window — `SBX_API_RATE_BURST` запросов за `burst / SBX_API_RATE_RPS` секунд на principal (по умолчанию 100 за 5 s, ровно `RateLimit-Policy: "req";q=100;w=5`), а не token bucket. Заголовки — как в §5.8. Старты (create, fork, resume) — `SBX_API_RATE_STARTS_PER_MIN` (30) в минуту на команду; повторы с тем же `Idempotency-Key` тоже считаются. Стримов — до `SBX_API_MAX_STREAMS` (100) на principal; sync-команды есть в реестре стримов (для отзыва и остановки), но в этот лимит не входят.
 - **`503 server_shutting_down`** — с `Connection: close` и `Retry-After: 1`.
-- **Тела запросов** (§5.11) до аутентификации не читаются: лимит считается в потоке, который читает сам обработчик (после аутентификации); превышение — `413` по ходу чтения. Ограниченное тело (всё, кроме `PUT /files/content|archive`) должно прийти за 60 s, иначе `400 validation` (`path: body`); у файловых загрузок такого срока нет, общего `requestTimeout` у сервера тоже (ограничен только `headersTimeout`). Ingress перед `api` должен ограничивать частоту запросов по IP: поиск ключа до аутентификации идёт на каждый запрос (`apps/api/README.md`).
+- **Тела запросов** (§5.11) до аутентификации не читаются: лимит считается в потоке, который читает сам обработчик (после аутентификации); превышение — `413` по ходу чтения. Ограниченное тело (всё, кроме `PUT /files/content|archive` и чанков загрузки) должно прийти за 60 s, иначе `400 validation` (`path: body`). У чанка `PUT /files/uploads/{upload}` (до 8 MiB) общего срока нет: медленный, но непрерывный клиент (4 MiB за 60 s — это ~0,55 Mbit/s) иначе не загрузил бы ни одного чанка; вместо него таймаут простоя — 30 s без новых байт, пока обработчик их ждёт (время ожидания готовности sandbox не считается), → `408 request_timeout`, `retryable: true` (§23.2). У `PUT /files/content|archive` срока нет, общего `requestTimeout` у сервера тоже (ограничен только `headersTimeout`). Ingress перед `api` должен ограничивать частоту запросов по IP: поиск ключа до аутентификации идёт на каждый запрос (`apps/api/README.md`).
 - **`GET /v1/docs`** — только на public listener-е: на proxied (origin с cookie oauth2-proxy) — `404`, сторонний скрипт там не выполняется (§15.1). Страница грузит Scalar фиксированной версии (`@scalar/api-reference@1.76.3`, `standalone.js`) с jsDelivr с SRI (`integrity`, `crossorigin`), без inline-скриптов, с CSP `default-src 'none'; script-src <этот файл>; style-src 'unsafe-inline'; connect-src 'self'; …`. Self-hosting из `node_modules` не сделан: пакет тянет Vue и ~30 зависимостей (+2700 строк lockfile, build-скрипты) ради одного файла.
 - Страница ошибки `/sbx-auth/authorize` с `429`/`503` ставит `Retry-After`, как JSON-ошибки.
 - `POST /v1/sandboxes` с `environment` в виде голого UUID — `404 not_found`, как ручки `/v1/environments/{environment}` (UUID — не имя; id — только `env_…`).
@@ -1245,7 +1247,7 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 ### 23.4 PTY
 
 - Повтор `POST /ptys` с тем же ключом и телом — `200` (не `201`), та же команда, `Idempotency-Replayed: true`.
-- Close сверх §10.2: `1008` — некорректный управляющий кадр (перед ним кадр `error` с `code: validation`), `1011` — неожиданная ошибка сервера (переподключиться с backoff). Неизвестные `type` текстовых кадров игнорируются.
+- Close сверх §10.2: `1008` — некорректный управляющий кадр (перед ним кадр `error` с `code: validation`), `1011` — неожиданная ошибка сервера (переподключиться с backoff), `4416` — `offset` за концом вывода PTY (перед ним кадр `error` с `code: range_not_satisfiable`, `retryable: false`, `details {stream: "pty", size}`), как `416` у `/stream` (§23.3); проверяется до attach, SDK и CLI не переподключаются. `tailBytes` важнее `offset` и за конец не выходит. Неизвестные `type` текстовых кадров игнорируются.
 - У PTY нет 60-минутного `max_duration` (он у NDJSON-стримов, §9.7): терминал открыт, пока им пользуются. Закрывают остановка пода (`1012`) и отзыв доступа (`4401`).
 - Отказы до upgrade (`400`, `401`, `403`, `426`, `429`, `503`) приходят обычным HTTP-ответом с конвертом ошибки.
 
@@ -1275,6 +1277,7 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - `exec --stdin` шлёт `seq` с `1` (shim отбрасывает `seq <= last`, §23.3).
 - `SBX_RETRY_BUDGET_MS` — бюджет повторов SDK для команд CLI.
 - `snapshot rm` спрашивает подтверждение, как `rm` (`--yes` без TTY).
+- `login --key-stdin`: ключ — единственная непустая строка stdin (пробелы и `\r` по краям срезаются); вторая непустая строка или ключ с неверным форматом или CRC (§7.2) — ошибка аргументов (код `2`) до любого запроса; сообщение ключ не цитирует.
 - `login` печатает JSONL: `device_code` (только device grant), затем `logged_in {profile, apiUrl, me}`. Профиль хранит `credentialStore` — где лежат секреты.
 - `exec sb -- 'npm test'` (один аргумент) идёт через `bash -lc`, `exec sb -- npm test` (несколько) — argv без shell.
 - Флаги и команды сверх §14.2: `--wait-timeout` у ждущих команд; `create --environment <name>` / `--no-environment`; `exec --tag k=v`; `kill --grace`; `ps --status`, `--limit`; `list --template`, `--q`, `--limit`; `label --unset`; `keys create --expires`; `run --cwd`, `--user`, `--timeout`; `run --push` по умолчанию работает в `~/<имя каталога>`; `shell --attach <cmd>`; `port --host-rewrite`, `--app-protocol`; `ssh-keys add --name`, `ssh-keys rm` по имени или отпечатку; `cp` с `:path` (текущая sandbox) и `-` (stdin/stdout); `sbx env-sets list|show|create|set|unset|rm` (environments, §23.6); алиас `ls` у `list`, `snapshot list`, `keys list` и `env-sets list`.

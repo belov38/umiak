@@ -9,7 +9,8 @@
 // The connection is reopened by offset (the bytes received so far) after a
 // drop, close 1012 (server shutdown), 1011, 4503 (agent unavailable) or a
 // failed handshake; 20 connections in a row without new bytes end it.
-// 4401/4403/4404/4409/1008 are final. Input written while disconnected is
+// 4401/4403/4404/4409/4416/1008 are final (4416: the offset is past the
+// end of the output). Input written while disconnected is
 // queued (up to 1 MiB) and sent after the next `attached`; input in flight
 // when a connection drops may be lost, never applied twice.
 
@@ -59,6 +60,7 @@ const FINAL_CLOSE_CODES: Record<number, string> = {
 	4403: "forbidden",
 	4404: "not_found",
 	4409: "sandbox_not_ready",
+	4416: "range_not_satisfiable",
 	1008: "validation",
 };
 const MAX_QUEUED_INPUT = 1024 * 1024;

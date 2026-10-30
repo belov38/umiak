@@ -262,6 +262,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@sbx/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@sbx/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk-ts
@@ -272,9 +275,6 @@ importers:
       '@sbx/api':
         specifier: workspace:*
         version: link:../api
-      '@sbx/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
       '@sbx/core':
         specifier: workspace:*
         version: link:../../packages/core

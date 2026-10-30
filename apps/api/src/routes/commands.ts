@@ -19,10 +19,11 @@ import type { AgentCommandInfo, AgentStream } from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import {
+	checkStreamOffsets,
 	commandResultOf,
-	DEFAULT_AGENT_READ_BUDGET_MS,
 	DEFAULT_ATTACH_MAX_ATTEMPTS,
 	followCommand,
+	readBudget,
 	withinBudget,
 } from "../commands/attach.ts";
 import { collectSync, type SyncResult } from "../commands/collect.ts";
@@ -385,61 +386,6 @@ async function commandTarget(
 
 function streamsOf(mode: string): AgentStream[] {
 	return mode === "pty" ? ["pty"] : ["stdout", "stderr"];
-}
-
-/**
- * Offsets of `GET .../stream` (§9.5): an offset of a stream the command
- * does not have is 400 (0 is ignored); an offset past the stream's size is
- * 416 like `/output`. Without the check an exited command never reaches
- * its end at such an offset and the attach is reopened until it gives up.
- */
-async function checkStreamOffsets(
-	deps: ApiDeps,
-	machineId: string,
-	commandId: string,
-	pty: boolean,
-	offsets: Partial<Record<AgentStream, number>>,
-): Promise<void> {
-	const has = pty ? ["pty"] : ["stdout", "stderr"];
-	const asked = (Object.keys(offsets) as AgentStream[]).filter(
-		(s) => (offsets[s] ?? 0) > 0,
-	);
-	const foreign = asked.filter((s) => !has.includes(s));
-	if (foreign.length > 0) {
-		throw validationError(
-			foreign.map((s) => ({
-				path: `query.${s}Offset`,
-				message: `this command has the streams ${has.join(", ")}`,
-			})),
-		);
-	}
-	if (asked.length === 0) return;
-	let info: AgentCommandInfo;
-	try {
-		info = await withinBudget(
-			deps.agent.get(machineId, commandId),
-			readBudget(deps),
-			machineId,
-		);
-	} catch (e) {
-		throw agentErrorToHttp(e);
-	}
-	for (const s of asked) {
-		const size = info.streams[s]?.size ?? 0;
-		const offset = offsets[s] ?? 0;
-		if (offset > size) {
-			throw new ApiError(
-				416,
-				"range_not_satisfiable",
-				`${s}Offset ${offset} is past the end of ${s} (${size} bytes so far)`,
-				{ details: { stream: s, size } },
-			);
-		}
-	}
-}
-
-function readBudget(deps: ApiDeps): number {
-	return deps.commandTimings.agentReadBudgetMs ?? DEFAULT_AGENT_READ_BUDGET_MS;
 }
 
 /** Frame types that end a stream. */

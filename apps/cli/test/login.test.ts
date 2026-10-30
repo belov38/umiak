@@ -358,6 +358,41 @@ describe("sbx login", () => {
 		expect(e.code).toBe(2);
 	});
 
+	it("--key-stdin checks the key locally: extra text or a bad key exits 2 before any request, without echoing it", async () => {
+		const { generateApiKeySecret } = await import("@sbx/auth");
+		const key = generateApiKeySecret();
+		// Nothing listens there: a request would end with network_error (75).
+		const nowhere = "http://127.0.0.1:1";
+		const flipped = `${key.slice(0, -1)}${key.endsWith("A") ? "B" : "A"}`;
+		for (const stdin of [
+			`${key}\nsecond line\n`,
+			`${key} trailing words\n`,
+			flipped,
+			"not-a-key",
+			`Bearer ${key}`,
+		]) {
+			const r = await runCli(["login", "--key-stdin", "--api-url", nowhere], {
+				env: home.env,
+				stdin,
+			});
+			expect(r.code, `${JSON.stringify(stdin)}: ${r.stderr}`).toBe(2);
+			expect(r.last()).toMatchObject({ event: "error", code: "usage" });
+			expect(r.stdout).not.toContain(key.slice(4, 20));
+			expect(r.stderr).not.toContain(key.slice(4, 20));
+			expect(r.stdout).not.toContain("second line");
+		}
+		expect(() =>
+			readFileSync(join(home.configDir, "credentials.json")),
+		).toThrow();
+		// Blank lines and CRLF around the key are fine.
+		const ok = await runCli(["login", "--key-stdin", "--api-url", w.url], {
+			env: home.env,
+			stdin: `\r\n\n  ${w.secret}  \r\n\n`,
+		});
+		expect(ok.code, ok.stderr).toBe(0);
+		expect(ok.last()).toMatchObject({ event: "logged_in" });
+	});
+
 	it("--team is checked at login and kept in the profile", async () => {
 		const r = await runCli(
 			["login", "--key-stdin", "--api-url", w.url, "--team", w.teamId],

@@ -857,7 +857,7 @@ export interface paths {
         };
         /**
          * Connect to a terminal (WebSocket)
-         * @description WebSocket upgrade with the subprotocol `sbx.pty.v1` (required). Server → client: binary frames are consecutive PTY output bytes; text frames are JSON: `{"type":"attached","offset":N}` first, `{"type":"truncated","availableFrom":N}`, `{"type":"exit",...}` (as in NDJSON), `{"type":"error","code","message","retryable","details","requestId"}`, `{"type":"reconnect","offset":N,"reason"}`. The client counts the offset itself: `attached.offset` (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are input (a key typed while the socket drops may be lost, never applied twice); text `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4503 agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; `tailBytes` for scrollback. Pings every 15 s. Authentication as for other requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team header.
+         * @description WebSocket upgrade with the subprotocol `sbx.pty.v1` (required). Server → client: binary frames are consecutive PTY output bytes; text frames are JSON: `{"type":"attached","offset":N}` first, `{"type":"truncated","availableFrom":N}`, `{"type":"exit",...}` (as in NDJSON), `{"type":"error","code","message","retryable","details","requestId"}`, `{"type":"reconnect","offset":N,"reason"}`. The client counts the offset itself: `attached.offset` (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are input (a key typed while the socket drops may be lost, never applied twice); text `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416 `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team header.
          */
         get: operations["ptys.connect"];
         put?: never;
@@ -5073,6 +5073,15 @@ export interface operations {
             };
             /** @description `not_found` or `upload_not_found` */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `request_timeout` (retryable): no bytes of the chunk arrived for 30 s; resume from the offset of HEAD .../uploads/{upload} */
+            408: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -23,6 +23,7 @@ import type {
 	AgentStream,
 } from "../agent/types.ts";
 import type { ApiDeps } from "../deps.ts";
+import { ApiError, validationError } from "../http/errors.ts";
 import {
 	type CommandExitStatus,
 	type ErrorFrame,
@@ -65,6 +66,65 @@ export function withinBudget<T>(
 		);
 		p.then(resolve, reject).finally(() => clearTimeout(timer));
 	});
+}
+
+/**
+ * Start offsets of `GET .../stream` (§9.5) and the PTY socket (§10.2): an
+ * offset of a stream the command does not have is 400 (0 is ignored); an
+ * offset past the stream's size is 416 like `/output`. Without the check
+ * an exited command never reaches its end at such an offset and the attach
+ * is reopened until it gives up. `param` names the offset in the message
+ * (default `<stream>Offset`, the query of `/stream`).
+ */
+export async function checkStreamOffsets(
+	deps: ApiDeps,
+	machineId: string,
+	commandId: string,
+	pty: boolean,
+	offsets: Partial<Record<AgentStream, number>>,
+	param: (s: AgentStream) => string = (s) => `${s}Offset`,
+): Promise<void> {
+	const has = pty ? ["pty"] : ["stdout", "stderr"];
+	const asked = (Object.keys(offsets) as AgentStream[]).filter(
+		(s) => (offsets[s] ?? 0) > 0,
+	);
+	const foreign = asked.filter((s) => !has.includes(s));
+	if (foreign.length > 0) {
+		throw validationError(
+			foreign.map((s) => ({
+				path: `query.${param(s)}`,
+				message: `this command has the streams ${has.join(", ")}`,
+			})),
+		);
+	}
+	if (asked.length === 0) return;
+	let info: AgentCommandInfo;
+	try {
+		info = await withinBudget(
+			deps.agent.get(machineId, commandId),
+			readBudget(deps),
+			machineId,
+		);
+	} catch (e) {
+		throw agentErrorToHttp(e);
+	}
+	for (const s of asked) {
+		const size = info.streams[s]?.size ?? 0;
+		const offset = offsets[s] ?? 0;
+		if (offset > size) {
+			throw new ApiError(
+				416,
+				"range_not_satisfiable",
+				`${param(s)} ${offset} is past the end of ${s} (${size} bytes so far)`,
+				{ details: { stream: s, size } },
+			);
+		}
+	}
+}
+
+/** Budget of a `Process/Get` that only enriches a read. */
+export function readBudget(deps: ApiDeps): number {
+	return deps.commandTimings.agentReadBudgetMs ?? DEFAULT_AGENT_READ_BUDGET_MS;
 }
 
 export const DEFAULT_COMMAND_TIMINGS: CommandTimings = {
