@@ -63,7 +63,7 @@ func Apply(ctx context.Context, l paths.Layout, id Identity, r Resetter, fromAge
 	if err := resetManagedFiles(l); err != nil {
 		return false, err
 	}
-	written, err := applyMachineID(l, hexID, old.WrittenMachineID)
+	written, replaced, err := applyMachineID(l, hexID, old.WrittenMachineID)
 	if err != nil {
 		return false, err
 	}
@@ -90,6 +90,13 @@ func Apply(ctx context.Context, l paths.Layout, id Identity, r Resetter, fromAge
 		return false, fmt.Errorf("ident: write identity.json: %w", err)
 	}
 	// After the save: a hang or a failure here must not repeat the wipe.
+	if replaced {
+		// journald started with the inherited machine-id (a fork) and would keep writing
+		// under it, where journalctl of this machine finds nothing.
+		if err := r.RestartJournal(); err != nil {
+			slog.Warn("restart journald after a machine-id change failed", "err", err)
+		}
+	}
 	if fromAgent {
 		if err := r.RestartSSH(); err != nil {
 			slog.Warn("restart ssh after identity reset failed", "err", err)
@@ -168,23 +175,25 @@ func resetManagedFiles(l paths.Layout) error {
 }
 
 // applyMachineID writes the new machine-id unless systemd already chose one
-// of its own. It returns the machine-id that is in effect afterwards.
-func applyMachineID(l paths.Layout, hexID, oldWritten string) (string, error) {
+// of its own. It returns the machine-id that is in effect afterwards and
+// whether it replaced a different machine-id that was in effect before.
+func applyMachineID(l paths.Layout, hexID, oldWritten string) (written string, replaced bool, err error) {
 	b, err := os.ReadFile(l.MachineIDFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("ident: read machine-id: %w", err)
+		return "", false, fmt.Errorf("ident: read machine-id: %w", err)
 	}
 	cur := strings.TrimSpace(string(b))
-	if cur != "" && cur != uninitializedMachineID && cur != oldWritten {
-		return cur, nil
+	set := cur != "" && cur != uninitializedMachineID
+	if set && cur != oldWritten {
+		return cur, false, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(l.MachineIDFile), 0o755); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := fsutil.ReplaceFile(l.MachineIDFile, []byte(hexID+"\n"), 0o644); err != nil {
-		return "", fmt.Errorf("ident: write machine-id: %w", err)
+		return "", false, fmt.Errorf("ident: write machine-id: %w", err)
 	}
-	return hexID, nil
+	return hexID, set && cur != hexID, nil
 }
 
 // linkDbusMachineID makes the D-Bus machine-id a symlink to /etc/machine-id.

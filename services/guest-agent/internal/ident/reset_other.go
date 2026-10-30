@@ -15,3 +15,6 @@ func (LinuxResetter) ReloadNetwork() error { return errors.ErrUnsupported }
 
 // RestartSSH is not supported outside Linux.
 func (LinuxResetter) RestartSSH() error { return errors.ErrUnsupported }
+
+// RestartJournal is not supported outside Linux.
+func (LinuxResetter) RestartJournal() error { return errors.ErrUnsupported }

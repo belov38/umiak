@@ -143,6 +143,24 @@ describe("tunnel URL in smbios family (S5 section 14)", () => {
 		expect(e.api.vms.get(vm.vmid)?.config.smbios1).toBe(
 			formatSmbios1({ ...smbios, family: `sbxt1:${url}` }),
 		);
+
+		const lvId = randomUUID().replaceAll("-", "");
+		const snap = await e.infra.snapshot(vm.vmid, { lvId });
+		const child = randomUUID();
+		const forked = await e.infra.fork({
+			machineId: child,
+			snapshot: {
+				lvId,
+				sourceVmid: vm.vmid,
+				disks: snap.disks,
+				hw: snap.hw,
+			},
+			smbios: smbiosFor(child),
+		});
+		expect(forked.vmid).not.toBe(vm.vmid);
+		expect(e.api.vms.get(forked.vmid)?.config.smbios1).toBe(
+			formatSmbios1({ ...smbiosFor(child), family: `sbxt1:${url}` }),
+		);
 	});
 
 	it("without SBX_TUNNEL_URL there is no family", async () => {

@@ -57,13 +57,13 @@ topology:
     # drive. `sbx-admin bootstrap` makes it active; 599-seed becomes deprecated (rollback:
     # `sbx-admin template promote <599-seed build id>`).
     - templateSlug: linux
-      version: "20261030.15"
+      version: "20261030.16"
       os: linux
       node: pve
       storage: local-lvm
-      pveVmid: 598
+      pveVmid: 597
       bootTimeoutS: 300
-      agentVersion: 0.1.0+20261030.2fb34a1
+      agentVersion: 0.1.0+20261030.78c73ee
       hw:
         machine: q35
         cpu: host

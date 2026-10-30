@@ -11,8 +11,11 @@ plan: `docs/plans/s5-linux-template.md`). The build VM is driven only through th
 - Host runbook steps done: `infra/pve/setup.sh media` (role `SbxTemplateMedia` on `/storage/local`) and
   `infra/pve/setup.sh node` (an `sbx-node` with `media.list`/`media.remove` and template origins in its range).
 - The S1 client config (`SBX_PVE_URL`, `SBX_PVE_TLS_NAME`, `SBX_NODE_SSH_HOST`, `~/.config/sbx/`).
-- VMIDs: template builds take `SBX_TEMPLATE_VMID_RANGE` (default `597-598`, top down); sandboxes stay in
-  `SBX_VMID_RANGE` (`500-589`). Two build slots: retire an old build before a third one.
+- VMIDs: a build takes the first free slot of its recipe (`vmids` in `template.yaml`: Linux 597 and 599,
+  Windows 598) inside `SBX_TEMPLATE_VMID_RANGE` (default `597-599`); 599 is skipped while it is the PoC
+  template (`SBX_TEMPLATE_VMID`). Sandboxes stay in `SBX_VMID_RANGE` (`500-589`). With one free Linux
+  slot, `sbx-tpl retire <buildId> --delete-vm` the previous build (refused for the build the worker
+  config uses and the newest ready one unless `--force`, for the PoC slot unless `--force-poc`).
 
 ## Build
 

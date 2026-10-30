@@ -122,16 +122,27 @@ export class Allocator {
 	}
 
 	/**
-	 * VMID for a new template (S5): scans from range.max down, so templates stay away from the
-	 * VMIDs machines take from range.min. The lease is a `reserved` purpose=template row; the
-	 * caller marks it active once the VM exists, or releases it after a failed build.
+	 * VMID for a new template (S5): the first free one of `slots` (the recipe's template slots,
+	 * each inside the template range), or without slots the template range from range.max down,
+	 * so templates stay away from the VMIDs machines take from range.min. The legacy template VMID
+	 * is never taken. The lease is a `reserved` purpose=template row; the caller marks it active
+	 * once the VM exists, or releases it after a failed build.
 	 */
-	async allocateTemplate(): Promise<AllocatedVmid> {
+	async allocateTemplate(slots?: readonly number[]): Promise<AllocatedVmid> {
 		const { store, clusterId, templateVmid } = this.#o;
 		const range = this.#o.templateRange ?? this.#o.range;
+		const outside = slots?.filter((v) => v < range.min || v > range.max);
+		if (outside?.length)
+			throw new AllocatorError(
+				"vmid_exhausted",
+				`template slots ${outside.join(", ")} are outside ${range.min}-${range.max}`,
+			);
+		const order = slots ? [...slots] : [];
+		if (!slots)
+			for (let vmid = range.max; vmid >= range.min; vmid--) order.push(vmid);
 		const occupied = await this.#o.occupied();
 		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
-		for (let vmid = range.max; vmid >= range.min; vmid--) {
+		for (const vmid of order) {
 			if (vmid === templateVmid || taken.has(vmid) || occupied.has(vmid))
 				continue;
 			const t = this.#now();
@@ -151,7 +162,9 @@ export class Allocator {
 		}
 		throw new AllocatorError(
 			"vmid_exhausted",
-			`no free VMID in ${range.min}-${range.max}`,
+			slots
+				? `no free template slot among ${slots.join(", ")}`
+				: `no free VMID in ${range.min}-${range.max}`,
 		);
 	}
 

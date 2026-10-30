@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net/netip"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,6 +19,17 @@ import (
 )
 
 var defaultSections = []string{"guests", "lvs", "hashes", "sysctl", "sbx0", "vmfiles", "journalReaders"}
+
+// slotVolumeRe matches the volumes of a guest by VMID: vm-<id>-disk-N, base-<id>-disk-N,
+// vm-<id>-cloudinit and the like.
+var slotVolumeRe = regexp.MustCompile(`^(?:vm|base)-([1-9][0-9]*)-`)
+
+// inTemplateSlot reports whether an LV belongs to a guest in a template slot: template builds
+// (S5, S9) create and delete those, untagged while the build runs, so they are not the world.
+func (s *Server) inTemplateSlot(lv string) bool {
+	m := slotVolumeRe.FindStringSubmatch(lv)
+	return m != nil && s.Cfg.IsTemplateSlot(atoiMatch(m, 1))
+}
 
 func (s *Server) inventory(ctx context.Context, raw json.RawMessage) (any, error) {
 	var args struct {
@@ -118,6 +130,11 @@ func (s *Server) guests(ctx context.Context) (any, error) {
 			return nil, fmt.Errorf("unexpected qm list row %q", f)
 		}
 		id, _ := strconv.Atoi(f[0])
+		// VMs in template slots are template builds and templates, ours like the sandboxes.
+		// Containers there are never ours and stay listed.
+		if s.Cfg.IsTemplateSlot(id) {
+			continue
+		}
 		qm = append(qm, qmRow{VMID: id, Name: f[1], Status: f[2], MemMB: f[3], BootDiskGB: f[4], PID: f[5]})
 	}
 	pct := []pctRow{}
@@ -147,8 +164,9 @@ func (s *Server) foreignLVs(ctx context.Context) (any, error) {
 	}
 	out := []row{}
 	for _, l := range all {
-		// LVs outside our pool: neither sandbox disks (sbx) nor our template (sbx-tpl).
-		if !slices.Contains(l.Tags, "sbx") && !slices.Contains(l.Tags, "sbx-tpl") {
+		// LVs outside our pool: neither sandbox disks (sbx), nor templates (sbx-tpl), nor the
+		// volumes of a template build.
+		if !slices.Contains(l.Tags, "sbx") && !slices.Contains(l.Tags, "sbx-tpl") && !s.inTemplateSlot(l.Name) {
 			out = append(out, row{l.Name, l.SizeBytes, l.Attr})
 		}
 	}
@@ -208,7 +226,9 @@ func (s *Server) hashes() (any, error) {
 		return nil, err
 	}
 	for _, p := range fws {
-		if s.Cfg.InRange(vmidOfFile(path.Base(p))) {
+		// Sandboxes and template build VMs (their firewall goes before `template`) are ours; the
+		// legacy template keeps its file in the world.
+		if id := vmidOfFile(path.Base(p)); s.Cfg.InRange(id) || (s.Cfg.IsTemplateSlot(id) && id != s.Cfg.TemplateVMID) {
 			continue
 		}
 		if err := s.hashFile(h, p); err != nil {

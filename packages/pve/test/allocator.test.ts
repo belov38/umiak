@@ -65,6 +65,31 @@ describe("Allocator", () => {
 		expect((await alloc.allocate()).vmid).toBe(500);
 	});
 
+	it("allocateTemplate with slots takes the first free one and never another VMID", async () => {
+		const { alloc } = make({
+			range: { min: 500, max: 589 },
+			templateRange: { min: 597, max: 599 },
+		});
+		// Linux slots: 597, then 599 (skipped while it is the legacy template), never 598.
+		expect((await alloc.allocateTemplate([597, 599])).vmid).toBe(597);
+		await expect(alloc.allocateTemplate([597, 599])).rejects.toThrow(
+			/no free template slot among 597, 599/,
+		);
+		expect(await alloc.get(598)).toBeUndefined();
+		expect((await alloc.allocateTemplate([598])).vmid).toBe(598);
+	});
+
+	it("allocateTemplate refuses slots outside the template range", async () => {
+		const { alloc } = make({
+			range: { min: 500, max: 589 },
+			templateRange: { min: 597, max: 599 },
+		});
+		await expect(alloc.allocateTemplate([589, 597])).rejects.toThrow(
+			/outside 597-599/,
+		);
+		expect(await alloc.get(597)).toBeUndefined();
+	});
+
 	it("allocateTemplate fails when the range is exhausted", async () => {
 		const { alloc } = make({ range: { min: 500, max: 500 }, occupied: [500] });
 		await expect(alloc.allocateTemplate()).rejects.toThrow(/vmid_exhausted/);

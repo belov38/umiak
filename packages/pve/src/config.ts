@@ -13,7 +13,10 @@ export interface Config {
 	nodeSshKnownHosts: string;
 	/** Sandbox VMIDs (pve: 500-589; 590-596 are dev infrastructure). */
 	vmidRange: { min: number; max: number };
-	/** VMIDs of S5 template builds (pve: 597-598; 599 is the PoC template). */
+	/**
+	 * Template slots (pve: 597-599). Each recipe picks its own slots in it (Linux 597 and 599,
+	 * Windows 598); 599 stays the PoC template until a Linux build replaces it.
+	 */
 	templateVmidRange: { min: number; max: number };
 	clusterId: number;
 	stateDb: string;
@@ -56,7 +59,7 @@ export function loadConfig(
 	);
 	const templateVmidRange = parseRange(
 		"SBX_TEMPLATE_VMID_RANGE",
-		get("SBX_TEMPLATE_VMID_RANGE", "597-598"),
+		get("SBX_TEMPLATE_VMID_RANGE", "597-599"),
 	);
 	if (
 		templateVmidRange.min <= vmidRange.max &&

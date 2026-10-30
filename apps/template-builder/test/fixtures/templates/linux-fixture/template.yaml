@@ -17,3 +17,4 @@ steps: [00-base, reboot, 10-system, 90-cleanup]
 seal: sbx-agent
 boot_timeout_s: 300
 verify: linux
+vmids: [597, 599]
