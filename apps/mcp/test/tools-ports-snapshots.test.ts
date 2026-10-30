@@ -81,7 +81,7 @@ describe("tool list", () => {
 			"snapshot_list",
 			"snapshot_delete",
 		]);
-		expect(ALL_TOOLS.slice(22).map((t) => t.name)).toEqual([
+		expect(ALL_TOOLS.slice(22, 28).map((t) => t.name)).toEqual([
 			...PORT_TOOLS.map((t) => t.name),
 			...SNAPSHOT_TOOLS.map((t) => t.name),
 		]);
