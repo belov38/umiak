@@ -187,10 +187,10 @@ export function agentUnavailableError(): ApiError {
  * ApiError passes through; a non-agent error maps like `toHttpError`
  * (500 internal). Start is classified in commands/run.ts first: only the
  * codes the agent sends before it launches anything (invalid_argument,
- * user_not_found, already_exists, too_many_commands, not_claimed,
- * request_id_reused, ...) mark the command `failed_to_start`; any other
- * error of a Start (`internal`, `unknown`, an unknown code) is an unknown
- * outcome (503, the row stays `starting`).
+ * user_not_found, already_exists, too_many_commands, not_claimed, ...)
+ * mark the command `failed_to_start`; any other error of a Start
+ * (`internal`, `unknown`, an unknown code, `already_exists` on a keyed
+ * replay) is an unknown outcome or follows the existing command.
  */
 export function agentErrorToHttp(e: unknown): ApiError {
 	if (e instanceof ApiError) return e;

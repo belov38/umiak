@@ -108,11 +108,15 @@ export function requireSameMachine(
 
 /**
  * Agent codes of a Start that the agent refuses before it launches anything
- * (S3 §9.2, services/guest-agent internal/process/start.go and the claim and
- * request-id interceptors): the process never ran. `failed_precondition`,
- * `shim_outdated` and `unimplemented` are answers of a call the agent does
- * not serve. Any other code (`internal` after the launch, a Connect
- * `unknown`, a code this api does not know) leaves the outcome unknown.
+ * (S3 §9.2, services/guest-agent internal/process/start.go and the claim
+ * interceptor): the process never ran. Start is exempt from the agent's
+ * request-id cache (internal/reqcache), so `request_id_reused` does not
+ * come from the real agent; it is kept as a refusal for an agent that
+ * would check it before the handler. `failed_precondition`, `shim_outdated`
+ * and `unimplemented` are answers of a call the agent does not serve. Any
+ * other code (`internal` after the launch, a Connect `unknown`, a code this
+ * api does not know) leaves the outcome unknown. On a keyed replay
+ * `already_exists` is not a refusal either (see startPlanned).
  */
 const START_REFUSED = new Set([
 	"invalid_argument",
@@ -159,6 +163,24 @@ function startUnavailable(
 				: { commandId: id, outcome: "unknown" },
 		},
 	);
+}
+
+/**
+ * The agent's command of a keyed replay whose Start answered
+ * `already_exists`: the first attempt started it (with the spec of that
+ * attempt), so the replay follows it. Null when it cannot be read: the
+ * outcome stays unknown.
+ */
+async function followExisting(
+	deps: ApiDeps,
+	machineId: string,
+	commandId: string,
+): Promise<AgentCommandInfo | null> {
+	try {
+		return await deps.agent.get(machineId, commandId);
+	} catch {
+		return null;
+	}
 }
 
 /** What to start: the command row, the agent spec and the capabilities. */
@@ -234,7 +256,6 @@ export async function startPlanned(
 		plan.user ??
 		(await deps.config.template(sandbox.templateSlug))?.loginUser ??
 		DEFAULT_COMMAND_USER;
-	const agentCmd: AgentCommandSpec = { ...plan.agent, user };
 	const requestId = startRequestId(auth, idemKey);
 	const spec: CommandSpec = { ...plan.core, user, requestId };
 	const { command, replayed } =
@@ -256,6 +277,10 @@ export async function startPlanned(
 		// Ended: Start is not repeated (an agent that lost it would run it again).
 		return { command, machineId, info: null, replayed };
 	}
+	// A replay re-sends the spec of the stored row: the default user of a
+	// first attempt may differ from the template's loginUser now, and the
+	// agent's Start is idempotent only for the same spec.
+	const agentCmd: AgentCommandSpec = { ...plan.agent, user: command.user };
 
 	let info: AgentCommandInfo;
 	try {
@@ -267,29 +292,36 @@ export async function startPlanned(
 		);
 		info = r.command;
 	} catch (e) {
-		if (isStartRefused(e)) {
+		const followed =
+			replayed && e instanceof AgentCallError && e.code === "already_exists"
+				? await followExisting(deps, machineId, command.id)
+				: null;
+		if (followed !== null) {
+			info = followed;
+		} else if (isStartRefused(e)) {
 			// The agent refused it: the process never started. A row that a
 			// concurrent replay already moved on is left alone.
 			await svc.failCommandStart(command.id).catch(() => {});
 			throw agentErrorToHttp(e);
+		} else {
+			// Unreachable, DeadlineExceeded, or an agent error that may come
+			// after the launch (`internal`): the agent may have started it, so
+			// the row stays `starting` and only a keyed retry repeats the Start.
+			const unreachable = isAgentOutcomeUnknown(e);
+			if (!unreachable) {
+				// An answer that is not a refusal: kept in the log, the client
+				// sees only agent_unavailable.
+				deps.log.warn(
+					{
+						err: e instanceof Error ? e.message : String(e),
+						code: e instanceof AgentCallError ? e.code : undefined,
+						commandId: command.id,
+					},
+					"agent Start failed with an unknown outcome",
+				);
+			}
+			throw startUnavailable(command.id, idemKey !== undefined, unreachable);
 		}
-		// Unreachable, DeadlineExceeded, or an agent error that may come
-		// after the launch (`internal`): the agent may have started it, so
-		// the row stays `starting` and only a keyed retry repeats the Start.
-		const unreachable = isAgentOutcomeUnknown(e);
-		if (!unreachable) {
-			// An answer that is not a refusal: kept in the log, the client
-			// sees only agent_unavailable.
-			deps.log.warn(
-				{
-					err: e instanceof Error ? e.message : String(e),
-					code: e instanceof AgentCallError ? e.code : undefined,
-					commandId: command.id,
-				},
-				"agent Start failed with an unknown outcome",
-			);
-		}
-		throw startUnavailable(command.id, idemKey !== undefined, unreachable);
 	}
 
 	await svc.markCommandRunning(command.id, info.pid);

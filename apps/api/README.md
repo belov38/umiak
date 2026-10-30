@@ -128,12 +128,16 @@ principal, то есть после аутентификации; до неё к
   потоки команды (у PTY — один `pty`).
 - `Sbx-Request-Id` (S2 §9.2) ставить на мутирующих вызовах: `Start` (`requestId` из `opts`, UUIDv5 ключа
   идемпотентности), `MakeDir`/`Move`/`Chmod`/`Remove`, `UpdateEnv`/`UpdateSecrets`. Ответ `request_id_reused`
-  значит другой запрос под тем же id → `409 idempotency_key_reused`.
+  значит другой запрос под тем же id → `409 idempotency_key_reused` (у `Start` его не бывает: агент
+  проверяет `Start` по `commandId`, не по request id).
 - `SendInput.seq` начинается с 1: shim отбрасывает `seq <= last`, у новой сессии `last = 0`.
 - Ошибки `Start`: `failed_to_start` — только у отказов до запуска процесса (`invalid_argument`, `user_not_found`,
-  `already_exists`, `too_many_commands`, `not_claimed`, `failed_precondition`, `shim_outdated`, `unimplemented`,
-  `request_id_reused`). `internal` агент шлёт и после запуска процесса, поэтому `internal`, `unknown` и
-  незнакомые коды — исход неизвестен (`503`, строка остаётся `starting`; `commands/run.ts`).
+  `already_exists`, `too_many_commands`, `not_claimed`, `failed_precondition`, `shim_outdated`, `unimplemented`).
+  `request_id_reused` от `Start` не приходит: `Start` исключён из кэша request id агента (идемпотентен по
+  `commandId`). Повтор с ключом шлёт spec сохранённой строки; `already_exists` на повторе — подключиться к
+  команде агента (`Process/Get`), а не отказ. `internal` агент шлёт и после запуска процесса, поэтому
+  `internal`, `unknown` и незнакомые коды — исход неизвестен (`503`, строка остаётся `starting`;
+  `commands/run.ts`).
 - `StreamInfo.size` — размер файла потока; после выхода оставшиеся процессы могут писать дальше `end`
   (S3 §10). Смещения, `tailBytes` и `sizeBytes` считать от `streamSize()` = `min(size, end)`.
 - Известное ограничение: `AgentClient` (S2) повторяет унарные вызовы с тем же `Sbx-Request-Id`, а кэш ответов

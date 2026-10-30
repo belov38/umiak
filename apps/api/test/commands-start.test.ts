@@ -551,6 +551,80 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		}
 	});
 
+	/** The template's loginUser is `user` until `to` is called. */
+	function switchableLoginUser() {
+		const config = w.env.config;
+		const real = config.template.bind(config);
+		let loginUser: string | null = null;
+		config.template = async (slug) => {
+			const t = await real(slug);
+			return t === null || loginUser === null ? t : { ...t, loginUser };
+		};
+		return {
+			to: (u: string) => {
+				loginUser = u;
+			},
+			restore: () => {
+				config.template = real;
+			},
+		};
+	}
+
+	it("a keyed replay re-sends the stored user: a loginUser changed between attempts does not fail the running command", async () => {
+		const s = await readySandbox(w);
+		const login = switchableLoginUser();
+		const headers = { "idempotency-key": `k-${randomUUID()}` };
+		const body = { command: "sleep 30", mode: "detached" };
+		try {
+			w.agent.failNextStart(s.machineId, "internal", { launched: true });
+			const first = await run(body, s.commands, headers);
+			expect(first.status).toBe(503);
+			const id = (first.body as Any).error.details.commandId as string;
+			login.to("dev");
+			const again = await run(body, s.commands, headers);
+			expect(again.status, JSON.stringify(again.body)).toBe(200);
+			expect(again.body as Any).toMatchObject({
+				id,
+				status: "running",
+				user: "user",
+			});
+			expect(w.agent.startCount(internalId(id))).toBe(1);
+			expect(await statusOf(s)).toEqual(["running"]);
+			await h.request("POST", `${s.commands}/${id}/kill`, {
+				json: { graceMs: 100 },
+			});
+		} finally {
+			login.restore();
+		}
+	});
+
+	it("already_exists on a keyed replay follows the existing command, never failed_to_start", async () => {
+		const s = await readySandbox(w);
+		const headers = { "idempotency-key": `k-${randomUUID()}` };
+		const body = { command: "sleep 30", mode: "detached" };
+		w.agent.failNextStart(s.machineId, "internal", { launched: true });
+		const first = await run(body, s.commands, headers);
+		expect(first.status).toBe(503);
+		const id = (first.body as Any).error.details.commandId as string;
+		const realStart = w.agent.start.bind(w.agent);
+		w.agent.start = async () => {
+			const { AgentCallError } = await import("../src/index.ts");
+			throw new AgentCallError("already_exists", "exists with another spec");
+		};
+		try {
+			const again = await run(body, s.commands, headers);
+			expect(again.status, JSON.stringify(again.body)).toBe(200);
+			expect(again.body as Any).toMatchObject({ id, status: "running" });
+		} finally {
+			w.agent.start = realStart;
+		}
+		expect(await statusOf(s)).toEqual(["running"]);
+		expect(w.agent.startCount(internalId(id))).toBe(1);
+		await h.request("POST", `${s.commands}/${id}/kill`, {
+			json: { graceMs: 100 },
+		});
+	});
+
 	it("definite refusals of Start mark the row failed_to_start", async () => {
 		const refusals: [string, number][] = [
 			["invalid_argument", 400],
