@@ -28,6 +28,7 @@ import type { Manifest, VerifyResult } from "./manifest.ts";
 import { preflight } from "./preflight.ts";
 import { loadRecipe, loadVersions } from "./recipe.ts";
 import { FileRegistry } from "./registry.ts";
+import { retire } from "./retire.ts";
 import { pveGuestIo } from "./runner.ts";
 import { makeIso } from "./seed.ts";
 import { defaultSecretFiles, verifyTemplate } from "./verify.ts";
@@ -43,7 +44,8 @@ const USAGE = `usage:
   sbx-tpl list [<slug>]
   sbx-tpl show <buildId> [--field <name>]
   sbx-tpl show --active-vmid <slug>
-  sbx-tpl cleanup [--node <node>]`;
+  sbx-tpl cleanup [--node <node>]
+  sbx-tpl retire <buildId> [--delete-vm]`;
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const TEMPLATES_DIR = join(REPO_ROOT, "infra/templates");
@@ -313,6 +315,7 @@ async function main(argv: string[]): Promise<number> {
 			"dev-cp-ssh": { type: "string" },
 			field: { type: "string" },
 			"active-vmid": { type: "string" },
+			"delete-vm": { type: "boolean", default: false },
 		},
 	});
 	const [cmd, arg, ...extra] = positionals;
@@ -431,6 +434,30 @@ async function main(argv: string[]): Promise<number> {
 					now: () => new Date(),
 				});
 				out(report.length > 0 ? report.join("\n") : "nothing to clean");
+				return 0;
+			} finally {
+				ctx.close();
+			}
+		}
+		case "retire": {
+			if (!arg || extra.length > 0) break;
+			const m = registry.get(arg);
+			if (!m) throw new Error(`build ${arg} not found in ${registry.dir}`);
+			const ctx = await makeContext({ node: m.node });
+			try {
+				const report = await retire(
+					{
+						api: ctx.api,
+						node: ctx.node,
+						allocator: ctx.allocator,
+						registry,
+						cfg: ctx.cfg,
+						now: () => new Date(),
+					},
+					arg,
+					{ deleteVm: values["delete-vm"] === true },
+				);
+				out(report.join("\n"));
 				return 0;
 			} finally {
 				ctx.close();

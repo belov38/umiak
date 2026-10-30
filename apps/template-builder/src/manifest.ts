@@ -1,6 +1,6 @@
 // Build manifest (spec S5 section 11) and verification results (section 10)
 
-export type BuildStatus = "building" | "ready" | "failed";
+export type BuildStatus = "building" | "ready" | "failed" | "retired";
 
 export interface CheckResult {
 	id: string;
@@ -76,4 +76,6 @@ export interface Manifest {
 	durationS: number | null;
 	verify?: VerifyResult;
 	error?: BuildError;
+	/** When `sbx-tpl retire` marked the build. */
+	retiredAt?: string;
 }
