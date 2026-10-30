@@ -20,6 +20,7 @@ import (
 	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
@@ -305,6 +306,57 @@ func TestUpdateSecretsWhileWipedDefersFiles(t *testing.T) {
 	}
 	if got := h.read(filepath.Join(h.l.SecretFilesDir, "key.pem")); got != "again" {
 		t.Errorf("key.pem after a later update = %q", got)
+	}
+}
+
+// TestRestoreFailureGoesOnAndSetsPending: a secret file that cannot be
+// written back does not stop the others; the secrets phase becomes pending
+// (readiness.changed), so the control plane sends the secrets again.
+func TestRestoreFailureGoesOnAndSetsPending(t *testing.T) {
+	for _, deferred := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferred=%v", deferred), func(t *testing.T) {
+			h := memoryHarness(t)
+			ctx := t.Context()
+			if _, err := h.m.Claim(ctx, twoFiles()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.m.WipeSecretFiles(); err != nil {
+				t.Fatal(err)
+			}
+			if deferred {
+				if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretFiles: twoFiles().GetSecretFiles()}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Something occupies key.pem: its write fails.
+			mustMkdir(t, filepath.Join(h.l.SecretFilesDir, "key.pem", "x"))
+			before := len(h.rec.Of(events.TypeReadinessChanged))
+			if err := h.m.RestoreSecretFiles(); err == nil {
+				t.Fatal("RestoreSecretFiles succeeded with key.pem blocked")
+			}
+			if got := h.read(filepath.Join(h.l.SecretFilesDir, "token")); got != "tok-"+secretFileValue {
+				t.Errorf("token after a failed key.pem = %q", got)
+			}
+			if st, _ := h.tr.State(readiness.PhaseSecrets); st != pending {
+				t.Errorf("secrets phase = %v, want pending", st)
+			}
+			if len(h.rec.Of(events.TypeReadinessChanged)) == before {
+				t.Error("no readiness.changed for the pending secrets")
+			}
+			// Secret writes are no longer deferred: the resend lands.
+			if err := os.RemoveAll(filepath.Join(h.l.SecretFilesDir, "key.pem")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretFiles: twoFiles().GetSecretFiles()}); err != nil {
+				t.Fatal(err)
+			}
+			if got := h.read(filepath.Join(h.l.SecretFilesDir, "key.pem")); got != secretFileValue {
+				t.Errorf("key.pem after the resend = %q", got)
+			}
+			if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready {
+				t.Errorf("secrets phase after the resend = %v", st)
+			}
+		})
 	}
 }
 

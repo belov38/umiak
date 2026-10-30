@@ -500,6 +500,8 @@ func TestHooksOrder(t *testing.T) {
 	}
 	e := newEnv(t, nil)
 	e.m.steps.runHook = execHook
+	// Real shell hooks: keep a loaded machine from hitting the budget.
+	e.m.freezeBudget = time.Minute
 	out := filepath.Join(t.TempDir(), "hooks.log")
 	script := func(name string) string {
 		return fmt.Sprintf("#!/bin/sh\necho \"%s $1\" >> '%s'\n", name, out)

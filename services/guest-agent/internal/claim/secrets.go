@@ -22,6 +22,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
 )
 
 // Secret limits (spec 8.1).
@@ -156,12 +157,21 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 	return m.syncSecrets(env, files, false)
 }
 
-// syncSecrets is writeSecrets; with keepEqual a secret file whose content
-// already matches is left alone (a file held open during the wipe cannot
-// be replaced).
-func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile, keepEqual bool) error {
+// syncSecrets is writeSecrets. With restore (RestoreSecretFiles) a secret
+// file whose content already matches is left alone (a file held open during
+// the wipe cannot be replaced), and a failing step does not stop the
+// others: the failures are joined.
+func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile, restore bool) error {
 	if err := m.prepareDirs(); err != nil {
 		return internal("prepare secrets", err)
+	}
+	var failed []error
+	// stop reports whether err ends the sync; with restore it is collected.
+	stop := func(err error) bool {
+		if restore {
+			failed = append(failed, err)
+		}
+		return !restore
 	}
 	var old secretsState
 	_ = fsutil.ReadJSON(m.l.SecretsStateFile, &old)
@@ -174,8 +184,8 @@ func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile
 	}
 	for _, f := range files {
 		// A file that was in use during the wipe was never touched.
-		if !keepEqual || !m.secretFileEqual(f) {
-			if err := m.writeSecretFile(f); err != nil {
+		if !restore || !m.secretFileEqual(f) {
+			if err := m.writeSecretFile(f); err != nil && stop(err) {
 				return err
 			}
 		}
@@ -184,12 +194,17 @@ func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile
 	}
 	entries, err := os.ReadDir(m.l.SecretFilesDir)
 	if err != nil {
-		return internal("list secret files", err)
+		if err := internal("list secret files", err); stop(err) {
+			return err
+		}
 	}
 	for _, e := range entries {
-		if !keep[e.Name()] {
-			if err := m.removeFile(filepath.Join(m.l.SecretFilesDir, e.Name())); err != nil {
-				return internal("remove secret file", err)
+		if keep[e.Name()] {
+			continue
+		}
+		if err := m.removeFile(filepath.Join(m.l.SecretFilesDir, e.Name())); err != nil {
+			if err := internal("remove secret file", err); stop(err) {
+				return err
 			}
 		}
 	}
@@ -198,7 +213,7 @@ func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile
 			continue
 		}
 		links[f.GetLinkPath()] = true
-		if err := m.placeLink(f.GetLinkPath(), filepath.Join(m.l.SecretFilesDir, f.GetName())); err != nil {
+		if err := m.placeLink(f.GetLinkPath(), filepath.Join(m.l.SecretFilesDir, f.GetName())); err != nil && stop(err) {
 			return err
 		}
 	}
@@ -208,7 +223,7 @@ func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile
 		}
 	}
 	if !m.opts.SecretEnvInMemory {
-		if err := m.writeGroupFile(m.l.SecretsEnvFile, FormatEnvFile(env), 0o440); err != nil {
+		if err := m.writeGroupFile(m.l.SecretsEnvFile, FormatEnvFile(env), 0o440); err != nil && stop(err) {
 			return err
 		}
 	}
@@ -217,9 +232,11 @@ func (m *Manager) syncSecrets(env map[string]string, files []*agentv1.SecretFile
 		return internal("encode secrets state", err)
 	}
 	if err := m.writeFile(m.l.SecretsStateFile, data, 0o600); err != nil {
-		return internal("write secrets state", err)
+		if err := internal("write secrets state", err); stop(err) {
+			return err
+		}
 	}
-	return nil
+	return errors.Join(failed...)
 }
 
 // writeSecretFile writes one secret file into files/.
@@ -298,7 +315,9 @@ func (m *Manager) WipeSecretFiles() (wiped bool, err error) {
 // memory since the wipe is written in full (stale files, links, state
 // record). Without an applied set in memory (secrets pending, for example
 // after an agent restart) it writes nothing: the files come back with
-// UpdateSecrets.
+// UpdateSecrets. A failing file does not stop the others; on any failure
+// the secrets phase becomes pending, so the control plane sends the
+// secrets again, and the failures are returned joined.
 func (m *Manager) RestoreSecretFiles() error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
@@ -307,25 +326,39 @@ func (m *Manager) RestoreSecretFiles() error {
 	m.mu.RLock()
 	env, files := m.secretEnv, m.secretFiles
 	m.mu.RUnlock()
+	var err error
 	if deferred {
-		return m.syncSecrets(env, files, true)
+		err = m.syncSecrets(env, files, true)
+	} else {
+		err = m.restoreFiles(files)
 	}
+	if err != nil {
+		m.log.Warn("restore secret files failed, secrets pending until sent again", "err", err)
+		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_PENDING, "")
+	}
+	return err
+}
+
+// restoreFiles writes the files that are missing or differ, going on past
+// failures.
+func (m *Manager) restoreFiles(files []*agentv1.SecretFile) error {
 	if len(files) == 0 {
 		return nil
 	}
 	if err := m.prepareDirs(); err != nil {
 		return internal("prepare secrets", err)
 	}
+	var failed []error
 	for _, f := range files {
 		if m.secretFileEqual(f) {
 			// A file that was in use was never touched; leave it alone.
 			continue
 		}
 		if err := m.writeSecretFile(f); err != nil {
-			return err
+			failed = append(failed, err)
 		}
 	}
-	return nil
+	return errors.Join(failed...)
 }
 
 // WipeSecretsDir wipes the secret files, the state record and secrets/env

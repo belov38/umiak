@@ -2,7 +2,10 @@
 
 package quiesce
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // Platform behaviour of Quiesce. Other platforms (macOS, for development
 // and tests) keep the Linux flow.
@@ -10,6 +13,10 @@ const (
 	freezesFS = true
 	// WipesSecretFiles is false: there is no secret file wipe on quiesce.
 	WipesSecretFiles = false
+	// freezeBudget caps the freeze steps of Quiesce (watchdog start,
+	// docker, hooks, sync, store, FIFREEZE): S1 allows 5 s for Quiesce. A
+	// shorter lease caps them at its deadline instead.
+	freezeBudget = 5 * time.Second
 )
 
 // unsupportedFreezer is the freezer of platforms without FIFREEZE.

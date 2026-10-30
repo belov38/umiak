@@ -13,6 +13,10 @@ import (
 
 	"connectrpc.com/connect"
 	"golang.org/x/sys/windows"
+
+	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
 )
 
 // fileAllAccess is the SDDL right FA.
@@ -334,5 +338,43 @@ func TestClaimDoesNotApplyHostnameOnWindows(t *testing.T) {
 	}
 	if got := h.hostnameCalls(); len(got) != 0 {
 		t.Errorf("hostname set on Windows: %v", got)
+	}
+}
+
+// TestRestoreOverHeldFileSetsPending: a secret file held open through the
+// wipe, whose content changed by a deferred UpdateSecrets, cannot be
+// written back: the other files are restored and the secrets phase becomes
+// pending.
+func TestRestoreOverHeldFileSetsPending(t *testing.T) {
+	if !isSystem(t) {
+		t.Skip("opening a SYSTEM-only secret file needs SYSTEM")
+	}
+	h := newHarness(t)
+	ctx := t.Context()
+	if _, err := h.m.Claim(ctx, twoFiles()); err != nil {
+		t.Fatal(err)
+	}
+	f := openShared(t, filepath.Join(h.l.SecretFilesDir, "key.pem"), windows.FILE_SHARE_READ)
+	defer f.Close() //nolint:errcheck // test cleanup
+	if _, err := h.m.WipeSecretFiles(); !errors.Is(err, ErrSecretInUse) {
+		t.Fatalf("WipeSecretFiles = %v, want ErrSecretInUse", err)
+	}
+	files := twoFiles().GetSecretFiles()
+	for _, f := range files {
+		if f.GetName() == "key.pem" {
+			f.Content = []byte("rotated")
+		}
+	}
+	if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretFiles: files}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.m.RestoreSecretFiles(); err == nil {
+		t.Fatal("RestoreSecretFiles succeeded over a held file")
+	}
+	if b, err := os.ReadFile(filepath.Join(h.l.SecretFilesDir, "token")); err != nil || string(b) != "tok-"+secretFileValue {
+		t.Errorf("token = %q (%v), want restored", b, err)
+	}
+	if st, _ := h.tr.State(readiness.PhaseSecrets); st != pending {
+		t.Errorf("secrets phase = %v, want pending", st)
 	}
 }

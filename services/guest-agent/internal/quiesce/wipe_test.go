@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -16,12 +17,16 @@ import (
 // fakeSecrets is the claim manager's secret file store: it logs the wipe
 // and the restore. inUse makes the wipe fail like a file held open.
 type fakeSecrets struct {
-	log   *recLog
-	inUse bool
+	log    *recLog
+	inUse  bool
+	onWipe func() // runs after the wipe, if set
 }
 
 func (f *fakeSecrets) WipeSecretFiles() (bool, error) {
 	f.log.add("secrets wipe")
+	if f.onWipe != nil {
+		f.onWipe()
+	}
 	if f.inUse {
 		return false, fmt.Errorf("wipe key.pem: %w", errs.ErrSecretInUse)
 	}
@@ -48,13 +53,13 @@ func newWindowsEnv(t *testing.T) (*env, *fakeSecrets) {
 func TestQuiesceWipeSecretFilesThenThawRestores(t *testing.T) {
 	t.Run("thaw", func(t *testing.T) {
 		e, _ := newWindowsEnv(t)
-		e.addHook(t, "10-a", "", 0o755)
+		e.addHook(t, "10-a.ps1", "", 0o755)
 		ctx := context.Background()
 		if _, err := e.m.Quiesce(ctx, 30000, false, false, true); err != nil {
 			t.Fatalf("Quiesce: %v", err)
 		}
 		// The wipe comes after the hooks, which may close the files.
-		want := []string{"watchdog start lease-1", "hook 10-a freeze", "secrets wipe"}
+		want := []string{"watchdog start lease-1", "hook 10-a.ps1 freeze", "secrets wipe"}
 		if got := e.log.all(); !slices.Equal(got, want) {
 			t.Errorf("quiesce order:\n got %q\nwant %q", got, want)
 		}
@@ -62,7 +67,7 @@ func TestQuiesceWipeSecretFilesThenThawRestores(t *testing.T) {
 		if _, err := e.m.Thaw(ctx, "lease-1"); err != nil {
 			t.Fatalf("Thaw: %v", err)
 		}
-		wantThaw := []string{"secrets restore", "hook 10-a thaw", "watchdog stop lease-1"}
+		wantThaw := []string{"secrets restore", "hook 10-a.ps1 thaw", "watchdog stop lease-1"}
 		if got := e.log.all()[n:]; !slices.Equal(got, wantThaw) {
 			t.Errorf("thaw order:\n got %q\nwant %q", got, wantThaw)
 		}
@@ -136,12 +141,12 @@ func TestQuiesceWipeSecretFilesThenThawRestores(t *testing.T) {
 func TestQuiesceSecretsInUseRollsBack(t *testing.T) {
 	e, sec := newWindowsEnv(t)
 	sec.inUse = true
-	e.addHook(t, "10-a", "", 0o755)
+	e.addHook(t, "10-a.ps1", "", 0o755)
 	_, err := e.m.Quiesce(context.Background(), 30000, false, false, true)
 	wantErr(t, err, connect.CodeFailedPrecondition, errs.SecretsInUse)
 	want := []string{
-		"watchdog start lease-1", "hook 10-a freeze", "secrets wipe",
-		"secrets restore", "hook 10-a thaw", "watchdog stop lease-1",
+		"watchdog start lease-1", "hook 10-a.ps1 freeze", "secrets wipe",
+		"secrets restore", "hook 10-a.ps1 thaw", "watchdog stop lease-1",
 	}
 	if got := e.log.all(); !slices.Equal(got, want) {
 		t.Errorf("log:\n got %q\nwant %q", got, want)
@@ -272,5 +277,65 @@ func TestStartupLeaseWithWipedSecrets(t *testing.T) {
 	}
 	if evs := autoThawed(e.rec); len(evs) != 1 || evs[0].GetBy() != ByAgentStart {
 		t.Errorf("events = %v", evs)
+	}
+}
+
+// TestQuiesceWipeWithoutSecretStore: a wipe requested before the claim
+// manager is set fails instead of handing out a lease without the wipe.
+func TestQuiesceWipeWithoutSecretStore(t *testing.T) {
+	e, _ := newWindowsEnv(t)
+	e.m.SetSecrets(nil)
+	_, err := e.m.Quiesce(context.Background(), 30000, false, false, true)
+	wantErr(t, err, connect.CodeUnavailable, errs.Internal)
+	if e.m.Status() != nil || fileExists(e.l.QuiesceFile) || len(e.log.all()) != 0 {
+		t.Errorf("lease started: %q", e.log.all())
+	}
+	// Without the wipe a lease is fine.
+	if _, err := e.m.Quiesce(context.Background(), 30000, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWatchdogFiresAfterWipe: the watchdog unit takes the lease right after
+// the wipe; the Quiesce fails with lease_expired and its rollback restores
+// the files (the unit cannot).
+func TestWatchdogFiresAfterWipe(t *testing.T) {
+	e, sec := newWindowsEnv(t)
+	e.addHook(t, "10-a.ps1", "", 0o755)
+	unit := steps{log: testLog, runHook: func(_ context.Context, p, arg string) error {
+		e.log.add("unit hook %s %s", filepath.Base(p), arg)
+		return nil
+	}}
+	sec.onWipe = func() {
+		runWatchdog(context.Background(), e.l, "lease-1", unit, func() time.Time { return time.Now().Add(time.Hour) })
+	}
+	_, err := e.m.Quiesce(context.Background(), 30000, false, false, true)
+	wantErr(t, err, connect.CodeAborted, errs.LeaseExpired)
+	want := []string{
+		"watchdog start lease-1", "hook 10-a.ps1 freeze", "secrets wipe",
+		"unit hook 10-a.ps1 thaw", "secrets restore", "watchdog stop lease-1",
+	}
+	if got := e.log.all(); !slices.Equal(got, want) {
+		t.Errorf("log:\n got %q\nwant %q", got, want)
+	}
+	if e.m.Status() != nil || fileExists(e.l.QuiesceFile) || fileExists(claimPath(e.l)) {
+		t.Error("lease not cleaned up")
+	}
+}
+
+// TestCutoffAfterWipe: the freeze budget runs out during the wipe; the
+// check after it rolls back with quiesce_timeout and restores the files.
+func TestCutoffAfterWipe(t *testing.T) {
+	e, sec := newWindowsEnv(t)
+	e.m.freezeBudget = 50 * time.Millisecond
+	sec.onWipe = func() { time.Sleep(100 * time.Millisecond) }
+	_, err := e.m.Quiesce(context.Background(), 30000, false, false, true)
+	wantErr(t, err, connect.CodeDeadlineExceeded, errs.QuiesceTimeout)
+	want := []string{"watchdog start lease-1", "secrets wipe", "secrets restore", "watchdog stop lease-1"}
+	if got := e.log.all(); !slices.Equal(got, want) {
+		t.Errorf("log:\n got %q\nwant %q", got, want)
+	}
+	if e.m.Status() != nil || fileExists(e.l.QuiesceFile) {
+		t.Error("lease left")
 	}
 }

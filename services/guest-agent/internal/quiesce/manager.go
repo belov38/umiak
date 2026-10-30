@@ -58,10 +58,6 @@ const (
 const (
 	// markerPoll is how often an active lease looks for a watchdog marker.
 	markerPoll = time.Second
-	// freezeBudget caps the freeze steps of Quiesce (docker, hooks, sync,
-	// store, FIFREEZE): S1 allows 5 s for Quiesce. A shorter lease caps
-	// them at its deadline instead.
-	freezeBudget = 5 * time.Second
 	// syncTimeout bounds the wait for sync(2); a foreign freeze can hang
 	// it, FIFREEZE then reports the freeze.
 	syncTimeout = 2 * time.Second
@@ -373,6 +369,12 @@ func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs, wipeS
 		docker = false
 	}
 	wipe := wipeSecretFiles && m.wipeSecrets
+	if wipe && m.secretFiles() == nil {
+		// Before the claim manager is up: a snapshot taken now could hold
+		// secret files from an earlier run.
+		return nil, errs.New(connect.CodeUnavailable, errs.Internal,
+			"quiesce: wipe_secret_files: the secret store is not ready yet")
+	}
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
 	if a := m.current(); a != nil {
@@ -415,8 +417,8 @@ func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs, wipeS
 }
 
 // freeze runs the steps of Quiesce after the lease file is written. The
-// docker, hook, wipe, sync, store and FIFREEZE steps end by freezeBudget or
-// the lease deadline, whichever comes first, and stop early if the watchdog
+// watchdog start and the docker, hook, wipe, sync, store and FIFREEZE steps
+// end by freezeBudget or the lease deadline, whichever comes first, and stop early if the watchdog
 // unit took the lease: a Quiesce never runs past its own deadline.
 func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS, wipe bool) (*agentv1.QuiesceResponse, error) {
 	l := a.lease
@@ -673,8 +675,9 @@ func (m *Manager) awaitUnitMarker(a *active) (marker, bool) {
 	return m.waitMarker(a.id)
 }
 
-// restoreSecrets writes back the secret files a wiped; a failure is
-// logged, the thaw goes on.
+// restoreSecrets writes back the secret files a wiped. A failure is
+// logged and the thaw goes on: the claim manager has set the secrets phase
+// pending, so the control plane sends the secrets again.
 func (m *Manager) restoreSecrets(a *active) {
 	if !a.lease.SecretsWiped {
 		return
@@ -709,9 +712,9 @@ func (m *Manager) thawAfterUnit(ctx context.Context, a *active, mk marker) {
 }
 
 // release ends a: with thaw it undoes the lease steps first (FITHAW, store
-// unfreeze, secret file restore, hooks, unpause); then it stops the timer and the marker watch,
-// deletes the lease file, stops the watchdog unit and deletes the unit's
-// claim of a. opMu is held.
+// unfreeze, secret file restore, hooks, unpause); then it stops the timer
+// and the marker watch, deletes the lease file, stops the watchdog unit and
+// deletes the unit's claim of a. opMu is held.
 func (m *Manager) release(ctx context.Context, a *active, thaw bool) {
 	unfreeze := func() {
 		if a.storeFrozen {

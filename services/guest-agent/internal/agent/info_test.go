@@ -4,12 +4,7 @@ import (
 	"runtime"
 	"slices"
 	"testing"
-
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/claim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
 )
-
-var _ quiesce.SecretFiles = (*claim.Manager)(nil)
 
 // TestCapabilityWipeSecrets: only the Windows agent announces
 // system.quiesce.wipe_secrets.v1 (S9 spec 12.10).
