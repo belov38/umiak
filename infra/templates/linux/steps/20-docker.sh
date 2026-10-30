@@ -25,7 +25,7 @@ Components: stable
 Architectures: amd64
 Signed-By: $key
 EOF
-apt_get update
+apt_update
 
 ce=$(toml_get docker.docker_ce)
 pkgs=(

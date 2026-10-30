@@ -16,7 +16,7 @@ systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service \
 # apt module rewrote the file.
 log "apt snapshot $SBX_APT_SNAPSHOT"
 apt_snapshot "$SBX_APT_SNAPSHOT"
-apt_get update
+apt_update
 
 # grub-pc upgrades must not ask for the boot disk. The by-id name of the
 # QEMU disk is the same in every clone.

@@ -46,6 +46,18 @@ apt_get() {
 
 apt_install() { apt_get install --no-install-recommends "$@"; }
 
+# apt-get update that fails when an index could not be fetched (plain update only warns, and
+# the step would go on with stale or no lists); snapshot.ubuntu.com answers 503 at times.
+apt_update() {
+	local i
+	for i in 1 2 3 4 5; do
+		apt_get update --error-on=any && return 0
+		log "apt-get update failed (attempt $i), retrying in $((i * 15)) s"
+		sleep $((i * 15))
+	done
+	die "apt-get update failed 5 times"
+}
+
 # Installed packages (any dpkg state but "not installed", so leftover
 # configuration counts) whose names match one of the glob patterns.
 installed_packages() {

@@ -107,9 +107,15 @@ describe("renderSeed cloud-init files", () => {
 		expect(cfg.apt.preserve_sources_list).toBe(true);
 		expect(cfg.package_update).toBe(true);
 		expect(cfg.packages).toEqual(["qemu-guest-agent"]);
-		expect(cfg.runcmd).toEqual([
-			["systemctl", "enable", "--now", "qemu-guest-agent"],
-		]);
+		// One install attempt of the packages module is not enough when the archive answers
+		// 503: apt retries, and runcmd installs again until the package is there.
+		expect(cfg.apt.conf).toContain('Acquire::Retries "10";');
+		expect(cfg.runcmd).toHaveLength(1);
+		const [sh, flag, script] = cfg.runcmd[0];
+		expect([sh, flag]).toEqual(["sh", "-c"]);
+		expect(script).toContain("dpkg -s qemu-guest-agent");
+		expect(script).toContain("apt-get update --error-on=any");
+		expect(script).toContain("systemctl enable --now qemu-guest-agent");
 		expect(cfg.bootcmd).toHaveLength(1);
 		expect(cfg.bootcmd[0]).toEqual([
 			"sh",
