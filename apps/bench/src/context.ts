@@ -5,6 +5,7 @@ import {
 	LvmThinDriver,
 	loadConfig,
 	Machines,
+	macFor,
 	PveApi,
 	pveVcpuControl,
 	readSecretFile,
@@ -145,4 +146,26 @@ export class RamGuard {
 	release(vmid: number): void {
 		this.#reserved.delete(vmid);
 	}
+}
+
+/** Lowercase MACs of templates: the legacy template VMID and every purpose=template lease. */
+export function templateMacs(ctx: Pick<Ctx, "cfg" | "store">): Set<string> {
+	const { cfg, store } = ctx;
+	const macs = new Set([macFor(cfg.clusterId, cfg.templateVmid).toLowerCase()]);
+	for (const row of store.list(cfg.clusterId))
+		if (row.purpose === "template") macs.add(row.mac.toLowerCase());
+	return macs;
+}
+
+/** A /cluster/resources VM entry; `tags` is semicolon-separated. */
+export interface VmResource {
+	vmid: number;
+	pool?: string;
+	tags?: string;
+	template?: number;
+}
+
+/** Template VMs and template build VMs (tag sbx-tpl) are never bench leftovers. */
+export function isTemplateVm(v: VmResource): boolean {
+	return v.template === 1 || (v.tags ?? "").split(/[;,]/).includes("sbx-tpl");
 }

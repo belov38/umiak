@@ -1,0 +1,19 @@
+slug: linux-fixture
+os: linux
+extends: null
+source:
+  kind: cloud-image
+  distro: ubuntu
+  release: "26.04"
+  flavor: minimal
+disk: { slot: scsi0, size: 32G }
+hw:
+  machine: q35
+  vga: std
+  tablet: 0
+  cloudinit: false
+build_vm: { cores: 2, memory_mb: 2048 }
+steps: [00-base, reboot, 10-system, 90-cleanup]
+seal: sbx-agent
+boot_timeout_s: 300
+verify: linux

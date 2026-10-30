@@ -148,10 +148,10 @@ export async function runS3(ctx: Ctx, o: S3Options): Promise<number> {
 		smbios: Smbios,
 		from?: SnapshotRef,
 	): Promise<MachineInfo> => {
-		// Host rules: only VMIDs 500-598, never the template 599.
+		// Host rules: sandbox VMIDs 500-589 (590-596 dev infrastructure, 597-599 templates).
 		if (
 			cfg.vmidRange.min < 500 ||
-			cfg.vmidRange.max > 598 ||
+			cfg.vmidRange.max > 589 ||
 			cfg.templateVmid !== 599
 		)
 			throw new Error(
@@ -164,8 +164,8 @@ export async function runS3(ctx: Ctx, o: S3Options): Promise<number> {
 			? await machines.fork(from, { size: SIZE, smbios, ownerId: owner })
 			: await machines.create({ size: SIZE, smbios, ownerId: owner });
 		created.push({ vmid: m.vmid, owner });
-		if (m.vmid < 500 || m.vmid > 598)
-			throw new Error(`allocator returned VMID ${m.vmid} outside 500-598`);
+		if (m.vmid < 500 || m.vmid > 589)
+			throw new Error(`allocator returned VMID ${m.vmid} outside 500-589`);
 		log(`${label}: VM ${m.vmid} (owner ${owner})`);
 		return m;
 	};

@@ -43,8 +43,26 @@ func TestLoadRejectsUnknownKeysAndBadRange(t *testing.T) {
 	}
 }
 
+func TestLoadWithoutTemplateVmid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sbx-node.toml")
+	if err := os.WriteFile(path, []byte("vmidMin = 500\nvmidMax = 599\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.TemplateVMID != 0 || !c.InRange(599) || !c.InRange(500) {
+		t.Errorf("TemplateVMID = %d, InRange(599) = %v", c.TemplateVMID, c.InRange(599))
+	}
+	if c.IsoDir != "/var/lib/vz/template/iso" || c.ImportDir != "/var/lib/vz/import" {
+		t.Errorf("media dirs = %q, %q", c.IsoDir, c.ImportDir)
+	}
+}
+
 func TestInRangeExcludesTemplate(t *testing.T) {
 	c := Default()
+	c.TemplateVMID = 599
 	if !c.InRange(500) || !c.InRange(598) {
 		t.Error("500 and 598 must be in range")
 	}

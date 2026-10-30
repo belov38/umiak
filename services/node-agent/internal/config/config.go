@@ -21,13 +21,15 @@ type Config struct {
 	Storage      string `toml:"storage" json:"storage"`
 	VMIDMin      int    `toml:"vmidMin" json:"vmidMin"`
 	VMIDMax      int    `toml:"vmidMax" json:"vmidMax"`
-	TemplateVMID int    `toml:"templateVmid" json:"templateVmid"`
+	TemplateVMID int    `toml:"templateVmid" json:"templateVmid"` // legacy template, 0 = none
 	SDNZone      string `toml:"sdnZone" json:"sdnZone"`
 	VNet         string `toml:"vnet" json:"vnet"`
 	ClusterID    int    `toml:"clusterId" json:"clusterId"`
 	LeaseFile    string `toml:"leaseFile" json:"leaseFile"`
 	EthersFile   string `toml:"ethersFile" json:"ethersFile"`
 	MacCacheFile string `toml:"macCacheFile" json:"macCacheFile"`
+	IsoDir       string `toml:"isoDir" json:"isoDir"`
+	ImportDir    string `toml:"importDir" json:"importDir"`
 }
 
 // Default returns the PoC values from the S1 spec.
@@ -39,13 +41,14 @@ func Default() Config {
 		Storage:      "local-lvm",
 		VMIDMin:      500,
 		VMIDMax:      599,
-		TemplateVMID: 599,
 		SDNZone:      "sbx",
 		VNet:         "sbx0",
 		ClusterID:    1,
 		LeaseFile:    "/var/lib/misc/dnsmasq.sbx.leases",
 		EthersFile:   "/etc/dnsmasq.d/sbx/ethers",
 		MacCacheFile: "/etc/pve/sdn/mac-cache.json",
+		IsoDir:       "/var/lib/vz/template/iso",
+		ImportDir:    "/var/lib/vz/import",
 	}
 }
 
@@ -69,17 +72,20 @@ func (c Config) Validate() error {
 	switch {
 	case c.VMIDMin < 100 || c.VMIDMax < c.VMIDMin:
 		return errors.New("invalid vmid range")
-	case c.TemplateVMID < c.VMIDMin || c.TemplateVMID > c.VMIDMax:
+	case c.TemplateVMID != 0 && (c.TemplateVMID < c.VMIDMin || c.TemplateVMID > c.VMIDMax):
 		return errors.New("templateVmid must be inside the vmid range")
 	case c.ClusterID < 0 || c.ClusterID > 255:
 		return errors.New("clusterId must fit in one byte")
+	case c.IsoDir == "" || c.ImportDir == "":
+		return errors.New("isoDir and importDir must not be empty")
 	case c.VG == "" || c.ThinPool == "" || c.VNet == "" || c.Node == "":
 		return errors.New("vg, thinPool, vnet and node are required")
 	}
 	return nil
 }
 
-// InRange reports whether vmid belongs to sandbox machines (the template is excluded).
+// InRange reports whether vmid belongs to sandbox machines. Only the legacy template is excluded;
+// templates built later need no config: any base-<id> LV with id in the range is a clone origin.
 func (c Config) InRange(vmid int) bool {
 	return vmid >= c.VMIDMin && vmid <= c.VMIDMax && vmid != c.TemplateVMID
 }

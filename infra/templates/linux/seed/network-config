@@ -1,0 +1,6 @@
+version: 2
+ethernets:
+  nics:
+    match:
+      name: "en*"
+    dhcp4: true

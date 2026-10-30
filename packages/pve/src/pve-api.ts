@@ -1,4 +1,9 @@
+import { randomBytes } from "node:crypto";
+import { createReadStream } from "node:fs";
+import type { IncomingMessage } from "node:http";
 import { Agent, request } from "node:https";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 export type ParamValue = string | number | boolean | readonly string[];
 export type Params = Record<string, ParamValue | undefined>;
@@ -128,6 +133,67 @@ function isRetryable(err: unknown, method: string, path: string): boolean {
 	return method === "GET" && (code === "ECONNRESET" || code === "EPIPE");
 }
 
+export interface UploadFile {
+	/** File name on the storage. */
+	name: string;
+	/** Local path of the file. */
+	path: string;
+	size: number;
+}
+
+/**
+ * Field parts in the order pveproxy accepts: its multipart parser fails ("wrong
+ * Content-Disposition ... expected 'form-data'") when `checksum` comes before
+ * `checksum-algorithm` (seen on PVE 9), so the algorithm goes right before the checksum.
+ */
+function uploadFieldOrder(fields: Record<string, string>): [string, string][] {
+	const algo = fields["checksum-algorithm"];
+	const out: [string, string][] = [];
+	for (const [k, v] of Object.entries(fields)) {
+		if (k === "checksum-algorithm" && "checksum" in fields) continue;
+		if (k === "checksum" && algo !== undefined)
+			out.push(["checksum-algorithm", algo]);
+		out.push([k, v]);
+	}
+	return out;
+}
+
+function readResponse(
+	res: IncomingMessage,
+	method: string,
+	path: string,
+): Promise<unknown> {
+	return new Promise((resolve, reject) => {
+		const chunks: Buffer[] = [];
+		res.on("data", (c: Buffer) => chunks.push(c));
+		res.on("error", reject);
+		res.on("end", () => {
+			const text = Buffer.concat(chunks).toString("utf8");
+			let parsed: {
+				data?: unknown;
+				message?: string;
+				errors?: Record<string, string>;
+			} = {};
+			try {
+				parsed = text ? (parseJsonLenient(text) as typeof parsed) : {};
+			} catch {
+				parsed = {};
+			}
+			const status = res.statusCode ?? 0;
+			if (status !== 200) {
+				const msg = (
+					parsed.message ??
+					res.statusMessage ??
+					`HTTP ${status}`
+				).trim();
+				reject(apiError(status, `${method} ${path}: ${msg}`, parsed.errors));
+				return;
+			}
+			resolve(parsed.data ?? null);
+		});
+	});
+}
+
 export class PveApi implements PveClient {
 	/** Number of retried requests (lock contention etc.), reported by the bench. */
 	retryCount = 0;
@@ -197,42 +263,81 @@ export class PveApi implements PveClient {
 					servername: this.#opts.tlsName,
 					timeout: 120_000,
 				},
-				(res) => {
-					const chunks: Buffer[] = [];
-					res.on("data", (c: Buffer) => chunks.push(c));
-					res.on("end", () => {
-						const text = Buffer.concat(chunks).toString("utf8");
-						let parsed: {
-							data?: unknown;
-							message?: string;
-							errors?: Record<string, string>;
-						} = {};
-						try {
-							parsed = text ? (parseJsonLenient(text) as typeof parsed) : {};
-						} catch {
-							parsed = {};
-						}
-						const status = res.statusCode ?? 0;
-						if (status !== 200) {
-							const msg = (
-								parsed.message ??
-								res.statusMessage ??
-								`HTTP ${status}`
-							).trim();
-							reject(
-								apiError(status, `${method} ${path}: ${msg}`, parsed.errors),
-							);
-							return;
-						}
-						resolve(parsed.data ?? null);
-					});
-				},
+				(res) => readResponse(res, method, path).then(resolve, reject),
 			);
 			req.on("timeout", () =>
 				req.destroy(new Error(`${method} ${path}: timeout`)),
 			);
 			req.on("error", reject);
 			req.end(body);
+		});
+	}
+
+	/**
+	 * POST as multipart/form-data with the file streamed from disk as the last part (Proxmox
+	 * reads the parameters before the file). Never retried. The socket idle timeout is long:
+	 * Proxmox answers only after it has checked and moved the file.
+	 */
+	upload<T = unknown>(
+		path: string,
+		fields: Record<string, string>,
+		file: UploadFile,
+		opts: { timeoutMs?: number } = {},
+	): Promise<T> {
+		const unsafe = /["\\\r\n]/;
+		for (const name of [...Object.keys(fields), file.name])
+			if (name === "" || unsafe.test(name))
+				return Promise.reject(
+					new Error(`upload ${path}: bad part name ${JSON.stringify(name)}`),
+				);
+		const boundary = `sbx-${randomBytes(16).toString("hex")}`;
+		let head = "";
+		for (const [k, v] of uploadFieldOrder(fields))
+			head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
+		head += `--${boundary}\r\nContent-Disposition: form-data; name="filename"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+		const tail = `\r\n--${boundary}--\r\n`;
+		async function* body() {
+			yield Buffer.from(head);
+			let n = 0;
+			for await (const chunk of createReadStream(file.path)) {
+				n += (chunk as Buffer).length;
+				if (n > file.size) break;
+				yield chunk as Buffer;
+			}
+			if (n !== file.size)
+				throw new Error(
+					`upload ${path}: ${file.path} does not have the declared size ${file.size}`,
+				);
+			yield Buffer.from(tail);
+		}
+		return new Promise<T>((resolve, reject) => {
+			const req = request(
+				{
+					host: this.#url.hostname,
+					port: this.#url.port || 8006,
+					method: "POST",
+					path: `/api2/json${path}`,
+					headers: {
+						Authorization: `PVEAPIToken=${this.#opts.tokenId}=${this.#opts.tokenSecret}`,
+						"Content-Type": `multipart/form-data; boundary=${boundary}`,
+						"Content-Length": String(
+							Buffer.byteLength(head) + file.size + Buffer.byteLength(tail),
+						),
+					},
+					agent: this.#agent,
+					ca: this.#opts.ca,
+					servername: this.#opts.tlsName,
+					timeout: opts.timeoutMs ?? 30 * 60_000,
+				},
+				(res) =>
+					readResponse(res, "POST", path).then((v) => resolve(v as T), reject),
+			);
+			req.on("timeout", () => req.destroy(new Error(`POST ${path}: timeout`)));
+			req.on("error", reject);
+			pipeline(Readable.from(body()), req).catch((err: unknown) => {
+				req.destroy(err as Error);
+				reject(err);
+			});
 		});
 	}
 

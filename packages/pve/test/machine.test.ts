@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Allocator } from "../src/allocator.ts";
 import {
+	familyForTunnelUrl,
 	formatSmbios1,
 	Machines,
 	OwnerMismatchError,
 	pveVcpuControl,
 	QgaUnavailableError,
+	SmbiosTooLongError,
 	s2SerialPayload,
 	TracesRemainError,
 } from "../src/machine.ts";
@@ -65,6 +67,35 @@ describe("smbios", () => {
 		expect(formatSmbios1({ uuid: "u", serial: "sbx1:x" })).toBe(
 			"uuid=u,serial=c2J4MTp4,base64=1",
 		);
+	});
+	it("puts a base64 family before base64=1", () => {
+		const family = "sbxt1:wss://t.example/v1/connect";
+		expect(formatSmbios1({ uuid: "u", serial: "sbx1:x", family })).toBe(
+			`uuid=u,serial=c2J4MTp4,family=${Buffer.from(family).toString("base64")},base64=1`,
+		);
+	});
+	it("accepts exactly 512 chars and rejects 513", () => {
+		const family = "f".repeat(300);
+		const s = { uuid: "", serial: "sbx1:x", family };
+		// Pad the uuid so the string is exactly 512 chars, then one more.
+		const uuid = "u".repeat(512 - formatSmbios1(s).length);
+		expect(formatSmbios1({ ...s, uuid })).toHaveLength(512);
+		expect(() => formatSmbios1({ ...s, uuid: `${uuid}u` })).toThrow(
+			SmbiosTooLongError,
+		);
+	});
+	it("builds the family for a wss tunnel URL and limits it", () => {
+		expect(familyForTunnelUrl("wss://t.example/v1/connect")).toBe(
+			"sbxt1:wss://t.example/v1/connect",
+		);
+		expect(() => familyForTunnelUrl("https://x")).toThrow();
+		expect(() => familyForTunnelUrl("ws://host/x")).toThrow();
+		expect(() => familyForTunnelUrl("wss:///x")).toThrow();
+		expect(() => familyForTunnelUrl("wss://")).toThrow();
+		const url = (n: number) => `wss://h.example/${"a".repeat(n - 16)}`;
+		expect(url(200)).toHaveLength(200);
+		expect(familyForTunnelUrl(url(200))).toBe(`sbxt1:${url(200)}`);
+		expect(() => familyForTunnelUrl(url(201))).toThrow();
 	});
 	it("builds the S2 serial payload", () => {
 		const bs = new Uint8Array(32).fill(255);
@@ -165,6 +196,54 @@ describe("create", () => {
 		});
 	});
 
+	it("copies rng0 from the template", async () => {
+		const { api, machines } = setup();
+		await machines.create({});
+		expect(api.vms.get(500)?.config.rng0).toBe("source=/dev/urandom");
+	});
+
+	it("posts no cloud-init parameters when the template has no cloud-init drive", async () => {
+		const { api, machines } = setup();
+		const cfg = { ...api.templateConfig };
+		delete cfg.ide2;
+		api.templateConfig = cfg;
+		await machines.create({});
+		const post =
+			api.calls.find((c) => c.method === "POST" && c.path === "/nodes/pve/qemu")
+				?.params ?? {};
+		for (const k of ["ide2", "ipconfig0", "ciuser", "ciupgrade"])
+			expect(post).not.toHaveProperty(k);
+		expect(post).toMatchObject({ name: "sbx-500", balloon: 0 });
+	});
+
+	it("does not take an ISO named cloudinit for a cloud-init drive", async () => {
+		const { api, machines } = setup();
+		const cfg = { ...api.templateConfig };
+		cfg.ide2 = "local:iso/cloudinit-x.iso,media=cdrom";
+		api.templateConfig = cfg;
+		await machines.create({});
+		const post =
+			api.calls.find((c) => c.method === "POST" && c.path === "/nodes/pve/qemu")
+				?.params ?? {};
+		for (const k of ["ide2", "ipconfig0", "ciuser", "ciupgrade"])
+			expect(post).not.toHaveProperty(k);
+	});
+
+	it("detects the cloud-init drive on any ide/scsi/sata key", async () => {
+		const { api, machines } = setup();
+		const cfg = { ...api.templateConfig };
+		delete cfg.ide2;
+		cfg.sata1 = "local-lvm:vm-598-cloudinit,media=cdrom";
+		api.templateConfig = cfg;
+		await machines.create({});
+		expect(api.vms.get(500)?.config).toMatchObject({
+			ide2: "local-lvm:cloudinit",
+			ipconfig0: "ip=dhcp",
+			ciuser: "sbx",
+			ciupgrade: "0",
+		});
+	});
+
 	it("passes the caller's smbios1", async () => {
 		const { api, machines } = setup();
 		await machines.create({
@@ -175,6 +254,17 @@ describe("create", () => {
 			api.calls.find((c) => c.path === "/nodes/pve/qemu")?.params ?? {};
 		expect(post.smbios1).toBe("uuid=u-1,serial=c2J4MTp4,base64=1");
 		expect(post).toMatchObject({ cores: 1, memory: 1024 });
+	});
+
+	it("passes the family in smbios1", async () => {
+		const { api, machines } = setup();
+		const family = familyForTunnelUrl("wss://t.example/v1/connect");
+		await machines.create({
+			smbios: { uuid: "u-1", serial: "sbx1:x", family },
+		});
+		expect(api.vms.get(500)?.config.smbios1).toBe(
+			formatSmbios1({ uuid: "u-1", serial: "sbx1:x", family }),
+		);
 	});
 
 	it("rolls back through delete when a later step fails", async () => {
@@ -905,5 +995,62 @@ describe("rollback under the power lock", () => {
 		await holder;
 		await expect(create).rejects.toThrow(/boom/);
 		expect(api.paths()).toContain("DELETE /nodes/pve/qemu/500");
+	});
+});
+
+describe("delete of a template", () => {
+	it("refuses a VM with template: 1 and makes no DELETE call or lease change", async () => {
+		const { api, store, machines } = setup();
+		api.vms.set(598, {
+			config: { name: "sbx-tpl-x", template: "1", tags: "sbx-tpl" },
+			status: "stopped",
+			firewall: { rules: [], ipsets: {} },
+		});
+		await expect(machines.delete(598)).rejects.toThrow(
+			"refusing to delete template VM 598",
+		);
+		expect(api.paths().some((p) => p.startsWith("DELETE"))).toBe(false);
+		expect(store.get(1, 598)).toBeUndefined();
+	});
+
+	it("still deletes an orphan VM that is not a template", async () => {
+		const { api, machines } = setup();
+		api.vms.set(598, {
+			config: { name: "x" },
+			status: "stopped",
+			firewall: { rules: [], ipsets: {} },
+		});
+		await machines.delete(598);
+		expect(api.vms.has(598)).toBe(false);
+	});
+
+	it("treats a missing VM as not a template", async () => {
+		const { machines } = setup();
+		await expect(machines.delete(598)).resolves.toBeUndefined();
+	});
+
+	it("propagates other config read errors", async () => {
+		const { api, machines } = setup();
+		api.vms.set(598, {
+			config: { name: "x" },
+			status: "stopped",
+			firewall: { rules: [], ipsets: {} },
+		});
+		api.fail["GET /nodes/pve/qemu/598/config"] = new PveApiError(502, "bad gw");
+		await expect(machines.delete(598)).rejects.toThrow(/bad gw/);
+	});
+});
+
+describe("occupiedVmids", () => {
+	it("counts VM disks and template disks, even of VMs the token cannot list", async () => {
+		const { node, machines } = setup();
+		node.lvs.push(
+			{ name: "vm-512-disk-0", tags: ["sbx"] },
+			{ name: "base-597-disk-0", tags: [] },
+			{ name: "data", tags: [] },
+		);
+		const ids = await machines.occupiedVmids();
+		expect(ids.has(512)).toBe(true);
+		expect(ids.has(597)).toBe(true);
 	});
 });

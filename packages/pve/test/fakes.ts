@@ -116,6 +116,7 @@ export const TEMPLATE_CONFIG: Record<string, string> = {
 	name: "sbx-ubuntu-poc",
 	net0: "virtio=02:01:00:00:02:57,bridge=sbx0,firewall=1",
 	ostype: "l26",
+	rng0: "source=/dev/urandom",
 	scsi0: "local-lvm:base-599-disk-0,discard=on,iothread=1,size=40G,ssd=1",
 	scsihw: "virtio-scsi-single",
 	serial0: "socket",
@@ -138,6 +139,8 @@ export class FakePve {
 	vms = new Map<number, FakeVm>();
 	ipam: { vmid: number; mac: string; ip: string }[] = [];
 	agentUp = true;
+	/** Config GET /qemu/599/config returns; tests replace it to model other templates. */
+	templateConfig: Record<string, string> = { ...TEMPLATE_CONFIG };
 	fail: Record<string, Error> = {};
 	keepIpamOnDelete = false;
 	/** Status /cluster/resources reports instead of the real one: pvestatd lags by seconds. */
@@ -174,7 +177,7 @@ export class FakePve {
 		this.log.push(`api:${key}`);
 		const f = this.fail[key];
 		if (f) throw f;
-		if (key === `GET ${n}/qemu/599/config`) return { ...TEMPLATE_CONFIG };
+		if (key === `GET ${n}/qemu/599/config`) return { ...this.templateConfig };
 		if (key === `POST ${n}/qemu`) {
 			const vmid = Number(p.vmid);
 			if (this.vms.has(vmid)) {

@@ -34,3 +34,6 @@ bench-results/
 
 # Compose stack
 /deploy/compose/secrets/
+
+# Template build step logs
+build-logs/

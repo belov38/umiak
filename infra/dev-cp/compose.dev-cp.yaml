@@ -25,7 +25,7 @@ services:
 
   worker:
     environment:
-      # The tunnel URL that the worker writes into smbios family (S5 §14), once it supports it.
+      # The tunnel URL that the worker writes into smbios family (S5 §14) of every new machine.
       SBX_TUNNEL_URL: ${SBX_TUNNEL_URL:?set by deploy.sh}
       # The port domain that the worker passes to agents in Claim (port_domain).
       SBX_PORT_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}

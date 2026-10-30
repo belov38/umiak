@@ -1,0 +1,26 @@
+#cloud-config
+# Build VM seed (spec S5 section 7.2): no users, no keys, no passwords.
+users: []
+disable_root: true
+ssh_pwauth: false
+bootcmd:
+  - ["sh", "-c", {{apt_snapshot_script}}, "sh", {{apt_snapshot}}, "/etc/apt/sources.list.d/ubuntu.sources"]
+apt:
+  preserve_sources_list: true
+  # snapshot.ubuntu.com answers 503 at times; apt retries those fetches.
+  conf: |
+    Acquire::Retries "10";
+package_update: true
+packages:
+  - qemu-guest-agent
+# The packages module tries once: install again until qemu-guest-agent is there.
+runcmd:
+  - - sh
+    - -c
+    - |
+      for i in 1 2 3 4 5 6 7 8 9 10; do
+        dpkg -s qemu-guest-agent >/dev/null 2>&1 && break
+        apt-get update --error-on=any && DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent && break
+        sleep 30
+      done
+      systemctl enable --now qemu-guest-agent

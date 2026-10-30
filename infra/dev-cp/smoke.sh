@@ -6,7 +6,7 @@
 #
 # 1. Builds the dev-signed agent package (services/guest-agent/test/linux/run.sh BUILD_ONLY).
 # 2. Registers a new machine (bootstrap secret hash) in the CT database, as the worker does.
-# 3. Clones one VM (2 GB) from template 599 into the free VMID nearest to 598, with the
+# 3. Clones one VM (2 GB) from template 599 into the free VMID nearest to 589, with the
 #    machine's smbios, on sbx0 with group sbx-egress.
 # 4. From the VM: the gateway port on the CT is reachable; other CT ports, the host, the
 #    router and other LAN guests are not.
@@ -74,7 +74,7 @@ cleanup() {
 		log "cleanup: VM $NAME, machine $MID"
 		remote "NAME=$NAME" <<'EOF' || rc=1
 for id in $(qm list | awk -v n="$NAME" '$2 == n {print $1}'); do
-	[ "$id" -ge 500 ] && [ "$id" -le 598 ] || continue
+	[ "$id" -ge 500 ] && [ "$id" -le 589 ] || continue
 	qm config "$id" | grep -q '^tags:.*sbx-devcp-smoke' || continue
 	qm stop "$id" >/dev/null 2>&1 || true
 	qm destroy "$id" --purge 1
@@ -119,14 +119,14 @@ remote "NAME=$NAME" "MID=$MID" "SERIAL=$serial" "FAMILY=$family" "CT_IP=$CT_IP" 
 d=/tmp/sbx-devcp-smoke
 avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge $((2048 + 4096)) ] || { echo "smoke: only $avail MB available on the host" >&2; exit 1; }
-# One VM, the free VMID nearest to 598; qm clone fails if another thread took it meanwhile.
+# One VM, the free sandbox VMID nearest to 589 (500-589; 590-596 dev, 597-599 templates); qm clone fails if another thread took it meanwhile.
 id=""
-for c in $(seq 598 -1 500); do
+for c in $(seq 589 -1 500); do
 	qm config "$c" >/dev/null 2>&1 && continue
 	pct config "$c" >/dev/null 2>&1 && continue
 	if qm clone 599 "$c" --name "$NAME" --pool sandbox >/dev/null 2>&1; then id=$c; break; fi
 done
-[ -n "$id" ] || { echo "smoke: no free VMID in 500-598" >&2; exit 1; }
+[ -n "$id" ] || { echo "smoke: no free VMID in 500-589" >&2; exit 1; }
 qm set "$id" --tags sbx-devcp-smoke --memory 2048 --cores 2 --smbios1 "uuid=$MID,serial=$SERIAL,family=$FAMILY,base64=1" >/dev/null
 grep -q 'GROUP sbx-egress -i net0' "/etc/pve/firewall/$id.fw" || { echo "smoke: VM $id has no sbx-egress rule" >&2; exit 1; }
 qm config "$id" | grep -q 'bridge=sbx0,firewall=1' || { echo "smoke: VM $id is not on sbx0 with firewall" >&2; exit 1; }

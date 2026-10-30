@@ -1,0 +1,13 @@
+{
+	"tag_name": "v2.103.3",
+	"assets": [
+		{
+			"name": "gh_2.103.3_checksums.txt",
+			"browser_download_url": "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_checksums.txt"
+		},
+		{
+			"name": "gh_2.103.3_linux_amd64.tar.gz",
+			"browser_download_url": "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz"
+		}
+	]
+}

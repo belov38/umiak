@@ -6,7 +6,7 @@ import {
 } from "./allocator.ts";
 import type { Config } from "./config.ts";
 import { type NodeOps, NodeOpsError } from "./node-client.ts";
-import type { Params, PveClient } from "./pve-api.ts";
+import { type Params, PveApiError, type PveClient } from "./pve-api.ts";
 import { Qga } from "./qga.ts";
 import {
 	formatDisk,
@@ -21,14 +21,51 @@ import type {
 	TemplateRef,
 } from "./storage/types.ts";
 
-/** Caller-provided SMBIOS identity. serial is the raw payload; it is base64-encoded for Proxmox. */
+/**
+ * Caller-provided SMBIOS identity. serial and family are raw payloads; they are base64-encoded
+ * for Proxmox.
+ */
 export interface Smbios {
 	uuid: string;
 	serial: string;
+	/** Tunnel descriptor, see familyForTunnelUrl. */
+	family?: string;
+}
+
+/** Proxmox rejects an smbios1 string longer than this. */
+export const SMBIOS1_MAX = 512;
+
+export class SmbiosTooLongError extends Error {
+	constructor(length: number) {
+		super(`smbios1 is ${length} chars, the limit is ${SMBIOS1_MAX}`);
+		this.name = "SmbiosTooLongError";
+	}
 }
 
 export function formatSmbios1(s: Smbios): string {
-	return `uuid=${s.uuid},serial=${Buffer.from(s.serial, "utf8").toString("base64")},base64=1`;
+	const b64 = (v: string) => Buffer.from(v, "utf8").toString("base64");
+	const family = s.family !== undefined ? `,family=${b64(s.family)}` : "";
+	const out = `uuid=${s.uuid},serial=${b64(s.serial)}${family},base64=1`;
+	if (out.length > SMBIOS1_MAX) throw new SmbiosTooLongError(out.length);
+	return out;
+}
+
+const FAMILY_URL_MAX = 200;
+
+/** SMBIOS family of a sandbox: "sbxt1:" + the tunnel URL the guest agent dials. */
+export function familyForTunnelUrl(url: string): string {
+	let host = "";
+	try {
+		host = new URL(url).hostname;
+	} catch {
+		// Falls through to the check below.
+	}
+	// URL parsing alone accepts "wss:///x" (host "x"), so the authority is checked textually too.
+	if (!/^wss:\/\/[^/?#]/.test(url) || host === "")
+		throw new Error(`tunnel URL must be wss:// with a host: ${url}`);
+	if (Buffer.byteLength(url, "utf8") > FAMILY_URL_MAX)
+		throw new Error(`tunnel URL is longer than ${FAMILY_URL_MAX} bytes`);
+	return `sbxt1:${url}`;
 }
 
 /** Serial payload from S2 §5.2: "sbx1:" + machineId + ":" + base64url(bootstrap secret). */
@@ -57,6 +94,7 @@ export const TEMPLATE_HW_KEYS = [
 	"serial0",
 	"vga",
 	"tablet",
+	"rng0",
 ];
 /**
  * Proxmox defaults to ciupgrade=1: cloud-init runs apt upgrade on first boot, which restarts
@@ -64,6 +102,62 @@ export const TEMPLATE_HW_KEYS = [
  * after the sandbox is ready.
  */
 const NO_CI_UPGRADE = { ciupgrade: 0 };
+
+/** True when an ide/scsi/sata key of a VM config holds a cloud-init drive (volume vm-<id>-cloudinit). */
+function hasCloudInitDrive(config: Record<string, string>): boolean {
+	return Object.entries(config).some(
+		([k, v]) =>
+			/^(ide|scsi|sata)\d+$/.test(k) &&
+			/^[^:,]+:(vm-\d+-)?cloudinit(,|$)/.test(String(v)),
+	);
+}
+
+async function ipamIp(
+	api: PveClient,
+	mac: string,
+): Promise<string | undefined> {
+	const entries = await api.get<{ mac?: string; ip?: string }[]>(
+		"/cluster/sdn/ipams/pve/status",
+	);
+	return entries.find((e) => e.mac?.toUpperCase() === mac.toUpperCase())?.ip;
+}
+
+/**
+ * Per-VM firewall (S1 §4.4): drop inbound, sbx-egress group on net0, macfilter, and with
+ * `ipfilter` an ipset pinned to the IPAM address. Also used for the template build VM.
+ */
+export async function configureVmFirewall(
+	api: PveClient,
+	node: string,
+	vmid: number,
+	mac: string,
+	opts: { ipfilter: boolean },
+): Promise<void> {
+	const base = `/nodes/${node}/qemu/${vmid}/firewall`;
+	await api.put(`${base}/options`, {
+		enable: 1,
+		policy_in: "DROP",
+		policy_out: "ACCEPT",
+		dhcp: 1,
+		ndp: 1,
+		radv: 0,
+		macfilter: 1,
+		ipfilter: opts.ipfilter ? 1 : 0,
+	});
+	await api.post(`${base}/rules`, {
+		type: "group",
+		action: "sbx-egress",
+		iface: "net0",
+		enable: 1,
+	});
+	if (opts.ipfilter) {
+		// ipfilter with an empty ipfilter-net0 drops all IPv4 but DHCP; PVE does not fill it from IPAM.
+		const ip = await ipamIp(api, mac);
+		if (!ip) throw new Error(`no IPAM address for VM ${vmid} (${mac})`);
+		await api.post(`${base}/ipset`, { name: "ipfilter-net0" });
+		await api.post(`${base}/ipset/ipfilter-net0`, { cidr: ip });
+	}
+}
 /** Hardware recorded in snapshot metadata: the template keys plus size. Never identity. */
 const SNAPSHOT_HW_KEYS = [...TEMPLATE_HW_KEYS, "cores", "memory", "balloon"];
 
@@ -330,9 +424,12 @@ export class Machines {
 		const { api, allocator, driver, cfg } = this.#o;
 		const hardware: Record<string, string> = {};
 		let tpl: TemplateRef | undefined;
+		// A fork keeps the cloud-init parameters it always had; only templates can opt out.
+		let cloudInit = true;
 		if (src.kind === "template") {
 			const t = await this.#templateInfo();
 			tpl = t.ref;
+			cloudInit = hasCloudInitDrive(t.config);
 			for (const k of TEMPLATE_HW_KEYS)
 				if (t.config[k] !== undefined) hardware[k] = String(t.config[k]);
 		} else {
@@ -350,10 +447,14 @@ export class Machines {
 				...hardware,
 				balloon: 0,
 				net0: `virtio=${mac},bridge=${cfg.vnet},firewall=1`,
-				ide2: `${cfg.storage}:cloudinit`,
-				ipconfig0: "ip=dhcp",
-				ciuser: "sbx",
-				...NO_CI_UPGRADE,
+				...(cloudInit
+					? {
+							ide2: `${cfg.storage}:cloudinit`,
+							ipconfig0: "ip=dhcp",
+							ciuser: "sbx",
+							...NO_CI_UPGRADE,
+						}
+					: {}),
 			};
 			if (size) {
 				params.cores = size.cores;
@@ -430,43 +531,14 @@ export class Machines {
 		});
 	}
 
-	async #ipamIp(mac: string): Promise<string | undefined> {
-		const entries = await this.#o.api.get<{ mac?: string; ip?: string }[]>(
-			"/cluster/sdn/ipams/pve/status",
-		);
-		return entries.find((e) => e.mac?.toUpperCase() === mac.toUpperCase())?.ip;
+	#ipamIp(mac: string): Promise<string | undefined> {
+		return ipamIp(this.#o.api, mac);
 	}
 
-	async #firewall(vmid: number, mac: string): Promise<void> {
-		const { api } = this.#o;
-		const ipfilter = this.#o.ipfilter ?? true;
-		await api.put(this.#vmPath(vmid, "/firewall/options"), {
-			enable: 1,
-			policy_in: "DROP",
-			policy_out: "ACCEPT",
-			dhcp: 1,
-			ndp: 1,
-			radv: 0,
-			macfilter: 1,
-			ipfilter: ipfilter ? 1 : 0,
+	#firewall(vmid: number, mac: string): Promise<void> {
+		return configureVmFirewall(this.#o.api, this.#node, vmid, mac, {
+			ipfilter: this.#o.ipfilter ?? true,
 		});
-		await api.post(this.#vmPath(vmid, "/firewall/rules"), {
-			type: "group",
-			action: "sbx-egress",
-			iface: "net0",
-			enable: 1,
-		});
-		if (ipfilter) {
-			// ipfilter with an empty ipfilter-net0 drops all IPv4 but DHCP; PVE does not fill it from IPAM.
-			const ip = await this.#ipamIp(mac);
-			if (!ip) throw new Error(`no IPAM address for VM ${vmid} (${mac})`);
-			await api.post(this.#vmPath(vmid, "/firewall/ipset"), {
-				name: "ipfilter-net0",
-			});
-			await api.post(this.#vmPath(vmid, "/firewall/ipset/ipfilter-net0"), {
-				cidr: ip,
-			});
-		}
 	}
 
 	async #task(vmid: number, action: string, params?: Params): Promise<void> {
@@ -626,10 +698,29 @@ export class Machines {
 			{},
 		);
 		for (const l of lvs) {
-			const m = /^vm-(\d+)-/.exec(l.name);
+			// base-<id>-*: a template's disk occupies its VMID even if its VM is not listed.
+			const m = /^(?:vm|base)-(\d+)-/.exec(l.name);
 			if (m) ids.add(Number(m[1]));
 		}
 		return ids;
+	}
+
+	/** True when the VM config says template: 1. A VM that does not exist is not a template. */
+	async #isTemplate(vmid: number): Promise<boolean> {
+		try {
+			return Number((await this.config(vmid)).template) === 1;
+		} catch (err) {
+			// Proxmox answers 403 (permission check on the missing /vms/<id>), 404 or
+			// 500 "does not exist" for a VMID without a config.
+			if (
+				err instanceof PveApiError &&
+				(err.status === 403 ||
+					err.status === 404 ||
+					/does not exist/.test(err.message))
+			)
+				return false;
+			throw err;
+		}
 	}
 
 	/**
@@ -642,6 +733,8 @@ export class Machines {
 		const { api, allocator, cfg } = this.#o;
 		if (vmid === cfg.templateVmid)
 			throw new Error(`refusing to delete the template VM ${vmid}`);
+		if (await this.#isTemplate(vmid))
+			throw new Error(`refusing to delete template VM ${vmid}`);
 		const listed = async () =>
 			(await this.#resources()).some((r) => r.vmid === vmid);
 		let lease = await allocator.get(vmid);

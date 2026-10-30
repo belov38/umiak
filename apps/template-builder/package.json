@@ -1,0 +1,23 @@
+{
+	"name": "@sbx/template-builder",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "sbx-tpl: builds Proxmox VM templates from recipes",
+	"bin": {
+		"sbx-tpl": "./src/main.ts"
+	},
+	"scripts": {
+		"sbx-tpl": "node src/main.ts",
+		"test": "vitest run",
+		"build": "tsc --noEmit -p .",
+		"typecheck": "tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"@sbx/pve": "workspace:*",
+		"openpgp": "6.3.2",
+		"smol-toml": "1.9.1",
+		"yaml": "2.9.1",
+		"zod": "4.6.7"
+	}
+}
