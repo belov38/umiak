@@ -1,24 +1,8 @@
 name: tunnel
 
+# Automatic push/PR triggers are disabled during development (Ilia, 2026-10-30); run manually.
 on:
-  push:
-    paths: &paths
-      - "libs/**"
-      - "proto/**"
-      - "db/migrations/**"
-      - "packages/proto/**"
-      - "packages/agent-client/**"
-      - "go.work"
-      - "go.work.sum"
-      - "mise.toml"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "biome.json"
-      - "tsconfig.base.json"
-      - ".github/workflows/tunnel.yml"
-  pull_request:
-    paths: *paths
+  workflow_dispatch:
 
 permissions:
   contents: read

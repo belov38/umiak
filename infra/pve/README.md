@@ -8,7 +8,7 @@ infra/pve/setup.sh [--dry-run] revert <step>
 infra/pve/setup.sh status
 ```
 
-Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template`; `media` is independent (S5, run after `user`). Each step checks whether it is already done, applies and verifies. `--dry-run` prints the remote scripts.
+Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (then, for the dev control plane, `cp` → `cp-gateway` → `cp-tailscale`); `media` is independent (S5, run after `user`). Each step checks whether it is already done, applies and verifies. `--dry-run` prints the remote scripts.
 
 | Step | What |
 |---|---|
@@ -19,8 +19,21 @@ Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template`; `
 | `fw` | `cluster.fw` (IPSets, group `sbx-egress`) and `host.fw` (`enable: 0`), then enables the datacenter firewall with a 5-minute automatic rollback. Cancels the rollback only if every check that passed before still passes |
 | `template` | template 599 from a thin snapshot of `base-9000-disk-0`, sanitized offline by `template-sanitize.sh` before it ever boots (no Tailscale, no personal credentials, clean cloud-init and machine-id, MAC-independent DHCP) |
 | `media` | role `SbxTemplateMedia` (`Datastore.AllocateTemplate`, `Datastore.Audit`) on `/storage/local` for `sbx@pve` and its token, so the template builder can upload seed ISOs and import images. Verified through `GET /access/permissions` with the token. `revert media` removes the ACLs and the role |
+| `cp` | dev only: CT 590 `sbx-dev-cp` for the compose stack (unprivileged Debian, Docker, Tailscale package, own firewall). See `infra/dev-cp/README.md` |
+| `cp-gateway` | dev only: the CT address into IPSet `sbx-gateway`, with a 3-minute automatic rollback and the same checks as `fw` |
+| `cp-tailscale` | dev only: joins the CT to the tailnet; prints the login URL until it is approved |
 
 `sbx-node` also serves `media.list` (files `sbx-seed-*.iso` in `/var/lib/vz/template/iso`, `sbx-*.{qcow2,img,raw}` in `/var/lib/vz/import`) and `media.remove {"names": [...]}`, which deletes only such regular files (no symlinks, no paths). Directories come from `isoDir` and `importDir` in `/etc/sbx-node.toml`. Snapshots (clones) are allowed from any `base-<id>-*` disk with `id` in the VMID range; a template's VMID cannot be reused for a sandbox disk. `templateVmid = 599` stays in the config so the legacy template remains protected; new templates need no config change.
+
+## VMID layout on `pve`
+
+| VMIDs | What |
+|---|---|
+| 500–589 | sandboxes: the allocator range of the worker, `sbx-bench` and `deploy/compose` (`SBX_VMID_RANGE`, topology `vmidMin`/`vmidMax`) |
+| 590–596 | dev infrastructure, never allocated: CT 590 is the dev control plane (`infra/dev-cp`) |
+| 597–599 | templates: S5 builds take 598, 597 (`sbx-tpl`, `SBX_TEMPLATE_VMID_RANGE`, default `597-598`); 599 is the PoC template |
+
+`sbx-node` keeps 500–599 as its own range: it clones from the `base-<id>-*` volumes of the templates.
 
 Environment: `SBX_SETUP_SSH` (default `pve`), `SBX_DENY_PUBLIC_IPS` (empty in the PoC), `SBX_FW_TS_PEERS` (Tailscale addresses of existing guests used by the `fw` checks, because the Mac is not on the host LAN).
 

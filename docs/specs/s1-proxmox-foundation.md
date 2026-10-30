@@ -129,6 +129,8 @@ IPSet `sbx-deny-public` — собственные публичные egress-а�
 
 IPSet `sbx-gateway` — место для будущего адреса ingress `tunnel.<domain>:443` в Kubernetes (architecture §10). В S1 он пустой.
 
+Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, его LAN-адрес `192.168.68.90` добавлен в `sbx-gateway` шагом `infra/pve/setup.sh cp-gateway` (откат `revert cp-gateway`). Правило группы не менялось: sandbox достаёт до CT только tcp/443. Подробности: `infra/dev-cp/README.md`.
+
 **Безопасное включение (главный выключатель firewall — самое рискованное изменение):**
 
 1. Записать `host.fw` с `enable: 0`. Записать в `cluster.fw` IPSet и группу с `enable: 0`. Проверить синтаксис `pve-firewall compile`.

@@ -1,17 +1,8 @@
 name: guest-agent
 
+# Automatic push/PR triggers are disabled during development (Ilia, 2026-10-30); run manually.
 on:
-  push:
-    paths: &paths
-      - "services/guest-agent/**"
-      - "libs/**"
-      - "proto/**"
-      - "go.work"
-      - "go.work.sum"
-      - "mise.toml"
-      - ".github/workflows/guest-agent.yml"
-  pull_request:
-    paths: *paths
+  workflow_dispatch:
 
 permissions:
   contents: read

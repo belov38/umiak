@@ -3,10 +3,11 @@
 # Runs on the operator's Mac and executes each step on the host over SSH (root).
 # Spec: docs/specs/s1-proxmox-foundation.md section 4.
 #
-#   infra/pve/setup.sh [--dry-run] <user|net|sdn|node|fw|template|media|status>
-#   infra/pve/setup.sh [--dry-run] revert <user|net|sdn|node|fw|template|media>
+#   infra/pve/setup.sh [--dry-run] <user|net|sdn|node|fw|template|media|cp|cp-gateway|cp-tailscale|status>
+#   infra/pve/setup.sh [--dry-run] revert <user|net|sdn|node|fw|template|media|cp|cp-gateway>
 #
 # Every step is idempotent: it checks whether it is already done, applies, then verifies.
+# The cp* steps are dev-only: the control-plane container (CT 590) for end-to-end tests.
 set -euo pipefail
 
 HOST="${SBX_SETUP_SSH:-pve}"
@@ -23,6 +24,16 @@ TS_PEERS="${SBX_FW_TS_PEERS:-100.64.10.11 100.64.10.12 100.64.10.13 100.64.10.14
 COMMENT="boat-dev-clone S1 PoC"
 TEMPLATE_VMID=599
 TEMPLATE_MAC="02:01:00:00:02:57"
+# Dev control plane (CT): a static LAN address outside the router's DHCP pool (.100 and up).
+CP_ID="${SBX_CP_CTID:-590}"
+CP_IP="${SBX_CP_IP:-192.168.68.90}"
+CP_GW="${SBX_CP_GW:-192.168.68.1}"
+CP_LAN="${SBX_CP_LAN:-192.168.68.0/24}"
+CP_NAME="${SBX_CP_HOSTNAME:-sbx-dev-cp}"
+CP_PUBKEY="${SBX_CP_SSH_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"
+# TCP ports of the CT open to the LAN: SSH, gateway TLS (tunnel and previews), gateway SSH,
+# api public (S7), oauth2-proxy (S8). Sandboxes reach only 443 (group sbx-egress).
+CP_LAN_TCP="${SBX_CP_LAN_TCP:-22 443 2222 8080 4180}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
@@ -677,10 +688,250 @@ pveum role delete SbxTemplateMedia || true
 EOF
 }
 
+# ---------------------------------------------------------------- dev control plane (CT)
+
+# cp_fw prints the firewall of the CT: inbound only from the LAN. Sandboxes arrive SNAT-ed from
+# the host LAN address, and their own group sbx-egress lets them reach only 443 here.
+cp_fw() {
+	printf '[OPTIONS]\n# %s: dev control plane, inbound only from the LAN\n' "$COMMENT"
+	printf 'enable: 1\npolicy_in: DROP\npolicy_out: ACCEPT\nmacfilter: 1\nndp: 1\ndhcp: 0\n\n[RULES]\n'
+	local p
+	for p in $CP_LAN_TCP; do printf 'IN ACCEPT -source %s -p tcp -dport %s\n' "$CP_LAN" "$p"; done
+	printf 'IN Ping(ACCEPT) -source %s\n' "$CP_LAN"
+	# Direct WireGuard paths of Tailscale; traffic inside the tailnet does not pass this firewall.
+	printf 'IN ACCEPT -p udp -dport 41641\n'
+}
+
+step_cp() {
+	log "cp: CT $CP_ID $CP_NAME ($CP_IP), unprivileged Debian with Docker and Tailscale, own firewall"
+	((CP_ID >= 500)) || die "cp: CT id must be 500 or above"
+	[[ -f "$CP_PUBKEY" ]] || die "cp: SSH public key $CP_PUBKEY not found (SBX_CP_SSH_PUBKEY)"
+	local tmpf
+	tmpf=$(mktemp)
+	cp_fw >"$tmpf"
+	if ((DRY)); then
+		echo "--- /etc/pve/firewall/$CP_ID.fw ---"
+		cat "$tmpf"
+	fi
+	local_run scp -q "$CP_PUBKEY" "$HOST:/tmp/sbx-cp.pub"
+	local_run scp -q "$tmpf" "$HOST:/tmp/sbx-cp.fw"
+	rm -f "$tmpf"
+	remote "ID=$CP_ID" "IP=$CP_IP" "GW=$CP_GW" "LAN=$CP_LAN" "NAME=$CP_NAME" "COMMENT=$COMMENT" <<'EOF'
+if pct config "$ID" >/dev/null 2>&1; then
+	pct config "$ID" | grep -q '^tags:.*sbx-dev-cp' || { echo "cp: CT $ID exists and is not ours" >&2; exit 1; }
+	echo "cp: CT $ID exists"
+elif qm config "$ID" >/dev/null 2>&1; then
+	echo "cp: $ID is a VM" >&2
+	exit 1
+else
+	# The address must be free: in no guest config and without an ARP answer.
+	if grep -lE "ip=$IP/" /etc/pve/nodes/*/lxc/*.conf /etc/pve/nodes/*/qemu-server/*.conf 2>/dev/null; then
+		echo "cp: $IP is configured on a guest" >&2
+		exit 1
+	fi
+	ping -c 2 -W 1 "$IP" >/dev/null 2>&1 || true
+	if ip neigh show "$IP" | grep -q lladdr; then
+		echo "cp: $IP answers on the LAN ($(ip neigh show "$IP"))" >&2
+		exit 1
+	fi
+	# 3 GB for the CT plus the 8 GB sandbox budget must leave at least 4 GB available.
+	avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
+	if [ "$avail" -lt $((3072 + 8192 + 4096)) ]; then
+		echo "cp: only $avail MB available on the host; refusing" >&2
+		exit 1
+	fi
+	pveam update >/dev/null 2>&1 || true
+	tpl=$(pveam available --section system | awk '$2 ~ /^debian-[0-9]+-standard_.*_amd64\.tar\.zst$/ {print $2}' | sort -V | tail -1)
+	[ -n "$tpl" ] || { echo "cp: no Debian template in pveam" >&2; exit 1; }
+	pveam list local | grep -qF "$tpl" || pveam download local "$tpl"
+	echo "cp: creating CT $ID from $tpl ($avail MB available)"
+	pct create "$ID" "local:vztmpl/$tpl" --hostname "$NAME" --ostype debian --unprivileged 1 \
+		--features nesting=1,keyctl=1 --rootfs local-lvm:30 --memory 3072 --swap 0 --cores 4 \
+		--net0 "name=eth0,bridge=vmbr0,ip=$IP/${LAN#*/},gw=$GW,firewall=1,type=veth" \
+		--nameserver "$GW 1.1.1.1" --onboot 0 --tags sbx-dev-cp --dev0 /dev/net/tun \
+		--description "$COMMENT: dev control plane (docker compose), not the product" \
+		--ssh-public-keys /tmp/sbx-cp.pub
+fi
+rm -f /tmp/sbx-cp.pub
+# The firewall is in place before the first start.
+cat /tmp/sbx-cp.fw >/etc/pve/firewall/$ID.fw
+rm -f /tmp/sbx-cp.fw
+pct status "$ID" | grep -q running || pct start "$ID"
+for _ in $(seq 1 60); do
+	pct exec "$ID" -- getent hosts download.docker.com >/dev/null 2>&1 && break
+	sleep 2
+done
+pct exec "$ID" -- env LANG=C.UTF-8 LC_ALL=C.UTF-8 bash -s <<'CT'
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+. /etc/os-release
+apt-get update -q
+apt-get install -y -q ca-certificates curl rsync openssh-server
+install -m 0755 -d /etc/apt/keyrings
+if [ ! -f /etc/apt/sources.list.d/docker.sources ]; then
+	curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+	chmod a+r /etc/apt/keyrings/docker.asc
+	printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: %s\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+		"$VERSION_CODENAME" >/etc/apt/sources.list.d/docker.sources
+fi
+if [ ! -f /etc/apt/sources.list.d/tailscale.list ]; then
+	curl -fsSL "https://pkgs.tailscale.com/stable/debian/$VERSION_CODENAME.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+	curl -fsSL "https://pkgs.tailscale.com/stable/debian/$VERSION_CODENAME.tailscale-keyring.list" -o /etc/apt/sources.list.d/tailscale.list
+fi
+apt-get update -q
+apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin tailscale
+systemctl enable --now docker.service tailscaled.service
+# Deploy user: uid 1000 like `node` in the worker image, so the 0600 secrets it owns are readable.
+id sbx >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash sbx
+usermod -aG docker sbx
+install -d -m 700 -o sbx -g sbx /home/sbx/.ssh
+install -m 600 -o sbx -g sbx /root/.ssh/authorized_keys /home/sbx/.ssh/authorized_keys
+printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' >/etc/ssh/sshd_config.d/50-sbx.conf
+systemctl restart ssh.service
+docker run --rm hello-world >/dev/null
+echo "cp: $PRETTY_NAME, $(docker --version), $(docker compose version), $(tailscale version | head -1)"
+CT
+pct config "$ID" | grep -E '^(arch|cores|memory|swap|rootfs|net0|features|unprivileged|onboot|dev0):'
+pve-firewall compile >/dev/null 2>&1 || { echo "cp: pve-firewall compile failed" >&2; exit 1; }
+EOF
+	((DRY)) && return 0
+	verify_cp
+}
+
+verify_cp() {
+	# Wait for pve-firewall to apply the CT rules, then probe from this Mac (on the LAN or not).
+	sleep 12
+	ssh -n -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "sbx@$CP_IP" \
+		'docker compose version >/dev/null && echo "cp: ssh sbx@'"$CP_IP"' ok, docker usable by sbx"' ||
+		log "cp: ssh sbx@$CP_IP failed (expected when this Mac is outside the LAN; use the tailnet name)"
+	ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "ID=$CP_ID; "'
+		pve-firewall status
+		iptables-save | grep -q "veth${ID}i0" && echo "cp: firewall rules on veth${ID}i0" || { echo "cp: no firewall rules on veth${ID}i0" >&2; exit 1; }' ||
+		die "cp: firewall check failed"
+	log "cp: ok"
+}
+
+revert_cp() {
+	remote "ID=$CP_ID" <<'EOF'
+if ! pct config "$ID" >/dev/null 2>&1; then
+	echo "cp: CT $ID does not exist"
+	exit 0
+fi
+pct config "$ID" | grep -q '^tags:.*sbx-dev-cp' || { echo "cp: CT $ID is not ours" >&2; exit 1; }
+pct stop "$ID" 2>/dev/null || true
+pct destroy "$ID" --purge 1 --destroy-unreferenced-disks 1
+rm -f /etc/pve/firewall/$ID.fw
+EOF
+}
+
+# step_cp_gateway adds the CT address to IPSet sbx-gateway, so sandboxes reach tcp/443 on it
+# (group sbx-egress). A datacenter firewall change: armed rollback, checks before and after.
+step_cp_gateway() {
+	log "cp-gateway: $CP_IP into IPSet sbx-gateway, with a 3-minute automatic rollback"
+	local present
+	present=$(remote "IP=$CP_IP" <<'EOF'
+pvesh get /cluster/firewall/ipset/sbx-gateway --output-format json | grep -q "\"cidr\":\"$IP\"" && echo yes || echo no
+EOF
+)
+	if ((DRY)); then
+		echo "+ checks before; arm sbx-fw-rollback (pvesh delete /cluster/firewall/ipset/sbx-gateway/$CP_IP); pvesh create ... --cidr $CP_IP; wait 20 s; checks after; stop timer"
+		return 0
+	fi
+	if [[ "$present" == "yes" ]]; then
+		log "cp-gateway: already present; verifying only"
+		verify_cp_gateway
+		return 0
+	fi
+	local guests before_status before
+	guests=$(guest_ips)
+	before_status=$(guest_status)
+	before=$(fw_checks "$guests")
+	log "cp-gateway: checks before:"$'\n'"$before"
+	[[ "$before" == *"ssh-tailscale ok"* ]] || die "cp-gateway: ssh over Tailscale fails before any change"
+	remote "IP=$CP_IP" "COMMENT=$COMMENT" <<'EOF'
+systemctl stop sbx-fw-rollback.timer 2>/dev/null || true
+systemctl reset-failed sbx-fw-rollback.service sbx-fw-rollback.timer 2>/dev/null || true
+systemd-run --quiet --unit=sbx-fw-rollback --on-active=3min /usr/bin/pvesh delete "/cluster/firewall/ipset/sbx-gateway/$IP"
+systemctl is-active --quiet sbx-fw-rollback.timer
+pvesh create /cluster/firewall/ipset/sbx-gateway --cidr "$IP" --comment "$COMMENT: dev control plane CT"
+echo "cp-gateway: added, rollback armed for 3 min"
+EOF
+	log "cp-gateway: waiting 20 s for pve-firewall to apply"
+	sleep 20
+	local after after_status failed=0 name line
+	after=$(fw_checks "$guests")
+	after_status=$(guest_status)
+	log "cp-gateway: checks after:"$'\n'"$after"
+	while read -r name line; do
+		[[ "$line" == "ok" ]] || continue
+		grep -qx "$name ok" <<<"$after" || {
+			log "cp-gateway: REGRESSION: $name"
+			failed=1
+		}
+	done <<<"$before"
+	[[ "$before_status" == "$after_status" ]] || {
+		log "cp-gateway: REGRESSION: guest status changed"
+		failed=1
+	}
+	if ((failed)); then
+		log "cp-gateway: checks failed; removing the entry now (the rollback timer stays as a backstop)"
+		ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "pvesh delete /cluster/firewall/ipset/sbx-gateway/$CP_IP" ||
+			log "cp-gateway: host unreachable; the rollback timer removes the entry within 3 min"
+		exit 1
+	fi
+	remote <<'EOF'
+systemctl stop sbx-fw-rollback.timer 2>/dev/null || true
+echo "cp-gateway: rollback timer cancelled"
+EOF
+	verify_cp_gateway
+}
+
+verify_cp_gateway() {
+	remote "IP=$CP_IP" <<'EOF'
+ipset list PVEFW-0-sbx-gateway-v4 | grep -qx "$IP" || { echo "cp-gateway: $IP not in the live ipset" >&2; exit 1; }
+grep -q -- '-dest +sbx-gateway -p tcp -dport 443' /etc/pve/firewall/cluster.fw || { echo "cp-gateway: group sbx-egress lost its 443 rule" >&2; exit 1; }
+echo "cp-gateway: $IP in the live ipset; group sbx-egress allows only tcp/443 to it"
+EOF
+}
+
+revert_cp_gateway() {
+	remote "IP=$CP_IP" <<'EOF'
+pvesh delete "/cluster/firewall/ipset/sbx-gateway/$IP" || true
+EOF
+}
+
+# step_cp_tailscale joins the CT to the operator's tailnet (dev access from outside the LAN).
+# The login is interactive: the step prints the URL to open and returns.
+step_cp_tailscale() {
+	log "cp-tailscale: join CT $CP_ID to the tailnet as $CP_NAME"
+	remote "ID=$CP_ID" "NAME=$CP_NAME" <<'EOF'
+state() { pct exec "$ID" -- tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("BackendState", ""), d.get("AuthURL", ""))' || true; }
+read -r st url <<<"$(state)"
+if [ "$st" = Running ]; then
+	# infra/dev-cp/deploy.sh configures Tailscale Serve as sbx.
+	pct exec "$ID" -- tailscale set --operator=sbx
+	echo "cp-tailscale: running, $(pct exec "$ID" -- tailscale ip -4) ($(pct exec "$ID" -- tailscale status --self --peers=false | awk '{print $2}')), operator sbx"
+	exit 0
+fi
+if [ -z "${url:-}" ]; then
+	# tailscaled keeps the login going after `up` is detached; it comes up once the URL is approved.
+	pct exec "$ID" -- sh -c "nohup tailscale up --hostname=$NAME --accept-dns=false >/var/log/sbx-tailscale-up.log 2>&1 &"
+	for _ in $(seq 1 30); do
+		read -r st url <<<"$(state)"
+		[ -n "${url:-}" ] || [ "$st" = Running ] && break
+		sleep 1
+	done
+fi
+[ "$st" = Running ] && { pct exec "$ID" -- tailscale set --operator=sbx; echo "cp-tailscale: running, operator sbx"; exit 0; }
+[ -n "${url:-}" ] || { echo "cp-tailscale: no login URL (state $st)" >&2; exit 1; }
+echo "cp-tailscale: open to log in: $url, then run cp-tailscale again (sets the Serve operator)"
+EOF
+}
+
 # ---------------------------------------------------------------- status
 
 step_status() {
-	remote "ID=$TEMPLATE_VMID" "NODE=$NODE" <<'EOF'
+	remote "ID=$TEMPLATE_VMID" "NODE=$NODE" "CP=$CP_ID" "CP_IP=$CP_IP" <<'EOF'
 s() { if eval "$2" >/dev/null 2>&1; then echo "ok    $1"; else echo "MISS  $1"; fi; }
 s "user sbx@pve"                "pveum user list --output-format json | grep -q '\"userid\":\"sbx@pve\"'"
 s "token sbx@pve!poc"           "pveum user token list sbx@pve --output-format json | grep -q '\"tokenid\":\"poc\"'"
@@ -702,22 +953,26 @@ s "sbx-node key"                "grep -q 'boat-dev-clone S1 sbx-node' /etc/pve/p
 s "role SbxTemplateMedia"       "pveum role list --output-format json | grep -q '\"roleid\":\"SbxTemplateMedia\"'"
 s "template $ID"                "qm config $ID | grep -q '^template: 1'"
 s "base-$ID-disk-0 tagged"      "lvs -o lv_tags --noheadings pve/base-$ID-disk-0 | grep -q sbx-tpl"
+s "dev cp CT $CP running"       "pct status $CP | grep -q running"
+s "dev cp $CP_IP in sbx-gateway" "ipset list PVEFW-0-sbx-gateway-v4 | grep -qx $CP_IP"
 EOF
 }
 
 # ---------------------------------------------------------------- main
 
 usage() {
-	sed -n '2,9p' "$0"
+	sed -n '2,10p' "$0"
 	exit 2
 }
 
 cmd="${1:-}"
 case "$cmd" in
-user | net | sdn | node | fw | template | media | status) "step_$cmd" ;;
+user | net | sdn | node | fw | template | media | cp | status) "step_$cmd" ;;
+cp-gateway | cp-tailscale) "step_${cmd//-/_}" ;;
 revert)
 	case "${2:-}" in
-	user | net | sdn | node | fw | template | media) "revert_$2" ;;
+	user | net | sdn | node | fw | template | media | cp) "revert_$2" ;;
+	cp-gateway) revert_cp_gateway ;;
 	*) usage ;;
 	esac
 	;;
