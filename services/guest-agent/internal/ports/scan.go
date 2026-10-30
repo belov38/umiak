@@ -37,11 +37,27 @@ const (
 // stateListen is the /proc/net/tcp state column of a LISTEN socket.
 const stateListen = "0A"
 
-// Listener is one LISTEN socket from /proc/net/tcp{,6}.
+// Listener is one LISTEN socket: from /proc/net/tcp{,6} on Linux (Inode set)
+// or from the TCP owner-pid table on Windows (Pid, Process and User set).
 type Listener struct {
 	Addr  netip.Addr
 	Port  uint16
 	Inode uint64
+	// Pid is the owning process, 0 when unknown.
+	Pid uint32
+	// Process is the owner's image base name and User its account name;
+	// either is empty when it could not be read.
+	Process string
+	User    string
+}
+
+// listenerSource reads the LISTEN sockets of the VM and finds their owners.
+type listenerSource interface {
+	// listeners returns the current LISTEN sockets.
+	listeners() ([]Listener, error)
+	// owners maps ports of the reportable groups to their owner; ports
+	// without an owner are absent.
+	owners(groups []*portGroup) map[uint16]owner
 }
 
 // ParseProcNetTCP parses the contents of /proc/net/tcp (v6 false) or
@@ -116,10 +132,15 @@ func parseLocal(s string, v6 bool) (netip.Addr, uint16, error) {
 
 // Options configures a Scanner.
 type Options struct {
-	// ProcDir is the procfs root; empty means /proc (Linux) or no scanning.
+	// ProcDir is the procfs root; empty means /proc on Linux, the TCP table
+	// on Windows and no scanning elsewhere.
 	ProcDir string
 	// Exclude lists ports that are never reported.
 	Exclude []uint16
+	// ExcludeProcesses lists image names (case-insensitive, such as
+	// svchost.exe) whose listeners are never reported. Only sources that
+	// know the owner's name (Windows) can match.
+	ExcludeProcesses []string
 	// Interval is the scan period; zero means 1 s.
 	Interval time.Duration
 	// Debounce is how long the port set must stay unchanged before
@@ -131,12 +152,18 @@ type Options struct {
 	LocalAddrs func() []netip.Addr
 	// Log is optional.
 	Log *slog.Logger
+
+	// source replaces the platform source in tests.
+	source listenerSource
 }
 
 // Scanner reports the TCP ports listening on the VM.
 type Scanner struct {
 	opt Options
 	log *slog.Logger
+	src listenerSource // nil: nothing to scan
+	// excludePorts is Options.Exclude widened for filterListeners.
+	excludePorts []uint32
 
 	mu        sync.Mutex
 	scanned   bool
@@ -148,8 +175,16 @@ type Scanner struct {
 
 // NewScanner returns a Scanner; call Run to start the periodic scan.
 func NewScanner(opt Options) *Scanner {
-	if opt.ProcDir == "" {
-		opt.ProcDir = defaultProcDir
+	src := opt.source
+	if src == nil {
+		if opt.ProcDir == "" {
+			opt.ProcDir = defaultProcDir
+		}
+		if opt.ProcDir != "" {
+			src = procSource{dir: opt.ProcDir}
+		} else {
+			src = defaultSource()
+		}
 	}
 	if opt.Interval <= 0 {
 		opt.Interval = defaultInterval
@@ -164,13 +199,17 @@ func NewScanner(opt Options) *Scanner {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Scanner{opt: opt, log: log.With("component", "ports")}
+	excl := make([]uint32, len(opt.Exclude))
+	for i, p := range opt.Exclude {
+		excl[i] = uint32(p)
+	}
+	return &Scanner{opt: opt, log: log.With("component", "ports"), src: src, excludePorts: excl}
 }
 
 // Run scans every Interval and emits ports.changed with the full list once
 // the set has been stable for Debounce. It returns when ctx is done.
 func (s *Scanner) Run(ctx context.Context) {
-	if s.opt.ProcDir == "" {
+	if s.src == nil {
 		<-ctx.Done()
 		return
 	}
@@ -223,10 +262,14 @@ func cloneList(in []*agentv1.Port) []*agentv1.Port {
 	return out
 }
 
-// scanLocked reads procfs and, when the set of ports or their addresses
+// scanLocked reads the listeners and, when the set of ports or their addresses
 // changed, resolves owners and restarts the debounce window.
 func (s *Scanner) scanLocked(now time.Time) error {
-	listeners, err := s.readListeners()
+	if s.src == nil {
+		s.scanned = true
+		return nil
+	}
+	listeners, err := s.src.listeners()
 	if err != nil {
 		return err
 	}
@@ -234,7 +277,7 @@ func (s *Scanner) scanLocked(now time.Time) error {
 	if s.scanned && key == s.key {
 		return nil
 	}
-	owners := s.resolveOwners(byPort)
+	owners := s.src.owners(byPort)
 	list := make([]*agentv1.Port, 0, len(byPort))
 	for _, g := range byPort {
 		p := &agentv1.Port{Port: uint32(g.port)}
@@ -253,15 +296,19 @@ func (s *Scanner) scanLocked(now time.Time) error {
 	return nil
 }
 
-// readListeners reads both tcp tables; a missing tcp6 (IPv6 off) is fine.
-func (s *Scanner) readListeners() ([]Listener, error) {
+// procSource reads the sockets from procfs and finds owners through
+// /proc/<pid>/fd.
+type procSource struct{ dir string }
+
+// listeners reads both tcp tables; a missing tcp6 (IPv6 off) is fine.
+func (p procSource) listeners() ([]Listener, error) {
 	var all []Listener
 	var read int
 	for _, t := range []struct {
 		name string
 		v6   bool
 	}{{"tcp", false}, {"tcp6", true}} {
-		data, err := os.ReadFile(filepath.Join(s.opt.ProcDir, "net", t.name))
+		data, err := os.ReadFile(filepath.Join(p.dir, "net", t.name))
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
@@ -276,7 +323,7 @@ func (s *Scanner) readListeners() ([]Listener, error) {
 		read++
 	}
 	if read == 0 {
-		return nil, fmt.Errorf("ports: no tcp table under %s/net", s.opt.ProcDir)
+		return nil, fmt.Errorf("ports: no tcp table under %s/net", p.dir)
 	}
 	return all, nil
 }
@@ -286,6 +333,19 @@ type portGroup struct {
 	port   uint16
 	addrs  []netip.Addr
 	inodes []uint64
+	// owner is the lowest-pid owner reported by the listeners themselves.
+	owner *owner
+}
+
+// groupOwners returns the owners the listeners carried into their groups.
+func groupOwners(groups []*portGroup) map[uint16]owner {
+	out := make(map[uint16]owner)
+	for _, g := range groups {
+		if g.owner != nil {
+			out[g.port] = *g.owner
+		}
+	}
+	return out
 }
 
 // group keeps the reportable listeners and groups them by port, sorted by
@@ -296,10 +356,7 @@ func (s *Scanner) group(ls []Listener) ([]*portGroup, string) {
 		local[a.Unmap().WithZone("")] = true
 	}
 	groups := make(map[uint16]*portGroup)
-	for _, l := range ls {
-		if slices.Contains(s.opt.Exclude, l.Port) {
-			continue
-		}
+	for _, l := range filterListeners(ls, s.excludePorts, s.opt.ExcludeProcesses) {
 		if !l.Addr.IsUnspecified() && !l.Addr.IsLoopback() && !local[l.Addr] {
 			continue
 		}
@@ -312,6 +369,9 @@ func (s *Scanner) group(ls []Listener) ([]*portGroup, string) {
 			g.addrs = append(g.addrs, l.Addr)
 		}
 		g.inodes = append(g.inodes, l.Inode)
+		if l.Pid != 0 && (g.owner == nil || int(l.Pid) < g.owner.pid) {
+			g.owner = &owner{pid: int(l.Pid), process: l.Process, user: l.User}
+		}
 	}
 	out := make([]*portGroup, 0, len(groups))
 	for _, g := range groups {

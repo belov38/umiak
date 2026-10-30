@@ -252,10 +252,11 @@ func (a *agent) buildServices() error {
 	}
 	a.tcp = &ports.Counter{}
 	a.ports = ports.NewScanner(ports.Options{
-		ProcDir: a.d.ProcDir,
-		Exclude: a.cfg.PortsExclude,
-		Emit:    a.emit,
-		Log:     a.log,
+		ProcDir:          a.d.ProcDir,
+		Exclude:          a.cfg.PortsExclude,
+		ExcludeProcesses: a.cfg.PortsExcludeProcesses,
+		Emit:             a.emit,
+		Log:              a.log,
 	})
 	a.updater, err = update.New(update.Options{
 		Layout:       a.l,

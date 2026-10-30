@@ -214,3 +214,41 @@ func TestScannerMissingTables(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+// fakeSource is a listenerSource that reports owners in the listeners, as
+// the Windows source does.
+type fakeSource struct{ ls []Listener }
+
+func (f *fakeSource) listeners() ([]Listener, error)         { return f.ls, nil }
+func (f *fakeSource) owners(g []*portGroup) map[uint16]owner { return groupOwners(g) }
+
+func TestScannerSourceOwnersAndProcessExclude(t *testing.T) {
+	lo := netip.MustParseAddr("127.0.0.1")
+	src := &fakeSource{ls: []Listener{
+		{Addr: lo, Port: 8080, Pid: 30, Process: "node.exe", User: "user"},
+		{Addr: netip.IPv6Loopback(), Port: 8080, Pid: 20, Process: "node.exe", User: "user"},
+		{Addr: netip.IPv6Unspecified(), Port: 135, Pid: 900, Process: "svchost.exe", User: "NETWORK SERVICE"},
+		{Addr: lo, Port: 445, Pid: 4, Process: "System"},
+		{Addr: lo, Port: 22, Pid: 800, Process: "sshd.exe"},
+		{Addr: lo, Port: 5000},
+	}}
+	s := NewScanner(Options{
+		source:           src,
+		Exclude:          []uint16{22},
+		ExcludeProcesses: []string{"System", "SVCHOST.EXE"},
+		LocalAddrs:       func() []netip.Addr { return nil },
+	})
+	got := s.List()
+	want := []*agentv1.Port{
+		{Port: 5000, Addresses: []string{"127.0.0.1"}},
+		{Port: 8080, Addresses: []string{"127.0.0.1", "::1"}, Pid: 20, Process: "node.exe", User: "user"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if !proto.Equal(got[i], want[i]) {
+			t.Fatalf("port %d: got %v, want %v", i, got[i], want[i])
+		}
+	}
+}
