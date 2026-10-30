@@ -22,6 +22,11 @@
           <Order>1</Order>
           <Path>"C:\Program Files\sbx-agent\current\sbx-agent.exe" identity apply --specialize</Path>
         </RunSynchronousCommand>
+        <!-- SYSPREP_DEFERRED_SERVICES of media.ts: sysprep /generalize needs it alive. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg.exe add HKLM\SYSTEM\CurrentControlSet\Services\dmwappushservice /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
       </RunSynchronous>
     </component>
     <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">

@@ -39,10 +39,20 @@ export const OFFLINE_SERVICES: Record<OfflineStage, string[]> = {
 };
 
 /**
- * Services of spec S9 section 8.1 that stay Manual through the build and are disabled offline
- * with any stage: sysprep /generalize can hang or fail with dmwappushservice disabled.
+ * Services of spec S9 section 8.1 that stay Manual through the build: sysprep /generalize can
+ * hang or fail with dmwappushservice disabled. The offline boot comes before sysprep, so they are
+ * not in its set; the specialize pass of sbx-unattend.xml disables them on each clone.
  */
 export const SYSPREP_DEFERRED_SERVICES = ["dmwappushservice"];
+
+/** Services and drivers the offline boot sets to Start=4, in offline-config.cmd order. */
+export function offlineServices(stages: OfflineStage[]): string[] {
+	if (stages.length === 0) throw new Error("no offline stages");
+	for (const s of stages)
+		if (!(OFFLINE_STAGES as readonly string[]).includes(s))
+			throw new Error(`unknown offline stage "${s}"`);
+	return [...new Set(stages.flatMap((s) => OFFLINE_SERVICES[s]))];
+}
 
 /** Same rule as the agent package versions (agent-package.ts). */
 const AGENT_VERSION_RE = /^[A-Za-z0-9_+-][A-Za-z0-9._+-]{0,63}$/;
@@ -188,16 +198,7 @@ export function offlineIsoFiles(
 	stages: OfflineStage[],
 	i: OfflineIsoInput,
 ): Map<string, string | Buffer> {
-	if (stages.length === 0) throw new Error("no offline stages");
-	for (const s of stages)
-		if (!(OFFLINE_STAGES as readonly string[]).includes(s))
-			throw new Error(`unknown offline stage "${s}"`);
-	const services = [
-		...new Set([
-			...stages.flatMap((s) => OFFLINE_SERVICES[s]),
-			...SYSPREP_DEFERRED_SERVICES,
-		]),
-	];
+	const services = offlineServices(stages);
 	const drivers = i.drivers ?? "w11";
 	const read = (name: string) =>
 		readFileSync(join(WINDOWS_FILES_DIR, name), "utf8");

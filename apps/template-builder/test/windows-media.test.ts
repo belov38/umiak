@@ -24,6 +24,7 @@ import {
 	OFFLINE_ISO_LABEL,
 	OFFLINE_SERVICES,
 	offlineIsoFiles,
+	offlineServices,
 	SYSPREP_DEFERRED_SERVICES,
 } from "../src/windows/media.ts";
 import {
@@ -197,17 +198,26 @@ describe("offlineIsoFiles", () => {
 		expect(xml).toContain("<AcceptEula>true</AcceptEula>");
 		const cfg = text(files, "offline-config.cmd");
 		expect(cfg).toBe(
-			"set SBX_DRIVERS=w11\r\nset SBX_SERVICES=WinDefend WdNisSvc Sense WdBoot WdFilter WdNisDrv WaaSMedicSvc dmwappushservice\r\n",
+			"set SBX_DRIVERS=w11\r\nset SBX_SERVICES=WinDefend WdNisSvc Sense WdBoot WdFilter WdNisDrv WaaSMedicSvc\r\n",
 		);
 	});
 
-	it("disables the services sysprep needs alive with any stage", () => {
+	it("leaves the services sysprep needs alive out: the offline boot comes before sysprep", () => {
 		expect(SYSPREP_DEFERRED_SERVICES).toEqual(["dmwappushservice"]);
 		const cfg = text(
 			offlineIsoFiles(["defender-off"], ANSWERS),
 			"offline-config.cmd",
 		);
-		expect(cfg).toContain(" dmwappushservice\r\n");
+		expect(cfg).not.toContain("dmwappushservice");
+		expect(offlineServices(["defender-off", "waasmedic-off"])).toEqual([
+			"WinDefend",
+			"WdNisSvc",
+			"Sense",
+			"WdBoot",
+			"WdFilter",
+			"WdNisDrv",
+			"WaaSMedicSvc",
+		]);
 	});
 
 	it("selects services of the given stages only", () => {
@@ -216,7 +226,7 @@ describe("offlineIsoFiles", () => {
 			"offline-config.cmd",
 		);
 		expect(cfg).toBe(
-			"set SBX_DRIVERS=2k25\r\nset SBX_SERVICES=WaaSMedicSvc dmwappushservice\r\n",
+			"set SBX_DRIVERS=2k25\r\nset SBX_SERVICES=WaaSMedicSvc\r\n",
 		);
 	});
 

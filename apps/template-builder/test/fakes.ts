@@ -470,6 +470,12 @@ export class FakeWinGuest implements GuestIo {
 	setupErr = "";
 	/** Exit codes of the next removals of C:\sbx-build (then 0). */
 	rmBuildDirExits: number[] = [];
+	/** C:\Windows\Setup\Scripts\sbx-offline.log; null: missing. */
+	offlineLog: string | null =
+		"sbx offline stage: drivers w11\r\nOK HKLM\\OFFSYS\\ControlSet001\\Services\\WinDefend Start 4\r\nDONE errors 0\r\n";
+	/** Start values the offline check reads; services not listed have Start=4. */
+	serviceStart: Record<string, number | null> = {};
+	msMpEng = false;
 	onStep?: (step: string) => void;
 	alive: () => boolean = () => true;
 	log: string[];
@@ -514,6 +520,22 @@ export class FakeWinGuest implements GuestIo {
 		if (read) return this.#readFiles(read);
 		if (c0 === "powershell.exe" && cmd.includes("-EncodedCommand")) {
 			const text = Buffer.from(script, "base64").toString("utf16le");
+			if (text.includes("sbx-offline.log")) {
+				this.log.push("guest:check-offline");
+				const names = (/\$names = @\(([^)]*)\)/.exec(text)?.[1] ?? "")
+					.split(",")
+					.map((n) => n.trim().replace(/^'|'$/g, ""))
+					.filter((n) => n !== "");
+				const start = Object.fromEntries(
+					names.map((n) => [
+						n,
+						n in this.serviceStart ? this.serviceStart[n] : 4,
+					]),
+				);
+				return ok(
+					`OFFLINE ${JSON.stringify({ log: this.offlineLog, start, msMpEng: this.msMpEng })}\r\n`,
+				);
+			}
 			if (text.includes("CurrentVersion")) {
 				this.log.push("guest:facts");
 				return ok(`noise\r\nFACTS ${JSON.stringify(this.facts)}\r\n`);

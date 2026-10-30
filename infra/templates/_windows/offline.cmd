@@ -1,12 +1,15 @@
 @echo off
 rem Offline WinPE stage (spec S9 section 10.3): sets Start=4 for services in
-rem the offline SYSTEM hive of the sealed Windows, then powers the VM off.
+rem the offline SYSTEM hive of the installed Windows, then powers the VM off.
+rem It runs before sysprep: a boot prompt OVMF misses boots a disk that is not
+rem sealed yet, and sbx-tpl retries.
 rem WinPE of Windows Setup has no PowerShell: cmd, reg, drvload, diskpart only.
 rem offline-config.cmd (written by sbx-tpl) sets SBX_DRIVERS and SBX_SERVICES.
 rem Log lines: OK / MISSING / ERROR <key>, last line "DONE errors <n>".
-rem The script always ends with wpeutil shutdown, so Setup never continues. On
-rem errors the log (copied to the Windows volume when one was found) records
-rem them and verify fails the template.
+rem The script always ends with wpeutil shutdown, so Setup never continues. The
+rem log is copied to the Windows volume when one was found; sbx-tpl boots that
+rem disk next (verify-offline), reads the log and the services, and fails the
+rem build on errors before sysprep.
 setlocal EnableExtensions
 set "SRC=%~d0"
 set "LOG=X:\sbx-offline.log"

@@ -34,7 +34,12 @@ import {
 	type WindowsVersions,
 } from "../recipe.ts";
 import { newBuildId } from "../registry.ts";
-import { type GuestIo, READ_CHUNK, StepFailedError } from "../runner.ts";
+import {
+	type GuestIo,
+	READ_CHUNK,
+	retryTransient,
+	StepFailedError,
+} from "../runner.ts";
 import {
 	BUILD_TAG,
 	type BuildDeps,
@@ -66,6 +71,7 @@ import {
 	genericProductKey,
 	OFFLINE_ISO_LABEL,
 	offlineIsoFiles,
+	offlineServices,
 	renderWindowsAgentToml,
 } from "./media.ts";
 import {
@@ -75,8 +81,10 @@ import {
 	runWindowsStep,
 } from "./runner.ts";
 
-// Stages of an iso-install build (spec S9 sections 6, 7, 10): media, vm, install, steps, seal,
-// offline, template. build.ts runs them in order, then verify, and rolls back on failure.
+// Stages of an iso-install build (spec S9 sections 6, 7, 10): media, vm, install, steps, offline,
+// verify-offline, seal, template. build.ts runs them in order, then verify, and rolls back on
+// failure. The offline WinPE boot comes before sysprep: a boot prompt OVMF misses then boots a
+// disk that is not sealed yet, which is harmless and retried.
 
 const MIN = 60_000;
 const SBX_AGENT_EXE = "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe";
@@ -113,6 +121,15 @@ const DEFAULT_KEY_INTERVAL_MS = 1000;
 const BOOT_KEY = "f12";
 const SYSPREP_TIMEOUT_MS = 30 * MIN;
 const OFFLINE_TIMEOUT_MS = 10 * MIN;
+/** Offline boots in a row that may reach Windows instead of WinPE. */
+const OFFLINE_ATTEMPTS = 3;
+/** A disk boot of the offline stage: how long Windows may take to power off on request. */
+const OFFLINE_POWEROFF_MS = 3 * MIN;
+/** verify-offline: the boot from the disk up to the guest agent. */
+const OFFLINE_BOOT_TIMEOUT_MS = 15 * MIN;
+const OFFLINE_CHECK_TIMEOUT_MS = 2 * MIN;
+const OFFLINE_LOG = "C:\\Windows\\Setup\\Scripts\\sbx-offline.log";
+const OFFLINE_LOG_TAIL = 30;
 const SEAL_TIMEOUT_MS = 5 * MIN;
 const FACTS_TIMEOUT_MS = 5 * MIN;
 const ISO_FILE_RE = /^[A-Za-z0-9._()+-]+\.iso$/;
@@ -288,13 +305,15 @@ export async function windowsStages(
 	await stageInstall(deps, o, p, io, st);
 	enter("steps");
 	const factsDone = await stageWindowsSteps(deps, o, p, io, st, save);
-	enter("seal");
 	if (!factsDone) await recordFacts(deps, o, p, io, st, save);
-	await stageSysprep(deps, o, io, st);
 	if (p.recipe.offline.length > 0) {
 		enter("offline");
 		await stageOffline(deps, o, io, st);
+		enter("verify-offline");
+		await stageVerifyOffline(deps, o, p, io, st, save);
 	}
+	enter("seal");
+	await stageSysprep(deps, o, io, st);
 	deps.ramGuard.release(vmid);
 	st.ramReserved = false;
 	enter("template");
@@ -825,6 +844,14 @@ async function recordFacts(
 			`New-Item -ItemType Directory -Force -Path '${GUEST_MANIFEST_DIR}' | Out-Null`,
 		),
 	);
+	await writeGuestManifest(deps, o, st);
+}
+
+async function writeGuestManifest(
+	deps: BuildDeps,
+	o: BuildOptions,
+	st: State,
+): Promise<void> {
 	await new Qga(deps.api, o.node).fileWriteWindows(
 		st.vmid as number,
 		GUEST_MANIFEST,
@@ -935,9 +962,9 @@ async function removeBuildDir(deps: BuildDeps, io: GuestIo): Promise<void> {
 }
 
 /**
- * C:\sbx-build goes (90-cleanup's log was read already), `sbx-agent seal`, then sysprep starts
- * through QGA without waiting for it; sysprep powers the VM off. A failed sysprep leaves the VM
- * running, so setuperr.log is read through QGA.
+ * On the running VM (verify-offline booted it): C:\sbx-build goes (90-cleanup's log was read
+ * already), `sbx-agent seal`, then sysprep starts through QGA without waiting for it; sysprep
+ * powers the VM off. A failed sysprep leaves the VM running, so setuperr.log is read through QGA.
  */
 export async function stageSysprep(
 	deps: BuildDeps,
@@ -992,9 +1019,67 @@ export async function stageSysprep(
 
 // offline
 
+/** The offline boot reached Windows on the disk instead of WinPE (OVMF missed the CD prompt). */
+class DiskBootedError extends Error {}
+
+/** Asks Windows to power off; a hard stop if the agent refuses or it takes too long. */
+async function powerOffDiskBoot(
+	deps: BuildDeps,
+	node: string,
+	vmid: number,
+): Promise<void> {
+	const vmPath = `/nodes/${node}/qemu/${vmid}`;
+	let graceMs = OFFLINE_POWEROFF_MS;
+	try {
+		await deps.api.post(`${vmPath}/agent/shutdown`);
+	} catch (err) {
+		deps.signal?.throwIfAborted();
+		// Windows is not sealed yet: a hard stop does no harm.
+		deps.log(`agent/shutdown: ${errorText(err)}`);
+		graceMs = 0;
+	}
+	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+	const deadline = Date.now() + graceMs;
+	while ((await vmStatus(deps, node, vmid)) !== "stopped") {
+		if (Date.now() >= deadline) {
+			deps.log(`VM ${vmid} is still running: stopping it`);
+			const upid = await deps.api.post<string>(`${vmPath}/status/stop`);
+			await deps.api.waitTask(node, upid);
+			return;
+		}
+		await sleep(pollMs);
+	}
+}
+
+/** One offline boot: start, key presses, wait for WinPE to power off. */
+async function offlineBoot(
+	deps: BuildDeps,
+	o: BuildOptions,
+	io: GuestIo,
+	vmid: number,
+): Promise<void> {
+	await startVm(deps, o.node, vmid);
+	// WinPE has no guest agent: an answer means Windows booted from the disk.
+	await pressKeys(deps, o.node, vmid, OFFLINE_KEYS, async () => {
+		if (await io.ping()) throw new DiskBootedError();
+	});
+	const timeoutMs = deps.offlineTimeoutMs ?? OFFLINE_TIMEOUT_MS;
+	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+	const deadline = Date.now() + timeoutMs;
+	while ((await vmStatus(deps, o.node, vmid)) !== "stopped") {
+		if (await io.ping()) throw new DiskBootedError();
+		if (Date.now() >= deadline)
+			throw new Error(
+				`the offline WinPE boot did not power off within ${timeoutMs} ms (WinPE has no guest agent: look at the console of a --keep-on-failure build)`,
+			);
+		await sleep(pollMs);
+	}
+}
+
 /**
- * Boots WinPE from the user's ISO with the offline ISO on sata2; offline.cmd edits the sealed
- * system's registry and powers off. A guest agent that answers means the sealed disk booted.
+ * Boots WinPE from the user's ISO with the offline ISO on sata2; offline.cmd edits the SYSTEM hive
+ * of the installed (not yet sealed) Windows and powers off. When OVMF misses "Press any key" and
+ * boots the disk instead, Windows is powered off and the boot repeated.
  */
 export async function stageOffline(
 	deps: BuildDeps,
@@ -1003,32 +1088,155 @@ export async function stageOffline(
 	st: State,
 ): Promise<void> {
 	const vmid = st.vmid as number;
-	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
-	await deps.api.put(`${vmPath}/config`, {
+	await deps.api.put(`/nodes/${o.node}/qemu/${vmid}/config`, {
 		sata2: `${MEDIA_STORAGE}:iso/${offlineIsoName(st.m)},media=cdrom`,
 		boot: "order=ide2",
 	});
-	await startVm(deps, o.node, vmid);
-	const sealedDiskBooted = () =>
-		new Error(
-			"sealed disk booted: the guest agent answered during the offline WinPE stage (OVMF booted the disk instead of the CD); this build's disk is spoiled",
+	for (let attempt = 1; ; attempt++) {
+		try {
+			await offlineBoot(deps, o, io, vmid);
+			break;
+		} catch (err) {
+			if (!(err instanceof DiskBootedError)) throw err;
+		}
+		deps.log(
+			`offline attempt ${attempt} of ${OFFLINE_ATTEMPTS}: the disk booted instead of WinPE (OVMF missed the CD prompt); powering it off`,
 		);
-	// A guest agent answering during the key presses already means the disk booted.
-	await pressKeys(deps, o.node, vmid, OFFLINE_KEYS, async () => {
-		if (await io.ping()) throw sealedDiskBooted();
-	});
-	const timeoutMs = deps.offlineTimeoutMs ?? OFFLINE_TIMEOUT_MS;
-	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
-	const deadline = Date.now() + timeoutMs;
-	while ((await vmStatus(deps, o.node, vmid)) !== "stopped") {
-		if (await io.ping()) throw sealedDiskBooted();
-		if (Date.now() >= deadline)
+		await powerOffDiskBoot(deps, o.node, vmid);
+		if (attempt >= OFFLINE_ATTEMPTS)
 			throw new Error(
-				`the offline WinPE boot did not power off within ${timeoutMs} ms (WinPE has no guest agent: look at the console of a --keep-on-failure build)`,
+				`the offline WinPE boot reached Windows on the disk in all ${OFFLINE_ATTEMPTS} attempts (OVMF missed "Press any key to boot from CD"); Windows is not sealed yet, so the disk is fine: build again, or look at the console of a --keep-on-failure build`,
+			);
+	}
+	deps.log("offline stage done");
+}
+
+// verify-offline
+
+/** sbx-offline.log, the Start value of each service and whether MsMpEng runs, as one line. */
+function offlineCheckScript(services: string[]): string {
+	return `$ErrorActionPreference = 'Stop'
+$names = @(${services.map((n) => `'${n}'`).join(", ")})
+$log = '${OFFLINE_LOG}'
+$text = if (Test-Path -LiteralPath $log) { [IO.File]::ReadAllText($log) } else { $null }
+$start = [ordered]@{}
+foreach ($n in $names) {
+  $p = Get-ItemProperty -LiteralPath "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\$n" -Name Start -ErrorAction SilentlyContinue
+  $start[$n] = if ($null -eq $p) { $null } else { [int]$p.Start }
+}
+$engine = @(Get-Process -Name MsMpEng -ErrorAction SilentlyContinue).Count -gt 0
+Write-Output ('OFFLINE ' + ([ordered]@{ log = $text; start = $start; msMpEng = $engine } | ConvertTo-Json -Compress -Depth 3))
+`;
+}
+
+const offlineCheckSchema = z.object({
+	log: z.string().nullable(),
+	start: z.record(z.string(), z.number().int().nullable()),
+	msMpEng: z.boolean(),
+});
+
+/**
+ * Boots the disk after the offline stage and checks its effect before sysprep: sbx-offline.log
+ * ends with `DONE errors 0`, every service of the offline set has Start=4 (or no key at all, as
+ * offline.cmd allows), MsMpEng does not run. The agent service runs on this boot; there is no
+ * sbx SMBIOS serial on the build VM, so identity apply skips, and `sbx-agent seal` comes next.
+ */
+export async function stageVerifyOffline(
+	deps: BuildDeps,
+	o: BuildOptions,
+	p: WindowsPrepared,
+	io: GuestIo,
+	st: State,
+	save: Save,
+): Promise<void> {
+	const vmid = st.vmid as number;
+	await deps.api.put(`/nodes/${o.node}/qemu/${vmid}/config`, {
+		sata2: "none,media=cdrom",
+		boot: `order=${p.recipe.disk.slot}`,
+	});
+	await startVm(deps, o.node, vmid);
+	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+	const bootDeadline = Date.now() + OFFLINE_BOOT_TIMEOUT_MS;
+	while (!(await io.ping())) {
+		if (Date.now() >= bootDeadline)
+			throw new Error(
+				`the guest agent did not answer within ${OFFLINE_BOOT_TIMEOUT_MS} ms of the boot after the offline stage`,
 			);
 		await sleep(pollMs);
 	}
-	deps.log("offline stage done");
+	const services = offlineServices(p.recipe.offline);
+	const what = "reading the offline stage's result";
+	// Read-only, so a status qemu-ga lost right after the boot is retried.
+	const r = await retryTransient(
+		() =>
+			io.exec(powershell(offlineCheckScript(services)), {
+				timeoutMs: FACTS_TIMEOUT_MS,
+			}),
+		Date.now() + OFFLINE_CHECK_TIMEOUT_MS,
+		pollMs,
+		(err) => deps.log(`${what}: ${errorText(err)}; retrying`),
+	);
+	if (r.exitCode !== 0)
+		throw new Error(
+			`${what} failed (exit ${r.exitCode}): ${(r.stderr || r.stdout).trim()}`,
+		);
+	const line = r.stdout
+		.split(/\r?\n/)
+		.find((l) => l.startsWith("OFFLINE "))
+		?.slice("OFFLINE ".length);
+	if (line === undefined)
+		throw new Error(`${what}: no OFFLINE line in ${r.stdout.slice(0, 200)}`);
+	const c = offlineCheckSchema.parse(JSON.parse(line));
+
+	if (c.log === null)
+		throw new Error(
+			`${OFFLINE_LOG} is missing: offline.cmd found no Windows volume or did not run`,
+		);
+	const lines = c.log.split(/\r?\n/).filter((l) => l.trim() !== "");
+	const tail = lines.slice(-OFFLINE_LOG_TAIL);
+	const done = lines.filter((l) => /^DONE errors/.test(l)).at(-1);
+	const errors = lines.filter((l) => /^\s*ERROR\b/.test(l));
+	if (done?.trim() !== "DONE errors 0" || errors.length > 0)
+		throw new StepFailedError(
+			"offline",
+			-1,
+			tail,
+			`${OFFLINE_LOG}: ${done === undefined ? 'no "DONE errors 0" line' : `"${done.trim()}"`}${errors.length > 0 ? `, ${errors.length} ERROR lines` : ""}`,
+		);
+	const bad = services.filter((n) => {
+		const v = c.start[n];
+		return v !== null && v !== 4;
+	});
+	if (bad.length > 0)
+		throw new StepFailedError(
+			"offline",
+			-1,
+			tail,
+			`not disabled after the offline stage: ${bad.map((n) => `${n} Start=${c.start[n] ?? "?"}`).join(", ")}`,
+		);
+	if (c.msMpEng)
+		throw new StepFailedError(
+			"offline",
+			-1,
+			tail,
+			"MsMpEng is running after the offline stage (Defender is still on)",
+		);
+	const missing = services.filter((n) => c.start[n] === null);
+	save({
+		windows: {
+			...(st.m.windows as WindowsFacts),
+			offline: {
+				services: services.filter((n) => !missing.includes(n)),
+				missing,
+				log: "DONE errors 0",
+			},
+		},
+	});
+	// build.json in the image carries the same record.
+	await writeGuestManifest(deps, o, st);
+	deps.log(
+		`offline stage checked: ${services.length - missing.length} services Start=4${missing.length > 0 ? `, no key: ${missing.join(", ")}` : ""}`,
+	);
 }
 
 // template

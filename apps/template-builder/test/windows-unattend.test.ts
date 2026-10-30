@@ -1,5 +1,6 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { describe, expect, it } from "vitest";
+import { SYSPREP_DEFERRED_SERVICES } from "../src/windows/media.ts";
 import {
 	type AutounattendInput,
 	renderAutounattend,
@@ -301,7 +302,7 @@ describe("SBX_UNATTEND", () => {
 		expect(passes(doc)).toEqual(["generalize", "specialize", "oobeSystem"]);
 	});
 
-	it("generalize keeps devices, specialize runs identity apply", () => {
+	it("generalize keeps devices, specialize runs identity apply and disables the deferred services", () => {
 		const doc = parse(SBX_UNATTEND);
 		const pnp = component(
 			pass(doc, "generalize"),
@@ -311,8 +312,14 @@ describe("SBX_UNATTEND", () => {
 		const cmds = commands(
 			component(pass(doc, "specialize"), "Microsoft-Windows-Deployment"),
 		);
+		// Services sysprep /generalize needs alive are disabled on the clone, right after it.
+		expect(SYSPREP_DEFERRED_SERVICES).toEqual(["dmwappushservice"]);
 		expect(cmds).toEqual([
 			'"C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe" identity apply --specialize',
+			...SYSPREP_DEFERRED_SERVICES.map(
+				(s) =>
+					`reg.exe add HKLM\\SYSTEM\\CurrentControlSet\\Services\\${s} /v Start /t REG_DWORD /d 4 /f`,
+			),
 		]);
 	});
 

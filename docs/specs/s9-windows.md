@@ -61,11 +61,13 @@
  |    -> specialize -> OOBE -> SetupComplete: QGA    |
  |  6 steps (PowerShell, scheduled task, logs by     |
  |    offset via QGA); link up after policies        |
- |  7 cleanup, sbx-agent seal, sysprep /generalize   |
- |    /oobe /shutdown                                |
- |  8 offline stage: boot WinPE from the Windows ISO |
- |    with an offline autounattend: SYSTEM hive edit |
- |    (Defender, WaaSMedic), shutdown                |
+ |  7 offline stage (before sysprep): boot WinPE     |
+ |    from the Windows ISO with an offline           |
+ |    autounattend: SYSTEM hive edit (Defender,      |
+ |    WaaSMedic), shutdown; a disk boot is retried   |
+ |  8 verify-offline: boot the disk, check the log,  |
+ |    Start=4, MsMpEng; sbx-agent seal, sysprep      |
+ |    /generalize /oobe /shutdown                    |
  |  9 detach media, convert to template              |
  | 10 verify: clone, specialize, checks, identity    |
  |    change reboot, hard stop, hibernate + resume   |
@@ -198,8 +200,8 @@ build/
 3. **Сборочная VM.** `POST /nodes/{node}/qemu`: железо из `hw`, `efidisk0=local-lvm:1,efitype=4m,pre-enrolled-keys=1,ms-cert=2023k`, `tpmstate0=local-lvm:1,version=v2.0` (у `windows`), `scsi0=local-lvm:<size>,discard=on,iothread=1,ssd=1`, `net0=virtio=<MAC>,bridge=sbx0,firewall=1,link_down=1`, `ide2=<user ISO>,media=cdrom`, `sata1=sbx-virtio-win-<v>.iso`, `sata2=sbx-build-<id>.iso`, `boot=order=scsi0;ide2`, `vmstatestorage=local-lvm`, `balloon=0`, теги и имя как в S5. Сеть выключена (`link_down=1`), пока шаг `00-base` не выставит политики: иначе Windows Update и обновления Store во время OOBE ломают sysprep (опыт 9001).
 4. **Установка.** Start, затем `sendkey ret` раз в секунду 20 s (`PUT …/sendkey`, право `VM.Console`, §18.1): загрузчик ISO ждёт «Press any key to boot from CD». Дальше без участия: WinPE ставит драйверы `vioscsi`, `NetKVM` из virtio-win, размечает диск, ставит редакцию; specialize; OOBE по ответам; `SetupComplete.cmd` ставит `virtio-win-gt-x64.msi` и `qemu-ga-x86_64.msi`. Сборщик ждёт `agent/ping` до `install_timeout` (40 min) **[S9]**.
 5. **Шаги.** Каждый шаг — scheduled task от SYSTEM, созданная и запущенная через QGA (`schtasks /create /ru SYSTEM /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\build\run-step.ps1 -Step <n>"` и `/run`). Так шаг переживает перезапуск QGA и не упирается в его тайм-ауты (аналог transient unit в S5). `run-step.ps1` находит build ISO по метке тома, пишет лог `C:\sbx-build\logs\<n>.log` и код выхода `<n>.exit`. Сборщик раз в 2 s одним `agent/exec` PowerShell-скрипта читает `<n>.exit` и кусок лога с offset (файлы открываются с FileShare ReadWrite|Delete). `agent/file-read` для файлов, в которые пишет гость, не используется: при тайм-ауте `guest-file-open` qemu-ga на Windows оставляет хэндл без FILE_SHARE_WRITE, и все дальнейшие записи в файл падают. `Write-Log` в `run-step.ps1` при занятом логе повторяет запись, затем копит строки в памяти; ошибка лога не меняет код выхода шага. Шаги до `10-system` идут в Windows PowerShell 5.1, после установки PowerShell 7 — в `pwsh` (решает `run-step.ps1` по заголовку шага).
-6. **Запечатывание.** `90-cleanup`, затем `sbx-agent seal` (§12.11), затем асинхронно через QGA `sysprep.exe /generalize /oobe /shutdown /quiet /unattend:C:\Windows\System32\Sysprep\sbx-unattend.xml`. Ожидание `stopped` до 30 min. При ошибке в манифест попадают последние строки `C:\Windows\System32\Sysprep\Panther\setuperr.log`: сборщик читает их через QGA до выключения. Если sysprep упал, VM ещё работает.
-7. **Offline-этап** (§10.3): `sata2` → offline ISO (virtio-win остаётся на `sata1`), `boot=order=ide2`, start, `sendkey`, ожидание `stopped` (до 10 min). Затем `delete=ide2,sata1,sata2`, `boot=order=scsi0`, `net0 link_down=0`.
+6. **Offline-этап** (§10.3), после `90-cleanup` и до sysprep: `sata2` → offline ISO (virtio-win остаётся на `sata1`), `boot=order=ide2`, start, `sendkey`, ожидание `stopped` (до 10 min). Если отвечает QGA, загрузился диск (OVMF пропустил «Press any key»); Windows ещё не запечатана, поэтому это безвредно: сборщик выключает VM (QGA shutdown, при отказе — `status/stop`) и повторяет загрузку, всего до 3 попыток, затем `failed`. Затем **verify-offline**: `sata2=none`, `boot=order=scsi0`, start, ожидание QGA; через QGA exec читаются `C:\Windows\Setup\Scripts\sbx-offline.log` (последняя строка `DONE errors <n>` — `DONE errors 0`, строк `ERROR` нет), `Start` служб offline-набора (4 или ключа нет) и процесс `MsMpEng` (не должен работать). Иначе `failed` с хвостом лога. Результат — в манифест (`windows.offline`) и в `build.json`. На этой загрузке работает служба агента; SMBIOS-серийника sbx у сборочной VM нет, `identity apply` пропускается, состояние агента стирает следующий `sbx-agent seal`.
+7. **Запечатывание** на работающей после verify-offline VM: `sbx-agent seal` (§12.11), затем асинхронно через QGA `sysprep.exe /generalize /oobe /shutdown /quiet /unattend:C:\Windows\System32\Sysprep\sbx-unattend.xml`. Ожидание `stopped` до 30 min. При ошибке в манифест попадают последние строки `C:\Windows\System32\Sysprep\Panther\setuperr.log`: сборщик читает их через QGA до выключения. Если sysprep упал, VM ещё работает. Затем `delete=ide2,sata1,sata2`, `boot=order=scsi0`, `net0 link_down=0`.
 8. **Template.** `POST …/template`. Диски становятся `base-<vmid>-disk-<k>` для `efidisk0`, `scsi0`, `tpmstate0` (порядок `k` записывается в `disk_layout`). Удалить build ISO и offline ISO (`media.remove`).
 9. **Проверка** (§15) и манифест (S5 §11 + поля §15.2).
 
@@ -295,12 +297,12 @@ build/
 
 ### 10.1 Порядок
 
-`90-cleanup` → `sbx-agent seal` → `sysprep /generalize /oobe /shutdown` → offline-этап → template. Sysprep выполняется один раз на шаблон. Specialize проходит каждая machine пула при первой загрузке; это время скрывает пул (решение master, §11.1).
+`90-cleanup` → offline-этап (WinPE, до 3 попыток) → verify-offline (загрузка диска, проверка результата) → `sbx-agent seal` → `sysprep /generalize /oobe /shutdown` → template. Sysprep выполняется один раз на шаблон. Specialize проходит каждая machine пула при первой загрузке; это время скрывает пул (решение master, §11.1).
 
 ### 10.2 `sbx-unattend.xml` (ответы для клонов)
 
 - `generalize`: `PersistAllDeviceInstalls=true` (драйверы virtio не переустанавливаются, specialize короче), `SkipRearm=0`.
-- `specialize`: `RunSynchronous` → `"C:\Program Files\sbx-agent\current\sbx-agent.exe" identity apply --specialize` (§11.2). Имя компьютера ставит агент; если для этого нужна заглушка `ComputerName` в Shell-Setup или определённый порядок компонентов, это выбирает исполнитель. Требование проверяется §15 п. 2: machine пула становится warm с именем `SBX<12 hex>` без перезагрузок сверх тех, что делает сам setup.
+- `specialize`: `RunSynchronous` → `"C:\Program Files\sbx-agent\current\sbx-agent.exe" identity apply --specialize` (§11.2), затем `reg.exe add` `Start=4` для `dmwappushservice` (§10.3). Имя компьютера ставит агент; если для этого нужна заглушка `ComputerName` в Shell-Setup или определённый порядок компонентов, это выбирает исполнитель. Требование проверяется §15 п. 2: machine пула становится warm с именем `SBX<12 hex>` без перезагрузок сверх тех, что делает сам setup.
 - `oobeSystem`: все экраны OOBE скрыты (`HideEULAPage`, `HideOEMRegistrationScreen`, `HideOnlineAccountScreens`, `HideWirelessSetupInOOBE`, `ProtectYourPC=3`), локаль en-US, UTC. Новых учётных записей нет (`user` уже существует), autologon здесь не задаётся (его пишет агент).
 - Файл лежит в `C:\Windows\System32\Sysprep\` и паролей не содержит. После первой загрузки setup сам заменяет копии ответов в `Panther`; агент удаляет `sbx-unattend.xml` на клоне в `identity apply`.
 
@@ -309,9 +311,10 @@ build/
 Нужен, потому что часть настроек нельзя изменить в работающей Windows: Tamper Protection блокирует Defender, `WaaSMedicSvc` защищён. Root на хосте (как `hivex` у 9001) у сборщика нет.
 
 - VM грузится с ISO Windows пользователя; Windows Setup находит `autounattend.xml` на offline ISO и в проходе `windowsPE` выполняет `RunSynchronous` → `offline.cmd`. Файл отвечает на страницы языка, ключа и лицензии как ответы установки (`International-Core-WinPE` с `ui_language`, `UserData` с generic-ключом и `AcceptEula`), чтобы Setup не ждал ввода. Сама установка не начинается: скрипт в конце выполняет `wpeutil shutdown`.
-- `offline.cmd` (cmd и `reg.exe`, PowerShell в WinPE установки нет): загрузить драйвер диска (`drvload <virtio-win>\vioscsi\w11\amd64\vioscsi.inf`: в WinPE установки драйвера virtio нет, а `DriverPaths` из `windowsPE` действуют только на саму установку); найти том с `\Windows\System32\config\SYSTEM` (буква диска заранее не известна); `reg load HKLM\OFFSYS`; для каждого `ControlSet00x` выставить `Start=4` службам из `offline` рецепта (`defender-off`: шесть служб и драйверов §8.1; `waasmedic-off`: `WaaSMedicSvc`) и при любом этапе `dmwappushservice` (без неё sysprep `/generalize` может зависнуть, поэтому до sysprep она остаётся Manual); `reg unload`; записать `\Windows\Setup\Scripts\sbx-offline.log`; `wpeutil shutdown`.
-- Сборщик ждёт `stopped` до 10 min; лог читается позже, в verify. Ошибка в WinPE видна только как тайм-аут (QGA в WinPE нет); `verify` проверяет результат (§15 п. 8).
-- **Риск пропущенного «Press any key».** В порядке загрузки только `ide2`, но OVMF может перейти к записи Windows Boot Manager в `efidisk0` и загрузить запечатанный диск, и тогда specialize испортит шаблон. Защита: `sendkey` начинается сразу после start и идёт 30 s. Если за время offline-этапа отвечает QGA (а в WinPE его нет), значит загрузился диск: сборка сразу `failed`, шаблон не создаётся. Исполнитель проверяет на спайке, учитывает ли OVMF Proxmox только `bootorder` из fw_cfg; если да, риск снимается.
+- `offline.cmd` (cmd и `reg.exe`, PowerShell в WinPE установки нет): загрузить драйвер диска (`drvload <virtio-win>\vioscsi\w11\amd64\vioscsi.inf`: в WinPE установки драйвера virtio нет, а `DriverPaths` из `windowsPE` действуют только на саму установку); найти том с `\Windows\System32\config\SYSTEM` (буква диска заранее не известна); `reg load HKLM\OFFSYS`; для каждого `ControlSet00x` выставить `Start=4` службам из `offline` рецепта (`defender-off`: шесть служб и драйверов §8.1; `waasmedic-off`: `WaaSMedicSvc`); `reg unload`; записать `\Windows\Setup\Scripts\sbx-offline.log`; `wpeutil shutdown`.
+- `dmwappushservice` в offline-набор не входит: без неё sysprep `/generalize` может зависнуть, а offline-этап идёт до sysprep. На шаблоне она Manual; на каждом клоне её выключает specialize (`sbx-unattend.xml`, `RunSynchronous` Order 2: `reg.exe add …\Services\dmwappushservice /v Start /t REG_DWORD /d 4 /f`) до первого запуска служб.
+- Сборщик ждёт `stopped` до 10 min. Ошибка в WinPE видна только как тайм-аут (QGA в WinPE нет). Результат проверяется сразу, в verify-offline (§7 п. 6): лог, `Start=4`, `MsMpEng`; `verify` на клоне проверяет его ещё раз (§15 п. 8).
+- **Риск пропущенного «Press any key».** В порядке загрузки только `ide2`, но OVMF после тайм-аута приглашения переходит к записи Windows Boot Manager в `efidisk0` и грузит диск. На сборке 9 так и вышло (на сборке 8 тот же этап прошёл): диск тогда был уже запечатан, и сборка упала с испорченным диском после ~60 min. Защита — порядок, повтор и проверка при сборке: offline-этап идёт до sysprep, поэтому загрузка диска безвредна; QGA, ответивший во время этапа (в WinPE его нет), значит загрузку диска — сборщик выключает VM и повторяет (до 3 попыток); verify-offline проверяет результат до sysprep.
 - Почему не скрипт PE-этапа установки (как в unattend-generator Schneegans, где установку ведёт свой скрипт: diskpart, dism, правка hive, bcdboot): offline-этап короче, не заменяет Windows Setup и годится для любых будущих offline-правок.
 
 ## 11. Первая загрузка клона и идентичность
@@ -603,7 +606,7 @@ Stop пользовательской sandbox через `suspend --todisk` со
 
 ### 15.2 Манифест: поля Windows
 
-К S5 §11: `windows` {`edition`, `build`, `ubr`, `family`, `isoFile`, `isoSha256`, `virtioWinVersion`, `openssh` (inbox/github и версия), `appxRemoved`, `options`}, `license` {`status`, `channel`, `daysRemaining`, `expiresAt`}, `verify.boot` (§16), `poolMode`.
+К S5 §11: `windows` {`edition`, `build`, `ubr`, `family`, `isoFile`, `isoSha256`, `virtioWinVersion`, `openssh` (inbox/github и версия), `appxRemoved`, `options`, `offline` {`services` с `Start=4`, `missing` без ключа, `log`}}, `license` {`status`, `channel`, `daysRemaining`, `expiresAt`}, `verify.boot` (§16), `poolMode`.
 
 ## 16. Замеры
 
@@ -765,7 +768,7 @@ packages/pve/, services/node-agent/   + §18.1
 - **Задача «при запуске», созданная пользователем,** может прочитать файлы секретов своей sandbox (после жёсткой остановки) или источника fork до очистки в `early`. Это принятый риск (master, 2026-10-29): fork наследует секреты по замыслу, `user` — администратор внутри VM, граница доверия — VM (§12.3). Проверка приёмки §20 п. 5 остаётся.
 - **Ознакомительный срок** шаблона (§17): с чего идёт отсчёт у клонов, измеряет реализация; до этого — пересборка не реже, чем раз в 60 дней (Windows 11 Evaluation).
 - **`SyncForegroundPolicy`** задерживает вход до появления сети; цена измеряется в `first_boot_to_desktop_ready` и `boot_to_agent_ready`.
-- **Пропущенный «Press any key»** на offline-этапе может загрузить запечатанный диск (§10.3); защита — немедленный `failed`.
+- **Пропущенный «Press any key»** на offline-этапе грузит диск вместо WinPE (§10.3); этап идёт до sysprep, поэтому это безвредно: повтор до 3 раз и проверка результата в verify-offline.
 
 ## 24. Результаты и решения реализации
 
@@ -804,7 +807,7 @@ packages/pve/, services/node-agent/   + §18.1
 21. **Загрузка клона:** если служба видела идущий Windows Setup, после его конца она сразу делает boot step сама, без 60 s ожидания `early.json` (на первой загрузке клона startup-скрипт отработал во время Setup и ничего не сделал). Ошибка boot step → выход 75 и повтор через failure actions. Пока идентичность не готова, сокеты не открыты.
 22. **Шаги сборки:** `00-base`…`90-cleanup` в `infra/templates/_windows/steps/`; `60-desktop` — только экран блокировки, первый вход и Default User hive. Шаг `10-system` ставит OpenSSH только из FoD (`openssh.source = inbox`), запасной `github` не реализован.
 
-### 24.3 Решения координатора (R1–R14)
+### 24.3 Решения координатора (R1–R15)
 
 | | Решение | Что меняет |
 |---|---|---|
@@ -822,6 +825,7 @@ packages/pve/, services/node-agent/   + §18.1
 | R12 | `agent-tests` подключает тестовые бинарники ISO-образом (`sbx-build-agenttests-<ts>.iso`, `ide2`), а не копирует по QGA | §24.2 п. 7 |
 | R13 | `fork_to_agent_ready` = длительность snapshot + (`cloneFromSnapshot` → start → готовность с новым именем); выключение источника между ними не входит; обе части в отчёте | §16 |
 | R14 | `env --format pwsh`: значения с управляющими символами (или не UTF-8) — `$env:K = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('<b64>'))`, остальные — `$env:K = '<v>'` с удвоенными `'`; `profile.ps1` принимает ровно эти две формы | §8.4, §12.7 |
+| R15 | offline-этап до sysprep (сборка 9 загрузила запечатанный диск): загрузка диска вместо WinPE выключается и повторяется (до 3 попыток), результат проверяется загрузкой диска до sysprep (verify-offline); `dmwappushservice` выключает specialize клона, а не offline-этап | §7 п. 6–7, §10.1, §10.3, §15.2 |
 
 ### 24.4 Результаты на `pve`
 

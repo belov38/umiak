@@ -225,7 +225,7 @@ describe("windows steps: files", () => {
 describe("windows steps: services", () => {
 	it("lib.ps1 lists the services of section 8.1; 00-base leaves the update services to 90-cleanup", () => {
 		const lib = read("lib.ps1");
-		// dmwappushservice stays Manual until sysprep is done; the offline stage disables it.
+		// dmwappushservice stays Manual through sysprep; specialize disables it on each clone.
 		expect(SYSPREP_DEFERRED_SERVICES).toEqual(["dmwappushservice"]);
 		expect(psArray(lib, "SbxDisabledServices").sort()).toEqual(
 			DISABLED_SERVICES.filter(

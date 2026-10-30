@@ -157,8 +157,9 @@ export type Stage =
 	| "boot"
 	| "install"
 	| "steps"
-	| "seal"
 	| "offline"
+	| "verify-offline"
+	| "seal"
 	| "template"
 	| "verify"
 	| "ready";

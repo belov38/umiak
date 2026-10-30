@@ -44,7 +44,7 @@ $UserName = 'user'
 # Boots of a clone's first start without the agent: specialize, then OOBE and the logon.
 $SetupBoots = 2
 # Spec 8.1: $SbxDisabledServices of _windows/lib.ps1 plus dmwappushservice,
-# which the offline stage disables after sysprep.
+# which the specialize pass of sbx-unattend.xml disables on the clone.
 $DisabledServices = @(
     'wuauserv', 'UsoSvc', 'DoSvc', 'WSearch', 'SysMain', 'DiagTrack',
     'dmwappushservice', 'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',

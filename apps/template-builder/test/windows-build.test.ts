@@ -338,7 +338,7 @@ function buildPassword(files: Map<string, string | Buffer>): string {
 }
 
 describe("iso-install build: happy path", () => {
-	it("runs media, vm, install, steps, seal, offline, template in order", async () => {
+	it("runs media, vm, install, steps, offline, verify-offline, seal, template in order", async () => {
 		const s = setup();
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(m.status).toBe("ready");
@@ -372,12 +372,19 @@ describe("iso-install build: happy path", () => {
 			"guest:mkdir-sbx-template",
 			`qga:write ${BUILD_JSON}`,
 			"guest:step 90-cleanup",
-			"guest:rm-sbx-build",
-			"guest:seal",
-			"guest:sysprep",
+			// offline: WinPE from the CD while Windows is not sealed yet
 			`api:PUT ${vm}/config`,
 			`api:POST ${vm}/status/start`,
 			`api:PUT ${vm}/sendkey`,
+			// verify-offline: the disk boots, the log and the services are read
+			`api:PUT ${vm}/config`,
+			`api:POST ${vm}/status/start`,
+			"guest:check-offline",
+			`qga:write ${BUILD_JSON}`,
+			// seal
+			"guest:rm-sbx-build",
+			"guest:seal",
+			"guest:sysprep",
 			"ram:release 598",
 			`api:PUT ${vm}/config`,
 			`api:POST ${vm}/template`,
@@ -395,10 +402,13 @@ describe("iso-install build: happy path", () => {
 		const starts = s.log
 			.map((e, i) => (e === `api:POST ${vm}/status/start` ? i : -1))
 			.filter((i) => i >= 0);
-		expect(starts).toHaveLength(2);
+		expect(starts).toHaveLength(3);
 		const firstStep = s.log.indexOf("guest:step 00-base");
 		expect(keysBetween(s.log, starts[0] ?? 0, firstStep)).toBe(60);
-		expect(keysBetween(s.log, starts[1] ?? 0, s.log.length)).toBe(60);
+		expect(keysBetween(s.log, starts[1] ?? 0, starts[2] ?? 0)).toBe(60);
+		expect(keysBetween(s.log, starts[2] ?? 0, s.log.length)).toBe(0);
+		// The disk boots once after WinPE, before sysprep.
+		expect(s.log.indexOf("guest:sysprep")).toBeGreaterThan(starts[2] ?? 0);
 		for (const c of s.pve.calls.filter((c) => c.path === `${vm}/sendkey`))
 			expect(c.params).toEqual({ key: "f12" });
 	});
@@ -439,7 +449,7 @@ describe("iso-install build: happy path", () => {
 		expect(s.pve.calls.some((c) => c.path === `${vm}/resize`)).toBe(false);
 	});
 
-	it("starts sysprep without waiting, swaps the CD for the offline boot and cleans up the template config", async () => {
+	it("swaps the CD for the offline boot, boots the disk again, starts sysprep without waiting and cleans up the template config", async () => {
 		const s = setup();
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(s.sysprepCalls).toEqual([SYSPREP]);
@@ -461,6 +471,7 @@ describe("iso-install build: happy path", () => {
 				sata2: `local:iso/${offlineIso(m)},media=cdrom`,
 				boot: "order=ide2",
 			},
+			{ sata2: "none,media=cdrom", boot: "order=scsi0" },
 			{
 				delete: "ide2,sata1,sata2",
 				boot: "order=scsi0",
@@ -526,6 +537,19 @@ describe("iso-install build: happy path", () => {
 			openssh: { source: "inbox", version: "9.8.3.1" },
 			appxRemoved: ["Microsoft.BingNews", "Clipchamp.Clipchamp"],
 			options: { vsBuildtools: false },
+			offline: {
+				services: [
+					"WinDefend",
+					"WdNisSvc",
+					"Sense",
+					"WdBoot",
+					"WdFilter",
+					"WdNisDrv",
+					"WaaSMedicSvc",
+				],
+				missing: [],
+				log: "DONE errors 0",
+			},
 		});
 		expect(m.license).toEqual({
 			status: null,
@@ -568,8 +592,35 @@ describe("iso-install build: happy path", () => {
 			buildId: m.buildId,
 			os: "windows",
 			pveVmid: 598,
-			windows: { build: "26300", ubr: 9457 },
+			windows: { build: "26300", ubr: 9457, offline: m.windows?.offline },
 		});
+	});
+
+	it("records the services the offline stage disabled, checked on the next boot", async () => {
+		const s = setup();
+		s.guest.serviceStart = { Sense: null };
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.windows?.offline).toEqual({
+			services: [
+				"WinDefend",
+				"WdNisSvc",
+				"WdBoot",
+				"WdFilter",
+				"WdNisDrv",
+				"WaaSMedicSvc",
+			],
+			missing: ["Sense"],
+			log: "DONE errors 0",
+		});
+		// dmwappushservice must stay alive through sysprep /generalize: not in the offline set.
+		const check = s.guest.calls.find((c) =>
+			Buffer.from(String(c.cmd.at(-1)), "base64")
+				.toString("utf16le")
+				.includes("sbx-offline.log"),
+		);
+		expect(
+			Buffer.from(String(check?.cmd.at(-1)), "base64").toString("utf16le"),
+		).not.toContain("dmwappushservice");
 	});
 
 	it("keeps the build password in the build ISO only", async () => {
@@ -825,21 +876,6 @@ describe("iso-install build: failures", () => {
 		expect(s.pve.vms.has(598)).toBe(false);
 	});
 
-	it("QGA answers during offline stage -> failed", async () => {
-		const s = setup();
-		// The sealed disk booted instead of WinPE: its agent answers.
-		s.guest.alive = () => s.pve.vms.get(598)?.status === "running";
-		s.state.offlineStopsAfter = 1000;
-		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
-		expect(m.error?.stage).toBe("offline");
-		expect(m.error?.message).toMatch(/sealed disk booted/);
-		expect(s.log).not.toContain(`api:POST ${vm}/template`);
-		expect(s.pve.vms.has(598)).toBe(false);
-		expect(
-			s.node.calls.filter((c) => c.op === "media.remove").map((c) => c.args),
-		).toEqual([{ names: [buildIso(m), offlineIso(m)] }]);
-	});
-
 	it("the offline WinPE powering off inside the key window ends the presses", async () => {
 		const s = setup();
 		let offKeys = 0;
@@ -862,23 +898,162 @@ describe("iso-install build: failures", () => {
 		expect(offKeys).toBe(5);
 	});
 
-	it("QGA answering between the offline key presses fails at once", async () => {
+	it("a disk boot instead of WinPE is powered off and the offline boot retried", async () => {
 		const s = setup();
-		const sendkeys = () =>
-			s.pve.calls.filter((c) => c.path === `${vm}/sendkey`).length;
+		let offlineStarts = 0;
+		const base = s.pve.before;
+		s.pve.before = (method, path, params) => {
+			base?.(method, path, params);
+			if (
+				method === "POST" &&
+				path === `${vm}/status/start` &&
+				s.pve.vms.get(598)?.config.boot === "order=ide2"
+			)
+				offlineStarts++;
+		};
+		// OVMF missed the CD prompt on the first offline boot: Windows (not sealed yet) answers.
 		s.guest.alive = () => {
 			const v = s.pve.vms.get(598);
 			return (
 				v?.status === "running" &&
-				(v.config.boot !== "order=ide2" || sendkeys() >= 24)
+				(v.config.boot !== "order=ide2" || offlineStarts === 1)
 			);
 		};
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.status).toBe("ready");
+		expect(offlineStarts).toBe(2);
+		expectInOrder(s.log, [
+			"guest:step 90-cleanup",
+			`api:POST ${vm}/status/start`,
+			`api:PUT ${vm}/sendkey`,
+			`api:POST ${vm}/agent/shutdown`,
+			`api:POST ${vm}/status/start`,
+			`api:PUT ${vm}/sendkey`,
+			"guest:check-offline",
+			"guest:sysprep",
+		]);
+		expect(s.messages.join("\n")).toMatch(
+			/offline attempt 1 of 3: the disk booted/,
+		);
+		// The config is set once; the retry only starts the VM again.
+		expect(
+			s.pve.calls.filter(
+				(c) =>
+					c.method === "PUT" &&
+					c.path === `${vm}/config` &&
+					c.params?.boot === "order=ide2",
+			),
+		).toHaveLength(1);
+	});
+
+	it("a disk boot whose agent refuses the shutdown is stopped hard, then retried", async () => {
+		const s = setup();
+		let offlineStarts = 0;
+		const base = s.pve.before;
+		s.pve.before = (method, path, params) => {
+			base?.(method, path, params);
+			if (
+				method === "POST" &&
+				path === `${vm}/status/start` &&
+				s.pve.vms.get(598)?.config.boot === "order=ide2"
+			)
+				offlineStarts++;
+		};
+		s.guest.alive = () => {
+			const v = s.pve.vms.get(598);
+			return (
+				v?.status === "running" &&
+				(v.config.boot !== "order=ide2" || offlineStarts === 1)
+			);
+		};
+		s.pve.fail[`POST ${vm}/agent/shutdown`] = new PveApiError(
+			500,
+			"QEMU guest agent is not running",
+		);
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.status).toBe("ready");
+		expectInOrder(s.log, [
+			`api:POST ${vm}/agent/shutdown`,
+			`api:POST ${vm}/status/stop`,
+			`api:POST ${vm}/status/start`,
+			"guest:check-offline",
+		]);
+	});
+
+	it("three disk boots in a row fail the offline stage before sysprep", async () => {
+		const s = setup();
+		// Every offline boot reaches Windows instead of WinPE.
+		s.guest.alive = () => s.pve.vms.get(598)?.status === "running";
 		s.state.offlineStopsAfter = 1000;
 		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
 		expect(m.error?.stage).toBe("offline");
-		expect(m.error?.message).toMatch(/sealed disk booted/);
-		// 60 install keys, then the offline keys up to the first ping that answers.
-		expect(sendkeys()).toBeLessThan(70);
+		expect(m.error?.message).toMatch(/3 attempts/);
+		expect(m.error?.message).toMatch(/not sealed/);
+		expect(
+			s.log.filter((e) => e === `api:POST ${vm}/agent/shutdown`),
+		).toHaveLength(3);
+		expect(s.log).not.toContain("guest:seal");
+		expect(s.log).not.toContain("guest:sysprep");
+		expect(s.log).not.toContain(`api:POST ${vm}/template`);
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(
+			s.node.calls.filter((c) => c.op === "media.remove").map((c) => c.args),
+		).toEqual([{ names: [buildIso(m), offlineIso(m)] }]);
+	});
+
+	it("an offline log with errors fails verify-offline with its tail, before sysprep", async () => {
+		const s = setup();
+		s.guest.offlineLog =
+			"sbx offline stage: drivers w11\r\nWindows volume C:\r\nERROR reg load of the offline SYSTEM hive failed\r\nDONE errors 1\r\n";
+		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+		expect(m.error?.stage).toBe("verify-offline");
+		expect(m.error?.message).toMatch(/DONE errors 1/);
+		expect(m.error?.tail).toEqual([
+			"sbx offline stage: drivers w11",
+			"Windows volume C:",
+			"ERROR reg load of the offline SYSTEM hive failed",
+			"DONE errors 1",
+		]);
+		expect(s.log).not.toContain("guest:seal");
+		expect(s.log).not.toContain("guest:sysprep");
+		expect(s.pve.vms.has(598)).toBe(false);
+	});
+
+	it("a missing offline log, a service left enabled or a running MsMpEng fail verify-offline", async () => {
+		const cases: [(s: ReturnType<typeof setup>) => void, RegExp][] = [
+			[
+				(s) => {
+					s.guest.offlineLog = null;
+				},
+				/sbx-offline\.log is missing/,
+			],
+			[
+				(s) => {
+					s.guest.offlineLog = "sbx offline stage\r\nOK x\r\n";
+				},
+				/no "DONE errors 0"/,
+			],
+			[
+				(s) => {
+					s.guest.serviceStart = { WinDefend: 3, WaaSMedicSvc: 2 };
+				},
+				/WinDefend Start=3, WaaSMedicSvc Start=2/,
+			],
+			[
+				(s) => {
+					s.guest.msMpEng = true;
+				},
+				/MsMpEng is running/,
+			],
+		];
+		for (const [arrange, message] of cases) {
+			const s = setup();
+			arrange(s);
+			const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+			expect(m.error?.stage).toBe("verify-offline");
+			expect(m.error?.message).toMatch(message);
+			expect(s.log).not.toContain("guest:sysprep");
+		}
 	});
 
 	it("a template without net0 fails the template stage instead of writing an empty net0", async () => {

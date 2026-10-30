@@ -69,6 +69,11 @@ export interface WindowsFacts {
 	/** Provisioned Appx packages of the removal list that are gone. */
 	appxRemoved: string[];
 	options: { vsBuildtools: boolean };
+	/**
+	 * What the build checked on the boot after the offline WinPE stage: services with Start=4,
+	 * services without a key, and the last line of sbx-offline.log.
+	 */
+	offline?: { services: string[]; missing: string[]; log: string };
 }
 
 export interface LicenseInfo {
