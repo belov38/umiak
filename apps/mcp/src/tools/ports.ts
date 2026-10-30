@@ -193,7 +193,8 @@ export const portList = defineTool({
 		const notes: string[] = [];
 		if (sorted.length === 0) notes.push("no port is published or listening");
 		const idle = sorted.filter((r) => r.published && r.process === undefined);
-		if (idle.length > 0) {
+		// A stored report may be stale: it cannot show that nothing listens.
+		if (idle.length > 0 && data.listeningObservedAt !== null) {
 			notes.push(
 				`published but nothing listens: ${idle.map((r) => r.port).join(", ")}; start the server in the sandbox`,
 			);

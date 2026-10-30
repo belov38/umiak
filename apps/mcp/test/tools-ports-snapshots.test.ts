@@ -462,10 +462,14 @@ describe("port_expose", () => {
 		expect(set.json).toMatchObject({ access: "sso", status: "access_changed" });
 		// The fake's contract check rejects the made-up mode (the document lists
 		// three); that is the point of the test, so only those reports are dropped.
-		const enumOnly = hh.api.contractErrors.every((e) =>
-			e.includes("/hosted/0/access must be equal to one of the allowed values"),
-		);
-		expect(enumOnly).toBe(true);
+		expect(hh.api.contractErrors).toHaveLength(2);
+		expect(
+			hh.api.contractErrors.every((e) =>
+				e.includes(
+					"/hosted/0/access must be equal to one of the allowed values",
+				),
+			),
+		).toBe(true);
 		hh.api.contractErrors.length = 0;
 	});
 
@@ -529,6 +533,19 @@ describe("port_list", () => {
 		expect(rows[2].process).toBeUndefined();
 		expect(r.lines).toContain("published but nothing listens: 9000");
 		expect(JSON.stringify(r.texts)).not.toContain("sbxp_");
+	});
+
+	it("a stopped sandbox gives the stored report and no 'nothing listens' claim", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		await hh.call("port_expose", { sandbox: sb, port: 9000 });
+		const live = await hh.call("port_list", { sandbox: sb });
+		expect(live.lines).toContain("published but nothing listens: 9000");
+		await hh.call("sandbox_stop", { sandbox: sb, wait: true });
+		const r = await hh.call("port_list", { sandbox: sb });
+		expect(r.isError).toBe(false);
+		expect(r.lines).toContain("last stored report");
+		expect(r.lines).not.toContain("nothing listens");
 	});
 
 	it("process names and addresses are sanitized and fenced, the label is a constant", async () => {
