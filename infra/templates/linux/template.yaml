@@ -1,0 +1,36 @@
+slug: linux
+os: linux
+extends: null # linux-desktop: extends: linux (S10)
+source:
+  kind: cloud-image # S9: iso-install
+  distro: ubuntu
+  release: "26.04"
+  flavor: minimal
+disk: { slot: scsi0, size: 64G }
+hw: # copied into the template config, S1 whitelist (§9)
+  machine: q35
+  cpu: host
+  bios: seabios
+  ostype: l26
+  scsihw: virtio-scsi-single
+  agent: "enabled=1"
+  serial0: socket
+  vga: std
+  tablet: 0
+  rng0: "source=/dev/urandom"
+  cloudinit: false # sandboxes get no cloud-init drive (§17.1)
+build_vm: { cores: 4, memory_mb: 4096 }
+steps:
+  [
+    00-base,
+    reboot,
+    10-system,
+    20-docker,
+    30-toolchains,
+    40-coding-agents,
+    50-sbx-agent,
+    90-cleanup,
+  ]
+seal: sbx-agent # S9: sysprep
+boot_timeout_s: 300
+verify: linux
