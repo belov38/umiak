@@ -13,6 +13,7 @@ import { Deadline } from "./deadline.ts";
 import { type ErrorResultExtra, errorResult, ToolError } from "./errors.ts";
 import { pinnedInstructions, SERVER_INSTRUCTIONS } from "./instructions.ts";
 import type { Logger } from "./log.ts";
+import type { CallRecord } from "./metrics.ts";
 import { capResult } from "./output/result.ts";
 import {
 	assertToolDef,
@@ -48,6 +49,8 @@ export interface ServerOptions {
 	onAuthFailure?: () => void;
 	/** HTTP concurrency limit: a release function, or null when no slot is free. */
 	acquireSlot?: () => (() => void) | null;
+	/** After every call (HTTP metrics). */
+	onCallEnd?: (r: CallRecord) => void;
 }
 
 /** tools/list depends on the principal, so it is cached privately for 1 h. */
@@ -245,13 +248,24 @@ async function callTool(
 	}
 
 	result = capResult(result);
-	o.log.info(
-		{
-			...fields,
-			...resultFields(result),
-			durationMs: Math.round(performance.now() - started),
-		},
-		"tool call",
-	);
+	const outcome = resultFields(result);
+	const durationMs = Math.round(performance.now() - started);
+	o.log.info({ ...fields, ...outcome, durationMs }, "tool call");
+	o.onCallEnd?.({
+		tool: t.name,
+		outcome: result.isError ? (outcome.code ?? "error") : "ok",
+		durationMs,
+		bytes: contentBytes(result),
+	});
 	return result;
+}
+
+/** Bytes of the text and the base64 data of a result. */
+function contentBytes(r: CallToolResult): number {
+	let n = 0;
+	for (const b of r.content) {
+		if (b.type === "text") n += Buffer.byteLength(b.text);
+		else if (b.type === "image" || b.type === "audio") n += b.data.length;
+	}
+	return n;
 }

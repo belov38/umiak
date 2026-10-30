@@ -289,7 +289,10 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 		return c.json(errorBody(e, requestId), e.status as 400, headers);
 	}
 
-	function authenticate(authorization: string | undefined): {
+	function authenticate(
+		authorization: string | undefined,
+		teamHeader: string | undefined,
+	): {
 		token: string;
 		principal: FakePrincipal;
 	} {
@@ -334,7 +337,41 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 				"the credential has expired",
 			);
 		}
-		return { token, principal };
+		return { token, principal: withTeam(principal, teamHeader) };
+	}
+
+	/**
+	 * The team of the request (Sbx-Team, else the default), as the real API
+	 * selects it (apps/api/src/auth/public.ts, principal.ts): checked only
+	 * after the credential passed.
+	 */
+	function withTeam(
+		p: FakePrincipal,
+		header: string | undefined,
+	): FakePrincipal {
+		if (header === undefined) return p;
+		const team = header.trim();
+		if (!/^team_\S+$/.test(team)) {
+			throw validation([
+				{ path: "header.sbx-team", message: "must be a team id (team_...)" },
+			]);
+		}
+		if (team === p.teamId) return p;
+		if (p.kind === "team_key") {
+			throw new FakeApiError(
+				403,
+				"team_forbidden",
+				"the API key belongs to another team than Sbx-Team",
+			);
+		}
+		if (!(p.teams ?? []).includes(team)) {
+			throw new FakeApiError(
+				403,
+				"team_forbidden",
+				"you are not a member of the team in Sbx-Team",
+			);
+		}
+		return { ...p, teamId: team };
 	}
 
 	async function checkRequest(
@@ -401,7 +438,10 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 		try {
 			if (fake.script.noDesktopRoutes && DESKTOP_PATH.test(path))
 				throw noRoute(method, path);
-			const auth = authenticate(c.req.header("Authorization"));
+			const auth = authenticate(
+				c.req.header("Authorization"),
+				c.req.header("Sbx-Team"),
+			);
 			c.set("token", auth.token);
 			c.set("principal", auth.principal);
 			const fail = fake.script.failNext;

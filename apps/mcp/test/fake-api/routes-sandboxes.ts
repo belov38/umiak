@@ -306,11 +306,18 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 
 	app.get("/v1/me", (c) => {
 		const p = c.get("principal");
-		const team = {
-			id: p.teamId,
-			name: `Team ${p.teamId}`,
+		const teamOf = (id: string) => ({
+			id,
+			name: `Team ${id}`,
 			role: p.kind === "oidc" ? "owner" : null,
-		};
+		});
+		const team = teamOf(p.teamId);
+		// A person's teams: the one of the request (selected by Sbx-Team) and the rest.
+		const own = fake.tokens.get(c.get("token"));
+		const teams =
+			p.kind === "oidc" && own !== undefined
+				? [own.teamId, ...(own.teams ?? [])].map(teamOf)
+				: [team];
 		const auth: Json = { kind: p.kind, scopes: p.scopes };
 		if (p.keyId !== undefined) auth.apiKeyId = p.keyId;
 		if (p.expiresAt !== undefined) auth.expiresAt = p.expiresAt;
@@ -335,7 +342,7 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 						}
 					: null,
 			team,
-			teams: [team],
+			teams,
 			isOperator: false,
 			auth,
 		});

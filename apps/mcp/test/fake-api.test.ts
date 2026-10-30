@@ -6,9 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	EMIT_UNIT,
 	emitPattern,
+	FAKE_TEAM,
 	FAKE_TOKENS,
 	type FakeApi,
 	INJECT_FENCE_END,
+	OTHER_TEAM,
 	scaleToFit,
 	startFakeApi,
 } from "./fake-api/index.ts";
@@ -199,6 +201,69 @@ describe("auth and teams", () => {
 		expect(first.json.error.code).toBe("token_expired");
 		const second = await call("GET", "/v1/me", { token: FAKE_TOKENS.oidc });
 		expect(second.status).toBe(200);
+		expect(api.contractErrors).toEqual([]);
+	});
+
+	it("selects the team of a person by Sbx-Team", async () => {
+		api.tokens.set("t_two", {
+			kind: "oidc",
+			scopes: ["sandboxes:read", "sandboxes:write"],
+			teamId: FAKE_TEAM,
+			teams: [OTHER_TEAM],
+		});
+		const own = await createReady();
+		const other = { "Sbx-Team": OTHER_TEAM };
+		const me = await call("GET", "/v1/me", { token: "t_two", headers: other });
+		expect(me.status).toBe(200);
+		expect(me.json.team.id).toBe(OTHER_TEAM);
+		expect(me.json.teams.map((t: Json) => t.id)).toEqual([
+			FAKE_TEAM,
+			OTHER_TEAM,
+		]);
+		const dflt = await call("GET", "/v1/me", { token: "t_two" });
+		expect(dflt.json.team.id).toBe(FAKE_TEAM);
+		// The sandbox of the default team is not visible from the other one.
+		const hidden = await call("GET", sbPath(own), {
+			token: "t_two",
+			headers: other,
+		});
+		expect(hidden.status).toBe(404);
+		const seen = await call("GET", sbPath(own), { token: "t_two" });
+		expect(seen.status).toBe(200);
+		const stranger = await call("GET", "/v1/me", {
+			token: "t_two",
+			headers: { "Sbx-Team": "team_nobody" },
+		});
+		expect(stranger.status).toBe(403);
+		expect(stranger.json.error.code).toBe("team_forbidden");
+		const malformed = await call("GET", "/v1/me", {
+			token: "t_two",
+			headers: { "Sbx-Team": "nope" },
+		});
+		expect(malformed.status).toBe(400);
+		expect(malformed.json.error.code).toBe("validation");
+		expect(api.contractErrors).toEqual([]);
+	});
+
+	it("rejects a team key with another team in Sbx-Team", async () => {
+		const same = await call("GET", "/v1/me", {
+			headers: { "Sbx-Team": FAKE_TEAM },
+		});
+		expect(same.status).toBe(200);
+		const other = await call("GET", "/v1/me", {
+			headers: { "Sbx-Team": OTHER_TEAM },
+		});
+		expect(other.status).toBe(403);
+		expect(other.json.error).toMatchObject({
+			code: "team_forbidden",
+			message: "the API key belongs to another team than Sbx-Team",
+		});
+		// A bad credential is a 401 whatever the team says.
+		const bad = await call("GET", "/v1/me", {
+			token: "nope",
+			headers: { "Sbx-Team": "nope" },
+		});
+		expect(bad.status).toBe(401);
 		expect(api.contractErrors).toEqual([]);
 	});
 

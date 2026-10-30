@@ -40,7 +40,13 @@ export const READ_ONLY_SCOPES = [
 export interface FakePrincipal {
 	kind: "oidc" | "team_key";
 	scopes: string[];
+	/**
+	 * The default team; in a request, the team it acts in (the fake replaces
+	 * it with the team Sbx-Team selected).
+	 */
 	teamId: string;
+	/** oidc: the person's other teams, selectable with Sbx-Team. */
+	teams?: string[];
 	/** oidc: the person; team_key: the creator shown in /v1/me. */
 	userEmail?: string;
 	keyId?: string;
