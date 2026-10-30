@@ -1,0 +1,66 @@
+[
+	{
+		"name": "Gzipped source tarball",
+		"url": "https://www.python.org/ftp/python/3.15.2/Python-3.15.2.tgz",
+		"sha256_sum": "f74e1db0eabd651cd01e4e2a00201bd41866abe74869ab716f9bf33cbbaa0943",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/3/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "XZ compressed source tarball",
+		"url": "https://www.python.org/ftp/python/3.15.2/Python-3.15.2.tar.xz",
+		"sha256_sum": "8b5536d280142ecf6cdfe15d12a21ba1c65e300bbf7b28a8d0cdb849575797de",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/3/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "Windows embeddable package (32-bit)",
+		"url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2-embed-win32.zip",
+		"sha256_sum": "8d20269d378040117c9cec11d1ad6c6d17c6b77774424955ee180a0f49c6b41e",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/1/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "Windows embeddable package (64-bit)",
+		"url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2-embed-amd64.zip",
+		"sha256_sum": "d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/1/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "Windows embeddable package (ARM64)",
+		"url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2-embed-arm64.zip",
+		"sha256_sum": "089eae5e8aba8284c2ce59df008c1dc915af46fd9e8b1227e3a7f315211567c9",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/1/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "Windows installer (32-bit)",
+		"url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2.exe",
+		"sha256_sum": "a1040151c8af7a31dcfa3d4da2648040806dfe86050622166cbebc7747f23027",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/1/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "Windows installer (64-bit)",
+		"url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2-amd64.exe",
+		"sha256_sum": "06e225a228191b0f4d1dcf6905fbb21bf9f6970d13a2ec63137ab9bee76f15aa",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/1/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	},
+	{
+		"name": "Windows installer (ARM64)",
+		"url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2-arm64.exe",
+		"sha256_sum": "a3957667a6305f0fa4c5ce6c73def927ddcad36190b9e27eb4a04e1a9a153c93",
+		"md5_sum": "",
+		"os": "https://www.python.org/api/v2/downloads/os/1/",
+		"release": "https://www.python.org/api/v2/downloads/release/1170/"
+	}
+]

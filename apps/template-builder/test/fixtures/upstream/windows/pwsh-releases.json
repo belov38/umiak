@@ -1,0 +1,69 @@
+[
+	{
+		"tag_name": "v7.7.0-rc.1",
+		"prerelease": true,
+		"draft": false,
+		"assets": []
+	},
+	{
+		"tag_name": "v7.6.9",
+		"prerelease": false,
+		"draft": false,
+		"assets": [
+			{
+				"name": "PowerShell-7.6.9-win-x64.msi",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.9/PowerShell-7.6.9-win-x64.msi",
+				"digest": "sha256:50d33c7494aaf82b987cfd4de3f232d04f91fdd4c0deeca8a669cced3e7cf8f9"
+			},
+			{
+				"name": "PowerShell-7.6.9.msixbundle",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.9/PowerShell-7.6.9.msixbundle",
+				"digest": "sha256:da75c8aa23edda52e888fb586a46b923ab37a7c243719c2e8914b00130c5917a"
+			},
+			{
+				"name": "PowerShell-LTS-7.6.9.msixbundle",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.9/PowerShell-LTS-7.6.9.msixbundle",
+				"digest": "sha256:93c82dd33b98331ed1df91e3f857c2371b716f9b46b431f7a0155416aa395a98"
+			}
+		]
+	},
+	{
+		"tag_name": "v7.5.13",
+		"prerelease": false,
+		"draft": false,
+		"assets": [
+			{
+				"name": "PowerShell-7.5.13-win-x64.msi",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.5.13/PowerShell-7.5.13-win-x64.msi",
+				"digest": "sha256:b61492a06107f04dba8fa9599d0cc8d82dbff9e69807769beb7fcbe05e521966"
+			},
+			{
+				"name": "PowerShell-7.5.13.msixbundle",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.5.13/PowerShell-7.5.13.msixbundle",
+				"digest": "sha256:9a4075deea8cd516b75ea651db73da4ae13e70f4e22deff008bfaf72626fe64c"
+			}
+		]
+	},
+	{
+		"tag_name": "v7.4.22",
+		"prerelease": false,
+		"draft": false,
+		"assets": [
+			{
+				"name": "PowerShell-7.4.22-win-x64.msi",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.4.22/PowerShell-7.4.22-win-x64.msi",
+				"digest": "sha256:78e819df51a672fba8362258a19db0e681452dcee6fee63c60bcb5aa45d1b859"
+			},
+			{
+				"name": "PowerShell-7.4.22.msixbundle",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.4.22/PowerShell-7.4.22.msixbundle",
+				"digest": "sha256:e19132ec55489e2e17cdd2e361a9e7d5dd78a908b32146ad8d86eacdd3aec0c5"
+			},
+			{
+				"name": "PowerShell-LTS-7.4.22.msixbundle",
+				"browser_download_url": "https://github.com/PowerShell/PowerShell/releases/download/v7.4.22/PowerShell-LTS-7.4.22.msixbundle",
+				"digest": "sha256:57bf52633213b14ae279953ac0814f90f84aeb5bb8119d0c6b6fe98bee878ad0"
+			}
+		]
+	}
+]

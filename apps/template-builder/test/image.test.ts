@@ -157,7 +157,11 @@ describe("pinned Ubuntu key", () => {
 	});
 
 	it("matches the sha256 pinned in versions.toml", () => {
-		const recipe = loadRecipe(join(repoRoot, "infra/templates"), "linux");
+		const recipe = loadRecipe(
+			join(repoRoot, "infra/templates"),
+			"linux",
+			"linux",
+		);
 		const sums = readFileSync(join(ubuntuFixtures, "SHA256SUMS"), "utf8");
 		expect(sums).toContain(`${loadVersions(recipe).base.sha256} *${IMAGE}`);
 	});

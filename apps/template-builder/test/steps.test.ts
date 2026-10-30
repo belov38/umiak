@@ -417,7 +417,7 @@ describe("verify.sh", () => {
 
 describe("renderSeed on the real linux recipe", () => {
 	it("renders every step, lib.sh and files/", () => {
-		const recipe = loadRecipe(templates, "linux");
+		const recipe = loadRecipe(templates, "linux", "linux");
 		const dir = mkdtempSync(join(tmpdir(), "sbx-steps-test-"));
 		const agentPackage = join(dir, "agent.tar");
 		writeFileSync(agentPackage, "x");

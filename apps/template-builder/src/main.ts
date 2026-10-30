@@ -26,12 +26,12 @@ import { devCpRegistrar } from "./devcp.ts";
 import { defaultDownloadFetch, fetchBaseImage } from "./image.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
 import { preflight } from "./preflight.ts";
-import { loadRecipe, loadVersions } from "./recipe.ts";
+import { loadRecipe } from "./recipe.ts";
 import { FileRegistry } from "./registry.ts";
 import { pveGuestIo } from "./runner.ts";
 import { makeIso } from "./seed.ts";
 import { defaultSecretFiles, verifyTemplate } from "./verify.ts";
-import { formatVersionsToml, updateVersionsFile } from "./versions-update.ts";
+import { formatRecipeVersions, updateVersionsFile } from "./versions-update.ts";
 
 const USAGE = `usage:
   sbx-tpl preflight [--node <node>]
@@ -323,16 +323,17 @@ async function main(argv: string[]): Promise<number> {
 		case "versions": {
 			if (!arg || extra.length > 0) break;
 			if (values.update) {
-				const { file, changes } = await updateVersionsFile({
+				const { file, changes, warnings } = await updateVersionsFile({
 					templatesDir: TEMPLATES_DIR,
 					slug: arg,
 				});
+				for (const w of warnings) process.stderr.write(`warning: ${w}\n`);
 				out(
 					`${file}\n${changes.length > 0 ? changes.join("\n") : "no changes"}`,
 				);
 			} else {
 				process.stdout.write(
-					formatVersionsToml(loadVersions(loadRecipe(TEMPLATES_DIR, arg))),
+					formatRecipeVersions(loadRecipe(TEMPLATES_DIR, arg)),
 				);
 			}
 			return 0;
