@@ -2466,7 +2466,7 @@
 				"type": "object"
 			},
 			"Operation": {
-				"description": "The running operation, or null",
+				"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds=",
 				"properties": {
 					"createdAt": {
 						"description": "ISO 8601 UTC with milliseconds",
@@ -2564,10 +2564,7 @@
 					"startedAt",
 					"finishedAt"
 				],
-				"type": [
-					"object",
-					"null"
-				]
+				"type": "object"
 			},
 			"PortToken": {
 				"description": "The new token; the old token and its cookies stopped working",
@@ -2677,7 +2674,15 @@
 				"description": "A VM sandbox. Work with it while `state` is `ready`; deleted sandboxes stay readable for 30 days",
 				"properties": {
 					"activeOperation": {
-						"$ref": "#/components/schemas/Operation"
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Operation"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"description": "The running operation, or null"
 					},
 					"activity": {
 						"enum": [
@@ -2988,14 +2993,7 @@
 				"description": "The sandbox now and the operation that was started",
 				"properties": {
 					"operation": {
-						"allOf": [
-							{
-								"$ref": "#/components/schemas/Operation"
-							},
-							{
-								"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
-							}
-						]
+						"$ref": "#/components/schemas/Operation"
 					},
 					"sandbox": {
 						"$ref": "#/components/schemas/Sandbox"
@@ -3011,14 +3009,15 @@
 				"description": "The sandbox and its delete operation; operation is null when it was already deleted",
 				"properties": {
 					"operation": {
-						"allOf": [
+						"anyOf": [
 							{
 								"$ref": "#/components/schemas/Operation"
 							},
 							{
-								"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
+								"type": "null"
 							}
-						]
+						],
+						"description": "The delete operation; null when it was already deleted"
 					},
 					"sandbox": {
 						"$ref": "#/components/schemas/Sandbox"
@@ -3467,14 +3466,7 @@
 				"description": "The new snapshot (creating) and the save_snapshot operation of the source sandbox",
 				"properties": {
 					"operation": {
-						"allOf": [
-							{
-								"$ref": "#/components/schemas/Operation"
-							},
-							{
-								"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
-							}
-						]
+						"$ref": "#/components/schemas/Operation"
 					},
 					"snapshot": {
 						"$ref": "#/components/schemas/Snapshot"
@@ -4820,14 +4812,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"allOf": [
-										{
-											"$ref": "#/components/schemas/Operation"
-										},
-										{
-											"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
-										}
-									]
+									"$ref": "#/components/schemas/Operation"
 								}
 							}
 						},

@@ -1948,7 +1948,7 @@ export interface components {
              */
             to: string;
         };
-        /** @description The running operation, or null */
+        /** @description A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds= */
         Operation: {
             /**
              * Format: date-time
@@ -1984,7 +1984,7 @@ export interface components {
             state: "pending" | "running" | "succeeded" | "failed" | "superseded" | (string & {});
             /** @description Last completed step, for debugging; values may change */
             step: string | null;
-        } | null;
+        };
         /** @description The new token; the old token and its cookies stopped working */
         PortToken: {
             /** @example sbxp_... */
@@ -2020,7 +2020,8 @@ export interface components {
         };
         /** @description A VM sandbox. Work with it while `state` is `ready`; deleted sandboxes stay readable for 30 days */
         Sandbox: {
-            activeOperation: components["schemas"]["Operation"];
+            /** @description The running operation, or null */
+            activeOperation: components["schemas"]["Operation"] | null;
             /** @enum {string} */
             activity: "busy" | "idle" | "unknown" | (string & {});
             /**
@@ -2138,12 +2139,13 @@ export interface components {
         };
         /** @description The sandbox now and the operation that was started */
         SandboxAction: {
-            operation: components["schemas"]["Operation"] & unknown;
+            operation: components["schemas"]["Operation"];
             sandbox: components["schemas"]["Sandbox"];
         };
         /** @description The sandbox and its delete operation; operation is null when it was already deleted */
         SandboxDelete: {
-            operation: components["schemas"]["Operation"] & unknown;
+            /** @description The delete operation; null when it was already deleted */
+            operation: components["schemas"]["Operation"] | null;
             sandbox: components["schemas"]["Sandbox"];
         };
         /** @description Env of the sandbox, names of its secrets and secret files */
@@ -2281,7 +2283,7 @@ export interface components {
         };
         /** @description The new snapshot (creating) and the save_snapshot operation of the source sandbox */
         SnapshotCreate: {
-            operation: components["schemas"]["Operation"] & unknown;
+            operation: components["schemas"]["Operation"];
             snapshot: components["schemas"]["Snapshot"];
         };
         SnapshotList: {
@@ -3158,7 +3160,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Operation"] & unknown;
+                    "application/json": components["schemas"]["Operation"];
                 };
             };
             /** @description `not_found`: no such operation in the team */

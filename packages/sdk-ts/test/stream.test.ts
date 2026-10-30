@@ -4,7 +4,7 @@
 // is followed at once.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClientCore } from "../src/client.ts";
-import { runCommand } from "../src/commands.ts";
+import { Command, runCommand } from "../src/commands.ts";
 import { SbxError } from "../src/errors.ts";
 
 const API = "https://api.example.test";
@@ -200,5 +200,160 @@ describe("command stream reconnects", () => {
 			retryable: false,
 			requestId: "req_9",
 		});
+	});
+
+	it("before the command id is known, the call's retry budget bounds the start", async () => {
+		const { sb, urls } = sandbox(() => unavailable());
+		const started = Date.now();
+		const p = (async () => {
+			for await (const _ of runCommand(sb, "ls", { retryBudgetMs: 1000 })) {
+				// no output
+			}
+		})().catch((e: unknown) => e);
+		await vi.runAllTimersAsync();
+		const err = await p;
+		expect(err).toMatchObject({ code: "agent_unavailable" });
+		expect(Date.now() - started).toBeLessThanOrEqual(1000);
+		expect(urls.every((u) => u.startsWith("POST"))).toBe(true);
+		expect(urls.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("a utf8 frame that overlaps the tracked offset is a protocol error: reattach", async () => {
+		let gets = 0;
+		const { sb, urls } = sandbox((req) => {
+			if (req.method === "POST") {
+				return ndjson({ type: "started", commandId: "cmd_1" }, out(0, "abc"));
+			}
+			gets += 1;
+			return gets === 1
+				? ndjson(
+						{
+							type: "attached",
+							commandId: "cmd_1",
+							stdoutOffset: 3,
+							stderrOffset: 0,
+							encoding: "utf8",
+						},
+						out(1, "bcd"),
+					)
+				: ndjson(
+						{
+							type: "attached",
+							commandId: "cmd_1",
+							stdoutOffset: 3,
+							stderrOffset: 0,
+							encoding: "utf8",
+						},
+						out(3, "d"),
+						{
+							type: "exit",
+							status: "exited",
+							exitCode: 0,
+							signal: null,
+							reason: "none",
+							stdoutOffset: 4,
+							stderrOffset: 0,
+						},
+					);
+		});
+		let text = "";
+		const p = (async () => {
+			for await (const ev of runCommand(sb, "x")) {
+				if (ev.type === "stdout") text += ev.data;
+			}
+		})();
+		await vi.runAllTimersAsync();
+		await p;
+		expect(text).toBe("abcd");
+		expect(urls.filter((u) => u.startsWith("GET"))).toHaveLength(2);
+	});
+
+	it("a base64 frame that overlaps the tracked offset is cut to its new bytes", async () => {
+		const b64 = (t: string) => Buffer.from(t).toString("base64");
+		const { sb } = sandbox((req) =>
+			req.method === "POST"
+				? ndjson(
+						{ type: "started", commandId: "cmd_1" },
+						{ type: "stdout", offset: 0, nextOffset: 3, data: b64("abc") },
+					)
+				: ndjson(
+						{
+							type: "attached",
+							commandId: "cmd_1",
+							stdoutOffset: 3,
+							stderrOffset: 0,
+							encoding: "base64",
+						},
+						{ type: "stdout", offset: 1, nextOffset: 5, data: b64("bcde") },
+						{
+							type: "exit",
+							status: "exited",
+							exitCode: 0,
+							signal: null,
+							reason: "none",
+							stdoutOffset: 5,
+							stderrOffset: 0,
+						},
+					),
+		);
+		const parts: { offset: number; text: string }[] = [];
+		const p = (async () => {
+			for await (const ev of runCommand(sb, "x", { encoding: "base64" })) {
+				if (ev.type === "stdout") {
+					parts.push({
+						offset: ev.offset,
+						text: Buffer.from(ev.data).toString(),
+					});
+				}
+			}
+		})();
+		await vi.runAllTimersAsync();
+		await p;
+		expect(parts).toEqual([
+			{ offset: 0, text: "abc" },
+			{ offset: 3, text: "de" },
+		]);
+	});
+
+	it("follow from the end keeps tailBytes until a stream is attached", async () => {
+		let gets = 0;
+		const { sb, urls } = sandbox(() => {
+			gets += 1;
+			// The first stream is answered but ends before its `attached` frame.
+			return gets === 1
+				? ndjson()
+				: ndjson(
+						{
+							type: "attached",
+							commandId: "cmd_1",
+							stdoutOffset: 9,
+							stderrOffset: 2,
+							encoding: "utf8",
+						},
+						{
+							type: "exit",
+							status: "exited",
+							exitCode: 0,
+							signal: null,
+							reason: "none",
+							stdoutOffset: 9,
+							stderrOffset: 2,
+						},
+					);
+		});
+		const events: unknown[] = [];
+		const p = (async () => {
+			for await (const ev of new Command(sb, "cmd_1").follow({ from: "end" })) {
+				events.push(ev);
+			}
+		})();
+		await vi.runAllTimersAsync();
+		await p;
+		expect(urls).toHaveLength(2);
+		for (const u of urls) {
+			expect(u).toContain("tailBytes=0");
+			expect(u).not.toContain("stdoutOffset");
+		}
+		expect(events).toEqual([expect.objectContaining({ type: "exit" })]);
 	});
 });

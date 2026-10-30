@@ -91,7 +91,9 @@ export const SandboxSchema = z
 			description: "When the TTL deletes the sandbox; null without a TTL",
 		}),
 		idleTimeoutSeconds: z.int().nullable(),
-		activeOperation: OperationSchema.nullable().openapi({
+		// A union, not `.nullable()`: zod-openapi would mark the registered
+		// Operation component itself nullable.
+		activeOperation: z.union([OperationSchema, z.null()]).openapi({
 			description: "The running operation, or null",
 		}),
 		endpoints: z.object({
@@ -140,7 +142,12 @@ export const SandboxActionSchema = z
 	});
 
 export const SandboxDeleteSchema = z
-	.object({ sandbox: SandboxSchema, operation: OperationSchema.nullable() })
+	.object({
+		sandbox: SandboxSchema,
+		operation: z.union([OperationSchema, z.null()]).openapi({
+			description: "The delete operation; null when it was already deleted",
+		}),
+	})
 	.openapi("SandboxDelete", {
 		description:
 			"The sandbox and its delete operation; operation is null when it was already deleted",

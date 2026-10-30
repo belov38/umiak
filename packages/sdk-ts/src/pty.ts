@@ -20,9 +20,9 @@ import {
 	type SandboxRef,
 	STREAM_MAX_FAILURES,
 } from "./commands.ts";
-import { SbxError } from "./errors.ts";
+import { SbxError, UNSUPPORTED_RUNTIME } from "./errors.ts";
 import { newIdempotencyKey } from "./ids.ts";
-import { retryDelayMs } from "./retry.ts";
+import { isRetryable, retryDelayMs } from "./retry.ts";
 
 export const PTY_SUBPROTOCOL = "sbx.pty.v1";
 
@@ -127,6 +127,7 @@ export class Pty {
 			this.#resolveReady = resolve;
 			this.exited.then(() => resolve(), reject);
 		});
+		this.ready.catch(() => {});
 		const { signal } = opts;
 		if (signal?.aborted) {
 			this.#finish(signal.reason);
@@ -149,7 +150,11 @@ export class Pty {
 		return () => this.#listeners.delete(cb);
 	}
 
-	/** Sends input (keystrokes or pasted text). */
+	/**
+	 * Sends input (keystrokes or pasted text). While reconnecting, input is
+	 * queued up to 1 MiB; more throws `pty_input_overflow` (nothing is dropped
+	 * silently).
+	 */
 	write(data: string | Uint8Array): void {
 		if (this.#done) return;
 		const bytes =
@@ -160,7 +165,14 @@ export class Pty {
 			ws.send(bytes as Uint8Array<ArrayBuffer>);
 			return;
 		}
-		if (this.#queued + bytes.length > MAX_QUEUED_INPUT) return;
+		if (this.#queued + bytes.length > MAX_QUEUED_INPUT) {
+			throw new SbxError({
+				status: 0,
+				code: "pty_input_overflow",
+				message: `the PTY is reconnecting and ${this.#queued} bytes of input are queued already (at most ${MAX_QUEUED_INPUT}); write again later`,
+				retryable: true,
+			});
+		}
 		this.#queue.push(bytes);
 		this.#queued += bytes.length;
 	}
@@ -244,14 +256,32 @@ export class Pty {
 		if (this.#done) return;
 		let progressed = false;
 		let immediate = false;
+		let opened = false;
 		this.#attached = false;
-		// Node (undici) and Bun take headers in the second argument.
-		const ws = new WebSocket(target.url, {
-			protocols: [PTY_SUBPROTOCOL],
-			headers: target.headers,
-		} as unknown as string[]);
+		let ws: WebSocket;
+		try {
+			// Node (undici) and Bun take headers in the second argument.
+			ws = new WebSocket(target.url, {
+				protocols: [PTY_SUBPROTOCOL],
+				headers: target.headers,
+			} as unknown as string[]);
+		} catch (err) {
+			this.#finish(
+				new SbxError({
+					status: 0,
+					code: UNSUPPORTED_RUNTIME,
+					message: `cannot open the PTY WebSocket: ${err instanceof Error ? err.message : String(err)}`,
+					retryable: false,
+					cause: err,
+				}),
+			);
+			return;
+		}
 		ws.binaryType = "arraybuffer";
 		this.#ws = ws;
+		ws.onopen = () => {
+			opened = true;
+		};
 		ws.onmessage = (ev: MessageEvent) => {
 			if (this.#ws !== ws) return;
 			if (typeof ev.data !== "string") {
@@ -314,8 +344,45 @@ export class Pty {
 				);
 				return;
 			}
+			if (!opened) {
+				// The handshake was refused; the WebSocket API hides the answer.
+				void this.#probe().then((final) => {
+					if (final === null) this.#retry(false, false);
+					else this.#finish(final);
+				});
+				return;
+			}
 			this.#retry(progressed, immediate || ev.code === 1012);
 		};
+	}
+
+	/**
+	 * After a refused handshake: the same route as plain HTTP shows why. 426
+	 * (upgrade required) means the request itself is fine: retry. A final
+	 * answer (401, 403, 404, ...) ends the PTY; null: retry.
+	 */
+	async #probe(): Promise<SbxError | null> {
+		try {
+			await this.#core.raw.GET(
+				"/v1/sandboxes/{sandbox}/ptys/{command}/connect",
+				{
+					params: {
+						path: { sandbox: this.command.sandboxId, command: this.command.id },
+						query: { offset: this.#offset },
+					},
+					retryBudgetMs: 0,
+				},
+			);
+			return null;
+		} catch (err) {
+			if (!(err instanceof SbxError)) return null;
+			if (err.status === 426) return null;
+			if (isRetryable(err, true)) {
+				this.#lastError = err;
+				return null;
+			}
+			return err;
+		}
 	}
 
 	#retry(progressed: boolean, immediate: boolean) {

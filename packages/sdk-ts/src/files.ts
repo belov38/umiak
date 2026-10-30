@@ -261,10 +261,20 @@ export class Files {
 	}
 
 	/** Resumable chunked upload (S7 §11.1); returns the committed file. */
-	async upload(
+	upload(
 		path: string,
 		src: UploadSource,
 		opts: UploadOptions = {},
+	): Promise<FileInfo> {
+		return this.#upload(path, src, opts, 0);
+	}
+
+	/** `restarts`: new uploads so far after the agent lost one. */
+	async #upload(
+		path: string,
+		src: UploadSource,
+		opts: UploadOptions,
+		restarts: number,
 	): Promise<FileInfo> {
 		const call = callOf(opts);
 		const source = await openSource(src);
@@ -296,6 +306,8 @@ export class Files {
 					if (chunk.length === 0 && sentAny) break;
 				}
 				let serverOffset: number;
+				// The failure of this round is counted (and waited for) already.
+				let counted = false;
 				try {
 					const { data, response } = await this.#raw.PUT(UPLOAD, {
 						params: {
@@ -316,6 +328,7 @@ export class Files {
 							throw err;
 						}
 						failures += 1;
+						counted = true;
 						if (failures >= MAX_FAILURES) throw err;
 						await sleep(retryDelayMs(err, failures - 1), call.signal);
 						const known = await this.#headOffset(uploadPath, call);
@@ -341,10 +354,33 @@ export class Files {
 					acked = serverOffset;
 					failures = 0;
 				} else if (serverOffset === chunkStart) {
-					// Nothing of the chunk arrived; repeat it.
+					// Nothing of the chunk arrived; repeat it after a backoff.
+					if (!counted) {
+						failures += 1;
+						if (failures >= MAX_FAILURES) {
+							throw new SbxError({
+								status: 0,
+								code: "upload_offset_mismatch",
+								message: `the upload stays at ${serverOffset} after ${failures} attempts`,
+								retryable: false,
+								details: { offset: serverOffset },
+							});
+						}
+						await sleep(retryDelayMs(undefined, failures - 1), call.signal);
+					}
 				} else if (serverOffset === 0 && source.seekable) {
 					// The agent lost the upload: start again from the first byte.
-					return await this.upload(path, src, opts);
+					if (restarts + 1 >= MAX_FAILURES) {
+						throw new SbxError({
+							status: 0,
+							code: "upload_offset_mismatch",
+							message: `the agent lost the upload ${restarts + 1} times`,
+							retryable: false,
+							details: { offset: 0 },
+						});
+					}
+					await sleep(retryDelayMs(undefined, restarts), call.signal);
+					return await this.#upload(path, src, opts, restarts + 1);
 				} else {
 					throw new SbxError({
 						status: 0,
@@ -429,10 +465,20 @@ export class Files {
 						parseAs: "stream",
 						...call,
 					});
-					if (response.status === 200 && received > 0) {
-						// The file changed (If-Range did not match): start again.
+					if (
+						received > 0 &&
+						(response.status !== 206 || rangeStart(response) !== received)
+					) {
+						// The file changed (If-Range did not match), or the range is
+						// not the one asked for: start again from the first byte.
 						await sink.reset();
 						received = 0;
+						if (response.status === 206) {
+							await (data as ReadableStream | null | undefined)?.cancel();
+							etag = null;
+							total = null;
+							continue;
+						}
 					}
 					etag = response.headers.get("ETag") ?? etag;
 					total = totalSize(response) ?? total;
@@ -522,6 +568,8 @@ export class Files {
 						bodySerializer: rawBody,
 						headers: OCTET,
 						...call,
+						// The whole archive is the unit of retry (withRetry below).
+						retryBudgetMs: 0,
 					});
 					await tar.done;
 					return data;
@@ -564,6 +612,7 @@ export class Files {
 						},
 						parseAs: "stream",
 						...call,
+						retryBudgetMs: 0,
 					});
 					const body = data as ReadableStream<Uint8Array> | null | undefined;
 					if (!body) throw broken("the archive answer has no body");
@@ -628,6 +677,12 @@ function mismatchOffset(err: unknown): number | null {
 	}
 	const v = Number(err.details.offset);
 	return Number.isFinite(v) ? v : null;
+}
+
+/** First byte of a 206 answer (`Content-Range: bytes N-M/T`), else null. */
+function rangeStart(res: Response): number | null {
+	const m = res.headers.get("Content-Range")?.match(/^bytes (\d+)-/);
+	return m?.[1] === undefined ? null : Number(m[1]);
 }
 
 /** Size of the whole file from Content-Range (206) or Content-Length (200). */

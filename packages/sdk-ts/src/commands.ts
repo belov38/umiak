@@ -13,7 +13,12 @@ import { SbxError } from "./errors.ts";
 import type { components } from "./gen/v1.d.ts";
 import { newIdempotencyKey } from "./ids.ts";
 import { ndjsonObjects } from "./ndjson.ts";
-import { isRetryable, retryDelayMs, sleep } from "./retry.ts";
+import {
+	DEFAULT_RETRY_BUDGET_MS,
+	isRetryable,
+	retryDelayMs,
+	sleep,
+} from "./retry.ts";
 
 export type CommandData = components["schemas"]["Command"];
 export type Encoding = "utf8" | "base64";
@@ -387,7 +392,7 @@ export function runCommand<E extends Encoding = "utf8">(
 		offsets: { stdoutOffset: 0, stderrOffset: 0 },
 		call,
 		...(opts.onStart ? { onStart: opts.onStart } : {}),
-		async start(signal) {
+		async start(signal, retryBudgetMs) {
 			const { data, response } = await sb.core.raw.POST(COMMANDS, {
 				params: { path: { sandbox: sb.id } },
 				body: {
@@ -399,6 +404,7 @@ export function runCommand<E extends Encoding = "utf8">(
 				parseAs: "stream" as const,
 				...call,
 				signal,
+				retryBudgetMs,
 			});
 			const body = data as ReadableStream<Uint8Array> | null | undefined;
 			if (body === null || body === undefined) {
@@ -444,9 +450,13 @@ interface StreamPlan<E extends Encoding> {
 	commandId?: string;
 	/** First /stream only: start each stream this many bytes before its end. */
 	tailBytes?: number;
-	/** Opens the first stream (run: POST /commands). */
+	/**
+	 * Opens the first stream (run: POST /commands) with the transport budget
+	 * left of the start phase.
+	 */
 	start?: (
 		signal: AbortSignal,
+		retryBudgetMs: number,
 	) => Promise<{ body: ReadableStream<Uint8Array>; commandId: string | null }>;
 	onStart?: (command: Command) => void;
 }
@@ -479,6 +489,10 @@ async function* resumable<E extends Encoding>(
 	let tailBytes = plan.tailBytes;
 	let failures = 0;
 	let lastError: unknown;
+	// Until the command id is known, every attempt is a (keyed) POST: the
+	// start phase as a whole is bounded by the call's retry budget.
+	const startBudget = plan.call.retryBudgetMs ?? DEFAULT_RETRY_BUDGET_MS;
+	const startedAt = Date.now();
 	for (;;) {
 		signal?.throwIfAborted();
 		const attempt = new AbortController();
@@ -490,7 +504,8 @@ async function* resumable<E extends Encoding>(
 			let body: ReadableStream<Uint8Array>;
 			if (commandId === undefined) {
 				if (!plan.start) throw new Error("no command to stream");
-				const r = await plan.start(attempt.signal);
+				const left = Math.max(0, startBudget - (Date.now() - startedAt));
+				const r = await plan.start(attempt.signal, left);
 				body = r.body;
 				if (r.commandId !== null) {
 					commandId = r.commandId;
@@ -502,7 +517,6 @@ async function* resumable<E extends Encoding>(
 					tailBytes,
 				});
 			}
-			tailBytes = undefined;
 			for await (const f of ndjsonObjects(body, {
 				idleTimeoutMs: sb.core.streamIdleTimeoutMs,
 				signal: attempt.signal,
@@ -516,20 +530,35 @@ async function* resumable<E extends Encoding>(
 						break;
 					case "attached":
 						setOffsets(offsets, f);
+						// From here on, reattach from the offsets.
+						tailBytes = undefined;
 						break;
 					case "stdout":
 					case "stderr":
 					case "pty": {
 						const key = OFFSET_KEY[f.type];
+						const at = offsets[key] ?? 0;
+						const start = Number(f.offset);
 						const next = Number(f.nextOffset);
-						if (next <= (offsets[key] ?? 0)) break; // already delivered
+						if (next <= at) break; // already delivered
+						let data = decode(String(f.data), plan.encoding);
+						if (start !== at) {
+							// base64 frames can be cut at the tracked byte; a utf8 frame
+							// cannot (its text is not bytes), and a gap is never right.
+							if (start > at || plan.encoding !== "base64") {
+								throw protocolError(
+									`${f.type} frame at ${start}, expected ${at}`,
+								);
+							}
+							data = (data as Uint8Array).subarray(at - start) as typeof data;
+						}
 						offsets[key] = next;
 						progressed = true;
 						failures = 0;
 						yield {
 							type: f.type,
-							data: decode(String(f.data), plan.encoding),
-							offset: Number(f.offset),
+							data,
+							offset: at,
 							nextOffset: next,
 						} as OutputEvent<E>;
 						break;
@@ -592,6 +621,12 @@ async function* resumable<E extends Encoding>(
 			reconnect && failures <= 1
 				? 0
 				: retryDelayMs(lastError, Math.max(0, failures - 1));
+		if (
+			commandId === undefined &&
+			(startBudget <= 0 || Date.now() + wait - startedAt > startBudget)
+		) {
+			throw lastError;
+		}
 		lastError = undefined;
 		if (wait > 0) await sleep(wait, signal);
 	}
@@ -652,6 +687,16 @@ function exitEvent(f: Frame): ExitEvent {
 	};
 	if (typeof f.ptyOffset === "number") ev.ptyOffset = f.ptyOffset;
 	return ev;
+}
+
+/** Frames that do not fit the offsets: reattach from the tracked offsets. */
+function protocolError(message: string): SbxError {
+	return new SbxError({
+		status: 0,
+		code: "protocol_error",
+		message: `command stream: ${message}`,
+		retryable: true,
+	});
 }
 
 /** An `error` frame (NDJSON or PTY) as SbxError (status 0: the answer itself was 200/101). */

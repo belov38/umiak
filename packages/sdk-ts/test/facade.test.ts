@@ -212,8 +212,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		});
 		const posts = () => api.requests.filter((r) => r.method === "POST");
 		const before = posts().length;
-		// No transport retries: the exec loop itself repeats the POST.
-		const r = await sb.exec("echo once-$((20+22))", { retryBudgetMs: 0 });
+		const r = await sb.exec("echo once-$((20+22))");
 		expect(r.stdout).toBe("once-42\n");
 		expect(r.exitCode).toBe(0);
 		const command = sb.command(r.command.id);
@@ -418,6 +417,65 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		expect(ranged.at(-1)?.headers.get("if-range")).toBeTruthy();
 	});
 
+	it("upload without transport retries resumes from the offset of HEAD", async () => {
+		const data = randomBytes(9 * 1024 * 1024);
+		let chunkPuts = 0;
+		api.intercept(async (req, next) => {
+			const p = new URL(req.url).pathname;
+			if (req.method !== "PUT" || !p.includes("/files/uploads/")) return null;
+			chunkPuts += 1;
+			if (chunkPuts !== 2) return null;
+			const res = await next(req);
+			await res.body?.cancel();
+			throw new TypeError("fetch failed (test: answer lost)");
+		});
+		const from = api.requests.length;
+		const info = await sb.files.upload("big/resumed.bin", data, {
+			retryBudgetMs: 0,
+		});
+		expect(info.sizeBytes).toBe(data.length);
+		const mine = api.requests.slice(from);
+		const head = mine.findIndex(
+			(r) => r.method === "HEAD" && r.path.includes("/files/uploads/"),
+		);
+		expect(head).toBeGreaterThan(0);
+		// After HEAD the upload goes on with the third chunk: chunk 2 is not sent again.
+		const putsAfter = mine
+			.slice(head)
+			.filter((r) => r.method === "PUT")
+			.map((r) => new URL(r.path, api.url).searchParams.get("offset"));
+		expect(putsAfter).toEqual([String(8 * 1024 * 1024)]);
+		expect(sha256(await sb.files.readBytes("big/resumed.bin"))).toBe(
+			sha256(data),
+		);
+	});
+
+	it("download restarts when the file changed between the break and the resume", async () => {
+		const first = randomBytes(2 * 1024 * 1024);
+		const second = randomBytes(3 * 1024 * 1024);
+		await sb.files.writeBytes("big/changing.bin", first);
+		// A client without the hooks writes the new version while the first
+		// answer is cut; the resume's If-Range no longer matches.
+		const plain = new Sbx({ baseUrl: api.url, apiKey: api.secret, env: {} });
+		const other = await plain.sandboxes.get(sb.slug);
+		api.intercept(async (req, next) => {
+			const p = new URL(req.url).pathname;
+			if (req.method !== "GET" || !p.endsWith("/files/content")) return null;
+			const res = cutAfter(await next(req), 1024 * 1024);
+			await new Promise((r) => setTimeout(r, 20)); // a later mtime
+			await other.files.writeBytes("big/changing.bin", second);
+			return res;
+		});
+		const dest = join(tmp, "changing.bin");
+		const got = await sb.files.download("big/changing.bin", dest);
+		expect(got.sizeBytes).toBe(second.length);
+		expect(sha256(await readFile(dest))).toBe(sha256(second));
+		const gets = api.requests.filter(
+			(r) => r.method === "GET" && r.path.includes("big%2Fchanging.bin"),
+		);
+		expect(gets.at(-1)?.headers.get("range")).toBe(`bytes=${1024 * 1024}-`);
+	});
+
 	it("uploadDir and downloadDir move a directory tree through tar.gz", async () => {
 		const src = join(tmp, "tree");
 		await mkdir(join(src, "sub", "deeper"), { recursive: true });
@@ -454,6 +512,23 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		expect((await sb.ports.list()).hosted).toEqual([]);
 	});
 
+	it("pty: a refused handshake (403 before the upgrade) ends at once", async () => {
+		const pty = await sb.pty({ command: "sleep 30" });
+		const readOnly = new Sbx({
+			baseUrl: api.url,
+			apiKey: await api.key(["sandboxes:read"]),
+			env: {},
+		});
+		const view = await readOnly.sandboxes.get(sb.slug);
+		const started = Date.now();
+		const err = await view.connectPty(pty.command.id).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toMatchObject({ status: 403, code: "forbidden" });
+		expect(Date.now() - started).toBeLessThan(2000);
+		await pty.kill({ graceMs: 0 });
+		pty.close();
+	});
+
 	it("pty: echo, a dropped socket reconnects by offset without loss, exit", async () => {
 		const pty = await sb.pty({
 			cols: 100,
@@ -485,8 +560,6 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		expect(exit).toMatchObject({ type: "exit", exitCode: 0 });
 		expect(out).toBe("got hello\ngot bye\n");
 		expect(exit.ptyOffset).toBe(out.length);
-		const connects = api.requests.length; // WebSockets bypass fetch
-		expect(connects).toBeGreaterThan(0);
 		expect(api.agent.ptySizes(coreCommandId(pty.command.id))).toContainEqual({
 			cols: 120,
 			rows: 40,
@@ -523,6 +596,36 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		expect((await sbx.sandboxes.get(sb.slug)).id).toBe(sb.id);
 		expect(await sbx.me()).toBeTruthy();
 		expect((await sbx.templates()).length).toBeGreaterThan(0);
+	});
+
+	it("snapshots.create({wait}) throws the error of a failed operation", async () => {
+		const p = sbx.snapshots
+			.create({ sandbox: sb.slug, name: `snap-${process.pid}` }, { wait: true })
+			.catch((e: unknown) => e);
+		const { id } = await api.sandboxRow(sb.slug);
+		const opId = await until(async () => {
+			const r = await db.pool.query<{ id: string }>(
+				"SELECT id FROM runtime.operations WHERE sandbox_id = $1 AND kind = 'save_snapshot'",
+				[id],
+			);
+			return r.rows[0]?.id;
+		});
+		await new Promise((r) => setTimeout(r, 300));
+		await db.pool.query(
+			`UPDATE runtime.operations
+			 SET state = 'failed', error_code = 'snapshot_failed', error_message = 'disk full',
+			     retryable = false, started_at = now(), finished_at = now()
+			 WHERE id = $1`,
+			[opId],
+		);
+		const err = await p;
+		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toMatchObject({
+			code: "snapshot_failed",
+			message: "disk full",
+			retryable: false,
+			details: { kind: "save_snapshot", state: "failed" },
+		});
 	});
 
 	it("delete sends Sbx-Confirm-Delete with the sandbox id", async () => {

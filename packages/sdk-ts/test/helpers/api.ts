@@ -25,6 +25,8 @@ export interface TestApi {
 	url: string;
 	/** Secret of a team key with every scope. */
 	secret: string;
+	/** A new key of the team with only these scopes. */
+	key(scopes: string[]): Promise<string>;
 	env: ServiceEnv;
 	agent: FakeAgent;
 	deps: ApiDeps;
@@ -102,6 +104,13 @@ export async function startTestApi(db: TestDatabase): Promise<TestApi> {
 	return {
 		url,
 		secret,
+		key: async (scopes) =>
+			(
+				await issueApiKey(deps.identity, {
+					teamId,
+					scopes: scopes as never,
+				})
+			).secret,
 		env,
 		agent,
 		deps,

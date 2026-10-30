@@ -28,11 +28,10 @@ import {
 	type PtyConnectOptions,
 	type PtyOptions,
 } from "./pty.ts";
+import { DEFAULT_RETRY_BUDGET_MS } from "./retry.ts";
 
 export type SandboxData = components["schemas"]["Sandbox"];
-/** An Operation (`op_...`); the document marks the schema nullable. */
 export type OperationData = components["schemas"]["Operation"];
-type Operation = NonNullable<OperationData>;
 export type HostedPort = components["schemas"]["HostedPort"];
 export type HostedPortWrite = components["schemas"]["HostedPortWrite"];
 export type SandboxPorts = components["schemas"]["SandboxPorts"];
@@ -63,6 +62,8 @@ export interface HostOptions extends CallOptions {
 export const READY_TIMEOUT_MS = 300_000;
 /** Seconds of one long-poll (the api allows up to 60). */
 const POLL_SECONDS = 30;
+/** A long-poll request is given up this long after its waitSeconds. */
+const POLL_MARGIN_MS = 15_000;
 /** Sandbox states that end a wait for `ready` with SandboxFailedError. */
 const FAILED_STATES = new Set(["error", "deleting", "deleted", "stopped"]);
 const FINAL_OPERATION_STATES = new Set(["succeeded", "failed", "superseded"]);
@@ -161,20 +162,19 @@ export class Sandbox implements SandboxRef {
 			if (left <= 0) {
 				throw waitTimeout(`sandbox ${this.slug} is still ${this.data.state}`);
 			}
+			const waitSeconds = pollSeconds(left);
 			// Answers at once when the state is already ready, stopped or final.
-			const { data } = await this.core.raw.GET(SANDBOX, {
-				params: {
-					...this.#path(),
-					query: {
-						waitFor: "ready,stopped",
-						waitSeconds: Math.max(
-							1,
-							Math.min(POLL_SECONDS, Math.ceil(left / 1000)),
-						),
+			const data = await longPoll(opts, waitSeconds, left, async (call) => {
+				const r = await this.core.raw.GET(SANDBOX, {
+					params: {
+						...this.#path(),
+						query: { waitFor: "ready,stopped", waitSeconds },
 					},
-				},
-				...callOf(opts),
+					...call,
+				});
+				return r.data;
 			});
+			if (data === undefined) continue;
 			this.data = data;
 			const state = data.state;
 			if (state === "ready") return this;
@@ -194,7 +194,7 @@ export class Sandbox implements SandboxRef {
 	async waitForOperation(
 		op: string | { id: string },
 		opts: WaitOptions = {},
-	): Promise<Operation> {
+	): Promise<OperationData> {
 		return waitForOperation(this.core, op, opts);
 	}
 
@@ -236,10 +236,7 @@ export class Sandbox implements SandboxRef {
 		return connectPty(this, new Command(this, id), opts);
 	}
 
-	/**
-	 * Stops the sandbox. Returns the stop operation (null if there is none);
-	 * `wait`: until it is final.
-	 */
+	/** Stops the sandbox; returns the stop operation; `wait`: until it is final. */
 	async stop(opts: ActionOptions = {}): Promise<OperationData> {
 		const { data } = await this.core.raw.POST(`${SANDBOX}/stop`, {
 			params: this.#path(),
@@ -284,7 +281,7 @@ export class Sandbox implements SandboxRef {
 	 * `Sbx-Confirm-Delete` to this sandbox's id. Returns the delete operation,
 	 * or null when it was already deleted; `wait`: until it is final.
 	 */
-	async delete(opts: ActionOptions = {}): Promise<OperationData> {
+	async delete(opts: ActionOptions = {}): Promise<OperationData | null> {
 		const { data } = await this.core.raw.DELETE(SANDBOX, {
 			params: this.#path(),
 			headers: { "Sbx-Confirm-Delete": this.id },
@@ -292,14 +289,12 @@ export class Sandbox implements SandboxRef {
 		});
 		this.data = data.sandbox;
 		const op = data.operation;
-		if (op === null || !opts.wait) return op;
-		const done = await this.waitForOperation(op, waitOpts(opts));
-		await this.refresh(callOf(opts));
-		return done;
+		if (op === null) return null;
+		return this.#after({ sandbox: data.sandbox, operation: op }, opts);
 	}
 
 	/** The same as `delete` (S7 §15.4: a delete needs no stop first). */
-	stopAndDelete(opts: ActionOptions = {}): Promise<OperationData> {
+	stopAndDelete(opts: ActionOptions = {}): Promise<OperationData | null> {
 		return this.delete(opts);
 	}
 
@@ -309,7 +304,7 @@ export class Sandbox implements SandboxRef {
 	): Promise<OperationData> {
 		this.data = data.sandbox;
 		const op = data.operation;
-		if (op === null || !opts.wait) return op;
+		if (!opts.wait) return op;
 		const done = await this.waitForOperation(op, waitOpts(opts));
 		await this.refresh(callOf(opts));
 		return done;
@@ -347,7 +342,7 @@ export async function waitForOperation(
 	core: ClientCore,
 	op: string | { id: string },
 	opts: WaitOptions = {},
-): Promise<Operation> {
+): Promise<OperationData> {
 	const id = typeof op === "string" ? op : op.id;
 	const { signal } = opts;
 	const deadline =
@@ -358,26 +353,50 @@ export async function waitForOperation(
 		signal?.throwIfAborted();
 		const left = deadline - Date.now();
 		if (left <= 0) throw waitTimeout(`operation ${id} is not final yet`);
-		const { data } = await core.raw.GET("/v1/operations/{operation}", {
-			params: {
-				path: { operation: id },
-				query: {
-					waitSeconds: Math.max(
-						1,
-						Math.min(POLL_SECONDS, Math.ceil(left / 1000)),
-					),
-				},
-			},
-			...callOf(opts),
-		});
-		if (data === null) {
-			throw new SbxError({
-				status: 200,
-				code: "unexpected_response",
-				message: `GET /v1/operations/${id} answered null`,
-				retryable: false,
+		const waitSeconds = pollSeconds(left);
+		const data = await longPoll(opts, waitSeconds, left, async (call) => {
+			const r = await core.raw.GET("/v1/operations/{operation}", {
+				params: { path: { operation: id }, query: { waitSeconds } },
+				...call,
 			});
+			return r.data;
+		});
+		if (data !== undefined && FINAL_OPERATION_STATES.has(data.state)) {
+			return data;
 		}
-		if (FINAL_OPERATION_STATES.has(data.state)) return data;
+	}
+}
+
+function pollSeconds(leftMs: number): number {
+	return Math.max(1, Math.min(POLL_SECONDS, Math.ceil(leftMs / 1000)));
+}
+
+/**
+ * One long-poll request. It is given up (undefined) waitSeconds + 15 s after
+ * it started, on top of the caller's signal, so a connection that hangs
+ * silently does not stall the wait; its transport retries fit in the time
+ * left of the wait.
+ */
+async function longPoll<T>(
+	opts: WaitOptions,
+	waitSeconds: number,
+	leftMs: number,
+	send: (call: CallOptions) => Promise<T>,
+): Promise<T | undefined> {
+	const timeout = AbortSignal.timeout(waitSeconds * 1000 + POLL_MARGIN_MS);
+	const signal =
+		opts.signal === undefined
+			? timeout
+			: AbortSignal.any([opts.signal, timeout]);
+	const retryBudgetMs = Math.min(
+		opts.retryBudgetMs ?? DEFAULT_RETRY_BUDGET_MS,
+		Math.max(0, leftMs),
+	);
+	try {
+		return await send({ signal, retryBudgetMs });
+	} catch (err) {
+		if (opts.signal?.aborted) throw opts.signal.reason;
+		if (timeout.aborted) return undefined;
+		throw err;
 	}
 }

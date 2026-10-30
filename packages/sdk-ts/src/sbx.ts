@@ -16,6 +16,7 @@ import {
 	type SbxOptions,
 } from "./client.ts";
 import { callOf } from "./commands.ts";
+import { SbxError } from "./errors.ts";
 import type { components } from "./gen/v1.d.ts";
 import { newIdempotencyKey } from "./ids.ts";
 import { paginate } from "./pages.ts";
@@ -138,8 +139,9 @@ export class Sbx {
 					...callOf(o),
 					idempotencyKey: o.idempotencyKey ?? newIdempotencyKey(),
 				});
-				if (!o.wait || data.operation === null) return data.snapshot;
-				await waitForOperation(core, data.operation, waitOf(o));
+				if (!o.wait) return data.snapshot;
+				const op = await waitForOperation(core, data.operation, waitOf(o));
+				if (op.state !== "succeeded") throw operationFailed(op);
 				return this.snapshots.get(input.name, callOf(o));
 			},
 			get: async (name, o = {}) => {
@@ -198,6 +200,18 @@ export class Sbx {
 		const { data } = await this.raw.GET("/v1/sizes", callOf(opts));
 		return data.data;
 	}
+}
+
+/** The error of an operation that did not succeed (failed or superseded). */
+function operationFailed(op: OperationData): SbxError {
+	const e = op.error;
+	return new SbxError({
+		status: 0,
+		code: e?.code ?? `operation_${op.state}`,
+		message: e?.message ?? `operation ${op.id} (${op.kind}) is ${op.state}`,
+		retryable: e?.retryable ?? false,
+		details: { operationId: op.id, kind: op.kind, state: op.state },
+	});
 }
 
 function waitOf(o: CallOptions): WaitOptions {
