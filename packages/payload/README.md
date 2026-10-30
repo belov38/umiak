@@ -130,6 +130,25 @@ Errors are `APIError(code, 400)` (message = code) or Payload
 - `sizes`: `slug` cannot change; a size named by a template (`defaultSize`,
   `allowedSizes`) or a pool target cannot be deleted (`size_in_use`).
 
+## ConfigReader (S8 §7, §8)
+
+- `PayloadConfigReader({payload, listen?: {databaseUrl, reconnectDelayMs?}, ttlMs = 5000})`
+  — `ConfigReader` of `@sbx/config` over `templates`, `sizes`, `pool-targets`,
+  `teams.quota` and the global `platform-defaults`. `start()` opens a
+  dedicated connection with `LISTEN sbx_config` (application name
+  `sbx-config-listener`; rejects if the first connect fails, reconnects by
+  itself with a growing delay); any notification and every (re)established
+  LISTEN drops the cache. Without `listen` only `ttlMs` applies. `close()`.
+- `templates()`/`sizes()`: `sortOrder`, then slug. Template defaults as in
+  `StaticConfigReader` (`name` = slug, `loginUser` `user`, capabilities
+  `exec, files, ssh`).
+- `teamQuota(id)`: empty team fields take `platform-defaults.defaultQuota`
+  (an empty default field takes the PoC quota 3 / 6144 / 10); a zero is a
+  value. An unknown or deleted team, or an id that is not a UUID, gets zeros.
+- `defaults()` is never cached (C7: `routes.lookup`).
+- The contract suite is `runConfigReaderContract` of `@sbx/config/testing`
+  (`test/config-reader.test.ts`).
+
 ## Migrations
 
 - Apply: `DATABASE_URL=… PAYLOAD_SECRET=… node packages/payload/src/migrate.ts`

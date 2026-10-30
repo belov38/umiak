@@ -457,20 +457,23 @@ importers:
       '@sbx/auth':
         specifier: workspace:*
         version: link:../auth
+      '@sbx/config':
+        specifier: workspace:*
+        version: link:../config
       graphql:
         specifier: 16.14.2
         version: 16.14.2
       payload:
         specifier: 3.92.1
         version: 3.92.1(graphql@16.14.2)(supports-color@10.2.2)(typescript@7.0.2)
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
     devDependencies:
       '@sbx/db':
         specifier: workspace:*
         version: link:../db
       '@types/pg':
-        specifier: 8.23.1
-        version: 8.23.1
-      pg:
         specifier: 8.23.1
         version: 8.23.1
       pg-boss:

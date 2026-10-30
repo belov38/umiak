@@ -17,13 +17,14 @@
 	"dependencies": {
 		"@payloadcms/db-postgres": "3.92.1",
 		"@sbx/auth": "workspace:*",
+		"@sbx/config": "workspace:*",
 		"graphql": "16.14.2",
-		"payload": "3.92.1"
+		"payload": "3.92.1",
+		"pg": "8.23.1"
 	},
 	"devDependencies": {
 		"@sbx/db": "workspace:*",
 		"@types/pg": "8.23.1",
-		"pg": "8.23.1",
 		"pg-boss": "12.38.0"
 	}
 }

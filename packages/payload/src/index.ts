@@ -12,6 +12,10 @@ export {
 	type SbxCustomConfig,
 	type SbxPayloadOptions,
 } from "./config.ts";
+export {
+	PayloadConfigReader,
+	type PayloadConfigReaderOptions,
+} from "./config-reader.ts";
 export { dbPool } from "./db.ts";
 export {
 	AUTH_HEADERS,
