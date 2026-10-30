@@ -100,6 +100,7 @@ def test_exec_collects_stdout_stderr_exit_code(state: dict[str, Any]) -> None:
     r = sb.exec("echo out; echo err >&2; exit 3", env={"A": "1"})
     assert (r.stdout, r.stderr, r.exit_code) == ("out\n", "err\n", 3)
     assert not r.stdout_truncated and not r.stderr_truncated
+    assert (r.stdout_from, r.stderr_from, r.output_truncated) == (0, 0, None)
     assert r.command.status == "exited"
     assert r.command.mode == "stream"
     assert r.command.env_keys == ["A"]
@@ -113,6 +114,9 @@ def test_exec_keeps_the_last_4_mib(state: dict[str, Any]) -> None:
     assert 4 * MiB - 70_000 < len(r.stdout) <= 4 * MiB
     assert r.stdout.endswith("aaa\nend\n")
     assert not r.stderr_truncated
+    # The tail starts where the dropped output ends: from + its bytes = the size.
+    assert r.stdout_from == 5_000_000 + 1 + 4 - len(r.stdout.encode())
+    assert r.stderr_from == 0
 
 
 def test_exec_after_a_503_is_retried_with_the_same_key_and_starts_once(
@@ -206,6 +210,22 @@ def test_a_silent_stream_is_reopened_from_its_offsets(
     events = list(s.run("for i in $(seq 1 50); do echo idle-$i; done"))
     assert join_output(events)["stdout"] == "".join(f"idle-{i}\n" for i in range(1, 51))
     assert time.monotonic() - t0 < 10
+
+
+def test_command_wait_and_follow_accept_a_timeout(state: dict[str, Any]) -> None:
+    sb = sandbox(state)
+    c = sb.start("sleep 30")
+    t0 = time.monotonic()
+    with pytest.raises(SbxError) as e:
+        c.wait(timeout=0.5)
+    assert e.value.code == "wait_timeout"
+    assert time.monotonic() - t0 < 5
+    with pytest.raises(SbxError) as e2:
+        for _ in c.follow(timeout=0.5):
+            pass
+    assert e2.value.code == "wait_timeout"
+    c.kill(grace_ms=0)
+    assert c.wait(timeout=10).status == "killed"
 
 
 def test_breaking_out_of_run_does_not_kill_the_command(state: dict[str, Any]) -> None:
@@ -313,6 +333,23 @@ def test_upload_without_transport_retries_resumes_from_head(
     after = [query(r["path"])["offset"][0] for r in mine[head:] if r["method"] == "PUT"]
     assert after == [str(8 * MiB)]
     assert sha256(sb.files.read_bytes("big/resumed.bin")) == sha256(data)
+
+
+def test_download_to_a_path_keeps_dest_when_it_fails(
+    api: TestApi, state: dict[str, Any], tmp_path: Path
+) -> None:
+    sb = sandbox(state)
+    dest = tmp_path / "keep.txt"
+    dest.write_text("old content\n")
+    with pytest.raises(SbxError) as e:
+        sb.files.download("no/such/file.txt", dest)
+    assert e.value.code == "path_not_found"
+    assert dest.read_text() == "old content\n"
+    assert not (tmp_path / "keep.txt.tmp").exists()
+    sb.files.write_text("small/new.txt", "new content\n")
+    sb.files.download("small/new.txt", dest)
+    assert dest.read_text() == "new content\n"
+    assert not (tmp_path / "keep.txt.tmp").exists()
 
 
 def test_download_restarts_when_the_file_changed(

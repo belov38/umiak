@@ -537,6 +537,74 @@ describe("401 token_expired", () => {
 	});
 });
 
+describe("timeouts and redirects", () => {
+	/** A fetch that never answers until its request is aborted. */
+	const hanging = (req: Request) =>
+		new Promise<Response>((_resolve, reject) => {
+			req.signal.addEventListener("abort", () => reject(req.signal.reason));
+		});
+
+	it("redirects are not followed: the request says manual, a 302 is an error", async () => {
+		const f = fakeFetch((req) => {
+			expect(req.redirect).toBe("manual");
+			return new Response(null, {
+				status: 302,
+				headers: { Location: "https://elsewhere.test/" },
+			});
+		});
+		const err = await client(f.fetch)
+			.GET("/v1/me")
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(SbxError);
+		expect((err as SbxError).status).toBe(302);
+		expect(f.seen).toHaveLength(1);
+	});
+
+	it("no response headers within 60 s: network_error, and a GET is retried", async () => {
+		const f = fakeFetch(hanging, json(200, { user: null }));
+		const p = client(f.fetch).GET("/v1/me", { retryBudgetMs: 120_000 });
+		await vi.advanceTimersByTimeAsync(59_000);
+		expect(f.seen).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await vi.advanceTimersByTimeAsync(5_000);
+		const { data } = await p;
+		expect(data).toEqual({ user: null });
+		expect(f.seen).toHaveLength(2);
+	});
+
+	it("timeoutMs replaces the 60 s; 0 turns it off", async () => {
+		const f = fakeFetch(hanging);
+		const p = client(f.fetch)
+			.GET("/v1/me", { timeoutMs: 1_000, retryBudgetMs: 0 })
+			.catch((e: unknown) => e);
+		await vi.advanceTimersByTimeAsync(1_000);
+		const err = await p;
+		expect((err as SbxError).code).toBe("network_error");
+		expect((err as SbxError).message).toContain("1000 ms");
+	});
+
+	it("a body silent for 60 s fails with network_error", async () => {
+		const f = fakeFetch(
+			() =>
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(ctl) {
+							ctl.enqueue(new TextEncoder().encode('{"user":'));
+						},
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+		);
+		const p = client(f.fetch)
+			.GET("/v1/me")
+			.catch((e: unknown) => e);
+		await vi.advanceTimersByTimeAsync(60_000);
+		const err = await p;
+		expect(err).toBeInstanceOf(SbxError);
+		expect((err as SbxError).code).toBe("network_error");
+	});
+});
+
 describe("content types", () => {
 	it("POST /commands with parseAs stream gives the NDJSON body", async () => {
 		const ndjson =

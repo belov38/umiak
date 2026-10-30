@@ -2,7 +2,8 @@
 // one too). Asks in a terminal; without one --yes is required (exit 2
 // otherwise, nothing deleted). Each DELETE carries `Sbx-Confirm-Delete`
 // with the sandbox id read before. Prints the answer `{sandbox, operation}`
-// of each sandbox; a deleted current sandbox is forgotten.
+// (an array of them for several sandboxes, one JSON document either way);
+// a deleted current sandbox is forgotten.
 
 import type { Sandbox } from "@sbx/sdk";
 import type { Command } from "commander";
@@ -37,6 +38,7 @@ export function register(program: Command, run: Runner): void {
 				);
 				const current = readCurrent(ctx);
 				let first: unknown;
+				const answers: { sandbox: Sandbox["data"] }[] = [];
 				for (const sb of sbs) {
 					try {
 						const { data } = await ctx
@@ -46,13 +48,21 @@ export function register(program: Command, run: Runner): void {
 								headers: { "Sbx-Confirm-Delete": sb.id },
 							});
 						if (current === sb.id) clearCurrent(ctx);
-						ctx.out.result(data, (v) => `Deleting ${sandboxLine(v.sandbox)}`);
+						answers.push(data as { sandbox: Sandbox["data"] });
 					} catch (err) {
 						first ??= err;
 						if (sbs.length > 1) {
 							ctx.out.warn(`${sb.slug}: ${(err as Error).message}`);
 						}
 					}
+				}
+				const line = (v: { sandbox: Sandbox["data"] }) =>
+					`Deleting ${sandboxLine(v.sandbox)}`;
+				// One JSON document: the answer of one sandbox, an array for several.
+				if (refs.length === 1) {
+					if (answers[0] !== undefined) ctx.out.result(answers[0], line);
+				} else if (answers.length > 0 || first === undefined) {
+					ctx.out.result(answers, (list) => list.map(line).join("\n"));
 				}
 				if (first !== undefined) throw first;
 			}),

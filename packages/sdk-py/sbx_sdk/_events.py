@@ -62,6 +62,8 @@ class ExitEvent:
     stdout_offset: int
     stderr_offset: int
     pty_offset: int | None = None
+    #: "disk_full" when the agent dropped output (a full disk); None otherwise.
+    output_truncated: str | None = None
     type: Literal["exit"] = "exit"
 
 
@@ -79,6 +81,11 @@ class ExecResult:
     #: Earlier output was dropped: read it with ``Command.output``.
     stdout_truncated: bool
     stderr_truncated: bool
+    #: Offset of the first byte of ``stdout`` / ``stderr`` in the stream.
+    stdout_from: int = 0
+    stderr_from: int = 0
+    #: "disk_full" when the agent dropped output (a full disk); None otherwise.
+    output_truncated: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,9 +114,19 @@ class Tail:
     def __init__(self) -> None:
         self._pieces: deque[tuple[str, int]] = deque()
         self._bytes = 0
+        # Stream offset after the last byte seen.
+        self._end = 0
         self.truncated = False
 
-    def push(self, text: str, size: int) -> None:
+    @property
+    def start(self) -> int:
+        """Offset of the first byte of the tail."""
+        return self._end - self._bytes
+
+    def push(self, text: str, next_offset: int) -> None:
+        """A frame of ``text`` that ends at stream offset ``next_offset``."""
+        size = max(0, next_offset - self._end)
+        self._end = next_offset
         self._pieces.append((text, size))
         self._bytes += size
         while self._bytes > EXEC_TAIL_BYTES and len(self._pieces) > 1:
@@ -117,10 +134,12 @@ class Tail:
             self._bytes -= dropped
             self.truncated = True
 
-    def drop(self) -> None:
-        """Output before a gap is not part of the tail."""
+    def drop(self, available_from: int) -> None:
+        """Output before a gap is not part of the tail; the stream goes on at
+        ``available_from``."""
         self._pieces.clear()
         self._bytes = 0
+        self._end = max(self._end, available_from)
         self.truncated = True
 
     def text(self) -> str:

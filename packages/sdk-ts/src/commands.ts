@@ -49,6 +49,8 @@ export interface ExitEvent extends Offsets {
 	exitCode: number | null;
 	signal: string | null;
 	reason: string | null;
+	/** "disk_full" when the agent dropped output (a full disk); null otherwise. */
+	outputTruncated: string | null;
 }
 
 export type RunEvent<E extends Encoding = "utf8"> =
@@ -98,6 +100,11 @@ export interface ExecResult {
 	/** Earlier output was dropped: read it with `Command.output`. */
 	stdoutTruncated: boolean;
 	stderrTruncated: boolean;
+	/** Offset of the first byte of `stdout` / `stderr` in the stream. */
+	stdoutFrom: number;
+	stderrFrom: number;
+	/** "disk_full" when the agent dropped output (a full disk); null otherwise. */
+	outputTruncated: string | null;
 }
 
 export interface OutputChunk {
@@ -141,11 +148,18 @@ function specOf(o: CommandSpec): CommandSpec {
 }
 
 /** {signal, retryBudgetMs, idempotencyKey} of the options, nothing else. */
+/**
+ * Time to the answer of a command or PTY start: the api waits up to 60 s
+ * for a creating/starting sandbox before it answers (S7 §9.1).
+ */
+export const START_TIMEOUT_MS = 75_000;
+
 export function callOf(o: CallOptions = {}): CallOptions {
 	const out: CallOptions = {};
 	if (o.signal !== undefined) out.signal = o.signal;
 	if (o.retryBudgetMs !== undefined) out.retryBudgetMs = o.retryBudgetMs;
 	if (o.idempotencyKey !== undefined) out.idempotencyKey = o.idempotencyKey;
+	if (o.timeoutMs !== undefined) out.timeoutMs = o.timeoutMs;
 	return out;
 }
 
@@ -320,9 +334,9 @@ export async function execCommand(
 	})) {
 		if (ev.type === "exit") exit = ev;
 		else if (ev.type === "truncated") {
-			if (ev.stream !== "pty") tails[ev.stream].truncate();
+			if (ev.stream !== "pty") tails[ev.stream].truncate(ev.availableFrom);
 		} else if (ev.type !== "pty") {
-			tails[ev.type].push(ev.data, ev.nextOffset - ev.offset);
+			tails[ev.type].push(ev.data, ev.nextOffset);
 		}
 	}
 	if (exit === undefined || command === undefined) {
@@ -341,6 +355,9 @@ export async function execCommand(
 		exitCode: exit.exitCode,
 		stdoutTruncated: tails.stdout.truncated,
 		stderrTruncated: tails.stderr.truncated,
+		stdoutFrom: tails.stdout.from,
+		stderrFrom: tails.stderr.from,
+		outputTruncated: exit.outputTruncated,
 	};
 }
 
@@ -348,9 +365,19 @@ export async function execCommand(
 class Tail {
 	#pieces: { text: string; bytes: number }[] = [];
 	#bytes = 0;
+	/** Stream offset after the last byte seen. */
+	#end = 0;
 	truncated = false;
 
-	push(text: string, bytes: number) {
+	/** Offset of the first byte of the tail. */
+	get from(): number {
+		return this.#end - this.#bytes;
+	}
+
+	/** A frame of `text` that ends at stream offset `nextOffset`. */
+	push(text: string, nextOffset: number) {
+		const bytes = Math.max(0, nextOffset - this.#end);
+		this.#end = nextOffset;
 		this.#pieces.push({ text, bytes });
 		this.#bytes += bytes;
 		while (this.#bytes > EXEC_TAIL_BYTES && this.#pieces.length > 1) {
@@ -360,10 +387,11 @@ class Tail {
 		}
 	}
 
-	/** Output before a gap is not part of the tail. */
-	truncate() {
+	/** Output before a gap is not part of the tail; the stream goes on at `availableFrom`. */
+	truncate(availableFrom: number) {
 		this.#pieces = [];
 		this.#bytes = 0;
+		this.#end = Math.max(this.#end, availableFrom);
 		this.truncated = true;
 	}
 
@@ -400,6 +428,7 @@ export function runCommand<E extends Encoding = "utf8">(
 				...call,
 				signal,
 				retryBudgetMs,
+				timeoutMs: START_TIMEOUT_MS,
 			});
 			const body = data as ReadableStream<Uint8Array> | null | undefined;
 			if (body === null || body === undefined) {
@@ -431,6 +460,7 @@ export async function startCommand(
 		},
 		...callOf(opts),
 		idempotencyKey: opts.idempotencyKey ?? newIdempotencyKey(),
+		timeoutMs: START_TIMEOUT_MS,
 	});
 	const c = data as CommandData;
 	return new Command(sb, c.id, c);
@@ -677,6 +707,8 @@ function exitEvent(f: Frame): ExitEvent {
 		exitCode: typeof f.exitCode === "number" ? f.exitCode : null,
 		signal: typeof f.signal === "string" ? f.signal : null,
 		reason: typeof f.reason === "string" ? f.reason : null,
+		outputTruncated:
+			typeof f.outputTruncated === "string" ? f.outputTruncated : null,
 		stdoutOffset: Number(f.stdoutOffset ?? 0),
 		stderrOffset: Number(f.stderrOffset ?? 0),
 	};

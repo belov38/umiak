@@ -5,6 +5,7 @@
 // The API URL is `baseUrl`, then SBX_API_URL, then the apiUrl of the sbx profile;
 // the team is `team`, then SBX_TEAM, then the team of the profile. A token from
 // the sbx profile is never sent to another API than the profile's apiUrl.
+// /etc/sbx/config.json (the CLI's system apiUrl) is not read here.
 
 import { canRunAuthCommand, runAuthCommand } from "./auth-command.ts";
 import type { SbxOptions } from "./client.ts";

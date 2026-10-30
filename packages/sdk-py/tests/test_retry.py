@@ -849,3 +849,28 @@ def test_freshness_of_the_generated_code() -> None:
         env={**os.environ},
     )
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_a_command_start_waits_75_s_for_the_first_byte(clock: FakeClock) -> None:
+    """The api waits up to 60 s for a starting sandbox before it answers a start."""
+    reads: list[float] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        reads.append(request.extensions["timeout"]["read"])
+        return httpx.Response(
+            200,
+            content=ndjson(
+                {"type": "started", "commandId": CMD},
+                {
+                    "type": "exit",
+                    "status": "exited",
+                    "exitCode": 0,
+                    "stdoutOffset": 0,
+                    "stderrOffset": 0,
+                },
+            ),
+        )
+
+    events = list(stream_sbx(Script(answer)).run("true"))
+    assert isinstance(events[-1], ExitEvent)
+    assert reads == [75.0]

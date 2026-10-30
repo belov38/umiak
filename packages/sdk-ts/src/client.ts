@@ -53,7 +53,19 @@ export interface CallOptions {
 	retryBudgetMs?: number;
 	/** Idempotency-Key to send instead of a generated one. */
 	idempotencyKey?: string;
+	/**
+	 * Time to the response headers of one attempt, then `network_error`
+	 * (retried like one); default 60 000 ms for requests without a body or
+	 * with a JSON body, none for binary and streamed bodies (an upload takes
+	 * as long as it takes); 0 turns it off.
+	 */
+	timeoutMs?: number;
 }
+
+/** Default of `CallOptions.timeoutMs` (as the Python SDK's read timeout). */
+export const REQUEST_TIMEOUT_MS = 60_000;
+/** A response body with no data for this long is a dead connection. */
+export const BODY_IDLE_TIMEOUT_MS = 60_000;
 
 export interface TokenProviderOptions {
 	/** The last token was rejected as expired: get a new one. */
@@ -185,6 +197,11 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 		opts.fetch ?? ((req) => globalThis.fetch(req));
 	const userAgent = opts.userAgent ?? `sbx-sdk-ts/${SDK_VERSION}`;
 	const defaultBudgetMs = opts.retryBudgetMs ?? DEFAULT_RETRY_BUDGET_MS;
+	// Command streams have their own (shorter) idle limit; never below it.
+	const bodyIdleMs = Math.max(
+		BODY_IDLE_TIMEOUT_MS,
+		opts.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS,
+	);
 
 	// Resolved on the first call; a failure is not kept, so `sbx login` later helps.
 	let pending: Promise<Credentials> | undefined;
@@ -236,21 +253,51 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 			signal?: AbortSignal,
 			budgetMs?: number,
 			oneShot = false,
+			headerTimeoutMs = 0,
 		) =>
 		(request: Request): Promise<Response> => {
 			const keyed = request.headers.has("Idempotency-Key");
 			const send = async (): Promise<Response> => {
+				const base = oneShot ? request : request.clone();
+				const timeout = new AbortController();
+				let timedOut = false;
+				const timer =
+					headerTimeoutMs > 0
+						? setTimeout(() => {
+								timedOut = true;
+								timeout.abort();
+							}, headerTimeoutMs)
+						: undefined;
+				// Redirects are not followed (like the Python SDK): a 3xx is an error.
+				const init: RequestInit & { duplex?: "half" } = {
+					signal: AbortSignal.any([base.signal, timeout.signal]),
+					redirect: "manual",
+				};
+				if (base.body !== null) init.duplex = "half";
 				let res: Response;
 				try {
-					res = await fetchImpl(oneShot ? request : request.clone());
+					res = await fetchImpl(new Request(base, init));
 				} catch (err) {
 					if (signal?.aborted) throw signal.reason;
+					if (timedOut) {
+						throw networkError(
+							new Error(`no response headers within ${headerTimeoutMs} ms`),
+							request.method,
+							keyed,
+						);
+					}
 					if (isAbortError(err)) throw err;
 					throw networkError(err, request.method, keyed);
+				} finally {
+					clearTimeout(timer);
 				}
 				seen.response = res;
 				if (!res.ok) throw await errorFromResponse(res);
-				return res;
+				return withBodyIdleTimeout(
+					res,
+					bodyIdleMs,
+					isSafeToRepeat(request.method, keyed),
+				);
 			};
 			if (oneShot) return send();
 			let refreshed = false;
@@ -273,13 +320,16 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 	const call =
 		(method: string) =>
 		async (url: string, init: LooseInit = {}): Promise<unknown> => {
-			const { signal, retryBudgetMs, idempotencyKey, ...rest } = init;
+			const { signal, retryBudgetMs, idempotencyKey, timeoutMs, ...rest } =
+				init;
 			const creds = await abortable(credentials(), signal);
 			const requestHeaders =
 				idempotencyKey === undefined
 					? rest.headers
 					: mergeHeaders(rest.headers, idempotencyKey);
 			const oneShot = (rest.body as unknown) instanceof ReadableStream;
+			const headerTimeoutMs =
+				timeoutMs ?? (isJsonBody(rest.body) ? REQUEST_TIMEOUT_MS : 0);
 			const seen: { response?: Response } = {};
 			try {
 				const { data, response } = await client.request(
@@ -300,6 +350,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 							signal,
 							retryBudgetMs ?? defaultBudgetMs,
 							oneShot,
+							headerTimeoutMs,
 						),
 					} as never,
 				);
@@ -360,6 +411,64 @@ function mergeHeaders(
 	}
 	h.set("Idempotency-Key", idempotencyKey);
 	return h;
+}
+
+/** No body, or one that openapi-fetch serializes as JSON. */
+function isJsonBody(body: unknown): boolean {
+	if (body === undefined || body === null || typeof body === "string") {
+		return true;
+	}
+	if (typeof body !== "object") return true;
+	const proto = Object.getPrototypeOf(body);
+	return proto === Object.prototype || proto === null || Array.isArray(body);
+}
+
+/** The response with a body that fails after `ms` without data. */
+function withBodyIdleTimeout(
+	res: Response,
+	ms: number,
+	retryable: boolean,
+): Response {
+	const source = res.body;
+	if (source === null) return res;
+	const reader = source.getReader();
+	const body = new ReadableStream<Uint8Array>({
+		async pull(ctl) {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const idle = new Promise<never>((_resolve, reject) => {
+				timer = setTimeout(
+					() =>
+						reject(
+							new SbxError({
+								status: 0,
+								code: NETWORK_ERROR,
+								message: `network error: no response data for ${ms} ms`,
+								retryable,
+							}),
+						),
+					ms,
+				);
+			});
+			try {
+				const r = await Promise.race([reader.read(), idle]);
+				if (r.done) ctl.close();
+				else ctl.enqueue(r.value);
+			} catch (err) {
+				reader.cancel().catch(() => {});
+				ctl.error(err);
+			} finally {
+				clearTimeout(timer);
+			}
+		},
+		cancel(reason) {
+			return reader.cancel(reason);
+		},
+	});
+	return new Response(body, {
+		status: res.status,
+		statusText: res.statusText,
+		headers: res.headers,
+	});
 }
 
 function networkError(cause: unknown, method: string, keyed: boolean) {

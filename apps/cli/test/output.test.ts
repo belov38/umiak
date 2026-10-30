@@ -269,6 +269,22 @@ describe("sbx against the api", () => {
 		expect(s.last()).toMatchObject({ code: "usage" });
 	});
 
+	it("a usage error of a raw-data command goes to stderr only: stdout (the data) stays empty", async () => {
+		for (const args of [
+			["exec", "sb-x", "--bogus", "--", "true"],
+			["logs", "sb-x", "--bogus"],
+			["auth", "token", "--bogus"],
+		]) {
+			const r = await runCli(args, { env: keyEnv() });
+			expect(r.code, args.join(" ")).toBe(2);
+			expect(r.stdout, args.join(" ")).toBe("");
+			expect(r.stderr).toContain('"code":"usage"');
+		}
+		// Other commands keep the JSON error on stdout.
+		const w2 = await runCli(["whoami", "--bogus"], { env: keyEnv() });
+		expect(JSON.parse(w2.stdout)).toMatchObject({ code: "usage" });
+	});
+
 	it("current: none → exit 3; <sb> makes it current; --clear forgets it; unknown → 3", async () => {
 		const env = keyEnv();
 		const none = await runCli(["current"], { env });

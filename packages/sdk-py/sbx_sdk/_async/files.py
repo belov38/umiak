@@ -14,6 +14,7 @@ Directory archives (upload_dir/download_dir) are not in the Python SDK yet.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 from collections.abc import AsyncIterator, Callable
@@ -439,6 +440,7 @@ class AsyncFiles:
         again and a file object fails with ``file_changed``."""
         core = self._sb.core
         sink = _open_sink(dest)
+        ok = False
         try:
             received = 0
             total: int | None = None
@@ -476,6 +478,7 @@ class AsyncFiles:
                             sink.write(piece)
                             received += len(piece)
                     if total is None or received >= total:
+                        ok = True
                         return DownloadResult(size_bytes=received, etag=etag)
                     last_error = broken("the download ended early")
                 except _NETWORK_ERRORS as err:
@@ -487,6 +490,7 @@ class AsyncFiles:
                         and total is not None
                         and received >= total
                     ):
+                        ok = True
                         return DownloadResult(size_bytes=received, etag=etag)
                     if not is_retryable(err, True):
                         raise
@@ -496,7 +500,7 @@ class AsyncFiles:
                     raise last_error
                 await sleep(retry_delay(last_error, max(0, failures - 1), core.random))
         finally:
-            sink.close()
+            sink.close(ok)
 
 
 def _mismatch(message: str, offset: int) -> SbxError:
@@ -601,9 +605,14 @@ def _file_reader(f: IO[bytes], seekable: bool) -> Callable[[int, int], bytes]:
 
 
 class _Sink:
+    """A local path is written to ``<dest>.tmp`` and renamed at the end, so a
+    failed download leaves an existing ``dest`` as it was."""
+
     def __init__(self, dest: DownloadTarget) -> None:
         self._own = isinstance(dest, str | os.PathLike)
-        self._f: IO[bytes] = open(dest, "wb") if self._own else dest  # type: ignore[arg-type]
+        self._dest = os.fspath(dest) if self._own else ""  # type: ignore[arg-type]
+        self._tmp = f"{self._dest}.tmp"
+        self._f: IO[bytes] = open(self._tmp, "wb") if self._own else dest  # type: ignore[arg-type]
         self._wrote = False
 
     def write(self, b: bytes) -> None:
@@ -623,9 +632,14 @@ class _Sink:
                 retryable=False,
             )
 
-    def close(self) -> None:
+    def close(self, ok: bool) -> None:
         if self._own:
             self._f.close()
+            if ok:
+                os.replace(self._tmp, self._dest)
+            else:
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(self._tmp)
         else:
             self._f.flush()
 

@@ -1268,7 +1268,11 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - Закрытый stdout (`sbx exec … | head -1`) → выход с кодом `141`; `exec`, `run` и `shell` при этом убивают удалённую команду.
 - Команды с сырым выводом (`exec`, `run`, `logs`) переключает в NDJSON-кадры только явный `--json`; `SBX_OUTPUT=json` — нет: скрипт с перенаправлением вывода должен получать байты.
 - Access token обновляется в `exp − 90 s`, а не `exp − 30 s`: SDK считает токен устаревшим в `exp − 60 s`, и токен из `sbx auth token` не должен устаревать сразу.
-- `--cacert <file>` / `SBX_CA_FILE` — частный CA для API, Keycloak и WebSocket PTY; добавляется к системным корням, а не заменяет их.
+- `--cacert <file>` / `SBX_CA_FILE` — частный CA для API, Keycloak и WebSocket PTY; доверие — встроенные корни Node/Bun плюс этот файл (хранилище сертификатов ОС не используется).
+- `exec`, `run`: SIGTERM и SIGHUP — как Ctrl-C: поток бросается, `run` удаляет sandbox (без `--keep`), выход `143`/`129` (Ctrl-C — `130`); удалённая команда `exec` продолжает работать. Не доставленный Ctrl-C (`signal` не дошёл) — предупреждение в stderr.
+- Ошибка разбора аргументов команд с сырым выводом (`exec`, `run`, `logs`, `cp`, …) идёт только в stderr и в JSON-режиме: команда известна до разбора её флагов, stdout (данные) остаётся пустым.
+- `sbx rm a b` в JSON-режиме печатает один документ — массив ответов `{sandbox, operation}` (для одной sandbox — объект, как раньше).
+- `exec --stdin` шлёт `seq` с `1` (shim отбрасывает `seq <= last`, §23.3).
 - `SBX_RETRY_BUDGET_MS` — бюджет повторов SDK для команд CLI.
 - `snapshot rm` спрашивает подтверждение, как `rm` (`--yes` без TTY).
 - `login` печатает JSONL: `device_code` (только device grant), затем `logged_in {profile, apiUrl, me}`. Профиль хранит `credentialStore` — где лежат секреты.
@@ -1278,6 +1282,11 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 ### 23.8 SDK
 
 - **TS:** raw-клиент бросает `SbxError` на любой не-2xx (а не возвращает `{error}` openapi-fetch). `tokenProvider` получает `{force}` (после `401 token_expired` — `force: true`). SDK шлёт `Idempotency-Key` и на commit загрузки (`<uploadId>`) и на `input` с `sessionId` + `seq` (`<sessionId>:<seq>`), чтобы транспорт мог их повторять; `api` на этих ручках заголовок игнорирует, идемпотентность у них своя. Отказ PTY до upgrade WebSocket-клиент видит как `1006` и считает неудачной попыткой.
+- **Таймауты TS:** ответ (заголовки) — 60 s на попытку (`CallOptions.timeoutMs`, `0` — выключить), дальше `network_error` и повтор по обычным правилам; для бинарных и потоковых тел (загрузки) срока нет. Старт команды и PTY — 75 s (`api` ждёт готовности sandbox до 60 s). Тело ответа без данных 60 s (не меньше `streamIdleTimeoutMs`) — `network_error`. Как у Python (`httpx.Timeout(60, connect=10)`; старт команды — `read` 75 s до заголовков, дальше idle-лимит потока).
+- **Редиректы** не следуют ни TS (`redirect: "manual"`), ни Python (`follow_redirects=False`): `3xx` — `SbxError`.
+- **`download` в путь** пишет `<dest>.tmp` и переименовывает в конце: неудачная загрузка оставляет прежний `dest` (TS и Python).
+- **`ExecResult`** (TS и Python) + `stdoutFrom`/`stderrFrom` (смещение первого байта хвоста) и `outputTruncated`; `ExitEvent` + `outputTruncated` (§23.3). Python: `Command.wait(timeout=)` и `follow(timeout=)` — `wait_timeout` (команда продолжает работать). TS `Pty.onTruncated(cb)` — потеря вывода терминала (`availableFrom`). `readText` (TS) не срезает BOM, как Python.
+- **URL API в SDK:** `baseUrl`, `SBX_API_URL`, затем `apiUrl` профиля из `sbx auth token`; системный `/etc/sbx/config.json` SDK не читает (это делает CLI). Внутри sandbox с одним `SBX_API_KEY` нужен и `SBX_API_URL` (или `baseUrl`).
 - **Python:** фасад написан один раз (`sbx_sdk/_async/`), синхронный (`sbx_sdk/_sync/`) генерирует `scripts/gen.py`, свежесть проверяют тесты, как у `_gen`. `AbortSignal` нет: ожидания принимают `timeout`, вызовы — `retry_budget` (секунды); отмена — средствами asyncio. Неизвестное значение открытого enum — член `UNKNOWN`. Без `pty`, `upload_dir`/`download_dir` (§23.1).
 
 ### 23.9 Агент

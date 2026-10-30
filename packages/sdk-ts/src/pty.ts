@@ -24,6 +24,7 @@ import {
 	type ExitEvent,
 	frameError,
 	type SandboxRef,
+	START_TIMEOUT_MS,
 	STREAM_MAX_FAILURES,
 } from "./commands.ts";
 import { SbxError, UNSUPPORTED_RUNTIME } from "./errors.ts";
@@ -77,6 +78,7 @@ export async function openPty(
 		body,
 		...callOf(opts),
 		idempotencyKey: opts.idempotencyKey ?? newIdempotencyKey(),
+		timeoutMs: START_TIMEOUT_MS,
 	});
 	return connectPty(sb, new Command(sb, data.id, data), callOf(opts));
 }
@@ -113,6 +115,7 @@ export class Pty {
 	#queued = 0;
 	#timer: ReturnType<typeof setTimeout> | undefined;
 	readonly #listeners = new Set<(data: Uint8Array) => void>();
+	readonly #truncatedListeners = new Set<(availableFrom: number) => void>();
 	#resolveExit!: (e: PtyExit) => void;
 	#rejectExit!: (e: unknown) => void;
 	#resolveReady!: () => void;
@@ -154,6 +157,16 @@ export class Pty {
 	onData(cb: (data: Uint8Array) => void): () => void {
 		this.#listeners.add(cb);
 		return () => this.#listeners.delete(cb);
+	}
+
+	/**
+	 * Calls `cb` when output was lost (the agent evicted it before it was
+	 * read): the output goes on at `availableFrom`. Returns the unsubscribe
+	 * function.
+	 */
+	onTruncated(cb: (availableFrom: number) => void): () => void {
+		this.#truncatedListeners.add(cb);
+		return () => this.#truncatedListeners.delete(cb);
 	}
 
 	/**
@@ -315,6 +328,7 @@ export class Pty {
 					if (typeof f.availableFrom === "number") {
 						this.#offset = f.availableFrom;
 						progressed = true;
+						for (const cb of this.#truncatedListeners) cb(f.availableFrom);
 					}
 					break;
 				case "exit":
@@ -427,6 +441,8 @@ export class Pty {
 			exitCode: typeof f.exitCode === "number" ? f.exitCode : null,
 			signal: typeof f.signal === "string" ? f.signal : null,
 			reason: typeof f.reason === "string" ? f.reason : null,
+			outputTruncated:
+				typeof f.outputTruncated === "string" ? f.outputTruncated : null,
 			stdoutOffset: Number(f.stdoutOffset ?? 0),
 			stderrOffset: Number(f.stderrOffset ?? 0),
 		};

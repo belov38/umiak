@@ -37,7 +37,9 @@ The same as `@sbx/sdk` (TS):
 - **Credentials** (S7 §7.6): `api_key` / `access_token` / `token_provider`
   (called with `force` before every request; may be async for `AsyncSbx`), then
   `SBX_API_KEY`, `SBX_ACCESS_TOKEN`, then `sbx auth token --json`. The URL is
-  `base_url`, `SBX_API_URL` or the profile's `apiUrl`; the team `team`,
+  `base_url`, `SBX_API_URL` or the profile's `apiUrl` (the SDK does not read
+  `/etc/sbx/config.json`: inside a sandbox with only `SBX_API_KEY`, set
+  `SBX_API_URL` too); the team `team`,
   `SBX_TEAM` or the profile's. A profile token is never sent to another API,
   is cached until `expiresAt − 60 s`, and `401 token_expired` gets one new
   token and one repeat.

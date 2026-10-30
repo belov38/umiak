@@ -25,6 +25,7 @@ from .._errors import (
     NETWORK_ERROR,
     PROTOCOL_ERROR,
     UNEXPECTED_RESPONSE,
+    WAIT_TIMEOUT,
     SbxError,
     broken,
     frame_error,
@@ -95,6 +96,15 @@ def _stream_timeout(idle: float) -> httpx.Timeout:
     return httpx.Timeout(60.0, connect=10.0, read=idle)
 
 
+# The api waits up to 60 s for a creating/starting sandbox before it answers
+# a command start (S7 §9.1): the first byte may come that late.
+START_READ_TIMEOUT = 60.0 + 15.0
+
+
+def _start_timeout(idle: float) -> httpx.Timeout:
+    return httpx.Timeout(60.0, connect=10.0, read=max(idle, START_READ_TIMEOUT))
+
+
 class AsyncCommand:
     """A command of a sandbox (``cmd_...``)."""
 
@@ -123,9 +133,11 @@ class AsyncCommand:
         *,
         start: Literal["start", "end"] | Offsets = "start",
         encoding: Encoding = "utf8",
+        timeout: float | None = None,
     ) -> AsyncIterator[RunEvent]:
         """Output events from ``start`` ("start": all output, "end": only new
-        output, or offsets) until the exit, reattaching after breaks."""
+        output, or offsets) until the exit, reattaching after breaks.
+        ``timeout`` (seconds): ``wait_timeout`` if the exit has not come by then."""
         offsets = (
             Offsets(start.stdout, start.stderr, start.pty)
             if isinstance(start, Offsets)
@@ -139,12 +151,14 @@ class AsyncCommand:
                 retry_budget=None,
                 command_id=self.id,
                 tail_bytes=0 if start == "end" else None,
+                deadline=None if timeout is None else time.monotonic() + timeout,
             ),
         )
 
-    async def wait(self) -> ExitEvent:
-        """Waits for the exit (output is skipped)."""
-        async with aclosing(self.follow(start="end")) as events:  # type: ignore[type-var]
+    async def wait(self, *, timeout: float | None = None) -> ExitEvent:
+        """Waits for the exit (output is skipped); ``wait_timeout`` after
+        ``timeout`` seconds (the command keeps running)."""
+        async with aclosing(self.follow(start="end", timeout=timeout)) as events:  # type: ignore[type-var]
             async for ev in events:
                 if isinstance(ev, ExitEvent):
                     return ev
@@ -279,10 +293,10 @@ async def exec_command(
                 exit_ev = ev
             elif isinstance(ev, TruncatedEvent):
                 if ev.stream != "pty":
-                    tails[ev.stream].drop()
+                    tails[ev.stream].drop(ev.available_from)
             elif ev.type != "pty":
                 assert isinstance(ev.data, str)
-                tails[ev.type].push(ev.data, ev.next_offset - ev.offset)
+                tails[ev.type].push(ev.data, ev.next_offset)
     if exit_ev is None or not started:
         raise SbxError(
             status=0,
@@ -298,6 +312,9 @@ async def exec_command(
         exit_code=exit_ev.exit_code,
         stdout_truncated=tails["stdout"].truncated,
         stderr_truncated=tails["stderr"].truncated,
+        stdout_from=tails["stdout"].start,
+        stderr_from=tails["stderr"].start,
+        output_truncated=exit_ev.output_truncated,
     )
 
 
@@ -331,7 +348,7 @@ def run_command(
             commands_create._get_kwargs(sb.id, body=body_of(body)),
             idempotency_key=key,
             retry_budget=budget_left,
-            timeout=_stream_timeout(core.stream_idle_timeout),
+            timeout=_start_timeout(core.stream_idle_timeout),
         )
 
     return _resumable(
@@ -370,6 +387,7 @@ async def start_command(
         body=body_of(body),
         retry_budget=retry_budget,
         idempotency_key=idempotency_key or new_idempotency_key(),
+        timeout=_start_timeout(sb.core.stream_idle_timeout),
     )
     return AsyncCommand(sb, data.id, data)
 
@@ -385,8 +403,11 @@ class _Plan:
         tail_bytes: int | None = None,
         start: Callable[[float], Any] | None = None,
         on_start: Callable[[AsyncCommand], Any] | None = None,
+        deadline: float | None = None,
     ) -> None:
         self.encoding = encoding
+        #: time.monotonic() after which the stream ends with wait_timeout.
+        self.deadline = deadline
         #: Updated as output arrives.
         self.offsets = offsets
         self.retry_budget = retry_budget
@@ -426,6 +447,7 @@ def _exit_event(f: Mapping[str, Any]) -> ExitEvent:
         stdout_offset=int(f.get("stdoutOffset") or 0),
         stderr_offset=int(f.get("stderrOffset") or 0),
         pty_offset=pty if isinstance(pty, int) else None,
+        output_truncated=text("outputTruncated"),
     )
 
 
@@ -449,12 +471,35 @@ def _open_stream(sb: AsyncSandbox, plan: _Plan, command_id: str, tail_bytes: int
         params["stderr_offset"] = o.stderr
     if o.pty is not None:
         params["pty_offset"] = o.pty
+    idle = sb.core.stream_idle_timeout
+    if plan.deadline is not None:
+        # A read stops at the deadline too; the loop then ends with wait_timeout.
+        idle = max(0.05, min(idle, plan.deadline - time.monotonic()))
     return sb.core.stream(
         commands_stream._get_kwargs(sb.id, command_id, **params),
         # The stream loop counts attempts itself (S7 §15.4).
         retry_budget=0,
-        timeout=_stream_timeout(sb.core.stream_idle_timeout),
+        timeout=_stream_timeout(idle),
     )
+
+
+def _idle_body_reads(resp: httpx.Response, idle: float) -> None:
+    """A start waits up to START_READ_TIMEOUT for its answer; once the headers
+    are in, the body reads use the idle limit (httpcore reads the request's
+    ``timeout`` extension when the body iteration begins)."""
+    t = resp.request.extensions.get("timeout")
+    if isinstance(t, dict) and isinstance(t.get("read"), int | float) and t["read"] > idle:
+        resp.request.extensions["timeout"] = {**t, "read": idle}
+
+
+def _check_deadline(plan: _Plan) -> None:
+    if plan.deadline is not None and time.monotonic() >= plan.deadline:
+        raise SbxError(
+            status=0,
+            code=WAIT_TIMEOUT,
+            message="the command did not exit within the timeout; it keeps running",
+            retryable=True,
+        )
 
 
 async def _resumable(sb: AsyncSandbox, plan: _Plan) -> AsyncIterator[RunEvent]:
@@ -466,6 +511,7 @@ async def _resumable(sb: AsyncSandbox, plan: _Plan) -> AsyncIterator[RunEvent]:
     start_budget = core.retry_budget if plan.retry_budget is None else plan.retry_budget
     started_at = time.monotonic()
     while True:
+        _check_deadline(plan)
         progressed = False
         reconnect = False
         last_error: SbxError | None = None
@@ -477,6 +523,7 @@ async def _resumable(sb: AsyncSandbox, plan: _Plan) -> AsyncIterator[RunEvent]:
             else:
                 cm = _open_stream(sb, plan, command_id, tail_bytes)
             async with cm as resp:
+                _idle_body_reads(resp, core.stream_idle_timeout)
                 if command_id is None:
                     cid = resp.headers.get("Sbx-Command-Id")
                     if cid:
@@ -551,11 +598,13 @@ async def _resumable(sb: AsyncSandbox, plan: _Plan) -> AsyncIterator[RunEvent]:
                         # heartbeat and frame types this SDK does not know: skipped
                     if stop:
                         break
+                    _check_deadline(plan)
                 if not stop:
                     decoder.end()
             if last_error is None:
                 last_error = broken("the command stream ended without exit")
         except _NETWORK_ERRORS as err:
+            _check_deadline(plan)
             why = (
                 f"no stream data for {core.stream_idle_timeout:g} s: connection dead"
                 if isinstance(err, httpx.TimeoutException)
@@ -581,5 +630,7 @@ async def _resumable(sb: AsyncSandbox, plan: _Plan) -> AsyncIterator[RunEvent]:
         )
         if command_id is None and over_budget(start_budget, time.monotonic() - started_at, wait):
             raise last_error
+        if plan.deadline is not None:
+            wait = min(wait, max(0.0, plan.deadline - time.monotonic()))
         if wait > 0:
             await sleep(wait)

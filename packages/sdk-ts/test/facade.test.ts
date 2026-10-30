@@ -5,6 +5,7 @@
 // ports → PTY echo with a reconnect → delete; exec retried after a 503 on
 // its first POST starts the command once; signal aborts waitUntilReady.
 import { createHash, randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -180,6 +181,9 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 			exitCode: 3,
 			stdoutTruncated: false,
 			stderrTruncated: false,
+			stdoutFrom: 0,
+			stderrFrom: 0,
+			outputTruncated: null,
 		});
 		expect(r.command.status).toBe("exited");
 		expect(r.command.mode).toBe("stream");
@@ -196,6 +200,10 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		expect(r.stdout.length).toBeGreaterThan(4 * 1024 * 1024 - 70_000);
 		expect(r.stdout.endsWith("aaa\nend\n")).toBe(true);
 		expect(r.stderrTruncated).toBe(false);
+		// The tail starts where the dropped output ends: from + its bytes = the size.
+		const total = 5_000_000 + 1 + 4;
+		expect(r.stdoutFrom).toBe(total - Buffer.byteLength(r.stdout));
+		expect(r.stderrFrom).toBe(0);
 	});
 
 	it("exec after a 503 on the first POST is retried with the same key and starts once", async () => {
@@ -353,6 +361,9 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 			mode: 0o600,
 		});
 		expect(await f.readText("notes/hi.txt")).toBe("hi there");
+		// A leading BOM is part of the text, as in the Python SDK.
+		await f.writeText("bomdir/bom.txt", "\uFEFFbom");
+		expect(await f.readText("bomdir/bom.txt")).toBe("\uFEFFbom");
 		const bin = randomBytes(70_000);
 		await f.writeBytes("notes/bin.dat", bin);
 		expect(sha256(await f.readBytes("notes/bin.dat"))).toBe(sha256(bin));
@@ -474,6 +485,21 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 			(r) => r.method === "GET" && r.path.includes("big%2Fchanging.bin"),
 		);
 		expect(gets.at(-1)?.headers.get("range")).toBe(`bytes=${1024 * 1024}-`);
+	});
+
+	it("download to a path writes <dest>.tmp and renames it: a failed download leaves dest as it was", async () => {
+		const dest = join(tmp, "keep.txt");
+		await writeFile(dest, "old content\n");
+		const err = await sb.files
+			.download("no/such/file.txt", dest)
+			.catch((e: unknown) => e);
+		expect((err as SbxError).code).toBe("path_not_found");
+		expect(await readFile(dest, "utf8")).toBe("old content\n");
+		expect(existsSync(`${dest}.tmp`)).toBe(false);
+		await sb.files.writeText("small/new.txt", "new content\n");
+		await sb.files.download("small/new.txt", dest);
+		expect(await readFile(dest, "utf8")).toBe("new content\n");
+		expect(existsSync(`${dest}.tmp`)).toBe(false);
 	});
 
 	it("uploadDir and downloadDir move a directory tree through tar.gz", async () => {

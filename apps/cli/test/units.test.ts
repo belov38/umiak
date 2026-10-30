@@ -37,6 +37,7 @@ const exit = (o: Partial<ExitEvent>): ExitEvent => ({
 	exitCode: 0,
 	signal: null,
 	reason: "none",
+	outputTruncated: null,
 	stdoutOffset: 0,
 	stderrOffset: 0,
 	...o,

@@ -93,9 +93,30 @@ export interface CliIo {
 	secrets?: SecretsBackend | undefined;
 }
 
+/** Actions made by a Runner with `rawData`, so their command is marked. */
+const rawActions = new WeakSet<object>();
+
+/**
+ * A command that knows whether its stdout is data (`rawData` of its
+ * action): decided before its options are parsed, so even a usage error
+ * of `sbx exec --bogus > f` keeps the data stream clean.
+ */
+class SbxCommand extends Command {
+	rawData = false;
+
+	override createCommand(name?: string): Command {
+		return new SbxCommand(name);
+	}
+
+	override action(fn: Parameters<Command["action"]>[0]): this {
+		if (rawActions.has(fn)) this.rawData = true;
+		return super.action(fn);
+	}
+}
+
 /** Builds the command tree; `run` wraps the handlers. */
 export function buildProgram(io: CliIo, run: Runner): Command {
-	const program = new Command("sbx")
+	const program = new SbxCommand("sbx")
 		.description("sbx: VM sandboxes for AI agents")
 		.version(CLI_VERSION, "-V, --version", "print the CLI version")
 		.option("--json", "print JSON (the default when stdout is not a terminal)")
@@ -176,7 +197,7 @@ export async function runCli(io: CliIo): Promise<number> {
 	});
 	let code = EXIT_OK;
 	const run: Runner = (fn, meta = {}) => {
-		return async (...a: unknown[]) => {
+		const action = async (...a: unknown[]) => {
 			const cmd = a.at(-1) as Command;
 			const opts = (a.at(-2) ?? {}) as Record<string, unknown>;
 			out.rawData = meta.rawData === true;
@@ -202,8 +223,16 @@ export async function runCli(io: CliIo): Promise<number> {
 				code = exitCodeOf(err);
 			}
 		};
+		if (meta.rawData === true) rawActions.add(action);
+		return action;
 	};
 	const program = buildProgram(io, run);
+	// Before a subcommand parses its options (a usage error comes from there).
+	for (const c of allCommands(program)) {
+		c.hook("preSubcommand", (_parent, sub) => {
+			out.rawData = sub instanceof SbxCommand && sub.rawData;
+		});
+	}
 	try {
 		await program.parseAsync([...io.argv], { from: "user" });
 	} catch (err) {

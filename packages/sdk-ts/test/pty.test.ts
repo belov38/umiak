@@ -72,3 +72,36 @@ describe("Pty WebSocket factory (SbxOptions.webSocket)", () => {
 		});
 	});
 });
+
+describe("Pty truncated", () => {
+	it("onTruncated reports where the output goes on after a gap; offset follows", async () => {
+		let socket: Record<string, unknown> | undefined;
+		const factory: WebSocketFactory = () => {
+			socket = { readyState: 1, close() {}, send() {} };
+			return socket as unknown as WebSocket;
+		};
+		const core = createClientCore({
+			baseUrl: "https://api.example.com",
+			apiKey: "sbx_test",
+			webSocket: factory,
+		});
+		const pty = new Pty(core, new Command({ core, id: "sb_1" }, "cmd_1"), {});
+		for (let i = 0; i < 50 && socket === undefined; i++) {
+			await new Promise((r) => setTimeout(r, 10));
+		}
+		const gaps: number[] = [];
+		const off = pty.onTruncated((from) => gaps.push(from));
+		const message = (data: unknown) =>
+			(socket as { onmessage: (ev: { data: unknown }) => void }).onmessage({
+				data,
+			});
+		message(JSON.stringify({ type: "attached", offset: 0 }));
+		message(JSON.stringify({ type: "truncated", availableFrom: 4096 }));
+		expect(gaps).toEqual([4096]);
+		expect(pty.offset).toBe(4096);
+		off();
+		message(JSON.stringify({ type: "truncated", availableFrom: 8192 }));
+		expect(gaps).toEqual([4096]);
+		pty.close();
+	});
+});

@@ -103,7 +103,11 @@ export class Files {
 		path: string,
 		opts: CallOptions & UserOption = {},
 	): Promise<string> {
-		return new TextDecoder().decode(await this.readBytes(path, opts));
+		// ignoreBOM: the file's bytes as they are (a leading U+FEFF stays),
+		// like the Python SDK.
+		return new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+			await this.readBytes(path, opts),
+		);
 	}
 
 	/** Atomic write of the whole file (PUT /files/content); retried as a whole. */
@@ -872,7 +876,11 @@ async function openSink(
 	dest: string | WritableStream<Uint8Array>,
 ): Promise<Sink> {
 	if (typeof dest === "string") {
-		const fh = await fsPromises("download to a local path").open(dest, "w");
+		// Written next to dest and renamed at the end: a failed download
+		// leaves an existing dest as it was.
+		const fs = fsPromises("download to a local path");
+		const tmp = `${dest}.tmp`;
+		const fh = await fs.open(tmp, "w");
 		let pos = 0;
 		return {
 			async write(b) {
@@ -887,7 +895,11 @@ async function openSink(
 				await fh.truncate(0);
 				pos = 0;
 			},
-			close: () => fh.close(),
+			async close(ok) {
+				await fh.close();
+				if (ok) await fs.rename(tmp, dest);
+				else await fs.rm(tmp, { force: true });
+			},
 		};
 	}
 	const writer = dest.getWriter();

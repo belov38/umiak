@@ -301,8 +301,14 @@ describe("sandbox lifecycle", () => {
 		expect(keep.stderr).toMatch(/\[y\/N\]/);
 		expect(JSON.parse((await sbx(["info", a.id])).stdout).state).toBe("ready");
 		await sbx(["current", a.id]);
-		const del = await sbx(["rm", a.slug, b.slug], { tty: true, stdin: "y\n" });
+		const del = await sbx(["--json", "rm", a.slug, b.slug], {
+			tty: true,
+			stdin: "y\n",
+		});
 		expect(del.code, del.stderr).toBe(0);
+		// JSON: one array of the answers, not one document per sandbox.
+		const answers = JSON.parse(del.stdout) as { sandbox: { id: string } }[];
+		expect(answers.map((x) => x.sandbox.id)).toEqual([a.id, b.id]);
 		expect((await sbx(["current"])).code).toBe(3);
 		expect(JSON.parse((await sbx(["info", a.id])).stdout).state).toBe(
 			"deleting",

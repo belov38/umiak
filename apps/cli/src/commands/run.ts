@@ -4,8 +4,8 @@
 // working directory unless --cwd, run the command with its output streamed
 // like `exec`, then delete the sandbox (unless --keep, which makes it
 // current). Exits with the command's code. Progress goes to stderr; stdout
-// carries only the command's output (or its frames with --json). Ctrl-C at
-// any point deletes the sandbox (unless --keep).
+// carries only the command's output (or its frames with --json). Ctrl-C,
+// SIGTERM or SIGHUP at any point deletes the sandbox (unless --keep).
 
 import { basename, resolve } from "node:path";
 import type { Command } from "commander";
@@ -22,10 +22,11 @@ import {
 } from "./create.ts";
 import {
 	commandSpec,
-	EXIT_INTERRUPTED,
 	type ExecFlags,
 	execIn,
 	remoteCommand,
+	STOP_SIGNALS,
+	stopExitCode,
 } from "./exec.ts";
 import { checkPushDir, pushDir } from "./push.ts";
 
@@ -95,16 +96,22 @@ export function register(program: Command, run: Runner): void {
 							? undefined
 							: parseDuration(f.waitTimeout, "--wait-timeout") * 1000;
 					const body = createBody(f);
-					// Ctrl-C at any point ends with the sandbox deleted (unless
-					// --keep). While the command runs, exec's own forwarding has
-					// it (first Ctrl-C to the command, second detaches); this
-					// handler only keeps the process alive until the cleanup.
+					// Ctrl-C, SIGTERM or SIGHUP at any point ends with the sandbox
+					// deleted (unless --keep) and exit 130/143/129. While the
+					// command runs, exec's own handlers have them (first Ctrl-C
+					// to the command, second detaches); these only keep the
+					// process alive until the cleanup.
 					const ac = new AbortController();
 					let executing = false;
-					const onInt = () => {
-						if (!executing) ac.abort();
+					let stoppedBy: NodeJS.Signals | undefined;
+					const onStop = (sig: NodeJS.Signals) => {
+						if (executing) return;
+						stoppedBy ??= sig;
+						ac.abort();
 					};
-					process.on("SIGINT", onInt);
+					const stops = ["SIGINT", ...STOP_SIGNALS] as const;
+					for (const sig of stops) process.on(sig, onStop);
+					const stopped = () => stopExitCode(stoppedBy);
 					let id: string | undefined;
 					let slug = "";
 					try {
@@ -113,7 +120,7 @@ export function register(program: Command, run: Runner): void {
 						id = created.sandbox.id;
 						slug = created.sandbox.slug;
 						ctx.out.info(`sbx: created ${slug} (${id})`);
-						if (ac.signal.aborted) return EXIT_INTERRUPTED;
+						if (ac.signal.aborted) return stopped();
 						try {
 							await waitForState(ctx, created.sandbox, "ready", {
 								...(timeoutMs === undefined ? {} : { timeoutMs }),
@@ -134,7 +141,7 @@ export function register(program: Command, run: Runner): void {
 								detachHint: f.keep === true,
 							});
 						} catch (err) {
-							if (ac.signal.aborted) return EXIT_INTERRUPTED;
+							if (ac.signal.aborted) return stopped();
 							throw err;
 						}
 					} finally {
@@ -146,7 +153,7 @@ export function register(program: Command, run: Runner): void {
 								await removeSandbox(ctx, id);
 							}
 						}
-						process.off("SIGINT", onInt);
+						for (const sig of stops) process.off(sig, onStop);
 					}
 				},
 				{ rawData: true },

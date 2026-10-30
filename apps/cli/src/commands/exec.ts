@@ -12,7 +12,8 @@
 // - `--stdin`: the command is started with stdin open and this process's
 //   stdin is sent to it; EOF closes it.
 // - Ctrl-C sends SIGINT to the remote command; a second Ctrl-C leaves it
-//   running and exits 130.
+//   running and exits 130. SIGTERM/SIGHUP leave it running too and exit
+//   143/129.
 // - When the reader of stdout goes away (`sbx exec … | head -1`), the remote
 //   command is killed (SIGTERM, then SIGKILL after the api's grace), as a
 //   local pipeline's writer dies of SIGPIPE, and sbx exits 141 quietly.
@@ -35,6 +36,22 @@ import type { Runner } from "../program.ts";
 
 /** Exit code after a second Ctrl-C (the remote command keeps running). */
 export const EXIT_INTERRUPTED = 130;
+
+/** Signals that stop sbx itself (the terminal closed, a kill): 128 + n. */
+export const STOP_SIGNALS = ["SIGTERM", "SIGHUP"] as const;
+type StopSignal = (typeof STOP_SIGNALS)[number] | "SIGINT";
+const STOP_EXIT: Record<StopSignal, number> = {
+	SIGINT: EXIT_INTERRUPTED,
+	SIGTERM: 128 + 15,
+	SIGHUP: 128 + 1,
+};
+
+/** Exit code of sbx stopped by `sig` (130 when unknown: Ctrl-C). */
+export function stopExitCode(sig: NodeJS.Signals | undefined): number {
+	return sig !== undefined && sig in STOP_EXIT
+		? STOP_EXIT[sig as StopSignal]
+		: EXIT_INTERRUPTED;
+}
 /** Bytes of stdin per input request. */
 const STDIN_CHUNK = 256 * 1024;
 
@@ -135,14 +152,22 @@ export async function printEvents(
 
 /**
  * Ctrl-C forwarding while a command streams: the first SIGINT signals the
- * remote command, the second aborts (`signal`). Call `stop()` at the end.
+ * remote command, the second aborts (`signal`). SIGTERM and SIGHUP abort at
+ * once (the remote command keeps running). `exitCode()` is the code of the
+ * abort (130, 143, 129). Call `stop()` at the end.
  */
 export function forwardInterrupts(
 	ctx: Context,
 	current: () => SbxCommand | undefined,
-): { signal: AbortSignal; interrupted: () => boolean; stop(): void } {
+): {
+	signal: AbortSignal;
+	interrupted: () => boolean;
+	exitCode: () => number;
+	stop(): void;
+} {
 	const ac = new AbortController();
 	let count = 0;
+	let stoppedBy: NodeJS.Signals | undefined;
 	const onInt = () => {
 		count++;
 		const cmd = current();
@@ -150,16 +175,29 @@ export function forwardInterrupts(
 			ctx.out.info(
 				"sbx: sending SIGINT to the command (Ctrl-C again to detach)",
 			);
-			cmd.signal("SIGINT").catch(() => {});
+			cmd.signal("SIGINT").catch((err: unknown) => {
+				ctx.out.warn(
+					`could not send SIGINT to the command: ${(err as Error).message}`,
+				);
+			});
 			return;
 		}
 		ac.abort();
 	};
+	const onStop = (sig: NodeJS.Signals) => {
+		stoppedBy ??= sig;
+		ac.abort();
+	};
 	process.on("SIGINT", onInt);
+	for (const sig of STOP_SIGNALS) process.on(sig, onStop);
 	return {
 		signal: ac.signal,
 		interrupted: () => ac.signal.aborted,
-		stop: () => process.off("SIGINT", onInt),
+		exitCode: () => stopExitCode(stoppedBy),
+		stop: () => {
+			process.off("SIGINT", onInt);
+			for (const sig of STOP_SIGNALS) process.off(sig, onStop);
+		},
 	};
 }
 
@@ -247,7 +285,7 @@ export async function execIn(
 					`sbx: ${command.id} keeps running; see: sbx logs ${command.id}`,
 				);
 			}
-			return EXIT_INTERRUPTED;
+			return fwd.exitCode();
 		}
 		throw err;
 	} finally {

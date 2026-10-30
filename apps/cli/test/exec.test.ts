@@ -230,6 +230,72 @@ describe("exec, logs, kill, ps, run", () => {
 		expect(state.rows[0]?.state).toBe("deleting");
 	});
 
+	it("SIGTERM while run waits for ready deletes the sandbox and exits 143", async () => {
+		const tag = crypto.randomUUID();
+		let child: ChildProcess | undefined;
+		const run = runCli(["run", "--label", `run=${tag}`, "--", "true"], {
+			env,
+			onSpawn: (c) => {
+				child = c;
+			},
+		});
+		const slug = await until(async () => {
+			const r = await w.db.pool.query<{ slug: string }>(
+				"SELECT slug FROM runtime.sandboxes WHERE labels->>'run' = $1",
+				[tag],
+			);
+			return r.rows[0]?.slug;
+		});
+		await new Promise((r) => setTimeout(r, 300));
+		child?.kill("SIGTERM");
+		const r = await run;
+		expect(r.code, r.stderr).toBe(143);
+		const state = await w.db.pool.query<{ state: string }>(
+			"SELECT state FROM runtime.sandboxes WHERE slug = $1",
+			[slug],
+		);
+		expect(state.rows[0]?.state).toBe("deleting");
+	});
+
+	it("SIGHUP while run executes the command deletes the sandbox and exits 129", async () => {
+		const tag = crypto.randomUUID();
+		let child: ChildProcess | undefined;
+		const run = runCli(
+			["run", "--label", `run=${tag}`, "--", "echo go; sleep 30"],
+			{
+				env,
+				onSpawn: (c) => {
+					child = c;
+				},
+			},
+		);
+		const slug = await until(async () => {
+			const r = await w.db.pool.query<{ slug: string }>(
+				"SELECT slug FROM runtime.sandboxes WHERE labels->>'run' = $1",
+				[tag],
+			);
+			return r.rows[0]?.slug;
+		});
+		await w.markReady(slug);
+		await until(async () => {
+			const r = await w.db.pool.query(
+				`SELECT 1 FROM runtime.commands c JOIN runtime.sandboxes s ON s.id = c.sandbox_id
+				  WHERE s.slug = $1 AND c.status = 'running'`,
+				[slug],
+			);
+			return r.rowCount ? true : undefined;
+		});
+		await new Promise((r) => setTimeout(r, 300));
+		child?.kill("SIGHUP");
+		const r = await run;
+		expect(r.code, r.stderr).toBe(129);
+		const state = await w.db.pool.query<{ state: string }>(
+			"SELECT state FROM runtime.sandboxes WHERE slug = $1",
+			[slug],
+		);
+		expect(state.rows[0]?.state).toBe("deleting");
+	});
+
 	it("exec errors: no `--` is a usage error; an unknown sandbox exits 3 with the error on stderr", async () => {
 		const u = await sbx(["exec", sb.id]);
 		expect(u.code).toBe(2);
