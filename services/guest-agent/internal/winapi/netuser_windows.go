@@ -9,15 +9,15 @@ import (
 
 var procNetUserSetInfo = modnetapi32.NewProc("NetUserSetInfo")
 
-// SetUserPassword sets the password of the local account user
+// SetUserPassword sets the UTF-8 password of the local account user
 // (NetUserSetInfo level 1003, USER_INFO_1003). The local password policy
-// applies.
-func SetUserPassword(user, password string) error {
+// applies. As with LogonUserToken the password is bytes the caller can wipe.
+func SetUserPassword(user string, password []byte) error {
 	u, err := windows.UTF16PtrFromString(user)
 	if err != nil {
 		return fmt.Errorf("winapi: set password of %s: %w", user, err)
 	}
-	pw, err := windows.UTF16FromString(password)
+	pw, err := utf16Secret(password)
 	if err != nil {
 		return fmt.Errorf("winapi: set password of %s: %w", user, err)
 	}

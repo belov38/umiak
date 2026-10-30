@@ -1,7 +1,10 @@
 package winapi
 
 import (
+	"errors"
 	"fmt"
+	"unicode/utf16"
+	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -18,18 +21,20 @@ const tokenElevationTypeLimited = 3
 
 var procLogonUserW = modadvapi32.NewProc("LogonUserW")
 
-// LogonUserToken logs the local account user on interactively with password
-// and returns its elevated token: the linked full token when UAC split the
-// logon into a limited and a full one (spec 12.5). The token carries the
-// password, so DPAPI and Credential Manager work in the processes that use
-// it. The caller closes it.
-func LogonUserToken(user, password string) (windows.Token, error) {
+// LogonUserToken logs the local account user on interactively with the
+// UTF-8 password and returns its elevated token: the linked full token when
+// UAC split the logon into a limited and a full one (spec 12.5). The token
+// carries the password, so DPAPI and Credential Manager work in the
+// processes that use it. The password is taken as bytes so the caller can
+// wipe it; the UTF-16 copy made here is wiped too. The caller closes the
+// token.
+func LogonUserToken(user string, password []byte) (windows.Token, error) {
 	u, err := windows.UTF16PtrFromString(user)
 	if err != nil {
 		return 0, fmt.Errorf("winapi: logon %s: %w", user, err)
 	}
 	dot, _ := windows.UTF16PtrFromString(".")
-	pw, err := windows.UTF16FromString(password)
+	pw, err := utf16Secret(password)
 	if err != nil {
 		return 0, fmt.Errorf("winapi: logon %s: password: %w", user, err)
 	}
@@ -58,4 +63,22 @@ func LogonUserToken(user, password string) (windows.Token, error) {
 		return 0, fmt.Errorf("winapi: logon %s: linked token: %w", user, err)
 	}
 	return full, nil
+}
+
+// utf16Secret converts the UTF-8 secret b to a NUL-terminated UTF-16 buffer
+// without an intermediate string. The buffer never grows (a UTF-8 sequence
+// is at least as long as its UTF-16 form), so no unwiped copy is left
+// behind; the caller clears it.
+func utf16Secret(b []byte) ([]uint16, error) {
+	out := make([]uint16, 0, len(b)+1)
+	for len(b) > 0 {
+		r, n := utf8.DecodeRune(b)
+		if r == 0 {
+			clear(out)
+			return nil, errors.New("contains NUL")
+		}
+		out = utf16.AppendRune(out, r)
+		b = b[n:]
+	}
+	return append(out, 0), nil
 }

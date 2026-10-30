@@ -30,11 +30,25 @@ type profileInfo struct {
 	Profile     windows.Handle
 }
 
-// profilePrivileges are needed by LoadUserProfileW; SYSTEM holds them but
-// they may be disabled in the service token.
-var profilePrivileges = sync.OnceValue(func() error {
-	return EnablePrivileges("SeBackupPrivilege", "SeRestorePrivilege")
-})
+// profilePrivileges enables the privileges LoadUserProfileW needs; SYSTEM
+// holds them but they may be disabled in the service token. Only success
+// is remembered, a failure is retried by the next load.
+var profilePrivileges = func() func() error {
+	var mu sync.Mutex
+	done := false
+	return func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return nil
+		}
+		if err := EnablePrivileges("SeBackupPrivilege", "SeRestorePrivilege"); err != nil {
+			return err
+		}
+		done = true
+		return nil
+	}
+}()
 
 // LoadProfile loads the profile (registry hive HKCU and the profile
 // directory) of user for token t, so the user's environment and

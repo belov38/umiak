@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -39,7 +40,21 @@ func TestLsaStoreRetrieveDelete(t *testing.T) {
 }
 
 func TestLogonUserTokenUnknownUser(t *testing.T) {
-	if _, err := LogonUserToken("sbx-no-such-user", "x"); err == nil {
+	if _, err := LogonUserToken("sbx-no-such-user", []byte("x")); err == nil {
 		t.Fatal("logon of an unknown user succeeded")
+	}
+}
+
+func TestUTF16Secret(t *testing.T) {
+	got, err := utf16Secret([]byte("aé🙂"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := windows.UTF16FromString("aé🙂")
+	if !slices.Equal(got, want) || cap(got) != len("aé🙂")+1 {
+		t.Fatalf("utf16Secret = %v (cap %d), want %v", got, cap(got), want)
+	}
+	if _, err := utf16Secret([]byte("a\x00b")); err == nil {
+		t.Fatal("NUL accepted")
 	}
 }

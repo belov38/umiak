@@ -24,7 +24,7 @@ func (b EnvBuilder) Build(u *process.User, spec *agentv1.CommandSpec) []string {
 	base, err := userEnvBlock(u)
 	if err != nil {
 		b.m.log.Warn("claim: user environment block failed, using the system one", "user", u.Name, "err", err)
-		base = systemEnvBlock(u)
+		base = b.systemEnvBlock(u)
 	}
 	platform, claimed, secret, req := b.claimEnv()
 	if h := req.GetHostname(); h != "" {
@@ -71,7 +71,7 @@ var userEnvBlock = func(u *process.User) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	t, err := winapi.LogonUserToken(account, string(pw))
+	t, err := winapi.LogonUserToken(account, pw)
 	clear(pw)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,12 @@ var userEnvBlock = func(u *process.User) ([]string, error) {
 
 // systemEnvBlock is the fallback base env: the system variables
 // (CreateEnvironmentBlock without a token) and the profile and name of u.
-func systemEnvBlock(u *process.User) []string {
-	env, _ := windows.Token(0).Environ(false)
+// Without even the system block the command gets only the claim layers and
+// the profile and name.
+func (b EnvBuilder) systemEnvBlock(u *process.User) []string {
+	env, err := windows.Token(0).Environ(false)
+	if err != nil {
+		b.m.log.Error("claim: system environment block failed", "err", err)
+	}
 	return wincmd.MergeEnv(env, []string{"USERPROFILE=" + u.Home, "USERNAME=" + u.Name})
 }

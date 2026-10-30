@@ -19,10 +19,18 @@ const defaultPathext = ".COM;.EXE;.BAT;.CMD"
 // (case-insensitive keys). A name with a separator or a drive is a path,
 // relative to cwd; a bare name is searched in the absolute PATH entries only
 // (never in cwd). A name with an extension is tried as is first; then each
-// PATHEXT extension is appended. isBatch is true for .bat and .cmd files.
+// PATHEXT extension is appended. Trailing dots and spaces of the name and of
+// the PATHEXT entries are dropped, as Win32 does when it opens the file.
+// isBatch is true for .bat and .cmd files.
 func ResolveProgram(name string, env []string, cwd string) (path string, isBatch bool, err error) {
 	if name == "" {
 		return "", false, fmt.Errorf("%w: empty name", ErrNotFound)
+	}
+	// Resolve the name Win32 would open, so the batch check sees the real
+	// extension; an alternate data stream (name:stream) is never a program.
+	name = win32Name(name)
+	if strings.Contains(filepath.Base(name), ":") {
+		return "", false, fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 	exts := pathext(env)
 	if strings.ContainsAny(name, `/\`) || filepath.VolumeName(name) != "" {
@@ -55,14 +63,14 @@ func pathext(env []string) []string {
 	}
 	var exts []string
 	for e := range strings.SplitSeq(v, ";") {
-		e = strings.ToLower(strings.TrimSpace(e))
+		// Trailing dots and spaces would be stripped when the file is
+		// opened: .CMD. is .CMD.
+		e = strings.ToLower(strings.TrimRight(strings.TrimSpace(e), ". "))
+		e = strings.TrimLeft(e, ".")
 		if e == "" {
 			continue
 		}
-		if e[0] != '.' {
-			e = "." + e
-		}
-		exts = append(exts, e)
+		exts = append(exts, "."+e)
 	}
 	return exts
 }

@@ -23,10 +23,21 @@ const batchUnsafe = "%!\"^\r\n"
 const batchQuote = " \t\v\f,;=&|<>()"
 
 // IsBatch reports whether path names a .bat or .cmd file, which runs through
-// cmd.exe.
+// cmd.exe. Trailing dots and spaces do not hide the extension: Win32 strips
+// them, so npm.cmd. opens npm.cmd (CVE-2024-43402 class).
 func IsBatch(path string) bool {
-	ext := strings.ToLower(filepath.Ext(strings.ReplaceAll(path, `\`, "/")))
+	ext := strings.ToLower(filepath.Ext(strings.ReplaceAll(win32Name(path), `\`, "/")))
 	return ext == ".bat" || ext == ".cmd"
+}
+
+// win32Name drops the trailing dots and spaces Win32 strips from the last
+// element of a path, unless the element consists of them only (".", "..").
+func win32Name(p string) string {
+	t := strings.TrimRight(p, ". ")
+	if t == "" || strings.HasSuffix(t, `\`) || strings.HasSuffix(t, "/") || strings.HasSuffix(t, ":") {
+		return p
+	}
+	return t
 }
 
 // BatchCommandLine returns the command line that runs the batch file script

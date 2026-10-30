@@ -20,17 +20,18 @@ func (m *Manager) shellArgv(_ string, _ *User, script string, login bool) ([]str
 
 // resolveCwd returns the working directory of a command: the home of u when
 // empty, relative paths under it.
-func resolveCwd(u *User, cwd string) string {
+func resolveCwd(u *User, cwd string) (string, error) {
 	switch {
 	case cwd == "":
-		return u.Home
+		return u.Home, nil
 	case !path.IsAbs(cwd):
-		return path.Join(u.Home, cwd)
+		return path.Join(u.Home, cwd), nil
 	}
-	return cwd
+	return cwd, nil
 }
 
-// checkArgv has nothing to check on Linux: execve passes argv as is.
-func (m *Manager) checkArgv(*User, *agentv1.CommandSpec) error {
-	return nil
+// prepareSpec has nothing to check on Linux (execve passes argv as is) and
+// leaves the environment to the launch.
+func (m *Manager) prepareSpec(*User, *agentv1.CommandSpec) ([]string, error) {
+	return nil, nil
 }

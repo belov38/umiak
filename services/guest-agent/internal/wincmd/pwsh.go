@@ -14,8 +14,9 @@ const ScriptFile = "script.ps1"
 
 // Prologue and epilogue of a shell command (spec 12.6). pwsh turns any exit
 // code of the last native program other than 0 and 1 into 1; the epilogue
-// keeps it. It sits on its own line, so a trailing comment in the script
-// cannot swallow it.
+// keeps it. It sits on its own line after an empty one, so neither a
+// trailing comment nor a trailing backtick (line continuation) in the
+// script can swallow it.
 const (
 	pwshPrologue = "$global:LASTEXITCODE = 0"
 	pwshEpilogue = "$__sbx_ok = $?; if ($__sbx_ok) { exit 0 } elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } else { exit 1 }"
@@ -24,7 +25,7 @@ const (
 // WrapScript returns script between the prologue and the exit-code
 // epilogue.
 func WrapScript(script string) string {
-	return pwshPrologue + "\n" + script + "\n" + pwshEpilogue
+	return pwshPrologue + "\n" + script + "\n\n" + pwshEpilogue
 }
 
 // PwshArgv returns the argv that runs shell script with pwsh: -NoLogo

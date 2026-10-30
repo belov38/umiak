@@ -82,6 +82,9 @@ func TestIsBatch(t *testing.T) {
 	for p, want := range map[string]bool{
 		`C:\x\npm.cmd`: true, `C:\x\NPM.CMD`: true, `C:\x\run.Bat`: true,
 		`C:\x\node.exe`: false, `C:\x.cmd\node`: false, "npm": false,
+		// Win32 strips trailing dots and spaces: these run through cmd.exe.
+		`C:\x\npm.cmd.`: true, `C:\x\npm.cmd `: true, `C:\x\npm.cmd. . `: true, `C:\x\run.bat...`: true,
+		`C:\x\node.exe.`: false,
 	} {
 		if got := IsBatch(p); got != want {
 			t.Errorf("IsBatch(%q) = %v, want %v", p, got, want)
@@ -135,6 +138,14 @@ func TestResolveProgramPathext(t *testing.T) {
 		{filepath.Join(cwd, "local.bat"), local, true},
 		{"local.bat", "", false},
 		{"." + string(filepath.Separator) + "local", local, true},
+		// Trailing dots and spaces name the same file and are dropped.
+		{"npm.cmd.", npm, true},
+		{"npm.cmd ", npm, true},
+		{"npm.cmd. .", npm, true},
+		{"node.exe.", node, false},
+		{filepath.Join(bin2, "npm.cmd.."), npm, true},
+		{".", "", false},
+		{"npm.cmd::$DATA", "", false},
 		{filepath.Join(bin1, "tool"), toolExe, false},
 		{tool, toolExe, false},
 	}
@@ -153,6 +164,17 @@ func TestResolveProgramPathext(t *testing.T) {
 		// Case-insensitive file systems answer a stat of NPM.cmd too.
 		if !strings.EqualFold(got, tt.wantPath) || batch != tt.wantBatch {
 			t.Errorf("ResolveProgram(%q) = %q, %v; want %q, %v", tt.name, got, batch, tt.wantPath, tt.wantBatch)
+		}
+	}
+}
+
+func TestResolveProgramPathextTrailingDot(t *testing.T) {
+	bin := t.TempDir()
+	npm := touch(t, bin, "npm.cmd")
+	for _, pe := range []string{".CMD.", ".CMD ", "CMD..", ".EXE;;.;.CMD. "} {
+		got, batch, err := ResolveProgram("npm", []string{"PATH=" + bin, "PATHEXT=" + pe}, "")
+		if err != nil || !batch || got != npm {
+			t.Errorf("PATHEXT=%q: ResolveProgram = %q, %v, %v", pe, got, batch, err)
 		}
 	}
 }
@@ -196,7 +218,7 @@ func TestPwshArgvEncoded(t *testing.T) {
 		t.Fatalf("argv = %q", argv)
 	}
 	got := decodeEncoded(t, argv[len(argv)-1])
-	want := "$global:LASTEXITCODE = 0\n" + script + "\n" +
+	want := "$global:LASTEXITCODE = 0\n" + script + "\n\n" +
 		"$__sbx_ok = $?; if ($__sbx_ok) { exit 0 } elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } else { exit 1 }"
 	if got != want {
 		t.Fatalf("wrapped script =\n%s\nwant\n%s", got, want)
@@ -205,8 +227,16 @@ func TestPwshArgvEncoded(t *testing.T) {
 		t.Fatal("WrapScript differs from the encoded script")
 	}
 	lines := strings.Split(got, "\n")
-	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "$__sbx_ok = $?;") {
-		t.Fatalf("epilogue is not on its own line: %q", last)
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "$__sbx_ok = $?;") || lines[len(lines)-2] != "" {
+		t.Fatalf("epilogue is not on its own line after an empty one: %q", lines[len(lines)-2:])
+	}
+
+	// A trailing backtick continues the line: the empty line ends the
+	// continuation before the epilogue.
+	tick := "cmd /c exit 3 `"
+	argv, _ = PwshArgv(testPwsh, tick, false, `C:\d`)
+	if got := decodeEncoded(t, argv[len(argv)-1]); !strings.Contains(got, tick+"\n\n$__sbx_ok = $?;") {
+		t.Fatalf("backtick script = %q", got)
 	}
 
 	// login keeps the profile.

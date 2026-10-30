@@ -134,7 +134,7 @@ func TestPTYIdleArmedOnRetryPath(t *testing.T) {
 	h := newHarness(t, func(o *Options) { o.PTYIdle = 100 * time.Millisecond })
 	spec := ptySpec()
 	putStarting(t, h, "c1", spec)
-	ss, err := h.m.shimSpec("c1", spec)
+	ss, err := h.m.shimSpec("c1", spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

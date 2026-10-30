@@ -59,6 +59,7 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 		return nil, false, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 	created := false
+	var env []string
 	if ok {
 		if rec.SpecHash != hash {
 			return nil, false, errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists,
@@ -87,14 +88,14 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 				"at most %d commands may run at once", m.opts.Config.MaxRunningCommands)
 		}
 	} else {
-		rec, err = m.create(ctx, c, id, hash, spec)
+		rec, env, err = m.create(ctx, c, id, hash, spec)
 		if err != nil {
 			return nil, false, err
 		}
 		created = true
 	}
 
-	if err := m.launchLocked(ctx, c, rec, spec); err != nil {
+	if err := m.launchLocked(ctx, c, rec, spec, env); err != nil {
 		return nil, false, err
 	}
 	// A PTY that nobody attaches to closes PTYIdle after its creation.
@@ -105,15 +106,18 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 	return info, created, err
 }
 
-// create checks the user, the argv and the limit and writes the STARTING
-// record. the record lock of c is held.
-func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec *agentv1.CommandSpec) (*store.Command, error) {
+// create checks the user, the spec against the platform and the limit and
+// writes the STARTING record. It returns the environment when checking
+// the spec already built it (Windows), for the launch to reuse. the record
+// lock of c is held.
+func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec *agentv1.CommandSpec) (*store.Command, []string, error) {
 	u, err := m.lookupUser(spec)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := m.checkArgv(u, spec); err != nil {
-		return nil, err
+	env, err := m.prepareSpec(u, spec)
+	if err != nil {
+		return nil, nil, err
 	}
 	// Reserve a slot: mainAlive counts toward max_running_commands from
 	// here on, so concurrent Starts cannot overshoot the limit.
@@ -121,7 +125,7 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 	if m.runningMainLocked() >= m.opts.Config.MaxRunningCommands {
 		m.mu.Unlock()
 		m.dropIfUnused(c)
-		return nil, errs.Newf(connect.CodeResourceExhausted, errs.TooManyCommands,
+		return nil, nil, errs.Newf(connect.CodeResourceExhausted, errs.TooManyCommands,
 			"at most %d commands may run at once", m.opts.Config.MaxRunningCommands)
 	}
 	c.mainAlive = true
@@ -131,7 +135,7 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 	stored, keys, err := storedSpec(spec)
 	if err != nil {
 		m.release(c)
-		return nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
+		return nil, nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 	now := m.opts.Now().UTC()
 	rec := &store.Command{
@@ -155,12 +159,12 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 	defer cancel()
 	if err := m.st.PutCommand(dctx, rec); err != nil {
 		m.release(c)
-		return nil, storeError(err)
+		return nil, nil, storeError(err)
 	}
 	m.mu.Lock()
 	m.loadLiveLocked(c, rec)
 	m.mu.Unlock()
-	return rec, nil
+	return rec, env, nil
 }
 
 // release undoes the slot reservation of a Start that wrote no record.
@@ -194,13 +198,14 @@ func (m *Manager) setPTY(c *command, pty bool) {
 }
 
 // launchLocked writes the shim spec, starts the unit and records the
-// outcome. the record lock of c is held and rec is STARTING without a trace of a launch.
-func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Command, spec *agentv1.CommandSpec) error {
+// outcome. env is the command environment when create built it, else nil.
+// the record lock of c is held and rec is STARTING without a trace of a launch.
+func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Command, spec *agentv1.CommandSpec, env []string) error {
 	m.mu.Lock()
 	c.mainAlive, c.unitAlive = true, true
 	m.mu.Unlock()
 
-	ss, err := m.shimSpec(rec.ID, spec)
+	ss, err := m.shimSpec(rec.ID, spec, env)
 	if err != nil {
 		// The user vanished between two Starts of a STARTING record: the
 		// command cannot start (spec 9.2).
@@ -327,11 +332,18 @@ func (m *Manager) lookupUser(spec *agentv1.CommandSpec) (*User, error) {
 }
 
 // shimSpec resolves spec into what the shim runs: argv, env, cwd and the
-// credentials.
-func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec) (shim.Spec, error) {
+// credentials. env, when not nil, is the already built environment.
+func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec, env []string) (shim.Spec, error) {
 	u, err := m.lookupUser(spec)
 	if err != nil {
 		return shim.Spec{}, err
+	}
+	cwd, err := resolveCwd(u, spec.GetCwd())
+	if err != nil {
+		return shim.Spec{}, err
+	}
+	if env == nil {
+		env = m.opts.Env.Build(u, spec)
 	}
 	var argv []string
 	if sh, ok := spec.GetCmd().(*agentv1.CommandSpec_Shell); ok {
@@ -345,8 +357,8 @@ func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec) (shim.Spec, err
 	ss := shim.Spec{
 		ID:            id,
 		Argv:          argv,
-		Env:           m.opts.Env.Build(u, spec),
-		Cwd:           resolveCwd(u, spec.GetCwd()),
+		Env:           env,
+		Cwd:           cwd,
 		UID:           u.UID,
 		GID:           u.GID,
 		Groups:        u.Groups,
