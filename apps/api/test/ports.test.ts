@@ -178,9 +178,9 @@ describe.skipIf(skipPg())("hosted ports (S7 §11.2)", () => {
 		expect(again.status).toBe(204);
 	});
 
-	it("ports 22, 0, 65536 and non-numbers are 400; the 51st port is 400", async () => {
+	it("ports 22, 47989 (desktop), 0, 65536 and non-numbers are 400; the 51st port is 400", async () => {
 		const s = await w.seed({ state: "ready" });
-		for (const port of ["22", "0", "65536", "abc", "80.5"]) {
+		for (const port of ["22", "47989", "0", "65536", "abc", "80.5"]) {
 			const r = await h.request("PUT", `/v1/sandboxes/${s.slug}/ports/${port}`);
 			expect(r.status, port).toBe(400);
 			expect(body(r).error.code).toBe("validation");
@@ -277,11 +277,24 @@ describe.skipIf(skipPg())("hosted ports (S7 §11.2)", () => {
 			before - 1000,
 		);
 
-		// An unreachable agent never fails the request.
+		// An unreachable agent never fails the request; the failure is a warning.
 		w.agent.setUnavailable(s.machineId as string, true);
+		const logs = captureLogs();
+		const lh = w.harness({ deps: { log: logs.log } });
 		try {
-			const stored = await h.request("GET", `/v1/sandboxes/${s.slug}/ports`);
+			const stored = await lh.request("GET", `/v1/sandboxes/${s.slug}/ports`);
 			expect(stored.status).toBe(200);
+			const warn = logs
+				.entries()
+				.find((e) => e.msg === "listPorts failed; the stored report is used");
+			expect(warn).toMatchObject({
+				level: 40,
+				sandboxId: s.sandboxId,
+				errName: "ConnectError",
+				errCode: 14,
+			});
+			// Name and code only, never the message.
+			expect(warn).not.toHaveProperty("err");
 			expect(body(stored).listening).toEqual([
 				{ port: 8000, addresses: ["127.0.0.1"], process: "py", user: "u" },
 			]);

@@ -195,6 +195,16 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 			{ name, env: tooMany },
 			{ name, repositories: [{ url: "https://user:pw@github.com/a/b.git" }] },
 			{ name, repositories: [{ url: "ftp://github.com/a/b.git" }] },
+			// Tokens in a query string would be shown to every reader.
+			{
+				name,
+				repositories: [{ url: "https://github.com/a/b.git?token=t0k" }],
+			},
+			{ name, repositories: [{ url: "https://github.com/a/b.git?" }] },
+			{ name, repositories: [{ url: "https://github.com/a/b.git#main" }] },
+			{ name, repositories: [{ url: "ssh://git@host/a/b.git?x=1" }] },
+			{ name, repositories: [{ url: "git@github.com:a/b.git?x=1" }] },
+			{ name, repositories: [{ url: "git@github.com:a/b.git#x" }] },
 			{
 				name,
 				repositories: [{ url: "https://github.com/a/b.git", path: "/abs" }],

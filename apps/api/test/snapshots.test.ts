@@ -254,6 +254,51 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 		expect(byName.status).toBe(204);
 	});
 
+	it("DELETE deletes the confirmed snapshot only: one replaced under the same name meanwhile is 428 and stays", async () => {
+		const name = uniqueName("race");
+		const first = await insertSavedSnapshot(db.pool, w.env.topo, {
+			teamId: w.teamId,
+			name,
+		});
+		let second = "";
+		// Between the read that is confirmed and the delete, a new snapshot
+		// of the same name becomes ready (S6 §7.8 replacement).
+		const svc = new Proxy(w.env.svc, {
+			get(target, prop, receiver) {
+				if (prop !== "getSavedSnapshot") {
+					const v = Reflect.get(target, prop, receiver);
+					return typeof v === "function" ? v.bind(target) : v;
+				}
+				return async (...args: Parameters<typeof target.getSavedSnapshot>) => {
+					const s = await target.getSavedSnapshot(...args);
+					await db.pool.query(
+						"UPDATE runtime.snapshots SET state = 'deleting', name = NULL WHERE id = $1",
+						[first],
+					);
+					second = await insertSavedSnapshot(db.pool, w.env.topo, {
+						teamId: w.teamId,
+						name,
+					});
+					return s;
+				};
+			},
+		});
+		const rh = w.harness({ deps: { svc } });
+		const r = await rh.request("DELETE", `/v1/snapshots/${name}`, {
+			headers: { "Sbx-Confirm-Delete": encodeUuid("snapshot", first) },
+		});
+		expect(r.status).toBe(428);
+		expect(body(r).error).toMatchObject({
+			code: "confirmation_required",
+			details: { reason: "mismatch" },
+		});
+		const st = await db.pool.query(
+			"SELECT state FROM runtime.snapshots WHERE id = $1",
+			[second],
+		);
+		expect(st.rows[0].state).toBe("ready");
+	});
+
 	it("DELETE of a snapshot still creating is 409 invalid_state; of an unknown name 404", async () => {
 		const s = await w.seed({ state: "ready" });
 		const name = uniqueName("wip");

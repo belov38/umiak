@@ -184,7 +184,11 @@ export interface SandboxService {
 		name: string,
 		idemKey?: string,
 	): Promise<SaveSnapshotResult>;
-	deleteSavedSnapshot(p: Principal, name: string): Promise<void>;
+	deleteSavedSnapshot(
+		p: Principal,
+		name: string,
+		expectedId?: string,
+	): Promise<void>;
 	/** `ready`, `creating` and `failed` of the last day. */
 	listSavedSnapshots(p: Principal): Promise<SavedSnapshot[]>;
 	/** `ready` by name, else `creating` by pending name, else `snapshot_not_found`. */
@@ -356,8 +360,12 @@ export class SandboxServiceImpl implements SandboxService {
 		return saveSnapshot(this.deps, p, idOrSlug, name, idemKey);
 	}
 
-	deleteSavedSnapshot(p: Principal, name: string): Promise<void> {
-		return deleteSavedSnapshot(this.deps, p, name);
+	deleteSavedSnapshot(
+		p: Principal,
+		name: string,
+		expectedId?: string,
+	): Promise<void> {
+		return deleteSavedSnapshot(this.deps, p, name, expectedId);
 	}
 
 	listSavedSnapshots(p: Principal): Promise<SavedSnapshot[]> {

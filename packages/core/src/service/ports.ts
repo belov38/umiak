@@ -48,10 +48,13 @@ export interface HostPortOptions {
 	appProtocol?: PortAppProtocol;
 }
 /**
- * Ports that cannot be hosted: SSH, plus ports reserved by the platform
- * (S3/S10; shared with the gateway). Nothing else is reserved yet.
+ * Ports that cannot be hosted: SSH and the desktop stream ports
+ * (S10 §8.1: moonlight-web and Sunshine). The same list as the gateway's
+ * (S4 §4.2, S7 §11.2).
  */
-export const RESERVED_PORTS: readonly number[] = [22];
+export const RESERVED_PORTS: readonly number[] = [
+	22, 47800, 47984, 47989, 47990, 48010,
+];
 /** S4: at most 50 hosted ports per sandbox. */
 export const MAX_HOSTED_PORTS = 50;
 export const PORT_TOKEN_PREFIX = "sbxp_";

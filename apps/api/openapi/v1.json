@@ -2342,7 +2342,7 @@
 						"type": "string"
 					},
 					"url": {
-						"description": "https://..., ssh://... or git@host:org/repo.git, without credentials in the URL",
+						"description": "https://..., ssh://... or git@host:org/repo.git, without credentials, a query or a fragment",
 						"example": "https://github.com/acme/web.git",
 						"maxLength": 2048,
 						"minLength": 1,
@@ -7862,12 +7862,12 @@
 						}
 					},
 					{
-						"description": "TCP port in the guest, 1-65535 (not 22)",
+						"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
 						"in": "path",
 						"name": "port",
 						"required": true,
 						"schema": {
-							"description": "TCP port in the guest, 1-65535 (not 22)",
+							"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
 							"example": 3000,
 							"maximum": 65535,
 							"minimum": 1,
@@ -7887,7 +7887,7 @@
 								}
 							}
 						},
-						"description": "`validation`: port outside 1-65535, a reserved port (22), or more than 50 hosted ports"
+						"description": "`validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, 48010), or more than 50 hosted ports"
 					},
 					"404": {
 						"content": {
@@ -7931,12 +7931,12 @@
 						}
 					},
 					{
-						"description": "TCP port in the guest, 1-65535 (not 22)",
+						"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
 						"in": "path",
 						"name": "port",
 						"required": true,
 						"schema": {
-							"description": "TCP port in the guest, 1-65535 (not 22)",
+							"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
 							"example": 3000,
 							"maximum": 65535,
 							"minimum": 1,
@@ -7984,7 +7984,7 @@
 								}
 							}
 						},
-						"description": "`validation`: port outside 1-65535, a reserved port (22), or more than 50 hosted ports"
+						"description": "`validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, 48010), or more than 50 hosted ports"
 					},
 					"403": {
 						"content": {
@@ -8050,12 +8050,12 @@
 						}
 					},
 					{
-						"description": "TCP port in the guest, 1-65535 (not 22)",
+						"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
 						"in": "path",
 						"name": "port",
 						"required": true,
 						"schema": {
-							"description": "TCP port in the guest, 1-65535 (not 22)",
+							"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
 							"example": 3000,
 							"maximum": 65535,
 							"minimum": 1,

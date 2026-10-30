@@ -6,6 +6,7 @@ import {
 	idempotencyKeyReused,
 	notFound,
 	operationInProgress,
+	SbxError,
 	snapshotNotFound,
 	validation,
 } from "../errors.ts";
@@ -149,12 +150,15 @@ export async function saveSnapshot(
 /**
  * The team's `ready` saved snapshot of this name → `deleting` (the name is
  * free at once) and a `snapshot-op delete` job. Locks only the snapshot row
- * (lock order contract: no team lock).
+ * (lock order contract: no team lock). With `expectedId` (the snapshot the
+ * caller confirmed), a ready snapshot of that name with another id is
+ * refused: `snapshot_not_found` with `details.reason: "id_mismatch"`.
  */
 export async function deleteSavedSnapshot(
 	deps: SandboxServiceDeps,
 	p: Principal,
 	name: string,
+	expectedId?: string,
 ): Promise<void> {
 	if (typeof name !== "string" || !SNAPSHOT_NAME_RE.test(name)) {
 		throw snapshotNotFound(String(name));
@@ -168,6 +172,13 @@ export async function deleteSavedSnapshot(
 		);
 		const id = r.rows[0]?.id;
 		if (id === undefined) throw snapshotNotFound(name);
+		if (expectedId !== undefined && id !== expectedId) {
+			throw new SbxError(
+				"snapshot_not_found",
+				`snapshot ${name} is another snapshot now; nothing was deleted`,
+				{ details: { reason: "id_mismatch" } },
+			);
+		}
 		await tx.client.query(
 			`UPDATE runtime.snapshots SET state = 'deleting', version = version + 1
 			 WHERE id = $1`,

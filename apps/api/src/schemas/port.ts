@@ -22,7 +22,8 @@ export const PortParams = z.object({
 		.max(65535)
 		.openapi({
 			param: { name: "port", in: "path" },
-			description: "TCP port in the guest, 1-65535 (not 22)",
+			description:
+				"TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
 			example: 3000,
 		}),
 });

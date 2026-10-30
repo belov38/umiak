@@ -8,6 +8,7 @@ import {
 	jsonBody,
 	requireHuman,
 	requireOwner,
+	requireOwnerUnlessKey,
 	requireScope,
 } from "../src/index.ts";
 import { testIdentityStore } from "../src/testing/index.ts";
@@ -130,5 +131,41 @@ describe("requireHuman and requireOwner", () => {
 			headers: session("owner"),
 		});
 		expect(r.status).toBe(204);
+	});
+});
+
+describe("requireOwnerUnlessKey", () => {
+	// Calls the guard on a bare context with this principal.
+	async function run(principal: Record<string, unknown>): Promise<unknown> {
+		const c = { var: { auth: { principal } } } as never;
+		let passed = false;
+		try {
+			await requireOwnerUnlessKey()(c, async () => {
+				passed = true;
+			});
+		} catch (e) {
+			return e;
+		}
+		return passed ? "passed" : "stopped";
+	}
+
+	it("a team key passes; a person needs owner, keyed off the principal kind", async () => {
+		expect(await run({ kind: "team_key", userId: null, role: null })).toBe(
+			"passed",
+		);
+		expect(await run({ kind: "oidc", userId: "u", role: "owner" })).toBe(
+			"passed",
+		);
+		for (const p of [
+			{ kind: "session", userId: "u", role: "member" },
+			// Not a key, whatever userId says.
+			{ kind: "session", userId: null, role: "member" },
+			{ kind: "oidc", userId: null, role: null },
+		]) {
+			expect(await run(p)).toMatchObject({
+				status: 403,
+				details: { reason: "role" },
+			});
+		}
 	});
 });

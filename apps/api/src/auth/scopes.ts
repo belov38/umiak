@@ -76,7 +76,7 @@ export function requireOwner(): MiddlewareHandler<ApiEnv> {
 export function requireOwnerUnlessKey(): MiddlewareHandler<ApiEnv> {
 	return async (c, next) => {
 		const p = authOf(c).principal;
-		if (p.userId !== null && p.role !== "owner") throw ownerRequired();
+		if (p.kind !== "team_key" && p.role !== "owner") throw ownerRequired();
 		await next();
 	};
 }

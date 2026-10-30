@@ -291,13 +291,20 @@ describe.skipIf(skipPg())(
 			it("rejects port 22, reserved ports, out-of-range ports, bad modes and deleting sandboxes", async () => {
 				const env = await serviceEnv(t.pool);
 				const s = await seedSandbox(t.pool, env, { state: "ready" });
-				expect(RESERVED_PORTS).toContain(22);
+				expect([...RESERVED_PORTS]).toEqual([
+					22, 47800, 47984, 47989, 47990, 48010,
+				]);
 				for (const port of [...RESERVED_PORTS, 0, 65_536, 1.5]) {
 					await expectCode(
 						env.svc.hostPort(env.p, s.sandboxId, port, "public"),
 						"validation",
 					);
 				}
+				// A platform port (S4/S10, shared with the gateway) is refused too.
+				const err = await env.svc
+					.hostPort(env.p, s.sandboxId, 47989, "token")
+					.catch((e: unknown) => e);
+				expect((err as Error).message).toContain("reserved");
 				await expectCode(
 					env.svc.hostPort(env.p, s.sandboxId, 80, "open" as never),
 					"validation",

@@ -3,6 +3,7 @@
 // Sbx-Confirm-Delete (`snap_...` or the name).
 import { createRoute, z } from "@hono/zod-openapi";
 import { encodeUuid } from "@sbx/auth";
+import { isSbxError } from "@sbx/core";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
@@ -207,7 +208,24 @@ export function registerSnapshotRoutes(app: ApiApp, deps: ApiDeps): void {
 				{ details: { state: s.state } },
 			);
 		}
-		await svc.deleteSavedSnapshot(p, name);
+		// The confirmed snapshot only: one that replaced it under the same
+		// name since the read above is refused.
+		try {
+			await svc.deleteSavedSnapshot(p, name, s.id);
+		} catch (e) {
+			if (
+				isSbxError(e, "snapshot_not_found") &&
+				e.details.reason === "id_mismatch"
+			) {
+				throw new ApiError(
+					428,
+					"confirmation_required",
+					`snapshot ${name} was replaced by another one; confirm the new id; nothing was deleted`,
+					{ details: { reason: "mismatch" } },
+				);
+			}
+			throw e;
+		}
 		return c.body(null, 204);
 	});
 }

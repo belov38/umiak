@@ -35,7 +35,8 @@ const TAGS = ["ports"];
 
 const notFound404 = errorResponse("`not_found`: no such sandbox in the team");
 const port400 = errorResponse(
-	"`validation`: port outside 1-65535, a reserved port (22), or more than 50 hosted ports",
+	"`validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, " +
+		"48010), or more than 50 hosted ports",
 );
 
 const listPorts = createRoute({
@@ -198,8 +199,18 @@ async function listening(
 				})),
 				listeningObservedAt: new Date().toISOString(),
 			};
-		} catch {
-			// Never fails the request: the last report below.
+		} catch (e) {
+			// Never fails the request: the last report below. Name and code
+			// only; agent messages may quote guest data. (`err.code` would be
+			// redacted as a secret, hence the flat fields.)
+			deps.log.warn(
+				{
+					sandboxId: s.id,
+					errName: e instanceof Error ? e.name : typeof e,
+					errCode: (e as { code?: unknown } | null)?.code,
+				},
+				"listPorts failed; the stored report is used",
+			);
 		}
 	}
 	return {

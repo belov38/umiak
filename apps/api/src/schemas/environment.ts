@@ -32,8 +32,15 @@ export const EnvironmentParams = z.object({
 	}),
 });
 
-/** `https://host/...`, `ssh://[user@]host/...` or `user@host:path`, without a password or token. */
+/**
+ * `https://host/...`, `ssh://[user@]host/...` or `user@host:path`, without a
+ * password, a token, a query or a fragment (the URL is shown to every reader
+ * of the environment, and a query string is where tokens go).
+ */
 function repositoryUrlProblem(url: string): string | null {
+	if (url.includes("?") || url.includes("#")) {
+		return "must not contain a query (?) or a fragment (#)";
+	}
 	const scp = /^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s:][^\s]*$/;
 	if (scp.test(url) && !url.includes("://")) return null;
 	let u: URL;
@@ -62,7 +69,7 @@ const RepositoryInput = z
 	.strictObject({
 		url: z.string().min(1).max(2048).openapi({
 			description:
-				"https://..., ssh://... or git@host:org/repo.git, without credentials in the URL",
+				"https://..., ssh://... or git@host:org/repo.git, without credentials, a query or a fragment",
 			example: "https://github.com/acme/web.git",
 		}),
 		branch: z
