@@ -9,6 +9,7 @@ import {
 	currentOwner,
 	type Owner,
 	ownerLabels,
+	ownerOf,
 	removeOrphans,
 	startWatchdog,
 } from "../src/testing/container-guard.ts";
@@ -25,21 +26,53 @@ function dockerAvailable(): boolean {
 	}
 }
 
+function must<T>(v: T | null): T {
+	if (v === null) throw new Error("no owner identity (ps)");
+	return v;
+}
+
+/** Polls `fn` until it holds; a hang guard only. */
+async function until(fn: () => Promise<boolean>, what: string): Promise<void> {
+	const end = Date.now() + 60_000;
+	while (!(await fn())) {
+		if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+		await new Promise((r) => setTimeout(r, 200));
+	}
+}
+
 /** A short-lived process: its owner identity, valid while it runs. */
 async function ownerProcess() {
 	const child = spawn("sleep", ["300"], { stdio: "ignore" });
 	const pid = child.pid as number;
 	const exited = new Promise<void>((r) => child.once("exit", () => r()));
-	const me = await currentOwner();
-	const { stdout } = await run("ps", ["-o", "lstart=", "-p", String(pid)]);
-	const owner: Owner = { host: me.host, pid, started: stdout.trim() };
+	const owner = must(await ownerOf(pid));
 	return {
 		owner,
 		kill: async () => {
 			child.kill("SIGKILL");
 			await exited;
+			await until(async () => (await ownerOf(pid)) === null, "owner gone");
 		},
 	};
+}
+
+/** Runs `fn` with these environment variables, restoring them after. */
+async function withEnv<T>(
+	vars: Record<string, string>,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const saved = Object.fromEntries(
+		Object.keys(vars).map((k) => [k, process.env[k]]),
+	);
+	Object.assign(process.env, vars);
+	try {
+		return await fn();
+	} finally {
+		for (const [k, v] of Object.entries(saved)) {
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+	}
 }
 
 const started: string[] = [];
@@ -74,6 +107,9 @@ async function exists(id: string): Promise<boolean> {
 	return stdout.trim() !== "";
 }
 
+const gone = (id: string) =>
+	until(async () => !(await exists(id)), "the container removed");
+
 describe.skipIf(!dockerAvailable())("test container guard", () => {
 	afterAll(async () => {
 		for (const id of started) {
@@ -86,7 +122,7 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 		const orphan = await container(dead.owner);
 		const live = await ownerProcess();
 		const kept = await container(live.owner);
-		const mine = await container(await currentOwner());
+		const mine = await container(must(await currentOwner()));
 		// The same pid with another start time is another process: its owner is gone.
 		const reused = await container({
 			...live.owner,
@@ -94,8 +130,8 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 		});
 		await dead.kill();
 
-		const removed = await removeOrphans();
-		expect(removed).toContain(orphan.slice(0, 12));
+		// Another package's sweep may remove the orphans first: check the state.
+		await removeOrphans();
 		expect(await exists(orphan)).toBe(false);
 		expect(await exists(reused)).toBe(false);
 		expect(await exists(kept)).toBe(true);
@@ -103,10 +139,32 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 		await live.kill();
 	});
 
+	it("labels written in one time zone and locale are read the same in another", async () => {
+		const live = await ownerProcess();
+		try {
+			const owner = await withEnv(
+				{ TZ: "Pacific/Chatham", LC_ALL: "de_DE.UTF-8", LANG: "de_DE.UTF-8" },
+				async () => must(await ownerOf(live.owner.pid)),
+			);
+			const id = await container(owner);
+			await withEnv(
+				{
+					TZ: "America/Los_Angeles",
+					LC_ALL: "fr_FR.UTF-8",
+					LANG: "fr_FR.UTF-8",
+				},
+				() => removeOrphans(),
+			);
+			expect(await exists(id)).toBe(true);
+		} finally {
+			await live.kill();
+		}
+	});
+
 	it("the watchdog removes the container once its owner process dies", async () => {
 		const owner = await ownerProcess();
 		const id = await container(owner.owner);
-		const dog = await startWatchdog(id, owner.owner.pid);
+		const dog = await startWatchdog(id, owner.owner);
 		try {
 			expect(await exists(id)).toBe(true);
 			await owner.kill();
@@ -116,23 +174,32 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 		}
 	});
 
-	/** Polls until the container is gone (the watchdog checks every second). */
-	async function gone(id: string): Promise<void> {
-		const end = Date.now() + 60_000;
-		while (await exists(id)) {
-			if (Date.now() > end) throw new Error("the watchdog did not remove it");
-			await new Promise((r) => setTimeout(r, 200));
+	it("the watchdog treats a reused pid (another start time) as a gone owner", async () => {
+		const live = await ownerProcess();
+		try {
+			const id = await container(live.owner);
+			const dog = await startWatchdog(id, {
+				pid: live.owner.pid,
+				started: "Thu Jan  1 00:00:00 1970",
+			});
+			try {
+				await gone(id);
+			} finally {
+				dog.stop();
+			}
+		} finally {
+			await live.kill();
 		}
-	}
+	});
 
 	it("a watchdog started before the container removes one created after its owner died", async () => {
 		const owner = await ownerProcess();
 		const name = containerName();
-		const dog = await startWatchdog(name, owner.owner.pid);
+		const dog = await startWatchdog(name, owner.owner);
 		try {
+			// The owner is gone (kill() waits until ps no longer lists it), then
+			// the daemon finishes a create the dead owner had asked for.
 			await owner.kill();
-			// The daemon finishes a create the dead owner had asked for.
-			await new Promise((r) => setTimeout(r, 1500));
 			const id = await container(owner.owner, name);
 			await gone(id);
 		} finally {

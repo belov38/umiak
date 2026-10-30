@@ -2,16 +2,20 @@
 // teardown: a SIGKILL, a crash, or `pnpm -r test` stopping the other
 // packages after a failure.
 //
-// Every container started by global-setup carries owner labels: the host,
+// Every container started by global-setup (and by the Postgres setup of
+// @sbx/agent-client's tests) carries owner labels: the host,
 // the pid of the process that started it and that process's start time
-// (`ps -o lstart=`; with the pid it names one process even when the pid is
-// reused later). Two guards use them:
+// (`ps -o lstart=` with TZ=UTC and the C locale, so every session reads the
+// same text; with the pid it names one process even when the pid is reused
+// later). Without a usable `ps` the container gets no owner labels and only
+// the watchdog guards it. Two guards use them:
 //
 // 1. A watchdog: a small node process started through a launcher that exits
 //    at once (double fork): its parent is init and it has its own session, so
 //    neither a kill of the runner's process group nor a kill of the runner's
-//    process tree reaches it. It checks the owner pid
-//    every second and removes the container once the owner is gone. It is
+//    process tree reaches it. It checks the owner pid every second (and its
+//    start time every 10 s, against pid reuse) and removes the container
+//    once the owner is gone. It is
 //    started before `docker run` and knows the container by its unique name,
 //    so a kill while `docker run` is still running is covered too; it repeats
 //    the removal for a while in case the daemon finishes the create after
@@ -40,14 +44,19 @@ const STARTED = "sbx-test.started";
 export interface Owner {
 	host: string;
 	pid: number;
-	/** `ps -o lstart=` of the pid. */
+	/** `ps -o lstart=` of the pid in UTC and the C locale. */
 	started: string;
 }
+
+/** `ps` prints the start time in the time zone and locale of its environment. */
+const psEnv = () => ({ ...process.env, TZ: "UTC", LC_ALL: "C", LANG: "C" });
 
 /** Start time of a process, or null when it does not exist. Throws when `ps` cannot tell. */
 async function startedAt(pid: number): Promise<string | null> {
 	try {
-		const { stdout } = await run("ps", ["-o", "lstart=", "-p", String(pid)]);
+		const { stdout } = await run("ps", ["-o", "lstart=", "-p", String(pid)], {
+			env: psEnv(),
+		});
 		const s = stdout.trim();
 		return s === "" ? null : s;
 	} catch (err) {
@@ -58,11 +67,25 @@ async function startedAt(pid: number): Promise<string | null> {
 	}
 }
 
-/** This process as the owner of a container. */
-export async function currentOwner(): Promise<Owner> {
-	const started = await startedAt(process.pid);
-	if (started === null) throw new Error("ps does not list this process");
-	return { host: hostname(), pid: process.pid, started };
+/**
+ * The process `pid` as the owner of a container; null when it does not exist
+ * or `ps` cannot tell its start time.
+ */
+export async function ownerOf(pid: number): Promise<Owner | null> {
+	try {
+		const started = await startedAt(pid);
+		return started === null ? null : { host: hostname(), pid, started };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * This process as the owner of a container; null when `ps` cannot tell its
+ * start time (the database setup then goes on without owner labels).
+ */
+export function currentOwner(): Promise<Owner | null> {
+	return ownerOf(process.pid);
 }
 
 /** A unique name for a new test container of this process. */
@@ -71,7 +94,8 @@ export function containerName(): string {
 }
 
 /** `docker run` arguments that label a container with its owner. */
-export function ownerLabels(o: Owner): string[] {
+export function ownerLabels(o: Owner | null): string[] {
+	if (o === null) return ["--label", TEST_PG_LABEL];
 	return [
 		"--label",
 		TEST_PG_LABEL,
@@ -130,20 +154,39 @@ export async function removeOrphans(): Promise<string[]> {
 	return removed;
 }
 
-// The watchdog's program (node -e): argv owner pid, container name or id.
-// Once the owner is gone it removes the container, repeating for up to a
-// minute while there is no such container yet (a create still in flight).
+// The watchdog's program (node -e): argv owner pid, container name or id,
+// owner start time (empty when unknown). Once the owner is gone it removes
+// the container, repeating for up to a minute while there is no such
+// container yet (a create still in flight).
 const WATCHDOG = `
-const { execFile } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const pid = Number(process.argv[1]);
 const ref = process.argv[2];
+const started = process.argv[3] || "";
+const env = { ...process.env, TZ: "UTC", LC_ALL: "C", LANG: "C" };
+let checkedAt = 0;
+const sameProcess = () => {
+	if (started === "" || Date.now() - checkedAt < 10000) return true;
+	checkedAt = Date.now();
+	try {
+		const s = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+			env,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		return s.trim() === started;
+	} catch (e) {
+		// ps exits 1 without such a process; anything else: cannot tell.
+		return e.status !== 1;
+	}
+};
 const alive = () => {
 	try {
 		process.kill(pid, 0);
-		return true;
 	} catch (e) {
-		return e.code === "EPERM";
+		if (e.code !== "EPERM") return false;
 	}
+	return sameProcess();
 };
 // docker rm -f exits 0 for a missing container too; only a removal prints
 // the reference.
@@ -162,11 +205,11 @@ const t = setInterval(() => {
 `;
 
 // The launcher (node -e): starts the watchdog (argv: its program, owner
-// pid, ref) detached, prints its pid and exits.
+// pid, ref, owner start time) detached, prints its pid and exits.
 const LAUNCHER = `
 const { spawn } = require("node:child_process");
-const [program, pid, ref] = process.argv.slice(1);
-const child = spawn(process.execPath, ["-e", program, pid, ref], {
+const [program, pid, ref, started] = process.argv.slice(1);
+const child = spawn(process.execPath, ["-e", program, pid, ref, started], {
 	detached: true,
 	stdio: "ignore",
 });
@@ -180,17 +223,18 @@ export interface Watchdog {
 }
 
 /**
- * Starts the watchdog of the container `ref` (name or id) owned by
- * `ownerPid` (this process by default); resolves once it runs.
+ * Starts the watchdog of the container `ref` (name or id) owned by `owner`
+ * (this process by default; `started` checks against pid reuse when known);
+ * resolves once it runs.
  */
 export function startWatchdog(
 	ref: string,
-	ownerPid = process.pid,
+	owner: { pid: number; started?: string } = { pid: process.pid },
 ): Promise<Watchdog> {
 	return new Promise((resolve, reject) => {
 		execFile(
 			process.execPath,
-			["-e", LAUNCHER, WATCHDOG, String(ownerPid), ref],
+			["-e", LAUNCHER, WATCHDOG, String(owner.pid), ref, owner.started ?? ""],
 			(err, stdout) => {
 				const pid = Number(String(stdout).trim());
 				if (err || !Number.isSafeInteger(pid) || pid <= 0) {

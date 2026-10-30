@@ -70,7 +70,10 @@ async function startContainer(): Promise<string> {
 	const owner = await currentOwner();
 	// The watchdog is up before the container exists (see container-guard.ts).
 	const name = containerName();
-	watchdog = await startWatchdog(name);
+	// Best effort: without a watchdog the next setup's sweep still applies.
+	watchdog = await startWatchdog(name, owner ?? { pid: process.pid }).catch(
+		() => undefined,
+	);
 	const { stdout } = await run(
 		"docker",
 		[
