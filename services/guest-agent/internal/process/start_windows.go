@@ -2,8 +2,6 @@ package process
 
 import (
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 
 	"connectrpc.com/connect"
@@ -15,21 +13,13 @@ import (
 )
 
 // shellArgv runs a shell command with pwsh and the exit-code epilogue
-// (spec 12.6). A script too long for -EncodedCommand is written to
-// script.ps1 in the command directory.
-func (m *Manager) shellArgv(id string, u *User, script string, login bool) ([]string, error) {
-	dir := m.opts.Layout.CommandDir(id)
-	argv, text := wincmd.PwshArgv(u.Shell, script, login, dir)
-	if text == "" {
-		return argv, nil
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("process: shell script: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, wincmd.ScriptFile), []byte(text), 0o600); err != nil {
-		return nil, fmt.Errorf("process: shell script: %w", err)
-	}
-	return argv, nil
+// (spec 12.6). A script too long for -EncodedCommand comes back as
+// scriptFile: argv runs it from script.ps1 in the command directory, which
+// the shim writes readable by the command's user and deletes after the
+// exit.
+func (m *Manager) shellArgv(id string, u *User, script string, login bool) (argv []string, scriptFile string, err error) {
+	argv, scriptFile = wincmd.PwshArgv(u.Shell, script, login, m.opts.Layout.CommandDir(id))
+	return argv, scriptFile, nil
 }
 
 // resolveCwd returns the working directory of a command: the profile

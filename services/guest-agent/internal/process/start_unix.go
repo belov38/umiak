@@ -9,13 +9,13 @@ import (
 )
 
 // shellArgv runs a shell command with bash, as a login shell unless login
-// is false.
-func (m *Manager) shellArgv(_ string, _ *User, script string, login bool) ([]string, error) {
+// is false. The script is always in argv: scriptFile is empty.
+func (m *Manager) shellArgv(_ string, _ *User, script string, login bool) (argv []string, scriptFile string, err error) {
 	flag := "-lc"
 	if !login {
 		flag = "-c"
 	}
-	return []string{"/bin/bash", flag, script}, nil
+	return []string{"/bin/bash", flag, script}, "", nil
 }
 
 // resolveCwd returns the working directory of a command: the home of u when

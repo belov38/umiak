@@ -321,3 +321,40 @@ func rpcconvDetail(err error) (string, bool) {
 	d, ok := rpcconv.Detail(err)
 	return d.GetCode(), ok
 }
+
+func TestUnsupportedSignalWindowsTable(t *testing.T) {
+	tests := []struct {
+		goos string
+		sig  int
+		pty  bool
+		ok   bool
+	}{
+		{"windows", 2, false, true},  // SIGINT: CTRL_BREAK
+		{"windows", 15, false, true}, // SIGTERM: CTRL_BREAK
+		{"windows", 9, false, true},  // SIGKILL: TerminateJobObject
+		{"windows", 2, true, true},   // SIGINT: 0x03 to the ConPTY
+		{"windows", 15, true, true},
+		{"windows", 9, true, true},
+		{"windows", 1, true, true},   // SIGHUP: ClosePseudoConsole
+		{"windows", 1, false, false}, // SIGHUP without a PTY
+		{"windows", 10, false, false},
+		{"windows", 10, true, false},
+		{"windows", 3, false, false},
+		{"windows", 19, true, false},
+		{"windows", 28, true, false},
+		{"linux", 1, false, true},
+		{"linux", 10, false, true},
+		{"linux", 28, true, true},
+		{"linux", 64, false, true},
+	}
+	for _, tt := range tests {
+		err := signalSupported(tt.goos, tt.sig, tt.pty)
+		if tt.ok {
+			if err != nil {
+				t.Errorf("%s sig %d pty %v: %v", tt.goos, tt.sig, tt.pty, err)
+			}
+			continue
+		}
+		wantCode(t, err, connect.CodeInvalidArgument, errs.UnsupportedSignal)
+	}
+}

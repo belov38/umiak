@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"slices"
@@ -456,5 +457,38 @@ func TestStartRetryRespectsLimit(t *testing.T) {
 	})
 	if st := h.start("c1", spec).GetCommand().GetState(); st != agentv1.CommandState_COMMAND_STATE_RUNNING {
 		t.Fatalf("retry after the slot freed: state %v, want RUNNING", st)
+	}
+}
+
+// A supervisor that takes the spec with the launch (Windows) gets the
+// resolved spec as JSON; nothing is written under CmdSpecDir.
+func TestStartUsesSpecLauncher(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.Supervisor = supervisor.FakeSpecLauncher{Fake: o.Supervisor.(*supervisor.Fake)}
+	})
+	spec := argvSpec("/bin/sleep", "100")
+	spec.Env = map[string]string{"SECRET": "v1"}
+	if st := h.start("c1", spec).GetCommand().GetState(); st != agentv1.CommandState_COMMAND_STATE_RUNNING {
+		t.Fatalf("state %v, want RUNNING", st)
+	}
+	ls := h.fake.Launches()
+	if len(ls) != 1 || len(ls[0].Spec) == 0 {
+		t.Fatalf("launches %+v, want one with the spec bytes", ls)
+	}
+	var ss shim.Spec
+	if err := json.Unmarshal(ls[0].Spec, &ss); err != nil {
+		t.Fatal(err)
+	}
+	if ss.ID != "c1" || !slices.Equal(ss.Argv, []string{"/bin/sleep", "100"}) || !slices.Contains(ss.Env, "SECRET=v1") {
+		t.Fatalf("spec %+v", ss)
+	}
+	if ss.User != h.user {
+		t.Fatalf("spec user %q, want %q", ss.User, h.user)
+	}
+	if !slices.Equal(h.run("c1").Spec().Argv, ss.Argv) {
+		t.Fatalf("fake shim got argv %v", h.run("c1").Spec().Argv)
+	}
+	if exists(h.layout.CmdSpecDir) {
+		t.Fatalf("%s created with a spec launcher", h.layout.CmdSpecDir)
 	}
 }

@@ -50,6 +50,13 @@ type StartOptions struct {
 	// NewProcessGroup makes the process the root of a new process group,
 	// so CtrlBreak can target it.
 	NewProcessGroup bool
+	// Detached starts the process without any console (DETACHED_PROCESS)
+	// instead of a hidden one; it excludes PseudoConsole.
+	Detached bool
+	// BreakawayFromJob starts the process outside the job of the caller
+	// (CREATE_BREAKAWAY_FROM_JOB). It fails with ERROR_ACCESS_DENIED when
+	// the caller's job does not allow breakaway.
+	BreakawayFromJob bool
 }
 
 // Process is a started process.
@@ -73,6 +80,9 @@ var tokenPrivileges = sync.OnceFunc(func() {
 func Start(o StartOptions) (*Process, error) {
 	if o.PseudoConsole != 0 && (o.Stdin != 0 || o.Stdout != 0 || o.Stderr != 0) {
 		return nil, errors.New("winproc: start: standard handles with a pseudo console")
+	}
+	if o.PseudoConsole != 0 && o.Detached {
+		return nil, errors.New("winproc: start: a detached process with a pseudo console")
 	}
 	var argv0 *uint16
 	if o.Argv0Path != "" {
@@ -159,11 +169,17 @@ func Start(o StartOptions) (*Process, error) {
 	}
 
 	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_SUSPENDED)
-	if o.PseudoConsole == 0 {
+	switch {
+	case o.Detached:
+		flags |= windows.DETACHED_PROCESS
+	case o.PseudoConsole == 0:
 		flags |= windows.CREATE_NO_WINDOW
 	}
 	if o.NewProcessGroup {
 		flags |= windows.CREATE_NEW_PROCESS_GROUP
+	}
+	if o.BreakawayFromJob {
+		flags |= windows.CREATE_BREAKAWAY_FROM_JOB
 	}
 	var pi windows.ProcessInformation
 	if o.Token != 0 {

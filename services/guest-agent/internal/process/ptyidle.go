@@ -170,9 +170,12 @@ func (m *Manager) syncDetached(c *command) {
 	}
 }
 
-// Linux signal numbers used by the agent itself. The agent drives a Linux
-// shim, so it does not use the host's syscall constants.
+// Linux signal numbers used by the agent itself. The shim protocol carries
+// Linux numbers on every OS, so it does not use the host's syscall
+// constants.
 const (
 	sigHUP  syscall.Signal = 1
+	sigINT  syscall.Signal = 2
 	sigKILL syscall.Signal = 9
+	sigTERM syscall.Signal = 15
 )

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,5 +56,22 @@ func TestSpecValidate(t *testing.T) {
 				t.Errorf("validate = %v, want ok %v", err, tt.ok)
 			}
 		})
+	}
+}
+
+func TestReadSpecFrom(t *testing.T) {
+	in := `{"id":"c1","argv":["cmd","/c","exit 3"],"env":["A=1"],"user":"SYSTEM","desktop":true,"script":"exit 7"}`
+	s, err := ReadSpecFrom(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ID != "c1" || len(s.Argv) != 3 || s.User != "SYSTEM" || !s.Desktop || s.Script != "exit 7" {
+		t.Errorf("spec = %+v", s)
+	}
+	if _, err := ReadSpecFrom(strings.NewReader(`{`)); err == nil {
+		t.Error("want a parse error")
+	}
+	if _, err := ReadSpecFrom(strings.NewReader("")); err == nil {
+		t.Error("want an error for an empty spec")
 	}
 }

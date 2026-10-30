@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"maps"
@@ -313,10 +314,17 @@ func (r *FakeRun) killedExit(sig syscall.Signal) shimproto.ExitFile {
 	return shimproto.ExitFile{Status: shimproto.StatusKilled, Code: 128 + int32(sig), Signal: signalName(sig), Reason: reason} //nolint:gosec // sig is 1..64
 }
 
-// start reads the spec, creates the files and the socket; it returns an
-// error when the shim would fail before READY=1.
-func (r *FakeRun) start(setup func(*FakeRun)) error {
-	spec, err := shim.ReadSpec(r.f.layout.CmdSpec(r.id))
+// start reads the spec (raw from LaunchSpec, else the CmdSpec file),
+// creates the files and the socket; it returns an error when the shim would
+// fail before READY=1.
+func (r *FakeRun) start(setup func(*FakeRun), raw []byte) error {
+	var spec shim.Spec
+	var err error
+	if raw != nil {
+		spec, err = shim.ReadSpecFrom(bytes.NewReader(raw))
+	} else {
+		spec, err = shim.ReadSpec(r.f.layout.CmdSpec(r.id))
+	}
 	if err != nil {
 		return err
 	}

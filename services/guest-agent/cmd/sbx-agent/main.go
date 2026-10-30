@@ -62,7 +62,7 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 	case "seal":
 		return sealCmd(ctx, d, stdout, stderr)
 	case "shim":
-		// The shim logs to stderr (the unit's journal).
+		// The shim logs to stderr (the unit's journal; shim.log on Windows).
 		return shim.Run(args[1:], stderr)
 	case "quiesce-watchdog":
 		return quiesceWatchdog(d, args[1:], stderr) //nolint:contextcheck // the watchdog runs to completion on its own clock

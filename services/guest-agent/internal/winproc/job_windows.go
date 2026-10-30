@@ -245,6 +245,36 @@ func (j *Job) ActiveProcesses() (uint32, error) {
 	return info.ActiveProcesses, nil
 }
 
+// ProcessIDs returns the ids of the processes in the job.
+func (j *Job) ProcessIDs() ([]uint32, error) {
+	h, err := j.handle()
+	if err != nil {
+		return nil, err
+	}
+	// JOBOBJECT_BASIC_PROCESS_ID_LIST: two DWORD counts (8 bytes), then
+	// ULONG_PTR ids. Grow until the list fits; processes may join meanwhile.
+	hdrWords := 8 / int(unsafe.Sizeof(uintptr(0)))
+	n := 64
+	for {
+		buf := make([]uintptr, hdrWords+n)
+		err := windows.QueryInformationJobObject(h, windows.JobObjectBasicProcessIdList,
+			uintptr(unsafe.Pointer(&buf[0])), uint32(len(buf))*uint32(unsafe.Sizeof(buf[0])), nil)
+		if err != nil && !errors.Is(err, windows.ERROR_MORE_DATA) {
+			return nil, fmt.Errorf("winproc: job process list: %w", err)
+		}
+		hdr := (*[2]uint32)(unsafe.Pointer(&buf[0]))
+		assigned, listed := int(hdr[0]), int(hdr[1])
+		if err == nil && listed <= n {
+			ids := make([]uint32, listed)
+			for i := range listed {
+				ids[i] = uint32(buf[hdrWords+i]) //nolint:gosec // process ids are 32-bit
+			}
+			return ids, nil
+		}
+		n = max(2*n, assigned+16)
+	}
+}
+
 // Terminate ends every process of the job with exit code code.
 func (j *Job) Terminate(code uint32) error {
 	h, err := j.handle()

@@ -197,7 +197,7 @@ func (m *Manager) setPTY(c *command, pty bool) {
 	m.mu.Unlock()
 }
 
-// launchLocked writes the shim spec, starts the unit and records the
+// launchLocked hands the shim its spec, starts the unit and records the
 // outcome. env is the command environment when create built it, else nil.
 // the record lock of c is held and rec is STARTING without a trace of a launch.
 func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Command, spec *agentv1.CommandSpec, env []string) error {
@@ -211,18 +211,9 @@ func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Comma
 		// command cannot start (spec 9.2).
 		return m.startFailedLocked(ctx, c, err.Error())
 	}
-	specPath := m.opts.Layout.CmdSpec(rec.ID)
-	if err := os.MkdirAll(m.opts.Layout.CmdSpecDir, 0o700); err != nil {
+	lerr, err := m.launchShim(ctx, rec.ID, ss)
+	if err != nil {
 		return m.abortLaunch(c, err)
-	}
-	if err := fsutil.WriteJSONAtomic(specPath, ss, 0o600); err != nil {
-		return m.abortLaunch(c, err)
-	}
-	lerr := m.sup.Launch(ctx, rec.ID, m.opts.ShimPath, nil)
-	// The spec holds the environment: never leave it behind. A shim that
-	// has not read it yet fails before shim.json, which is "not launched".
-	if err := os.Remove(specPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		m.log.Warn("process: remove command spec", "id", rec.ID, "err", err)
 	}
 
 	switch {
@@ -257,6 +248,36 @@ func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Comma
 		return m.startFailedLocked(ctx, c, "the shim did not start")
 	}
 	return err
+}
+
+// launchShim hands ss to the supervisor and starts the shim: over the
+// launch itself when the supervisor implements SpecLauncher (Windows),
+// else through the CmdSpec file, which is removed afterwards. err is a
+// failure before the supervisor was called; lerr is the launch result.
+func (m *Manager) launchShim(ctx context.Context, id string, ss shim.Spec) (lerr, err error) {
+	if sl, ok := m.sup.(supervisor.SpecLauncher); ok {
+		data, err := json.Marshal(ss)
+		if err != nil {
+			return nil, err
+		}
+		// The spec holds the environment.
+		defer clear(data)
+		return sl.LaunchSpec(ctx, id, m.opts.ShimPath, nil, data), nil
+	}
+	specPath := m.opts.Layout.CmdSpec(id)
+	if err := os.MkdirAll(m.opts.Layout.CmdSpecDir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := fsutil.WriteJSONAtomic(specPath, ss, 0o600); err != nil {
+		return nil, err
+	}
+	lerr = m.sup.Launch(ctx, id, m.opts.ShimPath, nil)
+	// The spec holds the environment: never leave it behind. A shim that
+	// has not read it yet fails before shim.json, which is "not launched".
+	if err := os.Remove(specPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		m.log.Warn("process: remove command spec", "id", id, "err", err)
+	}
+	return lerr, nil
 }
 
 // abortLaunch undoes the live state of a launch that never reached the
@@ -346,9 +367,10 @@ func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec, env []string) (
 		env = m.opts.Env.Build(u, spec)
 	}
 	var argv []string
+	var script string
 	if sh, ok := spec.GetCmd().(*agentv1.CommandSpec_Shell); ok {
 		login := spec.Login == nil || spec.GetLogin()
-		if argv, err = m.shellArgv(id, u, sh.Shell, login); err != nil {
+		if argv, script, err = m.shellArgv(id, u, sh.Shell, login); err != nil {
 			return shim.Spec{}, err
 		}
 	} else {
@@ -366,6 +388,12 @@ func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec, env []string) (
 		TimeoutMs:     spec.GetTimeoutMs(),
 		KillLeftovers: spec.GetOnExit() == agentv1.OnExit_ON_EXIT_KILL_LEFTOVERS,
 		AgentVersion:  m.opts.AgentVersion,
+		User:          u.Name,
+		Desktop:       spec.GetDesktop(),
+		Script:        script,
+	}
+	if u.Windows != nil {
+		ss.User = u.Windows.Account
 	}
 	if p := spec.GetPty(); p != nil {
 		ss.PTY = &shim.PTYSpec{Cols: uint16(p.GetCols()), Rows: uint16(p.GetRows()), Term: p.GetTerm()} //nolint:gosec // validated

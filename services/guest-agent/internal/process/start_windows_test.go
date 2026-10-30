@@ -44,19 +44,17 @@ func TestShellArgvPwsh(t *testing.T) {
 	l := paths.ForRoot(t.TempDir())
 	m := &Manager{opts: Options{Layout: l}}
 
-	argv, err := m.shellArgv("c1", winTestUser(), "exit 7", true)
+	argv, script, err := m.shellArgv("c1", winTestUser(), "exit 7", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(argv[:4], []string{pwshPath, "-NoLogo", "-NonInteractive", "-EncodedCommand"}) {
-		t.Fatalf("argv = %q", argv)
-	}
-	if _, err := os.Stat(filepath.Join(l.CommandDir("c1"), wincmd.ScriptFile)); !os.IsNotExist(err) {
-		t.Fatalf("short script written to a file: %v", err)
+	if !slices.Equal(argv[:4], []string{pwshPath, "-NoLogo", "-NonInteractive", "-EncodedCommand"}) || script != "" {
+		t.Fatalf("argv = %q, script %d bytes", argv, len(script))
 	}
 
+	// A long script goes to the shim in the spec; the agent writes no file.
 	long := "Write-Output " + strings.Repeat("x", 20000)
-	argv, err = m.shellArgv("c2", winTestUser(), long, false)
+	argv, script, err = m.shellArgv("c2", winTestUser(), long, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,9 +62,11 @@ func TestShellArgvPwsh(t *testing.T) {
 	if argv[len(argv)-2] != "-File" || argv[len(argv)-1] != file || !slices.Contains(argv, "-NoProfile") {
 		t.Fatalf("argv = %q", argv)
 	}
-	data, err := os.ReadFile(file)
-	if err != nil || string(data) != wincmd.WrapScript(long) {
-		t.Fatalf("script file: %v", err)
+	if script != wincmd.WrapScript(long) {
+		t.Fatal("script is not the wrapped script")
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("the agent wrote the script file: %v", err)
 	}
 }
 
