@@ -551,7 +551,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 
 **Воспроизводимость (§19 п. 2):** две сборки с одним `versions.toml` (20261030.10 и .11) дали одинаковые `packages` (658) и `tools` (39).
 
-**`verify` (§10):** 94 проверки PASS, 0 FAIL, включая агента (`doctor`, версия, identity, URL туннеля из `smbios`), подключение агента клона к dev-gateway (`tunnel_connected`, CT 590, `--connect-url`), Docker `hello-world`, скан диска шаблона и клона на секреты сборки (§20.3), жёсткую остановку (≤ первой загрузки + 3 s), fork с новыми machine-id, hostname, host keys, IP, random seed и состоянием агента. KVM в госте: `available` (на `pve` `kvm_intel nested=Y`).
+**`verify` (§10):** 97 проверок PASS, 0 FAIL (сборка .15), включая агента (`doctor`, версия, identity, URL туннеля из `smbios`), подключение агента клона к dev-gateway (`tunnel_connected`, CT 590, `--connect-url`), Docker `hello-world`, скан диска шаблона и клона на секреты сборки (§20.3), жёсткую остановку (≤ первой загрузки + 3 s), fork с новыми machine-id, hostname, host keys, IP, random seed и состоянием агента. KVM в госте: `available` (на `pve` `kvm_intel nested=Y`).
 
 **`sbx-bench s5 --template 597 --baseline 599 --runs 5`** (2 vCPU / 2 GB, `local-lvm`), ms, медиана (p95):
 
@@ -590,7 +590,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 
 ### 20.4 Шаблон
 
-Сборка и VMID, которые записаны в `deploy/compose/config/sbx.yaml`, — в итоговом отчёте ветки; занято в thin pool после `fstrim` — `manifest.diskUsedGiB`.
+Активная сборка в `deploy/compose/config/sbx.yaml`: `linux` **20261030.15**, VMID **598**, агент `0.1.0+20261030.2fb34a1` (tunnel CA — dev CA gateway CT 590). `verify`: 97 PASS, 0 FAIL (с проверками random seed, `credential.secret`, состояния агента и сканом на хосте). Занято в thin pool: **7.3 GiB** (11.4% от 64 GiB; `sbx-node lv.usage`). Предыдущая сборка .11 занимала 95%: zero-fill не возвращался в пул, потому что `rm` и `fstrim` шли без commit журнала ext4; теперь `rm; sync; fstrim`, и сборка падает при заполнении больше 40%.
 
 ## 21. Открытые вопросы и риски
 
