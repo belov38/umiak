@@ -247,12 +247,22 @@ check_network() {
 	https=$(curl -fsS -o /dev/null -m 30 -w '%{http_code}' https://example.com 2>&1)
 	report https $? "$https"
 
-	local start end st
+	# netplan (26.04) runs wait-online only for interfaces it can name; with "match: en*" the
+	# unit is skipped by its condition and network-online.target is reached without waiting.
+	# Either that, or a wait of at most 15 s (spec 8.4), passes.
+	local start end st cond online
 	st=$(systemctl show -p ActiveState --value systemd-networkd-wait-online.service)
+	cond=$(systemctl show -p ConditionResult --value systemd-networkd-wait-online.service)
 	start=$(systemctl show -p InactiveExitTimestampMonotonic --value systemd-networkd-wait-online.service)
 	end=$(systemctl show -p ActiveEnterTimestampMonotonic --value systemd-networkd-wait-online.service)
-	[ "$st" = active ] && [ "${end:-0}" -gt 0 ] && [ $((end - start)) -le 15000000 ]
-	report wait_online $? "state=$st took $(((${end:-0} - ${start:-0}) / 1000)) ms"
+	online=$(systemctl is-active network-online.target 2>&1)
+	if [ "$st" = inactive ] && [ "$cond" = no ]; then
+		[ "$online" = active ]
+		report wait_online $? "skipped by its condition (netplan), network-online.target $online"
+	else
+		[ "$st" = active ] && [ "${end:-0}" -gt 0 ] && [ $((end - start)) -le 15000000 ]
+		report wait_online $? "state=$st took $(((${end:-0} - ${start:-0}) / 1000)) ms, network-online.target $online"
+	fi
 }
 
 check_users() {
