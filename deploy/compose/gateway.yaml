@@ -104,10 +104,14 @@ services:
     restart: unless-stopped
 
   # The worker calls the gateway's internal listener with its service token
-  # (SBX_GATEWAY_SERVICE_TOKEN_FILE), e.g. to rotate machine tokens.
+  # (SBX_GATEWAY_SERVICE_TOKEN_FILE), e.g. to rotate machine tokens. It also
+  # sends the gateway's SSH user CA public key to every agent in Claim
+  # (ssh_user_ca_keys -> TrustedUserCAKeys of sshd in the VM); without it the
+  # gateway cannot log in to the VM and every SSH session fails.
   worker:
     environment:
       SBX_GATEWAY_SERVICE_TOKEN_FILE: /run/sbx-gateway/worker-gateway-token
+      SBX_SSH_USER_CA_KEYS_FILE: /run/sbx-gateway/ssh_user_ca.pub
     volumes:
       # The directory, not the file: a missing file source would be created
       # as a directory by Docker before gateway-secrets writes it.
