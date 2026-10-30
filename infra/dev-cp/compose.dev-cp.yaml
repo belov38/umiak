@@ -1,0 +1,39 @@
+# Dev control plane on CT 590 (infra/pve/setup.sh cp). infra/dev-cp/deploy.sh layers this file
+# over deploy/compose/compose.yaml and gateway.yaml through COMPOSE_FILE in deploy/compose/.env.
+# Dev only: the names, ports and paths here are not product defaults. Paths are relative to
+# deploy/compose (the directory of the first compose file).
+services:
+  # sbx.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/sbx.yaml).
+  migrate:
+    volumes:
+      - ./secrets/devcp/sbx.yaml:/etc/sbx/sbx.yaml:ro
+
+  worker:
+    environment:
+      # The tunnel URL that the worker writes into smbios family (S5 §14), once it supports it.
+      SBX_TUNNEL_URL: ${SBX_TUNNEL_URL:?set by deploy.sh}
+    volumes:
+      - ./secrets/devcp/sbx.yaml:/etc/sbx/sbx.yaml:ro
+
+  gateway-secrets:
+    command: !override
+      - dev-secrets
+      - -dir=/secrets
+      - -domain=sbx.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+      - -tunnel-host=tunnel.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+      - -ssh-host=ssh.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+      - -owner=65532:65532
+      - -worker-owner=1000:1000
+
+  gateway:
+    environment:
+      SBX_GATEWAY_SBX_DOMAIN: sbx.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+      SBX_GATEWAY_TUNNEL_HOST: tunnel.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+      SBX_GATEWAY_SSH_HOST: ssh.${SBX_DEVCP_DOMAIN:?set by deploy.sh}
+    # Public listeners on all addresses of the CT (its firewall admits only the LAN; sandboxes
+    # reach only 443). The internal listener and metrics stay on loopback.
+    ports: !override
+      - "443:8443" # TLS: tunnel.<domain> for agents, *.sbx.<domain> previews
+      - "2222:2222" # SSH
+      - "127.0.0.1:7000:7000"
+      - "127.0.0.1:9190:9090"
