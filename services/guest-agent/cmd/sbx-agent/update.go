@@ -37,7 +37,7 @@ func installPackage(d deps, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("install-package", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	noActivate := fs.Bool("no-activate", false, "only place the version, do not switch current")
-	noUnits := fs.Bool("no-units", false, "do not install and enable the systemd units")
+	noUnits := fs.Bool("no-units", false, "do not install the service (systemd units, Windows service)")
 	writeConfig := fs.Bool("write-config", false, "write the agent.toml template if absent")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
 		_, _ = io.WriteString(stderr, "usage: sbx-agent install-package [--no-activate] [--no-units] [--write-config] <package.tar>\n")
@@ -55,7 +55,8 @@ func installPackage(d deps, args []string, stdout, stderr io.Writer) int {
 		WriteConfig:  *writeConfig,
 		Units:        d.units,
 		Config:       d.configTemplate,
-		Systemctl:    d.systemctl,
+		Services:     d.services,
+		SystemPath:   d.systemPath,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "sbx-agent install-package: %v\n", err)
@@ -75,7 +76,7 @@ func rollbackCmd(d deps, args []string, stderr io.Writer) int {
 		return 2
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, nil)))
-	if err := update.Rollback(d.layout, *to, d.systemctl, d.sleep); err != nil {
+	if err := update.Rollback(d.layout, *to, d.services, d.sleep); err != nil {
 		_, _ = fmt.Fprintf(stderr, "sbx-agent rollback: %v\n", err)
 		return 1
 	}

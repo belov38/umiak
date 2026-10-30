@@ -31,8 +31,8 @@ func VersionDir(l paths.Layout, v string) string {
 	return filepath.Join(l.VersionsDir, v)
 }
 
-// LinkVersion returns the version a current or previous symlink points to,
-// or "" when the link does not exist.
+// LinkVersion returns the version a current or previous link (a symlink,
+// on Windows a junction) points to, or "" when the link does not exist.
 func LinkVersion(link string) (string, error) {
 	target, err := os.Readlink(link)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -42,44 +42,6 @@ func LinkVersion(link string) (string, error) {
 		return "", err
 	}
 	return filepath.Base(target), nil
-}
-
-// pointLink points link (current or previous) at version v. The target is
-// relative, so the tree stays valid under any root.
-func pointLink(l paths.Layout, link, v string) error {
-	target, err := filepath.Rel(filepath.Dir(link), VersionDir(l, v))
-	if err != nil {
-		return err
-	}
-	return switchLink(link, target)
-}
-
-// switchLink atomically replaces link with a symlink to target: a new
-// symlink under a temporary name is renamed over the old one.
-func switchLink(link, target string) error {
-	dir := filepath.Dir(link)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp := filepath.Join(dir, "."+filepath.Base(link)+".tmp-"+randHex())
-	if err := os.Symlink(target, tmp); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, link); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return syncDir(dir)
-}
-
-// pointBinLink makes /usr/local/bin/sbx-agent a symlink to
-// current/sbx-agent.
-func pointBinLink(l paths.Layout) error {
-	target, err := filepath.Rel(filepath.Dir(l.BinLink), filepath.Join(l.CurrentLink, BinaryName))
-	if err != nil {
-		return err
-	}
-	return switchLink(l.BinLink, target)
 }
 
 // syncDir fsyncs a directory after a rename into it; a no-op on Windows.

@@ -65,7 +65,7 @@ func updateDeps(t *testing.T, embedded ed25519.PublicKey) (deps, *cliSystemctl) 
 	sc := &cliSystemctl{}
 	return deps{
 		layout:         paths.ForRoot(t.TempDir()),
-		systemctl:      sc.run,
+		services:       update.SystemctlManager{Systemctl: sc.run},
 		sleep:          func(time.Duration) {},
 		executable:     os.Executable,
 		embeddedKeys:   []byte(update.FormatKey(embedded, "embedded") + "\n"),
@@ -75,6 +75,9 @@ func updateDeps(t *testing.T, embedded ed25519.PublicKey) (deps, *cliSystemctl) 
 }
 
 func TestInstallPackageCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("installs systemd units; the Windows service install is covered by update.TestInstallCreatesServiceConfig")
+	}
 	pubA, privA := genKey(t)
 	pubB, privB := genKey(t)
 	d, sc := updateDeps(t, pubA)

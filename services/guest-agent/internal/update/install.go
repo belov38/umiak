@@ -2,7 +2,6 @@ package update
 
 import (
 	"bytes"
-	"context"
 	"crypto/ed25519"
 	"errors"
 	"fmt"
@@ -10,10 +9,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
@@ -23,23 +20,31 @@ import (
 // InstallOptions controls what Install does besides placing the version.
 type InstallOptions struct {
 	// Activate points previous at the old current, current at the new
-	// version and the CLI link at current/sbx-agent.
+	// version and, on Linux, the CLI link at current/sbx-agent.
 	Activate bool
-	// InstallUnits writes Units into SystemdUnitDir, reloads systemd and
-	// enables sbx-identity.service and sbx-agent.service.
+	// InstallUnits installs the service. Linux: Units go into
+	// SystemdUnitDir, systemd is reloaded and sbx-identity.service and
+	// sbx-agent.service are enabled. Windows: the sbx-agent service is
+	// created or updated (S9 spec 12.2) and not started; it starts at the
+	// next boot.
 	InstallUnits bool
 	// WriteConfig writes Config to agent.toml if that file is absent.
 	WriteConfig bool
-	// Units holds the unit files at its root.
+	// Units holds the unit files at its root (Linux).
 	Units fs.FS
 	// Config is the agent.toml template.
 	Config []byte
-	// Systemctl runs systemctl; nil means the real one.
-	Systemctl func(args ...string) error
+	// Services runs daemon-reload and enable on Linux, where it must be a
+	// SystemctlManager; nil means the real systemctl. Windows does not use
+	// it: the install never starts the service.
+	Services ServiceManager
+	// ServiceName is the Windows service to configure; empty means
+	// AgentService. Tests use a throwaway name.
+	ServiceName string
+	// SystemPath adds the current link to the system Path once (Windows,
+	// with InstallUnits).
+	SystemPath bool
 }
-
-// enabledUnits are enabled by an install with units.
-var enabledUnits = []string{"sbx-identity.service", "sbx-agent.service"}
 
 // Install installs the package at tarPath (spec 17.1, `sbx-agent
 // install-package`): unpack into StagingDir, verify against keys and the
@@ -58,11 +63,7 @@ func Install(l paths.Layout, tarPath string, keys []ed25519.PublicKey, opts Inst
 		}
 	}
 	if opts.InstallUnits {
-		sc := opts.Systemctl
-		if sc == nil {
-			sc = Systemctl
-		}
-		if err := installUnits(l, opts.Units, sc); err != nil {
+		if err := installService(l, opts); err != nil {
 			return nil, err
 		}
 	}
@@ -295,8 +296,8 @@ func copyFile(src, dst string, perm fs.FileMode) (err error) {
 }
 
 // activate makes v the current version (see makeCurrent) and points the
-// CLI link at current. An unfinished self-update is abandoned: the operator
-// chose the version.
+// CLI link at current (Linux). An unfinished self-update is abandoned: the
+// operator chose the version.
 func activate(l paths.Layout, v string) error {
 	if _, err := makeCurrent(l, v); err != nil {
 		return err
@@ -304,10 +305,7 @@ func activate(l paths.Layout, v string) error {
 	if err := abandonPending(l, "abandoned by install-package "+v); err != nil {
 		return err
 	}
-	if err := pointBinLink(l); err != nil {
-		return fmt.Errorf("update: link %s: %w", l.BinLink, err)
-	}
-	return nil
+	return linkCLI(l)
 }
 
 // makeCurrent points current at v and previous at the old current, unless v
@@ -331,37 +329,6 @@ func makeCurrent(l paths.Layout, v string) (string, error) {
 	return cur, nil
 }
 
-// installUnits writes every file at the root of units into SystemdUnitDir,
-// reloads systemd and enables the agent units (decision 9).
-func installUnits(l paths.Layout, units fs.FS, systemctl func(args ...string) error) error {
-	if units == nil {
-		return errors.New("update: no unit files to install")
-	}
-	entries, err := fs.ReadDir(units, ".")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(l.SystemdUnitDir, 0o755); err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if !e.Type().IsRegular() {
-			continue
-		}
-		data, err := fs.ReadFile(units, e.Name())
-		if err != nil {
-			return err
-		}
-		if err := fsutil.WriteFileAtomic(filepath.Join(l.SystemdUnitDir, e.Name()), data, 0o644); err != nil {
-			return fmt.Errorf("update: install unit %s: %w", e.Name(), err)
-		}
-	}
-	if err := systemctl("daemon-reload"); err != nil {
-		return err
-	}
-	return systemctl(append([]string{"enable"}, enabledUnits...)...)
-}
-
 // writeConfigIfAbsent writes agent.toml unless it exists.
 func writeConfigIfAbsent(l paths.Layout, data []byte) error {
 	if _, err := os.Lstat(l.ConfigFile); err == nil {
@@ -373,20 +340,4 @@ func writeConfigIfAbsent(l paths.Layout, data []byte) error {
 		return err
 	}
 	return fsutil.WriteFileAtomic(l.ConfigFile, data, 0o644)
-}
-
-// systemctlTimeout bounds one systemctl call.
-const systemctlTimeout = time.Minute
-
-// Systemctl runs systemctl with args and returns its output in the error.
-func Systemctl(args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), systemctlTimeout)
-	defer cancel()
-	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, "systemctl", args...)
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("systemctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(out.String()))
-	}
-	return nil
 }

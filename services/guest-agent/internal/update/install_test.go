@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestInstallActivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("systemd units and the CLI link are Linux; see TestInstallCreatesServiceConfig")
+	}
 	pub, priv := testKey(t)
 	keys := []ed25519.PublicKey{pub}
 	l := paths.ForRoot(t.TempDir())
@@ -27,7 +31,7 @@ func TestInstallActivate(t *testing.T) {
 		WriteConfig:  true,
 		Units:        units,
 		Config:       []byte("[user]\n"),
-		Systemctl:    sc.run,
+		Services:     SystemctlManager{Systemctl: sc.run},
 	}
 
 	m, err := Install(l, packTest(t, "v1", priv), keys, opts)

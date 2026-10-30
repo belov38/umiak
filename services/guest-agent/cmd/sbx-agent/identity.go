@@ -39,8 +39,16 @@ type deps struct {
 	freezer     quiesce.Freezer
 	docker      quiesce.DockerAPI
 
-	// systemctl runs systemctl (install-package, rollback).
-	systemctl func(args ...string) error
+	// services starts and restarts the agent service (rollback) and, on
+	// Linux, installs the units (install-package).
+	services update.ServiceManager
+	// systemPath makes install-package add current to the system Path
+	// (Windows).
+	systemPath bool
+	// doctorUnits and doctorService are the OS parts of doctor; nil
+	// keeps the Linux defaults.
+	doctorUnits   []agent.DoctorUnit
+	doctorService func(ctx context.Context) *agent.ServiceReport
 	// sleep pauses rollback.
 	sleep func(time.Duration)
 	// executable returns the path of the running binary (selftest).
@@ -75,7 +83,7 @@ func defaultDeps() deps {
 		freezer:   quiesce.NewFreezer(),
 		docker:    &docker.Client{},
 
-		systemctl:      update.Systemctl,
+		services:       update.DefaultServiceManager(),
 		sleep:          time.Sleep,
 		executable:     os.Executable,
 		isActive:       agent.SystemctlIsActive,
@@ -87,6 +95,7 @@ func defaultDeps() deps {
 		devKey:         devUpdateKey != "",
 	}
 	platformDeps(&d)
+	serviceDeps(&d)
 	return d
 }
 

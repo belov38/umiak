@@ -47,6 +47,11 @@ const (
 // else must not keep the agent from exiting.
 const shutdownFlush = 5 * time.Second
 
+// PreShutdownBudget bounds the secrets wipe and store flush that
+// Deps.PreShutdown triggers. With the final shutdown flush it stays within
+// the 15 s preshutdown timeout of the Windows service (S9 spec 12.2).
+const PreShutdownBudget = 10 * time.Second
+
 // bootIDPath is the kernel boot id.
 const bootIDPath = "/proc/sys/kernel/random/boot_id"
 
@@ -129,6 +134,12 @@ type Deps struct {
 	// DebugConfirm lets a Control/Info served on the debug socket confirm
 	// a pending update without a tunnel connection.
 	DebugConfirm bool
+
+	// PreShutdown, when closed, makes the agent wipe the secrets and flush
+	// state.db like System/PrepareStop (bounded by PreShutdownBudget) and
+	// then stop as if its context ended: the PRESHUTDOWN control of the
+	// Windows service (S9 spec 12.2). Nil never fires.
+	PreShutdown <-chan struct{}
 }
 
 // withDefaults fills the production defaults and checks the required fields.
@@ -261,11 +272,33 @@ func (a *agent) run(ctx context.Context) error {
 		}
 		return err
 	}
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+	case <-a.d.PreShutdown:
+		a.preShutdown() //nolint:contextcheck // runs on its own budget while the run context is live
+	}
 	a.log.Info("agent: shutting down")
 	a.notifyStopping()
 	a.shutdown() //nolint:contextcheck // the shutdown outlives the cancelled run context
 	return nil
+}
+
+// preShutdown wipes the secrets and flushes state.db through the claim
+// manager, then ends the run. PrepareStop also drops the secrets held in
+// memory, so the quiesce auto-thaw of the shutdown cannot write the secret
+// files back.
+func (a *agent) preShutdown() {
+	a.log.Info("agent: system shutdown, wiping secrets")
+	ctx, cancel := context.WithTimeout(context.Background(), PreShutdownBudget)
+	defer cancel()
+	wiped, err := a.claim.PrepareStop(ctx)
+	switch {
+	case err != nil:
+		a.log.Error("agent: wipe secrets before shutdown", "err", err)
+	case !wiped:
+		a.log.Warn("agent: some secret files are in use and stay on disk until the next boot")
+	}
+	a.exit()
 }
 
 // notifyStopping sends STOPPING=1 to systemd once.

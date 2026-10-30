@@ -20,8 +20,11 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
 )
 
-// doctorUnits are the units whose state doctor reports, by report key.
-var doctorUnits = []struct{ key, unit string }{
+// DoctorUnit is a service whose state doctor reports under Key.
+type DoctorUnit struct{ Key, Unit string }
+
+// doctorUnits are the systemd units doctor reports by default.
+var doctorUnits = []DoctorUnit{
 	{"sbx-identity", "sbx-identity.service"},
 	{"sbx-agent", "sbx-agent.service"},
 }
@@ -31,9 +34,16 @@ type DoctorOptions struct {
 	// Source reads the smbios identity for the effective tunnel URL; nil
 	// reports the agent.toml URL.
 	Source ident.Source
-	// IsActive returns the state of a systemd unit (systemctl is-active).
-	// Default SystemctlIsActive.
+	// IsActive returns the state of a unit (systemctl is-active; the
+	// service state on Windows). Default SystemctlIsActive.
 	IsActive func(ctx context.Context, unit string) string
+	// Units are the units reported in Report.Units. Default: sbx-identity
+	// and sbx-agent.service.
+	Units []DoctorUnit
+	// Service checks the agent service configuration (Windows: failure
+	// actions, start type, preshutdown timeout); nil leaves Report.Service
+	// out.
+	Service func(ctx context.Context) *ServiceReport
 	// Statfs reports the size and free space of a filesystem. Default
 	// output.DefaultStatfs.
 	Statfs func(path string) (total, free uint64, err error)
@@ -47,8 +57,13 @@ type DoctorOptions struct {
 type Report struct {
 	Versions VersionsReport `json:"versions"`
 	// Units maps sbx-identity and sbx-agent to their systemctl is-active
-	// state.
+	// state (Windows: sbx-agent to its service state).
 	Units map[string]string `json:"units"`
+	// Service is the agent service check (Windows only).
+	Service *ServiceReport `json:"service,omitempty"`
+	// Early reports whether the boot step ran for the current boot
+	// (Windows only).
+	Early *EarlyReport `json:"early,omitempty"`
 	// Identity is identity.json; IdentityError explains a missing one.
 	Identity      *IdentityReport `json:"identity"`
 	IdentityError string          `json:"identity_error,omitempty"`
@@ -68,6 +83,31 @@ type Report struct {
 	// and identity.sysfs_dir when it is not the sysfs default. A template
 	// must have none.
 	TestAids []string `json:"test_aids,omitempty"`
+
+	units []DoctorUnit // order of Units for WriteText
+}
+
+// ServiceReport is the state and configuration of the agent service.
+type ServiceReport struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+	// Configured is true when the start type, image path, failure actions
+	// and preshutdown timeout are what install-package sets; Problems
+	// lists the differences.
+	Configured bool     `json:"configured"`
+	Problems   []string `json:"problems,omitempty"`
+	Error      string   `json:"error,omitempty"`
+}
+
+// EarlyReport compares early.json with the current boot.
+type EarlyReport struct {
+	// BootID is the boot early.json was written for; empty without it.
+	BootID string `json:"boot_id"`
+	// CurrentBootID is the boot id of the identity source.
+	CurrentBootID string `json:"current_boot_id"`
+	// Current is true when early.json belongs to the current boot.
+	Current bool   `json:"current"`
+	Error   string `json:"error,omitempty"`
 }
 
 // VersionsReport names the targets of the current and previous links.
@@ -112,7 +152,10 @@ func Doctor(ctx context.Context, l paths.Layout, cfg config.Config, opts DoctorO
 	if opts.Statfs == nil {
 		opts.Statfs = output.DefaultStatfs
 	}
-	r := &Report{Units: map[string]string{}}
+	if opts.Units == nil {
+		opts.Units = doctorUnits
+	}
+	r := &Report{Units: map[string]string{}, units: opts.Units}
 
 	var verr []string
 	var err error
@@ -124,8 +167,11 @@ func Doctor(ctx context.Context, l paths.Layout, cfg config.Config, opts DoctorO
 	}
 	r.Versions.Error = strings.Join(verr, "; ")
 
-	for _, u := range doctorUnits {
-		r.Units[u.key] = opts.IsActive(ctx, u.unit)
+	for _, u := range opts.Units {
+		r.Units[u.Key] = opts.IsActive(ctx, u.Unit)
+	}
+	if opts.Service != nil {
+		r.Service = opts.Service(ctx)
 	}
 
 	if f, err := ident.LoadFile(l.IdentityFile); err == nil {
@@ -139,7 +185,15 @@ func Doctor(ctx context.Context, l paths.Layout, cfg config.Config, opts DoctorO
 		r.IdentityError = err.Error()
 	}
 
-	r.TunnelURL = doctorTunnelURL(ctx, opts.Source, cfg)
+	var raw ident.Raw
+	var rawErr error
+	if opts.Source != nil {
+		raw, rawErr = opts.Source.Read(ctx)
+	}
+	r.TunnelURL = doctorTunnelURL(opts.Source != nil, raw, rawErr, cfg)
+	if l.EarlyFile != "" {
+		r.Early = doctorEarly(l.EarlyFile, raw, rawErr)
+	}
 
 	if b, err := os.ReadFile(l.StatusFile); err != nil {
 		r.StatusError = err.Error()
@@ -173,16 +227,34 @@ func Doctor(ctx context.Context, l paths.Layout, cfg config.Config, opts DoctorO
 	return r
 }
 
+// doctorEarly reads early.json and compares it with the boot id of the
+// identity source.
+func doctorEarly(path string, raw ident.Raw, rawErr error) *EarlyReport {
+	r := &EarlyReport{CurrentBootID: strings.TrimSpace(raw.BootID)}
+	var errs []string
+	if rawErr != nil {
+		errs = append(errs, "identity source: "+rawErr.Error())
+	}
+	if m, err := ident.LoadEarly(path); err != nil {
+		errs = append(errs, err.Error())
+	} else {
+		r.BootID = m.BootID
+	}
+	r.Current = r.BootID != "" && r.BootID == r.CurrentBootID
+	r.Error = strings.Join(errs, "; ")
+	return r
+}
+
 // doctorTunnelURL computes the effective tunnel URL like the agent: the
-// smbios family override if valid, otherwise agent.toml.
-func doctorTunnelURL(ctx context.Context, src ident.Source, cfg config.Config) TunnelURLReport {
-	if src == nil {
+// smbios family override if valid, otherwise agent.toml. haveSource is
+// false without an identity source; raw and err are its result.
+func doctorTunnelURL(haveSource bool, raw ident.Raw, err error, cfg config.Config) TunnelURLReport {
+	if !haveSource {
 		url, source := effectiveTunnelURL("", cfg.TunnelURL)
 		return TunnelURLReport{URL: url, Source: source}
 	}
 	var warn string
 	smbios := ""
-	raw, err := src.Read(ctx)
 	if err == nil {
 		var id ident.Identity
 		id, err = ident.Parse(raw)
@@ -224,8 +296,29 @@ func (r *Report) WriteText(w io.Writer) {
 	if r.Versions.Error != "" {
 		p("            error: %s\n", r.Versions.Error)
 	}
-	for _, u := range doctorUnits {
-		p("unit:       %s %s\n", u.unit, r.Units[u.key])
+	units := r.units
+	if units == nil {
+		units = doctorUnits
+	}
+	for _, u := range units {
+		p("unit:       %s %s\n", u.Unit, r.Units[u.Key])
+	}
+	if s := r.Service; s != nil {
+		switch {
+		case s.Error != "":
+			p("service:    %s: %s\n", s.Name, s.Error)
+		case s.Configured:
+			p("service:    %s configured (failure actions, preshutdown)\n", s.Name)
+		default:
+			p("service:    %s misconfigured: %s\n", s.Name, strings.Join(s.Problems, "; "))
+		}
+	}
+	if e := r.Early; e != nil {
+		if e.Current {
+			p("early:      ran for boot %s\n", e.BootID)
+		} else {
+			p("early:      not run for boot %s (early.json %s) %s\n", or(e.CurrentBootID, "-"), or(e.BootID, "-"), e.Error)
+		}
 	}
 	if len(r.TestAids) > 0 {
 		p("test aids:  %s (not for production)\n", strings.Join(r.TestAids, ", "))

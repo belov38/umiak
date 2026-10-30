@@ -165,6 +165,7 @@ type harness struct {
 	debugListen  string
 	debugConfirm bool
 	freezer      quiesce.Freezer
+	preShutdown  chan struct{}
 
 	cancel context.CancelFunc
 	done   chan error
@@ -227,6 +228,7 @@ func (h *harness) buildDeps() Deps {
 		DebugListen:   h.debugListen,
 		DebugConfirm:  h.debugConfirm,
 		Freezer:       h.freezer,
+		PreShutdown:   h.preShutdown,
 	}
 }
 

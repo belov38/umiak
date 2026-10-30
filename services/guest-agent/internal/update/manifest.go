@@ -11,9 +11,9 @@ import (
 // ManifestFormat is the Format value of a v1 manifest.
 const ManifestFormat = "sbx-agent-manifest/v1"
 
-// Entry names inside a package and a version directory.
+// Entry names inside a package and a version directory. The agent binary
+// is BinaryName (BinaryNameFor the package OS).
 const (
-	BinaryName     = "sbx-agent"
 	ManifestName   = "manifest.json"
 	SignatureName  = "manifest.sig"
 	TrustDir       = "trust"
@@ -21,8 +21,19 @@ const (
 	UpdateKeysName = "trust/update-keys.pub"
 )
 
-// requiredFiles must be listed in every manifest.
-var requiredFiles = []string{BinaryName, TunnelCAName, UpdateKeysName}
+// BinaryNameFor returns the agent binary name of a package for goos:
+// sbx-agent.exe on Windows, sbx-agent elsewhere.
+func BinaryNameFor(goos string) string {
+	if goos == "windows" {
+		return "sbx-agent.exe"
+	}
+	return "sbx-agent"
+}
+
+// requiredFiles returns the files every manifest for goos must list.
+func requiredFiles(goos string) []string {
+	return []string{BinaryNameFor(goos), TunnelCAName, UpdateKeysName}
+}
 
 // Manifest is manifest.json of a package (spec 17.1). manifest.sig is the
 // raw 64-byte ed25519 signature over the exact bytes of manifest.json.
