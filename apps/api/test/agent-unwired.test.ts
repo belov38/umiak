@@ -55,6 +55,17 @@ describe("UnwiredAgentApi", () => {
 		expect(await api.capabilities(randomUUID())).toEqual([]);
 	});
 
+	it("without a client (no gateway token): files and requireCapability are agent_unavailable", async () => {
+		const api = new UnwiredAgentApi(null, db.pool);
+		const m = randomUUID();
+		await expect(api.files(m, "/files/content", {})).rejects.toBeInstanceOf(
+			AgentUnavailableError,
+		);
+		await expect(api.requireCapability(m, "files.v1")).rejects.toBeInstanceOf(
+			AgentUnavailableError,
+		);
+	});
+
 	it("files goes through AgentClient.fetch unchanged", async () => {
 		const c = client();
 		const api = new UnwiredAgentApi(c.client, db.pool);

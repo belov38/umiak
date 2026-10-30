@@ -45,6 +45,11 @@ export interface Settings {
 	/** HMAC key of list cursors, at least 32 bytes. */
 	cursorKey: Buffer;
 	serviceTokensFile: string;
+	/**
+	 * Token of the api for the gateway internal listener (agent calls); null:
+	 * agent calls answer 503 agent_unavailable.
+	 */
+	gatewayTokenFile: string | null;
 	identityFile: string | null;
 	operatorGroups: string[];
 	/** Null when SBX_OIDC_ISSUER is not set: Keycloak JWTs are not accepted. */
@@ -186,6 +191,7 @@ const schema = z.object({
 	SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
 	SBX_API_CURSOR_KEY: cursorKey,
 	SBX_API_SERVICE_TOKENS_FILE: required("path of the service tokens JSON"),
+	SBX_API_GATEWAY_TOKEN_FILE: optional,
 	SBX_IDENTITY_FILE: optional,
 	SBX_OPERATOR_GROUPS: csv(""),
 	SBX_OIDC_ISSUER: optionalUrl,
@@ -253,6 +259,7 @@ export function loadSettings(
 		dataKeysFile: e.SBX_DATA_KEYS_FILE,
 		cursorKey: e.SBX_API_CURSOR_KEY,
 		serviceTokensFile: e.SBX_API_SERVICE_TOKENS_FILE,
+		gatewayTokenFile: e.SBX_API_GATEWAY_TOKEN_FILE ?? null,
 		identityFile: e.SBX_IDENTITY_FILE ?? null,
 		operatorGroups: e.SBX_OPERATOR_GROUPS,
 		oidc:

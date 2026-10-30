@@ -1,6 +1,8 @@
 // The production AgentApi until the S3 agent proto is wired: every RPC
 // fails with AgentUnavailableError (503 agent_unavailable), `/files*` goes
 // through AgentClient.fetch, capabilities come from the tunnel registry.
+// Without a client (no gateway token configured) `/files*` and capability
+// checks are agent_unavailable too.
 // ConnectAgentApi replaces it after S3 lands (global decision 3).
 import {
 	type AgentClient,
@@ -21,10 +23,10 @@ import type {
 } from "./types.ts";
 
 export class UnwiredAgentApi implements AgentApi {
-	readonly #client: AgentClient;
+	readonly #client: AgentClient | null;
 	readonly #pool: Pick<pg.Pool, "query">;
 
-	constructor(agentClient: AgentClient, pool: Pick<pg.Pool, "query">) {
+	constructor(agentClient: AgentClient | null, pool: Pick<pg.Pool, "query">) {
 		this.#client = agentClient;
 		this.#pool = pool;
 	}
@@ -43,6 +45,7 @@ export class UnwiredAgentApi implements AgentApi {
 		capability: string,
 		signal?: AbortSignal,
 	): Promise<void> {
+		if (this.#client === null) return unwired(machineId);
 		return this.#client.requireCapability(machineId, capability, signal);
 	}
 
@@ -51,6 +54,7 @@ export class UnwiredAgentApi implements AgentApi {
 		path: string,
 		init: AgentFetchInit,
 	): Promise<Response> {
+		if (this.#client === null) return unwired(machineId);
 		return this.#client.fetch(machineId, path, init);
 	}
 

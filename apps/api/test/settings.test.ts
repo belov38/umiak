@@ -37,6 +37,7 @@ describe("loadSettings", () => {
 			sshPort: 22,
 			sshHostKeysFile: null,
 			sshLoginCaKeyFile: null,
+			gatewayTokenFile: null,
 			identityFile: null,
 			operatorGroups: [],
 			trustedProxyCidrs: [],

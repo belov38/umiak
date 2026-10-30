@@ -48,4 +48,6 @@ export * from "./routes/meta.ts";
 export * from "./routes/operations.ts";
 export * from "./routes/ptys.ts";
 export * from "./routes/sandboxes.ts";
+export * from "./server.ts";
 export * from "./settings.ts";
+export * from "./shutdown.ts";

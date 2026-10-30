@@ -19,6 +19,7 @@ import type { PtyTimings } from "./commands/pty-socket.ts";
 import type { StreamRegistry } from "./commands/registry.ts";
 import type { ApiMetrics } from "./http/metrics.ts";
 import type { Settings } from "./settings.ts";
+import type { ApiLifecycle } from "./shutdown.ts";
 
 export interface ApiDeps {
 	settings: Settings;
@@ -59,6 +60,8 @@ export interface ApiDeps {
 	commandTimings: CommandTimings;
 	/** Ping, input coalescing and backpressure of PTY WebSockets. */
 	ptyTimings: PtyTimings;
+	/** Shutting down: `/readyz` 503 and new requests 503 (S7 §9.7). */
+	lifecycle: ApiLifecycle;
 }
 
 /** Hono env of every listener app. */

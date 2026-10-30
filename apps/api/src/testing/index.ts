@@ -17,6 +17,7 @@ import type { ApiDeps } from "../deps.ts";
 import { createApiLogger } from "../http/logger.ts";
 import { ApiMetrics } from "../http/metrics.ts";
 import { loadSettings, type Settings } from "../settings.ts";
+import { ApiLifecycle } from "../shutdown.ts";
 import { FakeAgent } from "./fake-agent.ts";
 import {
 	TEST_API_KEY,
@@ -114,7 +115,8 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  *   environments: `emptyEnvironmentStore()`, agent: a FakeAgent;
  * - streams: a StreamRegistry over the final identity and identityEvents;
  *   commandTimings: the defaults (60 s, 15 s, 60 min); ptyTimings: the
- *   defaults (ping 15 s, input 5 ms, 1 MiB).
+ *   defaults (ping 15 s, input 5 ms, 1 MiB);
+ * - lifecycle: running (not shutting down).
  */
 export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 	const settings = over.settings ?? testSettings();
@@ -163,6 +165,7 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 			}),
 		commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 		ptyTimings: { ...DEFAULT_PTY_TIMINGS },
+		lifecycle: new ApiLifecycle(),
 		...over,
 	};
 }

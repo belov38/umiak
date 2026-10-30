@@ -13,6 +13,7 @@ WORKDIR /app
 # Workspace manifests first, so the install layers are cached across source edits.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/agent-client/package.json packages/agent-client/
+COPY packages/auth/package.json packages/auth/
 COPY packages/config/package.json packages/config/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
@@ -20,6 +21,7 @@ COPY packages/proto/package.json packages/proto/
 COPY packages/pve/package.json packages/pve/
 COPY apps/worker/package.json apps/worker/
 # Part of the workspace and the lockfile, but not of the worker closure.
+COPY apps/api/package.json apps/api/
 COPY apps/bench/package.json apps/bench/
 
 # ---- build: compile @sbx/proto and @sbx/agent-client (needs dev dependencies)
@@ -39,6 +41,7 @@ RUN pnpm install --frozen-lockfile --prod --filter "@sbx/worker..."
 COPY db/migrations db/migrations
 COPY --from=build /app/packages/proto/dist packages/proto/dist
 COPY --from=build /app/packages/agent-client/dist packages/agent-client/dist
+COPY packages/auth/src packages/auth/src
 COPY packages/config/src packages/config/src
 COPY packages/core/src packages/core/src
 COPY packages/db/src packages/db/src

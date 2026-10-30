@@ -44,6 +44,7 @@ import { registerSbxAuthRoutes } from "./routes/sbx-auth.ts";
 import { registerSnapshotRoutes } from "./routes/snapshots.ts";
 import { registerSshRoutes } from "./routes/ssh.ts";
 import { registerSshKeyRoutes } from "./routes/ssh-keys.ts";
+import { refuseWhileShuttingDown } from "./shutdown.ts";
 
 /** Common middleware and error handling of the listener apps. */
 function listenerApp(
@@ -64,6 +65,7 @@ function listenerApp(
 		requestId(),
 		requestLog(deps.log),
 		requestMetrics(deps.metrics),
+		refuseWhileShuttingDown(deps.lifecycle),
 		bodyLimits(),
 		cancelHeadBodies(),
 	);
@@ -139,8 +141,8 @@ async function postgresAnswers(pool: pg.Pool): Promise<boolean> {
 }
 
 /**
- * `/healthz` (liveness), `/readyz` (Postgres and the LISTEN sbx_identity
- * connection), `/metrics` (Prometheus).
+ * `/healthz` (liveness), `/readyz` (not shutting down, Postgres and the
+ * LISTEN sbx_identity connection), `/metrics` (Prometheus).
  */
 export function createOpsApp(deps: ApiDeps): ApiApp {
 	const app = new OpenAPIHono<ApiEnv>();
@@ -150,6 +152,7 @@ export function createOpsApp(deps: ApiDeps): ApiApp {
 	app.get("/healthz", (c) => c.json({ ok: true }));
 	app.get("/readyz", async (c) => {
 		const reasons: string[] = [];
+		if (deps.lifecycle.shuttingDown) reasons.push("shutting_down");
 		if (deps.pool !== null && !(await postgresAnswers(deps.pool))) {
 			reasons.push("postgres");
 		}

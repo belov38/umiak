@@ -7,6 +7,12 @@
 # and the `sbx` network.
 name: sbx
 
+# S4 gateway (branch s4-impl): enabled when S4 and S7 are merged. Then also
+# uncomment `gateway-secrets` in the depends_on of `secrets-init` below and
+# set SBX_GATEWAY_API_URL=http://api:8082 in deploy/compose/.env.
+# include:
+#   - gateway.yaml
+
 x-logging: &logging
   driver: json-file
   options:
@@ -32,11 +38,6 @@ networks:
 volumes:
   postgres-data:
 
-secrets:
-  # Create it with the command in README.md (git-ignored directory).
-  data-keys:
-    file: ./secrets/data-keys.json
-
 services:
   postgres:
     <<: *service-defaults
@@ -57,6 +58,30 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # One-shot: create the missing dev secrets in ./secrets (git-ignored), one
+  # directory per consumer, and derive the api's ones from ./secrets/gateway
+  # when S4's gateway-secrets wrote them. Safe on every `up`: existing
+  # secrets are kept. See secrets-init/init.sh.
+  secrets-init:
+    logging: *logging
+    image: sbx-secrets-init:dev
+    build:
+      context: ./secrets-init
+      dockerfile_inline: |
+        FROM alpine:3.24.3
+        RUN apk add --no-cache openssh-keygen jq
+        COPY init.sh /init.sh
+        ENTRYPOINT ["sh", "/init.sh"]
+    # Root writes into the bind mount and hands each file to its consumer.
+    user: "0:0"
+    volumes:
+      - ./secrets:/secrets
+    network_mode: none
+    # depends_on:
+    #   gateway-secrets:
+    #     condition: service_completed_successfully
+    restart: "no"
+
   # One-shot: apply migrations, then load topology and template builds from
   # config/sbx.yaml. Idempotent, so it is safe to re-run on every `up`.
   migrate:
@@ -72,6 +97,9 @@ services:
     environment:
       <<: *db-env
       SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
+      # Override apiUrl/tlsName of the provider in config/sbx.yaml (deploy/compose/.env).
+      SBX_PVE_URL: ${SBX_PVE_URL:-}
+      SBX_PVE_TLS_NAME: ${SBX_PVE_TLS_NAME:-}
     volumes:
       - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
     depends_on:
@@ -86,11 +114,12 @@ services:
     environment:
       <<: *db-env
       SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
-      SBX_DATA_KEYS_FILE: /run/secrets/data-keys
+      SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
       SBX_SECRETS_DIR: /run/sbx-pve
-      # PVE API URL and TLS name are read from config/sbx.yaml (topology.providers).
-      # These two are read by the PVE/SSH adapter; override them in deploy/compose/.env.
-      SBX_NODE_SSH_HOST: ${SBX_NODE_SSH_HOST:-100.64.10.2}
+      # The PVE API URL and TLS name are in the database (migrate: config/sbx.yaml
+      # plus SBX_PVE_URL / SBX_PVE_TLS_NAME). These two are read by the PVE/SSH
+      # adapter; set them in deploy/compose/.env (see .env.example).
+      SBX_NODE_SSH_HOST: ${SBX_NODE_SSH_HOST:-pve}
       SBX_PVE_TOKEN_ID: ${SBX_PVE_TOKEN_ID:-sbx@pve!poc}
       # Reconcile only logs what it would do. Keep it on until the stack is trusted.
       SBX_RECONCILE_DRY_RUN: ${SBX_RECONCILE_DRY_RUN:-1}
@@ -101,12 +130,15 @@ services:
       - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
       # pve-token, pve-root-ca.pem, sbx-node_ed25519, known_hosts.
       - ${SBX_PVE_SECRETS_DIR:-${HOME}/.config/sbx}:/run/sbx-pve:ro
-    secrets:
-      - data-keys
+      # Written by secrets-init (a directory: its files appear after the
+      # container is created).
+      - ./secrets/worker:/run/sbx-secrets:ro
     ports:
       - "127.0.0.1:9090:9090"
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      secrets-init:
         condition: service_completed_successfully
     healthcheck:
       test:
@@ -123,10 +155,196 @@ services:
     stop_grace_period: 90s
     restart: unless-stopped
 
+  # One-shot: the database `keycloak` in the same Postgres (also on volumes
+  # created before Keycloak was in the stack).
+  keycloak-db:
+    <<: *service-defaults
+    image: postgres:18.6-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: sbx
+      PGPASSWORD: sbx
+      PGDATABASE: sbx
+    command:
+      - sh
+      - -c
+      - >-
+        psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'keycloak'" | grep -q 1
+        || createdb keycloak
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Keycloak (IdP, realm `sbx`, architecture §10). The realm is imported from
+  # keycloak/realm-sbx.json on the first start only (an existing realm is
+  # kept); the client secrets come from ./secrets/keycloak.
+  keycloak:
+    <<: *service-defaults
+    image: quay.io/keycloak/keycloak:26.8.1
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >-
+        export SBX_OAUTH2_PROXY_CLIENT_SECRET="$$(cat /run/sbx-secrets/oauth2-proxy-client-secret)"
+        SBX_WORKER_CLIENT_SECRET="$$(cat /run/sbx-secrets/sbx-worker-client-secret)"
+        && exec /opt/keycloak/bin/kc.sh start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: sbx
+      KC_DB_PASSWORD: sbx
+      # The browser and the CLI use the public address (it is the token
+      # issuer); api and oauth2-proxy call http://keycloak:8080 inside the network.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Temporary password of dev@example.com (changed at the first login).
+      SBX_DEV_PASSWORD: ${SBX_DEV_PASSWORD:-dev}
+    volumes:
+      - ./keycloak/realm-sbx.json:/opt/keycloak/data/import/realm-sbx.json:ro
+      - ./secrets/keycloak:/run/sbx-secrets:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
+    depends_on:
+      keycloak-db:
+        condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # No curl in the image: bash /dev/tcp against the management port.
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000
+          && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+          && grep -q '"status": "UP"' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  # Public API v1 (S7): public :8080 (SDK, CLI), proxied :8081 (oauth2-proxy
+  # only, not published), internal :8082 (gateway, not published), ops :9090.
+  api:
+    <<: *service-defaults
+    image: sbx-api:dev
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    # The cursor key is an environment value; read it from its secret file.
+    command:
+      - sh
+      - -c
+      - >-
+        export SBX_API_CURSOR_KEY="$$(cat /run/sbx-secrets/cursor-key)"
+        && exec node apps/api/src/main.ts
+    environment:
+      <<: *db-env
+      SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
+      SBX_IDENTITY_FILE: /etc/sbx/identity.yaml
+      SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
+      SBX_API_SERVICE_TOKENS_FILE: /run/sbx-secrets/service-tokens.json
+      SBX_API_GATEWAY_TOKEN_FILE: /run/sbx-secrets/gateway-token
+      SBX_SSH_LOGIN_CA_KEY_FILE: /run/sbx-secrets/ssh-login-ca
+      SBX_SSH_HOST_KEYS_FILE: /run/sbx-secrets/ssh-host-keys.pub
+      SBX_API_URL: http://localhost:${API_PORT:-8080}
+      SBX_APP_URL: http://localhost:${OAUTH2_PROXY_PORT:-4180}
+      SBX_SBX_DOMAIN: sbx.localhost
+      SBX_SSH_HOST: ${SBX_SSH_HOST:-127.0.0.1}
+      SBX_SSH_PORT: ${SBX_SSH_PORT:-2222}
+      # Keycloak: tokens carry the public issuer; keys are fetched inside the network.
+      SBX_OIDC_ISSUER: http://localhost:${KEYCLOAK_PORT:-8180}/realms/sbx
+      SBX_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/sbx/.well-known/openid-configuration
+      SBX_OIDC_JWKS_URL: http://keycloak:8080/realms/sbx/protocol/openid-connect/certs
+      SBX_OPERATOR_GROUPS: sbx-operators
+      SBX_LOG_LEVEL: ${SBX_API_LOG_LEVEL:-info}
+    volumes:
+      - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
+      - ./config/identity.yaml:/etc/sbx/identity.yaml:ro
+      - ./secrets/api:/run/sbx-secrets:ro
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+      # /healthz, /readyz, /metrics (9090 on the host is the worker's).
+      - "127.0.0.1:${API_METRICS_PORT:-9091}:9090"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:9090/readyz')
+          .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    # SIGTERM: the api stops within 10 s (S7 §9.7); the pod grace is 30 s.
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # Browser sessions (architecture §10): routes /api/* (without /api) and
+  # /sbx-auth/* to the proxied api listener with the X-Auth-Request-* headers.
+  # Plain http on localhost: the cookie has no Secure flag and no __Host- prefix.
+  oauth2-proxy:
+    <<: *service-defaults
+    image: sbx-oauth2-proxy:dev
+    build:
+      context: ./oauth2-proxy
+      # The upstream image is distroless; busybox wget serves the healthcheck.
+      dockerfile_inline: |
+        FROM busybox:1.38.0-musl AS busybox
+        FROM quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
+        COPY --from=busybox /bin/busybox /bin/busybox
+    command:
+      - --alpha-config=/etc/oauth2-proxy/oauth2-proxy.yaml
+      - --cookie-name=_sbx_session
+      - --cookie-secure=false
+      - --cookie-secret-file=/run/sbx-secrets/cookie-secret
+      - --cookie-refresh=5m
+      - --cookie-expire=168h
+      - --email-domain=*
+      - --redirect-url=http://localhost:${OAUTH2_PROXY_PORT:-4180}/oauth2/callback
+      - --whitelist-domain=localhost:${OAUTH2_PROXY_PORT:-4180}
+      - --skip-provider-button=true
+      - --silence-ping-logging=true
+    volumes:
+      - ./oauth2-proxy/oauth2-proxy.yaml:/etc/oauth2-proxy/oauth2-proxy.yaml:ro
+      - ./secrets/oauth2-proxy:/run/sbx-secrets:ro
+    ports:
+      - "127.0.0.1:${OAUTH2_PROXY_PORT:-4180}:4180"
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/bin/busybox",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:4180/ping",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
   # ---- Add the services of later threads below this line --------------------
-  # api            (S7)  depends_on: migrate (service_completed_successfully)
-  # gateway        (S2)  needs the S2 service token shared with the worker
-  #                      (SBX_GATEWAY_SERVICE_TOKEN_FILE on the worker)
-  # web            (S9)
-  # keycloak       (S8)  own database or schema in `postgres`
-  # oauth2-proxy   (S8)  in front of web and api
+  # gateway        (S4)  include gateway.yaml (see the top of this file)
+  # web            (S8)  behind oauth2-proxy: add it as the `/` upstream
