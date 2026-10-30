@@ -565,7 +565,7 @@ API: состояние `stopped` или `error` с machine в `stopped` (§6.1)
 | `resize` (если `size` изменился) | `PUT config` cores и memory, пока VM выключена |
 | `start` | проверка RAM перед стартом (§8.1, ждать с опросом 1 s), затем S1 `start` |
 | `wait_agent` | новое подключение (`tunnel_sessions` с `boot_id`, отличным от `provisioned_boot_id`) |
-| `provision` | `System/UpdateEnv{env}` и `System/UpdateSecrets{secret_env, secret_files}` (S3 §8.1: claim — один раз на идентичность, после загрузки наборы доставляются этими вызовами) — env и секреты передаются заново целиком (в госте секретов после загрузки нет, фаза `secrets: missing` у S3); записать `provisioned_boot_id` |
+| `provision` | `System/UpdateEnv{env}`, `System/UpdateSecrets{secret_env, secret_files}` и `System/UpdateSshCa{keys}` (S3 §8.1: claim — один раз на идентичность, после загрузки наборы доставляются этими вызовами) — env и секреты передаются заново целиком (в госте секретов после загрузки нет, фаза `secrets: missing` у S3); `keys` — текущий набор SSH user CA worker (тот же, что в claim), так sandbox, созданные до смены CA или до её настройки, получают ключи при следующем resume; записать `provisioned_boot_id` |
 | `finish` | machine → `running`, sandbox → `ready`, `deadline_at = now + ttl` (TTL можно передать заново), `health=ok` |
 
 Ошибка или дедлайн: S1 `stop` (жёстко), machine → `stopped`, sandbox → `error` (`resume_failed`). Диски целы, resume можно повторить.
@@ -913,7 +913,7 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
   - `allocate(ownerId)` в гонке двух вызовов одного владельца возвращает уже вставленный lease этого владельца (`reused`), а не перебирает диапазон.
 - **S2.** Таблицы `tunnel.*`, `POST /v1/machines/{id}/rotate-token` на внутреннем listener-е gateway, синтетические события, `agent-client` с повторами и ожиданием до 30 s.
 - **S3.** RPC (имена — S3):
-  - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secrets, secretFiles, authorizedKeys}` — идемпотентен по `requestId`, отвечает после применения (или стримит фазы, итог `ready`); после загрузки (resume, recover, reprovision) наборы доставляются `System/UpdateEnv` и `System/UpdateSecrets` (S3 §8.1; шаг `provision`, §7.6);
+  - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secrets, secretFiles, authorizedKeys}` — идемпотентен по `requestId`, отвечает после применения (или стримит фазы, итог `ready`); после загрузки (resume, recover, reprovision) наборы доставляются `System/UpdateEnv`, `System/UpdateSecrets` и `System/UpdateSshCa` (S3 §8.1; шаг `provision`, §7.6);
   - `System/PrepareStop` — best effort;
   - `System/Quiesce` с lease и watchdog и `Thaw` — реализация `QuiesceHook`;
   - `System/Info` — версия, capabilities, фаза готовности;

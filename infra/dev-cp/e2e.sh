@@ -197,9 +197,11 @@ gaps=$(awk '{n = 0; for (i = 2; i <= NF; i++) if ($i - $(i - 1) >= 700) n++; pri
 step "detach + logs -f"
 cid=$("$SBX" exec "$S" --detach -- sh -c 'for i in 1 2 3 4 5; do echo line $i; sleep 1; done; exit 3')
 sleep 2
-lines=$("$SBX" logs "$S" "$cid" -f | grep -c '^line ')
+"$SBX" logs "$S" "$cid" -f >"$W/logs.out"
+lrc=$?
+lines=$(grep -c '^line ' "$W/logs.out")
 st=$("$SBX" ps "$S" --json | json "[c for c in d['data'] if c['id'] == '$cid'][0]['exitCode']" 2>/dev/null)
-[[ "$lines" == 5 && "$st" == 3 ]] && pass "$cid: 5 lines, exit 3" || fail "lines=$lines exit=$st"
+[[ "$lines" == 5 && "$st" == 3 && "$lrc" == 3 ]] && pass "$cid: 5 lines, exit 3, logs -f exit 3" || fail "lines=$lines exit=$st logs -f exit=$lrc"
 
 step "pty (sbx shell)"
 r=$(python3 "$HERE/e2e-pty.py" "$SBX" "$S")
@@ -283,12 +285,8 @@ else
 fi
 
 step "snapshot + create --from"
-"$SBX" snapshot save "${F1:-$S}" e2e-snap >/dev/null
-for _ in $(seq 1 60); do
-	ss=$("$SBX" snapshot list --json | json "[s['state'] + ':' + str(s['consistency']) for s in d['data'] if s['name'] == 'e2e-snap'][0]")
-	[[ "$ss" == ready:* || "$ss" == failed:* ]] && break
-	sleep 2
-done
+ss=$("$SBX" snapshot save "${F1:-$S}" e2e-snap --wait --json | tail -1 |
+	json "d['snapshot']['state'] + ':' + str(d['snapshot']['consistency']) if d['event'] == 'ready' else 'failed:' + d['code']")
 [[ -n "${F1:-}" ]] && "$SBX" rm "$F1" --yes >/dev/null
 S2=""
 create_sb --from e2e-snap && S2=$SB
@@ -304,7 +302,9 @@ t0=$(date +%s)
 "$SBX" resume "$S" --wait --json >/dev/null
 t=$(($(date +%s) - t0))
 r=$("$SBX" exec "$S" -- sh -c 'echo $FOO $TOKEN; cat small.txt' | xargs)
-[[ "$st" == stopped && "$r" == "bar s3cret hello" ]] && pass "stopped, resumed in ${t}s; env, secret and files kept" || fail "state=$st out=$r"
+# Resume sends the SSH user CA keys again (UpdateSshCa in the provision step).
+rs=$("$SBX" ssh "$S" -- -o BatchMode=yes 'echo resumed-ssh' </dev/null)
+[[ "$st" == stopped && "$r" == "bar s3cret hello" && "$rs" == resumed-ssh ]] && pass "stopped, resumed in ${t}s; env, secret, files and ssh kept" || fail "state=$st out=$r ssh=$rs"
 
 step "delete"
 "$SBX" rm "$S" --yes >/dev/null

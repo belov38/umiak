@@ -2,7 +2,8 @@
 // of a command, raw (stdout to stdout, stderr to stderr) or with --json the
 // frames with `event`. Without -f it prints what there is now and exits;
 // with -f it follows until the command exits. --tail starts each stream at
-// its last N bytes. Exit code 0 (not the command's).
+// its last N bytes. With -f the exit code is the command's, as for `exec`
+// (§14.3); without -f it is 0.
 
 import type {
 	Offsets,
@@ -13,6 +14,7 @@ import type {
 import type { Command } from "commander";
 import { parseCount } from "../args.ts";
 import { useSandbox } from "../current.ts";
+import { CliError, commandExitCode } from "../exit-codes.ts";
 import type { Runner } from "../program.ts";
 import { printEvents } from "./exec.ts";
 
@@ -52,7 +54,10 @@ export function register(program: Command, run: Runner): void {
 			"sandbox ID or slug, or the command (current sandbox)",
 		)
 		.argument("[cmd]", "command ID (cmd_…)")
-		.option("-f, --follow", "follow the output until the command exits")
+		.option(
+			"-f, --follow",
+			"follow the output until the command exits, then exit with its code",
+		)
 		.option("--tail <bytes>", "start each stream at its last N bytes")
 		.action(
 			run(
@@ -89,11 +94,20 @@ export function register(program: Command, run: Runner): void {
 						stderr: size("stderr"),
 						...(streams.pty ? { pty: size("pty") } : {}),
 					};
-					await printEvents(
+					const exit = await printEvents(
 						ctx,
 						follow ? events : upTo(events, from, sizes),
 						json,
 					);
+					if (opts.follow !== true) return;
+					if (exit === undefined) {
+						throw new CliError({
+							code: "unexpected_response",
+							message: "the command stream ended without an exit",
+							retryable: false,
+						});
+					}
+					return commandExitCode(exit);
 				},
 				{ rawData: true },
 			),

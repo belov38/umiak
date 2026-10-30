@@ -183,6 +183,11 @@ export interface AgentPort {
 		secrets: { secretEnv: Record<string, string>; secretFiles: SecretFile[] },
 		requestId: string,
 	): Promise<void>;
+	/**
+	 * `System/UpdateSshCa` with the worker's SSH user CA keys (the set sent in
+	 * Claim). Idempotent: the agent rewrites the same file.
+	 */
+	updateSshCa(machineId: string, requestId: string): Promise<void>;
 	prepareStop(machineId: string): Promise<void>;
 	quiesceHook(machineId: string, leaseMs: number): QuiesceHook;
 	activity(machineId: string): Promise<AgentActivity>;
