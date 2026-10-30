@@ -3,6 +3,7 @@ packages:
   - "packages/*"
 allowBuilds:
   cpu-features: false
+  esbuild: false
   ssh2: false
 minimumReleaseAgeExclude:
   - "@biomejs/biome@2.6.4"
