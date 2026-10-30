@@ -1,18 +1,8 @@
 name: gateway
 
+# Automatic push/PR triggers are disabled during development (Ilia, 2026-10-30); run manually.
 on:
-  push:
-    paths: &paths
-      - "services/gateway/**"
-      - "libs/**"
-      - "db/migrations/**"
-      - "deploy/compose/gateway.yaml"
-      - "go.work"
-      - "go.work.sum"
-      - "mise.toml"
-      - ".github/workflows/gateway.yml"
-  pull_request:
-    paths: *paths
+  workflow_dispatch:
 
 permissions:
   contents: read
