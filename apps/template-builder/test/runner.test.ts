@@ -498,6 +498,9 @@ describe("runStep robustness", () => {
 			script: SCRIPT,
 			log: () => {},
 			...fast,
+			// The window must outlast the four scripted checks however slow the
+			// machine is; it ends at the fourth (the unit is seen loaded).
+			startCheckMs: 60_000,
 		});
 		expect(r.exitStatus).toBe(0);
 		expect(checks).toBe(4);
