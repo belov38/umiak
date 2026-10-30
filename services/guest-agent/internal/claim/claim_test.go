@@ -753,8 +753,8 @@ func TestLinkPathParentsOwnership(t *testing.T) {
 			t.Errorf("%s mode = %o", d, m)
 		}
 	}
-	uid, _ := testUID()
-	if got := ownerUID(t, inHome); got != uid {
+	got := ownerUID(t, inHome)
+	if uid, _ := testUID(); got != uid {
 		t.Errorf("dir in home owned by %d, want %d", got, uid)
 	}
 	if os.Getuid() != 0 {
