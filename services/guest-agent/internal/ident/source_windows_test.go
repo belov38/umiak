@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
 )
 
 func TestFirmwareSourceRead(t *testing.T) {
@@ -65,30 +66,34 @@ func TestNewFirmwareSourceRealTable(t *testing.T) {
 	}
 }
 
-func TestFirmwareSourceBootTimeFallback(t *testing.T) {
+func TestFirmwareSourceVolatileFallback(t *testing.T) {
 	table := smbTable(smbType1(smbWireUUID, 1, 0, true, smbSerial), smbEnd)
-	boot := time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC)
 	src := FirmwareSource{
-		ReadTable: func() ([]byte, error) { return table, nil },
-		BootCount: func() (uint32, error) { return 0, errors.New("no key") },
-		BootTime:  func() (time.Time, error) { return boot, nil },
+		ReadTable:      func() ([]byte, error) { return table, nil },
+		BootCount:      func() (uint32, error) { return 0, errors.New("no key") },
+		FallbackBootID: func() (string, error) { return "volatile-1", nil },
 	}
 	raw, err := src.Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	const machine = "00112233-4455-6677-8899-aabbccddeeff"
-	if want := BootIDFromBootTime(machine, boot); raw.BootID != want {
-		t.Errorf("boot id = %q, want %q", raw.BootID, want)
+	if raw.BootID != "volatile-1" {
+		t.Errorf("boot id = %q, want the volatile one", raw.BootID)
 	}
 }
 
-func TestNewFirmwareSourceBootTime(t *testing.T) {
-	bt, err := NewFirmwareSource().BootTime()
+// TestVolatileBootIDStable reads the volatile boot id twice: the same id
+// within one boot (the test runs as SYSTEM or an elevated administrator).
+func TestVolatileBootIDStable(t *testing.T) {
+	a, err := winapi.VolatileBootID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if up := time.Since(bt); up <= 0 || up > 365*24*time.Hour {
-		t.Errorf("boot time %v is %v ago", bt, up)
+	b, err := winapi.VolatileBootID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == "" || a != b {
+		t.Errorf("volatile boot ids %q, %q", a, b)
 	}
 }

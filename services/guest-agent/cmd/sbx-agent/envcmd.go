@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/agent"
 )
@@ -90,7 +93,8 @@ var (
 
 // formatEnv writes the KEY=VALUE entries env as assignments in format:
 //
-//	pwsh: $env:K = 'v' (${env:K} for other names; quotes doubled)
+//	pwsh: $env:K = 'v' (${env:K} for other names; quotes doubled; a value
+//	      with a control character as UTF-8 in base64, see pwshValue)
 //	cmd:  set "K=v"    (% doubled, for a batch file)
 //	sh:   export K='v'
 //
@@ -116,7 +120,7 @@ func formatEnv(w, stderr io.Writer, format string, env []string) error {
 			if !pwshPlainName.MatchString(k) {
 				name = "${env:" + pwshBraced.Replace(k) + "}"
 			}
-			b.WriteString(name + " = '" + pwshQuote.Replace(v) + "'\n")
+			b.WriteString(name + " = " + pwshValue(v) + "\n")
 		case "cmd":
 			if strings.ContainsAny(v, "\r\n") {
 				_, _ = fmt.Fprintf(stderr, "sbx-agent env: skipped %s: cmd cannot hold a line break\n", k)
@@ -133,4 +137,16 @@ func formatEnv(w, stderr io.Writer, format string, env []string) error {
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// pwshValue returns v as a PowerShell expression: a single-quoted string
+// with its quotes doubled, or, when v holds a control character (a line
+// break, an escape sequence) or is not valid UTF-8, the UTF-8 bytes in
+// base64 decoded by .NET, so no terminal or parser ever sees them raw.
+func pwshValue(v string) string {
+	if utf8.ValidString(v) && !strings.ContainsFunc(v, unicode.IsControl) {
+		return "'" + pwshQuote.Replace(v) + "'"
+	}
+	return "[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" +
+		base64.StdEncoding.EncodeToString([]byte(v)) + "'))"
 }

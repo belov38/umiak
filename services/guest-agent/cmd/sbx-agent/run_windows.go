@@ -154,7 +154,7 @@ func platformAgentDeps(ctx context.Context, d deps) (agent.Deps, func(), error) 
 		Statfs:      d.statfs,
 		ShimPath:    versionShimPath(d.layout, exe, finalPath),
 		BootID: func() (string, error) {
-			// FirmwareSource falls back to the kernel boot time when the
+			// FirmwareSource falls back to a volatile registry id when the
 			// boot counter cannot be read (S9 spec 12.4).
 			raw, err := src.Read(ctx)
 			if err != nil {
@@ -163,7 +163,7 @@ func platformAgentDeps(ctx context.Context, d deps) (agent.Deps, func(), error) 
 			if id := strings.TrimSpace(raw.BootID); id != "" {
 				return id, nil
 			}
-			return "", errors.New("agent: neither the boot counter nor the kernel boot time gives a boot id")
+			return "", errors.New("agent: neither the boot counter nor the volatile registry key gives a boot id")
 		},
 	}, func() { _ = sup.Close() }, nil
 }

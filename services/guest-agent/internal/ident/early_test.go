@@ -3,6 +3,7 @@ package ident
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -166,5 +167,22 @@ func TestEarlyDoneForBoot(t *testing.T) {
 	mustWrite(t, l.EarlyFile, `{"bootId":"boot-1"}`)
 	if !EarlyDoneForBoot(l.EarlyFile, "boot-1") {
 		t.Error("early.json of this boot does not count")
+	}
+}
+
+func TestEarlySecuresAgentDirs(t *testing.T) {
+	l := winLayout(t)
+	r := newWinFake(t, l, testComputerName)
+	if err := Early(context.Background(), l, earlySource("boot-1"), r); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{l.RunDir, l.StateDir} {
+		fi, err := os.Stat(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o700 {
+			t.Errorf("%s mode = %v, want 0700 (the protected DACL on Windows)", d, fi.Mode().Perm())
+		}
 	}
 }

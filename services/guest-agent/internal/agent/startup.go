@@ -75,7 +75,12 @@ func (a *agent) startup(ctx context.Context) error {
 	}
 	a.bootID = bootID
 	if a.d.WinBoot != nil {
-		// Windows: nothing runs before the boot step of this boot.
+		// Windows: run\ and state\ get their protected DACLs before
+		// early.json is read or a socket is opened, and nothing else runs
+		// before the boot step of this boot.
+		if err := ident.SecureAgentDirs(a.l); err != nil {
+			return err
+		}
 		if err := a.windowsBootStep(ctx); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

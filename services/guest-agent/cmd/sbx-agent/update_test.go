@@ -202,3 +202,30 @@ func TestRollbackLogsToFile(t *testing.T) {
 		}
 	}
 }
+
+// TestRollbackRecreatesMissingCurrent runs rollback (as the failure action
+// does from previous\) with current gone: current is recreated before the
+// agent is started again.
+func TestRollbackRecreatesMissingCurrent(t *testing.T) {
+	pub, priv := genKey(t)
+	d, sc := updateDeps(t, pub)
+	ctx := context.Background()
+	for _, v := range []string{"v1", "v2"} {
+		if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, v, priv, pub)}, io.Discard, io.Discard); code != 0 {
+			t.Fatalf("install %s failed", v)
+		}
+	}
+	if err := os.Remove(d.layout.CurrentLink); err != nil {
+		t.Fatal(err)
+	}
+	var errOut bytes.Buffer
+	if code := runWith(ctx, d, []string{"rollback"}, io.Discard, &errOut); code != 0 {
+		t.Fatalf("exit = %d: %s", code, errOut.String())
+	}
+	if cur, _ := update.LinkVersion(d.layout.CurrentLink); cur != "v1" {
+		t.Errorf("current = %q, want v1 (previous)", cur)
+	}
+	if len(sc.calls) == 0 || sc.calls[len(sc.calls)-1][0] != "start" {
+		t.Errorf("systemctl = %v, want a start", sc.calls)
+	}
+}

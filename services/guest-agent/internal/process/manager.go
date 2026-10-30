@@ -132,10 +132,11 @@ type Options struct {
 	// StartingTTL ends a STARTING record that was never launched (no unit,
 	// no shim.json) once it is older than this. Default DefaultStartingTTL.
 	StartingTTL time.Duration
-	// WaitSecrets, if set, runs before a command is launched for the first
-	// time; an error refuses the Start (claim.Manager.WaitSecrets: up to
-	// 30 s for pending secrets on Windows, S9 spec 12.8).
-	WaitSecrets func(ctx context.Context) error
+	// WaitSecrets, if set, runs with the spec before a command is launched
+	// for the first time; an error refuses the Start (claim.Manager
+	// WaitSecrets: up to 30 s for pending secrets on Windows, S9 spec 12.8;
+	// the Windows boot gate).
+	WaitSecrets func(ctx context.Context, spec *agentv1.CommandSpec) error
 	// HandlerOptions are added to the Connect handler; the wiring passes
 	// reqcache.Interceptors (created once and shared by all services).
 	HandlerOptions []connect.HandlerOption

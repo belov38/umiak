@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -262,25 +261,5 @@ func TestBootIDInvalidMachineUUID(t *testing.T) {
 		if a != BootIDFor(m, 3) || a == BootIDFor(m, 4) {
 			t.Errorf("%q: unstable or count-independent boot id", m)
 		}
-	}
-}
-
-func TestBootIDFromBootTime(t *testing.T) {
-	const machine = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
-	boot := time.Date(2026, 10, 31, 8, 0, 0, 0, time.UTC)
-	a := BootIDFromBootTime(machine, boot)
-	// Rounded to seconds: jitter of the kernel value below 0.5 s keeps the id.
-	if a != BootIDFromBootTime(machine, boot.Add(400*time.Millisecond)) || a != BootIDFromBootTime(machine, boot.Add(-400*time.Millisecond)) {
-		t.Error("sub-second jitter changed the boot id")
-	}
-	if a == BootIDFromBootTime(machine, boot.Add(time.Minute)) {
-		t.Error("another boot time gave the same boot id")
-	}
-	if a == BootIDFor(machine, uint32(boot.Unix())) { //nolint:gosec // test value fits
-		t.Error("boot time and boot counter ids must not collide")
-	}
-	id, err := uuid.Parse(a)
-	if err != nil || id.Version() != 5 {
-		t.Errorf("boot id %q: %v", a, err)
 	}
 }

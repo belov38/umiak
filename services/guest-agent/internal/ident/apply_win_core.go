@@ -116,6 +116,9 @@ func ApplyWindows(ctx context.Context, l paths.Layout, id Identity, r WinResette
 		return false, false, err
 	}
 	defer unlock()
+	if err := SecureAgentDirs(l); err != nil {
+		return false, false, err
+	}
 	return applyWindows(ctx, l, id, r, mode)
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -173,7 +174,7 @@ func TestCallSubcommand(t *testing.T) {
 
 func TestCallWithoutAgent(t *testing.T) {
 	d, _ := testDeps(t, errSource{})
-	d.layout.AdminSocket = filepath.Join(t.TempDir(), "none.sock")
+	d.layout.AdminSocket = shortSocketPath(t)
 	var out, errOut bytes.Buffer
 	if code := runWith(context.Background(), d, []string{"call", "sbx.agent.v1.System/Info"}, &out, &errOut); code != 1 {
 		t.Errorf("exit %d, want 1: %s", code, errOut.String())
@@ -236,8 +237,12 @@ func TestExecAfterPrepareStop(t *testing.T) {
 	a.d.newID = func() string { return id }
 	a.sup.Script(id, func(r *supervisor.FakeRun) { _ = r.Exit(3) })
 	start := time.Now()
-	if code, _, errOut := a.cli(t, "", "exec", "--", "true"); code != 3 {
+	code, _, errOut = a.cli(t, "", "exec", "--", "true")
+	if code != 3 {
 		t.Errorf("exec after PrepareStop: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(errOut, "secrets are pending") {
+		t.Errorf("no pending secrets note on stderr: %q", errOut)
 	}
 	if d := time.Since(start); d > 10*time.Second {
 		t.Errorf("exec waited %v for the pending secrets", d)
@@ -277,7 +282,9 @@ func TestEnvFormatPwshQuoting(t *testing.T) {
 		{"pwsh", []string{"A=a'b"}, "$env:A = 'a''b'\n"},
 		{"pwsh", []string{"Q=\u2018x\u2019"}, "$env:Q = '\u2018\u2018x\u2019\u2019'\n"},
 		{"pwsh", []string{"A-B=1", "C}D=2"}, "${env:A-B} = '1'\n${env:C`}D} = '2'\n"},
-		{"pwsh", []string{"M=line1\nline2"}, "$env:M = 'line1\nline2'\n"},
+		{"pwsh", []string{"M=line1\nline2"}, "$env:M = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('bGluZTEKbGluZTI='))\n"},
+		{"pwsh", []string{"T=a\tb\x1b[0m"}, "$env:T = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('YQliG1swbQ=='))\n"},
+		{"pwsh", []string{"U=caf\u00e9 'x'"}, "$env:U = 'caf\u00e9 ''x'''\n"},
 		{"cmd", []string{"A=50%&x"}, "set \"A=50%%&x\"\n"},
 		{"cmd", []string{"N=a\nb", "OK=1"}, "set \"OK=1\"\n"},
 		{"sh", []string{"A=it's", "B-C=x"}, "export A='it'\\''s'\n"},
@@ -336,7 +343,7 @@ func TestLogsSubcommand(t *testing.T) {
 
 func TestThawForceAdminSocketAgentDown(t *testing.T) {
 	d := deps{layout: paths.ForRoot(t.TempDir())}
-	d.layout.AdminSocket = filepath.Join(t.TempDir(), "none.sock")
+	d.layout.AdminSocket = shortSocketPath(t)
 	if err := os.MkdirAll(d.layout.RunDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -375,4 +382,36 @@ func TestThawForceThroughAgent(t *testing.T) {
 	if code != 0 || strings.Contains(out, `"quiesce"`) {
 		t.Errorf("lease still active: %s", out)
 	}
+}
+
+func TestUnreachable(t *testing.T) {
+	dial := func(errno error) error {
+		return fmt.Errorf("unavailable: %w", &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", errno)})
+	}
+	for _, tt := range []struct {
+		err  error
+		want bool
+	}{
+		{dial(syscall.ENOENT), true},
+		{dial(syscall.ECONNREFUSED), true},
+		{dial(syscall.EACCES), false},
+		{dial(syscall.EPERM), false},
+		{errors.New("protocol error"), false},
+	} {
+		if got := unreachable(tt.err); got != tt.want {
+			t.Errorf("unreachable(%v) = %v, want %v", tt.err, got, tt.want)
+		}
+	}
+}
+
+// shortSocketPath returns a path for a socket nobody listens on, short
+// enough for macOS (104 bytes).
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sbxn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "none.sock")
 }

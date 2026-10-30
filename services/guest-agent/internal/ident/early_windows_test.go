@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -109,6 +110,29 @@ func TestUTF16LEMatchesWindows(t *testing.T) {
 	for i, c := range u {
 		if got[2*i] != byte(c) || got[2*i+1] != byte(c>>8) {
 			t.Fatalf("mismatch at %d", i)
+		}
+	}
+}
+
+// TestSecureAgentDirsDACL checks the protected DACLs of run\ (SYSTEM and
+// Administrators) and state\ (SYSTEM only) after the boot step.
+func TestSecureAgentDirsDACL(t *testing.T) {
+	l := winLayout(t)
+	if err := SecureAgentDirs(l); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		dir    string
+		admins bool
+	}{{l.RunDir, true}, {l.StateDir, false}} {
+		sd, err := windows.GetNamedSecurityInfo(tt.dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := sd.String()
+		if !strings.HasPrefix(s, "D:P") || !strings.Contains(s, ";;;SY)") || strings.Contains(s, ";;;BA)") != tt.admins ||
+			strings.Contains(s, ";;;BU)") || strings.Contains(s, ";;;AU)") || strings.Contains(s, ";;;CO)") {
+			t.Errorf("DACL of %s = %s", tt.dir, s)
 		}
 	}
 }

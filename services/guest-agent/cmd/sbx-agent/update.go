@@ -85,6 +85,13 @@ func rollbackCmd(d deps, args []string, stderr io.Writer) int {
 		log, closeLog = windowsLog(d, "rollback.log", stderr)
 		defer closeLog()
 	}
+	// The failure action runs rollback from previous\ when it can: current
+	// may be missing after a crash during a junction switch.
+	if v, err := update.RepairCurrent(d.layout); err != nil {
+		log.Error("rollback: current is missing and cannot be recreated", "err", err)
+	} else if v != "" {
+		log.Warn("rollback: recreated the missing current link", "version", v)
+	}
 	if err := update.Rollback(d.layout, *to, d.services, d.sleep); err != nil {
 		log.Error("rollback failed", "err", err)
 		_, _ = fmt.Fprintf(stderr, "sbx-agent rollback: %v\n", err)

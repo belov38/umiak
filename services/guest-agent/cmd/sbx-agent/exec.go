@@ -68,6 +68,7 @@ func execCmd(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 		input = d.stdin
 	}
 
+	noteSecretsPending(ctx, sock, stderr)
 	c := d.commandRun(sock, stdout, stderr)
 	sigCtx, stop := signal.NotifyContext(context.WithoutCancel(ctx), os.Interrupt)
 	defer stop()
@@ -278,4 +279,23 @@ func lastBytes(b []byte, n int) []byte {
 		return b[len(b)-n:]
 	}
 	return b
+}
+
+// noteSecretsPending prints a note when the secrets phase is pending: the
+// admin socket does not wait for UpdateSecrets, so the command runs without
+// the secret env and the secret files. A failing System/Info is ignored;
+// the command itself reports what is wrong.
+func noteSecretsPending(ctx context.Context, sock string, stderr io.Writer) {
+	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
+	defer cancel()
+	res, err := agentv1connect.NewSystemClient(socketClient(sock), agentURL).Info(ctx, connect.NewRequest(&agentv1.InfoRequest{}))
+	if err != nil {
+		return
+	}
+	for _, p := range res.Msg.GetReadiness() {
+		if p.GetName() == "secrets" && p.GetState() == agentv1.PhaseState_PHASE_STATE_PENDING {
+			_, _ = io.WriteString(stderr, "sbx-agent exec: note: the secrets are pending (not sent again since the agent restarted or PrepareStop); the command runs without them\n")
+			return
+		}
+	}
 }

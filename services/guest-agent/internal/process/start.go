@@ -84,7 +84,7 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 			return m.currentInfo(id)
 		}
 		// The retry launches: it takes a slot like a new command.
-		if err := m.waitSecrets(ctx); err != nil {
+		if err := m.waitSecrets(ctx, spec); err != nil {
 			return nil, false, err
 		}
 		m.mu.Lock()
@@ -95,7 +95,7 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 				"at most %d commands may run at once", m.opts.Config.MaxRunningCommands)
 		}
 	} else {
-		if err := m.waitSecrets(ctx); err != nil {
+		if err := m.waitSecrets(ctx, spec); err != nil {
 			m.dropIfUnused(c)
 			return nil, false, err
 		}
@@ -118,11 +118,11 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 }
 
 // waitSecrets runs Options.WaitSecrets, if set, before a launch.
-func (m *Manager) waitSecrets(ctx context.Context) error {
+func (m *Manager) waitSecrets(ctx context.Context, spec *agentv1.CommandSpec) error {
 	if m.opts.WaitSecrets == nil {
 		return nil
 	}
-	return m.opts.WaitSecrets(ctx)
+	return m.opts.WaitSecrets(ctx, spec)
 }
 
 // create checks the user, the spec against the platform and the limit and

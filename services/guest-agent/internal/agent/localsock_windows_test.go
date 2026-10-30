@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -37,4 +38,43 @@ func TestSecureSocketACL(t *testing.T) {
 		t.Fatalf("connect as administrator: %v", err)
 	}
 	_ = c.Close()
+}
+
+// TestEnvSocketUserACE opens an env socket for an account (BUILTIN\Users
+// stands in for the default user, it exists on every machine) and finds an
+// ACE that lets it read and write the socket.
+func TestEnvSocketUserACE(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "env.sock")
+	ln, err := listenLocal(context.Background(), p, socketEnv, "Users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	sd, err := windows.GetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	users, err := windows.CreateWellKnownSid(windows.WinBuiltinUsersSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const rw = windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE
+	found := false
+	for i := range uint32(dacl.AceCount) {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if sid.Equals(users) && uint32(ace.Mask)&rw == rw {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("env socket DACL %s has no read/write ACE for the account", sd.String())
+	}
 }

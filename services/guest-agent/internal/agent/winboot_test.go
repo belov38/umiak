@@ -198,10 +198,21 @@ func TestWinBootRebootPendingGates(t *testing.T) {
 			t.Error("identity ready while the boot step waits for a reboot")
 		}
 	}
-	// The admin socket starts commands anyway.
-	start := &agentv1.StartRequest{CommandId: "admin-1", Spec: &agentv1.CommandSpec{User: currentUser(t), Cmd: &agentv1.CommandSpec_Argv{Argv: &agentv1.Argv{Args: []string{"true"}}}}}
-	if _, err := agentv1connect.NewProcessClient(admin, "http://agent").Start(ctx, connect.NewRequest(start)); err != nil {
-		t.Errorf("Process/Start over the admin socket: %v", err)
+	// The admin socket starts commands of SYSTEM (root) anyway, not those
+	// of another user.
+	proc := agentv1connect.NewProcessClient(admin, "http://agent")
+	start := &agentv1.StartRequest{CommandId: "admin-1", Spec: &agentv1.CommandSpec{User: "root", Cmd: &agentv1.CommandSpec_Argv{Argv: &agentv1.Argv{Args: []string{"true"}}}}}
+	if _, err := proc.Start(ctx, connect.NewRequest(start)); err != nil {
+		t.Errorf("Process/Start as root over the admin socket: %v", err)
+	}
+	start = &agentv1.StartRequest{CommandId: "admin-2", Spec: &agentv1.CommandSpec{User: currentUser(t), Cmd: &agentv1.CommandSpec_Argv{Argv: &agentv1.Argv{Args: []string{"true"}}}}}
+	if _, err := proc.Start(ctx, connect.NewRequest(start)); detail(err) != errs.IdentityNotReady {
+		t.Errorf("Process/Start as a user over the admin socket = %v, want identity_not_ready", err)
+	}
+	creq := connect.NewRequest(&agentv1.ClaimRequest{SandboxId: "sbx_1", Hostname: "box"})
+	creq.Header().Set(wire.HeaderRequestID, uuid.NewString())
+	if _, err := agentv1connect.NewSystemClient(admin, "http://agent").Claim(ctx, creq); detail(err) != errs.IdentityNotReady {
+		t.Errorf("Claim = %v, want identity_not_ready", err)
 	}
 	ureq := connect.NewRequest(&agentv1.UpdateSecretsRequest{})
 	ureq.Header().Set(wire.HeaderRequestID, uuid.NewString())
@@ -321,4 +332,25 @@ func currentUser(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return u.Username
+}
+
+// TestWinBootRunsEarlyRightAfterSetup: on the first boot of a clone the
+// startup script ran during Windows Setup (and skipped); the service runs
+// the boot step as soon as Setup completes, without the early.json wait.
+func TestWinBootRunsEarlyRightAfterSetup(t *testing.T) {
+	h := newWinHarness(t)
+	h.winBoot.EarlyWait = time.Minute
+	h.setup.Store(true)
+	h.start()
+	time.Sleep(50 * time.Millisecond)
+	h.setup.Store(false)
+	start := time.Now()
+	h.waitReady()
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("READY %v after Windows Setup ended", d)
+	}
+	if !ident.EarlyDoneForBoot(h.l.EarlyFile, bootOne) {
+		t.Error("the service did not run the boot step after Windows Setup")
+	}
+	h.stop()
 }

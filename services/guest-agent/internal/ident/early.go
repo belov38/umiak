@@ -31,11 +31,32 @@ func LoadEarly(path string) (*EarlyMarker, error) {
 }
 
 // EarlyDoneForBoot reports whether early.json at path was written for boot
-// bootID. A marker without a boot id (the step could not read one) never
-// counts as the current boot.
+// bootID. A marker without a boot id (the step could not read one), or one
+// not owned by SYSTEM or Administrators (Windows), never counts as the
+// current boot.
 func EarlyDoneForBoot(path, bootID string) bool {
 	m, err := LoadEarly(path)
-	return err == nil && m.BootID != "" && m.BootID == bootID
+	if err != nil || m.BootID == "" || m.BootID != bootID {
+		return false
+	}
+	trusted, err := fsutil.TrustedOwner(path)
+	if err != nil || !trusted {
+		slog.Warn("early.json is not owned by the system, ignoring it", "path", path, "err", err)
+		return false
+	}
+	return true
+}
+
+// SecureAgentDirs creates run\ (SYSTEM and Administrators) and state\
+// (SYSTEM only) with their protected DACLs (S9 spec 12.1); 0700 elsewhere.
+func SecureAgentDirs(l paths.Layout) error {
+	if err := fsutil.MkdirSecure(l.RunDir, fsutil.SystemAndAdmins); err != nil {
+		return fmt.Errorf("ident: secure run dir: %w", err)
+	}
+	if err := fsutil.MkdirSecure(l.StateDir, fsutil.SystemOnly); err != nil {
+		return fmt.Errorf("ident: secure state dir: %w", err)
+	}
+	return nil
 }
 
 // Early is the boot step of Windows (sbx-agent early, spec 12.3), run by the
@@ -66,6 +87,12 @@ func EarlyIn(ctx context.Context, l paths.Layout, src Source, r WinResetter, mod
 		return err
 	}
 	defer unlock()
+	// Before early.json is read or anything is written: run\ and state\
+	// must not keep the C:\ProgramData ACL, under which users may create
+	// files (a planted marker, a squatted socket).
+	if err := SecureAgentDirs(l); err != nil {
+		return err
+	}
 
 	raw, err := src.Read(ctx)
 	if err != nil {
@@ -106,9 +133,6 @@ func EarlyIn(ctx context.Context, l paths.Layout, src Source, r WinResetter, mod
 			return fmt.Errorf("ident: reboot: %w", err)
 		}
 		return nil
-	}
-	if err := os.MkdirAll(l.RunDir, 0o755); err != nil {
-		return err
 	}
 	if err := fsutil.WriteJSONAtomic(l.EarlyFile, EarlyMarker{BootID: bootID}, 0o644); err != nil {
 		return fmt.Errorf("ident: write early.json: %w", err)

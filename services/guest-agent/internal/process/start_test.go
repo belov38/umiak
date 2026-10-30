@@ -539,8 +539,11 @@ func TestStartWaitsForSecrets(t *testing.T) {
 	var pendingSecrets atomic.Bool
 	pendingSecrets.Store(true)
 	h := newHarness(t, func(o *Options) {
-		o.WaitSecrets = func(context.Context) error {
+		o.WaitSecrets = func(_ context.Context, spec *agentv1.CommandSpec) error {
 			calls.Add(1)
+			if spec.GetArgv().GetArgs()[0] != "/bin/sleep" {
+				t.Errorf("WaitSecrets got spec %v", spec)
+			}
 			if pendingSecrets.Load() {
 				return errs.New(connect.CodeUnavailable, errs.SecretsPending, "secrets pending")
 			}

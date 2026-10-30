@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"syscall"
@@ -47,12 +48,12 @@ func adminSocket(d deps, cmd string, stderr io.Writer) string {
 	return d.layout.AdminSocket
 }
 
-// unreachable reports an error of dialing a socket nobody listens on (the
-// agent is not running or has not opened it yet).
+// unreachable reports an error of dialing a socket nobody listens on: the
+// file is missing or the connection is refused (the agent is not running
+// or has not opened it yet). Anything else, access denied in particular,
+// is a real error: thaw --force must not drop a lease then.
 func unreachable(err error) bool {
-	var op *net.OpError
-	return errors.As(err, &op) && op.Op == "dial" ||
-		errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) || connRefusedOS(err)
 }
 
 // newCommandID returns the id of a command started by the CLI.

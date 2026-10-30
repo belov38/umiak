@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -97,7 +98,8 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 
 // windowsBootStep waits out Windows Setup and the boot step of this boot
 // (early.json with a.bootID), running the step in the service when the
-// startup script did not write the marker within EarlyWait. A step that
+// startup script did not write the marker within EarlyWait, or right after
+// a Windows Setup the service saw running. A step that
 // asked for a reboot is given RebootWait to happen. It returns ctx.Err()
 // when the run stops meanwhile, another error when the step failed.
 func (a *agent) windowsBootStep(ctx context.Context) error {
@@ -110,6 +112,12 @@ func (a *agent) windowsBootStep(ctx context.Context) error {
 			}
 		}
 		a.log.Info("agent: windows setup finished")
+		// The startup script of this boot ran during Setup and skipped
+		// the step (first boot of a clone): no early.json is coming.
+		if !ident.EarlyDoneForBoot(a.l.EarlyFile, a.bootID) {
+			return a.runEarlyStep(ctx)
+		}
+		return nil
 	}
 	deadline := time.Now().Add(w.EarlyWait)
 	for !ident.EarlyDoneForBoot(a.l.EarlyFile, a.bootID) {
@@ -126,8 +134,7 @@ func (a *agent) windowsBootStep(ctx context.Context) error {
 // runEarlyStep runs `sbx-agent early` in the service (ModeService).
 func (a *agent) runEarlyStep(ctx context.Context) error {
 	w := a.d.WinBoot
-	a.log.Warn("agent: the startup script did not finish the boot step of this boot, running it in the service",
-		"waited", w.EarlyWait)
+	a.log.Warn("agent: the startup script did not finish the boot step of this boot, running it in the service")
 	if err := ident.EarlyIn(ctx, a.l, a.d.IdentSource, w.Resetter, ident.ModeService); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -193,15 +200,30 @@ func (a *agent) bootGate() error {
 }
 
 // waitSecrets is process.Options.WaitSecrets: the boot gate, then the
-// claim's wait for pending secrets. Calls on the admin socket skip both.
-func (a *agent) waitSecrets(ctx context.Context) error {
-	if isAdminCall(ctx) {
+// claim's wait for pending secrets. A call on the admin socket skips the
+// secrets wait (exec works after PrepareStop) and, for a command run as
+// SYSTEM, also the boot gate; a command of another user still needs a
+// completed boot step, which wiped the secret files of the last boot.
+func (a *agent) waitSecrets(ctx context.Context, spec *agentv1.CommandSpec) error {
+	admin := isAdminCall(ctx)
+	if !admin || !a.runsAsSystem(spec) {
+		if err := a.bootGate(); err != nil {
+			return err
+		}
+	}
+	if admin {
 		return nil
 	}
-	if err := a.bootGate(); err != nil {
-		return err
-	}
 	return a.claim.WaitSecrets(ctx)
+}
+
+// runsAsSystem reports whether spec runs as SYSTEM (or its alias root).
+func (a *agent) runsAsSystem(spec *agentv1.CommandSpec) bool {
+	u := spec.GetUser()
+	if u == "" {
+		u = a.cfg.DefaultUser
+	}
+	return strings.EqualFold(u, "SYSTEM") || u == "root"
 }
 
 // startSSH starts sshd in the background on Windows once the identity is
