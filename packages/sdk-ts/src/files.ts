@@ -534,26 +534,34 @@ export class Files {
 	 * `path` (created if missing). The whole archive is repeated on failure.
 	 * `entries`: pack only these paths (relative to `localDir`, e.g. the
 	 * output of `git ls-files`) and their parent directories; directories in
-	 * the list are not recursed into.
+	 * the list are not recursed into. A Uint8Array entry is the name's bytes
+	 * as is (file names that are not UTF-8).
 	 */
 	async uploadDir(
 		localDir: string,
 		path: string,
 		opts: CallOptions &
-			UserOption & { overwrite?: boolean; entries?: readonly string[] } = {},
+			UserOption & {
+				overwrite?: boolean;
+				entries?: readonly (string | Uint8Array)[];
+			} = {},
 	): Promise<ArchiveResult> {
 		const fs = fsPromises("uploadDir");
 		const listed =
 			opts.entries === undefined ? null : withParents(opts.entries);
-		const names = listed ?? (await fs.readdir(localDir));
+		const names = listed === null ? await fs.readdir(localDir) : [];
 		const call = callOf(opts);
-		if (names.length === 0) {
+		if (listed === null ? names.length === 0 : listed.count === 0) {
 			const info = await this.mkdir(path, { ...opts, parents: true });
 			return { path: info.path, entries: 0, sizeBytes: 0 };
 		}
 		return withRetry(
 			async () => {
-				const tar = tarCreate(localDir, names, { listed: listed !== null });
+				const tar = tarCreate(
+					localDir,
+					names,
+					listed === null ? {} : { list: listed.list },
+				);
 				let tarError: unknown;
 				tar.done.catch((e: unknown) => {
 					tarError = e;
@@ -647,16 +655,57 @@ export class Files {
 
 /**
  * The listed paths with every parent directory before its children, without
- * duplicates (an archive whose files come with their directories).
+ * duplicates (an archive whose files come with their directories), as the
+ * NUL-terminated bytes of `tar --null -T -`.
  */
-function withParents(entries: readonly string[]): string[] {
-	const out = new Set<string>();
+function withParents(entries: readonly (string | Uint8Array)[]): {
+	list: Uint8Array;
+	count: number;
+} {
+	const enc = new TextEncoder();
+	const seen = new Set<string>();
+	const out: Uint8Array[] = [];
+	const add = (parts: Uint8Array[]) => {
+		const joined = joinBytes(parts, 0x2f);
+		// A byte-exact key (latin1 maps each byte to one char).
+		const key = String.fromCharCode(...joined);
+		if (seen.has(key)) return;
+		seen.add(key);
+		out.push(joined, new Uint8Array([0]));
+	};
 	for (const e of entries) {
-		const parts = e.split("/").filter((p) => p !== "" && p !== ".");
-		for (let i = 1; i < parts.length; i++) out.add(parts.slice(0, i).join("/"));
-		if (parts.length > 0) out.add(parts.join("/"));
+		const bytes = typeof e === "string" ? enc.encode(e) : e;
+		const parts = splitBytes(bytes, 0x2f).filter(
+			(p) => p.length > 0 && !(p.length === 1 && p[0] === 0x2e),
+		);
+		for (let i = 1; i < parts.length; i++) add(parts.slice(0, i));
+		if (parts.length > 0) add(parts);
 	}
-	return [...out];
+	return { list: joinBytes(out), count: seen.size };
+}
+
+function splitBytes(b: Uint8Array, sep: number): Uint8Array[] {
+	const parts: Uint8Array[] = [];
+	let start = 0;
+	for (let i = 0; i <= b.length; i++) {
+		if (i === b.length || b[i] === sep) {
+			parts.push(b.subarray(start, i));
+			start = i + 1;
+		}
+	}
+	return parts;
+}
+
+function joinBytes(parts: Uint8Array[], sep?: number): Uint8Array {
+	const extra = sep === undefined ? 0 : Math.max(0, parts.length - 1);
+	const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0) + extra);
+	let at = 0;
+	for (const [i, p] of parts.entries()) {
+		if (i > 0 && sep !== undefined) out[at++] = sep;
+		out.set(p, at);
+		at += p.length;
+	}
+	return out;
 }
 
 function writeQuery(path: string, o: WriteOptions) {

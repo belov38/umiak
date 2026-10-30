@@ -76,14 +76,52 @@ describe("sbx shell", () => {
 			w.agent.ptySizes(cmdId).length >= 1 ? true : undefined,
 		);
 		expect(w.agent.ptySizes(cmdId)[0]).toEqual({ cols: 132, rows: 43 });
-		child?.kill("SIGWINCH");
-		await until(async () =>
-			w.agent.ptySizes(cmdId).length >= 2 ? true : undefined,
-		);
+		// The handler is installed once the PTY is attached, which the test
+		// cannot see: repeat the signal until a resize arrives.
+		await until(async () => {
+			if (w.agent.ptySizes(cmdId).length >= 2) return true;
+			child?.kill("SIGWINCH");
+			await new Promise((r) => setTimeout(r, 100));
+			return undefined;
+		});
 		child?.stdin?.end("x\n");
 		const r = await run;
 		expect(r.code, r.stderr).toBe(0);
 		expect(r.stdout).toBe("after x\n");
+	});
+
+	it("SIGTERM leaves the terminal running and exits 143; a closed stdout ends the session with 141", async () => {
+		let child: ChildProcess | undefined;
+		const before = w.requests.length;
+		const run = runCli(["shell", sb.id, "--", "sleep 20"], {
+			env,
+			stdin: "",
+			stdinOpen: true,
+			onSpawn: (c) => {
+				child = c;
+			},
+		});
+		await until(async () =>
+			w.requests.slice(before).some((r) => r.startsWith("UPGRADE "))
+				? true
+				: undefined,
+		);
+		// Past the attach, when the handlers are in place.
+		await new Promise((r) => setTimeout(r, 500));
+		child?.kill("SIGTERM");
+		const r = await run;
+		expect(r.code, r.stderr).toBe(143);
+		expect(r.stderr).toContain("--attach cmd_");
+
+		const started = Date.now();
+		const head = await runCli(["shell", sb.id, "--", "yes"], {
+			env,
+			stdinOpen: true,
+			closeStdoutAfter: 1,
+		});
+		expect(head.code, head.stderr).toBe(141);
+		expect(head.stderr).toBe("");
+		expect(Date.now() - started).toBeLessThan(15_000);
 	});
 
 	it("--cacert reaches the PTY WebSocket behind a self-signed TLS front", async () => {

@@ -113,17 +113,18 @@ export const LOCAL_TAR_FAILED = "local_tar_failed";
 
 /**
  * `tar -cz` of the top-level `names` of `dir`, as a web stream that errors
- * when tar fails, so an upload never ends as a short archive. `listed`:
- * `names` is the whole list of paths (not recursed into), passed to tar on
- * stdin (`--null -T -`), so a long list never hits the argv limit.
+ * when tar fails, so an upload never ends as a short archive. `list`: the
+ * whole list of paths instead (NUL-terminated bytes, not recursed into),
+ * passed to tar on stdin (`--null -T -`), so a long list never hits the argv
+ * limit and names need not be UTF-8.
  */
 export function tarCreate(
 	dir: string,
 	names: string[],
-	o: { listed?: boolean } = {},
+	o: { list?: Uint8Array } = {},
 ): { body: ReadableStream<Uint8Array>; done: Promise<void>; kill(): void } {
 	const { child, done } = runTar(
-		o.listed === true
+		o.list !== undefined
 			? [
 					"-c",
 					"-z",
@@ -142,7 +143,7 @@ export function tarCreate(
 	child.stdin?.on("error", () => {
 		// tar exited early; its exit status reports why.
 	});
-	child.stdin?.end(o.listed === true ? `${names.join("\0")}\0` : undefined);
+	child.stdin?.end(o.list);
 	const reader = (
 		stream("uploadDir").Readable.toWeb(
 			child.stdout as Stream.Readable,

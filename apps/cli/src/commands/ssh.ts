@@ -9,10 +9,11 @@
 //      ssh options such as `-L 3000:localhost:3000`, or a remote command);
 //   5. the directory is removed when ssh exits.
 // Works with a team key too. sbx exits with ssh's code. Ctrl-C belongs to
-// ssh: sbx ignores SIGINT meanwhile so that it still cleans up.
+// ssh; SIGTERM and SIGHUP (the terminal closed) are passed on to ssh. sbx
+// survives them until ssh exits, so the key is always removed (see sshInto).
 
-import { spawn } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { type ChildProcess, spawn } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Command } from "commander";
@@ -29,15 +30,23 @@ import {
 	TOOL_MISSING,
 } from "../ssh.ts";
 
-/** Runs the system ssh with `argv` on this terminal; resolves to its exit code. */
-function runSsh(argv: string[]): Promise<number> {
+/** Exit code of a signal on this machine (128 + n), as a shell reports it. */
+function signalExit(sig: NodeJS.Signals | null): number {
+	return 128 + (sig ? (constants.signals[sig] ?? 0) : 0);
+}
+
+/**
+ * Runs the system ssh with `argv` on this terminal; resolves to its exit
+ * code. `onChild` gets the process (for passing signals on).
+ */
+function runSsh(
+	argv: string[],
+	onChild: (c: ChildProcess) => void,
+): Promise<number> {
 	return new Promise((resolve, reject) => {
-		const ignore = () => {};
-		process.on("SIGINT", ignore);
 		const child = spawn("ssh", argv, { stdio: "inherit" });
-		const done = () => process.off("SIGINT", ignore);
+		onChild(child);
 		child.once("error", (err) => {
-			done();
 			reject(
 				new CliError({
 					code: TOOL_MISSING,
@@ -47,41 +56,76 @@ function runSsh(argv: string[]): Promise<number> {
 			);
 		});
 		child.once("close", (code, signal) => {
-			done();
-			// A local signal: the local number, as a shell reports it.
-			resolve(code ?? 128 + (signal ? (constants.signals[signal] ?? 0) : 0));
+			resolve(code ?? signalExit(signal));
 		});
 	});
 }
 
+/**
+ * The key, its certificate and ssh. From the temporary directory on, sbx
+ * does not die of SIGINT, SIGTERM or SIGHUP: while ssh runs, SIGINT is left
+ * to ssh (it reaches the whole foreground group) and SIGTERM/SIGHUP are
+ * passed on to it; before that, they stop the preparation. Either way the
+ * directory is removed and sbx exits 128 + n (or with ssh's code).
+ */
 async function sshInto(
 	ctx: Context,
 	ref: string | undefined,
 	extra: string[],
 ): Promise<number> {
 	const sb = await useSandbox(ctx, ref);
+	const ac = new AbortController();
+	let child: ChildProcess | undefined;
+	let caught: NodeJS.Signals | undefined;
+	const onSignal = (sig: NodeJS.Signals) => {
+		if (child !== undefined) {
+			if (sig !== "SIGINT" && child.exitCode === null) child.kill(sig);
+			return;
+		}
+		caught ??= sig;
+		ac.abort();
+	};
+	const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+	for (const sig of signals) process.on(sig, onSignal);
 	const dir = mkdtempSync(join(tmpdir(), "sbx-ssh-"));
 	try {
 		chmodSync(dir, 0o700);
 		const key = join(dir, "id_ed25519");
 		sshKeygen(key, `sbx-${sb.slug}`);
-		const cert = await certify(ctx, sb.id, key);
-		const knownHosts = await refreshKnownHosts(ctx, cert);
-		return await runSsh([
-			"-i",
+		ac.signal.throwIfAborted();
+		const cert = await certify(
+			ctx,
+			sb.id,
+			readFileSync(`${key}.pub`, "utf8"),
 			key,
-			"-o",
-			`CertificateFile=${key}-cert.pub`,
-			"-o",
-			"IdentitiesOnly=yes",
-			"-o",
-			`UserKnownHostsFile=${knownHosts}`,
-			"-p",
-			String(cert.port),
-			`${cert.username}@${cert.host}`,
-			...extra,
-		]);
+			ac.signal,
+		);
+		const knownHosts = await refreshKnownHosts(ctx, cert);
+		ac.signal.throwIfAborted();
+		return await runSsh(
+			[
+				"-i",
+				key,
+				"-o",
+				`CertificateFile=${key}-cert.pub`,
+				"-o",
+				"IdentitiesOnly=yes",
+				"-o",
+				`UserKnownHostsFile=${knownHosts}`,
+				"-p",
+				String(cert.port),
+				`${cert.username}@${cert.host}`,
+				...extra,
+			],
+			(c) => {
+				child = c;
+			},
+		);
+	} catch (err) {
+		if (caught !== undefined) return signalExit(caught);
+		throw err;
 	} finally {
+		for (const sig of signals) process.off(sig, onSignal);
 		rmSync(dir, { recursive: true, force: true });
 	}
 }

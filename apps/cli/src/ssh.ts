@@ -6,7 +6,8 @@
 // `/v1/meta` (`[host]:port` when the port is not 22).
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, linkSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { components } from "@sbx/sdk";
 import { writePrivateFile } from "./config.ts";
@@ -28,13 +29,11 @@ export function knownHostsName(host: string, port: number): string {
 	return port === 22 ? host : `[${host}]:${port}`;
 }
 
-/** Makes a new ed25519 key pair at `file` and `file.pub` (no passphrase). */
-export function sshKeygen(file: string, comment: string): void {
-	const r = spawnSync(
-		"ssh-keygen",
-		["-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", file],
-		{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-	);
+function runKeygen(args: string[]): string {
+	const r = spawnSync("ssh-keygen", args, {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 	if (r.error !== undefined) {
 		throw new CliError({
 			code: TOOL_MISSING,
@@ -49,26 +48,61 @@ export function sshKeygen(file: string, comment: string): void {
 			retryable: false,
 		});
 	}
+	return r.stdout;
+}
+
+/** Makes a new ed25519 key pair at `file` and `file.pub` (no passphrase). */
+export function sshKeygen(file: string, comment: string): void {
+	runKeygen(["-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", file]);
 }
 
 /**
- * Certifies the public key of `keyFile` for sandbox `sandbox` (ID or slug)
- * and writes the certificate to `<keyFile>-cert.pub` (0600).
+ * Certifies `publicKey` (an OpenSSH line) for sandbox `sandbox` (ID or
+ * slug) and writes the certificate to `<keyFile>-cert.pub` (0600).
  */
 export async function certify(
 	ctx: Context,
 	sandbox: string,
+	publicKey: string,
 	keyFile: string,
+	signal?: AbortSignal,
 ): Promise<SshCertificate> {
-	const publicKey = readFileSync(`${keyFile}.pub`, "utf8").trim();
 	const { data } = await ctx
 		.sbx()
 		.raw.POST("/v1/sandboxes/{sandbox}/ssh/certificate", {
 			params: { path: { sandbox } },
-			body: { publicKey },
+			body: { publicKey: publicKey.trim() },
+			...(signal === undefined ? {} : { signal }),
 		});
 	writePrivateFile(`${keyFile}-cert.pub`, `${data.certificate.trim()}\n`);
 	return data;
+}
+
+/** The public key line of a private key file (`ssh-keygen -y`). */
+export function publicKeyOf(keyFile: string): string {
+	const r = runKeygen(["-y", "-f", keyFile]);
+	return r.trim();
+}
+
+/**
+ * Makes the private key `file` if there is none. The key is made under a
+ * temporary name and linked into place, so concurrent first runs end with
+ * one key (the loser drops its own). No `.pub` is kept: see publicKeyOf.
+ */
+export function ensureKey(file: string, comment: string): void {
+	if (existsSync(file)) return;
+	const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		sshKeygen(tmp, comment);
+		try {
+			linkSync(tmp, file);
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+		}
+	} finally {
+		rmSync(tmp, { force: true });
+		rmSync(`${tmp}.pub`, { force: true });
+	}
 }
 
 interface MetaSsh {

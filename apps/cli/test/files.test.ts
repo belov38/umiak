@@ -214,6 +214,15 @@ describe("cp, push, run --push", () => {
 			"./new.txt",
 			"./src/main.ts",
 		]);
+		// An ignored directory: git lists nothing, so all of it goes (warned).
+		const ignored = await sbx([
+			"push",
+			join(repo, "node_modules"),
+			`${sb.id}:work/deps`,
+		]);
+		expect(ignored.code, ignored.stderr).toBe(0);
+		expect(ignored.stderr).toContain("pushing the whole directory");
+		expect(await remote("cat work/deps/dep/index.js")).toBe("dep\n");
 		// The default dir is the working directory.
 		writeFileSync(join(repo, "src", "main.ts"), "changed\n");
 		const again = await sbx(["push", `${sb.id}:work/repo`], { cwd: repo });

@@ -3,11 +3,13 @@
 //   bun scripts/build.ts --all   the five release targets (`pnpm build:all`;
 //                                Bun downloads the other runtimes once)
 // Output: dist/sbx-<os>-<arch>[.exe] and dist/SHA256SUMS (sha256sum format)
-// of the binaries built by this run. dist/ is not committed.
+// of every sbx-* binary in dist/ after this run, so the file always matches
+// what is there (a host-only build after --all keeps the other entries).
+// dist/ is not committed.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,7 +57,6 @@ const CLI_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 export function build(targets: readonly Target[]): void {
 	const dist = join(CLI_DIR, "dist");
 	mkdirSync(dist, { recursive: true });
-	const sums: string[] = [];
 	for (const t of targets) {
 		const out = join(dist, t.file);
 		const r = spawnSync(
@@ -75,9 +76,16 @@ export function build(targets: readonly Target[]): void {
 				`bun build for ${t.name} failed (${r.status ?? r.signal})`,
 			);
 		}
-		const digest = createHash("sha256").update(readFileSync(out)).digest("hex");
-		sums.push(`${digest}  ${t.file}\n`);
 	}
+	const sums = readdirSync(dist)
+		.filter((f) => f.startsWith("sbx-"))
+		.sort()
+		.map((f) => {
+			const digest = createHash("sha256")
+				.update(readFileSync(join(dist, f)))
+				.digest("hex");
+			return `${digest}  ${f}\n`;
+		});
 	writeFileSync(join(dist, "SHA256SUMS"), sums.join(""));
 }
 

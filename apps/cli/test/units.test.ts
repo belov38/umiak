@@ -1,10 +1,18 @@
 // Unit tests of the argument parsers, the exit code of exec/run and the
 // backpressure of raw output (no api).
 
+import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import type { ExitEvent } from "@sbx/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -13,6 +21,7 @@ import {
 	parsePairs,
 	splitDashDash,
 } from "../src/args.ts";
+import { configValue, matchExecLine } from "../src/commands/ssh-config.ts";
 import { commandExitCode, exitCodeOf } from "../src/exit-codes.ts";
 import { Output, OutputClosedError, outputMode } from "../src/output.ts";
 
@@ -236,5 +245,38 @@ describe("output", () => {
 		stdout.emit("drain");
 		await p;
 		expect(done).toBe(true);
+	});
+});
+
+describe("ssh-config quoting (checked with the real ssh -G)", () => {
+	it("a Match exec of a path with blanks, $, backticks, quotes and % runs that program with those arguments", async () => {
+		const odd = join(dir, "d ir $HOME `id` %h 'q' \"dq\"");
+		mkdirSync(odd);
+		const probe = join(odd, "probe");
+		const out = join(dir, "probe-out");
+		writeFileSync(probe, `#!/bin/sh\nprintf '%s\\n' "$@" > "$PROBE_OUT"\n`, {
+			mode: 0o755,
+		});
+		const key = join(odd, "key %d");
+		const cfg = [
+			"Host odd-host",
+			`  IdentityFile ${configValue(key)}`,
+			matchExecLine("odd-host", [probe, "--cacert", odd, "50%", "x"]),
+			"  User matched",
+			"",
+		].join("\n");
+		const file = join(dir, "cfg");
+		writeFileSync(file, cfg);
+		const { stdout } = await promisify(execFile)(
+			"ssh",
+			["-G", "-F", file, "odd-host"],
+			{ env: { ...process.env, PROBE_OUT: out }, timeout: 10_000 },
+		);
+		expect(readFileSync(out, "utf8")).toBe(`--cacert\n${odd}\n50%\nx\n`);
+		expect(stdout).toMatch(/^user matched$/m);
+		// ssh -G shows the value before % expansion (%% becomes % on use).
+		expect(stdout.split("\n")).toContain(
+			`identityfile ${key.replaceAll("%", "%%")}`,
+		);
 	});
 });

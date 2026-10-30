@@ -3,13 +3,14 @@
 // existing files overwritten, nothing deleted).
 // - In a git work tree: the files of `git ls-files -co --exclude-standard`
 //   (tracked and untracked, without ignored ones; deleted files skipped)
-//   with their parent directories. Submodules come as empty directories.
+//   with their parent directories, names as git's bytes. Submodules come as
+//   empty directories. If git lists nothing for a non-empty directory (it is
+//   ignored), the whole directory goes, with a warning.
 // - Elsewhere: the whole directory.
 // stdout stays empty; `--json` prints the ArchiveResult.
 
 import { spawnSync } from "node:child_process";
-import { lstatSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readdirSync } from "node:fs";
 import type { ArchiveResult, Sandbox } from "@sbx/sdk";
 import type { Command } from "commander";
 import type { Context } from "../context.ts";
@@ -18,33 +19,41 @@ import { usageError } from "../exit-codes.ts";
 import type { Runner } from "../program.ts";
 import { localStat, parseRemote } from "./cp.ts";
 
-/** The files git would commit from `dir` (relative), or null outside git. */
-export function gitFiles(dir: string): string[] | null {
+/**
+ * The files git would commit from `dir` (relative, as the bytes git prints:
+ * names need not be UTF-8), or null outside git.
+ */
+export function gitFiles(dir: string): Buffer[] | null {
 	const inside = spawnSync(
 		"git",
 		["-C", dir, "rev-parse", "--is-inside-work-tree"],
-		{
-			encoding: "utf8",
-		},
+		{ encoding: "utf8" },
 	);
 	if (inside.status !== 0 || inside.stdout.trim() !== "true") return null;
 	const ls = spawnSync(
 		"git",
 		["-C", dir, "ls-files", "-z", "-c", "-o", "--exclude-standard"],
-		{ encoding: "utf8", maxBuffer: 1024 * 1024 * 1024 },
+		{ maxBuffer: 1024 * 1024 * 1024 },
 	);
 	if (ls.status !== 0) {
-		throw usageError(`git ls-files failed in ${dir}: ${ls.stderr.trim()}`);
+		throw usageError(
+			`git ls-files failed in ${dir}: ${ls.stderr.toString().trim()}`,
+		);
 	}
-	return ls.stdout.split("\0").filter((f) => {
-		if (f === "") return false;
+	const base = Buffer.from(`${dir}/`);
+	const files: Buffer[] = [];
+	let start = 0;
+	for (let i = ls.stdout.indexOf(0); i >= 0; i = ls.stdout.indexOf(0, start)) {
+		const name = ls.stdout.subarray(start, i);
+		start = i + 1;
 		try {
-			lstatSync(join(dir, f)); // a tracked file deleted from the work tree
-			return true;
+			lstatSync(Buffer.concat([base, name])); // deleted from the work tree?
+			files.push(name);
 		} catch {
-			return false;
+			// A tracked file deleted from the work tree.
 		}
-	});
+	}
+	return files;
 }
 
 /** Checks that `dir` is a local directory (usage error otherwise). */
@@ -62,7 +71,14 @@ export function pushDir(
 	path: string,
 	signal?: AbortSignal,
 ): Promise<ArchiveResult> {
-	const files = gitFiles(dir);
+	let files = gitFiles(dir);
+	if (files !== null && files.length === 0 && readdirSync(dir).length > 0) {
+		// An ignored directory (or only ignored files): git lists nothing.
+		ctx.out.warn(
+			`git lists no files in ${dir} (ignored?); pushing the whole directory`,
+		);
+		files = null;
+	}
 	return sb.files.uploadDir(dir, path, {
 		retryBudgetMs: ctx.transferBudgetMs,
 		...(signal === undefined ? {} : { signal }),

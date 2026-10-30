@@ -7,14 +7,19 @@
 //   SIGWINCH. Without a terminal, COLUMNS/LINES give the size, and the end
 //   of stdin sends ^D (EOF on the remote terminal).
 // - The SDK reconnects by offset after a drop (input typed meanwhile is
-//   queued up to 1 MiB; past that, stdin pauses until it drains). If the SDK
-//   gives up, sbx attaches again with 64 KiB of scrollback (up to
-//   REATTACH_ROUNDS times). `--attach cmd_…` joins a running terminal the
-//   same way (the agent keeps one 10 min without a client).
-// - sbx exits with the terminal command's code (128+n for a signal). A
-//   SIGINT to sbx itself (no raw terminal) leaves the terminal running and
-//   exits 130.
+//   queued up to 1 MiB; past that, stdin pauses until it drains, the final
+//   ^D too). If the SDK gives up, sbx attaches again from the same offset
+//   (up to REATTACH_ROUNDS times). `--attach cmd_…` joins a running
+//   terminal with 64 KiB of scrollback (the agent keeps one 10 min without
+//   a client).
+// - sbx exits with the terminal command's code (128+n for a signal).
+//   SIGINT (no raw terminal), SIGTERM or SIGHUP to sbx itself leave the
+//   terminal running, restore this terminal and exit 128 + n (130 for
+//   SIGINT).
+// - When the reader of stdout goes away, the session ends as with exec: the
+//   terminal command is killed and sbx exits 141 quietly.
 
+import { constants } from "node:os";
 import type { Pty, Sandbox } from "@sbx/sdk";
 import { SbxError } from "@sbx/sdk";
 import type { Command } from "commander";
@@ -26,7 +31,7 @@ import { OutputClosedError } from "../output.ts";
 import type { Runner } from "../program.ts";
 import { EXIT_INTERRUPTED } from "./exec.ts";
 
-/** Scrollback of a new attach (S7 §10.2: the CLI's tailBytes). */
+/** Scrollback of `--attach` (S7 §10.2: the CLI's tailBytes). */
 export const SCROLLBACK_BYTES = 64 * 1024;
 /** New attaches after the SDK's own reconnects gave up. */
 const REATTACH_ROUNDS = 3;
@@ -63,13 +68,14 @@ function terminalSize(ctx: Context): TerminalSize | undefined {
 }
 
 /**
- * Feeds stdin into the current Pty. On `pty_input_overflow` stdin is paused
- * and the chunk written again later.
+ * Feeds stdin into the current Pty, and `endInput` (if any) after its end.
+ * On `pty_input_overflow` stdin is paused and the bytes written again later,
+ * the end-of-input bytes too.
  */
 function pumpInput(
 	ctx: Context,
 	current: () => Pty,
-	onEnd: () => void,
+	endInput: Uint8Array | null,
 ): () => void {
 	const stdin = ctx.stdin as NodeJS.ReadStream;
 	let pending: Uint8Array | null = null;
@@ -95,13 +101,19 @@ function pumpInput(
 			timer = setTimeout(retry, OVERFLOW_RETRY_MS);
 		}
 	};
+	const queue = (b: Uint8Array) => {
+		if (pending === null && send(b)) return;
+		pending = pending === null ? b : concat(pending, b);
+		stdin.pause();
+		timer ??= setTimeout(retry, OVERFLOW_RETRY_MS);
+	};
 	const onData = (chunk: Buffer | string) => {
-		const b = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-		if (pending !== null || !send(new Uint8Array(b))) {
-			pending = pending === null ? new Uint8Array(b) : concat(pending, b);
-			stdin.pause();
-			timer ??= setTimeout(retry, OVERFLOW_RETRY_MS);
-		}
+		queue(
+			new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
+		);
+	};
+	const onEnd = () => {
+		if (endInput !== null) queue(endInput);
 	};
 	stdin.on("data", onData);
 	stdin.once("end", onEnd);
@@ -138,7 +150,7 @@ async function runShell(
 	let closed = false;
 	const onOutput = (b: Uint8Array) => {
 		ctx.out.data(b).catch((err: unknown) => {
-			// The reader of stdout left: stop following (the terminal stays).
+			// The reader of stdout left: end the session (see the header).
 			if (err instanceof OutputClosedError && !closed) {
 				closed = true;
 				pty.close();
@@ -150,44 +162,42 @@ async function runShell(
 		const s = terminalSize(ctx);
 		if (s !== undefined) pty.resize(s.cols, s.rows);
 	};
-	let interrupted = false;
-	const onInt = () => {
-		interrupted = true;
+	// SIGINT (no raw terminal), SIGTERM, SIGHUP: leave the terminal running,
+	// restore this one (finally) and exit 128 + n.
+	let stoppedBy: NodeJS.Signals | undefined;
+	const onStop = (sig: NodeJS.Signals) => {
+		stoppedBy ??= sig;
 		pty.close();
 	};
+	const stops = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 	if (o.attach !== undefined && size !== undefined) {
 		pty.resize(size.cols, size.rows);
 	}
 	if (raw) stdin.setRawMode(true);
 	process.on("SIGWINCH", onWinch);
-	process.on("SIGINT", onInt);
-	const stopInput = pumpInput(
-		ctx,
-		() => pty,
-		() => {
-			// End of a piped stdin: EOF for the remote terminal.
-			if (!raw) {
-				try {
-					pty.write("\x04");
-				} catch {
-					// Reconnecting with a full queue: the terminal ends by itself.
-				}
-			}
-		},
-	);
+	for (const sig of stops) process.on(sig, onStop);
+	// End of a piped stdin: ^D, EOF for the remote terminal.
+	const stopInput = pumpInput(ctx, () => pty, raw ? null : new Uint8Array([4]));
 	try {
 		for (let round = 0; ; round++) {
 			try {
 				const exit = await pty.exited;
 				return commandExitCode(exit);
 			} catch (err) {
-				if (interrupted) {
+				if (stoppedBy !== undefined) {
 					ctx.out.info(
 						`sbx: the terminal keeps running; attach again: sbx shell ${sb.slug} --attach ${pty.command.id}`,
 					);
-					return EXIT_INTERRUPTED;
+					return stoppedBy === "SIGINT"
+						? EXIT_INTERRUPTED
+						: 128 + (constants.signals[stoppedBy] ?? 0);
 				}
-				if (closed) throw new OutputClosedError();
+				if (closed) {
+					await pty
+						.kill({ signal: AbortSignal.timeout(5_000), retryBudgetMs: 2_000 })
+						.catch(() => {});
+					throw new OutputClosedError();
+				}
 				if (
 					!(err instanceof SbxError) ||
 					!err.retryable ||
@@ -195,10 +205,9 @@ async function runShell(
 				) {
 					throw err;
 				}
+				// The SDK gave up reconnecting: attach again where output stopped.
 				unsubscribe();
-				pty = await sb.connectPty(pty.command.id, {
-					tailBytes: SCROLLBACK_BYTES,
-				});
+				pty = await sb.connectPty(pty.command.id, { offset: pty.offset });
 				unsubscribe = pty.onData(onOutput);
 				onWinch();
 			}
@@ -206,7 +215,7 @@ async function runShell(
 	} finally {
 		stopInput();
 		process.off("SIGWINCH", onWinch);
-		process.off("SIGINT", onInt);
+		for (const sig of stops) process.off(sig, onStop);
 		if (raw) stdin.setRawMode(false);
 		unsubscribe();
 		(stdin as { destroy?: () => void }).destroy?.();

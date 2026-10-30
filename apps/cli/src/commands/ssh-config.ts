@@ -28,9 +28,29 @@ import type { Runner } from "../program.ts";
 import { knownHostsFile, refreshKnownHosts } from "../ssh.ts";
 import { certDir } from "./ssh-cert.ts";
 
-/** A value of ssh_config: quoted when it has blanks. */
-function value(v: string): string {
-	return /[\s"]/.test(v) ? `"${v.replaceAll('"', '\\"')}"` : v;
+/**
+ * A path value of ssh_config: `%` doubled (ssh expands % tokens in these
+ * options), and in double quotes with `\` and `"` escaped when it has
+ * blanks, quotes or backslashes (ssh's argument splitting).
+ */
+export function configValue(v: string): string {
+	const e = v.replaceAll("%", "%%");
+	return /[\s"'\\]/.test(e) ? `"${e.replace(/[\\"]/g, "\\$&")}"` : e;
+}
+
+/** POSIX shell quoting of one word (single quotes keep $ and ` literal). */
+function shellWord(w: string): string {
+	return /^[\w@+=:,./-]+$/.test(w) ? w : `'${w.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * `Match originalhost <alias> exec "<cmd>"` for these words: ssh unquotes
+ * the argument, expands % tokens, then runs it with /bin/sh -c. So the words
+ * are shell-quoted, `%` doubled, and `\` and `"` escaped for the quotes.
+ */
+export function matchExecLine(alias: string, words: string[]): string {
+	const cmd = words.map(shellWord).join(" ").replaceAll("%", "%%");
+	return `Match originalhost ${alias} exec "${cmd.replace(/[\\"]/g, "\\$&")}"`;
 }
 
 /** The `sbx` to run from ssh: this binary when compiled, else `sbx` on PATH. */
@@ -75,21 +95,21 @@ export function register(program: Command, run: Runner): void {
 					const dir = certDir(ctx, sb.id);
 					const ensure = [
 						sbxCommand(),
-						...globalFlags(ctx).map(value),
+						...globalFlags(ctx),
 						"ssh-cert",
 						sb.id,
 						"--ensure",
-					].join(" ");
+					];
 					const config = [
 						`Host ${alias}`,
 						`  HostName ${ssh.host}`,
 						`  Port ${ssh.port}`,
 						`  User ${ssh.username}`,
 						"  IdentitiesOnly yes",
-						`  UserKnownHostsFile ${value(knownHostsFile(ctx))}`,
-						`Match originalhost ${alias} exec "${ensure.replaceAll('"', '\\"')}"`,
-						`  IdentityFile ${value(join(dir, "id_ed25519"))}`,
-						`  CertificateFile ${value(join(dir, "id_ed25519-cert.pub"))}`,
+						`  UserKnownHostsFile ${configValue(knownHostsFile(ctx))}`,
+						matchExecLine(alias, ensure),
+						`  IdentityFile ${configValue(join(dir, "id_ed25519"))}`,
+						`  CertificateFile ${configValue(join(dir, "id_ed25519-cert.pub"))}`,
 						"",
 					].join("\n");
 					if (ctx.out.jsonFlag) ctx.out.result({ host: alias, config });

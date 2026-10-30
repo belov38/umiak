@@ -3,7 +3,7 @@
 // the system ssh, which is a recording fake here), ssh-config (checked with
 // the real `ssh -G`, which runs its `Match exec` without connecting),
 // ssh-cert [--ensure] and ssh-keys.
-import { execFile, execFileSync } from "node:child_process";
+import { type ChildProcess, execFile, execFileSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -23,7 +23,7 @@ import {
 	expect,
 	it,
 } from "vitest";
-import { type CliWorld, startWorld } from "./helpers/api.ts";
+import { type CliWorld, startWorld, until } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 
 const MAIN = join(
@@ -179,6 +179,42 @@ describe("ports and ssh", () => {
 		);
 	});
 
+	it("ssh survives SIGTERM and SIGHUP: passes them to ssh and still removes the key", async () => {
+		const bin = join(home.dir, "bin");
+		mkdirSync(bin);
+		writeFileSync(
+			join(bin, "ssh"),
+			[
+				"#!/bin/sh",
+				'printf "%s\\n" "$@" > "$REC.tmp" && mv "$REC.tmp" "$REC"',
+				"exec sleep 30",
+				"",
+			].join("\n"),
+		);
+		chmodSync(join(bin, "ssh"), 0o755);
+		for (const [sig, code] of [
+			["SIGTERM", 143],
+			["SIGHUP", 129],
+		] as const) {
+			const rec = join(home.dir, `argv-${sig}`);
+			let child: ChildProcess | undefined;
+			const run = runCli(["ssh", sb.id], {
+				env: { ...env, PATH: `${bin}:${env.PATH}`, REC: rec },
+				onSpawn: (c) => {
+					child = c;
+				},
+			});
+			await until(async () => (existsSync(rec) ? true : undefined));
+			const argv = readFileSync(rec, "utf8").split("\n");
+			const key = argv[argv.indexOf("-i") + 1] as string;
+			expect(existsSync(key)).toBe(true);
+			child?.kill(sig);
+			const r = await run;
+			expect(r.code, r.stderr).toBe(code);
+			expect(existsSync(dirname(key))).toBe(false);
+		}
+	});
+
 	it("ssh-cert writes a certificate; --ensure keeps a fresh one and renews one about to expire", async () => {
 		const first = await sbx(["ssh-cert", sb.id, "--json"]);
 		expect(first.code, first.stderr).toBe(0);
@@ -196,6 +232,32 @@ describe("ports and ssh", () => {
 			"[ssh.sbx.test]:2222 ssh-ed25519 ",
 		);
 		const cert1 = readFileSync(c.certificateFile, "utf8");
+		// Concurrent first runs in a fresh home end with one key that matches
+		// the certificate.
+		const other = cliHome();
+		try {
+			const oenv = { ...other.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+			const runs = await Promise.all(
+				[1, 2, 3].map(() =>
+					runCli(["ssh-cert", sb.id, "--json"], { env: oenv }),
+				),
+			);
+			for (const x of runs) expect(x.code, x.stderr).toBe(0);
+			const k = runs[0]?.last().identityFile as string;
+			const keyFp = execFileSync("ssh-keygen", ["-l", "-f", k], {
+				encoding: "utf8",
+			}).split(" ")[1] as string;
+			const certText = execFileSync(
+				"ssh-keygen",
+				["-L", "-f", `${k}-cert.pub`],
+				{
+					encoding: "utf8",
+				},
+			);
+			expect(certText).toContain(keyFp);
+		} finally {
+			other.rm();
+		}
 
 		const ensure = await sbx(["ssh-cert", sb.slug, "--ensure", "--json"]);
 		expect(ensure.code, ensure.stderr).toBe(0);
@@ -323,6 +385,21 @@ describe("ports and ssh", () => {
 		});
 		expect(table.stdout).toContain(fp);
 
+		// Two keys named alike: rm by that name is refused.
+		const third = join(home.dir, "third");
+		execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", third]);
+		const dup = await runCli(
+			["ssh-keys", "add", `${third}.pub`, "--name", "ci box"],
+			{ env: penv },
+		);
+		expect(dup.code, dup.stderr).toBe(0);
+		const amb = await runCli(["ssh-keys", "rm", "ci box"], { env: penv });
+		expect(amb.code).toBe(2);
+		expect(amb.stderr).toContain("2 SSH keys");
+		const dupFp = (dup.last() as { fingerprint: string }).fingerprint;
+		expect((await runCli(["ssh-keys", "rm", dupFp], { env: penv })).code).toBe(
+			0,
+		);
 		const rm = await runCli(["ssh-keys", "rm", key.id, "ci box"], {
 			env: penv,
 		});

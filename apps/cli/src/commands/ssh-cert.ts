@@ -1,6 +1,7 @@
 // `sbx ssh-cert [<sb>] [--ensure]` (S7 §11.3, §14.2): the key and
 // certificate that `sbx ssh-config` points ssh at, in
-// `<config dir>/ssh/<sb_id>/`: `id_ed25519` (made once with ssh-keygen),
+// `<config dir>/ssh/<sb_id>/`: `id_ed25519` (made once with ssh-keygen under
+// a temporary name and linked into place, so concurrent first runs agree),
 // `id_ed25519-cert.pub` and `cert.json` (its validity, so --ensure needs no
 // request while it is fresh).
 // - Without --ensure: always a new certificate.
@@ -17,7 +18,7 @@ import { readJsonFile, writePrivateFile } from "../config.ts";
 import type { Context } from "../context.ts";
 import { sandboxRef, writeCurrent } from "../current.ts";
 import type { Runner } from "../program.ts";
-import { certify, refreshKnownHosts, sshKeygen } from "../ssh.ts";
+import { certify, ensureKey, publicKeyOf, refreshKnownHosts } from "../ssh.ts";
 
 /** --ensure renews a certificate with less than this left. */
 export const RENEW_BEFORE_MS = 2 * 60_000;
@@ -68,10 +69,8 @@ async function ensureCert(
 		}
 	}
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
-	if (!existsSync(key) || !existsSync(`${key}.pub`)) {
-		sshKeygen(key, `sbx-${id}`);
-	}
-	const cert = await certify(ctx, id, key);
+	ensureKey(key, `sbx-${id}`);
+	const cert = await certify(ctx, id, publicKeyOf(key), key);
 	const meta: CertMeta = {
 		sandboxId: id,
 		principal: cert.principal,

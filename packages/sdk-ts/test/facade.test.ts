@@ -508,7 +508,8 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		await writeFile(join(src, "skip", "no.txt"), "no\n");
 		await writeFile(join(src, "a", "no.txt"), "no\n");
 		const r = await sb.files.uploadDir(src, "listed", {
-			entries: ["a/b/kept.txt", "top.txt"],
+			// A name as bytes (non-UTF-8 names come from git that way).
+			entries: [new TextEncoder().encode("a/b/kept.txt"), "./top.txt"],
 		});
 		// a, a/b, a/b/kept.txt, top.txt
 		expect(r.entries).toBe(4);

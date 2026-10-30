@@ -3,7 +3,8 @@
 // sbx. Team keys have none (they use `sbx ssh` certificates).
 // - add: default ~/.ssh/id_ed25519.pub; the name is --name, else the key's
 //   comment, else the file name.
-// - rm: by id (`sshk_…`), name or fingerprint.
+// - rm: by id (`sshk_…`), name or fingerprint; a name of several keys is a
+//   usage error (exit 2).
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -35,7 +36,14 @@ async function keyId(
 ): Promise<string> {
 	if (ref.startsWith("sshk_")) return ref;
 	cache.keys ??= await listKeys(ctx);
-	const k = cache.keys.find((x) => x.name === ref || x.fingerprint === ref);
+	const byFp = cache.keys.find((x) => x.fingerprint === ref);
+	const byName = cache.keys.filter((x) => x.name === ref);
+	if (byFp === undefined && byName.length > 1) {
+		throw usageError(
+			`${byName.length} SSH keys are named ${JSON.stringify(ref)}; give the id or fingerprint`,
+		);
+	}
+	const k = byFp ?? byName[0];
 	if (k === undefined) {
 		throw new CliError({
 			code: "not_found",

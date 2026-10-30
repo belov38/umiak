@@ -3,7 +3,7 @@
 // compiled binary answers `sbx version`.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -35,9 +35,23 @@ describe("build", () => {
 		execFileSync(BUN, ["scripts/build.ts"], { cwd: CLI_DIR, stdio: "pipe" });
 		const bin = join(CLI_DIR, "dist", target.file);
 		expect(existsSync(bin)).toBe(true);
+		// A stale binary of another target: SHA256SUMS lists what is there.
+		const stale = join(CLI_DIR, "dist", "sbx-test-stale");
+		writeFileSync(stale, "old");
+		execFileSync(BUN, ["scripts/build.ts"], { cwd: CLI_DIR, stdio: "pipe" });
+		rmSync(stale);
 		const sums = readFileSync(join(CLI_DIR, "dist", "SHA256SUMS"), "utf8");
 		const digest = createHash("sha256").update(readFileSync(bin)).digest("hex");
 		expect(sums).toContain(`${digest}  ${target.file}\n`);
+		for (const line of sums.trim().split("\n")) {
+			const [sum, file] = line.split("  ") as [string, string];
+			if (file === "sbx-test-stale") {
+				expect(sum).toBe(createHash("sha256").update("old").digest("hex"));
+				continue;
+			}
+			const data = readFileSync(join(CLI_DIR, "dist", file));
+			expect(createHash("sha256").update(data).digest("hex")).toBe(sum);
+		}
 		const out = execFileSync(bin, ["version", "--json"], {
 			encoding: "utf8",
 			env: { PATH: process.env.PATH ?? "", HOME: CLI_DIR },
