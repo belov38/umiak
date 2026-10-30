@@ -74,16 +74,17 @@ export function parseSystemdAnalyze(text: string): {
 
 /**
  * Host time of an event inside the guest, relative to the start call: the guest's kernel
- * started at `pingHostMs - uptimeS * 1000` (host clock), the event is `monotonicUs` after that.
+ * started at `uptimeReadHostMs - uptimeS * 1000` (host clock, the moment /proc/uptime was read,
+ * give or take the latency of the exec call), the event is `monotonicUs` after that.
  */
 export function agentReadyMs(
 	startHostMs: number,
-	pingHostMs: number,
+	uptimeReadHostMs: number,
 	uptimeS: number,
 	activeEnterMonotonicUs: number,
 ): number | null {
 	if (!(activeEnterMonotonicUs > 0)) return null;
-	const kernelStart = pingHostMs - uptimeS * 1000;
+	const kernelStart = uptimeReadHostMs - uptimeS * 1000;
 	return Math.round(kernelStart + activeEnterMonotonicUs / 1000 - startHostMs);
 }
 
@@ -127,7 +128,10 @@ export async function runS5(ctx: Ctx, o: S5Options): Promise<number> {
 		});
 		// Give the agent and systemd-analyze a moment: "Startup finished" needs boot completion.
 		let out = "";
+		let readAt = 0;
 		for (let i = 0; i < 30; i++) {
+			// The script reads /proc/uptime first, right after the exec call lands.
+			readAt = Date.now();
 			const r = await machines.qga.exec(vmid, ["bash", "-c", GUEST_SCRIPT]);
 			out = r.stdout;
 			if (/Startup finished/.test(out)) break;
@@ -142,12 +146,7 @@ export async function runS5(ctx: Ctx, o: S5Options): Promise<number> {
 			sample: {
 				startToQgaMs: ready.pingAt - startedAt,
 				startToIpMs: ready.ipAt - startedAt,
-				startToAgentReadyMs: agentReadyMs(
-					startedAt,
-					ready.pingAt,
-					uptimeS,
-					active,
-				),
+				startToAgentReadyMs: agentReadyMs(startedAt, readAt, uptimeS, active),
 				...analyze,
 			},
 			chain: chain.trim(),
