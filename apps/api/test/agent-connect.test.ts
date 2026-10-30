@@ -234,7 +234,7 @@ describe("ConnectAgentApi: Process", () => {
 		expect(info.streams.stdout?.end).toBeNull();
 	});
 
-	it("an exited command: exit code 0 is a code, UNSPECIFIED reason is none, ends and output_truncated", async () => {
+	it("an exited command: exit code 0 is a code, UNSPECIFIED reason is null (unknown), ends and output_truncated", async () => {
 		const { agent } = api({
 			process: {
 				get: () => ({
@@ -259,7 +259,7 @@ describe("ConnectAgentApi: Process", () => {
 		const info = await agent.get("m1", "c1");
 		expect(info).toMatchObject({
 			state: "exited",
-			exit: { status: "exited", code: 0, signal: null, reason: "none" },
+			exit: { status: "exited", code: 0, signal: null, reason: null },
 			endedAt: at,
 			outputTruncated: "disk_full",
 			streams: { pty: { size: 7, availableFrom: 2, end: 7 } },

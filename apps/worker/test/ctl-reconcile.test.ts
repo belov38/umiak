@@ -657,9 +657,10 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(kinds(await reconcile(w))).toEqual([
 			["machine_lost", `machine:${r.machineId}`],
 		]);
+		// The VM is gone, not seen rebooting: the reason is unknown (R32).
 		expect(await commandOutcome(w, cmd)).toMatchObject({
 			status: "lost",
-			reason: "reboot",
+			reason: null,
 		});
 		const m = await row(w, "machines", r.machineId);
 		expect(m.state).toBe("failed");

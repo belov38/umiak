@@ -12,6 +12,7 @@ import {
 	type CommandStatus,
 	idempotencyPrincipal,
 	type Principal,
+	storableOutputTruncated,
 	uuidv5,
 } from "@sbx/core";
 import {
@@ -606,7 +607,9 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 				command: {
 					...toCommandResource(done),
 					// The exit's value even if storing it failed.
-					outputTruncated: result.exit.outputTruncated ?? done.outputTruncated,
+					outputTruncated:
+						storableOutputTruncated(result.exit.outputTruncated) ??
+						done.outputTruncated,
 				},
 				stdout: result.stdout,
 				stderr: result.stderr,

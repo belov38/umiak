@@ -270,14 +270,16 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 			await env.svc.failCommandStart(a.id);
 			const failed = await env.svc.getCommand(env.p, s.sandboxId, a.id);
 			expect(failed.status).toBe("failed_to_start");
+			expect(failed.reason).toBe("start_failed");
 			expect(failed.endedAt).toBeInstanceOf(Date);
 
 			const b = await env.svc.createCommand(env.p, s.sandboxId, spec);
 			await env.svc.markCommandRunning(b.id, 7);
 			await env.svc.failCommandStart(b.id);
-			expect((await env.svc.getCommand(env.p, s.sandboxId, b.id)).status).toBe(
-				"running",
-			);
+			expect(await env.svc.getCommand(env.p, s.sandboxId, b.id)).toMatchObject({
+				status: "running",
+				reason: null,
+			});
 		});
 	});
 

@@ -294,6 +294,13 @@ describe.skipIf(skipPg())(
 					}),
 					"validation",
 				);
+				// The database refuses an unknown reason too (0304 CHECK).
+				await expect(
+					t.pool.query(
+						"UPDATE runtime.commands SET reason = 'cosmic_ray' WHERE id = $1",
+						[b.id],
+					),
+				).rejects.toThrow(/commands_reason_check/);
 			});
 
 			it("markOutputTruncated records the first reason on any status of the command", async () => {

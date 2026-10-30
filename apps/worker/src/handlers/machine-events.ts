@@ -396,7 +396,8 @@ async function onRebooted(s: EventScope, e: SyntheticRow): Promise<void> {
 	const bootId = await sessionBoot(s);
 	if (bootId !== null) {
 		const lost = await s.tx.client.query(
-			// `reboot`: the reason the agent gives commands of an earlier boot (S3).
+			// The boot id changed, so the guest rebooted: `reboot`, as the agent
+			// reports commands of an earlier boot (S3).
 			`UPDATE runtime.commands SET status = 'lost', reason = 'reboot', ended_at = now()
 			 WHERE machine_id = $1 AND status IN ('starting', 'running')
 			   AND boot_id IS DISTINCT FROM $2`,

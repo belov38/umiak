@@ -614,7 +614,8 @@ export async function failCommandStart(
 	commandId: string,
 ): Promise<void> {
 	await q.query(
-		`UPDATE runtime.commands SET status = 'failed_to_start', ended_at = now()
+		`UPDATE runtime.commands
+		 SET status = 'failed_to_start', reason = 'start_failed', ended_at = now()
 		 WHERE id = $1 AND status = 'starting'`,
 		[commandId],
 	);

@@ -67,7 +67,8 @@ export interface AgentExitInfo {
 	code: number;
 	/** Signal name such as `SIGTERM`; null when none. */
 	signal: string | null;
-	reason: AgentExitReason;
+	/** Null when the agent does not say (proto UNSPECIFIED). */
+	reason: AgentExitReason | null;
 }
 
 export interface AgentStreamInfo {
@@ -127,7 +128,8 @@ export type AgentAttachEvent =
 			status: AgentExitStatus;
 			code: number;
 			signal: string | null;
-			reason: AgentExitReason;
+			/** Null when the agent does not say (proto UNSPECIFIED). */
+			reason: AgentExitReason | null;
 			stdoutEnd: number;
 			stderrEnd: number;
 			ptyEnd: number;

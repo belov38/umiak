@@ -143,7 +143,7 @@ describe.skipIf(skipPg())("stored exit reason and outputTruncated", () => {
 		});
 	});
 
-	it("a command the platform marked lost answers its stored reason; an old row without one answers null", async () => {
+	it("a command the platform marked lost answers its stored reason; one without a reason answers null", async () => {
 		const start = async () => {
 			const r = await h.request("POST", sb.commands, {
 				json: { mode: "detached", command: "sleep 30" },
@@ -153,8 +153,9 @@ describe.skipIf(skipPg())("stored exit reason and outputTruncated", () => {
 		};
 		const rebooted = await start();
 		const old = await start();
-		// What the worker writes when the guest went down (reason `reboot`),
-		// and a row from before the column existed.
+		// What the worker writes when the boot id changed (reason `reboot`),
+		// and a lost row whose cause is unknown (a stop, a missing VM, or a
+		// row from before the column existed).
 		await w.pool.query(
 			`UPDATE runtime.commands SET status = 'lost', ended_at = now(),
 			   reason = CASE WHEN id = $1 THEN 'reboot' END
@@ -170,6 +171,73 @@ describe.skipIf(skipPg())("stored exit reason and outputTruncated", () => {
 		expect(await getCommand(old)).toMatchObject({
 			status: "lost",
 			reason: null,
+		});
+	});
+
+	it("an ended row's stored reason wins over the agent's; the agent's fills a missing one", async () => {
+		const ended = async () => {
+			const r = await h.request("POST", sb.commands, {
+				json: { mode: "detached", command: "true" },
+			});
+			expect(r.status, JSON.stringify(r.body)).toBe(201);
+			const pub = (r.body as Any).id as string;
+			const id = resolveCommandRef(pub);
+			await until(
+				async () => (await w.agent.get(sb.machineId, id)).exit !== null,
+			);
+			return pub;
+		};
+		const known = await ended();
+		const unknown = await ended();
+		// The platform ended both first (the agent says `none`).
+		await w.pool.query(
+			`UPDATE runtime.commands SET status = 'lost', ended_at = now(),
+			   reason = CASE WHEN id = $1 THEN 'reboot' END
+			 WHERE id = ANY($2)`,
+			[resolveCommandRef(known), [known, unknown].map(resolveCommandRef)],
+		);
+		expect(await getCommand(known)).toMatchObject({
+			status: "lost",
+			reason: "reboot",
+		});
+		expect(await getCommand(unknown)).toMatchObject({
+			status: "lost",
+			reason: "none",
+		});
+	});
+
+	it("an outputTruncated the agent sends that cannot be stored is not answered (GET, sync)", async () => {
+		const r = await h.request("POST", sb.commands, {
+			json: { mode: "detached", command: "true" },
+		});
+		const pub = (r.body as Any).id as string;
+		const id = resolveCommandRef(pub);
+		await until(
+			async () => (await w.agent.get(sb.machineId, id)).exit !== null,
+		);
+		w.agent.truncateOutput(id, "x".repeat(65));
+		expect(await getCommand(pub)).toMatchObject({ outputTruncated: null });
+		expect((await stored(pub)).output_truncated).toBeNull();
+
+		const gate = shellGate();
+		const marker = `odd-${Date.now()}`;
+		const sync = h.request("POST", sb.commands, {
+			json: { command: `${gate.shell}; echo ${marker}` },
+		});
+		const syncId = await until(async () => {
+			const q = await w.pool.query<{ id: string }>(
+				"SELECT id FROM runtime.commands WHERE cmd LIKE $1 AND status = 'running'",
+				[`%${marker}%`],
+			);
+			return q.rows[0]?.id;
+		});
+		w.agent.truncateOutput(syncId, "disk\nfull");
+		gate.open();
+		const done = await sync;
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect((done.body as Any).command).toMatchObject({
+			status: "exited",
+			outputTruncated: null,
 		});
 	});
 });

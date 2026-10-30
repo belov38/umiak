@@ -191,7 +191,7 @@ export const CommandSchema = z
 		signal: z.string().nullable(),
 		reason: z.string().nullable().openapi({
 			description:
-				"Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed (`reboot` also when the platform marked it lost because the machine went down); null while it runs or when unknown",
+				"Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed (`reboot` also when the platform saw the guest reboot); null while it runs or when unknown (for example a command lost on a stop or with a missing VM)",
 		}),
 		pid: z.int().nullable(),
 		outputTruncated: z.string().nullable().openapi({

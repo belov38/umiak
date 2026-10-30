@@ -2,9 +2,14 @@
 // sizes, the exit, outputTruncated) come from the agent's `Process/Get`
 // while the sandbox is ready; otherwise from the row (`stdout_bytes`/
 // `stderr_bytes`, a PTY command keeps its one stream in `stdout_bytes`;
-// `reason`, `output_truncated`).
+// `reason`, `output_truncated`). An ended row's stored reason wins over the
+// agent's.
 import { decodeUlid, encodeUlid, encodeUuid } from "@sbx/auth";
-import type { Command, CommandStatus } from "@sbx/core";
+import {
+	type Command,
+	type CommandStatus,
+	storableOutputTruncated,
+} from "@sbx/core";
 import type { AgentCommandInfo, AgentStreamInfo } from "../agent/types.ts";
 import { commandStatus } from "../commands/attach.ts";
 import { notFoundError } from "../http/errors.ts";
@@ -34,7 +39,11 @@ export function isTerminalStatus(s: CommandStatus): boolean {
 	return TERMINAL.includes(s);
 }
 
-/** The reason of a row stored without one (before migration 0304). */
+/**
+ * The reason when none is known (a row from before migration 0304, or an
+ * agent that gave none): derived from the status; null for `lost`, whose
+ * cause the status does not tell.
+ */
 function reasonOf(status: CommandStatus): string | null {
 	switch (status) {
 		case "exited":
@@ -78,7 +87,7 @@ export function toCommandResource(
 	let status: CommandStatus = c.status;
 	let exitCode = c.exitCode;
 	let signal = c.signal;
-	let reason: string | null = c.reason ?? reasonOf(c.status);
+	let reason: string | null = c.reason;
 	let endedAt = c.endedAt;
 	const exit = live?.exit ?? null;
 	if (exit !== null) {
@@ -87,9 +96,14 @@ export function toCommandResource(
 			exitCode = exit.code;
 			signal = exit.signal;
 			endedAt = live?.endedAt ?? endedAt;
+			reason = exit.reason;
+		} else {
+			// Ended: the stored reason stays (the platform may know better,
+			// e.g. a reboot); the agent's only fills a gap.
+			reason = c.reason ?? exit.reason;
 		}
-		reason = exit.reason;
 	}
+	reason ??= reasonOf(status);
 	let streams: CommandResource["streams"] = storedStreams(c);
 	if (live !== null) {
 		streams = {};
@@ -115,7 +129,8 @@ export function toCommandResource(
 		signal,
 		reason,
 		pid: live?.pid ?? c.pid,
-		outputTruncated: live?.outputTruncated ?? c.outputTruncated,
+		outputTruncated:
+			storableOutputTruncated(live?.outputTruncated) ?? c.outputTruncated,
 		streams,
 		createdBy: c.createdBy === null ? null : encodeUuid("user", c.createdBy),
 		createdByKey:

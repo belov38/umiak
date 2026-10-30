@@ -174,7 +174,7 @@ export interface FollowOptions {
 /** S3 exit status and reason → the command status (§9.5). */
 export function commandStatus(
 	status: AgentExitStatus,
-	reason: AgentExitReason,
+	reason: AgentExitReason | null,
 ): CommandExitStatus {
 	if (reason === "timeout") return "timed_out";
 	if (reason === "start_failed") return "failed_to_start";

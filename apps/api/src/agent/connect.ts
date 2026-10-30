@@ -140,9 +140,8 @@ const EXIT_STATUSES: Partial<Record<ExitStatus, AgentExitStatus>> = {
 	[ExitStatus.LOST]: "lost",
 };
 
+// UNSPECIFIED (an agent that does not refine the status) is null: unknown.
 const EXIT_REASONS: Partial<Record<ExitReason, AgentExitReason>> = {
-	// UNSPECIFIED: an agent that does not refine the status.
-	[ExitReason.UNSPECIFIED]: "none",
 	[ExitReason.NONE]: "none",
 	[ExitReason.SIGNAL]: "signal",
 	[ExitReason.TIMEOUT]: "timeout",
@@ -166,7 +165,8 @@ function exitStatus(s: ExitStatus): AgentExitStatus {
 	return v;
 }
 
-function exitReason(r: ExitReason): AgentExitReason {
+function exitReason(r: ExitReason): AgentExitReason | null {
+	if (r === ExitReason.UNSPECIFIED) return null;
 	const v = EXIT_REASONS[r];
 	if (v === undefined) throw badResponse(`exit reason ${r}`);
 	return v;

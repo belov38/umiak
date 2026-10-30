@@ -39,8 +39,8 @@ class Command:
             sandbox is ready, else the stored value
         pid (int | None):
         reason (None | str): Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed
-            (`reboot` also when the platform marked it lost because the machine went down); null while it runs or when
-            unknown
+            (`reboot` also when the platform saw the guest reboot); null while it runs or when unknown (for example a
+            command lost on a stop or with a missing VM)
         sandbox_id (str):  Example: sb_01jbx4q3m7f8r2t6v9w0y1z2a3.
         signal (None | str):
         started_at (datetime.datetime | None): ISO 8601 UTC with milliseconds
