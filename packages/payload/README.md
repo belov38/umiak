@@ -149,6 +149,52 @@ Errors are `APIError(code, 400)` (message = code) or Payload
 - The contract suite is `runConfigReaderContract` of `@sbx/config/testing`
   (`test/config-reader.test.ts`).
 
+## IdP sync (S8 §20.1)
+
+`ctl-idp-sync` of `apps/worker` runs `KeycloakIdpSync` (offboarding variant
+A).
+
+- `KeycloakAdminClient({baseUrl, realm, clientId, clientSecret, fetch?,
+  pageSize = 100, timeoutMs = 10000})` — client credentials token at
+  `<baseUrl>/realms/<realm>/protocol/openid-connect/token` (cached until
+  30 s before `expires_in`; a `401` of the admin API renews it once).
+  `listUsers()` pages `GET <baseUrl>/admin/realms/<realm>/users?briefRepresentation=true&first=&max=`
+  until an empty page and returns `{id, enabled}[]`; any non-2xx, timeout
+  or malformed page throws `KeycloakError` (never a partial list).
+  `userExists(id)`: `404` → `false`, other non-2xx throw. Errors carry
+  status and path, never the secret or the token. The realm client
+  `sbx-worker` needs the service account role `view-users` of
+  `realm-management` (`deploy/compose/keycloak/realm-sbx.json` has it).
+- `KeycloakIdpSync({payload, keycloak, onAbort?, log?, now?}).run()` →
+  `{deactivated, reactivated, aborted, abort?}` (Payload user uuids). One
+  pass: the full list, then the plan over users with an `idpSubject`
+  (stubs are never touched):
+  - active, `enabled: false` → `idp_disabled`;
+  - active, missing from the list → `idp_deleted` only if `userExists` is
+    `false`;
+  - inactive with `deactivatedReason` `idp_*` and `enabled: true` →
+    reactivated (`active: true`, reason and `deactivatedAt` cleared).
+    `operator` (or no reason) is never lifted.
+  - Guard: `n` planned deactivations, `a` active users with an
+    `idpSubject`; `n > 5 && n > 0.2·a` → nothing changes, `onAbort({reason:
+    "mass_deactivation", wouldDeactivate: n, active: a})`, result
+    `aborted: true` (the worker turns it into `sbx_idp_sync_aborted_total`,
+    gauge `sbx_idp_sync_aborted` = 1 and `log.error`).
+- Writes: one Payload transaction per user; the row is locked
+  (`FOR UPDATE`) and checked again (same `idpSubject`, still active / still
+  `idp_*`), so a concurrent operator deactivation wins. The update goes
+  through the Local API with `req`: the `users` hooks send
+  `sbx_identity users:<uuid>` and `sbx_ssh_revoke user:usr_…`. A failed
+  change is logged and the others continue; the pass then throws (pg-boss
+  retries, the next pass is idempotent).
+- Notices: for every team the deactivated user is a member of, one
+  `team-notices` row `{team, kind: "member_deactivated", user, apiKeys}`
+  unless an unacknowledged one for (team, user) exists. `apiKeys` lists the
+  team's non-revoked keys the user created: `[{id, publicId, name,
+  prefix}]`, `id` the Payload uuid, `publicId` the `key_…` id of `/api/v1`
+  (revoke through `DELETE /v1/api-keys/{publicId}` or the dashboard). Keys
+  are not revoked.
+
 ## Migrations
 
 - Apply: `DATABASE_URL=… PAYLOAD_SECRET=… node packages/payload/src/migrate.ts`

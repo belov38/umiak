@@ -21,7 +21,11 @@ import { PveInfraRegistry } from "./adapters/pve-infra.ts";
 import { parseWorkerEnv, type WorkerEnv } from "./env.ts";
 import { errText, processLogger } from "./log.ts";
 import { PromMetrics } from "./metrics.ts";
-import { openWorkerPayload, type WorkerPayload } from "./payload.ts";
+import {
+	createWorkerIdpSync,
+	openWorkerPayload,
+	type WorkerPayload,
+} from "./payload.ts";
 import type { AgentPort, GatewayPort } from "./ports.ts";
 import { createWorker, STOP_TIMEOUT_MS, type Worker } from "./worker.ts";
 
@@ -87,6 +91,14 @@ async function main(): Promise<void> {
 			log,
 		});
 		const p = payload;
+		const idpSync = createWorkerIdpSync({
+			env: env.idpSync,
+			payload: p.payload,
+			log,
+		});
+		if (idpSync === undefined) {
+			log.info("SBX_IDP_SYNC_KEYCLOAK_URL is not set: ctl-idp-sync is off");
+		}
 		let gateway: GatewayPort;
 		let agent: AgentPort;
 		if (env.gatewayServiceTokenFile !== undefined) {
@@ -128,6 +140,7 @@ async function main(): Promise<void> {
 			migrateOnStart: env.migrateOnStart,
 			httpPort: env.httpPort,
 			idpSyncIntervalMs: env.idpSyncIntervalMs,
+			...(idpSync === undefined ? {} : { idpSync }),
 			payloadReady: () => p.ready(),
 		});
 		await worker.start();

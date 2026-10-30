@@ -223,6 +223,17 @@ export const METRIC_DEFS: readonly MetricDef[] = [
 		help: "IdP sync run time",
 		buckets: [0.1, 0.5, 1, 5, 10, 30, 60, 300],
 	},
+	{
+		name: "sbx_idp_sync_aborted_total",
+		kind: "counter",
+		help: "IdP sync passes that changed nothing because a guard tripped, per reason",
+		labels: ["reason"],
+	},
+	{
+		name: "sbx_idp_sync_aborted",
+		kind: "gauge",
+		help: "1 after an aborted IdP sync pass, 0 after a successful one (alert when 1)",
+	},
 ];
 
 type AnyMetric = Counter<string> | Gauge<string> | Histogram<string>;

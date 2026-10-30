@@ -41,6 +41,23 @@ export {
 	oauth2ProxyStrategy,
 	operatorGroupsOf,
 } from "./identity/strategy.ts";
+export {
+	KeycloakAdminClient,
+	type KeycloakAdminClientOptions,
+	KeycloakError,
+	type KeycloakUser,
+} from "./idp-sync/keycloak.ts";
+export {
+	type IdpDeactivatedReason,
+	type IdpSyncAbort,
+	type IdpSyncLog,
+	type IdpSyncResult,
+	KeycloakIdpSync,
+	type KeycloakIdpSyncOptions,
+	MASS_DEACTIVATION_MIN,
+	MASS_DEACTIVATION_SHARE,
+	type NoticeApiKey,
+} from "./idp-sync/sync.ts";
 export { closeSbxPayload, getSbxPayload } from "./instance.ts";
 export { type NotifyChannel, notify, txQuery } from "./notify.ts";
 export {

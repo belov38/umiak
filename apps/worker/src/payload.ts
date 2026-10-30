@@ -2,13 +2,18 @@
 // Payload collections (LISTEN sbx_config drops its cache) and the readiness
 // check of the Payload migrations. The migrations themselves are applied by
 // `node packages/payload/src/migrate.ts` (compose: web-migrate), never here.
+import { readFileSync } from "node:fs";
 import {
 	assertPayloadMigrated,
 	closeSbxPayload,
 	getSbxPayload,
+	KeycloakAdminClient,
+	KeycloakIdpSync,
 	PayloadConfigReader,
 } from "@sbx/payload";
 import type { Logger } from "pino";
+import type { IdpSync } from "./controllers/idp-sync.ts";
+import type { IdpSyncEnv } from "./env.ts";
 import { errText } from "./log.ts";
 
 /**
@@ -72,4 +77,42 @@ export async function openWorkerPayload(
 			return closing;
 		},
 	};
+}
+
+export interface WorkerIdpSyncOptions {
+	/** `WorkerEnv.idpSync`; undefined = no sync (ctl-idp-sync is not registered). */
+	env: IdpSyncEnv | undefined;
+	payload: WorkerPayload["payload"];
+	log: Logger;
+	/** Reads the client secret file (tests). */
+	readFile?: (path: string) => string;
+}
+
+/**
+ * ctl-idp-sync over Keycloak (S8 §20.1), or undefined without
+ * SBX_IDP_SYNC_KEYCLOAK_URL. The client secret is read once from its file
+ * and never logged; aborts are reported through the result (runIdpSync
+ * turns them into metrics and log.error).
+ */
+export function createWorkerIdpSync(
+	o: WorkerIdpSyncOptions,
+): IdpSync | undefined {
+	if (o.env === undefined) return undefined;
+	const read = o.readFile ?? ((p: string) => readFileSync(p, "utf8"));
+	const clientSecret = read(o.env.clientSecretFile).trim();
+	if (clientSecret === "") {
+		throw new Error(
+			`idp sync client secret file ${o.env.clientSecretFile} is empty`,
+		);
+	}
+	return new KeycloakIdpSync({
+		payload: o.payload,
+		keycloak: new KeycloakAdminClient({
+			baseUrl: o.env.keycloakUrl,
+			realm: o.env.realm,
+			clientId: o.env.clientId,
+			clientSecret,
+		}),
+		log: o.log,
+	});
 }
