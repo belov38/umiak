@@ -199,6 +199,8 @@ type proc struct {
 	// graceKill is the SIGKILL after the grace of a timeout; stopped once
 	// the process is reaped.
 	graceKill *time.Timer
+	// reaped is set once Wait returned: no timeout signal after it.
+	reaped bool
 }
 
 // run starts the process, forwards the fake shim's requests to it and
@@ -226,15 +228,16 @@ func (s *execSupervisor) run(r *supervisor.FakeRun, spec shim.Spec) {
 	}
 
 	err := p.cmd.Wait()
-	s.log.Debug("exited", "id", r.ID(), "state", p.cmd.ProcessState)
-	if timer != nil {
-		timer.Stop()
-	}
 	p.mu.Lock()
+	p.reaped = true
 	if p.graceKill != nil {
 		p.graceKill.Stop()
 	}
 	p.mu.Unlock()
+	if timer != nil {
+		timer.Stop()
+	}
+	s.log.Debug("exited", "id", r.ID(), "state", p.cmd.ProcessState)
 	if copied != nil {
 		// The PTY ends (EIO) once nothing holds its slave side.
 		select {
@@ -369,18 +372,27 @@ func (p *proc) kill(sig syscall.Signal) {
 }
 
 // timeout is the shim's timeout_ms: SIGTERM, then SIGKILL after the grace.
+// Both happen under p.mu with the reaped check, so neither is sent, nor the
+// SIGKILL armed, once Wait returned.
 func (p *proc) timeout() {
-	p.mu.Lock()
-	p.timedOut = true
-	p.mu.Unlock()
-	p.kill(unix.SIGTERM)
 	grace := shim.DefaultKillGrace
 	if p.spec.KillGraceMs > 0 {
 		grace = time.Duration(p.spec.KillGraceMs) * time.Millisecond //nolint:gosec // bounded by the agent
 	}
 	p.mu.Lock()
-	p.graceKill = time.AfterFunc(grace, func() { p.kill(unix.SIGKILL) })
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	if p.reaped {
+		return
+	}
+	p.timedOut = true
+	p.kill(unix.SIGTERM)
+	p.graceKill = time.AfterFunc(grace, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if !p.reaped {
+			p.kill(unix.SIGKILL)
+		}
+	})
 }
 
 // recordExit writes the exit of the process to the fake shim. An exit the

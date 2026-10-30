@@ -998,6 +998,47 @@ describe.skipIf(skipPg() || skipReason !== "")(
 				expect(readFileSync(p(`${name}-up.bin`), "utf8")).toBe("up");
 				expect(readFileSync(p(`${name}-arc/a.txt`), "utf8")).toBe("a");
 				for (const n of created) expect(existsSync(inHome(n))).toBe(false);
+
+				// Enough ".." to climb from the scratch dir into $HOME: refused.
+				const dots = "../".repeat(work.split("/").length - 1);
+				const climb = `${dots}${homedir().slice(1)}/${name}-climb`;
+				const viaRpc = await h.request("POST", url("/mkdir"), {
+					json: { path: climb },
+				});
+				expect(
+					viaRpc.status,
+					JSON.stringify(viaRpc.body),
+				).toBeGreaterThanOrEqual(400);
+				const viaHttp = await h.request(
+					"PUT",
+					url("/content", { path: `~/${climb}` }),
+					{
+						headers: { "content-type": "application/octet-stream" },
+						body: "x",
+					},
+				);
+				expect(viaHttp.status).toBeGreaterThanOrEqual(400);
+				const upc = await h.request("POST", url("/uploads"), {
+					json: { path: `${name}-c.bin` },
+				});
+				const cid = (upc.body as Any).uploadId as string;
+				await h.request(
+					"PUT",
+					url(`/uploads/${cid}`, { offset: "0", path: `${name}-c.bin` }),
+					{
+						headers: { "content-type": "application/octet-stream" },
+						body: "c",
+					},
+				);
+				const viaCommit = await h.request(
+					"POST",
+					url(`/uploads/${cid}/commit`),
+					{
+						json: { path: climb, sha256: sha256("c") },
+					},
+				);
+				expect(viaCommit.status).toBeGreaterThanOrEqual(400);
+				expect(existsSync(inHome(`${name}-climb`))).toBe(false);
 			});
 
 			it("files and commands see the same directory", async () => {
