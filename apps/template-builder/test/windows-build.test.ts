@@ -390,14 +390,14 @@ describe("iso-install build: happy path", () => {
 		});
 		expect(s.guest.started).toEqual(["00-base", "10-system", "90-cleanup"]);
 
-		// Boot-from-CD key presses: every second for 20 s at install, 30 s at the offline boot.
+		// Boot-from-CD key presses: every second for 60 s at install and at the offline boot.
 		const starts = s.log
 			.map((e, i) => (e === `api:POST ${vm}/status/start` ? i : -1))
 			.filter((i) => i >= 0);
 		expect(starts).toHaveLength(2);
 		const firstStep = s.log.indexOf("guest:step 00-base");
-		expect(keysBetween(s.log, starts[0] ?? 0, firstStep)).toBe(20);
-		expect(keysBetween(s.log, starts[1] ?? 0, s.log.length)).toBe(30);
+		expect(keysBetween(s.log, starts[0] ?? 0, firstStep)).toBe(60);
+		expect(keysBetween(s.log, starts[1] ?? 0, s.log.length)).toBe(60);
 		for (const c of s.pve.calls.filter((c) => c.path === `${vm}/sendkey`))
 			expect(c.params).toEqual({ key: "ret" });
 	});
@@ -829,8 +829,8 @@ describe("iso-install build: failures", () => {
 		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
 		expect(m.error?.stage).toBe("offline");
 		expect(m.error?.message).toMatch(/sealed disk booted/);
-		// 20 install keys, then the offline keys up to the first ping that answers.
-		expect(sendkeys()).toBeLessThan(30);
+		// 60 install keys, then the offline keys up to the first ping that answers.
+		expect(sendkeys()).toBeLessThan(70);
 	});
 
 	it("a template without net0 fails the template stage instead of writing an empty net0", async () => {
