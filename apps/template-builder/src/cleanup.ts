@@ -17,7 +17,8 @@ export interface CleanupDeps {
 	cfg: {
 		node: string;
 		pool: string;
-		vmidRange: { min: number; max: number };
+		/** Where build VMs and template leases live (pve: 597-598). */
+		templateVmidRange: { min: number; max: number };
 		templateVmid: number;
 	};
 	now: () => Date;
@@ -71,8 +72,8 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 	);
 
 	const inRange = (vmid: number) =>
-		vmid >= cfg.vmidRange.min &&
-		vmid <= cfg.vmidRange.max &&
+		vmid >= cfg.templateVmidRange.min &&
+		vmid <= cfg.templateVmidRange.max &&
 		vmid !== cfg.templateVmid &&
 		!isProtectedVmid(vmid);
 	const vms = await api.get<VmResource[]>("/cluster/resources", { type: "vm" });

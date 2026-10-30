@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -13,12 +14,15 @@ import {
 } from "./build.ts";
 import { cleanup } from "./cleanup.ts";
 import {
+	type Ctx,
 	imageCacheDir,
+	machinesFor,
 	makeContext,
 	RAM_CAP_MB,
 	RamGuard,
 	registryDir,
 } from "./context.ts";
+import { devCpRegistrar } from "./devcp.ts";
 import { defaultDownloadFetch, fetchBaseImage } from "./image.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
 import { preflight } from "./preflight.ts";
@@ -26,6 +30,7 @@ import { loadRecipe, loadVersions } from "./recipe.ts";
 import { FileRegistry } from "./registry.ts";
 import { pveGuestIo } from "./runner.ts";
 import { makeIso } from "./seed.ts";
+import { defaultSecretFiles, verifyTemplate } from "./verify.ts";
 import { formatVersionsToml, updateVersionsFile } from "./versions-update.ts";
 
 const USAGE = `usage:
@@ -49,18 +54,85 @@ const UPDATE_KEYS_FILE = join(
 );
 const LOG_DIR = join(REPO_ROOT, "build-logs");
 
-/** Template verification (Task 10 wires the real one). */
-const verifyBuild:
-	| ((
-			m: Manifest,
-			o: { connect?: ConnectOptions; signal?: AbortSignal },
-	  ) => Promise<VerifyResult>)
-	| undefined = undefined;
-
 class UsageError extends Error {}
 
 const out = (s: string) =>
 	process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
+
+/**
+ * First SIGINT/SIGTERM aborts `signal` (the command fails at its next call and cleans up); a
+ * second one exits at once with `lastWords()`.
+ */
+function trapSignals(lastWords: () => string): {
+	signal: AbortSignal;
+	exitCode: () => number;
+	release: () => void;
+} {
+	const ac = new AbortController();
+	let exitCode = 130;
+	const onSignal = (sig: NodeJS.Signals) => {
+		if (!ac.signal.aborted) {
+			// 128 + signal number, as a shell reports it.
+			exitCode = sig === "SIGTERM" ? 143 : 130;
+			out(
+				`\n[sbx-tpl] ${sig}: rolling back; send it again to exit without cleanup`,
+			);
+			ac.abort(new Error(`interrupted by ${sig}`));
+			return;
+		}
+		out(`\n[sbx-tpl] ${lastWords()}`);
+		process.exit(exitCode);
+	};
+	process.on("SIGINT", onSignal);
+	process.on("SIGTERM", onSignal);
+	return {
+		signal: ac.signal,
+		exitCode: () => exitCode,
+		release() {
+			process.off("SIGINT", onSignal);
+			process.off("SIGTERM", onSignal);
+		},
+	};
+}
+
+/** `verifyTemplate` with the clients of `ctx`; guest calls stop once `signal` is aborted. */
+function runVerify(
+	ctx: Ctx,
+	ramGuard: RamGuard,
+	m: Manifest,
+	o: { connect?: ConnectOptions; signal?: AbortSignal },
+): Promise<VerifyResult> {
+	if (m.pveVmid === null)
+		throw new Error(`build ${m.buildId} has no template VM`);
+	const { cfg, api } = ctx;
+	const recipe = loadRecipe(TEMPLATES_DIR, m.templateSlug);
+	const ioApi = o.signal ? guardApi(api, o.signal) : api;
+	return verifyTemplate(
+		{
+			machines: machinesFor(ctx, m.pveVmid),
+			io: (vmid) => pveGuestIo(ioApi, cfg.node, vmid),
+			ramGuard,
+			verifyScript: readFileSync(
+				join(TEMPLATES_DIR, recipe.verify, "verify.sh"),
+				"utf8",
+			),
+			secretFiles: defaultSecretFiles(cfg),
+			log: (msg) => out(`[sbx-tpl] ${msg}`),
+		},
+		m,
+		{
+			...(o.connect !== undefined
+				? {
+						connect: {
+							url: o.connect.url,
+							registrar: devCpRegistrar({ ctSsh: o.connect.ctSsh }),
+						},
+					}
+				: {}),
+			...(o.signal !== undefined ? { signal: o.signal } : {}),
+		},
+	);
+}
 
 function gitCommit(): string {
 	const git = (...args: string[]) =>
@@ -124,8 +196,6 @@ async function cmdBuild(
 	const agentPackage = str("agent-package");
 	if (!agentPackage) throw new UsageError("--agent-package is required");
 	const noVerify = v["no-verify"] === true;
-	if (!noVerify && verifyBuild === undefined)
-		throw new UsageError("verify is not implemented yet: run with --no-verify");
 	if (v.refresh === true) {
 		const { file, changes } = await updateVersionsFile({
 			templatesDir: TEMPLATES_DIR,
@@ -137,28 +207,19 @@ async function cmdBuild(
 		str("node") !== undefined ? { node: str("node") as string } : {},
 	);
 	// First signal: fail the build at the next call and roll back. Second: exit at once.
-	const interrupt = new AbortController();
 	let buildId: string | undefined;
-	let exitCode = 130;
-	const onSignal = (sig: NodeJS.Signals) => {
-		if (!interrupt.signal.aborted) {
-			// 128 + signal number, as a shell reports it.
-			exitCode = sig === "SIGTERM" ? 143 : 130;
-			out(
-				`\n[sbx-tpl] ${sig}: rolling back; send it again to exit without cleanup`,
-			);
-			interrupt.abort(new Error(`interrupted by ${sig}`));
-			return;
-		}
-		out(
-			`\n[sbx-tpl] exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run sbx-tpl cleanup`,
-		);
-		process.exit(exitCode);
-	};
-	process.on("SIGINT", onSignal);
-	process.on("SIGTERM", onSignal);
+	const interrupt = trapSignals(
+		() =>
+			`exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run sbx-tpl cleanup`,
+	);
 	try {
 		const { cfg, api } = ctx;
+		const ramGuard = new RamGuard({
+			api,
+			node: cfg.node,
+			pool: cfg.pool,
+			capMb: RAM_CAP_MB,
+		});
 		const opt = (flag: string, key: keyof BuildOptions) =>
 			str(flag) !== undefined ? { [key]: str(flag) } : {};
 		const opts: BuildOptions = {
@@ -202,17 +263,8 @@ async function cmdBuild(
 				io: (vmid) =>
 					pveGuestIo(guardApi(api, interrupt.signal), cfg.node, vmid),
 				makeIso: (files, path) => makeIso(files, path),
-				verify: (mf, o) => {
-					if (verifyBuild === undefined)
-						throw new Error("verify not implemented yet");
-					return verifyBuild(mf, o);
-				},
-				ramGuard: new RamGuard({
-					api,
-					node: cfg.node,
-					pool: cfg.pool,
-					capMb: RAM_CAP_MB,
-				}),
+				verify: (mf, o) => runVerify(ctx, ramGuard, mf, o),
+				ramGuard,
 				log: (msg) => out(`[sbx-tpl] ${msg}`),
 				stepOutput: (_step, chunk) => process.stdout.write(chunk),
 				now: () => new Date(),
@@ -233,10 +285,9 @@ async function cmdBuild(
 		out(`\n${err.message}`);
 		if (e?.tail?.length) out(`last lines of ${e.step}:\n${e.tail.join("\n")}`);
 		out(`step logs: ${join(LOG_DIR, err.manifest.buildId)}`);
-		return interrupt.signal.aborted ? exitCode : 1;
+		return interrupt.signal.aborted ? interrupt.exitCode() : 1;
 	} finally {
-		process.off("SIGINT", onSignal);
-		process.off("SIGTERM", onSignal);
+		interrupt.release();
 		ctx.close();
 	}
 }
@@ -318,14 +369,33 @@ async function main(argv: string[]): Promise<number> {
 			const m = registry.get(arg);
 			if (!m) throw new Error(`build ${arg} not found in ${registry.dir}`);
 			const o = connectOption(values);
-			if (verifyBuild === undefined)
-				throw new Error("verify not implemented yet");
-			const v = await verifyBuild(m, o);
-			registry.update(m.buildId, { verify: v });
-			for (const c of v.checks)
-				out(`${c.status.padEnd(4)}  ${c.id}  ${c.evidence}`);
-			out(v.ok ? "verify: ok" : "verify: FAILED");
-			return v.ok ? 0 : 1;
+			const ctx = await makeContext({ node: m.node });
+			const interrupt = trapSignals(
+				() => "exiting without cleanup; run sbx-tpl cleanup",
+			);
+			try {
+				const ramGuard = new RamGuard({
+					api: ctx.api,
+					node: ctx.cfg.node,
+					pool: ctx.cfg.pool,
+					capMb: RAM_CAP_MB,
+				});
+				// The checks are printed as they run; the template stays either way.
+				const v = await runVerify(ctx, ramGuard, m, {
+					...o,
+					signal: interrupt.signal,
+				});
+				registry.update(m.buildId, { verify: v });
+				out(v.ok ? "verify: ok" : "verify: FAILED");
+				return v.ok ? 0 : 1;
+			} catch (err) {
+				if (!interrupt.signal.aborted) throw err;
+				out(`\n${err instanceof Error ? err.message : String(err)}`);
+				return interrupt.exitCode();
+			} finally {
+				interrupt.release();
+				ctx.close();
+			}
 		}
 		case "preflight": {
 			if (arg !== undefined) break;

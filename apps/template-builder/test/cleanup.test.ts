@@ -166,7 +166,7 @@ async function setup() {
 	const cfg = {
 		node: "pve",
 		pool: "sandbox",
-		vmidRange: { min: 500, max: 598 },
+		templateVmidRange: { min: 500, max: 598 },
 		templateVmid: 599,
 	};
 	return { pve, node, store, allocator, registry, cfg, log };
@@ -254,7 +254,11 @@ describe("cleanup", () => {
 			node: s.node,
 			allocator: s.allocator,
 			registry: s.registry,
-			cfg: { ...s.cfg, vmidRange: { min: 100, max: 9999 }, templateVmid: 0 },
+			cfg: {
+				...s.cfg,
+				templateVmidRange: { min: 100, max: 9999 },
+				templateVmid: 0,
+			},
 			now: () => NOW,
 		});
 		for (const vmid of [599, 9000, 9001])

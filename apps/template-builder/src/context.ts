@@ -66,6 +66,7 @@ export async function makeContext(over: { node?: string } = {}): Promise<Ctx> {
 		store,
 		clusterId: cfg.clusterId,
 		range: cfg.vmidRange,
+		templateRange: cfg.templateVmidRange,
 		templateVmid: cfg.templateVmid,
 		occupied: () => (machines as Machines).occupiedVmids(),
 	});
@@ -95,6 +96,26 @@ export async function makeContext(over: { node?: string } = {}): Promise<Ctx> {
 			store.close();
 		},
 	};
+}
+
+/**
+ * S1 machines cloned from `templateVmid` (a built template, not cfg.templateVmid) with the
+ * context's clients: what `verify` creates and deletes.
+ */
+export function machinesFor(ctx: Ctx, templateVmid: number): Machines {
+	const { cfg, api, node } = ctx;
+	return new Machines({
+		api,
+		node,
+		driver: new LvmThinDriver({
+			node,
+			vcpu: pveVcpuControl(api, cfg.node),
+			storage: cfg.storage,
+		}),
+		allocator: ctx.allocator,
+		snapshots: ctx.store,
+		cfg: { ...cfg, templateVmid },
+	});
 }
 
 /**
