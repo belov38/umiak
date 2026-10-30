@@ -1,0 +1,2 @@
+# System config of the Codex CLI: versions come with the template build.
+check_for_update_on_startup = false

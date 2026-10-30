@@ -28,7 +28,7 @@ topology:
     - name: pve
       clusterMacId: 1
       vmidMin: 500
-      vmidMax: 598
+      vmidMax: 589
       apiUrl: https://100.64.10.2:8006
       tlsName: pve
       secretRef: pve
@@ -50,3 +50,33 @@ topology:
       storage: local-lvm
       pveVmid: 599
       bootTimeoutS: 300
+    # S5 template build (sbx-tpl build linux): Ubuntu 26.04, agent baked in (tunnel CA = the dev
+    # CA of the CT 590 gateway, ~/.config/sbx/dev-ca; production needs its own build), no cloud-init
+    # drive. `sbx-admin bootstrap` makes it active; 599-seed becomes deprecated (rollback:
+    # `sbx-admin template promote <599-seed build id>`).
+    - templateSlug: linux
+      version: "20261030.15"
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 598
+      bootTimeoutS: 300
+      agentVersion: 0.1.0+20261030.2fb34a1
+      hw:
+        machine: q35
+        cpu: host
+        bios: seabios
+        ostype: l26
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        serial0: socket
+        vga: std
+        tablet: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
+      diskLayout:
+        scsi0:
+          size: 64G
+          discard: "on"
+          iothread: "1"
+          ssd: "1"

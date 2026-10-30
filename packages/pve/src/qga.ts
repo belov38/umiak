@@ -36,6 +36,9 @@ export class QgaExecStatusLostError extends Error {
 	}
 }
 
+/** Message of PveApi's client-side timeout on an exec-status poll. */
+const CLIENT_TIMEOUT_RE = /^GET \S+\/agent\/exec-status: timeout$/;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** QEMU guest agent through the Proxmox API. */
@@ -100,16 +103,20 @@ export class Qga {
 			try {
 				st = await this.#api.get(this.#path(vmid, "exec-status"), { pid });
 			} catch (err) {
-				if (!(err instanceof PveApiError)) throw err;
-				if (/PID \d+ does not exist/.test(err.message))
-					throw new QgaExecStatusLostError(vmid, pid, err);
 				// Polling on after a timeout or while the agent restarts is harmless: the status of a
-				// running process is not consumed, and a lost one shows up as a missing PID.
-				if (
+				// running process is not consumed, and a lost one shows up as a missing PID. PveApi
+				// giving up on an answer (plain Error, see pve-api.ts) counts as a timeout too.
+				if (!(err instanceof PveApiError)) {
+					if (!(err instanceof Error) || !CLIENT_TIMEOUT_RE.test(err.message))
+						throw err;
+				} else if (/PID \d+ does not exist/.test(err.message)) {
+					throw new QgaExecStatusLostError(vmid, pid, err);
+				} else if (
 					!(err instanceof QgaTimeoutError) &&
 					!/guest agent is not running/i.test(err.message)
-				)
+				) {
 					throw err;
+				}
 			}
 			if (st?.exited)
 				return {

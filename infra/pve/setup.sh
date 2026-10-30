@@ -3,8 +3,8 @@
 # Runs on the operator's Mac and executes each step on the host over SSH (root).
 # Spec: docs/specs/s1-proxmox-foundation.md section 4.
 #
-#   infra/pve/setup.sh [--dry-run] <user|net|sdn|node|fw|template|cp|cp-gateway|cp-tailscale|status>
-#   infra/pve/setup.sh [--dry-run] revert <user|net|sdn|node|fw|template|cp|cp-gateway>
+#   infra/pve/setup.sh [--dry-run] <user|net|sdn|node|fw|template|media|cp|cp-gateway|cp-tailscale|status>
+#   infra/pve/setup.sh [--dry-run] revert <user|net|sdn|node|fw|template|media|cp|cp-gateway>
 #
 # Every step is idempotent: it checks whether it is already done, applies, then verifies.
 # The cp* steps are dev-only: the control-plane container (CT 590) for end-to-end tests.
@@ -649,6 +649,45 @@ lvremove -y pve/vm-$ID-disk-0 2>/dev/null || true
 EOF
 }
 
+# ---------------------------------------------------------------- media (S5 template builder uploads)
+
+step_media() {
+	log "media: role SbxTemplateMedia (Datastore.AllocateTemplate, Datastore.Audit) on /storage/local for sbx@pve and its token"
+	remote <<'EOF'
+privs="Datastore.AllocateTemplate,Datastore.Audit"
+if pveum role list --output-format json | grep -q '"roleid":"SbxTemplateMedia"'; then
+	pveum role modify SbxTemplateMedia --privs "$privs"
+else
+	pveum role add SbxTemplateMedia --privs "$privs"
+fi
+pveum acl modify /storage/local --users sbx@pve --roles SbxTemplateMedia
+pveum acl modify /storage/local --tokens 'sbx@pve!poc' --roles SbxTemplateMedia
+EOF
+	if ((DRY)); then
+		printf -- '+ curl GET https://pve:8006/api2/json/access/permissions?path=/storage/local with the token, expect Datastore.AllocateTemplate\n'
+		return 0
+	fi
+	verify_media
+}
+
+verify_media() {
+	local out
+	out=$(curl -sS --cacert "$CFG_DIR/pve-root-ca.pem" --resolve "pve:8006:$TS_IP" \
+		-H "Authorization: PVEAPIToken=sbx@pve!poc=$(cat "$CFG_DIR/pve-token")" \
+		"https://pve:8006/api2/json/access/permissions?path=/storage/local")
+	[[ "$out" == *'"Datastore.AllocateTemplate":1'* ]] || die "media: token lacks Datastore.AllocateTemplate on /storage/local: $out"
+	[[ "$out" != *'"Datastore.Allocate":1'* ]] || die "media: token has Datastore.Allocate on /storage/local, more than the role grants: $out"
+	log "media: token has Datastore.AllocateTemplate on /storage/local"
+}
+
+revert_media() {
+	remote <<'EOF'
+pveum acl delete /storage/local --users sbx@pve --roles SbxTemplateMedia || true
+pveum acl delete /storage/local --tokens 'sbx@pve!poc' --roles SbxTemplateMedia || true
+pveum role delete SbxTemplateMedia || true
+EOF
+}
+
 # ---------------------------------------------------------------- dev control plane (CT)
 
 # cp_fw prints the firewall of the CT: inbound only from the LAN. Sandboxes arrive SNAT-ed from
@@ -911,6 +950,7 @@ s "group sbx-egress"            "grep -q 'group sbx-egress' /etc/pve/firewall/cl
 s "rollback timer inactive"     "! systemctl is-active sbx-fw-rollback.timer"
 s "sbx-node installed"          "test -x /usr/local/bin/sbx-node && test -f /etc/sbx-node.toml"
 s "sbx-node key"                "grep -q 'boat-dev-clone S1 sbx-node' /etc/pve/priv/authorized_keys"
+s "role SbxTemplateMedia"       "pveum role list --output-format json | grep -q '\"roleid\":\"SbxTemplateMedia\"'"
 s "template $ID"                "qm config $ID | grep -q '^template: 1'"
 s "base-$ID-disk-0 tagged"      "lvs -o lv_tags --noheadings pve/base-$ID-disk-0 | grep -q sbx-tpl"
 s "dev cp CT $CP running"       "pct status $CP | grep -q running"
@@ -927,11 +967,11 @@ usage() {
 
 cmd="${1:-}"
 case "$cmd" in
-user | net | sdn | node | fw | template | cp | status) "step_$cmd" ;;
+user | net | sdn | node | fw | template | media | cp | status) "step_$cmd" ;;
 cp-gateway | cp-tailscale) "step_${cmd//-/_}" ;;
 revert)
 	case "${2:-}" in
-	user | net | sdn | node | fw | template | cp) "revert_$2" ;;
+	user | net | sdn | node | fw | template | media | cp) "revert_$2" ;;
 	cp-gateway) revert_cp_gateway ;;
 	*) usage ;;
 	esac

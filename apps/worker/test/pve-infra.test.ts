@@ -82,7 +82,7 @@ interface Env {
 	factoryCalls: number;
 }
 
-async function setup(): Promise<Env> {
+async function setup(o: { env?: Record<string, string> } = {}): Promise<Env> {
 	const topo = await createTopology(db.pool);
 	const name = await nodeName(topo.nodeId);
 	const api = new FakePve([], { node: name });
@@ -96,6 +96,7 @@ async function setup(): Promise<Env> {
 	const env = { topo, name, api, node, factoryCalls: 0 } as Env;
 	env.registry = new PveInfraRegistry(db.pool, {
 		secretsDir: "/nonexistent",
+		...(o.env ? { env: o.env } : {}),
 		clients: () => {
 			env.factoryCalls += 1;
 			return { api, node };
@@ -124,6 +125,49 @@ describe("PveInfraRegistry", () => {
 		expect(await leases(e.topo.providerId)).toEqual([
 			expect.objectContaining({ vmid: 599, purpose: "template" }),
 		]);
+	});
+});
+
+describe("tunnel URL in smbios family (S5 section 14)", () => {
+	it("create and fork write family=sbxt1:<SBX_TUNNEL_URL> into smbios1", async () => {
+		const url = "wss://tunnel.example.com/v1/connect";
+		const e = await setup({ env: { SBX_TUNNEL_URL: url } });
+		const m = randomUUID();
+		const smbios = smbiosFor(m);
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: { vcpu: 2, memoryMb: 2048 },
+			smbios,
+		});
+		expect(e.api.vms.get(vm.vmid)?.config.smbios1).toBe(
+			formatSmbios1({ ...smbios, family: `sbxt1:${url}` }),
+		);
+	});
+
+	it("without SBX_TUNNEL_URL there is no family", async () => {
+		const e = await setup({ env: {} });
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: { vcpu: 2, memoryMb: 2048 },
+			smbios: smbiosFor(m),
+		});
+		expect(e.api.vms.get(vm.vmid)?.config.smbios1).not.toContain("family=");
+	});
+
+	it("an invalid SBX_TUNNEL_URL fails at start", () => {
+		expect(
+			() =>
+				new PveInfraRegistry(db.pool, {
+					secretsDir: "/nonexistent",
+					env: { SBX_TUNNEL_URL: "http://plain" },
+					clients: () => {
+						throw new Error("unused");
+					},
+				}),
+		).toThrow(/SBX_TUNNEL_URL/);
 	});
 });
 

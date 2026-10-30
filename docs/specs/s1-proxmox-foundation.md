@@ -173,6 +173,19 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 
 599 — шаблон PoC; S5 заменит его чистой сборкой Ubuntu 26.04 minimal.
 
+
+### 4.7 Раскладка VMID на `pve`
+
+Решение master-сессии, 2026-10-30:
+
+| VMID | Что |
+|---|---|
+| 500–589 | sandbox: диапазон аллокатора worker, `sbx-bench` и `deploy/compose` (`SBX_VMID_RANGE`, `vmidMin`/`vmidMax` в topology) |
+| 590–596 | dev-инфраструктура, в выдачу не входит; CT 590 — dev control plane (`infra/dev-cp`) |
+| 597–599 | шаблоны: 597–598 — сборки S5 (`sbx-tpl`, `SBX_TEMPLATE_VMID_RANGE`), 599 — шаблон PoC |
+
+Диапазон самого `sbx-node` остаётся 500–599: он клонирует из томов `base-<id>-*` шаблонов. Токен видит только VM своего pool, поэтому гость вне pool внутри диапазона sandbox (как CT 590 до этой раскладки) аллокатору не виден; preflight `sbx-bench` такие случаи ловит.
+
 ## 5. Как выполняются операции
 
 | Что | Через что |
@@ -223,7 +236,8 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 | `SBX_PVE_CA_FILE` | CA хоста (`pve-root-ca.pem`), TLS проверяется | `~/.config/sbx/pve-root-ca.pem` |
 | `SBX_PVE_TLS_NAME` | имя, по которому проверяется сертификат `:8006` | `pve` |
 | `SBX_NODE_SSH_HOST`, `SBX_NODE_SSH_KEY_FILE`, `SBX_NODE_SSH_KNOWN_HOSTS` | доступ к `sbx-node` | `pve.tail0000.ts.net`, `~/.config/sbx/sbx-node_ed25519`, `~/.config/sbx/known_hosts` |
-| `SBX_VMID_RANGE` | диапазон VMID | `500-598` |
+| `SBX_VMID_RANGE` | диапазон VMID sandbox | `500-589` (раскладка §4.7) |
+| `SBX_TEMPLATE_VMID_RANGE` | VMID сборок шаблонов S5 (`sbx-tpl`) | `597-598` |
 | `SBX_CLUSTER_ID` | номер кластера для MAC (1 байт) | `1` |
 | `SBX_STATE_DB` | SQLite аллокатора (PoC) | `~/.local/state/sbx/poc.db` |
 | `SBX_TEMPLATE_VMID` | шаблон | `599` |
@@ -308,7 +322,7 @@ interface QuiesceHook {
 - Таблица `vmid_lease`: `cluster`, `vmid`, `mac`, `state` (`reserved` / `active` / `releasing`), `purpose` (machine, template), `created_at`, `updated_at`. Уникальность `(cluster, vmid)` и `(cluster, mac)`.
 - Выделение: наименьший VMID из `SBX_VMID_RANGE`, которого нет в таблице, в `/cluster/resources` (видны только VM pool, этого достаточно для нашего диапазона) и среди LV `vm-<id>-*` (`sbx-node lv.list`/`inventory`). Вставка строки и есть блокировка: при конфликте уникальности берётся следующий. `/cluster/nextid` не используется.
 - MAC детерминированный: `02:<cluster>:<vmid, 4 байта big-endian>`, например `02:01:00:00:01:F4` для кластера 1 и VMID 500. Локально администрируемый unicast, уникален в пределах кластера; L2 у нас локальная для ноды, этого достаточно.
-- VMID 599 занят шаблоном (`purpose=template`), в выдачу не входит.
+- VMID 599 занят шаблоном (`purpose=template`), в выдачу не входит. Шаблоны S5 получают VMID из `SBX_TEMPLATE_VMID_RANGE` (597–598) через `allocateTemplate`, вне диапазона sandbox (§4.7).
 
 ## 7. Стенд `sbx-bench` (`apps/bench`, TypeScript)
 

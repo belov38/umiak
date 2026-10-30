@@ -19,7 +19,22 @@ func TestValidOrigin(t *testing.T) {
 			t.Errorf("ValidOrigin(%q) = %v, want nil", name, err)
 		}
 	}
-	for _, name := range []string{"base-9000-disk-0", "vm-108-disk-1", "vm-599-disk-0", "vm-600-disk-0", "root", "data", "../x", "vm-500-disk-0;rm", "", "sbx-snap-", "base-599-disk-0 "} {
+	for _, name := range []string{"base-9000-disk-0", "vm-108-disk-1", "vm-599-disk-0", "vm-600-disk-0", "root", "data", "../x", "vm-500-disk-0;rm", "", "sbx-snap-", "base-599-disk-0 ", "base-0598-disk-0", "vm-0500-disk-0"} {
+		if err := ValidOrigin(cfg, name); err == nil {
+			t.Errorf("ValidOrigin(%q) = nil, want error", name)
+		}
+	}
+}
+
+func TestValidOriginAnyTemplateInRange(t *testing.T) {
+	cfg := testConfig()
+	cfg.TemplateVMID = 0
+	for _, name := range []string{"base-598-disk-0", "base-500-disk-0", "base-599-disk-0"} {
+		if err := ValidOrigin(cfg, name); err != nil {
+			t.Errorf("ValidOrigin(%q) = %v, want nil", name, err)
+		}
+	}
+	for _, name := range []string{"base-9000-disk-0", "base-499-disk-0", "base-600-disk-0", "base-9001-disk-0", "base-598"} {
 		if err := ValidOrigin(cfg, name); err == nil {
 			t.Errorf("ValidOrigin(%q) = nil, want error", name)
 		}
@@ -33,7 +48,7 @@ func TestValidTargetName(t *testing.T) {
 			t.Errorf("ValidTargetName(%q) = %v, want nil", name, err)
 		}
 	}
-	for _, name := range []string{"base-599-disk-0", "vm-599-disk-0", "vm-108-disk-0", "vm-500-cloudinit", "vm-500-disk-x", "Vm-500-disk-0", "sbx-snap-UPPER-scsi0", "sbx-tpl", "data"} {
+	for _, name := range []string{"base-599-disk-0", "vm-599-disk-0", "vm-108-disk-0", "vm-500-cloudinit", "vm-500-disk-x", "Vm-500-disk-0", "sbx-snap-UPPER-scsi0", "sbx-tpl", "data", "vm-0598-disk-0", "vm-00500-disk-0"} {
 		if err := ValidTargetName(cfg, name); err == nil {
 			t.Errorf("ValidTargetName(%q) = nil, want error", name)
 		}
@@ -59,6 +74,7 @@ func TestValidTags(t *testing.T) {
 		{"sbx", "sbx-vm-108"},
 		{"sbx", "sbx-vm-599"},
 		{"sbx", "sbx-src-9000"},
+		{"sbx", "sbx-vm-0500"},
 	}
 	for _, tags := range bad {
 		if err := ValidTags(cfg, tags); err == nil {

@@ -1,16 +1,20 @@
-import { macFor } from "@sbx/pve";
-import type { Ctx } from "./context.ts";
+import {
+	type Ctx,
+	isTemplateVm,
+	templateMacs,
+	type VmResource,
+} from "./context.ts";
 
 /** Removes everything a failed run may have left (spec §7.1). Never touches the template or sbx-tpl LVs. */
 export async function cleanup(ctx: Ctx): Promise<string[]> {
 	const { api, node, cfg, store, machines } = ctx;
 	const report: string[] = [];
-	const vms = await api.get<{ vmid: number; pool?: string }[]>(
-		"/cluster/resources",
-		{ type: "vm" },
-	);
+	const vms = await api.get<VmResource[]>("/cluster/resources", {
+		type: "vm",
+	});
 	for (const v of vms.filter(
-		(x) => x.pool === cfg.pool && x.vmid !== cfg.templateVmid,
+		(x) =>
+			x.pool === cfg.pool && x.vmid !== cfg.templateVmid && !isTemplateVm(x),
 	)) {
 		try {
 			await machines.delete(v.vmid);
@@ -33,14 +37,14 @@ export async function cleanup(ctx: Ctx): Promise<string[]> {
 	} catch (err) {
 		report.push(`LVs: ${(err as Error).message}`);
 	}
-	const tpl = macFor(cfg.clusterId, cfg.templateVmid).toLowerCase();
+	const tpl = templateMacs(ctx);
 	const prefix = `02:${cfg.clusterId.toString(16).padStart(2, "0")}:`;
 	const d = await node.call<{
 		leases: { mac: string }[];
 		ethers: { mac: string }[];
 	}>("dhcp.leases");
 	for (const mac of new Set([...d.leases, ...d.ethers].map((l) => l.mac))) {
-		if (!mac.startsWith(prefix) || mac === tpl) continue;
+		if (!mac.startsWith(prefix) || tpl.has(mac)) continue;
 		try {
 			await node.call("dhcp.release", { mac });
 			report.push(`released DHCP ${mac}`);

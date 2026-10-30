@@ -88,6 +88,8 @@ export interface AllocatorOptions {
 	clusterId: number;
 	range: { min: number; max: number };
 	templateVmid: number;
+	/** Where allocateTemplate looks; defaults to `range`. */
+	templateRange?: { min: number; max: number };
 	/** VMIDs taken outside our table: VMs in /cluster/resources and LVs vm-<id>-*. */
 	occupied: () => Promise<Set<number>>;
 	now?: () => number;
@@ -117,6 +119,40 @@ export class Allocator {
 			createdAt: t,
 			updatedAt: t,
 		});
+	}
+
+	/**
+	 * VMID for a new template (S5): scans from range.max down, so templates stay away from the
+	 * VMIDs machines take from range.min. The lease is a `reserved` purpose=template row; the
+	 * caller marks it active once the VM exists, or releases it after a failed build.
+	 */
+	async allocateTemplate(): Promise<AllocatedVmid> {
+		const { store, clusterId, templateVmid } = this.#o;
+		const range = this.#o.templateRange ?? this.#o.range;
+		const occupied = await this.#o.occupied();
+		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
+		for (let vmid = range.max; vmid >= range.min; vmid--) {
+			if (vmid === templateVmid || taken.has(vmid) || occupied.has(vmid))
+				continue;
+			const t = this.#now();
+			const mac = macFor(clusterId, vmid);
+			if (
+				await store.tryInsert({
+					cluster: clusterId,
+					vmid,
+					mac,
+					state: "reserved",
+					purpose: "template",
+					createdAt: t,
+					updatedAt: t,
+				})
+			)
+				return { vmid, mac, reused: false };
+		}
+		throw new AllocatorError(
+			"vmid_exhausted",
+			`no free VMID in ${range.min}-${range.max}`,
+		);
 	}
 
 	/**

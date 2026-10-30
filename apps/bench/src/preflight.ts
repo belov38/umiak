@@ -1,6 +1,10 @@
-import { macFor } from "@sbx/pve";
 import { type Check, check } from "./checks.ts";
-import type { Ctx } from "./context.ts";
+import {
+	type Ctx,
+	isTemplateVm,
+	templateMacs,
+	type VmResource,
+} from "./context.ts";
 
 interface Inventory {
 	sysctl: Record<string, string>;
@@ -22,11 +26,20 @@ export async function preflight(
 				version: string;
 				config: { vmidMin: number; vmidMax: number; templateVmid: number };
 			}>("version");
+			// sbx-node clones from base-<id> of any VMID in its range (S5 templates), its own
+			// templateVmid is only the legacy 599.
+			const tplOk =
+				v.config.templateVmid === cfg.templateVmid ||
+				(cfg.templateVmid >= v.config.vmidMin &&
+					cfg.templateVmid <= v.config.vmidMax);
 			const ok =
-				v.config.templateVmid === cfg.templateVmid &&
+				tplOk &&
 				v.config.vmidMin <= cfg.vmidRange.min &&
 				v.config.vmidMax >= cfg.vmidRange.max;
-			return { ok, detail: `sbx-node ${v.version}` };
+			return {
+				ok,
+				detail: `sbx-node ${v.version}, range ${v.config.vmidMin}-${v.config.vmidMax}, template ${cfg.templateVmid}`,
+			};
 		}),
 	);
 	checks.push(
@@ -167,12 +180,16 @@ export async function preflight(
 	);
 	checks.push(
 		await check("no leftover VMs in the pool", async () => {
-			const vms = await api.get<{ vmid: number; pool?: string }[]>(
-				"/cluster/resources",
-				{ type: "vm" },
-			);
+			const vms = await api.get<VmResource[]>("/cluster/resources", {
+				type: "vm",
+			});
 			const left = vms
-				.filter((v) => v.pool === cfg.pool && v.vmid !== cfg.templateVmid)
+				.filter(
+					(v) =>
+						v.pool === cfg.pool &&
+						v.vmid !== cfg.templateVmid &&
+						!isTemplateVm(v),
+				)
 				.map((v) => v.vmid);
 			return { ok: left.length === 0, detail: left.join(",") };
 		}),
@@ -201,7 +218,7 @@ export async function preflight(
 		await check(
 			"no leftover DHCP leases or ethers entries of our MACs",
 			async () => {
-				const tpl = macFor(cfg.clusterId, cfg.templateVmid).toLowerCase();
+				const tpl = templateMacs(ctx);
 				const d = await node.call<{
 					leases: { mac: string }[];
 					ethers: { mac: string }[];
@@ -212,7 +229,7 @@ export async function preflight(
 						(m) =>
 							m.startsWith(
 								`02:${cfg.clusterId.toString(16).padStart(2, "0")}:`,
-							) && m !== tpl,
+							) && !tpl.has(m),
 					);
 				return { ok: ours.length === 0, detail: ours.join(",") };
 			},

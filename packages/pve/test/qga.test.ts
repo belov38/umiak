@@ -81,6 +81,43 @@ describe("Qga.exec", () => {
 		expect(api.calls.filter((c) => c === "POST exec")).toHaveLength(1);
 	});
 
+	it("keeps polling after a client-side timeout of exec-status", async () => {
+		const clientTimeout = new Error(
+			"GET /nodes/pve/qemu/500/agent/exec-status: timeout",
+		);
+		const api = new ScriptedPve({
+			exec: [{ pid: 42 }],
+			"exec-status": [running, clientTimeout, done],
+		});
+		const r = await new Qga(api, "pve").exec(500, ["true"]);
+		expect(r).toEqual({ exitCode: 3, stdout: "out", stderr: "err" });
+		expect(api.calls.filter((c) => c === "POST exec")).toHaveLength(1);
+	});
+
+	it("reports a lost exit status when the PID vanished after a client-side timeout", async () => {
+		const api = new ScriptedPve({
+			exec: [{ pid: 42 }],
+			"exec-status": [
+				new Error("GET /nodes/pve/qemu/500/agent/exec-status: timeout"),
+				pidGone,
+			],
+		});
+		const err = await new Qga(api, "pve")
+			.exec(500, ["true"])
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(QgaExecStatusLostError);
+	});
+
+	it("still fails on other plain errors while polling", async () => {
+		const api = new ScriptedPve({
+			exec: [{ pid: 42 }],
+			"exec-status": [new Error("read ECONNRESET")],
+		});
+		await expect(new Qga(api, "pve").exec(500, ["true"])).rejects.toThrow(
+			"ECONNRESET",
+		);
+	});
+
 	it("treats an agent restart during exec-status like a timeout", async () => {
 		const notRunning = new PveApiError(
 			500,

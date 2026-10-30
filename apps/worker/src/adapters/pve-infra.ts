@@ -8,6 +8,7 @@ import {
 	checkLeaseOwner,
 	type Disk,
 	type DiskSet,
+	familyForTunnelUrl,
 	LvmThinDriver,
 	Machines,
 	type NodeOps,
@@ -19,6 +20,7 @@ import {
 	QgaTimeoutError,
 	type QuiesceHook,
 	readSecretFile,
+	type Smbios,
 	type SnapshotRef,
 	type SnapshotStore,
 	SshNodeOps,
@@ -242,6 +244,11 @@ export interface PveNodeInfraOptions {
 	pool: string;
 	/** Machines poll interval (delete verification); S1 default when unset. */
 	pollMs?: number;
+	/**
+	 * smbios1 `family` of every new machine (`sbxt1:<SBX_TUNNEL_URL>`, S5 section 14): the
+	 * agent's tunnel URL; templates carry no default. Unset: no family.
+	 */
+	family?: string;
 }
 
 /** NodeInfra over S1 `Machines` for one node. */
@@ -284,6 +291,14 @@ export class PveNodeInfra implements NodeInfra {
 			maxMetadataPercent: t.metaMaxPct,
 		});
 		this.#allocator = this.#allocatorFor(0);
+	}
+
+	#smbios(s: InfraSmbios): Smbios {
+		return {
+			uuid: s.uuid,
+			serial: s.serial,
+			...(this.#o.family !== undefined ? { family: this.#o.family } : {}),
+		};
 	}
 
 	get templateVmids(): number[] {
@@ -386,7 +401,7 @@ export class PveNodeInfra implements NodeInfra {
 		return this.#run("create", async () => {
 			const info = await this.#machinesFor(p.templateVmid).create({
 				size: toSize(p.size),
-				smbios: { uuid: p.smbios.uuid, serial: p.smbios.serial },
+				smbios: this.#smbios(p.smbios),
 				ownerId: p.machineId,
 			});
 			return {
@@ -406,7 +421,7 @@ export class PveNodeInfra implements NodeInfra {
 		return this.#run("fork", async () => {
 			const info = await this.#base.fork(this.#snapshotRef(p.snapshot), {
 				...(p.size ? { size: toSize(p.size) } : {}),
-				smbios: { uuid: p.smbios.uuid, serial: p.smbios.serial },
+				smbios: this.#smbios(p.smbios),
 				ownerId: p.machineId,
 			});
 			return {
@@ -751,6 +766,7 @@ export class PveInfraRegistry implements InfraRegistry {
 	readonly #o: PveInfraRegistryOptions;
 	readonly #env: Env;
 	readonly #clients: NodeClientsFactory;
+	readonly #family: string | undefined;
 	readonly #cache = new Map<
 		string,
 		Promise<{ infra: PveNodeInfra; refreshedAt: number }>
@@ -760,6 +776,16 @@ export class PveInfraRegistry implements InfraRegistry {
 		this.#db = pool;
 		this.#o = o;
 		this.#env = o.env ?? process.env;
+		const url = this.#env.SBX_TUNNEL_URL;
+		if (url !== undefined && url !== "") {
+			try {
+				this.#family = familyForTunnelUrl(url);
+			} catch (err) {
+				throw new Error(
+					`SBX_TUNNEL_URL: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
 		this.#clients = o.clients ?? pveClientsFromSecrets(o.secretsDir, this.#env);
 	}
 
@@ -781,6 +807,7 @@ export class PveInfraRegistry implements InfraRegistry {
 			vnet: this.#env.SBX_PVE_VNET ?? "sbx0",
 			pool: this.#env.SBX_PVE_POOL ?? "sandbox",
 			...(this.#o.pollMs !== undefined ? { pollMs: this.#o.pollMs } : {}),
+			...(this.#family !== undefined ? { family: this.#family } : {}),
 		});
 		try {
 			await infra.setTemplates(await this.#templatesOf(nodeId));
