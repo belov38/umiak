@@ -528,7 +528,9 @@ export const sandboxDelete = defineTool({
 		confirm: z
 			.string()
 			.min(1)
-			.regex(/^[\x20-\x7e]+$/, "must be printable ASCII")
+			// No space: an HTTP client trims header values, so " sb_1" would
+			// reach the API as "sb_1" and confirm a delete it should refuse.
+			.regex(/^[\x21-\x7e]+$/, "must be printable ASCII without spaces")
 			.describe("Id of the sandbox to delete, equal to sandbox"),
 	},
 	async handler(args, ctx) {
