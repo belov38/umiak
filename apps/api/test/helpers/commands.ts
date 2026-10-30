@@ -2,10 +2,17 @@
 // stream read line by line while it is open (frames validated against the
 // document), and folding frames into the bytes of each stream.
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import {
+	mkdtempSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { encodeUuid } from "@sbx/auth";
+import { vi } from "vitest";
 import type { Frame } from "../../src/index.ts";
 import { assertConforms, assertRequestConforms } from "./conformance.ts";
 import { recordValidated } from "./conformance-coverage.ts";
@@ -258,6 +265,18 @@ export function sha256(b: Uint8Array | string): string {
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Freezes setTimeout and setInterval (never advanced; I/O, setImmediate and
+ * Date stay real). Whatever still completes did not wait for a timer:
+ * revocation is pushed by NOTIFY, not found by a poll. Undo with
+ * `vi.useRealTimers()`.
+ */
+export function freezeTimers(): void {
+	vi.useFakeTimers({
+		toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+	});
+}
+
+/**
  * The budget of a condition wait. It only bounds a hang: the condition, not
  * the time, is what a test checks, so it is far above what any wait takes
  * on an idle machine and leaves room for a heavily loaded one.
@@ -288,11 +307,42 @@ export async function until<T>(
 }
 
 /**
+ * One directory of gate files per test process. Test workers are often
+ * ended without an exit event, so each new directory also removes gate
+ * directories older than an hour (no test runs that long).
+ */
+let gateDir: string | undefined;
+let gates = 0;
+const GATE_PREFIX = "sbx-gate-";
+
+function removeOldGateDirs(): void {
+	const old = Date.now() - 3_600_000;
+	try {
+		for (const name of readdirSync(tmpdir())) {
+			if (!name.startsWith(GATE_PREFIX)) continue;
+			const dir = join(tmpdir(), name);
+			if (statSync(dir).mtimeMs < old) {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}
+	} catch {
+		// Best effort.
+	}
+}
+
+/**
  * A file the test creates to let a command go on: `shell` waits for it
  * (the FakeAgent runs commands in the host shell), `open()` creates it.
  */
 export function shellGate(): { shell: string; open(): void } {
-	const path = join(mkdtempSync(join(tmpdir(), "sbx-gate-")), "open");
+	if (gateDir === undefined) {
+		removeOldGateDirs();
+		const dir = mkdtempSync(join(tmpdir(), GATE_PREFIX));
+		gateDir = dir;
+		process.once("exit", () => rmSync(dir, { recursive: true, force: true }));
+	}
+	gates += 1;
+	const path = join(gateDir, `open-${gates}`);
 	return {
 		shell: `while [ ! -e '${path}' ]; do sleep 0.01; done`,
 		open: () => writeFileSync(path, ""),

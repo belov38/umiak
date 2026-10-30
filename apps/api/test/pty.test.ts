@@ -28,6 +28,7 @@ import {
 } from "../src/index.ts";
 import {
 	type Any,
+	freezeTimers,
 	type ReadySandbox,
 	readySandbox,
 	sleep,
@@ -681,18 +682,23 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		}
 	});
 
-	it("a key revoked while connected: close 4401 within a second after an error frame", async () => {
+	it("a key revoked while connected: close 4401 after an error frame, pushed by NOTIFY (timers frozen)", async () => {
 		const k = await w.key(["commands:exec"]);
 		const id = await pty({ command: "cat" });
 		const c = connect(connectPath(id), { bearer: k.secret });
 		await until(() => c.texts.length > 0);
+		// Timers frozen: only the NOTIFY can close it (the spec's 1 s holds by
+		// construction); the clock bound is a hang guard.
 		const t0 = Date.now();
-		await w.identity.revokeApiKey(k.id, {});
-		const closed = await c.closed;
-		// NOTIFY-driven with no timer on the way (the spec's 1 s holds by
-		// construction); the bound only catches a regression to polling and
-		// leaves room for a loaded machine's scheduling delays.
-		expect(Date.now() - t0).toBeLessThan(5000);
+		freezeTimers();
+		let closed: Closed;
+		try {
+			await w.identity.revokeApiKey(k.id, {});
+			closed = await c.closed;
+		} finally {
+			vi.useRealTimers();
+		}
+		expect(Date.now() - t0).toBeLessThan(WAIT_MS);
 		expect(closed.code).toBe(4401);
 		expect(c.texts.at(-1)).toMatchObject({
 			type: "error",
@@ -882,6 +888,8 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 	it("ping every pingMs; a peer that never answers is dropped", async () => {
 		const id = await pty({ command: "cat" });
 		fakePingClock();
+		// The server side of each connection sends the pings (ws.ping).
+		const serverPings = vi.spyOn(WebSocket.prototype, "ping");
 		const c = connect(connectPath(id));
 		const mute = connect(connectPath(id), { autoPong: false });
 		await until(() => c.texts.length > 0 && mute.texts.length > 0);
@@ -911,6 +919,21 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		await roundTrip("c");
 		expect(c.ws.readyState).toBe(WebSocket.OPEN);
 		expect(mute.pings).toBe(1);
+
+		// A cycle without any data from the client: only its pong keeps it.
+		const server = (serverPings.mock.contexts as WebSocket[]).find(
+			(ws) => ws.readyState === WebSocket.OPEN,
+		) as WebSocket;
+		expect(server).toBeDefined();
+		const pong = new Promise<void>((r) => server.once("pong", () => r()));
+		vi.advanceTimersByTime(PING_MS);
+		await until(() => c.pings === 3, WAIT_MS, "third ping");
+		await pong;
+		vi.advanceTimersByTime(PING_MS);
+		await until(() => c.pings === 4, WAIT_MS, "fourth ping");
+		expect(server.readyState).toBe(WebSocket.OPEN);
+		expect(c.ws.readyState).toBe(WebSocket.OPEN);
+		serverPings.mockRestore();
 		vi.useRealTimers();
 		await h.request("POST", `${sb.commands}/${id}/kill`, {
 			json: { graceMs: 0 },

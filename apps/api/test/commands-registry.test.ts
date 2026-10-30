@@ -1,13 +1,21 @@
 // StreamRegistry (S7 §5.8, §7.10, S8 C9, Review Focus 4): open streams of
-// a principal are capped, closed with `error unauthorized` within a second
-// of the NOTIFY sbx_identity that revokes the principal, and closed with
+// a principal are capped, closed with `error unauthorized` on the NOTIFY
+// sbx_identity that revokes the principal (no timer on the way), and closed with
 // `reconnect server_shutdown` by closeAll.
 import { randomUUID } from "node:crypto";
 import { type AddressInfo, connect } from "node:net";
 import { PgIdentityStore } from "@sbx/auth";
 import { pgIdentitySeeding } from "@sbx/auth/testing";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	type CloseFrame,
 	createApiServer,
@@ -23,6 +31,7 @@ import {
 } from "../src/testing/index.ts";
 import {
 	type Any,
+	freezeTimers,
 	openStream,
 	type ReadySandbox,
 	readySandbox,
@@ -244,14 +253,6 @@ describe("StreamRegistry", () => {
 	});
 });
 
-/**
- * Revocation reaches open connections by NOTIFY with no timer on the way:
- * the spec's 1 s holds by construction. A test bound only catches a
- * regression to polling; on a loaded machine the scheduling delay alone
- * can approach a second, so the bound is wider than the spec's figure.
- */
-const PUSH_BUDGET_MS = 5_000;
-
 describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 	let db: TestDatabase;
 	let w: ApiWorld;
@@ -267,6 +268,10 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 		await events.whenReady();
 		h = w.harness({ deps: { identityEvents: events } });
 		sb = await readySandbox(w);
+	});
+	afterEach(() => {
+		// A frozen-timer test that failed half way leaves real timers behind.
+		vi.useRealTimers();
 	});
 	afterAll(async () => {
 		await events?.close();
@@ -288,7 +293,7 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 			"commands running",
 		);
 
-	it("a key revoked during an open stream: error unauthorized within 1 s; the command keeps running", async () => {
+	it("a key revoked during an open stream: error unauthorized pushed by NOTIFY (timers frozen); the command keeps running", async () => {
 		const k = await w.key(["commands:exec", "commands:read"]);
 		const gate = shellGate();
 		const s = await openStream(h, "POST", sb.commands, {
@@ -302,13 +307,18 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 		});
 		await other.next();
 
+		// With timers frozen the close can only come from the NOTIFY (the
+		// spec's 1 s holds by construction); the clock bound is a hang guard.
 		const t0 = Date.now();
-		await w.identity.revokeApiKey(k.id, {});
-		const last = (await s.until(
-			(f) => f.type === "error",
-			PUSH_BUDGET_MS,
-		)) as Any;
-		expect(Date.now() - t0).toBeLessThan(PUSH_BUDGET_MS);
+		freezeTimers();
+		let last: Any;
+		try {
+			await w.identity.revokeApiKey(k.id, {});
+			last = await s.until((f) => f.type === "error");
+		} finally {
+			vi.useRealTimers();
+		}
+		expect(Date.now() - t0).toBeLessThan(WAIT_MS);
 		expect(last).toMatchObject({
 			type: "error",
 			code: "unauthorized",
@@ -346,7 +356,7 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 		gate.open();
 	});
 
-	it("a member removed or a user deactivated: their registered streams close within 1 s", async () => {
+	it("a member removed or a user deactivated: their registered streams close on the NOTIFY (timers frozen)", async () => {
 		const seed = pgIdentitySeeding(db.pool);
 		const store = new PgIdentityStore({ pool: db.pool, operatorGroups: [] });
 		const reg = new StreamRegistry({
@@ -360,22 +370,37 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 			const u2 = await seed.seedUser({ email: `${randomUUID()}@e.x` });
 			await seed.addMember(u1, team, "member");
 			await seed.addMember(u2, team, "owner");
-			const closedAt: Record<string, number> = {};
+			const closed = { u1: false, u2: false };
+			let u1Closed = () => {};
+			let u2Closed = () => {};
+			const u1Done = new Promise<void>((r) => {
+				u1Closed = r;
+			});
+			const u2Done = new Promise<void>((r) => {
+				u2Closed = r;
+			});
 			reg.register({ userId: u1, apiKeyId: null, teamId: team }, () => {
-				closedAt.u1 = Date.now();
+				closed.u1 = true;
+				u1Closed();
 			});
 			reg.register({ userId: u2, apiKeyId: null, teamId: team }, () => {
-				closedAt.u2 = Date.now();
+				closed.u2 = true;
+				u2Closed();
 			});
-			let t0 = Date.now();
-			await seed.removeMember(u1, team);
-			await until(() => closedAt.u1 !== undefined, PUSH_BUDGET_MS, "u1");
-			expect(must(closedAt.u1) - t0).toBeLessThan(PUSH_BUDGET_MS);
-			expect(closedAt.u2).toBeUndefined();
-			t0 = Date.now();
-			await seed.setActive(u2, false);
-			await until(() => closedAt.u2 !== undefined, PUSH_BUDGET_MS, "u2");
-			expect(must(closedAt.u2) - t0).toBeLessThan(PUSH_BUDGET_MS);
+			// Timers frozen: only the NOTIFY can close them; the clock bound
+			// is a hang guard.
+			const t0 = Date.now();
+			freezeTimers();
+			try {
+				await seed.removeMember(u1, team);
+				await u1Done;
+				expect(closed.u2).toBe(false);
+				await seed.setActive(u2, false);
+				await u2Done;
+			} finally {
+				vi.useRealTimers();
+			}
+			expect(Date.now() - t0).toBeLessThan(WAIT_MS);
 		} finally {
 			reg.close();
 		}

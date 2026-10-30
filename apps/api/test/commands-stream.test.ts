@@ -230,9 +230,14 @@ describe.skipIf(skipPg())("command streams", () => {
 			const s = await readySandbox(w);
 			const fast = w.harness({ deps: { commandTimings: timings } });
 			const start = await fast.request("POST", s.commands, {
-				json: { command: "printf abc; sleep 2", mode: "detached" },
+				json: { command: "printf abc; sleep 30", mode: "detached" },
 			});
 			const id = (start.body as Any).id;
+			// The output exists before the agent is "lost" (the retry reads it).
+			await until(async () => {
+				const g = await fast.request("GET", `${s.commands}/${id}`);
+				return (g.body as Any).streams.stdout.sizeBytes === 3;
+			});
 			let opens = 0;
 			// Every attach ends at once without exit: no progress, reopened.
 			const restore = patchAttach(s.machineId, async function* () {
