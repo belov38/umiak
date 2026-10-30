@@ -57,6 +57,7 @@ func TestMediaListShowsOnlyOurFiles(t *testing.T) {
 	writeFile(t, filepath.Join(d.imp, "sbx-win.raw"), 40)
 	writeFile(t, filepath.Join(d.imp, "other.qcow2"), 50)
 	writeFile(t, filepath.Join(d.imp, "sbx-note.txt"), 50)
+	writeFile(t, filepath.Join(d.imp, "sbx-a..b.raw"), 50)
 	if err := os.Symlink("/etc/passwd", filepath.Join(d.imp, "sbx-link.img")); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestMediaRemoveRefusesBeforeRemovingAnything(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(d.imp, "sbx-dir.img"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []string{"../x.iso", "foo.iso", "sbx-seed-a.iso", "sbx-dir.img", "sub/sbx-seed-a.iso", "sbx-seed-..iso", "sbx-seed-a.iso/", "", "/etc/passwd", "sbx-seed-UP.iso"} {
+	for _, bad := range []string{"../x.iso", "foo.iso", "sbx-seed-a.iso", "sbx-dir.img", "sub/sbx-seed-a.iso", "sbx-seed-..iso", "sbx-seed-a.iso/", "", "/etc/passwd", "sbx-seed-UP.iso", "sbx-a..b.raw"} {
 		r := h.call(t, "media.remove", map[string]any{"names": []string{"sbx-seed-0192abcd.iso", bad}})
 		if r.OK || r.Error.Code != "forbidden" {
 			t.Errorf("name %q: want forbidden, got %+v", bad, r)

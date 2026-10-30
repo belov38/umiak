@@ -665,6 +665,7 @@ verify_media() {
 		-H "Authorization: PVEAPIToken=sbx@pve!poc=$(cat "$CFG_DIR/pve-token")" \
 		"https://pve:8006/api2/json/access/permissions?path=/storage/local")
 	[[ "$out" == *'"Datastore.AllocateTemplate":1'* ]] || die "media: token lacks Datastore.AllocateTemplate on /storage/local: $out"
+	[[ "$out" != *'"Datastore.Allocate":1'* ]] || die "media: token has Datastore.Allocate on /storage/local, more than the role grants: $out"
 	log "media: token has Datastore.AllocateTemplate on /storage/local"
 }
 

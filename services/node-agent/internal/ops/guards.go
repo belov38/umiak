@@ -13,14 +13,16 @@ import (
 )
 
 var (
+	// VMIDs are written without leading zeros: "vm-0598-disk-0" would parse as 598 but not match a
+	// "base-598-" prefix check.
 	lvNameRe   = regexp.MustCompile(`^[a-z0-9][a-z0-9+_.-]{0,126}$`)
-	baseRe     = regexp.MustCompile(`^base-([0-9]+)-[a-z0-9+_.-]+$`)
-	vmAnyRe    = regexp.MustCompile(`^vm-([0-9]+)-[a-z0-9+_.-]+$`)
-	vmDiskRe   = regexp.MustCompile(`^vm-([0-9]+)-disk-[0-9]+$`)
+	baseRe     = regexp.MustCompile(`^base-([1-9][0-9]*)-[a-z0-9+_.-]+$`)
+	vmAnyRe    = regexp.MustCompile(`^vm-([1-9][0-9]*)-[a-z0-9+_.-]+$`)
+	vmDiskRe   = regexp.MustCompile(`^vm-([1-9][0-9]*)-disk-[0-9]+$`)
 	mediaISORe = regexp.MustCompile(`^sbx-seed-[a-z0-9-]{1,64}\.iso$`)
 	mediaImgRe = regexp.MustCompile(`^sbx-[a-z0-9.+_-]{1,96}\.(qcow2|img|raw)$`)
 	snapLVRe   = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})-([a-z0-9]{1,16})$`)
-	vmTagRe    = regexp.MustCompile(`^sbx-(vm|src)-([0-9]+)$`)
+	vmTagRe    = regexp.MustCompile(`^sbx-(vm|src)-([1-9][0-9]*)$`)
 	snapTagRe  = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})$`)
 	serialRe   = regexp.MustCompile(`^sbx1:[0-9a-fA-F-]{36}:[A-Za-z0-9_-]{43}$`)
 	errBadName = errors.New("invalid LV name")

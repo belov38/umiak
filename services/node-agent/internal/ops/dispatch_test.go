@@ -169,6 +169,13 @@ func TestSnapshotRefusesToOverwriteTemplateDisk(t *testing.T) {
 	if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
 		t.Fatalf("got %+v, created %v", r, h.lvm.created)
 	}
+	// A leading zero must not dodge the template check.
+	r = h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
+		{Origin: "base-598-disk-0", Name: "vm-0598-disk-0", Tags: []string{"sbx", "sbx-vm-0598"}},
+	}})
+	if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
+		t.Fatalf("leading zero: got %+v, created %v", r, h.lvm.created)
+	}
 	// A clone from the same template into a free VMID still works.
 	m := resultMap(t, h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
 		{Origin: "base-598-disk-0", Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},

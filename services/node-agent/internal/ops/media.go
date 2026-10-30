@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // mediaKind is one directory of template builder files and the names allowed in it.
@@ -21,6 +22,11 @@ type mediaKind struct {
 var mediaKinds = []mediaKind{
 	{"iso", mediaISORe, func(s *Server) string { return s.Cfg.IsoDir }},
 	{"import", mediaImgRe, func(s *Server) string { return s.Cfg.ImportDir }},
+}
+
+// matches reports whether name is an allowed file name for this directory.
+func (k mediaKind) matches(name string) bool {
+	return k.re.MatchString(name) && !strings.Contains(name, "..")
 }
 
 // MediaFile is one file in a media.list result.
@@ -41,7 +47,7 @@ func (s *Server) mediaList(_ context.Context, raw json.RawMessage) (any, error) 
 			return nil, err
 		}
 		for _, e := range entries {
-			if !k.re.MatchString(e.Name()) {
+			if !k.matches(e.Name()) {
 				continue
 			}
 			// Lstat, not Stat: a symlink must never be listed as a removable file.
@@ -68,7 +74,7 @@ func (s *Server) mediaRemove(_ context.Context, raw json.RawMessage) (any, error
 	for _, n := range args.Names {
 		path := ""
 		for _, k := range mediaKinds {
-			if k.re.MatchString(n) {
+			if k.matches(n) {
 				path = filepath.Join(k.dir(s), n)
 			}
 		}
