@@ -2,6 +2,7 @@
 // with isError: true and a short key: value text the model can act on.
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { SbxError } from "@sbx/sdk";
+import { safeLine } from "./output/sanitize.ts";
 
 export interface ToolErrorInit {
 	code: string;
@@ -44,6 +45,12 @@ function str(v: unknown): string | undefined {
 	return typeof v === "string" && v !== "" ? v : undefined;
 }
 
+/** A string of the API's details, made safe to show (it may come from the agent). */
+function safeStr(v: unknown): string | undefined {
+	const s = str(v);
+	return s === undefined ? undefined : safeLine(s);
+}
+
 function num(v: unknown): number | undefined {
 	return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
@@ -59,9 +66,9 @@ function validationHint(details: Record<string, unknown>): string {
 	for (const issue of issues.slice(0, 5)) {
 		if (typeof issue !== "object" || issue === null) continue;
 		const { path, message } = issue as Record<string, unknown>;
-		const m = str(message);
+		const m = safeStr(message);
 		if (m === undefined) continue;
-		const p = str(path);
+		const p = safeStr(path);
 		parts.push(p === undefined ? m : `${p}: ${m}`);
 	}
 	return parts.length === 0
@@ -82,7 +89,7 @@ export function hintFor(code: string, ctx: HintContext): string | undefined {
 		case "agent_unavailable":
 			return `the agent in the sandbox does not answer; retry in ${retryIn(details)}.`;
 		case "operation_in_progress": {
-			const op = str(details.operationId);
+			const op = safeStr(details.operationId);
 			return `another operation${op === undefined ? "" : ` (${op})`} is running on this sandbox; retry in ${retryIn(details)}.`;
 		}
 		case "desktop_not_ready":
@@ -94,7 +101,7 @@ export function hintFor(code: string, ctx: HintContext): string | undefined {
 		case "rate_limited":
 			return `too many requests; retry in ${retryIn(details)}.`;
 		case "forbidden": {
-			const scope = str(details.requiredScope);
+			const scope = safeStr(details.requiredScope);
 			return scope === undefined
 				? undefined
 				: `this key lacks the scope ${scope}; ask a human to grant it.`;
@@ -121,7 +128,7 @@ export function hintFor(code: string, ctx: HintContext): string | undefined {
 			return "this sandbox has no desktop; use a template with the desktop capability.";
 		case "invalid_action": {
 			const index = num(details.index);
-			const reason = str(details.reason);
+			const reason = safeStr(details.reason);
 			return `${index === undefined ? "an action" : `action ${index}`} is invalid${reason === undefined ? "" : ` (${reason})`}; nothing was executed. Fix the action list and call again.`;
 		}
 		case "action_failed": {
@@ -154,10 +161,6 @@ function errorName(err: unknown): string | undefined {
 	return typeof err === "object" && err !== null && "name" in err
 		? str((err as { name: unknown }).name)
 		: undefined;
-}
-
-function oneLine(s: string): string {
-	return s.replace(/\s*[\r\n]+\s*/g, " ");
 }
 
 function fieldsOf(err: unknown): {
@@ -242,17 +245,20 @@ export function errorResult(
 		});
 	const idempotencyKey = fields.idempotencyKey ?? extra.idempotencyKey;
 
+	// Every value may carry API or agent text: one safe line each, and the
+	// message capped (the hint is built here from capped parts).
 	const lines = [
-		`error: ${oneLine(fields.code)}`,
-		`message: ${oneLine(fields.message)}`,
+		`error: ${safeLine(fields.code)}`,
+		`message: ${safeLine(fields.message)}`,
 		`retryable: ${fields.retryable}`,
 	];
 	if (fields.retryAfterSeconds !== undefined)
 		lines.push(`retry_after: ${fields.retryAfterSeconds}`);
-	if (hint !== undefined) lines.push(`hint: ${oneLine(hint)}`);
+	if (hint !== undefined)
+		lines.push(`hint: ${safeLine(hint, Number.POSITIVE_INFINITY)}`);
 	if (idempotencyKey !== undefined)
-		lines.push(`idempotency_key: ${oneLine(idempotencyKey)}`);
+		lines.push(`idempotency_key: ${safeLine(idempotencyKey)}`);
 	if (fields.requestId !== undefined)
-		lines.push(`request_id: ${oneLine(fields.requestId)}`);
+		lines.push(`request_id: ${safeLine(fields.requestId)}`);
 	return { content: [{ type: "text", text: lines.join("\n") }], isError: true };
 }

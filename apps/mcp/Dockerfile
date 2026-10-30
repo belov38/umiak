@@ -41,5 +41,5 @@ ENV NODE_ENV=production
 USER node
 # main (/mcp, metadata), ops (/metrics, /healthz, /readyz)
 EXPOSE 8080 9090
-# SIGTERM: graceful stop within 10 s (compose stop_grace_period, pod grace 30 s).
+# SIGTERM: graceful stop within 25 s (compose stop_grace_period and pod grace 30 s).
 CMD ["node", "apps/mcp/src/main.ts"]

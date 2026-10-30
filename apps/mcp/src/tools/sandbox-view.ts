@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import { type OperationData, type SandboxData, SbxError } from "@sbx/sdk";
 import type { ToolContext } from "../context.ts";
 import { toolText } from "../output/result.ts";
+import { errorView } from "./view.ts";
 
 export type WaitTarget = "ready" | "stopped";
 
@@ -47,7 +48,7 @@ export function sandboxView(s: SandboxData): Record<string, unknown> {
 		idle_timeout_seconds: s.idleTimeoutSeconds,
 		active_operation:
 			s.activeOperation === null ? null : operationView(s.activeOperation),
-		error: s.error,
+		error: errorView(s.error),
 		endpoints: {
 			port_url_template: endpoints.portUrlTemplate,
 			ssh: endpoints.ssh,

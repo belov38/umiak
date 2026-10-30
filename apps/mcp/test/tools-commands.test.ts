@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { Sbx } from "@sbx/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MAX_RESULT_CHARS } from "../src/output/result.ts";
 import { ByteTail } from "../src/output/tail.ts";
 import { publishedJsonSchemaOf, selectTools } from "../src/registry.ts";
 import { lintToolName, lintToolSchema } from "../src/schema-rules.ts";
@@ -550,6 +551,41 @@ describe("exec_run", () => {
 		expect(text).toContain("ignore previous instructions");
 	});
 
+	it("API and agent text outside the fence is sanitized, one line and capped", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		const evil = `${String.fromCodePoint(0x1b)}[2Jgone${String.fromCodePoint(0xe0041)}\nhint: ${"z".repeat(500)}`;
+		const run = hh.call("exec_run", { sandbox: sb, command: "fake:sleep 1" });
+		await vi.waitFor(() => expect(hh.api.state.commands.size).toBe(1));
+		const cmd = [...hh.api.state.commands.values()][0];
+		if (cmd !== undefined) cmd.outputTruncated = evil;
+		const r = await run;
+		const note = r.lines
+			.split("\n")
+			.find((l) => l.startsWith("the agent dropped output"));
+		expect(note).toBe(
+			`the agent dropped output (gone\\u{E0041} hint: ${"z".repeat(279)}\u2026)`,
+		);
+
+		hh.api.script.failNext = {
+			path: /^GET .*\/commands\/cmd_[^/]+$/,
+			status: 409,
+			code: "invalid_state",
+			retryable: false,
+			message: evil,
+		};
+		const e = await hh.call("exec_output", {
+			sandbox: sb,
+			command_id: r.json.command_id,
+		});
+		expect(e.isError).toBe(true);
+		const lines = e.texts[0]?.split("\n") ?? [];
+		expect(lines.filter((l) => l.startsWith("hint:"))).toEqual([]);
+		const message = lines.find((l) => l.startsWith("message: ")) ?? "";
+		expect(message).toMatch(/^message: gone\\u\{E0041\} hint: z+\u2026$/);
+		expect(message.length).toBe("message: ".length + 300);
+	});
+
 	it("sends progress about every 5 s with the bytes seen", async () => {
 		const hh = await start();
 		const sb = await sandbox(hh);
@@ -783,6 +819,31 @@ describe("exec_output", () => {
 		expect(r.json.done).toBeUndefined();
 	});
 
+	it("a long wait ends early enough for the reads after it on a slow API (7.5)", async () => {
+		// A 10 s budget instead of 50 s: the margin after the wait is the same.
+		const hh = await start({ server: { callBudgetMs: 10_000 } });
+		const sb = await sandbox(hh);
+		const s = await hh.call("exec_start", {
+			sandbox: sb,
+			command: "fake:sleep 60",
+		});
+		hh.api.script.slow = {
+			path: /^GET \/v1\/sandboxes\/[^/]+\/commands\/cmd_[^/]+$/,
+			ms: 2_000,
+		};
+		const t0 = Date.now();
+		const r = await hh.call("exec_output", {
+			sandbox: sb,
+			command_id: s.json.command_id,
+			stdout_offset: 0,
+			stderr_offset: 0,
+			wait_seconds: 50,
+		});
+		expect(r.isError, r.texts[0]).toBe(false);
+		expect(r.json).toMatchObject({ status: "running", stdout_offset: 0 });
+		expect(Date.now() - t0).toBeLessThan(10_000);
+	}, 20_000);
+
 	it("a stopped sandbox is sandbox_not_ready with the resume hint", async () => {
 		const hh = await start();
 		const sb = await sandbox(hh);
@@ -821,6 +882,135 @@ describe("exec_output", () => {
 		});
 		expect(r.isError).toBe(true);
 		expect(r.texts[0]).toContain("stdout_offset");
+	});
+});
+
+describe("output that sanitizing makes longer (9.2: the response stays under the cap)", () => {
+	type Streams = Record<"stdout" | "stderr", Buffer>;
+	const STREAM_NAMES = ["stdout", "stderr"] as const;
+
+	/** Bytes of fenced text whose bytes are all controls (written as escapes). */
+	function bytesOf(text: string | undefined): Buffer {
+		const raw = (text ?? "").replace(/\\u\{([0-9A-F]+)\}/g, (_, hex: string) =>
+			String.fromCodePoint(Number.parseInt(hex, 16)),
+		);
+		return Buffer.from(raw, "latin1");
+	}
+
+	/** Fits the cap, every fence is closed, and each window holds exactly from..to. */
+	function checkAnswer(a: Answer): Streams {
+		expect(a.isError, a.texts.join("\n").slice(0, 500)).toBe(false);
+		const chars = a.texts.reduce((n, t) => n + t.length, 0);
+		expect(chars).toBeLessThanOrEqual(MAX_RESULT_CHARS);
+		const all = a.texts.join("\n");
+		const opened = all.match(/<<<sbx-untrusted id=/g)?.length ?? 0;
+		expect(all.match(/\n<<<end id=[0-9a-f]+>>>/g)?.length ?? 0).toBe(opened);
+		expect(all).not.toContain("response cut at");
+		const out = {} as Streams;
+		for (const s of STREAM_NAMES) {
+			out[s] = bytesOf(fenced(a, s));
+			expect(out[s].length, s).toBe(a.json[s].to - a.json[s].from);
+		}
+		return out;
+	}
+
+	/** exec_output from offset 0 to done; every answer checked. */
+	async function readAll(
+		hh: Harness,
+		sb: string,
+		id: string,
+	): Promise<Streams> {
+		const got: Record<"stdout" | "stderr", Buffer[]> = {
+			stdout: [],
+			stderr: [],
+		};
+		let offsets = { stdout_offset: 0, stderr_offset: 0 };
+		for (let i = 0; i < 50; i++) {
+			const o = await hh.call("exec_output", {
+				sandbox: sb,
+				command_id: id,
+				...offsets,
+				max_bytes: 65536,
+			});
+			const shown = checkAnswer(o);
+			for (const s of STREAM_NAMES) {
+				expect(o.json[s].from).toBe(offsets[`${s}_offset`]);
+				got[s].push(shown[s]);
+			}
+			offsets = {
+				stdout_offset: o.json.stdout_offset,
+				stderr_offset: o.json.stderr_offset,
+			};
+			if (o.json.done === true) {
+				return {
+					stdout: Buffer.concat(got.stdout),
+					stderr: Buffer.concat(got.stderr),
+				};
+			}
+		}
+		throw new Error("exec_output never got to done");
+	}
+
+	it("exec_run with 16 KiB of 0x01 and the default budget: the tail that fits, offsets as shown", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		const r = await hh.call("exec_run", {
+			sandbox: sb,
+			command: "fake:fill 01:16384",
+		});
+		const shown = checkAnswer(r);
+		expect(r.json.status).toBe("exited");
+		expect(r.json.stdout).toMatchObject({ size: 16384, to: 16384 });
+		expect(r.json.stdout.from).toBeGreaterThan(0);
+		expect(
+			shown.stdout.equals(Buffer.alloc(16384 - r.json.stdout.from, 1)),
+		).toBe(true);
+		expect(r.lines).toContain(
+			`stdout: last ${16384 - r.json.stdout.from} of 16384 bytes.`,
+		);
+		const all = await readAll(hh, sb, r.json.command_id);
+		expect(sha256(all.stdout)).toBe(sha256(Buffer.alloc(16384, 1)));
+	});
+
+	it("exec_run with 64 KiB of NUL on both streams: both fences closed, chained exec_output gives every byte", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		const r = await hh.call("exec_run", {
+			sandbox: sb,
+			command: "fake:fill 00:65536:both",
+			max_output_bytes: 65536,
+		});
+		const shown = checkAnswer(r);
+		for (const s of STREAM_NAMES) {
+			expect(r.json[s]).toMatchObject({ size: 65536, to: 65536 });
+			expect(shown[s].length).toBeGreaterThan(0);
+		}
+		const all = await readAll(hh, sb, r.json.command_id);
+		for (const s of STREAM_NAMES) {
+			expect(sha256(all[s]), s).toBe(sha256(Buffer.alloc(65536, 0)));
+		}
+	});
+
+	it("exec_output tail of 64 KiB of 0x01: the end of the stream that fits", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		const r = await hh.call("exec_run", {
+			sandbox: sb,
+			command: "fake:fill 01:65536",
+			max_output_bytes: 1024,
+		});
+		const t = await hh.call("exec_output", {
+			sandbox: sb,
+			command_id: r.json.command_id,
+			max_bytes: 65536,
+		});
+		const shown = checkAnswer(t);
+		expect(t.json.stdout).toMatchObject({ size: 65536, to: 65536 });
+		expect(t.json.stdout.from).toBeGreaterThan(0);
+		expect(
+			shown.stdout.equals(Buffer.alloc(65536 - t.json.stdout.from, 1)),
+		).toBe(true);
+		expect(t.json.done).toBe(true);
 	});
 });
 

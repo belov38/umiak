@@ -72,7 +72,11 @@ export interface FakeScript {
 		status: number;
 		code: string;
 		retryable: boolean;
+		/** Default: `injected failure <code>`. */
+		message?: string;
 	};
+	/** Every request whose "METHOD /path" matches answers this much later. */
+	slow?: { path: RegExp; ms: number };
 	/**
 	 * Called by GET /files/content after the file is read and before the
 	 * answer is sent: a test changes the file in between (a race with a reader

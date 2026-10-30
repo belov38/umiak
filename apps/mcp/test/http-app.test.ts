@@ -488,6 +488,32 @@ describe("health and metrics", () => {
 		expect(late.headers["retry-after"]).toBe("1");
 	});
 
+	it("drain: /readyz and new /mcp requests are 503 at once; the call in flight still answers", async () => {
+		h = await startHttp();
+		const s = h;
+		const c = await h.connect(FAKE_TOKENS.full);
+		const sb = await readySandbox(c);
+		const call = c.client.callTool({
+			name: "exec_run",
+			arguments: { sandbox: sb, command: "fake:sleep 30", wait_seconds: 2 },
+		});
+		await vi.waitFor(() => expect(s.api.state.commands.size).toBe(1));
+		h.http.drain();
+		expect(h.http.ready()).toBe(false);
+		const ready = await h.raw("GET", "/readyz");
+		expect(ready.status).toBe(503);
+		expect(JSON.parse(ready.text).reasons).toEqual(["shutting_down"]);
+		const late = await h.raw("POST", "/mcp", {
+			headers: { ...json, authorization: `Bearer ${FAKE_TOKENS.full}` },
+			body: LIST,
+		});
+		expect(late.status).toBe(503);
+		expect(late.headers["retry-after"]).toBe("1");
+		const r = answerOf((await call) as never);
+		expect(r.isError).toBe(false);
+		expect(r.json.status).toBe("running");
+	});
+
 	it("exposes call counters and 401s on the ops /metrics", async () => {
 		h = await startHttp();
 		const c = await h.connect(FAKE_TOKENS.full);

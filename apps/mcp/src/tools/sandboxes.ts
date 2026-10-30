@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
 import { prune, toolText } from "../output/result.ts";
+import { safeLine } from "../output/sanitize.ts";
 import { defineTool } from "../registry.ts";
 import { keyFor, withUnknownOutcome } from "./keyed.ts";
 import {
@@ -97,7 +98,7 @@ async function finishAction(
 			// Cancel, 401 and bugs go to the call wrapper.
 			if (!(err instanceof SbxError) || err.status === 401) throw err;
 			notes.push(
-				`waiting for the sandbox failed (${err.code}): ${err.message}`,
+				`waiting for the sandbox failed (${safeLine(err.code)}): ${safeLine(err.message)}`,
 			);
 		}
 	}

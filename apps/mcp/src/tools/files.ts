@@ -9,10 +9,10 @@ import { z } from "zod";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
 import { fenceUntrusted } from "../output/fence.ts";
+import { fittingWindow } from "../output/fit.ts";
 import { IMAGE_MAX_BYTES, sniffImage } from "../output/image.ts";
 import { toolText } from "../output/result.ts";
 import { sanitizeForLlm } from "../output/sanitize.ts";
-import { decodeWindow, type Window } from "../output/utf8.ts";
 import { defineTool } from "../registry.ts";
 import { compact } from "./view.ts";
 
@@ -227,27 +227,18 @@ function checkOffset(offset: number, part: Part): void {
 	}
 }
 
-/**
- * Decodes a text window, shortened (on a character boundary) until its
- * sanitized text fits TEXT_CHARS_BUDGET, so `to` is what the model gets.
- */
-function fittingWindow(part: Part): Window {
-	let n = part.bytes.length;
-	for (;;) {
-		const w = decodeWindow(part.bytes.subarray(0, n), part.start, part.size, {
-			atStart: part.start === 0,
-			final: part.start + n >= part.size,
-		});
-		const chars = sanitizeForLlm(w.text).length;
-		if (chars <= TEXT_CHARS_BUDGET) return w;
-		// Proportional, with a margin; always shorter than before.
-		n = Math.min(n - 1, Math.floor((n * TEXT_CHARS_BUDGET * 0.9) / chars));
-	}
-}
-
 function textAnswer(f: FileRef, part: Part, offset: number): CallToolResult {
 	checkOffset(offset, part);
-	const w = fittingWindow(part);
+	const w = fittingWindow(
+		{
+			bytes: part.bytes,
+			offset: part.start,
+			size: part.size,
+			atStart: part.start === 0,
+			final: part.start + part.bytes.length >= part.size,
+		},
+		TEXT_CHARS_BUDGET,
+	);
 	const notes = continueNote(w.to, part.size);
 	return toolText(windowHeader(f, w.from, w.to, part), [
 		...(notes.length > 0 ? [notes.join("\n")] : []),

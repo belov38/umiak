@@ -206,15 +206,22 @@ EOF
 # with api 404 route_not_found; either proves DNS, TLS and routing. Serve with the system trust
 # store: oauth2-proxy on 8443 (a sign-in redirect), Keycloak on 10000, and /v1/meta of the api
 # public listener on 8443.
-# check name url [curl args]: logs the HTTP status and the body.
+# check name url [curl args]: logs the HTTP status and the body; any HTTP answer passes
+# (CHECK_CODE keeps the status).
 check() {
-	local name=$1 url=$2 out code
+	local name=$1 url=$2 out
 	shift 2
 	out=$(curl -sS --max-time 30 -w '\n%{http_code}' "$@" "$url" 2>&1) || true
-	code=${out##*$'\n'}
-	log "$name $url: HTTP $code ${out%$'\n'*}"
-	[[ "$code" =~ ^[0-9]{3}$ && "$code" != 000 ]]
+	CHECK_CODE=${out##*$'\n'}
+	log "$name $url: HTTP $CHECK_CODE ${out%$'\n'*}"
+	[[ "$CHECK_CODE" =~ ^[0-9]{3}$ && "$CHECK_CODE" != 000 ]]
 }
+# check_ok name url [curl args]: like check, but only HTTP 200 passes (a 421 for a Host the
+# server does not take, or a 404 of a missing Serve path, must not).
+check_ok() { check "$@" && [[ "$CHECK_CODE" == 200 ]]; }
+# Protected Resource Metadata of MCP_URL (RFC 9728): the well-known prefix before its path.
+MCP_ORIGIN=$(sed -E 's#^(https?://[^/]+).*#\1#' <<<"$MCP_URL")
+MCP_PRM_URL="$MCP_ORIGIN/.well-known/oauth-protected-resource${MCP_URL#"$MCP_ORIGIN"}"
 check tunnel "https://$TUNNEL_HOST/v1/connect" --cacert "$CA_DIR/ca.pem" ||
 	log "WARNING: the tunnel host is not reachable from this Mac (outside the LAN?)"
 check preview "https://x-y-z-3000.$PORT_DOMAIN/" --cacert "$CA_DIR/ca.pem" ||
@@ -225,6 +232,6 @@ for port in $(tr ' ' '\n' <<<"$SERVE" | cut -d: -f1 | sort -u); do
 done
 check api "$API_URL/v1/meta" ||
 	log "WARNING: the api is not reachable through Tailscale Serve from this Mac"
-check mcp "https://$TS_NAME:8443/.well-known/oauth-protected-resource/mcp" ||
+check_ok mcp "$MCP_PRM_URL" ||
 	log "WARNING: the MCP server is not reachable through Tailscale Serve from this Mac"
 log "deployed"

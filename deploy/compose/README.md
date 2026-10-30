@@ -335,7 +335,7 @@ curl -s http://localhost:8090/.well-known/oauth-protected-resource/mcp    # auth
 
 - Проверка `Host`: допустимы host и hostname из `SBX_MCP_PUBLIC_URL` (по умолчанию `localhost:8090`) и значения `SBX_MCP_ALLOWED_HOSTS` через запятую (по умолчанию в стеке `127.0.0.1:8090`). Другой `Host` — `421`. Запрос с `Origin` отклоняется (`403`), пока origin не в `SBX_MCP_ALLOWED_ORIGINS` (в стеке пусто: клиенты MCP — не браузеры).
 - За TLS-прокси задайте `SBX_MCP_PUBLIC_URL` (`https://…/mcp`); прокси отдаёт сервису `/mcp` и `/.well-known/oauth-protected-resource/mcp` (у `api.<домен>` в проде — те же пути, S11 §6.2). Пример — `infra/dev-cp/README.md`, «S11 MCP behind Tailscale Serve».
-- Логи: `SBX_MCP_LOG_LEVEL` (по умолчанию `info`). Остановка по SIGTERM за 10 s.
+- Логи: `SBX_MCP_LOG_LEVEL` (по умолчанию `info`). Остановка по SIGTERM за 25 s (`stop_grace_period: 30s`).
 
 ## Как добавить сервис
 

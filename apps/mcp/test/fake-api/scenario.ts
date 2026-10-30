@@ -7,6 +7,8 @@
 //                                                 characters and a forged
 //                                                 fence end marker
 //   fake:stderr <text>                            text on stderr, exit 0
+//   fake:fill <hex>:<bytes>[:stdout|stderr|both]  `bytes` copies of one byte
+//                                                 (e.g. 01 or 00), at once
 //   anything else                                 echo: prints the line
 //
 // `fake:emit` writes the pattern EMIT_UNIT repeated and cut at exactly
@@ -72,6 +74,22 @@ export function parseScenario(line: string): Scenario {
 				atMs: steps.length > 0 ? (steps.length - 1) * delay : 0,
 				code: 0,
 			},
+		};
+	}
+	const fill =
+		/^fake:fill\s+([0-9a-f]{2}):(\d+)(?::(stdout|stderr|both))?$/.exec(text);
+	if (fill) {
+		const data = Buffer.alloc(
+			Number(fill[2]),
+			Number.parseInt(fill[1] ?? "", 16),
+		);
+		const streams: ("stdout" | "stderr")[] =
+			fill[3] === "both"
+				? ["stdout", "stderr"]
+				: [fill[3] === "stderr" ? "stderr" : "stdout"];
+		return {
+			steps: streams.map((stream) => ({ atMs: 0, stream, data })),
+			exit: { atMs: 0, code: 0 },
 		};
 	}
 	const sleep = /^fake:sleep\s+(\d+(?:\.\d+)?)$/.exec(text);

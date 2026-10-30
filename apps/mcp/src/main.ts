@@ -1,9 +1,9 @@
 // Remote MCP server process: `node src/main.ts`. Reads the environment
 // (settings.ts), serves /mcp on SBX_MCP_PORT (8080) and /metrics on
-// SBX_MCP_OPS_PORT (9090), and stops on SIGTERM/SIGINT within 10 s:
-// readiness goes false, new connections stop, calls in flight get the rest
-// of the grace period, then whatever still hangs is cut (clients retry,
-// S11 6.2).
+// SBX_MCP_OPS_PORT (9090), and stops on SIGTERM/SIGINT within 25 s:
+// readiness goes false and new requests get 503, new connections stop, calls
+// in flight get the rest of the grace period, then whatever still hangs is
+// cut (clients retry, S11 6.2).
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
@@ -13,8 +13,18 @@ import { createLogger, type Logger } from "./log.ts";
 import { Metrics } from "./metrics.ts";
 import { loadSettings, type Settings } from "./settings.ts";
 
-/** Upper bound of a graceful stop, from the signal to the resolved close. */
-export const SHUTDOWN_GRACE_MS = 10_000;
+/**
+ * Upper bound of a graceful stop, from the signal to the resolved close: most
+ * calls (up to 50 s) end in it, and it stays under the 30 s the container
+ * and the pod get (compose stop_grace_period).
+ */
+export const SHUTDOWN_GRACE_MS = 25_000;
+/** A request (headers and body) must arrive within this (S11 6.2: 60 s). */
+export const REQUEST_TIMEOUT_MS = 60_000;
+/** The request headers must arrive within this. */
+export const HEADERS_TIMEOUT_MS = 15_000;
+/** How often Node checks the two limits above, at most. */
+const TIMEOUT_CHECK_MS = 5_000;
 
 export interface RunningMcp {
 	port: number;
@@ -22,9 +32,30 @@ export interface RunningMcp {
 	close(): Promise<void>;
 }
 
-function listen(app: Hono, port: number): Promise<Server> {
+interface Timeouts {
+	requestTimeoutMs: number;
+	headersTimeoutMs: number;
+}
+
+function listen(app: Hono, port: number, t: Timeouts): Promise<Server> {
 	return new Promise((resolve, reject) => {
-		const s = serve({ fetch: app.fetch, port }, () => resolve(s as Server));
+		const s = serve(
+			{
+				fetch: app.fetch,
+				port,
+				// Only the request is limited: the answer of a call (SSE up to
+				// 50 s) is not. A slow request gets 408 and its connection closes.
+				serverOptions: {
+					requestTimeout: t.requestTimeoutMs,
+					headersTimeout: t.headersTimeoutMs,
+					connectionsCheckingInterval: Math.min(
+						TIMEOUT_CHECK_MS,
+						Math.ceil(t.headersTimeoutMs / 2),
+					),
+				},
+			},
+			() => resolve(s as Server),
+		);
 		s.once("error", reject);
 	});
 }
@@ -50,8 +81,18 @@ function closed(s: Server, deadline: number): Promise<void> {
 
 export async function startMcp(
 	settings: Settings,
-	o: { log: Logger; graceMs?: number },
+	o: {
+		log: Logger;
+		graceMs?: number;
+		/** Tests: shorter request limits. */
+		requestTimeoutMs?: number;
+		headersTimeoutMs?: number;
+	},
 ): Promise<RunningMcp> {
+	const timeouts: Timeouts = {
+		requestTimeoutMs: o.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
+		headersTimeoutMs: o.headersTimeoutMs ?? HEADERS_TIMEOUT_MS,
+	};
 	const metrics = new Metrics();
 	const http = createHttpApp({
 		apiUrl: settings.apiUrl,
@@ -63,10 +104,11 @@ export async function startMcp(
 		metrics,
 	});
 	let stopping = false;
-	const main = await listen(http.app, settings.port);
+	const main = await listen(http.app, settings.port, timeouts);
 	const ops = await listen(
 		createOpsApp({ metrics, ready: () => !stopping && http.ready() }),
 		settings.opsPort,
+		timeouts,
 	);
 	const port = (main.address() as AddressInfo).port;
 	const opsPort = (ops.address() as AddressInfo).port;

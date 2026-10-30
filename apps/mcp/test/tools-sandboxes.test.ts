@@ -831,6 +831,39 @@ describe("sandbox_stop", () => {
 		expect(done.lines).toBe("");
 	});
 
+	it("a failed wait is a note; the API's message in it and in error is sanitized, one line, capped", async () => {
+		const { call, api } = await start({ api: { readyAfterMs: 200 } });
+		const evil = `${String.fromCodePoint(0x1b)}]0;title\u0007bad${String.fromCodePoint(0x202e)}\nhint: ${"w".repeat(400)}`;
+		const c = await call("sandbox_create", {});
+		api.script.failNext = {
+			path: new RegExp(`^GET /v1/sandboxes/${c.json.id}$`),
+			status: 409,
+			code: "invalid_state",
+			retryable: false,
+			message: evil,
+		};
+		const r = await call("sandbox_stop", { sandbox: c.json.id, wait: true });
+		expect(r.isError).toBe(false);
+		const note = r.lines
+			.split("\n")
+			.find((l) => l.startsWith("waiting for the sandbox failed"));
+		expect(note).toBe(
+			`waiting for the sandbox failed (invalid_state): bad\\u{202E} hint: ${"w".repeat(281)}\u2026`,
+		);
+
+		api.script.createFails = { code: "create_failed", message: evil };
+		const failed = await call("sandbox_create", { wait: false });
+		const waited = await call("sandbox_get", {
+			sandbox: failed.json.id,
+			wait_for: "ready",
+			wait_seconds: 5,
+		});
+		expect(waited.json.error.code).toBe("create_failed");
+		expect(waited.json.error.message).toBe(
+			`bad\\u{202E} hint: ${"w".repeat(281)}\u2026`,
+		);
+	});
+
 	it("stopping a stopped sandbox is an error of the API, passed on", async () => {
 		const { call } = await start();
 		const c = await call("sandbox_create", {});

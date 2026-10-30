@@ -54,3 +54,25 @@ export function sanitizeForLlm(text: string): string {
 	const body = bom ? plain.slice(1) : plain;
 	return (bom ? BOM : "") + body.replace(UNSAFE, visible);
 }
+
+/** Longest API or agent message shown outside a fence (S11 7.6, 11.3). */
+export const MESSAGE_MAX_CHARS = 300;
+
+// Line breaks left after sanitizing: newline and the Unicode line and
+// paragraph separators, with the blanks around them.
+const LINE_BREAKS = /\s*[\n\u2028\u2029]+\s*/g;
+
+/**
+ * Text from the API or the sandbox agent that is shown outside a fence (an
+ * error message, a reason, a note): sanitized, folded to one line so it
+ * cannot forge a `hint:` line, and cut to `max` characters with "…".
+ */
+export function safeLine(text: string, max = MESSAGE_MAX_CHARS): string {
+	const line = sanitizeForLlm(text).replace(LINE_BREAKS, " ");
+	if (line.length <= max) return line;
+	let end = max - 1;
+	const last = line.charCodeAt(end - 1);
+	// Do not leave half of a surrogate pair at the cut.
+	if (last >= 0xd800 && last <= 0xdbff) end--;
+	return `${line.slice(0, end)}…`;
+}

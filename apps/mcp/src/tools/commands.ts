@@ -15,9 +15,11 @@ import { RESPONSE_MARGIN_MS } from "../deadline.ts";
 import { hintFor, ToolError } from "../errors.ts";
 import { splitBudget, truncationNote } from "../output/budget.ts";
 import { fenceUntrusted } from "../output/fence.ts";
+import { type ByteSpan, fittingWindow, shownChars } from "../output/fit.ts";
 import { toolText } from "../output/result.ts";
+import { safeLine } from "../output/sanitize.ts";
 import { ByteTail } from "../output/tail.ts";
-import { decodeWindow, type Window } from "../output/utf8.ts";
+import type { Window } from "../output/utf8.ts";
 import { defineTool } from "../registry.ts";
 import {
 	keyFor,
@@ -42,6 +44,12 @@ export const DEFAULT_OUTPUT_BYTES = 16_384;
 export const MAX_OUTPUT_BYTES = 65_536;
 /** Below this a window could hold nothing but a split character. */
 const MIN_OUTPUT_BYTES = 1_024;
+/**
+ * Sanitized characters of the fenced output, both streams together: control
+ * bytes are written as escapes, so the byte windows are shortened until they
+ * fit this (the header and notes come on top, under the 80 000 of a response).
+ */
+const OUTPUT_CHARS_BUDGET = 70_000;
 const DEFAULT_RUN_TIMEOUT_SECONDS = 600;
 const DEFAULT_RUN_WAIT_SECONDS = 30;
 /** stdio cancel of exec_run: SIGTERM, then SIGKILL after this (S11 10.2). */
@@ -53,6 +61,12 @@ const PROGRESS_EVERY_MS = 5_000;
 const STARTED_GRACE_MS = 1_000;
 /** exec_output keeps reading this long after the first new chunk. */
 const SETTLE_MS = 500;
+/**
+ * exec_output ends its wait this long before the deadline: up to three reads
+ * follow it (the status, then each stream), and a slow API must not turn the
+ * answer into deadline_exceeded.
+ */
+const READS_MARGIN_MS = 5_000;
 const LIST_COMMAND_CHARS = 200;
 
 type Stream = "stdout" | "stderr";
@@ -109,6 +123,30 @@ function streamView(w: Window, availableFrom?: number) {
 		from: w.from,
 		to: w.to,
 		...(availableFrom === undefined ? {} : { available_from: availableFrom }),
+	};
+}
+
+/**
+ * Decodes both streams and shortens them on a character boundary until the
+ * sanitized text fits OUTPUT_CHARS_BUDGET, split like the byte budget: from
+ * the start for a tail, from the end when reading forward. Offsets then match
+ * what the model gets.
+ */
+function fitStreams(
+	spans: Record<Stream, ByteSpan>,
+	keep: "head" | "tail",
+): Record<Stream, Window> {
+	const full = {
+		stdout: fittingWindow(spans.stdout, Number.POSITIVE_INFINITY, keep),
+		stderr: fittingWindow(spans.stderr, Number.POSITIVE_INFINITY, keep),
+	};
+	const chars = splitBudget(OUTPUT_CHARS_BUDGET, {
+		stdout: shownChars(full.stdout),
+		stderr: shownChars(full.stderr),
+	});
+	return {
+		stdout: fittingWindow(spans.stdout, chars.stdout, keep),
+		stderr: fittingWindow(spans.stderr, chars.stderr, keep),
 	};
 }
 
@@ -339,16 +377,22 @@ function runAnswer(
 		stderr: tails.stderr.to - tails.stderr.from,
 	};
 	const budget = splitBudget(max, held);
-	const windows = {} as Record<Stream, Window>;
-	for (const s of STREAMS) {
+	const span = (s: Stream): ByteSpan => {
 		const all = tails[s].bytes();
 		const take = all.subarray(all.length - budget[s]);
 		const from = tails[s].to - take.length;
-		windows[s] = decodeWindow(take, from, tails[s].to, {
+		return {
+			bytes: take,
+			offset: from,
+			size: tails[s].to,
 			atStart: from === 0,
 			final: o.exit !== undefined,
-		});
-	}
+		};
+	};
+	const windows = fitStreams(
+		{ stdout: span("stdout"), stderr: span("stderr") },
+		"tail",
+	);
 	const notes: string[] = [];
 	if (o.replayed) notes.push(REPLAYED_LINE);
 	for (const s of STREAMS) {
@@ -371,7 +415,9 @@ function runAnswer(
 		header.stderr_offset = offsets.stderr;
 		notes.push(continueHint(id, offsets));
 	} else if (o.exit.outputTruncated !== null) {
-		notes.push(`the agent dropped output (${o.exit.outputTruncated})`);
+		notes.push(
+			`the agent dropped output (${safeLine(o.exit.outputTruncated)})`,
+		);
 	}
 	if (o.replayed) header.replayed = true;
 	header.idempotency_key = o.modelKey;
@@ -590,8 +636,17 @@ export const execOutput = defineTool({
 			.describe("Seconds to wait (default 0)"),
 	},
 	async handler(args, ctx) {
-		// The wait is measured from the start of the call, requests included.
-		const waitEndsAt = Date.now() + ctx.deadline.waitMs(args.wait_seconds ?? 0);
+		// The wait is measured from the start of the call, requests included,
+		// and ends early enough for the reads after it (S11 7.5).
+		const waitEndsAt =
+			Date.now() +
+			Math.max(
+				0,
+				Math.min(
+					ctx.deadline.waitMs(args.wait_seconds ?? 0),
+					ctx.deadline.remainingMs() - READS_MARGIN_MS,
+				),
+			);
 		const path = { sandbox: args.sandbox, command: args.command_id };
 		const max = args.max_bytes ?? DEFAULT_OUTPUT_BYTES;
 		const forward =
@@ -653,32 +708,41 @@ export const execOutput = defineTool({
 			stderr: state.stderr.size - begin("stderr"),
 		});
 
-		const windows = {} as Record<Stream, Window>;
+		const spans = {} as Record<Stream, ByteSpan>;
 		const availableFrom = {} as Record<Stream, number>;
-		const notes: string[] = [];
+		const ended = {} as Record<Stream, boolean>;
 		for (const s of STREAMS) {
 			const offset = tail ? state[s].size - budget[s] : asked[s];
-			let w: Window;
-			let avail = state[s].availableFrom;
-			let ended = state[s].end !== null;
+			availableFrom[s] = state[s].availableFrom;
+			ended[s] = state[s].end !== null;
 			if (budget[s] > 0) {
 				const chunk = await readOutput(ctx, path, s, offset, budget[s]);
-				avail = chunk.availableFrom;
-				ended = chunk.end !== null && chunk.nextOffset >= chunk.end;
-				w = decodeWindow(
-					chunk.data,
-					chunk.offset,
-					Math.max(state[s].size, chunk.end ?? 0, chunk.nextOffset),
-					{
-						// A returned offset is a character boundary; a retention cut is not.
-						atStart: chunk.offset === 0 || (forward && chunk.offset === offset),
-						final: ended,
-					},
-				);
+				availableFrom[s] = chunk.availableFrom;
+				ended[s] = chunk.end !== null && chunk.nextOffset >= chunk.end;
+				spans[s] = {
+					bytes: chunk.data,
+					offset: chunk.offset,
+					size: Math.max(state[s].size, chunk.end ?? 0, chunk.nextOffset),
+					// A returned offset is a character boundary; a retention cut is not.
+					atStart: chunk.offset === 0 || (forward && chunk.offset === offset),
+					final: ended[s],
+				};
 			} else {
-				const at = Math.max(offset, avail);
-				w = { size: state[s].size, from: at, to: at, text: "" };
+				const at = Math.max(offset, availableFrom[s]);
+				spans[s] = {
+					bytes: new Uint8Array(),
+					offset: at,
+					size: state[s].size,
+					atStart: true,
+					final: ended[s],
+				};
 			}
+		}
+		const windows = fitStreams(spans, tail ? "tail" : "head");
+		const notes: string[] = [];
+		for (const s of STREAMS) {
+			const w = windows[s];
+			const avail = availableFrom[s];
 			if (forward && asked[s] < avail) {
 				notes.push(
 					`${s}: ${avail - asked[s]} bytes were dropped by retention; reading starts at ${avail}.`,
@@ -689,9 +753,7 @@ export const execOutput = defineTool({
 				mode: tail ? "tail" : "forward",
 			});
 			if (note !== null && w.to > w.from) notes.push(note);
-			windows[s] = w;
-			availableFrom[s] = avail;
-			state[s].end = ended ? w.size : null;
+			state[s].end = ended[s] ? w.size : null;
 		}
 
 		const offsets = { stdout: windows.stdout.to, stderr: windows.stderr.to };

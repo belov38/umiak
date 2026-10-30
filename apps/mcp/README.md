@@ -45,7 +45,7 @@ SBX_MCP_PORT=8090 mise exec -- node apps/mcp/src/main.ts
 | `SBX_LOG_LEVEL` | info | `fatal` ... `trace`, `silent` |
 
 - A request without a bearer gets `401` with `WWW-Authenticate: Bearer resource_metadata="<public origin>/.well-known/oauth-protected-resource/mcp"`. A person in several teams picks one with the header `Sbx-Team: team_...` or `?team=team_...` in the URL.
-- SIGTERM stops within 10 s: readiness goes false, calls in flight get the rest of the grace period.
+- SIGTERM stops within 25 s: readiness goes false and new requests get `503` with `Retry-After`, calls in flight get the rest of the grace period. A request (headers and body) must arrive within 60 s (headers within 15 s), else `408`.
 - Image: `docker build -f apps/mcp/Dockerfile -t sbx-mcp:dev .` (context is the repo root). Local stack: the `mcp` service of `deploy/compose` listens on `http://localhost:8090/mcp` (README of `deploy/compose`, section MCP). Dev control plane: `infra/dev-cp/README.md`, section S11 MCP behind Tailscale Serve.
 
 ## Client configs

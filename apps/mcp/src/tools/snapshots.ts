@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
 import { prune, toolText } from "../output/result.ts";
+import { safeLine } from "../output/sanitize.ts";
 import { defineTool } from "../registry.ts";
 import { keyFor, withUnknownOutcome } from "./keyed.ts";
 import {
@@ -19,6 +20,7 @@ import {
 	idempotencyKeyShape,
 	waitShape,
 } from "./shapes.ts";
+import { errorView } from "./view.ts";
 
 const OPERATION_PATH = "/v1/operations/{operation}";
 /** A wait is cut into polls of this length: after each one the client gets a progress note. */
@@ -40,7 +42,7 @@ function snapshotView(
 		template: s.template,
 		size: s.size,
 		consistency: s.consistency,
-		error: s.error,
+		error: errorView(s.error),
 		created_at: s.createdAt,
 		ready_at: s.readyAt,
 	};
@@ -146,7 +148,7 @@ export const snapshotSave = defineTool({
 				// Cancel, 401 and bugs go to the call wrapper.
 				if (!(err instanceof SbxError) || err.status === 401) throw err;
 				notes.push(
-					`waiting for the snapshot failed (${err.code}): ${err.message}`,
+					`waiting for the snapshot failed (${safeLine(err.code)}): ${safeLine(err.message)}`,
 				);
 			}
 		}
@@ -156,7 +158,7 @@ export const snapshotSave = defineTool({
 		const view: OperationView = operationView(op);
 		header.operation = view;
 		if (state === "failed") {
-			header.error ??= op.error;
+			header.error ??= errorView(op.error);
 			notes.unshift(
 				"the snapshot was not saved (see error); try again with a new idempotency_key (the same key returns this failure).",
 			);

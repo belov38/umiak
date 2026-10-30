@@ -67,9 +67,11 @@ export interface HttpOptions {
 
 export interface HttpApp {
 	app: Hono;
-	/** False once close() was called (/readyz). */
+	/** False once drain() or close() was called (/readyz). */
 	ready(): boolean;
-	/** Readiness goes false and in-flight exchanges are torn down. */
+	/** Readiness goes false and new /mcp requests get 503; calls in flight go on. */
+	drain(): void;
+	/** drain(), then the exchanges still in flight are torn down. */
 	close(): Promise<void>;
 }
 
@@ -86,6 +88,9 @@ interface RequestState {
 	/** The api answered 401 during a call of this request. */
 	authFailed: boolean;
 }
+
+/** A team id as the API gives it (team_ and a base32 id). */
+const TEAM_ID = /^team_[A-Za-z0-9]{1,64}$/;
 
 const TRACEPARENT = /^[\da-f]{2}-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/;
 
@@ -293,14 +298,30 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		}
 		const flags = queryFlags(url);
 		if (typeof flags === "string") return rpcError(400, flags);
+		// Sbx-Team wins over ?team=; either must look like a team id, so
+		// nothing odd reaches /v1/me or the SDK's headers.
 		const team =
 			req.headers.get("sbx-team")?.trim() ||
 			url.searchParams.get("team")?.trim() ||
 			undefined;
+		if (team !== undefined && !TEAM_ID.test(team)) {
+			return refuse({
+				status: 400,
+				reason: "bad_team",
+				code: "validation",
+				message: "Sbx-Team and ?team= take a team id (team_...)",
+			});
+		}
 		const principal = await authenticate(req, team);
 		if (principal instanceof Response) return principal;
 
-		const bytes = await readBodyLimited(req, MAX_BODY_BYTES);
+		let bytes: Uint8Array<ArrayBuffer> | null;
+		try {
+			bytes = await readBodyLimited(req, MAX_BODY_BYTES);
+		} catch {
+			// The client went away or the request limit closed it mid-body.
+			return rpcError(408, "the request body did not arrive in time");
+		}
 		if (bytes === null) {
 			return rpcError(413, `the request body is over ${MAX_BODY_BYTES} bytes`);
 		}
@@ -373,6 +394,9 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 	return {
 		app,
 		ready: () => !closing,
+		drain() {
+			closing = true;
+		},
 		async close() {
 			closing = true;
 			await handler.close();

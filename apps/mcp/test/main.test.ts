@@ -2,6 +2,7 @@
 // `node src/main.ts` with its two listeners and the SIGTERM stop (S11 6.2,
 // 16.3).
 import { type ChildProcess, spawn } from "node:child_process";
+import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,7 +10,9 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadSettings, SettingsError } from "../src/settings.ts";
+import { createLogger } from "../src/log.ts";
+import { type RunningMcp, SHUTDOWN_GRACE_MS, startMcp } from "../src/main.ts";
+import { loadSettings, type Settings, SettingsError } from "../src/settings.ts";
 import { FAKE_TOKENS, type FakeApi, startFakeApi } from "./fake-api/index.ts";
 import { TEST_CLIENT_INFO } from "./helpers/connect.ts";
 
@@ -118,7 +121,7 @@ describe("node src/main.ts", () => {
 		expect(s.stderr()).toContain("SBX_MCP_API_URL: required");
 	});
 
-	it("serves both listeners and stops on SIGTERM within 10 s, a call in flight cut", async () => {
+	it("serves both listeners and stops on SIGTERM once the call in flight ends", async () => {
 		api = await startFakeApi();
 		const s = await start({
 			SBX_MCP_PORT: "0",
@@ -169,6 +172,123 @@ describe("node src/main.ts", () => {
 		const sb = JSON.parse(
 			(created.content as { text: string }[])[0]?.text ?? "{}",
 		).id as string;
+		const call = client.callTool({
+			name: "exec_run",
+			arguments: { sandbox: sb, command: "fake:sleep 60", wait_seconds: 3 },
+		});
+		await vi.waitFor(() => expect(api?.state.commands.size).toBe(1));
+		const metrics = await (await fetch(`${ops}/metrics`)).text();
+		expect(metrics).toContain("sbx_mcp_tool_calls_in_flight 1");
+
+		const t0 = Date.now();
+		s.p.kill("SIGTERM");
+		// The call in flight gets its answer: the wait ends, the command runs on.
+		const r = await call;
+		expect(r.isError).toBeFalsy();
+		expect((r.content as { text: string }[])[0]?.text).toContain(
+			'"status":"running"',
+		);
+		expect(await s.exited).toBe(0);
+		expect(Date.now() - t0).toBeLessThan(SHUTDOWN_GRACE_MS);
+		await client.close().catch(() => {});
+		expect(s.stderr()).toContain('"signal: shutting down"');
+		// The command was not killed: only the wait was cut.
+		expect(api.journal.filter((l) => l.endsWith("/kill"))).toEqual([]);
+	}, 60_000);
+});
+
+describe("startMcp", () => {
+	let api: FakeApi | undefined;
+	let running: RunningMcp | undefined;
+
+	afterEach(async () => {
+		await running?.close();
+		running = undefined;
+		await api?.close();
+		api = undefined;
+	});
+
+	function settings(apiUrl: string): Settings {
+		return {
+			port: 0,
+			opsPort: 0,
+			apiUrl,
+			publicUrl: "http://127.0.0.1/mcp",
+			issuer: null,
+			allowedOrigins: [],
+			allowedHosts: ["127.0.0.1"],
+			logLevel: "info",
+		};
+	}
+
+	const quiet = () => createLogger({ level: "silent" });
+
+	it("has a 25 s grace: above the 50 s budget's tail, under compose's 30 s stop_grace_period", () => {
+		expect(SHUTDOWN_GRACE_MS).toBe(25_000);
+	});
+
+	it("closes a request whose body does not arrive in time (408)", async () => {
+		api = await startFakeApi();
+		running = await startMcp(settings(api.url), {
+			log: quiet(),
+			requestTimeoutMs: 1_000,
+			headersTimeoutMs: 500,
+		});
+		const port = running.port;
+		const t0 = Date.now();
+		const answer = await new Promise<string>((resolve, reject) => {
+			const sock = connect(port, "127.0.0.1", () => {
+				sock.write(
+					[
+						"POST /mcp HTTP/1.1",
+						"Host: 127.0.0.1",
+						`Authorization: Bearer ${FAKE_TOKENS.full}`,
+						"Content-Type: application/json",
+						"Content-Length: 1000",
+						"",
+						'{"jsonrpc":',
+					].join("\r\n"),
+				);
+			});
+			let got = "";
+			sock.on("data", (d: Buffer) => {
+				got += d.toString();
+			});
+			sock.on("close", () => resolve(got));
+			sock.on("error", reject);
+			sock.setTimeout(8_000, () => {
+				sock.destroy();
+				reject(new Error("the server kept the slow request open"));
+			});
+		});
+		expect(Date.now() - t0).toBeLessThan(5_000);
+		expect(answer).toMatch(/^HTTP\/1\.1 408/);
+	}, 15_000);
+
+	it("cuts a call still running when the grace period ends", async () => {
+		api = await startFakeApi();
+		const r = await startMcp(settings(api.url), {
+			log: quiet(),
+			graceMs: 1_500,
+		});
+		const client = new Client(TEST_CLIENT_INFO);
+		await client.connect(
+			new StreamableHTTPClientTransport(
+				new URL(`http://127.0.0.1:${r.port}/mcp`),
+				{
+					requestInit: {
+						headers: { Authorization: `Bearer ${FAKE_TOKENS.full}` },
+					},
+				},
+			),
+		);
+		const created = await client.callTool({
+			name: "sandbox_create",
+			arguments: {},
+		});
+		const sb = JSON.parse(
+			(created.content as { text: string }[])[0]?.text ?? "{}",
+		).id as string;
 		const call = client
 			.callTool({
 				name: "exec_run",
@@ -176,19 +296,10 @@ describe("node src/main.ts", () => {
 			})
 			.catch((e: unknown) => e);
 		await vi.waitFor(() => expect(api?.state.commands.size).toBe(1));
-		const metrics = await (await fetch(`${ops}/metrics`)).text();
-		expect(metrics).toContain("sbx_mcp_tool_calls_in_flight 1");
-
 		const t0 = Date.now();
-		s.p.kill("SIGTERM");
-		expect(await s.exited).toBe(0);
-		expect(Date.now() - t0).toBeLessThan(10_500);
-		// The 2025-era client would reconnect forever: close it, then the
-		// call settles.
+		await r.close();
+		expect(Date.now() - t0).toBeLessThan(3_000);
 		await client.close().catch(() => {});
 		await call;
-		expect(s.stderr()).toContain('"signal: shutting down"');
-		// The command was not killed: only the wait was cut.
-		expect(api.journal.filter((l) => l.endsWith("/kill"))).toEqual([]);
-	}, 60_000);
+	}, 20_000);
 });

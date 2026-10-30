@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fenceUntrusted } from "../src/output/fence.ts";
 import { capResult, MAX_RESULT_CHARS, toolText } from "../src/output/result.ts";
 
 function textOf(r: { content: { type: string; text?: string }[] }) {
@@ -84,6 +85,37 @@ describe("capResult", () => {
 		const out = capResult(big);
 		expect(out.content[0]).toEqual(image);
 		expect(textOf(out).length).toBeLessThanOrEqual(MAX_RESULT_CHARS);
+	});
+
+	it("never cuts inside a fenced block: it drops the whole block and says so", () => {
+		const fence = fenceUntrusted([
+			{ label: "stream=stdout", text: "o".repeat(50_000) },
+			{ label: "stream=stderr", text: "e".repeat(40_000) },
+		]);
+		const r = toolText({ a: 1 }, ["stdout: last 50000 of 50000 bytes.", fence]);
+		const out = capResult(r);
+		const texts = out.content.map((b) => (b.type === "text" ? b.text : ""));
+		expect(texts[0]).toBe('{"a":1}');
+		expect(texts[1]).toBe("stdout: last 50000 of 50000 bytes.");
+		expect(texts.join("\n")).not.toContain("<<<sbx-untrusted");
+		expect(texts.at(-1)).toBe(
+			"sandbox output dropped: the response would exceed 80000 characters",
+		);
+		expect(textOf(out).length).toBeLessThanOrEqual(MAX_RESULT_CHARS);
+	});
+
+	it("keeps a fenced block that fits and drops the one that does not", () => {
+		const small = fenceUntrusted([
+			{ label: "kind=file", text: "s".repeat(30_000) },
+		]);
+		const large = fenceUntrusted([
+			{ label: "kind=file", text: "l".repeat(60_000) },
+		]);
+		const out = capResult(toolText({}, [small, large]));
+		const texts = out.content.map((b) => (b.type === "text" ? b.text : ""));
+		expect(texts[1]).toBe(small);
+		expect(texts).not.toContain(large);
+		expect(texts.at(-1)).toContain("sandbox output dropped");
 	});
 
 	it("does not split a surrogate pair", () => {

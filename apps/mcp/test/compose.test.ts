@@ -191,3 +191,59 @@ describe("dev-cp", () => {
 		expect(deploy).toContain("SBX_MCP_PUBLIC_URL=$MCP_URL");
 	});
 });
+
+describe("deploy.sh checks from the Mac", () => {
+	/** `check` and `check_ok` of deploy.sh, run with a fake curl answering `code`. */
+	function runCheck(fn: string, code: number, url: string): number {
+		const deploy = readFileSync(join(DEVCP, "deploy.sh"), "utf8");
+		const start = deploy.indexOf("\ncheck() {");
+		const end = deploy.indexOf("\ncheck tunnel ");
+		expect(start, "check() in deploy.sh").toBeGreaterThan(0);
+		expect(end).toBeGreaterThan(start);
+		const script = [
+			"log() { :; }",
+			`curl() { printf 'body\\n${code}'; }`,
+			deploy.slice(start, end),
+			`${fn} mcp "$1"`,
+		].join("\n");
+		return (
+			spawnSync("bash", ["-c", script, "_", url], {
+				env: { PATH: process.env.PATH ?? "" },
+			}).status ?? -1
+		);
+	}
+
+	it("the metadata check of MCP passes on 200 only (a 421 from a wrong Host fails)", () => {
+		const url =
+			"https://cp.example.ts.net:8443/.well-known/oauth-protected-resource/mcp";
+		expect(runCheck("check_ok", 200, url)).toBe(0);
+		expect(runCheck("check_ok", 421, url)).not.toBe(0);
+		expect(runCheck("check_ok", 404, url)).not.toBe(0);
+		// The plain check accepts any HTTP answer (a sign-in redirect is fine).
+		expect(runCheck("check", 421, url)).toBe(0);
+	});
+
+	it("derives the metadata URL from MCP_URL", () => {
+		const deploy = readFileSync(join(DEVCP, "deploy.sh"), "utf8");
+		expect(deploy).toContain('check_ok mcp "$MCP_PRM_URL"');
+		const line = (name: string) =>
+			deploy.split("\n").find((l) => l.startsWith(`${name}=`)) ?? "";
+		const out = execFileSync(
+			"bash",
+			[
+				"-c",
+				`${line("MCP_ORIGIN")}\n${line("MCP_PRM_URL")}\nprintf %s "$MCP_PRM_URL"`,
+			],
+			{
+				encoding: "utf8",
+				env: {
+					PATH: process.env.PATH ?? "",
+					MCP_URL: "https://cp.example.ts.net:9443/x/mcp",
+				},
+			},
+		);
+		expect(out).toBe(
+			"https://cp.example.ts.net:9443/.well-known/oauth-protected-resource/x/mcp",
+		);
+	});
+});

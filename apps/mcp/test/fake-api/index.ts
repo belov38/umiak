@@ -444,13 +444,17 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 			);
 			c.set("token", auth.token);
 			c.set("principal", auth.principal);
+			const slow = fake.script.slow;
+			if (slow?.path.test(`${method} ${path}`)) {
+				await fake.sleep(slow.ms, c.req.raw.signal);
+			}
 			const fail = fake.script.failNext;
 			if (fail?.path.test(`${method} ${path}`)) {
 				delete fake.script.failNext;
 				throw new FakeApiError(
 					fail.status,
 					fail.code,
-					`injected failure ${fail.code}`,
+					fail.message ?? `injected failure ${fail.code}`,
 					{
 						retryable: fail.retryable,
 						details:

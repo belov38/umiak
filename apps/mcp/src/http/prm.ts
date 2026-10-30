@@ -26,15 +26,25 @@ export function protectedResourceMetadata(o: {
 }): Record<string, unknown> {
 	return {
 		resource: o.publicUrl,
-		authorization_servers: o.issuer === null ? [] : [o.issuer],
+		// Without an issuer no authorization server is named (not an empty list).
+		...(o.issuer === null ? {} : { authorization_servers: [o.issuer] }),
 		scopes_supported: [...PRM_SCOPES],
 		bearer_methods_supported: ["header"],
 		resource_name: RESOURCE_NAME,
 	};
 }
 
+/**
+ * A quoted-string of RFC 6750: `"` and `\` are not allowed in its values
+ * (NQSCHAR), so they are replaced, not escaped; other characters outside
+ * printable ASCII become spaces.
+ */
 function quoted(v: string): string {
-	return `"${v.replace(/[\\"]/g, "\\$&").replace(/[^\x20-\x7e]/g, " ")}"`;
+	const safe = v
+		.replaceAll('"', "'")
+		.replaceAll("\\", "/")
+		.replace(/[^\x20-\x7e]/g, " ");
+	return `"${safe}"`;
 }
 
 /** `Bearer resource_metadata="..."[, error="...", error_description="..."]` (RFC 6750 3). */

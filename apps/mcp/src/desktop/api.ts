@@ -6,6 +6,7 @@
 import { type Sbx, SbxError, UNEXPECTED_RESPONSE } from "@sbx/sdk";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
+import { safeLine } from "../output/sanitize.ts";
 import type { Size } from "./coords.ts";
 
 /** `computer_type` may type for this long (S11 7.5): the rest of the 50 s is for settle and the answer. */
@@ -301,7 +302,7 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 				// Only a desktop that is starting gets better by itself.
 				throw new ToolError({
 					code: "desktop_not_ready",
-					message: `the desktop is ${st.state}${st.reason === null ? "" : `: ${st.reason}`}`,
+					message: `the desktop is ${safeLine(st.state)}${st.reason === null ? "" : `: ${safeLine(st.reason)}`}`,
 					retryable: st.state === "starting",
 				});
 			}

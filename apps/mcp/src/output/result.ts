@@ -3,6 +3,9 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 export const MAX_RESULT_CHARS = 80_000;
 
 const CUT_NOTE = `response cut at ${MAX_RESULT_CHARS} characters`;
+const DROP_NOTE = `sandbox output dropped: the response would exceed ${MAX_RESULT_CHARS} characters`;
+/** Start of a fenced block (fence.ts): such a block is kept whole or dropped. */
+const FENCE_START = "<<<sbx-untrusted id=";
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -51,26 +54,38 @@ function cutAt(text: string, n: number): string {
 
 /**
  * Safety net for the whole response: text beyond MAX_RESULT_CHARS is cut,
- * last blocks first so the header survives, and a line says so. Images are
- * not counted or changed.
+ * last blocks first so the header survives, and a line says so. A block of
+ * fenced sandbox text is never cut (its end marker would go): it is dropped
+ * whole, with its own line. Images are not counted or changed.
  */
 export function capResult(r: CallToolResult): CallToolResult {
 	let total = 0;
 	for (const b of r.content) if (b.type === "text") total += b.text.length;
 	if (total <= MAX_RESULT_CHARS) return r;
 
-	let left = MAX_RESULT_CHARS - CUT_NOTE.length;
+	let left = MAX_RESULT_CHARS - CUT_NOTE.length - DROP_NOTE.length;
+	let cut = false;
+	let dropped = false;
 	const content: CallToolResult["content"] = [];
 	for (const b of r.content) {
 		if (b.type !== "text") {
 			content.push(b);
 			continue;
 		}
-		if (left <= 0) continue;
-		const text = b.text.length <= left ? b.text : cutAt(b.text, left);
-		left -= text.length;
-		content.push({ ...b, text });
+		if (b.text.length <= left) {
+			left -= b.text.length;
+			content.push(b);
+		} else if (b.text.includes(FENCE_START)) {
+			dropped = true;
+		} else {
+			cut = true;
+			if (left <= 0) continue;
+			const text = cutAt(b.text, left);
+			left -= text.length;
+			content.push({ ...b, text });
+		}
 	}
-	content.push({ type: "text", text: CUT_NOTE });
+	if (dropped) content.push({ type: "text", text: DROP_NOTE });
+	if (cut) content.push({ type: "text", text: CUT_NOTE });
 	return { ...r, content };
 }

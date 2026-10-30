@@ -8,7 +8,12 @@ import {
 	jwtExpiresAt,
 	MeCache,
 } from "../src/http/auth.ts";
-import { prmPath, prmUrl, protectedResourceMetadata } from "../src/http/prm.ts";
+import {
+	bearerChallenge,
+	prmPath,
+	prmUrl,
+	protectedResourceMetadata,
+} from "../src/http/prm.ts";
 import { FAKE_TEAM, FAKE_TOKENS, OTHER_TEAM } from "./fake-api/index.ts";
 import {
 	fakeJwt,
@@ -105,12 +110,49 @@ describe("challenges and metadata", () => {
 		expect(prmUrl("https://api.example.com:8443/mcp")).toBe(
 			"https://api.example.com:8443/.well-known/oauth-protected-resource/mcp",
 		);
+		// No issuer: no authorization server is named at all (not an empty list).
 		expect(
-			protectedResourceMetadata({
-				publicUrl: "https://api.example.com/mcp",
-				issuer: null,
-			}).authorization_servers,
-		).toEqual([]);
+			Object.keys(
+				protectedResourceMetadata({
+					publicUrl: "https://api.example.com/mcp",
+					issuer: null,
+				}),
+			),
+		).not.toContain("authorization_servers");
+	});
+
+	it("error_description has no quote or backslash (RFC 6750 NQSCHAR): they are replaced", () => {
+		const v = bearerChallenge("https://api.example.com/x", {
+			error: "invalid_token",
+			description: 'bad "token" C:\\path\u00e9',
+		});
+		expect(v).toBe(
+			`Bearer resource_metadata="https://api.example.com/x", error="invalid_token", error_description="bad 'token' C:/path "`,
+		);
+	});
+
+	it("answers 503 with Retry-After, uncached, when /v1/me fails", async () => {
+		h = await startHttp();
+		h.api.script.failNext = {
+			path: /^GET \/v1\/me$/,
+			status: 500,
+			code: "internal",
+			retryable: false,
+		};
+		const r = await post(FAKE_TOKENS.full);
+		expect(r.status).toBe(503);
+		expect(r.headers["retry-after"]).toBe("1");
+		expect(JSON.parse(r.text) as Json).toMatchObject({
+			error: "api_unavailable",
+		});
+		const rejections = await h.metrics.authRejections.get();
+		expect(
+			rejections.values.find((v) => v.labels.reason === "api_unavailable")
+				?.value,
+		).toBe(1);
+		// Not cached: the next request asks /v1/me again and passes.
+		expect((await post(FAKE_TOKENS.full)).status).toBe(200);
+		expect(meCalls()).toBe(2);
 	});
 
 	it("answers 401 invalid_token to a bearer the API rejects", async () => {
@@ -270,6 +312,38 @@ describe("the team of a request", () => {
 		const d = await s.connect(twoTeams);
 		await d.client.callTool({ name: "sandbox_list", arguments: {} });
 		expect(teamOf("/v1/sandboxes")).toEqual([OTHER_TEAM, null]);
+	});
+
+	it("Sbx-Team wins over ?team=", async () => {
+		const s = await setup();
+		const c = await s.connect(twoTeams, {
+			headers: { "Sbx-Team": OTHER_TEAM },
+			query: "?team=team_nobody",
+		});
+		await c.client.callTool({ name: "sandbox_list", arguments: {} });
+		expect(teamOf("/v1/me")).toEqual([OTHER_TEAM]);
+		expect(teamOf("/v1/sandboxes")).toEqual([OTHER_TEAM]);
+	});
+
+	it("a team that is not a team id is 400 validation, before /v1/me", async () => {
+		const s = await setup();
+		for (const r of [
+			await s.raw("POST", "/mcp?team=team_x%01y", {
+				headers: {
+					"content-type": "application/json",
+					accept: "application/json, text/event-stream",
+					authorization: `Bearer ${twoTeams}`,
+				},
+				body: INIT,
+			}),
+			await post(twoTeams, { "sbx-team": "my team" }),
+		]) {
+			expect(r.status).toBe(400);
+			expect(JSON.parse(r.text) as Json).toMatchObject({
+				error: "validation",
+			});
+		}
+		expect(meCalls()).toBe(0);
 	});
 
 	it("caches per team and passes the API's refusal of a foreign team", async () => {

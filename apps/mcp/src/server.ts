@@ -51,6 +51,8 @@ export interface ServerOptions {
 	acquireSlot?: () => (() => void) | null;
 	/** After every call (HTTP metrics). */
 	onCallEnd?: (r: CallRecord) => void;
+	/** Tests: a shorter budget than CALL_BUDGET_MS. */
+	callBudgetMs?: number;
 }
 
 /** tools/list depends on the principal, so it is cached privately for 1 h. */
@@ -230,7 +232,7 @@ async function callTool(
 			extra,
 		);
 	} else {
-		const deadline = new Deadline(req.mcpReq.signal);
+		const deadline = new Deadline(req.mcpReq.signal, o.callBudgetMs);
 		try {
 			const ctx = createToolContext({
 				o,
