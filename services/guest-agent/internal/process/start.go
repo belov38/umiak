@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -38,6 +39,9 @@ var errNotLaunched = errors.New("process: command was never launched")
 // false; another spec fails with already_exists.
 func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpec) (*agentv1.CommandInfo, bool, error) {
 	if err := validateID(id); err != nil {
+		return nil, false, err
+	}
+	if err := checkIDForOS(runtime.GOOS, id); err != nil {
 		return nil, false, err
 	}
 	if err := validateSpec(spec); err != nil {
@@ -423,6 +427,17 @@ func validateID(id string) error {
 	return nil
 }
 
+// checkIDForOS rejects ids a valid command id cannot be on goos: on
+// Windows a colon would make the command directory an alternate data
+// stream of the commands directory.
+func checkIDForOS(goos, id string) error {
+	if goos == "windows" && strings.Contains(id, ":") {
+		return errs.Newf(connect.CodeInvalidArgument, errs.InvalidArgument,
+			"command_id %q: ':' is not allowed on windows", id)
+	}
+	return nil
+}
+
 // validateSpec checks the parts of spec the agent relies on.
 func validateSpec(spec *agentv1.CommandSpec) error {
 	invalid := func(format string, args ...any) error {
@@ -450,6 +465,11 @@ func validateSpec(spec *agentv1.CommandSpec) error {
 	}
 	if p := spec.GetPty(); p != nil && (p.GetCols() > math.MaxUint16 || p.GetRows() > math.MaxUint16) {
 		return invalid("pty size %dx%d is too large", p.GetCols(), p.GetRows())
+	}
+	if spec.GetDesktop() {
+		// The desktop helper comes with S10 (S9 plan decision 2).
+		return errs.New(connect.CodeFailedPrecondition, errs.DesktopNotReady,
+			"desktop sessions are not available: the agent has no desktop helper")
 	}
 	return nil
 }

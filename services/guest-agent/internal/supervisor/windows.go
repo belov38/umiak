@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"golang.org/x/sys/windows"
@@ -112,9 +113,13 @@ func (s *windowsSup) LaunchSpec(ctx context.Context, id, shimPath string, extraA
 
 	// The pipe buffer may be smaller than the spec: write while the shim
 	// reads. A shim that dies early breaks the pipe, and readReady sees EOF.
+	// Its own copy: the caller clears spec (it holds the environment) when
+	// LaunchSpec returns, possibly before the shim read it all.
+	buf := slices.Clone(spec)
 	go func() {
-		_, _ = stdinW.Write(spec)
+		_, _ = stdinW.Write(buf)
 		_ = stdinW.Close()
+		clear(buf)
 	}()
 	done := make(chan error, 1)
 	go func() {
@@ -147,7 +152,10 @@ func pipe() (r, w *os.File, err error) {
 // else (spec section 9.7).
 var commandEnv = []string{"GOGC=50", "GOMEMLIMIT=6MiB"}
 
-// launched reports whether command id has a live shim or a job.
+// launched reports whether command id has a live shim or a job. An empty
+// job without a shim and without shim.json or exit.json is the leftover of
+// a shim that died before it launched anything: its permanence is dropped
+// so the launch can go on instead of failing until a reboot.
 func (s *windowsSup) launched(id string) (bool, error) {
 	if winproc.ShimAlive(id) {
 		return true, nil
@@ -159,8 +167,25 @@ func (s *windowsSup) launched(id string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("supervisor: %w", err)
 	}
-	_ = j.Close()
-	return true, nil
+	defer j.Close() //nolint:errcheck // nothing to do on failure
+	if n, err := j.ActiveProcesses(); err != nil || n > 0 || s.traced(id) || winproc.ShimAlive(id) {
+		return true, nil //nolint:nilerr // an unqueryable job counts as launched
+	}
+	if err := j.MakeTemporary(); err != nil {
+		return true, fmt.Errorf("supervisor: reclaim the job of %s: %w", id, err)
+	}
+	return false, nil
+}
+
+// traced reports whether the command directory of id has shim.json or
+// exit.json: a shim got far enough to own the command.
+func (s *windowsSup) traced(id string) bool {
+	for _, name := range []string{shim.ShimJSON, shim.ExitJSON} {
+		if _, err := os.Lstat(filepath.Join(s.layout.CommandDir(id), name)); !errors.Is(err, os.ErrNotExist) {
+			return true
+		}
+	}
+	return false
 }
 
 // State implements Supervisor (S9 plan decision 5): a live shim or a job

@@ -358,3 +358,31 @@ func TestUnsupportedSignalWindowsTable(t *testing.T) {
 		wantCode(t, err, connect.CodeInvalidArgument, errs.UnsupportedSignal)
 	}
 }
+
+// Remove and the janitor stop what is left of the unit: on Windows the
+// empty permanent job of a dead shim, which would block a new Start.
+func TestRemoveStopsUnit(t *testing.T) {
+	h := newHarness(t)
+	h.start("c1", argvSpec("/bin/true"))
+	h.start("c2", argvSpec("/bin/true"))
+	_, err := h.client.Remove(h.ctx(), connect.NewRequest(&agentv1.ProcessRemoveRequest{CommandId: "c1"}))
+	wantCode(t, err, connect.CodeFailedPrecondition, errs.CommandRunning)
+	if s := h.fake.Stops(); len(s) != 0 {
+		t.Fatalf("stops after a refused Remove: %v", s)
+	}
+	for _, id := range []string{"c1", "c2"} {
+		if err := h.run(id).Exit(0); err != nil {
+			t.Fatal(err)
+		}
+		h.waitExited(id)
+	}
+	if _, err := h.client.Remove(h.ctx(), connect.NewRequest(&agentv1.ProcessRemoveRequest{CommandId: "c1"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.m.RemoveRecord("c2"); err != nil {
+		t.Fatal(err)
+	}
+	if s := h.fake.Stops(); fmt.Sprint(s) != "[c1 c2]" {
+		t.Fatalf("stops = %v, want [c1 c2]", s)
+	}
+}

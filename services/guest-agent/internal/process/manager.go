@@ -486,6 +486,7 @@ func (m *Manager) RemoveRecord(id string) error {
 	if alive {
 		return fmt.Errorf("process: leftovers of command %s still run", id)
 	}
+	m.releaseUnit(m.ctx, id)
 	if err := m.st.DeleteCommand(m.ctx, id); err != nil {
 		return err
 	}

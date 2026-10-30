@@ -492,3 +492,43 @@ func TestStartUsesSpecLauncher(t *testing.T) {
 		t.Fatalf("%s created with a spec launcher", h.layout.CmdSpecDir)
 	}
 }
+
+// Decision 2: no agent has the desktop helper yet (S10).
+func TestStartDesktopNotReady(t *testing.T) {
+	h := newHarness(t)
+	spec := argvSpec("/bin/true")
+	spec.Desktop = true
+	_, err := h.client.Start(h.ctx(), connect.NewRequest(&agentv1.StartRequest{CommandId: "c1", Spec: spec}))
+	wantCode(t, err, connect.CodeFailedPrecondition, errs.DesktopNotReady)
+	if n := len(h.fake.Launches()); n != 0 {
+		t.Fatalf("launches = %d, want 0", n)
+	}
+	if _, err := h.get("c1"); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("Get after a refused Start: %v", err)
+	}
+}
+
+// A colon names an alternate data stream on Windows: such an id never
+// reaches the shim there.
+func TestCommandIDForOS(t *testing.T) {
+	for _, tt := range []struct {
+		goos, id string
+		ok       bool
+	}{
+		{"windows", "c1", true},
+		{"windows", "a.b-c_d", true},
+		{"windows", "a:b", false},
+		{"windows", ":", false},
+		{"linux", "a:b", true},
+		{"darwin", "a:b", true},
+	} {
+		err := checkIDForOS(tt.goos, tt.id)
+		if tt.ok {
+			if err != nil {
+				t.Errorf("%s %q: %v", tt.goos, tt.id, err)
+			}
+			continue
+		}
+		wantCode(t, err, connect.CodeInvalidArgument, errs.InvalidArgument)
+	}
+}

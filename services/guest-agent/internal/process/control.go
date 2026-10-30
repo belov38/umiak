@@ -357,6 +357,7 @@ func (m *Manager) Remove(ctx context.Context, id string) (bool, error) {
 	if alive {
 		return false, errs.Newf(connect.CodeFailedPrecondition, errs.CommandRunning, "leftovers of %q still run", id)
 	}
+	m.releaseUnit(ctx, id)
 	dctx, cancel := m.durableCtx(ctx)
 	defer cancel()
 	if err := m.st.DeleteCommand(dctx, id); err != nil {
@@ -367,6 +368,17 @@ func (m *Manager) Remove(ctx context.Context, id string) (bool, error) {
 	}
 	m.forget(c)
 	return true, nil
+}
+
+// releaseUnit stops what is left of the unit of a removed command. On
+// Windows a shim that died leaves its empty permanent job behind, which
+// would make every later Start of the id ErrUnitExists until a reboot
+// (S9 spec 12.6); on Linux the unit is already collected and Stop does
+// nothing. A failure only costs that, so it is logged.
+func (m *Manager) releaseUnit(ctx context.Context, id string) {
+	if err := m.sup.Stop(ctx, id); err != nil && !errors.Is(err, supervisor.ErrUnitNotFound) {
+		m.log.Warn("process: release the unit of a removed command", "id", id, "err", err)
+	}
 }
 
 // unitStillAlive checks the unit of an exited command: the live state may

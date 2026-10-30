@@ -432,3 +432,44 @@ func TestWatchdog(t *testing.T) {
 		t.Fatalf("stop of a stopped watchdog: %v", err)
 	}
 }
+
+// A shim that died after it created the job but before shim.json leaves an
+// empty permanent job; the next launch reclaims it instead of failing with
+// ErrUnitExists until a reboot.
+func TestLaunchReclaimsOrphanJob(t *testing.T) {
+	e := newWinEnv(t)
+	j, err := winproc.CreatePermanentJob(shim.JobName(e.id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = j.Close()
+	if st := e.state(e.sup); st != UnitInactive {
+		t.Fatalf("state of the orphan job = %v, want inactive", st)
+	}
+	spec := e.spec("")
+	spec.Argv = []string{filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe"), "/d", "/c", "exit 4"}
+	e.mustLaunch(spec)
+	if ex := e.waitExit(); ex.Code != 4 {
+		t.Fatalf("exit = %+v", ex)
+	}
+}
+
+// An empty job with a trace of a launch (shim.json) is not reclaimed.
+func TestLaunchKeepsTracedJob(t *testing.T) {
+	e := newWinEnv(t)
+	j, err := winproc.CreatePermanentJob(shim.JobName(e.id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = j.Close()
+	dir := e.l.CommandDir(e.id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, shim.ShimJSON), []byte(`{"state":"launching"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.launch(e.sup, e.spec("")); !errors.Is(err, ErrUnitExists) {
+		t.Fatalf("launch over a traced job: %v, want ErrUnitExists", err)
+	}
+}

@@ -57,6 +57,11 @@ func winSignalAction(sig int, pty bool) (winAction, error) {
 // its own first. NTSTATUS codes such as 0xC0000005 pass as they are, as a
 // signed 32-bit value. The reason is the first kill's, else SIGNAL for a
 // KILLED process after a signal request, else NONE.
+//
+// A termination by another process (the agent's KillCgroup while this shim
+// lives, used only when it cannot reach the shim) is not detectable: the
+// exit code 1 is indistinguishable from the program's own, so it stays
+// EXITED with code 1 and reason NONE.
 func winExit(code uint32, terminated bool, killReason string, signalled bool) (status string, c int32, reason string) {
 	status = shimproto.StatusExited
 	if terminated && code == terminateCode {
