@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Offline WinPE stage after sysprep (spec S9 sections 6.4, 10.3). Windows Setup
+  finds this file in the root of the offline ISO (label SBXOFFL) and runs
+  offline.cmd in the windowsPE pass. offline.cmd powers the VM off, so Setup
+  never installs anything; on a failure it hangs and the builder times out.
+  An implicitly found answer file suppresses the language page, so no
+  International-Core-WinPE (it would have to match the ISO's language).
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <RunSynchronous>
+        <!-- WinPE has no Get-Volume: the offline ISO is the drive with offline.cmd and offline-config.cmd. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>cmd.exe /c "for %d in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do @if exist %d:\offline-config.cmd if exist %d:\offline.cmd call %d:\offline.cmd"</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
+</unattend>
