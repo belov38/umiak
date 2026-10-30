@@ -4,6 +4,8 @@
 `api`, `gateway`, `web`, `keycloak`, `oauth2-proxy` добавляют потоки S2, S7, S8, S9
 (места помечены комментариями в `compose.yaml`). Proxmox остаётся реальным хостом `pve`.
 
+Стек на `pve` (CT 590, доступен из sandbox VM): `infra/dev-cp/README.md`.
+
 ## Что нужно
 
 - Docker с compose v2.
