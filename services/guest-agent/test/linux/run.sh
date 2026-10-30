@@ -22,7 +22,9 @@
 # BUILD_ONLY=<dir> builds the packages and the test binary into <dir>/it
 # (pkg/ and integration.test, the layout the tests expect at /it) and exits
 # without Docker; GOARCH_IT=<arch> overrides the target architecture. The pve
-# stand (apps/bench `s3`) uses this to build for the amd64 VM.
+# stand (apps/bench `s3`) uses this to build for the amd64 VM. TUNNEL_CA=<pem>
+# packs that bundle as trust/tunnel-ca.pem instead of a throwaway CA, for
+# packages that must reach a real gateway.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,11 +97,15 @@ release=("${GO[@]}" run ./cmd/sbx-release)
 devkey="$(awk '{print $2}' "$work/update-keys.pub")"
 
 log "tunnel CA"
-# A named-curve key (LibreSSL's -newkey ec writes explicit parameters, which
-# Go's x509 rejects).
-openssl ecparam -name prime256v1 -genkey -noout -out "$work/tunnel-ca.key"
-openssl req -new -x509 -key "$work/tunnel-ca.key" -out "$work/tunnel-ca.pem" -days 1 \
-	-subj /CN=sbx-it-tunnel-ca >/dev/null 2>&1
+if [ -n "${TUNNEL_CA:-}" ]; then
+	cp "$TUNNEL_CA" "$work/tunnel-ca.pem"
+else
+	# A named-curve key (LibreSSL's -newkey ec writes explicit parameters, which
+	# Go's x509 rejects).
+	openssl ecparam -name prime256v1 -genkey -noout -out "$work/tunnel-ca.key"
+	openssl req -new -x509 -key "$work/tunnel-ca.key" -out "$work/tunnel-ca.pem" -days 1 \
+		-subj /CN=sbx-it-tunnel-ca >/dev/null 2>&1
+fi
 
 build() { # version out [extra ldflags]
 	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "${GO[@]}" build -trimpath \
