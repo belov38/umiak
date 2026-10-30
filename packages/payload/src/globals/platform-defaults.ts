@@ -1,12 +1,21 @@
 import type { GlobalConfig } from "payload";
 import { operatorOnly } from "../access.ts";
 import { quotaFields } from "../collections/teams.ts";
+import { platformDefaultsConfigAfterChange } from "../hooks/config.ts";
+import {
+	routesAfterChange,
+	ssoPolicyEpochBeforeChange,
+} from "../hooks/routes.ts";
 
 // Platform defaults (S6 §5.11, S7, S8 §7). The values are seeded by the
 // initial migration; the defaultValue of every field matches the seed.
 export const PlatformDefaults: GlobalConfig = {
 	slug: "platform-defaults",
 	access: { read: operatorOnly, update: operatorOnly },
+	hooks: {
+		beforeChange: [ssoPolicyEpochBeforeChange],
+		afterChange: [platformDefaultsConfigAfterChange, routesAfterChange],
+	},
 	fields: [
 		// S6
 		{ name: "ttlSeconds", type: "number", min: 1 },
@@ -73,7 +82,8 @@ export const PlatformDefaults: GlobalConfig = {
 			fields: quotaFields(),
 		},
 		{ name: "maxOwnedTeamsPerUser", type: "number", min: 0, defaultValue: 3 },
-		// Bumped when ssoPortPolicy changes (S8 §8).
+		// Owned by the beforeChange hook: +1 when ssoPortPolicy goes from any
+		// to team (S8 §8); written values are ignored.
 		{
 			name: "ssoPolicyEpoch",
 			type: "number",

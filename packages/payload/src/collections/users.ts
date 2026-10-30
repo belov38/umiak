@@ -1,37 +1,17 @@
-import type { Access, AuthStrategy, CollectionConfig, Where } from "payload";
+import type { AuthStrategy, CollectionConfig } from "payload";
 import { isOperatorReq, operatorOnly } from "../access.ts";
-import { dbPool } from "../db.ts";
+import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
+import { usersStubOnlyBeforeDelete } from "../hooks/rules.ts";
+import {
+	usersRevokeAfterChange,
+	usersRevokeAfterDelete,
+} from "../hooks/ssh-revoke.ts";
 
 // Placeholder of the oauth2-proxy strategy (S8 §5.4): it authenticates nobody
 // until resolveSession is wired in (S8 plan, task 3).
 const oauth2ProxyPlaceholder: AuthStrategy = {
 	name: "oauth2-proxy",
 	authenticate: async () => ({ user: null }),
-};
-
-/**
- * Users are never deleted (their rows back `created_by` in runtime and the
- * audit), except stubs (S8 §6.3) that never logged in and have no membership.
- */
-const deleteStubsOnly: Access = async ({ req, id }) => {
-	if (!isOperatorReq(req)) return false;
-	const pool = dbPool(req.payload);
-	const schema = req.payload.db.schemaName ?? "public";
-	const args: unknown[] = [];
-	let byId = "";
-	if (id !== undefined) {
-		args.push(String(id));
-		byId = "AND u.id::text = $1";
-	}
-	const r = await pool.query<{ id: string }>(
-		`SELECT u.id FROM "${schema}".users u
-		 WHERE u.last_login_at IS NULL ${byId}
-		   AND NOT EXISTS (SELECT 1 FROM "${schema}".memberships m WHERE m.user_id = u.id)`,
-		args,
-	);
-	if (r.rows.length === 0) return false;
-	const where: Where = { id: { in: r.rows.map((x) => x.id) } };
-	return where;
 };
 
 const lowercase = ({ value }: { value?: unknown }) =>
@@ -52,7 +32,13 @@ export const Users: CollectionConfig = {
 		read: operatorOnly,
 		create: operatorOnly,
 		update: operatorOnly,
-		delete: deleteStubsOnly,
+		// Only stubs are deletable; the hook checks it in the transaction.
+		delete: operatorOnly,
+	},
+	hooks: {
+		beforeDelete: [usersStubOnlyBeforeDelete],
+		afterChange: [identityAfterChange("users"), usersRevokeAfterChange],
+		afterDelete: [identityAfterDelete("users"), usersRevokeAfterDelete],
 	},
 	fields: [
 		{

@@ -1,5 +1,9 @@
 import type { CollectionConfig, Field } from "payload";
 import { operatorAccess } from "../access.ts";
+import { configAfterDelete, teamsConfigAfterChange } from "../hooks/config.ts";
+import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
+import { teamsBeforeDelete } from "../hooks/rules.ts";
+import { teamsRevokeAfterDelete } from "../hooks/ssh-revoke.ts";
 
 /** Quota fields of a team and of platform-defaults (S8 §7, S6 S3). */
 export function quotaFields(): Field[] {
@@ -17,6 +21,15 @@ export const Teams: CollectionConfig = {
 		defaultColumns: ["name", "personal", "createdBy", "createdAt"],
 	},
 	access: operatorAccess,
+	hooks: {
+		beforeDelete: [teamsBeforeDelete],
+		afterChange: [identityAfterChange("teams"), teamsConfigAfterChange],
+		afterDelete: [
+			identityAfterDelete("teams"),
+			configAfterDelete("teams"),
+			teamsRevokeAfterDelete,
+		],
+	},
 	fields: [
 		{ name: "name", type: "text", required: true, minLength: 1, maxLength: 64 },
 		{ name: "personal", type: "checkbox", defaultValue: false },

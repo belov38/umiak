@@ -1,5 +1,6 @@
 import type { CollectionConfig } from "payload";
 import { operatorAccess } from "../access.ts";
+import { configAfterChange, configAfterDelete } from "../hooks/config.ts";
 
 const UUID_RE =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -8,6 +9,10 @@ export const PoolTargets: CollectionConfig = {
 	slug: "pool-targets",
 	admin: { defaultColumns: ["template", "size", "providerId", "target"] },
 	access: operatorAccess,
+	hooks: {
+		afterChange: [configAfterChange("pool-targets")],
+		afterDelete: [configAfterDelete("pool-targets")],
+	},
 	indexes: [{ fields: ["template", "size", "providerId"], unique: true }],
 	fields: [
 		// Template and size slugs.

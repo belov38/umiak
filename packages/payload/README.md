@@ -21,8 +21,55 @@ components are referenced by import-map path strings from `apps/web`.
   `assertPayloadMigrated(p)` — see below.
 - `isOperatorReq(req)` — `req.user?.isOperator === true`. Every collection
   and the global are operator-only through access; `api-keys.create` is
-  refused to everyone; `users.delete` only matches stubs without
-  `lastLoginAt` and without memberships.
+  refused to everyone.
+- `notify(req, channel, payload)` — `pg_notify` in the transaction of the
+  Payload request (`txQuery(req, sql)` runs any SQL there).
+
+## NOTIFY hooks (S8 §8)
+
+Hooks run inside the transaction of the Payload operation: a Local API call
+without `req` opens and commits its own, one with `req` uses the caller's
+(`initTransaction`/`commitTransaction`). `notify` sends through the adapter
+session of `req.transactionID`, so Postgres delivers after commit and a
+listener reads the new data; a rolled back write sends nothing. A failing
+`pg_notify` fails the hook and Payload rolls the write back. Without a
+transaction (a bare `createLocalReq`) the statement is its own transaction.
+
+| Channel | Payload | Sent by |
+|---|---|---|
+| `sbx_identity` | `'<collection>:<uuid>'` | `users`, `teams`, `memberships` (id of the membership), `api-keys`, `ssh-keys` after change/delete; updates that only change `lastUsedAt`, `lastLoginAt`, `updatedAt` (or nothing) send nothing |
+| `sbx_config` | `'<collection>:<uuid>'`, `'platform-defaults:global'` | `templates`, `sizes`, `pool-targets` (change/delete), `teams` (create, `quota` change, delete), `platform-defaults` |
+| `sbx_routes` | `'*'` | `platform-defaults` when `publicPortsEnabled` or `ssoPortPolicy` changed |
+| `sbx_ssh_revoke` | `user:usr_…`, `member:team_…:usr_…`, `key:key_…`, `team:team_…` | as the 0302/0303 triggers: a user becomes inactive (or an active one is deleted), a membership is deleted, a key gets `revokedAt` or a new `secretHash` while live (or a live key is deleted), a team is deleted |
+
+`ssoPolicyEpoch` is owned by a `beforeChange` hook of `platform-defaults`:
+`ssoPortPolicy` `any` → `team` adds 1, written values are ignored.
+
+## Collection rules
+
+Errors are `APIError(code, 400)` (message = code) or Payload
+`ValidationError` (field path):
+
+- `memberships`: the last `owner` of a team cannot be demoted, moved to
+  another team or deleted (`last_owner`); the team row is locked
+  (`FOR NO KEY UPDATE`) before the count, so concurrent removals serialize.
+- `teams` delete: a personal team is refused (`personal_team`); otherwise
+  `beforeDelete` deletes the team's memberships and team notices and sets
+  `revokedAt` (and `revokedBy` = the request user) on its live keys, all
+  through the Local API with `req`, so their hooks notify in the same
+  transaction. Revoked keys are kept; the foreign key sets their `team` to
+  null when the team row goes.
+- `api-keys`: `team` is nullable in the database, required on create
+  (validation). Through Payload access (/admin, REST) only `revokedAt` can be
+  written, once; the hook sets `revokedBy` to the user of the request. api
+  writes with `overrideAccess` and is not limited.
+- `users` delete: only stubs (`idpSubject` and `lastLoginAt` empty, no
+  memberships), checked in `beforeDelete` inside the transaction
+  (`user_not_stub`); collection access only requires an operator.
+- `templates`: `allowedSizes` is a non-empty list of existing size slugs,
+  `defaultSize` is one of them; `slug` cannot change.
+- `sizes`: `slug` cannot change; a size named by a template (`defaultSize`,
+  `allowedSizes`) or a pool target cannot be deleted (`size_in_use`).
 
 ## Migrations
 
@@ -77,9 +124,10 @@ only; `rotated_at` is copied when 0303 is applied.
   transaction); it refuses smaller pools. `closeSbxPayload` does not wait for
   `pool.end()` for the same reason.
 - Required relationships get `NOT NULL` with `ON DELETE SET NULL` foreign
-  keys (Payload has no per-field `onDelete`). Deleting a team that still has
-  memberships, team notices or API keys fails in Postgres: the team delete
-  hook (S8 §6.4) has to remove or reassign those rows first.
+  keys (Payload has no per-field `onDelete`). Deleting a team with
+  memberships or team notices would fail in Postgres, so the team delete
+  hook removes them first; `api-keys.team` is not required in the schema
+  (migration `api_keys_team_nullable`) so keys survive the team.
 - `pool-targets` is unique on (`template`, `size`, `providerId`) with
   `NULLS NOT DISTINCT` (Postgres 18), so a second target without a provider
   for the same template and size is rejected. Payload cannot express it: the

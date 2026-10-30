@@ -1,5 +1,6 @@
 import type { CollectionConfig } from "payload";
 import { operatorAccess } from "../access.ts";
+import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
 
 export const SshKeys: CollectionConfig = {
 	slug: "ssh-keys",
@@ -8,6 +9,10 @@ export const SshKeys: CollectionConfig = {
 		defaultColumns: ["name", "user", "type", "fingerprint", "lastUsedAt"],
 	},
 	access: operatorAccess,
+	hooks: {
+		afterChange: [identityAfterChange("ssh-keys")],
+		afterDelete: [identityAfterDelete("ssh-keys")],
+	},
 	fields: [
 		{ name: "user", type: "relationship", relationTo: "users", required: true },
 		{ name: "name", type: "text", required: true },

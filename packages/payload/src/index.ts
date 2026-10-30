@@ -13,6 +13,7 @@ export {
 } from "./config.ts";
 export { dbPool } from "./db.ts";
 export { closeSbxPayload, getSbxPayload } from "./instance.ts";
+export { type NotifyChannel, notify, txQuery } from "./notify.ts";
 export {
 	assertPayloadMigrated,
 	migrateSbxPayload,

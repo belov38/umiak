@@ -185,7 +185,7 @@ describe.skipIf(skipPg())("collection and global access", () => {
 					lastLoginAt: new Date().toISOString(),
 				},
 			});
-			await expect(del(u.id)).rejects.toThrow();
+			await expect(del(u.id)).rejects.toThrow("user_not_stub");
 			expect(await exists(u.id)).toBe(true);
 		});
 
@@ -202,7 +202,7 @@ describe.skipIf(skipPg())("collection and global access", () => {
 				collection: "memberships",
 				data: { user: u.id, team: team.id, role: "member" },
 			});
-			await expect(del(u.id)).rejects.toThrow();
+			await expect(del(u.id)).rejects.toThrow("user_not_stub");
 			expect(await exists(u.id)).toBe(true);
 		});
 	});
