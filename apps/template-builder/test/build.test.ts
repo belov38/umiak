@@ -82,15 +82,10 @@ function setup(
 	});
 	// The template disk after fstrim: about 6 GiB of 64.
 	const disk = { dataPercent: 9.4 };
-	node.handlers["lv.list"] = () => ({
-		lvs: [
-			{
-				name: "base-598-disk-0",
-				sizeBytes: 64 * 2 ** 30,
-				dataPercent: disk.dataPercent,
-			},
-		],
-	});
+	node.handlers["lv.usage"] = (a) => {
+		if (a.name !== "base-598-disk-0") throw new Error(`lv.usage ${a.name}`);
+		return { sizeBytes: 64 * 2 ** 30, dataPercent: disk.dataPercent };
+	};
 	const store = new SqliteStateStore(":memory:");
 	const allocator = new Allocator({
 		store,

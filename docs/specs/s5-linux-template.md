@@ -543,7 +543,54 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 
 ## 20. Результаты
 
-Заполняется после реализации: таблица `sbx-bench s5` (сборка vs 599), принятые эксперименты §13.3, итоговый размер образа (занято в thin pool), длительность сборки, права, добавленные по факту (§17.1 п. 3).
+Реализация 2026-10-30, ветка `s5-impl`; план `docs/plans/s5-linux-template.md`. Сборки на `pve` (Proxmox VE 9.2.21).
+
+### 20.1 Цифры
+
+**Сборка** `linux` (`sbx-tpl build linux`, Mac → `pve`): 10–14 min от официального образа до готового шаблона, плюс 5–6 min `verify`. Базовый образ `release-20261024` грузится в `local:import` один раз на serial (420 MB). Образ: 658 пакетов, ядро `7.0.0-42-generic`, systemd 259.9, 39 команд инструментов (§8.9, `sbx` пока нет). Занято в thin pool: см. §20.4.
+
+**Воспроизводимость (§19 п. 2):** две сборки с одним `versions.toml` (20261030.10 и .11) дали одинаковые `packages` (658) и `tools` (39).
+
+**`verify` (§10):** 94 проверки PASS, 0 FAIL, включая агента (`doctor`, версия, identity, URL туннеля из `smbios`), подключение агента клона к dev-gateway (`tunnel_connected`, CT 590, `--connect-url`), Docker `hello-world`, скан диска шаблона и клона на секреты сборки (§20.3), жёсткую остановку (≤ первой загрузки + 3 s), fork с новыми machine-id, hostname, host keys, IP, random seed и состоянием агента. KVM в госте: `available` (на `pve` `kvm_intel nested=Y`).
+
+**`sbx-bench s5 --template 597 --baseline 599 --runs 5`** (2 vCPU / 2 GB, `local-lvm`), ms, медиана (p95):
+
+| Метрика | S5 (597) | 599 |
+|---|---|---|
+| `start_to_qga` | 9013 (9702) | 11014 (11726) |
+| `start_to_ip` | 9214 (9903) | 11118 (11928) |
+| `start_to_agent_ready` | 8821 (9631) | — (агента нет) |
+| kernel / initrd / userspace | 431 / 1922 / 2944 | 631 / 2013 / 4160 |
+| `hard_stop_restart` | 8921 (9397) | 9974 (11037) |
+
+Шаблон S5 не хуже 599 ни по одной метрике. Цель §13.2 `start_to_agent_ready` ≤ 10 s выполнена; `start_to_qga` ≤ 8 s **не выполнена** (9.0 s): kernel + initrd + userspace ≈ 5.3 s, остальное — SeaBIOS и запуск QEMU. Решение Ильи «время создания не оптимизируем» (`docs/roadmap.md`) делает эту цель необязательной для MVP; эксперименты §13.3 не проводились.
+
+**`sbx-bench s1` против шаблона 597:** 126/126 (clone 1.0 s, boot 9.9 s, fork 11.2 s; baseline `qm clone` из шаблона тоже проходит).
+
+**Неудачная сборка (§19 п. 7):** `--fail-step 20-docker` — откат удалил VM, seed и lease, на хосте остался только кэш базового образа; `--fail-step 00-base --keep-on-failure` — VM, seed и lease остались, `sbx-tpl cleanup` их убрал, шаблон не тронут.
+
+### 20.2 Отклонения от спецификации
+
+1. **Seed — диск, а не CD** (§7.2 п. 3–4, §7.2 п. 8). Первая загрузка cloud-образа идёт без initrd (`GRUB_FORCE_PARTUUID`); драйверы CD (AHCI, `sr_mod`) — модули и появляются после того, как cloud-init ищет seed, и cloud-init выключается. Seed (тот же ISO 9660 `cidata`) грузится в `local:import/sbx-seed-<buildId>.raw` и подключается как `scsi1` (`import-from`); virtio-scsi и sd встроены в ядро. Дополнительно у сборочной VM `smbios1 serial=ds=nocloud`. Перед `template` диск удаляется (`unlink force=1`), `smbios1` снимается.
+2. **ISO только через `xorriso`** (§7.2 п. 3, §21). `hdiutil` сокращает имена с точками и длиннее 30 символов (`sudoers.d` → `sudoersd`). На Mac: `brew install xorriso`.
+3. **Реестр — файлы JSON** (§11). S6 уже есть, SQLite-реестр не делался: манифесты в `~/.local/state/sbx/templates/<buildId>.json` (`SBX_TEMPLATE_REGISTRY`), номер версии — эксклюзивный claim-файл. Регистрация для worker — `topology.templateBuilds` в `deploy/compose/config/sbx.yaml` (или `sbx-admin template register`, строку печатает `build`). `promote` — `sbx-admin template promote` (S6), `gc` — S6/S12 (§17.4 п. 5); `retire` в `sbx-tpl` нет. `show --active ... --field pveVmid` реализован как `show --active-vmid <slug>` (новейшая `ready` сборка).
+4. **VMID шаблонов** — `SBX_TEMPLATE_VMID_RANGE` (по умолчанию 597–598, сверху вниз), раскладка `pve` в S1 §4.7. Два слота: перед третьей сборкой старую нужно удалить.
+5. **URL туннеля по умолчанию пуст** (§14). `agent.toml` без `[tunnel] url`, если не задан `--tunnel-url`; worker пишет `smbios1.family` из `SBX_TUNNEL_URL` (§17.4 п. 3 сделан в этой ветке). Tunnel CA — параметр сборки пакета агента (`infra/templates/agent-package.sh --tunnel-ca`); dev-сборка использует dev CA gateway CT 590.
+6. **Скан на секреты — на хосте** (§10). Новая операция `sbx-node lv.scan` (только `base-<id>-*` и `vm-<id>-disk-N` диапазона, паттерны через stdin SSH, в журнал `sbx-node` не пишутся) сканирует диск шаблона и диск клона после загрузки. Паттерны: ключ подписи обновлений (PEM и seed в base64/hex), секрет токена PVE, ключи `sbx-node` и dev CA, BS клона.
+7. **`wait-online`** (§8.4, §10 п. 12). netplan 26.04 включает `systemd-networkd-wait-online` только для интерфейсов с известным именем; с `match: {name: "en*"}` unit пропускается по условию, `network-online.target` достигается сразу. Проверка принимает это (плюс `network-online.target active`) или ожидание ≤ 15 s.
+8. **`sbx-bench s5`** принимает `--template <vmid>` вместо `--build <buildId>`.
+9. **Запечатывание** (§7.2 п. 7) дополнено: остановка `systemd-random-seed` и удаление `random-seed`, `credential.secret` перед `seal` (иначе ExecStop сохраняет seed при poweroff); после `seal` journald переводится в `/run` и `/var/log/journal/*` удаляется; zero-fill свободного места, `sync`, `fstrim`; сборка падает, если `base-<vmid>-disk-0` занят больше чем на 40%. Firewall сборочной VM снимается перед `template` (иначе `qm clone` копирует ipset).
+10. **apt.** Источники на время сборки — снапшот; `snapshot.ubuntu.com` отвечал 503 около 30 min: cloud-init повторяет установку `qemu-guest-agent`, шаги используют `apt-get update --error-on=any` с повторами.
+11. **Docker** держится `apt-mark hold` только во время сборки; в шаблоне снят.
+
+### 20.3 Права и изменения хоста, добавленные по факту
+
+- Роль `SbxTemplateMedia` (`Datastore.AllocateTemplate`, `Datastore.Audit`) на `/storage/local` (`infra/pve/setup.sh media`). `Datastore.Allocate` не выдаётся; проверка шага это проверяет.
+- `sbx-node`: клон из `base-<id>-*` любого VMID диапазона, запрет `vm-<id>-disk-*` поверх шаблона, операции `media.list`, `media.remove`, `lv.scan`. Развёртывание: `setup.sh node`.
+
+### 20.4 Шаблон
+
+Сборка и VMID, которые записаны в `deploy/compose/config/sbx.yaml`, — в итоговом отчёте ветки; занято в thin pool после `fstrim` — `manifest.diskUsedGiB`.
 
 ## 21. Открытые вопросы и риски
 

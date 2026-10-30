@@ -104,3 +104,23 @@ func TestLvScanRefusesForeignAndBadInput(t *testing.T) {
 		t.Fatalf("opened %v calls %v", *opened, h.run.calls)
 	}
 }
+
+func TestLvUsageActivatesTemplateForTheReading(t *testing.T) {
+	h := newHarness(nil)
+	for i := range h.lvm.lvs {
+		if h.lvm.lvs[i].Name == "base-599-disk-0" {
+			h.lvm.lvs[i].SizeBytes = 64 << 30
+			h.lvm.lvs[i].DataPercent = 11.4
+		}
+	}
+	m := resultMap(t, h.call(t, "lv.usage", map[string]any{"name": "base-599-disk-0"}))
+	if m["dataPercent"].(float64) != 11.4 || m["sizeBytes"].(float64) != float64(64<<30) {
+		t.Fatalf("result %v", m)
+	}
+	if len(h.run.calls) != 2 || h.run.calls[0][1] != "-ay" || h.run.calls[1][1] != "-an" {
+		t.Fatalf("calls %v", h.run.calls)
+	}
+	if r := h.call(t, "lv.usage", map[string]any{"name": "vm-108-disk-1"}); r.OK {
+		t.Fatal("foreign LV accepted")
+	}
+}

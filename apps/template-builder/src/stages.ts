@@ -516,11 +516,11 @@ async function checkTemplateDisk(
 	st: State,
 ): Promise<void> {
 	const name = `base-${vmid}-disk-0`;
-	const { lvs } = await deps.node.call<{
-		lvs: { name: string; sizeBytes: number; dataPercent: number }[];
-	}>("lv.list", {});
-	const lv = lvs.find((l) => l.name === name);
-	if (!lv) throw new Error(`${name} not found after the template conversion`);
+	// lv.list has no data percent for an inactive LV (a template); lv.usage activates it.
+	const lv = await deps.node.call<{ sizeBytes: number; dataPercent: number }>(
+		"lv.usage",
+		{ name },
+	);
 	const usedGiB =
 		Math.round(((lv.sizeBytes * lv.dataPercent) / 100 / 2 ** 30) * 10) / 10;
 	st.m.diskUsedGiB = usedGiB;

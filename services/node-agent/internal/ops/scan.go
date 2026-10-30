@@ -96,22 +96,11 @@ func (s *Server) lvScan(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		pats = append(pats, []byte(p))
 	}
-	all, err := s.LVM.List(ctx)
+	release, err := s.activate(ctx, args.Name)
 	if err != nil {
 		return nil, err
 	}
-	i := slices.IndexFunc(all, func(l lvm.LV) bool { return l.Name == args.Name })
-	if i < 0 {
-		return nil, forbidden("LV %q does not exist", args.Name)
-	}
-	active := len(all[i].Attr) > 4 && all[i].Attr[4] == 'a'
-	lv := s.Cfg.VG + "/" + args.Name
-	if !active {
-		if _, err := s.Host.Run(ctx, "lvchange", "-ay", "-K", lv); err != nil {
-			return nil, err
-		}
-		defer func() { _, _ = s.Host.Run(context.WithoutCancel(ctx), "lvchange", "-an", lv) }()
-	}
+	defer release()
 	open := s.ScanOpen
 	if open == nil {
 		open = openDevice
@@ -126,6 +115,55 @@ func (s *Server) lvScan(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("scan %s: %w", args.Name, err)
 	}
 	return map[string]any{"matches": matches, "scannedBytes": scanned}, nil
+}
+
+// activate makes an existing LV active for reading (a template's LV is inactive and skipped by
+// default) and returns the function that restores its state.
+func (s *Server) activate(ctx context.Context, name string) (func(), error) {
+	all, err := s.LVM.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(all, func(l lvm.LV) bool { return l.Name == name })
+	if i < 0 {
+		return nil, forbidden("LV %q does not exist", name)
+	}
+	if len(all[i].Attr) > 4 && all[i].Attr[4] == 'a' {
+		return func() {}, nil
+	}
+	lv := s.Cfg.VG + "/" + name
+	if _, err := s.Host.Run(ctx, "lvchange", "-ay", "-K", lv); err != nil {
+		return nil, err
+	}
+	return func() { _, _ = s.Host.Run(context.WithoutCancel(ctx), "lvchange", "-an", lv) }, nil
+}
+
+// lvUsage reports the thin usage of one LV (a template disk or a VM disk of the range); lvs
+// reports no data percent for an inactive LV, so a template is activated for the reading.
+func (s *Server) lvUsage(ctx context.Context, raw json.RawMessage) (any, error) {
+	var args struct {
+		Name string `json:"name"`
+	}
+	if err := decodeArgs(raw, &args); err != nil {
+		return nil, err
+	}
+	if err := validScanTarget(s, args.Name); err != nil {
+		return nil, err
+	}
+	release, err := s.activate(ctx, args.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	all, err := s.LVM.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(all, func(l lvm.LV) bool { return l.Name == args.Name })
+	if i < 0 {
+		return nil, forbidden("LV %q does not exist", args.Name)
+	}
+	return map[string]any{"sizeBytes": all[i].SizeBytes, "dataPercent": all[i].DataPercent}, nil
 }
 
 func validScanTarget(s *Server, name string) error {

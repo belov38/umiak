@@ -77,6 +77,7 @@ var handlers = map[string]handler{
 	"media.list":   (*Server).mediaList,
 	"media.remove": (*Server).mediaRemove,
 	"lv.scan":      (*Server).lvScan,
+	"lv.usage":     (*Server).lvUsage,
 }
 
 // decodeArgs decodes optional args strictly.
