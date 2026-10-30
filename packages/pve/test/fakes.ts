@@ -266,7 +266,24 @@ export class FakePve {
 			case "GET /config":
 				return { ...vm.config };
 			case "PUT /config": {
-				for (const [k, v] of Object.entries(p)) vm.config[k] = String(v);
+				const id = Number(/\/qemu\/(\d+)/.exec(path)?.[1]);
+				for (const [k, v] of Object.entries(p)) {
+					// "<storage>:<size GiB>,opts" asks Proxmox to allocate a new volume.
+					const alloc = /^([^:,]+):\d+(,.*)?$/.exec(String(v));
+					if (k === "tpmstate0" && alloc) {
+						const used = new Set(
+							[
+								...Object.values(vm.config)
+									.join(" ")
+									.matchAll(new RegExp(`vm-${id}-disk-(\\d+)`, "g")),
+							].map((m) => Number(m[1])),
+						);
+						let n = 0;
+						while (used.has(n)) n++;
+						vm.config[k] =
+							`${alloc[1]}:vm-${id}-disk-${n},size=4M${alloc[2] ?? ""}`;
+					} else vm.config[k] = String(v);
+				}
 				const mac = /virtio=([0-9A-F:]+)/i.exec(String(p.net0 ?? ""))?.[1];
 				const entry = this.ipam.find(
 					(e) => e.vmid === Number(/\/qemu\/(\d+)/.exec(path)?.[1]),
@@ -293,6 +310,8 @@ export class FakePve {
 			case "POST /status/resume":
 				vm.status = "running";
 				return this.#task();
+			case "PUT /sendkey":
+				return null;
 			case "PUT /firewall/options":
 				vm.firewall.options = { ...p };
 				return null;

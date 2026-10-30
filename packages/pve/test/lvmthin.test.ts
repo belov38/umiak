@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	FreezeBudgetExceededError,
+	FreezeTimeoutError,
 	formatDisk,
 	LvmThinDriver,
 	parseDiskSet,
@@ -29,7 +30,7 @@ const winTpl: DiskSet = parseDiskSet(
 	"local-lvm",
 );
 
-function setup(opts: { budgetMs?: number } = {}) {
+function setup(opts: { budgetMs?: number; freezeTimeoutMs?: number } = {}) {
 	const log: string[] = [];
 	const node = new FakeNode(log);
 	const clock = new FakeClock();
@@ -46,6 +47,9 @@ function setup(opts: { budgetMs?: number } = {}) {
 		vcpu,
 		storage: "local-lvm",
 		freezeBudgetMs: opts.budgetMs ?? 10_000,
+		...(opts.freezeTimeoutMs !== undefined
+			? { freezeTimeoutMs: opts.freezeTimeoutMs }
+			: {}),
 		thawRetryDelayMs: 0,
 		now: clock.now,
 		newSnapshotId: () => "snap1",
@@ -123,6 +127,24 @@ describe("cloneFromTemplate", () => {
 				options: { discard: "on", iothread: "1", ssd: "1" },
 			},
 		]);
+	});
+
+	it("skips the requested slots", async () => {
+		const { node, driver } = setup();
+		const disks = await driver.cloneFromTemplate(
+			{ node: "pve", vmid: 598, disks: winTpl },
+			{ node: "pve", vmid: 501 },
+			{ skipSlots: ["tpmstate0"] },
+		);
+		const items = node.calls[1]?.args.items as {
+			origin: string;
+			name: string;
+		}[];
+		expect(items.map((i) => `${i.origin}->${i.name}`)).toEqual([
+			"base-598-disk-0->vm-501-disk-0",
+			"base-598-disk-1->vm-501-disk-1",
+		]);
+		expect(disks.map((d) => d.slot)).toEqual(["efidisk0", "scsi0"]);
 	});
 
 	it("numbers disks by slot order for a Windows template", async () => {
@@ -249,6 +271,46 @@ describe("snapshot", () => {
 			op: "lv.remove",
 			args: { names: ["sbx-snap-snap1-scsi0"] },
 		});
+	});
+
+	it("does not count the time before freeze() returns against the budget", async () => {
+		const { clock, node, driver, hook } = setup({ budgetMs: 10_000 });
+		hook.freeze = async () => {
+			clock.advance(12_000);
+		};
+		const s = await driver.snapshot(machine(linuxTpl), hook);
+		expect(s.freezeMs).toBe(0);
+		expect(node.ops()).not.toContain("lv.remove");
+	});
+
+	it("counts the time from freeze() return to the thaw call, not thaw itself", async () => {
+		const { clock, node, driver, hook } = setup({ budgetMs: 10_000 });
+		hook.thaw = async () => {
+			clock.advance(30_000);
+		};
+		const s = await driver.snapshot(machine(linuxTpl), hook);
+		expect(s.freezeMs).toBe(0);
+		expect(node.ops()).not.toContain("lv.remove");
+	});
+
+	it("throws FreezeTimeoutError and thaws when freeze() is slower than freezeTimeoutMs", async () => {
+		const { log, node, driver, hook } = setup({ freezeTimeoutMs: 20 });
+		let finishFreeze: () => void = () => {};
+		hook.freeze = () => {
+			log.push("freeze");
+			return new Promise<void>((r) => {
+				finishFreeze = r;
+			});
+		};
+		await expect(
+			driver.snapshot(machine(linuxTpl), hook),
+		).rejects.toBeInstanceOf(FreezeTimeoutError);
+		expect(log).toEqual(["node:pool.usage", "freeze", "thaw"]);
+		expect(node.ops()).not.toContain("lv.snapshot");
+		// A freeze that completes after the timeout must not leave the guest frozen.
+		finishFreeze();
+		await new Promise((r) => setTimeout(r, 5));
+		expect(log.filter((l) => l === "thaw")).toHaveLength(2);
 	});
 
 	it("retries thaw and reports a machine that needs attention after the last retry", async () => {

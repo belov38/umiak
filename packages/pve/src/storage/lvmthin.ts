@@ -30,6 +30,14 @@ export class FreezeBudgetExceededError extends Error {
 	}
 }
 
+/** hook.freeze() did not return within freezeTimeoutMs; the snapshot is cancelled. */
+export class FreezeTimeoutError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "FreezeTimeoutError";
+	}
+}
+
 /** The guest may still be frozen: the machine needs attention. */
 export class ThawFailedError extends Error {
 	readonly vmid: number;
@@ -85,7 +93,10 @@ export interface LvmThinOptions {
 	node: NodeOps;
 	vcpu: VcpuControl;
 	storage: string;
+	/** Time from the return of hook.freeze() to the call of hook.thaw(). */
 	freezeBudgetMs?: number;
+	/** Limit for hook.freeze() itself (agent hooks, secret wipe, VSS preparation). */
+	freezeTimeoutMs?: number;
 	maxDataPercent?: number;
 	maxMetadataPercent?: number;
 	thawRetries?: number;
@@ -120,6 +131,7 @@ export class LvmThinDriver implements StorageDriver {
 	constructor(opts: LvmThinOptions) {
 		this.#o = {
 			freezeBudgetMs: 10_000,
+			freezeTimeoutMs: 30_000,
 			maxDataPercent: 80,
 			maxMetadataPercent: 70,
 			thawRetries: 3,
@@ -155,33 +167,41 @@ export class LvmThinDriver implements StorageDriver {
 	#vmDisks(
 		source: DiskSet,
 		vmid: number,
+		skipSlots: readonly DiskSlot[] = [],
 	): { items: SnapshotItem[]; disks: DiskSet } {
 		const items: SnapshotItem[] = [];
 		const disks: DiskSet = [];
-		sorted(source).forEach((d, k) => {
-			const name = `vm-${vmid}-disk-${k}`;
-			items.push({
-				origin: d.lv,
-				name,
-				tags: ["sbx", `sbx-vm-${vmid}`],
-				activationSkip: false,
+		sorted(source)
+			.filter((d) => !skipSlots.includes(d.slot))
+			.forEach((d, k) => {
+				const name = `vm-${vmid}-disk-${k}`;
+				items.push({
+					origin: d.lv,
+					name,
+					tags: ["sbx", `sbx-vm-${vmid}`],
+					activationSkip: false,
+				});
+				disks.push({
+					slot: d.slot,
+					volid: `${this.#o.storage}:${name}`,
+					lv: name,
+					options: { ...d.options },
+				});
 			});
-			disks.push({
-				slot: d.slot,
-				volid: `${this.#o.storage}:${name}`,
-				lv: name,
-				options: { ...d.options },
-			});
-		});
 		return { items, disks };
 	}
 
 	async cloneFromTemplate(
 		tpl: TemplateRef,
 		target: VmTarget,
+		opts: { skipSlots?: DiskSlot[] } = {},
 	): Promise<DiskSet> {
 		await this.#assertCapacity(target);
-		const { items, disks } = this.#vmDisks(tpl.disks, target.vmid);
+		const { items, disks } = this.#vmDisks(
+			tpl.disks,
+			target.vmid,
+			opts.skipSlots,
+		);
 		await this.#o.node.call("lv.snapshot", { items });
 		return disks;
 	}
@@ -235,14 +255,16 @@ export class LvmThinDriver implements StorageDriver {
 			return ref;
 		}
 
-		const start = this.#o.now();
 		let frozen = false;
 		let paused = false;
 		let created: string[] = [];
 		let opError: unknown;
+		let start: number | undefined;
 		try {
 			frozen = true; // thaw even if freeze itself fails half-way
-			await hook.freeze();
+			await this.#freeze(hook);
+			// The budget covers what runs while the guest holds writes: pause, lvcreate, resume.
+			start = this.#o.now();
 			if (m.disks.length > 1) {
 				paused = true;
 				await this.#o.vcpu.suspend(m.vmid);
@@ -262,10 +284,10 @@ export class LvmThinDriver implements StorageDriver {
 				resumeError = err;
 			}
 		}
+		const freezeMs = start === undefined ? 0 : this.#o.now() - start;
 		if (frozen) await this.#thaw(m.vmid, hook);
 		if (opError) throw opError;
 		if (resumeError) throw resumeError;
-		const freezeMs = this.#o.now() - start;
 		if (freezeMs > this.#o.freezeBudgetMs) {
 			if (created.length > 0)
 				await this.#o.node.call("lv.remove", { names: created });
@@ -274,6 +296,28 @@ export class LvmThinDriver implements StorageDriver {
 			);
 		}
 		return { ...ref, freezeMs };
+	}
+
+	/** hook.freeze() under freezeTimeoutMs. A freeze that finishes late is thawed again. */
+	async #freeze(hook: QuiesceHook): Promise<void> {
+		const limit = this.#o.freezeTimeoutMs;
+		const pending = hook.freeze();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timedOut = new Promise<"timeout">((resolve) => {
+			timer = setTimeout(() => resolve("timeout"), limit);
+		});
+		try {
+			if ((await Promise.race([pending, timedOut])) !== "timeout") return;
+		} finally {
+			clearTimeout(timer);
+		}
+		pending.then(
+			() => hook.thaw().catch(() => {}),
+			() => {},
+		);
+		throw new FreezeTimeoutError(
+			`freeze did not return within ${limit} ms; snapshot cancelled`,
+		);
 	}
 
 	async #thaw(vmid: number, hook: QuiesceHook): Promise<void> {

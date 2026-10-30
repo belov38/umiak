@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
 	type Params,
@@ -170,5 +171,150 @@ describe("Qga.exec", () => {
 		await expect(
 			new Qga(api, "pve").exec(500, ["sleep", "9"], { timeoutMs: 1 }),
 		).rejects.toThrow(/timed out/);
+	});
+});
+
+describe("Qga.fsfreezeStatus", () => {
+	it('parses "frozen" and "thawed"', async () => {
+		const api = new ScriptedPve({
+			"fsfreeze-status": [{ result: "frozen" }, { result: "thawed" }],
+		});
+		const qga = new Qga(api, "pve");
+		await expect(qga.fsfreezeStatus(500)).resolves.toBe("frozen");
+		await expect(qga.fsfreezeStatus(500)).resolves.toBe("thawed");
+		expect(api.calls[0]).toBe("GET fsfreeze-status");
+	});
+
+	it("rejects an unknown state", async () => {
+		const api = new ScriptedPve({ "fsfreeze-status": [{ result: "weird" }] });
+		await expect(new Qga(api, "pve").fsfreezeStatus(500)).rejects.toThrow(
+			/weird/,
+		);
+	});
+});
+
+describe("Qga.shutdown", () => {
+	it("posts agent/shutdown", async () => {
+		const api = new ScriptedPve({ shutdown: [null] });
+		await new Qga(api, "pve").shutdown(500);
+		expect(api.calls).toEqual(["POST shutdown"]);
+	});
+});
+
+interface ExecCall {
+	command: string[];
+	input: string | undefined;
+}
+
+/** Fake guest: decodes each exec's stdin like the PowerShell script does and keeps the file. */
+class FakeWindowsGuest implements PveClient {
+	execs: ExecCall[] = [];
+	file = Buffer.alloc(0);
+	hashOverride: string | undefined;
+	failChunk: number | undefined;
+	#last = { exited: 1, exitcode: 0, "out-data": "" };
+	async get<T>(_path: string, _p?: Params): Promise<T> {
+		return this.#last as T;
+	}
+	async post<T>(path: string, p?: Params): Promise<T> {
+		if (!path.endsWith("/agent/exec")) throw new Error(`unexpected ${path}`);
+		const command = (p?.command ?? []) as string[];
+		const input = p?.["input-data"] as string | undefined;
+		this.execs.push({ command, input });
+		const script = command[command.length - 2] ?? "";
+		const chunk = Buffer.from(input ?? "", "base64");
+		if (this.failChunk === this.execs.length - 1) {
+			this.#last = { exited: 1, exitcode: 1, "out-data": "" };
+		} else {
+			this.file = /FileMode\]::Create/.test(script)
+				? chunk
+				: Buffer.concat([this.file, chunk]);
+			const hash = /SHA256/.test(script)
+				? `${this.hashOverride ?? createHash("sha256").update(this.file).digest("hex").toUpperCase()}\r\n`
+				: "";
+			this.#last = { exited: 1, exitcode: 0, "out-data": hash };
+		}
+		return { pid: this.execs.length } as T;
+	}
+	put<T>(): Promise<T> {
+		throw new Error("unexpected put");
+	}
+	delete<T>(): Promise<T> {
+		throw new Error("unexpected delete");
+	}
+	async waitTask(): Promise<void> {}
+}
+
+describe("Qga.fileWriteWindows", () => {
+	const data = Buffer.from(
+		Array.from({ length: 70_000 }, (_, i) => (i * 7) & 0xff),
+	);
+
+	it("sends base64 chunks of at most 32 KiB and checks the sha256", async () => {
+		const guest = new FakeWindowsGuest();
+		await new Qga(guest, "pve").fileWriteWindows(
+			500,
+			"C:\\Windows\\Temp\\x.bin",
+			data,
+		);
+		expect(guest.execs).toHaveLength(3);
+		for (const e of guest.execs) {
+			expect(e.command.slice(0, 4)).toEqual([
+				"powershell",
+				"-NoProfile",
+				"-NonInteractive",
+				"-Command",
+			]);
+			expect(e.command.at(-1)).toBe("C:\\Windows\\Temp\\x.bin");
+			expect(Buffer.from(e.input ?? "", "base64").length).toBeLessThanOrEqual(
+				32 * 1024,
+			);
+		}
+		// Only the first chunk truncates, only the last one reports the hash.
+		const scripts = guest.execs.map((e) => e.command.at(-2) ?? "");
+		expect(scripts.map((s) => /FileMode\]::Create/.test(s))).toEqual([
+			true,
+			false,
+			false,
+		]);
+		expect(scripts.map((s) => /SHA256/.test(s))).toEqual([false, false, true]);
+		expect(guest.file.equals(data)).toBe(true);
+	});
+
+	it("writes an empty file as one chunk", async () => {
+		const guest = new FakeWindowsGuest();
+		await new Qga(guest, "pve").fileWriteWindows(
+			500,
+			"C:\\x.txt",
+			Buffer.alloc(0),
+		);
+		expect(guest.execs).toHaveLength(1);
+		expect(guest.file.length).toBe(0);
+	});
+
+	it("fails when the guest hash differs", async () => {
+		const guest = new FakeWindowsGuest();
+		guest.hashOverride = "00".repeat(32);
+		await expect(
+			new Qga(guest, "pve").fileWriteWindows(500, "C:\\x.bin", data),
+		).rejects.toThrow(/sha256/);
+	});
+
+	it("fails when a chunk exits non-zero", async () => {
+		const guest = new FakeWindowsGuest();
+		guest.failChunk = 1;
+		await expect(
+			new Qga(guest, "pve").fileWriteWindows(500, "C:\\x.bin", data),
+		).rejects.toThrow(/chunk 2/);
+		expect(guest.execs).toHaveLength(2);
+	});
+
+	it("rejects paths that would not survive PowerShell command-line parsing", async () => {
+		const guest = new FakeWindowsGuest();
+		for (const p of ["C:\\a b\\x", "C:\\x';calc", "C:\\$env\\x", ""])
+			await expect(
+				new Qga(guest, "pve").fileWriteWindows(500, p, data),
+			).rejects.toThrow(/path/);
+		expect(guest.execs).toHaveLength(0);
 	});
 });
