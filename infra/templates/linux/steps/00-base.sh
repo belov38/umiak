@@ -69,10 +69,9 @@ ln -sfn /usr/bin/fdfind /usr/local/bin/fd
 apt_get autoremove --purge
 
 log "mask units"
-for unit in apt-daily.timer apt-daily-upgrade.timer motd-news.timer man-db.timer e2scrub_all.timer systemd-oomd.service; do
-	if [ "$unit" = systemd-oomd.service ] && ! systemctl cat "$unit" >/dev/null 2>&1; then
-		continue
-	fi
+oomd=$(systemctl cat systemd-oomd.service >/dev/null 2>&1 && echo yes || echo no)
+for unit in "${MASK_UNITS[@]}"; do
+	[[ $unit == systemd-oomd.* && $oomd == no ]] && continue
 	systemctl mask --now "$unit"
 done
 

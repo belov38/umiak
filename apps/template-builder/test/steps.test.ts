@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -125,15 +134,31 @@ describe("recipe scripts: spec items", () => {
 		const base = code("steps/00-base.sh");
 		expect(base).toContain("linux-image-virtual");
 		expect(base).toContain("full-upgrade");
-		for (const unit of [
+		expect(bashArray(code("lib.sh"), "MASK_UNITS")).toEqual([
 			"apt-daily.timer",
 			"apt-daily-upgrade.timer",
 			"motd-news.timer",
 			"man-db.timer",
 			"e2scrub_all.timer",
 			"systemd-oomd.service",
-		])
-			expect(base, unit).toContain(unit);
+			"systemd-oomd.socket",
+		]);
+		expect(base).toMatch(/for unit in "\$\{MASK_UNITS\[@\]\}"; do/);
+	});
+
+	it("verify.sh checks the same purge and mask lists as the steps", () => {
+		const lib = code("lib.sh");
+		const verify = code("verify.sh");
+		expect(bashArray(verify, "PURGED")).toEqual(
+			bashArray(lib, "PURGE_PACKAGES"),
+		);
+		expect(bashArray(verify, "MASKED")).toEqual(bashArray(lib, "MASK_UNITS"));
+	});
+
+	it("20-docker accepts only the pinned key, nothing appended", () => {
+		expect(code("steps/20-docker.sh")).toMatch(
+			/fprs=\$\(gpg_primary_fprs "\$key\.part"\)[^\n]*\n\[ "\$fprs" = "\$DOCKER_KEY_FPR" \] \|\| die/,
+		);
 	});
 
 	it("10-system removes all three .bash_logout files", () => {
@@ -393,17 +418,23 @@ describe("verify.sh", () => {
 describe("renderSeed on the real linux recipe", () => {
 	it("renders every step, lib.sh and files/", () => {
 		const recipe = loadRecipe(templates, "linux");
-		const agentPackage = join(tmpdir(), "sbx-steps-test-agent.tar");
+		const dir = mkdtempSync(join(tmpdir(), "sbx-steps-test-"));
+		const agentPackage = join(dir, "agent.tar");
 		writeFileSync(agentPackage, "x");
-		const files = renderSeed({
-			recipe,
-			versions: loadVersions(recipe),
-			buildId: "0199c5a0-7b1e-7a3c-8d3e-5f2a9c1b4e60",
-			version: "20261030.1",
-			agentPackage,
-			agentVersion: "1.2.3",
-			manifestBase: {},
-		});
+		let files: Map<string, string | Buffer>;
+		try {
+			files = renderSeed({
+				recipe,
+				versions: loadVersions(recipe),
+				buildId: "0199c5a0-7b1e-7a3c-8d3e-5f2a9c1b4e60",
+				version: "20261030.1",
+				agentPackage,
+				agentVersion: "1.2.3",
+				manifestBase: {},
+			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 		for (const step of recipe.steps.filter((s) => s !== REBOOT_STEP))
 			expect(files.get(`build/steps/${step}.sh`)?.toString()).toBe(
 				read(`steps/${step}.sh`),
@@ -414,4 +445,83 @@ describe("renderSeed on the real linux recipe", () => {
 		);
 		expect(files.has("build/files/etc/sudoers.d/90-sbx-user")).toBe(true);
 	});
+});
+
+const gpg = spawnSync("gpg", ["--version"]).status === 0;
+
+describe("lib.sh gpg_primary_fprs", () => {
+	// A throwaway build dir: lib.sh needs build/env next to it.
+	function run(keyFile: string, dir: string): string[] {
+		copyFileSync(join(linux, "lib.sh"), join(dir, "lib.sh"));
+		writeFileSync(join(dir, "env"), "SBX_BUILD_ID='x'\n");
+		// lib.sh sets the Ubuntu PATH; keep the host's to find gpg.
+		const r = spawnSync(
+			"bash",
+			[
+				"-c",
+				'p=$PATH; . "$1/lib.sh"; PATH=$p; gpg_primary_fprs "$2"',
+				"_",
+				dir,
+				keyFile,
+			],
+			{ encoding: "utf8" },
+		);
+		expect(r.status, r.stderr).toBe(0);
+		return r.stdout.split("\n").filter((l) => l !== "");
+	}
+
+	it.skipIf(!gpg)(
+		"lists every primary key and no subkey",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "sbx-gpg-"));
+			try {
+				const home = join(dir, "gnupg");
+				mkdirSync(home, { mode: 0o700 });
+				const g = (...args: string[]) =>
+					spawnSync(
+						"gpg",
+						[
+							"--homedir",
+							home,
+							"--batch",
+							"--pinentry-mode",
+							"loopback",
+							"--passphrase",
+							"",
+							...args,
+						],
+						{ encoding: "utf8" },
+					);
+				const fprs: string[] = [];
+				for (const uid of ["a@sbx.test", "b@sbx.test"]) {
+					// default algo: primary key + encryption subkey
+					expect(
+						g("--quick-gen-key", uid, "default", "default", "never").status,
+					).toBe(0);
+					const list = g("--with-colons", "--list-keys", uid).stdout;
+					const fpr = /^fpr:+([0-9A-F]{40}):/m.exec(list)?.[1];
+					expect(fpr).toBeDefined();
+					fprs.push(fpr as string);
+				}
+				const one = join(dir, "one.asc");
+				const both = join(dir, "both.asc");
+				writeFileSync(one, g("--armor", "--export", "a@sbx.test").stdout);
+				writeFileSync(
+					both,
+					g("--armor", "--export", "a@sbx.test", "b@sbx.test").stdout,
+				);
+				expect(run(one, dir)).toEqual([fprs[0]]);
+				expect(run(both, dir).sort()).toEqual([...fprs].sort());
+			} finally {
+				spawnSync("gpgconf", [
+					"--homedir",
+					join(dir, "gnupg"),
+					"--kill",
+					"all",
+				]);
+				rmSync(dir, { recursive: true, force: true });
+			}
+		},
+		60_000,
+	);
 });

@@ -24,7 +24,7 @@ export PATH=$STD_PATH LC_ALL=C.UTF-8
 
 # Same lists as lib.sh (this script runs on its own, without the seed).
 PURGED=(snapd 'apport*' unattended-upgrades 'ubuntu-pro-client*' update-notifier-common landscape-common pollinate fwupd modemmanager multipath-tools open-iscsi udisks2 lxd-installer ufw open-vm-tools rsyslog sysstat avahi-daemon 'cups*' 'tailscale*' systemd-zram-generator)
-MASKED=(apt-daily.timer apt-daily-upgrade.timer motd-news.timer man-db.timer e2scrub_all.timer systemd-oomd.service)
+MASKED=(apt-daily.timer apt-daily-upgrade.timer motd-news.timer man-db.timer e2scrub_all.timer systemd-oomd.service systemd-oomd.socket)
 
 # report <id> <0|1|INFO> <evidence...>: 0 is PASS, anything else FAIL.
 report() {

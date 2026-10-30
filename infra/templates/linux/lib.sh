@@ -28,6 +28,8 @@ SBX_STD_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # patterns as in bash `case`; systemd-zram-generator because there is no swap
 # of any kind (section 8.6).
 PURGE_PACKAGES=(snapd 'apport*' unattended-upgrades 'ubuntu-pro-client*' update-notifier-common landscape-common pollinate fwupd modemmanager multipath-tools open-iscsi udisks2 lxd-installer ufw open-vm-tools rsyslog sysstat avahi-daemon 'cups*' 'tailscale*' systemd-zram-generator)
+# Masked by 00-base (spec 8.1); the systemd-oomd units only when present.
+MASK_UNITS=(apt-daily.timer apt-daily-upgrade.timer motd-news.timer man-db.timer e2scrub_all.timer systemd-oomd.service systemd-oomd.socket)
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
@@ -116,6 +118,12 @@ print(v)
 PY
 }
 
+# toml_has <table>: whether versions.toml has the top-level table.
+toml_has() {
+	python3 -I -c 'import sys, tomllib; sys.exit(not isinstance(tomllib.load(open(sys.argv[1], "rb")).get(sys.argv[2]), dict))' \
+		"$SBX_BUILD_DIR/versions.toml" "$1"
+}
+
 # toml_table <table>: `key=value` lines of a flat table of versions.toml.
 toml_table() {
 	python3 -I - "$SBX_BUILD_DIR/versions.toml" "$1" <<'PY'
@@ -126,6 +134,17 @@ if not isinstance(t, dict):
 for k, v in t.items():
     print(f"{k}={v}")
 PY
+}
+
+# gpg_primary_fprs <keyfile>: fingerprints of the primary keys in the file,
+# one per line; subkeys are not listed.
+gpg_primary_fprs() {
+	local home rc=0
+	home=$(mktemp -d)
+	GNUPGHOME=$home gpg --batch --show-keys --with-colons "$1" 2>/dev/null |
+		awk -F: '$1 == "pub" || $1 == "sec" { want = 1; next } $1 == "fpr" && want { print $10 } { want = 0 }' || rc=$?
+	rm -rf "$home"
+	return "$rc"
 }
 
 # install_file <path> [mode]: /<path> from files/<path>.

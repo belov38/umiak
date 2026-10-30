@@ -56,7 +56,8 @@ mapfile -t kernels < <(compgen -G '/boot/vmlinuz-*' || true)
 [ "${#kernels[@]}" -eq 1 ] || bad+=("kernels: ${kernels[*]}")
 left=$(installed_packages "${PURGE_PACKAGES[@]}" | tr '\n' ' ')
 [ -z "$left" ] || bad+=("packages to purge are installed: $left")
-keys=$(find / -xdev \( -name authorized_keys -o -name authorized_keys2 \) -print 2>/dev/null | tr '\n' ' ')
+# find may fail on files that vanish meanwhile; what it prints still counts.
+keys=$({ find / -xdev \( -name authorized_keys -o -name authorized_keys2 \) -print 2>/dev/null || true; } | tr '\n' ' ')
 [ -z "$keys" ] || bad+=("authorized_keys: $keys")
 for f in /etc/skel/.bash_logout /home/user/.bash_logout /root/.bash_logout; do
 	[ ! -e "$f" ] || bad+=("$f exists")

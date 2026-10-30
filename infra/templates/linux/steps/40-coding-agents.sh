@@ -25,7 +25,8 @@ install_file etc/codex/config.toml
 
 # `sbx` CLI (S7) and its API URL, when the build was given them.
 if [ -f "$SBX_BUILD_DIR/sbx" ]; then
-	if sha=$(toml_get sbx.cli.sha256 2>/dev/null); then
+	if toml_has sbx; then
+		sha=$(toml_get sbx.cli.sha256)
 		echo "$sha  $SBX_BUILD_DIR/sbx" | sha256sum -c --status || die "build/sbx does not match versions.toml sbx.cli.sha256"
 	else
 		log "versions.toml has no [sbx]: build/sbx is not checked"

@@ -11,10 +11,9 @@ key=/etc/apt/keyrings/docker.asc
 
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL --retry 5 --retry-all-errors -o "$key.part" https://download.docker.com/linux/ubuntu/gpg
-gnupg_home=$(mktemp -d)
-fprs=$(GNUPGHOME=$gnupg_home gpg --show-keys --with-colons "$key.part" | awk -F: '$1 == "fpr" { print $10 }')
-rm -rf "$gnupg_home"
-grep -qx "$DOCKER_KEY_FPR" <<<"$fprs" || die "unexpected Docker key: $fprs"
+# apt trusts every key of the Signed-By file: it must hold exactly this one.
+fprs=$(gpg_primary_fprs "$key.part") || die "cannot read the Docker key file"
+[ "$fprs" = "$DOCKER_KEY_FPR" ] || die "Docker key file must hold only $DOCKER_KEY_FPR, has: $(echo "$fprs" | tr '\n' ' ')"
 chmod 0644 "$key.part"
 mv "$key.part" "$key"
 
