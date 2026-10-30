@@ -132,7 +132,7 @@ describe("tool list", () => {
 			"files_stat",
 			"files_delete",
 		]);
-		expect(ALL_TOOLS.slice(16).map((t) => t.name)).toEqual(
+		expect(ALL_TOOLS.slice(16, 22).map((t) => t.name)).toEqual(
 			FILE_TOOLS.map((t) => t.name),
 		);
 		const table: Record<string, [boolean, boolean, boolean, boolean]> = {
