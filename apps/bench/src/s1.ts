@@ -61,9 +61,11 @@ interface BatchResult {
 const DEFAULT_TARGETS = {
 	lanGateway: "192.168.68.1",
 	hostLan: "192.168.68.116",
-	hostTailscale: "100.64.10.2",
 	vnetGateway: "10.88.0.1",
 };
+
+/** The address the operator reaches the host by (dev default: the PoC host). */
+const DEFAULT_HOST_ADDRESS = "100.64.10.2";
 
 function testSmbios(): Smbios {
 	const uuid = randomUUID();
@@ -137,6 +139,7 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 	}
 	const targets: NetTargets = {
 		...DEFAULT_TARGETS,
+		hostAddress: process.env.SBX_NODE_SSH_HOST || DEFAULT_HOST_ADDRESS,
 		hostLinkLocal: pf.inventory?.sbx0.linkLocal ?? "",
 		denyPublic: (process.env.SBX_DENY_PUBLIC_IPS ?? "")
 			.split(/\s+/)

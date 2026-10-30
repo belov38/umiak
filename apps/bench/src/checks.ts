@@ -98,7 +98,8 @@ export async function pingBlocked(
 export interface NetTargets {
 	lanGateway: string;
 	hostLan: string;
-	hostTailscale: string;
+	/** The operator's address of the host (SBX_NODE_SSH_HOST). */
+	hostAddress: string;
 	vnetGateway: string;
 	hostLinkLocal: string;
 	denyPublic: string[];
@@ -166,7 +167,7 @@ export async function networkChecks(
 	}
 	for (const [host, ports] of [
 		[t.hostLan, [22, 8006]],
-		[t.hostTailscale, [22, 8006]],
+		[t.hostAddress, [22, 8006]],
 		[t.vnetGateway, [22, 8006, 53]],
 	] as const) {
 		for (const port of ports)
