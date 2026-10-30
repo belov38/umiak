@@ -14,6 +14,14 @@ export const operatorOnly: Access = ({ req }) => isOperatorReq(req);
 
 export const nobody: Access = () => false;
 
+/**
+ * One document by id, operators only: no bulk update/delete by `where`.
+ * Payload runs the hooks of a bulk operation in parallel in one
+ * transaction, so per-document invariants (the last owner) would not hold.
+ */
+export const operatorByIdOnly: Access = ({ req, id }) =>
+	isOperatorReq(req) && id !== undefined;
+
 /** Collection access with every operation for operators only. */
 export const operatorAccess = {
 	read: operatorOnly,

@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
-import { APIError, type Payload, ValidationError } from "payload";
+import { APIError, Forbidden, type Payload, ValidationError } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrateSbxPayload } from "../src/index.ts";
 import { closePayload, openPayload } from "./helpers.ts";
@@ -20,6 +20,9 @@ describe.skipIf(skipPg())("collection rules", () => {
 		expect((err as APIError).message).toBe(message);
 		expect((err as APIError).status).toBe(400);
 	};
+
+	const forbidden = (p: Promise<unknown>) =>
+		expect(p).rejects.toBeInstanceOf(Forbidden);
 
 	const validation = async (p: Promise<unknown>, path: string) => {
 		const err = await p.then(
@@ -145,22 +148,113 @@ describe.skipIf(skipPg())("collection rules", () => {
 			await payload.delete({ collection: "memberships", id: m.id });
 		});
 
-		it("moving the last owner to another team is refused", async () => {
+		it("bulk delete by where is refused, owners stay", async () => {
+			const tm = await team();
+			await member(tm.id, "owner");
+			await member(tm.id, "owner");
+			await forbidden(
+				payload.delete({
+					collection: "memberships",
+					where: { team: { equals: tm.id } },
+					overrideAccess: false,
+					user: operator,
+				}),
+			);
+			expect(
+				await count("memberships", {
+					and: [{ team: { equals: tm.id } }, { role: { equals: "owner" } }],
+				}),
+			).toBe(2);
+		});
+
+		it("bulk update by where is refused, owners stay", async () => {
+			const tm = await team();
+			await member(tm.id, "owner");
+			await member(tm.id, "owner");
+			await forbidden(
+				payload.update({
+					collection: "memberships",
+					where: { team: { equals: tm.id } },
+					data: { role: "member" },
+					overrideAccess: false,
+					user: operator,
+				}),
+			);
+			expect(
+				await count("memberships", {
+					and: [{ team: { equals: tm.id } }, { role: { equals: "owner" } }],
+				}),
+			).toBe(2);
+		});
+	});
+
+	describe("memberships: user and team are fixed", () => {
+		it("the Local API refuses a change of team or user", async () => {
 			const tm = await team();
 			const other = await team();
-			const owner = await member(tm.id, "owner");
+			await member(tm.id, "owner");
+			const m = await member(tm.id, "member");
 			await apiError(
 				payload.update({
 					collection: "memberships",
-					id: owner.id,
+					id: m.id,
 					data: { team: other.id },
 				}),
-				"last_owner",
+				"membership_immutable",
 			);
+			await apiError(
+				payload.update({
+					collection: "memberships",
+					id: m.id,
+					data: { user: (await user()).id },
+				}),
+				"membership_immutable",
+			);
+			// Same values and other fields are fine.
+			await payload.update({
+				collection: "memberships",
+				id: m.id,
+				data: { team: tm.id, role: "owner" },
+			});
+		});
+
+		it("through access the fields are read-only: the change is dropped", async () => {
+			const tm = await team();
+			const other = await team();
+			await member(tm.id, "owner");
+			const m = await member(tm.id, "member");
+			await payload.update({
+				collection: "memberships",
+				id: m.id,
+				data: { team: other.id, role: "owner" },
+				overrideAccess: false,
+				user: operator,
+			});
+			const back = await payload.findByID({
+				collection: "memberships",
+				id: m.id,
+				depth: 0,
+			});
+			expect(back.team).toBe(tm.id);
+			expect(back.role).toBe("owner");
 		});
 	});
 
 	describe("teams: delete", () => {
+		it("bulk delete by where is refused", async () => {
+			const tm = await team({ name: "bulk" });
+			await member(tm.id, "owner");
+			await forbidden(
+				payload.delete({
+					collection: "teams",
+					where: { id: { equals: tm.id } },
+					overrideAccess: false,
+					user: operator,
+				}),
+			);
+			expect(await count("teams", { id: { equals: tm.id } })).toBe(1);
+		});
+
 		it("a personal team cannot be deleted", async () => {
 			const tm = await team({ personal: true });
 			await member(tm.id, "owner");

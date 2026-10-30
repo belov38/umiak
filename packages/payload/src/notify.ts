@@ -16,16 +16,23 @@ export type NotifyChannel =
 
 type SQL = ReturnType<typeof sql>;
 
-/** The drizzle handle of the request transaction, or of the pool without one. */
+/**
+ * The drizzle handle of the request transaction, or of the pool without one.
+ * A transaction id without a session (already committed or rolled back)
+ * throws: running outside it would notify for a write that may not exist.
+ */
 async function txDb(req: PayloadRequest) {
 	const adapter = req.payload.db as unknown as PostgresAdapter;
 	const id =
 		req.transactionID instanceof Promise
 			? await req.transactionID
 			: req.transactionID;
-	const session =
-		id === undefined || id === null ? undefined : adapter.sessions[id];
-	return session?.db ?? adapter.drizzle;
+	if (id === undefined || id === null || id === "") return adapter.drizzle;
+	const session = adapter.sessions[id];
+	if (!session) {
+		throw new Error(`notify: transaction ${id} of the request is not open`);
+	}
+	return session.db;
 }
 
 /** Runs SQL in the transaction of the request; returns the rows. */

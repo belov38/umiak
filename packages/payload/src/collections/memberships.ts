@@ -1,18 +1,31 @@
 import type { CollectionConfig } from "payload";
-import { operatorAccess } from "../access.ts";
+import { operatorAccess, operatorByIdOnly } from "../access.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
 import {
+	membershipsFixedPairBeforeChange,
 	membershipsLastOwnerBeforeChange,
 	membershipsLastOwnerBeforeDelete,
 } from "../hooks/rules.ts";
 import { membershipsRevokeAfterDelete } from "../hooks/ssh-revoke.ts";
 
+// user and team never change: a membership is replaced by delete + create,
+// so the delete sends sbx_ssh_revoke for the old (team, user).
+const fixed = { update: () => false };
+
 export const Memberships: CollectionConfig = {
 	slug: "memberships",
 	admin: { defaultColumns: ["user", "team", "role", "createdAt"] },
-	access: operatorAccess,
+	// No bulk update/delete: the last-owner rule is per document.
+	access: {
+		...operatorAccess,
+		update: operatorByIdOnly,
+		delete: operatorByIdOnly,
+	},
 	hooks: {
-		beforeChange: [membershipsLastOwnerBeforeChange],
+		beforeChange: [
+			membershipsFixedPairBeforeChange,
+			membershipsLastOwnerBeforeChange,
+		],
 		beforeDelete: [membershipsLastOwnerBeforeDelete],
 		afterChange: [identityAfterChange("memberships")],
 		afterDelete: [
@@ -22,8 +35,20 @@ export const Memberships: CollectionConfig = {
 	},
 	indexes: [{ fields: ["user", "team"], unique: true }],
 	fields: [
-		{ name: "user", type: "relationship", relationTo: "users", required: true },
-		{ name: "team", type: "relationship", relationTo: "teams", required: true },
+		{
+			name: "user",
+			type: "relationship",
+			relationTo: "users",
+			required: true,
+			access: fixed,
+		},
+		{
+			name: "team",
+			type: "relationship",
+			relationTo: "teams",
+			required: true,
+			access: fixed,
+		},
 		{
 			name: "role",
 			type: "select",

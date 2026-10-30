@@ -33,11 +33,12 @@ without `req` opens and commits its own, one with `req` uses the caller's
 session of `req.transactionID`, so Postgres delivers after commit and a
 listener reads the new data; a rolled back write sends nothing. A failing
 `pg_notify` fails the hook and Payload rolls the write back. Without a
-transaction (a bare `createLocalReq`) the statement is its own transaction.
+transaction (a bare `createLocalReq`) the statement is its own transaction;
+a `transactionID` whose session is gone (committed or rolled back) throws.
 
 | Channel | Payload | Sent by |
 |---|---|---|
-| `sbx_identity` | `'<collection>:<uuid>'` | `users`, `teams`, `memberships` (id of the membership), `api-keys`, `ssh-keys` after change/delete; updates that only change `lastUsedAt`, `lastLoginAt`, `updatedAt` (or nothing) send nothing |
+| `sbx_identity` | `'<collection>:<uuid>'`, memberships `'memberships:<userUuid>:<teamUuid>'` (S7 §23.10) | `users`, `teams`, `memberships`, `api-keys`, `ssh-keys` after change/delete; updates that only change `lastUsedAt`, `lastLoginAt`, `updatedAt` (or nothing) send nothing |
 | `sbx_config` | `'<collection>:<uuid>'`, `'platform-defaults:global'` | `templates`, `sizes`, `pool-targets` (change/delete), `teams` (create, `quota` change, delete), `platform-defaults` |
 | `sbx_routes` | `'*'` | `platform-defaults` when `publicPortsEnabled` or `ssoPortPolicy` changed |
 | `sbx_ssh_revoke` | `user:usr_…`, `member:team_…:usr_…`, `key:key_…`, `team:team_…` | as the 0302/0303 triggers: a user becomes inactive (or an active one is deleted), a membership is deleted, a key gets `revokedAt` or a new `secretHash` while live (or a live key is deleted), a team is deleted |
@@ -50,10 +51,17 @@ transaction (a bare `createLocalReq`) the statement is its own transaction.
 Errors are `APIError(code, 400)` (message = code) or Payload
 `ValidationError` (field path):
 
-- `memberships`: the last `owner` of a team cannot be demoted, moved to
-  another team or deleted (`last_owner`); the team row is locked
-  (`FOR NO KEY UPDATE`) before the count, so concurrent removals serialize.
-- `teams` delete: a personal team is refused (`personal_team`); otherwise
+- `memberships`: the last `owner` of a team cannot be demoted or deleted
+  (`last_owner`); the team row is locked (`FOR NO KEY UPDATE`) before the
+  count, so concurrent removals serialize. Update and delete through access
+  need an `id`: Payload runs the hooks of a bulk `where` operation in
+  parallel in one transaction, where the count cannot see the siblings.
+  Server code must not bulk-update or bulk-delete memberships through the
+  Local API either. `user` and `team` are fixed (read-only through access,
+  `membership_immutable` with `overrideAccess`): a membership is replaced by
+  delete + create, so the delete closes the old SSH sessions.
+- `teams` delete: one team by id only (no bulk delete through access); a
+  personal team is refused (`personal_team`); otherwise
   `beforeDelete` deletes the team's memberships and team notices and sets
   `revokedAt` (and `revokedBy` = the request user) on its live keys, all
   through the Local API with `req`, so their hooks notify in the same

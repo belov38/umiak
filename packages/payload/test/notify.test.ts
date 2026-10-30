@@ -167,10 +167,23 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			const back = await payload.findByID({ collection: "users", id: u.id });
 			expect(back.name).toBe("before");
 		});
+
+		it("notify with a transaction id that is no longer open throws", async () => {
+			const req = await createLocalReq({}, payload);
+			await initTransaction(req);
+			const id = req.transactionID;
+			await commitTransaction(req);
+			if (id === undefined) throw new Error("no transaction");
+			req.transactionID = id;
+			await expect(notify(req, "sbx_identity", "users:x")).rejects.toThrow(
+				/not open/,
+			);
+			delete req.transactionID;
+		});
 	});
 
 	describe("sbx_identity", () => {
-		it("users, teams, memberships, api-keys, ssh-keys notify '<collection>:<uuid>'", async () => {
+		it("users, teams, api-keys, ssh-keys notify '<collection>:<uuid>', memberships '<user>:<team>'", async () => {
 			const u = await user();
 			const tm = await team();
 			const m = await payload.create({
@@ -192,9 +205,25 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			expect(ids).toEqual([
 				`users:${u.id}`,
 				`teams:${tm.id}`,
-				`memberships:${m.id}`,
+				`memberships:${u.id}:${tm.id}`,
 				`api-keys:${k.id}`,
 				`ssh-keys:${s.id}`,
+			]);
+			listener.clear();
+			// A role change keeps the pair: sent once.
+			await payload.create({
+				collection: "memberships",
+				data: { user: (await user()).id, team: tm.id, role: "owner" },
+			});
+			await listener.settle();
+			listener.clear();
+			await payload.update({
+				collection: "memberships",
+				id: m.id,
+				data: { role: "member" },
+			});
+			expect(only(await listener.settle(), "sbx_identity")).toEqual([
+				`memberships:${u.id}:${tm.id}`,
 			]);
 			listener.clear();
 			await payload.delete({ collection: "ssh-keys", id: s.id });
@@ -389,7 +418,9 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			expect(only(notes, "sbx_ssh_revoke")).toEqual([
 				`member:${pub("team", tm.id)}:${pub("user", u.id)}`,
 			]);
-			expect(only(notes, "sbx_identity")).toEqual([`memberships:${m.id}`]);
+			expect(only(notes, "sbx_identity")).toEqual([
+				`memberships:${u.id}:${tm.id}`,
+			]);
 		});
 
 		it("a revoked key -> 'key:key_…'; a rotated live key too", async () => {
@@ -428,7 +459,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 		it("a deleted shared team -> 'team:team_…', revokes and deletes in one transaction", async () => {
 			const u = await user();
 			const tm = await team("shared");
-			const m = await payload.create({
+			await payload.create({
 				collection: "memberships",
 				data: { user: u.id, team: tm.id, role: "owner" },
 			});
@@ -445,7 +476,11 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				].sort(),
 			);
 			expect(only(notes, "sbx_identity").sort()).toEqual(
-				[`memberships:${m.id}`, `api-keys:${k.id}`, `teams:${tm.id}`].sort(),
+				[
+					`memberships:${u.id}:${tm.id}`,
+					`api-keys:${k.id}`,
+					`teams:${tm.id}`,
+				].sort(),
 			);
 			expect(only(notes, "sbx_config")).toEqual([`teams:${tm.id}`]);
 		});

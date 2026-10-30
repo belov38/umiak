@@ -2,6 +2,7 @@ export {
 	isOperatorReq,
 	nobody,
 	operatorAccess,
+	operatorByIdOnly,
 	operatorOnly,
 } from "./access.ts";
 export {

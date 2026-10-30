@@ -50,14 +50,32 @@ async function assertAnotherOwner(
 	if (others.totalDocs === 0) throw new APIError("last_owner", 400);
 }
 
+/**
+ * user and team of a membership are fixed, with overrideAccess too: moving
+ * it would leave the SSH sessions of the old (team, user) open. Replace it
+ * by delete + create.
+ */
+export const membershipsFixedPairBeforeChange: CollectionBeforeChangeHook = ({
+	data,
+	originalDoc,
+	operation,
+}) => {
+	if (operation !== "update" || !originalDoc) return data;
+	for (const f of ["user", "team"] as const) {
+		if (data[f] !== undefined && relId(data[f]) !== relId(originalDoc[f])) {
+			throw new APIError("membership_immutable", 400);
+		}
+	}
+	return data;
+};
+
 export const membershipsLastOwnerBeforeChange: CollectionBeforeChangeHook =
 	async ({ data, originalDoc, operation, req }) => {
 		if (operation !== "update" || !originalDoc) return data;
 		if (originalDoc.role !== "owner") return data;
 		const team = relId(originalDoc.team);
 		const nextRole = data.role ?? originalDoc.role;
-		const nextTeam = relId(data.team ?? originalDoc.team);
-		if (team !== null && (nextRole !== "owner" || nextTeam !== team)) {
+		if (team !== null && nextRole !== "owner") {
 			await assertAnotherOwner(req, team, String(originalDoc.id));
 		}
 		return data;

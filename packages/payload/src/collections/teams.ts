@@ -1,5 +1,5 @@
 import type { CollectionConfig, Field } from "payload";
-import { operatorAccess } from "../access.ts";
+import { operatorAccess, operatorByIdOnly } from "../access.ts";
 import { configAfterDelete, teamsConfigAfterChange } from "../hooks/config.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
 import { teamsBeforeDelete } from "../hooks/rules.ts";
@@ -20,7 +20,8 @@ export const Teams: CollectionConfig = {
 		useAsTitle: "name",
 		defaultColumns: ["name", "personal", "createdBy", "createdAt"],
 	},
-	access: operatorAccess,
+	// Deleted one at a time through the team page (S8 §6.4), never in bulk.
+	access: { ...operatorAccess, delete: operatorByIdOnly },
 	hooks: {
 		beforeDelete: [teamsBeforeDelete],
 		afterChange: [identityAfterChange("teams"), teamsConfigAfterChange],
