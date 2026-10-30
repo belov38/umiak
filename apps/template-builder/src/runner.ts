@@ -280,10 +280,10 @@ export async function runStep(
 			`step ${name}: preparing ${LOG_DIR} failed: ${prep.stderr.trim()}`,
 		);
 
-	// systemd expands $VAR in command lines itself, and EXIT_STATUS exists only in the environment
-	// of the ExecStopPost process. `$$` makes systemd pass a literal `$` to sh, which then expands
-	// $EXIT_STATUS. The argv element is handed to systemd-run as is (no shell on our side).
-	const stopPost = `echo "$$EXIT_STATUS" > ${rcPath}`;
+	// EXIT_STATUS is in the environment of ExecStopPost. Whether systemd expands $EXIT_STATUS in
+	// the command line itself or leaves it to sh, the file gets the number; "$$" is NOT unescaped
+	// for transient units (checked on Ubuntu 26.04: sh received "$$" and wrote its PID).
+	const stopPost = `echo "$EXIT_STATUS" > ${rcPath}`;
 	const start = [
 		"systemd-run",
 		`--unit=${unit}`,

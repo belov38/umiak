@@ -135,8 +135,8 @@ describe("runStep", () => {
 			"--property=StandardOutput=append:/var/log/sbx-build/00-base.log",
 			"--property=StandardError=append:/var/log/sbx-build/00-base.log",
 			"--property=WorkingDirectory=/mnt/seed/build",
-			// systemd turns $$ into $, then sh expands $EXIT_STATUS from the ExecStopPost environment.
-			`--property=ExecStopPost=/bin/sh -c 'echo "$$EXIT_STATUS" > /var/log/sbx-build/00-base.rc'`,
+			// A single $: "$$" reaches sh unchanged in transient units and expands to its PID.
+			`--property=ExecStopPost=/bin/sh -c 'echo "$EXIT_STATUS" > /var/log/sbx-build/00-base.rc'`,
 			"--",
 			"bash",
 			SCRIPT,
