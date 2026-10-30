@@ -163,6 +163,13 @@ export async function configureVmFirewall(
 }
 /** Hardware recorded in snapshot metadata: the template keys plus size. Never identity. */
 const SNAPSHOT_HW_KEYS = [...TEMPLATE_HW_KEYS, "cores", "memory", "balloon"];
+/**
+ * Snapshot hardware entry (not a Proxmox key, stripped before create) that says whether the
+ * source had a cloud-init drive: "1" or "0". A fork follows its source, so a fork of an S5
+ * sandbox gets no drive either (S5 section 17.1 p. 4). Snapshots without it predate the entry
+ * and keep the drive.
+ */
+export const SNAPSHOT_CLOUDINIT_KEY = "sbx-cloudinit";
 
 export interface MachineInfo {
 	vmid: number;
@@ -437,7 +444,6 @@ export class Machines {
 		const { api, allocator, driver, cfg } = this.#o;
 		const hardware: Record<string, string> = {};
 		let tpl: TemplateRef | undefined;
-		// A fork keeps the cloud-init parameters it always had; only templates can opt out.
 		let cloudInit = true;
 		if (src.kind === "template") {
 			const t = await this.#templateInfo();
@@ -446,7 +452,9 @@ export class Machines {
 			for (const k of TEMPLATE_HW_KEYS)
 				if (t.config[k] !== undefined) hardware[k] = String(t.config[k]);
 		} else {
-			Object.assign(hardware, src.snap.hardware);
+			const { [SNAPSHOT_CLOUDINIT_KEY]: ci, ...hw } = src.snap.hardware;
+			cloudInit = ci !== "0";
+			Object.assign(hardware, hw);
 		}
 		const size =
 			opts.size ?? (src.kind === "snapshot" ? undefined : DEFAULT_SIZE);
@@ -691,6 +699,7 @@ export class Machines {
 		const hardware: Record<string, string> = {};
 		for (const k of SNAPSHOT_HW_KEYS)
 			if (config[k] !== undefined) hardware[k] = String(config[k]);
+		hardware[SNAPSHOT_CLOUDINIT_KEY] = hasCloudInitDrive(config) ? "1" : "0";
 		const snap: SnapshotRef = { ...ref, hardware };
 		this.#o.snapshots.putSnapshot(snap);
 		return snap;

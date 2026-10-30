@@ -13,6 +13,9 @@ type Resetter interface {
 	ReloadNetwork() error
 	// RestartSSH restarts sshd if it is running.
 	RestartSSH() error
+	// RestartJournal restarts systemd-journald if it is running, so it
+	// writes under the current machine-id.
+	RestartJournal() error
 }
 
 // LinuxResetter is the Resetter for Linux hosts. Its methods return
@@ -67,4 +70,10 @@ func (f *FakeResetter) ReloadNetwork() error {
 func (f *FakeResetter) RestartSSH() error {
 	f.Calls = append(f.Calls, "RestartSSH")
 	return f.Errs["RestartSSH"]
+}
+
+// RestartJournal records the call.
+func (f *FakeResetter) RestartJournal() error {
+	f.Calls = append(f.Calls, "RestartJournal")
+	return f.Errs["RestartJournal"]
 }

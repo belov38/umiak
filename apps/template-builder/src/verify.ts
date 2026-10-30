@@ -289,6 +289,8 @@ export interface Facts {
 	credentialSecret: string;
 	/** machineId in the agent's /var/lib/sbx-agent/identity.json. */
 	agentMachineId: string;
+	/** "1" when journalctl (this machine-id's journal) has the kernel's first line of this boot. */
+	journalBoot: string;
 }
 
 /** A fork must not share its source's identity (spec section 2 anti-goals). */
@@ -331,6 +333,13 @@ export function checkForkIdentity(a: Facts, f: Facts): CheckResult[] {
 			uuidHex(a.agentMachineId) === uuidHex(a.uuid) &&
 				uuidHex(f.agentMachineId) === uuidHex(f.uuid),
 			`A ${a.agentMachineId || "none"}, F ${f.agentMachineId || "none"}`,
+		),
+		// journald of a fork starts with the source's machine-id; the agent restarts it before the
+		// flush, or F's journal lands in A's directory and `journalctl` in F finds none.
+		pass(
+			"fork_journal",
+			a.journalBoot === "1" && f.journalBoot === "1",
+			`whole boot in the own journal: A ${a.journalBoot || "?"}, F ${f.journalBoot || "?"}`,
 		),
 	];
 }
@@ -465,6 +474,7 @@ const FACTS_SCRIPT = [
 	'  if [ -e "/var/lib/systemd/$f" ]; then echo "$f=$(sha256sum "/var/lib/systemd/$f" | cut -d" " -f1)"; else echo "$f=absent"; fi',
 	"done",
 	'echo "agent_machine_id=$(grep -o \'"machineId": *"[^"]*"\' /var/lib/sbx-agent/identity.json | cut -d\'"\' -f4)"',
+	"echo \"journal_boot=$(journalctl -b -q --no-pager -o cat -t kernel 2>/dev/null | head -1 | grep -c '^Linux version')\"",
 ].join("\n");
 
 const DOCKER_SCRIPT = "docker info >/dev/null && docker run --rm hello-world";
@@ -606,6 +616,7 @@ export async function verifyTemplate(
 			randomSeed: kv["random-seed"] ?? "",
 			credentialSecret: kv["credential.secret"] ?? "",
 			agentMachineId: kv.agent_machine_id ?? "",
+			journalBoot: kv.journal_boot ?? "",
 		};
 	};
 

@@ -1,9 +1,19 @@
 // Vitest global setup: provides an admin Postgres DSN to the test workers.
 // SBX_TEST_DATABASE_URL is used as is; otherwise a postgres:18.6-alpine
-// container is started once through the docker CLI and removed in teardown.
+// container is started once through the docker CLI and removed in teardown;
+// a run killed before its teardown is cleaned up by the guard of @sbx/db
+// (owner labels, watchdog, sweep at the next setup).
 // SBX_TEST_SKIP_PG=1 without a URL makes database tests skip instead of fail.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import {
+	containerName,
+	currentOwner,
+	ownerLabels,
+	removeOrphans,
+	startWatchdog,
+	type Watchdog,
+} from "@sbx/db/testing/container-guard";
 import pg from "pg";
 import type { TestProject } from "vitest/node";
 
@@ -12,6 +22,7 @@ const run = promisify(execFile);
 const image = "postgres:18.6-alpine";
 
 let containerId: string | undefined;
+let watchdog: Watchdog | undefined;
 
 export async function setup(project: TestProject): Promise<void> {
 	const url = process.env.SBX_TEST_DATABASE_URL;
@@ -39,20 +50,29 @@ export async function setup(project: TestProject): Promise<void> {
 
 export async function teardown(): Promise<void> {
 	if (containerId !== undefined) {
-		await run("docker", ["rm", "-f", containerId]).catch(() => {});
+		await run("docker", ["rm", "-f", "-v", containerId]).catch(() => {});
 		containerId = undefined;
 	}
+	watchdog?.stop();
+	watchdog = undefined;
 }
 
 async function startContainer(): Promise<string> {
+	await removeOrphans();
+	const owner = await currentOwner();
+	const name = containerName();
+	watchdog = await startWatchdog(name, owner ?? { pid: process.pid }).catch(
+		() => undefined,
+	);
 	const { stdout } = await run(
 		"docker",
 		[
 			"run",
 			"-d",
 			"--rm",
-			"--label",
-			"sbx-test=agent-client",
+			"--name",
+			name,
+			...ownerLabels(owner),
 			"-e",
 			"POSTGRES_PASSWORD=sbx",
 			"-p",

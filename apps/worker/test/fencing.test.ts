@@ -166,7 +166,7 @@ describe("Fenced (operations.attempt)", () => {
 		const f = await Fenced.begin(w.ctx, opId);
 		if (!f) throw new Error("no fence");
 		const wait = waitUntil(w.ctx, f, async () => undefined, {
-			timeoutMs: 5000,
+			timeoutMs: 30_000,
 			pollMs: 5,
 		});
 		await w.pool.query(

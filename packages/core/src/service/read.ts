@@ -13,16 +13,23 @@ import {
 	type Sandbox,
 	sandboxFromRow,
 } from "../rows.ts";
-import { SANDBOX_STATES, type SandboxState } from "../states.ts";
+import {
+	SANDBOX_STATES,
+	type SandboxState,
+	TERMINAL_OPERATION_STATES,
+} from "../states.ts";
 import {
 	activeOperations,
 	findSandboxRow,
 	isUuid,
+	loadOperation,
 	loadSandbox,
+	type Queryable,
 	type SandboxRow,
 	type SandboxServiceDeps,
 	toSandbox,
 } from "./common.ts";
+import { decodeCursor, encodeCursor } from "./cursor.ts";
 import {
 	checkKnownKeys,
 	checkLabels,
@@ -83,35 +90,6 @@ export async function getOperation(
 	);
 	if (!r.rows[0]) throw notFound("operation");
 	return operationFromRow(r.rows[0]);
-}
-
-interface Cursor {
-	/** created_at in UTC with microseconds, `YYYY-MM-DD HH24:MI:SS.US`. */
-	c: string;
-	id: string;
-}
-
-const CURSOR_TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$/;
-
-function encodeCursor(c: Cursor): string {
-	return Buffer.from(JSON.stringify(c), "utf8").toString("base64url");
-}
-
-function decodeCursor(s: string): Cursor {
-	try {
-		const v: unknown = JSON.parse(Buffer.from(s, "base64url").toString("utf8"));
-		if (
-			isPlainObject(v) &&
-			typeof v.c === "string" &&
-			CURSOR_TS_RE.test(v.c) &&
-			isUuid(v.id)
-		) {
-			return { c: v.c, id: v.id };
-		}
-	} catch {
-		// reported below
-	}
-	throw validation([{ path: "cursor", message: "invalid cursor" }]);
 }
 
 function escapeLike(s: string): string {
@@ -336,26 +314,82 @@ export function waitForSandboxState(
 	id: string,
 	states: SandboxState[],
 	timeoutMs: number,
+	signal?: AbortSignal,
 ): Promise<Sandbox> {
+	return waitForRow(deps, {
+		id,
+		channel: "sbx_sandboxes",
+		what: "sandbox",
+		load: (q, rowId) => loadSandbox(q, rowId),
+		done: (s) => states.includes(s.state),
+		timeoutMs,
+		...(signal === undefined ? {} : { signal }),
+	});
+}
+
+/**
+ * Resolves with the operation once it is terminal (`succeeded`, `failed`,
+ * `superseded`), or with its current row when `timeoutMs` passes. Woken by
+ * `NOTIFY sbx_operations '<id>'` (trigger of 0201) like `waitForSandboxState`.
+ * No access check: the caller has read the operation with `getOperation`.
+ */
+export function waitForOperation(
+	deps: SandboxServiceDeps,
+	id: string,
+	timeoutMs: number,
+): Promise<Operation> {
+	return waitForRow(deps, {
+		id,
+		channel: "sbx_operations",
+		what: "operation",
+		load: (q, rowId) => loadOperation(q, rowId),
+		done: (op) => TERMINAL_OPERATION_STATES.includes(op.state),
+		timeoutMs,
+	});
+}
+
+interface WaitSpec<T> {
+	id: string;
+	/** NOTIFY channel whose payload is the row id. */
+	channel: string;
+	/** For `not_found`. */
+	what: string;
+	load: (q: Queryable, id: string) => Promise<T | null>;
+	done: (row: T) => boolean;
+	timeoutMs: number;
+	/** Abort: reject with its reason and stop listening and polling. */
+	signal?: AbortSignal;
+}
+
+function waitForRow<T>(deps: SandboxServiceDeps, w: WaitSpec<T>): Promise<T> {
 	const notifier = deps.notifier;
 	const pollMs = deps.waitPollMs ?? (notifier ? 2000 : 500);
-	const deadline = Date.now() + Math.max(0, timeoutMs);
+	const deadline = Date.now() + Math.max(0, w.timeoutMs);
+	const { id } = w;
 
-	return new Promise<Sandbox>((resolve, reject) => {
+	return new Promise<T>((resolve, reject) => {
 		let done = false;
 		let reading = false;
 		let again = false;
 		let unsubscribe: (() => void) | null = null;
 		const timers: NodeJS.Timeout[] = [];
 
-		const finish = (err: unknown, s?: Sandbox) => {
+		const signal = w.signal;
+		const onAbort = () => finish(signal?.reason);
+		const finish = (err: unknown, row?: T) => {
 			if (done) return;
 			done = true;
 			for (const t of timers) clearTimeout(t); // also clears the interval
 			unsubscribe?.();
-			if (s !== undefined) resolve(s);
+			signal?.removeEventListener("abort", onAbort);
+			if (row !== undefined) resolve(row);
 			else reject(err);
 		};
+		if (signal?.aborted) {
+			finish(signal.reason);
+			return;
+		}
+		signal?.addEventListener("abort", onAbort, { once: true });
 
 		const check = async (): Promise<void> => {
 			if (done) return;
@@ -367,10 +401,10 @@ export function waitForSandboxState(
 			try {
 				do {
 					again = false;
-					const s = await loadSandbox(deps.pool, id);
-					if (s === null) return finish(notFound("sandbox"));
-					if (states.includes(s.state) || Date.now() >= deadline) {
-						return finish(null, s);
+					const row = await w.load(deps.pool, id);
+					if (row === null) return finish(notFound(w.what));
+					if (w.done(row) || Date.now() >= deadline) {
+						return finish(null, row);
 					}
 				} while (again && !done);
 			} catch (err) {
@@ -381,11 +415,11 @@ export function waitForSandboxState(
 		};
 
 		if (!isUuid(id)) {
-			finish(notFound("sandbox"));
+			finish(notFound(w.what));
 			return;
 		}
 		if (notifier) {
-			unsubscribe = notifier.subscribe("sbx_sandboxes", (payload) => {
+			unsubscribe = notifier.subscribe(w.channel, (payload) => {
 				if (payload === null || payload === id) void check();
 			});
 		}

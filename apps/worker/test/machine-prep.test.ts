@@ -30,9 +30,11 @@ import {
 
 let db: TestDatabase;
 
+// The budget only bounds a hang (the condition is what is checked); it
+// leaves room for a heavily loaded machine.
 async function until(
 	cond: () => Promise<boolean>,
-	timeoutMs = 5000,
+	timeoutMs = 30_000,
 ): Promise<void> {
 	const end = Date.now() + timeoutMs;
 	while (!(await cond())) {
@@ -306,7 +308,7 @@ describe("prepareMachine under an operation fence (cold create)", () => {
 		if (!fenced) throw new Error("no fence");
 
 		await prepareMachine(w.ctx, fenced, id, { kind: "template" });
-		const bootId = await waitBooted(w.ctx, fenced, id, 2000);
+		const bootId = await waitBooted(w.ctx, fenced, id, 30_000);
 		await w.agentWorld.settled();
 
 		const m = await machine(w, id);

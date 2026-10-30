@@ -33,6 +33,7 @@ import type { Manifest, VerifyResult } from "./manifest.ts";
 import { preflight } from "./preflight.ts";
 import { loadRecipe, loadVersions } from "./recipe.ts";
 import { FileRegistry } from "./registry.ts";
+import { configuredBuilds, retire } from "./retire.ts";
 import { pveGuestIo } from "./runner.ts";
 import { makeIso } from "./seed.ts";
 import { fileSha256, MEDIA_STORAGE, TASK_TIMEOUT_MS } from "./stages.ts";
@@ -52,7 +53,8 @@ const USAGE = `usage:
   sbx-tpl list [<slug>]
   sbx-tpl show <buildId> [--field <name>]
   sbx-tpl show --active-vmid <slug>
-  sbx-tpl cleanup [--node <node>]`;
+  sbx-tpl cleanup [--node <node>]
+  sbx-tpl retire <buildId> [--delete-vm] [--config <sbx.yaml>] [--force] [--force-poc]`;
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const TEMPLATES_DIR = join(REPO_ROOT, "infra/templates");
@@ -403,6 +405,10 @@ async function main(argv: string[]): Promise<number> {
 			"dev-cp-ssh": { type: "string" },
 			field: { type: "string" },
 			"active-vmid": { type: "string" },
+			"delete-vm": { type: "boolean", default: false },
+			config: { type: "string" },
+			force: { type: "boolean", default: false },
+			"force-poc": { type: "boolean", default: false },
 		},
 	});
 	const [cmd, arg, ...extra] = positionals;
@@ -541,6 +547,44 @@ async function main(argv: string[]): Promise<number> {
 					now: () => new Date(),
 				});
 				out(report.length > 0 ? report.join("\n") : "nothing to clean");
+				return 0;
+			} finally {
+				ctx.close();
+			}
+		}
+		case "retire": {
+			if (!arg || extra.length > 0) break;
+			const m = registry.get(arg);
+			if (!m) throw new Error(`build ${arg} not found in ${registry.dir}`);
+			// The config the worker reads: the one it is given, else the dev stand's.
+			const configFile =
+				values.config ??
+				process.env.SBX_CONFIG_FILE ??
+				join(REPO_ROOT, "deploy/compose/config/sbx.yaml");
+			const configured = {
+				file: configFile,
+				builds: configuredBuilds(configFile),
+			};
+			const ctx = await makeContext({ node: m.node });
+			try {
+				const report = await retire(
+					{
+						api: ctx.api,
+						node: ctx.node,
+						allocator: ctx.allocator,
+						registry,
+						cfg: ctx.cfg,
+						configured,
+						now: () => new Date(),
+					},
+					arg,
+					{
+						deleteVm: values["delete-vm"] === true,
+						force: values.force === true,
+						forcePoc: values["force-poc"] === true,
+					},
+				);
+				out(report.join("\n"));
 				return 0;
 			} finally {
 				ctx.close();

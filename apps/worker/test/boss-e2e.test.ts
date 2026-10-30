@@ -371,7 +371,12 @@ describe("worker over pg-boss", () => {
 		expect(first?.state).toBe("completed");
 		expect(again?.state).toBe("created");
 		expect(again?.retry_limit).toBe(DELETE_RETRY_LIMIT);
-		const delayS = ((again?.start_after.getTime() ?? 0) - Date.now()) / 1000;
+		// pg-boss sets start_after on the database clock.
+		const { rows } = await db.pool.query<{ t: Date }>(
+			"SELECT clock_timestamp() AS t",
+		);
+		const now = (rows[0] as { t: Date }).t.getTime();
+		const delayS = ((again?.start_after.getTime() ?? 0) - now) / 1000;
 		expect(delayS).toBeGreaterThan(20);
 		expect(delayS).toBeLessThanOrEqual(31);
 		expect(infra.lvs.has(lv)).toBe(true);

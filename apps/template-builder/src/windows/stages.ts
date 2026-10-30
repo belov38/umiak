@@ -516,7 +516,7 @@ export async function stageWindowsVm(
 			? await pinnedMachine(api, o.node)
 			: recipe.hw.machine;
 	const hw = { ...recipe.hw, ...(machine !== undefined ? { machine } : {}) };
-	const { vmid, mac } = await deps.allocator.allocateTemplate();
+	const { vmid, mac } = await deps.allocator.allocateTemplate(recipe.vmids);
 	if (isProtectedVmid(vmid))
 		throw new Error(`allocator returned protected VMID ${vmid}`);
 	st.vmid = vmid;
@@ -1021,6 +1021,8 @@ export async function stageWindowsTemplate(
 		layout[slot] = { index: m[3], ...layout[slot] };
 	}
 	save({ diskLayout: layout });
+	// The sbx-tpl tag on the disks makes them clone origins for sbx-node (lv.usage needs it too).
+	await deps.node.call("lv.tagTemplate", { vmid });
 	await checkTemplateDisk(deps, lvs[p.recipe.disk.slot] as string, st);
 	if (st.m.diskUsedGiB !== undefined) save({ diskUsedGiB: st.m.diskUsedGiB });
 	await deps.allocator.markActive(vmid);

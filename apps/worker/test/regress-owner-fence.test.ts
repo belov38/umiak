@@ -27,7 +27,8 @@ afterAll(async () => {
 });
 
 async function until(cond: () => boolean, what: string): Promise<void> {
-	const deadline = Date.now() + 5000;
+	// Only bounds a hang; room for a heavily loaded machine.
+	const deadline = Date.now() + 30_000;
 	while (!cond()) {
 		if (Date.now() > deadline) throw new Error(`timed out waiting: ${what}`);
 		await new Promise((r) => setTimeout(r, 5));

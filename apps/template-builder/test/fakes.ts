@@ -362,6 +362,7 @@ export class FakeGuest implements GuestIo {
 					};
 			}
 		}
+		if (c0 === "update-initramfs") this.log.push("guest:initrd");
 		if (c0 === "fstrim") this.log.push("guest:fstrim");
 		if (c0 === "sync") this.log.push("guest:sync");
 		return ok();

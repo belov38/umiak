@@ -158,7 +158,8 @@ export const STOP_OP: SandboxOpHandler = {
 					"not stopping at finish",
 				);
 			}
-			// The guest is off: nothing that ran on it survives.
+			// The guest is off: nothing that ran on it survives. The reason
+			// stays null (unknown): no reboot was seen (R32).
 			await tx.client.query(
 				`UPDATE runtime.commands SET status = 'lost', ended_at = now()
 				 WHERE machine_id = $1 AND status IN ('starting', 'running')`,

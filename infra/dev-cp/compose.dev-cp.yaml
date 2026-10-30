@@ -2,6 +2,21 @@
 # over deploy/compose/compose.yaml and gateway.yaml through COMPOSE_FILE in deploy/compose/.env.
 # Dev only: the names, ports and paths here are not product defaults. Paths are relative to
 # deploy/compose (the directory of the first compose file).
+#
+# Tailscale Serve terminates TLS on the CT and forwards to loopback ports (names.sh):
+#   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/*, /sbx-auth/*; web in S8)
+#   https://<TS name>:8443/v1  -> 127.0.0.1:8080 api public listener (path kept)
+#   https://<TS name>:10000/   -> 127.0.0.1:8180 Keycloak
+# The base compose already publishes these ports on loopback, and every service talks to
+# http://keycloak:8080 while tokens carry the public issuer (KC_HOSTNAME_BACKCHANNEL_DYNAMIC):
+# containers cannot reach the Serve address. The values below come from .env and are required
+# (`:?`), so the CT never runs with a localhost default.
+
+# Peers whose X-Forwarded-* headers count: Serve's connections to the published loopback ports
+# arrive from the Docker bridge gateway (172.16.0.0/12 holds Docker's default bridge pools), and
+# oauth2-proxy calls the api from its container address in the same range.
+x-devcp-proxy-cidrs: &devcp-proxy-cidrs 172.16.0.0/12,127.0.0.1/32
+
 services:
   # sbx.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/sbx.yaml).
   migrate:
@@ -34,6 +49,11 @@ services:
       SBX_GATEWAY_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
       SBX_GATEWAY_TUNNEL_HOST: ${SBX_DEVCP_TUNNEL_HOST:?set by deploy.sh}
       SBX_GATEWAY_SSH_HOST: ${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
+      # Port SSO (S4 §8.4): a private preview sends the browser to the api behind oauth2-proxy.
+      # The preview domain (sslip.io) and the dashboard (ts.net) are different sites, so the
+      # port cookie needs SameSite=None (S4 §8.2) to work in the dashboard iframe.
+      SBX_GATEWAY_AUTH_URL: ${SBX_GATEWAY_AUTH_URL:?set by deploy.sh}
+      SBX_GATEWAY_COOKIE_CROSS_SITE: "true"
     # Public listeners on all addresses of the CT (its firewall admits only the LAN; sandboxes
     # reach only 443). 443 serves the tunnel host on the LAN address and the previews on the
     # tailnet address: preview hosts route only without a port in Host (S4 4.2), so Tailscale
@@ -44,3 +64,40 @@ services:
       - "2222:2222" # SSH
       - "127.0.0.1:7000:7000"
       - "127.0.0.1:9190:9090"
+
+  # S7: Keycloak behind Serve on :10000. The realm (imported on the first start only) gets the
+  # oauth2-proxy redirect URI and web origin of the Serve name.
+  keycloak:
+    environment:
+      KC_HOSTNAME: ${SBX_KEYCLOAK_URL:?set by deploy.sh}
+      KC_HTTP_ENABLED: "true"
+      SBX_KEYCLOAK_PROXY_HEADERS: xforwarded
+      SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES: *devcp-proxy-cidrs
+      SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:?set by deploy.sh}
+      SBX_OAUTH2_PROXY_REDIRECT_URL: ${SBX_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
+
+  # S7: the public listener behind Serve (:8443/v1). /v1/meta tells the CLI and SDK the public
+  # names; OIDC discovery and keys come from Keycloak inside the network (base). Tailscale-User-*
+  # headers from Serve are never an identity (the api reads only Authorization here).
+  api:
+    environment:
+      SBX_API_URL: ${SBX_API_PUBLIC_URL:?set by deploy.sh}
+      SBX_APP_URL: ${SBX_APP_ORIGIN:?set by deploy.sh}
+      SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:?set by deploy.sh}
+      SBX_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
+      SBX_SSH_HOST: ${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
+      SBX_SSH_PORT: "2222"
+      SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}
+      SBX_API_TRUSTED_PROXY_CIDRS: *devcp-proxy-cidrs
+
+  # S7: browser sessions behind Serve (:8443/). HTTPS on the Serve name: a Secure __Host- cookie
+  # (host-only, Path=/). Login goes to the public issuer; redeem, JWKS and profile stay on
+  # http://keycloak:8080 (oauth2-proxy.yaml, skipDiscovery).
+  oauth2-proxy:
+    environment:
+      SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}
+      OAUTH2_PROXY_REDIRECT_URL: ${SBX_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SBX_DEVCP_TS_NAME:?set by deploy.sh}:8443
+      OAUTH2_PROXY_COOKIE_NAME: __Host-sbx_session
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      OAUTH2_PROXY_REVERSE_PROXY: "true"

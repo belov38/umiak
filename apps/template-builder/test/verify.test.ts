@@ -198,6 +198,7 @@ const facts = (over: Partial<Facts> = {}): Facts => ({
 	randomSeed: "a".repeat(64),
 	credentialSecret: "absent",
 	agentMachineId: UUID_A,
+	journalBoot: "1",
 	...over,
 });
 const forkFacts = () =>
@@ -224,7 +225,13 @@ describe("checkForkIdentity", () => {
 			"fork_random_seed",
 			"fork_credential_secret",
 			"fork_agent_state",
+			"fork_journal",
 		]);
+	});
+
+	it("fails when the fork's journal went to its source's directory", () => {
+		const cs = checkForkIdentity(facts(), { ...forkFacts(), journalBoot: "0" });
+		expect(failed(cs)).toEqual(["fork_journal"]);
 	});
 
 	it("fails on a shared random seed, credential secret or agent state", () => {
@@ -555,6 +562,7 @@ class World {
 							`random-seed=${this.seedOf(vmid)}`,
 							"credential.secret=absent",
 							`agent_machine_id=${uuid}`,
+							"journal_boot=1",
 							"",
 						].join("\n"),
 					);

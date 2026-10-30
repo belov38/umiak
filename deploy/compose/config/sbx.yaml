@@ -29,7 +29,9 @@ topology:
       clusterMacId: 1
       vmidMin: 500
       vmidMax: 589
-      apiUrl: https://100.64.10.2:8006
+      # Overridden by SBX_PVE_URL / SBX_PVE_TLS_NAME in deploy/compose/.env
+      # (sbx-admin bootstrap in `migrate`).
+      apiUrl: https://pve:8006
       tlsName: pve
       secretRef: pve
       nodes:
@@ -55,13 +57,13 @@ topology:
     # drive. `sbx-admin bootstrap` makes it active; 599-seed becomes deprecated (rollback:
     # `sbx-admin template promote <599-seed build id>`).
     - templateSlug: linux
-      version: "20261030.15"
+      version: "20261030.16"
       os: linux
       node: pve
       storage: local-lvm
-      pveVmid: 598
+      pveVmid: 597
       bootTimeoutS: 300
-      agentVersion: 0.1.0+20261030.2fb34a1
+      agentVersion: 0.1.0+20261030.78c73ee
       hw:
         machine: q35
         cpu: host

@@ -2,7 +2,7 @@
 Description=sbx machine identity
 DefaultDependencies=no
 After=local-fs.target systemd-remount-fs.service
-Before=network-pre.target systemd-networkd.service ssh.service ssh.socket cloud-init-local.service sbx-agent.service sysinit.target
+Before=network-pre.target systemd-networkd.service ssh.service ssh.socket cloud-init-local.service sbx-agent.service systemd-journal-flush.service sysinit.target
 Wants=network-pre.target
 
 [Service]

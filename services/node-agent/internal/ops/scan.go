@@ -85,7 +85,8 @@ func (s *Server) lvScan(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err := decodeArgs(raw, &args); err != nil {
 		return nil, err
 	}
-	if err := validScanTarget(s, args.Name); err != nil {
+	lv, err := s.readTarget(ctx, args.Name)
+	if err != nil {
 		return nil, err
 	}
 	if len(args.Patterns) == 0 || len(args.Patterns) > scanMaxPatterns {
@@ -101,7 +102,7 @@ func (s *Server) lvScan(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		pats = append(pats, []byte(p))
 	}
-	release, err := s.activate(ctx, args.Name)
+	release, err := s.activate(ctx, lv)
 	if err != nil {
 		return nil, err
 	}
@@ -122,21 +123,13 @@ func (s *Server) lvScan(ctx context.Context, raw json.RawMessage) (any, error) {
 	return map[string]any{"matches": matches, "scannedBytes": scanned}, nil
 }
 
-// activate makes an existing LV active for reading (a template's LV is inactive and skipped by
-// default) and returns the function that restores its state.
-func (s *Server) activate(ctx context.Context, name string) (func(), error) {
-	all, err := s.LVM.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	i := slices.IndexFunc(all, func(l lvm.LV) bool { return l.Name == name })
-	if i < 0 {
-		return nil, forbidden("LV %q does not exist", name)
-	}
-	if len(all[i].Attr) > 4 && all[i].Attr[4] == 'a' {
+// activate makes a validated LV (readTarget) active for reading, a template's LV is inactive and
+// skipped by default, and returns the function that restores its state.
+func (s *Server) activate(ctx context.Context, l lvm.LV) (func(), error) {
+	if len(l.Attr) > 4 && l.Attr[4] == 'a' {
 		return func() {}, nil
 	}
-	lv := s.Cfg.VG + "/" + name
+	lv := s.Cfg.VG + "/" + l.Name
 	if _, err := s.Host.Run(ctx, "lvchange", "-ay", "-K", lv); err != nil {
 		return nil, err
 	}
@@ -156,10 +149,11 @@ func (s *Server) lvUsage(ctx context.Context, raw json.RawMessage) (any, error) 
 	if err := decodeArgs(raw, &args); err != nil {
 		return nil, err
 	}
-	if err := validScanTarget(s, args.Name); err != nil {
+	lv, err := s.readTarget(ctx, args.Name)
+	if err != nil {
 		return nil, err
 	}
-	release, err := s.activate(ctx, args.Name)
+	release, err := s.activate(ctx, lv)
 	if err != nil {
 		return nil, err
 	}
@@ -179,15 +173,34 @@ func (s *Server) lvUsage(ctx context.Context, raw json.RawMessage) (any, error) 
 	return map[string]any{"sizeBytes": all[i].SizeBytes, "dataPercent": all[i].DataPercent}, nil
 }
 
-func validScanTarget(s *Server, name string) error {
+// readTarget returns the LV that lv.scan and lv.usage may read: a template disk base-<id>-* of
+// a template slot tagged sbx-tpl, or a sandbox disk vm-<id>-disk-N tagged sbx and sbx-vm-<id>.
+// Names alone prove nothing (any guest may use a VMID or a base-* name), and dev infrastructure
+// (590-596) is in neither range. Nothing is activated before this check.
+func (s *Server) readTarget(ctx context.Context, name string) (lvm.LV, error) {
 	if !lvNameRe.MatchString(name) {
-		return errBadName
+		return lvm.LV{}, errBadName
 	}
-	if m := baseRe.FindStringSubmatch(name); m != nil && inVMIDRange(s.Cfg, atoiMatch(m, 1)) {
-		return nil
+	var need []string
+	if m := baseRe.FindStringSubmatch(name); m != nil && s.Cfg.IsTemplateSlot(atoiMatch(m, 1)) {
+		need = []string{"sbx-tpl"}
+	} else if m := vmDiskRe.FindStringSubmatch(name); m != nil && s.Cfg.InRange(atoiMatch(m, 1)) {
+		need = []string{"sbx", "sbx-vm-" + m[1]}
+	} else {
+		return lvm.LV{}, forbidden("%q is not a template or sandbox disk", name)
 	}
-	if m := vmDiskRe.FindStringSubmatch(name); m != nil && s.Cfg.InRange(atoiMatch(m, 1)) {
-		return nil
+	all, err := s.LVM.List(ctx)
+	if err != nil {
+		return lvm.LV{}, err
 	}
-	return forbidden("scan target %q is not a template or VM disk of the range", name)
+	i := slices.IndexFunc(all, func(l lvm.LV) bool { return l.Name == name })
+	if i < 0 {
+		return lvm.LV{}, forbidden("LV %q does not exist", name)
+	}
+	for _, t := range need {
+		if !slices.Contains(all[i].Tags, t) {
+			return lvm.LV{}, forbidden("LV %q lacks tag %q", name, t)
+		}
+	}
+	return all[i], nil
 }

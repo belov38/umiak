@@ -7,17 +7,17 @@ import { loadConfig, readSecretFile } from "../src/config.ts";
 describe("loadConfig", () => {
 	it("uses the PoC defaults from the spec", () => {
 		const c = loadConfig({}, "/home/u");
-		expect(c.pveUrl).toBe("https://pve.tail0000.ts.net:8006");
+		expect(c.pveUrl).toBe("https://pve:8006");
 		expect(c.tokenId).toBe("sbx@pve!poc");
 		expect(c.tokenSecretFile).toBe("/home/u/.config/sbx/pve-token");
 		expect(c.caFile).toBe("/home/u/.config/sbx/pve-root-ca.pem");
 		expect(c.tlsName).toBe("pve");
-		expect(c.nodeSshHost).toBe("pve.tail0000.ts.net");
+		expect(c.nodeSshHost).toBe("pve");
 		expect(c.nodeSshKeyFile).toBe("/home/u/.config/sbx/sbx-node_ed25519");
 		expect(c.nodeSshKnownHosts).toBe("/home/u/.config/sbx/known_hosts");
 		// pve layout: 500-589 sandboxes, 590-596 dev infrastructure, 597-599 templates.
 		expect(c.vmidRange).toEqual({ min: 500, max: 589 });
-		expect(c.templateVmidRange).toEqual({ min: 597, max: 598 });
+		expect(c.templateVmidRange).toEqual({ min: 597, max: 599 });
 		expect(c.clusterId).toBe(1);
 		expect(c.stateDb).toBe("/home/u/.local/state/sbx/poc.db");
 		expect(c.templateVmid).toBe(599);

@@ -90,6 +90,7 @@ options: { vs_buildtools: false }
 boot_timeout_s: 1200
 install_timeout_s: 2400
 verify: windows
+vmids: [598]
 `;
 
 /** The real _windows files plus fixture steps, and a recipe `winbuild` with pinned ISO sha. */
@@ -154,6 +155,10 @@ function setup(
 		sha256: state.isoSha,
 	});
 	const disk = { dataPercent: 12.5 };
+	node.handlers["lv.tagTemplate"] = (a) => ({
+		tagged: [0, 1, 2].map((k) => `base-${a.vmid}-disk-${k}`),
+		already: [],
+	});
 	node.handlers["lv.usage"] = (a) => {
 		if (a.name !== "base-598-disk-1") throw new Error(`lv.usage ${a.name}`);
 		return { sizeBytes: 96 * 2 ** 30, dataPercent: disk.dataPercent };
@@ -162,7 +167,8 @@ function setup(
 	const allocator = new Allocator({
 		store,
 		clusterId: 1,
-		range: { min: 500, max: 598 },
+		range: { min: 500, max: 589 },
+		templateRange: { min: 597, max: 599 },
 		templateVmid: 599,
 		occupied: async () => new Set(pve.vms.keys()),
 	});
@@ -375,9 +381,13 @@ describe("iso-install build: happy path", () => {
 			`api:PUT ${vm}/config`,
 			`api:POST ${vm}/template`,
 			"node:media.remove",
+			"node:lv.tagTemplate",
 			"node:lv.usage",
 			"verify",
 		]);
+		expect(s.node.calls.find((c) => c.op === "lv.tagTemplate")?.args).toEqual({
+			vmid: 598,
+		});
 		expect(s.guest.started).toEqual(["00-base", "10-system", "90-cleanup"]);
 
 		// Boot-from-CD key presses: every second for 20 s at install, 30 s at the offline boot.

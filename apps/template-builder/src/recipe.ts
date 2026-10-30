@@ -102,6 +102,8 @@ const recipeFileSchema = z.strictObject({
 	boot_timeout_s: z.number().int().positive().optional(),
 	install_timeout_s: z.number().int().positive().optional(),
 	verify: z.string().min(1).optional(),
+	/** Template slots this recipe builds into, in order (not inherited: each template has its own). */
+	vmids: z.array(z.number().int().positive()).min(1),
 });
 
 interface RecipeBase {
@@ -128,6 +130,8 @@ interface RecipeBase {
 	verify: string;
 	/** Shared directory name (`_windows`); its files have the lowest lookup priority. */
 	shared?: string;
+	/** Template slots (VMIDs) this recipe builds into, first free one wins. */
+	vmids: number[];
 	/** Directory of this recipe. */
 	dir: string;
 	/** Lookup order lowest priority first: shared dir, parent recipe directories, this recipe's directory last. */
@@ -327,6 +331,7 @@ function loadRecipeChain(
 			installTimeoutS,
 			verify,
 			...(shared !== undefined ? { shared } : {}),
+			vmids: raw.vmids,
 			dir,
 			stepDirs: sharedDir !== undefined ? [sharedDir, ...ownDirs] : ownDirs,
 		};

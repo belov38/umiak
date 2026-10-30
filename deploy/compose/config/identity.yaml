@@ -1,0 +1,27 @@
+# Identity file of the api stand-in (SBX_IDENTITY_FILE, S7 plan decision 2),
+# loaded at every api start as upserts: rows missing here are kept, revoked
+# keys stay revoked. People normally appear by themselves at their first
+# login (Keycloak user -> JIT user with a personal team), so the file is
+# empty in the dev stack. After editing:
+#   docker compose -f deploy/compose/compose.yaml up -d --force-recreate api
+#
+# Format (ids: any 8-4-4-4-12 hex):
+# teams:
+#   - {id: 00000000-0000-4000-8000-000000000001, name: platform}
+# users:
+#   # Bound to the Keycloak account with this email at its first login.
+#   - id: 00000000-0000-4000-8000-000000000101
+#     email: dev@example.com
+#     teams: {00000000-0000-4000-8000-000000000001: owner}
+# apiKeys:
+#   # Team key by its sha256 only (never the secret): one of
+#   # scopes [..] or preset read-only | ci | full.
+#   - id: 00000000-0000-4000-8000-000000000201
+#     teamId: 00000000-0000-4000-8000-000000000001
+#     name: ci
+#     sha256: <64 hex>
+#     preset: ci
+#     expiresAt: 2027-01-01T00:00:00Z
+teams: []
+users: []
+apiKeys: []

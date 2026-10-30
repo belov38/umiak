@@ -361,7 +361,7 @@ export async function stageVm(
 	save: Save,
 ): Promise<void> {
 	const { api } = deps;
-	const { vmid, mac } = await deps.allocator.allocateTemplate();
+	const { vmid, mac } = await deps.allocator.allocateTemplate(recipe.vmids);
 	if (isProtectedVmid(vmid))
 		throw new Error(`allocator returned protected VMID ${vmid}`);
 	st.vmid = vmid;
@@ -556,6 +556,8 @@ export async function stageTemplate(
 		await deps.api.waitTask(o.node, r, { timeoutMs: TASK_TIMEOUT_MS });
 	await deps.node.call("media.remove", { names: [seedName(st.m)] });
 	st.seedUploaded = false;
+	// The sbx-tpl tag on the disk makes it a clone origin for sbx-node (as 599's).
+	await deps.node.call("lv.tagTemplate", { vmid });
 	await checkTemplateDisk(deps, `base-${vmid}-disk-0`, st);
 	await deps.allocator.markActive(vmid);
 }

@@ -6,6 +6,7 @@ import {
 	idempotencyKeyReused,
 	notFound,
 	operationInProgress,
+	SbxError,
 	snapshotNotFound,
 	validation,
 } from "../errors.ts";
@@ -149,12 +150,15 @@ export async function saveSnapshot(
 /**
  * The team's `ready` saved snapshot of this name → `deleting` (the name is
  * free at once) and a `snapshot-op delete` job. Locks only the snapshot row
- * (lock order contract: no team lock).
+ * (lock order contract: no team lock). With `expectedId` (the snapshot the
+ * caller confirmed), a ready snapshot of that name with another id is
+ * refused: `snapshot_not_found` with `details.reason: "id_mismatch"`.
  */
 export async function deleteSavedSnapshot(
 	deps: SandboxServiceDeps,
 	p: Principal,
 	name: string,
+	expectedId?: string,
 ): Promise<void> {
 	if (typeof name !== "string" || !SNAPSHOT_NAME_RE.test(name)) {
 		throw snapshotNotFound(String(name));
@@ -168,6 +172,13 @@ export async function deleteSavedSnapshot(
 		);
 		const id = r.rows[0]?.id;
 		if (id === undefined) throw snapshotNotFound(name);
+		if (expectedId !== undefined && id !== expectedId) {
+			throw new SbxError(
+				"snapshot_not_found",
+				`snapshot ${name} is another snapshot now; nothing was deleted`,
+				{ details: { reason: "id_mismatch" } },
+			);
+		}
 		await tx.client.query(
 			`UPDATE runtime.snapshots SET state = 'deleting', version = version + 1
 			 WHERE id = $1`,
@@ -183,8 +194,9 @@ export async function deleteSavedSnapshot(
 }
 
 /**
- * The team's saved snapshots in `ready` and `creating` (the expected name is
- * `pendingName`), newest first. `failed` within a day is S7 §20.2 item 6.
+ * The team's saved snapshots in `ready`, `creating` (the expected name is
+ * `pendingName`) and `failed` created within the last day (S7 §13), newest
+ * first.
  */
 export async function listSavedSnapshots(
 	deps: SandboxServiceDeps,
@@ -192,9 +204,35 @@ export async function listSavedSnapshots(
 ): Promise<SavedSnapshot[]> {
 	const r = await deps.pool.query(
 		`SELECT * FROM runtime.snapshots
-		 WHERE team_id = $1 AND kind = 'saved' AND state IN ('ready', 'creating')
+		 WHERE team_id = $1 AND kind = 'saved'
+		   AND (state IN ('ready', 'creating')
+		        OR (state = 'failed' AND created_at > now() - interval '1 day'))
 		 ORDER BY created_at DESC, id DESC`,
 		[p.teamId],
 	);
 	return r.rows.map(snapshotFromRow);
+}
+
+/**
+ * The team's `ready` snapshot of this name, else the newest `creating` one
+ * whose `pendingName` it is (S7 §13), else `snapshot_not_found`.
+ */
+export async function getSavedSnapshot(
+	deps: SandboxServiceDeps,
+	p: Principal,
+	name: string,
+): Promise<SavedSnapshot> {
+	if (typeof name !== "string" || !SNAPSHOT_NAME_RE.test(name)) {
+		throw snapshotNotFound(String(name));
+	}
+	const r = await deps.pool.query(
+		`SELECT * FROM runtime.snapshots
+		 WHERE team_id = $1 AND kind = 'saved'
+		   AND ((state = 'ready' AND name = $2) OR (state = 'creating' AND pending_name = $2))
+		 ORDER BY (state = 'ready') DESC, created_at DESC, id DESC
+		 LIMIT 1`,
+		[p.teamId, name],
+	);
+	if (!r.rows[0]) throw snapshotNotFound(name);
+	return snapshotFromRow(r.rows[0]);
 }

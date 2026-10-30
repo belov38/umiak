@@ -1,14 +1,19 @@
 package ops
 
 import (
+	"slices"
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
 )
 
 const qmList = `      VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID
        100 hasp                 running    512                4.00 4068746
+       598 sbx-tpl-windows-1    running    8192              64.00 4068750
        599 sbx-ubuntu-poc       stopped    2048              40.00 0
+       590 sbx-dev-cp-vm        running    1024               8.00 4068751
 `
 
 const pctList = `VMID       Status     Lock         Name
@@ -25,6 +30,8 @@ func inventoryFS() fstest.MapFS {
 		"etc/pve/firewall/cluster.fw":           {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/firewall/500.fw":               {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/firewall/599.fw":               {Data: []byte("[OPTIONS]\n")},
+		"etc/pve/firewall/598.fw":               {Data: []byte("[OPTIONS]\n")},
+		"etc/pve/firewall/590.fw":               {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/nodes/pve/host.fw":             {Data: []byte("[OPTIONS]\nenable: 0\n")},
 		"etc/pve/qemu-server/500.conf":          {Data: []byte("memory: 2048\n")},
 		"etc/pve/qemu-server/101.conf":          {Data: []byte("memory: 2048\n")},
@@ -49,7 +56,8 @@ func TestInventoryDefaultSections(t *testing.T) {
 
 	guests := m["guests"].(map[string]any)
 	qm := guests["qm"].([]any)
-	if len(qm) != 2 || qm[1].(map[string]any)["name"] != "sbx-ubuntu-poc" || qm[0].(map[string]any)["status"] != "running" {
+	// Template slots (598 a build, 599 the PoC template) are ours; 590 is dev infrastructure.
+	if len(qm) != 2 || qm[0].(map[string]any)["vmid"].(float64) != 100 || qm[1].(map[string]any)["vmid"].(float64) != 590 || qm[0].(map[string]any)["status"] != "running" {
 		t.Errorf("qm = %v", qm)
 	}
 	pct := guests["pct"].([]any)
@@ -78,8 +86,13 @@ func TestInventoryDefaultSections(t *testing.T) {
 			t.Errorf("hash missing for %s: %v", p, hashes)
 		}
 	}
-	if _, ok := hashes["/etc/pve/firewall/500.fw"]; ok {
-		t.Error("per-VM firewall files of the range must not be hashed")
+	for _, p := range []string{"/etc/pve/firewall/500.fw", "/etc/pve/firewall/598.fw"} {
+		if _, ok := hashes[p]; ok {
+			t.Errorf("%s: per-VM firewall files of sandboxes and template builds must not be hashed", p)
+		}
+	}
+	if _, ok := hashes["/etc/pve/firewall/590.fw"]; !ok {
+		t.Error("dev infrastructure (590) firewall must be hashed")
 	}
 
 	sysctl := m["sysctl"].(map[string]any)
@@ -143,5 +156,28 @@ func TestInventoryHashesJSONCanonically(t *testing.T) {
 	c := hash(`{"zones":{"sbx":{"ips":{"10.88.0.1":{"gateway":1}}}}}`)
 	if a != b || a == c {
 		t.Errorf("a=%v b=%v c=%v", a, b, c)
+	}
+}
+
+// A template build (S9 in 598) creates untagged volumes; they are not the world. A volume of dev
+// infrastructure (590) or of another guest stays foreign.
+func TestInventoryLVsSkipTemplateSlotVolumes(t *testing.T) {
+	h := newHarness(inventoryFS())
+	h.lvm.lvs = append(h.lvm.lvs,
+		lvm.LV{Name: "vm-598-disk-0", Tags: []string{}, PoolLV: "data"},
+		lvm.LV{Name: "vm-598-disk-1", Tags: []string{}, PoolLV: "data"},
+		lvm.LV{Name: "base-597-disk-0", Tags: []string{}, PoolLV: "data"},
+		lvm.LV{Name: "vm-590-disk-0", Tags: []string{}, PoolLV: "data"},
+		lvm.LV{Name: "vm-5980-disk-0", Tags: []string{}, PoolLV: "data"},
+	)
+	m := resultMap(t, h.call(t, "inventory", map[string]any{"sections": []string{"lvs"}}))
+	names := []string{}
+	for _, l := range m["lvs"].([]any) {
+		names = append(names, l.(map[string]any)["name"].(string))
+	}
+	slices.Sort(names)
+	want := []string{"data", "vm-108-disk-1", "vm-590-disk-0", "vm-5980-disk-0"}
+	if !slices.Equal(names, want) {
+		t.Errorf("lvs = %v, want %v", names, want)
 	}
 }

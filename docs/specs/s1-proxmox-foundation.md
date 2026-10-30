@@ -182,9 +182,9 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 |---|---|
 | 500–589 | sandbox: диапазон аллокатора worker, `sbx-bench` и `deploy/compose` (`SBX_VMID_RANGE`, `vmidMin`/`vmidMax` в topology) |
 | 590–596 | dev-инфраструктура, в выдачу не входит; CT 590 — dev control plane (`infra/dev-cp`) |
-| 597–599 | шаблоны: 597–598 — сборки S5 (`sbx-tpl`, `SBX_TEMPLATE_VMID_RANGE`), 599 — шаблон PoC |
+| 597–599 | шаблоны (`sbx-tpl`, `SBX_TEMPLATE_VMID_RANGE`): Linux (S5) — 597 и 599 (599 пока шаблон PoC), Windows (S9) — 598; слоты задаёт рецепт (`vmids`) |
 
-Диапазон самого `sbx-node` остаётся 500–599: он клонирует из томов `base-<id>-*` шаблонов. Токен видит только VM своего pool, поэтому гость вне pool внутри диапазона sandbox (как CT 590 до этой раскладки) аллокатору не виден; preflight `sbx-bench` такие случаи ловит.
+У `sbx-node` та же раскладка: `vmidMin`/`vmidMax` 500–589 и `templateVmidMin`/`templateVmidMax` 597–599; он клонирует только из томов `base-<слот>-*` с тегом `sbx-tpl`, 590–596 не входят ни в один диапазон. Токен видит только VM своего pool, поэтому гость вне pool внутри диапазона sandbox (как CT 590 до этой раскладки) аллокатору не виден; preflight `sbx-bench` такие случаи ловит.
 
 ## 5. Как выполняются операции
 
@@ -203,19 +203,21 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 
 - Go-модуль: `go 1.27`, `toolchain go1.27.3`. Бинарь `sbx-node`, `GOOS=linux GOARCH=amd64`, ставится в `/usr/local/bin/sbx-node` шагом runbook.
 - Режим `--stdio`: один запрос на SSH-вызов (или несколько exec-каналов поверх одного SSH-соединения): JSON на stdin `{op, args, requestId}`, JSON на stdout `{ok, result | error}`, ненулевой exit code при ошибке. Каждая операция пишется в journal (`requestId`, op, аргументы, результат).
-- Конфиг `/etc/sbx-node.toml`: VG (`pve`), thin pool (`data`), диапазон VMID (`500–599`), VMID шаблона (`599`), имя SDN-зоны (`sbx`).
+- Конфиг `/etc/sbx-node.toml`: VG (`pve`), thin pool (`data`), диапазон VMID sandbox (`500–589`), слоты шаблонов (`597–599`), VMID шаблона (`599`), имя SDN-зоны (`sbx`).
 - Белый список операций:
 
 | op | Что делает | Защита |
 |---|---|---|
 | `version` | версия бинаря и конфиг | — |
-| `lv.snapshot` | пачка `lvcreate -s` (`origin`, `name`, `tags`, `activationSkip`); при ошибке удаляет созданное этим вызовом | origin только `base-<template>-*`, `sbx-snap-*`, `vm-<id в диапазоне>-*`; имя только `vm-<id в диапазоне>-disk-<k>` или `sbx-snap-*` |
+| `lv.snapshot` | пачка `lvcreate -s` (`origin`, `name`, `tags`, `activationSkip`); при ошибке удаляет созданное этим вызовом | origin только `base-<слот шаблона>-*` с тегом `sbx-tpl`, `sbx-snap-*`, `vm-<id в диапазоне>-*`; имя только `vm-<id в диапазоне>-disk-<k>` или `sbx-snap-*` |
 | `lv.remove` | `lvremove` по именам | только LV с тегом `sbx` |
 | `lv.list` | LV по тегам | только чтение |
+| `lv.tagTemplate` (S5) | тег `sbx-tpl` на `base-<vmid>-disk-N` | только слот шаблона, конфиг VM с `template: 1` и тегом `sbx-tpl` |
+| `lv.scan`, `lv.usage` (S5) | счёт паттернов на диске, заполнение LV; неактивный LV активируется на время чтения | только `base-<слот>-*` с тегом `sbx-tpl` и `vm-<id в диапазоне>-disk-N` с тегами `sbx`, `sbx-vm-<id>` |
 | `pool.usage` | data% и metadata% thin pool, размер и занятость наших LV | только чтение |
 | `dhcp.leases` | содержимое lease-файла dnsmasq зоны `sbx` | только чтение |
 | `dhcp.release` | освободить lease по MAC (если понадобится, §6.3) | только MAC из диапазона нашего аллокатора |
-| `inventory` | наличие заданной строки в journal и task log (только да/нет; сама строка не логируется), `qm list`, `pct list`, все LV без тега `sbx` (имя, размер, атрибуты), хеши `/etc/pve/sdn/*`, `cluster.fw`, `host.fw`, `/etc/network/interfaces*`, значения sysctl forwarding, link-local адрес хоста на `sbx0` | только чтение |
+| `inventory` | наличие заданной строки в journal и task log (только да/нет; сама строка не логируется), `qm list` (без VM в слотах шаблонов 597–599: сборки и шаблоны наши), `pct list`, все LV без тегов `sbx` и `sbx-tpl` и не тома слотов шаблонов (`vm-`/`base-<слот>-…`, во время сборки они ещё без тега) (имя, размер, атрибуты), хеши `/etc/pve/sdn/*`, `cluster.fw`, `host.fw`, `/etc/network/interfaces*`, значения sysctl forwarding, link-local адрес хоста на `sbx0` | только чтение |
 
 - Тесты: unit-тесты на разбор запросов, белый список и защиту по тегам и именам (LVM за интерфейсом, в тестах фейк). Проверка `golangci-lint`.
 - Позже тот же код становится демоном с тем же набором операций (S12). LVM сам блокирует метаданные VG, поэтому параллельные вызовы `sbx-node` и операции Proxmox на том же VG безопасны; имена у нас уникальны благодаря аллокатору.
@@ -230,14 +232,14 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 
 | Переменная | Назначение | Дефолт PoC |
 |---|---|---|
-| `SBX_PVE_URL` | Proxmox API | `https://pve.tail0000.ts.net:8006` |
+| `SBX_PVE_URL` | Proxmox API | `https://pve:8006` (свой адрес Proxmox — через env, в compose — `deploy/compose/.env`) |
 | `SBX_PVE_TOKEN_ID` | id токена | `sbx@pve!poc` |
 | `SBX_PVE_TOKEN_SECRET_FILE` | секрет токена | `~/.config/sbx/pve-token` (права 600) |
 | `SBX_PVE_CA_FILE` | CA хоста (`pve-root-ca.pem`), TLS проверяется | `~/.config/sbx/pve-root-ca.pem` |
 | `SBX_PVE_TLS_NAME` | имя, по которому проверяется сертификат `:8006` | `pve` |
-| `SBX_NODE_SSH_HOST`, `SBX_NODE_SSH_KEY_FILE`, `SBX_NODE_SSH_KNOWN_HOSTS` | доступ к `sbx-node` | `pve.tail0000.ts.net`, `~/.config/sbx/sbx-node_ed25519`, `~/.config/sbx/known_hosts` |
+| `SBX_NODE_SSH_HOST`, `SBX_NODE_SSH_KEY_FILE`, `SBX_NODE_SSH_KNOWN_HOSTS` | доступ к `sbx-node` | `pve`, `~/.config/sbx/sbx-node_ed25519`, `~/.config/sbx/known_hosts` |
 | `SBX_VMID_RANGE` | диапазон VMID sandbox | `500-589` (раскладка §4.7) |
-| `SBX_TEMPLATE_VMID_RANGE` | VMID сборок шаблонов S5 (`sbx-tpl`) | `597-598` |
+| `SBX_TEMPLATE_VMID_RANGE` | граница слотов шаблонов (`sbx-tpl`); слоты выбирает рецепт | `597-599` |
 | `SBX_CLUSTER_ID` | номер кластера для MAC (1 байт) | `1` |
 | `SBX_STATE_DB` | SQLite аллокатора (PoC) | `~/.local/state/sbx/poc.db` |
 | `SBX_TEMPLATE_VMID` | шаблон | `599` |
@@ -322,7 +324,7 @@ interface QuiesceHook {
 - Таблица `vmid_lease`: `cluster`, `vmid`, `mac`, `state` (`reserved` / `active` / `releasing`), `purpose` (machine, template), `created_at`, `updated_at`. Уникальность `(cluster, vmid)` и `(cluster, mac)`.
 - Выделение: наименьший VMID из `SBX_VMID_RANGE`, которого нет в таблице, в `/cluster/resources` (видны только VM pool, этого достаточно для нашего диапазона) и среди LV `vm-<id>-*` (`sbx-node lv.list`/`inventory`). Вставка строки и есть блокировка: при конфликте уникальности берётся следующий. `/cluster/nextid` не используется.
 - MAC детерминированный: `02:<cluster>:<vmid, 4 байта big-endian>`, например `02:01:00:00:01:F4` для кластера 1 и VMID 500. Локально администрируемый unicast, уникален в пределах кластера; L2 у нас локальная для ноды, этого достаточно.
-- VMID 599 занят шаблоном (`purpose=template`), в выдачу не входит. Шаблоны S5 получают VMID из `SBX_TEMPLATE_VMID_RANGE` (597–598) через `allocateTemplate`, вне диапазона sandbox (§4.7).
+- VMID 599 занят шаблоном (`purpose=template`), в выдачу не входит. Шаблоны S5 получают VMID через `allocateTemplate(<vmids рецепта>)` — первый свободный слот рецепта внутри `SBX_TEMPLATE_VMID_RANGE` (597–599), вне диапазона sandbox (§4.7); `SBX_TEMPLATE_VMID` не выдаётся.
 
 ## 7. Стенд `sbx-bench` (`apps/bench`, TypeScript)
 

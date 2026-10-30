@@ -68,19 +68,20 @@ func badReq(format string, args ...any) error { return badRequest{fmt.Sprintf(fo
 type handler func(s *Server, ctx context.Context, args json.RawMessage) (any, error)
 
 var handlers = map[string]handler{
-	"version":      (*Server).version,
-	"lv.snapshot":  (*Server).lvSnapshot,
-	"lv.remove":    (*Server).lvRemove,
-	"lv.list":      (*Server).lvList,
-	"pool.usage":   (*Server).poolUsage,
-	"dhcp.leases":  (*Server).dhcpLeases,
-	"dhcp.release": (*Server).dhcpRelease,
-	"inventory":    (*Server).inventory,
-	"media.list":   (*Server).mediaList,
-	"media.remove": (*Server).mediaRemove,
-	"media.sha256": (*Server).mediaSHA256,
-	"lv.scan":      (*Server).lvScan,
-	"lv.usage":     (*Server).lvUsage,
+	"version":        (*Server).version,
+	"lv.snapshot":    (*Server).lvSnapshot,
+	"lv.remove":      (*Server).lvRemove,
+	"lv.list":        (*Server).lvList,
+	"pool.usage":     (*Server).poolUsage,
+	"dhcp.leases":    (*Server).dhcpLeases,
+	"dhcp.release":   (*Server).dhcpRelease,
+	"inventory":      (*Server).inventory,
+	"media.list":     (*Server).mediaList,
+	"media.remove":   (*Server).mediaRemove,
+	"media.sha256":   (*Server).mediaSHA256,
+	"lv.scan":        (*Server).lvScan,
+	"lv.usage":       (*Server).lvUsage,
+	"lv.tagTemplate": (*Server).lvTagTemplate,
 }
 
 // decodeArgs decodes optional args strictly.

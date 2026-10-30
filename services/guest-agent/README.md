@@ -9,6 +9,7 @@ Binaries:
 
 - `cmd/sbx-agent` - the agent and its helper subcommands (`run`, `identity`, `install-package`, `rollback`, `doctor`, `version`, ...).
 - `cmd/sbx-release` - builds, signs and verifies packages.
+- `cmd/sbx-agent-harness` - test aid, never packaged: the real tunnel gateway and the agent with fake OS dependencies in one process, commands run as host processes; used by `apps/api/test/agent-real.test.ts`.
 
 Run Go tools through mise: `mise exec -- go ...`.
 

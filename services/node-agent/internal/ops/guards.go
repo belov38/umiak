@@ -43,13 +43,13 @@ func atoiMatch(m []string, i int) int {
 	return n
 }
 
-// ValidOrigin allows snapshots only of template disks (base-<id> with id in our range), our
-// snapshots and our VM disks.
+// ValidOrigin allows snapshots only of template disks (base-<id> of a template slot; lv.snapshot
+// also requires the sbx-tpl tag), our snapshots and our VM disks.
 func ValidOrigin(cfg config.Config, name string) error {
 	if !lvNameRe.MatchString(name) {
 		return errBadName
 	}
-	if m := baseRe.FindStringSubmatch(name); m != nil && inVMIDRange(cfg, atoiMatch(m, 1)) {
+	if m := baseRe.FindStringSubmatch(name); m != nil && cfg.IsTemplateSlot(atoiMatch(m, 1)) {
 		return nil
 	}
 	if snapLVRe.MatchString(name) {
@@ -59,10 +59,6 @@ func ValidOrigin(cfg config.Config, name string) error {
 		return nil
 	}
 	return forbidden("origin %q is not ours", name)
-}
-
-func inVMIDRange(cfg config.Config, vmid int) bool {
-	return vmid >= cfg.VMIDMin && vmid <= cfg.VMIDMax
 }
 
 // ValidTargetName allows only VM disks in our range and our snapshot names.
@@ -142,7 +138,8 @@ func ValidMAC(cfg config.Config, mac string) (int, error) {
 		b[i] = int(v)
 	}
 	vmid := b[2]<<24 | b[3]<<16 | b[4]<<8 | b[5]
-	if b[0] != 0x02 || b[1] != cfg.ClusterID || !cfg.InRange(vmid) {
+	// Template build VMs (template slots) get their MAC from the same allocator.
+	if b[0] != 0x02 || b[1] != cfg.ClusterID || (!cfg.InRange(vmid) && !cfg.IsTemplateSlot(vmid)) {
 		return 0, forbidden("MAC %s is not from our allocator", mac)
 	}
 	return vmid, nil

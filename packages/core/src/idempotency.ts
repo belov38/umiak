@@ -37,12 +37,20 @@ export interface IdempotencyClaimInput {
 	requestHash: RequestHash;
 	sandboxId?: string | null;
 	operationId?: string | null;
+	/** Ids of the result (never request values); default `{sandboxId, operationId}`. */
+	response?: Record<string, unknown>;
 	ttlSeconds?: number;
 }
 
 export type IdempotencyClaim =
 	| { kind: "new" }
-	| { kind: "replay"; sandboxId: string | null; operationId: string | null };
+	| {
+			kind: "replay";
+			sandboxId: string | null;
+			operationId: string | null;
+			/** `response` of the first request. */
+			response: Record<string, unknown> | null;
+	  };
 
 /**
  * Takes the key for this request, or returns the ids stored by the first
@@ -75,7 +83,7 @@ export async function claimIdempotencyKey(
 			input.requestHash.value,
 			operationId,
 			sandboxId,
-			JSON.stringify({ sandboxId, operationId }),
+			JSON.stringify(input.response ?? { sandboxId, operationId }),
 			input.ttlSeconds ?? IDEMPOTENCY_TTL_SECONDS,
 		],
 	);
@@ -87,8 +95,9 @@ export async function claimIdempotencyKey(
 		request_hash: Buffer;
 		sandbox_id: string | null;
 		operation_id: string | null;
+		response: Record<string, unknown> | null;
 	}>(
-		`SELECT request_hash, sandbox_id, operation_id FROM runtime.idempotency_keys
+		`SELECT request_hash, sandbox_id, operation_id, response FROM runtime.idempotency_keys
 		 WHERE principal_id = $1 AND scope = $2 AND key = $3`,
 		[principalId, scope, key],
 	);
@@ -103,5 +112,6 @@ export async function claimIdempotencyKey(
 		kind: "replay",
 		sandboxId: row.sandbox_id,
 		operationId: row.operation_id,
+		response: row.response,
 	};
 }

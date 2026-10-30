@@ -330,13 +330,19 @@ export async function createTopology(
 // ---------------------------------------------------------------------------
 // World
 
+/**
+ * Short polls, long capacity waits: in these tests a RAM or clone slot wait
+ * ends when its condition holds; a test of the timeout sets its own. A
+ * short default would turn a slow (loaded) machine into a spurious
+ * no-capacity failure.
+ */
 export const TEST_TIMING: Timing = {
 	pollMs: 10,
 	supersedeCheckMs: 20,
 	ramWaitPollMs: 10,
-	ramWaitTimeoutMs: 3000,
+	ramWaitTimeoutMs: 20_000,
 	cloneSlotPollMs: 10,
-	cloneSlotTimeoutMs: 3000,
+	cloneSlotTimeoutMs: 20_000,
 };
 
 export interface TestWorld {

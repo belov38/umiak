@@ -92,11 +92,30 @@ const workerSchema = z.object({
 	SBX_SSH_USER_CA_KEYS_FILE: optional,
 });
 
+const optionalHttpsUrl = z.preprocess(
+	unsetEmpty,
+	z
+		.string()
+		.refine(
+			(v) => {
+				try {
+					return new URL(v).protocol === "https:";
+				} catch {
+					return false;
+				}
+			},
+			{ message: "must be an https:// URL" },
+		)
+		.optional(),
+);
+
 const adminSchema = z.object({
 	DATABASE_URL: databaseUrl,
 	SBX_CONFIG_FILE: optional,
 	SBX_DATA_KEYS_FILE: optional,
 	SBX_SECRETS_DIR: optional,
+	SBX_PVE_URL: optionalHttpsUrl,
+	SBX_PVE_TLS_NAME: optional,
 	SBX_LOG_LEVEL: workerSchema.shape.SBX_LOG_LEVEL,
 });
 
@@ -118,11 +137,22 @@ export interface WorkerEnv {
 	sshUserCaKeysFile: string | undefined;
 }
 
+/**
+ * Replaces `apiUrl` / `tlsName` of the first topology provider in
+ * `sbx-admin bootstrap` (SBX_PVE_URL / SBX_PVE_TLS_NAME): the YAML has no
+ * interpolation, and the PVE address differs between deployments.
+ */
+export interface ProviderOverride {
+	apiUrl?: string;
+	tlsName?: string;
+}
+
 export interface AdminEnv {
 	databaseUrl: string;
 	configFile: string | undefined;
 	dataKeysFile: string | undefined;
 	secretsDir: string | undefined;
+	providerOverride: ProviderOverride;
 	logLevel: (typeof LOG_LEVELS)[number];
 }
 
@@ -161,6 +191,12 @@ export function parseAdminEnv(env: Env = process.env): AdminEnv {
 		configFile: e.SBX_CONFIG_FILE,
 		dataKeysFile: e.SBX_DATA_KEYS_FILE,
 		secretsDir: e.SBX_SECRETS_DIR,
+		providerOverride: {
+			...(e.SBX_PVE_URL === undefined ? {} : { apiUrl: e.SBX_PVE_URL }),
+			...(e.SBX_PVE_TLS_NAME === undefined
+				? {}
+				: { tlsName: e.SBX_PVE_TLS_NAME }),
+		},
 		logLevel: e.SBX_LOG_LEVEL,
 	};
 }

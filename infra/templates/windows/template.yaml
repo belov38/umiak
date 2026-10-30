@@ -44,3 +44,5 @@ options: { vs_buildtools: false }
 boot_timeout_s: 1200
 install_timeout_s: 2400
 verify: windows
+# Template slot on pve (S1 4.7): 598 is the Windows template; Linux alternates 597 and 599.
+vmids: [598]

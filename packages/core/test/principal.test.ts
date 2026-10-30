@@ -1,3 +1,4 @@
+import { SCOPES as AUTH_SCOPES } from "@sbx/auth";
 import { describe, expect, it } from "vitest";
 import { idempotencyPrincipal, type Principal, SCOPES } from "../src/index.ts";
 
@@ -32,5 +33,12 @@ describe("idempotencyPrincipal", () => {
 		expect(SCOPES).toContain("sandboxes:write");
 		expect(SCOPES).toContain("keys:admin");
 		expect(SCOPES).toHaveLength(14);
+	});
+});
+
+describe("SCOPES", () => {
+	it("is the @sbx/auth list", () => {
+		expect([...SCOPES]).toEqual([...AUTH_SCOPES]);
+		expect(SCOPES).toBe(AUTH_SCOPES);
 	});
 });

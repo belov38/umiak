@@ -24,3 +24,4 @@ offline: [defender-off, waasmedic-off]
 options: { vs_buildtools: false }
 boot_timeout_s: 1200
 verify: windows
+vmids: [598]

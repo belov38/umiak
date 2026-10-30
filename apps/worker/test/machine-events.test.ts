@@ -14,6 +14,7 @@ import {
 import {
 	activeOps,
 	agentEvents,
+	commandOutcome,
 	commandStatus,
 	ev,
 	insertCommand,
@@ -336,8 +337,15 @@ describe("machine-events (§10.2)", () => {
 
 		await synthetic(w, l.machineId, "disconnected", "rebooted", "connected");
 
-		expect(await commandStatus(w, oldCmd)).toBe("lost");
-		expect(await commandStatus(w, doneCmd)).toBe("exited");
+		// The guest rebooted: the reason the agent gives such commands (S3).
+		expect(await commandOutcome(w, oldCmd)).toMatchObject({
+			status: "lost",
+			reason: "reboot",
+		});
+		expect(await commandOutcome(w, doneCmd)).toMatchObject({
+			status: "exited",
+			reason: null,
+		});
 		expect(await commandStatus(w, newCmd)).toBe("running");
 		const s = await sandbox(w, l.sandboxId);
 		expect(s.last_reboot_at).not.toBeNull();
@@ -467,6 +475,64 @@ describe("machine-events (§10.2)", () => {
 		expect(await commandStatus(w, pty)).toBe("exited");
 		expect(await commandStatus(w, killed)).toBe("killed");
 		expect(await commandStatus(w, foreign)).toBe("running");
+		expect(await unprocessed(w, l.machineId)).toBe(0);
+	});
+
+	it("command.exited stores the exit reason and output_truncated; output.truncated marks a running or ended command", async () => {
+		const w = await createWorld(db);
+		const l = await linkedSandbox(w);
+		const other = await linkedSandbox(w);
+		const boot = await setSession(w, l.machineId);
+		const oom = await insertCommand(w, l, { bootId: boot });
+		const running = await insertCommand(w, l, { bootId: boot });
+		const pty = await insertCommand(w, l, { bootId: boot, mode: "pty" });
+		const foreign = await insertCommand(w, other, { bootId: boot });
+		await agentEvents(w, l.machineId, [
+			ev(1, boot, "command.exited", {
+				commandId: oom,
+				status: "EXIT_STATUS_KILLED",
+				code: 137,
+				signal: "SIGKILL",
+				reason: "EXIT_REASON_OOM",
+				outputTruncated: "disk_full",
+			}),
+			ev(2, boot, "output.truncated", {
+				commandId: running,
+				stream: "STREAM_STDOUT",
+				reason: "disk_full",
+			}),
+			ev(3, boot, "pty.closed", {
+				commandId: pty,
+				reason: "EXIT_REASON_PTY_IDLE",
+			}),
+			// After the end: the reason is kept, output_truncated is added.
+			ev(4, boot, "output.truncated", { commandId: pty, reason: "disk_full" }),
+			ev(5, boot, "output.truncated", {
+				commandId: foreign,
+				reason: "disk_full",
+			}),
+			ev(6, boot, "output.truncated", { commandId: "nope", reason: "x" }),
+		]);
+		expect(await commandOutcome(w, oom)).toEqual({
+			status: "killed",
+			reason: "oom",
+			output_truncated: "disk_full",
+		});
+		expect(await commandOutcome(w, running)).toEqual({
+			status: "running",
+			reason: null,
+			output_truncated: "disk_full",
+		});
+		expect(await commandOutcome(w, pty)).toEqual({
+			status: "exited",
+			reason: "pty_idle",
+			output_truncated: "disk_full",
+		});
+		expect(await commandOutcome(w, foreign)).toEqual({
+			status: "running",
+			reason: null,
+			output_truncated: null,
+		});
 		expect(await unprocessed(w, l.machineId)).toBe(0);
 	});
 

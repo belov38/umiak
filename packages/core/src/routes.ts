@@ -1,5 +1,5 @@
 import { parseLabel } from "./label.ts";
-import type { PortMode } from "./rows.ts";
+import type { PortAppProtocol, PortHostRewrite, PortMode } from "./rows.ts";
 import { isUuid, type Queryable } from "./service/common.ts";
 import type { SandboxState } from "./states.ts";
 
@@ -19,24 +19,35 @@ export interface RouteTarget {
 	authEpoch: number;
 	/** The sandbox state as is; the gateway decides what to show. */
 	state: SandboxState;
+	teamId: string;
+	hostRewrite: PortHostRewrite;
+	appProtocol: PortAppProtocol;
+	/** Port or sandbox blocked by an operator (S8). S7 adds `public_disabled`. */
+	blocked: boolean;
+	/** The sandbox's reason when the sandbox is blocked, else the port's; null unless blocked. */
+	blockReason: string | null;
 }
 
 export interface SshTarget {
 	sandboxId: string;
 	machineId: string | null;
 	state: SandboxState;
+	teamId: string;
+	slug: string;
+	templateSlug: string;
 }
 
 /**
- * The hosted port of `<slug>-<port>`, or null: label outside the grammar, no
- * such sandbox, port not hosted, sandbox deleted.
+ * The hosted port of `<slug>-<port>`, or null: label outside the grammar, a
+ * desktop label, no such sandbox, port not hosted, sandbox deleted.
  */
 export async function lookupRoute(
 	q: Queryable,
 	label: string,
 ): Promise<RouteTarget | null> {
 	const parsed = typeof label === "string" ? parseLabel(label) : null;
-	if (parsed === null) return null;
+	// Desktop labels have no hosted port (S10 adds their routes).
+	if (parsed === null || parsed.kind !== "port") return null;
 	const r = await q.query<{
 		sandbox_id: string;
 		slug: string;
@@ -46,9 +57,17 @@ export async function lookupRoute(
 		token_hash: Buffer | null;
 		auth_epoch: number;
 		state: SandboxState;
+		team_id: string;
+		host_rewrite: PortHostRewrite;
+		app_protocol: PortAppProtocol;
+		blocked: boolean;
+		block_reason: string | null;
 	}>(
-		`SELECT s.id AS sandbox_id, s.slug, s.machine_id, s.state,
-		        hp.port, hp.mode, hp.token_hash, hp.auth_epoch
+		`SELECT s.id AS sandbox_id, s.slug, s.machine_id, s.state, s.team_id,
+		        hp.port, hp.mode, hp.token_hash, hp.auth_epoch, hp.host_rewrite, hp.app_protocol,
+		        (s.blocked OR hp.blocked) AS blocked,
+		        CASE WHEN s.blocked THEN s.block_reason
+		             WHEN hp.blocked THEN hp.block_reason END AS block_reason
 		 FROM runtime.sandboxes s
 		 JOIN runtime.hosted_ports hp ON hp.sandbox_id = s.id AND hp.deleted_at IS NULL
 		 WHERE s.slug = $1 AND hp.port = $2 AND s.state <> 'deleted'`,
@@ -65,6 +84,11 @@ export async function lookupRoute(
 		tokenHash: row.token_hash === null ? null : row.token_hash.toString("hex"),
 		authEpoch: row.auth_epoch,
 		state: row.state,
+		teamId: row.team_id,
+		hostRewrite: row.host_rewrite,
+		appProtocol: row.app_protocol,
+		blocked: row.blocked,
+		blockReason: row.block_reason,
 	};
 }
 
@@ -81,14 +105,24 @@ export async function sshTarget(
 		id: string;
 		machine_id: string | null;
 		state: SandboxState;
+		team_id: string;
+		slug: string;
+		template_slug: string;
 	}>(
-		`SELECT id, machine_id, state FROM runtime.sandboxes
+		`SELECT id, machine_id, state, team_id, slug, template_slug FROM runtime.sandboxes
 		 WHERE ${byId ? "id" : "slug"} = $1 AND state <> 'deleted'`,
 		[sandboxIdOrSlug],
 	);
 	const row = r.rows[0];
 	if (!row) return null;
-	return { sandboxId: row.id, machineId: row.machine_id, state: row.state };
+	return {
+		sandboxId: row.id,
+		machineId: row.machine_id,
+		state: row.state,
+		teamId: row.team_id,
+		slug: row.slug,
+		templateSlug: row.template_slug,
+	};
 }
 
 export interface Routes {

@@ -121,4 +121,20 @@ describe("admin env", () => {
 		});
 		expect(() => parseAdminEnv({})).toThrow(/DATABASE_URL: required/);
 	});
+
+	it("SBX_PVE_URL and SBX_PVE_TLS_NAME become the provider override", () => {
+		expect(
+			parseAdminEnv({ DATABASE_URL: BASE.DATABASE_URL }).providerOverride,
+		).toEqual({});
+		expect(
+			parseAdminEnv({
+				DATABASE_URL: BASE.DATABASE_URL,
+				SBX_PVE_URL: "https://10.0.0.5:8006",
+				SBX_PVE_TLS_NAME: "pve",
+			}).providerOverride,
+		).toEqual({ apiUrl: "https://10.0.0.5:8006", tlsName: "pve" });
+		expect(() =>
+			parseAdminEnv({ DATABASE_URL: BASE.DATABASE_URL, SBX_PVE_URL: "pve" }),
+		).toThrow(/SBX_PVE_URL/);
+	});
 });

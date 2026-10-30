@@ -23,6 +23,7 @@
 		"pg": "8.23.1"
 	},
 	"devDependencies": {
+		"@sbx/db": "workspace:*",
 		"@types/pg": "8.23.1"
 	}
 }

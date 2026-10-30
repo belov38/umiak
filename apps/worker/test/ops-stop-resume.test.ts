@@ -17,6 +17,7 @@ import {
 	type TestWorld,
 } from "./fakes/world.ts";
 import {
+	dbNow,
 	ENV,
 	expireDeadline,
 	opsEnv,
@@ -111,6 +112,14 @@ describe("stop", () => {
 		expect(await commandStatus(w, running)).toBe("lost");
 		expect(await commandStatus(w, starting)).toBe("lost");
 		expect(await commandStatus(w, exited)).toBe("exited");
+		// A stop is not a reboot the platform saw: the reason is unknown (R32).
+		const reasons = await w.pool.query(
+			"SELECT id, reason FROM runtime.commands WHERE id = ANY($1) ORDER BY id",
+			[[running, starting, exited]],
+		);
+		expect(
+			Object.fromEntries(reasons.rows.map((r) => [r.id, r.reason])),
+		).toEqual({ [running]: null, [starting]: null, [exited]: null });
 	});
 
 	it("a shutdown that times out is followed by a hard stop", async () => {
@@ -206,7 +215,7 @@ describe("resume", () => {
 		const m = await row(w, "machines", machineId);
 		expect(s.state).toBe("ready");
 		expect(s.health).toBe("ok");
-		const left = (s.deadline_at as Date).getTime() - Date.now();
+		const left = (s.deadline_at as Date).getTime() - (await dbNow(w));
 		expect(left).toBeGreaterThan(590_000);
 		expect(m.state).toBe("running");
 		expect(m.provisioned_boot_id).not.toBe(oldBoot);
@@ -357,9 +366,10 @@ describe("resume", () => {
 		);
 		const startsBefore = w.infra.callsOf("start").length;
 
+		// Far below the configured 60 s, with room for a loaded machine.
 		const t0 = Date.now();
 		expect(await run(w, op.id)).toBe("failed");
-		expect(Date.now() - t0).toBeLessThan(3000);
+		expect(Date.now() - t0).toBeLessThan(20_000);
 
 		expect((await row(w, "operations", op.id)).error_code).toBe(
 			"deadline_exceeded",

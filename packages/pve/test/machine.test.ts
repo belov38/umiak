@@ -8,6 +8,7 @@ import {
 	pveVcpuControl,
 	QgaUnavailableError,
 	SmbiosTooLongError,
+	SNAPSHOT_CLOUDINIT_KEY,
 	s2SerialPayload,
 	sendKey,
 	TracesRemainError,
@@ -478,6 +479,45 @@ describe("snapshot and fork", () => {
 		expect(api.vms.get(501)?.config.vmgenid).not.toBe(
 			api.vms.get(500)?.config.vmgenid,
 		);
+	});
+
+	it("a fork of a machine without a cloud-init drive gets none either (S5 17.1 p. 4)", async () => {
+		const { api, machines } = setup();
+		const cfg = { ...api.templateConfig };
+		delete cfg.ide2;
+		api.templateConfig = cfg;
+		const a = await machines.create({});
+		const s = await machines.snapshot(a.vmid);
+		expect(s.hardware[SNAPSHOT_CLOUDINIT_KEY]).toBe("0");
+		await machines.fork(s, {});
+		const post =
+			api.calls.filter((c) => c.path === "/nodes/pve/qemu").at(-1)?.params ??
+			{};
+		for (const k of [
+			"ide2",
+			"ipconfig0",
+			"ciuser",
+			"ciupgrade",
+			SNAPSHOT_CLOUDINIT_KEY,
+		])
+			expect(post).not.toHaveProperty(k);
+	});
+
+	it("a fork of a 599 clone keeps cloud-init, and so does a snapshot without the entry", async () => {
+		const { api, machines } = setup();
+		const a = await machines.create({});
+		const s = await machines.snapshot(a.vmid);
+		expect(s.hardware[SNAPSHOT_CLOUDINIT_KEY]).toBe("1");
+		await machines.fork(s, {});
+		const { [SNAPSHOT_CLOUDINIT_KEY]: _, ...legacy } = s.hardware;
+		await machines.fork({ ...s, hardware: legacy }, {});
+		const posts = api.calls.filter(
+			(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
+		);
+		for (const p of posts.slice(-2)) {
+			expect(p.params).toMatchObject({ ciuser: "sbx", ciupgrade: 0 });
+			expect(p.params).not.toHaveProperty(SNAPSHOT_CLOUDINIT_KEY);
+		}
 	});
 
 	it("never copies smbios1 from the source even without a caller value", async () => {

@@ -13,7 +13,10 @@ export interface Config {
 	nodeSshKnownHosts: string;
 	/** Sandbox VMIDs (pve: 500-589; 590-596 are dev infrastructure). */
 	vmidRange: { min: number; max: number };
-	/** VMIDs of S5 template builds (pve: 597-598; 599 is the PoC template). */
+	/**
+	 * Template slots (pve: 597-599). Each recipe picks its own slots in it (Linux 597 and 599,
+	 * Windows 598); 599 stays the PoC template until a Linux build replaces it.
+	 */
 	templateVmidRange: { min: number; max: number };
 	clusterId: number;
 	stateDb: string;
@@ -56,7 +59,7 @@ export function loadConfig(
 	);
 	const templateVmidRange = parseRange(
 		"SBX_TEMPLATE_VMID_RANGE",
-		get("SBX_TEMPLATE_VMID_RANGE", "597-598"),
+		get("SBX_TEMPLATE_VMID_RANGE", "597-599"),
 	);
 	if (
 		templateVmidRange.min <= vmidRange.max &&
@@ -77,7 +80,7 @@ export function loadConfig(
 	if (clusterId > 255) throw new Error("SBX_CLUSTER_ID must fit in one byte");
 
 	return {
-		pveUrl: get("SBX_PVE_URL", "https://pve.tail0000.ts.net:8006"),
+		pveUrl: get("SBX_PVE_URL", "https://pve:8006"),
 		tokenId: get("SBX_PVE_TOKEN_ID", "sbx@pve!poc"),
 		tokenSecretFile: path(
 			"SBX_PVE_TOKEN_SECRET_FILE",
@@ -85,7 +88,7 @@ export function loadConfig(
 		),
 		caFile: path("SBX_PVE_CA_FILE", "~/.config/sbx/pve-root-ca.pem"),
 		tlsName: get("SBX_PVE_TLS_NAME", "pve"),
-		nodeSshHost: get("SBX_NODE_SSH_HOST", "pve.tail0000.ts.net"),
+		nodeSshHost: get("SBX_NODE_SSH_HOST", "pve"),
 		nodeSshKeyFile: path(
 			"SBX_NODE_SSH_KEY_FILE",
 			"~/.config/sbx/sbx-node_ed25519",
