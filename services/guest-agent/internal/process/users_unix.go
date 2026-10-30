@@ -4,6 +4,7 @@ package process
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -15,6 +16,19 @@ const passwdFile = "/etc/passwd"
 
 // defaultShell is the shell of a user without a passwd entry.
 const defaultShell = "/bin/sh"
+
+// lookupUser resolves name through os/user.
+func lookupUser(name string) (*User, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		var unknown user.UnknownUserError
+		if errors.As(err, &unknown) {
+			return nil, fmt.Errorf("%w: %s", ErrUserNotFound, name)
+		}
+		return nil, fmt.Errorf("process: lookup user %s: %w", name, err)
+	}
+	return fromOSUser(u)
+}
 
 func fromOSUser(u *user.User) (*User, error) {
 	uid, err := parseID(u.Uid)

@@ -3,6 +3,7 @@ package claim
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -126,6 +127,9 @@ func TestSecretsDigest(t *testing.T) {
 }
 
 func TestEnvBuilderOrder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Linux base env; Windows: TestEnvBuilderWindowsLayers")
+	}
 	h := newHarness(t)
 	req := fullRequest()
 	req.Env = map[string]string{"SBX": "claim", "A": "claim", "B": "claim", "C": "claim", "HOME": "/claim"}

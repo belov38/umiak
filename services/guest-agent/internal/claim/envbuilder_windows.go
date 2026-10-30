@@ -1,0 +1,93 @@
+package claim
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+
+	"golang.org/x/sys/windows"
+
+	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
+)
+
+// Build returns the environment of a command run as u (spec 12.7). Later
+// layers win, keys compare case-insensitively and keep their first
+// spelling: the environment block of the user's token (system and user
+// variables from the registry: Path, USERPROFILE, APPDATA, TEMP, ...), the
+// platform env (with SBX_HOSTNAME, SBX_ENV_APPLIED=1 and TERM for a PTY),
+// claim env, secret env, spec env.
+func (b EnvBuilder) Build(u *process.User, spec *agentv1.CommandSpec) []string {
+	base, err := userEnvBlock(u)
+	if err != nil {
+		b.m.log.Warn("claim: user environment block failed, using the system one", "user", u.Name, "err", err)
+		base = systemEnvBlock(u)
+	}
+	platform, claimed, secret, req := b.claimEnv()
+	if h := req.GetHostname(); h != "" {
+		// Windows keeps its SBX<hex> name; the claimed one is only env.
+		platform["SBX_HOSTNAME"] = h
+	}
+	platform["SBX_ENV_APPLIED"] = "1"
+	if spec.GetPty() != nil {
+		// ConPTY speaks xterm-256color whatever the spec's term is.
+		platform["TERM"] = DefaultTerm
+	}
+	return wincmd.MergeEnv(base, envList(platform), envList(claimed), envList(secret), envList(spec.GetEnv()))
+}
+
+// envList returns m as KEY=VALUE entries sorted by key, so keys that differ
+// only in case merge in a stable order.
+func envList(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		out = append(out, k+"="+m[k])
+	}
+	return out
+}
+
+// userEnvBlock returns CreateEnvironmentBlock(token, FALSE) of u: the
+// service's own token for SYSTEM, otherwise a logon of the account with the
+// password from LSA and its profile loaded, so HKCU\Environment applies.
+// Tests replace it.
+var userEnvBlock = func(u *process.User) ([]string, error) {
+	if u.Windows != nil && u.Windows.System {
+		var t windows.Token
+		if err := windows.OpenProcessToken(windows.CurrentProcess(),
+			windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE|windows.TOKEN_IMPERSONATE, &t); err != nil {
+			return nil, fmt.Errorf("open process token: %w", err)
+		}
+		defer t.Close() //nolint:errcheck // read-only use
+		return t.Environ(false)
+	}
+	account := u.Name
+	if u.Windows != nil {
+		account = u.Windows.Account
+	}
+	pw, err := winapi.LsaRetrieve(winapi.SecretUserPassword)
+	if err != nil {
+		return nil, err
+	}
+	t, err := winapi.LogonUserToken(account, string(pw))
+	clear(pw)
+	if err != nil {
+		return nil, err
+	}
+	defer t.Close() //nolint:errcheck // nothing to do on failure
+	unload, err := winapi.LoadProfile(t, account)
+	if err != nil {
+		return nil, err
+	}
+	defer unload()
+	return t.Environ(false)
+}
+
+// systemEnvBlock is the fallback base env: the system variables
+// (CreateEnvironmentBlock without a token) and the profile and name of u.
+func systemEnvBlock(u *process.User) []string {
+	env, _ := windows.Token(0).Environ(false)
+	return wincmd.MergeEnv(env, []string{"USERPROFILE=" + u.Home, "USERNAME=" + u.Name})
+}

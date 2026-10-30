@@ -105,6 +105,17 @@ func TestRequireRequestID(t *testing.T) {
 	_ = s.Close()
 }
 
+func TestNewRetryableError(t *testing.T) {
+	err := rpcconv.NewRetryableError(connect.CodeFailedPrecondition, "file_in_use", "msg")
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || err.Message() != "msg" {
+		t.Errorf("err = %v", err)
+	}
+	d, ok := rpcconv.Detail(err)
+	if !ok || d.GetCode() != "file_in_use" || !d.GetRetryable() {
+		t.Errorf("detail = %v (ok=%v), want file_in_use retryable", d, ok)
+	}
+}
+
 func TestNewErrorRetryable(t *testing.T) {
 	cases := map[connect.Code]bool{
 		connect.CodeUnavailable:      true,

@@ -1,4 +1,7 @@
-// Package config loads /etc/sbx-agent/agent.toml (spec section 5).
+// Package config loads agent.toml: /etc/sbx-agent/agent.toml on Linux (S3
+// spec section 5), C:\ProgramData\sbx-agent\agent.toml on Windows (S9 spec
+// section 12.1). The defaults differ per OS (defaults_unix.go,
+// defaults_windows.go).
 package config
 
 import (
@@ -29,6 +32,9 @@ type Config struct {
 	DockerEnabled bool
 	// PortsExclude lists ports not reported in ports.changed.
 	PortsExclude []uint16
+	// PortsExcludeProcesses lists process image names (such as svchost.exe)
+	// whose listeners are not reported in ports.changed.
+	PortsExcludeProcesses []string
 	// PerStreamBytes caps the retained output of one stream.
 	PerStreamBytes int64
 	// TotalBytes caps the retained output of all commands.
@@ -42,23 +48,17 @@ type Config struct {
 	IdleWindow time.Duration
 	// IdentityDir is the directory with the smbios files (product_serial,
 	// product_uuid, product_family). A test aid: the Linux integration
-	// tests point it at a fake directory. Default /sys/class/dmi/id.
+	// tests point it at a fake directory. Default DefaultIdentityDir.
 	IdentityDir string
 	// PTYIdle overrides the idle timeout of PTY commands. A test aid
 	// ([process] pty_idle); 0 keeps the default of the process package.
 	PTYIdle time.Duration
 }
 
-// DefaultIdentityDir is the sysfs directory of the smbios identity.
-const DefaultIdentityDir = "/sys/class/dmi/id"
-
 // Defaults returns the configuration used when agent.toml is absent.
 func Defaults() Config {
-	return Config{
+	cfg := Config{
 		DefaultUser:        "user",
-		ReadinessRequired:  []string{"identity", "claim", "secrets", "docker"},
-		DockerEnabled:      true,
-		PortsExclude:       []uint16{22, 53},
 		PerStreamBytes:     128 << 20,
 		TotalBytes:         2 << 30,
 		TotalFraction:      0.10,
@@ -66,6 +66,8 @@ func Defaults() Config {
 		IdleWindow:         5 * time.Minute,
 		IdentityDir:        DefaultIdentityDir,
 	}
+	osDefaults(&cfg)
+	return cfg
 }
 
 // file mirrors the TOML document. Pointers distinguish absent keys from zero
@@ -85,7 +87,8 @@ type file struct {
 		Enabled *bool `toml:"enabled"`
 	} `toml:"docker"`
 	Ports struct {
-		Exclude *[]int `toml:"exclude"`
+		Exclude          *[]int    `toml:"exclude"`
+		ExcludeProcesses *[]string `toml:"exclude_processes"`
 	} `toml:"ports"`
 	Output struct {
 		PerStreamBytes *string  `toml:"per_stream_bytes"`
@@ -154,6 +157,14 @@ func (f *file) apply(cfg *Config) error {
 			ports = append(ports, uint16(p))
 		}
 		cfg.PortsExclude = ports
+	}
+	if f.Ports.ExcludeProcesses != nil {
+		for _, name := range *f.Ports.ExcludeProcesses {
+			if name == "" {
+				return errors.New("ports.exclude_processes: empty process name")
+			}
+		}
+		cfg.PortsExcludeProcesses = *f.Ports.ExcludeProcesses
 	}
 	if err := parseSizeInto(f.Output.PerStreamBytes, &cfg.PerStreamBytes, "output.per_stream_bytes"); err != nil {
 		return err

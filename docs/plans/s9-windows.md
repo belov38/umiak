@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `sbx-tpl build windows` builds a Windows 11 sandbox template (VMID 597) from Ilia's ISO with no console work, and the guest agent runs on it as a Windows service with the S3 API (commands, ConPTY, files, ports, claim and secrets, quiesce, identity change, self-update), verified on `pve` with create and fork timings.
+**Goal:** `sbx-tpl build windows` builds a Windows 11 sandbox template (VMID 598) from Ilia's ISO with no console work, and the guest agent runs on it as a Windows service with the S3 API (commands, ConPTY, files, ports, claim and secrets, quiesce, identity change, self-update), verified on `pve` with create and fork timings.
 
 **Architecture:** Agent: Windows implementations behind the existing S3 seams (`supervisor.Supervisor`, `shim`, `ident.Source`/`Resetter`, `output.Store`, ports, claim secrets, quiesce `Freezer`, `update`), all in `*_windows.go` files plus a small `internal/winapi` package for Win32/NT calls that `golang.org/x/sys/windows` lacks; no cgo, cross-compiled from macOS. Builder: a second source kind `iso-install` in `apps/template-builder` (autounattend on a build ISO, steps as SYSTEM scheduled tasks started over QGA, sysprep, offline WinPE stage), recipe data in `infra/templates/{_windows,windows}`. S1/S6: fresh vTPM per machine, `sendkey`, `media.sha256`, per-OS shutdown timeout, composite quiesce hook.
 
@@ -15,7 +15,7 @@
 - **Windows 11 only**; Server Core is phase 2. **No hibernated pool, no `suspend --todisk`, no `resume-hint`, no `vmstatestorage`.** Create = cold clone of the template + sysprep specialize on first boot; target ≤ 5 min, good 2–3 min.
 - Trust boundary is the VM. Secrets per spec §12.8 (NTFS secret files wiped on boot, identity change, `PrepareStop`, `PRESHUTDOWN`; `ClearPageFileAtShutdown=1`; no crash dumps; `secret_env` only in memory).
 - No Tailscale in product code or the image; never tunnels/relays (cloudflared, ngrok, trycloudflare).
-- `pve`: sandboxes only VMIDs 500–589; template only 597; never touch 598/599/9000/9001, CT 590, VMs < 500, `vmbr0`, VM 103's state; no firewall/SDN changes except the `VM.Console` privilege step; ≤ 8 GB RAM for our VMs (one Windows VM 4 GB + build VM; two Windows VMs at once is the limit); check `qm list` before starting VMs; clean up. Run by IP: `SBX_PVE_URL=https://100.64.10.2:8006`, `SBX_PVE_TLS_NAME=pve`, `SBX_NODE_SSH_HOST=100.64.10.2`.
+- `pve`: sandboxes only VMIDs 500–589; template only **598**, and only after `s5-fix` deleted the old 598 (master tells, or `qm list`); never touch 597 (s5-fix new Linux template), 599, 9000, 9001, CT 590, VMs < 500, `vmbr0`, VM 103's state; no firewall/SDN changes except the `VM.Console` privilege step; ≤ 8 GB RAM for our VMs (one Windows VM 4 GB + build VM; two Windows VMs at once is the limit); check `qm list` before starting VMs; clean up. Run by IP: `SBX_PVE_URL=https://100.64.10.2:8006`, `SBX_PVE_TLS_NAME=pve`, `SBX_NODE_SSH_HOST=100.64.10.2`.
 - **Subagents never run ssh, pve, sudo or keychain commands.** All `pve` work (Tasks 26+) runs in the coordinator session.
 - Tool versions: latest stable checked at implementation time (`npm view`, `go list -m -versions`, GitHub releases); virtio-win pinned to **0.1.271** with sha256.
 - Linux behaviour of the agent unchanged: `go test -race ./...` on darwin and the Linux integration suite (`services/guest-agent/test/linux/run.sh`) stay green.
@@ -34,7 +34,7 @@
 7. **Real-Windows agent tests:** cross-compiled `go test -c` binaries are copied into a clone over QGA and run as SYSTEM (`sbx-bench s9 agent-tests`). A `workflow_dispatch` GitHub Actions job on `windows-2025` runs the same tests (optional, not a gate).
 8. **Fresh vTPM per machine**: S1 `create` from a template skips `tpmstate0` in the clone and adds `tpmstate0=<storage>:1,version=v2.0` through the PVE API; fork and snapshot clones copy it.
 9. **Verify uses a fork** (S1 snapshot with QGA VSS hook → `cloneFromSnapshot`) for the identity-change check instead of editing `smbios1`; the source is shut down before the fork boots (RAM).
-10. Template boot disk is `scsi0` = `base-597-disk-1` (`SLOT_ORDER` efidisk0, scsi0, tpmstate0); builder disk checks use the slot index from `diskLayout`, not `disk-0`.
+10. Template boot disk is `scsi0` = `base-598-disk-1` (`SLOT_ORDER` efidisk0, scsi0, tpmstate0); builder disk checks use the slot index from `diskLayout`, not `disk-0`.
 11. `hostname` from claim is not applied on Windows (`hostname_applied=false`), it is exposed as `SBX_HOSTNAME`.
 12. Version switching uses NTFS junctions created with `FSCTL_SET_REPARSE_POINT`; switching is delete+create guarded by `pending-update.json`.
 
@@ -299,12 +299,12 @@ Common rules for Tasks 5–17: Windows code in `*_windows.go`; Linux files untou
 
 **Interfaces:**
 - Produces:
-  - `ident.ApplyWindows(ctx, l paths.Layout, id Identity, r WinResetter, mode ApplyMode) (changed, rebootNeeded bool, err error)`, `ApplyMode` = `ModeSpecialize | ModeEarly | ModeService`. Steps per spec §11.2: wipe agent state and secrets dir; `MachineGuid` = machine id; delete `C:\ProgramData\ssh\ssh_host_*`, run `C:\Windows\System32\OpenSSH\ssh-keygen.exe -A` (cwd `C:\ProgramData\ssh`), fix ACLs (owner SYSTEM, SYSTEM+Administrators full only); `SetComputerNameExW(ComputerNamePhysicalDnsHostname, "SBX"+upper(last 12 hex))`; **only when identity.json is absent**: new 32-char random password → `SetUserPassword("user")`, `LsaStore("L$sbx_user")`, `LsaStore("DefaultPassword")`, Winlogon `AutoAdminLogon=1`, `DefaultUserName=user`, `DefaultDomainName=.`; delete `SysprepUnattend`; copy `SSHUserCATemplate` → `C:\ProgramData\ssh\sbx_user_ca.pub` with sshd ACL; write identity.json (`ResetPending`, flushed). `rebootNeeded` = active name (`GetComputerNameExW(ComputerNamePhysicalDnsHostname)` current) ≠ new name and mode ≠ specialize.
+  - `ident.ApplyWindows(ctx, l paths.Layout, id Identity, r WinResetter, mode ApplyMode) (changed, rebootNeeded bool, err error)`, `ApplyMode` = `ModeSpecialize | ModeEarly | ModeService`. Steps per spec §11.2: wipe agent state and secrets dir; `MachineGuid` = machine id; delete `C:\ProgramData\ssh\ssh_host_*`, run `C:\Windows\System32\OpenSSH\ssh-keygen.exe -A` (cwd `C:\ProgramData\ssh`), fix ACLs (owner SYSTEM, SYSTEM+Administrators full only); `SetComputerNameExW(ComputerNamePhysicalDnsHostname, "SBX"+upper(last 12 hex))`; **only when identity.json is absent**: new 32-char random password → `SetUserPassword("user")`, `LsaStore("L$sbx_user")`, `LsaStore("DefaultPassword")`, Winlogon `AutoAdminLogon=1`, `DefaultUserName=user`, `DefaultDomainName=.`; delete `SysprepUnattend`; copy `l.TemplateSSHCA` → `C:\ProgramData\ssh\sbx_user_ca.pub` with sshd ACL; write identity.json (`ResetPending`, flushed). `rebootNeeded` = active name (`GetComputerNameExW(ComputerNamePhysicalDnsHostname)` current) ≠ new name and mode ≠ specialize.
   - `WinResetter interface { SetMachineGUID(string) error; RegenerateHostKeys() error; SetComputerName(string) error; ActiveComputerName() (string, error); NewUserPassword(user string) error; Reboot(reason string) error }` with a fake for darwin tests.
   - `ident.SetupInProgress() bool` (Windows: `ImageState` ≠ `IMAGE_STATE_COMPLETE`; elsewhere false).
   - `ident.Early(ctx, l, src Source, r WinResetter, wipe func() error) error`: if `SetupInProgress()` → return nil; apply (`ModeEarly`); wipe secrets dir; clean `run\` (except sockets of live shims… simply leave `run\cmd`) when the boot id changed; write `EarlyFile {bootId}`; reboot if needed (identity.json was already saved, so the next boot finds no change). Global named mutex `Global\sbx-identity`.
   - `sbx-agent identity apply --specialize` (no reboot, no wait for setup); `sbx-agent early`.
-  - `ident.Seal` on Windows: stop `sbx-agent` and `sshd` services, wipe state and run dirs, host keys, secrets dir, restore template `sbx_user_ca.pub` from `SSHUserCATemplate`, empty env.
+  - `ident.Seal` on Windows: stop `sbx-agent` and `sshd` services, wipe state and run dirs, host keys, secrets dir, restore template `sbx_user_ca.pub` from `l.TemplateSSHCA`, empty env.
 - [ ] **Step 1: Failing tests (darwin with fake resetter, tagged to compile the Windows-free core):** `TestApplyFirstBootChangesPassword`, `TestApplyForkKeepsPassword` (identity.json present with other machine id → no `NewUserPassword`), `TestApplySameIDNoop`, `TestApplyRebootOnlyOutsideSpecialize`, `TestApplyInterruptedRepeats` (resetter fails after `SetMachineGUID` → identity.json unchanged → next call re-runs all steps), `TestComputerNameFromMachineID` (`…-0123456789ab` → `SBX0123456789AB`).
 - [ ] **Step 2–4:** FAIL → implement (core in portable `apply_win_core.go` taking the resetter + layout so darwin tests run it) → common check.
 - [ ] **Step 5:** Commit `guest-agent: Windows identity apply, early, seal`.
@@ -446,7 +446,7 @@ Common check for Tasks 18–24: `mise exec -- pnpm --filter @sbx/template-builde
 
 **Interfaces:**
 - Produces:
-  - `sbx-bench s9 --template 597 [--runs 3] [--connect-url <wss>] [--dev-cp-ssh <host>] [--keep]`: per run — `create_to_agent_ready` (S1 create + start → `doctor` identity ready and, with `--connect-url`, tunnel connected), `boot_to_agent_ready`, `hard_stop_restart`, `fork_to_agent_ready` (snapshot with QGA hook + `cloneFromSnapshot` + start → ready with a new name), `freeze_ms`; one Windows VM at a time; RAM guard 8192 MB; deletes everything; writes `bench-out/s9-<ts>.json` and a markdown table.
+  - `sbx-bench s9 --template 598 [--runs 3] [--connect-url <wss>] [--dev-cp-ssh <host>] [--keep]`: per run — `create_to_agent_ready` (S1 create + start → `doctor` identity ready and, with `--connect-url`, tunnel connected), `boot_to_agent_ready`, `hard_stop_restart`, `fork_to_agent_ready` (snapshot with QGA hook + `cloneFromSnapshot` + start → ready with a new name), `freeze_ms`; one Windows VM at a time; RAM guard 8192 MB; deletes everything; writes `bench-out/s9-<ts>.json` and a markdown table.
   - `sbx-bench s9 agent-tests --vmid <running clone> --dir <test binaries>`: copies each `*.test.exe` with `Qga.fileWriteWindows` to `C:\sbx-tests\`, runs `<bin> -test.v -test.timeout 5m` as SYSTEM via QGA exec, prints results, exit 1 on any failure, removes the dir.
   - `build-tests.sh`: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c -ldflags='-s -w' -o <out>/<pkg>.test.exe` for every package with `*_windows_test.go`.
   - GitHub Actions `guest-agent-windows.yml` (`on: workflow_dispatch` only, `runs-on: windows-2025`, `go test ./...` in `services/guest-agent`).
@@ -456,7 +456,7 @@ Common check for Tasks 18–24: `mise exec -- pnpm --filter @sbx/template-builde
 
 ### Task 25: Spec and docs
 
-**Files:** `docs/specs/s9-windows.md` (status line: Ilia's decisions of 2026-10-31; §14 replaced by "cold create"; §24 decisions/deviations from this plan), `docs/specs/s3-guest-agent.md` §18 table (Windows column as built), `services/guest-agent/README.md` (Windows build/package/tests), `apps/template-builder/README.md` (windows build), `deploy/compose/config/sbx.yaml` (template `windows` + build 597 after Task 28).
+**Files:** `docs/specs/s9-windows.md` (status line: Ilia's decisions of 2026-10-31; §14 replaced by "cold create"; §24 decisions/deviations from this plan), `docs/specs/s3-guest-agent.md` §18 table (Windows column as built), `services/guest-agent/README.md` (Windows build/package/tests), `apps/template-builder/README.md` (windows build), `deploy/compose/config/sbx.yaml` (template `windows` + build 598 after Task 28).
 
 - [ ] **Step 1:** Write the changes; numbers are filled in Task 29.
 - [ ] **Step 2:** Commit `docs: S9 decisions (Windows 11 only, cold create)`.
@@ -472,14 +472,14 @@ Common check for Tasks 18–24: `mise exec -- pnpm --filter @sbx/template-builde
 
 ### Task 27: Agent tests on real Windows
 
-- [ ] Create a clone of 597 (S1), run `sbx-bench s9 agent-tests` with `build-tests.sh` output; all Windows tests pass; delete the clone.
+- [ ] Create a clone of 598 (S1), run `sbx-bench s9 agent-tests` with `build-tests.sh` output; all Windows tests pass; delete the clone.
 
 ### Task 28: Reproducibility, verify, bench
 
-- [ ] Second build with the same `versions.toml` and commit → same edition/build/tools/virtio in the manifest (spec §20 p.2); keep the better of the two as 597, remove the other.
+- [ ] Second build with the same `versions.toml` and commit → same edition/build/tools/virtio in the manifest (spec §20 p.2); keep the better of the two as 598, remove the other.
 - [ ] `sbx-tpl verify <buildId> --connect-url … --dev-cp-ssh …` all green.
-- [ ] `sbx-bench s9 --template 597 --runs 3 --connect-url …`.
-- [ ] Register the build in `deploy/compose/config/sbx.yaml` (`windows`, `pveVmid: 597`).
+- [ ] `sbx-bench s9 --template 598 --runs 3 --connect-url …`.
+- [ ] Register the build in `deploy/compose/config/sbx.yaml` (`windows`, `pveVmid: 598`).
 
 ### Task 29: Finish
 

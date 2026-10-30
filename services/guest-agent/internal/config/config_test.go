@@ -22,20 +22,17 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.IdleWindow != 5*time.Minute {
 		t.Errorf("IdleWindow = %v", cfg.IdleWindow)
 	}
-	if want := []uint16{22, 53}; !reflect.DeepEqual(cfg.PortsExclude, want) {
-		t.Errorf("PortsExclude = %v, want %v", cfg.PortsExclude, want)
-	}
-	if want := []string{"identity", "claim", "secrets", "docker"}; !reflect.DeepEqual(cfg.ReadinessRequired, want) {
-		t.Errorf("ReadinessRequired = %v, want %v", cfg.ReadinessRequired, want)
-	}
-	if cfg.DefaultUser != "user" || !cfg.DockerEnabled {
-		t.Errorf("DefaultUser = %q, DockerEnabled = %v", cfg.DefaultUser, cfg.DockerEnabled)
+	if cfg.DefaultUser != "user" {
+		t.Errorf("DefaultUser = %q", cfg.DefaultUser)
 	}
 	if cfg.TunnelURL != "" || cfg.TrustDir != "" {
 		t.Errorf("TunnelURL = %q, TrustDir = %q, want empty", cfg.TunnelURL, cfg.TrustDir)
 	}
-	if cfg.IdentityDir != "/sys/class/dmi/id" || cfg.PTYIdle != 0 {
-		t.Errorf("IdentityDir = %q, PTYIdle = %v; want the sysfs DMI dir and 0", cfg.IdentityDir, cfg.PTYIdle)
+	if cfg.PTYIdle != 0 {
+		t.Errorf("PTYIdle = %v, want 0", cfg.PTYIdle)
+	}
+	if !reflect.DeepEqual(cfg, Defaults()) {
+		t.Errorf("cfg = %+v, want Defaults() %+v", cfg, Defaults())
 	}
 }
 
@@ -56,6 +53,7 @@ enabled = false
 
 [ports]
 exclude = [22, 53, 8080]
+exclude_processes = ["System", "svchost.exe"]
 
 [output]
 per_stream_bytes = "64MiB"
@@ -83,19 +81,20 @@ pty_idle = "3s"
 		t.Fatal(err)
 	}
 	want := Config{
-		TunnelURL:          "wss://tunnel.example.com/v1/connect",
-		TrustDir:           "/tmp/trust",
-		DefaultUser:        "dev",
-		ReadinessRequired:  []string{"identity", "claim"},
-		DockerEnabled:      false,
-		PortsExclude:       []uint16{22, 53, 8080},
-		PerStreamBytes:     64 << 20,
-		TotalBytes:         1 << 30,
-		TotalFraction:      0.25,
-		MaxRunningCommands: 8,
-		IdleWindow:         30 * time.Second,
-		IdentityDir:        "/run/fake-dmi",
-		PTYIdle:            3 * time.Second,
+		TunnelURL:             "wss://tunnel.example.com/v1/connect",
+		TrustDir:              "/tmp/trust",
+		DefaultUser:           "dev",
+		ReadinessRequired:     []string{"identity", "claim"},
+		DockerEnabled:         false,
+		PortsExclude:          []uint16{22, 53, 8080},
+		PortsExcludeProcesses: []string{"System", "svchost.exe"},
+		PerStreamBytes:        64 << 20,
+		TotalBytes:            1 << 30,
+		TotalFraction:         0.25,
+		MaxRunningCommands:    8,
+		IdleWindow:            30 * time.Second,
+		IdentityDir:           "/run/fake-dmi",
+		PTYIdle:               3 * time.Second,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("cfg = %+v, want %+v", cfg, want)
@@ -111,7 +110,7 @@ func TestLoadPartialKeepsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.TunnelURL != "wss://x/v1/connect" || cfg.MaxRunningCommands != 256 || !cfg.DockerEnabled {
+	if cfg.TunnelURL != "wss://x/v1/connect" || cfg.MaxRunningCommands != 256 || cfg.DockerEnabled != Defaults().DockerEnabled {
 		t.Errorf("cfg = %+v", cfg)
 	}
 }
@@ -122,6 +121,7 @@ func TestLoadErrors(t *testing.T) {
 		{"bad size", "[output]\nper_stream_bytes = \"lots\"\n"},
 		{"bad duration", "[idle]\nwindow = \"soon\"\n"},
 		{"bad port", "[ports]\nexclude = [70000]\n"},
+		{"empty excluded process", "[ports]\nexclude_processes = [\"\"]\n"},
 		{"bad fraction", "[output]\ntotal_fraction = 1.5\n"},
 		{"bad max", "[limits]\nmax_running_commands = 0\n"},
 		{"empty sysfs dir", "[identity]\nsysfs_dir = \"\"\n"},
