@@ -119,6 +119,8 @@ interface MachineState {
 	files: MachineFiles;
 	unavailable: boolean;
 	failNext: { afterBytes: number; kind: FakeAttachFailure } | null;
+	/** failNextAttach failures that were thrown. */
+	attachFailures: number;
 	commands: Map<string, FakeCommand>;
 	/** Process launches by commandId. */
 	starts: Map<string, number>;
@@ -200,6 +202,24 @@ export class FakeAgent implements AgentApi {
 			}
 		}
 		return n;
+	}
+
+	/** Process launches of every command, on the machine or on all machines. */
+	totalStarts(machineId?: string): number {
+		let n = 0;
+		for (const [id, s] of this.#machines) {
+			if (machineId !== undefined && id !== machineId) continue;
+			for (const c of s.starts.values()) n += c;
+		}
+		return n;
+	}
+
+	/**
+	 * How many failNextAttach failures were thrown on the machine (an armed
+	 * failure counts only once an attach reached its byte count).
+	 */
+	attachFailures(machineId: string): number {
+		return this.#machines.get(machineId)?.attachFailures ?? 0;
 	}
 
 	/** PTY sizes of a command: the one from its spec, then each `update`. */
@@ -297,6 +317,7 @@ export class FakeAgent implements AgentApi {
 				files,
 				unavailable: false,
 				failNext: null,
+				attachFailures: 0,
 				commands: new Map(),
 				starts: new Map(),
 			};
@@ -442,10 +463,12 @@ export class FakeAgent implements AgentApi {
 		const cmd = this.#command(s, req.commandId);
 		const fail = s.failNext;
 		s.failNext = null;
-		const failure = () =>
-			fail?.kind === "unavailable"
+		const failure = () => {
+			s.attachFailures += 1;
+			return fail?.kind === "unavailable"
 				? new AgentUnavailableError(machineId)
 				: connectionReset();
+		};
 		const streams = cmd.streams;
 		const requested: Record<AgentStream, number> = {
 			stdout: req.stdoutOffset,

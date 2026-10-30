@@ -157,6 +157,7 @@ export class StreamRegistry {
 		const unregister = () => {
 			if (done) return;
 			done = true;
+			opts.signal?.removeEventListener("abort", unregister);
 			this.#entries.delete(entry);
 			if (capped) {
 				const left = this.count(pk) - 1;

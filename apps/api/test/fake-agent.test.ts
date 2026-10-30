@@ -195,6 +195,7 @@ describe("Start", () => {
 		expect((await collect(attachAll(m2, id))).out.stdout).toBe("two");
 		expect(fake.startCount(id, m1)).toBe(1);
 		expect(fake.startCount(id)).toBe(2);
+		expect(fake.totalStarts(m1)).toBe(1);
 	});
 
 	it("rejects the same commandId with another spec: already_exists", async () => {
@@ -476,6 +477,7 @@ describe("Attach", () => {
 		})().catch((e: unknown) => e);
 		expect(err).toBeInstanceOf(Error);
 		expect((err as { code?: string }).code).toBe("ECONNRESET");
+		expect(fake.attachFailures(m)).toBe(1);
 		expect(
 			dec.decode(
 				new Uint8Array(
@@ -521,6 +523,20 @@ describe("Attach", () => {
 			if (o.type === "data") parts.push(dec.decode(o.data));
 		}
 		expect(parts.join("")).toBe("abcdefghij");
+		expect(fake.attachFailures(m)).toBe(2);
+	});
+
+	it("an armed failure counts only once an attach reaches its byte count", async () => {
+		const m = newMachine();
+		const r = await run(m, spec({ shell: "printf abc" }));
+		// The attach ends at exit before 100 bytes: the failure never bit.
+		fake.failNextAttach(m, 100, "reset");
+		await collect(attachAll(m, r.commandId));
+		expect(fake.attachFailures(m)).toBe(0);
+		fake.failNextAttach(m, 0, "unavailable");
+		await collect(attachAll(m, r.commandId)).catch(() => {});
+		expect(fake.attachFailures(m)).toBe(1);
+		expect(fake.attachFailures("never-used")).toBe(0);
 	});
 
 	it("failNextAttach unavailable fails with AgentUnavailableError", async () => {
