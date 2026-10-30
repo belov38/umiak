@@ -1,6 +1,7 @@
 package winapi
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -8,11 +9,30 @@ import (
 )
 
 var (
+	procCreateJobObjectW          = modkernel32.NewProc("CreateJobObjectW")
 	procOpenJobObjectW            = modkernel32.NewProc("OpenJobObjectW")
 	procAttachConsole             = modkernel32.NewProc("AttachConsole")
 	procFreeConsole               = modkernel32.NewProc("FreeConsole")
 	procUpdateProcThreadAttribute = modkernel32.NewProc("UpdateProcThreadAttribute")
 )
+
+// CreateJobObject creates the job object name (Win32 name, e.g.
+// `Global\sbx-wd-<lease>`; "" for an unnamed job) with default security.
+// When the name exists it returns the existing job's handle with
+// existed = true (the x/sys wrapper drops that ERROR_ALREADY_EXISTS).
+func CreateJobObject(name string) (h windows.Handle, existed bool, err error) {
+	var n *uint16
+	if name != "" {
+		if n, err = windows.UTF16PtrFromString(name); err != nil {
+			return 0, false, fmt.Errorf("winapi: job name %q: %w", name, err)
+		}
+	}
+	r, _, e := procCreateJobObjectW.Call(0, uintptr(unsafe.Pointer(n)))
+	if r == 0 {
+		return 0, false, callErr(e)
+	}
+	return windows.Handle(r), errors.Is(e, windows.ERROR_ALREADY_EXISTS), nil
+}
 
 // OpenJobObject opens the named job object (Win32 name, e.g.
 // `Global\sbx-cmd-<id>`). A missing job is windows.ERROR_FILE_NOT_FOUND.

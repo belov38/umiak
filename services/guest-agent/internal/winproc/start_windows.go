@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"strings"
 	"sync"
@@ -38,6 +39,9 @@ type StartOptions struct {
 	// Stdin, Stdout, Stderr are the standard handles; 0 leaves one unset.
 	// They need not be inheritable: Start passes inheritable duplicates
 	// through PROC_THREAD_ATTRIBUTE_HANDLE_LIST, so nothing else leaks.
+	// Pseudo-handles (InvalidHandle is also CurrentProcess) are rejected:
+	// duplicating one would give the child a real handle to the caller's
+	// process, thread or token.
 	Stdin, Stdout, Stderr windows.Handle
 	// PseudoConsole attaches the process to a ConPTY; the standard
 	// handles must then be 0. Without it the process gets a hidden
@@ -239,6 +243,10 @@ func inheritableCopies(stdin, stdout, stderr windows.Handle) (stdHandles, func()
 		if p.src == 0 {
 			continue
 		}
+		if pseudoHandle(p.src) {
+			closeAll()
+			return stdHandles{}, func() {}, fmt.Errorf("winproc: start: pseudo-handle %#x as a standard handle", uintptr(p.src))
+		}
 		var d windows.Handle
 		if err := windows.DuplicateHandle(self, p.src, self, &d, 0, true, windows.DUPLICATE_SAME_ACCESS); err != nil {
 			closeAll()
@@ -248,6 +256,13 @@ func inheritableCopies(stdin, stdout, stderr windows.Handle) (stdHandles, func()
 		*p.dst = d
 	}
 	return out, closeAll, nil
+}
+
+// pseudoHandle reports a value with the high bit set: InvalidHandle and the
+// pseudo-handles of the current process, thread and tokens (-1 .. -6). Real
+// user-mode handles never have it.
+func pseudoHandle(h windows.Handle) bool {
+	return h > windows.Handle(math.MaxInt)
 }
 
 // Pid returns the process id.

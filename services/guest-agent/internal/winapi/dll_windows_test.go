@@ -18,7 +18,7 @@ func TestSystemDLLsLoad(t *testing.T) {
 func TestJobAndConsoleProcsResolve(t *testing.T) {
 	for _, p := range []*windows.LazyProc{
 		procNtCreateJobObject, procNtMakeTemporaryObject,
-		procOpenJobObjectW, procAttachConsole, procFreeConsole, procUpdateProcThreadAttribute,
+		procCreateJobObjectW, procOpenJobObjectW, procAttachConsole, procFreeConsole, procUpdateProcThreadAttribute,
 	} {
 		if err := p.Find(); err != nil {
 			t.Errorf("find %s: %v", p.Name, err)

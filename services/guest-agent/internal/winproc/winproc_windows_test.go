@@ -341,6 +341,83 @@ func TestStartEnvAndDir(t *testing.T) {
 	}
 }
 
+func TestCreateJobCollision(t *testing.T) {
+	name := uniqueName(t, "sbx-test-wd")
+	j, err := CreateJob(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close() //nolint:errcheck // test cleanup
+	if _, err := CreateJob(name); !errors.Is(err, ErrJobExists) {
+		t.Fatalf("second CreateJob = %v, want ErrJobExists", err)
+	}
+	// The failed attempt did not take the job from its owner.
+	if n, err := j.ActiveProcesses(); err != nil || n != 0 {
+		t.Fatalf("ActiveProcesses = %d, %v", n, err)
+	}
+}
+
+func TestOpenJobPollsWithoutPort(t *testing.T) {
+	name := uniqueName(t, "sbx-test-open")
+	j, err := CreateJob(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close() //nolint:errcheck // test cleanup
+	o, err := OpenJob(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Close() //nolint:errcheck // test cleanup
+	if o.port != 0 {
+		t.Fatal("OpenJob took a completion port")
+	}
+	p := start(t, StartOptions{
+		Argv0Path:   cmdExe(),
+		CommandLine: `cmd.exe /d /c ping -n 2 127.0.0.1`,
+		Job:         o,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// Both the owner (port) and the opener (polling) see the job empty.
+	if err := o.WaitEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.WaitEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wait(t, p, 30*time.Second)
+}
+
+func TestJobCloseStopsDrain(t *testing.T) {
+	j, err := CreateJob("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drained := j.drained
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-drained:
+	default:
+		t.Fatal("drain goroutine still running after Close")
+	}
+	if err := j.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestStartRejectsPseudoHandles(t *testing.T) {
+	for _, h := range []windows.Handle{windows.InvalidHandle, windows.CurrentProcess(), windows.CurrentThread(), ^windows.Handle(3)} {
+		if _, err := Start(StartOptions{
+			Argv0Path: cmdExe(), CommandLine: `cmd.exe /c exit 0`, Stdout: h,
+		}); err == nil {
+			t.Errorf("Start with standard handle %#x succeeded", uintptr(h))
+		}
+	}
+}
+
 func TestStartRejectsPTYWithStdHandles(t *testing.T) {
 	pty, err := NewPseudoConsole(80, 25)
 	if err != nil {

@@ -29,9 +29,15 @@ var (
 // NtMakeTemporaryObject needs.
 const jobAllAccess = windows.STANDARD_RIGHTS_REQUIRED | windows.SYNCHRONIZE | 0x3F
 
-// waitEmptyPoll bounds one wait on the completion port: WaitEmpty rechecks
-// the context and the process count at least this often.
+// waitEmptyPoll is how often WaitEmpty recounts the processes without a
+// notification from the completion port.
 const waitEmptyPoll = 250 * time.Millisecond
+
+// Completion keys: job messages, and the request to stop draining.
+const (
+	keyJob  = 1
+	keyQuit = 2
+)
 
 // basicAccounting is JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.
 type basicAccounting struct {
@@ -54,10 +60,18 @@ type associateCompletionPort struct {
 // Job is a job object. Its processes and their descendants stay in it: the
 // job has neither JOB_OBJECT_LIMIT_BREAKAWAY_OK nor KILL_ON_JOB_CLOSE, so
 // closing the handle (or the shim dying) leaves the processes running.
+//
+// A created job owns the job's completion port (a job takes only one). A
+// goroutine drains it for the whole life of the Job, so the queue of job
+// messages does not grow with every process a long command spawns, and
+// wakes WaitEmpty on each message. Close stops it. An opened job has no
+// port and WaitEmpty polls.
 type Job struct {
-	mu   sync.Mutex
-	h    windows.Handle
-	port windows.Handle // 0 if another handle owner associated its port first
+	mu      sync.Mutex
+	h       windows.Handle
+	port    windows.Handle // 0 for an opened job
+	notify  chan struct{}  // a job message arrived; nil without a port
+	drained chan struct{}  // closed when the drain goroutine ends
 }
 
 // permanentPrivilege enables SeCreatePermanentPrivilege once; SYSTEM holds
@@ -110,19 +124,15 @@ func CreatePermanentJob(name string) (*Job, error) {
 // named `Global\<name>`, or unnamed when name is "". An existing job is
 // ErrJobExists.
 func CreateJob(name string) (*Job, error) {
-	var n *uint16
+	var win32 string
 	if name != "" {
 		if err := checkName(name); err != nil {
 			return nil, err
 		}
-		p, err := windows.UTF16PtrFromString(`Global\` + name)
-		if err != nil {
-			return nil, fmt.Errorf("winproc: job name %q: %w", name, err)
-		}
-		n = p
+		win32 = `Global\` + name
 	}
-	h, err := windows.CreateJobObject(nil, n)
-	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+	h, existed, err := winapi.CreateJobObject(win32)
+	if existed {
 		_ = windows.CloseHandle(h)
 		return nil, fmt.Errorf("%w: %s", ErrJobExists, name)
 	}
@@ -138,7 +148,8 @@ func CreateJob(name string) (*Job, error) {
 }
 
 // OpenJob opens the job name (`Global\<name>`) created by this or another
-// process. A missing job is ErrJobNotFound.
+// process. It never takes the completion port: a live shim may own it. A
+// missing job is ErrJobNotFound.
 func OpenJob(name string) (*Job, error) {
 	if err := checkName(name); err != nil {
 		return nil, err
@@ -150,11 +161,7 @@ func OpenJob(name string) (*Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("winproc: OpenJobObject %s: %w", name, err)
 	}
-	j := &Job{h: h}
-	// A job takes one completion port; the creator usually has it. Then
-	// WaitEmpty polls.
-	_ = j.associatePort()
-	return j, nil
+	return &Job{h: h}, nil
 }
 
 // checkName accepts a plain object name: no namespace prefix, no path.
@@ -165,21 +172,46 @@ func checkName(name string) error {
 	return nil
 }
 
-// associatePort creates a completion port and associates it with the job
-// for JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO.
+// associatePort creates a completion port, associates it with the job
+// (JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO and the other job messages) and
+// starts draining it.
 func (j *Job) associatePort() error {
 	port, err := windows.CreateIoCompletionPort(windows.InvalidHandle, 0, 0, 1)
 	if err != nil {
 		return fmt.Errorf("CreateIoCompletionPort: %w", err)
 	}
-	info := associateCompletionPort{CompletionKey: 1, CompletionPort: port}
+	info := associateCompletionPort{CompletionKey: keyJob, CompletionPort: port}
 	if _, err := windows.SetInformationJobObject(j.h, windows.JobObjectAssociateCompletionPortInformation,
 		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
 		_ = windows.CloseHandle(port)
 		return fmt.Errorf("associate completion port: %w", err)
 	}
 	j.port = port
+	j.notify = make(chan struct{}, 1)
+	j.drained = make(chan struct{})
+	go drain(port, j.notify, j.drained)
 	return nil
+}
+
+// drain dequeues the messages of port until keyQuit or a port failure and
+// signals each job message on notify without blocking.
+func drain(port windows.Handle, notify chan<- struct{}, drained chan<- struct{}) {
+	defer close(drained)
+	for {
+		var msg uint32
+		var key uintptr
+		var ov *windows.Overlapped
+		if err := windows.GetQueuedCompletionStatus(port, &msg, &key, &ov, windows.INFINITE); err != nil {
+			return
+		}
+		if key == keyQuit {
+			return
+		}
+		select {
+		case notify <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // Handle returns the job handle, valid until Close.
@@ -238,9 +270,13 @@ func (j *Job) MakeTemporary() error {
 	return nil
 }
 
-// WaitEmpty returns when the job has no processes, or ctx.Err(). It uses
-// the job's completion port when this Job owns it, and polls otherwise.
+// WaitEmpty returns when the job has no processes, or ctx.Err(). A created
+// job wakes on its port's messages (JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO when
+// the last process exits); an opened one polls every waitEmptyPoll.
 func (j *Job) WaitEmpty(ctx context.Context) error {
+	j.mu.Lock()
+	notify := j.notify
+	j.mu.Unlock()
 	for {
 		n, err := j.ActiveProcesses()
 		if err != nil {
@@ -249,31 +285,17 @@ func (j *Job) WaitEmpty(ctx context.Context) error {
 		if n == 0 {
 			return nil
 		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		j.mu.Lock()
-		port := j.port
-		j.mu.Unlock()
-		if port == 0 {
-			t := time.NewTimer(waitEmptyPoll)
-			select {
-			case <-ctx.Done():
-				t.Stop()
-				return ctx.Err()
-			case <-t.C:
-			}
-			continue
-		}
-		// The port gets JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO when the last
-		// process exits. Any message (new or exited process, a stale zero
-		// from an earlier wait) or the timeout leads to a recount.
-		var msg uint32
-		var key uintptr
-		var ov *windows.Overlapped
-		err = windows.GetQueuedCompletionStatus(port, &msg, &key, &ov, uint32(waitEmptyPoll/time.Millisecond))
-		if err != nil && !errors.Is(err, windows.WAIT_TIMEOUT) {
-			return fmt.Errorf("winproc: job completion port: %w", err)
+		// Any message (a new or exited process, a stale zero from an
+		// earlier wait) or the timer leads to a recount; the timer also
+		// covers a notification taken by a concurrent WaitEmpty.
+		t := time.NewTimer(waitEmptyPoll)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-notify:
+			t.Stop()
+		case <-t.C:
 		}
 	}
 }
@@ -287,7 +309,15 @@ func (j *Job) Close() error {
 		return nil
 	}
 	if j.port != 0 {
-		_ = windows.CloseHandle(j.port)
+		// Let drain return before the port handle goes, so it never waits
+		// on a closed (or reused) handle value.
+		if err := windows.PostQueuedCompletionStatus(j.port, 0, keyQuit, nil); err != nil {
+			_ = windows.CloseHandle(j.port)
+			<-j.drained
+		} else {
+			<-j.drained
+			_ = windows.CloseHandle(j.port)
+		}
 		j.port = 0
 	}
 	err := windows.CloseHandle(j.h)
