@@ -7,7 +7,7 @@
 # evaluation media.
 [iso]
 file = "Windows11_Client_x64_en-gb_26300_9457.iso"
-sha256 = ""
+sha256 = "7e3f373bd3c2321b5d5125dfcf718dfbf1a0abc50a267118669951890df98a5d"
 edition = "Windows 11 Pro"
 product_key = "generic-pro"
 channel = "retail"
