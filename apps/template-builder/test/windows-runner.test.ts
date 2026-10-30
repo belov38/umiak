@@ -159,6 +159,8 @@ describe("runWindowsStep", () => {
 		await runWindowsStep(g.io, { step: "00-base", onLog: () => {}, ...fast });
 		const clean = g.calls.find((c) => c.at(-1)?.includes("Remove-Item"));
 		expect(clean?.at(-1)).toContain("C:\\sbx-build\\logs\\00-base.exit");
+		// Remove-Item of missing files leaves $? false, which -Command turns into exit 1.
+		expect(clean?.at(-1)).toMatch(/; exit 0$/);
 	});
 
 	it("non-zero exit throws StepFailedError with tail", async () => {

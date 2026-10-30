@@ -186,7 +186,9 @@ export async function runWindowsStep(
 				io.exec([
 					...POWERSHELL,
 					`New-Item -ItemType Directory -Force -Path ${LOG_DIR} | Out-Null; ` +
-						`Remove-Item -Force -ErrorAction SilentlyContinue ${exitPath}, ${exitPath}.tmp, ${logPath}`,
+						`Remove-Item -Force -ErrorAction SilentlyContinue ${exitPath}, ${exitPath}.tmp, ${logPath}; ` +
+						// -Command exits 1 when the last statement had an error, even a silenced one.
+						"exit 0",
 				]),
 			deadline,
 			pollMs,
