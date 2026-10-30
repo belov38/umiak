@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -106,10 +105,14 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 	return info, created, err
 }
 
-// create checks the user and the limit and writes the STARTING record.
-// the record lock of c is held.
+// create checks the user, the argv and the limit and writes the STARTING
+// record. the record lock of c is held.
 func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec *agentv1.CommandSpec) (*store.Command, error) {
-	if _, err := m.lookupUser(spec); err != nil {
+	u, err := m.lookupUser(spec)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.checkArgv(u, spec); err != nil {
 		return nil, err
 	}
 	// Reserve a slot: mainAlive counts toward max_running_commands from
@@ -332,26 +335,18 @@ func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec) (shim.Spec, err
 	}
 	var argv []string
 	if sh, ok := spec.GetCmd().(*agentv1.CommandSpec_Shell); ok {
-		flag := "-lc"
-		if spec.Login != nil && !spec.GetLogin() {
-			flag = "-c"
+		login := spec.Login == nil || spec.GetLogin()
+		if argv, err = m.shellArgv(id, u, sh.Shell, login); err != nil {
+			return shim.Spec{}, err
 		}
-		argv = []string{"/bin/bash", flag, sh.Shell}
 	} else {
 		argv = slices.Clone(spec.GetArgv().GetArgs())
-	}
-	cwd := spec.GetCwd()
-	switch {
-	case cwd == "":
-		cwd = u.Home
-	case !path.IsAbs(cwd):
-		cwd = path.Join(u.Home, cwd)
 	}
 	ss := shim.Spec{
 		ID:            id,
 		Argv:          argv,
 		Env:           m.opts.Env.Build(u, spec),
-		Cwd:           cwd,
+		Cwd:           resolveCwd(u, spec.GetCwd()),
 		UID:           u.UID,
 		GID:           u.GID,
 		Groups:        u.Groups,
