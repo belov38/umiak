@@ -193,6 +193,13 @@ function setup(
 		return { exitcode: 0 };
 	};
 	pve.before = (method, path) => {
+		// Proxmox refuses to start a running VM.
+		if (
+			method === "POST" &&
+			path === `${vm}/status/start` &&
+			pve.vms.get(598)?.status === "running"
+		)
+			throw new Error(`VM 598 already running`);
 		if (method !== "GET" || path !== `${vm}/status/current`) return;
 		const v = pve.vms.get(598);
 		if (v?.status !== "running") return;
@@ -904,11 +911,8 @@ describe("iso-install build: failures", () => {
 		const base = s.pve.before;
 		s.pve.before = (method, path, params) => {
 			base?.(method, path, params);
-			if (
-				method === "POST" &&
-				path === `${vm}/status/start` &&
-				s.pve.vms.get(598)?.config.boot === "order=ide2"
-			)
+			const offline = s.pve.vms.get(598)?.config.boot === "order=ide2";
+			if (method === "POST" && path === `${vm}/status/start` && offline)
 				offlineStarts++;
 		};
 		// OVMF missed the CD prompt on the first offline boot: Windows (not sealed yet) answers.
@@ -952,12 +956,12 @@ describe("iso-install build: failures", () => {
 		const base = s.pve.before;
 		s.pve.before = (method, path, params) => {
 			base?.(method, path, params);
-			if (
-				method === "POST" &&
-				path === `${vm}/status/start` &&
-				s.pve.vms.get(598)?.config.boot === "order=ide2"
-			)
+			const offline = s.pve.vms.get(598)?.config.boot === "order=ide2";
+			if (method === "POST" && path === `${vm}/status/start` && offline)
 				offlineStarts++;
+			// Only the disk boot during the offline stage refuses the shutdown.
+			if (method === "POST" && path === `${vm}/agent/shutdown` && offline)
+				throw new PveApiError(500, "QEMU guest agent is not running");
 		};
 		s.guest.alive = () => {
 			const v = s.pve.vms.get(598);
@@ -966,10 +970,6 @@ describe("iso-install build: failures", () => {
 				(v.config.boot !== "order=ide2" || offlineStarts === 1)
 			);
 		};
-		s.pve.fail[`POST ${vm}/agent/shutdown`] = new PveApiError(
-			500,
-			"QEMU guest agent is not running",
-		);
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(m.status).toBe("ready");
 		expectInOrder(s.log, [
@@ -991,7 +991,7 @@ describe("iso-install build: failures", () => {
 		expect(m.error?.message).toMatch(/not sealed/);
 		expect(
 			s.log.filter((e) => e === `api:POST ${vm}/agent/shutdown`),
-		).toHaveLength(3);
+		).toHaveLength(4); // the shutdown after the steps, then one per disk boot
 		expect(s.log).not.toContain("guest:seal");
 		expect(s.log).not.toContain("guest:sysprep");
 		expect(s.log).not.toContain(`api:POST ${vm}/template`);

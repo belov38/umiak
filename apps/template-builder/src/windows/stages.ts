@@ -57,6 +57,7 @@ import {
 	type Save,
 	type Stage,
 	type State,
+	shutdown,
 	sleep,
 	stepLog,
 	TASK_TIMEOUT_MS,
@@ -1088,6 +1089,9 @@ export async function stageOffline(
 	st: State,
 ): Promise<void> {
 	const vmid = st.vmid as number;
+	// The steps leave Windows running; WinPE needs a cold boot from the CD.
+	if ((await vmStatus(deps, o.node, vmid)) !== "stopped")
+		await shutdown(deps, o, vmid);
 	await deps.api.put(`/nodes/${o.node}/qemu/${vmid}/config`, {
 		sata2: `${MEDIA_STORAGE}:iso/${offlineIsoName(st.m)},media=cdrom`,
 		boot: "order=ide2",
