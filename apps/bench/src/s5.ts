@@ -98,6 +98,26 @@ const GUEST_SCRIPT = [
 	"systemd-analyze blame 2>/dev/null | head -10",
 ].join("\n");
 
+/**
+ * A config lock held for a while by Proxmox (seen right after a start) fails the stop task of a
+ * delete with "can't lock file ... got timeout"; delete is safe to repeat.
+ */
+async function deleteWithRetry(
+	machines: Machines,
+	vmid: number,
+): Promise<void> {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			await machines.delete(vmid);
+			return;
+		} catch (err) {
+			if (attempt >= 3 || !/can't lock file/.test(String(err))) throw err;
+			log(`VM ${vmid}: delete hit a config lock, retrying`);
+			await new Promise((r) => setTimeout(r, 5000));
+		}
+	}
+}
+
 const log = (s: string) =>
 	process.stderr.write(`[${new Date().toISOString().slice(11, 19)}] ${s}\n`);
 
@@ -181,7 +201,7 @@ export async function runS5(ctx: Ctx, o: S5Options): Promise<number> {
 					blameTop10: first.blame,
 				});
 			} finally {
-				if (!o.keep) await machines.delete(m.vmid);
+				if (!o.keep) await deleteWithRetry(machines, m.vmid);
 				ram.release(m.vmid);
 			}
 		}
