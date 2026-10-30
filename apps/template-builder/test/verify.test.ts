@@ -438,6 +438,10 @@ class World {
 			this.#vm(vmid).running = false;
 			this.log.push(`stop ${vmid}`);
 		},
+		shutdown: async (vmid) => {
+			this.#vm(vmid).running = false;
+			this.log.push(`shutdown ${vmid}`);
+		},
 		delete: async (vmid) => {
 			this.vms.delete(vmid);
 			this.log.push(`delete ${vmid}`);

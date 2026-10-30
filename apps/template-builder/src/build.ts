@@ -314,7 +314,10 @@ export async function buildTemplate(
 				...(signal !== undefined ? { signal } : {}),
 			});
 			signal?.throwIfAborted();
-			save({ verify: v });
+			save({
+				verify: v,
+				...(v.license !== undefined ? { license: v.license } : {}),
+			});
 			if (!v.ok) {
 				const red = v.checks
 					.filter((c) => c.status === "FAIL")

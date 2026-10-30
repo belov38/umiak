@@ -23,6 +23,7 @@ import type {
 	VerifyResult,
 } from "./manifest.ts";
 import type { GuestIo } from "./runner.ts";
+import { verifyWindows } from "./windows/verify.ts";
 
 // `sbx-tpl verify` (spec S5 section 10): a clone of the template, its hard restart, a fork with
 // a new identity and a raw-disk scan for build secrets. The clones are removed at the end.
@@ -87,6 +88,7 @@ export interface VerifyDeps {
 		| "fork"
 		| "start"
 		| "stop"
+		| "shutdown"
 		| "delete"
 		| "waitReady"
 		| "snapshot"
@@ -99,8 +101,10 @@ export interface VerifyDeps {
 		reserve(vmid: number, memoryMb: number): Promise<void>;
 		release(vmid: number): void;
 	};
-	/** infra/templates/<recipe.verify>/verify.sh */
+	/** infra/templates/<recipe.verify>/verify.sh (windows: verify.ps1) */
 	verifyScript: string;
+	/** Windows: QGA calls beyond exec (Qga of @sbx/pve). */
+	windows?: WindowsGuestOps;
 	secretFiles: SecretFiles;
 	/** One message per call; secrets are already redacted. */
 	log: (msg: string) => void;
@@ -109,6 +113,14 @@ export interface VerifyDeps {
 	/** Poll interval of the agent and tunnel waits (default 2 s). */
 	pollMs?: number;
 	randomUUID?: () => string;
+}
+
+export interface WindowsGuestOps {
+	fsfreezeFreeze(vmid: number): Promise<void>;
+	fsfreezeThaw(vmid: number): Promise<void>;
+	fsfreezeStatus(vmid: number): Promise<"thawed" | "frozen">;
+	/** Qga.fileWriteWindows: the path must not contain spaces or shell metacharacters. */
+	writeFile(vmid: number, path: string, data: Buffer): Promise<void>;
 }
 
 export interface VerifyOptions {
@@ -475,6 +487,7 @@ export async function verifyTemplate(
 	manifest: Manifest,
 	o: VerifyOptions = {},
 ): Promise<VerifyResult> {
+	if (manifest.os === "windows") return verifyWindows(deps, manifest, o);
 	const tplVmid = manifest.pveVmid;
 	if (tplVmid === null) throw new Error("the build has no template VMID");
 	const now = deps.now ?? Date.now;
@@ -788,29 +801,48 @@ export async function verifyTemplate(
 		at: new Date(now()).toISOString(),
 	};
 
-	async function waitTunnel(
+	function waitTunnel(
 		reg: TunnelRegistrar,
 		machineId: string,
 	): Promise<CheckResult> {
-		const deadline = now() + TUNNEL_TIMEOUT_MS;
-		let last = "no session";
-		for (;;) {
-			signal?.throwIfAborted();
-			try {
-				const st = await reg.sessionState(machineId);
-				if (st?.startsWith("connected"))
-					return pass("tunnel_connected", true, `session ${st}`);
-				last = st === null ? "no session" : `session ${st}`;
-			} catch (err) {
-				last = `error: ${errorText(err)}`;
-			}
-			if (now() >= deadline)
-				return pass(
-					"tunnel_connected",
-					false,
-					`${last} after ${TUNNEL_TIMEOUT_MS} ms`,
-				);
-			await sleep(pollMs);
+		return waitTunnelSession(reg, machineId, {
+			now,
+			sleep,
+			pollMs,
+			...(signal !== undefined ? { signal } : {}),
+		});
+	}
+}
+
+/** Polls the dev gateway until the machine's tunnel session is connected (at most 60 s). */
+export async function waitTunnelSession(
+	reg: TunnelRegistrar,
+	machineId: string,
+	o: {
+		now: () => number;
+		sleep: (ms: number) => Promise<void>;
+		pollMs: number;
+		signal?: AbortSignal;
+	},
+): Promise<CheckResult> {
+	const deadline = o.now() + TUNNEL_TIMEOUT_MS;
+	let last = "no session";
+	for (;;) {
+		o.signal?.throwIfAborted();
+		try {
+			const st = await reg.sessionState(machineId);
+			if (st?.startsWith("connected"))
+				return pass("tunnel_connected", true, `session ${st}`);
+			last = st === null ? "no session" : `session ${st}`;
+		} catch (err) {
+			last = `error: ${errorText(err)}`;
 		}
+		if (o.now() >= deadline)
+			return pass(
+				"tunnel_connected",
+				false,
+				`${last} after ${TUNNEL_TIMEOUT_MS} ms`,
+			);
+		await o.sleep(o.pollMs);
 	}
 }

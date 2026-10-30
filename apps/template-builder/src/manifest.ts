@@ -14,12 +14,30 @@ export interface BootTimes {
 	startToAgentActiveMs?: number;
 }
 
+/** Boot timings of verify (spec S5 section 10; windows: spec S9 section 16). */
+export interface VerifyBoot {
+	first: BootTimes;
+	hardRestart: BootTimes;
+	/** Windows: start of a template clone to agent ready (and tunnel connected with a connect URL). */
+	firstBootToAgentReadyMs?: number;
+	/** Windows: start after a shutdown to agent ready. */
+	bootToAgentReadyMs?: number;
+	/** Windows: start after a hard stop to agent ready. */
+	hardStopRestartMs?: number;
+	/** Windows: start of a fork to agent ready, the rename reboot included. */
+	identityChangeBootMs?: number;
+	/** Windows: QGA VSS freeze to thaw of the snapshot. */
+	freezeMs?: number;
+}
+
 export interface VerifyResult {
 	ok: boolean;
 	checks: CheckResult[];
-	boot: { first: BootTimes; hardRestart: BootTimes };
+	boot: VerifyBoot;
 	kvm: { available: boolean; reason?: string };
 	fork: { ok: boolean };
+	/** Windows: licence state of the clone (goes to the manifest's `license`). */
+	license?: LicenseInfo;
 	at: string;
 }
 

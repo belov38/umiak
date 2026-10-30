@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { Qga } from "@sbx/pve";
 import {
 	BuildFailedError,
 	type BuildOptions,
@@ -103,7 +104,10 @@ function trapSignals(lastWords: () => string): {
 	};
 }
 
-/** `verifyTemplate` with the clients of `ctx`; guest calls stop once `signal` is aborted. */
+/**
+ * `verifyTemplate` with the clients of `ctx` (the profile follows `m.os`); guest calls stop once
+ * `signal` is aborted.
+ */
 function runVerify(
 	ctx: Ctx,
 	ramGuard: RamGuard,
@@ -112,10 +116,10 @@ function runVerify(
 ): Promise<VerifyResult> {
 	if (m.pveVmid === null)
 		throw new Error(`build ${m.buildId} has no template VM`);
-	if (m.os === "windows") return verifyWindowsPending();
 	const { cfg, api } = ctx;
 	const recipe = loadRecipe(TEMPLATES_DIR, m.templateSlug);
 	const ioApi = o.signal ? guardApi(api, o.signal) : api;
+	const qga = new Qga(ioApi, cfg.node);
 	return verifyTemplate(
 		{
 			machines: machinesFor(ctx, m.pveVmid),
@@ -123,10 +127,20 @@ function runVerify(
 			node: ctx.node,
 			ramGuard,
 			verifyScript: readFileSync(
-				join(TEMPLATES_DIR, recipe.verify, "verify.sh"),
+				join(
+					TEMPLATES_DIR,
+					recipe.verify,
+					m.os === "windows" ? "verify.ps1" : "verify.sh",
+				),
 				"utf8",
 			),
 			secretFiles: defaultSecretFiles(cfg),
+			windows: {
+				fsfreezeFreeze: (vmid) => qga.fsfreezeFreeze(vmid),
+				fsfreezeThaw: (vmid) => qga.fsfreezeThaw(vmid),
+				fsfreezeStatus: (vmid) => qga.fsfreezeStatus(vmid),
+				writeFile: (vmid, path, data) => qga.fileWriteWindows(vmid, path, data),
+			},
 			log: (msg) => out(`[sbx-tpl] ${msg}`),
 		},
 		m,
@@ -142,11 +156,6 @@ function runVerify(
 			...(o.signal !== undefined ? { signal: o.signal } : {}),
 		},
 	);
-}
-
-/** The windows verify profile is not written yet: a windows build needs --no-verify until then. */
-async function verifyWindowsPending(): Promise<VerifyResult> {
-	throw new Error("windows verify not implemented (build with --no-verify)");
 }
 
 /**
@@ -469,7 +478,10 @@ async function main(argv: string[]): Promise<number> {
 					...o,
 					signal: interrupt.signal,
 				});
-				registry.update(m.buildId, { verify: v });
+				registry.update(m.buildId, {
+					verify: v,
+					...(v.license !== undefined ? { license: v.license } : {}),
+				});
 				out(v.ok ? "verify: ok" : "verify: FAILED");
 				return v.ok ? 0 : 1;
 			} catch (err) {

@@ -875,6 +875,20 @@ describe("iso-install build: failures", () => {
 		).rejects.toThrow(/--iso/);
 	});
 
+	it("the licence verify reads goes to the manifest", async () => {
+		const s = setup();
+		const license = {
+			status: "Licensed",
+			channel: "retail" as const,
+			daysRemaining: null,
+			expiresAt: null,
+		};
+		s.setVerify({ ...VERIFY_OK, license });
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.license).toEqual(license);
+		expect(m.verify?.license).toEqual(license);
+	});
+
 	it("a red verify deletes the template and removes nothing else", async () => {
 		const s = setup();
 		s.setVerify({ ...VERIFY_OK, ok: false });
