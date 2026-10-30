@@ -15,12 +15,14 @@ import {
 	ExitReason,
 	ExitStatus,
 	IdentityResetSchema,
+	OutputTruncatedSchema,
 	PhaseState,
 	PortSchema,
 	PortsChangedSchema,
 	PtyClosedSchema,
 	QuiesceAutoThawedSchema,
 	ReadinessChangedSchema,
+	Stream,
 } from "@sbx/proto/agent/v1";
 import { describe, expect, it } from "vitest";
 import { decodePayload } from "../src/agent/event-decode.ts";
@@ -56,8 +58,38 @@ describe("S3 event payloads", () => {
 			status: "exited",
 			exitCode: 0,
 			signal: null,
+			reason: "none",
+			outputTruncated: null,
 			stdoutBytes: 12,
 			stderrBytes: 0,
+		});
+	});
+
+	it("CommandExited and OutputTruncated: the reason in lower case and output_truncated", () => {
+		expect(
+			roundTrip("command.exited", CommandExitedSchema, {
+				commandId: "01O",
+				status: ExitStatus.KILLED,
+				code: 137,
+				signal: "SIGKILL",
+				reason: ExitReason.OOM,
+				outputTruncated: "disk_full",
+			}).event,
+		).toMatchObject({
+			status: "killed",
+			reason: "oom",
+			outputTruncated: "disk_full",
+		});
+		expect(
+			roundTrip("output.truncated", OutputTruncatedSchema, {
+				commandId: "01O",
+				stream: Stream.STDOUT,
+				reason: "disk_full",
+			}).event,
+		).toEqual({
+			kind: "output_truncated",
+			commandId: "01O",
+			reason: "disk_full",
 		});
 	});
 
@@ -119,7 +151,7 @@ describe("S3 event payloads", () => {
 				commandId: "01P",
 				reason: ExitReason.PTY_IDLE,
 			}).event,
-		).toEqual({ kind: "pty_closed", commandId: "01P" });
+		).toEqual({ kind: "pty_closed", commandId: "01P", reason: "pty_idle" });
 		expect(
 			roundTrip("claim.applied", ClaimAppliedSchema, { sandboxId: "s-1" })
 				.event,

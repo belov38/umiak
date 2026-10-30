@@ -11,10 +11,14 @@ import {
 import { claimIdempotencyKey } from "../idempotency.ts";
 import { idempotencyPrincipal, type Principal } from "../principal.ts";
 import {
+	COMMAND_EXIT_REASONS,
 	type Command,
+	type CommandExitReason,
 	type CommandMode,
 	type CommandStatus,
 	commandFromRow,
+	isOutputTruncatedReason,
+	OUTPUT_TRUNCATED_MAX_CHARS,
 	type Page,
 } from "../rows.ts";
 import {
@@ -97,6 +101,13 @@ export interface CommandResult {
 	signal?: string | null;
 	stdoutBytes?: number | null;
 	stderrBytes?: number | null;
+	/** Why it ended (S3 `ExitReason` in lower case). */
+	reason?: CommandExitReason | null;
+	/**
+	 * "disk_full" when the agent dropped output. Also recorded on a command
+	 * that has ended already (and has none yet): it can arrive later.
+	 */
+	outputTruncated?: string | null;
 	/** Default now. */
 	endedAt?: Date;
 }
@@ -124,6 +135,8 @@ const RESULT_KEYS = [
 	"signal",
 	"stdoutBytes",
 	"stderrBytes",
+	"reason",
+	"outputTruncated",
 	"endedAt",
 ];
 
@@ -499,6 +512,23 @@ function validateResult(result: CommandResult): void {
 		}
 	}
 	if (
+		result.reason !== undefined &&
+		result.reason !== null &&
+		!COMMAND_EXIT_REASONS.includes(result.reason)
+	) {
+		issues.push({
+			path: "reason",
+			message: `must be one of ${COMMAND_EXIT_REASONS.join(", ")}`,
+		});
+	}
+	if (
+		result.outputTruncated !== undefined &&
+		result.outputTruncated !== null &&
+		!isOutputTruncatedReason(result.outputTruncated)
+	) {
+		issues.push({ path: "outputTruncated", message: OUTPUT_TRUNCATED_RULE });
+	}
+	if (
 		result.endedAt !== undefined &&
 		!(result.endedAt instanceof Date && !Number.isNaN(result.endedAt.getTime()))
 	) {
@@ -507,9 +537,12 @@ function validateResult(result: CommandResult): void {
 	if (issues.length > 0) throw validation(issues);
 }
 
+const OUTPUT_TRUNCATED_RULE = `must be a reason of 1 to ${OUTPUT_TRUNCATED_MAX_CHARS} characters`;
+
 /**
  * Writes a terminal status unless the command already has one. Unknown ids
- * are `not_found`; a command that is already terminal is left unchanged.
+ * are `not_found`; a command that is already terminal keeps its status and
+ * reason, and only gets `outputTruncated` if it has none yet.
  */
 export async function completeCommand(
 	q: Queryable,
@@ -517,10 +550,12 @@ export async function completeCommand(
 	result: CommandResult,
 ): Promise<void> {
 	validateResult(result);
+	const outputTruncated = result.outputTruncated ?? null;
 	const r = await q.query(
 		`UPDATE runtime.commands
 		 SET status = $2, exit_code = $3, signal = $4, stdout_bytes = $5, stderr_bytes = $6,
-		     ended_at = COALESCE($7::timestamptz, now())
+		     ended_at = COALESCE($7::timestamptz, now()), reason = $8,
+		     output_truncated = COALESCE(output_truncated, $9)
 		 WHERE id = $1 AND status IN ('starting', 'running')`,
 		[
 			commandId,
@@ -530,15 +565,44 @@ export async function completeCommand(
 			result.stdoutBytes ?? null,
 			result.stderrBytes ?? null,
 			result.endedAt ?? null,
+			result.reason ?? null,
+			outputTruncated,
 		],
 	);
-	if (r.rowCount === 0) {
-		const exists = await q.query(
-			"SELECT 1 FROM runtime.commands WHERE id = $1",
-			[commandId],
-		);
-		if (exists.rowCount === 0) throw notFound("command");
+	if (r.rowCount !== 0) return;
+	if (outputTruncated !== null) {
+		await markOutputTruncated(q, commandId, outputTruncated);
+		return;
 	}
+	const exists = await q.query("SELECT 1 FROM runtime.commands WHERE id = $1", [
+		commandId,
+	]);
+	if (exists.rowCount === 0) throw notFound("command");
+}
+
+/**
+ * Records that the agent dropped output of the command (`output.truncated`,
+ * S3), whatever its status; the first reason stays. Unknown ids are
+ * `not_found`.
+ */
+export async function markOutputTruncated(
+	q: Queryable,
+	commandId: string,
+	reason: string,
+): Promise<void> {
+	if (!isOutputTruncatedReason(reason)) {
+		throw validation([{ path: "reason", message: OUTPUT_TRUNCATED_RULE }]);
+	}
+	const r = await q.query(
+		`UPDATE runtime.commands SET output_truncated = $2
+		 WHERE id = $1 AND output_truncated IS NULL`,
+		[commandId, reason],
+	);
+	if (r.rowCount !== 0) return;
+	const exists = await q.query("SELECT 1 FROM runtime.commands WHERE id = $1", [
+		commandId,
+	]);
+	if (exists.rowCount === 0) throw notFound("command");
 }
 
 /**

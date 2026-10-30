@@ -111,6 +111,17 @@ export const COMMAND_STATUSES = [
 	"lost",
 	"failed_to_start",
 ] as const;
+/** S3 `ExitReason` in lower case (S7 §9.6). */
+export const COMMAND_EXIT_REASONS = [
+	"none",
+	"signal",
+	"timeout",
+	"oom",
+	"pty_idle",
+	"reboot",
+	"shim_lost",
+	"start_failed",
+] as const;
 export const PORT_MODES = ["token", "sso", "public"] as const;
 export const PORT_HOST_REWRITES = ["preserve", "localhost"] as const;
 export const PORT_APP_PROTOCOLS = ["http1", "h2c"] as const;
@@ -446,6 +457,10 @@ export const commands = runtime.table("commands", {
 	pid: integer("pid"),
 	/** The team key that started the command (S7 §20.2 item 9). */
 	createdByKey: uuid("created_by_key"),
+	// S7 §9.6, §23.3 (migration 0304, S7 range).
+	reason: text("reason", { enum: COMMAND_EXIT_REASONS }),
+	/** "disk_full" when the agent dropped output; null otherwise. */
+	outputTruncated: text("output_truncated"),
 });
 
 export const hostedPorts = runtime.table("hosted_ports", {

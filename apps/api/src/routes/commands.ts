@@ -605,7 +605,8 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			{
 				command: {
 					...toCommandResource(done),
-					outputTruncated: result.exit.outputTruncated,
+					// The exit's value even if storing it failed.
+					outputTruncated: result.exit.outputTruncated ?? done.outputTruncated,
 				},
 				stdout: result.stdout,
 				stderr: result.stderr,
@@ -677,8 +678,14 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			).catch(() => null);
 		}
 		const result = live === null ? null : commandResultOf(live);
-		if (result !== null && !isTerminalStatus(command.status)) {
-			// A command nobody followed to its end (detached).
+		if (
+			result !== null &&
+			(!isTerminalStatus(command.status) ||
+				(result.outputTruncated != null && command.outputTruncated === null))
+		) {
+			// A command nobody followed to its end (detached), or output the
+			// agent dropped after the row was ended (completeCommand keeps
+			// the status and only adds outputTruncated then).
 			await svc.completeCommand(command.id, result).catch(() => {});
 		}
 		return c.json(toCommandResource(command, live), 200);

@@ -112,6 +112,14 @@ describe("stop", () => {
 		expect(await commandStatus(w, running)).toBe("lost");
 		expect(await commandStatus(w, starting)).toBe("lost");
 		expect(await commandStatus(w, exited)).toBe("exited");
+		// The guest went down with them: reason `reboot`, as the agent says.
+		const reasons = await w.pool.query(
+			"SELECT id, reason FROM runtime.commands WHERE id = ANY($1) ORDER BY id",
+			[[running, starting, exited]],
+		);
+		expect(
+			Object.fromEntries(reasons.rows.map((r) => [r.id, r.reason])),
+		).toEqual({ [running]: "reboot", [starting]: "reboot", [exited]: null });
 	});
 
 	it("a shutdown that times out is followed by a hard stop", async () => {

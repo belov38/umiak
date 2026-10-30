@@ -1,6 +1,8 @@
 // Listener-wide body handling: a body that breaks while the body-limit
 // middleware reads it is 400 validation (not 500); HEAD answers cancel the
 // GET handler's streamed body.
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import { Hono } from "hono";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +10,7 @@ import type { ApiEnv } from "../src/deps.ts";
 import { bodyLimits } from "../src/http/body-limit.ts";
 import { onErrorHandler } from "../src/http/errors.ts";
 import { requestId } from "../src/http/request-id.ts";
+import { createApiServer } from "../src/http/websocket.ts";
 import { TEST_API_KEY } from "../src/testing/index.ts";
 import { createHarness } from "./helpers/harness.ts";
 
@@ -237,6 +240,95 @@ describe("body limit", () => {
 				retryable: true,
 			});
 			expect(body.error.message).toMatch(/30 s/);
+		});
+
+		it("a handler that waits 40 s before its first read (for the sandbox) still gets the chunk", async () => {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+			const a = new Hono<ApiEnv>();
+			a.use(
+				"*",
+				requestId(),
+				bodyLimits({ timeoutMs: 60_000, idleTimeoutMs: 30_000 }),
+			);
+			a.onError(onErrorHandler(pino({ level: "silent" })));
+			let reading = false;
+			a.put("/v1/sandboxes/:sb/files/uploads/:up", async (c) => {
+				await new Promise((r) => setTimeout(r, 40_000));
+				reading = true;
+				return c.text(String((await c.req.arrayBuffer()).byteLength));
+			});
+			const t = trickle();
+			const res = send(a, "PUT", CHUNK, t.stream);
+			// The client's bytes are not pulled before the handler reads
+			// (highWaterMark 0), so no idle timer runs while it waits.
+			await vi.advanceTimersByTimeAsync(40_000);
+			expect(reading).toBe(true);
+			await t.waiting();
+			t.send(new Uint8Array(1000));
+			await t.waiting();
+			t.send(null);
+			const r = await res;
+			expect(r.status).toBe(200);
+			expect(await r.text()).toBe("1000");
+		});
+
+		it("over a real socket a stalled chunk is 408 with Connection: close while the rest of the body is unsent", async () => {
+			const a = new Hono<ApiEnv>();
+			a.use("*", requestId(), bodyLimits({ idleTimeoutMs: 200 }));
+			a.onError(onErrorHandler(pino({ level: "silent" })));
+			a.put("/v1/sandboxes/:sb/files/uploads/:up", async (c) =>
+				c.text(String((await c.req.arrayBuffer()).byteLength)),
+			);
+			const { server } = createApiServer(a);
+			await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+			const { port } = server.address() as AddressInfo;
+			try {
+				const got = await new Promise<{
+					status: number;
+					connection: string | undefined;
+					body: string;
+					socketClosed: Promise<void>;
+				}>((resolve, reject) => {
+					const req = httpRequest({
+						host: "127.0.0.1",
+						port,
+						method: "PUT",
+						path: CHUNK,
+						headers: { "content-length": "1000" },
+					});
+					req.on("error", reject);
+					req.on("response", (res) => {
+						const socketClosed = new Promise<void>((r) =>
+							res.socket.once("close", () => r()),
+						);
+						let body = "";
+						res.setEncoding("utf8");
+						res.on("data", (d) => {
+							body += d;
+						});
+						res.on("end", () =>
+							resolve({
+								status: res.statusCode ?? 0,
+								connection: res.headers.connection,
+								body,
+								socketClosed,
+							}),
+						);
+					});
+					// 100 of the 1000 bytes, then nothing: the client stalls.
+					req.write(Buffer.alloc(100));
+				});
+				expect(got.status).toBe(408);
+				expect(got.connection).toBe("close");
+				expect(JSON.parse(got.body)).toMatchObject({
+					error: { code: "request_timeout", retryable: true },
+				});
+				// The server ends the connection: the rest would never come.
+				await got.socketClosed;
+			} finally {
+				server.closeAllConnections();
+				await new Promise((r) => server.close(r));
+			}
 		});
 
 		it("other bounded bodies keep the total deadline: the same slow client is 400 at 60 s", async () => {

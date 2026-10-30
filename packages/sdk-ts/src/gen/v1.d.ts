@@ -1233,10 +1233,10 @@ export interface components {
             id: string;
             /** @enum {string} */
             mode: "sync" | "stream" | "detached" | "pty" | (string & {});
-            /** @description Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise. Known from the agent while the sandbox is ready and in the sync answer; null when unknown */
+            /** @description Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise. Live from the agent while the sandbox is ready, else the stored value */
             outputTruncated: string | null;
             pid: number | null;
-            /** @description Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed */
+            /** @description Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed (`reboot` also when the platform marked it lost because the machine went down); null while it runs or when unknown */
             reason: string | null;
             /** @example sb_01jbx4q3m7f8r2t6v9w0y1z2a3 */
             sandboxId: string;

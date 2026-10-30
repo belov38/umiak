@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { COMMAND_CMD_MAX_BYTES, RESERVED_PORTS } from "../src/index.ts";
+import {
+	COMMAND_CMD_MAX_BYTES,
+	markOutputTruncated,
+	RESERVED_PORTS,
+} from "../src/index.ts";
 import {
 	expectCode,
 	sandboxRow,
@@ -215,6 +219,104 @@ describe.skipIf(skipPg())(
 				await expectCode(
 					env.svc.completeCommand(c.id, { status: "running" as never }),
 					"validation",
+				);
+			});
+
+			it("completeCommand stores the exit reason and outputTruncated; a later outputTruncated fills an ended row", async () => {
+				const env = await serviceEnv(t.pool);
+				const s = await seedSandbox(t.pool, env, { state: "ready" });
+				const create = () =>
+					env.svc.createCommand(env.p, s.sandboxId, {
+						cmd: "true",
+						mode: "detached",
+					});
+				const a = await create();
+				expect(a).toMatchObject({ reason: null, outputTruncated: null });
+				await env.svc.completeCommand(a.id, {
+					status: "killed",
+					exitCode: 137,
+					signal: "SIGKILL",
+					reason: "oom",
+					outputTruncated: "disk_full",
+				});
+				expect(await cmdRow(a.id)).toMatchObject({
+					status: "killed",
+					reason: "oom",
+					output_truncated: "disk_full",
+				});
+				expect(
+					await env.svc.getCommand(env.p, s.sandboxId, a.id),
+				).toMatchObject({ reason: "oom", outputTruncated: "disk_full" });
+
+				// Terminal already: the reason stays, a known outputTruncated stays.
+				await env.svc.completeCommand(a.id, {
+					status: "lost",
+					reason: "reboot",
+					outputTruncated: "other",
+				});
+				expect(await cmdRow(a.id)).toMatchObject({
+					status: "killed",
+					reason: "oom",
+					output_truncated: "disk_full",
+				});
+
+				// Ended without it (pty.closed first): a later exit adds it.
+				const b = await create();
+				await env.svc.completeCommand(b.id, { status: "exited" });
+				expect(await cmdRow(b.id)).toMatchObject({
+					reason: null,
+					output_truncated: null,
+				});
+				await env.svc.completeCommand(b.id, {
+					status: "exited",
+					exitCode: 0,
+					reason: "none",
+					outputTruncated: "disk_full",
+				});
+				expect(await cmdRow(b.id)).toMatchObject({
+					status: "exited",
+					exit_code: null,
+					reason: null,
+					output_truncated: "disk_full",
+				});
+
+				await expectCode(
+					env.svc.completeCommand(b.id, {
+						status: "exited",
+						reason: "cosmic_ray" as never,
+					}),
+					"validation",
+				);
+				await expectCode(
+					env.svc.completeCommand(b.id, {
+						status: "exited",
+						outputTruncated: "x".repeat(65),
+					}),
+					"validation",
+				);
+			});
+
+			it("markOutputTruncated records the first reason on any status of the command", async () => {
+				const env = await serviceEnv(t.pool);
+				const s = await seedSandbox(t.pool, env, { state: "ready" });
+				const c = await env.svc.createCommand(env.p, s.sandboxId, {
+					cmd: "true",
+					mode: "detached",
+				});
+				await markOutputTruncated(t.pool, c.id, "disk_full");
+				expect(await cmdRow(c.id)).toMatchObject({
+					status: "starting",
+					output_truncated: "disk_full",
+				});
+				await markOutputTruncated(t.pool, c.id, "other");
+				await env.svc.completeCommand(c.id, { status: "exited", exitCode: 0 });
+				expect(await cmdRow(c.id)).toMatchObject({
+					status: "exited",
+					output_truncated: "disk_full",
+				});
+				await expectCode(
+					markOutputTruncated(t.pool, "01JBXUNKNOWN0000000000000", "disk_full"),
+					"not_found",
 				);
 			});
 		});

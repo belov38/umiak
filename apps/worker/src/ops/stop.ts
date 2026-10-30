@@ -151,9 +151,10 @@ export const STOP_OP: SandboxOpHandler = {
 					"not stopping at finish",
 				);
 			}
-			// The guest is off: nothing that ran on it survives.
+			// The guest is off: nothing that ran on it survives (reason `reboot`,
+			// as the agent reports commands of an earlier boot).
 			await tx.client.query(
-				`UPDATE runtime.commands SET status = 'lost', ended_at = now()
+				`UPDATE runtime.commands SET status = 'lost', reason = 'reboot', ended_at = now()
 				 WHERE machine_id = $1 AND status IN ('starting', 'running')`,
 				[machineId],
 			);

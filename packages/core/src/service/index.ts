@@ -88,6 +88,7 @@ export {
 	completeCommand,
 	failCommandStart,
 	markCommandRunning,
+	markOutputTruncated,
 	TERMINAL_COMMAND_STATUSES,
 	truncateUtf8,
 } from "./commands.ts";

@@ -186,6 +186,22 @@ export async function commandStatus(w: TestWorld, id: string): Promise<string> {
 	return r.rows[0]?.status ?? "missing";
 }
 
+/** Status, exit reason and output_truncated of a command row. */
+export async function commandOutcome(
+	w: TestWorld,
+	id: string,
+): Promise<{
+	status: string;
+	reason: string | null;
+	output_truncated: string | null;
+}> {
+	const r = await w.pool.query(
+		"SELECT status, reason, output_truncated FROM runtime.commands WHERE id = $1",
+		[id],
+	);
+	return r.rows[0];
+}
+
 export async function activeOps(
 	w: TestWorld,
 	sandboxId: string,

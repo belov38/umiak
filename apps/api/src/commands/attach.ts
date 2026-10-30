@@ -12,7 +12,7 @@ import {
 	type AttachView,
 	resumableAttach,
 } from "@sbx/agent-client";
-import type { CommandResult } from "@sbx/core";
+import { type CommandResult, storableOutputTruncated } from "@sbx/core";
 import { agentErrorToHttp, isAgentUnreachable } from "../agent/errors.ts";
 import type {
 	AgentAttachEvent,
@@ -185,18 +185,23 @@ type ExitEvent = Extract<AgentAttachEvent, { type: "exit" }>;
 
 /**
  * The `completeCommand` result of an agent exit. `bytes` are the stream
- * ends; a PTY command keeps its one stream in `stdout_bytes`.
+ * ends; a PTY command keeps its one stream in `stdout_bytes`. The reason
+ * and `outputTruncated` are stored too (read without the agent).
  */
 export function commandResult(
 	exit: AgentExitInfo,
 	bytes: { stdout: number | null; stderr: number | null; pty: number | null },
 	pty: boolean,
 	endedAt: Date | null,
+	outputTruncated: string | null,
 ): CommandResult {
 	return {
 		status: commandStatus(exit.status, exit.reason),
 		exitCode: exit.code,
 		signal: exit.signal,
+		reason: exit.reason,
+		// An odd value from the agent must not keep the status from being stored.
+		outputTruncated: storableOutputTruncated(outputTruncated),
 		stdoutBytes: pty ? bytes.pty : bytes.stdout,
 		stderrBytes: pty ? 0 : bytes.stderr,
 		...(endedAt === null ? {} : { endedAt }),
@@ -215,6 +220,7 @@ export function commandResultOf(info: AgentCommandInfo): CommandResult | null {
 		{ stdout: end("stdout"), stderr: end("stderr"), pty: end("pty") },
 		info.streams.pty !== undefined,
 		info.endedAt,
+		info.outputTruncated,
 	);
 }
 
@@ -596,6 +602,7 @@ async function exitFrame(
 				{ stdout: e.stdoutEnd, stderr: e.stderrEnd, pty: e.ptyEnd },
 				pty,
 				e.endedAt,
+				e.outputTruncated,
 			),
 		);
 	} catch (err) {

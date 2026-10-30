@@ -1,7 +1,8 @@
 // Command (core) -> Command resource (S7 §9.6). Live fields (pid, stream
-// sizes, the exit) come from the agent's `Process/Get` while the sandbox is
-// ready; otherwise from the row (`stdout_bytes`/`stderr_bytes`; a PTY
-// command keeps its one stream in `stdout_bytes`).
+// sizes, the exit, outputTruncated) come from the agent's `Process/Get`
+// while the sandbox is ready; otherwise from the row (`stdout_bytes`/
+// `stderr_bytes`, a PTY command keeps its one stream in `stdout_bytes`;
+// `reason`, `output_truncated`).
 import { decodeUlid, encodeUlid, encodeUuid } from "@sbx/auth";
 import type { Command, CommandStatus } from "@sbx/core";
 import type { AgentCommandInfo, AgentStreamInfo } from "../agent/types.ts";
@@ -33,6 +34,7 @@ export function isTerminalStatus(s: CommandStatus): boolean {
 	return TERMINAL.includes(s);
 }
 
+/** The reason of a row stored without one (before migration 0304). */
 function reasonOf(status: CommandStatus): string | null {
 	switch (status) {
 		case "exited":
@@ -76,7 +78,7 @@ export function toCommandResource(
 	let status: CommandStatus = c.status;
 	let exitCode = c.exitCode;
 	let signal = c.signal;
-	let reason = reasonOf(c.status);
+	let reason: string | null = c.reason ?? reasonOf(c.status);
 	let endedAt = c.endedAt;
 	const exit = live?.exit ?? null;
 	if (exit !== null) {
@@ -113,7 +115,7 @@ export function toCommandResource(
 		signal,
 		reason,
 		pid: live?.pid ?? c.pid,
-		outputTruncated: live?.outputTruncated ?? null,
+		outputTruncated: live?.outputTruncated ?? c.outputTruncated,
 		streams,
 		createdBy: c.createdBy === null ? null : encodeUuid("user", c.createdBy),
 		createdByKey:

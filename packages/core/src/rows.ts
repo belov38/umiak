@@ -142,6 +142,47 @@ export type CommandStatus =
 	| "timed_out"
 	| "lost"
 	| "failed_to_start";
+/** S3 `ExitReason` in lower case: why a command ended (S7 §9.6). */
+export type CommandExitReason =
+	| "none"
+	| "signal"
+	| "timeout"
+	| "oom"
+	| "pty_idle"
+	| "reboot"
+	| "shim_lost"
+	| "start_failed";
+export const COMMAND_EXIT_REASONS: readonly CommandExitReason[] = [
+	"none",
+	"signal",
+	"timeout",
+	"oom",
+	"pty_idle",
+	"reboot",
+	"shim_lost",
+	"start_failed",
+];
+/** Longest `output_truncated` reason stored ("disk_full" today). */
+export const OUTPUT_TRUNCATED_MAX_CHARS = 64;
+
+/** A storable `output_truncated` reason: 1-64 characters, no controls. */
+export function isOutputTruncatedReason(v: unknown): v is string {
+	return (
+		typeof v === "string" &&
+		v.length > 0 &&
+		v.length <= OUTPUT_TRUNCATED_MAX_CHARS &&
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: rejects control characters
+		!/[\x00-\x1f\x7f]/.test(v)
+	);
+}
+
+/**
+ * The agent's `output_truncated` as stored: null for "" and for a value
+ * that cannot be stored, so an odd value never blocks completing a command.
+ */
+export function storableOutputTruncated(v: unknown): string | null {
+	return isOutputTruncatedReason(v) ? v : null;
+}
 
 export interface Command {
 	id: string;
@@ -174,6 +215,10 @@ export interface Command {
 	tags: Record<string, string>;
 	/** Set when the agent has started the process (`markCommandRunning`). */
 	pid: number | null;
+	/** Why it ended; null while it runs or when unknown. */
+	reason: CommandExitReason | null;
+	/** "disk_full" when the agent dropped output of the command; else null. */
+	outputTruncated: string | null;
 }
 
 export type PortMode = "token" | "sso" | "public";
@@ -339,6 +384,8 @@ export function commandFromRow(r: Row): Command {
 		argv: r.argv ?? null,
 		tags: r.tags ?? {},
 		pid: r.pid ?? null,
+		reason: r.reason ?? null,
+		outputTruncated: r.output_truncated ?? null,
 	};
 }
 

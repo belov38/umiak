@@ -174,6 +174,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 403 | `path_forbidden` | нет | `EACCES` в файловой операции |
 | 404 | `not_found` | нет | ресурса нет или он чужой (чужое не отличается от несуществующего) |
 | 404 | `snapshot_not_found`, `path_not_found`, `upload_not_found` | нет | |
+| 408 | `request_timeout` | да | добавлено в реализации (§23.2): чанк загрузки застыл (§23.3) |
 | 409 | `invalid_state` | нет | операция недопустима в текущем состоянии; `details.state` |
 | 409 | `sandbox_not_ready` | нет | sandbox не `ready` для команд, файлов, PTY; `details.state` |
 | 409 | `sandbox_starting` | да | sandbox в `creating`/`starting` дольше 60 s ожидания (§8.1) |
@@ -184,7 +185,6 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 409 | `command_exited` | нет | input/resize для завершённой команды |
 | 409 | `upload_offset_mismatch` | нет | `details.offset`, заголовок `Sbx-Upload-Offset` |
 | 409 | `not_directory`, `is_directory`, `cross_device` | нет | файлы (S3 §11.1) |
-| 408 | `request_timeout` | да | добавлено в реализации (§23.2): чанк загрузки застыл (§23.3) |
 | 413 | `payload_too_large` | нет | |
 | 416 | `range_not_satisfiable` | нет | |
 | 422 | `template_unavailable` | нет | шаблон выключен или размер не разрешён |
@@ -1241,7 +1241,8 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - **`agent-events`** (§12.1): тело — binary protobuf `AgentEventsRequest` (`@sbx/proto`), а не protojson (решение 4). Payload `Any` разбирается реестром типов: сообщения S3 (`sbx.agent.v1`, `events.proto` и `common.proto`) и JSON-совместимые (`Struct`/`Value`/`ListValue`) — в protojson с нулевыми полями (код выхода `0`, ноль команд — данные); неизвестные и битые сохраняются как `{"@type": typeUrl}` (иначе gateway повторял бы пакет вечно). `normalizeAgentEvent` (core) переводит `CommandExited.reason` так же, как attach: `TIMEOUT` → `timed_out`, `START_FAILED` → `failed_to_start`; у PTY-команды `pty_end` идёт в `stdout_bytes`.
 - **`GET .../stream`** со смещением больше размера потока → `416 range_not_satisfiable` (`details.stream`, `details.size`), как `/output`; ненулевое смещение потока, которого у команды нет (`ptyOffset` у не-PTY, `stdoutOffset`/`stderrOffset` у PTY), → `400 validation`. Раньше такой стрим завершённой команды переоткрывал attach до отказа и заканчивался `agent_unavailable`.
 - **`POST .../input`**: `seq` — от `1` (схема `minimum: 1`): shim отбрасывает `seq <= last`, у новой сессии `last = 0`, так что `seq: 0` никогда бы не применился.
-- **`outputTruncated`** (proto `output_truncated`): `"disk_full"`, если агент потерял вывод из-за полного диска (концы потоков считают только записанные байты), иначе `null`. Есть в кадре `exit`, в ресурсе Command (живое значение от агента, пока sandbox `ready`; в БД не хранится — без агента `null`) и в `command` ответа sync. Строка, а не boolean, как в proto: причина может добавиться.
+- **`outputTruncated`** (proto `output_truncated`): `"disk_full"`, если агент потерял вывод из-за полного диска (концы потоков считают только записанные байты), иначе `null`. Есть в кадре `exit`, в ресурсе Command и в `command` ответа sync. Строка, а не boolean, как в proto: причина может добавиться.
+- **Хранимые `outputTruncated` и `reason` команды** (миграция `0304_command_output.sql`, колонки `runtime.commands.output_truncated` и `reason`; таблица S6, но миграция в диапазоне S7 по решению master, см. `docs/roadmap.md`). Пишутся при завершении команды (`completeCommand`: кадр `exit` стрима и sync, ответ `Process/Get` у `GET /commands/{command}`, события `command.exited` и `pty.closed` в worker) и событием S3 `output.truncated` (на любом статусе). У завершённой команды статус и `reason` не меняются, а `output_truncated` дописывается, если его ещё не было (агент может узнать о потере вывода позже). `reason` — значение S3 в нижнем регистре; команды, которые платформа сама пометила `lost` (перезагрузка гостя, stop, пропавшая или неожиданно остановленная VM), получают `reboot` — так агент помечает команды прошлой загрузки. Ресурс Command берёт живые значения агента, пока sandbox `ready`, иначе сохранённые; у строк до миграции `reason` выводится из статуса (у `lost` — `null`).
 - **`GET /commands/{command}`** и `/output` спрашивают агента (`Process/Get`) с бюджетом 5 s: `GET` по истечении отдаёт строку из БД, `/output` — `503 agent_unavailable` (retryable).
 
 ### 23.4 PTY
@@ -1327,7 +1328,7 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - `failCommandStart(commandId)` — `starting` → `failed_to_start` одним условным UPDATE (первый пишущий выигрывает); `waitForState(..., signal)` — отмена ожидания (снимает LISTEN и опрос);
 - `parseLabel` принимает `<slug>-desktop` (`kind: desktop`) для S4; `TemplateConfig` + `name`, `loginUser`, `capabilities`; `PlatformDefaults` + `publicPortsEnabled`, `ssoPortPolicy`, `ssoPolicyEpoch`.
 
-Пункты 7, 8, 12 и 13 уже были в S6. Номера `0204`–`0205` заняты S7 в диапазоне S6 — согласовать с треком S6.
+Пункты 7, 8, 12 и 13 уже были в S6. Номера `0204`–`0205` заняты S7 в диапазоне runtime (`0200–0299`: S6 и изменения таблиц runtime из S7, диапазоны — в `docs/roadmap.md`). Колонки `reason` и `output_truncated` в `commands` — исключение, `0304` (§23.3).
 
 ### 23.12 Локальный стек
 

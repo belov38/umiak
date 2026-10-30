@@ -651,9 +651,10 @@ async function hasActiveOp(tx: Tx, sandboxId: string): Promise<boolean> {
 	return (r.rowCount ?? 0) > 0;
 }
 
+/** The guest is gone or down: reason `reboot`, as the agent would report. */
 async function commandsLost(tx: Tx, machineId: string): Promise<void> {
 	await tx.client.query(
-		`UPDATE runtime.commands SET status = 'lost', ended_at = now()
+		`UPDATE runtime.commands SET status = 'lost', reason = 'reboot', ended_at = now()
 		 WHERE machine_id = $1 AND status IN ('starting', 'running')`,
 		[machineId],
 	);

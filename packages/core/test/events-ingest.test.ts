@@ -246,6 +246,8 @@ describe("normalizeAgentEvent (decision 13)", () => {
 			status: "exited",
 			exitCode: 2,
 			signal: null,
+			reason: null,
+			outputTruncated: null,
 			stdoutBytes: 10,
 			stderrBytes: 0,
 		});
@@ -254,7 +256,7 @@ describe("normalizeAgentEvent (decision 13)", () => {
 				type: "pty.closed",
 				payload: { commandId: "01P" },
 			}),
-		).toEqual({ kind: "pty_closed", commandId: "01P" });
+		).toEqual({ kind: "pty_closed", commandId: "01P", reason: null });
 		expect(
 			normalizeAgentEvent({
 				type: "activity",
@@ -319,6 +321,8 @@ describe("normalizeAgentEvent (decision 13)", () => {
 			status: "exited",
 			exitCode: 0,
 			signal: null,
+			reason: "none",
+			outputTruncated: null,
 			stdoutBytes: 4,
 			stderrBytes: 0,
 		});
@@ -390,9 +394,99 @@ describe("normalizeAgentEvent (decision 13)", () => {
 			status: "timed_out",
 			exitCode: null,
 			signal: null,
+			reason: null,
+			outputTruncated: null,
 			stdoutBytes: 5,
 			stderrBytes: null,
 		});
+	});
+
+	it("keeps the S3 exit reason in lower case and output_truncated of command.exited", () => {
+		const exited = (payload: object) =>
+			normalizeAgentEvent({ type: "command.exited", payload });
+		const base = { commandId: "01R", code: 0, stdoutEnd: "1", stderrEnd: "0" };
+		const reasons = [
+			["EXIT_REASON_NONE", "EXIT_STATUS_EXITED", "none", "exited"],
+			["EXIT_REASON_SIGNAL", "EXIT_STATUS_KILLED", "signal", "killed"],
+			["EXIT_REASON_TIMEOUT", "EXIT_STATUS_KILLED", "timeout", "timed_out"],
+			["EXIT_REASON_OOM", "EXIT_STATUS_KILLED", "oom", "killed"],
+			["EXIT_REASON_PTY_IDLE", "EXIT_STATUS_KILLED", "pty_idle", "killed"],
+			["EXIT_REASON_REBOOT", "EXIT_STATUS_LOST", "reboot", "lost"],
+			["EXIT_REASON_SHIM_LOST", "EXIT_STATUS_LOST", "shim_lost", "lost"],
+			[
+				"EXIT_REASON_START_FAILED",
+				"EXIT_STATUS_EXITED",
+				"start_failed",
+				"failed_to_start",
+			],
+		] as const;
+		for (const [proto, protoStatus, reason, status] of reasons) {
+			expect(
+				exited({ ...base, status: protoStatus, reason: proto }),
+				proto,
+			).toMatchObject({ reason, status });
+		}
+		// snake_case, an unknown reason and the unspecified zero value give null.
+		expect(exited({ ...base, status: "exited", reason: "oom" })).toMatchObject({
+			reason: "oom",
+		});
+		expect(
+			exited({ ...base, status: "exited", reason: "EXIT_REASON_UNSPECIFIED" }),
+		).toMatchObject({ reason: null, status: "exited" });
+		expect(
+			exited({ ...base, status: "exited", reason: "cosmic_ray" }),
+		).toMatchObject({ reason: null, status: "exited" });
+		expect(
+			exited({ ...base, status: "exited", output_truncated: "disk_full" }),
+		).toMatchObject({ outputTruncated: "disk_full" });
+		expect(
+			exited({ ...base, status: "exited", outputTruncated: "" }),
+		).toMatchObject({ outputTruncated: null });
+		// A value that cannot be stored is dropped; the exit still counts.
+		expect(
+			exited({ ...base, status: "exited", outputTruncated: "x".repeat(65) }),
+		).toMatchObject({ status: "exited", outputTruncated: null });
+	});
+
+	it("maps output.truncated and the reason of pty.closed", () => {
+		expect(
+			normalizeAgentEvent({
+				type: "output.truncated",
+				payload: {
+					commandId: "01O",
+					stream: "STREAM_STDOUT",
+					reason: "disk_full",
+				},
+			}),
+		).toEqual({
+			kind: "output_truncated",
+			commandId: "01O",
+			reason: "disk_full",
+		});
+		expect(
+			normalizeAgentEvent({
+				type: "output.truncated",
+				payload: { command_id: "01O", reason: "" },
+			}),
+		).toBe(null);
+		expect(
+			normalizeAgentEvent({
+				type: "output.truncated",
+				payload: { reason: "disk_full" },
+			}),
+		).toBe(null);
+		expect(
+			normalizeAgentEvent({
+				type: "output.truncated",
+				payload: { commandId: "01O", reason: "disk\nfull" },
+			}),
+		).toBe(null);
+		expect(
+			normalizeAgentEvent({
+				type: "pty.closed",
+				payload: { commandId: "01P", reason: "EXIT_REASON_PTY_IDLE" },
+			}),
+		).toEqual({ kind: "pty_closed", commandId: "01P", reason: "pty_idle" });
 	});
 
 	it("returns null for unknown types and malformed payloads", () => {

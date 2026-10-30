@@ -4,6 +4,7 @@ import {
 	completeCommand,
 	insertOperation,
 	insertSandboxEvent,
+	markOutputTruncated,
 	normalizeAgentEvent,
 	operationDeadline,
 	SbxError,
@@ -74,6 +75,7 @@ const AGENT: { [K in AgentEventKind]?: AgentHandler<K> } = {
 	phase: onPhase,
 	command_exited: onCommandExited,
 	pty_closed: onPtyClosed,
+	output_truncated: onOutputTruncated,
 	activity: onActivity,
 	ports_changed: onPortsChanged,
 	quiesce_watchdog_thawed: onQuiesceWatchdogThawed,
@@ -394,7 +396,8 @@ async function onRebooted(s: EventScope, e: SyntheticRow): Promise<void> {
 	const bootId = await sessionBoot(s);
 	if (bootId !== null) {
 		const lost = await s.tx.client.query(
-			`UPDATE runtime.commands SET status = 'lost', ended_at = now()
+			// `reboot`: the reason the agent gives commands of an earlier boot (S3).
+			`UPDATE runtime.commands SET status = 'lost', reason = 'reboot', ended_at = now()
 			 WHERE machine_id = $1 AND status IN ('starting', 'running')
 			   AND boot_id IS DISTINCT FROM $2`,
 			[m.id, bootId],
@@ -492,11 +495,14 @@ async function maybeReprovision(
 	);
 }
 
-/** Terminal status of a command of this machine, unless it is terminal already. */
-async function finishCommand(
+/**
+ * Applies `write` to a command of this machine; a command of another or no
+ * machine, or a malformed value (an SbxError), is logged and skipped.
+ */
+async function writeCommand(
 	s: EventScope,
 	commandId: string,
-	result: Parameters<typeof completeCommand>[2],
+	write: () => Promise<void>,
 ): Promise<void> {
 	const r = await s.tx.client.query<{ machine_id: string }>(
 		"SELECT machine_id FROM runtime.commands WHERE id = $1",
@@ -511,7 +517,7 @@ async function finishCommand(
 		return;
 	}
 	try {
-		await completeCommand(s.tx.client, commandId, result);
+		await write();
 	} catch (err) {
 		// A malformed result must not block the machine's event queue.
 		if (!(err instanceof SbxError)) throw err;
@@ -520,6 +526,17 @@ async function finishCommand(
 			"command event rejected",
 		);
 	}
+}
+
+/** Terminal status of a command of this machine, unless it is terminal already. */
+function finishCommand(
+	s: EventScope,
+	commandId: string,
+	result: Parameters<typeof completeCommand>[2],
+): Promise<void> {
+	return writeCommand(s, commandId, () =>
+		completeCommand(s.tx.client, commandId, result),
+	);
 }
 
 /** §10.2 `command.exited`. */
@@ -532,6 +549,8 @@ async function onCommandExited(
 		status: e.status,
 		exitCode: e.exitCode,
 		signal: e.signal,
+		reason: e.reason,
+		outputTruncated: e.outputTruncated,
 		stdoutBytes: e.stdoutBytes,
 		stderrBytes: e.stderrBytes,
 		endedAt: row.time,
@@ -544,7 +563,21 @@ async function onPtyClosed(
 	e: Extract<AgentEvent, { kind: "pty_closed" }>,
 	row: AgentRow,
 ): Promise<void> {
-	await finishCommand(s, e.commandId, { status: "exited", endedAt: row.time });
+	await finishCommand(s, e.commandId, {
+		status: "exited",
+		reason: e.reason,
+		endedAt: row.time,
+	});
+}
+
+/** S3 `output.truncated`: on a running or ended command; the first reason stays. */
+async function onOutputTruncated(
+	s: EventScope,
+	e: Extract<AgentEvent, { kind: "output_truncated" }>,
+): Promise<void> {
+	await writeCommand(s, e.commandId, () =>
+		markOutputTruncated(s.tx.client, e.commandId, e.reason),
+	);
 }
 
 /**

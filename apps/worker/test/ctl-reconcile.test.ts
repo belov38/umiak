@@ -20,7 +20,9 @@ import {
 } from "./fakes/world.ts";
 import {
 	activeOps,
+	commandOutcome,
 	eventTypes,
+	insertCommand,
 	setRow,
 	setSession,
 } from "./helpers/controllers.ts";
@@ -649,11 +651,16 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 	it("machine without VM: machine failed (lost), sandbox error machine_lost", async () => {
 		const w = await createWorld(db);
 		const r = await readySandbox(w, opsEnv(w));
+		const cmd = await insertCommand(w, r);
 		const vmid = (await row(w, "machines", r.machineId)).vmid as number;
 		w.infra.vms.delete(vmid);
 		expect(kinds(await reconcile(w))).toEqual([
 			["machine_lost", `machine:${r.machineId}`],
 		]);
+		expect(await commandOutcome(w, cmd)).toMatchObject({
+			status: "lost",
+			reason: "reboot",
+		});
 		const m = await row(w, "machines", r.machineId);
 		expect(m.state).toBe("failed");
 		expect(m.error_code).toBe("machine_lost");

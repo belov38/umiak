@@ -191,12 +191,12 @@ export const CommandSchema = z
 		signal: z.string().nullable(),
 		reason: z.string().nullable().openapi({
 			description:
-				"Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed",
+				"Why it ended: none, signal, timeout, oom, pty_idle, reboot, shim_lost, start_failed (`reboot` also when the platform marked it lost because the machine went down); null while it runs or when unknown",
 		}),
 		pid: z.int().nullable(),
 		outputTruncated: z.string().nullable().openapi({
 			description:
-				"Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise. Known from the agent while the sandbox is ready and in the sync answer; null when unknown",
+				"Why output is missing: `disk_full` when the agent dropped output because the sandbox disk was full (stream ends count only the bytes written); null otherwise. Live from the agent while the sandbox is ready, else the stored value",
 		}),
 		streams: z
 			.object({
