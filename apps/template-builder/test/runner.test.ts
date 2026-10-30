@@ -95,6 +95,10 @@ function fakeGuest(o: FakeOpts = {}) {
 
 const fast = { pollMs: 1, startCheckMs: 20 };
 
+/** Log output without the builder's notes about retried errors. */
+const stepText = (out: string[]) =>
+	out.filter((c) => !c.startsWith("[sbx-tpl]")).join("");
+
 const netError = (msg = "read ECONNRESET", code = "ECONNRESET") =>
 	Object.assign(new Error(msg), { code });
 
@@ -266,7 +270,64 @@ describe("runStep", () => {
 			...fast,
 		});
 		expect(r.exitStatus).toBe(0);
-		expect(out.join("")).toBe("hi\n");
+		expect(stepText(out)).toBe("hi\n");
+		expect(out.some((c) => c.startsWith("[sbx-tpl] transient error"))).toBe(
+			true,
+		);
+	});
+
+	it("retries client-side timeouts and 502/504 while polling and logs each message once", async () => {
+		const errs = [
+			new Error("GET /nodes/pve/qemu/1/agent/exec-status: timeout"),
+			new Error("GET /nodes/pve/qemu/1/agent/exec-status: timeout"),
+			new PveApiError(502, "GET /nodes/pve/qemu/1/agent/exec: Bad Gateway"),
+			new PveApiError(
+				504,
+				"POST /nodes/pve/qemu/1/agent/exec: Gateway Timeout",
+			),
+		];
+		const g = fakeGuest({
+			chunks: [Buffer.from("hi\n")],
+			rc: "0",
+			onExec: (cmd) => {
+				if (cmd[0] === "systemctl" && cmd[1] === "show") {
+					const e = errs.shift();
+					if (e) throw e;
+				}
+			},
+		});
+		const out: string[] = [];
+		const r = await runStep(g.io, {
+			name: "s",
+			script: SCRIPT,
+			log: (c) => out.push(c),
+			...fast,
+		});
+		expect(r.exitStatus).toBe(0);
+		// The step log itself is unchanged; notes about retried errors come on their own lines.
+		expect(r.tail).toEqual(["hi"]);
+		const notes = out.filter((c) => c.startsWith("[sbx-tpl]"));
+		expect(notes).toEqual([
+			"[sbx-tpl] transient error, retrying: GET /nodes/pve/qemu/1/agent/exec-status: timeout\n",
+			"[sbx-tpl] transient error, retrying: GET /nodes/pve/qemu/1/agent/exec: Bad Gateway\n",
+			"[sbx-tpl] transient error, retrying: POST /nodes/pve/qemu/1/agent/exec: Gateway Timeout\n",
+		]);
+	});
+
+	it("does not treat a client-side timeout of the systemd-run start as transient", async () => {
+		const g = fakeGuest({
+			onExec: (cmd) => {
+				if (cmd[0] === "systemd-run")
+					throw new Error("POST /nodes/pve/qemu/1/agent/exec: timeout");
+			},
+		});
+		await expect(
+			runStep(g.io, { name: "s", script: SCRIPT, log: () => {}, ...fast }),
+		).rejects.toThrow("agent/exec: timeout");
+		// No unit check either: the start error went straight up.
+		expect(
+			g.calls.filter((c) => c.cmd[0] === "systemctl" && c.cmd[1] === "show"),
+		).toHaveLength(0);
 	});
 
 	it("does not swallow non-transient errors while polling", async () => {
@@ -484,7 +545,10 @@ describe("runStep robustness", () => {
 			...fast,
 		});
 		expect(r.exitStatus).toBe(0);
-		expect(out.join("")).toBe("hi\n");
+		expect(stepText(out)).toBe("hi\n");
+		expect(out.some((c) => c.startsWith("[sbx-tpl] transient error"))).toBe(
+			true,
+		);
 		expect(prepN).toBeGreaterThan(1);
 		expect(g.calls.filter((c) => c.cmd[0] === "systemd-run")).toHaveLength(1);
 	});

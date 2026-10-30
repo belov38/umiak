@@ -148,17 +148,44 @@ function isTransient(err: unknown): boolean {
 	return isNetworkError(err);
 }
 
+/** PveApi gave up on a request that got no answer in time (plain Error, see pve-api.ts). */
+const CLIENT_TIMEOUT_RE = /^(GET|POST|PUT|DELETE) \S+: timeout$/;
+
+/**
+ * Transient for idempotent calls only (polls, checks): also a client-side timeout and a 502/504
+ * from a proxy, where the request may have been executed. Never used for the systemd-run start.
+ */
+function isTransientPoll(err: unknown): boolean {
+	if (isTransient(err)) return true;
+	if (err instanceof PveApiError)
+		return err.status === 502 || err.status === 504;
+	return err instanceof Error && CLIENT_TIMEOUT_RE.test(err.message);
+}
+
+/** Reports each distinct transient error message once through `log`. */
+function transientNotes(log: (text: string) => void): (err: unknown) => void {
+	const seen = new Set<string>();
+	return (err) => {
+		const msg = errorText(err);
+		if (seen.has(msg)) return;
+		seen.add(msg);
+		log(`[sbx-tpl] transient error, retrying: ${msg}\n`);
+	};
+}
+
 /** Repeats an idempotent call on transient errors until `deadline`, then rethrows the last one. */
 async function retryTransient<T>(
 	fn: () => Promise<T>,
 	deadline: number,
 	delayMs: number,
+	note: (err: unknown) => void,
 ): Promise<T> {
 	for (;;) {
 		try {
 			return await fn();
 		} catch (err) {
-			if (!isTransient(err) || Date.now() >= deadline) throw err;
+			if (!isTransientPoll(err) || Date.now() >= deadline) throw err;
+			note(err);
 			await sleep(delayMs);
 		}
 	}
@@ -239,12 +266,14 @@ export async function runStep(
 	const unit = `sbx-build-${name}`;
 	const logPath = `${LOG_DIR}/${name}.log`;
 	const rcPath = `${LOG_DIR}/${name}.rc`;
+	const note = transientNotes(o.log);
 
 	// Idempotent, so a lost reply is simply repeated.
 	const prep = await retryTransient(
 		() => io.exec(["bash", "-c", PREPARE_SCRIPT, "sbx-prep", name]),
 		deadline,
 		pollMs,
+		note,
 	);
 	if (prep.exitCode !== 0)
 		throw new Error(
@@ -330,7 +359,8 @@ export async function runStep(
 		try {
 			rc = await poll();
 		} catch (err) {
-			if (!isTransient(err)) throw err;
+			if (!isTransientPoll(err)) throw err;
+			note(err);
 			lastError = err;
 		}
 		if (rc !== undefined) break;
@@ -401,7 +431,7 @@ async function unitStarted(
 				if ((await io.readFile(f, 0, 1)).length > 0) return true;
 			lastError = undefined;
 		} catch (err) {
-			if (!isTransient(err)) throw err;
+			if (!isTransientPoll(err)) throw err;
 			lastError = err;
 		}
 		if (Date.now() >= until) break;
