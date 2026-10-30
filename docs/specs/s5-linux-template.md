@@ -553,19 +553,19 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 
 **`verify` (§10):** 97 проверок PASS, 0 FAIL (сборка .15), включая агента (`doctor`, версия, identity, URL туннеля из `smbios`), подключение агента клона к dev-gateway (`tunnel_connected`, CT 590, `--connect-url`), Docker `hello-world`, скан диска шаблона и клона на секреты сборки (§20.2 п. 6), жёсткую остановку (≤ первой загрузки + 3 s), fork с новыми machine-id, hostname, host keys, IP, random seed и состоянием агента. KVM в госте: `available` (на `pve` `kvm_intel nested=Y`).
 
-**`sbx-bench s5 --template 597 --baseline 599 --runs 5`** (2 vCPU / 2 GB, `local-lvm`), ms, медиана (p95):
+**`sbx-bench s5 --template 598 --baseline 599 --runs 5`** (сборка .15; 2 vCPU / 2 GB, `local-lvm`), ms, медиана (p95):
 
-| Метрика | S5 (597) | 599 |
+| Метрика | S5 (598) | 599 |
 |---|---|---|
-| `start_to_qga` | 9013 (9702) | 11014 (11726) |
-| `start_to_ip` | 9214 (9903) | 11118 (11928) |
-| `start_to_agent_ready` | 8821 (9631) | — (агента нет) |
-| kernel / initrd / userspace | 431 / 1922 / 2944 | 631 / 2013 / 4160 |
-| `hard_stop_restart` | 8921 (9397) | 9974 (11037) |
+| `start_to_qga` | 9094 (9174) | 11605 (14142) |
+| `start_to_ip` | 9296 (9379) | 11811 (14249) |
+| `start_to_agent_ready` | 8955 (9074) | — (агента нет) |
+| kernel / initrd / userspace | 466 / 1940 / 3103 | 851 / 2123 / 6087 |
+| `hard_stop_restart` | 8886 (9070) | 10024 (14707) |
 
-Шаблон S5 не хуже 599 ни по одной метрике. Цель §13.2 `start_to_agent_ready` ≤ 10 s выполнена; `start_to_qga` ≤ 8 s **не выполнена** (9.0 s): kernel + initrd + userspace ≈ 5.3 s, остальное — SeaBIOS и запуск QEMU. Решение Ильи «время создания не оптимизируем» (`docs/roadmap.md`) делает эту цель необязательной для MVP; эксперименты §13.3 не проводились.
+Сборка .11 (597) дала те же цифры (`start_to_qga` 9013, `start_to_agent_ready` 8821). Шаблон S5 не хуже 599 ни по одной метрике. Цель §13.2 `start_to_agent_ready` ≤ 10 s выполнена; `start_to_qga` ≤ 8 s **не выполнена** (9.1 s): kernel + initrd + userspace ≈ 5.3 s, остальное — SeaBIOS и запуск QEMU. Решение Ильи «время создания не оптимизируем» (`docs/roadmap.md`) делает эту цель необязательной для MVP; эксперименты §13.3 не проводились.
 
-**`sbx-bench s1` против шаблона 597:** 126/126 (clone 1.0 s, boot 9.9 s, fork 11.2 s; baseline `qm clone` из шаблона тоже проходит).
+**`sbx-bench s1`:** против шаблона 597 — 126/126 (clone 1.0 s, boot 9.9 s, fork 11.2 s; baseline `qm clone` из шаблона тоже проходит); против 598 — 125/126 (clone 1.0 s, fork 13.5 s), единственный FAIL — «мир до/после»: первый клон нового шаблона активирует его LV (`attr`), повторный прогон его не даёт.
 
 **Неудачная сборка (§19 п. 7):** `--fail-step 20-docker` — откат удалил VM, seed и lease, на хосте остался только кэш базового образа; `--fail-step 00-base --keep-on-failure` — VM, seed и lease остались, `sbx-tpl cleanup` их убрал, шаблон не тронут.
 
