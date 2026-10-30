@@ -176,7 +176,7 @@ function expectInOrder(log: string[], seq: string[]) {
 	}
 }
 
-const isoName = (m: Manifest) => `sbx-seed-${m.buildId}.iso`;
+const seedName = (m: Manifest) => `sbx-seed-${m.buildId}.raw`;
 const vm = "/nodes/pve/qemu/598";
 
 describe("buildTemplate: happy path", () => {
@@ -298,7 +298,7 @@ describe("buildTemplate: happy path", () => {
 			memory: 4096,
 			balloon: 0,
 			scsi0: `local-lvm:0,import-from=local:import/${IMAGE_NAME},discard=on,iothread=1,ssd=1`,
-			ide2: `local:iso/sbx-seed-${m.buildId}.iso,media=cdrom`,
+			scsi1: `local-lvm:0,import-from=local:import/sbx-seed-${m.buildId}.raw`,
 			net0: "virtio=02:01:00:00:02:56,bridge=sbx0,firewall=1",
 			boot: "order=scsi0",
 		});
@@ -322,15 +322,21 @@ describe("buildTemplate: happy path", () => {
 				c.path === `${vm}/config` &&
 				c.params?.delete !== undefined,
 		);
-		expect(template?.params).toEqual({ delete: "ide2,smbios1" });
+		expect(template?.params).toEqual({ delete: "smbios1" });
+		const unlink = s.pve.calls.find(
+			(c) => c.method === "PUT" && c.path === `${vm}/unlink`,
+		);
+		// force=1: the seed disk is destroyed, not left as unused0.
+		expect(unlink?.params).toEqual({ idlist: "scsi1", force: 1 });
 		expect(s.pve.vms.get(598)?.config.template).toBe("1");
-		expect(s.pve.vms.get(598)?.config.ide2).toBeUndefined();
+		expect(s.pve.vms.get(598)?.config.scsi1).toBeUndefined();
+		expect(s.pve.vms.get(598)?.config.smbios1).toBeUndefined();
 		const removed = s.node.calls.find((c) => c.op === "media.remove");
-		expect(removed?.args).toEqual({ names: [isoName(m)] });
+		expect(removed?.args).toEqual({ names: [seedName(m)] });
 		expect((await s.allocator.get(598))?.state).toBe("active");
 	});
 
-	it("uploads the base image and the seed ISO with sha256 checksums", async () => {
+	it("uploads the base image and the seed image to local:import with sha256 checksums", async () => {
 		const s = setup();
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(s.pve.uploads.map((u) => u.fields)).toEqual([
@@ -340,14 +346,14 @@ describe("buildTemplate: happy path", () => {
 				"checksum-algorithm": "sha256",
 			},
 			{
-				content: "iso",
+				content: "import",
 				checksum: sha(`iso with ${s.isos[0]?.size} files`),
 				"checksum-algorithm": "sha256",
 			},
 		]);
 		expect(s.pve.uploads.map((u) => u.file.name)).toEqual([
 			IMAGE_NAME,
-			isoName(m),
+			seedName(m),
 		]);
 		// The order pveproxy accepts (see PveApi.upload).
 		for (const u of s.pve.uploads)
@@ -517,7 +523,7 @@ describe("buildTemplate: base image", () => {
 			size: statSync(s.image).size,
 		});
 		const m = await buildTemplate(s.deps, s.opts);
-		expect(s.pve.uploads.map((u) => u.file.name)).toEqual([isoName(m)]);
+		expect(s.pve.uploads.map((u) => u.file.name)).toEqual([seedName(m)]);
 		expect(s.node.calls.filter((c) => c.op === "media.remove")).toHaveLength(1);
 	});
 
@@ -531,7 +537,7 @@ describe("buildTemplate: base image", () => {
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(s.pve.uploads.map((u) => u.file.name)).toEqual([
 			IMAGE_NAME,
-			isoName(m),
+			seedName(m),
 		]);
 		expect(s.node.calls[0]).toEqual({
 			op: "media.remove",
@@ -576,7 +582,7 @@ describe("buildTemplate: failures", () => {
 		const del = s.pve.calls.find((c) => c.method === "DELETE" && c.path === vm);
 		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 1 });
 		const removed = s.node.calls.find((c) => c.op === "media.remove");
-		expect(removed?.args).toEqual({ names: [isoName(m)] });
+		expect(removed?.args).toEqual({ names: [seedName(m)] });
 		expect(s.pve.vms.has(598)).toBe(false);
 		expect(await s.allocator.get(598)).toBeUndefined();
 		// The base image stays as a cache.
@@ -610,7 +616,7 @@ describe("buildTemplate: failures", () => {
 		expect(m.error?.message).toContain("unable to create VM 598");
 		expect(s.pve.calls.some((c) => c.method === "DELETE")).toBe(false);
 		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
-			names: [isoName(m)],
+			names: [seedName(m)],
 		});
 		expect(await s.allocator.get(598)).toBeUndefined();
 	});
@@ -702,7 +708,7 @@ describe("buildTemplate: failures", () => {
 		expect((await s.allocator.get(598))?.state).toBe("reserved");
 		// The ISO goes anyway.
 		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
-			names: [isoName(m)],
+			names: [seedName(m)],
 		});
 	});
 
@@ -746,7 +752,7 @@ describe("buildTemplate: failures", () => {
 		expect(s.pve.vms.has(598)).toBe(false);
 		expect(await s.allocator.get(598)).toBeUndefined();
 		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
-			names: [isoName(m)],
+			names: [seedName(m)],
 		});
 	});
 

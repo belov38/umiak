@@ -22,10 +22,10 @@ import {
 	DISK_OPTIONS,
 	errorText,
 	guestManifest,
-	isoName,
 	type Prepared,
 	type Stage,
 	type State,
+	seedName,
 	shutdown,
 	stageBoot,
 	stageImage,
@@ -190,7 +190,7 @@ export async function buildTemplate(
 	const st: State = {
 		m: p.manifest,
 		stage: "prepare",
-		isoUploaded: false,
+		seedUploaded: false,
 		ramReserved: false,
 	};
 	const save = (patch: Partial<Manifest>, unset: (keyof Manifest)[] = []) => {
@@ -372,11 +372,11 @@ async function rollback(
 			warn(`deleting VM ${vmid}`, err);
 		}
 	}
-	if (st.isoUploaded) {
+	if (st.seedUploaded) {
 		try {
-			await deps.node.call("media.remove", { names: [isoName(st.m)] });
+			await deps.node.call("media.remove", { names: [seedName(st.m)] });
 		} catch (err) {
-			warn(`removing ${isoName(st.m)}`, err);
+			warn(`removing ${seedName(st.m)}`, err);
 		}
 	}
 	// A VMID whose VM could not be deleted keeps its lease until `sbx-tpl cleanup`.

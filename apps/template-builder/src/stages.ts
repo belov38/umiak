@@ -137,7 +137,7 @@ export interface State {
 	step?: string;
 	vmid?: number;
 	mac?: string;
-	isoUploaded: boolean;
+	seedUploaded: boolean;
 	ramReserved: boolean;
 }
 
@@ -217,8 +217,16 @@ export async function stageImage(
 	return name;
 }
 
-export function isoName(m: Manifest): string {
-	return `sbx-seed-${m.buildId}.iso`;
+/**
+ * The seed (an ISO 9660 image) travels as a raw disk, not as a CD: the first boot of the cloud
+ * image has no initrd, so the CD drivers are modules that load after cloud-init has looked for
+ * its seed; virtio-scsi and sd are built into the kernel (they mount the root).
+ */
+export const SEED_SLOT = "scsi1";
+
+/** Name of the seed image in local:import. */
+export function seedName(m: Manifest): string {
+	return `sbx-seed-${m.buildId}.raw`;
 }
 
 export async function stageSeed(
@@ -244,13 +252,14 @@ export async function stageSeed(
 	};
 	const dir = mkdtempSync(join(tmpdir(), "sbx-tpl-seed-"));
 	try {
-		const name = isoName(st.m);
-		const path = join(dir, name);
+		const name = seedName(st.m);
+		// hdiutil insists on the .iso suffix; the upload gets the import name.
+		const path = join(dir, "seed.iso");
 		deps.makeIso(renderSeed(input), path);
 		const size = statSync(path).size;
-		st.isoUploaded = true;
+		st.seedUploaded = true;
 		deps.log(`uploading ${name} (${size} bytes)`);
-		await upload(deps, o.node, "iso", await fileSha256(path), {
+		await upload(deps, o.node, "import", await fileSha256(path), {
 			name,
 			path,
 			size,
@@ -311,7 +320,7 @@ export async function stageVm(
 		balloon: 0,
 		[recipe.disk.slot]:
 			`${o.storage}:0,import-from=${MEDIA_STORAGE}:import/${image},${opts}`,
-		ide2: `${MEDIA_STORAGE}:iso/${isoName(st.m)},media=cdrom`,
+		[SEED_SLOT]: `${o.storage}:0,import-from=${MEDIA_STORAGE}:import/${seedName(st.m)}`,
 		net0: `virtio=${mac},bridge=${o.vnet},firewall=1`,
 		boot: `order=${recipe.disk.slot}`,
 		description: `sbx-tpl build ${st.m.buildId}\ngit ${o.gitCommit}`,
@@ -454,11 +463,13 @@ export async function stageTemplate(
 ): Promise<void> {
 	const vmid = st.vmid as number;
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
-	await deps.api.put(`${vmPath}/config`, { delete: "ide2,smbios1" });
+	// force=1 destroys the seed disk instead of leaving it as unused0.
+	await deps.api.put(`${vmPath}/unlink`, { idlist: SEED_SLOT, force: 1 });
+	await deps.api.put(`${vmPath}/config`, { delete: "smbios1" });
 	const r = await deps.api.post(`${vmPath}/template`);
 	if (isUpid(r))
 		await deps.api.waitTask(o.node, r, { timeoutMs: TASK_TIMEOUT_MS });
-	await deps.node.call("media.remove", { names: [isoName(st.m)] });
-	st.isoUploaded = false;
+	await deps.node.call("media.remove", { names: [seedName(st.m)] });
+	st.seedUploaded = false;
 	await deps.allocator.markActive(vmid);
 }

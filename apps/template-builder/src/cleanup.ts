@@ -6,7 +6,8 @@ import { isProtectedVmid } from "./vmid-guard.ts";
 
 const BUILD_TAG = "sbx-tpl";
 const STALE_BUILD_MS = 2 * 60 * 60_000;
-const SEED_ISO_RE = /^sbx-seed-[a-z0-9-]+\.iso$/;
+// Seeds are raw images in local:import; .iso in local:iso is the earlier CD form.
+const SEED_RE = /^sbx-seed-[a-z0-9-]+\.(?:raw|iso)$/;
 
 export interface CleanupDeps {
 	api: PveClient;
@@ -37,8 +38,8 @@ const errorText = (err: unknown) =>
 /**
  * Deletes build VMs (tag sbx-tpl, name sbx-tpl-*, not a template) in the VMID range and not
  * protected (vmid-guard.ts), unused
- * seed ISOs and template leases whose VM is gone, and marks builds that have been `building`
- * for more than 2 h as failed. A build still in progress keeps its VM, ISO and lease.
+ * seed images and template leases whose VM is gone, and marks builds that have been `building`
+ * for more than 2 h as failed. A build still in progress keeps its VM, seed and lease.
  */
 export async function cleanup(d: CleanupDeps): Promise<string[]> {
 	const { api, node, cfg } = d;
@@ -62,7 +63,12 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 	}
 	const active = d.registry.list().filter((m) => m.status === "building");
 	const activeVmids = new Set(active.map((m) => m.pveVmid));
-	const activeIsos = new Set(active.map((m) => `sbx-seed-${m.buildId}.iso`));
+	const activeSeeds = new Set(
+		active.flatMap((m) => [
+			`sbx-seed-${m.buildId}.raw`,
+			`sbx-seed-${m.buildId}.iso`,
+		]),
+	);
 
 	const inRange = (vmid: number) =>
 		vmid >= cfg.vmidRange.min &&
@@ -112,7 +118,7 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 	}
 
 	try {
-		const used = new Set(activeIsos);
+		const used = new Set(activeSeeds);
 		for (const vmid of remaining) {
 			const c = await api.get<Record<string, string>>(
 				`/nodes/${cfg.node}/qemu/${vmid}/config`,
@@ -122,16 +128,19 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 				if (m?.[1]) used.add(m[1]);
 			}
 		}
-		const { iso } = await node.call<{ iso: { name: string }[] }>("media.list");
-		const unused = iso
+		const media = await node.call<{
+			iso: { name: string }[];
+			import: { name: string }[];
+		}>("media.list");
+		const unused = [...media.iso, ...media.import]
 			.map((f) => f.name)
-			.filter((n) => SEED_ISO_RE.test(n) && !used.has(n));
+			.filter((n) => SEED_RE.test(n) && !used.has(n));
 		if (unused.length > 0) {
 			await node.call("media.remove", { names: unused });
 			report.push(`removed ${unused.join(", ")}`);
 		}
 	} catch (err) {
-		report.push(`seed ISOs: ${errorText(err)}`);
+		report.push(`seed images: ${errorText(err)}`);
 	}
 
 	for (const l of await d.allocator.list()) {

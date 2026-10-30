@@ -68,6 +68,12 @@ export class BuildPve extends FakePve {
 			vm.config.template = "1";
 			return { value: `UPID:pve:${++this.#upid}` };
 		}
+		if (key === "PUT /unlink") {
+			this.#record(method, path, params);
+			if (!vm) throw new PveApiError(500, "VM does not exist");
+			for (const k of String(params?.idlist).split(",")) delete vm.config[k];
+			return { value: null };
+		}
 		if (key === "PUT /config" && params?.delete !== undefined) {
 			this.#record(method, path, params);
 			if (!vm) throw new PveApiError(500, "VM does not exist");

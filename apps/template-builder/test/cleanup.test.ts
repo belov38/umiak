@@ -70,7 +70,11 @@ async function setup() {
 	];
 	node.handlers["media.list"] = () => ({
 		iso: iso.map((name) => ({ name, size: 1 })),
-		import: [{ name: "sbx-ubuntu-26.04-minimal-1.qcow2", size: 1 }],
+		import: [
+			{ name: "sbx-ubuntu-26.04-minimal-1.qcow2", size: 1 },
+			{ name: "sbx-seed-old.raw", size: 1 },
+			{ name: `sbx-seed-${ID_FRESH}.raw`, size: 1 },
+		],
 	});
 	node.handlers["media.remove"] = (a) => ({ removed: a.names, missing: [] });
 	const store = new SqliteStateStore(":memory:");
@@ -195,7 +199,11 @@ describe("cleanup", () => {
 
 		const removed = s.node.calls.filter((c) => c.op === "media.remove");
 		expect(removed).toEqual([
-			{ op: "media.remove", args: { names: ["sbx-seed-old.iso"] } },
+			{
+				op: "media.remove",
+				// The base image cache and the running build's seed stay.
+				args: { names: ["sbx-seed-old.iso", "sbx-seed-old.raw"] },
+			},
 		]);
 
 		const leases = (await s.allocator.list()).map((l) => l.vmid).sort();
