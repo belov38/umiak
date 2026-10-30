@@ -157,7 +157,9 @@ export const snapshotSave = defineTool({
 		header.operation = view;
 		if (state === "failed") {
 			header.error ??= op.error;
-			notes.unshift("the snapshot was not saved (see error); try again.");
+			notes.unshift(
+				"the snapshot was not saved (see error); try again with a new idempotency_key (the same key returns this failure).",
+			);
 		} else if (state !== "ready") {
 			header.operation_id = op.id;
 			notes.unshift(

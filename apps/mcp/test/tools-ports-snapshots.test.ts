@@ -104,7 +104,7 @@ describe("tool list", () => {
 		expect(
 			Object.fromEntries(tools.map((t) => [t.name, [...t.scopes]])),
 		).toEqual({
-			port_expose: ["ports:write"],
+			port_expose: ["ports:write", "sandboxes:read"],
 			port_list: ["sandboxes:read"],
 			port_unexpose: ["ports:write"],
 			snapshot_save: ["snapshots:write"],
@@ -365,6 +365,7 @@ describe("port_expose", () => {
 		});
 		expect(r.isError).toBe(true);
 		expect(r.texts[0]).toContain("error: forbidden");
+		expect(r.texts[0]).toContain("turned off by the operator");
 	});
 
 	it("a reserved port is a validation error", async () => {
@@ -404,29 +405,68 @@ describe("port_expose", () => {
 		expect(JSON.stringify(hh.logs)).not.toContain(token);
 	});
 
-	it("works with ports:write alone when access is named, and says what is missing otherwise", async () => {
+	it("needs sandboxes:read for the read of the current port: forbidden names it, nothing is written", async () => {
 		const hh = await start();
 		const sb = await sandbox(hh);
 		const scoped = await withScopes(hh, ["ports:write"]);
 		try {
-			const ok = await scoped.call("port_expose", {
-				sandbox: sb,
-				port: 3000,
-				access: "sso",
-			});
-			expect(ok.isError).toBe(false);
-			expect(ok.json).toMatchObject({ access: "sso", status: "created" });
-			expect(ok.lines).toContain("sandboxes:read");
-			const blind = await scoped.call("port_expose", {
-				sandbox: sb,
-				port: 3000,
-			});
-			expect(blind.isError).toBe(true);
-			expect(blind.texts[0]).toContain("error: forbidden");
-			expect(blind.texts[0]).toContain("sandboxes:read");
+			for (const access of [undefined, "sso"]) {
+				const r = await scoped.call("port_expose", {
+					sandbox: sb,
+					port: 3000,
+					...(access === undefined ? {} : { access }),
+				});
+				expect(r.isError, String(access)).toBe(true);
+				expect(r.texts[0]).toContain("error: forbidden");
+				expect(r.texts[0]).toContain("sandboxes:read");
+			}
+			expect(hh.to("PUT", `${PORTS(sb)}/3000`)).toHaveLength(0);
+			const both = await withScopes(hh, ["ports:write", "sandboxes:read"]);
+			try {
+				const ok = await both.call("port_expose", { sandbox: sb, port: 3000 });
+				expect(ok.isError).toBe(false);
+			} finally {
+				await both.close();
+			}
 		} finally {
 			await scoped.close();
 		}
+	});
+
+	it("a team key without sandboxes:read does not see the tool", () => {
+		const names = selectTools({
+			tools: PORT_TOOLS,
+			principal: { kind: "team_key", scopes: ["ports:write"] },
+		}).map((t) => t.name);
+		expect(names).toEqual(["port_unexpose"]);
+	});
+
+	it("an existing port in a mode this server does not know stays as it is without access", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		await hh.call("port_expose", { sandbox: sb, port: 3000 });
+		const stored = hh.api.state.ports.get(sb)?.get(3000);
+		expect(stored).toBeDefined();
+		if (stored === undefined) return;
+		(stored as { access: string }).access = "mtls";
+		const r = await hh.call("port_expose", { sandbox: sb, port: 3000 });
+		expect(r.isError).toBe(false);
+		expect(r.json).toMatchObject({ access: "mtls", status: "unchanged" });
+		expect(hh.to("PUT", `${PORTS(sb)}/3000`)).toHaveLength(1);
+		// Naming a mode still writes it.
+		const set = await hh.call("port_expose", {
+			sandbox: sb,
+			port: 3000,
+			access: "sso",
+		});
+		expect(set.json).toMatchObject({ access: "sso", status: "access_changed" });
+		// The fake's contract check rejects the made-up mode (the document lists
+		// three); that is the point of the test, so only those reports are dropped.
+		const enumOnly = hh.api.contractErrors.every((e) =>
+			e.includes("/hosted/0/access must be equal to one of the allowed values"),
+		);
+		expect(enumOnly).toBe(true);
+		hh.api.contractErrors.length = 0;
 	});
 
 	it("uses the pinned sandbox when pinned", async () => {
@@ -790,6 +830,7 @@ describe("snapshot_save", () => {
 		expect(r.isError).toBe(true);
 		expect(r.json.state).toBe("failed");
 		expect(r.json.error).toMatchObject({ code: "agent_unavailable" });
+		expect(r.lines).toContain("new idempotency_key");
 	});
 
 	it("a key with snapshots:write and sandboxes:read saves and waits", async () => {

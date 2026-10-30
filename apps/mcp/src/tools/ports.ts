@@ -1,7 +1,7 @@
 // Port tools (S11 8.5, 11.4): port_expose, port_list, port_unexpose. Calls go
 // through the SDK's no-fetch sandbox handle, so only the scopes of the table
 // are needed: ports:write for changes, sandboxes:read for the list.
-import { type HostedPort, SbxError } from "@sbx/sdk";
+import type { HostedPort } from "@sbx/sdk";
 import { z } from "zod";
 import { ToolError } from "../errors.ts";
 import { fenceUntrusted } from "../output/fence.ts";
@@ -19,11 +19,6 @@ const portShape = z
 	.describe("TCP port in the sandbox, 1-65535 (not 22)");
 
 type Access = "sso" | "token" | "public";
-
-/** The API's modes are an extensible enum; a mode this server does not know is kept as it is. */
-function knownAccess(a: string): Access | undefined {
-	return a === "sso" || a === "token" || a === "public" ? a : undefined;
-}
 
 /** hostRewrite and appProtocol of a port, as the API accepts them back (unknown values are dropped). */
 function keptSettings(p: HostedPort): {
@@ -62,7 +57,7 @@ export const portExpose = defineTool({
 	description:
 		"Publishes a sandbox TCP port at a public URL. Default access sso (a signed-in platform user opens it). Use token when a program needs the URL; public only if the user asks. A repeat without access changes nothing; rotate_token=true issues a new token link.",
 	toolset: "ports",
-	scopes: ["ports:write"],
+	scopes: ["ports:write", "sandboxes:read"],
 	annotations: {
 		readOnlyHint: false,
 		destructiveHint: false,
@@ -90,31 +85,17 @@ export const portExpose = defineTool({
 		const notes: string[] = [];
 
 		// PUT replaces the settings and a changed mode ends the issued links, so
-		// the current port is read first. A key without sandboxes:read can still
-		// publish when it names the mode itself.
-		let existing: HostedPort | undefined;
-		try {
-			existing = (await sb.ports.list(ctx.call)).hosted.find(
-				(p) => p.port === args.port,
-			);
-		} catch (err) {
-			if (
-				!(err instanceof SbxError) ||
-				err.status !== 403 ||
-				args.access === undefined
-			) {
-				throw err;
-			}
-			notes.push(
-				"the current settings could not be read (needs sandboxes:read): the port's host rewrite and protocol are reset to the defaults",
-			);
-		}
+		// the current port is always read first (a 403 names sandboxes:read).
+		const existing = (await sb.ports.list(ctx.call)).hosted.find(
+			(p) => p.port === args.port,
+		);
 
-		const access: Access =
-			args.access ??
-			(existing === undefined ? undefined : knownAccess(existing.access)) ??
-			"sso";
-		if (args.rotate_token === true && access !== "token") {
+		// The mode to write; none when the port stays as it is. A mode this server
+		// does not know is left alone unless the model names one.
+		const wanted: Access | undefined =
+			args.access ?? (existing === undefined ? "sso" : undefined);
+		const mode: string = wanted ?? existing?.access ?? "sso";
+		if (args.rotate_token === true && mode !== "token") {
 			throw new ToolError({
 				code: "validation",
 				message: `port ${args.port} is not in token mode, so there is no token to rotate`,
@@ -125,10 +106,13 @@ export const portExpose = defineTool({
 		let port: HostedPort | undefined = existing;
 		let status = "unchanged";
 		let urlWithToken: string | undefined;
-		if (existing === undefined || access !== existing.access) {
+		if (
+			wanted !== undefined &&
+			(existing === undefined || wanted !== existing.access)
+		) {
 			const written = await sb.ports.host(args.port, {
 				...ctx.call,
-				access,
+				access: wanted,
 				// PUT is a full replacement: keep what the port already has.
 				...(existing === undefined ? {} : keptSettings(existing)),
 			});
