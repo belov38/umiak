@@ -644,7 +644,7 @@ export function loadVersions(recipe: Recipe): Versions | WindowsVersions {
 	}
 }
 
-const PRODUCT_KEY_RE = /^[A-Z0-9]{5}(-[A-Z0-9]{5}){4}$/;
+export const PRODUCT_KEY_RE = /^[A-Z0-9]{5}(-[A-Z0-9]{5}){4}$/;
 
 /** The product key named `name` in `keys.toml` (recipe dir first, shared dir last). */
 export function resolveProductKey(recipe: Recipe, name: string): string {

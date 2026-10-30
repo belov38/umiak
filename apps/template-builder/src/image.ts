@@ -194,3 +194,31 @@ export async function fetchBaseImage(o: {
 	const sha256 = await download(o.fetch, `${releaseUrl}${name}`, path, signed);
 	return { path, sha256 };
 }
+
+/** Archive of the virtio-win releases (spec S9 section 6.2). */
+export const VIRTIO_WIN_ARCHIVE =
+	"https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/";
+
+export function virtioWinUrl(version: string): string {
+	return `${VIRTIO_WIN_ARCHIVE}virtio-win-${version}-1/virtio-win-${version}.iso`;
+}
+
+/**
+ * Downloads `virtio-win-<v>.iso` into `cacheDir` and checks it against the pinned sha256; a
+ * cached file with that sha256 is reused.
+ */
+export async function fetchVirtioWin(o: {
+	fetch: DownloadFetch;
+	cacheDir: string;
+	virtioWin: { version: string; sha256: string };
+}): Promise<{ path: string; sha256: string }> {
+	const { version, sha256 } = o.virtioWin;
+	if (!/^\d+\.\d+\.\d+$/.test(version))
+		throw new Error(`invalid virtio-win version "${version}"`);
+	mkdirSync(o.cacheDir, { recursive: true });
+	const path = join(o.cacheDir, `virtio-win-${version}.iso`);
+	if (existsSync(path) && (await fileSha256(path)) === sha256)
+		return { path, sha256 };
+	const got = await download(o.fetch, virtioWinUrl(version), path, sha256);
+	return { path, sha256: got };
+}

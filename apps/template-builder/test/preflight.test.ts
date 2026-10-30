@@ -179,4 +179,92 @@ describe("preflight", () => {
 		});
 		expect(again.find((c) => c.name.includes("RAM"))?.ok).toBe(false);
 	});
+	describe("windows", () => {
+		const WIN = {
+			...GOOD,
+			"/access/permissions?path=/pool/sandbox": {
+				"/pool/sandbox": { "VM.Console": 1, "VM.Audit": 1 },
+			},
+			"/nodes/pve/capabilities/qemu/machines": [
+				{ id: "pc-q35-11.0+pve2", type: "q35" },
+			],
+		};
+		const ISO = "Windows11_Client_x64_en-gb_26300_9457.iso";
+		const nodeWin = (sha: string | Error): NodeOps => ({
+			call: async <T>(op: string, args?: object) => {
+				if (op === "media.list") return { iso: [], import: [] } as T;
+				if (op === "media.sha256") {
+					if (sha instanceof Error) throw sha;
+					return { ...(args as object), size: 7, sha256: sha } as T;
+				}
+				throw new Error(op);
+			},
+			close() {},
+		});
+
+		it("checks VM.Console, machine types and the user ISO", async () => {
+			const checks = await preflight({
+				api: stub(WIN),
+				node: nodeWin("ab".repeat(32)),
+				cfg,
+				keyFile,
+				hasCommand: () => true,
+				windows: { isoFile: ISO, isoSha256: "ab".repeat(32) },
+			});
+			expect(checks.filter((c) => !c.ok)).toEqual([]);
+			expect(checks.map((c) => c.name)).toEqual(
+				expect.arrayContaining([
+					"token: VM.Console on /pool/sandbox",
+					"machine types (pc-q35-*+pve*)",
+					`user ISO local:iso/${ISO}`,
+				]),
+			);
+			expect(checks.find((c) => c.name.includes("machine"))?.detail).toBe(
+				"pc-q35-11.0+pve2",
+			);
+		});
+
+		it("fails without VM.Console, on a missing ISO and on a sha mismatch; warns on an unpinned sha", async () => {
+			const noConsole = {
+				...WIN,
+				"/access/permissions?path=/pool/sandbox": {
+					"/pool/sandbox": { "VM.Audit": 1 },
+				},
+			};
+			const a = await preflight({
+				api: stub(noConsole),
+				node: nodeWin(new Error("not_found: no such ISO")),
+				cfg,
+				keyFile,
+				hasCommand: () => true,
+				windows: { isoFile: ISO, isoSha256: "ab".repeat(32) },
+			});
+			expect(a.find((c) => c.name.includes("VM.Console"))?.ok).toBe(false);
+			const iso = a.find((c) => c.name.includes("user ISO"));
+			expect(iso?.ok).toBe(false);
+			expect(iso?.detail).toMatch(/iso upload/);
+
+			const b = await preflight({
+				api: stub(WIN),
+				node: nodeWin("cd".repeat(32)),
+				cfg,
+				keyFile,
+				hasCommand: () => true,
+				windows: { isoFile: ISO, isoSha256: "ab".repeat(32) },
+			});
+			expect(b.find((c) => c.name.includes("user ISO"))?.ok).toBe(false);
+
+			const c = await preflight({
+				api: stub(WIN),
+				node: nodeWin("cd".repeat(32)),
+				cfg,
+				keyFile,
+				hasCommand: () => true,
+				windows: { isoFile: ISO, isoSha256: "" },
+			});
+			const unpinned = c.find((x) => x.name.includes("user ISO"));
+			expect(unpinned).toMatchObject({ ok: true, warn: true });
+			expect(unpinned?.detail).toContain("cd".repeat(32));
+		});
+	});
 });

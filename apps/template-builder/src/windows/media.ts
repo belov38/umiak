@@ -184,3 +184,30 @@ export function offlineIsoFiles(
 		],
 	]);
 }
+
+/**
+ * `C:\ProgramData\sbx-agent\agent.toml` of the template (spec S9 section 12.1, without the
+ * desktop readiness phase: Decision 2). The values equal the agent's Windows defaults; the file
+ * makes them visible on the image.
+ */
+export function renderWindowsAgentToml(tunnelUrl?: string): string {
+	const lines: string[] = [];
+	if (tunnelUrl !== undefined)
+		lines.push("[tunnel]", `url = ${JSON.stringify(tunnelUrl)}`, "");
+	lines.push(
+		"[user]",
+		'default = "user"',
+		"",
+		"[readiness]",
+		'required = ["identity", "claim", "secrets"]',
+		"",
+		"[docker]",
+		"enabled = false",
+		"",
+		"[ports]",
+		"exclude = [22, 135]",
+		'exclude_processes = ["System", "lsass.exe", "wininit.exe", "services.exe", "svchost.exe", "spoolsv.exe"]',
+		"",
+	);
+	return lines.join("\n");
+}

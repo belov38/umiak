@@ -271,4 +271,32 @@ describe("cleanup", () => {
 		// The unprotected leftover still goes.
 		expect(s.pve.vms.has(598)).toBe(false);
 	});
+	it("removes build and offline ISOs of finished builds, never user or virtio-win ISOs", async () => {
+		const s = await setup();
+		s.node.handlers["media.list"] = () => ({
+			iso: [
+				`sbx-build-${ID_STALE}.iso`,
+				`sbx-offline-${ID_STALE}.iso`,
+				`sbx-build-${ID_FRESH}.iso`,
+				`sbx-offline-${ID_FRESH}.iso`,
+				"sbx-virtio-win-0.1.271.iso",
+				"Windows11_Client_x64_en-gb_26300_9457.iso",
+			].map((name) => ({ name, size: 1 })),
+			import: [],
+		});
+		await cleanup({
+			api: s.pve,
+			node: s.node,
+			allocator: s.allocator,
+			registry: s.registry,
+			cfg: s.cfg,
+			now: () => NOW,
+		});
+		const removed = s.node.calls.filter((c) => c.op === "media.remove");
+		expect(removed.map((c) => c.args)).toEqual([
+			{
+				names: [`sbx-build-${ID_STALE}.iso`, `sbx-offline-${ID_STALE}.iso`],
+			},
+		]);
+	});
 });

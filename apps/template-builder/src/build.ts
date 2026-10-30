@@ -5,9 +5,11 @@ import { stringify as stringifyYaml } from "yaml";
 import { verifyAgentPackage } from "./agent-package.ts";
 import type { BuildError, Manifest } from "./manifest.ts";
 import {
+	type LinuxRecipe,
 	loadRecipe,
 	loadVersions,
 	REBOOT_STEP,
+	type Recipe,
 	recipeDigest,
 } from "./recipe.ts";
 import { newBuildId } from "./registry.ts";
@@ -37,6 +39,11 @@ import {
 	vmStatus,
 } from "./stages.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
+import {
+	buildIsoName,
+	prepareWindows,
+	windowsStages,
+} from "./windows/stages.ts";
 
 export {
 	type BuildApi,
@@ -64,12 +71,22 @@ export class BuildFailedError extends Error {
 }
 
 /** Stage 1 checks: everything that can be wrong before the build is recorded. */
-function prepare(deps: BuildDeps, o: BuildOptions): Prepared {
-	const recipe = loadRecipe(o.templatesDir, o.slug);
-	if (recipe.os !== "linux")
-		throw new Error(
-			`recipe "${o.slug}" is for ${recipe.os}; only linux is supported`,
-		);
+function prepare(
+	deps: BuildDeps,
+	o: BuildOptions,
+	recipe: LinuxRecipe,
+): Prepared {
+	for (const [flag, v] of [
+		["--iso", o.iso],
+		["--iso-sha256", o.isoSha256],
+		["--accept-iso-sha256", o.acceptIsoSha256 ? true : undefined],
+		["--edition", o.edition],
+		["--product-key-file", o.productKeyFile],
+	] as const)
+		if (v !== undefined)
+			throw new Error(
+				`${flag} is only for iso-install recipes; "${o.slug}" is a cloud image`,
+			);
 	const versions = loadVersions(recipe);
 	const scriptSteps = recipe.steps.filter((s) => s !== REBOOT_STEP);
 	if (o.failStep !== undefined && !scriptSteps.includes(o.failStep))
@@ -187,14 +204,77 @@ function guardIo(io: GuestIo, signal: AbortSignal): GuestIo {
 	};
 }
 
+type Save = (patch: Partial<Manifest>, unset?: (keyof Manifest)[]) => void;
+
+/** A prepared build: its first manifest and the stages up to the template. */
+interface Job {
+	manifest: Manifest;
+	stages(
+		run: BuildDeps,
+		st: State,
+		save: Save,
+		enter: (stage: Stage) => void,
+	): Promise<void>;
+}
+
+function linuxJob(deps: BuildDeps, o: BuildOptions, recipe: LinuxRecipe): Job {
+	const p = prepare(deps, o, recipe);
+	return {
+		manifest: p.manifest,
+		async stages(run, st, save, enter) {
+			enter("image");
+			const image = await stageImage(run, o, p.versions);
+			enter("seed");
+			await stageSeed(run, o, p, st);
+			enter("vm");
+			await stageVm(run, o, p.recipe, image, st, save);
+			const vmid = st.vmid as number;
+			const io = run.io(vmid);
+			enter("boot");
+			await stageBoot(run, o, p.recipe, io, st);
+			enter("steps");
+			await stageSteps(run, o, p.recipe, io, st);
+			enter("seal");
+			save(await collectFacts(io, p.verifyScript));
+			await writeGuestFile(
+				io,
+				GUEST_MANIFEST,
+				`${JSON.stringify(guestManifest(st.m), null, 2)}\n`,
+			);
+			await sealGuest(io);
+			await shutdown(run, o, vmid);
+			run.ramGuard.release(vmid);
+			st.ramReserved = false;
+			enter("template");
+			await stageTemplate(run, o, st);
+			if (st.m.diskUsedGiB !== undefined)
+				save({ diskUsedGiB: st.m.diskUsedGiB });
+		},
+	};
+}
+
+/** Source kind decides the pipeline; recipe.ts pairs iso-install with os windows. */
+function newJob(deps: BuildDeps, o: BuildOptions, recipe: Recipe): Job {
+	if (recipe.os === "windows" && recipe.source.kind === "iso-install") {
+		const p = prepareWindows(deps, o, recipe);
+		return {
+			manifest: p.manifest,
+			stages: (run, st, save, enter) =>
+				windowsStages(run, o, p, st, save, enter),
+		};
+	}
+	if (recipe.os === "linux") return linuxJob(deps, o, recipe);
+	throw new Error(`recipe "${o.slug}": unsupported source`);
+}
+
 export async function buildTemplate(
 	deps: BuildDeps,
 	o: BuildOptions,
 ): Promise<Manifest> {
-	const p = prepare(deps, o);
-	deps.registry.create(p.manifest);
+	const job = newJob(deps, o, loadRecipe(o.templatesDir, o.slug));
+	deps.registry.create(job.manifest);
 	const st: State = {
-		m: p.manifest,
+		m: job.manifest,
 		stage: "prepare",
 		seedUploaded: false,
 		ramReserved: false,
@@ -226,32 +306,7 @@ export async function buildTemplate(
 		: deps;
 
 	try {
-		enter("image");
-		const image = await stageImage(run, o, p.versions);
-		enter("seed");
-		await stageSeed(run, o, p, st);
-		enter("vm");
-		await stageVm(run, o, p.recipe, image, st, save);
-		const vmid = st.vmid as number;
-		const io = run.io(vmid);
-		enter("boot");
-		await stageBoot(run, o, p.recipe, io, st);
-		enter("steps");
-		await stageSteps(run, o, p.recipe, io, st);
-		enter("seal");
-		save(await collectFacts(io, p.verifyScript));
-		await writeGuestFile(
-			io,
-			GUEST_MANIFEST,
-			`${JSON.stringify(guestManifest(st.m), null, 2)}\n`,
-		);
-		await sealGuest(io);
-		await shutdown(run, o, vmid);
-		deps.ramGuard.release(vmid);
-		st.ramReserved = false;
-		enter("template");
-		await stageTemplate(run, o, st);
-		if (st.m.diskUsedGiB !== undefined) save({ diskUsedGiB: st.m.diskUsedGiB });
+		await job.stages(run, st, save, enter);
 		if (!o.noVerify) {
 			enter("verify");
 			const v = await run.verify(st.m, {
@@ -283,9 +338,10 @@ export async function buildTemplate(
 		} catch (saveErr) {
 			deps.log(`recording the failure: ${errorText(saveErr)}`);
 		} finally {
-			if (o.keepOnFailure)
+			if (o.keepOnFailure) {
 				deps.log("--keep-on-failure: leaving the VM and the ISO");
-			else await rollback(deps, o, st);
+				await dropBuildIso(deps, o, st);
+			} else await rollback(deps, o, st);
 			if (st.ramReserved && st.vmid !== undefined)
 				deps.ramGuard.release(st.vmid);
 		}
@@ -386,6 +442,15 @@ async function rollback(
 			warn(`removing ${seedName(st.m)}`, err);
 		}
 	}
+	// Build and offline ISOs only: the user's ISO and virtio-win stay.
+	if (st.isos !== undefined && st.isos.length > 0) {
+		try {
+			await deps.node.call("media.remove", { names: st.isos });
+			st.isos = [];
+		} catch (err) {
+			warn(`removing ${st.isos.join(", ")}`, err);
+		}
+	}
 	// A VMID whose VM could not be deleted keeps its lease until `sbx-tpl cleanup`.
 	if (st.vmid !== undefined && vmGone) {
 		try {
@@ -393,6 +458,38 @@ async function rollback(
 		} catch (err) {
 			warn(`releasing VMID ${st.vmid}`, err);
 		}
+	}
+}
+
+/**
+ * --keep-on-failure keeps the VM, but not the build ISO: it holds the build password. It is
+ * ejected from the kept VM first, so the VM can still start.
+ */
+async function dropBuildIso(
+	deps: BuildDeps,
+	o: BuildOptions,
+	st: State,
+): Promise<void> {
+	const name = buildIsoName(st.m);
+	if (!st.isos?.includes(name)) return;
+	const warn = (what: string, err: unknown) =>
+		deps.log(`--keep-on-failure: ${what}: ${errorText(err)}`);
+	if (st.vmid !== undefined && !isProtectedVmid(st.vmid)) {
+		const vmPath = `/nodes/${o.node}/qemu/${st.vmid}`;
+		try {
+			const cfg = await readConfig(deps.api, vmPath);
+			for (const [k, v] of Object.entries(cfg ?? {}))
+				if (/^(ide|sata|scsi)\d+$/.test(k) && v.includes(`iso/${name}`))
+					await deps.api.put(`${vmPath}/config`, { [k]: "none,media=cdrom" });
+		} catch (err) {
+			warn(`ejecting ${name}`, err);
+		}
+	}
+	try {
+		await deps.node.call("media.remove", { names: [name] });
+		st.isos = st.isos.filter((n) => n !== name);
+	} catch (err) {
+		warn(`removing ${name}`, err);
 	}
 }
 
