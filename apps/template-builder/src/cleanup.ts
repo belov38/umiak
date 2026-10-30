@@ -92,7 +92,8 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 			// /cluster/resources lags; the config decides.
 			const c = await api.get<Record<string, string>>(`${path}/config`);
 			if (
-				c.template === "1" ||
+				// A JSON number in the Proxmox API.
+				Number(c.template) === 1 ||
 				!tagsOf(c.tags).includes(BUILD_TAG) ||
 				!c.name?.startsWith("sbx-tpl-") ||
 				activeVmids.has(v.vmid)

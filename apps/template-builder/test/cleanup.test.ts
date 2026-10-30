@@ -100,11 +100,11 @@ async function setup() {
 		{ name: "sbx-tpl-linux-20261029-1", tags: "sbx-tpl", memory: "4096" },
 		"running",
 	);
-	// Finished template: stays.
+	// Finished template: stays. Proxmox returns `template` as a JSON number.
 	addVm(597, {
 		name: "sbx-tpl-linux-20261028-1",
 		tags: "sbx-tpl",
-		template: "1",
+		template: 1 as unknown as string,
 	});
 	// Build in progress (fresh registry row): stays, and so does its ISO.
 	addVm(596, {
