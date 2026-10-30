@@ -46,6 +46,48 @@ describe("parseAuthHeaders (S8 §5.2)", () => {
 		).toBe(null);
 	});
 
+	it("an empty email is no email", () => {
+		expect(
+			parseAuthHeaders({
+				"x-auth-request-email": "",
+				"x-auth-request-user": "s",
+			}),
+		).toBe(null);
+		expect(
+			parseAuthHeaders(
+				new Headers({ "x-auth-request-email": "", "x-auth-request-user": "s" }),
+			),
+		).toBe(null);
+	});
+
+	it("a duplicated email header is no email (never pick one of two)", () => {
+		// Headers joins repeated values with ", ".
+		const h = new Headers();
+		h.append("x-auth-request-email", "a@b.com");
+		h.append("x-auth-request-email", "evil@x.com");
+		h.set("x-auth-request-user", "s");
+		expect(parseAuthHeaders(h)).toBe(null);
+		expect(
+			parseAuthHeaders({
+				"x-auth-request-email": ["a@b.com", "evil@x.com"],
+				"x-auth-request-user": "s",
+			}),
+		).toBe(null);
+		expect(
+			parseAuthHeaders({
+				"x-auth-request-email": "a@b.com,evil@x.com",
+				"x-auth-request-user": "s",
+			}),
+		).toBe(null);
+		// The same name twice in a record (different case) counts as two values.
+		expect(
+			parseAuthHeaders({
+				"X-Auth-Request-Email": "a@b.com",
+				"x-auth-request-email": "evil@x.com",
+			}),
+		).toBe(null);
+	});
+
 	it("user and preferredUsername are optional and trimmed; header names are case-insensitive", () => {
 		expect(
 			parseAuthHeaders({

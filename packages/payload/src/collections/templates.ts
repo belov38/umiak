@@ -1,5 +1,6 @@
 import type { CollectionConfig } from "payload";
 import { operatorAccess } from "../access.ts";
+import { jsonFieldAdmin } from "../admin-components.ts";
 import { configAfterChange, configAfterDelete } from "../hooks/config.ts";
 import {
 	immutableSlug,
@@ -57,10 +58,11 @@ export const Templates: CollectionConfig = {
 			type: "json",
 			required: true,
 			validate: validateAllowedSizes,
+			admin: jsonFieldAdmin,
 		},
 		{ name: "loginUser", type: "text", defaultValue: "user" },
 		// S7 §13: exec, files, ssh, desktop.
-		{ name: "capabilities", type: "json" },
+		{ name: "capabilities", type: "json", admin: jsonFieldAdmin },
 		{ name: "sortOrder", type: "number", defaultValue: 0 },
 	],
 };

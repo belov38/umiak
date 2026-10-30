@@ -1,5 +1,6 @@
 import type { CollectionConfig, FieldAccess } from "payload";
 import { nobody, operatorOnly } from "../access.ts";
+import { jsonFieldAdmin } from "../admin-components.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
 import {
 	apiKeysRevokedByBeforeChange,
@@ -72,7 +73,13 @@ export const ApiKeys: CollectionConfig = {
 		},
 		{ name: "prefix", type: "text", required: true, access: readOnly },
 		{ name: "last4", type: "text", required: true, access: readOnly },
-		{ name: "scopes", type: "json", required: true, access: readOnly },
+		{
+			name: "scopes",
+			type: "json",
+			required: true,
+			access: readOnly,
+			admin: jsonFieldAdmin,
+		},
 		{ name: "expiresAt", type: "date", required: true, access: readOnly },
 		{
 			name: "createdVia",

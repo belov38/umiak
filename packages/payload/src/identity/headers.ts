@@ -39,15 +39,30 @@ function single(h: HeaderSource, name: string): string | undefined {
 }
 
 /**
- * S8 §5.2: email (lowercased, trimmed; required, else null), user (`sub`),
+ * The email: exactly one non-empty value without a comma, else undefined.
+ * Repeated headers arrive as several values or joined with ", " (Headers,
+ * Node); picking one of them would let whoever added the second choose.
+ */
+function email(h: HeaderSource): string | undefined {
+	const all = values(h, AUTH_HEADERS.email)
+		.map((v) => v.trim())
+		.filter((v) => v !== "");
+	if (all.length !== 1) return undefined;
+	const v = all[0] as string;
+	return v.includes(",") ? undefined : v.toLowerCase();
+}
+
+/**
+ * S8 §5.2: email (lowercased, trimmed; required, else null; an empty,
+ * repeated or comma-joined value counts as none), user (`sub`),
  * groups (one comma-separated value or several values; split by `,`,
  * trimmed, empty and duplicate names dropped; names with a comma are not
  * supported), preferredUsername. A missing `user` is kept as undefined:
  * resolveSession answers subject_required.
  */
 export function parseAuthHeaders(h: HeaderSource): SessionHeaders | null {
-	const email = single(h, AUTH_HEADERS.email)?.toLowerCase();
-	if (email === undefined) return null;
+	const e = email(h);
+	if (e === undefined) return null;
 	const groups = [
 		...new Set(
 			values(h, AUTH_HEADERS.groups)
@@ -56,7 +71,7 @@ export function parseAuthHeaders(h: HeaderSource): SessionHeaders | null {
 				.filter((g) => g !== ""),
 		),
 	];
-	const out: SessionHeaders = { email, groups };
+	const out: SessionHeaders = { email: e, groups };
 	const user = single(h, AUTH_HEADERS.user);
 	if (user !== undefined) out.user = user;
 	const preferredUsername = single(h, AUTH_HEADERS.preferredUsername);

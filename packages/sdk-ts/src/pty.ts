@@ -242,8 +242,10 @@ export class Pty {
 
 	async #url(): Promise<{ url: string; headers: Record<string, string> }> {
 		const creds = await this.#core.credentials();
-		const token = await creds.getToken(false);
-		const base = new URL(creds.baseUrl);
+		// A session baseUrl may be a path of the page's origin (`/api`).
+		const page = (globalThis as { location?: { href?: string } }).location
+			?.href;
+		const base = new URL(creds.baseUrl, creds.session ? page : undefined);
 		base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
 		const url = new URL(`${base.toString().replace(/\/+$/, "")}${this.#path}`);
 		if (this.#tailBytes !== undefined) {
@@ -252,10 +254,15 @@ export class Pty {
 			url.searchParams.set("offset", String(this.#offset));
 		}
 		const headers: Record<string, string> = {
-			Authorization: `Bearer ${token}`,
 			"User-Agent": this.#core.userAgent,
 		};
-		if (creds.team !== undefined) headers["Sbx-Team"] = creds.team;
+		if (creds.session) {
+			// The cookie goes with the upgrade; the team must be in the query (S8 C4).
+			if (creds.team !== undefined) url.searchParams.set("team", creds.team);
+		} else {
+			headers.Authorization = `Bearer ${await creds.getToken(false)}`;
+			if (creds.team !== undefined) headers["Sbx-Team"] = creds.team;
+		}
 		return { url: url.toString(), headers };
 	}
 

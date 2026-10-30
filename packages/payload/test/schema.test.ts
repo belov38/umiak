@@ -21,6 +21,7 @@ describe("buildSbxConfig", () => {
 		expect(c.csrf).toEqual(["https://app.sbx.test"]);
 		expect(c.cookiePrefix).toBe("__Host-payload");
 		expect(c.admin.user).toBe("users");
+		expect(c.admin.avatar).toBe("default");
 		expect(c.telemetry).toBe(false);
 		expect(c.custom).toEqual({ sbx: { operatorGroups: ["sbx-operators"] } });
 		const users = c.collections.find((x) => x.slug === "users");

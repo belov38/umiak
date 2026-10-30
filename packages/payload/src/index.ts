@@ -29,6 +29,19 @@ export {
 } from "./identity/resolve-session.ts";
 export { seedPayloadIdentity } from "./identity/seed.ts";
 export {
+	type AttachSessionCacheOptions,
+	attachSessionCache,
+	detachSessionCache,
+	flushesSessions,
+	IDENTITY_CHANNEL,
+	SESSION_CACHE_TTL_MS,
+	SESSION_LISTENER_APPLICATION_NAME,
+	SessionCache,
+	type SessionCacheOptions,
+	sessionCacheKey,
+	sessionCacheOf,
+} from "./identity/session-cache.ts";
+export {
 	PayloadIdentityStore,
 	type PayloadIdentityStoreOptions,
 } from "./identity/store.ts";
@@ -37,9 +50,12 @@ export {
 	type AuthDeniedReason,
 	type AuthOutcome,
 	authenticateHeaders,
+	authenticateRequest,
 	OAUTH2_PROXY_STRATEGY,
 	oauth2ProxyStrategy,
 	operatorGroupsOf,
+	type RequestAuth,
+	type UserDoc,
 } from "./identity/strategy.ts";
 export {
 	KeycloakAdminClient,

@@ -28,7 +28,8 @@ components are referenced by import-map path strings from `apps/web`.
 ## Identity (S8 §5)
 
 - `parseAuthHeaders(h)` — the oauth2-proxy headers (§5.2): email lowercased
-  and trimmed (none → `null`), `user` = `sub`, groups split by `,`, trimmed,
+  and trimmed (none, empty, repeated or comma-joined → `null`: never pick
+  one of two emails), `user` = `sub`, groups split by `,`, trimmed,
   without empty names and duplicates, `preferredUsername`. Takes `Headers`
   or a Node header record.
 - `resolveSession(payload, h, {operatorGroups, req?})` — JIT of §5.3 in one
@@ -59,6 +60,18 @@ components are referenced by import-map path strings from `apps/web`.
   `{kind: "denied", status: 401 | 403, reason}` (`subject_required` → 401,
   the others → 403), or `{kind: "session", claims, session}`. Other errors
   (database) are thrown.
+- `authenticateRequest(payload, headers)` — `authenticateHeaders` plus the
+  `users` document (`user`), through the session cache of the instance when
+  one is attached. The strategy uses it too, so `/admin` and `/app` agree.
+- Session cache (plan decision 8): `buildSbxConfig({sessionCache: {ttlMs?,
+  listen?}})` attaches it in `onInit` (web only): 30 s per claims key
+  (`sessionCacheKey`: sha256 of email, sub, sorted groups, names), only
+  sessions are cached (refusals and errors are not), concurrent loads of a
+  key share one call, a load that spans a flush is not stored. `LISTEN
+  sbx_identity` on its own connection (`sbx-session-listener`) flushes it
+  on any payload but `sandboxes:`, `api-keys:`, `ssh-keys:` and on every
+  (re)connect. `closeSbxPayload` closes it; `attachSessionCache` /
+  `detachSessionCache` for an instance from Payload's `getPayload`.
 - `PayloadIdentityStore` — `IdentityStore` of `@sbx/auth` over the
   collections, the semantics of `PgIdentityStore`; passes the contract
   suite (`test/identity-contract.test.ts`). Reads are SQL over the
@@ -264,3 +277,11 @@ only; `rotated_at` is copied when 0303 is applied.
   `overrideAccess` (api) does.
 - `esbuild` (via `drizzle-kit`) build scripts are disabled in
   `pnpm-workspace.yaml`; the platform binary comes from its optional package.
+
+## Admin components
+
+Components live in `apps/web` and are referenced by import-map path
+(`src/admin-components.ts`, relative to the apps/web directory). JSON
+fields use `JSON_FIELD_COMPONENT` (a textarea): Payload's Monaco editor
+loads from a CDN, which web's CSP blocks. `admin.avatar` is `"default"`
+(no Gravatar requests).

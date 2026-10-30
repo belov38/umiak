@@ -2,6 +2,7 @@
 import { BasePayload, type Payload } from "payload";
 import { buildSbxConfig, type SbxPayloadOptions } from "./config.ts";
 import { dbPool } from "./db.ts";
+import { detachSessionCache } from "./identity/session-cache.ts";
 
 const instances = new Map<string, Promise<Payload>>();
 
@@ -30,6 +31,7 @@ export async function closeSbxPayload(databaseUrl: string): Promise<void> {
 	const payload = await p.catch(() => null);
 	if (!payload) return;
 	const pool = dbPool(payload);
+	await detachSessionCache(payload);
 	await payload.destroy();
 	// The adapter keeps one client checked out for good (connect), so end()
 	// settles only once that client is gone; idle clients close at once.

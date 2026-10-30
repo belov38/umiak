@@ -1,6 +1,7 @@
 // The Payload config of the platform (S8 §7): one config for api, worker
 // (Local API, plain Node) and web (Next). No React imports here: admin
 // components are referenced by import-map path strings from apps/web.
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { postgresAdapter } from "@payloadcms/db-postgres";
 import { buildConfig, type EmailAdapter, type SanitizedConfig } from "payload";
@@ -14,6 +15,7 @@ import { Teams } from "./collections/teams.ts";
 import { Templates } from "./collections/templates.ts";
 import { Users } from "./collections/users.ts";
 import { PlatformDefaults } from "./globals/platform-defaults.ts";
+import { attachSessionCache } from "./identity/session-cache.ts";
 
 export interface SbxPayloadOptions {
 	databaseUrl: string;
@@ -25,14 +27,30 @@ export interface SbxPayloadOptions {
 	appOrigin?: string;
 	/** Size of the pg pool of the adapter (default 10). */
 	poolMax?: number;
+	/**
+	 * Cache resolved browser sessions on the instance (web, plan decision 8):
+	 * attached in onInit, with LISTEN sbx_identity on its own connection
+	 * unless `listen` is false. api and worker leave it off.
+	 */
+	sessionCache?: {
+		ttlMs?: number;
+		listen?: boolean;
+		reconnectDelayMs?: number;
+		onListenError?: (err: unknown) => void;
+	};
 }
 
 /** Postgres schema owned by Payload. */
 export const PAYLOAD_SCHEMA = "payload";
 
-/** Migrations of the payload schema (committed, applied by src/migrate.ts). */
-export const PAYLOAD_MIGRATIONS_DIR: string = fileURLToPath(
-	new URL("./migrations", import.meta.url),
+/**
+ * Migrations of the payload schema (committed, applied by src/migrate.ts).
+ * Not `new URL("./migrations", import.meta.url)`: bundlers (Turbopack in
+ * apps/web) turn that form into an asset reference.
+ */
+export const PAYLOAD_MIGRATIONS_DIR: string = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"migrations",
 );
 
 /** Settings of the platform kept in config.custom.sbx (read by the auth strategy). */
@@ -74,7 +92,9 @@ export function buildSbxConfig(o: SbxPayloadOptions): Promise<SanitizedConfig> {
 		routes: { api: "/cms-api", admin: "/admin" },
 		csrf: o.appOrigin ? [o.appOrigin] : [],
 		cookiePrefix: "__Host-payload",
-		admin: { user: "users" },
+		// avatar "default": no Gravatar request (an external origin, and it
+		// would hand every user's email hash to a third party).
+		admin: { user: "users", avatar: "default" },
 		typescript: { autoGenerate: false },
 		collections: [
 			Users,
@@ -89,5 +109,31 @@ export function buildSbxConfig(o: SbxPayloadOptions): Promise<SanitizedConfig> {
 		],
 		globals: [PlatformDefaults],
 		custom: { sbx },
+		...(o.sessionCache === undefined
+			? {}
+			: { onInit: (payload) => sessionCacheOnInit(payload, o) }),
+	});
+}
+
+function sessionCacheOnInit(
+	payload: Parameters<typeof attachSessionCache>[0],
+	o: SbxPayloadOptions,
+): Promise<void> {
+	const c = o.sessionCache ?? {};
+	return attachSessionCache(payload, {
+		...(c.ttlMs === undefined ? {} : { ttlMs: c.ttlMs }),
+		...(c.listen === false
+			? {}
+			: {
+					listen: {
+						databaseUrl: o.databaseUrl,
+						...(c.reconnectDelayMs === undefined
+							? {}
+							: { reconnectDelayMs: c.reconnectDelayMs }),
+					},
+				}),
+		...(c.onListenError === undefined
+			? {}
+			: { onListenError: c.onListenError }),
 	});
 }

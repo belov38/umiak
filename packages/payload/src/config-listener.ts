@@ -1,6 +1,7 @@
 // LISTEN on one channel with its own Postgres connection. `onSignal` runs for
-// every notification and each time LISTEN is (re)established, because
-// notifications sent while the connection was down are lost. A lost
+// every notification (with its payload) and each time LISTEN is
+// (re)established (with null), because notifications sent while the
+// connection was down are lost. A lost
 // connection is retried with a growing delay; reads must not rely on the
 // listener alone (the reader has a TTL).
 import pg from "pg";
@@ -13,8 +14,11 @@ const MAX_RECONNECT_DELAY_MS = 10_000;
 export interface ChannelListenerOptions {
 	databaseUrl: string;
 	channel: string;
-	onSignal: () => void;
+	/** The notification payload, or null when LISTEN is (re)established. */
+	onSignal: (payload: string | null) => void;
 	reconnectDelayMs?: number;
+	/** application_name of the connection; default sbx-config-listener. */
+	applicationName?: string;
 	/** Connection errors; the listener retries by itself. */
 	onError?: (err: unknown) => void;
 }
@@ -51,7 +55,7 @@ export class ChannelListener {
 	async #connect(): Promise<void> {
 		const client = new pg.Client({
 			connectionString: this.#o.databaseUrl,
-			application_name: LISTENER_APPLICATION_NAME,
+			application_name: this.#o.applicationName ?? LISTENER_APPLICATION_NAME,
 		});
 		const lost = (err?: unknown) => {
 			// Only the live client counts; a failed attempt reports by throwing.
@@ -64,7 +68,7 @@ export class ChannelListener {
 		client.on("error", lost);
 		client.on("end", () => lost());
 		client.on("notification", (m) => {
-			if (m.channel === this.#o.channel) this.#o.onSignal();
+			if (m.channel === this.#o.channel) this.#o.onSignal(m.payload ?? "");
 		});
 		try {
 			await client.connect();
@@ -79,7 +83,7 @@ export class ChannelListener {
 		}
 		this.#client = client;
 		this.#delayMs = this.#baseDelayMs;
-		this.#o.onSignal();
+		this.#o.onSignal(null);
 	}
 
 	#scheduleReconnect(): void {

@@ -5,13 +5,15 @@
 // Payload only takes a user or null from a strategy, but web must tell a
 // missing login (401) from a refused one (403 pages "account disabled",
 // "identity conflict", S8 §5.3 item 4). So:
-// - authenticateHeaders() returns the outcome with the reason; web (proxy,
-//   layouts, server actions) calls it, with its cache around it (plan
-//   task 9), and renders the 401/403 pages itself;
-// - the strategy maps the outcome to {user} for Payload (/admin,
-//   /cms-api) and, when refused, adds the response header
-//   `X-Sbx-Auth-Denied: <reason>` (Payload copies strategy response
-//   headers to its REST responses).
+// - authenticateHeaders() returns the outcome with the reason;
+// - authenticateRequest() is the same through the session cache of the
+//   instance (session-cache.ts, attached in web) plus the user document;
+//   web's layouts and server actions call it and render the 401/403 pages
+//   themselves;
+// - the strategy calls authenticateRequest() too (so /admin and /app agree)
+//   and maps the outcome to {user} for Payload (/admin, /cms-api); when
+//   refused, it adds the response header `X-Sbx-Auth-Denied: <reason>`
+//   (Payload copies strategy response headers to its REST responses).
 import {
 	IdentityError,
 	type SessionHeaders,
@@ -21,6 +23,7 @@ import type { AuthStrategy, Payload } from "payload";
 import type { SbxCustomConfig } from "../config.ts";
 import { type HeaderSource, parseAuthHeaders } from "./headers.ts";
 import { resolveSession } from "./resolve-session.ts";
+import { sessionCacheKey, sessionCacheOf } from "./session-cache.ts";
 
 export const OAUTH2_PROXY_STRATEGY = "oauth2-proxy";
 
@@ -80,10 +83,55 @@ export async function authenticateHeaders(
 	}
 }
 
+/** The users document of a session (depth 0), as Payload's req.user takes it. */
+export type UserDoc = Record<string, unknown> & { id: string };
+
+export type RequestAuth =
+	| Exclude<AuthOutcome, { kind: "session" }>
+	| (Extract<AuthOutcome, { kind: "session" }> & {
+			/** null when the row vanished between resolveSession and the read. */
+			user: UserDoc | null;
+	  });
+
+async function resolveRequest(
+	payload: Payload,
+	headers: HeaderSource,
+): Promise<RequestAuth> {
+	const out = await authenticateHeaders(payload, headers);
+	if (out.kind !== "session") return out;
+	const doc = await payload.findByID({
+		collection: "users",
+		id: out.session.user.id,
+		depth: 0,
+		disableErrors: true,
+	});
+	return { ...out, user: (doc as UserDoc | null) ?? null };
+}
+
+/**
+ * authenticateHeaders() plus the users document, through the session cache
+ * of the instance when one is attached (only sessions are cached; refusals
+ * and errors are not).
+ */
+export async function authenticateRequest(
+	payload: Payload,
+	headers: HeaderSource,
+): Promise<RequestAuth> {
+	const cache = sessionCacheOf(payload);
+	if (cache === null) return resolveRequest(payload, headers);
+	const claims = parseAuthHeaders(headers);
+	if (claims === null) return { kind: "anonymous", status: 401 };
+	return (await cache.load(
+		sessionCacheKey(claims),
+		() => resolveRequest(payload, headers),
+		(v) => (v as RequestAuth).kind === "session",
+	)) as RequestAuth;
+}
+
 export const oauth2ProxyStrategy: AuthStrategy = {
 	name: OAUTH2_PROXY_STRATEGY,
 	authenticate: async ({ headers, payload }) => {
-		const out = await authenticateHeaders(payload, headers);
+		const out = await authenticateRequest(payload, headers);
 		if (out.kind === "anonymous") return { user: null };
 		if (out.kind === "denied") {
 			return {
@@ -91,15 +139,13 @@ export const oauth2ProxyStrategy: AuthStrategy = {
 				responseHeaders: new Headers({ [AUTH_DENIED_HEADER]: out.reason }),
 			};
 		}
-		const doc = await payload.findByID({
-			collection: "users",
-			id: out.session.user.id,
-			depth: 0,
-			disableErrors: true,
-		});
-		if (!doc) return { user: null };
+		if (out.user === null) return { user: null };
 		return {
-			user: { ...doc, collection: "users", _strategy: OAUTH2_PROXY_STRATEGY },
+			user: {
+				...out.user,
+				collection: "users",
+				_strategy: OAUTH2_PROXY_STRATEGY,
+			},
 		};
 	},
 };

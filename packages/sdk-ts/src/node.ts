@@ -65,10 +65,15 @@ interface TarProcess {
 function runTar(args: string[], what: string): TarProcess {
 	const cp = childProcess(what);
 	const proc = (globalThis as { process?: NodeProcess }).process;
+	// macOS bsdtar: no AppleDouble `._*` entries.
+	const env: Record<string, string | undefined> = {
+		...proc?.env,
+		COPYFILE_DISABLE: "1",
+	};
 	const child = cp.spawn("tar", args, {
 		stdio: ["pipe", "pipe", "pipe"],
-		// macOS bsdtar: no AppleDouble `._*` entries.
-		env: { ...proc?.env, COPYFILE_DISABLE: "1" },
+		// Cast: a Next.js app's global types make NODE_ENV required.
+		env: env as NodeJS.ProcessEnv,
 		windowsHide: true,
 	});
 	let stderr = "";

@@ -95,6 +95,13 @@ export interface SbxOptions {
 	baseUrl?: string;
 	/** Team (`team_...`) sent as Sbx-Team; else SBX_TEAM, else the sbx profile. */
 	team?: string;
+	/**
+	 * Browser session of the dashboard (S8 §9.1): the cookie of the page's
+	 * own origin is the credential. No Authorization header is sent and no
+	 * credential chain is used; `baseUrl` may be a path (`/api`). The PTY
+	 * WebSocket gets the team as `?team=` (browsers set no headers there).
+	 */
+	session?: boolean;
 	apiKey?: string;
 	accessToken?: string;
 	/**
@@ -221,10 +228,12 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 		async onRequest({ request, schemaPath }) {
 			const creds = await credentials();
 			const h = request.headers;
-			h.set(
-				"Authorization",
-				`Bearer ${await creds.getToken(false, request.signal)}`,
-			);
+			if (!creds.session) {
+				h.set(
+					"Authorization",
+					`Bearer ${await creds.getToken(false, request.signal)}`,
+				);
+			}
 			if (creds.team !== undefined && !h.has("Sbx-Team")) {
 				h.set("Sbx-Team", creds.team);
 			}
@@ -306,7 +315,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 					try {
 						return await send();
 					} catch (err) {
-						if (refreshed || !isTokenExpired(err)) throw err;
+						if (refreshed || creds.session || !isTokenExpired(err)) throw err;
 						refreshed = true;
 						const token = await creds.getToken(true, signal);
 						request.headers.set("Authorization", `Bearer ${token}`);

@@ -1,5 +1,6 @@
 import type { CollectionConfig } from "payload";
 import { isOperatorReq, operatorOnly } from "../access.ts";
+import { jsonFieldAdmin } from "../admin-components.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
 import { usersStubOnlyBeforeDelete } from "../hooks/rules.ts";
 import {
@@ -57,7 +58,11 @@ export const Users: CollectionConfig = {
 		{
 			name: "groups",
 			type: "json",
-			admin: { readOnly: true, description: "Last groups from the IdP." },
+			admin: {
+				...jsonFieldAdmin,
+				readOnly: true,
+				description: "Last groups from the IdP.",
+			},
 		},
 		{
 			name: "isOperator",

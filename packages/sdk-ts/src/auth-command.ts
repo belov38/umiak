@@ -44,7 +44,8 @@ export function runAuthCommand(
 			file,
 			args,
 			{
-				env,
+				// Cast: a Next.js app's global types make NODE_ENV required.
+				env: env as NodeJS.ProcessEnv,
 				timeout: timeoutMs,
 				// A command that ignores SIGTERM must not outlive the timeout.
 				killSignal: "SIGKILL",
