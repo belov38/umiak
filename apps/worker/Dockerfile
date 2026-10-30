@@ -28,6 +28,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/bench/package.json apps/bench/
 COPY apps/cli/package.json apps/cli/
 COPY apps/template-builder/package.json apps/template-builder/
+COPY apps/web/package.json apps/web/
 
 # ---- build: compile @sbx/proto and @sbx/agent-client (needs dev dependencies)
 FROM base AS build

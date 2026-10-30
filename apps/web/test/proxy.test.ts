@@ -1,0 +1,104 @@
+import { NextRequest } from "next/server";
+import { beforeAll, describe, expect, it } from "vitest";
+import { guard } from "../src/lib/guard.ts";
+
+const ORIGIN = "https://app.sbx.example.com";
+const ENV = {
+	DATABASE_URL: "postgres://u:p@127.0.0.1:5432/sbx",
+	PAYLOAD_SECRET: "0123456789abcdef0123",
+	SBX_APP_ORIGIN: ORIGIN,
+	SBX_OPERATOR_GROUPS: "sbx-operators",
+	SBX_SBX_DOMAIN: "sbx.example.com",
+	SBX_API_PUBLIC_URL: "https://api.sbx.example.com",
+};
+const SIGNED_IN = { "x-auth-request-email": "a@b.com" };
+
+function req(
+	method: string,
+	path: string,
+	headers: Record<string, string> = {},
+): NextRequest {
+	return new NextRequest(new URL(path, ORIGIN), { method, headers });
+}
+
+describe("guard (S8 §5.1, §5.6)", () => {
+	const g = (method: string, path: string, h: Record<string, string> = {}) =>
+		guard(
+			{ method, pathname: path, headers: new Headers(h) },
+			{ appOrigin: ORIGIN },
+		);
+
+	it("no identity header: 401 on every path but /healthz", () => {
+		expect(g("GET", "/app")?.status).toBe(401);
+		expect(g("GET", "/admin")?.status).toBe(401);
+		expect(g("GET", "/cms-api/users")?.status).toBe(401);
+		expect(g("GET", "/app", { "x-auth-request-email": "  " })?.status).toBe(
+			401,
+		);
+		expect(g("GET", "/healthz")).toBe(null);
+	});
+
+	it("unsafe methods need Origin == SBX_APP_ORIGIN", () => {
+		expect(
+			g("POST", "/app", { ...SIGNED_IN, origin: "https://evil" })?.status,
+		).toBe(403);
+		expect(g("POST", "/app", SIGNED_IN)?.status).toBe(403);
+		expect(g("DELETE", "/cms-api/teams/1", SIGNED_IN)?.status).toBe(403);
+		expect(
+			g("PATCH", "/cms-api/users/1", { ...SIGNED_IN, origin: `${ORIGIN}/` })
+				?.status,
+		).toBe(403);
+		expect(g("POST", "/app", { ...SIGNED_IN, origin: ORIGIN })).toBe(null);
+		expect(g("GET", "/app", { ...SIGNED_IN, origin: "https://evil" })).toBe(
+			null,
+		);
+	});
+
+	it("no identity wins over a bad origin (401 first)", () => {
+		expect(g("POST", "/app", { origin: "https://evil" })?.status).toBe(401);
+	});
+});
+
+describe("proxy", () => {
+	let proxy: typeof import("../src/proxy.ts").proxy;
+
+	beforeAll(async () => {
+		Object.assign(process.env, ENV);
+		({ proxy } = await import("../src/proxy.ts"));
+	});
+
+	it("without the header: 401 HTML with the security headers", async () => {
+		const res = proxy(req("GET", "/app"));
+		expect(res.status).toBe(401);
+		expect(res.headers.get("content-type")).toMatch(/^text\/html/);
+		expect(await res.text()).toContain("Not signed in");
+		expect(res.headers.get("content-security-policy")).toContain(
+			"frame-ancestors 'self'",
+		);
+	});
+
+	it("POST with Origin https://evil: 403", () => {
+		expect(
+			proxy(req("POST", "/app", { ...SIGNED_IN, origin: "https://evil" }))
+				.status,
+		).toBe(403);
+	});
+
+	it("POST without Origin: 403", () => {
+		expect(proxy(req("POST", "/cms-api/teams", SIGNED_IN)).status).toBe(403);
+	});
+
+	it("GET /healthz without headers passes (200)", () => {
+		const res = proxy(req("GET", "/healthz"));
+		expect(res.status).toBe(200);
+		expect(res.headers.get("x-middleware-next")).toBe("1");
+		expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+	});
+
+	it("a signed-in same-origin POST passes with the headers", () => {
+		const res = proxy(req("POST", "/app", { ...SIGNED_IN, origin: ORIGIN }));
+		expect(res.status).toBe(200);
+		expect(res.headers.get("x-middleware-next")).toBe("1");
+		expect(res.headers.get("referrer-policy")).toBe("same-origin");
+	});
+});
