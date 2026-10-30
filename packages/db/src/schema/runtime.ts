@@ -1,5 +1,5 @@
 // Drizzle description of schema `runtime` (S6 §5.1-5.9, §8.3). The SQL in
-// db/migrations/02xx_*.sql is the source of truth; test/schema-drift.test.ts
+// db/migrations/02xx_*.sql and 0400_*.sql is the source of truth; test/schema-drift.test.ts
 // checks that every column, type and nullability here matches it.
 import { sql } from "drizzle-orm";
 import {
@@ -558,4 +558,25 @@ export const portAuthCodes = runtime.table("port_auth_codes", {
 	expiresAt: tstz("expires_at").notNull(),
 	usedAt: tstz("used_at"),
 	createdAt: tstz("created_at").notNull().defaultNow(),
+});
+
+// Team environments (S8 §10.3; migration 0400). team_id and updated_by are
+// plain uuids: teams and users live in the Payload schema. The sets are an
+// AES-256-GCM blob (AAD `environment:<id>:v<key_version>`).
+export const environments = runtime.table("environments", {
+	id: uuid("id").primaryKey().default(sql`uuidv7()`),
+	teamId: uuid("team_id").notNull(),
+	name: text("name").notNull(),
+	isDefault: boolean("is_default").notNull().default(false),
+	revision: integer("revision").notNull().default(1),
+	keyVersion: integer("key_version").notNull(),
+	nonce: bytea("nonce").notNull(),
+	ciphertext: bytea("ciphertext").notNull(),
+	repositories: jsonb("repositories").notNull().default(sql`'[]'::jsonb`),
+	excludeOwnerSecrets: boolean("exclude_owner_secrets")
+		.notNull()
+		.default(false),
+	createdAt: tstz("created_at").notNull().defaultNow(),
+	updatedAt: tstz("updated_at").notNull().defaultNow(),
+	updatedBy: uuid("updated_by"),
 });

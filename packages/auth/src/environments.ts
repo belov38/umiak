@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { IdentityError } from "./identity.ts";
-import { FK_VIOLATION, inTx, pgCode, UNIQUE_VIOLATION } from "./pg-util.ts";
+import { inTx, pgCode, UNIQUE_VIOLATION } from "./pg-util.ts";
 import {
 	applySecretPatch,
 	type SecretFile,
@@ -8,9 +8,11 @@ import {
 	type SecretSets,
 } from "./secret-sets.ts";
 
-// Environments of a team (S8 §10) in the identity stand-in (table
-// identity.environments of migration 0300) until S8. The sets are encrypted
-// with the data key ring, AAD `environment:<id>:v<keyVersion>` (S8 §10.3).
+// Environments of a team (S8 §10) in table runtime.environments (migration
+// 0400). The table has no foreign keys: teams and users live in the Payload
+// schema, so the caller (apps/api) resolves the team before it calls the
+// store. The sets are encrypted with the data key ring, AAD
+// `environment:<id>:v<keyVersion>` (S8 §10.3).
 // Limits and names are validated by the caller (apps/api); the store merges,
 // encrypts and persists.
 
@@ -82,7 +84,7 @@ export interface EnvironmentStore {
 	/** By id (uuid) or name, within the team. */
 	get(teamId: string, idOrName: string): Promise<EnvironmentRecord | null>;
 	getDefault(teamId: string): Promise<EnvironmentRecord | null>;
-	/** Throws IdentityError `name_taken`, or `not_found` for an unknown team. */
+	/** Throws IdentityError `name_taken`. */
 	create(
 		teamId: string,
 		input: NewEnvironment,
@@ -156,7 +158,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 
 	async list(teamId: string): Promise<EnvironmentRecord[]> {
 		const r = await this.#pool.query<EnvRow>(
-			`SELECT ${COLS} FROM identity.environments WHERE team_id = $1 ORDER BY name`,
+			`SELECT ${COLS} FROM runtime.environments WHERE team_id = $1 ORDER BY name`,
 			[teamId],
 		);
 		return r.rows.map((row) => this.#record(row));
@@ -167,7 +169,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 		idOrName: string,
 	): Promise<EnvironmentRecord | null> {
 		const r = await this.#pool.query<EnvRow>(
-			`SELECT ${COLS} FROM identity.environments WHERE ${BY_ID_OR_NAME}`,
+			`SELECT ${COLS} FROM runtime.environments WHERE ${BY_ID_OR_NAME}`,
 			[teamId, idOrName, idParam(idOrName)],
 		);
 		return r.rows[0] ? this.#record(r.rows[0]) : null;
@@ -175,7 +177,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 
 	async getDefault(teamId: string): Promise<EnvironmentRecord | null> {
 		const r = await this.#pool.query<EnvRow>(
-			`SELECT ${COLS} FROM identity.environments WHERE team_id = $1 AND is_default`,
+			`SELECT ${COLS} FROM runtime.environments WHERE team_id = $1 AND is_default`,
 			[teamId],
 		);
 		return r.rows[0] ? this.#record(r.rows[0]) : null;
@@ -202,7 +204,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 		const blob = this.#encrypt(id, sets);
 		return this.#write(teamId, input.isDefault === true, async (c) => {
 			const r = await c.query<EnvRow>(
-				`INSERT INTO identity.environments
+				`INSERT INTO runtime.environments
 				   (id, team_id, name, is_default, revision, key_version, nonce, ciphertext,
 				    repositories, exclude_owner_secrets, updated_by)
 				 VALUES ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10)
@@ -233,7 +235,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 		return this.#write(teamId, patch.isDefault === true, async (c) => {
 			const cur = (
 				await c.query<EnvRow>(
-					`SELECT ${COLS} FROM identity.environments WHERE ${BY_ID_OR_NAME} FOR UPDATE`,
+					`SELECT ${COLS} FROM runtime.environments WHERE ${BY_ID_OR_NAME} FOR UPDATE`,
 					[teamId, idOrName, idParam(idOrName)],
 				)
 			).rows[0];
@@ -242,7 +244,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 			this.#validate(sets);
 			const blob = this.#encrypt(cur.id, sets);
 			const r = await c.query<EnvRow>(
-				`UPDATE identity.environments SET
+				`UPDATE runtime.environments SET
 				   name = $2, is_default = $3, revision = revision + 1,
 				   key_version = $4, nonce = $5, ciphertext = $6,
 				   repositories = $7, exclude_owner_secrets = $8,
@@ -267,8 +269,8 @@ export class PgEnvironmentStore implements EnvironmentStore {
 
 	async delete(teamId: string, idOrName: string): Promise<void> {
 		const r = await this.#pool.query(
-			`DELETE FROM identity.environments WHERE id = (
-			   SELECT id FROM identity.environments WHERE ${BY_ID_OR_NAME})`,
+			`DELETE FROM runtime.environments WHERE id = (
+			   SELECT id FROM runtime.environments WHERE ${BY_ID_OR_NAME})`,
 			[teamId, idOrName, idParam(idOrName)],
 		);
 		if (!r.rowCount) throw new IdentityError("not_found");
@@ -287,11 +289,11 @@ export class PgEnvironmentStore implements EnvironmentStore {
 			const row = await inTx(this.#pool, async (c) => {
 				if (makeDefault) {
 					await c.query(
-						"SELECT pg_advisory_xact_lock(hashtextextended('identity.environments:' || $1, 0))",
+						"SELECT pg_advisory_xact_lock(hashtextextended('runtime.environments:' || $1, 0))",
 						[teamId],
 					);
 					await c.query(
-						"UPDATE identity.environments SET is_default = false WHERE team_id = $1 AND is_default",
+						"UPDATE runtime.environments SET is_default = false WHERE team_id = $1 AND is_default",
 						[teamId],
 					);
 				}
@@ -301,9 +303,6 @@ export class PgEnvironmentStore implements EnvironmentStore {
 		} catch (e) {
 			const code = pgCode(e);
 			if (code === UNIQUE_VIOLATION) throw new IdentityError("name_taken");
-			if (code === FK_VIOLATION) {
-				throw new IdentityError("not_found", "unknown team or user");
-			}
 			throw e;
 		}
 	}
