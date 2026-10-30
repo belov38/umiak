@@ -6,15 +6,18 @@
 //   - every client connection is cut in the load balancer (a TCP proxy);
 //   - the current api instance stops through its SIGTERM path (close()) and a
 //     new one takes over: rolling (new instance first) or with a gap.
-// The first answer of POST /commands is lost after the api started the
-// command, so the SDK repeats the POST with the same Idempotency-Key.
+// The run begins with a fixed prefix, so each fault takes effect at least
+// once while the SDK streams (attach failure, drop, rolling restart, gap);
+// the rest is random. The first answer of POST /commands is lost after the
+// api started the command, so the SDK repeats the POST with the same
+// Idempotency-Key.
 // All instances share the Postgres database and the FakeAgent, as the pods of
 // one deployment share the database and the agents. Both streams must arrive
 // byte for byte, the exit code must be right, the command must start once
 // and every close() must end within the shutdown grace.
 //
 // The RNG is seeded; SBX_CHAOS_SEED=<n> replays a run, SBX_CHAOS_LOG=1
-// prints the action counts and timings.
+// prints what the faults did and the timings.
 import { createHash, randomInt } from "node:crypto";
 import { type RunningApi, SHUTDOWN_GRACE_MS, startApi } from "@sbx/api";
 import {
@@ -76,6 +79,50 @@ function rngOf(seed: number): () => number {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+async function until(
+	fn: () => boolean,
+	what: string,
+	ms = 15_000,
+): Promise<void> {
+	const end = Date.now() + ms;
+	while (!fn()) {
+		if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+		await sleep(10);
+	}
+}
+
+/**
+ * `res` with its NDJSON body passed through unchanged; `onShutdown` runs for
+ * each `reconnect {reason: server_shutdown}` frame in it.
+ */
+function watchFrames(res: Response, onShutdown: () => void): Response {
+	const type = res.headers.get("content-type") ?? "";
+	if (res.body === null || !type.includes("ndjson")) return res;
+	const dec = new TextDecoder();
+	let line = "";
+	const scan = new TransformStream<Uint8Array, Uint8Array>({
+		transform(chunk, ctrl) {
+			line += dec.decode(chunk, { stream: true });
+			for (let i = line.indexOf("\n"); i >= 0; i = line.indexOf("\n")) {
+				const l = line.slice(0, i);
+				line = line.slice(i + 1);
+				if (
+					l.includes('"type":"reconnect"') &&
+					l.includes('"reason":"server_shutdown"')
+				) {
+					onShutdown();
+				}
+			}
+			ctrl.enqueue(chunk);
+		},
+	});
+	return new Response(res.body.pipeThrough(scan), {
+		status: res.status,
+		statusText: res.statusText,
+		headers: res.headers,
+	});
+}
+
 describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 	let db: TestDatabase;
 	let env: ServiceEnv;
@@ -128,12 +175,24 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 	});
 
 	it("run delivers both streams byte for byte and starts the command once", async () => {
-		const seed = Number(process.env.SBX_CHAOS_SEED ?? randomInt(2 ** 31));
+		const given = process.env.SBX_CHAOS_SEED;
+		const seed = given ? Number(given) : randomInt(2 ** 31);
 		const rng = rngOf(seed);
 		const trace: string[] = [];
 		const t0 = Date.now();
 		const note = (s: string) => trace.push(`${Date.now() - t0}ms ${s}`);
-		const counts = { attach: 0, drop: 0, rolling: 0, gap: 0 };
+		// What the faults did, not only how often they were picked.
+		const effect = {
+			attachArmed: 0,
+			drops: 0,
+			droppedConnections: 0,
+			rolling: 0,
+			gap: 0,
+			/** Open streams of each instance when its close() began. */
+			openAtStop: [] as number[],
+			/** `reconnect {reason: server_shutdown}` frames the SDK received. */
+			shutdownReconnects: 0,
+		};
 		const closes: Promise<number>[] = [];
 		const stopped: RunningApi[] = [];
 
@@ -144,7 +203,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 			baseUrl: `http://127.0.0.1:${proxy.port}`,
 			apiKey: secret,
 			env: {},
-			fetch: ((req: Request) => {
+			fetch: (async (req: Request) => {
 				if (counting) {
 					const path = new URL(req.url).pathname;
 					if (req.method === "POST" && path.endsWith("/commands")) {
@@ -153,62 +212,103 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 						sent.streams += 1;
 					}
 				}
-				return globalThis.fetch(req);
+				return watchFrames(await globalThis.fetch(req), () => {
+					effect.shutdownReconnects += 1;
+				});
 			}) as typeof fetch,
 		});
 		const sb: Sandbox = await sbx.sandboxes.create({
 			labels: { suite: "chaos" },
 		});
 		await markSandboxReady(db.pool, sb.slug);
-		const { machineId } = await sandboxRow(db.pool, sb.slug);
+		const row = await sandboxRow(db.pool, sb.slug);
+		const machineId = row.machineId;
 		if (machineId === null) throw new Error("sandbox without a machine");
 
 		/** close() of an instance, timed; never awaited by the chaos loop. */
 		const stop = (api: RunningApi) => {
 			stopped.push(api);
+			effect.openAtStop.push(api.deps.streams.size);
 			const started = Date.now();
 			closes.push(api.close().then(() => Date.now() - started));
 		};
+		const failAttach = (after: number) => {
+			const kind = rng() < 0.5 ? "reset" : "unavailable";
+			agent.failNextAttach(machineId, after, kind);
+			effect.attachArmed += 1;
+			note(`attach fails after ${after} B (${kind})`);
+		};
+		const drop = () => {
+			const n = proxy.drop();
+			effect.drops += 1;
+			effect.droppedConnections += n;
+			note(`dropped ${n} connections`);
+		};
+		// Rolling: the new instance takes traffic before the old one stops.
+		const rolling = async () => {
+			const old = current;
+			current = await startInstance();
+			proxy.target(current.ports.public);
+			stop(old);
+			effect.rolling += 1;
+			note(`rolling restart -> :${current.ports.public}`);
+		};
+		// A gap: the only instance stops; until the new one is up, new
+		// connections get 503 server_shutting_down or are refused.
+		const gap = async () => {
+			const old = current;
+			stop(old);
+			await sleep(50 + Math.floor(rng() * 150));
+			current = await startInstance();
+			proxy.target(current.ports.public);
+			effect.gap += 1;
+			note(`restart with a gap -> :${current.ports.public}`);
+		};
+		/** The SDK streams from the current instance through the proxy. */
+		const streaming = () =>
+			until(
+				() => current.deps.streams.size > 0 && proxy.size > 0,
+				"an open stream on the current instance",
+			);
 
 		counting = true;
 		proxy.cutNextAnswer();
 		let done = false;
 		const chaos = (async () => {
+			// A fixed prefix makes every fault take effect at least once, each
+			// while the SDK is streaming: an attach failure (bitten on the
+			// reattach the drop causes), a drop, a rolling restart and a
+			// restart with a gap.
+			await streaming();
+			failAttach(2000 + Math.floor(rng() * 8000));
+			await streaming();
+			drop();
+			await until(
+				() => agent.attachFailures(machineId) > 0,
+				"the attach failure to bite",
+			);
+			await streaming();
+			await rolling();
+			await streaming();
+			await gap();
+			note("prefix done");
 			while (!done) {
 				await sleep(100 + Math.floor(rng() * 300));
 				if (done) break;
 				const r = rng();
-				if (r < 0.35) {
-					const after = Math.floor(rng() * 200_000);
-					const kind = rng() < 0.5 ? "reset" : "unavailable";
-					agent.failNextAttach(machineId, after, kind);
-					counts.attach += 1;
-					note(`attach fails after ${after} B (${kind})`);
-				} else if (r < 0.7) {
-					const n = proxy.drop();
-					counts.drop += 1;
-					note(`dropped ${n} connections`);
-				} else if (r < 0.92) {
-					// Rolling: the new instance takes traffic before the old one stops.
-					const old = current;
-					current = await startInstance();
-					proxy.target(current.ports.public);
-					stop(old);
-					counts.rolling += 1;
-					note(`rolling restart -> :${current.ports.public}`);
-				} else {
-					// A gap: the only instance stops; until the new one is up, new
-					// connections get 503 server_shutting_down or are refused.
-					const old = current;
-					stop(old);
-					await sleep(50 + Math.floor(rng() * 150));
-					current = await startInstance();
-					proxy.target(current.ports.public);
-					counts.gap += 1;
-					note(`restart with a gap -> :${current.ports.public}`);
-				}
+				if (r < 0.35) failAttach(Math.floor(rng() * 200_000));
+				else if (r < 0.7) drop();
+				else if (r < 0.92) await rolling();
+				else await gap();
 			}
 		})();
+		// A failure of the prefix ends the test at once, not after the run.
+		const chaosFailed = chaos.then(
+			() => new Promise<never>(() => {}),
+			(e: unknown) => {
+				throw e;
+			},
+		);
 
 		const out = { stdout: "", stderr: "" };
 		const next = { stdout: 0, stderr: 0 };
@@ -217,25 +317,31 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 		let command: Command | undefined;
 		try {
 			try {
-				for await (const ev of sb.run(SCRIPT, {
-					onStart: (c) => {
-						command = c;
-					},
-				})) {
-					if (ev.type === "stdout" || ev.type === "stderr") {
-						expect(ev.offset, `${ev.type} offset`).toBe(next[ev.type]);
-						next[ev.type] = ev.nextOffset;
-						out[ev.type] += ev.data;
-					} else if (ev.type === "truncated") {
-						truncated += 1;
-					} else if (ev.type === "exit") {
-						exit = ev;
-					}
-				}
+				await Promise.race([
+					chaosFailed,
+					(async () => {
+						for await (const ev of sb.run(SCRIPT, {
+							onStart: (c) => {
+								command = c;
+							},
+						})) {
+							if (ev.type === "stdout" || ev.type === "stderr") {
+								expect(ev.offset, `${ev.type} offset`).toBe(next[ev.type]);
+								next[ev.type] = ev.nextOffset;
+								out[ev.type] += ev.data;
+							} else if (ev.type === "truncated") {
+								truncated += 1;
+							} else if (ev.type === "exit") {
+								exit = ev;
+							}
+						}
+					})(),
+				]);
 			} finally {
 				done = true;
-				await chaos;
+				await chaos.catch(() => {});
 			}
+			await chaos;
 			const elapsed = Date.now() - t0;
 			const closeMs = await Promise.all(closes);
 
@@ -253,15 +359,31 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 				stderrOffset: bytes,
 			});
 			expect(command?.id).toMatch(/^cmd_/);
+			// Started once: one launch of this id, no launch under any other id,
+			// one command row in the sandbox.
 			expect(agent.startCount(coreCommandId(command?.id as string))).toBe(1);
+			expect(agent.totalStarts(machineId)).toBe(1);
+			const rows = await db.pool.query<{ n: number }>(
+				"SELECT count(*)::int AS n FROM runtime.commands WHERE sandbox_id = $1",
+				[row.id],
+			);
+			expect(rows.rows[0]?.n).toBe(1);
 			// Every stopped instance went through its graceful stop in time and
 			// left no stream open.
 			for (const ms of closeMs)
 				expect(ms).toBeLessThanOrEqual(SHUTDOWN_GRACE_MS);
 			for (const api of stopped) expect(api.deps.streams.size).toBe(0);
-			// The chaos actually happened while the command ran.
-			expect(counts.rolling + counts.gap).toBeGreaterThan(0);
-			expect(counts.attach + counts.drop).toBeGreaterThan(0);
+			// Every fault took effect: the attach failure was thrown, the proxy
+			// cut live connections, the restarts stopped instances with a stream
+			// open and the SDK got their reconnect frames, and the lost first
+			// answer made the SDK repeat its POST.
+			expect(agent.attachFailures(machineId)).toBeGreaterThan(0);
+			expect(effect.droppedConnections).toBeGreaterThan(0);
+			expect(effect.rolling).toBeGreaterThan(0);
+			expect(effect.gap).toBeGreaterThan(0);
+			expect(effect.openAtStop[0]).toBeGreaterThan(0);
+			expect(effect.openAtStop[1]).toBeGreaterThan(0);
+			expect(effect.shutdownReconnects).toBeGreaterThan(0);
 			expect(sent.posts).toBeGreaterThanOrEqual(2);
 			expect(sent.streams).toBeGreaterThanOrEqual(1);
 			const status = await command?.refresh();
@@ -272,7 +394,10 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 					JSON.stringify({
 						seed,
 						elapsedMs: elapsed,
-						counts,
+						effect: {
+							...effect,
+							attachFailures: agent.attachFailures(machineId),
+						},
 						sent,
 						maxCloseMs: Math.max(0, ...closeMs),
 					}),
