@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import Pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { encodeUuid } from "../src/ids.ts";
 import { PRESETS } from "../src/scopes.ts";
 import { seedIdentity } from "../src/seed.ts";
 import { pgContractSubject, runIdentityStoreContract } from "../src/testing.ts";
@@ -160,6 +161,168 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 			await s.resolveSession({ ...h, groups: ["x"] }); // not an operator group
 			await flush();
 			expect(count(`users:${r.user.id}`)).toBe(before);
+		});
+	});
+
+	// S4 §9.5: the gateway closes open SSH sessions on these payloads and
+	// compares their ids with the public ids of ssh/authorize answers.
+	describe("NOTIFY sbx_ssh_revoke", () => {
+		let listener: Pg.Client;
+		const got: string[] = [];
+		const waiters: { payload: string; resolve: () => void }[] = [];
+
+		beforeAll(async () => {
+			listener = new Pg.Client({ connectionString: t.url });
+			await listener.connect();
+			listener.on("notification", (n) => {
+				if (n.channel !== "sbx_ssh_revoke" || n.payload === undefined) return;
+				got.push(n.payload);
+				for (const w of waiters.filter((w) => w.payload === n.payload)) {
+					w.resolve();
+				}
+			});
+			await listener.query("LISTEN sbx_ssh_revoke");
+		});
+		afterAll(async () => {
+			await listener?.end();
+		});
+
+		function received(payload: string): Promise<void> {
+			if (got.includes(payload)) return Promise.resolve();
+			return new Promise((resolve, reject) => {
+				const timer = setTimeout(
+					() => reject(new Error(`no NOTIFY ${payload}`)),
+					5000,
+				);
+				waiters.push({
+					payload,
+					resolve: () => {
+						clearTimeout(timer);
+						resolve();
+					},
+				});
+			});
+		}
+
+		async function flush(): Promise<void> {
+			const marker = `marker:${randomUUID()}`;
+			await t.pool.query("SELECT pg_notify('sbx_ssh_revoke', $1)", [marker]);
+			await received(marker);
+		}
+
+		const count = (payload: string) => got.filter((p) => p === payload).length;
+		const usr = (id: string) => encodeUuid("user", id);
+		const team = (id: string) => encodeUuid("team", id);
+
+		async function member() {
+			const s = pgContractSubject(t.pool);
+			const userId = await s.seedUser({
+				email: `r-${randomBytes(4).toString("hex")}@example.com`,
+			});
+			const teamId = await s.seedTeam(`t-${randomUUID()}`);
+			await s.addMember(userId, teamId, "member");
+			return { s, userId, teamId };
+		}
+
+		async function key(
+			s: ReturnType<typeof pgContractSubject>,
+			teamId: string,
+		) {
+			return s.createApiKey({
+				teamId,
+				name: "ci",
+				scopes: ["ssh:connect"],
+				expiresAt: new Date(Date.now() + 86_400_000),
+				createdByUserId: null,
+				createdVia: "api",
+				secretHash: randomBytes(32).toString("hex"),
+				prefix: "abcdefgh",
+				last4: "1234",
+			});
+		}
+
+		it("the SQL encoder gives the ids of encodeUuid", async () => {
+			const ids = [
+				"00000000-0000-0000-0000-000000000000",
+				"ffffffff-ffff-ffff-ffff-ffffffffffff",
+				"0192f0a1-7b3c-7def-8123-456789abcdef",
+				...Array.from({ length: 50 }, () => randomUUID()),
+			];
+			const r = await t.pool.query<{ id: string; pub: string }>(
+				"SELECT id::text AS id, identity.public_id('usr', id) AS pub FROM unnest($1::uuid[]) AS id",
+				[ids],
+			);
+			for (const row of r.rows) {
+				expect(row.pub, row.id).toBe(encodeUuid("user", row.id));
+			}
+		});
+
+		it("deactivating a user sends user:<usr_>; reactivating and repeating do not", async () => {
+			const { s, userId } = await member();
+			await s.setActive(userId, false);
+			await received(`user:${usr(userId)}`);
+			await s.setActive(userId, false);
+			await s.setActive(userId, true);
+			await flush();
+			expect(count(`user:${usr(userId)}`)).toBe(1);
+		});
+
+		it("removing a member sends member:<team_>:<usr_>", async () => {
+			const { s, userId, teamId } = await member();
+			await s.removeMember(userId, teamId);
+			await received(`member:${team(teamId)}:${usr(userId)}`);
+		});
+
+		it("revoking a key sends key:<key_> once", async () => {
+			const { s, teamId } = await member();
+			const k = await key(s, teamId);
+			await s.revokeApiKey(k.id, {});
+			await received(`key:${encodeUuid("apiKey", k.id)}`);
+			await s.revokeApiKey(k.id, {});
+			await flush();
+			expect(count(`key:${encodeUuid("apiKey", k.id)}`)).toBe(1);
+		});
+
+		it("deleting a team sends team:<team_> (and its members and live keys)", async () => {
+			const { s, userId, teamId } = await member();
+			const live = await key(s, teamId);
+			const revoked = await key(s, teamId);
+			await s.revokeApiKey(revoked.id, {});
+			await flush();
+			await t.pool.query("DELETE FROM identity.teams WHERE id = $1", [teamId]);
+			await received(`team:${team(teamId)}`);
+			await received(`member:${team(teamId)}:${usr(userId)}`);
+			await received(`key:${encodeUuid("apiKey", live.id)}`);
+			await flush();
+			expect(count(`key:${encodeUuid("apiKey", revoked.id)}`)).toBe(1);
+		});
+
+		it("is part of the transaction: a rolled-back deactivation sends nothing", async () => {
+			const { userId } = await member();
+			const c = await t.pool.connect();
+			try {
+				await c.query("BEGIN");
+				await c.query(
+					"UPDATE identity.users SET active = false WHERE id = $1",
+					[userId],
+				);
+				await c.query("ROLLBACK");
+			} finally {
+				c.release();
+			}
+			await flush();
+			expect(count(`user:${usr(userId)}`)).toBe(0);
+		});
+
+		it("a deactivation by the identity file notifies too", async () => {
+			const id = randomUUID();
+			const email = `f-${randomBytes(4).toString("hex")}@example.com`;
+			await seedIdentity(t.pool, `users: [{id: ${id}, email: ${email}}]`);
+			await seedIdentity(
+				t.pool,
+				`users: [{id: ${id}, email: ${email}, active: false}]`,
+			);
+			await received(`user:${usr(id)}`);
 		});
 	});
 

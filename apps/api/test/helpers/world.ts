@@ -103,6 +103,7 @@ export async function apiWorld(
 		config: env.config,
 		environments,
 		agent,
+		jobs: env.jobs,
 		...over,
 	});
 

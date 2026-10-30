@@ -181,6 +181,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@hono/node-server':
         specifier: 2.1.5
         version: 2.1.5(hono@4.13.14)
@@ -202,6 +205,9 @@ importers:
       '@sbx/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sbx/proto':
+        specifier: workspace:*
+        version: link:../../packages/proto
       '@scalar/hono-api-reference':
         specifier: 0.12.16
         version: 0.12.16(hono@4.13.14)

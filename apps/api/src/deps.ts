@@ -4,7 +4,7 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { EnvironmentStore, IdentityStore, SshCa } from "@sbx/auth";
 import type { ConfigReader } from "@sbx/config";
-import type { SandboxService } from "@sbx/core";
+import type { JobSender, SandboxService } from "@sbx/core";
 import type pg from "pg";
 import type { Logger } from "pino";
 import type { AgentApi } from "./agent/types.ts";
@@ -45,6 +45,8 @@ export interface ApiDeps {
 	rateLimits: RateLimits;
 	/** Sandboxes, operations, env (S6 SandboxService). */
 	svc: SandboxService;
+	/** pg-boss jobs of core calls outside the service (agent events intake). */
+	jobs: JobSender;
 	/** Templates, sizes, quotas, platform defaults. */
 	config: ConfigReader;
 	/** Environments of the teams (PgEnvironmentStore until S8). */

@@ -38,6 +38,8 @@ export interface HarnessResponse {
 	/** Parsed JSON for JSON responses, the text otherwise. */
 	body: unknown;
 	text: string;
+	/** The raw body (binary answers such as application/proto). */
+	bytes: Uint8Array;
 }
 
 export interface Harness {
@@ -103,7 +105,11 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 			headers,
 			...(body === undefined ? {} : { body }),
 		});
-		const text = method.toUpperCase() === "HEAD" ? "" : await res.text();
+		const bytes =
+			method.toUpperCase() === "HEAD"
+				? new Uint8Array()
+				: new Uint8Array(await res.arrayBuffer());
+		const text = new TextDecoder().decode(bytes);
 		const contentType = res.headers.get("content-type") ?? "";
 		const isJson = /^application\/(.+\+)?json\b/i.test(contentType);
 		const isNdjson = /^application\/x-ndjson\b/i.test(contentType);
@@ -133,7 +139,12 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 		if (rid === null || !REQUEST_ID_RE.test(rid)) {
 			throw new Error(`${where}: no valid Request-Id header (${rid})`);
 		}
-		if (res.status >= 400 && !isJson) {
+		// The browser endpoint of port SSO answers errors with an HTML page.
+		const htmlPage =
+			listener === "proxied" &&
+			path.startsWith("/sbx-auth/") &&
+			/^text\/html\b/i.test(contentType);
+		if (res.status >= 400 && !isJson && !htmlPage) {
 			throw new Error(`${where}: error without a JSON envelope`);
 		}
 		if (isJson && text !== "") {
@@ -162,7 +173,13 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 				if (r.operationId !== null) validatedOperations.add(r.operationId);
 			}
 		}
-		return { status: res.status, headers: res.headers, body: parsed, text };
+		return {
+			status: res.status,
+			headers: res.headers,
+			body: parsed,
+			text,
+			bytes,
+		};
 	}
 
 	return { deps, app, bearer: o.bearer, request };

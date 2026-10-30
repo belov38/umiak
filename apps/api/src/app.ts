@@ -32,6 +32,7 @@ import { registerCommandRoutes } from "./routes/commands.ts";
 import { registerEnvRoutes } from "./routes/env.ts";
 import { registerEnvironmentRoutes } from "./routes/environments.ts";
 import { registerFileRoutes } from "./routes/files.ts";
+import { registerInternalRoutes } from "./routes/internal/index.ts";
 import { registerLimitsRoutes } from "./routes/limits.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerMetaRoutes } from "./routes/meta.ts";
@@ -39,6 +40,7 @@ import { registerOperationRoutes } from "./routes/operations.ts";
 import { registerPortRoutes } from "./routes/ports.ts";
 import { registerPtyRoutes } from "./routes/ptys.ts";
 import { registerSandboxRoutes } from "./routes/sandboxes.ts";
+import { registerSbxAuthRoutes } from "./routes/sbx-auth.ts";
 import { registerSnapshotRoutes } from "./routes/snapshots.ts";
 import { registerSshRoutes } from "./routes/ssh.ts";
 import { registerSshKeyRoutes } from "./routes/ssh-keys.ts";
@@ -107,12 +109,14 @@ export function createProxiedApp(deps: ApiDeps): ApiApp {
 	const app = listenerApp(deps);
 	app.use("/v1/*", proxiedAuth(deps), rateLimit(deps));
 	mountV1(app, deps);
+	registerSbxAuthRoutes(app, deps);
 	return app;
 }
 
 export function createInternalApp(deps: ApiDeps): ApiApp {
 	const app = listenerApp(deps, { topLevelCode: true });
 	app.use("*", serviceAuth(deps));
+	registerInternalRoutes(app, deps);
 	return app;
 }
 

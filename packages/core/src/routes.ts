@@ -38,15 +38,16 @@ export interface SshTarget {
 }
 
 /**
- * The hosted port of `<slug>-<port>`, or null: label outside the grammar, no
- * such sandbox, port not hosted, sandbox deleted.
+ * The hosted port of `<slug>-<port>`, or null: label outside the grammar, a
+ * desktop label, no such sandbox, port not hosted, sandbox deleted.
  */
 export async function lookupRoute(
 	q: Queryable,
 	label: string,
 ): Promise<RouteTarget | null> {
 	const parsed = typeof label === "string" ? parseLabel(label) : null;
-	if (parsed === null) return null;
+	// Desktop labels have no hosted port (S10 adds their routes).
+	if (parsed === null || parsed.kind !== "port") return null;
 	const r = await q.query<{
 		sandbox_id: string;
 		slug: string;

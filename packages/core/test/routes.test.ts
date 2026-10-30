@@ -70,6 +70,7 @@ describe.skipIf(skipPg())("routes for the gateway (S6 §14.2, S4 §4.2)", () => 
 			`${s.slug.toUpperCase()}-3000`,
 			`${s.slug}-3001`,
 			"unknown-box-3000",
+			`${s.slug}-desktop`,
 		]) {
 			expect(await lookupRoute(t.pool, label)).toBeNull();
 		}

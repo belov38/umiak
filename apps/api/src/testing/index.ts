@@ -2,7 +2,7 @@
 // SDK and CLI tests that run the api in process).
 import { type EnvironmentStore, PgIdentityStore } from "@sbx/auth";
 import { StaticConfigReader } from "@sbx/config";
-import type { SandboxService } from "@sbx/core";
+import { RecordingJobSender, type SandboxService } from "@sbx/core";
 import type { Logger } from "pino";
 import { IdentityListener } from "../auth/identity-listener.ts";
 import { ServiceTokens } from "../auth/internal.ts";
@@ -109,7 +109,8 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  * - identityEvents: without a notifier (never emits, ready);
  * - oidc: a verifier when the settings have SBX_OIDC_ISSUER;
  * - serviceTokens: none accepted;
- * - svc: `unconfiguredService()`, config: an empty StaticConfigReader,
+ * - svc: `unconfiguredService()`, jobs: a RecordingJobSender,
+ *   config: an empty StaticConfigReader,
  *   environments: `emptyEnvironmentStore()`, agent: a FakeAgent;
  * - streams: a StreamRegistry over the final identity and identityEvents;
  *   commandTimings: the defaults (60 s, 15 s, 60 min); ptyTimings: the
@@ -148,6 +149,7 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 		serviceTokens: new ServiceTokens({}),
 		rateLimits: new RateLimits(settings.rate),
 		svc: unconfiguredService(),
+		jobs: new RecordingJobSender(),
 		config: StaticConfigReader.fromObject({}),
 		environments: emptyEnvironmentStore(),
 		agent: new FakeAgent(),
