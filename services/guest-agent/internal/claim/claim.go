@@ -77,7 +77,9 @@ type Options struct {
 	LookupUser func(name string) (*process.User, error)
 	// SecretEnvInMemory keeps secret_env off the disk: no secrets/env, no
 	// env in the secrets state record. After an agent restart the secrets
-	// phase is then pending until UpdateSecrets. Always true on Windows.
+	// phase is then pending until UpdateSecrets. It also keeps the secret
+	// file contents in memory, so WipeSecretFiles can be undone by
+	// RestoreSecretFiles. Always true on Windows.
 	SecretEnvInMemory bool
 	// PendingSecretsWait is how long WaitSecrets waits for UpdateSecrets
 	// (config.PendingSecretsWait). 0 does not wait.
@@ -108,7 +110,8 @@ type Manager struct {
 	req       *agentv1.ClaimRequest // rec.Request decoded: secret values stripped
 	secretEnv map[string]string     // applied secret env; nil if not in the tmpfs
 	// secretFiles is the applied secret file set (normalized, with content)
-	// for RestoreSecretFiles; nil when secretEnv is nil.
+	// for RestoreSecretFiles; nil when secretEnv is nil or without
+	// SecretEnvInMemory (see keepFiles).
 	secretFiles []*agentv1.SecretFile
 
 	// filesWiped is set by WipeSecretFiles and cleared by
@@ -217,7 +220,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 	m.mu.Lock()
-	m.rec, m.req, m.secretEnv, m.secretFiles = rec, req, secretEnv, secretFiles
+	m.rec, m.req, m.secretEnv, m.secretFiles = rec, req, secretEnv, m.keepFiles(secretFiles)
 	m.mu.Unlock()
 	m.ready.Set(readiness.PhaseClaim, agentv1.PhaseState_PHASE_STATE_READY, "")
 	if secretsReady {
@@ -345,7 +348,7 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 		return nil, err
 	}
 	m.mu.Lock()
-	m.rec, m.req, m.secretEnv, m.secretFiles = rec, stripped, maps.Clone(req.GetSecretEnv()), files
+	m.rec, m.req, m.secretEnv, m.secretFiles = rec, stripped, maps.Clone(req.GetSecretEnv()), m.keepFiles(files)
 	m.mu.Unlock()
 	m.ready.Set(readiness.PhaseClaim, agentv1.PhaseState_PHASE_STATE_READY, "")
 	m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_READY, "")
@@ -617,7 +620,7 @@ func (m *Manager) applyLocked(ctx context.Context, u update) error {
 	m.mu.Lock()
 	m.rec, m.req = &rec, next
 	if u.secrets != nil {
-		m.secretEnv, m.secretFiles = maps.Clone(u.secrets.env), u.secrets.files
+		m.secretEnv, m.secretFiles = maps.Clone(u.secrets.env), m.keepFiles(u.secrets.files)
 	}
 	m.mu.Unlock()
 	if u.secrets != nil {
@@ -686,7 +689,7 @@ func (m *Manager) resyncSecrets(want string) {
 		}
 	}
 	m.mu.Lock()
-	m.secretEnv, m.secretFiles = env, files
+	m.secretEnv, m.secretFiles = env, m.keepFiles(files)
 	m.mu.Unlock()
 	if ok {
 		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_READY, "")
@@ -832,9 +835,24 @@ func storeError(err error) error {
 	}
 }
 
+// keepFiles returns the secret files to keep in memory: all of them where
+// they can be wiped and restored (SecretEnvInMemory), none on Linux, where
+// the tmpfs holds them.
+func (m *Manager) keepFiles(files []*agentv1.SecretFile) []*agentv1.SecretFile {
+	if !m.opts.SecretEnvInMemory {
+		return nil
+	}
+	return files
+}
+
 // internal wraps a local failure (resource_exhausted/no_space on a full
-// disk, see errs.Wrap); err carries paths, never values.
+// disk, see errs.Wrap); a secret file held open by a process (Windows) is
+// failed_precondition/file_in_use, retryable. err carries paths, never
+// values.
 func internal(what string, err error) error {
+	if errors.Is(err, ErrSecretInUse) {
+		return errs.NewRetryable(connect.CodeFailedPrecondition, errs.FileInUse, what+": "+err.Error())
+	}
 	return errs.Wrap(what, err)
 }
 

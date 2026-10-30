@@ -16,3 +16,6 @@ func ownerUID(t *testing.T, path string) uint32 {
 	}
 	return fi.Sys().(*syscall.Stat_t).Uid
 }
+
+// testLinkPath is the link_path of fullRequest.
+const testLinkPath = "/home/user/.config/key.pem"

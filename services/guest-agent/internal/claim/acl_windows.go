@@ -13,8 +13,8 @@ const (
 	// mountSDDL keeps C:\ProgramData\sbx and what inherits from it (the
 	// secrets state record) to SYSTEM and Administrators.
 	mountSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-	// secretDirSDDL is SYSTEM full control, inherited by new entries so a
-	// file being written is SYSTEM-only until secureSecretFile runs.
+	// secretDirSDDL is SYSTEM full control, inherited by new entries; secret
+	// files are created with their own protected DACL.
 	secretDirSDDL = "D:P(A;OICI;FA;;;SY)"
 	// secretFileSDDL is SYSTEM full control without inheritance.
 	secretFileSDDL = "D:P(A;;FA;;;SY)"
@@ -59,25 +59,6 @@ func setDACL(path, sddl string) error {
 		return fmt.Errorf("claim: set ACL of %s: %w", path, err)
 	}
 	return nil
-}
-
-// secureSecretFile gives a written secret file its DACL (secretFileACL) and
-// the attributes of the store: FILE_ATTRIBUTE_TEMPORARY (the cache manager
-// avoids writing it out) and never read-only, so a wipe can open it.
-func secureSecretFile(path string, mode fs.FileMode, user *windows.SID) error {
-	p, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return err
-	}
-	attrs, err := windows.GetFileAttributes(p)
-	if err != nil {
-		return fmt.Errorf("claim: attributes of %s: %w", path, err)
-	}
-	attrs = attrs&^(windows.FILE_ATTRIBUTE_READONLY|windows.FILE_ATTRIBUTE_NORMAL) | windows.FILE_ATTRIBUTE_TEMPORARY
-	if err := windows.SetFileAttributes(p, attrs); err != nil {
-		return fmt.Errorf("claim: set attributes of %s: %w", path, err)
-	}
-	return setDACL(path, secretFileACL(mode, user))
 }
 
 // lookupAccountSID resolves a local account name.

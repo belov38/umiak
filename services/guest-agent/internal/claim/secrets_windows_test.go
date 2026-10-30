@@ -3,6 +3,7 @@ package claim
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"connectrpc.com/connect"
 	"golang.org/x/sys/windows"
 )
 
@@ -52,6 +54,20 @@ func TestWipeFileZeroesAndDeletes(t *testing.T) {
 	if len(got) != len(content) || !bytes.Equal(got, make([]byte, len(content))) {
 		t.Errorf("content after wipe: %d bytes, zeroed=%v", len(got), bytes.Equal(got, make([]byte, len(got))))
 	}
+	// While the reader keeps the name, the file is delete-pending: a second
+	// wipe counts it as wiped, a new secret by that name is in use.
+	if !isDeletePending(path) {
+		t.Error("wiped file held open is not delete-pending")
+	}
+	if err := wipeFile(path); err != nil {
+		t.Errorf("wipeFile of a delete-pending file = %v, want nil", err)
+	}
+	if err := writeSecret(path, []byte("new"), 0o440, nil); !errors.Is(err, ErrSecretInUse) {
+		t.Errorf("writeSecret over a delete-pending file = %v, want ErrSecretInUse", err)
+	}
+	if err := internal("write secret", fmt.Errorf("x: %w", ErrSecretInUse)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("in-use write maps to %v, want failed_precondition", err)
+	}
 	_ = f.Close()
 	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("file present after wipe (%v)", err)
@@ -89,6 +105,57 @@ func TestWipeOpenFileIsInUse(t *testing.T) {
 	}
 	if err := wipeFile(path); err != nil {
 		t.Fatalf("wipeFile after close: %v", err)
+	}
+}
+
+// isSystem reports whether the test runs as LocalSystem.
+func isSystem(t *testing.T) bool {
+	t.Helper()
+	tu, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tu.User.Sid.IsWellKnown(windows.WinLocalSystemSid)
+}
+
+func TestWriteSecretReplacesInPlace(t *testing.T) {
+	if !isSystem(t) {
+		t.Skip("replacing a SYSTEM-only secret file needs SYSTEM")
+	}
+	path := filepath.Join(t.TempDir(), "secret")
+	old := bytes.Repeat([]byte("old-secret"), 1000)
+	if err := writeSecret(path, old, 0o440, nil); err != nil {
+		t.Fatal(err)
+	}
+	// A reader sharing everything keeps the old file: it sees zeros after
+	// the replace, the name has the new content.
+	f := openShared(t, path, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE)
+	if err := writeSecret(path, []byte("new"), 0o440, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, make([]byte, len(old))) {
+		t.Error("old secret content not zeroed by the replace")
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "new" {
+		t.Errorf("content = %q (%v), want new", b, err)
+	}
+	if _, err := os.Lstat(path + tmpSuffix); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("temporary file left (%v)", err)
+	}
+
+	// A reader without write sharing blocks the replace and keeps the file.
+	_ = f.Close()
+	g := openShared(t, path, windows.FILE_SHARE_READ)
+	if err := writeSecret(path, []byte("newer"), 0o440, nil); !errors.Is(err, ErrSecretInUse) {
+		t.Errorf("writeSecret over a held file = %v, want ErrSecretInUse", err)
+	}
+	_ = g.Close()
+	if b, err := os.ReadFile(path); err != nil || string(b) != "new" {
+		t.Errorf("content after a refused replace = %q (%v)", b, err)
 	}
 }
 
@@ -140,12 +207,10 @@ func TestSecretFileACL(t *testing.T) {
 		{0o602, true},
 	} {
 		path := filepath.Join(t.TempDir(), "secret")
-		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := secureSecretFile(path, fs.FileMode(tc.mode), users); err != nil {
+		if err := writeSecret(path, []byte("x"), fs.FileMode(tc.mode), users); err != nil {
 			t.Fatalf("%o: %v", tc.mode, err)
 		}
+		wantProtected(t, path)
 		got := aces(t, path)
 		if len(got) != 2 {
 			t.Errorf("%o: ACEs = %v, want SYSTEM and the user only", tc.mode, got)
@@ -168,14 +233,80 @@ func TestSecretFileACL(t *testing.T) {
 
 	// Without a known user the file is SYSTEM only.
 	path := filepath.Join(t.TempDir(), "secret")
-	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := secureSecretFile(path, 0o440, nil); err != nil {
+	if err := writeSecret(path, []byte("x"), 0o440, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := aces(t, path); len(got) != 1 || got[system.String()] != fileAllAccess {
 		t.Errorf("ACEs without a user = %v, want SYSTEM only", got)
+	}
+}
+
+func TestSecretDirACL(t *testing.T) {
+	users, err := windows.CreateWellKnownSid(windows.WinBuiltinUsersSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mount := filepath.Join(t.TempDir(), "sbx")
+	if err := mountSecrets(mount); err != nil {
+		t.Fatal(err)
+	}
+	wantProtected(t, mount)
+	if got := aces(t, mount); len(got) != 2 || got[system.String()] != fileAllAccess || got[admins.String()] != fileAllAccess {
+		t.Errorf("mount ACEs = %v, want SYSTEM and Administrators full", got)
+	}
+
+	dir := filepath.Join(mount, "secrets")
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := setDACL(dir, secretDirACL(users)); err != nil {
+		t.Fatal(err)
+	}
+	wantProtected(t, dir)
+	got := aces(t, dir)
+	if len(got) != 2 || got[system.String()] != fileAllAccess {
+		t.Errorf("secrets dir ACEs = %v, want SYSTEM full and the user", got)
+	}
+	if um := got[users.String()]; um&windows.FILE_LIST_DIRECTORY == 0 || um&windows.FILE_WRITE_DATA != 0 {
+		t.Errorf("user mask on the secrets dir = %#x, want list without write", um)
+	}
+}
+
+// wantProtected asserts that the DACL of path is protected and has no
+// inherited ACE.
+func wantProtected(t *testing.T, path string) {
+	t.Helper()
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl, _, err := sd.Control()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctl&windows.SE_DACL_PROTECTED == 0 {
+		t.Errorf("%s: DACL not protected", path)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range uint32(dacl.AceCount) {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		if ace.Header.AceFlags&windows.INHERITED_ACE != 0 {
+			t.Errorf("%s: ACE %d is inherited", path, i)
+		}
 	}
 }
 

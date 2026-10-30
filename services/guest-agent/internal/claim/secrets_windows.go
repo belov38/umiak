@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -61,15 +62,11 @@ func (m *Manager) secureDir(path string, _ fs.FileMode, group bool) error {
 	return setDACL(path, sddl)
 }
 
-// writeGroupFile writes a secret file and gives it the DACL for mode and the
-// default user (secureSecretFile). The file is written writable: access is
-// decided by the DACL, a read-only attribute would only block the wipe.
+// writeGroupFile writes a secret file with the DACL for mode and the
+// default user (writeSecret).
 func (m *Manager) writeGroupFile(path string, data []byte, mode fs.FileMode) error {
-	if err := m.writeFile(path, data, 0o600); err != nil {
+	if err := writeSecret(path, data, mode, m.userSID()); err != nil {
 		return internal("write secret", err)
-	}
-	if err := secureSecretFile(path, mode, m.userSID()); err != nil {
-		return internal("secure secret", err)
 	}
 	return nil
 }
@@ -117,49 +114,164 @@ func removeSecretFile(path string) error {
 	}
 }
 
-// wipeFile overwrites path with zeros to its size, flushes it and deletes
-// it, all through one handle opened with write and delete access that
-// shares read, write and delete. A process holding the file open without
-// sharing write or delete access makes the open fail before anything is
-// changed: the error then matches ErrSecretInUse.
-func wipeFile(path string) error {
+// tmpSuffix names the file a secret is written to before the rename; "~"
+// is not allowed in secret names, so it never collides with one.
+const tmpSuffix = "~sbx-tmp"
+
+// writeSecret writes data as the secret file path. The content goes to a
+// new file created with FILE_ATTRIBUTE_TEMPORARY and its final DACL
+// (secretFileACL), and is never flushed: the cache manager keeps a
+// temporary file in memory as long as it can. An existing file is
+// overwritten with zeros and flushed in place, then replaced by a rename. A
+// file held open without sharing write and delete access, or still being
+// deleted, fails with ErrSecretInUse and is left as it was.
+func writeSecret(path string, data []byte, mode fs.FileMode, user *windows.SID) error {
+	tmp := path + tmpSuffix
+	if err := removeSecretFile(tmp); err != nil {
+		return err
+	}
+	if err := createSecret(tmp, data, mode, user); err != nil {
+		return err
+	}
+	if err := replaceSecret(tmp, path); err != nil {
+		if werr := wipeFile(tmp); werr != nil {
+			return errors.Join(err, werr)
+		}
+		return err
+	}
+	return nil
+}
+
+// createSecret creates path (it must not exist) with the secret file DACL
+// and FILE_ATTRIBUTE_TEMPORARY and writes data, without a flush.
+func createSecret(path string, data []byte, mode fs.FileMode, user *windows.SID) error {
+	sd, err := windows.SecurityDescriptorFromString(secretFileACL(mode, user))
+	if err != nil {
+		return fmt.Errorf("claim: secret file ACL: %w", err)
+	}
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return err
 	}
+	sa := windows.SecurityAttributes{SecurityDescriptor: sd}
+	sa.Length = uint32(unsafe.Sizeof(sa))
+	h, err := windows.CreateFile(p, windows.GENERIC_WRITE|windows.DELETE, 0, &sa,
+		windows.CREATE_NEW, windows.FILE_ATTRIBUTE_TEMPORARY, 0)
+	if err != nil {
+		return secretFileError("create", path, err)
+	}
+	f := os.NewFile(uintptr(h), path)
+	if _, err := f.Write(data); err != nil {
+		// Nothing was flushed; deleting drops the cached data.
+		_ = deleteOnClose(h)
+		_ = f.Close()
+		return fmt.Errorf("claim: write %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("claim: write %s: %w", path, err)
+	}
+	return nil
+}
+
+// replaceSecret moves tmp to path. An existing regular file at path is
+// overwritten with zeros first; anything else there is removed.
+func replaceSecret(tmp, path string) error {
+	fi, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return secretFileError("inspect", path, err)
+	case fi.Mode().IsRegular():
+		if err := zeroInPlace(path); err != nil {
+			return err
+		}
+	default:
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return secretFileError("replace", path, err)
+	}
+	return nil
+}
+
+// wipeFile overwrites path with zeros to its size, flushes it and deletes
+// it, all through one handle opened with write and delete access that
+// shares read, write and delete. A process holding the file open without
+// sharing write or delete access makes the open fail before anything is
+// changed: the error then matches ErrSecretInUse. A file already being
+// deleted (an earlier wipe, its name kept by a handle that shares delete)
+// counts as wiped.
+func wipeFile(path string) error {
+	f, h, err := openExisting(path)
+	if err != nil {
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) && isDeletePending(path) {
+			return nil
+		}
+		return secretFileError("wipe", path, err)
+	}
+	werr := zeroFile(f)
+	if werr == nil {
+		werr = deleteOnClose(h)
+	}
+	cerr := f.Close()
+	if werr != nil {
+		return secretFileError("wipe", path, werr)
+	}
+	if cerr != nil {
+		return secretFileError("wipe", path, cerr)
+	}
+	return nil
+}
+
+// zeroInPlace overwrites the secret file path with zeros and flushes it,
+// keeping the file; the in-use rules are those of wipeFile.
+func zeroInPlace(path string) error {
+	f, _, err := openExisting(path)
+	if err != nil {
+		return secretFileError("wipe", path, err)
+	}
+	werr := zeroFile(f)
+	cerr := f.Close()
+	if werr != nil {
+		return secretFileError("wipe", path, werr)
+	}
+	if cerr != nil {
+		return secretFileError("wipe", path, cerr)
+	}
+	return nil
+}
+
+// openExisting opens path itself (not a link target) for overwrite and
+// delete, sharing read, write and delete. A read-only attribute, which
+// refuses write access even to SYSTEM, is cleared.
+func openExisting(path string) (*os.File, windows.Handle, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, 0, err
+	}
 	h, err := openForWipe(p)
 	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-		// The read-only attribute refuses write access even to SYSTEM.
 		if a, aerr := windows.GetFileAttributes(p); aerr == nil && a&windows.FILE_ATTRIBUTE_READONLY != 0 &&
 			windows.SetFileAttributes(p, a&^windows.FILE_ATTRIBUTE_READONLY) == nil {
 			h, err = openForWipe(p)
 		}
 	}
 	if err != nil {
-		return wipeError(path, err)
+		return nil, 0, err
 	}
-	f := os.NewFile(uintptr(h), path)
-	werr := zeroAndDelete(f, h)
-	cerr := f.Close()
-	if werr != nil {
-		return wipeError(path, werr)
-	}
-	if cerr != nil {
-		return wipeError(path, cerr)
-	}
-	return nil
+	return os.NewFile(uintptr(h), path), h, nil
 }
 
-// openForWipe opens p itself (not a link target) for overwrite and delete.
 func openForWipe(p *uint16) (windows.Handle, error) {
 	return windows.CreateFile(p, windows.GENERIC_WRITE|windows.DELETE,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 }
 
-// zeroAndDelete overwrites f with zeros, flushes it to disk and marks it
-// for deletion on close.
-func zeroAndDelete(f *os.File, h windows.Handle) error {
+// zeroFile overwrites f with zeros to its size and flushes it to disk.
+func zeroFile(f *os.File) error {
 	fi, err := f.Stat()
 	if err != nil {
 		return err
@@ -172,19 +284,46 @@ func zeroAndDelete(f *os.File, h windows.Handle) error {
 		}
 		off += n
 	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
+	return f.Sync()
+}
+
+// deleteOnClose marks the file of h (opened with DELETE access) for
+// deletion when its last handle closes.
+func deleteOnClose(h windows.Handle) error {
 	del := byte(1) // FILE_DISPOSITION_INFO.DeleteFile
 	return windows.SetFileInformationByHandle(h, windows.FileDispositionInfo, &del, 1)
 }
 
-// wipeError wraps a wipe failure; a sharing or lock violation matches
-// ErrSecretInUse (and the errno, for file_in_use).
-func wipeError(path string, err error) error {
-	if errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION) ||
-		errors.Is(err, windows.ERROR_USER_MAPPED_FILE) {
-		return fmt.Errorf("claim: wipe %s: %w: %w", path, ErrSecretInUse, err)
+// isDeletePending reports whether path is marked for deletion and only
+// kept by open handles: Win32 reports such a file as access denied, the
+// NT open as STATUS_DELETE_PENDING.
+func isDeletePending(path string) bool {
+	name, err := windows.NewNTUnicodeString(`\??\` + path)
+	if err != nil {
+		return false
 	}
-	return fmt.Errorf("claim: wipe %s: %w", path, err)
+	oa := windows.OBJECT_ATTRIBUTES{ObjectName: name, Attributes: windows.OBJ_CASE_INSENSITIVE}
+	oa.Length = uint32(unsafe.Sizeof(oa))
+	var h windows.Handle
+	var iosb windows.IO_STATUS_BLOCK
+	err = windows.NtCreateFile(&h, windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, &oa, &iosb, nil, 0,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		windows.FILE_OPEN, windows.FILE_OPEN_REPARSE_POINT, 0, 0)
+	if err == nil {
+		_ = windows.CloseHandle(h)
+		return false
+	}
+	return errors.Is(err, windows.STATUS_DELETE_PENDING)
+}
+
+// secretFileError wraps a failure of op on a secret file. A sharing or lock
+// violation, or a file still being deleted, matches ErrSecretInUse (and
+// keeps the errno).
+func secretFileError(op, path string, err error) error {
+	if errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION) ||
+		errors.Is(err, windows.ERROR_USER_MAPPED_FILE) ||
+		(errors.Is(err, windows.ERROR_ACCESS_DENIED) && isDeletePending(path)) {
+		return fmt.Errorf("claim: %s %s: %w: %w", op, path, ErrSecretInUse, err)
+	}
+	return fmt.Errorf("claim: %s %s: %w", op, path, err)
 }

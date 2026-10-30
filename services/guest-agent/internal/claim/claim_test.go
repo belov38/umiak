@@ -157,7 +157,7 @@ func fullRequest() *agentv1.ClaimRequest {
 		SecretFiles: []*agentv1.SecretFile{{
 			Name:     "key.pem",
 			Content:  []byte(secretFileValue),
-			LinkPath: "/home/user/.config/key.pem",
+			LinkPath: testLinkPath,
 		}},
 		SshUserCaKeys:  []string{"ssh-ed25519 AAAAcurrent ca-1", "ssh-ed25519 AAAAnext ca-2"},
 		Reason:         agentv1.ClaimReason_CLAIM_REASON_CLAIM,

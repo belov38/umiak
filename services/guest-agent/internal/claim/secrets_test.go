@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
@@ -190,8 +191,15 @@ func TestResyncKeepsMemoryEnv(t *testing.T) {
 	}
 }
 
+// memoryHarness is a harness whose Manager keeps the secrets in memory, as
+// on Windows.
+func memoryHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessWith(t, func(o *Options) { o.SecretEnvInMemory = true })
+}
+
 func TestWipeAndRestoreSecretFiles(t *testing.T) {
-	h := newHarness(t)
+	h := memoryHarness(t)
 	ctx := t.Context()
 	if _, err := h.m.Claim(ctx, twoFiles()); err != nil {
 		t.Fatal(err)
@@ -219,14 +227,35 @@ func TestWipeAndRestoreSecretFiles(t *testing.T) {
 	if got := h.read(filepath.Join(h.l.SecretFilesDir, "token")); got != "tok-"+secretFileValue {
 		t.Errorf("restored token = %q", got)
 	}
-	link, _ := h.l.Rooted("/home/user/.config/key.pem")
+	link, _ := h.l.Rooted(testLinkPath)
 	if got := h.read(link); got != secretFileValue {
 		t.Errorf("link_path after restore = %q", got)
 	}
-	// The restored set still matches the digest after an agent restart.
-	h.newManager()
-	if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready {
-		t.Errorf("secrets after restart = %v, want ready", st)
+}
+
+// TestLinuxKeepsNoFilesInMemory: without SecretEnvInMemory the tmpfs holds
+// the files and nothing can be restored, so the contents are not kept in
+// memory and a wipe does not defer later writes.
+func TestLinuxKeepsNoFilesInMemory(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if _, err := h.m.Claim(ctx, twoFiles()); err != nil {
+		t.Fatal(err)
+	}
+	h.m.mu.RLock()
+	kept := h.m.secretFiles
+	h.m.mu.RUnlock()
+	if kept != nil {
+		t.Errorf("secret files kept in memory: %d", len(kept))
+	}
+	if _, err := h.m.WipeSecretFiles(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretFiles: []*agentv1.SecretFile{{Name: "key.pem", Content: []byte("new")}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.read(filepath.Join(h.l.SecretFilesDir, "key.pem")); got != "new" {
+		t.Errorf("key.pem after an update = %q", got)
 	}
 }
 
@@ -234,7 +263,7 @@ func TestWipeAndRestoreSecretFiles(t *testing.T) {
 // lease with wiped files must not write secret files into the snapshot; the
 // new set is applied in memory and its files come with RestoreSecretFiles.
 func TestUpdateSecretsWhileWipedDefersFiles(t *testing.T) {
-	h := newHarness(t)
+	h := memoryHarness(t)
 	ctx := t.Context()
 	if _, err := h.m.Claim(ctx, twoFiles()); err != nil {
 		t.Fatal(err)
@@ -242,7 +271,7 @@ func TestUpdateSecretsWhileWipedDefersFiles(t *testing.T) {
 	if _, err := h.m.WipeSecretFiles(); err != nil {
 		t.Fatal(err)
 	}
-	files := []*agentv1.SecretFile{{Name: "key.pem", Content: []byte("rotated"), LinkPath: "/home/user/.config/key.pem"}}
+	files := []*agentv1.SecretFile{{Name: "key.pem", Content: []byte("rotated"), LinkPath: testLinkPath}}
 	if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{
 		SecretEnv: map[string]string{"TOKEN": "rotated-env"}, SecretFiles: files,
 	}); err != nil {
@@ -266,7 +295,7 @@ func TestUpdateSecretsWhileWipedDefersFiles(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(h.l.SecretFilesDir, "token")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("token of the old set restored (%v)", err)
 	}
-	link, _ := h.l.Rooted("/home/user/.config/key.pem")
+	link, _ := h.l.Rooted(testLinkPath)
 	if got := h.read(link); got != "rotated" {
 		t.Errorf("link_path after restore = %q", got)
 	}
@@ -438,4 +467,12 @@ func unixLinkPaths() (ok, bad []string) {
 func windowsLinkPaths() (ok, bad []string) {
 	return []string{`C:\Users\user\.config\key.pem`, "C:/Users/user/key", `d:\x`},
 		[]string{"relative", `C:\`, `C:x`, `\x`, `\\server\share\x`, `\\?\C:\x`, `C:\a\..\b`, "/home/user/x"}
+}
+
+func TestInUseWriteIsFileInUse(t *testing.T) {
+	err := internal("write secret", fmt.Errorf("replace x: %w", ErrSecretInUse))
+	wantDetail(t, err, connect.CodeFailedPrecondition, errs.FileInUse)
+	if d, _ := rpcconv.Detail(err); !d.GetRetryable() {
+		t.Error("file_in_use of a secret write is not retryable")
+	}
 }

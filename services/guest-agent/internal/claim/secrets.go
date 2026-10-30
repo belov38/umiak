@@ -287,7 +287,9 @@ func (m *Manager) wipeSecrets() (wiped bool, err error) {
 func (m *Manager) WipeSecretFiles() (wiped bool, err error) {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
-	m.filesWiped = true
+	// Without the contents in memory there is nothing to restore, so
+	// secret writes are not deferred either.
+	m.filesWiped = m.opts.SecretEnvInMemory
 	return wipeDir(m.l.SecretFilesDir, m.removeFile)
 }
 
