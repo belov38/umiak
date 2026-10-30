@@ -477,7 +477,13 @@ export async function rebootWindows(
 	const timeoutMs = o.timeoutMs ?? DEFAULT_REBOOT_TIMEOUT_MS;
 	const pollMs = o.pollMs ?? DEFAULT_POLL_MS;
 	const deadline = Date.now() + timeoutMs;
-	const before = await bootTime(io);
+	// qemu-ga for Windows loses exec statuses now and then (seen right after a step); retry.
+	const before = await retryTransient(
+		() => bootTime(io),
+		deadline,
+		pollMs,
+		() => {},
+	);
 	let reboot: Awaited<ReturnType<GuestIo["exec"]>> | undefined;
 	try {
 		reboot = await io.exec(["shutdown.exe", "/r", "/t", "0"]);

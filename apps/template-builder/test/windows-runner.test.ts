@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, PveClient } from "@sbx/pve";
+import { QgaExecStatusLostError } from "@sbx/pve";
 import { FakePve } from "@sbx/pve/testing";
 import { describe, expect, it } from "vitest";
 import {
@@ -503,6 +504,38 @@ describe("readGuestFiles script (pwsh)", () => {
 });
 
 describe("rebootWindows", () => {
+	it("retries a lost exec status while reading the boot time before the reboot", async () => {
+		let boot = "2026-10-31T10:00:00.0000000+00:00";
+		let first = true;
+		let rebooted = false;
+		const io: GuestIo = {
+			async exec(cmd) {
+				if (cmd[0] === "shutdown.exe") {
+					rebooted = true;
+					boot = "2026-10-31T10:05:00.0000000+00:00";
+					return ok();
+				}
+				if (first) {
+					first = false;
+					throw new QgaExecStatusLostError(
+						598,
+						4492,
+						new Error("PID lld does not exist"),
+					);
+				}
+				return ok(`${boot}\r\n`);
+			},
+			async readFile() {
+				return Buffer.alloc(0);
+			},
+			async ping() {
+				return true;
+			},
+		};
+		await rebootWindows(io, { pollMs: 1, timeoutMs: 5000 });
+		expect(rebooted).toBe(true);
+	});
+
 	it("reboot waits for a new boot time", async () => {
 		let boot = "2026-10-31T10:00:00.0000000+00:00";
 		let pings = 0;
