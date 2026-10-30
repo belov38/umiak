@@ -1,8 +1,7 @@
 // The guest agent as seen by the api (S3 §9–§13). Shapes mirror
 // proto/sbx/agent/v1 (Process, Filesystem, System) in plain TS: camelCase
-// fields, lower-case enum values, offsets and sizes as `number`. The real
-// implementation (ConnectAgentApi over AgentClient) is wired after S3 lands;
-// until then production uses UnwiredAgentApi and tests use FakeAgent.
+// fields, lower-case enum values, offsets and sizes as `number`. Production
+// uses ConnectAgentApi (connect.ts, over AgentClient); tests use FakeAgent.
 import type { AgentFetchInit } from "@sbx/agent-client";
 
 /** Capability strings of `Control/Info` (S3 §13). */

@@ -14,7 +14,11 @@ import {
 	type Principal,
 	uuidv5,
 } from "@sbx/core";
-import { agentErrorToHttp, isAgentOutcomeUnknown } from "../agent/errors.ts";
+import {
+	agentErrorToHttp,
+	isAgentOutcomeUnknown,
+	unknownOutcomeError,
+} from "../agent/errors.ts";
 import type { AgentCommandInfo, AgentStream } from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
@@ -863,10 +867,9 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		} catch (e) {
 			// Without sessionId+seq the agent cannot drop a repeat.
 			if (b.sessionId === undefined && isAgentOutcomeUnknown(e)) {
-				throw unknownOutcomeError(
-					command.id,
-					"the input may have been written",
-				);
+				throw unknownOutcomeError("the input may have been written", {
+					commandId: publicCommandId(command.id),
+				});
 			}
 			throw agentErrorToHttp(e);
 		}
@@ -904,28 +907,14 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		} catch (e) {
 			// A repeat would send the signal twice.
 			if (isAgentOutcomeUnknown(e)) {
-				throw unknownOutcomeError(command.id, "the signal may have been sent");
+				throw unknownOutcomeError("the signal may have been sent", {
+					commandId: publicCommandId(command.id),
+				});
 			}
 			throw agentErrorToHttp(e);
 		}
 		return c.json(toCommandResource(command, info), 200);
 	});
-}
-
-/**
- * 503 agent_unavailable of a non-idempotent agent call whose outcome is
- * unknown (§5.5): not retryable, `details.outcome: "unknown"`.
- */
-function unknownOutcomeError(commandId: string, what: string): ApiError {
-	return new ApiError(
-		503,
-		"agent_unavailable",
-		`the sandbox agent is not reachable and ${what}; check the command before repeating`,
-		{
-			retryable: false,
-			details: { commandId: publicCommandId(commandId), outcome: "unknown" },
-		},
-	);
 }
 
 function commandExitedError(): ApiError {

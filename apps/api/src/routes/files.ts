@@ -17,7 +17,11 @@ import type { AgentFetchInit } from "@sbx/agent-client";
 import { parseUploadOffset } from "@sbx/agent-client";
 import { decodeUlid, newPublicUlid } from "@sbx/auth";
 import type { Context } from "hono";
-import { AgentCallError, agentErrorToHttp } from "../agent/errors.ts";
+import {
+	AgentCallError,
+	agentErrorToHttp,
+	agentMutationErrorToHttp,
+} from "../agent/errors.ts";
 import {
 	agentHttpError,
 	filesQuery,
@@ -590,6 +594,23 @@ async function rpc<T>(fn: () => Promise<T>): Promise<T> {
 	}
 }
 
+/**
+ * A mutating Filesystem RPC: its request id is new per request, so a repeat
+ * after an unknown outcome would apply it again (503 retryable false,
+ * details.outcome "unknown" with `details`).
+ */
+async function mutation<T>(
+	fn: () => Promise<T>,
+	what: string,
+	details: Record<string, unknown>,
+): Promise<T> {
+	try {
+		return await fn();
+	} catch (e) {
+		throw agentMutationErrorToHttp(e, what, details);
+	}
+}
+
 /** The ULID of `upl_...`; anything else is 404 upload_not_found. */
 function uploadIdOf(publicId: string): string {
 	const id = decodeUlid("upload", publicId);
@@ -1004,14 +1025,17 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const q = c.req.valid("query");
 		const b = c.req.valid("json");
 		const m = await fileTarget(deps, c, sandbox, "files.v1");
-		const r = await rpc(() =>
-			deps.agent.makeDir(m, {
-				path: b.path,
-				...(q.user === undefined ? {} : { user: q.user }),
-				parents: b.parents ?? false,
-				...(b.mode === undefined ? {} : { mode: b.mode }),
-				requestId: randomUUID(),
-			}),
+		const r = await mutation(
+			() =>
+				deps.agent.makeDir(m, {
+					path: b.path,
+					...(q.user === undefined ? {} : { user: q.user }),
+					parents: b.parents ?? false,
+					...(b.mode === undefined ? {} : { mode: b.mode }),
+					requestId: randomUUID(),
+				}),
+			"the directory may have been created",
+			{ path: b.path },
 		);
 		return c.json(toFileInfo(r.info), r.created ? 201 : 200);
 	});
@@ -1021,14 +1045,17 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const q = c.req.valid("query");
 		const b = c.req.valid("json");
 		const m = await fileTarget(deps, c, sandbox, "files.v1");
-		const info = await rpc(() =>
-			deps.agent.move(m, {
-				src: b.from,
-				dst: b.to,
-				...(q.user === undefined ? {} : { user: q.user }),
-				overwrite: b.overwrite ?? false,
-				requestId: randomUUID(),
-			}),
+		const info = await mutation(
+			() =>
+				deps.agent.move(m, {
+					src: b.from,
+					dst: b.to,
+					...(q.user === undefined ? {} : { user: q.user }),
+					overwrite: b.overwrite ?? false,
+					requestId: randomUUID(),
+				}),
+			"the path may have been moved",
+			{ path: b.from, to: b.to },
 		);
 		return c.json(toFileInfo(info), 200);
 	});
@@ -1038,16 +1065,19 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const q = c.req.valid("query");
 		const b = c.req.valid("json");
 		const m = await fileTarget(deps, c, sandbox, "files.v1");
-		const info = await rpc(() =>
-			deps.agent.chmod(m, {
-				path: b.path,
-				...(q.user === undefined ? {} : { user: q.user }),
-				...(b.mode === undefined ? {} : { mode: b.mode }),
-				...(b.owner === undefined ? {} : { owner: b.owner }),
-				...(b.group === undefined ? {} : { group: b.group }),
-				recursive: b.recursive ?? false,
-				requestId: randomUUID(),
-			}),
+		const info = await mutation(
+			() =>
+				deps.agent.chmod(m, {
+					path: b.path,
+					...(q.user === undefined ? {} : { user: q.user }),
+					...(b.mode === undefined ? {} : { mode: b.mode }),
+					...(b.owner === undefined ? {} : { owner: b.owner }),
+					...(b.group === undefined ? {} : { group: b.group }),
+					recursive: b.recursive ?? false,
+					requestId: randomUUID(),
+				}),
+			"the mode or owner may have been changed",
+			{ path: b.path },
 		);
 		return c.json(toFileInfo(info), 200);
 	});
@@ -1056,13 +1086,16 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
 		const m = await fileTarget(deps, c, sandbox, "files.v1");
-		const r = await rpc(() =>
-			deps.agent.remove(m, {
-				path: q.path,
-				...(q.user === undefined ? {} : { user: q.user }),
-				recursive: q.recursive === "true",
-				requestId: randomUUID(),
-			}),
+		const r = await mutation(
+			() =>
+				deps.agent.remove(m, {
+					path: q.path,
+					...(q.user === undefined ? {} : { user: q.user }),
+					recursive: q.recursive === "true",
+					requestId: randomUUID(),
+				}),
+			"the path may have been deleted",
+			{ path: q.path },
 		);
 		return c.json({ existed: r.existed }, 200);
 	});

@@ -95,9 +95,10 @@ export function isAgentUnreachable(e: unknown, signal?: AbortSignal): boolean {
 }
 
 /**
- * A mutating call (Start, Signal, SendInput without a session) may or may
- * not have taken effect: the agent is unreachable, or the call ran out of
- * time (DeadlineExceeded) after the agent may have acted on it.
+ * A mutating call (Start, Signal, SendInput without a session, the
+ * Filesystem mutations) may or may not have taken effect: the agent is
+ * unreachable, or the call ran out of time (DeadlineExceeded) after the
+ * agent may have acted on it.
  */
 export function isAgentOutcomeUnknown(
 	e: unknown,
@@ -109,6 +110,41 @@ export function isAgentOutcomeUnknown(
 		connectCode(e) === CONNECT_DEADLINE_EXCEEDED ||
 		(e instanceof AgentCallError && e.code === "deadline_exceeded")
 	);
+}
+
+/**
+ * 503 agent_unavailable of a mutation without an idempotency key whose
+ * outcome is unknown (S7 §5.5): not retryable, `details.outcome: "unknown"`
+ * plus `details`. `what` completes "the sandbox agent is not reachable
+ * and ...".
+ */
+export function unknownOutcomeError(
+	what: string,
+	details: Record<string, unknown> = {},
+): ApiError {
+	return new ApiError(
+		503,
+		"agent_unavailable",
+		`the sandbox agent is not reachable and ${what}; check before repeating`,
+		{ retryable: false, details: { ...details, outcome: "unknown" } },
+	);
+}
+
+/**
+ * The public error of a failed mutation that a repeat would apply twice
+ * (no idempotency key reaches the agent): an unknown outcome
+ * (isAgentOutcomeUnknown) is `unknownOutcomeError`, anything else maps
+ * like `agentErrorToHttp`.
+ */
+export function agentMutationErrorToHttp(
+	e: unknown,
+	what: string,
+	details: Record<string, unknown> = {},
+): ApiError {
+	if (!(e instanceof ApiError) && isAgentOutcomeUnknown(e)) {
+		return unknownOutcomeError(what, details);
+	}
+	return agentErrorToHttp(e);
 }
 
 /** 503 agent_unavailable (retryable) for an unreachable agent. */
@@ -134,7 +170,7 @@ export function agentUnavailableError(): ApiError {
  * | Agent error | Public |
  * |---|---|
  * | unreachable, Connect Unavailable (any detail: quiesced, shim_unavailable, store_busy, identity_not_ready), Canceled | 503 agent_unavailable, retryable (mutations: unknown outcome, see isAgentOutcomeUnknown) |
- * | Connect DeadlineExceeded | 503 agent_unavailable, retryable (Start, Signal, input: unknown outcome) |
+ * | Connect DeadlineExceeded | 503 agent_unavailable, retryable (unkeyed mutations: unknown outcome, agentMutationErrorToHttp) |
  * | path_not_found, upload_not_found | 404, same code |
  * | command_not_found, not_found | 404 not_found |
  * | permission_denied | 403 path_forbidden |

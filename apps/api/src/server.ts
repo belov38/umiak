@@ -23,7 +23,7 @@ import {
 import { createPool } from "@sbx/db";
 import { PgBoss } from "pg-boss";
 import type { Logger } from "pino";
-import { UnwiredAgentApi } from "./agent/unwired.ts";
+import { ConnectAgentApi } from "./agent/connect.ts";
 import {
 	createInternalApp,
 	createOpsApp,
@@ -48,6 +48,9 @@ import { ApiLifecycle, type Listener, shutdown } from "./shutdown.ts";
 
 /** Postgres connections of the request pool. */
 const DB_POOL_MAX = 20;
+
+/** How long an agent call waits for the machine's tunnel (S7 §9.7). */
+const AGENT_WAIT_MS = 30_000;
 
 /** pg-boss schema (the worker's BOSS_SCHEMA). */
 const BOSS_SCHEMA = "pgboss";
@@ -158,7 +161,11 @@ export async function buildDeps(
 				maxConnections: 4,
 			});
 			cleanups.push(() => registry.close());
-			agentClient = new AgentClient({ registry, serviceToken: gatewayToken });
+			agentClient = new AgentClient({
+				registry,
+				serviceToken: gatewayToken,
+				waitForAgentMs: AGENT_WAIT_MS,
+			});
 		}
 
 		const identity = new PgIdentityStore({
@@ -199,7 +206,7 @@ export async function buildDeps(
 			environments: new PgEnvironmentStore(pool, keys, {
 				validateSets: validateSecretSets,
 			}),
-			agent: new UnwiredAgentApi(agentClient, pool),
+			agent: new ConnectAgentApi(agentClient, pool),
 			streams,
 			commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 			ptyTimings: { ...DEFAULT_PTY_TIMINGS },

@@ -96,24 +96,18 @@ principal, то есть после аутентификации; до неё к
 (`@sbx/agent-client`) и `AgentCallError` (`src/agent/errors.ts`); отображение в HTTP — `src/agent/errors.ts`.
 
 - Тесты — `FakeAgent` из `@sbx/api/testing`: настоящие процессы, PTY без терминала, файлы во временном каталоге.
-- Процесс `api` — `UnwiredAgentApi` (`src/agent/unwired.ts`): RPC — `503 agent_unavailable`, `files` — через
-  `AgentClient.fetch` (`@sbx/agent-client`), capabilities — из `tunnel.tunnel_sessions`.
-
-После команды master-сессии (S3 уже в `main`) — подключить настоящего агента:
-
-1. Написать `ConnectAgentApi implements AgentApi` поверх клиентов `sbx.agent.v1` из `@sbx/proto` (`proto/sbx/agent/v1`)
-   и транспорта `AgentClient` (поиск gateway, `421`, ожидание агента до 30 s); `attach` — через `resumableAttach`
-   с `pty_offset`. `files` и `capabilities` взять из `UnwiredAgentApi` как есть.
-2. В `src/server.ts` заменить `new UnwiredAgentApi(agentClient, pool)` на него (при `agentClient === null` оставить
-   `UnwiredAgentApi`).
-3. Сверить с настоящим агентом: имена query у `/files*` (`overwrite`, `user` у чанка и commit, восьмеричный `mode`),
-   параллельный повтор `Start` с тем же `commandId`. Ошибки — по таблице в doc-комментарии `agentErrorToHttp`
-   (`src/agent/errors.ts`): Connect `Unavailable`/`Canceled`/`DeadlineExceeded` оставлять `ConnectError`
-   (с любым detail: `quiesced`, `shim_unavailable`, `store_busy`, `identity_not_ready`), остальное —
-   `AgentCallError(<код ErrorDetail>)`.
-4. Payload-ы `agent-events` уже разбираются типами S3 (`src/agent/event-decode.ts`: `events.proto` и
-   `common.proto` из `@sbx/proto/agent/v1`), нормализация — `normalizeAgentEvent` в `packages/core`.
-5. Добавить chaos стрима через туннель (spec §16) и E2E `sbx-bench s7` на `pve`.
+- Процесс `api` — `ConnectAgentApi` (`src/agent/connect.ts`): RPC — клиенты `sbx.agent.v1` (`@sbx/proto/agent/v1`)
+  поверх `AgentClient.transport(machineId)` (поиск gateway, `421`, ожидание агента до 30 s), `files` — через
+  `AgentClient.fetch`, capabilities — из `tunnel.tunnel_sessions`. Без `SBX_API_GATEWAY_TOKEN_FILE` все вызовы —
+  `503 agent_unavailable`. `attach` — один поток `Process/Attach`; переподключение — `resumableAttach` в
+  `src/commands/attach.ts`.
+- Ошибки — по таблице в doc-комментарии `agentErrorToHttp` (`src/agent/errors.ts`): Connect
+  `Unavailable`/`Canceled`/`DeadlineExceeded` остаются `ConnectError` (с любым detail), остальное —
+  `AgentCallError(<код ErrorDetail>)`, без detail — имя кода Connect (`failed_precondition`). Мутации без
+  идемпотентного ключа (`Start` без ключа, `input` без сессии, `signal`, файловые `mkdir`/`move`/`chmod`/`delete`)
+  при неизвестном исходе — `503 agent_unavailable`, `retryable: false`, `details.outcome: "unknown"`
+  (`agentMutationErrorToHttp`).
+- Не сделано: chaos стрима через туннель (spec §16) и E2E `sbx-bench s7` на `pve`.
 
 ### Wiring S3: адаптер proto ↔ `AgentApi`
 

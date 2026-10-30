@@ -52,7 +52,7 @@ export interface ApiDeps {
 	config: ConfigReader;
 	/** Environments of the teams (PgEnvironmentStore until S8). */
 	environments: EnvironmentStore;
-	/** RPCs of the guest agents (UnwiredAgentApi until S3 is merged). */
+	/** RPCs of the guest agents (ConnectAgentApi; FakeAgent in tests). */
 	agent: AgentApi;
 	/** Open NDJSON streams, sync waits and PTYs (limits, revocation, shutdown). */
 	streams: StreamRegistry;
