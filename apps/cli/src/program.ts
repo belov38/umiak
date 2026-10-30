@@ -55,6 +55,8 @@ export interface CliIo {
 	stdin: NodeJS.ReadableStream;
 	/** stdout is a terminal. */
 	isTTY: boolean;
+	/** stdin and stderr are a terminal: prompts (`rm`) can be answered. */
+	interactive?: boolean;
 	/** Keychain backend; default Bun.secrets. */
 	secrets?: SecretsBackend | undefined;
 }
@@ -74,7 +76,7 @@ export function buildProgram(io: CliIo, run: Runner): Command {
 		.option("--team <team>", "team (team_…) to act in (env SBX_TEAM)")
 		.option(
 			"--cacert <file>",
-			"PEM file of a private CA for HTTPS (env SBX_CA_FILE)",
+			"PEM file of a private CA for HTTPS; trusted: Node's bundled roots plus this file, not the OS store (env SBX_CA_FILE)",
 		)
 		.option(
 			"--credential-store <store>",
@@ -126,6 +128,8 @@ export async function runCli(io: CliIo): Promise<number> {
 					env: io.env,
 					globals: cmd.optsWithGlobals<GlobalOptions>(),
 					stdin: io.stdin,
+					interactive: io.interactive === true,
+					argv: io.argv,
 					...("secrets" in io ? { secrets: io.secrets } : {}),
 				});
 				const r = await fn(ctx, a.slice(0, -2), opts);

@@ -2,8 +2,11 @@
 // uses (api and Keycloak), and small JSON helpers for the anonymous calls
 // (`/v1/meta`, the OIDC endpoints).
 //
-// `--cacert <file>` / SBX_CA_FILE: a PEM bundle of a private CA. It is added
-// to the default roots (not a replacement), because Keycloak and the api may
+// `--cacert <file>` / SBX_CA_FILE: a PEM bundle of a private CA. The trusted
+// roots of the CLI's requests become Node's bundled roots
+// (`tls.rootCertificates`, Mozilla's list) plus that PEM: the OS trust store
+// is no longer consulted, so a corporate root installed only in the OS must
+// be in the PEM too. The bundled roots stay because Keycloak and the api may
 // sit behind different CAs. Bun takes it as `fetch(req, {tls: {ca}})`.
 
 import { readFileSync } from "node:fs";

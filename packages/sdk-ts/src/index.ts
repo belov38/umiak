@@ -9,6 +9,7 @@ export {
 	type SbxOptions,
 	SDK_VERSION,
 	STREAM_IDLE_TIMEOUT_MS,
+	type TokenProviderOptions,
 } from "./client.ts";
 export {
 	Command,

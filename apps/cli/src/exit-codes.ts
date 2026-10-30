@@ -2,7 +2,7 @@
 // `exec` and `run` exit with the command's own code instead (128 + n for a
 // signal, 124 for timed_out, 125 for lost or failed_to_start; Task 21).
 
-import { SbxError, type SbxErrorInit } from "@sbx/sdk";
+import { SbxError, type SbxErrorInit, UNEXPECTED_RESPONSE } from "@sbx/sdk";
 
 export const EXIT_OK = 0;
 /** An API or CLI error. */
@@ -88,5 +88,12 @@ export function exitCodeOf(err: unknown): number {
 		return EXIT_NOT_FOUND;
 	}
 	if (err.retryable) return EXIT_TEMPORARY;
+	// A proxy's 502/503/504/429 without the API envelope is temporary too.
+	if (
+		err.code === UNEXPECTED_RESPONSE &&
+		[429, 502, 503, 504].includes(err.status)
+	) {
+		return EXIT_TEMPORARY;
+	}
 	return EXIT_ERROR;
 }

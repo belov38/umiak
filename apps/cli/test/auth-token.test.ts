@@ -103,6 +103,39 @@ describe("sbx auth token", () => {
 		expect(w.oidc.stats.refresh).toBe(refreshes + 1);
 	});
 
+	it("an access token is refreshed 90 s before it expires", async () => {
+		const all = JSON.parse(readFileSync(credFile(), "utf8"));
+		const cred = JSON.parse(all[entry()]);
+		cred.expiresAt = new Date(Date.now() + 60_000).toISOString();
+		all[entry()] = JSON.stringify(cred);
+		writeFileSync(credFile(), JSON.stringify(all), { mode: 0o600 });
+		const refreshes = w.oidc.stats.refresh;
+		const r = await runCli(["auth", "token", "--json"], { env: home.env });
+		expect(r.code, r.stderr).toBe(0);
+		expect(w.oidc.stats.refresh).toBe(refreshes + 1);
+		expect(JSON.parse(r.stdout).token).not.toBe(cred.accessToken);
+	});
+
+	it("401 token_expired on a token the CLI thinks fresh forces a real refresh", async () => {
+		// The api sees an expired JWT; the stored expiry says it is fresh.
+		const expired = await w.oidc.token(
+			{ sub, email: `${sub}@example.com` },
+			{ expiresIn: -600 },
+		);
+		const all = JSON.parse(readFileSync(credFile(), "utf8"));
+		const cred = JSON.parse(all[entry()]);
+		cred.accessToken = expired;
+		cred.expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+		all[entry()] = JSON.stringify(cred);
+		writeFileSync(credFile(), JSON.stringify(all), { mode: 0o600 });
+		const refreshes = w.oidc.stats.refresh;
+		const r = await runCli(["whoami"], { env: home.env });
+		expect(r.code, r.stderr).toBe(0);
+		expect(JSON.parse(r.stdout).user.email).toBe(`${sub}@example.com`);
+		expect(w.oidc.stats.refresh).toBe(refreshes + 1);
+		expect(readCred().accessToken).not.toBe(expired);
+	});
+
 	it("a stale lock left by a dead process is taken over", async () => {
 		expireAccessToken();
 		const lock = join(home.configDir, ".lock");

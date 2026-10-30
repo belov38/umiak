@@ -2,6 +2,7 @@
 // store files, and --cacert / SBX_CA_FILE through a self-signed TLS front.
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { startTestOidcServer, type TestOidcServer } from "@sbx/api/testing";
 import {
 	afterAll,
@@ -13,6 +14,9 @@ import {
 	it,
 } from "vitest";
 import { deviceLogin } from "../src/auth/device-grant.ts";
+import type { SecretsBackend } from "../src/auth/keychain.ts";
+import { browserCommand } from "../src/commands/login.ts";
+import { runCli as runCliInProcess } from "../src/program.ts";
 import { type CliWorld, startWorld } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 import { startTlsFront, type TlsFront } from "./helpers/tls.ts";
@@ -23,6 +27,58 @@ function jwtClaims(token: string): Record<string, unknown> {
 }
 
 const mode = (p: string) => statSync(p).mode & 0o777;
+
+/** In-memory Bun.secrets. */
+function fakeSecrets(): SecretsBackend & { data: Map<string, string> } {
+	const data = new Map<string, string>();
+	return {
+		data,
+		async get(o) {
+			return data.get(`${o.service}/${o.name}`) ?? null;
+		},
+		async set(o) {
+			data.set(`${o.service}/${o.name}`, o.value);
+		},
+		async delete(o) {
+			return data.delete(`${o.service}/${o.name}`);
+		},
+	};
+}
+
+/** The CLI in this process (to pass a keychain stand-in). */
+async function inProcess(
+	argv: string[],
+	o: {
+		env: Record<string, string | undefined>;
+		stdin?: string;
+		secrets?: SecretsBackend;
+	},
+): Promise<{ code: number; stdout: string; stderr: string }> {
+	const out: string[] = [];
+	const err: string[] = [];
+	const code = await runCliInProcess({
+		argv,
+		env: o.env,
+		stdout: { write: (s: string | Uint8Array) => out.push(String(s)) },
+		stderr: { write: (s: string | Uint8Array) => err.push(String(s)) },
+		stdin: Readable.from([o.stdin ?? ""]),
+		isTTY: false,
+		secrets: o.secrets,
+	});
+	return { code, stdout: out.join(""), stderr: err.join("") };
+}
+
+describe("openBrowser command", () => {
+	it("Windows opens the link with rundll32 (no cmd parsing)", () => {
+		const url = "https://kc.x/device?user_code=AB&x=1";
+		expect(browserCommand("win32", url)).toEqual([
+			"rundll32",
+			["url.dll,FileProtocolHandler", url],
+		]);
+		expect(browserCommand("darwin", url)).toEqual(["open", [url]]);
+		expect(browserCommand("linux", url)).toEqual(["xdg-open", [url]]);
+	});
+});
 
 describe("deviceLogin (unit, scripted Keycloak)", () => {
 	it("polls at the interval, adds 5 s on slow_down, and returns the tokens", async () => {
@@ -365,6 +421,72 @@ describe("sbx login", () => {
 		expect(t.code).toBe(4);
 		const again = await runCli(["logout"], { env: home.env });
 		expect(JSON.parse(again.stdout)).toMatchObject({ loggedOut: false });
+	});
+
+	it("re-login into the same profile revokes the old refresh token", async () => {
+		const sub = `kc-${crypto.randomUUID()}`;
+		w.oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
+		const login = () =>
+			runCli(["login", "--no-browser", "--api-url", w.url], { env: home.env });
+		expect((await login()).code).toBe(0);
+		const cred = () =>
+			JSON.parse(
+				JSON.parse(
+					readFileSync(join(home.configDir, "credentials.json"), "utf8"),
+				)[`default@${w.oidc.issuer}`],
+			);
+		const first = cred().refreshToken;
+		const revokes = w.oidc.stats.revoke;
+		const r = await login();
+		expect(r.code, r.stderr).toBe(0);
+		expect(w.oidc.stats.revoke).toBe(revokes + 1);
+		expect(cred().refreshToken).not.toBe(first);
+	});
+
+	it("re-login with another store deletes the secret from the old store", async () => {
+		const secrets = fakeSecrets();
+		const env = { ...home.env, SBX_CREDENTIAL_STORE: undefined };
+		const a = await inProcess(
+			[
+				"login",
+				"--key-stdin",
+				"--api-url",
+				w.url,
+				"--credential-store",
+				"keychain",
+			],
+			{ env, stdin: w.secret, secrets },
+		);
+		expect(a.code, a.stderr).toBe(0);
+		expect([...secrets.data.keys()]).toEqual([`sbx/default@${w.url}`]);
+		const b = await inProcess(
+			[
+				"login",
+				"--key-stdin",
+				"--api-url",
+				w.url,
+				"--credential-store",
+				"file",
+			],
+			{ env, stdin: w.secret, secrets },
+		);
+		expect(b.code, b.stderr).toBe(0);
+		expect([...secrets.data.keys()]).toEqual([]);
+		const file = JSON.parse(
+			readFileSync(join(home.configDir, "credentials.json"), "utf8"),
+		);
+		expect(Object.keys(file)).toEqual([`default@${w.url}`]);
+	});
+
+	it("an empty SBX_CREDENTIAL_STORE is treated as unset (auto)", async () => {
+		const secrets = fakeSecrets();
+		const r = await inProcess(["login", "--key-stdin", "--api-url", w.url], {
+			env: { ...home.env, SBX_CREDENTIAL_STORE: "" },
+			stdin: w.secret,
+			secrets,
+		});
+		expect(r.code, r.stderr).toBe(0);
+		expect([...secrets.data.keys()]).toEqual([`sbx/default@${w.url}`]);
 	});
 
 	it("logout of a key only erases it; --revoke also revokes the key", async () => {

@@ -21,6 +21,14 @@ import {
 	sameApi,
 } from "./profile.ts";
 
+/**
+ * Retry budget of one SDK call of a command (CallOptions.retryBudgetMs), so
+ * a dead API ends an interactive command with exit 75 quickly. Waits
+ * (`--wait`, exec streams once started) keep their own deadlines.
+ * SBX_RETRY_BUDGET_MS overrides it.
+ */
+export const INTERACTIVE_RETRY_BUDGET_MS = 15_000;
+
 export interface ContextOptions {
 	out: Output;
 	env: Env;
@@ -28,6 +36,14 @@ export interface ContextOptions {
 	stdin: NodeJS.ReadableStream;
 	/** Keychain backend; default Bun.secrets. */
 	secrets?: SecretsBackend | undefined;
+	/** stdin and stderr are a terminal: prompts can be answered. */
+	interactive?: boolean;
+	/** The whole command line (for the words after `--`). */
+	argv?: readonly string[];
+}
+
+function nonEmpty(v: string | undefined): string | undefined {
+	return v === undefined || v === "" ? undefined : v;
 }
 
 export class Context {
@@ -36,6 +52,8 @@ export class Context {
 	readonly globals: GlobalOptions;
 	readonly paths: Paths;
 	readonly stdin: NodeJS.ReadableStream;
+	readonly interactive: boolean;
+	readonly argv: readonly string[];
 	readonly #secrets: SecretsBackend | undefined;
 	#fetch: Fetch | undefined;
 	#resolved: Resolved | undefined;
@@ -47,6 +65,8 @@ export class Context {
 		this.env = o.env;
 		this.globals = o.globals;
 		this.stdin = o.stdin;
+		this.interactive = o.interactive === true;
+		this.argv = o.argv ?? [];
 		this.paths = pathsOf(o.env);
 		this.#secrets = "secrets" in o ? o.secrets : bunSecrets();
 	}
@@ -69,6 +89,14 @@ export class Context {
 		this.#bearer = undefined;
 	}
 
+	/** See INTERACTIVE_RETRY_BUDGET_MS. */
+	get retryBudgetMs(): number {
+		const v = Number(this.env.SBX_RETRY_BUDGET_MS);
+		return Number.isInteger(v) && v >= 0 && this.env.SBX_RETRY_BUDGET_MS !== ""
+			? v
+			: INTERACTIVE_RETRY_BUDGET_MS;
+	}
+
 	/** The API URL or CliError `no_api_url` (exit 4). */
 	apiUrl(): string {
 		const url = this.resolved.apiUrl;
@@ -88,23 +116,35 @@ export class Context {
 	 * the profile was logged in with, else auto.
 	 */
 	store(profile: Profile | undefined = this.resolved.profile): CredentialStore {
-		const choice = parseStoreChoice(
-			this.globals.credentialStore ??
-				this.env.SBX_CREDENTIAL_STORE ??
+		return this.#open(
+			nonEmpty(this.globals.credentialStore) ??
+				nonEmpty(this.env.SBX_CREDENTIAL_STORE) ??
 				profile?.credentialStore ??
 				"auto",
 		);
-		return openCredentialStore(choice, {
+	}
+
+	/** The store a profile was logged in with (flags and env do not apply). */
+	storeOf(profile: Profile): CredentialStore {
+		return this.#open(profile.credentialStore ?? "auto");
+	}
+
+	#open(choice: string): CredentialStore {
+		return openCredentialStore(parseStoreChoice(choice), {
 			file: this.paths.credentials,
 			secrets: this.#secrets,
 			warn: (m) => this.out.warn(m),
 		});
 	}
 
-	/** The bearer of this command (auth/token.ts), refreshed when due. */
-	async bearer(): Promise<Bearer> {
+	/**
+	 * The bearer of this command (auth/token.ts), refreshed when due.
+	 * `force`: the api rejected the current one as expired.
+	 */
+	async bearer(force = false): Promise<Bearer> {
 		const b = this.#bearer;
 		if (
+			!force &&
 			b !== undefined &&
 			(b.expiresAt === null ||
 				Date.parse(b.expiresAt) - REFRESH_MARGIN_MS > Date.now())
@@ -132,6 +172,7 @@ export class Context {
 			lockPath: this.paths.lock,
 			fetch: this.fetch,
 			env: this.env,
+			...(force ? { force, ...(b ? { rejected: b.token } : {}) } : {}),
 		});
 		return this.#bearer;
 	}
@@ -143,9 +184,10 @@ export class Context {
 		this.#sbx = new Sbx({
 			baseUrl: this.apiUrl(),
 			...(team === undefined ? {} : { team }),
-			tokenProvider: async () => (await this.bearer()).token,
+			tokenProvider: async ({ force }) => (await this.bearer(force)).token,
 			fetch: this.fetch as typeof fetch,
 			userAgent: `sbx-cli/${CLI_VERSION}`,
+			retryBudgetMs: this.retryBudgetMs,
 			// Everything is resolved here; the SDK must not read SBX_* itself.
 			env: {},
 		});

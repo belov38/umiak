@@ -1,8 +1,11 @@
 // The output contract (S7 §14.3) and exit codes: unit tests of Output and
 // exitCodeOf, then the real CLI against the api (whoami, errors, usage,
 // current, version, completion, mcp).
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { SbxError } from "@sbx/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Context } from "../src/context.ts";
 import {
 	CliError,
 	EXIT_NO_AUTH,
@@ -337,3 +340,52 @@ async function revokedLookingKey(): Promise<string> {
 	const { generateApiKeySecret } = await import("@sbx/auth");
 	return generateApiKeySecret();
 }
+
+describe("retry budget of interactive commands", () => {
+	it("a dead API (503 without the envelope) exits 75 once the budget is spent", async () => {
+		let hits = 0;
+		const server = createServer((_req, res) => {
+			hits++;
+			res.writeHead(503, { "content-type": "text/html" });
+			res.end("<html>503</html>");
+		});
+		await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		const home = cliHome();
+		try {
+			const started = Date.now();
+			const r = await runCli(["whoami"], {
+				env: {
+					...home.env,
+					SBX_API_URL: url,
+					SBX_API_KEY: "sbx_dead",
+					SBX_RETRY_BUDGET_MS: "1000",
+				},
+			});
+			expect(r.code, r.stderr).toBe(EXIT_TEMPORARY);
+			expect(Date.now() - started).toBeLessThan(6000);
+			expect(hits).toBeGreaterThan(1);
+		} finally {
+			home.rm();
+			await new Promise<void>((r) => server.close(() => r()));
+		}
+	});
+
+	it("the default budget is 15 s", () => {
+		const a = capture();
+		const ctx = new Context({
+			out: new Output({ ...a, isTTY: false }),
+			env: {},
+			globals: {},
+			stdin: process.stdin,
+		});
+		expect(ctx.retryBudgetMs).toBe(15_000);
+		const b = new Context({
+			out: new Output({ ...a, isTTY: false }),
+			env: { SBX_RETRY_BUDGET_MS: "2500" },
+			globals: {},
+			stdin: process.stdin,
+		});
+		expect(b.retryBudgetMs).toBe(2500);
+	});
+});

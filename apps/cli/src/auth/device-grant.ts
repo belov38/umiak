@@ -2,7 +2,7 @@
 // Grant (RFC 8628) with the public client `sbx-cli`, the refresh_token grant
 // and revocation (RFC 7009). Paths are Keycloak's under the issuer.
 
-import { SbxError } from "@sbx/sdk";
+import { NETWORK_ERROR, SbxError } from "@sbx/sdk";
 import { CliError, LOGIN_FAILED, LOGIN_REQUIRED } from "../exit-codes.ts";
 import { type Fetch, send } from "../http.ts";
 
@@ -44,6 +44,7 @@ async function postForm(
 	f: Fetch,
 	url: string,
 	form: Record<string, string>,
+	signal?: AbortSignal,
 ): Promise<OAuthAnswer> {
 	const res = await send(
 		f,
@@ -54,9 +55,10 @@ async function postForm(
 				accept: "application/json",
 			},
 			body: new URLSearchParams(form).toString(),
+			...(signal === undefined ? {} : { signal }),
 		}),
 	);
-	const text = await res.text();
+	const text = await readText(res);
 	let body: unknown;
 	try {
 		body = text === "" ? {} : JSON.parse(text);
@@ -67,6 +69,21 @@ async function postForm(
 		throw idpError(res.status, `HTTP ${res.status}: ${text.slice(0, 200)}`);
 	}
 	return { status: res.status, body: body as Record<string, unknown> };
+}
+
+/** The body; a timeout while reading it is a network error like one before it. */
+async function readText(res: Response): Promise<string> {
+	try {
+		return await res.text();
+	} catch (err) {
+		throw new SbxError({
+			status: 0,
+			code: NETWORK_ERROR,
+			message: `Keycloak: ${(err as Error).message}`,
+			retryable: true,
+			cause: err,
+		});
+	}
 }
 
 /** Keycloak answered something that is not OAuth: retryable on 5xx and 429. */
@@ -175,12 +192,19 @@ export async function refreshTokens(o: {
 	clientId: string;
 	refreshToken: string;
 	fetch: Fetch;
+	/** Ends a hanging request (network_error, retryable). */
+	signal?: AbortSignal;
 }): Promise<TokenSet> {
-	const a = await postForm(o.fetch, endpoint(o.issuer, "token"), {
-		grant_type: "refresh_token",
-		refresh_token: o.refreshToken,
-		client_id: o.clientId,
-	});
+	const a = await postForm(
+		o.fetch,
+		endpoint(o.issuer, "token"),
+		{
+			grant_type: "refresh_token",
+			refresh_token: o.refreshToken,
+			client_id: o.clientId,
+		},
+		o.signal,
+	);
 	if (a.status === 200) return tokenSet(a, o.refreshToken);
 	if (oauthError(a) === "invalid_grant") {
 		throw new CliError({
@@ -201,12 +225,18 @@ export async function revokeRefreshToken(o: {
 	clientId: string;
 	refreshToken: string;
 	fetch: Fetch;
+	signal?: AbortSignal;
 }): Promise<void> {
-	const a = await postForm(o.fetch, endpoint(o.issuer, "revoke"), {
-		client_id: o.clientId,
-		token: o.refreshToken,
-		token_type_hint: "refresh_token",
-	});
+	const a = await postForm(
+		o.fetch,
+		endpoint(o.issuer, "revoke"),
+		{
+			client_id: o.clientId,
+			token: o.refreshToken,
+			token_type_hint: "refresh_token",
+		},
+		o.signal,
+	);
 	if (a.status !== 200) {
 		throw idpError(
 			a.status,

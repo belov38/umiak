@@ -35,7 +35,12 @@ import {
 } from "./errors.ts";
 import type { paths } from "./gen/v1.d.ts";
 import { newIdempotencyKey, takesIdempotencyKey } from "./ids.ts";
-import { abortable, isSafeToRepeat, withRetry } from "./retry.ts";
+import {
+	abortable,
+	DEFAULT_RETRY_BUDGET_MS,
+	isSafeToRepeat,
+	withRetry,
+} from "./retry.ts";
 
 /** Version of @sbx/sdk; sent as `User-Agent: sbx-sdk-ts/<version>`. */
 export const SDK_VERSION = "0.1.0";
@@ -50,6 +55,11 @@ export interface CallOptions {
 	idempotencyKey?: string;
 }
 
+export interface TokenProviderOptions {
+	/** The last token was rejected as expired: get a new one. */
+	force: boolean;
+}
+
 export interface SbxOptions {
 	/** API URL, e.g. https://api.example.com; else SBX_API_URL, else the sbx profile. */
 	baseUrl?: string;
@@ -57,12 +67,21 @@ export interface SbxOptions {
 	team?: string;
 	apiKey?: string;
 	accessToken?: string;
-	/** Called before every request; owns its own caching. */
-	tokenProvider?: () => Promise<string>;
+	/**
+	 * Called before every request; owns its own caching. `force` is true
+	 * after the api answered `401 token_expired` to the token it gave: it
+	 * must return a new token, not the cached one.
+	 */
+	tokenProvider?: (o: TokenProviderOptions) => Promise<string>;
 	fetch?: typeof fetch;
 	userAgent?: string;
 	/** Environment read instead of process.env (also for the `sbx` subprocess). */
 	env?: Record<string, string | undefined>;
+	/**
+	 * Retry budget of a call that passes no `retryBudgetMs`; default
+	 * 60 000 ms. Long-poll waits keep their own per-poll budget.
+	 */
+	retryBudgetMs?: number;
 	/** Default ["sbx", "auth", "token", "--json"]. */
 	authCommand?: string[];
 	/**
@@ -127,6 +146,8 @@ export interface ClientCore {
 	credentials(signal?: AbortSignal): Promise<Credentials>;
 	userAgent: string;
 	streamIdleTimeoutMs: number;
+	/** `SbxOptions.retryBudgetMs` or the default. */
+	retryBudgetMs: number;
 }
 
 /** Default of `SbxOptions.streamIdleTimeoutMs` (S7 §9.7: 45 s without lines). */
@@ -141,6 +162,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 	const fetchImpl: (req: Request) => Promise<Response> =
 		opts.fetch ?? ((req) => globalThis.fetch(req));
 	const userAgent = opts.userAgent ?? `sbx-sdk-ts/${SDK_VERSION}`;
+	const defaultBudgetMs = opts.retryBudgetMs ?? DEFAULT_RETRY_BUDGET_MS;
 
 	// Resolved on the first call; a failure is not kept, so `sbx login` later helps.
 	let pending: Promise<Credentials> | undefined;
@@ -250,7 +272,13 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 						// Node and Bun need it for a streamed request body.
 						...(oneShot ? { duplex: "half" } : {}),
 						baseUrl: creds.baseUrl,
-						fetch: transport(creds, seen, signal, retryBudgetMs, oneShot),
+						fetch: transport(
+							creds,
+							seen,
+							signal,
+							retryBudgetMs ?? defaultBudgetMs,
+							oneShot,
+						),
 					} as never,
 				);
 				return { data, response };
@@ -276,6 +304,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 		credentials: (signal) => abortable(credentials(), signal),
 		userAgent,
 		streamIdleTimeoutMs: opts.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS,
+		retryBudgetMs: defaultBudgetMs,
 	};
 }
 

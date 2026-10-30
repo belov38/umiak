@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	statSync,
@@ -15,13 +16,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileStore } from "../src/auth/file-store.ts";
 import { KeychainStore, type SecretsBackend } from "../src/auth/keychain.ts";
-import { withFileLock } from "../src/auth/lock.ts";
+import { removeIfStale, withFileLock } from "../src/auth/lock.ts";
 import {
 	AutoStore,
 	openCredentialStore,
 	parseStoreChoice,
 } from "../src/auth/store.ts";
-import { credentialName } from "../src/auth/token.ts";
+import { credentialName, getBearer } from "../src/auth/token.ts";
 import { exitCodeOf } from "../src/exit-codes.ts";
 
 let dir: string;
@@ -253,6 +254,41 @@ describe("withFileLock", () => {
 		expect(Date.now() - started).toBeLessThan(1000);
 	});
 
+	it("writes a unique owner token into the lock", async () => {
+		const lock = join(dir, ".lock");
+		const seen: string[] = [];
+		for (let i = 0; i < 2; i++) {
+			await withFileLock(lock, async () => {
+				seen.push(readFileSync(lock, "utf8"));
+			});
+		}
+		expect(seen[0]).toMatch(new RegExp(`^${process.pid} [0-9a-f-]{36} `));
+		expect(seen[1]).not.toBe(seen[0]);
+	});
+
+	it("does not remove a lock that is no longer its own on release", async () => {
+		const lock = join(dir, ".lock");
+		await withFileLock(lock, async () => {
+			// Taken over as stale meanwhile, then created by another process.
+			writeFileSync(lock, "4243 other-owner\n");
+		});
+		expect(readFileSync(lock, "utf8")).toBe("4243 other-owner\n");
+	});
+
+	it("removeIfStale removes an old lock and keeps a fresh one", () => {
+		const lock = join(dir, ".lock");
+		writeFileSync(lock, "4242 dead\n");
+		const old = new Date(Date.now() - 31_000);
+		utimesSync(lock, old, old);
+		removeIfStale(lock, 30_000);
+		expect(existsSync(lock)).toBe(false);
+		writeFileSync(lock, "4242 alive\n");
+		removeIfStale(lock, 30_000);
+		expect(readFileSync(lock, "utf8")).toBe("4242 alive\n");
+		// No leftovers of the rename.
+		expect(readdirSync(dir)).toEqual([".lock"]);
+	});
+
 	it("waits for a fresh lock and gives up with lock_timeout", async () => {
 		const lock = join(dir, ".lock");
 		mkdirSync(dir, { recursive: true });
@@ -261,5 +297,53 @@ describe("withFileLock", () => {
 			withFileLock(lock, async () => "never", { timeoutMs: 200, retryMs: 20 }),
 		).rejects.toMatchObject({ code: "lock_timeout", retryable: true });
 		expect(existsSync(lock)).toBe(true);
+	});
+});
+
+describe("getBearer refresh", () => {
+	it("a refresh that hangs is given up within its timeout and the lock is released", async () => {
+		const lock = join(dir, ".lock");
+		const file = new FileStore(join(dir, "credentials.json"));
+		const profile = {
+			apiUrl: "https://api.x",
+			auth: "oidc" as const,
+			issuer: "https://kc.x/realms/sbx",
+		};
+		await file.set(
+			credentialName("default", profile),
+			JSON.stringify({
+				kind: "oidc",
+				issuer: profile.issuer,
+				clientId: "sbx-cli",
+				accessToken: "old",
+				refreshToken: "r1",
+				expiresAt: new Date(Date.now() - 1000).toISOString(),
+			}),
+		);
+		// Never answers; only the request's signal ends it.
+		const hanging = (req: Request) =>
+			new Promise<Response>((_, reject) => {
+				req.signal.addEventListener("abort", () => reject(req.signal.reason));
+			});
+		const started = Date.now();
+		await expect(
+			getBearer({
+				profileName: "default",
+				profile,
+				store: file,
+				lockPath: lock,
+				fetch: hanging,
+				env: {},
+				refreshTimeoutMs: 200,
+			}),
+		).rejects.toMatchObject({ code: "network_error", retryable: true });
+		expect(Date.now() - started).toBeLessThan(2000);
+		expect(existsSync(lock)).toBe(false);
+	});
+
+	it("the refresh timeout is below the stale age of the lock", async () => {
+		const { LOCK_STALE_MS } = await import("../src/auth/lock.ts");
+		const { REFRESH_TIMEOUT_MS } = await import("../src/auth/token.ts");
+		expect(REFRESH_TIMEOUT_MS).toBeLessThan(LOCK_STALE_MS);
 	});
 });

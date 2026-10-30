@@ -7,37 +7,34 @@
 //   `GET /v1/me`.
 // The credentials go to the credential store, the profile (apiUrl, team,
 // auth, issuer, store) to config.json, and the profile becomes current.
+// Re-login into a profile replaces its old entry: the old secret is deleted
+// when its entry name or its store differs from the new one, and an old
+// Keycloak refresh token is revoked (best effort).
 // Output: in JSON mode `{"event":"device_code",…}` (device flow) and last
 // `{"event":"logged_in","profile","apiUrl","me"}`.
 
 import { spawn } from "node:child_process";
 import { Sbx } from "@sbx/sdk";
 import type { Command } from "commander";
-import { deviceLogin } from "../auth/device-grant.ts";
+import { deviceLogin, revokeRefreshToken } from "../auth/device-grant.ts";
 import { withFileLock } from "../auth/lock.ts";
 import {
 	credentialName,
 	OIDC_CLIENT_ID,
+	parseCredential,
 	type StoredCredential,
 } from "../auth/token.ts";
 import { type Profile, readConfig, writeConfig } from "../config.ts";
 import type { Context } from "../context.ts";
 import { CliError, usageError } from "../exit-codes.ts";
 import { getJson } from "../http.ts";
+import { readAll } from "../io.ts";
 import type { Runner } from "../program.ts";
 import { CLI_VERSION } from "./version.ts";
 import { humanMe, type Me } from "./whoami.ts";
 
 interface MetaOidc {
 	oidc: { issuer: string; clientId: string; audience: string } | null;
-}
-
-export async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
-	const chunks: Buffer[] = [];
-	for await (const c of stream) {
-		chunks.push(typeof c === "string" ? Buffer.from(c) : (c as Buffer));
-	}
-	return Buffer.concat(chunks).toString("utf8");
 }
 
 /** GET /v1/me with this bearer (and team), without the stored credentials. */
@@ -58,13 +55,20 @@ async function meWith(
 	return sbx.me();
 }
 
+/** The program that opens `url` in the browser (Windows: no cmd parsing of the URL). */
+export function browserCommand(
+	platform: NodeJS.Platform,
+	url: string,
+): [string, string[]] {
+	if (platform === "darwin") return ["open", [url]];
+	if (platform === "win32") {
+		return ["rundll32", ["url.dll,FileProtocolHandler", url]];
+	}
+	return ["xdg-open", [url]];
+}
+
 function openBrowser(url: string): void {
-	const [cmd, args] =
-		process.platform === "darwin"
-			? ["open", [url]]
-			: process.platform === "win32"
-				? ["cmd", ["/c", "start", "", url]]
-				: ["xdg-open", [url]];
+	const [cmd, args] = browserCommand(process.platform, url);
 	try {
 		const p = spawn(cmd, args, { stdio: "ignore", detached: true });
 		p.on("error", () => {});
@@ -133,24 +137,49 @@ async function login(
 	const name = r.profileName;
 	const old = r.profile;
 	const store = ctx.store(profile);
+	const oldEntry = old === undefined ? undefined : credentialName(name, old);
+	const oldStore = old === undefined ? undefined : ctx.storeOf(old);
+	const oldCred =
+		oldEntry === undefined || oldStore === undefined
+			? null
+			: parseCredential(await oldStore.get(oldEntry).catch(() => null));
 	await withFileLock(ctx.paths.lock, async () => {
-		if (
-			old !== undefined &&
-			credentialName(name, old) !== credentialName(name, profile)
-		) {
-			await ctx
-				.store(old)
-				.delete(credentialName(name, old))
-				.catch(() => {});
-		}
-		await store.set(credentialName(name, profile), JSON.stringify(cred));
+		const entry = credentialName(name, profile);
+		await store.set(entry, JSON.stringify(cred));
 		profile.credentialStore = store.kind;
+		// An unknown old store (config of an older CLI) under the same name
+		// is the entry just written: leave it.
+		const otherStore =
+			old?.credentialStore !== undefined && old.credentialStore !== store.kind;
+		if (
+			oldEntry !== undefined &&
+			oldStore !== undefined &&
+			(oldEntry !== entry || otherStore)
+		) {
+			await oldStore.delete(oldEntry).catch(() => {});
+		}
 		const config = readConfig(ctx.paths);
 		config.profiles[name] = profile;
 		config.current = name;
 		writeConfig(ctx.paths, config);
 	});
 	ctx.reload();
+	if (
+		oldCred?.kind === "oidc" &&
+		!(cred.kind === "oidc" && cred.refreshToken === oldCred.refreshToken)
+	) {
+		await revokeRefreshToken({
+			issuer: oldCred.issuer,
+			clientId: oldCred.clientId,
+			refreshToken: oldCred.refreshToken,
+			fetch: ctx.fetch,
+			signal: AbortSignal.timeout(10_000),
+		}).catch((err: unknown) => {
+			ctx.out.warn(
+				`could not revoke the previous refresh token at Keycloak: ${(err as Error).message}`,
+			);
+		});
+	}
 	if (store.kind === "file") {
 		ctx.out.warn(
 			`credentials are stored in ${ctx.paths.credentials} (mode 0600), not in the OS keychain`,

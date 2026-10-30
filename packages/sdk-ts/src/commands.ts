@@ -13,12 +13,7 @@ import { SbxError } from "./errors.ts";
 import type { components } from "./gen/v1.d.ts";
 import { newIdempotencyKey } from "./ids.ts";
 import { ndjsonObjects } from "./ndjson.ts";
-import {
-	DEFAULT_RETRY_BUDGET_MS,
-	isRetryable,
-	retryDelayMs,
-	sleep,
-} from "./retry.ts";
+import { isRetryable, retryDelayMs, sleep } from "./retry.ts";
 
 export type CommandData = components["schemas"]["Command"];
 export type Encoding = "utf8" | "base64";
@@ -491,7 +486,7 @@ async function* resumable<E extends Encoding>(
 	let lastError: unknown;
 	// Until the command id is known, every attempt is a (keyed) POST: the
 	// start phase as a whole is bounded by the call's retry budget.
-	const startBudget = plan.call.retryBudgetMs ?? DEFAULT_RETRY_BUDGET_MS;
+	const startBudget = plan.call.retryBudgetMs ?? sb.core.retryBudgetMs;
 	const startedAt = Date.now();
 	for (;;) {
 		signal?.throwIfAborted();

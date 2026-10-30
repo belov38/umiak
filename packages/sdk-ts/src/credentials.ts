@@ -108,7 +108,7 @@ export async function resolveCredentials(
 		return withTeam(
 			{
 				baseUrl: trimSlash(url),
-				getToken: (_force, signal) => abortable(provider(), signal),
+				getToken: (force = false, signal) => abortable(provider(force), signal),
 			},
 			team,
 		);
@@ -120,11 +120,13 @@ export async function resolveCredentials(
 function tokenSource(
 	opts: SbxOptions,
 	env: Env,
-): (() => Promise<string>) | undefined {
+): ((force: boolean) => Promise<string>) | undefined {
 	const explicit = nonEmpty(opts.apiKey) ?? nonEmpty(opts.accessToken);
 	if (explicit !== undefined) return async () => explicit;
 	const tokenProvider = opts.tokenProvider;
-	if (tokenProvider) return () => callTokenProvider(tokenProvider);
+	if (tokenProvider) {
+		return (force) => callTokenProvider(() => tokenProvider({ force }));
+	}
 	const fromEnv = nonEmpty(env.SBX_API_KEY) ?? nonEmpty(env.SBX_ACCESS_TOKEN);
 	if (fromEnv !== undefined) return async () => fromEnv;
 	return undefined;

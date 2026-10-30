@@ -386,6 +386,39 @@ describe("request bodies", () => {
 	});
 });
 
+describe("retryBudgetMs option", () => {
+	it("is the default budget of every call; a call's own budget wins", async () => {
+		const always503 = () => apiError(503, "agent_unavailable", true);
+		const f = fakeFetch(...Array.from({ length: 50 }, always503));
+		const raw = createRawClient({
+			baseUrl: API,
+			fetch: f.fetch,
+			env: {},
+			apiKey: "sbx_test",
+			retryBudgetMs: 1500,
+		});
+		const start = Date.now();
+		const p = raw.GET("/v1/me").catch((e: unknown) => e);
+		await vi.runAllTimersAsync();
+		expect(await p).toMatchObject({ code: "agent_unavailable" });
+		// Every wait fits in 1.5 s (the default would be 60 s).
+		expect(f.seen.length).toBeGreaterThanOrEqual(2);
+		expect(Date.now() - start).toBeLessThanOrEqual(1500);
+		const g = fakeFetch(...Array.from({ length: 50 }, always503));
+		const raw2 = createRawClient({
+			baseUrl: API,
+			fetch: g.fetch,
+			env: {},
+			apiKey: "sbx_test",
+			retryBudgetMs: 1500,
+		});
+		const q = raw2.GET("/v1/me", { retryBudgetMs: 0 }).catch((e: unknown) => e);
+		await vi.runAllTimersAsync();
+		await q;
+		expect(g.seen).toHaveLength(1);
+	});
+});
+
 describe("malformed answers and token providers", () => {
 	it("a 2xx with a body that is not JSON is unexpected_response", async () => {
 		const f = fakeFetch(
@@ -461,6 +494,22 @@ describe("401 token_expired", () => {
 			"Bearer jwt-1",
 			"Bearer jwt-2",
 		]);
+	});
+
+	it("the tokenProvider is told to force a refresh after token_expired", async () => {
+		const f = fakeFetch(
+			apiError(401, "token_expired", false),
+			json(200, { ok: true }),
+		);
+		const calls: (boolean | undefined)[] = [];
+		const raw = client(f.fetch, {
+			tokenProvider: async (o) => {
+				calls.push(o?.force);
+				return `jwt-${calls.length}`;
+			},
+		});
+		await raw.GET("/v1/me");
+		expect(calls).toEqual([false, true]);
 	});
 
 	it("a second token_expired is returned to the caller", async () => {

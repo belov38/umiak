@@ -583,7 +583,7 @@ export class Files {
 			{
 				method: "PUT",
 				signal: call.signal,
-				budgetMs: call.retryBudgetMs,
+				budgetMs: call.retryBudgetMs ?? this.#sb.core.retryBudgetMs,
 			},
 		);
 	}
@@ -630,7 +630,11 @@ export class Files {
 					tar.kill();
 				}
 			},
-			{ method: "GET", signal: call.signal, budgetMs: call.retryBudgetMs },
+			{
+				method: "GET",
+				signal: call.signal,
+				budgetMs: call.retryBudgetMs ?? this.#sb.core.retryBudgetMs,
+			},
 		);
 	}
 }
