@@ -8,7 +8,12 @@ import { IDEMPOTENCY_KEY_RE } from "../src/idempotency.ts";
 import { createLogger } from "../src/log.ts";
 import { publishedJsonSchemaOf, selectTools } from "../src/registry.ts";
 import { lintToolName, lintToolSchema } from "../src/schema-rules.ts";
-import { ALL_TOOLS, sandboxView, waitSandbox } from "../src/tools/index.ts";
+import {
+	CATALOG_TOOLS,
+	SANDBOX_TOOLS,
+	sandboxView,
+	waitSandbox,
+} from "../src/tools/index.ts";
 import { sandboxCreate } from "../src/tools/sandboxes.ts";
 import { FAKE_TOKENS } from "./fake-api/index.ts";
 import { type Harness, startHarness } from "./helpers/harness.ts";
@@ -52,9 +57,12 @@ const VIEW_KEYS = [
 	"idempotency_key",
 ];
 
+/** The tools of 8.1-8.2; later toolsets have their own tests. */
+const TOOLS = [...CATALOG_TOOLS, ...SANDBOX_TOOLS];
+
 describe("tool list", () => {
 	it("has the 11 tools of 8.1-8.2 in spec order with the annotations of the tables", () => {
-		expect(ALL_TOOLS.map((t) => t.name)).toEqual([
+		expect(TOOLS.map((t) => t.name)).toEqual([
 			"limits_get",
 			"templates_list",
 			"sandbox_create",
@@ -81,7 +89,7 @@ describe("tool list", () => {
 			sandbox_recover: [false, false, true, false],
 			sandbox_delete: [false, true, true, false],
 		};
-		for (const t of ALL_TOOLS) {
+		for (const t of TOOLS) {
 			const a = t.annotations;
 			expect(
 				[a.readOnlyHint, a.destructiveHint, a.idempotentHint, a.openWorldHint],
@@ -93,7 +101,7 @@ describe("tool list", () => {
 
 	it("scopes are exactly the table", () => {
 		const scopes = Object.fromEntries(
-			ALL_TOOLS.map((t) => [t.name, [...t.scopes]]),
+			TOOLS.map((t) => [t.name, [...t.scopes]]),
 		);
 		expect(scopes).toEqual({
 			limits_get: [],
@@ -111,13 +119,13 @@ describe("tool list", () => {
 	});
 
 	it("schemas pass the 7.2 linter; create, resume and fork take no secrets", () => {
-		for (const t of ALL_TOOLS) {
+		for (const t of TOOLS) {
 			expect(lintToolName(t.name)).toEqual([]);
 			const schema = publishedJsonSchemaOf(t, false);
 			expect(lintToolSchema(t.name, schema)).toEqual([]);
 		}
 		for (const name of ["sandbox_create", "sandbox_resume", "sandbox_fork"]) {
-			const t = ALL_TOOLS.find((d) => d.name === name);
+			const t = TOOLS.find((d) => d.name === name);
 			const props = Object.keys(
 				(publishedJsonSchemaOf(t as never, false).properties ?? {}) as object,
 			);
@@ -129,7 +137,7 @@ describe("tool list", () => {
 
 	it("env says non-secret values only, every field has a description", () => {
 		const props = (name: string) => {
-			const t = ALL_TOOLS.find((d) => d.name === name);
+			const t = TOOLS.find((d) => d.name === name);
 			return publishedJsonSchemaOf(t as never, false).properties as Record<
 				string,
 				{ description?: string }
@@ -141,13 +149,13 @@ describe("tool list", () => {
 	});
 
 	it("descriptions stay short", () => {
-		const total = ALL_TOOLS.reduce((n, t) => n + t.description.length, 0);
-		for (const t of ALL_TOOLS) expect(t.description.length).toBeLessThan(900);
-		expect(total / ALL_TOOLS.length).toBeLessThan(700);
+		const total = TOOLS.reduce((n, t) => n + t.description.length, 0);
+		for (const t of TOOLS) expect(t.description.length).toBeLessThan(900);
+		expect(total / TOOLS.length).toBeLessThan(700);
 	});
 
 	it("the published list stays within its share of the 40 000 character budget", async () => {
-		const { conn } = await start();
+		const { conn } = await start({ server: { tools: TOOLS } });
 		const listed = await conn.client.listTools();
 		// 11 of the 38 tools; Task 13 checks the whole list against 40 000.
 		expect(JSON.stringify(listed).length).toBeLessThanOrEqual(
@@ -158,7 +166,7 @@ describe("tool list", () => {
 
 	it("pinned mode hides create, list, fork and delete", () => {
 		const names = selectTools({
-			tools: ALL_TOOLS,
+			tools: TOOLS,
 			pinnedSandbox: "sb_1",
 		}).map((t) => t.name);
 		expect(names).toEqual([
@@ -174,7 +182,7 @@ describe("tool list", () => {
 
 	it("a team key sees the tools its scopes allow", () => {
 		const names = selectTools({
-			tools: ALL_TOOLS,
+			tools: TOOLS,
 			principal: { kind: "team_key", scopes: ["sandboxes:read"] },
 		}).map((t) => t.name);
 		expect(names).toEqual([

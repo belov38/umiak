@@ -1,4 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import v8 from "node:v8";
+import vm from "node:vm";
 import {
 	afterEach,
 	beforeEach,
@@ -311,6 +315,40 @@ describe("retries", () => {
 			.catch((e: unknown) => e);
 		expect(err).toMatchObject({ name: "AbortError" });
 		expect(f.seen).toHaveLength(1);
+	});
+
+	it("an abort still reaches a fetch in flight after a garbage collection", async () => {
+		vi.useRealTimers();
+		// undici's Request follows its signal through a WeakRef: a Request of
+		// the chain that nothing holds is collected and the abort is lost.
+		v8.setFlagsFromString("--expose-gc");
+		const gc = vm.runInNewContext("gc") as () => void;
+		const server = createServer((_req, res) => {
+			setTimeout(() => res.end("{}"), 3000).unref();
+		});
+		await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+		const { port } = server.address() as AddressInfo;
+		try {
+			const raw = createRawClient({
+				baseUrl: `http://127.0.0.1:${port}`,
+				apiKey: "sbx_test",
+				env: {},
+			});
+			const ac = new AbortController();
+			const started = Date.now();
+			const p = raw
+				.POST("/v1/sandboxes", { body: {}, signal: ac.signal })
+				.catch((e: unknown) => e);
+			await new Promise((r) => setTimeout(r, 200));
+			gc();
+			await new Promise((r) => setTimeout(r, 100));
+			ac.abort(new Error("caller gave up"));
+			expect(await p).toMatchObject({ message: "caller gave up" });
+			expect(Date.now() - started).toBeLessThan(1500);
+		} finally {
+			server.closeAllConnections();
+			server.close();
+		}
 	});
 
 	it("an error body without the envelope becomes unexpected_response", async () => {

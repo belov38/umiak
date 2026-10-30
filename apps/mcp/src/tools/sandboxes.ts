@@ -10,6 +10,7 @@ import { defineTool } from "../registry.ts";
 import { keyFor, withUnknownOutcome } from "./keyed.ts";
 import {
 	getSandbox,
+	resolveSandboxId,
 	SANDBOX_PATH,
 	sandboxResult,
 	sandboxView,
@@ -112,26 +113,6 @@ async function finishAction(
 			: { idempotencyKey: o.idempotencyKey }),
 		notes,
 	});
-}
-
-/**
- * The id of the sandbox a reference points to. An id is taken as it is; a
- * slug costs one read. When the read is not allowed or finds nothing, the
- * typed value stands (the action itself then answers 403 or 404).
- */
-async function resolveSandboxId(
-	ctx: ToolContext,
-	ref: string,
-): Promise<string> {
-	if (ref.toLowerCase().startsWith("sb_")) return ref;
-	try {
-		return (await getSandbox(ctx, ref)).id;
-	} catch (err) {
-		if (err instanceof SbxError && (err.status === 403 || err.status === 404)) {
-			return ref;
-		}
-		throw err;
-	}
 }
 
 /** `{K: v}` and a list of names to remove -> the API's `{K: v | null}`. */

@@ -2,9 +2,11 @@
 // Each toolset task appends its tools in the order of the spec.
 import type { ToolDef } from "../registry.ts";
 import { CATALOG_TOOLS } from "./catalog.ts";
+import { COMMAND_TOOLS } from "./commands.ts";
 import { SANDBOX_TOOLS } from "./sandboxes.ts";
 
 export { CATALOG_TOOLS } from "./catalog.ts";
+export { COMMAND_TOOLS } from "./commands.ts";
 export {
 	sandboxView,
 	waitSandbox,
@@ -14,4 +16,5 @@ export { SANDBOX_TOOLS } from "./sandboxes.ts";
 export const ALL_TOOLS: readonly ToolDef[] = [
 	...CATALOG_TOOLS,
 	...SANDBOX_TOOLS,
+	...COMMAND_TOOLS,
 ];

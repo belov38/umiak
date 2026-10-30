@@ -83,7 +83,12 @@ export async function startHarness(o: HarnessOptions = {}): Promise<Harness> {
 	const api = await startFakeApi(o.api);
 	const requests: RecordedRequest[] = [];
 	const recordingFetch: typeof fetch = async (input, init) => {
-		const req = new Request(input, init);
+		// Fetch the SDK's own Request (it holds it while the fetch runs): a copy
+		// nothing holds would lose its abort after a garbage collection.
+		const req =
+			input instanceof Request && init === undefined
+				? input
+				: new Request(input, init);
 		const text = await req.clone().text();
 		requests.push({
 			method: req.method,

@@ -48,12 +48,17 @@ export async function withUnknownOutcome<T>(
 		return await send();
 	} catch (err) {
 		if (!outcomeUnknown(err, ctx)) throw err;
-		throw new ToolError({
-			code: "deadline_exceeded",
-			message: "the API did not answer in time",
-			retryable: true,
-			hint: "the action may have started; call again with this idempotency_key to attach to it.",
-			idempotencyKey: modelKey,
-		});
+		throw unknownOutcomeError(modelKey);
 	}
+}
+
+/** `deadline_exceeded` for an action that may have started, with the key to attach to it. */
+export function unknownOutcomeError(modelKey: string): ToolError {
+	return new ToolError({
+		code: "deadline_exceeded",
+		message: "the API did not answer in time",
+		retryable: true,
+		hint: "the action may have started; call again with this idempotency_key to attach to it.",
+		idempotencyKey: modelKey,
+	});
 }

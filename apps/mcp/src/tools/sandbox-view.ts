@@ -1,7 +1,7 @@
 // The sandbox as the model sees it (S11 8.2 "Форма ответа") and the wait for
 // a sandbox state by long-poll (S7 5.10, S11 7.5).
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import type { OperationData, SandboxData } from "@sbx/sdk";
+import { type OperationData, type SandboxData, SbxError } from "@sbx/sdk";
 import type { ToolContext } from "../context.ts";
 import { toolText } from "../output/result.ts";
 
@@ -127,6 +127,26 @@ export async function getSandbox(
 		...ctx.call,
 	});
 	return data;
+}
+
+/**
+ * The id of the sandbox a reference points to. An id is taken as it is; a
+ * slug costs one read. When the read is not allowed or finds nothing, the
+ * typed value stands (the action itself then answers 403 or 404).
+ */
+export async function resolveSandboxId(
+	ctx: ToolContext,
+	ref: string,
+): Promise<string> {
+	if (ref.toLowerCase().startsWith("sb_")) return ref;
+	try {
+		return (await getSandbox(ctx, ref)).id;
+	} catch (err) {
+		if (err instanceof SbxError && (err.status === 403 || err.status === 404)) {
+			return ref;
+		}
+		throw err;
+	}
 }
 
 /** What to tell the model when the sandbox is not in the state it waited for; undefined when it is. */

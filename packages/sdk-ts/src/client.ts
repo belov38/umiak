@@ -187,6 +187,15 @@ export interface ClientCore {
 /** Default of `SbxOptions.streamIdleTimeoutMs` (S7 §9.7: 45 s without lines). */
 export const STREAM_IDLE_TIMEOUT_MS = 45_000;
 
+/**
+ * Requests whose fetch has not answered yet. undici's Request follows the
+ * signal it was made with through a WeakRef: when nothing holds the Request
+ * handed to fetch, a garbage collection during the fetch unlinks it and a
+ * later abort (the caller's signal, the header timeout) never reaches the
+ * connection.
+ */
+const IN_FLIGHT = new Set<Request>();
+
 export function createRawClient(opts: SbxOptions = {}): RawClient {
 	return createClientCore(opts).raw;
 }
@@ -269,14 +278,18 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 							}, headerTimeoutMs)
 						: undefined;
 				// Redirects are not followed (like the Python SDK): a 3xx is an error.
+				// The signal comes from `request` (held by this closure), not from
+				// the clone: see IN_FLIGHT.
 				const init: RequestInit & { duplex?: "half" } = {
-					signal: AbortSignal.any([base.signal, timeout.signal]),
+					signal: AbortSignal.any([request.signal, timeout.signal]),
 					redirect: "manual",
 				};
 				if (base.body !== null) init.duplex = "half";
+				const sent = new Request(base, init);
+				IN_FLIGHT.add(sent);
 				let res: Response;
 				try {
-					res = await fetchImpl(new Request(base, init));
+					res = await fetchImpl(sent);
 				} catch (err) {
 					if (signal?.aborted) throw signal.reason;
 					if (timedOut) {
@@ -290,6 +303,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 					throw networkError(err, request.method, keyed);
 				} finally {
 					clearTimeout(timer);
+					IN_FLIGHT.delete(sent);
 				}
 				seen.response = res;
 				if (!res.ok) throw await errorFromResponse(res);

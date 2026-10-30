@@ -76,6 +76,11 @@ export interface RunOptions<E extends Encoding = "utf8">
 	encoding?: E;
 	/** Called once the command is known (before its first event). */
 	onStart?: (command: Command) => void;
+	/**
+	 * Called on the `started` frame of POST /commands; `replayed` is true when
+	 * the api attached to a command started earlier with the same key.
+	 */
+	onStarted?: (started: { commandId: string; replayed: boolean }) => void;
 }
 
 export interface StartOptions extends CommandSpec, CallOptions {
@@ -415,6 +420,7 @@ export function runCommand<E extends Encoding = "utf8">(
 		offsets: { stdoutOffset: 0, stderrOffset: 0 },
 		call,
 		...(opts.onStart ? { onStart: opts.onStart } : {}),
+		...(opts.onStarted ? { onStarted: opts.onStarted } : {}),
 		async start(signal, retryBudgetMs) {
 			const { data, response } = await sb.core.raw.POST(COMMANDS, {
 				params: { path: { sandbox: sb.id } },
@@ -484,6 +490,7 @@ interface StreamPlan<E extends Encoding> {
 		retryBudgetMs: number,
 	) => Promise<{ body: ReadableStream<Uint8Array>; commandId: string | null }>;
 	onStart?: (command: Command) => void;
+	onStarted?: (started: { commandId: string; replayed: boolean }) => void;
 }
 
 const OFFSET_KEY = {
@@ -551,6 +558,12 @@ async function* resumable<E extends Encoding>(
 						if (commandId === undefined && typeof f.commandId === "string") {
 							commandId = f.commandId;
 							plan.onStart?.(new Command(sb, commandId));
+						}
+						if (typeof f.commandId === "string") {
+							plan.onStarted?.({
+								commandId: f.commandId,
+								replayed: f.replayed === true,
+							});
 						}
 						break;
 					case "attached":
