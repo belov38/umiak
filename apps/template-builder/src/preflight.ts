@@ -6,6 +6,7 @@ import {
 	assertPinnedKey,
 	UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT,
 } from "./image.ts";
+import { ISO_TOOL } from "./seed.ts";
 
 // `sbx-tpl preflight`: read-only checks before a build (spec S5 section 7.1)
 
@@ -33,10 +34,6 @@ async function check(
 			detail: err instanceof Error ? err.message : String(err),
 		};
 	}
-}
-
-export function isoTool(): "hdiutil" | "xorriso" {
-	return process.platform === "darwin" ? "hdiutil" : "xorriso";
 }
 
 function commandExists(cmd: string): boolean {
@@ -115,7 +112,7 @@ export async function preflight(d: {
 				detail: `node free ${freeMb} MB; ${pool}`,
 			};
 		}),
-		await check(`ISO tool ${isoTool()}`, async () => ({ ok: has(isoTool()) })),
+		await check(`ISO tool ${ISO_TOOL}`, async () => ({ ok: has(ISO_TOOL) })),
 		await check("Ubuntu cloud image signing key", async () => {
 			await assertPinnedKey(
 				readFileSync(d.keyFile, "utf8"),

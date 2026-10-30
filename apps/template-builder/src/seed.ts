@@ -166,8 +166,7 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 			.map(([k, v]) => `${k}=${shellQuote(v)}\n`)
 			.join(""),
 	);
-	// A fixed name: hdiutil keeps one dot per name, so "sbx-agent-0.1.0+x-linux-amd64.tar"
-	// would arrive mangled; the version travels in build/env.
+	// A fixed name; the version travels in build/env.
 	out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
 	out.set("build/agent.toml", renderAgentToml(i.tunnelUrl));
 	out.set(
@@ -188,17 +187,18 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 
 const VOLUME_LABEL = "cidata";
 
-/** Writes the tree to a temp directory and packs it into `out` (volume label `cidata`). */
+/** The ISO tool, on every platform. */
+export const ISO_TOOL = "xorriso";
+
+/**
+ * Writes the tree to a temp directory and packs it into `out` (volume label `cidata`) with xorriso,
+ * Rock Ridge and Joliet. Not hdiutil: it shortens names with dots or more than 30 characters
+ * (sudoers.d became sudoersd on a real build).
+ */
 export function makeIso(
 	files: Map<string, string | Buffer>,
 	out: string,
-	tool: "hdiutil" | "xorriso" = process.platform === "darwin"
-		? "hdiutil"
-		: "xorriso",
 ): void {
-	// hdiutil appends .iso to other names, which would leave `out` missing.
-	if (!out.endsWith(".iso"))
-		throw new Error(`ISO output path must end with .iso: ${out}`);
 	const root = mkdtempSync(join(tmpdir(), "sbx-seed-"));
 	try {
 		for (const [rel, data] of files) {
@@ -207,30 +207,27 @@ export function makeIso(
 			writeFileSync(p, data);
 		}
 		rmSync(out, { force: true });
-		const args =
-			tool === "hdiutil"
-				? [
-						"makehybrid",
-						"-iso",
-						"-joliet",
-						"-default-volume-name",
-						VOLUME_LABEL,
-						"-o",
-						out,
-						root,
-					]
-				: tool === "xorriso"
-					? ["-as", "mkisofs", "-V", VOLUME_LABEL, "-J", "-R", "-o", out, root]
-					: null;
-		if (args === null) throw new Error(`unknown ISO tool "${tool}"`);
+		const args = [
+			"-as",
+			"mkisofs",
+			"-V",
+			VOLUME_LABEL,
+			"-J",
+			"-R",
+			"-o",
+			out,
+			root,
+		];
 		try {
-			execFileSync(tool, args, { stdio: ["ignore", "pipe", "pipe"] });
+			execFileSync(ISO_TOOL, args, { stdio: ["ignore", "pipe", "pipe"] });
 		} catch (err) {
 			const e = err as NodeJS.ErrnoException & { stderr?: Buffer };
 			if (e.code === "ENOENT")
-				throw new Error(`ISO tool "${tool}" not found in PATH`);
+				throw new Error(
+					`${ISO_TOOL} not found in PATH (macOS: brew install xorriso; Debian/Ubuntu: apt install xorriso)`,
+				);
 			throw new Error(
-				`${tool} failed: ${e.stderr?.toString().trim() || e.message}`,
+				`${ISO_TOOL} failed: ${e.stderr?.toString().trim() || e.message}`,
 			);
 		}
 	} finally {

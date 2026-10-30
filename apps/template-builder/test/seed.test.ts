@@ -335,29 +335,19 @@ describe("renderSeed build tree", () => {
 });
 
 describe("makeIso", () => {
-	const hasHdiutil =
-		process.platform === "darwin" &&
-		spawnSync("hdiutil", ["help"]).error === undefined;
 	const hasXorriso = spawnSync("xorriso", ["-version"]).error === undefined;
 
-	it("requires an .iso output name", () => {
-		expect(() => makeIso(new Map([["a", "b"]]), join(tmp(), "seed"))).toThrow(
-			/\.iso/,
-		);
-	});
-
-	it("throws when the tool is missing", () => {
-		const bogus = "no-such-iso-tool" as unknown as "xorriso";
-		expect(() =>
-			makeIso(new Map([["a", "b"]]), join(tmp(), "x.iso"), bogus),
-		).toThrow();
-	});
-
-	it.skipIf(!hasHdiutil && !hasXorriso)(
-		"builds an ISO labelled cidata that keeps long names",
+	it.skipIf(!hasXorriso)(
+		"builds an ISO labelled cidata that keeps names with dots and long names",
 		() => {
 			const files = renderSeed(input());
-			files.set("build/steps/40-coding-agents.sh", "#!/usr/bin/env bash\n");
+			const deep = [
+				"build/steps/40-coding-agents.sh",
+				"build/files/etc/sudoers.d/90-sbx-user",
+				"build/files/etc/systemd/system/systemd-networkd-wait-online.service.d/10-sbx.conf",
+				"build/sbx-agent-0.1.0+20261030.abc1234-linux-amd64.tar",
+			];
+			for (const p of deep) files.set(p, "x\n");
 			const out = join(tmp(), "seed.iso");
 			makeIso(files, out);
 			expect(existsSync(out)).toBe(true);
@@ -371,29 +361,22 @@ describe("makeIso", () => {
 				.subarray(pvd + 40, pvd + 72)
 				.toString("latin1")
 				.replace(/[\0 ]+$/, "");
-			// hdiutil upper-cases the ISO9660 id; cloud-init accepts CIDATA and cidata.
-			expect(label.toLowerCase()).toBe("cidata");
+			expect(label).toBe("cidata");
 
-			// Joliet supplementary descriptor (type 2): exact label, UCS-2BE names.
-			let jolietLabel: string | undefined;
-			for (let off = pvd; off + 2048 <= iso.length; off += 2048) {
-				if (iso[off] === 255) break;
-				if (iso[off] === 2)
-					jolietLabel = new TextDecoder("utf-16be")
-						.decode(iso.subarray(off + 40, off + 72))
-						.replace(/[\0\s]+$/, "");
-			}
-			expect(jolietLabel).toBe("cidata");
-			const ucs2 = (s: string) => Buffer.from(s, "utf16le").swap16();
-			for (const name of [
-				"user-data",
-				"meta-data",
-				"network-config",
-				"40-coding-agents.sh",
-				"sbx-agent.tar",
-			]) {
-				expect(iso.includes(ucs2(name)), name).toBe(true);
-			}
+			// The Rock Ridge tree as Linux mounts it (xorriso lists it back).
+			const ls = spawnSync(
+				"xorriso",
+				["-indev", out, "-find", "/", "-type", "f", "-exec", "echo"],
+				{ encoding: "utf8" },
+			);
+			const listed = new Set(
+				ls.stdout
+					.split("\n")
+					.map((l) => l.trim().replace(/^'|'$/g, "").replace(/^\//, ""))
+					.filter(Boolean),
+			);
+			for (const name of ["user-data", "meta-data", "network-config", ...deep])
+				expect(listed.has(name), name).toBe(true);
 		},
 	);
 });

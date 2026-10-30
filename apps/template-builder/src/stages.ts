@@ -253,7 +253,6 @@ export async function stageSeed(
 	const dir = mkdtempSync(join(tmpdir(), "sbx-tpl-seed-"));
 	try {
 		const name = seedName(st.m);
-		// hdiutil insists on the .iso suffix; the upload gets the import name.
 		const path = join(dir, "seed.iso");
 		deps.makeIso(renderSeed(input), path);
 		const size = statSync(path).size;
