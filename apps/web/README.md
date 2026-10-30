@@ -107,6 +107,12 @@ the SDK default is 60 s), so a missing api shows "API unavailable" quickly.
 - `src/lib/errors.ts`: API error → text (`describeError`), `isApiUnavailable`
   (no answer, or a 502/503/504 page without the API envelope, or the api
   shutting down). `src/components/app/query-error.tsx` renders it for a query.
+- `src/lib/idempotency.ts`: create and fork keep their Idempotency-Key
+  (`slotFor`/`slotAfter`, per form or source sandbox) while the body is the
+  same and the outcome of the last attempt is unknown (no answer, a page
+  without the API envelope, `server_shutting_down`, `details.outcome:
+  "unknown"`); a success, a definitive API error or a changed body gives a
+  new key. A manual retry therefore cannot create a second sandbox.
 - `src/lib/client-call.ts`: `attempt(fn)` for server actions and SDK calls
   from handlers and transitions: an exception becomes a toast, not the error
   boundary or an unhandled rejection; nothing is logged (bodies may hold

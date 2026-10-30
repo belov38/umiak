@@ -1,13 +1,13 @@
 "use client";
 // Actions of a sandbox row (S8 §9.4): Stop / Resume by state, and a menu
 // with Fork, Open terminal, Delete. A blocked sandbox keeps stop and delete
-// only (S8 §11). After an action the list and the quota refresh at once.
+// only (S8 §11): Resume, Fork and Open terminal are disabled. After an action the list and the quota refresh at once.
 import type { SandboxData } from "@sbx/sdk";
 import { useQueryClient } from "@tanstack/react-query";
 import { EllipsisIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSbx } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
+import { describeError } from "@/lib/errors";
+import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
 import { canDelete, canFork, canResume, canStop } from "@/lib/sandboxes";
 import { DeleteSandboxDialog } from "./delete-dialog";
 import { sandboxHref } from "./links";
@@ -46,6 +48,7 @@ export function RowActions({
 	const refresh = useRefreshSandboxes(teamId);
 	const [busy, setBusy] = useState(false);
 	const [deleting, setDeleting] = useState(false);
+	const forkKey = useRef<IdempotencySlot | null>(null);
 	const path = { params: { path: { sandbox: sandbox.id } } };
 
 	const run = async <T,>(
@@ -72,17 +75,30 @@ export function RowActions({
 			`Resuming ${sandbox.slug}`,
 		);
 	const fork = async () => {
-		// The SDK sets the Idempotency-Key of the fork.
-		const r = await run(async () => {
+		const body = {};
+		// One key per source sandbox and body until the outcome is known, so
+		// a second click after a lost answer cannot make a second copy.
+		const slot = slotFor(forkKey.current, { sandbox: sandbox.id, body });
+		setBusy(true);
+		let slug: string;
+		try {
 			const { data } = await sbx.raw.POST("/v1/sandboxes/{sandbox}/fork", {
 				...path,
-				body: {},
+				body,
+				idempotencyKey: slot.key,
 			});
-			return data;
-		});
-		if (r === undefined) return;
-		toast.success(`Forking ${sandbox.slug} into ${r.sandbox.slug}`);
-		router.push(sandboxHref(teamId, r.sandbox.slug));
+			forkKey.current = slotAfter(slot, undefined);
+			slug = data.sandbox.slug;
+		} catch (e) {
+			forkKey.current = slotAfter(slot, e);
+			toast.error(describeError(e).message);
+			return;
+		} finally {
+			setBusy(false);
+			await attempt(refresh);
+		}
+		toast.success(`Forking ${sandbox.slug} into ${slug}`);
+		router.push(sandboxHref(teamId, slug));
 	};
 
 	return (
@@ -115,17 +131,19 @@ export function RowActions({
 					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" className="min-w-40">
-					{canResume(sandbox) && (
-						<DropdownMenuItem onSelect={resume}>Resume</DropdownMenuItem>
-					)}
 					<DropdownMenuItem disabled={!canFork(sandbox)} onSelect={fork}>
 						Fork
 					</DropdownMenuItem>
-					<DropdownMenuItem asChild disabled={sandbox.state !== "ready"}>
-						<Link href={sandboxHref(teamId, sandbox.slug, "terminal")}>
-							Open terminal
-						</Link>
-					</DropdownMenuItem>
+					{sandbox.state === "ready" && !sandbox.blocked ? (
+						<DropdownMenuItem asChild>
+							<Link href={sandboxHref(teamId, sandbox.slug, "terminal")}>
+								Open terminal
+							</Link>
+						</DropdownMenuItem>
+					) : (
+						// No link at all: a disabled item must not navigate.
+						<DropdownMenuItem disabled>Open terminal</DropdownMenuItem>
+					)}
 					<DropdownMenuSeparator />
 					<DropdownMenuItem
 						variant="destructive"

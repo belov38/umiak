@@ -62,9 +62,12 @@ export function SecretDialog({
 			{shown && (
 				<DialogContent
 					className="sm:max-w-2xl"
+					showCloseButton={false}
 					data-testid="key-secret-dialog"
-					// A click outside must not lose a secret that is shown only once.
+					// Neither a click outside nor Escape may lose a secret that is
+					// shown only once: it closes through "I have copied it" only.
 					onInteractOutside={(e) => e.preventDefault()}
+					onEscapeKeyDown={(e) => e.preventDefault()}
 				>
 					<DialogHeader>
 						<DialogTitle>

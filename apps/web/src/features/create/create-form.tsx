@@ -12,6 +12,7 @@ import {
 	type ReactNode,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { QueryError } from "@/components/app/query-error";
@@ -25,6 +26,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { useSbx } from "@/lib/api";
+import { attempt } from "@/lib/client-call";
 import {
 	type CreateFormState,
 	type CreatePrefill,
@@ -36,6 +38,7 @@ import {
 	toCreateRequest,
 } from "@/lib/create-form";
 import { describeError, type ErrorView } from "@/lib/errors";
+import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
 import { teamPath } from "@/lib/team-path";
 import { cn } from "@/lib/utils";
 import { sandboxHref } from "../sandboxes/links";
@@ -125,6 +128,7 @@ export function CreateSandboxForm({
 	const [errors, setErrors] = useState<FormErrors>({});
 	const [submitError, setSubmitError] = useState<ErrorView | null>(null);
 	const [pending, setPending] = useState(false);
+	const idempotency = useRef<IdempotencySlot | null>(null);
 	const patch = (p: Partial<CreateFormState>) =>
 		setForm((f) => ({ ...f, ...p }));
 
@@ -206,18 +210,30 @@ export function CreateSandboxForm({
 		}
 		setErrors({});
 		setPending(true);
+		// The same key while the body is unchanged, so a retry after an
+		// unknown outcome cannot create a second sandbox (lib/idempotency).
+		const slot = slotFor(idempotency.current, r.body);
+		let slug: string;
 		try {
 			// Retryable errors are retried within the dashboard's budget (api.ts).
-			const sb = await sbx.sandboxes.create(r.body);
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ["sandboxes", teamId] }),
-				queryClient.invalidateQueries({ queryKey: ["limits", teamId] }),
-			]);
-			router.push(sandboxHref(teamId, sb.data.slug));
+			const sb = await sbx.sandboxes.create(r.body, {
+				idempotencyKey: slot.key,
+			});
+			idempotency.current = slotAfter(slot, undefined);
+			slug = sb.data.slug;
 		} catch (err) {
+			idempotency.current = slotAfter(slot, err);
 			setSubmitError(describeError(err));
 			setPending(false);
+			return;
 		}
+		await attempt(() =>
+			Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["sandboxes", teamId] }),
+				queryClient.invalidateQueries({ queryKey: ["limits", teamId] }),
+			]),
+		);
+		router.push(sandboxHref(teamId, slug));
 	};
 
 	const slugHint =

@@ -159,6 +159,11 @@ function textOf(e: SbxError): { message: string; retry?: boolean } {
 				message: `Not possible in the current state${state ? ` (${state})` : ""}.`,
 			};
 		}
+		case "idempotency_key_reused":
+			return {
+				message:
+					"The form changed while an earlier attempt was still unanswered. Check the sandboxes list, then try again.",
+			};
 		case "rate_limited":
 			return {
 				message: "Too many requests. Wait a moment and try again.",
