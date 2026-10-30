@@ -2,10 +2,13 @@ package ops
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
 )
 
 func TestCountPatternsAcrossChunksAndZeros(t *testing.T) {
@@ -107,11 +110,16 @@ func TestLvScanRefusesForeignAndBadInput(t *testing.T) {
 
 func TestLvUsageActivatesTemplateForTheReading(t *testing.T) {
 	h := newHarness(nil)
-	for i := range h.lvm.lvs {
-		if h.lvm.lvs[i].Name == "base-599-disk-0" {
-			h.lvm.lvs[i].SizeBytes = 64 << 30
-			h.lvm.lvs[i].DataPercent = 11.4
+	tpl := slices.IndexFunc(h.lvm.lvs, func(l lvm.LV) bool { return l.Name == "base-599-disk-0" })
+	h.lvm.lvs[tpl].SizeBytes = 64 << 30
+	h.lvm.lvs[tpl].DataPercent = 11.4
+	run := h.srv.Host.Run
+	h.srv.Host.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		// lvchange -ay makes the fake LV active, as LVM does.
+		if name == "lvchange" && args[0] == "-ay" {
+			h.lvm.lvs[tpl].Attr = "Vri-a-tz-k"
 		}
+		return run(ctx, name, args...)
 	}
 	m := resultMap(t, h.call(t, "lv.usage", map[string]any{"name": "base-599-disk-0"}))
 	if m["dataPercent"].(float64) != 11.4 || m["sizeBytes"].(float64) != float64(64<<30) {
@@ -122,5 +130,31 @@ func TestLvUsageActivatesTemplateForTheReading(t *testing.T) {
 	}
 	if r := h.call(t, "lv.usage", map[string]any{"name": "vm-108-disk-1"}); r.OK {
 		t.Fatal("foreign LV accepted")
+	}
+}
+
+func TestLvUsageRefusesAnInactiveReading(t *testing.T) {
+	h := newHarness(nil)
+	// lvchange succeeds but the LV stays inactive: no data percent to report.
+	if r := h.call(t, "lv.usage", map[string]any{"name": "base-599-disk-0"}); r.OK {
+		t.Fatalf("usage of an inactive LV: %+v", r.Result)
+	}
+}
+
+func TestLvScanRefusesNulPatterns(t *testing.T) {
+	h, _ := scanHarness(t, nil)
+	if r := h.call(t, "lv.scan", map[string]any{"name": "base-599-disk-0", "patterns": []string{"abc\x00defgh"}}); r.OK {
+		t.Fatal("NUL pattern accepted")
+	}
+}
+
+func TestCountPatternsSkipsZeroChunksButKeepsBorderMatches(t *testing.T) {
+	secret := []byte("tail-of-a-secret-key")
+	disk := make([]byte, 2*scanChunk)
+	// Ends exactly at the first border: the next chunk is all zeros.
+	copy(disk[scanChunk-len(secret):], secret)
+	m, _, err := countPatterns(bytes.NewReader(disk), [][]byte{secret})
+	if err != nil || m != 1 {
+		t.Fatalf("matches %d err %v", m, err)
 	}
 }

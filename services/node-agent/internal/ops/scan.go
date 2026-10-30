@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
 )
@@ -45,7 +46,8 @@ func countPatterns(r io.Reader, patterns [][]byte) (matches, scanned int64, err 
 		n, rerr := io.ReadFull(r, buf[carry:carry+scanChunk])
 		scanned += int64(n)
 		window := buf[:carry+n]
-		if n > 0 && (carry != 0 || !bytes.Equal(window, zero[:n])) {
+		// New bytes all zero: no pattern (none contains a NUL) can end in them.
+		if n > 0 && !bytes.Equal(buf[carry:carry+n], zero[:n]) {
 			for _, p := range patterns {
 				// Count only matches that end in the new bytes: the carried tail was counted.
 				for off := 0; ; {
@@ -94,6 +96,9 @@ func (s *Server) lvScan(ctx context.Context, raw json.RawMessage) (any, error) {
 		if len(p) < scanMinPattern || len(p) > scanMaxPattern {
 			return nil, badReq("patterns: each must be %d to %d bytes", scanMinPattern, scanMaxPattern)
 		}
+		if strings.ContainsRune(p, 0) {
+			return nil, badReq("patterns: NUL bytes are not allowed")
+		}
 		pats = append(pats, []byte(p))
 	}
 	release, err := s.activate(ctx, args.Name)
@@ -135,7 +140,11 @@ func (s *Server) activate(ctx context.Context, name string) (func(), error) {
 	if _, err := s.Host.Run(ctx, "lvchange", "-ay", "-K", lv); err != nil {
 		return nil, err
 	}
-	return func() { _, _ = s.Host.Run(context.WithoutCancel(ctx), "lvchange", "-an", lv) }, nil
+	return func() {
+		if _, err := s.Host.Run(context.WithoutCancel(ctx), "lvchange", "-an", lv); err != nil {
+			s.Log(fmt.Sprintf("deactivating %s after a read: %v", lv, err))
+		}
+	}, nil
 }
 
 // lvUsage reports the thin usage of one LV (a template disk or a VM disk of the range); lvs
@@ -162,6 +171,10 @@ func (s *Server) lvUsage(ctx context.Context, raw json.RawMessage) (any, error) 
 	i := slices.IndexFunc(all, func(l lvm.LV) bool { return l.Name == args.Name })
 	if i < 0 {
 		return nil, forbidden("LV %q does not exist", args.Name)
+	}
+	// lvs reports no data percent (read as 0) for an inactive LV: never report that as empty.
+	if len(all[i].Attr) <= 4 || all[i].Attr[4] != 'a' {
+		return nil, fmt.Errorf("%s is not active, its usage is unknown", args.Name)
 	}
 	return map[string]any{"sizeBytes": all[i].SizeBytes, "dataPercent": all[i].DataPercent}, nil
 }

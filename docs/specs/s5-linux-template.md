@@ -551,7 +551,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 
 **Воспроизводимость (§19 п. 2):** две сборки с одним `versions.toml` (20261030.10 и .11) дали одинаковые `packages` (658) и `tools` (39).
 
-**`verify` (§10):** 97 проверок PASS, 0 FAIL (сборка .15), включая агента (`doctor`, версия, identity, URL туннеля из `smbios`), подключение агента клона к dev-gateway (`tunnel_connected`, CT 590, `--connect-url`), Docker `hello-world`, скан диска шаблона и клона на секреты сборки (§20.3), жёсткую остановку (≤ первой загрузки + 3 s), fork с новыми machine-id, hostname, host keys, IP, random seed и состоянием агента. KVM в госте: `available` (на `pve` `kvm_intel nested=Y`).
+**`verify` (§10):** 97 проверок PASS, 0 FAIL (сборка .15), включая агента (`doctor`, версия, identity, URL туннеля из `smbios`), подключение агента клона к dev-gateway (`tunnel_connected`, CT 590, `--connect-url`), Docker `hello-world`, скан диска шаблона и клона на секреты сборки (§20.2 п. 6), жёсткую остановку (≤ первой загрузки + 3 s), fork с новыми machine-id, hostname, host keys, IP, random seed и состоянием агента. KVM в госте: `available` (на `pve` `kvm_intel nested=Y`).
 
 **`sbx-bench s5 --template 597 --baseline 599 --runs 5`** (2 vCPU / 2 GB, `local-lvm`), ms, медиана (p95):
 
@@ -586,7 +586,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 ### 20.3 Права и изменения хоста, добавленные по факту
 
 - Роль `SbxTemplateMedia` (`Datastore.AllocateTemplate`, `Datastore.Audit`) на `/storage/local` (`infra/pve/setup.sh media`). `Datastore.Allocate` не выдаётся; проверка шага это проверяет.
-- `sbx-node`: клон из `base-<id>-*` любого VMID диапазона, запрет `vm-<id>-disk-*` поверх шаблона, операции `media.list`, `media.remove`, `lv.scan`. Развёртывание: `setup.sh node`.
+- `sbx-node`: клон из `base-<id>-*` любого VMID диапазона, запрет `vm-<id>-disk-*` поверх шаблона, операции `media.list`, `media.remove`, `lv.scan`, `lv.usage` (заполнение LV; неактивный шаблон активируется на время чтения). Развёртывание: `setup.sh node`.
 
 ### 20.4 Шаблон
 
