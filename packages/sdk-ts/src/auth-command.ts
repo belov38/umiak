@@ -6,24 +6,11 @@
 
 import type * as ChildProcess from "node:child_process";
 import { AUTH_COMMAND_FAILED, NO_CREDENTIALS, SbxError } from "./errors.ts";
+import { builtinModule } from "./node.ts";
 
 const TIMEOUT_MS = 30_000;
 /** `sbx` exit code for "no permission or not logged in" (S7 §14.3). */
 const EXIT_NO_LOGIN = 4;
-
-interface NodeProcess {
-	getBuiltinModule?: (id: string) => unknown;
-}
-
-/**
- * A Node built-in module through `process.getBuiltinModule` (Node ≥ 22.3,
- * Bun, Deno), or undefined where there is none (browsers).
- */
-export function builtinModule<T>(id: string): T | undefined {
-	const proc = (globalThis as { process?: NodeProcess }).process;
-	if (typeof proc?.getBuiltinModule !== "function") return undefined;
-	return proc.getBuiltinModule(id) as T | undefined;
-}
 
 /** Whether `sbx auth token` can be run here (a runtime with child_process). */
 export function canRunAuthCommand(): boolean {

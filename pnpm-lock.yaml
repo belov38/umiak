@@ -422,6 +422,15 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
     devDependencies:
+      '@sbx/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+      '@sbx/core':
+        specifier: workspace:*
+        version: link:../core
+      '@sbx/db':
+        specifier: workspace:*
+        version: link:../db
       openapi-typescript:
         specifier: 7.13.0
         version: 7.13.0

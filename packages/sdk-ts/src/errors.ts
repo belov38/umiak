@@ -11,7 +11,11 @@ export const NO_CREDENTIALS = "no_credentials";
 export const NO_API_URL = "no_api_url";
 /** `sbx auth token --json` failed or printed something unexpected. */
 export const AUTH_COMMAND_FAILED = "auth_command_failed";
-/** The `tokenProvider` option rejected or returned no token. */
+/** A Node/Bun-only helper (local paths, the system tar) used elsewhere. */
+export const UNSUPPORTED_RUNTIME = "unsupported_runtime";
+/** waitUntilReady / waitForOperation ran out of time. */
+export const WAIT_TIMEOUT = "wait_timeout";
+/** The tokenProvider option rejected or returned no token. */
 export const TOKEN_PROVIDER_FAILED = "token_provider_failed";
 
 export interface SbxErrorInit {
