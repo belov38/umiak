@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/internal/pgtest"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }

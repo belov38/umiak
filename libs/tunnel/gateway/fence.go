@@ -10,14 +10,48 @@ import (
 	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
 )
 
-// listenLoop feeds registry notifications to the fence and instance
-// workers. The handlers only enqueue: they run on the LISTEN goroutine.
+// listenLoop feeds registry notifications to the fence, instance and
+// session workers. The handlers only enqueue: they run on the LISTEN
+// goroutine. Config.ListenChannels handlers are called there directly.
 func (g *Gateway) listenLoop(ctx context.Context) {
-	h := registry.ListenHandlers{Session: g.fenceQ.push}
+	h := registry.ListenHandlers{Session: g.fenceQ.push, Channels: g.cfg.ListenChannels}
+	if g.cfg.OnSessionChange != nil {
+		h.Session = func(id string) {
+			g.fenceQ.push(id)
+			g.sessQ.push(id)
+		}
+	}
 	if g.cfg.OnInstanceChange != nil {
 		h.Instance = g.instQ.push
 	}
-	_ = g.store.Listen(ctx, h)
+	if err := g.store.Listen(ctx, h); err != nil && ctx.Err() == nil {
+		g.log.Error("gateway: listen stopped", "err", err)
+	}
+}
+
+// sessionWorker calls OnSessionChange for every queued machine id; "" (a
+// resync) is delivered first and once per batch.
+func (g *Gateway) sessionWorker(ctx context.Context) {
+	if g.cfg.OnSessionChange == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-g.sessQ.signal:
+		}
+		ids, all := g.sessQ.take()
+		if all {
+			g.cfg.OnSessionChange("")
+		}
+		for id := range ids {
+			if ctx.Err() != nil {
+				return
+			}
+			g.cfg.OnSessionChange(id)
+		}
+	}
 }
 
 // instanceWorker calls OnInstanceChange for every queued instance id.

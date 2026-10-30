@@ -1,0 +1,790 @@
+// Package config reads the gateway configuration from the environment
+// (spec section 16.2). Secrets and keys come from files named by *_FILE
+// variables.
+package config
+
+import (
+	"bufio"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/netip"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+
+	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
+	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
+)
+
+const envPrefix = "SBX_GATEWAY_"
+
+// CookieKey is one key of the session cookie codec. The first key signs; all
+// keys verify.
+type CookieKey struct {
+	ID  string
+	Key []byte
+}
+
+// Timeouts are the limits of spec section 7.7.
+type Timeouts struct {
+	TLSHandshake   time.Duration
+	ReadHeader     time.Duration
+	MaxHeaderBytes int
+	ClientIdle     time.Duration
+	RouteLookup    time.Duration
+	AgentWait      time.Duration
+	Dial           time.Duration
+	ResponseHeader time.Duration
+	StreamIdle     time.Duration
+	// TunnelReadHeader is the header timeout of the tunnel server (TLS
+	// edge), also its idle timeout between requests: a tunnel conn that has
+	// not sent the upgrade is closed after it.
+	TunnelReadHeader time.Duration
+}
+
+// Config is the validated gateway configuration.
+type Config struct {
+	// Identity and internal listener.
+	InstanceID     string
+	DatabaseURL    string
+	InternalListen string
+	InternalURL    string
+	ServiceTokens  gateway.TokenSet
+	PeerToken      string // first token of ServiceTokens["gateway"]
+
+	// Listeners. An empty TLSListen or SSHListen disables that listener.
+	TLSListen     string
+	SSHListen     string
+	HTTPListen    string
+	MetricsListen string
+
+	// Names.
+	SbxDomain  string
+	TunnelHost string
+	SSHHost    string
+
+	// TLS files (required when TLSListen is set).
+	SbxCertFile    string
+	SbxKeyFile     string
+	TunnelCertFile string
+	TunnelKeyFile  string
+
+	// Client IP.
+	ProxyProtocol      bool
+	ProxyProtocolCIDRs []netip.Prefix
+	TrustedProxyCIDRs  []netip.Prefix
+	// ProxyHeaderTimeout bounds the wait for the PROXY v2 header of a conn
+	// from ProxyProtocolCIDRs. On the TLS edge a conn without a complete
+	// header by then is closed. On the SSH listener it goes on header-less
+	// (go-proxyproto "no header"), keyed by the LB address; a client that
+	// waits for the server banner first stalls that long.
+	ProxyHeaderTimeout time.Duration
+
+	// TLSMaxHandshakesPerIP caps the TLS handshakes in flight per client
+	// IP on the TLS listener; RateLimit.Exempt IPs skip it.
+	TLSMaxHandshakesPerIP int
+
+	// API.
+	APIURL   string
+	APIToken string
+	AuthURL  string
+
+	// Cookies.
+	CookieKeys          []CookieKey
+	CookieCrossSite     bool
+	StripCookiePrefixes []string
+
+	// SSH keys (required when SSHListen is set; login CA keys may be empty).
+	SSHHostKeys    []ssh.Signer
+	SSHUserCA      ssh.Signer
+	SSHLoginCAKeys []ssh.PublicKey
+	// SSHLoginCertMaxValidity caps ValidBefore - ValidAfter of a login
+	// certificate; longer ones are refused.
+	SSHLoginCertMaxValidity time.Duration
+
+	// Reserved names.
+	ReservedPorts    []int
+	ReservedSuffixes []string
+	ReservedSlugs    []string
+
+	// Rate limits.
+	RateLimit ratelimit.Config
+
+	// Drain.
+	HTTPDrainDeadline time.Duration
+	SSHDrainDeadline  time.Duration
+	// EndpointWait is how long a draining instance keeps accepting while the
+	// load balancer drops it; 0 keeps the libs/tunnel default (5 s).
+	EndpointWait time.Duration
+	// DrainTimeout bounds the whole drain of the process after SIGTERM; 0
+	// means the drain budget plus a margin (950 s with the defaults). Either
+	// way it is at most MaxDrainTimeout (ProcessDrainTimeout). Both knobs
+	// exist for local runs and smoke tests.
+	DrainTimeout time.Duration
+
+	// SSH keepalive (spec 9.4): a probe to both ends every interval; the
+	// connection is closed after max consecutive misses.
+	SSHKeepaliveInterval time.Duration
+	SSHKeepaliveMax      int
+	// SSHMaxChannels caps the open channels per SSH connection.
+	SSHMaxChannels int
+
+	Timeouts Timeouts
+
+	// Tunnel.
+	TunnelAdmitRate  float64
+	TunnelAdmitBurst int
+	MinAgentVersion  string
+
+	LogLevel string
+}
+
+// APIURLNone as SBX_GATEWAY_API_URL runs the gateway without api (local
+// development): every route lookup and SSH authorization fails as
+// unavailable and agent events are logged and dropped.
+const APIURLNone = "none"
+
+// Defaults of the drain deadlines (spec 10.2, 10.3).
+const (
+	DefaultHTTPDrainDeadline = 2 * time.Minute
+	DefaultSSHDrainDeadline  = 15 * time.Minute
+)
+
+// The gateway.Timing defaults the drain budget needs (zero Timing fields
+// take them in libs/tunnel), and the bounds of the process's drain.
+const (
+	DefaultEndpointWait        = 5 * time.Second
+	DefaultDrainSpread         = 5 * time.Second
+	DefaultDrainMargin         = 10 * time.Second
+	DefaultMaxTCPDrainDeadline = 15 * time.Minute
+	// DrainProcessMargin is added to DrainBudget for the process's drain
+	// context.
+	DrainProcessMargin = 30 * time.Second
+	// TerminationGrace is the pod's terminationGracePeriodSeconds (spec
+	// 10.5): DrainBudget + DrainProcessMargin must fit in it.
+	TerminationGrace = 960 * time.Second
+	// MaxDrainTimeout is the largest DrainTimeout: the grace period minus
+	// 10 s, the default process bound (DrainBudget + DrainProcessMargin =
+	// 950 s).
+	MaxDrainTimeout = TerminationGrace - 10*time.Second
+)
+
+// FromEnv reads and validates the configuration. getenv is normally os.Getenv;
+// an empty value means "unset". Errors name the offending variable.
+func FromEnv(getenv func(string) string) (Config, error) {
+	l := &loader{getenv: getenv}
+	var c Config
+
+	c.InstanceID = l.str("INSTANCE_ID", "")
+	if c.InstanceID == "" {
+		c.InstanceID = defaultInstanceID()
+	}
+	c.DatabaseURL = l.str("DATABASE_URL", getenv("DATABASE_URL"))
+	c.InternalListen = l.str("INTERNAL_LISTEN", ":7000")
+	c.InternalURL = l.required("INTERNAL_URL")
+
+	c.TLSListen = l.listen("TLS_LISTEN", ":8443")
+	c.SSHListen = l.listen("SSH_LISTEN", ":2222")
+	c.HTTPListen = l.listen("HTTP_LISTEN", "")
+	c.MetricsListen = l.str("METRICS_LISTEN", ":9090")
+
+	c.SbxDomain = l.str("SBX_DOMAIN", "")
+	c.TunnelHost = l.str("TUNNEL_HOST", "")
+	c.SSHHost = l.str("SSH_HOST", "")
+
+	if c.TLSListen != "" {
+		c.SbxCertFile = l.required("TLS_SBX_CERT_FILE")
+		c.SbxKeyFile = l.required("TLS_SBX_KEY_FILE")
+		c.TunnelCertFile = l.required("TLS_TUNNEL_CERT_FILE")
+		c.TunnelKeyFile = l.required("TLS_TUNNEL_KEY_FILE")
+	} else {
+		c.SbxCertFile = l.str("TLS_SBX_CERT_FILE", "")
+		c.SbxKeyFile = l.str("TLS_SBX_KEY_FILE", "")
+		c.TunnelCertFile = l.str("TLS_TUNNEL_CERT_FILE", "")
+		c.TunnelKeyFile = l.str("TLS_TUNNEL_KEY_FILE", "")
+	}
+
+	switch pp := l.str("PROXY_PROTOCOL", "off"); pp {
+	case "off":
+	case "v2":
+		c.ProxyProtocol = true
+	default:
+		l.fail("PROXY_PROTOCOL", fmt.Errorf("invalid value %q, want off or v2", pp))
+	}
+	c.ProxyProtocolCIDRs = l.cidrs("PROXY_PROTOCOL_CIDRS")
+	c.TrustedProxyCIDRs = l.cidrs("TRUSTED_PROXY_CIDRS")
+	c.ProxyHeaderTimeout = l.duration("PROXY_HEADER_TIMEOUT", 2*time.Second)
+	c.TLSMaxHandshakesPerIP = l.integer("TLS_MAX_HANDSHAKES_PER_IP", 64)
+
+	c.APIURL = l.str("API_URL", "")
+	c.APIToken = l.fileText("API_TOKEN_FILE", false)
+	c.AuthURL = l.str("AUTH_URL", "")
+
+	c.ServiceTokens, c.PeerToken = l.serviceTokens("SERVICE_TOKENS_FILE")
+	c.CookieKeys = l.cookieKeys("COOKIE_KEYS_FILE")
+	c.CookieCrossSite = l.boolean("COOKIE_CROSS_SITE", false)
+	c.StripCookiePrefixes = l.list("STRIP_COOKIE_PREFIXES", []string{"_oauth2_proxy", "__Host-oauth2_proxy", "__Secure-oauth2_proxy"})
+
+	if c.SSHListen != "" {
+		c.SSHHostKeys = l.hostKeys("SSH_HOST_KEY_FILES")
+		c.SSHUserCA = l.privateKey("SSH_USER_CA_KEY_FILE", true)
+		c.SSHLoginCAKeys = l.loginCAKeys("SSH_LOGIN_CA_KEYS_FILE")
+	}
+
+	c.ReservedPorts = l.ports("RESERVED_PORTS", []int{22, 47800, 47984, 47989, 47990, 48010})
+	c.ReservedSuffixes = l.list("RESERVED_SUFFIXES", []string{"desktop"})
+	c.ReservedSlugs = l.list("RESERVED_SLUGS", []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "sbx"})
+
+	c.RateLimit = ratelimit.Config{
+		IPRate:             l.float("RATELIMIT_IP_RATE", 300),
+		IPBurst:            l.integer("RATELIMIT_IP_BURST", 2000),
+		LabelRate:          l.float("RATELIMIT_LABEL_RATE", 1000),
+		LabelBurst:         l.integer("RATELIMIT_LABEL_BURST", 3000),
+		AuthFailPerMin:     l.integer("RATELIMIT_AUTH_FAIL_PER_MIN", 20),
+		AuthBlock:          l.duration("RATELIMIT_AUTH_BLOCK", 5*time.Minute),
+		ConnsPerIP:         l.integer("RATELIMIT_CONNS_PER_IP", 512),
+		TunnelConnsPerIP:   l.integer("RATELIMIT_TUNNEL_CONNS_PER_IP", 512),
+		SSHConnPerMin:      l.integer("RATELIMIT_SSH_CONN_PER_MIN", 10),
+		SSHConnBurst:       l.integer("RATELIMIT_SSH_CONN_BURST", 20),
+		SSHAuthFailPerMin:  l.integer("RATELIMIT_SSH_AUTH_FAIL_PER_MIN", 10),
+		SSHSessionsPerUser: l.integer("RATELIMIT_SSH_SESSIONS_PER_USER", 20),
+		Exempt:             l.cidrs("RATELIMIT_EXEMPT_CIDRS"),
+	}
+
+	c.HTTPDrainDeadline = l.duration("HTTP_DRAIN_DEADLINE", DefaultHTTPDrainDeadline)
+	c.SSHDrainDeadline = l.duration("SSH_DRAIN_DEADLINE", DefaultSSHDrainDeadline)
+	c.EndpointWait = l.duration("ENDPOINT_WAIT", 0)
+	c.DrainTimeout = l.duration("DRAIN_TIMEOUT", 0)
+	c.SSHKeepaliveInterval = l.duration("SSH_KEEPALIVE_INTERVAL", 30*time.Second)
+	c.SSHKeepaliveMax = l.integer("SSH_KEEPALIVE_MAX", 3)
+	c.SSHMaxChannels = l.integer("SSH_MAX_CHANNELS", 256)
+	c.SSHLoginCertMaxValidity = l.duration("SSH_LOGIN_CERT_MAX_VALIDITY", 24*time.Hour)
+
+	c.Timeouts = Timeouts{
+		TLSHandshake:     l.duration("TIMEOUT_TLS_HANDSHAKE", 10*time.Second),
+		ReadHeader:       l.duration("TIMEOUT_READ_HEADER", 10*time.Second),
+		MaxHeaderBytes:   l.integer("MAX_HEADER_BYTES", 64<<10),
+		ClientIdle:       l.duration("TIMEOUT_CLIENT_IDLE", 120*time.Second),
+		RouteLookup:      l.duration("TIMEOUT_ROUTE_LOOKUP", 3*time.Second),
+		AgentWait:        l.duration("TIMEOUT_AGENT_WAIT", 10*time.Second),
+		Dial:             l.duration("TIMEOUT_DIAL", 10*time.Second),
+		ResponseHeader:   l.duration("TIMEOUT_RESPONSE_HEADER", 5*time.Minute),
+		StreamIdle:       l.duration("TIMEOUT_STREAM_IDLE", 60*time.Minute),
+		TunnelReadHeader: l.duration("TIMEOUT_TUNNEL_READ_HEADER", 5*time.Second),
+	}
+
+	c.TunnelAdmitRate = l.float("TUNNEL_ADMIT_RATE", 200)
+	c.TunnelAdmitBurst = l.integer("TUNNEL_ADMIT_BURST", 1000)
+	c.MinAgentVersion = l.str("MIN_AGENT_VERSION", "")
+
+	c.LogLevel = l.str("LOG_LEVEL", "info")
+	switch c.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		l.fail("LOG_LEVEL", fmt.Errorf("invalid value %q, want debug, info, warn or error", c.LogLevel))
+	}
+
+	if l.err != nil {
+		return Config{}, l.err
+	}
+	return c, nil
+}
+
+// ValidateServe checks what FromEnv leaves optional but a serving process
+// needs: the names, the database and the api endpoint with its token (unless
+// APIURL is APIURLNone). The TLS and SSH files are checked by FromEnv when
+// their listeners are on.
+func (c Config) ValidateServe() error {
+	var errs []error
+	need := func(name, v string) {
+		if v == "" {
+			errs = append(errs, fmt.Errorf("%s%s: is required", envPrefix, name))
+		}
+	}
+	need("SBX_DOMAIN", c.SbxDomain)
+	need("TUNNEL_HOST", c.TunnelHost)
+	if c.DatabaseURL == "" {
+		errs = append(errs, fmt.Errorf("%sDATABASE_URL (or DATABASE_URL): is required", envPrefix))
+	}
+	if err := checkHTTPURL(c.InternalURL); err != nil {
+		errs = append(errs, fmt.Errorf("%sINTERNAL_URL: %w", envPrefix, err))
+	}
+	// PROXY v2 from anyone would let any client spoof its address.
+	if c.ProxyProtocol && len(c.ProxyProtocolCIDRs) == 0 {
+		errs = append(errs, fmt.Errorf("%sPROXY_PROTOCOL_CIDRS: is required with %sPROXY_PROTOCOL=v2", envPrefix, envPrefix))
+	}
+	// An exempt LB address would make every header-less conn of the LB
+	// exempt from the per-IP limits.
+	if c.ProxyProtocol {
+		for _, e := range c.RateLimit.Exempt {
+			for _, pp := range c.ProxyProtocolCIDRs {
+				if e.Overlaps(pp) {
+					errs = append(errs, fmt.Errorf("%sRATELIMIT_EXEMPT_CIDRS: %s overlaps %s of %sPROXY_PROTOCOL_CIDRS",
+						envPrefix, e, pp, envPrefix))
+				}
+			}
+		}
+	}
+	// The drain must end within the pod's grace period, with the timing
+	// the process uses (only EndpointWait is configurable).
+	if b := DrainBudget(c, gateway.Timing{EndpointWait: c.EndpointWait}) + DrainProcessMargin; b > TerminationGrace {
+		errs = append(errs, fmt.Errorf("%s: drain budget %s (endpoint wait + drain spread + longest drain deadline + margin + %s process margin) exceeds the %s grace period",
+			c.drainBudgetCause(), b, DrainProcessMargin, TerminationGrace))
+	}
+	if c.DrainTimeout > MaxDrainTimeout {
+		errs = append(errs, fmt.Errorf("%sDRAIN_TIMEOUT: %s exceeds %s (the %s grace period minus %s)",
+			envPrefix, c.DrainTimeout, MaxDrainTimeout, TerminationGrace, TerminationGrace-MaxDrainTimeout))
+	}
+	if c.HTTPDrainDeadline > c.SSHDrainDeadline {
+		errs = append(errs, fmt.Errorf("%sHTTP_DRAIN_DEADLINE: %s is longer than %sSSH_DRAIN_DEADLINE (%s)",
+			envPrefix, c.HTTPDrainDeadline, envPrefix, c.SSHDrainDeadline))
+	}
+	switch c.APIURL {
+	case "":
+		errs = append(errs, fmt.Errorf("%sAPI_URL: is required (%q runs without api)", envPrefix, APIURLNone))
+	case APIURLNone:
+	default:
+		if err := checkHTTPURL(c.APIURL); err != nil {
+			errs = append(errs, fmt.Errorf("%sAPI_URL: %w", envPrefix, err))
+		}
+		need("API_TOKEN_FILE", c.APIToken)
+	}
+	return errors.Join(errs...)
+}
+
+// drainBudgetCause names the drain settings above their defaults that make
+// the drain budget: the endpoint wait, and the SSH or HTTP drain deadline
+// when it is the longest deadline of the budget. With none above its
+// default (not reachable with the default constants) it names all three.
+func (c Config) drainBudgetCause() string {
+	var names []string
+	if c.EndpointWait > DefaultEndpointWait {
+		names = append(names, envPrefix+"ENDPOINT_WAIT")
+	}
+	longest := max(c.SSHDrainDeadline, c.HTTPDrainDeadline, DefaultMaxTCPDrainDeadline)
+	if c.SSHDrainDeadline > DefaultSSHDrainDeadline && c.SSHDrainDeadline == longest {
+		names = append(names, envPrefix+"SSH_DRAIN_DEADLINE")
+	}
+	if c.HTTPDrainDeadline > DefaultHTTPDrainDeadline && c.HTTPDrainDeadline == longest {
+		names = append(names, envPrefix+"HTTP_DRAIN_DEADLINE")
+	}
+	if len(names) == 0 {
+		names = []string{envPrefix + "ENDPOINT_WAIT", envPrefix + "SSH_DRAIN_DEADLINE", envPrefix + "HTTP_DRAIN_DEADLINE"}
+	}
+	return strings.Join(names, ", ")
+}
+
+// DrainBudget is the longest a Drain takes with c and timing:
+// EndpointWait + DrainSpread + the longest stream drain deadline +
+// DrainMargin, the bound of the tunnel drain, after which only the
+// graceful shutdown of the internal listener is left. Zero timing fields
+// take the libs/tunnel defaults. With the defaults it is 5 s + 5 s +
+// 15 min + 10 s = 920 s; the process bounds its drain at that plus
+// DrainProcessMargin, within TerminationGrace (spec 10.5).
+func DrainBudget(c Config, timing gateway.Timing) time.Duration {
+	longest := max(c.SSHDrainDeadline, c.HTTPDrainDeadline, orDefault(timing.MaxTCPDrainDeadline, DefaultMaxTCPDrainDeadline))
+	return orDefault(timing.EndpointWait, DefaultEndpointWait) +
+		orDefault(timing.DrainSpread, DefaultDrainSpread) +
+		longest +
+		orDefault(timing.DrainMargin, DefaultDrainMargin)
+}
+
+// ProcessDrainTimeout bounds the drain of the process after SIGTERM:
+// c.DrainTimeout when set (ValidateServe caps it at MaxDrainTimeout), else
+// DrainBudget + DrainProcessMargin capped at MaxDrainTimeout, so the process
+// gives up at least 10 s before the grace period ends.
+func ProcessDrainTimeout(c Config, timing gateway.Timing) time.Duration {
+	if c.DrainTimeout > 0 {
+		return c.DrainTimeout
+	}
+	return min(DrainBudget(c, timing)+DrainProcessMargin, MaxDrainTimeout)
+}
+
+func orDefault(v, def time.Duration) time.Duration {
+	if v <= 0 {
+		return def
+	}
+	return v
+}
+
+// checkHTTPURL accepts an absolute http or https URL with a host.
+func checkHTTPURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return err
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("%q is not an http(s) URL", s)
+	}
+	return nil
+}
+
+func defaultInstanceID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "gateway"
+	}
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return host + "-" + hex.EncodeToString(b[:])
+}
+
+// loader reads variables and keeps the first error.
+type loader struct {
+	getenv func(string) string
+	err    error
+}
+
+func (l *loader) fail(name string, err error) {
+	if l.err == nil {
+		l.err = fmt.Errorf("%s%s: %w", envPrefix, name, err)
+	}
+}
+
+func (l *loader) raw(name string) string {
+	return strings.TrimSpace(l.getenv(envPrefix + name))
+}
+
+func (l *loader) str(name, def string) string {
+	if v := l.raw(name); v != "" {
+		return v
+	}
+	return def
+}
+
+func (l *loader) required(name string) string {
+	v := l.raw(name)
+	if v == "" {
+		l.fail(name, errors.New("is required"))
+	}
+	return v
+}
+
+// listen reads a listen address. "off" disables the listener, since an empty
+// value means "use the default".
+func (l *loader) listen(name, def string) string {
+	v := l.str(name, def)
+	if v == "off" {
+		return ""
+	}
+	return v
+}
+
+func (l *loader) boolean(name string, def bool) bool {
+	v := l.raw(name)
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		l.fail(name, fmt.Errorf("invalid boolean %q", v))
+		return def
+	}
+	return b
+}
+
+func (l *loader) integer(name string, def int) int {
+	v := l.raw(name)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		l.fail(name, fmt.Errorf("invalid value %q, want a positive integer", v))
+		return def
+	}
+	return n
+}
+
+func (l *loader) float(name string, def float64) float64 {
+	v := l.raw(name)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		l.fail(name, fmt.Errorf("invalid value %q, want a positive number", v))
+		return def
+	}
+	return f
+}
+
+func (l *loader) duration(name string, def time.Duration) time.Duration {
+	v := l.raw(name)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		l.fail(name, fmt.Errorf("invalid value %q, want a positive duration like 10s", v))
+		return def
+	}
+	return d
+}
+
+// list reads a comma-separated list; empty items are dropped.
+func (l *loader) list(name string, def []string) []string {
+	v := l.raw(name)
+	if v == "" {
+		return def
+	}
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (l *loader) ports(name string, def []int) []int {
+	items := l.list(name, nil)
+	if items == nil {
+		return def
+	}
+	out := make([]int, 0, len(items))
+	for _, it := range items {
+		n, err := strconv.Atoi(it)
+		if err != nil || n < 1 || n > 65535 {
+			l.fail(name, fmt.Errorf("invalid port %q", it))
+			return def
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// cidrs reads a comma-separated list of prefixes. A bare address is a
+// single-host prefix. Client addresses are unmapped before they are matched,
+// so an IPv4-mapped prefix (::ffff:a.b.c.d/n) of /96 or longer becomes the
+// IPv4 prefix /n-96; a shorter one is refused, as it would never match.
+func (l *loader) cidrs(name string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, it := range l.list(name, nil) {
+		p, err := netip.ParsePrefix(it)
+		if err != nil {
+			a, aerr := netip.ParseAddr(it)
+			if aerr != nil || a.Zone() != "" {
+				l.fail(name, fmt.Errorf("invalid CIDR %q", it))
+				return nil
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		if p.Addr().Is4In6() {
+			if p.Bits() < 96 {
+				l.fail(name, fmt.Errorf("IPv4-mapped CIDR %q is shorter than /96, write it as an IPv4 CIDR", it))
+				return nil
+			}
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+		}
+		out = append(out, p.Masked())
+	}
+	return out
+}
+
+// fileText reads the file named by the variable and trims it. A missing
+// variable is an error only when required.
+func (l *loader) fileText(name string, required bool) string {
+	path := l.raw(name)
+	if path == "" {
+		if required {
+			l.fail(name, errors.New("is required"))
+		}
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		l.fail(name, err)
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func (l *loader) serviceTokens(name string) (gateway.TokenSet, string) {
+	path := l.raw(name)
+	if path == "" {
+		l.fail(name, errors.New("is required"))
+		return nil, ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		l.fail(name, err)
+		return nil, ""
+	}
+	var ts gateway.TokenSet
+	if err := json.Unmarshal(b, &ts); err != nil {
+		l.fail(name, fmt.Errorf("invalid JSON: %w", err))
+		return nil, ""
+	}
+	g := ts["gateway"]
+	if len(g) == 0 || g[0] == "" {
+		l.fail(name, errors.New(`has no "gateway" token`))
+		return nil, ""
+	}
+	return ts, g[0]
+}
+
+// cookieKeys reads lines "kid:base64(32 bytes)". Blank and # lines are
+// skipped. Standard and URL-safe base64, padded or not, are accepted.
+func (l *loader) cookieKeys(name string) []CookieKey {
+	path := l.raw(name)
+	if path == "" {
+		l.fail(name, errors.New("is required"))
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		l.fail(name, err)
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+
+	var keys []CookieKey
+	seen := map[string]bool{}
+	sc := bufio.NewScanner(f)
+	for n := 1; sc.Scan(); n++ {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		id, enc, ok := strings.Cut(line, ":")
+		id, enc = strings.TrimSpace(id), strings.TrimSpace(enc)
+		if !ok || id == "" || enc == "" {
+			l.fail(name, fmt.Errorf("line %d: want kid:base64", n))
+			return nil
+		}
+		key, err := decodeBase64(enc)
+		if err != nil {
+			l.fail(name, fmt.Errorf("line %d: key %q is not base64", n, id))
+			return nil
+		}
+		if len(key) != 32 {
+			l.fail(name, fmt.Errorf("line %d: key %q is %d bytes, want 32", n, id, len(key)))
+			return nil
+		}
+		if !ValidCookieKeyID(id) {
+			l.fail(name, fmt.Errorf("line %d: key id %q has characters not allowed in a cookie value", n, id))
+			return nil
+		}
+		if seen[id] {
+			l.fail(name, fmt.Errorf("line %d: duplicate key id %q", n, id))
+			return nil
+		}
+		seen[id] = true
+		keys = append(keys, CookieKey{ID: id, Key: key})
+	}
+	if err := sc.Err(); err != nil {
+		l.fail(name, err)
+		return nil
+	}
+	if len(keys) == 0 {
+		l.fail(name, errors.New("contains no keys"))
+	}
+	return keys
+}
+
+// ValidCookieKeyID reports whether id is non-empty and uses only the RFC 6265
+// cookie-octet set, so it can appear in a cookie value as is.
+func ValidCookieKeyID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if c <= 0x20 || c >= 0x7f || c == '"' || c == ',' || c == ';' || c == '\\' {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeBase64(s string) ([]byte, error) {
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.RawURLEncoding} {
+		if b, err := enc.DecodeString(s); err == nil {
+			return b, nil
+		}
+	}
+	return nil, errors.New("invalid base64")
+}
+
+func (l *loader) hostKeys(name string) []ssh.Signer {
+	paths := l.list(name, nil)
+	if len(paths) == 0 {
+		l.fail(name, errors.New("is required"))
+		return nil
+	}
+	var out []ssh.Signer
+	for _, p := range paths {
+		s, err := parsePrivateKeyFile(p)
+		if err != nil {
+			l.fail(name, err)
+			return nil
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func (l *loader) privateKey(name string, required bool) ssh.Signer {
+	path := l.raw(name)
+	if path == "" {
+		if required {
+			l.fail(name, errors.New("is required"))
+		}
+		return nil
+	}
+	s, err := parsePrivateKeyFile(path)
+	if err != nil {
+		l.fail(name, err)
+		return nil
+	}
+	return s
+}
+
+func parsePrivateKeyFile(path string) (ssh.Signer, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	s, err := ssh.ParsePrivateKey(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return s, nil
+}
+
+// loginCAKeys reads public keys in authorized_keys format, one per line.
+// The variable is optional: without it, no certificate can log in.
+func (l *loader) loginCAKeys(name string) []ssh.PublicKey {
+	path := l.raw(name)
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		l.fail(name, err)
+		return nil
+	}
+	var out []ssh.PublicKey
+	for n, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		pk, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+		if err != nil {
+			l.fail(name, fmt.Errorf("line %d: %w", n+1, err))
+			return nil
+		}
+		out = append(out, pk)
+	}
+	return out
+}

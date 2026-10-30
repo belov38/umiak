@@ -7,8 +7,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
@@ -208,6 +210,51 @@ func TestLocalOnly(t *testing.T) {
 		var pe *agent.PolicyError
 		if !errors.As(err, &pe) || pe.Status != tc.want {
 			t.Errorf("%s:%s: err %v, want status %d", tc.host, strconv.Itoa(tc.port), err, tc.want)
+		}
+	}
+}
+
+// timeoutErr is a net.Error that reports a timeout.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+func TestConnectDialErrorReason(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		dialEr error
+	)
+	cfg := fastConfig()
+	cfg.Dial = func(context.Context, string, int) (net.Conn, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return nil, dialEr
+	}
+	e := startEnv(t, cfg, nil)
+	c := e.gw.nextConn()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"refused", &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}}, wire.DialErrorRefused},
+		{"refused wrapped", fmt.Errorf("dial: %w", syscall.ECONNREFUSED), wire.DialErrorRefused},
+		{"net timeout", &net.OpError{Op: "dial", Net: "tcp", Err: timeoutErr{}}, wire.DialErrorTimeout},
+		{"deadline exceeded", fmt.Errorf("dial: %w", context.DeadlineExceeded), wire.DialErrorTimeout},
+		{"other", errors.New("x"), ""},
+	} {
+		mu.Lock()
+		dialEr = tc.err
+		mu.Unlock()
+		s := dialConnect(t, c, "127.0.0.1:1234")
+		if s.status != http.StatusBadGateway {
+			t.Errorf("%s: status %d, want 502", tc.name, s.status)
+		}
+		if got := s.header.Get(wire.HeaderDialError); got != tc.want {
+			t.Errorf("%s: %s = %q, want %q", tc.name, wire.HeaderDialError, got, tc.want)
 		}
 	}
 }

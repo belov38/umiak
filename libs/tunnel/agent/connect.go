@@ -67,9 +67,13 @@ func (c *Client) serveConnect(w http.ResponseWriter, r *http.Request) {
 	target, err := c.cfg.Dial(r.Context(), host, port)
 	if err != nil {
 		c.log.Debug("tunnel connect: dial failed", "host", host, "port", port, "err", err)
+		reason := classifyDialError(err)
 		var de *DialError
 		if errors.As(err, &de) && de.Reason != "" {
-			w.Header().Set(wire.HeaderDialError, de.Reason)
+			reason = wire.NormalizeDialError(de.Reason)
+		}
+		if reason != "" {
+			w.Header().Set(wire.HeaderDialError, reason)
 		}
 		http.Error(w, "dial failed", http.StatusBadGateway)
 		return
