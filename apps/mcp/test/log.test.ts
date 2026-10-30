@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createLogger, REDACT_PATHS } from "../src/log.ts";
+import { apiCallLogger, createLogger, REDACT_PATHS } from "../src/log.ts";
 
 function capture(level = "info") {
 	const lines: Record<string, unknown>[] = [];
@@ -71,5 +71,60 @@ describe("createLogger", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("apiCallLogger", () => {
+	const ok: (
+		input: RequestInfo | URL,
+		init?: RequestInit,
+	) => Promise<Response> = async () => new Response("{}", { status: 201 });
+
+	it("debug: logs method, path, status and duration, never the query, headers or body", async () => {
+		const { log, lines } = capture("debug");
+		const f = apiCallLogger(ok, log);
+		const req = new Request(
+			"http://api.test/v1/sandboxes/sb_1/files/content?path=/secret",
+			{
+				method: "PUT",
+				headers: { authorization: "Bearer tok" },
+				body: "file body",
+			},
+		);
+		const res = await f(req);
+		expect(res.status).toBe(201);
+		expect(lines).toEqual([
+			expect.objectContaining({
+				msg: "api call",
+				method: "PUT",
+				path: "/v1/sandboxes/sb_1/files/content",
+				status: 201,
+				durationMs: expect.any(Number),
+			}),
+		]);
+		const all = JSON.stringify(lines);
+		for (const s of ["secret", "tok", "file body"])
+			expect(all).not.toContain(s);
+	});
+
+	it("a failed fetch is logged with the error name and rethrown", async () => {
+		const { log, lines } = capture("debug");
+		const boom = new TypeError("fetch failed");
+		const f = apiCallLogger(async () => {
+			throw boom;
+		}, log);
+		await expect(f("http://api.test/v1/me")).rejects.toBe(boom);
+		expect(lines[0]).toMatchObject({
+			msg: "api call failed",
+			method: "GET",
+			path: "/v1/me",
+			error: "TypeError",
+		});
+	});
+
+	it("info: logs nothing", async () => {
+		const { log, lines } = capture("info");
+		await apiCallLogger(ok, log)("http://api.test/v1/me");
+		expect(lines).toEqual([]);
 	});
 });

@@ -19,6 +19,30 @@ export const TOOLSETS: readonly Toolset[] = [
 	"desktop",
 ];
 
+/**
+ * Toolsets of a comma list (`--toolsets`, `SBX_MCP_TOOLSETS`, `?toolsets=`):
+ * spaces trimmed, repeats dropped; an unknown name is an Error listing the
+ * valid ones.
+ */
+export function parseToolsets(csv: string): Toolset[] {
+	const out: Toolset[] = [];
+	for (const raw of csv.split(",")) {
+		const name = raw.trim();
+		if (name === "") continue;
+		const t = TOOLSETS.find((v) => v === name);
+		if (t === undefined) {
+			throw new Error(
+				`unknown toolset ${JSON.stringify(name)}; valid: ${TOOLSETS.join(", ")}`,
+			);
+		}
+		if (!out.includes(t)) out.push(t);
+	}
+	if (out.length === 0) {
+		throw new Error(`no toolsets given; valid: ${TOOLSETS.join(", ")}`);
+	}
+	return out;
+}
+
 export interface ToolDef<Shape extends z.ZodRawShape = z.ZodRawShape> {
 	name: string;
 	title: string;

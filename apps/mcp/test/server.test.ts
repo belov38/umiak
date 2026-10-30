@@ -8,7 +8,10 @@ import {
 	RESPONSE_MARGIN_MS,
 } from "../src/deadline.ts";
 import { ToolError } from "../src/errors.ts";
-import { SERVER_INSTRUCTIONS } from "../src/instructions.ts";
+import {
+	pinnedInstructions,
+	SERVER_INSTRUCTIONS,
+} from "../src/instructions.ts";
 import { createLogger } from "../src/log.ts";
 import { MAX_RESULT_CHARS, toolText } from "../src/output/result.ts";
 import { lintToolSchema } from "../src/schema-rules.ts";
@@ -179,6 +182,22 @@ describe.each(ERAS)("pinned mode (%s era)", (era) => {
 		expect(r.isError).toBeFalsy();
 		expect(fake.calls[0]?.args).toEqual({ sandbox: "sb_pinned", path: "/a" });
 		expect(callLines(logs)[0]).toMatchObject({ sandbox: "sb_pinned" });
+	});
+
+	it("sends the pinned instructions that name the sandbox and no hidden tool", async () => {
+		const { conn } = await setup({ pinnedSandbox: "sb_pinned" }, era);
+		const text = conn.client.getInstructions() ?? "";
+		expect(text).toBe(pinnedInstructions("sb_pinned"));
+		expect(text).toContain("sb_pinned");
+		for (const hidden of [
+			"sandbox_create",
+			"sandbox_list",
+			"sandbox_fork",
+			"sandbox_delete",
+			"snapshot_delete",
+		]) {
+			expect(text).not.toContain(hidden);
+		}
 	});
 
 	it("a hidden tool is an unknown tool (JSON-RPC error), never executed", async () => {
@@ -495,9 +514,9 @@ describe("errors", () => {
 		expect(text(r)).toContain("hint: use an absolute path.");
 	});
 
-	it("API 401 calls onAuthFailure and answers unauthorized, retryable", async () => {
+	it("API 401 over HTTP calls onAuthFailure and answers unauthorized, retryable", async () => {
 		const onAuthFailure = vi.fn();
-		const { conn, fake } = await setup({ onAuthFailure });
+		const { conn, fake } = await setup({ onAuthFailure, transport: "http" });
 		fake.behaviour = async () => {
 			throw new SbxError({
 				status: 401,
@@ -515,6 +534,27 @@ describe("errors", () => {
 		expect(text(r)).toContain("error: unauthorized");
 		expect(text(r)).toContain("message: retry the call");
 		expect(text(r)).toContain("retryable: true");
+	});
+
+	it("API 401 over stdio answers unauthorized with a re-login hint, not retryable", async () => {
+		const { conn, fake } = await setup({ transport: "stdio" });
+		fake.behaviour = async () => {
+			throw new SbxError({
+				status: 401,
+				code: "unauthorized",
+				message: "invalid credentials",
+				retryable: false,
+			});
+		};
+		const r = await conn.client.callTool({
+			name: "fake_get",
+			arguments: { sandbox: "sb_1", path: "/" },
+		});
+		expect(r.isError).toBe(true);
+		expect(text(r)).toContain("error: unauthorized");
+		expect(text(r)).toContain("retryable: false");
+		expect(text(r)).toContain("run `sbx login` in a terminal");
+		expect(text(r)).not.toContain("retry the call");
 	});
 
 	it("an unknown error is logged with its stack, without arguments, and answered internal", async () => {

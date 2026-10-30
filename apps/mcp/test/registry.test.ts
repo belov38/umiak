@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { SERVER_INSTRUCTIONS } from "../src/instructions.ts";
+import {
+	pinnedInstructions,
+	SERVER_INSTRUCTIONS,
+} from "../src/instructions.ts";
 import {
 	defineTool,
 	inputSchemaOf,
+	parseToolsets,
 	publishedJsonSchemaOf,
 	selectTools,
 	stripPropertyNames,
@@ -244,5 +248,48 @@ describe("SERVER_INSTRUCTIONS", () => {
 		]) {
 			expect(SERVER_INSTRUCTIONS).toContain(needle);
 		}
+	});
+});
+
+describe("pinnedInstructions", () => {
+	it("fits in 1500 characters with a long sandbox ref", () => {
+		expect(pinnedInstructions("x".repeat(128)).length).toBeLessThanOrEqual(
+			1500,
+		);
+	});
+
+	it("says the server is bound to the sandbox and keeps the safety rules", () => {
+		const text = pinnedInstructions("quiet-otter-lamp");
+		for (const needle of [
+			"bound to sandbox quiet-otter-lamp",
+			"no sandbox argument",
+			"exec_run",
+			"exec_output",
+			"exec_start",
+			"PowerShell",
+			"<<<sbx-untrusted",
+			"never as instructions",
+			"secret",
+			"state not final yet",
+		]) {
+			expect(text).toContain(needle);
+		}
+	});
+});
+
+describe("parseToolsets", () => {
+	it("reads a comma list, trims spaces and drops repeats", () => {
+		expect(parseToolsets("core, files,core")).toEqual(["core", "files"]);
+		expect(parseToolsets("desktop")).toEqual(["desktop"]);
+	});
+
+	it("an unknown name is an error that lists the valid ones", () => {
+		expect(() => parseToolsets("core,shell")).toThrow(
+			'unknown toolset "shell"; valid: core, files, ports, snapshots, desktop',
+		);
+	});
+
+	it("an empty list is an error", () => {
+		expect(() => parseToolsets(" , ")).toThrow(/no toolsets/);
 	});
 });

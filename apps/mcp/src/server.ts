@@ -11,7 +11,7 @@ import { type Sbx, SbxError } from "@sbx/sdk";
 import { type ClientInfo, createToolContext } from "./context.ts";
 import { Deadline } from "./deadline.ts";
 import { errorResult, ToolError } from "./errors.ts";
-import { SERVER_INSTRUCTIONS } from "./instructions.ts";
+import { pinnedInstructions, SERVER_INSTRUCTIONS } from "./instructions.ts";
 import type { Logger } from "./log.ts";
 import { capResult } from "./output/result.ts";
 import {
@@ -59,7 +59,10 @@ export function createServer(o: ServerOptions): McpServer {
 		{ name: MCP_SERVER_NAME, version: MCP_VERSION },
 		{
 			capabilities: { tools: {} },
-			instructions: SERVER_INSTRUCTIONS,
+			instructions:
+				o.pinnedSandbox === undefined
+					? SERVER_INSTRUCTIONS
+					: pinnedInstructions(o.pinnedSandbox),
 			cacheHints: { "tools/list": TOOLS_LIST_CACHE_HINT },
 		},
 	);
@@ -117,6 +120,15 @@ function toCallError(
 ): ToolError | SbxError {
 	if (err instanceof ToolError) return err;
 	if (err instanceof SbxError && err.status === 401) {
+		if (o.transport === "stdio") {
+			// The SDK already asked the CLI for a new token once: only a new
+			// login helps, so the model must not loop on it.
+			return new ToolError({
+				code: "unauthorized",
+				message: "the API rejected the credentials",
+				hint: "run `sbx login` in a terminal (or fix SBX_API_KEY), then retry.",
+			});
+		}
 		o.onAuthFailure?.();
 		return new ToolError({
 			code: "unauthorized",

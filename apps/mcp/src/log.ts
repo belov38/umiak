@@ -37,3 +37,41 @@ export function createLogger(o: LoggerOptions = {}): Logger {
 		destination,
 	);
 }
+
+export type FetchFn = (
+	input: RequestInfo | URL,
+	init?: RequestInit,
+) => Promise<Response>;
+
+/**
+ * fetch that logs every API call at debug (S11 13.3, `--log-level debug`):
+ * method, path, status, duration. Never the query, headers or bodies. The
+ * request is passed on untouched (the SDK holds its own Request object).
+ */
+export function apiCallLogger(f: FetchFn, log: Logger): FetchFn {
+	return async (input, init) => {
+		if (!log.isLevelEnabled("debug")) return f(input, init);
+		const req = input instanceof Request ? input : undefined;
+		const fields = {
+			method: (init?.method ?? req?.method ?? "GET").toUpperCase(),
+			path: new URL(req?.url ?? String(input)).pathname,
+		};
+		const started = performance.now();
+		const durationMs = () => Math.round(performance.now() - started);
+		try {
+			const res = await f(input, init);
+			log.debug(
+				{ ...fields, status: res.status, durationMs: durationMs() },
+				"api call",
+			);
+			return res;
+		} catch (err) {
+			const error = err instanceof Error ? err.name : typeof err;
+			log.debug(
+				{ ...fields, error, durationMs: durationMs() },
+				"api call failed",
+			);
+			throw err;
+		}
+	};
+}
