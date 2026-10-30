@@ -8,7 +8,7 @@ infra/pve/setup.sh [--dry-run] revert <step>
 infra/pve/setup.sh status
 ```
 
-Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template`. Each step checks whether it is already done, applies and verifies. `--dry-run` prints the remote scripts.
+Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template` (then, for the dev control plane, `cp` → `cp-gateway` → `cp-tailscale`). Each step checks whether it is already done, applies and verifies. `--dry-run` prints the remote scripts.
 
 | Step | What |
 |---|---|
@@ -18,6 +18,9 @@ Order of steps: `user` → `net` → `sdn` → `node` → `fw` → `template`. E
 | `node` | builds `sbx-node`, installs `/usr/local/bin/sbx-node` and `/etc/sbx-node.toml`, adds the restricted key, pins the host key in `~/.config/sbx/known_hosts` for the Tailscale name and IP |
 | `fw` | `cluster.fw` (IPSets, group `sbx-egress`) and `host.fw` (`enable: 0`), then enables the datacenter firewall with a 5-minute automatic rollback. Cancels the rollback only if every check that passed before still passes |
 | `template` | template 599 from a thin snapshot of `base-9000-disk-0`, sanitized offline by `template-sanitize.sh` before it ever boots (no Tailscale, no personal credentials, clean cloud-init and machine-id, MAC-independent DHCP) |
+| `cp` | dev only: CT 590 `sbx-dev-cp` for the compose stack (unprivileged Debian, Docker, Tailscale package, own firewall). See `infra/dev-cp/README.md` |
+| `cp-gateway` | dev only: the CT address into IPSet `sbx-gateway`, with a 3-minute automatic rollback and the same checks as `fw` |
+| `cp-tailscale` | dev only: joins the CT to the tailnet; prints the login URL until it is approved |
 
 Environment: `SBX_SETUP_SSH` (default `pve`), `SBX_DENY_PUBLIC_IPS` (empty in the PoC), `SBX_FW_TS_PEERS` (Tailscale addresses of existing guests used by the `fw` checks, because the Mac is not on the host LAN).
 

@@ -18,6 +18,8 @@
 `web` (S8) добавится позже.
 Proxmox — любой хост, доступный из контейнеров (см. «Proxmox»).
 
+Стек на `pve` (CT 590, доступен из sandbox VM): `infra/dev-cp/README.md`.
+
 ## Что нужно
 
 - Docker с compose v2.
