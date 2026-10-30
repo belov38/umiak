@@ -6,16 +6,17 @@
 |---|---|---|
 | `postgres` | Postgres 18: базы `sbx` и `keycloak` | 5432 |
 | `secrets-init` | одноразовый: создаёт недостающие dev-секреты в `secrets/` | — |
-| `migrate` | одноразовый: миграции и `sbx-admin bootstrap` (топология из `config/sbx.yaml`) | — |
-| `worker` | worker S6 | 9090 (`/readyz`, `/metrics`) |
+| `migrate` | одноразовый: миграции `db/migrations` и `sbx-admin bootstrap` (топология из `config/sbx.yaml`) | — |
+| `web-migrate` | одноразовый (образ `web`): миграции Payload, схема `payload` (S8 §12) | — |
+| `worker` | worker S6 (+ `ctl-idp-sync` S8) | 9090 (`/readyz`, `/metrics`) |
 | `keycloak-db` | одноразовый: создаёт базу `keycloak`, если её нет | — |
 | `keycloak` | IdP, realm `sbx` (architecture §10) | 8180 |
 | `api` | публичное API v1 (S7) | 8080 (public), 9091 (`/readyz`, `/metrics`) |
-| `oauth2-proxy` | браузерные сессии: `/api/*` и `/sbx-auth/*` → proxied listener `api` | 4180 |
+| `oauth2-proxy` | браузерные сессии: `/api/*` и `/sbx-auth/*` → proxied listener `api`, остальное → `web` | 4180 |
+| `web` | S8: дашборд `/app`, админка Payload `/admin`, REST Payload `/cms-api` | — (только через oauth2-proxy) |
 | `gateway-secrets` | одноразовый (`gateway.yaml`): dev-секреты gateway в `secrets/gateway/` | — |
 | `gateway` | S4: preview-адреса, SSH, туннели агентов (см. «Gateway (S4)» ниже) | 8443 (TLS), 2222 (SSH), 7000, 9190 |
 
-`web` (S8) добавится позже.
 Proxmox — любой хост, доступный из контейнеров (см. «Proxmox»).
 
 Стек на `pve` (CT 590, доступен из sandbox VM): `infra/dev-cp/README.md`.
@@ -66,6 +67,9 @@ mkdir -p deploy/compose/secrets
 |---|---|---|
 | `data-keys.json` | источник копий ниже | ключи данных S6 (формат: `config/data-keys.example.json`) |
 | `api/data-keys.json`, `worker/data-keys.json` | `api`, `worker` | копии `data-keys.json` |
+| `payload-secret` | источник копий ниже | `PAYLOAD_SECRET` конфига Payload (S8), одно значение на все сервисы |
+| `web/payload-secret`, `api/payload-secret`, `worker/payload-secret` | `web`, `web-migrate`, `api`, `worker` | копии `payload-secret`; сервис читает файл при старте в `PAYLOAD_SECRET` |
+| `worker/idp-sync-client-secret` | `worker` | копия `keycloak/sbx-worker-client-secret` для `ctl-idp-sync` (`SBX_IDP_SYNC_CLIENT_SECRET_FILE`) |
 | `api/cursor-key` | `api` | `SBX_API_CURSOR_KEY`, HMAC-ключ курсоров |
 | `api/service-tokens.json` | `api` | `SBX_API_SERVICE_TOKENS_FILE`: токены gateway, которые принимает internal listener |
 | `api/gateway-token` | `api` | `SBX_API_GATEWAY_TOKEN_FILE`: токен `api` для internal listener gateway |
@@ -81,8 +85,8 @@ mkdir -p deploy/compose/secrets
   `api[0]`, `gateway/ssh_login_ca`, `gateway/ssh_host_*_key.pub`. Стек без `gateway-secrets` не поднимется
   (`depends_on`); `init.sh` создаёт свои dev-значения только для файлов, которых нет в `secrets/gateway/`
   (например при запуске `secrets-init` отдельно, с `--no-deps`).
-- Копии (`api/data-keys.json`, `worker/data-keys.json`, `oauth2-proxy/client-secret`) тоже переписываются из
-  источника.
+- Копии (`api/data-keys.json`, `worker/data-keys.json`, `*/payload-secret`, `worker/idp-sync-client-secret`,
+  `oauth2-proxy/client-secret`) тоже переписываются из источника.
 - Пересоздать секрет: удалить файл и выполнить `up -d`. После этого пересоздать его потребителей
   (`up -d --force-recreate api oauth2-proxy ...`). На Linux файлы принадлежат root и uid потребителей
   (`secrets-init` пишет их от root): удалять через `sudo rm` или из контейнера —
@@ -97,8 +101,8 @@ cp deploy/compose/.env.example deploy/compose/.env   # один раз; впис
 mkdir -p deploy/compose/secrets                       # один раз
 docker compose -f deploy/compose/compose.yaml up -d --build
 docker compose -f deploy/compose/compose.yaml ps -a
-# gateway-secrets, secrets-init, keycloak-db, migrate: Exited (0)
-# postgres, keycloak, api, oauth2-proxy, gateway, worker: healthy
+# gateway-secrets, secrets-init, keycloak-db, migrate, web-migrate: Exited (0)
+# postgres, keycloak, api, oauth2-proxy, gateway, worker, web: healthy
 curl -s http://localhost:8080/v1/meta                                     # api: oidc.issuer = Keycloak
 curl -s http://localhost:9091/readyz                                      # api: {"ready":true,...}
 curl -s http://localhost:8180/realms/sbx/.well-known/openid-configuration # Keycloak
@@ -106,7 +110,9 @@ curl -s -d client_id=sbx-cli http://localhost:8180/realms/sbx/protocol/openid-co
 curl -i http://127.0.0.1:9090/readyz                                      # worker
 ```
 
-Первый старт Keycloak занимает 20–40 секунд; `api` и `oauth2-proxy` ждут, пока он станет healthy.
+Первый старт Keycloak занимает 20–40 секунд; `api` и `oauth2-proxy` ждут, пока он станет healthy. Порядок
+одноразовых: `migrate` → `web-migrate` → `api`, `worker`, `web`. Образ `web` (Next.js build) собирается
+несколько минут.
 
 Состояние пула и узлов (sbx-admin внутри контейнера):
 
@@ -143,15 +149,25 @@ docker compose -f deploy/compose/compose.yaml exec keycloak cat /run/sbx-secrets
 
 Учётка создаётся только при первом старте Keycloak; смена значений потом на неё не влияет. Realm `sbx`.
 
+**Дашборд.** http://localhost:4180/ → вход Keycloak → `/app` → личная команда пользователя
+(`/app/t/team_…`). Пользователь и личная команда создаются при первом входе (одинаково в `web` и `api`).
+Выход (меню пользователя → Sign out): `/oauth2/sign_out?rd=<SBX_LOGOUT_URL>` — oauth2-proxy удаляет cookie,
+Keycloak показывает страницу выхода и возвращает на http://localhost:4180/app (у `web` нет страницы `/`: это 404).
+
 **Тестовый пользователь.** В realm `sbx` уже есть `dev@example.com` (email подтверждён) с временным паролем
 `SBX_DEV_PASSWORD` из `.env` (по умолчанию `dev`). При первом входе Keycloak попросит задать новый пароль.
 Новые пользователи заводятся в админке Keycloak (Users → Add user); для API у них должен быть отмечен
-Email verified, иначе `api` отклонит их токен. Оператор платформы — член группы `sbx-operators`
-(`SBX_OPERATOR_GROUPS`); права оператора действуют только в браузерной сессии.
+Email verified, иначе `api` отклонит их токен.
 
-**Браузер.** Дашборда пока нет (S8). Вход проверяется через API за oauth2-proxy:
-http://localhost:4180/api/v1/me → страница входа Keycloak → JSON с пользователем, его личной командой и
-`"auth": {"kind": "session"}`. Пользователь и личная команда создаются при первом входе.
+**Оператор.** Оператор платформы — член группы `sbx-operators` (`SBX_OPERATOR_GROUPS` у `api` и `web`); права
+оператора действуют только в браузерной сессии. `dev@example.com` в realm обычный пользователь (так проверяется
+и путь не-оператора: `/admin` показывает страницу Payload «unauthorized», `/app/operator` — 403). Сделать его
+оператором: админка Keycloak → realm `sbx` → Users → `dev@example.com` → Groups → Join group → `sbx-operators`.
+Группа приходит в cookie oauth2-proxy при входе, поэтому затем выйти и войти снова (или подождать обновления
+сессии, `--cookie-refresh=5m`). После этого открываются `/admin` и `/app/operator`.
+
+**API в браузере.** http://localhost:4180/api/v1/me → JSON с пользователем, его личной командой и
+`"auth": {"kind": "session"}`.
 
 **CLI.** `sbx` (`apps/cli`) входит через Device Authorization Grant. Бинарник для своей платформы собирает
 `mise exec -- pnpm --filter @sbx/cli build` (`apps/cli/dist/sbx-<os>-<arch>`), из исходников —
@@ -202,6 +218,44 @@ NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
 адреса»). Сессия обновляется каждые
 5 минут (`--cookie-refresh=5m`).
 
+## web (S8)
+
+`web` (образ `apps/web/Dockerfile`, `sbx-web:dev`) — Next.js + Payload; переменные — `apps/web/README.md`
+(«Environment»). `web-migrate` — тот же образ с `node packages/payload/src/migrate.ts`: применяет миграции схемы
+`payload` (в первой — платформенные значения по умолчанию, шаблон `linux` и размер `2gb`, как в
+`config/sbx.yaml`, и копия личностей S7 из схемы `identity`, если она есть). `api`, `worker` и `web` стартуют
+после него; `/readyz` `api` и `worker` и `/healthz` `web` не готовы, пока не применены все миграции Payload.
+
+- `api` и `worker` берут личности и конфиг (шаблоны, размеры, квоты, platform defaults) только из Payload:
+  `SBX_CONFIG_FILE` у них больше нет, `config/sbx.yaml` читает только `migrate` (`bootstrap`: топология и сборки
+  шаблонов). Шаблоны и размеры меняются в `/admin` (оператор), а не в `sbx.yaml`. `config/identity.yaml` `api`
+  по-прежнему загружает при старте (upsert в Payload).
+- `PAYLOAD_SECRET` — один на `web`, `web-migrate`, `api` и `worker` (`secrets/*/payload-secret`, см. «Секреты»).
+- Сеть. `web` доверяет заголовкам `X-Auth-Request-*`, поэтому до `:3000` должен доходить только oauth2-proxy.
+  `web` подключён только к сети `web-internal` (`internal: true`: без выхода наружу и без публикации портов), в
+  которой кроме него только `oauth2-proxy` и `postgres` (`web` нужна база). Все остальные сервисы — только в сети
+  `sbx`: из них имя `web` не резолвится, а адрес `web` в `web-internal` недоступен. Порт `web` на хосте не
+  опубликован. Проверка:
+
+  ```sh
+  docker run --rm --network sbx_sbx busybox:1.38.0-musl wget -T 3 -qO- http://web:3000/healthz        # bad address 'web'
+  ip=$(docker inspect -f '{{(index .NetworkSettings.Networks "sbx_web-internal").IPAddress}}' sbx-web-1)
+  docker run --rm --network sbx_sbx busybox:1.38.0-musl wget -T 3 -qO- "http://$ip:3000/healthz"   # timeout
+  docker compose -f deploy/compose/compose.yaml exec oauth2-proxy /bin/busybox wget -qO- http://web:3000/healthz  # ok
+  ```
+
+- Postgres: `max_connections=200` (`api` ~36 соединений, `worker` ~37, `web` ~11, плюс Keycloak и одноразовые).
+- `worker` включает `ctl-idp-sync` (S8 §20.1): раз в 5 минут читает пользователей realm `sbx` через Admin API
+  Keycloak (`http://keycloak:8080`, клиент `sbx-worker` с ролью `view-users`) и деактивирует в Payload тех, кто
+  отключён или удалён в Keycloak. `worker` не ждёт Keycloak: на свежем стеке первый проход может упасть
+  (`idp sync failed … fetch failed`, Keycloak ещё стартует), следующий — через 5 минут
+  (`sbx_idp_sync_total{result="ok"}` на `:9090/metrics`).
+- Выход: `SBX_LOGOUT_URL` (по умолчанию `<SBX_KEYCLOAK_URL>/realms/sbx/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=<SBX_APP_ORIGIN>/app`).
+  oauth2-proxy пропускает `rd` только на хосты из `whitelist_domains`, поэтому в нём и адрес Keycloak
+  (`SBX_OAUTH2_PROXY_WHITELIST_KEYCLOAK`); realm разрешает клиенту `oauth2-proxy` post-logout redirect
+  `<SBX_APP_ORIGIN>/*`.
+- Логи: `docker compose -f deploy/compose/compose.yaml logs -f web web-migrate`.
+
 ## Gateway (S4)
 
 `compose.yaml` включает `gateway.yaml` (`include`), так что `up -d --build` поднимает `gateway-secrets` и
@@ -241,19 +295,21 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 
 | Переменная | По умолчанию | Куда идёт |
 |---|---|---|
-| `SBX_API_PUBLIC_URL` | `http://localhost:8080` | `api` `SBX_API_URL` (`/v1/meta` `apiUrl`) |
-| `SBX_APP_ORIGIN` | `http://localhost:4180` | `api` `SBX_APP_URL` и `SBX_APP_ORIGIN` (Origin для небезопасных методов на proxied listener); web origin и post-logout redirect клиента `oauth2-proxy` в realm |
+| `SBX_API_PUBLIC_URL` | `http://localhost:8080` | `api` `SBX_API_URL` (`/v1/meta` `apiUrl`), `web` (подсказки CLI и SDK) |
+| `SBX_APP_ORIGIN` | `http://localhost:4180` | `api` `SBX_APP_URL` и `SBX_APP_ORIGIN` (Origin для небезопасных методов на proxied listener); `web` `SBX_APP_ORIGIN`; web origin и post-logout redirect клиента `oauth2-proxy` в realm |
 | `SBX_KEYCLOAK_URL` | `http://localhost:8180` | Keycloak `KC_HOSTNAME` |
 | `SBX_OIDC_ISSUER` | `<SBX_KEYCLOAK_URL>/realms/sbx` | `api` и oauth2-proxy (issuer, адрес входа) |
 | `SBX_OAUTH2_PROXY_REDIRECT_URL` | `<SBX_APP_ORIGIN>/oauth2/callback` | oauth2-proxy `redirect_url`, redirect URI клиента в realm |
 | `SBX_OAUTH2_PROXY_WHITELIST_DOMAIN` | `localhost:4180` | oauth2-proxy `whitelist_domains` — host:port из `SBX_APP_ORIGIN`; задаётся отдельно (compose не умеет отрезать схему) |
+| `SBX_OAUTH2_PROXY_WHITELIST_KEYCLOAK` | `localhost:8180` | второй элемент `whitelist_domains` — host:port из `SBX_KEYCLOAK_URL` (переход на страницу выхода Keycloak) |
+| `SBX_LOGOUT_URL` | `<SBX_KEYCLOAK_URL>/realms/sbx/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=<SBX_APP_ORIGIN>/app` | `web`: куда oauth2-proxy отправляет после выхода |
 | `SBX_GATEWAY_AUTH_URL` | `<SBX_APP_ORIGIN>/sbx-auth/authorize` | gateway: куда отправлять браузер для порта в режиме `sso` |
 | `SBX_KEYCLOAK_PROXY_HEADERS` | пусто | Keycloak `KC_PROXY_HEADERS`: за TLS-прокси `xforwarded` (или `forwarded`) |
 | `SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES` | пусто | Keycloak `KC_PROXY_TRUSTED_ADDRESSES`: адреса прокси (CIDR через запятую) |
 | `SBX_OAUTH2_PROXY_COOKIE_NAME` | `_sbx_session` | имя cookie сессии; за TLS — `__Host-sbx_session` |
 | `SBX_OAUTH2_PROXY_COOKIE_SECURE` | `false` | `true` за TLS (обязательно для `__Host-`) |
 | `SBX_OAUTH2_PROXY_REVERSE_PROXY` | `false` | `true`, если перед oauth2-proxy стоит прокси с `X-Forwarded-*` |
-| `SBX_SBX_DOMAIN` | `sbx.localhost` | `api` `/v1/meta` `sbxDomain` (домен портов). У gateway — свой `SBX_GATEWAY_SBX_DOMAIN` в `gateway.yaml`: при смене нужен и override gateway с тем же значением |
+| `SBX_SBX_DOMAIN` | `sbx.localhost` | `api` `/v1/meta` `sbxDomain` (домен портов), `web` (CSP `frame-src`). У gateway — свой `SBX_GATEWAY_SBX_DOMAIN` в `gateway.yaml`: при смене нужен и override gateway с тем же значением |
 | `SBX_SSH_HOST`, `SBX_SSH_PORT` | `ssh.localhost`, `${GATEWAY_SSH_PORT:-2222}` | `/v1/meta` `ssh` и `sbx ssh`. Хост gateway — свой `SBX_GATEWAY_SSH_HOST` в `gateway.yaml`: при смене `SBX_SSH_HOST` нужен и override gateway; порт по умолчанию следует за опубликованным `GATEWAY_SSH_PORT` |
 | `SBX_API_TRUSTED_PROXY_CIDRS` | пусто | `X-Forwarded-For` идёт в `clientIp` лога `api` только от этих адресов, иначе адрес соединения |
 
@@ -268,17 +324,17 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 
 ## Настройки
 
-- `config/sbx.yaml` — шаблоны, размеры, квоты и топология (узел `pve`, хранилище `local-lvm`, сборки шаблона
-  599 и 597 из S5). Worker и `api` читают конфиг один раз при старте, а `up -d` не пересоздаёт контейнер, если в
-  `compose.yaml` ничего не поменялось. Поэтому после правки:
+- `config/sbx.yaml` — топология (узел `pve`, хранилище `local-lvm`) и сборки шаблона 599 и 597 из S5; их в базу
+  загружает `sbx-admin bootstrap` в `migrate`. Шаблоны, размеры, квоты и пулы `api` и `worker` берут из Payload
+  (S8; правятся в `/admin`), секции `templates`/`sizes`/`quotas`/`pools` файла они не читают (начальные значения
+  Payload совпадают с ними). После правки топологии или сборок:
 
   ```sh
-  docker compose -f deploy/compose/compose.yaml up -d --force-recreate worker api
+  docker compose -f deploy/compose/compose.yaml up -d --force-recreate migrate worker api
   ```
 
-  Если менялись топология или сборки шаблонов (их в базу загружает `bootstrap`), пересоздать и `migrate`:
-  `... up -d --force-recreate migrate worker api` (bootstrap идемпотентен). То же для правок
-  `deploy/compose/.env` и файлов секретов.
+  (bootstrap идемпотентен). Правки `deploy/compose/.env` и файлов секретов — так же пересоздать потребителей
+  (`up -d --force-recreate <сервисы>`).
 - `config/identity.yaml` — файл личностей `api` (`SBX_IDENTITY_FILE`): команды, пользователи, командные ключи по
   sha256. Загружается при каждом старте `api` (только upsert). В dev пуст: люди появляются при первом входе.
 - `deploy/compose/.env` (git-ignored, пример — `.env.example`): Proxmox (`SBX_PVE_URL`, `SBX_PVE_TLS_NAME`,
@@ -294,7 +350,7 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 ## Что worker и api делают сами, а чего нет
 
 - Reconcile работает в dry-run (`SBX_RECONCILE_DRY_RUN=1`): читает список VM на Proxmox (только чтение) и логирует, что сделал бы.
-- Целевые размеры пулов в `sbx.yaml` равны 0 (`pools: []`, решение 17), поэтому worker сам не создаёт VM.
+- Целевых размеров пулов нет (коллекция `pool-targets` Payload пуста, как `pools: []` в `sbx.yaml`, решение 17), поэтому worker сам не создаёт VM.
 - Gateway (S4) в стеке и worker получает `SBX_GATEWAY_SERVICE_TOKEN_FILE` из `gateway.yaml`, но без VM с агентом (S3) туннеля нет: агентский порт недоступен, и создание sandbox не доходит до `ready`.
 - RPC агента в `api` отвечают `503 agent_unavailable`, пока не подключён `ConnectAgentApi` (S3 уже в `main`, подключение — по команде master-сессии; решение 3 плана S7, `apps/api/README.md`); файлы идут через gateway.
 - Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой схемы `tunnel` (до этой миграции), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.

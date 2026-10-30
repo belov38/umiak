@@ -48,7 +48,7 @@ All names are set in `names.sh`. sslip.io is a public wildcard DNS (`<a-b-c-d>.s
 |---|---|---|---|
 | Agents in sandboxes | `wss://tunnel.192-168-68-90.sslip.io/v1/connect` | LAN `192.168.68.90:443`, gateway | dev CA, pinned by the agent |
 | Previews (browser) | `https://<slug>-<port>.sbx.100-64-10-7.sslip.io` | tailnet `100.64.10.7:443`, gateway | dev CA (wildcard) |
-| oauth2-proxy (S7; dashboard S8) | `https://sbx-dev-cp.tail0000.ts.net:8443/` | Tailscale Serve → `127.0.0.1:4180` | Let's Encrypt (Serve) |
+| Dashboard `web` (S8) behind oauth2-proxy (S7) | `https://sbx-dev-cp.tail0000.ts.net:8443/` (`/app`, `/admin`; `/api/*`, `/sbx-auth/*` → api) | Tailscale Serve → `127.0.0.1:4180` | Let's Encrypt (Serve) |
 | api public listener (S7, CLI, SDK) | `https://sbx-dev-cp.tail0000.ts.net:8443/v1/…` | Tailscale Serve → `127.0.0.1:8080/v1` | Let's Encrypt (Serve) |
 | Keycloak (S7) | `https://sbx-dev-cp.tail0000.ts.net:10000/` | Tailscale Serve → `127.0.0.1:8180` | Let's Encrypt (Serve) |
 | SSH gateway (S4) | `ssh -p 2222 <slug>@sbx-dev-cp.tail0000.ts.net` | tailnet or LAN, port 2222 | gateway host keys |
@@ -91,12 +91,12 @@ infra/dev-cp/deploy.sh [--dry-run]
 1. Runs `dev-ca.sh`. Copies the working tree (`git ls-files`, ignored files excluded) to `~/boat-dev-clone` on the CT and removes files that are gone. `deploy/compose/secrets/` and `deploy/compose/.env` stay.
 2. Copies `pve-token`, `pve-root-ca.pem`, `sbx-node_ed25519`, `known_hosts` and `dev-ca/ca.{pem,key}` from `~/.config/sbx` to `~/.config/sbx` on the CT (mode 0600). `known_hosts` gets the host key pinned for the host LAN address too.
 3. Checks the CT's MagicDNS name against `names.sh`, puts the dev CA into `secrets/gateway` when it changed, writes `deploy/compose/.env` (below), `secrets/devcp/sbx.yaml` (the PVE API on the LAN address) and `secrets/data-keys.json` once.
-4. `docker compose up -d --build --remove-orphans`, waits until `worker`, `gateway`, `api` and `oauth2-proxy` are healthy (the first Keycloak start takes a minute or two), prints the worker, gateway and api `/readyz`, applies the Serve config.
+4. `docker compose up -d --build --remove-orphans`, waits until `worker`, `gateway`, `api`, `oauth2-proxy` and `web` are healthy (the first Keycloak start takes a minute or two), prints the worker, gateway and api `/readyz`, applies the Serve config.
 5. From the Mac, with real DNS: the tunnel host and a preview host with the dev CA, each Serve port and the api `/v1/meta` with the system trust store.
 
-`.env`: `COMPOSE_FILE` (the stack plus `compose.dev-cp.yaml`), `SBX_PVE_URL`, `SBX_PVE_TLS_NAME`, `SBX_NODE_SSH_HOST` (host LAN address `192.168.68.116`), `SBX_PVE_SECRETS_DIR`, the names (`SBX_DEVCP_TUNNEL_HOST`, `SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`, `SBX_DEVCP_SSH_HOST`) and the public URLs (`SBX_DEVCP_TS_NAME`, `SBX_APP_ORIGIN`, `SBX_API_PUBLIC_URL`, `SBX_KEYCLOAK_URL`, `SBX_OIDC_ISSUER`, `SBX_GATEWAY_AUTH_URL`, `SBX_OAUTH2_PROXY_REDIRECT_URL`).
+`.env`: `COMPOSE_FILE` (the stack plus `compose.dev-cp.yaml`), `SBX_PVE_URL`, `SBX_PVE_TLS_NAME`, `SBX_NODE_SSH_HOST` (host LAN address `192.168.68.116`), `SBX_PVE_SECRETS_DIR`, the names (`SBX_DEVCP_TUNNEL_HOST`, `SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`, `SBX_DEVCP_SSH_HOST`) and the public URLs (`SBX_DEVCP_TS_NAME`, `SBX_APP_ORIGIN`, `SBX_API_PUBLIC_URL`, `SBX_KEYCLOAK_URL`, `SBX_OIDC_ISSUER`, `SBX_GATEWAY_AUTH_URL`, `SBX_OAUTH2_PROXY_REDIRECT_URL`, `SBX_LOGOUT_URL`).
 
-`compose.dev-cp.yaml` overrides only what the CT needs: the names for `gateway-secrets`, `gateway` and `worker` (`SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`), the gateway ports (443 and 2222 on all addresses, the rest on loopback), the `sbx.yaml` mount, and the S7 services behind Serve (below). Each value it takes from `.env` is required (`${VAR:?set by deploy.sh}`), so a stale `.env` fails `docker compose config` instead of falling back to localhost.
+`compose.dev-cp.yaml` overrides only what the CT needs: the names for `gateway-secrets`, `gateway` and `worker` (`SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`), the gateway ports (443 and 2222 on all addresses, the rest on loopback), the `sbx.yaml` mount of `migrate` (api and worker read the config from Payload since S8), and the S7/S8 services behind Serve (below). Each value it takes from `.env` is required (`${VAR:?set by deploy.sh}`), so a stale `.env` fails `docker compose config` instead of falling back to localhost.
 
 Environment: `SBX_DEVCP_SSH` (`sbx@192.168.68.90`, or `sbx@sbx-dev-cp` over the tailnet), `SBX_DEVCP_COMPOSE_FILES` (`compose.yaml:gateway.yaml`), `SBX_DEVCP_ENV` (extra lines for `.env`), `SBX_PVE_LAN_IP`; names: `SBX_CP_IP`, `SBX_CP_TAILNET_IP`, `SBX_DEVCP_TS_NAME`, `SBX_DEVCP_TUNNEL_HOST`, `SBX_DEVCP_PORT_DOMAIN`, `SBX_DEVCP_SERVE`, `SBX_DEVCP_CA_DIR`.
 
@@ -117,17 +117,32 @@ On the CT, `cd ~/boat-dev-clone/deploy/compose`; `docker compose ps|logs|exec` p
 
 | Service | Publish (base compose) | Settings |
 |---|---|---|
-| oauth2-proxy | `127.0.0.1:4180:4180` | `OAUTH2_PROXY_REDIRECT_URL=${SBX_OAUTH2_PROXY_REDIRECT_URL}`, issuer and login URL from `SBX_OIDC_ISSUER` (alpha config, `skipDiscovery`; redeem, JWKS and profile on `http://keycloak:8080/realms/sbx/…`), `OAUTH2_PROXY_REVERSE_PROXY=true`, cookie `__Host-sbx_session` with `Secure`, whitelist `<TS name>:8443`; upstreams `/api/` → api `:8081` (prefix stripped), `/sbx-auth/` → api `:8081` |
+| oauth2-proxy | `127.0.0.1:4180:4180` | `OAUTH2_PROXY_REDIRECT_URL=${SBX_OAUTH2_PROXY_REDIRECT_URL}`, issuer and login URL from `SBX_OIDC_ISSUER` (alpha config, `skipDiscovery`; redeem, JWKS and profile on `http://keycloak:8080/realms/sbx/…`), `OAUTH2_PROXY_REVERSE_PROXY=true`, cookie `__Host-sbx_session` with `Secure`, whitelist `<TS name>:8443` (post-login) and `<TS name>:10000` (sign-out to Keycloak); upstreams `/api/` → api `:8081` (prefix stripped), `/sbx-auth/` → api `:8081`, `/` → web `:3000` |
 | api | `127.0.0.1:8080:8080`, ops `127.0.0.1:9091` | `SBX_OIDC_ISSUER=${SBX_OIDC_ISSUER}` (discovery and JWKS on `http://keycloak:8080` from the base), `SBX_APP_ORIGIN`/`SBX_APP_URL=${SBX_APP_ORIGIN}`, `SBX_API_URL=${SBX_API_PUBLIC_URL}`, `SBX_SBX_DOMAIN=${SBX_PORT_DOMAIN}`, `SBX_SSH_HOST=${SBX_DEVCP_SSH_HOST}` port 2222, `SBX_API_TRUSTED_PROXY_CIDRS=172.16.0.0/12,127.0.0.1/32` |
 | Keycloak | `127.0.0.1:8180:8080` | `KC_HOSTNAME=${SBX_KEYCLOAK_URL}` (`KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` from the base), `KC_HTTP_ENABLED=true`, `SBX_KEYCLOAK_PROXY_HEADERS=xforwarded` and `SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES` as the api (→ `KC_PROXY_HEADERS`, `KC_PROXY_TRUSTED_ADDRESSES`); realm `sbx` with the Serve redirect URI and web origin |
 | gateway | as before | `SBX_GATEWAY_AUTH_URL=${SBX_GATEWAY_AUTH_URL}` (`https://<TS name>:8443/sbx-auth/authorize`), `SBX_GATEWAY_COOKIE_CROSS_SITE=true` (the preview domain and the dashboard are different sites) |
-| web (S8) | not published | to add: `/` upstream of oauth2-proxy, `SBX_APP_ORIGIN`, `SBX_SBX_DOMAIN=${SBX_PORT_DOMAIN}`, `SBX_API_PUBLIC_URL` |
+| web (S8) | not published; only on the `web-internal` network (oauth2-proxy, postgres) | `/` upstream of oauth2-proxy; `SBX_APP_ORIGIN=${SBX_APP_ORIGIN}`, `SBX_SBX_DOMAIN=${SBX_PORT_DOMAIN}` (CSP `frame-src https://*.<port domain>`), `SBX_API_PUBLIC_URL=${SBX_API_PUBLIC_URL}`, `SBX_LOGOUT_URL=${SBX_LOGOUT_URL}` (`names.sh` `LOGOUT_URL`: Keycloak end-session on `:10000`, `client_id=oauth2-proxy`, back to `https://<TS name>:8443/app`) |
+| web-migrate, worker (S8) | — | `web-migrate` applies the Payload migrations before api, worker and web; the worker runs `ctl-idp-sync` against `http://keycloak:8080` (client `sbx-worker`) from the base compose |
 
 - Containers on the CT cannot reach the Serve address (checked: `ECONNREFUSED` from the worker container to `100.64.10.7:10000`; the CT itself can). So every service talks to Keycloak as `http://keycloak:8080` while tokens keep the public issuer `https://<TS name>:10000/realms/sbx` (`KC_HOSTNAME_BACKCHANNEL_DYNAMIC`).
 - Keycloak clients: `oauth2-proxy` redirect URI `https://sbx-dev-cp.tail0000.ts.net:8443/oauth2/callback`, web origin `https://sbx-dev-cp.tail0000.ts.net:8443`; `sbx-cli` is a public device-flow client without redirect URIs. The realm is imported into an empty Keycloak only: after changing the names, drop the `keycloak` database (`deploy/compose/README.md`, «Keycloak»).
 - Client addresses: Serve connects to the published loopback ports, and Docker hands the connection to the container from the bridge gateway (`172.x.0.1`); oauth2-proxy calls the api from its container address. Both are in `172.16.0.0/12` (Docker's default bridge pools), so `X-Forwarded-For` from them gives the tailnet client in the api log (`clientIp`). Any container in the `sbx` network can forge it too; it only affects logs.
 - Keycloak admin: `https://sbx-dev-cp.tail0000.ts.net:10000/admin`, password on the CT in `~/boat-dev-clone/deploy/compose/secrets/keycloak/admin-password`. Dev user `dev@example.com`, temporary password `dev`.
 - The LAN firewall still admits 8080/4180, which are now unused; nothing listens there on the LAN.
+
+### S8 dashboard (web)
+
+> **Не проверено на CT.** Checked locally only (`docker compose config` with the dev-cp files as `deploy.sh` layers them, and the base stack on the Mac). After the next deploy, verify on the CT:
+> - `docker compose ps -a`: `web-migrate` and `migrate` `Exited (0)`, `web` healthy; `docker compose logs web-migrate` lists the applied migrations (an existing S7 volume: the identity rows are copied into `payload` by the first one). api `/readyz` 200 (it checks the Payload migrations).
+> - Browser `https://<TS name>:8443/` → Keycloak (`:10000`) → `/app` → the personal team; `/api/v1/me` 200 with `"auth": {"kind": "session"}` and the same user and team ids as the dashboard.
+> - `/admin`: Payload's unauthorized page for `dev@example.com`; after joining `sbx-operators` in Keycloak and signing in again: the admin and `/app/operator`.
+> - Sign out (user menu): `/oauth2/sign_out?rd=…` → Keycloak `:10000` logout page → back on `https://<TS name>:8443/app` and a new login. A Keycloak database imported before S8 already has `post.logout.redirect.uris` `<app origin>/*` (S7 realm); if Keycloak answers `Invalid redirect uri`, add it to the client `oauth2-proxy` or drop the `keycloak` database.
+> - A preview of a published `sso` port opens in the dashboard's sandbox page (frame from `*.sbx.100-64-10-7.sslip.io` with the cross-site port cookie); no CSP errors in the browser console.
+> - `web:3000` is not reachable from a container on the `sbx` network (`deploy/compose/README.md`, «web (S8)»), and nothing listens on 3000 on the CT.
+> - `worker` log: `ctl-idp-sync` passes without `KeycloakError` (the service account `sbx-worker` has `view-users`).
+> - Postgres `SHOW max_connections` is 200.
+
+`deploy.sh` writes `SBX_LOGOUT_URL` from `names.sh` and waits for `web` too. The api and worker take templates, sizes and quotas from Payload now; `secrets/devcp/sbx.yaml` is read only by `migrate` (topology and template builds).
 
 ## Smoke test
 
