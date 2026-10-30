@@ -4,6 +4,14 @@ import { posix } from "node:path";
 // services/guest-agent/internal/update/pkg.go: regular files and directories
 // only, names must stay inside the package, an entry may appear once, at most
 // 64 entries and 512 MiB of file data.
+//
+// The reader is deliberately stricter than GNU tar and Go archive/tar: the
+// package is verified here but extracted by tar in the guest, so anything the
+// two could parse differently is rejected. Accepted is exactly what Go's
+// writeTar (pkg.go) produces: plain ustar headers (magic "ustar\0", version
+// "00"), no pax (x, g) and no GNU long name (L, K) headers, directories
+// without data, regular file names without a trailing slash, and the archive
+// ends with two zero blocks followed by zeros only.
 
 const BLOCK = 512;
 const MAX_ENTRIES = 64;
@@ -38,6 +46,9 @@ function checksumOk(hdr: Buffer): boolean {
 	return sum === octal(hdr, 148, 8, "checksum");
 }
 
+const MAGIC = Buffer.from("ustar\0");
+const VERSION = Buffer.from("00");
+
 /** Regular files of a ustar archive by cleaned name; directory entries are accepted and skipped. */
 export function readTar(buf: Buffer): Map<string, Buffer> {
 	const files = new Map<string, Buffer>();
@@ -48,22 +59,33 @@ export function readTar(buf: Buffer): Map<string, Buffer> {
 	while (pos + BLOCK <= buf.length) {
 		const hdr = buf.subarray(pos, pos + BLOCK);
 		pos += BLOCK;
-		if (hdr.every((b) => b === 0)) return files;
+		if (hdr.every((b) => b === 0)) {
+			// End of archive: a second zero block and nothing but zeros after it.
+			if (pos + BLOCK > buf.length) throw new Error("tar: truncated archive");
+			if (!buf.subarray(pos).every((b) => b === 0))
+				throw new Error("tar: data after the end of the archive");
+			return files;
+		}
 		if (!checksumOk(hdr)) throw new Error("tar: header checksum mismatch");
+		if (
+			!hdr.subarray(257, 263).equals(MAGIC) ||
+			!hdr.subarray(263, 265).equals(VERSION)
+		)
+			throw new Error("tar: not a ustar header");
 		const type = String.fromCharCode(hdr[156] as number);
 		const size = octal(hdr, 124, 12, "size");
 		const prefix = cString(hdr, 345, 155);
 		const rawName = cString(hdr, 0, 100);
 		const raw = prefix === "" ? rawName : `${prefix}/${rawName}`;
 		const next = pos + Math.ceil(size / BLOCK) * BLOCK;
-		if (type === "g") {
-			pos = next;
-			continue;
-		}
 		if (++entries > MAX_ENTRIES)
 			throw new Error(`tar: more than ${MAX_ENTRIES} entries`);
 		const name = entryName(raw);
 		if (type === "5") {
+			if (size !== 0)
+				throw new Error(
+					`tar: directory ${JSON.stringify(raw)} has data (size ${size})`,
+				);
 			if (name !== null) dirs.add(name);
 			pos = next;
 			continue;
@@ -72,7 +94,8 @@ export function readTar(buf: Buffer): Map<string, Buffer> {
 			throw new Error(
 				`tar: entry ${JSON.stringify(raw)} has unsupported type ${JSON.stringify(type)}`,
 			);
-		if (name === null)
+		// GNU tar treats a regular entry with a trailing slash as a directory.
+		if (name === null || raw.endsWith("/"))
 			throw new Error(`tar: bad entry name ${JSON.stringify(raw)}`);
 		if (size > MAX_BYTES - total)
 			throw new Error(`tar: package is larger than ${MAX_BYTES} bytes`);

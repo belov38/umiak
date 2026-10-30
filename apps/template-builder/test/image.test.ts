@@ -14,10 +14,12 @@ import { Readable } from "node:stream";
 import * as openpgp from "openpgp";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+	assertPinnedKey,
 	type DownloadFetch,
 	fetchBaseImage,
 	imageFileName,
 	pveImageName,
+	UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT,
 	verifySha256Sums,
 } from "../src/image.ts";
 import { loadRecipe, loadVersions } from "../src/recipe.ts";
@@ -51,6 +53,7 @@ afterEach(() => {
 interface TestKey {
 	privateKey: string;
 	publicKey: string;
+	fingerprint: string;
 }
 async function newKey(): Promise<TestKey> {
 	const { privateKey, publicKey } = await openpgp.generateKey({
@@ -58,7 +61,10 @@ async function newKey(): Promise<TestKey> {
 		userIDs: [{ name: "sbx test" }],
 		format: "armored",
 	});
-	return { privateKey, publicKey };
+	const fingerprint = (
+		await openpgp.readKey({ armoredKey: publicKey })
+	).getFingerprint();
+	return { privateKey, publicKey, fingerprint };
 }
 
 async function detachSign(
@@ -110,6 +116,30 @@ describe("pinned Ubuntu key", () => {
 		);
 	});
 
+	it("asserts exactly one key with the expected fingerprint", async () => {
+		await assertPinnedKey(
+			readFileSync(pinnedKeyFile, "utf8"),
+			UBUNTU_FINGERPRINT,
+		);
+		await expect(
+			assertPinnedKey(keyA.publicKey, UBUNTU_FINGERPRINT),
+		).rejects.toThrow(/fingerprint/);
+		const ubuntu = await openpgp.readKey({
+			armoredKey: readFileSync(pinnedKeyFile, "utf8"),
+		});
+		const a = await openpgp.readKey({ armoredKey: keyA.publicKey });
+		const two = openpgp.armor(
+			openpgp.enums.armor.publicKey,
+			Buffer.concat([ubuntu.write(), a.write()]),
+		);
+		await expect(assertPinnedKey(two, UBUNTU_FINGERPRINT)).rejects.toThrow(
+			/2 keys/,
+		);
+		await expect(verifySha256Sums("x", new Uint8Array(0), two)).rejects.toThrow(
+			/2 keys/,
+		);
+	});
+
 	it("rejects the real SHA256SUMS with one changed digit", async () => {
 		const text = readFileSync(join(ubuntuFixtures, "SHA256SUMS"), "utf8");
 		const tampered = `${text[0] === "0" ? "1" : "0"}${text.slice(1)}`;
@@ -120,6 +150,10 @@ describe("pinned Ubuntu key", () => {
 				readFileSync(pinnedKeyFile, "utf8"),
 			),
 		).rejects.toThrow();
+	});
+
+	it("exports the fingerprint of the committed key", () => {
+		expect(UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT).toBe(UBUNTU_FINGERPRINT);
 	});
 
 	it("matches the sha256 pinned in versions.toml", () => {
@@ -169,6 +203,7 @@ describe("fetchBaseImage", () => {
 	const imageBytes = Buffer.from("pretend this is a qcow2 image");
 
 	interface Setup {
+		keyFingerprint: string;
 		fetch: DownloadFetch;
 		urls: string[];
 		cacheDir: string;
@@ -226,9 +261,20 @@ describe("fetchBaseImage", () => {
 			urls,
 			cacheDir: join(dir, "cache"),
 			keyFile,
+			keyFingerprint: keyA.fingerprint,
 			base: { serial: "20261024", sha256: sha(imageBytes) },
 		};
 	}
+
+	it("refuses a key file whose fingerprint is not the pinned Ubuntu key", async () => {
+		const s = await setup();
+		const { keyFingerprint: _, ...o } = s;
+		await expect(fetchBaseImage(o)).rejects.toThrow(/fingerprint/);
+		expect(s.urls).toEqual([
+			`${RELEASE_URL}SHA256SUMS`,
+			`${RELEASE_URL}SHA256SUMS.gpg`,
+		]);
+	});
 
 	it("downloads, verifies and caches under <cacheDir>/<serial>", async () => {
 		const s = await setup();

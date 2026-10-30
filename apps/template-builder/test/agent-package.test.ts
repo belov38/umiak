@@ -28,10 +28,14 @@ interface TarEntry {
 	name: string;
 	data?: Buffer;
 	type?: string;
+	/** Size written to the header; defaults to the data length. */
+	size?: number;
+	/** Written at offset 257 (8 bytes); defaults to the ustar magic and version. */
+	magic?: string;
 }
 
 /** Minimal ustar writer for tests. */
-function makeTar(entries: TarEntry[]): Buffer {
+function makeTar(entries: TarEntry[], end = Buffer.alloc(1024)): Buffer {
 	const blocks: Buffer[] = [];
 	for (const e of entries) {
 		const data = e.data ?? Buffer.alloc(0);
@@ -40,18 +44,20 @@ function makeTar(entries: TarEntry[]): Buffer {
 		hdr.write("0000644\0", 100);
 		hdr.write("0000000\0", 108);
 		hdr.write("0000000\0", 116);
-		hdr.write(`${data.length.toString(8).padStart(11, "0")}\0`, 124);
+		hdr.write(
+			`${(e.size ?? data.length).toString(8).padStart(11, "0")}\0`,
+			124,
+		);
 		hdr.write("00000000000\0", 136);
 		hdr.write("        ", 148);
 		hdr.write(e.type ?? "0", 156);
-		hdr.write("ustar\0", 257);
-		hdr.write("00", 263);
+		hdr.write(e.magic ?? "ustar\x0000", 257, "latin1");
 		let sum = 0;
 		for (const b of hdr) sum += b;
 		hdr.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
 		blocks.push(hdr, data, Buffer.alloc((512 - (data.length % 512)) % 512));
 	}
-	blocks.push(Buffer.alloc(1024));
+	blocks.push(end);
 	return Buffer.concat(blocks);
 }
 
@@ -146,6 +152,80 @@ describe("readTar", () => {
 		expect(() => readTar(makeTar([{ name: "../d/", type: "5" }]))).toThrow(
 			/entry/,
 		);
+	});
+
+	it("accepts trailing zero padding after the end blocks", () => {
+		const m = readTar(
+			makeTar([{ name: "a", data: Buffer.from("1") }], Buffer.alloc(10240)),
+		);
+		expect([...m.keys()]).toEqual(["a"]);
+	});
+
+	// Go's tar.Reader and GNU tar skip no data after a directory header, so
+	// the hidden entry below would be extracted as sbx-agent by `tar -x`.
+	it("rejects a directory entry that carries data (hidden entry)", () => {
+		const hidden = makeTar([{ name: "sbx-agent", data: Buffer.from("evil") }]);
+		const body = hidden.subarray(0, 1024);
+		expect(() =>
+			readTar(
+				makeTar([
+					{ name: "trust/", type: "5", size: body.length, data: body },
+					{ name: "sbx-agent", data: Buffer.from("signed") },
+				]),
+			),
+		).toThrow(/directory .* has data/);
+		expect(() =>
+			readTar(makeTar([{ name: "trust/", type: "5", size: 1 }])),
+		).toThrow(/has data/);
+	});
+
+	it("rejects pax and GNU long-name headers", () => {
+		for (const type of ["g", "x", "L", "K"])
+			expect(() =>
+				readTar(
+					makeTar([
+						{ name: "hdr", type, data: Buffer.from("15 path=evil\n") },
+						{ name: "a", data: Buffer.from("1") },
+					]),
+				),
+			).toThrow(/unsupported type/);
+	});
+
+	it("requires the ustar magic and version", () => {
+		for (const magic of [
+			"ustar  \0",
+			"ustar\x0001",
+			"\0\0\0\0\0\0\0\0",
+			"USTAR\x0000",
+		])
+			expect(() =>
+				readTar(makeTar([{ name: "a", data: Buffer.from("1"), magic }])),
+			).toThrow(/not a ustar header/);
+	});
+
+	it("rejects a regular entry whose name ends in '/'", () => {
+		for (const type of ["0", "\0"])
+			expect(() =>
+				readTar(makeTar([{ name: "trust/", type, data: Buffer.from("x") }])),
+			).toThrow(/bad entry name/);
+	});
+
+	it("requires two zero blocks and only zeros after them", () => {
+		const entries = [{ name: "a", data: Buffer.from("1") }];
+		expect(() => readTar(makeTar(entries, Buffer.alloc(0)))).toThrow(
+			/truncated/,
+		);
+		expect(() => readTar(makeTar(entries, Buffer.alloc(512)))).toThrow(
+			/truncated/,
+		);
+		const late = makeTar(entries, Buffer.alloc(1024 + 512));
+		late[late.length - 1] = 1;
+		expect(() => readTar(late)).toThrow(/after the end/);
+		// A complete entry after the end blocks must not be reachable.
+		const tail = makeTar([{ name: "sbx-agent", data: Buffer.from("evil") }]);
+		expect(() =>
+			readTar(Buffer.concat([makeTar(entries, Buffer.alloc(1024)), tail])),
+		).toThrow(/after the end/);
 	});
 
 	it("rejects links, duplicates and corrupt headers", () => {
@@ -333,6 +413,15 @@ describe("verifyAgentPackage", () => {
 		expect(() => verifyAgentPackage(tarPath, noKeys)).toThrow(/no keys/);
 		const [, badKey] = write(dir, tar, "ed25519 AAAA bad\n");
 		expect(() => verifyAgentPackage(tarPath, badKey)).toThrow(/32/);
+		const lax = key.line.replace("=", "");
+		const [, unpadded] = write(dir, tar, `${lax}\n`);
+		expect(() => verifyAgentPackage(tarPath, unpadded)).toThrow(/base64/);
+		const [, urlSafe] = write(
+			dir,
+			tar,
+			`ed25519 ${"A".repeat(42)}-= url-safe\n`,
+		);
+		expect(() => verifyAgentPackage(tarPath, urlSafe)).toThrow(/base64/);
 		const [, rsa] = write(dir, tar, "rsa AAAA bad\n");
 		expect(() => verifyAgentPackage(tarPath, rsa)).toThrow(/ed25519/);
 	});

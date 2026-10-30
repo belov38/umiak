@@ -25,6 +25,7 @@ const REQUIRED_FILES = [
 const SIGNATURE_SIZE = 64;
 const PUBLIC_KEY_SIZE = 32;
 const KEY_TYPE = "ed25519";
+const KEY_BASE64_RE = /^[A-Za-z0-9+/]{43}=$/;
 const VERSION_RE = /^[A-Za-z0-9_+-][A-Za-z0-9._+-]{0,63}$/;
 
 const manifestSchema = z.object({
@@ -53,6 +54,11 @@ function parseKeys(text: string): KeyObject[] {
 		if (fields.length < 2 || fields[0] !== KEY_TYPE)
 			throw new Error(
 				`keys line ${i + 1}: want "${KEY_TYPE} <base64> [comment]"`,
+			);
+		// Strict like Go's base64.StdEncoding: padded, no line breaks or other characters.
+		if (!KEY_BASE64_RE.test(fields[1] as string))
+			throw new Error(
+				`keys line ${i + 1}: key is not standard base64 of ${PUBLIC_KEY_SIZE} bytes`,
 			);
 		const key = Buffer.from(fields[1] as string, "base64");
 		if (key.length !== PUBLIC_KEY_SIZE)

@@ -45,7 +45,33 @@ export function pveImageName(serial: string): string {
 	return `sbx-ubuntu-26.04-minimal-${serial}.qcow2`;
 }
 
+/** Fingerprint of the Ubuntu Cloud Image signing key committed in infra/templates/keys/. */
+export const UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT =
+	"d2eb44626fddc30b513d5bb71a5d6c4c7db87c81";
+
 const ARMOR_PREFIX = "-----BEGIN PGP";
+
+async function readSingleKey(armored: string): Promise<openpgp.Key> {
+	const keys = await openpgp.readKeys({ armoredKeys: armored });
+	const [key] = keys;
+	if (keys.length !== 1 || !key)
+		throw new Error(
+			`pinned key file holds ${keys.length} keys, want exactly 1`,
+		);
+	return key;
+}
+
+/** Throws unless `armored` holds exactly one key with the given fingerprint. */
+export async function assertPinnedKey(
+	armored: string,
+	fingerprint: string,
+): Promise<void> {
+	const key = await readSingleKey(armored);
+	if (key.getFingerprint() !== fingerprint)
+		throw new Error(
+			`pinned key has fingerprint ${key.getFingerprint()}, want ${fingerprint}`,
+		);
+}
 
 /** Verifies a detached signature (binary or armored) of the SHA256SUMS text against the pinned key. */
 export async function verifySha256Sums(
@@ -53,9 +79,7 @@ export async function verifySha256Sums(
 	sigArmoredOrBinary: Uint8Array,
 	pinnedKeyArmored: string,
 ): Promise<void> {
-	const verificationKeys = await openpgp.readKey({
-		armoredKey: pinnedKeyArmored,
-	});
+	const verificationKeys = await readSingleKey(pinnedKeyArmored);
 	const armored =
 		Buffer.from(sigArmoredOrBinary.subarray(0, ARMOR_PREFIX.length)).toString(
 			"latin1",
@@ -142,13 +166,20 @@ export async function fetchBaseImage(o: {
 	cacheDir: string;
 	base: Versions["base"];
 	keyFile: string;
+	/** Expected fingerprint of `keyFile`; the default is the Ubuntu key. Tests override it. */
+	keyFingerprint?: string;
 }): Promise<{ path: string; sha256: string }> {
 	const name = imageFileName(o.base);
 	const releaseUrl = `${UBUNTU_MINIMAL}release-${o.base.serial}/`;
 	const sums = await getBytes(o.fetch, `${releaseUrl}SHA256SUMS`);
 	const sig = await getBytes(o.fetch, `${releaseUrl}SHA256SUMS.gpg`);
 	const sumsText = Buffer.from(sums).toString("utf8");
-	await verifySha256Sums(sumsText, sig, readFileSync(o.keyFile, "utf8"));
+	const key = readFileSync(o.keyFile, "utf8");
+	await assertPinnedKey(
+		key,
+		o.keyFingerprint ?? UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT,
+	);
+	await verifySha256Sums(sumsText, sig, key);
 	const signed = findChecksum(sumsText, name, `${releaseUrl}SHA256SUMS`);
 	if (signed !== o.base.sha256)
 		throw new Error(
