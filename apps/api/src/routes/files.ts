@@ -519,12 +519,24 @@ async function fileTarget(
 	return (await fileSandbox(deps, c, sandbox, capability)).machineId;
 }
 
+/** `fileTarget` of a write: 403 `sandbox_blocked` on a blocked sandbox (S8 C3). */
+async function fileWriteTarget(
+	deps: ApiDeps,
+	c: Context<ApiEnv>,
+	sandbox: string,
+	capability: Capability,
+): Promise<string> {
+	return (await fileSandbox(deps, c, sandbox, capability, { write: true }))
+		.machineId;
+}
+
 /** `fileTarget` with the sandbox id. */
 async function fileSandbox(
 	deps: ApiDeps,
 	c: Context<ApiEnv>,
 	sandbox: string,
 	capability: Capability,
+	opts: { write?: boolean } = {},
 ): Promise<{ sandboxId: string; machineId: string }> {
 	const p = authOf(c).principal;
 	const signal = c.req.raw.signal;
@@ -535,7 +547,7 @@ async function fileSandbox(
 		signal,
 		(s) => deps.svc.touchApiActivity(s.id),
 	);
-	const { machineId } = await deps.svc.resolveAgentTarget(p, s.id);
+	const { machineId } = await deps.svc.resolveAgentTarget(p, s.id, opts);
 	try {
 		await deps.agent.requireCapability(machineId, capability, signal);
 	} catch (e) {
@@ -810,7 +822,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 	app.openapi(putContentRoute, async (c) => {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
-		const m = await fileTarget(deps, c, sandbox, "files.v1");
+		const m = await fileWriteTarget(deps, c, sandbox, "files.v1");
 		const res = await agentFiles(
 			deps,
 			m,
@@ -835,7 +847,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 
 	app.openapi(createUploadRoute, async (c) => {
 		const { sandbox } = c.req.valid("param");
-		await fileTarget(deps, c, sandbox, "files.upload.v1");
+		await fileWriteTarget(deps, c, sandbox, "files.upload.v1");
 		return c.json(
 			{
 				uploadId: newPublicUlid("upload"),
@@ -850,7 +862,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 	app.openapi(putChunkRoute, async (c) => {
 		const params = c.req.valid("param");
 		const q = c.req.valid("query");
-		const m = await fileTarget(deps, c, params.sandbox, "files.upload.v1");
+		const m = await fileWriteTarget(deps, c, params.sandbox, "files.upload.v1");
 		const id = uploadIdOf(params.upload);
 		// Buffered (<= 8 MiB) so that agent-client may resend it.
 		const data = await readChunk(c.req.raw);
@@ -927,7 +939,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 
 	app.openapi(deleteUploadRoute, async (c) => {
 		const params = c.req.valid("param");
-		const m = await fileTarget(deps, c, params.sandbox, "files.upload.v1");
+		const m = await fileWriteTarget(deps, c, params.sandbox, "files.upload.v1");
 		const id = uploadIdOf(params.upload);
 		const res = await agentFiles(deps, m, `/uploads/${id}`, {
 			method: "DELETE",
@@ -942,7 +954,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const params = c.req.valid("param");
 		const q = c.req.valid("query");
 		const b = c.req.valid("json");
-		const m = await fileTarget(deps, c, params.sandbox, "files.upload.v1");
+		const m = await fileWriteTarget(deps, c, params.sandbox, "files.upload.v1");
 		const id = uploadIdOf(params.upload);
 		const body: Record<string, unknown> = { path: b.path };
 		if (b.sha256 !== undefined) body.sha256 = b.sha256.toLowerCase();
@@ -1025,7 +1037,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
 		const b = c.req.valid("json");
-		const m = await fileTarget(deps, c, sandbox, "files.v1");
+		const m = await fileWriteTarget(deps, c, sandbox, "files.v1");
 		const r = await mutation(
 			() =>
 				deps.agent.makeDir(m, {
@@ -1045,7 +1057,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
 		const b = c.req.valid("json");
-		const m = await fileTarget(deps, c, sandbox, "files.v1");
+		const m = await fileWriteTarget(deps, c, sandbox, "files.v1");
 		const info = await mutation(
 			() =>
 				deps.agent.move(m, {
@@ -1065,7 +1077,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
 		const b = c.req.valid("json");
-		const m = await fileTarget(deps, c, sandbox, "files.v1");
+		const m = await fileWriteTarget(deps, c, sandbox, "files.v1");
 		const info = await mutation(
 			() =>
 				deps.agent.chmod(m, {
@@ -1086,7 +1098,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 	app.openapi(removeRoute, async (c) => {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
-		const m = await fileTarget(deps, c, sandbox, "files.v1");
+		const m = await fileWriteTarget(deps, c, sandbox, "files.v1");
 		const r = await mutation(
 			() =>
 				deps.agent.remove(m, {
@@ -1146,7 +1158,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 	app.openapi(putArchiveRoute, async (c) => {
 		const { sandbox } = c.req.valid("param");
 		const q = c.req.valid("query");
-		const m = await fileTarget(deps, c, sandbox, "files.archive.v1");
+		const m = await fileWriteTarget(deps, c, sandbox, "files.archive.v1");
 		const res = await agentFiles(
 			deps,
 			m,

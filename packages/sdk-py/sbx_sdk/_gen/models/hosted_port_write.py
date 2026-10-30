@@ -9,6 +9,13 @@ from attrs import field as _attrs_field
 
 from ..models.hosted_port_write_access import HostedPortWriteAccess
 from ..models.hosted_port_write_app_protocol import HostedPortWriteAppProtocol
+from ..models.hosted_port_write_block_reason_type_1 import HostedPortWriteBlockReasonType1
+from ..models.hosted_port_write_block_reason_type_2_type_1 import (
+    HostedPortWriteBlockReasonType2Type1,
+)
+from ..models.hosted_port_write_block_reason_type_3_type_1 import (
+    HostedPortWriteBlockReasonType3Type1,
+)
 from ..models.hosted_port_write_host_rewrite import HostedPortWriteHostRewrite
 from ..types import UNSET, Unset
 
@@ -22,8 +29,10 @@ class HostedPortWrite:
     Attributes:
         access (HostedPortWriteAccess):
         app_protocol (HostedPortWriteAppProtocol):
-        block_reason (None | str):
-        blocked (bool): An operator blocked the port; the gateway refuses it
+        block_reason (HostedPortWriteBlockReasonType1 | HostedPortWriteBlockReasonType2Type1 |
+            HostedPortWriteBlockReasonType3Type1 | None):
+        blocked (bool): An operator blocked the port: the gateway refuses it, and PUT, rotate-token and DELETE of the
+            port are 403 `forbidden` (details.reason `port_blocked`)
         created_at (datetime.datetime): ISO 8601 UTC with milliseconds
         host_rewrite (HostedPortWriteHostRewrite):
         label (str): `<slug>-<port>`, the first DNS label of the URL Example: quiet-otter-lamp-3000.
@@ -36,7 +45,12 @@ class HostedPortWrite:
 
     access: HostedPortWriteAccess
     app_protocol: HostedPortWriteAppProtocol
-    block_reason: None | str
+    block_reason: (
+        HostedPortWriteBlockReasonType1
+        | HostedPortWriteBlockReasonType2Type1
+        | HostedPortWriteBlockReasonType3Type1
+        | None
+    )
     blocked: bool
     created_at: datetime.datetime
     host_rewrite: HostedPortWriteHostRewrite
@@ -53,7 +67,14 @@ class HostedPortWrite:
         app_protocol = self.app_protocol.value
 
         block_reason: None | str
-        block_reason = self.block_reason
+        if isinstance(self.block_reason, HostedPortWriteBlockReasonType1):
+            block_reason = self.block_reason.value
+        elif isinstance(self.block_reason, HostedPortWriteBlockReasonType2Type1):
+            block_reason = self.block_reason.value
+        elif isinstance(self.block_reason, HostedPortWriteBlockReasonType3Type1):
+            block_reason = self.block_reason.value
+        else:
+            block_reason = self.block_reason
 
         blocked = self.blocked
 
@@ -100,10 +121,47 @@ class HostedPortWrite:
 
         app_protocol = HostedPortWriteAppProtocol(d.pop("appProtocol"))
 
-        def _parse_block_reason(data: object) -> None | str:
+        def _parse_block_reason(
+            data: object,
+        ) -> (
+            HostedPortWriteBlockReasonType1
+            | HostedPortWriteBlockReasonType2Type1
+            | HostedPortWriteBlockReasonType3Type1
+            | None
+        ):
             if data is None:
                 return data
-            return cast(None | str, data)
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                block_reason_type_1 = HostedPortWriteBlockReasonType1(data)
+
+                return block_reason_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                block_reason_type_2_type_1 = HostedPortWriteBlockReasonType2Type1(data)
+
+                return block_reason_type_2_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                block_reason_type_3_type_1 = HostedPortWriteBlockReasonType3Type1(data)
+
+                return block_reason_type_3_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(
+                HostedPortWriteBlockReasonType1
+                | HostedPortWriteBlockReasonType2Type1
+                | HostedPortWriteBlockReasonType3Type1
+                | None,
+                data,
+            )
 
         block_reason = _parse_block_reason(d.pop("blockReason"))
 

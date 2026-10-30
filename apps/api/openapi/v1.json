@@ -201,6 +201,27 @@
 				],
 				"type": "object"
 			},
+			"BlockRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"note": {
+						"description": "Up to 500 characters for the record (the sandbox's events)",
+						"maxLength": 500,
+						"type": "string"
+					},
+					"reason": {
+						"enum": [
+							"operator",
+							"abuse"
+						],
+						"type": "string"
+					}
+				},
+				"required": [
+					"reason"
+				],
+				"type": "object"
+			},
 			"ChmodRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -1833,13 +1854,19 @@
 						"x-extensible-enum": true
 					},
 					"blockReason": {
+						"enum": [
+							"operator",
+							"abuse",
+							null
+						],
 						"type": [
 							"string",
 							"null"
-						]
+						],
+						"x-extensible-enum": true
 					},
 					"blocked": {
-						"description": "An operator blocked the port; the gateway refuses it",
+						"description": "An operator blocked the port: the gateway refuses it, and PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`)",
 						"type": "boolean"
 					},
 					"createdAt": {
@@ -1903,13 +1930,19 @@
 						"x-extensible-enum": true
 					},
 					"blockReason": {
+						"enum": [
+							"operator",
+							"abuse",
+							null
+						],
 						"type": [
 							"string",
 							"null"
-						]
+						],
+						"x-extensible-enum": true
 					},
 					"blocked": {
-						"description": "An operator blocked the port; the gateway refuses it",
+						"description": "An operator blocked the port: the gateway refuses it, and PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`)",
 						"type": "boolean"
 					},
 					"createdAt": {
@@ -2709,6 +2742,23 @@
 						"type": "string",
 						"x-extensible-enum": true
 					},
+					"blockReason": {
+						"description": "Why it is blocked; null unless blocked",
+						"enum": [
+							"operator",
+							"abuse",
+							null
+						],
+						"type": [
+							"string",
+							"null"
+						],
+						"x-extensible-enum": true
+					},
+					"blocked": {
+						"description": "A platform operator blocked the sandbox: its ports are refused and only reads, stop and delete are allowed (403 `forbidden`, details.reason `sandbox_blocked`)",
+						"type": "boolean"
+					},
 					"createdAt": {
 						"description": "ISO 8601 UTC with milliseconds",
 						"format": "date-time",
@@ -2997,6 +3047,8 @@
 					"endpoints",
 					"environment",
 					"excludeOwnerSecrets",
+					"blocked",
+					"blockReason",
 					"createdAt",
 					"readyAt",
 					"stoppedAt",
@@ -3893,6 +3945,17 @@
 				"required": [
 					"data"
 				],
+				"type": "object"
+			},
+			"UnblockRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"note": {
+						"description": "Up to 500 characters for the record (the sandbox's events)",
+						"maxLength": 500,
+						"type": "string"
+					}
+				},
 				"type": "object"
 			},
 			"UpdateEnvironmentRequest": {
@@ -4863,7 +4926,7 @@
 		},
 		"/v1/sandboxes": {
 			"get": {
-				"description": "Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters: `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must match), `template`, `q` (prefix of name or slug).",
+				"description": "Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters: `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must match), `template`, `q` (prefix of name or slug). A platform operator in the dashboard may list every team with `allTeams=true` (and `teamId`).",
 				"operationId": "sandboxes.list",
 				"parameters": [
 					{
@@ -4917,6 +4980,31 @@
 						}
 					},
 					{
+						"description": "`true`: sandboxes of every team. Only a platform operator in the dashboard (browser session); anyone else is 403 `forbidden` (details.reason `operator_required`)",
+						"in": "query",
+						"name": "allTeams",
+						"required": false,
+						"schema": {
+							"description": "`true`: sandboxes of every team. Only a platform operator in the dashboard (browser session); anyone else is 403 `forbidden` (details.reason `operator_required`)",
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"description": "With allTeams=true: only this team (`team_...`)",
+						"in": "query",
+						"name": "teamId",
+						"required": false,
+						"schema": {
+							"description": "With allTeams=true: only this team (`team_...`)",
+							"example": "team_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					},
+					{
 						"description": "Page size, 1-200 (default 50)",
 						"in": "query",
 						"name": "limit",
@@ -4959,7 +5047,17 @@
 								}
 							}
 						},
-						"description": "`validation` or `invalid_cursor`"
+						"description": "`validation` (also `teamId` without allTeams=true) or `invalid_cursor`"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `operator_required`: allTeams=true by anyone but a platform operator's browser session"
 					},
 					"default": {
 						"content": {
@@ -5325,6 +5423,92 @@
 					}
 				},
 				"summary": "Update a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/block": {
+			"post": {
+				"description": "Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"operationId": "sandboxes.block",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/BlockRequest"
+							}
+						}
+					},
+					"description": "Why",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Sandbox"
+								}
+							}
+						},
+						"description": "The blocked sandbox"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `operator_required`: not a platform operator"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in any team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`: deleted"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Block a sandbox (operator)",
 				"tags": [
 					"sandboxes"
 				]
@@ -8629,6 +8813,16 @@
 						},
 						"description": "`validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, 48010), or more than 50 hosted ports"
 					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `port_blocked` (an operator blocked this port) or `sandbox_blocked` (an operator blocked the sandbox)"
+					},
 					"404": {
 						"content": {
 							"application/json": {
@@ -8734,7 +8928,7 @@
 								}
 							}
 						},
-						"description": "`forbidden` with details.reason `public_disabled`: the operator turned public ports off"
+						"description": "`forbidden` with details.reason `public_disabled` (the operator turned public ports off), `port_blocked` (an operator blocked this port) or `sandbox_blocked`"
 					},
 					"404": {
 						"content": {
@@ -8768,6 +8962,105 @@
 					}
 				},
 				"summary": "Publish a port or change its access",
+				"tags": [
+					"ports"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ports/{port}/block": {
+			"post": {
+				"description": "Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"operationId": "ports.block",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
+						"in": "path",
+						"name": "port",
+						"required": true,
+						"schema": {
+							"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
+							"example": 3000,
+							"maximum": 65535,
+							"minimum": 1,
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/BlockRequest"
+							}
+						}
+					},
+					"description": "Why",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HostedPort"
+								}
+							}
+						},
+						"description": "The blocked port"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, 48010), or more than 50 hosted ports"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `operator_required`: not a platform operator"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in any team, or the port is not hosted"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Block a hosted port (operator)",
 				"tags": [
 					"ports"
 				]
@@ -8824,6 +9117,16 @@
 						},
 						"description": "`validation`: a bad port or the port is not in token mode"
 					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `port_blocked` (an operator blocked this port) or `sandbox_blocked` (an operator blocked the sandbox)"
+					},
 					"404": {
 						"content": {
 							"application/json": {
@@ -8856,6 +9159,105 @@
 					}
 				},
 				"summary": "Issue a new port token",
+				"tags": [
+					"ports"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ports/{port}/unblock": {
+			"post": {
+				"description": "Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"operationId": "ports.unblock",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
+						"in": "path",
+						"name": "port",
+						"required": true,
+						"schema": {
+							"description": "TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
+							"example": 3000,
+							"maximum": 65535,
+							"minimum": 1,
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UnblockRequest"
+							}
+						}
+					},
+					"description": "Optional note",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HostedPort"
+								}
+							}
+						},
+						"description": "The port"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, 48010), or more than 50 hosted ports"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `operator_required`: not a platform operator"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in any team, or the port is not hosted"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Unblock a hosted port (operator)",
 				"tags": [
 					"ports"
 				]
@@ -9554,6 +9956,82 @@
 					}
 				},
 				"summary": "Stop a sandbox",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/unblock": {
+			"post": {
+				"description": "Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"operationId": "sandboxes.unblock",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UnblockRequest"
+							}
+						}
+					},
+					"description": "Optional note",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Sandbox"
+								}
+							}
+						},
+						"description": "The sandbox"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `operator_required`: not a platform operator"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in any team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Unblock a sandbox (operator)",
 				"tags": [
 					"sandboxes"
 				]

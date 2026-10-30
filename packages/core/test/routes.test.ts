@@ -96,6 +96,7 @@ describe.skipIf(skipPg())("routes for the gateway (S6 §14.2, S4 §4.2)", () => 
 			teamId: env.p.teamId,
 			slug: s.slug,
 			templateSlug: env.template,
+			blocked: false,
 		};
 		expect(await sshTarget(t.pool, s.sandboxId)).toEqual(want);
 		expect(await createRoutes(t.pool).sshTarget(s.slug)).toEqual(want);

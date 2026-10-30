@@ -377,18 +377,26 @@ const signalCommandRoute = createRoute({
 
 // --- helpers ---
 
-/** The command (404 unless it is the sandbox's) and the machine to call. */
+/**
+ * The command (404 unless it is the sandbox's) and the machine to call.
+ * `write` (input, kill, signal): 403 `sandbox_blocked` on a blocked sandbox.
+ */
 async function commandTarget(
 	deps: ApiDeps,
 	p: Principal,
 	params: { sandbox: string; command: string },
+	opts: { write?: boolean } = {},
 ) {
 	const command = await deps.svc.getCommand(
 		p,
 		resolveSandboxRef(params.sandbox),
 		resolveCommandRef(params.command),
 	);
-	const { machineId } = await deps.svc.resolveAgentTarget(p, command.sandboxId);
+	const { machineId } = await deps.svc.resolveAgentTarget(
+		p,
+		command.sandboxId,
+		opts,
+	);
 	requireSameMachine(command, machineId);
 	return { command, machineId };
 }
@@ -862,7 +870,9 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const p = authOf(c).principal;
 		const params = c.req.valid("param");
 		const b = c.req.valid("json");
-		const { command, machineId } = await commandTarget(deps, p, params);
+		const { command, machineId } = await commandTarget(deps, p, params, {
+			write: true,
+		});
 		if (isTerminalStatus(command.status)) throw commandExitedError();
 		const data =
 			b.encoding === "base64"
@@ -899,7 +909,9 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const p = authOf(c).principal;
 		const params = c.req.valid("param");
 		const b = c.req.valid("json") ?? {};
-		const { command, machineId } = await commandTarget(deps, p, params);
+		const { command, machineId } = await commandTarget(deps, p, params, {
+			write: true,
+		});
 		let info: AgentCommandInfo;
 		try {
 			info = await deps.agent.kill(machineId, {
@@ -916,7 +928,9 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const p = authOf(c).principal;
 		const params = c.req.valid("param");
 		const b = c.req.valid("json");
-		const { command, machineId } = await commandTarget(deps, p, params);
+		const { command, machineId } = await commandTarget(deps, p, params, {
+			write: true,
+		});
 		let info: AgentCommandInfo;
 		try {
 			info = await deps.agent.signal(machineId, {

@@ -11,7 +11,7 @@ import {
 	type Sandbox,
 } from "@sbx/core";
 import { authOf } from "../auth/principal.ts";
-import { requireScope } from "../auth/scopes.ts";
+import { requireOperator, requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { iso } from "../map/operation.ts";
@@ -19,11 +19,13 @@ import { resolveSandboxRef } from "../map/sandbox.ts";
 import {
 	ERROR_RESPONSES,
 	errorResponse,
+	jsonBody,
 	jsonResponse,
 	optionalJsonBody,
 } from "../openapi/registry.ts";
 import { SandboxParams } from "../schemas/common.ts";
 import {
+	HostedPortSchema,
 	HostedPortWriteSchema,
 	HostPortRequest,
 	PortParams,
@@ -31,10 +33,16 @@ import {
 	RESERVED_PORTS_TEXT,
 	SandboxPortsSchema,
 } from "../schemas/port.ts";
+import { BlockRequest, UnblockRequest } from "../schemas/sandbox.ts";
+import { blockInput, unblockInput } from "./sandboxes.ts";
 
 const TAGS = ["ports"];
 
 const notFound404 = errorResponse("`not_found`: no such sandbox in the team");
+const portBlocked403 = errorResponse(
+	"`forbidden` with details.reason `port_blocked` (an operator blocked this port) or " +
+		"`sandbox_blocked` (an operator blocked the sandbox)",
+);
 const port400 = errorResponse(
 	`\`validation\`: port outside 1-65535, a reserved port (${RESERVED_PORTS_TEXT}), ` +
 		"or more than 50 hosted ports",
@@ -82,7 +90,8 @@ const hostPort = createRoute({
 		201: jsonResponse(HostedPortWriteSchema, "Published"),
 		400: port400,
 		403: errorResponse(
-			"`forbidden` with details.reason `public_disabled`: the operator turned public ports off",
+			"`forbidden` with details.reason `public_disabled` (the operator turned public ports " +
+				"off), `port_blocked` (an operator blocked this port) or `sandbox_blocked`",
 		),
 		404: notFound404,
 		409: errorResponse("`invalid_state`: deleting or deleted"),
@@ -106,6 +115,7 @@ const rotateToken = createRoute({
 		400: errorResponse(
 			"`validation`: a bad port or the port is not in token mode",
 		),
+		403: portBlocked403,
 		404: errorResponse(
 			"`not_found`: no such sandbox, or the port is not hosted",
 		),
@@ -128,7 +138,64 @@ const unhostPort = createRoute({
 	responses: {
 		204: { description: "Not hosted any more" },
 		400: port400,
+		403: portBlocked403,
 		404: notFound404,
+		...ERROR_RESPONSES,
+	},
+});
+
+const OPERATOR_ONLY =
+	"Only a platform operator's browser session (the dashboard); API keys and Keycloak " +
+	"tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found " +
+	"in any team, no Sbx-Team needed.";
+
+const blockPortRoute = createRoute({
+	method: "post",
+	path: "/v1/sandboxes/{sandbox}/ports/{port}/block",
+	operationId: "ports.block",
+	summary: "Block a hosted port (operator)",
+	description:
+		"Blocks the port: the gateway refuses it, and for everyone but an operator PUT, " +
+		"rotate-token and DELETE of the port are 403 `forbidden` (details.reason " +
+		"`port_blocked`), so the block survives an unpublish and a new publish. The same " +
+		`reason again changes nothing. ${OPERATOR_ONLY}`,
+	tags: TAGS,
+	middleware: [requireOperator()] as const,
+	request: { params: PortParams, body: jsonBody(BlockRequest, "Why") },
+	responses: {
+		200: jsonResponse(HostedPortSchema, "The blocked port"),
+		400: port400,
+		403: errorResponse(
+			"`forbidden` with details.reason `operator_required`: not a platform operator",
+		),
+		404: errorResponse(
+			"`not_found`: no such sandbox in any team, or the port is not hosted",
+		),
+		...ERROR_RESPONSES,
+	},
+});
+
+const unblockPortRoute = createRoute({
+	method: "post",
+	path: "/v1/sandboxes/{sandbox}/ports/{port}/unblock",
+	operationId: "ports.unblock",
+	summary: "Unblock a hosted port (operator)",
+	description: `Lifts the port's block at once; on a port that is not blocked nothing changes. ${OPERATOR_ONLY}`,
+	tags: TAGS,
+	middleware: [requireOperator()] as const,
+	request: {
+		params: PortParams,
+		body: optionalJsonBody(UnblockRequest, "Optional note"),
+	},
+	responses: {
+		200: jsonResponse(HostedPortSchema, "The port"),
+		400: port400,
+		403: errorResponse(
+			"`forbidden` with details.reason `operator_required`: not a platform operator",
+		),
+		404: errorResponse(
+			"`not_found`: no such sandbox in any team, or the port is not hosted",
+		),
 		...ERROR_RESPONSES,
 	},
 });
@@ -292,5 +359,29 @@ export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 		const { sandbox, port } = c.req.valid("param");
 		await svc.unhostPort(p, resolveSandboxRef(sandbox), port);
 		return c.body(null, 204);
+	});
+
+	app.openapi(blockPortRoute, async (c) => {
+		const p = authOf(c).principal;
+		const { sandbox, port } = c.req.valid("param");
+		const hp = await svc.blockPort(
+			p,
+			resolveSandboxRef(sandbox),
+			port,
+			blockInput(c.req.valid("json")),
+		);
+		return c.json(toHostedPort(hp, domain()), 200);
+	});
+
+	app.openapi(unblockPortRoute, async (c) => {
+		const p = authOf(c).principal;
+		const { sandbox, port } = c.req.valid("param");
+		const hp = await svc.unblockPort(
+			p,
+			resolveSandboxRef(sandbox),
+			port,
+			unblockInput(c.req.valid("json")),
+		);
+		return c.json(toHostedPort(hp, domain()), 200);
 	});
 }

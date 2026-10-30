@@ -19,6 +19,9 @@ export const ERROR_CODES = [
 	"snapshot_name_taken",
 	"agent_unavailable",
 	"retries_exhausted",
+	// S8 C3: operator rights and blocks; `details.reason` says which
+	// (operator_required, sandbox_blocked, port_blocked).
+	"forbidden",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -191,5 +194,32 @@ export function recoverRateLimited(retryAfterSeconds: number): SbxError {
 		"recover_rate_limited",
 		`recover was called recently; retry in ${retryAfterSeconds} s`,
 		{ details: { retryAfterSeconds } },
+	);
+}
+
+/** An operator-only action by anyone else (S8 C3). */
+export function operatorRequired(): SbxError {
+	return new SbxError(
+		"forbidden",
+		"only a platform operator (browser session) may do this",
+		{ details: { reason: "operator_required" } },
+	);
+}
+
+/** A change of a sandbox an operator has blocked (S8 C3). */
+export function sandboxBlocked(): SbxError {
+	return new SbxError(
+		"forbidden",
+		"the sandbox is blocked by the platform operator; only reads, stop and delete are allowed",
+		{ details: { reason: "sandbox_blocked" } },
+	);
+}
+
+/** A change of a hosted port an operator has blocked (S8 C3). */
+export function portBlocked(port: number): SbxError {
+	return new SbxError(
+		"forbidden",
+		`port ${port} is blocked by the platform operator`,
+		{ details: { reason: "port_blocked", port } },
 	);
 }

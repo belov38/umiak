@@ -354,6 +354,9 @@ export const sandboxes = runtime.table("sandboxes", {
 	/** Operator block (S8; migration 0204): every port of the sandbox is blocked. */
 	blocked: boolean("blocked").notNull().default(false),
 	blockReason: text("block_reason"),
+	/** When and by which operator (migration 0206). */
+	blockedAt: tstz("blocked_at"),
+	blockedBy: uuid("blocked_by"),
 	/** Last change of the row, set by a trigger (migration 0205). */
 	updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
@@ -482,6 +485,9 @@ export const hostedPorts = runtime.table("hosted_ports", {
 		.default("http1"),
 	blocked: boolean("blocked").notNull().default(false),
 	blockReason: text("block_reason"),
+	/** When and by which operator (migration 0206). */
+	blockedAt: tstz("blocked_at"),
+	blockedBy: uuid("blocked_by"),
 });
 
 // §5.9 Agent events

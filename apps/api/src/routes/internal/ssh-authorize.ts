@@ -8,7 +8,9 @@
 // `recheck` (the gateway re-checks open sessions after its LISTEN came back)
 // checks the identity the same way but not the certificate's validity, and
 // touches nothing. A team key's certificate issued before the key's last
-// rotation is denied on login and on recheck. A denial has no reason: the gateway does not show one.
+// rotation is denied on login and on recheck. A sandbox blocked by an
+// operator (S8 C3) is denied for everyone. A denial has no reason: the
+// gateway does not show one.
 import {
 	decodeUuid,
 	encodeUuid,
@@ -227,7 +229,8 @@ export function registerSshAuthorizeRoutes(app: ApiApp, deps: ApiDeps): void {
 			checkCredential(b);
 			const recheck = b.recheck === true;
 			const t = await target(deps, b.sandbox);
-			if (t === null) return c.json(DENIED, 200);
+			// A blocked sandbox takes no SSH logins, operators included (S8 C3, C6).
+			if (t === null || t.blocked) return c.json(DENIED, 200);
 			const actor =
 				b.certificate !== undefined
 					? await viaCertificate(deps, t, b.certificate, recheck)

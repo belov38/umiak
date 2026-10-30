@@ -124,7 +124,11 @@ export const ptySize = {
 };
 const ResizeMessage = z.object({ type: z.literal("resize"), ...ptySize });
 
-/** The PTY command of the path (404 unless a PTY of the sandbox) and its machine. */
+/**
+ * The PTY command of the path (404 unless a PTY of the sandbox) and its
+ * machine. A PTY is input to the guest: 403 `sandbox_blocked` on a blocked
+ * sandbox (S8 C3).
+ */
 export async function ptyTarget(
 	deps: ApiDeps,
 	p: Principal,
@@ -136,7 +140,13 @@ export async function ptyTarget(
 		resolveCommandRef(params.command),
 	);
 	if (command.mode !== "pty") throw notFoundError("pty");
-	const { machineId } = await deps.svc.resolveAgentTarget(p, command.sandboxId);
+	const { machineId } = await deps.svc.resolveAgentTarget(
+		p,
+		command.sandboxId,
+		{
+			write: true,
+		},
+	);
 	requireSameMachine(command, machineId);
 	return { command, machineId };
 }

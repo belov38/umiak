@@ -149,7 +149,9 @@ export async function forkSandbox(
 	validateForkInput(input);
 	// The source id is part of the idempotency hash (S7 §20.2 item 11): resolve
 	// it before the transaction, whose first write must be the key.
-	const sourceId = (await findSandboxRow(deps.pool, p, idOrSlug)).id;
+	const sourceId = (
+		await findSandboxRow(deps.pool, p, idOrSlug, { write: true })
+	).id;
 	const targetId = uuidv7();
 	const machineId = uuidv7();
 	const forkOpId = uuidv7();
@@ -179,7 +181,10 @@ export async function forkSandbox(
 			}
 		}
 
-		const src = await findSandboxRow(tx.client, p, sourceId, { lock: true });
+		const src = await findSandboxRow(tx.client, p, sourceId, {
+			lock: true,
+			write: true,
+		});
 		const active = await activeOperation(tx.client, src.id);
 		if (active !== null) throw operationInProgress(active);
 		sandboxNext(src.state, "fork");

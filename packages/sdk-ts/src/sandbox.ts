@@ -38,6 +38,9 @@ export type SandboxPorts = components["schemas"]["SandboxPorts"];
 export type PortToken = components["schemas"]["PortToken"];
 export type ForkInput = components["schemas"]["ForkSandboxRequest"];
 export type ResumeInput = components["schemas"]["ResumeSandboxRequest"];
+/** `{reason: "operator" | "abuse", note?}` of an operator block (S8 C3). */
+export type BlockInput = components["schemas"]["BlockRequest"];
+export type UnblockInput = components["schemas"]["UnblockRequest"];
 
 export interface WaitOptions {
 	/** Overall limit; default 300 000 ms for ready, none for operations. */
@@ -80,6 +83,18 @@ export class Sandbox implements SandboxRef {
 		unhost(port: number, opts?: CallOptions): Promise<void>;
 		/** A new token; the old one and its cookies stop working at once. */
 		rotateToken(port: number, opts?: CallOptions): Promise<PortToken>;
+		/** Operator only (dashboard session): blocks the port. */
+		block(
+			port: number,
+			input: BlockInput,
+			opts?: CallOptions,
+		): Promise<HostedPort>;
+		/** Operator only: lifts the port's block. */
+		unblock(
+			port: number,
+			input?: UnblockInput,
+			opts?: CallOptions,
+		): Promise<HostedPort>;
 	};
 
 	constructor(core: ClientCore, data: SandboxData) {
@@ -116,6 +131,28 @@ export class Sandbox implements SandboxRef {
 				const { data } = await this.core.raw.POST(
 					`${SANDBOX}/ports/{port}/rotate-token`,
 					{ params: { path: { sandbox: this.id, port } }, ...callOf(opts) },
+				);
+				return data;
+			},
+			block: async (port, input, opts = {}) => {
+				const { data } = await this.core.raw.POST(
+					`${SANDBOX}/ports/{port}/block`,
+					{
+						params: { path: { sandbox: this.id, port } },
+						body: input,
+						...callOf(opts),
+					},
+				);
+				return data;
+			},
+			unblock: async (port, input = {}, opts = {}) => {
+				const { data } = await this.core.raw.POST(
+					`${SANDBOX}/ports/{port}/unblock`,
+					{
+						params: { path: { sandbox: this.id, port } },
+						body: input,
+						...callOf(opts),
+					},
 				);
 				return data;
 			},
@@ -291,6 +328,34 @@ export class Sandbox implements SandboxRef {
 		const op = data.operation;
 		if (op === null) return null;
 		return this.#after({ sandbox: data.sandbox, operation: op }, opts);
+	}
+
+	/**
+	 * Operator only (dashboard session, S8 C3): blocks the sandbox. Its ports
+	 * and SSH are refused; the team keeps reads, stop and delete.
+	 */
+	async block(input: BlockInput, opts: CallOptions = {}): Promise<SandboxData> {
+		const { data } = await this.core.raw.POST(`${SANDBOX}/block`, {
+			params: this.#path(),
+			body: input,
+			...callOf(opts),
+		});
+		this.data = data;
+		return data;
+	}
+
+	/** Operator only: lifts the block at once. */
+	async unblock(
+		input: UnblockInput = {},
+		opts: CallOptions = {},
+	): Promise<SandboxData> {
+		const { data } = await this.core.raw.POST(`${SANDBOX}/unblock`, {
+			params: this.#path(),
+			body: input,
+			...callOf(opts),
+		});
+		this.data = data;
+		return data;
 	}
 
 	/** The same as `delete` (S7 §15.4: a delete needs no stop first). */

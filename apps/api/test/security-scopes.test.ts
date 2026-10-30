@@ -237,8 +237,45 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 		},
 	);
 
+	const operatorOnly = ROUTE_LIST.filter(([, r]) => r.operator);
+
+	it("the operator-only operations are the blocks of S8 C3", () => {
+		expect(operatorOnly.map(([id]) => id).sort()).toEqual([
+			"ports.block",
+			"ports.unblock",
+			"sandboxes.block",
+			"sandboxes.unblock",
+		]);
+	});
+
+	it.each(operatorOnly)(
+		"%s: a key with every scope, an owner and a member are 403 operator_required; an operator session gets past the guards",
+		async (_id, r) => {
+			const fx = await fixtureFor(r);
+			for (const [who, res] of [
+				["key", await send(full, r.method, r.request(fx))],
+				["owner", await send(owner.h, r.method, r.request(fx), owner.headers)],
+				[
+					"member",
+					await send(member.h, r.method, r.request(fx), member.headers),
+				],
+			] as const) {
+				expect(res.status, who).toBe(403);
+				expect(errorOf(res), who).toMatchObject({
+					code: "forbidden",
+					details: { reason: "operator_required" },
+				});
+			}
+			const op = w.session({ isOperator: true, deps });
+			expectPastGuards(
+				_id,
+				await send(op.h, r.method, r.request(fx), op.headers),
+			);
+		},
+	);
+
 	const membersToo = ROUTE_LIST.filter(
-		([, r]) => !r.anonymous && !r.owner && !r.keyOnly,
+		([, r]) => !r.anonymous && !r.owner && !r.keyOnly && !r.operator,
 	);
 
 	it.each(membersToo)(
@@ -262,7 +299,7 @@ describe.skipIf(skipPg())("scopes and roles on every operation", () => {
 	);
 
 	const anyKey = ROUTE_LIST.filter(
-		([, r]) => r.scope === null && !r.human && !r.anonymous,
+		([, r]) => r.scope === null && !r.human && !r.anonymous && !r.operator,
 	);
 
 	it("the operations that take any key are me, limits, templates, sizes and api-keys/self", () => {

@@ -3,12 +3,13 @@ import { type Tx, withTx } from "@sbx/db";
 import {
 	invalidState,
 	notFound,
+	portBlocked,
 	type ValidationIssue,
 	validation,
 } from "../errors.ts";
 import { uuidv7 } from "../ids.ts";
 import { portLabel } from "../label.ts";
-import type { Principal } from "../principal.ts";
+import { hasOperatorRights, type Principal } from "../principal.ts";
 import {
 	type HostedPort,
 	hostedPortFromRow,
@@ -72,7 +73,7 @@ function newToken(): { token: string; hash: Buffer } {
 	return { token, hash: createHash("sha256").update(token, "utf8").digest() };
 }
 
-function validatePort(port: unknown): asserts port is number {
+export function validatePort(port: unknown): asserts port is number {
 	if (
 		typeof port !== "number" ||
 		!Number.isInteger(port) ||
@@ -101,6 +102,13 @@ async function activePort(
 		[sandboxId, port],
 	);
 	return r.rows[0] ? hostedPortFromRow(r.rows[0]) : null;
+}
+
+/** `port_blocked` for a port an operator blocked, unless `p` is an operator (S8 C3). */
+function assertPortNotBlocked(p: Principal, cur: HostedPort | null): void {
+	if (cur?.blocked === true && !hasOperatorRights(p)) {
+		throw portBlocked(cur.port);
+	}
 }
 
 function notDeleting(row: SandboxRow): void {
@@ -172,9 +180,13 @@ export async function hostPort(
 	validatePort(port);
 	const want = portSettings(mode);
 	return withTx(deps.pool, async (tx) => {
-		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
+		const row = await findSandboxRow(tx.client, p, idOrSlug, {
+			lock: true,
+			write: true,
+		});
 		notDeleting(row);
 		const cur = await activePort(tx, row.id, port);
+		assertPortNotBlocked(p, cur);
 		if (cur !== null && cur.mode === want.mode) {
 			if (
 				cur.hostRewrite === want.hostRewrite &&
@@ -282,12 +294,18 @@ export async function unhostPort(
 ): Promise<void> {
 	validatePort(port);
 	await withTx(deps.pool, async (tx) => {
-		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
+		const row = await findSandboxRow(tx.client, p, idOrSlug, {
+			lock: true,
+			write: true,
+		});
+		const cur = await activePort(tx, row.id, port);
+		if (cur === null) return;
+		assertPortNotBlocked(p, cur);
 		await tx.client.query(
 			`UPDATE runtime.hosted_ports
 			 SET deleted_at = now(), auth_epoch = auth_epoch + 1
-			 WHERE sandbox_id = $1 AND port = $2 AND deleted_at IS NULL`,
-			[row.id, port],
+			 WHERE id = $1`,
+			[cur.id],
 		);
 	});
 }
@@ -301,10 +319,14 @@ export async function rotatePortToken(
 ): Promise<{ token: string }> {
 	validatePort(port);
 	return withTx(deps.pool, async (tx) => {
-		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
+		const row = await findSandboxRow(tx.client, p, idOrSlug, {
+			lock: true,
+			write: true,
+		});
 		notDeleting(row);
 		const cur = await activePort(tx, row.id, port);
 		if (cur === null) throw notFound("hosted port");
+		assertPortNotBlocked(p, cur);
 		if (cur.mode !== "token") {
 			throw validation([
 				{ path: "port", message: `port ${port} is not in token mode` },

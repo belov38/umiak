@@ -241,7 +241,10 @@ export async function startPlanned(
 	const sandbox = await waitUntilReady(deps, p, ref, signal, (s) =>
 		svc.touchApiActivity(s.id),
 	);
-	const { machineId } = await svc.resolveAgentTarget(p, sandbox.id);
+	// Exec and PTYs are refused on a blocked sandbox (S8 C3; core checks too).
+	const { machineId } = await svc.resolveAgentTarget(p, sandbox.id, {
+		write: true,
+	});
 	try {
 		for (const cap of plan.capabilities) {
 			await deps.agent.requireCapability(machineId, cap, signal);

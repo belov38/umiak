@@ -35,6 +35,8 @@ export interface SshTarget {
 	teamId: string;
 	slug: string;
 	templateSlug: string;
+	/** Blocked by an operator (S8 C3): every SSH login is refused. */
+	blocked: boolean;
 }
 
 /**
@@ -108,8 +110,9 @@ export async function sshTarget(
 		team_id: string;
 		slug: string;
 		template_slug: string;
+		blocked: boolean;
 	}>(
-		`SELECT id, machine_id, state, team_id, slug, template_slug FROM runtime.sandboxes
+		`SELECT id, machine_id, state, team_id, slug, template_slug, blocked FROM runtime.sandboxes
 		 WHERE ${byId ? "id" : "slug"} = $1 AND state <> 'deleted'`,
 		[sandboxIdOrSlug],
 	);
@@ -122,6 +125,7 @@ export async function sshTarget(
 		teamId: row.team_id,
 		slug: row.slug,
 		templateSlug: row.template_slug,
+		blocked: row.blocked,
 	};
 }
 

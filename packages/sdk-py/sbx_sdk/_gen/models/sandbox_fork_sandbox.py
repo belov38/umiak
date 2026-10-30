@@ -8,6 +8,9 @@ from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..models.sandbox_activity import SandboxActivity
+from ..models.sandbox_block_reason_type_1 import SandboxBlockReasonType1
+from ..models.sandbox_block_reason_type_2_type_1 import SandboxBlockReasonType2Type1
+from ..models.sandbox_block_reason_type_3_type_1 import SandboxBlockReasonType3Type1
 from ..models.sandbox_health import SandboxHealth
 from ..models.sandbox_state import SandboxState
 from ..models.sandbox_stop_reason_type_1 import SandboxStopReasonType1
@@ -32,6 +35,10 @@ class SandboxForkSandbox:
     Attributes:
         active_operation (None | Operation): The running operation, or null
         activity (SandboxActivity):
+        block_reason (None | SandboxBlockReasonType1 | SandboxBlockReasonType2Type1 | SandboxBlockReasonType3Type1): Why
+            it is blocked; null unless blocked
+        blocked (bool): A platform operator blocked the sandbox: its ports are refused and only reads, stop and delete
+            are allowed (403 `forbidden`, details.reason `sandbox_blocked`)
         created_at (datetime.datetime): ISO 8601 UTC with milliseconds
         created_by (None | str): The person (`usr_...`); null when a team key created it
         created_by_key (None | str): The team key (`key_...`) that created it, else null
@@ -71,6 +78,10 @@ class SandboxForkSandbox:
 
     active_operation: None | Operation
     activity: SandboxActivity
+    block_reason: (
+        None | SandboxBlockReasonType1 | SandboxBlockReasonType2Type1 | SandboxBlockReasonType3Type1
+    )
+    blocked: bool
     created_at: datetime.datetime
     created_by: None | str
     created_by_key: None | str
@@ -118,6 +129,18 @@ class SandboxForkSandbox:
             active_operation = self.active_operation
 
         activity = self.activity.value
+
+        block_reason: None | str
+        if isinstance(self.block_reason, SandboxBlockReasonType1):
+            block_reason = self.block_reason.value
+        elif isinstance(self.block_reason, SandboxBlockReasonType2Type1):
+            block_reason = self.block_reason.value
+        elif isinstance(self.block_reason, SandboxBlockReasonType3Type1):
+            block_reason = self.block_reason.value
+        else:
+            block_reason = self.block_reason
+
+        blocked = self.blocked
 
         created_at = self.created_at.isoformat()
 
@@ -234,6 +257,8 @@ class SandboxForkSandbox:
             {
                 "activeOperation": active_operation,
                 "activity": activity,
+                "blockReason": block_reason,
+                "blocked": blocked,
                 "createdAt": created_at,
                 "createdBy": created_by,
                 "createdByKey": created_by_key,
@@ -297,6 +322,52 @@ class SandboxForkSandbox:
         active_operation = _parse_active_operation(d.pop("activeOperation"))
 
         activity = SandboxActivity(d.pop("activity"))
+
+        def _parse_block_reason(
+            data: object,
+        ) -> (
+            None
+            | SandboxBlockReasonType1
+            | SandboxBlockReasonType2Type1
+            | SandboxBlockReasonType3Type1
+        ):
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                block_reason_type_1 = SandboxBlockReasonType1(data)
+
+                return block_reason_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                block_reason_type_2_type_1 = SandboxBlockReasonType2Type1(data)
+
+                return block_reason_type_2_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                block_reason_type_3_type_1 = SandboxBlockReasonType3Type1(data)
+
+                return block_reason_type_3_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(
+                None
+                | SandboxBlockReasonType1
+                | SandboxBlockReasonType2Type1
+                | SandboxBlockReasonType3Type1,
+                data,
+            )
+
+        block_reason = _parse_block_reason(d.pop("blockReason"))
+
+        blocked = d.pop("blocked")
 
         created_at = datetime.datetime.fromisoformat(d.pop("createdAt"))
 
@@ -544,6 +615,8 @@ class SandboxForkSandbox:
         sandbox_fork_sandbox = cls(
             active_operation=active_operation,
             activity=activity,
+            block_reason=block_reason,
+            blocked=blocked,
             created_at=created_at,
             created_by=created_by,
             created_by_key=created_by_key,
