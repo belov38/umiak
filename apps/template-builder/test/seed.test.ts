@@ -104,6 +104,7 @@ describe("renderSeed cloud-init files", () => {
 		expect(cfg.users).toEqual([]);
 		expect(cfg.disable_root).toBe(true);
 		expect(cfg.ssh_pwauth).toBe(false);
+		expect(cfg.apt.preserve_sources_list).toBe(true);
 		expect(cfg.package_update).toBe(true);
 		expect(cfg.packages).toEqual(["qemu-guest-agent"]);
 		expect(cfg.runcmd).toEqual([
@@ -338,6 +339,12 @@ describe("makeIso", () => {
 		process.platform === "darwin" &&
 		spawnSync("hdiutil", ["help"]).error === undefined;
 	const hasXorriso = spawnSync("xorriso", ["-version"]).error === undefined;
+
+	it("requires an .iso output name", () => {
+		expect(() => makeIso(new Map([["a", "b"]]), join(tmp(), "seed"))).toThrow(
+			/\.iso/,
+		);
+	});
 
 	it("throws when the tool is missing", () => {
 		const bogus = "no-such-iso-tool" as unknown as "xorriso";

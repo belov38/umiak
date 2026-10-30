@@ -5,6 +5,8 @@ disable_root: true
 ssh_pwauth: false
 bootcmd:
   - ["sh", "-c", {{apt_snapshot_script}}, "sh", {{apt_snapshot}}, "/etc/apt/sources.list.d/ubuntu.sources"]
+apt:
+  preserve_sources_list: true
 package_update: true
 packages:
   - qemu-guest-agent

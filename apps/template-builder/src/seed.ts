@@ -195,6 +195,9 @@ export function makeIso(
 		? "hdiutil"
 		: "xorriso",
 ): void {
+	// hdiutil appends .iso to other names, which would leave `out` missing.
+	if (!out.endsWith(".iso"))
+		throw new Error(`ISO output path must end with .iso: ${out}`);
 	const root = mkdtempSync(join(tmpdir(), "sbx-seed-"));
 	try {
 		for (const [rel, data] of files) {
