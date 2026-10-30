@@ -438,8 +438,9 @@ func (m *Manager) JanitorCommands() []output.JanitorCommand {
 	return out
 }
 
-// RemoveRecord deletes the record of an exited command for the janitor,
-// which removes the log directory itself.
+// RemoveRecord deletes the record and the log directory of an exited
+// command for the janitor. Both go under the record lock, so a new command
+// with the same id never loses its logs.
 func (m *Manager) RemoveRecord(id string) error {
 	c, err := m.lockEntry(m.ctx, id)
 	if err != nil {
@@ -468,7 +469,7 @@ func (m *Manager) RemoveRecord(id string) error {
 		return err
 	}
 	m.forget(c)
-	return nil
+	return os.RemoveAll(m.opts.Layout.CommandDir(id))
 }
 
 // UnitAlive reports whether the unit of command id still runs (main process

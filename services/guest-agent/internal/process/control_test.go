@@ -310,6 +310,11 @@ func TestJanitorHooks(t *testing.T) {
 	if _, err := h.get("c1"); connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("Get after RemoveRecord: %v", err)
 	}
+	// The log directory goes under the record lock, together with the
+	// record: a new command with the same id cannot lose its logs.
+	if exists(h.layout.CommandDir("c1")) {
+		t.Fatal("log dir of c1 still exists after RemoveRecord")
+	}
 }
 
 func rpcconvDetail(err error) (string, bool) {

@@ -3,6 +3,7 @@
 package shim
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -154,6 +155,13 @@ func newShim(log *slog.Logger, l paths.Layout, id string) *shim {
 
 // run performs the whole life of the shim (spec section 9.3).
 func (s *shim) run(useCgroup bool) error {
+	// shim.json is written only by a shim that got this far: another one
+	// already ran the command. A second launch must not start it again.
+	if _, err := os.Lstat(filepath.Join(s.dir, ShimJSON)); err == nil {
+		return fmt.Errorf("shim: %s exists: command %s was already launched", ShimJSON, s.id)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	spec, err := ReadSpec(s.layout.CmdSpec(s.id))
 	if err != nil {
 		return err

@@ -148,9 +148,11 @@ func (m *Manager) Signal(ctx context.Context, req *agentv1.SignalRequest) (*agen
 
 // Kill stops a command: SIGTERM, then the cgroup kill after the grace
 // (default DefaultKillGraceMs), run by the shim. Without a shim (unit gone,
-// or an outdated shim and grace_ms 0) the agent kills the cgroup itself. A
-// live shim that cannot be reached right now answers shim_unavailable
-// (retryable) rather than skipping the grace. On an exited command without
+// or an unreachable or outdated shim and grace_ms 0) the agent kills the
+// cgroup itself. A live shim that cannot be reached right now answers
+// shim_unavailable (retryable) for a kill with a grace rather than skipping
+// it. A STARTING command that was never launched ends as KILLED/SIGNAL, so
+// a retry of Start does not launch it. On an exited command without
 // leftovers it does nothing.
 func (m *Manager) Kill(ctx context.Context, req *agentv1.KillRequest) (*agentv1.CommandInfo, error) {
 	if err := validateID(req.GetCommandId()); err != nil {
@@ -183,14 +185,52 @@ func (m *Manager) Kill(ctx context.Context, req *agentv1.KillRequest) (*agentv1.
 		if err != nil {
 			return nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 		}
-		if alive {
+		if alive && grace > 0 {
 			return nil, errs.Newf(connect.CodeUnavailable, errs.ShimUnavailable, "the shim of %q is not connected", id)
+		}
+		if !alive {
+			if err := m.killUnlaunched(ctx, id); err != nil {
+				return nil, err
+			}
 		}
 		if err := m.killCgroup(ctx, id); err != nil {
 			return nil, err
 		}
 	}
 	return m.infoOrErr(id, nil)
+}
+
+// killUnlaunched ends a STARTING record without any trace of a launch as
+// KILLED/SIGNAL under the record lock. Other records are settled from the
+// disk and the unit like Start does, or left alone.
+func (m *Manager) killUnlaunched(ctx context.Context, id string) error {
+	c, err := m.lockRPC(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer c.unlock()
+	rec, ok, err := m.st.GetCommand(id)
+	if err != nil {
+		return errs.New(connect.CodeInternal, errs.Internal, err.Error())
+	}
+	if !ok || rec.State != StateStarting {
+		return nil
+	}
+	m.mu.Lock()
+	m.loadLiveLocked(c, rec)
+	m.mu.Unlock()
+	if err := m.settleLocked(ctx, c, rec, true); !errors.Is(err, errNotLaunched) {
+		return err
+	}
+	ex := m.currentEnds(id, rec.PTY)
+	ex.status, ex.reason = statusKilled, shimproto.ReasonSignal
+	dctx, cancel := m.durableCtx(ctx)
+	defer cancel()
+	if err := m.finalizeLocked(dctx, c, ex, false); err != nil {
+		return storeError(err)
+	}
+	m.markGone(c)
+	return nil
 }
 
 // needsAction reports whether a signal or kill can reach anything: the

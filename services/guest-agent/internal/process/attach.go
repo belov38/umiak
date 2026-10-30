@@ -183,6 +183,16 @@ func (m *Manager) readStream(s *attachStream, rec *store.Command, exited bool, t
 	if err != nil {
 		return false, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
+	if !exited && len(ch.Data) > 0 {
+		// The record lags behind exit.json until the monitor saves the
+		// exit; leftovers may write past the end meanwhile. exit.json is
+		// read after the chunk, so a chunk read before the exit is still
+		// cut at the recorded end.
+		if e, ok := m.readExit(rec.ID); ok {
+			end := clampOffset(exitFromFile(e, rec.PTY).ends[s.name])
+			ch.Data = ch.Data[:max(0, min(int64(len(ch.Data)), end-s.pos))]
+		}
+	}
 	stream := streamEnum(s.name)
 	switch {
 	case ch.Truncated:

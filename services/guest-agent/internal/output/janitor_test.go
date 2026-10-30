@@ -53,7 +53,7 @@ func newJanitorEnv(t *testing.T) *janitorEnv {
 		Now:       func() time.Time { return testNow },
 		RemoveRecord: func(id string) error {
 			e.removed = append(e.removed, id)
-			return nil
+			return os.RemoveAll(e.layout.CommandDir(id))
 		},
 	}
 	return e

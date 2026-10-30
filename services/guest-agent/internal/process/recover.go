@@ -14,7 +14,8 @@ import (
 // each command is finalized from exit.json, reconnected to its live unit,
 // or marked LOST/SHIM_LOST; a STARTING record that was never launched (no
 // shim.json, no unit) stays STARTING for a retry of Start. PTY idle timers
-// resume from pty_detached_at.
+// resume from pty_detached_at. It fails only when the records cannot be
+// listed; a command that cannot be recovered is logged and skipped.
 func (m *Manager) Recover(ctx context.Context) error {
 	var recs []*store.Command
 	// Collect first: writing while a bbolt read transaction is open can
@@ -25,13 +26,14 @@ func (m *Manager) Recover(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("process: recover: %w", err)
 	}
-	var errList []error
+	// A command that cannot be recovered is logged and skipped: one bad
+	// record must not keep the agent from starting.
 	for _, rec := range recs {
 		if err := m.recoverOne(ctx, rec); err != nil {
-			errList = append(errList, fmt.Errorf("command %s: %w", rec.ID, err))
+			m.log.Error("process: recover command", "id", rec.ID, "err", err)
 		}
 	}
-	return errors.Join(errList...)
+	return nil
 }
 
 func (m *Manager) recoverOne(ctx context.Context, rec *store.Command) error {

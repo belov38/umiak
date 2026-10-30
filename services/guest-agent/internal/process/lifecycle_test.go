@@ -211,9 +211,17 @@ func TestKillUnreachableShim(t *testing.T) {
 	putRunning(t, h, "c1", "boot-1", argvSpec("/bin/sleep", "100"))
 	h.fake.SetState("c1", supervisor.UnitActive) // a unit without a socket
 	h.restart("boot-1")
-	for _, grace := range []uint32{5000, 0} {
-		_, err := h.client.Kill(h.ctx(), connect.NewRequest(&agentv1.KillRequest{CommandId: "c1", GraceMs: &grace}))
-		wantCode(t, err, connect.CodeUnavailable, errs.ShimUnavailable)
+	grace := uint32(5000)
+	_, err := h.client.Kill(h.ctx(), connect.NewRequest(&agentv1.KillRequest{CommandId: "c1", GraceMs: &grace}))
+	wantCode(t, err, connect.CodeUnavailable, errs.ShimUnavailable)
+	// Without a grace there is nothing to wait for: the agent kills the
+	// cgroup itself.
+	grace = 0
+	if _, err := h.client.Kill(h.ctx(), connect.NewRequest(&agentv1.KillRequest{CommandId: "c1", GraceMs: &grace})); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.fake.CgroupKills("c1"); n != 1 {
+		t.Fatalf("cgroup kills = %d, want 1", n)
 	}
 	// Once the unit is gone the command is lost; Kill is then a no-op.
 	h.fake.ClearState("c1")

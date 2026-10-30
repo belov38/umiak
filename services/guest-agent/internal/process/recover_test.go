@@ -235,6 +235,11 @@ func TestRecoverKeepsUnlaunchedStarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.waitExited("c2")
+	// The record is EXITED a moment before the slot is free.
+	eventually(t, "slot of c2 freed", func() bool {
+		running, _, _ := h.m.Counts()
+		return running == 0
+	})
 
 	res := h.start("c1", spec)
 	if res.GetCreated() {
@@ -252,5 +257,70 @@ func TestRecoverKeepsUnlaunchedStarting(t *testing.T) {
 	}
 	if launches != 1 {
 		t.Fatalf("launches of c1 = %d (%v), want 1", launches, h.fake.Launches())
+	}
+}
+
+// One record that cannot be recovered must not stop the agent: Recover logs
+// it and goes on with the others.
+func TestRecoverSkipsBadRecord(t *testing.T) {
+	h := newHarness(t)
+	putRunning(t, h, "c1", "boot-0", argvSpec("/bin/sleep", "100"))
+	if err := h.st.PutCommand(t.Context(), &store.Command{ID: "c0", State: "FROM_THE_FUTURE", BootID: "boot-0"}); err != nil {
+		t.Fatal(err)
+	}
+	h.restart("boot-1")
+	info, err := h.get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := info.GetExit(); e.GetStatus() != agentv1.ExitStatus_EXIT_STATUS_LOST || e.GetReason() != agentv1.ExitReason_EXIT_REASON_REBOOT {
+		t.Fatalf("c1 exit %v, want LOST/REBOOT", e)
+	}
+}
+
+// A STARTING record with shim.json but without a unit was launched and
+// died: it is LOST/SHIM_LOST and Recover never launches it again.
+func TestRecoverStartingWithShimJSONIsLost(t *testing.T) {
+	h := newHarness(t)
+	putStarting(t, h, "c1", argvSpec("/bin/sleep", "100"))
+	if err := os.MkdirAll(h.layout.CommandDir("c1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsutil.WriteJSONAtomic(cmdFile(h.layout, "c1", shim.ShimJSON),
+		shim.ShimFile{State: shim.StateRunning, AgentVersion: "1.2.3", ShimProto: 1, Pid: 4242}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.restart("boot-1")
+	info, err := h.get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := info.GetExit(); info.GetState() != agentv1.CommandState_COMMAND_STATE_EXITED ||
+		e.GetStatus() != agentv1.ExitStatus_EXIT_STATUS_LOST || e.GetReason() != agentv1.ExitReason_EXIT_REASON_SHIM_LOST {
+		t.Fatalf("state %v exit %v, want EXITED LOST/SHIM_LOST", info.GetState(), e)
+	}
+	if n := len(h.fake.Launches()); n != 0 {
+		t.Fatalf("launches = %d, want 0", n)
+	}
+}
+
+// A STARTING record from another boot is LOST/REBOOT, never launched.
+func TestRecoverStartingFromOtherBootIsLost(t *testing.T) {
+	h := newHarness(t)
+	putStarting(t, h, "c1", argvSpec("/bin/sleep", "100"))
+	h.restart("boot-2")
+	info, err := h.get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := info.GetExit(); info.GetState() != agentv1.CommandState_COMMAND_STATE_EXITED ||
+		e.GetStatus() != agentv1.ExitStatus_EXIT_STATUS_LOST || e.GetReason() != agentv1.ExitReason_EXIT_REASON_REBOOT {
+		t.Fatalf("state %v exit %v, want EXITED LOST/REBOOT", info.GetState(), e)
+	}
+	if n := len(h.fake.Launches()); n != 0 {
+		t.Fatalf("launches = %d, want 0", n)
+	}
+	if got := h.rec.Of(events.TypeCommandExited); len(got) != 1 {
+		t.Fatalf("command.exited events = %d, want 1", len(got))
 	}
 }

@@ -83,8 +83,8 @@ type Janitor struct {
 	// records are kept.
 	RecordTTL  time.Duration
 	MaxRecords int
-	// RemoveRecord deletes the record of an exited command. The janitor
-	// removes the command's log directory afterwards.
+	// RemoveRecord deletes the record and the log directory of an exited
+	// command, both under the record lock of the owner.
 	RemoveRecord func(id string) error
 
 	mu  sync.Mutex
@@ -304,9 +304,6 @@ func (j *Janitor) removeRecords(ctx context.Context, cmds []JanitorCommand) ([]J
 			errs = append(errs, fmt.Errorf("output: remove record %s: %w", c.ID, err))
 			kept = append(kept, c)
 			continue
-		}
-		if err := os.RemoveAll(j.Layout.CommandDir(c.ID)); err != nil {
-			errs = append(errs, err)
 		}
 	}
 	return kept, errs

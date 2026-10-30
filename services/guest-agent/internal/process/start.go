@@ -79,6 +79,14 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 			}
 			return m.currentInfo(id)
 		}
+		// The retry launches: it takes a slot like a new command.
+		m.mu.Lock()
+		full := m.runningMainLocked() >= m.opts.Config.MaxRunningCommands
+		m.mu.Unlock()
+		if full {
+			return nil, false, errs.Newf(connect.CodeResourceExhausted, errs.TooManyCommands,
+				"at most %d commands may run at once", m.opts.Config.MaxRunningCommands)
+		}
 	} else {
 		rec, err = m.create(ctx, c, id, hash, spec)
 		if err != nil {

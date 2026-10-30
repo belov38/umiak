@@ -11,6 +11,7 @@ import (
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
@@ -224,5 +225,35 @@ func TestAttachExitHasEndedAt(t *testing.T) {
 	e := evs[len(evs)-1].GetExit()
 	if e == nil || e.GetEndedAt() == nil || e.GetPtyEnd() != 0 {
 		t.Fatalf("exit %v", e)
+	}
+}
+
+// Between the shim writing exit.json and the agent recording the exit, the
+// record is still RUNNING: attach must not deliver leftover output past the
+// stream end of exit.json.
+func TestAttachStopsAtExitJSONEndWhileRunning(t *testing.T) {
+	h := newHarness(t)
+	h.start("c1", argvSpec("/bin/x"))
+	h.waitRunning("c1")
+	r := h.run("c1")
+	if err := r.Write(shim.StdoutFile, []byte("abc")); err != nil {
+		t.Fatal(err)
+	}
+	// exit.json as the shim writes it; the fake does not push the exit, so
+	// the record stays RUNNING.
+	if err := fsutil.WriteJSONAtomic(cmdFile(h.layout, "c1", shim.ExitJSON),
+		shimproto.ExitFile{Status: shimproto.StatusExited, Reason: shimproto.ReasonNone, StdoutEnd: 3, EndedAt: time.Now().UTC()}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Write(shim.StdoutFile, []byte("leftover")); err != nil {
+		t.Fatal(err)
+	}
+	follow := false
+	evs, err := collect(t, mustAttach(t, h, &agentv1.AttachRequest{CommandId: "c1", Follow: &follow}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dataOf(t, evs, agentv1.Stream_STREAM_STDOUT, 0); got != "abc" {
+		t.Fatalf("stdout %q, want %q", got, "abc")
 	}
 }

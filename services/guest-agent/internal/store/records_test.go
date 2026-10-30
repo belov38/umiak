@@ -158,3 +158,25 @@ func TestRequestsPrune(t *testing.T) {
 		t.Errorf("second prune = %d, %v", n, err)
 	}
 }
+
+func TestListSkipsUndecodableRecords(t *testing.T) {
+	s, _ := openTest(t, Options{})
+	ctx := context.Background()
+	for _, id := range []string{"a", "c"} {
+		if err := s.PutCommand(ctx, &Command{ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Update(ctx, func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketCommands).Put([]byte("b"), []byte("{not json"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	if err := s.ListCommands(func(c *Command) bool { ids = append(ids, c.ID); return true }); err != nil {
+		t.Fatalf("ListCommands: %v", err)
+	}
+	if !reflect.DeepEqual(ids, []string{"a", "c"}) {
+		t.Errorf("ListCommands = %v, want [a c]", ids)
+	}
+}

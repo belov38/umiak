@@ -64,14 +64,16 @@ func decodeJSON(data []byte, v any) error {
 }
 
 // list decodes every record of bucket in key order into a fresh T and passes
-// it to fn until fn returns false.
+// it to fn until fn returns false. An undecodable record is logged and
+// skipped, so one bad record does not hide the others.
 func list[T any](s *Store, bucket []byte, fn func(*T) bool) error {
 	return s.db.View(func(tx *bbolt.Tx) error {
 		c := tx.Bucket(bucket).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			rec := new(T)
 			if err := decodeJSON(v, rec); err != nil {
-				return fmt.Errorf("%s/%s: %w", bucket, k, err)
+				s.opts.Log.Warn("store: skip undecodable record", "bucket", string(bucket), "key", string(k), "err", err)
+				continue
 			}
 			if !fn(rec) {
 				return nil

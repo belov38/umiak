@@ -263,7 +263,16 @@ func (f *Fake) KillCgroup(_ context.Context, id string) error {
 	f.mu.Lock()
 	r := f.units[id]
 	if r == nil {
+		// A unit that exists only through SetState takes the kill and
+		// keeps its reported state.
+		alive := f.stateLocked(id) != UnitNotFound
+		if alive {
+			f.cgroupKills[id]++
+		}
 		f.mu.Unlock()
+		if alive {
+			return nil
+		}
 		return fmt.Errorf("%w: %s", ErrUnitNotFound, UnitName(id))
 	}
 	f.cgroupKills[id]++

@@ -400,3 +400,61 @@ func TestRunRepeatAttachesFromStart(t *testing.T) {
 		t.Fatalf("launches = %d", n)
 	}
 }
+
+// Kill of a STARTING record that was never launched ends it as
+// KILLED/SIGNAL; a later Start retry must not launch it.
+func TestKillUnlaunchedStarting(t *testing.T) {
+	h := newHarness(t)
+	spec := argvSpec("/bin/sleep", "100")
+	putStarting(t, h, "c1", spec)
+	h.restart("boot-1")
+	grace := uint32(0)
+	res, err := h.client.Kill(h.ctx(), connect.NewRequest(&agentv1.KillRequest{CommandId: "c1", GraceMs: &grace}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := res.Msg.GetCommand()
+	if e := info.GetExit(); info.GetState() != agentv1.CommandState_COMMAND_STATE_EXITED ||
+		e.GetStatus() != agentv1.ExitStatus_EXIT_STATUS_KILLED || e.GetReason() != agentv1.ExitReason_EXIT_REASON_SIGNAL {
+		t.Fatalf("state %v exit %v, want EXITED KILLED/SIGNAL", info.GetState(), e)
+	}
+	if got := h.rec.Of(events.TypeCommandExited); len(got) != 1 {
+		t.Fatalf("command.exited events = %d, want 1", len(got))
+	}
+	if st := h.start("c1", spec).GetCommand().GetState(); st != agentv1.CommandState_COMMAND_STATE_EXITED {
+		t.Fatalf("retry: state %v, want EXITED", st)
+	}
+	if n := len(h.fake.Launches()); n != 0 {
+		t.Fatalf("launches = %d, want 0", n)
+	}
+}
+
+// The retry of a kept STARTING record takes a slot like a new command.
+func TestStartRetryRespectsLimit(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.Config.MaxRunningCommands = 1 })
+	spec := argvSpec("/bin/sleep", "1")
+	putStarting(t, h, "c1", spec)
+	h.restart("boot-1")
+	h.start("c2", argvSpec("/bin/sleep", "100"))
+	_, err := h.client.Start(h.ctx(), connect.NewRequest(&agentv1.StartRequest{CommandId: "c1", Spec: spec}))
+	wantCode(t, err, connect.CodeResourceExhausted, errs.TooManyCommands)
+	info, err := h.get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.GetState() != agentv1.CommandState_COMMAND_STATE_STARTING {
+		t.Fatalf("state %v, want STARTING", info.GetState())
+	}
+	if err := h.run("c2").Exit(0); err != nil {
+		t.Fatal(err)
+	}
+	h.waitExited("c2")
+	// The record is EXITED a moment before the slot is free.
+	eventually(t, "slot of c2 freed", func() bool {
+		running, _, _ := h.m.Counts()
+		return running == 0
+	})
+	if st := h.start("c1", spec).GetCommand().GetState(); st != agentv1.CommandState_COMMAND_STATE_RUNNING {
+		t.Fatalf("retry after the slot freed: state %v, want RUNNING", st)
+	}
+}

@@ -82,6 +82,13 @@ func spec(argv ...string) Spec {
 // binary as its shim.
 func startShim(t *testing.T, s Spec) *harness {
 	t.Helper()
+	return startShimAfter(t, s, nil)
+}
+
+// startShimAfter is startShim that runs before (when not nil) on the layout
+// right before the shim starts.
+func startShimAfter(t *testing.T, s Spec, before func(paths.Layout)) *harness {
+	t.Helper()
 	root := t.TempDir()
 	l := paths.ForRoot(root)
 	s.ID = "c1"
@@ -89,6 +96,9 @@ func startShim(t *testing.T, s Spec) *harness {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if before != nil {
+		before(l)
 	}
 	if err := fsutil.WriteJSONAtomic(l.CmdSpec(s.ID), s, 0o600); err != nil {
 		t.Fatal(err)
@@ -359,6 +369,33 @@ func TestShimStartFailed(t *testing.T) {
 	}
 	if e.StderrEnd != int64(len(stderr)) {
 		t.Errorf("stderrEnd = %d, want %d", e.StderrEnd, len(stderr))
+	}
+}
+
+// A second launch of the same command finds shim.json of the first and
+// must not start the process again.
+func TestShimRefusesSecondLaunch(t *testing.T) {
+	h := startShimAfter(t, spec("/bin/sh", "-c", "echo second"), func(l paths.Layout) {
+		dir := l.CommandDir("c1")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := fsutil.WriteJSONAtomic(filepath.Join(dir, ShimJSON), ShimFile{State: StateRunning, Pid: 1}, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	select {
+	case <-h.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("shim still running")
+	}
+	if h.err == nil {
+		t.Fatal("shim exited 0, want a failure")
+	}
+	for _, name := range []string{ExitJSON, StdoutFile} {
+		if _, err := os.Stat(h.path(name)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s exists after a refused launch (err %v)", name, err)
+		}
 	}
 }
 
