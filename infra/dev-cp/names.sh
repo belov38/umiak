@@ -16,11 +16,13 @@ TS_NAME="${SBX_DEVCP_TS_NAME:-sbx-dev-cp.tail0000.ts.net}"
 # 443 of the tailnet address stays with the gateway (previews, below), so:
 #   :8443  /    -> oauth2-proxy (S8: web, /api/*, /sbx-auth/*)
 #   :8443  /v1  -> api public listener (S7, CLI and SDK)
+#   :8443  /mcp -> MCP server (S11), with its protected resource metadata
 #   :10000 /    -> Keycloak (S8)
 # Targets are loopback ports of the CT; S7/S8 publish their services there.
-SERVE="${SBX_DEVCP_SERVE:-8443:/=http://127.0.0.1:4180 8443:/v1=http://127.0.0.1:8080/v1 10000:/=http://127.0.0.1:8180}"
+SERVE="${SBX_DEVCP_SERVE:-8443:/=http://127.0.0.1:4180 8443:/v1=http://127.0.0.1:8080/v1 8443:/mcp=http://127.0.0.1:8090/mcp 8443:/.well-known/oauth-protected-resource/mcp=http://127.0.0.1:8090/.well-known/oauth-protected-resource/mcp 10000:/=http://127.0.0.1:8180}"
 APP_ORIGIN="https://$TS_NAME:8443"
 API_URL="https://$TS_NAME:8443"
+MCP_URL="https://$TS_NAME:8443/mcp"
 KEYCLOAK_URL="https://$TS_NAME:10000"
 OIDC_ISSUER="$KEYCLOAK_URL/realms/sbx"
 SSH_HOST="$TS_NAME"

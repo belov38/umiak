@@ -6,6 +6,8 @@
 # Tailscale Serve terminates TLS on the CT and forwards to loopback ports (names.sh):
 #   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/*, /sbx-auth/*; web in S8)
 #   https://<TS name>:8443/v1  -> 127.0.0.1:8080 api public listener (path kept)
+#   https://<TS name>:8443/mcp -> 127.0.0.1:8090 MCP server (S11; path kept, plus the protected
+#                                 resource metadata /.well-known/oauth-protected-resource/mcp)
 #   https://<TS name>:10000/   -> 127.0.0.1:8180 Keycloak
 # The base compose already publishes these ports on loopback, and every service talks to
 # http://keycloak:8080 while tokens carry the public issuer (KC_HOSTNAME_BACKCHANNEL_DYNAMIC):
@@ -101,3 +103,14 @@ services:
       OAUTH2_PROXY_COOKIE_NAME: __Host-sbx_session
       OAUTH2_PROXY_COOKIE_SECURE: "true"
       OAUTH2_PROXY_REVERSE_PROXY: "true"
+
+  # S11: the remote MCP server behind Serve (:8443/mcp). The public URL is what MCP clients use
+  # and what the protected resource metadata names. Serve may pass the Host header either as the
+  # MagicDNS name (with :8443) or as the target (127.0.0.1:8090); the Host allowlist admits both
+  # and nothing else. Calls reach the api as http://api:8080 inside the network, with the
+  # caller's own bearer token. Keycloak issues for the public issuer (SBX_OIDC_ISSUER).
+  mcp:
+    environment:
+      SBX_MCP_PUBLIC_URL: ${SBX_MCP_PUBLIC_URL:?set by deploy.sh}
+      SBX_MCP_ALLOWED_HOSTS: ${SBX_DEVCP_TS_NAME:?set by deploy.sh}:8443,${SBX_DEVCP_TS_NAME},127.0.0.1:8090
+      SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}

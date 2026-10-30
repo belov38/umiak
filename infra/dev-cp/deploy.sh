@@ -111,7 +111,7 @@ fi
 
 # 3. The dev CA for the gateway, .env, the dev sbx.yaml, data keys; then the stack.
 ct "PVE_LAN_IP=$PVE_LAN_IP" "PORT_DOMAIN=$PORT_DOMAIN" "TUNNEL_HOST=$TUNNEL_HOST" "TUNNEL_URL=$TUNNEL_URL" \
-	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" \
+	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" "MCP_URL=$MCP_URL" \
 	"KEYCLOAK_URL=$KEYCLOAK_URL" "OIDC_ISSUER=$OIDC_ISSUER" "SERVE=$SERVE" \
 	"FILES=$FILES" "EXTRA_ENV=$EXTRA_ENV" <<'EOF'
 ts=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
@@ -161,6 +161,7 @@ SBX_DEVCP_SSH_HOST=$SSH_HOST
 SBX_DEVCP_TS_NAME=$TS_NAME
 SBX_APP_ORIGIN=$APP_ORIGIN
 SBX_API_PUBLIC_URL=$API_URL
+SBX_MCP_PUBLIC_URL=$MCP_URL
 SBX_KEYCLOAK_URL=$KEYCLOAK_URL
 SBX_OIDC_ISSUER=$OIDC_ISSUER
 SBX_GATEWAY_AUTH_URL=$APP_ORIGIN/sbx-auth/authorize
@@ -172,7 +173,7 @@ docker compose up -d --build --remove-orphans 2>&1 | grep -vE '^ *#[0-9]+ ' | ta
 # api and oauth2-proxy wait for Keycloak, whose first start (realm import) takes a minute or two.
 healthy() {
 	local s
-	for s in worker gateway api oauth2-proxy; do
+	for s in worker gateway api oauth2-proxy mcp; do
 		[ "$(docker compose ps --format '{{.Health}}' "$s")" = healthy ] || return 1
 	done
 }
@@ -184,6 +185,7 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 echo "worker /readyz: $(curl -sS http://127.0.0.1:9090/readyz)"
 echo "gateway /readyz: $(curl -sS http://127.0.0.1:9190/readyz)"
 echo "api /readyz: $(curl -sS http://127.0.0.1:9091/readyz)"
+echo "mcp /readyz: $(curl -sS http://127.0.0.1:9092/readyz)"
 healthy
 
 # Tailscale Serve (operator sbx, set by `infra/pve/setup.sh cp-tailscale`): rebuilt from SERVE.
@@ -223,4 +225,6 @@ for port in $(tr ' ' '\n' <<<"$SERVE" | cut -d: -f1 | sort -u); do
 done
 check api "$API_URL/v1/meta" ||
 	log "WARNING: the api is not reachable through Tailscale Serve from this Mac"
+check mcp "https://$TS_NAME:8443/.well-known/oauth-protected-resource/mcp" ||
+	log "WARNING: the MCP server is not reachable through Tailscale Serve from this Mac"
 log "deployed"

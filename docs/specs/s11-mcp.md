@@ -750,4 +750,64 @@ apps/mcp/
 
 ## 19. Результаты
 
-Заполняется при реализации: итог спайка Bun (§12.2), чек-лист клиентов (§14.4), размеры ответов и длительности вызовов из E2E, фактический бюджет `tools/list`.
+Реализация: `apps/mcp` (`@sbx/mcp`), ветка `s11-impl`, 2026-10-31. План и итоги по задачам — `docs/plans/s11-mcp.md`, раздел «Итоги реализации».
+
+### 19.1 Спайк Bun (§12.2)
+
+Bun 1.4.4 собирает `@modelcontextprotocol/server` 2.4.0 (с `/stdio`) через `bun build --compile` без обходных путей: 110 модулей, бинарник на хосте (darwin arm64) около 86 MiB, кросс-сборка `--target=bun-linux-x64` проходит (около 105 MiB). Скомпилированный бинарник проходит `initialize`, `tools/list` и `tools/call` по stdio с клиентом 2.4.0 (`test/bun-spike.test.ts`). Из пяти целей S7 §14.1 собраны две (хост darwin arm64 и linux-x64); darwin-x64, linux-arm64 и windows-x64 не проверялись и остаются на сборке релиза CLI. Проход через Claude Code не делался (нет в этом треде), через Inspector — делался: `sbx mcp` под Bun из исходников CLI, `inspector --cli --method tools/list` отдаёт 38 инструментов (`test/inspector-smoke.test.ts`).
+
+### 19.2 Бюджет `tools/list` (§7.1)
+
+38 инструментов, весь ответ `tools/list` (все toolsets, человек) — **37 922 символа** JSON при пределе 40 000 (замер `JSON.stringify(await client.listTools())` на сервере из `test/helpers/harness.ts`; страж — `test/golden.test.ts`). Запас 2 078 символов: новый инструмент или длиннее описание требуют места за счёт существующих.
+
+### 19.3 Отклонения от спеки
+
+Решения исполнителя (`apps/mcp`, подробности в плане):
+
+1. **Desktop без S10.** S10 в API не реализован: ручки `/desktop*` вызываются через `sbx.raw` в одном модуле `src/desktop/api.ts`, проверяются по фрагменту OpenAPI, написанному по S10 §13.2 (`test/fake-api/desktop.openapi.json`). `404` от такой ручки (и sandbox существует) и `422 desktop_unsupported` дают ошибку инструмента `desktop_unsupported`; инструменты остаются в списке (он статичен, golden). Пока в API нет scope `desktop`, командный ключ не видит `desktop_url` и `computer_*` (§8.7). JSON тела S10 — camelCase, как остальной S7 (`coordinateSpace`, `delayMs`, `hasText`, `maxWidth`); при выходе S10 поля сверить.
+2. **SDK:** в `RunOptions` добавлен `onStarted` (кадр `started`; нужен `exec_run` для `replayed: true`, §7.4); `sbx.sandboxes.handle(ref)` — дескриптор без запроса; SDK держит `Request` до конца тела ответа (иначе Node abort через слабую ссылку сигнала).
+3. **HTTP-адаптер:** `@modelcontextprotocol/hono` не используется — `createMcpHandler(...).fetch` уже web-standard; маршруты, `Host`/`Origin` и лимит тела — свои на Hono.
+4. **`Host` (§6.2):** вместо одной `SBX_MCP_PUBLIC_HOST` допустимы host и hostname из `SBX_MCP_PUBLIC_URL` плюс `SBX_MCP_ALLOWED_HOSTS` (через запятую); несовпадение — `421`. `Origin` не из `SBX_MCP_ALLOWED_ORIGINS` — `403`.
+5. **`401` от `api` посреди вызова (§6.3 п. 3):** если ответ ещё JSON — HTTP `401` с `error="invalid_token"`; если SSE уже идёт — ошибка инструмента `unauthorized` (`retryable`).
+6. **stdio (§6.1):** при старте `GET /v1/me` с таймаутом 5 s; при ошибке (нет входа, сеть) список — как у человека, вызовы проверяет `api`. Ошибки использования `sbx mcp` всегда в stderr.
+7. **Порты:** `mcp` слушает `:8080` (`/mcp`, метаданные, `/healthz`, `/readyz`) и `:9090` (`/metrics`, `/healthz`, `/readyz`); compose `127.0.0.1:8090:8080`, `127.0.0.1:9092:9090`; dev-cp Serve `8443:/mcp` и `8443:/.well-known/oauth-protected-resource/mcp`.
+8. **`exec_output`:** `GET /commands/{cmd}` (статус, `streams`) + `GET /output` по потокам; ожидание — `Command.follow` до первого куска плюс 500 ms добора или `exit`; конец ожидания фиксируется до чтения.
+9. **`files_read`:** `GET /files/content` с `Range` (`parseAs: "arrayBuffer"`); первые 8 KiB для `as: auto` тем же запросом.
+10. **`fail_fast`, `warmAvailable` не вводятся:** S7 убрал их из публичного контракта (нет тёплого пула), подсказка `pool_exhausted` не нужна.
+11. **Progress:** при `progressToken` ожидания create, resume, fork, recover, stop, `snapshot_save` и `exec_run` шлют `notifications/progress` раз в ~5 s. `traceparent` из `_meta` уходит в `api` заголовком.
+12. **Метка** `created-via=mcp` (labels свободной формы).
+13. **Интеграционные тесты против настоящего `api`** в процессе (`@sbx/api/testing`) — сквозной сценарий сверх §14.2: ловит расхождения фейка с API.
+14. **Conformance:** прогон против `createHttpApp` с внедрённым `authenticate` и фейковым API; сценарии про resources, prompts, sampling и т. п. — в `test/conformance-baseline.yml` с причиной.
+
+Решения controller при ревью (rulings):
+
+- **`files_list`:** `limit` по умолчанию 200, максимум **200** (в §8.4 было ≤ 500): `/files/list` в API не отдаёт больше 200.
+- **`files_read`:** `max_bytes` максимум **65 536** (в §8.4 и §9.2 — 131 072): 128 KiB текста не помещаются в предел ответа 80 000 символов; честная схема лучше молчаливого внутреннего усечения. Окно текста сжимается, пока очищенный текст не поместится, смещения остаются точными.
+- **`ttl_seconds`, `idle_timeout_seconds`:** не более 30 суток (2 592 000 s) в схемах MCP, чтобы не публиковать `MAX_SAFE_INTEGER`; команда с большим `maxTtlSeconds` из S6 через MCP больше не задаст. Признака «сбросить `idle_timeout_seconds`» нет (вопрос master).
+- **`port_expose`:** нужны `ports:write` и `sandboxes:read` (в §8.5 только `ports:write`), потому что §8.5 требует сначала прочитать `GET /ports`, как `computer_*` в §8.7; ключ только с `ports:write` инструмент не видит.
+- **`exec_run`, ожидание:** таймер `wait_seconds` обрывает только поток после `command_id`; до него POST ограничен сроком вызова (§7.5: `deadline_exceeded` только при исчерпании 50 s). Значит `exec_run` с малым `wait_seconds` на стартующей sandbox может занять до ~48 s.
+- **Шлюз desktop:** реальный API отвечает на неизвестный маршрут `404 not_found` (тот же код, что у отсутствующей sandbox), поэтому при `404` от ручки рабочего стола MCP читает `GET /v1/sandboxes/{sb}`: sandbox есть — `desktop_unsupported`, нет — исходный `not_found`.
+- **`retryBudgetMs`** вызова SDK = остаток срока минус `RESPONSE_MARGIN_MS`; сокращения описаний и схем (общий страж `tools/list`) — ради пункта 19.2.
+- **Клиентские правила** (`test/client-compat.test.ts`) собраны из документации клиентов, а не проверены на самих клиентах; `golden` проверяет имена `origin/main` только когда ссылка есть и файла нет.
+
+### 19.4 Подключение клиентов (§12.3)
+
+Конфиги проверены по документации клиентов 2026-10-31 и записаны в `apps/mcp/README.md`. Отличия от §12.3:
+
+- **Codex:** `codex mcp add --url --oauth-client-id` подтверждён; он пишет `client_id` и callback в `[mcp_servers.<name>.oauth]`; кроме глобального `mcp_oauth_callback_port` есть `oauth.callback_port` для одного сервера. Значения `default_tools_approval_mode`: `auto`, `prompt`, `writes`, `approve`.
+- **OpenCode:** порт callback **фиксирован — 19876** (`http://127.0.0.1:19876/mcp/oauth/callback`), не 33418. В исходниках схемы конфига есть `oauth.callbackPort` и `oauth.redirectUri` (в таблице страницы документации их нет); в README указан `callbackPort: 33418`, realm не менялся. Документация v2-превью использует другой формат (`mcp.servers`, snake_case).
+- **Gemini CLI:** путь callback по умолчанию `/oauth/callback` (не `/callback`), порт по умолчанию случайный; в README `redirectUri: http://localhost:33418/oauth/callback`. Ключ удалённого сервера — `httpUrl` (`url` — SSE).
+- **Claude Code:** ключи и флаги совпадают с §12.3.
+
+### 19.5 Поставка
+
+Образ `sbx-mcp:dev` (`apps/mcp/Dockerfile`, Node 26, прод-зависимости `@sbx/mcp...`, без стадии сборки, `USER node`, `EXPOSE 8080 9090`); сервис `mcp` в `deploy/compose` (`depends_on: api healthy`, порты на loopback); маршрут dev-cp через Tailscale Serve (`infra/dev-cp`); `test/compose.test.ts`. В Dockerfile `apps/api` и `apps/worker` манифест `apps/mcp/package.json` не добавлялся: `pnpm install --frozen-lockfile --filter` проходит без него (проверено сборкой `apps/api/Dockerfile`).
+
+### 19.6 Не сделано (открытые вопросы для master)
+
+- **E2E на `pve` (§14.4)** и сценарий `sbx-bench s11` — не в этом треде (CT 590 и `pve` запрещены). Размеры ответов и длительности вызовов из E2E, значения кэшей (размер экрана 10 s, `/v1/me` 30 s) и лимита одновременных вызовов (16) не подтверждены.
+- **Ручной чек-лист клиентов** (`apps/mcp/README.md`, последний раздел) не прогонялся: конфиги сверены только с документацией.
+- **Dev-cp не развёрнут:** какой `Host` Serve передаёт целевому серверу, и работа двух путей `/mcp` и `/.well-known/...` рядом с `/` и `/v1` на порту 8443 не проверены (`infra/dev-cp/README.md`).
+- **OpenCode:** подтвердить `callbackPort: 33418` на реальном клиенте или добавить `http://127.0.0.1:19876/*` в redirect URIs `sbx-mcp` (изменение realm, решение master).
+- **S10:** `src/desktop/api.ts` заменить хелперами SDK; сверить имена полей и scope `desktop`.
+- **Отложенное в финальную волну (minor):** 503 при недоступном `/v1/me` без теста; `?team=` с управляющими символами даёт 503, а не 400; PRM без проверки `Origin`; `/readyz` главного порта остаётся 200 при drain; `error_description` должен экранировать `"` и `\` (RFC 6750); нет 60 s таймаута HTTP-запроса (§6.2); `authorization_servers: []` без issuer.

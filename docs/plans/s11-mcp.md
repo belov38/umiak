@@ -366,3 +366,16 @@
 - [ ] **Step 3:** README `apps/mcp`: запуск, переменные, Inspector (UI и `--cli`), конфиги Claude Code, Codex, OpenCode, Gemini CLI (§12.3) — ключи заново проверить по документации клиентов (perplexity) и записать дату; порт callback OpenCode — если фиксирован и не 33418, записать открытым вопросом (realm не менять без master).
 - [ ] **Step 4:** архитектура §2/§10, спека §19 (итог спайка Bun, фактический бюджет `tools/list`, отклонения из этого плана), compose README; `pnpm -r test`, `pnpm -r typecheck`, `pnpm lint`, `pnpm build` — зелёные.
 - [ ] **Step 5:** commit `mcp: image, compose service, dev-cp route, client configs`.
+
+---
+
+## Итоги реализации
+
+Все 14 задач выполнены на ветке `s11-impl` (2026-10-31); подробности, бюджет `tools/list` и открытые вопросы — `docs/specs/s11-mcp.md` §19.
+
+- **Результат:** 38 инструментов в 5 toolsets; `sbx mcp` (stdio) и HTTP-сервер `node apps/mcp/src/main.ts` (stateless, `/mcp` + PRM, `/healthz`, `/readyz`, `/metrics`); образ `sbx-mcp:dev`; сервис `mcp` в `deploy/compose` (`127.0.0.1:8090`, ops `9092`); маршруты Tailscale Serve `8443:/mcp` и `8443:/.well-known/oauth-protected-resource/mcp` в `infra/dev-cp`; конфиги Claude Code, Codex, OpenCode, Gemini CLI в `apps/mcp/README.md`.
+- **Бюджет:** `tools/list` — 37 922 символа из 40 000 (golden-тест).
+- **Bun:** `bun build --compile` собирает сервер 2.4.0 без обходных путей (хост и linux-x64 проверены).
+- **Отклонения от спеки:** решения 1–17 выше и решения controller при ревью (§19.3): `files_list.limit` ≤ 200, `files_read.max_bytes` ≤ 65 536, TTL ≤ 30 суток в схемах, `port_expose` требует `sandboxes:read`, ожидание `exec_run` до `command_id` ограничено сроком вызова, шлюз `desktop_unsupported` через повторное чтение sandbox.
+- **Подтверждено по документации клиентов 2026-10-31, отличается от §12.3:** OpenCode слушает фиксированный порт 19876 (в README задан `callbackPort: 33418`, realm не менялся); Gemini CLI — путь `/oauth/callback`; Codex — `[mcp_servers.<name>.oauth]` и `oauth.callback_port`.
+- **Не сделано (вопросы master):** E2E на `pve` и `sbx-bench s11`; ручной чек-лист клиентов; деплой на CT 590 (Host, который передаёт Serve); подтверждение `callbackPort` у OpenCode или правка redirect URIs `sbx-mcp`; переход `src/desktop/api.ts` на хелперы SDK после S10; отложенные minor из ревью задачи 12.

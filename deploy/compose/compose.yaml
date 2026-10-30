@@ -392,3 +392,49 @@ services:
 
   # ---- Add the services of later threads below this line --------------------
   # web            (S8)  behind oauth2-proxy: add it as the `/` upstream
+
+  # Remote MCP server (S11): /mcp (Streamable HTTP, stateless) on :8080 and
+  # /healthz, /readyz, /metrics on :9090. It holds no state and no secrets: it
+  # forwards the caller's own bearer token to the api public listener, which
+  # authorizes every call. Behind a reverse proxy, /mcp and
+  # /.well-known/oauth-protected-resource/mcp go to this service (S11 §6.2);
+  # locally it has its own port.
+  mcp:
+    <<: *service-defaults
+    image: sbx-mcp:dev
+    build:
+      context: ../..
+      dockerfile: apps/mcp/Dockerfile
+    environment:
+      SBX_MCP_API_URL: http://api:8080
+      # The URL clients use; its host must match the Host header they send.
+      SBX_MCP_PUBLIC_URL: ${SBX_MCP_PUBLIC_URL:-http://localhost:8090/mcp}
+      # Authorization server named in the protected resource metadata.
+      SBX_OIDC_ISSUER: *oidc-issuer
+      # MCP clients are not browsers: no browser origin may call /mcp.
+      SBX_MCP_ALLOWED_ORIGINS: ""
+      # Extra Host values besides the host of SBX_MCP_PUBLIC_URL.
+      SBX_MCP_ALLOWED_HOSTS: ${SBX_MCP_ALLOWED_HOSTS:-127.0.0.1:8090}
+      SBX_LOG_LEVEL: ${SBX_MCP_LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:8090:8080"
+      # /healthz, /readyz, /metrics (9090 is the worker's, 9091 the api's).
+      - "127.0.0.1:9092:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:9090/readyz')
+          .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    # SIGTERM: the server stops within 10 s (calls in flight get the rest).
+    stop_grace_period: 30s
+    restart: unless-stopped
