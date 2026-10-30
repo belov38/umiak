@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { encodeUuid } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ServiceTokens } from "../src/index.ts";
+import { RateLimits, ServiceTokens } from "../src/index.ts";
 import { testIdentityStore } from "../src/testing/index.ts";
 import { mutableDefaults } from "./helpers/config.ts";
 import {
@@ -55,7 +55,12 @@ describe.skipIf(skipPg())(
 
 		/** A browser session (in-memory identity): a member of the world's team by default. */
 		async function browser(
-			o: { member?: boolean; operator?: boolean; active?: boolean } = {},
+			o: {
+				member?: boolean;
+				operator?: boolean;
+				active?: boolean;
+				rateLimits?: RateLimits;
+			} = {},
 		): Promise<Browser> {
 			const sub = `sub-${randomUUID()}`;
 			const email = `${sub}@example.com`;
@@ -80,7 +85,11 @@ describe.skipIf(skipPg())(
 							.user.id;
 			const h = createHarness({
 				listener: "proxied",
-				deps: w.deps({ identity, config: defaults.config }),
+				deps: w.deps({
+					identity,
+					config: defaults.config,
+					...(o.rateLimits === undefined ? {} : { rateLimits: o.rateLimits }),
+				}),
 			});
 			return {
 				h,
@@ -282,6 +291,17 @@ describe.skipIf(skipPg())(
 					await authorize(off, `label=${r0.label}&state=${STATE}`),
 					403,
 				);
+			});
+
+			it("rate limited: a 429 error page with Retry-After", async () => {
+				const r0 = await hosted("sso");
+				const b = await browser({
+					rateLimits: new RateLimits({ rps: 1, burst: 1, startsPerMinute: 30 }),
+				});
+				await authorize(b, `label=${r0.label}&state=${STATE}`);
+				const r = await authorize(b, `label=${r0.label}&state=${STATE}`);
+				expectErrorPage(r, 429);
+				expect(Number(r.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
 			});
 
 			it("exists only on the proxied listener", async () => {

@@ -46,6 +46,7 @@ function keyRecord(id: string, revokedAt: Date | null): ApiKeyRecord {
 		expiresAt: new Date(Date.now() + 86_400_000),
 		lastUsedAt: null,
 		revokedAt,
+		rotatedAt: null,
 	};
 }
 

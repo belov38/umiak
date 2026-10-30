@@ -42,13 +42,20 @@ export class ServiceTokens {
 
 /** Reads SBX_API_SERVICE_TOKENS_FILE; a missing or malformed file throws. */
 export function loadServiceTokens(file: string): ServiceTokens {
-	let raw: unknown;
+	let text: string;
 	try {
-		raw = JSON.parse(readFileSync(file, "utf8"));
+		text = readFileSync(file, "utf8");
 	} catch (e) {
 		throw new Error(
 			`service tokens file ${file}: ${e instanceof Error ? e.message : String(e)}`,
 		);
+	}
+	let raw: unknown;
+	try {
+		raw = JSON.parse(text);
+	} catch {
+		// JSON.parse quotes the input in its message: the tokens are secrets.
+		throw new Error(`service tokens file ${file} is not valid JSON`);
 	}
 	const r = FileSchema.safeParse(raw);
 	if (!r.success) {

@@ -256,6 +256,17 @@ export function errorBody(
 	return body;
 }
 
+/** `Retry-After` seconds of a 429/503: the error's hint, else the default. */
+export function retryAfterSecondsOf(e: ApiError): number {
+	const hint = e.details.retryAfterSeconds;
+	if (typeof hint === "number" && Number.isFinite(hint) && hint > 0) {
+		return Math.ceil(hint);
+	}
+	return e.code === "server_shutting_down"
+		? SHUTTING_DOWN_RETRY_AFTER_SECONDS
+		: DEFAULT_RETRY_AFTER_SECONDS;
+}
+
 /** Renders an ApiError: envelope, Request-Id, `Retry-After` on 429/503. */
 export function renderError(
 	c: Context<ApiEnv>,
@@ -267,12 +278,7 @@ export function renderError(
 	if (e.status === 429 || e.status === 503) {
 		const hint = e.details.retryAfterSeconds;
 		const shuttingDown = e.code === "server_shutting_down";
-		const seconds =
-			typeof hint === "number" && Number.isFinite(hint) && hint > 0
-				? Math.ceil(hint)
-				: shuttingDown
-					? SHUTTING_DOWN_RETRY_AFTER_SECONDS
-					: DEFAULT_RETRY_AFTER_SECONDS;
+		const seconds = retryAfterSecondsOf(e);
 		if (hint !== seconds) {
 			err = new ApiError(e.status, e.code, e.message, {
 				retryable: e.retryable,

@@ -12,7 +12,7 @@ import { authOf } from "../auth/principal.ts";
 import { proxiedAuth } from "../auth/proxied.ts";
 import { rateLimit } from "../auth/rate-limit.ts";
 import type { ApiApp, ApiDeps, ApiEnv } from "../deps.ts";
-import { ApiError, toHttpError } from "../http/errors.ts";
+import { ApiError, retryAfterSecondsOf, toHttpError } from "../http/errors.ts";
 import { REQUEST_ID_HEADER } from "../http/request-id.ts";
 import { poolOf } from "./internal/common.ts";
 import {
@@ -58,8 +58,13 @@ function errorPage(c: Context<ApiEnv>, e: ApiError): Response {
 		"</body></html>",
 		"",
 	].join("\n");
+	const retry =
+		e.status === 429 || e.status === 503
+			? { "Retry-After": String(retryAfterSecondsOf(e)) }
+			: {};
 	return c.html(html, e.status as 400, {
 		...(e.headers ?? {}),
+		...retry,
 		[REQUEST_ID_HEADER]: c.var.requestId,
 		"Cache-Control": "no-store",
 		"Content-Security-Policy": "default-src 'none'",

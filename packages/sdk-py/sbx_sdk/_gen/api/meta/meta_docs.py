@@ -47,7 +47,8 @@ def sync_detailed(
 ) -> Response[Error | str]:
     """API reference page
 
-     Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.
+     Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no
+    authentication. Public listener only.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -72,7 +73,8 @@ def sync(
 ) -> Error | str | None:
     """API reference page
 
-     Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.
+     Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no
+    authentication. Public listener only.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -93,7 +95,8 @@ async def asyncio_detailed(
 ) -> Response[Error | str]:
     """API reference page
 
-     Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.
+     Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no
+    authentication. Public listener only.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -116,7 +119,8 @@ async def asyncio(
 ) -> Error | str | None:
     """API reference page
 
-     Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.
+     Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no
+    authentication. Public listener only.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

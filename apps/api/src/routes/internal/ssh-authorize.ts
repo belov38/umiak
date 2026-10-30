@@ -7,7 +7,8 @@
 // exception, C6); a team key must be live, of that team, with ssh:connect.
 // `recheck` (the gateway re-checks open sessions after its LISTEN came back)
 // checks the identity the same way but not the certificate's validity, and
-// touches nothing. A denial has no reason: the gateway does not show one.
+// touches nothing. A team key's certificate issued before the key's last
+// rotation is denied on login and on recheck. A denial has no reason: the gateway does not show one.
 import {
 	decodeUuid,
 	encodeUuid,
@@ -18,6 +19,7 @@ import { isUuid, type SshTarget, sshTarget } from "@sbx/core";
 import { z } from "zod";
 import type { ApiApp, ApiDeps } from "../../deps.ts";
 import { validationError } from "../../http/errors.ts";
+import { CERT_LIFETIME_MS } from "../ssh.ts";
 import { poolOf, readJson, requireGateway } from "./common.ts";
 
 const DEFAULT_LOGIN_USER = "user";
@@ -158,6 +160,24 @@ async function viaRegisteredKey(
 
 const KEY_ID_RE = /^sbx:(user|key):([^:]+)$/;
 
+/**
+ * A certificate of a team key issued before the key's last rotation (also
+ * on recheck): the old secret no longer authorizes anything. It was issued
+ * at validBefore − CERT_LIFETIME_MS (validBefore is floored to seconds, so
+ * one issued within a second after the rotation is refused too; the client
+ * gets a new one). Without a readable validBefore a rotated key's
+ * certificate is refused.
+ */
+function issuedBeforeRotation(
+	validBefore: string | undefined,
+	rotatedAt: Date | null,
+): boolean {
+	if (rotatedAt === null) return false;
+	const before = Date.parse(validBefore ?? "");
+	if (Number.isNaN(before)) return true;
+	return before - CERT_LIFETIME_MS < rotatedAt.getTime();
+}
+
 async function viaCertificate(
 	deps: ApiDeps,
 	t: SshTarget,
@@ -181,14 +201,14 @@ async function viaCertificate(
 	}
 	const keyId = decodeUuid("apiKey", m[2]);
 	if (keyId === null) return null;
-	// Listing the sandbox team's keys also checks the key's team.
-	const keys = await deps.identity.listApiKeys({ teamId: t.teamId });
-	const k = keys.find((x) => x.id === keyId);
+	const k = await deps.identity.apiKey(keyId);
 	if (
-		k === undefined ||
+		k === null ||
+		k.teamId !== t.teamId ||
 		k.revokedAt !== null ||
 		k.expiresAt.getTime() <= Date.now() ||
-		!k.scopes.includes("ssh:connect")
+		!k.scopes.includes("ssh:connect") ||
+		issuedBeforeRotation(cert.validBefore, k.rotatedAt)
 	) {
 		return null;
 	}

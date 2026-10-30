@@ -59,6 +59,8 @@ export interface ApiKeyRecord {
 	expiresAt: Date;
 	lastUsedAt: Date | null;
 	revokedAt: Date | null;
+	/** Last rotation of the secret; login certificates issued before it are refused. */
+	rotatedAt: Date | null;
 }
 
 export interface NewApiKey {
@@ -109,6 +111,8 @@ export interface IdentityStore {
 	): Promise<void>;
 	/** Team keys with the creator status. */
 	listApiKeys(q: { teamId: string }): Promise<ApiKeyRecord[]>;
+	/** A key by id (revoked and expired ones too); null when unknown. */
+	apiKey(id: string): Promise<ApiKeyRecord | null>;
 	touchApiKey(id: string): Promise<void>;
 	listSshKeys(userId: string): Promise<SshKeyRecord[]>;
 	/** Throws IdentityError("fingerprint_taken") if the fingerprint exists. */

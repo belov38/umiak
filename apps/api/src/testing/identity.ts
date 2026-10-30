@@ -81,6 +81,7 @@ export function testIdentityStore(o: TestIdentityOptions = {}): IdentityStore {
 			expiresAt: k.expiresAt ?? new Date(Date.now() + 86_400_000),
 			lastUsedAt: null,
 			revokedAt: k.revokedAt ?? null,
+			rotatedAt: null,
 		});
 	}
 	const sessions = new Map<string, SessionIdentity & { active: boolean }>();
@@ -115,6 +116,9 @@ export function testIdentityStore(o: TestIdentityOptions = {}): IdentityStore {
 		},
 		async findApiKeyByHash(hash) {
 			return keys.get(hash) ?? null;
+		},
+		async apiKey(id) {
+			return [...keys.values()].find((k) => k.id === id) ?? null;
 		},
 		async touchApiKey() {},
 		async team(teamId) {

@@ -34,7 +34,7 @@ const TAGS = ["ssh"];
 
 /** S7 §11.3: login certificates start 60 s back (clock skew) and last 10 min. */
 const CERT_BACKDATE_MS = 60_000;
-const CERT_LIFETIME_MS = 10 * 60_000;
+export const CERT_LIFETIME_MS = 10 * 60_000;
 
 const DEFAULT_LOGIN_USER = "user";
 

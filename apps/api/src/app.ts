@@ -81,9 +81,13 @@ function listenerApp(
  * The listener's authentication and the rate limit are installed before
  * (they cover every matched route except the anonymous ones).
  */
-export function mountV1(app: ApiApp, deps: ApiDeps): void {
+export function mountV1(
+	app: ApiApp,
+	deps: ApiDeps,
+	o: { docs: boolean } = { docs: true },
+): void {
 	registerSecuritySchemes(app);
-	registerMetaRoutes(app, deps);
+	registerMetaRoutes(app, deps, o);
 	registerMeRoutes(app, deps);
 	registerSandboxRoutes(app, deps);
 	registerEnvRoutes(app, deps);
@@ -112,7 +116,8 @@ export function createPublicApp(deps: ApiDeps): ApiApp {
 export function createProxiedApp(deps: ApiDeps): ApiApp {
 	const app = listenerApp(deps);
 	app.use("/v1/*", proxiedAuth(deps), rateLimit(deps));
-	mountV1(app, deps);
+	// No /v1/docs: a third-party script must not run on the cookie origin.
+	mountV1(app, deps, { docs: false });
 	registerSbxAuthRoutes(app, deps);
 	return app;
 }

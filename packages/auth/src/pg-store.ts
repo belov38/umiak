@@ -51,6 +51,7 @@ interface ApiKeyRow {
 	expires_at: Date;
 	last_used_at: Date | null;
 	revoked_at: Date | null;
+	rotated_at: Date | null;
 	cb_id: string | null;
 	cb_email: string | null;
 	cb_active: boolean | null;
@@ -74,7 +75,7 @@ const USER_COLS =
 const API_KEY_SELECT = `
 SELECT k.id, k.team_id, k.name, k.secret_hash, k.prefix, k.last4, k.scopes,
        k.created_via, k.created_at, k.expires_at, k.last_used_at, k.revoked_at,
-       u.id AS cb_id, u.email AS cb_email, u.active AS cb_active,
+       k.rotated_at, u.id AS cb_id, u.email AS cb_email, u.active AS cb_active,
        EXISTS (SELECT 1 FROM identity.memberships m
                 WHERE m.user_id = k.created_by AND m.team_id = k.team_id) AS cb_member
   FROM identity.api_keys k
@@ -123,6 +124,7 @@ function apiKeyOf(r: ApiKeyRow): ApiKeyRecord {
 		expiresAt: r.expires_at,
 		lastUsedAt: r.last_used_at,
 		revokedAt: r.revoked_at,
+		rotatedAt: r.rotated_at,
 	};
 }
 
@@ -357,13 +359,18 @@ export class PgIdentityStore implements IdentityStore {
 		return r.rows[0] ? apiKeyOf(r.rows[0]) : null;
 	}
 
-	async #apiKey(id: string): Promise<ApiKeyRecord> {
+	async apiKey(id: string): Promise<ApiKeyRecord | null> {
 		const r = await this.#pool.query<ApiKeyRow>(
 			`${API_KEY_SELECT} WHERE k.id = $1`,
 			[id],
 		);
-		if (!r.rows[0]) throw new IdentityError("not_found");
-		return apiKeyOf(r.rows[0]);
+		return r.rows[0] ? apiKeyOf(r.rows[0]) : null;
+	}
+
+	async #apiKey(id: string): Promise<ApiKeyRecord> {
+		const k = await this.apiKey(id);
+		if (k === null) throw new IdentityError("not_found");
+		return k;
 	}
 
 	async createApiKey(input: NewApiKey): Promise<ApiKeyRecord> {
@@ -401,7 +408,8 @@ export class PgIdentityStore implements IdentityStore {
 		s: { secretHash: string; prefix: string; last4: string },
 	): Promise<ApiKeyRecord> {
 		const r = await this.#pool.query(
-			`UPDATE identity.api_keys SET secret_hash = $2, prefix = $3, last4 = $4
+			`UPDATE identity.api_keys
+			    SET secret_hash = $2, prefix = $3, last4 = $4, rotated_at = now()
 			  WHERE id = $1 AND revoked_at IS NULL`,
 			[id, s.secretHash, s.prefix, s.last4],
 		);

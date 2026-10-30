@@ -97,7 +97,7 @@ export interface paths {
         };
         /**
          * API reference page
-         * @description Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.
+         * @description Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no authentication. Public listener only.
          */
         get: operations["meta.docs"];
         put?: never;

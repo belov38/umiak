@@ -205,6 +205,32 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 		}
 	});
 
+	it("a JWKS failure before any key was fetched does not start the outage backoff", async () => {
+		const other = await startTestOidcServer();
+		const settings = testSettings({ SBX_OIDC_ISSUER: other.issuer });
+		const h = createHarness({
+			deps: {
+				settings,
+				pool: w.db.pool,
+				identity: w.identity,
+				identityEvents: w.events,
+				oidc: new OidcVerifier(settings.oidc as OidcSettings, {
+					outageBackoffMs: 60_000,
+				}),
+			},
+		});
+		try {
+			other.fail({ jwks: 503 });
+			const token = await other.token(person());
+			expect((await me(h, token)).status).toBe(503);
+			other.fail({ jwks: null });
+			// No cached keys to verify with: the next request asks Keycloak again.
+			expect((await me(h, token)).status).toBe(200);
+		} finally {
+			await other.close();
+		}
+	});
+
 	it("a failed discovery is not retried for a short while", async () => {
 		const other = await startTestOidcServer();
 		const settings = testSettings({ SBX_OIDC_ISSUER: other.issuer });

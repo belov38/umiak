@@ -92,6 +92,25 @@ describe("loadServiceTokens", () => {
 		).toThrow();
 	});
 
+	it("errors never echo the file's content (a bare token is a secret)", () => {
+		const secret = "s3cr3t-0123456789abcdef";
+		for (const content of [
+			secret,
+			`{"gateway": [${secret}]}`,
+			JSON.stringify({ gateway: secret }),
+			JSON.stringify([secret]),
+		]) {
+			let message = "";
+			try {
+				loadServiceTokens(tokensFile(content));
+			} catch (e) {
+				message = (e as Error).message;
+			}
+			expect(message, content).not.toBe("");
+			expect(message, content).not.toContain("s3cr");
+		}
+	});
+
 	it("an empty token never matches", () => {
 		const t = new ServiceTokens({ gateway: [T1] });
 		expect(t.verify("")).toBeNull();

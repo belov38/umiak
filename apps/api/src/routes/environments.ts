@@ -165,7 +165,7 @@ const ENV_PREFIX = "env_";
  * anything else a name. A bare UUID is never a name (the store would read
  * it as an id), so it is 404.
  */
-function environmentRef(ref: string): string {
+export function environmentRef(ref: string): string {
 	if (ref.slice(0, ENV_PREFIX.length).toLowerCase() === ENV_PREFIX) {
 		const id = decodeUuid("environment", ref);
 		if (id === null) throw notFoundError("environment");

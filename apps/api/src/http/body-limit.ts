@@ -41,12 +41,36 @@ export function incompleteBodyError(): ApiError {
 	]);
 }
 
+/** A bounded body must arrive within this (the request timeout of non-streaming routes). */
+export const BODY_TIMEOUT_MS = 60_000;
+
+function bodyTimeoutError(ms: number): ApiError {
+	return validationError([
+		{
+			path: "body",
+			message: `the request body did not arrive within ${Math.round(ms / 1000)} s`,
+		},
+	]);
+}
+
+export interface BodyLimitOptions {
+	/** Default BODY_TIMEOUT_MS. */
+	timeoutMs?: number;
+}
+
 /**
- * Refuses larger bodies with 413 payload_too_large: by Content-Length, or
- * while reading a body without one (it is read here, then handed on). A
- * body that breaks while it is read is 400 validation, not 500.
+ * Refuses larger bodies with 413 payload_too_large: by Content-Length at
+ * once, else while the handler reads the body. The body is not read here:
+ * it is passed through a counting stream, so nothing is buffered before
+ * authentication (which runs before the handler). A bounded body must
+ * arrive within `timeoutMs`; a body that breaks or stalls is 400
+ * validation, not 500. Routes without a limit (streamed files) have no
+ * timeout either: their uploads may take long.
  */
-export function bodyLimits(): MiddlewareHandler<ApiEnv> {
+export function bodyLimits(
+	o: BodyLimitOptions = {},
+): MiddlewareHandler<ApiEnv> {
+	const timeoutMs = o.timeoutMs ?? BODY_TIMEOUT_MS;
 	return async (c, next) => {
 		const limit = bodyLimitFor(c.req.method, c.req.path);
 		const raw = c.req.raw;
@@ -56,34 +80,61 @@ export function bodyLimits(): MiddlewareHandler<ApiEnv> {
 			if (Number.parseInt(length, 10) > limit) {
 				throw payloadTooLargeError(limit);
 			}
-			return next();
 		}
-		const reader = raw.body.getReader();
-		const chunks: Uint8Array[] = [];
+		const source = raw.body.getReader();
+		// The first failure of the body; the answer once the handler is done.
+		let failure: ApiError | null = null;
+		let timer: NodeJS.Timeout | undefined;
 		let size = 0;
-		for (;;) {
-			let r: ReadableStreamReadResult<Uint8Array>;
+		const fail = (ctrl: ReadableStreamDefaultController, e: ApiError) => {
+			failure ??= e;
+			clearTimeout(timer);
+			source.cancel().catch(() => {});
 			try {
-				r = await reader.read();
+				ctrl.error(failure);
 			} catch {
-				throw incompleteBodyError();
+				// already closed or errored
 			}
-			if (r.done) break;
-			size += r.value.byteLength;
-			if (size > limit) {
-				await reader.cancel().catch(() => {});
-				throw payloadTooLargeError(limit);
-			}
-			chunks.push(r.value);
-		}
+		};
 		const body = new ReadableStream<Uint8Array>({
 			start(ctrl) {
-				for (const chunk of chunks) ctrl.enqueue(chunk);
-				ctrl.close();
+				timer = setTimeout(
+					() => fail(ctrl, bodyTimeoutError(timeoutMs)),
+					timeoutMs,
+				);
+				timer.unref();
+			},
+			async pull(ctrl) {
+				let r: ReadableStreamReadResult<Uint8Array>;
+				try {
+					r = await source.read();
+				} catch {
+					return fail(ctrl, incompleteBodyError());
+				}
+				if (failure !== null) return;
+				if (r.done) {
+					clearTimeout(timer);
+					ctrl.close();
+					return;
+				}
+				size += r.value.byteLength;
+				if (size > limit) return fail(ctrl, payloadTooLargeError(limit));
+				ctrl.enqueue(r.value);
+			},
+			cancel(reason) {
+				clearTimeout(timer);
+				return source.cancel(reason);
 			},
 		});
 		const init: RequestInit & { duplex: "half" } = { body, duplex: "half" };
 		c.req.raw = new Request(raw, init);
-		return next();
+		try {
+			await next();
+		} finally {
+			clearTimeout(timer);
+		}
+		// Whatever the handler made of the failed read (a JSON parse error,
+		// a broken agent upload), the answer is the body's failure.
+		if (failure !== null) throw failure;
 	};
 }

@@ -4,12 +4,7 @@
 // {sandbox, operation}; a repeat while the same kind is active returns that
 // operation (core), another kind is 409 operation_in_progress.
 import { createRoute, z } from "@hono/zod-openapi";
-import {
-	decodeUuid,
-	type EnvironmentStore,
-	encodeUuid,
-	type SecretSets,
-} from "@sbx/auth";
+import { type EnvironmentStore, encodeUuid, type SecretSets } from "@sbx/auth";
 import {
 	type CreateInput,
 	type ForkInput,
@@ -60,6 +55,7 @@ import {
 	SandboxSchema,
 	UpdateSandboxRequest,
 } from "../schemas/sandbox.ts";
+import { environmentRef } from "./environments.ts";
 
 const TAGS = ["sandboxes"];
 
@@ -141,8 +137,6 @@ const createSandbox = createRoute({
 	},
 });
 
-const ENV_PREFIX = "env_";
-
 /**
  * Sets of the create's environment (S8 §10.1): absent → the team's default,
  * null → none, a name or `env_...` → that one (404 if unknown). Called by
@@ -158,13 +152,7 @@ async function environmentSets(
 	if (ref === null) return null;
 	if (ref === undefined)
 		return (await store.getDefault(p.teamId))?.sets ?? null;
-	let key = ref;
-	if (ref.slice(0, ENV_PREFIX.length).toLowerCase() === ENV_PREFIX) {
-		const id = decodeUuid("environment", ref);
-		if (id === null) throw notFoundError("environment");
-		key = id;
-	}
-	const rec = await store.get(p.teamId, key);
+	const rec = await store.get(p.teamId, environmentRef(ref));
 	if (rec === null) throw notFoundError("environment");
 	return rec.sets;
 }

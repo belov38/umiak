@@ -23,7 +23,6 @@
 		"@sbx/core": "workspace:*",
 		"@sbx/db": "workspace:*",
 		"@sbx/proto": "workspace:*",
-		"@scalar/hono-api-reference": "0.12.16",
 		"hono": "4.13.14",
 		"jose": "6.2.14",
 		"pg": "8.23.1",

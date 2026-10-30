@@ -208,13 +208,8 @@ async function teamKey(
 	ref: string,
 ): Promise<ApiKeyRecord> {
 	const id = decodeUuid("apiKey", ref);
-	const k =
-		id === null
-			? undefined
-			: (await deps.identity.listApiKeys({ teamId: p.teamId })).find(
-					(x) => x.id === id,
-				);
-	if (k === undefined) throw notFoundError("api key");
+	const k = id === null ? null : await deps.identity.apiKey(id);
+	if (k === null || k.teamId !== p.teamId) throw notFoundError("api key");
 	return k;
 }
 

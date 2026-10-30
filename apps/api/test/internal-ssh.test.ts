@@ -2,7 +2,7 @@
 // registered key of a person or a login certificate (person or team key);
 // active member of the sandbox's team without the operator exception, a live
 // team key with ssh:connect; `recheck` skips the certificate's validity.
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { encodeUuid, parseSshPublicKey } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -316,6 +316,46 @@ describe.skipIf(skipPg())("POST /internal/v1/gateway/ssh/authorize", () => {
 				});
 				expect(body(r), id).toEqual(DENIED);
 			}
+		});
+
+		it("a team key rotated after the certificate was issued: denied on login and recheck; a certificate issued after it is allowed", async () => {
+			const s = await w.seed({ state: "ready" });
+			const k = await w.key(["ssh:connect"]);
+			// Issued 10 min before validBefore: validBefore - 10 min.
+			const issuedBefore = new Date(Date.now() + 9 * 60_000);
+			const old = cert(
+				teamKeyId(k.id),
+				s.sandboxId,
+				issuedBefore.toISOString().replace(/\.\d+Z$/, "Z"),
+			);
+			expect(
+				body(await authorize({ sandbox: s.slug, certificate: old })).allowed,
+			).toBe(true);
+			// Rotated "now": the certificate was issued ~1 min ago, before it.
+			await w.identity.rotateApiKey(k.id, {
+				secretHash: randomBytes(32).toString("hex"),
+				prefix: "zzzzzzzz",
+				last4: "9999",
+			});
+			expect(
+				body(await authorize({ sandbox: s.slug, certificate: old })),
+			).toEqual(DENIED);
+			expect(
+				body(
+					await authorize({ sandbox: s.slug, certificate: old, recheck: true }),
+				),
+			).toEqual(DENIED);
+			// A certificate issued after the rotation (validBefore = now + 10 min).
+			const fresh = cert(
+				teamKeyId(k.id),
+				s.sandboxId,
+				new Date(Date.now() + 10 * 60_000 + 2000)
+					.toISOString()
+					.replace(/\.\d+Z$/, "Z"),
+			);
+			expect(
+				body(await authorize({ sandbox: s.slug, certificate: fresh })).allowed,
+			).toBe(true);
 		});
 
 		it("a malformed keyId is denied", async () => {

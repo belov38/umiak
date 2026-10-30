@@ -54,16 +54,51 @@ describe("GET /v1/meta (S7 §13)", () => {
 		expect((r.body as { apiVersion: string }).apiVersion).toBe("v1");
 	});
 
-	it("openapi.json and docs are served without auth on public and proxied", async () => {
+	it("openapi.json is served without auth on public and proxied", async () => {
 		for (const listener of ["public", "proxied"] as const) {
 			const h = createHarness({ listener });
 			const doc = await h.request("GET", "/v1/openapi.json");
 			expect(doc.status).toBe(200);
 			expect((doc.body as { openapi: string }).openapi).toBe("3.1.0");
-			const docs = await h.request("GET", "/v1/docs");
-			expect(docs.status).toBe(200);
-			expect(docs.headers.get("content-type")).toContain("text/html");
 		}
+	});
+
+	it("docs on the public listener: a pinned Scalar bundle with SRI, no inline script, a strict CSP", async () => {
+		const h = createHarness();
+		const docs = await h.app.request("/v1/docs");
+		expect(docs.status).toBe(200);
+		expect(docs.headers.get("content-type")).toContain("text/html");
+		const html = await docs.text();
+		const scripts = [
+			...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g),
+		];
+		const external = scripts.filter((m) => /\ssrc=/.test(m[1] ?? ""));
+		expect(external).toHaveLength(1);
+		const tag = external[0]?.[1] ?? "";
+		expect(tag).toContain(
+			'src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.3/dist/browser/standalone.js"',
+		);
+		expect(tag).toMatch(/integrity="sha384-[A-Za-z0-9+/=]{64}"/);
+		expect(tag).toContain('crossorigin="anonymous"');
+		// The only other script element is the data holder, not executable code.
+		for (const m of scripts.filter((m) => !/\ssrc=/.test(m[1] ?? ""))) {
+			expect(m[1]).toContain('type="application/json"');
+		}
+		const csp = docs.headers.get("content-security-policy") ?? "";
+		expect(csp).toContain("default-src 'none'");
+		expect(csp).toContain(
+			"script-src https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.3/dist/browser/standalone.js",
+		);
+		expect(csp).not.toContain("unsafe-eval");
+		expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
+		expect(csp).toContain("frame-ancestors 'none'");
+	});
+
+	it("docs are not served on the proxied (cookie-authenticated) listener", async () => {
+		const h = createHarness({ listener: "proxied" });
+		const docs = await h.app.request("/v1/docs");
+		expect(docs.status).not.toBe(200);
+		expect(docs.headers.get("content-type") ?? "").not.toContain("text/html");
 	});
 
 	it("the served document points keycloak at the configured issuer", async () => {

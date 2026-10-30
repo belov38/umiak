@@ -4321,7 +4321,7 @@
 		},
 		"/v1/docs": {
 			"get": {
-				"description": "Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.",
+				"description": "Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no authentication. Public listener only.",
 				"operationId": "meta.docs",
 				"responses": {
 					"200": {

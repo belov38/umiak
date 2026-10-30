@@ -34,7 +34,8 @@ export interface OidcVerifierOptions {
 	/**
 	 * After a failed JWKS fetch, verify offline with the last good keys and
 	 * do not try Keycloak again for this long (default 30 s), so a hanging
-	 * Keycloak does not cost every request the timeout.
+	 * Keycloak does not cost every request the timeout. Without good keys
+	 * yet (cold start) there is no backoff.
 	 */
 	outageBackoffMs?: number;
 	/** After a failed discovery, answer 503 without retrying for this long (default 5 s). */
@@ -123,7 +124,11 @@ export class OidcVerifier {
 			return await remote(header, token);
 		} catch (e) {
 			if (!isKeySetOutage(e)) throw e;
-			this.#outageUntil = Date.now() + this.#o.outageBackoffMs;
+			// Back off only with keys to verify offline; on a cold start the
+			// next request tries Keycloak again instead of 503 for the backoff.
+			if (remote.jwks() !== undefined) {
+				this.#outageUntil = Date.now() + this.#o.outageBackoffMs;
+			}
 			return this.#offline(remote, header, token, e);
 		}
 	}

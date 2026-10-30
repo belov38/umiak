@@ -1,9 +1,9 @@
 // Routes without auth on the public and proxied listeners: GET /v1/meta
-// (S7 §13, platform facts for clients), GET /v1/openapi.json and GET /v1/docs
-// (S7 §15.1).
+// (S7 §13, platform facts for clients), GET /v1/openapi.json, and GET
+// /v1/docs (S7 §15.1) on the public listener only: the page loads Scalar
+// from a CDN, which must not run on the cookie-authenticated proxied origin.
 import { createRoute, z } from "@hono/zod-openapi";
-import { Scalar } from "@scalar/hono-api-reference";
-import type { ApiApp, ApiDeps, ApiEnv } from "../deps.ts";
+import type { ApiApp, ApiDeps } from "../deps.ts";
 import {
 	buildOpenApiDocument,
 	type OpenApiDocument,
@@ -107,7 +107,8 @@ const getDocs = createRoute({
 	operationId: "meta.docs",
 	summary: "API reference page",
 	description:
-		"Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.",
+		"Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no " +
+		"authentication. Public listener only.",
 	tags: ["meta"],
 	security: NO_AUTH,
 	responses: {
@@ -141,7 +142,61 @@ export function metaOf(deps: ApiDeps): Meta {
 	};
 }
 
-export function registerMetaRoutes(app: ApiApp, deps: ApiDeps): void {
+/**
+ * The Scalar standalone bundle: an exact version with its SRI hash
+ * (sha384 of dist/browser/standalone.js of @scalar/api-reference 1.76.3),
+ * so a changed file on the CDN does not run. Bundling it would add the
+ * package's whole dependency tree (Vue and ~30 packages) to the api.
+ */
+const SCALAR_BUNDLE =
+	"https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.3/dist/browser/standalone.js";
+const SCALAR_BUNDLE_SRI =
+	"sha384-H/jJ+XQ0S+5wKmVCrODlHKRKyDzdSBog4sUPc+AQTZddtU1FyQsiCrA47EUte2Fd";
+
+/**
+ * Only the pinned bundle runs (no inline script, no eval); it injects its
+ * styles; the document and "try it" calls go to this origin.
+ */
+const DOCS_CSP = [
+	"default-src 'none'",
+	`script-src ${SCALAR_BUNDLE}`,
+	"style-src 'unsafe-inline'",
+	"img-src 'self' data:",
+	"font-src 'self' data:",
+	"connect-src 'self'",
+	"base-uri 'none'",
+	"form-action 'none'",
+	"frame-ancestors 'none'",
+].join("; ");
+
+const DOCS_CONFIG = JSON.stringify({ withDefaultFonts: false });
+
+// Relative URL: works under /v1/docs and behind a path prefix. The first
+// script element only holds the configuration (type application/json).
+const DOCS_HTML = `<!doctype html>
+<html>
+  <head>
+    <title>sbx API</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script id="api-reference" type="application/json" data-url="openapi.json" data-configuration="${DOCS_CONFIG.replaceAll('"', "&quot;")}"></script>
+    <script src="${SCALAR_BUNDLE}" integrity="${SCALAR_BUNDLE_SRI}" crossorigin="anonymous"></script>
+  </body>
+</html>
+`;
+
+export interface MetaRouteOptions {
+	/** Serve GET /v1/docs (the public listener only). */
+	docs: boolean;
+}
+
+export function registerMetaRoutes(
+	app: ApiApp,
+	deps: ApiDeps,
+	o: MetaRouteOptions = { docs: true },
+): void {
 	const meta = metaOf(deps);
 	app.openapi(getMeta, (c) => c.json(meta, 200));
 
@@ -154,10 +209,8 @@ export function registerMetaRoutes(app: ApiApp, deps: ApiDeps): void {
 		return c.json(doc, 200);
 	});
 
-	// Relative URL: the proxied listener is reached under /api/v1/docs.
-	const scalar = Scalar<ApiEnv>({ url: "openapi.json", pageTitle: "sbx API" });
-	app.openapi(getDocs, async (c) => {
-		const res = await scalar(c, async () => {});
-		return res ?? c.notFound();
-	});
+	if (!o.docs) return;
+	app.openapi(getDocs, (c) =>
+		c.html(DOCS_HTML, 200, { "Content-Security-Policy": DOCS_CSP }),
+	);
 }

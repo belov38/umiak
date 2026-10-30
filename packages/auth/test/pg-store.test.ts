@@ -283,6 +283,19 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 			expect(count(`key:${encodeUuid("apiKey", k.id)}`)).toBe(1);
 		});
 
+		it("rotating a key sends key:<key_> (certificates of the old secret end)", async () => {
+			const { s, teamId } = await member();
+			const k = await key(s, teamId);
+			await s.rotateApiKey(k.id, {
+				secretHash: randomBytes(32).toString("hex"),
+				prefix: "zzzzzzzz",
+				last4: "9999",
+			});
+			await received(`key:${encodeUuid("apiKey", k.id)}`);
+			await flush();
+			expect(count(`key:${encodeUuid("apiKey", k.id)}`)).toBe(1);
+		});
+
 		it("deleting a team sends team:<team_> (and its members and live keys)", async () => {
 			const { s, userId, teamId } = await member();
 			const live = await key(s, teamId);

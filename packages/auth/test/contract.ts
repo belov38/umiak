@@ -400,6 +400,8 @@ export function runIdentityStoreContract(
 					expiresAt: k.expiresAt,
 					...next,
 				});
+				expect(k.rotatedAt).toBe(null);
+				expect(r.rotatedAt).toBeInstanceOf(Date);
 				expect(await s.findApiKeyByHash(input.secretHash)).toBe(null);
 				expect((await s.findApiKeyByHash(next.secretHash))?.id).toBe(k.id);
 				expect(
@@ -407,6 +409,15 @@ export function runIdentityStoreContract(
 						s.rotateApiKey(randomUUID(), { ...next, secretHash: hash() }),
 					),
 				).toBe("not_found");
+			});
+
+			it("apiKey returns the key by id (revoked too), null for an unknown id", async () => {
+				const o = await owner();
+				const k = await s.createApiKey(newKey(o.teamId, o.userId));
+				expect(await s.apiKey(k.id)).toEqual(k);
+				await s.revokeApiKey(k.id, {});
+				expect((await s.apiKey(k.id))?.revokedAt).toBeInstanceOf(Date);
+				expect(await s.apiKey(randomUUID())).toBe(null);
 			});
 
 			it("touchApiKey sets lastUsedAt", async () => {

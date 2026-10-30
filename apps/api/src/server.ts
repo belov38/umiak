@@ -181,7 +181,7 @@ export async function buildDeps(
 			sshCa,
 			identity,
 			identityEvents: events,
-			keyCache: new KeyCache(identity, events),
+			keyCache: new KeyCache(identity, events, { log }),
 			sessions: new SessionResolver(identity, events),
 			oidc: settings.oidc === null ? null : new OidcVerifier(settings.oidc),
 			serviceTokens,
@@ -289,8 +289,11 @@ export async function startApi(
 		l.server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
 		// Above the keep-alive timeout, as Node recommends.
 		l.server.headersTimeout = KEEP_ALIVE_TIMEOUT_MS + 1000;
-		// Uploads to /files may take longer than Node's 300 s default; the
-		// headers timeout still bounds clients that never finish a request.
+		// Uploads to /files may take longer than Node's 300 s default, so
+		// there is no server-wide request timeout: the headers timeout bounds
+		// clients that never finish the headers, and bodyLimits bounds every
+		// limited (non-file) body to 60 s; bodies are read only by handlers,
+		// after authentication.
 		l.server.requestTimeout = 0;
 	}
 

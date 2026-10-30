@@ -29,7 +29,13 @@ sync-командам — `503 server_shutting_down`, выход не позже
 
 `/readyz` готов, когда работают Postgres и `LISTEN sbx_identity` и процесс не останавливается; иначе `503 not_ready`
 с `details.reasons` (`postgres`, `identity_listener`, `shutting_down`).
-OpenAPI — `GET /v1/openapi.json`, документация — `GET /v1/docs` (без аутентификации).
+OpenAPI — `GET /v1/openapi.json`, документация — `GET /v1/docs` (без аутентификации; docs — только на public:
+страница грузит Scalar с jsDelivr, закреплённый с SRI).
+
+**Ingress перед public и proxied должен ограничивать частоту запросов по IP клиента.** Лимиты `api` считаются по
+principal, то есть после аутентификации; до неё каждый запрос с `Bearer sbx_…` — поиск ключа (кэш 30 s / 5 s на
+неизвестный хеш, дальше Postgres), каждый JWT — проверка подписи. Тела запросов до аутентификации не читаются,
+ограниченные тела должны прийти за 60 s.
 
 ## Переменные окружения
 

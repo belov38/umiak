@@ -403,4 +403,28 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 			await w.environments.patch(w.teamId, name, { isDefault: false }, null);
 		}
 	});
+
+	it("create with a bare UUID as environment is 404 like the environments routes, and creates nothing", async () => {
+		const name = uniqueName("byuuid");
+		const made = await asOwner("POST", "/v1/environments", {
+			name,
+			env: { X: "1" },
+		});
+		const raw = decodeUuid("environment", body(made).id) as string;
+		const before = await db.pool.query(
+			"SELECT count(*)::int AS n FROM runtime.sandboxes",
+		);
+		const r = await h.request("POST", "/v1/sandboxes", {
+			json: { environment: raw },
+		});
+		expect(r.status).toBe(404);
+		expect(body(r).error.code).toBe("not_found");
+		expect((await h.request("GET", `/v1/environments/${raw}`)).status).toBe(
+			404,
+		);
+		const after = await db.pool.query(
+			"SELECT count(*)::int AS n FROM runtime.sandboxes",
+		);
+		expect(after.rows[0].n).toBe(before.rows[0].n);
+	});
 });

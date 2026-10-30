@@ -96,7 +96,7 @@ S7 — внешний интерфейс платформы. Им пользую
 | `https://app.<domain>/api/v1/*` (префикс `/api` снимает ingress) | proxied `:8081` | браузер (дашборд S8, терминал) |
 | `https://app.<domain>/sbx-auth/*` | proxied `:8081` | SSO для портов (S4 §8.4) |
 | `http://api.<ns>.svc:8082/internal/v1/*` | internal `:8082` | gateway |
-| `GET /v1/openapi.json`, `GET /v1/docs` | public и proxied | без аутентификации |
+| `GET /v1/openapi.json`, `GET /v1/docs` | public и proxied (`/v1/docs` — только public, §23.3) | без аутентификации |
 
 Ресурсы на public и proxied listener-ах одинаковые, отличается только аутентификация (§7).
 
@@ -925,7 +925,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 - **Security schemes:** `keycloak` — `type: openIdConnect`, `openIdConnectUrl: {issuer}/.well-known/openid-configuration` (Keycloak JWT, §7.10); `teamKey` — `type: http`, `scheme: bearer`, `bearerFormat: "sbx_"` (§7.2). Глобально `security: [{keycloak: []}, {teamKey: []}]`; ручки только для человека (SSH-ключи, выпуск и ротация ключей) — `[{keycloak: []}]`; `/v1/meta`, `/v1/openapi.json`, `/v1/docs` — `security: []`. Браузерная сессия (proxied listener) в документе не описывается: она для дашборда того же origin.
 - Enum ответов помечены `x-extensible-enum`; генераторы настроены так, чтобы неизвестное значение не роняло клиент (§15.2, §15.3).
 - `pnpm --filter @sbx/api openapi` пишет `apps/api/openapi/v1.json` (коммитится). CI: регенерация без расхождений, `oasdiff breaking` против `main`.
-- Документация — `GET /v1/docs` (Scalar, `@scalar/hono-api-reference`) по тому же документу.
+- Документация — `GET /v1/docs` (Scalar) по тому же документу; только public listener, версия закреплена с SRI (§23.3).
 
 ### 15.2 TypeScript: `@sbx/sdk`
 
@@ -1036,7 +1036,7 @@ await sb.delete()
 
 ### 17.3 S8 (Payload)
 
-`IdentityStore` (интерфейс в `packages/auth`, реализация на Payload Local API — S8):
+`IdentityStore` (интерфейс в `packages/auth`, реализация на Payload Local API — S8; добавления реализации — §23.10):
 
 ```ts
 interface IdentityStore {
@@ -1227,6 +1227,11 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 
 - **Лимиты** (§5.8): fixed window — `SBX_API_RATE_BURST` запросов за `burst / SBX_API_RATE_RPS` секунд на principal (по умолчанию 100 за 5 s, ровно `RateLimit-Policy: "req";q=100;w=5`), а не token bucket. Заголовки — как в §5.8. Старты (create, fork, resume) — `SBX_API_RATE_STARTS_PER_MIN` (30) в минуту на команду; повторы с тем же `Idempotency-Key` тоже считаются. Стримов — до `SBX_API_MAX_STREAMS` (100) на principal; sync-команды есть в реестре стримов (для отзыва и остановки), но в этот лимит не входят.
 - **`503 server_shutting_down`** — с `Connection: close` и `Retry-After: 1`.
+- **Тела запросов** (§5.11) до аутентификации не читаются: лимит считается в потоке, который читает сам обработчик (после аутентификации); превышение — `413` по ходу чтения. Ограниченное тело (всё, кроме `PUT /files/content|archive`) должно прийти за 60 s, иначе `400 validation` (`path: body`); у файловых загрузок такого срока нет, общего `requestTimeout` у сервера тоже (ограничен только `headersTimeout`). Ingress перед `api` должен ограничивать частоту запросов по IP: поиск ключа до аутентификации идёт на каждый запрос (`apps/api/README.md`).
+- **`GET /v1/docs`** — только на public listener-е: на proxied (origin с cookie oauth2-proxy) — `404`, сторонний скрипт там не выполняется (§15.1). Страница грузит Scalar фиксированной версии (`@scalar/api-reference@1.76.3`, `standalone.js`) с jsDelivr с SRI (`integrity`, `crossorigin`), без inline-скриптов, с CSP `default-src 'none'; script-src <этот файл>; style-src 'unsafe-inline'; connect-src 'self'; …`. Self-hosting из `node_modules` не сделан: пакет тянет Vue и ~30 зависимостей (+2700 строк lockfile, build-скрипты) ради одного файла.
+- Страница ошибки `/sbx-auth/authorize` с `429`/`503` ставит `Retry-After`, как JSON-ошибки.
+- `POST /v1/sandboxes` с `environment` в виде голого UUID — `404 not_found`, как ручки `/v1/environments/{environment}` (UUID — не имя; id — только `env_…`).
+- Ошибка разбора `SBX_API_SERVICE_TOKENS_FILE` не цитирует содержимое файла (сообщение `JSON.parse` содержит начало ввода — токен). JWKS Keycloak, недоступный до первой удачной загрузки ключей, не включает 30-секундную паузу: следующий запрос снова идёт в Keycloak.
 - **Курсоры** (§5.6): `base64url(JSON {c: <курсор core>}) + "." + HMAC-SHA256(SBX_API_CURSOR_KEY)`, усечённый до 16 байт; подделка — `400 invalid_cursor` (решение 5).
 - **Slug** (§5.4): словарь core, около 300 слов (2,7 · 10⁷ сочетаний из трёх, затем четыре слова); словарь на 1 500 слов — позже (решение 6).
 - **IP клиента** (§7.1): `X-Forwarded-For` берётся только от адресов из `SBX_API_TRUSTED_PROXY_CIDRS` (справа налево, до первого недоверенного адреса) и идёт только в поле `clientIp` лога запроса; лимиты считаются по principal. Заголовки личности, кроме заголовков oauth2-proxy на proxied listener-е, не доверяются нигде (например `Tailscale-User-*` перед `api`); на это есть тесты, как для `X-Auth-Request-*` на public.
@@ -1290,6 +1295,8 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - `NOTIFY sbx_identity '<collection>:<id>'` шлют триггеры `0300`; коллекции `users`, `memberships` (id `<userId>:<teamId>`, для потребителей непрозрачен), `api-keys`, `ssh-keys` — имена S8.
 - `NOTIFY sbx_ssh_revoke` (S4 §9.5) шлют триггеры `0302` в транзакции изменения, кто бы его ни делал: `user:usr_…` (деактивация, удаление), `member:team_…:usr_…`, `key:key_…`, `team:team_…`. S8 шлёт те же payload-ы из hooks.
 - `IdentityError` дополнен кодами `identity_conflict` (→ `403`) и `subject_required` (→ `401`); реализация S8 обязана выдавать их же (контрактные тесты).
+- **Добавления к `IdentityStore`** сверх §17.3 (контрактные тесты `@sbx/auth/testing`, S8 обязана реализовать): `rotateApiKey(id, {secretHash, prefix, last4})` (отозванный или неизвестный — `not_found`; ставит `rotatedAt`); `apiKey(id)` — ключ по id, отозванный и истёкший тоже, `null` для неизвестного (вместо перебора `listApiKeys`); `touchSshKey(id)`; `team(teamId)` → `{id, name} | null`; `SessionHeaders.name` (имя из IdP). `ApiKeyRecord` + `rotatedAt: Date | null`.
+- **Ротация ключа** режет SSH: `UPDATE OF secret_hash` живого ключа шлёт `NOTIFY sbx_ssh_revoke 'key:<key_…>'` (миграция `0303_api_key_rotation.sql`, колонка `identity.api_keys.rotated_at`), а `ssh/authorize` (вход и `recheck`) отказывает login-сертификату ключа, выданному до ротации (`validBefore − 10 min < rotatedAt`; без читаемого `validBefore` — отказ). S8 шлёт тот же payload из hook-а и хранит `rotatedAt`.
 - Environments живут там же (`identity.environments`, интерфейс `EnvironmentStore`).
 - `ConfigReader` дополнен методами `templates()` и `sizes()`: `/templates`, `/sizes` и `/limits` строятся по каталогу конфига. `PayloadConfigReader` (S8) обязан их реализовать.
 
