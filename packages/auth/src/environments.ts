@@ -125,7 +125,8 @@ interface EnvRow {
 	updated_by: string | null;
 }
 
-const AAD_PREFIX = "environment";
+/** AAD prefix of the environment blobs: `environment:<id>:v<keyVersion>`. */
+export const ENVIRONMENT_AAD_PREFIX = "environment";
 
 const COLS = `id, team_id, name, is_default, revision, key_version, nonce, ciphertext,
   repositories, exclude_owner_secrets, created_at, updated_at, updated_by`;
@@ -308,11 +309,15 @@ export class PgEnvironmentStore implements EnvironmentStore {
 	}
 
 	#encrypt(id: string, sets: SecretSets) {
-		return this.#keys.encryptFor(AAD_PREFIX, id, JSON.stringify(sets));
+		return this.#keys.encryptFor(
+			ENVIRONMENT_AAD_PREFIX,
+			id,
+			JSON.stringify(sets),
+		);
 	}
 
 	#record(r: EnvRow): EnvironmentRecord {
-		const plain = this.#keys.decryptFor(AAD_PREFIX, r.id, {
+		const plain = this.#keys.decryptFor(ENVIRONMENT_AAD_PREFIX, r.id, {
 			keyVersion: r.key_version,
 			nonce: r.nonce,
 			ciphertext: r.ciphertext,

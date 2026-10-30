@@ -18,6 +18,7 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/config/package.json packages/config/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
+COPY packages/payload/package.json packages/payload/
 COPY packages/proto/package.json packages/proto/
 COPY packages/pve/package.json packages/pve/
 COPY packages/sdk-py/package.json packages/sdk-py/
@@ -50,6 +51,8 @@ COPY packages/auth/src packages/auth/src
 COPY packages/config/src packages/config/src
 COPY packages/core/src packages/core/src
 COPY packages/db/src packages/db/src
+# Payload config, collections and migrations (identity and config, S8).
+COPY packages/payload/src packages/payload/src
 COPY packages/pve/src packages/pve/src
 COPY apps/api/src apps/api/src
 

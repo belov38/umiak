@@ -204,12 +204,12 @@ export const METRIC_DEFS: readonly MetricDef[] = [
 	{
 		name: "sbx_secrets_old_key_rows",
 		kind: "gauge",
-		help: "sandbox_secrets rows still encrypted with an old key version",
+		help: "sandbox_secrets and environments rows still encrypted with an old key version",
 	},
 	{
 		name: "sbx_secrets_reencrypt_failed_total",
 		kind: "counter",
-		help: "sandbox_secrets rows cleanup failed to re-encrypt",
+		help: "sandbox_secrets and environments rows cleanup failed to re-encrypt",
 	},
 	{
 		name: "sbx_idp_sync_total",

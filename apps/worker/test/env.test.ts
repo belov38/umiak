@@ -3,7 +3,7 @@ import { EnvError, parseAdminEnv, parseWorkerEnv } from "../src/env.ts";
 
 const BASE = {
 	DATABASE_URL: "postgres://sbx:sbx@db:5432/sbx",
-	SBX_CONFIG_FILE: "/etc/sbx/config.yaml",
+	PAYLOAD_SECRET: "payload-secret-0123456789abcdef",
 	SBX_DATA_KEYS_FILE: "/etc/sbx/keys.json",
 	SBX_SECRETS_DIR: "/etc/sbx/secrets",
 };
@@ -30,7 +30,7 @@ describe("worker env", () => {
 		}
 		for (const name of [
 			"DATABASE_URL",
-			"SBX_CONFIG_FILE",
+			"PAYLOAD_SECRET",
 			"SBX_DATA_KEYS_FILE",
 			"SBX_SECRETS_DIR",
 			"SBX_HTTP_PORT",
@@ -39,11 +39,25 @@ describe("worker env", () => {
 		}
 	});
 
+	it("PAYLOAD_SECRET is required; SBX_CONFIG_FILE is not (config comes from Payload)", () => {
+		const { PAYLOAD_SECRET: _, ...rest } = BASE;
+		expect(() => parseWorkerEnv(rest)).toThrow(/PAYLOAD_SECRET: required/);
+		expect(() => parseWorkerEnv({ ...BASE, PAYLOAD_SECRET: "" })).toThrow(
+			/PAYLOAD_SECRET: required/,
+		);
+		const env = parseWorkerEnv(BASE);
+		expect(env).not.toHaveProperty("configFile");
+		// A leftover SBX_CONFIG_FILE is ignored.
+		expect(
+			parseWorkerEnv({ ...BASE, SBX_CONFIG_FILE: "/etc/sbx/sbx.yaml" }),
+		).toEqual(env);
+	});
+
 	it("defaults", () => {
 		const env = parseWorkerEnv(BASE);
 		expect(env).toMatchObject({
 			databaseUrl: BASE.DATABASE_URL,
-			configFile: BASE.SBX_CONFIG_FILE,
+			payloadSecret: BASE.PAYLOAD_SECRET,
 			dataKeysFile: BASE.SBX_DATA_KEYS_FILE,
 			secretsDir: BASE.SBX_SECRETS_DIR,
 			gatewayServiceTokenFile: undefined,

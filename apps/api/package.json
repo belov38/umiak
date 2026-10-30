@@ -23,6 +23,7 @@
 		"@sbx/config": "workspace:*",
 		"@sbx/core": "workspace:*",
 		"@sbx/db": "workspace:*",
+		"@sbx/payload": "workspace:*",
 		"@sbx/proto": "workspace:*",
 		"hono": "4.13.14",
 		"jose": "6.2.14",

@@ -1,7 +1,7 @@
 // Worker process fixtures: startWorker options over fakes, and small polls.
 import { randomBytes } from "node:crypto";
 import { Writable } from "node:stream";
-import { StaticConfigReader } from "@sbx/config";
+import { type ConfigReader, StaticConfigReader } from "@sbx/config";
 import { KeyRing } from "@sbx/core";
 import type pg from "pg";
 import { createLogger } from "../../src/context.ts";
@@ -62,7 +62,7 @@ export function workerOptions(
 	pool: pg.Pool,
 	o: {
 		infra: InfraRegistry;
-		config: StaticConfigReader;
+		config: ConfigReader;
 		keys: KeyRing;
 	} & Partial<WorkerOptions>,
 ): WorkerOptions {

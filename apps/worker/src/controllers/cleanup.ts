@@ -1,3 +1,4 @@
+import { ENVIRONMENT_AAD_PREFIX } from "@sbx/auth";
 import { DELETE_RETRY_LIMIT, requestSystemDelete, SbxError } from "@sbx/core";
 import { withTx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
@@ -30,8 +31,11 @@ import { lockSandboxRow } from "../db.ts";
 //
 // Key rotation (§13.1): `sandbox_secrets` rows with a key version other than
 // the ring's current one are decrypted and encrypted again, in batches, each
-// under its sandbox row lock (lock order: sandbox row first). The gauge
-// `sbx_secrets_old_key_rows` reports what is left (0 = the old key can go).
+// under its sandbox row lock (lock order: sandbox row first). Team
+// environments (`runtime.environments`, S8 §10.3) the same way, each under
+// its own row lock; their revision and update time stay (same content). The
+// gauge `sbx_secrets_old_key_rows` reports what is left in both tables
+// (0 = the old key can go).
 
 export const AGENT_EVENTS_RETENTION_DAYS = 7;
 export const COMMANDS_RETENTION_DAYS = 90;
@@ -69,8 +73,12 @@ export interface CleanupResult {
 	forkSources: string[];
 	errorDeletes: string[];
 	retentionDeletes: string[];
+	/** sandbox_secrets rows re-encrypted with the current key. */
 	reencrypted: number;
 	reencryptFailed: number;
+	/** runtime.environments rows re-encrypted with the current key. */
+	environmentsReencrypted: number;
+	environmentsReencryptFailed: number;
 	/** Parts that threw in this run (logged, `sbx_cleanup_failed_total{part}`). */
 	failed: CleanupPart[];
 }
@@ -90,6 +98,8 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 		retentionDeletes: [],
 		reencrypted: 0,
 		reencryptFailed: 0,
+		environmentsReencrypted: 0,
+		environmentsReencryptFailed: 0,
 		failed: [],
 	};
 	const part = async (name: CleanupPart, fn: () => Promise<void>) => {
@@ -194,9 +204,19 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 		}
 	});
 	await part("reencrypt", async () => {
-		const enc = await reencryptSecrets(ctx);
+		const current = ctx.keys.currentVersion;
+		const enc = await reencryptRows(ctx, SANDBOX_SECRETS, current);
 		res.reencrypted = enc.done;
 		res.reencryptFailed = enc.failed;
+		const envs = await reencryptRows(ctx, ENVIRONMENTS, current);
+		res.environmentsReencrypted = envs.done;
+		res.environmentsReencryptFailed = envs.failed;
+		const left = await ctx.pool.query<{ n: number }>(
+			`SELECT (SELECT count(*) FROM runtime.sandbox_secrets WHERE key_version <> $1)::int
+			      + (SELECT count(*) FROM runtime.environments WHERE key_version <> $1)::int AS n`,
+			[current],
+		);
+		ctx.metrics.set("sbx_secrets_old_key_rows", left.rows[0]?.n ?? 0);
 	});
 	ctx.log.info({ ...res }, "cleanup done");
 	return res;
@@ -367,46 +387,63 @@ async function systemDeletes(
 	return out;
 }
 
+/** A table of encrypted rows the key rotation walks. */
+interface EncryptedTable {
+	/** For logs. */
+	what: string;
+	/** Ids of rows on an old key version ($1 current, $2 ids to skip). */
+	pending: string;
+	/** Re-encrypts one row under its locks; false when nothing was left to do. */
+	one(ctx: WorkerCtx, id: string, current: number): Promise<boolean>;
+}
+
+const SANDBOX_SECRETS: EncryptedTable = {
+	what: "sandbox secrets",
+	pending: `SELECT sandbox_id AS id FROM runtime.sandbox_secrets
+	          WHERE key_version <> $1 AND NOT (sandbox_id = ANY($2::uuid[]))
+	          ORDER BY sandbox_id LIMIT ${REENCRYPT_BATCH}`,
+	one: reencryptSandboxSecrets,
+};
+
+const ENVIRONMENTS: EncryptedTable = {
+	what: "environment",
+	pending: `SELECT id FROM runtime.environments
+	          WHERE key_version <> $1 AND NOT (id = ANY($2::uuid[]))
+	          ORDER BY id LIMIT ${REENCRYPT_BATCH}`,
+	one: reencryptEnvironment,
+};
+
 /** §13.1 key rotation: re-encrypts rows of an old key version with the current one. */
-async function reencryptSecrets(
+async function reencryptRows(
 	ctx: WorkerCtx,
+	table: EncryptedTable,
+	current: number,
 ): Promise<{ done: number; failed: number }> {
-	const current = ctx.keys.currentVersion;
 	const failed = new Set<string>();
 	let done = 0;
 	for (let b = 0; b < REENCRYPT_MAX_BATCHES; b++) {
-		const r = await ctx.pool.query<{ sandbox_id: string }>(
-			`SELECT sandbox_id FROM runtime.sandbox_secrets
-			 WHERE key_version <> $1 AND NOT (sandbox_id = ANY($2::uuid[]))
-			 ORDER BY sandbox_id LIMIT ${REENCRYPT_BATCH}`,
-			[current, [...failed]],
-		);
+		const r = await ctx.pool.query<{ id: string }>(table.pending, [
+			current,
+			[...failed],
+		]);
 		if (r.rows.length === 0) break;
-		for (const { sandbox_id: id } of r.rows) {
+		for (const { id } of r.rows) {
 			try {
-				if (await reencryptOne(ctx, id, current)) done += 1;
+				if (await table.one(ctx, id, current)) done += 1;
 			} catch (err) {
 				failed.add(id);
 				ctx.metrics.inc("sbx_secrets_reencrypt_failed_total");
 				ctx.log.error(
-					{
-						sandboxId: id,
-						err: err instanceof Error ? err.message : String(err),
-					},
-					"cleanup: secrets re-encryption failed",
+					{ id, err: err instanceof Error ? err.message : String(err) },
+					`cleanup: ${table.what} re-encryption failed`,
 				);
 			}
 		}
 	}
-	const left = await ctx.pool.query<{ n: number }>(
-		"SELECT count(*)::int AS n FROM runtime.sandbox_secrets WHERE key_version <> $1",
-		[current],
-	);
-	ctx.metrics.set("sbx_secrets_old_key_rows", left.rows[0]?.n ?? 0);
 	return { done, failed: failed.size };
 }
 
-async function reencryptOne(
+async function reencryptSandboxSecrets(
 	ctx: WorkerCtx,
 	sandboxId: string,
 	current: number,
@@ -436,6 +473,41 @@ async function reencryptOne(
 			 SET key_version = $2, nonce = $3, ciphertext = $4, updated_at = now()
 			 WHERE sandbox_id = $1`,
 			[sandboxId, blob.keyVersion, blob.nonce, blob.ciphertext],
+		);
+		return true;
+	});
+}
+
+// The blob is opaque here: decrypted and encrypted again as bytes, with the
+// AAD of PgEnvironmentStore (@sbx/auth). Writers of an environment lock its
+// row (SELECT ... FOR UPDATE), so a concurrent patch waits or wins.
+async function reencryptEnvironment(
+	ctx: WorkerCtx,
+	id: string,
+	current: number,
+): Promise<boolean> {
+	return withTx(ctx.pool, async (tx) => {
+		const r = await tx.client.query<{
+			key_version: number;
+			nonce: Buffer;
+			ciphertext: Buffer;
+		}>(
+			`SELECT key_version, nonce, ciphertext FROM runtime.environments
+			 WHERE id = $1 FOR UPDATE`,
+			[id],
+		);
+		const row = r.rows[0];
+		if (row === undefined || row.key_version === current) return false;
+		const plain = ctx.keys.decryptFor(ENVIRONMENT_AAD_PREFIX, id, {
+			keyVersion: row.key_version,
+			nonce: row.nonce,
+			ciphertext: row.ciphertext,
+		});
+		const blob = ctx.keys.encryptFor(ENVIRONMENT_AAD_PREFIX, id, plain);
+		await tx.client.query(
+			`UPDATE runtime.environments SET key_version = $2, nonce = $3, ciphertext = $4
+			 WHERE id = $1`,
+			[id, blob.keyVersion, blob.nonce, blob.ciphertext],
 		);
 		return true;
 	});

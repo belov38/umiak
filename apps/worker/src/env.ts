@@ -71,7 +71,9 @@ const int = (dflt: number, min: number, max: number) =>
 
 const workerSchema = z.object({
 	DATABASE_URL: databaseUrl,
-	SBX_CONFIG_FILE: required("path of the YAML config"),
+	// Templates, sizes, quotas and defaults come from Payload (S8 plan
+	// decision 5); SBX_CONFIG_FILE is read only by `sbx-admin bootstrap`.
+	PAYLOAD_SECRET: required("secret of the Payload config, as web"),
 	SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
 	SBX_SECRETS_DIR: required("directory with the PVE and sbx-node secrets"),
 	SBX_GATEWAY_SERVICE_TOKEN_FILE: optional,
@@ -121,7 +123,8 @@ const adminSchema = z.object({
 
 export interface WorkerEnv {
 	databaseUrl: string;
-	configFile: string;
+	/** PAYLOAD_SECRET: the Payload instance of the config reader. */
+	payloadSecret: string;
 	dataKeysFile: string;
 	secretsDir: string;
 	gatewayServiceTokenFile: string | undefined;
@@ -167,7 +170,7 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 	const e = r.data;
 	return {
 		databaseUrl: e.DATABASE_URL,
-		configFile: e.SBX_CONFIG_FILE,
+		payloadSecret: e.PAYLOAD_SECRET,
 		dataKeysFile: e.SBX_DATA_KEYS_FILE,
 		secretsDir: e.SBX_SECRETS_DIR,
 		gatewayServiceTokenFile: e.SBX_GATEWAY_SERVICE_TOKEN_FILE,

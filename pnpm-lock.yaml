@@ -210,6 +210,9 @@ importers:
       '@sbx/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sbx/payload':
+        specifier: workspace:*
+        version: link:../../packages/payload
       '@sbx/proto':
         specifier: workspace:*
         version: link:../../packages/proto
@@ -314,6 +317,9 @@ importers:
       '@sbx/agent-client':
         specifier: workspace:*
         version: link:../../packages/agent-client
+      '@sbx/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@sbx/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -323,6 +329,9 @@ importers:
       '@sbx/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sbx/payload':
+        specifier: workspace:*
+        version: link:../../packages/payload
       '@sbx/proto':
         specifier: workspace:*
         version: link:../../packages/proto

@@ -109,6 +109,20 @@ describe("loadSettings", () => {
 		}
 	});
 
+	it("PAYLOAD_SECRET is required; SBX_CONFIG_FILE is not read (S8: config from Payload)", () => {
+		const { PAYLOAD_SECRET: _, ...rest } = TEST_ENV;
+		expect(errorOf(rest)).toMatch(/PAYLOAD_SECRET: required/);
+		expect(errorOf({ ...TEST_ENV, PAYLOAD_SECRET: "" })).toMatch(
+			/PAYLOAD_SECRET: required/,
+		);
+		const s = loadSettings(TEST_ENV);
+		expect(s.payloadSecret).toBe(TEST_ENV.PAYLOAD_SECRET);
+		expect(s).not.toHaveProperty("configFile");
+		expect(
+			loadSettings({ ...TEST_ENV, SBX_CONFIG_FILE: "/etc/sbx/sbx.yaml" }),
+		).toEqual(s);
+	});
+
 	it("rejects a cursor key that is not base64", () => {
 		expect(
 			errorOf({ ...TEST_ENV, SBX_API_CURSOR_KEY: `${CURSOR_KEY}!!` }),
