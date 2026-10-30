@@ -236,6 +236,7 @@ describe("buildIsoFiles", () => {
 				"build/files/appx-remove.txt",
 				"build/files/gpt.ini",
 				"build/files/profile.ps1",
+				"build/files/sbx-early.cmd",
 				"build/files/scripts.ini",
 				"build/files/sshd_config",
 			].sort(),

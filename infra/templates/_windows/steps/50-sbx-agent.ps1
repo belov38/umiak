@@ -1,8 +1,9 @@
 #requires -Version 7
 # 50-sbx-agent (spec S9 sections 8.4, 8.6, 12.1-12.3): the agent package
 # through its own installer, agent.toml, the template SSH CA, PowerShell
-# profiles, the startup script `sbx-agent early` in the local GPO, QGA and its
-# VSS provider, the sysprep answer file for clones. The service is installed,
+# profiles, the startup script (the wrapper sbx-early.cmd, which runs
+# `sbx-agent early`) in the local GPO, QGA and its VSS provider, the sysprep
+# answer file for clones. The service is installed,
 # not started: it would treat the build VM as a new machine.
 . (Join-Path $PSScriptRoot '..\lib.ps1')
 
@@ -56,6 +57,11 @@ foreach ($psHomeDir in @((Split-Path -Parent $SbxPwshExe), $ps51Home)) {
 Set-RegValue 'HKLM:\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell' ExecutionPolicy 'RemoteSigned' String
 
 # --- Local GPO: computer startup script `sbx-agent.exe early` (spec 12.3) ---
+# The GPO runs a wrapper, not current\sbx-agent.exe: it finds the agent when the "current"
+# junction is missing (an interrupted update).
+$earlyCmd = Join-Path $env:ProgramFiles 'sbx-agent\sbx-early.cmd'
+$earlyText = (Get-Content -LiteralPath (Join-Path $SbxFilesDir 'sbx-early.cmd') -Raw) -replace "`r?`n", "`r`n"
+Set-Content -LiteralPath $earlyCmd -Value $earlyText -Encoding Ascii -NoNewline
 $gpo = Join-Path $env:SystemRoot 'System32\GroupPolicy'
 $startupDir = Join-Path $gpo 'Machine\Scripts\Startup'
 New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
@@ -85,9 +91,9 @@ Set-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Winlog
 Invoke-Native -FilePath (Join-Path $env:SystemRoot 'System32\gpupdate.exe') -ArgumentList @('/target:computer', '/force')
 # The scripts extension records what runs at the next startup.
 $registered = @(Get-ChildItem -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\Scripts\Startup' -Recurse -ErrorAction SilentlyContinue |
-    ForEach-Object { $_.GetValue('Script') } | Where-Object { $_ -eq $SbxAgentExe })
-if ($registered.Count -eq 0) { throw "startup script $SbxAgentExe is not registered after gpupdate" }
-Write-BuildLog "startup script: $SbxAgentExe early"
+    ForEach-Object { $_.GetValue('Script') } | Where-Object { $_ -eq $earlyCmd })
+if ($registered.Count -eq 0) { throw "startup script $earlyCmd is not registered after gpupdate" }
+Write-BuildLog "startup script: $earlyCmd (sbx-agent early)"
 
 # --- QEMU guest agent and its VSS provider (QGA fsfreeze, spec 12.10) ---
 Set-SbxServiceStartup -Name 'QEMU-GA' -StartupType Automatic

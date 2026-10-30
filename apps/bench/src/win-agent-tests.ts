@@ -20,6 +20,7 @@ import { type Ctx, RamGuard } from "./context.ts";
 import { table } from "./report.ts";
 import { deleteWithRetry, machinesFor } from "./s5.ts";
 import { checkHostRules, waitAgentReady } from "./s9.ts";
+import { abortable, withAbortSignals } from "./signals.ts";
 
 // sbx-bench s9 agent-tests (spec S9 section 18.3): the Windows test binaries of the guest agent
 // (services/guest-agent/test/windows/build-tests.sh) go into an ISO that is attached to a fresh
@@ -79,6 +80,8 @@ export interface AgentTestsDeps {
 	sleep?: (ms: number) => Promise<void>;
 	pollMs?: number;
 	bootTimeoutMs?: number;
+	/** Aborts the run; the clone and the ISO are still removed. */
+	signal?: AbortSignal;
 }
 
 export interface BinaryResult {
@@ -142,6 +145,7 @@ export async function runAgentTests(
 	const sleep =
 		deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
 	const pollMs = deps.pollMs ?? 2000;
+	const { signal } = deps;
 
 	const bins = files
 		.list(o.dir)
@@ -175,15 +179,18 @@ export async function runAgentTests(
 	try {
 		const content = new Map<string, Buffer>();
 		for (const b of bins) content.set(b, files.read(join(o.dir, b)));
+		signal?.throwIfAborted();
 		iso.make(content, isoPath, ISO_LABEL);
 		log(`uploading ${MEDIA_STORAGE}:iso/${isoName}`);
 		// Recorded first: a failed upload may still leave a file behind.
 		isoUploaded = true;
 		await iso.upload(isoName, isoPath);
 
+		signal?.throwIfAborted();
 		log("create a clone of the template");
 		vmid = (await machines.create({ size: SIZE, smbios })).vmid;
 		await iso.attach(vmid, isoName);
+		signal?.throwIfAborted();
 		await ram.reserve(vmid, SIZE.memoryMb);
 		reserved = true;
 		log(`VM ${vmid}: start`);
@@ -197,12 +204,14 @@ export async function runAgentTests(
 			sleep,
 			pollMs,
 			timeoutMs: deps.bootTimeoutMs ?? BOOT_TIMEOUT_MS,
+			...(signal !== undefined ? { signal } : {}),
 		});
 
 		log(`VM ${vmid}: copy the binaries to ${REMOTE_DIR}`);
 		const copyDeadline = now() + COPY_TIMEOUT_MS;
 		let have: string[] = [];
 		for (;;) {
+			signal?.throwIfAborted();
 			const r = await machines.qga
 				.exec(vmid, powershell(COPY_SCRIPT))
 				.catch((err: unknown) => ({
@@ -225,6 +234,7 @@ export async function runAgentTests(
 		}
 
 		for (const name of bins) {
+			signal?.throwIfAborted();
 			const t0 = now();
 			const cmd = [
 				`${REMOTE_DIR}\\${name}`,
@@ -236,13 +246,16 @@ export async function runAgentTests(
 			log(`${name}: run`);
 			try {
 				// QGA returns the output when the process ends; it is printed right then.
-				const r = await machines.qga.exec(vmid, cmd, {
-					timeoutMs: EXEC_TIMEOUT_MS,
-				});
+				// Raced with the abort signal: a test may run for minutes.
+				const r = await abortable(
+					machines.qga.exec(vmid, cmd, { timeoutMs: EXEC_TIMEOUT_MS }),
+					signal,
+				);
 				out(`=== ${name} (exit ${r.exitCode})\n${r.stdout}`);
 				if (r.stderr.trim() !== "") out(`--- stderr\n${r.stderr}`);
 				results.push({ name, exitCode: r.exitCode, ms: now() - t0 });
 			} catch (err) {
+				signal?.throwIfAborted();
 				const error = err instanceof Error ? err.message : String(err);
 				out(`=== ${name}: ${error}\n`);
 				results.push({ name, exitCode: null, ms: now() - t0, error });
@@ -336,12 +349,15 @@ export function runAgentTestsOn(
 	o: AgentTestsOptions,
 ): Promise<number> {
 	checkHostRules(ctx.cfg, o.template);
-	return runAgentTests(
-		{
-			machines: machinesFor(ctx, o.template),
-			ram: new RamGuard(ctx, o.ramCapMb),
-			iso: realIso(ctx),
-		},
-		o,
+	return withAbortSignals((signal) =>
+		runAgentTests(
+			{
+				machines: machinesFor(ctx, o.template),
+				ram: new RamGuard(ctx, o.ramCapMb),
+				iso: realIso(ctx),
+				signal,
+			},
+			o,
+		),
 	);
 }

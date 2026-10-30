@@ -20,6 +20,7 @@ import {
 	buildTemplate,
 } from "../src/build.ts";
 import type { Manifest, VerifyResult } from "../src/manifest.ts";
+import { loadRecipe, recipeDigest } from "../src/recipe.ts";
 import { FileRegistry } from "../src/registry.ts";
 import {
 	type AgentExecResult,
@@ -696,6 +697,17 @@ describe("iso-install build: user ISO", () => {
 		expect(s.messages.join("\n")).toContain("ef".repeat(32));
 	});
 
+	it("--accept-iso-sha256 records the recipe digest of the rewritten versions.toml", async () => {
+		const s = setup({ acceptIsoSha256: true }, { pinnedSha: "" });
+		s.state.isoSha = "ef".repeat(32);
+		const m = await buildTemplate(s.deps, s.opts);
+		const now = recipeDigest(loadRecipe(s.templatesDir, "winbuild"));
+		expect(m.recipeDigest).toBe(now);
+		expect(
+			s.registry.list().find((x) => x.buildId === m.buildId)?.recipeDigest,
+		).toBe(now);
+	});
+
 	it("a missing user ISO fails the media stage with a hint", async () => {
 		const s = setup();
 		s.node.handlers["media.sha256"] = () => {
@@ -792,6 +804,63 @@ describe("iso-install build: failures", () => {
 		).toEqual([{ names: [buildIso(m), offlineIso(m)] }]);
 	});
 
+	it("QGA answering between the offline key presses fails at once", async () => {
+		const s = setup();
+		const sendkeys = () =>
+			s.pve.calls.filter((c) => c.path === `${vm}/sendkey`).length;
+		s.guest.alive = () => {
+			const v = s.pve.vms.get(598);
+			return (
+				v?.status === "running" &&
+				(v.config.boot !== "order=ide2" || sendkeys() >= 24)
+			);
+		};
+		s.state.offlineStopsAfter = 1000;
+		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+		expect(m.error?.stage).toBe("offline");
+		expect(m.error?.message).toMatch(/sealed disk booted/);
+		// 20 install keys, then the offline keys up to the first ping that answers.
+		expect(sendkeys()).toBeLessThan(30);
+	});
+
+	it("a template without net0 fails the template stage instead of writing an empty net0", async () => {
+		const s = setup();
+		const base = s.pve.before;
+		s.pve.before = (method, path, params) => {
+			base?.(method, path, params);
+			if (
+				method === "GET" &&
+				path === `${vm}/config` &&
+				s.log.includes("ram:release 598")
+			)
+				delete s.pve.vms.get(598)?.config.net0;
+		};
+		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+		expect(m.error?.stage).toBe("template");
+		expect(m.error?.message).toMatch(/net0/);
+		expect(
+			s.pve.calls.some(
+				(c) =>
+					c.method === "PUT" &&
+					c.path === `${vm}/config` &&
+					c.params?.net0 === "",
+			),
+		).toBe(false);
+		expect(s.log).not.toContain(`api:POST ${vm}/template`);
+	});
+
+	it("a media.remove failure after the template keeps the finished template", async () => {
+		const s = setup();
+		s.node.handlers["media.remove"] = () => {
+			throw new Error("node unreachable");
+		};
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.status).toBe("ready");
+		expect(s.pve.vms.get(598)?.config.template).toBe("1");
+		expect((await s.allocator.get(598))?.state).toBe("active");
+		expect(s.messages.join("\n")).toMatch(/sbx-tpl cleanup/);
+	});
+
 	it("sysprep failure surfaces setuperr tail", async () => {
 		const s = setup();
 		s.state.sysprepResult = { exitcode: 1 };
@@ -829,6 +898,35 @@ describe("iso-install build: failures", () => {
 			s.node.calls.filter((c) => c.op === "media.remove").map((c) => c.args),
 		).toEqual([{ names: [buildIso(m)] }]);
 		expect((await s.allocator.get(598))?.state).toBe("reserved");
+	});
+
+	it("keepOnFailure leaves a VM that is not this build's untouched", async () => {
+		const s = setup({ keepOnFailure: true });
+		s.guest.failRc["10-system"] = "1";
+		const base = s.pve.before;
+		s.pve.before = (method, path, params) => {
+			base?.(method, path, params);
+			if (
+				method === "GET" &&
+				path === `${vm}/config` &&
+				s.messages.some((x) => x.startsWith("failed at"))
+			) {
+				const v = s.pve.vms.get(598);
+				if (v) v.config.name = "someone-elses-vm";
+			}
+		};
+		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+		expect(s.pve.vms.get(598)?.config.sata2).toBe(
+			`local:iso/${buildIso(m)},media=cdrom`,
+		);
+		expect(
+			s.pve.calls.some(
+				(c) =>
+					c.method === "PUT" &&
+					c.path === `${vm}/config` &&
+					c.params?.sata2 === "none,media=cdrom",
+			),
+		).toBe(false);
 	});
 
 	it("refuses a linux agent package for a windows recipe before recording", async () => {

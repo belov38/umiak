@@ -153,7 +153,12 @@ describe("windows steps: files", () => {
 	});
 
 	it("the .ps1 files are ASCII (Windows PowerShell 5.1 reads them as ANSI)", () => {
-		for (const rel of [...ps1Files(), "files/scripts.ini", "files/gpt.ini"])
+		for (const rel of [
+			...ps1Files(),
+			"files/scripts.ini",
+			"files/gpt.ini",
+			"files/sbx-early.cmd",
+		])
 			expect(
 				[...read(rel)].every(
 					(c) =>
@@ -293,15 +298,37 @@ describe("windows steps: files/", () => {
 	it("the local GPO runs sbx-agent early at startup", () => {
 		const scripts = read("files/scripts.ini");
 		expect(scripts).toMatch(/^\[Startup\]\r?$/m);
+		// The wrapper survives a missing "current" junction.
 		expect(scripts).toMatch(
-			/^0CmdLine=C:\\Program Files\\sbx-agent\\current\\sbx-agent\.exe\r?$/m,
+			/^0CmdLine=C:\\Program Files\\sbx-agent\\sbx-early\.cmd\r?$/m,
 		);
-		expect(scripts).toMatch(/^0Parameters=early\r?$/m);
+		expect(scripts).toMatch(/^0Parameters=\r?$/m);
 		const gpt = read("files/gpt.ini");
 		expect(gpt).toMatch(
 			/^gPCMachineExtensionNames=\[\{42B5FAAE-6536-11D2-AE5A-0000F87571E3\}\{40B6664F-4972-11D1-A7CA-0000F87571E3\}\]\r?$/m,
 		);
 		expect(gpt).toMatch(/^Version=\d+\r?$/m);
+	});
+
+	it("sbx-early.cmd runs `early` from current, else previous, else the newest version", () => {
+		const raw = readFileSync(join(shared, "files/sbx-early.cmd"), "utf8");
+		expect(raw.split("\n").every((l) => l === "" || l.endsWith("\r"))).toBe(
+			true,
+		);
+		const c = code(raw);
+		const at = (re: RegExp) => c.search(re);
+		const cur = at(/exist "%SBX_DIR%current\\sbx-agent\.exe"/);
+		const prev = at(/exist "%SBX_DIR%previous\\sbx-agent\.exe"/);
+		const newest = at(/dir \/b \/ad \/o-d "%SBX_DIR%versions"/);
+		const run = at(/^"%SBX_EXE%" early\r?$/m);
+		expect(cur).toBeGreaterThanOrEqual(0);
+		expect(prev).toBeGreaterThan(cur);
+		expect(newest).toBeGreaterThan(prev);
+		expect(run).toBeGreaterThan(newest);
+		expect(c).toMatch(/exit \/b %errorlevel%\s*$/);
+		expect(c).toMatch(
+			/if not defined SBX_EXE \(\r?\n\s*echo[^\n]*\n\s*exit \/b 1/,
+		);
 	});
 
 	it("profile.ps1 applies the agent env without executing it", () => {
@@ -334,6 +361,9 @@ describe("windows steps: step content", () => {
 		// scripts.ini as Group Policy writes it: UTF-16 LE, CRLF.
 		expect(s).toMatch(/-replace "`r\?`n", "`r`n"/);
 		expect(s).toMatch(/scripts\.ini'\) -Value \$ini -Encoding Unicode/);
+		// The wrapper goes next to the agent, CRLF, and is what the GPO must register.
+		expect(s).toMatch(/'sbx-agent\\sbx-early\.cmd'/);
+		expect(s).toMatch(/Where-Object \{ \$_ -eq \$earlyCmd \}/);
 		expect(s).toMatch(/DelayedAutostart/);
 		expect(s).toMatch(/gpupdate\.exe/);
 		expect(s).toMatch(/QEMU-GA/);
@@ -404,6 +434,7 @@ describe("windows steps: build ISO", () => {
 				"build/files/profile.ps1",
 				"build/files/scripts.ini",
 				"build/files/gpt.ini",
+				"build/files/sbx-early.cmd",
 			]),
 		);
 	});
@@ -417,6 +448,71 @@ describe("windows steps: PowerShell parser", () => {
 		const r = spawnSync(PWSH, ["-NoProfile", "-Command", "exit 0"]);
 		expect(r.error, `${PWSH}: run the tests through mise`).toBeUndefined();
 		expect(r.status).toBe(0);
+	});
+
+	it("profile.ps1 applies exactly the two env line forms and ignores everything else", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-profile-"));
+		try {
+			const b64 = (v: string) => Buffer.from(v, "utf8").toString("base64");
+			const out = [
+				"$env:SBX_T_PLAIN = 'it''s plain'",
+				`$env:SBX_T_B64 = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64("line1\nline2 \u00e9")}'))`,
+				'$env:SBX_T_DOUBLE = "expanded $env:HOME"',
+				"$env:SBX_T_HERE = @'\nx\n'@",
+				"$" + "{env:SBX_T-BAD} = 'braced name'",
+				"$env:1BAD = 'digit first'",
+				"$env:SBX_T_CMD = (Get-Date).ToString()",
+				`$env:SBX_T_OTHER = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64("x")}')) + 'tail'`,
+				"$env:SBX_T_STATIC = [System.Environment]::MachineName",
+				"$script:SBX_T_VAR = 'not env'",
+				"Set-Content -LiteralPath SBX_T_MARK -Value x",
+			];
+			const agent = join(dir, "sbx-agent");
+			writeFileSync(
+				agent,
+				`#!/bin/sh\ncat <<'EOF_SBX'\n${out.join("\n")}\nEOF_SBX\n`,
+				{ mode: 0o755 },
+			);
+			const profile = read("files/profile.ps1").replace(
+				"'C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe'",
+				`'${agent}'`,
+			);
+			expect(profile).toContain(agent);
+			const script = join(dir, "run.ps1");
+			writeFileSync(
+				script,
+				`Set-Location '${dir}'
+. '${join(dir, "profile.ps1")}'
+foreach ($n in 'SBX_T_PLAIN','SBX_T_B64','SBX_T_DOUBLE','SBX_T_HERE','SBX_T_CMD','SBX_T_OTHER','SBX_T_STATIC','SBX_T_VAR') {
+  $v = [Environment]::GetEnvironmentVariable($n)
+  Write-Output ($n + '=' + $(if ($null -eq $v) { '<unset>' } else { $v.Replace("\`n", '|') }))
+}
+Write-Output ('applied=' + $env:SBX_ENV_APPLIED)
+Write-Output ('mark=' + (Test-Path -LiteralPath (Join-Path '${dir}' 'SBX_T_MARK')))
+`,
+			);
+			writeFileSync(join(dir, "profile.ps1"), profile);
+			const r = spawnSync(
+				PWSH,
+				["-NoProfile", "-NonInteractive", "-File", script],
+				{ encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } },
+			);
+			expect(r.stderr).toBe("");
+			expect(r.stdout.split(/\r?\n/).filter(Boolean)).toEqual([
+				"SBX_T_PLAIN=it's plain",
+				"SBX_T_B64=line1|line2 \u00e9",
+				"SBX_T_DOUBLE=<unset>",
+				"SBX_T_HERE=<unset>",
+				"SBX_T_CMD=<unset>",
+				"SBX_T_OTHER=<unset>",
+				"SBX_T_STATIC=<unset>",
+				"SBX_T_VAR=<unset>",
+				"applied=1",
+				"mark=False",
+			]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("every .ps1 parses without errors", () => {

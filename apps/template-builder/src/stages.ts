@@ -163,6 +163,12 @@ export type Stage =
 	| "verify"
 	| "ready";
 
+/** Records a manifest patch in the registry; `unset` drops optional keys. */
+export type Save = (
+	patch: Partial<Manifest>,
+	unset?: (keyof Manifest)[],
+) => void;
+
 /** What the build created so far: the rollback removes exactly this. */
 export interface State {
 	m: Manifest;
@@ -352,7 +358,7 @@ export async function stageVm(
 	recipe: Recipe,
 	image: string,
 	st: State,
-	save: (patch: Partial<Manifest>) => void,
+	save: Save,
 ): Promise<void> {
 	const { api } = deps;
 	const { vmid, mac } = await deps.allocator.allocateTemplate();

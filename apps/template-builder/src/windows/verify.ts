@@ -57,12 +57,16 @@ const FORK_BOOTS = 2;
 const DAY_MS = 86_400_000;
 
 // --- Agent CLI contract (spec S9 12.14, plan Task 17), assumed here; Task 26 adjusts it. ---
-// sbx-agent.exe runs as SYSTEM through QGA exec:
-//   exec [--user <u>] [--shell <script>] -- <argv...>   exit code = the command's
+// verify.ps1 builds the same `exec` argv itself (marker "agent CLI contract" in that file).
+// sbx-agent.exe runs as SYSTEM through QGA exec and talks to the agent over the admin socket:
+//   exec [--user <u>] [--shell <script>] -- <argv...>   exit code = the command's; 125 = agent or
+//                                                        CLI error, 127 = the command did not start
 //   call <package.Service/Method> -                      Connect JSON request on stdin, response on stdout
 //   doctor --json | logs -n <N> | selftest --pty
 // `call ... -` (request from stdin) is required: secret values must not reach a guest command
-// line, which qemu-ga logs.
+// line, which qemu-ga logs. The admin socket skips WaitSecrets (a command as user does not wait
+// for UpdateSecrets), but the boot gate (a failed boot step) still refuses commands of non-SYSTEM
+// users.
 
 export const AGENT_EXE = "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe";
 const INFO = "sbx.agent.v1.System/Info";
@@ -88,6 +92,21 @@ export const agentCallCmd = (method: string): string[] => [
 	"call",
 	method,
 	"-",
+];
+
+export const agentDoctorCmd = (): string[] => [AGENT_EXE, "doctor", "--json"];
+
+export const agentLogsCmd = (lines: number): string[] => [
+	AGENT_EXE,
+	"logs",
+	"-n",
+	String(lines),
+];
+
+export const agentSelftestCmd = (): string[] => [
+	AGENT_EXE,
+	"selftest",
+	"--pty",
 ];
 
 // --- end of the agent CLI contract ---
@@ -590,6 +609,8 @@ export async function verifyWindows(
 		startedAt: number,
 		label: string,
 	): Promise<number> => {
+		// A fork also renames the machine: its machine id alone is not enough (spec 11.2 p.4).
+		const wantName = label.startsWith("fork_") ? computerNameFor(c.uuid) : "";
 		const deadline = startedAt + bootTimeoutMs;
 		let last = "no answer";
 		for (;;) {
@@ -598,18 +619,24 @@ export async function verifyWindows(
 				const r = await call(c, INFO, {});
 				if (r.json !== undefined) {
 					const st = infoState(r.json);
-					if (sameId(st.machineId, c.uuid) && isReadyState(st.identity)) {
+					const nameOk =
+						wantName === "" || st.hostname.toUpperCase() === wantName;
+					if (
+						sameId(st.machineId, c.uuid) &&
+						isReadyState(st.identity) &&
+						nameOk
+					) {
 						const at = now();
 						add(
 							pass(
 								`${label}agent_ready`,
 								true,
-								`machine_id ${st.machineId}, identity ready ${at - startedAt} ms after start`,
+								`machine_id ${st.machineId}${wantName ? `, hostname ${st.hostname}` : ""}, identity ready ${at - startedAt} ms after start`,
 							),
 						);
 						return at;
 					}
-					last = `machine_id ${st.machineId || "none"}, identity ${st.identity || "unknown"}`;
+					last = `machine_id ${st.machineId || "none"}, hostname ${st.hostname || "none"}, identity ${st.identity || "unknown"}`;
 				} else last = callError(r);
 			} catch (err) {
 				last = errorText(err);
@@ -651,7 +678,7 @@ export async function verifyWindows(
 		return times;
 	};
 
-	/** Whether the secret file exists, read as SYSTEM (an exec as user may wait for secrets). */
+	/** Whether the secret file exists, read as SYSTEM (an exec as user is gated by the boot step). */
 	const secretFile = async (c: WinClone): Promise<string> => {
 		const r = await exec(c, pwshCmd(`Test-Path -LiteralPath '${SECRET_PATH}'`));
 		if (r.exitCode !== 0) return `error: ${callError(r)}`;
@@ -862,7 +889,7 @@ export async function verifyWindows(
 		license = lic.license;
 
 		step("agent (sbx-agent doctor)");
-		const dr = await exec(A, [AGENT_EXE, "doctor", "--json"], AGENT_TIMEOUT_MS);
+		const dr = await exec(A, agentDoctorCmd(), AGENT_TIMEOUT_MS);
 		let doc: unknown = null;
 		try {
 			doc = JSON.parse(dr.stdout);
@@ -910,11 +937,7 @@ export async function verifyWindows(
 				`npm --version (a .cmd through argv): exit ${np.exitCode}, ${JSON.stringify(firstLine(np.stdout || np.stderr))}${npmWant ? `, manifest ${npmWant}` : ""}`,
 			),
 		);
-		const pty = await exec(
-			A,
-			[AGENT_EXE, "selftest", "--pty"],
-			AGENT_TIMEOUT_MS,
-		);
+		const pty = await exec(A, agentSelftestCmd(), AGENT_TIMEOUT_MS);
 		add(
 			pass(
 				"agent_selftest_pty",
@@ -1004,7 +1027,7 @@ export async function verifyWindows(
 				`${SECRET_PATH} ${afterHard} once the agent is ready (early wipes it)`,
 			),
 		);
-		// The applied set was not empty: commands as user would wait for UpdateSecrets (spec 12.8).
+		// Leaves no applied secrets behind before the fork snapshot.
 		const cleared = await call(A, UPDATE_SECRETS, {});
 		add(
 			pass(
@@ -1028,10 +1051,11 @@ export async function verifyWindows(
 		} catch (err) {
 			freezeError = errorText(err);
 		} finally {
-			if (frozen)
-				await win.fsfreezeThaw(A.vmid).catch((err: unknown) => {
-					freezeError ||= `thaw: ${errorText(err)}`;
-				});
+			// A freeze that threw may have frozen the volumes anyway: always thaw. "Not frozen"
+			// after a failed freeze is expected and not reported.
+			await win.fsfreezeThaw(A.vmid).catch((err: unknown) => {
+				if (frozen) freezeError ||= `thaw: ${errorText(err)}`;
+			});
 		}
 		const freezeMs = now() - freezeStart;
 		const after = await win.fsfreezeStatus(A.vmid).catch(errorText);
@@ -1120,7 +1144,7 @@ export async function verifyWindows(
 		add(...al);
 		if (!al.some((c) => c.id === "fork_autologon_session"))
 			add(pass("fork_autologon_session", false, "verify.ps1 printed nothing"));
-		const lg = await exec(B, [AGENT_EXE, "logs", "-n", String(LOG_LINES)]);
+		const lg = await exec(B, agentLogsCmd(LOG_LINES));
 		const logs = lg.stdout.toLowerCase();
 		add(
 			...checkWindowsFork(
@@ -1132,6 +1156,7 @@ export async function verifyWindows(
 					bootsSince: typeof fB.bootsSince === "number" ? fB.bootsSince : null,
 					identityResetLogged:
 						logs.includes("identity.reset") ||
+						// Temporary fallback until the agent logs identity.reset on Windows.
 						(logs.includes("identity applied") && logs.includes(B.uuid)),
 				},
 				{ marker, dpapi: dpapiPlain },

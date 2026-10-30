@@ -25,6 +25,7 @@ import {
 	errorText,
 	guestManifest,
 	type Prepared,
+	type Save,
 	type Stage,
 	type State,
 	seedName,
@@ -204,8 +205,6 @@ function guardIo(io: GuestIo, signal: AbortSignal): GuestIo {
 	};
 }
 
-type Save = (patch: Partial<Manifest>, unset?: (keyof Manifest)[]) => void;
-
 /** A prepared build: its first manifest and the stages up to the template. */
 interface Job {
 	manifest: Manifest;
@@ -382,6 +381,17 @@ async function readConfig(
 	}
 }
 
+/** Whether a VM config is this build's VM: its name and the build tag (or the build id). */
+function isBuildVm(cfg: Record<string, string>, m: Manifest): boolean {
+	const tags = (cfg.tags ?? "").split(/[;,]/);
+	return (
+		cfg.name === m.vmName &&
+		(tags.includes(BUILD_TAG) ||
+			// Created, but the tag call after the create failed.
+			(cfg.description ?? "").includes(`sbx-tpl build ${m.buildId}`))
+	);
+}
+
 /**
  * Removes what this build created: its VM (only if name and tag are the build's), the seed
  * ISO and the VMID lease. The base image stays as a cache. Errors are logged; the build
@@ -481,9 +491,14 @@ async function dropBuildIso(
 		const vmPath = `/nodes/${o.node}/qemu/${st.vmid}`;
 		try {
 			const cfg = await readConfig(deps.api, vmPath);
-			for (const [k, v] of Object.entries(cfg ?? {}))
-				if (/^(ide|sata|scsi)\d+$/.test(k) && v.includes(`iso/${name}`))
-					await deps.api.put(`${vmPath}/config`, { [k]: "none,media=cdrom" });
+			if (cfg !== undefined && !isBuildVm(cfg, st.m))
+				deps.log(
+					`--keep-on-failure: VM ${st.vmid} is "${cfg.name}", not this build's: ${name} not ejected`,
+				);
+			else
+				for (const [k, v] of Object.entries(cfg ?? {}))
+					if (/^(ide|sata|scsi)\d+$/.test(k) && v.includes(`iso/${name}`))
+						await deps.api.put(`${vmPath}/config`, { [k]: "none,media=cdrom" });
 		} catch (err) {
 			warn(`ejecting ${name}`, err);
 		}

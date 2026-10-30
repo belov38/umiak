@@ -22,6 +22,11 @@ import {
 } from "../src/verify.ts";
 import {
 	AGENT_EXE,
+	agentCallCmd,
+	agentDoctorCmd,
+	agentExecCmd,
+	agentLogsCmd,
+	agentSelftestCmd,
 	checkLicense,
 	checkShellContract,
 	checkWindowsDoctor,
@@ -88,6 +93,30 @@ describe("parseWindowsOutput", () => {
 		]);
 		expect(r.license).toBeUndefined();
 		expect(r.facts).toBeUndefined();
+	});
+});
+
+describe("agent CLI argv helpers", () => {
+	it("build every sbx-agent command line of the contract", () => {
+		expect(agentDoctorCmd()).toEqual([AGENT_EXE, "doctor", "--json"]);
+		expect(agentLogsCmd(50)).toEqual([AGENT_EXE, "logs", "-n", "50"]);
+		expect(agentSelftestCmd()).toEqual([AGENT_EXE, "selftest", "--pty"]);
+		expect(agentCallCmd("a.B/C")).toEqual([AGENT_EXE, "call", "a.B/C", "-"]);
+		expect(agentExecCmd({ user: "user", argv: ["npm", "-v"] })).toEqual([
+			AGENT_EXE,
+			"exec",
+			"--user",
+			"user",
+			"--",
+			"npm",
+			"-v",
+		]);
+		expect(agentExecCmd({ shell: "exit 7" })).toEqual([
+			AGENT_EXE,
+			"exec",
+			"--shell",
+			"exit 7",
+		]);
 	});
 });
 
@@ -438,6 +467,8 @@ interface FakeVm {
 	notReady: number;
 	secretEnv: string | undefined;
 	forked: boolean;
+	/** Info answers of a fork that still report the old computer name. */
+	staleHostname: number;
 }
 
 const SECRET_FILE = "C:\\ProgramData\\sbx\\secrets\\files\\sbx-verify";
@@ -463,6 +494,8 @@ class WinWorld {
 	agentDead = false;
 	/** The fork's agent never sees a new identity. */
 	forkKeepsName = false;
+	/** Info answers of a fork's first boot that carry the machine id but the old computer name. */
+	forkStaleHostnames = 0;
 	frozen = false;
 	onExec?: (vmid: number, cmd: string[]) => void;
 
@@ -478,7 +511,9 @@ class WinWorld {
 			const d = this.snaps.get(snap.id);
 			if (!d) throw new Error(`no snapshot ${snap.id}`);
 			const info = this.#create(o, "fork", cloneDisk(d));
-			(this.vms.get(info.vmid) as FakeVm).forked = true;
+			const vm = this.vms.get(info.vmid) as FakeVm;
+			vm.forked = true;
+			vm.staleHostname = this.forkStaleHostnames;
 			return info;
 		},
 		start: async (vmid) => {
@@ -583,6 +618,7 @@ class WinWorld {
 			notReady: 0,
 			secretEnv: undefined,
 			forked: false,
+			staleHostname: 0,
 		});
 		this.log.push(`${what} ${vmid}`);
 		return { vmid, mac: "BC:24:11:00:00:01", node: "pve", disks: [] };
@@ -1107,6 +1143,63 @@ describe("verifyWindows", () => {
 		]);
 	});
 
+	it("the fork is ready only once its computer name is the new one", async () => {
+		const { w, deps } = setup();
+		w.forkStaleHostnames = 2;
+		const v = await verifyWindows(deps, manifest(), {});
+		expect(failed(v.checks)).toEqual([]);
+		const ready = v.checks.find((c) => c.id === "fork_agent_ready");
+		expect(ready?.evidence).toContain(`hostname ${computerNameFor(UUID_B)}`);
+	});
+
+	it("a thaw is attempted when the freeze call threw", async () => {
+		const { w, deps } = setup();
+		let thaws = 0;
+		deps.windows = {
+			...(deps.windows as NonNullable<VerifyDeps["windows"]>),
+			fsfreezeFreeze: async () => {
+				throw new Error("freeze timed out");
+			},
+			fsfreezeThaw: async () => {
+				thaws++;
+				throw new Error("not frozen");
+			},
+		};
+		const v = await verifyWindows(deps, manifest(), {});
+		expect(thaws).toBe(1);
+		const vss = v.checks.find((c) => c.id === "vss_freeze");
+		expect(vss?.status).toBe("FAIL");
+		expect(vss?.evidence).toContain("freeze timed out");
+		expect(vss?.evidence).not.toContain("not frozen");
+		expect(w.vms.size).toBe(0);
+	});
+
+	it("cleans up the fork, the snapshot and the source when the fork fails to start", async () => {
+		const { w, deps, ram } = setup();
+		deps.machines = {
+			...w.machines,
+			start: async (vmid) => {
+				if (w.vms.get(vmid)?.forked) throw new Error("fork start failed");
+				return w.machines.start(vmid);
+			},
+		};
+		await expect(verifyWindows(deps, manifest(), {})).rejects.toThrow(
+			/fork start failed/,
+		);
+		expect(w.vms.size).toBe(0);
+		expect(w.snaps.size).toBe(0);
+		const deletes = w.log.filter((l) => l.startsWith("delete"));
+		expect(deletes).toEqual([
+			"delete 502",
+			"delete-snapshot snap501",
+			"delete 501",
+		]);
+		expect(ram.filter((r) => r.startsWith("reserve")).length).toBe(
+			ram.filter((r) => r.startsWith("release")).length,
+		);
+		expect(ram.at(-1)).toBe("release 502");
+	});
+
 	it("stops between stages on abort and still cleans up", async () => {
 		const { w, deps } = setup();
 		const ac = new AbortController();
@@ -1259,6 +1352,16 @@ Write-Output "capture $($r.Code)"
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("marks where it builds the agent exec argv", () => {
+		const t = text();
+		const marker =
+			"# agent CLI contract — see apps/template-builder/src/windows/verify.ts";
+		expect(t).toContain(marker);
+		// The marker sits in the function that builds the exec argv.
+		const at = t.indexOf(marker);
+		expect(t.indexOf("'exec', '--user'", at)).toBeGreaterThan(at);
 	});
 
 	it("requires pwsh 7 and takes the parameters verifyWindows passes", () => {
