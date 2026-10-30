@@ -1,6 +1,9 @@
 // Tool registry (S11 7.1-7.3, 8.8): declarative tool definitions, toolsets,
 // the read-only / scope / pinned filters and the published input schema.
-import type { CallToolResult } from "@modelcontextprotocol/server";
+import type {
+	CallToolResult,
+	StandardSchemaWithJSON,
+} from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ToolContext } from "./context.ts";
 import type { ServerOptions } from "./server.ts";
@@ -45,10 +48,20 @@ export interface ToolDef<Shape extends z.ZodRawShape = z.ZodRawShape> {
 	): Promise<CallToolResult>;
 }
 
-/** Identity helper that infers the handler's argument types from `shape`. */
+/** Throws on a definition the registry cannot publish. */
+export function assertToolDef(t: ToolDef): void {
+	if (t.sandboxArg && "sandbox" in t.shape) {
+		throw new Error(
+			`tool ${t.name}: sandboxArg is set, so the shape must not define its own sandbox`,
+		);
+	}
+}
+
+/** Identity helper that infers the handler's argument types from `shape`; checks the definition. */
 export function defineTool<Shape extends z.ZodRawShape>(
 	t: ToolDef<Shape>,
 ): ToolDef<Shape> {
+	assertToolDef(t);
 	return t;
 }
 
@@ -82,9 +95,71 @@ export function selectTools(
 	);
 }
 
-/** The input schema the server publishes and validates for `t`. */
+/** The input schema the server validates for `t`. */
 export function inputSchemaOf(t: ToolDef, pinned: boolean): z.ZodObject {
 	return t.sandboxArg && !pinned
 		? z.object({ sandbox: SANDBOX_ARG, ...t.shape })
 		: z.object(t.shape);
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * zod emits `propertyNames: {type: "string"}` for every record; some clients
+ * do not know the keyword and it says nothing for string keys, so it is not
+ * published (spec 7.2 dictionaries are `{type: object, additionalProperties}`).
+ */
+export function stripPropertyNames(node: unknown): unknown {
+	if (Array.isArray(node)) return node.map(stripPropertyNames);
+	if (!isPlainObject(node)) return node;
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(node)) {
+		if (k === "propertyNames") continue;
+		// Under `properties` the keys are argument names, not keywords.
+		out[k] =
+			k === "properties" && isPlainObject(v)
+				? Object.fromEntries(
+						Object.entries(v).map(([n, c]) => [n, stripPropertyNames(c)]),
+					)
+				: stripPropertyNames(v);
+	}
+	return out;
+}
+
+/**
+ * What `registerTool` gets: validation by the zod schema of `inputSchemaOf`,
+ * JSON Schema of it without `propertyNames`.
+ */
+export function publishedSchemaOf(
+	t: ToolDef,
+	pinned: boolean,
+): StandardSchemaWithJSON<Record<string, unknown>> {
+	const std = inputSchemaOf(t, pinned)["~standard"];
+	return {
+		"~standard": {
+			version: 1,
+			vendor: "sbx",
+			validate: (value) => std.validate(value),
+			jsonSchema: {
+				input: (opts) =>
+					stripPropertyNames(std.jsonSchema.input(opts)) as Record<
+						string,
+						unknown
+					>,
+				output: (opts) => std.jsonSchema.output(opts),
+			},
+		},
+	};
+}
+
+/** The JSON Schema `tools/list` publishes for `t` (draft 2020-12, as the SDK converts it). */
+export function publishedJsonSchemaOf(
+	t: ToolDef,
+	pinned: boolean,
+): Record<string, unknown> {
+	return publishedSchemaOf(t, pinned)["~standard"].jsonSchema.input({
+		target: "draft-2020-12",
+	});
 }

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { SERVER_INSTRUCTIONS } from "../src/instructions.ts";
-import { inputSchemaOf, selectTools, TOOLSETS } from "../src/registry.ts";
+import {
+	defineTool,
+	inputSchemaOf,
+	publishedJsonSchemaOf,
+	selectTools,
+	stripPropertyNames,
+	TOOLSETS,
+} from "../src/registry.ts";
 import { fakeTools } from "./helpers/fake-tools.ts";
 
 const { tools } = fakeTools();
@@ -133,6 +140,78 @@ describe("inputSchemaOf", () => {
 		expect(
 			inputSchemaOf(get, false).safeParse({ sandbox: "", path: "a" }).success,
 		).toBe(false);
+	});
+});
+
+describe("definition checks", () => {
+	it("defineTool refuses a sandboxArg tool with its own sandbox in the shape", () => {
+		const [get] = tools;
+		if (get === undefined) throw new Error("fixture");
+		expect(() =>
+			defineTool({
+				...get,
+				shape: { sandbox: z.string().describe("Sandbox") },
+			}),
+		).toThrow(/fake_get/);
+		expect(() =>
+			defineTool({
+				...get,
+				sandboxArg: false,
+				shape: { sandbox: z.string().describe("Sandbox") },
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("publication", () => {
+	it("strips propertyNames everywhere but keeps arguments of that name", () => {
+		expect(
+			stripPropertyNames({
+				type: "object",
+				properties: {
+					env: {
+						type: "object",
+						propertyNames: { type: "string" },
+						additionalProperties: { type: "string" },
+					},
+					list: {
+						type: "array",
+						items: {
+							type: "object",
+							properties: {
+								m: { type: "object", propertyNames: { type: "string" } },
+							},
+						},
+					},
+					propertyNames: { type: "string" },
+				},
+			}),
+		).toEqual({
+			type: "object",
+			properties: {
+				env: { type: "object", additionalProperties: { type: "string" } },
+				list: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: { m: { type: "object" } },
+					},
+				},
+				propertyNames: { type: "string" },
+			},
+		});
+	});
+
+	it("publishes the same schema as zod, minus propertyNames", () => {
+		const [get] = tools;
+		if (get === undefined) throw new Error("fixture");
+		const json = publishedJsonSchemaOf(get, false);
+		expect(json.type).toBe("object");
+		expect(Object.keys(json.properties as object)).toEqual([
+			"sandbox",
+			"path",
+			"wait_seconds",
+		]);
 	});
 });
 

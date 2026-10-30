@@ -15,8 +15,9 @@ import { SERVER_INSTRUCTIONS } from "./instructions.ts";
 import type { Logger } from "./log.ts";
 import { capResult } from "./output/result.ts";
 import {
-	inputSchemaOf,
+	assertToolDef,
 	isPinned,
+	publishedSchemaOf,
 	selectTools,
 	type ToolDef,
 	type Toolset,
@@ -62,6 +63,7 @@ export function createServer(o: ServerOptions): McpServer {
 			cacheHints: { "tools/list": TOOLS_LIST_CACHE_HINT },
 		},
 	);
+	for (const t of o.tools) assertToolDef(t);
 	const pinned = isPinned(o);
 	for (const t of selectTools(o)) {
 		server.registerTool(
@@ -69,7 +71,7 @@ export function createServer(o: ServerOptions): McpServer {
 			{
 				title: t.title,
 				description: t.description,
-				inputSchema: inputSchemaOf(t, pinned),
+				inputSchema: publishedSchemaOf(t, pinned),
 				annotations: { ...t.annotations },
 			},
 			(args, req) =>
@@ -112,7 +114,7 @@ function toCallError(
 	deadline: Deadline,
 	o: ServerOptions,
 	fields: Record<string, unknown>,
-): unknown {
+): ToolError | SbxError {
 	if (err instanceof ToolError) return err;
 	if (err instanceof SbxError && err.status === 401) {
 		o.onAuthFailure?.();
@@ -139,7 +141,8 @@ function toCallError(
 		});
 	}
 	logUnknown(o.log, fields, err);
-	return err;
+	// errorResult never sees the raw error (it would map AbortError by name).
+	return new ToolError({ code: "internal", message: "internal error" });
 }
 
 function firstText(r: CallToolResult): string | undefined {

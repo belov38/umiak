@@ -2,7 +2,7 @@
 // deadline, pinned substitution, progress, cancel state, logger, User-Agent.
 import type { ServerContext } from "@modelcontextprotocol/server";
 import type { Sbx } from "@sbx/sdk";
-import type { Deadline } from "./deadline.ts";
+import { type Deadline, RESPONSE_MARGIN_MS } from "./deadline.ts";
 import type { Logger } from "./log.ts";
 import type { ServerOptions } from "./server.ts";
 import { MCP_VERSION } from "./version.ts";
@@ -11,7 +11,7 @@ export interface ToolContext {
 	/** The SDK client; may throw ToolError not_logged_in. */
 	sbx(): Sbx;
 	deadline: Deadline;
-	/** Spread into every SDK call; read at the call, so the retry budget never outlives the deadline. */
+	/** Spread into every SDK call; read at the call, so SDK retries end before the response margin. */
 	call: { signal: AbortSignal; retryBudgetMs: number };
 	/** The pinned sandbox in pinned mode, else `ref`. */
 	sandbox(ref: string): string;
@@ -72,7 +72,7 @@ export function createToolContext({
 		get call() {
 			return {
 				signal: deadline.signal,
-				retryBudgetMs: deadline.remainingMs(),
+				retryBudgetMs: Math.max(0, deadline.remainingMs() - RESPONSE_MARGIN_MS),
 			};
 		},
 		sandbox: (ref) => o.pinnedSandbox ?? ref,

@@ -12,13 +12,47 @@ const FORBIDDEN_KEYWORDS = [
 	"if",
 	"then",
 	"else",
+	"propertyNames",
 ] as const;
+
+const ALLOWED_TYPES = new Set([
+	"string",
+	"integer",
+	"number",
+	"boolean",
+	"array",
+	"object",
+]);
 
 const PROPERTY_NAME = /^[a-z][a-z0-9_]*$/;
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,39}$/;
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function lintType(node: Record<string, unknown>, where: string, out: string[]) {
+	const { type } = node;
+	if (Array.isArray(type)) {
+		out.push(`${where}: type is an array (${JSON.stringify(type)})`);
+	} else if (type === undefined) {
+		out.push(`${where}: has no type (any value)`);
+	} else if (typeof type !== "string" || !ALLOWED_TYPES.has(type)) {
+		out.push(
+			`${where}: type ${JSON.stringify(type)} is not one of ${[...ALLOWED_TYPES].join(", ")}`,
+		);
+	}
+}
+
+// A dictionary (env, labels) maps strings to strings, nothing else.
+function lintDictValues(value: unknown, where: string, out: string[]) {
+	if (typeof value === "boolean") return;
+	const keys = isPlainObject(value) ? Object.keys(value) : [];
+	if (!isPlainObject(value) || value.type !== "string" || keys.length !== 1) {
+		out.push(
+			`${where}: additionalProperties must be {"type":"string"} (got ${JSON.stringify(value)})`,
+		);
+	}
 }
 
 function lintNode(
@@ -34,15 +68,16 @@ function lintNode(
 	for (const key of FORBIDDEN_KEYWORDS) {
 		if (key in node) out.push(`${where}: uses ${key}`);
 	}
-	if (Array.isArray(node.type)) {
-		out.push(`${where}: type is an array (${JSON.stringify(node.type)})`);
-	}
+	if (where !== "root") lintType(node, where, out);
 	if ("nullable" in node) out.push(`${where}: uses nullable`);
 	if ("enum" in node) {
 		const values = node.enum;
 		if (!Array.isArray(values) || values.some((v) => typeof v !== "string")) {
 			out.push(`${where}: enum values must be strings`);
 		}
+	}
+	if ("const" in node && typeof node.const !== "string") {
+		out.push(`${where}: const must be a string`);
 	}
 	if (
 		isProperty &&
@@ -59,13 +94,15 @@ function lintNode(
 			lintNode(child, `${prefix}${name}`, true, out);
 		}
 	}
-	if (Array.isArray(node.items)) {
-		out.push(`${where}: items is a tuple`);
-	} else if (node.items !== undefined) {
+	if ("prefixItems" in node) {
+		out.push(`${where}: is a tuple (prefixItems); use an object instead`);
+	} else if (isPlainObject(node.items)) {
 		lintNode(node.items, `${where}[]`, false, out);
+	} else if (node.type === "array") {
+		out.push(`${where}: array without an items schema`);
 	}
-	if (isPlainObject(node.additionalProperties)) {
-		lintNode(node.additionalProperties, `${where}{}`, false, out);
+	if ("additionalProperties" in node) {
+		lintDictValues(node.additionalProperties, where, out);
 	}
 }
 

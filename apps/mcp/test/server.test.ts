@@ -1,7 +1,12 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { Sbx, SbxError } from "@sbx/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CALL_BUDGET_MS, Deadline } from "../src/deadline.ts";
+import { z } from "zod";
+import {
+	CALL_BUDGET_MS,
+	Deadline,
+	RESPONSE_MARGIN_MS,
+} from "../src/deadline.ts";
 import { ToolError } from "../src/errors.ts";
 import { SERVER_INSTRUCTIONS } from "../src/instructions.ts";
 import { createLogger } from "../src/log.ts";
@@ -162,6 +167,20 @@ describe.each(ERAS)("pinned mode (%s era)", (era) => {
 		expect(fake.calls[0]?.ctx.sandbox("sb_other")).toBe("sb_pinned");
 	});
 
+	it("ignores a foreign sandbox argument and uses the pinned one", async () => {
+		const { conn, fake, logs } = await setup(
+			{ pinnedSandbox: "sb_pinned" },
+			era,
+		);
+		const r = await conn.client.callTool({
+			name: "fake_get",
+			arguments: { sandbox: "sb_other", path: "/a" },
+		});
+		expect(r.isError).toBeFalsy();
+		expect(fake.calls[0]?.args).toEqual({ sandbox: "sb_pinned", path: "/a" });
+		expect(callLines(logs)[0]).toMatchObject({ sandbox: "sb_pinned" });
+	});
+
 	it("a hidden tool is an unknown tool (JSON-RPC error), never executed", async () => {
 		const { conn, fake } = await setup({ pinnedSandbox: "sb_pinned" }, era);
 		await expect(
@@ -225,6 +244,55 @@ describe.each(ERAS)("tools/call (%s era)", (era) => {
 	});
 });
 
+describe("registration", () => {
+	it("refuses a sandboxArg tool whose shape has its own sandbox", () => {
+		const fake = fakeTools();
+		const [get] = fake.tools;
+		if (get === undefined) throw new Error("fixture");
+		const bad = {
+			...get,
+			shape: { ...get.shape, sandbox: z.string().describe("x") },
+		};
+		expect(() =>
+			createServer({
+				tools: [bad],
+				sbx: () => {
+					throw new Error("unused");
+				},
+				transport: "stdio",
+				log: createLogger({ level: "silent" }),
+			}),
+		).toThrow(/fake_get.*sandbox/);
+	});
+
+	it("publishes a string dictionary without propertyNames", async () => {
+		const fake = fakeTools();
+		const [get] = fake.tools;
+		if (get === undefined) throw new Error("fixture");
+		const withEnv = {
+			...get,
+			shape: {
+				...get.shape,
+				env: z.record(z.string(), z.string()).optional().describe("Env"),
+			},
+		};
+		const { conn } = await setup({ tools: [withEnv] });
+		const listed = await conn.client.listTools();
+		const schema = listed.tools[0]?.inputSchema;
+		expect(schema?.properties?.env).toEqual({
+			type: "object",
+			additionalProperties: { type: "string" },
+			description: "Env",
+		});
+		expect(lintToolSchema("fake_get", schema)).toEqual([]);
+		const r = await conn.client.callTool({
+			name: "fake_get",
+			arguments: { sandbox: "sb_1", path: "/", env: { A: 1 } },
+		});
+		expect(r.isError).toBe(true);
+	});
+});
+
 describe("tool context", () => {
 	it("ctx.sbx() is the factory's client, read lazily", async () => {
 		const sbx = new Sbx({
@@ -274,9 +342,18 @@ describe("tool context", () => {
 		const { conn, fake } = await setup();
 		fake.behaviour = async ({ ctx }) => {
 			expect(ctx.call.signal).toBe(ctx.deadline.signal);
+			// SDK retries end before the response margin.
 			const first = ctx.call.retryBudgetMs;
-			expect(first).toBeGreaterThan(CALL_BUDGET_MS - 5_000);
-			expect(first).toBeLessThanOrEqual(CALL_BUDGET_MS);
+			expect(first).toBeGreaterThan(
+				CALL_BUDGET_MS - RESPONSE_MARGIN_MS - 5_000,
+			);
+			expect(first).toBeLessThanOrEqual(CALL_BUDGET_MS - RESPONSE_MARGIN_MS);
+			const now = Date.now();
+			vi.spyOn(Date, "now").mockReturnValue(
+				now + CALL_BUDGET_MS - RESPONSE_MARGIN_MS / 2,
+			);
+			expect(ctx.call.retryBudgetMs).toBe(0);
+			vi.restoreAllMocks();
 			await new Promise((r) => setTimeout(r, 20));
 			expect(ctx.call.retryBudgetMs).toBeLessThan(first);
 			return toolText({});
@@ -465,7 +542,7 @@ describe("errors", () => {
 			const now = Date.now();
 			vi.spyOn(Date, "now").mockReturnValue(now + CALL_BUDGET_MS + 1);
 			expect(ctx.deadline.expired()).toBe(true);
-			throw new DOMException("aborted", "AbortError");
+			throw new Error("x");
 		};
 		const r = await conn.client.callTool({
 			name: "fake_get",
@@ -475,6 +552,30 @@ describe("errors", () => {
 		expect(text(r)).toContain("error: deadline_exceeded");
 		expect(text(r)).toContain("retryable: true");
 	});
+
+	it.each([
+		["AbortError", () => new DOMException("aborted", "AbortError")],
+		["TimeoutError", () => new DOMException("timed out", "TimeoutError")],
+		[
+			"an Error named TimeoutError",
+			() => Object.assign(new Error("t"), { name: "TimeoutError" }),
+		],
+	])(
+		"%s with no expiry and no cancel is internal, logged once",
+		async (_, make) => {
+			const { conn, fake, logs } = await setup();
+			fake.behaviour = async () => {
+				throw make();
+			};
+			const r = await conn.client.callTool({
+				name: "fake_get",
+				arguments: { sandbox: "sb_1", path: "/" },
+			});
+			expect(text(r)).toContain("error: internal");
+			expect(text(r)).not.toContain("deadline_exceeded");
+			expect(logs.filter((l) => l.level === 50)).toHaveLength(1);
+		},
+	);
 
 	it("a ToolError raised after the deadline keeps the handler's own error", async () => {
 		const { conn, fake } = await setup();
