@@ -43,5 +43,7 @@ ignore = ["E501", "ASYNC109"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# A stream or generator closed badly (e.g. outside its event loop) fails the test.
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"

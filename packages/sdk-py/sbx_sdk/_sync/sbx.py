@@ -239,7 +239,9 @@ class Sbx:
 
     @property
     def raw(self) -> GenClient:
-        """The generated client: ``sandboxes_get.asyncio(client=sbx.raw, sandbox=...)``."""
+        """The generated client over this facade's transport:
+        ``sandboxes_get.sync("sb_...", client=sbx.raw)``. Only the
+        blocking httpx client is set on it, so use the ``sync*`` functions."""
         return self._core.raw
 
     def __enter__(self) -> Sbx:

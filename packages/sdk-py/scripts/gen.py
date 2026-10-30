@@ -105,7 +105,7 @@ def ruff(*args: str) -> None:
 def generate_client(out: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "_gen"
-        subprocess.run(
+        r = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -120,11 +120,12 @@ def generate_client(out: Path) -> None:
                 "--meta",
                 "none",
             ],
-            check=True,
             cwd=ROOT,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
         )
+        if r.returncode != 0:
+            raise SystemExit(f"gen.py: openapi-python-client failed:\n{r.stdout}\n{r.stderr}")
         opened = open_enums(target / "models", extensible_value_sets(json.loads(SPEC.read_text())))
         if not opened:
             raise SystemExit("gen.py: no extensible enum found; did the generator change?")
@@ -156,6 +157,10 @@ SYNC_NAMES = [
 SYNC_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\(asyncio\)"), "(blocking)"),
     (re.compile(r"\basyncio facade\b"), "blocking facade"),
+    # The generated endpoint functions: asyncio/asyncio_detailed -> sync/sync_detailed.
+    (re.compile(r"\basyncio httpx client\b"), "blocking httpx client"),
+    (re.compile(r"\.asyncio\("), ".sync("),
+    (re.compile(r"``asyncio\*``"), "``sync*``"),
     (re.compile(r"\basync def\b"), "def"),
     (re.compile(r"\basync for\b"), "for"),
     (re.compile(r"\basync with\b"), "with"),
@@ -193,11 +198,16 @@ def generate_sync(src: Path, out: Path) -> None:
             shutil.copy(f, out / f.name)
 
 
-def same_tree(a: Path, b: Path) -> list[str]:
-    """Relative paths of .py files that differ between a and b."""
-    names = {p.relative_to(a) for p in a.rglob("*.py")} | {
-        p.relative_to(b) for p in b.rglob("*.py")
+def _files(root: Path) -> set[Path]:
+    """Every file under root (py.typed included), without bytecode caches."""
+    return {
+        p.relative_to(root) for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts
     }
+
+
+def same_tree(a: Path, b: Path) -> list[str]:
+    """Relative paths of the files that differ between a and b."""
+    names = _files(a) | _files(b)
     return sorted(
         str(n)
         for n in names
@@ -219,7 +229,7 @@ def main() -> int:
         gen = Path(tmp) / "_gen"
         generate_client(gen)
         sync = Path(tmp) / "_sync"
-        shutil.copytree(PKG / "_sync", sync)
+        shutil.copytree(PKG / "_sync", sync, ignore=shutil.ignore_patterns("__pycache__"))
         generate_sync(PKG / "_async", sync)
         stale = [f"_gen/{n}" for n in same_tree(gen, PKG / "_gen")]
         stale += [f"_sync/{n}" for n in same_tree(sync, PKG / "_sync")]

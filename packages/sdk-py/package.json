@@ -12,8 +12,6 @@
 	"devDependencies": {
 		"@sbx/api": "workspace:*",
 		"@sbx/core": "workspace:*",
-		"@sbx/db": "workspace:*",
-		"@types/pg": "8.23.1",
-		"pg": "8.23.1"
+		"@sbx/db": "workspace:*"
 	}
 }

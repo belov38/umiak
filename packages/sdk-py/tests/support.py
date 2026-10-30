@@ -68,6 +68,10 @@ class TestApi:
     def fail_next_attach(self, slug: str, after_bytes: int, kind: str) -> None:
         self._post("/fail-next-attach", {"slug": slug, "afterBytes": after_bytes, "kind": kind})
 
+    def agent_chunk_size(self, size: int) -> int:
+        """Sets the FakeAgent's max bytes per data event; returns the previous one."""
+        return self._post("/agent-chunk-size", {"size": size})["previous"]
+
     def key(self, scopes: list[str] | None = None) -> str:
         return self._post("/key", {} if scopes is None else {"scopes": scopes})["secret"]
 
@@ -128,15 +132,20 @@ def _callback(fn: Callable[..., Any], loop: asyncio.AbstractEventLoop) -> Callab
 
 
 def _iterate(agen: Any, loop: asyncio.AbstractEventLoop) -> Iterator[Any]:
-    try:
-        while True:
-            try:
-                item = loop.run_until_complete(agen.__anext__())
-            except StopAsyncIteration:
-                return
-            yield _blocking(item, loop)
-    finally:
-        loop.run_until_complete(agen.aclose())
+    # Like `async for`: leaving early does not aclose the async generator
+    # (the loop finalizes it later), so a test's `break` is a real break.
+    while True:
+        try:
+            # __anext__ is called inside the running loop, so the loop's async
+            # generator hooks see the first iteration (and finalize it later).
+            item = loop.run_until_complete(_anext(agen))
+        except StopAsyncIteration:
+            return
+        yield _blocking(item, loop)
+
+
+async def _anext(agen: Any) -> Any:
+    return await agen.__anext__()
 
 
 class Client:
@@ -187,6 +196,9 @@ class Client:
         return result
 
     def close(self) -> None:
+        if self._loop is not None:
+            # Streams left by an early `break` are closed before their clients.
+            self._loop.run_until_complete(self._loop.shutdown_asyncgens())
         for made in self._made:
             if self._loop is None:
                 made.close()

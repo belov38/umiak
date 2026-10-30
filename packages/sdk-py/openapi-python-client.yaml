@@ -1,4 +1,7 @@
 # Config of openapi-python-client (scripts/gen.py), output: sbx_sdk/_gen.
+# The facade (sbx_sdk/_async) calls the private `_get_kwargs` and
+# `_parse_response` of the generated endpoint modules to pass per-call retry
+# budgets, timeouts and headers: check them when bumping the generator.
 # Response enums marked `x-extensible-enum` are opened by scripts/gen.py
 # after generation (unknown values parse), see the header of gen.py.
 package_name_override: _gen

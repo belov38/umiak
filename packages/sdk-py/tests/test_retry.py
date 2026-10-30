@@ -756,8 +756,10 @@ def test_wait_until_ready_ends_within_its_timeout_against_a_failing_api(clock: F
     s = Script(httpx.Response(200, json={**SANDBOX, "state": "creating"}), proxy_page(503))
     sb = sbx(s, random=1.0).sandboxes.get("x")
     t0 = clock.now
-    with pytest.raises(SbxError):
+    with pytest.raises(SbxError) as e:
         sb.wait_until_ready(timeout=1)
+    # The last transport error of the poll whose budget is the time left.
+    assert (e.value.status, e.value.code) == (503, "unexpected_response")
     assert clock.now - t0 <= 1.0
 
 

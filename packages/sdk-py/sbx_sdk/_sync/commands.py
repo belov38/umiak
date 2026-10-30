@@ -259,27 +259,31 @@ def exec_command(
     started: list[Command] = []
     tails = {"stdout": Tail(), "stderr": Tail()}
     exit_ev: ExitEvent | None = None
-    for ev in run_command(
-        sb,
-        cmd,
-        cwd=cwd,
-        env=env,
-        user=user,
-        timeout_seconds=timeout_seconds,
-        tags=tags,
-        encoding="utf8",
-        on_start=started.append,
-        retry_budget=retry_budget,
-        idempotency_key=idempotency_key,
-    ):
-        if isinstance(ev, ExitEvent):
-            exit_ev = ev
-        elif isinstance(ev, TruncatedEvent):
-            if ev.stream != "pty":
-                tails[ev.stream].drop()
-        elif ev.type != "pty":
-            assert isinstance(ev.data, str)
-            tails[ev.type].push(ev.data, ev.next_offset - ev.offset)
+    # Closed at once also when the loop ends early (an error in the body).
+    with closing(
+        run_command(
+            sb,
+            cmd,
+            cwd=cwd,
+            env=env,
+            user=user,
+            timeout_seconds=timeout_seconds,
+            tags=tags,
+            encoding="utf8",
+            on_start=started.append,
+            retry_budget=retry_budget,
+            idempotency_key=idempotency_key,
+        )  # type: ignore[type-var]
+    ) as events:
+        for ev in events:
+            if isinstance(ev, ExitEvent):
+                exit_ev = ev
+            elif isinstance(ev, TruncatedEvent):
+                if ev.stream != "pty":
+                    tails[ev.stream].drop()
+            elif ev.type != "pty":
+                assert isinstance(ev.data, str)
+                tails[ev.type].push(ev.data, ev.next_offset - ev.offset)
     if exit_ev is None or not started:
         raise SbxError(
             status=0,

@@ -7,7 +7,8 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./testing": "./src/testing/index.ts",
-		"./testing/global-setup": "./src/testing/global-setup.ts"
+		"./testing/global-setup": "./src/testing/global-setup.ts",
+		"./testing/pg": "./src/testing/pg.ts"
 	},
 	"scripts": {
 		"test": "vitest run",

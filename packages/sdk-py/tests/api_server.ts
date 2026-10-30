@@ -9,13 +9,13 @@
 //   request and applies one-shot faults (replace the answer, cut or stall the
 //   body after N bytes, drop the connection after the api answered);
 // - a control server (JSON) for the tests: requests, faults, the worker's
-//   part (mark-ready, fail-operation), FakeAgent controls, new keys.
+//   part (mark-ready, fail-operation), FakeAgent controls (attach failures,
+//   chunk size), new keys.
 //
 // Prints one JSON line {url, apiUrl, control, secret} (or {skip}) on stdout
 // and runs until stdin closes or SIGTERM; then drops the database and
 // removes the container.
 
-import { randomBytes } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApiServer, createPublicApp } from "@sbx/api";
@@ -27,13 +27,9 @@ import {
 	testSettings,
 } from "@sbx/api/testing";
 import { serviceEnv } from "@sbx/core/testing";
-import { createPool, MIGRATIONS_DIR, migrate } from "@sbx/db";
+import { createPool } from "@sbx/db";
 import { setup, teardown } from "@sbx/db/testing/global-setup";
-import pg from "pg";
-
-// The same template and lock as @sbx/db/testing (createTestDatabase needs vitest).
-const TEMPLATE_DB = "sbx_tmpl";
-const TEMPLATE_LOCK_KEY = 727002;
+import { createDatabase, dropDatabase } from "@sbx/db/testing/pg";
 
 interface Fault {
 	method?: string;
@@ -65,12 +61,6 @@ interface Logged {
 	headers: Record<string, string>;
 }
 
-const dsnFor = (admin: string, database: string) => {
-	const u = new URL(admin);
-	u.pathname = `/${database}`;
-	return u.toString();
-};
-
 async function adminDsn(): Promise<string | null> {
 	const provided: Record<string, string> = {};
 	await setup({
@@ -80,58 +70,6 @@ async function adminDsn(): Promise<string | null> {
 	} as never);
 	if (provided.sbxPgError) throw new Error(provided.sbxPgError);
 	return provided.sbxPgAdminDsn ? provided.sbxPgAdminDsn : null;
-}
-
-async function createDatabase(admin: string): Promise<string> {
-	const name = `sbx_test_${randomBytes(6).toString("hex")}`;
-	const c = new pg.Client({ connectionString: admin });
-	await c.connect();
-	try {
-		await c.query("SELECT pg_advisory_lock($1)", [TEMPLATE_LOCK_KEY]);
-		try {
-			const exists = await c.query(
-				"SELECT 1 FROM pg_database WHERE datname = $1",
-				[TEMPLATE_DB],
-			);
-			let ready = false;
-			if (exists.rowCount) {
-				ready = await migrateTemplate(dsnFor(admin, TEMPLATE_DB)).then(
-					() => true,
-					() => false,
-				);
-			}
-			if (!ready) {
-				await c.query(`DROP DATABASE IF EXISTS ${TEMPLATE_DB} WITH (FORCE)`);
-				await c.query(`CREATE DATABASE ${TEMPLATE_DB} TEMPLATE template0`);
-				await migrateTemplate(dsnFor(admin, TEMPLATE_DB));
-			}
-			await c.query(`CREATE DATABASE ${name} TEMPLATE ${TEMPLATE_DB}`);
-		} finally {
-			await c.query("SELECT pg_advisory_unlock($1)", [TEMPLATE_LOCK_KEY]);
-		}
-	} finally {
-		await c.end();
-	}
-	return name;
-}
-
-async function migrateTemplate(url: string): Promise<void> {
-	const pool = createPool(url, 1);
-	try {
-		await migrate(pool, { dir: MIGRATIONS_DIR });
-	} finally {
-		await pool.end();
-	}
-}
-
-async function dropDatabase(admin: string, name: string): Promise<void> {
-	const c = new pg.Client({ connectionString: admin });
-	await c.connect();
-	try {
-		await c.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-	} finally {
-		await c.end();
-	}
 }
 
 function listen(server: http.Server): Promise<number> {
@@ -158,8 +96,9 @@ async function main() {
 		await teardown();
 		return;
 	}
-	const dbName = await createDatabase(admin);
-	const pool = createPool(dsnFor(admin, dbName), 20);
+	// The same template, lock and copy as createTestDatabase of @sbx/db/testing.
+	const { name: dbName, url: dbUrl } = await createDatabase(admin);
+	const pool = createPool(dbUrl, 20);
 	const env = await serviceEnv(pool);
 	const teamId = env.p.teamId;
 	await pool.query("INSERT INTO identity.teams (id, name) VALUES ($1, $2)", [
@@ -383,6 +322,13 @@ async function main() {
 						input.kind as FakeAttachFailure,
 					);
 					out = { ok: true };
+					break;
+				}
+				case "POST /agent-chunk-size": {
+					// Max bytes of one agent data event (1: frames split inside characters).
+					const previous = agent.chunkSize;
+					agent.chunkSize = Number(input.size);
+					out = { previous };
 					break;
 				}
 				case "POST /key": {

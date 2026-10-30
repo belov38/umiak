@@ -163,6 +163,37 @@ def test_run_reattaches_after_a_failed_attach_and_a_cut_stream(
     assert len(reattaches) >= 2
 
 
+def test_multibyte_utf8_survives_attach_failures_and_cuts_inside_characters(
+    api: TestApi, state: dict[str, Any]
+) -> None:
+    sb = sandbox(state)
+    text = "aé€😀" * 60 + "\n"  # 1 + 2 + 3 + 4 bytes per unit
+    size = len(text.encode())
+    # One byte per agent event: the api frames whole characters, offsets stay bytes.
+    previous = api.agent_chunk_size(1)
+    try:
+        # The agent attach fails 15 bytes in (inside the 4-byte character), and
+        # the first reattach is cut inside its body.
+        api.fail_next_attach(sb.slug, 15, "unavailable")
+        api.fault("cut", method="GET", pathEndsWith="/stream", bytes=1500)
+        n0 = api.request_count()
+        events = list(sb.run(["printf", "%s", text]))
+        reattaches = [r for r in api.requests(n0) if r["path"].split("?")[0].endswith("/stream")]
+        api.fail_next_attach(sb.slug, 7, "unavailable")
+        r = sb.exec(["printf", "%s", text])
+    finally:
+        api.agent_chunk_size(previous)
+    out = join_output(events)
+    assert out["stdout"] == text
+    assert out["next"]["stdout"] == size
+    assert isinstance(events[-1], ExitEvent) and events[-1].stdout_offset == size
+    assert len(reattaches) >= 2
+    for ev in events:
+        if isinstance(ev, OutputEvent):
+            assert ev.next_offset - ev.offset == len(ev.data.encode())
+    assert (r.stdout, r.exit_code) == (text, 0)
+
+
 def test_a_silent_stream_is_reopened_from_its_offsets(
     client: Client, api: TestApi, state: dict[str, Any]
 ) -> None:
