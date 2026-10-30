@@ -840,6 +840,28 @@ describe("iso-install build: failures", () => {
 		).toEqual([{ names: [buildIso(m), offlineIso(m)] }]);
 	});
 
+	it("the offline WinPE powering off inside the key window ends the presses", async () => {
+		const s = setup();
+		let offKeys = 0;
+		const base = s.pve.before;
+		s.pve.before = (method, path, params) => {
+			base?.(method, path, params);
+			const v = s.pve.vms.get(598);
+			if (
+				method !== "PUT" ||
+				path !== `${vm}/sendkey` ||
+				v?.config.boot !== "order=ide2"
+			)
+				return;
+			if (v.status !== "running")
+				throw new Error(`PUT ${vm}/sendkey: VM 598 not running`);
+			if (++offKeys >= 5) v.status = "stopped";
+		};
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.status).toBe("ready");
+		expect(offKeys).toBe(5);
+	});
+
 	it("QGA answering between the offline key presses fails at once", async () => {
 		const s = setup();
 		const sendkeys = () =>

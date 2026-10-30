@@ -584,6 +584,18 @@ async function startVm(
 }
 
 /** Enter at "Press any key to boot from CD or DVD", `count` times one interval apart. */
+async function vmStopped(
+	deps: BuildDeps,
+	node: string,
+	vmid: number,
+): Promise<boolean> {
+	try {
+		return (await vmStatus(deps, node, vmid)) === "stopped";
+	} catch {
+		return false;
+	}
+}
+
 async function pressKeys(
 	deps: BuildDeps,
 	node: string,
@@ -594,7 +606,13 @@ async function pressKeys(
 ): Promise<void> {
 	const interval = deps.keyIntervalMs ?? DEFAULT_KEY_INTERVAL_MS;
 	for (let i = 0; i < count; i++) {
-		await sendKey(deps.api, node, vmid, BOOT_KEY);
+		try {
+			await sendKey(deps.api, node, vmid, BOOT_KEY);
+		} catch (err) {
+			// The offline WinPE boot can finish and power off within the key window.
+			if (await vmStopped(deps, node, vmid)) return;
+			throw err;
+		}
 		if (i < count - 1) {
 			await sleep(interval);
 			await between?.();
