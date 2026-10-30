@@ -54,6 +54,11 @@ services:
       # port cookie needs SameSite=None (S4 §8.2) to work in the dashboard iframe.
       SBX_GATEWAY_AUTH_URL: ${SBX_GATEWAY_AUTH_URL:?set by deploy.sh}
       SBX_GATEWAY_COOKIE_CROSS_SITE: "true"
+      # One gateway on the CT: there is no peer to drain tunnels and SSH sessions to, and the
+      # product drain (up to 950 s, stop_grace_period 960 s) would keep the old container, and
+      # the worker waiting on it, down for 16 minutes on every deploy that recreates it.
+      SBX_GATEWAY_DRAIN_TIMEOUT: 20s
+    stop_grace_period: 30s
     # Public listeners on all addresses of the CT (its firewall admits only the LAN; sandboxes
     # reach only 443). 443 serves the tunnel host on the LAN address and the previews on the
     # tailnet address: preview hosts route only without a port in Host (S4 4.2), so Tailscale
@@ -67,8 +72,13 @@ services:
 
   # S7: Keycloak behind Serve on :10000. The realm (imported on the first start only) gets the
   # oauth2-proxy redirect URI and web origin of the Serve name.
+  # The CT has 3 GB and no swap. Without a cgroup limit of its own the JVM in Docker in LXC sizes
+  # its heap from the host's RAM (sysinfo is not virtualised), grows past 2.5 GB and starves the
+  # CT. A fixed heap and a container limit keep Keycloak under ~1 GB.
   keycloak:
+    mem_limit: 1200m
     environment:
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
       KC_HOSTNAME: ${SBX_KEYCLOAK_URL:?set by deploy.sh}
       KC_HTTP_ENABLED: "true"
       SBX_KEYCLOAK_PROXY_HEADERS: xforwarded
