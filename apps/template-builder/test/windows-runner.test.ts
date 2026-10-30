@@ -1,4 +1,8 @@
-import { type ExecResult, PveApiError, type PveClient } from "@sbx/pve";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ExecResult, PveClient } from "@sbx/pve";
 import { FakePve } from "@sbx/pve/testing";
 import { describe, expect, it } from "vitest";
 import {
@@ -8,15 +12,17 @@ import {
 } from "../src/runner.ts";
 import {
 	networkUp,
+	readGuestFiles,
 	rebootWindows,
 	runWindowsStep,
 } from "../src/windows/runner.ts";
+import {
+	type GuestFilesRequest,
+	guestFilesAnswer,
+	guestFilesRequest,
+} from "./fakes.ts";
 
 const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "" });
-const MISSING = new PveApiError(
-	500,
-	"failed to open file 'C:\\sbx-build\\logs\\x.exit' (mode: 'r'): The system cannot find the file specified.",
-);
 
 interface FakeOpts {
 	/** Log content visible after the Nth task status query (1-based), as cumulative chunks. */
@@ -31,23 +37,39 @@ interface FakeOpts {
 	onExec?: (cmd: string[], n: number) => ExecResult | undefined;
 	/** `/run` starts the task, then the call fails (lost reply). */
 	runError?: Error;
+	/** Log bytes that appear together with the exit file. */
+	tail?: Buffer;
 }
 
-/** Fake Windows guest: the log grows by one chunk per `schtasks /query`. */
+/**
+ * Fake Windows guest: the log grows by one chunk per `schtasks /query`; the log and the exit file
+ * are read through one PowerShell exec per read, never through QGA file-read.
+ */
 function fakeWindows(o: FakeOpts = {}) {
 	const chunks = o.chunks ?? [];
 	const calls: string[][] = [];
-	const reads: { path: string; offset: number }[] = [];
+	const reads: GuestFilesRequest[] = [];
 	let queries = 0;
 	let started = false;
 	let exitFile = o.staleExit;
+	let tail: Buffer = Buffer.alloc(0);
 	const log = () =>
-		Buffer.concat(chunks.slice(0, Math.min(queries, chunks.length)));
+		started
+			? Buffer.concat([
+					...chunks.slice(0, Math.min(queries, chunks.length)),
+					tail,
+				])
+			: undefined;
 	const io: GuestIo = {
 		async exec(cmd) {
 			calls.push(cmd);
 			const custom = o.onExec?.(cmd, calls.length);
 			if (custom) return custom;
+			const read = guestFilesRequest(cmd);
+			if (read) {
+				reads.push(read);
+				return guestFilesAnswer(read, exitFile, log());
+			}
 			if (cmd[0] === "powershell.exe") {
 				const script = cmd.at(-1) ?? "";
 				if (script.includes("Get-Volume"))
@@ -66,20 +88,17 @@ function fakeWindows(o: FakeOpts = {}) {
 					return { exitCode: 1, stdout: "", stderr: "ERROR: not found" };
 				queries++;
 				const finished = queries > chunks.length;
-				if (finished && "exit" in o && o.exit !== undefined) exitFile = o.exit;
+				if (finished && "exit" in o && o.exit !== undefined) {
+					exitFile = o.exit;
+					tail = o.tail ?? tail;
+				}
 				const status = finished ? (o.statusAfter ?? "Ready") : "Running";
 				return ok(`"\\${cmd[3]}","N/A","${status}"\r\n`);
 			}
 			return ok();
 		},
-		async readFile(path, offset, count) {
-			reads.push({ path, offset });
-			if (path.endsWith(".exit")) {
-				if (exitFile === undefined) throw MISSING;
-				return Buffer.from(exitFile);
-			}
-			if (path.endsWith(".log")) return log().subarray(offset, offset + count);
-			return Buffer.alloc(0);
+		async readFile(path) {
+			throw new Error(`file-read is not used on Windows: ${path}`);
 		},
 		async ping() {
 			return true;
@@ -201,6 +220,73 @@ describe("runWindowsStep", () => {
 		expect(out.join("")).not.toContain("\ufffd");
 	});
 
+	it("reads the exit file and the log in one exec per poll, never through file-read", async () => {
+		const g = fakeWindows({
+			chunks: [Buffer.from("one\n"), Buffer.from("two\n")],
+			exit: "0",
+		});
+		await runWindowsStep(g.io, { step: "00-base", onLog: () => {}, ...fast });
+		const polls = g.reads.filter((r) => r.exit !== "");
+		expect(polls.length).toBeGreaterThan(2);
+		for (const r of polls) {
+			expect(r.exit).toBe("C:\\sbx-build\\logs\\00-base.exit");
+			expect(r.log).toBe("C:\\sbx-build\\logs\\00-base.log");
+			expect(r.count).toBe(1024 * 1024);
+		}
+		const cmd = g.calls.find((c) => guestFilesRequest(c));
+		expect(cmd?.slice(0, -1)).toEqual([
+			"powershell.exe",
+			"-NoProfile",
+			"-NonInteractive",
+			"-EncodedCommand",
+		]);
+		// The exit file is read before the log: a seen exit means the log is complete.
+		const text = Buffer.from(String(cmd?.at(-1)), "base64").toString("utf16le");
+		expect(text.indexOf("Open($exitPath")).toBeGreaterThan(0);
+		expect(text.indexOf("Open($exitPath")).toBeLessThan(
+			text.indexOf("Open($logPath"),
+		);
+		expect(text).toContain("'ReadWrite, Delete'");
+	});
+
+	it("an exit seen with a big log drains the log to its end", async () => {
+		const big = Buffer.alloc(2.5 * 1024 * 1024, "a");
+		big.write("\n", big.length - 1);
+		const g = fakeWindows({
+			chunks: [Buffer.from("start\n")],
+			exit: "0",
+			tail: big,
+		});
+		let got = 0;
+		await runWindowsStep(g.io, {
+			step: "00-base",
+			onLog: (c) => {
+				got += Buffer.byteLength(c);
+			},
+			...fast,
+		});
+		expect(got).toBe(6 + big.length);
+		// The poll that saw the exit plus log-only reads to the end.
+		const last = g.reads.findLastIndex((r) => r.exit !== "");
+		const after = g.reads.slice(last + 1);
+		expect(after.length).toBeGreaterThanOrEqual(2);
+		expect(after.every((r) => r.exit === "")).toBe(true);
+		expect(after.at(-1)?.offset).toBe(6 + big.length);
+	});
+
+	it("a failing read script fails the step with its error", async () => {
+		const g = fakeWindows({
+			onExec: (cmd) =>
+				guestFilesRequest(cmd)
+					? { exitCode: 1, stdout: "", stderr: "Access to the path is denied." }
+					: undefined,
+		});
+		await expect(
+			runWindowsStep(g.io, { step: "00-base", onLog: () => {}, ...fast }),
+		).rejects.toThrow(/Access to the path is denied/);
+		expect(g.calls.at(-1)?.[1]).toBe("/delete");
+	});
+
 	it("timeout throws StepTimeoutError and deletes the task", async () => {
 		const g = fakeWindows({
 			chunks: Array.from({ length: 100_000 }, () => Buffer.from("tick\n")),
@@ -287,6 +373,101 @@ describe("runWindowsStep", () => {
 			runWindowsStep(g.io, { step: "00-base", onLog: () => {}, ...fast }),
 		).rejects.toThrow(/task did not start/);
 		expect(g.calls.filter((c) => c[1] === "/run")).toHaveLength(1);
+	});
+});
+
+/** pwsh comes from mise.toml (`powershell`); `PWSH=<path>` overrides it. */
+const PWSH = process.env.PWSH ?? "pwsh";
+
+/** Runs the powershell.exe commands of readGuestFiles in local pwsh. */
+const pwshIo: GuestIo = {
+	async exec(cmd) {
+		const r = spawnSync(PWSH, cmd.slice(1), { encoding: "utf8" });
+		return { exitCode: r.status ?? -1, stdout: r.stdout, stderr: r.stderr };
+	},
+	async readFile(path) {
+		throw new Error(`file-read is not used on Windows: ${path}`);
+	},
+	async ping() {
+		return true;
+	},
+};
+
+describe("readGuestFiles script (pwsh)", () => {
+	it("missing files read as no exit and an empty log", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-read-"));
+		try {
+			const r = await readGuestFiles(pwshIo, {
+				exit: join(dir, "x.exit"),
+				log: join(dir, "nodir", "x.log"),
+				offset: 0,
+				count: 1024,
+			});
+			expect(r).toEqual({ exit: null, size: 0, data: Buffer.alloc(0) });
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("reads the exit file and a log chunk from an offset", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-read-"));
+		try {
+			const log = Buffer.from("caf\u00e9 \u2713 ok\n");
+			writeFileSync(join(dir, "x.exit"), "0\r\n");
+			writeFileSync(join(dir, "x.log"), log);
+			const r = await readGuestFiles(pwshIo, {
+				exit: join(dir, "x.exit"),
+				log: join(dir, "x.log"),
+				offset: 4,
+				count: 3,
+			});
+			expect(r.exit).toBe("0\r\n");
+			expect(r.size).toBe(log.length);
+			// Cut inside the check mark: raw bytes, the caller decodes.
+			expect(r.data).toEqual(log.subarray(4, 7));
+			const end = await readGuestFiles(pwshIo, {
+				log: join(dir, "x.log"),
+				offset: log.length,
+				count: 3,
+			});
+			expect(end).toEqual({
+				exit: null,
+				size: log.length,
+				data: Buffer.alloc(0),
+			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a log locked by another process reads as empty, not as an error", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-read-"));
+		const path = join(dir, "x.log");
+		writeFileSync(path, "held\n");
+		// .NET on Unix takes an exclusive flock for FileShare.None.
+		const holder = spawn(PWSH, [
+			"-NoProfile",
+			"-NonInteractive",
+			"-Command",
+			`$h = [System.IO.File]::Open('${path}', 'Open', 'ReadWrite', 'None'); 'locked'; [Console]::Out.Flush(); Start-Sleep -Seconds 30`,
+		]);
+		try {
+			await new Promise<void>((resolve, reject) => {
+				holder.stdout.on("data", (d: Buffer) => {
+					if (d.toString().includes("locked")) resolve();
+				});
+				holder.on("exit", () => reject(new Error("holder exited")));
+			});
+			const r = await readGuestFiles(pwshIo, {
+				log: path,
+				offset: 0,
+				count: 64,
+			});
+			expect(r).toEqual({ exit: null, size: 0, data: Buffer.alloc(0) });
+		} finally {
+			holder.kill();
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

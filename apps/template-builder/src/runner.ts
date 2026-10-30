@@ -260,12 +260,22 @@ export class LogFollower {
 		this.#onLog(text);
 	}
 
+	/** Bytes of the log consumed so far. */
+	get offset(): number {
+		return this.#offset;
+	}
+
+	/** Takes bytes the caller read itself at `offset`. */
+	accept(buf: Buffer): void {
+		this.#offset += buf.length;
+		this.#feed(this.#decoder.decode(buf, { stream: true }));
+	}
+
 	/** While the writer runs a short read ends the poll; once it stopped, read until an empty read. */
 	async drain(untilEmpty: boolean): Promise<void> {
 		for (;;) {
 			const buf = await this.#read(this.#offset, READ_CHUNK);
-			this.#offset += buf.length;
-			this.#feed(this.#decoder.decode(buf, { stream: true }));
+			this.accept(buf);
 			if (buf.length === 0 || (!untilEmpty && buf.length < READ_CHUNK)) return;
 		}
 	}

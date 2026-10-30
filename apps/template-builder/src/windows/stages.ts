@@ -67,7 +67,12 @@ import {
 	offlineIsoFiles,
 	renderWindowsAgentToml,
 } from "./media.ts";
-import { networkUp, rebootWindows, runWindowsStep } from "./runner.ts";
+import {
+	networkUp,
+	readGuestFiles,
+	rebootWindows,
+	runWindowsStep,
+} from "./runner.ts";
 
 // Stages of an iso-install build (spec S9 sections 6, 7, 10): media, vm, install, steps, seal,
 // offline, template. build.ts runs them in order, then verify, and rolls back on failure.
@@ -844,12 +849,18 @@ function decodeLog(buf: Buffer): string {
 	return buf.toString("utf8");
 }
 
-/** The last lines of setuperr.log. */
+/** The last lines of setuperr.log; a sysprep that still runs may hold it open. */
 async function setupErrTail(io: GuestIo): Promise<string[]> {
 	const chunks: Buffer[] = [];
 	let offset = 0;
 	while (offset < SETUPERR_MAX_BYTES) {
-		const b = await io.readFile(SETUPERR_LOG, offset, READ_CHUNK);
+		const b = (
+			await readGuestFiles(io, {
+				log: SETUPERR_LOG,
+				offset,
+				count: READ_CHUNK,
+			})
+		).data;
 		if (b.length === 0) break;
 		chunks.push(b);
 		offset += b.length;

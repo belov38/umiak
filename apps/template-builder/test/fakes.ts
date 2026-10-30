@@ -393,11 +393,56 @@ export class FakeGuest implements GuestIo {
 	}
 }
 
-const MISSING_WIN = (path: string) =>
-	new PveApiError(
-		500,
-		`failed to open file '${path}' (mode: 'r'): The system cannot find the file specified.`,
+export interface GuestFilesRequest {
+	/** Empty when the read asks for no exit file. */
+	exit: string;
+	log: string;
+	offset: number;
+	count: number;
+}
+
+/** The request of a readGuestFiles exec (src/windows/runner.ts), undefined for other commands. */
+export function guestFilesRequest(
+	cmd: string[],
+): GuestFilesRequest | undefined {
+	if (cmd[0] !== "powershell.exe" || !cmd.includes("-EncodedCommand"))
+		return undefined;
+	const text = Buffer.from(String(cmd.at(-1)), "base64").toString("utf16le");
+	const str = (name: string) =>
+		new RegExp(`^\\$${name} = '((?:[^']|'')*)'$`, "m")
+			.exec(text)?.[1]
+			?.replaceAll("''", "'");
+	const num = (name: string) =>
+		new RegExp(`^\\$${name} = (\\d+)$`, "m").exec(text)?.[1];
+	const exit = str("exitPath");
+	const log = str("logPath");
+	const offset = num("offset");
+	const count = num("count");
+	if (
+		exit === undefined ||
+		log === undefined ||
+		offset === undefined ||
+		count === undefined
+	)
+		return undefined;
+	return { exit, log, offset: Number(offset), count: Number(count) };
+}
+
+/** What the readGuestFiles script prints; `undefined` content = missing file. */
+export function guestFilesAnswer(
+	r: GuestFilesRequest,
+	exit: string | Buffer | undefined,
+	log: Buffer | undefined,
+): ExecResult {
+	const data = log?.subarray(r.offset, r.offset + r.count) ?? Buffer.alloc(0);
+	return ok(
+		JSON.stringify({
+			exit: r.exit === "" || exit === undefined ? null : exit.toString(),
+			size: log?.length ?? 0,
+			data: data.toString("base64"),
+		}),
 	);
+}
 
 /** What the facts script of the Windows build reports by default. */
 export const FAKE_WIN_FACTS = {
@@ -463,6 +508,8 @@ export class FakeWinGuest implements GuestIo {
 			this.log.push("guest:reboot");
 			return ok();
 		}
+		const read = guestFilesRequest(cmd);
+		if (read) return this.#readFiles(read);
 		if (c0 === "powershell.exe" && cmd.includes("-EncodedCommand")) {
 			const text = Buffer.from(script, "base64").toString("utf16le");
 			if (text.includes("CurrentVersion")) {
@@ -487,18 +534,23 @@ export class FakeWinGuest implements GuestIo {
 		return ok();
 	}
 
-	async readFile(path: string, offset: number, count: number): Promise<Buffer> {
-		if (path.endsWith("\\setuperr.log"))
-			return Buffer.from(this.setupErr).subarray(offset, offset + count);
-		const m = /^C:\\sbx-build\\logs\\(.+)\.(exit|log)$/.exec(path);
-		if (!m) throw MISSING_WIN(path);
-		const [, step = "", kind] = m;
-		if (!this.started.includes(step)) throw MISSING_WIN(path);
-		if (kind === "exit") return Buffer.from(`${this.failRc[step] ?? "0"}\r\n`);
-		return Buffer.from(`running ${step}\nend of ${step}\n`).subarray(
-			offset,
-			offset + count,
+	#readFiles(r: GuestFilesRequest): ExecResult {
+		if (r.log.endsWith("\\setuperr.log"))
+			return guestFilesAnswer(r, undefined, Buffer.from(this.setupErr));
+		const m = /^C:\\sbx-build\\logs\\(.+)\.log$/.exec(r.log);
+		const step = m?.[1] ?? "";
+		if (!m || !this.started.includes(step))
+			return guestFilesAnswer(r, undefined, undefined);
+		return guestFilesAnswer(
+			r,
+			`${this.failRc[step] ?? "0"}\r\n`,
+			Buffer.from(`running ${step}\nend of ${step}\n`),
 		);
+	}
+
+	async readFile(path: string): Promise<Buffer> {
+		// QGA file-read leaves handles open on Windows when it times out.
+		throw new Error(`file-read is not used on Windows: ${path}`);
 	}
 
 	async ping(): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { PveApiError, type PveClient, Qga } from "@sbx/pve";
+import { type PveClient, Qga } from "@sbx/pve";
 import {
 	DEFAULT_POLL_MS,
 	DEFAULT_REBOOT_TIMEOUT_MS,
@@ -8,6 +8,7 @@ import {
 	isTransient,
 	isTransientPoll,
 	LogFollower,
+	READ_CHUNK,
 	retryTransient,
 	StepFailedError,
 	StepTimeoutError,
@@ -35,14 +36,6 @@ const POWERSHELL = [
 	"-NonInteractive",
 	"-Command",
 ] as const;
-
-/**
- * QGA file-read errors that mean "not there (yet) or briefly locked". qemu-ga on Windows words an
- * open failure as `failed to open file '<path>' (mode: 'r'): The system cannot find the file
- * specified.`; a writer that holds the file without sharing gives "being used by another process".
- */
-const NOT_READABLE_YET_RE =
-	/failed to open file|cannot find the (file|path)|no such file|ENOENT|being used by another process|\(error: [23]\)/i;
 
 const driveLetters = new WeakMap<GuestIo, string>();
 
@@ -118,23 +111,110 @@ async function dropTask(io: GuestIo, task: string): Promise<void> {
 	}
 }
 
+/** powershell.exe with the script as -EncodedCommand: no quoting through QGA and the command line. */
+function encodedPowershell(script: string): string[] {
+	return [
+		"powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-EncodedCommand",
+		Buffer.from(script, "utf16le").toString("base64"),
+	];
+}
+
+const psQuote = (s: string) => `'${s.replaceAll("'", "''")}'`;
+
 /**
- * Reads one guest file; a file that cannot be opened reads as empty. The writer of the log and
- * the exit file is run-step.ps1, so "not there yet" and "locked for a moment" are normal.
+ * Body of the read script; the caller puts $exitPath, $logPath, $offset and $count in front.
+ * Both files are opened with FileShare ReadWrite|Delete, so a writer is never locked out, and
+ * the handle is closed by the time the exec answers. QGA file-read must not be used for files a
+ * guest process writes: when a guest-file-open times out, qemu-ga on Windows keeps the handle,
+ * opened without FILE_SHARE_WRITE, and every later write of the file fails. The exit file is
+ * read before the log. A file that cannot be opened (missing, locked) reads as absent.
+ * Windows PowerShell 5.1: keep it ASCII and 5.1-compatible.
  */
-async function readSoft(
+const READ_FILES_BODY = `$ErrorActionPreference = 'Stop'
+$share = [System.IO.FileShare]'ReadWrite, Delete'
+$exit = $null
+if ($exitPath -ne '') {
+    try {
+        $f = [System.IO.File]::Open($exitPath, 'Open', 'Read', $share)
+        try { $exit = (New-Object System.IO.StreamReader($f)).ReadToEnd() } finally { $f.Dispose() }
+    } catch [System.IO.IOException] { $exit = $null }
+}
+$size = 0
+$data = ''
+try {
+    $f = [System.IO.File]::Open($logPath, 'Open', 'Read', $share)
+    try {
+        $size = $f.Length
+        if ($offset -lt $size) {
+            $buf = New-Object byte[] ([int][Math]::Min([long]$count, $size - $offset))
+            [void]$f.Seek($offset, 'Begin')
+            $n = 0
+            while ($n -lt $buf.Length) {
+                $r = $f.Read($buf, $n, $buf.Length - $n)
+                if ($r -le 0) { break }
+                $n += $r
+            }
+            $data = [Convert]::ToBase64String($buf, 0, $n)
+        }
+    } finally { $f.Dispose() }
+} catch [System.IO.IOException] { $size = 0; $data = '' }
+[Console]::Out.Write((ConvertTo-Json -Compress -InputObject ([ordered]@{ exit = $exit; size = $size; data = $data })))
+`;
+
+export interface GuestFiles {
+	/** Content of the exit file; null when it was not asked for or cannot be opened. */
+	exit: string | null;
+	/** Length of the log when it was read; 0 when it cannot be opened. */
+	size: number;
+	/** Up to `count` bytes of the log from `offset`. */
+	data: Buffer;
+}
+
+/**
+ * Reads an optional exit file and a chunk of a log with one PowerShell exec. Missing or locked
+ * files are not an error; a failing script is.
+ */
+export async function readGuestFiles(
 	io: GuestIo,
-	path: string,
-	offset: number,
-	count: number,
-): Promise<Buffer> {
+	r: { exit?: string; log: string; offset: number; count: number },
+): Promise<GuestFiles> {
+	if (!Number.isSafeInteger(r.offset) || r.offset < 0)
+		throw new Error(`bad offset ${r.offset}`);
+	if (!Number.isSafeInteger(r.count) || r.count <= 0)
+		throw new Error(`bad count ${r.count}`);
+	const script = [
+		`$exitPath = ${psQuote(r.exit ?? "")}`,
+		`$logPath = ${psQuote(r.log)}`,
+		`$offset = ${r.offset}`,
+		`$count = ${r.count}`,
+		READ_FILES_BODY,
+	].join("\n");
+	const res = await io.exec(encodedPowershell(script));
+	const line = res.stdout.trim().split(/\r?\n/).at(-1) ?? "";
+	if (res.exitCode !== 0)
+		throw new Error(
+			`reading ${r.log} failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).trim()}`,
+		);
+	let j: { exit?: unknown; size?: unknown; data?: unknown };
 	try {
-		return await io.readFile(path, offset, count);
-	} catch (err) {
-		if (err instanceof PveApiError && NOT_READABLE_YET_RE.test(err.message))
-			return Buffer.alloc(0);
-		throw err;
+		j = JSON.parse(line);
+	} catch {
+		throw new Error(
+			`reading ${r.log}: unexpected answer "${line.slice(0, 200)}"`,
+		);
 	}
+	if (
+		!(j.exit === null || typeof j.exit === "string") ||
+		typeof j.size !== "number" ||
+		typeof j.data !== "string"
+	)
+		throw new Error(
+			`reading ${r.log}: unexpected answer "${line.slice(0, 200)}"`,
+		);
+	return { exit: j.exit, size: j.size, data: Buffer.from(j.data, "base64") };
 }
 
 export interface WindowsStepOptions {
@@ -170,7 +250,8 @@ export async function runWindowsStep(
 	const exitPath = `${LOG_DIR}\\${step}.exit`;
 	const note = transientNotes(o.onLog);
 	const follower = new LogFollower(
-		(offset, count) => readSoft(io, logPath, offset, count),
+		async (offset, count) =>
+			(await readGuestFiles(io, { log: logPath, offset, count })).data,
 		o.onLog,
 	);
 
@@ -241,7 +322,8 @@ export async function runWindowsStep(
 			if (
 				!(await taskStarted(io, step, {
 					task,
-					files: [exitPath, logPath],
+					exitPath,
+					logPath,
 					deadline,
 					windowMs: o.startCheckMs ?? START_CHECK_MS,
 					intervalMs: pollMs,
@@ -263,11 +345,17 @@ export async function runWindowsStep(
 			try {
 				// Task state before the exit file: a task seen as finished has written it already.
 				const status = await taskStatus(io, task);
-				const exit = (await readSoft(io, exitPath, 0, 64))
-					.toString("utf8")
-					.trim();
-				// The exit file is written last, so a finished step has its whole log drained.
-				await follower.drain(exit !== "");
+				const files = await readGuestFiles(io, {
+					exit: exitPath,
+					log: logPath,
+					offset: follower.offset,
+					count: READ_CHUNK,
+				});
+				follower.accept(files.data);
+				const exit = files.exit?.trim() ?? "";
+				// The exit file is written last and read before the log, so once it is there the log
+				// is complete and is drained to its end.
+				if (follower.offset < files.size) await follower.drain(exit !== "");
 				if (exit !== "") code = exit;
 				else if (!/^(running|queued)$/i.test(status ?? "")) deadPolls++;
 				else deadPolls = 0;
@@ -328,7 +416,8 @@ async function taskStarted(
 	step: string,
 	c: {
 		task: string;
-		files: string[];
+		exitPath: string;
+		logPath: string;
 		deadline: number;
 		windowMs: number;
 		intervalMs: number;
@@ -340,8 +429,13 @@ async function taskStarted(
 		try {
 			if (/^(running|queued)$/i.test((await taskStatus(io, c.task)) ?? ""))
 				return true;
-			for (const f of c.files)
-				if ((await readSoft(io, f, 0, 1)).length > 0) return true;
+			const files = await readGuestFiles(io, {
+				exit: c.exitPath,
+				log: c.logPath,
+				offset: 0,
+				count: 1,
+			});
+			if (files.exit !== null || files.size > 0) return true;
 			lastError = undefined;
 		} catch (err) {
 			if (!isTransientPoll(err)) throw err;

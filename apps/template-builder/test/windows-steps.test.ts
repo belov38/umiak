@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
+	chmodSync,
+	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -538,6 +540,81 @@ exit $bad
 			);
 			expect(r.stdout + r.stderr).toBe("");
 			expect(r.status).toBe(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("run-step.ps1 (pwsh)", () => {
+	it("a log write blocked by another handle never fails the step; the line is written later", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-run-step-"));
+		try {
+			const logs = join(dir, "logs");
+			const wrapper = read("run-step.ps1");
+			const patched = wrapper
+				.replace("$logDir = 'C:\\sbx-build\\logs'", `$logDir = '${logs}'`)
+				.replace("$logRetries = 40", "$logRetries = 3")
+				.replace("$logRetryMs = 250", "$logRetryMs = 50");
+			expect(patched).toContain(`$logDir = '${logs}'`);
+			expect(patched).toContain("$logRetries = 3");
+			expect(patched).toContain("$logRetryMs = 50");
+			mkdirSync(join(dir, "build", "steps"), { recursive: true });
+			writeFileSync(join(dir, "build", "run-step.ps1"), patched);
+			// The step holds the log without any sharing (an exclusive flock on Unix) longer than
+			// the wrapper retries, prints a line meanwhile, then lets go.
+			writeFileSync(
+				join(dir, "build", "steps", "t.ps1"),
+				`#requires -Version 7
+$h = [System.IO.File]::Open($env:SBX_TEST_LOG, 'Open', 'ReadWrite', 'None')
+Write-Output 'during-lock'
+Start-Sleep -Milliseconds 1500
+$h.Dispose()
+Write-Output 'after-lock'
+exit 0
+`,
+			);
+			// run-step.ps1 finds pwsh 7 at $env:ProgramFiles\PowerShell\7\pwsh.exe.
+			const exe = join(dir, "pf", "PowerShell", "7", "pwsh.exe");
+			mkdirSync(join(dir, "pf", "PowerShell", "7"), { recursive: true });
+			const real = spawnSync(
+				PWSH,
+				["-NoProfile", "-Command", "[Environment]::ProcessPath"],
+				{ encoding: "utf8" },
+			).stdout.trim();
+			writeFileSync(exe, `#!/bin/sh\nexec '${real}' "$@"\n`);
+			chmodSync(exe, 0o755);
+
+			const r = spawnSync(
+				PWSH,
+				[
+					"-NoProfile",
+					"-NonInteractive",
+					"-File",
+					join(dir, "build", "run-step.ps1"),
+					"-Step",
+					"t",
+				],
+				{
+					encoding: "utf8",
+					env: {
+						...process.env,
+						NO_COLOR: "1",
+						ProgramFiles: join(dir, "pf"),
+						SBX_TEST_LOG: join(logs, "t.log"),
+					},
+				},
+			);
+			expect(r.stderr).toBe("");
+			expect(r.status).toBe(0);
+			expect(readFileSync(join(logs, "t.exit"), "utf8")).toBe("0");
+			const lines = readFileSync(join(logs, "t.log"), "utf8").split("\n");
+			expect(lines.filter((l) => !l.startsWith("run-step:"))).toEqual([
+				"during-lock",
+				"after-lock",
+				"",
+			]);
+			expect(lines.at(-2)).toBe("run-step: t: exit code 0");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

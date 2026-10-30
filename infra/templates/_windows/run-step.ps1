@@ -6,6 +6,7 @@
 # start); the exit code goes to <n>.exit, written last through a rename from
 # <n>.exit.tmp, so the builder never reads a partial value.
 # Steps get SBX_BUILD_DIR = <drive>:\build of the build ISO.
+# A log write never fails the step: another handle may hold the log for a while.
 # Runs in Windows PowerShell 5.1: keep this file ASCII and 5.1-compatible.
 param(
     [Parameter(Mandatory = $true)]
@@ -20,15 +21,51 @@ $exitFile = Join-Path $logDir "$Step.exit"
 $exitTmp = "$exitFile.tmp"
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 
-function Write-Log([string]$Line) {
-    [System.IO.File]::AppendAllText($log, $Line + "`n", $utf8)
+# Retries of one log write while another handle locks the log out.
+$logRetries = 40
+$logRetryMs = 250
+# Lines not written yet; they go out with the next write that succeeds.
+$pending = New-Object System.Text.StringBuilder
+# After a write gave up, the next lines try once each, so a log that stays locked does not slow
+# the step down; the first write that gets through ends that.
+$logStuck = $false
+
+function Open-Log([System.IO.FileMode]$Mode) {
+    [System.IO.File]::Open($log, $Mode, [System.IO.FileAccess]::Write, [System.IO.FileShare]'ReadWrite, Delete')
+}
+
+# Never throws.
+function Write-Log([string]$Line, [switch]$Final) {
+    [void]$script:pending.Append($Line).Append("`n")
+    $tries = $logRetries
+    if ($script:logStuck -and -not $Final) { $tries = 1 }
+    for ($i = 0; $i -lt $tries; $i++) {
+        try {
+            $bytes = $utf8.GetBytes($script:pending.ToString())
+            $f = Open-Log ([System.IO.FileMode]::Append)
+            try { $f.Write($bytes, 0, $bytes.Length) } finally { $f.Dispose() }
+            [void]$script:pending.Clear()
+            $script:logStuck = $false
+            return
+        } catch {
+            $e = $_.Exception
+            if ($e.InnerException) { $e = $e.InnerException }
+            # Only a sharing or lock violation goes away by waiting.
+            if (-not ($e -is [System.IO.IOException]) -or
+                $e -is [System.IO.FileNotFoundException] -or
+                $e -is [System.IO.DirectoryNotFoundException]) { break }
+            if ($i + 1 -lt $tries) { Start-Sleep -Milliseconds $logRetryMs }
+        }
+    }
+    $script:logStuck = $true
 }
 
 $code = 1
 try {
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $exitFile, $exitTmp
-    [System.IO.File]::WriteAllText($log, '', $utf8)
+    # Truncate; a log that cannot be truncated is appended to.
+    try { (Open-Log ([System.IO.FileMode]::Create)).Dispose() } catch { }
 
     # A missing Storage module throws even with SilentlyContinue.
     $vol = $null
@@ -73,10 +110,10 @@ try {
     if ($null -eq $code) { $code = 1 }
 } catch {
     $code = 1
-    try { Write-Log "run-step: $($_.Exception.Message)" } catch { }
+    Write-Log "run-step: $($_.Exception.Message)"
 }
 
-try { Write-Log "run-step: ${Step}: exit code $code" } catch { }
+Write-Log "run-step: ${Step}: exit code $code" -Final
 Set-Content -LiteralPath $exitTmp -Value ([string]$code) -NoNewline -Encoding Ascii
 Move-Item -LiteralPath $exitTmp -Destination $exitFile -Force
 exit $code
