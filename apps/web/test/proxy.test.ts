@@ -30,6 +30,7 @@ describe("guard (S8 §5.1, §5.6)", () => {
 
 	it("no identity header: 401 on every path but /healthz", () => {
 		expect(g("GET", "/app")?.status).toBe(401);
+		expect(g("GET", "/")?.status).toBe(401);
 		expect(g("GET", "/admin")?.status).toBe(401);
 		expect(g("GET", "/cms-api/users")?.status).toBe(401);
 		expect(g("GET", "/app", { "x-auth-request-email": "  " })?.status).toBe(
@@ -75,6 +76,11 @@ describe("proxy", () => {
 		expect(res.headers.get("content-security-policy")).toContain(
 			"frame-ancestors 'self'",
 		);
+	});
+
+	it("the app root goes through the guard first: 401 without the header", () => {
+		expect(proxy(req("GET", "/")).status).toBe(401);
+		expect(proxy(req("GET", "/", SIGNED_IN)).status).toBe(200);
 	});
 
 	it("POST with Origin https://evil: 403", () => {

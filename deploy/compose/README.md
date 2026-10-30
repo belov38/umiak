@@ -244,6 +244,9 @@ NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
   docker compose -f deploy/compose/compose.yaml exec oauth2-proxy /bin/busybox wget -qO- http://web:3000/healthz  # ok
   ```
 
+- База: `web` (как и `web-migrate`, `api`, `worker`) ходит в Postgres под общим суперпользователем `sbx` из
+  `*db-env`. Отдельные роли Postgres из S8 §12 (у `web` — только схема `payload`, без `INSERT` в `api_keys`/`ssh_keys`)
+  — работа S12.
 - Postgres: `max_connections=200` (`api` ~36 соединений, `worker` ~37, `web` ~11, плюс Keycloak и одноразовые).
 - `worker` включает `ctl-idp-sync` (S8 §20.1): раз в 5 минут читает пользователей realm `sbx` через Admin API
   Keycloak (`http://keycloak:8080`, клиент `sbx-worker` с ролью `view-users`) и деактивирует в Payload тех, кто
@@ -327,14 +330,14 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 - `config/sbx.yaml` — топология (узел `pve`, хранилище `local-lvm`) и сборки шаблона 599 и 597 из S5; их в базу
   загружает `sbx-admin bootstrap` в `migrate`. Шаблоны, размеры, квоты и пулы `api` и `worker` берут из Payload
   (S8; правятся в `/admin`), секции `templates`/`sizes`/`quotas`/`pools` файла они не читают (начальные значения
-  Payload совпадают с ними). После правки топологии или сборок:
+  Payload совпадают с ними; пулы — коллекция `pool-targets` в `/admin`). После правки топологии или сборок
+  достаточно перезапустить `migrate` (bootstrap идемпотентен, `api` и `worker` читают их из базы):
 
   ```sh
-  docker compose -f deploy/compose/compose.yaml up -d --force-recreate migrate worker api
+  docker compose -f deploy/compose/compose.yaml up -d --force-recreate migrate
   ```
 
-  (bootstrap идемпотентен). Правки `deploy/compose/.env` и файлов секретов — так же пересоздать потребителей
-  (`up -d --force-recreate <сервисы>`).
+  Правки `deploy/compose/.env` и файлов секретов: пересоздать их потребителей (`up -d --force-recreate <сервисы>`).
 - `config/identity.yaml` — файл личностей `api` (`SBX_IDENTITY_FILE`): команды, пользователи, командные ключи по
   sha256. Загружается при каждом старте `api` (только upsert). В dev пуст: люди появляются при первом входе.
 - `deploy/compose/.env` (git-ignored, пример — `.env.example`): Proxmox (`SBX_PVE_URL`, `SBX_PVE_TLS_NAME`,

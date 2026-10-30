@@ -144,7 +144,7 @@ fi
 cat >.env <<ENV
 # Written by infra/dev-cp/deploy.sh; changes are overwritten on the next deploy.
 COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml
-# The PVE host over the LAN. The worker reads the API URL from secrets/devcp/sbx.yaml.
+# The PVE host over the LAN. migrate (bootstrap) loads the API URL from secrets/devcp/sbx.yaml.
 SBX_PVE_URL=https://$PVE_LAN_IP:8006
 SBX_PVE_TLS_NAME=pve
 SBX_NODE_SSH_HOST=$PVE_LAN_IP
