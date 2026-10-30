@@ -28,7 +28,7 @@
 // A container is removed only when its owner is known to be gone; one of a
 // live owner (another session's run, a watch mode), of another host, or
 // without owner labels (started by an older global-setup) is left alone.
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { promisify } from "node:util";
@@ -64,6 +64,35 @@ async function startedAt(pid: number): Promise<string | null> {
 		const e = err as { code?: unknown; stdout?: string };
 		if (e.code === 1 && (e.stdout ?? "").trim() === "") return null;
 		throw err;
+	}
+}
+
+/** startedAt without awaiting: null when there is no such process or `ps` cannot tell. */
+function startedAtSync(pid: number): string | null {
+	try {
+		const s = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+			env: psEnv(),
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return s === "" ? null : s;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Sends SIGTERM to `pid` only while it is the process that started at
+ * `started` (`ps -o lstart=`): a pid that was reused by another process, or
+ * a start time that is unknown, gets nothing. True when the signal was sent.
+ */
+export function stopProcess(pid: number, started: string | null): boolean {
+	if (started === null || startedAtSync(pid) !== started) return false;
+	try {
+		process.kill(pid, "SIGTERM");
+		return true;
+	} catch {
+		return false; // Gone meanwhile.
 	}
 }
 
@@ -218,7 +247,13 @@ process.stdout.write(String(child.pid));
 `;
 
 export interface Watchdog {
-	/** Stops the watchdog (after the owner removed the container itself). */
+	/**
+	 * Stops the watchdog (after the owner removed the container itself). The
+	 * signal goes only to the watchdog process itself (its start time is
+	 * checked, against a pid reused after the watchdog exited); a watchdog
+	 * that cannot be identified is left to exit on its own once the owner
+	 * is gone.
+	 */
 	stop(): void;
 }
 
@@ -241,15 +276,10 @@ export function startWatchdog(
 					reject(err ?? new Error(`watchdog launcher printed ${stdout}`));
 					return;
 				}
-				resolve({
-					stop: () => {
-						try {
-							process.kill(pid);
-						} catch {
-							// Already gone.
-						}
-					},
-				});
+				startedAt(pid).then(
+					(started) => resolve({ stop: () => stopProcess(pid, started) }),
+					() => resolve({ stop: () => {} }),
+				);
 			},
 		);
 	});

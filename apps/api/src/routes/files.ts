@@ -261,8 +261,9 @@ const putChunkRoute = createRoute({
 				`\`invalid_state\` (already committed), ${notReady409}`,
 		),
 		408: errorResponse(
-			"`request_timeout` (retryable): no bytes of the chunk arrived for 30 s; " +
-				"resume from the offset of HEAD .../uploads/{upload}",
+			"`request_timeout` (retryable): no bytes of the chunk arrived for 30 s " +
+				"(details.idleTimeoutSeconds), or the chunk took over 10 min from its first read " +
+				"(details.timeoutSeconds); resume from the offset of HEAD .../uploads/{upload}",
 		),
 		413: errorResponse("`payload_too_large`: the chunk is over 8 MiB"),
 		...ERROR_RESPONSES,

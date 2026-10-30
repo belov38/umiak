@@ -1444,7 +1444,7 @@ export interface components {
              * @example xterm-256color
              */
             term?: string;
-            /** @description Guest user (default `user`; `root` is allowed) */
+            /** @description Guest user (default: the login user of the sandbox's template, `user` unless the template sets another; `root` is allowed) */
             user?: string;
         };
         CreateSandboxRequest: {
@@ -2420,7 +2420,7 @@ export interface components {
             tags?: components["schemas"]["Labels"];
             /** @description Process timeout (status timed_out). sync: default 60, at most 600, null not allowed. stream and detached: default none (null). */
             timeoutSeconds?: number | null;
-            /** @description Guest user (default `user`; `root` is allowed) */
+            /** @description Guest user (default: the login user of the sandbox's template, `user` unless the template sets another; `root` is allowed) */
             user?: string;
         };
         /** @description The result of a sync command: the tail (up to 4 MiB) of each stream */
@@ -5080,7 +5080,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `request_timeout` (retryable): no bytes of the chunk arrived for 30 s; resume from the offset of HEAD .../uploads/{upload} */
+            /** @description `request_timeout` (retryable): no bytes of the chunk arrived for 30 s (details.idleTimeoutSeconds), or the chunk took over 10 min from its first read (details.timeoutSeconds); resume from the offset of HEAD .../uploads/{upload} */
             408: {
                 headers: {
                     [name: string]: unknown;

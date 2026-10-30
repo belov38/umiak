@@ -516,6 +516,41 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		}
 	});
 
+	it("without user the command runs as the template's login user; an explicit user wins", async () => {
+		const s = await readySandbox(w);
+		const config = w.env.config;
+		const realTemplate = config.template.bind(config);
+		const realStart = w.agent.start.bind(w.agent);
+		const users: string[] = [];
+		config.template = async (slug) => {
+			const t = await realTemplate(slug);
+			return t === null ? null : { ...t, loginUser: "dev" };
+		};
+		w.agent.start = (m, req, opts) => {
+			users.push(req.spec.user);
+			return realStart(m, req, opts);
+		};
+		try {
+			const r = await run({ command: "true", mode: "detached" }, s.commands);
+			expect(r.status).toBe(201);
+			expect((r.body as Any).user).toBe("dev");
+			const p = await h.request("POST", `/v1/sandboxes/${s.ref}/ptys`, {
+				json: { cols: 80, rows: 24 },
+			});
+			expect(p.status).toBe(201);
+			expect((p.body as Any).user).toBe("dev");
+			const root = await run(
+				{ command: "true", mode: "detached", user: "root" },
+				s.commands,
+			);
+			expect((root.body as Any).user).toBe("root");
+			expect(users).toEqual(["dev", "dev", "root"]);
+		} finally {
+			config.template = realTemplate;
+			w.agent.start = realStart;
+		}
+	});
+
 	it("definite refusals of Start mark the row failed_to_start", async () => {
 		const refusals: [string, number][] = [
 			["invalid_argument", 400],

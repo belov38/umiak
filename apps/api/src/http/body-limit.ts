@@ -1,8 +1,9 @@
 // Request body limits (S7 §5.11, §23.3). One middleware per listener picks
 // the limit and the timeout by method and path; streamed file bodies have
 // neither. Bounded bodies must arrive within a total deadline, except upload
-// chunks: a slow but steady client may take long over one, so only a stall
-// (no new bytes while the handler waits for them) ends it.
+// chunks: a slow but steady client may take long over one, so a stall (no
+// new bytes while the handler waits for them) ends it, and a cap of 10 min
+// from the first read keeps a trickle from holding it open for ever.
 import type { MiddlewareHandler } from "hono";
 import type { ApiEnv } from "../deps.ts";
 import { ApiError, payloadTooLargeError, validationError } from "./errors.ts";
@@ -60,6 +61,8 @@ export function incompleteBodyError(): ApiError {
 export const BODY_TIMEOUT_MS = 60_000;
 /** An upload chunk fails after this long without new bytes while it is read. */
 export const BODY_IDLE_TIMEOUT_MS = 30_000;
+/** An upload chunk fails this long after its first read, however steady. */
+export const UPLOAD_CHUNK_TIMEOUT_MS = 600_000;
 
 function bodyTimeoutError(ms: number): ApiError {
 	return validationError([
@@ -77,15 +80,28 @@ function bodyTimeoutError(ms: number): ApiError {
  */
 function bodyIdleError(ms: number): ApiError {
 	const s = Math.round(ms / 1000);
+	return chunkTimeoutError(`no bytes of the request body arrived for ${s} s`, {
+		idleTimeoutSeconds: s,
+	});
+}
+
+/** An upload chunk that took longer than its cap: as bodyIdleError. */
+function chunkCapError(ms: number): ApiError {
+	const s = Math.round(ms / 1000);
+	return chunkTimeoutError(`the request body did not arrive within ${s} s`, {
+		timeoutSeconds: s,
+	});
+}
+
+function chunkTimeoutError(
+	what: string,
+	details: Record<string, number>,
+): ApiError {
 	return new ApiError(
 		408,
 		"request_timeout",
-		`no bytes of the request body arrived for ${s} s; resume the upload from the offset of HEAD .../uploads/{upload}`,
-		{
-			retryable: true,
-			details: { idleTimeoutSeconds: s },
-			headers: { Connection: "close" },
-		},
+		`${what}; resume the upload from the offset of HEAD .../uploads/{upload}`,
+		{ retryable: true, details, headers: { Connection: "close" } },
 	);
 }
 
@@ -94,6 +110,8 @@ export interface BodyLimitOptions {
 	timeoutMs?: number;
 	/** Stall timeout of upload chunks; default BODY_IDLE_TIMEOUT_MS. */
 	idleTimeoutMs?: number;
+	/** Cap of an upload chunk from its first read; default UPLOAD_CHUNK_TIMEOUT_MS. */
+	chunkTimeoutMs?: number;
 }
 
 /**
@@ -102,16 +120,18 @@ export interface BodyLimitOptions {
  * it is passed through a counting stream, so nothing is buffered before
  * authentication (which runs before the handler). A bounded body must
  * arrive within `timeoutMs`, else 400 validation; a body that breaks is 400
- * validation too, not 500. An upload chunk has no total deadline: it fails
- * with 408 request_timeout (retryable) only when the handler waits for bytes
- * for `idleTimeoutMs` and none come. Routes without a limit (streamed files)
- * have no timeout either: their uploads may take long.
+ * validation too, not 500. An upload chunk has no request deadline: it fails
+ * with 408 request_timeout (retryable) when the handler waits for bytes for
+ * `idleTimeoutMs` and none come, or `chunkTimeoutMs` after the handler first
+ * read it. Routes without a limit (streamed files) have no timeout either:
+ * their uploads may take long.
  */
 export function bodyLimits(
 	o: BodyLimitOptions = {},
 ): MiddlewareHandler<ApiEnv> {
 	const timeoutMs = o.timeoutMs ?? BODY_TIMEOUT_MS;
 	const idleTimeoutMs = o.idleTimeoutMs ?? BODY_IDLE_TIMEOUT_MS;
+	const chunkTimeoutMs = o.chunkTimeoutMs ?? UPLOAD_CHUNK_TIMEOUT_MS;
 	return async (c, next) => {
 		const { limit, timeout } = bodyRule(c.req.method, c.req.path);
 		const raw = c.req.raw;
@@ -126,10 +146,13 @@ export function bodyLimits(
 		// The first failure of the body; the answer once the handler is done.
 		let failure: ApiError | null = null;
 		let timer: NodeJS.Timeout | undefined;
+		// The cap of an upload chunk, from its first read.
+		let cap: NodeJS.Timeout | undefined;
 		let size = 0;
 		const fail = (ctrl: ReadableStreamDefaultController, e: ApiError) => {
 			failure ??= e;
 			clearTimeout(timer);
+			clearTimeout(cap);
 			source.cancel().catch(() => {});
 			try {
 				ctrl.error(failure);
@@ -157,6 +180,13 @@ export function bodyLimits(
 				},
 				async pull(ctrl) {
 					if (timeout === "idle") {
+						if (cap === undefined) {
+							cap = setTimeout(
+								() => fail(ctrl, chunkCapError(chunkTimeoutMs)),
+								chunkTimeoutMs,
+							);
+							cap.unref?.();
+						}
 						arm(ctrl, bodyIdleError(idleTimeoutMs), idleTimeoutMs);
 					}
 					let r: ReadableStreamReadResult<Uint8Array>;
@@ -169,6 +199,7 @@ export function bodyLimits(
 					if (failure !== null) return;
 					if (r.done) {
 						clearTimeout(timer);
+						clearTimeout(cap);
 						ctrl.close();
 						return;
 					}
@@ -178,6 +209,7 @@ export function bodyLimits(
 				},
 				cancel(reason) {
 					clearTimeout(timer);
+					clearTimeout(cap);
 					return source.cancel(reason);
 				},
 			},
@@ -189,6 +221,7 @@ export function bodyLimits(
 			await next();
 		} finally {
 			clearTimeout(timer);
+			clearTimeout(cap);
 		}
 		// Whatever the handler made of the failed read (a JSON parse error,
 		// a broken agent upload), the answer is the body's failure.

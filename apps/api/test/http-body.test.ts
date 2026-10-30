@@ -242,6 +242,42 @@ describe("body limit", () => {
 			expect(body.error.message).toMatch(/30 s/);
 		});
 
+		it("a chunk held open by a byte every 29 s is 408 after 10 min in all", async () => {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+			const t = trickle();
+			let done = false;
+			const res = send(app(), "PUT", CHUNK, t.stream).finally(() => {
+				done = true;
+			});
+			// 20 bytes over 580 s: never 30 s idle.
+			for (let i = 0; i < 20; i++) {
+				await t.waiting();
+				await vi.advanceTimersByTimeAsync(29_000);
+				t.send(new Uint8Array(1));
+			}
+			await t.waiting();
+			await vi.advanceTimersByTimeAsync(19_000);
+			expect(done).toBe(false);
+			await vi.advanceTimersByTimeAsync(1_000);
+			const r = await res;
+			expect(r.status).toBe(408);
+			expect(r.headers.get("connection")).toBe("close");
+			const body = (await r.json()) as {
+				error: {
+					code: string;
+					retryable: boolean;
+					message: string;
+					details: Record<string, unknown>;
+				};
+			};
+			expect(body.error).toMatchObject({
+				code: "request_timeout",
+				retryable: true,
+				details: { timeoutSeconds: 600 },
+			});
+			expect(body.error.message).toMatch(/600 s/);
+		});
+
 		it("a handler that waits 40 s before its first read (for the sandbox) still gets the chunk", async () => {
 			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 			const a = new Hono<ApiEnv>();

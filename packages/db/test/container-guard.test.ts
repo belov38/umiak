@@ -12,6 +12,7 @@ import {
 	ownerOf,
 	removeOrphans,
 	startWatchdog,
+	stopProcess,
 } from "../src/testing/container-guard.ts";
 import { TEST_PG_IMAGE } from "../src/testing/global-setup.ts";
 
@@ -109,6 +110,27 @@ async function exists(id: string): Promise<boolean> {
 
 const gone = (id: string) =>
 	until(async () => !(await exists(id)), "the container removed");
+
+describe("stopProcess (Watchdog.stop)", () => {
+	it("sends SIGTERM only to the process with the recorded start time", async () => {
+		const p = await ownerProcess();
+		try {
+			// Another start time: the pid was reused by another process.
+			expect(stopProcess(p.owner.pid, "Thu Jan  1 00:00:00 1970")).toBe(false);
+			expect(await ownerOf(p.owner.pid)).toEqual(p.owner);
+			// Unknown start time: nothing is sent.
+			expect(stopProcess(p.owner.pid, null)).toBe(false);
+			expect(await ownerOf(p.owner.pid)).toEqual(p.owner);
+			expect(stopProcess(p.owner.pid, p.owner.started)).toBe(true);
+			await until(
+				async () => (await ownerOf(p.owner.pid)) === null,
+				"the process stopped",
+			);
+		} finally {
+			await p.kill();
+		}
+	});
+});
 
 describe.skipIf(!dockerAvailable())("test container guard", () => {
 	afterAll(async () => {

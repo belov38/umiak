@@ -35,7 +35,8 @@ class StartCommandRequest:
             Example: {'session': '42'}.
         timeout_seconds (int | None | Unset): Process timeout (status timed_out). sync: default 60, at most 600, null
             not allowed. stream and detached: default none (null).
-        user (str | Unset): Guest user (default `user`; `root` is allowed)
+        user (str | Unset): Guest user (default: the login user of the sandbox's template, `user` unless the template
+            sets another; `root` is allowed)
     """
 
     argv: list[str] | None | Unset = UNSET

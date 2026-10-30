@@ -56,11 +56,15 @@ export function effectiveTimeout(b: StartCommandBody): number | null {
 	return (b.mode ?? "sync") === "sync" ? SYNC_DEFAULT_TIMEOUT_SECONDS : null;
 }
 
+/** The user of a request without `user`: the template's login user (§23.9). */
+export const DEFAULT_COMMAND_USER = "user";
+
 function agentSpec(b: StartCommandBody): AgentCommandSpec {
 	const spec: AgentCommandSpec = {
 		cwd: b.cwd ?? "",
 		env: b.env ?? {},
-		user: b.user ?? "user",
+		// Set by startPlanned (StartPlan.user).
+		user: b.user ?? DEFAULT_COMMAND_USER,
 		stdin: b.stdin ?? false,
 		timeoutMs: (effectiveTimeout(b) ?? 0) * 1000,
 		tags: b.tags ?? {},
@@ -79,7 +83,7 @@ function coreSpec(b: StartCommandBody, requestId: string): CommandSpec {
 		mode: b.mode ?? "sync",
 		timeoutSeconds: effectiveTimeout(b),
 		requestId,
-		user: b.user ?? "user",
+		user: b.user ?? DEFAULT_COMMAND_USER,
 		tags: b.tags ?? {},
 	};
 }
@@ -164,6 +168,11 @@ export interface StartPlan {
 	/** The command row (the requestId is added by the start). */
 	core: Omit<CommandSpec, "requestId">;
 	agent: AgentCommandSpec;
+	/**
+	 * The `user` of the request; without one the command runs as the login
+	 * user of the sandbox's template (`user` when the template has none).
+	 */
+	user: string | undefined;
 	/** Hashed with the Idempotency-Key: the validated client body. */
 	hashBody: unknown;
 }
@@ -176,6 +185,7 @@ export function commandPlan(body: StartCommandBody): StartPlan {
 			body.stdin === true ? ["process.v1", "process.stdin"] : ["process.v1"],
 		core,
 		agent: agentSpec(body),
+		user: body.user,
 		hashBody: body,
 	};
 }
@@ -220,8 +230,13 @@ export async function startPlanned(
 		throw agentErrorToHttp(e);
 	}
 
+	const user =
+		plan.user ??
+		(await deps.config.template(sandbox.templateSlug))?.loginUser ??
+		DEFAULT_COMMAND_USER;
+	const agentCmd: AgentCommandSpec = { ...plan.agent, user };
 	const requestId = startRequestId(auth, idemKey);
-	const spec: CommandSpec = { ...plan.core, requestId };
+	const spec: CommandSpec = { ...plan.core, user, requestId };
 	const { command, replayed } =
 		idemKey === undefined
 			? {
@@ -246,7 +261,7 @@ export async function startPlanned(
 	try {
 		const r = await deps.agent.start(
 			machineId,
-			{ commandId: command.id, spec: plan.agent },
+			{ commandId: command.id, spec: agentCmd },
 			// Not aborted with the request: a Start cut short has an unknown outcome.
 			{ requestId },
 		);
@@ -261,11 +276,20 @@ export async function startPlanned(
 		// Unreachable, DeadlineExceeded, or an agent error that may come
 		// after the launch (`internal`): the agent may have started it, so
 		// the row stays `starting` and only a keyed retry repeats the Start.
-		throw startUnavailable(
-			command.id,
-			idemKey !== undefined,
-			isAgentOutcomeUnknown(e),
-		);
+		const unreachable = isAgentOutcomeUnknown(e);
+		if (!unreachable) {
+			// An answer that is not a refusal: kept in the log, the client
+			// sees only agent_unavailable.
+			deps.log.warn(
+				{
+					err: e instanceof Error ? e.message : String(e),
+					code: e instanceof AgentCallError ? e.code : undefined,
+					commandId: command.id,
+				},
+				"agent Start failed with an unknown outcome",
+			);
+		}
+		throw startUnavailable(command.id, idemKey !== undefined, unreachable);
 	}
 
 	await svc.markCommandRunning(command.id, info.pid);

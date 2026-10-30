@@ -18,7 +18,11 @@ import {
 	runPtySocket,
 } from "../commands/pty-socket.ts";
 import { streamOwner } from "../commands/registry.ts";
-import { type StartPlan, startPlanned } from "../commands/run.ts";
+import {
+	DEFAULT_COMMAND_USER,
+	type StartPlan,
+	startPlanned,
+} from "../commands/run.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { ApiError, validationError } from "../http/errors.ts";
 import {
@@ -203,7 +207,8 @@ function ptyPlan(b: CreatePtyBody): StartPlan {
 		shell,
 		cwd: b.cwd ?? "",
 		env: b.env ?? {},
-		user: b.user ?? "user",
+		// Set by startPlanned (StartPlan.user).
+		user: b.user ?? DEFAULT_COMMAND_USER,
 		pty: { cols, rows, term: b.term ?? PTY_DEFAULT_TERM },
 		stdin: false,
 		timeoutMs: 0,
@@ -218,10 +223,11 @@ function ptyPlan(b: CreatePtyBody): StartPlan {
 			env: b.env ?? {},
 			mode: "pty",
 			timeoutSeconds: null,
-			user: b.user ?? "user",
+			user: b.user ?? DEFAULT_COMMAND_USER,
 			tags: {},
 		},
 		agent,
+		user: b.user,
 		// Wrapped: the same key and body on POST .../commands is another request.
 		hashBody: { pty: b },
 	};

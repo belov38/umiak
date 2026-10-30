@@ -11,8 +11,13 @@ ALTER TABLE runtime.commands
   ADD COLUMN reason text,
   ADD COLUMN output_truncated text;
 
--- The CHECK is added NOT VALID (no scan under the ACCESS EXCLUSIVE lock of
--- ADD CONSTRAINT) and validated separately (SHARE UPDATE EXCLUSIVE).
+-- The CHECK is added NOT VALID and then validated. In this file that brings
+-- no lock benefit: the runner applies it in one transaction, so the ACCESS
+-- EXCLUSIVE lock of the ALTER TABLE above is held until commit and the
+-- VALIDATE scan runs under it too. The new columns are null in every
+-- existing row, so the scan only reads the table; runtime.commands is
+-- small enough for that. A large table would need the VALIDATE in a later
+-- migration (its own transaction).
 ALTER TABLE runtime.commands
   ADD CONSTRAINT commands_reason_check CHECK (reason IN (
     'none', 'signal', 'timeout', 'oom', 'pty_idle', 'reboot', 'shim_lost', 'start_failed'))

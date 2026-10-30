@@ -42,7 +42,8 @@ export const CreatePtyRequest = z
 			description: "Variables of this terminal only; values are never stored",
 		}),
 		user: z.string().min(1).max(64).optional().openapi({
-			description: "Guest user (default `user`; `root` is allowed)",
+			description:
+				"Guest user (default: the login user of the sandbox's template, `user` unless the template sets another; `root` is allowed)",
 		}),
 		term: z
 			.string()

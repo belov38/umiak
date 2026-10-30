@@ -1061,7 +1061,7 @@
 						"type": "string"
 					},
 					"user": {
-						"description": "Guest user (default `user`; `root` is allowed)",
+						"description": "Guest user (default: the login user of the sandbox's template, `user` unless the template sets another; `root` is allowed)",
 						"maxLength": 64,
 						"minLength": 1,
 						"type": "string"
@@ -3771,7 +3771,7 @@
 						]
 					},
 					"user": {
-						"description": "Guest user (default `user`; `root` is allowed)",
+						"description": "Guest user (default: the login user of the sandbox's template, `user` unless the template sets another; `root` is allowed)",
 						"maxLength": 64,
 						"minLength": 1,
 						"type": "string"
@@ -8265,7 +8265,7 @@
 								}
 							}
 						},
-						"description": "`request_timeout` (retryable): no bytes of the chunk arrived for 30 s; resume from the offset of HEAD .../uploads/{upload}"
+						"description": "`request_timeout` (retryable): no bytes of the chunk arrived for 30 s (details.idleTimeoutSeconds), or the chunk took over 10 min from its first read (details.timeoutSeconds); resume from the offset of HEAD .../uploads/{upload}"
 					},
 					"409": {
 						"content": {

@@ -25,7 +25,8 @@ class CreatePtyRequest:
         env (CreatePtyRequestEnv | Unset):
         rows (int | Unset): Rows, 1 to 1000 (default 24) Example: 32.
         term (str | Unset): TERM of the terminal (default xterm-256color) Example: xterm-256color.
-        user (str | Unset): Guest user (default `user`; `root` is allowed)
+        user (str | Unset): Guest user (default: the login user of the sandbox's template, `user` unless the template
+            sets another; `root` is allowed)
     """
 
     cols: int | Unset = UNSET
