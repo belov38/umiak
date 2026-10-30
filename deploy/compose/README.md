@@ -228,16 +228,22 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 ## Публичные адреса
 
 По умолчанию стек живёт на фиксированных портах localhost. За TLS-прокси (ingress, Tailscale Serve и т. п.)
-публичные адреса задаются в `deploy/compose/.env`, все вместе: они записаны в realm, oauth2-proxy и `/v1/meta`.
+публичные адреса задаются в `deploy/compose/.env`: они записаны в realm, oauth2-proxy и `/v1/meta`. Зависимые
+значения (issuer, redirect URL, адрес SSO gateway) по умолчанию выводятся из `SBX_KEYCLOAK_URL` и
+`SBX_APP_ORIGIN`, так что обычно хватает `SBX_API_PUBLIC_URL`, `SBX_APP_ORIGIN`, `SBX_KEYCLOAK_URL`,
+`SBX_OAUTH2_PROXY_WHITELIST_DOMAIN`, настроек cookie и прокси.
 
 | Переменная | По умолчанию | Куда идёт |
 |---|---|---|
 | `SBX_API_PUBLIC_URL` | `http://localhost:8080` | `api` `SBX_API_URL` (`/v1/meta` `apiUrl`) |
 | `SBX_APP_ORIGIN` | `http://localhost:4180` | `api` `SBX_APP_URL` и `SBX_APP_ORIGIN` (Origin для небезопасных методов на proxied listener); web origin и post-logout redirect клиента `oauth2-proxy` в realm |
 | `SBX_KEYCLOAK_URL` | `http://localhost:8180` | Keycloak `KC_HOSTNAME` |
-| `SBX_OIDC_ISSUER` | `http://localhost:8180/realms/sbx` | `api` и oauth2-proxy (issuer, адрес входа). Должен быть `<SBX_KEYCLOAK_URL>/realms/sbx` |
-| `SBX_OAUTH2_PROXY_REDIRECT_URL` | `http://localhost:4180/oauth2/callback` | oauth2-proxy `redirect_url`, redirect URI клиента в realm |
-| `SBX_OAUTH2_PROXY_WHITELIST_DOMAIN` | `localhost:4180` | oauth2-proxy `whitelist_domains` (host:port адреса приложения) |
+| `SBX_OIDC_ISSUER` | `<SBX_KEYCLOAK_URL>/realms/sbx` | `api` и oauth2-proxy (issuer, адрес входа) |
+| `SBX_OAUTH2_PROXY_REDIRECT_URL` | `<SBX_APP_ORIGIN>/oauth2/callback` | oauth2-proxy `redirect_url`, redirect URI клиента в realm |
+| `SBX_OAUTH2_PROXY_WHITELIST_DOMAIN` | `localhost:4180` | oauth2-proxy `whitelist_domains` — host:port из `SBX_APP_ORIGIN`; задаётся отдельно (compose не умеет отрезать схему) |
+| `SBX_GATEWAY_AUTH_URL` | `<SBX_APP_ORIGIN>/sbx-auth/authorize` | gateway: куда отправлять браузер для порта в режиме `sso` |
+| `SBX_KEYCLOAK_PROXY_HEADERS` | пусто | Keycloak `KC_PROXY_HEADERS`: за TLS-прокси `xforwarded` (или `forwarded`) |
+| `SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES` | пусто | Keycloak `KC_PROXY_TRUSTED_ADDRESSES`: адреса прокси (CIDR через запятую) |
 | `SBX_OAUTH2_PROXY_COOKIE_NAME` | `_sbx_session` | имя cookie сессии; за TLS — `__Host-sbx_session` |
 | `SBX_OAUTH2_PROXY_COOKIE_SECURE` | `false` | `true` за TLS (обязательно для `__Host-`) |
 | `SBX_OAUTH2_PROXY_REVERSE_PROXY` | `false` | `true`, если перед oauth2-proxy стоит прокси с `X-Forwarded-*` |

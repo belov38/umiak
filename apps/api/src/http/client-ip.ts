@@ -1,7 +1,7 @@
 // Client address for the request log (S7 §7.1): from `X-Forwarded-For` only
 // when the connection comes from SBX_API_TRUSTED_PROXY_CIDRS (ingress,
-// Tailscale Serve via the Docker bridge, oauth2-proxy), else the address of
-// the connection. Rate limits are per principal, not per address.
+// a TLS proxy on the host, via the Docker bridge, oauth2-proxy), else the
+// address of the connection. Rate limits are per principal, not per address.
 import type { IncomingMessage } from "node:http";
 import { BlockList, isIP } from "node:net";
 import type { MiddlewareHandler } from "hono";

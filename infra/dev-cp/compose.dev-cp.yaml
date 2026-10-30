@@ -7,8 +7,10 @@
 #   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/*, /sbx-auth/*; web in S8)
 #   https://<TS name>:8443/v1  -> 127.0.0.1:8080 api public listener (path kept)
 #   https://<TS name>:10000/   -> 127.0.0.1:8180 Keycloak
-# Containers cannot reach the Serve address, so every service talks to http://keycloak:8080
-# while tokens carry the public issuer (KC_HOSTNAME_BACKCHANNEL_DYNAMIC).
+# The base compose already publishes these ports on loopback, and every service talks to
+# http://keycloak:8080 while tokens carry the public issuer (KC_HOSTNAME_BACKCHANNEL_DYNAMIC):
+# containers cannot reach the Serve address. The values below come from .env and are required
+# (`:?`), so the CT never runs with a localhost default.
 
 # Peers whose X-Forwarded-* headers count: Serve's connections to the published loopback ports
 # arrive from the Docker bridge gateway (172.16.0.0/12 holds Docker's default bridge pools), and
@@ -68,17 +70,14 @@ services:
   keycloak:
     environment:
       KC_HOSTNAME: ${SBX_KEYCLOAK_URL:?set by deploy.sh}
-      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HTTP_ENABLED: "true"
-      KC_PROXY_HEADERS: xforwarded
-      KC_PROXY_TRUSTED_ADDRESSES: *devcp-proxy-cidrs
+      SBX_KEYCLOAK_PROXY_HEADERS: xforwarded
+      SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES: *devcp-proxy-cidrs
       SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:?set by deploy.sh}
       SBX_OAUTH2_PROXY_REDIRECT_URL: ${SBX_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
-    ports: !override
-      - "127.0.0.1:8180:8080"
 
   # S7: the public listener behind Serve (:8443/v1). /v1/meta tells the CLI and SDK the public
-  # names; OIDC discovery and keys come from Keycloak inside the network. Tailscale-User-*
+  # names; OIDC discovery and keys come from Keycloak inside the network (base). Tailscale-User-*
   # headers from Serve are never an identity (the api reads only Authorization here).
   api:
     environment:
@@ -89,12 +88,7 @@ services:
       SBX_SSH_HOST: ${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
       SBX_SSH_PORT: "2222"
       SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}
-      SBX_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/sbx/.well-known/openid-configuration
-      SBX_OIDC_JWKS_URL: http://keycloak:8080/realms/sbx/protocol/openid-connect/certs
       SBX_API_TRUSTED_PROXY_CIDRS: *devcp-proxy-cidrs
-    ports: !override
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:9091:9090"
 
   # S7: browser sessions behind Serve (:8443/). HTTPS on the Serve name: a Secure __Host- cookie
   # (host-only, Path=/). Login goes to the public issuer; redeem, JWKS and profile stay on
@@ -107,5 +101,3 @@ services:
       OAUTH2_PROXY_COOKIE_NAME: __Host-sbx_session
       OAUTH2_PROXY_COOKIE_SECURE: "true"
       OAUTH2_PROXY_REVERSE_PROXY: "true"
-    ports: !override
-      - "127.0.0.1:4180:4180"

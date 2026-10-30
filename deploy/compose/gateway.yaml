@@ -56,6 +56,8 @@ services:
       # "none" (set in .env) turns it off for a stack without api: every route
       # then answers 503 route_lookup_unavailable and SSH logins fail.
       SBX_GATEWAY_API_URL: ${SBX_GATEWAY_API_URL:-http://api:8082}
+      # Port SSO (sso ports): the api's /sbx-auth/authorize behind oauth2-proxy.
+      SBX_GATEWAY_AUTH_URL: ${SBX_GATEWAY_AUTH_URL:-${SBX_APP_ORIGIN:-http://localhost:4180}/sbx-auth/authorize}
       SBX_GATEWAY_API_TOKEN_FILE: /secrets/api-token
       SBX_GATEWAY_SERVICE_TOKENS_FILE: /secrets/service-tokens.json
       SBX_GATEWAY_COOKIE_KEYS_FILE: /secrets/cookie-keys

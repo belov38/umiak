@@ -34,6 +34,16 @@ describe("TrustedProxies.clientOf", () => {
 		expect(p.clientOf(undefined, "1.2.3.4")).toBeUndefined();
 	});
 
+	it("an all-trusted chain: the leftmost hop", () => {
+		expect(p.clientOf("172.18.0.5", "172.18.0.2, 172.18.0.1")).toBe(
+			"172.18.0.2",
+		);
+	});
+
+	it("an IPv4-mapped hop behind an IPv6 peer: plain IPv4", () => {
+		expect(p.clientOf("fd00::1", "::ffff:100.1.1.1")).toBe("100.1.1.1");
+	});
+
 	it("no trusted CIDRs: always the peer", () => {
 		expect(new TrustedProxies([]).clientOf("127.0.0.1", "1.2.3.4")).toBe(
 			"127.0.0.1",

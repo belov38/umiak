@@ -104,13 +104,13 @@ On the CT, `cd ~/boat-dev-clone/deploy/compose`; `docker compose ps|logs|exec` p
 
 ### S7 behind Tailscale Serve (api, Keycloak, oauth2-proxy)
 
-`compose.yaml` has the S7 services and includes `gateway.yaml`; `compose.dev-cp.yaml` publishes them on loopback for Serve and feeds them the `.env` values. The product compose takes the same public URLs as generic variables with localhost defaults (`deploy/compose/README.md`, «Публичные адреса»); the override sets them explicitly so the CT never runs with a localhost default.
+`compose.yaml` has the S7 services and includes `gateway.yaml`; `compose.dev-cp.yaml` publishes them on loopback for Serve and feeds them the `.env` values. The product compose takes the same public URLs as generic variables with localhost defaults (`deploy/compose/README.md`, «Публичные адреса»); the override repeats the ones from `.env` as required values (`${VAR:?}`) so the CT never runs with a localhost default, and adds what the base leaves neutral (Keycloak proxy headers, trusted proxies, the `__Host-` cookie, cross-site port cookies).
 
-| Service | Publish | Settings |
+| Service | Publish (base compose) | Settings |
 |---|---|---|
 | oauth2-proxy | `127.0.0.1:4180:4180` | `OAUTH2_PROXY_REDIRECT_URL=${SBX_OAUTH2_PROXY_REDIRECT_URL}`, issuer and login URL from `SBX_OIDC_ISSUER` (alpha config, `skipDiscovery`; redeem, JWKS and profile on `http://keycloak:8080/realms/sbx/…`), `OAUTH2_PROXY_REVERSE_PROXY=true`, cookie `__Host-sbx_session` with `Secure`, whitelist `<TS name>:8443`; upstreams `/api/` → api `:8081` (prefix stripped), `/sbx-auth/` → api `:8081` |
-| api | `127.0.0.1:8080:8080`, ops `127.0.0.1:9091` | `SBX_OIDC_ISSUER=${SBX_OIDC_ISSUER}`, discovery and JWKS on `http://keycloak:8080`, `SBX_APP_ORIGIN`/`SBX_APP_URL=${SBX_APP_ORIGIN}`, `SBX_API_URL=${SBX_API_PUBLIC_URL}`, `SBX_SBX_DOMAIN=${SBX_PORT_DOMAIN}`, `SBX_SSH_HOST=${SBX_DEVCP_SSH_HOST}` port 2222, `SBX_API_TRUSTED_PROXY_CIDRS=172.16.0.0/12,127.0.0.1/32` |
-| Keycloak | `127.0.0.1:8180:8080` | `KC_HOSTNAME=${SBX_KEYCLOAK_URL}`, `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`, `KC_HTTP_ENABLED=true`, `KC_PROXY_HEADERS=xforwarded`, `KC_PROXY_TRUSTED_ADDRESSES` as the api; realm `sbx` with the Serve redirect URI and web origin |
+| api | `127.0.0.1:8080:8080`, ops `127.0.0.1:9091` | `SBX_OIDC_ISSUER=${SBX_OIDC_ISSUER}` (discovery and JWKS on `http://keycloak:8080` from the base), `SBX_APP_ORIGIN`/`SBX_APP_URL=${SBX_APP_ORIGIN}`, `SBX_API_URL=${SBX_API_PUBLIC_URL}`, `SBX_SBX_DOMAIN=${SBX_PORT_DOMAIN}`, `SBX_SSH_HOST=${SBX_DEVCP_SSH_HOST}` port 2222, `SBX_API_TRUSTED_PROXY_CIDRS=172.16.0.0/12,127.0.0.1/32` |
+| Keycloak | `127.0.0.1:8180:8080` | `KC_HOSTNAME=${SBX_KEYCLOAK_URL}` (`KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` from the base), `KC_HTTP_ENABLED=true`, `SBX_KEYCLOAK_PROXY_HEADERS=xforwarded` and `SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES` as the api (→ `KC_PROXY_HEADERS`, `KC_PROXY_TRUSTED_ADDRESSES`); realm `sbx` with the Serve redirect URI and web origin |
 | gateway | as before | `SBX_GATEWAY_AUTH_URL=${SBX_GATEWAY_AUTH_URL}` (`https://<TS name>:8443/sbx-auth/authorize`), `SBX_GATEWAY_COOKIE_CROSS_SITE=true` (the preview domain and the dashboard are different sites) |
 | web (S8) | not published | to add: `/` upstream of oauth2-proxy, `SBX_APP_ORIGIN`, `SBX_SBX_DOMAIN=${SBX_PORT_DOMAIN}`, `SBX_API_PUBLIC_URL` |
 
