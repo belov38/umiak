@@ -48,6 +48,7 @@ const LABEL_FILE = "kind=file";
 const LABEL_BASE64 = "kind=file encoding=base64";
 const LABEL_LISTING = "kind=listing";
 const LABEL_CONTEXT = "kind=context";
+const LABEL_STAT = "kind=stat";
 
 const READ_ONLY = {
 	readOnlyHint: true,
@@ -794,22 +795,29 @@ export const filesStat = defineTool({
 			}
 			throw err;
 		}
-		return toolText({
-			path: args.path,
-			exists: true,
-			type: info.type,
-			size: info.sizeBytes,
-			mode: octalMode(info.mode),
-			modified_at: info.modifiedAt,
-			owner: sanitizeForLlm(info.owner),
-			group: sanitizeForLlm(info.group),
-			symlink_target:
-				info.symlinkTarget === null
-					? undefined
-					: sanitizeForLlm(info.symlinkTarget),
-			resolved_path:
-				info.path === args.path ? undefined : sanitizeForLlm(info.path),
-		});
+		// Owner, group and the paths the sandbox chose are sandbox text: fenced,
+		// one `key: value` line each. The header keeps what the server knows.
+		const details = [
+			`owner: ${oneLine(info.owner)}`,
+			`group: ${oneLine(info.group)}`,
+			...(info.symlinkTarget === null
+				? []
+				: [`symlink_target: ${oneLine(info.symlinkTarget)}`]),
+			...(info.path === args.path
+				? []
+				: [`resolved_path: ${oneLine(info.path)}`]),
+		];
+		return toolText(
+			{
+				path: args.path,
+				exists: true,
+				type: info.type,
+				size: info.sizeBytes,
+				mode: octalMode(info.mode),
+				modified_at: info.modifiedAt,
+			},
+			[fenceUntrusted([{ label: LABEL_STAT, text: details.join("\n") }])],
+		);
 	},
 });
 

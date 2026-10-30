@@ -9,10 +9,12 @@ import {
 	CLAUDE_CODE,
 	CODEX,
 	checkClient,
+	combineRules,
 	GEMINI_CLI,
 	GEMINI_KEYWORDS,
 	type JsonObject,
 	OPENAI_KEYWORDS,
+	OPENCODE,
 	SERVER_NAME,
 	stripKeywords,
 	validDraft2020,
@@ -168,5 +170,58 @@ describe("Gemini CLI", () => {
 		expect(checkClient(GEMINI_CLI, "t", bad).join("\n")).toContain(
 			"keyword exclusiveMinimum",
 		);
+	});
+});
+
+describe("checker branches", () => {
+	it("reports a changed required and an invalid transformed schema", () => {
+		const schema = {
+			type: "object",
+			required: ["a"],
+			properties: { a: { type: "string", description: "x" } },
+		} as JsonObject;
+		const dropsRequired = {
+			...GEMINI_CLI,
+			transform: (s: JsonObject) => {
+				const { required: _required, ...rest } = s;
+				return rest;
+			},
+		};
+		expect(checkClient(dropsRequired, "t", schema).join("\n")).toContain(
+			"required changed",
+		);
+		const breaks = {
+			...GEMINI_CLI,
+			transform: (s: JsonObject): JsonObject => ({ ...s, type: "nonsense" }),
+		};
+		expect(checkClient(breaks, "t", schema).join("\n")).toContain(
+			"not valid JSON Schema",
+		);
+	});
+
+	it("OpenCode is the union of the Anthropic and OpenAI rules", () => {
+		const both = combineRules("both", (n) => n, CLAUDE_CODE, CODEX);
+		expect(OPENCODE.namePatterns).toEqual(both.namePatterns);
+		expect(OPENCODE.namePatterns).toHaveLength(2);
+		expect(OPENCODE.arraysNeedItems).toBe(true);
+		expect(OPENCODE.allowedKeywords).toEqual(OPENAI_KEYWORDS);
+		// Stricter than either alone: the shortest limit and the narrower keyword set.
+		const strict = combineRules(
+			"strict",
+			(n) => n,
+			{ ...CLAUDE_CODE, nameMaxLength: 10 },
+			{ ...CODEX, allowedKeywords: new Set(["type", "properties"]) },
+		);
+		expect(strict.nameMaxLength).toBe(10);
+		expect([...(strict.allowedKeywords ?? [])].sort()).toEqual([
+			"properties",
+			"type",
+		]);
+		const problems = checkClient(strict, "a_long_tool_name", {
+			type: "object",
+			properties: { s: { type: "string", description: "x" } },
+		});
+		expect(problems.join("\n")).toContain("characters (max 10)");
+		expect(problems.join("\n")).toContain("keyword description");
 	});
 });

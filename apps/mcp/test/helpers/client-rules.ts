@@ -49,7 +49,8 @@ export interface ClientRules {
 	client: string;
 	/** The name the model sees for tool `name` of server `sbx`. */
 	qualifiedName(name: string): string;
-	namePattern: RegExp;
+	/** The qualified name must match every pattern. */
+	namePatterns: readonly RegExp[];
 	/** Longest qualified name. */
 	nameMaxLength: number;
 	/** Every array schema must have `items` (OpenAI rejects it otherwise). */
@@ -160,7 +161,7 @@ const ANTHROPIC_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
 export const CLAUDE_CODE: ClientRules = {
 	client: "Claude Code",
 	qualifiedName: (n) => `mcp__${SERVER_NAME}__${n}`,
-	namePattern: ANTHROPIC_NAME,
+	namePatterns: [ANTHROPIC_NAME],
 	nameMaxLength: 64,
 	arraysNeedItems: false,
 };
@@ -168,26 +169,55 @@ export const CLAUDE_CODE: ClientRules = {
 export const CODEX: ClientRules = {
 	client: "Codex",
 	qualifiedName: (n) => `mcp__${SERVER_NAME}__${n}`,
-	namePattern: /^[a-zA-Z0-9_-]{1,64}$/,
+	namePatterns: [/^[a-zA-Z0-9_-]{1,64}$/],
 	nameMaxLength: 64,
 	arraysNeedItems: true,
 	allowedKeywords: OPENAI_KEYWORDS,
 };
 
-export const OPENCODE: ClientRules = {
-	client: "OpenCode",
-	qualifiedName: (n) => `${SERVER_NAME}_${n}`,
-	// Both providers' name rules are the same pattern; kept as the union.
-	namePattern: /^[a-zA-Z0-9_-]{1,64}$/,
-	nameMaxLength: 64,
-	arraysNeedItems: true,
-	allowedKeywords: OPENAI_KEYWORDS,
-};
+/**
+ * A client that passes the schema on to several providers must satisfy all
+ * their rules: every name pattern, the shortest name limit, array items if
+ * any provider needs them, and only the keywords every provider takes.
+ */
+export function combineRules(
+	client: string,
+	qualifiedName: (name: string) => string,
+	...rules: ClientRules[]
+): ClientRules {
+	const keywordSets = rules.flatMap((r) =>
+		r.allowedKeywords === undefined ? [] : [r.allowedKeywords],
+	);
+	const first = keywordSets[0];
+	return {
+		client,
+		qualifiedName,
+		namePatterns: rules.flatMap((r) => [...r.namePatterns]),
+		nameMaxLength: Math.min(...rules.map((r) => r.nameMaxLength)),
+		arraysNeedItems: rules.some((r) => r.arraysNeedItems),
+		...(first === undefined
+			? {}
+			: {
+					allowedKeywords: new Set(
+						[...first].filter((k) => keywordSets.every((set) => set.has(k))),
+					),
+				}),
+	};
+}
+
+// OpenCode passes the schema to the provider API unchanged and names the
+// tool `<server>_<tool>`: Anthropic and OpenAI rules at once.
+export const OPENCODE: ClientRules = combineRules(
+	"OpenCode",
+	(n) => `${SERVER_NAME}_${n}`,
+	CLAUDE_CODE,
+	CODEX,
+);
 
 export const GEMINI_CLI: ClientRules = {
 	client: "Gemini CLI",
 	qualifiedName: (n) => `mcp_${SERVER_NAME}_${n}`,
-	namePattern: /^[a-zA-Z_][a-zA-Z0-9_.:-]{0,63}$/,
+	namePatterns: [/^[a-zA-Z_][a-zA-Z0-9_.:-]{0,63}$/],
 	nameMaxLength: 64,
 	arraysNeedItems: true,
 	allowedKeywords: GEMINI_KEYWORDS,
@@ -229,8 +259,10 @@ export function checkClient(
 			`${who}: ${qualified} is ${qualified.length} characters (max ${rules.nameMaxLength})`,
 		);
 	}
-	if (!rules.namePattern.test(qualified)) {
-		out.push(`${who}: ${qualified} does not match ${rules.namePattern.source}`);
+	for (const pattern of rules.namePatterns) {
+		if (!pattern.test(qualified)) {
+			out.push(`${who}: ${qualified} does not match ${pattern.source}`);
+		}
 	}
 	if (published.type !== "object") out.push(`${who}: root type is not object`);
 	if (!isObject(published.properties)) {

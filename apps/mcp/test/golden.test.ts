@@ -131,23 +131,25 @@ describe("golden tools/list", () => {
 	});
 
 	it("keeps every tool name of origin/main", (ctx) => {
-		let onMain: string | undefined;
+		const git = (...args: string[]) =>
+			execFileSync("git", args, {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			});
 		try {
-			onMain = execFileSync(
-				"git",
-				["show", "origin/main:apps/mcp/golden/tools-list.json"],
-				{ encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-			);
+			git("rev-parse", "--verify", "--quiet", "origin/main^{commit}");
 		} catch {
-			onMain = undefined;
-		}
-		if (onMain === undefined) {
-			ctx.skip(
-				"apps/mcp/golden/tools-list.json is not on origin/main (yet, or no origin): nothing to compare",
-			);
+			ctx.skip("origin/main not available: the name check cannot run here");
 			return;
 		}
-		expect(missingNames(onMain, readGolden())).toEqual([]);
+		const path = "apps/mcp/golden/tools-list.json";
+		if (git("ls-tree", "origin/main", "--", path).trim() === "") {
+			ctx.skip(`${path} is not on origin/main yet: nothing to compare`);
+			return;
+		}
+		expect(
+			missingNames(git("show", `origin/main:${path}`), readGolden()),
+		).toEqual([]);
 	});
 
 	it("the name comparison reports a removed or renamed tool", () => {
