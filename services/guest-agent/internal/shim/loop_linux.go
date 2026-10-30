@@ -127,10 +127,7 @@ func (s *shim) copy(st *stream, buf []byte, limit int) {
 		n, err := unix.Read(st.fd, buf)
 		if n > 0 {
 			total += n
-			if _, werr := st.file.Write(buf[:n]); werr != nil && !st.werr {
-				st.werr = true
-				s.log.Error("shim: write log, output lost", "stream", st.name, "err", werr)
-			}
+			s.writeLog(st, buf[:n])
 		}
 		switch {
 		case err == nil && n == 0:

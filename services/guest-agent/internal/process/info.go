@@ -31,6 +31,8 @@ func (m *Manager) info(rec *store.Command) *agentv1.CommandInfo {
 		StartedAt:    ts(rec.StartedAt),
 		EndedAt:      ts(rec.EndedAt),
 		AgentVersion: rec.AgentVersion,
+
+		OutputTruncated: rec.OutputTruncated,
 	}
 	if e := rec.Exit; e != nil {
 		info.Exit = &agentv1.ExitInfo{Status: exitStatusEnum(e.Status), Code: e.Code, Signal: e.Signal,

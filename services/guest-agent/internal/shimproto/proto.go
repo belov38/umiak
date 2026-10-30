@@ -34,7 +34,8 @@ const (
 	TypeHello = "hello"
 	// TypeStatus asks for a StatusReply.
 	TypeStatus = "status"
-	// TypeStatusReply carries Pid, State, LastSeq, Leftovers and Exited.
+	// TypeStatusReply carries Pid, State, LastSeq, Leftovers, Exited,
+	// OutputTruncated and DroppedBytes.
 	TypeStatusReply = "status_reply"
 	// TypeInput writes Data to the command (deduplicated by Session and Seq)
 	// and, with CloseStdin, closes its stdin afterwards.
@@ -119,7 +120,17 @@ type ExitFile struct {
 	EndedAt time.Time `json:"endedAt"`
 	// StartFailed is the start error text when Reason is ReasonStartFailed.
 	StartFailed string `json:"startFailed,omitempty"`
+	// OutputTruncated is TruncatedDiskFull when the shim dropped output
+	// because a log write failed with ENOSPC or EDQUOT; empty otherwise.
+	OutputTruncated string `json:"outputTruncated,omitempty"`
+	// DroppedBytes counts the dropped bytes per stream name (stdout, stderr,
+	// pty); streams without loss are absent. The ends never include them.
+	DroppedBytes map[string]uint64 `json:"droppedBytes,omitempty"`
 }
+
+// TruncatedDiskFull is the OutputTruncated value of output dropped on a full
+// disk or an exceeded quota.
+const TruncatedDiskFull = "disk_full"
 
 // Message is one frame. Only the fields of its Type are set.
 type Message struct {
@@ -134,12 +145,15 @@ type Message struct {
 	Max     int `json:"max,omitempty"`
 	Version int `json:"version,omitempty"`
 
-	// Pid, State, LastSeq, Leftovers and Exited form a status reply.
-	Pid       int               `json:"pid,omitempty"`
-	State     string            `json:"state,omitempty"`
-	LastSeq   map[string]uint64 `json:"last_seq,omitempty"`
-	Leftovers bool              `json:"leftovers,omitempty"`
-	Exited    bool              `json:"exited,omitempty"`
+	// Pid, State, LastSeq, Leftovers, Exited, OutputTruncated and
+	// DroppedBytes form a status reply (the last two as in ExitFile).
+	Pid             int               `json:"pid,omitempty"`
+	State           string            `json:"state,omitempty"`
+	LastSeq         map[string]uint64 `json:"last_seq,omitempty"`
+	Leftovers       bool              `json:"leftovers,omitempty"`
+	Exited          bool              `json:"exited,omitempty"`
+	OutputTruncated string            `json:"output_truncated,omitempty"`
+	DroppedBytes    map[string]uint64 `json:"dropped_bytes,omitempty"`
 
 	// Session, Seq, Data and CloseStdin form an input request; Applied is
 	// its reply.

@@ -26,6 +26,10 @@ type Command struct {
 	PTYDetachedAt *time.Time        `json:"pty_detached_at,omitempty"`
 	// Ends maps a stream name to its final byte offset.
 	Ends map[string]uint64 `json:"ends,omitempty"`
+	// OutputTruncated is "disk_full" once the shim reported output dropped
+	// on a full disk; Dropped holds the dropped bytes per stream name.
+	OutputTruncated string            `json:"output_truncated,omitempty"`
+	Dropped         map[string]uint64 `json:"dropped,omitempty"`
 }
 
 // ExitRecord is how a command ended. Signal is a signal name ("SIGKILL").

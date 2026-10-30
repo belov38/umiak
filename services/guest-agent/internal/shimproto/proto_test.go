@@ -22,12 +22,14 @@ func TestFrameRoundTrip(t *testing.T) {
 	}{
 		{"hello", Message{Type: TypeHello, ID: 1, Min: 1, Max: 3}},
 		{"status reply", Message{Type: TypeStatusReply, ID: 2, Pid: 42, State: StateRunning,
-			LastSeq: map[string]uint64{"s1": 7}, Leftovers: true}},
+			LastSeq: map[string]uint64{"s1": 7}, Leftovers: true,
+			OutputTruncated: TruncatedDiskFull, DroppedBytes: map[string]uint64{"stdout": 3}}},
 		{"input", Message{Type: TypeInput, ID: 3, Session: "s", Seq: 9, Data: []byte{0, 1, 0xff}, CloseStdin: true}},
 		{"kill", Message{Type: TypeKill, ID: 4, GraceMs: 100, FirstSignal: int(syscall.SIGHUP), Reason: ReasonPTYIdle}},
 		{"error", Message{Type: TypeError, ID: 5, Code: CodeInternal, Text: "partial", Written: 7}},
 		{"exited", Message{Type: TypeExited, Exit: &ExitFile{Status: StatusKilled, Code: 137, Signal: "SIGKILL",
-			Reason: ReasonOOM, StdoutEnd: 10, StderrEnd: 20, EndedAt: ended}}},
+			Reason: ReasonOOM, StdoutEnd: 10, StderrEnd: 20, EndedAt: ended,
+			OutputTruncated: TruncatedDiskFull, DroppedBytes: map[string]uint64{"stderr": 9}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,7 +163,8 @@ func TestClientCalls(t *testing.T) {
 		switch m.Type {
 		case TypeStatus:
 			return []Message{{Type: TypeStatusReply, ID: m.ID, Pid: 10, State: StateRunning,
-				LastSeq: map[string]uint64{"a": 1}}}
+				LastSeq: map[string]uint64{"a": 1}, OutputTruncated: TruncatedDiskFull,
+				DroppedBytes: map[string]uint64{"stdout": 4}}}
 		case TypeInput:
 			// The push arrives before the reply: the client must route both.
 			return []Message{
@@ -196,7 +199,8 @@ func TestClientCalls(t *testing.T) {
 	}
 
 	st, err := c.Status(ctx)
-	if err != nil || st.Pid != 10 || st.State != StateRunning || st.LastSeq["a"] != 1 {
+	if err != nil || st.Pid != 10 || st.State != StateRunning || st.LastSeq["a"] != 1 ||
+		st.OutputTruncated != TruncatedDiskFull || st.DroppedBytes["stdout"] != 4 {
 		t.Errorf("Status = %+v, %v", st, err)
 	}
 	applied, err := c.Input(ctx, "s", 2, []byte("x"), true)
@@ -205,7 +209,7 @@ func TestClientCalls(t *testing.T) {
 	}
 	select {
 	case got := <-c.Exited():
-		if got != exit {
+		if !reflect.DeepEqual(got, exit) {
 			t.Errorf("Exited = %+v, want %+v", got, exit)
 		}
 	case <-ctx.Done():

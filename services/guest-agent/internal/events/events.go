@@ -27,6 +27,7 @@ const (
 	TypeDiskOK            = "disk.ok"
 	TypeUpdateResult      = "update.result"
 	TypeJournalGap        = "journal.gap"
+	TypeOutputTruncated   = "output.truncated"
 )
 
 // Emitter publishes an event. Emit never blocks and never fails; a nil

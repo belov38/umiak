@@ -26,6 +26,10 @@ type Status struct {
 	Leftovers bool
 	// Exited reports that exit.json is written.
 	Exited bool
+	// OutputTruncated and DroppedBytes report output dropped so far, as in
+	// ExitFile.
+	OutputTruncated string
+	DroppedBytes    map[string]uint64
 }
 
 // Client is the agent side of one shim connection. Its methods are safe for
@@ -138,7 +142,8 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	return Status{Pid: r.Pid, State: r.State, LastSeq: r.LastSeq, Leftovers: r.Leftovers, Exited: r.Exited}, nil
+	return Status{Pid: r.Pid, State: r.State, LastSeq: r.LastSeq, Leftovers: r.Leftovers, Exited: r.Exited,
+		OutputTruncated: r.OutputTruncated, DroppedBytes: r.DroppedBytes}, nil
 }
 
 // Input writes data to the command. applied is false when seq is not above

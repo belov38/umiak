@@ -6,7 +6,7 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { ExitReason, ExitStatus, PhaseState, Port } from "./common_pb.js";
+import type { ExitReason, ExitStatus, PhaseState, Port, Stream } from "./common_pb.js";
 import { file_sbx_agent_v1_common } from "./common_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file sbx/agent/v1/events.proto.
  */
 export const file_sbx_agent_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("ChlzYngvYWdlbnQvdjEvZXZlbnRzLnByb3RvEgxzYnguYWdlbnQudjEiWgoMQWdlbnRTdGFydGVkEg8KB3ZlcnNpb24YASABKAkSGAoQcHJldmlvdXNfdmVyc2lvbhgCIAEoCRIPCgdib290X2lkGAMgASgJEg4KBnJlYXNvbhgEIAEoCSIjCg1JZGVudGl0eVJlc2V0EhIKCm1hY2hpbmVfaWQYASABKAki/AEKDUNvbW1hbmRFeGl0ZWQSEgoKY29tbWFuZF9pZBgBIAEoCRIoCgZzdGF0dXMYAiABKA4yGC5zYnguYWdlbnQudjEuRXhpdFN0YXR1cxIMCgRjb2RlGAMgASgFEg4KBnNpZ25hbBgEIAEoCRIoCgZyZWFzb24YBSABKA4yGC5zYnguYWdlbnQudjEuRXhpdFJlYXNvbhISCgpzdGRvdXRfZW5kGAYgASgEEhIKCnN0ZGVycl9lbmQYByABKAQSDwoHcHR5X2VuZBgIIAEoBBIsCghlbmRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiWQoQUmVhZGluZXNzQ2hhbmdlZBINCgVwaGFzZRgBIAEoCRInCgVzdGF0ZRgCIAEoDjIYLnNieC5hZ2VudC52MS5QaGFzZVN0YXRlEg0KBWVycm9yGAMgASgJIiIKDENsYWltQXBwbGllZBISCgpzYW5kYm94X2lkGAEgASgJIjEKDFBvcnRzQ2hhbmdlZBIhCgVwb3J0cxgBIAMoCzISLnNieC5hZ2VudC52MS5Qb3J0IkYKC0lkbGVDaGFuZ2VkEgwKBGlkbGUYASABKAgSKQoFc2luY2UYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIkwKCEFjdGl2aXR5EhgKEHJ1bm5pbmdfY29tbWFuZHMYASABKA0SEQoJb3Blbl9wdHlzGAIgASgNEhMKC3RjcF9zdHJlYW1zGAMgASgNIkkKCVB0eUNsb3NlZBISCgpjb21tYW5kX2lkGAEgASgJEigKBnJlYXNvbhgCIAEoDjIYLnNieC5hZ2VudC52MS5FeGl0UmVhc29uIlkKEVF1aWVzY2VBdXRvVGhhd2VkEhAKCGxlYXNlX2lkGAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIKCgJieRgDIAEoCSIyCg1EaXNrVGhyZXNob2xkEg0KBW1vdW50GAEgASgJEhIKCmZyZWVfYnl0ZXMYAiABKAQiWAoMVXBkYXRlUmVzdWx0EgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkSCgoCb2sYAyABKAgSEwoLcm9sbGVkX2JhY2sYBCABKAgSDQoFZXJyb3IYBSABKAkiLgoKSm91cm5hbEdhcBIQCghmcm9tX3NlcRgBIAEoBBIOCgZ0b19zZXEYAiABKARCQ1pBZ2l0aHViLmNvbS9iZWxvdjM4L2JvYXQtZGV2LWNsb25lL2xpYnMvcHJvdG8vc2J4L2FnZW50L3YxO2FnZW50djFiBnByb3RvMw", [file_google_protobuf_timestamp, file_sbx_agent_v1_common]);
+  fileDesc("ChlzYngvYWdlbnQvdjEvZXZlbnRzLnByb3RvEgxzYnguYWdlbnQudjEiWgoMQWdlbnRTdGFydGVkEg8KB3ZlcnNpb24YASABKAkSGAoQcHJldmlvdXNfdmVyc2lvbhgCIAEoCRIPCgdib290X2lkGAMgASgJEg4KBnJlYXNvbhgEIAEoCSIjCg1JZGVudGl0eVJlc2V0EhIKCm1hY2hpbmVfaWQYASABKAkilgIKDUNvbW1hbmRFeGl0ZWQSEgoKY29tbWFuZF9pZBgBIAEoCRIoCgZzdGF0dXMYAiABKA4yGC5zYnguYWdlbnQudjEuRXhpdFN0YXR1cxIMCgRjb2RlGAMgASgFEg4KBnNpZ25hbBgEIAEoCRIoCgZyZWFzb24YBSABKA4yGC5zYnguYWdlbnQudjEuRXhpdFJlYXNvbhISCgpzdGRvdXRfZW5kGAYgASgEEhIKCnN0ZGVycl9lbmQYByABKAQSDwoHcHR5X2VuZBgIIAEoBBIsCghlbmRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoQb3V0cHV0X3RydW5jYXRlZBgKIAEoCSJbCg9PdXRwdXRUcnVuY2F0ZWQSEgoKY29tbWFuZF9pZBgBIAEoCRIkCgZzdHJlYW0YAiABKA4yFC5zYnguYWdlbnQudjEuU3RyZWFtEg4KBnJlYXNvbhgDIAEoCSJZChBSZWFkaW5lc3NDaGFuZ2VkEg0KBXBoYXNlGAEgASgJEicKBXN0YXRlGAIgASgOMhguc2J4LmFnZW50LnYxLlBoYXNlU3RhdGUSDQoFZXJyb3IYAyABKAkiIgoMQ2xhaW1BcHBsaWVkEhIKCnNhbmRib3hfaWQYASABKAkiMQoMUG9ydHNDaGFuZ2VkEiEKBXBvcnRzGAEgAygLMhIuc2J4LmFnZW50LnYxLlBvcnQiRgoLSWRsZUNoYW5nZWQSDAoEaWRsZRgBIAEoCBIpCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiTAoIQWN0aXZpdHkSGAoQcnVubmluZ19jb21tYW5kcxgBIAEoDRIRCglvcGVuX3B0eXMYAiABKA0SEwoLdGNwX3N0cmVhbXMYAyABKA0iSQoJUHR5Q2xvc2VkEhIKCmNvbW1hbmRfaWQYASABKAkSKAoGcmVhc29uGAIgASgOMhguc2J4LmFnZW50LnYxLkV4aXRSZWFzb24iWQoRUXVpZXNjZUF1dG9UaGF3ZWQSEAoIbGVhc2VfaWQYASABKAkSJgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEgoKAmJ5GAMgASgJIjIKDURpc2tUaHJlc2hvbGQSDQoFbW91bnQYASABKAkSEgoKZnJlZV9ieXRlcxgCIAEoBCJYCgxVcGRhdGVSZXN1bHQSDAoEZnJvbRgBIAEoCRIKCgJ0bxgCIAEoCRIKCgJvaxgDIAEoCBITCgtyb2xsZWRfYmFjaxgEIAEoCBINCgVlcnJvchgFIAEoCSIuCgpKb3VybmFsR2FwEhAKCGZyb21fc2VxGAEgASgEEg4KBnRvX3NlcRgCIAEoBEJDWkFnaXRodWIuY29tL2JlbG92MzgvYm9hdC1kZXYtY2xvbmUvbGlicy9wcm90by9zYngvYWdlbnQvdjE7YWdlbnR2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_sbx_agent_v1_common]);
 
 /**
  * AgentStarted is sent when the agent process starts.
@@ -119,6 +119,13 @@ export type CommandExited = Message<"sbx.agent.v1.CommandExited"> & {
    * @generated from field: google.protobuf.Timestamp ended_at = 9;
    */
   endedAt?: Timestamp | undefined;
+
+  /**
+   * See CommandInfo.output_truncated.
+   *
+   * @generated from field: string output_truncated = 10;
+   */
+  outputTruncated: string;
 };
 
 /**
@@ -127,6 +134,38 @@ export type CommandExited = Message<"sbx.agent.v1.CommandExited"> & {
  */
 export const CommandExitedSchema: GenMessage<CommandExited> = /*@__PURE__*/
   messageDesc(file_sbx_agent_v1_events, 2);
+
+/**
+ * OutputTruncated (output.truncated) is sent once per stream when the agent
+ * learns that the shim dropped output of the stream.
+ *
+ * @generated from message sbx.agent.v1.OutputTruncated
+ */
+export type OutputTruncated = Message<"sbx.agent.v1.OutputTruncated"> & {
+  /**
+   * @generated from field: string command_id = 1;
+   */
+  commandId: string;
+
+  /**
+   * @generated from field: sbx.agent.v1.Stream stream = 2;
+   */
+  stream: Stream;
+
+  /**
+   * "disk_full".
+   *
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message sbx.agent.v1.OutputTruncated.
+ * Use `create(OutputTruncatedSchema)` to create a new message.
+ */
+export const OutputTruncatedSchema: GenMessage<OutputTruncated> = /*@__PURE__*/
+  messageDesc(file_sbx_agent_v1_events, 3);
 
 /**
  * ReadinessChanged is sent when a readiness phase changes state.
@@ -155,7 +194,7 @@ export type ReadinessChanged = Message<"sbx.agent.v1.ReadinessChanged"> & {
  * Use `create(ReadinessChangedSchema)` to create a new message.
  */
 export const ReadinessChangedSchema: GenMessage<ReadinessChanged> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 3);
+  messageDesc(file_sbx_agent_v1_events, 4);
 
 /**
  * ClaimApplied is sent after a claim was applied.
@@ -174,7 +213,7 @@ export type ClaimApplied = Message<"sbx.agent.v1.ClaimApplied"> & {
  * Use `create(ClaimAppliedSchema)` to create a new message.
  */
 export const ClaimAppliedSchema: GenMessage<ClaimApplied> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 4);
+  messageDesc(file_sbx_agent_v1_events, 5);
 
 /**
  * PortsChanged carries the full list of listening ports after a change.
@@ -193,7 +232,7 @@ export type PortsChanged = Message<"sbx.agent.v1.PortsChanged"> & {
  * Use `create(PortsChangedSchema)` to create a new message.
  */
 export const PortsChangedSchema: GenMessage<PortsChanged> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 5);
+  messageDesc(file_sbx_agent_v1_events, 6);
 
 /**
  * IdleChanged is sent when the machine becomes idle or busy.
@@ -217,7 +256,7 @@ export type IdleChanged = Message<"sbx.agent.v1.IdleChanged"> & {
  * Use `create(IdleChangedSchema)` to create a new message.
  */
 export const IdleChangedSchema: GenMessage<IdleChanged> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 6);
+  messageDesc(file_sbx_agent_v1_events, 7);
 
 /**
  * Activity is sent on any change between zero and non-zero and periodically.
@@ -246,7 +285,7 @@ export type Activity = Message<"sbx.agent.v1.Activity"> & {
  * Use `create(ActivitySchema)` to create a new message.
  */
 export const ActivitySchema: GenMessage<Activity> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 7);
+  messageDesc(file_sbx_agent_v1_events, 8);
 
 /**
  * PtyClosed is sent when the terminal of a PTY command closes.
@@ -270,7 +309,7 @@ export type PtyClosed = Message<"sbx.agent.v1.PtyClosed"> & {
  * Use `create(PtyClosedSchema)` to create a new message.
  */
 export const PtyClosedSchema: GenMessage<PtyClosed> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 8);
+  messageDesc(file_sbx_agent_v1_events, 9);
 
 /**
  * QuiesceAutoThawed is sent when a lease was thawed by the watchdog.
@@ -299,7 +338,7 @@ export type QuiesceAutoThawed = Message<"sbx.agent.v1.QuiesceAutoThawed"> & {
  * Use `create(QuiesceAutoThawedSchema)` to create a new message.
  */
 export const QuiesceAutoThawedSchema: GenMessage<QuiesceAutoThawed> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 9);
+  messageDesc(file_sbx_agent_v1_events, 10);
 
 /**
  * DiskThreshold is the payload of disk.low and disk.ok.
@@ -323,7 +362,7 @@ export type DiskThreshold = Message<"sbx.agent.v1.DiskThreshold"> & {
  * Use `create(DiskThresholdSchema)` to create a new message.
  */
 export const DiskThresholdSchema: GenMessage<DiskThreshold> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 10);
+  messageDesc(file_sbx_agent_v1_events, 11);
 
 /**
  * UpdateResult is sent after an agent update finished or was rolled back.
@@ -362,7 +401,7 @@ export type UpdateResult = Message<"sbx.agent.v1.UpdateResult"> & {
  * Use `create(UpdateResultSchema)` to create a new message.
  */
 export const UpdateResultSchema: GenMessage<UpdateResult> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 11);
+  messageDesc(file_sbx_agent_v1_events, 12);
 
 /**
  * JournalGap is sent when journal events in the range were lost.
@@ -386,5 +425,5 @@ export type JournalGap = Message<"sbx.agent.v1.JournalGap"> & {
  * Use `create(JournalGapSchema)` to create a new message.
  */
 export const JournalGapSchema: GenMessage<JournalGap> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_events, 12);
+  messageDesc(file_sbx_agent_v1_events, 13);
 

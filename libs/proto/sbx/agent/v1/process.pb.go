@@ -554,17 +554,19 @@ func (x *TruncatedEvent) GetAvailableFrom() uint64 {
 
 // ExitEvent ends the stream with the outcome and the final stream sizes.
 type ExitEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        ExitStatus             `protobuf:"varint,1,opt,name=status,proto3,enum=sbx.agent.v1.ExitStatus" json:"status,omitempty"`
-	Code          int32                  `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
-	Signal        string                 `protobuf:"bytes,3,opt,name=signal,proto3" json:"signal,omitempty"`
-	StdoutEnd     uint64                 `protobuf:"varint,4,opt,name=stdout_end,json=stdoutEnd,proto3" json:"stdout_end,omitempty"`
-	StderrEnd     uint64                 `protobuf:"varint,5,opt,name=stderr_end,json=stderrEnd,proto3" json:"stderr_end,omitempty"`
-	PtyEnd        uint64                 `protobuf:"varint,6,opt,name=pty_end,json=ptyEnd,proto3" json:"pty_end,omitempty"`
-	Reason        ExitReason             `protobuf:"varint,7,opt,name=reason,proto3,enum=sbx.agent.v1.ExitReason" json:"reason,omitempty"`
-	EndedAt       *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Status    ExitStatus             `protobuf:"varint,1,opt,name=status,proto3,enum=sbx.agent.v1.ExitStatus" json:"status,omitempty"`
+	Code      int32                  `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
+	Signal    string                 `protobuf:"bytes,3,opt,name=signal,proto3" json:"signal,omitempty"`
+	StdoutEnd uint64                 `protobuf:"varint,4,opt,name=stdout_end,json=stdoutEnd,proto3" json:"stdout_end,omitempty"`
+	StderrEnd uint64                 `protobuf:"varint,5,opt,name=stderr_end,json=stderrEnd,proto3" json:"stderr_end,omitempty"`
+	PtyEnd    uint64                 `protobuf:"varint,6,opt,name=pty_end,json=ptyEnd,proto3" json:"pty_end,omitempty"`
+	Reason    ExitReason             `protobuf:"varint,7,opt,name=reason,proto3,enum=sbx.agent.v1.ExitReason" json:"reason,omitempty"`
+	EndedAt   *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	// See CommandInfo.output_truncated.
+	OutputTruncated string `protobuf:"bytes,9,opt,name=output_truncated,json=outputTruncated,proto3" json:"output_truncated,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ExitEvent) Reset() {
@@ -651,6 +653,13 @@ func (x *ExitEvent) GetEndedAt() *timestamppb.Timestamp {
 		return x.EndedAt
 	}
 	return nil
+}
+
+func (x *ExitEvent) GetOutputTruncated() string {
+	if x != nil {
+		return x.OutputTruncated
+	}
+	return ""
 }
 
 // StartedEvent is sent first on Run.
@@ -1468,7 +1477,7 @@ const file_sbx_agent_v1_process_proto_rawDesc = "" +
 	"\x0eHeartbeatEvent\"e\n" +
 	"\x0eTruncatedEvent\x12,\n" +
 	"\x06stream\x18\x01 \x01(\x0e2\x14.sbx.agent.v1.StreamR\x06stream\x12%\n" +
-	"\x0eavailable_from\x18\x02 \x01(\x04R\ravailableFrom\"\xa9\x02\n" +
+	"\x0eavailable_from\x18\x02 \x01(\x04R\ravailableFrom\"\xd4\x02\n" +
 	"\tExitEvent\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.sbx.agent.v1.ExitStatusR\x06status\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\x05R\x04code\x12\x16\n" +
@@ -1479,7 +1488,8 @@ const file_sbx_agent_v1_process_proto_rawDesc = "" +
 	"stderr_end\x18\x05 \x01(\x04R\tstderrEnd\x12\x17\n" +
 	"\apty_end\x18\x06 \x01(\x04R\x06ptyEnd\x120\n" +
 	"\x06reason\x18\a \x01(\x0e2\x18.sbx.agent.v1.ExitReasonR\x06reason\x125\n" +
-	"\bended_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\"b\n" +
+	"\bended_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12)\n" +
+	"\x10output_truncated\x18\t \x01(\tR\x0foutputTruncated\"b\n" +
 	"\fStartedEvent\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x123\n" +

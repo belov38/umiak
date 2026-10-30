@@ -73,6 +73,7 @@ func TestTypeNames(t *testing.T) {
 		events.TypeDiskOK:            "disk.ok",
 		events.TypeUpdateResult:      "update.result",
 		events.TypeJournalGap:        "journal.gap",
+		events.TypeOutputTruncated:   "output.truncated",
 	} {
 		if typ != want {
 			t.Errorf("type %q, want %q", typ, want)

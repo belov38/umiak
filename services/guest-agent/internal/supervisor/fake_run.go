@@ -3,6 +3,7 @@ package supervisor
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -85,6 +86,7 @@ type FakeRun struct {
 	ignoreSigs bool
 	failStart  string
 	leftovers  bool
+	dropped    map[string]uint64 // output lost to a full disk, per stream
 	stdinOpen  bool
 	seqs       map[string]uint64
 	inputs     []FakeInput
@@ -132,6 +134,27 @@ func (r *FakeRun) SetLeftovers(on bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.leftovers = on
+}
+
+// SetDropped records n bytes of stream as dropped on a full disk: the
+// status reply and the exit.json of Exit report them with reason
+// disk_full, like the real shim after a failed log write.
+func (r *FakeRun) SetDropped(stream string, n uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.dropped == nil {
+		r.dropped = map[string]uint64{}
+	}
+	r.dropped[stream] = n
+}
+
+// truncationLocked returns the OutputTruncated and DroppedBytes of the
+// shim. r.mu is held.
+func (r *FakeRun) truncationLocked() (string, map[string]uint64) {
+	if len(r.dropped) == 0 {
+		return "", nil
+	}
+	return shimproto.TruncatedDiskFull, maps.Clone(r.dropped)
 }
 
 // SetShimVersions sets the protocol range the fake shim accepts in hello.
@@ -226,11 +249,13 @@ func (r *FakeRun) Write(stream string, data []byte) error {
 func (r *FakeRun) Exit(code int32) error {
 	r.mu.Lock()
 	reason := r.killReason
+	truncated, dropped := r.truncationLocked()
 	r.mu.Unlock()
 	if reason == "" {
 		reason = shimproto.ReasonNone
 	}
-	return r.finish(shimproto.ExitFile{Status: shimproto.StatusExited, Code: code, Reason: reason}, true)
+	return r.finish(shimproto.ExitFile{Status: shimproto.StatusExited, Code: code, Reason: reason,
+		OutputTruncated: truncated, DroppedBytes: dropped}, true)
 }
 
 // ExitWith ends the main process recording e as is (EndedAt defaults to
@@ -475,6 +500,7 @@ func (r *FakeRun) handleStatus() shimproto.Message {
 	defer r.mu.Unlock()
 	reply := shimproto.Message{Type: shimproto.TypeStatusReply, Pid: r.pid, State: shimproto.StateRunning,
 		LastSeq: make(map[string]uint64, len(r.seqs))}
+	reply.OutputTruncated, reply.DroppedBytes = r.truncationLocked()
 	for k, v := range r.seqs {
 		reply.LastSeq[k] = v
 	}

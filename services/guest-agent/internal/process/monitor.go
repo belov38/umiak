@@ -3,8 +3,10 @@ package process
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,12 +30,15 @@ type exitInfo struct {
 	code    int32
 	endedAt time.Time
 	ends    map[string]uint64
+	// truncated and dropped report output lost to a full disk.
+	truncated string
+	dropped   map[string]uint64
 }
 
 // exitFromFile converts exit.json.
 func exitFromFile(e shimproto.ExitFile, pty bool) exitInfo {
 	ex := exitInfo{status: strings.ToUpper(e.Status), reason: e.Reason, signal: e.Signal, code: e.Code,
-		endedAt: e.EndedAt.UTC(), ends: map[string]uint64{}}
+		endedAt: e.EndedAt.UTC(), ends: map[string]uint64{}, truncated: e.OutputTruncated, dropped: e.DroppedBytes}
 	if ex.status != statusKilled {
 		ex.status = statusExited
 	}
@@ -122,17 +127,75 @@ func (m *Manager) finalizeLocked(ctx context.Context, c *command, ex exitInfo, e
 		rec.EndedAt = m.opts.Now().UTC()
 	}
 	rec.Ends = ex.ends
+	lost := mergeTruncation(rec, ex.truncated, ex.dropped)
 	if emitFirst {
+		m.emitTruncated(rec.ID, lost)
 		m.emitExit(rec)
 	}
 	if err := m.st.PutCommand(ctx, rec); err != nil {
 		return err
 	}
 	if !emitFirst {
+		m.emitTruncated(rec.ID, lost)
 		m.emitExit(rec)
 	}
 	m.mainExited(c, true)
 	return nil
+}
+
+// mergeTruncation adds output lost to a full disk, as reported by the shim,
+// to rec and returns the streams the record did not know as truncated yet.
+func mergeTruncation(rec *store.Command, truncated string, dropped map[string]uint64) []string {
+	if truncated == "" {
+		return nil
+	}
+	rec.OutputTruncated = truncated
+	var fresh []string
+	for _, s := range slices.Sorted(maps.Keys(dropped)) {
+		n := dropped[s]
+		if n == 0 {
+			continue
+		}
+		if rec.Dropped == nil {
+			rec.Dropped = map[string]uint64{}
+		}
+		if _, known := rec.Dropped[s]; !known {
+			fresh = append(fresh, s)
+		}
+		rec.Dropped[s] = max(rec.Dropped[s], n)
+	}
+	return fresh
+}
+
+// emitTruncated publishes output.truncated for each stream of id.
+func (m *Manager) emitTruncated(id string, streams []string) {
+	for _, s := range streams {
+		m.opts.Emit.Emit(events.TypeOutputTruncated, &agentv1.OutputTruncated{
+			CommandId: id, Stream: streamEnum(s), Reason: shimproto.TruncatedDiskFull})
+	}
+}
+
+// noteTruncation records output lost to a full disk that the status of a
+// running shim reports, and emits output.truncated for streams not known
+// yet. An exited record is finalized from exit.json, which carries the
+// loss itself.
+func (m *Manager) noteTruncation(c *command, st shimproto.Status) {
+	if st.OutputTruncated == "" || !m.lockLive(c) {
+		return
+	}
+	defer c.unlock()
+	rec, ok, err := m.st.GetCommand(c.id)
+	if err != nil || !ok || rec.State == StateExited {
+		return
+	}
+	lost := mergeTruncation(rec, st.OutputTruncated, st.DroppedBytes)
+	if len(lost) == 0 {
+		return
+	}
+	m.emitTruncated(rec.ID, lost)
+	if err := m.st.PutCommand(m.ctx, rec); err != nil {
+		m.warnUnlessClosed("process: record truncated output", c.id, err)
+	}
 }
 
 // mainExited updates the live state after the end of the main process and
@@ -164,6 +227,8 @@ func (m *Manager) emitExit(rec *store.Command) {
 		StderrEnd: ee.GetStderrEnd(),
 		PtyEnd:    ee.GetPtyEnd(),
 		EndedAt:   ee.GetEndedAt(),
+
+		OutputTruncated: ee.GetOutputTruncated(),
 	})
 	if rec.PTY {
 		m.opts.Emit.Emit(events.TypePtyClosed, &agentv1.PtyClosed{CommandId: rec.ID, Reason: ee.GetReason()})
@@ -176,6 +241,8 @@ func exitEvent(rec *store.Command) *agentv1.ExitEvent {
 		StdoutEnd: rec.Ends[shim.StdoutFile],
 		StderrEnd: rec.Ends[shim.StderrFile],
 		PtyEnd:    rec.Ends[shim.PtyFile],
+
+		OutputTruncated: rec.OutputTruncated,
 	}
 	if !rec.EndedAt.IsZero() {
 		ee.EndedAt = timestamppb.New(rec.EndedAt)
@@ -477,6 +544,7 @@ func (m *Manager) serve(c *command, client *shimproto.Client) {
 			}
 			c.unlock()
 		}
+		m.noteTruncation(c, st)
 		m.setUnit(c, true, false)
 	}
 	for {

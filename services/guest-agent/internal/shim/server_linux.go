@@ -196,6 +196,7 @@ func (s *shim) handleStatus() shimproto.Message {
 	defer s.unlockReq()
 	r := shimproto.Message{Type: shimproto.TypeStatusReply, Pid: s.pid, State: shimproto.StateRunning,
 		LastSeq: s.seqs.snapshot()}
+	r.OutputTruncated, r.DroppedBytes = s.truncation()
 	s.mu.Lock()
 	if s.exited {
 		r.State = shimproto.StateExited

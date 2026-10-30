@@ -138,18 +138,20 @@ func (x *IdentityReset) GetMachineId() string {
 
 // CommandExited is sent when a command ends.
 type CommandExited struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	Status        ExitStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=sbx.agent.v1.ExitStatus" json:"status,omitempty"`
-	Code          int32                  `protobuf:"varint,3,opt,name=code,proto3" json:"code,omitempty"`
-	Signal        string                 `protobuf:"bytes,4,opt,name=signal,proto3" json:"signal,omitempty"`
-	Reason        ExitReason             `protobuf:"varint,5,opt,name=reason,proto3,enum=sbx.agent.v1.ExitReason" json:"reason,omitempty"`
-	StdoutEnd     uint64                 `protobuf:"varint,6,opt,name=stdout_end,json=stdoutEnd,proto3" json:"stdout_end,omitempty"`
-	StderrEnd     uint64                 `protobuf:"varint,7,opt,name=stderr_end,json=stderrEnd,proto3" json:"stderr_end,omitempty"`
-	PtyEnd        uint64                 `protobuf:"varint,8,opt,name=pty_end,json=ptyEnd,proto3" json:"pty_end,omitempty"`
-	EndedAt       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	Status    ExitStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=sbx.agent.v1.ExitStatus" json:"status,omitempty"`
+	Code      int32                  `protobuf:"varint,3,opt,name=code,proto3" json:"code,omitempty"`
+	Signal    string                 `protobuf:"bytes,4,opt,name=signal,proto3" json:"signal,omitempty"`
+	Reason    ExitReason             `protobuf:"varint,5,opt,name=reason,proto3,enum=sbx.agent.v1.ExitReason" json:"reason,omitempty"`
+	StdoutEnd uint64                 `protobuf:"varint,6,opt,name=stdout_end,json=stdoutEnd,proto3" json:"stdout_end,omitempty"`
+	StderrEnd uint64                 `protobuf:"varint,7,opt,name=stderr_end,json=stderrEnd,proto3" json:"stderr_end,omitempty"`
+	PtyEnd    uint64                 `protobuf:"varint,8,opt,name=pty_end,json=ptyEnd,proto3" json:"pty_end,omitempty"`
+	EndedAt   *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	// See CommandInfo.output_truncated.
+	OutputTruncated string `protobuf:"bytes,10,opt,name=output_truncated,json=outputTruncated,proto3" json:"output_truncated,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CommandExited) Reset() {
@@ -245,6 +247,76 @@ func (x *CommandExited) GetEndedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *CommandExited) GetOutputTruncated() string {
+	if x != nil {
+		return x.OutputTruncated
+	}
+	return ""
+}
+
+// OutputTruncated (output.truncated) is sent once per stream when the agent
+// learns that the shim dropped output of the stream.
+type OutputTruncated struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	Stream    Stream                 `protobuf:"varint,2,opt,name=stream,proto3,enum=sbx.agent.v1.Stream" json:"stream,omitempty"`
+	// "disk_full".
+	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OutputTruncated) Reset() {
+	*x = OutputTruncated{}
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutputTruncated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutputTruncated) ProtoMessage() {}
+
+func (x *OutputTruncated) ProtoReflect() protoreflect.Message {
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutputTruncated.ProtoReflect.Descriptor instead.
+func (*OutputTruncated) Descriptor() ([]byte, []int) {
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *OutputTruncated) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *OutputTruncated) GetStream() Stream {
+	if x != nil {
+		return x.Stream
+	}
+	return Stream_STREAM_UNSPECIFIED
+}
+
+func (x *OutputTruncated) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 // ReadinessChanged is sent when a readiness phase changes state.
 type ReadinessChanged struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -257,7 +329,7 @@ type ReadinessChanged struct {
 
 func (x *ReadinessChanged) Reset() {
 	*x = ReadinessChanged{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[3]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -269,7 +341,7 @@ func (x *ReadinessChanged) String() string {
 func (*ReadinessChanged) ProtoMessage() {}
 
 func (x *ReadinessChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[3]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -282,7 +354,7 @@ func (x *ReadinessChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadinessChanged.ProtoReflect.Descriptor instead.
 func (*ReadinessChanged) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{3}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ReadinessChanged) GetPhase() string {
@@ -316,7 +388,7 @@ type ClaimApplied struct {
 
 func (x *ClaimApplied) Reset() {
 	*x = ClaimApplied{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[4]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +400,7 @@ func (x *ClaimApplied) String() string {
 func (*ClaimApplied) ProtoMessage() {}
 
 func (x *ClaimApplied) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[4]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +413,7 @@ func (x *ClaimApplied) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimApplied.ProtoReflect.Descriptor instead.
 func (*ClaimApplied) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{4}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ClaimApplied) GetSandboxId() string {
@@ -361,7 +433,7 @@ type PortsChanged struct {
 
 func (x *PortsChanged) Reset() {
 	*x = PortsChanged{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[5]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -373,7 +445,7 @@ func (x *PortsChanged) String() string {
 func (*PortsChanged) ProtoMessage() {}
 
 func (x *PortsChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[5]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -386,7 +458,7 @@ func (x *PortsChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PortsChanged.ProtoReflect.Descriptor instead.
 func (*PortsChanged) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{5}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PortsChanged) GetPorts() []*Port {
@@ -407,7 +479,7 @@ type IdleChanged struct {
 
 func (x *IdleChanged) Reset() {
 	*x = IdleChanged{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[6]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -419,7 +491,7 @@ func (x *IdleChanged) String() string {
 func (*IdleChanged) ProtoMessage() {}
 
 func (x *IdleChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[6]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -432,7 +504,7 @@ func (x *IdleChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdleChanged.ProtoReflect.Descriptor instead.
 func (*IdleChanged) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{6}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *IdleChanged) GetIdle() bool {
@@ -461,7 +533,7 @@ type Activity struct {
 
 func (x *Activity) Reset() {
 	*x = Activity{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[7]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -473,7 +545,7 @@ func (x *Activity) String() string {
 func (*Activity) ProtoMessage() {}
 
 func (x *Activity) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[7]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -486,7 +558,7 @@ func (x *Activity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Activity.ProtoReflect.Descriptor instead.
 func (*Activity) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{7}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Activity) GetRunningCommands() uint32 {
@@ -521,7 +593,7 @@ type PtyClosed struct {
 
 func (x *PtyClosed) Reset() {
 	*x = PtyClosed{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[8]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -533,7 +605,7 @@ func (x *PtyClosed) String() string {
 func (*PtyClosed) ProtoMessage() {}
 
 func (x *PtyClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[8]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -546,7 +618,7 @@ func (x *PtyClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PtyClosed.ProtoReflect.Descriptor instead.
 func (*PtyClosed) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{8}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PtyClosed) GetCommandId() string {
@@ -575,7 +647,7 @@ type QuiesceAutoThawed struct {
 
 func (x *QuiesceAutoThawed) Reset() {
 	*x = QuiesceAutoThawed{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[9]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -587,7 +659,7 @@ func (x *QuiesceAutoThawed) String() string {
 func (*QuiesceAutoThawed) ProtoMessage() {}
 
 func (x *QuiesceAutoThawed) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[9]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -600,7 +672,7 @@ func (x *QuiesceAutoThawed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuiesceAutoThawed.ProtoReflect.Descriptor instead.
 func (*QuiesceAutoThawed) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{9}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *QuiesceAutoThawed) GetLeaseId() string {
@@ -635,7 +707,7 @@ type DiskThreshold struct {
 
 func (x *DiskThreshold) Reset() {
 	*x = DiskThreshold{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[10]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -647,7 +719,7 @@ func (x *DiskThreshold) String() string {
 func (*DiskThreshold) ProtoMessage() {}
 
 func (x *DiskThreshold) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[10]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -660,7 +732,7 @@ func (x *DiskThreshold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskThreshold.ProtoReflect.Descriptor instead.
 func (*DiskThreshold) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{10}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DiskThreshold) GetMount() string {
@@ -691,7 +763,7 @@ type UpdateResult struct {
 
 func (x *UpdateResult) Reset() {
 	*x = UpdateResult{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[11]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -703,7 +775,7 @@ func (x *UpdateResult) String() string {
 func (*UpdateResult) ProtoMessage() {}
 
 func (x *UpdateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[11]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +788,7 @@ func (x *UpdateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateResult.ProtoReflect.Descriptor instead.
 func (*UpdateResult) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{11}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UpdateResult) GetFrom() string {
@@ -765,7 +837,7 @@ type JournalGap struct {
 
 func (x *JournalGap) Reset() {
 	*x = JournalGap{}
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[12]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -777,7 +849,7 @@ func (x *JournalGap) String() string {
 func (*JournalGap) ProtoMessage() {}
 
 func (x *JournalGap) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_events_proto_msgTypes[12]
+	mi := &file_sbx_agent_v1_events_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -790,7 +862,7 @@ func (x *JournalGap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JournalGap.ProtoReflect.Descriptor instead.
 func (*JournalGap) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{12}
+	return file_sbx_agent_v1_events_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *JournalGap) GetFromSeq() uint64 {
@@ -819,7 +891,7 @@ const file_sbx_agent_v1_events_proto_rawDesc = "" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\".\n" +
 	"\rIdentityReset\x12\x1d\n" +
 	"\n" +
-	"machine_id\x18\x01 \x01(\tR\tmachineId\"\xcc\x02\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\"\xf7\x02\n" +
 	"\rCommandExited\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x120\n" +
@@ -832,7 +904,14 @@ const file_sbx_agent_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"stderr_end\x18\a \x01(\x04R\tstderrEnd\x12\x17\n" +
 	"\apty_end\x18\b \x01(\x04R\x06ptyEnd\x125\n" +
-	"\bended_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\"n\n" +
+	"\bended_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12)\n" +
+	"\x10output_truncated\x18\n" +
+	" \x01(\tR\x0foutputTruncated\"v\n" +
+	"\x0fOutputTruncated\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12,\n" +
+	"\x06stream\x18\x02 \x01(\x0e2\x14.sbx.agent.v1.StreamR\x06stream\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"n\n" +
 	"\x10ReadinessChanged\x12\x14\n" +
 	"\x05phase\x18\x01 \x01(\tR\x05phase\x12.\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x18.sbx.agent.v1.PhaseStateR\x05state\x12\x14\n" +
@@ -886,41 +965,44 @@ func file_sbx_agent_v1_events_proto_rawDescGZIP() []byte {
 	return file_sbx_agent_v1_events_proto_rawDescData
 }
 
-var file_sbx_agent_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_sbx_agent_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_sbx_agent_v1_events_proto_goTypes = []any{
 	(*AgentStarted)(nil),          // 0: sbx.agent.v1.AgentStarted
 	(*IdentityReset)(nil),         // 1: sbx.agent.v1.IdentityReset
 	(*CommandExited)(nil),         // 2: sbx.agent.v1.CommandExited
-	(*ReadinessChanged)(nil),      // 3: sbx.agent.v1.ReadinessChanged
-	(*ClaimApplied)(nil),          // 4: sbx.agent.v1.ClaimApplied
-	(*PortsChanged)(nil),          // 5: sbx.agent.v1.PortsChanged
-	(*IdleChanged)(nil),           // 6: sbx.agent.v1.IdleChanged
-	(*Activity)(nil),              // 7: sbx.agent.v1.Activity
-	(*PtyClosed)(nil),             // 8: sbx.agent.v1.PtyClosed
-	(*QuiesceAutoThawed)(nil),     // 9: sbx.agent.v1.QuiesceAutoThawed
-	(*DiskThreshold)(nil),         // 10: sbx.agent.v1.DiskThreshold
-	(*UpdateResult)(nil),          // 11: sbx.agent.v1.UpdateResult
-	(*JournalGap)(nil),            // 12: sbx.agent.v1.JournalGap
-	(ExitStatus)(0),               // 13: sbx.agent.v1.ExitStatus
-	(ExitReason)(0),               // 14: sbx.agent.v1.ExitReason
-	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
-	(PhaseState)(0),               // 16: sbx.agent.v1.PhaseState
-	(*Port)(nil),                  // 17: sbx.agent.v1.Port
+	(*OutputTruncated)(nil),       // 3: sbx.agent.v1.OutputTruncated
+	(*ReadinessChanged)(nil),      // 4: sbx.agent.v1.ReadinessChanged
+	(*ClaimApplied)(nil),          // 5: sbx.agent.v1.ClaimApplied
+	(*PortsChanged)(nil),          // 6: sbx.agent.v1.PortsChanged
+	(*IdleChanged)(nil),           // 7: sbx.agent.v1.IdleChanged
+	(*Activity)(nil),              // 8: sbx.agent.v1.Activity
+	(*PtyClosed)(nil),             // 9: sbx.agent.v1.PtyClosed
+	(*QuiesceAutoThawed)(nil),     // 10: sbx.agent.v1.QuiesceAutoThawed
+	(*DiskThreshold)(nil),         // 11: sbx.agent.v1.DiskThreshold
+	(*UpdateResult)(nil),          // 12: sbx.agent.v1.UpdateResult
+	(*JournalGap)(nil),            // 13: sbx.agent.v1.JournalGap
+	(ExitStatus)(0),               // 14: sbx.agent.v1.ExitStatus
+	(ExitReason)(0),               // 15: sbx.agent.v1.ExitReason
+	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
+	(Stream)(0),                   // 17: sbx.agent.v1.Stream
+	(PhaseState)(0),               // 18: sbx.agent.v1.PhaseState
+	(*Port)(nil),                  // 19: sbx.agent.v1.Port
 }
 var file_sbx_agent_v1_events_proto_depIdxs = []int32{
-	13, // 0: sbx.agent.v1.CommandExited.status:type_name -> sbx.agent.v1.ExitStatus
-	14, // 1: sbx.agent.v1.CommandExited.reason:type_name -> sbx.agent.v1.ExitReason
-	15, // 2: sbx.agent.v1.CommandExited.ended_at:type_name -> google.protobuf.Timestamp
-	16, // 3: sbx.agent.v1.ReadinessChanged.state:type_name -> sbx.agent.v1.PhaseState
-	17, // 4: sbx.agent.v1.PortsChanged.ports:type_name -> sbx.agent.v1.Port
-	15, // 5: sbx.agent.v1.IdleChanged.since:type_name -> google.protobuf.Timestamp
-	14, // 6: sbx.agent.v1.PtyClosed.reason:type_name -> sbx.agent.v1.ExitReason
-	15, // 7: sbx.agent.v1.QuiesceAutoThawed.at:type_name -> google.protobuf.Timestamp
-	8,  // [8:8] is the sub-list for method output_type
-	8,  // [8:8] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	14, // 0: sbx.agent.v1.CommandExited.status:type_name -> sbx.agent.v1.ExitStatus
+	15, // 1: sbx.agent.v1.CommandExited.reason:type_name -> sbx.agent.v1.ExitReason
+	16, // 2: sbx.agent.v1.CommandExited.ended_at:type_name -> google.protobuf.Timestamp
+	17, // 3: sbx.agent.v1.OutputTruncated.stream:type_name -> sbx.agent.v1.Stream
+	18, // 4: sbx.agent.v1.ReadinessChanged.state:type_name -> sbx.agent.v1.PhaseState
+	19, // 5: sbx.agent.v1.PortsChanged.ports:type_name -> sbx.agent.v1.Port
+	16, // 6: sbx.agent.v1.IdleChanged.since:type_name -> google.protobuf.Timestamp
+	15, // 7: sbx.agent.v1.PtyClosed.reason:type_name -> sbx.agent.v1.ExitReason
+	16, // 8: sbx.agent.v1.QuiesceAutoThawed.at:type_name -> google.protobuf.Timestamp
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_sbx_agent_v1_events_proto_init() }
@@ -935,7 +1017,7 @@ func file_sbx_agent_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sbx_agent_v1_events_proto_rawDesc), len(file_sbx_agent_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -428,7 +429,7 @@ func TestShimLeftovers(t *testing.T) {
 	}
 	h.waitShim(10 * time.Second)
 	// The leftover's death does not rewrite exit.json.
-	if e2 := h.waitExitFile(time.Second); e2 != e {
+	if e2 := h.waitExitFile(time.Second); !reflect.DeepEqual(e2, e) {
 		t.Errorf("exit.json changed: %+v -> %+v", e, e2)
 	}
 }

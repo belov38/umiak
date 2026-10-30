@@ -34,6 +34,17 @@ message CommandExited {
   uint64 stderr_end = 7;
   uint64 pty_end = 8;
   google.protobuf.Timestamp ended_at = 9;
+  // See CommandInfo.output_truncated.
+  string output_truncated = 10;
+}
+
+// OutputTruncated (output.truncated) is sent once per stream when the agent
+// learns that the shim dropped output of the stream.
+message OutputTruncated {
+  string command_id = 1;
+  Stream stream = 2;
+  // "disk_full".
+  string reason = 3;
 }
 
 // ReadinessChanged is sent when a readiness phase changes state.

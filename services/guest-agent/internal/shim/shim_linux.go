@@ -84,11 +84,15 @@ func validID(id string) bool {
 // stream is one output stream: a non-blocking read fd and its log file.
 type stream struct {
 	name string
-	file *os.File // append-only log
-	fd   int      // read end; -1 before the start
+	file *os.File  // append-only log
+	out  io.Writer // writes to file; tests replace it to inject errors
+	fd   int       // read end; -1 before the start
 	eof  bool
 	// werr is set after the first failed log write, to log it once.
 	werr bool
+	// dropped counts the bytes lost to a full disk (ENOSPC or EDQUOT). The
+	// loop adds, the server reads.
+	dropped atomic.Uint64
 }
 
 // shim is the state of one shim process.
@@ -245,7 +249,7 @@ func (s *shim) openStreams() error {
 		if err != nil {
 			return err
 		}
-		s.streams = append(s.streams, &stream{name: name, file: f, fd: -1})
+		s.streams = append(s.streams, &stream{name: name, file: f, out: f, fd: -1})
 	}
 	return nil
 }
@@ -488,9 +492,7 @@ func hasEnv(env []string, key string) bool {
 func (s *shim) startFailed(cause error) error {
 	s.log.Warn("shim: start failed", "err", cause)
 	st := s.streams[len(s.streams)-1] // stderr, or the only pty stream
-	if _, err := fmt.Fprintf(st.file, "sbx-agent: cannot start command: %v\n", cause); err != nil {
-		s.log.Error("shim: write start error", "err", err)
-	}
+	s.writeLog(st, fmt.Appendf(nil, "sbx-agent: cannot start command: %v\n", cause))
 	e := ExitFile{
 		Status:      shimproto.StatusExited,
 		Code:        127,
@@ -506,8 +508,10 @@ func (s *shim) startFailed(cause error) error {
 	return nil
 }
 
-// setEnds fills the stream ends of e from the log file sizes.
+// setEnds fills the stream ends of e from the log file sizes, and the
+// output lost to a full disk.
 func (s *shim) setEnds(e *ExitFile) {
+	e.OutputTruncated, e.DroppedBytes = s.truncation()
 	for _, st := range s.streams {
 		fi, err := st.file.Stat()
 		if err != nil {
@@ -523,6 +527,42 @@ func (s *shim) setEnds(e *ExitFile) {
 			e.PtyEnd = fi.Size()
 		}
 	}
+}
+
+// writeLog appends p to the log of st. A failed write never blocks the
+// stream: the loop keeps reading the pipe and drops what the file does not
+// take. Bytes dropped on a full disk are counted for OutputTruncated; the
+// file size, and so the stream offsets, cover only what was written.
+func (s *shim) writeLog(st *stream, p []byte) {
+	n, err := st.out.Write(p)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, unix.ENOSPC) || errors.Is(err, unix.EDQUOT) {
+		st.dropped.Add(uint64(len(p) - max(n, 0))) //nolint:gosec // n <= len(p)
+	}
+	if !st.werr {
+		st.werr = true
+		s.log.Error("shim: write log, output lost", "stream", st.name, "err", err)
+	}
+}
+
+// truncation reports the output lost to a full disk: TruncatedDiskFull and
+// the dropped bytes per stream, or nothing.
+func (s *shim) truncation() (string, map[string]uint64) {
+	var dropped map[string]uint64
+	for _, st := range s.streams {
+		if n := st.dropped.Load(); n > 0 {
+			if dropped == nil {
+				dropped = make(map[string]uint64, len(s.streams))
+			}
+			dropped[st.name] = n
+		}
+	}
+	if dropped == nil {
+		return "", nil
+	}
+	return shimproto.TruncatedDiskFull, dropped
 }
 
 // notifyReady sends READY=1 to systemd; without NOTIFY_SOCKET it is a no-op.

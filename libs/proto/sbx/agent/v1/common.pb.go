@@ -835,6 +835,9 @@ type CommandInfo struct {
 	HasLeftovers    bool                   `protobuf:"varint,11,opt,name=has_leftovers,json=hasLeftovers,proto3" json:"has_leftovers,omitempty"`
 	AttachedClients uint32                 `protobuf:"varint,12,opt,name=attached_clients,json=attachedClients,proto3" json:"attached_clients,omitempty"`
 	AgentVersion    string                 `protobuf:"bytes,13,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	// "disk_full" when the shim dropped output because the disk was full;
+	// empty otherwise. Stream ends cover only the bytes written.
+	OutputTruncated string `protobuf:"bytes,14,opt,name=output_truncated,json=outputTruncated,proto3" json:"output_truncated,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -956,6 +959,13 @@ func (x *CommandInfo) GetAttachedClients() uint32 {
 func (x *CommandInfo) GetAgentVersion() string {
 	if x != nil {
 		return x.AgentVersion
+	}
+	return ""
+}
+
+func (x *CommandInfo) GetOutputTruncated() string {
+	if x != nil {
+		return x.OutputTruncated
 	}
 	return ""
 }
@@ -1275,7 +1285,7 @@ const file_sbx_agent_v1_common_proto_rawDesc = "" +
 	"\x04size\x18\x02 \x01(\x04R\x04size\x12%\n" +
 	"\x0eavailable_from\x18\x03 \x01(\x04R\ravailableFrom\x12\x15\n" +
 	"\x03end\x18\x04 \x01(\x04H\x00R\x03end\x88\x01\x01B\x06\n" +
-	"\x04_end\"\xbc\x04\n" +
+	"\x04_end\"\xe7\x04\n" +
 	"\vCommandInfo\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12-\n" +
@@ -1293,7 +1303,8 @@ const file_sbx_agent_v1_common_proto_rawDesc = "" +
 	" \x03(\v2\x18.sbx.agent.v1.StreamInfoR\astreams\x12#\n" +
 	"\rhas_leftovers\x18\v \x01(\bR\fhasLeftovers\x12)\n" +
 	"\x10attached_clients\x18\f \x01(\rR\x0fattachedClients\x12#\n" +
-	"\ragent_version\x18\r \x01(\tR\fagentVersion\"\xaf\x02\n" +
+	"\ragent_version\x18\r \x01(\tR\fagentVersion\x12)\n" +
+	"\x10output_truncated\x18\x0e \x01(\tR\x0foutputTruncated\"\xaf\x02\n" +
 	"\bFileInfo\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12*\n" +

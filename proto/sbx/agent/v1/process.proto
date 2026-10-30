@@ -120,6 +120,8 @@ message ExitEvent {
   uint64 pty_end = 6;
   ExitReason reason = 7;
   google.protobuf.Timestamp ended_at = 8;
+  // See CommandInfo.output_truncated.
+  string output_truncated = 9;
 }
 
 // StartedEvent is sent first on Run.

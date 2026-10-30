@@ -137,6 +137,9 @@ message CommandInfo {
   bool has_leftovers = 11;
   uint32 attached_clients = 12;
   string agent_version = 13;
+  // "disk_full" when the shim dropped output because the disk was full;
+  // empty otherwise. Stream ends cover only the bytes written.
+  string output_truncated = 14;
 }
 
 // FileInfo describes a filesystem entry.
