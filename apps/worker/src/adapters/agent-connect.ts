@@ -32,6 +32,21 @@ export interface ConnectAgentPortOptions {
 	 * route. Default 45 s.
 	 */
 	timeoutMs?: number;
+	/** Domain of the published ports, sent as `port_domain` on every Claim. */
+	portDomain?: string;
+	/** SSH user CA public keys, sent as `ssh_user_ca_keys` on every Claim. */
+	sshUserCaKeys?: string[];
+}
+
+/**
+ * Parses an SSH user CA keys file: one public key per line; blank lines and
+ * `#` comments are skipped.
+ */
+export function parseCaKeys(text: string): string[] {
+	return text
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l !== "" && !l.startsWith("#"));
 }
 
 /** Mode of a secret file when S6 does not set one (S3 §10). */
@@ -102,11 +117,15 @@ export class ConnectAgentPort implements AgentPort {
 	readonly #client: AgentClient;
 	readonly #log: ConnectAgentPortOptions["log"];
 	readonly #timeoutMs: number;
+	readonly #portDomain: string;
+	readonly #sshUserCaKeys: string[];
 
 	constructor(client: AgentClient, opts: ConnectAgentPortOptions = {}) {
 		this.#client = client;
 		this.#log = opts.log;
 		this.#timeoutMs = opts.timeoutMs ?? 45_000;
+		this.#portDomain = opts.portDomain ?? "";
+		this.#sshUserCaKeys = [...(opts.sshUserCaKeys ?? [])];
 	}
 
 	/**
@@ -156,6 +175,8 @@ export class ConnectAgentPort implements AgentPort {
 					reason: CLAIM_REASONS[req.reason],
 					sandboxId: req.sandboxId,
 					hostname: req.hostname,
+					portDomain: this.#portDomain,
+					sshUserCaKeys: this.#sshUserCaKeys,
 					env: req.env,
 					secretEnv: req.secretEnv,
 					secretFiles: req.secretFiles.map(toProtoFile),
@@ -213,8 +234,10 @@ export class ConnectAgentPort implements AgentPort {
 	 * Freeze = `System/Quiesce`, thaw = `System/Thaw` with the lease from the
 	 * freeze. Each call gets its request id once per hook, so a retry of the
 	 * same step replays the agent's cached answer instead of taking a second
-	 * lease. A freeze whose response was lost leaves its lease to the agent's
-	 * watchdog, which thaws it at the deadline.
+	 * lease. After a freeze whose outcome is unknown (`AgentUnavailable`: the
+	 * response may be lost after the agent took the lease), thaw asks
+	 * `System/Info` for the active lease and thaws it; a failed lookup leaves
+	 * the lease to the agent's watchdog, which thaws it at the deadline.
 	 *
 	 * A thaw answered with `auto_thawed` means the watchdog released the guest
 	 * before the snapshot was done: the snapshot is not consistent, so thaw
@@ -229,20 +252,32 @@ export class ConnectAgentPort implements AgentPort {
 		const freezeId = randomUUID();
 		const thawId = randomUUID();
 		let leaseId: string | undefined;
+		// A freeze failed without a known outcome: the agent may hold a lease.
+		let freezeUnknown = false;
 		// Set once a Thaw reached the agent: undefined = not thawed yet, null = clean.
 		let thawOutcome: QuiesceFailed | null | undefined;
 		return {
 			freeze: async () => {
-				const r = await this.#call(machineId, "quiesce", freezeId, (c, o) =>
-					c.quiesce({ leaseMs }, o),
-				);
-				leaseId = r.leaseId;
+				try {
+					const r = await this.#call(machineId, "quiesce", freezeId, (c, o) =>
+						c.quiesce({ leaseMs }, o),
+					);
+					leaseId = r.leaseId;
+				} catch (err) {
+					if (err instanceof AgentUnavailable) freezeUnknown = true;
+					throw err;
+				}
+				freezeUnknown = false;
 				thawOutcome = undefined;
 			},
 			thaw: async () => {
 				if (thawOutcome !== undefined) {
 					if (thawOutcome !== null) throw thawOutcome;
 					return;
+				}
+				if (leaseId === undefined && freezeUnknown) {
+					leaseId = await this.#activeLease(machineId);
+					freezeUnknown = false;
 				}
 				if (leaseId === undefined) return;
 				const lease = leaseId;
@@ -262,5 +297,22 @@ export class ConnectAgentPort implements AgentPort {
 				throw thawOutcome;
 			},
 		};
+	}
+
+	/**
+	 * Returns the id of the agent's active quiesce lease, or undefined when
+	 * none is active or the agent cannot be asked (its watchdog thaws then).
+	 */
+	async #activeLease(machineId: string): Promise<string | undefined> {
+		try {
+			const r = await this.#call(machineId, "info", undefined, (c, o) =>
+				c.info({}, o),
+			);
+			return r.quiesce?.active && r.quiesce.leaseId !== ""
+				? r.quiesce.leaseId
+				: undefined;
+		} catch {
+			return undefined;
+		}
 	}
 }

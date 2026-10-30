@@ -10,7 +10,7 @@ import { AgentClient, PgRegistry } from "@sbx/agent-client";
 import { StaticConfigReader } from "@sbx/config";
 import { KeyRing } from "@sbx/core";
 import { createPool } from "@sbx/db";
-import { ConnectAgentPort } from "./adapters/agent-connect.ts";
+import { ConnectAgentPort, parseCaKeys } from "./adapters/agent-connect.ts";
 import { UnavailableAgentPort } from "./adapters/agent-unavailable.ts";
 import {
 	HttpGatewayPort,
@@ -87,7 +87,17 @@ async function main(): Promise<void> {
 			});
 			gateway = new HttpGatewayPort(registry, { serviceToken });
 			agentClient = new AgentClient({ registry, serviceToken });
-			agent = new ConnectAgentPort(agentClient, { log });
+			agent = new ConnectAgentPort(agentClient, {
+				log,
+				...(env.portDomain === undefined ? {} : { portDomain: env.portDomain }),
+				...(env.sshUserCaKeysFile === undefined
+					? {}
+					: {
+							sshUserCaKeys: parseCaKeys(
+								readFileSync(env.sshUserCaKeysFile, "utf8"),
+							),
+						}),
+			});
 		} else {
 			log.warn(
 				"SBX_GATEWAY_SERVICE_TOKEN_FILE is not set: token rotation and agent calls fail (transient) until it is",

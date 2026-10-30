@@ -14,7 +14,10 @@ import {
 import { ErrorDetailSchema } from "@sbx/proto";
 import { ClaimReason, System } from "@sbx/proto/agent/v1";
 import { describe, expect, it } from "vitest";
-import { ConnectAgentPort } from "../src/adapters/agent-connect.ts";
+import {
+	ConnectAgentPort,
+	parseCaKeys,
+} from "../src/adapters/agent-connect.ts";
 import { QuiesceFailed } from "../src/ops/snapshot-step.ts";
 import { AgentRejected, AgentUnavailable } from "../src/ports.ts";
 
@@ -41,7 +44,10 @@ class StaticRegistry implements Registry {
 
 type SystemImpl = Partial<ServiceImpl<typeof System>>;
 
-function portFor(impl: SystemImpl): ConnectAgentPort {
+function portFor(
+	impl: SystemImpl,
+	opts: ConstructorParameters<typeof ConnectAgentPort>[1] = {},
+): ConnectAgentPort {
 	const client = new AgentClient({
 		registry: new StaticRegistry(),
 		serviceToken: "svc",
@@ -51,7 +57,7 @@ function portFor(impl: SystemImpl): ConnectAgentPort {
 		createTransport: () =>
 			createRouterTransport(({ service }) => service(System, impl)),
 	});
-	return new ConnectAgentPort(client);
+	return new ConnectAgentPort(client, opts);
 }
 
 function detailed(code: Code, detail: string, retryable = false): ConnectError {
@@ -122,6 +128,57 @@ describe("ConnectAgentPort", () => {
 		expect([...(tuned?.content ?? [])]).toEqual([0, 255, 7]);
 		expect(tuned?.mode).toBe(0o600);
 		expect(tuned?.linkPath).toBe("/etc/tuned");
+		// Without the worker settings both fields stay empty.
+		expect((seen.req as { portDomain: string }).portDomain).toBe("");
+		expect((seen.req as { sshUserCaKeys: string[] }).sshUserCaKeys).toEqual([]);
+	});
+
+	it("claim carries the port domain and the SSH user CA keys", async () => {
+		const seen: { portDomain?: string; sshUserCaKeys?: string[] }[] = [];
+		const port = portFor(
+			{
+				async claim(req) {
+					seen.push({
+						portDomain: req.portDomain,
+						sshUserCaKeys: req.sshUserCaKeys,
+					});
+					return { ready: true };
+				},
+			},
+			{
+				portDomain: "sbx.example.com",
+				sshUserCaKeys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"],
+			},
+		);
+		const req = {
+			reason: "claim" as const,
+			sandboxId: "sbx-1",
+			hostname: "box",
+			env: {},
+			secretEnv: {},
+			secretFiles: [],
+			authorizedKeys: [],
+		};
+		await port.claim(machineId, req, "r1");
+		await port.claim(machineId, req, "r2");
+		expect(seen).toEqual([
+			{
+				portDomain: "sbx.example.com",
+				sshUserCaKeys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"],
+			},
+			{
+				portDomain: "sbx.example.com",
+				sshUserCaKeys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"],
+			},
+		]);
+	});
+
+	it("parseCaKeys keeps key lines and drops blanks and comments", () => {
+		expect(
+			parseCaKeys(
+				"# user CA\nssh-ed25519 AAAA ca-1\n\n  ssh-rsa BBBB ca-2  \r\n",
+			),
+		).toEqual(["ssh-ed25519 AAAA ca-1", "ssh-rsa BBBB ca-2"]);
 	});
 
 	it("updateEnv, updateSecrets and prepareStop reach the agent", async () => {
@@ -242,6 +299,61 @@ describe("ConnectAgentPort", () => {
 			await expect(hook.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
 		}
 		expect(thaws).toBe(1);
+	});
+
+	it("thaw after a freeze with a lost response thaws the active lease", async () => {
+		const thaws: string[] = [];
+		let infos = 0;
+		const port = portFor({
+			async quiesce() {
+				// The agent took the lease, the response never arrived.
+				throw new ConnectError("lost", Code.Unavailable);
+			},
+			async info() {
+				infos++;
+				return { quiesce: { active: true, leaseId: "lease-lost" } };
+			},
+			async thaw(req) {
+				thaws.push(req.leaseId);
+				return {};
+			},
+		});
+		const hook = port.quiesceHook(machineId, 1000);
+		await expect(hook.freeze()).rejects.toBeInstanceOf(AgentUnavailable);
+		await hook.thaw();
+		expect(infos).toBe(1);
+		expect(thaws).toEqual(["lease-lost"]);
+	});
+
+	it("thaw after a rejected or lost freeze without an active lease does nothing", async () => {
+		let thaws = 0;
+		let infos = 0;
+		let freezeError = new ConnectError("lost", Code.Unavailable);
+		const port = portFor({
+			async quiesce() {
+				throw freezeError;
+			},
+			async info() {
+				infos++;
+				return { quiesce: { active: false } };
+			},
+			async thaw() {
+				thaws++;
+				return {};
+			},
+		});
+		const lost = port.quiesceHook(machineId, 1000);
+		await expect(lost.freeze()).rejects.toBeInstanceOf(AgentUnavailable);
+		await lost.thaw();
+		expect(infos).toBe(1);
+
+		// A rejected freeze took no lease: no lookup at all.
+		freezeError = detailed(Code.FailedPrecondition, "quiesced");
+		const rejected = port.quiesceHook(machineId, 1000);
+		await expect(rejected.freeze()).rejects.toBeInstanceOf(AgentRejected);
+		await rejected.thaw();
+		expect(infos).toBe(1);
+		expect(thaws).toBe(0);
 	});
 
 	it("a thaw that did not reach the agent is retried with the same ids", async () => {

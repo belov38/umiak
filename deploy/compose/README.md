@@ -72,6 +72,7 @@ docker compose -f deploy/compose/compose.yaml down -v     # чистый ста�
 - Пока нет агента (S3) и gateway (S2), создание sandbox не может дойти до `ready`: агентский порт недоступен, а без `SBX_GATEWAY_SERVICE_TOKEN_FILE` ротация токена падает по таймауту. Worker при этом предупреждает об этом в логе при старте.
 - Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой схемы `tunnel` (до этой миграции), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
 - С `SBX_GATEWAY_SERVICE_TOKEN_FILE` worker находит gateway, который держит туннель machine, через `PgRegistry` из `@sbx/agent-client` (своё небольшое подключение к Postgres и LISTEN `tunnel_sessions`) и вызывает на нём `rotate-token`.
+- `SBX_PORT_DOMAIN` (домен опубликованных портов, например `sbx.example.com`) и `SBX_SSH_USER_CA_KEYS_FILE` (файл с публичными ключами SSH user CA, по одному в строке) необязательны: worker передаёт их агенту в каждом Claim (`port_domain`, `ssh_user_ca_keys`). Без них поля пустые.
 
 ## Smoke-тест реального адаптера Proxmox
 
