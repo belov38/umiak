@@ -11,7 +11,8 @@ import {
 } from "@sbx/sdk";
 import { z } from "zod";
 import type { ToolContext } from "../context.ts";
-import { ToolError } from "../errors.ts";
+import { RESPONSE_MARGIN_MS } from "../deadline.ts";
+import { hintFor, ToolError } from "../errors.ts";
 import { splitBudget, truncationNote } from "../output/budget.ts";
 import { fenceUntrusted } from "../output/fence.ts";
 import { toolText } from "../output/result.ts";
@@ -48,6 +49,8 @@ export const KILL_GRACE_MS = 5_000;
 /** exec_kill with SIGTERM (S11 8.3). */
 export const SIGTERM_GRACE_MS = 10_000;
 const PROGRESS_EVERY_MS = 5_000;
+/** A wait over before the command is named: how long to wait for its started frame. */
+const STARTED_GRACE_MS = 1_000;
 /** exec_output keeps reading this long after the first new chunk. */
 const SETTLE_MS = 500;
 const LIST_COMMAND_CHARS = 200;
@@ -212,14 +215,15 @@ export const execRun = defineTool({
 		idempotency_key: commandKeyShape,
 	},
 	async handler(args, ctx) {
-		// The SDK's stream machinery needs a Sandbox handle; the read also
-		// gives the id the key is scoped by (an id and a slug key alike).
-		const sb = await ctx.sbx().sandboxes.get(args.sandbox, ctx.call);
+		// The key is scoped by the sandbox id (an id and a slug key alike); the
+		// handle costs no request, so commands:exec is the only scope needed.
+		const sandboxId = await resolveSandboxId(ctx, args.sandbox);
 		const { modelKey, apiKey } = keyFor(
 			"exec_run",
 			args.idempotency_key,
-			sb.id,
+			sandboxId,
 		);
+		const sb = ctx.sbx().sandboxes.handle(args.sandbox);
 		const max = args.max_output_bytes ?? DEFAULT_OUTPUT_BYTES;
 		const tails: Record<Stream, ByteTail> = {
 			stdout: new ByteTail(max),
@@ -230,10 +234,22 @@ export const execRun = defineTool({
 		let exit: ExitEvent | undefined;
 		const started = Date.now();
 
-		// Leaving the wait aborts the stream only: the command keeps running.
-		const waitOver = new AbortController();
+		// Ending the wait aborts the stream only: the command keeps running.
+		// The wait never cuts the keyed POST: until the API names the command
+		// only the call budget does (`stop`), so a retry with the key attaches.
+		const stop = new AbortController();
+		const end = () => stop.abort(new DOMException("wait over", "TimeoutError"));
+		let waitOver = false;
+		let grace: ReturnType<typeof setTimeout> | undefined;
+		const budget = setTimeout(
+			end,
+			Math.max(0, ctx.deadline.remainingMs() - RESPONSE_MARGIN_MS),
+		);
 		const timer = setTimeout(
-			() => waitOver.abort(new DOMException("wait over", "TimeoutError")),
+			() => {
+				waitOver = true;
+				if (command !== undefined) end();
+			},
 			ctx.deadline.waitMs(args.wait_seconds ?? DEFAULT_RUN_WAIT_SECONDS),
 		);
 		const progress = setInterval(() => {
@@ -251,13 +267,17 @@ export const execRun = defineTool({
 				timeoutSeconds: timeout === 0 ? null : timeout,
 				encoding: "base64",
 				idempotencyKey: apiKey,
-				signal: AbortSignal.any([ctx.call.signal, waitOver.signal]),
+				signal: AbortSignal.any([ctx.call.signal, stop.signal]),
 				retryBudgetMs: ctx.call.retryBudgetMs,
 				onStart: (c) => {
 					command = c;
+					// The wait is over: answer once the started frame (replayed)
+					// is read, or shortly if it does not come.
+					if (waitOver) grace = setTimeout(end, STARTED_GRACE_MS);
 				},
 				onStarted: (s) => {
 					replayed = s.replayed;
+					if (waitOver) end();
 				},
 			})) {
 				if (ev.type === "exit") {
@@ -278,20 +298,22 @@ export const execRun = defineTool({
 				}
 				throw err;
 			}
-			const waitEnded = waitOver.signal.aborted || ctx.deadline.expired();
+			const stopped = stop.signal.aborted || ctx.deadline.expired();
 			if (command === undefined) {
-				if (waitEnded || outcomeUnknown(err, ctx)) {
+				if (stopped || outcomeUnknown(err, ctx)) {
 					throw unknownOutcomeError(modelKey);
 				}
 				throw err;
 			}
-			if (!waitEnded) {
+			if (!stopped) {
 				// 401 and bugs go to the call wrapper (re-login, the log).
 				if (!(err instanceof SbxError) || err.status === 401) throw err;
-				throw lostStream(err, command.id, modelKey);
+				throw lostStream(err, args.sandbox, command.id, modelKey);
 			}
 		} finally {
+			clearTimeout(budget);
 			clearTimeout(timer);
+			clearTimeout(grace);
 			clearInterval(progress);
 		}
 		if (command === undefined) {
@@ -308,13 +330,24 @@ export const execRun = defineTool({
 	},
 });
 
-/** The command started but its output stream failed for good. */
-function lostStream(err: SbxError, id: string, modelKey: string): ToolError {
+/**
+ * The command started but its output stream failed for good: the API's
+ * error (retryable and the hint of its code as they are) plus where to read on.
+ */
+function lostStream(
+	err: SbxError,
+	sandbox: string,
+	id: string,
+	modelKey: string,
+): ToolError {
+	const hint = hintFor(err.code, { sandbox, details: err.details });
+	const readOn = `command ${id} was started; read its output with exec_output command_id=${id}.`;
 	return new ToolError({
 		code: err.code,
 		message: err.message,
-		retryable: true,
-		hint: `command ${id} was started; read its output with exec_output command_id=${id}.`,
+		retryable: err.retryable,
+		hint: hint === undefined ? readOn : `${hint} Then ${readOn}`,
+		details: err.details,
 		idempotencyKey: modelKey,
 	});
 }
@@ -510,18 +543,19 @@ function streamState(c: CommandData, s: Stream): StreamState {
 
 /**
  * Waits until the command has output past `offsets` (then SETTLE_MS more,
- * to collect what follows) or exits, at most `waitMs`. Never throws because
- * time is up: the caller answers with the state as it is.
+ * to collect what follows) or exits, at most until `endsAt` (epoch ms).
+ * Never throws because time is up: the caller answers with the state as it is.
  */
 async function waitForOutput(
 	ctx: ToolContext,
 	sandbox: string,
 	commandId: string,
 	offsets: Record<Stream, number>,
-	waitMs: number,
+	endsAt: number,
 ): Promise<void> {
+	const waitMs = endsAt - Date.now();
 	if (waitMs <= 0) return;
-	const sb = await ctx.sbx().sandboxes.get(sandbox, ctx.call);
+	const sb = ctx.sbx().sandboxes.handle(sandbox);
 	const stop = new AbortController();
 	const timer = setTimeout(() => stop.abort(), waitMs);
 	let settle: ReturnType<typeof setTimeout> | undefined;
@@ -585,10 +619,23 @@ export const execOutput = defineTool({
 			.describe("Seconds to wait (default 0)"),
 	},
 	async handler(args, ctx) {
+		// The wait is measured from the start of the call, requests included.
+		const waitEndsAt = Date.now() + ctx.deadline.waitMs(args.wait_seconds ?? 0);
 		const path = { sandbox: args.sandbox, command: args.command_id };
 		const max = args.max_bytes ?? DEFAULT_OUTPUT_BYTES;
 		const forward =
 			args.stdout_offset !== undefined || args.stderr_offset !== undefined;
+		if (
+			forward &&
+			(args.stdout_offset === undefined || args.stderr_offset === undefined)
+		) {
+			// The missing stream would be read again from 0 (duplicated output).
+			throw new ToolError({
+				code: "validation",
+				message: "stdout_offset and stderr_offset go together",
+				hint: "pass both offsets of the previous answer, or none for the tail.",
+			});
+		}
 		const asked: Record<Stream, number> = {
 			stdout: args.stdout_offset ?? 0,
 			stderr: args.stderr_offset ?? 0,
@@ -606,7 +653,7 @@ export const execOutput = defineTool({
 				args.sandbox,
 				args.command_id,
 				asked,
-				ctx.deadline.waitMs(args.wait_seconds ?? 0),
+				waitEndsAt,
 			);
 			c = await getCommand(ctx, path);
 		}

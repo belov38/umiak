@@ -187,15 +187,6 @@ export interface ClientCore {
 /** Default of `SbxOptions.streamIdleTimeoutMs` (S7 §9.7: 45 s without lines). */
 export const STREAM_IDLE_TIMEOUT_MS = 45_000;
 
-/**
- * Requests whose fetch has not answered yet. undici's Request follows the
- * signal it was made with through a WeakRef: when nothing holds the Request
- * handed to fetch, a garbage collection during the fetch unlinks it and a
- * later abort (the caller's signal, the header timeout) never reaches the
- * connection.
- */
-const IN_FLIGHT = new Set<Request>();
-
 export function createRawClient(opts: SbxOptions = {}): RawClient {
 	return createClientCore(opts).raw;
 }
@@ -278,15 +269,18 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 							}, headerTimeoutMs)
 						: undefined;
 				// Redirects are not followed (like the Python SDK): a 3xx is an error.
-				// The signal comes from `request` (held by this closure), not from
-				// the clone: see IN_FLIGHT.
+				// undici's Request follows the signal it was made with through a
+				// WeakRef: a Request of the chain that nothing holds may be collected
+				// during the fetch, and a later abort (the caller's signal, the
+				// header timeout) then never reaches the connection. So the signal
+				// comes from `request`, not from the clone, and `request` and `sent`
+				// stay referenced until the body is read (withBodyIdleTimeout).
 				const init: RequestInit & { duplex?: "half" } = {
 					signal: AbortSignal.any([request.signal, timeout.signal]),
 					redirect: "manual",
 				};
 				if (base.body !== null) init.duplex = "half";
 				const sent = new Request(base, init);
-				IN_FLIGHT.add(sent);
 				let res: Response;
 				try {
 					res = await fetchImpl(sent);
@@ -303,7 +297,6 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 					throw networkError(err, request.method, keyed);
 				} finally {
 					clearTimeout(timer);
-					IN_FLIGHT.delete(sent);
 				}
 				seen.response = res;
 				if (!res.ok) throw await errorFromResponse(res);
@@ -311,6 +304,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 					res,
 					bodyIdleMs,
 					isSafeToRepeat(request.method, keyed),
+					[request, sent],
 				);
 			};
 			if (oneShot) return send();
@@ -442,10 +436,14 @@ function withBodyIdleTimeout(
 	res: Response,
 	ms: number,
 	retryable: boolean,
+	/** Held until the body ends, so an abort still reaches it (see transport). */
+	requests: Request[],
 ): Response {
 	const source = res.body;
 	if (source === null) return res;
 	const reader = source.getReader();
+	// Captured by the closures below: the requests live as long as the body.
+	const keep = { requests };
 	const body = new ReadableStream<Uint8Array>({
 		async pull(ctl) {
 			let timer: ReturnType<typeof setTimeout> | undefined;
@@ -465,9 +463,12 @@ function withBodyIdleTimeout(
 			});
 			try {
 				const r = await Promise.race([reader.read(), idle]);
-				if (r.done) ctl.close();
-				else ctl.enqueue(r.value);
+				if (r.done) {
+					keep.requests = [];
+					ctl.close();
+				} else ctl.enqueue(r.value);
 			} catch (err) {
+				keep.requests = [];
 				reader.cancel().catch(() => {});
 				ctl.error(err);
 			} finally {
@@ -475,6 +476,7 @@ function withBodyIdleTimeout(
 			}
 		},
 		cancel(reason) {
+			keep.requests = [];
 			return reader.cancel(reason);
 		},
 	});

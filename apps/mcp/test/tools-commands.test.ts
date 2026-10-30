@@ -1,5 +1,6 @@
 // Command tools (S11 8.3, 9.1-9.3, 10.2) against the fake API, and ByteTail.
 import { createHash } from "node:crypto";
+import { Sbx } from "@sbx/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ByteTail } from "../src/output/tail.ts";
 import { publishedJsonSchemaOf, selectTools } from "../src/registry.ts";
@@ -7,7 +8,12 @@ import { lintToolName, lintToolSchema } from "../src/schema-rules.ts";
 import { COMMAND_TOOLS, KILL_GRACE_MS } from "../src/tools/commands.ts";
 import { ALL_TOOLS } from "../src/tools/index.ts";
 import { REPLAYED_LINE } from "../src/tools/sandbox-view.ts";
-import { emitPattern, INJECT_FENCE_END } from "./fake-api/index.ts";
+import {
+	emitPattern,
+	FAKE_TEAM,
+	FAKE_TOKENS,
+	INJECT_FENCE_END,
+} from "./fake-api/index.ts";
 import { type Answer, type Harness, startHarness } from "./helpers/harness.ts";
 
 let h: Harness | undefined;
@@ -392,8 +398,62 @@ describe("exec_run", () => {
 		const id = [...hh.api.state.commands.values()][0]?.id as string;
 		expect(r.isError).toBe(true);
 		expect(r.texts[0]).toContain("error: sandbox_not_ready");
+		// The API's retryable and the hint of its code stay; where to read on is added.
+		expect(r.texts[0]).toContain("retryable: false");
+		expect(r.texts[0]).toContain("sandbox_resume");
 		expect(r.texts[0]).toContain(`exec_output command_id=${id}`);
 		expect(r.texts[0]).toContain("idempotency_key: k-lost");
+	});
+
+	it("wait_seconds 0 still gets the command id; a retry with the key attaches", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		const r = await hh.call("exec_run", {
+			sandbox: sb,
+			command: "fake:sleep 30",
+			wait_seconds: 0,
+			idempotency_key: "k-zero",
+		});
+		expect(r.isError, r.texts.join("\n")).toBe(false);
+		expect(r.json).toMatchObject({
+			command_id: expect.stringMatching(/^cmd_/),
+			status: "running",
+			stdout_offset: 0,
+			stderr_offset: 0,
+			idempotency_key: "k-zero",
+		});
+		const again = await hh.call("exec_run", {
+			sandbox: sb,
+			command: "fake:sleep 30",
+			wait_seconds: 0,
+			idempotency_key: "k-zero",
+		});
+		expect(again.json).toMatchObject({
+			command_id: r.json.command_id,
+			status: "running",
+			replayed: true,
+		});
+		expect(hh.to("POST", COMMANDS(sb))).toHaveLength(2);
+		expect(hh.api.state.commands.size).toBe(1);
+	});
+
+	it("a POST answered after the wait (starting sandbox) still gives the command id", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		hh.api.script.holdCommandsPostMs = 3000;
+		const t0 = Date.now();
+		const r = await hh.call("exec_run", {
+			sandbox: sb,
+			command: "fake:sleep 30",
+			wait_seconds: 1,
+		});
+		expect(Date.now() - t0).toBeGreaterThanOrEqual(2900);
+		expect(r.isError, r.texts.join("\n")).toBe(false);
+		expect(r.json).toMatchObject({
+			command_id: [...hh.api.state.commands.keys()][0],
+			status: "running",
+		});
+		expect(r.lines).toContain("call exec_output with command_id=");
 	});
 
 	// The one real-time test of the 50 s budget: it takes about 49 s.
@@ -734,6 +794,21 @@ describe("exec_output", () => {
 		expect(r.texts[0]).toContain("sandbox_resume");
 	});
 
+	it("a lone offset is rejected: both offsets or none", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		const id = await finished(hh, sb, "echo short");
+		const r = await hh.call("exec_output", {
+			sandbox: sb,
+			command_id: id,
+			stdout_offset: 0,
+		});
+		expect(r.isError).toBe(true);
+		expect(r.texts[0]).toContain("error: validation");
+		expect(r.texts[0]).toContain("pass both offsets");
+		expect(hh.requests.filter((q) => q.path.includes("/output"))).toEqual([]);
+	});
+
 	it("an offset past the end is a validation error", async () => {
 		const hh = await start();
 		const sb = await sandbox(hh);
@@ -746,6 +821,70 @@ describe("exec_output", () => {
 		});
 		expect(r.isError).toBe(true);
 		expect(r.texts[0]).toContain("stdout_offset");
+	});
+});
+
+describe("a key with only the commands scopes", () => {
+	it("runs, starts, reads (with a wait), lists and kills without reading the sandbox", async () => {
+		const hh = await start({
+			api: {
+				tokens: {
+					sbx_fake_commands: {
+						kind: "team_key",
+						scopes: ["commands:exec", "commands:read"],
+						teamId: FAKE_TEAM,
+						keyId: "key_fake_commands",
+					},
+				},
+			},
+			token: "sbx_fake_commands",
+		});
+		const admin = new Sbx({
+			baseUrl: hh.api.url,
+			apiKey: FAKE_TOKENS.full,
+			env: {},
+		});
+		const created = await admin.sandboxes.create({ slug: "cmd-box" });
+		await created.waitUntilReady();
+		const sb = created.id;
+		const run = await hh.call("exec_run", { sandbox: sb, command: "echo ok" });
+		expect(run.isError, run.texts.join("\n")).toBe(false);
+		expect(fenced(run, "stdout")).toBe("ok\n");
+		// A slug works too: its key falls back to the slug (no sandboxes:read).
+		const bySlug = await hh.call("exec_run", {
+			sandbox: "cmd-box",
+			command: "echo slug",
+		});
+		expect(bySlug.isError, bySlug.texts.join("\n")).toBe(false);
+		const s = await hh.call("exec_start", {
+			sandbox: sb,
+			command: "fake:sleep 30",
+		});
+		expect(s.isError, s.texts.join("\n")).toBe(false);
+		const o = await hh.call("exec_output", {
+			sandbox: sb,
+			command_id: s.json.command_id,
+			stdout_offset: 0,
+			stderr_offset: 0,
+			wait_seconds: 1,
+		});
+		expect(o.isError, o.texts.join("\n")).toBe(false);
+		const l = await hh.call("exec_list", { sandbox: sb, status: "all" });
+		expect(l.isError).toBe(false);
+		const k = await hh.call("exec_kill", {
+			sandbox: sb,
+			command_id: s.json.command_id,
+		});
+		expect(k.isError, k.texts.join("\n")).toBe(false);
+		// The only sandbox read of this key: the slug lookup (403, the slug stands).
+		expect(
+			hh.requests.filter(
+				(q) =>
+					q.method === "GET" &&
+					/^\/v1\/sandboxes\/[^/]+$/.test(q.path) &&
+					q.headers.get("authorization") === "Bearer sbx_fake_commands",
+			),
+		).toHaveLength(1);
 	});
 });
 
