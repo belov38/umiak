@@ -1,0 +1,26 @@
+{
+	"name": "@sbx/cli",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "sbx: the command line of the sbx public API (Bun, on @sbx/sdk): login, profiles, sandboxes, commands, files, ports",
+	"bin": {
+		"sbx": "./src/main.ts"
+	},
+	"scripts": {
+		"sbx": "bun src/main.ts",
+		"compile": "bun build --compile src/main.ts --outfile dist/sbx",
+		"test": "vitest run",
+		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"@sbx/sdk": "workspace:*",
+		"commander": "15.0.0"
+	},
+	"devDependencies": {
+		"@sbx/api": "workspace:*",
+		"@sbx/auth": "workspace:*",
+		"@sbx/core": "workspace:*",
+		"@sbx/db": "workspace:*"
+	}
+}

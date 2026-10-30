@@ -40,6 +40,12 @@ export interface TestOidcServerOptions {
 	deviceInterval?: number;
 	/** Device code lifetime in seconds (Keycloak: 600). */
 	deviceExpiresIn?: number;
+	/**
+	 * Public issuer when the server sits behind a proxy (a TLS front, say),
+	 * e.g. `https://127.0.0.1:8443/realms/sbx`: tokens and discovery carry it.
+	 * The path must stay `/realms/sbx`. Default: the server's own address.
+	 */
+	issuer?: string;
 }
 
 export interface TestOidcStats {
@@ -64,8 +70,10 @@ export interface TestDeviceFlow {
 }
 
 export interface TestOidcServer {
-	/** `http://127.0.0.1:<port>/realms/sbx` */
+	/** `http://127.0.0.1:<port>/realms/sbx`, or the `issuer` option */
 	issuer: string;
+	/** The server's own address, `http://127.0.0.1:<port>` */
+	base: string;
 	/** A signed token: access token claims of Keycloak's `sbx-cli` by default. */
 	token(claims?: TestClaims, opts?: TestTokenOptions): Promise<string>;
 	/** New current RSA key; old keys stay in the JWKS. */
@@ -176,7 +184,7 @@ export async function startTestOidcServer(
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const port = (server.address() as AddressInfo).port;
 	const base = `http://127.0.0.1:${port}`;
-	const issuer = `${base}/realms/sbx`;
+	const issuer = o.issuer?.replace(/\/+$/, "") ?? `${base}/realms/sbx`;
 	const oidcPath = "/realms/sbx/protocol/openid-connect";
 
 	function claimsOf(over: TestClaims, typ: string, ttl: number): TestClaims {
@@ -392,6 +400,7 @@ export async function startTestOidcServer(
 
 	return {
 		issuer,
+		base,
 		token,
 		rotateKey() {
 			rsaKeys.push(newKey("RS256"));

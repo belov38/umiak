@@ -24,6 +24,7 @@ COPY apps/worker/package.json apps/worker/
 # Part of the workspace and the lockfile, but not of the worker closure.
 COPY apps/api/package.json apps/api/
 COPY apps/bench/package.json apps/bench/
+COPY apps/cli/package.json apps/cli/
 
 # ---- build: compile @sbx/proto and @sbx/agent-client (needs dev dependencies)
 FROM base AS build

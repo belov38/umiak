@@ -263,6 +263,28 @@ importers:
         specifier: workspace:*
         version: link:../../packages/pve
 
+  apps/cli:
+    dependencies:
+      '@sbx/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk-ts
+      commander:
+        specifier: 15.0.0
+        version: 15.0.0
+    devDependencies:
+      '@sbx/api':
+        specifier: workspace:*
+        version: link:../api
+      '@sbx/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@sbx/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@sbx/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+
   apps/worker:
     dependencies:
       '@bufbuild/protobuf':
@@ -397,7 +419,7 @@ importers:
         version: link:../pve
       drizzle-orm:
         specifier: 0.45.4
-        version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1)
+        version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(bun-types@1.4.4)(pg@8.23.1)
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -924,6 +946,9 @@ packages:
     resolution: {integrity: sha512-lHblz4ahamxpTmnsk+MNTRWsjYKv965MwOrSJyeD588rR3Jcu7swE+0wN5F+PbL5cjgu/9ObkhfzEPuofEMwLA==}
     engines: {node: '>=10.0.0'}
 
+  bun-types@1.4.4:
+    resolution: {integrity: sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ==}
+
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
     engines: {node: '>=18'}
@@ -933,6 +958,10 @@ packages:
 
   colorette@1.4.0:
     resolution: {integrity: sha512-Y2oEozpomLn7Q3HFP7dpww7AtMJplbM9lGZP6RDfHqmbeRjiwRg4n6VM6j4KLmRke85uWEI7JqF17f3pqdRA0g==}
+
+  commander@15.0.0:
+    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+    engines: {node: '>=22.12.0'}
 
   cpu-features@0.0.10:
     resolution: {integrity: sha512-9IkYqtX3YHPCzoVg1Py+o9057a3i0fp7S530UWokCSaFVTc7CwXPRiOjRjBQQ18ZCNafx78YfnG+HALxtVmOGA==}
@@ -1911,11 +1940,19 @@ snapshots:
   buildcheck@0.0.7:
     optional: true
 
+  bun-types@1.4.4:
+    dependencies:
+      '@types/node': 26.6.6
+      undici-types: 8.9.0
+    optional: true
+
   chai@6.3.0: {}
 
   change-case@5.4.4: {}
 
   colorette@1.4.0: {}
+
+  commander@15.0.0: {}
 
   cpu-features@0.0.10:
     dependencies:
@@ -1935,10 +1972,11 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1):
+  drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(bun-types@1.4.4)(pg@8.23.1):
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
       '@types/pg': 8.23.1
+      bun-types: 1.4.4
       pg: 8.23.1
 
   es-module-lexer@2.3.2: {}
