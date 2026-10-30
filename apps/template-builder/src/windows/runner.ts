@@ -125,6 +125,22 @@ function encodedPowershell(script: string): string[] {
 const psQuote = (s: string) => `'${s.replaceAll("'", "''")}'`;
 
 /**
+ * Registers (or replaces: -Force) the SYSTEM task of a step in one exec. Not schtasks /create:
+ * its tasks run at priority 7, below normal CPU and low I/O, which slows installers and DISM
+ * down. No trigger: the task is only ever started with schtasks /run.
+ */
+function registerTaskScript(task: string, args: string): string {
+	return [
+		"$ErrorActionPreference = 'Stop'",
+		"$action = New-ScheduledTaskAction -Execute 'powershell.exe' " +
+			`-Argument ${psQuote(args)}`,
+		"$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest",
+		"$settings = New-ScheduledTaskSettingsSet -Priority 4 -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries",
+		`Register-ScheduledTask -TaskName ${psQuote(task)} -Action $action -Principal $principal -Settings $settings -Force | Out-Null`,
+	].join("\n");
+}
+
+/**
  * Body of the read script; the caller puts $exitPath, $logPath, $offset and $count in front.
  * Both files are opened with FileShare ReadWrite|Delete, so a writer is never locked out, and
  * the handle is closed by the time the exec answers. QGA file-read must not be used for files a
@@ -256,8 +272,10 @@ export async function runWindowsStep(
 	);
 
 	const drive = await buildDrive(io, deadline, pollMs, note);
-	const command = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${drive}:\\build\\run-step.ps1 -Step ${step}`;
-
+	const register = registerTaskScript(
+		task,
+		`-NoProfile -ExecutionPolicy Bypass -File ${drive}:\\build\\run-step.ps1 -Step ${step}`,
+	);
 	try {
 		await dropTask(io, task);
 		// A stale exit file of an earlier attempt must not be taken for this run. The step name is
@@ -280,34 +298,15 @@ export async function runWindowsStep(
 				`step ${step}: preparing ${LOG_DIR} failed: ${prep.stderr.trim()}`,
 			);
 
-		// /f makes create idempotent. A past /st only gives a warning on stderr; the task is only
-		// ever started with /run.
 		const create = await retryTransient(
-			() =>
-				io.exec([
-					"schtasks.exe",
-					"/create",
-					"/f",
-					"/tn",
-					task,
-					"/ru",
-					"SYSTEM",
-					"/sc",
-					"once",
-					"/st",
-					"00:00",
-					"/rl",
-					"HIGHEST",
-					"/tr",
-					command,
-				]),
+			() => io.exec(encodedPowershell(register)),
 			deadline,
 			pollMs,
 			note,
 		);
 		if (create.exitCode !== 0)
 			throw new Error(
-				`step ${step}: schtasks /create failed (exit ${create.exitCode}): ${create.stderr.trim()}`,
+				`step ${step}: registering the task failed (exit ${create.exitCode}): ${(create.stderr || create.stdout).trim()}`,
 			);
 
 		try {

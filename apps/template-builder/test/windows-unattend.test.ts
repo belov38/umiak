@@ -340,8 +340,13 @@ describe("SBX_UNATTEND", () => {
 });
 
 describe("renderOfflineAutounattend", () => {
+	const KEY = "VK7JG-NPHTM-C97JM-9MPGT-3V66T";
+
 	it("only windowsPE, runs offline.cmd from the offline ISO", () => {
-		const xml = renderOfflineAutounattend();
+		const xml = renderOfflineAutounattend({
+			uiLanguage: "en-GB",
+			productKey: KEY,
+		});
 		const doc = parse(xml);
 		expect(passes(doc)).toEqual(["windowsPE"]);
 		expectComponentAttributes(doc);
@@ -356,5 +361,46 @@ describe("renderOfflineAutounattend", () => {
 		expect(xml).not.toContain("ImageInstall");
 		expect(xml).not.toContain("DiskConfiguration");
 		expect(xml).not.toMatch(/Password/i);
+	});
+
+	it("answers the language, key and licence pages as the install does", () => {
+		const doc = parse(
+			renderOfflineAutounattend({ uiLanguage: "en-GB", productKey: KEY }),
+		);
+		const pe = pass(doc, "windowsPE");
+		expect(
+			component(pe, "Microsoft-Windows-International-Core-WinPE"),
+		).toMatchObject({
+			SetupUILanguage: { UILanguage: "en-GB" },
+			InputLocale: "en-GB",
+			SystemLocale: "en-GB",
+			UILanguage: "en-GB",
+			UserLocale: "en-GB",
+		});
+		expect(component(pe, "Microsoft-Windows-Setup").UserData).toEqual({
+			ProductKey: { Key: KEY, WillShowUI: "OnError" },
+			AcceptEula: "true",
+		});
+
+		const eval_ = parse(
+			renderOfflineAutounattend({ uiLanguage: "en-US", productKey: null }),
+		);
+		const pe2 = pass(eval_, "windowsPE");
+		expect(component(pe2, "Microsoft-Windows-Setup").UserData).toEqual({
+			AcceptEula: "true",
+		});
+		expect(
+			component(pe2, "Microsoft-Windows-International-Core-WinPE"),
+		).toMatchObject({ UILanguage: "en-US" });
+	});
+
+	it("XML-escapes the language and the key", () => {
+		const xml = renderOfflineAutounattend({
+			uiLanguage: "en<GB",
+			productKey: "A&B<C",
+		});
+		expect(XMLValidator.validate(xml)).toBe(true);
+		expect(xml).not.toContain("A&B<C");
+		expect(xml).not.toContain("en<GB");
 	});
 });

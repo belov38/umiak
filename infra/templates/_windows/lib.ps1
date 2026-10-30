@@ -18,10 +18,12 @@ $SbxWorkDir = 'C:\sbx-build\work'
 # Services of spec section 8.1 that end up Disabled. 00-base disables all but
 # the update services: the OpenSSH FoD in 10-system comes from Windows Update
 # through Delivery Optimization. 90-cleanup disables those and checks the
-# whole list.
+# whole list. dmwappushservice is not here: sysprep /generalize can hang or
+# fail without it, so it stays Manual and the offline stage disables it
+# (SYSPREP_DEFERRED_SERVICES in apps/template-builder/src/windows/media.ts).
 $SbxDisabledServices = @(
     'wuauserv', 'UsoSvc', 'DoSvc', 'WSearch', 'SysMain', 'DiagTrack',
-    'dmwappushservice', 'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',
+    'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',
     'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM'
 )
 $SbxUpdateServices = @('wuauserv', 'UsoSvc', 'DoSvc')
@@ -43,7 +45,9 @@ function Invoke-Native {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$ArgumentList = @(),
-        [int[]]$SuccessCodes = @(0)
+        [int[]]$SuccessCodes = @(0),
+        # Returns the exit code (one of $SuccessCodes).
+        [switch]$PassThru
     )
     Write-BuildLog "> $FilePath $($ArgumentList -join ' ')"
     # A missing command must fail here: with 'Continue' below, $LASTEXITCODE would be stale.
@@ -53,6 +57,73 @@ function Invoke-Native {
     & $FilePath @ArgumentList 2>&1 | ForEach-Object { Write-Host ([string]$_) }
     $code = $LASTEXITCODE
     if ($SuccessCodes -notcontains $code) { throw "$FilePath $($ArgumentList -join ' '): exit code $code" }
+    if ($PassThru) { return $code }
+}
+
+# Kills a process and every process it started.
+function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        try { $Process.Kill($true) } catch { Write-BuildLog "kill of PID $($Process.Id): $($_.Exception.Message)" }
+    } else {
+        $ErrorActionPreference = 'Continue'
+        & (Join-Path $env:SystemRoot 'System32\taskkill.exe') /PID $Process.Id /T /F 2>&1 | ForEach-Object { Write-Host ([string]$_) }
+    }
+    $null = $Process.WaitForExit(10000)
+}
+
+# Runs a console tool as a probe (`--version`, `prefix -g`): stdin redirected
+# and closed, so a tool that waits for input sees EOF, and killed with its
+# process tree when it does not exit within $TimeoutSec. Returns ExitCode,
+# Output (stdout lines) and Errors (stderr lines). Arguments with spaces are
+# quoted; none may contain double quotes.
+function Invoke-Probe {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [int]$TimeoutSec = 120
+    )
+    $cmdLine = "$FilePath $($ArgumentList -join ' ')"
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = (@($ArgumentList | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $p = [System.Diagnostics.Process]::Start($psi)
+    try {
+        $p.StandardInput.Close()
+        $out = $p.StandardOutput.ReadToEndAsync()
+        $err = $p.StandardError.ReadToEndAsync()
+        if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+            Stop-ProcessTree $p
+            throw "${cmdLine}: no exit within $TimeoutSec s (stdin closed); its process tree was killed"
+        }
+        # A child that outlives the tool keeps the pipes open.
+        if (-not [System.Threading.Tasks.Task]::WaitAll(@($out, $err), 30000)) {
+            throw "${cmdLine}: exited, but a process it started still holds its output open"
+        }
+        $p.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $p.ExitCode
+            Output = @($out.Result -split '\r?\n' | Where-Object { $_ -ne '' })
+            Errors = @($err.Result -split '\r?\n' | Where-Object { $_ -ne '' })
+        }
+    } finally {
+        $p.Dispose()
+    }
+}
+
+# First line of `<command> <args>` (stdout, else stderr) from the system Path,
+# '' when the command is missing. Through Invoke-Probe: a tool that hangs fails
+# the step after 120 s.
+function Get-InstalledVersion([string]$Command, [string[]]$Arguments) {
+    Update-SessionPath
+    $c = Get-Command $Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $c) { return '' }
+    $r = Invoke-Probe -FilePath $c.Source -ArgumentList $Arguments
+    return "$(@($r.Output + $r.Errors) | Select-Object -First 1)".Trim()
 }
 
 # Same as Invoke-Native, but returns the stdout lines instead of logging them.
@@ -77,14 +148,21 @@ function Get-NativeOutput {
 }
 
 # Runs an installer (GUI subsystem, so Start-Process -Wait) and accepts 0 and
-# 3010 (success, reboot pending: sysprep reboots anyway).
+# 3010 (success, reboot pending: sysprep reboots anyway). MSI exit 1618 means
+# another installation holds the Windows Installer mutex (Windows' own
+# servicing): it is retried three times, 30 s apart.
 function Invoke-Installer {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string]$Arguments
     )
-    Write-BuildLog "> $FilePath $Arguments"
-    $p = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+    for ($i = 0; ; $i++) {
+        Write-BuildLog "> $FilePath $Arguments"
+        $p = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+        if ($p.ExitCode -ne 1618 -or $i -ge 3) { break }
+        Write-BuildLog "${FilePath}: exit code 1618 (another installation is in progress); retrying in 30 s"
+        Start-Sleep -Seconds 30
+    }
     if (@(0, 3010) -notcontains $p.ExitCode) { throw "${FilePath}: exit code $($p.ExitCode)" }
 }
 
@@ -292,9 +370,11 @@ function Invoke-WithDefaultUserHive([scriptblock]$Script) {
             $code = $LASTEXITCODE
             $ErrorActionPreference = 'Stop'
             if ($code -eq 0) { break }
-            if ($i -ge 5) { throw "reg unload $hive failed" }
+            # Antivirus scans and the registry provider can hold it for a while.
+            if ($i -ge 30) { throw "reg unload $hive failed $i times in about 60 s" }
             Start-Sleep -Seconds 2
             [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
         }
     }
 }

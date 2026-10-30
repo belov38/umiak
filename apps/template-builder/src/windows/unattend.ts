@@ -50,6 +50,17 @@ export function virtioDriverPaths(
 /** CD-ROM letters in the setup WinPE are not fixed; DriverPaths skips missing folders. */
 const DRIVER_LETTERS = ["D", "E", "F", "G", "H", "I"];
 
+/** `<ProductKey>` of `Microsoft-Windows-Setup` `UserData`; empty without a key. */
+function productKeyElement(key: string | null): string {
+	if (key === null) return "";
+	return (
+		"        <ProductKey>\n" +
+		`          <Key>${xmlEscape(key)}</Key>\n` +
+		"          <WillShowUI>OnError</WillShowUI>\n" +
+		"        </ProductKey>"
+	);
+}
+
 export interface AutounattendInput {
 	/** `/IMAGE/NAME` in install.wim. */
 	edition: string;
@@ -82,21 +93,13 @@ export function renderAutounattend(
 				"        </PathAndCredentials>",
 		)
 		.join("\n");
-	const productKey =
-		i.productKey === null
-			? ""
-			: "        <ProductKey>\n" +
-				`          <Key>${xmlEscape(i.productKey)}</Key>\n` +
-				"          <WillShowUI>OnError</WillShowUI>\n" +
-				"        </ProductKey>";
-
 	return fillTemplate(
 		template,
 		{
 			ui_language: xmlEscape(i.uiLanguage),
 			driver_paths: driverPaths,
 			edition: xmlEscape(i.edition),
-			product_key: productKey,
+			product_key: productKeyElement(i.productKey),
 			keyboard: xmlEscape(i.locale.keyboard),
 			formats: xmlEscape(i.locale.formats),
 			timezone: xmlEscape(i.locale.timezone),
@@ -109,9 +112,27 @@ export function renderAutounattend(
 /** Sysprep answers for clones (`_windows/sbx-unattend.xml`); no accounts, no passwords. */
 export const SBX_UNATTEND = readWindowsFile("sbx-unattend.xml");
 
-/** autounattend.xml of the offline ISO: only windowsPE, runs offline.cmd. */
+export interface OfflineAutounattendInput {
+	/** Language of the ISO, as for the install (`versions.iso.uiLanguage`). */
+	uiLanguage: string;
+	/** The generic key of the edition; null for evaluation media. */
+	productKey: string | null;
+}
+
+/**
+ * autounattend.xml of the offline ISO: only windowsPE, runs offline.cmd. It answers the
+ * language, key and licence pages, so Setup reaches RunSynchronous without input.
+ */
 export function renderOfflineAutounattend(
+	i: OfflineAutounattendInput,
 	template = readWindowsFile("offline-autounattend.xml"),
 ): string {
-	return template;
+	return fillTemplate(
+		template,
+		{
+			ui_language: xmlEscape(i.uiLanguage),
+			product_key: productKeyElement(i.productKey),
+		},
+		"offline-autounattend.xml",
+	);
 }

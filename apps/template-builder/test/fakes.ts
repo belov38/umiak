@@ -468,6 +468,8 @@ export class FakeWinGuest implements GuestIo {
 	sealExit = 0;
 	/** Content of C:\Windows\System32\Sysprep\Panther\setuperr.log. */
 	setupErr = "";
+	/** Exit codes of the next removals of C:\sbx-build (then 0). */
+	rmBuildDirExits: number[] = [];
 	onStep?: (step: string) => void;
 	alive: () => boolean = () => true;
 	log: string[];
@@ -518,7 +520,10 @@ export class FakeWinGuest implements GuestIo {
 			}
 			if (text.includes("C:\\sbx-build")) {
 				this.log.push("guest:rm-sbx-build");
-				return ok();
+				const code = this.rmBuildDirExits.shift() ?? 0;
+				return code === 0
+					? ok()
+					: { exitCode: code, stdout: "", stderr: "file in use" };
 			}
 			if (text.includes("sbx-template")) {
 				this.log.push("guest:mkdir-sbx-template");

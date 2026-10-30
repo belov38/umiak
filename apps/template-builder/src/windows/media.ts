@@ -38,6 +38,12 @@ export const OFFLINE_SERVICES: Record<OfflineStage, string[]> = {
 	"waasmedic-off": ["WaaSMedicSvc"],
 };
 
+/**
+ * Services of spec S9 section 8.1 that stay Manual through the build and are disabled offline
+ * with any stage: sysprep /generalize can hang or fail with dmwappushservice disabled.
+ */
+export const SYSPREP_DEFERRED_SERVICES = ["dmwappushservice"];
+
 /** Same rule as the agent package versions (agent-package.ts). */
 const AGENT_VERSION_RE = /^[A-Za-z0-9_+-][A-Za-z0-9._+-]{0,63}$/;
 /** Joliet (what Windows reads) keeps at most 64 characters of a name. */
@@ -104,6 +110,16 @@ function versionsJson(i: BuildIsoInput): string {
 	)}\n`;
 }
 
+/** The generic key named by `versions.iso.productKey` in keys.toml; null for evaluation media. */
+export function genericProductKey(
+	recipe: WindowsRecipe,
+	versions: WindowsVersions,
+): string | null {
+	return versions.iso.productKey === null
+		? null
+		: resolveProductKey(recipe, versions.iso.productKey);
+}
+
 /** File map of the build ISO (volume label `SBXBUILD`); recipe files are looked up child recipe first. */
 export function buildIsoFiles(i: BuildIsoInput): Map<string, string | Buffer> {
 	const { recipe, versions } = i;
@@ -111,9 +127,7 @@ export function buildIsoFiles(i: BuildIsoInput): Map<string, string | Buffer> {
 	const productKey =
 		i.productKey !== undefined
 			? i.productKey
-			: versions.iso.productKey === null
-				? null
-				: resolveProductKey(recipe, versions.iso.productKey);
+			: genericProductKey(recipe, versions);
 	const agentTarName = agentPackageName(i.agentVersion);
 
 	const out = new Map<string, string | Buffer>();
@@ -158,23 +172,43 @@ export function buildIsoFiles(i: BuildIsoInput): Map<string, string | Buffer> {
 	return out;
 }
 
+export interface OfflineIsoInput {
+	/** `versions.iso.uiLanguage`. */
+	uiLanguage: string;
+	/** The generic key (`genericProductKey`), never a --product-key-file key: nothing is installed. */
+	productKey: string | null;
+	drivers?: IsoInstallSource["drivers"];
+}
+
 /**
  * File map of the offline ISO (volume label `SBXOFFL`): the windowsPE-only answer file,
  * offline.cmd and offline-config.cmd with the virtio-win driver folder and the services.
  */
 export function offlineIsoFiles(
 	stages: OfflineStage[],
-	drivers: IsoInstallSource["drivers"] = "w11",
+	i: OfflineIsoInput,
 ): Map<string, string | Buffer> {
 	if (stages.length === 0) throw new Error("no offline stages");
 	for (const s of stages)
 		if (!(OFFLINE_STAGES as readonly string[]).includes(s))
 			throw new Error(`unknown offline stage "${s}"`);
-	const services = [...new Set(stages.flatMap((s) => OFFLINE_SERVICES[s]))];
+	const services = [
+		...new Set([
+			...stages.flatMap((s) => OFFLINE_SERVICES[s]),
+			...SYSPREP_DEFERRED_SERVICES,
+		]),
+	];
+	const drivers = i.drivers ?? "w11";
 	const read = (name: string) =>
 		readFileSync(join(WINDOWS_FILES_DIR, name), "utf8");
 	return new Map<string, string | Buffer>([
-		["autounattend.xml", renderOfflineAutounattend()],
+		[
+			"autounattend.xml",
+			renderOfflineAutounattend({
+				uiLanguage: i.uiLanguage,
+				productKey: i.productKey,
+			}),
+		],
 		["offline.cmd", crlf(read("offline.cmd"))],
 		[
 			"offline-config.cmd",

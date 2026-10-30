@@ -48,9 +48,7 @@ $npmPrefix = Join-Path $env:ProgramData 'npm'
 foreach ($t in @('claude', 'codex', 'opencode', 'gemini')) {
     $path = Assert-Command $t
     if (-not $path.StartsWith("$npmPrefix\", [StringComparison]::OrdinalIgnoreCase)) { throw "$t resolves to $path, want $npmPrefix" }
-    $ErrorActionPreference = 'Continue'
-    $ver = "$(& $path --version 2>&1 | Select-Object -First 1)".Trim()
-    $ErrorActionPreference = 'Stop'
-    Write-BuildLog "${t}: $ver"
+    # A CLI that waits for input or a network call fails the step after 120 s.
+    Write-BuildLog "${t}: $(Get-InstalledVersion $path @('--version'))"
 }
 Write-BuildLog 'done'

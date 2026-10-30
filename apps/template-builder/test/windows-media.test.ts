@@ -24,6 +24,7 @@ import {
 	OFFLINE_ISO_LABEL,
 	OFFLINE_SERVICES,
 	offlineIsoFiles,
+	SYSPREP_DEFERRED_SERVICES,
 } from "../src/windows/media.ts";
 import {
 	SBX_UNATTEND,
@@ -64,6 +65,9 @@ function input(extra: Partial<BuildIsoInput> = {}): BuildIsoInput {
 	};
 }
 
+const KEY = "VK7JG-NPHTM-C97JM-9MPGT-3V66T";
+const ANSWERS = { uiLanguage: "en-GB", productKey: KEY };
+
 function text(files: Map<string, string | Buffer>, name: string): string {
 	const v = files.get(name);
 	if (v === undefined) throw new Error(`missing ${name}`);
@@ -96,7 +100,7 @@ describe("repo files", () => {
 });
 
 describe("offline.cmd", () => {
-	const cmd = offlineIsoFiles(["defender-off", "waasmedic-off"]).get(
+	const cmd = offlineIsoFiles(["defender-off", "waasmedic-off"], ANSWERS).get(
 		"offline.cmd",
 	) as string;
 
@@ -179,32 +183,48 @@ describe("offline.cmd", () => {
 
 describe("offlineIsoFiles", () => {
 	it("has the answer file, offline.cmd and the stage config", () => {
-		const files = offlineIsoFiles(["defender-off", "waasmedic-off"]);
+		const files = offlineIsoFiles(["defender-off", "waasmedic-off"], ANSWERS);
 		expect([...files.keys()].sort()).toEqual([
 			"autounattend.xml",
 			"offline-config.cmd",
 			"offline.cmd",
 		]);
-		expect(XMLValidator.validate(text(files, "autounattend.xml"))).toBe(true);
+		const xml = text(files, "autounattend.xml");
+		expect(XMLValidator.validate(xml)).toBe(true);
+		// The language page would stop Setup before RunSynchronous starts offline.cmd.
+		expect(xml).toContain("<UILanguage>en-GB</UILanguage>");
+		expect(xml).toContain(`<Key>${KEY}</Key>`);
+		expect(xml).toContain("<AcceptEula>true</AcceptEula>");
 		const cfg = text(files, "offline-config.cmd");
 		expect(cfg).toBe(
-			"set SBX_DRIVERS=w11\r\nset SBX_SERVICES=WinDefend WdNisSvc Sense WdBoot WdFilter WdNisDrv WaaSMedicSvc\r\n",
+			"set SBX_DRIVERS=w11\r\nset SBX_SERVICES=WinDefend WdNisSvc Sense WdBoot WdFilter WdNisDrv WaaSMedicSvc dmwappushservice\r\n",
 		);
+	});
+
+	it("disables the services sysprep needs alive with any stage", () => {
+		expect(SYSPREP_DEFERRED_SERVICES).toEqual(["dmwappushservice"]);
+		const cfg = text(
+			offlineIsoFiles(["defender-off"], ANSWERS),
+			"offline-config.cmd",
+		);
+		expect(cfg).toContain(" dmwappushservice\r\n");
 	});
 
 	it("selects services of the given stages only", () => {
 		const cfg = text(
-			offlineIsoFiles(["waasmedic-off"], "2k25"),
+			offlineIsoFiles(["waasmedic-off"], { ...ANSWERS, drivers: "2k25" }),
 			"offline-config.cmd",
 		);
 		expect(cfg).toBe(
-			"set SBX_DRIVERS=2k25\r\nset SBX_SERVICES=WaaSMedicSvc\r\n",
+			"set SBX_DRIVERS=2k25\r\nset SBX_SERVICES=WaaSMedicSvc dmwappushservice\r\n",
 		);
 	});
 
 	it("rejects unknown stages and an empty list", () => {
-		expect(() => offlineIsoFiles(["nope" as "defender-off"])).toThrow(/nope/);
-		expect(() => offlineIsoFiles([])).toThrow(/stage/);
+		expect(() => offlineIsoFiles(["nope" as "defender-off"], ANSWERS)).toThrow(
+			/nope/,
+		);
+		expect(() => offlineIsoFiles([], ANSWERS)).toThrow(/stage/);
 	});
 
 	it("volume labels", () => {
@@ -393,7 +413,7 @@ describe("buildIsoFiles", () => {
 		const cmd = text(files, "build/SetupComplete.cmd");
 		expect(cmd.replaceAll("\r\n", "")).not.toMatch(/[\r\n]/);
 		// Windows PowerShell 5.1 and cmd read BOM-less files in the ANSI code page.
-		const off = offlineIsoFiles(["defender-off"]);
+		const off = offlineIsoFiles(["defender-off"], ANSWERS);
 		for (const [name, data] of [
 			...[
 				"autounattend.xml",

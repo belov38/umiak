@@ -1,6 +1,7 @@
 #requires -Version 7
 # 90-cleanup (spec S9 section 8.8): update services off, component store
-# (after the recipe's reboot: pending servicing makes DISM fail with 0x800f0806),
+# (after the recipe's reboot: pending servicing makes DISM fail with 0x800f0806;
+# DISM must not leave a reboot pending either, sysprep follows without one),
 # downloads and caches, answer files with the build password, event logs,
 # TRIM, then a self-check. The builder wrote C:\ProgramData\sbx-template\build.json
 # right before this step (it stays) and removes C:\sbx-build after reading
@@ -23,13 +24,18 @@ function Remove-Leftover([string]$Path) {
 $manifest = Join-Path $env:ProgramData 'sbx-template\build.json'
 if (-not (Test-Path -LiteralPath $manifest)) { throw "$manifest is missing: the builder writes it before this step" }
 
+# Keys of servicing operations that finish at the next boot.
+function Get-PendingReboot {
+    return @(@(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending',
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+        ) | Where-Object { Test-Path -LiteralPath $_ })
+}
+
 # The FoD and the MSIs leave servicing operations that finish at the next boot.
-$pending = @(
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending',
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-) | Where-Object { Test-Path -LiteralPath $_ }
-if ($pending) {
+$pending = Get-PendingReboot
+if ($pending.Count -gt 0) {
     throw "a reboot is pending ($($pending -join ', ')): the recipe needs a reboot step after the last install step, before 90-cleanup"
 }
 
@@ -37,7 +43,13 @@ if ($pending) {
 foreach ($s in $SbxUpdateServices) { Disable-SbxService -Name $s -StopNow }
 
 # --- Component store ---
-Invoke-Native -FilePath (Join-Path $env:SystemRoot 'System32\Dism.exe') -ArgumentList @('/Online', '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase') -SuccessCodes @(0, 3010)
+# Sysprep follows this step without a reboot: DISM must not leave one pending.
+$dismCode = Invoke-Native -FilePath (Join-Path $env:SystemRoot 'System32\Dism.exe') -ArgumentList @('/Online', '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase') -SuccessCodes @(0, 3010) -PassThru
+if ($dismCode -eq 3010) { throw 'DISM /StartComponentCleanup /ResetBase: exit code 3010 (a reboot is required), and there is no reboot after 90-cleanup before sysprep' }
+$pending = Get-PendingReboot
+if ($pending.Count -gt 0) {
+    throw "DISM /StartComponentCleanup /ResetBase left a reboot pending ($($pending -join ', ')): a reboot after 90-cleanup is not allowed (sysprep follows)"
+}
 
 # --- Downloads, installers, caches (of SYSTEM, which ran the steps) ---
 $sysProfile = Join-Path $env:SystemRoot 'System32\config\systemprofile'
@@ -140,6 +152,25 @@ if ($bde.Conversion -ne '' -and ($bde.Conversion -ne 'Fully Decrypted' -or $bde.
     $problems.Add("BitLocker C: is '$($bde.Conversion)', '$($bde.Protection)'")
 }
 if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\Sysprep\sbx-unattend.xml'))) { $problems.Add('sbx-unattend.xml is missing') }
+# Informative: sysprep /generalize fails (0x80073cf2) on a package installed for
+# a user but not provisioned; setuperr.log then names it.
+try {
+    $provisioned = @(Get-AppxProvisionedPackage -Online | ForEach-Object { $_.DisplayName })
+    # Appx in pwsh 7 may need the Windows PowerShell compatibility session.
+    try { $installed = @(Get-AppxPackage -AllUsers) } catch {
+        Import-Module Appx -UseWindowsPowerShell -WarningAction SilentlyContinue
+        $installed = @(Get-AppxPackage -AllUsers)
+    }
+    $userOnly = @($installed | Where-Object { "$($_.SignatureKind)" -ne 'System' -and -not $_.IsFramework -and $provisioned -notcontains $_.Name } |
+            ForEach-Object { $_.Name } | Sort-Object -Unique)
+    if ($userOnly.Count -gt 0) {
+        Write-BuildLog "WARNING: Appx installed for a user but not provisioned (sysprep may refuse them): $($userOnly -join ', ')"
+    } else {
+        Write-BuildLog 'Appx: every non-system package installed for a user is provisioned'
+    }
+} catch {
+    Write-BuildLog "WARNING: Appx check: $($_.Exception.Message)"
+}
 if (-not (Test-Path -LiteralPath $manifest)) { $problems.Add("$manifest is missing") }
 if ($problems.Count -gt 0) {
     $problems | ForEach-Object { Write-BuildLog "CHECK FAILED: $_" }

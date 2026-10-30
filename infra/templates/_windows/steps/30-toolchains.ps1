@@ -1,17 +1,9 @@
 #requires -Version 7
 # 30-toolchains (spec S9 section 8.5): Git for Windows, Node, Python, uv, Bun,
 # Go, gh from the official installers of versions.json, each checked against
-# its pinned sha256. Every command is found by name in the system Path.
+# its pinned sha256. Every command is found by name in the system Path; the
+# version probes run through Invoke-Probe (stdin closed, 120 s limit).
 . (Join-Path $PSScriptRoot '..\lib.ps1')
-
-# First line of `<command> <args>` from the system Path, '' when it is missing.
-function Get-InstalledVersion([string]$Command, [string[]]$Arguments) {
-    Update-SessionPath
-    $c = Get-Command $Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $c) { return '' }
-    $ErrorActionPreference = 'Continue'
-    return "$(& $c.Source @Arguments 2>&1 | Select-Object -First 1)".Trim()
-}
 
 if ((Get-BuildVersionInfo).options.vsBuildtools) {
     throw 'options.vs_buildtools is not supported by this image yet'
@@ -47,7 +39,9 @@ $npmrc = Join-Path $nodeDir 'node_modules\npm\npmrc'
 Add-MachinePath $npmPrefix
 Assert-Command 'node' | Out-Null
 $npm = Assert-Command 'npm.cmd'
-$prefix = (Get-NativeOutput -FilePath $npm -ArgumentList @('prefix', '-g') | Select-Object -Last 1).Trim()
+$r = Invoke-Probe -FilePath $npm -ArgumentList @('prefix', '-g')
+if ($r.ExitCode -ne 0) { throw "npm prefix -g: exit code $($r.ExitCode): $($r.Errors -join ' | ')" }
+$prefix = "$($r.Output | Select-Object -Last 1)".Trim()
 if ($prefix -ne $npmPrefix) { throw "npm prefix -g is '$prefix', want $npmPrefix" }
 
 # --- Python 3 (all users, py launcher) ---

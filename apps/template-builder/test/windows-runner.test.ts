@@ -24,6 +24,13 @@ import {
 
 const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "" });
 
+/** Script of a powershell.exe -EncodedCommand call, "" for any other command. */
+function decoded(cmd: string[]): string {
+	if (cmd[0] !== "powershell.exe" || !cmd.includes("-EncodedCommand"))
+		return "";
+	return Buffer.from(String(cmd.at(-1)), "base64").toString("utf16le");
+}
+
 interface FakeOpts {
 	/** Log content visible after the Nth task status query (1-based), as cumulative chunks. */
 	chunks?: Buffer[];
@@ -131,24 +138,24 @@ describe("runWindowsStep", () => {
 			"-Command",
 			"(Get-Volume -FileSystemLabel SBXBUILD).DriveLetter",
 		]);
-		const create = g.calls.find((c) => c[1] === "/create");
-		expect(create).toEqual([
-			"schtasks.exe",
-			"/create",
-			"/f",
-			"/tn",
-			"sbx-build-00-base",
-			"/ru",
-			"SYSTEM",
-			"/sc",
-			"once",
-			"/st",
-			"00:00",
-			"/rl",
-			"HIGHEST",
-			"/tr",
-			"powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\build\\run-step.ps1 -Step 00-base",
-		]);
+		// One exec registers the task: normal priority (schtasks /create gives 7), no time limit.
+		const create = g.calls.filter((c) =>
+			decoded(c).includes("Register-ScheduledTask"),
+		);
+		expect(create).toHaveLength(1);
+		const reg = decoded(create[0] as string[]);
+		expect(reg).toContain("-TaskName 'sbx-build-00-base'");
+		expect(reg).toContain("-Execute 'powershell.exe'");
+		expect(reg).toContain(
+			"-Argument '-NoProfile -ExecutionPolicy Bypass -File D:\\build\\run-step.ps1 -Step 00-base'",
+		);
+		expect(reg).toMatch(
+			/-UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest/,
+		);
+		expect(reg).toMatch(/New-ScheduledTaskSettingsSet [^\n]*-Priority 4/);
+		expect(reg).toMatch(/-ExecutionTimeLimit \(\[TimeSpan\]::Zero\)/);
+		expect(reg).toContain("-Force");
+		expect(g.calls.some((c) => c[1] === "/create")).toBe(false);
 		expect(g.calls.find((c) => c[1] === "/run")).toEqual([
 			"schtasks.exe",
 			"/run",
@@ -156,8 +163,9 @@ describe("runWindowsStep", () => {
 			"sbx-build-00-base",
 		]);
 		// Stale files are removed before the task exists, the task is deleted at the end.
-		const order = g.calls.map((c) => c[1] ?? c[0]);
-		expect(order.indexOf("/create")).toBeGreaterThan(
+		expect(
+			g.calls.findIndex((c) => decoded(c).includes("Register-ScheduledTask")),
+		).toBeGreaterThan(
 			g.calls.findIndex((c) => c.at(-1)?.includes("Remove-Item")),
 		);
 		expect(g.calls.at(-1)).toEqual([
@@ -322,7 +330,7 @@ describe("runWindowsStep", () => {
 		expect(err.tail).toEqual(["boom"]);
 	});
 
-	it("rejects an unsafe step name and a failing /create", async () => {
+	it("rejects an unsafe step name and a failing task registration", async () => {
 		const g = fakeWindows();
 		await expect(
 			runWindowsStep(g.io, { step: "x; calc", onLog: () => {} }),
@@ -331,13 +339,13 @@ describe("runWindowsStep", () => {
 
 		const bad = fakeWindows({
 			onExec: (cmd) =>
-				cmd[1] === "/create"
-					? { exitCode: 1, stdout: "", stderr: "ERROR: Access is denied." }
+				decoded(cmd).includes("Register-ScheduledTask")
+					? { exitCode: 1, stdout: "", stderr: "Access is denied." }
 					: undefined,
 		});
 		await expect(
 			runWindowsStep(bad.io, { step: "00-base", onLog: () => {}, ...fast }),
-		).rejects.toThrow(/schtasks \/create failed.*Access is denied/);
+		).rejects.toThrow(/registering the task failed.*Access is denied/);
 		expect(bad.calls.at(-1)?.[1]).toBe("/delete");
 	});
 
@@ -392,6 +400,29 @@ const pwshIo: GuestIo = {
 		return true;
 	},
 };
+
+describe("task registration script (pwsh)", () => {
+	it("parses without errors", async () => {
+		const g = fakeWindows({ chunks: [Buffer.from("x\n")], exit: "0" });
+		await runWindowsStep(g.io, { step: "00-base", onLog: () => {}, ...fast });
+		const reg = g.calls
+			.map(decoded)
+			.find((t) => t.includes("Register-ScheduledTask"));
+		expect(reg).toBeDefined();
+		const r = spawnSync(
+			PWSH,
+			[
+				"-NoProfile",
+				"-NonInteractive",
+				"-Command",
+				"$e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$null, [ref]$e); $e | ForEach-Object { $_.Message }; exit $e.Count",
+			],
+			{ input: reg, encoding: "utf8" },
+		);
+		expect(r.stdout + r.stderr).toBe("");
+		expect(r.status).toBe(0);
+	});
+});
 
 describe("readGuestFiles script (pwsh)", () => {
 	it("missing files read as no exit and an empty log", async () => {

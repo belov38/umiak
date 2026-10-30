@@ -63,6 +63,7 @@ import { isProtectedVmid } from "../vmid-guard.ts";
 import {
 	BUILD_ISO_LABEL,
 	buildIsoFiles,
+	genericProductKey,
 	OFFLINE_ISO_LABEL,
 	offlineIsoFiles,
 	renderWindowsAgentToml,
@@ -95,6 +96,8 @@ const SETUPERR_MAX_BYTES = 16 * 1024 * 1024;
 const GUEST_MANIFEST_DIR = "C:\\ProgramData\\sbx-template";
 const GUEST_MANIFEST = `${GUEST_MANIFEST_DIR}\\build.json`;
 const BUILD_DIR = "C:\\sbx-build";
+const BUILD_DIR_TRIES = 5;
+const BUILD_DIR_RETRY_MS = 10_000;
 /** build.json is written right before this step; the step keeps it. */
 export const CLEANUP_STEP = "90-cleanup";
 /**
@@ -473,7 +476,11 @@ export async function stageMedia(
 				deps,
 				o,
 				st,
-				offlineIsoFiles(recipe.offline, recipe.source.drivers),
+				offlineIsoFiles(recipe.offline, {
+					uiLanguage: versions.iso.uiLanguage,
+					productKey: genericProductKey(recipe, versions),
+					drivers: recipe.source.drivers,
+				}),
 				offlineIsoName(st.m),
 				OFFLINE_ISO_LABEL,
 				dir,
@@ -807,6 +814,15 @@ async function recordFacts(
 	);
 }
 
+/** `step_timeouts` of the recipe in ms; undefined leaves the runner's default (60 min). */
+export function stepTimeoutMs(
+	recipe: WindowsRecipe,
+	step: string,
+): number | undefined {
+	const min = recipe.stepTimeoutsMin[step];
+	return min === undefined ? undefined : min * MIN;
+}
+
 /** Runs the recipe steps; returns whether build.json was written (before 90-cleanup). */
 export async function stageWindowsSteps(
 	deps: BuildDeps,
@@ -835,9 +851,11 @@ export async function stageWindowsSteps(
 			});
 			continue;
 		}
+		const timeoutMs = stepTimeoutMs(p.recipe, step);
 		await runWindowsStep(io, {
 			step,
 			pollMs,
+			...(timeoutMs !== undefined ? { timeoutMs } : {}),
 			onLog: stepLog(deps, o, st.m.buildId, step),
 			...(deps.signal !== undefined ? { signal: deps.signal } : {}),
 		});
@@ -876,6 +894,29 @@ async function setupErrTail(io: GuestIo): Promise<string[]> {
 }
 
 /**
+ * C:\sbx-build holds logs and downloads only (90-cleanup emptied the work dir): a file some
+ * process still holds open is not worth a failed build, so removal is retried, then warned about.
+ */
+async function removeBuildDir(deps: BuildDeps, io: GuestIo): Promise<void> {
+	const what = `removing ${BUILD_DIR}`;
+	const cmd = powershell(
+		`if (Test-Path -LiteralPath '${BUILD_DIR}') { Remove-Item -LiteralPath '${BUILD_DIR}' -Recurse -Force }`,
+	);
+	let last = "";
+	for (let i = 1; i <= BUILD_DIR_TRIES; i++) {
+		try {
+			await mustRun(io, what, cmd);
+			return;
+		} catch (err) {
+			deps.signal?.throwIfAborted();
+			last = errorText(err);
+		}
+		if (i < BUILD_DIR_TRIES) await sleep(deps.pollMs ?? BUILD_DIR_RETRY_MS);
+	}
+	deps.log(`WARNING: ${last} (${BUILD_DIR_TRIES} tries); sealing anyway`);
+}
+
+/**
  * C:\sbx-build goes (90-cleanup's log was read already), `sbx-agent seal`, then sysprep starts
  * through QGA without waiting for it; sysprep powers the VM off. A failed sysprep leaves the VM
  * running, so setuperr.log is read through QGA.
@@ -888,13 +929,7 @@ export async function stageSysprep(
 ): Promise<void> {
 	const vmid = st.vmid as number;
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
-	await mustRun(
-		io,
-		`removing ${BUILD_DIR}`,
-		powershell(
-			`if (Test-Path -LiteralPath '${BUILD_DIR}') { Remove-Item -LiteralPath '${BUILD_DIR}' -Recurse -Force }`,
-		),
-	);
+	await removeBuildDir(deps, io);
 	await mustRun(io, "sbx-agent seal", [SBX_AGENT_EXE, "seal"], SEAL_TIMEOUT_MS);
 	const { pid } = await deps.api.post<{ pid: number }>(`${vmPath}/agent/exec`, {
 		command: SYSPREP_COMMAND,

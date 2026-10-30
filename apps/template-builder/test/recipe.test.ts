@@ -109,6 +109,11 @@ describe("loadRecipe: real windows recipe", () => {
 		expect(r.options).toEqual({ vsBuildtools: false });
 		expect(r.bootTimeoutS).toBe(1200);
 		expect(r.installTimeoutS).toBe(2400);
+		expect(r.stepTimeoutsMin).toEqual({
+			"30-toolchains": 60,
+			"40-coding-agents": 45,
+			"90-cleanup": 120,
+		});
 		expect(r.verify).toBe("windows");
 		expect(r.disk).toEqual({ slot: "scsi0", sizeGb: 96 });
 		expect(r.buildVm).toEqual({ cores: 4, memoryMb: 4096 });
@@ -490,6 +495,33 @@ describe("loadRecipe: windows (iso-install)", () => {
 		expect(r.offline).toEqual([]);
 		expect(r.options).toEqual({ vsBuildtools: false });
 		expect(r.installTimeoutS).toBe(2400);
+		expect(r.stepTimeoutsMin).toEqual({});
+	});
+
+	it("reads step_timeouts in minutes per script step", () => {
+		const dir = copyFixtures();
+		const p = join(dir, "windows-fixture/template.yaml");
+		writeFileSync(
+			p,
+			`${readText(p)}step_timeouts: { 10-system: 45, 90-cleanup: 120 }\n`,
+		);
+		const r = loadRecipe(dir, "windows-fixture");
+		expect(r.stepTimeoutsMin).toEqual({ "10-system": 45, "90-cleanup": 120 });
+	});
+
+	it("rejects step_timeouts of unknown or built-in steps and non-positive minutes", () => {
+		for (const [entry, msg] of [
+			["nope: 5", /nope/],
+			["reboot: 5", /reboot/],
+			["network-up: 5", /network-up/],
+			["10-system: 0", /step_timeouts/],
+			["10-system: 1.5", /step_timeouts/],
+		] as const) {
+			const dir = copyFixtures();
+			const p = join(dir, "windows-fixture/template.yaml");
+			writeFileSync(p, `${readText(p)}step_timeouts: { ${entry} }\n`);
+			expect(() => loadRecipe(dir, "windows-fixture"), entry).toThrow(msg);
+		}
 	});
 
 	it("reads install_timeout_s and vs_buildtools", () => {
@@ -557,6 +589,7 @@ describe("loadRecipe: windows (iso-install)", () => {
 			"offline: [defender-off]",
 			"options: { vs_buildtools: true }",
 			"install_timeout_s: 100",
+			"step_timeouts: { 00-base: 5 }",
 		]) {
 			const dir = copyFixtures();
 			const p = join(dir, "linux-fixture/template.yaml");

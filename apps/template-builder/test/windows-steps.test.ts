@@ -20,7 +20,10 @@ import {
 	WINDOWS_TOOLS,
 	type WindowsRecipe,
 } from "../src/recipe.ts";
-import { buildIsoFiles } from "../src/windows/media.ts";
+import {
+	buildIsoFiles,
+	SYSPREP_DEFERRED_SERVICES,
+} from "../src/windows/media.ts";
 
 // Static checks of the Windows image steps and files (spec S9 section 8).
 
@@ -222,7 +225,18 @@ describe("windows steps: files", () => {
 describe("windows steps: services", () => {
 	it("lib.ps1 lists the services of section 8.1; 00-base leaves the update services to 90-cleanup", () => {
 		const lib = read("lib.ps1");
+		// dmwappushservice stays Manual until sysprep is done; the offline stage disables it.
+		expect(SYSPREP_DEFERRED_SERVICES).toEqual(["dmwappushservice"]);
 		expect(psArray(lib, "SbxDisabledServices").sort()).toEqual(
+			DISABLED_SERVICES.filter(
+				(s) => !SYSPREP_DEFERRED_SERVICES.includes(s),
+			).sort(),
+		);
+		for (const s of ["00-base", "10-system", "90-cleanup"])
+			expect(code(read(`steps/${s}.ps1`)), s).not.toMatch(/dmwappushservice/i);
+		// verify runs on a clone, after the offline stage: everything is Disabled there.
+		const verify = readFileSync(join(templates, "windows/verify.ps1"), "utf8");
+		expect(psArray(verify, "DisabledServices").sort()).toEqual(
 			[...DISABLED_SERVICES].sort(),
 		);
 		// DoSvc carries the Windows Update payloads of the OpenSSH FoD.
@@ -394,6 +408,65 @@ describe("windows steps: step content", () => {
 		expect(pending).toBeLessThan(s.indexOf("StartComponentCleanup"));
 	});
 
+	it("90-cleanup accepts DISM exit 0 only and fails on a reboot DISM left pending", () => {
+		const s = code(read("steps/90-cleanup.ps1"));
+		const dism = s.indexOf("StartComponentCleanup");
+		const call = s.slice(s.lastIndexOf("\n", dism), s.indexOf("\n", dism));
+		expect(call).toMatch(/-SuccessCodes @\(0, 3010\) -PassThru/);
+		const after = s.slice(dism);
+		expect(after).toMatch(/-eq 3010\) \{ throw [^\n]*3010[^\n]*reboot/);
+		// The same check as before DISM, failing right there with the key.
+		const checks = [...s.matchAll(/Get-PendingReboot/g)].map((m) => m.index);
+		expect(checks.filter((i) => i > dism).length).toBeGreaterThan(0);
+		expect(checks.filter((i) => i < dism).length).toBeGreaterThan(1);
+		expect(after).toMatch(
+			/throw "DISM [^\n]*\$\(\$pending -join ', '\)[^\n]*reboot after 90-cleanup/,
+		);
+	});
+
+	it("90-cleanup warns about Appx packages installed for a user but not provisioned", () => {
+		const s = code(read("steps/90-cleanup.ps1"));
+		const start = s.indexOf(
+			"$problems = [Collections.Generic.List[string]]::new()",
+		);
+		expect(start).toBeGreaterThan(0);
+		const check = s.slice(start);
+		expect(check).toMatch(/Get-AppxPackage -AllUsers/);
+		expect(check).toMatch(/Get-AppxProvisionedPackage -Online/);
+		expect(check).toMatch(
+			/Write-BuildLog "WARNING: Appx [^\n]*not provisioned/,
+		);
+		// Informative only: never a problem of the self-check.
+		expect(check).not.toMatch(/\$problems\.Add\([^\n]*[Aa]ppx/);
+	});
+
+	it("--version probes go through Invoke-Probe (stdin closed, time limit)", () => {
+		for (const st of ["30-toolchains", "40-coding-agents"]) {
+			const s = code(read(`steps/${st}.ps1`));
+			expect(s, st).not.toMatch(/& \$\w+(\.Source)? (@\w+|--version)/);
+			expect(s, st).not.toMatch(/function Get-InstalledVersion/);
+		}
+		expect(code(read("steps/40-coding-agents.ps1"))).toMatch(
+			/Get-InstalledVersion \$path @\('--version'\)/,
+		);
+		expect(code(read("steps/30-toolchains.ps1"))).toMatch(
+			/Invoke-Probe -FilePath \$npm -ArgumentList @\('prefix', '-g'\)/,
+		);
+		const lib = code(read("lib.ps1"));
+		expect(lib).toMatch(/function Get-InstalledVersion[\s\S]*?Invoke-Probe/);
+	});
+
+	it("lib.ps1 retries a busy hive unload for about a minute", () => {
+		const lib = code(read("lib.ps1"));
+		const unload = lib.slice(
+			lib.indexOf("function Invoke-WithDefaultUserHive"),
+		);
+		expect(unload).toMatch(/if \(\$i -ge 30\)/);
+		expect(unload).toMatch(
+			/Start-Sleep -Seconds 2\s+\[GC\]::Collect\(\)\s+\[GC\]::WaitForPendingFinalizers\(\)/,
+		);
+	});
+
 	it("the recipe reboots after the last install step and before the agent is installed", () => {
 		const steps = recipe().steps;
 		const reboots = steps.flatMap((s, i) => (s === "reboot" ? [i] : []));
@@ -540,6 +613,108 @@ exit $bad
 			);
 			expect(r.stdout + r.stderr).toBe("");
 			expect(r.status).toBe(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+/** Runs `body` in pwsh after dot-sourcing lib.ps1; returns the exit status and output. */
+function runWithLib(body: string): { status: number | null; out: string } {
+	const dir = mkdtempSync(join(tmpdir(), "sbx-lib-"));
+	try {
+		writeFileSync(join(dir, "lib.ps1"), read("lib.ps1"));
+		const script = join(dir, "t.ps1");
+		writeFileSync(script, `. (Join-Path $PSScriptRoot 'lib.ps1')\n${body}\n`);
+		const r = spawnSync(
+			PWSH,
+			["-NoProfile", "-NonInteractive", "-File", script],
+			{
+				encoding: "utf8",
+				env: { ...process.env, NO_COLOR: "1", SBX_BUILD_DIR: dir },
+			},
+		);
+		return { status: r.status, out: r.stdout + r.stderr };
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+describe("lib.ps1 (pwsh)", () => {
+	it("Invoke-Installer retries MSI exit 1618 three times, 30 s apart", () => {
+		const mock = (codes: number[]) => `$script:codes = @(${codes.join(", ")})
+$script:runs = 0
+function Start-Process { $script:runs++; [pscustomobject]@{ ExitCode = $script:codes[$script:runs - 1] } }
+function Start-Sleep([int]$Seconds) { Write-Output "sleep $Seconds" }`;
+		const ok = runWithLib(`${mock([1618, 1618, 1618, 0])}
+Invoke-Installer -FilePath 'x.exe' -Arguments '/qn'
+Write-Output "runs $script:runs"`);
+		expect(ok.status, ok.out).toBe(0);
+		expect(ok.out.match(/sleep 30/g)).toHaveLength(3);
+		expect(ok.out).toContain("runs 4");
+
+		const busy = runWithLib(`${mock([1618, 1618, 1618, 1618, 0])}
+try { Invoke-Installer -FilePath 'x.exe' -Arguments '/qn' } catch { Write-Output "failed: $($_.Exception.Message)" }
+Write-Output "runs $script:runs"`);
+		expect(busy.out).toMatch(/failed: x\.exe: exit code 1618/);
+		expect(busy.out).toContain("runs 4");
+
+		const other = runWithLib(`${mock([1603])}
+try { Invoke-Installer -FilePath 'x.exe' -Arguments '/qn' } catch { Write-Output "failed: $($_.Exception.Message)" }
+Write-Output "runs $script:runs"`);
+		expect(other.out).toMatch(/failed: x\.exe: exit code 1603/);
+		expect(other.out).toContain("runs 1");
+	});
+
+	it("Invoke-Probe closes stdin, returns the output and the exit code", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-probe-"));
+		try {
+			const tool = join(dir, "tool");
+			// Waits for stdin like a CLI that prompts: EOF lets it go on at once.
+			writeFileSync(
+				tool,
+				'#!/bin/sh\nread x\necho "tool 1.2.3 $1"\necho warn >&2\nexit 3\n',
+				{ mode: 0o755 },
+			);
+			const r =
+				runWithLib(`$r = Invoke-Probe -FilePath '${tool}' -ArgumentList @('--version') -TimeoutSec 20
+Write-Output "exit $($r.ExitCode)"
+Write-Output "out $($r.Output -join '|')"
+Write-Output "err $($r.Errors -join '|')"`);
+			expect(r.status, r.out).toBe(0);
+			expect(r.out).toContain("exit 3");
+			expect(r.out).toContain("out tool 1.2.3 --version");
+			expect(r.out).toContain("err warn");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("Invoke-Probe kills a tool that does not exit in time, with its children", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-probe-"));
+		try {
+			const tool = join(dir, "hang");
+			const pidFile = join(dir, "child.pid");
+			writeFileSync(
+				tool,
+				`#!/bin/sh\nsleep 60 &\necho $! > '${pidFile}'\nwait\n`,
+				{ mode: 0o755 },
+			);
+			const started = Date.now();
+			const r = runWithLib(`try {
+    Invoke-Probe -FilePath '${tool}' -ArgumentList @('--version') -TimeoutSec 2 | Out-Null
+    Write-Output 'no error'
+} catch { Write-Output "failed: $($_.Exception.Message)" }`);
+			expect(Date.now() - started).toBeLessThan(20_000);
+			expect(r.out).toMatch(/failed: .*hang --version: no exit within 2 s/);
+			const child = Number(readFileSync(pidFile, "utf8").trim());
+			let alive = true;
+			try {
+				process.kill(child, 0);
+			} catch {
+				alive = false;
+			}
+			expect(alive).toBe(false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

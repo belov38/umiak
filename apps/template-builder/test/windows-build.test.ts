@@ -22,6 +22,7 @@ import {
 import type { Manifest, VerifyResult } from "../src/manifest.ts";
 import { loadRecipe, recipeDigest } from "../src/recipe.ts";
 import { FileRegistry } from "../src/registry.ts";
+import { stepTimeoutMs } from "../src/windows/stages.ts";
 import {
 	type AgentExecResult,
 	BuildPve,
@@ -624,6 +625,17 @@ describe("iso-install build: happy path", () => {
 			k.isos.find((i) => i.label === "SBXBUILD")?.files.get("autounattend.xml"),
 		);
 		expect(xml).toContain("<Key>ABCDE-FGHIJ-KLMNO-PQRST-UVWXY</Key>");
+		// The offline boot installs nothing: it gets the generic key, never the real one.
+		for (const b of [s, k]) {
+			const off = String(
+				b.isos
+					.find((i) => i.label === "SBXOFFL")
+					?.files.get("autounattend.xml"),
+			);
+			expect(off).toContain("<Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>");
+			expect(off).toContain("<UILanguage>en-GB</UILanguage>");
+			expect(off).not.toContain("ABCDE-FGHIJ");
+		}
 		expect(JSON.stringify(m)).not.toContain("ABCDE-FGHIJ");
 		expect(k.messages.join("\n")).not.toContain("ABCDE-FGHIJ");
 	});
@@ -649,6 +661,20 @@ describe("iso-install build: happy path", () => {
 			s.isos.find((i) => i.label === "SBXBUILD")?.files.get("autounattend.xml"),
 		);
 		expect(xml).toContain("Windows 11 Enterprise");
+	});
+});
+
+describe("step timeouts", () => {
+	it("step_timeouts of the recipe in minutes, the runner's default for the rest", () => {
+		const r = loadRecipe(
+			join(repoRoot, "infra/templates"),
+			"windows",
+			"windows",
+		);
+		expect(stepTimeoutMs(r, "30-toolchains")).toBe(60 * 60_000);
+		expect(stepTimeoutMs(r, "40-coding-agents")).toBe(45 * 60_000);
+		expect(stepTimeoutMs(r, "90-cleanup")).toBe(120 * 60_000);
+		expect(stepTimeoutMs(r, "00-base")).toBeUndefined();
 	});
 });
 
@@ -869,6 +895,27 @@ describe("iso-install build: failures", () => {
 		expect(s.pve.vms.get(598)?.config.template).toBe("1");
 		expect((await s.allocator.get(598))?.state).toBe("active");
 		expect(s.messages.join("\n")).toMatch(/sbx-tpl cleanup/);
+	});
+
+	it("a C:\\sbx-build that resists removal is retried, then only warned about", async () => {
+		const s = setup();
+		s.guest.rmBuildDirExits = [1, 1];
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.status).toBe("ready");
+		expect(s.log.filter((e) => e === "guest:rm-sbx-build")).toHaveLength(3);
+		expect(s.messages.join("\n")).not.toMatch(
+			/WARNING: removing C:\\sbx-build/,
+		);
+
+		const w = setup();
+		w.guest.rmBuildDirExits = Array.from({ length: 10 }, () => 1);
+		const m2 = await buildTemplate(w.deps, w.opts);
+		expect(m2.status).toBe("ready");
+		expect(w.log.filter((e) => e === "guest:rm-sbx-build")).toHaveLength(5);
+		expect(w.messages.join("\n")).toMatch(
+			/WARNING: removing C:\\sbx-build failed .*file in use/,
+		);
+		expectInOrder(w.log, ["guest:rm-sbx-build", "guest:seal", "guest:sysprep"]);
 	});
 
 	it("sysprep failure surfaces setuperr tail", async () => {

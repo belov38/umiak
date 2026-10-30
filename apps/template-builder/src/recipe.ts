@@ -101,6 +101,8 @@ const recipeFileSchema = z.strictObject({
 	options: z.strictObject({ vs_buildtools: z.boolean().optional() }).optional(),
 	boot_timeout_s: z.number().int().positive().optional(),
 	install_timeout_s: z.number().int().positive().optional(),
+	/** Minutes per script step (windows); steps not listed get the runner's default. */
+	step_timeouts: z.record(z.string(), z.number().int().positive()).optional(),
 	verify: z.string().min(1).optional(),
 	/** Template slots this recipe builds into, in order (not inherited: each template has its own). */
 	vmids: z.array(z.number().int().positive()).min(1),
@@ -127,6 +129,8 @@ interface RecipeBase {
 	bootTimeoutS: number;
 	/** iso-install: how long the builder waits for QGA after starting Windows Setup. */
 	installTimeoutS: number;
+	/** `step_timeouts`: minutes per script step, merged over the parent's (windows; empty for linux). */
+	stepTimeoutsMin: Record<string, number>;
 	verify: string;
 	/** Shared directory name (`_windows`); its files have the lowest lookup priority. */
 	shared?: string;
@@ -276,6 +280,10 @@ function loadRecipeChain(
 			raw.install_timeout_s ??
 			parent?.installTimeoutS ??
 			DEFAULT_INSTALL_TIMEOUT_S;
+		const stepTimeoutsMin = {
+			...parent?.stepTimeoutsMin,
+			...raw.step_timeouts,
+		};
 
 		const shared = raw.shared ?? parent?.shared;
 		let sharedDir: string | undefined;
@@ -315,6 +323,15 @@ function loadRecipeChain(
 		) {
 			throw new Error(`missing required fields: ${missing.join(", ")}`);
 		}
+		for (const step of Object.keys(stepTimeoutsMin))
+			if (
+				!steps.includes(step) ||
+				step === REBOOT_STEP ||
+				(raw.os === "windows" && step === NETWORK_UP_STEP)
+			)
+				throw new Error(
+					`step_timeouts: "${step}" is not a script step of the recipe`,
+				);
 
 		const base = {
 			slug,
@@ -329,6 +346,7 @@ function loadRecipeChain(
 			options,
 			bootTimeoutS,
 			installTimeoutS,
+			stepTimeoutsMin,
 			verify,
 			...(shared !== undefined ? { shared } : {}),
 			vmids: raw.vmids,
@@ -349,7 +367,12 @@ function loadRecipeChain(
 		if (seal !== "sbx-agent")
 			throw new Error(`os linux requires seal: sbx-agent`);
 		// The linux pipeline would silently ignore these: reject them instead.
-		for (const key of ["offline", "options", "install_timeout_s"] as const)
+		for (const key of [
+			"offline",
+			"options",
+			"install_timeout_s",
+			"step_timeouts",
+		] as const)
 			if (raw[key] !== undefined)
 				throw new Error(`${key} is supported only for os windows`);
 		const firmwareDisk = Object.keys(firmwareDisks)[0];

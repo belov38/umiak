@@ -5,11 +5,21 @@
   offline.cmd in the windowsPE pass. offline.cmd always powers the VM off, so
   Setup never installs anything; failures are recorded in sbx-offline.log on
   the Windows volume ("DONE errors <n>") and verify fails the template.
-  An implicitly found answer file suppresses the language page, so no
-  International-Core-WinPE (it would have to match the ISO's language).
+  Rendered by sbx-tpl (src/windows/unattend.ts). The language, key and licence
+  answers are the install's, so no Setup page waits for input before
+  RunSynchronous; the key is always the generic one of keys.toml.
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
   <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage>
+        <UILanguage>{{ui_language}}</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>{{ui_language}}</InputLocale>
+      <SystemLocale>{{ui_language}}</SystemLocale>
+      <UILanguage>{{ui_language}}</UILanguage>
+      <UserLocale>{{ui_language}}</UserLocale>
+    </component>
     <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <RunSynchronous>
         <!-- WinPE has no Get-Volume: the offline ISO is the drive with offline.cmd and offline-config.cmd. -->
@@ -18,6 +28,10 @@
           <Path>cmd.exe /c "for %d in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do @if exist %d:\offline-config.cmd if exist %d:\offline.cmd call %d:\offline.cmd"</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
+      <UserData>
+{{product_key}}
+        <AcceptEula>true</AcceptEula>
+      </UserData>
     </component>
   </settings>
 </unattend>
