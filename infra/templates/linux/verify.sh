@@ -310,6 +310,12 @@ check_users() {
 	[ -e /root/.bash_history ] && left+=(/root/.bash_history)
 	[ -e /home/user/.bash_history ] && left+=(/home/user/.bash_history)
 	[ -f /etc/sbx-template/build.json ] || left+=("no /etc/sbx-template/build.json")
+	# The build VM's journal (another machine-id) must not ship with the template.
+	local mid j
+	mid=$(cat /etc/machine-id)
+	for j in /var/log/journal/*/; do
+		[ -d "$j" ] && [ "$(basename "$j")" != "$mid" ] && left+=("journal ${j%/}")
+	done
 	[ "${#left[@]}" -eq 0 ]
 	report leftovers $? "${left[*]:-none}"
 

@@ -22,7 +22,7 @@ import { REBOOT_STEP, type Recipe, type Versions } from "./recipe.ts";
 import type { FileRegistry } from "./registry.ts";
 import { type GuestIo, mountSeed, rebootGuest, runStep } from "./runner.ts";
 import { writeGuestFile } from "./seal.ts";
-import { renderSeed, type SeedInput } from "./seed.ts";
+import { renderSeed, SEED_AGENT_PACKAGE, type SeedInput } from "./seed.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
 
 // Stages of `sbx-tpl build` (spec S5 section 7.2); build.ts runs them in order and rolls back.
@@ -164,6 +164,8 @@ export interface Prepared {
 	versions: Versions;
 	verifyScript: string;
 	manifest: Manifest;
+	/** sha256 of the agent package as verified in prepare. */
+	agentSha256: string;
 }
 
 async function upload(
@@ -254,7 +256,17 @@ export async function stageSeed(
 	try {
 		const name = seedName(st.m);
 		const path = join(dir, "seed.iso");
-		deps.makeIso(renderSeed(input), path);
+		const files = renderSeed(input);
+		// The seed must carry the bytes prepare verified, not a later version of the file.
+		const pkg = files.get(SEED_AGENT_PACKAGE);
+		if (
+			pkg === undefined ||
+			createHash("sha256").update(pkg).digest("hex") !== p.agentSha256
+		)
+			throw new Error(
+				`${o.agentPackage} changed after its signature was verified`,
+			);
+		deps.makeIso(files, path);
 		const size = statSync(path).size;
 		st.seedUploaded = true;
 		deps.log(`uploading ${name} (${size} bytes)`);

@@ -14,6 +14,8 @@ sed -i -E '/(^|[[:space:]])sbx-build([[:space:]]|$)/d' /etc/hosts
 
 # apt: back to the plain archive, no package lists (spec 6.2).
 apt_snapshot ""
+# The Docker pins hold only during the build: users update Docker with apt like the rest.
+apt-mark unhold docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin >/dev/null
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 

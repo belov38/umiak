@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+	copyFileSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -217,6 +218,7 @@ describe("buildTemplate: happy path", () => {
 			"guest:rm-build-logs",
 			"guest:random-seed",
 			"guest:seal",
+			"guest:drop-journal",
 			"guest:zero-fill",
 			"guest:fstrim",
 			"guest:sync",
@@ -602,6 +604,26 @@ describe("buildTemplate: failures", () => {
 		expect(s.node.calls.some((c) => c.op === "media.remove")).toBe(false);
 		expect(s.pve.vms.get(598)?.status).toBe("running");
 		expect((await s.allocator.get(598))?.state).toBe("reserved");
+	});
+
+	it("refuses an agent package that changed after its signature was verified", async () => {
+		const s = setup();
+		const pkg = join(mkdtempSync(join(tmpdir(), "sbx-pkg-")), "pkg.tar");
+		copyFileSync(s.opts.agentPackage, pkg);
+		const opts = { ...s.opts, agentPackage: pkg };
+		const fetchImage = s.deps.fetchImage;
+		// The image stage runs between prepare (signature check) and the seed.
+		s.deps.fetchImage = async (base) => {
+			writeFileSync(pkg, "swapped");
+			return fetchImage(base);
+		};
+		const err = await buildTemplate(s.deps, opts).catch((e: unknown) => e);
+		const m = (err as BuildFailedError).manifest;
+		expect(m.error?.stage).toBe("seed");
+		expect(m.error?.message).toMatch(
+			/changed after its signature was verified/,
+		);
+		expect(s.pve.uploads.map((u) => u.file.name)).not.toContain(seedName(m));
 	});
 
 	it("a failed VM create releases the lease and removes the ISO without deleting anything", async () => {

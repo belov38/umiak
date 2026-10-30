@@ -698,7 +698,8 @@ export class Machines {
 			{},
 		);
 		for (const l of lvs) {
-			const m = /^vm-(\d+)-/.exec(l.name);
+			// base-<id>-*: a template's disk occupies its VMID even if its VM is not listed.
+			const m = /^(?:vm|base)-(\d+)-/.exec(l.name);
 			if (m) ids.add(Number(m[1]));
 		}
 		return ids;

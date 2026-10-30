@@ -50,7 +50,8 @@ topology:
       storage: local-lvm
       pveVmid: 599
       bootTimeoutS: 300
-    # S5 template build (sbx-tpl build linux): Ubuntu 26.04, agent baked in, no cloud-init
+    # S5 template build (sbx-tpl build linux): Ubuntu 26.04, agent baked in (tunnel CA = the dev
+    # CA of the CT 590 gateway, ~/.config/sbx/dev-ca; production needs its own build), no cloud-init
     # drive. `sbx-admin bootstrap` makes it active; 599-seed becomes deprecated (rollback:
     # `sbx-admin template promote <599-seed build id>`).
     - templateSlug: linux

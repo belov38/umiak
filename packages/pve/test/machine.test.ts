@@ -1040,3 +1040,17 @@ describe("delete of a template", () => {
 		await expect(machines.delete(598)).rejects.toThrow(/bad gw/);
 	});
 });
+
+describe("occupiedVmids", () => {
+	it("counts VM disks and template disks, even of VMs the token cannot list", async () => {
+		const { node, machines } = setup();
+		node.lvs.push(
+			{ name: "vm-512-disk-0", tags: ["sbx"] },
+			{ name: "base-597-disk-0", tags: [] },
+			{ name: "data", tags: [] },
+		);
+		const ids = await machines.occupiedVmids();
+		expect(ids.has(512)).toBe(true);
+		expect(ids.has(597)).toBe(true);
+	});
+});

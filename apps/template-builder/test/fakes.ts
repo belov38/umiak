@@ -250,6 +250,8 @@ export class FakeGuest implements GuestIo {
 			const s = String(cmd[2]);
 			if (s.includes("rm -rf /var/log/sbx-build"))
 				this.log.push("guest:rm-build-logs");
+			if (s.includes("journalctl --relinquish-var"))
+				this.log.push("guest:drop-journal");
 			if (s.includes("/dev/zero")) this.log.push("guest:zero-fill");
 			if (s.includes("fstrim")) this.log.push("guest:fstrim");
 			if (s.includes("systemd-random-seed")) {

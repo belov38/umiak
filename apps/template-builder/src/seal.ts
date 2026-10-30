@@ -150,6 +150,13 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 	]);
 	// After seal only the zero file is written; fstrim then covers the freed blocks.
 	await must(io, ["sbx-agent", "seal"], { timeoutMs: 2 * MIN });
+	// The persistent journal holds the build's last entries (tools run, seal) under the build
+	// VM's machine-id; journald goes on in /run until poweroff, clones start an empty one.
+	await must(io, [
+		"bash",
+		"-c",
+		"journalctl --relinquish-var && rm -rf /var/log/journal/* && sync",
+	]);
 	// dd ends with "no space left", so its status does not count. Minutes on a 64 GiB disk.
 	await must(
 		io,

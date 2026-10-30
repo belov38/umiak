@@ -130,7 +130,13 @@ function prepare(deps: BuildDeps, o: BuildOptions): Prepared {
 		finishedAt: null,
 		durationS: null,
 	};
-	return { recipe, versions, verifyScript, manifest };
+	return {
+		recipe,
+		versions,
+		verifyScript,
+		manifest,
+		agentSha256: agent.sha256,
+	};
 }
 
 /**
