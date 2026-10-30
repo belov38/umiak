@@ -24,6 +24,9 @@ components are referenced by import-map path strings from `apps/web`.
   refused to everyone.
 - `notify(req, channel, payload)` — `pg_notify` in the transaction of the
   Payload request (`txQuery(req, sql)` runs any SQL there).
+- `inTransaction(payload, fn, outer?)`, `rows(payload, sql, req?)`,
+  `tbl(payload, name)`, `sql`, `uniqueViolation(e)` — the transaction and
+  SQL helpers of the identity code, for the server actions of web.
 
 ## Identity (S8 §5)
 

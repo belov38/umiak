@@ -13,8 +13,60 @@ Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
 | `/cms-api/*` | Payload REST (collection access: operators). A refused login answers with `X-Sbx-Auth-Denied: <reason>`. |
 | `/app` | Redirect to the default team, `/app/t/<team_…>`. |
 | `/app/t/<team>` | Team frame (S8 §9.3): team switcher, sections, operator links, user menu with sign-out. A team the user is not in: 403 page (operators may open any team). |
+| `/app/t/<team>/settings` | Team (S8 §9.9): name (rename: owner, operator), members (email, name, role, "Not signed in yet", last sign-in), invite / role / remove (owner, operator), leave, quota and usage (`GET /v1/limits`), the IdP-sync notice banner (§9.8, §20.1) for owners and operators: "Revoke selected" (`DELETE /v1/api-keys/{key_…}` through the SDK), "Dismiss" (`acknowledgeNotice`, owners). |
+| `/app/teams/new` | New shared team: name → `createTeam` → the new team. |
+| `/app/account` | Profile (read-only), default team (`setDefaultTeam`), SSH keys (`GET/POST/DELETE /v1/ssh-keys`; `ssh_key_in_use` and unsupported types as text), sign-out with the `sbx login` hint. |
 
-Pages of the sections arrive with later tasks of the S8 plan.
+Pages of the other sections arrive with later tasks of the S8 plan.
+
+## Server actions (S8 §9.11)
+
+`src/actions/{teams,members,account,notices}.ts` are `"use server"`
+wrappers: `createTeam(name)`, `renameTeam(teamId, name)`,
+`inviteMember(teamId, email, role)`, `setRole(membershipId, role)`,
+`removeMember(membershipId)`, `leaveTeam(teamId)`,
+`setDefaultTeam(teamId)`, `acknowledgeNotice(noticeId)` →
+`{ok: true, …} | {error: {code, message}}`. The logic is
+`…Impl(ctx: {payload, session}, args)` in `src/lib/team-actions/` (tested
+without Next, `test/actions.test.ts`).
+
+- Session: `requestAuth()` (the same cached resolution as the layouts and
+  the Payload strategy); none → `forbidden`. After a success the session
+  cache of the process is flushed at once and `/app` is revalidated.
+- One Payload transaction per action (`inTransaction`: `createLocalReq` +
+  `initTransaction`/`commitTransaction`/`killTransaction`). The team row is
+  locked (`FOR NO KEY UPDATE`, the lock of the last-owner hook), then the
+  caller's membership is read in the transaction and checked with
+  `can()` (`src/lib/permissions.ts`, the table of §6.2). Writes: Local API,
+  `overrideAccess: true`, the same `req` (hooks and NOTIFY in the
+  transaction), memberships one id at a time. An error result rolls back.
+  A unique violation (two invites of a new email at once) retries the
+  action (3 attempts).
+- Input: zod. Codes: `validation` (bad input or malformed id),
+  `forbidden`, `not_found`, `last_owner` (the hook's `APIError`),
+  `team_limit`, `already_member`.
+- `forbidden` vs `not_found`: a person gets `forbidden` both for a row of a
+  team they may not act on and for a row that does not exist, so nobody
+  learns whether a foreign team, membership or notice exists. Operators
+  (who see every team) get `not_found` for a missing row.
+- Rules beyond the table: `createTeam` counts shared teams where the user
+  is `owner` against `PlatformDefaults.maxOwnedTeamsPerUser` (3 if unset;
+  the user row is locked so concurrent creates serialize) and copies
+  `newSharedTeamQuota`; `inviteMember` lowercases and trims the email,
+  links an existing user or creates a stub (`active`, no `idpSubject`, no
+  personal team), never into a personal team (operators neither);
+  `leaveTeam`/`removeMember` reset a default team that was this team to the
+  personal team (a stub: none); the personal team cannot be left;
+  `setDefaultTeam` needs a membership (operators too);
+  `acknowledgeNotice` is for owners of the notice's team only (operators
+  use `/admin`) and keeps the first acknowledgement.
+
+### Dashboard ids
+
+Memberships and team notices have no public id in `/api/v1`. The
+dashboard uses `mbr_…` and `ntc_…` (`src/lib/ids.ts`): the same Crockford
+base32 body over the Payload UUID as `usr_`/`team_`, accepted only by these
+server actions. Teams are `team_…`, users `usr_…`, notice keys `key_…`.
 
 ## Authentication (S8 §5)
 
@@ -143,7 +195,11 @@ from the image (`.dockerignore`) and `pnpm check:image` fails if any file of
 
 ## Tests
 
-`pnpm --filter @sbx/web test`: proxy and CSRF decisions, security headers,
+`pnpm --filter @sbx/web test`: the role table (`permissions.test.ts`), the
+server actions against Postgres and Payload (`actions.test.ts`: forbidden
+matrix for member, non-member and operator, last owner, concurrent
+demotions, personal team, team limit, already member, stubs, default team
+fallback, notices), proxy and CSRF decisions, security headers,
 env parsing, team paths, the dev proxy over real sockets (header stripping,
 routing, WebSocket upgrade, 127.0.0.1 only), and the web Payload config
 against Postgres (`@sbx/db/testing/global-setup`): strategy, shared session

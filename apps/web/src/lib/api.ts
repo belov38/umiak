@@ -20,12 +20,16 @@ type SbxForTeam = (teamId: string) => Sbx;
 
 const SbxContext = createContext<SbxForTeam | null>(null);
 
-/** One SDK client per team: every request carries `Sbx-Team: <teamId>`. */
+/**
+ * One SDK client per team: every request carries `Sbx-Team: <teamId>`.
+ * `""` gives a client without a team (the default team of the user; for
+ * requests that are not about a team, like SSH keys).
+ */
 export function sbxForTeam(teamId: string): Sbx {
 	return new Sbx({
 		baseUrl: API_BASE_URL,
 		session: true,
-		team: teamId,
+		...(teamId === "" ? {} : { team: teamId }),
 		// Never read SBX_* settings in the browser bundle.
 		env: {},
 		userAgent: "sbx-web",
@@ -63,7 +67,7 @@ export function SbxProvider({ children }: { children: ReactNode }) {
 	);
 }
 
-/** The SDK for a team (`team_...`); inside SbxProvider only. */
+/** The SDK for a team (`team_...`, or "" for none); inside SbxProvider only. */
 export function useSbx(teamId: string): Sbx {
 	const forTeam = useContext(SbxContext);
 	if (forTeam === null) throw new Error("useSbx outside SbxProvider");

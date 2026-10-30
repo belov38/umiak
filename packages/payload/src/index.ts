@@ -18,6 +18,13 @@ export {
 } from "./config-reader.ts";
 export { dbPool } from "./db.ts";
 export {
+	inTransaction,
+	rows,
+	sql,
+	tbl,
+	uniqueViolation,
+} from "./identity/db.ts";
+export {
 	AUTH_HEADERS,
 	type HeaderSource,
 	parseAuthHeaders,
