@@ -28,7 +28,7 @@
 - **Причина.** Gateway входит в sshd VM сертификатом от SSH user CA (`SBX_GATEWAY_SSH_USER_CA_KEY_FILE`), а агент доверяет ключам из Claim (`ssh_user_ca_keys`). Worker берёт их из `SBX_SSH_USER_CA_KEYS_FILE`, но `deploy/compose/gateway.yaml` давал worker только токен gateway. Список был пустым в любом стеке compose.
 - **Исправление.** `deploy/compose/gateway.yaml`: worker получает `SBX_SSH_USER_CA_KEYS_FILE=/run/sbx-gateway/ssh_user_ca.pub` (каталог секретов gateway уже смонтирован).
 - **Тест.** `apps/worker/test/compose-wiring.test.ts` разбирает `gateway.yaml` и сверяет пару «CA gateway → `.pub` у worker». На старом `gateway.yaml` падал (`expected undefined to be '/run/sbx-gateway/ssh_user_ca.pub'`). Шаги `sbx ssh` и `plain ssh :2222` в `e2e.sh`.
-- **Ограничение.** Ключ приходит только в Claim (create, fork, create --from). Resume Claim не повторяет: sandbox, созданные до исправления, остаются без SSH, а смена SSH user CA не дойдёт до существующих sandbox. См. «Открытые вопросы».
+- **Ограничение.** Ключ приходит только в Claim (create, fork, create --from). Resume Claim не повторяет: sandbox, созданные до исправления, остаются без SSH, а смена SSH user CA не дойдёт до существующих sandbox. См. «Открытые вопросы». Закрыто веткой `fix-resume-sshca`: шаг `provision` (resume, recover, reprovision) вызывает `System/UpdateSshCa`.
 
 ### 3. Каждый деплой, пересоздающий gateway, кладёт стек на 16 минут
 
@@ -50,3 +50,10 @@
 - `sbx logs -f` выходит с `0` для команды с ненулевым кодом (спека задаёт код команды только для `exec`/`run`).
 - `sbx snapshot save` без `--wait`: снапшот готов через ~2 s, сценарий ждёт `snapshot list`.
 - Idle stop при `--idle 60s` срабатывает через ~80 s (шаг учёта активности).
+
+## Закрыто веткой `fix-resume-sshca` (2026-10-31)
+
+- SSH user CA: worker шлёт `System/UpdateSshCa` с текущим набором ключей в шаге `provision` (S6 §7.6, S3 §8.1). Протокол агента не менялся: RPC был с S3. Sandbox, созданные до настройки CA, получают ключ при следующем stop/resume.
+- `sbx logs -f` выходит с кодом команды, как `exec` (S7 §14.2, §14.3); без `-f` — `0`.
+- `snapshot save --wait` был и раньше, сценарий его не использовал. Теперь вывод как у других ждущих команд (JSONL `accepted` → `ready`, лимит 5 min); `e2e.sh` ждёт через `--wait`.
+- `create --from <snapshot>` не переносит env и секреты — записано в S7 §8.3 как задуманное.

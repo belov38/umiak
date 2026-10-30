@@ -551,11 +551,13 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 
 Три набора, с разной судьбой в госте (S3 §8.1–8.2):
 
-| Поле API | В S3 | Где живёт в госте | Попадает в fork/снапшот |
-|---|---|---|---|
-| `env` | `ClaimRequest.env` | `/etc/sbx/env` и `state.db` (диск) | да (диск) |
-| `secrets` | `secret_env` | tmpfs, заново после каждой загрузки | только через fork (S6 перешифровывает) |
-| `secretFiles` | `secret_files` | tmpfs, `linkPath` — symlink на диске | только через fork |
+| Поле API | В S3 | Где живёт в госте | Fork | Create из saved snapshot |
+|---|---|---|---|---|
+| `env` | `ClaimRequest.env` | `/etc/sbx/env` и `state.db` (диск) | да (S6 копирует набор источника) | нет |
+| `secrets` | `secret_env` | tmpfs, заново после каждой загрузки | да (S6 перешифровывает) | нет |
+| `secretFiles` | `secret_files` | tmpfs, `linkPath` — symlink на диске | да | нет |
+
+- **Create из saved snapshot** переносит только диск источника (файлы, пакеты, история shell). Env, секреты и secret-файлы источника не переносятся: при первой загрузке агент видит новую идентичность и стирает `state.db` с claim и `/etc/sbx/env` (S3 §7.2), а наборы новой sandbox — из запроса create и environment (S8 §10), как у create из шаблона. Снапшот — образ диска, а не копия sandbox; секреты на диске не хранятся, и снапшот, которым поделились в команде, не должен раздавать чужие секреты. Решение 2026-10-31 (ветка `fix-resume-sshca`): так и задумано. Нужны наборы источника — fork или явные `env`/`secrets` в create.
 
 - Наборы принимают create, fork и resume (§8.2), `PUT /env` и environments (S8 §10).
 - Лимиты: до 100 переменных в каждом наборе; ключ `[A-Za-z_][A-Za-z0-9_]{0,127}`; значение до 32 KiB без NUL; всего до 256 KiB на набор. Префикс `SBX_` зарезервирован (`400 validation`), кроме переменных CLI `sbx` (§14.1): `SBX_API_KEY`, `SBX_API_URL`, `SBX_TEAM`, `SBX_PROFILE` — так CLI внутри VM получает ключ секретом sandbox (S5 §8.9). Значения с переводом строки в SSH-сессиях не видны (S3 §8.2) — это пишется в описании поля.
@@ -896,7 +898,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx cp [-r] <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range`; `-r` — каталог через `/files/archive` (§11.1) |
 | `sbx push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz потоком в `PUT /files/archive` |
 | `sbx port <sb> <port> [--public\|--sso\|--token]`, `sbx ports <sb>`, `sbx unport <sb> <port>`, `sbx port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
-| `sbx snapshot save <sb> <name>`, `snapshot list\|rm` | |
+| `sbx snapshot save <sb> <name> [--wait]`, `snapshot list\|rm` | `save --wait` ждёт, пока снапшот станет `ready` (лимит `--wait-timeout`, по умолчанию 5 min), и печатает его; ошибка сохранения — код `1` |
 | `sbx templates`, `sbx sizes`, `sbx limits` | |
 | `sbx keys list\|create [--preset] [--scope]...\|rotate\|rm` | командные ключи; `create`, `rotate` — только `owner` с входом Keycloak |
 | `sbx run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |
@@ -912,7 +914,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 ### 14.3 Вывод и коды выхода
 
 - **JSON, когда stdout не TTY** [MVP-рек. R1]. В TTY — таблицы и строки для человека; если stdout не TTY — JSON, как с `--json`. `--json` (или `SBX_OUTPUT=json`) включает JSON и в TTY, `--human` (`SBX_OUTPUT=human`) — текст и без TTY. (Команды с сырым выводом переключает в NDJSON только явный `--json`, не `SBX_OUTPUT`, §23.7.) Исключение — команды, чей stdout — это данные: `exec`, `run`, `logs`, `shell`, `ssh`, `cp`/`push` в stdout пишут сырой вывод при любом stdout (`sbx exec sb -- cat f > out` пишет байты файла); для `exec`, `run`, `logs` с явным `--json` — кадры NDJSON как в API.
-- **Форма JSON.** Обычные команды — одна JSON-структура (ресурс API как есть). Ждущие команды (`create --wait`, `fork --wait`, `resume --wait`, `recover --wait`, `stop --wait`) — JSON Lines: `{"event":"accepted","sandbox":{...},"operation":{...}}`, `{"event":"state",...}` при смене состояния, последним — `{"event":"ready","sandbox":{...}}` (у `stop --wait` — `{"event":"stopped",...}`). Поле-дискриминатор строк JSONL у CLI всегда `event`: кадры API (§9.5) в `exec`/`run`/`logs --json` печатаются с `event` вместо `type`.
+- **Форма JSON.** Обычные команды — одна JSON-структура (ресурс API как есть). Ждущие команды (`create --wait`, `fork --wait`, `resume --wait`, `recover --wait`, `stop --wait`) — JSON Lines: `{"event":"accepted","sandbox":{...},"operation":{...}}`, `{"event":"state",...}` при смене состояния, последним — `{"event":"ready","sandbox":{...}}` (у `stop --wait` — `{"event":"stopped",...}`). `snapshot save --wait` — так же: `{"event":"accepted","snapshot":{...},"operation":{...}}`, последним — `{"event":"ready","snapshot":{...}}` (у снапшота нет промежуточных состояний, строк `state` нет). Поле-дискриминатор строк JSONL у CLI всегда `event`: кадры API (§9.5) в `exec`/`run`/`logs --json` печатаются с `event` вместо `type`.
 - **Ошибка — последняя строка stdout** в режиме JSON: `{"event":"error","code","message","retryable","details","requestId"}` (поля из §5.5; ошибка CLI без ответа API — те же поля, `requestId: null`), у любой команды, в том числе после строк JSONL. Текст для человека — в stderr. У команд с сырым выводом (`exec`, `run`, `logs`, `cp`, `push`) без явного `--json` stdout занят данными, поэтому эта строка идёт в stderr.
 - Коды выхода (одинаковы в TTY и в JSON): `0` — успех; `1` — ошибка API или CLI; `2` — ошибка аргументов; `3` — не найдено; `4` — нет прав или нет входа; `75` — временная ошибка (retryable, исчерпаны повторы); для `exec`/`run`/`logs -f` — код команды (`128 + n` для сигнала, `124` для `timed_out`, `125` для `lost`/`failed_to_start`).
 

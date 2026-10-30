@@ -35,7 +35,7 @@ sbx shell <slug>                        # терминал
 sbx cp ./file <slug>:file               # и обратно: sbx cp <slug>:file ./file; каталог: -r
 sbx stop <slug> / sbx resume <slug> --wait
 sbx fork <slug> --wait
-sbx snapshot save <slug> my-snap ; sbx create --from my-snap --wait
+sbx snapshot save <slug> my-snap --wait ; sbx create --from my-snap --wait
 sbx rm <slug> --yes
 ```
 

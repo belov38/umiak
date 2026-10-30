@@ -1,17 +1,20 @@
 // `sbx snapshot save [<sb>] <name> [--wait]`, `snapshot list`,
 // `snapshot rm <name>... [--yes]` (S7 §13, §5.12). save prints
-// `{snapshot, operation}`, or with --wait the ready snapshot; a snapshot with
-// the same name is replaced once the new one is ready. rm asks like `sbx rm`
-// and sends `Sbx-Confirm-Delete`.
+// `{snapshot, operation}`; with --wait, like the other waiting commands
+// (§14.3), the JSON Lines `accepted` ({snapshot, operation}) and last `ready`
+// ({snapshot}), or the error line if the save fails. A snapshot with the same
+// name is replaced once the new one is ready. rm asks like `sbx rm` and sends
+// `Sbx-Confirm-Delete`.
 
 import type { SnapshotData } from "@sbx/sdk";
-import { newIdempotencyKey } from "@sbx/sdk";
+import { newIdempotencyKey, SbxError } from "@sbx/sdk";
 import type { Command } from "commander";
 import { parseDuration } from "../args.ts";
 import { confirm } from "../confirm.ts";
 import { sandboxRef, writeCurrent } from "../current.ts";
 import { table } from "../format.ts";
 import type { Runner } from "../program.ts";
+import { WAIT_TIMEOUT_MS } from "../wait.ts";
 
 function snapshotLine(s: SnapshotData): string {
 	return `${s.name} (${s.id}): ${s.state}`;
@@ -37,35 +40,43 @@ export function register(program: Command, run: Runner): void {
 				const [a, b] = args as [string, string | undefined];
 				const ref = sandboxRef(ctx, b === undefined ? undefined : a);
 				const name = b ?? a;
+				const timeoutMs =
+					opts.waitTimeout === undefined
+						? WAIT_TIMEOUT_MS
+						: parseDuration(opts.waitTimeout as string, "--wait-timeout") *
+							1000;
 				const sbx = ctx.sbx();
-				if (opts.wait === true) {
-					const s = await sbx.snapshots.create(
-						{ sandbox: ref.ref, name },
-						{
-							wait: true,
-							...(opts.waitTimeout === undefined
-								? {}
-								: {
-										waitTimeoutMs:
-											parseDuration(
-												opts.waitTimeout as string,
-												"--wait-timeout",
-											) * 1000,
-									}),
-						},
-					);
-					if (ref.explicit && s.sourceSandboxId)
-						writeCurrent(ctx, s.sourceSandboxId);
-					ctx.out.result(s, snapshotLine);
-					return;
-				}
 				const { data } = await sbx.raw.POST("/v1/snapshots", {
 					body: { sandbox: ref.ref, name },
 					idempotencyKey: newIdempotencyKey(),
 				});
 				const source = data.snapshot.sourceSandboxId;
 				if (ref.explicit && source) writeCurrent(ctx, source);
-				ctx.out.result(data, (v) => `Saving ${snapshotLine(v.snapshot)}`);
+				if (opts.wait !== true) {
+					ctx.out.result(data, (v) => `Saving ${snapshotLine(v.snapshot)}`);
+					return;
+				}
+				ctx.out.event(
+					"accepted",
+					data,
+					(v) => `Saving ${snapshotLine(v.snapshot)}`,
+				);
+				const op = await sbx.waitForOperation(data.operation, { timeoutMs });
+				if (op.state !== "succeeded") {
+					throw new SbxError({
+						status: 0,
+						code: op.error?.code ?? `operation_${op.state}`,
+						message:
+							op.error?.message ??
+							`saving snapshot ${name} is ${op.state}`,
+						retryable: op.error?.retryable ?? false,
+						details: { operationId: op.id, kind: op.kind, state: op.state },
+					});
+				}
+				const s = await sbx.snapshots.get(name);
+				ctx.out.event("ready", { snapshot: s }, (v) =>
+					snapshotLine(v.snapshot),
+				);
 			}),
 		);
 
