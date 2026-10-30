@@ -12,7 +12,6 @@ import (
 
 	"connectrpc.com/connect"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
 )
 
@@ -115,11 +114,7 @@ func Newf(code connect.Code, detailCode, format string, args ...any) *connect.Er
 // for conditions the caller may retry that are not unavailable (such as
 // failed_precondition file_in_use).
 func NewRetryable(code connect.Code, detailCode, msg string) *connect.Error {
-	err := connect.NewError(code, errors.New(msg))
-	if d, derr := connect.NewErrorDetail(&tunnelv1.ErrorDetail{Code: detailCode, Retryable: true}); derr == nil {
-		err.AddDetail(d)
-	}
-	return err
+	return rpcconv.NewRetryableError(code, detailCode, msg)
 }
 
 // mapping is the Connect error an errno maps to.

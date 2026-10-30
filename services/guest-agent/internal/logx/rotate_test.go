@@ -114,10 +114,10 @@ func TestRotatingFileKeepOne(t *testing.T) {
 	}
 }
 
-func TestRotatingFileRenameFailure(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root ignores directory permissions")
-	}
+// testRotationBlocked checks a rotation whose renames fail: block makes
+// every rename in dir fail until the returned unblock is called.
+func testRotationBlocked(t *testing.T, block func(t *testing.T, dir string) (unblock func())) {
+	t.Helper()
 	dir := t.TempDir()
 	w, err := NewRotatingFile(dir, "agent.log", 40, 3)
 	if err != nil {
@@ -125,15 +125,9 @@ func TestRotatingFileRenameFailure(t *testing.T) {
 	}
 	defer func() { _ = w.Close() }()
 	writeLines(t, w, 0, 4)
-	// A read-only directory makes every rename fail, like a log file held
-	// open by a reader on Windows.
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatal(err)
-	}
+	unblock := block(t, dir)
 	writeLines(t, w, 4, 12)
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	unblock()
 	if got, want := logFiles(t, dir), []string{"agent.log"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("files = %v, want %v", got, want)
 	}
