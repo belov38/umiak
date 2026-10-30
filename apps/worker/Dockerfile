@@ -19,6 +19,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
 COPY packages/proto/package.json packages/proto/
 COPY packages/pve/package.json packages/pve/
+COPY packages/sdk-py/package.json packages/sdk-py/
 COPY packages/sdk-ts/package.json packages/sdk-ts/
 COPY apps/worker/package.json apps/worker/
 # Part of the workspace and the lockfile, but not of the worker closure.

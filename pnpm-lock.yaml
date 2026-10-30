@@ -444,6 +444,24 @@ importers:
         specifier: 1.15.6
         version: 1.15.6
 
+  packages/sdk-py:
+    devDependencies:
+      '@sbx/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+      '@sbx/core':
+        specifier: workspace:*
+        version: link:../core
+      '@sbx/db':
+        specifier: workspace:*
+        version: link:../db
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+
   packages/sdk-ts:
     dependencies:
       openapi-fetch:
