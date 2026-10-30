@@ -137,7 +137,15 @@ export function parseCheckLines(stdout: string): {
 					: { id, status: "FAIL", evidence: `status ${status}: ${evidence}` },
 			);
 		} else if (line.startsWith("TOOLS ")) {
-			tools = JSON.parse(line.slice("TOOLS ".length));
+			try {
+				tools = JSON.parse(line.slice("TOOLS ".length));
+			} catch (err) {
+				checks.push({
+					id: "verify_sh_tools",
+					status: "FAIL",
+					evidence: `TOOLS line is not JSON: ${err instanceof Error ? err.message : String(err)}`,
+				});
+			}
 		}
 	}
 	return { checks, tools };
@@ -418,15 +426,16 @@ export function parseScan(r: {
 	);
 }
 
-/** Spec section 10 item 16: no recordfail in grubenv, or a recordfail that does not wait. */
+/**
+ * Spec section 10 item 16: the menu timeout grub.cfg uses after a failed boot (recordfail) is 0,
+ * whatever grubenv holds now (Ubuntu clears recordfail once a boot succeeds).
+ */
 const GRUB_SCRIPT = [
-	"env=$(grub-editenv /boot/grub/grubenv list 2>&1)",
-	"if grep -qx 'recordfail=1' <<<\"$env\"; then",
+	"env=$(grub-editenv /boot/grub/grubenv list 2>&1 | tr '\\n' ' ')",
 	'  t=$(awk \'/\\$\\{recordfail\\}" = 1/ { f = 1; next } f && /set timeout=/ { sub(/.*set timeout=/, ""); print; exit }\' /boot/grub/grub.cfg)',
-	'  if [ "$t" = 0 ]; then echo "CHECK grub_recordfail PASS recordfail=1, recordfail timeout $t"',
+	'if [ "$t" = 0 ]; then echo "CHECK grub_recordfail PASS recordfail timeout $t in grub.cfg; grubenv: $env"',
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: bash
-	'  else echo "CHECK grub_recordfail FAIL recordfail=1, recordfail timeout ${t:-unknown}"; fi',
-	'else echo "CHECK grub_recordfail PASS no recordfail in grubenv"; fi',
+	'else echo "CHECK grub_recordfail FAIL recordfail timeout ${t:-not found} in grub.cfg; grubenv: $env"; fi',
 ].join("\n");
 
 const FACTS_SCRIPT = [

@@ -874,3 +874,14 @@ describe("verifyTemplate with the tunnel connect check", () => {
 		expect(reg.calls.at(-1)).toBe(`unregister ${UUID_A}`);
 	});
 });
+
+describe("parseCheckLines: a broken TOOLS line", () => {
+	it("becomes a FAIL check instead of throwing", () => {
+		const r = parseCheckLines('CHECK os PASS 26.04\nTOOLS {"node": \n');
+		expect(r.tools).toEqual({});
+		expect(r.checks).toEqual([
+			{ id: "os", status: "PASS", evidence: "26.04" },
+			expect.objectContaining({ id: "verify_sh_tools", status: "FAIL" }),
+		]);
+	});
+});

@@ -210,7 +210,7 @@ async function cmdBuild(
 	let buildId: string | undefined;
 	const interrupt = trapSignals(
 		() =>
-			`exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run sbx-tpl cleanup`,
+			`exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run sbx-tpl cleanup (build VM, seed, lease) and, if verify had started, sbx-bench cleanup (verify clones and snapshot)`,
 	);
 	try {
 		const { cfg, api } = ctx;
@@ -371,7 +371,8 @@ async function main(argv: string[]): Promise<number> {
 			const o = connectOption(values);
 			const ctx = await makeContext({ node: m.node });
 			const interrupt = trapSignals(
-				() => "exiting without cleanup; run sbx-tpl cleanup",
+				() =>
+					"exiting without cleanup; run sbx-bench cleanup (verify clones and snapshot)",
 			);
 			try {
 				const ramGuard = new RamGuard({
