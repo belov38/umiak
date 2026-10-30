@@ -1,6 +1,9 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	PveApi,
@@ -285,3 +288,160 @@ describe("PveApi", () => {
 		expect((err as Error).message).toMatch(/unable to create VM 500/);
 	});
 });
+
+describe("PveApi.upload", () => {
+	async function serveRaw(
+		handler: (req: IncomingMessage, body: Buffer, res: ServerResponse) => void,
+	): Promise<string> {
+		server = createServer(
+			{ key: pvePki.key, cert: pvePki.cert },
+			(req, res) => {
+				const chunks: Buffer[] = [];
+				req.on("data", (c: Buffer) => chunks.push(c));
+				req.on("end", () => handler(req, Buffer.concat(chunks), res));
+			},
+		);
+		await new Promise<void>((r) => server?.listen(0, "127.0.0.1", r));
+		return `https://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	}
+
+	function tmpFile(data: Buffer): string {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-upload-"));
+		const p = join(dir, "file.bin");
+		writeFileSync(p, data);
+		return p;
+	}
+
+	it("streams multipart form data with the fields first and the file part last", async () => {
+		// Larger than one read chunk, with bytes that are not valid UTF-8.
+		const data = Buffer.alloc(300_000);
+		for (let i = 0; i < data.length; i++) data[i] = (i * 7) & 0xff;
+		const path = tmpFile(data);
+		let seen: { req: IncomingMessage; body: Buffer; type: string } | undefined;
+		const url = await serveRaw((req, body, res) => {
+			seen = { req, body, type: String(req.headers["content-type"]) };
+			json(res, 200, { data: "UPID:upload" });
+		});
+		const r = await api(url).upload(
+			"/nodes/pve/storage/local/upload",
+			{ content: "iso", checksum: "abc", "checksum-algorithm": "sha256" },
+			{ name: "sbx-seed-1.iso", path, size: data.length },
+		);
+		expect(r).toBe("UPID:upload");
+		if (!seen) throw new Error("no request");
+		expect(seen.req.method).toBe("POST");
+		expect(seen.req.url).toBe("/api2/json/nodes/pve/storage/local/upload");
+		expect(seen.req.headers.authorization).toBe("PVEAPIToken=sbx@pve!poc=sec");
+		expect(Number(seen.req.headers["content-length"])).toBe(seen.body.length);
+		const boundary = /^multipart\/form-data; boundary=(.+)$/.exec(
+			seen.type,
+		)?.[1];
+		expect(boundary).toBeTruthy();
+		const parts = splitMultipart(seen.body, String(boundary));
+		expect(parts.map((p) => p.headers)).toEqual([
+			'Content-Disposition: form-data; name="content"',
+			'Content-Disposition: form-data; name="checksum"',
+			'Content-Disposition: form-data; name="checksum-algorithm"',
+			'Content-Disposition: form-data; name="filename"; filename="sbx-seed-1.iso"\r\nContent-Type: application/octet-stream',
+		]);
+		expect(parts.slice(0, 3).map((p) => p.data.toString())).toEqual([
+			"iso",
+			"abc",
+			"sha256",
+		]);
+		expect(parts[3]?.data.equals(data)).toBe(true);
+	});
+
+	it("reports an error answer as PveApiError and does not retry", async () => {
+		let n = 0;
+		const url = await serveRaw((_req, _body, res) => {
+			n++;
+			json(res, 503, { data: null }, "storage busy");
+		});
+		const path = tmpFile(Buffer.from("x"));
+		const err = await api(url)
+			.upload(
+				"/nodes/pve/storage/local/upload",
+				{ content: "iso" },
+				{
+					name: "a.iso",
+					path,
+					size: 1,
+				},
+			)
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(PveApiError);
+		expect((err as PveApiError).status).toBe(503);
+		expect(n).toBe(1);
+	});
+
+	it("fails when the file size differs from the declared size", async () => {
+		const url = await serveRaw((_req, _body, res) =>
+			json(res, 200, { data: "UPID:x" }),
+		);
+		const path = tmpFile(Buffer.from("12345"));
+		await expect(
+			api(url).upload(
+				"/x/upload",
+				{ content: "iso" },
+				{
+					name: "a.iso",
+					path,
+					size: 4,
+				},
+			),
+		).rejects.toThrow(/size/);
+	});
+
+	it("rejects field and file names that would break the part headers", async () => {
+		const path = tmpFile(Buffer.from("x"));
+		await expect(
+			api("https://127.0.0.1:1").upload(
+				"/x",
+				{ 'a"b': "v" },
+				{
+					name: "a.iso",
+					path,
+					size: 1,
+				},
+			),
+		).rejects.toThrow(/name/);
+		await expect(
+			api("https://127.0.0.1:1").upload(
+				"/x",
+				{},
+				{
+					name: "a\r\n.iso",
+					path,
+					size: 1,
+				},
+			),
+		).rejects.toThrow(/name/);
+	});
+});
+
+/** Splits a multipart body into header blocks and data. */
+function splitMultipart(
+	body: Buffer,
+	boundary: string,
+): { headers: string; data: Buffer }[] {
+	const delim = Buffer.from(`--${boundary}`);
+	const parts: { headers: string; data: Buffer }[] = [];
+	let pos = body.indexOf(delim);
+	for (;;) {
+		const start = pos + delim.length;
+		if (body.subarray(start, start + 2).toString() === "--") break;
+		const next = body.indexOf(delim, start);
+		if (next < 0) throw new Error("unterminated multipart body");
+		// Part = CRLF headers CRLF CRLF data CRLF
+		const part = body.subarray(start + 2, next - 2);
+		const sep = part.indexOf("\r\n\r\n");
+		parts.push({
+			headers: part.subarray(0, sep).toString(),
+			data: part.subarray(sep + 4),
+		});
+		pos = next;
+	}
+	expect(body.subarray(pos).toString()).toBe(`--${boundary}--\r\n`);
+	return parts;
+}
