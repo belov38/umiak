@@ -453,7 +453,9 @@ describe("sandbox lifecycle", () => {
 		expect(t.stdout).toMatch(
 			new RegExp(`^Saving ${human} \\(snap_[^)]+\\): creating\\n`),
 		);
-		expect(t.stdout).toMatch(new RegExp(`${human} \\(snap_[^)]+\\): ready\\n$`));
+		expect(t.stdout).toMatch(
+			new RegExp(`${human} \\(snap_[^)]+\\): ready\\n$`),
+		);
 	});
 
 	it("templates, sizes and limits", async () => {

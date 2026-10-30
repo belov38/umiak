@@ -67,8 +67,7 @@ export function register(program: Command, run: Runner): void {
 						status: 0,
 						code: op.error?.code ?? `operation_${op.state}`,
 						message:
-							op.error?.message ??
-							`saving snapshot ${name} is ${op.state}`,
+							op.error?.message ?? `saving snapshot ${name} is ${op.state}`,
 						retryable: op.error?.retryable ?? false,
 						details: { operationId: op.id, kind: op.kind, state: op.state },
 					});
