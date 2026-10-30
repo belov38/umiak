@@ -70,6 +70,7 @@ export function registerFileRoutes(app: FakeApp, fake: Fake): void {
 		const info = await fs.stat(path, pathOptions(c));
 		if (!info) throw pathNotFound(path);
 		const data = await fs.read(path, pathOptions(c));
+		await fake.script.onFileRead?.({ sandboxId: sb.id, path });
 		const etag = `"${data.length}-${Math.floor(Date.parse(info.modifiedAt ?? "0"))}"`;
 		const lastModified = new Date(info.modifiedAt ?? 0).toUTCString();
 		const headers: Record<string, string> = {

@@ -67,6 +67,13 @@ export interface FakeScript {
 		code: string;
 		retryable: boolean;
 	};
+	/**
+	 * Called by GET /files/content after the file is read and before the
+	 * answer is sent: a test changes the file in between (a race with a reader
+	 * that read, then writes). Not cleared by the fake; the callback removes
+	 * itself when it should fire once.
+	 */
+	onFileRead?: (e: { sandboxId: string; path: string }) => void | Promise<void>;
 	/** Desktop routes answer like an API without S10: the plain 404. */
 	noDesktopRoutes?: boolean;
 	/** The next create ends in `error` with this error. */

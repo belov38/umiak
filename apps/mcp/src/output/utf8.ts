@@ -56,3 +56,32 @@ export function decodeUtf8Chunk(
 	const text = decoder.decode(bytes.subarray(start, bytes.length - endHold));
 	return { text, startSkip: start, endHold };
 }
+
+/** A decoded window `[from, to)` of a stream of `size` bytes. */
+export interface Window {
+	size: number;
+	from: number;
+	to: number;
+	text: string;
+}
+
+/**
+ * Decodes `bytes` that start at stream offset `offset`. Stray continuation
+ * bytes at the start are skipped (unless the window starts on a known
+ * boundary) and an unfinished character at the end is held back unless the
+ * stream ended, so `to` is always on a character boundary.
+ */
+export function decodeWindow(
+	bytes: Uint8Array,
+	offset: number,
+	size: number,
+	o: { atStart: boolean; final: boolean },
+): Window {
+	const d = decodeUtf8Chunk(bytes, o);
+	return {
+		size,
+		from: offset + d.startSkip,
+		to: offset + bytes.length - d.endHold,
+		text: d.text,
+	};
+}

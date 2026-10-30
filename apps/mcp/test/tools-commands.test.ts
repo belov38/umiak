@@ -92,7 +92,7 @@ describe("tool list", () => {
 			"exec_list",
 			"exec_kill",
 		]);
-		expect(ALL_TOOLS.slice(11).map((t) => t.name)).toEqual(
+		expect(ALL_TOOLS.slice(11, 16).map((t) => t.name)).toEqual(
 			COMMAND_TOOLS.map((t) => t.name),
 		);
 		const table: Record<string, [boolean, boolean, boolean, boolean]> = {

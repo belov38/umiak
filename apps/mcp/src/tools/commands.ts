@@ -17,7 +17,7 @@ import { splitBudget, truncationNote } from "../output/budget.ts";
 import { fenceUntrusted } from "../output/fence.ts";
 import { toolText } from "../output/result.ts";
 import { ByteTail } from "../output/tail.ts";
-import { decodeUtf8Chunk } from "../output/utf8.ts";
+import { decodeWindow, type Window } from "../output/utf8.ts";
 import { defineTool } from "../registry.ts";
 import {
 	keyFor,
@@ -101,35 +101,6 @@ function timeoutShape(description: string) {
 		.max(MAX_SECONDS)
 		.optional()
 		.describe(description);
-}
-
-/** A decoded window `[from, to)` of a stream of `size` bytes. */
-interface Window {
-	size: number;
-	from: number;
-	to: number;
-	text: string;
-}
-
-/**
- * Decodes `bytes` that start at stream offset `offset`. Stray continuation
- * bytes at the start are skipped (unless the window starts on a known
- * boundary) and an unfinished character at the end is held back unless the
- * stream ended, so `to` is always on a character boundary.
- */
-function decodeWindow(
-	bytes: Uint8Array,
-	offset: number,
-	size: number,
-	o: { atStart: boolean; final: boolean },
-): Window {
-	const d = decodeUtf8Chunk(bytes, o);
-	return {
-		size,
-		from: offset + d.startSkip,
-		to: offset + bytes.length - d.endHold,
-		text: d.text,
-	};
 }
 
 function streamView(w: Window, availableFrom?: number) {

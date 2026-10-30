@@ -62,6 +62,13 @@ export interface HarnessOptions {
 	server?: Partial<ServerOptions>;
 }
 
+/** JSON bodies parsed; other bodies (file contents) as their text. */
+function bodyOf(req: Request, text: string): unknown {
+	return (req.headers.get("content-type") ?? "").startsWith("application/json")
+		? JSON.parse(text)
+		: text;
+}
+
 export function answerOf(raw: CallToolResult): Answer {
 	const texts = raw.content.map((b) => (b.type === "text" ? b.text : ""));
 	let json: unknown;
@@ -95,7 +102,7 @@ export async function startHarness(o: HarnessOptions = {}): Promise<Harness> {
 			path: new URL(req.url).pathname,
 			query: new URL(req.url).searchParams,
 			headers: req.headers,
-			body: text === "" ? undefined : JSON.parse(text),
+			body: text === "" ? undefined : bodyOf(req, text),
 		});
 		return fetch(req);
 	};
