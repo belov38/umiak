@@ -1,8 +1,9 @@
 // `sbx mcp`: the MCP server over stdio (S11 §6.1, §8.8, §10.2). stdout
-// carries only JSON-RPC: the runner's rawData mode keeps errors on stderr,
-// and logs go to stderr or --log-file. The server starts without a login
-// (tools/list works) and every tool call then answers `not_logged_in`; the
-// config is read again on the next call, so `sbx login` in a terminal is
+// carries only JSON-RPC: the runner's protocol mode keeps every error on
+// stderr (even with --json), and logs go to stderr or --log-file. The
+// server starts without a login (tools/list works) and every tool call then
+// answers `not_logged_in`; the config is read again on the next call (also
+// after an API 401 to a stored key), so `sbx login` in a terminal is
 // enough. The process ends (exit 0) when the client closes stdin.
 
 import {
@@ -112,13 +113,26 @@ function pinnedSandbox(ctx: Context, ref: string): string {
 	return ref;
 }
 
-const NOT_LOGGED_IN_ERROR = () =>
-	new SbxError({
+/**
+ * A CLI login error as the tools report it: code not_logged_in (its hint
+ * says to run `sbx login` in a terminal), the CLI's own reason as the
+ * message (which profile, which API).
+ */
+function notLoggedIn(err: SbxError): SbxError {
+	return new SbxError({
 		status: 0,
 		code: NOT_LOGGED_IN,
-		message: "run `sbx login` in a terminal, then retry",
+		message: err.message,
 		retryable: false,
 	});
+}
+
+/** The hint of an API 401 that a new token does not fix. */
+export function unauthorizedHint(env: Record<string, string | undefined>) {
+	return nonEmpty(env.SBX_API_KEY) === undefined
+		? "run `sbx login` in a terminal, then retry."
+		: "the API rejected SBX_API_KEY: fix SBX_API_KEY in the MCP client config and restart the MCP server.";
+}
 
 /**
  * The SDK client of the server, made on first use; without a login every
@@ -129,12 +143,19 @@ function sbxFactory(
 	log: ReturnType<typeof createLogger>,
 ): () => Sbx {
 	let sbx: Sbx | undefined;
-	const creds = mcpCredentials((force) => ctx.bearer(force), ctx.fetch);
-	const loginError = (err: unknown): unknown => {
-		if (!(err instanceof SbxError) || !LOGIN_CODES.has(err.code)) return err;
+	// Read the config and the credential store again on the next call.
+	const forget = () => {
 		ctx.reload();
 		sbx = undefined;
-		return NOT_LOGGED_IN_ERROR();
+	};
+	const creds = mcpCredentials((force) => ctx.bearer(force), ctx.fetch, {
+		// A revoked or expired key: a new `sbx login` must be picked up.
+		onRejected: forget,
+	});
+	const loginError = (err: unknown): unknown => {
+		if (!(err instanceof SbxError) || !LOGIN_CODES.has(err.code)) return err;
+		forget();
+		return notLoggedIn(err);
 	};
 	return () => {
 		if (sbx !== undefined) return sbx;
@@ -175,6 +196,7 @@ async function serve(ctx: Context, o: McpOptions): Promise<number> {
 		sbx: sbxFactory(ctx, log),
 		...(s.toolsets === undefined ? {} : { toolsets: s.toolsets }),
 		readOnly: s.readOnly,
+		unauthorizedHint: unauthorizedHint(ctx.env),
 		...(s.pinnedSandbox === undefined
 			? {}
 			: { pinnedSandbox: s.pinnedSandbox }),
@@ -220,6 +242,7 @@ export function register(program: Command, run: Runner): void {
 		.action(
 			run(async (ctx, _args, opts) => serve(ctx, opts as McpOptions), {
 				rawData: true,
+				protocol: true,
 			}),
 		);
 }

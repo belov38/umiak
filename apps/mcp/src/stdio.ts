@@ -31,6 +31,8 @@ export interface StdioOptions {
 	readOnly?: boolean;
 	/** Sandbox id or slug (`self` is resolved by the caller). */
 	pinnedSandbox?: string;
+	/** Hint of an API 401 a new token does not fix; default: run `sbx login`. */
+	unauthorizedHint?: string;
 	log: Logger;
 	/** Default process.stdin / process.stdout (tests pass their own). */
 	stdin?: Readable;
@@ -159,6 +161,9 @@ export async function runStdio(o: StdioOptions): Promise<StdioServer> {
 				...(o.pinnedSandbox === undefined
 					? {}
 					: { pinnedSandbox: o.pinnedSandbox }),
+				...(o.unauthorizedHint === undefined
+					? {}
+					: { unauthorizedHint: o.unauthorizedHint }),
 				principal: await principal,
 				sbx: o.sbx,
 				transport: "stdio",

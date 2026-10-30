@@ -338,3 +338,32 @@ describe("every table row appears in the result text", () => {
 		expect(t).toContain("files:write");
 	});
 });
+
+describe("hints in pinned mode", () => {
+	it("name no hidden tool and no sandbox argument", () => {
+		expect(
+			hintFor("sandbox_not_ready", {
+				sandbox: "sb_1",
+				pinned: true,
+				details: {},
+			}),
+		).toBe("call sandbox_resume and retry.");
+		for (const code of ["not_found", "quota_exceeded"]) {
+			const h = hintFor(code, { pinned: true, details: {} }) ?? "";
+			expect(h).not.toMatch(
+				/sandbox_(list|create|fork|delete)|snapshot_delete|sandbox=/,
+			);
+		}
+		expect(
+			errorResult(
+				new SbxError({
+					status: 404,
+					code: "not_found",
+					message: "no such sandbox",
+					retryable: false,
+				}),
+				{ sandbox: "sb_1", pinned: true },
+			).content[0],
+		).toMatchObject({ text: expect.not.stringContaining("sandbox_list") });
+	});
+});

@@ -153,10 +153,13 @@ export async function resolveSandboxId(
 export function waitHint(
 	state: string,
 	target: WaitTarget,
+	pinned = false,
 ): string | undefined {
 	if (state === target) return undefined;
 	if (state === "error") {
-		return "the sandbox is in state error (see error): sandbox_recover reboots it, sandbox_delete removes it.";
+		return pinned
+			? "the sandbox is in state error (see error): sandbox_recover reboots it."
+			: "the sandbox is in state error (see error): sandbox_recover reboots it, sandbox_delete removes it.";
 	}
 	if (state === "deleting" || state === "deleted") {
 		return `the sandbox is ${state}; it cannot be used any more.`;
@@ -182,6 +185,8 @@ export interface ResultOptions {
 	idempotencyKey?: string;
 	/** Extra lines under the header. */
 	notes?: string[];
+	/** Pinned mode: the hint names no hidden tool. */
+	pinned?: boolean;
 }
 
 /**
@@ -214,7 +219,7 @@ export function sandboxResult(
 	}
 	const lines: string[] = [];
 	if (o.target !== undefined) {
-		const hint = waitHint(s.state, o.target);
+		const hint = waitHint(s.state, o.target, o.pinned === true);
 		if (hint !== undefined) lines.push(hint);
 		if (hint?.startsWith("state not final yet")) {
 			const id = o.operation?.id ?? s.activeOperation?.id;

@@ -799,6 +799,7 @@ describe("snapshot_save", () => {
 				};
 			},
 			sandbox: (ref) => ref,
+			pinned: false,
 			progress: async () => {},
 			cancelledByClient: () => false,
 			transport: "stdio",

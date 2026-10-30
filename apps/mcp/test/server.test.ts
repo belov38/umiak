@@ -200,6 +200,50 @@ describe.each(ERAS)("pinned mode (%s era)", (era) => {
 		}
 	});
 
+	it("error hints name no hidden tool and no sandbox argument", async () => {
+		const hidden = [
+			"sandbox_create",
+			"sandbox_list",
+			"sandbox_fork",
+			"sandbox_delete",
+			"snapshot_delete",
+			"sandbox=",
+		];
+		for (const code of ["sandbox_not_ready", "not_found", "quota_exceeded"]) {
+			const { conn, fake } = await setup({ pinnedSandbox: "sb_pinned" }, era);
+			fake.behaviour = async () => {
+				throw new SbxError({
+					status: code === "quota_exceeded" ? 403 : 409,
+					code,
+					message: code,
+					retryable: false,
+				});
+			};
+			const r = await conn.client.callTool({
+				name: "fake_get",
+				arguments: { path: "/a" },
+			});
+			const t = text(r);
+			expect(t).toContain(`error: ${code}`);
+			expect(t).toContain("hint: ");
+			for (const h of hidden) expect(t, code).not.toContain(h);
+		}
+		const { conn, fake } = await setup({ pinnedSandbox: "sb_pinned" }, era);
+		fake.behaviour = async () => {
+			throw new SbxError({
+				status: 409,
+				code: "sandbox_not_ready",
+				message: "stopped",
+				retryable: false,
+			});
+		};
+		const r = await conn.client.callTool({
+			name: "fake_get",
+			arguments: { path: "/a" },
+		});
+		expect(text(r)).toContain("hint: call sandbox_resume and retry.");
+	});
+
 	it("a hidden tool is an unknown tool (JSON-RPC error), never executed", async () => {
 		const { conn, fake } = await setup({ pinnedSandbox: "sb_pinned" }, era);
 		await expect(
@@ -555,6 +599,29 @@ describe("errors", () => {
 		expect(text(r)).toContain("retryable: false");
 		expect(text(r)).toContain("run `sbx login` in a terminal");
 		expect(text(r)).not.toContain("retry the call");
+	});
+
+	it("unauthorizedHint replaces the stdio 401 hint", async () => {
+		const { conn, fake } = await setup({
+			transport: "stdio",
+			unauthorizedHint: "fix SBX_API_KEY and restart the MCP server.",
+		});
+		fake.behaviour = async () => {
+			throw new SbxError({
+				status: 401,
+				code: "api_key_expired",
+				message: "expired",
+				retryable: false,
+			});
+		};
+		const r = await conn.client.callTool({
+			name: "fake_get",
+			arguments: { sandbox: "sb_1", path: "/" },
+		});
+		expect(text(r)).toContain(
+			"hint: fix SBX_API_KEY and restart the MCP server.",
+		);
+		expect(text(r)).toContain("retryable: false");
 	});
 
 	it("an unknown error is logged with its stack, without arguments, and answered internal", async () => {

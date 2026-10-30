@@ -15,6 +15,8 @@ export interface ToolContext {
 	call: { signal: AbortSignal; retryBudgetMs: number };
 	/** The pinned sandbox in pinned mode, else `ref`. */
 	sandbox(ref: string): string;
+	/** Pinned mode (`sbx mcp --sandbox`): answers must not name hidden tools. */
+	pinned: boolean;
 	/** `notifications/progress`; a no-op when the request has no progressToken. Never throws. */
 	progress(progress: number, total?: number, message?: string): Promise<void>;
 	/** stdio: the client sent notifications/cancelled for this request (not a stdin close). */
@@ -76,6 +78,7 @@ export function createToolContext({
 			};
 		},
 		sandbox: (ref) => o.pinnedSandbox ?? ref,
+		pinned: o.pinnedSandbox !== undefined,
 		async progress(progress, total, message) {
 			const progressToken = req.mcpReq._meta?.progressToken;
 			if (progressToken === undefined) return;

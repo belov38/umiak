@@ -1,4 +1,5 @@
 // Catalog and sandbox lifecycle tools (S11 8.1, 8.2) against the fake API.
+
 import { Sbx } from "@sbx/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../src/context.ts";
@@ -14,6 +15,7 @@ import {
 	sandboxView,
 	waitSandbox,
 } from "../src/tools/index.ts";
+import { waitHint } from "../src/tools/sandbox-view.ts";
 import { sandboxCreate } from "../src/tools/sandboxes.ts";
 import { FAKE_TOKENS } from "./fake-api/index.ts";
 import { type Harness, startHarness } from "./helpers/harness.ts";
@@ -504,6 +506,7 @@ function shortContext(
 			};
 		},
 		sandbox: (ref) => ref,
+		pinned: false,
 		progress: async () => {},
 		cancelledByClient: () => false,
 		transport: "stdio",
@@ -1231,5 +1234,14 @@ describe("sandboxView", () => {
 			"created_at",
 		]);
 		expect(view.labels).toEqual({ "created-via": "mcp", a: "b" });
+	});
+});
+
+describe("waitHint", () => {
+	it("pinned: state error names sandbox_recover, not the hidden sandbox_delete", () => {
+		expect(waitHint("error", "ready")).toContain("sandbox_delete");
+		const pinned = waitHint("error", "ready", true) ?? "";
+		expect(pinned).toContain("sandbox_recover");
+		expect(pinned).not.toContain("sandbox_delete");
 	});
 });

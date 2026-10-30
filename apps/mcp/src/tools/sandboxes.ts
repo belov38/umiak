@@ -107,6 +107,7 @@ async function finishAction(
 			? {}
 			: { sourceOperation: answer.sourceOperation }),
 		target: o.target,
+		pinned: ctx.pinned,
 		...(o.replayed === undefined ? {} : { replayed: o.replayed }),
 		...(o.idempotencyKey === undefined
 			? {}
@@ -309,7 +310,10 @@ export const sandboxGet = defineTool({
 			args.wait_for,
 			ctx.deadline.waitMs(args.wait_seconds ?? GET_WAIT_SECONDS),
 		);
-		return sandboxResult(sandbox, { target: args.wait_for });
+		return sandboxResult(sandbox, {
+			target: args.wait_for,
+			pinned: ctx.pinned,
+		});
 	},
 });
 

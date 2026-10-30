@@ -6,14 +6,13 @@
 //   the current token itself was rejected: when several calls fail with the
 //   same expired token, the first one refreshes and the others take the new
 //   token. The fetch wrapper tells which token a 401 was for.
+// - Any other 401 to the current token (a revoked or expired key) is not
+//   refreshed by the SDK: `onRejected` lets the command drop its cached
+//   credentials, so a new `sbx login` is used by the next call.
 
+import type { FetchFn } from "@sbx/mcp";
 import type { Bearer } from "../auth/token.ts";
 import type { Fetch } from "../http.ts";
-
-export type FetchFn = (
-	input: RequestInfo | URL,
-	init?: RequestInit,
-) => Promise<Response>;
 
 export interface McpCredentials {
 	/** The SDK's tokenProvider. */
@@ -22,13 +21,28 @@ export interface McpCredentials {
 	fetch: FetchFn;
 }
 
-function authorizationOf(req: Request): string | null {
-	return req.headers.get("authorization");
+export interface McpCredentialsOptions {
+	/** The api answered 401 (not token_expired) to the current token. */
+	onRejected?: () => void;
+}
+
+/** `error.code` of an api error body; undefined when it has none. */
+async function errorCode(res: Response): Promise<string | undefined> {
+	try {
+		const body = (await res.clone().json()) as {
+			error?: { code?: unknown };
+		};
+		const code = body?.error?.code;
+		return typeof code === "string" ? code : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 export function mcpCredentials(
 	bearer: (force: boolean) => Promise<Bearer>,
 	f: Fetch,
+	o: McpCredentialsOptions = {},
 ): McpCredentials {
 	let pending: Promise<Bearer> | undefined;
 	let current: string | undefined;
@@ -64,7 +78,7 @@ export function mcpCredentials(
 				input instanceof Request && init === undefined
 					? input
 					: new Request(input, init);
-			const auth = authorizationOf(req);
+			const auth = req.headers.get("authorization");
 			const res = await f(req);
 			if (
 				res.status === 401 &&
@@ -72,6 +86,7 @@ export function mcpCredentials(
 				auth === `Bearer ${current}`
 			) {
 				currentRejected = true;
+				if ((await errorCode(res)) !== "token_expired") o.onRejected?.();
 			}
 			return res;
 		},

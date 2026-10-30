@@ -35,6 +35,8 @@ export class ToolError extends Error {
 export interface HintContext {
 	/** Sandbox id (sb_...) the call was about, if any. */
 	sandbox?: string;
+	/** The server is pinned to one sandbox: no `sandbox` argument, no create/list/delete tools. */
+	pinned?: boolean;
 	details: Record<string, unknown>;
 }
 
@@ -69,10 +71,12 @@ function validationHint(details: Record<string, unknown>): string {
 
 /** Advice for the model by error code; undefined when there is none. */
 export function hintFor(code: string, ctx: HintContext): string | undefined {
-	const { sandbox, details } = ctx;
+	const { sandbox, details, pinned } = ctx;
 	switch (code) {
 		case "sandbox_not_ready":
-			return `call sandbox_resume with sandbox="${sandbox ?? "sb_..."}" and retry.`;
+			return pinned
+				? "call sandbox_resume and retry."
+				: `call sandbox_resume with sandbox="${sandbox ?? "sb_..."}" and retry.`;
 		case "sandbox_starting":
 			return `the sandbox is still starting; retry in ${retryIn(details)}.`;
 		case "agent_unavailable":
@@ -100,11 +104,15 @@ export function hintFor(code: string, ctx: HintContext): string | undefined {
 				? "set confirm to the id of the sandbox (or the name of the snapshot) you delete."
 				: `set confirm="${sandbox}" (the id of the sandbox to delete) and call again.`;
 		case "quota_exceeded":
-			return "call limits_get to see the quota, then sandbox_stop the sandboxes you no longer need.";
+			return pinned
+				? "call limits_get to see the quota; the team must stop sandboxes it no longer needs."
+				: "call limits_get to see the quota, then sandbox_stop the sandboxes you no longer need.";
 		case "path_not_found":
 			return "call files_list on the parent directory to check the path.";
 		case "not_found":
-			return "check the id or name; sandbox_list shows the sandboxes of the team.";
+			return pinned
+				? "check the id or name; if the bound sandbox itself is gone, the MCP server must be restarted with another --sandbox."
+				: "check the id or name; sandbox_list shows the sandboxes of the team.";
 		case "validation":
 			return validationHint(details);
 		case "idempotency_key_reused":
@@ -210,6 +218,8 @@ export interface ErrorResultExtra {
 	idempotencyKey?: string;
 	/** Sandbox id the call was about, for hints. */
 	sandbox?: string;
+	/** Pinned mode: hints name no hidden tool and no `sandbox` argument. */
+	pinned?: boolean;
 }
 
 /** The tool result for an error: `key: value` lines, `isError: true`. */
@@ -222,6 +232,7 @@ export function errorResult(
 		fields.hint ??
 		hintFor(fields.code, {
 			...(extra.sandbox !== undefined ? { sandbox: extra.sandbox } : {}),
+			...(extra.pinned === true ? { pinned: true } : {}),
 			details: {
 				...(fields.retryAfterSeconds !== undefined
 					? { retryAfterSeconds: fields.retryAfterSeconds }

@@ -10,7 +10,7 @@ import {
 import { type Sbx, SbxError } from "@sbx/sdk";
 import { type ClientInfo, createToolContext } from "./context.ts";
 import { Deadline } from "./deadline.ts";
-import { errorResult, ToolError } from "./errors.ts";
+import { type ErrorResultExtra, errorResult, ToolError } from "./errors.ts";
 import { pinnedInstructions, SERVER_INSTRUCTIONS } from "./instructions.ts";
 import type { Logger } from "./log.ts";
 import { capResult } from "./output/result.ts";
@@ -42,6 +42,8 @@ export interface ServerOptions {
 	transport: "stdio" | "http";
 	log: Logger;
 	wasCancelledByClient?: (requestId: string | number) => boolean;
+	/** stdio: the hint of an API 401 (default: run `sbx login`). */
+	unauthorizedHint?: string;
 	/** HTTP: the API answered 401 during a call. */
 	onAuthFailure?: () => void;
 	/** HTTP concurrency limit: a release function, or null when no slot is free. */
@@ -126,7 +128,8 @@ function toCallError(
 			return new ToolError({
 				code: "unauthorized",
 				message: "the API rejected the credentials",
-				hint: "run `sbx login` in a terminal (or fix SBX_API_KEY), then retry.",
+				hint:
+					o.unauthorizedHint ?? "run `sbx login` in a terminal, then retry.",
 			});
 		}
 		o.onAuthFailure?.();
@@ -207,7 +210,10 @@ async function callTool(
 	};
 	if (sandbox !== undefined) fields.sandbox = sandbox;
 	if (typeof args.command_id === "string") fields.commandId = args.command_id;
-	const extra = sandbox === undefined ? {} : { sandbox };
+	const extra: ErrorResultExtra = {
+		...(sandbox === undefined ? {} : { sandbox }),
+		...(isPinned(o) ? { pinned: true } : {}),
+	};
 
 	let result: CallToolResult;
 	const release = o.acquireSlot === undefined ? () => {} : o.acquireSlot();
