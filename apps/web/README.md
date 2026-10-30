@@ -15,15 +15,71 @@ Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
 | `/app/t/<team>` | Team frame (S8 §9.3): team switcher, sections, operator links, user menu with sign-out. A team the user is not in: 403 page (operators may open any team). The page itself: sandboxes (§9.4), below. |
 | `/app/t/<team>` (page) | Sandboxes: `GET /v1/sandboxes` with search (`q`), state and `label=k=v` filters, infinite scroll over `nextCursor`; quota line from `GET /v1/limits`. Polled every 5 s while the tab is visible and refetched at once after an action. Transitional states with a spinner and `activeOperation.kind: step`, `error` red with its message, `degraded` with `healthReason`, a lock for a blocked sandbox. Row actions: Stop / Resume, Fork (→ the new sandbox page), Open terminal (`?tab=terminal`), Delete (type the slug; `Sbx-Confirm-Delete` = id). Blocked: Resume and Fork disabled. |
 | `/app/t/<team>/sandboxes/new` | Create (§9.5): template (enabled ones only), size (`allowedSizes`, the quota reason from `/v1/limits`), from a saved snapshot, name, slug (checked live), environment (team default → field omitted, a name, `none` → `environment: null`), labels, env, secrets (`type=password` with a show toggle), secret files (read into memory as base64; name, mode, link path), TTL and idle-stop (platform default → omitted, `none` → `null`). `POST /v1/sandboxes` through the SDK (Idempotency-Key), then the sandbox page. `quota_exceeded`, `out_of_capacity` (with "Try again"), `slug_taken`, `template_unavailable` as text at the form. The URL carries only `template`, `size`, `snapshot` (`newSandboxHref`/`parsePrefill`); inputs have no `name`, so a submit before hydration sends nothing. |
-| `/app/t/<team>/sandboxes/<slug>` | Header of the sandbox (name, slug, state, health, template, size, row actions); the tabs of §9.6 come with plan task 12. |
+| `/app/t/<team>/sandboxes/<slug>` | Sandbox page (§9.6), below. `<slug>` may also be an `sb_…` id (snapshot sources link by id; the URL then shows the slug). |
 | `/app/t/<team>/snapshots` | Saved snapshots (§9.7): `GET /v1/snapshots` (polled while one is creating or deleting), "Create sandbox" → the create form with the snapshot chosen, Delete (`sbx.snapshots.delete`, confirm). |
 | `/app/t/<team>/keys` | Team API keys (§9.8): `GET /v1/api-keys`; presets `read-only`/`ci`/`full` (`@sbx/auth/scopes`) or scopes by hand, lifetime 90 days by default, at most 365; the secret once in a dialog with copy, `export SBX_API_KEY=…` and `sbx login --key-stdin`; Rotate (new secret in the same dialog), Revoke. New and Rotate for owners, Revoke for owners and operators (§6.2). Marks "creator left the team" / "creator deactivated" (`createdBy.member`/`active`); the IdP-sync notice banner above (same loader as settings); revoked and expired keys collapsed at the bottom; the `sbx login` hint for people. |
 | `/app/t/<team>/settings` | Team (S8 §9.9): name (rename: owner, operator), members (email, name, role, "Not signed in yet", last sign-in), invite / role / remove (owner, operator), leave, quota and usage (`GET /v1/limits`), the IdP-sync notice banner (§9.8, §20.1) for owners and operators: "Revoke selected" (`DELETE /v1/api-keys/{key_…}` through the SDK), "Dismiss" (`acknowledgeNotice`, owners). |
 | `/app/teams/new` | New shared team: name → `createTeam` → the new team. |
 | `/app/account` | Profile (read-only), default team (`setDefaultTeam`), SSH keys (`GET/POST/DELETE /v1/ssh-keys`; `ssh_key_in_use` and unsupported types as text), sign-out with the `sbx login` hint. |
 
-Environments, the sandbox tabs and the operator section arrive with later
-tasks of the S8 plan.
+Environments and the operator section arrive with later tasks of the S8
+plan.
+
+## Sandbox page (S8 §9.6)
+
+`src/features/sandbox/*`; the tab is in `?tab=` and only the open tab is
+mounted, so leaving a tab (or the page) closes its streams and sockets.
+
+- **Live state** (`live.ts`, `use-sandbox.ts`): one loop per page with at
+  most one long-poll in flight: `GET /v1/sandboxes/{id}?waitFor=<every state
+  but the current>&waitSeconds=30` (none in `error`/`deleting`/`deleted`,
+  where the api answers at once); an operation started by a button
+  (`track(op)`) is awaited in the same loop (`waitForOperation`) and ends the
+  sandbox long-poll first. Plus a plain GET every 10 s for health and
+  activity. After the first answer everything uses the `sb_…` id.
+- **Header**: name, slug + rename (`PATCH slug`, then the URL follows),
+  state, health, activity, template/version, size, origin, labels,
+  TTL/deadline, idle stop; Stop/Resume, Fork (same idempotency slot as the
+  list), Recover (confirm), Extend, Save snapshot (name, warning when a ready
+  snapshot of that name is replaced), Delete (type the slug). Operation bar
+  (`kind`, `state · step`), error block with Recover. Blocked: lock, reason
+  banner; only Stop and Delete stay enabled, and the tabs disable writes.
+- **Terminal**: xterm.js 6 (`fit`, `web-links`, `search`), loaded with
+  `next/dynamic` (`ssr: false`), CSS from the package. Tabs = running PTYs
+  (`GET /commands?mode=pty&status=running`) plus new ones (`POST /ptys`);
+  the open tab attaches with `tailBytes=65536` through `sb.connectPty`
+  (WebSocket `/api/v1/sandboxes/{sb}/ptys/{cmd}/connect?team=…`,
+  `sbx.pty.v1`). The SDK reconnects by offset; `src/lib/ws.ts` (the
+  browser WebSocket factory: subprotocols only) reports socket closes for the
+  "Reconnecting…" bar. Final errors (`4409`, `4503` after retries, `4401`,
+  `4404`, `4416`) get text and, where it helps, "Reconnect". Detach keeps the
+  shell (ended by the agent after 10 min without a client); Close kills it.
+- **Commands**: table with status filter and pages; Run command
+  (`sb.start`, detached, Idempotency-Key kept across a manual retry with an
+  unknown outcome); output in a read-only xterm via `cmd.follow` (from the
+  start, or the last 1 MiB per stream for long output), stderr red,
+  stdout/stderr filter, `truncated` and the exit as dim lines; Download of up
+  to 4 MiB from an offset (`/output?…&team=`, default the last 4 MiB);
+  Signal and Kill while running.
+- **Files**: `GET /files/list` with pages, breadcrumbs, `..`, hidden files;
+  preview of files ≤ 1 MiB (`Range: bytes=0-1048575`) as text in `<pre>`,
+  binary or larger → download only; download links
+  `/api/v1/sandboxes/{id}/files/content?path=…&team=…`; upload by button or
+  drop (≤ 64 MiB one `PUT /files/content`, larger `sb.files.upload` in
+  chunks with progress and cancel; folders → hint to use the CLI); new
+  folder, move/rename, delete (recursive for folders, confirmed).
+- **Ports**: hosted and listening; publish/change (`access`
+  token/sso/public, `hostRewrite`), the token and `urlWithToken` once in a
+  dialog that closes only through "I have copied it" (also after Rotate);
+  Unpublish; a blocked port shows the lock and keeps its buttons disabled;
+  `403 public_disabled` → hint at the form and `public` disabled.
+- **SSH**: command, `known_hosts` lines, `hasKeys: false` → link to
+  `/app/account` and the `sbx ssh` hint.
+- **Env**: env with values, secret names with `•••` (values are never
+  fetched), secret files; every change is one key through `PATCH /env`
+  (merge); `delivered: false` → "applies at the next start".
+- **Desktop**: only for templates with the `desktop` capability; a
+  placeholder until S10.
 
 ## Server actions (S8 §9.11)
 
@@ -117,7 +173,10 @@ the SDK default is 60 s), so a missing api shows "API unavailable" quickly.
   from handlers and transitions: an exception becomes a toast, not the error
   boundary or an unhandled rejection; nothing is logged (bodies may hold
   secrets).
-- Query keys: `["sandboxes", team, …]`, `["limits", team]`,
+- Query keys: `["sandboxes", team, …]` (the page: `["sandboxes", team,
+  "one", ref]`), `["commands", team, sb]`, `["ptys", team, sb]`,
+  `["files", team, sb, …]`, `["ports", team, sb]`, `["env", team, sb]`,
+  `["ssh", team, sb]`, `["limits", team]`,
   `["snapshots", team]`, `["api-keys", team]`, `["templates", team]`,
   `["sizes", team]`, `["environments", team]`.
 

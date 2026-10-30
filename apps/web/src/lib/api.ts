@@ -12,9 +12,10 @@ import {
 	useContext,
 	useState,
 } from "react";
+import { API_BASE_URL } from "./api-base";
+import { browserWebSocket } from "./ws";
 
-/** The api behind oauth2-proxy on the same origin (`/api/*` → api, S8 §5.1). */
-export const API_BASE_URL = "/api";
+export { API_BASE_URL };
 
 /**
  * Retry budget of a dashboard request (the SDK default is 60 s): a person
@@ -41,6 +42,7 @@ export function sbxForTeam(teamId: string): Sbx {
 		env: {},
 		userAgent: "sbx-web",
 		retryBudgetMs: DASHBOARD_RETRY_BUDGET_MS,
+		webSocket: browserWebSocket,
 	});
 }
 

@@ -86,6 +86,25 @@ const SBX_ALLOWED = new Set([
 const FILE_NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
+/** Why an env or secret name is not valid (S7 §8.3), or null. */
+export function envKeyProblem(key: string): string | null {
+	if (key === "") return "Name is missing";
+	if (!ENV_KEY_RE.test(key)) {
+		return "Letters, digits and _, not starting with a digit, up to 128 characters";
+	}
+	if (key.startsWith("SBX_") && !SBX_ALLOWED.has(key)) {
+		return "The SBX_ prefix is reserved";
+	}
+	return null;
+}
+
+/** A secret file name the API accepts (S7 §8.3), or the problem. */
+export function secretFileNameProblem(name: string): string | null {
+	return FILE_NAME_RE.test(name)
+		? null
+		: "Letters, digits, '.', '_' and '-', up to 128 characters";
+}
+
 /** Why the slug is not valid, or null (the API also refuses reserved words). */
 export function slugProblem(s: string): string | null {
 	if (s.length < 3 || s.length > 40) return "3 to 40 characters";
@@ -142,13 +161,9 @@ function envSet(
 		if (isBlank(r)) return;
 		const key = r.key.trim();
 		const at = `${field}.${i}`;
-		if (key === "") errors[at] = "Name is missing";
-		else if (!ENV_KEY_RE.test(key)) {
-			errors[at] =
-				"Letters, digits and _, not starting with a digit, up to 128 characters";
-		} else if (key.startsWith("SBX_") && !SBX_ALLOWED.has(key)) {
-			errors[at] = "The SBX_ prefix is reserved";
-		} else if (key in out) errors[at] = "Duplicate name";
+		const problem = envKeyProblem(key);
+		if (problem !== null) errors[at] = problem;
+		else if (key in out) errors[at] = "Duplicate name";
 		else {
 			out[key] = r.value;
 			n++;

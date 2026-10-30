@@ -1,0 +1,102 @@
+"use client";
+// A small dialog with a form: fields as children, one submit button. The
+// submit handler resolves to true when done (the dialog closes).
+import { type FormEvent, type ReactNode, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+
+export function FormDialog({
+	open,
+	onOpenChange,
+	title,
+	description,
+	submitLabel,
+	submitDisabled,
+	destructive,
+	onSubmit,
+	children,
+}: {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	title: string;
+	description?: ReactNode;
+	submitLabel: string;
+	submitDisabled?: boolean;
+	destructive?: boolean;
+	onSubmit: () => Promise<boolean>;
+	children?: ReactNode;
+}) {
+	const [busy, setBusy] = useState(false);
+	const submit = async (e: FormEvent) => {
+		e.preventDefault();
+		if (busy || submitDisabled) return;
+		setBusy(true);
+		try {
+			if (await onSubmit()) onOpenChange(false);
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
+			<DialogContent>
+				<form method="post" onSubmit={submit} className="grid gap-4">
+					<DialogHeader>
+						<DialogTitle>{title}</DialogTitle>
+						{description && (
+							<DialogDescription>{description}</DialogDescription>
+						)}
+					</DialogHeader>
+					{children}
+					<DialogFooter>
+						<DialogClose asChild>
+							<Button type="button" variant="outline" disabled={busy}>
+								Cancel
+							</Button>
+						</DialogClose>
+						<Button
+							type="submit"
+							variant={destructive ? "destructive" : "default"}
+							disabled={busy || submitDisabled}
+						>
+							{submitLabel}
+						</Button>
+					</DialogFooter>
+				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+/** A labelled field of a form dialog, with an optional error. */
+export function Field({
+	label,
+	error,
+	hint,
+	children,
+}: {
+	label: string;
+	error?: string | null | undefined;
+	hint?: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		// biome-ignore lint/a11y/noLabelWithoutControl: the control is the child
+		<label className="grid gap-1 text-sm">
+			<span className="font-medium">{label}</span>
+			{children}
+			{hint && !error && (
+				<span className="text-xs text-muted-foreground">{hint}</span>
+			)}
+			{error && <span className="text-xs text-destructive">{error}</span>}
+		</label>
+	);
+}

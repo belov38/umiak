@@ -2,9 +2,7 @@
 // The secret of a new or rotated team key, shown once (S8 §9.8): copy
 // button and the two ways to use it. The secret lives only in the state of
 // the keys page and is dropped when this dialog closes.
-import { CheckIcon, CopyIcon } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
+import { CopyButton } from "@/components/app/copy-button";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -20,29 +18,6 @@ export interface ShownSecret {
 	keyName: string;
 	secret: string;
 	rotated: boolean;
-}
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-	const [copied, setCopied] = useState(false);
-	return (
-		<Button
-			type="button"
-			size="icon-sm"
-			variant="ghost"
-			aria-label={label}
-			onClick={async () => {
-				try {
-					await navigator.clipboard.writeText(text);
-					setCopied(true);
-					setTimeout(() => setCopied(false), 1500);
-				} catch {
-					toast.error("Could not copy: select the text and copy it yourself.");
-				}
-			}}
-		>
-			{copied ? <CheckIcon /> : <CopyIcon />}
-		</Button>
-	);
 }
 
 export function SecretDialog({

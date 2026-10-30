@@ -6,8 +6,7 @@ import type { SandboxData } from "@sbx/sdk";
 import { useQueryClient } from "@tanstack/react-query";
 import { EllipsisIcon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,11 +18,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSbx } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
-import { describeError } from "@/lib/errors";
-import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
 import { canDelete, canFork, canResume, canStop } from "@/lib/sandboxes";
 import { DeleteSandboxDialog } from "./delete-dialog";
 import { sandboxHref } from "./links";
+import { useFork } from "./use-fork";
 
 /** Refreshes what an action on a sandbox changes. */
 export function useRefreshSandboxes(teamId: string) {
@@ -44,11 +42,9 @@ export function RowActions({
 	sandbox: SandboxData;
 }) {
 	const sbx = useSbx(teamId);
-	const router = useRouter();
 	const refresh = useRefreshSandboxes(teamId);
 	const [busy, setBusy] = useState(false);
 	const [deleting, setDeleting] = useState(false);
-	const forkKey = useRef<IdempotencySlot | null>(null);
 	const path = { params: { path: { sandbox: sandbox.id } } };
 
 	const run = async <T,>(
@@ -74,31 +70,14 @@ export function RowActions({
 				sbx.raw.POST("/v1/sandboxes/{sandbox}/resume", { ...path, body: {} }),
 			`Resuming ${sandbox.slug}`,
 		);
+	const forkNow = useFork(teamId, sandbox, refresh);
 	const fork = async () => {
-		const body = {};
-		// One key per source sandbox and body until the outcome is known, so
-		// a second click after a lost answer cannot make a second copy.
-		const slot = slotFor(forkKey.current, { sandbox: sandbox.id, body });
 		setBusy(true);
-		let slug: string;
 		try {
-			const { data } = await sbx.raw.POST("/v1/sandboxes/{sandbox}/fork", {
-				...path,
-				body,
-				idempotencyKey: slot.key,
-			});
-			forkKey.current = slotAfter(slot, undefined);
-			slug = data.sandbox.slug;
-		} catch (e) {
-			forkKey.current = slotAfter(slot, e);
-			toast.error(describeError(e).message);
-			return;
+			await forkNow();
 		} finally {
 			setBusy(false);
-			await attempt(refresh);
 		}
-		toast.success(`Forking ${sandbox.slug} into ${slug}`);
-		router.push(sandboxHref(teamId, slug));
 	};
 
 	return (
