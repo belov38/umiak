@@ -24,7 +24,10 @@ export interface RouteTarget {
 	appProtocol: PortAppProtocol;
 	/** Port or sandbox blocked by an operator (S8). S7 adds `public_disabled`. */
 	blocked: boolean;
-	/** The sandbox's reason when the sandbox is blocked, else the port's; null unless blocked. */
+	/**
+	 * The port's reason when the port is blocked, else the sandbox's (S8
+	 * §17.2 S4: port, sandbox, public_disabled in this order); null unless blocked.
+	 */
 	blockReason: string | null;
 }
 
@@ -68,8 +71,8 @@ export async function lookupRoute(
 		`SELECT s.id AS sandbox_id, s.slug, s.machine_id, s.state, s.team_id,
 		        hp.port, hp.mode, hp.token_hash, hp.auth_epoch, hp.host_rewrite, hp.app_protocol,
 		        (s.blocked OR hp.blocked) AS blocked,
-		        CASE WHEN s.blocked THEN s.block_reason
-		             WHEN hp.blocked THEN hp.block_reason END AS block_reason
+		        CASE WHEN hp.blocked THEN hp.block_reason
+		             WHEN s.blocked THEN s.block_reason END AS block_reason
 		 FROM runtime.sandboxes s
 		 JOIN runtime.hosted_ports hp ON hp.sandbox_id = s.id AND hp.deleted_at IS NULL
 		 WHERE s.slug = $1 AND hp.port = $2 AND s.state <> 'deleted'`,

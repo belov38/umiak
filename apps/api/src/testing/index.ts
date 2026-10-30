@@ -12,7 +12,7 @@ import { SessionResolver } from "../auth/principal.ts";
 import { RateLimits } from "../auth/rate-limit.ts";
 import { DEFAULT_COMMAND_TIMINGS } from "../commands/attach.ts";
 import { DEFAULT_PTY_TIMINGS } from "../commands/pty-socket.ts";
-import { StreamRegistry } from "../commands/registry.ts";
+import { blockedSandboxesOf, StreamRegistry } from "../commands/registry.ts";
 import type { ApiDeps } from "../deps.ts";
 import { createApiLogger } from "../http/logger.ts";
 import { ApiMetrics } from "../http/metrics.ts";
@@ -162,6 +162,9 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 				identity,
 				events: identityEvents,
 				maxPerPrincipal: settings.maxStreams,
+				...(pool === null
+					? {}
+					: { blockedSandboxes: blockedSandboxesOf(pool) }),
 				log,
 			}),
 		commandTimings: { ...DEFAULT_COMMAND_TIMINGS },

@@ -133,6 +133,8 @@ export async function ptyTarget(
 	deps: ApiDeps,
 	p: Principal,
 	params: { sandbox: string; command: string },
+	/** The sandbox once known, before the block check (StreamHandle.bindSandbox). */
+	onSandbox?: (sandboxId: string) => void,
 ): Promise<{ command: Command; machineId: string }> {
 	const command = await deps.svc.getCommand(
 		p,
@@ -140,6 +142,7 @@ export async function ptyTarget(
 		resolveCommandRef(params.command),
 	);
 	if (command.mode !== "pty") throw notFoundError("pty");
+	onSandbox?.(command.sandboxId);
 	const { machineId } = await deps.svc.resolveAgentTarget(
 		p,
 		command.sandboxId,
@@ -166,6 +169,8 @@ export interface PtyConnection {
 	closed: AbortSignal;
 	/** Leaves the StreamRegistry (idempotent). */
 	unregister(): void;
+	/** Ties the registry entry to the sandbox: a block closes the socket (S8 C3). */
+	bindSandbox?(sandboxId: string): void;
 }
 
 type ErrorInfo = Pick<
@@ -287,7 +292,7 @@ export async function runPtySocket(
 
 	let target: { command: Command; machineId: string };
 	try {
-		target = await ptyTarget(deps, conn.auth.principal, conn);
+		target = await ptyTarget(deps, conn.auth.principal, conn, conn.bindSandbox);
 		// tailBytes wins over offset and never resolves past the end.
 		if (conn.tailBytes === undefined && (conn.offset ?? 0) > 0) {
 			await checkStreamOffsets(
@@ -384,7 +389,7 @@ export async function runPtySocket(
 							code: f.code,
 							message: f.message,
 							retryable: f.retryable,
-							details: {},
+							details: f.details ?? {},
 						},
 						f.ptyOffset ?? offset,
 					);

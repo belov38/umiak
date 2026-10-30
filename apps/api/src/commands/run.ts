@@ -223,8 +223,17 @@ export function startCommand(
 	body: StartCommandBody,
 	idemKey?: string,
 	signal?: AbortSignal,
+	onSandbox?: (sandboxId: string) => void,
 ): Promise<StartedCommand> {
-	return startPlanned(deps, auth, ref, commandPlan(body), idemKey, signal);
+	return startPlanned(
+		deps,
+		auth,
+		ref,
+		commandPlan(body),
+		idemKey,
+		signal,
+		onSandbox,
+	);
 }
 
 /** `startCommand` of any plan (commands, PTYs). */
@@ -235,12 +244,15 @@ export async function startPlanned(
 	plan: StartPlan,
 	idemKey?: string,
 	signal?: AbortSignal,
+	/** The sandbox once resolved, before the block check (StreamHandle.bindSandbox). */
+	onSandbox?: (sandboxId: string) => void,
 ): Promise<StartedCommand> {
 	const p = auth.principal;
 	const svc = deps.svc;
 	const sandbox = await waitUntilReady(deps, p, ref, signal, (s) =>
 		svc.touchApiActivity(s.id),
 	);
+	onSandbox?.(sandbox.id);
 	// Exec and PTYs are refused on a blocked sandbox (S8 C3; core checks too).
 	const { machineId } = await svc.resolveAgentTarget(p, sandbox.id, {
 		write: true,

@@ -487,6 +487,11 @@
 					"code": {
 						"type": "string"
 					},
+					"details": {
+						"additionalProperties": {},
+						"description": "Only on some errors: `forbidden` after an operator blocked the sandbox has `reason: sandbox_blocked`",
+						"type": "object"
+					},
 					"message": {
 						"type": "string"
 					},

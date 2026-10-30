@@ -112,7 +112,11 @@ export interface FindSandboxOptions {
 	/**
 	 * The caller changes the sandbox or works in its guest: a sandbox blocked
 	 * by an operator is `forbidden` (`sandbox_blocked`) unless the principal
-	 * is an operator (S8 C3).
+	 * is an operator (S8 C3). Inside a transaction with `lock` the check is
+	 * exact. Without a lock (the api's agent paths: files, command input,
+	 * PTYs) it is best-effort: a block that commits between this read and
+	 * the agent call lets that one in-flight call through; open streams are
+	 * closed by the block's NOTIFY.
 	 */
 	write?: boolean;
 }

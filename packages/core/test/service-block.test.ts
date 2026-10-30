@@ -204,6 +204,39 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			expect(await events(t.pool, s.sandboxId, "unblocked")).toHaveLength(1);
 		});
 
+		it("block notifies sbx_ssh_revoke '' (recheck SSH) and sbx_identity 'sandboxes:<id>' (api streams); unblock and port blocks do not", async () => {
+			const env = await serviceEnv(t.pool);
+			const s = await seedSandbox(t.pool, env, { state: "ready" });
+			await env.svc.hostPort(env.p, s.sandboxId, 3000, "token");
+			const op = operator();
+			const listener = new pg.Client({ connectionString: t.url });
+			await listener.connect();
+			const notes: string[] = [];
+			listener.on("notification", (n) => {
+				notes.push(`${n.channel}=${n.payload ?? ""}`);
+			});
+			await listener.query("LISTEN sbx_ssh_revoke");
+			await listener.query("LISTEN sbx_identity");
+			const want = [`sbx_ssh_revoke=`, `sbx_identity=sandboxes:${s.sandboxId}`];
+			try {
+				await env.svc.blockPort(op, s.sandboxId, 3000, { reason: "abuse" });
+				await env.svc.block(op, s.sandboxId, { reason: "abuse" });
+				for (const end = Date.now() + 10_000; notes.length < 2; ) {
+					if (Date.now() > end) break;
+					await new Promise((r) => setTimeout(r, 20));
+				}
+				expect(notes.sort()).toEqual([...want].sort());
+				// A repeat with the same reason changes nothing and sends nothing.
+				await env.svc.block(op, s.sandboxId, { reason: "abuse" });
+				await env.svc.unblock(op, s.sandboxId);
+				await env.svc.unblockPort(op, s.sandboxId, 3000);
+				await new Promise((r) => setTimeout(r, 200));
+				expect(notes).toHaveLength(2);
+			} finally {
+				await listener.end();
+			}
+		});
+
 		it("NOTIFY sbx_routes with the slug on block and on unblock", async () => {
 			const env = await serviceEnv(t.pool);
 			const s = await seedSandbox(t.pool, env, { state: "ready" });
@@ -396,7 +429,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			);
 		});
 
-		it("routes.lookup: blocked with the sandbox's reason over the port's", async () => {
+		it("routes.lookup: blocked; the port's reason first, then the sandbox's (S8 §17.2 S4)", async () => {
 			const env = await serviceEnv(t.pool);
 			const s = await seedSandbox(t.pool, env, { state: "ready" });
 			await env.svc.hostPort(env.p, s.sandboxId, 3000, "public");
@@ -411,13 +444,19 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 				blocked: true,
 				blockReason: "operator",
 			});
+			// Both blocked: the port's reason wins.
 			await env.svc.block(op, s.sandboxId, { reason: "abuse" });
+			expect(await lookupRoute(t.pool, label)).toMatchObject({
+				blocked: true,
+				blockReason: "operator",
+			});
+			// Only the sandbox blocked: its reason.
+			await env.svc.unblockPort(op, s.sandboxId, 3000);
 			expect(await lookupRoute(t.pool, label)).toMatchObject({
 				blocked: true,
 				blockReason: "abuse",
 			});
 			await env.svc.unblock(op, s.sandboxId);
-			await env.svc.unblockPort(op, s.sandboxId, 3000);
 			expect(await lookupRoute(t.pool, label)).toMatchObject({
 				blocked: false,
 				blockReason: null,

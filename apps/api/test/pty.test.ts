@@ -5,8 +5,10 @@
 // duplicates, scrollback, refusals before the upgrade (HTTP with the error
 // envelope), close codes after it (4401/4404/4409/4503, 1000, 1012),
 // backpressure and ping.
+
+import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid, SCOPES } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import {
 	afterAll,
@@ -772,6 +774,48 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		expect((await again.refused).status).toBe(401);
 		await h.request("POST", `${sb.commands}/${id}/kill`, {
 			json: { graceMs: 0 },
+		});
+	});
+
+	it("a sandbox blocked while connected: close 4403 after an error frame forbidden sandbox_blocked, pushed by NOTIFY (timers frozen); a new connect is 4403 too", async () => {
+		const s = await readySandbox(w);
+		const id = await pty({ command: "cat" }, s);
+		const c = connect(connectPath(id, "", s));
+		await until(() => c.texts.length > 0);
+		const t0 = Date.now();
+		freezeTimers();
+		let closed: Closed;
+		try {
+			await w.env.svc.block(
+				{
+					kind: "session",
+					userId: randomUUID(),
+					teamId: randomUUID(),
+					role: null,
+					isOperator: true,
+					scopes: [...SCOPES],
+				},
+				s.sandboxId,
+				{ reason: "abuse" },
+			);
+			closed = await c.closed;
+		} finally {
+			vi.useRealTimers();
+		}
+		expect(Date.now() - t0).toBeLessThan(WAIT_MS);
+		expect(closed.code).toBe(4403);
+		expect(c.texts.at(-1)).toMatchObject({
+			type: "error",
+			code: "forbidden",
+			retryable: false,
+			details: { reason: "sandbox_blocked" },
+		});
+		await until(() => h.deps.streams.size === 0, WAIT_MS, "unregistered");
+		const again = connect(connectPath(id, "", s));
+		expect((await again.closed).code).toBe(4403);
+		expect(again.texts.at(-1)).toMatchObject({
+			code: "forbidden",
+			details: { reason: "sandbox_blocked" },
 		});
 	});
 

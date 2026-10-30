@@ -122,6 +122,8 @@ export interface AgentTargetOptions {
 	/**
 	 * The call changes the guest (file writes, command input and signals,
 	 * PTYs): `sandbox_blocked` on a blocked sandbox unless an operator (S8 C3).
+	 * Best-effort: the agent call happens after this check, so a block that
+	 * commits in between lets that one in-flight call through.
 	 */
 	write?: boolean;
 }

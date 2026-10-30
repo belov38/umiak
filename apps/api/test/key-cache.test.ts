@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ApiKeyRecord, IdentityStore } from "@sbx/auth";
 import type { Notifier } from "@sbx/core";
 import { describe, expect, it } from "vitest";
-import { IdentityListener, KeyCache } from "../src/index.ts";
+import { IdentityListener, KeyCache, SessionResolver } from "../src/index.ts";
 
 function fakeNotifier() {
 	let fn: ((p: string | null) => void) | null = null;
@@ -102,5 +102,42 @@ describe("KeyCache", () => {
 		cache.forget(id);
 		expect((await cache.lookup("hash"))?.key.revokedAt).not.toBeNull();
 		expect(loads).toBe(2);
+	});
+
+	it("'sandboxes:<id>' (a sandbox block for the stream registry) flushes neither the keys nor the sessions", async () => {
+		const id = randomUUID();
+		let keyLoads = 0;
+		let sessionLoads = 0;
+		const store = {
+			findApiKeyByHash: async () => {
+				keyLoads++;
+				return keyRecord(id, null);
+			},
+			team: async () => ({ id: TEAM, name: "t" }),
+			resolveSession: async () => {
+				sessionLoads++;
+				return { user: { id: "u" }, teams: [], defaultTeamId: null };
+			},
+		} as unknown as IdentityStore;
+		const { notifier, emit } = fakeNotifier();
+		const events = new IdentityListener(notifier);
+		events.start();
+		emit(null);
+		const keys = new KeyCache(store, events);
+		const sessions = new SessionResolver(store, events);
+		const h = { email: "a@example.com", user: "sub", groups: [] };
+		await keys.lookup("hash");
+		await sessions.resolve(h);
+		emit(`sandboxes:${randomUUID()}`);
+		await keys.lookup("hash");
+		await sessions.resolve(h);
+		expect({ keyLoads, sessionLoads }).toEqual({
+			keyLoads: 1,
+			sessionLoads: 1,
+		});
+		// A real identity change still flushes the sessions.
+		emit("users:u");
+		await sessions.resolve(h);
+		expect(sessionLoads).toBe(2);
 	});
 });

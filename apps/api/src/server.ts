@@ -40,7 +40,7 @@ import { SessionResolver } from "./auth/principal.ts";
 import { RateLimits } from "./auth/rate-limit.ts";
 import { DEFAULT_COMMAND_TIMINGS } from "./commands/attach.ts";
 import { DEFAULT_PTY_TIMINGS } from "./commands/pty-socket.ts";
-import { StreamRegistry } from "./commands/registry.ts";
+import { blockedSandboxesOf, StreamRegistry } from "./commands/registry.ts";
 import type { ApiDeps } from "./deps.ts";
 import { createApiLogger } from "./http/logger.ts";
 import { ApiMetrics } from "./http/metrics.ts";
@@ -213,6 +213,7 @@ export async function buildDeps(
 			identity,
 			events,
 			maxPerPrincipal: settings.maxStreams,
+			blockedSandboxes: blockedSandboxesOf(pool),
 			log,
 		});
 		cleanups.push(async () => streams.close());

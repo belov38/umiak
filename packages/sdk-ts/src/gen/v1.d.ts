@@ -1357,6 +1357,10 @@ export interface components {
         };
         CommandErrorFrame: {
             code: string;
+            /** @description Only on some errors: `forbidden` after an operator blocked the sandbox has `reason: sandbox_blocked` */
+            details?: {
+                [key: string]: unknown;
+            };
             message: string;
             /** @description PTY commands only */
             ptyOffset?: number;

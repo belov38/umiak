@@ -30,7 +30,8 @@ import { checkKnownKeys, isPlainObject } from "./validate.ts";
 // A sandbox block makes every route of the sandbox `blocked` and leaves the
 // team only reads, stop and delete (`findSandboxRow({write})`); a port block
 // blocks its route and PUT/rotate/DELETE of the port (`ports.ts`). The
-// triggers notify `sbx_routes` (0201 for hosted ports, 0204 for sandboxes).
+// triggers notify `sbx_routes` (0201 for hosted ports, 0204 for sandboxes);
+// a sandbox block also notifies `sbx_ssh_revoke` and `sbx_identity` (below).
 // Each change is a `sandbox_events` row with `{reason, note, by}`.
 
 export const BLOCK_NOTE_MAX_CHARS = 500;
@@ -137,6 +138,15 @@ export async function blockSandbox(
 			reason: input.reason,
 			data: eventData(input.reason, input.note, p),
 		});
+		// Open sessions end at once (S8 §11), delivered after the commit:
+		// '' makes the gateway recheck every SSH session (ssh/authorize
+		// denies a blocked sandbox, S4 §9.5); 'sandboxes:<id>' makes every api
+		// close the sandbox's exec streams and PTY sockets (StreamRegistry).
+		await tx.client.query(
+			`SELECT pg_notify('sbx_ssh_revoke', ''),
+			        pg_notify('sbx_identity', 'sandboxes:' || $1::text)`,
+			[row.id],
+		);
 		return toSandbox(tx.client, updated);
 	});
 }

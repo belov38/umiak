@@ -16,6 +16,7 @@ from .command_attached_frame import CommandAttachedFrame
 from .command_attached_frame_encoding import CommandAttachedFrameEncoding
 from .command_attached_frame_type import CommandAttachedFrameType
 from .command_error_frame import CommandErrorFrame
+from .command_error_frame_details import CommandErrorFrameDetails
 from .command_error_frame_type import CommandErrorFrameType
 from .command_exit_frame import CommandExitFrame
 from .command_exit_frame_status import CommandExitFrameStatus
@@ -237,6 +238,7 @@ __all__ = (
     "CommandAttachedFrameEncoding",
     "CommandAttachedFrameType",
     "CommandErrorFrame",
+    "CommandErrorFrameDetails",
     "CommandErrorFrameType",
     "CommandExitFrame",
     "CommandExitFrameStatus",
