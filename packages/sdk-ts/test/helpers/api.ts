@@ -13,6 +13,7 @@ import {
 	testSettings,
 } from "@sbx/api/testing";
 import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
+import { withTx } from "@sbx/db";
 import type { TestDatabase } from "@sbx/db/testing";
 
 type Pool = TestDatabase["pool"];
@@ -146,21 +147,25 @@ export async function markSandboxReady(
 	slug: string,
 ): Promise<void> {
 	const { id } = await sandboxRow(pool, slug);
-	await pool.query(
-		`UPDATE runtime.sandboxes
-		 SET state = 'ready', ready_at = now(), state_changed_at = now(), version = version + 1
-		 WHERE id = $1`,
-		[id],
-	);
-	await pool.query(
-		`UPDATE runtime.machines SET state = 'running', power_observed = 'running'
-		 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
-		[id],
-	);
-	await pool.query(
-		`UPDATE runtime.operations
-		 SET state = 'succeeded', started_at = COALESCE(started_at, now()), finished_at = now()
-		 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
-		[id],
-	);
+	// One transaction, as the worker commits it: a waiter woken by the
+	// state change sees the finished operation too.
+	await withTx(pool, async (tx) => {
+		await tx.client.query(
+			`UPDATE runtime.sandboxes
+			 SET state = 'ready', ready_at = now(), state_changed_at = now(), version = version + 1
+			 WHERE id = $1`,
+			[id],
+		);
+		await tx.client.query(
+			`UPDATE runtime.machines SET state = 'running', power_observed = 'running'
+			 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
+			[id],
+		);
+		await tx.client.query(
+			`UPDATE runtime.operations
+			 SET state = 'succeeded', started_at = COALESCE(started_at, now()), finished_at = now()
+			 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
+			[id],
+		);
+	});
 }

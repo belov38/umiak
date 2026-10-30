@@ -27,7 +27,7 @@ import {
 	testSettings,
 } from "@sbx/api/testing";
 import { serviceEnv } from "@sbx/core/testing";
-import { createPool } from "@sbx/db";
+import { createPool, withTx } from "@sbx/db";
 import { setup, teardown } from "@sbx/db/testing/global-setup";
 import { createDatabase, dropDatabase } from "@sbx/db/testing/pg";
 
@@ -276,23 +276,27 @@ async function main() {
 				}
 				case "POST /mark-ready": {
 					const { id } = await sandboxRow(String(input.slug));
-					await pool.query(
-						`UPDATE runtime.sandboxes
-						 SET state = 'ready', ready_at = now(), state_changed_at = now(), version = version + 1
-						 WHERE id = $1`,
-						[id],
-					);
-					await pool.query(
-						`UPDATE runtime.machines SET state = 'running', power_observed = 'running'
-						 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
-						[id],
-					);
-					await pool.query(
-						`UPDATE runtime.operations
-						 SET state = 'succeeded', started_at = COALESCE(started_at, now()), finished_at = now()
-						 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
-						[id],
-					);
+					// One transaction, as the worker commits it: a waiter woken by the
+					// state change sees the finished operation too.
+					await withTx(pool, async (tx) => {
+						await tx.client.query(
+							`UPDATE runtime.sandboxes
+							 SET state = 'ready', ready_at = now(), state_changed_at = now(), version = version + 1
+							 WHERE id = $1`,
+							[id],
+						);
+						await tx.client.query(
+							`UPDATE runtime.machines SET state = 'running', power_observed = 'running'
+							 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
+							[id],
+						);
+						await tx.client.query(
+							`UPDATE runtime.operations
+							 SET state = 'succeeded', started_at = COALESCE(started_at, now()), finished_at = now()
+							 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
+							[id],
+						);
+					});
 					out = { ok: true };
 					break;
 				}

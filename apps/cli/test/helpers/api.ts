@@ -24,6 +24,7 @@ import {
 } from "@sbx/auth";
 import { validateSecretSets } from "@sbx/core";
 import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
+import { withTx } from "@sbx/db";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 
 export interface CliWorld {
@@ -157,25 +158,29 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		);
 		const id = r.rows[0]?.id;
 		if (id === undefined) throw new Error(`no sandbox ${slug}`);
-		await pool.query(
-			`UPDATE runtime.machines SET state = $2, power_observed = $3
-			 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
-			[id, machine, machine === "running" ? "running" : "stopped"],
-		);
-		await pool.query(
-			`UPDATE runtime.operations
-			 SET state = $2, started_at = COALESCE(started_at, now()), finished_at = now()
-			 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
-			[id, op],
-		);
-		await pool.query(
-			`UPDATE runtime.sandboxes
-			 SET state = $2, state_changed_at = now(), version = version + 1,
-			     ready_at = CASE WHEN $2 = 'ready' THEN now() ELSE ready_at END,
-			     stopped_at = CASE WHEN $2 = 'stopped' THEN now() ELSE stopped_at END
-			 WHERE id = $1`,
-			[id, sandbox],
-		);
+		// One transaction, as the worker commits it: a waiter woken by the
+		// state change sees the finished operation too.
+		await withTx(pool, async (tx) => {
+			await tx.client.query(
+				`UPDATE runtime.machines SET state = $2, power_observed = $3
+				 WHERE id = (SELECT machine_id FROM runtime.sandboxes WHERE id = $1)`,
+				[id, machine, machine === "running" ? "running" : "stopped"],
+			);
+			await tx.client.query(
+				`UPDATE runtime.operations
+				 SET state = $2, started_at = COALESCE(started_at, now()), finished_at = now()
+				 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
+				[id, op],
+			);
+			await tx.client.query(
+				`UPDATE runtime.sandboxes
+				 SET state = $2, state_changed_at = now(), version = version + 1,
+				     ready_at = CASE WHEN $2 = 'ready' THEN now() ELSE ready_at END,
+				     stopped_at = CASE WHEN $2 = 'stopped' THEN now() ELSE stopped_at END
+				 WHERE id = $1`,
+				[id, sandbox],
+			);
+		});
 	};
 	const createSandbox = async () => {
 		const res = await fetch(`${url}/v1/sandboxes`, {
