@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,14 +15,44 @@ import (
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
 	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
 )
 
+// killOrder wraps the fake supervisor and records, for each KillCgroup,
+// whether the secret file was still on disk.
+type killOrder struct {
+	*supervisor.Fake
+	secret string
+	mu     sync.Mutex
+	kills  map[string]bool // id -> secret file present at the kill
+}
+
+func (k *killOrder) KillCgroup(ctx context.Context, id string) error {
+	_, err := os.Stat(k.secret)
+	k.mu.Lock()
+	k.kills[id] = err == nil
+	k.mu.Unlock()
+	return k.Fake.KillCgroup(ctx, id)
+}
+
 // TestPreShutdownWipesSecrets: PreShutdown (the Windows PRESHUTDOWN
-// control) wipes the secret files like System/PrepareStop and then stops
-// the agent without its context being cancelled.
+// control) ends the commands first, then wipes the secret files like
+// System/PrepareStop and stops the agent without its context being
+// cancelled.
 func TestPreShutdownWipesSecrets(t *testing.T) {
 	h := newHarness(t)
 	h.seedIdentity(machineA)
+	secret := filepath.Join(h.l.SecretFilesDir, "token")
+	ko := &killOrder{Fake: h.sup, secret: secret, kills: map[string]bool{}}
+	h.supervisor = ko
+	// A live command (unit active) and a finished one (unit gone).
+	h.sup.SetState("live", supervisor.UnitActive)
+	for _, id := range []string{"live", "gone"} {
+		if err := os.MkdirAll(h.l.CommandDir(id), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dir, err := os.MkdirTemp("", "sbxdbg")
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +82,6 @@ func TestPreShutdownWipesSecrets(t *testing.T) {
 	if _, err := sys.Claim(ctx, req); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	secret := filepath.Join(h.l.SecretFilesDir, "token")
 	if _, err := os.Stat(secret); err != nil {
 		t.Fatalf("secret file after Claim: %v", err)
 	}
@@ -68,5 +98,16 @@ func TestPreShutdownWipesSecrets(t *testing.T) {
 	}
 	if _, err := os.Stat(secret); !os.IsNotExist(err) {
 		t.Errorf("secret file after PreShutdown: %v", err)
+	}
+	ko.mu.Lock()
+	defer ko.mu.Unlock()
+	for _, id := range []string{"live", "gone"} {
+		present, ok := ko.kills[id]
+		if !ok || !present {
+			t.Errorf("command %s: killed %t, secret file present at the kill %t; want a kill before the wipe", id, ok, present)
+		}
+	}
+	if h.sup.CgroupKills("live") != 1 {
+		t.Errorf("live command kills = %d", h.sup.CgroupKills("live"))
 	}
 }

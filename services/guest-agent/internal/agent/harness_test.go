@@ -166,6 +166,8 @@ type harness struct {
 	debugConfirm bool
 	freezer      quiesce.Freezer
 	preShutdown  chan struct{}
+	// supervisor replaces sup in the agent deps when set.
+	supervisor supervisor.Supervisor
 
 	cancel context.CancelFunc
 	done   chan error
@@ -206,8 +208,12 @@ func (h *harness) seedIdentity(id string) {
 // buildDeps returns the fake dependencies of one agent run.
 func (h *harness) buildDeps() Deps {
 	uid, gid := uint32(os.Getuid()), uint32(os.Getgid())
+	var sup supervisor.Supervisor = h.sup
+	if h.supervisor != nil {
+		sup = h.supervisor
+	}
 	return Deps{
-		Supervisor:   h.sup,
+		Supervisor:   sup,
 		IdentSource:  h.src,
 		Resetter:     h.resetter,
 		Dialer:       h.dialer,

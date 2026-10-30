@@ -3,6 +3,7 @@ package update
 import (
 	"crypto/ed25519"
 	"errors"
+	"os"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -13,11 +14,15 @@ import (
 
 // TestInstallCreatesServiceConfig installs a package with the service under
 // a throwaway name and checks the service configuration; the service is
-// never started. Needs administrator rights (the agent tests run as SYSTEM).
+// never started. Needs administrator rights (the agent tests run as SYSTEM);
+// without them it fails unless SBX_TEST_ALLOW_SKIP=1.
 func TestInstallCreatesServiceConfig(t *testing.T) {
 	m, err := mgr.Connect()
 	if err != nil {
-		t.Skipf("no access to the service manager: %v", err)
+		if os.Getenv("SBX_TEST_ALLOW_SKIP") == "1" {
+			t.Skipf("no access to the service manager: %v", err)
+		}
+		t.Fatalf("no access to the service manager (run as an administrator, or set SBX_TEST_ALLOW_SKIP=1): %v", err)
 	}
 	_ = m.Disconnect()
 	pub, priv := testKey(t)

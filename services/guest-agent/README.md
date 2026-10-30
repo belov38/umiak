@@ -78,12 +78,18 @@ the service: an image build VM must not run the agent before sysprep, so it star
 
 Under the service control manager `run` reports `SERVICE_RUNNING` once state.db is open and the
 shims are recovered, runs at `ABOVE_NORMAL` priority and logs to
-`C:\ProgramData\sbx-agent\logs\agent.log` (10 files of 10 MiB). `PRESHUTDOWN` wipes the secret
-files and flushes state.db (at most 10 s) before the shutdown. A self-update, a reverted update or a
+`C:\ProgramData\sbx-agent\logs\agent.log` (10 files of 10 MiB; `%TEMP%\sbx-agent.log` if that
+directory cannot be opened). `PRESHUTDOWN` ends the command jobs (at most 3 s), wipes the secret
+files and flushes state.db, all within 10 s, before the shutdown. `rollback` started by the failure
+action logs to `logs\rollback.log`. A self-update, a reverted update or a
 changed identity ends the process with exit code 75 without `SERVICE_STOPPED`, so the failure
 actions start the new current version. Started from a console, `run` runs in the foreground until
-Ctrl+C. Switching versions deletes and recreates a junction (no atomic rename); `pending-update.json`
-and the rollback cover a crash in between. `doctor` on Windows reports the service state, whether
+Ctrl+C. Switching versions deletes and recreates a junction (no atomic rename). A crash that leaves
+`current` at the old version is repaired by `pending-update.json` and the rollback. A crash that
+leaves `current` missing is not covered by the failure actions: the image path does not resolve, so
+the service cannot start and no rollback command runs. The boot step `sbx-agent early` recreates a
+missing `current` from `pending-update.json` or `previous` (S9 Task 17); otherwise repair it over
+the QEMU guest agent with `rollback --to <v>` run from `versions\<v>\sbx-agent.exe`. `doctor` on Windows reports the service state, whether
 its configuration (failure actions, start type, preshutdown timeout) matches, and whether
 `early.json` belongs to the current boot.
 

@@ -55,7 +55,7 @@ func installPackage(d deps, args []string, stdout, stderr io.Writer) int {
 		WriteConfig:  *writeConfig,
 		Units:        d.units,
 		Config:       d.configTemplate,
-		Services:     d.services,
+		Systemctl:    d.systemctl,
 		SystemPath:   d.systemPath,
 	})
 	if err != nil {
@@ -75,8 +75,17 @@ func rollbackCmd(d deps, args []string, stderr io.Writer) int {
 		_, _ = io.WriteString(stderr, "usage: sbx-agent rollback [--to <version>]\n")
 		return 2
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, nil)))
+	log := slog.New(slog.NewTextHandler(stderr, nil))
+	slog.SetDefault(log)
+	if d.layout.LogDir != "" {
+		// Windows: the run-command failure action of the service starts
+		// rollback without a console; its log goes to rollback.log.
+		var closeLog func()
+		log, closeLog = windowsLog(d, "rollback.log", stderr)
+		defer closeLog()
+	}
 	if err := update.Rollback(d.layout, *to, d.services, d.sleep); err != nil {
+		log.Error("rollback failed", "err", err)
 		_, _ = fmt.Fprintf(stderr, "sbx-agent rollback: %v\n", err)
 		return 1
 	}

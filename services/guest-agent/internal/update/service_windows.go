@@ -3,6 +3,7 @@ package update
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -30,6 +31,8 @@ const (
 	failureResetPeriod = 120
 	// serviceWait bounds the wait for a service to stop.
 	serviceWait = time.Minute
+	// startWait bounds the wait for a starting service before a restart.
+	startWait = 30 * time.Second
 )
 
 // failureActions are restart, restart, then the rollback command: the
@@ -59,10 +62,21 @@ func (SCMManager) Start(name string) error {
 	})
 }
 
-// Restart implements ServiceManager: stop, wait until stopped, start.
+// Restart implements ServiceManager: stop, wait until stopped, start. A
+// service that is still starting is given startWait to finish first; if it
+// still cannot take the stop, the restart is left pending: the service runs
+// the version it loaded, and current takes effect at its next start.
 func (SCMManager) Restart(name string) error {
 	return withService(name, func(s *mgr.Service) error {
-		if err := waitStopped(s, true); err != nil {
+		if err := waitStarted(s); err != nil {
+			return err
+		}
+		err := waitStopped(s, true)
+		if errors.Is(err, windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL) {
+			slog.Warn("update: the service is still starting, restart left pending", "service", s.Name)
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 		return startService(s)
@@ -95,6 +109,21 @@ func startService(s *mgr.Service) error {
 		return fmt.Errorf("update: start service %s: %w", s.Name, err)
 	}
 	return nil
+}
+
+// waitStarted waits up to startWait while s is start-pending.
+func waitStarted(s *mgr.Service) error {
+	deadline := time.Now().Add(startWait)
+	for {
+		st, err := s.Query()
+		if err != nil {
+			return fmt.Errorf("update: query service %s: %w", s.Name, err)
+		}
+		if st.State != svc.StartPending || time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // waitStopped waits until s is stopped, sending a stop control first when

@@ -69,7 +69,13 @@ func runWindowsAgent(ctx context.Context, d deps, o runOptions, stderr io.Writer
 	}
 	w := stderr
 	logFile, logErr := logx.NewRotatingFile(d.layout.LogDir, agentLogName, agentLogBytes, agentLogKeep)
-	if logErr == nil {
+	var fallbackErr error
+	if logErr != nil {
+		// A service has no stderr: keep a log in the system temp directory
+		// rather than none.
+		logFile, fallbackErr = logx.NewRotatingFile(os.TempDir(), "sbx-"+agentLogName, agentLogBytes, 2)
+	}
+	if logErr == nil || fallbackErr == nil {
 		defer func() { _ = logFile.Close() }()
 		if stderr == io.Discard {
 			w = logFile
@@ -81,8 +87,11 @@ func runWindowsAgent(ctx context.Context, d deps, o runOptions, stderr io.Writer
 	defer closeLog(h)
 	log := slog.New(h)
 	slog.SetDefault(log)
-	if logErr != nil {
-		log.Warn("agent: no log file, logging to stderr", "err", logErr)
+	switch {
+	case logErr != nil && fallbackErr == nil:
+		log.Warn("agent: cannot open the agent log, logging to the temp directory", "dir", os.TempDir(), "err", logErr)
+	case logErr != nil:
+		log.Warn("agent: no log file, logging to stderr", "err", logErr, "fallback_err", fallbackErr)
 	}
 	if hooks.service {
 		// The Windows form of CPUWeight: the agent stays responsive

@@ -24,15 +24,11 @@ func DefaultServiceManager() ServiceManager { return SystemctlManager{} }
 
 // installService installs the systemd units (decision 9).
 func installService(l paths.Layout, opts InstallOptions) error {
-	sm := SystemctlManager{}
-	if opts.Services != nil {
-		m, ok := opts.Services.(SystemctlManager)
-		if !ok {
-			return fmt.Errorf("update: installing units needs a SystemctlManager, got %T", opts.Services)
-		}
-		sm = m
+	sc := opts.Systemctl
+	if sc == nil {
+		sc = Systemctl
 	}
-	return installUnits(l, opts.Units, sm.run)
+	return installUnits(l, opts.Units, sc)
 }
 
 // installUnits writes every file at the root of units into SystemdUnitDir,

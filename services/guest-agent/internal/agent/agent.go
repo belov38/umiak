@@ -7,6 +7,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -47,10 +48,14 @@ const (
 // else must not keep the agent from exiting.
 const shutdownFlush = 5 * time.Second
 
-// PreShutdownBudget bounds the secrets wipe and store flush that
-// Deps.PreShutdown triggers. With the final shutdown flush it stays within
-// the 15 s preshutdown timeout of the Windows service (S9 spec 12.2).
+// PreShutdownBudget bounds what Deps.PreShutdown triggers: ending the
+// command jobs, the secrets wipe and the store flush. With the final
+// shutdown flush it stays within the 15 s preshutdown timeout of the Windows
+// service (S9 spec 12.2).
 const PreShutdownBudget = 10 * time.Second
+
+// preShutdownKill bounds ending the command jobs within PreShutdownBudget.
+const preShutdownKill = 3 * time.Second
 
 // bootIDPath is the kernel boot id.
 const bootIDPath = "/proc/sys/kernel/random/boot_id"
@@ -135,10 +140,12 @@ type Deps struct {
 	// a pending update without a tunnel connection.
 	DebugConfirm bool
 
-	// PreShutdown, when closed, makes the agent wipe the secrets and flush
-	// state.db like System/PrepareStop (bounded by PreShutdownBudget) and
-	// then stop as if its context ended: the PRESHUTDOWN control of the
-	// Windows service (S9 spec 12.2). Nil never fires.
+	// PreShutdown, when closed, makes the agent end every command (the
+	// supervisor's KillCgroup, on Windows the command job), then wipe the
+	// secrets and flush state.db like System/PrepareStop, all bounded by
+	// PreShutdownBudget, and then stop as if its context ended: the
+	// PRESHUTDOWN control of the Windows service (S9 spec 12.2). Nil never
+	// fires.
 	PreShutdown <-chan struct{}
 }
 
@@ -283,14 +290,16 @@ func (a *agent) run(ctx context.Context) error {
 	return nil
 }
 
-// preShutdown wipes the secrets and flushes state.db through the claim
-// manager, then ends the run. PrepareStop also drops the secrets held in
-// memory, so the quiesce auto-thaw of the shutdown cannot write the secret
-// files back.
+// preShutdown ends the commands, wipes the secrets and flushes state.db
+// through the claim manager, then ends the run. The commands go first: a
+// process holding a secret file open would keep it on disk. PrepareStop
+// also drops the secrets held in memory, so the quiesce auto-thaw of the
+// shutdown cannot write the secret files back.
 func (a *agent) preShutdown() {
-	a.log.Info("agent: system shutdown, wiping secrets")
+	a.log.Info("agent: system shutdown, ending commands and wiping secrets")
 	ctx, cancel := context.WithTimeout(context.Background(), PreShutdownBudget)
 	defer cancel()
+	a.killCommands(ctx)
 	wiped, err := a.claim.PrepareStop(ctx)
 	switch {
 	case err != nil:
@@ -299,6 +308,34 @@ func (a *agent) preShutdown() {
 		a.log.Warn("agent: some secret files are in use and stay on disk until the next boot")
 	}
 	a.exit()
+}
+
+// killCommands kills every command that has a command directory through the
+// supervisor, within preShutdownKill. A command that is gone already is
+// skipped.
+func (a *agent) killCommands(ctx context.Context) {
+	entries, err := os.ReadDir(a.l.CommandsDir)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			a.log.Warn("agent: list commands", "err", err)
+		}
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, preShutdownKill)
+	defer cancel()
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if ctx.Err() != nil {
+			a.log.Warn("agent: no time left to end the commands")
+			return
+		}
+		err := a.d.Supervisor.KillCgroup(ctx, e.Name())
+		if err != nil && !errors.Is(err, supervisor.ErrUnitNotFound) {
+			a.log.Warn("agent: end command", "id", e.Name(), "err", err)
+		}
+	}
 }
 
 // notifyStopping sends STOPPING=1 to systemd once.

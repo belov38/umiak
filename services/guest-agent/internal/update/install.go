@@ -34,10 +34,10 @@ type InstallOptions struct {
 	Units fs.FS
 	// Config is the agent.toml template.
 	Config []byte
-	// Services runs daemon-reload and enable on Linux, where it must be a
-	// SystemctlManager; nil means the real systemctl. Windows does not use
-	// it: the install never starts the service.
-	Services ServiceManager
+	// Systemctl runs systemctl for the unit install (Linux); nil means the
+	// real one. Windows does not use it: the install never starts the
+	// service.
+	Systemctl func(args ...string) error
 	// ServiceName is the Windows service to configure; empty means
 	// AgentService. Tests use a throwaway name.
 	ServiceName string

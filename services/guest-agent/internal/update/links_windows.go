@@ -20,8 +20,13 @@ const BinaryName = "sbx-agent.exe"
 // pointLink points the junction link (current or previous) at version v
 // (S9 spec 12.12). A junction cannot be renamed over another, so the new
 // junction is created under a temporary name, the old one is removed and
-// the new one renamed into place. A crash in between leaves link missing or
-// at the old version; pending-update.json and the rollback repair it.
+// the new one renamed into place. A crash in between leaves link at the old
+// version (repaired by pending-update.json and the rollback) or missing.
+// A missing current is not covered by the service failure actions: the
+// image path does not resolve, so no process runs and the rollback command
+// (under current or previous) may not exist either. The recovery is the
+// boot step `sbx-agent early`, which recreates a missing current from
+// pending-update.json or previous (S9 Task 17), or the QEMU guest agent.
 func pointLink(l paths.Layout, link, v string) error {
 	target, err := filepath.Abs(VersionDir(l, v))
 	if err != nil {

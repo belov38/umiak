@@ -31,7 +31,7 @@ func TestInstallActivate(t *testing.T) {
 		WriteConfig:  true,
 		Units:        units,
 		Config:       []byte("[user]\n"),
-		Services:     SystemctlManager{Systemctl: sc.run},
+		Systemctl:    sc.run,
 	}
 
 	m, err := Install(l, packTest(t, "v1", priv), keys, opts)

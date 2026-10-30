@@ -39,9 +39,11 @@ type deps struct {
 	freezer     quiesce.Freezer
 	docker      quiesce.DockerAPI
 
-	// services starts and restarts the agent service (rollback) and, on
-	// Linux, installs the units (install-package).
+	// services starts and restarts the agent service (rollback).
 	services update.ServiceManager
+	// systemctl runs systemctl for the unit install of install-package
+	// (Linux).
+	systemctl func(args ...string) error
 	// systemPath makes install-package add current to the system Path
 	// (Windows).
 	systemPath bool
@@ -84,6 +86,7 @@ func defaultDeps() deps {
 		docker:    &docker.Client{},
 
 		services:       update.DefaultServiceManager(),
+		systemctl:      update.Systemctl,
 		sleep:          time.Sleep,
 		executable:     os.Executable,
 		isActive:       agent.SystemctlIsActive,
@@ -213,7 +216,10 @@ func windowsLog(d deps, name string, stderr io.Writer) (*slog.Logger, func()) {
 	w, closeFn := stderr, func() {}
 	if d.layout.LogDir != "" {
 		if f, err := logx.NewRotatingFile(d.layout.LogDir, name, windowsLogBytes, 2); err == nil {
-			w, closeFn = io.MultiWriter(stderr, f), func() { _ = f.Close() }
+			// The file goes first: io.MultiWriter stops at the first
+			// failing writer, and a process started by the service control
+			// manager has no usable stderr.
+			w, closeFn = io.MultiWriter(f, stderr), func() { _ = f.Close() }
 		}
 	}
 	prev := slog.Default()

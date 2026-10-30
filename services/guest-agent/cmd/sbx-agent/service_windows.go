@@ -49,7 +49,10 @@ type agentHooks struct {
 type serviceHandler struct {
 	run  func(ctx context.Context, hooks agentHooks) int
 	exit func(code int)
-	// preShutdownWait defaults to update.PreshutdownTimeout; tick to
+	// preShutdownWait is the fallback cancel after PRESHUTDOWN, for an
+	// agent that hangs in its preshutdown steps: agent.PreShutdownBudget
+	// plus 1 s by default, which leaves the final shutdown flush inside the
+	// 15 s preshutdown timeout of the service. tick defaults to
 	// pendingTick.
 	preShutdownWait time.Duration
 	tick            time.Duration
@@ -59,7 +62,7 @@ type serviceHandler struct {
 func (h *serviceHandler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- svc.Status) (bool, uint32) {
 	preWait, tickEvery := h.preShutdownWait, h.tick
 	if preWait <= 0 {
-		preWait = update.PreshutdownTimeout
+		preWait = agent.PreShutdownBudget + time.Second
 	}
 	if tickEvery <= 0 {
 		tickEvery = pendingTick

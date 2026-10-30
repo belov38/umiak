@@ -66,6 +66,7 @@ func updateDeps(t *testing.T, embedded ed25519.PublicKey) (deps, *cliSystemctl) 
 	return deps{
 		layout:         paths.ForRoot(t.TempDir()),
 		services:       update.SystemctlManager{Systemctl: sc.run},
+		systemctl:      sc.run,
 		sleep:          func(time.Duration) {},
 		executable:     os.Executable,
 		embeddedKeys:   []byte(update.FormatKey(embedded, "embedded") + "\n"),
@@ -170,5 +171,34 @@ func TestSelftestCLI(t *testing.T) {
 	errOut.Reset()
 	if code := runWith(ctx, d, []string{"selftest", "--schema", "1"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), `"dev"`) {
 		t.Errorf("dev binary: exit = %d, stderr = %q", code, errOut.String())
+	}
+}
+
+// TestRollbackLogsToFile: with a log directory (Windows) rollback, which the
+// service's failure action starts without a console, logs to rollback.log.
+func TestRollbackLogsToFile(t *testing.T) {
+	pub, priv := genKey(t)
+	d, _ := updateDeps(t, pub)
+	d.layout.LogDir = filepath.Join(t.TempDir(), "logs")
+	ctx := context.Background()
+	for _, v := range []string{"v1", "v2"} {
+		if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, v, priv, pub)}, io.Discard, io.Discard); code != 0 {
+			t.Fatalf("install %s failed", v)
+		}
+	}
+	if code := runWith(ctx, d, []string{"rollback", "--to", "v1"}, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if code := runWith(ctx, d, []string{"rollback", "--to", "v7"}, io.Discard, io.Discard); code != 1 {
+		t.Fatalf("rollback to a missing version: exit = %d", code)
+	}
+	b, err := os.ReadFile(filepath.Join(d.layout.LogDir, "rollback.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"switched version", "rollback failed"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("rollback.log misses %q:\n%s", want, b)
+		}
 	}
 }
