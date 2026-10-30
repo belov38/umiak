@@ -14,9 +14,16 @@ const run = promisify(execFile);
 
 let dir = "";
 
-/** True when `cmd` itself is missing (not a failing build). */
-function missing(e: unknown): boolean {
-	return (e as { code?: unknown } | null)?.code === "ENOENT";
+/**
+ * True when Go itself is missing, not a failing build: the command is not
+ * installed (ENOENT), or mise cannot run `go` (no such tool in this
+ * environment).
+ */
+function goMissing(e: unknown, stderr: string): boolean {
+	if ((e as { code?: unknown } | null)?.code === "ENOENT") return true;
+	return /^mise ERROR "go" couldn't exec process: No such file or directory/m.test(
+		stderr,
+	);
 }
 
 export async function setup(project: TestProject): Promise<void> {
@@ -43,9 +50,9 @@ export async function setup(project: TestProject): Promise<void> {
 			return;
 		} catch (e) {
 			const stderr = String((e as { stderr?: unknown }).stderr ?? "");
-			// mise without a go tool, or no mise: try the next one.
-			if (missing(e) || /go.*(not found|not installed)/i.test(stderr)) {
-				reasons.push(`${cmd}: ${missing(e) ? "not found" : stderr.trim()}`);
+			// No mise, or mise without go: try the next one.
+			if (goMissing(e, stderr)) {
+				reasons.push(`${cmd}: ${stderr.trim().split("\n")[0] || "not found"}`);
 				continue;
 			}
 			throw new Error(

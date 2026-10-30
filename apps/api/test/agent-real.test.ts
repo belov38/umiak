@@ -8,8 +8,9 @@
 // - commands run as the current OS user, not as `user` (no such account on
 //   a developer machine, no uid switch): requests pass `user` = that
 //   account. The home of that user is mapped to the harness's scratch
-//   directory for commands (cwd, HOME); file paths are absolute under it,
-//   because the Filesystem API resolves `~` to the real home.
+//   directory: for commands (cwd, HOME) by the fake shim, for the
+//   Filesystem API and /files* by the harness rewriting `~`, relative and
+//   real-home paths before they reach the agent (homeGuard).
 // - no cgroups: leftovers and OOM kills are not covered;
 // - ports come from a fake procfs with one listener (0.0.0.0:8080);
 // - the machine is not claimed (no worker): env delivery is not covered.
@@ -22,6 +23,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import type { AddressInfo } from "node:net";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -921,6 +923,81 @@ describe.skipIf(skipPg() || skipReason !== "")(
 				);
 				expect(notDir.status).toBe(409);
 				expect(err(notDir).code).toBe("not_directory");
+			});
+
+			it("~, relative paths and the real home land in the scratch dir, never in $HOME", async () => {
+				const name = `sbx-guard-${randomBytes(6).toString("hex")}`;
+				const inHome = (rel: string) => join(homedir(), rel);
+				const created = [
+					`${name}.txt`,
+					`${name}-dir`,
+					`${name}-up.bin`,
+					`${name}-arc`,
+				];
+				for (const n of created) expect(existsSync(inHome(n))).toBe(false);
+
+				const home = await h.request("GET", url("/stat", { path: "~" }));
+				expect((home.body as Any).path).toBe(work);
+				const put = await h.request(
+					"PUT",
+					url("/content", { path: `~/${name}.txt` }),
+					{
+						headers: { "content-type": "application/octet-stream" },
+						body: "tilde",
+					},
+				);
+				expect(put.status, JSON.stringify(put.body)).toBe(200);
+				expect((put.body as Any).path).toBe(p(`${name}.txt`));
+				const mk = await h.request("POST", url("/mkdir"), {
+					json: { path: `${name}-dir/sub`, parents: true },
+				});
+				expect(mk.status, JSON.stringify(mk.body)).toBe(201);
+				expect((mk.body as Any).path).toBe(p(`${name}-dir/sub`));
+				// An absolute path in the real home is the scratch dir as well.
+				const abs = await h.request(
+					"GET",
+					url("/stat", { path: inHome(`${name}.txt`) }),
+				);
+				expect((abs.body as Any).path).toBe(p(`${name}.txt`));
+				const mv = await h.request("POST", url("/move"), {
+					json: { from: `~/${name}.txt`, to: `${name}-dir/moved.txt` },
+				});
+				expect(mv.status, JSON.stringify(mv.body)).toBe(200);
+				const up = await h.request("POST", url("/uploads"), {
+					json: { path: `${name}-up.bin` },
+				});
+				const id = (up.body as Any).uploadId as string;
+				await h.request(
+					"PUT",
+					url(`/uploads/${id}`, { offset: "0", path: `${name}-up.bin` }),
+					{
+						headers: { "content-type": "application/octet-stream" },
+						body: "up",
+					},
+				);
+				const commit = await h.request("POST", url(`/uploads/${id}/commit`), {
+					json: { path: `${name}-up.bin`, sha256: sha256("up") },
+				});
+				expect(commit.status, JSON.stringify(commit.body)).toBe(200);
+				expect((commit.body as Any).path).toBe(p(`${name}-up.bin`));
+				const arc = await h.request(
+					"PUT",
+					url("/archive", { path: `${name}-arc` }),
+					{
+						headers: { "content-type": "application/x-tar" },
+						body: tarOf(tarEntry("a.txt", "0", "a")),
+					},
+				);
+				expect(arc.status, JSON.stringify(arc.body)).toBe(200);
+				const del = await h.request(
+					"DELETE",
+					url("", { path: `~/${name}-dir`, recursive: "true" }),
+				);
+				expect(del.body).toEqual({ existed: true });
+
+				expect(readFileSync(p(`${name}-up.bin`), "utf8")).toBe("up");
+				expect(readFileSync(p(`${name}-arc/a.txt`), "utf8")).toBe("a");
+				for (const n of created) expect(existsSync(inHome(n))).toBe(false);
 			});
 
 			it("files and commands see the same directory", async () => {

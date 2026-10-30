@@ -10,6 +10,8 @@
 // commands run for real: the fake supervisor's shims are driven by host
 // processes (runner.go), so output, exit codes, stdin, PTYs, signals and
 // timeouts behave as in a VM, within the limits listed in runner.go.
+// The developer's home stays untouched: the home of the commands and of
+// the Filesystem API is a scratch directory (runner.go, guard.go).
 //
 // It registers one machine (tunnel credentials), waits until its session
 // serves with known capabilities, prints one JSON line to stdout
@@ -34,6 +36,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -172,8 +175,15 @@ func start(ctx context.Context, dsn, token, listen, machineID string) (*harness,
 		return h, fmt.Errorf("put credentials: %w", err)
 	}
 
+	m, err := newMachine(h)
+	if err != nil {
+		return h, err
+	}
 	mem := memnet.New(memnet.Options{})
-	gw, url, err := startGateway(ctx, h, store, token, listen)
+	guard := func(next http.Handler) http.Handler {
+		return homeGuard{next: next, home: m.realHome, scratch: m.work}
+	}
+	gw, url, err := startGateway(ctx, h, store, token, listen, guard)
 	if err != nil {
 		return h, err
 	}
@@ -183,10 +193,6 @@ func start(ctx context.Context, dsn, token, listen, machineID string) (*harness,
 	mem.AddGateway("gw", gw.Admitter(), gw.Ready)
 	h.onClose(func() { mem.RemoveGateway("gw") })
 
-	m, err := newMachine(h)
-	if err != nil {
-		return h, err
-	}
 	if err := m.startAgent(sctx, h, machineID, bs, mem); err != nil {
 		return h, err
 	}
@@ -215,9 +221,12 @@ func start(ctx context.Context, dsn, token, listen, machineID string) (*harness,
 	return h, nil
 }
 
-// startGateway runs one gateway with its internal listener on listen. It
-// runs until the harness closes, not until ctx (the start budget) ends.
-func startGateway(ctx context.Context, h *harness, store *registry.Store, token, listen string) (*gateway.Gateway, string, error) {
+// startGateway runs one gateway with its internal listener on listen,
+// behind wrap. It runs until the harness closes, not until ctx (the start
+// budget) ends.
+func startGateway(ctx context.Context, h *harness, store *registry.Store, token, listen string,
+	wrap func(http.Handler) http.Handler,
+) (*gateway.Gateway, string, error) {
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listen)
 	if err != nil {
 		return nil, "", err
@@ -240,7 +249,7 @@ func startGateway(ctx context.Context, h *harness, store *registry.Store, token,
 		defer close(runDone)
 		_ = g.Run(gctx)
 	}()
-	srv := gateway.NewInternalServer(g.InternalHandler())
+	srv := gateway.NewInternalServer(wrap(g.InternalHandler()))
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)
@@ -260,8 +269,12 @@ type machine struct {
 	root   string
 	work   string
 	layout paths.Layout
-	user   *process.User
-	sup    *execSupervisor
+	// user is the OS user with its home set to the scratch dir (Deps.LookupUser).
+	user *process.User
+	// realHome is the user's home on the host; the agent's own lookups
+	// (process, files) still see it, see homeGuard and execSupervisor.
+	realHome string
+	sup      *execSupervisor
 }
 
 // newMachine creates the layout in a short temporary root and a fake
@@ -290,13 +303,18 @@ func newMachine(h *harness) (*machine, error) {
 	if err != nil {
 		return nil, err
 	}
-	if m.user, err = process.LookupUser(cu.Username); err != nil {
+	u, err := process.LookupUser(cu.Username)
+	if err != nil {
 		return nil, err
 	}
+	m.realHome = u.Home
+	scratchUser := *u
+	scratchUser.Home = m.work
+	m.user = &scratchUser
 	if err := writeProcNet(filepath.Join(root, "proc")); err != nil {
 		return nil, err
 	}
-	m.sup = newExecSupervisor(m.layout, m.user.Home, m.work, logger("component", "shim"))
+	m.sup = newExecSupervisor(m.layout, m.realHome, m.work, logger("component", "shim"))
 	// Registered before the agent: it runs after the agent stopped.
 	h.onClose(func() { _ = m.sup.Close() })
 	return m, nil

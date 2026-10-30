@@ -166,6 +166,9 @@ export async function buildDeps(
 				serviceToken: gatewayToken,
 				waitForAgentMs: AGENT_WAIT_MS,
 			});
+			const client = agentClient;
+			// Before the registry (cleanups run in reverse): its HTTP/2 sessions.
+			cleanups.push(() => client.close());
 		}
 
 		const identity = new PgIdentityStore({

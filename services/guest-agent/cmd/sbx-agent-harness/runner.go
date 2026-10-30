@@ -196,6 +196,9 @@ type proc struct {
 
 	mu       sync.Mutex
 	timedOut bool
+	// graceKill is the SIGKILL after the grace of a timeout; stopped once
+	// the process is reaped.
+	graceKill *time.Timer
 }
 
 // run starts the process, forwards the fake shim's requests to it and
@@ -227,6 +230,11 @@ func (s *execSupervisor) run(r *supervisor.FakeRun, spec shim.Spec) {
 	if timer != nil {
 		timer.Stop()
 	}
+	p.mu.Lock()
+	if p.graceKill != nil {
+		p.graceKill.Stop()
+	}
+	p.mu.Unlock()
 	if copied != nil {
 		// The PTY ends (EIO) once nothing holds its slave side.
 		select {
@@ -280,20 +288,22 @@ func hasEnv(env []string, name string) bool {
 // process group.
 func (p *proc) forward(exited <-chan struct{}) {
 	var inputs, resizes, signals, kills int
+	// Input goes through its own goroutine: a process that does not read
+	// its stdin must not hold up signals and kills.
+	in := make(chan supervisor.FakeInput, 1024)
+	defer close(in)
+	go p.writeInput(in)
 	t := time.NewTicker(2 * time.Millisecond)
 	defer t.Stop()
 	for {
-		for _, in := range p.r.Inputs()[inputs:] {
-			inputs++
-			w := io.Writer(p.ptmx)
-			if p.ptmx == nil {
-				w = p.stdin
-			}
-			if w != nil && len(in.Data) > 0 {
-				_, _ = w.Write(in.Data)
-			}
-			if in.CloseStdin && p.stdin != nil {
-				_ = p.stdin.Close()
+	queue:
+		for _, x := range p.r.Inputs()[inputs:] {
+			select {
+			case in <- x:
+				inputs++
+			default:
+				// Full: the rest, in order, on a later tick.
+				break queue
 			}
 		}
 		for _, rs := range p.r.Resizes()[resizes:] {
@@ -329,6 +339,27 @@ func (p *proc) forward(exited <-chan struct{}) {
 	}
 }
 
+// writeInput writes inputs in order to the stdin pipe or the PTY. A write
+// blocked by a process that does not read ends when Wait closes the pipe
+// (or the PTY is closed).
+func (p *proc) writeInput(in <-chan supervisor.FakeInput) {
+	var w io.Writer
+	switch {
+	case p.ptmx != nil:
+		w = p.ptmx
+	case p.stdin != nil:
+		w = p.stdin
+	}
+	for x := range in {
+		if w != nil && len(x.Data) > 0 {
+			_, _ = w.Write(x.Data)
+		}
+		if x.CloseStdin && p.stdin != nil {
+			_ = p.stdin.Close()
+		}
+	}
+}
+
 // kill signals the process group of the command.
 func (p *proc) kill(sig syscall.Signal) {
 	if sig == 0 || p.cmd.Process == nil {
@@ -347,7 +378,9 @@ func (p *proc) timeout() {
 	if p.spec.KillGraceMs > 0 {
 		grace = time.Duration(p.spec.KillGraceMs) * time.Millisecond //nolint:gosec // bounded by the agent
 	}
-	time.AfterFunc(grace, func() { p.kill(unix.SIGKILL) })
+	p.mu.Lock()
+	p.graceKill = time.AfterFunc(grace, func() { p.kill(unix.SIGKILL) })
+	p.mu.Unlock()
 }
 
 // recordExit writes the exit of the process to the fake shim. An exit the

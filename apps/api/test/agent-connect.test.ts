@@ -323,6 +323,54 @@ describe("ConnectAgentApi: Process", () => {
 		await expect(agent.get("m1", "c1")).rejects.toBeInstanceOf(AgentCallError);
 	});
 
+	it("an unknown numeric enum (ExitReason 99, ExitStatus 42) is bad_response, never guessed", async () => {
+		for (const exit of [
+			{ status: ExitStatus.EXITED, code: 0, reason: 99 as ExitReason },
+			{ status: 42 as ExitStatus, code: 0, reason: ExitReason.NONE },
+		]) {
+			const { agent } = api({
+				process: {
+					get: () => ({
+						command: runningInfo({ state: CommandState.EXITED, exit }),
+					}),
+				},
+			});
+			const e = await agent.get("m1", "c1").catch((x: unknown) => x);
+			expect(e).toBeInstanceOf(AgentCallError);
+			expect((e as AgentCallError).code).toBe("bad_response");
+		}
+	});
+
+	it("attach: an exit event with status UNSPECIFIED or an unknown reason is bad_response", async () => {
+		for (const value of [
+			{ status: ExitStatus.UNSPECIFIED, code: 1, reason: ExitReason.NONE },
+			{ status: ExitStatus.EXITED, code: 1, reason: 99 as ExitReason },
+		]) {
+			const { agent } = api({
+				process: {
+					async *attach() {
+						yield { event: { case: "exit", value } };
+					},
+				},
+			});
+			const e = await (async () => {
+				for await (const _ of agent.attach(
+					"m1",
+					{ commandId: "c1", stdoutOffset: 0, stderrOffset: 0, ptyOffset: 0 },
+					new AbortController().signal,
+				)) {
+					// drain
+				}
+			})().catch((x: unknown) => x);
+			expect(e).toBeInstanceOf(AgentCallError);
+			expect((e as AgentCallError).code).toBe("bad_response");
+			expect(agentErrorToHttp(e)).toMatchObject({
+				status: 502,
+				code: "agent_error",
+			});
+		}
+	});
+
 	it("uint64 beyond 2^53 − 1 is an adapter error, never truncated; MAX_SAFE_INTEGER passes", async () => {
 		const max = BigInt(Number.MAX_SAFE_INTEGER);
 		const { agent: ok } = api({
