@@ -113,7 +113,9 @@ const rotateKey = createRoute({
 		200: jsonResponse(ApiKeySecretSchema, "The new secret, shown once"),
 		403: owner403,
 		404: notFound404,
-		409: errorResponse("`invalid_state`: the key is revoked"),
+		409: errorResponse(
+			"`invalid_state`: the key is revoked or expired (`details.state`)",
+		),
 		...ERROR_RESPONSES,
 	},
 });
@@ -165,7 +167,7 @@ function toApiKey(k: ApiKeyRecord): ApiKeyView {
 	return {
 		id: encodeUuid("apiKey", k.id),
 		kind: k.kind,
-		sandboxId: k.sandboxId,
+		sandboxId: k.sandboxId === null ? null : encodeUuid("sandbox", k.sandboxId),
 		teamId: encodeUuid("team", k.teamId),
 		name: k.name,
 		prefix: k.prefix,
@@ -231,6 +233,15 @@ function revokedError(): ApiError {
 	);
 }
 
+function expiredError(): ApiError {
+	return new ApiError(
+		409,
+		"invalid_state",
+		"the key has expired; issue a new one",
+		{ details: { state: "expired" } },
+	);
+}
+
 export function registerApiKeyRoutes(app: ApiApp, deps: ApiDeps): void {
 	app.openapi(listKeys, async (c) => {
 		const p = authOf(c).principal;
@@ -262,6 +273,8 @@ export function registerApiKeyRoutes(app: ApiApp, deps: ApiDeps): void {
 		const p = authOf(c).principal;
 		const k = await teamKey(deps, p, c.req.valid("param").key);
 		if (k.revokedAt !== null) throw revokedError();
+		// Rotation keeps the expiry, so an expired key would stay unusable.
+		if (k.expiresAt.getTime() <= Date.now()) throw expiredError();
 		const { secret, ...stored } = newSecret();
 		let rotated: ApiKeyRecord;
 		try {

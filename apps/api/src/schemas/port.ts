@@ -1,13 +1,21 @@
 // Hosted ports (S7 §11.2, S4 §8). The port token is only in the answer of
 // the call that issued it; GET never returns it.
 import { z } from "@hono/zod-openapi";
-import { PORT_APP_PROTOCOLS, PORT_HOST_REWRITES, PORT_MODES } from "@sbx/core";
+import {
+	PORT_APP_PROTOCOLS,
+	PORT_HOST_REWRITES,
+	PORT_MODES,
+	RESERVED_PORTS,
+} from "@sbx/core";
 import { extensibleEnum } from "../openapi/registry.ts";
 import { Timestamp } from "./common.ts";
 
 const ACCESS = PORT_MODES as readonly ["token", "sso", "public"];
 const HOST_REWRITES = PORT_HOST_REWRITES as readonly ["preserve", "localhost"];
 const APP_PROTOCOLS = PORT_APP_PROTOCOLS as readonly ["http1", "h2c"];
+
+/** The ports nobody may host, as text for descriptions ("22, 47800, ..."). */
+export const RESERVED_PORTS_TEXT = RESERVED_PORTS.join(", ");
 
 export const PortParams = z.object({
 	sandbox: z.string().openapi({
@@ -22,8 +30,7 @@ export const PortParams = z.object({
 		.max(65535)
 		.openapi({
 			param: { name: "port", in: "path" },
-			description:
-				"TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform)",
+			description: `TCP port in the guest, 1-65535; not ${RESERVED_PORTS_TEXT} (platform)`,
 			example: 3000,
 		}),
 });

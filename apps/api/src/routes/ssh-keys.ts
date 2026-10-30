@@ -44,7 +44,7 @@ const listSshKeys = createRoute({
 		"or `sbx login`).",
 	tags: TAGS,
 	security: HUMAN_ONLY,
-	middleware: [requireScope("ssh:connect"), requireHuman()] as const,
+	middleware: [requireHuman(), requireScope("ssh:connect")] as const,
 	responses: {
 		200: jsonResponse(SshKeyListSchema, "My SSH keys"),
 		403: human403,
@@ -63,7 +63,7 @@ const addSshKey = createRoute({
 		"certificates. A key can belong to one person on the platform only.",
 	tags: TAGS,
 	security: HUMAN_ONLY,
-	middleware: [requireScope("ssh:connect"), requireHuman()] as const,
+	middleware: [requireHuman(), requireScope("ssh:connect")] as const,
 	request: { body: jsonBody(CreateSshKeyRequest, "Name and public key") },
 	responses: {
 		201: jsonResponse(SshKeySchema, "Added"),
@@ -85,7 +85,7 @@ const removeSshKey = createRoute({
 		"The key stops working for new logins at once; open sessions stay.",
 	tags: TAGS,
 	security: HUMAN_ONLY,
-	middleware: [requireScope("ssh:connect"), requireHuman()] as const,
+	middleware: [requireHuman(), requireScope("ssh:connect")] as const,
 	request: { params: SshKeyParams },
 	responses: {
 		204: { description: "Removed" },

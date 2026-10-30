@@ -343,6 +343,31 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 			expect(revoked.status).toBe(409);
 			expect(body(revoked).error.code).toBe("invalid_state");
 		});
+
+		it("an expired key is 409 invalid_state with details.state expired, the secret is unchanged", async () => {
+			const owner = await session("owner");
+			const { apiKey } = await create(owner);
+			const id = decodeUuid("apiKey", apiKey.id) as string;
+			await db.pool.query(
+				"UPDATE identity.api_keys SET expires_at = now() - interval '1 second' WHERE id = $1",
+				[id],
+			);
+			const before = await db.pool.query(
+				"SELECT secret_hash FROM identity.api_keys WHERE id = $1",
+				[id],
+			);
+			const r = await owner.req("POST", `/v1/api-keys/${apiKey.id}/rotate`);
+			expect(r.status, r.text).toBe(409);
+			expect(body(r).error).toMatchObject({
+				code: "invalid_state",
+				details: { state: "expired" },
+			});
+			const after = await db.pool.query(
+				"SELECT secret_hash FROM identity.api_keys WHERE id = $1",
+				[id],
+			);
+			expect(after.rows).toEqual(before.rows);
+		});
 	});
 
 	async function otherTeamKey() {

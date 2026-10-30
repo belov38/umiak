@@ -28,6 +28,7 @@ import {
 	HostPortRequest,
 	PortParams,
 	PortTokenSchema,
+	RESERVED_PORTS_TEXT,
 	SandboxPortsSchema,
 } from "../schemas/port.ts";
 
@@ -35,8 +36,8 @@ const TAGS = ["ports"];
 
 const notFound404 = errorResponse("`not_found`: no such sandbox in the team");
 const port400 = errorResponse(
-	"`validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, " +
-		"48010), or more than 50 hosted ports",
+	`\`validation\`: port outside 1-65535, a reserved port (${RESERVED_PORTS_TEXT}), ` +
+		"or more than 50 hosted ports",
 );
 
 const listPorts = createRoute({

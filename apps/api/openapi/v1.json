@@ -4287,7 +4287,7 @@
 								}
 							}
 						},
-						"description": "`invalid_state`: the key is revoked"
+						"description": "`invalid_state`: the key is revoked or expired (`details.state`)"
 					},
 					"default": {
 						"content": {

@@ -174,4 +174,13 @@ describe.skipIf(skipPg())("SSH keys (S7 §11.3)", () => {
 			});
 		}
 	});
+
+	it("a team key without ssh:connect is told user_required, not the scope", async () => {
+		const k = await w.key(["sandboxes:read"]);
+		const r = await w
+			.harness({ bearer: k.secret })
+			.request("GET", "/v1/ssh-keys");
+		expect(r.status).toBe(403);
+		expect(body(r).error.details).toEqual({ reason: "user_required" });
+	});
 });
