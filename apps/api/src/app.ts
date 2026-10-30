@@ -29,13 +29,16 @@ import { registerSecuritySchemes } from "./openapi/registry.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
 import { registerCommandRoutes } from "./routes/commands.ts";
 import { registerEnvRoutes } from "./routes/env.ts";
+import { registerEnvironmentRoutes } from "./routes/environments.ts";
 import { registerFileRoutes } from "./routes/files.ts";
 import { registerLimitsRoutes } from "./routes/limits.ts";
 import { registerMeRoutes } from "./routes/me.ts";
 import { registerMetaRoutes } from "./routes/meta.ts";
 import { registerOperationRoutes } from "./routes/operations.ts";
+import { registerPortRoutes } from "./routes/ports.ts";
 import { registerPtyRoutes } from "./routes/ptys.ts";
 import { registerSandboxRoutes } from "./routes/sandboxes.ts";
+import { registerSnapshotRoutes } from "./routes/snapshots.ts";
 
 /** Common middleware and error handling of the listener apps. */
 function listenerApp(
@@ -79,6 +82,9 @@ export function mountV1(app: ApiApp, deps: ApiDeps): void {
 	registerCommandRoutes(app, deps);
 	registerPtyRoutes(app, deps);
 	registerFileRoutes(app, deps);
+	registerPortRoutes(app, deps);
+	registerSnapshotRoutes(app, deps);
+	registerEnvironmentRoutes(app, deps);
 	registerCatalogRoutes(app, deps);
 	registerLimitsRoutes(app, deps);
 }

@@ -53,6 +53,16 @@ export interface ApiWorld {
 		h: Harness;
 		headers: Record<string, string>;
 	};
+	/**
+	 * A browser session of a user stored in identity.users with this role in
+	 * the world's team (its default team), through `identity`; for writes
+	 * that reference the user (environments `updated_by`).
+	 */
+	dbSession(o: { role: "owner" | "member"; deps?: Partial<ApiDeps> }): Promise<{
+		h: Harness;
+		headers: Record<string, string>;
+		userId: string;
+	}>;
 	/** A new key of the team with these scopes. */
 	key(scopes: Scope[]): Promise<{ secret: string; id: string }>;
 	/** A sandbox row of the world's template and team (core's seedSandbox). */
@@ -134,6 +144,29 @@ export async function apiWorld(
 					"x-auth-request-user": sub,
 					origin: settings.appOrigin,
 				},
+			};
+		},
+		async dbSession(o) {
+			const sub = `sub-${randomUUID()}`;
+			const email = `${sub}@example.com`;
+			const r = await pool.query<{ id: string }>(
+				`INSERT INTO identity.users (email, idp_subject, default_team_id)
+				 VALUES ($1, $2, $3) RETURNING id`,
+				[email, sub, teamId],
+			);
+			const userId = r.rows[0]?.id as string;
+			await pool.query(
+				"INSERT INTO identity.memberships (user_id, team_id, role) VALUES ($1, $2, $3)",
+				[userId, teamId, o.role],
+			);
+			return {
+				h: createHarness({ listener: "proxied", deps: deps(o.deps) }),
+				headers: {
+					"x-auth-request-email": email,
+					"x-auth-request-user": sub,
+					origin: settings.appOrigin,
+				},
+				userId,
 			};
 		},
 		async key(scopes) {

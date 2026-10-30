@@ -706,6 +706,56 @@
 				],
 				"type": "object"
 			},
+			"CreateEnvironmentRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"env": {
+						"$ref": "#/components/schemas/EnvVars"
+					},
+					"excludeOwnerSecrets": {
+						"description": "Do not pass the creating user's personal secrets into the sandbox (stored only)",
+						"type": "boolean"
+					},
+					"isDefault": {
+						"description": "Applied to every create of the team that names no environment; the previous default stops being one",
+						"type": "boolean"
+					},
+					"name": {
+						"description": "Unique in the team: `^[a-z0-9][a-z0-9-]{0,62}$`",
+						"example": "production",
+						"pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+						"type": "string"
+					},
+					"repositories": {
+						"description": "Up to 20 repositories; stored and returned only (cloning comes later)",
+						"items": {
+							"$ref": "#/components/schemas/RepositoryInput"
+						},
+						"maxItems": 20,
+						"type": "array"
+					},
+					"secretFiles": {
+						"items": {
+							"$ref": "#/components/schemas/SecretFileInput"
+						},
+						"type": "array"
+					},
+					"secrets": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Secret variables (never returned)"
+							}
+						]
+					}
+				},
+				"required": [
+					"name"
+				],
+				"type": "object"
+			},
 			"CreatePtyRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -859,6 +909,29 @@
 				},
 				"type": "object"
 			},
+			"CreateSnapshotRequest": {
+				"additionalProperties": false,
+				"description": "A ready snapshot with this name is replaced once the new one is ready",
+				"properties": {
+					"name": {
+						"description": "Name within the team: `^[a-z0-9][a-z0-9-]{0,62}$`",
+						"example": "web-stack",
+						"pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+						"type": "string"
+					},
+					"sandbox": {
+						"description": "Source sandbox: id (`sb_...`) or slug",
+						"example": "quiet-otter-lamp",
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"sandbox",
+					"name"
+				],
+				"type": "object"
+			},
 			"CreateUploadRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -939,6 +1012,268 @@
 					]
 				},
 				"description": "Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a newline are not visible in SSH sessions. Merged by key: null deletes the key.",
+				"type": "object"
+			},
+			"Environment": {
+				"description": "An environment with its env values (secret values never)",
+				"properties": {
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"env": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVars"
+							},
+							{
+								"description": "Env variables with their values"
+							}
+						]
+					},
+					"envKeys": {
+						"description": "Names of env variables",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"excludeOwnerSecrets": {
+						"type": "boolean"
+					},
+					"id": {
+						"example": "env_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"isDefault": {
+						"type": "boolean"
+					},
+					"name": {
+						"example": "production",
+						"type": "string"
+					},
+					"repositories": {
+						"items": {
+							"properties": {
+								"branch": {
+									"type": "string"
+								},
+								"path": {
+									"type": "string"
+								},
+								"url": {
+									"type": "string"
+								}
+							},
+							"required": [
+								"url"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
+					"revision": {
+						"description": "1 on create, + 1 on every change",
+						"type": "integer"
+					},
+					"secretFiles": {
+						"items": {
+							"properties": {
+								"linkPath": {
+									"type": [
+										"string",
+										"null"
+									]
+								},
+								"mode": {
+									"type": "integer"
+								},
+								"name": {
+									"type": "string"
+								},
+								"sizeBytes": {
+									"type": "integer"
+								}
+							},
+							"required": [
+								"name",
+								"mode",
+								"linkPath",
+								"sizeBytes"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
+					"secretKeys": {
+						"description": "Names of secret variables (values never)",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"updatedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"updatedBy": {
+						"description": "User (`usr_...`) of the last change; null for a team key",
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"isDefault",
+					"revision",
+					"envKeys",
+					"secretKeys",
+					"secretFiles",
+					"repositories",
+					"excludeOwnerSecrets",
+					"createdAt",
+					"updatedAt",
+					"updatedBy",
+					"env"
+				],
+				"type": "object"
+			},
+			"EnvironmentList": {
+				"description": "Environments of the team by name",
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/EnvironmentSummary"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"data"
+				],
+				"type": "object"
+			},
+			"EnvironmentSummary": {
+				"description": "An environment without values",
+				"properties": {
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"envKeys": {
+						"description": "Names of env variables",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"excludeOwnerSecrets": {
+						"type": "boolean"
+					},
+					"id": {
+						"example": "env_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"isDefault": {
+						"type": "boolean"
+					},
+					"name": {
+						"example": "production",
+						"type": "string"
+					},
+					"repositories": {
+						"items": {
+							"properties": {
+								"branch": {
+									"type": "string"
+								},
+								"path": {
+									"type": "string"
+								},
+								"url": {
+									"type": "string"
+								}
+							},
+							"required": [
+								"url"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
+					"revision": {
+						"description": "1 on create, + 1 on every change",
+						"type": "integer"
+					},
+					"secretFiles": {
+						"items": {
+							"properties": {
+								"linkPath": {
+									"type": [
+										"string",
+										"null"
+									]
+								},
+								"mode": {
+									"type": "integer"
+								},
+								"name": {
+									"type": "string"
+								},
+								"sizeBytes": {
+									"type": "integer"
+								}
+							},
+							"required": [
+								"name",
+								"mode",
+								"linkPath",
+								"sizeBytes"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
+					"secretKeys": {
+						"description": "Names of secret variables (values never)",
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"updatedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"updatedBy": {
+						"description": "User (`usr_...`) of the last change; null for a team key",
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"isDefault",
+					"revision",
+					"envKeys",
+					"secretKeys",
+					"secretFiles",
+					"repositories",
+					"excludeOwnerSecrets",
+					"createdAt",
+					"updatedAt",
+					"updatedBy"
+				],
 				"type": "object"
 			},
 			"Error": {
@@ -1167,6 +1502,187 @@
 				},
 				"type": "object"
 			},
+			"HostPortRequest": {
+				"additionalProperties": false,
+				"description": "The full desired settings (PUT): an omitted field takes its default, not the current value",
+				"properties": {
+					"access": {
+						"description": "token (default): a secret link; sso: any signed-in user of the platform; public: anyone (the operator may turn public off)",
+						"enum": [
+							"token",
+							"sso",
+							"public"
+						],
+						"type": "string"
+					},
+					"appProtocol": {
+						"description": "http1 (default) or h2c (HTTP/2 without TLS, gRPC)",
+						"enum": [
+							"http1",
+							"h2c"
+						],
+						"type": "string"
+					},
+					"hostRewrite": {
+						"description": "preserve (default): the app sees the public Host; localhost: Host is rewritten to localhost:<port> for dev servers that check it",
+						"enum": [
+							"preserve",
+							"localhost"
+						],
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
+			"HostedPort": {
+				"description": "A port published by the gateway",
+				"properties": {
+					"access": {
+						"enum": [
+							"token",
+							"sso",
+							"public"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"appProtocol": {
+						"enum": [
+							"http1",
+							"h2c"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"blockReason": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"blocked": {
+						"description": "An operator blocked the port; the gateway refuses it",
+						"type": "boolean"
+					},
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"hostRewrite": {
+						"enum": [
+							"preserve",
+							"localhost"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"label": {
+						"description": "`<slug>-<port>`, the first DNS label of the URL",
+						"example": "quiet-otter-lamp-3000",
+						"type": "string"
+					},
+					"port": {
+						"example": 3000,
+						"type": "integer"
+					},
+					"url": {
+						"example": "https://quiet-otter-lamp-3000.sbx.example.com",
+						"type": "string"
+					}
+				},
+				"required": [
+					"port",
+					"label",
+					"url",
+					"access",
+					"hostRewrite",
+					"appProtocol",
+					"blocked",
+					"blockReason",
+					"createdAt"
+				],
+				"type": "object"
+			},
+			"HostedPortWrite": {
+				"description": "The hosted port; with the token when this call issued one",
+				"properties": {
+					"access": {
+						"enum": [
+							"token",
+							"sso",
+							"public"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"appProtocol": {
+						"enum": [
+							"http1",
+							"h2c"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"blockReason": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"blocked": {
+						"description": "An operator blocked the port; the gateway refuses it",
+						"type": "boolean"
+					},
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"hostRewrite": {
+						"enum": [
+							"preserve",
+							"localhost"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"label": {
+						"description": "`<slug>-<port>`, the first DNS label of the URL",
+						"example": "quiet-otter-lamp-3000",
+						"type": "string"
+					},
+					"port": {
+						"example": 3000,
+						"type": "integer"
+					},
+					"token": {
+						"description": "Only when this call issued a token (a new token port or a switch to token). It is not stored and never shown again: replace a lost one with rotate-token",
+						"example": "sbxp_...",
+						"type": "string"
+					},
+					"url": {
+						"example": "https://quiet-otter-lamp-3000.sbx.example.com",
+						"type": "string"
+					},
+					"urlWithToken": {
+						"description": "`url` + `/?_token=<token>`, with `token`",
+						"type": "string"
+					}
+				},
+				"required": [
+					"port",
+					"label",
+					"url",
+					"access",
+					"hostRewrite",
+					"appProtocol",
+					"blocked",
+					"blockReason",
+					"createdAt"
+				],
+				"type": "object"
+			},
 			"Labels": {
 				"additionalProperties": {
 					"type": "string"
@@ -1334,6 +1850,33 @@
 					"canCreate",
 					"templates",
 					"rateLimits"
+				],
+				"type": "object"
+			},
+			"ListeningPort": {
+				"description": "A TCP port a process in the guest listens on",
+				"properties": {
+					"addresses": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"port": {
+						"type": "integer"
+					},
+					"process": {
+						"type": "string"
+					},
+					"user": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"port",
+					"addresses",
+					"process",
+					"user"
 				],
 				"type": "object"
 			},
@@ -1763,6 +2306,53 @@
 					"object",
 					"null"
 				]
+			},
+			"PortToken": {
+				"description": "The new token; the old token and its cookies stopped working",
+				"properties": {
+					"token": {
+						"example": "sbxp_...",
+						"type": "string"
+					},
+					"urlWithToken": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"token",
+					"urlWithToken"
+				],
+				"type": "object"
+			},
+			"RepositoryInput": {
+				"additionalProperties": false,
+				"properties": {
+					"branch": {
+						"description": "Branch or tag",
+						"maxLength": 255,
+						"minLength": 1,
+						"pattern": "^[^\\s\\0]+$",
+						"type": "string"
+					},
+					"path": {
+						"description": "Directory relative to the home of `user` (default: the repository name)",
+						"maxLength": 1024,
+						"minLength": 1,
+						"pattern": "^[^\\0]+$",
+						"type": "string"
+					},
+					"url": {
+						"description": "https://..., ssh://... or git@host:org/repo.git, without credentials in the URL",
+						"example": "https://github.com/acme/web.git",
+						"maxLength": 2048,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"url"
+				],
+				"type": "object"
 			},
 			"ResizePtyRequest": {
 				"additionalProperties": false,
@@ -2358,6 +2948,36 @@
 				],
 				"type": "object"
 			},
+			"SandboxPorts": {
+				"properties": {
+					"hosted": {
+						"items": {
+							"$ref": "#/components/schemas/HostedPort"
+						},
+						"type": "array"
+					},
+					"listening": {
+						"items": {
+							"$ref": "#/components/schemas/ListeningPort"
+						},
+						"type": "array"
+					},
+					"listeningObservedAt": {
+						"description": "When `listening` was read from the agent; null when it is the last report stored for the sandbox (not ready or the agent is unreachable)",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"hosted",
+					"listening",
+					"listeningObservedAt"
+				],
+				"type": "object"
+			},
 			"SandboxState": {
 				"description": "`ready` means usable; creating, stopping, stopped, starting, error, deleting, deleted",
 				"enum": [
@@ -2462,6 +3082,154 @@
 					"data": {
 						"items": {
 							"$ref": "#/components/schemas/Size"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"data"
+				],
+				"type": "object"
+			},
+			"Snapshot": {
+				"description": "A saved snapshot; create a sandbox from it with POST /v1/sandboxes {from: {snapshot: name}}",
+				"properties": {
+					"consistency": {
+						"description": "quiesced: filesystems frozen in a running VM; powered_off: taken from a stopped VM; null until ready",
+						"enum": [
+							"quiesced",
+							"powered_off",
+							"crash",
+							null
+						],
+						"type": [
+							"string",
+							"null"
+						],
+						"x-extensible-enum": true
+					},
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"error": {
+						"description": "Why it failed; null otherwise",
+						"properties": {
+							"code": {
+								"type": "string"
+							},
+							"message": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"code",
+							"message"
+						],
+						"type": [
+							"object",
+							"null"
+						]
+					},
+					"id": {
+						"example": "snap_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"name": {
+						"description": "The name; while creating, the name it will get",
+						"example": "web-stack",
+						"type": "string"
+					},
+					"readyAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"size": {
+						"example": "2gb",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"sourceSandboxId": {
+						"description": "The sandbox it was taken from (`sb_...`)",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"state": {
+						"enum": [
+							"creating",
+							"ready",
+							"failed",
+							"deleting"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"template": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"templateVersion": {
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"state",
+					"sourceSandboxId",
+					"template",
+					"templateVersion",
+					"size",
+					"consistency",
+					"error",
+					"createdAt",
+					"readyAt"
+				],
+				"type": "object"
+			},
+			"SnapshotCreate": {
+				"description": "The new snapshot (creating) and the save_snapshot operation of the source sandbox",
+				"properties": {
+					"operation": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/Operation"
+							},
+							{
+								"description": "A long-running action on a sandbox; wait with GET /v1/operations/{operation}?waitSeconds="
+							}
+						]
+					},
+					"snapshot": {
+						"$ref": "#/components/schemas/Snapshot"
+					}
+				},
+				"required": [
+					"snapshot",
+					"operation"
+				],
+				"type": "object"
+			},
+			"SnapshotList": {
+				"properties": {
+					"data": {
+						"description": "Ready and creating snapshots and those that failed within a day, newest first",
+						"items": {
+							"$ref": "#/components/schemas/Snapshot"
 						},
 						"type": "array"
 					}
@@ -2671,6 +3439,49 @@
 				],
 				"type": "object"
 			},
+			"UpdateEnvironmentRequest": {
+				"additionalProperties": false,
+				"description": "Sets merge by key (null deletes a key or a file); repositories are replaced; revision + 1",
+				"properties": {
+					"env": {
+						"$ref": "#/components/schemas/EnvVarsPatch"
+					},
+					"excludeOwnerSecrets": {
+						"type": "boolean"
+					},
+					"isDefault": {
+						"type": "boolean"
+					},
+					"name": {
+						"description": "Unique in the team: `^[a-z0-9][a-z0-9-]{0,62}$`",
+						"example": "production",
+						"pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+						"type": "string"
+					},
+					"repositories": {
+						"description": "Replaces the list whole",
+						"items": {
+							"$ref": "#/components/schemas/RepositoryInput"
+						},
+						"maxItems": 20,
+						"type": "array"
+					},
+					"secretFiles": {
+						"$ref": "#/components/schemas/SecretFilesPatch"
+					},
+					"secrets": {
+						"allOf": [
+							{
+								"$ref": "#/components/schemas/EnvVarsPatch"
+							},
+							{
+								"description": "Secret variables (tmpfs in the guest); merged like env"
+							}
+						]
+					}
+				},
+				"type": "object"
+			},
 			"UpdateSandboxRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -2811,6 +3622,314 @@
 				"summary": "API reference page",
 				"tags": [
 					"meta"
+				]
+			}
+		},
+		"/v1/environments": {
+			"get": {
+				"description": "Environments of the team by name, without values: names of env and secret variables and the metadata of secret files.",
+				"operationId": "environments.list",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/EnvironmentList"
+								}
+							}
+						},
+						"description": "Environments of the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List environments",
+				"tags": [
+					"environments"
+				]
+			},
+			"post": {
+				"description": "A named set of env, secrets, secret files and repositories that new sandboxes of the team get at create (`environment` of POST /v1/sandboxes; the default one when it is omitted). Changes apply to new sandboxes only. Only owners (or a team key with environments:write).",
+				"operationId": "environments.create",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateEnvironmentRequest"
+							}
+						}
+					},
+					"description": "The environment",
+					"required": true
+				},
+				"responses": {
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Environment"
+								}
+							}
+						},
+						"description": "Created"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: name, repositories, or a limit of the sets (checked on the result)"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden`: the key lacks environments:write (details.requiredScope), or the person is not an owner of the team (details.reason `role`)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`already_exists`: the name is taken in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Create an environment",
+				"tags": [
+					"environments"
+				]
+			}
+		},
+		"/v1/environments/{environment}": {
+			"delete": {
+				"description": "Sandboxes created from it keep their values.",
+				"operationId": "environments.delete",
+				"parameters": [
+					{
+						"description": "Environment id (`env_...`) or name",
+						"in": "path",
+						"name": "environment",
+						"required": true,
+						"schema": {
+							"description": "Environment id (`env_...`) or name",
+							"example": "production",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Deleted"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden`: the key lacks environments:write (details.requiredScope), or the person is not an owner of the team (details.reason `role`)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such environment in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Delete an environment",
+				"tags": [
+					"environments"
+				]
+			},
+			"get": {
+				"description": "The environment with its env values. Secret values are never returned, only their names.",
+				"operationId": "environments.get",
+				"parameters": [
+					{
+						"description": "Environment id (`env_...`) or name",
+						"in": "path",
+						"name": "environment",
+						"required": true,
+						"schema": {
+							"description": "Environment id (`env_...`) or name",
+							"example": "production",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Environment"
+								}
+							}
+						},
+						"description": "The environment"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such environment in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Get an environment",
+				"tags": [
+					"environments"
+				]
+			},
+			"patch": {
+				"description": "Sets merge by key: a value sets the variable, null deletes it; secret files by name (null deletes). `repositories` replaces the list. `revision` grows by one. Sandboxes created before keep their values.",
+				"operationId": "environments.update",
+				"parameters": [
+					{
+						"description": "Environment id (`env_...`) or name",
+						"in": "path",
+						"name": "environment",
+						"required": true,
+						"schema": {
+							"description": "Environment id (`env_...`) or name",
+							"example": "production",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UpdateEnvironmentRequest"
+							}
+						}
+					},
+					"description": "Changes",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Environment"
+								}
+							}
+						},
+						"description": "The changed environment"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: name, repositories, or a limit of the sets (checked on the result)"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden`: the key lacks environments:write (details.requiredScope), or the person is not an owner of the team (details.reason `role`)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such environment in the team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`already_exists`: the name is taken in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Change an environment",
+				"tags": [
+					"environments"
 				]
 			}
 		},
@@ -6671,6 +7790,337 @@
 				]
 			}
 		},
+		"/v1/sandboxes/{sandbox}/ports": {
+			"get": {
+				"description": "`hosted`: ports published through the gateway, with their URLs (tokens are never shown again). `listening`: TCP ports processes in the guest listen on, live from the agent when the sandbox is ready, else the last report.",
+				"operationId": "ports.list",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxPorts"
+								}
+							}
+						},
+						"description": "Hosted and listening ports"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List hosted and listening ports",
+				"tags": [
+					"ports"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ports/{port}": {
+			"delete": {
+				"description": "Stops publishing the port; its links and cookies stop working. Repeating is safe: a port that is not hosted also answers 204.",
+				"operationId": "ports.delete",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "TCP port in the guest, 1-65535 (not 22)",
+						"in": "path",
+						"name": "port",
+						"required": true,
+						"schema": {
+							"description": "TCP port in the guest, 1-65535 (not 22)",
+							"example": 3000,
+							"maximum": 65535,
+							"minimum": 1,
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Not hosted any more"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: port outside 1-65535, a reserved port (22), or more than 50 hosted ports"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Unpublish a port",
+				"tags": [
+					"ports"
+				]
+			},
+			"put": {
+				"description": "Publishes the guest port at `https://<slug>-<port>.<sbxDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.",
+				"operationId": "ports.put",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "TCP port in the guest, 1-65535 (not 22)",
+						"in": "path",
+						"name": "port",
+						"required": true,
+						"schema": {
+							"description": "TCP port in the guest, 1-65535 (not 22)",
+							"example": 3000,
+							"maximum": 65535,
+							"minimum": 1,
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/HostPortRequest"
+							}
+						}
+					},
+					"description": "Settings of the port",
+					"required": false
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HostedPortWrite"
+								}
+							}
+						},
+						"description": "Changed or unchanged"
+					},
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HostedPortWrite"
+								}
+							}
+						},
+						"description": "Published"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: port outside 1-65535, a reserved port (22), or more than 50 hosted ports"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `public_disabled`: the operator turned public ports off"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`: deleting or deleted"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Publish a port or change its access",
+				"tags": [
+					"ports"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ports/{port}/rotate-token": {
+			"post": {
+				"description": "Replaces the token of a token port: the old token, its links and cookies stop working at once. The new token is returned only here.",
+				"operationId": "ports.rotateToken",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"description": "TCP port in the guest, 1-65535 (not 22)",
+						"in": "path",
+						"name": "port",
+						"required": true,
+						"schema": {
+							"description": "TCP port in the guest, 1-65535 (not 22)",
+							"example": 3000,
+							"maximum": 65535,
+							"minimum": 1,
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PortToken"
+								}
+							}
+						},
+						"description": "The new token"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: a bad port or the port is not in token mode"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox, or the port is not hosted"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`: deleting or deleted"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Issue a new port token",
+				"tags": [
+					"ports"
+				]
+			}
+		},
 		"/v1/sandboxes/{sandbox}/ptys": {
 			"post": {
 				"description": "Starts a PTY command in a ready sandbox (a creating or starting one is awaited up to 60 s): the user's login shell, or `command` run by `bash -lc` in the terminal. Answers 201 Command (mode `pty`, one output stream `pty`). Connect with GET .../connect (WebSocket), or read it with GET .../commands/{command}/stream?ptyOffset= and write with POST .../commands/{command}/input. A PTY with no client connected is closed by the agent after 10 min (reason pty_idle). With an Idempotency-Key a repeat returns the same command with 200 and `Idempotency-Replayed: true`. Needs the agent capability process.pty.",
@@ -7257,6 +8707,263 @@
 				"summary": "List sizes",
 				"tags": [
 					"catalog"
+				]
+			}
+		},
+		"/v1/snapshots": {
+			"get": {
+				"description": "Saved snapshots of the team, newest first: ready ones, those being created (under the name they will get) and those that failed within the last day.",
+				"operationId": "snapshots.list",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SnapshotList"
+								}
+							}
+						},
+						"description": "Saved snapshots"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List saved snapshots",
+				"tags": [
+					"snapshots"
+				]
+			},
+			"post": {
+				"description": "Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in `creating` and the `save_snapshot` operation of the sandbox; wait with GET /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the new one is ready. Send an Idempotency-Key to retry safely.",
+				"operationId": "snapshots.create",
+				"parameters": [
+					{
+						"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the stored result instead of saving again (24 h)",
+						"in": "header",
+						"name": "Idempotency-Key",
+						"required": false,
+						"schema": {
+							"description": "1-255 printable ASCII characters; a repeat with the same key and body returns the stored result instead of saving again (24 h)",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateSnapshotRequest"
+							}
+						}
+					},
+					"description": "Source sandbox and name",
+					"required": true
+				},
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SnapshotCreate"
+								}
+							}
+						},
+						"description": "Saving",
+						"headers": {
+							"Idempotency-Replayed": {
+								"description": "`true` when the answer is the stored result of an earlier request with this Idempotency-Key",
+								"schema": {
+									"enum": [
+										"true"
+									],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`quota_exceeded` (saved snapshots of the team) or `forbidden`"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state` (details.state), `operation_in_progress` (retryable) or `idempotency_key_reused`"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Save a snapshot of a sandbox",
+				"tags": [
+					"snapshots"
+				]
+			}
+		},
+		"/v1/snapshots/{name}": {
+			"delete": {
+				"description": "Deletes the ready snapshot of this name; the name is free at once, the disk is removed in the background. Needs the header Sbx-Confirm-Delete with the snapshot id (or name) — otherwise 428 and nothing happens. Sandboxes created from it stay.",
+				"operationId": "snapshots.delete",
+				"parameters": [
+					{
+						"description": "Name of the saved snapshot",
+						"in": "path",
+						"name": "name",
+						"required": true,
+						"schema": {
+							"description": "Name of the saved snapshot",
+							"example": "web-stack",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Required: the id (`snap_...`) or the name of the snapshot in the path; without it or with another snapshot the answer is 428 and nothing is deleted",
+						"in": "header",
+						"name": "Sbx-Confirm-Delete",
+						"required": false,
+						"schema": {
+							"description": "Required: the id (`snap_...`) or the name of the snapshot in the path; without it or with another snapshot the answer is 428 and nothing is deleted",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Deleting"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`snapshot_not_found`: no ready or creating snapshot of this name in the team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state` (details.state `creating`): wait until it is ready"
+					},
+					"428": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`confirmation_required`: Sbx-Confirm-Delete is missing or names another resource"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Delete a saved snapshot",
+				"tags": [
+					"snapshots"
+				]
+			},
+			"get": {
+				"description": "The ready snapshot of this name, else the one being created under it.",
+				"operationId": "snapshots.get",
+				"parameters": [
+					{
+						"description": "Name of the saved snapshot",
+						"in": "path",
+						"name": "name",
+						"required": true,
+						"schema": {
+							"description": "Name of the saved snapshot",
+							"example": "web-stack",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Snapshot"
+								}
+							}
+						},
+						"description": "The snapshot"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`snapshot_not_found`: no ready or creating snapshot of this name in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Get a saved snapshot",
+				"tags": [
+					"snapshots"
 				]
 			}
 		},

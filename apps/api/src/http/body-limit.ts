@@ -21,6 +21,8 @@ const LIMITS: [method: string, path: RegExp, limit: number | null][] = [
 	["POST", /^\/v1\/sandboxes\/[^/]+\/(fork|resume)$/, 12 * MiB],
 	["PUT", /^\/v1\/sandboxes\/[^/]+\/env$/, 12 * MiB],
 	["PATCH", /^\/v1\/sandboxes\/[^/]+\/env$/, 12 * MiB],
+	["POST", /^\/v1\/environments$/, 12 * MiB],
+	["PATCH", /^\/v1\/environments\/[^/]+$/, 12 * MiB],
 	["POST", /^\/internal\/v1\/agent-events$/, 16 * MiB],
 ];
 

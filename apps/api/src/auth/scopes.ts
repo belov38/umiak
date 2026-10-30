@@ -47,19 +47,36 @@ export function requireHuman(): MiddlewareHandler<ApiEnv> {
 	};
 }
 
+function ownerRequired(): ApiError {
+	return new ApiError(
+		403,
+		"forbidden",
+		"only an owner of the team can do this",
+		{
+			details: { reason: "role" },
+		},
+	);
+}
+
 /** A person with the `owner` role in the request's team; else 403 `user_required` or `role`. */
 export function requireOwner(): MiddlewareHandler<ApiEnv> {
 	return async (c, next) => {
 		const p = authOf(c).principal;
 		if (p.userId === null) throw userRequired();
-		if (p.role !== "owner") {
-			throw new ApiError(
-				403,
-				"forbidden",
-				"only an owner of the team can do this",
-				{ details: { reason: "role" } },
-			);
-		}
+		if (p.role !== "owner") throw ownerRequired();
+		await next();
+	};
+}
+
+/**
+ * A person needs the `owner` role (403 `role`); a team key passes, its
+ * scopes stand in for the role (an owner chose them, §7.5). Use after
+ * `requireScope`.
+ */
+export function requireOwnerUnlessKey(): MiddlewareHandler<ApiEnv> {
+	return async (c, next) => {
+		const p = authOf(c).principal;
+		if (p.userId !== null && p.role !== "owner") throw ownerRequired();
 		await next();
 	};
 }
