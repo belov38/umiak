@@ -51,7 +51,10 @@ const LOG_DIR = join(REPO_ROOT, "build-logs");
 
 /** Template verification (Task 10 wires the real one). */
 const verifyBuild:
-	| ((m: Manifest, o: { connect?: ConnectOptions }) => Promise<VerifyResult>)
+	| ((
+			m: Manifest,
+			o: { connect?: ConnectOptions; signal?: AbortSignal },
+	  ) => Promise<VerifyResult>)
 	| undefined = undefined;
 
 class UsageError extends Error {}
@@ -136,8 +139,11 @@ async function cmdBuild(
 	// First signal: fail the build at the next call and roll back. Second: exit at once.
 	const interrupt = new AbortController();
 	let buildId: string | undefined;
+	let exitCode = 130;
 	const onSignal = (sig: NodeJS.Signals) => {
 		if (!interrupt.signal.aborted) {
+			// 128 + signal number, as a shell reports it.
+			exitCode = sig === "SIGTERM" ? 143 : 130;
 			out(
 				`\n[sbx-tpl] ${sig}: rolling back; send it again to exit without cleanup`,
 			);
@@ -147,7 +153,7 @@ async function cmdBuild(
 		out(
 			`\n[sbx-tpl] exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run sbx-tpl cleanup`,
 		);
-		process.exit(130);
+		process.exit(exitCode);
 	};
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
@@ -227,7 +233,7 @@ async function cmdBuild(
 		out(`\n${err.message}`);
 		if (e?.tail?.length) out(`last lines of ${e.step}:\n${e.tail.join("\n")}`);
 		out(`step logs: ${join(LOG_DIR, err.manifest.buildId)}`);
-		return interrupt.signal.aborted ? 130 : 1;
+		return interrupt.signal.aborted ? exitCode : 1;
 	} finally {
 		process.off("SIGINT", onSignal);
 		process.off("SIGTERM", onSignal);

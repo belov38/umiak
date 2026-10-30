@@ -149,6 +149,8 @@ export class FakeGuest implements GuestIo {
 	onStep?: (step: string) => void;
 	/** Exit status of `sbx-agent seal`. */
 	sealExit = 0;
+	/** Exit status of the random seed stop and removal. */
+	randomSeedExit = 0;
 	log: string[];
 	#bootId = 1;
 
@@ -219,7 +221,15 @@ export class FakeGuest implements GuestIo {
 				this.log.push("guest:rm-build-logs");
 			if (s.includes("/dev/zero")) this.log.push("guest:zero-fill");
 			if (s.includes("fstrim")) this.log.push("guest:fstrim");
-			if (s.includes("systemd-random-seed")) this.log.push("guest:random-seed");
+			if (s.includes("systemd-random-seed")) {
+				this.log.push("guest:random-seed");
+				if (this.randomSeedExit !== 0)
+					return {
+						exitCode: this.randomSeedExit,
+						stdout: "",
+						stderr: "still active",
+					};
+			}
 		}
 		if (c0 === "fstrim") this.log.push("guest:fstrim");
 		if (c0 === "sync") this.log.push("guest:sync");

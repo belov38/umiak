@@ -215,11 +215,11 @@ describe("buildTemplate: happy path", () => {
 			"guest:write /etc/sbx-template/build.json.tmp",
 			"guest:mv /etc/sbx-template/build.json",
 			"guest:rm-build-logs",
+			"guest:random-seed",
 			"guest:seal",
 			"guest:zero-fill",
 			"guest:fstrim",
 			"guest:sync",
-			"guest:random-seed",
 			`api:POST ${vm}/agent/shutdown`,
 			"ram:release 598",
 			`api:PUT ${vm}/config`,
@@ -235,21 +235,30 @@ describe("buildTemplate: happy path", () => {
 		);
 	});
 
-	it("drops the random seed and the credential secret as the last guest call before shutdown", async () => {
+	it("drops the random seed and the credential secret right before seal and fails if the unit stays active", async () => {
 		const s = setup();
 		await buildTemplate(s.deps, s.opts);
-		const shutdownAt = s.log.indexOf(`api:POST ${vm}/agent/shutdown`);
-		const lastGuest = s.log
-			.slice(0, shutdownAt)
-			.filter((e) => e.startsWith("guest:"))
-			.at(-1);
-		expect(lastGuest).toBe("guest:random-seed");
-		const last = s.guest.calls.at(-1)?.cmd;
-		expect(last?.slice(0, 2)).toEqual(["bash", "-c"]);
-		// The stop runs ExecStop (which saves a seed) before the file goes.
-		expect(last?.[2]).toMatch(
-			/systemctl stop systemd-random-seed\.service.*rm -f \/var\/lib\/systemd\/random-seed \/var\/lib\/systemd\/credential\.secret/,
+		const guest = s.log.filter((e) => e.startsWith("guest:"));
+		expect(guest[guest.indexOf("guest:seal") - 1]).toBe("guest:random-seed");
+		const i = s.guest.calls.findIndex(
+			(c) => c.cmd.join(" ") === "sbx-agent seal",
 		);
+		const cmd = s.guest.calls[i - 1]?.cmd;
+		expect(cmd).toEqual([
+			"bash",
+			"-c",
+			// The stop runs ExecStop (which saves a seed) before the files go; any failure stops the build.
+			"systemctl stop systemd-random-seed.service && ! systemctl is-active -q systemd-random-seed.service && rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret && sync",
+		]);
+	});
+
+	it("a failing random seed stop fails the seal stage before seal", async () => {
+		const s = setup();
+		s.guest.randomSeedExit = 1;
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		expect((err as BuildFailedError).manifest.error?.stage).toBe("seal");
+		expect(s.log).not.toContain("guest:seal");
+		expect(s.pve.vms.has(598)).toBe(false);
 	});
 
 	it("reports the new build before it starts", async () => {
@@ -337,6 +346,13 @@ describe("buildTemplate: happy path", () => {
 			IMAGE_NAME,
 			isoName(m),
 		]);
+		// The order pveproxy accepts (see PveApi.upload).
+		for (const u of s.pve.uploads)
+			expect(Object.keys(u.fields)).toEqual([
+				"content",
+				"checksum-algorithm",
+				"checksum",
+			]);
 		expect(s.pve.uploads[0]?.file).toMatchObject({
 			path: s.image,
 			size: statSync(s.image).size,
@@ -473,6 +489,19 @@ describe("buildTemplate: happy path", () => {
 		expect(got).toEqual({
 			connect: { url: "wss://t.example.test/v1/connect", ctSsh: "u@h" },
 		});
+	});
+
+	it("passes the abort signal to verify", async () => {
+		const s = setup();
+		const ac = new AbortController();
+		s.deps.signal = ac.signal;
+		let got: { signal?: AbortSignal } | undefined;
+		s.deps.verify = async (_m, o) => {
+			got = o;
+			return VERIFY_OK;
+		};
+		await buildTemplate(s.deps, s.opts);
+		expect(got?.signal).toBe(ac.signal);
 	});
 });
 
@@ -731,6 +760,28 @@ describe("buildTemplate: failures", () => {
 		expect(s.pve.vms.has(598)).toBe(false);
 		expect(await s.allocator.get(598)).toBeUndefined();
 		expect(s.registry.get(m.buildId)?.status).toBe("failed");
+	});
+
+	it("an abort during a task-starting call still waits for the task, then rolls back", async () => {
+		const s = setup();
+		const ac = new AbortController();
+		s.deps.signal = ac.signal;
+		s.pve.before = (method, path) => {
+			if (method === "POST" && path === "/nodes/pve/qemu")
+				ac.abort(new Error("interrupted by SIGTERM"));
+		};
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		const m = (err as BuildFailedError).manifest;
+		expect(m.error).toMatchObject({
+			stage: "vm",
+			message: "interrupted by SIGTERM",
+		});
+		const create = s.log.indexOf("api:POST /nodes/pve/qemu");
+		expect(s.log[create + 1]).toMatch(/^api:wait UPID:/);
+		// Nothing after the wait but the rollback.
+		expect(s.log).not.toContain(`api:PUT ${vm}/resize`);
+		expect(s.pve.vms.has(598)).toBe(false);
+		expect(await s.allocator.get(598)).toBeUndefined();
 	});
 
 	it("rejects bad inputs before anything is recorded or created", async () => {

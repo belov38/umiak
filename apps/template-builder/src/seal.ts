@@ -131,8 +131,8 @@ export async function collectFacts(
 }
 
 /**
- * Removes the build leftovers 90-cleanup cannot remove itself, runs `sbx-agent seal`, then
- * zero-fills and trims the free space and drops the random seed. Nothing may write to the disk
+ * Removes the build leftovers 90-cleanup cannot remove itself and the random seed, runs
+ * `sbx-agent seal`, then zero-fills and trims the free space. Nothing may write to the disk
  * afterwards but shutdown.
  */
 export async function sealGuest(io: GuestIo): Promise<void> {
@@ -141,6 +141,14 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 		"-c",
 		`umount ${SEED_DIR} 2>/dev/null || true; rmdir ${SEED_DIR} 2>/dev/null || true; rm -rf ${BUILD_LOG_DIR}`,
 	]);
+	// No two clones may share these. Stopping systemd-random-seed runs its ExecStop, which saves
+	// a seed, so the files go after the stop; an inactive unit saves nothing at poweroff.
+	await must(io, [
+		"bash",
+		"-c",
+		"systemctl stop systemd-random-seed.service && ! systemctl is-active -q systemd-random-seed.service && rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret && sync",
+	]);
+	// After seal only the zero file is written; fstrim then covers the freed blocks.
 	await must(io, ["sbx-agent", "seal"], { timeoutMs: 2 * MIN });
 	// dd ends with "no space left", so its status does not count. Minutes on a 64 GiB disk.
 	await must(
@@ -154,11 +162,4 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 	);
 	await must(io, ["fstrim", "-av"], { timeoutMs: 10 * MIN });
 	await must(io, ["sync"], { timeoutMs: 5 * MIN });
-	// Last call before poweroff: stopping systemd-random-seed runs its ExecStop, which saves a
-	// seed; then the seed and the credential secret go, so no two clones share them.
-	await must(io, [
-		"bash",
-		"-c",
-		"systemctl stop systemd-random-seed.service; rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret; sync",
-	]);
 }

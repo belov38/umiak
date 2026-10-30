@@ -133,14 +133,19 @@ function prepare(deps: BuildDeps, o: BuildOptions): Prepared {
 	return { recipe, versions, verifyScript, manifest };
 }
 
-/** Proxmox client that fails every call once `signal` is aborted (checked before and after). */
+/**
+ * Proxmox client that fails every call once `signal` is aborted, checked before and after the
+ * call. A call that started a task (returned a UPID) is not failed afterwards, and waitTask is
+ * not checked before: the task finishes before the abort takes effect, so the rollback does
+ * not meet a VM locked by a running task.
+ */
 export function guardApi(api: BuildApi, signal: AbortSignal): BuildApi {
 	const g =
 		<A extends unknown[], R>(fn: (...a: A) => Promise<R>) =>
 		async (...a: A): Promise<R> => {
 			signal.throwIfAborted();
 			const r = await fn(...a);
-			signal.throwIfAborted();
+			if (!isUpid(r)) signal.throwIfAborted();
 			return r;
 		};
 	return {
@@ -148,10 +153,15 @@ export function guardApi(api: BuildApi, signal: AbortSignal): BuildApi {
 		post: g((p, q) => api.post(p, q)),
 		put: g((p, q) => api.put(p, q)),
 		delete: g((p, q) => api.delete(p, q)),
-		waitTask: g((n, u, o) => api.waitTask(n, u, o)),
+		waitTask: async (n, u, o) => {
+			await api.waitTask(n, u, o);
+			signal.throwIfAborted();
+		},
 		upload: g((p, f, file) => api.upload(p, f, file)),
 	} as BuildApi;
 }
+
+const isUpid = (v: unknown) => typeof v === "string" && v.startsWith("UPID:");
 
 function guardIo(io: GuestIo, signal: AbortSignal): GuestIo {
 	const g =
@@ -237,10 +247,10 @@ export async function buildTemplate(
 		await stageTemplate(run, o, st);
 		if (!o.noVerify) {
 			enter("verify");
-			const v = await run.verify(
-				st.m,
-				o.connect !== undefined ? { connect: o.connect } : {},
-			);
+			const v = await run.verify(st.m, {
+				...(o.connect !== undefined ? { connect: o.connect } : {}),
+				...(signal !== undefined ? { signal } : {}),
+			});
 			signal?.throwIfAborted();
 			save({ verify: v });
 			if (!v.ok) {

@@ -71,7 +71,7 @@ export interface BuildDeps {
 	makeIso: (files: Map<string, string | Buffer>, out: string) => void;
 	verify: (
 		m: Manifest,
-		o: { connect?: ConnectOptions },
+		o: { connect?: ConnectOptions; signal?: AbortSignal },
 	) => Promise<VerifyResult>;
 	ramGuard: {
 		reserve(vmid: number, memoryMb: number): Promise<void>;
@@ -173,7 +173,8 @@ async function upload(
 ): Promise<void> {
 	const upid = await deps.api.upload<string>(
 		`/nodes/${node}/storage/${MEDIA_STORAGE}/upload`,
-		{ content, checksum: sha256, "checksum-algorithm": "sha256" },
+		// The order pveproxy accepts; PveApi.upload enforces it as well.
+		{ content, "checksum-algorithm": "sha256", checksum: sha256 },
 		file,
 	);
 	await deps.api.waitTask(node, upid, { timeoutMs: TASK_TIMEOUT_MS });

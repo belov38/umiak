@@ -141,6 +141,23 @@ export interface UploadFile {
 	size: number;
 }
 
+/**
+ * Field parts in the order pveproxy accepts: its multipart parser fails ("wrong
+ * Content-Disposition ... expected 'form-data'") when `checksum` comes before
+ * `checksum-algorithm` (seen on PVE 9), so the algorithm goes right before the checksum.
+ */
+function uploadFieldOrder(fields: Record<string, string>): [string, string][] {
+	const algo = fields["checksum-algorithm"];
+	const out: [string, string][] = [];
+	for (const [k, v] of Object.entries(fields)) {
+		if (k === "checksum-algorithm" && "checksum" in fields) continue;
+		if (k === "checksum" && algo !== undefined)
+			out.push(["checksum-algorithm", algo]);
+		out.push([k, v]);
+	}
+	return out;
+}
+
 function readResponse(
 	res: IncomingMessage,
 	method: string,
@@ -275,7 +292,7 @@ export class PveApi implements PveClient {
 				);
 		const boundary = `sbx-${randomBytes(16).toString("hex")}`;
 		let head = "";
-		for (const [k, v] of Object.entries(fields))
+		for (const [k, v] of uploadFieldOrder(fields))
 			head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
 		head += `--${boundary}\r\nContent-Disposition: form-data; name="filename"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
 		const tail = `\r\n--${boundary}--\r\n`;

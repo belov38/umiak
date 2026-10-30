@@ -338,16 +338,17 @@ describe("PveApi.upload", () => {
 		)?.[1];
 		expect(boundary).toBeTruthy();
 		const parts = splitMultipart(seen.body, String(boundary));
+		// pveproxy rejects the body when checksum comes before checksum-algorithm.
 		expect(parts.map((p) => p.headers)).toEqual([
 			'Content-Disposition: form-data; name="content"',
-			'Content-Disposition: form-data; name="checksum"',
 			'Content-Disposition: form-data; name="checksum-algorithm"',
+			'Content-Disposition: form-data; name="checksum"',
 			'Content-Disposition: form-data; name="filename"; filename="sbx-seed-1.iso"\r\nContent-Type: application/octet-stream',
 		]);
 		expect(parts.slice(0, 3).map((p) => p.data.toString())).toEqual([
 			"iso",
-			"abc",
 			"sha256",
+			"abc",
 		]);
 		expect(parts[3]?.data.equals(data)).toBe(true);
 	});
