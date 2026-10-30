@@ -21,6 +21,9 @@ func TestConfigDefaultsUnix(t *testing.T) {
 	if cfg.PortsExcludeProcesses != nil {
 		t.Errorf("PortsExcludeProcesses = %v, want nil", cfg.PortsExcludeProcesses)
 	}
+	if cfg.PendingSecretsWait != 0 {
+		t.Errorf("PendingSecretsWait = %v, want 0", cfg.PendingSecretsWait)
+	}
 	if cfg.IdentityDir != "/sys/class/dmi/id" || DefaultIdentityDir != "/sys/class/dmi/id" {
 		t.Errorf("IdentityDir = %q, DefaultIdentityDir = %q; want the sysfs DMI dir", cfg.IdentityDir, DefaultIdentityDir)
 	}

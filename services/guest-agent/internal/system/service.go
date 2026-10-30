@@ -42,7 +42,8 @@ type Claimer interface {
 	UpdateEnv(ctx context.Context, req *agentv1.UpdateEnvRequest) (*agentv1.UpdateEnvResponse, error)
 	UpdateSecrets(ctx context.Context, req *agentv1.UpdateSecretsRequest) (*agentv1.UpdateSecretsResponse, error)
 	UpdateSshCa(ctx context.Context, req *agentv1.UpdateSshCaRequest) (*agentv1.UpdateSshCaResponse, error) //nolint:revive // named after the System.UpdateSshCa RPC
-	PrepareStop(ctx context.Context) error
+	// PrepareStop reports whether no secret file is left on disk.
+	PrepareStop(ctx context.Context) (wiped bool, err error)
 	// ClaimInfo returns the claim without secret values, or nil.
 	ClaimInfo() *agentv1.ClaimInfo
 	// SandboxID returns the claimed sandbox id, or "".
@@ -254,16 +255,18 @@ func (s *Service) UpdateSshCa(ctx context.Context, req *connect.Request[agentv1.
 	return connect.NewResponse(res), nil
 }
 
-// PrepareStop implements agentv1connect.SystemHandler. A nil error from the
-// claim manager means the secrets were wiped.
+// PrepareStop implements agentv1connect.SystemHandler. secret_files_wiped
+// is false when secret files held open by a process (Windows) are left on
+// disk; the control plane then keeps treating the disk as holding secrets.
 func (s *Service) PrepareStop(ctx context.Context, _ *connect.Request[agentv1.PrepareStopRequest]) (*connect.Response[agentv1.PrepareStopResponse], error) {
 	if s.opts.Claim == nil {
 		return nil, unimplemented("claim")
 	}
-	if err := s.opts.Claim.PrepareStop(ctx); err != nil {
+	wiped, err := s.opts.Claim.PrepareStop(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&agentv1.PrepareStopResponse{SecretFilesWiped: true}), nil
+	return connect.NewResponse(&agentv1.PrepareStopResponse{SecretFilesWiped: wiped}), nil
 }
 
 // Quiesce implements agentv1connect.SystemHandler. Unset fields take the

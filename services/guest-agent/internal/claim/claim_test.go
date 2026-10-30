@@ -42,12 +42,20 @@ type harness struct {
 	tr  *readiness.Tracker
 	rec *events.Recorder
 	m   *Manager
+	// mod adjusts the options of every Manager the harness builds.
+	mod func(*Options)
 
 	mu        sync.Mutex
 	hostnames []string
 }
 
 func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessWith(t, nil)
+}
+
+// newHarnessWith is newHarness with mod applied to the Manager options.
+func newHarnessWith(t *testing.T, mod func(*Options)) *harness {
 	t.Helper()
 	l := paths.ForRoot(t.TempDir())
 	if err := os.MkdirAll(l.StateDir, 0o700); err != nil {
@@ -64,7 +72,7 @@ func newHarness(t *testing.T) *harness {
 	if err := os.WriteFile(l.TemplateSSHCA, []byte(templateCA), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, l: l, st: st, rec: &events.Recorder{}}
+	h := &harness{t: t, l: l, st: st, rec: &events.Recorder{}, mod: mod}
 	h.tr = readiness.New([]string{"identity", "claim", "secrets"}, h.rec, nil)
 	h.tr.Set(readiness.PhaseIdentity, ready, "")
 	h.m = h.newManager()
@@ -75,7 +83,7 @@ func newHarness(t *testing.T) *harness {
 // as the agent does after a restart.
 func (h *harness) newManager() *Manager {
 	h.t.Helper()
-	m, err := New(Options{
+	opts := Options{
 		Store:       h.st,
 		Layout:      h.l,
 		Ready:       h.tr,
@@ -92,7 +100,11 @@ func (h *harness) newManager() *Manager {
 			uid, gid := testUID()
 			return &process.User{Name: name, UID: uid, GID: gid, Home: "/home/user"}, nil
 		},
-	})
+	}
+	if h.mod != nil {
+		h.mod(&opts)
+	}
+	m, err := New(opts)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -290,16 +302,16 @@ func TestClaimReportsHostnameApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.HostnameApplied == nil || !resp.GetHostnameApplied() {
-		t.Errorf("hostname_applied = %v, want true", resp.HostnameApplied)
+	if resp.HostnameApplied == nil || resp.GetHostnameApplied() != appliesHostname {
+		t.Errorf("hostname_applied = %v, want %v", resp.HostnameApplied, appliesHostname)
 	}
 	// A replay is answered from the stored response.
 	replay, err := h.m.Claim(ctx, fullRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replay.HostnameApplied == nil || !replay.GetHostnameApplied() {
-		t.Errorf("replayed hostname_applied = %v, want true", replay.HostnameApplied)
+	if replay.HostnameApplied == nil || replay.GetHostnameApplied() != appliesHostname {
+		t.Errorf("replayed hostname_applied = %v, want %v", replay.HostnameApplied, appliesHostname)
 	}
 }
 
@@ -551,8 +563,8 @@ func TestPrepareStopWipes(t *testing.T) {
 	if _, err := h.m.Claim(ctx, fullRequest()); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.m.PrepareStop(ctx); err != nil {
-		t.Fatal(err)
+	if wiped, err := h.m.PrepareStop(ctx); err != nil || !wiped {
+		t.Fatalf("PrepareStop = %v, %v; want true, nil", wiped, err)
 	}
 	if got := h.read(h.l.SecretsEnvFile); got != "" {
 		t.Errorf("secrets/env = %q after PrepareStop", got)
@@ -571,8 +583,8 @@ func TestPrepareStopWipes(t *testing.T) {
 		t.Error("secret env still served after PrepareStop")
 	}
 	// Idempotent.
-	if err := h.m.PrepareStop(ctx); err != nil {
-		t.Fatal(err)
+	if wiped, err := h.m.PrepareStop(ctx); err != nil || !wiped {
+		t.Fatalf("repeated PrepareStop = %v, %v; want true, nil", wiped, err)
 	}
 }
 
@@ -583,7 +595,7 @@ func TestPrepareStopWithoutSecretsKeepsReady(t *testing.T) {
 	if _, err := h.m.Claim(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.m.PrepareStop(context.Background()); err != nil {
+	if _, err := h.m.PrepareStop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready {

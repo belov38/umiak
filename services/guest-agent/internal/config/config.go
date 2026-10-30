@@ -53,6 +53,10 @@ type Config struct {
 	// PTYIdle overrides the idle timeout of PTY commands. A test aid
 	// ([process] pty_idle); 0 keeps the default of the process package.
 	PTYIdle time.Duration
+	// PendingSecretsWait is how long Process/Start waits for UpdateSecrets
+	// while the secrets phase is pending with a non-empty secret set (S9
+	// spec 12.8). 0 (Linux) starts without waiting.
+	PendingSecretsWait time.Duration
 }
 
 // Defaults returns the configuration used when agent.toml is absent.

@@ -5,7 +5,9 @@
 //
 // Secret values never reach the disk outside the tmpfs: the stored claim
 // keeps only secret names, and SecretsDigest is a sha256 of the canonical
-// secret set. Values are never logged.
+// secret set. Values are never logged. On Windows (S9 spec 12.8) the secret
+// files live on NTFS with a SYSTEM + user ACL and are wiped with a zero
+// overwrite, and the secret env is kept in memory only.
 package claim
 
 import (
@@ -57,7 +59,8 @@ type Options struct {
 	// Emit receives claim.applied. Default: discard.
 	Emit events.Emitter
 	// Hostname sets the hostname from the claim (see HostnameWriter). Nil
-	// skips the step.
+	// skips the step and the claim answers hostname_applied=false. Always
+	// nil on Windows (S9 spec 11.3).
 	Hostname func(string) error
 	// DefaultUser owns the secrets group and new link_path parents.
 	DefaultUser string
@@ -72,6 +75,15 @@ type Options struct {
 	MountSecrets func(dir string) error
 	// LookupUser resolves DefaultUser. Default process.LookupUser.
 	LookupUser func(name string) (*process.User, error)
+	// SecretEnvInMemory keeps secret_env off the disk: no secrets/env, no
+	// env in the secrets state record. After an agent restart the secrets
+	// phase is then pending until UpdateSecrets. Always true on Windows.
+	SecretEnvInMemory bool
+	// PendingSecretsWait is how long WaitSecrets waits for UpdateSecrets
+	// (config.PendingSecretsWait). 0 does not wait.
+	PendingSecretsWait time.Duration
+	// After is the timer of WaitSecrets. Default time.After.
+	After func(time.Duration) <-chan time.Time
 	// Now is the clock. Default time.Now.
 	Now func() time.Time
 	// DurableTimeout bounds a state.db write. Default DefaultDurableTimeout.
@@ -95,10 +107,16 @@ type Manager struct {
 	rec       *store.Claim          // stored claim; nil before claim
 	req       *agentv1.ClaimRequest // rec.Request decoded: secret values stripped
 	secretEnv map[string]string     // applied secret env; nil if not in the tmpfs
+	// secretFiles is the applied secret file set (normalized, with content)
+	// for RestoreSecretFiles; nil when secretEnv is nil.
+	secretFiles []*agentv1.SecretFile
 
 	// writeFile writes the env, secret and SSH CA files; tests replace it
 	// to inject write errors.
 	writeFile func(path string, data []byte, perm fs.FileMode) error
+	// removeFile wipes one entry of files/ (removeSecretFile); tests
+	// replace it to simulate files in use.
+	removeFile func(path string) error
 }
 
 // New returns a Manager. Call Start before any other method.
@@ -121,13 +139,23 @@ func New(opts Options) (*Manager, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	if opts.After == nil {
+		opts.After = time.After
+	}
+	if !appliesHostname {
+		opts.Hostname = nil
+	}
+	if secretEnvMemoryOnly {
+		opts.SecretEnvInMemory = true
+	}
 	if opts.DurableTimeout <= 0 {
 		opts.DurableTimeout = DefaultDurableTimeout
 	}
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
-	return &Manager{opts: opts, l: opts.Layout, ready: opts.Ready, log: opts.Log, writeFile: fsutil.WriteFileAtomic}, nil
+	return &Manager{opts: opts, l: opts.Layout, ready: opts.Ready, log: opts.Log,
+		writeFile: fsutil.WriteFileAtomic, removeFile: removeSecretFile}, nil
 }
 
 // Start prepares the run-time files at boot: it mounts the secrets tmpfs,
@@ -136,6 +164,8 @@ func New(opts Options) (*Manager, error) {
 // claim and sets the claim and secrets phases. The secrets phase is ready
 // without a claim, with an empty secret set, or when the tmpfs content
 // matches the stored digest; otherwise it is pending until UpdateSecrets.
+// With SecretEnvInMemory a non-empty secret set is always pending: the env
+// did not survive the restart.
 func (m *Manager) Start(ctx context.Context) error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
@@ -173,14 +203,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("claim: decode stored claim: %w", err)
 	}
 	var secretEnv map[string]string
+	var secretFiles []*agentv1.SecretFile
 	secretsReady := rec.SecretsDigest == ""
-	if !secretsReady {
+	if !secretsReady && !m.opts.SecretEnvInMemory {
 		if env, files, err := m.loadSecrets(); err == nil && SecretsDigest(env, files) == rec.SecretsDigest {
-			secretEnv, secretsReady = env, true
+			secretEnv, secretFiles, secretsReady = env, files, true
 		}
 	}
 	m.mu.Lock()
-	m.rec, m.req, m.secretEnv = rec, req, secretEnv
+	m.rec, m.req, m.secretEnv, m.secretFiles = rec, req, secretEnv, secretFiles
 	m.mu.Unlock()
 	m.ready.Set(readiness.PhaseClaim, agentv1.PhaseState_PHASE_STATE_READY, "")
 	if secretsReady {
@@ -192,7 +223,8 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 // prepareDirs creates the tmpfs directories and the always-present env
-// files.
+// files. Paths the layout leaves empty (Windows has no cmd-spec/ and no
+// /etc/sbx/env) are skipped.
 func (m *Manager) prepareDirs() error {
 	for _, d := range []struct {
 		path  string
@@ -203,22 +235,25 @@ func (m *Manager) prepareDirs() error {
 		{m.l.SecretFilesDir, 0o750, true},
 		{m.l.CmdSpecDir, 0o700, false},
 	} {
+		if d.path == "" {
+			continue
+		}
 		if err := os.MkdirAll(d.path, d.mode); err != nil {
 			return fmt.Errorf("claim: %w", err)
 		}
-		if err := os.Chmod(d.path, d.mode); err != nil {
-			return fmt.Errorf("claim: %w", err)
+		if err := m.secureDir(d.path, d.mode, d.group); err != nil {
+			return err
 		}
-		if d.group {
-			if err := m.chownGroup(d.path); err != nil {
+	}
+	if !m.opts.SecretEnvInMemory {
+		if _, err := os.Lstat(m.l.SecretsEnvFile); errors.Is(err, fs.ErrNotExist) {
+			if err := m.writeGroupFile(m.l.SecretsEnvFile, nil, 0o440); err != nil {
 				return err
 			}
 		}
 	}
-	if _, err := os.Lstat(m.l.SecretsEnvFile); errors.Is(err, fs.ErrNotExist) {
-		if err := m.writeGroupFile(m.l.SecretsEnvFile, nil, 0o440); err != nil {
-			return err
-		}
+	if m.l.SbxEnvFile == "" {
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(m.l.SbxEnvFile), 0o755); err != nil {
 		return fmt.Errorf("claim: %w", err)
@@ -284,7 +319,7 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 			return nil, internal("set hostname", err)
 		}
 	}
-	if err := m.writeSbxEnv(req.GetSandboxId(), req.GetPortDomain(), req.GetEnv()); err != nil {
+	if err := m.writeSbxEnv(req, req.GetEnv()); err != nil {
 		return nil, err
 	}
 	stripped := strip(req)
@@ -297,14 +332,14 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 	if err := m.claimSecretsAndRecord(ctx, req, files, stripped, rec); err != nil {
 		// Leave no secrets of a failed first claim behind; the machine is
 		// still unclaimed, so its secret set is empty.
-		if werr := m.wipeSecrets(); werr != nil {
+		if _, werr := m.wipeSecrets(); werr != nil {
 			m.log.Warn("wipe secrets of a failed claim failed", "err", werr)
 		}
 		m.resyncSecrets("")
 		return nil, err
 	}
 	m.mu.Lock()
-	m.rec, m.req, m.secretEnv = rec, stripped, maps.Clone(req.GetSecretEnv())
+	m.rec, m.req, m.secretEnv, m.secretFiles = rec, stripped, maps.Clone(req.GetSecretEnv()), files
 	m.mu.Unlock()
 	m.ready.Set(readiness.PhaseClaim, agentv1.PhaseState_PHASE_STATE_READY, "")
 	m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_READY, "")
@@ -353,18 +388,26 @@ func (m *Manager) storedResponse(rec *store.Claim) *agentv1.ClaimResponse {
 		var resp agentv1.ClaimResponse
 		if err := proto.Unmarshal(rec.Response, &resp); err == nil {
 			// Responses stored before the field existed lack it.
-			resp.HostnameApplied = proto.Bool(true)
+			if resp.HostnameApplied == nil {
+				resp.HostnameApplied = proto.Bool(m.hostnameApplied())
+			}
 			return &resp
 		}
 	}
 	return m.currentResponse()
 }
 
-// currentResponse reports the current readiness. This agent always applies
-// the claim hostname.
+// currentResponse reports the current readiness and whether this agent
+// applies the claim hostname.
 func (m *Manager) currentResponse() *agentv1.ClaimResponse {
 	phases, ready := m.ready.Snapshot()
-	return &agentv1.ClaimResponse{Readiness: phases, Ready: ready, HostnameApplied: proto.Bool(true)}
+	return &agentv1.ClaimResponse{Readiness: phases, Ready: ready, HostnameApplied: proto.Bool(m.hostnameApplied())}
+}
+
+// hostnameApplied reports whether a claim sets the hostname: false on
+// Windows and without Options.Hostname.
+func (m *Manager) hostnameApplied() bool {
+	return m.opts.Hostname != nil
 }
 
 // UpdateEnv replaces the claim env (spec 8.1). New commands see it; running
@@ -412,21 +455,24 @@ func (m *Manager) UpdateSshCa(ctx context.Context, req *agentv1.UpdateSshCaReque
 	return &agentv1.UpdateSshCaResponse{}, nil
 }
 
-// PrepareStop wipes the secrets from the tmpfs and flushes state.db before
-// the VM stops (Decision 3). The secrets phase becomes pending if the
-// applied set was not empty. It is idempotent.
-func (m *Manager) PrepareStop(ctx context.Context) error {
+// PrepareStop wipes the secrets from the tmpfs (on Windows: overwrites and
+// deletes the secret files) and flushes state.db before the VM stops
+// (Decision 3). The secrets phase becomes pending if the applied set was
+// not empty. wiped reports that no secret file is left on disk; files held
+// open by a process (Windows) leave it false without failing the call. It
+// is idempotent.
+func (m *Manager) PrepareStop(ctx context.Context) (wiped bool, err error) {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
 	// Secrets go first: wiping them does not depend on the store, which may
 	// be frozen or slow.
-	wipeErr := m.wipeSecrets()
+	wiped, wipeErr := m.wipeSecrets()
 	m.mu.Lock()
 	digest := ""
 	if m.rec != nil {
 		digest = m.rec.SecretsDigest
 	}
-	m.secretEnv = nil
+	m.secretEnv, m.secretFiles = nil, nil
 	m.mu.Unlock()
 	if digest != "" {
 		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_PENDING, "")
@@ -435,12 +481,57 @@ func (m *Manager) PrepareStop(ctx context.Context) error {
 	defer cancel()
 	flushErr := m.opts.Store.Flush(dctx)
 	if wipeErr != nil {
-		return wipeErr
+		return false, wipeErr
 	}
 	if flushErr != nil {
-		return storeError(flushErr)
+		return wiped, storeError(flushErr)
 	}
-	return nil
+	return wiped, nil
+}
+
+// WaitSecrets waits up to Options.PendingSecretsWait for UpdateSecrets while
+// the secrets phase is pending with a non-empty secret set, so a command
+// does not silently start without its secrets (S9 spec 12.8). It fails with
+// unavailable/secrets_pending when the wait runs out. Without
+// PendingSecretsWait, before the claim, or with an empty set it returns at
+// once.
+func (m *Manager) WaitSecrets(ctx context.Context) error {
+	if m.opts.PendingSecretsWait <= 0 || !m.secretsPending() {
+		return nil
+	}
+	timer := m.opts.After(m.opts.PendingSecretsWait)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-timer:
+			cancel()
+		case <-wctx.Done():
+		}
+	}()
+	if err := m.ready.Wait(wctx, readiness.PhaseSecrets); err == nil || !m.secretsPending() {
+		// Ready, or the phase moved on (PrepareStop of an empty set) just
+		// as the wait ran out.
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return storeError(err)
+	}
+	return errs.New(connect.CodeUnavailable, errs.SecretsPending,
+		"the secrets were not sent again after the agent restarted")
+}
+
+// secretsPending reports a pending secrets phase with a non-empty secret
+// set.
+func (m *Manager) secretsPending() bool {
+	m.mu.RLock()
+	digest := ""
+	if m.rec != nil {
+		digest = m.rec.SecretsDigest
+	}
+	m.mu.RUnlock()
+	st, _ := m.ready.State(readiness.PhaseSecrets)
+	return digest != "" && st == agentv1.PhaseState_PHASE_STATE_PENDING
 }
 
 // ClaimInfo returns the stored claim without secret values, or nil before
@@ -520,7 +611,7 @@ func (m *Manager) applyLocked(ctx context.Context, u update) error {
 	m.mu.Lock()
 	m.rec, m.req = &rec, next
 	if u.secrets != nil {
-		m.secretEnv = maps.Clone(u.secrets.env)
+		m.secretEnv, m.secretFiles = maps.Clone(u.secrets.env), u.secrets.files
 	}
 	m.mu.Unlock()
 	if u.secrets != nil {
@@ -533,7 +624,7 @@ func (m *Manager) applyLocked(ctx context.Context, u update) error {
 // stores rec.
 func (m *Manager) applyFiles(ctx context.Context, u update, next *agentv1.ClaimRequest, rec *store.Claim) error {
 	if u.setEnv {
-		if err := m.writeSbxEnv(next.GetSandboxId(), next.GetPortDomain(), u.env); err != nil {
+		if err := m.writeSbxEnv(next, u.env); err != nil {
 			return err
 		}
 		next.Env = maps.Clone(u.env)
@@ -565,17 +656,26 @@ func (m *Manager) applyFiles(ctx context.Context, u update, next *agentv1.ClaimR
 
 // resyncSecrets makes the secrets phase and the env cache match the tmpfs
 // after a failed write: ready with the env loaded if the tmpfs holds the
-// set with digest want, pending without env otherwise.
+// set with digest want, pending without env otherwise. With
+// SecretEnvInMemory the env in memory stands in for the one on disk.
 func (m *Manager) resyncSecrets(want string) {
 	var env map[string]string
+	var files []*agentv1.SecretFile
 	ok := false
 	if _, err := os.Lstat(m.l.SecretsStateFile); errors.Is(err, fs.ErrNotExist) {
 		ok = want == ""
-	} else if e, files, err := m.loadSecrets(); err == nil && SecretsDigest(e, files) == want {
-		env, ok = e, true
+	} else if e, fl, err := m.loadSecrets(); err == nil {
+		if m.opts.SecretEnvInMemory {
+			m.mu.RLock()
+			e = m.secretEnv
+			m.mu.RUnlock()
+		}
+		if SecretsDigest(e, fl) == want {
+			env, files, ok = e, fl, true
+		}
 	}
 	m.mu.Lock()
-	m.secretEnv = env
+	m.secretEnv, m.secretFiles = env, files
 	m.mu.Unlock()
 	if ok {
 		m.ready.Set(readiness.PhaseSecrets, agentv1.PhaseState_PHASE_STATE_READY, "")

@@ -3,6 +3,7 @@ package config
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestConfigDefaultsWindows(t *testing.T) {
@@ -22,6 +23,9 @@ func TestConfigDefaultsWindows(t *testing.T) {
 	want := []string{"System", "lsass.exe", "wininit.exe", "services.exe", "svchost.exe", "spoolsv.exe"}
 	if !reflect.DeepEqual(cfg.PortsExcludeProcesses, want) {
 		t.Errorf("PortsExcludeProcesses = %v, want %v", cfg.PortsExcludeProcesses, want)
+	}
+	if cfg.PendingSecretsWait != 30*time.Second {
+		t.Errorf("PendingSecretsWait = %v, want 30s", cfg.PendingSecretsWait)
 	}
 	if cfg.IdentityDir != "" || DefaultIdentityDir != "" {
 		t.Errorf("IdentityDir = %q, DefaultIdentityDir = %q; want empty", cfg.IdentityDir, DefaultIdentityDir)

@@ -26,11 +26,7 @@ func (b EnvBuilder) Build(u *process.User, spec *agentv1.CommandSpec) []string {
 		b.m.log.Warn("claim: user environment block failed, using the system one", "user", u.Name, "err", err)
 		base = b.systemEnvBlock(u)
 	}
-	platform, claimed, secret, req := b.claimEnv()
-	if h := req.GetHostname(); h != "" {
-		// Windows keeps its SBX<hex> name; the claimed one is only env.
-		platform["SBX_HOSTNAME"] = h
-	}
+	platform, claimed, secret := b.claimEnv()
 	platform["SBX_ENV_APPLIED"] = "1"
 	if spec.GetPty() != nil {
 		// ConPTY speaks xterm-256color whatever the spec's term is.

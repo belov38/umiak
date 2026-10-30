@@ -1,12 +1,12 @@
 package claim
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"hash"
 	"io/fs"
 	"maps"
@@ -20,6 +20,7 @@ import (
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 )
 
 // Secret limits (spec 8.1).
@@ -29,6 +30,10 @@ const (
 	// DefaultSecretFileMode applies to a secret file without a mode.
 	DefaultSecretFileMode = 0o440
 )
+
+// ErrSecretInUse reports a secret file held open by another process without
+// sharing write and delete access, so it cannot be wiped (Windows).
+var ErrSecretInUse = errors.New("claim: secret file is in use")
 
 // secretFileName is a valid secret file name; "." and ".." are refused
 // separately.
@@ -96,10 +101,8 @@ func validateSecrets(env map[string]string, files []*agentv1.SecretFile) error {
 		if f.GetMode()&^0o777 != 0 {
 			return invalid("secret_files: " + name + " has an invalid mode")
 		}
-		if lp := f.GetLinkPath(); lp != "" {
-			if !strings.HasPrefix(lp, "/") || slices.Contains(strings.Split(lp, "/"), "..") || filepath.Clean(lp) == "/" {
-				return invalid("secret_files: link_path of " + name + " must be an absolute path")
-			}
+		if lp := f.GetLinkPath(); lp != "" && !validLinkPath(lp) {
+			return invalid("secret_files: link_path of " + name + " must be an absolute path")
 		}
 	}
 	if total > MaxSecretFilesBytes {
@@ -124,9 +127,10 @@ func normalizeFiles(files []*agentv1.SecretFile) []*agentv1.SecretFile {
 // secretsState is the agent's record of the applied secret set in the
 // tmpfs (root 0600). It keeps the full secret env, which secrets/env cannot
 // hold (multi-line values), so an agent restart without a reboot restores
-// the env of commands and verifies the digest.
+// the env of commands and verifies the digest. With SecretEnvInMemory
+// (Windows) Env is left out and the record holds the file metas only.
 type secretsState struct {
-	Env   map[string]string `json:"env"`
+	Env   map[string]string `json:"env,omitempty"`
 	Files []secretFileMeta  `json:"files"`
 }
 
@@ -139,7 +143,7 @@ type secretFileMeta struct {
 
 // writeSecrets replaces the secrets in the tmpfs with env and files
 // (normalized): files, stale files and links removed, links, secrets/env,
-// then the state record.
+// then the state record. With SecretEnvInMemory the env stays off the disk.
 func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFile) error {
 	if err := m.prepareDirs(); err != nil {
 		return internal("prepare secrets", err)
@@ -149,10 +153,12 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 
 	keep := make(map[string]bool, len(files))
 	links := make(map[string]bool, len(files))
-	st := secretsState{Env: maps.Clone(env), Files: make([]secretFileMeta, 0, len(files))}
+	st := secretsState{Files: make([]secretFileMeta, 0, len(files))}
+	if !m.opts.SecretEnvInMemory {
+		st.Env = maps.Clone(env)
+	}
 	for _, f := range files {
-		p := filepath.Join(m.l.SecretFilesDir, f.GetName())
-		if err := m.writeGroupFile(p, f.GetContent(), fs.FileMode(f.GetMode())); err != nil {
+		if err := m.writeSecretFile(f); err != nil {
 			return err
 		}
 		keep[f.GetName()] = true
@@ -164,7 +170,7 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 	}
 	for _, e := range entries {
 		if !keep[e.Name()] {
-			if err := os.RemoveAll(filepath.Join(m.l.SecretFilesDir, e.Name())); err != nil {
+			if err := m.removeFile(filepath.Join(m.l.SecretFilesDir, e.Name())); err != nil {
 				return internal("remove secret file", err)
 			}
 		}
@@ -183,8 +189,10 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 			m.removeLink(f.LinkPath)
 		}
 	}
-	if err := m.writeGroupFile(m.l.SecretsEnvFile, FormatEnvFile(env), 0o440); err != nil {
-		return err
+	if !m.opts.SecretEnvInMemory {
+		if err := m.writeGroupFile(m.l.SecretsEnvFile, FormatEnvFile(env), 0o440); err != nil {
+			return err
+		}
 	}
 	data, err := json.Marshal(st)
 	if err != nil {
@@ -196,7 +204,13 @@ func (m *Manager) writeSecrets(env map[string]string, files []*agentv1.SecretFil
 	return nil
 }
 
-// loadSecrets reads the applied secret set back from the tmpfs.
+// writeSecretFile writes one secret file into files/.
+func (m *Manager) writeSecretFile(f *agentv1.SecretFile) error {
+	return m.writeGroupFile(filepath.Join(m.l.SecretFilesDir, f.GetName()), f.GetContent(), fs.FileMode(f.GetMode()))
+}
+
+// loadSecrets reads the applied secret set back from the tmpfs. The env is
+// nil when the state holds none (SecretEnvInMemory).
 func (m *Manager) loadSecrets() (map[string]string, []*agentv1.SecretFile, error) {
 	var st secretsState
 	if err := fsutil.ReadJSON(m.l.SecretsStateFile, &st); err != nil {
@@ -213,52 +227,118 @@ func (m *Manager) loadSecrets() (map[string]string, []*agentv1.SecretFile, error
 	return st.Env, files, nil
 }
 
-// wipeSecrets empties the tmpfs secrets: files/ is emptied, secrets/env is
-// truncated (PAM needs the file) and the state record removed. Links stay
-// and dangle until the secrets are sent again.
-func (m *Manager) wipeSecrets() error {
-	entries, err := os.ReadDir(m.l.SecretFilesDir)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return internal("list secret files", err)
+// wipeSecrets empties the tmpfs secrets: the files in files/ are wiped (see
+// wipeDir), secrets/env is truncated (PAM needs the file) and the state
+// record removed. Links stay and dangle until the secrets are sent again.
+// wiped reports that no secret file is left; files held open (Windows) do
+// not fail the call, they leave wiped false.
+func (m *Manager) wipeSecrets() (wiped bool, err error) {
+	wiped, err = wipeDir(m.l.SecretFilesDir, m.removeFile)
+	if err != nil && !errors.Is(err, ErrSecretInUse) {
+		return false, err
 	}
-	for _, e := range entries {
-		if err := os.RemoveAll(filepath.Join(m.l.SecretFilesDir, e.Name())); err != nil {
-			return internal("remove secret file", err)
-		}
+	if err != nil {
+		m.log.Warn("secret files in use, left on disk", "err", err)
 	}
 	if err := os.Remove(m.l.SecretsStateFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return internal("remove secrets state", err)
+		return false, internal("remove secrets state", err)
 	}
-	if _, err := os.Stat(m.l.SecretsDir); err == nil {
-		if err := m.writeGroupFile(m.l.SecretsEnvFile, nil, 0o440); err != nil {
+	if !m.opts.SecretEnvInMemory {
+		if _, err := os.Stat(m.l.SecretsDir); err == nil {
+			if err := m.writeGroupFile(m.l.SecretsEnvFile, nil, 0o440); err != nil {
+				return false, err
+			}
+		}
+	}
+	return wiped, nil
+}
+
+// WipeSecretFiles wipes the secret files and keeps everything else: the
+// applied set in memory, the state record, the secrets phase. It continues
+// past files that are in use and then fails with ErrSecretInUse; wiped
+// reports that no secret file is left. RestoreSecretFiles brings the files
+// back (quiesce for a saved snapshot, S9 spec 12.10).
+func (m *Manager) WipeSecretFiles() (wiped bool, err error) {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	return wipeDir(m.l.SecretFilesDir, m.removeFile)
+}
+
+// RestoreSecretFiles rewrites the applied secret files from memory where
+// they are missing or differ, after WipeSecretFiles. Without an applied set
+// in memory (secrets pending, for example after an agent restart) it does
+// nothing: the files come back with UpdateSecrets.
+func (m *Manager) RestoreSecretFiles() error {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	m.mu.RLock()
+	files := m.secretFiles
+	m.mu.RUnlock()
+	if len(files) == 0 {
+		return nil
+	}
+	if err := m.prepareDirs(); err != nil {
+		return internal("prepare secrets", err)
+	}
+	for _, f := range files {
+		// A file that was in use was never touched; leave it alone.
+		b, err := os.ReadFile(filepath.Join(m.l.SecretFilesDir, f.GetName()))
+		if err == nil && bytes.Equal(b, f.GetContent()) {
+			continue
+		}
+		if err := m.writeSecretFile(f); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// writeGroupFile writes a tmpfs file with mode and the default user's
-// group.
-func (m *Manager) writeGroupFile(path string, data []byte, mode fs.FileMode) error {
-	if err := m.writeFile(path, data, mode); err != nil {
-		return internal("write secret", err)
+// WipeSecretsDir wipes the secret files, the state record and secrets/env
+// of layout l without a Manager: the boot step of Windows (sbx-agent early)
+// runs it before any logon.
+func WipeSecretsDir(l paths.Layout) error {
+	_, err := wipeDir(l.SecretFilesDir, removeSecretFile)
+	failed := []error{err}
+	for _, p := range []string{l.SecretsStateFile, l.SecretsEnvFile} {
+		if p == "" {
+			continue
+		}
+		if err := removeSecretFile(p); err != nil {
+			failed = append(failed, err)
+		}
 	}
-	return m.chownGroup(path)
+	return errors.Join(failed...)
 }
 
-// chownGroup gives path the default user's group; the owner is unchanged
-// (root in production). Without a known user it does nothing.
-func (m *Manager) chownGroup(path string) error {
-	m.mu.RLock()
-	u := m.user
-	m.mu.RUnlock()
-	if u == nil {
-		return nil
+// wipeDir removes every entry of dir with remove (a zero overwrite on
+// Windows). It goes on past failures: wiped reports that dir is empty or
+// missing. err matches ErrSecretInUse when every failure was a file in use;
+// otherwise it carries the other failures.
+func wipeDir(dir string, remove func(string) error) (wiped bool, err error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
 	}
-	if err := os.Lchown(path, -1, int(u.GID)); err != nil {
-		return internal("chown secret", err)
+	if err != nil {
+		return false, internal("list secret files", err)
 	}
-	return nil
+	var inUse, other []error
+	for _, e := range entries {
+		if err := remove(filepath.Join(dir, e.Name())); err != nil {
+			if errors.Is(err, ErrSecretInUse) {
+				inUse = append(inUse, err)
+			} else {
+				other = append(other, err)
+			}
+		}
+	}
+	switch {
+	case len(other) > 0:
+		return false, internal("remove secret file", errors.Join(other...))
+	case len(inUse) > 0:
+		return false, errors.Join(inUse...)
+	}
+	return true, nil
 }
 
 // placeLink makes the link_path symlink point at target. An existing
@@ -331,52 +411,4 @@ func (m *Manager) removeLink(linkPath string) {
 	if err := os.Remove(link); err != nil {
 		m.log.Warn("remove stale secret link failed", "err", err)
 	}
-}
-
-// mkdirAllOwned creates dir and its missing parents (0755, root). Created
-// directories inside the default user's home (after resolving symlinks, so
-// a symlink in the home cannot hand out directories elsewhere) are given to
-// the user; the others stay root-owned.
-func (m *Manager) mkdirAllOwned(dir string) error {
-	var missing []string
-	for d := dir; ; d = filepath.Dir(d) {
-		if _, err := os.Lstat(d); err == nil {
-			break
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		missing = append(missing, d)
-		if filepath.Dir(d) == d {
-			break
-		}
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	m.mu.RLock()
-	u := m.user
-	m.mu.RUnlock()
-	if u == nil || u.Home == "" || len(missing) == 0 {
-		return nil
-	}
-	home, err := m.l.Rooted(u.Home)
-	if err != nil {
-		return nil
-	}
-	if home, err = filepath.EvalSymlinks(home); err != nil {
-		return nil
-	}
-	for _, d := range missing {
-		resolved, err := filepath.EvalSymlinks(d)
-		if err != nil {
-			return err
-		}
-		if !strings.HasPrefix(resolved, home+string(filepath.Separator)) {
-			continue
-		}
-		if err := os.Lchown(resolved, int(u.UID), int(u.GID)); err != nil {
-			return fmt.Errorf("chown %s: %w", d, err)
-		}
-	}
-	return nil
 }

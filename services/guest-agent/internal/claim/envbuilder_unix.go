@@ -34,7 +34,7 @@ func (b EnvBuilder) Build(u *process.User, spec *agentv1.CommandSpec) []string {
 		env["TERM"] = term
 	}
 
-	platform, claimed, secret, _ := b.claimEnv()
+	platform, claimed, secret := b.claimEnv()
 	maps.Copy(env, platform)
 	maps.Copy(env, claimed)
 	maps.Copy(env, secret)

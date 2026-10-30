@@ -1,10 +1,6 @@
 package claim
 
-import (
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-)
+import "github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
 
 // Defaults of the base environment.
 const (
@@ -29,10 +25,10 @@ func (m *Manager) EnvBuilder() EnvBuilder {
 
 // claimEnv returns the platform env (with the extensions), the claim env
 // and the secret env: the layers between the base env and the spec env.
-func (b EnvBuilder) claimEnv() (platform, claimed, secret map[string]string, req *agentv1.ClaimRequest) {
+func (b EnvBuilder) claimEnv() (platform, claimed, secret map[string]string) {
 	m := b.m
 	m.mu.RLock()
-	req, secret = m.req, m.secretEnv
+	req, secret := m.req, m.secretEnv
 	m.mu.RUnlock()
-	return m.platformEnv(req.GetSandboxId(), req.GetPortDomain()), req.GetEnv(), secret, req
+	return m.platformEnv(req), req.GetEnv(), secret
 }

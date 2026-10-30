@@ -145,6 +145,8 @@ func (a *agent) startup(ctx context.Context) error {
 		LookupUser:   a.d.LookupUser,
 		Now:          a.d.Now,
 		Log:          a.log,
+
+		PendingSecretsWait: a.cfg.PendingSecretsWait,
 	})
 	if err != nil {
 		return err
@@ -233,6 +235,7 @@ func (a *agent) buildServices() error {
 		BootID:         a.bootID,
 		Now:            a.d.Now,
 		PTYIdle:        a.cfg.PTYIdle,
+		WaitSecrets:    a.claim.WaitSecrets,
 		HandlerOptions: interceptors,
 		Log:            a.log,
 	})

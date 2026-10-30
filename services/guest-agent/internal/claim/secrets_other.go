@@ -1,10 +1,10 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package claim
 
 import "errors"
 
-// mountSecrets is Linux only.
+// mountSecrets is Linux and Windows only.
 func mountSecrets(string) error {
 	return errors.ErrUnsupported
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -530,5 +531,44 @@ func TestCommandIDForOS(t *testing.T) {
 			continue
 		}
 		wantCode(t, err, connect.CodeInvalidArgument, errs.InvalidArgument)
+	}
+}
+
+func TestStartWaitsForSecrets(t *testing.T) {
+	var calls atomic.Int32
+	var pendingSecrets atomic.Bool
+	pendingSecrets.Store(true)
+	h := newHarness(t, func(o *Options) {
+		o.WaitSecrets = func(context.Context) error {
+			calls.Add(1)
+			if pendingSecrets.Load() {
+				return errs.New(connect.CodeUnavailable, errs.SecretsPending, "secrets pending")
+			}
+			return nil
+		}
+	})
+	spec := argvSpec("/bin/sleep", "100")
+	_, err := h.client.Start(h.ctx(), connect.NewRequest(&agentv1.StartRequest{CommandId: "c1", Spec: spec}))
+	wantCode(t, err, connect.CodeUnavailable, errs.SecretsPending)
+	if _, err := h.get("c1"); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("refused command has a record: %v", err)
+	}
+	if n := len(h.fake.Launches()); n != 0 {
+		t.Fatalf("launches = %d, want 0", n)
+	}
+
+	pendingSecrets.Store(false)
+	if res := h.start("c1", spec); !res.GetCreated() {
+		t.Fatal("created = false after the secrets arrived")
+	}
+
+	// A repeat of an existing command answers without waiting.
+	pendingSecrets.Store(true)
+	before := calls.Load()
+	if res := h.start("c1", spec); res.GetCreated() {
+		t.Fatal("repeat created = true")
+	}
+	if calls.Load() != before {
+		t.Error("a repeat of an existing command waited for the secrets")
 	}
 }

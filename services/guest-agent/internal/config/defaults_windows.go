@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 // DefaultIdentityDir is empty on Windows: the smbios identity is read from
 // the firmware table, not from files.
 const DefaultIdentityDir = ""
@@ -11,4 +13,7 @@ func osDefaults(cfg *Config) {
 	cfg.DockerEnabled = false
 	cfg.PortsExclude = []uint16{22, 135}
 	cfg.PortsExcludeProcesses = []string{"System", "lsass.exe", "wininit.exe", "services.exe", "svchost.exe", "spoolsv.exe"}
+	// secret_env lives only in memory, so an agent restart leaves the
+	// secrets pending until the control plane sends them again.
+	cfg.PendingSecretsWait = 30 * time.Second
 }

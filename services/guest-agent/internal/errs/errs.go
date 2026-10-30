@@ -84,8 +84,10 @@ const (
 	// SecretsInUse (failed_precondition): a secret file is held open, so
 	// Quiesce with wipe_secret_files rolled back.
 	SecretsInUse = "secrets_in_use"
-	// SecretsPending (failed_precondition): the secret files are not
-	// restored yet, for example after an agent restart during a lease.
+	// SecretsPending: the secrets were not sent again after an agent
+	// restart. Process/Start answers unavailable (retryable) after waiting
+	// for them (S9 spec 12.8); failed_precondition when the secret files
+	// are not restored yet after a restart during a lease.
 	SecretsPending = "secrets_pending"
 	// FsFreezeUnsupported (failed_precondition): Quiesce with fs=true on a
 	// platform without a filesystem freeze (Windows).
