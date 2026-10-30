@@ -399,7 +399,7 @@ describe("iso-install build: happy path", () => {
 		expect(keysBetween(s.log, starts[0] ?? 0, firstStep)).toBe(60);
 		expect(keysBetween(s.log, starts[1] ?? 0, s.log.length)).toBe(60);
 		for (const c of s.pve.calls.filter((c) => c.path === `${vm}/sendkey`))
-			expect(c.params).toEqual({ key: "ret" });
+			expect(c.params).toEqual({ key: "f12" });
 	});
 
 	it("creates the build VM with firmware disks, three CDs and the network down", async () => {

@@ -97,12 +97,17 @@ const GUEST_MANIFEST = `${GUEST_MANIFEST_DIR}\\build.json`;
 const BUILD_DIR = "C:\\sbx-build";
 /** build.json is written right before this step; the step keeps it. */
 export const CLEANUP_STEP = "90-cleanup";
-/** "Press any key to boot from CD": one press per interval. */
-// OVMF on a fresh efidisk can take well over 20 s to reach the prompt; Enter in WinPE is harmless,
-// and the first reboot from the disk comes minutes later.
+/**
+ * "Press any key to boot from CD": one press per interval. OVMF on a fresh efidisk can take well
+ * over 20 s to reach the prompt, so the presses go on after Setup has started; the first reboot
+ * from the disk comes minutes later.
+ */
 const INSTALL_KEYS = 60;
 const OFFLINE_KEYS = 60;
 const DEFAULT_KEY_INTERVAL_MS = 1000;
+// Any key passes the boot prompt. Not Enter or Space: Setup's progress window has the Cancel
+// button focused, and Enter there opens "Are you sure you want to quit?" (seen on a real build).
+const BOOT_KEY = "f12";
 const SYSPREP_TIMEOUT_MS = 30 * MIN;
 const OFFLINE_TIMEOUT_MS = 10 * MIN;
 const SEAL_TIMEOUT_MS = 5 * MIN;
@@ -582,7 +587,7 @@ async function pressKeys(
 ): Promise<void> {
 	const interval = deps.keyIntervalMs ?? DEFAULT_KEY_INTERVAL_MS;
 	for (let i = 0; i < count; i++) {
-		await sendKey(deps.api, node, vmid, "ret");
+		await sendKey(deps.api, node, vmid, BOOT_KEY);
 		if (i < count - 1) {
 			await sleep(interval);
 			await between?.();
