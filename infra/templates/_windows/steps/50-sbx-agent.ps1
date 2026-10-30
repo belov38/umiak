@@ -32,6 +32,9 @@ Update-SessionPath
 
 $svc = Get-Service -Name 'sbx-agent'
 if ($svc.StartType -ne 'Automatic') { throw "service sbx-agent is $($svc.StartType), want Automatic" }
+# Automatic, not Automatic (Delayed Start): the agent starts with the startup script (spec 12.2).
+$delayed = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\sbx-agent').PSObject.Properties['DelayedAutostart']
+if ($delayed -and $delayed.Value -ne 0) { throw "service sbx-agent has DelayedAutostart=$($delayed.Value), want 0" }
 
 # A template must carry a production agent build (spec S3 17.6).
 $doctor = (Get-NativeOutput -FilePath $SbxAgentExe -ArgumentList @('doctor', '--json')) -join "`n" | ConvertFrom-Json
@@ -57,8 +60,8 @@ $gpo = Join-Path $env:SystemRoot 'System32\GroupPolicy'
 $startupDir = Join-Path $gpo 'Machine\Scripts\Startup'
 New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $gpo 'Machine\Scripts\Shutdown') | Out-Null
-# Group Policy writes scripts.ini as UTF-16 LE.
-$ini = Get-Content -LiteralPath (Join-Path $SbxFilesDir 'scripts.ini') -Raw
+# Group Policy writes scripts.ini as UTF-16 LE with CRLF.
+$ini = (Get-Content -LiteralPath (Join-Path $SbxFilesDir 'scripts.ini') -Raw) -replace "`r?`n", "`r`n"
 Set-Content -LiteralPath (Join-Path $gpo 'Machine\Scripts\scripts.ini') -Value $ini -Encoding Unicode -NoNewline
 # gpt.ini: the scripts client-side extension next to the ones already there;
 # the version only grows, so the client sees a changed GPO.

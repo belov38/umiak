@@ -85,6 +85,7 @@ describe("loadRecipe: real windows recipe", () => {
 			"10-system",
 			"30-toolchains",
 			"40-coding-agents",
+			"reboot",
 			"50-sbx-agent",
 			"60-desktop",
 			"90-cleanup",

@@ -1,5 +1,6 @@
 #requires -Version 7
-# 90-cleanup (spec S9 section 8.8): update services off, component store,
+# 90-cleanup (spec S9 section 8.8): update services off, component store
+# (after the recipe's reboot: pending servicing makes DISM fail with 0x800f0806),
 # downloads and caches, answer files with the build password, event logs,
 # TRIM, then a self-check. The builder wrote C:\ProgramData\sbx-template\build.json
 # right before this step (it stays) and removes C:\sbx-build after reading
@@ -22,6 +23,16 @@ function Remove-Leftover([string]$Path) {
 $manifest = Join-Path $env:ProgramData 'sbx-template\build.json'
 if (-not (Test-Path -LiteralPath $manifest)) { throw "$manifest is missing: the builder writes it before this step" }
 
+# The FoD and the MSIs leave servicing operations that finish at the next boot.
+$pending = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+) | Where-Object { Test-Path -LiteralPath $_ }
+if ($pending) {
+    throw "a reboot is pending ($($pending -join ', ')): the recipe needs a reboot step after the last install step, before 90-cleanup"
+}
+
 # --- Windows Update services: the FoD is installed ---
 foreach ($s in $SbxUpdateServices) { Disable-SbxService -Name $s -StopNow }
 
@@ -40,8 +51,25 @@ foreach ($p in @(
         (Join-Path $sysProfile 'AppData\Local\uv\cache'),
         (Join-Path $sysProfile 'AppData\Local\go-build'),
         (Join-Path $sysProfile 'go\pkg\mod'),
-        (Join-Path $sysProfile 'AppData\Local\Temp\*'))) {
+        (Join-Path $sysProfile 'AppData\Local\Temp\*'),
+        # State of the CLIs' --version probes run as SYSTEM.
+        (Join-Path $sysProfile '.claude*'),
+        (Join-Path $sysProfile '.codex'),
+        (Join-Path $sysProfile '.gemini'),
+        (Join-Path $sysProfile '.config\opencode'),
+        (Join-Path $sysProfile '.local\share\opencode'),
+        (Join-Path $sysProfile '.local\state\opencode'),
+        (Join-Path $sysProfile '.cache\opencode'),
+        (Join-Path $sysProfile '.npm'))) {
     Remove-Leftover $p
+}
+# Installer payloads cached by bundles (Python) during the build steps: the
+# subdirectories of Package Cache created after 00-base started.
+$buildStart = (Get-Item -LiteralPath (Join-Path $SbxLogDir '00-base.log')).CreationTimeUtc
+$packageCache = Join-Path $env:ProgramData 'Package Cache'
+foreach ($d in @(Get-ChildItem -LiteralPath $packageCache -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.CreationTimeUtc -ge $buildStart })) {
+    Remove-Leftover $d.FullName
 }
 
 # --- Answer files: the build password is in the cached autounattend ---
@@ -97,8 +125,20 @@ foreach ($dir in @((Join-Path $env:SystemRoot 'Panther'), (Join-Path $env:System
         }
     }
 }
+# Autologon is written by identity apply on the clone, never in the image.
 $winlogon = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 if ($winlogon.PSObject.Properties['DefaultPassword']) { $problems.Add('Winlogon has DefaultPassword') }
+$autoLogon = $winlogon.PSObject.Properties['AutoAdminLogon']
+if ($autoLogon -and "$($autoLogon.Value)" -ne '0') { $problems.Add("Winlogon AutoAdminLogon is '$($autoLogon.Value)'") }
+$allow = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
+foreach ($r in $allow) { $problems.Add("firewall rule $($r.Name) allows inbound") }
+foreach ($fp in @(Get-NetFirewallProfile)) {
+    if ("$($fp.Enabled)" -ne 'True' -or "$($fp.DefaultInboundAction)" -ne 'Block') { $problems.Add("firewall profile $($fp.Name): Enabled=$($fp.Enabled), inbound $($fp.DefaultInboundAction)") }
+}
+$bde = Get-BitLockerStatus
+if ($bde.Conversion -ne '' -and ($bde.Conversion -ne 'Fully Decrypted' -or $bde.Protection -ne 'Protection Off')) {
+    $problems.Add("BitLocker C: is '$($bde.Conversion)', '$($bde.Protection)'")
+}
 if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\Sysprep\sbx-unattend.xml'))) { $problems.Add('sbx-unattend.xml is missing') }
 if (-not (Test-Path -LiteralPath $manifest)) { $problems.Add("$manifest is missing") }
 if ($problems.Count -gt 0) {

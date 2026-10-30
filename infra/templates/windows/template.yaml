@@ -22,6 +22,9 @@ hw:
   tpmstate0: { version: v2.0 }
   cloudinit: false
 build_vm: { cores: 4, memory_mb: 4096 }
+# reboot after the last install step finishes pending servicing (DISM in
+# 90-cleanup fails otherwise); it comes before 50-sbx-agent, so the agent
+# service and its startup script never run on the build VM.
 steps:
   [
     00-base,
@@ -30,6 +33,7 @@ steps:
     10-system,
     30-toolchains,
     40-coding-agents,
+    reboot,
     50-sbx-agent,
     60-desktop,
     90-cleanup,

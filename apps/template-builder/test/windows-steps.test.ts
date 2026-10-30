@@ -218,8 +218,9 @@ describe("windows steps: services", () => {
 		expect(psArray(lib, "SbxDisabledServices").sort()).toEqual(
 			[...DISABLED_SERVICES].sort(),
 		);
+		// DoSvc carries the Windows Update payloads of the OpenSSH FoD.
 		expect(psArray(lib, "SbxUpdateServices").sort()).toEqual(
-			["UsoSvc", "wuauserv"].sort(),
+			["DoSvc", "UsoSvc", "wuauserv"].sort(),
 		);
 		const base = code(read("steps/00-base.ps1"));
 		expect(base).toMatch(
@@ -330,6 +331,10 @@ describe("windows steps: step content", () => {
 			/tar\.exe'\) -ArgumentList @\('-xf', \$tar, '-C', \$unpack, 'sbx-agent\.exe'\)/,
 		);
 		expect(s).toMatch(/SyncForegroundPolicy/);
+		// scripts.ini as Group Policy writes it: UTF-16 LE, CRLF.
+		expect(s).toMatch(/-replace "`r\?`n", "`r`n"/);
+		expect(s).toMatch(/scripts\.ini'\) -Value \$ini -Encoding Unicode/);
+		expect(s).toMatch(/DelayedAutostart/);
 		expect(s).toMatch(/gpupdate\.exe/);
 		expect(s).toMatch(/QEMU-GA/);
 		expect(s).toMatch(/sbx-unattend\.xml/);
@@ -342,6 +347,38 @@ describe("windows steps: step content", () => {
 		expect(s).toMatch(/StartComponentCleanup/);
 		expect(s).toMatch(/authorized_keys/);
 		expect(s).toMatch(/Panther/);
+		// Self-check of what the image must not carry.
+		expect(s).toMatch(/AutoAdminLogon/);
+		expect(s).toMatch(
+			/Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True/,
+		);
+		expect(s).toMatch(/Get-BitLockerStatus/);
+	});
+
+	it("90-cleanup refuses pending servicing before DISM", () => {
+		const s = code(read("steps/90-cleanup.ps1"));
+		const pending = s.indexOf("Component Based Servicing\\RebootPending");
+		expect(pending).toBeGreaterThan(0);
+		expect(pending).toBeLessThan(s.indexOf("StartComponentCleanup"));
+	});
+
+	it("the recipe reboots after the last install step and before the agent is installed", () => {
+		const steps = recipe().steps;
+		const reboots = steps.flatMap((s, i) => (s === "reboot" ? [i] : []));
+		const last = reboots.at(-1) ?? -1;
+		expect(last).toBeGreaterThan(steps.indexOf("40-coding-agents"));
+		// The agent service and its startup script must never run on the build VM.
+		expect(last).toBeLessThan(steps.indexOf("50-sbx-agent"));
+	});
+
+	it("00-base keeps going when an Appx package or an Edge update task resists", () => {
+		const s = code(read("steps/00-base.ps1"));
+		expect(s).toMatch(
+			/try \{\s*Remove-AppxProvisionedPackage[\s\S]*?\} catch \{/,
+		);
+		expect(s).toMatch(
+			/MicrosoftEdgeUpdateTask[\s\S]*?try \{\s*Disable-ScheduledTask[\s\S]*?\} catch \{/,
+		);
 	});
 });
 
@@ -372,12 +409,17 @@ describe("windows steps: build ISO", () => {
 	});
 });
 
-/** `PWSH=<path>` points at a pwsh outside PATH (e.g. `mise which pwsh --tool powershell`). */
+/** pwsh comes from mise.toml (`powershell`); `PWSH=<path>` overrides it. */
 const PWSH = process.env.PWSH ?? "pwsh";
-const pwsh = spawnSync(PWSH, ["-NoProfile", "-Command", "exit 0"]).status === 0;
 
 describe("windows steps: PowerShell parser", () => {
-	it.skipIf(!pwsh)("every .ps1 parses without errors", () => {
+	it("pwsh is available (mise.toml powershell)", () => {
+		const r = spawnSync(PWSH, ["-NoProfile", "-Command", "exit 0"]);
+		expect(r.error, `${PWSH}: run the tests through mise`).toBeUndefined();
+		expect(r.status).toBe(0);
+	});
+
+	it("every .ps1 parses without errors", () => {
 		const dir = mkdtempSync(join(tmpdir(), "sbx-ps-parse-"));
 		try {
 			const script = join(dir, "parse.ps1");

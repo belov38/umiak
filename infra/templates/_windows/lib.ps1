@@ -16,14 +16,15 @@ $SbxLogDir = 'C:\sbx-build\logs'
 $SbxWorkDir = 'C:\sbx-build\work'
 
 # Services of spec section 8.1 that end up Disabled. 00-base disables all but
-# the update services, which OpenSSH FoD needs in 10-system; 90-cleanup
-# disables those and checks the whole list.
+# the update services: the OpenSSH FoD in 10-system comes from Windows Update
+# through Delivery Optimization. 90-cleanup disables those and checks the
+# whole list.
 $SbxDisabledServices = @(
     'wuauserv', 'UsoSvc', 'DoSvc', 'WSearch', 'SysMain', 'DiagTrack',
     'dmwappushservice', 'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',
     'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM'
 )
-$SbxUpdateServices = @('wuauserv', 'UsoSvc')
+$SbxUpdateServices = @('wuauserv', 'UsoSvc', 'DoSvc')
 
 $SbxPwshExe = 'C:\Program Files\PowerShell\7\pwsh.exe'
 $SbxAgentExe = 'C:\Program Files\sbx-agent\current\sbx-agent.exe'
@@ -256,6 +257,17 @@ function Expand-ToWorkDir([string]$Zip, [string]$Name) {
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
     Expand-Archive -LiteralPath $Zip -DestinationPath $dir
     return $dir
+}
+
+# Conversion and protection status of C: from manage-bde ('' when BitLocker is
+# not part of the edition), e.g. 'Fully Decrypted' and 'Protection Off'.
+function Get-BitLockerStatus {
+    $exe = Join-Path $env:SystemRoot 'System32\manage-bde.exe'
+    if (-not (Test-Path -LiteralPath $exe)) { return [pscustomobject]@{ Conversion = ''; Protection = '' } }
+    $out = Get-NativeOutput -FilePath $exe -ArgumentList @('-status', 'C:') -SuccessCodes @(0, -1)
+    $conv = @($out | Where-Object { $_ -match '^\s*Conversion Status:\s*(.+)$' } | ForEach-Object { $Matches[1].Trim() }) | Select-Object -First 1
+    $prot = @($out | Where-Object { $_ -match '^\s*Protection Status:\s*(.+)$' } | ForEach-Object { $Matches[1].Trim() }) | Select-Object -First 1
+    return [pscustomobject]@{ Conversion = "$conv"; Protection = "$prot" }
 }
 
 # Loads C:\Users\Default\NTUSER.DAT (the template of every new profile) and

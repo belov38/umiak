@@ -7,9 +7,28 @@ $policies = 'HKLM:\SOFTWARE\Policies\Microsoft'
 $cv = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
 Write-BuildLog "edition $($cv.EditionID), build $($cv.CurrentBuild).$($cv.UBR)"
 
+# --- Defender: exclusions for the build (the offline stage disables the engine) ---
+$pyVer = (Get-ToolVersion 'python').Split('.')
+$exclusions = @(
+    'C:\sbx-build', $env:TEMP, (Join-Path $env:SystemRoot 'Temp'),
+    (Join-Path $env:SystemRoot 'System32\config\systemprofile\AppData'),
+    (Join-Path $env:ProgramData 'npm'), (Join-Path $env:ProgramData 'Package Cache'),
+    (Join-Path $env:ProgramFiles 'Git'), (Join-Path $env:ProgramFiles 'nodejs'),
+    (Join-Path $env:ProgramFiles "Python$($pyVer[0])$($pyVer[1])"), (Join-Path $env:ProgramFiles 'uv'),
+    (Join-Path $env:ProgramFiles 'bun'), (Join-Path $env:ProgramFiles 'Go'),
+    (Join-Path $env:ProgramFiles 'GitHub CLI'), (Join-Path $env:ProgramFiles 'PowerShell'),
+    (Join-Path $env:ProgramFiles 'sbx-agent')
+)
+try {
+    Add-MpPreference -ExclusionPath $exclusions
+    Write-BuildLog "Defender exclusions: $($exclusions -join ', ')"
+} catch {
+    Write-BuildLog "WARNING: Defender exclusions: $($_.Exception.Message)"
+}
+
 # --- Policies (before network) ---
 # Windows Update: no automatic updates. Its servers stay reachable: 10-system
-# installs OpenSSH from them; wuauserv is disabled in 90-cleanup.
+# installs OpenSSH from them; wuauserv, UsoSvc and DoSvc are disabled in 90-cleanup.
 Set-RegValue "$policies\Windows\WindowsUpdate\AU" NoAutoUpdate 1
 Set-RegValue "$policies\Windows\WindowsUpdate" ExcludeWUDriversInQualityUpdate 1
 # Store: no automatic app updates.
@@ -100,7 +119,14 @@ foreach ($t in $tasks) {
 }
 Get-ScheduledTask -TaskPath '\' -ErrorAction SilentlyContinue |
     Where-Object { $_.TaskName -like 'MicrosoftEdgeUpdateTask*' } |
-    ForEach-Object { Disable-ScheduledTask -InputObject $_ | Out-Null; Write-BuildLog "task $($_.TaskName): disabled" }
+    ForEach-Object {
+        try {
+            Disable-ScheduledTask -InputObject $_ | Out-Null
+            Write-BuildLog "task $($_.TaskName): disabled"
+        } catch {
+            Write-BuildLog "WARNING: task $($_.TaskName): $($_.Exception.Message)"
+        }
+    }
 # Automatic maintenance.
 Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Maintenance' MaintenanceDisabled 1
 
@@ -187,26 +213,43 @@ Write-BuildLog "firewall: $($allow.Count) inbound allow rules disabled"
 
 # --- BitLocker: never encrypt (also set in specialize of the install) ---
 Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker' PreventDeviceEncryption 1
-$manageBde = Join-Path $env:SystemRoot 'System32\manage-bde.exe'
-if (Test-Path -LiteralPath $manageBde) {
-    $bde = Get-NativeOutput -FilePath $manageBde -ArgumentList @('-status', 'C:') -SuccessCodes @(0, -1)
-    if (($bde -match 'Conversion Status:') -and -not ($bde -match 'Conversion Status:\s+Fully Decrypted')) {
-        Write-BuildLog 'C: is encrypted or encrypting: turning BitLocker off'
-        Invoke-Native -FilePath $manageBde -ArgumentList @('-off', 'C:')
+$bde = Get-BitLockerStatus
+if ($bde.Conversion -ne '' -and $bde.Conversion -ne 'Fully Decrypted') {
+    Write-BuildLog "C: is '$($bde.Conversion)': turning BitLocker off"
+    if ($bde.Conversion -notlike 'Decryption in Progress*') {
+        Invoke-Native -FilePath (Join-Path $env:SystemRoot 'System32\manage-bde.exe') -ArgumentList @('-off', 'C:')
     }
+    # Decryption runs in the background; the offline stage and sysprep need it finished.
+    $deadline = (Get-Date).AddMinutes(60)
+    while (($bde = Get-BitLockerStatus).Conversion -ne 'Fully Decrypted') {
+        if ((Get-Date) -gt $deadline) { throw "C: is still '$($bde.Conversion)' after 60 min" }
+        Start-Sleep -Seconds 15
+    }
+    Write-BuildLog 'C: fully decrypted'
 }
 
 # --- Appx: provisioned packages of files\appx-remove.txt (display name or * pattern) ---
 $patterns = @(Get-Content -LiteralPath (Join-Path $SbxFilesDir 'appx-remove.txt') |
     ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and -not $_.StartsWith('#') })
+# A package Windows refuses to remove is reported and kept; the builder records
+# in the manifest which entries are really gone (removedAppx).
 $provisioned = @(Get-AppxProvisionedPackage -Online)
+$removed = @()
+$failed = @()
 foreach ($p in $patterns) {
     $matched = @($provisioned | Where-Object { $_.DisplayName -like $p })
     if ($matched.Count -eq 0) { Write-BuildLog "appx ${p}: not provisioned"; continue }
     foreach ($m in $matched) {
-        Remove-AppxProvisionedPackage -Online -AllUsers -PackageName $m.PackageName | Out-Null
-        Write-BuildLog "appx $($m.PackageName): removed"
+        try {
+            Remove-AppxProvisionedPackage -Online -AllUsers -PackageName $m.PackageName | Out-Null
+            $removed += $m.DisplayName
+            Write-BuildLog "appx $($m.PackageName): removed"
+        } catch {
+            $failed += $m.DisplayName
+            Write-BuildLog "WARNING: appx $($m.PackageName): $($_.Exception.Message)"
+        }
     }
 }
+Write-BuildLog "appx removed: $($removed.Count) ($($removed -join ', ')); failed: $($failed.Count) ($($failed -join ', '))"
 
 Write-BuildLog 'done'
