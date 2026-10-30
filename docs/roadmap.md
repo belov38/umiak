@@ -30,6 +30,8 @@ Dev-стенд control plane (решение 2026-10-30): unprivileged LXC CT 59
 
 Миграции БД (`db/migrations/NNNN_*.sql`, решение master 2026-10-31): номера зарезервированы по областям, чтобы параллельные треки не сталкивались. `0100–0199` — S2 (`tunnel`); `0200–0299` — runtime: S6 и изменения таблиц runtime из S7 (`0204`, `0205`); `0300–0399` — S7. Исключение по решению master: колонки `reason` и `output_truncated` таблицы S6 `runtime.commands` из приёмочных правок S7 лежат в `0304_command_output.sql` (диапазон S7), с комментарием в миграции. Новые области берут свой диапазон здесь, прежде чем добавлять миграции.
 
+Сквозной тест на dev-стенде (2026-10-31, в main): весь стек MVP на CT 590, сценарий `infra/dev-cp/e2e.sh` с Mac (login, create, exec, PTY, cp, превью token/sso, ssh, fork, snapshot, stop/resume, idle-stop, delete, оба SDK) — 20/20 PASS, независимая приёмка повторила прогон. Вход для Ильи — `infra/dev-cp/QUICKSTART.md`. Открыто: ключ SSH user CA приходит агенту только при create/fork, не при resume; `sbx logs -f` выходит с кодом 0 при ненулевом коде команды; у `snapshot save` нет `--wait`.
+
 Первая сборка для Ильи: весь стек MVP поднимается локально через docker compose (`deploy/compose/`): Postgres, api, worker, gateway, web, Keycloak, oauth2-proxy; Proxmox — `pve`. Каждый тред реализации добавляет туда свой сервис.
 
 Фаза 2 (паритет с boat.dev, области S14–S30): `docs/roadmap-phase2.md`.
