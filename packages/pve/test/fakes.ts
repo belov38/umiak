@@ -143,6 +143,8 @@ export class FakePve {
 	templateConfig: Record<string, string> = { ...TEMPLATE_CONFIG };
 	fail: Record<string, Error> = {};
 	keepIpamOnDelete = false;
+	/** When set, PVE-allocated volumes land in its LV list and destroy removes them. */
+	lvStore: FakeNode | undefined;
 	/** Status /cluster/resources reports instead of the real one: pvestatd lags by seconds. */
 	staleStatus = new Map<number, string>();
 	#nextIp = 101;
@@ -257,6 +259,12 @@ export class FakePve {
 			if (vm.status !== "stopped")
 				throw new PveApiError(500, `VM ${id} is running - destroy failed`);
 			this.vms.delete(id);
+			// destroy-unreferenced-disks: Proxmox removes the VM's own volumes (not our tagged clones,
+			// which sbx-node removes by tag).
+			if (this.lvStore)
+				this.lvStore.lvs = this.lvStore.lvs.filter(
+					(l) => l.tags.includes("sbx") || !l.name.startsWith(`vm-${id}-`),
+				);
 			if (!this.keepIpamOnDelete)
 				this.ipam = this.ipam.filter((e) => e.vmid !== id);
 			return this.#task();
@@ -280,6 +288,7 @@ export class FakePve {
 						);
 						let n = 0;
 						while (used.has(n)) n++;
+						this.lvStore?.lvs.push({ name: `vm-${id}-disk-${n}`, tags: [] });
 						vm.config[k] =
 							`${alloc[1]}:vm-${id}-disk-${n},size=4M${alloc[2] ?? ""}`;
 					} else vm.config[k] = String(v);

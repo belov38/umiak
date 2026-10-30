@@ -102,6 +102,9 @@ export class FakeInfra implements NodeInfra {
 		});
 	}
 
+	/** Test control: the next snapshot with a hook fails with this error (as classified by the adapter). */
+	snapshotFailure: Error | undefined;
+
 	#call(method: string, ...args: unknown[]): void {
 		this.calls.push({ method, args });
 	}
@@ -368,6 +371,11 @@ export class FakeInfra implements NodeInfra {
 		opts: { lvId: string; hook?: QuiesceHook },
 	): Promise<InfraSnapshotResult> {
 		this.#call("snapshot", vmid, { lvId: opts.lvId, hook: !!opts.hook });
+		const injected = this.snapshotFailure;
+		if (injected && opts.hook) {
+			this.snapshotFailure = undefined;
+			throw injected;
+		}
 		const vm = this.#vm(vmid);
 		// As sbx-node lv.snapshot: an LV of that name must not exist yet.
 		if (

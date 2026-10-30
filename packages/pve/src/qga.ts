@@ -43,8 +43,12 @@ const CLIENT_TIMEOUT_RE = /^GET \S+\/agent\/exec-status: timeout$/;
 /** Raw bytes per exec in fileWriteWindows. */
 const WRITE_CHUNK_BYTES = 32 * 1024;
 
-/** Paths that reach PowerShell as one plain token: no spaces, quotes, `$`, `;`, `&` or backticks. */
-const SAFE_WINDOWS_PATH_RE = /^[A-Za-z0-9_.:\\/()@%+=,~-]+$/;
+/**
+ * Paths that reach PowerShell as one plain token: letters, digits and `_ . : \ / - + ~ =` only;
+ * no spaces, quotes, `$ ; & , ( ) @ %` or backticks (the -Command string is parsed again), and no
+ * leading `-` (it would read as a parameter).
+ */
+const SAFE_WINDOWS_PATH_RE = /^[A-Za-z0-9_.:\\/+=~][A-Za-z0-9_.:\\/+=~-]*$/;
 
 /**
  * Body of the append script. The path is the trailing argument of `powershell -Command`, so it

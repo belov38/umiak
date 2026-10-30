@@ -1122,6 +1122,42 @@ describe("Windows template (three disks)", () => {
 		expect(puts).toHaveLength(1);
 	});
 
+	it("delete removes the PVE-allocated tpmstate0 volume", async () => {
+		const { api, node, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		api.lvStore = node;
+		const m = await machines.create({});
+		expect(node.lvs.map((l) => l.name).sort()).toEqual([
+			"vm-500-disk-0",
+			"vm-500-disk-1",
+			"vm-500-disk-2",
+		]);
+		// The untagged volume is not found by the driver's tag lookup: only destroy removes it.
+		expect(node.lvs.find((l) => l.name === "vm-500-disk-2")?.tags).toEqual([]);
+		await machines.delete(m.vmid);
+		expect(node.lvs).toEqual([]);
+	});
+
+	it("a create failing right after the tpmstate0 PUT rolls back without traces", async () => {
+		const { api, node, machines, store } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		api.lvStore = node;
+		// The re-read of the config after the tpmstate0 PUT fails once; the rollback reads it again.
+		const get = api.get.bind(api);
+		let failed = false;
+		api.get = ((path: string, params?: Record<string, unknown>) => {
+			if (path === "/nodes/pve/qemu/500/config" && !failed) {
+				failed = true;
+				return Promise.reject(new Error("config read failed"));
+			}
+			return get(path, params);
+		}) as typeof api.get;
+		await expect(machines.create({})).rejects.toThrow(/config read failed/);
+		expect(api.vms.has(500)).toBe(false);
+		expect(node.lvs).toEqual([]);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
 	it("fork copies tpmstate0 of the source", async () => {
 		const { api, node, machines } = setup();
 		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };

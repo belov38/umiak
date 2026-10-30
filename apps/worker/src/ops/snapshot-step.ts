@@ -1,6 +1,6 @@
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import type { Tx } from "@sbx/db";
-import type { QuiesceHook } from "@sbx/pve";
+import { FreezeTimeoutError, type QuiesceHook } from "@sbx/pve";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { insertDisks, loadSnapshot, snapshotRef } from "../db.ts";
@@ -34,8 +34,8 @@ type Queryable = Pick<pg.Pool, "query"> | Pick<pg.PoolClient, "query">;
 export class QuiesceFailed extends Error {
 	readonly retryable = false;
 	readonly code = "quiesce_failed";
-	constructor(message: string) {
-		super(message);
+	constructor(message: string, opts?: { cause?: unknown }) {
+		super(message, opts);
 		this.name = "QuiesceFailed";
 	}
 }
@@ -234,17 +234,19 @@ export async function takeSnapshot(
 		if (status === "missing") throw new MachineGone(m.id, `VM ${vmid} missing`);
 		let hook: QuiesceHook | undefined;
 		let agentUnavailable = false;
+		let agentHook = false;
 		if (status === "running") {
 			const viaQga = fenced.op.progress.quiesceVia === "qga";
 			if (!viaQga && (await agentCanQuiesce(ctx, m.id))) {
-				const agentHook = ctx.agent.quiesceHook(m.id, QUIESCE_LEASE_MS);
+				agentHook = true;
+				const agent = ctx.agent.quiesceHook(m.id, QUIESCE_LEASE_MS);
 				const watch = (e: unknown): never => {
 					if (e instanceof AgentUnavailable) agentUnavailable = true;
 					throw e;
 				};
 				hook = {
-					freeze: () => agentHook.freeze().catch(watch),
-					thaw: () => agentHook.thaw().catch(watch),
+					freeze: () => agent.freeze().catch(watch),
+					thaw: () => agent.thaw().catch(watch),
 				};
 			} else if (!(await infra.qgaPing(vmid))) {
 				throw new QuiesceFailed(
@@ -259,7 +261,14 @@ export async function takeSnapshot(
 		try {
 			res = await infra.snapshot(vmid, hook ? { lvId, hook } : { lvId });
 		} catch (e) {
-			if (agentUnavailable) {
+			// S1 gave up waiting for the agent's freeze (the infra adapter reports it as
+			// QuiesceFailed caused by FreezeTimeoutError): same fallback as an unanswered hook.
+			const frozeTooLong =
+				agentHook &&
+				(e instanceof FreezeTimeoutError ||
+					(e instanceof QuiesceFailed &&
+						e.cause instanceof FreezeTimeoutError));
+			if (agentUnavailable || frozeTooLong) {
 				// §7.7 fallback: the agent did not answer; the next attempt freezes
 				// through QGA. The error stays transient (the job is repeated).
 				ctx.log.info(
@@ -267,6 +276,12 @@ export async function takeSnapshot(
 					"agent quiesce unavailable; the retry uses QGA",
 				);
 				await mergeProgress(fenced, { quiesceVia: "qga" });
+				// Transient, so the job is repeated through QGA.
+				if (frozeTooLong)
+					throw new AgentUnavailable(
+						"agent quiesce did not finish in time; the retry uses QGA",
+						{ cause: e },
+					);
 			}
 			throw e;
 		}

@@ -311,7 +311,17 @@ describe("Qga.fileWriteWindows", () => {
 
 	it("rejects paths that would not survive PowerShell command-line parsing", async () => {
 		const guest = new FakeWindowsGuest();
-		for (const p of ["C:\\a b\\x", "C:\\x';calc", "C:\\$env\\x", ""])
+		for (const p of [
+			"C:\\a b\\x",
+			"C:\\x';calc",
+			"C:\\$env\\x",
+			"C:\\a,b",
+			"C:\\a(b)",
+			"C:\\a@b",
+			"C:\\a%b%",
+			"-Path",
+			"",
+		])
 			await expect(
 				new Qga(guest, "pve").fileWriteWindows(500, p, data),
 			).rejects.toThrow(/path/);
