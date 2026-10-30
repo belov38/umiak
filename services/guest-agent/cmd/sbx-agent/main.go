@@ -19,7 +19,10 @@ commands:
   run [--debug-listen unix:<path> [--debug-confirm]]
                     run the agent daemon (the debug flags are a test aid)
   shim --id <id>    command supervisor (started by the agent)
-  identity apply    apply the machine identity (sbx-identity.service)
+  identity apply [--specialize]
+                    apply the machine identity (sbx-identity.service;
+                    --specialize: the Windows sysprep specialize pass)
+  early             Windows boot step (computer startup script)
   quiesce-watchdog --lease <id>
                     thaw a quiesce lease when it expires (started by the agent)
   rollback [--to <version>]
@@ -58,7 +61,9 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 			_, _ = io.WriteString(stderr, usage)
 			return 2
 		}
-		return identityApply(ctx, d, stderr)
+		return identityApply(ctx, d, args[2:], stderr)
+	case "early":
+		return earlyCmd(ctx, d, args[1:], stderr)
 	case "seal":
 		return sealCmd(ctx, d, stdout, stderr)
 	case "shim":

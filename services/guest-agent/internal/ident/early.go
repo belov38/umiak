@@ -1,0 +1,142 @@
+package ident
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+)
+
+// EarlyMarker is the content of early.json: the boot whose early step has
+// finished (S9 spec 12.3).
+type EarlyMarker struct {
+	BootID string `json:"bootId"`
+}
+
+// LoadEarly reads early.json. A missing file returns an error for which
+// errors.Is(err, fs.ErrNotExist) is true.
+func LoadEarly(path string) (*EarlyMarker, error) {
+	var m EarlyMarker
+	if err := fsutil.ReadJSON(path, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// Early is the boot step of Windows (sbx-agent early, spec 12.3), run by the
+// computer startup script before any logon, or by the agent service when
+// the script did not run. While Windows Setup runs it does nothing. Under
+// the global identity mutex it applies the identity (ModeEarly), wipes the
+// secrets directory, clears run\ when the boot id changed and writes
+// early.json for the current boot. When the computer name changed it
+// reboots instead of writing early.json: identity.json is already saved, so
+// the next boot finds nothing to change.
+//
+// An identity that cannot be read or parsed is logged and skipped, the rest
+// still runs: a machine without identity must boot.
+func Early(ctx context.Context, l paths.Layout, src Source, r WinResetter) error {
+	if SetupInProgress() {
+		slog.Info("windows setup is in progress, early step skipped")
+		return nil
+	}
+	unlock, err := lockIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	raw, err := src.Read(ctx)
+	if err != nil {
+		slog.Warn("early: cannot read the identity source, identity not applied", "err", err)
+	}
+	bootID := strings.TrimSpace(raw.BootID)
+	reboot := false
+	if err == nil {
+		id, perr := Parse(raw)
+		if perr != nil {
+			slog.Warn("early: invalid identity, not applied", "err", perr)
+		} else {
+			for _, w := range id.Warnings {
+				slog.Warn("early: " + w)
+			}
+			changed, need, err := applyWindows(ctx, l, id, r, ModeEarly)
+			if err != nil {
+				// No marker: the service repeats the step. The secrets
+				// still go before any logon.
+				return errors.Join(err, wrapWipe(r.WipeSecrets()))
+			}
+			if changed {
+				slog.Info("identity applied", "machine_id", id.MachineID, "computer_name", WindowsComputerName(id.MachineID))
+			}
+			reboot = need
+		}
+	}
+
+	if err := wrapWipe(r.WipeSecrets()); err != nil {
+		return err
+	}
+	if err := cleanRunDirOnNewBoot(l, bootID); err != nil {
+		return err
+	}
+	if reboot {
+		slog.Info("rebooting to apply the computer name")
+		if err := r.Reboot("sbx identity changed"); err != nil {
+			return fmt.Errorf("ident: reboot: %w", err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(l.RunDir, 0o755); err != nil {
+		return err
+	}
+	if err := fsutil.WriteJSONAtomic(l.EarlyFile, EarlyMarker{BootID: bootID}, 0o644); err != nil {
+		return fmt.Errorf("ident: write early.json: %w", err)
+	}
+	return nil
+}
+
+func wrapWipe(err error) error {
+	if err != nil {
+		return fmt.Errorf("ident: early wipe secrets: %w", err)
+	}
+	return nil
+}
+
+// cleanRunDirOnNewBoot empties run\ when early.json belongs to another boot
+// (or is missing, or the boot id is unknown). The shim socket directory and
+// the agent's own sockets stay: the service starts in parallel with the
+// startup script and may already listen on them.
+func cleanRunDirOnNewBoot(l paths.Layout, bootID string) error {
+	if m, err := LoadEarly(l.EarlyFile); err == nil && bootID != "" && m.BootID == bootID {
+		return nil
+	}
+	entries, err := os.ReadDir(l.RunDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("ident: list run dir: %w", err)
+	}
+	keep := map[string]bool{}
+	for _, p := range []string{l.ShimSockDir, l.AdminSocket, l.EnvSocket} {
+		if p != "" {
+			keep[filepath.Clean(p)] = true
+		}
+	}
+	for _, e := range entries {
+		p := filepath.Join(l.RunDir, e.Name())
+		if keep[p] {
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil {
+			return fmt.Errorf("ident: clean run dir: %w", err)
+		}
+	}
+	return nil
+}
