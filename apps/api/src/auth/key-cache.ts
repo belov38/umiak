@@ -101,6 +101,14 @@ export class KeyCache {
 		});
 	}
 
+	/**
+	 * Drops the key at once on this pod (revoke, rotate); other pods follow
+	 * on the NOTIFY of the change.
+	 */
+	forget(id: string): void {
+		this.#invalidateKey(id);
+	}
+
 	flush(): void {
 		this.#generation++;
 		// Loads started before the change must not be joined by new requests.

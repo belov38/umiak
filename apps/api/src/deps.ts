@@ -2,7 +2,7 @@
 // add fields (svc, agent, streams, ...); tests build deps with
 // `makeTestDeps(over)` from `@sbx/api/testing`.
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { EnvironmentStore, IdentityStore } from "@sbx/auth";
+import type { EnvironmentStore, IdentityStore, SshCa } from "@sbx/auth";
 import type { ConfigReader } from "@sbx/config";
 import type { SandboxService } from "@sbx/core";
 import type pg from "pg";
@@ -26,8 +26,10 @@ export interface ApiDeps {
 	metrics: ApiMetrics;
 	/** Postgres; null only in tests that need no database. */
 	pool: pg.Pool | null;
-	/** Gateway SSH host keys ("<type> <base64>") for `/v1/meta`. */
+	/** Gateway SSH host keys ("<type> <base64>") for `/v1/meta` and `/ssh`. */
 	hostKeys: string[];
+	/** SSH login CA (SBX_SSH_LOGIN_CA_KEY_FILE); null: no certificates. */
+	sshCa: SshCa | null;
 	/** Users, teams, keys (PgIdentityStore until S8). */
 	identity: IdentityStore;
 	/** LISTEN sbx_identity; its connection is part of `/readyz`. */

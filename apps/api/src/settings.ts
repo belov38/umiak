@@ -2,7 +2,7 @@
 // environment is a fatal error that lists every problem.
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { loadSshHostKeys } from "@sbx/auth";
+import { loadSshCa, loadSshHostKeys, type SshCa } from "@sbx/auth";
 import { z } from "zod";
 
 export class SettingsError extends Error {
@@ -295,4 +295,12 @@ export function loadSettings(
  */
 export function readHostKeys(file: string | null): string[] {
 	return file === null ? [] : loadSshHostKeys(readFileSync(file, "utf8"));
+}
+
+/**
+ * The SSH login CA (SBX_SSH_LOGIN_CA_KEY_FILE: unencrypted ed25519, PKCS#8
+ * PEM or OpenSSH); null without the file. A missing or invalid file is fatal.
+ */
+export function readSshCa(file: string | null): SshCa | null {
+	return file === null ? null : loadSshCa(readFileSync(file, "utf8"));
 }

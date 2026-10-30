@@ -81,4 +81,25 @@ describe("KeyCache", () => {
 			expect(loads).toHaveLength(2);
 		});
 	}
+
+	it("forget(id) drops the key on this pod without a NOTIFY", async () => {
+		const id = randomUUID();
+		let revokedAt: Date | null = null;
+		let loads = 0;
+		const store = {
+			findApiKeyByHash: async () => {
+				loads++;
+				return keyRecord(id, revokedAt);
+			},
+			team: async () => ({ id: TEAM, name: "t" }),
+		} as unknown as IdentityStore;
+		const cache = new KeyCache(store, new IdentityListener(null));
+		expect((await cache.lookup("hash"))?.key.revokedAt).toBeNull();
+		revokedAt = new Date();
+		// Still cached (30 s) until forgotten.
+		expect((await cache.lookup("hash"))?.key.revokedAt).toBeNull();
+		cache.forget(id);
+		expect((await cache.lookup("hash"))?.key.revokedAt).not.toBeNull();
+		expect(loads).toBe(2);
+	});
 });

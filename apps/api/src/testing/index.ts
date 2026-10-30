@@ -102,7 +102,7 @@ export function emptyEnvironmentStore(): EnvironmentStore {
 
 /**
  * Deps for tests: test settings, a silent logger, fresh metrics, no
- * database, no host keys. `over` replaces any field; the auth services are
+ * database, no host keys, no SSH login CA. `over` replaces any field; the auth services are
  * built from the final settings, pool, identity and identityEvents:
  * - identity: PgIdentityStore over `pool` if given, else `testIdentityStore`
  *   that knows `TEST_API_KEY` (all scopes, team `TEST_TEAM_ID`);
@@ -139,6 +139,7 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 		metrics: new ApiMetrics(),
 		pool,
 		hostKeys: [],
+		sshCa: null,
 		identity,
 		identityEvents,
 		keyCache: new KeyCache(identity, identityEvents),

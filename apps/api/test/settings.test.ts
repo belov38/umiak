@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadSshCa } from "@sbx/auth";
 import { describe, expect, it } from "vitest";
-import { loadSettings, readHostKeys, SettingsError } from "../src/index.ts";
+import {
+	loadSettings,
+	readHostKeys,
+	readSshCa,
+	SettingsError,
+} from "../src/index.ts";
 import { TEST_ENV } from "../src/testing/index.ts";
 
 const CURSOR_KEY = Buffer.alloc(32, 1).toString("base64");
@@ -123,5 +128,29 @@ describe("readHostKeys", () => {
 		const file = join(dir, "host_keys");
 		writeFileSync(file, `# gateway\n${key} root@gw\n`);
 		expect(readHostKeys(file)).toEqual([key]);
+	});
+});
+
+describe("readSshCa", () => {
+	it("is null without a file, loads the CA from the file, refuses a non-ed25519 key", () => {
+		expect(readSshCa(null)).toBeNull();
+		const dir = mkdtempSync(join(tmpdir(), "sbx-api-"));
+		const pem = generateKeyPairSync("ed25519").privateKey.export({
+			format: "pem",
+			type: "pkcs8",
+		}) as string;
+		const file = join(dir, "login_ca");
+		writeFileSync(file, pem);
+		expect(readSshCa(file)?.publicKey).toBe(loadSshCa(pem).publicKey);
+		const rsa = join(dir, "rsa");
+		writeFileSync(
+			rsa,
+			generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
+				format: "pem",
+				type: "pkcs8",
+			}) as string,
+		);
+		expect(() => readSshCa(rsa)).toThrow(/ed25519/);
+		expect(() => readSshCa(join(dir, "missing"))).toThrow();
 	});
 });

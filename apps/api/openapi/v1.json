@@ -2,6 +2,182 @@
 	"components": {
 		"parameters": {},
 		"schemas": {
+			"ApiKey": {
+				"properties": {
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"createdBy": {
+						"description": "Who issued the key (audit only; the key does not depend on them)",
+						"properties": {
+							"active": {
+								"description": "false: the creator is deactivated",
+								"type": "boolean"
+							},
+							"email": {
+								"type": "string"
+							},
+							"id": {
+								"example": "usr_01jbx2v7d3m6c8q9w0e4r5t6y7",
+								"type": "string"
+							},
+							"member": {
+								"description": "false: the creator left the team (the key still works)",
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"id",
+							"email",
+							"active",
+							"member"
+						],
+						"type": [
+							"object",
+							"null"
+						]
+					},
+					"createdVia": {
+						"enum": [
+							"api",
+							"cli",
+							"dashboard"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"expiresAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"id": {
+						"example": "key_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"kind": {
+						"description": "Always `team` in v1; `sandbox` is reserved",
+						"enum": [
+							"team",
+							"sandbox"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					},
+					"last4": {
+						"example": "9xYz",
+						"type": "string"
+					},
+					"lastUsedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"name": {
+						"type": "string"
+					},
+					"prefix": {
+						"description": "First 8 characters after `sbx_`",
+						"example": "a1B2c3D4",
+						"type": "string"
+					},
+					"revokedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"sandboxId": {
+						"description": "Sandbox keys only (reserved); null",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"scopes": {
+						"items": {
+							"enum": [
+								"sandboxes:read",
+								"sandboxes:write",
+								"sandboxes:delete",
+								"commands:read",
+								"commands:exec",
+								"files:read",
+								"files:write",
+								"ports:write",
+								"ssh:connect",
+								"snapshots:read",
+								"snapshots:write",
+								"environments:read",
+								"environments:write",
+								"keys:admin"
+							],
+							"type": "string",
+							"x-extensible-enum": true
+						},
+						"type": "array"
+					},
+					"teamId": {
+						"example": "team_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					}
+				},
+				"required": [
+					"id",
+					"kind",
+					"sandboxId",
+					"teamId",
+					"name",
+					"prefix",
+					"last4",
+					"scopes",
+					"createdBy",
+					"createdVia",
+					"createdAt",
+					"expiresAt",
+					"lastUsedAt",
+					"revokedAt"
+				],
+				"type": "object"
+			},
+			"ApiKeyList": {
+				"description": "Every key of the team, revoked ones included, newest first",
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/ApiKey"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"data"
+				],
+				"type": "object"
+			},
+			"ApiKeySecret": {
+				"properties": {
+					"apiKey": {
+						"$ref": "#/components/schemas/ApiKey"
+					},
+					"secret": {
+						"description": "The secret (`sbx_...`), shown only in this answer; keep it like a password",
+						"type": "string"
+					}
+				},
+				"required": [
+					"apiKey",
+					"secret"
+				],
+				"type": "object"
+			},
 			"ArchiveResult": {
 				"properties": {
 					"entries": {
@@ -706,6 +882,68 @@
 				],
 				"type": "object"
 			},
+			"CreateApiKeyRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"expiresInSeconds": {
+						"description": "Lifetime; default 90 days (7776000), at most 365 days",
+						"maximum": 31536000,
+						"minimum": 60,
+						"type": "integer"
+					},
+					"kind": {
+						"description": "Only `team` (the default)",
+						"enum": [
+							"team"
+						],
+						"type": "string"
+					},
+					"name": {
+						"example": "ci-main",
+						"maxLength": 100,
+						"minLength": 1,
+						"pattern": "^[^\\p{Cc}]+$/u",
+						"type": "string"
+					},
+					"preset": {
+						"description": "read-only, ci or full (S7 §7.3); or send `scopes`. Exactly one of the two.",
+						"enum": [
+							"read-only",
+							"ci",
+							"full"
+						],
+						"type": "string"
+					},
+					"scopes": {
+						"description": "Scopes of the key; or send `preset`",
+						"items": {
+							"enum": [
+								"sandboxes:read",
+								"sandboxes:write",
+								"sandboxes:delete",
+								"commands:read",
+								"commands:exec",
+								"files:read",
+								"files:write",
+								"ports:write",
+								"ssh:connect",
+								"snapshots:read",
+								"snapshots:write",
+								"environments:read",
+								"environments:write",
+								"keys:admin"
+							],
+							"type": "string"
+						},
+						"minItems": 1,
+						"type": "array"
+					}
+				},
+				"required": [
+					"name"
+				],
+				"type": "object"
+			},
 			"CreateEnvironmentRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -929,6 +1167,30 @@
 				"required": [
 					"sandbox",
 					"name"
+				],
+				"type": "object"
+			},
+			"CreateSshKeyRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"name": {
+						"example": "laptop",
+						"maxLength": 100,
+						"minLength": 1,
+						"pattern": "^[^\\p{Cc}]+$/u",
+						"type": "string"
+					},
+					"publicKey": {
+						"description": "OpenSSH public key line: ssh-ed25519, ecdsa-sha2-nistp256/384/521 or ssh-rsa of at least 3072 bits; not a certificate",
+						"example": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl me@laptop",
+						"maxLength": 16384,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"name",
+					"publicKey"
 				],
 				"type": "object"
 			},
@@ -3239,6 +3501,192 @@
 				],
 				"type": "object"
 			},
+			"SshAccess": {
+				"properties": {
+					"command": {
+						"example": "ssh quiet-otter-lamp@ssh.example.com",
+						"type": "string"
+					},
+					"hasKeys": {
+						"description": "The person has registered SSH keys (always false for a team key, which uses certificates)",
+						"type": "boolean"
+					},
+					"host": {
+						"example": "ssh.example.com",
+						"type": "string"
+					},
+					"knownHosts": {
+						"description": "`known_hosts` lines of the gateway host keys, the same for every sandbox (`[host]:port ...` when the port is not 22)",
+						"example": [
+							"ssh.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+						],
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"loginUser": {
+						"description": "User of the guest OS the session runs as (template)",
+						"example": "user",
+						"type": "string"
+					},
+					"port": {
+						"example": 22,
+						"type": "integer"
+					},
+					"username": {
+						"description": "SSH user name: the slug of the sandbox",
+						"example": "quiet-otter-lamp",
+						"type": "string"
+					}
+				},
+				"required": [
+					"host",
+					"port",
+					"username",
+					"knownHosts",
+					"loginUser",
+					"command",
+					"hasKeys"
+				],
+				"type": "object"
+			},
+			"SshCertificate": {
+				"properties": {
+					"certificate": {
+						"description": "OpenSSH user certificate line; save it next to the private key as `<key>-cert.pub`",
+						"type": "string"
+					},
+					"host": {
+						"example": "ssh.example.com",
+						"type": "string"
+					},
+					"knownHosts": {
+						"description": "`known_hosts` lines of the gateway host keys, the same for every sandbox (`[host]:port ...` when the port is not 22)",
+						"example": [
+							"ssh.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+						],
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"port": {
+						"example": 22,
+						"type": "integer"
+					},
+					"principal": {
+						"description": "The only principal: the sandbox id",
+						"example": "sb_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"username": {
+						"description": "SSH user name: the slug of the sandbox",
+						"example": "quiet-otter-lamp",
+						"type": "string"
+					},
+					"validAfter": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"validBefore": {
+						"description": "Checked only when logging in: an open session lasts longer",
+						"format": "date-time",
+						"type": "string"
+					}
+				},
+				"required": [
+					"certificate",
+					"principal",
+					"validAfter",
+					"validBefore",
+					"host",
+					"port",
+					"username",
+					"knownHosts"
+				],
+				"type": "object"
+			},
+			"SshCertificateRequest": {
+				"additionalProperties": false,
+				"properties": {
+					"publicKey": {
+						"description": "OpenSSH public key line: ssh-ed25519, ecdsa-sha2-nistp256/384/521 or ssh-rsa of at least 3072 bits; not a certificate",
+						"example": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl me@laptop",
+						"maxLength": 16384,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"publicKey"
+				],
+				"type": "object"
+			},
+			"SshKey": {
+				"properties": {
+					"createdAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": "string"
+					},
+					"fingerprint": {
+						"description": "As `ssh-keygen -l`; unique across the platform",
+						"example": "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s",
+						"type": "string"
+					},
+					"id": {
+						"example": "sshk_01jbx2v7d3m6c8q9w0e4r5t6y7",
+						"type": "string"
+					},
+					"lastUsedAt": {
+						"description": "ISO 8601 UTC with milliseconds",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"name": {
+						"type": "string"
+					},
+					"type": {
+						"enum": [
+							"ssh-ed25519",
+							"ecdsa-sha2-nistp256",
+							"ecdsa-sha2-nistp384",
+							"ecdsa-sha2-nistp521",
+							"ssh-rsa"
+						],
+						"type": "string",
+						"x-extensible-enum": true
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"fingerprint",
+					"type",
+					"createdAt",
+					"lastUsedAt"
+				],
+				"type": "object"
+			},
+			"SshKeyList": {
+				"properties": {
+					"data": {
+						"items": {
+							"$ref": "#/components/schemas/SshKey"
+						},
+						"type": "array"
+					}
+				},
+				"required": [
+					"data"
+				],
+				"type": "object"
+			},
 			"StartCommandRequest": {
 				"additionalProperties": false,
 				"properties": {
@@ -3592,6 +4040,277 @@
 	},
 	"openapi": "3.1.0",
 	"paths": {
+		"/v1/api-keys": {
+			"get": {
+				"description": "Every key of the team of the request, revoked and expired ones included, newest first, with who created it and whether that person is still active and a member. Secrets are never shown. Any member; a team key needs keys:admin.",
+				"operationId": "apiKeys.list",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiKeyList"
+								}
+							}
+						},
+						"description": "Keys of the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "List the team's API keys",
+				"tags": [
+					"api-keys"
+				]
+			},
+			"post": {
+				"description": "Issues a key of the team for automation and CI with `scopes` or a `preset` (read-only, ci, full) and a lifetime (default 90 days, at most 365). The secret is in this answer only. Only an owner of the team, as a person (dashboard or `sbx login`); a key cannot issue keys. People use `sbx login` instead of keys.",
+				"operationId": "apiKeys.create",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateApiKeyRequest"
+							}
+						}
+					},
+					"description": "The key",
+					"required": true
+				},
+				"responses": {
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiKeySecret"
+								}
+							}
+						},
+						"description": "Issued; the secret is shown once"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: unknown scope or preset, both or neither of them, lifetime over 365 days, kind other than \"team\""
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden`: details.reason `role` (not an owner of the team) or `user_required` (a team key cannot issue keys)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"keycloak": []
+					}
+				],
+				"summary": "Issue a team API key",
+				"tags": [
+					"api-keys"
+				]
+			}
+		},
+		"/v1/api-keys/self": {
+			"delete": {
+				"description": "The team key of this request revokes itself (`sbx logout --revoke`); it stops working at once on every server. Any team key, no scope needed.",
+				"operationId": "apiKeys.revokeSelf",
+				"responses": {
+					"204": {
+						"description": "Revoked"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `api_key_required`: the caller is a person"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Revoke the calling key",
+				"tags": [
+					"api-keys"
+				]
+			}
+		},
+		"/v1/api-keys/{key}": {
+			"delete": {
+				"description": "Revokes a key of the team of the request; it stops working at once on every server, open streams and terminals of it are closed. Repeating is safe. An owner, a platform operator, or a team key with keys:admin.",
+				"operationId": "apiKeys.revoke",
+				"parameters": [
+					{
+						"description": "API key id (`key_...`)",
+						"in": "path",
+						"name": "key",
+						"required": true,
+						"schema": {
+							"description": "API key id (`key_...`)",
+							"example": "key_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Revoked"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden`: details.reason `role` (a member) or details.requiredScope `keys:admin` (a key without it)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such key in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Revoke a team API key",
+				"tags": [
+					"api-keys"
+				]
+			}
+		},
+		"/v1/api-keys/{key}/rotate": {
+			"post": {
+				"description": "Replaces the secret of the key: the old secret stops working at once; id, name, scopes and expiry stay. The new secret is in this answer only. Only an owner, as a person.",
+				"operationId": "apiKeys.rotate",
+				"parameters": [
+					{
+						"description": "API key id (`key_...`)",
+						"in": "path",
+						"name": "key",
+						"required": true,
+						"schema": {
+							"description": "API key id (`key_...`)",
+							"example": "key_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiKeySecret"
+								}
+							}
+						},
+						"description": "The new secret, shown once"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden`: details.reason `role` (not an owner of the team) or `user_required` (a team key cannot issue keys)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such key in the team"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state`: the key is revoked"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"keycloak": []
+					}
+				],
+				"summary": "Rotate a team API key",
+				"tags": [
+					"api-keys"
+				]
+			}
+		},
 		"/v1/docs": {
 			"get": {
 				"description": "Interactive HTML reference (Scalar) rendered from `/v1/openapi.json`. Needs no authentication.",
@@ -8613,6 +9332,147 @@
 				]
 			}
 		},
+		"/v1/sandboxes/{sandbox}/ssh": {
+			"get": {
+				"description": "Host, port and user name (the slug) of the SSH gateway, the guest user of the session, a ready `ssh` command and `known_hosts` lines for the gateway's host keys. `hasKeys` says whether the person registered SSH keys (POST /v1/ssh-keys); without them, or with a team key, get a certificate (POST .../ssh/certificate).",
+				"operationId": "ssh.get",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SshAccess"
+								}
+							}
+						},
+						"description": "How to connect"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "How to connect over SSH",
+				"tags": [
+					"ssh"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/ssh/certificate": {
+			"post": {
+				"description": "Signs the public key with the platform's SSH login CA: an OpenSSH user certificate for this sandbox only, valid 10 minutes (checked when logging in; the session may last longer), with the caller as KeyId. Works for people and team keys; the sandbox may be in any state. Every login is still checked, so revoking a key or leaving the team takes effect at once.",
+				"operationId": "ssh.certificate",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/SshCertificateRequest"
+							}
+						}
+					},
+					"description": "The public key to certify",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SshCertificate"
+								}
+							}
+						},
+						"description": "The certificate"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: not a supported public key (ed25519, ecdsa, RSA >= 3072 bits; no certificates)"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team"
+					},
+					"500": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`internal`: the SSH login CA is not configured"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Get a short-lived SSH certificate",
+				"tags": [
+					"ssh"
+				]
+			}
+		},
 		"/v1/sandboxes/{sandbox}/stop": {
 			"post": {
 				"description": "Shuts the VM down and keeps its disk; resume brings it back. Only from `ready`. A repeat while the stop runs returns the same operation.",
@@ -8964,6 +9824,192 @@
 				"summary": "Get a saved snapshot",
 				"tags": [
 					"snapshots"
+				]
+			}
+		},
+		"/v1/ssh-keys": {
+			"get": {
+				"description": "SSH public keys of the calling person, oldest first. Only a person (browser session or `sbx login`).",
+				"operationId": "sshKeys.list",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SshKeyList"
+								}
+							}
+						},
+						"description": "My SSH keys"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `user_required`: a team API key has no SSH keys"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"keycloak": []
+					}
+				],
+				"summary": "List my SSH keys",
+				"tags": [
+					"ssh"
+				]
+			},
+			"post": {
+				"description": "Registers a public key of the calling person for `ssh <sandbox>@<ssh host>`. Types: ssh-ed25519, ecdsa-sha2-nistp256/384/521, ssh-rsa of at least 3072 bits; no certificates. A key can belong to one person on the platform only.",
+				"operationId": "sshKeys.create",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateSshKeyRequest"
+							}
+						}
+					},
+					"description": "Name and public key",
+					"required": true
+				},
+				"responses": {
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SshKey"
+								}
+							}
+						},
+						"description": "Added"
+					},
+					"400": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`validation`: not a supported public key, or the name"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `user_required`: a team API key has no SSH keys"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`ssh_key_in_use`: this key (fingerprint) is already registered"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"keycloak": []
+					}
+				],
+				"summary": "Add an SSH key",
+				"tags": [
+					"ssh"
+				]
+			}
+		},
+		"/v1/ssh-keys/{key}": {
+			"delete": {
+				"description": "The key stops working for new logins at once; open sessions stay.",
+				"operationId": "sshKeys.delete",
+				"parameters": [
+					{
+						"description": "SSH key id (`sshk_...`)",
+						"in": "path",
+						"name": "key",
+						"required": true,
+						"schema": {
+							"description": "SSH key id (`sshk_...`)",
+							"example": "sshk_01jbx2v7d3m6c8q9w0e4r5t6y7",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Removed"
+					},
+					"403": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`forbidden` with details.reason `user_required`: a team API key has no SSH keys"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such key of mine"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"keycloak": []
+					}
+				],
+				"summary": "Remove an SSH key",
+				"tags": [
+					"ssh"
 				]
 			}
 		},

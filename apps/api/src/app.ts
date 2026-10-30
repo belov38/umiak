@@ -26,6 +26,7 @@ import { requestLog } from "./http/logger.ts";
 import { requestMetrics } from "./http/metrics.ts";
 import { requestId } from "./http/request-id.ts";
 import { registerSecuritySchemes } from "./openapi/registry.ts";
+import { registerApiKeyRoutes } from "./routes/api-keys.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
 import { registerCommandRoutes } from "./routes/commands.ts";
 import { registerEnvRoutes } from "./routes/env.ts";
@@ -39,6 +40,8 @@ import { registerPortRoutes } from "./routes/ports.ts";
 import { registerPtyRoutes } from "./routes/ptys.ts";
 import { registerSandboxRoutes } from "./routes/sandboxes.ts";
 import { registerSnapshotRoutes } from "./routes/snapshots.ts";
+import { registerSshRoutes } from "./routes/ssh.ts";
+import { registerSshKeyRoutes } from "./routes/ssh-keys.ts";
 
 /** Common middleware and error handling of the listener apps. */
 function listenerApp(
@@ -83,10 +86,13 @@ export function mountV1(app: ApiApp, deps: ApiDeps): void {
 	registerPtyRoutes(app, deps);
 	registerFileRoutes(app, deps);
 	registerPortRoutes(app, deps);
+	registerSshRoutes(app, deps);
+	registerSshKeyRoutes(app, deps);
 	registerSnapshotRoutes(app, deps);
 	registerEnvironmentRoutes(app, deps);
 	registerCatalogRoutes(app, deps);
 	registerLimitsRoutes(app, deps);
+	registerApiKeyRoutes(app, deps);
 }
 
 export function createPublicApp(deps: ApiDeps): ApiApp {
