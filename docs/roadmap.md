@@ -26,6 +26,8 @@
 
 Приёмка реализации: master не сливает ветку `sN-impl` только по отчёту исполнителя. Независимый тестовый субагент собирает, прогоняет линтеры и тесты и проверяет поведение на `pve`; найденное исправляет отдельный тред, после чего проверка повторяется.
 
+Dev-стенд control plane (решение 2026-10-30): unprivileged LXC CT 590 на `pve` (`vmbr0`, 3 GB сверх лимита sandbox), в нём docker compose; адрес CT в IPSet `sbx-gateway`. В проде control plane один на платформу (Kubernetes), а на нодах Proxmox в `sbx-gateway` — адрес балансировщика gateway.
+
 Первая сборка для Ильи: весь стек MVP поднимается локально через docker compose (`deploy/compose/`): Postgres, api, worker, gateway, web, Keycloak, oauth2-proxy; Proxmox — `pve`. Каждый тред реализации добавляет туда свой сервис.
 
 Фаза 2 (паритет с boat.dev, области S14–S30): `docs/roadmap-phase2.md`.
