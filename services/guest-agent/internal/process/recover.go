@@ -13,7 +13,8 @@ import (
 // or RUNNING command without exit.json is LOST/REBOOT. Within the same boot
 // each command is finalized from exit.json, reconnected to its live unit,
 // or marked LOST/SHIM_LOST; a STARTING record that was never launched (no
-// shim.json, no unit) stays STARTING for a retry of Start. PTY idle timers
+// shim.json, no unit) stays STARTING for a retry of Start, unless it is
+// older than StartingTTL: then it ends as START_FAILED. PTY idle timers
 // resume from pty_detached_at. It fails only when the records cannot be
 // listed; a command that cannot be recovered is logged and skipped.
 func (m *Manager) Recover(ctx context.Context) error {
@@ -90,6 +91,9 @@ func (m *Manager) recoverOne(ctx context.Context, rec *store.Command) error {
 	}
 
 	err = m.settleLocked(ctx, c, rec, false)
+	if errors.Is(err, errNotLaunched) && m.startingExpired(rec) {
+		return m.expireLocked(ctx, c)
+	}
 	if errors.Is(err, errNotLaunched) {
 		// The previous agent died between the STARTING record and the
 		// launch: nothing ran. The record stays STARTING without a slot,

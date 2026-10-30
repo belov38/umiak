@@ -60,6 +60,9 @@ const (
 	DefaultPoll           = 250 * time.Millisecond
 	DefaultHeartbeat      = 15 * time.Second
 	DefaultDurableTimeout = 30 * time.Second
+	// DefaultStartingTTL is how long a STARTING record that was never
+	// launched waits for a retry of Start before it ends as START_FAILED.
+	DefaultStartingTTL = 24 * time.Hour
 )
 
 // Limits of the API.
@@ -126,6 +129,9 @@ type Options struct {
 	Heartbeat time.Duration
 	// DurableTimeout bounds a durable write made for an RPC.
 	DurableTimeout time.Duration
+	// StartingTTL ends a STARTING record that was never launched (no unit,
+	// no shim.json) once it is older than this. Default DefaultStartingTTL.
+	StartingTTL time.Duration
 	// HandlerOptions are added to the Connect handler; the wiring passes
 	// reqcache.Interceptors (created once and shared by all services).
 	HandlerOptions []connect.HandlerOption
@@ -167,6 +173,9 @@ func (o *Options) setDefaults() error {
 	}
 	if o.DurableTimeout <= 0 {
 		o.DurableTimeout = DefaultDurableTimeout
+	}
+	if o.StartingTTL <= 0 {
+		o.StartingTTL = DefaultStartingTTL
 	}
 	if o.Config.MaxRunningCommands <= 0 {
 		o.Config.MaxRunningCommands = config.Defaults().MaxRunningCommands
@@ -417,13 +426,12 @@ func (m *Manager) runningMainLocked() int {
 }
 
 // JanitorCommands lists the commands for the output janitor, oldest first.
+// On the way it ends the STARTING records whose start was never retried
+// within StartingTTL (see expireStarting).
 func (m *Manager) JanitorCommands() []output.JanitorCommand {
-	var recs []*store.Command
-	if err := m.st.ListCommands(func(c *store.Command) bool {
-		recs = append(recs, c)
-		return true
-	}); err != nil {
-		m.log.Warn("process: list commands", "err", err)
+	recs := m.listRecords()
+	if m.expireStarting(recs) > 0 {
+		recs = m.listRecords()
 	}
 	slices.SortStableFunc(recs, func(a, b *store.Command) int { return a.CreatedAt.Compare(b.CreatedAt) })
 	out := make([]output.JanitorCommand, 0, len(recs))
@@ -436,6 +444,19 @@ func (m *Manager) JanitorCommands() []output.JanitorCommand {
 		out = append(out, jc)
 	}
 	return out
+}
+
+// listRecords returns every command record; a failed listing is logged and
+// returns what was read.
+func (m *Manager) listRecords() []*store.Command {
+	var recs []*store.Command
+	if err := m.st.ListCommands(func(c *store.Command) bool {
+		recs = append(recs, c)
+		return true
+	}); err != nil {
+		m.log.Warn("process: list commands", "err", err)
+	}
+	return recs
 }
 
 // RemoveRecord deletes the record and the log directory of an exited

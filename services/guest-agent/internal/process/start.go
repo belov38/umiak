@@ -264,6 +264,12 @@ func (m *Manager) abortLaunch(c *command, err error) error {
 // START_FAILED and code 127, the message in its last stream so attach shows
 // it (spec 9.2). the record lock of c is held.
 func (m *Manager) startFailedLocked(ctx context.Context, c *command, msg string) error {
+	return m.recordStartFailedLocked(ctx, c, msg, false)
+}
+
+// recordStartFailedLocked is startFailedLocked with the event order of
+// finalizeLocked: emitFirst for background callers.
+func (m *Manager) recordStartFailedLocked(ctx context.Context, c *command, msg string, emitFirst bool) error {
 	m.mu.Lock()
 	pty := c.pty
 	m.mu.Unlock()
@@ -285,7 +291,7 @@ func (m *Manager) startFailedLocked(ctx context.Context, c *command, msg string)
 	ex.status, ex.reason, ex.code = statusExited, shimproto.ReasonStartFailed, startFailedCode
 	dctx, cancel := m.durableCtx(ctx)
 	defer cancel()
-	if err := m.finalizeLocked(dctx, c, ex, false); err != nil {
+	if err := m.finalizeLocked(dctx, c, ex, emitFirst); err != nil {
 		return storeError(err)
 	}
 	m.markGone(c)
