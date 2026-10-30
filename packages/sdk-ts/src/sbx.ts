@@ -65,6 +65,8 @@ export class Sbx {
 		create(input?: CreateSandboxInput, opts?: CreateOptions): Promise<Sandbox>;
 		/** By id (`sb_...`) or slug. */
 		get(ref: string, opts?: CallOptions): Promise<Sandbox>;
+		/** A handle of a sandbox already read (e.g. from a cache); nothing is fetched. */
+		handle(data: SandboxData): Sandbox;
 		/** Every sandbox of the team matching the filter, newest first, all pages. */
 		list(
 			filter?: SandboxFilter,
@@ -125,6 +127,7 @@ export class Sbx {
 				return new Sandbox(core, data);
 			},
 			list: (filter = {}, o = {}) => listSandboxes(core, filter, {}, o),
+			handle: (data) => new Sandbox(core, data),
 		};
 		this.operator = {
 			listSandboxes: (filter = {}, o = {}) => {

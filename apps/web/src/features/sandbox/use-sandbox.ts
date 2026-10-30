@@ -6,13 +6,15 @@
 // does not break the page.
 import type { Sandbox, SandboxData } from "@sbx/sdk";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSbx } from "@/lib/api";
 import { POLL_RETRY_BUDGET_MS } from "@/lib/sandboxes";
 import {
 	LIVE_POLL_MS,
 	type LiveLoop,
 	LONG_POLL_SECONDS,
+	pollRef,
+	sandboxHandle,
 	startLiveLoop,
 } from "./live";
 
@@ -38,23 +40,36 @@ export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
 	const sbx = useSbx(teamId);
 	const queryClient = useQueryClient();
 	const key = sandboxQueryKey(teamId, ref);
-	const handles = useRef(new Map<string, Sandbox>());
+	// The handle and the client it was made with (a new client: a new handle).
+	const handleRef = useRef<{ sbx: unknown; h: Sandbox | undefined }>({
+		sbx: null,
+		h: undefined,
+	});
+	const idRef = useRef<string | undefined>(undefined);
 
 	const q = useQuery({
 		queryKey: key,
 		queryFn: async ({ signal }) => {
-			const sb = await sbx.sandboxes.get(ref, {
+			const { data } = await sbx.raw.GET("/v1/sandboxes/{sandbox}", {
+				params: { path: { sandbox: pollRef(ref, idRef.current) } },
 				signal,
 				retryBudgetMs: POLL_RETRY_BUDGET_MS,
 			});
-			if (!handles.current.has(sb.id)) handles.current.set(sb.id, sb);
-			return sb.data;
+			return data;
 		},
 		refetchInterval: LIVE_POLL_MS,
 		refetchIntervalInBackground: false,
 	});
 
 	const id = q.data?.id;
+	idRef.current = id;
+	const handle = useMemo(() => {
+		const prev =
+			handleRef.current.sbx === sbx ? handleRef.current.h : undefined;
+		const h = sandboxHandle((d) => sbx.sandboxes.handle(d), q.data, prev);
+		handleRef.current = { sbx, h };
+		return h;
+	}, [q.data, sbx]);
 	const stateRef = useRef<string | undefined>(undefined);
 	stateRef.current = q.data?.state;
 	const loopRef = useRef<LiveLoop | null>(null);
@@ -101,7 +116,7 @@ export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
 
 	return {
 		data: q.data,
-		handle: id === undefined ? undefined : handles.current.get(id),
+		handle,
 		error: q.error,
 		isPending: q.isPending,
 		refetch: q.refetch,

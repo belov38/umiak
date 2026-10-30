@@ -21,11 +21,13 @@ import { watchPtySocket } from "@/lib/ws";
 import { exitText } from "./output";
 import {
 	closeCodeText,
+	mergeRunningTabs,
 	PTY_TAIL_BYTES,
 	type PtyFailure,
 	type PtyPhase,
 	ptyFailure,
 	ptyTitle,
+	type TermTabState,
 } from "./pty-status";
 import { canWork } from "./rules";
 import { type XtermHandle, XtermView } from "./xterm-lazy";
@@ -34,12 +36,13 @@ import { type XtermHandle, XtermView } from "./xterm-lazy";
 const START_TIMEOUT_MS = 75_000;
 const START_RETRY_BUDGET_MS = 15_000;
 
-interface TermTab {
-	id: string;
-	command: string | null;
-	/** Detached by the user: no connection until "Reattach". */
-	detached: boolean;
-}
+type TermTab = TermTabState;
+
+/**
+ * Terminals closed on this page (`cmd_…`, unique across sandboxes); kept
+ * across remounts of the tab while their kill settles.
+ */
+const dismissedPtys = new Set<string>();
 
 export function TerminalTab({
 	teamId,
@@ -74,18 +77,15 @@ export function TerminalTab({
 	const [active, setActive] = useState<string | null>(null);
 	const [creating, setCreating] = useState(false);
 
-	// Running terminals the page does not show yet become tabs.
+	// Running terminals the page does not show yet become tabs (not the
+	// ones closed here: a killed shell may be listed as running a moment).
 	useEffect(() => {
 		const list = running.data;
 		if (!list) return;
-		setTabs((cur) => {
-			const known = new Set(cur.map((t) => t.id));
-			const add = list
-				.filter((c) => !known.has(c.id))
-				.map((c) => ({ id: c.id, command: c.command, detached: false }));
-			return add.length === 0 ? cur : [...cur, ...add];
-		});
-		setActive((a) => a ?? list[0]?.id ?? null);
+		setTabs((cur) => mergeRunningTabs(cur, list, dismissedPtys));
+		setActive(
+			(a) => a ?? list.find((c) => !dismissedPtys.has(c.id))?.id ?? null,
+		);
 	}, [running.data]);
 
 	const create = async () => {
@@ -110,6 +110,7 @@ export function TerminalTab({
 
 	const remove = useCallback(
 		(id: string) => {
+			dismissedPtys.add(id);
 			setTabs((cur) => {
 				const next = cur.filter((t) => t.id !== id);
 				setActive((a) => (a === id ? (next[0]?.id ?? null) : a));

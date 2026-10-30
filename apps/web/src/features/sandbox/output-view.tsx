@@ -38,11 +38,14 @@ export function OutputView({
 	handle,
 	command: c,
 	readable,
+	controlOff,
 	onChanged,
 }: {
 	teamId: string;
 	handle: Sandbox;
 	command: CommandData;
+	/** Why Kill and Signal are off (blocked, not ready); null: they work. */
+	controlOff: string | null;
 	/** The sandbox is ready (output lives in the VM). */
 	readable: boolean;
 	/** The command ended or was signalled: refresh the list. */
@@ -150,7 +153,8 @@ export function OutputView({
 							aria-label="Send a signal"
 							className="h-7 rounded-md border bg-transparent px-1 text-xs"
 							value=""
-							disabled={busy}
+							disabled={busy || controlOff !== null}
+							title={controlOff ?? undefined}
 							onChange={(e) => {
 								const v = e.target.value as (typeof SIGNALS)[number];
 								if (v) void signal(v);
@@ -166,7 +170,8 @@ export function OutputView({
 						<Button
 							size="xs"
 							variant="destructive"
-							disabled={busy}
+							disabled={busy || controlOff !== null}
+							title={controlOff ?? undefined}
 							onClick={kill}
 						>
 							Kill

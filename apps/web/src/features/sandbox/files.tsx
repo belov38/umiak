@@ -18,7 +18,7 @@ import {
 	UploadIcon,
 	XIcon,
 } from "lucide-react";
-import { type DragEvent, useMemo, useRef, useState } from "react";
+import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
@@ -90,6 +90,13 @@ export function FilesTab({
 	const [dragging, setDragging] = useState(false);
 	const picker = useRef<HTMLInputElement>(null);
 	const counter = useRef(0);
+	// Aborted when the tab unmounts: uploads in flight stop with it.
+	const life = useRef<AbortController | null>(null);
+	useEffect(() => {
+		const ac = new AbortController();
+		life.current = ac;
+		return () => ac.abort();
+	}, []);
 
 	const home = useQuery({
 		queryKey: ["files-home", teamId, sandbox.id],
@@ -151,7 +158,9 @@ export function FilesTab({
 		return <p className="text-sm text-muted-foreground">Loading…</p>;
 
 	const upload = async (files: File[]) => {
+		const lifetime = life.current?.signal;
 		for (const file of files) {
+			if (lifetime?.aborted) return;
 			const path = joinPath(cwd, file.name);
 			if (
 				rows.some((r) => r.name === file.name) &&
@@ -167,6 +176,8 @@ export function FilesTab({
 				state: "uploading",
 				ac: new AbortController(),
 			};
+			const stop = () => item.ac.abort();
+			lifetime?.addEventListener("abort", stop, { once: true });
 			const update = (p: Partial<UploadItem>) =>
 				setUploads((cur) =>
 					cur.map((u) => (u.key === item.key ? { ...u, ...p } : u)),
@@ -194,7 +205,10 @@ export function FilesTab({
 			} catch (e) {
 				if (item.ac.signal.aborted) update({ state: "cancelled" });
 				else update({ state: "failed", error: describeError(e).message });
+			} finally {
+				lifetime?.removeEventListener("abort", stop);
 			}
+			if (lifetime?.aborted) return;
 			await refresh();
 		}
 	};

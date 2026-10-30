@@ -231,6 +231,7 @@ export function CommandsTab({
 					handle={handle}
 					command={chosen}
 					readable={canRead(sandbox).ok}
+					controlOff={work.ok ? null : work.reason}
 					onChanged={refresh}
 				/>
 			)}

@@ -86,3 +86,28 @@ export function ptyTitle(c: { command: string | null; id: string }): string {
 	if (cmd) return cmd.length > 24 ? `${cmd.slice(0, 23)}…` : cmd;
 	return `shell ${c.id.slice(-4)}`;
 }
+
+export interface TermTabState {
+	id: string;
+	command: string | null;
+	/** Detached by the user: no connection until "Reattach". */
+	detached: boolean;
+}
+
+/**
+ * Tabs after a fresh list of running terminals: running ones the page does
+ * not show yet are added, except the ones the user closed. A closed shell
+ * may still be listed as running for a moment (SIGTERM, then SIGKILL after
+ * the grace), and must not come back as a tab.
+ */
+export function mergeRunningTabs(
+	cur: TermTabState[],
+	running: { id: string; command: string | null }[],
+	dismissed: ReadonlySet<string>,
+): TermTabState[] {
+	const known = new Set(cur.map((t) => t.id));
+	const add = running
+		.filter((c) => !known.has(c.id) && !dismissed.has(c.id))
+		.map((c) => ({ id: c.id, command: c.command, detached: false }));
+	return add.length === 0 ? cur : [...cur, ...add];
+}

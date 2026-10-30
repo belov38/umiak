@@ -187,3 +187,22 @@ describe("PTY socket watch", () => {
 		);
 	});
 });
+
+describe("terminal tabs from running PTYs", () => {
+	it("adds new running terminals, keeps the shown ones, never a closed one", async () => {
+		const { mergeRunningTabs } = await import("@/features/sandbox/pty-status");
+		const cur = [{ id: "cmd_a", command: null, detached: true }];
+		const running = [
+			{ id: "cmd_a", command: null },
+			{ id: "cmd_b", command: "htop" },
+			{ id: "cmd_closed", command: null },
+		];
+		const next = mergeRunningTabs(cur, running, new Set(["cmd_closed"]));
+		expect(next).toEqual([
+			{ id: "cmd_a", command: null, detached: true },
+			{ id: "cmd_b", command: "htop", detached: false },
+		]);
+		// Nothing new: the same array (no re-render).
+		expect(mergeRunningTabs(next, running, new Set(["cmd_closed"]))).toBe(next);
+	});
+});

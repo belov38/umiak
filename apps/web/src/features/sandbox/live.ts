@@ -154,3 +154,29 @@ export function startLiveLoop(
 		done,
 	};
 }
+
+/**
+ * The SDK handle of the page's sandbox, built from the data the page has
+ * (the query cache too, so a remount over cached data gets one without a
+ * request). The same handle is kept while the id stays the same.
+ */
+export function sandboxHandle<
+	D extends { id: string },
+	H extends { id: string; data: D },
+>(
+	make: (data: D) => H,
+	data: D | undefined,
+	prev: H | undefined,
+): H | undefined {
+	if (data === undefined) return undefined;
+	if (prev !== undefined && prev.id === data.id) {
+		prev.data = data;
+		return prev;
+	}
+	return make(data);
+}
+
+/** What the sandbox is read by: its id once known (a rename elsewhere keeps working), else the ref of the URL. */
+export function pollRef(ref: string, knownId: string | undefined): string {
+	return knownId ?? ref;
+}

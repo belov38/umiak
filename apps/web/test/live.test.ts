@@ -4,7 +4,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	liveWaitFor,
+	pollRef,
 	SANDBOX_STATES,
+	sandboxHandle,
 	startLiveLoop,
 	waitForStates,
 } from "@/features/sandbox/live";
@@ -244,5 +246,43 @@ describe("startLiveLoop", () => {
 		await loop.done;
 		expect(sleeps[0]).toBeGreaterThan(400);
 		expect(sleeps[0]).toBeLessThanOrEqual(500);
+	});
+});
+
+describe("sandboxHandle", () => {
+	type D = { id: string; state: string };
+	const make = (d: D) => ({ id: d.id, data: d, made: true });
+
+	it("a remount over cached data gets a handle at once, without a request", () => {
+		let made = 0;
+		const h = sandboxHandle(
+			(d: D) => {
+				made++;
+				return make(d);
+			},
+			{ id: "sb_1", state: "stopped" },
+			undefined,
+		);
+		expect(h?.id).toBe("sb_1");
+		expect(made).toBe(1);
+	});
+
+	it("keeps the handle while the id stays, with the newest data", () => {
+		const first = sandboxHandle(
+			make,
+			{ id: "sb_1", state: "ready" },
+			undefined,
+		);
+		const again = sandboxHandle(make, { id: "sb_1", state: "stopped" }, first);
+		expect(again).toBe(first);
+		expect(again?.data.state).toBe("stopped");
+		const other = sandboxHandle(make, { id: "sb_2", state: "ready" }, first);
+		expect(other).not.toBe(first);
+		expect(sandboxHandle(make, undefined, first)).toBe(undefined);
+	});
+
+	it("polls by id once it is known (a rename elsewhere keeps the page working)", () => {
+		expect(pollRef("old-slug", undefined)).toBe("old-slug");
+		expect(pollRef("old-slug", "sb_1")).toBe("sb_1");
 	});
 });

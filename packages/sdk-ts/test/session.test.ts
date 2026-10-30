@@ -85,4 +85,33 @@ describe("session mode", () => {
 			headers: { "User-Agent": "ua/1" },
 		});
 	});
+
+	it("sandboxes.handle builds a handle from data without a request", async () => {
+		const seen: Request[] = [];
+		const sbx = new Sbx({
+			baseUrl: APP,
+			session: true,
+			team: "team_1",
+			env: {},
+			fetch: (async (input: Request) => {
+				seen.push(input);
+				return new Response(JSON.stringify({ data: [], nextCursor: null }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			}) as typeof fetch,
+		});
+		const sb = sbx.sandboxes.handle({
+			id: "sb_1",
+			slug: "quiet-otter-lamp",
+			state: "stopped",
+		} as never);
+		expect(sb.id).toBe("sb_1");
+		expect(seen).toHaveLength(0);
+		for await (const _ of sb.files.list("/")) {
+			// empty
+		}
+		expect(seen[0]?.url).toMatch(/\/api\/v1\/sandboxes\/sb_1\/files\/list/);
+		expect(seen[0]?.headers.get("sbx-team")).toBe("team_1");
+	});
 });
