@@ -283,7 +283,6 @@ describe("buildTemplate: happy path", () => {
 			vmid: 598,
 			name: "sbx-tpl-linux-20261030-1",
 			pool: "sandbox",
-			tags: "sbx-tpl",
 			machine: "q35",
 			cpu: "host",
 			bios: "seabios",
@@ -317,7 +316,10 @@ describe("buildTemplate: happy path", () => {
 		expect(ipset?.params).toEqual({ cidr: "10.88.0.101" });
 
 		const template = s.pve.calls.find(
-			(c) => c.method === "PUT" && c.path === `${vm}/config`,
+			(c) =>
+				c.method === "PUT" &&
+				c.path === `${vm}/config` &&
+				c.params?.delete !== undefined,
 		);
 		expect(template?.params).toEqual({ delete: "ide2" });
 		expect(s.pve.vms.get(598)?.config.template).toBe("1");
@@ -609,6 +611,38 @@ describe("buildTemplate: failures", () => {
 		expect(s.node.calls.find((c) => c.op === "media.remove")?.args).toEqual({
 			names: [isoName(m)],
 		});
+		expect(await s.allocator.get(598)).toBeUndefined();
+	});
+
+	it("tags the VM right after the create call, not in it", async () => {
+		const s = setup();
+		await buildTemplate(s.deps, s.opts);
+		const i = s.pve.calls.findIndex(
+			(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
+		);
+		expect(s.pve.calls[i]?.params).not.toHaveProperty("tags");
+		const tag = s.pve.calls.findIndex(
+			(c) =>
+				c.method === "PUT" &&
+				c.path === `${vm}/config` &&
+				c.params?.tags === "sbx-tpl",
+		);
+		expect(tag).toBeGreaterThan(i);
+		const resize = s.pve.calls.findIndex(
+			(c) => c.method === "PUT" && c.path === `${vm}/resize`,
+		);
+		expect(tag).toBeLessThan(resize);
+	});
+
+	it("rolls back a created VM whose tag call failed (by its description)", async () => {
+		const s = setup();
+		s.pve.before = (method, path, params) => {
+			if (method === "PUT" && path === `${vm}/config` && params?.tags)
+				throw new PveApiError(403, "Permission check failed");
+		};
+		const err = await buildTemplate(s.deps, s.opts).catch((e: unknown) => e);
+		expect((err as BuildFailedError).manifest.error?.stage).toBe("vm");
+		expect(s.pve.vms.has(598)).toBe(false);
 		expect(await s.allocator.get(598)).toBeUndefined();
 	});
 

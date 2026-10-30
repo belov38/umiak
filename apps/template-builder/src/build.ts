@@ -340,7 +340,14 @@ async function rollback(
 			const tags = (cfg?.tags ?? "").split(/[;,]/);
 			if (cfg === undefined) {
 				deps.log(`rollback: VM ${vmid} does not exist`);
-			} else if (cfg.name !== st.m.vmName || !tags.includes(BUILD_TAG)) {
+			} else if (
+				cfg.name !== st.m.vmName ||
+				!(
+					tags.includes(BUILD_TAG) ||
+					// Created, but the tag call after the create failed.
+					(cfg.description ?? "").includes(`sbx-tpl build ${st.m.buildId}`)
+				)
+			) {
 				deps.log(
 					`rollback: VM ${vmid} is "${cfg.name}" with tags "${cfg.tags ?? ""}", not this build's: left alone`,
 				);

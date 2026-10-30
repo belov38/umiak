@@ -299,7 +299,6 @@ export async function stageVm(
 		vmid,
 		name: st.m.vmName,
 		pool: o.pool,
-		tags: BUILD_TAG,
 		...recipe.hw,
 		cores: recipe.buildVm.cores,
 		memory: recipe.buildVm.memoryMb,
@@ -313,6 +312,10 @@ export async function stageVm(
 	});
 	await api.waitTask(o.node, upid, { timeoutMs: TASK_TIMEOUT_MS });
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
+	// Proxmox checks tag changes on /vms/<id> without the pool (GuestHelpers
+	// assert_tag_permissions), and a VM being created is not in the pool yet:
+	// tags in the create call fail for a pool-scoped token, so they come next.
+	await api.put(`${vmPath}/config`, { tags: BUILD_TAG });
 	const resized = await api.put(`${vmPath}/resize`, {
 		disk: recipe.disk.slot,
 		size: `${recipe.disk.sizeGb}G`,
