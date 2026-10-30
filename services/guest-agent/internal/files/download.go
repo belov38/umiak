@@ -2,7 +2,6 @@ package files
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -20,7 +19,7 @@ import (
 const defaultFileMode fs.FileMode = 0o644
 
 // download serves GET and HEAD /files?path=&user=: the file content with
-// a single Range, If-Range, ETag "<inode>-<size>-<mtime_ns>",
+// a single Range, If-Range, ETag (etagOf),
 // Last-Modified and Accept-Ranges (http.ServeContent). Several ranges get
 // the whole file with 200. A directory is is_directory.
 func (s *Service) download(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +52,7 @@ func (s *Service) download(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("Range")
 	}
 	h := w.Header()
-	h.Set("ETag", fmt.Sprintf(`"%d-%d-%d"`, sysOf(fi).ino, fi.Size(), fi.ModTime().UnixNano()))
+	h.Set("ETag", etagOf(f, fi))
 	h.Set("Content-Type", "application/octet-stream")
 	http.ServeContent(w, r, "", fi.ModTime(), f)
 }

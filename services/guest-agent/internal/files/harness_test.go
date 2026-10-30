@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -81,7 +82,12 @@ func newHarness(t *testing.T, mods ...func(*Options)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := process.LookupUser(cu.Username)
+	userName := cu.Username
+	if runtime.GOOS == "windows" {
+		// Windows knows only "user" and SYSTEM; the tests run as SYSTEM.
+		userName = "SYSTEM"
+	}
+	u, err := process.LookupUser(userName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +99,7 @@ func newHarness(t *testing.T, mods ...func(*Options)) *harness {
 	opts := Options{
 		Store:          st,
 		Layout:         l,
-		DefaultUser:    cu.Username,
+		DefaultUser:    userName,
 		Now:            c.Now,
 		DurableTimeout: 2 * time.Second,
 		HandlerOptions: reqcache.Interceptors(st),

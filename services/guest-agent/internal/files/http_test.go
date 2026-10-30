@@ -29,7 +29,7 @@ func TestDownloadRangeAndETag(t *testing.T) {
 	body := wantStatus(t, res, http.StatusOK)
 	mustEqualBytes(t, "full body", body, data)
 	etag := res.Header.Get("ETag")
-	if !regexp.MustCompile(`^"[0-9]+-1000-[0-9]+"$`).MatchString(etag) {
+	if !regexp.MustCompile(`^"([0-9]+-)+1000-[0-9]+"$`).MatchString(etag) {
 		t.Fatalf("ETag = %q", etag)
 	}
 	if res.Header.Get("Accept-Ranges") != "bytes" || res.Header.Get("Last-Modified") == "" {

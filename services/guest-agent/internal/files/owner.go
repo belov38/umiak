@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,11 +18,25 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
 )
 
-// owner is the uid and gid that new files and directories get (spec 4).
-type owner struct{ uid, gid int }
+// owner is the uid and gid that new files and directories get (spec 4). On
+// Windows only account counts: the account name whose SID becomes the owner.
+type owner struct {
+	uid, gid int
+	account  string
+}
 
 // ownerOf is the owner of entries created for u.
-func ownerOf(u *process.User) owner { return owner{uid: int(u.UID), gid: int(u.GID)} }
+func ownerOf(u *process.User) owner {
+	return owner{uid: int(u.UID), gid: int(u.GID), account: accountOf(u)}
+}
+
+// accountOf is the Windows account name of u, empty elsewhere.
+func accountOf(u *process.User) string {
+	if u.Windows == nil {
+		return ""
+	}
+	return u.Windows.Account
+}
 
 // lookupUser resolves a user name; an unknown name is user_not_found.
 func lookupUser(name string) (*process.User, error) {
@@ -35,24 +48,6 @@ func lookupUser(name string) (*process.User, error) {
 		return nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 	return u, nil
-}
-
-// lookupGroup resolves a group name to its gid; an unknown group is
-// user_not_found (the spec has no separate code for groups).
-func lookupGroup(name string) (uint32, error) {
-	g, err := user.LookupGroup(name)
-	if err != nil {
-		var unknown user.UnknownGroupError
-		if errors.As(err, &unknown) {
-			return 0, errs.Newf(connect.CodeInvalidArgument, errs.UserNotFound, "group %q not found", name)
-		}
-		return 0, errs.New(connect.CodeInternal, errs.Internal, err.Error())
-	}
-	gid, err := strconv.ParseUint(g.Gid, 10, 32)
-	if err != nil {
-		return 0, errs.Newf(connect.CodeInternal, errs.Internal, "group %s: gid %q", name, g.Gid)
-	}
-	return uint32(gid), nil
 }
 
 // resolveOwner parses an owner field, "user" or "user:group". Empty means
@@ -93,21 +88,6 @@ func toFileMode(m uint32) fs.FileMode {
 	return mode
 }
 
-// fromFileMode is the inverse of toFileMode: Unix permission bits.
-func fromFileMode(m fs.FileMode) uint32 {
-	bits := uint32(m.Perm())
-	if m&fs.ModeSetuid != 0 {
-		bits |= 0o4000
-	}
-	if m&fs.ModeSetgid != 0 {
-		bits |= 0o2000
-	}
-	if m&fs.ModeSticky != 0 {
-		bits |= 0o1000
-	}
-	return bits
-}
-
 // parseMode parses a mode query parameter in octal ("644", "0644", "0o644").
 func parseMode(s string) (uint32, error) {
 	s = strings.TrimPrefix(strings.TrimPrefix(s, "0o"), "0O")
@@ -118,66 +98,39 @@ func parseMode(s string) (uint32, error) {
 	return uint32(m), nil
 }
 
-// names caches uid and gid to name lookups for one request.
+// names caches uid, gid and (on Windows) SID to name lookups for one
+// request.
 type names struct {
-	users  map[uint32]string
-	groups map[uint32]string
+	users    map[uint32]string
+	groups   map[uint32]string
+	accounts map[string]string
 }
 
 func newNames() *names {
-	return &names{users: map[uint32]string{}, groups: map[uint32]string{}}
+	return &names{users: map[uint32]string{}, groups: map[uint32]string{}, accounts: map[string]string{}}
 }
 
-func (n *names) user(uid uint32) string {
-	if name, ok := n.users[uid]; ok {
-		return name
-	}
-	var name string
-	if u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10)); err == nil {
-		name = u.Username
-	}
-	n.users[uid] = name
-	return name
-}
-
-func (n *names) group(gid uint32) string {
-	if name, ok := n.groups[gid]; ok {
-		return name
-	}
-	var name string
-	if g, err := user.LookupGroupId(strconv.FormatUint(uint64(gid), 10)); err == nil {
-		name = g.Name
-	}
-	n.groups[gid] = name
-	return name
-}
-
-// buildInfo describes fi found at path. target is the symlink target of a
-// symlink reported as such.
-func buildInfo(path string, fi fs.FileInfo, target string, n *names) *agentv1.FileInfo {
-	sys := sysOf(fi)
+// buildInfo describes fi found at path. link reports a symlink (or, on
+// Windows, a junction) shown as such; target is its target.
+func buildInfo(path string, fi fs.FileInfo, link bool, target string, n *names) *agentv1.FileInfo {
 	info := &agentv1.FileInfo{
 		Path:  path,
 		Name:  filepath.Base(path),
 		Size:  uint64(max(fi.Size(), 0)),
-		Mode:  fromFileMode(fi.Mode()),
-		Uid:   sys.uid,
-		Gid:   sys.gid,
-		Owner: n.user(sys.uid),
-		Group: n.group(sys.gid),
 		Mtime: timestamppb.New(fi.ModTime()),
 	}
 	switch {
+	case link:
+		info.Type = agentv1.FileType_FILE_TYPE_SYMLINK
+		info.SymlinkTarget = target
 	case fi.Mode().IsRegular():
 		info.Type = agentv1.FileType_FILE_TYPE_FILE
 	case fi.IsDir():
 		info.Type = agentv1.FileType_FILE_TYPE_DIR
-	case fi.Mode()&fs.ModeSymlink != 0:
-		info.Type = agentv1.FileType_FILE_TYPE_SYMLINK
-		info.SymlinkTarget = target
 	default:
 		info.Type = agentv1.FileType_FILE_TYPE_OTHER
 	}
+	setOwnerMode(info, path, fi, link, n)
 	return info
 }
 
@@ -194,11 +147,12 @@ func statInfo(path string, follow bool, n *names) (*agentv1.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	link := isLink(path, fi)
 	var target string
-	if fi.Mode()&fs.ModeSymlink != 0 {
+	if link {
 		target, _ = os.Readlink(path)
 	}
-	return buildInfo(path, fi, target, n), nil
+	return buildInfo(path, fi, link, target, n), nil
 }
 
 // mkdirAll creates dir and its missing parents with perm (exactly, not

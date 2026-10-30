@@ -225,28 +225,23 @@ func writeTemp(dir string, r io.Reader, mode fs.FileMode, o owner) (path string,
 }
 
 // place moves the finished file tmp to dst and fsyncs the directory. With
-// overwrite an existing dst is replaced atomically (rename); without, a
-// hard link refuses an existing dst atomically (already_exists). tmp is
-// left in place on error; EXDEV is returned unmapped so callers can copy.
+// overwrite an existing dst is replaced atomically (replaceFile); without,
+// an existing dst is refused atomically (placeNew, already_exists). tmp is
+// left in place on error; a cross-device error is returned unmapped so
+// callers can copy.
 func place(tmp, dst string, overwrite bool) error {
 	if overwrite {
-		if err := os.Rename(tmp, dst); err != nil {
+		if err := replaceFile(tmp, dst); err != nil {
 			return err
 		}
-	} else {
-		if err := os.Link(tmp, dst); err != nil {
-			if errors.Is(err, fs.ErrExist) {
-				return errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists, "%s already exists", dst)
-			}
-			return err
+	} else if err := placeNew(tmp, dst); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists, "%s already exists", dst)
 		}
-		_ = os.Remove(tmp)
+		return err
 	}
 	return syncDir(filepath.Dir(dst))
 }
-
-// isCrossDevice reports a rename across filesystems.
-func isCrossDevice(err error) bool { return errors.Is(err, syscall.EXDEV) }
 
 // placeTemp is place for a temporary file of this request: it is removed
 // on error and errors are mapped.
