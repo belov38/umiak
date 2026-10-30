@@ -109,6 +109,14 @@ GOOS=windows mise exec -- golangci-lint run ./...
 The Windows-only tests (junctions, the service install under a throwaway service name, the service
 handler) run on a Windows machine as an administrator.
 
+- `test/windows/build-tests.sh <out-dir>` cross-compiles a `windows/amd64` test binary for every
+  package with a `*_windows_test.go` file (`<pkg path with _>.test.exe`), offline (`GOPROXY=off`).
+- `sbx-bench s9 agent-tests --template <vmid> --dir <out-dir> [--run <regex>]` (`apps/bench`) clones
+  the Windows template, attaches the binaries as an ISO (`sbx-build-agenttests-<ts>.iso`), runs them
+  as SYSTEM over QGA and deletes the clone and the ISO. This is the gate for the Windows code.
+- `.github/workflows/guest-agent-windows.yml` (`workflow_dispatch` only) runs `go test ./...` on a
+  `windows-2025` runner. Optional, not a gate.
+
 - `test/harness` runs the real tunnel gateway against the agent. It needs Postgres: set
   `SBX_TEST_DATABASE_URL` (admin DSN), otherwise a `postgres` container is started through the Docker
   CLI; `SBX_TEST_SKIP_PG=1` skips those tests.
