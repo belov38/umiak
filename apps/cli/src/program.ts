@@ -45,7 +45,13 @@ import { register as registerWhoami } from "./commands/whoami.ts";
 import type { Env } from "./config.ts";
 import { Context } from "./context.ts";
 import { EXIT_OK, EXIT_USAGE, exitCodeOf, usageError } from "./exit-codes.ts";
-import { Output, outputMode, type Writer } from "./output.ts";
+import {
+	EXIT_BROKEN_PIPE,
+	Output,
+	OutputClosedError,
+	outputMode,
+	type Writer,
+} from "./output.ts";
 import type { GlobalOptions } from "./profile.ts";
 
 export interface CommandMeta {
@@ -171,6 +177,11 @@ export async function runCli(io: CliIo): Promise<number> {
 				const r = await fn(ctx, a.slice(0, -2), opts);
 				code = typeof r === "number" ? r : EXIT_OK;
 			} catch (err) {
+				if (err instanceof OutputClosedError) {
+					// The reader of stdout left (`| head`): quiet, like SIGPIPE.
+					code = EXIT_BROKEN_PIPE;
+					return;
+				}
 				out.error(err);
 				code = exitCodeOf(err);
 			}

@@ -53,6 +53,10 @@ export interface RunOptions {
 	/** Treat stdout as a terminal (default: not, as a pipe is). */
 	tty?: boolean;
 	timeoutMs?: number;
+	/** Close the read end of stdout after this many bytes (`| head -c N`). */
+	closeStdoutAfter?: number;
+	/** Working directory of the CLI (default apps/cli). */
+	cwd?: string;
 }
 
 export interface CliResult {
@@ -72,16 +76,21 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 	for (const [k, v] of Object.entries(o.env)) if (v !== undefined) env[k] = v;
 	if (o.tty !== undefined) env.SBX_TTY = o.tty ? "1" : "0";
 	return new Promise((resolve, reject) => {
-		const child = spawn(BUN, ["src/main.ts", ...args], {
-			cwd: CLI_DIR,
+		const child = spawn(BUN, [join(CLI_DIR, "src/main.ts"), ...args], {
+			cwd: o.cwd ?? CLI_DIR,
 			env,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		o.onSpawn?.(child);
 		const out: Buffer[] = [];
 		let stderr = "";
+		let got = 0;
 		child.stdout.on("data", (b: Buffer) => {
 			out.push(b);
+			got += b.length;
+			if (o.closeStdoutAfter !== undefined && got >= o.closeStdoutAfter) {
+				child.stdout.destroy();
+			}
 		});
 		child.stderr.setEncoding("utf8").on("data", (s: string) => {
 			stderr += s;

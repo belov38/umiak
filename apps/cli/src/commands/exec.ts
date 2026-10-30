@@ -13,6 +13,9 @@
 //   stdin is sent to it; EOF closes it.
 // - Ctrl-C sends SIGINT to the remote command; a second Ctrl-C leaves it
 //   running and exits 130.
+// - When the reader of stdout goes away (`sbx exec … | head -1`), the remote
+//   command is killed (SIGTERM, then SIGKILL after the api's grace), as a
+//   local pipeline's writer dies of SIGPIPE, and sbx exits 141 quietly.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -27,6 +30,7 @@ import { collect, parseDuration, parsePairs, splitDashDash } from "../args.ts";
 import type { Context } from "../context.ts";
 import { useSandbox } from "../current.ts";
 import { CliError, commandExitCode, usageError } from "../exit-codes.ts";
+import { OutputClosedError } from "../output.ts";
 import type { Runner } from "../program.ts";
 
 /** Exit code after a second Ctrl-C (the remote command keeps running). */
@@ -104,7 +108,8 @@ export async function printEvents(
 	for await (const ev of events) {
 		if (json) {
 			const { type, ...rest } = ev;
-			ctx.out.event(type, rest);
+			await ctx.out.event(type, rest);
+			ctx.out.throwIfClosed();
 			if (ev.type === "exit") return ev;
 			continue;
 		}
@@ -176,7 +181,7 @@ export async function execIn(
 	let command: SbxCommand | undefined;
 	const onStart = (c: SbxCommand) => {
 		command = c;
-		if (json) ctx.out.event("started", { commandId: c.id });
+		if (json) void ctx.out.event("started", { commandId: c.id });
 	};
 	const fwd = forwardInterrupts(ctx, () => command);
 	// True while this process's stdin is being sent (--stdin).
@@ -230,6 +235,12 @@ export async function execIn(
 		}
 		return commandExitCode(exit);
 	} catch (err) {
+		if (err instanceof OutputClosedError && command !== undefined) {
+			// Best effort: the reader is gone, the output has nowhere to go.
+			await command
+				.kill({ signal: AbortSignal.timeout(5_000), retryBudgetMs: 2_000 })
+				.catch(() => {});
+		}
 		if (fwd.interrupted()) {
 			if (command !== undefined && o.detachHint !== false) {
 				ctx.out.info(

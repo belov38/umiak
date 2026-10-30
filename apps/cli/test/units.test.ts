@@ -1,5 +1,7 @@
 // Unit tests of the argument parsers, the exit code of exec/run and the
 // backpressure of raw output (no api).
+
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +14,7 @@ import {
 	splitDashDash,
 } from "../src/args.ts";
 import { commandExitCode, exitCodeOf } from "../src/exit-codes.ts";
-import { Output, outputMode } from "../src/output.ts";
+import { Output, OutputClosedError, outputMode } from "../src/output.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -175,6 +177,63 @@ describe("output", () => {
 		expect(writes).toBe(1);
 		expect(done).toBe(false);
 		for (const l of listeners) l();
+		await p;
+		expect(done).toBe(true);
+	});
+
+	/** A pipe whose reader went away: write() says full, then EPIPE. */
+	function closingPipe() {
+		const w = new EventEmitter() as EventEmitter & {
+			write(s: string | Uint8Array): boolean;
+			written: string[];
+		};
+		w.written = [];
+		w.write = (s) => {
+			w.written.push(String(s));
+			return false;
+		};
+		return w;
+	}
+
+	it("data() resolves (rejects with OutputClosedError) when the reader closes the pipe", async () => {
+		const stdout = closingPipe();
+		const out = new Output({ stdout, stderr: closingPipe(), isTTY: false });
+		const p = out.data("x");
+		setTimeout(() => {
+			stdout.emit(
+				"error",
+				Object.assign(new Error("EPIPE"), { code: "EPIPE" }),
+			);
+		}, 10);
+		await expect(p).rejects.toBeInstanceOf(OutputClosedError);
+		expect(out.stdoutClosed).toBe(true);
+		// Nothing more is written to a closed stdout.
+		await expect(out.data("y")).rejects.toBeInstanceOf(OutputClosedError);
+		await out.event("stdout", { data: "z" });
+		out.error(new Error("late"));
+		expect(stdout.written).toEqual(["x"]);
+		expect(() => out.throwIfClosed()).toThrow(OutputClosedError);
+	});
+
+	it("a 'close' of stdout also ends a wait for drain", async () => {
+		const stdout = closingPipe();
+		const out = new Output({ stdout, stderr: closingPipe(), isTTY: false });
+		const p = out.data("x");
+		setTimeout(() => stdout.emit("close"), 10);
+		await expect(p).rejects.toBeInstanceOf(OutputClosedError);
+	});
+
+	it("event() waits for drain (NDJSON frames of --json raw commands)", async () => {
+		const stdout = closingPipe();
+		const out = new Output({ stdout, stderr: closingPipe(), isTTY: false });
+		let done = false;
+		const p = out.event("stdout", { data: "x" }).then(() => {
+			done = true;
+		});
+		await new Promise((r) => setTimeout(r, 20));
+		expect(done).toBe(false);
+		expect(stdout.written).toEqual(['{"event":"stdout","data":"x"}\n']);
+		stdout.emit("drain");
 		await p;
 		expect(done).toBe(true);
 	});

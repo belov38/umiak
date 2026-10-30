@@ -11,26 +11,79 @@
 // - Raw-data commands switch to JSON (NDJSON frames) only with the --json
 //   flag, never with SBX_OUTPUT=json (ruling R25): `sbx exec … > file`
 //   writes bytes whatever the env says.
-// - data()/errData() wait for 'drain' when the stream is full, so large
-//   piped output does not pile up in memory.
+// - data()/errData()/event() wait for 'drain' when the stream is full, so
+//   large piped output does not pile up in memory.
+// - A reader that goes away (`sbx exec … | head -1`: EPIPE, 'error' or
+//   'close' on stdout) ends the wait: data() rejects with OutputClosedError,
+//   nothing more is written to stdout, and the runner exits 141 (128 +
+//   SIGPIPE, what a shell reports for a tool killed by a broken pipe) without
+//   an error message. A closed stderr is ignored.
 
 import { SbxError } from "@sbx/sdk";
 
 export interface Writer {
 	/** false: the stream is full; wait for 'drain' (Node streams). */
 	write(s: string | Uint8Array): unknown;
-	once?(event: "drain", listener: () => void): unknown;
+	once?(event: string, listener: () => void): unknown;
+	/** 'error' and 'close' tell that the reader went away. */
+	on?(event: string, listener: () => void): unknown;
+	off?(event: string, listener: () => void): unknown;
 }
 
-/** Writes and, when the stream reports it is full, waits for 'drain'. */
-async function writeDrained(
-	w: Writer,
-	chunk: string | Uint8Array,
-): Promise<void> {
-	if (w.write(chunk) !== false || typeof w.once !== "function") return;
-	await new Promise<void>((resolve) => {
-		w.once?.("drain", resolve);
-	});
+/** Exit code when the reader of stdout went away (128 + SIGPIPE). */
+export const EXIT_BROKEN_PIPE = 141;
+
+/** stdout was closed by its reader (EPIPE); the command stops quietly. */
+export class OutputClosedError extends Error {
+	constructor() {
+		super("stdout was closed by its reader");
+		this.name = "OutputClosedError";
+	}
+}
+
+/** A writer and whether its reader has gone away. */
+class Sink {
+	closed = false;
+	readonly #w: Writer;
+	readonly #waiters = new Set<() => void>();
+
+	constructor(w: Writer) {
+		this.#w = w;
+		const onGone = () => {
+			this.closed = true;
+			for (const f of this.#waiters) f();
+			this.#waiters.clear();
+		};
+		// The listener also keeps an EPIPE from being an uncaught error.
+		w.on?.("error", onGone);
+		w.on?.("close", onGone);
+	}
+
+	write(chunk: string | Uint8Array): boolean {
+		if (this.closed) return true;
+		try {
+			return this.#w.write(chunk) !== false;
+		} catch {
+			// A synchronous EPIPE (some runtimes): the reader is gone.
+			this.closed = true;
+			return true;
+		}
+	}
+
+	/** Writes; when the stream is full, waits for 'drain' or the reader leaving. */
+	async writeDrained(chunk: string | Uint8Array): Promise<void> {
+		if (this.write(chunk) || typeof this.#w.once !== "function") return;
+		if (this.closed) return;
+		await new Promise<void>((resolve) => {
+			const done = () => {
+				this.#waiters.delete(done);
+				this.#w.off?.("drain", done);
+				resolve();
+			};
+			this.#waiters.add(done);
+			this.#w.once?.("drain", done);
+		});
+	}
 }
 
 export interface OutputOptions {
@@ -87,12 +140,12 @@ export class Output {
 	readonly jsonFlag: boolean;
 	/** stdout carries data of the command (set by the command runner). */
 	rawData = false;
-	readonly #stdout: Writer;
-	readonly #stderr: Writer;
+	readonly #stdout: Sink;
+	readonly #stderr: Sink;
 
 	constructor(o: OutputOptions) {
-		this.#stdout = o.stdout;
-		this.#stderr = o.stderr;
+		this.#stdout = new Sink(o.stdout);
+		this.#stderr = new Sink(o.stderr);
 		this.explicitJson = o.explicitJson === true && o.explicitHuman !== true;
 		this.jsonFlag = o.jsonFlag === true && o.explicitHuman !== true;
 		this.json = this.explicitJson || (!o.isTTY && o.explicitHuman !== true);
@@ -104,23 +157,44 @@ export class Output {
 		else this.#text(this.#stdout, human(v));
 	}
 
-	/** A JSON Lines record `{"event": name, ...v}`; text in human mode. */
-	event<T extends object>(name: string, v: T, human?: Human<T>): void {
+	/**
+	 * A JSON Lines record `{"event": name, ...v}`; text in human mode.
+	 * Resolves once the stream took it (never rejects: a stream of frames
+	 * checks `throwIfClosed()` after it).
+	 */
+	event<T extends object>(name: string, v: T, human?: Human<T>): Promise<void> {
 		if (this.json) {
-			this.#line(this.#stdout, JSON.stringify({ event: name, ...v }));
-		} else if (human !== undefined) {
-			this.#text(this.#stdout, human(v));
+			return this.#stdout.writeDrained(
+				`${JSON.stringify({ event: name, ...v })}\n`,
+			);
 		}
+		if (human !== undefined) this.#text(this.#stdout, human(v));
+		return Promise.resolve();
 	}
 
-	/** Data of a raw command, written as is (resolves once it is taken). */
-	data(chunk: string | Uint8Array): Promise<void> {
-		return writeDrained(this.#stdout, chunk);
+	/**
+	 * Data of a raw command, written as is (resolves once it is taken);
+	 * rejects with OutputClosedError once the reader of stdout is gone.
+	 */
+	async data(chunk: string | Uint8Array): Promise<void> {
+		this.throwIfClosed();
+		await this.#stdout.writeDrained(chunk);
+		this.throwIfClosed();
 	}
 
 	/** Data of a raw command meant for stderr (exec's stderr), as is. */
 	errData(chunk: string | Uint8Array): Promise<void> {
-		return writeDrained(this.#stderr, chunk);
+		return this.#stderr.writeDrained(chunk);
+	}
+
+	/** The reader of stdout went away (EPIPE). */
+	get stdoutClosed(): boolean {
+		return this.#stdout.closed;
+	}
+
+	/** Throws OutputClosedError when the reader of stdout went away. */
+	throwIfClosed(): void {
+		if (this.#stdout.closed) throw new OutputClosedError();
 	}
 
 	/** A question for the person on stderr, without a new line. */
@@ -152,11 +226,11 @@ export class Output {
 		this.#line(this.#stdout, line);
 	}
 
-	#text(w: Writer, s: string): void {
+	#text(w: Sink, s: string): void {
 		if (s !== "") this.#line(w, s.replace(/\n+$/, ""));
 	}
 
-	#line(w: Writer, s: string): void {
+	#line(w: Sink, s: string): void {
 		w.write(`${s}\n`);
 	}
 }

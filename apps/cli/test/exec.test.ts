@@ -130,6 +130,43 @@ describe("exec, logs, kill, ps, run", () => {
 		for (const l of lines) expect(l).not.toHaveProperty("type");
 	});
 
+	it("exec into a reader that closes early (| head) exits 141 quietly and kills the command", async () => {
+		for (const json of [false, true]) {
+			const started = Date.now();
+			const r = await runCli(
+				[
+					"exec",
+					sb.id,
+					...(json ? ["--json"] : []),
+					"--tag",
+					`pipe=${json}`,
+					"--",
+					"yes sbx-pipe-test",
+				],
+				{ env, closeStdoutAfter: 1, timeoutMs: 20_000 },
+			);
+			expect(r.code, r.stderr).toBe(141);
+			expect(r.stderr).toBe("");
+			expect(Date.now() - started).toBeLessThan(15_000);
+			// The remote `yes` was killed.
+			const ps = await sbx(["ps", sb.id, "--json"]);
+			const cmd = (
+				ps.last().data as { id: string; tags: Record<string, string> }[]
+			).find((c) => c.tags.pipe === String(json));
+			expect(cmd).toBeDefined();
+			const logs = await sbx([
+				"logs",
+				sb.id,
+				cmd?.id ?? "",
+				"-f",
+				"--tail",
+				"1",
+				"--json",
+			]);
+			expect(logs.last()).toMatchObject({ event: "exit", status: "killed" });
+		}
+	});
+
 	it("SBX_OUTPUT=json does not turn exec into frames: stdout stays the bytes", async () => {
 		const r = await runCli(["exec", sb.id, "--", "echo raw"], {
 			env: { ...env, SBX_OUTPUT: "json" },
