@@ -898,7 +898,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx cp [-r] <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range`; `-r` — каталог через `/files/archive` (§11.1) |
 | `sbx push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz потоком в `PUT /files/archive` |
 | `sbx port <sb> <port> [--public\|--sso\|--token]`, `sbx ports <sb>`, `sbx unport <sb> <port>`, `sbx port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
-| `sbx snapshot save <sb> <name> [--wait]`, `snapshot list\|rm` | `save --wait` ждёт, пока снапшот станет `ready` (лимит `--wait-timeout`, по умолчанию 5 min), и печатает его; ошибка сохранения — код `1` |
+| `sbx snapshot save <sb> <name> [--wait]`, `snapshot list\|rm` | `save --wait` ждёт, пока снапшот станет `ready` (лимит `--wait-timeout`, по умолчанию 5 min), и печатает его; ошибка сохранения — код `1`, таймаут ожидания или временная ошибка (`retryable`) — `75` |
 | `sbx templates`, `sbx sizes`, `sbx limits` | |
 | `sbx keys list\|create [--preset] [--scope]...\|rotate\|rm` | командные ключи; `create`, `rotate` — только `owner` с входом Keycloak |
 | `sbx run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |
