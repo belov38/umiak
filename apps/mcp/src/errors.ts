@@ -122,6 +122,8 @@ export function hintFor(code: string, ctx: HintContext): string | undefined {
 				: "check the id or name; sandbox_list shows the sandboxes of the team.";
 		case "validation":
 			return validationHint(details);
+		case "snapshot_requires_stop":
+			return "a running Windows sandbox is snapshotted only from a stopped VM; retry with force_stop: true to stop and restart the sandbox (running commands and sessions are interrupted).";
 		case "idempotency_key_reused":
 			return "this idempotency_key was used with different arguments; use a new idempotency_key.";
 		case "desktop_unsupported":

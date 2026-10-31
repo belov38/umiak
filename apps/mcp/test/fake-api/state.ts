@@ -142,6 +142,12 @@ export interface FakeOperation {
 	state: "pending" | "running" | "succeeded" | "failed" | "superseded";
 	step: string | null;
 	error: { code: string; message: string; retryable: boolean } | null;
+	/** fork / save_snapshot with forceStop of a running Windows sandbox (S9 §24.8). */
+	forceStop: {
+		sourceStopped: boolean;
+		sourceRestarted: boolean | null;
+		restartError: { code: string; message: string } | null;
+	} | null;
 	createdAt: Date;
 	startedAt: Date | null;
 	finishedAt: Date | null;

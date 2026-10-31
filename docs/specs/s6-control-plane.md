@@ -577,14 +577,14 @@ API: состояние `stopped` или `error` с machine в `stopped` (§6.1)
 
 ### 7.7 Fork
 
-Вход: источник в `ready` или `stopped` без активной операции; параметры цели (`name`, `slug`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`, `size`, `env`, `secrets`, `secretFiles`).
+Вход: источник в `ready` или `stopped` без активной операции; параметры цели (`name`, `slug`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`, `size`, `env`, `secrets`, `secretFiles`) и `forceStop`. Источник Windows в `ready` без `forceStop: true` — `snapshot_requires_stop` (409) до любых записей, с подсказкой повторить с флагом (§7.8 «Windows только из остановленной VM»). Флаг для Linux и остановленного источника игнорируется и в `request` операции не пишется.
 
 **API:** admission RAM для цели на ноде источника (вытеснение warm разрешено; других нод нет — LV локальны). Создаются:
 - цель: sandbox `creating` (`origin = fork`, `forked_from_sandbox_id`), `sandbox_secrets` — копия env и секретов источника, поверх которой по ключу наложены `env`, `secrets`, `secretFiles` из запроса (MVP-рек. R11: правила, лимиты и `null` — как у resume, §7.6), зашифрованная с AAD цели; machine цели `allocating`;
 - операция `fork` на источнике (`pending`) и операция `create` на цели (`pending`, `parent_operation_id` = fork). Задание ставится только для `fork`.
 
 **Worker, операция `fork` на источнике:**
-1. `snapshot`: строка `snapshots` (`kind = fork_source`, `consumer_sandbox_id` = цель, `creating`). Если Linux-источник работает — S1 `snapshot` с `QuiesceHook` от S3 (`System/Quiesce` с lease и watchdog; запасной путь — QGA fsfreeze через S1), `consistency = quiesced`. Если агент и QGA не отвечают — ошибка `quiesce_failed`. Для работающей Windows действует явно разрешённый crash-consistent fallback (§7.8): без QGA/VSS, с pause vCPU на время LVM snapshot, `consistency = crash`; fork не требует агента. Если источник выключен — без freeze, `powered_off`. После thaw обработчик проверяет `quiesce_broken`: если watchdog успел разморозить ФС раньше, снапшот несогласован, операция падает с `quiesce_failed`.
+1. `snapshot`: строка `snapshots` (`kind = fork_source`, `consumer_sandbox_id` = цель, `creating`). Если Linux-источник работает — S1 `snapshot` с `QuiesceHook` от S3 (`System/Quiesce` с lease и watchdog; запасной путь — QGA fsfreeze через S1), `consistency = quiesced`. Если агент и QGA не отвечают — ошибка `quiesce_failed`. Работающая Windows вживую не снимается (§7.8, S9 §24.8): только из остановленной VM. Если источник выключен — без freeze, `powered_off`. После thaw обработчик проверяет `quiesce_broken`: если watchdog успел разморозить ФС раньше, снапшот несогласован, операция падает с `quiesce_failed`.
 2. Снапшот → `ready`. В одной транзакции: операция `fork` → `succeeded`; у операции цели `deadline_at = now + дедлайн`; задание `sandbox-op` для цели. Если цель к этому моменту уже `deleting`/`deleted`, задание не ставится, а снапшот удаляется этой же операцией.
 
 **Worker, операция `create` на цели:** шаги `provision` (S1 `fork(snapshot)`), `boot`, `claim` (агент увидит смену `machineId` и сменит идентичность, S3), `finish` — как cold create. Затем `cleanup_source`: S1 `delete(snapshot)`, снапшот → `deleted` (thin-снимки независимы).
@@ -599,11 +599,17 @@ Fork наследует от источника: диск, env и секреты
 
 ### 7.8 Saved snapshot, recover, reprovision, update
 
-**Save snapshot** (операция `save_snapshot` на источнике в `ready`/`stopped`): снапшот `kind = saved`, `pending_name`, тем же способом, что в fork. Когда он `ready`, в одной транзакции: старый `ready`-снапшот с этим именем → `deleting` (имя снимается), новый получает `name`. При ошибке имя остаётся за прежним снапшотом. Linux держит секреты в tmpfs. Для Windows действует уточнение S9 §18.6 п. 5: при `machines.secret_files_on_disk = true` работающая VM получает `snapshot_requires_stop`, остановленная — `snapshot_requires_clean_stop`, до freeze и создания LVs. `secrets_in_use` от quiesce тоже отображается в `snapshot_requires_stop`. Fork этим правилом не ограничен.
+**Save snapshot** (операция `save_snapshot` на источнике в `ready`/`stopped`): снапшот `kind = saved`, `pending_name`, тем же способом, что в fork. Когда он `ready`, в одной транзакции: старый `ready`-снапшот с этим именем → `deleting` (имя снимается), новый получает `name`. При ошибке имя остаётся за прежним снапшотом. Linux держит секреты в tmpfs. Для Windows действует уточнение S9 §18.6 п. 5: остановленная machine с `machines.secret_files_on_disk = true` получает `snapshot_requires_clean_stop` до создания LVs (работающая Windows без `forceStop` отклоняется раньше, ниже). Fork этим правилом не ограничен.
 
 `secret_files_on_disk` консервативно ставится **до** `Claim` / `UpdateSecrets` с непустыми secret-файлами Windows (включая живые PUT/PATCH env): потерянный ответ мог означать успешную запись. Успешная доставка пустого набора снимает флаг, неудачная — сохраняет. Только подтверждённый `PrepareStop{secret_files_wiped: true}` снимает его при stop; hard stop сам по себе ничего не подтверждает. Миграция старых Windows-machine без подтверждения очистки выставляет `true`.
 
-**Windows crash-consistent fallback (решение пользователя, S9 §24).** QGA/VSS thaw зависает и с обновлённым QGA; worker для работающей Windows не вызывает QGA freeze/thaw. Fork использует no-op hook; saved при чистом флаге всё ещё требует подключённого агента с capability wipe и `System/Quiesce{fs: false, wipe_secret_files: true, lease_ms: 30000}`. S1 приостанавливает vCPU на время LVM snapshot; метаданные явно `consistency = crash`, даже при успешной подготовке агента. Согласованность приложений не гарантируется; `powered_off` для остановленной VM сохраняется. Dirty-проверки выше продолжают действовать. `auto_thawed` / `quiesce_broken` у saved означает возможное восстановление секрет-файлов: такой snapshot выбрасывается и в crash-режиме.
+**Windows только из остановленной VM (решение Ильи 2026-11-01, S9 §24.8).** QGA/VSS thaw зависает, а crash-consistent снимок работающей VM теряет или обнуляет недавние записи из кэша. Поэтому fork и saved snapshot Windows снимаются только с выключенной VM (`powered_off`); прежний crash-consistent fallback (§24.7) из публичного пути убран, новых `consistency = crash` нет (значение остаётся в схеме для старых снапшотов).
+
+- API: источник Windows в `ready` без `forceStop: true` → `snapshot_requires_stop` (409), `details {reason: "windows_running", retryWith: {forceStop: true}, cli: "--force-stop"}`. Тот же код (сообщение с подсказкой) даёт и шаг `snapshot` worker, если работающую Windows застал без флага.
+- С `forceStop: true` API пишет `request.forceStop = true` (только для `ready` Windows), дедлайн операции = её дедлайн + дедлайн stop (§7.9). Шаги fork / save_snapshot: `stop_prepare` → `stop_shutdown` → `stop_verify` (путь stop §7.5: PrepareStop со стиранием секретов, тайм-аут shutdown 120 s, hard stop) → `stopped` (machine → `stopped`, команды → `lost`; progress `forceStopped`) → `snapshot` (`powered_off`; затем `deadline_at = max(deadline_at, now + дедлайн resume)`) → `restart` (проверка перед стартом §8.2 и S1 start с `retryOnVmLock` для lock qmeventd) → `restart_agent` (новая загрузка) → `restart_provision` (env, секреты, CA; machine → `running`; progress `sourceRestarted: true`) → finish (fork: передача цели). Sandbox всё это время `ready` с активной операцией; её machine проходит `running → stopping → stopped → starting → running`. RAM остановленной machine остаётся в `reserved`, пока активна операция с `forceStop` (§8.1).
+- Провал перезапуска после снапшота операцию не роняет: hard stop (best effort), machine → `stopped` (или `failed` при `machine_lost`), sandbox `ready → error` (`resume_failed`, событие с `reason: force_stop_restart`), progress `sourceRestarted: false`, `restartError {code, message}`; fork продолжается, снапшот цел. Пользователь поднимает источник обычным `resume`.
+- Провал до снапшота (например, saved с неподтверждённым стиранием секретов → `snapshot_requires_clean_stop`) компенсируется как обычно, и компенсация запускает источник снова тем же путём (`restartForcedSource`).
+- Saved Windows из остановленной VM по-прежнему требует `secret_files_on_disk = false`: forced save получает его от PrepareStop своего stop. `System/Quiesce` агента для Windows больше не вызывается.
 
 Snapshot после restart тоже использует `retryOnVmLock` (5 попыток, паузы 10 s), включая `freeze took … (budget …)` после ожидания VM lock. Каждая попытка заново читает источник, проверяет fence и дедлайн, удаляет остатки прежней попытки и создаёт свежие hooks; ошибка thaw не повторяет snapshot. Проверки fence продолжаются во время пауз.
 
@@ -621,10 +627,10 @@ Snapshot после restart тоже использует `retryOnVmLock` (5 п�
 |---|---|---|
 | create из пула | 2 min | 5 min |
 | create cold / from snapshot / fork-цель | 6 min | 20 min |
-| fork (снапшот на источнике) | 2 min | 3 min |
+| fork (снапшот на источнике) | 2 min | 3 min; с `forceStop` + 5 min (stop), после снапшота не меньше now + 15 min (resume) |
 | stop | 3 min | 5 min |
 | resume, recover | 5 min | 15 min |
-| save_snapshot | 5 min | 5 min |
+| save_snapshot | 5 min | 5 min; с `forceStop` + 5 min (stop), после снапшота не меньше now + 15 min (resume) |
 | delete | без дедлайна: повторы с backoff до 10 min; через 30 min метрика тревоги `sbx_delete_stuck` | то же |
 
 Время загрузки до готовности агента берётся из `template_builds.boot_timeout_s`.
@@ -635,7 +641,7 @@ Snapshot после restart тоже использует `retryOnVmLock` (5 п�
 
 RAM machine = `memory_mb` (S1: `balloon=0`, overcommit нет). Лимит — `nodes.ram_cap_mb` (8192 в PoC). На ноде считаются две величины:
 
-- **`reserved`** — обещанная RAM: сумма по machine в `allocating`, `provisioning`, `booting`, `warm`, `claiming`, `running`, `starting`, `stopping`, плюс machine `stopped`, для которых есть `pending`/`running` операция resume или recover (место для их старта уже выдано). Machine в `failed`/`deleting` сюда **не** входят: их место отдано.
+- **`reserved`** — обещанная RAM: сумма по machine в `allocating`, `provisioning`, `booting`, `warm`, `claiming`, `running`, `starting`, `stopping`, плюс machine `stopped`, для которых есть `pending`/`running` операция resume или recover, или fork/save_snapshot с `request.forceStop` (место для их старта уже выдано). Machine в `failed`/`deleting` сюда **не** входят: их место отдано.
 - **`powered`** — RAM VM, которые могут работать прямо сейчас: machine в `booting`, `warm`, `claiming`, `running`, `starting`, `stopping`, а также `failed`/`deleting`/`stopped`, у которых `power_observed` не `stopped`.
 
 Инварианты: `reserved ≤ cap` (обеспечивает admission, §8.2) и `powered ≤ cap` (обеспечивает проверка перед стартом, §8.2). Обе проверки идут под `pg_advisory_xact_lock(hash(node_id))`.
@@ -935,7 +941,7 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
 - **S5.** Регистрирует сборки (§14.3). Шаблон содержит агента и qemu-guest-agent.
 - **S7.** Строит HTTP поверх `SandboxService`; создаёт `commands` до `Process/Start`; вызывает `touchApiActivity`; выставляет внутренние ручки §10.1 и §14.2; формат id и ошибок.
 - **S8.** Коллекции: Templates (`slug`, `os`, `enabled`, `defaultSize`, `allowedSizes`), Sizes (`slug`, `vcpu`, `memoryMb`), PoolTargets, Quotas (на команду), PlatformDefaults (глобальная настройка); `afterChange`-хуки шлют `NOTIFY sbx_config`; Payload-конфиг экспортируется пакетом без Next, чтобы `api` и `worker` вызывали `getPayload`. Публичные SSH-ключи пользователя для `authorizedKeys`.
-- **S9.** Дедлайны Windows (§7.9), `boot_timeout_s`, crash-consistent fallback без QGA/VSS и защита secret-файлов saved snapshot (§7.8).
+- **S9.** Дедлайны Windows (§7.9), `boot_timeout_s`, snapshot Windows только из остановленной VM с `forceStop` (§7.8, S9 §24.8) и защита secret-файлов saved snapshot (§7.8).
 - **S12.** Deployment `worker` (2 реплики, grace 90 s), Secret с ключами данных (`SBX_DATA_KEYS_FILE`), Secret PVE и `sbx-node`, NetworkPolicy для `/internal/v1/*`, Postgres 18.
 
 ## 17. Библиотеки

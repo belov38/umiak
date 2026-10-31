@@ -282,7 +282,7 @@ sbx manages remote VM sandboxes (Linux, Linux desktop, Windows) of your team.
 | `sandbox_update` | `name`, `slug`, `labels` (полная замена), `ttl_seconds` (`0` — снять TTL; иначе дедлайн = сейчас + ttl), `idle_timeout_seconds` | `PATCH /v1/sandboxes/{sb}` | `sandboxes:write` | · · + · |
 | `sandbox_stop` | `wait` (по умолчанию `false`), `wait_seconds` | `POST /stop` | `sandboxes:write` | · · + · |
 | `sandbox_resume` | `env` (словарь), `unset_env` (массив имён), `size`, `ttl_seconds`, `wait` (по умолчанию `true`), `wait_seconds` | `POST /resume` | `sandboxes:write` | · · + · |
-| `sandbox_fork` | `name`, `slug`, `labels`, `env`, `unset_env`, `size`, `ttl_seconds`, `idle_timeout_seconds`, `wait` (по умолчанию `true`), `wait_seconds`, `idempotency_key` | `POST /fork` | `sandboxes:write` | · · · · |
+| `sandbox_fork` | `name`, `slug`, `labels`, `env`, `unset_env`, `size`, `force_stop`, `ttl_seconds`, `idle_timeout_seconds`, `wait` (по умолчанию `true`), `wait_seconds`, `idempotency_key` | `POST /fork` | `sandboxes:write` | · · · · |
 | `sandbox_recover` | `wait`, `wait_seconds` | `POST /recover` | `sandboxes:write` | · · + · |
 | `sandbox_delete` | `confirm` (обязателен) | `DELETE /v1/sandboxes/{sb}` с `Sbx-Confirm-Delete: <confirm>` | `sandboxes:delete` | · + + · |
 
@@ -366,11 +366,12 @@ sbx manages remote VM sandboxes (Linux, Linux desktop, Windows) of your team.
 
 | Инструмент | Аргументы | API | Scope | R D I O |
 |---|---|---|---|---|
-| `snapshot_save` | `sandbox`, `name` (`^[a-z0-9][a-z0-9-]{0,62}$`), `wait` (по умолчанию `true`), `wait_seconds`, `idempotency_key` | `POST /v1/snapshots`; long-poll `GET /v1/operations/{op}` | `snapshots:write` | · + · · |
+| `snapshot_save` | `sandbox`, `name` (`^[a-z0-9][a-z0-9-]{0,62}$`), `force_stop`, `wait` (по умолчанию `true`), `wait_seconds`, `idempotency_key` | `POST /v1/snapshots`; long-poll `GET /v1/operations/{op}` | `snapshots:write` | · + · · |
 | `snapshot_list` | `limit`, `cursor` | `GET /v1/snapshots` | `snapshots:read` | + · + · |
 | `snapshot_delete` | `name`, `confirm` (обязателен) | `DELETE /v1/snapshots/{name}` с `Sbx-Confirm-Delete` | `snapshots:write` | · + + · |
 
 - `snapshot_save` помечен разрушительным: снапшот с тем же именем заменяется (S7 §13). Описание это говорит.
+- **`force_stop` у `sandbox_fork` и `snapshot_save`** (S9 §24.8): работающая Windows-sandbox снимается только из остановленной VM. Без флага API отвечает `409 snapshot_requires_stop`; текст ошибки инструмента содержит подсказку повторить с `force_stop: true`, чтобы агент мог сделать это сам (или спросить человека). Описание параметра говорит, что флаг останавливает исходную VM (идущие команды и сессии прерываются), снимает снапшот и запускает VM снова; для Linux и остановленной sandbox он ничего не меняет. Если перезапуск источника не удался, ответ fork/save успешен, а источник в `error` (`resume_failed`) — его поднимают `sandbox_resume`.
 - Create из снапшота — `sandbox_create` с `from_snapshot`.
 
 ### 8.7 Рабочий стол и computer-use (toolset `desktop`)

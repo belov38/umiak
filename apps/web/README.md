@@ -57,6 +57,12 @@ mounted, so leaving a tab (or the page) closes its streams and sockets.
   snapshot of that name is replaced), Delete (type the slug). Operation bar
   (`kind`, `state · step`), error block with Recover. Blocked: lock, reason
   banner; only Stop and Delete stay enabled, and the tabs disable writes.
+  Fork and Save snapshot of a running Windows sandbox (S9 §24.8; the OS from
+  the template catalog `GET /v1/templates`, else the API's 409
+  `snapshot_requires_stop`) ask first ("This stops the sandbox, takes the
+  snapshot and starts it again…": a confirm dialog for Fork, the warning and
+  a "Stop and save snapshot" button in the save dialog) and send
+  `forceStop: true`; the list's Fork does the same.
 - **Terminal**: xterm.js 6 (`fit`, `web-links`, `search`), loaded with
   `next/dynamic` (`ssr: false`), CSS from the package. Tabs = running PTYs
   (`GET /commands?mode=pty&status=running`) plus new ones (`POST /ptys`);

@@ -79,7 +79,16 @@ export class Sbx {
 		): AsyncIterable<SandboxData>;
 	};
 	readonly snapshots: {
-		/** `wait`: until the snapshot operation is final (the snapshot is then re-read). */
+		/**
+		 * `wait`: until the snapshot operation is final (the snapshot is then re-read).
+		 *
+		 * A running Windows sandbox is saved only from a stopped VM: without
+		 * `input.forceStop` it throws SbxError 409 `snapshot_requires_stop`
+		 * (`details.retryWith: {forceStop: true}`). `forceStop: true` stops the
+		 * sandbox (running commands and sessions are interrupted), takes the
+		 * snapshot and starts it again; the operation's `forceStop` reports the
+		 * restart. Ignored for Linux and for a stopped sandbox.
+		 */
 		create(
 			input: CreateSnapshotInput,
 			opts?: ActionOptions,

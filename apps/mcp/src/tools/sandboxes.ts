@@ -21,6 +21,7 @@ import {
 import {
 	DEFAULT_WAIT_SECONDS,
 	envShape,
+	forceStopShape,
 	idempotencyKeyShape,
 	idleTimeoutShape,
 	labelsShape,
@@ -433,7 +434,7 @@ export const sandboxFork = defineTool({
 	name: "sandbox_fork",
 	title: "Fork a sandbox",
 	description:
-		"Copies a ready or stopped sandbox (disk and settings) into a new one; the source keeps running. Same overrides as sandbox_create; env and unset_env merge onto the source's. Waits until the copy is ready.",
+		"Copies a sandbox (disk, settings) to a new one, waits for ready. Overrides as in sandbox_create; env, unset_env merge onto source's.",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: NEW_RESOURCE,
@@ -446,6 +447,7 @@ export const sandboxFork = defineTool({
 		env: envShape,
 		unset_env: unsetEnvShape,
 		size: sizeShape,
+		force_stop: forceStopShape,
 		ttl_seconds: ttlShape,
 		idle_timeout_seconds: idleTimeoutShape,
 		...waitShape(true),
@@ -468,6 +470,7 @@ export const sandboxFork = defineTool({
 			size: args.size,
 			ttlSeconds: args.ttl_seconds,
 			idleTimeoutSeconds: args.idle_timeout_seconds,
+			forceStop: args.force_stop,
 		});
 		const r = await withUnknownOutcome(ctx, modelKey, () =>
 			ctx.sbx().raw.POST(`${SANDBOX_PATH}/fork`, {

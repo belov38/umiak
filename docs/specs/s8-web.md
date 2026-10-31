@@ -359,6 +359,8 @@ Listening (not published)
 
 Таблица `GET /v1/snapshots` (имя, состояние, источник, шаблон и версия, размер, согласованность, создан); «Create sandbox from» → форма create с выбранным снапшотом; Delete. Сохранение — со страницы sandbox (имя, предупреждение о замене снапшота с тем же именем, S7 §13). Шаринга между командами в фазе 1 нет [решение S8, одобрено].
 
+Fork и Save snapshot работающей Windows-sandbox (S9 §24.8). OS берётся из каталога `GET /v1/templates` по `template` sandbox (у ресурса sandbox поля OS нет). Fork показывает подтверждение «This stops the sandbox, takes the snapshot and starts it again. Running commands and sessions are interrupted.» с кнопкой «Stop and fork» и шлёт `forceStop: true`; диалог Save snapshot показывает то же предупреждение, кнопка — «Stop and save snapshot». Если каталог не загружен или шаблон неизвестен, ответ `409 snapshot_requires_stop` показывает то же предупреждение, и следующий запрос уходит с флагом. Неудачный перезапуск источника виден как его `error` (`resume_failed`).
+
 ### 9.8 API-ключи
 
 ```

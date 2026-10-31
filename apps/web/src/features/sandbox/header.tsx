@@ -3,7 +3,9 @@
 // health, activity, template, size, origin, labels, TTL, idle timeout; the
 // actions Stop/Resume/Fork/Recover/Extend/Save snapshot/Delete; the bar of
 // the active operation and the error block. A blocked sandbox shows the
-// lock and its reason; forbidden actions are disabled (S8 §17.1 C3).
+// lock and its reason; forbidden actions are disabled (S8 §17.1 C3). Fork
+// and Save snapshot of a running Windows sandbox ask before they stop and
+// restart it (S9 §24.8).
 import type { SandboxData } from "@sbx/sdk";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoaderCircleIcon, LockIcon, PencilIcon } from "lucide-react";
@@ -18,11 +20,12 @@ import { Input } from "@/components/ui/input";
 import { useSbx } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { slugProblem } from "@/lib/create-form";
-import { describeError } from "@/lib/errors";
+import { describeError, isSnapshotRequiresStop } from "@/lib/errors";
 import { formatTime } from "@/lib/format";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
 import { teamPath } from "@/lib/team-path";
 import { DeleteSandboxDialog } from "../sandboxes/delete-dialog";
+import { useNeedsForceStop } from "../sandboxes/force-stop";
 import { sandboxHref } from "../sandboxes/links";
 import { useRefreshSandboxes } from "../sandboxes/row-actions";
 import {
@@ -32,7 +35,12 @@ import {
 	StateCell,
 } from "../sandboxes/state-cell";
 import { useFork } from "../sandboxes/use-fork";
-import { formatSeconds, headerActions, SNAPSHOT_NAME_RE } from "./rules";
+import {
+	FORCE_STOP_TEXT,
+	formatSeconds,
+	headerActions,
+	SNAPSHOT_NAME_RE,
+} from "./rules";
 import { sandboxQueryKey } from "./use-sandbox";
 
 export function SandboxHeader({
@@ -53,7 +61,7 @@ export function SandboxHeader({
 	>(null);
 	const a = headerActions(s);
 	const path = { params: { path: { sandbox: s.id } } };
-	const fork = useFork(teamId, s, refreshAll);
+	const forking = useFork(teamId, s, refreshAll);
 
 	/** An action that answers {sandbox, operation}: the loop awaits the operation. */
 	const act = async (
@@ -136,7 +144,7 @@ export function SandboxHeader({
 						onClick={async () => {
 							setBusy(true);
 							try {
-								await fork();
+								await forking.fork();
 							} finally {
 								setBusy(false);
 							}
@@ -223,6 +231,7 @@ export function SandboxHeader({
 				open={dialog === "extend"}
 				onOpenChange={(o) => setDialog(o ? "extend" : null)}
 			/>
+			{forking.dialog}
 			<SnapshotDialog
 				teamId={teamId}
 				sandbox={s}
@@ -539,6 +548,11 @@ function SnapshotDialog({
 	const queryClient = useQueryClient();
 	const [name, setName] = useState("");
 	const key = useRef<IdempotencySlot | null>(null);
+	// A running Windows sandbox is saved with forceStop (S9 §24.8): known from
+	// the catalog, or learnt from the API's 409; the dialog says what happens.
+	const windows = useNeedsForceStop(teamId, s);
+	const [requiresStop, setRequiresStop] = useState(false);
+	const forceStop = windows || requiresStop;
 	const snapshots = useQuery({
 		queryKey: ["snapshots", teamId],
 		queryFn: async ({ signal }) => {
@@ -558,14 +572,29 @@ function SnapshotDialog({
 	return (
 		<FormDialog
 			open={open}
-			onOpenChange={onOpenChange}
+			onOpenChange={(o) => {
+				if (!o) setRequiresStop(false);
+				onOpenChange(o);
+			}}
 			title={`Save a snapshot of ${s.slug}`}
 			description="A saved snapshot keeps the disk; new sandboxes can start from it."
-			submitLabel={replaces ? "Replace snapshot" : "Save snapshot"}
-			destructive={replaces}
+			submitLabel={
+				forceStop
+					? replaces
+						? "Stop and replace snapshot"
+						: "Stop and save snapshot"
+					: replaces
+						? "Replace snapshot"
+						: "Save snapshot"
+			}
+			destructive={replaces || forceStop}
 			submitDisabled={n === "" || problem !== null}
 			onSubmit={async () => {
-				const body = { sandbox: s.id, name: n };
+				const body = {
+					sandbox: s.id,
+					name: n,
+					...(forceStop ? { forceStop: true } : {}),
+				};
 				const slot = slotFor(key.current, body);
 				try {
 					const { data } = await sbx.raw.POST("/v1/snapshots", {
@@ -576,9 +605,15 @@ function SnapshotDialog({
 					track(data.operation.id);
 				} catch (e) {
 					key.current = slotAfter(slot, e);
+					if (!forceStop && isSnapshotRequiresStop(e)) {
+						// Ask: the next submit sends forceStop.
+						setRequiresStop(true);
+						return false;
+					}
 					toast.error(describeError(e).message);
 					return false;
 				}
+				setRequiresStop(false);
 				toast.success(`Saving snapshot ${n}`);
 				setName("");
 				await attempt(() =>
@@ -602,6 +637,14 @@ function SnapshotDialog({
 			{replaces && (
 				<p className="text-sm text-amber-800">
 					A snapshot named {n} exists: it is replaced when the new one is ready.
+				</p>
+			)}
+			{forceStop && (
+				<p role="alert" className="text-sm text-amber-800">
+					{requiresStop
+						? "This Windows sandbox is snapshotted only from a stopped VM. "
+						: ""}
+					{FORCE_STOP_TEXT}
 				</p>
 			)}
 		</FormDialog>

@@ -138,10 +138,20 @@ class AsyncSnapshots:
         wait_timeout: float | None = None,
         retry_budget: float | None = None,
         idempotency_key: str | None = None,
+        force_stop: bool | None = None,
         **fields: Any,
     ) -> Snapshot:
         """Saves a snapshot of a sandbox (keyed POST). ``wait``: until the
-        operation is final; a failed one raises its error."""
+        operation is final; a failed one raises its error.
+
+        A running Windows sandbox is saved only from a stopped VM: without
+        ``force_stop`` it raises SbxError 409 ``snapshot_requires_stop``
+        (``details["retryWith"] == {"forceStop": True}``). ``force_stop=True``
+        stops the sandbox (running commands and sessions are interrupted),
+        takes the snapshot and starts it again; the operation's ``force_stop``
+        reports the restart. Ignored for Linux and for a stopped sandbox."""
+        if force_stop is not None:
+            fields = {**fields, "force_stop": force_stop}
         created = await self._core.call(
             snapshots_create,
             body=_fields({"sandbox": sandbox, "name": name}, fields),

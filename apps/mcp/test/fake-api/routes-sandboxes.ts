@@ -7,9 +7,11 @@ import {
 	checkScope,
 	claimIdempotency,
 	finishOperation,
+	forceStopFor,
 	limitOf,
 	longPoll,
 	lookupSandbox,
+	markForceStopped,
 	operationResource,
 	paginate,
 	sandboxResource,
@@ -782,6 +784,7 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 				{ state: src.state, event: "fork" },
 			);
 		}
+		const forced = forceStopFor(fake, src, "fork", b.forceStop);
 		const { template, size } = checkTemplateAndSize(
 			fake,
 			src.template,
@@ -805,9 +808,17 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 			copyFrom: state.fs(src.id).root,
 		});
 		const sourceOp = startOperation(fake, src, "fork", "copying");
-		fake.later(state.readyAfterMs, () =>
-			finishOperation(fake, sourceOp, "succeeded"),
-		);
+		if (forced) {
+			sourceOp.forceStop = {
+				sourceStopped: false,
+				sourceRestarted: null,
+				restartError: null,
+			};
+		}
+		fake.later(state.readyAfterMs, () => {
+			if (forced) markForceStopped(sourceOp);
+			finishOperation(fake, sourceOp, "succeeded");
+		});
 		claim?.save({
 			sandboxId: sandbox.id,
 			operationId: operation.id,

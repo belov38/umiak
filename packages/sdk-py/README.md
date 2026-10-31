@@ -56,6 +56,13 @@ The same as `@sbx/sdk` (TS):
   `retry_budget`.
 - **Errors**: `SbxError(status, code, message, retryable, details, request_id)`;
   `status` 0 for network, credential and in-stream errors.
+- **Windows fork / saved snapshot**: a running Windows sandbox is snapshotted
+  only from a stopped VM. `sb.fork(...)` and `sbx.snapshots.create(...)`
+  without `force_stop` raise `SbxError` 409 `snapshot_requires_stop`
+  (`details["retryWith"] == {"forceStop": True}`); `force_stop=True` stops the
+  sandbox (running commands and sessions are interrupted), takes the snapshot
+  and starts it again (the operation's `force_stop` reports the restart).
+  Ignored for Linux and for a stopped sandbox.
 
 API resources are the generated attrs models (`sbx_sdk.models`). Enums the
 API marks `x-extensible-enum` accept unknown values (they parse as a member

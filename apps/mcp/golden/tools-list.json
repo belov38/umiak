@@ -355,7 +355,7 @@
     {
       "name": "sandbox_fork",
       "title": "Fork a sandbox",
-      "description": "Copies a ready or stopped sandbox (disk and settings) into a new one; the source keeps running. Same overrides as sandbox_create; env and unset_env merge onto the source's. Waits until the copy is ready.",
+      "description": "Copies a sandbox (disk, settings) to a new one, waits for ready. Overrides as in sandbox_create; env, unset_env merge onto source's.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -398,6 +398,10 @@
           "size": {
             "description": "Size slug from templates_list, e.g. 2gb; default: the template's",
             "type": "string"
+          },
+          "force_stop": {
+            "description": "Running Windows: stop VM (ends commands/sessions), snapshot, restart. Linux: no-op",
+            "type": "boolean"
           },
           "ttl_seconds": {
             "description": "Lifetime in seconds from ready, then it is deleted; default: none",
@@ -1180,6 +1184,10 @@
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
             "description": "Snapshot name, [a-z0-9-], up to 63 characters, e.g. web-stack"
+          },
+          "force_stop": {
+            "description": "Running Windows: stop VM (ends commands/sessions), snapshot, restart. Linux: no-op",
+            "type": "boolean"
           },
           "wait": {
             "description": "Wait for the result (default true)",

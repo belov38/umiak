@@ -5,6 +5,7 @@ import {
 	CREATE_ERROR_CODES,
 	describeError,
 	isApiUnavailable,
+	isSnapshotRequiresStop,
 } from "../src/lib/errors.ts";
 
 const err = (
@@ -119,5 +120,26 @@ describe("isApiUnavailable", () => {
 		);
 		expect(isApiUnavailable(err("not_found", { status: 404 }))).toBe(false);
 		expect(isApiUnavailable(new Error("boom"))).toBe(false);
+	});
+});
+
+describe("snapshot_requires_stop (S9 §24.8)", () => {
+	const e = err("snapshot_requires_stop", {
+		status: 409,
+		message:
+			"Windows sandboxes are forked from a stopped VM; stop it first or retry with forceStop: true (CLI --force-stop), which stops the sandbox, takes the snapshot and starts it again",
+		details: { reason: "windows_running", retryWith: { forceStop: true } },
+	});
+
+	it("is recognised, so the dashboard asks and retries with forceStop", () => {
+		expect(isSnapshotRequiresStop(e)).toBe(true);
+		expect(isSnapshotRequiresStop(err("invalid_state"))).toBe(false);
+		expect(isSnapshotRequiresStop(new Error("x"))).toBe(false);
+	});
+
+	it("has dashboard words, not the CLI flag", () => {
+		const t = describeError(e).message;
+		expect(t).toContain("Windows");
+		expect(t).not.toContain("--force-stop");
 	});
 });

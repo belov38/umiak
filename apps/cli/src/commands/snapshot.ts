@@ -4,7 +4,8 @@
 // (§14.3), the JSON Lines `accepted` ({snapshot, operation}) and last `ready`
 // ({snapshot}), or the error line if the save fails. A snapshot with the same
 // name is replaced once the new one is ready. rm asks like `sbx rm` and sends
-// `Sbx-Confirm-Delete`.
+// `Sbx-Confirm-Delete`. save --force-stop: a running Windows sandbox is
+// stopped for the snapshot and started again (S9 §24.8).
 
 import type { SnapshotData } from "@sbx/sdk";
 import { newIdempotencyKey, SbxError } from "@sbx/sdk";
@@ -14,7 +15,8 @@ import { confirm } from "../confirm.ts";
 import { sandboxRef, writeCurrent } from "../current.ts";
 import { table } from "../format.ts";
 import type { Runner } from "../program.ts";
-import { WAIT_TIMEOUT_MS } from "../wait.ts";
+import { WAIT_TIMEOUT_MS, warnForceStop } from "../wait.ts";
+import { FORCE_STOP_HELP } from "./lifecycle.ts";
 
 function snapshotLine(s: SnapshotData): string {
 	return `${s.name} (${s.id}): ${s.state}`;
@@ -35,6 +37,7 @@ export function register(program: Command, run: Runner): void {
 		.argument("[name]", "snapshot name: ^[a-z0-9][a-z0-9-]{0,62}$")
 		.option("--wait", "wait until the snapshot is ready and print it")
 		.option("--wait-timeout <duration>", "limit of --wait")
+		.option("--force-stop", FORCE_STOP_HELP)
 		.action(
 			run(async (ctx, args, opts) => {
 				const [a, b] = args as [string, string | undefined];
@@ -47,7 +50,11 @@ export function register(program: Command, run: Runner): void {
 							1000;
 				const sbx = ctx.sbx();
 				const { data } = await sbx.raw.POST("/v1/snapshots", {
-					body: { sandbox: ref.ref, name },
+					body: {
+						sandbox: ref.ref,
+						name,
+						...(opts.forceStop === true ? { forceStop: true } : {}),
+					},
 					idempotencyKey: newIdempotencyKey(),
 				});
 				const source = data.snapshot.sourceSandboxId;
@@ -72,6 +79,7 @@ export function register(program: Command, run: Runner): void {
 						details: { operationId: op.id, kind: op.kind, state: op.state },
 					});
 				}
+				warnForceStop(ctx, op);
 				const s = await sbx.snapshots.get(name);
 				ctx.out.event("ready", { snapshot: s }, (v) =>
 					snapshotLine(v.snapshot),
