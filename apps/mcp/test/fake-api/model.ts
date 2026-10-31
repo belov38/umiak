@@ -114,6 +114,9 @@ export function sandboxResource(fake: Fake, sb: FakeSandbox) {
 		endpoints,
 		environment: null,
 		excludeOwnerSecrets: false,
+		// Operator blocks (S8 C3) are not modelled.
+		blocked: false,
+		blockReason: null,
 		createdAt: iso(sb.createdAt),
 		readyAt: isoOrNull(sb.readyAt),
 		stoppedAt: isoOrNull(sb.stoppedAt),
