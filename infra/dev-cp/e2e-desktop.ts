@@ -84,6 +84,19 @@ try {
 	}
 
 	console.log(`create_ms ${createMs}`);
+	const turnHost = process.env.SBX_DESKTOP_TURN_HOST;
+	if (!turnHost) throw new Error("dev TURN host missing");
+	const egress = await sb.exec([
+		"python3",
+		"-I",
+		"-c",
+		"import socket,struct,os,sys; host=sys.argv[1]; port=int(sys.argv[2]); tid=os.urandom(12); s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(3); s.sendto(struct.pack('!HHI12s',1,0,0x2112a442,tid),(host,port)); data=s.recv(1024); assert data[8:20]==tid; s.close();\nfor p in (port,int(sys.argv[3])):\n t=socket.socket(); t.settimeout(2); assert t.connect_ex((host,p))!=0, 'VM TCP TURN egress allowed'; t.close()",
+		turnHost,
+		process.env.SBX_DESKTOP_TURN_PORT ?? "",
+		process.env.SBX_DESKTOP_TURN_TLS_PORT ?? "",
+	]);
+	check(egress.exitCode === 0, "VM TURN egress UDP only; TCP/TLS blocked");
+
 	check(sb.data.endpoints.desktop, "desktop capability");
 	const before = await sb.desktop.screenshot({ cursor: "false" });
 	check(

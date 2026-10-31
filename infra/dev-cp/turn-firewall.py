@@ -19,8 +19,7 @@ def update(root: Path, enable: bool) -> None:
         anchor = "OUT DROP -dest +sbx-deny\n"
         if anchor not in cleaned[0]:
             raise ValueError("private egress guard missing")
-        rules = (f"OUT ACCEPT -dest +sbx-gateway -p tcp -dport 3478,5349 {MARKER}\n"
-                 f"OUT ACCEPT -dest +sbx-gateway -p udp -dport 3478,49160:49200 {MARKER}\n")
+        rules = f"OUT ACCEPT -dest +sbx-gateway -p udp -dport 3478 {MARKER}\n"
         cleaned[0] = cleaned[0].replace(anchor, rules + anchor, 1)
         rules = (f"IN ACCEPT -source 192.168.68.0/24 -p tcp -dport 3478,5349 {MARKER}\n"
                  f"IN ACCEPT -source 192.168.68.0/24 -p udp -dport 3478,49160:49200 {MARKER}\n")

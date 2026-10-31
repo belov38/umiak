@@ -35,7 +35,10 @@ it("dev TURN rollback removes only its rules and preserves concurrent changes", 
 		expect(run("apply").status).toBe(0);
 		expect(run("apply").status).toBe(0);
 		const applied = readFileSync(join(dir, "cluster.fw"), "utf8");
-		expect(applied.match(/s10-dev-turn/g)).toHaveLength(2);
+		expect(applied.match(/s10-dev-turn/g)).toHaveLength(1);
+		expect(applied).toContain(
+			"OUT ACCEPT -dest +sbx-gateway -p udp -dport 3478 # s10-dev-turn",
+		);
 		writeFileSync(
 			join(dir, "cluster.fw"),
 			`${applied}# concurrent S9 change\n`,
