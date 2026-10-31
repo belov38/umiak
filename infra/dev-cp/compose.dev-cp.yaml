@@ -84,7 +84,7 @@ services:
 
   # S7: Keycloak behind Serve on :10000. The realm (imported on the first start only) gets the
   # oauth2-proxy redirect URI and web origin of the Serve name.
-  # The CT has 3 GB and no swap. Without a cgroup limit of its own the JVM in Docker in LXC sizes
+  # The CT has 6 GB and no swap. Without a cgroup limit of its own the JVM in Docker in LXC sizes
   # its heap from the host's RAM (sysinfo is not virtualised), grows past 2.5 GB and starves the
   # CT. A fixed heap and a container limit keep Keycloak under ~1 GB.
   keycloak:

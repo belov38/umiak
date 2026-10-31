@@ -949,8 +949,11 @@ including Unicode keymap input and INCR clipboard transfers. systemd owns restar
 
 Sunshine source at v2026.914.233613 has no REST session-count endpoint.
 `/api/clients/list` lists paired certificates only. RTSP TCP requests are short-lived.
-Observed ENet CLIENT CONNECTED/DISCONNECTED log transitions are the primary count;
-ASSURED UDP47999 conntrack flows are the fallback (conservative until flow expiry).
+Linux counts recent ASSURED UDP 47999 (ENet control) conntrack flows as the primary
+activity signal: the remaining TTL must be within 5 s of the guest's actual
+`nf_conntrack_udp_timeout_stream`. Extended ipv4/ipv6 records are parsed by transport
+token. Sunshine ENet CONNECTED/DISCONNECTED log transitions are a conservative fallback,
+because a forced session end does not log DISCONNECT.
 A failed observation never clears a previously active count. The agent also observes
 already-running streamers after its own restart. Empty/no streamer is zero activity.
 
@@ -988,9 +991,13 @@ S8 integration (2026-10-31): Desktop tab uses real SDK, fresh single-use tickets
 - Direct-agent live probe: cold clone+boot toQGA11.286s, claim→desktopready2.097s;1920x1080 screenshot, mouse/Unicode keyboard proof + pixel diff, clipboardUnicode/emoji, actual Sunshine/Moon pairing, stopstreamer; fork fresh streamercredentials and stop/resume verified. Resume desktopready1.057s. These are NOT public API create or gateway media timings.
 - S8 Desktop tab implemented; Payload publicDesktopEnabled=false with route invalidation, catalog sizes4gb/8gb and verified build seeded. Worker waits actual desktop readiness on the same boot afterConfigure before create/resume finish.
 - Migration0403 tracks policy revocation transition. Direct media is ended for blocked/public-disabled routes. Used grants of current ready epoch remain retained/rechecked beyond12h and1day until stop/revoke changes epoch; cleanup then removes them. Public views without ticket are covered by route monitor.
-- Pending live spikes: CT590 publicAPI create, actual WebSocket/WebRTC/TURN frames and stream activity/long-idle checks. Dedicated self-hosted TURN listener IP/TLS443 is still needed for devCP. Windows depends on S9 merge. No public API/S11 field changes in this pass.
+- Linux live acceptance passed on build 20261031.6 / VM 596; see "Linux live acceptance — 2026-11-01" below.
 
-Dev TURN decision (master, 2026-11-01): CT590 may share its address with gateway; dev listeners3478UDP/TCP,5349TLS, narrow UDP relay range configured only under infra/dev-cp. TLS from existing dev CA, hostname under its permitted tunnel DNS namespace. Dedicated address/TLS443 or SNI multiplexing is a production follow-up, not an MVP dev blocker. CT590 RAM6144MiB maximum. Master redeploys main after merges; this acceptance may leave s10-impl deployed.
+Dev TURN decision (master, 2026-11-01): CT 590 shares its address with the gateway.
+Dev listener ports, TLS hostname and a narrow UDP relay range are configured only under
+`infra/dev-cp`. The TLS leaf comes from the existing dev CA, with a hostname in its
+permitted DNS namespace. A dedicated address with TLS 443, or SNI multiplexing, is a
+production follow-up, not an MVP blocker. CT 590 RAM stays at most 6144 MiB.
 
 
 Coturn Refresh policy (implementation, 2026-11-01): upstream4.18.0 intentionally
@@ -1021,3 +1028,28 @@ max-allocate-lifetime60s: закрытые UDP allocations освобождаю�
 действующие обновляются каждые~30s. rtc-turn0.21.1 соблюдает выданный LIFETIME.
 Проверены6 allocations, LIFETIME≤60, valid/expired Refresh, peer403 и UDP/TCP/TLS.
 Квота400 и per-session bandwidth остаются; peer allowlist не расширялся.
+
+
+### Linux live acceptance — 2026-11-01
+
+Immutable `linux-desktop 20261031.6`, VM 596, agent `0.1.0+20261031.4865e13`.
+
+- Clean recipe build 676 s, 7.8 GiB; `verify: linux-desktop` 109 checks, 0 FAIL;
+  first QGA 9.9 s, hard-restart QGA 12.3 s.
+- Public cold create (API to `running` with desktop ready): 18.4 s and 14.4 s on two runs.
+- All MCP `computer_*` tools and `desktop_url` work against the real API; the
+  "desktop unsupported" fallback is not used when the capability is advertised.
+- PNG screenshot with cursor, Unicode keyboard proof, clipboard round-trip, WebSocket
+  media and forced relay-to-relay WebRTC over UDP, TCP and TLS TURN: changed frames.
+- 30 min hold with an open viewer and no API calls: 176 samples, `desktopStreams >= 1`,
+  all other activity counters 0, last API call 1830 s ago; frames still change after the hold.
+- Idle-stop with `idle_timeout = 60 s`: stopped 78.1 s after an explicit end-streams,
+  98.8 s after a natural page close without EndStreams.
+- Fork gets fresh streamer credentials; stop/resume with screenshot; old desktop
+  cookie returns 401 after resume; delete cleans up clones and snapshots.
+- After the runs only VM 596 remains in the S10 slots; 595 and all clones are removed.
+
+The S8 Desktop tab and S11 API contract are unchanged by the live fixes.
+Open: Windows desktop (§8) after S9; production TURN on TLS 443 (dedicated address or
+SNI). Audio stays disabled; performance, glass-to-glass latency and multi-viewer
+behaviour are not characterised by this acceptance.

@@ -166,3 +166,12 @@ Dev egress alignment: removed unnecessary VM TCP/TLS and relay-range accepts; VM
 
 Build6 immutable result: version20261031.6, buildId01a19259-3e1f-7edc-82c2-4e64f82042cf, VM596, signed agent0.1.0+20261031.4865e13, duration676s, disk7.8GiB. Verify6 passed109 checks,0FAIL and cleaned its clones/snapshot. Backup5/VM595 retired/deleted; dev seeded/promoted6 and deployed successfully. Final run13 uses NO experimental package: coldcreate18428ms, guest STUN/UDP reachable and TCP/TLS egress blocked, all real MCP, WS and forced relay-UDP frames passed;30min no-API hold in progress with only desktopStreams1. DB+SSH observation confirms healthok, tunnelconnected and fresh activity heartbeats.
 Full workspace initially hit existing DB container-guard immediate orphan-removal assertion. removeOrphans is best-effort and concurrent sweeps may still be removing the container; switched that assertion to the existing bounded gone() helper, preserving live-owner checks and without retrying removal commands. Original full run RED, targeted original rerun PASS; corrected DB71 PASS and final serial full workspace PASS (builder321, API1039, worker360+5skip, MCP698+1skip, web223, TS SDK138, Python79, CLI156; other packages green). Lint/typecheck/build PASS. Agent full native race(-p1)/vet/Linux build PASS; native/Windows lint/build/vet and gateway race/vet/native+Windows checks PASS. All verification uses mise. Live30min result remains pending until the final observer/cleanup completes.
+
+Linux live acceptance PASS (2026-11-01) on immutable 20261031.6 / VM 596, no signed hot-update.
+Run 13: cold create 18.4 s; guest UDP-only TURN egress, TCP/TLS blocked; all MCP tools;
+WS and relay UDP/TCP/TLS media; 30 min hold (176 samples, desktopStreams >= 1, other
+counters 0); idle-stop 78.1 s after EndStreams; fork, resume, old cookie 401, delete PASS.
+Run 14: natural page close without EndStreams, cold create 14.4 s, idle-stop 98.8 s; same
+fork/resume/revoke/delete checks PASS. The e2e helper now closes the last transport
+naturally when an idle hold is requested. pve after runs: only 596 in S10 slots, all
+clones and snapshots removed. Next: rebase on main (S9), Windows desktop.

@@ -174,15 +174,20 @@ try {
 		"gateway stream page",
 	);
 	try {
-		await verifyDesktopMedia(sb, output, async () => {
-			const holdMs = Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0);
-			if (holdMs > 0)
-				await verifyDesktopIdleHold(
-					sb,
-					holdMs,
-					join(output, "idle-observations.ndjson"),
-				);
-		});
+		await verifyDesktopMedia(
+			sb,
+			output,
+			async () => {
+				const holdMs = Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0);
+				if (holdMs > 0)
+					await verifyDesktopIdleHold(
+						sb,
+						holdMs,
+						join(output, "idle-observations.ndjson"),
+					);
+			},
+			Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0,
+		);
 	} catch (error) {
 		const diagnostic = await sb.exec([
 			"sudo",
@@ -199,11 +204,12 @@ try {
 		console.log("media diagnostics", output);
 		throw error;
 	}
-	await sb.desktop.endStreams();
 	if (Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0) {
 		await waitDesktopIdleStop(sb);
 		await budget();
 		await sb.resume({}, { wait: true });
+	} else {
+		await sb.desktop.endStreams();
 	}
 
 	// Fork a stopped source so this track uses only 4GiB while S9 is running.

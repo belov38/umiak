@@ -153,13 +153,13 @@ topology:
 
     # S10: verified Linux desktop build; no warm/hibernated pool.
     - templateSlug: linux-desktop
-      version: "20261031.3"
+      version: "20261031.6"
       os: linux
       node: pve
       storage: local-lvm
       pveVmid: 596
       bootTimeoutS: 300
-      agentVersion: 0.1.0+20261031.ebe5ea8
+      agentVersion: 0.1.0+20261031.4865e13
       hw:
         {
           "machine": "q35",

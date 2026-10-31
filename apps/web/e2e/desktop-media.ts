@@ -12,6 +12,7 @@ export async function verifyDesktopMedia(
 	sb: Sandbox,
 	output: string,
 	onWebRtcReady?: () => Promise<void>,
+	naturalCloseLast = false,
 ) {
 	const protocols = (process.env.SBX_DESKTOP_TURN_TRANSPORTS ?? "udp").split(
 		",",
@@ -32,7 +33,7 @@ export async function verifyDesktopMedia(
 	});
 
 	try {
-		for (const label of cases) {
+		for (const [index, label] of cases.entries()) {
 			const transport = label === "websocket" ? "websocket" : "webrtc";
 			const protocol = label.slice("webrtc-".length);
 			const page = await browser.newPage({
@@ -178,7 +179,8 @@ export async function verifyDesktopMedia(
 				throw error;
 			} finally {
 				await page.close();
-				await sb.desktop.endStreams();
+				if (!naturalCloseLast || index !== cases.length - 1)
+					await sb.desktop.endStreams();
 			}
 		}
 	} finally {
