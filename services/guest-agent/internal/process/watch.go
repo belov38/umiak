@@ -16,8 +16,12 @@ type dirWatcher struct {
 	wake func(id string)
 	done chan struct{}
 
-	mu   sync.Mutex
-	refs map[string]int
+	// mu serialises add and remove with close: fsnotify's Windows backend
+	// can block forever in Remove when Close runs concurrently (a monitor
+	// ending during Manager.Close, seen on Windows).
+	mu     sync.Mutex
+	refs   map[string]int
+	closed bool
 }
 
 func newDirWatcher(wake func(id string)) (*dirWatcher, error) {
@@ -56,6 +60,9 @@ func (d *dirWatcher) add(dir string) bool {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return false
+	}
 	if d.refs[dir] == 0 {
 		if err := d.w.Add(dir); err != nil {
 			return false
@@ -72,6 +79,9 @@ func (d *dirWatcher) remove(dir string) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		return
+	}
 	d.refs[dir]--
 	if d.refs[dir] <= 0 {
 		delete(d.refs, dir)
@@ -80,6 +90,9 @@ func (d *dirWatcher) remove(dir string) {
 }
 
 func (d *dirWatcher) close() {
+	d.mu.Lock()
+	d.closed = true
+	d.mu.Unlock()
 	_ = d.w.Close()
 	<-d.done
 }
