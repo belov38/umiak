@@ -26,7 +26,7 @@ func (a *agent) desktopLoop(ctx context.Context) {
 		}
 		state := v1.PhaseState_PHASE_STATE_PENDING
 		reason := "desktop_not_ready"
-		if secretsReady {
+		if secretsReady && a.claim != nil && a.claim.SandboxID() != "" {
 			if !prepared {
 				if err := a.desktop.PrepareRuntime(ctx); err != nil {
 					a.tracker.Set("desktop", v1.PhaseState_PHASE_STATE_PENDING, "desktop_not_ready")

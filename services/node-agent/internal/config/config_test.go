@@ -89,3 +89,20 @@ func TestDefaultLayout(t *testing.T) {
 		}
 	}
 }
+
+func TestDevelopmentDesktopSlots(t *testing.T) {
+	c, err := Load("../../../../infra/pve/sbx-node.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int{595, 596, 597, 598, 599} {
+		if !c.IsTemplateSlot(id) {
+			t.Fatalf("template slot %d denied", id)
+		}
+	}
+	for _, id := range []int{590, 591, 592, 593, 594} {
+		if c.IsTemplateSlot(id) {
+			t.Fatalf("infrastructure %d allowed", id)
+		}
+	}
+}

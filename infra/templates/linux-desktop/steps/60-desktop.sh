@@ -29,6 +29,7 @@ curl -fsSL --retry 5 "https://github.com/trycua/cua/releases/download/cua-driver
  --certificate-identity "https://github.com/trycua/cua/.github/workflows/cd-rust-cua-driver.yml@refs/tags/cua-driver-rs-v${cua}" \
  --certificate-oidc-issuer https://token.actions.githubusercontent.com "$SBX_WORK_DIR/cua-driver.tar.gz"
 
+install -d -o user -g user -m 0700 /home/user/.local/state
 install -d -m 0755 "/opt/sbx-desktop/moonlight-web/$moonlight" "/opt/sbx-desktop/cua-driver/$cua"
 tar -xzf "$SBX_WORK_DIR/moonlight-web.tar.gz" -C "/opt/sbx-desktop/moonlight-web/$moonlight" --strip-components=1 --no-same-owner
 tar -xzf "$SBX_WORK_DIR/cua-driver.tar.gz" -C "/opt/sbx-desktop/cua-driver/$cua" --no-same-owner

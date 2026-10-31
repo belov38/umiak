@@ -3,11 +3,11 @@ node = "pve"
 vg = "pve"
 thinPool = "data"
 storage = "local-lvm"
-# Sandboxes 500-589; template slots 597-599 (their base-<id> disks, tagged sbx-tpl, are clone
-# origins); 590-596 is dev infrastructure and in neither range (S1 spec 4.7).
+# Sandboxes 500-589; template slots 595-599 (their base-<id> disks, tagged sbx-tpl, are clone
+# origins); 590-594 is dev infrastructure and in neither range (S1 spec 4.7).
 vmidMin = 500
 vmidMax = 589
-templateVmidMin = 597
+templateVmidMin = 595
 templateVmidMax = 599
 templateVmid = 599
 sdnZone = "sbx"

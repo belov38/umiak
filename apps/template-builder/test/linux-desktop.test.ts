@@ -104,7 +104,7 @@ it("normalizes non-executable upstream archive binaries before checking them", (
 		);
 		const result = spawnSync(
 			"bash",
-			["-e", "-c", "moonlight=test; cua=test; die() { exit 1; };\n" + fragment],
+			["-e", "-c", `moonlight=test; cua=test; die() { exit 1; };\n${fragment}`],
 			{ encoding: "utf8" },
 		);
 		expect(result.status, result.stderr).toBe(0);

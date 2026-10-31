@@ -1,6 +1,6 @@
 // Disposable direct-agent spike. The public API/gateway/real viewer acceptance is a separate E2E.
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import {
 	machinesFor,
 	makeContext,
@@ -51,7 +51,15 @@ try {
 		),
 		timeoutMs: 300_000,
 	});
-	console.log(result.stdout);
+	for (const line of result.stdout.split("\n")) {
+		if (line.startsWith("SCREENSHOT "))
+			writeFileSync(
+				"/tmp/s10-desktop-spike.png",
+				Buffer.from(line.slice(11), "base64"),
+				{ mode: 0o600 },
+			);
+		else console.log(line);
+	}
 	if (result.exitCode !== 0) {
 		console.error(result.stderr);
 		const diagnostics = await io.exec([

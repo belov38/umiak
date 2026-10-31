@@ -348,31 +348,43 @@ func (s *X11Session) Input(ctx context.Context, a *v1.DesktopAction) error {
 		}
 		return nil
 	case "type":
-		code := s.setup.MaxKeycode
-		r, e := xproto.GetKeyboardMapping(s.c, code, 1).Reply()
+		const capacity = 64
+		first := s.setup.MaxKeycode - capacity + 1
+		original, e := xproto.GetKeyboardMapping(s.c, first, capacity).Reply()
 		if e != nil {
 			return e
 		}
-		defer func() { _ = xproto.ChangeKeyboardMappingChecked(s.c, 1, code, r.KeysymsPerKeycode, r.Keysyms).Check() }()
+		defer func() {
+			_ = xproto.ChangeKeyboardMappingChecked(s.c, capacity, first, original.KeysymsPerKeycode, original.Keysyms).Check()
+		}()
 		delay := uint32(5)
 		if a.DelayMs != nil {
 			delay = *a.DelayMs
 		}
-		for _, ch := range a.Text {
-			syms := make([]xproto.Keysym, r.KeysymsPerKeycode)
-			for i := range syms {
-				syms[i] = xproto.Keysym(keySymbol(string(ch)))
+		for _, batch := range planTextBatches(a.Text, capacity) {
+			syms := append([]xproto.Keysym(nil), original.Keysyms...)
+			for i, sym := range batch.Symbols {
+				for j := 0; j < int(original.KeysymsPerKeycode); j++ {
+					syms[i*int(original.KeysymsPerKeycode)+j] = xproto.Keysym(sym)
+				}
 			}
-			if e = xproto.ChangeKeyboardMappingChecked(s.c, 1, code, r.KeysymsPerKeycode, syms).Check(); e != nil {
+			if e = xproto.ChangeKeyboardMappingChecked(s.c, capacity, first, original.KeysymsPerKeycode, syms).Check(); e != nil {
 				return e
 			}
-			if e = s.fake(xproto.KeyPress, byte(code), 0, 0); e != nil {
-				return e
+			for _, index := range batch.Codes {
+				code := byte(first) + byte(index)
+				if e = s.fake(xproto.KeyPress, code, 0, 0); e != nil {
+					return e
+				}
+				if e = s.fake(xproto.KeyRelease, code, 0, 0); e != nil {
+					return e
+				}
+				if e = pause(ctx, time.Duration(delay)*time.Millisecond); e != nil {
+					return e
+				}
 			}
-			if e = s.fake(xproto.KeyRelease, byte(code), 0, 0); e != nil {
-				return e
-			}
-			if e = pause(ctx, time.Duration(delay)*time.Millisecond); e != nil {
+			// Allow interactive clients to consume the batch before replacing it.
+			if e = pause(ctx, 50*time.Millisecond); e != nil {
 				return e
 			}
 		}

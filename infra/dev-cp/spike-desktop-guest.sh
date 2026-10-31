@@ -10,10 +10,10 @@ UNIT
 systemctl daemon-reload
 systemctl restart sbx-agent
 python3 -I - <<'PY'
-import base64, hashlib, json, subprocess, time
+import base64, hashlib, json, subprocess, time, uuid
 sock='/run/sbx-agent/desktop-spike.sock'
 def rpc(service, method, body={}):
- p=subprocess.run(['curl','--silent','--show-error','--fail-with-body','--unix-socket',sock,'-H','Content-Type: application/json','-d',json.dumps(body),'http://localhost/sbx.agent.v1.'+service+'/'+method],capture_output=True,text=True)
+ p=subprocess.run(['curl','--silent','--show-error','--fail-with-body','--unix-socket',sock,'-H','Content-Type: application/json','-H','Sbx-Request-Id: '+str(uuid.uuid4()),'-d',json.dumps(body),'http://localhost/sbx.agent.v1.'+service+'/'+method],capture_output=True,text=True)
  if p.returncode: raise RuntimeError(method+': '+p.stdout[:1000]+p.stderr[:200])
  return json.loads(p.stdout)
 for _ in range(60):
@@ -32,15 +32,17 @@ print('desktop_ready_ms',round((time.monotonic()-started)*1000))
 assert status['screen']=={'width':1920,'height':1080}, status
 before=rpc('Desktop','Screenshot',{'cursor':False})
 png=base64.b64decode(before['data']); assert png.startswith(b'\x89PNG\r\n\x1a\n')
-subprocess.Popen(['runuser','-u','user','--','env','DISPLAY=:0','XAUTHORITY=/home/user/.Xauthority','xfce4-terminal','--disable-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+subprocess.Popen(['runuser','-u','user','--','env','DISPLAY=:0','XAUTHORITY=/home/user/.Xauthority','XDG_RUNTIME_DIR=/run/user/1000','DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus','xfce4-terminal','--disable-server','--geometry=100x25+100+100'],stdout=open('/tmp/s10-terminal.log','w'),stderr=subprocess.STDOUT)
 time.sleep(2)
 before=rpc('Desktop','Screenshot',{'cursor':False})
-rpc('Desktop','Act',{'actions':[{'type':'move','x':600,'y':400},{'type':'type','text':"printf '%s' 'S10 desktop Привет 世界' > /tmp/s10-desktop-input"},{'type':'key','keys':['enter']},{'type':'wait','ms':500}]})
+rpc('Desktop','Act',{'actions':[{'type':'click','x':400,'y':300},{'type':'type','text':"printf '%s' 'S10 desktop \u041f\u0440\u0438\u0432\u0435\u0442 \u4e16\u754c' > /tmp/s10-desktop-input"},{'type':'key','keys':['enter']},{'type':'wait','ms':500}]})
 after=rpc('Desktop','Screenshot',{'cursor':False})
 assert before['data']!=after['data'],'input did not change screen'
-assert open('/tmp/s10-desktop-input').read()=='S10 desktop Привет 世界'
+print('SCREENSHOT '+after['data'])
+print('TERMINAL '+open('/tmp/s10-terminal.log').read())
+assert open('/tmp/s10-desktop-input').read()=='S10 desktop \u041f\u0440\u0438\u0432\u0435\u0442 \u4e16\u754c'
 print('screenshot_input_diff PASS',hashlib.sha256(png).hexdigest())
-text='S10 clipboard Привет 世界 😀'
+text='S10 clipboard \u041f\u0440\u0438\u0432\u0435\u0442 \u4e16\u754c \U0001f600'
 rpc('Desktop','SetClipboard',{'text':text})
 assert rpc('Desktop','GetClipboard').get('text')==text
 print('clipboard_roundtrip PASS')

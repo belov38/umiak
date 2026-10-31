@@ -36,6 +36,11 @@ func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(c
 		if kind == "moon" {
 			owner = "sbxstream:sbxstream"
 		}
+		if kind == "sun" {
+			if e := ownUserDesktopParents(ctx, path, ExecCommand); e != nil {
+				return e
+			}
+		}
 		_, e := ExecCommand(ctx, "chown", "-R", "--no-dereference", owner, path)
 		return e
 	}
