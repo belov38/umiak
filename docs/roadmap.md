@@ -17,10 +17,10 @@
 | S9 | Windows | Шаблон Win11 (образ пользователя, autounattend, sysprep), агент как служба, ConPTY, VSS, autologon. Server Core — фаза 2 | S3, S5 | ✅ спецификация `docs/specs/s9-windows.md`; ✅ реализация в main (агент как служба Windows, шаблон `windows` в слоте 598; две приёмки на `pve`: verify 100/0, create→агент ~110–170 s, fork ~40 s; права на upload и self-update исправлены в `s9-fix`) |
 | S10 | Рабочий стол и computer-use | Sunshine + moonlight-web + TURN, cua-driver, шаблон `linux-desktop`, Windows desktop, computer-use API | S4, S9 | ✅ спецификация `docs/specs/s10-desktop.md`; реализация (ветка `s10-impl`) |
 | S11 | MCP-сервер | Инструменты поверх публичного API: `sbx mcp` (stdio) и удалённый `/mcp`, вход через Keycloak (`sbx-mcp`) или командный ключ, computer-use | S7, S10 | ✅ спецификация `docs/specs/s11-mcp.md`; ✅ реализация в main (`apps/mcp`, `sbx mcp`; 38 инструментов, приёмка с атаками на auth/scopes/ограждение вывода; инструменты рабочего стола ждут S10) |
-| S12 | Эксплуатация | Деплой в Kubernetes (Helm, ingress, oauth2-proxy, Postgres), метрики, логи, несколько нод, PBS | S6 | |
+| S12 | Эксплуатация | Деплой в Kubernetes (Helm, ingress, oauth2-proxy, Postgres), метрики, логи, несколько нод, PBS | S6 | фаза 2 (решение Ильи 2026-11-01), в MVP не реализуем |
 | S13 | Git и приватные зависимости | Репозитории в environment, клон при claim, доступ к приватным репо (GitHub App: токен установки на sandbox с минимальными правами через credential helper агента; позже git-прокси в gateway без токена в VM), политика push, приватные registry (npm, pip, Docker) | S3, S6 | фаза 2, в MVP не реализуем |
 
-Порядок: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12. S13 перенесена в фазу 2.
+Порядок: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11. S12 и S13 перенесены в фазу 2; MVP разворачивается через docker compose (`deploy/compose`).
 
 Решение Ильи 2026-10-29: время создания sandbox не оптимизируем, до ~1 min допустимо. Warm pool в MVP не входит: Linux создаётся холодным клоном (~12 s), `failFast` / `pool_exhausted` (S6, S7) не реализуются, пул остаётся задачей фазы 2. Windows (S9) и `linux-desktop` (S10) тоже без спящих пулов. Для Windows до 5 min допустимо, 2–3 min — хорошо: create идёт холодным путём S9 (клон шаблона + sysprep specialize при первой загрузке), спайк vTPM + `suspend --todisk` не нужен.
 
