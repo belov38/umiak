@@ -1,6 +1,7 @@
 // Next.js 16 proxy (formerly middleware): identity header and CSRF checks
-// for every path but /healthz and Next's static files, plus the security
-// headers on every answer (S8 §5.1, §5.6).
+// for every path but /healthz and Next's static files, the operator gate of
+// /admin and /cms-api, and the security headers on every answer (S8 §5.1,
+// §5.5, §5.6).
 import { type NextRequest, NextResponse } from "next/server";
 import { webEnv } from "./lib/env";
 import { guard } from "./lib/guard";

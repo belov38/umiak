@@ -162,7 +162,7 @@ Email verified, иначе `api` отклонит их токен.
 
 **Оператор.** Оператор платформы — член группы `sbx-operators` (`SBX_OPERATOR_GROUPS` у `api` и `web`); права
 оператора действуют только в браузерной сессии. `dev@example.com` в realm обычный пользователь (так проверяется
-и путь не-оператора: `/admin` показывает страницу Payload «unauthorized», `/app/operator` — 403). Сделать его
+и путь не-оператора: `/admin` — 403 «Operators only» из proxy `web`, `/app/operator` — 403). Сделать его
 оператором: админка Keycloak → realm `sbx` → Users → `dev@example.com` → Groups → Join group → `sbx-operators`.
 Группа приходит в cookie oauth2-proxy при входе, поэтому затем выйти и войти снова (или подождать обновления
 сессии, `--cookie-refresh=5m`). После этого открываются `/admin` и `/app/operator`.
@@ -228,6 +228,16 @@ NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
 `payload` (в первой — платформенные значения по умолчанию, шаблон `linux` и размер `2gb`, как в
 `config/sbx.yaml`, и копия личностей S7 из схемы `identity`, если она есть). `api`, `worker` и `web` стартуют
 после него; `/readyz` `api` и `worker` и `/healthz` `web` не готовы, пока не применены все миграции Payload.
+
+Первый запуск S8 на существующем томе (там уже есть схема `identity` от S7): сначала соберите образы, затем
+остановите `api` и `worker`, затем поднимите стек. Иначе `api` до S8 продолжит писать в `identity`, пока
+`web-migrate` копирует её в `payload`, и эти строки потеряются. Дальше шаг не нужен.
+
+```sh
+docker compose -f deploy/compose/compose.yaml build
+docker compose -f deploy/compose/compose.yaml stop api worker
+docker compose -f deploy/compose/compose.yaml up -d
+```
 
 - `api` и `worker` берут личности и конфиг (шаблоны, размеры, квоты, platform defaults) только из Payload:
   `SBX_CONFIG_FILE` у них больше нет, `config/sbx.yaml` читает только `migrate` (`bootstrap`: топология и сборки

@@ -79,8 +79,12 @@ test("forged identity headers after sign-in grant nothing", async ({
 	await alice.context.setExtraHTTPHeaders(forged);
 	const r = await alice.page.goto("/app/operator");
 	expect(r?.status()).toBe(403);
-	await alice.page.goto("/admin");
-	await expect(alice.page).toHaveURL(/\/admin\/unauthorized/);
+	// The proxy refuses /admin before Payload renders its config.
+	const adminR = await alice.page.goto("/admin");
+	expect(adminR?.status()).toBe(403);
+	await expect(
+		alice.page.getByRole("heading", { name: "Operators only" }),
+	).toBeVisible();
 	const meR = await alice.request.get(`/api/v1/me?team=${team}`);
 	expect(meR.status()).toBe(200);
 	const body = (await meR.json()) as {
@@ -125,6 +129,34 @@ test("unsafe /cms-api requests with a foreign Origin are 403, also for an operat
 		data: { name: `none-${state.run}` },
 	});
 	expect(none.status()).toBe(403);
+});
+
+test("Payload's JWT and preference endpoints are closed (S8 §5.4)", async ({
+	as,
+	state,
+}) => {
+	const APP_ORIGIN = new URL(APP).origin;
+	// refresh-token would issue a Payload JWT nothing accepts: refused even to
+	// an operator with the right Origin.
+	const op = await as("op");
+	const refresh = await op.request.post("/cms-api/users/refresh-token", {
+		headers: { origin: APP_ORIGIN },
+	});
+	expect(refresh.status()).toBe(403);
+	expect(await refresh.text()).not.toMatch(/"(refreshedToken|token)"/);
+	// A non-operator reaches no Payload REST at all, preferences included.
+	const alice = await as("alice");
+	const prefs = await alice.request.post(
+		`/cms-api/payload-preferences/e2e-${state.run}`,
+		{
+			headers: { origin: APP_ORIGIN, "content-type": "application/json" },
+			data: { value: { x: 1 } },
+		},
+	);
+	expect(prefs.status()).toBe(403);
+	expect(
+		(await alice.request.get("/cms-api/payload-preferences")).status(),
+	).toBe(403);
 });
 
 test("web answers 401 without the identity header and only oauth2-proxy reaches it", () => {

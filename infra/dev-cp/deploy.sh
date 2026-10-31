@@ -173,7 +173,9 @@ docker compose config --quiet
 # The one-time switch to S8 (identities move from the schema identity to payload): the pre-S8 api
 # and worker keep writing into identity while web-migrate copies it, and later rows would be lost.
 # Stop them first when the stack runs and has identity but no Payload migrations yet; any later
-# deploy finds payload.payload_migrations and skips this.
+# deploy finds payload.payload_migrations and skips this. Images are built first, so a failed
+# build leaves the running api and worker alone.
+docker compose build 2>&1 | grep -vE '^ *#[0-9]+ ' | tail -30
 if [ -n "$(docker compose ps -q --status running postgres)" ]; then
 	first_s8=$(docker compose exec -T postgres psql -U sbx -d sbx -tAc \
 		"SELECT to_regclass('identity.users') IS NOT NULL AND to_regclass('payload.payload_migrations') IS NULL")
@@ -182,7 +184,7 @@ if [ -n "$(docker compose ps -q --status running postgres)" ]; then
 		docker compose stop api worker
 	fi
 fi
-docker compose up -d --build --remove-orphans 2>&1 | grep -vE '^ *#[0-9]+ ' | tail -30
+docker compose up -d --remove-orphans 2>&1 | tail -30
 # api and oauth2-proxy wait for Keycloak, whose first start (realm import) takes a minute or two;
 # api, worker and web wait for migrate and web-migrate.
 healthy() {

@@ -27,8 +27,12 @@ test("non-operators get 403 on the operator screens and allTeams", async ({
 	const op = await as("op");
 	const r = await alice.page.goto("/app/operator");
 	expect(r?.status()).toBe(403);
-	await alice.page.goto("/admin");
-	await expect(alice.page).toHaveURL(/\/admin\/unauthorized/);
+	// The proxy refuses /admin before Payload renders its config.
+	const adminR = await alice.page.goto("/admin");
+	expect(adminR?.status()).toBe(403);
+	await expect(
+		alice.page.getByRole("heading", { name: "Operators only" }),
+	).toBeVisible();
 	const team = await personalTeam(alice);
 	const all = await alice.request.get(
 		`/api/v1/sandboxes?allTeams=true&team=${team}`,

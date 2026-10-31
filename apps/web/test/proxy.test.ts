@@ -26,7 +26,7 @@ describe("guard (S8 §5.1, §5.6)", () => {
 	const g = (method: string, path: string, h: Record<string, string> = {}) =>
 		guard(
 			{ method, pathname: path, headers: new Headers(h) },
-			{ appOrigin: ORIGIN },
+			{ appOrigin: ORIGIN, operatorGroups: ["sbx-operators"] },
 		);
 
 	it("no identity header: 401 on every path but /healthz", () => {
@@ -58,6 +58,68 @@ describe("guard (S8 §5.1, §5.6)", () => {
 
 	it("no identity wins over a bad origin (401 first)", () => {
 		expect(g("POST", "/app", { origin: "https://evil" })?.status).toBe(401);
+	});
+});
+
+describe("guard: operator gate and disabled auth endpoints (S8 §5.4, §5.5)", () => {
+	const g = (method: string, path: string, h: Record<string, string> = {}) =>
+		guard(
+			{ method, pathname: path, headers: new Headers(h) },
+			{ appOrigin: ORIGIN, operatorGroups: ["sbx-operators"] },
+		);
+	const OP = { ...SIGNED_IN, "x-auth-request-groups": "dev, sbx-operators" };
+
+	it("/admin and /cms-api: 403 without an operator group, before Payload", () => {
+		for (const path of [
+			"/admin",
+			"/admin/",
+			"/admin/unauthorized",
+			"/admin/collections/api-keys",
+			"/cms-api/users",
+			"/cms-api/payload-preferences",
+			"/cms-api/payload-locked-documents",
+		]) {
+			const d = g("GET", path, {
+				...SIGNED_IN,
+				"x-auth-request-groups": "dev,role:sbx-operators",
+			});
+			expect(d?.status, path).toBe(403);
+			expect(d?.reason, path).toBe("operators_only");
+		}
+		expect(g("GET", "/admin", SIGNED_IN)?.reason).toBe("operators_only");
+		expect(
+			g("POST", "/cms-api/payload-preferences/x", {
+				...SIGNED_IN,
+				origin: ORIGIN,
+			})?.reason,
+		).toBe("operators_only");
+	});
+
+	it("operators pass; the gate does not touch /app or look-alike paths", () => {
+		expect(g("GET", "/admin/collections/users", OP)).toBe(null);
+		expect(g("GET", "/cms-api/users/me", OP)).toBe(null);
+		expect(g("POST", "/cms-api/users/logout", { ...OP, origin: ORIGIN })).toBe(
+			null,
+		);
+		expect(g("GET", "/app/operator", SIGNED_IN)).toBe(null);
+		expect(g("GET", "/administrator", SIGNED_IN)).toBe(null);
+	});
+
+	it("password-login endpoints of users: 403 for everyone, operators too", () => {
+		for (const path of [
+			"/cms-api/users/login",
+			"/cms-api/users/refresh-token",
+			"/cms-api/users/first-register",
+			"/cms-api/users/forgot-password",
+			"/cms-api/users/reset-password",
+			"/cms-api/users/unlock",
+			"/cms-api/users/verify/abc",
+			"/cms-api/users/abc/api-key/reveal",
+		]) {
+			const d = g("POST", path, { ...OP, origin: ORIGIN });
+			expect(d?.status, path).toBe(403);
+			expect(d?.reason, path).toBe("endpoint_disabled");
+		}
 	});
 });
 

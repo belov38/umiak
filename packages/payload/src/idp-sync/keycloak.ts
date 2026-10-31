@@ -183,10 +183,17 @@ export class KeycloakAdminClient {
 
 	async #call(url: string, init: RequestInit): Promise<Response> {
 		try {
-			return await this.#fetch(url, {
-				...init,
-				signal: AbortSignal.timeout(this.#timeoutMs),
-			});
+			// The timer holds the controller: an AbortSignal.timeout that nothing
+			// references can be collected during the fetch (undici follows the
+			// signal through a WeakRef), and then it never aborts. The timer is not
+			// cleared on purpose, so it also bounds reading the body.
+			const c = new AbortController();
+			setTimeout(
+				() =>
+					c.abort(new DOMException("The operation timed out.", "TimeoutError")),
+				this.#timeoutMs,
+			).unref();
+			return await this.#fetch(url, { ...init, signal: c.signal });
 		} catch (err) {
 			// The URL carries no secret; the cause is a network error or the timeout.
 			const what = err instanceof Error ? err.message : String(err);

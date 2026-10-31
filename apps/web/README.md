@@ -9,8 +9,8 @@ Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
 | Path | What |
 |---|---|
 | `/healthz` | `200 ok` once Postgres answers, Payload is up and every payload migration known to this code is applied; `503` otherwise. No identity headers needed (exec probe `node healthcheck.js`). |
-| `/admin` | Payload admin (`app/(payload)`, from Payload's Next.js template). Operators only: `users` admin access; others get Payload's `/admin/unauthorized`. |
-| `/cms-api/*` | Payload REST (collection access: operators). A refused login answers with `X-Sbx-Auth-Denied: <reason>`. |
+| `/admin` | Payload admin (`app/(payload)`, from Payload's Next.js template). Operators only: `proxy.ts` answers 403 "Operators only" to anyone without an operator group in `X-Auth-Request-Groups` (before Payload renders its config); Payload's `users` admin access checks again. |
+| `/cms-api/*` | Payload REST: operators only in `proxy.ts` (403 for others, preferences and document locks included), then collection access. The password and JWT endpoints of `users` (`login`, `refresh-token`, `first-register`, `forgot-password`, `reset-password`, `unlock`, `verify`, `api-key/reveal`) are 403 for everyone. A refused login answers with `X-Sbx-Auth-Denied: <reason>`. |
 | `/` | `307` to `/app` (a page, not a config redirect, so an anonymous `/` is still `401`). |
 | `/app` | Redirect to the default team, `/app/t/<team_…>`. |
 | `/app/t/<team>` | Team frame (S8 §9.3): team switcher, sections, operator links, user menu with sign-out. A team the user is not in: 403 page (operators may open any team). The page itself: sandboxes (§9.4), below. |

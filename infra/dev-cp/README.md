@@ -134,7 +134,7 @@ Checked on CT 590 by `e2e.sh` (`docs/plans/e2e-devcp.md`): every service healthy
 > **Не проверено на CT.** Checked locally only (`docker compose config` with the dev-cp files as `deploy.sh` layers them, and the base stack on the Mac). After the next deploy, verify on the CT:
 > - `docker compose ps -a`: `web-migrate` and `migrate` `Exited (0)`, `web` healthy; `docker compose logs web-migrate` lists the applied migrations (an existing S7 volume: the identity rows are copied into `payload` by the first one). api `/readyz` 200 (it checks the Payload migrations).
 > - Browser `https://<TS name>:8443/` → Keycloak (`:10000`) → `/app` → the personal team; `/api/v1/me` 200 with `"auth": {"kind": "session"}` and the same user and team ids as the dashboard.
-> - `/admin`: Payload's unauthorized page for `dev@example.com`; after joining `sbx-operators` in Keycloak and signing in again: the admin and `/app/operator`.
+> - `/admin`: 403 "Operators only" for `dev@example.com`; after joining `sbx-operators` in Keycloak and signing in again: the admin and `/app/operator`.
 > - Sign out (user menu): `/oauth2/sign_out?rd=…` → Keycloak `:10000` logout page → back on `https://<TS name>:8443/app` and a new login. A Keycloak database imported before S8 already has `post.logout.redirect.uris` `<app origin>/*` (S7 realm); if Keycloak answers `Invalid redirect uri`, add it to the client `oauth2-proxy` or drop the `keycloak` database.
 > - A preview of a published `sso` port opens in the dashboard's sandbox page (frame from `*.sbx.100-64-10-7.sslip.io` with the cross-site port cookie); no CSP errors in the browser console.
 > - `web:3000` is not reachable from a container on the `sbx` network (`deploy/compose/README.md`, «web (S8)»), and nothing listens on 3000 on the CT.
