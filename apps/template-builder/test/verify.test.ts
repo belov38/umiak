@@ -735,6 +735,18 @@ describe("verifyTemplate", () => {
 		expect(f.serial.split(":")[2]).not.toBe(a.serial.split(":")[2]);
 	});
 
+	it("desktop fork verification runs only one 4GiB VM at a time", async () => {
+		const { w, deps } = setup();
+		const m = manifest();
+		m.templateSlug = "linux-desktop";
+		await verifyTemplate(deps, m, {});
+		const forkStart = w.log.indexOf("start 502");
+		const stops = w.log
+			.slice(0, forkStart)
+			.filter((line) => line === "stop 501");
+		expect(stops).toHaveLength(2);
+	});
+
 	it("passes the expected values through stdin and scans for secrets on the host only", async () => {
 		const { w, deps, logs } = setup();
 		const v = await verifyTemplate(deps, manifest(), {});

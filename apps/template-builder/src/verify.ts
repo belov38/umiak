@@ -754,10 +754,18 @@ export async function verifyTemplate(
 			reserved: false,
 		};
 		cloneF = F;
+		// Desktop verification shares the host with other build tracks. Preserve
+		// source evidence before stopping it; the fork never needs both guests live.
+		const sourceFacts = await facts(A);
+		if (manifest.templateSlug === "linux-desktop") {
+			await machines.stop(A.vmid);
+			deps.ramGuard.release(A.vmid);
+			A.reserved = false;
+		}
 		await reserve(F);
 		step(`booting fork VM ${F.vmid}`);
 		await startClone(F, "fork_");
-		add(...checkForkIdentity(await facts(A), await facts(F)));
+		add(...checkForkIdentity(sourceFacts, await facts(F)));
 	} catch (err) {
 		failure = err;
 	}
