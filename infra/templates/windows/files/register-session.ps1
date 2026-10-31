@@ -1,0 +1,17 @@
+param([Parameter(Mandatory)][string]$Socket)
+$ErrorActionPreference='Stop'
+# The user account is created by S9 identity apply, so registration belongs to claim-time.
+$scheduler=New-Object -ComObject Schedule.Service
+$scheduler.Connect()
+try{[void]$scheduler.GetFolder('\sbx')}catch{[void]$scheduler.GetFolder('\').CreateFolder('sbx')}
+$binary=Join-Path $env:ProgramFiles 'sbx-agent\current\sbx-agent.exe'
+$action=New-ScheduledTaskAction -Execute $binary -Argument ("session --socket `"$Socket`"")
+$principal=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\user" -LogonType Interactive -RunLevel Highest
+$trigger=New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\user"
+$settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName session -TaskPath '\sbx\' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName session -TaskPath '\sbx\'
+$cua=Join-Path $env:ProgramFiles 'sbx-desktop\cua-driver\current\cua-driver.exe'
+$cuaAction=New-ScheduledTaskAction -Execute $cua -Argument serve
+Register-ScheduledTask -TaskName cua-driver -TaskPath '\sbx\' -Action $cuaAction -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName cua-driver -TaskPath '\sbx\'

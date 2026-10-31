@@ -960,3 +960,13 @@ returns streamed NDJSON Pin then Paired. The proxy user sbx is a pre-created ord
 User, cannot add hosts; only the generated private administrator manages pairing.
 Source-derived wire fixtures are committed under internal/desktop/testdata/upstream;
 they are not live pve recordings.
+
+Windows implementation is based on local S9 d38ec62 (remote s9-impl was not yet
+published). Its autologon/user creation stays in S9. S10 registers session and
+cua-driver tasks after secrets/account readiness. Helper is the signed agent's
+session subcommand; GDI, SendInput and clipboard operate in that user's console.
+The upstream SunshineService owns Sunshine's console process. Moonlight runs in
+an SCM wrapper under NT SERVICE\\sbx-moonlight-web. Installer overlay adds65-streamer;
+Windows artifact pins are in windows/files/desktop-pins.json until the typed S9/S10
+manifest integration. No Windows VM or slot598 is touched by this code-only pass.
+Cua v0.38.0 defaults to stdio MCP; service/task explicitly launches serve.
