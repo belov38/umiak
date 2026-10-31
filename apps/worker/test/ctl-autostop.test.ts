@@ -71,6 +71,29 @@ async function stopsOf(w: TestWorld, id: string): Promise<unknown[]> {
 }
 
 describe("ctl-autostop (§12)", () => {
+	it("desktop stream blocks idle-stop from both journal and live counters", async () => {
+		const w = await createWorld(db);
+		const s = await idleSandbox(w);
+		w.agent.activityOf.set(s.machineId, {
+			runningCommands: 0,
+			openPtys: 0,
+			tcpStreams: 0,
+			desktopStreams: 1,
+		});
+		expect((await runAutostop(w.ctx)).idle).not.toContain(s.sandboxId);
+		w.agent.activityOf.delete(s.machineId);
+		seq += 1;
+		await agentEvents(w, s.machineId, [
+			ev(seq, s.bootId, "activity", {
+				runningCommands: 0,
+				openPtys: 0,
+				tcpStreams: 0,
+				desktopStreams: 1,
+			}),
+		]);
+		expect((await row(w, "sandboxes", s.sandboxId)).activity).toBe("busy");
+		expect((await runAutostop(w.ctx)).idle).not.toContain(s.sandboxId);
+	});
 	it("idle: all zeros, fresh activity, quiet API and a zero live check → stop (idle)", async () => {
 		const w = await createWorld(db);
 		const s = await idleSandbox(w);

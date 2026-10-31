@@ -21,3 +21,8 @@ Proxmox egress firewall changes remain a separate operator step with a rollback
 timer and prior master notification. No firewall is changed by compose.
 Real relay-to-relay connectivity, secret expiry on Refresh and upstream stream
 pairing are acceptance/spike items, not claims made by config tests.
+
+For the worker, set `SBX_TURN_SECRET_FILE=/turn-secrets/auth-secret` and
+`SBX_TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:443?transport=tcp`.
+The read-only mount is shared with coturn. Credentials last 24 hours and are
+refreshed by `ctl-desktop-turn` every ten minutes once older than twelve hours.

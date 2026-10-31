@@ -173,7 +173,13 @@ export interface ClaimRequest {
 	authorizedKeys: string[];
 }
 
+export interface DesktopConfiguration {
+	authEpoch: number;
+	iceServers: { urls: string[]; username: string; credential: string }[];
+}
+
 export interface AgentActivity {
+	desktopStreams?: number;
 	runningCommands: number;
 	openPtys: number;
 	tcpStreams: number;
@@ -195,6 +201,11 @@ export interface QuiesceHookOpts {
  * `NodeInfra.qgaExec`.
  */
 export interface AgentPort {
+	configureDesktop(
+		machineId: string,
+		configuration: DesktopConfiguration,
+		requestId: string,
+	): Promise<void>;
 	claim(machineId: string, req: ClaimRequest, requestId: string): Promise<void>;
 	updateEnv(
 		machineId: string,

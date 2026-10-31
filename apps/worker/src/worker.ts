@@ -40,6 +40,7 @@ import { PromMetrics } from "./metrics.ts";
 import type { AgentPort, GatewayPort, InfraRegistry } from "./ports.ts";
 
 export interface WorkerOptions {
+	turn?: import("./desktop.ts").TurnConfig;
 	/** Shared pool: pg-boss, Drizzle and the handlers (S6 §15.2). Owned by the caller. */
 	pool: pg.Pool;
 	config: ConfigReader;
@@ -124,6 +125,7 @@ export class Worker {
 		this.metrics = o.metrics ?? new PromMetrics({ log: this.#log });
 		this.boss = createBoss(o.bossDb ?? poolDb(o.pool), this.#log, o.boss);
 		this.ctx = {
+			...(o.turn ? { turn: o.turn } : {}),
 			pool: o.pool,
 			db: dbOf(o.pool),
 			jobs: new PgBossJobSender(this.boss),

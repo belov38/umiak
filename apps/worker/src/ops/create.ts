@@ -2,6 +2,7 @@ import { stepRequestId } from "@sbx/core";
 import type { Tx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine, type MachineRow } from "../db.ts";
+import { configureDesktop } from "../desktop.ts";
 import {
 	MachineStateConflict,
 	type PrepSource,
@@ -143,6 +144,12 @@ export function createSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 				);
 				await fenced.check();
 				await ctx.agent.claim(m.id, req, stepRequestId(fenced.id, "claim"));
+				await configureDesktop(
+					ctx,
+					fenced.sandboxId,
+					m.id,
+					stepRequestId(fenced.id, "claim:desktop"),
+				);
 				const bootId = (await sessionOf(ctx.pool, m.id))?.boot_id ?? null;
 				await fenced.tx(async (tx) => {
 					await recordSecretDelivery(

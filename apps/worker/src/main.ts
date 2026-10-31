@@ -128,6 +128,17 @@ async function main(): Promise<void> {
 			agent = new UnavailableAgentPort();
 		}
 		worker = createWorker({
+			...(env.turnSecretFile && env.turnUrls
+				? {
+						turn: {
+							secret: readFileSync(env.turnSecretFile, "utf8").trim(),
+							urls: env.turnUrls
+								.split(",")
+								.map((s) => s.trim())
+								.filter(Boolean),
+						},
+					}
+				: {}),
 			pool,
 			config: p.config,
 			keys,

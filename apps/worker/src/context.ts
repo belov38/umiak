@@ -88,6 +88,7 @@ export class RecordingMetrics implements Metrics {
 }
 
 export interface WorkerCtx {
+	turn?: import("./desktop.ts").TurnConfig;
 	pool: pg.Pool;
 	db: Db;
 	jobs: JobSender;
@@ -127,6 +128,11 @@ export const REDACT_PATHS: string[] = [
 	"*.bs",
 	"*.token",
 	"*.serial",
+	"turn",
+	"*.iceServers",
+	"iceServers",
+	"credential",
+	"*.credential",
 ];
 
 export function createLogger(

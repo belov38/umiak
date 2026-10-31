@@ -182,6 +182,8 @@ services:
         export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
         && exec node apps/worker/src/main.ts
     environment:
+      SBX_TURN_SECRET_FILE: ${SBX_TURN_SECRET_FILE:-}
+      SBX_TURN_URLS: ${SBX_TURN_URLS:-}
       <<: *db-env
       SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
       SBX_SECRETS_DIR: /run/sbx-pve
@@ -202,6 +204,7 @@ services:
       SBX_IDP_SYNC_CLIENT_ID: sbx-worker
       SBX_IDP_SYNC_CLIENT_SECRET_FILE: /run/sbx-secrets/idp-sync-client-secret
     volumes:
+      - ./secrets/turn:/turn-secrets:ro
       # pve-token, pve-root-ca.pem, sbx-node_ed25519, known_hosts.
       - ${SBX_PVE_SECRETS_DIR:-${HOME}/.config/sbx}:/run/sbx-pve:ro
       # Written by secrets-init (a directory: its files appear after the

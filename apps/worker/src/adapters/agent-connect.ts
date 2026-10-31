@@ -13,7 +13,7 @@ import {
 } from "@sbx/agent-client";
 import type { SecretFile } from "@sbx/core";
 import { ErrorDetailSchema } from "@sbx/proto";
-import { ClaimReason, System } from "@sbx/proto/agent/v1";
+import { ClaimReason, Desktop, System } from "@sbx/proto/agent/v1";
 import type { QuiesceHook } from "@sbx/pve";
 import { QuiesceFailed } from "../ops/snapshot-step.ts";
 import {
@@ -22,6 +22,7 @@ import {
 	AgentRejected,
 	AgentUnavailable,
 	type ClaimRequest,
+	type DesktopConfiguration,
 	type PrepareStopResult,
 	type QuiesceHookOpts,
 } from "../ports.ts";
@@ -231,6 +232,23 @@ export class ConnectAgentPort implements AgentPort {
 		return { secretFilesWiped: r.secretFilesWiped };
 	}
 
+	async configureDesktop(
+		machineId: string,
+		configuration: DesktopConfiguration,
+		requestId: string,
+	): Promise<void> {
+		try {
+			await createClient(Desktop, this.#client.transport(machineId)).configure(
+				{ ...configuration, authEpoch: BigInt(configuration.authEpoch) },
+				{
+					headers: { [HEADER_REQUEST_ID]: requestId },
+					timeoutMs: this.#timeoutMs,
+				},
+			);
+		} catch (error) {
+			throw toPortError(error);
+		}
+	}
 	async activity(machineId: string): Promise<AgentActivity> {
 		const r = await this.#call(machineId, "activity", undefined, (c, o) =>
 			c.activity({}, o),
@@ -239,6 +257,7 @@ export class ConnectAgentPort implements AgentPort {
 			runningCommands: r.runningCommands,
 			openPtys: r.openPtys,
 			tcpStreams: r.tcpStreams,
+			...(r.desktopStreams > 0 ? { desktopStreams: r.desktopStreams } : {}),
 		};
 	}
 

@@ -22,6 +22,7 @@ describe("QUEUES (S6 §15.1)", () => {
 				"ctl-reconcile",
 				"ctl-cleanup",
 				"ctl-idp-sync",
+				"ctl-desktop-turn",
 			].sort(),
 		);
 		expect(Object.keys(QUEUES).sort()).toEqual([...QUEUE_NAMES].sort());

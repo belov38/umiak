@@ -160,6 +160,9 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 			   LIMIT ${BATCH})`,
 		);
 	});
+	await ctx.pool.query(
+		"DELETE FROM runtime.desktop_tickets WHERE created_at<now()-interval '1 day'",
+	);
 	await part("port_auth_codes", async () => {
 		// The table belongs to S7 (migration 0301) and may not exist yet.
 		const t = await ctx.pool.query<{ ok: boolean }>(

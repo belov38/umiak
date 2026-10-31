@@ -218,7 +218,12 @@ async function onSuperseded(
 }
 
 function isZero(e: Extract<AgentEvent, { kind: "activity" }>): boolean {
-	return e.runningCommands === 0 && e.openPtys === 0 && e.tcpStreams === 0;
+	return (
+		e.runningCommands === 0 &&
+		e.openPtys === 0 &&
+		e.tcpStreams === 0 &&
+		(e.desktopStreams ?? 0) === 0
+	);
 }
 
 /**
@@ -645,6 +650,9 @@ async function onActivity(
 		runningCommands: e.runningCommands,
 		openPtys: e.openPtys,
 		tcpStreams: e.tcpStreams,
+		...(e.desktopStreams === undefined
+			? {}
+			: { desktopStreams: e.desktopStreams }),
 	};
 	const idle = isZero(e);
 	await s.tx.client.query(

@@ -7,6 +7,7 @@ import {
 	AgentRejected,
 	AgentUnavailable,
 	type ClaimRequest,
+	type DesktopConfiguration,
 	type PrepareStopResult,
 	type QuiesceHookOpts,
 } from "../../src/ports.ts";
@@ -14,6 +15,7 @@ import {
 export type AgentFailure = "unavailable" | { rejected: string };
 
 export type AgentMethod =
+	| "configureDesktop"
 	| "claim"
 	| "updateEnv"
 	| "updateSecrets"
@@ -75,6 +77,13 @@ export class FakeAgent implements AgentPort {
 		}
 	}
 
+	async configureDesktop(
+		machineId: string,
+		args: DesktopConfiguration,
+		requestId: string,
+	): Promise<void> {
+		this.#record({ method: "configureDesktop", machineId, args, requestId });
+	}
 	async claim(
 		machineId: string,
 		req: ClaimRequest,

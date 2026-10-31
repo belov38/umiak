@@ -92,6 +92,12 @@ export function stopSteps(ctx: WorkerCtx, fenced: Fenced, prefix = ""): Step[] {
 			// does not block a stop. `secretFilesWiped` is the agent's confirmation.
 			run: async () => {
 				const m = await machine();
+				await fenced.tx(async (tx) => {
+					await tx.client.query(
+						`UPDATE runtime.sandbox_desktops SET auth_epoch=auth_epoch+1,last_stop_operation_id=$2,updated_at=now() WHERE sandbox_id=$1 AND last_stop_operation_id IS DISTINCT FROM $2::uuid`,
+						[fenced.sandboxId, fenced.id],
+					);
+				});
 				let secretFilesWiped: boolean;
 				try {
 					const r = await withTimeout(

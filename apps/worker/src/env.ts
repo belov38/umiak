@@ -119,6 +119,8 @@ const workerSchema = z
 			z.string().default("sbx-worker"),
 		),
 		SBX_IDP_SYNC_CLIENT_SECRET_FILE: optional,
+		SBX_TURN_SECRET_FILE: optional,
+		SBX_TURN_URLS: optional,
 		SBX_PORT_DOMAIN: optional,
 		SBX_SSH_USER_CA_KEYS_FILE: optional,
 	})
@@ -163,6 +165,8 @@ const adminSchema = z.object({
 });
 
 export interface WorkerEnv {
+	turnSecretFile: string | undefined;
+	turnUrls: string | undefined;
 	databaseUrl: string;
 	/** PAYLOAD_SECRET: the Payload instance of the config reader. */
 	payloadSecret: string;
@@ -224,6 +228,8 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 	if (!r.success) fail(r.error);
 	const e = r.data;
 	return {
+		turnSecretFile: e.SBX_TURN_SECRET_FILE,
+		turnUrls: e.SBX_TURN_URLS,
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
 		dataKeysFile: e.SBX_DATA_KEYS_FILE,
