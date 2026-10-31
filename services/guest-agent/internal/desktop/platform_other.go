@@ -11,10 +11,10 @@ import (
 )
 
 // NativeSession opens the interactive OS desktop.
-func NativeSession() (Session, error) {
+func NativeSession(_ context.Context) (Session, error) {
 	return nil, errors.New("desktop helper requires Linux or Windows")
 }
-func secureSocket(path string) error { return os.Chmod(path, 0600) }
+func secureSocket(_ context.Context, path string) error { return os.Chmod(path, 0600) }
 
 // PlatformEnvironment returns the platform display environment.
 func PlatformEnvironment() map[string]string { return nil }

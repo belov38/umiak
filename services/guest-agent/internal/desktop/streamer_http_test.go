@@ -152,3 +152,18 @@ func TestViewerFixtures(t *testing.T) {
 		t.Fatal("RTSP setup mistaken for viewer")
 	}
 }
+
+func TestBootPreparesFreshUpstreamStateWithoutOpeningVideo(t *testing.T) {
+	host := &fakeStreamHost{}
+	stream := NewHTTPStreamer(host, &http.Client{}, "http://unused.invalid", "http://unused.invalid")
+	s, e := New(Options{Enabled: true, Identity: "fork", Dir: t.TempDir(), Session: &fakeSession{}, Streamer: stream})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = s.PrepareRuntime(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	if !host.ready || host.starts != 0 {
+		t.Fatal("boot did not rotate state independently of video")
+	}
+}

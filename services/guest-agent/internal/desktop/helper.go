@@ -14,7 +14,7 @@ import (
 func RunHelper(ctx context.Context, path string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s, e := NativeSession()
+	s, e := NativeSession(ctx)
 	if e != nil {
 		return e
 	}
@@ -38,7 +38,7 @@ func RunHelper(ctx context.Context, path string) error {
 	}
 	defer func() { _ = listener.Close() }()
 	defer func() { _ = os.Remove(path) }()
-	if e = secureSocket(path); e != nil {
+	if e = secureSocket(ctx, path); e != nil {
 		return e
 	}
 	srv := &http.Server{Handler: SessionHandler(s), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 65 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}

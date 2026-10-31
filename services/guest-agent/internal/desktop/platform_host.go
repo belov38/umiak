@@ -123,6 +123,9 @@ func (h *FileHost) Prepare(ctx context.Context, c Credentials, ice []*v1.Desktop
 	return reset, nil
 }
 func (h *FileHost) writeICE(ice []*v1.DesktopIceServer) error {
+	if ice == nil {
+		ice = []*v1.DesktopIceServer{}
+	}
 	b, e := json.Marshal(ice)
 	if e != nil {
 		return e

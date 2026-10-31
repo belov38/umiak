@@ -217,6 +217,14 @@ type moonHost struct {
 	Address string `json:"address"`
 }
 
+// PrepareIdentity resets copied private state independently of opening a viewer.
+func (s *HTTPStreamer) PrepareIdentity(ctx context.Context, c Credentials, ice []*v1.DesktopIceServer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, e := s.host.Prepare(ctx, c, ice)
+	return e
+}
+
 func (s *HTTPStreamer) pair(ctx context.Context, id uint32) error {
 	res, e := s.request(ctx, "POST", s.moon, "/api/pair", map[string]uint32{"host_id": id})
 	if e != nil {

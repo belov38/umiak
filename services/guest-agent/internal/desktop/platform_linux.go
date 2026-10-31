@@ -1,12 +1,8 @@
 package desktop
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
-	"encoding/pem"
 	"errors"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,8 +11,8 @@ import (
 )
 
 // NativeSession opens the interactive OS desktop.
-func NativeSession() (Session, error) { return NewX11Session() }
-func secureSocket(path string) error  { return os.Chmod(path, 0600) }
+func NativeSession(_ context.Context) (Session, error)  { return NewX11Session() }
+func secureSocket(_ context.Context, path string) error { return os.Chmod(path, 0600) }
 
 // PlatformEnvironment returns the platform display environment.
 func PlatformEnvironment() map[string]string {
@@ -54,19 +50,7 @@ func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(c
 		}
 		return false, e
 	}
-	// Sunshine generates a self-signed cert; authenticate its exact private on-disk certificate.
-	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true, VerifyConnection: func(cs tls.ConnectionState) error { //nolint:gosec // exact certificate pin below; endpoint is fixed loopback
-		b, e := os.ReadFile(filepath.Join(h.SunDir, "cert.pem"))
-		if e != nil {
-			return e
-		}
-		block, _ := pem.Decode(b)
-		if block == nil || len(cs.PeerCertificates) == 0 || !bytes.Equal(block.Bytes, cs.PeerCertificates[0].Raw) {
-			return errors.New("sunshine certificate pin mismatch")
-		}
-		return nil
-	}}}
-	streamer := NewHTTPStreamer(h, &http.Client{Transport: transport}, "https://127.0.0.1:47990", "http://127.0.0.1:47800")
+	streamer := NewHTTPStreamer(h, pinnedSunshineClient(filepath.Join(h.SunDir, "cert.pem")), "https://127.0.0.1:47990", "http://127.0.0.1:47800")
 	marker := filepath.Join(l.RunDir, "desktop-session-boot")
 	gate := SessionGate{Marker: marker, IdentityBoot: identityBoot, Run: ExecCommand}
 
