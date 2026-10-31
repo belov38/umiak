@@ -17,3 +17,9 @@ it("rejects unreadable host memory instead of assuming zero", () => {
 	).toThrow("memory");
 	expect(() => runningSandboxMemory("unavailable")).toThrow("header");
 });
+
+it("limits S10 itself to one 4GiB guest even while S9 is idle", () => {
+	const list =
+		"VMID NAME STATUS MEM(MB)\n580 probe running 4096\n595 template stopped 4096";
+	expect(runningSandboxMemory(list, true)).toBe(4096);
+});

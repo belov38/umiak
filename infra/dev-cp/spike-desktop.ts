@@ -1,6 +1,7 @@
 // Disposable direct-agent spike. The public API/gateway/real viewer acceptance is a separate E2E.
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import {
 	machinesFor,
 	makeContext,
@@ -17,6 +18,7 @@ if (
 	![595, 596].includes(manifest.pveVmid ?? 0)
 )
 	throw new Error("expected desktop template595/596");
+process.env.SBX_VMID_RANGE ??= "580-589";
 const ctx = await makeContext({ node: manifest.node });
 const machines = machinesFor(ctx, manifest.pveVmid as number);
 const id = randomUUID();
@@ -44,6 +46,42 @@ try {
 		`clone_boot_qga_ms ${Date.now() - start} VM ${vmid} IP ${ready.ip}`,
 	);
 	const io = pveGuestIo(ctx.api, ctx.cfg.node, vmid);
+	const replacement = process.env.SBX_SPIKE_AGENT_PACKAGE;
+	if (replacement) {
+		const bytes = gzipSync(readFileSync(replacement));
+		const chunks = Array.from(
+			{ length: Math.ceil(bytes.length / 32768) },
+			(_, i) => ({
+				file: `/tmp/s10-agent-${String(i).padStart(5, "0")}.part`,
+				content: bytes.subarray(i * 32768, (i + 1) * 32768).toString("base64"),
+				encode: 0,
+			}),
+		);
+		for (let i = 0; i < chunks.length; i += 4)
+			await Promise.all(
+				chunks
+					.slice(i, i + 4)
+					.map((chunk) =>
+						ctx.api.post(
+							`/nodes/${ctx.cfg.node}/qemu/${vmid}/agent/file-write`,
+							chunk,
+						),
+					),
+			);
+		const install = await io.exec(
+			[
+				"bash",
+				"-e",
+				"-c",
+				"cat /tmp/s10-agent-*.part > /tmp/s10-agent.tar.gz\ngzip -d /tmp/s10-agent.tar.gz\nsystemctl stop lightdm\nsbx-agent install-package --no-units /tmp/s10-agent.tar\nsystemctl restart sbx-agent",
+			],
+			{ timeoutMs: 120_000 },
+		);
+		if (install.exitCode !== 0)
+			throw new Error(`agent replacement failed: ${install.stderr}`);
+		console.log("installed signed replacement agent");
+	}
+
 	const result = await io.exec(["bash", "-s"], {
 		input: readFileSync(
 			new URL("./spike-desktop-guest.sh", import.meta.url),

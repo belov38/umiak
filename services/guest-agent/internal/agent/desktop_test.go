@@ -2,13 +2,14 @@ package agent
 
 import (
 	"context"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 func TestDesktopDoesNotStartBeforeClaim(t *testing.T) {
