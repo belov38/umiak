@@ -27,6 +27,9 @@ func writeFile(t *testing.T, n int) (*os.File, []byte) {
 	return f, data
 }
 
+// alignedDown rounds n down to the eviction granularity of the store.
+func alignedDown(n int64) int64 { return n &^ (punchUnit - 1) }
+
 // randomData returns n pseudo-random non-zero bytes.
 func randomData(n int) []byte {
 	data := make([]byte, n)
@@ -49,8 +52,8 @@ func TestPunchFrontKeepsOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if avail != 299_008 {
-		t.Fatalf("AvailableFrom = %d, want 299008", avail)
+	if want := alignedDown(300_000); avail != want {
+		t.Fatalf("AvailableFrom = %d, want %d", avail, want)
 	}
 	fi, err := f.Stat()
 	if err != nil {
@@ -97,7 +100,7 @@ func TestAvailableFromEmptyFile(t *testing.T) {
 func TestPunchFrontBelowBlockIsNoop(t *testing.T) {
 	st := output.Default()
 	f, data := writeFile(t, 10_000)
-	if err := st.PunchFront(f, 4095); err != nil {
+	if err := st.PunchFront(f, punchUnit-1); err != nil {
 		t.Fatal(err)
 	}
 	if avail, _ := st.AvailableFrom(f, int64(len(data))); avail != 0 {

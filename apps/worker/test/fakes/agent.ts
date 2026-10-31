@@ -7,6 +7,8 @@ import {
 	AgentRejected,
 	AgentUnavailable,
 	type ClaimRequest,
+	type PrepareStopResult,
+	type QuiesceHookOpts,
 } from "../../src/ports.ts";
 
 export type AgentFailure = "unavailable" | { rejected: string };
@@ -40,6 +42,10 @@ export class FakeAgent implements AgentPort {
 	readonly calls: AgentCall[] = [];
 	/** Activity per machine (default all zero). */
 	readonly activityOf = new Map<string, AgentActivity>();
+	/** `secretFilesWiped` of the PrepareStop answer. */
+	secretFilesWiped = false;
+	/** Test control: freeze/thaw/snapshot order across fakes, when a test shares one list. */
+	trace: string[] | undefined;
 	/** Runs after a successful thaw of a quiesce hook (e.g. a watchdog event). */
 	onThaw: ((machineId: string) => Promise<void>) | undefined;
 	readonly #failures = new Map<
@@ -102,16 +108,35 @@ export class FakeAgent implements AgentPort {
 		this.#record({ method: "updateSshCa", machineId, requestId });
 	}
 
-	async prepareStop(machineId: string): Promise<void> {
+	async prepareStop(machineId: string): Promise<PrepareStopResult> {
 		this.#record({ method: "prepareStop", machineId });
+		return { secretFilesWiped: this.secretFilesWiped };
 	}
 
-	quiesceHook(machineId: string, leaseMs: number): QuiesceHook {
+	quiesceHook(
+		machineId: string,
+		leaseMs: number,
+		opts?: QuiesceHookOpts,
+	): QuiesceHook {
+		// As the real hook: a thaw without a held lease does nothing.
+		let frozen = false;
 		return {
-			freeze: async () =>
-				this.#record({ method: "freeze", machineId, args: { leaseMs } }),
+			freeze: async () => {
+				this.#record({
+					method: "freeze",
+					machineId,
+					args: { leaseMs, ...opts },
+				});
+				frozen = true;
+				this.trace?.push(
+					`agent.quiesce(fs=${opts?.fs ?? true}, wipe=${opts?.wipeSecretFiles ?? false})`,
+				);
+			},
 			thaw: async () => {
+				if (!frozen) return;
+				frozen = false;
 				this.#record({ method: "thaw", machineId });
+				this.trace?.push("agent.thaw");
 				await this.onThaw?.(machineId);
 			},
 		};

@@ -14,14 +14,13 @@ import { entryName, readTar } from "./tar.ts";
 // keys.go (ParseKeys), names in manifest.go.
 
 const MANIFEST_FORMAT = "sbx-agent-manifest/v1";
-const BINARY_NAME = "sbx-agent";
+/** update.BinaryName per GOOS. */
+const BINARY_NAME = { linux: "sbx-agent", windows: "sbx-agent.exe" } as const;
 const MANIFEST_NAME = "manifest.json";
 const SIGNATURE_NAME = "manifest.sig";
-const REQUIRED_FILES = [
-	BINARY_NAME,
-	"trust/tunnel-ca.pem",
-	"trust/update-keys.pub",
-];
+const TRUST_FILES = ["trust/tunnel-ca.pem", "trust/update-keys.pub"];
+
+export type AgentOs = keyof typeof BINARY_NAME;
 const SIGNATURE_SIZE = 64;
 const PUBLIC_KEY_SIZE = 32;
 const KEY_TYPE = "ed25519";
@@ -82,11 +81,12 @@ const sha256Hex = (data: Buffer) =>
 /**
  * Checks the ed25519 signature of manifest.json (raw 64 bytes over the exact
  * manifest bytes) against any key of the update keys file, every file listed
- * in the manifest, and that the package is for linux/amd64.
+ * in the manifest, and that the package is for `<os>`/amd64.
  */
 export function verifyAgentPackage(
 	tarPath: string,
 	updateKeysFile: string,
+	os: AgentOs = "linux",
 ): AgentPackageInfo {
 	const keys = parseKeys(readFileSync(updateKeysFile, "utf8"));
 	const tar = readFileSync(tarPath);
@@ -123,7 +123,11 @@ export function verifyAgentPackage(
 		if (clean !== name || name === MANIFEST_NAME || name === SIGNATURE_NAME)
 			throw where(`manifest lists bad file name ${JSON.stringify(name)}`);
 	}
-	for (const name of REQUIRED_FILES)
+	if (manifest.os !== os || manifest.arch !== "amd64")
+		throw where(
+			`package is for ${manifest.os}/${manifest.arch}, want ${os}/amd64`,
+		);
+	for (const name of [BINARY_NAME[os], ...TRUST_FILES])
 		if (!(name in manifest.files))
 			throw where(`manifest does not list ${name}`);
 
@@ -136,10 +140,6 @@ export function verifyAgentPackage(
 	for (const name of Object.keys(manifest.files))
 		if (!files.has(name)) throw where(`file ${name} is missing`);
 
-	if (manifest.os !== "linux" || manifest.arch !== "amd64")
-		throw where(
-			`package is for ${manifest.os}/${manifest.arch}, want linux/amd64`,
-		);
 	return {
 		version: manifest.version,
 		os: manifest.os,

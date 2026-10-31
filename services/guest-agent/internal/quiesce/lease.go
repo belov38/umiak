@@ -37,6 +37,10 @@ type Lease struct {
 	Frozen []string `json:"frozen,omitempty"`
 	// Hooks lists the hooks run with freeze, in run order.
 	Hooks []string `json:"hooks,omitempty"`
+	// SecretsWiped is set before the secret files are wiped (Windows); the
+	// agent restores them from memory on thaw. The watchdog cannot: after
+	// an agent restart they come back with UpdateSecrets.
+	SecretsWiped bool `json:"secrets_wiped,omitempty"`
 }
 
 // marker records an automatic thaw in Layout.QuiesceThawedDir/<id>.json.

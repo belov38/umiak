@@ -229,7 +229,7 @@ describe("ConnectAgentPort", () => {
 					id: ctx.requestHeader.get(HEADER_REQUEST_ID),
 					body: null,
 				});
-				return {};
+				return { secretFilesWiped: true };
 			},
 		});
 		await port.updateEnv(machineId, { K: "v" }, "r1");
@@ -241,11 +241,33 @@ describe("ConnectAgentPort", () => {
 			},
 			"r2",
 		);
-		await port.prepareStop(machineId);
+		await expect(port.prepareStop(machineId)).resolves.toEqual({
+			secretFilesWiped: true,
+		});
 		expect(calls).toEqual([
 			{ m: "updateEnv", id: "r1", body: { K: "v" } },
 			{ m: "updateSecrets", id: "r2", body: [{ S: "1" }, [0o440]] },
 			{ m: "prepareStop", id: null, body: null },
+		]);
+	});
+
+	it("quiesce hook sends fs and wipe_secret_files only when set", async () => {
+		const reqs: { fs: boolean | undefined; wipe: boolean | undefined }[] = [];
+		const port = portFor({
+			async quiesce(req) {
+				reqs.push({ fs: req.fs, wipe: req.wipeSecretFiles });
+				return { leaseId: "l" };
+			},
+		});
+		await port.quiesceHook(machineId, 1000).freeze();
+		await port
+			.quiesceHook(machineId, 1000, { fs: false, wipeSecretFiles: true })
+			.freeze();
+		await port.quiesceHook(machineId, 1000, { fs: false }).freeze();
+		expect(reqs).toEqual([
+			{ fs: undefined, wipe: undefined },
+			{ fs: false, wipe: true },
+			{ fs: false, wipe: undefined },
 		]);
 	});
 

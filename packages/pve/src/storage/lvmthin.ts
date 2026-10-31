@@ -24,9 +24,20 @@ export class StorageFullError extends Error {
 }
 
 export class FreezeBudgetExceededError extends Error {
-	constructor(message: string) {
+	/** Measured time the guest held writes. */
+	readonly freezeMs: number | undefined;
+	constructor(message: string, freezeMs?: number) {
 		super(message);
 		this.name = "FreezeBudgetExceededError";
+		this.freezeMs = freezeMs;
+	}
+}
+
+/** hook.freeze() did not return within freezeTimeoutMs; the snapshot is cancelled. */
+export class FreezeTimeoutError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "FreezeTimeoutError";
 	}
 }
 
@@ -85,10 +96,15 @@ export interface LvmThinOptions {
 	node: NodeOps;
 	vcpu: VcpuControl;
 	storage: string;
+	/** Time from the return of hook.freeze() to the call of hook.thaw(). */
 	freezeBudgetMs?: number;
+	/** Limit for hook.freeze() itself (agent hooks, secret wipe, VSS preparation). */
+	freezeTimeoutMs?: number;
 	maxDataPercent?: number;
 	maxMetadataPercent?: number;
 	thawRetries?: number;
+	/** Maximum wait for each thaw attempt, including a hung QGA/VSS call. */
+	thawTimeoutMs?: number;
 	thawRetryDelayMs?: number;
 	newSnapshotId?: () => string;
 	now?: () => number;
@@ -120,9 +136,11 @@ export class LvmThinDriver implements StorageDriver {
 	constructor(opts: LvmThinOptions) {
 		this.#o = {
 			freezeBudgetMs: 10_000,
+			freezeTimeoutMs: 30_000,
 			maxDataPercent: 80,
 			maxMetadataPercent: 70,
 			thawRetries: 3,
+			thawTimeoutMs: 10_000,
 			thawRetryDelayMs: 500,
 			newSnapshotId: randomId,
 			now: Date.now,
@@ -155,33 +173,41 @@ export class LvmThinDriver implements StorageDriver {
 	#vmDisks(
 		source: DiskSet,
 		vmid: number,
+		skipSlots: readonly DiskSlot[] = [],
 	): { items: SnapshotItem[]; disks: DiskSet } {
 		const items: SnapshotItem[] = [];
 		const disks: DiskSet = [];
-		sorted(source).forEach((d, k) => {
-			const name = `vm-${vmid}-disk-${k}`;
-			items.push({
-				origin: d.lv,
-				name,
-				tags: ["sbx", `sbx-vm-${vmid}`],
-				activationSkip: false,
+		sorted(source)
+			.filter((d) => !skipSlots.includes(d.slot))
+			.forEach((d, k) => {
+				const name = `vm-${vmid}-disk-${k}`;
+				items.push({
+					origin: d.lv,
+					name,
+					tags: ["sbx", `sbx-vm-${vmid}`],
+					activationSkip: false,
+				});
+				disks.push({
+					slot: d.slot,
+					volid: `${this.#o.storage}:${name}`,
+					lv: name,
+					options: { ...d.options },
+				});
 			});
-			disks.push({
-				slot: d.slot,
-				volid: `${this.#o.storage}:${name}`,
-				lv: name,
-				options: { ...d.options },
-			});
-		});
 		return { items, disks };
 	}
 
 	async cloneFromTemplate(
 		tpl: TemplateRef,
 		target: VmTarget,
+		opts: { skipSlots?: DiskSlot[] } = {},
 	): Promise<DiskSet> {
 		await this.#assertCapacity(target);
-		const { items, disks } = this.#vmDisks(tpl.disks, target.vmid);
+		const { items, disks } = this.#vmDisks(
+			tpl.disks,
+			target.vmid,
+			opts.skipSlots,
+		);
 		await this.#o.node.call("lv.snapshot", { items });
 		return disks;
 	}
@@ -235,18 +261,22 @@ export class LvmThinDriver implements StorageDriver {
 			return ref;
 		}
 
-		const start = this.#o.now();
 		let frozen = false;
 		let paused = false;
 		let created: string[] = [];
+		let snapshotCalled = false;
 		let opError: unknown;
+		let start: number | undefined;
 		try {
 			frozen = true; // thaw even if freeze itself fails half-way
-			await hook.freeze();
+			await this.#freeze(hook);
+			// The budget covers what runs while the guest holds writes: pause, lvcreate, resume.
+			start = this.#o.now();
 			if (m.disks.length > 1) {
 				paused = true;
 				await this.#o.vcpu.suspend(m.vmid);
 			}
+			snapshotCalled = true;
 			created = (
 				await this.#o.node.call<{ created: string[] }>("lv.snapshot", { items })
 			).created;
@@ -262,26 +292,79 @@ export class LvmThinDriver implements StorageDriver {
 				resumeError = err;
 			}
 		}
-		if (frozen) await this.#thaw(m.vmid, hook);
-		if (opError) throw opError;
-		if (resumeError) throw resumeError;
-		const freezeMs = this.#o.now() - start;
-		if (freezeMs > this.#o.freezeBudgetMs) {
-			if (created.length > 0)
-				await this.#o.node.call("lv.remove", { names: created });
-			throw new FreezeBudgetExceededError(
-				`freeze took ${freezeMs} ms (budget ${this.#o.freezeBudgetMs} ms); snapshot discarded`,
-			);
+		const freezeMs = start === undefined ? 0 : this.#o.now() - start;
+		let autoThawed = false;
+		try {
+			if (frozen) autoThawed = await this.#thaw(m.vmid, hook);
+			if (opError) throw opError;
+			if (resumeError) throw resumeError;
+			if (freezeMs > this.#o.freezeBudgetMs)
+				throw new FreezeBudgetExceededError(
+					`freeze took ${freezeMs} ms (budget ${this.#o.freezeBudgetMs} ms); snapshot discarded`,
+					freezeMs,
+				);
+		} catch (err) {
+			// No ref reaches the caller, so nothing would ever delete these LVs.
+			if (snapshotCalled) await this.#discard(id, created).catch(() => {});
+			throw err;
 		}
-		return { ...ref, freezeMs };
+		return { ...ref, freezeMs, ...(autoThawed ? { autoThawed: true } : {}) };
 	}
 
-	async #thaw(vmid: number, hook: QuiesceHook): Promise<void> {
+	/** Removes the LVs of a failed snapshot: the created ones and any carrying its tag. */
+	async #discard(id: string, created: string[]): Promise<void> {
+		const { lvs } = await this.#o.node
+			.call<{ lvs: { name: string }[] }>("lv.list", {
+				tags: ["sbx", `sbx-snap-${id}`],
+			})
+			.catch(() => ({ lvs: [] as { name: string }[] }));
+		const names = [...new Set([...created, ...lvs.map((l) => l.name)])];
+		if (names.length > 0) await this.#o.node.call("lv.remove", { names });
+	}
+
+	/** hook.freeze() under freezeTimeoutMs. A freeze that finishes late is thawed again. */
+	async #freeze(hook: QuiesceHook): Promise<void> {
+		const limit = this.#o.freezeTimeoutMs;
+		const pending = hook.freeze();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timedOut = new Promise<"timeout">((resolve) => {
+			timer = setTimeout(() => resolve("timeout"), limit);
+		});
+		try {
+			if ((await Promise.race([pending, timedOut])) !== "timeout") return;
+		} finally {
+			clearTimeout(timer);
+		}
+		pending.then(
+			() => hook.thaw().catch(() => {}),
+			() => {},
+		);
+		throw new FreezeTimeoutError(
+			`freeze did not return within ${limit} ms; snapshot cancelled`,
+		);
+	}
+
+	/** hook.thaw() with retries; true when the guest had already thawed itself. */
+	async #thaw(vmid: number, hook: QuiesceHook): Promise<boolean> {
 		let last: unknown;
 		for (let i = 0; i < this.#o.thawRetries; i++) {
 			try {
-				await hook.thaw();
-				return;
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				let r: Awaited<ReturnType<QuiesceHook["thaw"]>>;
+				try {
+					r = await Promise.race([
+						hook.thaw(),
+						new Promise<never>((_, reject) => {
+							timer = setTimeout(
+								() => reject(new Error("thaw timed out")),
+								this.#o.thawTimeoutMs,
+							);
+						}),
+					]);
+				} finally {
+					clearTimeout(timer);
+				}
+				return r?.autoThawed === true;
 			} catch (err) {
 				last = err;
 				await sleep(this.#o.thawRetryDelayMs);

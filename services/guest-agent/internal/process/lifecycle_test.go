@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
@@ -134,17 +136,11 @@ func TestPTYIdleArmedOnRetryPath(t *testing.T) {
 	h := newHarness(t, func(o *Options) { o.PTYIdle = 100 * time.Millisecond })
 	spec := ptySpec()
 	putStarting(t, h, "c1", spec)
-	ss, err := h.m.shimSpec("c1", spec)
+	ss, err := h.m.shimSpec("c1", spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(h.layout.CmdSpecDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := fsutil.WriteJSONAtomic(h.layout.CmdSpec("c1"), ss, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.fake.Launch(t.Context(), "c1", h.opts.ShimPath, nil); err != nil {
+	if err := launchWithSpec(t, h, "c1", ss); err != nil {
 		t.Fatal(err)
 	}
 	h.start("c1", spec)
@@ -155,6 +151,27 @@ func TestPTYIdleArmedOnRetryPath(t *testing.T) {
 	if k := h.run("c1").Kills()[0]; k.Reason != shimproto.ReasonPTYIdle {
 		t.Fatalf("kill %+v", k)
 	}
+}
+
+// launchWithSpec launches id in the fake with the shim spec ss like the
+// manager does: through the CmdSpec file, on Windows (no CmdSpec directory)
+// with the launch.
+func launchWithSpec(t *testing.T, h *harness, id string, ss shim.Spec) error {
+	t.Helper()
+	if h.layout.CmdSpecDir == "" {
+		data, err := json.Marshal(ss)
+		if err != nil {
+			return err
+		}
+		return supervisor.FakeSpecLauncher{Fake: h.fake}.LaunchSpec(t.Context(), id, h.opts.ShimPath, nil, data)
+	}
+	if err := os.MkdirAll(h.layout.CmdSpecDir, 0o700); err != nil {
+		return err
+	}
+	if err := fsutil.WriteJSONAtomic(h.layout.CmdSpec(id), ss, 0o600); err != nil {
+		return err
+	}
+	return h.fake.Launch(t.Context(), id, h.opts.ShimPath, nil)
 }
 
 // A never attached PTY keeps counting from its creation across a restart.

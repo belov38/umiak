@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -22,7 +23,23 @@ const (
 	PtyFile    = "pty"
 	ShimJSON   = "shim.json"
 	ExitJSON   = "exit.json"
+	// ShimLog is the log of a Windows shim (its stderr).
+	ShimLog = "shim.log"
 )
+
+// Lines a Windows shim prints on its stdout once (S9 spec 12.6, plan
+// decision 3): ReadyLine when the command runs or its start failure is
+// recorded, FailPrefix and the reason when it cannot record anything.
+// A reason starting with FailAlreadyStarted means another shim owns the
+// command.
+const (
+	ReadyLine          = "READY"
+	FailPrefix         = "FAIL "
+	FailAlreadyStarted = "already started"
+)
+
+// maxSpecSize bounds a spec read from a stream.
+const maxSpecSize = 64 << 20
 
 // ShimFile states.
 const (
@@ -40,7 +57,8 @@ const DefaultKillGrace = 10 * time.Second
 // Spec is the full command description the agent writes to CmdSpec(id) (mode
 // 0600, tmpfs) before starting the unit. The shim reads and deletes it. The
 // agent resolves the user, the argv and the environment; the shim does no
-// user lookups.
+// user lookups. On Windows the agent writes it to the shim's stdin instead
+// (no tmpfs), and the shim resolves the program and logs the user on.
 type Spec struct {
 	// ID is the command id; it must match --id.
 	ID string `json:"id"`
@@ -68,6 +86,17 @@ type Spec struct {
 	KillLeftovers bool `json:"killLeftovers"`
 	// AgentVersion is the version of the agent that started the shim.
 	AgentVersion string `json:"agentVersion"`
+	// User is the account the command runs as on Windows: SYSTEM runs it
+	// with the shim's own token, another name logs that account on.
+	User string `json:"user,omitempty"`
+	// Desktop runs the command in the interactive desktop session
+	// (Windows); not supported yet.
+	Desktop bool `json:"desktop,omitempty"`
+	// Script is a wrapped pwsh script too long for -EncodedCommand
+	// (Windows). The shim writes it to wincmd.ScriptFile in the command
+	// directory, readable by User, before the start (Argv runs it with
+	// -File) and deletes it after the exit.
+	Script string `json:"script,omitempty"`
 }
 
 // PTYSpec is the terminal of a PTY command.
@@ -101,12 +130,34 @@ func ReadSpec(path string) (Spec, error) {
 		return Spec{}, err
 	}
 	rmErr := os.Remove(path)
-	var s Spec
-	if err := json.Unmarshal(data, &s); err != nil {
-		return Spec{}, errors.Join(fmt.Errorf("shim: parse spec: %w", err), rmErr)
+	s, err := parseSpec(data)
+	if err != nil {
+		return Spec{}, errors.Join(err, rmErr)
 	}
 	if rmErr != nil {
 		return Spec{}, fmt.Errorf("shim: remove spec: %w", rmErr)
+	}
+	return s, nil
+}
+
+// ReadSpecFrom reads a spec from r to EOF (the shim's stdin on Windows).
+// The raw bytes, which hold the environment, are cleared afterwards.
+func ReadSpecFrom(r io.Reader) (Spec, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxSpecSize+1))
+	defer clear(data)
+	if err != nil {
+		return Spec{}, fmt.Errorf("shim: read spec: %w", err)
+	}
+	if len(data) > maxSpecSize {
+		return Spec{}, fmt.Errorf("shim: spec is larger than %d bytes", maxSpecSize)
+	}
+	return parseSpec(data)
+}
+
+func parseSpec(data []byte) (Spec, error) {
+	var s Spec
+	if err := json.Unmarshal(data, &s); err != nil {
+		return Spec{}, fmt.Errorf("shim: parse spec: %w", err)
 	}
 	return s, nil
 }

@@ -48,16 +48,21 @@ func FormatEnvFile(env map[string]string) []byte {
 	return []byte(sb.String())
 }
 
-// platformEnv returns the platform defaults (spec 8.2, step 2) plus the
-// extensions' env. Keys without a value are left out before the claim.
-func (m *Manager) platformEnv(sandboxID, portDomain string) map[string]string {
+// platformEnv returns the platform defaults of the claim req (spec 8.2,
+// step 2; on Windows with SBX_HOSTNAME, S9 spec 12.7) plus the extensions'
+// env. Keys without a value are left out before the claim.
+func (m *Manager) platformEnv(req *agentv1.ClaimRequest) map[string]string {
 	env := map[string]string{"SBX": "1"}
-	if sandboxID != "" {
-		env["SBX_SANDBOX_ID"] = sandboxID
+	if id := req.GetSandboxId(); id != "" {
+		env["SBX_SANDBOX_ID"] = id
 	}
-	if portDomain != "" {
-		env["SBX_PORT_DOMAIN"] = portDomain
-		env["__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"] = "." + portDomain
+	if pd := req.GetPortDomain(); pd != "" {
+		env["SBX_PORT_DOMAIN"] = pd
+		env["__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"] = "." + pd
+	}
+	if h := req.GetHostname(); h != "" && !appliesHostname {
+		// The system keeps its own name; the claimed one is only env.
+		env["SBX_HOSTNAME"] = h
 	}
 	for _, e := range m.opts.Extensions {
 		maps.Copy(env, e.PlatformEnv())
@@ -65,9 +70,14 @@ func (m *Manager) platformEnv(sandboxID, portDomain string) map[string]string {
 	return env
 }
 
-// writeSbxEnv writes /etc/sbx/env: platform env, then the claim env.
-func (m *Manager) writeSbxEnv(sandboxID, portDomain string, env map[string]string) error {
-	all := m.platformEnv(sandboxID, portDomain)
+// writeSbxEnv writes /etc/sbx/env: platform env of req, then env. Windows
+// has no such file (the layout leaves it empty); SSH sessions get the env
+// from the agent.
+func (m *Manager) writeSbxEnv(req *agentv1.ClaimRequest, env map[string]string) error {
+	if m.l.SbxEnvFile == "" {
+		return nil
+	}
+	all := m.platformEnv(req)
 	maps.Copy(all, env)
 	if err := m.writeFile(m.l.SbxEnvFile, FormatEnvFile(all), 0o644); err != nil {
 		return internal("write sbx env", err)

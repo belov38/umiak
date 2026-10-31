@@ -1,6 +1,8 @@
 # S9. Windows: спецификация
 
-Статус: согласовано (master-сессия), 2026-10-29; ревью исполнителем пройдено, замечания внесены. Изменение scope от Ильи (2026-10-29): в MVP только `windows` (Windows 11), Windows Server Core перенесён в фазу 2 (§22). Область S9 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4 агент, §5 хранилище, §6 warm pool, §8 рабочий стол, §11 безопасность). Опирается на `docs/specs/s5-linux-template.md` (пайплайн `sbx-tpl`, который здесь расширяется), `docs/specs/s3-guest-agent.md` (агент, §18 переносимость), `docs/specs/s1-proxmox-foundation.md` (`DiskSet`, snapshot с паузой vCPU), `docs/specs/s6-control-plane.md` (пул, учёт RAM, дедлайны §7.9), `docs/specs/s4-gateway.md` (§9 SSH), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios).
+Статус: реализовано по плану `docs/plans/s9-windows.md` (ветка `s9-impl`); цифры с `pve` — §24.4. **Решения Ильи 2026-10-31** (меняют спеку, подробности в §24): только Windows 11; пула через спящий режим нет, спайка vTPM + `suspend --todisk` нет; create холодный — клон шаблона + sysprep specialize на первой загрузке, ≤ 5 min допустимо, 2–3 min хорошо; граница доверия — VM; секреты по §12.8; никаких Tailscale и туннельных сервисов; слот шаблона на `pve` — 598. Разделы о спящем режиме (§14, §15 п. 15, §16, §18.1 п. 4–6, §18.6 п. 1–4, `resume-hint`) помечены «не реализуется в MVP» и оставлены как материал фазы 2.
+
+Раньше: согласовано (master-сессия), 2026-10-29; ревью исполнителем пройдено, замечания внесены. Изменение scope от Ильи (2026-10-29): в MVP только `windows` (Windows 11), Windows Server Core перенесён в фазу 2 (§22). Область S9 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4 агент, §5 хранилище, §6 warm pool, §8 рабочий стол, §11 безопасность). Опирается на `docs/specs/s5-linux-template.md` (пайплайн `sbx-tpl`, который здесь расширяется), `docs/specs/s3-guest-agent.md` (агент, §18 переносимость), `docs/specs/s1-proxmox-foundation.md` (`DiskSet`, snapshot с паузой vCPU), `docs/specs/s6-control-plane.md` (пул, учёт RAM, дедлайны §7.9), `docs/specs/s4-gateway.md` (§9 SSH), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios).
 
 Решения разделов вопросов 1–4 (пул через спящий режим, секреты на Windows, содержимое образа, идентичность и процессы) согласованы с master-сессией 2026-10-29. Пометка **[S9]** — решение автора спеки в рамках согласованного; его можно менять без нового согласования, если причина записана.
 
@@ -11,10 +13,10 @@
 Успех:
 1. Одна команда с Mac собирает шаблон из ISO пользователя и `virtio-win`: установка, инструменты, агент, sysprep, проверка, регистрация. Человек в консоль VM не заходит: Tamper Protection Defender, «Press any key to boot from CD», OOBE обходятся автоматически.
 2. Тот же реестр, версии, `promote`, откат и `gc`, что у S5.
-3. Claim Windows-sandbox из пула в PoC не дольше 30 s (машина пула спит на диске и не занимает RAM, §14).
+3. Claim Windows-sandbox из пула в PoC не дольше 30 s (машина пула спит на диске и не занимает RAM, §14). *Не реализуется в MVP (решение Ильи 2026-10-31): пула Windows нет, create холодный, цель ≤ 5 min, хорошо 2–3 min (§14).*
 4. Fork и VM из saved snapshot получают новую идентичность (имя, `MachineGuid`, SSH host keys, пустое состояние агента) до входа пользователя и сохраняют данные пользователя, включая DPAPI.
 5. Команды, PTY, файлы, порты, SSH, обновление агента работают на Windows с той же семантикой, что на Linux, кроме отступлений, перечисленных в §12.
-6. У `windows` после загрузки есть разблокированная сессия `user` с helper-процессом, на которую опирается S10.
+6. У `windows` после загрузки есть разблокированная сессия `user` с helper-процессом, на которую опирается S10. *Как сделано: autologon и сессия без блокировки есть, helper `sbx-session` и фаза `desktop` перенесены в S10 (§24.2 п. 2).*
 
 ## 2. Цели, не-цели, анти-цели
 
@@ -59,11 +61,13 @@
  |    -> specialize -> OOBE -> SetupComplete: QGA    |
  |  6 steps (PowerShell, scheduled task, logs by     |
  |    offset via QGA); link up after policies        |
- |  7 cleanup, sbx-agent seal, sysprep /generalize   |
- |    /oobe /shutdown                                |
- |  8 offline stage: boot WinPE from the Windows ISO |
- |    with an offline autounattend: SYSTEM hive edit |
+ |  7 offline stage (before sysprep): WinPE of the   |
+ |    Windows ISO from a one-time BCD ramdisk entry, |
+ |    offline autounattend: SYSTEM hive edit         |
  |    (Defender, WaaSMedic), shutdown                |
+ |  8 verify-offline: boot the disk, check the log,  |
+ |    Start=4, MsMpEng; sbx-agent seal, sysprep      |
+ |    /generalize /oobe /shutdown                    |
  |  9 detach media, convert to template              |
  | 10 verify: clone, specialize, checks, identity    |
  |    change reboot, hard stop, hibernate + resume   |
@@ -111,6 +115,8 @@ verify: windows-desktop
 ```
 
 Рецепт `windows-core` — фаза 2 (§22).
+
+*Как сделано* (`infra/templates/windows/template.yaml`): нет `pool` и `size_default` (пула нет, §14); `shared: _windows`; лишний `reboot` после `40-coding-agents`, перед `50-sbx-agent` (§24.3 R11); `install_timeout_s: 2400`; `step_timeouts` (минуты на шаг: `30-toolchains` 60, `40-coding-agents` 45, `90-cleanup` 120, остальные 60); `verify: windows`; `vmids: [598]`. `vmstatestorage` сборщик не ставит.
 
 Встроенные шаги сборщика: `reboot` (как в S5, но через `shutdown /r /t 0`) и `network-up` (`net0 link_down=0`, ожидание IPv4).
 
@@ -192,10 +198,10 @@ build/
 1. **Подготовка.** Проверка пакета агента (`os/arch = windows/amd64`), ISO пользователя (§6.1), virtio-win (§6.2). Запись в реестре `building`.
 2. **Носители.** Build ISO и offline ISO (§6.3, §6.4).
 3. **Сборочная VM.** `POST /nodes/{node}/qemu`: железо из `hw`, `efidisk0=local-lvm:1,efitype=4m,pre-enrolled-keys=1,ms-cert=2023k`, `tpmstate0=local-lvm:1,version=v2.0` (у `windows`), `scsi0=local-lvm:<size>,discard=on,iothread=1,ssd=1`, `net0=virtio=<MAC>,bridge=sbx0,firewall=1,link_down=1`, `ide2=<user ISO>,media=cdrom`, `sata1=sbx-virtio-win-<v>.iso`, `sata2=sbx-build-<id>.iso`, `boot=order=scsi0;ide2`, `vmstatestorage=local-lvm`, `balloon=0`, теги и имя как в S5. Сеть выключена (`link_down=1`), пока шаг `00-base` не выставит политики: иначе Windows Update и обновления Store во время OOBE ломают sysprep (опыт 9001).
-4. **Установка.** Start, затем `sendkey ret` раз в секунду 20 s (`PUT …/sendkey`, право `VM.Console`, §18.1): загрузчик ISO ждёт «Press any key to boot from CD». Дальше без участия: WinPE ставит драйверы `vioscsi`, `NetKVM` из virtio-win, размечает диск, ставит редакцию; specialize; OOBE по ответам; `SetupComplete.cmd` ставит `virtio-win-gt-x64.msi` и `qemu-ga-x86_64.msi`. Сборщик ждёт `agent/ping` до `install_timeout` (40 min) **[S9]**.
-5. **Шаги.** Каждый шаг — scheduled task от SYSTEM, созданная и запущенная через QGA (`schtasks /create /ru SYSTEM /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\build\run-step.ps1 -Step <n>"` и `/run`). Так шаг переживает перезапуск QGA и не упирается в его тайм-ауты (аналог transient unit в S5). `run-step.ps1` находит build ISO по метке тома, пишет лог `C:\sbx-build\logs\<n>.log` и код выхода `<n>.exit`. Сборщик раз в 2 s опрашивает `<n>.exit` и дочитывает лог через `agent/file-read` с offset (как S5). Шаги до `10-system` идут в Windows PowerShell 5.1, после установки PowerShell 7 — в `pwsh` (решает `run-step.ps1` по заголовку шага).
-6. **Запечатывание.** `90-cleanup`, затем `sbx-agent seal` (§12.11), затем асинхронно через QGA `sysprep.exe /generalize /oobe /shutdown /quiet /unattend:C:\Windows\System32\Sysprep\sbx-unattend.xml`. Ожидание `stopped` до 30 min. При ошибке в манифест попадают последние строки `C:\Windows\System32\Sysprep\Panther\setuperr.log`: сборщик читает их через QGA до выключения. Если sysprep упал, VM ещё работает.
-7. **Offline-этап** (§10.3): `sata2` → offline ISO (virtio-win остаётся на `sata1`), `boot=order=ide2`, start, `sendkey`, ожидание `stopped` (до 10 min). Затем `delete=ide2,sata1,sata2`, `boot=order=scsi0`, `net0 link_down=0`.
+4. **Установка.** Start и сразу после ответа на вызов start — `sendkey f12` четыре раза в секунду 60 s (`PUT …/sendkey`, право `VM.Console`, §18.1): загрузчик ISO ждёт «Press any key to boot from CD» около 5 s. Нажатия идут по таймеру (250 ms), не дожидаясь ответа на предыдущее: один вызов API на медленном канале идёт секунды. Отдельные отказы (`not running` до старта QEMU, `Broken pipe` монитора) нажатия не останавливают; во время нажатий сборщик не пингует QGA (пинг загружающейся VM надолго занимает воркер pvedaemon). Дальше без участия: WinPE ставит драйверы `vioscsi`, `NetKVM` из virtio-win, размечает диск, ставит редакцию; specialize; OOBE по ответам; `SetupComplete.cmd` ставит `virtio-win-gt-x64.msi` и `qemu-ga-x86_64.msi`. Сборщик ждёт `agent/ping` до `install_timeout` (40 min) **[S9]**.
+5. **Шаги.** Каждый шаг — scheduled task от SYSTEM, созданная и запущенная через QGA (`schtasks /create /ru SYSTEM /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\build\run-step.ps1 -Step <n>"` и `/run`). Так шаг переживает перезапуск QGA и не упирается в его тайм-ауты (аналог transient unit в S5). `run-step.ps1` находит build ISO по метке тома, пишет лог `C:\sbx-build\logs\<n>.log` и код выхода `<n>.exit`. Сборщик раз в 2 s одним `agent/exec` PowerShell-скрипта читает `<n>.exit` и кусок лога с offset (файлы открываются с FileShare ReadWrite|Delete). `agent/file-read` для файлов, в которые пишет гость, не используется: при тайм-ауте `guest-file-open` qemu-ga на Windows оставляет хэндл без FILE_SHARE_WRITE, и все дальнейшие записи в файл падают. `Write-Log` в `run-step.ps1` при занятом логе повторяет запись, затем копит строки в памяти; ошибка лога не меняет код выхода шага. Шаги до `10-system` идут в Windows PowerShell 5.1, после установки PowerShell 7 — в `pwsh` (решает `run-step.ps1` по заголовку шага).
+6. **Offline-этап** (§10.3), после `90-cleanup` и до sysprep, на работающей Windows: `sata2` → offline ISO сменой носителя на ходу (virtio-win остаётся на `sata1`; если Proxmox отказал или оставил смену в pending — выключение, config, загрузка Windows); через QGA exec скрипт PowerShell копирует `\sources\boot.wim` и `\boot\boot.sdi` ISO пользователя в `C:\sbx-pe`, создаёт `{ramdiskoptions}` и запись `osloader` с описанием `sbx offline` (`device`/`osdevice` = `ramdisk=[C:]\sbx-pe\boot.wim,{ramdiskoptions}`, `winpe yes`) и ставит её на одну загрузку (`bcdedit /bootsequence`); код выхода каждого `bcdedit` проверяется. Затем `shutdown /r /t 0` через QGA и ожидание `stopped` (до 10 min); порядок загрузки остаётся `scsi0`. Если QGA снова отвечает с новым временем загрузки, Windows Boot Manager загрузил Windows, а не WinPE: запись ставится ещё раз, после второго раза — `failed`. Затем **verify-offline**: `sata2=none`, `boot=order=scsi0`, start, ожидание QGA; через QGA exec читаются `C:\Windows\Setup\Scripts\sbx-offline.log` (последняя строка `DONE errors <n>` — `DONE errors 0`, строк `ERROR` нет), `Start` служб offline-набора (4 или ключа нет) и процесс `MsMpEng` (не должен работать). Иначе `failed` с хвостом лога. Затем удаляются записи BCD с описанием `sbx offline` (и `{ramdiskoptions}`) и `C:\sbx-pe`; `bcdedit /enum all /v` не должен содержать `sbx offline`, иначе `failed`. Результат — в манифест (`windows.offline`) и в `build.json`. На этой загрузке работает служба агента; SMBIOS-серийника sbx у сборочной VM нет, `identity apply` пропускается, состояние агента стирает следующий `sbx-agent seal`.
+7. **Запечатывание** на работающей после verify-offline VM: `sbx-agent seal` (§12.11), затем асинхронно через QGA `sysprep.exe /generalize /oobe /shutdown /quiet /unattend:C:\Windows\System32\Sysprep\sbx-unattend.xml`. Ожидание `stopped` до 30 min. При ошибке в манифест попадают последние строки `C:\Windows\System32\Sysprep\Panther\setuperr.log`: сборщик читает их через QGA до выключения. Если sysprep упал, VM ещё работает. Затем `delete=ide2,sata1,sata2`, `boot=order=scsi0`, `net0 link_down=0`.
 8. **Template.** `POST …/template`. Диски становятся `base-<vmid>-disk-<k>` для `efidisk0`, `scsi0`, `tpmstate0` (порядок `k` записывается в `disk_layout`). Удалить build ISO и offline ISO (`media.remove`).
 9. **Проверка** (§15) и манифест (S5 §11 + поля §15.2).
 
@@ -208,12 +214,12 @@ build/
 ### 8.1 Система и службы (`00-base`)
 
 - **Политики до сети:** Windows Update (`NoAutoUpdate=1`; серверы Windows Update не блокируются, потому что из них ставится OpenSSH FoD в `10-system`; служба `wuauserv` выключается в `90-cleanup`), Store (`AutoDownload=2`, без автообновлений приложений), consumer features и CloudContent выключены, Delivery Optimization выключен, телеметрия на минимальном уровне редакции (0 для Enterprise и Server, 1 для Pro), Error Reporting выключен, Edge без first-run и без фоновых обновлений, Copilot, Widgets, Spotlight, советы и рекомендации Start выключены, OneDrive не ставится.
-- **Службы выключены** (Disabled): `wuauserv`, `UsoSvc`, `DoSvc`, `WSearch`, `SysMain`, `DiagTrack`, `dmwappushservice`, `MapsBroker`, `lfsvc`, `WerSvc`, `RemoteRegistry`, `Spooler`, `SSDPSRV`, `FDResPub`, `LanmanServer` (нет SMB-сервера и порта 445), `TermService` (RDP), `WinRM`. `WaaSMedicSvc` защищён от изменения онлайн и выключается offline-этапом (§10.3). Запланированные задачи обслуживания (дефрагментация, Compatibility Appraiser, CEIP, автоматическое обслуживание) выключены.
+- **Службы выключены** (Disabled): `wuauserv`, `UsoSvc`, `DoSvc`, `WSearch`, `SysMain`, `DiagTrack`, `dmwappushservice`, `MapsBroker`, `lfsvc`, `WerSvc`, `RemoteRegistry`, `Spooler`, `SSDPSRV`, `FDResPub`, `LanmanServer` (нет SMB-сервера и порта 445), `TermService` (RDP), `WinRM`, `CDPSvc` (порт 5040). `WaaSMedicSvc` защищён от изменения онлайн и выключается offline-этапом (§10.3). Запланированные задачи обслуживания (дефрагментация, Compatibility Appraiser, CEIP, автоматическое обслуживание) выключены.
 - **Defender полностью выключен** offline-этапом (§10.3) — службы и драйверы `WinDefend`, `WdNisSvc`, `Sense`, `WdBoot`, `WdFilter`, `WdNisDrv` с `Start=4`. Движок не запускается, поэтому Tamper Protection не возвращается (проверено Ильёй на 9001). Почему выключен: граница доверия — VM, Windows Update выключен, а сканирование заметно тормозит `npm install` и сборки.
 - **Питание и загрузка:** схема High performance, сон и отключение монитора — никогда, спящий режим гостя выключен (`powercfg /h off`, нет `hiberfil.sys`), Fast Startup выключен. Для BCD: `bootstatuspolicy ignoreallfailures`, `recoveryenabled no`; WinRE выключен (`reagentc /disable`), раздела восстановления нет. Это аналог `GRUB_RECORDFAIL_TIMEOUT=0`: жёсткая остановка не должна приводить к Automatic Repair.
 - **Память и секреты** (решение master, §12.8): pagefile включён фиксированного размера (2 GiB **[S9]**: commit = RAM + pagefile, а время очистки при выключении ограничено), `ClearPageFileAtShutdown=1`, дампы памяти выключены (`CrashDumpEnabled=0`). Выключены System Restore и запланированные теневые копии; службы VSS (`VSS`, `swprv`) остаются в режиме Manual: на них работает `fsfreeze` QGA (§12.10).
 - **Прочее:** часовой пояс UTC, локаль и раскладка en-US, системная кодовая страница UTF-8 (ACP/OEMCP 65001), `LongPathsEnabled=1`, Developer Mode (символические ссылки без повышения), VBS и HVCI выключены (с `cpu: host` и nested virt на хосте Windows иначе включает Hyper-V под собой и замедляется). Для w32time: NTP `time.windows.com`, `MaxPosPhaseCorrection` и `MaxNegPhaseCorrection` = `0xFFFFFFFF` (большие скачки после пробуждения, §14.3).
-- **Firewall включён** во всех профилях: входящие запрещены, все предустановленные разрешающие входящие правила выключены, уведомления о новых слушателях выключены (`NotifyOnListen=False`, иначе диалог «разрешить доступ» мешает computer-use). Loopback firewall не фильтрует, поэтому CONNECT агента и sshd на loopback работают. Дальнейшая защита — firewall Proxmox (`policy_in=DROP`, S1 §4.4).
+- **Firewall включён** во всех профилях: входящие запрещены, все предустановленные разрешающие входящие правила выключены, локальные правила игнорируются политикой (`AllowLocalPolicyMerge=0` в `HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<Profile>` для Domain/Private/Public: Setup и регистрация Appx на клоне снова включают правила), и там же `DoNotAllowExceptions=1` («shields up», в ActiveStore `AllowInboundRules=False`): разрешающие входящие правила не применяются вообще, в том числе AppX capability-правила первого входа `user`, которые лежат вне локального хранилища, уведомления о новых слушателях выключены (`NotifyOnListen=False`, иначе диалог «разрешить доступ» мешает computer-use). Loopback firewall не фильтрует, поэтому CONNECT агента и sshd на loopback работают. Дальнейшая защита — firewall Proxmox (`policy_in=DROP`, S1 §4.4).
 - **Appx (`windows`):** удалить provisioned-пакеты, которые не нужны sandbox и ломают sysprep при обновлении (Teams, новый Outlook, Clipchamp, News, Weather, Xbox, Solitaire, Bing, Feedback Hub, Get Help, Office Hub, To Do, Copilot и т.п.; список — `files/appx-remove.txt`). Оставить Edge, Terminal, Notepad, Calculator, Paint, Snipping Tool, Photos, Store и App Installer (`winget` для пользователя). В профиле `user` до sysprep никто не входит, поэтому per-user MSIX, ломающих sysprep (`0x80073cf2`, опыт 9001), нет.
 
 ### 8.2 Пользователи и вход (`10-system`)
@@ -263,7 +269,7 @@ build/
 
 ### 8.7 Рабочий стол (`60-desktop`)
 
-- Scheduled task `\sbx\session`: триггер «при входе `user`», `RunLevel Highest`, перезапуск при сбое раз в минуту, действие `C:\Program Files\sbx-agent\current\sbx-session.exe` (§13).
+- Scheduled task `\sbx\session`: триггер «при входе `user`», `RunLevel Highest`, перезапуск при сбое раз в минуту, действие `C:\Program Files\sbx-agent\current\sbx-session.exe` (§13). *Не сделано в S9: задача и helper — S10.*
 - Ключи Winlogon для autologon пишет `identity apply` (§11.2), не сборка.
 - Без экрана блокировки: `NoLockScreen=1` (там, где редакция это соблюдает: Enterprise, Education, Server), `powercfg CONSOLELOCK 0` (вход при пробуждении не требуется), экранная заставка выключена. В Default User hive: `DisableLockWorkstation=1`, выключены анимация первого входа (`EnableFirstLogonAnimation=0`), privacy experience, «давайте завершим настройку» (SCOOBE), предложение PIN и Windows Hello, уведомления-советы. Профиль `user` создаётся при первом autologon из Default User.
 
@@ -291,23 +297,26 @@ build/
 
 ### 10.1 Порядок
 
-`90-cleanup` → `sbx-agent seal` → `sysprep /generalize /oobe /shutdown` → offline-этап → template. Sysprep выполняется один раз на шаблон. Specialize проходит каждая machine пула при первой загрузке; это время скрывает пул (решение master, §11.1).
+`90-cleanup` → offline-этап (WinPE из одноразовой BCD-записи) → verify-offline (загрузка диска, проверка результата) → `sbx-agent seal` → `sysprep /generalize /oobe /shutdown` → template. Sysprep выполняется один раз на шаблон. Specialize проходит каждая machine пула при первой загрузке; это время скрывает пул (решение master, §11.1).
 
 ### 10.2 `sbx-unattend.xml` (ответы для клонов)
 
 - `generalize`: `PersistAllDeviceInstalls=true` (драйверы virtio не переустанавливаются, specialize короче), `SkipRearm=0`.
-- `specialize`: `RunSynchronous` → `"C:\Program Files\sbx-agent\current\sbx-agent.exe" identity apply --specialize` (§11.2). Имя компьютера ставит агент; если для этого нужна заглушка `ComputerName` в Shell-Setup или определённый порядок компонентов, это выбирает исполнитель. Требование проверяется §15 п. 2: machine пула становится warm с именем `SBX<12 hex>` без перезагрузок сверх тех, что делает сам setup.
-- `oobeSystem`: все экраны OOBE скрыты (`HideEULAPage`, `HideOEMRegistrationScreen`, `HideOnlineAccountScreens`, `HideWirelessSetupInOOBE`, `ProtectYourPC=3`), локаль en-US, UTC. Новых учётных записей нет (`user` уже существует), autologon здесь не задаётся (его пишет агент).
+- `specialize`: `RunSynchronous` → `"C:\Program Files\sbx-agent\current\sbx-agent.exe" identity apply --specialize` (§11.2), затем `reg.exe add` `Start=4` для `dmwappushservice` (§10.3). В Shell-Setup — заглушка `ComputerName=SBXTEMPLATE`: Setup всегда перезаписывает имя, заданное в specialize, поэтому `SBX<12 hex>` ставит агент одной перезагрузкой после setup (R16).
+- `oobeSystem`: все экраны OOBE скрыты (`HideEULAPage`, `HideLocalAccountScreen`, `HideOEMRegistrationScreen`, `HideOnlineAccountScreens`, `HideWirelessSetupInOOBE`, `ProtectYourPC=3`) и пропущены (`SkipMachineOOBE`, `SkipUserOOBE`: без них OOBE останавливается на «Who's going to use this device?»), локаль en-US, UTC. Новых учётных записей нет (`user` уже существует), autologon здесь не задаётся (его пишет агент).
+- `SystemLocale` нет ни в одном проходе: он переписывает кодовые страницы.
+- **Скрипт первой загрузки клона.** Generalize, specialize и OOBE сбрасывают часть настроек образа. `90-cleanup` ставит `C:\Windows\Setup\Scripts\SetupComplete.cmd` (`files/SetupComplete-clone.cmd`) и `C:\ProgramData\sbx-template\firstboot.ps1` (ACL: SYSTEM и Administrators — полный доступ, Users — чтение). Setup запускает его от SYSTEM после OOBE, до первого входа: службы §8.1 (список `lib.ps1`, `CDPSvc`, `dmwappushservice`) → Disabled, ACP/OEMCP/MACCP = 65001 (действуют со следующей загрузки — перезагрузки на переименование), `reagentc /disable`, BCD `recoveryenabled no` и `bootstatuspolicy ignoreallfailures`, NetBIOS выключен, политика firewall `AllowLocalPolicyMerge=0` и `DoNotAllowExceptions=1`. Ошибки только пишутся в `C:\ProgramData\sbx-template\firstboot.log` (без секретов, последняя строка `done`), выход всегда 0. Последнее действие — `C:\ProgramData\sbx-template\firstboot.done` (время UTC), и после ошибок тоже; в образе его нет (`90-cleanup`). Агент запускается параллельно со `SetupComplete.cmd`: пока `SetupComplete.cmd` есть, а `firstboot.done` нет, он ждёт маркер (до 5 мин, потом предупреждение в журнале) перед шагом загрузки и перед перезагрузкой на переименование, иначе перезагрузка обрывает `firstboot.ps1`.
 - Файл лежит в `C:\Windows\System32\Sysprep\` и паролей не содержит. После первой загрузки setup сам заменяет копии ответов в `Panther`; агент удаляет `sbx-unattend.xml` на клоне в `identity apply`.
 
 ### 10.3 Offline-этап WinPE
 
 Нужен, потому что часть настроек нельзя изменить в работающей Windows: Tamper Protection блокирует Defender, `WaaSMedicSvc` защищён. Root на хосте (как `hivex` у 9001) у сборщика нет.
 
-- VM грузится с ISO Windows пользователя; Windows Setup находит `autounattend.xml` на offline ISO и в проходе `windowsPE` выполняет `RunSynchronous` → `offline.cmd`. Сама установка не начинается: скрипт в конце выполняет `wpeutil shutdown`.
+- WinPE из `boot.wim` ISO пользователя загружается один раз из ramdisk-записи BCD установленной, ещё не запечатанной Windows (§7 п. 6): Windows Boot Manager на диске запускает её детерминированно, без приглашения «Press any key» и без `sendkey`. Windows Setup в этой WinPE находит `autounattend.xml` на offline ISO и в проходе `windowsPE` выполняет `RunSynchronous` → `offline.cmd`. Файл отвечает на страницы языка, ключа и лицензии как ответы установки (`International-Core-WinPE` с `ui_language`, `UserData` с generic-ключом и `AcceptEula`), чтобы Setup не ждал ввода. Сама установка не начинается: скрипт в конце выполняет `wpeutil shutdown`.
 - `offline.cmd` (cmd и `reg.exe`, PowerShell в WinPE установки нет): загрузить драйвер диска (`drvload <virtio-win>\vioscsi\w11\amd64\vioscsi.inf`: в WinPE установки драйвера virtio нет, а `DriverPaths` из `windowsPE` действуют только на саму установку); найти том с `\Windows\System32\config\SYSTEM` (буква диска заранее не известна); `reg load HKLM\OFFSYS`; для каждого `ControlSet00x` выставить `Start=4` службам из `offline` рецепта (`defender-off`: шесть служб и драйверов §8.1; `waasmedic-off`: `WaaSMedicSvc`); `reg unload`; записать `\Windows\Setup\Scripts\sbx-offline.log`; `wpeutil shutdown`.
-- Сборщик ждёт `stopped` до 10 min; лог читается позже, в verify. Ошибка в WinPE видна только как тайм-аут (QGA в WinPE нет); `verify` проверяет результат (§15 п. 8).
-- **Риск пропущенного «Press any key».** В порядке загрузки только `ide2`, но OVMF может перейти к записи Windows Boot Manager в `efidisk0` и загрузить запечатанный диск, и тогда specialize испортит шаблон. Защита: `sendkey` начинается сразу после start и идёт 30 s. Если за время offline-этапа отвечает QGA (а в WinPE его нет), значит загрузился диск: сборка сразу `failed`, шаблон не создаётся. Исполнитель проверяет на спайке, учитывает ли OVMF Proxmox только `bootorder` из fw_cfg; если да, риск снимается.
+- `dmwappushservice` в offline-набор не входит: без неё sysprep `/generalize` может зависнуть, а offline-этап идёт до sysprep. На шаблоне она Manual; на каждом клоне её выключает specialize (`sbx-unattend.xml`, `RunSynchronous` Order 2: `reg.exe add …\Services\dmwappushservice /v Start /t REG_DWORD /d 4 /f`) до первого запуска служб.
+- Сборщик ждёт `stopped` до 10 min. Ошибка в WinPE видна только как тайм-аут (QGA в WinPE нет). Результат проверяется сразу, в verify-offline (§7 п. 6): лог, `Start=4`, `MsMpEng`; `verify` на клоне проверяет его ещё раз (§15 п. 8).
+- **Почему не загрузка с CD (R17).** Раньше этап грузил ISO с `boot=order=ide2` и нажимал клавишу на «Press any key to boot from CD». После того как незапечатанная Windows поработала (обычный ход сборки), OVMF пропускал приглашение каждый раз (9 из 9 попыток на `pve`) и грузил диск через запись Windows Boot Manager в `efidisk0`. Одноразовая запись BCD от этого не зависит; если Windows Boot Manager её всё же проигнорирует, QGA ответит с новым временем загрузки (в WinPE его нет), и сборщик поставит запись ещё раз. Этап идёт до sysprep, поэтому загрузка диска вместо WinPE безвредна; verify-offline проверяет результат до sysprep. `VM.Console` нужен только для приглашения установки (§7 п. 4).
 - Почему не скрипт PE-этапа установки (как в unattend-generator Schneegans, где установку ведёт свой скрипт: diskpart, dism, правка hive, bcdboot): offline-этап короче, не заменяет Windows Setup и годится для любых будущих offline-правок.
 
 ## 11. Первая загрузка клона и идентичность
@@ -315,10 +324,11 @@ build/
 ### 11.1 Machine пула (из шаблона)
 
 1. Specialize: `identity apply --specialize` (§11.2), без перезагрузки от агента.
-2. OOBE по ответам, без экранов.
-3. Обычная загрузка: startup-скрипт `sbx-agent early` (идентичность совпадает, очистка секретов), служба `sbx-agent` запускает sshd, подключается к туннелю.
-4. `windows`: autologon `user` → первый вход создаёт профиль → `\sbx\session` запускает `sbx-session` → фаза `desktop: ready` (§13).
-5. Фаза `pool_ready` (§12.13) → S6 переводит machine в спящий режим (§14).
+2. OOBE по ответам, без экранов (`SkipMachineOOBE`, `SkipUserOOBE`); `SetupComplete.cmd` → `firstboot.ps1` (§10.2).
+3. Setup перезаписал имя на `SBXTEMPLATE`: агент переименовывает machine в `SBX<12 hex>` одной перезагрузкой (§11.2 п. 8, R16).
+4. Обычная загрузка: startup-скрипт `sbx-agent early` (идентичность совпадает, очистка секретов), служба `sbx-agent` запускает sshd, подключается к туннелю.
+5. `windows`: autologon `user` → первый вход создаёт профиль → `\sbx\session` запускает `sbx-session` → фаза `desktop: ready` (§13). *Как сделано: только autologon и профиль; helper и фаза `desktop` — S10.*
+6. Фаза `pool_ready` (§12.13) → S6 переводит machine в спящий режим (§14). *Не реализуется в MVP (решение Ильи 2026-10-31): после готовности агента — сразу claim (холодный create).*
 
 ### 11.2 `identity apply`
 
@@ -331,7 +341,7 @@ build/
 5. **Только для клона шаблона** (`identity.json` нет, то есть первая загрузка после `seal`): новый случайный пароль `user` (32 символа), `L$sbx_user`, у `windows` — ещё `DefaultPassword` и ключи Winlogon (`AutoAdminLogon=1`, `DefaultUserName=user`, `DefaultDomainName=.`). Профиля `user` в этот момент ещё нет, поэтому ничего не теряется. **Fork и VM из saved snapshot пароль не меняют:** сброс пароля администратором делает недоступными данные DPAPI пользователя (Credential Manager, токены `gh`, cookies Edge), а fork — копия той же машины. LSA secret копируется вместе с диском, autologon и токены агента продолжают работать.
 6. Удалить `C:\Windows\System32\Sysprep\sbx-unattend.xml`, если он ещё есть.
 7. Записать `identity.json` с `resetPending` (FlushFileBuffers).
-8. Если действующее имя (`ActiveComputerName`) ≠ новое и это не режим `--specialize` — перезагрузка (`InitiateShutdownW`, причина «planned»). Fork и VM из saved snapshot поэтому загружаются на одну перезагрузку дольше (решение master: +15–25 s).
+8. Если действующее имя (`ActiveComputerName`) ≠ новое и это не режим `--specialize` — перезагрузка (`InitiateShutdownW`, причина «planned»). Fork и VM из saved snapshot поэтому загружаются на одну перезагрузку дольше (решение master: +15–25 s). Клон шаблона тоже: Setup после specialize всегда ставит имя из ответов (`SBXTEMPLATE`), поэтому на его первой загрузке агент делает ровно одну такую перезагрузку после setup (R16, ~25 s).
 
 SID машины не меняется: домена нет, а дубликат machine SID вне домена ни на что не влияет. Следствие для будущего KMS: fork наследует CMID (§17).
 
@@ -381,7 +391,7 @@ SID машины не меняется: домена нет, а дубликат
 
 - **smbios:** `GetSystemFirmwareTable('RSMB')`, структура type 1: `uuid`, `serial` (`sbx1:…`, S2 §5.2), `family` (`sbxt1:<url>`, S5 §14). На Windows SMBIOS читает любой процесс без привилегий (на Linux `product_serial` читает только root). BS виден всем процессам VM. Это допустимо в рамках принятой модели (граница доверия — VM, S3 §4) и записывается в S2.
 - **vmgenid:** `\\.\VmGenerationCounter`, `IOCTL_VMGENCOUNTER_READ` (16 байт) → заголовок `Sbx-Vmgenid` (hex). Только информационно: fork у нас всегда холодный старт, решение о смене идентичности принимается по `machineId`.
-- **bootId:** UUIDv5 от `machineId` и счётчика загрузок `BootId` (`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters`). Пробуждение из спящего режима Proxmox — не загрузка, `bootId` не меняется, и это верно: процессы живы. Если счётчик окажется ненадёжным, исполнитель берёт время загрузки ядра (`NtQuerySystemInformation`) с проверкой устойчивости к смене часов и записывает причину.
+- **bootId:** UUIDv5 от `machineId` и счётчика загрузок `BootId` (`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters`). Пробуждение из спящего режима Proxmox — не загрузка, `bootId` не меняется, и это верно: процессы живы. Если счётчик окажется ненадёжным, исполнитель берёт время загрузки ядра (`NtQuerySystemInformation`) с проверкой устойчивости к смене часов и записывает причину. *Как сделано: запасной путь — случайный UUID в volatile-ключе реестра, а не время загрузки ядра (§24.2 п. 14).*
 
 ### 12.5 Пользователи и токены (`Credentials`)
 
@@ -396,7 +406,7 @@ SID машины не меняется: домена нет, а дубликат
 
 - **Job — постоянный именованный объект.** Shim создаёт job `\BaseNamedObjects\Global\sbx-cmd-<id>` через `NtCreateJobObject` с `OBJ_PERMANENT` (право `SeCreatePermanentPrivilege` у SYSTEM есть; вызов ntdll без cgo). Обычный именованный объект исчезает вместе с последним handle: процессы job handle на него не держат, и после смерти shim job нельзя было бы найти. Постоянный job переживает shim и агента до перезагрузки. Агент открывает его по имени (`OpenJobObject`) для `Kill`, `SIGKILL`, `KILL_LEFTOVERS` и восстановления. Постоянство снимает `NtMakeTemporaryObject`, когда команда завершилась без leftovers или её удалили (`Remove`, retention); после перезагрузки объектов нет.
 - **Ровно один запуск.** Если job с таким именем уже есть (`STATUS_OBJECT_NAME_COLLISION`), shim выходит: это аналог детерминированного имени unit-а. Маркер `shim.json` и правила повтора `Start` — как в S3 §9.2. Если `OBJ_PERMANENT` окажется недоступен, запасной путь исполнителя: агент держит дубликат handle job (`DuplicateHandle` из shim), а `shim.json` хранит pid-ы для поиска после перезапуска агента; причина записывается в §24.
-- **IPC агент ↔ shim:** AF_UNIX-сокет `C:\ProgramData\sbx-agent\run\cmd\<id>.sock` (Go `net` поддерживает AF_UNIX на Windows; ACL каталога — только SYSTEM). Протокол S3 §9.6. Spec команды с env передаётся первым сообщением по сокету, а не файлом: у Windows нет tmpfs. Готовность — сообщение `Started{pid}` вместо `READY=1`.
+- **IPC агент ↔ shim:** AF_UNIX-сокет `C:\ProgramData\sbx-agent\run\cmd\<id>.sock` (Go `net` поддерживает AF_UNIX на Windows; ACL каталога — только SYSTEM). Протокол S3 §9.6. Spec команды с env передаётся первым сообщением по сокету, а не файлом: у Windows нет tmpfs. Готовность — сообщение `Started{pid}` вместо `READY=1`. *Как сделано: spec идёт в stdin shim-а, готовность — строка `READY` в его stdout, протокол сокета не менялся (§24.2 п. 3); живость shim — mutex `Global\sbx-shim-<id>` (§24.2 п. 5).*
 - **Запуск:** `CreateProcessAsUserW` с атрибутами `PROC_THREAD_ATTRIBUTE_JOB_LIST` (процесс сразу в job), `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` (pipe-ы) и для PTY `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`; `CREATE_UNICODE_ENVIRONMENT`. Без PTY — `CREATE_NO_WINDOW` (скрытая консоль, которая нужна консольным программам). Рабочий стол — служебная window station logon-сессии; с `desktop: true` — `winsta0\default` консольной сессии (§13).
 - **Лимиты job:** `JOB_OBJECT_LIMIT_BREAKAWAY_OK` не ставится (потомки не уходят из job), `KILL_ON_JOB_CLOSE` не ставится: если shim упал, команда живёт, агент находит job по имени и может его убить (аналог `cgroup.kill`).
 - **Leftovers:** число активных процессов job (`JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.ActiveProcesses`, сообщение `JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO` через completion port). Shim не выходит, пока job непуст и pipe-ы не закрыты (как S3 §9.3).
@@ -444,7 +454,7 @@ $__sbx_ok = $?; if ($__sbx_ok) { exit 0 } elseif ($LASTEXITCODE -ne 0) { exit $L
 
 Решение master (условия a–d), граница доверия — VM:
 - **`secret_env`** — только в памяти агента и в env процессов. После перезапуска агента (сбой, обновление) значения пропадают, фаза `secrets` → `pending`, событие `readiness.changed`; S6 присылает `UpdateSecrets` заново (§18.6 п. 7). Пока `secrets: pending` при непустом `secretsDigest`, `Start` ждёт `UpdateSecrets` до 30 s, затем `unavailable secrets_pending` (retryable): команда не должна тихо запуститься без секретов.
-- **`secret_files`** — `C:\ProgramData\sbx\secrets\files\<name>` с атрибутом `FILE_ATTRIBUTE_TEMPORARY`, ACL SYSTEM + `user` (режим из запроса сводится к read-only или read-write). `link_path` — symlink на файл (как S3 §8.1). ACL защищает от случайного доступа, но не от администратора; от чтения устаревших файлов защищает порядок очистки (§12.3).
+- **`secret_files`** — `C:\ProgramData\sbx\secrets\files\<name>` с атрибутом `FILE_ATTRIBUTE_TEMPORARY`, ACL SYSTEM + `user` (режим из запроса сводится к read-only или read-write; *как сделано: любой бит записи в `mode` → `user` read-write, иначе read-only, §24.2 п. 13*). `link_path` — symlink на файл (как S3 §8.1). ACL защищает от случайного доступа, но не от администратора; от чтения устаревших файлов защищает порядок очистки (§12.3).
 - **Очистка** (перезапись нулями на месте, затем удаление):
   - (a) при каждой загрузке и при смене идентичности — в `sbx-agent early` до входа (§12.3);
   - в `System/PrepareStop` (шаг `prepare` stop S6): ответ `{secret_files_wiped: true}` подтверждает очистку, и по нему S6 снимает флаг `secret_files_on_disk` (§18.6 п. 5). Дублируется в `PRESHUTDOWN`;
@@ -481,7 +491,7 @@ thaw():   QGA fsfreeze-thaw -> System/Thaw
 - Агент: хуки `C:\ProgramData\sbx-agent\quiesce.d\*.ps1` с аргументом `freeze`/`thaw`, до 5 s каждый; lease и авто-снятие по `deadline` — внутренний таймер агента (watchdog-процесс не нужен: VSS сам снимает заморозку).
 - `fs: true` на Windows → `failed_precondition fs_freeze_unsupported`. Capabilities: `system.quiesce.v1` и новая `system.quiesce.wipe_secrets.v1`; `docker` на Windows игнорируется.
 - **Бюджет.** S1 считает 10 s от возврата `freeze()` (VSS уже держит запись) до начала `thaw()`, то есть пауза vCPU, `lvcreate` и resume. Подготовка до этого (хуки агента, очистка секретов, подготовка VSS writers в `fsfreeze-freeze`) в бюджет не входит и ограничена своим тайм-аутом: весь `freeze()` ≤ 30 s, иначе снапшот отменяется. Для Linux смысл тот же: S3 замораживает FS в конце `Quiesce`. Это уточнение S1 §6.2 (§18.1 п. 9).
-- **VSS держит запись не дольше 10 s** и снимает заморозку сам. Это совпадает с бюджетом S1 и заменяет watchdog S3 §14.3. Если `fsfreeze-thaw` сообщает, что заморозка уже снята, снимок только crash-consistent, и worker поступает как при `auto_thawed` (S3 §14.3).
+- **VSS держит запись не дольше 10 s** и снимает заморозку сам. Это совпадает с бюджетом S1 и заменяет watchdog S3 §14.3. Если `fsfreeze-thaw` сообщает, что заморозка уже снята, снимок только crash-consistent, и worker поступает как при `auto_thawed` (S3 §14.3). `Qga.fsfreezeThaw` при ошибке читает `fsfreeze-status` и при `thawed` возвращает `{autoThawed: true}` вместо ошибки; S1 `snapshot` с QGA-хуком по умолчанию отдаёт `SnapshotRef.autoThawed`, а при любой ошибке после `lv.snapshot` удаляет LV снимка.
 - **Очистка секретов для saved snapshot** (условие b): при `wipe_secret_files` агент до заморозки перезаписывает нулями и удаляет файлы секретов, `Thaw` восстанавливает их из памяти. Если какой-то файл открыт без совместного доступа на запись и удаление, агент откатывает уже стёртые и отвечает `failed_precondition secrets_in_use`. Тогда S6 требует остановить sandbox перед сохранением (§18.6 п. 5). Перезапуск агента во время lease: файлы восстанавливаются только после `UpdateSecrets` (фаза `secrets: pending`).
 - Если агент не подключён, worker делает только QGA `fsfreeze` (как S1 сейчас); для `kind=saved` с файлами секретов это запрещено (`agent_unavailable`).
 - `sbx-agent thaw --force` на Windows восстанавливает файлы секретов и снимает lease; FS он не трогает.
@@ -508,11 +518,15 @@ S3 §7.3 для Windows: остановить службу, стереть `C:\P
 | `early` | startup-скрипт (§12.3) |
 | `identity apply [--specialize]` | §11.2 (на Linux существует, здесь режим specialize) |
 | `env --format pwsh` | env для профиля SSH-сессии (§12.7) |
-| `resume-hint --unix-ms <t>` | после пробуждения из спящего режима (§14.3); работает и на Linux |
+| `resume-hint --unix-ms <t>` | после пробуждения из спящего режима (§14.3); работает и на Linux. *Не реализуется в MVP (решение Ильи 2026-10-31)* |
 | `exec --user <u> -- <argv>` | локальный запуск через тот же путь токенов и shim; для verify и QGA (только Administrators) |
 | `logs -n <N>` | аналог `journalctl` |
 
+*Как сделано:* ещё `call <Service/Method> [<json>|-]` (unary-вызов API по `admin.sock`, §24.2 п. 4), `selftest --pty`, `quiesce-watchdog --lease <id>`. `exec` и `call` работают через `run\admin.sock`, а не через отдельный путь.
+
 ## 13. Рабочий стол: хуки для S10
+
+> *Как сделано (план, решение 2):* в S9 есть только autologon `user`, отсутствие блокировки и мастеров первого входа (`60-desktop`). `sbx-session.exe`, задача `\sbx\session`, `run\session.sock` и фаза `desktop` не сделаны, это S10; `readiness.required = ["identity", "claim", "secrets"]`. `CommandSpec.desktop = true` → `failed_precondition desktop_not_ready`.
 
 - **Autologon** `user` в консольную сессию (§11.2, §8.7); блокировки, UAC-запросов и мастеров первого входа нет.
 - **`sbx-session.exe`** — helper в интерактивной сессии: служба из session 0 не может захватывать экран и посылать ввод. Запускается задачей `\sbx\session` при входе, повышенный (UIPI не мешает управлять повышенными окнами). Подключается к агенту по AF_UNIX `run\session.sock` (ACL: SYSTEM и `user`) и сообщает `Hello{session_id, user, version}` и `State{locked, input_desktop, width, height, dpi}` при каждом изменении (уведомления WTS о сессии). Принимает `ApplyEnv` (§12.7). Протокол — protobuf с префиксом длины, расширяемый: захват экрана, ввод, буфер обмена и запуск стримера добавит S10.
@@ -521,6 +535,8 @@ S3 §7.3 для Windows: остановить службу, стереть `C:\P
 - Видеоадаптер, разрешение, Sunshine, cua-driver — S10.
 
 ## 14. Пул, загрузка, спящий режим
+
+> **Не реализуется в MVP (решение Ильи 2026-10-31).** Пула Windows через спящий режим нет, спайка vTPM + `suspend --todisk` (§21 п. 1) нет, `resume-hint` нет, `vmstatestorage` не ставится. **Create — холодный:** S1 `create` клонирует шаблон (со свежим vTPM, §9), первая загрузка проходит sysprep specialize и OOBE (§11.1 п. 1–3), затем claim. Цель ≤ 5 min, хорошо 2–3 min; дедлайн S6 cold create 20 min (§14.5) с запасом. Цель пула `windows` = 0. Stop Windows — обычное выключение (§14.6). Текст §14.1–14.4 оставлен как материал для фазы 2.
 
 ### 14.1 Почему спящий режим
 
@@ -538,7 +554,7 @@ S6 §9.3 (clone, start, ожидание `pool_ready` не дольше `boot_ti
 
 1. API: admission RAM машины (с вытеснением warm других пар, S6 §8.2), machine → `claiming`.
 2. Worker: проверка RAM перед стартом, S1 `start` (Proxmox продолжает VM с сохранённого состояния и удаляет `vmstate`).
-3. `agent/ping` QGA, затем `agent/exec`: `sbx-agent resume-hint --unix-ms <время хоста>`. Агент:
+3. `agent/ping` QGA, затем `agent/exec`: `sbx-agent resume-hint --unix-ms <время хоста>` (*`resume-hint` не реализуется в MVP, решение Ильи 2026-10-31*). Агент:
    - выставляет системное время (`SetSystemTime`; у SYSTEM есть право), если расхождение больше 1 s, и запускает `w32tm /resync /force`. Без этого часы гостя отстают на время сна, и TLS к туннелю может упасть на `notBefore` свежего сертификата;
    - закрывает старое WebSocket-соединение и подключается заново сразу, не дожидаясь 15 s ping-тайм-аута;
    - пересчитывает фазы (`desktop` для `windows`).
@@ -572,20 +588,20 @@ Stop пользовательской sandbox через `suspend --todisk` со
 `verify` создаёт machine из шаблона примитивом S1 (тестовый `smbios1` с `family`), загружает её (specialize), проверяет через QGA и удаляет со следами (включая LV состояния спящего режима, §18.1). Команды от `user` выполняются через `sbx-agent exec --user user` (§12.14), то есть тем же путём, что команды агента.
 
 1. ОС: редакция и сборка = рецепт/манифест; `Get-ComputerInfo`.
-2. **Specialize:** имя `SBX<12 hex>` тестового `machineId`; `MachineGuid` = `machineId`; число перезагрузок первой загрузки не больше, чем у setup без агента (по журналу событий, ID 6005/6006/1074); `sbx-unattend.xml` удалён; в `Panther` нет пароля.
+2. **Specialize:** имя `SBX<12 hex>` тестового `machineId`; `MachineGuid` = `machineId`; число загрузок первой загрузки не больше, чем у setup без агента, плюс одна плановая перезагрузка `sbx-agent.exe` на переименование (R16; по журналу событий, ID 6005/1074); `firstboot.log` кончается `done`; `sbx-unattend.xml` удалён; в `Panther` нет пароля.
 3. **Сокеты:** TCP-слушатели только из allow-list рецепта: `127.0.0.1:22`, `[::1]:22`, 135 и динамические RPC 49664–49670 (`lsass`, `wininit`, `services`, `svchost`, `spoolsv`, `System`). Портов 3389, 5985, 5986, 445, 139, 5357, 7680 нет. UDP: DHCP-клиент, mDNS и LLMNR выключены.
-4. **Firewall:** включён во всех профилях, входящие по умолчанию запрещены, ни одного включённого разрешающего входящего правила, `NotifyOnListen=False`.
+4. **Firewall:** включён во всех профилях, входящие по умолчанию запрещены, ни одного действующего разрешающего входящего правила: в ActiveStore `AllowInboundRules=False` во всех трёх профилях (оставшиеся разрешающие правила не применяются и только перечисляются) или нет ни одного включённого разрешающего входящего правила (при `AllowLocalPolicyMerge=0` — в `-PolicyStore ActiveStore`), `NotifyOnListen=False`.
 5. **sshd:** `sshd -T` — `passwordauthentication no`, `trustedusercakeys`, оба `listenaddress`; служба работает (её запустил агент); host keys созданы в эту загрузку; `DefaultShell` = pwsh 7. Вход по сертификату с тестовым CA: `ssh -i <key> -o CertificateFile=<cert> user@127.0.0.1 "$env:SBX"` (CA подкладывается через `sbx_user_ca.pub` на время проверки).
 6. **Агент:** `sbx-agent doctor --json` — версия, `identity` ready, URL туннеля из `family`, служба Running, failure actions заданы, startup-скрипт отработал (`early.json`), фазы по профилю.
-7. **Пользователи и вход:** `user` в Administrators, пароль бессрочный, LSA secret есть; Administrator и Guest выключены; UAC: `EnableLUA=1`, `ConsentPromptBehaviorAdmin=0`, `PromptOnSecureDesktop=0`. `windows`: сессия `user` активна (`query user`), `LogonUI.exe` не работает, фаза `desktop` = ready.
+7. **Пользователи и вход:** `user` в Administrators, пароль бессрочный, LSA secret есть; Administrator и Guest выключены; UAC: `EnableLUA=1`, `ConsentPromptBehaviorAdmin=0`, `PromptOnSecureDesktop=0`. `windows`: сессия `user` активна (`query user`) и не заблокирована (`WTSSessionInfoEx`), `LogonUI.exe` в этой сессии не работает (ожидание до 180 s после готовности агента), фаза `desktop` = ready.
 8. **Службы и политики:** §8.1 — состояния служб, Defender (`Start=4` у шести служб и драйверов, процесса `MsMpEng` нет), `WaaSMedicSvc` `Start=4`, `sbx-offline.log` без ошибок, Fast Startup и спящий режим гостя выключены, pagefile есть и `ClearPageFileAtShutdown=1`, `CrashDumpEnabled=0`, VBS выключен (`Win32_DeviceGuard`), BitLocker выключен (`manage-bde -status`), TPM готов и отличается от шаблона (`Get-Tpm`, у `windows`), BCD `bootstatuspolicy`/`recoveryenabled`, WinRE выключен, кодовая страница 65001.
 9. **Инструменты:** каждая команда §8.5 — `--version` от `user` прямым exec и через `pwsh -Command`; версии = манифест; `npm -g` пишет в `C:\ProgramData\npm`.
 10. **Сеть:** IPv4 из `10.88.0.0/24`, `Resolve-DnsName example.com`, `Invoke-WebRequest https://example.com`; время синхронизировано, часовой пояс UTC.
 11. **Процессы агента:** через `sbx-agent exec` и путь `shell`: коды выхода по контракту §12.6; `.cmd` из `PATH` (`npm --version`) запускается; ConPTY-сессия с `pwsh` отвечает на ввод (локальный selftest `sbx-agent selftest --pty`).
 12. **VSS:** QGA `fsfreeze-freeze` → `fsfreeze-status` = frozen → `fsfreeze-thaw` за ≤ 10 s, в журнале событий нет ошибок VSS.
-13. **Смена идентичности (fork-путь):** выключить VM, поменять `smbios1` (новый `machineId` и BS), загрузить. Произошла одна перезагрузка на переименование; новое имя, `MachineGuid`, host keys, пустое состояние агента, `identity.reset` в журнале; пароль `user` прежний, autologon работает, секрет, сохранённый через DPAPI до смены идентичности, читается. Время записывается.
+13. **Смена идентичности (fork-путь):** *как сделано — настоящий fork: S1 snapshot с QGA VSS-хуком → `cloneFromSnapshot`, источник выключается до старта fork из-за RAM (§24.2 п. 9). На медленном хосте (пауза vCPU + lvcreate + resume дольше ~10 s удержания VSS) снимок с `FreezeBudgetExceededError` или `autoThawed` повторяется один раз, потом берётся crash-consistent снимок со строкой `WARN vss_snapshot` (время заморозки и причина); проверки fork остаются критерием.* Выключить VM, поменять `smbios1` (новый `machineId` и BS), загрузить. Произошла одна перезагрузка на переименование; новое имя, `MachineGuid`, host keys, пустое состояние агента, `identity.reset` в журнале; пароль `user` прежний, autologon работает, секрет, сохранённый через DPAPI до смены идентичности, читается. Время записывается.
 14. **Жёсткая остановка:** S1 `stop` без shutdown, затем start; загрузка без Automatic Repair, время до готовности агента ≤ обычная загрузка + 10 s.
-15. **Спящий режим** (если `pool.mode = hibernated`): S1 `hibernate`, start, `resume-hint`; агент подключён и `pool_ready`; часы расходятся с хостом < 2 s; `windows`: сессия не заблокирована. Время записывается.
+15. *Не реализуется в MVP (решение Ильи 2026-10-31, §14).* **Спящий режим** (если `pool.mode = hibernated`): S1 `hibernate`, start, `resume-hint`; агент подключён и `pool_ready`; часы расходятся с хостом < 2 s; `windows`: сессия не заблокирована. Время записывается.
 16. **TRIM:** `Optimize-Volume -ReTrim`. Пока закреплённый virtio-win не содержит исправления, ошибка — предупреждение; после — красная проверка.
 17. **Лицензия:** редакция, состояние лицензии, канал, оставшиеся дни (`SoftwareLicensingProduct`) → манифест (`license`). Для `channel = evaluation`: проверка ждёт до 10 min онлайн-активации ознакомительной версии на клоне; меньше 30 дней — предупреждение, меньше 7 — красная проверка (§17). Для `retail` и `volume` проверяется только совпадение редакции; неактивированная Windows — не ошибка.
 18. **Остатки:** нет `C:\sbx-build`, установщиков, файлов `authorized_keys`; `C:\ProgramData\sbx-template\build.json` есть.
@@ -593,7 +609,7 @@ Stop пользовательской sandbox через `suspend --todisk` со
 
 ### 15.2 Манифест: поля Windows
 
-К S5 §11: `windows` {`edition`, `build`, `ubr`, `family`, `isoFile`, `isoSha256`, `virtioWinVersion`, `openssh` (inbox/github и версия), `appxRemoved`, `options`}, `license` {`status`, `channel`, `daysRemaining`, `expiresAt`}, `verify.boot` (§16), `poolMode`.
+К S5 §11: `windows` {`edition`, `build`, `ubr`, `family`, `isoFile`, `isoSha256`, `virtioWinVersion`, `openssh` (inbox/github и версия), `appxRemoved`, `options`, `offline` {`services` с `Start=4`, `missing` без ключа, `log`}}, `license` {`status`, `channel`, `daysRemaining`, `expiresAt`}, `verify.boot` (§16), `poolMode`.
 
 ## 16. Замеры
 
@@ -608,13 +624,15 @@ Stop пользовательской sandbox через `suspend --todisk` со
 | `boot_to_agent_ready` | обычная загрузка после shutdown |
 | `hard_stop_restart` | после `stop` без shutdown |
 | `identity_change_boot` | после смены `smbios1` (с перезагрузкой на переименование) |
-| `hibernate` | длительность `suspend --todisk`, размер LV состояния |
-| `resume_to_agent_ready` | start спящей → `resume-hint` → агент подключён и `pool_ready` |
+| `hibernate` | длительность `suspend --todisk`, размер LV состояния. *Не реализуется в MVP (решение Ильи 2026-10-31)* |
+| `resume_to_agent_ready` | start спящей → `resume-hint` → агент подключён и `pool_ready`. *Не реализуется в MVP (решение Ильи 2026-10-31)* |
 | `freeze` | QGA VSS freeze → thaw |
+
+*Как сделано* (`apps/bench/src/s9.ts`): метрики `create`, `create_to_agent_ready`, `first_boot_to_agent_ready`, `boot_to_agent_ready`, `start_to_qga`, `tunnel_connected`, `hard_stop_restart`, `freeze_ms`, `fork_snapshot_ms`, `fork_clone_ms`, `fork_start_to_agent_ready`, `fork_boot_to_agent_ready`, `fork_to_agent_ready` (определение — §24.3 R13), `fork_tunnel_connected`. `first_boot_to_desktop_ready` нет (фаза `desktop` — S10).
 
 ### 16.2 Цели (оценки, проверяются; цифры пишутся в §24)
 
-На `pve`, `local-lvm`, размеры §9: `first_boot_to_desktop_ready` ≤ 4 min; `boot_to_agent_ready` ≤ 60 s; `identity_change_boot` ≤ 2 min; `hibernate` ≤ 30 s; `resume_to_agent_ready` ≤ 20 s (claim-to-ready ≤ 30 s).
+На `pve`, `local-lvm`, размеры §9: `first_boot_to_desktop_ready` ≤ 4 min; `boot_to_agent_ready` ≤ 60 s; `identity_change_boot` ≤ 2 min; `hibernate` ≤ 30 s; `resume_to_agent_ready` ≤ 20 s (claim-to-ready ≤ 30 s). *Для MVP: `hibernate` и `resume_to_agent_ready` не измеряются; вместо claim-to-ready цель — `create_to_agent_ready` ≤ 5 min (хорошо 2–3 min).*
 
 ### 16.3 Эксперименты
 
@@ -635,9 +653,11 @@ Stop пользовательской sandbox через `suspend --todisk` со
 
 ### 18.1 S1 (`packages/pve`, `sbx-node`, runbook)
 
-1. **Право `VM.Console`** в роль `SbxPoC` на pool `sandbox` (решение master): `sendkey` для «Press any key» при сборке и offline-этапе.
+1. **Право `VM.Console`** в роль `SbxPoC` на pool `sandbox` (решение master): `sendkey` для «Press any key» при установке (offline-этапу не нужен, R17).
 2. **`DiskSet` с `efidisk0` и `tpmstate0`** проверяется на деле: `snapshot`, `cloneFromSnapshot`, `delete` для трёх дисков; опции `efitype`, `pre-enrolled-keys`, `ms-cert`, `version` переносятся. `cloneFromTemplate` клонирует `scsi0` и `efidisk0`, а `tpmstate0` создаёт новым через PVE API при `create` (§9). Новый том Proxmox называет `vm-<vmid>-disk-<k>` без тега `sbx`; `delete` удаляет его через `purge` и проверяет, что `vm-<vmid>-*` не осталось. В `sbx-bench s1` — прогон с Windows-шаблоном (fork загружается, `Get-Tpm` в fork `TpmReady`).
 3. **Белый список железа:** + `efidisk0`/`tpmstate0` опции, `vmstatestorage`; `machine` с версией копируется как есть.
+*П. 4–6 не реализуются в MVP (решение Ильи 2026-10-31, §14).* П. 1 сделан отдельной ролью `SbxConsole` (§24.3 R4).
+
 4. **`hibernate(vmid)`:** `POST status/suspend todisk=1`, ожидание задачи, проверка `lock: suspended`. Права есть: `VM.PowerMgmt`, `VM.Config.Disk`, `Datastore.AllocateSpace` на `local-lvm` (проверено в `PVE/API2/Qemu.pm`). `start` спящей VM — обычный `start`.
 5. **`sbx-node vm.discard-suspend <vmid>`** (решение master): для VM из диапазона, в pool `sandbox`, с тегом `sbx` и `lock: suspended` — `qm unlock`, удалить ключ `vmstate` и его том (`pvesm free`). Без этого VM со спящим состоянием не удалить: `skiplock` разрешён только root. `delete` вызывает её первой, если VM в `lock: suspended`.
 6. **Проверка `delete`:** кроме LV с тегом `sbx-vm-<vmid>` — нет LV `vm-<vmid>-state-*` (том состояния создаёт Proxmox, тега `sbx` у него нет).
@@ -671,6 +691,8 @@ Stop пользовательской sandbox через `suspend --todisk` со
 5. Admission при сборке (S5 §7.2 п. 4) учитывает `build_vm.memory_mb` 4096.
 
 ### 18.6 S6 (control plane)
+
+*П. 1–4 не реализуются в MVP (решение Ильи 2026-10-31, §14). Что сделано в worker и что осталось S6 — §24.5.*
 
 1. **Состояния machine:** `suspending` (усыпляется; RAM в `reserved` и `powered`) и `hibernated` (warm на диске; RAM нигде не учитывается). `hibernated` — предложение для пула (supply считает `allocating`, `provisioning`, `booting`, `warm`, `suspending`, `hibernated`).
 2. **`poolTargets.mode`:** `running | hibernated` (по умолчанию из `template.yaml pool.mode`). После `pool_ready` при `mode = hibernated` контроллер переводит machine в `suspending` → S1 `hibernate` → `hibernated`.
@@ -720,7 +742,7 @@ packages/pve/, services/node-agent/   + §18.1
 
 ## 21. Порядок реализации
 
-1. **Спайк (первым, решение master):** на `pve` в диапазоне PoC — Windows 11 VM с vTPM и OVMF (можно временно, вне пайплайна), `suspend --todisk` → `start`: состояние TPM и сессии сохраняется, время усыпления и пробуждения, размер тома состояния; `discard-suspend` (прототип `sbx-node`) и удаление; заодно — загружает ли OVMF Proxmox запись Windows Boot Manager из `efidisk0`, если в `boot` только `ide2` (§10.3), и работает ли постоянный job (`OBJ_PERMANENT`, §12.6). Итог: `pool.mode` для Windows и цифры в §24. Провал → цель `windows` = 0.
+1. *Не делается (решение Ильи 2026-10-31): пула через спящий режим нет. Проверки OVMF `bootorder` и `OBJ_PERMANENT` идут в сборке и в тестах агента на `pve`.* **Спайк (первым, решение master):** на `pve` в диапазоне PoC — Windows 11 VM с vTPM и OVMF (можно временно, вне пайплайна), `suspend --todisk` → `start`: состояние TPM и сессии сохраняется, время усыпления и пробуждения, размер тома состояния; `discard-suspend` (прототип `sbx-node`) и удаление; заодно — загружает ли OVMF Proxmox запись Windows Boot Manager из `efidisk0`, если в `boot` только `ide2` (§10.3), и работает ли постоянный job (`OBJ_PERMANENT`, §12.6). Итог: `pool.mode` для Windows и цифры в §24. Провал → цель `windows` = 0.
 2. S1 §18.1 (права, `DiskSet` с тремя дисками, `hibernate`, `discard-suspend`, `media.sha256`).
 3. Агент на Windows (§12) с CI на Windows-раннере.
 4. `sbx-tpl` `iso-install` и рецепт `windows` (ISO Ильи есть на `pve`).
@@ -749,8 +771,123 @@ packages/pve/, services/node-agent/   + §18.1
 - **Задача «при запуске», созданная пользователем,** может прочитать файлы секретов своей sandbox (после жёсткой остановки) или источника fork до очистки в `early`. Это принятый риск (master, 2026-10-29): fork наследует секреты по замыслу, `user` — администратор внутри VM, граница доверия — VM (§12.3). Проверка приёмки §20 п. 5 остаётся.
 - **Ознакомительный срок** шаблона (§17): с чего идёт отсчёт у клонов, измеряет реализация; до этого — пересборка не реже, чем раз в 60 дней (Windows 11 Evaluation).
 - **`SyncForegroundPolicy`** задерживает вход до появления сети; цена измеряется в `first_boot_to_desktop_ready` и `boot_to_agent_ready`.
-- **Пропущенный «Press any key»** на offline-этапе может загрузить запечатанный диск (§10.3); защита — немедленный `failed`.
+- **Windows Boot Manager игнорирует одноразовую запись WinPE** (§10.3): грузится Windows вместо WinPE; этап идёт до sysprep, поэтому это безвредно: запись ставится ещё раз, результат проверяет verify-offline.
 
-## 24. Результаты
+## 24. Результаты и решения реализации
 
-Заполняется после реализации: итог спайка §21 (включая проверку OVMF `bootorder`), таблица `sbx-bench s9`, принятые эксперименты §16.3, длительность сборки, размер шаблона в thin pool, выбранный способ установки OpenSSH, итог по `BootId` и specialize.
+План: `docs/plans/s9-windows.md` (раздел «Decisions taken here»). Ниже — что из реализации меняет или уточняет разделы выше.
+
+### 24.1 Решения Ильи 2026-10-31
+
+- Только Windows 11 (`windows`); Server Core — фаза 2 (§22).
+- Пула через спящий режим нет, спайка vTPM + `suspend --todisk` нет (§14, §21 п. 1). Create — холодный: клон шаблона + sysprep specialize на первой загрузке; ≤ 5 min допустимо, 2–3 min хорошо.
+- Граница доверия — VM. Секреты — по §12.8.
+- Никаких Tailscale и туннельных сервисов (cloudflared, ngrok и т.п.) ни в коде, ни в образе.
+- Слот шаблона на `pve` — 598 (`vmids: [598]`); 597 и 599 — Linux.
+
+### 24.2 Решения плана и реализации
+
+1. **Нет спящего режима** (план 1): из рецепта убраны `pool` и `size_default`; §14, §15 п. 15, метрики `hibernate`/`resume_to_agent_ready` §16, §18.1 п. 4–6, §18.6 п. 1–4 и `resume-hint` не реализованы.
+2. **Helper рабочего стола — в S10** (план 2): autologon `user` делает `identity apply`; `sbx-session.exe`, `\sbx\session`, `run\session.sock` и фаза `desktop` не сделаны. `readiness.required = ["identity", "claim", "secrets"]`. `CommandSpec.desktop = true` → `failed_precondition desktop_not_ready`.
+3. **Spec — в stdin shim-а, готовность — строка `READY`** в его stdout (`FAIL <текст>` или EOF — ошибка запуска), а не первое сообщение по сокету и не файл (§12.6): у Windows нет tmpfs, и нет курицы и яйца с сокетом. Протокол сокета (shimproto) не менялся.
+4. **Локальный admin-сокет** `C:\ProgramData\sbx-agent\run\admin.sock` (ACL SYSTEM + Administrators) всегда отдаёт полный API агента, как `--debug-listen` на Linux. Его клиенты — `sbx-agent exec` и `sbx-agent call` (verify и QGA-восстановление). `exec` по нему не ждёт отложенных секретов, но для не-SYSTEM пользователя проверка готовности загрузки остаётся. Коды выхода `exec`: 125 — ошибка агента или CLI, 127 — `START_FAILED`. `run\env.sock` (ACL SYSTEM, Administrators, `user`) отдаёт только env для `sbx-agent env --format pwsh` (HTTP `GET /env`).
+5. **Живость shim** — именованный mutex `Global\sbx-shim-<id>`, который держит shim; команда — постоянный job `Global\sbx-cmd-<id>`. `State`: mutex есть или в job есть процессы → `UnitActive`; job есть и пуст → `UnitInactive`; иначе `UnitNotFound`.
+6. **Инструменты скачиваются в сборочной VM** по официальным URL из `versions.toml` и проверяются `Get-FileHash` по закреплённому sha256 (в build ISO их нет).
+7. **Тесты агента на настоящей Windows:** `go test -c` для `GOOS=windows` (`services/guest-agent/test/windows/build-tests.sh`), бинарники — на ISO, подключённом к клону шаблона (R12), запуск от SYSTEM (`sbx-bench s9 agent-tests`). Job GitHub Actions на `windows-2025` (`workflow_dispatch`) — по желанию, не gate (уточнение §18.3 п. 4).
+8. **Свой vTPM у каждой machine** (§9): S1 `create` из шаблона не клонирует `tpmstate0`, а добавляет `tpmstate0=<storage>:1,version=v2.0` через PVE API; fork и `cloneFromSnapshot` копируют его.
+9. **Verify использует fork** для проверки смены идентичности (§15 п. 13): S1 snapshot с QGA VSS-хуком → `cloneFromSnapshot` вместо правки `smbios1`; источник выключается до старта fork (RAM). Fork готов, только когда `System/Info.hostname` — новое имя.
+10. **Загрузочный диск шаблона** — `scsi0` = `base-598-disk-1` (`SLOT_ORDER` efidisk0, scsi0, tpmstate0); проверки диска в сборщике берут индекс слота из `diskLayout`, а не `disk-0`.
+11. **Hostname из claim на Windows не применяется** (§11.3): `hostname_applied = false`, значение — env `SBX_HOSTNAME`.
+12. **Переключение версий — junction-ы NTFS** (`FSCTL_SET_REPARSE_POINT`): временный junction, удаление старого, rename; защищено `pending-update.json`. Пропавший `current` восстанавливают `early` и `rollback` (`RepairCurrent`: `to` из `pending-update.json` → `from` → `previous`).
+13. **Файлы секретов** (§12.8): на Windows содержимое `secret_files` хранится и в памяти агента (`SecretEnvInMemory`), чтобы `Thaw` после quiesce восстановил стёртые файлы; на Linux — нет. `PrepareStop`, когда файл открыт без совместного доступа, — успех с `secret_files_wiped = false` (не ошибка); стёрто всё, что можно. `mode` с любым битом записи → `user` read-write, иначе read-only (на Linux — точный `mode`). Записи Administrators в ACL нет: у `user` повышенный токен, и она дала бы запись в read-only секрет. Новый файл создаётся рядом с итоговым DACL и `FILE_ATTRIBUTE_TEMPORARY`; существующий перед заменой перезаписывается нулями на месте.
+14. **Запасной `bootId`** (§12.4): если счётчик `BootId` не читается — случайный UUID в volatile-ключе `HKLM\SOFTWARE\sbx-agent\Volatile` (SYSTEM only, живёт до перезагрузки). Время загрузки ядра не подходит: оно сдвигается при установке часов.
+15. **Бюджет заморозки агента зависит от ОС:** на Windows часть агента в `freeze()` (watchdog, хуки `*.ps1` до 5 s каждый, очистка секретов) ограничена 20 s, на Linux — 5 s. Из 30 s на весь `freeze()` (§12.10) 10 s остаются VSS. Lease quiesce должен быть больше 20 s (worker: 30 s). Очистка секретов — после хуков заморозки (хуки могут остановить процессы, держащие файлы); при thaw файлы восстанавливаются до хуков. Watchdog на Windows выполняет thaw-хуки, но файлы не восстанавливает (вне процесса агента нечем); `sbx-agent thaw --force` вызывает `System/Thaw` по admin-сокету.
+16. **Пути:** API файлов отвергает пути без диска (`\x`, `/x`) — `invalid_argument invalid_path`, а `cwd` команды отображает `\x` на диск профиля пользователя. Буква диска приводится к верхнему регистру.
+17. **`PRESHUTDOWN`** (§12.2): сначала завершает job-ы команд (`TerminateJobObject`, до 3 s), затем `PrepareStop` (очистка секретов, сброс `state.db`); всё в пределах 10 s из 15 s тайм-аута.
+18. **Failure actions SCM:** restart 1 s, restart 1 s, затем `cmd.exe /d /c if exist "<previous>\sbx-agent.exe" (… rollback) else ("<current>\sbx-agent.exe" rollback)`; сброс 120 s. То есть новая версия получает два перезапуска за 120 s, после этого — откат. Любой выход по инициативе агента (обновление, откат, смена идентичности) — код 75 без `SERVICE_STOPPED`. Пропавший `current` failure actions не лечат (путь образа не разрешается), это делает `early` (п. 19).
+19. **Обёртка `sbx-early.cmd`** — startup-скрипт GPO: запускает `sbx-agent early` из `current\`, иначе `previous\`, иначе новейшего `versions\<v>\`.
+20. **ACL каталогов агента:** `state\` — защищённый DACL только SYSTEM, `run\` — SYSTEM + Administrators; ставятся до чтения `early.json` и открытия сокетов. `early.json` с владельцем не SYSTEM/Administrators игнорируется.
+21. **Загрузка клона:** если служба видела идущий Windows Setup, после его конца она сразу делает boot step сама, без 60 s ожидания `early.json` (на первой загрузке клона startup-скрипт отработал во время Setup и ничего не сделал). Ошибка boot step → выход 75 и повтор через failure actions. Пока идентичность не готова, сокеты не открыты.
+22. **Шаги сборки:** `00-base`…`90-cleanup` в `infra/templates/_windows/steps/`; `60-desktop` — только экран блокировки, первый вход и Default User hive. Шаг `10-system` ставит OpenSSH только из FoD (`openssh.source = inbox`), запасной `github` не реализован.
+23. **Первая загрузка клона** (§10.2, §11.1): `SkipMachineOOBE`/`SkipUserOOBE`, заглушка `ComputerName=SBXTEMPLATE`, без `SystemLocale`; `SetupComplete.cmd` клона запускает `firstboot.ps1`, который возвращает то, что сбросил sysprep (службы, кодовые страницы, BCD, WinRE, NetBIOS, политика firewall). Проверено на клоне 26H2: OOBE проходит, autologon `user` работает; ACP применяется только после перезагрузки на переименование.
+24. **Путь с файлом вместо каталога в середине:** NTFS отвечает `ERROR_PATH_NOT_FOUND`, а Go определяет `syscall.ENOTDIR` как тот же код, поэтому на Windows это `not_found path_not_found`, если файловый сервис не увидел файл на пути сам (тогда `failed_precondition not_directory`, как на Linux).
+25. **Гранулярность обрезки вывода на Windows — 64 KiB** (sparse-файлы NTFS освобождают место блоками по 64 KiB); `available_from` всегда кратен 64 KiB, на Linux — 4 KiB.
+
+### 24.3 Решения координатора (R1–R17)
+
+| | Решение | Что меняет |
+|---|---|---|
+| R1 | Task 10 раньше Task 9 | порядок работ |
+| R2 | 30 s ожидания отложенных секретов в `Start` — только Windows (`PendingSecretsWait`: Linux 0, Windows 30 s) | §18.3 п. 5: на Linux не включено |
+| R3 | два параллельных трека (Go и TS) | порядок работ |
+| R4 | `setup.sh console` — отдельная роль `SbxConsole` (`VM.Console` на `/pool/sandbox`), а не право в `SbxPoC` | §18.1 п. 1 |
+| R5 | слот шаблона Windows — 598, только после удаления старого 598 в `s5-fix`; 597 не трогать | §24.1 |
+| R6 | эпилог pwsh отделён от скрипта пустой строкой (`\n\n`): завершающий backtick не съедает его | §12.6 |
+| R7 | shim сам заново разрешает программу и строит `BatchCommandLine`, передаёт разрешённый путь как application name; файл длинного скрипта pwsh читаем пользователем команды | §12.6 |
+| R8 | `offline.cmd` всегда кончается `wpeutil shutdown`; ошибки — `DONE errors <n>` в `sbx-offline.log`, их судит verify (§15 п. 8) | §10.3 |
+| R9 | ОС-независимый код сервера shim перенесён в файл `linux \|\| windows` без изменений | структура кода |
+| R10 | `DoSvc` остаётся Manual до `90-cleanup` (FoD качается через Delivery Optimization), выключается там вместе с `wuauserv`, `UsoSvc` | §8.1, §8.8 (итоговый образ не меняется) |
+| R11 | вторая перезагрузка после `40-coding-agents`, перед `50-sbx-agent`: DISM `ResetBase` в `90-cleanup` падает при отложенных операциях CBS, а перезагрузка после `50` запустила бы агент и `identity apply` на сборочной VM | §5 `steps` |
+| R12 | `agent-tests` подключает тестовые бинарники ISO-образом (`sbx-build-agenttests-<ts>.iso`, `ide2`), а не копирует по QGA | §24.2 п. 7 |
+| R13 | `fork_to_agent_ready` = длительность snapshot + (`cloneFromSnapshot` → start → готовность с новым именем); выключение источника между ними не входит; обе части в отчёте | §16 |
+| R14 | `env --format pwsh`: значения с управляющими символами (или не UTF-8) — `$env:K = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('<b64>'))`, остальные — `$env:K = '<v>'` с удвоенными `'`; `profile.ps1` принимает ровно эти две формы | §8.4, §12.7 |
+| R15 | offline-этап до sysprep (сборка 9 загрузила запечатанный диск): загрузка диска вместо WinPE выключается и повторяется (до 3 попыток), результат проверяется загрузкой диска до sysprep (verify-offline); `dmwappushservice` выключает specialize клона, а не offline-этап | §7 п. 6–7, §10.1, §10.3, §15.2 |
+| R16 | одна перезагрузка агента на переименование на первой загрузке клона (запасной вариант §23): Setup перезаписывает имя из specialize во всех опробованных вариантах; цена ошибки ~25 s на create | §10.2, §11.1, §11.2 п. 8, §15.1 п. 2 |
+| R17 | offline-этап грузит WinPE не с CD, а из одноразовой ramdisk-записи BCD (`bcdedit /bootsequence`) установленной, ещё не запечатанной Windows: после работы Windows OVMF пропускал «Press any key» 9 раз из 9; запись и `C:\sbx-pe` удаляет verify-offline; нажатия клавиш остаются только у установки; заменяет загрузку с CD и повторы R15 | §7 п. 4, 6, §10.1, §10.3, §18.1 п. 1, §23 |
+
+### 24.4 Результаты на `pve`
+
+| Что | Значение |
+|---|---|
+| Длительность сборки (`sbx-tpl build windows`, без verify / с verify) | ≈ 27 min / 34.7 min (сборка `20261031.9`; verify отдельно 7.5 min) |
+| Размер шаблона в thin pool (`base-598-disk-*`) | 16.6 GiB занято из 96 GiB (`diskUsedGiB`) |
+| Способ установки OpenSSH (FoD inbox, версия) | FoD inbox, `OpenSSH_9.5p2 for Windows` |
+| Счётчик `BootId` (надёжен / запасной путь) | надёжен: читается на клоне (`PrefetchParameters\BootId`), volatile-ключ агента не создаётся |
+| Перезагрузки на первой загрузке клона (specialize, §15 п. 2) | 3 загрузки после seal: 2 от Setup (sysprep, winlogon) + 1 переименование агентом (R16) |
+| Create: `create_to_agent_ready` (медиана / p95) | S1 create ≈ 2 s; start → агент готов: медиана 111.0 s, максимум 127.2 s (7 замеров: 5 попыток bench + 2 verify) |
+| Fork: `fork_to_agent_ready` (медиана / p95; snapshot + clone→ready) | start fork → агент готов под новым именем: 44.6 / 45.8 / 47.7 s (3 verify); snapshot ≈ 2–4 s; bench `--runs 3` не завершён (зависание thaw, §24.5) |
+| `freeze_ms` (QGA VSS freeze → thaw) | 544 / 614 / 1100 ms (окно pause + `lvcreate` в snapshot, 3 verify) |
+| `first_boot_to_agent_ready` / `boot_to_agent_ready` | медиана 111.0 s / 16.5–21.3 s; после hard stop 14.0–16.9 s (медиана 15.2 s) |
+
+### 24.5 Контракты для соседних областей
+
+- **S6.** Сделано в worker (S9 Task 4): тайм-аут shutdown для `os = windows` — 120 s; составной quiesce-хук (агент `fs: false`, `wipe_secret_files` для `kind = saved`, затем QGA VSS); результат `PrepareStop{secret_files_wiped}` пишется в прогресс stop. Осталось S6:
+  - `machines.secret_files_on_disk` и правила saved snapshot (§18.6 п. 5): `secrets_in_use` → `snapshot_requires_stop`, остановленная machine с `true` → `snapshot_requires_clean_stop`;
+  - saved snapshot с `auto_thawed` выбрасывать: истёкший lease между `Quiesce` агента и QGA `fsfreeze` восстанавливает файлы секретов до VSS;
+  - для Windows всегда отправлять `fs: false` (по умолчанию `fs` = true → `fs_freeze_unsupported`);
+  - `lease_ms` quiesce больше 20 s (§24.2 п. 15);
+  - повторная отправка `UpdateSecrets` при `readiness.changed{secrets: pending}` без смены `boot_id` (§18.6 п. 7) — в S9 не делалась.
+  - `stop` сразу после `shutdown` + `start` может упасть с `can't lock file ... got timeout`: qmeventd до 30 s держит lock VM, пока ждёт выхода старого QEMU (видно на `pve`). Worker считает это временной ошибкой (`TRANSIENT_4XX_RE`) и повторяет; повторы должны покрывать 30 s. Snapshot в этом окне ждёт lock внутри бюджета заморозки и падает по `freeze took … (budget …)`; worker должен повторять и это (или не снимать snapshot раньше 35 s после start, `VM_LOCK_AFTER_RESTART_MS`). `retryOnVmLock` из `@sbx/pve` — готовый повтор для stop и snapshot.
+  - **Открыто:** S1 snapshot работающей Windows-machine (QGA VSS freeze → pause → `lvcreate` → resume → thaw) примерно в половине попыток подвешивает thaw в qemu-ga: гость остаётся замороженным (12 min без записей на диск, `agent.log` и журналы Windows пусты), сокет QGA занят до hard stop (`ThawFailedError`). Видно в bench (snapshot через 35 s после рестарта, 3 из 3) и вручную (3 из 6); fork-snapshot verify прошёл во всех трёх прогонах, ручная последовательность `qm` + `lvcreate` на свежей загрузке — тоже. Нагрузка хоста, разогрев (freeze + thaw заранее) и время после загрузки причину не объясняют; она в qemu-ga/VSS Windows и не найдена. После hard stop NTFS целая, записи гостя после freeze потеряны. Защита S6 реализована в `s9-fix`: ограниченное ожидание thaw и hard stop при `ThawFailedError` (§24.6); первопричина остаётся открытой.
+- **S7.** Документация семантики Windows и коды ошибок §18.7, в том числе `desktop_not_ready` (пока на любой `desktop: true`), `secrets_in_use`, `fs_freeze_unsupported`; `hostname_applied = false`; `exec`/`call` — локальные инструменты, не API.
+- **S10.** Не сделано в S9: `sbx-session.exe`, задача `\sbx\session`, `run\session.sock`, фаза `desktop` (и `desktop` в `readiness.required`), запуск команд с `CommandSpec.desktop` в консольной сессии (§13). Есть: autologon `user`, без блокировки и мастеров первого входа.
+
+
+### 24.6 Исправления приёмки S9 (`s9-fix`, 2026-11-01 NZ / 2026-10-31 UTC)
+
+Решения и поведение:
+
+1. **Resumable upload / NTFS ACL.** На Windows commit всегда копирует содержимое в `writeTemp` рядом с целью, затем атомарно размещает файл. Rename из SYSTEM-only `state\uploads` больше не переносит его DACL. Исходный handle закрывается **до** удаления upload-файла: иначе Windows оставляет исходник и ломает восстановление результата после потерянного ответа. Unix сохраняет быстрый rename; cross-device copy также закрывает handle до unlink. Цена на Windows — дополнительное копирование содержимого при commit.
+2. **Обновление / NTFS ACL.** Подписанный пакет по-прежнему распаковывается и проверяется в защищённом staging. На Windows проверенное дерево копируется во временный каталог непосредственно под `VersionsDir`, затем переименовывается в версию: файлы и вложенный `trust` наследуют разрешения versions. Непроверенные файлы не публикуются в versions. Цена — одно дополнительное копирование небольшого пакета.
+3. `composeHooks.thaw()` отмечает отмену **до** ожидания хуков. Завершившийся поздно agent freeze повторно освобождается, VSS freeze после отмены не запускается.
+4. Saved Windows snapshot требует объявленную capability `system.quiesce.wipe_secrets.v1`. Подключённый агент без неё даёт постоянный `quiesce_failed` с названием capability до snapshot / freeze. Недоступный агент остаётся временной ошибкой; QGA-only fallback для saved Windows отсутствует.
+5. Замена секрета удерживает старый handle с DELETE до завершения rename. При неудаче обнулённый старый файл удаляется через delete-on-close, ошибка замены возвращается явно (не маскируется как «секрет оставлен в использовании»). Новые секреты по-прежнему не flush-ятся, старые перед заменой обнуляются и flush-ятся.
+6. Глобальный `sbx-bench cleanup` требует явного `--all-sandbox-resources` и без него отказывает до действий cleanup. Это **глобальный**, а не run-scoped режим; использовать его при параллельных работах нельзя. Сообщение прерывания verify рекомендует удалять только VMIDs и snapshot своего прогона, явно предупреждая о глобальном флаге.
+7. **Thaw safety.** S1 ограничивает каждую попытку thaw 10 s, по умолчанию 3 попытки и задержки 500 ms (до 31.5 s ожидания thaw; отдельно действуют тайм-ауты удаления LVs / PVE stop). После `ThawFailedError` worker под общим power lock проверяет исходного владельца lease и hard-stop-ит VM; recycled VMID другого владельца не останавливается. Операция получает постоянный `quiesce_failed` с сообщением hard-stopped / start again normally; если stop не удался, сообщение содержит обе ошибки. LVs неудачного snapshot удаляются S1. Fake-PVE тест проверяет stopped и успешный последующий обычный start; отдельный S1 тест проверяет никогда не возвращающий thaw и отсутствие snapshot LVs.
+
+Проверка на настоящем Windows-клоне **570** из read-only **598 / 20261031.9**:
+
+- RED: `TestUploadInheritsTargetACL` и `TestInstallInheritsVersionsACL` на старом коде оба упали с DACL, содержащим только SYSTEM. GREEN: все **19/19** Windows test binaries прошли, в том числе эти регрессии, потерянный commit-result и `TestReplaceFailureRemovesZeroedSecret`.
+- Собранный исправленный агент установлен подписанным `install-package` как `0.1.0+s9-fix.1` на клоне; шаблон не менялся. HTTP `PUT /files/uploads/s9fix?offset=0&user=user`, затем commit в `C:\Users\user\sbxt\up.txt` — 200 / 200. `icacls` файла: SYSTEM, Administrators и **user:(I)(F)**. Версия и бинарник: **BUILTIN\Users:(I)(RX)**. `exec --user user` читает `upload-readable`, manifest версии и запускает `current\sbx-agent.exe env --format pwsh`.
+- После claim с `S9_ACL=verified` команда `exec --user user -- pwsh -Command ...` с обычным профилем печатает `verified`; `env --format pwsh` содержит `S9_ACL`, `SBX_HOSTNAME` и `SBX_SANDBOX_ID`. Тем самым проверен и путь профиля после переключения версии.
+- Полный Windows-прогон выявил две переносимые ошибки старых тестов: проверка Unix mode 0644 для SSH CA на Windows и замена fake `/proc/net/tcp` через обычный `os.Rename`, конфликтующий с reader handle. Тесты исправлены: Unix mode проверяется только на Unix, fixture использует `os.Root.Rename` (POSIX rename semantics на Windows).
+
+**Расследование thaw (пункт 8), первопричина не устранена.** На клоне включён verbose QEMU-GA в `C:\Program Files\Qemu-ga\qemu-ga.log` (изменение только клона). QGA сообщает **109.1.0**; VirtIO SCSI / net / serial / RNG — **100.100.104.27100** (носитель 0.1.271). До freeze VSS и `QEMU Guest Agent VSS Provider` — Manual / Stopped, writers Stable / No error; по одним этим состояниям нельзя доказать незавершённый запуск. VSS Application events: только **8224, shutting down due to idle timeout**; событий crash QEMU-GA от SCM в проверке нет.
+
+Повтор: hard stop 12:40:40 UTC → start 12:40:41 → agent ready 12:40:56. Snapshot примерно через 53 s после start вновь дал **ThawFailedError за 27.927 s**; вызван hard stop, затем обычный start восстановил QGA и sbx-agent. Лог содержит `guest-fsfreeze-freeze`, затем `disabling logging due to filesystem freeze` (12:41:34); записи thaw в файле нет, потому что logging выключен при freeze. Собранный после восстановления verbose-лог содержит GLib `gspawn-win32.c:681 (might_be_console_process): should not be reached` и `error sending error response: Input/output error`; также наблюдался потерянный exec-status. Это отдельные наблюдения, **не доказанная причина VSS hang**. Verbose `prepare/check` создаёт сотни MB за минуты; читать лог нужно ограниченными byte ranges, обычный tail может не догонять растущий файл. В production verbose не включён.
+
+Надёжный readiness predicate / retry pattern не найден: объявлять `quiesce_ready` только из agent-ready, состояния Manual-служб или Stable writers оснований нет. Митигирующее изменение VSS не внесено, успешный `sbx-bench s9 --runs 3` не заявляется. Остаётся защита пункта 7; расследование проведено в пределах лимита 2 h, без перестройки шаблона или изменений хоста.
+
+Проверки: workspace build, typecheck, Biome; TS suites последовательно (worker 381 + 5 skipped, PVE 192, bench 44); Python SDK 77; Go race/vet/golangci-lint всех модулей, Linux cross-build; Windows build/vet/lint всех применимых модулей (node-agent Linux-only). Первоначальный параллельный API suite имел teardown-flake `terminating connection due to administrator command`; последовательный API прогон — 1008 passed.
+
+Итоговая очистка `pve`: VM 570 удалена, allocator snapshots своего прогона пусты; оба ISO (`sbx-build-agenttests-20261031123309.iso`, `sbx-build-s9-fix.iso`) удалены. Проверки `qm list`, `lvs -o lv_name,lv_tags` и `pvesm list local --content iso` подтвердили отсутствие моих VM/LVs/ISO и любых `sbx-snap-*` LVs. VM 596 другого потока оставлена без изменений.

@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -41,6 +41,9 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 	if err := validateID(id); err != nil {
 		return nil, false, err
 	}
+	if err := checkIDForOS(runtime.GOOS, id); err != nil {
+		return nil, false, err
+	}
 	if err := validateSpec(spec); err != nil {
 		return nil, false, err
 	}
@@ -60,6 +63,7 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 		return nil, false, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 	created := false
+	var env []string
 	if ok {
 		if rec.SpecHash != hash {
 			return nil, false, errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists,
@@ -80,6 +84,9 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 			return m.currentInfo(id)
 		}
 		// The retry launches: it takes a slot like a new command.
+		if err := m.waitSecrets(ctx, spec); err != nil {
+			return nil, false, err
+		}
 		m.mu.Lock()
 		full := m.runningMainLocked() >= m.opts.Config.MaxRunningCommands
 		m.mu.Unlock()
@@ -88,14 +95,18 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 				"at most %d commands may run at once", m.opts.Config.MaxRunningCommands)
 		}
 	} else {
-		rec, err = m.create(ctx, c, id, hash, spec)
+		if err := m.waitSecrets(ctx, spec); err != nil {
+			m.dropIfUnused(c)
+			return nil, false, err
+		}
+		rec, env, err = m.create(ctx, c, id, hash, spec)
 		if err != nil {
 			return nil, false, err
 		}
 		created = true
 	}
 
-	if err := m.launchLocked(ctx, c, rec, spec); err != nil {
+	if err := m.launchLocked(ctx, c, rec, spec, env); err != nil {
 		return nil, false, err
 	}
 	// A PTY that nobody attaches to closes PTYIdle after its creation.
@@ -106,11 +117,26 @@ func (m *Manager) Start(ctx context.Context, id string, spec *agentv1.CommandSpe
 	return info, created, err
 }
 
-// create checks the user and the limit and writes the STARTING record.
-// the record lock of c is held.
-func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec *agentv1.CommandSpec) (*store.Command, error) {
-	if _, err := m.lookupUser(spec); err != nil {
-		return nil, err
+// waitSecrets runs Options.WaitSecrets, if set, before a launch.
+func (m *Manager) waitSecrets(ctx context.Context, spec *agentv1.CommandSpec) error {
+	if m.opts.WaitSecrets == nil {
+		return nil
+	}
+	return m.opts.WaitSecrets(ctx, spec)
+}
+
+// create checks the user, the spec against the platform and the limit and
+// writes the STARTING record. It returns the environment when checking
+// the spec already built it (Windows), for the launch to reuse. the record
+// lock of c is held.
+func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec *agentv1.CommandSpec) (*store.Command, []string, error) {
+	u, err := m.lookupUser(spec)
+	if err != nil {
+		return nil, nil, err
+	}
+	env, err := m.prepareSpec(u, spec)
+	if err != nil {
+		return nil, nil, err
 	}
 	// Reserve a slot: mainAlive counts toward max_running_commands from
 	// here on, so concurrent Starts cannot overshoot the limit.
@@ -118,7 +144,7 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 	if m.runningMainLocked() >= m.opts.Config.MaxRunningCommands {
 		m.mu.Unlock()
 		m.dropIfUnused(c)
-		return nil, errs.Newf(connect.CodeResourceExhausted, errs.TooManyCommands,
+		return nil, nil, errs.Newf(connect.CodeResourceExhausted, errs.TooManyCommands,
 			"at most %d commands may run at once", m.opts.Config.MaxRunningCommands)
 	}
 	c.mainAlive = true
@@ -128,7 +154,7 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 	stored, keys, err := storedSpec(spec)
 	if err != nil {
 		m.release(c)
-		return nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
+		return nil, nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 	now := m.opts.Now().UTC()
 	rec := &store.Command{
@@ -152,12 +178,12 @@ func (m *Manager) create(ctx context.Context, c *command, id, hash string, spec 
 	defer cancel()
 	if err := m.st.PutCommand(dctx, rec); err != nil {
 		m.release(c)
-		return nil, storeError(err)
+		return nil, nil, storeError(err)
 	}
 	m.mu.Lock()
 	m.loadLiveLocked(c, rec)
 	m.mu.Unlock()
-	return rec, nil
+	return rec, env, nil
 }
 
 // release undoes the slot reservation of a Start that wrote no record.
@@ -190,31 +216,23 @@ func (m *Manager) setPTY(c *command, pty bool) {
 	m.mu.Unlock()
 }
 
-// launchLocked writes the shim spec, starts the unit and records the
-// outcome. the record lock of c is held and rec is STARTING without a trace of a launch.
-func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Command, spec *agentv1.CommandSpec) error {
+// launchLocked hands the shim its spec, starts the unit and records the
+// outcome. env is the command environment when create built it, else nil.
+// the record lock of c is held and rec is STARTING without a trace of a launch.
+func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Command, spec *agentv1.CommandSpec, env []string) error {
 	m.mu.Lock()
 	c.mainAlive, c.unitAlive = true, true
 	m.mu.Unlock()
 
-	ss, err := m.shimSpec(rec.ID, spec)
+	ss, err := m.shimSpec(rec.ID, spec, env)
 	if err != nil {
 		// The user vanished between two Starts of a STARTING record: the
 		// command cannot start (spec 9.2).
 		return m.startFailedLocked(ctx, c, err.Error())
 	}
-	specPath := m.opts.Layout.CmdSpec(rec.ID)
-	if err := os.MkdirAll(m.opts.Layout.CmdSpecDir, 0o700); err != nil {
+	lerr, err := m.launchShim(ctx, rec.ID, ss)
+	if err != nil {
 		return m.abortLaunch(c, err)
-	}
-	if err := fsutil.WriteJSONAtomic(specPath, ss, 0o600); err != nil {
-		return m.abortLaunch(c, err)
-	}
-	lerr := m.sup.Launch(ctx, rec.ID, m.opts.ShimPath, nil)
-	// The spec holds the environment: never leave it behind. A shim that
-	// has not read it yet fails before shim.json, which is "not launched".
-	if err := os.Remove(specPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		m.log.Warn("process: remove command spec", "id", rec.ID, "err", err)
 	}
 
 	switch {
@@ -249,6 +267,36 @@ func (m *Manager) launchLocked(ctx context.Context, c *command, rec *store.Comma
 		return m.startFailedLocked(ctx, c, "the shim did not start")
 	}
 	return err
+}
+
+// launchShim hands ss to the supervisor and starts the shim: over the
+// launch itself when the supervisor implements SpecLauncher (Windows),
+// else through the CmdSpec file, which is removed afterwards. err is a
+// failure before the supervisor was called; lerr is the launch result.
+func (m *Manager) launchShim(ctx context.Context, id string, ss shim.Spec) (lerr, err error) {
+	if sl, ok := m.sup.(supervisor.SpecLauncher); ok {
+		data, err := json.Marshal(ss)
+		if err != nil {
+			return nil, err
+		}
+		// The spec holds the environment.
+		defer clear(data)
+		return sl.LaunchSpec(ctx, id, m.opts.ShimPath, nil, data), nil
+	}
+	specPath := m.opts.Layout.CmdSpec(id)
+	if err := os.MkdirAll(m.opts.Layout.CmdSpecDir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := fsutil.WriteJSONAtomic(specPath, ss, 0o600); err != nil {
+		return nil, err
+	}
+	lerr = m.sup.Launch(ctx, id, m.opts.ShimPath, nil)
+	// The spec holds the environment: never leave it behind. A shim that
+	// has not read it yet fails before shim.json, which is "not launched".
+	if err := os.Remove(specPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		m.log.Warn("process: remove command spec", "id", id, "err", err)
+	}
+	return lerr, nil
 }
 
 // abortLaunch undoes the live state of a launch that never reached the
@@ -324,33 +372,33 @@ func (m *Manager) lookupUser(spec *agentv1.CommandSpec) (*User, error) {
 }
 
 // shimSpec resolves spec into what the shim runs: argv, env, cwd and the
-// credentials.
-func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec) (shim.Spec, error) {
+// credentials. env, when not nil, is the already built environment.
+func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec, env []string) (shim.Spec, error) {
 	u, err := m.lookupUser(spec)
 	if err != nil {
 		return shim.Spec{}, err
 	}
+	cwd, err := resolveCwd(u, spec.GetCwd())
+	if err != nil {
+		return shim.Spec{}, err
+	}
+	if env == nil {
+		env = m.opts.Env.Build(u, spec)
+	}
 	var argv []string
+	var script string
 	if sh, ok := spec.GetCmd().(*agentv1.CommandSpec_Shell); ok {
-		flag := "-lc"
-		if spec.Login != nil && !spec.GetLogin() {
-			flag = "-c"
+		login := spec.Login == nil || spec.GetLogin()
+		if argv, script, err = m.shellArgv(id, u, sh.Shell, login); err != nil {
+			return shim.Spec{}, err
 		}
-		argv = []string{"/bin/bash", flag, sh.Shell}
 	} else {
 		argv = slices.Clone(spec.GetArgv().GetArgs())
-	}
-	cwd := spec.GetCwd()
-	switch {
-	case cwd == "":
-		cwd = u.Home
-	case !path.IsAbs(cwd):
-		cwd = path.Join(u.Home, cwd)
 	}
 	ss := shim.Spec{
 		ID:            id,
 		Argv:          argv,
-		Env:           m.opts.Env.Build(u, spec),
+		Env:           env,
 		Cwd:           cwd,
 		UID:           u.UID,
 		GID:           u.GID,
@@ -359,6 +407,12 @@ func (m *Manager) shimSpec(id string, spec *agentv1.CommandSpec) (shim.Spec, err
 		TimeoutMs:     spec.GetTimeoutMs(),
 		KillLeftovers: spec.GetOnExit() == agentv1.OnExit_ON_EXIT_KILL_LEFTOVERS,
 		AgentVersion:  m.opts.AgentVersion,
+		User:          u.Name,
+		Desktop:       spec.GetDesktop(),
+		Script:        script,
+	}
+	if u.Windows != nil {
+		ss.User = u.Windows.Account
 	}
 	if p := spec.GetPty(); p != nil {
 		ss.PTY = &shim.PTYSpec{Cols: uint16(p.GetCols()), Rows: uint16(p.GetRows()), Term: p.GetTerm()} //nolint:gosec // validated
@@ -384,6 +438,17 @@ func validateID(id string) error {
 		default:
 			return errs.Newf(connect.CodeInvalidArgument, errs.InvalidArgument, "command_id %q must match [A-Za-z0-9:_.-]", id)
 		}
+	}
+	return nil
+}
+
+// checkIDForOS rejects ids a valid command id cannot be on goos: on
+// Windows a colon would make the command directory an alternate data
+// stream of the commands directory.
+func checkIDForOS(goos, id string) error {
+	if goos == "windows" && strings.Contains(id, ":") {
+		return errs.Newf(connect.CodeInvalidArgument, errs.InvalidArgument,
+			"command_id %q: ':' is not allowed on windows", id)
 	}
 	return nil
 }
@@ -415,6 +480,11 @@ func validateSpec(spec *agentv1.CommandSpec) error {
 	}
 	if p := spec.GetPty(); p != nil && (p.GetCols() > math.MaxUint16 || p.GetRows() > math.MaxUint16) {
 		return invalid("pty size %dx%d is too large", p.GetCols(), p.GetRows())
+	}
+	if spec.GetDesktop() {
+		// The desktop helper comes with S10 (S9 plan decision 2).
+		return errs.New(connect.CodeFailedPrecondition, errs.DesktopNotReady,
+			"desktop sessions are not available: the agent has no desktop helper")
 	}
 	return nil
 }

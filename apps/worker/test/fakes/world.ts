@@ -122,7 +122,12 @@ export class FakeAgentWorld implements VmLifecycle {
 				randomUUID(),
 				bootId,
 				randomUUID(),
-				["process.v1", "system.claim.v1", "system.quiesce.v1"],
+				[
+					"process.v1",
+					"system.claim.v1",
+					"system.quiesce.v1",
+					"system.quiesce.wipe_secrets.v1",
+				],
 			],
 		);
 		const epoch = Number(s.rows[0]?.epoch ?? 1);

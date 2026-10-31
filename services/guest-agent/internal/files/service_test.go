@@ -46,7 +46,7 @@ func TestFilesystemRPCs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi := res.Msg.GetInfo(); fi.GetType() != agentv1.FileType_FILE_TYPE_FILE || fi.GetSize() != 5 || fi.GetMode() != 0o640 || fi.GetPath() != link {
+	if fi := res.Msg.GetInfo(); fi.GetType() != agentv1.FileType_FILE_TYPE_FILE || fi.GetSize() != 5 || fi.GetMode() != infoMode("link", false, 0o640) || fi.GetPath() != link {
 		t.Fatalf("Stat follow = %v", fi)
 	}
 	res, err = h.fs.Stat(ctx, connect.NewRequest(&agentv1.StatRequest{Path: link, NoFollow: true}))
@@ -118,7 +118,7 @@ func TestFilesystemRPCs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !mres.Msg.GetCreated() || mres.Msg.GetInfo().GetType() != agentv1.FileType_FILE_TYPE_DIR || mres.Msg.GetInfo().GetMode() != 0o750 {
+	if !mres.Msg.GetCreated() || mres.Msg.GetInfo().GetType() != agentv1.FileType_FILE_TYPE_DIR || mres.Msg.GetInfo().GetMode() != infoMode("b", true, 0o750) {
 		t.Fatalf("MakeDir = %v", mres.Msg)
 	}
 	mres, err = h.fs.MakeDir(ctx, connect.NewRequest(&agentv1.MakeDirRequest{Path: dir}))
@@ -192,16 +192,16 @@ func TestFilesystemRPCs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cres.Msg.GetInfo().GetMode() != 0o700 {
+	if cres.Msg.GetInfo().GetMode() != infoMode("ch", true, 0o700) {
 		t.Fatalf("Chmod info = %v", cres.Msg.GetInfo())
 	}
 	for _, p := range []string{cdir, filepath.Join(cdir, "a"), filepath.Join(cdir, "a", "f")} {
 		st, err := os.Stat(p)
-		if err != nil || st.Mode().Perm() != 0o700 {
+		if err != nil || st.Mode().Perm() != statPerm(st.IsDir(), 0o700) {
 			t.Fatalf("%s mode = %v, %v", p, st.Mode(), err)
 		}
 	}
-	if st, _ := os.Stat(ext); st.Mode().Perm() != 0o644 {
+	if st, _ := os.Stat(ext); st.Mode().Perm() != statPerm(false, 0o644) {
 		t.Fatalf("Chmod followed a symlink: %v", st.Mode())
 	}
 	_, err = h.fs.Chmod(ctx, connect.NewRequest(&agentv1.ChmodRequest{Path: cdir, Owner: "no-such-user-sbx-test"}))

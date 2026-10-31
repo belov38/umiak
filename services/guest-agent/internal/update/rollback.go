@@ -11,16 +11,14 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 )
 
-// agentUnit is the unit Rollback restarts.
-const agentUnit = "sbx-agent.service"
-
 // stableFailurePause is how long Rollback waits before restarting a
 // version that has no pending update (spec 17.4 step 6).
 const stableFailurePause = 30 * time.Second
 
 // Rollback is `sbx-agent rollback [--to v]`, run by
-// sbx-agent-rollback.service when sbx-agent.service hits its start limit, or
-// by hand through the QEMU guest agent (spec 17.4 step 6, 17.6):
+// sbx-agent-rollback.service when sbx-agent.service hits its start limit (on
+// Windows by the run-command failure action of the service), or by hand
+// through the QEMU guest agent (spec 17.4 step 6, 17.6):
 //   - to set: current switches to the installed version to (previous becomes
 //     the old current), an unfinished update is abandoned, and the agent is
 //     restarted;
@@ -32,15 +30,15 @@ const stableFailurePause = 30 * time.Second
 //
 // The last two then reset the failed state and start the agent again, so a
 // broken stable version is restarted forever with a pause instead of
-// flipping versions. The start is --no-block: the rollback unit must not
+// flipping versions. The start does not wait: the rollback unit must not
 // wait for the agent's readiness, and the agent may fail again and trigger
 // this unit anew.
-func Rollback(l paths.Layout, to string, systemctl func(args ...string) error, sleep func(time.Duration)) error {
+func Rollback(l paths.Layout, to string, sm ServiceManager, sleep func(time.Duration)) error {
 	if to != "" {
 		if err := rollbackTo(l, to); err != nil {
 			return err
 		}
-		return restartAgent(systemctl, "restart")
+		return errors.Join(sm.ResetFailed(AgentService), sm.Restart(AgentService))
 	}
 	p, ok, err := readPending(l)
 	if err != nil {
@@ -55,7 +53,7 @@ func Rollback(l paths.Layout, to string, systemctl func(args ...string) error, s
 		slog.Warn("rollback: no pending update, restarting the agent after a pause", "pause", stableFailurePause)
 		sleep(stableFailurePause)
 	}
-	return errors.Join(rerr, restartAgent(systemctl, "start"))
+	return errors.Join(rerr, sm.ResetFailed(AgentService), sm.Start(AgentService))
 }
 
 // rollbackTo switches current to the installed version v.
@@ -79,13 +77,4 @@ func rollbackTo(l paths.Layout, v string) error {
 	}
 	slog.Info("rollback: switched version", "from", cur, "to", v)
 	return nil
-}
-
-// restartAgent clears the start limit of sbx-agent.service and starts (or
-// restarts) it without waiting.
-func restartAgent(systemctl func(args ...string) error, verb string) error {
-	return errors.Join(
-		systemctl("reset-failed", agentUnit),
-		systemctl(verb, "--no-block", agentUnit),
-	)
 }

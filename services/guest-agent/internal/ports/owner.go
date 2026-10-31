@@ -16,11 +16,11 @@ type owner struct {
 	user    string
 }
 
-// resolveOwners maps each port to the lowest-pid process holding one of its
+// owners maps each port to the lowest-pid process holding one of its
 // sockets, found through /proc/<pid>/fd. Processes that vanish or cannot be
 // read are skipped. It walks every process, so callers use it only when the
 // port set changed.
-func (s *Scanner) resolveOwners(groups []*portGroup) map[uint16]owner {
+func (p procSource) owners(groups []*portGroup) map[uint16]owner {
 	if len(groups) == 0 {
 		return nil
 	}
@@ -30,7 +30,7 @@ func (s *Scanner) resolveOwners(groups []*portGroup) map[uint16]owner {
 			portOf[in] = g.port
 		}
 	}
-	entries, err := os.ReadDir(s.opt.ProcDir)
+	entries, err := os.ReadDir(p.dir)
 	if err != nil {
 		return nil
 	}
@@ -44,7 +44,7 @@ func (s *Scanner) resolveOwners(groups []*portGroup) map[uint16]owner {
 	slices.Sort(pids)
 	owners := make(map[uint16]owner)
 	for _, pid := range pids {
-		dir := filepath.Join(s.opt.ProcDir, strconv.Itoa(pid))
+		dir := filepath.Join(p.dir, strconv.Itoa(pid))
 		fds, err := os.ReadDir(filepath.Join(dir, "fd"))
 		if err != nil {
 			continue

@@ -1,0 +1,4 @@
+# Microsoft's public generic product keys (KMS client / generic setup keys).
+# They select the edition during Setup and do not activate Windows. A real key
+# is passed to the build with --product-key-file and never goes to git.
+generic-pro = "VK7JG-NPHTM-C97JM-9MPGT-3V66T"

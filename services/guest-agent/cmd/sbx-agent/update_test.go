@@ -65,6 +65,7 @@ func updateDeps(t *testing.T, embedded ed25519.PublicKey) (deps, *cliSystemctl) 
 	sc := &cliSystemctl{}
 	return deps{
 		layout:         paths.ForRoot(t.TempDir()),
+		services:       update.SystemctlManager{Systemctl: sc.run},
 		systemctl:      sc.run,
 		sleep:          func(time.Duration) {},
 		executable:     os.Executable,
@@ -75,6 +76,9 @@ func updateDeps(t *testing.T, embedded ed25519.PublicKey) (deps, *cliSystemctl) 
 }
 
 func TestInstallPackageCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("installs systemd units; the Windows service install is covered by update.TestInstallCreatesServiceConfig")
+	}
 	pubA, privA := genKey(t)
 	pubB, privB := genKey(t)
 	d, sc := updateDeps(t, pubA)
@@ -150,8 +154,13 @@ func TestSelftestCLI(t *testing.T) {
 	if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, "v1", priv, pub)}, io.Discard, io.Discard); code != 0 {
 		t.Fatal("install failed")
 	}
-	// The binary runs through the CLI link.
-	d.executable = func() (string, error) { return d.layout.BinLink, nil }
+	// The binary runs through the CLI link, on Windows through the current
+	// junction on the system Path.
+	exe := d.layout.BinLink
+	if exe == "" {
+		exe = filepath.Join(d.layout.CurrentLink, update.BinaryName)
+	}
+	d.executable = func() (string, error) { return exe, nil }
 	d.version = "v1"
 
 	var out, errOut bytes.Buffer
@@ -167,5 +176,61 @@ func TestSelftestCLI(t *testing.T) {
 	errOut.Reset()
 	if code := runWith(ctx, d, []string{"selftest", "--schema", "1"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), `"dev"`) {
 		t.Errorf("dev binary: exit = %d, stderr = %q", code, errOut.String())
+	}
+}
+
+// TestRollbackLogsToFile: with a log directory (Windows) rollback, which the
+// service's failure action starts without a console, logs to rollback.log.
+func TestRollbackLogsToFile(t *testing.T) {
+	pub, priv := genKey(t)
+	d, _ := updateDeps(t, pub)
+	d.layout.LogDir = filepath.Join(t.TempDir(), "logs")
+	ctx := context.Background()
+	for _, v := range []string{"v1", "v2"} {
+		if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, v, priv, pub)}, io.Discard, io.Discard); code != 0 {
+			t.Fatalf("install %s failed", v)
+		}
+	}
+	if code := runWith(ctx, d, []string{"rollback", "--to", "v1"}, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if code := runWith(ctx, d, []string{"rollback", "--to", "v7"}, io.Discard, io.Discard); code != 1 {
+		t.Fatalf("rollback to a missing version: exit = %d", code)
+	}
+	b, err := os.ReadFile(filepath.Join(d.layout.LogDir, "rollback.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"switched version", "rollback failed"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("rollback.log misses %q:\n%s", want, b)
+		}
+	}
+}
+
+// TestRollbackRecreatesMissingCurrent runs rollback (as the failure action
+// does from previous\) with current gone: current is recreated before the
+// agent is started again.
+func TestRollbackRecreatesMissingCurrent(t *testing.T) {
+	pub, priv := genKey(t)
+	d, sc := updateDeps(t, pub)
+	ctx := context.Background()
+	for _, v := range []string{"v1", "v2"} {
+		if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, v, priv, pub)}, io.Discard, io.Discard); code != 0 {
+			t.Fatalf("install %s failed", v)
+		}
+	}
+	if err := os.Remove(d.layout.CurrentLink); err != nil {
+		t.Fatal(err)
+	}
+	var errOut bytes.Buffer
+	if code := runWith(ctx, d, []string{"rollback"}, io.Discard, &errOut); code != 0 {
+		t.Fatalf("exit = %d: %s", code, errOut.String())
+	}
+	if cur, _ := update.LinkVersion(d.layout.CurrentLink); cur != "v1" {
+		t.Errorf("current = %q, want v1 (previous)", cur)
+	}
+	if len(sc.calls) == 0 || sc.calls[len(sc.calls)-1][0] != "start" {
+		t.Errorf("systemctl = %v, want a start", sc.calls)
 	}
 }

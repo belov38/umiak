@@ -4,8 +4,22 @@ package quiesce
 
 import (
 	"os"
+	"time"
 
 	"golang.org/x/sys/unix"
+)
+
+// Platform behaviour of Quiesce: FIFREEZE and Docker pause; the secret
+// files are on a tmpfs, so wipe_secret_files is accepted and ignored.
+const (
+	freezesFS = true
+	// WipesSecretFiles is false: the secrets tmpfs never reaches a
+	// snapshot.
+	WipesSecretFiles = false
+	// freezeBudget caps the freeze steps of Quiesce (watchdog start,
+	// docker, hooks, sync, store, FIFREEZE): S1 allows 5 s for Quiesce. A
+	// shorter lease caps them at its deadline instead.
+	freezeBudget = 5 * time.Second
 )
 
 // FIFREEZE and FITHAW from linux/fs.h: _IOWR('X', 119, int) and

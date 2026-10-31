@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -124,6 +125,9 @@ func (m *Manager) Signal(ctx context.Context, req *agentv1.SignalRequest) (*agen
 		return nil, err
 	}
 	id := req.GetCommandId()
+	if err := m.checkSignal(id, sig); err != nil {
+		return nil, err
+	}
 	act, err := m.needsAction(id)
 	if err != nil || !act {
 		return m.infoOrErr(id, err)
@@ -353,6 +357,7 @@ func (m *Manager) Remove(ctx context.Context, id string) (bool, error) {
 	if alive {
 		return false, errs.Newf(connect.CodeFailedPrecondition, errs.CommandRunning, "leftovers of %q still run", id)
 	}
+	m.releaseUnit(ctx, id)
 	dctx, cancel := m.durableCtx(ctx)
 	defer cancel()
 	if err := m.st.DeleteCommand(dctx, id); err != nil {
@@ -363,6 +368,17 @@ func (m *Manager) Remove(ctx context.Context, id string) (bool, error) {
 	}
 	m.forget(c)
 	return true, nil
+}
+
+// releaseUnit stops what is left of the unit of a removed command. On
+// Windows a shim that died leaves its empty permanent job behind, which
+// would make every later Start of the id ErrUnitExists until a reboot
+// (S9 spec 12.6); on Linux the unit is already collected and Stop does
+// nothing. A failure only costs that, so it is logged.
+func (m *Manager) releaseUnit(ctx context.Context, id string) {
+	if err := m.sup.Stop(ctx, id); err != nil && !errors.Is(err, supervisor.ErrUnitNotFound) {
+		m.log.Warn("process: release the unit of a removed command", "id", id, "err", err)
+	}
 }
 
 // unitStillAlive checks the unit of an exited command: the live state may
@@ -415,6 +431,44 @@ func shimError(err error) error {
 	default:
 		return errs.New(connect.CodeUnavailable, errs.ShimUnavailable, err.Error())
 	}
+}
+
+// checkSignal rejects a signal the platform cannot deliver to command id
+// before it reaches the shim.
+func (m *Manager) checkSignal(id string, sig syscall.Signal) error {
+	err := signalSupported(runtime.GOOS, int(sig), false)
+	if err == nil || signalSupported(runtime.GOOS, int(sig), true) != nil {
+		return err
+	}
+	// Supported with a PTY only: it depends on the command.
+	rec, err := m.getRecord(id)
+	if err != nil {
+		return err
+	}
+	return signalSupported(runtime.GOOS, int(sig), rec.PTY)
+}
+
+// signalSupported reports whether goos can deliver sig (a Linux signal
+// number) to a command with or without a PTY. Linux delivers all of them.
+// Windows (S9 spec 12.6) maps SIGINT and SIGTERM to CTRL_BREAK or 0x03 into
+// the ConPTY, SIGKILL to TerminateJobObject and SIGHUP of a PTY command to
+// ClosePseudoConsole; the rest is invalid_argument unsupported_signal.
+func signalSupported(goos string, sig int, pty bool) error {
+	if goos != "windows" {
+		return nil
+	}
+	switch sig {
+	case int(sigINT), int(sigTERM), int(sigKILL):
+		return nil
+	case int(sigHUP):
+		if pty {
+			return nil
+		}
+		return errs.New(connect.CodeInvalidArgument, errs.UnsupportedSignal,
+			"SIGHUP needs a pty on windows (it closes the pseudo console)")
+	}
+	return errs.Newf(connect.CodeInvalidArgument, errs.UnsupportedSignal,
+		"signal %d is not supported on windows: use SIGINT, SIGTERM, SIGKILL or SIGHUP (pty)", sig)
 }
 
 // signalNumbers maps the Linux signal names (without "SIG") to numbers.

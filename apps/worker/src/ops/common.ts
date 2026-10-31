@@ -1,3 +1,4 @@
+import type { TemplateOs } from "@sbx/config";
 import {
 	insertSandboxEvent,
 	SECRET_FILE_DEFAULT_MODE,
@@ -78,6 +79,18 @@ export async function currentMachine(
 	const m = await loadMachine(ctx.pool, s.machine_id);
 	if (m === null) throw new MachineStateConflict(s.machine_id, "not found");
 	return m;
+}
+
+/** OS of the machine's template build (`template_builds.os`). */
+export async function machineOs(
+	q: Pick<pg.Pool, "query">,
+	m: Pick<MachineRow, "template_build_id">,
+): Promise<TemplateOs> {
+	const r = await q.query<{ os: TemplateOs }>(
+		"SELECT os FROM runtime.template_builds WHERE id = $1",
+		[m.template_build_id],
+	);
+	return r.rows[0]?.os ?? "linux";
 }
 
 /** VMID of a machine that has a VM; `MachineStateConflict` otherwise. */

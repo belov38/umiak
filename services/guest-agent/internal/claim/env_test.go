@@ -3,6 +3,7 @@ package claim
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -126,6 +127,9 @@ func TestSecretsDigest(t *testing.T) {
 }
 
 func TestEnvBuilderOrder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Linux base env; Windows: TestEnvBuilderWindowsLayers")
+	}
 	h := newHarness(t)
 	req := fullRequest()
 	req.Env = map[string]string{"SBX": "claim", "A": "claim", "B": "claim", "C": "claim", "HOME": "/claim"}
@@ -263,4 +267,26 @@ func TestWatchDocker(t *testing.T) {
 			t.Fatal("watcher did not stop")
 		}
 	})
+}
+
+func TestSessionEnv(t *testing.T) {
+	h := newHarness(t)
+	if got := h.m.EnvBuilder().SessionEnv(); !slices.Equal(got, []string{"SBX=1", "SBX_ENV_APPLIED=1"}) {
+		t.Errorf("before the claim: %q", got)
+	}
+	req := fullRequest()
+	req.Env["SBX_SANDBOX_ID"] = "from-claim-env"
+	if _, err := h.m.Claim(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	got := h.m.EnvBuilder().SessionEnv()
+	for _, want := range []string{"SBX=1", "SBX_ENV_APPLIED=1", "SBX_PORT_DOMAIN=sbx.example.com", "FOO=bar",
+		"TOKEN=" + secretEnvValue, "SBX_SANDBOX_ID=from-claim-env"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("session env %q has no %q", got, want)
+		}
+	}
+	if !slices.IsSorted(got) {
+		t.Errorf("session env not sorted: %q", got)
+	}
 }

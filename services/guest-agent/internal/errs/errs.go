@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"syscall"
 
@@ -71,11 +72,40 @@ const (
 	// filesystem frozen by someone else.
 	StoreBusy = "store_busy"
 
+	// UnsupportedSignal (invalid_argument): the platform cannot deliver the
+	// requested signal to a command (Windows).
+	UnsupportedSignal = "unsupported_signal"
+	// UnsafeBatchArgs (invalid_argument): an argv for a .cmd or .bat file
+	// cannot be passed to cmd.exe without changing its meaning.
+	UnsafeBatchArgs = "unsafe_batch_args"
+	// FileInUse (failed_precondition): the file is held open by another
+	// process and cannot be replaced or deleted (Windows).
+	FileInUse = "file_in_use"
+	// SecretsInUse (failed_precondition): a secret file is held open, so
+	// Quiesce with wipe_secret_files rolled back.
+	SecretsInUse = "secrets_in_use"
+	// SecretsPending: the secrets were not sent again after an agent
+	// restart. Process/Start answers unavailable (retryable) after waiting
+	// for them (S9 spec 12.8); failed_precondition when the secret files
+	// are not restored yet after a restart during a lease.
+	SecretsPending = "secrets_pending"
+	// FsFreezeUnsupported (failed_precondition): Quiesce with fs=true on a
+	// platform without a filesystem freeze (Windows).
+	FsFreezeUnsupported = "fs_freeze_unsupported"
+	// DesktopNotReady (failed_precondition): CommandSpec.desktop is set but
+	// the agent has no interactive desktop session.
+	DesktopNotReady = "desktop_not_ready"
+
 	// PermissionDenied and Internal have no entry in the spec list; they keep
 	// the JSON body of /files uniform.
 	PermissionDenied = "permission_denied"
 	Internal         = "internal"
 )
+
+// ErrSecretInUse reports a secret file held open by another process without
+// sharing write and delete access, so it cannot be wiped (Windows). The
+// claim manager returns it; quiesce maps it to secrets_in_use.
+var ErrSecretInUse = errors.New("secret file is in use")
 
 // New builds a Connect error with an ErrorDetail.
 func New(code connect.Code, detailCode, msg string) *connect.Error {
@@ -87,9 +117,64 @@ func Newf(code connect.Code, detailCode, format string, args ...any) *connect.Er
 	return New(code, detailCode, fmt.Sprintf(format, args...))
 }
 
-// FromErrno maps a filesystem error to a Connect error (spec section 11.1).
-// A *connect.Error anywhere in the chain is returned as is; nil maps to nil.
-// Unknown errors become internal.
+// NewRetryable is New with ErrorDetail.retryable set regardless of the code,
+// for conditions the caller may retry that are not unavailable (such as
+// failed_precondition file_in_use).
+func NewRetryable(code connect.Code, detailCode, msg string) *connect.Error {
+	return rpcconv.NewRetryableError(code, detailCode, msg)
+}
+
+// mapping is the Connect error an errno maps to.
+type mapping struct {
+	code      connect.Code
+	detail    string
+	retryable bool
+}
+
+var (
+	notDirectory = mapping{code: connect.CodeFailedPrecondition, detail: NotDirectory}
+	noSpace      = mapping{code: connect.CodeResourceExhausted, detail: NoSpace}
+	crossDevice  = mapping{code: connect.CodeFailedPrecondition, detail: CrossDevice}
+	notEmpty     = mapping{code: connect.CodeFailedPrecondition, detail: FailedPrecondition}
+)
+
+// errnoTable maps the errnos that the fs sentinels do not cover (and a
+// non-empty directory, which they cover as fs.ErrExist). The constants exist
+// on every OS: on Windows package syscall invents them and portable agent
+// code returns them. errs_windows.go adds the Win32 codes.
+var errnoTable = map[syscall.Errno]mapping{
+	syscall.ENOTEMPTY: notEmpty,
+	syscall.ENOTDIR:   notDirectory,
+	syscall.EISDIR:    {code: connect.CodeFailedPrecondition, detail: IsDirectory},
+	syscall.ENOSPC:    noSpace,
+	syscall.EDQUOT:    noSpace,
+	syscall.EXDEV:     crossDevice,
+}
+
+// lookupErrno returns the table entry of the first errno in err's chain.
+// osErrnoTable comes first: on Windows some invented errnos of package
+// syscall are real Win32 codes (syscall.ENOTDIR is ERROR_PATH_NOT_FOUND).
+func lookupErrno(err error) (mapping, bool) {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return mapping{}, false
+	}
+	if m, ok := osErrnoTable[errno]; ok {
+		return m, true
+	}
+	m, ok := errnoTable[errno]
+	return m, ok
+}
+
+// FromErrno maps a filesystem error to a Connect error (spec section 11.1,
+// S9 spec section 12.9 for Windows). A *connect.Error anywhere in the chain
+// is returned as is; nil maps to nil. The first errno in the chain maps by
+// errnoTable and osErrnoTable; otherwise not-found, already-exists and
+// permission errors map by fs.ErrNotExist, fs.ErrExist and fs.ErrPermission,
+// which also cover their Win32 codes. The tables come first so that a
+// non-empty directory, which fs.ErrExist also matches, is failed_precondition;
+// the other entries do not overlap the sentinels. Unknown errors become
+// internal.
 func FromErrno(err error) *connect.Error {
 	if err == nil {
 		return nil
@@ -98,35 +183,40 @@ func FromErrno(err error) *connect.Error {
 	if errors.As(err, &cerr) {
 		return cerr
 	}
-	var errno syscall.Errno
-	if !errors.As(err, &errno) {
-		return New(connect.CodeInternal, Internal, err.Error())
-	}
 	msg := err.Error()
-	switch errno {
-	case syscall.ENOENT:
-		return New(connect.CodeNotFound, PathNotFound, msg)
-	case syscall.EEXIST:
-		return New(connect.CodeAlreadyExists, AlreadyExists, msg)
-	case syscall.ENOTDIR:
-		return New(connect.CodeFailedPrecondition, NotDirectory, msg)
-	case syscall.EISDIR:
-		return New(connect.CodeFailedPrecondition, IsDirectory, msg)
-	case syscall.ENOSPC, syscall.EDQUOT:
-		return New(connect.CodeResourceExhausted, NoSpace, msg)
-	case syscall.EACCES, syscall.EPERM:
-		return New(connect.CodePermissionDenied, PermissionDenied, msg)
-	case syscall.EXDEV:
-		return New(connect.CodeFailedPrecondition, CrossDevice, msg)
-	default:
+	m, ok := lookupErrno(err)
+	if !ok {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			m, ok = mapping{code: connect.CodeNotFound, detail: PathNotFound}, true
+		case errors.Is(err, fs.ErrExist):
+			m, ok = mapping{code: connect.CodeAlreadyExists, detail: AlreadyExists}, true
+		case errors.Is(err, fs.ErrPermission):
+			m, ok = mapping{code: connect.CodePermissionDenied, detail: PermissionDenied}, true
+		}
+	}
+	switch {
+	case !ok:
 		return New(connect.CodeInternal, Internal, msg)
+	case m.retryable:
+		return NewRetryable(m.code, m.detail, msg)
+	default:
+		return New(m.code, m.detail, msg)
 	}
 }
 
-// IsNoSpace reports whether err is a full disk or an exceeded quota (ENOSPC
-// or EDQUOT anywhere in the chain).
+// IsNoSpace reports whether err is a full disk or an exceeded quota (ENOSPC,
+// EDQUOT or, on Windows, ERROR_DISK_FULL and its relatives anywhere in the
+// chain).
 func IsNoSpace(err error) bool {
-	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
+	for _, t := range []map[syscall.Errno]mapping{errnoTable, osErrnoTable} {
+		for errno, m := range t {
+			if m == noSpace && errors.Is(err, errno) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Wrap maps a local failure of the step what: a *connect.Error in the chain

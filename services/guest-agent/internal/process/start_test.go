@@ -2,10 +2,14 @@ package process
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -223,12 +227,33 @@ func TestStartInvalid(t *testing.T) {
 
 func TestStartShellAndCwd(t *testing.T) {
 	h := newHarness(t)
-	home := mustUser(t, h.user).Home
+	u := mustUser(t, h.user)
+	home := u.Home
+	// The shell is bash on Linux, pwsh on Windows (TestShellArgvPwsh), where
+	// a path rooted without a drive is on the drive of the home.
+	shellArgv := func(id, script string, login bool) []string {
+		if runtime.GOOS != "windows" {
+			flag := "-lc"
+			if !login {
+				flag = "-c"
+			}
+			return []string{"/bin/bash", flag, script}
+		}
+		argv, _, err := h.m.shellArgv(id, u, script, login)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return argv
+	}
+	tmp := "/tmp"
+	if runtime.GOOS == "windows" {
+		tmp = filepath.VolumeName(home) + `\tmp`
+	}
 
 	spec := &agentv1.CommandSpec{Cmd: &agentv1.CommandSpec_Shell{Shell: "echo hi"}, Cwd: "work"}
 	h.start("c1", spec)
 	ss := h.run("c1").Spec()
-	if !slices.Equal(ss.Argv, []string{"/bin/bash", "-lc", "echo hi"}) || ss.Cwd != home+"/work" {
+	if !slices.Equal(ss.Argv, shellArgv("c1", "echo hi", true)) || ss.Cwd != filepath.Join(home, "work") {
 		t.Fatalf("argv %v cwd %q", ss.Argv, ss.Cwd)
 	}
 
@@ -237,7 +262,7 @@ func TestStartShellAndCwd(t *testing.T) {
 		OnExit: agentv1.OnExit_ON_EXIT_KILL_LEFTOVERS, TimeoutMs: 1500, Stdin: true}
 	h.start("c2", spec)
 	ss = h.run("c2").Spec()
-	if !slices.Equal(ss.Argv, []string{"/bin/bash", "-c", "echo hi"}) || ss.Cwd != "/tmp" {
+	if !slices.Equal(ss.Argv, shellArgv("c2", "echo hi", false)) || ss.Cwd != tmp {
 		t.Fatalf("argv %v cwd %q", ss.Argv, ss.Cwd)
 	}
 	if !ss.KillLeftovers || ss.TimeoutMs != 1500 || !ss.Stdin || ss.AgentVersion != "1.2.3" {
@@ -456,5 +481,120 @@ func TestStartRetryRespectsLimit(t *testing.T) {
 	})
 	if st := h.start("c1", spec).GetCommand().GetState(); st != agentv1.CommandState_COMMAND_STATE_RUNNING {
 		t.Fatalf("retry after the slot freed: state %v, want RUNNING", st)
+	}
+}
+
+// A supervisor that takes the spec with the launch (Windows) gets the
+// resolved spec as JSON; nothing is written under CmdSpecDir.
+func TestStartUsesSpecLauncher(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.Supervisor = supervisor.FakeSpecLauncher{Fake: o.Supervisor.(*supervisor.Fake)}
+	})
+	spec := argvSpec("/bin/sleep", "100")
+	spec.Env = map[string]string{"SECRET": "v1"}
+	if st := h.start("c1", spec).GetCommand().GetState(); st != agentv1.CommandState_COMMAND_STATE_RUNNING {
+		t.Fatalf("state %v, want RUNNING", st)
+	}
+	ls := h.fake.Launches()
+	if len(ls) != 1 || len(ls[0].Spec) == 0 {
+		t.Fatalf("launches %+v, want one with the spec bytes", ls)
+	}
+	var ss shim.Spec
+	if err := json.Unmarshal(ls[0].Spec, &ss); err != nil {
+		t.Fatal(err)
+	}
+	if ss.ID != "c1" || !slices.Equal(ss.Argv, []string{"/bin/sleep", "100"}) || !slices.Contains(ss.Env, "SECRET=v1") {
+		t.Fatalf("spec %+v", ss)
+	}
+	if ss.User != h.user {
+		t.Fatalf("spec user %q, want %q", ss.User, h.user)
+	}
+	if !slices.Equal(h.run("c1").Spec().Argv, ss.Argv) {
+		t.Fatalf("fake shim got argv %v", h.run("c1").Spec().Argv)
+	}
+	if exists(h.layout.CmdSpecDir) {
+		t.Fatalf("%s created with a spec launcher", h.layout.CmdSpecDir)
+	}
+}
+
+// Decision 2: no agent has the desktop helper yet (S10).
+func TestStartDesktopNotReady(t *testing.T) {
+	h := newHarness(t)
+	spec := argvSpec("/bin/true")
+	spec.Desktop = true
+	_, err := h.client.Start(h.ctx(), connect.NewRequest(&agentv1.StartRequest{CommandId: "c1", Spec: spec}))
+	wantCode(t, err, connect.CodeFailedPrecondition, errs.DesktopNotReady)
+	if n := len(h.fake.Launches()); n != 0 {
+		t.Fatalf("launches = %d, want 0", n)
+	}
+	if _, err := h.get("c1"); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("Get after a refused Start: %v", err)
+	}
+}
+
+// A colon names an alternate data stream on Windows: such an id never
+// reaches the shim there.
+func TestCommandIDForOS(t *testing.T) {
+	for _, tt := range []struct {
+		goos, id string
+		ok       bool
+	}{
+		{"windows", "c1", true},
+		{"windows", "a.b-c_d", true},
+		{"windows", "a:b", false},
+		{"windows", ":", false},
+		{"linux", "a:b", true},
+		{"darwin", "a:b", true},
+	} {
+		err := checkIDForOS(tt.goos, tt.id)
+		if tt.ok {
+			if err != nil {
+				t.Errorf("%s %q: %v", tt.goos, tt.id, err)
+			}
+			continue
+		}
+		wantCode(t, err, connect.CodeInvalidArgument, errs.InvalidArgument)
+	}
+}
+
+func TestStartWaitsForSecrets(t *testing.T) {
+	var calls atomic.Int32
+	var pendingSecrets atomic.Bool
+	pendingSecrets.Store(true)
+	h := newHarness(t, func(o *Options) {
+		o.WaitSecrets = func(_ context.Context, spec *agentv1.CommandSpec) error {
+			calls.Add(1)
+			if spec.GetArgv().GetArgs()[0] != "/bin/sleep" {
+				t.Errorf("WaitSecrets got spec %v", spec)
+			}
+			if pendingSecrets.Load() {
+				return errs.New(connect.CodeUnavailable, errs.SecretsPending, "secrets pending")
+			}
+			return nil
+		}
+	})
+	spec := argvSpec("/bin/sleep", "100")
+	_, err := h.client.Start(h.ctx(), connect.NewRequest(&agentv1.StartRequest{CommandId: "c1", Spec: spec}))
+	wantCode(t, err, connect.CodeUnavailable, errs.SecretsPending)
+	if _, err := h.get("c1"); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("refused command has a record: %v", err)
+	}
+	if n := len(h.fake.Launches()); n != 0 {
+		t.Fatalf("launches = %d, want 0", n)
+	}
+
+	pendingSecrets.Store(false)
+	if res := h.start("c1", spec); !res.GetCreated() {
+		t.Fatal("created = false after the secrets arrived")
+	}
+
+	// A repeat of an existing command answers without waiting.
+	pendingSecrets.Store(true)
+	before := calls.Load()
+	if res := h.start("c1", spec); res.GetCreated() {
+		t.Fatal("repeat created = true")
+	}
+	if calls.Load() != before {
+		t.Error("a repeat of an existing command waited for the secrets")
 	}
 }

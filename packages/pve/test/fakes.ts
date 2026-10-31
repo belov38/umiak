@@ -26,6 +26,8 @@ export class FakeNode implements NodeOps {
 	vmfiles: string[] = [];
 	fail: Record<string, Error> = {};
 	handlers: Record<string, Handler> = {};
+	/** VM configs lv.adopt reads, as sbx-node reads /etc/pve/qemu-server/<vmid>.conf. */
+	pve: { vms: Map<number, { config: Record<string, string> }> } | undefined;
 
 	constructor(log: string[] = []) {
 		this.log = log;
@@ -43,7 +45,26 @@ export class FakeNode implements NodeOps {
 			case "pool.usage":
 				return this.usage as T;
 			case "lv.snapshot": {
-				const items = a.items as { name: string; tags: string[] }[];
+				const items = a.items as {
+					origin: string;
+					name: string;
+					tags: string[];
+				}[];
+				// Like sbx-node, a known vm-<id>-* origin must carry sbx and sbx-vm-<id>.
+				for (const it of items) {
+					const id = /^vm-(\d+)-/.exec(it.origin)?.[1];
+					const l = this.lvs.find((x) => x.name === it.origin);
+					if (
+						id &&
+						l &&
+						!(l.tags.includes("sbx") && l.tags.includes(`sbx-vm-${id}`))
+					)
+						throw new NodeOpsError(
+							op,
+							"forbidden",
+							`origin "${it.origin}" is not a sandbox disk`,
+						);
+				}
 				for (const it of items) this.lvs.push({ name: it.name, tags: it.tags });
 				return { created: items.map((i) => i.name) } as T;
 			}
@@ -58,6 +79,8 @@ export class FakeNode implements NodeOps {
 				this.lvs = this.lvs.filter((l) => !names.includes(l.name));
 				return { removed: names, missing: [] } as T;
 			}
+			case "lv.adopt":
+				return this.#adopt(Number(a.vmid)) as T;
 			case "dhcp.leases":
 				return { leases: this.leases, ethers: this.ethers } as T;
 			case "dhcp.release": {
@@ -71,6 +94,30 @@ export class FakeNode implements NodeOps {
 			default:
 				throw new NodeOpsError(op, "bad_request", "unknown op in fake");
 		}
+	}
+
+	/** Tags the vm-<vmid>-disk-N LVs the VM config attaches, as sbx-node's lv.adopt. */
+	#adopt(vmid: number): { tagged: string[]; already: string[] } {
+		const config = this.pve?.vms.get(vmid)?.config;
+		if (!config || config.template === "1")
+			throw new NodeOpsError("lv.adopt", "forbidden", `VM ${vmid} refused`);
+		const tagged: string[] = [];
+		const already: string[] = [];
+		for (const [k, v] of Object.entries(config)) {
+			if (!/^(efidisk|tpmstate|scsi|sata|virtio|ide)\d+$/.test(k)) continue;
+			const name = /^[^:,]+:([^,]+)/.exec(v)?.[1] ?? "";
+			const l = this.lvs.find((x) => x.name === name);
+			if (!l || !new RegExp(`^vm-${vmid}-disk-\\d+$`).test(name)) continue;
+			const missing = ["sbx", `sbx-vm-${vmid}`].filter(
+				(t) => !l.tags.includes(t),
+			);
+			if (missing.length === 0) already.push(name);
+			else {
+				l.tags = [...l.tags, ...missing];
+				tagged.push(name);
+			}
+		}
+		return { tagged, already };
 	}
 
 	close(): void {}
@@ -143,6 +190,10 @@ export class FakePve {
 	templateConfig: Record<string, string> = { ...TEMPLATE_CONFIG };
 	fail: Record<string, Error> = {};
 	keepIpamOnDelete = false;
+	/** Guest filesystem state reported by fsfreeze-status; a test sets false to model a VSS timeout. */
+	guestFrozen = false;
+	/** When set, PVE-allocated volumes land in its LV list and destroy removes them. */
+	lvStore: FakeNode | undefined;
 	/** Status /cluster/resources reports instead of the real one: pvestatd lags by seconds. */
 	staleStatus = new Map<number, string>();
 	#nextIp = 101;
@@ -207,6 +258,9 @@ export class FakePve {
 				...TEMPLATE_CONFIG,
 				name: String(p.name),
 			};
+			// The clone keeps the template's guest OS type (Windows tests).
+			if (this.templateConfig.ostype !== undefined)
+				config.ostype = this.templateConfig.ostype;
 			delete config.template;
 			config.scsi0 = `local-lvm:vm-${vmid}-disk-0,discard=on,iothread=1,size=40G,ssd=1`;
 			config.net0 = "virtio=BC:24:11:00:00:01,bridge=sbx0,firewall=1";
@@ -257,6 +311,12 @@ export class FakePve {
 			if (vm.status !== "stopped")
 				throw new PveApiError(500, `VM ${id} is running - destroy failed`);
 			this.vms.delete(id);
+			// destroy-unreferenced-disks: Proxmox removes the VM's own volumes (not our tagged clones,
+			// which sbx-node removes by tag).
+			if (this.lvStore)
+				this.lvStore.lvs = this.lvStore.lvs.filter(
+					(l) => l.tags.includes("sbx") || !l.name.startsWith(`vm-${id}-`),
+				);
 			if (!this.keepIpamOnDelete)
 				this.ipam = this.ipam.filter((e) => e.vmid !== id);
 			return this.#task();
@@ -266,7 +326,25 @@ export class FakePve {
 			case "GET /config":
 				return { ...vm.config };
 			case "PUT /config": {
-				for (const [k, v] of Object.entries(p)) vm.config[k] = String(v);
+				const id = Number(/\/qemu\/(\d+)/.exec(path)?.[1]);
+				for (const [k, v] of Object.entries(p)) {
+					// "<storage>:<size GiB>,opts" asks Proxmox to allocate a new volume.
+					const alloc = /^([^:,]+):\d+(,.*)?$/.exec(String(v));
+					if (k === "tpmstate0" && alloc) {
+						const used = new Set(
+							[
+								...Object.values(vm.config)
+									.join(" ")
+									.matchAll(new RegExp(`vm-${id}-disk-(\\d+)`, "g")),
+							].map((m) => Number(m[1])),
+						);
+						let n = 0;
+						while (used.has(n)) n++;
+						this.lvStore?.lvs.push({ name: `vm-${id}-disk-${n}`, tags: [] });
+						vm.config[k] =
+							`${alloc[1]}:vm-${id}-disk-${n},size=4M${alloc[2] ?? ""}`;
+					} else vm.config[k] = String(v);
+				}
 				const mac = /virtio=([0-9A-F:]+)/i.exec(String(p.net0 ?? ""))?.[1];
 				const entry = this.ipam.find(
 					(e) => e.vmid === Number(/\/qemu\/(\d+)/.exec(path)?.[1]),
@@ -293,6 +371,8 @@ export class FakePve {
 			case "POST /status/resume":
 				vm.status = "running";
 				return this.#task();
+			case "PUT /sendkey":
+				return null;
 			case "PUT /firewall/options":
 				vm.firewall.options = { ...p };
 				return null;
@@ -336,6 +416,22 @@ export class FakePve {
 						},
 					],
 				};
+			}
+			if (sub === "/agent/fsfreeze-freeze") {
+				this.guestFrozen = true;
+				return { result: 1 };
+			}
+			if (sub === "/agent/fsfreeze-thaw") {
+				this.guestFrozen = false;
+				return { result: 1 };
+			}
+			if (sub === "/agent/fsfreeze-status") {
+				if (method !== "POST")
+					throw new PveApiError(
+						501,
+						`Method '${method} ${path}' not implemented`,
+					);
+				return { result: this.guestFrozen ? "frozen" : "thawed" };
 			}
 			if (sub === "/agent/exec") return { pid: 42 };
 			if (sub === "/agent/exec-status")

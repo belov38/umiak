@@ -52,8 +52,13 @@ export interface SnapshotRef extends NodeRef {
 	/** Hardware config of the source without identity (smbios1, vmgenid, MAC, name) and disks. */
 	hardware: Record<string, string>;
 	createdAt: number;
-	/** Time from the start of freeze to the end of thaw, for running machines. */
+	/** Time from the return of hook.freeze() to the call of hook.thaw(), for running machines. */
 	freezeMs?: number;
+	/**
+	 * The guest released the freeze by itself before hook.thaw() (Windows VSS holds writes for
+	 * about 10 s): the disks are crash-consistent only.
+	 */
+	autoThawed?: true;
 }
 
 export interface StorageUsage {
@@ -63,13 +68,24 @@ export interface StorageUsage {
 	ourLvUsedBytes: number;
 }
 
+export interface ThawResult {
+	/** The guest had already thawed itself; the thaw call found nothing to release. */
+	autoThawed?: boolean;
+}
+
 export interface QuiesceHook {
 	freeze(): Promise<void>;
-	thaw(): Promise<void>;
+	// biome-ignore lint/suspicious/noConfusingVoidType: most hooks are `async () => {}`.
+	thaw(): Promise<void | ThawResult>;
 }
 
 export interface StorageDriver {
-	cloneFromTemplate(tpl: TemplateRef, target: VmTarget): Promise<DiskSet>;
+	/** opts.skipSlots leaves slots out of the clone; the caller creates them (a fresh vTPM, S9 §9). */
+	cloneFromTemplate(
+		tpl: TemplateRef,
+		target: VmTarget,
+		opts?: { skipSlots?: DiskSlot[] },
+	): Promise<DiskSet>;
 	/** opts.id fixes the snapshot id; it must match ^[a-z0-9]{1,32}$ (used in LV names). */
 	snapshot(
 		m: MachineRef,

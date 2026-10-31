@@ -64,6 +64,9 @@ func TestLoadWithoutTemplateVmid(t *testing.T) {
 	if c.IsoDir != "/var/lib/vz/template/iso" || c.ImportDir != "/var/lib/vz/import" {
 		t.Errorf("media dirs = %q, %q", c.IsoDir, c.ImportDir)
 	}
+	if c.StateDir != "/var/lib/sbx-node" {
+		t.Errorf("StateDir = %q", c.StateDir)
+	}
 }
 
 func TestDefaultLayout(t *testing.T) {

@@ -10,13 +10,14 @@ import {
 	SmbiosTooLongError,
 	SNAPSHOT_CLOUDINIT_KEY,
 	s2SerialPayload,
+	sendKey,
 	TracesRemainError,
 } from "../src/machine.ts";
 import { NodeOpsError } from "../src/node-client.ts";
 import { PveApiError, QgaTimeoutError } from "../src/pve-api.ts";
 import { SqliteStateStore } from "../src/state-sqlite.ts";
 import { LvmThinDriver } from "../src/storage/lvmthin.ts";
-import { FakeNode, FakePve } from "./fakes.ts";
+import { FakeNode, FakePve, TEMPLATE_CONFIG } from "./fakes.ts";
 
 function setup(
 	opts: {
@@ -27,6 +28,9 @@ function setup(
 	const log: string[] = [];
 	const api = new FakePve(log);
 	const node = new FakeNode(log);
+	// PVE-allocated volumes (a fresh tpmstate0) land in sbx-node's LV list; lv.adopt reads configs.
+	api.lvStore = node;
+	node.pve = api;
 	const store = new SqliteStateStore(":memory:");
 	const allocator = new Allocator({
 		store,
@@ -201,6 +205,22 @@ describe("create", () => {
 		const { api, machines } = setup();
 		await machines.create({});
 		expect(api.vms.get(500)?.config.rng0).toBe("source=/dev/urandom");
+	});
+
+	it("create from a template with localtime=0 posts localtime 0, and a fork keeps it", async () => {
+		const { api, machines } = setup();
+		api.templateConfig.localtime = "0";
+		const a = await machines.create({});
+		const post = () =>
+			api.calls.filter(
+				(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
+			);
+		expect(post()[0]?.params).toMatchObject({ localtime: "0" });
+		await machines.start(a.vmid);
+		const s = await machines.snapshot(a.vmid);
+		expect(s.hardware.localtime).toBe("0");
+		await machines.fork(s, {});
+		expect(post().at(-1)?.params).toMatchObject({ localtime: "0" });
 	});
 
 	it("posts no cloud-init parameters when the template has no cloud-init drive", async () => {
@@ -1092,5 +1112,239 @@ describe("occupiedVmids", () => {
 		const ids = await machines.occupiedVmids();
 		expect(ids.has(512)).toBe(true);
 		expect(ids.has(597)).toBe(true);
+	});
+});
+
+const WIN_TEMPLATE_CONFIG: Record<string, string> = {
+	...TEMPLATE_CONFIG,
+	bios: "ovmf",
+	ostype: "win11",
+	machine: "pc-q35-9.2",
+	efidisk0:
+		"local-lvm:base-599-disk-0,efitype=4m,pre-enrolled-keys=1,ms-cert=2023k,size=4M",
+	scsi0: "local-lvm:base-599-disk-1,discard=on,iothread=1,size=100G,ssd=1",
+	tpmstate0: "local-lvm:base-599-disk-2,size=4M,version=v2.0",
+};
+delete WIN_TEMPLATE_CONFIG.ide2;
+delete WIN_TEMPLATE_CONFIG.ipconfig0;
+delete WIN_TEMPLATE_CONFIG.ciuser;
+
+describe("Windows template (three disks)", () => {
+	it("create clones efidisk0 and scsi0 only and allocates a fresh tpmstate0", async () => {
+		const { api, node, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
+			.items as { origin: string; name: string }[];
+		expect(items.map((i) => `${i.origin}->${i.name}`)).toEqual([
+			"base-599-disk-0->vm-500-disk-0",
+			"base-599-disk-1->vm-500-disk-1",
+		]);
+		const puts = api.calls.filter(
+			(c) => c.method === "PUT" && c.path === "/nodes/pve/qemu/500/config",
+		);
+		expect(puts.map((c) => c.params)).toEqual([
+			expect.objectContaining({
+				efidisk0:
+					"local-lvm:vm-500-disk-0,efitype=4m,pre-enrolled-keys=1,ms-cert=2023k",
+				scsi0: "local-lvm:vm-500-disk-1,discard=on,iothread=1,ssd=1",
+			}),
+			{ tpmstate0: "local-lvm:1,version=v2.0" },
+		]);
+		const cfg = api.vms.get(500)?.config ?? {};
+		expect(cfg.tpmstate0).toBe("local-lvm:vm-500-disk-2,size=4M,version=v2.0");
+		expect(cfg.efidisk0).toContain(
+			"efitype=4m,pre-enrolled-keys=1,ms-cert=2023k",
+		);
+		expect(m.disks.map((d) => `${d.slot}=${d.lv}`)).toEqual([
+			"efidisk0=vm-500-disk-0",
+			"scsi0=vm-500-disk-1",
+			"tpmstate0=vm-500-disk-2",
+		]);
+	});
+
+	it("takes the vTPM version from the template", async () => {
+		const { api, machines } = setup();
+		api.templateConfig = {
+			...WIN_TEMPLATE_CONFIG,
+			tpmstate0: "local-lvm:base-599-disk-2,size=4M,version=v1.2",
+		};
+		await machines.create({});
+		expect(api.vms.get(500)?.config.tpmstate0).toContain("version=v1.2");
+	});
+
+	it("keeps a Linux template without tpmstate0 on one config PUT", async () => {
+		const { api, machines } = setup();
+		await machines.create({});
+		const puts = api.calls.filter(
+			(c) => c.method === "PUT" && c.path === "/nodes/pve/qemu/500/config",
+		);
+		expect(puts).toHaveLength(1);
+	});
+
+	it("create tags the PVE-allocated tpmstate0 LV through lv.adopt", async () => {
+		const { api, node, machines, log } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		await machines.create({});
+		expect(node.calls.find((c) => c.op === "lv.adopt")?.args).toEqual({
+			vmid: 500,
+		});
+		// After the tpmstate0 PUT, before the firewall.
+		const adopt = log.indexOf("node:lv.adopt");
+		expect(adopt).toBeGreaterThan(
+			log.lastIndexOf("api:PUT /nodes/pve/qemu/500/config"),
+		);
+		expect(adopt).toBeLessThan(
+			log.indexOf("api:PUT /nodes/pve/qemu/500/firewall/options"),
+		);
+		expect(node.lvs).toEqual(
+			[0, 1, 2].map((n) => ({
+				name: `vm-500-disk-${n}`,
+				tags: ["sbx", "sbx-vm-500"],
+			})),
+		);
+	});
+
+	it("snapshot of a Windows clone snapshots all three LVs", async () => {
+		const { node, api, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		await machines.start(m.vmid);
+		node.calls.length = 0;
+		const snap = await machines.snapshot(m.vmid);
+		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
+			.items as { origin: string; name: string }[];
+		expect(items.map((i) => `${i.origin}->${i.name}`)).toEqual([
+			`vm-500-disk-0->sbx-snap-${snap.id}-efidisk0`,
+			`vm-500-disk-1->sbx-snap-${snap.id}-scsi0`,
+			`vm-500-disk-2->sbx-snap-${snap.id}-tpmstate0`,
+		]);
+	});
+
+	it("Windows VSS thawed by itself during the snapshot: the ref says autoThawed, no error", async () => {
+		const { node, api, machines, store } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		await machines.start(m.vmid);
+		const thaw = `POST /nodes/pve/qemu/${m.vmid}/agent/fsfreeze-thaw`;
+		node.handlers["lv.snapshot"] = (a) => {
+			const items = a.items as { name: string; tags: string[] }[];
+			for (const it of items) node.lvs.push({ name: it.name, tags: it.tags });
+			// The VSS hold ran out on a slow host: the guest thawed, the thaw call fails.
+			api.guestFrozen = false;
+			api.fail[thaw] = new PveApiError(500, "guest-fsfreeze-thaw failed");
+			return { created: items.map((i) => i.name) };
+		};
+		const snap = await machines.snapshot(m.vmid);
+		expect(snap.autoThawed).toBe(true);
+		expect(store.getSnapshot(snap.id)?.autoThawed).toBe(true);
+		expect(
+			node.lvs.filter((l) => l.tags.includes(`sbx-snap-${snap.id}`)),
+		).toHaveLength(3);
+	});
+
+	it("a thaw that fails on a still-frozen Windows guest leaves no snapshot LV behind", async () => {
+		const { node, api, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		await machines.start(m.vmid);
+		api.fail[`POST /nodes/pve/qemu/${m.vmid}/agent/fsfreeze-thaw`] =
+			new PveApiError(500, "guest-fsfreeze-thaw failed");
+		await expect(machines.snapshot(m.vmid, { id: "s1" })).rejects.toThrow(
+			/thaw failed for VM 500/,
+		);
+		expect(node.lvs.filter((l) => l.name.startsWith("sbx-snap-"))).toEqual([]);
+	});
+
+	it("a create whose tpmstate0 LV lv.adopt does not report rolls back", async () => {
+		const { api, node, machines, store } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		node.handlers["lv.adopt"] = () => ({
+			tagged: [],
+			already: ["vm-500-disk-0", "vm-500-disk-1"],
+		});
+		await expect(machines.create({})).rejects.toThrow(
+			/tpmstate0.*vm-500-disk-2/,
+		);
+		expect(api.vms.has(500)).toBe(false);
+		expect(node.lvs).toEqual([]);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("delete removes the PVE-allocated tpmstate0 volume", async () => {
+		const { api, node, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		expect(node.lvs.map((l) => l.name).sort()).toEqual([
+			"vm-500-disk-0",
+			"vm-500-disk-1",
+			"vm-500-disk-2",
+		]);
+		await machines.delete(m.vmid);
+		expect(node.lvs).toEqual([]);
+	});
+
+	it("a create failing right after the tpmstate0 PUT rolls back without traces", async () => {
+		const { api, node, machines, store } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		// The re-read of the config after the tpmstate0 PUT fails once; the rollback reads it again.
+		const get = api.get.bind(api);
+		let failed = false;
+		api.get = ((path: string, params?: Record<string, unknown>) => {
+			if (path === "/nodes/pve/qemu/500/config" && !failed) {
+				failed = true;
+				return Promise.reject(new Error("config read failed"));
+			}
+			return get(path, params);
+		}) as typeof api.get;
+		await expect(machines.create({})).rejects.toThrow(/config read failed/);
+		expect(api.vms.has(500)).toBe(false);
+		expect(node.lvs).toEqual([]);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
+	it("fork copies tpmstate0 of the source", async () => {
+		const { api, node, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const a = await machines.create({});
+		await machines.start(a.vmid);
+		const snap = await machines.snapshot(a.vmid);
+		expect(snap.disks.map((d) => d.slot)).toEqual([
+			"efidisk0",
+			"scsi0",
+			"tpmstate0",
+		]);
+		node.calls.length = 0;
+		const b = await machines.fork(snap);
+		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
+			.items as { origin: string; name: string }[];
+		expect(items.map((i) => i.name)).toEqual([
+			`vm-${b.vmid}-disk-0`,
+			`vm-${b.vmid}-disk-1`,
+			`vm-${b.vmid}-disk-2`,
+		]);
+		expect(items[2]?.origin).toBe(`sbx-snap-${snap.id}-tpmstate0`);
+		expect(api.vms.get(b.vmid)?.config.tpmstate0).toBe(
+			`local-lvm:vm-${b.vmid}-disk-2,version=v2.0`,
+		);
+		const puts = api.calls.filter(
+			(c) =>
+				c.method === "PUT" && c.path === `/nodes/pve/qemu/${b.vmid}/config`,
+		);
+		expect(puts).toHaveLength(1);
+	});
+});
+
+describe("sendKey", () => {
+	it("puts the key", async () => {
+		const { api, machines } = setup();
+		const m = await machines.create({});
+		await sendKey(api, "pve", m.vmid, "ret");
+		const last = api.calls.at(-1);
+		expect(last).toEqual({
+			method: "PUT",
+			path: `/nodes/pve/qemu/${m.vmid}/sendkey`,
+			params: { key: "ret" },
+		});
 	});
 });

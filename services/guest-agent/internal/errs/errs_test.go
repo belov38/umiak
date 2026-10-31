@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"syscall"
 	"testing"
 
@@ -16,6 +17,12 @@ import (
 )
 
 func TestFromErrno(t *testing.T) {
+	// On Windows package syscall defines ENOTDIR as ERROR_PATH_NOT_FOUND, a
+	// missing parent (see TestFromErrnoWindows).
+	notDirCode, notDirDetail := connect.CodeFailedPrecondition, NotDirectory
+	if runtime.GOOS == "windows" {
+		notDirCode, notDirDetail = connect.CodeNotFound, PathNotFound
+	}
 	tests := []struct {
 		errno      syscall.Errno
 		wantCode   connect.Code
@@ -23,12 +30,14 @@ func TestFromErrno(t *testing.T) {
 	}{
 		{syscall.ENOENT, connect.CodeNotFound, PathNotFound},
 		{syscall.EEXIST, connect.CodeAlreadyExists, AlreadyExists},
-		{syscall.ENOTDIR, connect.CodeFailedPrecondition, NotDirectory},
+		{syscall.ENOTDIR, notDirCode, notDirDetail},
 		{syscall.EISDIR, connect.CodeFailedPrecondition, IsDirectory},
 		{syscall.ENOSPC, connect.CodeResourceExhausted, NoSpace},
 		{syscall.EDQUOT, connect.CodeResourceExhausted, NoSpace},
 		{syscall.EACCES, connect.CodePermissionDenied, PermissionDenied},
+		{syscall.EPERM, connect.CodePermissionDenied, PermissionDenied},
 		{syscall.EXDEV, connect.CodeFailedPrecondition, CrossDevice},
+		{syscall.ENOTEMPTY, connect.CodeFailedPrecondition, FailedPrecondition},
 		{syscall.EIO, connect.CodeInternal, Internal},
 	}
 	for _, tt := range tests {
@@ -43,6 +52,27 @@ func TestFromErrno(t *testing.T) {
 				t.Errorf("detail = %v (ok=%v), want %q", d, ok, tt.wantDetail)
 			}
 		})
+	}
+}
+
+func TestFromErrnoSentinels(t *testing.T) {
+	// Errors without an errno map by the fs sentinel they wrap.
+	tests := []struct {
+		err        error
+		wantCode   connect.Code
+		wantDetail string
+	}{
+		{fmt.Errorf("x: %w", fs.ErrNotExist), connect.CodeNotFound, PathNotFound},
+		{&fs.PathError{Op: "open", Path: "/x", Err: fs.ErrExist}, connect.CodeAlreadyExists, AlreadyExists},
+		{fmt.Errorf("x: %w", fs.ErrPermission), connect.CodePermissionDenied, PermissionDenied},
+		{errors.New("boom"), connect.CodeInternal, Internal},
+	}
+	for _, tt := range tests {
+		err := FromErrno(tt.err)
+		d, ok := rpcconv.Detail(err)
+		if err.Code() != tt.wantCode || !ok || d.GetCode() != tt.wantDetail {
+			t.Errorf("FromErrno(%v) = %v %v, want %v %q", tt.err, err.Code(), d, tt.wantCode, tt.wantDetail)
+		}
 	}
 }
 

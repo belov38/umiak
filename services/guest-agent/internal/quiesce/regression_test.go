@@ -3,7 +3,6 @@ package quiesce
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -31,7 +30,7 @@ func TestProbeStaleGenAfterOwnLease(t *testing.T) {
 		return nil
 	}
 	e.m.startProbe() // hangs on the foreign freeze
-	_, err := e.m.Quiesce(context.Background(), 30000, false, true)
+	_, err := e.m.Quiesce(context.Background(), 30000, false, true, false)
 	wantErr(t, err, connect.CodeFailedPrecondition, errs.FrozenByOther)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -58,19 +57,19 @@ func TestWatchdogMidQuiesce(t *testing.T) {
 	e.addHook(t, "b", "#!/bin/sh\n", 0o755)
 	unit := steps{freezer: e.fz, docker: e.dk, log: testLog,
 		runHook: func(_ context.Context, p, arg string) error {
-			e.log.add("unit hook %s %s", filepath.Base(p), arg)
+			e.log.add("unit hook %s %s", hookLabel(p), arg)
 			return nil
 		}}
 	e.m.steps.runHook = func(ctx context.Context, p, arg string) error {
-		e.log.add("hook %s %s", filepath.Base(p), arg)
-		if arg == hookFreeze && filepath.Base(p) == "a" {
+		e.log.add("hook %s %s", hookLabel(p), arg)
+		if arg == hookFreeze && hookLabel(p) == "a" {
 			// The unit wakes while hook a runs (its clock is past the
 			// deadline).
 			runWatchdog(ctx, e.l, "lease-1", unit, func() time.Time { return time.Now().Add(time.Hour) })
 		}
 		return nil
 	}
-	_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+	_, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 	wantErr(t, err, connect.CodeAborted, errs.LeaseExpired)
 	if e.fz.isFrozen("/") || e.fz.isFrozen("/data") || len(e.dk.pausedIDs()) != 0 {
 		t.Errorf("left frozen or paused: %q", e.log.all())
@@ -104,13 +103,13 @@ func TestQuiesceStopsAtDeadline(t *testing.T) {
 	e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
 	e.addHook(t, "20-b", "#!/bin/sh\n", 0o755)
 	e.m.steps.runHook = func(_ context.Context, p, arg string) error {
-		e.log.add("hook %s %s", filepath.Base(p), arg)
+		e.log.add("hook %s %s", hookLabel(p), arg)
 		if arg == hookFreeze {
 			time.Sleep(150 * time.Millisecond)
 		}
 		return nil
 	}
-	_, err := e.m.Quiesce(context.Background(), 100, true, true)
+	_, err := e.m.Quiesce(context.Background(), 100, true, true, false)
 	wantErr(t, err, connect.CodeAborted, errs.LeaseExpired)
 	if e.log.has("hook 20-b freeze") || e.log.count("freeze /") != 0 {
 		t.Errorf("continued past the deadline: %q", e.log.all())
@@ -131,7 +130,7 @@ func TestQuiesceBudget(t *testing.T) {
 	e.m.freezeBudget = 50 * time.Millisecond
 	e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
 	e.m.steps.runHook = func(ctx context.Context, p, arg string) error {
-		e.log.add("hook %s %s", filepath.Base(p), arg)
+		e.log.add("hook %s %s", hookLabel(p), arg)
 		if arg == hookFreeze {
 			<-ctx.Done() // a hook that only stops when killed
 			return ctx.Err()
@@ -139,7 +138,7 @@ func TestQuiesceBudget(t *testing.T) {
 		return nil
 	}
 	start := time.Now()
-	_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+	_, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 	wantErr(t, err, connect.CodeDeadlineExceeded, errs.QuiesceTimeout)
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("Quiesce took %v", d)
@@ -167,7 +166,7 @@ func TestQuiesceBudgetIncludesWatchdogStart(t *testing.T) {
 		o.Supervisor = slowSupervisor{Supervisor: o.Supervisor, delay: 150 * time.Millisecond}
 	})
 	e.m.freezeBudget = 100 * time.Millisecond
-	_, err := e.m.Quiesce(context.Background(), 30000, true, true)
+	_, err := e.m.Quiesce(context.Background(), 30000, true, true, false)
 	wantErr(t, err, connect.CodeDeadlineExceeded, errs.QuiesceTimeout)
 	if e.log.count("freeze /") != 0 || e.st.Frozen() {
 		t.Errorf("froze past the budget: %q", e.log.all())
@@ -211,13 +210,13 @@ func TestLateStoreFreezeUndone(t *testing.T) {
 	e.m.st = bs
 	e.m.storeFreezeTimeout = 30 * time.Millisecond
 	ctx := context.Background()
-	_, err := e.m.Quiesce(ctx, 30000, false, true)
+	_, err := e.m.Quiesce(ctx, 30000, false, true, false)
 	wantErr(t, err, connect.CodeUnavailable, errs.StoreBusy)
 	if e.log.count("freeze /") != 0 {
 		t.Errorf("froze with a busy store: %q", e.log.all())
 	}
 	// A docker-only lease is active when the late freeze lands.
-	if _, err := e.m.Quiesce(ctx, 30000, true, false); err != nil {
+	if _, err := e.m.Quiesce(ctx, 30000, true, false, false); err != nil {
 		t.Fatal(err)
 	}
 	close(bs.gate)
@@ -240,7 +239,7 @@ func TestThawWaitsForUnitMarker(t *testing.T) {
 	t.Run("marker arrives", func(t *testing.T) {
 		e := newEnv(t, nil)
 		e.m.markerEvery = time.Hour
-		if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+		if _, err := e.m.Quiesce(context.Background(), 60000, true, true, false); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Rename(e.l.QuiesceFile, claimPath(e.l)); err != nil {
@@ -270,7 +269,7 @@ func TestThawWaitsForUnitMarker(t *testing.T) {
 		e := newEnv(t, nil)
 		e.m.markerEvery = time.Hour
 		e.m.unitMarkerWait = 50 * time.Millisecond
-		if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+		if _, err := e.m.Quiesce(context.Background(), 60000, true, true, false); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Rename(e.l.QuiesceFile, claimPath(e.l)); err != nil {
@@ -296,7 +295,7 @@ func TestThawWaitsForUnitMarker(t *testing.T) {
 	t.Run("claim of another lease kept", func(t *testing.T) {
 		e := newEnv(t, nil)
 		e.m.markerEvery = time.Hour
-		if _, err := e.m.Quiesce(context.Background(), 60000, false, false); err != nil {
+		if _, err := e.m.Quiesce(context.Background(), 60000, false, false, false); err != nil {
 			t.Fatal(err)
 		}
 		if err := writeLease(claimPath(e.l), &Lease{ID: "other", Deadline: time.Now()}); err != nil {
@@ -395,7 +394,7 @@ func TestReleaseRemovesLeaseBeforeStoppingWatchdog(t *testing.T) {
 		o.Supervisor = leaseCheckSupervisor{Supervisor: o.Supervisor, path: o.Layout.QuiesceFile, seen: &seen}
 	})
 	e.m.markerEvery = time.Hour
-	if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+	if _, err := e.m.Quiesce(context.Background(), 60000, true, true, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.m.Thaw(context.Background(), "lease-1"); err != nil {
@@ -411,7 +410,7 @@ func TestReleaseRemovesLeaseBeforeStoppingWatchdog(t *testing.T) {
 func TestShutdownThawsActiveLease(t *testing.T) {
 	e := newEnv(t, nil)
 	e.m.markerEvery = time.Hour
-	if _, err := e.m.Quiesce(context.Background(), 60000, true, true); err != nil {
+	if _, err := e.m.Quiesce(context.Background(), 60000, true, true, false); err != nil {
 		t.Fatal(err)
 	}
 	e.m.AutoThaw(ByAgentStop)

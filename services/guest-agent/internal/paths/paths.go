@@ -1,12 +1,12 @@
-// Package paths defines the on-disk layout of the guest agent (spec section 5).
-// Every file access in the agent goes through a Layout so tests can run
-// against a temporary root.
+// Package paths defines the on-disk layout of the guest agent (S3 spec
+// section 5, S9 spec section 12.1 for Windows). Every file access in the
+// agent goes through a Layout so tests can run against a temporary root.
+// Fields that only one OS uses are empty on the other.
 package paths
 
 import (
 	"errors"
 	"fmt"
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -50,6 +50,16 @@ type Layout struct {
 	QuiesceThawedDir string
 	// StatusFile is the agent status snapshot for the CLI.
 	StatusFile string
+	// EarlyFile is the marker the early boot step writes for the current
+	// boot (Windows).
+	EarlyFile string
+	// AdminSocket serves the full agent API to local administrators
+	// (Windows).
+	AdminSocket string
+	// EnvSocket serves the sandbox env to SSH session profiles (Windows).
+	EnvSocket string
+	// LogDir holds the rotated agent log (Windows; Linux uses journald).
+	LogDir string
 
 	// SecretsMount is the tmpfs mount point.
 	SecretsMount string
@@ -89,6 +99,16 @@ type Layout struct {
 	QuiesceHooksDir string
 	// SystemdUnitDir is where the agent installs its unit files.
 	SystemdUnitDir string
+	// SysprepUnattend is the answer file of the template's sysprep run,
+	// deleted once the clone's identity is applied (Windows).
+	SysprepUnattend string
+	// SetupCompleteScript is the script Windows Setup runs at the end of a
+	// clone's first boot; the template installs one that runs the clone
+	// first-boot script (Windows).
+	SetupCompleteScript string
+	// FirstBootDone is the marker the clone first-boot script writes as its
+	// last action (Windows).
+	FirstBootDone string
 
 	// root is the directory the layout is mounted under; empty for Default.
 	root string
@@ -99,34 +119,43 @@ func Default() Layout {
 	return build(func(p string) string { return p }, "")
 }
 
-// ForRoot returns the same tree under root, for tests and dev runs.
+// ForRoot returns the same tree under root, for tests and dev runs. The
+// drive of a Windows path is dropped: C:\ProgramData\x maps to
+// root\ProgramData\x.
 func ForRoot(root string) Layout {
 	return build(func(p string) string {
-		return filepath.Join(root, filepath.FromSlash(p))
+		return filepath.Join(root, filepath.FromSlash(p[len(filepath.VolumeName(p)):]))
 	}, root)
 }
 
-// Rooted maps a production path (such as /etc/foo from a managed-files list)
-// to its location in this layout: unchanged for Default, under the root for
-// ForRoot. It rejects relative paths, paths with a ".." element and the
-// filesystem root, so a mapped path can never leave the layout.
+// Rooted maps a production path (such as /etc/foo or C:\ProgramData\foo
+// from a managed-files list) to its location in this layout: cleaned for
+// Default, under the root for ForRoot. It rejects relative paths, paths with
+// a ".." element, the filesystem (drive) root and, on Windows, paths that are
+// not on a drive letter (UNC, device paths), so a mapped path can never leave
+// the layout.
 func (l Layout) Rooted(abs string) (string, error) {
-	if !strings.HasPrefix(abs, "/") {
+	vol := filepath.VolumeName(abs)
+	if !filepath.IsAbs(abs) {
 		return "", fmt.Errorf("paths: %q is not absolute", abs)
 	}
-	for _, elem := range strings.Split(abs, "/") {
+	if len(vol) > 2 {
+		return "", fmt.Errorf("paths: %q is not on a drive", abs)
+	}
+	for _, elem := range strings.Split(filepath.ToSlash(abs), "/") {
 		if elem == ".." {
 			return "", fmt.Errorf("paths: %q contains \"..\"", abs)
 		}
 	}
-	clean := path.Clean(abs)
-	if clean == "/" {
+	clean := filepath.Clean(abs)
+	rest := clean[len(vol):]
+	if rest == string(filepath.Separator) {
 		return "", errors.New("paths: refusing the filesystem root")
 	}
 	if l.root == "" {
-		return filepath.FromSlash(clean), nil
+		return clean, nil
 	}
-	return filepath.Join(l.root, filepath.FromSlash(clean)), nil
+	return filepath.Join(l.root, rest), nil
 }
 
 // CommandDir returns the directory of command id.
@@ -139,64 +168,11 @@ func (l Layout) ShimSocket(id string) string {
 	return filepath.Join(l.ShimSockDir, id+".sock")
 }
 
-// CmdSpec returns the spec file path of command id.
+// CmdSpec returns the spec file path of command id, or "" without a
+// CmdSpecDir (Windows).
 func (l Layout) CmdSpec(id string) string {
-	return filepath.Join(l.CmdSpecDir, id)
-}
-
-// build maps the slash-separated production paths through f.
-func build(f func(string) string, root string) Layout {
-	const (
-		lib   = "/usr/local/lib/sbx-agent"
-		state = "/var/lib/sbx-agent"
-		run   = "/run/sbx-agent"
-		sbx   = "/run/sbx"
-		etc   = "/etc/sbx-agent"
-		ssh   = "/etc/ssh"
-	)
-	j := path.Join
-	return Layout{
-		VersionsDir:  f(j(lib, "versions")),
-		CurrentLink:  f(j(lib, "current")),
-		PreviousLink: f(j(lib, "previous")),
-		BinLink:      f("/usr/local/bin/sbx-agent"),
-
-		StateDir:          f(state),
-		StateDB:           f(j(state, "state.db")),
-		CommandsDir:       f(j(state, "commands")),
-		UploadsDir:        f(j(state, "uploads")),
-		StagingDir:        f(j(state, "staging")),
-		IdentityFile:      f(j(state, "identity.json")),
-		PendingUpdateFile: f(j(state, "pending-update.json")),
-		BadVersionsFile:   f(j(state, "bad-versions")),
-		ManagedFilesList:  f(j(state, "managed-files")),
-
-		RunDir:           f(run),
-		ShimSockDir:      f(j(run, "cmd")),
-		QuiesceFile:      f(j(run, "quiesce.json")),
-		QuiesceThawedDir: f(j(run, "quiesce-thawed")),
-		StatusFile:       f(j(run, "status.json")),
-
-		SecretsMount:     f(sbx),
-		SecretsDir:       f(j(sbx, "secrets")),
-		SecretsEnvFile:   f(j(sbx, "secrets", "env")),
-		SecretFilesDir:   f(j(sbx, "secrets", "files")),
-		SecretsStateFile: f(j(sbx, "secrets.json")),
-		CmdSpecDir:       f(j(sbx, "cmd-spec")),
-		SbxEnvFile:       f("/etc/sbx/env"),
-
-		EtcDir:          f(etc),
-		ConfigFile:      f(j(etc, "agent.toml")),
-		TemplateSSHCA:   f(j(etc, "ssh-user-ca.pub")),
-		SSHUserCA:       f(j(ssh, "sbx_user_ca.pub")),
-		SSHDir:          f(ssh),
-		MachineIDFile:   f("/etc/machine-id"),
-		DbusMachineID:   f("/var/lib/dbus/machine-id"),
-		HostnameFile:    f("/etc/hostname"),
-		HostsFile:       f("/etc/hosts"),
-		QuiesceHooksDir: f(j(etc, "quiesce.d")),
-		SystemdUnitDir:  f("/etc/systemd/system"),
-
-		root: root,
+	if l.CmdSpecDir == "" {
+		return ""
 	}
+	return filepath.Join(l.CmdSpecDir, id)
 }

@@ -17,10 +17,21 @@ func Retryable(code connect.Code) bool {
 
 // NewError builds a Connect error with a tunnelv1.ErrorDetail attached.
 func NewError(code connect.Code, detailCode, msg string) *connect.Error {
+	return newError(code, detailCode, msg, Retryable(code))
+}
+
+// NewRetryableError is NewError with the detail marked retryable whatever
+// the code, for conditions a client may retry that are not unavailable
+// (such as failed_precondition file_in_use of the Windows agent).
+func NewRetryableError(code connect.Code, detailCode, msg string) *connect.Error {
+	return newError(code, detailCode, msg, true)
+}
+
+func newError(code connect.Code, detailCode, msg string, retryable bool) *connect.Error {
 	err := connect.NewError(code, errors.New(msg))
 	d, derr := connect.NewErrorDetail(&tunnelv1.ErrorDetail{
 		Code:      detailCode,
-		Retryable: Retryable(code),
+		Retryable: retryable,
 	})
 	if derr == nil {
 		err.AddDetail(d)

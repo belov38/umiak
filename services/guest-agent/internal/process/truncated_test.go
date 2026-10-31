@@ -80,21 +80,24 @@ func TestOutputTruncatedFromStatusOnce(t *testing.T) {
 	if e := truncatedEvents(h)[0]; e.GetStream() != agentv1.Stream_STREAM_STDERR || e.GetReason() != "disk_full" {
 		t.Errorf("output.truncated = %v", e)
 	}
-	info := h.waitRunning("c1")
-	if info.GetOutputTruncated() != "disk_full" {
-		t.Errorf("running CommandInfo.output_truncated = %q", info.GetOutputTruncated())
-	}
+	// The monitor emits before it writes the record (a crash repeats the
+	// event instead of losing it), so the record may lag the event.
+	eventually(t, "running CommandInfo.output_truncated", func() bool {
+		return h.waitRunning("c1").GetOutputTruncated() == "disk_full"
+	})
+	// The agent being replaced may have seen the status too: at least once.
+	before := len(truncatedEvents(h))
 
 	// exit.json repeats the loss: no second event.
 	if err := r.Exit(0); err != nil {
 		t.Fatal(err)
 	}
-	info = h.waitExited("c1")
+	info := h.waitExited("c1")
 	if info.GetOutputTruncated() != "disk_full" {
 		t.Errorf("exited CommandInfo.output_truncated = %q", info.GetOutputTruncated())
 	}
-	if got := truncatedEvents(h); len(got) != 1 {
-		t.Errorf("output.truncated events = %v, want exactly one", got)
+	if got := truncatedEvents(h); len(got) != before {
+		t.Errorf("output.truncated events = %v, want no new one from exit.json", got)
 	}
 }
 

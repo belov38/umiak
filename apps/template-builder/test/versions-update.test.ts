@@ -390,7 +390,7 @@ describe("updateVersionsFile", () => {
 		expect(res.changes.some((c) => c.startsWith("sbx"))).toBe(false);
 
 		expect(readFileSync(file, "utf8")).toBe(res.text);
-		const reloaded = loadVersions(loadRecipe(dir, "linux-fixture"));
+		const reloaded = loadVersions(loadRecipe(dir, "linux-fixture", "linux"));
 		expect(reloaded.sbx?.cli.version).toBe("0.1.0");
 		expect(reloaded.tools.go.sha256).toBe(
 			"65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40",
@@ -422,9 +422,9 @@ describe("updateVersionsFile", () => {
 		rmSync(join(dir, "linux-fixture", "versions.toml"));
 		const res = await run(dir);
 		expect(res.changes).toContain("base.serial: (none) -> 20261024");
-		expect(loadVersions(loadRecipe(dir, "linux-fixture")).base.serial).toBe(
-			"20261024",
-		);
+		expect(
+			loadVersions(loadRecipe(dir, "linux-fixture", "linux")).base.serial,
+		).toBe("20261024");
 	});
 
 	it("does not touch the file when a source fails", async () => {

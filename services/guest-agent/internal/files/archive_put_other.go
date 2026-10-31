@@ -8,12 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
-
-// errNotDir is the errno of a non-directory in the way.
-var errNotDir error = syscall.ENOTDIR
 
 // rootDir is the extractDir of other systems: an os.Root (which refuses
 // paths that leave the directory) plus an Lstat of every parent component

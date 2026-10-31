@@ -3,6 +3,8 @@ package process
 import (
 	"bytes"
 	"fmt"
+	"runtime"
+	"syscall"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -181,16 +183,21 @@ func TestSignal(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Setup("c1", func(r *supervisor.FakeRun) { r.IgnoreSignals() })
 	h.start("c1", argvSpec("/bin/sleep", "100"))
-	for _, s := range []string{"SIGINT", "INT", "2", "SIGUSR1"} {
+	// Windows delivers only INT, TERM, KILL and HUP of a pty (S9 spec 12.6).
+	last, lastNum, bads := "SIGUSR1", syscall.Signal(10), []string{"", "SIGNOPE", "0", "65", "-1"}
+	if runtime.GOOS == "windows" {
+		last, lastNum, bads = "SIGTERM", 15, append(bads, "SIGUSR1")
+	}
+	for _, s := range []string{"SIGINT", "INT", "2", last} {
 		if _, err := h.client.Signal(h.ctx(), connect.NewRequest(&agentv1.SignalRequest{CommandId: "c1", Signal: s})); err != nil {
 			t.Fatalf("Signal %s: %v", s, err)
 		}
 	}
 	ss := h.run("c1").Signals()
-	if len(ss) != 4 || ss[0].Sig != 2 || ss[2].Sig != 2 || ss[3].Sig != 10 || ss[0].Cgroup {
+	if len(ss) != 4 || ss[0].Sig != 2 || ss[2].Sig != 2 || ss[3].Sig != lastNum || ss[0].Cgroup {
 		t.Fatalf("signals %+v", ss)
 	}
-	for _, bad := range []string{"", "SIGNOPE", "0", "65", "-1"} {
+	for _, bad := range bads {
 		_, err := h.client.Signal(h.ctx(), connect.NewRequest(&agentv1.SignalRequest{CommandId: "c1", Signal: bad}))
 		wantCode(t, err, connect.CodeInvalidArgument, "")
 	}
@@ -320,4 +327,69 @@ func TestJanitorHooks(t *testing.T) {
 func rpcconvDetail(err error) (string, bool) {
 	d, ok := rpcconv.Detail(err)
 	return d.GetCode(), ok
+}
+
+func TestUnsupportedSignalWindowsTable(t *testing.T) {
+	tests := []struct {
+		goos string
+		sig  int
+		pty  bool
+		ok   bool
+	}{
+		{"windows", 2, false, true},  // SIGINT: CTRL_BREAK
+		{"windows", 15, false, true}, // SIGTERM: CTRL_BREAK
+		{"windows", 9, false, true},  // SIGKILL: TerminateJobObject
+		{"windows", 2, true, true},   // SIGINT: 0x03 to the ConPTY
+		{"windows", 15, true, true},
+		{"windows", 9, true, true},
+		{"windows", 1, true, true},   // SIGHUP: ClosePseudoConsole
+		{"windows", 1, false, false}, // SIGHUP without a PTY
+		{"windows", 10, false, false},
+		{"windows", 10, true, false},
+		{"windows", 3, false, false},
+		{"windows", 19, true, false},
+		{"windows", 28, true, false},
+		{"linux", 1, false, true},
+		{"linux", 10, false, true},
+		{"linux", 28, true, true},
+		{"linux", 64, false, true},
+	}
+	for _, tt := range tests {
+		err := signalSupported(tt.goos, tt.sig, tt.pty)
+		if tt.ok {
+			if err != nil {
+				t.Errorf("%s sig %d pty %v: %v", tt.goos, tt.sig, tt.pty, err)
+			}
+			continue
+		}
+		wantCode(t, err, connect.CodeInvalidArgument, errs.UnsupportedSignal)
+	}
+}
+
+// Remove and the janitor stop what is left of the unit: on Windows the
+// empty permanent job of a dead shim, which would block a new Start.
+func TestRemoveStopsUnit(t *testing.T) {
+	h := newHarness(t)
+	h.start("c1", argvSpec("/bin/true"))
+	h.start("c2", argvSpec("/bin/true"))
+	_, err := h.client.Remove(h.ctx(), connect.NewRequest(&agentv1.ProcessRemoveRequest{CommandId: "c1"}))
+	wantCode(t, err, connect.CodeFailedPrecondition, errs.CommandRunning)
+	if s := h.fake.Stops(); len(s) != 0 {
+		t.Fatalf("stops after a refused Remove: %v", s)
+	}
+	for _, id := range []string{"c1", "c2"} {
+		if err := h.run(id).Exit(0); err != nil {
+			t.Fatal(err)
+		}
+		h.waitExited(id)
+	}
+	if _, err := h.client.Remove(h.ctx(), connect.NewRequest(&agentv1.ProcessRemoveRequest{CommandId: "c1"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.m.RemoveRecord("c2"); err != nil {
+		t.Fatal(err)
+	}
+	if s := h.fake.Stops(); fmt.Sprint(s) != "[c1 c2]" {
+		t.Fatalf("stops = %v, want [c1 c2]", s)
+	}
 }

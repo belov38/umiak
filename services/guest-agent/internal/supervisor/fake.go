@@ -20,6 +20,8 @@ type FakeLaunch struct {
 	ExtraArgs []string
 	// Argv is the command line the systemd unit would run.
 	Argv []string
+	// Spec is the spec passed to LaunchSpec; nil for Launch.
+	Spec []byte
 }
 
 // FakeInput is one applied input request.
@@ -138,6 +140,7 @@ func (f *Fake) Launches() []FakeLaunch {
 	for i, l := range f.launches {
 		l.ExtraArgs = slices.Clone(l.ExtraArgs)
 		l.Argv = slices.Clone(l.Argv)
+		l.Spec = slices.Clone(l.Spec)
 		out[i] = l
 	}
 	return out
@@ -167,9 +170,32 @@ func (f *Fake) Stops() []string {
 
 // Launch implements Supervisor.
 func (f *Fake) Launch(ctx context.Context, id string, shimPath string, extraArgs []string) error {
+	return f.launch(ctx, id, shimPath, extraArgs, nil)
+}
+
+// FakeSpecLauncher is a Fake that also implements SpecLauncher, like the
+// Windows supervisor: the spec comes with the launch, not as a CmdSpec file.
+// On Windows the Fake itself is one (fake_windows.go).
+type FakeSpecLauncher struct {
+	*Fake
+}
+
+var _ SpecLauncher = FakeSpecLauncher{}
+
+// LaunchSpec implements SpecLauncher.
+func (f FakeSpecLauncher) LaunchSpec(ctx context.Context, id, shimPath string, extraArgs []string, spec []byte) error {
+	if spec == nil {
+		spec = []byte{}
+	}
+	return f.launch(ctx, id, shimPath, extraArgs, spec)
+}
+
+// launch starts a run of id; spec is the spec of LaunchSpec, nil to read
+// the CmdSpec file like the Linux shim.
+func (f *Fake) launch(ctx context.Context, id string, shimPath string, extraArgs []string, spec []byte) error {
 	f.mu.Lock()
 	f.launches = append(f.launches, FakeLaunch{ID: id, ShimPath: shimPath, ExtraArgs: slices.Clone(extraArgs),
-		Argv: shimArgv(id, shimPath, extraArgs)})
+		Argv: shimArgv(id, shimPath, extraArgs), Spec: slices.Clone(spec)})
 	if err := checkCommandID(id); err != nil {
 		f.mu.Unlock()
 		return err
@@ -207,7 +233,7 @@ func (f *Fake) Launch(ctx context.Context, id string, shimPath string, extraArgs
 	f.last[id] = r
 	f.mu.Unlock()
 
-	if err := r.start(setup); err != nil {
+	if err := r.start(setup, spec); err != nil {
 		r.end(false)
 		return fmt.Errorf("supervisor: %s failed: %w", UnitName(id), err)
 	}

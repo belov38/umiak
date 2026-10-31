@@ -113,24 +113,52 @@ function apiError(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const CONNECTION_ERROR_CODES = new Set([
+	"ECONNRESET",
+	"EPIPE",
+	"ETIMEDOUT",
+	"ECONNREFUSED",
+	"EHOSTUNREACH",
+	"ENETUNREACH",
+	"EAI_AGAIN",
+]);
+
+/**
+ * The connection to the API broke or could not be made (a flaky uplink): reset ("socket hang
+ * up"), timed out, refused, unreachable. The request may or may not have reached Proxmox.
+ */
+export function isConnectionError(err: unknown): boolean {
+	if (!(err instanceof Error) || err instanceof PveApiError) return false;
+	const code = (err as { code?: unknown }).code;
+	return (
+		(typeof code === "string" && CONNECTION_ERROR_CODES.has(code)) ||
+		/socket hang up/i.test(err.message)
+	);
+}
+
 /**
  * A lock timeout means the request was not executed, so any method may be retried. Guest agent
- * calls are not idempotent (exec, fsfreeze, and exec-status, which forgets an exited PID), so
- * nothing else is retried for them. Otherwise only GET is retried on a timeout or a broken
+ * calls are not idempotent (exec, fsfreeze, and exec-status, which forgets an exited PID): only
+ * their read-only GETs other than exec-status are retried after a broken connection (Qga.exec
+ * polls exec-status on by itself). Otherwise only GET is retried on a timeout or a broken
  * connection, which may hide an executed request.
  */
 function isRetryable(err: unknown, method: string, path: string): boolean {
 	if (err instanceof QgaTimeoutError) return false;
 	if (err instanceof PveApiError && LOCK_TIMEOUT_RE.test(err.message))
 		return true;
-	if (path.includes("/agent/")) return false;
+	if (path.includes("/agent/"))
+		return (
+			method === "GET" &&
+			!path.endsWith("/agent/exec-status") &&
+			isConnectionError(err)
+		);
 	if (err instanceof PveApiError)
 		return (
 			err.status === 503 ||
 			(method === "GET" && /got timeout/.test(err.message))
 		);
-	const code = (err as { code?: string }).code;
-	return method === "GET" && (code === "ECONNRESET" || code === "EPIPE");
+	return method === "GET" && isConnectionError(err);
 }
 
 export interface UploadFile {

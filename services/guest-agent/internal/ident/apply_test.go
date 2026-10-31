@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -69,11 +70,23 @@ func newFake(t *testing.T, l paths.Layout) (*FakeResetter, *string) {
 	return f, &fp
 }
 
+// linuxApply skips a test of the Linux identity apply (Apply, Seal) on
+// Windows: the Windows layout has none of its files (machine-id, hosts,
+// /etc/sbx/env), and Windows runs ApplyWindows and SealWindows instead
+// (apply_win_core_test.go, seal_win_core_test.go).
+func linuxApply(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the Linux identity apply; Windows runs ApplyWindows and SealWindows")
+	}
+}
+
 func testIdentity(machineID string) Identity {
 	return Identity{MachineID: machineID, BS: testBS()}
 }
 
 func TestApplySameMachineNoop(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.StateDB, "db")
 	mustWrite(t, l.SbxEnvFile, "A=1\n")
@@ -105,6 +118,7 @@ func TestApplySameMachineNoop(t *testing.T) {
 }
 
 func TestApplyChangedResetsState(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	old := "aaaaaaaabbbbccccddddeeeeeeeeeeee"
 	if err := (&File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", WrittenMachineID: old}).Save(l.IdentityFile); err != nil {
@@ -178,6 +192,7 @@ func TestApplyChangedResetsState(t *testing.T) {
 }
 
 func TestApplyFirstBootAfterSeal(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.MachineIDFile, "")
 	mustWrite(t, l.TemplateSSHCA, "")
@@ -201,6 +216,7 @@ func TestApplyFirstBootAfterSeal(t *testing.T) {
 }
 
 func TestApplyHostsBlockReplacedNotDuplicated(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.HostsFile, "127.0.0.1 localhost\n::1 localhost\n")
 	r, _ := newFake(t, l)
@@ -224,6 +240,7 @@ func TestApplyHostsBlockReplacedNotDuplicated(t *testing.T) {
 }
 
 func TestHostsBlockKeepsSurroundingLines(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.HostsFile, "a\n# BEGIN sbx\n127.0.1.1 old\n# END sbx\nb\n")
 	if err := SetHostsBlock(l.HostsFile, "new"); err != nil {
@@ -236,6 +253,7 @@ func TestHostsBlockKeepsSurroundingLines(t *testing.T) {
 }
 
 func TestMachineIDRules(t *testing.T) {
+	linuxApply(t)
 	old := "aaaaaaaabbbbccccddddeeeeeeeeeeee"
 	for _, tt := range []struct {
 		name    string
@@ -278,6 +296,7 @@ func TestMachineIDRules(t *testing.T) {
 func ptr(s string) *string { return &s }
 
 func TestApplyDbusSymlink(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.DbusMachineID, "stale\n") // regular file from the image
 	r, _ := newFake(t, l)
@@ -297,6 +316,7 @@ func TestApplyDbusSymlink(t *testing.T) {
 }
 
 func TestApplyFromAgentRestartsServices(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	r, _ := newFake(t, l)
 	r.Errs = map[string]error{"ReloadNetwork": errors.New("networkctl missing")}
@@ -327,6 +347,7 @@ func (s *savedCheck) RestartSSH() error {
 // The agent fallback saves identity.json before it restarts sshd and the
 // network: a hang there must not repeat the wipe on the next start.
 func TestApplyFromAgentSavesBeforeServices(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	r, _ := newFake(t, l)
 	sc := &savedCheck{FakeResetter: r, path: l.IdentityFile}
@@ -349,6 +370,7 @@ func TestApplyFailureLeavesNoIdentityFile(t *testing.T) {
 }
 
 func TestApplyCorruptIdentityFileIsReset(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.IdentityFile, "{not json")
 	r, _ := newFake(t, l)
@@ -387,6 +409,7 @@ func TestFileRoundTrip(t *testing.T) {
 }
 
 func TestSealWipes(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.StateDB, "db")
 	mustWrite(t, filepath.Join(l.CommandsDir, "c1", "stdout"), "out")
@@ -448,6 +471,7 @@ func TestSealStopFailureAborts(t *testing.T) {
 }
 
 func TestSealThenApplyIsFirstBoot(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.TemplateSSHCA, "ca\n")
 	if err := Seal(context.Background(), l, nil); err != nil {
@@ -466,10 +490,15 @@ func TestSealThenApplyIsFirstBoot(t *testing.T) {
 func TestManagedFilesConfinedToLayout(t *testing.T) {
 	root := t.TempDir()
 	l := paths.ForRoot(root)
+	// The list holds production paths: /x on Linux, C:\x on Windows.
+	abs := func(p string) string { return p }
+	if runtime.GOOS == "windows" {
+		abs = func(p string) string { return `C:` + filepath.FromSlash(p) }
+	}
 	// Files that the list must never reach: outside the layout root.
 	outside := filepath.Join(t.TempDir(), "outside")
 	mustWrite(t, outside, "keep")
-	inside, err := l.Rooted("/etc/inside.conf")
+	inside, err := l.Rooted(abs("/etc/inside.conf"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,12 +510,12 @@ func TestManagedFilesConfinedToLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, l.ManagedFilesList, strings.Join([]string{
-		"/",
+		abs("/"),
 		"../x",
-		"/../x",
-		"/etc/../../" + rel,
+		abs("/../x"),
+		abs("/etc/../../") + rel,
 		outside, // an absolute host path is re-rooted under the layout, so the real file is untouched
-		"/etc/inside.conf",
+		abs("/etc/inside.conf"),
 		"",
 	}, "\n"))
 
@@ -501,9 +530,16 @@ func TestManagedFilesConfinedToLayout(t *testing.T) {
 		}
 	}
 
-	r, _ := newFake(t, l)
-	if _, err := Apply(context.Background(), l, testIdentity(testMachineID), r, false); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		r := newWinFake(t, l, WindowsComputerName(testMachineID))
+		if _, _, err := ApplyWindows(context.Background(), l, testIdentity(testMachineID), r, ModeEarly); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		r, _ := newFake(t, l)
+		if _, err := Apply(context.Background(), l, testIdentity(testMachineID), r, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 	mustNotExist(t, inside)
 	if mustRead(t, outside) != "keep" || mustRead(t, sentinel) != "keep" {
@@ -515,6 +551,7 @@ func TestManagedFilesConfinedToLayout(t *testing.T) {
 }
 
 func TestApplyFailureKeepsOldIdentityFileAndRetryRewipes(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	oldFile := &File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", WrittenMachineID: "aaaaaaaabbbbccccddddeeeeeeeeeeee"}
 	if err := oldFile.Save(l.IdentityFile); err != nil {
@@ -573,6 +610,9 @@ func TestHostKeyFingerprintsWarnsWhenNoneParse(t *testing.T) {
 
 // identity.json is created in a root 0700 state directory (spec 4).
 func TestSaveCreatesStateDir0700(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("state\\ gets its protected DACL from SecureAgentDirs (TestEarlySecuresAgentDirs), not from Save")
+	}
 	l := paths.ForRoot(t.TempDir())
 	if err := (&File{MachineID: testMachineID}).Save(l.IdentityFile); err != nil {
 		t.Fatal(err)
@@ -590,6 +630,7 @@ func TestSaveCreatesStateDir0700(t *testing.T) {
 // start: replacing it restarts journald. A machine-id that systemd chose, or
 // none at all, is no reason to.
 func TestApplyRestartsJournalOnlyWhenReplacingAnID(t *testing.T) {
+	linuxApply(t)
 	old := "aaaaaaaabbbbccccddddeeeeeeeeeeee"
 	for _, tt := range []struct {
 		name    string
@@ -625,6 +666,7 @@ func TestApplyRestartsJournalOnlyWhenReplacingAnID(t *testing.T) {
 // journald restarts after identity.json is saved, so a hang there does not
 // repeat the wipe.
 func TestApplyRestartsJournalAfterSave(t *testing.T) {
+	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	old := "aaaaaaaabbbbccccddddeeeeeeeeeeee"
 	if err := (&File{MachineID: "old", WrittenMachineID: old}).Save(l.IdentityFile); err != nil {

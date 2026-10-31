@@ -6,6 +6,10 @@
 // The lease file and the auto-thaw markers live on tmpfs (/run), so the
 // agent never writes to a frozen filesystem; the store is frozen before
 // FIFREEZE and unfrozen after FITHAW.
+//
+// On Windows (S9 spec 12.10) VSS freezes the filesystems after Quiesce
+// returns: a lease runs the hooks and, for a saved snapshot, wipes the
+// secret files, which every thaw restores from the agent's memory.
 package quiesce
 
 import (
@@ -54,10 +58,6 @@ const (
 const (
 	// markerPoll is how often an active lease looks for a watchdog marker.
 	markerPoll = time.Second
-	// freezeBudget caps the freeze steps of Quiesce (docker, hooks, sync,
-	// store, FIFREEZE): S1 allows 5 s for Quiesce. A shorter lease caps
-	// them at its deadline instead.
-	freezeBudget = 5 * time.Second
 	// syncTimeout bounds the wait for sync(2); a foreign freeze can hang
 	// it, FIFREEZE then reports the freeze.
 	syncTimeout = 2 * time.Second
@@ -112,6 +112,16 @@ type frozenStore interface {
 	Flush(ctx context.Context) error
 }
 
+// SecretFiles wipes and restores the secret files for a snapshot;
+// *claim.Manager implements it.
+type SecretFiles interface {
+	// WipeSecretFiles overwrites and deletes the secret files. A file held
+	// open makes it fail with an error matching errs.ErrSecretInUse.
+	WipeSecretFiles() (wiped bool, err error)
+	// RestoreSecretFiles writes the files back from memory.
+	RestoreSecretFiles() error
+}
+
 // Supervisor starts and stops the watchdog unit; supervisor.Supervisor
 // implements it.
 type Supervisor interface {
@@ -136,6 +146,10 @@ type Options struct {
 	Freezer Freezer
 	// Supervisor runs the watchdog unit.
 	Supervisor Supervisor
+	// Secrets wipes the secret files for Quiesce with wipe_secret_files
+	// where WipesSecretFiles; nil skips the wipe. May be set later with
+	// SetSecrets (the claim manager starts after quiesce).
+	Secrets SecretFiles
 	// Emit publishes quiesce.auto_thawed. Events emitted before an
 	// emitter is set wait in memory.
 	Emit events.Emitter
@@ -166,6 +180,9 @@ type Manager struct {
 	freezeBudget       time.Duration
 	storeFreezeTimeout time.Duration
 	unitMarkerWait     time.Duration
+	// Platform behaviour, freezesFS and WipesSecretFiles by default.
+	fsFreeze    bool // fs freeze and Docker pause; false refuses fs=true
+	wipeSecrets bool // wipe_secret_files is honoured
 
 	// opMu serializes Quiesce, Thaw, the automatic thaws and the foreign
 	// thaw; it is held for a whole operation.
@@ -176,6 +193,7 @@ type Manager struct {
 	gen        uint64      // incremented by every Quiesce
 	st         frozenStore // nil without a store
 	emit       events.Emitter
+	secrets    SecretFiles // nil without a secret store
 	queued     []*agentv1.QuiesceAutoThawed
 	probeDone  chan struct{} // the probe write in flight, or nil
 	probeGen   uint64        // gen when the probe in flight started
@@ -224,7 +242,10 @@ func New(opts Options) *Manager {
 		freezeBudget:       freezeBudget,
 		storeFreezeTimeout: storeFreezeTimeout,
 		unitMarkerWait:     unitMarkerWait,
+		fsFreeze:           freezesFS,
+		wipeSecrets:        WipesSecretFiles,
 		emit:               opts.Emit,
+		secrets:            opts.Secrets,
 	}
 	if opts.Store != nil {
 		m.st = opts.Store
@@ -249,6 +270,20 @@ func (m *Manager) SetStore(st *store.Store, emit events.Emitter) {
 		emit.Emit(events.TypeQuiesceAutoThawed, ev)
 	}
 	m.queued = nil
+}
+
+// SetSecrets sets the secret file store once the claim manager exists.
+func (m *Manager) SetSecrets(s SecretFiles) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.secrets = s
+}
+
+// secretFiles returns the secret file store, or nil.
+func (m *Manager) secretFiles() SecretFiles {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.secrets
 }
 
 // store returns the store, or nil.
@@ -314,14 +349,31 @@ func frozenByOther(what string) error {
 
 // Quiesce starts a lease of leaseMs (0 means DefaultLeaseMs) in the order of
 // spec 14.2: lease file, watchdog unit and timer, Docker pause, freeze
-// hooks, sync, store freeze, FIFREEZE. A failing step undoes the earlier
-// ones in reverse order.
-func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs bool) (*agentv1.QuiesceResponse, error) {
+// hooks, secret file wipe, sync, store freeze, FIFREEZE. A failing step
+// undoes the earlier ones in reverse order. Without the fs freeze
+// (Windows) fs=true fails with fs_freeze_unsupported and docker is
+// ignored; wipeSecretFiles is ignored where the platform does not wipe
+// (Linux: the secrets are on a tmpfs).
+func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs, wipeSecretFiles bool) (*agentv1.QuiesceResponse, error) {
 	if leaseMs == 0 {
 		leaseMs = DefaultLeaseMs
 	}
 	if leaseMs > MaxLeaseMs {
 		return nil, errs.Newf(connect.CodeInvalidArgument, errs.InvalidArgument, "lease_ms must be in 1..%d", MaxLeaseMs)
+	}
+	if !m.fsFreeze {
+		if fs {
+			return nil, errs.New(connect.CodeFailedPrecondition, errs.FsFreezeUnsupported,
+				"quiesce: the agent cannot freeze filesystems on this platform; freeze them with the QEMU guest agent (VSS)")
+		}
+		docker = false
+	}
+	wipe := wipeSecretFiles && m.wipeSecrets
+	if wipe && m.secretFiles() == nil {
+		// Before the claim manager is up: a snapshot taken now could hold
+		// secret files from an earlier run.
+		return nil, errs.New(connect.CodeUnavailable, errs.Internal,
+			"quiesce: wipe_secret_files: the secret store is not ready yet")
 	}
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
@@ -340,7 +392,7 @@ func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs bool) 
 		return nil, internalErr("lease", err)
 	}
 	m.setCurrent(a)
-	res, err := m.freeze(ctx, a, docker, fs)
+	res, err := m.freeze(ctx, a, docker, fs, wipe)
 	if err != nil {
 		m.opts.Log.Warn("quiesce failed, rolling back", "lease", id, "err", err)
 		rctx := context.WithoutCancel(ctx)
@@ -365,10 +417,10 @@ func (m *Manager) Quiesce(ctx context.Context, leaseMs uint32, docker, fs bool) 
 }
 
 // freeze runs the steps of Quiesce after the lease file is written. The
-// docker, hook, sync, store and FIFREEZE steps end by freezeBudget or the
-// lease deadline, whichever comes first, and stop early if the watchdog
+// watchdog start and the docker, hook, wipe, sync, store and FIFREEZE steps
+// end by freezeBudget or the lease deadline, whichever comes first, and stop early if the watchdog
 // unit took the lease: a Quiesce never runs past its own deadline.
-func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool) (*agentv1.QuiesceResponse, error) {
+func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS, wipe bool) (*agentv1.QuiesceResponse, error) {
 	l := a.lease
 	res := &agentv1.QuiesceResponse{LeaseId: a.id, Deadline: timestamppb.New(a.deadline)}
 	save := func() error { return writeLease(m.opts.Layout.QuiesceFile, l) }
@@ -454,6 +506,25 @@ func (m *Manager) freeze(ctx context.Context, a *active, withDocker, withFS bool
 		}
 		if err := m.steps.runHook(ctx, h, hookFreeze); err != nil {
 			return nil, fail("freeze hook", err)
+		}
+	}
+
+	// Secret files, after the hooks: a hook may stop what holds them open.
+	if sec := m.secretFiles(); wipe && sec != nil {
+		if err := check(); err != nil {
+			return nil, err
+		}
+		// Recorded before the wipe: every thaw restores them.
+		l.SecretsWiped = true
+		if err := save(); err != nil {
+			return nil, internalErr("lease", err)
+		}
+		if _, err := sec.WipeSecretFiles(); err != nil {
+			if errors.Is(err, errs.ErrSecretInUse) {
+				return nil, errs.New(connect.CodeFailedPrecondition, errs.SecretsInUse,
+					"quiesce: a secret file is held open by a process, stop the sandbox before the snapshot: "+err.Error())
+			}
+			return nil, fail("wipe secret files", err)
 		}
 	}
 
@@ -604,6 +675,22 @@ func (m *Manager) awaitUnitMarker(a *active) (marker, bool) {
 	return m.waitMarker(a.id)
 }
 
+// restoreSecrets writes back the secret files a wiped. A failure is
+// logged and the thaw goes on: the claim manager has set the secrets phase
+// pending, so the control plane sends the secrets again.
+func (m *Manager) restoreSecrets(a *active) {
+	if !a.lease.SecretsWiped {
+		return
+	}
+	sec := m.secretFiles()
+	if sec == nil {
+		return
+	}
+	if err := sec.RestoreSecretFiles(); err != nil {
+		m.opts.Log.Error("quiesce: restore secret files", "lease", a.id, "err", err)
+	}
+}
+
 // thawAfterUnit completes the watchdog unit's thaw of a (marker mk, zero if
 // the unit left none). The unit thawed what it read from the lease file,
 // and the agent may have frozen, paused or run more after that read: FITHAW
@@ -611,6 +698,8 @@ func (m *Manager) awaitUnitMarker(a *active) (marker, bool) {
 // paused" are harmless), hooks the unit did not thaw get thaw now.
 func (m *Manager) thawAfterUnit(ctx context.Context, a *active, mk marker) {
 	m.steps.thawMounts(a.lease.Frozen)
+	// The unit cannot restore the secret files: they are in our memory.
+	m.restoreSecrets(a)
 	for _, h := range slices.Backward(a.lease.Hooks) {
 		if slices.Contains(mk.Hooks, h) {
 			continue
@@ -623,9 +712,9 @@ func (m *Manager) thawAfterUnit(ctx context.Context, a *active, mk marker) {
 }
 
 // release ends a: with thaw it undoes the lease steps first (FITHAW, store
-// unfreeze, hooks, unpause); then it stops the timer and the marker watch,
-// deletes the lease file, stops the watchdog unit and deletes the unit's
-// claim of a. opMu is held.
+// unfreeze, secret file restore, hooks, unpause); then it stops the timer
+// and the marker watch, deletes the lease file, stops the watchdog unit and
+// deletes the unit's claim of a. opMu is held.
 func (m *Manager) release(ctx context.Context, a *active, thaw bool) {
 	unfreeze := func() {
 		if a.storeFrozen {
@@ -636,7 +725,10 @@ func (m *Manager) release(ctx context.Context, a *active, thaw bool) {
 		}
 	}
 	if thaw {
-		m.steps.thawLease(ctx, a.lease, unfreeze)
+		m.steps.thawLease(ctx, a.lease, func() {
+			unfreeze()
+			m.restoreSecrets(a)
+		})
 	} else {
 		unfreeze()
 	}

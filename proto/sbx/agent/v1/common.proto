@@ -99,6 +99,9 @@ message CommandSpec {
   uint64 timeout_ms = 9;
   OnExit on_exit = 10;
   map<string, string> tags = 11;
+  // Desktop runs the command in the interactive desktop session (Windows).
+  // Agents without a desktop helper answer failed_precondition desktop_not_ready.
+  bool desktop = 12;
 }
 
 // ExitInfo is the final outcome of a command.

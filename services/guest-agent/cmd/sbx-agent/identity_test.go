@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -30,6 +31,9 @@ func testDeps(t *testing.T, src ident.Source) (deps, *ident.FakeResetter) {
 }
 
 func TestIdentityApplyCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Linux identity apply; Windows: TestIdentityApplySpecializeCLI, TestIdentityApplyWindowsReboots")
+	}
 	serial := wire.SMBIOSSerial(cliMachineID, bytes.Repeat([]byte{7}, wire.SecretLen))
 	d, r := testDeps(t, ident.Static{Raw: ident.Raw{Serial: serial, UUID: cliMachineID}})
 

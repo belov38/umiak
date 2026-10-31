@@ -59,7 +59,7 @@ rm -f "$2.new"
 `;
 
 /** Replaces `{{name}}` with the value; a placeholder without a value is an error. */
-function fillTemplate(
+export function fillTemplate(
 	tmpl: string,
 	values: Record<string, string>,
 	file: string,
@@ -112,8 +112,11 @@ export function renderAgentToml(tunnelUrl?: string): string {
 	return lines.join("\n");
 }
 
-/** Every file under `<dir>/files/`, as `relative path -> content`. */
-function collectFiles(dir: string, out: Map<string, string | Buffer>): void {
+/** Every file under `<dir>/files/`, as `build/files/<relative path> -> content`. */
+export function collectFiles(
+	dir: string,
+	out: Map<string, string | Buffer>,
+): void {
 	const root = join(dir, "files");
 	if (!existsSync(root)) return;
 	const rels = readdirSync(root, { recursive: true, encoding: "utf8" })
@@ -186,19 +189,24 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 // ISO
 
 const VOLUME_LABEL = "cidata";
+/** ISO 9660 volume id: at most 32 characters; xorriso keeps the case. */
+const VOLUME_LABEL_RE = /^[A-Za-z0-9_]{1,32}$/;
 
 /** The ISO tool, on every platform. */
 export const ISO_TOOL = "xorriso";
 
 /**
- * Writes the tree to a temp directory and packs it into `out` (volume label `cidata`) with xorriso,
+ * Writes the tree to a temp directory and packs it into `out` (volume label `cidata` unless given) with xorriso,
  * Rock Ridge and Joliet. Not hdiutil: it shortens names with dots or more than 30 characters
  * (sudoers.d became sudoersd on a real build).
  */
 export function makeIso(
 	files: Map<string, string | Buffer>,
 	out: string,
+	label = VOLUME_LABEL,
 ): void {
+	if (!VOLUME_LABEL_RE.test(label))
+		throw new Error(`invalid ISO volume label "${label}"`);
 	const root = mkdtempSync(join(tmpdir(), "sbx-seed-"));
 	try {
 		for (const [rel, data] of files) {
@@ -207,17 +215,7 @@ export function makeIso(
 			writeFileSync(p, data);
 		}
 		rmSync(out, { force: true });
-		const args = [
-			"-as",
-			"mkisofs",
-			"-V",
-			VOLUME_LABEL,
-			"-J",
-			"-R",
-			"-o",
-			out,
-			root,
-		];
+		const args = ["-as", "mkisofs", "-V", label, "-J", "-R", "-o", out, root];
 		try {
 			execFileSync(ISO_TOOL, args, { stdio: ["ignore", "pipe", "pipe"] });
 		} catch (err) {

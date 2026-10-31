@@ -714,25 +714,34 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 
 Всё зависимое от ОС — за интерфейсами, файлы `*_linux.go` / `*_windows.go`. CI собирает `GOOS=windows CGO_ENABLED=0` с первого дня.
 
-| Интерфейс | Linux (S3) | Windows (S9) |
+| Интерфейс | Linux (S3) | Windows (S9, как сделано; пакеты в `services/guest-agent/internal/`) |
 |---|---|---|
-| `Supervisor` (запуск unit-а команды, поиск, kill) | systemd transient service через D-Bus + shim, cgroup v2 | shim в job object с breakaway |
-| `PTY` | `creack/pty` | ConPTY |
-| `IdentitySource` (machineId, BS, vmgenid, bootId) | DMI sysfs, `/proc/sys/kernel/random/boot_id`; vmgenid нет | `GetSystemFirmwareTable`, vmgenid |
-| `IdentityResetter` | machine-id, host keys, hostname | имя компьютера, host keys OpenSSH for Windows |
-| `Quiescer` | Docker pause + FIFREEZE | VSS |
-| `PortScanner` | `/proc/net/tcp{,6}` | `GetExtendedTcpTable` |
+| `Supervisor` (запуск unit-а команды, поиск, kill) | systemd transient service через D-Bus + shim, cgroup v2 | `supervisor/windows.go`: shim запускается с `CREATE_BREAKAWAY_FROM_JOB \| DETACHED_PROCESS`, spec — в stdin, готовность — строка `READY`; живость — mutex `Global\sbx-shim-<id>`, команда — постоянный job `Global\sbx-cmd-<id>` (`winproc/job_windows.go`, `NtCreateJobObject` + `OBJ_PERMANENT`); shim — `shim/*_windows.go` |
+| IPC агент ↔ shim | AF_UNIX, shimproto | то же: AF_UNIX `run\cmd\<id>.sock`, shimproto без изменений |
+| `PTY` | `creack/pty` | ConPTY (`winproc/conpty_windows.go`) |
+| Командная строка | `argv` как есть, `shell` = `bash -lc` (`-c` без login) | `wincmd`: правила MSVCRT, `.cmd`/`.bat` через `cmd.exe /d /s /c` (BatBadBut → `unsafe_batch_args`), `shell` = `pwsh -EncodedCommand` с эпилогом кода выхода (S9 §12.6) |
+| `IdentitySource` (machineId, BS, vmgenid, bootId) | DMI sysfs, `/proc/sys/kernel/random/boot_id`; vmgenid нет | `ident/source_windows.go`: `GetSystemFirmwareTable('RSMB')` (`ident/smbios.go`), bootId = UUIDv5(machineId, счётчик `BootId` в реестре), запасной — volatile-ключ реестра; vmgenid не читается |
+| `IdentityResetter` | machine-id, host keys, hostname | `ident/{apply,reset,early,seal}_windows.go`: `MachineGuid`, host keys встроенного OpenSSH, имя `SBX<12 hex>`, пароль `user` только на клоне шаблона; `identity apply --specialize`, `early` (startup-скрипт `sbx-early.cmd`) |
+| `Quiescer` | Docker pause + FIFREEZE | `quiesce/{freeze,hooks}_windows.go`: только хуки `quiesce.d\*.ps1` и очистка файлов секретов; FS замораживает QGA VSS из worker |
+| `PortScanner` | `/proc/net/tcp{,6}` | `ports/scan_windows.go`: `GetExtendedTcpTable` раз в 1 s, фильтр по процессам (`ports/filter.go`) |
 | `Metrics` | `gopsutil` | `gopsutil` |
-| `Credentials` | uid/gid/groups (`os/user` без cgo) | токен пользователя |
-| `SecretStore` | tmpfs `noswap` | каталог с ACL только для SYSTEM и пользователя |
-| `ServiceManager` | systemd D-Bus | SCM (`x/sys/windows/svc`) |
-| `OutputStore` (выбивание дыр) | `fallocate PUNCH_HOLE` | sparse-файлы `FSCTL_SET_ZERO_DATA` |
+| `Credentials` | uid/gid/groups (`os/user` без cgo) | `process/users_windows.go`, `winapi/{logon,lsa,profile}_windows.go`: `LogonUserW` + связанный повышенный токен, пароль из LSA secret `L$sbx_user`; `root` = `SYSTEM` |
+| `SecretStore` | tmpfs `noswap` | `claim/secrets_windows.go`, `claim/acl_windows.go`: `C:\ProgramData\sbx\secrets\files`, ACL SYSTEM + `user`, `FILE_ATTRIBUTE_TEMPORARY`, перезапись нулями перед удалением; `secret_env` и содержимое файлов — только в памяти |
+| `ServiceManager` | systemd D-Bus | SCM (`x/sys/windows/svc`, `update/service_windows.go`, `cmd/sbx-agent/service_windows.go`) |
+| Переключение версий | symlink-и `current`/`previous` | junction-ы NTFS (`update/junction_windows.go`) |
+| `OutputStore` (выбивание дыр) | `fallocate PUNCH_HOLE` | sparse-файлы: `FSCTL_SET_SPARSE`, `FSCTL_SET_ZERO_DATA` с шагом 64 KiB, `FSCTL_QUERY_ALLOCATED_RANGES` (`output/store_windows.go`) |
+| Файлы | POSIX | `files/*_windows.go`: пути `C:\…`, `mode`/`owner` синтезируются, `file_in_use` (S9 §12.9) |
+| Локальные сокеты | `--debug-listen` (тесты) | `run\admin.sock` (SYSTEM + Administrators, клиенты `exec`, `call`), `run\env.sock` (`env --format pwsh`) — `agent/localsock_windows.go` |
+
+Пакет Windows: `sbx-agent-<v>-windows-amd64.tar` с `sbx-agent.exe` (`sbx-release pack --os windows`, `infra/templates/agent-package.sh --os windows`). Отличия и решения реализации — S9 §24.
 
 ## 19. Proto
 
 `proto/sbx/agent/v1/`: `process.proto`, `filesystem.proto`, `system.proto`, `events.proto`, `common.proto` (`FileInfo`, `CommandInfo`). Соглашения S2 §10: только добавления, `buf breaking`; `idempotency_level` на методах как в таблицах §9.1, §11.4, §13; ошибки — коды Connect + `ErrorDetail{code, retryable}` из `sbx.tunnel.v1`.
 
 Коды `ErrorDetail.code` агента: `already_exists`, `command_not_found`, `command_exited`, `too_many_commands`, `start_failed`, `user_not_found`, `path_not_found`, `is_directory`, `not_directory`, `no_space`, `cross_device`, `upload_offset_mismatch`, `checksum_mismatch`, `identity_not_ready`, `already_claimed`, `not_claimed`, `quiesced`, `already_quiesced`, `frozen_by_other`, `signature_invalid`, `update_in_progress`, `shim_outdated`.
+
+Добавлены в S9 (Windows): `unsupported_signal`, `unsafe_batch_args`, `file_in_use`, `secrets_in_use`, `secrets_pending`, `fs_freeze_unsupported`, `desktop_not_ready`. Поля proto S9 (только добавления): `CommandSpec.desktop`, `ClaimResponse.hostname_applied` (Linux всегда `true`), `QuiesceRequest.wipe_secret_files`, `PrepareStopResponse.secret_files_wiped` (Linux `true` после успешной очистки). Capability `system.quiesce.wipe_secrets.v1` объявляет только Windows-агент.
 
 Сгенерированный код кладётся как в реализации S2: Go — в `libs/proto` (`github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1`), TS — в `packages/proto`.
 

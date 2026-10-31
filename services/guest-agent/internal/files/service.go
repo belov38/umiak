@@ -505,7 +505,7 @@ func (s *Service) move(ctx context.Context, req *agentv1.MoveRequest) (*agentv1.
 		return nil, fsError(err)
 	}
 	if req.GetOverwrite() {
-		err = os.Rename(src, dst)
+		err = replaceFile(src, dst)
 	} else {
 		err = renameNoReplace(src, dst)
 	}
@@ -513,7 +513,7 @@ func (s *Service) move(ctx context.Context, req *agentv1.MoveRequest) (*agentv1.
 	case err == nil:
 	case !req.GetOverwrite() && errors.Is(err, fs.ErrExist):
 		return nil, errs.Newf(connect.CodeAlreadyExists, errs.AlreadyExists, "%s already exists", dst)
-	case errors.Is(err, syscall.EXDEV):
+	case isCrossDevice(err):
 		if sfi.IsDir() {
 			return nil, errs.Newf(connect.CodeFailedPrecondition, errs.CrossDevice, "cannot move directory %s across filesystems", src)
 		}
@@ -533,15 +533,6 @@ func (s *Service) move(ctx context.Context, req *agentv1.MoveRequest) (*agentv1.
 		return nil, fsError(err)
 	}
 	return info, nil
-}
-
-// renameCheckFirst renames src to dst after checking that dst does not
-// exist (fs.ErrExist otherwise). The two steps are not atomic.
-func renameCheckFirst(src, dst string) error {
-	if _, err := os.Lstat(dst); err == nil {
-		return &os.LinkError{Op: "rename", Old: src, New: dst, Err: fs.ErrExist}
-	}
-	return os.Rename(src, dst)
 }
 
 // copyAcross copies the file or symlink src to dst on another filesystem
@@ -600,7 +591,7 @@ func (s *Service) chmod(ctx context.Context, req *agentv1.ChmodRequest) (*agentv
 		if err != nil {
 			return nil, err
 		}
-		o.uid = int(u.UID)
+		o.uid, o.account = int(u.UID), accountOf(u)
 		if hasGroup {
 			gid, err := lookupGroup(group)
 			if err != nil {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -271,6 +272,10 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 		mod(&opts)
 	}
 	e.m = New(opts)
+	// The tests drive the Linux flow with the fake freezer and docker. The
+	// Windows agent refuses fs=true and ignores docker (S9 spec 12.10, see
+	// wipe_test.go), but the steps around them are the same code.
+	e.m.fsFreeze = true
 	n := 0
 	var mu sync.Mutex
 	e.m.newID = func() string {
@@ -281,7 +286,7 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 	}
 	e.m.syncFS = func() { log.add("sync") }
 	e.m.steps.runHook = func(_ context.Context, p, arg string) error {
-		log.add("hook %s %s", filepath.Base(p), arg)
+		log.add("hook %s %s", hookLabel(p), arg)
 		return nil
 	}
 	// Probes succeed at once unless a test replaces them.
@@ -289,14 +294,24 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 	return e
 }
 
-// addHook creates an executable hook file in the hooks dir.
+// addHook creates an executable hook file in the hooks dir. On Windows a
+// name without an extension gets .ps1: only *.ps1 files are hooks there.
 func (e *env) addHook(t *testing.T, name, body string, mode os.FileMode) string {
 	t.Helper()
+	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
+		name += ".ps1"
+	}
 	p := filepath.Join(e.l.QuiesceHooksDir, name)
 	if err := os.WriteFile(p, []byte(body), mode); err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// hookLabel is the name of hook p in the test logs: its base name without
+// the .ps1 extension (see addHook).
+func hookLabel(p string) string {
+	return strings.TrimSuffix(filepath.Base(p), ".ps1")
 }
 
 // waitFor polls cond for up to 5 s.

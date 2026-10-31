@@ -28,6 +28,7 @@ import (
 
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 )
 
 // tunnelPackage is the proto package of the tunnel control API.
@@ -49,9 +50,17 @@ func (a *agent) startDebug(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	a.log.Warn("agent: debug socket enabled (test aid)", "path", path, "debug_confirm", a.d.DebugConfirm)
+	a.serveLocal(ctx, ln, path, a.apiHandler())
+	return nil
+}
+
+// apiHandler is the handler of the debug and admin sockets: the agent mux,
+// Control/Info and a read-only Events/Subscribe.
+func (a *agent) apiHandler() http.Handler {
 	ctlPath, ctl := tunnelv1connect.NewControlHandler(debugControl{a: a})
 	evPath, ev := tunnelv1connect.NewEventsHandler(debugEvents{a: a})
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, ctlPath):
 			ctl.ServeHTTP(w, r)
@@ -61,11 +70,16 @@ func (a *agent) startDebug(ctx context.Context) error {
 			a.mux.ServeHTTP(w, r)
 		}
 	})
+}
+
+// serveLocal serves h on the local socket ln (HTTP/1.1 and h2c) until ctx
+// ends; then it stops accepting, waits (bounded) for in-flight requests and
+// removes the socket file at path.
+func (a *agent) serveLocal(ctx context.Context, ln net.Listener, path string, h http.Handler) {
 	var protos http.Protocols
 	protos.SetHTTP1(true)
 	protos.SetUnencryptedHTTP2(true)
 	srv := &http.Server{Handler: h, Protocols: &protos, ReadHeaderTimeout: 10 * time.Second}
-	a.log.Warn("agent: debug socket enabled (test aid)", "path", path, "debug_confirm", a.d.DebugConfirm)
 	a.goBG(func() { _ = srv.Serve(ln) })
 	a.goBG(func() {
 		<-ctx.Done()
@@ -76,18 +90,24 @@ func (a *agent) startDebug(ctx context.Context) error {
 		}
 		_ = os.Remove(path)
 	})
-	return nil
 }
 
 // listenPrivate listens on a unix socket at path that nobody but the owner
 // can connect to at any moment: the socket is created in a fresh 0700
-// directory next to path, made 0600 and only then renamed into place.
+// directory next to path (on Windows a directory with the SYSTEM and
+// Administrators DACL), made 0600 (on Windows given the DACL of the admin
+// socket) and only then renamed into place.
 func listenPrivate(ctx context.Context, path string) (net.Listener, error) {
 	dir, err := os.MkdirTemp(filepath.Dir(path), ".sbx-debug-")
 	if err != nil {
 		return nil, fmt.Errorf("agent: debug socket dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
+	// MkdirTemp's 0700 means nothing on Windows; MkdirSecure sets the DACL
+	// there (and keeps 0700 elsewhere).
+	if err := fsutil.MkdirSecure(dir, fsutil.SystemAndAdmins); err != nil {
+		return nil, fmt.Errorf("agent: debug socket dir: %w", err)
+	}
 	tmp := filepath.Join(dir, "s")
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "unix", tmp)
@@ -99,7 +119,7 @@ func listenPrivate(ctx context.Context, path string) (net.Listener, error) {
 		ul.SetUnlinkOnClose(false)
 	}
 	_ = os.Remove(path) // a socket left by a killed run
-	err = os.Chmod(tmp, 0o600)
+	err = secureSocket(tmp, socketAdmin, "")
 	if err == nil {
 		err = os.Rename(tmp, path)
 	}

@@ -92,6 +92,14 @@ type Supervisor interface {
 	Close() error
 }
 
+// SpecLauncher is implemented by a Supervisor that hands the shim its spec
+// with the launch instead of through the CmdSpec file (Windows: no tmpfs,
+// the spec goes over the shim's stdin). LaunchSpec behaves like Launch;
+// spec is the JSON of shim.Spec. The caller writes no CmdSpec file then.
+type SpecLauncher interface {
+	LaunchSpec(ctx context.Context, id, shimPath string, extraArgs []string, spec []byte) error
+}
+
 // UnitName returns the unit name of command id.
 func UnitName(id string) string {
 	return cmdUnitPrefix + id + serviceSuffix

@@ -18,7 +18,12 @@ import {
 } from "@sbx/pve";
 import { pveImageName } from "./image.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
-import { REBOOT_STEP, type Recipe, type Versions } from "./recipe.ts";
+import {
+	REBOOT_STEP,
+	type Recipe,
+	type Versions,
+	type WindowsVersions,
+} from "./recipe.ts";
 import type { FileRegistry } from "./registry.ts";
 import { type GuestIo, mountSeed, rebootGuest, runStep } from "./runner.ts";
 import { writeGuestFile } from "./seal.ts";
@@ -43,7 +48,7 @@ export const TASK_TIMEOUT_MS = 30 * MIN;
 const PING_TIMEOUT_MS = 10 * MIN;
 const SHUTDOWN_TIMEOUT_MS = 5 * MIN;
 const IPAM_TIMEOUT_MS = 15_000;
-const DEFAULT_POLL_MS = 2000;
+export const DEFAULT_POLL_MS = 2000;
 
 /** PveApi with the multipart upload. */
 export type BuildApi = PveClient & {
@@ -69,8 +74,17 @@ export interface BuildDeps {
 	fetchImage: (
 		base: Versions["base"],
 	) => Promise<{ path: string; sha256: string }>;
+	/** iso-install: downloads virtio-win and checks its sha256 (fetchVirtioWin). */
+	fetchVirtioWin?: (
+		v: WindowsVersions["virtioWin"],
+	) => Promise<{ path: string; sha256: string }>;
 	io: (vmid: number) => GuestIo;
-	makeIso: (files: Map<string, string | Buffer>, out: string) => void;
+	/** Writes an ISO 9660 image; `label` is the volume label (default the seed's). */
+	makeIso: (
+		files: Map<string, string | Buffer>,
+		out: string,
+		label?: string,
+	) => void;
 	verify: (
 		m: Manifest,
 		o: { connect?: ConnectOptions; signal?: AbortSignal },
@@ -93,6 +107,12 @@ export interface BuildDeps {
 	signal?: AbortSignal;
 	/** Poll interval for the guest and Proxmox (default 2 s). */
 	pollMs?: number;
+	/** iso-install: interval of the boot-from-CD key presses (default 250 ms); their number is fixed. */
+	keyIntervalMs?: number;
+	/** iso-install: how long sysprep may take to power the VM off (default 30 min). */
+	sysprepTimeoutMs?: number;
+	/** iso-install: how long the offline WinPE boot may take (default 10 min). */
+	offlineTimeoutMs?: number;
 }
 
 export interface BuildOptions {
@@ -116,19 +136,39 @@ export interface BuildOptions {
 	/** Test flag: this step exits 1. */
 	failStep?: string;
 	connect?: ConnectOptions;
+	/** iso-install: the user's ISO in local:iso instead of versions.toml [iso] file. */
+	iso?: string;
+	/** iso-install: expected sha256 of the user's ISO instead of [iso] sha256. */
+	isoSha256?: string;
+	/** iso-install: take the sha256 the node computes and write it into versions.toml. */
+	acceptIsoSha256?: boolean;
+	/** iso-install: `/IMAGE/NAME` instead of [iso] edition. */
+	edition?: string;
+	/** iso-install: file with a product key that replaces the generic one; never recorded. */
+	productKeyFile?: string;
 }
 
 export type Stage =
 	| "prepare"
 	| "image"
 	| "seed"
+	| "media"
 	| "vm"
 	| "boot"
+	| "install"
 	| "steps"
+	| "offline"
+	| "verify-offline"
 	| "seal"
 	| "template"
 	| "verify"
 	| "ready";
+
+/** Records a manifest patch in the registry; `unset` drops optional keys. */
+export type Save = (
+	patch: Partial<Manifest>,
+	unset?: (keyof Manifest)[],
+) => void;
 
 /** What the build created so far: the rollback removes exactly this. */
 export interface State {
@@ -139,15 +179,17 @@ export interface State {
 	mac?: string;
 	seedUploaded: boolean;
 	ramReserved: boolean;
+	/** iso-install: build and offline ISOs in local:iso (possibly partly uploaded). */
+	isos?: string[];
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const errorText = (err: unknown) =>
 	err instanceof Error ? err.message : String(err);
-const isUpid = (v: unknown): v is string =>
+export const isUpid = (v: unknown): v is string =>
 	typeof v === "string" && v.startsWith("UPID:");
 
-async function fileSha256(path: string): Promise<string> {
+export async function fileSha256(path: string): Promise<string> {
 	const h = createHash("sha256");
 	for await (const chunk of createReadStream(path)) h.update(chunk);
 	return h.digest("hex");
@@ -168,7 +210,7 @@ export interface Prepared {
 	agentSha256: string;
 }
 
-async function upload(
+export async function upload(
 	deps: BuildDeps,
 	node: string,
 	content: "iso" | "import",
@@ -184,6 +226,42 @@ async function upload(
 	await deps.api.waitTask(node, upid, { timeoutMs: TASK_TIMEOUT_MS });
 }
 
+/**
+ * `name` in local:<content>, uploaded only when it is not there with the same size; a file of
+ * another size (a partial earlier upload) is replaced.
+ */
+export async function ensureMedia(
+	deps: BuildDeps,
+	node: string,
+	content: "iso" | "import",
+	name: string,
+	file: { path: string; sha256: string },
+): Promise<void> {
+	const size = statSync(file.path).size;
+	const volid = `${MEDIA_STORAGE}:${content}/${name}`;
+	const have = (
+		await deps.api.get<{ volid: string; size?: number }[]>(
+			`/nodes/${node}/storage/${MEDIA_STORAGE}/content`,
+			{ content },
+		)
+	).find((f) => f.volid === volid);
+	if (have?.size === size) {
+		deps.log(`${volid} is present`);
+		return;
+	}
+	if (have) {
+		// An upload never overwrites.
+		deps.log(`${volid} has ${have.size} bytes, want ${size}: replacing`);
+		await deps.node.call("media.remove", { names: [name] });
+	}
+	deps.log(`uploading ${name} (${size} bytes)`);
+	await upload(deps, node, content, file.sha256, {
+		name,
+		path: file.path,
+		size,
+	});
+}
+
 /** Base image in local:import, uploaded only when it is not there with the same size. */
 export async function stageImage(
 	deps: BuildDeps,
@@ -192,30 +270,7 @@ export async function stageImage(
 ): Promise<string> {
 	const img = await deps.fetchImage(versions.base);
 	const name = pveImageName(versions.base.serial);
-	const size = statSync(img.path).size;
-	const have = (
-		await deps.api.get<{ volid: string; size?: number }[]>(
-			`/nodes/${o.node}/storage/${MEDIA_STORAGE}/content`,
-			{ content: "import" },
-		)
-	).find((f) => f.volid === `${MEDIA_STORAGE}:import/${name}`);
-	if (have?.size === size) {
-		deps.log(`${MEDIA_STORAGE}:import/${name} is present`);
-		return name;
-	}
-	if (have) {
-		// A partial earlier upload: an upload never overwrites.
-		deps.log(
-			`${MEDIA_STORAGE}:import/${name} has ${have.size} bytes, want ${size}: replacing`,
-		);
-		await deps.node.call("media.remove", { names: [name] });
-	}
-	deps.log(`uploading ${name} (${size} bytes)`);
-	await upload(deps, o.node, "import", img.sha256, {
-		name,
-		path: img.path,
-		size,
-	});
+	await ensureMedia(deps, o.node, "import", name, img);
 	return name;
 }
 
@@ -280,7 +335,7 @@ export async function stageSeed(
 	}
 }
 
-async function waitIpam(
+export async function waitIpam(
 	deps: BuildDeps,
 	mac: string,
 	pollMs: number,
@@ -304,7 +359,7 @@ export async function stageVm(
 	recipe: Recipe,
 	image: string,
 	st: State,
-	save: (patch: Partial<Manifest>) => void,
+	save: Save,
 ): Promise<void> {
 	const { api } = deps;
 	const { vmid, mac } = await deps.allocator.allocateTemplate(recipe.vmids);
@@ -379,7 +434,7 @@ export async function stageBoot(
 	await mountSeed(io);
 }
 
-function stepLog(
+export function stepLog(
 	deps: BuildDeps,
 	o: BuildOptions,
 	buildId: string,
@@ -471,7 +526,7 @@ export async function shutdown(
  * The build VM's firewall (ipfilter with its IPAM address, the sbx-egress rule) must not stay on
  * the template: a Proxmox clone copies it, and the copy then collides with the clone's own.
  */
-async function dropBuildFirewall(
+export async function dropBuildFirewall(
 	api: PveClient,
 	vmPath: string,
 ): Promise<void> {
@@ -504,20 +559,22 @@ export async function stageTemplate(
 	st.seedUploaded = false;
 	// The sbx-tpl tag on the disk makes it a clone origin for sbx-node (as 599's).
 	await deps.node.call("lv.tagTemplate", { vmid });
-	await checkTemplateDisk(deps, vmid, st);
+	await checkTemplateDisk(deps, `base-${vmid}-disk-0`, st);
 	await deps.allocator.markActive(vmid);
 }
 
 /** A template disk this full kept the zero-fill: the free space was not trimmed. */
 export const MAX_TEMPLATE_DISK_PCT = 40;
 
-/** Records the template disk's thin usage and fails a build whose free space was not trimmed. */
-async function checkTemplateDisk(
+/**
+ * Records the thin usage of the template's boot disk (LV `name`, base-<vmid>-disk-<k>) and fails
+ * a build whose free space was not trimmed.
+ */
+export async function checkTemplateDisk(
 	deps: BuildDeps,
-	vmid: number,
+	name: string,
 	st: State,
 ): Promise<void> {
-	const name = `base-${vmid}-disk-0`;
 	// lv.list has no data percent for an inactive LV (a template); lv.usage activates it.
 	const lv = await deps.node.call<{ sizeBytes: number; dataPercent: number }>(
 		"lv.usage",

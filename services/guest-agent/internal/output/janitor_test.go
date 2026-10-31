@@ -108,8 +108,8 @@ func TestJanitorPerStreamCap(t *testing.T) {
 	if size != 200*kib {
 		t.Fatalf("size = %d, want unchanged", size)
 	}
-	if held > 64*kib+4095 {
-		t.Fatalf("held %d bytes, want <= %d", held, 64*kib+4095)
+	if held > 64*kib+punchUnit-1 {
+		t.Fatalf("held %d bytes, want <= %d", held, 64*kib+punchUnit-1)
 	}
 	if held < 64*kib {
 		t.Fatalf("held %d bytes, want at least the cap %d", held, 64*kib)
@@ -130,7 +130,7 @@ func TestJanitorTotalDropsOldestExitedFirst(t *testing.T) {
 	if err := e.j.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, held := e.held(t, "older", "stdout"); held >= 4096 {
+	if _, held := e.held(t, "older", "stdout"); held >= punchUnit {
 		t.Fatalf("older exited kept %d bytes, want it dropped", held)
 	}
 	if _, held := e.held(t, "newer", "stdout"); held != 100*kib {
@@ -153,7 +153,7 @@ func TestJanitorTotalTrimsRunningAfterExited(t *testing.T) {
 	if err := e.j.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, held := e.held(t, "done", "stdout"); held >= 4096 {
+	if _, held := e.held(t, "done", "stdout"); held >= punchUnit {
 		t.Fatalf("exited kept %d bytes, want it dropped", held)
 	}
 	// 200 KiB over a 150 KiB limit: dropping the exited log leaves 100 KiB,
@@ -169,7 +169,7 @@ func TestJanitorTotalTrimsRunningAfterExited(t *testing.T) {
 	if err := e.j.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, held := e.held(t, "running", "stdout"); held < 50*kib || held > 50*kib+4095 {
+	if _, held := e.held(t, "running", "stdout"); held < 50*kib || held > 50*kib+punchUnit-1 {
 		t.Fatalf("running held %d, want trimmed to about 50 KiB", held)
 	}
 }
@@ -186,7 +186,7 @@ func TestJanitorTotalUsesFilesystemFraction(t *testing.T) {
 	if err := e.j.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, held := e.held(t, "done", "stdout"); held >= 4096 {
+	if _, held := e.held(t, "done", "stdout"); held >= punchUnit {
 		t.Fatalf("held %d, want dropped by the fraction limit", held)
 	}
 }
@@ -254,8 +254,8 @@ func TestJanitorDiskLowLowersStreamCap(t *testing.T) {
 	if err := e.j.RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, held := e.held(t, "c1", "stdout"); held > 32*kib+4095 {
-		t.Fatalf("held %d, want <= %d", held, 32*kib+4095)
+	if _, held := e.held(t, "c1", "stdout"); held > 32*kib+punchUnit-1 {
+		t.Fatalf("held %d, want <= %d", held, 32*kib+punchUnit-1)
 	}
 
 	e.free = 50 * gib

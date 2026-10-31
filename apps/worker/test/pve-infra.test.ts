@@ -19,6 +19,7 @@ import {
 	PveInfraRegistry,
 	pveClientsFromSecrets,
 } from "../src/adapters/pve-infra.ts";
+import { QuiesceFailed } from "../src/ops/snapshot-step.ts";
 import {
 	type InfraSmbios,
 	isPermanent,
@@ -107,6 +108,33 @@ async function setup(o: { env?: Record<string, string> } = {}): Promise<Env> {
 }
 
 describe("PveInfraRegistry", () => {
+	it("hard-stops a guest after failed thaw and allows a normal start", async () => {
+		const e = await setup();
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		const err = await e.infra
+			.snapshot(vm.vmid, {
+				lvId: randomUUID().replaceAll("-", ""),
+				hook: {
+					freeze: async () => {},
+					thaw: async () => {
+						throw new Error("QGA dead");
+					},
+				},
+			})
+			.catch((x: unknown) => x);
+		expect(err).toBeInstanceOf(QuiesceFailed);
+		expect((err as Error).message).toMatch(/hard-stopped/);
+		expect(await e.infra.status(vm.vmid)).toBe("stopped");
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		expect(await e.infra.status(vm.vmid)).toBe("running");
+	});
 	it("builds the clients of a node once and caches them", async () => {
 		const e = await setup();
 		expect(await e.registry.forNode(e.topo.nodeId)).toBe(e.infra);
@@ -292,6 +320,125 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(snap.consistency).toBe("quiesced");
 		expect(hookCalls).toEqual(["freeze", "thaw"]);
 		expect(e.api.paths().some((p) => p.includes("fsfreeze"))).toBe(false);
+	});
+
+	it("qgaFreezeHook freezes and thaws through QGA; an already thawed guest is a QuiesceFailed", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const freeze = `POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-freeze`;
+		const thaw = `POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-thaw`;
+
+		// Thaw without a freeze does nothing.
+		const idle = e.infra.qgaFreezeHook(vmid);
+		await idle.thaw();
+		expect(e.api.paths()).not.toContain(thaw);
+
+		const clean = e.infra.qgaFreezeHook(vmid);
+		await clean.freeze();
+		expect(e.api.guestFrozen).toBe(true);
+		await clean.thaw();
+		expect(e.api.guestFrozen).toBe(false);
+		await clean.thaw();
+		expect(e.api.paths().filter((p) => p === thaw)).toHaveLength(1);
+
+		// VSS released the writers by itself: the thaw is not an error for QGA,
+		// but the snapshot is not consistent. The outcome is kept for retries.
+		const late = e.infra.qgaFreezeHook(vmid);
+		await late.freeze();
+		e.api.guestFrozen = false;
+		await expect(late.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
+		await expect(late.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
+		expect(e.api.paths().filter((p) => p === freeze)).toHaveLength(2);
+		expect(e.api.paths().filter((p) => p === thaw)).toHaveLength(1);
+	});
+
+	it("qgaFreezeHook: a freeze that returns after a thaw request is thawed by the next thaw", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const freezePath = `/nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-freeze`;
+		const api = e.api;
+		const post = api.post.bind(api);
+		let release = () => {};
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		// VSS takes effect only after S1 gave up waiting for the freeze.
+		api.post = (async (path: string, params?: never) => {
+			if (path === freezePath) await gate;
+			return post(path, params);
+		}) as typeof api.post;
+		const hook = e.infra.qgaFreezeHook(vmid);
+		const pending = hook.freeze();
+		await hook.thaw();
+		release();
+		await pending;
+		expect(api.guestFrozen).toBe(true);
+		// S1 thaws again once the late freeze returns (lvmthin #freeze).
+		await hook.thaw();
+		expect(api.guestFrozen).toBe(false);
+	});
+
+	it("qgaFreezeHook: a thaw call that fails because VSS thawed meanwhile is a QuiesceFailed", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const hook = e.infra.qgaFreezeHook(vmid);
+		await hook.freeze();
+		// fsfreeze-status still says frozen; VSS gives up between it and the thaw call.
+		const api = e.api;
+		Object.defineProperty(
+			api.fail,
+			`POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-thaw`,
+			{
+				get() {
+					api.guestFrozen = false;
+					return new PveApiError(500, "guest-fsfreeze-thaw failed");
+				},
+			},
+		);
+		await expect(hook.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
+	});
+
+	it("a QGA snapshot whose guest thawed by itself is a QuiesceFailed and leaves no LV", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const lvId = randomUUID().replaceAll("-", "");
+		e.node.handlers["lv.snapshot"] = (a) => {
+			const items = a.items as { name: string; tags: string[] }[];
+			for (const it of items) e.node.lvs.push({ name: it.name, tags: it.tags });
+			e.api.guestFrozen = false;
+			e.api.fail[`POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-thaw`] =
+				new PveApiError(500, "guest-fsfreeze-thaw failed");
+			return { created: items.map((i) => i.name) };
+		};
+		const err = await e.infra.snapshot(vmid, { lvId }).catch((x: unknown) => x);
+		expect((err as { code?: string }).code).toBe("quiesce_failed");
+		expect(
+			(await e.infra.listLvs()).filter((l) => l.name.includes(lvId)),
+		).toEqual([]);
 	});
 
 	it("QGA down during a running snapshot is a permanent quiesce_failed", async () => {

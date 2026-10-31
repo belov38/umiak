@@ -44,6 +44,34 @@ Other commands: `versions <slug> [--update]`, `verify <buildId>`, `list`, `show 
 `show --active-vmid <slug>`, `cleanup` (failed build VMs, seed images, template leases; never a template).
 `promote` and `gc` belong to S6 (`sbx-admin template promote`).
 
+## Windows build
+
+Spec: `docs/specs/s9-windows.md`. Recipe `infra/templates/windows` (Windows 11), shared steps, unattend files
+and keys in `infra/templates/_windows`. Template slot 598.
+
+Host prerequisites on top of the Linux ones: `infra/pve/setup.sh console` (role `SbxConsole` with
+`VM.Console` on `/pool/sandbox`, needed for `sendkey`), an `sbx-node` with `media.sha256`, and the user's
+Windows ISO in `local:iso` under its Microsoft name (`sbx-tpl iso upload <file>` or the Proxmox web UI).
+`preflight windows` checks the `VM.Console` right, the pinned machine type and the ISO sha256 through
+`media.sha256`.
+
+```sh
+pkg=$(infra/templates/agent-package.sh --tunnel-ca ~/.config/sbx/dev-ca/ca.pem --out /tmp/sbx-agent-pkg --os windows)
+mise exec -- node apps/template-builder/src/main.ts preflight windows
+# First build with a new ISO: compute its sha256 and write it into versions.toml (commit it afterwards).
+mise exec -- node apps/template-builder/src/main.ts build windows --agent-package "$pkg" --accept-iso-sha256
+```
+
+Windows options: `--iso <file>` (an ISO in `local:iso` other than `versions.toml [iso]`; needs `--iso-sha256 <hex>`
+or `--accept-iso-sha256`), `--edition <name>` (`/IMAGE/NAME` in `install.wim`), `--product-key-file <file>` (a
+real key; it never reaches the manifest). The build VM gets 4 vCPU / 4 GB, so the RAM guard needs that much free.
+
+Stages: media (user ISO sha256, virtio-win 0.1.271 uploaded once as `sbx-virtio-win-<v>.iso`, build and offline
+ISOs) → build VM (OVMF, Secure Boot, vTPM, network down) → install (`sendkey` for "Press any key", unattended
+setup, wait for QGA) → steps as SYSTEM scheduled tasks (`run-step.ps1`) → `sbx-agent seal` and sysprep → offline
+WinPE stage (Defender, WaaSMedic off) → template → verify (a clone through specialize, then a fork with a new
+identity). Build and verify times: `docs/specs/s9-windows.md` section 24.4 (filled after the pve runs).
+
 ## How a build runs
 
 1. Verify the agent package (ed25519 over `manifest.json`, file sha256s, strict tar parsing) and fetch the

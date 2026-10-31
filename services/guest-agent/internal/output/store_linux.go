@@ -13,6 +13,10 @@ import (
 
 // errPunchIneffective reports that a punch did not make the evicted prefix
 // invisible to AvailableFrom.
+// blockSize is the granularity of hole punching. Offsets handed to PunchFront
+// are rounded down to a multiple of it.
+const blockSize = 4096
+
 var errPunchIneffective = errors.New("punch hole ineffective")
 
 func defaultStore() Store { return sparseStore{} }

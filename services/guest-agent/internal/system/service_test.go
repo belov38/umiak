@@ -66,10 +66,14 @@ type fakeQuiescer struct {
 	status *agentv1.QuiesceStatus
 }
 
-func (f *fakeQuiescer) Quiesce(_ context.Context, leaseMs uint32, docker, fs bool) (*agentv1.QuiesceResponse, error) {
+func (f *fakeQuiescer) Quiesce(_ context.Context, leaseMs uint32, docker, fs, wipe bool) (*agentv1.QuiesceResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, "quiesce "+formatBools(leaseMs, docker, fs))
+	call := "quiesce " + formatBools(leaseMs, docker, fs)
+	if wipe {
+		call += " wipe"
+	}
+	f.calls = append(f.calls, call)
 	return &agentv1.QuiesceResponse{LeaseId: "lease-1"}, nil
 }
 
@@ -302,6 +306,18 @@ func TestInfoFields(t *testing.T) {
 	}
 }
 
+func TestPrepareStopReportsWiped(t *testing.T) {
+	ce := newClaimEnv(t)
+	client := serve(t, Options{Info: staticInfo{}, Ready: ce.tr, Claim: ce.m, HandlerOptions: reqcache.Interceptors(ce.st)})
+	res, err := client.PrepareStop(t.Context(), connect.NewRequest(&agentv1.PrepareStopRequest{}))
+	if err != nil {
+		t.Fatalf("PrepareStop: %v", err)
+	}
+	if !res.Msg.GetSecretFilesWiped() {
+		t.Fatalf("PrepareStop = %v, want secret_files_wiped", res.Msg)
+	}
+}
+
 func TestInfoWithoutOptionalSources(t *testing.T) {
 	tr := readiness.New(nil, nil, nil)
 	client := serve(t, Options{Info: staticInfo{Version: "1.0.0"}, Ready: tr})
@@ -379,6 +395,7 @@ func TestQuiesceDefaults(t *testing.T) {
 		{"unset", &agentv1.QuiesceRequest{}, "30s docker fs"},
 		{"explicit", &agentv1.QuiesceRequest{LeaseMs: new(uint32(5000)), Docker: new(false), Fs: new(true)}, "5s - fs"},
 		{"max", &agentv1.QuiesceRequest{LeaseMs: new(uint32(120000)), Docker: new(true), Fs: new(false)}, "2m0s docker -"},
+		{"wipe secret files", &agentv1.QuiesceRequest{Docker: new(false), Fs: new(false), WipeSecretFiles: new(true)}, "30s - - wipe"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

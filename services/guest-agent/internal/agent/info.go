@@ -15,6 +15,7 @@ import (
 
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
 )
@@ -22,7 +23,12 @@ import (
 // agentPackage is the proto package of the agent API.
 const agentPackage = "sbx.agent.v1"
 
-// capabilities are announced in Control/Info (spec section 13, S2 10.2).
+// CapQuiesceWipeSecrets is announced on Windows only: Quiesce accepts
+// wipe_secret_files and PrepareStop reports secret_files_wiped.
+const CapQuiesceWipeSecrets = "system.quiesce.wipe_secrets.v1"
+
+// capabilities are announced in Control/Info (spec section 13, S2 10.2),
+// plus CapQuiesceWipeSecrets where quiesce wipes the secret files.
 var capabilities = []string{
 	"process.v1",
 	"process.pty",
@@ -38,6 +44,15 @@ var capabilities = []string{
 	"system.activity.v1",
 }
 
+// capabilityList returns the capabilities of this platform.
+func capabilityList() []string {
+	out := slices.Clone(capabilities)
+	if quiesce.WipesSecretFiles {
+		out = append(out, CapQuiesceWipeSecrets)
+	}
+	return out
+}
+
 // infoResponse is the Control/Info answer. The tunnel library appends
 // sbx.tunnel.v1 to the proto packages.
 func (a *agent) infoResponse() *tunnelv1.InfoResponse {
@@ -46,7 +61,7 @@ func (a *agent) infoResponse() *tunnelv1.InfoResponse {
 		Os:            runtime.GOOS,
 		Arch:          runtime.GOARCH,
 		ProtoPackages: []string{agentPackage},
-		Capabilities:  slices.Clone(capabilities),
+		Capabilities:  capabilityList(),
 	}
 }
 

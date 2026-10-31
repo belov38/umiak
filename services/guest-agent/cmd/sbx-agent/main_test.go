@@ -50,9 +50,9 @@ func TestRun(t *testing.T) {
 }
 
 // shimUsageCode is the exit code of `sbx-agent shim` without --id: a usage
-// error on Linux, "unsupported" elsewhere.
+// error on Linux and Windows, "unsupported" elsewhere.
 func shimUsageCode() int {
-	if runtime.GOOS == "linux" {
+	if shimSupported() {
 		return 2
 	}
 	return 1
@@ -60,8 +60,12 @@ func shimUsageCode() int {
 
 // shimUsageErr is what `sbx-agent shim` without --id prints.
 func shimUsageErr() string {
-	if runtime.GOOS == "linux" {
+	if shimSupported() {
 		return "usage: sbx-agent shim --id"
 	}
 	return "unsupported"
+}
+
+func shimSupported() bool {
+	return runtime.GOOS == "linux" || runtime.GOOS == "windows"
 }

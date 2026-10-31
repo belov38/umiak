@@ -9,6 +9,7 @@ import {
 	type AgentPort,
 	AgentUnavailable,
 	type ClaimRequest,
+	type PrepareStopResult,
 } from "../ports.ts";
 
 function unavailable(what: string): AgentUnavailable {
@@ -50,7 +51,7 @@ export class UnavailableAgentPort implements AgentPort {
 		throw unavailable("updateSshCa");
 	}
 
-	async prepareStop(_machineId: string): Promise<void> {
+	async prepareStop(_machineId: string): Promise<PrepareStopResult> {
 		throw unavailable("prepareStop");
 	}
 

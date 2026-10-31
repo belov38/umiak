@@ -7,6 +7,7 @@ import {
 	UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT,
 } from "./image.ts";
 import { ISO_TOOL } from "./seed.ts";
+import { pinnedMachine } from "./windows/stages.ts";
 
 // `sbx-tpl preflight`: read-only checks before a build (spec S5 section 7.1)
 
@@ -50,12 +51,14 @@ export async function preflight(d: {
 	keyFile: string;
 	buildMemoryMb?: number;
 	hasCommand?: (cmd: string) => boolean;
+	/** An iso-install recipe: its user ISO (file, pinned sha256 or "") and the console right. */
+	windows?: { isoFile: string; isoSha256: string };
 }): Promise<Check[]> {
 	const { api, cfg } = d;
 	const buildMb = d.buildMemoryMb ?? 4096;
 	const has = d.hasCommand ?? commandExists;
 	const storagePath = `/storage/${MEDIA_STORAGE}`;
-	return [
+	const checks = [
 		await check(
 			`token: Datastore.AllocateTemplate on ${storagePath}`,
 			async () => {
@@ -127,6 +130,59 @@ export async function preflight(d: {
 			return {
 				ok: true,
 				detail: `${r.iso.length} ISOs, ${r.import.length} images`,
+			};
+		}),
+	];
+	if (d.windows) checks.push(...(await windowsChecks(d, d.windows)));
+	return checks;
+}
+
+/** iso-install: sendkey needs VM.Console, the machine type is pinned, the user ISO is there. */
+async function windowsChecks(
+	d: { api: PveClient; node: NodeOps; cfg: { node: string; pool: string } },
+	w: { isoFile: string; isoSha256: string },
+): Promise<Check[]> {
+	const poolPath = `/pool/${d.cfg.pool}`;
+	return [
+		await check(`token: VM.Console on ${poolPath}`, async () => {
+			const perms = await d.api.get<Record<string, Record<string, number>>>(
+				"/access/permissions",
+				{ path: poolPath },
+			);
+			const p = perms[poolPath] ?? {};
+			return {
+				ok: p["VM.Console"] === 1,
+				detail:
+					Object.keys(p).join(",") || "none (run infra/pve/setup.sh console)",
+			};
+		}),
+		await check("machine types (pc-q35-*+pve*)", async () => ({
+			ok: true,
+			detail: await pinnedMachine(d.api, d.cfg.node),
+		})),
+		await check(`user ISO ${MEDIA_STORAGE}:iso/${w.isoFile}`, async () => {
+			let r: { size: number; sha256: string };
+			try {
+				r = await d.node.call("media.sha256", { name: w.isoFile });
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				return {
+					ok: false,
+					detail: `${msg}; put it there with sbx-tpl iso upload <file> or the Proxmox web UI`,
+				};
+			}
+			if (w.isoSha256 === "")
+				return {
+					ok: true,
+					warn: true,
+					detail: `sha256 ${r.sha256} not pinned yet (build with --accept-iso-sha256)`,
+				};
+			return {
+				ok: r.sha256 === w.isoSha256,
+				detail:
+					r.sha256 === w.isoSha256
+						? `${r.size} bytes, sha256 matches`
+						: `sha256 ${r.sha256}, pinned ${w.isoSha256}`,
 			};
 		}),
 	];

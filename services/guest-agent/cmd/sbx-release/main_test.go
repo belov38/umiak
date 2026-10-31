@@ -1,7 +1,10 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -164,5 +167,64 @@ func TestPackRefusesTestBuild(t *testing.T) {
 	errOut.Reset()
 	if code := run(append(args, "--allow-test-build"), &out, &errOut); code != 0 || !strings.Contains(errOut.String(), "warning") {
 		t.Errorf("pack with --allow-test-build: exit %d, stderr %q", code, errOut.String())
+	}
+}
+
+// tarNames lists the entry names of a tar file.
+func tarNames(t *testing.T, p string) []string {
+	t.Helper()
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	var names []string
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return names
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, hdr.Name)
+	}
+}
+
+// TestPackWindowsPackage packs a Windows package on any OS: the binary is
+// sbx-agent.exe at the archive root (the image step extracts it with
+// `tar -xf <tar> sbx-agent.exe`), and verify accepts it.
+func TestPackWindowsPackage(t *testing.T) {
+	dir := t.TempDir()
+	keyFile, line := keygenTo(t, filepath.Join(dir, "signing"))
+	pubFile := writeTestFile(t, filepath.Join(dir, "update-keys.pub"), line+"\n", 0o644)
+	ca := writeTestFile(t, filepath.Join(dir, "ca.pem"), "ca", 0o644)
+	bin := writeTestFile(t, filepath.Join(dir, "sbx-agent.exe"), "MZ fake", 0o644)
+	tarPath := filepath.Join(dir, "sbx-agent-1.0.0-windows-amd64.tar")
+	var out, errOut bytes.Buffer
+	args := []string{
+		"pack", "--version", "1.0.0", "--os", "windows", "--arch", "amd64",
+		"--binary", bin, "--tunnel-ca", ca, "--update-keys", pubFile,
+		"--key", keyFile, "--out", tarPath, "--skip-version-check",
+	}
+	if code := run(args, &out, &errOut); code != 0 {
+		t.Fatalf("pack exit = %d: %s", code, errOut.String())
+	}
+	names := tarNames(t, tarPath)
+	if !slices.Contains(names, "sbx-agent.exe") || slices.Contains(names, "sbx-agent") {
+		t.Errorf("entries = %v, want sbx-agent.exe at the root", names)
+	}
+	for _, n := range names {
+		if strings.HasPrefix(n, "./") || strings.Contains(n, `\`) {
+			t.Errorf("entry %q: want a plain slash-separated name", n)
+		}
+	}
+	out.Reset()
+	if code := run([]string{"verify", "--keys", pubFile, tarPath}, &out, &errOut); code != 0 {
+		t.Fatalf("verify exit = %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "1.0.0 windows/amd64") {
+		t.Errorf("verify output = %q", out.String())
 	}
 }

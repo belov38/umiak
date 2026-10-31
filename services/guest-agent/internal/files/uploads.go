@@ -12,9 +12,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -476,7 +478,14 @@ func finishUpload(tempPath, target string, mode fs.FileMode, o owner, overwrite 
 	if err := os.Chmod(tempPath, mode); err != nil {
 		return fsError(err)
 	}
-	err := place(tempPath, target, overwrite)
+	// Windows renames preserve the SYSTEM-only upload DACL. Copy beside the
+	// target so that its inherited ACL matches a regular PUT /files.
+	var err error
+	if runtime.GOOS != "windows" {
+		err = place(tempPath, target, overwrite)
+	} else {
+		err = syscall.EXDEV
+	}
 	if err == nil {
 		return nil
 	}
@@ -495,7 +504,12 @@ func finishUpload(tempPath, target string, mode fs.FileMode, o owner, overwrite 
 	if err := placeTemp(tmp, target, overwrite); err != nil {
 		return err
 	}
-	_ = os.Remove(tempPath)
+	if err := in.Close(); err != nil {
+		return fsError(err)
+	}
+	if err := os.Remove(tempPath); err != nil {
+		return fsError(err)
+	}
 	return nil
 }
 

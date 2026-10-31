@@ -4,10 +4,12 @@
 // failures and delete during a fork.
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { FreezeTimeoutError } from "@sbx/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOpDeadLetter } from "../src/handlers/dlq.ts";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
+import { QuiesceFailed } from "../src/ops/snapshot-step.ts";
 import {
 	AgentUnavailable,
 	type ClaimRequest,
@@ -301,6 +303,28 @@ describe("fork of a running source", () => {
 		const snap = await forkSource(w, f);
 		expect(snap.state).toBe("ready");
 		expect(snap.consistency).toBe("quiesced");
+	});
+
+	it("the agent freeze times out in S1: the retry freezes through QGA", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const f = await readyFork(w, e);
+		w.infra.snapshotFailure = new QuiesceFailed("freeze timed out", {
+			cause: new FreezeTimeoutError("freeze did not return within 30000 ms"),
+		});
+
+		await expect(
+			handleSandboxOp(w.ctx, { operationId: f.forkOpId }),
+		).rejects.toBeInstanceOf(AgentUnavailable);
+		const mid = await row(w, "operations", f.forkOpId);
+		expect(mid.state).toBe("running");
+		expect(mid.progress).toMatchObject({ quiesceVia: "qga" });
+
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+		expect(w.infra.callsOf("snapshot").map((c) => c.args[1])).toEqual([
+			expect.objectContaining({ hook: true }),
+			expect.objectContaining({ hook: false }),
+		]);
 	});
 
 	it("an agent that rejects the freeze fails the fork; nothing is left", async () => {

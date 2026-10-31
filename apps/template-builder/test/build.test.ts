@@ -31,7 +31,8 @@ import { BuildPve, FakeGuest } from "./fakes.ts";
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const templatesDir = join(repoRoot, "infra/templates");
 const agentFixtures = resolve(import.meta.dirname, "fixtures/agent");
-const SERIAL = loadVersions(loadRecipe(templatesDir, "linux")).base.serial;
+const SERIAL = loadVersions(loadRecipe(templatesDir, "linux", "linux")).base
+	.serial;
 const IMAGE_NAME = pveImageName(SERIAL);
 const STEPS = [
 	"00-base",

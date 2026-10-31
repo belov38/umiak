@@ -2,7 +2,7 @@
 // section 17.3, decision 8).
 //
 //	sbx-release keygen --out <dir> [--comment c]
-//	sbx-release pack --version v --os linux --arch amd64 --binary <path> \
+//	sbx-release pack --version v --os linux|windows --arch amd64 --binary <path> \
 //	    --tunnel-ca <pem> --update-keys <file> --key <ed25519.key> --out <tar> \
 //	    [--skip-version-check] [--allow-foreign-signer] [--allow-test-build]
 //	sbx-release verify --keys <file> <tar>
@@ -35,10 +35,11 @@ const usage = `usage: sbx-release <command>
 commands:
   keygen --out <dir> [--comment c]
         write <dir>/ed25519.key (0600) and print the public key line
-  pack --version v --os linux --arch amd64 --binary <path> --tunnel-ca <pem>
-       --update-keys <file> --key <ed25519.key> --out <tar>
+  pack --version v --os linux|windows --arch amd64 --binary <path>
+       --tunnel-ca <pem> --update-keys <file> --key <ed25519.key> --out <tar>
        [--skip-version-check] [--allow-foreign-signer] [--allow-test-build]
-        build and sign a package; the binary must report the version, the
+        build and sign a package; the binary is packed as sbx-agent
+        (sbx-agent.exe for --os windows); it must report the version, the
         signing key must be in --update-keys and the binary must not be an
         integration test build (main.failRun, main.devUpdateKey)
   verify --keys <file> <tar>
@@ -150,7 +151,7 @@ func pack(args []string, stdout, stderr io.Writer) error {
 	f.StringVar(&o.Version, "version", "", "agent version")
 	f.StringVar(&o.OS, "os", "", "GOOS of the binary")
 	f.StringVar(&o.Arch, "arch", "", "GOARCH of the binary")
-	f.StringVar(&o.Binary, "binary", "", "sbx-agent binary")
+	f.StringVar(&o.Binary, "binary", "", "sbx-agent binary (sbx-agent.exe for --os windows)")
 	f.StringVar(&o.TunnelCA, "tunnel-ca", "", "tunnel CA bundle (PEM)")
 	f.StringVar(&o.UpdateKeys, "update-keys", "", "update keys file")
 	f.StringVar(&keyPath, "key", "", "signing key (ed25519.key)")

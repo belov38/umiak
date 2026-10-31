@@ -50,6 +50,9 @@ func putStartingAt(t *testing.T, h *harness, id string, spec *agentv1.CommandSpe
 	if err != nil {
 		t.Fatal(err)
 	}
+	if h.layout.CmdSpecDir == "" {
+		return // Windows: the spec goes over the shim's stdin
+	}
 	if err := os.MkdirAll(h.layout.CmdSpecDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +85,10 @@ func wantExpired(t *testing.T, h *harness, id string) {
 			t.Errorf("stderr end %d, want %d", s.GetEnd(), len(b))
 		}
 	}
-	if _, err := os.Stat(h.layout.CmdSpec(id)); !os.IsNotExist(err) {
-		t.Errorf("stale cmd-spec kept: %v", err)
+	if p := h.layout.CmdSpec(id); p != "" {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("stale cmd-spec kept: %v", err)
+		}
 	}
 	n := 0
 	for _, p := range h.rec.Of(events.TypeCommandExited) {
@@ -152,5 +157,23 @@ func TestStartingTTLOption(t *testing.T) {
 	b, _ := os.ReadFile(cmdFile(h.layout, "c1", shim.StderrFile))
 	if !strings.Contains(string(b), "start was never retried within 1h") {
 		t.Errorf("stderr = %q", b)
+	}
+}
+
+// Without a cmd-spec directory (Windows) the expiry removes no spec file: in
+// particular not a file named like the command in the working directory.
+func TestExpireWithoutCmdSpecDir(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)}
+	h := newHarness(t, func(o *Options) { o.Now = clock.Now; o.Layout.CmdSpecDir = "" })
+	h.layout.CmdSpecDir = ""
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("old", []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	putStartingAt(t, h, "old", argvSpec("/bin/sleep", "1"), clock.Now().Add(-24*time.Hour-time.Second))
+	h.restart("boot-1")
+	wantExpired(t, h, "old")
+	if _, err := os.Stat("old"); err != nil {
+		t.Errorf("a file named like the command in the working directory: %v", err)
 	}
 }

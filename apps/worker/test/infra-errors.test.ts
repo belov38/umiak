@@ -1,6 +1,7 @@
 import {
 	AllocatorError,
 	FreezeBudgetExceededError,
+	FreezeTimeoutError,
 	formatSmbios1,
 	NodeOpsError,
 	PveApiError,
@@ -99,6 +100,16 @@ describe("classifyInfraError", () => {
 		expect(thaw).toBeInstanceOf(QuiesceFailed);
 		expect(isPermanent(thaw)).toBe(true);
 		expect(thaw.cause).toBeUndefined();
+	});
+
+	it("a freeze timeout is quiesce_failed and keeps the cause", () => {
+		const cause = new FreezeTimeoutError(
+			"freeze did not return within 30000 ms",
+		);
+		const e = classifyInfraError(cause, "snapshot");
+		expect(e).toBeInstanceOf(QuiesceFailed);
+		expect(isPermanent(e)).toBe(true);
+		expect(e.cause).toBe(cause);
 	});
 
 	it("a thaw failure caused by an unavailable agent stays transient (QGA fallback)", () => {

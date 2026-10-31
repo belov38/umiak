@@ -1,0 +1,51 @@
+slug: windows
+os: windows
+extends: null
+shared: _windows # steps, unattend templates, files and keys.toml shared with phase-2 recipes
+source:
+  kind: iso-install
+  family: client # client | server; ISO, edition and key come from versions.toml [iso]
+  drivers: w11 # virtio-win subfolder: w11 | 2k25
+  locale: { formats: en-US, keyboard: en-US, timezone: UTC } # UI language: versions.toml [iso] ui_language (the image's own)
+disk: { slot: scsi0, size: 96G }
+hw:
+  machine: pinned # builder pins the newest pc-q35-<x>+pve<n> at build time, recorded in hw
+  cpu: host
+  bios: ovmf
+  ostype: win11
+  scsihw: virtio-scsi-single
+  agent: "enabled=1"
+  vga: std # S10 may change
+  tablet: 1 # absolute pointer for the console and computer-use
+  localtime: 0 # RTC in UTC; PVE defaults to local time for Windows ostypes, which skews the guest clock
+  rng0: "source=/dev/urandom"
+  efidisk0: { efitype: 4m, pre-enrolled-keys: 1, ms-cert: 2023k }
+  tpmstate0: { version: v2.0 }
+  cloudinit: false
+build_vm: { cores: 4, memory_mb: 4096 }
+# reboot after the last install step finishes pending servicing (DISM in
+# 90-cleanup fails otherwise); it comes before 50-sbx-agent, so the agent
+# service and its startup script never run on the build VM.
+steps:
+  [
+    00-base,
+    reboot,
+    network-up,
+    10-system,
+    30-toolchains,
+    40-coding-agents,
+    reboot,
+    50-sbx-agent,
+    60-desktop,
+    90-cleanup,
+  ]
+seal: sysprep
+offline: [defender-off, waasmedic-off]
+options: { vs_buildtools: false }
+boot_timeout_s: 1200
+install_timeout_s: 2400
+# Minutes per script step; the others get 60. DISM /ResetBase alone can take an hour.
+step_timeouts: { 30-toolchains: 60, 40-coding-agents: 45, 90-cleanup: 120 }
+verify: windows
+# Template slot on pve (S1 4.7): 598 is the Windows template; Linux alternates 597 and 599.
+vmids: [598]

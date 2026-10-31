@@ -55,6 +55,8 @@ type Server struct {
 	Version string
 	// ScanOpen opens LV devices for lv.scan; nil reads /dev/<vg>/<lv>.
 	ScanOpen ScanOpener
+	// OnHash is called each time media.sha256 reads a file instead of using its cache; tests count it.
+	OnHash func(name string)
 }
 
 type badRequest struct{ msg string }
@@ -76,9 +78,11 @@ var handlers = map[string]handler{
 	"inventory":      (*Server).inventory,
 	"media.list":     (*Server).mediaList,
 	"media.remove":   (*Server).mediaRemove,
+	"media.sha256":   (*Server).mediaSHA256,
 	"lv.scan":        (*Server).lvScan,
 	"lv.usage":       (*Server).lvUsage,
 	"lv.tagTemplate": (*Server).lvTagTemplate,
+	"lv.adopt":       (*Server).lvAdopt,
 }
 
 // decodeArgs decodes optional args strictly.

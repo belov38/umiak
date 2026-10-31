@@ -35,7 +35,8 @@ type PackOptions struct {
 	// Version, OS and Arch go into the manifest.
 	Version, OS, Arch string
 	// Binary, TunnelCA and UpdateKeys are the paths of the files packed as
-	// sbx-agent, trust/tunnel-ca.pem and trust/update-keys.pub.
+	// sbx-agent (sbx-agent.exe for OS windows), trust/tunnel-ca.pem and
+	// trust/update-keys.pub.
 	Binary, TunnelCA, UpdateKeys string
 	// Key signs manifest.json.
 	Key ed25519.PrivateKey
@@ -52,8 +53,10 @@ type packFile struct {
 	data []byte
 }
 
-// Pack builds a signed package (spec 17.1): a plain tar with sbx-agent,
-// trust/, manifest.json and manifest.sig. The tar is written atomically.
+// Pack builds a signed package (spec 17.1): a plain tar with the binary
+// (BinaryNameFor o.OS), trust/, manifest.json and manifest.sig. Entry names
+// are slash-separated and relative, without a "./" prefix. The tar is
+// written atomically.
 func Pack(o PackOptions) (*Manifest, error) {
 	if err := ValidVersion(o.Version); err != nil {
 		return nil, err
@@ -75,7 +78,7 @@ func Pack(o PackOptions) (*Manifest, error) {
 		name, src string
 		mode      int64
 	}{
-		{BinaryName, o.Binary, 0o755},
+		{BinaryNameFor(o.OS), o.Binary, 0o755},
 		{TunnelCAName, o.TunnelCA, 0o644},
 		{UpdateKeysName, o.UpdateKeys, 0o644},
 	} {
@@ -369,7 +372,7 @@ func checkManifest(m *Manifest) error {
 			return invalidPackage("manifest has a bad sha256 for %q", name)
 		}
 	}
-	for _, name := range requiredFiles {
+	for _, name := range requiredFiles(m.OS) {
 		if _, ok := m.Files[name]; !ok {
 			return invalidPackage("manifest does not list %s", name)
 		}

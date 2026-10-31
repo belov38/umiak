@@ -5,13 +5,24 @@ import {
 	type VmResource,
 } from "./context.ts";
 
+/** ISOs made by `sbx-bench s9 agent-tests`. */
+export const AGENT_TESTS_ISO_RE = /^sbx-build-agenttests-\d{14}\.iso$/;
+
 /** Removes everything a failed run may have left (spec §7.1). Never touches the template or sbx-tpl LVs. */
-export async function cleanup(ctx: Ctx): Promise<string[]> {
+export async function cleanup(
+	ctx: Ctx,
+	opts: { allSandboxResources?: boolean } = {},
+): Promise<string[]> {
+	if (!opts.allSandboxResources)
+		throw new Error(
+			"broad cleanup requires --all-sandbox-resources; it deletes resources belonging to other runs",
+		);
 	const { api, node, cfg, store, machines } = ctx;
 	const report: string[] = [];
 	const vms = await api.get<VmResource[]>("/cluster/resources", {
 		type: "vm",
 	});
+	const stuck: number[] = [];
 	for (const v of vms.filter(
 		(x) =>
 			x.pool === cfg.pool && x.vmid !== cfg.templateVmid && !isTemplateVm(x),
@@ -20,8 +31,32 @@ export async function cleanup(ctx: Ctx): Promise<string[]> {
 			await machines.delete(v.vmid);
 			report.push(`deleted VM ${v.vmid}`);
 		} catch (err) {
+			stuck.push(v.vmid);
 			report.push(`VM ${v.vmid}: ${(err as Error).message}`);
 		}
+	}
+	// ISOs of `s9 agent-tests`, except those a VM that could not be deleted still has attached.
+	try {
+		const used = new Set<string>();
+		for (const vmid of stuck) {
+			const c = await api.get<Record<string, string>>(
+				`/nodes/${cfg.node}/qemu/${vmid}/config`,
+			);
+			for (const value of Object.values(c)) {
+				const m = /(?:^|:)iso\/([^,]+)/.exec(String(value));
+				if (m?.[1]) used.add(m[1]);
+			}
+		}
+		const media = await node.call<{ iso: { name: string }[] }>("media.list");
+		const isos = media.iso
+			.map((f) => f.name)
+			.filter((n) => AGENT_TESTS_ISO_RE.test(n) && !used.has(n));
+		if (isos.length > 0) {
+			await node.call("media.remove", { names: isos });
+			report.push(`removed ISOs ${isos.join(",")}`);
+		}
+	} catch (err) {
+		report.push(`ISOs: ${(err as Error).message}`);
 	}
 	try {
 		const { lvs } = await node.call<{

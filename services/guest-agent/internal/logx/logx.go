@@ -1,6 +1,8 @@
 // Package logx provides a slog handler that never blocks the caller: records
 // are formatted synchronously and written by a background goroutine. When the
-// buffer is full the record is dropped and counted.
+// buffer is full the record is dropped and counted. On Windows, which has no
+// journald, the handler writes to a size-rotated file (NewRotatingFile) that
+// `sbx-agent logs` reads back with Tail.
 package logx
 
 import (

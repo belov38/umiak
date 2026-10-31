@@ -1,7 +1,10 @@
+//go:build !windows
+
 // Command sbx-agent-harness runs the real S2 gateway and the real guest
 // agent (agent.Run) in one process, for the api integration tests
 // (apps/api/test/agent-real.test.ts). It is a test aid and is never
-// packaged.
+// packaged. It runs on the Unix development hosts only (process groups,
+// PTYs and signals in runner.go), so Windows builds leave it out.
 //
 // Like test/harness, the gateway keeps its registry in the given Postgres
 // (the tunnel migrations must be applied) and serves its internal listener

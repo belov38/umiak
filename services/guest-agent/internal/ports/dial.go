@@ -155,9 +155,15 @@ func candidates(host string, localAddrs func() []netip.Addr) []string {
 	return append(out, v6...)
 }
 
+// isRefused reports whether err is a connection refusal. Windows reports
+// WSAECONNREFUSED, which is not syscall.ECONNREFUSED there.
+func isRefused(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED) || isConnRefusedOS(err)
+}
+
 // isTimeout reports whether err is a dial timeout rather than a refusal.
 func isTimeout(err error) bool {
-	if errors.Is(err, syscall.ECONNREFUSED) {
+	if isRefused(err) {
 		return false
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

@@ -3,6 +3,7 @@ package files
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -14,7 +15,11 @@ import (
 )
 
 func TestResolveHome(t *testing.T) {
-	home := filepath.FromSlash("/home/user")
+	// Absolute paths need a drive letter on Windows (TestWindowsPathRules).
+	home, abs := filepath.FromSlash("/home/user"), ""
+	if runtime.GOOS == "windows" {
+		home, abs = `C:\Users\user`, "C:"
+	}
 	u := &process.User{Name: "user", Home: home}
 	tests := []struct {
 		in   string
@@ -26,8 +31,8 @@ func TestResolveHome(t *testing.T) {
 		{"a", filepath.Join(home, "a")},
 		{"a/b/", filepath.Join(home, "a", "b")},
 		{"./a", filepath.Join(home, "a")},
-		{"/etc//passwd", filepath.FromSlash("/etc/passwd")},
-		{"/a/../b", filepath.FromSlash("/b")},
+		{abs + "/etc//passwd", abs + filepath.FromSlash("/etc/passwd")},
+		{abs + "/a/../b", abs + filepath.FromSlash("/b")},
 	}
 	for _, tt := range tests {
 		got, err := Resolve(tt.in, u)

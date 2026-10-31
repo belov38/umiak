@@ -6,13 +6,25 @@ import { preflight } from "./preflight.ts";
 import { runS1 } from "./s1.ts";
 import { runS3 } from "./s3.ts";
 import { runS5 } from "./s5.ts";
+import { runS9 } from "./s9.ts";
+import { runAgentTestsOn } from "./win-agent-tests.ts";
 
 const USAGE = `usage:
   sbx-bench preflight
   sbx-bench s1 [--runs 3] [--size 2g] [--parallel 1,2,4] [--clone-only 8] [--ram-cap 8g] [--no-baseline] [--keep]
   sbx-bench s3 [--skip-suite] [--keep]
   sbx-bench s5 --template <vmid> [--baseline 599] [--runs 5] [--ram-cap 8g] [--keep]
-  sbx-bench cleanup`;
+  sbx-bench s9 --template <vmid> [--runs 3] [--ram-cap 8g] [--connect-url <wss>] [--dev-cp-ssh <host>] [--keep]
+  sbx-bench s9 agent-tests --template <vmid> --dir <test binaries> [--run <regex>] [--ram-cap 8g] [--keep]
+  sbx-bench cleanup --all-sandbox-resources`;
+
+/** --runs: a positive integer. */
+export function parseRuns(v: string | undefined, fallback: number): number {
+	if (v === undefined) return fallback;
+	if (!/^[1-9]\d*$/.test(v.trim()))
+		throw new Error(`--runs: not a positive integer: ${v}`);
+	return Number(v);
+}
 
 export function parseSizeMb(v: string): number {
 	const m = /^(\d+)([mg])?$/i.exec(v.trim());
@@ -26,6 +38,7 @@ async function main(argv: string[]): Promise<number> {
 		allowPositionals: true,
 		options: {
 			runs: { type: "string" },
+			"all-sandbox-resources": { type: "boolean", default: false },
 			size: { type: "string", default: "2g" },
 			parallel: { type: "string", default: "1,2,4" },
 			"clone-only": { type: "string", default: "8" },
@@ -36,10 +49,14 @@ async function main(argv: string[]): Promise<number> {
 			out: { type: "string", default: "bench-results" },
 			template: { type: "string" },
 			baseline: { type: "string" },
+			run: { type: "string" },
+			dir: { type: "string" },
+			"connect-url": { type: "string" },
+			"dev-cp-ssh": { type: "string" },
 		},
 	});
 	const cmd = positionals[0];
-	if (!cmd || !["preflight", "s1", "s3", "s5", "cleanup"].includes(cmd)) {
+	if (!cmd || !["preflight", "s1", "s3", "s5", "s9", "cleanup"].includes(cmd)) {
 		process.stderr.write(`${USAGE}\n`);
 		return 2;
 	}
@@ -55,7 +72,9 @@ async function main(argv: string[]): Promise<number> {
 			return checks.every((c) => c.ok) ? 0 : 1;
 		}
 		if (cmd === "cleanup") {
-			const report = await cleanup(ctx);
+			const report = await cleanup(ctx, {
+				allSandboxResources: values["all-sandbox-resources"],
+			});
 			process.stdout.write(
 				`${report.length ? report.join("\n") : "nothing to clean"}\n`,
 			);
@@ -67,12 +86,46 @@ async function main(argv: string[]): Promise<number> {
 				process.stdout.write(`still left: ${c.name} ${c.detail ?? ""}\n`);
 			return left.length === 0 ? 0 : 1;
 		}
+		const vmid = (v: string | undefined, name: string) => {
+			if (v === undefined) return undefined;
+			if (!/^\d+$/.test(v)) throw new Error(`--${name}: not a VMID: ${v}`);
+			return Number(v);
+		};
+		if (cmd === "s9") {
+			if (positionals[1] === "agent-tests") {
+				const tpl = vmid(values.template, "template");
+				if (tpl === undefined || values.dir === undefined) {
+					process.stderr.write(`--template and --dir are required\n${USAGE}\n`);
+					return 2;
+				}
+				return await runAgentTestsOn(ctx, {
+					template: tpl,
+					dir: values.dir,
+					...(values.run !== undefined ? { run: values.run } : {}),
+					keep: values.keep,
+					ramCapMb: parseSizeMb(values["ram-cap"]),
+				});
+			}
+			const template = vmid(values.template, "template");
+			if (template === undefined) {
+				process.stderr.write(`--template is required\n${USAGE}\n`);
+				return 2;
+			}
+			return await runS9(ctx, {
+				template,
+				runs: parseRuns(values.runs, 3),
+				...(values["connect-url"] !== undefined
+					? { connectUrl: values["connect-url"] }
+					: {}),
+				...(values["dev-cp-ssh"] !== undefined
+					? { devCpSsh: values["dev-cp-ssh"] }
+					: {}),
+				keep: values.keep,
+				outDir: values.out,
+				ramCapMb: parseSizeMb(values["ram-cap"]),
+			});
+		}
 		if (cmd === "s5") {
-			const vmid = (v: string | undefined, name: string) => {
-				if (v === undefined) return undefined;
-				if (!/^\d+$/.test(v)) throw new Error(`--${name}: not a VMID: ${v}`);
-				return Number(v);
-			};
 			const template = vmid(values.template, "template");
 			if (template === undefined) {
 				process.stderr.write(`--template is required\n${USAGE}\n`);
@@ -82,7 +135,7 @@ async function main(argv: string[]): Promise<number> {
 			return await runS5(ctx, {
 				template,
 				...(baseline !== undefined ? { baseline } : {}),
-				runs: Number(values.runs ?? "5"),
+				runs: parseRuns(values.runs, 5),
 				ramCapMb: parseSizeMb(values["ram-cap"]),
 				keep: values.keep,
 				outDir: values.out,
@@ -95,7 +148,7 @@ async function main(argv: string[]): Promise<number> {
 				skipSuite: values["skip-suite"],
 			});
 		return await runS1(ctx, {
-			runs: Number(values.runs ?? "3"),
+			runs: parseRuns(values.runs, 3),
 			size: { cores: 2, memoryMb: parseSizeMb(values.size) },
 			parallel: values.parallel
 				.split(",")

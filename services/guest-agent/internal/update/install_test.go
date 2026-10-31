@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestInstallActivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("systemd units and the CLI link are Linux; see TestInstallCreatesServiceConfig")
+	}
 	pub, priv := testKey(t)
 	keys := []ed25519.PublicKey{pub}
 	l := paths.ForRoot(t.TempDir())
@@ -158,6 +162,9 @@ func TestInstallActivateAbandonsPending(t *testing.T) {
 }
 
 func TestPlaceVersionForcesExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no executable bit: an .exe runs by its extension")
+	}
 	pub, priv := testKey(t)
 	l := paths.ForRoot(t.TempDir())
 	keys := []ed25519.PublicKey{pub}
