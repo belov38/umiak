@@ -1,3 +1,4 @@
+import { register as registerDesktop } from "./commands/desktop.ts";
 // The `sbx` program: commander tree, global options, and the runner that
 // turns a command's result or error into output and an exit code.
 //
@@ -176,6 +177,7 @@ export function buildProgram(io: CliIo, run: Runner): Command {
 	registerCp(program, run);
 	registerPush(program, run);
 	registerPort(program, run);
+	registerDesktop(program, run);
 	registerRun(program, run);
 	registerSnapshot(program, run);
 	registerCatalog(program, run);

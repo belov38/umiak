@@ -4,6 +4,7 @@ from enum import StrEnum
 class CreateApiKeyRequestScopesItem(StrEnum):
     COMMANDSEXEC = "commands:exec"
     COMMANDSREAD = "commands:read"
+    DESKTOP = "desktop"
     ENVIRONMENTSREAD = "environments:read"
     ENVIRONMENTSWRITE = "environments:write"
     FILESREAD = "files:read"

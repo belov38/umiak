@@ -476,6 +476,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sandboxes/{sandbox}/desktop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Desktop status
+         * @description status for the sandbox desktop. Requires the desktop template capability and a ready sandbox.
+         */
+        get: operations["desktop.status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/desktop/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Desktop access
+         * @description access for the sandbox desktop. Requires the desktop template capability and a ready sandbox.
+         */
+        put: operations["desktop.access"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/desktop/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Desktop act
+         * @description act for the sandbox desktop. Requires the desktop template capability and a ready sandbox.
+         */
+        post: operations["desktop.act"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/desktop/clipboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Desktop getClipboard
+         * @description getClipboard for the sandbox desktop. Requires the desktop template capability and a ready sandbox.
+         */
+        get: operations["desktop.getClipboard"];
+        /**
+         * Desktop setClipboard
+         * @description setClipboard for the sandbox desktop. Requires the desktop template capability and a ready sandbox.
+         */
+        put: operations["desktop.setClipboard"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/desktop/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Desktop link
+         * @description link for the sandbox desktop. Requires the desktop template capability and a ready sandbox.
+         */
+        post: operations["desktop.link"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/desktop/screenshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Capture the desktop
+         * @description PNG or JPEG screen capture independent of the video streamer, with original screen, image and cursor metadata in response headers.
+         */
+        get: operations["desktop.screenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/desktop/streams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Desktop endStreams
+         * @description endStreams for the sandbox desktop. Requires the desktop template capability and a ready sandbox.
+         */
+        delete: operations["desktop.endStreams"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sandboxes/{sandbox}/env": {
         parameters: {
             query?: never;
@@ -1254,7 +1398,7 @@ export interface components {
             revokedAt: string | null;
             /** @description Sandbox keys only (reserved); null */
             sandboxId: string | null;
-            scopes: ("sandboxes:read" | "sandboxes:write" | "sandboxes:delete" | "commands:read" | "commands:exec" | "files:read" | "files:write" | "ports:write" | "ssh:connect" | "snapshots:read" | "snapshots:write" | "environments:read" | "environments:write" | "keys:admin")[];
+            scopes: ("sandboxes:read" | "sandboxes:write" | "sandboxes:delete" | "commands:read" | "commands:exec" | "files:read" | "files:write" | "ports:write" | "ssh:connect" | "desktop" | "snapshots:read" | "snapshots:write" | "environments:read" | "environments:write" | "keys:admin")[];
             /** @example team_01jbx2v7d3m6c8q9w0e4r5t6y7 */
             teamId: string;
         };
@@ -1492,7 +1636,7 @@ export interface components {
              */
             preset?: "read-only" | "ci" | "full";
             /** @description Scopes of the key; or send `preset` */
-            scopes?: ("sandboxes:read" | "sandboxes:write" | "sandboxes:delete" | "commands:read" | "commands:exec" | "files:read" | "files:write" | "ports:write" | "ssh:connect" | "snapshots:read" | "snapshots:write" | "environments:read" | "environments:write" | "keys:admin")[];
+            scopes?: ("sandboxes:read" | "sandboxes:write" | "sandboxes:delete" | "commands:read" | "commands:exec" | "files:read" | "files:write" | "ports:write" | "ssh:connect" | "desktop" | "snapshots:read" | "snapshots:write" | "environments:read" | "environments:write" | "keys:admin")[];
         };
         CreateEnvironmentRequest: {
             env?: components["schemas"]["EnvVars"];
@@ -1961,7 +2105,7 @@ export interface components {
                 expiresAt?: string;
                 /** @enum {string} */
                 kind: "session" | "oidc" | "team_key" | (string & {});
-                scopes: ("sandboxes:read" | "sandboxes:write" | "sandboxes:delete" | "commands:read" | "commands:exec" | "files:read" | "files:write" | "ports:write" | "ssh:connect" | "snapshots:read" | "snapshots:write" | "environments:read" | "environments:write" | "keys:admin")[];
+                scopes: ("sandboxes:read" | "sandboxes:write" | "sandboxes:delete" | "commands:read" | "commands:exec" | "files:read" | "files:write" | "ports:write" | "ssh:connect" | "desktop" | "snapshots:read" | "snapshots:write" | "environments:read" | "environments:write" | "keys:admin")[];
             };
             /** @description Platform operator rights; only in a browser session */
             isOperator: boolean;
@@ -2167,6 +2311,7 @@ export interface components {
              */
             deletedAt: string | null;
             endpoints: {
+                desktop?: string;
                 /**
                  * @description URL of a published port; replace {port}
                  * @example https://quiet-otter-lamp-{port}.sbx.example.com
@@ -4201,6 +4346,412 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Desktop response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        access: "token" | "sso" | "public";
+                        cursor: {
+                            x: number;
+                            y: number;
+                        };
+                        reason: string | null;
+                        screen: {
+                            height: number;
+                            width: number;
+                        };
+                        /** @enum {string} */
+                        state: "ready" | "starting" | "unavailable";
+                        streamer: {
+                            running: boolean;
+                            streaming: boolean;
+                        };
+                        url: string;
+                    };
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        /** @description Desktop request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    access: "token" | "sso" | "public";
+                };
+            };
+        };
+        responses: {
+            /** @description Desktop response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        access: "token" | "sso" | "public";
+                        url: string;
+                    };
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.act": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        /** @description Desktop request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    actions: ({
+                        /** @enum {string} */
+                        type: "move";
+                        x: number;
+                        y: number;
+                    } | {
+                        /** @enum {string} */
+                        button?: "left" | "right" | "middle";
+                        count?: number;
+                        modifiers?: ("ctrl" | "alt" | "shift" | "meta")[];
+                        /** @enum {string} */
+                        type: "click";
+                        x?: number;
+                        y?: number;
+                    } | {
+                        /** @enum {string} */
+                        button?: "left" | "right" | "middle";
+                        /** @enum {string} */
+                        type: "mouse_down" | "mouse_up";
+                        x?: number;
+                        y?: number;
+                    } | {
+                        dx?: number;
+                        dy?: number;
+                        /** @enum {string} */
+                        type: "scroll";
+                        x?: number;
+                        y?: number;
+                    } | {
+                        /** @enum {string} */
+                        button?: "left" | "right" | "middle";
+                        path: {
+                            x: number;
+                            y: number;
+                        }[];
+                        /** @enum {string} */
+                        type: "drag";
+                    } | {
+                        keys: string[];
+                        /** @enum {string} */
+                        type: "key";
+                    } | {
+                        key: string;
+                        /** @enum {string} */
+                        type: "key_down" | "key_up";
+                    } | {
+                        delayMs?: number;
+                        text: string;
+                        /** @enum {string} */
+                        type: "type";
+                    } | {
+                        ms: number;
+                        /** @enum {string} */
+                        type: "wait";
+                    })[];
+                    coordinateSpace?: {
+                        height: number;
+                        width: number;
+                    };
+                    screenshot?: {
+                        /** @enum {string} */
+                        format?: "png" | "jpeg";
+                        maxHeight?: number;
+                        maxWidth?: number;
+                        quality?: number;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Desktop response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        completed: number;
+                        cursor: {
+                            x: number;
+                            y: number;
+                        };
+                        screen: {
+                            height: number;
+                            width: number;
+                        };
+                        screenshot?: {
+                            /** @enum {string} */
+                            contentType: "image/png" | "image/jpeg";
+                            data: string;
+                            height: number;
+                            width: number;
+                        };
+                    };
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.getClipboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Desktop response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        hasText: boolean;
+                        text: string;
+                    };
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.setClipboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        /** @description Desktop request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    text: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        /** @description Desktop request */
+        requestBody?: {
+            content: {
+                "application/json": {
+                    bitrateKbps?: number;
+                    fps?: 30 | 60;
+                    /** @enum {string} */
+                    transport?: "auto" | "webrtc" | "websocket";
+                };
+            };
+        };
+        responses: {
+            /** @description Desktop response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        expiresAt: string;
+                        url: string;
+                    };
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.screenshot": {
+        parameters: {
+            query?: {
+                format?: "png" | "jpeg";
+                quality?: number;
+                maxWidth?: number;
+                maxHeight?: number;
+                x?: number | null;
+                y?: number | null;
+                width?: number;
+                height?: number;
+                cursor?: "true" | "false";
+            };
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Desktop screenshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "desktop.endStreams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Done */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error; `error.code` says what happened */
             default: {

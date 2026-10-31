@@ -1,3 +1,4 @@
+import { Desktop } from "./desktop.ts";
 // A sandbox handle (S7 §8, §15.2): waiting, commands, files, ports, PTY and
 // lifecycle. Waits use the api long-polls (`?waitFor=` and operations
 // `?waitSeconds=`), never frequent polling.
@@ -75,6 +76,7 @@ const SANDBOX = "/v1/sandboxes/{sandbox}";
 export class Sandbox implements SandboxRef {
 	readonly core: ClientCore;
 	data: SandboxData;
+	readonly desktop: Desktop;
 	readonly files: Files;
 	readonly ports: {
 		/** Publishes a port (PUT: omitted settings take their defaults). */
@@ -100,6 +102,7 @@ export class Sandbox implements SandboxRef {
 	constructor(core: ClientCore, data: SandboxData) {
 		this.core = core;
 		this.data = data;
+		this.desktop = new Desktop(core, data.id);
 		this.files = new Files(this);
 		this.ports = {
 			host: async (port, opts = {}) => {

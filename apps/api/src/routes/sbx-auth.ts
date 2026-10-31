@@ -12,6 +12,7 @@ import { authOf } from "../auth/principal.ts";
 import { proxiedAuth } from "../auth/proxied.ts";
 import { rateLimit } from "../auth/rate-limit.ts";
 import type { ApiApp, ApiDeps, ApiEnv } from "../deps.ts";
+import { lookupDesktopRoute } from "../desktop/service.ts";
 import { ApiError, retryAfterSecondsOf, toHttpError } from "../http/errors.ts";
 import { REQUEST_ID_HEADER } from "../http/request-id.ts";
 import { poolOf } from "./internal/common.ts";
@@ -89,12 +90,17 @@ async function authorize(c: Context<ApiEnv>, deps: ApiDeps): Promise<Response> {
 			"This is not a port address of the platform.",
 		);
 	}
-	const t = await lookupRoute(poolOf(deps), label);
+	const desktop = await lookupDesktopRoute(deps, label);
+	const t = desktop
+		? { teamId: desktop.rawTeamId }
+		: await lookupRoute(poolOf(deps), label);
 	if (t === null) {
 		throw page(404, "route_not_found", "This port is not published.");
 	}
 	const d = await deps.config.defaults();
-	const route = toGatewayRoute(label, t, d);
+	const route =
+		desktop ??
+		toGatewayRoute(label, t as Parameters<typeof toGatewayRoute>[1], d);
 	if (route.access !== "sso") {
 		throw page(
 			400,
@@ -106,7 +112,7 @@ async function authorize(c: Context<ApiEnv>, deps: ApiDeps): Promise<Response> {
 		throw page(403, "forbidden", "This port is blocked by the platform.");
 	}
 	const a = authOf(c);
-	if (d.ssoPortPolicy === "team") {
+	if (desktop || d.ssoPortPolicy === "team") {
 		const inTeam = a.teams.some((m) => m.teamId === t.teamId);
 		if (!inTeam && !a.principal.isOperator) {
 			throw page(

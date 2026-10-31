@@ -31,6 +31,7 @@ from .._gen.models.sandbox_ports import SandboxPorts
 from .._retry import new_idempotency_key
 from .client import AsyncClientCore, body_of
 from .commands import AsyncCommand, exec_command, run_command, start_command
+from .desktop import AsyncDesktop
 from .files import AsyncFiles
 
 #: Seconds of one long-poll (the api allows up to 60).
@@ -151,6 +152,7 @@ class AsyncSandbox:
         self.core = core
         self.data = data
         self.files = AsyncFiles(self)
+        self.desktop = AsyncDesktop(self)
         self.ports = AsyncPorts(self)
 
     def __repr__(self) -> str:

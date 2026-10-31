@@ -133,6 +133,7 @@ describe("S3 event payloads", () => {
 			runningCommands: 1,
 			openPtys: 0,
 			tcpStreams: 0,
+			desktopStreams: 0,
 		});
 		expect(
 			roundTrip("ports.changed", PortsChangedSchema, {

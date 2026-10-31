@@ -113,6 +113,7 @@
 								"files:write",
 								"ports:write",
 								"ssh:connect",
+								"desktop",
 								"snapshots:read",
 								"snapshots:write",
 								"environments:read",
@@ -969,6 +970,7 @@
 								"files:write",
 								"ports:write",
 								"ssh:connect",
+								"desktop",
 								"snapshots:read",
 								"snapshots:write",
 								"environments:read",
@@ -2292,6 +2294,7 @@
 										"files:write",
 										"ports:write",
 										"ssh:connect",
+										"desktop",
 										"snapshots:read",
 										"snapshots:write",
 										"environments:read",
@@ -2861,6 +2864,9 @@
 					},
 					"endpoints": {
 						"properties": {
+							"desktop": {
+								"type": "string"
+							},
 							"portUrlTemplate": {
 								"description": "URL of a published port; replace {port}",
 								"example": "https://quiet-otter-lamp-{port}.sbx.example.com",
@@ -6509,6 +6515,1064 @@
 				"summary": "Attach to a command's output",
 				"tags": [
 					"commands"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop": {
+			"get": {
+				"description": "status for the sandbox desktop. Requires the desktop template capability and a ready sandbox.",
+				"operationId": "desktop.status",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"access": {
+											"enum": [
+												"token",
+												"sso",
+												"public"
+											],
+											"type": "string"
+										},
+										"cursor": {
+											"properties": {
+												"x": {
+													"type": "integer"
+												},
+												"y": {
+													"type": "integer"
+												}
+											},
+											"required": [
+												"x",
+												"y"
+											],
+											"type": "object"
+										},
+										"reason": {
+											"type": [
+												"string",
+												"null"
+											]
+										},
+										"screen": {
+											"properties": {
+												"height": {
+													"exclusiveMinimum": 0,
+													"type": "integer"
+												},
+												"width": {
+													"exclusiveMinimum": 0,
+													"type": "integer"
+												}
+											},
+											"required": [
+												"width",
+												"height"
+											],
+											"type": "object"
+										},
+										"state": {
+											"enum": [
+												"ready",
+												"starting",
+												"unavailable"
+											],
+											"type": "string"
+										},
+										"streamer": {
+											"properties": {
+												"running": {
+													"type": "boolean"
+												},
+												"streaming": {
+													"type": "boolean"
+												}
+											},
+											"required": [
+												"running",
+												"streaming"
+											],
+											"type": "object"
+										},
+										"url": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"state",
+										"reason",
+										"screen",
+										"cursor",
+										"access",
+										"url",
+										"streamer"
+									],
+									"type": "object"
+								}
+							}
+						},
+						"description": "Desktop response"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Desktop status",
+				"tags": [
+					"desktop"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/access": {
+			"put": {
+				"description": "access for the sandbox desktop. Requires the desktop template capability and a ready sandbox.",
+				"operationId": "desktop.access",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"access": {
+										"enum": [
+											"token",
+											"sso",
+											"public"
+										],
+										"type": "string"
+									}
+								},
+								"required": [
+									"access"
+								],
+								"type": "object"
+							}
+						}
+					},
+					"description": "Desktop request",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"access": {
+											"enum": [
+												"token",
+												"sso",
+												"public"
+											],
+											"type": "string"
+										},
+										"url": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"access",
+										"url"
+									],
+									"type": "object"
+								}
+							}
+						},
+						"description": "Desktop response"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Desktop access",
+				"tags": [
+					"desktop"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/actions": {
+			"post": {
+				"description": "act for the sandbox desktop. Requires the desktop template capability and a ready sandbox.",
+				"operationId": "desktop.act",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"actions": {
+										"items": {
+											"oneOf": [
+												{
+													"properties": {
+														"type": {
+															"enum": [
+																"move"
+															],
+															"type": "string"
+														},
+														"x": {
+															"minimum": 0,
+															"type": "integer"
+														},
+														"y": {
+															"minimum": 0,
+															"type": "integer"
+														}
+													},
+													"required": [
+														"type",
+														"x",
+														"y"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"button": {
+															"enum": [
+																"left",
+																"right",
+																"middle"
+															],
+															"type": "string"
+														},
+														"count": {
+															"maximum": 3,
+															"minimum": 1,
+															"type": "integer"
+														},
+														"modifiers": {
+															"items": {
+																"enum": [
+																	"ctrl",
+																	"alt",
+																	"shift",
+																	"meta"
+																],
+																"type": "string"
+															},
+															"type": "array"
+														},
+														"type": {
+															"enum": [
+																"click"
+															],
+															"type": "string"
+														},
+														"x": {
+															"minimum": 0,
+															"type": "integer"
+														},
+														"y": {
+															"minimum": 0,
+															"type": "integer"
+														}
+													},
+													"required": [
+														"type"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"button": {
+															"enum": [
+																"left",
+																"right",
+																"middle"
+															],
+															"type": "string"
+														},
+														"type": {
+															"enum": [
+																"mouse_down",
+																"mouse_up"
+															],
+															"type": "string"
+														},
+														"x": {
+															"minimum": 0,
+															"type": "integer"
+														},
+														"y": {
+															"minimum": 0,
+															"type": "integer"
+														}
+													},
+													"required": [
+														"type"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"dx": {
+															"type": "integer"
+														},
+														"dy": {
+															"type": "integer"
+														},
+														"type": {
+															"enum": [
+																"scroll"
+															],
+															"type": "string"
+														},
+														"x": {
+															"minimum": 0,
+															"type": "integer"
+														},
+														"y": {
+															"minimum": 0,
+															"type": "integer"
+														}
+													},
+													"required": [
+														"type"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"button": {
+															"enum": [
+																"left",
+																"right",
+																"middle"
+															],
+															"type": "string"
+														},
+														"path": {
+															"items": {
+																"properties": {
+																	"x": {
+																		"type": "integer"
+																	},
+																	"y": {
+																		"type": "integer"
+																	}
+																},
+																"required": [
+																	"x",
+																	"y"
+																],
+																"type": "object"
+															},
+															"maxItems": 1000,
+															"minItems": 2,
+															"type": "array"
+														},
+														"type": {
+															"enum": [
+																"drag"
+															],
+															"type": "string"
+														}
+													},
+													"required": [
+														"type",
+														"path"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"keys": {
+															"items": {
+																"minLength": 1,
+																"type": "string"
+															},
+															"maxItems": 16,
+															"minItems": 1,
+															"type": "array"
+														},
+														"type": {
+															"enum": [
+																"key"
+															],
+															"type": "string"
+														}
+													},
+													"required": [
+														"type",
+														"keys"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"key": {
+															"minLength": 1,
+															"type": "string"
+														},
+														"type": {
+															"enum": [
+																"key_down",
+																"key_up"
+															],
+															"type": "string"
+														}
+													},
+													"required": [
+														"type",
+														"key"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"delayMs": {
+															"maximum": 100,
+															"minimum": 0,
+															"type": "integer"
+														},
+														"text": {
+															"maxLength": 20000,
+															"type": "string"
+														},
+														"type": {
+															"enum": [
+																"type"
+															],
+															"type": "string"
+														}
+													},
+													"required": [
+														"type",
+														"text"
+													],
+													"type": "object"
+												},
+												{
+													"properties": {
+														"ms": {
+															"maximum": 10000,
+															"minimum": 0,
+															"type": "integer"
+														},
+														"type": {
+															"enum": [
+																"wait"
+															],
+															"type": "string"
+														}
+													},
+													"required": [
+														"type",
+														"ms"
+													],
+													"type": "object"
+												}
+											]
+										},
+										"maxItems": 100,
+										"minItems": 1,
+										"type": "array"
+									},
+									"coordinateSpace": {
+										"properties": {
+											"height": {
+												"exclusiveMinimum": 0,
+												"type": "integer"
+											},
+											"width": {
+												"exclusiveMinimum": 0,
+												"type": "integer"
+											}
+										},
+										"required": [
+											"width",
+											"height"
+										],
+										"type": "object"
+									},
+									"screenshot": {
+										"properties": {
+											"format": {
+												"enum": [
+													"png",
+													"jpeg"
+												],
+												"type": "string"
+											},
+											"maxHeight": {
+												"exclusiveMinimum": 0,
+												"maximum": 16384,
+												"type": "integer"
+											},
+											"maxWidth": {
+												"exclusiveMinimum": 0,
+												"maximum": 16384,
+												"type": "integer"
+											},
+											"quality": {
+												"maximum": 100,
+												"minimum": 1,
+												"type": "integer"
+											}
+										},
+										"type": "object"
+									}
+								},
+								"required": [
+									"actions"
+								],
+								"type": "object"
+							}
+						}
+					},
+					"description": "Desktop request",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"completed": {
+											"type": "integer"
+										},
+										"cursor": {
+											"properties": {
+												"x": {
+													"type": "integer"
+												},
+												"y": {
+													"type": "integer"
+												}
+											},
+											"required": [
+												"x",
+												"y"
+											],
+											"type": "object"
+										},
+										"screen": {
+											"properties": {
+												"height": {
+													"exclusiveMinimum": 0,
+													"type": "integer"
+												},
+												"width": {
+													"exclusiveMinimum": 0,
+													"type": "integer"
+												}
+											},
+											"required": [
+												"width",
+												"height"
+											],
+											"type": "object"
+										},
+										"screenshot": {
+											"properties": {
+												"contentType": {
+													"enum": [
+														"image/png",
+														"image/jpeg"
+													],
+													"type": "string"
+												},
+												"data": {
+													"type": "string"
+												},
+												"height": {
+													"exclusiveMinimum": 0,
+													"type": "integer"
+												},
+												"width": {
+													"exclusiveMinimum": 0,
+													"type": "integer"
+												}
+											},
+											"required": [
+												"contentType",
+												"width",
+												"height",
+												"data"
+											],
+											"type": "object"
+										}
+									},
+									"required": [
+										"completed",
+										"screen",
+										"cursor"
+									],
+									"type": "object"
+								}
+							}
+						},
+						"description": "Desktop response"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Desktop act",
+				"tags": [
+					"desktop"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/clipboard": {
+			"get": {
+				"description": "getClipboard for the sandbox desktop. Requires the desktop template capability and a ready sandbox.",
+				"operationId": "desktop.getClipboard",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"hasText": {
+											"type": "boolean"
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"text",
+										"hasText"
+									],
+									"type": "object"
+								}
+							}
+						},
+						"description": "Desktop response"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Desktop getClipboard",
+				"tags": [
+					"desktop"
+				]
+			},
+			"put": {
+				"description": "setClipboard for the sandbox desktop. Requires the desktop template capability and a ready sandbox.",
+				"operationId": "desktop.setClipboard",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"text": {
+										"maxLength": 1048576,
+										"type": "string"
+									}
+								},
+								"required": [
+									"text"
+								],
+								"type": "object"
+							}
+						}
+					},
+					"description": "Desktop request",
+					"required": true
+				},
+				"responses": {
+					"204": {
+						"description": "Done"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Desktop setClipboard",
+				"tags": [
+					"desktop"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/links": {
+			"post": {
+				"description": "link for the sandbox desktop. Requires the desktop template capability and a ready sandbox.",
+				"operationId": "desktop.link",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"bitrateKbps": {
+										"maximum": 20000,
+										"minimum": 1000,
+										"type": "integer"
+									},
+									"fps": {
+										"anyOf": [
+											{
+												"enum": [
+													30
+												],
+												"type": "number"
+											},
+											{
+												"enum": [
+													60
+												],
+												"type": "number"
+											}
+										]
+									},
+									"transport": {
+										"enum": [
+											"auto",
+											"webrtc",
+											"websocket"
+										],
+										"type": "string"
+									}
+								},
+								"type": "object"
+							}
+						}
+					},
+					"description": "Desktop request",
+					"required": false
+				},
+				"responses": {
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"properties": {
+										"expiresAt": {
+											"type": "string"
+										},
+										"url": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"url",
+										"expiresAt"
+									],
+									"type": "object"
+								}
+							}
+						},
+						"description": "Desktop response"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Desktop link",
+				"tags": [
+					"desktop"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/screenshot": {
+			"get": {
+				"description": "PNG or JPEG screen capture independent of the video streamer, with original screen, image and cursor metadata in response headers.",
+				"operationId": "desktop.screenshot",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "format",
+						"required": false,
+						"schema": {
+							"enum": [
+								"png",
+								"jpeg"
+							],
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "quality",
+						"required": false,
+						"schema": {
+							"maximum": 100,
+							"minimum": 1,
+							"type": "integer"
+						}
+					},
+					{
+						"in": "query",
+						"name": "maxWidth",
+						"required": false,
+						"schema": {
+							"exclusiveMinimum": 0,
+							"maximum": 16384,
+							"type": "integer"
+						}
+					},
+					{
+						"in": "query",
+						"name": "maxHeight",
+						"required": false,
+						"schema": {
+							"exclusiveMinimum": 0,
+							"maximum": 16384,
+							"type": "integer"
+						}
+					},
+					{
+						"in": "query",
+						"name": "x",
+						"required": false,
+						"schema": {
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"in": "query",
+						"name": "y",
+						"required": false,
+						"schema": {
+							"minimum": 0,
+							"type": [
+								"integer",
+								"null"
+							]
+						}
+					},
+					{
+						"in": "query",
+						"name": "width",
+						"required": false,
+						"schema": {
+							"exclusiveMinimum": 0,
+							"type": "integer"
+						}
+					},
+					{
+						"in": "query",
+						"name": "height",
+						"required": false,
+						"schema": {
+							"exclusiveMinimum": 0,
+							"type": "integer"
+						}
+					},
+					{
+						"in": "query",
+						"name": "cursor",
+						"required": false,
+						"schema": {
+							"enum": [
+								"true",
+								"false"
+							],
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"image/jpeg": {
+								"schema": {
+									"format": "binary",
+									"type": "string"
+								}
+							},
+							"image/png": {
+								"schema": {
+									"format": "binary",
+									"type": "string"
+								}
+							}
+						},
+						"description": "Desktop screenshot"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Capture the desktop",
+				"tags": [
+					"desktop"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/streams": {
+			"delete": {
+				"description": "endStreams for the sandbox desktop. Requires the desktop template capability and a ready sandbox.",
+				"operationId": "desktop.endStreams",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Done"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Desktop endStreams",
+				"tags": [
+					"desktop"
 				]
 			}
 		},

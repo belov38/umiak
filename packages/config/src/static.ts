@@ -109,6 +109,7 @@ const defaultsSchema = z
 		recoverMinIntervalSeconds: nonNegInt.default(600),
 		defaultTemplate: slug.default("linux"),
 		publicPortsEnabled: z.boolean().default(true),
+		publicDesktopEnabled: z.boolean().optional(),
 		ssoPortPolicy: z.enum(["any", "team"]).default("any"),
 		ssoPolicyEpoch: nonNegInt.default(0),
 	})

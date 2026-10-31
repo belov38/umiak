@@ -20,6 +20,9 @@ import type { CoverageRecord, OperationCount } from "./conformance-coverage.ts";
  * by their validated error answers. Must equal the document's set.
  */
 export const NON_JSON_SUCCESS = [
+	"desktop.endStreams",
+	"desktop.screenshot",
+	"desktop.setClipboard",
 	"apiKeys.revoke",
 	"apiKeys.revokeSelf",
 	"commands.input",

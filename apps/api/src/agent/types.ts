@@ -1,3 +1,13 @@
+export type DesktopMethod =
+	| "status"
+	| "open"
+	| "stopStreamer"
+	| "endStreams"
+	| "screenshot"
+	| "act"
+	| "getClipboard"
+	| "setClipboard";
+
 // The guest agent as seen by the api (S3 §9–§13). Shapes mirror
 // proto/sbx/agent/v1 (Process, Filesystem, System) in plain TS: camelCase
 // fields, lower-case enum values, offsets and sizes as `number`. Production
@@ -18,6 +28,10 @@ export const AGENT_CAPABILITIES = [
 	"system.ports.v1",
 	"system.metrics.v1",
 	"system.activity.v1",
+	"desktop.v1",
+	"desktop.stream.v1",
+	"desktop.input.v1",
+	"desktop.clipboard.v1",
 ] as const;
 
 // --- Process ---
@@ -299,6 +313,12 @@ export interface AgentReadiness {
  * answered with an error code, S3 §11.1). `agentErrorToHttp` maps them.
  */
 export interface AgentApi {
+	desktopCall(
+		machineId: string,
+		method: DesktopMethod,
+		body: Record<string, unknown>,
+		opts?: { requestId?: string; signal?: AbortSignal },
+	): Promise<Record<string, unknown>>;
 	/** Capabilities the agent reported; [] while unknown. */
 	capabilities(machineId: string): Promise<string[]>;
 	/** Throws AgentOutdatedError or AgentUnavailableError. */

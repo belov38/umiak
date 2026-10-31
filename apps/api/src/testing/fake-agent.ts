@@ -61,6 +61,7 @@ import {
 	type AgentStream,
 	type AgentStreamInfo,
 	type AgentUpdateRequest,
+	type DesktopMethod,
 } from "../agent/types.ts";
 import {
 	callError,
@@ -150,6 +151,56 @@ const TIMEOUT_KILL_GRACE_MS = 10_000;
 const LEFTOVER_MAX_WAIT_MS = 1000;
 
 export class FakeAgent implements AgentApi {
+	readonly desktopClipboard = new Map<string, string>();
+	async desktopCall(
+		machineId: string,
+		method: DesktopMethod,
+		body: Record<string, unknown>,
+	): Promise<Record<string, unknown>> {
+		this.#reach(machineId);
+		const screen = { width: 1920, height: 1080 },
+			cursor = { x: 10, y: 20 };
+		const image = {
+			data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNioAAAAASUVORK5CYII=",
+			contentType: "image/png",
+			screen,
+			image: { width: 1, height: 1 },
+			cursor,
+			scale: 1 / 1920,
+		};
+		switch (method) {
+			case "status":
+				return {
+					state: "ready",
+					reason: "",
+					screen,
+					cursor,
+					running: false,
+					desktopStreams: 0,
+				};
+			case "open":
+				return { hostId: "host", appId: "desktop" };
+			case "screenshot":
+				return image;
+			case "act":
+				return {
+					completed: (body.actions as unknown[]).length,
+					screen,
+					cursor,
+					...(body.screenshot ? { screenshot: image } : {}),
+				};
+			case "getClipboard": {
+				const text = this.desktopClipboard.get(machineId) ?? "";
+				return { text, hasText: text !== "" };
+			}
+			case "setClipboard":
+				this.desktopClipboard.set(machineId, String(body.text));
+				return {};
+			default:
+				return {};
+		}
+	}
+
 	/** Max bytes of one attach data event; 1 for UTF-8 boundary tests. */
 	chunkSize: number;
 	/** Silence before an attach heartbeat. */

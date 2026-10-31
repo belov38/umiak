@@ -261,10 +261,10 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 					...ctx.call,
 				})
 				.then(
-					() => true,
-					() => false,
+					(result) => result.data,
+					() => undefined,
 				);
-			if (!exists) throw err;
+			if (!exists || exists.endpoints.desktop !== undefined) throw err;
 			throw new ToolError({
 				code: "desktop_unsupported",
 				message: "this API has no desktop endpoints yet (S10)",

@@ -29,6 +29,7 @@ import { registerSecuritySchemes } from "./openapi/registry.ts";
 import { registerApiKeyRoutes } from "./routes/api-keys.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
 import { registerCommandRoutes } from "./routes/commands.ts";
+import { registerDesktopRoutes } from "./routes/desktop.ts";
 import { registerEnvRoutes } from "./routes/env.ts";
 import { registerEnvironmentRoutes } from "./routes/environments.ts";
 import { registerFileRoutes } from "./routes/files.ts";
@@ -89,6 +90,7 @@ export function mountV1(
 	registerMetaRoutes(app, deps, o);
 	registerMeRoutes(app, deps);
 	registerSandboxRoutes(app, deps);
+	registerDesktopRoutes(app, deps);
 	registerEnvRoutes(app, deps);
 	registerOperationRoutes(app, deps);
 	registerCommandRoutes(app, deps);

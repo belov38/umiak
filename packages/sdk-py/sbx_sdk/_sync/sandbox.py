@@ -32,6 +32,7 @@ from .._gen.models.sandbox_ports import SandboxPorts
 from .._retry import new_idempotency_key
 from .client import ClientCore, body_of
 from .commands import Command, exec_command, run_command, start_command
+from .desktop import Desktop
 from .files import Files
 
 #: Seconds of one long-poll (the api allows up to 60).
@@ -150,6 +151,7 @@ class Sandbox:
         self.core = core
         self.data = data
         self.files = Files(self)
+        self.desktop = Desktop(self)
         self.ports = Ports(self)
 
     def __repr__(self) -> str:

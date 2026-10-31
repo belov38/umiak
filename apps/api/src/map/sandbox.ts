@@ -4,6 +4,7 @@
 // `environment` is always null and `excludeOwnerSecrets` false until the
 // sandbox stores them (decision 7).
 import { decodeUuid, encodeUuid } from "@sbx/auth";
+import type { ConfigReader } from "@sbx/config";
 import { isUuid, type Sandbox } from "@sbx/core";
 import type pg from "pg";
 import { notFoundError } from "../http/errors.ts";
@@ -152,17 +153,37 @@ export async function loadSandboxExtras(
 
 /** Resources of sandboxes with their extras (one query). */
 export async function sandboxResources(
-	deps: { pool: pg.Pool | null; settings: SandboxMapContext["settings"] },
+	deps: {
+		pool: pg.Pool | null;
+		settings: SandboxMapContext["settings"];
+		config?: ConfigReader;
+	},
 	list: readonly Sandbox[],
 ): Promise<SandboxResource[]> {
 	const extras = await loadSandboxExtras(deps.pool, list);
-	return list.map((s) =>
-		toSandboxResource(s, { settings: deps.settings, extras: extras.get(s.id) }),
+	return Promise.all(
+		list.map(async (s) => {
+			const resource = toSandboxResource(s, {
+				settings: deps.settings,
+				extras: extras.get(s.id),
+			});
+			if (
+				(await deps.config?.template(s.templateSlug))?.capabilities.includes(
+					"desktop",
+				)
+			)
+				resource.endpoints.desktop = `https://${s.slug}-desktop.${deps.settings.sbxDomain}/`;
+			return resource;
+		}),
 	);
 }
 
 export async function sandboxResource(
-	deps: { pool: pg.Pool | null; settings: SandboxMapContext["settings"] },
+	deps: {
+		pool: pg.Pool | null;
+		settings: SandboxMapContext["settings"];
+		config?: ConfigReader;
+	},
 	s: Sandbox,
 ): Promise<SandboxResource> {
 	const [r] = await sandboxResources(deps, [s]);

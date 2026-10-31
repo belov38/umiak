@@ -6,6 +6,8 @@ from typing import Any, TypeVar
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
 T = TypeVar("T", bound="SandboxEndpoints")
 
 
@@ -16,16 +18,20 @@ class SandboxEndpoints:
         port_url_template (str): URL of a published port; replace {port} Example: https://quiet-otter-
             lamp-{port}.sbx.example.com.
         ssh (str): SSH command (needs a certificate or a registered key) Example: ssh quiet-otter-lamp@ssh.example.com.
+        desktop (str | Unset):
     """
 
     port_url_template: str
     ssh: str
+    desktop: str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         port_url_template = self.port_url_template
 
         ssh = self.ssh
+
+        desktop = self.desktop
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -35,6 +41,8 @@ class SandboxEndpoints:
                 "ssh": ssh,
             }
         )
+        if desktop is not UNSET:
+            field_dict["desktop"] = desktop
 
         return field_dict
 
@@ -45,9 +53,12 @@ class SandboxEndpoints:
 
         ssh = d.pop("ssh")
 
+        desktop = d.pop("desktop", UNSET)
+
         sandbox_endpoints = cls(
             port_url_template=port_url_template,
             ssh=ssh,
+            desktop=desktop,
         )
 
         sandbox_endpoints.additional_properties = d

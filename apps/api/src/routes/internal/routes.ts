@@ -6,6 +6,7 @@ import { encodeUuid } from "@sbx/auth";
 import type { PlatformDefaults } from "@sbx/config";
 import { lookupRoute, type RouteTarget } from "@sbx/core";
 import type { ApiApp, ApiDeps } from "../../deps.ts";
+import { lookupDesktopRoute } from "../../desktop/service.ts";
 import { ApiError } from "../../http/errors.ts";
 import { poolOf, requireGateway } from "./common.ts";
 
@@ -73,6 +74,11 @@ export function registerGatewayRouteRoutes(app: ApiApp, deps: ApiDeps): void {
 		const label = c.req.param("label");
 		// Outside the grammar, desktop labels, reserved slugs, unknown slug,
 		// unhosted port and deleted sandboxes are all null.
+		const desktop = await lookupDesktopRoute(deps, label);
+		if (desktop) {
+			const { rawSandboxId: _, rawTeamId: __, ...route } = desktop;
+			return c.json(route, 200);
+		}
 		const t = await lookupRoute(poolOf(deps), label);
 		if (t === null) throw routeNotFound();
 		const d = await deps.config.defaults();
