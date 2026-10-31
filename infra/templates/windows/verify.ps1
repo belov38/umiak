@@ -524,15 +524,17 @@ function Test-Autologon([int]$WaitSeconds = 180, [int]$PollSeconds = 5) {
         $logonUi = @(Get-Process -Name LogonUI -ErrorAction SilentlyContinue)
         $mine = @($logonUi | Where-Object { $null -ne $sessionId -and $_.SessionId -eq $sessionId })
         $lock = if ($null -ne $sessionId) { Get-SessionLockState $sessionId } else { 'unknown' }
-        $ok = $null -ne $sessionId -and $mine.Count -eq 0 -and $lock -ne 'locked'
+        $lockApp = @(Get-Process -Name LockApp -ErrorAction SilentlyContinue | Where-Object { $null -ne $sessionId -and $_.SessionId -eq $sessionId })
+        # A locked Windows 11 session runs LogonUI and LockApp in it. The WTSSessionInfoEx flag is
+        # only reported: on 26H2 it said 'locked' for a session with neither (seen on pve).
+        $ok = $null -ne $sessionId -and $mine.Count -eq 0 -and $lockApp.Count -eq 0
         if ($ok -or (Get-Date) -ge $deadline) { break }
         Start-Sleep -Seconds $PollSeconds
     }
-    $lockApp = @(Get-Process -Name LockApp -ErrorAction SilentlyContinue | Where-Object { $null -ne $sessionId -and $_.SessionId -eq $sessionId })
     $ev = if ($null -eq $sessionId) {
         "no active session of ${UserName}: $($q.Lines -join ' | ')"
     } else {
-        "query user: $($line.Trim()); session $sessionId $lock (WTSSessionInfoEx)"
+        "query user: $($line.Trim()); session $sessionId, WTSSessionInfoEx flag $lock"
     }
     $ui = if ($logonUi.Count) { ($logonUi | ForEach-Object { "LogonUI in session $($_.SessionId)" }) -join ', ' } else { 'no LogonUI' }
     Report autologon_session $ok "$ev; $ui; LockApp in the session: $(if ($lockApp.Count) { 'running' } else { 'no' }); waited up to $WaitSeconds s"
