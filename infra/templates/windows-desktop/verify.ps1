@@ -30,7 +30,11 @@ function Test-Desktop {
     $ok = $false
     $ev = "$cfgFile missing"
     if (Test-Path -LiteralPath $cfgFile) {
-        $cfg = Get-Content -Raw -LiteralPath $cfgFile | ConvertFrom-Json
+        try { $cfg = Get-Content -Raw -LiteralPath $cfgFile | ConvertFrom-Json } catch {
+            $acl = (Invoke-Capture icacls.exe @($DesktopRoot, $cfgFile)).Lines -join '; '
+            Report desktop_moonlight_config $false "read failed: $($_.Exception.Message); icacls: $acl"
+            return
+        }
         $ok = $cfg.web_server.bind_address -eq '127.0.0.1:47800' -and
             @($cfg.webrtc.ice_servers).Count -eq 0 -and
             $cfg.webrtc.ice_server_script -eq (Join-Path $DesktopRoot 'ice-servers.cmd') -and

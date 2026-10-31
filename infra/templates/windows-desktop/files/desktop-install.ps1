@@ -53,8 +53,16 @@ function Install-SbxDesktop {
     $signature=@{url=($pins.cua.url+'.sigstore.json');sha256='da18eb92cfaba790609a6abee97e425541b96775f030d87b8cf6835bae516b13'}
     & $Ops.Fetch $signature $bundle
     & $Ops.Native (Join-Path $WorkRoot 'cosign.exe') @('verify-blob','--bundle',$bundle,'--certificate-identity',"https://github.com/trycua/cua/.github/workflows/cd-rust-cua-driver.yml@refs/tags/cua-driver-rs-v$($pins.cua.version)",'--certificate-oidc-issuer','https://token.actions.githubusercontent.com',(Join-Path $WorkRoot 'cua.zip'))
+    # The service account must exist before the directory ACL names it.
+    $agent=Join-Path $ProgramRoot 'sbx-agent/current/sbx-agent.exe'
+    & $Ops.Native 'sc.exe' @('create','sbx-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\sbx-moonlight-web')
+    & $Ops.Native 'sc.exe' @('config','sbx-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\sbx-moonlight-web')
+    & $Ops.Native 'sc.exe' @('sidtype','sbx-moonlight-web','unrestricted')
+    & $Ops.Native 'sc.exe' @('failure','sbx-moonlight-web','reset=','86400','actions=','restart/15000/restart/30000/restart/60000')
     $desktop=Join-Path $AgentRoot 'desktop'
     New-Item -ItemType Directory -Force $desktop | Out-Null
+    # Directory ACL first; every file below only inherits it (no per-file grants).
+    & $Ops.Native 'icacls.exe' @($desktop,'/inheritance:r','/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','NT SERVICE\sbx-moonlight-web:(OI)(CI)RX','/Q')
     $config=Join-Path $desktop 'moonlight.json'
     $web=Join-Path (Join-Path $ProgramRoot 'sbx-desktop') 'moonlight-web/current/web-server.exe'
     & $Ops.Generate $web $config
@@ -70,10 +78,5 @@ function Install-SbxDesktop {
     Copy-Item -LiteralPath (Join-Path $FilesRoot 'run-cua.ps1') -Destination $desktop -Force
     $ice=Join-Path (Join-Path $AgentRoot 'state') 'desktop-moonlight/ice-servers.json'
     [IO.File]::WriteAllText((Join-Path $desktop 'ice-servers.cmd'),"@echo off`r`ntype `"$ice`"`r`n")
-    $agent=Join-Path $ProgramRoot 'sbx-agent/current/sbx-agent.exe'
-    & $Ops.Native 'sc.exe' @('create','sbx-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\sbx-moonlight-web')
-    & $Ops.Native 'sc.exe' @('config','sbx-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\sbx-moonlight-web')
-    & $Ops.Native 'sc.exe' @('sidtype','sbx-moonlight-web','unrestricted')
-    & $Ops.Native 'sc.exe' @('failure','sbx-moonlight-web','reset=','86400','actions=','restart/15000/restart/30000/restart/60000')
-    & $Ops.Native 'icacls.exe' @($desktop,'/inheritance:r','/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','NT SERVICE\sbx-moonlight-web:(OI)(CI)RX','/T','/Q')
+    & $Ops.Native 'icacls.exe' @((Join-Path $desktop '*'),'/reset','/T','/Q')
 }
