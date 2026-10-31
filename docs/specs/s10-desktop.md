@@ -980,3 +980,12 @@ TimeoutStopSec3. Revoke отменяет ещё и незавершённые Op
 file modes синтетические: private access обеспечивается DACL и проверяется live.
 
 S8 integration (2026-10-31): Desktop tab uses real SDK, fresh single-use tickets outside query cache, retry2s on desktop_not_ready, iframe/fullscreen/new-tab/access/disconnect/resume. Payload migration adds publicDesktopEnabled=false + route invalidation and desktop4gb/8gb seeds. Runtime desktop migrations moved to0401/0402 after S8 environments0400. Linux verify stops source clone before booting fork (one4GiB VM). Master permits S9≤4GiB + S10≤4GiB; total≤8GiB.
+
+### Live Linux verification, 2026-10-31 (S10 after S8 merge)
+
+- `linux-desktop 20261031.3`, slot596; agent0.1.0+20261031.ebe5ea8. Build704s,7.8GiB thin used. Slot595 previous failed verification build retired/deleted. Upstream pins unchanged (§24).
+- `verify: linux-desktop`:109 checks,0FAIL; KVM available; first QGA9.606s, hardrestart9.441s. Sequential fork uses one4GiB VM; all clones/snapshot removed.
+- Direct-agent live probe: cold clone+boot toQGA11.286s, claim→desktopready2.097s;1920x1080 screenshot, mouse/Unicode keyboard proof + pixel diff, clipboardUnicode/emoji, actual Sunshine/Moon pairing, stopstreamer; fork fresh streamercredentials and stop/resume verified. Resume desktopready1.057s. These are NOT public API create or gateway media timings.
+- S8 Desktop tab implemented; Payload publicDesktopEnabled=false with route invalidation, catalog sizes4gb/8gb and verified build seeded. Worker waits actual desktop readiness on the same boot afterConfigure before create/resume finish.
+- Migration0403 tracks policy revocation transition. Direct media is ended for blocked/public-disabled routes. Used grants of current ready epoch remain retained/rechecked beyond12h and1day until stop/revoke changes epoch; cleanup then removes them. Public views without ticket are covered by route monitor.
+- Pending live spikes: CT590 publicAPI create, actual WebSocket/WebRTC/TURN frames and stream activity/long-idle checks. Dedicated self-hosted TURN listener IP/TLS443 is still needed for devCP. Windows depends on S9 merge. No public API/S11 field changes in this pass.

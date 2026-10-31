@@ -150,3 +150,32 @@ topology:
         tpmstate0:
           index: "2"
           version: v2.0
+
+    # S10: verified Linux desktop build; no warm/hibernated pool.
+    - templateSlug: linux-desktop
+      version: "20261031.3"
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 596
+      bootTimeoutS: 300
+      agentVersion: 0.1.0+20261031.ebe5ea8
+      hw:
+        {
+          "machine": "q35",
+          "cpu": "host",
+          "bios": "seabios",
+          "ostype": "l26",
+          "scsihw": "virtio-scsi-single",
+          "agent": "enabled=1",
+          "serial0": "socket",
+          "vga": "std",
+          "tablet": "0",
+          "rng0": "source=/dev/urandom",
+          "cloudinit": false,
+        }
+      diskLayout:
+        {
+          "scsi0":
+            { "size": "64G", "discard": "on", "iothread": "1", "ssd": "1" },
+        }

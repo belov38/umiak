@@ -9,7 +9,10 @@ import {
 } from "../../apps/template-builder/src/context.ts";
 import { FileRegistry } from "../../apps/template-builder/src/registry.ts";
 import { pveGuestIo } from "../../apps/template-builder/src/runner.ts";
-import { s2SerialPayload } from "../../packages/pve/src/index.ts";
+import {
+	type SnapshotRef,
+	s2SerialPayload,
+} from "../../packages/pve/src/index.ts";
 import { waitForDesktopBudget } from "./desktop-budget.ts";
 
 const manifest = new FileRegistry(registryDir()).get(process.argv[2] ?? "");
@@ -23,6 +26,8 @@ const ctx = await makeContext({ node: manifest.node });
 const machines = machinesFor(ctx, manifest.pveVmid as number);
 const id = randomUUID();
 let vmid: number | undefined;
+let forkVmid: number | undefined;
+let snapshot: SnapshotRef | undefined;
 try {
 	const start = Date.now();
 	vmid = (
@@ -82,43 +87,92 @@ try {
 		console.log("installed signed replacement agent");
 	}
 
-	const result = await io.exec(["bash", "-s"], {
-		input: readFileSync(
-			new URL("./spike-desktop-guest.sh", import.meta.url),
-			"utf8",
-		),
-		timeoutMs: 300_000,
-	});
-	for (const line of result.stdout.split("\n")) {
-		if (line.startsWith("SCREENSHOT "))
-			writeFileSync(
-				"/tmp/s10-desktop-spike.png",
-				Buffer.from(line.slice(11), "base64"),
-				{ mode: 0o600 },
-			);
-		else console.log(line);
-	}
-	if (result.exitCode !== 0) {
-		console.error(result.stderr);
-		const diagnostics = await io.exec([
-			"journalctl",
-			"-u",
-			"lightdm",
-			"-u",
-			"sbx-agent",
-			"-u",
-			"sbx-sunshine",
-			"-u",
-			"sbx-moonlight-web",
-			"--no-pager",
-			"-n",
-			"100",
+	const probe = async (guest: ReturnType<typeof pveGuestIo>) => {
+		const result = await guest.exec(["bash", "-s"], {
+			input: readFileSync(
+				new URL("./spike-desktop-guest.sh", import.meta.url),
+				"utf8",
+			),
+			timeoutMs: 300_000,
+		});
+		for (const line of result.stdout.split("\n")) {
+			if (line.startsWith("SCREENSHOT "))
+				writeFileSync(
+					"/tmp/s10-desktop-spike.png",
+					Buffer.from(line.slice(11), "base64"),
+					{ mode: 0o600 },
+				);
+			else console.log(line);
+		}
+		if (result.exitCode !== 0) {
+			console.error(result.stderr);
+			const diagnostics = await guest.exec([
+				"journalctl",
+				"-u",
+				"lightdm",
+				"-u",
+				"sbx-agent",
+				"-u",
+				"sbx-sunshine",
+				"-u",
+				"sbx-moonlight-web",
+				"--no-pager",
+				"-n",
+				"100",
+			]);
+			console.error(diagnostics.stdout);
+			throw new Error(`desktop spike exit ${result.exitCode}`);
+		}
+	};
+	const credentialHash = async (guest: ReturnType<typeof pveGuestIo>) => {
+		const result = await guest.exec([
+			"python3",
+			"-I",
+			"-c",
+			"import hashlib,json; s=json.load(open('/var/lib/sbx-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
 		]);
-		console.error(diagnostics.stdout);
-		throw new Error(`desktop spike exit ${result.exitCode}`);
-	}
+		if (result.exitCode !== 0 || !/^[a-f0-9]{64}\s*$/.test(result.stdout))
+			throw new Error("credential digest unavailable");
+		return result.stdout.trim();
+	};
+	await probe(io);
+	const original = await credentialHash(io);
+	snapshot = await machines.snapshot(vmid);
+	await machines.stop(vmid);
+	const forkId = randomUUID();
+	forkVmid = (
+		await machines.fork(snapshot, {
+			size: { cores: 4, memoryMb: 4096 },
+			smbios: {
+				uuid: forkId,
+				serial: s2SerialPayload(forkId, randomBytes(32)),
+				family: "sbxt1:wss://tunnel.verify.invalid/v1/connect",
+			},
+		})
+	).vmid;
+	await waitForDesktopBudget();
+	await machines.start(forkVmid);
+	await machines.waitReady(forkVmid, { timeoutMs: 300_000 });
+	const forkIo = pveGuestIo(ctx.api, ctx.cfg.node, forkVmid);
+	await probe(forkIo);
+	if (original === (await credentialHash(forkIo)))
+		throw new Error("fork reused streamer credentials");
+	console.log("fresh_fork_streamer_credentials PASS");
+	await machines.delete(forkVmid);
+	forkVmid = undefined;
+	await machines.deleteSnapshot(snapshot);
+	snapshot = undefined;
+	await waitForDesktopBudget();
+	await machines.start(vmid);
+	await machines.waitReady(vmid, { timeoutMs: 300_000 });
+	await probe(io);
+	if (original !== (await credentialHash(io)))
+		throw new Error("resume unexpectedly changed identity credentials");
+	console.log("stop_resume PASS");
 } finally {
 	try {
+		if (forkVmid !== undefined) await machines.delete(forkVmid);
+		if (snapshot !== undefined) await machines.deleteSnapshot(snapshot);
 		if (vmid !== undefined) {
 			await machines.delete(vmid);
 			console.log(`cleaned VM ${vmid}`);
