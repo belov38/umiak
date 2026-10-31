@@ -47,7 +47,7 @@ func NewX11Session() (*X11Session, error) {
 	if e = xtest.Init(c); e != nil {
 		return fail(e)
 	}
-	if e = xfixes.Init(c); e != nil {
+	if e = initXFixes(c); e != nil {
 		return fail(e)
 	}
 	s := &X11Session{c: c, setup: xproto.Setup(c), notify: make(chan xgb.Event, 64), done: make(chan struct{})}
@@ -558,4 +558,18 @@ received:
 			}
 		}
 	}
+}
+
+func initXFixes(c *xgb.Conn) error {
+	if err := xfixes.Init(c); err != nil {
+		return err
+	}
+	version, err := xfixes.QueryVersion(c, 1, 0).Reply()
+	if err != nil {
+		return err
+	}
+	if version == nil || version.MajorVersion < 1 {
+		return errors.New("XFixes cursor capture requires version 1")
+	}
+	return nil
 }
