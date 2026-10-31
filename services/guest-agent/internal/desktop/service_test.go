@@ -6,6 +6,7 @@ import (
 	"image"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -95,7 +96,7 @@ func TestIdentityCredentialsAndEpoch(t *testing.T) {
 		t.Fatal("empty credentials")
 	}
 	info, e := os.Stat(filepath.Join(dir, "identity.json"))
-	if e != nil || info.Mode().Perm() != 0600 {
+	if e != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0600) {
 		t.Fatalf("private state mode: %v %v", info, e)
 	}
 	restarted := service(t, "machine-a", dir, &fakeSession{}, f, rec)

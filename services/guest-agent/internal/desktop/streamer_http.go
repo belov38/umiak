@@ -37,6 +37,9 @@ type HTTPStreamer struct {
 	creds         Credentials
 	hostID, appID string
 	active        atomic.Bool
+	flightMu      sync.Mutex
+	flights       map[uint64]context.CancelFunc
+	nextFlight    uint64
 }
 
 // NewHTTPStreamer constructs the pinned HTTP protocol adapter.
@@ -45,7 +48,7 @@ func NewHTTPStreamer(host StreamHost, client *http.Client, sun, moon string) *HT
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	copyClient.Timeout = 35 * time.Second
 	copyClient.Jar, _ = cookiejar.New(nil)
-	return &HTTPStreamer{host: host, client: &copyClient, sun: sun, moon: moon}
+	return &HTTPStreamer{host: host, client: &copyClient, sun: sun, moon: moon, flights: make(map[uint64]context.CancelFunc)}
 }
 func (s *HTTPStreamer) request(ctx context.Context, method, base, path string, body any) (*http.Response, error) {
 	var input io.Reader
@@ -89,10 +92,19 @@ func (s *HTTPStreamer) json(ctx context.Context, method, base, path string, body
 
 // Open starts and pairs the pinned upstream streaming stack.
 func (s *HTTPStreamer) Open(ctx context.Context, c Credentials, ice []*v1.DesktopIceServer) (string, string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	s.flightMu.Lock()
+	s.nextFlight++
+	flight := s.nextFlight
+	s.flights[flight] = cancel
+	s.flightMu.Unlock()
+	defer func() { s.flightMu.Lock(); delete(s.flights, flight); s.flightMu.Unlock() }()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := ctx.Err(); e != nil {
+		return "", "", e
+	}
 	reset, e := s.host.Prepare(ctx, c, ice)
 	if e != nil {
 		return "", "", e
@@ -289,6 +301,7 @@ func (s *HTTPStreamer) pair(ctx context.Context, id uint32) error {
 
 // Stop stops both streaming services.
 func (s *HTTPStreamer) Stop(ctx context.Context) error {
+	s.cancelPairing()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.host.Stop(ctx)
@@ -300,6 +313,7 @@ func (s *HTTPStreamer) Stop(ctx context.Context) error {
 
 // EndStreams implements the desktop adapter boundary.
 func (s *HTTPStreamer) EndStreams(ctx context.Context) error {
+	s.cancelPairing()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.active.Load() {
@@ -315,6 +329,14 @@ func (s *HTTPStreamer) EndStreams(ctx context.Context) error {
 		return errors.New("sunshine did not close streams")
 	}
 	return s.host.RestartWeb(ctx)
+}
+
+func (s *HTTPStreamer) cancelPairing() {
+	s.flightMu.Lock()
+	defer s.flightMu.Unlock()
+	for _, cancel := range s.flights {
+		cancel()
+	}
 }
 
 // Viewers samples observed active media clients.

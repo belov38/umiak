@@ -11,7 +11,6 @@ it("installs Windows desktop with manual services, private config and verified d
 			"mise",
 			[
 				"exec",
-				"powershell@7.6.9",
 				"--",
 				"pwsh",
 				"-NoLogo",

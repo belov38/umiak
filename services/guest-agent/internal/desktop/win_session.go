@@ -146,16 +146,16 @@ func (s *WinSession) Input(ctx context.Context, a *v1.DesktopAction) error {
 	if a.Button == "middle" {
 		down, up = 32, 64
 	}
-	for _, mod := range a.Modifiers {
-		if e := s.press(mod, false); e != nil {
-			return e
-		}
-	}
 	defer func() {
 		for _, mod := range a.Modifiers {
 			_ = s.press(mod, true)
 		}
 	}()
+	for _, mod := range a.Modifiers {
+		if e := s.press(mod, false); e != nil {
+			return e
+		}
+	}
 	switch a.Type {
 	case "move":
 		return nil

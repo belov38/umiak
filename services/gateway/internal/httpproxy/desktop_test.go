@@ -38,6 +38,16 @@ func TestDesktopOpenWhitelistsViewerParameters(t *testing.T) {
 		t.Fatalf("unsafe redirect: %v", location)
 	}
 }
+
+func TestDesktopOpenWithoutControlPlaneFailsClosed(t *testing.T) {
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.sbx.test/", nil)
+	w := httptest.NewRecorder()
+	h := &handler{}
+	x := &exchange{r: r, w: &recorder{rw: w}, label: routes.Label{Raw: "a-desktop"}}
+	if !h.desktopOpen(x) || w.Code != 503 {
+		t.Fatalf("desktop without backend: %d", w.Code)
+	}
+}
 func TestDesktopRewriteStripsSpoofedIdentityAndSecrets(t *testing.T) {
 	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.sbx.test/api?_ticket=secret&x=1", nil)
 	r.Header.Set("X_Sbx_Desktop_User", "attacker")

@@ -10,5 +10,6 @@ Environment=DISPLAY=:0 XAUTHORITY=/home/user/.Xauthority XDG_RUNTIME_DIR=/run/us
 ExecStart=/usr/bin/sunshine /home/user/.local/state/sbx-sunshine/sunshine.conf
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=3
 UMask=0077
 OOMScoreAdjust=-500

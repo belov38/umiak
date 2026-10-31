@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"connectrpc.com/connect"
 
 	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 )
@@ -166,4 +169,39 @@ func TestBootPreparesFreshUpstreamStateWithoutOpeningVideo(t *testing.T) {
 	if !host.ready || host.starts != 0 {
 		t.Fatal("boot did not rotate state independently of video")
 	}
+}
+
+type blockedRoundTripper struct{ started chan struct{} }
+
+func (t blockedRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	close(t.started)
+	<-r.Context().Done()
+	return nil, r.Context().Err()
+}
+func TestRevocationCancelsInFlightPairing(t *testing.T) {
+	started := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := NewHTTPStreamer(&fakeStreamHost{}, &http.Client{Transport: blockedRoundTripper{started}}, "http://sun.test", "http://moon.test")
+	service, e := New(Options{Enabled: true, Identity: "machine", Dir: t.TempDir(), Session: &fakeSession{}, Streamer: stream})
+	if e != nil {
+		t.Fatal(e)
+	}
+	opened := make(chan struct{})
+	go func() { _, _ = service.Open(ctx, connect.NewRequest(&v1.DesktopOpenRequest{})); close(opened) }()
+	<-started
+	stopped := make(chan error, 1)
+	go func() {
+		_, err := service.EndStreams(ctx, connect.NewRequest(&v1.DesktopEndStreamsRequest{}))
+		stopped <- err
+	}()
+	select {
+	case e := <-stopped:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("revocation blocked behind pairing")
+	}
+	<-opened
 }

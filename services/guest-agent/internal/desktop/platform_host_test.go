@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestRuntimeConfigRotationAndICERefresh(t *testing.T) {
 		t.Fatal("unsafe defaults or no process stop on rotate")
 	}
 	info, _ := os.Stat(filepath.Join(h.MoonDir, "ice-servers.json"))
-	if info.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatal("public ICE credentials")
 	}
 }

@@ -30,7 +30,13 @@ func secureSocket(ctx context.Context, path string) error {
 // PlatformEnvironment leaves Windows display selection to the interactive helper.
 func PlatformEnvironment() map[string]string { return nil }
 func windowsACL(ctx context.Context, path, account string) error {
-	_, e := ExecCommand(ctx, "icacls.exe", path, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", account+":(OI)(CI)F", "/T", "/Q")
+	rights := "F"
+	if info, err := os.Stat(path); err != nil {
+		return err
+	} else if info.IsDir() {
+		rights = "(OI)(CI)F"
+	}
+	_, e := ExecCommand(ctx, "icacls.exe", path, "/inheritance:r", "/grant:r", "*S-1-5-18:"+rights, account+":"+rights, "/T", "/Q")
 	return e
 }
 

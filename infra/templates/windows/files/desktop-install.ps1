@@ -67,6 +67,7 @@ function Install-SbxDesktop {
     $settings.webrtc['ice_server_script']=Join-Path $desktop 'ice-servers.cmd'
     [IO.File]::WriteAllText($config,($settings | ConvertTo-Json -Depth 30))
     Copy-Item -LiteralPath (Join-Path $FilesRoot 'register-session.ps1') -Destination $desktop -Force
+    Copy-Item -LiteralPath (Join-Path $FilesRoot 'run-cua.ps1') -Destination $desktop -Force
     $ice=Join-Path (Join-Path $AgentRoot 'state') 'desktop-moonlight/ice-servers.json'
     [IO.File]::WriteAllText((Join-Path $desktop 'ice-servers.cmd'),"@echo off`r`ntype `"$ice`"`r`n")
     $agent=Join-Path $ProgramRoot 'sbx-agent/current/sbx-agent.exe'

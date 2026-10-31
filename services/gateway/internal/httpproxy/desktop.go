@@ -12,6 +12,10 @@ func (h *handler) desktopOpen(x *exchange) bool {
 	if x.r.Method != http.MethodGet || x.r.URL.Path != "/" {
 		return false
 	}
+	if h.cfg.DesktopAPI == nil {
+		x.fail(sbxerr.Error{Status: http.StatusServiceUnavailable, Code: "route_lookup_unavailable", Retryable: true, RetryAfter: 5})
+		return true
+	}
 	opened, err := h.cfg.DesktopAPI.OpenDesktop(x.r.Context(), x.label.Raw)
 	if err != nil {
 		x.fail(sbxerr.Error{Status: http.StatusServiceUnavailable, Code: "desktop_starting", Retryable: true, RetryAfter: 5, Refresh: true})

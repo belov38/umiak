@@ -10,6 +10,7 @@ WorkingDirectory=/opt/sbx-desktop/moonlight-web/current
 ExecStart=/opt/sbx-desktop/moonlight-web/current/web-server --config-path /var/lib/sbx-stream/config.json --disable-default-webrtc-ice-servers
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=3
 UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict

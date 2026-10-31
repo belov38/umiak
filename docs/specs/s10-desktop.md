@@ -934,7 +934,7 @@ cua-driver 0.38.0 — последний versioned release в просмотре
 
 ### S10 code pass 2026-10-31 (before pve spike)
 
-Agent/worker/gateway/API/TS+Python SDK/CLI/MCP contract implemented and fake-tested. Production `Session` and `Streamer` adapters remain behind interfaces until Linux/Windows helper and upstream pairing spikes; default behavior is unavailable, never a fake ready screen. This is the master's explicit temporary implementation allowance, not an acceptance waiver. Remaining: session startup after secrets, helper OS bindings, private streamer databases/process lifecycle, observed viewer count and real media acceptance.
+Agent/worker/gateway/API/TS+Python SDK/CLI/MCP реализованы и проверены на fakes. Linux и Windows factories теперь подключают реальные Session/Streamer adapters; PendingStreamer остаётся только для unsupported OS и явно не подключённых тестовых adapters. Реализованы secrets gate, OS helper bindings, private upstream state, pairing, process lifecycle и observed viewers. Live acceptance на pve ещё не выполнялся. Windows требует rebase на S9 (без merge в этом проходе), затем проверки на настоящей Win11.
 
 The linux-desktop recipe now inherits Linux pins, adds pinned cosign3.1.4 for cua signature verification, and installs upstream-generated moonlight config. The release archive contains `package/web-server`; extraction strips `package/`. Sunshine/moonlight services are manual; config templates contain no credentials. Audio starts disabled pending the best-effort spike (§8.5). `linux-desktop` verification combines Linux baseline and desktop image checks; full screen/input/stream acceptance runs after real claim through `infra/dev-cp/e2e-desktop.sh`. No template build/version or latency result has been claimed yet.
 
@@ -970,3 +970,11 @@ an SCM wrapper under NT SERVICE\\sbx-moonlight-web. Installer overlay adds65-str
 Windows artifact pins are in windows/files/desktop-pins.json until the typed S9/S10
 manifest integration. No Windows VM or slot598 is touched by this code-only pass.
 Cua v0.38.0 defaults to stdio MCP; service/task explicitly launches serve.
+
+Linux Sunshine запускается system unit `sbx-sunshine.service` с `User=user` и явным
+session environment; upstream user unit выключен. Это упрощает один controller
+для root agent без DBus вызовов в user manager. Оба Linux streamer unit имеют
+TimeoutStopSec3. Revoke отменяет ещё и незавершённые Open/pairing requests,
+чтобы disconnect не ждал30s HTTP handshake. Windows Cua task запускает serve
+через hidden wrapper; PowerShell7.6.9 закреплён в mise, как в S9. Windows POSIX
+file modes синтетические: private access обеспечивается DACL и проверяется live.

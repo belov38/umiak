@@ -72,13 +72,14 @@ type identityState struct {
 // Service implements Desktop; mutations and input have independent serialization.
 type Service struct {
 	agentv1connect.UnimplementedDesktopHandler
-	opts    Options
-	mu      sync.Mutex
-	state   identityState
-	ice     []*v1.DesktopIceServer
-	running bool
-	streams atomic.Uint32
-	input   chan struct{}
+	opts             Options
+	mu               sync.Mutex
+	state            identityState
+	ice              []*v1.DesktopIceServer
+	running          bool
+	streamGeneration uint64
+	streams          atomic.Uint32
+	input            chan struct{}
 }
 
 // New opens private state, rotating all credentials if the identity changed.
@@ -236,12 +237,18 @@ func (s *Service) Open(ctx context.Context, _ *connect.Request[v1.DesktopOpenReq
 		return nil, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	credentials, ice, generation := s.state.Credentials, s.ice, s.streamGeneration
+	s.mu.Unlock()
 	if s.opts.Streamer == nil {
 		return nil, failure(connect.CodeUnavailable, "streamer_failed")
 	}
-	host, app, err := s.opts.Streamer.Open(ctx, s.state.Credentials, s.ice)
+	host, app, err := s.opts.Streamer.Open(ctx, credentials, ice)
 	if err != nil {
+		return nil, failure(connect.CodeUnavailable, "streamer_failed")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if generation != s.streamGeneration {
 		return nil, failure(connect.CodeUnavailable, "streamer_failed")
 	}
 	s.running = true
@@ -264,13 +271,14 @@ func (s *Service) StopStreamer(ctx context.Context, _ *connect.Request[v1.Deskto
 		return nil, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.streamGeneration++
+	s.running = false
+	s.mu.Unlock()
 	if s.opts.Streamer != nil {
 		if err := s.opts.Streamer.Stop(ctx); err != nil {
 			return nil, err
 		}
 	}
-	s.running = false
 	s.StreamingChanged(0)
 	return connect.NewResponse(&v1.DesktopStopStreamerResponse{}), nil
 }
@@ -281,7 +289,8 @@ func (s *Service) EndStreams(ctx context.Context, _ *connect.Request[v1.DesktopE
 		return nil, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.streamGeneration++
+	s.mu.Unlock()
 	if s.opts.Streamer != nil {
 		if err := s.opts.Streamer.EndStreams(ctx); err != nil {
 			return nil, err

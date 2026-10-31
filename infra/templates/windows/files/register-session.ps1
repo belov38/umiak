@@ -11,7 +11,8 @@ $trigger=New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\user"
 $settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName session -TaskPath '\sbx\' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName session -TaskPath '\sbx\'
-$cua=Join-Path $env:ProgramFiles 'sbx-desktop\cua-driver\current\cua-driver.exe'
-$cuaAction=New-ScheduledTaskAction -Execute $cua -Argument serve
+$pwsh=Join-Path $PSHOME 'pwsh.exe'
+$cuaScript=Join-Path $PSScriptRoot 'run-cua.ps1'
+$cuaAction=New-ScheduledTaskAction -Execute $pwsh -Argument ("-NoLogo -NoProfile -WindowStyle Hidden -File `"$cuaScript`"")
 Register-ScheduledTask -TaskName cua-driver -TaskPath '\sbx\' -Action $cuaAction -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName cua-driver -TaskPath '\sbx\'
