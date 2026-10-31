@@ -565,6 +565,16 @@ describe("windows steps: clone first boot", () => {
 		);
 	});
 
+	it("00-base blocks all inbound including exceptions (shields up) by policy and in the local store", () => {
+		const s = code(read("steps/00-base.ps1"));
+		expect(s).toMatch(
+			/foreach \(\$p in @\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)\) \{[^}]*Set-RegValue "\$policies\\WindowsFirewall\\\$p" DoNotAllowExceptions 1/,
+		);
+		expect(s).toMatch(
+			/Set-NetFirewallProfile -All [^\n]*-AllowInboundRules False/,
+		);
+	});
+
 	it("firstboot.ps1 disables the services of lib.ps1, CDPSvc and dmwappushservice", () => {
 		const lib = read("lib.ps1");
 		const want = new Set([
@@ -601,6 +611,11 @@ describe("windows steps: clone first boot", () => {
 			/Get-NetFirewallRule -PolicyStore PersistentStore -Direction Inbound -Action Allow -Enabled True[\s\S]*Disable-NetFirewallRule/,
 		);
 		expect(s).toMatch(/firewall: disabled \$\(\$rules\.Count\)/);
+		// Shields up: the AppX capability rules of the first logon never apply.
+		expect(s).toMatch(
+			/@\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)[\s\S]*-Name DoNotAllowExceptions -Value 1 -Type DWord/,
+		);
+		expect(s).toMatch(/Set-NetFirewallProfile -All -AllowInboundRules False/);
 		// Never fails Setup.
 		expect(s).not.toMatch(/\bexit [1-9]/);
 		expect(s).not.toMatch(/\bthrow\b/);

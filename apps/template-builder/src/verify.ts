@@ -117,7 +117,9 @@ export interface VerifyDeps {
 
 export interface WindowsGuestOps {
 	fsfreezeFreeze(vmid: number): Promise<void>;
-	fsfreezeThaw(vmid: number): Promise<void>;
+	/** autoThawed: the guest had already released the freeze (VSS hold timeout). */
+	// biome-ignore lint/suspicious/noConfusingVoidType: fakes are `async () => {}`.
+	fsfreezeThaw(vmid: number): Promise<void | { autoThawed?: boolean }>;
 	fsfreezeStatus(vmid: number): Promise<"thawed" | "frozen">;
 	/** Qga.fileWriteWindows: the path must not contain spaces or shell metacharacters. */
 	writeFile(vmid: number, path: string, data: Buffer): Promise<void>;

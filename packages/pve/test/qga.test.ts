@@ -237,6 +237,45 @@ describe("Qga.fsfreezeStatus", () => {
 	});
 });
 
+describe("Qga.fsfreezeThaw", () => {
+	it("a clean thaw is not auto-thawed and does not read the status", async () => {
+		const api = new ScriptedPve({ "fsfreeze-thaw": [{ result: 3 }] });
+		await expect(new Qga(api, "pve").fsfreezeThaw(500)).resolves.toEqual({
+			autoThawed: false,
+		});
+		expect(api.calls).toEqual(["POST fsfreeze-thaw"]);
+	});
+
+	it("a failed thaw of a guest that thawed itself (VSS hold timeout) is auto-thawed", async () => {
+		const api = new ScriptedPve({
+			"fsfreeze-thaw": [new PveApiError(500, "guest-fsfreeze-thaw failed")],
+			"fsfreeze-status": [{ result: "thawed" }],
+		});
+		await expect(new Qga(api, "pve").fsfreezeThaw(500)).resolves.toEqual({
+			autoThawed: true,
+		});
+		expect(api.calls).toEqual(["POST fsfreeze-thaw", "POST fsfreeze-status"]);
+	});
+
+	it("rethrows the thaw error when the guest is still frozen or the status fails", async () => {
+		const thawErr = new PveApiError(500, "guest-fsfreeze-thaw failed");
+		const frozen = new ScriptedPve({
+			"fsfreeze-thaw": [thawErr],
+			"fsfreeze-status": [{ result: "frozen" }],
+		});
+		await expect(new Qga(frozen, "pve").fsfreezeThaw(500)).rejects.toBe(
+			thawErr,
+		);
+		const noStatus = new ScriptedPve({
+			"fsfreeze-thaw": [thawErr],
+			"fsfreeze-status": [new PveApiError(500, "agent timeout")],
+		});
+		await expect(new Qga(noStatus, "pve").fsfreezeThaw(500)).rejects.toBe(
+			thawErr,
+		);
+	});
+});
+
 describe("Qga.shutdown", () => {
 	it("posts agent/shutdown", async () => {
 		const api = new ScriptedPve({ shutdown: [null] });

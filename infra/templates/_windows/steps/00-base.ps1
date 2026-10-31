@@ -206,16 +206,21 @@ Set-RegValue "$w32\Config" MaxPosPhaseCorrection 0xFFFFFFFF
 Set-RegValue "$w32\Config" MaxNegPhaseCorrection 0xFFFFFFFF
 
 # --- Firewall: on everywhere, inbound blocked, no allow-inbound rule, no listen prompts ---
-Set-NetFirewallProfile -All -Enabled True -DefaultInboundAction Block -DefaultOutboundAction Allow -NotifyOnListen False
+# AllowInboundRules False: block all inbound, allow rules included ("shields up"). Loopback is
+# not filtered (sshd on 127.0.0.1, the agent's outbound CONNECT).
+Set-NetFirewallProfile -All -Enabled True -DefaultInboundAction Block -DefaultOutboundAction Allow -NotifyOnListen False -AllowInboundRules False
 $allow = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
 if ($allow.Count -gt 0) { $allow | Disable-NetFirewallRule }
 Write-BuildLog "firewall: $($allow.Count) inbound allow rules disabled"
-# Local rules are ignored: Windows Setup and Appx registration on a clone add
-# and enable inbound allow rules again (firstboot.ps1 sets the same on the clone).
+# Local rules are ignored: Windows Setup and Appx registration on a clone add and enable
+# inbound allow rules again. The AppX capability rules of the first logon live outside the
+# local store, so the policy also blocks every exception (GPO "Do not allow exceptions",
+# ActiveStore AllowInboundRules False). firstboot.ps1 sets the same on the clone.
 foreach ($p in @('DomainProfile', 'PrivateProfile', 'PublicProfile')) {
     Set-RegValue "$policies\WindowsFirewall\$p" AllowLocalPolicyMerge 0
+    Set-RegValue "$policies\WindowsFirewall\$p" DoNotAllowExceptions 1
 }
-Write-BuildLog 'firewall: local rules ignored (policy AllowLocalPolicyMerge=0)'
+Write-BuildLog 'firewall: local rules ignored, no exceptions (policy AllowLocalPolicyMerge=0, DoNotAllowExceptions=1)'
 
 # --- BitLocker: never encrypt (also set in specialize of the install) ---
 Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker' PreventDeviceEncryption 1

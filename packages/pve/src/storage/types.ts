@@ -54,6 +54,11 @@ export interface SnapshotRef extends NodeRef {
 	createdAt: number;
 	/** Time from the return of hook.freeze() to the call of hook.thaw(), for running machines. */
 	freezeMs?: number;
+	/**
+	 * The guest released the freeze by itself before hook.thaw() (Windows VSS holds writes for
+	 * about 10 s): the disks are crash-consistent only.
+	 */
+	autoThawed?: true;
 }
 
 export interface StorageUsage {
@@ -63,9 +68,15 @@ export interface StorageUsage {
 	ourLvUsedBytes: number;
 }
 
+export interface ThawResult {
+	/** The guest had already thawed itself; the thaw call found nothing to release. */
+	autoThawed?: boolean;
+}
+
 export interface QuiesceHook {
 	freeze(): Promise<void>;
-	thaw(): Promise<void>;
+	// biome-ignore lint/suspicious/noConfusingVoidType: most hooks are `async () => {}`.
+	thaw(): Promise<void | ThawResult>;
 }
 
 export interface StorageDriver {

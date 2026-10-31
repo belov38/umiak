@@ -104,15 +104,22 @@ Invoke-Part 'netbios' {
     }
 }
 
-# Setup and Appx registration enable inbound allow rules again; the policy
-# makes Windows ignore every local rule.
+# Setup and Appx registration enable inbound allow rules again; the policy makes Windows
+# ignore every local rule and allow no exception at all ("shields up"): the AppX capability
+# rules of the first logon of user are not in the local store.
 Invoke-Part 'firewall' {
     foreach ($p in @('DomainProfile', 'PrivateProfile', 'PublicProfile')) {
         $k = "HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\$p"
         if (-not (Test-Path -LiteralPath $k)) { New-Item -Path $k -Force | Out-Null }
         Set-ItemProperty -LiteralPath $k -Name AllowLocalPolicyMerge -Value 0 -Type DWord
+        Set-ItemProperty -LiteralPath $k -Name DoNotAllowExceptions -Value 1 -Type DWord
     }
-    Write-Log 'firewall: local rules ignored (policy AllowLocalPolicyMerge=0)'
+    Write-Log 'firewall: local rules ignored, no exceptions (policy AllowLocalPolicyMerge=0, DoNotAllowExceptions=1)'
+}
+
+Invoke-Part 'firewall shields up' {
+    Set-NetFirewallProfile -All -AllowInboundRules False
+    Write-Log 'firewall: AllowInboundRules False in the local store'
 }
 
 # OOBE registers AppX capability inbound allow rules (*-ServerCapability, ...) in the local

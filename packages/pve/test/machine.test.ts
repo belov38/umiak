@@ -1220,6 +1220,41 @@ describe("Windows template (three disks)", () => {
 		]);
 	});
 
+	it("Windows VSS thawed by itself during the snapshot: the ref says autoThawed, no error", async () => {
+		const { node, api, machines, store } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		await machines.start(m.vmid);
+		const thaw = `POST /nodes/pve/qemu/${m.vmid}/agent/fsfreeze-thaw`;
+		node.handlers["lv.snapshot"] = (a) => {
+			const items = a.items as { name: string; tags: string[] }[];
+			for (const it of items) node.lvs.push({ name: it.name, tags: it.tags });
+			// The VSS hold ran out on a slow host: the guest thawed, the thaw call fails.
+			api.guestFrozen = false;
+			api.fail[thaw] = new PveApiError(500, "guest-fsfreeze-thaw failed");
+			return { created: items.map((i) => i.name) };
+		};
+		const snap = await machines.snapshot(m.vmid);
+		expect(snap.autoThawed).toBe(true);
+		expect(store.getSnapshot(snap.id)?.autoThawed).toBe(true);
+		expect(
+			node.lvs.filter((l) => l.tags.includes(`sbx-snap-${snap.id}`)),
+		).toHaveLength(3);
+	});
+
+	it("a thaw that fails on a still-frozen Windows guest leaves no snapshot LV behind", async () => {
+		const { node, api, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		await machines.start(m.vmid);
+		api.fail[`POST /nodes/pve/qemu/${m.vmid}/agent/fsfreeze-thaw`] =
+			new PveApiError(500, "guest-fsfreeze-thaw failed");
+		await expect(machines.snapshot(m.vmid, { id: "s1" })).rejects.toThrow(
+			/thaw failed for VM 500/,
+		);
+		expect(node.lvs.filter((l) => l.name.startsWith("sbx-snap-"))).toEqual([]);
+	});
+
 	it("a create whose tpmstate0 LV lv.adopt does not report rolls back", async () => {
 		const { api, node, machines, store } = setup();
 		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };

@@ -4,7 +4,8 @@ export type BuildStatus = "building" | "ready" | "failed" | "retired";
 
 export interface CheckResult {
 	id: string;
-	status: "PASS" | "FAIL" | "INFO";
+	/** WARN: degraded but not a failure (only host-side checks use it). */
+	status: "PASS" | "FAIL" | "INFO" | "WARN";
 	evidence: string;
 }
 

@@ -678,6 +678,14 @@ export class PveNodeInfra implements NodeInfra {
 				id: opts.lvId,
 				...(opts.hook ? { hook: opts.hook } : {}),
 			});
+			if (ref.autoThawed) {
+				// S1's QGA hook tolerates a guest that thawed itself; a stored snapshot
+				// must be quiesced, so it is discarded like qgaFreezeHook's outcome.
+				await this.#base.deleteSnapshot(ref);
+				throw new QuiesceFailed(
+					`VM ${vmid}: the guest thawed itself before the snapshot was done`,
+				);
+			}
 			return {
 				disks: toInfraDisks(ref.disks),
 				hw: { ...ref.hardware },
@@ -770,7 +778,13 @@ export class PveNodeInfra implements NodeInfra {
 					);
 					throw outcome;
 				}
-				await qga.fsfreezeThaw(vmid);
+				// The thaw call fails when VSS lets go between the status and the thaw.
+				if ((await qga.fsfreezeThaw(vmid)).autoThawed) {
+					outcome = new QuiesceFailed(
+						`VM ${vmid}: the guest thawed itself before the snapshot was done`,
+					);
+					throw outcome;
+				}
 				outcome = null;
 			},
 		};

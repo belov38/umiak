@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
 	type ExecResult,
+	FreezeBudgetExceededError,
 	familyForTunnelUrl,
 	type Smbios,
 	type SnapshotRef,
@@ -161,6 +162,45 @@ const info = (id: string, evidence: string): CheckResult => ({
 	status: "INFO",
 	evidence,
 });
+
+/**
+ * S1 snapshot of the running clone for the fork. VSS holds writes for about 10 s; on a slow
+ * host pause + lvcreate + resume can take longer (FreezeBudgetExceededError) or VSS thaws by
+ * itself first (autoThawed). Then one retry, then a crash-consistent snapshot with a WARN: the
+ * fork checks (marker, DPAPI, name, password) still decide. `track` sees every snapshot that
+ * exists, so the caller's cleanup removes it if this throws.
+ */
+export async function forkSnapshot(
+	machines: Pick<VerifyDeps["machines"], "snapshot" | "deleteSnapshot">,
+	vmid: number,
+	track: (s: SnapshotRef | undefined) => void = () => {},
+): Promise<{ snap: SnapshotRef; warn?: CheckResult }> {
+	const reasons: string[] = [];
+	for (let i = 0; i < 2; i++) {
+		try {
+			const s = await machines.snapshot(vmid);
+			if (!s.autoThawed) return { snap: s };
+			track(s);
+			reasons.push(
+				`VSS auto-thawed before the thaw, frozen ${s.freezeMs ?? "?"} ms`,
+			);
+			await machines.deleteSnapshot(s);
+			track(undefined);
+		} catch (err) {
+			if (!(err instanceof FreezeBudgetExceededError)) throw err;
+			reasons.push(`freeze budget exceeded, frozen ${err.freezeMs ?? "?"} ms`);
+		}
+	}
+	const snap = await machines.snapshot(vmid, { crashConsistent: true });
+	return {
+		snap,
+		warn: {
+			id: "vss_snapshot",
+			status: "WARN",
+			evidence: `quiesced snapshot failed twice (${reasons.join("; ")}); crash-consistent snapshot used instead (slow host: VSS holds writes about 10 s)`,
+		},
+	};
+}
 
 const uuidHex = (s: string) => s.replaceAll("-", "").toLowerCase();
 const sameId = (x: string | undefined, y: string) =>
@@ -1053,9 +1093,11 @@ export async function verifyWindows(
 		} finally {
 			// A freeze that threw may have frozen the volumes anyway: always thaw. "Not frozen"
 			// after a failed freeze is expected and not reported.
-			await win.fsfreezeThaw(A.vmid).catch((err: unknown) => {
+			const t = await win.fsfreezeThaw(A.vmid).catch((err: unknown) => {
 				if (frozen) freezeError ||= `thaw: ${errorText(err)}`;
 			});
+			if (frozen && t?.autoThawed)
+				freezeError ||= "VSS had already thawed by itself before the thaw";
 		}
 		const freezeMs = now() - freezeStart;
 		const after = await win.fsfreezeStatus(A.vmid).catch(errorText);
@@ -1098,7 +1140,11 @@ export async function verifyWindows(
 		const sideA = side(A, await facts(A, [["Salt", salt]]), await agentInfo(A));
 
 		step(`snapshot of VM ${A.vmid} (QGA VSS hook)`);
-		snap = await machines.snapshot(A.vmid);
+		const taken = await forkSnapshot(machines, A.vmid, (s) => {
+			snap = s;
+		});
+		snap = taken.snap;
+		if (taken.warn) add(taken.warn);
 		boot.freezeMs = snap.freezeMs ?? freezeMs;
 		const since = new Date(snap.createdAt).toISOString();
 		step(`shutting down VM ${A.vmid}`);

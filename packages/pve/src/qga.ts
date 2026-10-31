@@ -104,8 +104,19 @@ export class Qga {
 		await this.#api.post(this.#path(vmid, "fsfreeze-freeze"));
 	}
 
-	async fsfreezeThaw(vmid: number): Promise<void> {
-		await this.#api.post(this.#path(vmid, "fsfreeze-thaw"));
+	/**
+	 * Windows VSS releases the writers by itself after about 10 s; guest-fsfreeze-thaw then
+	 * fails. A failed thaw of a guest that reports "thawed" is autoThawed, not an error.
+	 */
+	async fsfreezeThaw(vmid: number): Promise<{ autoThawed: boolean }> {
+		try {
+			await this.#api.post(this.#path(vmid, "fsfreeze-thaw"));
+			return { autoThawed: false };
+		} catch (err) {
+			const state = await this.fsfreezeStatus(vmid).catch(() => undefined);
+			if (state === "thawed") return { autoThawed: true };
+			throw err;
+		}
 	}
 
 	/** PVE implements fsfreeze-status as POST only; GET answers "not implemented". */

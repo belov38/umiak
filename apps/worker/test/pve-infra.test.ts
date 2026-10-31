@@ -331,6 +331,57 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(e.api.paths().filter((p) => p === thaw)).toHaveLength(1);
 	});
 
+	it("qgaFreezeHook: a thaw call that fails because VSS thawed meanwhile is a QuiesceFailed", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const hook = e.infra.qgaFreezeHook(vmid);
+		await hook.freeze();
+		// fsfreeze-status still says frozen; VSS gives up between it and the thaw call.
+		const api = e.api;
+		Object.defineProperty(
+			api.fail,
+			`POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-thaw`,
+			{
+				get() {
+					api.guestFrozen = false;
+					return new PveApiError(500, "guest-fsfreeze-thaw failed");
+				},
+			},
+		);
+		await expect(hook.thaw()).rejects.toBeInstanceOf(QuiesceFailed);
+	});
+
+	it("a QGA snapshot whose guest thawed by itself is a QuiesceFailed and leaves no LV", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const lvId = randomUUID().replaceAll("-", "");
+		e.node.handlers["lv.snapshot"] = (a) => {
+			const items = a.items as { name: string; tags: string[] }[];
+			for (const it of items) e.node.lvs.push({ name: it.name, tags: it.tags });
+			e.api.guestFrozen = false;
+			e.api.fail[`POST /nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-thaw`] =
+				new PveApiError(500, "guest-fsfreeze-thaw failed");
+			return { created: items.map((i) => i.name) };
+		};
+		const err = await e.infra.snapshot(vmid, { lvId }).catch((x: unknown) => x);
+		expect((err as { code?: string }).code).toBe("quiesce_failed");
+		expect(
+			(await e.infra.listLvs()).filter((l) => l.name.includes(lvId)),
+		).toEqual([]);
+	});
+
 	it("QGA down during a running snapshot is a permanent quiesce_failed", async () => {
 		const m = randomUUID();
 		const { vmid } = await e.infra.create({

@@ -252,7 +252,8 @@ describe("snapshot", () => {
 		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toThrow(
 			/lvcreate failed/,
 		);
-		expect(log.slice(-2)).toEqual(["resume", "thaw"]);
+		// lv.snapshot may have created LVs before failing: they are looked up by tag.
+		expect(log.slice(-3)).toEqual(["resume", "thaw", "node:lv.list"]);
 	});
 
 	it("removes the created LVs when the freeze budget is exceeded", async () => {
@@ -355,6 +356,75 @@ describe("snapshot", () => {
 			/resume failed/,
 		);
 		expect(log).toContain("thaw");
+	});
+
+	it("a guest that thawed itself before the thaw: the ref says autoThawed", async () => {
+		const { driver, hook } = setup();
+		hook.thaw = async () => ({ autoThawed: true });
+		const s = await driver.snapshot(machine(winTpl), hook);
+		expect(s.autoThawed).toBe(true);
+
+		const clean = setup();
+		const c = await clean.driver.snapshot(machine(winTpl), clean.hook);
+		expect(c.autoThawed).toBeUndefined();
+	});
+
+	it("removes the created LVs when thaw fails for good (no snapshot LV is left behind)", async () => {
+		const { node, driver, hook } = setup();
+		hook.thawFailures = 3;
+		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toBeInstanceOf(
+			ThawFailedError,
+		);
+		expect(node.lvs.filter((l) => l.tags.includes("sbx-snap-snap1"))).toEqual(
+			[],
+		);
+		expect(node.ops()).toContain("lv.remove");
+	});
+
+	it("removes the created LVs when resume fails", async () => {
+		const log: string[] = [];
+		const node = new FakeNode(log);
+		const driver = new LvmThinDriver({
+			node,
+			vcpu: {
+				suspend: async () => {},
+				resume: async () => {
+					throw new Error("resume failed");
+				},
+			},
+			storage: "local-lvm",
+			thawRetryDelayMs: 0,
+			newSnapshotId: () => "snap1",
+		});
+		const hook = { freeze: async () => {}, thaw: async () => {} };
+		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toThrow(
+			/resume failed/,
+		);
+		expect(node.lvs).toEqual([]);
+	});
+
+	it("removes LVs by the snapshot tag when lv.snapshot errors after creating them", async () => {
+		const { node, driver, hook } = setup();
+		node.handlers["lv.snapshot"] = (a) => {
+			const items = a.items as { name: string; tags: string[] }[];
+			for (const it of items) node.lvs.push({ name: it.name, tags: it.tags });
+			throw new Error("ssh: connection reset");
+		};
+		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toThrow(
+			/connection reset/,
+		);
+		expect(node.lvs).toEqual([]);
+	});
+
+	it("keeps the original error when the cleanup fails too", async () => {
+		const { node, driver, hook } = setup();
+		hook.thawFailures = 3;
+		node.handlers["lv.remove"] = () => {
+			throw new Error("lvremove failed");
+		};
+		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toBeInstanceOf(
+			ThawFailedError,
+		);
 	});
 
 	it("skips freeze and pause for a stopped machine", async () => {

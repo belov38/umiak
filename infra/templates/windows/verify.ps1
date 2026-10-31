@@ -192,6 +192,36 @@ function Get-SaltedHash([string]$SaltHex, [byte[]]$Secret) {
     }
 }
 
+# Lock state of a session: 'locked', 'unlocked' or 'unknown' (WTSSessionInfoEx SessionFlags).
+function Get-SessionLockState([int]$SessionId) {
+    if (-not ('SbxWts' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class SbxWts {
+    [DllImport("wtsapi32.dll", SetLastError = true)]
+    static extern bool WTSQuerySessionInformation(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytes);
+    [DllImport("wtsapi32.dll")]
+    static extern void WTSFreeMemory(IntPtr memory);
+    // WTSINFOEXW: Level, then WTSINFOEX_LEVEL1_W { SessionId, SessionState, SessionFlags, ... }.
+    // SessionFlags: 0 WTS_SESSIONSTATE_LOCK, 1 WTS_SESSIONSTATE_UNLOCK, -1 unknown.
+    public static int Flags(int sessionId) {
+        IntPtr buf; int bytes;
+        if (!WTSQuerySessionInformation(IntPtr.Zero, sessionId, 25, out buf, out bytes)) return -2;
+        try { return Marshal.ReadInt32(buf, 0) == 1 ? Marshal.ReadInt32(buf, 12) : -2; }
+        finally { WTSFreeMemory(buf); }
+    }
+}
+'@
+    }
+    $flags = try { [SbxWts]::Flags($SessionId) } catch { -2 }
+    switch ($flags) {
+        0 { return 'locked' }
+        1 { return 'unlocked' }
+        default { return 'unknown' }
+    }
+}
+
 # Salted sha256 and length of an LSA secret, $null when it does not exist.
 function Get-LsaSecretHash([string]$Name, [string]$SaltHex) {
     if (-not ('SbxLsa' -as [type])) { Add-Type -TypeDefinition $LsaSource }
@@ -336,19 +366,25 @@ function Test-Listeners {
     Report listen_udp ($udp.Count -eq 0) "NetBIOS, SSDP, WS-Discovery, mDNS, LLMNR endpoints: $(if ($udp.Count) { $udp -join ' ' } else { 'none' })"
 }
 
-# [4] Firewall on in every profile, inbound blocked, no allow rule, no listen notifications.
+# [4] Firewall on in every profile, inbound blocked, no effective allow rule, no listen notifications.
 function Test-Firewall {
     $desc = [Collections.Generic.List[string]]::new()
     $bad = 0
-    foreach ($p in @(Get-NetFirewallProfile -PolicyStore ActiveStore)) {
+    $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore)
+    foreach ($p in $profiles) {
         $desc.Add("$($p.Name): enabled $($p.Enabled), inbound $($p.DefaultInboundAction), notify $($p.NotifyOnListen)")
         if ("$($p.Enabled)" -ne 'True' -or "$($p.DefaultInboundAction)" -ne 'Block' -or "$($p.NotifyOnListen)" -ne 'False') { $bad++ }
     }
     Report firewall_profiles ($desc.Count -eq 3 -and $bad -eq 0) ($desc -join '; ')
-    # 00-base and firstboot.ps1 set AllowLocalPolicyMerge=0: Windows ignores the
-    # local rules Setup and Appx enable again, so the effective rules count.
-    $merge = @(foreach ($p in @('DomainProfile', 'PrivateProfile', 'PublicProfile')) { "$p=$(Get-RegValue "$FirewallPolicy\$p" 'AllowLocalPolicyMerge')" })
+    # 00-base and firstboot.ps1 set AllowLocalPolicyMerge=0 (Windows ignores the local rules Setup
+    # and Appx enable again) and DoNotAllowExceptions=1 ("shields up": inbound allow rules of any
+    # store, also the AppX capability rules of the first logon, are not applied).
+    $names = @('DomainProfile', 'PrivateProfile', 'PublicProfile')
+    $merge = @(foreach ($p in $names) { "$p=$(Get-RegValue "$FirewallPolicy\$p" 'AllowLocalPolicyMerge')" })
+    $except = @(foreach ($p in $names) { "$p=$(Get-RegValue "$FirewallPolicy\$p" 'DoNotAllowExceptions')" })
     $policy = @($merge | Where-Object { $_ -match '=0$' }).Count -eq 3
+    $shieldsUp = $profiles.Count -eq 3 -and @($profiles | Where-Object { "$($_.AllowInboundRules)" -ne 'False' }).Count -eq 0
+    $inbound = ($profiles | ForEach-Object { "$($_.Name)=$($_.AllowInboundRules)" }) -join ', '
     if ($policy) {
         $allow = @(Get-NetFirewallRule -PolicyStore ActiveStore -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
         $what = 'effective (ActiveStore)'
@@ -356,7 +392,11 @@ function Test-Firewall {
         $allow = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
         $what = 'local'
     }
-    Report firewall_rules ($allow.Count -eq 0) "policy AllowLocalPolicyMerge: $($merge -join ', ') (local rules $(if ($policy) { 'ignored' } else { 'merged' })); $(if ($allow.Count) { "$what inbound allow rules: $(($allow | ForEach-Object { $_.Name }) -join ', ')" } else { "no $what enabled inbound allow rule" })"
+    $list = ($allow | ForEach-Object { $_.Name }) -join ', '
+    $rules = if ($allow.Count -eq 0) { "no $what enabled inbound allow rule" }
+    elseif ($shieldsUp) { "$($allow.Count) $what inbound allow rules ineffective: $list" }
+    else { "$what inbound allow rules: $list" }
+    Report firewall_rules ($shieldsUp -or $allow.Count -eq 0) "ActiveStore AllowInboundRules: $inbound ($(if ($shieldsUp) { 'AllowInboundRules False everywhere: allow rules not applied' } else { 'allow rules applied' })); policy DoNotAllowExceptions: $($except -join ', '); AllowLocalPolicyMerge: $($merge -join ', ') (local rules $(if ($policy) { 'ignored' } else { 'merged' })); $rules"
 }
 
 # [5] sshd: effective config, running (the agent started it), host keys of this clone, shell.
@@ -472,18 +512,30 @@ function Test-Users {
     Report uac ($lua -eq 1 -and $consent -eq 0 -and $secure -eq 0) "EnableLUA $lua, ConsentPromptBehaviorAdmin $consent, PromptOnSecureDesktop $secure"
 }
 
-# [7] Autologon: an active console session of user, no logon screen (also run on a fork).
-function Test-Autologon {
-    # The autologon can finish a little after the agent is ready.
-    $deadline = (Get-Date).AddSeconds(180)
+# [7] Autologon: an active, unlocked console session of user, no logon screen in it (also run on a fork).
+function Test-Autologon([int]$WaitSeconds = 180, [int]$PollSeconds = 5) {
+    # The autologon can finish a while after the agent is ready (LogonUI stays until the
+    # shell is up); the lock screen keeps LogonUI and shows as a locked session.
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
     while ($true) {
         $q = Invoke-Capture query.exe @('user')
         $line = @($q.Lines | Where-Object { $_ -match "^\s*>?$UserName\s" -and $_ -match '\bActive\b' }) | Select-Object -First 1
-        $logonUi = $null -ne (Get-Process -Name LogonUI -ErrorAction SilentlyContinue)
-        if (($line -and -not $logonUi) -or (Get-Date) -gt $deadline) { break }
-        Start-Sleep -Seconds 5
+        $sessionId = if ($line -and $line -match '\s(\d+)\s+Active\b') { [int]$Matches[1] } else { $null }
+        $logonUi = @(Get-Process -Name LogonUI -ErrorAction SilentlyContinue)
+        $mine = @($logonUi | Where-Object { $null -ne $sessionId -and $_.SessionId -eq $sessionId })
+        $lock = if ($null -ne $sessionId) { Get-SessionLockState $sessionId } else { 'unknown' }
+        $ok = $null -ne $sessionId -and $mine.Count -eq 0 -and $lock -ne 'locked'
+        if ($ok -or (Get-Date) -ge $deadline) { break }
+        Start-Sleep -Seconds $PollSeconds
     }
-    Report autologon_session ($null -ne $line -and -not $logonUi) "query user: $(if ($line) { $line.Trim() } else { $q.Lines -join ' | ' }); LogonUI running: $logonUi"
+    $lockApp = @(Get-Process -Name LockApp -ErrorAction SilentlyContinue | Where-Object { $null -ne $sessionId -and $_.SessionId -eq $sessionId })
+    $ev = if ($null -eq $sessionId) {
+        "no active session of ${UserName}: $($q.Lines -join ' | ')"
+    } else {
+        "query user: $($line.Trim()); session $sessionId $lock (WTSSessionInfoEx)"
+    }
+    $ui = if ($logonUi.Count) { ($logonUi | ForEach-Object { "LogonUI in session $($_.SessionId)" }) -join ', ' } else { 'no LogonUI' }
+    Report autologon_session $ok "$ev; $ui; LockApp in the session: $(if ($lockApp.Count) { 'running' } else { 'no' }); waited up to $WaitSeconds s"
 }
 
 # [8] Services, Defender, offline stage, power, memory, VBS, BitLocker, TPM, BCD, WinRE, code page.

@@ -24,9 +24,12 @@ export class StorageFullError extends Error {
 }
 
 export class FreezeBudgetExceededError extends Error {
-	constructor(message: string) {
+	/** Measured time the guest held writes. */
+	readonly freezeMs: number | undefined;
+	constructor(message: string, freezeMs?: number) {
 		super(message);
 		this.name = "FreezeBudgetExceededError";
+		this.freezeMs = freezeMs;
 	}
 }
 
@@ -258,6 +261,7 @@ export class LvmThinDriver implements StorageDriver {
 		let frozen = false;
 		let paused = false;
 		let created: string[] = [];
+		let snapshotCalled = false;
 		let opError: unknown;
 		let start: number | undefined;
 		try {
@@ -269,6 +273,7 @@ export class LvmThinDriver implements StorageDriver {
 				paused = true;
 				await this.#o.vcpu.suspend(m.vmid);
 			}
+			snapshotCalled = true;
 			created = (
 				await this.#o.node.call<{ created: string[] }>("lv.snapshot", { items })
 			).created;
@@ -285,17 +290,33 @@ export class LvmThinDriver implements StorageDriver {
 			}
 		}
 		const freezeMs = start === undefined ? 0 : this.#o.now() - start;
-		if (frozen) await this.#thaw(m.vmid, hook);
-		if (opError) throw opError;
-		if (resumeError) throw resumeError;
-		if (freezeMs > this.#o.freezeBudgetMs) {
-			if (created.length > 0)
-				await this.#o.node.call("lv.remove", { names: created });
-			throw new FreezeBudgetExceededError(
-				`freeze took ${freezeMs} ms (budget ${this.#o.freezeBudgetMs} ms); snapshot discarded`,
-			);
+		let autoThawed = false;
+		try {
+			if (frozen) autoThawed = await this.#thaw(m.vmid, hook);
+			if (opError) throw opError;
+			if (resumeError) throw resumeError;
+			if (freezeMs > this.#o.freezeBudgetMs)
+				throw new FreezeBudgetExceededError(
+					`freeze took ${freezeMs} ms (budget ${this.#o.freezeBudgetMs} ms); snapshot discarded`,
+					freezeMs,
+				);
+		} catch (err) {
+			// No ref reaches the caller, so nothing would ever delete these LVs.
+			if (snapshotCalled) await this.#discard(id, created).catch(() => {});
+			throw err;
 		}
-		return { ...ref, freezeMs };
+		return { ...ref, freezeMs, ...(autoThawed ? { autoThawed: true } : {}) };
+	}
+
+	/** Removes the LVs of a failed snapshot: the created ones and any carrying its tag. */
+	async #discard(id: string, created: string[]): Promise<void> {
+		const { lvs } = await this.#o.node
+			.call<{ lvs: { name: string }[] }>("lv.list", {
+				tags: ["sbx", `sbx-snap-${id}`],
+			})
+			.catch(() => ({ lvs: [] as { name: string }[] }));
+		const names = [...new Set([...created, ...lvs.map((l) => l.name)])];
+		if (names.length > 0) await this.#o.node.call("lv.remove", { names });
 	}
 
 	/** hook.freeze() under freezeTimeoutMs. A freeze that finishes late is thawed again. */
@@ -320,12 +341,13 @@ export class LvmThinDriver implements StorageDriver {
 		);
 	}
 
-	async #thaw(vmid: number, hook: QuiesceHook): Promise<void> {
+	/** hook.thaw() with retries; true when the guest had already thawed itself. */
+	async #thaw(vmid: number, hook: QuiesceHook): Promise<boolean> {
 		let last: unknown;
 		for (let i = 0; i < this.#o.thawRetries; i++) {
 			try {
-				await hook.thaw();
-				return;
+				const r = await hook.thaw();
+				return r?.autoThawed === true;
 			} catch (err) {
 				last = err;
 				await sleep(this.#o.thawRetryDelayMs);

@@ -3,13 +3,14 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type {
-	ExecResult,
-	MachineInfo,
-	MachineSize,
-	ReadyInfo,
-	Smbios,
-	SnapshotRef,
+import {
+	type ExecResult,
+	FreezeBudgetExceededError,
+	type MachineInfo,
+	type MachineSize,
+	type ReadyInfo,
+	type Smbios,
+	type SnapshotRef,
 } from "@sbx/pve";
 import { describe, expect, it } from "vitest";
 import type { Manifest } from "../src/manifest.ts";
@@ -499,6 +500,8 @@ class WinWorld {
 	/** Same for A's first boot: setup's interim name before the agent's rename reboot (R16). */
 	firstStaleHostnames = 0;
 	frozen = false;
+	/** Outcomes of the next quiesced snapshots on a slow host (then a normal one). */
+	snapshotOutcomes: ("budget" | "autoThawed")[] = [];
 	onExec?: (vmid: number, cmd: string[]) => void;
 
 	machines: VerifyDeps["machines"] = {
@@ -565,12 +568,19 @@ class WinWorld {
 			this.t += 500;
 			return r;
 		},
-		snapshot: async (vmid) => {
+		snapshot: async (vmid, o = {}) => {
 			const vm = this.#vm(vmid);
 			if (!vm.running) throw new Error("snapshot of a stopped VM");
+			const crash = o.crashConsistent === true;
+			const outcome = crash ? undefined : this.snapshotOutcomes.shift();
+			this.log.push(`snapshot ${vmid}${crash ? " crash" : ""}`);
+			if (outcome === "budget")
+				throw new FreezeBudgetExceededError(
+					"freeze took 14200 ms (budget 10000 ms); snapshot discarded",
+					14_200,
+				);
 			const id = `snap${vmid}`;
 			this.snaps.set(id, cloneDisk(vm.disk));
-			this.log.push(`snapshot ${vmid}`);
 			const s: SnapshotRef = {
 				kind: "snapshot",
 				id,
@@ -579,7 +589,8 @@ class WinWorld {
 				disks: [],
 				hardware: {},
 				createdAt: this.t,
-				freezeMs: 1500,
+				...(crash ? {} : { freezeMs: outcome ? 12_300 : 1500 }),
+				...(outcome === "autoThawed" ? { autoThawed: true } : {}),
 			};
 			return s;
 		},
@@ -1007,6 +1018,59 @@ describe("verifyWindows", () => {
 		expect(v.license).toMatchObject({ status: "Licensed", channel: "retail" });
 	});
 
+	it("slow host: quiesced snapshot retried once, then crash-consistent with a WARN; fork checks decide", async () => {
+		const { w, deps } = setup();
+		w.snapshotOutcomes = ["budget", "autoThawed"];
+		const v = await verifyWindows(deps, manifest(), {});
+		expect(failed(v.checks)).toEqual([]);
+		expect(v.ok).toBe(true);
+		expect(v.fork).toEqual({ ok: true });
+		const warn = v.checks.find((c) => c.id === "vss_snapshot");
+		expect(warn?.status).toBe("WARN");
+		expect(warn?.evidence).toMatch(/14200 ms/);
+		expect(warn?.evidence).toMatch(/auto-thawed.*12300 ms/);
+		expect(warn?.evidence).toMatch(/crash-consistent/);
+		expect(warn?.evidence).toMatch(/slow host/);
+		for (const id of ["fork_marker", "fork_dpapi", "fork_name"])
+			expect(v.checks.find((c) => c.id === id)?.status).toBe("PASS");
+		const snaps = w.log.filter((l) => l.includes("snapshot"));
+		expect(snaps).toEqual([
+			"snapshot 501",
+			"snapshot 501",
+			"delete-snapshot snap501",
+			"snapshot 501 crash",
+			"delete-snapshot snap501",
+		]);
+		expect(w.snaps.size).toBe(0);
+	});
+
+	it("one slow quiesced snapshot: the retry is quiesced, no WARN", async () => {
+		const { w, deps } = setup();
+		w.snapshotOutcomes = ["autoThawed"];
+		const v = await verifyWindows(deps, manifest(), {});
+		expect(v.ok).toBe(true);
+		expect(v.checks.some((c) => c.id === "vss_snapshot")).toBe(false);
+		expect(w.log.filter((l) => l.startsWith("snapshot"))).toEqual([
+			"snapshot 501",
+			"snapshot 501",
+		]);
+		expect(v.boot.freezeMs).toBe(1500);
+	});
+
+	it("other snapshot errors are not retried", async () => {
+		const { w, deps } = setup();
+		const orig = w.machines.snapshot;
+		w.machines.snapshot = async (vmid, o) => {
+			if (!o?.crashConsistent) throw new Error("lv.snapshot: pool full");
+			return orig(vmid, o);
+		};
+		await expect(verifyWindows(deps, manifest(), {})).rejects.toThrow(
+			/pool full/,
+		);
+		expect(w.log.filter((l) => l.startsWith("snapshot"))).toEqual([]);
+		expect(w.vms.size).toBe(0);
+	});
+
 	it("gives A and B their own smbios with the tunnel URL and 2 vCPU / 4 GB", async () => {
 		const { w, deps } = setup();
 		const made: { size?: MachineSize; smbios?: Smbios }[] = [];
@@ -1190,6 +1254,21 @@ describe("verifyWindows", () => {
 		expect(vss?.evidence).toContain("freeze timed out");
 		expect(vss?.evidence).not.toContain("not frozen");
 		expect(w.vms.size).toBe(0);
+	});
+
+	it("vss_freeze fails when VSS had already thawed by itself at the thaw", async () => {
+		const { w, deps } = setup();
+		deps.windows = {
+			...(deps.windows as NonNullable<VerifyDeps["windows"]>),
+			fsfreezeThaw: async () => {
+				w.frozen = false;
+				return { autoThawed: true };
+			},
+		};
+		const v = await verifyWindows(deps, manifest(), {});
+		const vss = v.checks.find((c) => c.id === "vss_freeze");
+		expect(vss?.status).toBe("FAIL");
+		expect(vss?.evidence).toMatch(/already thawed by itself/);
 	});
 
 	it("cleans up the fork, the snapshot and the source when the fork fails to start", async () => {
@@ -1597,7 +1676,10 @@ Test-FirstBootLog (Join-Path $d 'empty.log')`,
 			/^\$FirewallPolicy = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\WindowsFirewall'$/m,
 		);
 		expect(fw).toMatch(
-			/@\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)[^\n]*\$FirewallPolicy\\\$p" 'AllowLocalPolicyMerge'/,
+			/\$names = @\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)/,
+		);
+		expect(fw).toMatch(
+			/foreach \(\$p in \$names\)[^\n]*\$FirewallPolicy\\\$p" 'AllowLocalPolicyMerge'/,
 		);
 		expect(fw).toMatch(
 			/Get-NetFirewallRule -PolicyStore ActiveStore -Direction Inbound -Action Allow -Enabled True/,
@@ -1606,6 +1688,91 @@ Test-FirstBootLog (Join-Path $d 'empty.log')`,
 		expect(fw).toMatch(
 			/Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction/,
 		);
+	});
+
+	it("firewall_rules: shields up (AllowInboundRules False everywhere) makes leftover allow rules ineffective", () => {
+		const r = runFunctions(
+			["Report", "Test-Firewall"],
+			String.raw`$FirewallPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall'
+function prof($n, $allow) { [pscustomobject]@{ Name = $n; Enabled = 'True'; DefaultInboundAction = 'Block'; NotifyOnListen = 'False'; AllowInboundRules = $allow } }
+function Get-RegValue([string]$Path, [string]$Name) { $script:reg["$(Split-Path -Leaf $Path)/$Name"] }
+function Get-NetFirewallProfile { param($PolicyStore) $script:profiles }
+function Get-NetFirewallRule { param($PolicyStore, $Direction, $Action, $Enabled, $ErrorAction) $script:rules }
+$appx = [pscustomobject]@{ Name = 'Microsoft.WindowsStore_8wekyb3d8bbweS-1-5-21-1-1000-In-Allow-ServerCapability' }
+$script:reg = @{}
+foreach ($p in @('DomainProfile', 'PrivateProfile', 'PublicProfile')) { $script:reg["$p/AllowLocalPolicyMerge"] = 0; $script:reg["$p/DoNotAllowExceptions"] = 1 }
+$script:profiles = @((prof 'Domain' 'False'), (prof 'Private' 'False'), (prof 'Public' 'False'))
+$script:rules = @($appx)
+Test-Firewall
+$script:profiles = @((prof 'Domain' 'False'), (prof 'Private' 'NotConfigured'), (prof 'Public' 'False'))
+Test-Firewall
+$script:rules = @()
+Test-Firewall`,
+		);
+		expect(r.stderr).toBe("");
+		const lines = r.stdout
+			.trim()
+			.split(/\r?\n/)
+			.filter((l) => l.startsWith("CHECK firewall_rules"));
+		expect(lines).toHaveLength(3);
+		expect(lines[0]).toMatch(/^CHECK firewall_rules PASS /);
+		expect(lines[0]).toMatch(/AllowInboundRules False/);
+		expect(lines[0]).toMatch(/ineffective.*WindowsStore/);
+		expect(lines[0]).toMatch(/DoNotAllowExceptions: DomainProfile=1/);
+		expect(lines[1]).toMatch(/^CHECK firewall_rules FAIL .*WindowsStore/);
+		expect(lines[1]).toMatch(/Private=NotConfigured/);
+		expect(lines[2]).toMatch(/^CHECK firewall_rules PASS /);
+	});
+
+	it("autologon_session: the user's session must be unlocked; evidence says why not", () => {
+		const r = runFunctions(
+			["Report", "Test-Autologon"],
+			String.raw`$UserName = 'user'
+function Invoke-Capture { param($FilePath, $ArgumentList) [pscustomobject]@{ Code = 0; Lines = $script:q; Text = ($script:q -join "\n") } }
+function Get-Process { param($Name, $ErrorAction) @($script:procs | Where-Object { $_.Name -eq $Name }) }
+function Get-SessionLockState { param([int]$SessionId) $script:lockQueried = $SessionId; $script:lock }
+function Start-Sleep { param($Seconds) }
+function proc($n, $sid) { [pscustomobject]@{ Name = $n; Id = 100 + $sid; SessionId = $sid } }
+$active = @(' USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME', '>user                  console             1  Active      none   10/31/2026 9:00 AM')
+$script:q = $active
+$script:procs = @()
+$script:lock = 'unlocked'
+Test-Autologon -WaitSeconds 0
+Write-Output "queried $script:lockQueried"
+$script:procs = @((proc 'LogonUI' 1), (proc 'LockApp' 1))
+$script:lock = 'locked'
+Test-Autologon -WaitSeconds 0
+# LogonUI of another session (a second console logon screen) does not matter.
+$script:procs = @((proc 'LogonUI' 2))
+$script:lock = 'unlocked'
+Test-Autologon -WaitSeconds 0
+$script:q = @(' USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME')
+$script:procs = @()
+Test-Autologon -WaitSeconds 0`,
+		);
+		expect(r.stderr).toBe("");
+		const lines = r.stdout.trim().split(/\r?\n/);
+		expect(lines).toHaveLength(5);
+		expect(lines[0]).toMatch(
+			/^CHECK autologon_session PASS .*session 1.*unlocked/,
+		);
+		expect(lines[1]).toBe("queried 1");
+		expect(lines[2]).toMatch(/^CHECK autologon_session FAIL /);
+		expect(lines[2]).toMatch(/locked/);
+		expect(lines[2]).toMatch(/LogonUI in session 1/);
+		expect(lines[2]).toMatch(/LockApp/);
+		expect(lines[3]).toMatch(/^CHECK autologon_session PASS /);
+		expect(lines[4]).toMatch(
+			/^CHECK autologon_session FAIL .*no active session/,
+		);
+	});
+
+	it("autologon_session polls up to 180 s and reads the lock state through WTSSessionInfoEx", () => {
+		const t = text();
+		const fn = t.slice(t.indexOf("function Test-Autologon"));
+		expect(fn).toMatch(/\[int\]\$WaitSeconds = 180/);
+		expect(t).toMatch(/WTSQuerySessionInformation/);
+		expect(t).toMatch(/function Get-SessionLockState/);
 	});
 
 	it("codepage checks the registry and the active code pages", () => {
