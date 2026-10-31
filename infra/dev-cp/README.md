@@ -222,3 +222,23 @@ profile. The current dev gateway already occupies443; assigning the TURN listene
 and firewall rules is a separate network change (notify master and use auto rollback).
 CT590 was not redeployed for S10 in this pass. Public create/media/TURN and long-idle
 viewer checks have not run; direct pairing and HTML alone do not prove video transport.
+
+Dev TURN runs in the desktop compose profile on CT590's existing address: UDP/TCP3478,
+TLS5349 and UDP relay49160–49200. `turn-cert.sh` issues a leaf below the existing
+CA's permitted tunnel namespace (`turn.$TUNNEL_HOST`), preserving the CA trusted by
+images. CT memory remains6GiB. Production TLS443/dedicatedIP/SNI is a follow-up.
+
+Firewall changes use `turn-firewall.py apply` **only after telling master and arming
+an automatic rollback timer**. `rollback` removes only tagged S10 rules and preserves
+concurrent edits. Compile/check gateway and SSH before cancelling the timer.
+`mise exec -- python infra/dev-cp/verify-turn.py` tests actual UDP/TCP/TLS allocation,
+peer restrictions and expiry on Refresh without logging the REST secret. The current
+coturn4.18.0 accepts Refresh on an existing allocation after REST credential expiry;
+that final assertion remains an explicit open acceptance failure.
+
+For long-idle media acceptance use `SBX_DESKTOP_IDLE_HOLD_MS=1800000` with
+`e2e-desktop.sh`. It checks real MCP tools, forces relay-only WebRTC, verifies the
+selected relay-to-relay pair and watches DB activity without API calls that would
+refresh the idle timer. Diagnostics, screenshots and observations are written only
+to its private temporary output directory. The branch may stay deployed after this
+run; master restores main after merges.

@@ -9,6 +9,10 @@ services:
     environment:
       SBX_TURN_IP: ${SBX_TURN_IP:-}
       SBX_TURN_REALM: ${SBX_TURN_REALM:-}
+      SBX_TURN_PORT: ${SBX_TURN_PORT:-3478}
+      SBX_TURN_TLS_PORT: ${SBX_TURN_TLS_PORT:-443}
+      SBX_TURN_RELAY_MIN: ${SBX_TURN_RELAY_MIN:-49152}
+      SBX_TURN_RELAY_MAX: ${SBX_TURN_RELAY_MAX:-65535}
     volumes:
       - ./turn/entrypoint.sh:/etc/sbx-turn/entrypoint.sh:ro
       - ./secrets/turn:/secrets:ro

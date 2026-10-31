@@ -41,3 +41,10 @@ PORT_DOMAIN="${SBX_DEVCP_PORT_DOMAIN:-sbx.${CT_TAILNET_IP//./-}.sslip.io}"
 
 # The dev CA (outside git) and its copy on the CT, both 0600.
 CA_DIR="${SBX_DEVCP_CA_DIR:-${SBX_CONFIG_DIR:-$HOME/.config/sbx}/dev-ca}"
+
+# Child of the constrained CA's tunnel name, resolving to the same LAN address.
+TURN_HOST="${SBX_DEVCP_TURN_HOST:-turn.$TUNNEL_HOST}"
+TURN_PORT=3478
+TURN_TLS_PORT=5349
+TURN_RELAY_MIN=49160
+TURN_RELAY_MAX=49200

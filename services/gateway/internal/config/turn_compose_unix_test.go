@@ -50,7 +50,7 @@ func TestDesktopTURNSecretInitAndRestrictedConfig(t *testing.T) {
 	}
 	for _, ip := range []string{"203.0.113.9", "999.0.0.1"} {
 		cmd := exec.CommandContext(t.Context(), "sh", filepath.Join(root, "deploy/compose/turn/entrypoint.sh"))
-		cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "SBX_TURN_SECRETS_DIR="+filepath.Join(secrets, "turn"), "SBX_TURN_RUN_DIR="+dir, "SBX_TURN_IP="+ip, "SBX_TURN_REALM=turn.example", "SBX_TURN_CAPTURE="+filepath.Join(dir, "config"))
+		cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "SBX_TURN_SECRETS_DIR="+filepath.Join(secrets, "turn"), "SBX_TURN_RUN_DIR="+dir, "SBX_TURN_IP="+ip, "SBX_TURN_REALM=turn.example", "SBX_TURN_CAPTURE="+filepath.Join(dir, "config"), "SBX_TURN_TLS_PORT=23844", "SBX_TURN_RELAY_MIN=55000", "SBX_TURN_RELAY_MAX=55040")
 		out, e := cmd.CombinedOutput()
 		if ip != "203.0.113.9" {
 			if e == nil {
@@ -66,7 +66,7 @@ func TestDesktopTURNSecretInitAndRestrictedConfig(t *testing.T) {
 			t.Fatal(e)
 		}
 		config := string(b)
-		for _, required := range []string{"use-auth-secret\n", "static-auth-secret=" + string(secret) + "\n", "allowed-peer-ip=203.0.113.9\n", "denied-peer-ip=0.0.0.0-255.255.255.255\n", "user-quota=4\n", "no-tcp-relay\n", "tls-listening-port=443\n"} {
+		for _, required := range []string{"use-auth-secret\n", "static-auth-secret=" + string(secret) + "\n", "allowed-peer-ip=203.0.113.9\n", "denied-peer-ip=0.0.0.0-255.255.255.255\n", "user-quota=4\n", "no-tcp-relay\n", "tls-listening-port=23844\n", "min-port=55000\n", "max-port=55040\n"} {
 			if !strings.Contains(config, required) {
 				t.Fatal("missing TURN restriction")
 			}

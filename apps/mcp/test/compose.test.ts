@@ -111,6 +111,9 @@ describe("product compose: service mcp", () => {
 
 describe("dev-cp", () => {
 	const required = {
+		SBX_DEVCP_TURN_IP: "192.0.2.90",
+		SBX_DEVCP_TURN_HOST: "turn.test",
+		SBX_DEVCP_TURN_URLS: "turn:turn.test:3478?transport=udp",
 		SBX_TUNNEL_URL: "wss://tunnel.test/v1/connect",
 		SBX_PORT_DOMAIN: "sbx.test",
 		SBX_DEVCP_TUNNEL_HOST: "tunnel.test",

@@ -57,7 +57,7 @@ ct() {
 	{
 		printf '%sset -euo pipefail\nmkdir -p ~/%s && cd ~/%s\n' "$prefix" "$DIR" "$DIR"
 		cat
-	} | ssh -o BatchMode=yes "$CT" 'f=$(mktemp); cat >"$f"; bash "$f" </dev/null; rc=$?; rm -f "$f"; exit $rc'
+	} | ssh -o BatchMode=yes "$CT" "python3 ~/boat-dev-clone/infra/dev-cp/remote-script.py"
 }
 
 for f in pve-token pve-root-ca.pem sbx-node_ed25519 known_hosts; do
@@ -67,6 +67,7 @@ if ((DRY)); then
 	[[ -s "$CA_DIR/ca.pem" ]] || log "dry run: $CA_DIR/ca.pem is missing; dev-ca.sh creates it on a real run"
 else
 	"$HERE/dev-ca.sh"
+	"$HERE/turn-cert.sh"
 fi
 
 # 1. The working tree: tracked and untracked files that are not ignored, minus deleted ones.
@@ -85,7 +86,7 @@ else
 	COPYFILE_DISABLE=1 tar --no-xattrs -C "$REPO" -cf - -T "$list" |
 		ssh -o BatchMode=yes "$CT" "mkdir -p ~/$DIR && tar -xf - -C ~/$DIR"
 	# Remove what is gone from the tree; secrets and .env live only on the CT.
-	ssh -o BatchMode=yes "$CT" "cd ~/$DIR && f=\$(mktemp) && sort >\"\$f\" && find . -type f ! -path './deploy/compose/secrets/*' ! -path './deploy/compose/.env' | sed 's|^\./||' | sort | comm -23 - \"\$f\" | tee /dev/stderr | xargs -r -d '\n' rm -f && rm -f \"\$f\"" <"$list"
+	ssh -o BatchMode=yes "$CT" "python3 ~/boat-dev-clone/infra/dev-cp/prune.py" <"$list"
 fi
 
 # 2. PVE secrets and the dev CA, 0600, owned by sbx (uid 1000 = node in the worker image). The
@@ -109,8 +110,15 @@ else
 	} | ssh -o BatchMode=yes "$CT" 'umask 077 && cat >~/.config/sbx/known_hosts'
 fi
 
+if ((!DRY)); then
+ ssh -o BatchMode=yes "$CT" 'install -d -m 700 ~/boat-dev-clone/deploy/compose/secrets/turn'
+ for f in tls.crt tls.key; do
+  ssh -o BatchMode=yes "$CT" "umask 077; cat >~/boat-dev-clone/deploy/compose/secrets/turn/$f" <"$CA_DIR/turn/$f"
+ done
+fi
+
 # 3. The dev CA for the gateway, .env, the dev sbx.yaml, data keys; then the stack.
-ct "PVE_LAN_IP=$PVE_LAN_IP" "PORT_DOMAIN=$PORT_DOMAIN" "TUNNEL_HOST=$TUNNEL_HOST" "TUNNEL_URL=$TUNNEL_URL" \
+ct "TURN_HOST=$TURN_HOST" "TURN_IP=$CT_IP" "PVE_LAN_IP=$PVE_LAN_IP" "PORT_DOMAIN=$PORT_DOMAIN" "TUNNEL_HOST=$TUNNEL_HOST" "TUNNEL_URL=$TUNNEL_URL" \
 	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" "MCP_URL=$MCP_URL" \
 	"KEYCLOAK_URL=$KEYCLOAK_URL" "OIDC_ISSUER=$OIDC_ISSUER" "LOGOUT_URL=$LOGOUT_URL" "SERVE=$SERVE" \
 	"FILES=$FILES" "EXTRA_ENV=$EXTRA_ENV" <<'EOF'
@@ -144,6 +152,10 @@ fi
 cat >.env <<ENV
 # Written by infra/dev-cp/deploy.sh; changes are overwritten on the next deploy.
 COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml
+COMPOSE_PROFILES=desktop
+SBX_DEVCP_TURN_IP=$TURN_IP
+SBX_DEVCP_TURN_HOST=$TURN_HOST
+SBX_DEVCP_TURN_URLS=turn:$TURN_HOST:3478?transport=udp,turn:$TURN_HOST:3478?transport=tcp,turns:$TURN_HOST:5349?transport=tcp
 # The PVE host over the LAN. migrate (bootstrap) loads the API URL from secrets/devcp/sbx.yaml.
 SBX_PVE_URL=https://$PVE_LAN_IP:8006
 SBX_PVE_TLS_NAME=pve

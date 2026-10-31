@@ -21,6 +21,15 @@
 x-devcp-proxy-cidrs: &devcp-proxy-cidrs 172.16.0.0/12,127.0.0.1/32
 
 services:
+  turn:
+    environment:
+      SBX_TURN_IP: ${SBX_DEVCP_TURN_IP:?set by deploy.sh}
+      SBX_TURN_REALM: ${SBX_DEVCP_TURN_HOST:?set by deploy.sh}
+      SBX_TURN_PORT: "3478"
+      SBX_TURN_TLS_PORT: "5349"
+      SBX_TURN_RELAY_MIN: "49160"
+      SBX_TURN_RELAY_MAX: "49200"
+
   # sbx.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/sbx.yaml).
   migrate:
     volumes:
@@ -30,6 +39,7 @@ services:
   worker:
     environment:
       # The tunnel URL that the worker writes into smbios family (S5 §14) of every new machine.
+      SBX_TURN_URLS: ${SBX_DEVCP_TURN_URLS:?set by deploy.sh}
       SBX_TUNNEL_URL: ${SBX_TUNNEL_URL:?set by deploy.sh}
       # The port domain that the worker passes to agents in Claim (port_domain).
       SBX_PORT_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
