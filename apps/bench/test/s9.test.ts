@@ -174,10 +174,6 @@ function fakeDeps(opts: { failFork?: boolean } = {}) {
 			async ping() {
 				return true;
 			},
-			async fsfreezeFreeze() {},
-			async fsfreezeThaw() {
-				return { autoThawed: false };
-			},
 			async exec(vmid: number, cmd: string[]) {
 				expect(cmd).toEqual(INFO_CMD);
 				const id = uuidOf.get(vmid) ?? "";
@@ -369,10 +365,6 @@ function fakeTestsRun(
 		qga: {
 			async ping() {
 				return true;
-			},
-			async fsfreezeFreeze() {},
-			async fsfreezeThaw() {
-				return { autoThawed: false };
 			},
 			async exec(_vmid: number, cmd: string[]) {
 				execs.push(cmd);
