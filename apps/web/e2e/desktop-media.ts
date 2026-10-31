@@ -102,7 +102,7 @@ export async function verifyDesktopMedia(
 					],
 				});
 				await page.waitForTimeout(3000);
-				const second = await media.screenshot();
+				let second = await media.screenshot();
 				if (hash(first) === hash(second))
 					throw new Error(`${label} live viewer frame did not change`);
 				console.log(`ok ${label} live viewer frame diff`);
@@ -138,6 +138,26 @@ export async function verifyDesktopMedia(
 						throw new Error(`TURN did not select ${protocol}`);
 					console.log("ok TURN selected relay-to-relay", JSON.stringify(pair));
 					if (protocol === protocols[0]) await onWebRtcReady?.();
+					const connected = await page.evaluate(() =>
+						(
+							window as unknown as { __s10Peers: RTCPeerConnection[] }
+						).__s10Peers.some((p) => p.connectionState === "connected"),
+					);
+					if (!connected)
+						throw new Error("WebRTC disconnected during idle hold");
+					const endBefore = await media.screenshot();
+					await sb.desktop.act({
+						actions: [
+							{ type: "type", text: `echo S10-${label}-end-${Date.now()}` },
+							{ type: "key", keys: ["enter"] },
+						],
+					});
+					await page.waitForTimeout(2000);
+					const endAfter = await media.screenshot();
+					if (hash(endBefore) === hash(endAfter))
+						throw new Error("WebRTC media froze during idle hold");
+					second = endAfter;
+					console.log(`ok ${label} still delivers changed frames after hold`);
 				}
 
 				await writeFile(join(output, `${label}-viewer.png`), second, {
@@ -145,7 +165,7 @@ export async function verifyDesktopMedia(
 				});
 			} catch (error) {
 				const logs = page.getByText("Show Logs", { exact: true });
-				if (await logs.count()) await logs.click();
+				if (await logs.isVisible()) await logs.click({ timeout: 1000 });
 				await page.screenshot({
 					path: join(output, `${label}-failure.png`),
 				});

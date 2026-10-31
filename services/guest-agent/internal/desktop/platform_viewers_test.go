@@ -43,7 +43,7 @@ func TestViewerLifecycleLogWinsOverStaleConntrack(t *testing.T) {
 
 func TestRecentControlTrafficWinsOverUnbalancedSunshineEvents(t *testing.T) {
 	flow := func(ttl int) string {
-		return fmt.Sprintf("udp 17 %d src=127.0.0.1 dst=127.0.0.1 sport=53555 dport=47999 src=127.0.0.1 dst=127.0.0.1 sport=47999 dport=53555 [ASSURED]\n", ttl)
+		return fmt.Sprintf("ipv4 2 udp 17 %d src=127.0.0.1 dst=127.0.0.1 sport=53555 dport=47999 src=127.0.0.1 dst=127.0.0.1 sport=47999 dport=53555 [ASSURED]\n", ttl)
 	}
 	for _, active := range []bool{false, true} {
 		dir := t.TempDir()

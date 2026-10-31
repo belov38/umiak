@@ -41,7 +41,7 @@ try {
 		template: process.env.SBX_E2E_TEMPLATE ?? "linux-desktop",
 		size: "4gb",
 		labels: { e2e: "desktop" },
-		idleTimeoutSeconds: 60,
+		idleTimeoutSeconds: process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE ? 300 : 60,
 		ttlSeconds: 3600,
 	});
 	created.push(sb);
@@ -74,6 +74,10 @@ try {
 			if (Date.now() > until) throw new Error("test agent did not reconnect");
 			await new Promise((done) => setTimeout(done, 1000));
 		}
+		await client.raw.PATCH("/v1/sandboxes/{sandbox}", {
+			params: { path: { sandbox: sb.id } },
+			body: { idleTimeoutSeconds: 60 },
+		});
 		console.log(
 			"installed experimental signed agent; immutable recipe rebuild still required",
 		);

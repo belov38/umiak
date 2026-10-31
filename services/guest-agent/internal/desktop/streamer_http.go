@@ -380,10 +380,18 @@ func recentConntrackViewers(text string, timeout uint32) uint32 {
 	var recent []string
 	for _, line := range strings.Split(text, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		// Extended output prefixes the transport with "ipv4 2" or "ipv6 10".
+		index := -1
+		for i, field := range fields {
+			if field == "udp" {
+				index = i
+				break
+			}
+		}
+		if index < 0 || len(fields) <= index+2 {
 			continue
 		}
-		ttl, e := strconv.ParseUint(fields[2], 10, 32)
+		ttl, e := strconv.ParseUint(fields[index+2], 10, 32)
 		if e == nil && ttl >= uint64(timeout-5) {
 			recent = append(recent, line)
 		}
