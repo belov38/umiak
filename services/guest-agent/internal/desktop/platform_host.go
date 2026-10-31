@@ -35,7 +35,9 @@ type FileHost struct {
 	Own                                  func(context.Context, string, string) error
 	Running                              func(context.Context) (bool, error)
 	FlowTimeout                          func() (uint32, error)
-	mu                                   sync.Mutex
+	// StreamSockets counts the streamer's live UDP sockets (Windows); one stream needs at least one.
+	StreamSockets func(context.Context) (uint32, error)
+	mu            sync.Mutex
 }
 
 // Prepare rotates private state when the machine identity changes.
@@ -190,6 +192,13 @@ func (h *FileHost) Viewers(ctx context.Context) (uint32, error) {
 			if err == nil {
 				return recentConntrackViewers(string(data), ttl), nil
 			}
+		}
+	}
+	// Without conntrack (Windows) moonlight-web holds UDP sockets only while it
+	// streams: the ENet control channel to Sunshine exists for every transport.
+	if h.StreamSockets != nil {
+		if n, err := h.StreamSockets(ctx); err == nil {
+			return min(n, 1), nil
 		}
 	}
 	// Lifecycle logs remain a conservative fallback when flow sampling fails.

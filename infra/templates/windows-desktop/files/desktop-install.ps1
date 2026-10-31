@@ -75,11 +75,5 @@ function Install-SbxDesktop {
     & $Ops.Native 'sc.exe' @('config','sbx-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\sbx-moonlight-web')
     & $Ops.Native 'sc.exe' @('sidtype','sbx-moonlight-web','unrestricted')
     & $Ops.Native 'sc.exe' @('failure','sbx-moonlight-web','reset=','86400','actions=','restart/15000/restart/30000/restart/60000')
-    $toml=Join-Path $AgentRoot 'agent.toml';$text=Get-Content -Raw $toml
-    if($text -notmatch '(?m)^required\s*='){throw 'missing readiness configuration'}
-    $text=[regex]::Replace($text,'(?m)^required\s*=\s*\[([^\r\n]*)\]',{param($m) if($m.Value.Contains('desktop')){$m.Value}else{'required = ['+$m.Groups[1].Value+', "desktop"]'}})
-    $text=[regex]::Replace($text,'(?ms)^\[(desktop|ports)\]\r?\n.*?(?=^\[|\z)','')
-    $text+="`n[desktop]`nenabled = true`n[ports]`nexclude = [22, 53, 47800, 47984, 47989, 47990, 48010]`n"
-    [IO.File]::WriteAllText($toml,$text)
     & $Ops.Native 'icacls.exe' @($desktop,'/inheritance:r','/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','NT SERVICE\sbx-moonlight-web:(OI)(CI)RX','/T','/Q')
 }

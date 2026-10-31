@@ -104,7 +104,11 @@ function prepare(
 	] as const)
 		if (file !== undefined && !existsSync(file))
 			throw new Error(`${flag}: ${file} not found`);
-	const verifyScript = loadVerifyScript(o.templatesDir, recipe.verify);
+	const verifyScript = loadVerifyScript(
+		o.templatesDir,
+		recipe.verify,
+		recipe.os,
+	);
 	const agent = verifyAgentPackage(o.agentPackage, o.updateKeysFile);
 
 	const now = deps.now();

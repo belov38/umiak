@@ -11,13 +11,11 @@ $ops=@{
 }
 $program=Join-Path $Root 'program';$agent=Join-Path $Root 'agent';$work=Join-Path $Root 'work'
 New-Item -ItemType Directory -Force $agent | Out-Null
-[IO.File]::WriteAllText((Join-Path $agent 'agent.toml'),"[readiness]`nrequired = [`"identity`", `"claim`", `"secrets`"]`n")
 Install-SbxDesktop -ProgramRoot $program -AgentRoot $agent -WorkRoot $work -FilesRoot $Files -Ops $ops
 $config=Get-Content -Raw (Join-Path $agent 'desktop/moonlight.json') | ConvertFrom-Json
 if($config.web_server.bind_address -ne '127.0.0.1:47800' -or $config.webrtc.ice_servers.Count -ne 0){throw 'public/default STUN config'}
 if(-not ($commands | Where-Object {$_ -match 'config SunshineService start= demand'})){throw 'Sunshine not manual'}
 if(-not ($commands | Where-Object {$_ -match 'create sbx-moonlight-web'})){throw 'SCM wrapper missing'}
-if(-not (Get-Content -Raw (Join-Path $agent 'agent.toml')).Contains('desktop')){throw 'desktop readiness missing'}
 $bad=Join-Path $Root 'bad.bin'
 $refused=$false
 try{Get-SbxDesktopArtifact -Pin @{url='https://invalid.example/';sha256=('0'*64)} -Destination $bad -Download {param($Url,$Destination)[IO.File]::WriteAllText($Destination,'tampered')}}catch{$refused=$true}

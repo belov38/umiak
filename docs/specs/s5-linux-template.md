@@ -606,4 +606,4 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 
 ## S10 template slots (решение Ильи 2026-10-31)
 
-`linux-desktop` наследует `linux`, но использует собственные VMIDs `[595, 596]` из dev-infra 590–596 (CT 590 остаётся). Linux `[597, 599]` и Windows `[598]` не меняются и S10 их не трогает. Пулы в MVP отсутствуют; default size 4gb, allowed 4gb/8gb задаются в runtime seeds/config.
+`linux-desktop` наследует `linux`, но использует собственный VMID `[596]` из dev-infra 590–596 (CT 590 остаётся); `windows-desktop` (S10, `extends: windows`) — `[595]` (решение master 2026-11-01). Linux `[597, 599]` и Windows `[598]` не меняются и S10 их не трогает. Пулы в MVP отсутствуют; default size 4gb, allowed 4gb/8gb задаются в runtime seeds/config.

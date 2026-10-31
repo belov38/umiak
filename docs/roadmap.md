@@ -46,4 +46,4 @@ Windows fork и saved snapshot (решение Ильи 2026-11-01, ветка `
 
 Фаза 2 (паритет с boat.dev, области S14–S30): `docs/roadmap-phase2.md`.
 
-Решение Ильи 2026-10-31 (S10): `linux-desktop` занимает template slots `[595, 596]` из dev-infra 590–596; CT 590 остаётся, 597/598/599 не менять. Sandbox VMIDs 500–589, общий RAM ≤8 GB. GPL Sunshine/moonlight-web разрешён; TURN только собственный coturn; продукт не зависит от Tailscale, dev-адреса только в `infra/dev-cp/`. Пулы исключены, Linux cold create до ~1 min, Windows до 5 min. Миграции S10: 0400–0499.
+Решение Ильи 2026-10-31 (S10): `linux-desktop` занимает template slots `[595, 596]` из dev-infra 590–596; CT 590 остаётся, 597/598/599 не менять. Sandbox VMIDs 500–589, общий RAM ≤8 GB. GPL Sunshine/moonlight-web разрешён; TURN только собственный coturn; продукт не зависит от Tailscale, dev-адреса только в `infra/dev-cp/`. Пулы исключены, Linux cold create до ~1 min, Windows до 5 min. Миграции S10: 0400–0499. Уточнение master 2026-11-01: `windows-desktop` (`extends: windows`) — слот 595, `linux-desktop` — 596, по одному слоту.

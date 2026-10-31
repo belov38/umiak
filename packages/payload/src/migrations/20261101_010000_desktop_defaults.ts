@@ -1,5 +1,6 @@
 // S10 desktop defaults: PlatformDefaults.publicDesktopEnabled, the 8gb size,
-// 4 vCPU for 4gb (S10 §11; S9 seeded 2) and the linux-desktop template.
+// 4 vCPU for 4gb (S10 section 15.1; S9 seeded 2) and the linux-desktop and
+// windows-desktop templates.
 // Operator-edited records are kept: inserts skip existing slugs and the 4gb
 // update applies only to the untouched S9 seed value.
 import {
@@ -23,6 +24,9 @@ export async function up({ db }: MigrateUpArgs): Promise<void> {
     ) VALUES (
       uuidv7(), 'linux-desktop', 'Linux Desktop', 'linux', true, '4gb', '["4gb", "8gb"]',
       'user', '["exec", "files", "ssh", "desktop"]', 2
+    ), (
+      uuidv7(), 'windows-desktop', 'Windows 11 Desktop', 'windows', true, '4gb', '["4gb", "8gb"]',
+      'user', '["exec", "files", "ssh", "desktop"]', 3
     ) ON CONFLICT ("slug") DO NOTHING;
 
     SELECT pg_notify('sbx_config', '*');

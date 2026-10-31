@@ -221,11 +221,14 @@ export function offlineIsoFiles(
 }
 
 /**
- * `C:\ProgramData\sbx-agent\agent.toml` of the template (spec S9 section 12.1, without the
- * desktop readiness phase: Decision 2). The values equal the agent's Windows defaults; the file
- * makes them visible on the image.
+ * `C:\ProgramData\sbx-agent\agent.toml` of the template (spec S9 section 12.1). The values equal
+ * the agent's Windows defaults; the file makes them visible on the image. A desktop recipe adds
+ * the desktop readiness phase and excludes the loopback streamer ports (spec S10 section 8.1).
  */
-export function renderWindowsAgentToml(tunnelUrl?: string): string {
+export function renderWindowsAgentToml(
+	tunnelUrl?: string,
+	desktop = false,
+): string {
 	const lines: string[] = [];
 	if (tunnelUrl !== undefined)
 		lines.push("[tunnel]", `url = ${JSON.stringify(tunnelUrl)}`, "");
@@ -234,13 +237,20 @@ export function renderWindowsAgentToml(tunnelUrl?: string): string {
 		'default = "user"',
 		"",
 		"[readiness]",
-		'required = ["identity", "claim", "secrets"]',
+		desktop
+			? 'required = ["identity", "claim", "secrets", "desktop"]'
+			: 'required = ["identity", "claim", "secrets"]',
 		"",
 		"[docker]",
 		"enabled = false",
 		"",
+	);
+	if (desktop) lines.push("[desktop]", "enabled = true", "");
+	lines.push(
 		"[ports]",
-		"exclude = [22, 135]",
+		desktop
+			? "exclude = [22, 135, 47800, 47984, 47989, 47990, 48010]"
+			: "exclude = [22, 135]",
 		'exclude_processes = ["System", "lsass.exe", "wininit.exe", "services.exe", "svchost.exe", "spoolsv.exe"]',
 		"",
 	);

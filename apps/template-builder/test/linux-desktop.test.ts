@@ -20,11 +20,11 @@ it("desktop verification retains the Linux baseline and tools manifest", () => {
 	expect(script).toContain("TOOLS %s");
 	expect(script).toContain("desktop_packages");
 });
-it("desktop inherits Linux pins, uses only 595/596 and enables the desktop readiness/capability", () => {
+it("desktop inherits Linux pins, uses only slot 596 and enables the desktop readiness/capability", () => {
 	const recipe = loadRecipe(templates, "linux-desktop");
 	if (recipe.os !== "linux") throw new Error("linux-desktop is not linux");
 	expect(recipe.extends).toBe("linux");
-	expect(recipe.vmids).toEqual([595, 596]);
+	expect(recipe.vmids).toEqual([596]);
 	expect(recipe.verify).toBe("linux-desktop");
 	expect(recipe.steps.slice(-2)).toEqual(["60-desktop", "90-cleanup"]);
 	expect(loadVersions(recipe).tools).toEqual(

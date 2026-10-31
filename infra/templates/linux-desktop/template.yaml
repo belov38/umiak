@@ -1,7 +1,8 @@
 slug: linux-desktop
 os: linux
 extends: linux
-vmids: [595, 596]
+# One slot (S10 decision 2026-11-01): 596; 595 is windows-desktop.
+vmids: [596]
 hw: { vga: std, tablet: 0 }
 build_vm: { cores: 4, memory_mb: 4096 }
 steps:

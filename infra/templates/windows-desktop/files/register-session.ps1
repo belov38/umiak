@@ -10,9 +10,14 @@ $principal=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\user" -LogonTyp
 $trigger=New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\user"
 $settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName session -TaskPath '\sbx\' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
-Start-ScheduledTask -TaskName session -TaskPath '\sbx\'
 $pwsh=Join-Path $PSHOME 'pwsh.exe'
 $cuaScript=Join-Path $PSScriptRoot 'run-cua.ps1'
 $cuaAction=New-ScheduledTaskAction -Execute $pwsh -Argument ("-NoLogo -NoProfile -WindowStyle Hidden -File `"$cuaScript`"")
 Register-ScheduledTask -TaskName cua-driver -TaskPath '\sbx\' -Action $cuaAction -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
-Start-ScheduledTask -TaskName cua-driver -TaskPath '\sbx\'
+# Before the autologon of user an interactive task cannot start; the logon trigger starts both.
+# The agent calls this script on every start, so a running helper is also kept.
+if (Get-CimInstance -ClassName Win32_ComputerSystem).UserName {
+    foreach ($task in @('session', 'cua-driver')) {
+        try { Start-ScheduledTask -TaskName $task -TaskPath '\sbx\' } catch { Write-Warning "start $task: $_" }
+    }
+}

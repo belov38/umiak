@@ -19,6 +19,11 @@ const VERIFY_BASE: Record<string, string> = {
 	"windows-desktop": "windows",
 };
 
+/** A desktop recipe gets the desktop readiness phase and the streamer port exclusions. */
+export function isDesktopRecipe(recipe: { verify: string }): boolean {
+	return Object.hasOwn(VERIFY_BASE, recipe.verify);
+}
+
 /** The verify script of `profile`, prefixed with its headless baseline. */
 export function loadVerifyScript(
 	templatesDir: string,
@@ -28,10 +33,16 @@ export function loadVerifyScript(
 	const file = os === "windows" ? "verify.ps1" : "verify.sh";
 	const script = readFileSync(join(templatesDir, profile, file), "utf8");
 	const base = VERIFY_BASE[profile];
-	return base
-		? `${readFileSync(join(templatesDir, base, file), "utf8")}\n${script}`
-		: script;
+	if (!base) return script;
+	const baseScript = readFileSync(join(templatesDir, base, file), "utf8");
+	if (os === "linux") return `${baseScript}\n${script}`;
+	// verify.ps1 starts with a param block: the desktop groups go before its main block.
+	const at = baseScript.indexOf(WINDOWS_VERIFY_MAIN);
+	if (at < 0)
+		throw new Error(`${base}/${file}: no "${WINDOWS_VERIFY_MAIN}" marker`);
+	return `${baseScript.slice(0, at)}${script}\n${baseScript.slice(at)}`;
 }
+const WINDOWS_VERIFY_MAIN = "# --- main ---";
 export const REBOOT_STEP = "reboot";
 /** Windows only: `net0 link_down=0`, then wait for an IPv4 (spec S9 section 5). */
 export const NETWORK_UP_STEP = "network-up";

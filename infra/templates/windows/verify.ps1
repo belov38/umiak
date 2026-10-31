@@ -787,6 +787,10 @@ $Groups = [ordered]@{
     facts = { Test-Facts }
 }
 $OnDemand = @('vss_events', 'lsa_hash', 'facts')
+# Desktop profiles (S10) are spliced in before "# --- main ---" and add their groups here.
+if (Test-Path variable:SbxExtraGroups) {
+    foreach ($k in $SbxExtraGroups.Keys) { $Groups[$k] = $SbxExtraGroups[$k] }
+}
 
 $BootTime = (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime.ToUniversalTime()
 $selected = if ($Check) {

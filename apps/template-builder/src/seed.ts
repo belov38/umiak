@@ -11,7 +11,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { REBOOT_STEP, type Recipe, stepFile, type Versions } from "./recipe.ts";
+import {
+	isDesktopRecipe,
+	REBOOT_STEP,
+	type Recipe,
+	stepFile,
+	type Versions,
+} from "./recipe.ts";
 import { formatVersionsToml } from "./versions-update.ts";
 
 // Seed ISO for the build VM (spec S5 sections 6.2, 7.2 step 3, 14)
@@ -184,7 +190,7 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 	out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
 	out.set(
 		"build/agent.toml",
-		renderAgentToml(i.tunnelUrl, recipe.verify === "linux-desktop"),
+		renderAgentToml(i.tunnelUrl, isDesktopRecipe(recipe)),
 	);
 	out.set(
 		"build/ssh-user-ca.pub",

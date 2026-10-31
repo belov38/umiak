@@ -91,15 +91,21 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 	});
 
 	it("seeds desktop capability and 4gb/8gb without a pool", async () => {
-		const templates = await payload.find({
-			collection: "templates",
-			where: { slug: { equals: "linux-desktop" } },
-		});
-		expect(templates.docs[0]).toMatchObject({
-			defaultSize: "4gb",
-			allowedSizes: ["4gb", "8gb"],
-			capabilities: ["exec", "files", "ssh", "desktop"],
-		});
+		for (const [slug, os] of [
+			["linux-desktop", "linux"],
+			["windows-desktop", "windows"],
+		] as const) {
+			const templates = await payload.find({
+				collection: "templates",
+				where: { slug: { equals: slug } },
+			});
+			expect(templates.docs[0]).toMatchObject({
+				os,
+				defaultSize: "4gb",
+				allowedSizes: ["4gb", "8gb"],
+				capabilities: ["exec", "files", "ssh", "desktop"],
+			});
+		}
 		for (const [slug, vcpu, memoryMb] of [
 			["4gb", 4, 4096],
 			["8gb", 8, 8192],

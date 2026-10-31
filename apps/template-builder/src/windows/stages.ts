@@ -22,6 +22,7 @@ import { verifyAgentPackage } from "../agent-package.ts";
 import type { Manifest, WindowsFacts } from "../manifest.ts";
 import {
 	isBuiltinStep,
+	isDesktopRecipe,
 	loadVersions,
 	NETWORK_UP_STEP,
 	PINNED_MACHINE,
@@ -479,7 +480,7 @@ export async function stageMedia(
 			versions,
 			agentTar,
 			agentVersion: st.m.agentVersion,
-			agentToml: renderWindowsAgentToml(o.tunnelUrl),
+			agentToml: renderWindowsAgentToml(o.tunnelUrl, isDesktopRecipe(recipe)),
 			...(o.sshUserCa !== undefined
 				? { sshUserCa: readFileSync(o.sshUserCa, "utf8") }
 				: {}),

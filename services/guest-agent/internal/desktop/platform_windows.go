@@ -77,6 +77,7 @@ func NewPlatform(l paths.Layout, _ string) (Session, Streamer, func(context.Cont
 	}
 	configDir := filepath.Join(filepath.Dir(l.StateDir), "desktop")
 	h := &FileHost{SunDir: filepath.Join(files, "Sunshine", "config"), MoonDir: filepath.Join(l.StateDir, "desktop-moonlight"), Template: filepath.Join(configDir, "moonlight.json"), IceScript: filepath.Join(configDir, "ice-servers.cmd"), Capture: "ddx"}
+	h.StreamSockets = moonlightUDPSockets
 	h.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		if name == "conntrack" {
 			return nil, errors.New("windows conntrack unavailable")
@@ -114,7 +115,7 @@ func NewPlatform(l paths.Layout, _ string) (Session, Streamer, func(context.Cont
 		if e := windowsACL(ctx, filepath.Dir(socket), "user"); e != nil {
 			return e
 		}
-		_, e := ExecCommand(ctx, "pwsh.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", filepath.Join(configDir, "register-session.ps1"), "-Socket", socket)
+		_, e := ExecCommand(ctx, filepath.Join(files, "PowerShell", "7", "pwsh.exe"), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", filepath.Join(configDir, "register-session.ps1"), "-Socket", socket)
 		return e
 	}
 	streamer := NewHTTPStreamer(h, pinnedSunshineClient(filepath.Join(h.SunDir, "cert.pem")), "https://127.0.0.1:47990", "http://127.0.0.1:47800")
