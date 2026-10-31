@@ -39,6 +39,7 @@ func TestDoctorJSONFields(t *testing.T) {
 	raw := rawFor(machineA)
 	raw.Family = "sbxt1:" + overrideURL
 	h.src.set(raw)
+	h.seedIdentity(machineA)
 	h.start()
 	h.waitReady()
 	eventually(t, "status.json with every phase", func() bool {

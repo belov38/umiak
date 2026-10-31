@@ -162,6 +162,9 @@ func TestInstallActivateAbandonsPending(t *testing.T) {
 }
 
 func TestPlaceVersionForcesExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no executable bit: an .exe runs by its extension")
+	}
 	pub, priv := testKey(t)
 	l := paths.ForRoot(t.TempDir())
 	keys := []ed25519.PublicKey{pub}

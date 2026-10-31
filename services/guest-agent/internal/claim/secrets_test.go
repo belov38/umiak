@@ -158,11 +158,11 @@ func TestSecretEnvNotPersistedWhenDisabled(t *testing.T) {
 
 	// A failed update keeps the applied set: the files on disk and the env
 	// in memory still match the digest.
-	blocker, _ := h.l.Rooted("/blocker")
+	blocker, _ := h.l.Rooted(testPath("/blocker"))
 	mustWrite(t, blocker, "a file")
 	_, err := m2.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{
 		SecretEnv:   req.SecretEnv,
-		SecretFiles: []*agentv1.SecretFile{{Name: "other", Content: []byte("x"), LinkPath: "/blocker/x"}},
+		SecretFiles: []*agentv1.SecretFile{{Name: "other", Content: []byte("x"), LinkPath: testPath("/blocker/x")}},
 	})
 	if err == nil {
 		t.Fatal("UpdateSecrets succeeded with a blocked link_path")
@@ -238,6 +238,9 @@ func TestWipeAndRestoreSecretFiles(t *testing.T) {
 // the files and nothing can be restored, so the contents are not kept in
 // memory and a wipe does not defer later writes.
 func TestLinuxKeepsNoFilesInMemory(t *testing.T) {
+	if secretEnvMemoryOnly {
+		t.Skip("the secrets are kept in memory on this OS (TestWipeAndRestoreSecretFiles)")
+	}
 	h := newHarness(t)
 	ctx := t.Context()
 	if _, err := h.m.Claim(ctx, twoFiles()); err != nil {
@@ -329,7 +332,7 @@ func TestRestoreFailureGoesOnAndSetsPending(t *testing.T) {
 				}
 			}
 			// Something occupies key.pem: its write fails.
-			mustMkdir(t, filepath.Join(h.l.SecretFilesDir, "key.pem", "x"))
+			release := blockSecretPath(t, filepath.Join(h.l.SecretFilesDir, "key.pem"))
 			before := len(h.rec.Of(events.TypeReadinessChanged))
 			if err := h.m.RestoreSecretFiles(); err == nil {
 				t.Fatal("RestoreSecretFiles succeeded with key.pem blocked")
@@ -344,9 +347,7 @@ func TestRestoreFailureGoesOnAndSetsPending(t *testing.T) {
 				t.Error("no readiness.changed for the pending secrets")
 			}
 			// Secret writes are no longer deferred: the resend lands.
-			if err := os.RemoveAll(filepath.Join(h.l.SecretFilesDir, "key.pem")); err != nil {
-				t.Fatal(err)
-			}
+			release()
 			if _, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretFiles: twoFiles().GetSecretFiles()}); err != nil {
 				t.Fatal(err)
 			}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -36,6 +37,9 @@ import (
 )
 
 func TestStartupOrderIdentityReset(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Linux start (ident.Apply); the Windows reset: TestWinBootRunsEarlyInService")
+	}
 	h := newHarness(t)
 	// State of the previous identity: identity.json of machine A, a journal
 	// with events and a command directory.
@@ -100,6 +104,7 @@ func TestStartupOrderIdentityReset(t *testing.T) {
 
 func TestReadyBeforeTunnel(t *testing.T) {
 	h := newHarness(t)
+	h.seedIdentity(machineA)
 	h.dialer.block = true
 	h.start()
 	h.waitReady()
@@ -222,6 +227,7 @@ func TestIdentityFailedRetries(t *testing.T) {
 
 func TestAgentStartedReason(t *testing.T) {
 	h := newHarness(t)
+	h.seedIdentity(machineA)
 	runOnce := func() string {
 		t.Helper()
 		h.start()
@@ -275,6 +281,7 @@ func TestAgentStartedReason(t *testing.T) {
 
 func TestStatusFileHasNoSecrets(t *testing.T) {
 	h := newHarness(t)
+	h.seedIdentity(machineA)
 	h.start()
 	h.waitReady()
 	var raw []byte
@@ -335,13 +342,7 @@ func TestDebugListenConfirmsUpdate(t *testing.T) {
 	h.start()
 	h.waitReady()
 
-	fi, err := os.Stat(sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Errorf("socket mode = %v, want 0600", fi.Mode().Perm())
-	}
+	wantPrivateSocket(t, sock)
 	hc := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
@@ -510,8 +511,10 @@ func TestShutdownFlushesBufferedOutcome(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// The Quiesce outcome is produced while the store is frozen, so the
-	// request cache buffers it in memory.
-	qreq := connect.NewRequest(&agentv1.QuiesceRequest{})
+	// request cache buffers it in memory. Windows freezes neither the
+	// filesystems nor the store (fs=true is refused): the outcome is
+	// written at once there and must be as durable.
+	qreq := connect.NewRequest(&agentv1.QuiesceRequest{Fs: proto.Bool(quiesceFS)})
 	qreq.Header().Set(wire.HeaderRequestID, reqQuiesce)
 	q, err := sys.Quiesce(ctx, qreq)
 	if err != nil {
@@ -565,13 +568,13 @@ func TestShutdownThawsActiveLease(t *testing.T) {
 	sys := agentv1connect.NewSystemClient(hc, "http://agent")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	qreq := connect.NewRequest(&agentv1.QuiesceRequest{})
+	qreq := connect.NewRequest(&agentv1.QuiesceRequest{Fs: proto.Bool(quiesceFS)})
 	qreq.Header().Set(wire.HeaderRequestID, "0192f1a4-7c3e-7b2a-9d4f-000000000003")
 	if _, err := sys.Quiesce(ctx, qreq); err != nil {
 		t.Fatalf("Quiesce: %v", err)
 	}
-	if !fz.isFrozen("/") {
-		t.Fatal("not frozen")
+	if fz.isFrozen("/") != quiesceFS {
+		t.Fatalf("frozen = %v, want %v", fz.isFrozen("/"), quiesceFS)
 	}
 	h.stop()
 	if fz.isFrozen("/") {
@@ -585,19 +588,25 @@ func TestShutdownThawsActiveLease(t *testing.T) {
 	}
 }
 
-// The state and run directories are root 0700 (spec 4).
+// The state and run directories are root 0700 (spec 4); on Windows the
+// start gives them protected DACLs (S9 spec 12.1).
 func TestStateDirsMode(t *testing.T) {
 	h := newHarness(t)
+	if runtime.GOOS == "windows" {
+		wh := newWinHarness(t)
+		wh.seedIdentity(machineA)
+		wh.writeEarly(bootOne)
+		h = wh.harness
+	}
 	h.start()
 	h.waitReady()
 	h.stop()
-	for _, dir := range []string{h.l.StateDir, h.l.RunDir} {
-		fi, err := os.Stat(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if m := fi.Mode().Perm(); m != 0o700 {
-			t.Errorf("%s mode = %o, want 700", dir, m)
+	for _, d := range []struct {
+		dir string
+		a   fsutil.DirAccess
+	}{{h.l.StateDir, fsutil.SystemOnly}, {h.l.RunDir, fsutil.SystemAndAdmins}} {
+		if ok, err := fsutil.IsSecure(d.dir, d.a); err != nil || !ok {
+			t.Errorf("%s: IsSecure = %v, %v; want 0700, the protected DACL on Windows", d.dir, ok, err)
 		}
 	}
 }
@@ -631,6 +640,10 @@ func (f *recFreezer) isFrozen(p string) bool {
 	defer f.mu.Unlock()
 	return f.frozen[p]
 }
+
+// quiesceFS is the fs field of the Quiesce calls: Windows freezes no
+// filesystem in the agent (S9 spec 12.10).
+const quiesceFS = runtime.GOOS != "windows"
 
 // reqQuiesce is the request id of the Quiesce call in
 // TestShutdownFlushesBufferedOutcome.

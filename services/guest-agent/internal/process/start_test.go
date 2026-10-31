@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -225,12 +227,33 @@ func TestStartInvalid(t *testing.T) {
 
 func TestStartShellAndCwd(t *testing.T) {
 	h := newHarness(t)
-	home := mustUser(t, h.user).Home
+	u := mustUser(t, h.user)
+	home := u.Home
+	// The shell is bash on Linux, pwsh on Windows (TestShellArgvPwsh), where
+	// a path rooted without a drive is on the drive of the home.
+	shellArgv := func(id, script string, login bool) []string {
+		if runtime.GOOS != "windows" {
+			flag := "-lc"
+			if !login {
+				flag = "-c"
+			}
+			return []string{"/bin/bash", flag, script}
+		}
+		argv, _, err := h.m.shellArgv(id, u, script, login)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return argv
+	}
+	tmp := "/tmp"
+	if runtime.GOOS == "windows" {
+		tmp = filepath.VolumeName(home) + `\tmp`
+	}
 
 	spec := &agentv1.CommandSpec{Cmd: &agentv1.CommandSpec_Shell{Shell: "echo hi"}, Cwd: "work"}
 	h.start("c1", spec)
 	ss := h.run("c1").Spec()
-	if !slices.Equal(ss.Argv, []string{"/bin/bash", "-lc", "echo hi"}) || ss.Cwd != home+"/work" {
+	if !slices.Equal(ss.Argv, shellArgv("c1", "echo hi", true)) || ss.Cwd != filepath.Join(home, "work") {
 		t.Fatalf("argv %v cwd %q", ss.Argv, ss.Cwd)
 	}
 
@@ -239,7 +262,7 @@ func TestStartShellAndCwd(t *testing.T) {
 		OnExit: agentv1.OnExit_ON_EXIT_KILL_LEFTOVERS, TimeoutMs: 1500, Stdin: true}
 	h.start("c2", spec)
 	ss = h.run("c2").Spec()
-	if !slices.Equal(ss.Argv, []string{"/bin/bash", "-c", "echo hi"}) || ss.Cwd != "/tmp" {
+	if !slices.Equal(ss.Argv, shellArgv("c2", "echo hi", false)) || ss.Cwd != tmp {
 		t.Fatalf("argv %v cwd %q", ss.Argv, ss.Cwd)
 	}
 	if !ss.KillLeftovers || ss.TimeoutMs != 1500 || !ss.Stdin || ss.AgentVersion != "1.2.3" {

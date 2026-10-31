@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -145,8 +146,14 @@ func TestScannerList(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %v", got)
 	}
-	want8080 := &agentv1.Port{Port: 8080, Addresses: []string{"127.0.0.1", "::1"}, Pid: 7, Process: "myapp", User: "root"}
-	want80 := &agentv1.Port{Port: 80, Addresses: []string{"10.0.0.5"}, Pid: 7, Process: "myapp", User: "root"}
+	// The procfs owner is a uid: Windows has no uid 0, so the name stays
+	// numeric there.
+	owner := "root"
+	if runtime.GOOS == "windows" {
+		owner = "0"
+	}
+	want8080 := &agentv1.Port{Port: 8080, Addresses: []string{"127.0.0.1", "::1"}, Pid: 7, Process: "myapp", User: owner}
+	want80 := &agentv1.Port{Port: 80, Addresses: []string{"10.0.0.5"}, Pid: 7, Process: "myapp", User: owner}
 	// Sorted by port: 80, 8080.
 	if !proto.Equal(got[0], want80) || !proto.Equal(got[1], want8080) {
 		t.Fatalf("got %v, want %v and %v", got, want80, want8080)

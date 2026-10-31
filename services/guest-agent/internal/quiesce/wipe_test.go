@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -59,7 +58,7 @@ func TestQuiesceWipeSecretFilesThenThawRestores(t *testing.T) {
 			t.Fatalf("Quiesce: %v", err)
 		}
 		// The wipe comes after the hooks, which may close the files.
-		want := []string{"watchdog start lease-1", "hook 10-a.ps1 freeze", "secrets wipe"}
+		want := []string{"watchdog start lease-1", "hook 10-a freeze", "secrets wipe"}
 		if got := e.log.all(); !slices.Equal(got, want) {
 			t.Errorf("quiesce order:\n got %q\nwant %q", got, want)
 		}
@@ -67,7 +66,7 @@ func TestQuiesceWipeSecretFilesThenThawRestores(t *testing.T) {
 		if _, err := e.m.Thaw(ctx, "lease-1"); err != nil {
 			t.Fatalf("Thaw: %v", err)
 		}
-		wantThaw := []string{"secrets restore", "hook 10-a.ps1 thaw", "watchdog stop lease-1"}
+		wantThaw := []string{"secrets restore", "hook 10-a thaw", "watchdog stop lease-1"}
 		if got := e.log.all()[n:]; !slices.Equal(got, wantThaw) {
 			t.Errorf("thaw order:\n got %q\nwant %q", got, wantThaw)
 		}
@@ -145,8 +144,8 @@ func TestQuiesceSecretsInUseRollsBack(t *testing.T) {
 	_, err := e.m.Quiesce(context.Background(), 30000, false, false, true)
 	wantErr(t, err, connect.CodeFailedPrecondition, errs.SecretsInUse)
 	want := []string{
-		"watchdog start lease-1", "hook 10-a.ps1 freeze", "secrets wipe",
-		"secrets restore", "hook 10-a.ps1 thaw", "watchdog stop lease-1",
+		"watchdog start lease-1", "hook 10-a freeze", "secrets wipe",
+		"secrets restore", "hook 10-a thaw", "watchdog stop lease-1",
 	}
 	if got := e.log.all(); !slices.Equal(got, want) {
 		t.Errorf("log:\n got %q\nwant %q", got, want)
@@ -229,7 +228,7 @@ func TestWindowsWatchdog(t *testing.T) {
 		if code := runWatchdog(context.Background(), e.l, "w-1", s, time.Now); code != 0 {
 			t.Fatalf("exit %d", code)
 		}
-		if want := []string{"hook 10-a.ps1 thaw"}; !slices.Equal(e.log.all(), want) {
+		if want := []string{"hook 10-a thaw"}; !slices.Equal(e.log.all(), want) {
 			t.Errorf("log = %q, want %q", e.log.all(), want)
 		}
 		if fileExists(e.l.QuiesceFile) || fileExists(claimPath(e.l)) {
@@ -269,7 +268,7 @@ func TestStartupLeaseWithWipedSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.m.Startup(context.Background())
-	if want := []string{"hook 10-a.ps1 thaw", "watchdog stop old"}; !slices.Equal(e.log.all(), want) {
+	if want := []string{"hook 10-a thaw", "watchdog stop old"}; !slices.Equal(e.log.all(), want) {
 		t.Errorf("log = %q, want %q", e.log.all(), want)
 	}
 	if fileExists(e.l.QuiesceFile) {
@@ -303,7 +302,7 @@ func TestWatchdogFiresAfterWipe(t *testing.T) {
 	e, sec := newWindowsEnv(t)
 	e.addHook(t, "10-a.ps1", "", 0o755)
 	unit := steps{log: testLog, runHook: func(_ context.Context, p, arg string) error {
-		e.log.add("unit hook %s %s", filepath.Base(p), arg)
+		e.log.add("unit hook %s %s", hookLabel(p), arg)
 		return nil
 	}}
 	sec.onWipe = func() {
@@ -312,8 +311,8 @@ func TestWatchdogFiresAfterWipe(t *testing.T) {
 	_, err := e.m.Quiesce(context.Background(), 30000, false, false, true)
 	wantErr(t, err, connect.CodeAborted, errs.LeaseExpired)
 	want := []string{
-		"watchdog start lease-1", "hook 10-a.ps1 freeze", "secrets wipe",
-		"unit hook 10-a.ps1 thaw", "secrets restore", "watchdog stop lease-1",
+		"watchdog start lease-1", "hook 10-a freeze", "secrets wipe",
+		"unit hook 10-a thaw", "secrets restore", "watchdog stop lease-1",
 	}
 	if got := e.log.all(); !slices.Equal(got, want) {
 		t.Errorf("log:\n got %q\nwant %q", got, want)

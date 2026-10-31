@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -75,13 +76,9 @@ func newHarness(t *testing.T, mods ...func(*Options)) *harness {
 	fake := supervisor.NewFake(l)
 	t.Cleanup(func() { _ = fake.Close() })
 
-	cu, err := user.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
 	cfg := config.Defaults()
-	cfg.DefaultUser = cu.Username
-	h := &harness{t: t, layout: l, st: st, fake: fake, rec: &events.Recorder{}, user: cu.Username}
+	cfg.DefaultUser = testUser(t)
+	h := &harness{t: t, layout: l, st: st, fake: fake, rec: &events.Recorder{}, user: cfg.DefaultUser}
 	h.opts = Options{
 		Store:          st,
 		Supervisor:     fake,
@@ -142,6 +139,21 @@ func (h *harness) restart(bootID string) {
 	}
 	h.opts.BootID = bootID
 	h.startManager(true)
+}
+
+// testUser is the account the commands of the tests run as: the current
+// user, on Windows SYSTEM (the tests run as SYSTEM, and the agent knows only
+// SYSTEM and user there; user.Current names SYSTEM WORKGROUP\<host>$).
+func testUser(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return "SYSTEM"
+	}
+	cu, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cu.Username
 }
 
 func argvSpec(args ...string) *agentv1.CommandSpec {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -40,6 +41,9 @@ func (f *cliFreezer) Thaw(p string) error {
 }
 
 func TestThawForce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Linux thaw (FITHAW); Windows thaws through the agent: TestThawForceAdminSocketAgentDown, TestThawForceThroughAgent")
+	}
 	fz := &cliFreezer{frozen: true}
 	d := deps{layout: paths.ForRoot(t.TempDir()), freezer: fz}
 	var out, errOut bytes.Buffer

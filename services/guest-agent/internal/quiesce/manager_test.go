@@ -91,7 +91,7 @@ func TestQuiesceOrderAndRollback(t *testing.T) {
 			t.Fatalf("lease file: %v, %v", l, err)
 		}
 		if l.ID != "lease-1" || !slices.Equal(l.Paused, []string{"c1", "c2"}) || !slices.Equal(l.Frozen, []string{"/data", "/"}) ||
-			len(l.Hooks) != 2 || filepath.Base(l.Hooks[0]) != "10-a" || filepath.Base(l.Hooks[1]) != "20-b" {
+			len(l.Hooks) != 2 || hookLabel(l.Hooks[0]) != "10-a" || hookLabel(l.Hooks[1]) != "20-b" {
 			t.Errorf("lease = %+v", l)
 		}
 		want := []string{

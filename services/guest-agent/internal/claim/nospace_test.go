@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 
@@ -32,20 +34,35 @@ func TestClaimNoSpace(t *testing.T) {
 		name  string
 		path  func(h *harness) string
 		errno syscall.Errno
+		// skip is why the file is not written through the writeFile seam
+		// on this OS, or "".
+		skip string
 	}{
-		{"sbx env", func(h *harness) string { return h.l.SbxEnvFile }, syscall.ENOSPC},
-		{"secret file", func(h *harness) string { return h.l.SecretFilesDir + "/key.pem" }, syscall.ENOSPC},
-		{"secrets env", func(h *harness) string { return h.l.SecretsEnvFile }, syscall.ENOSPC},
-		{"secrets state", func(h *harness) string { return h.l.SecretsStateFile }, syscall.EDQUOT},
-		{"ssh ca", func(h *harness) string { return h.l.SSHUserCA }, syscall.ENOSPC},
+		{"sbx env", func(h *harness) string { return h.l.SbxEnvFile }, syscall.ENOSPC, onWindows("no /etc/sbx/env")},
+		{"secret file", func(h *harness) string { return filepath.Join(h.l.SecretFilesDir, "key.pem") }, syscall.ENOSPC,
+			onWindows("secret files are created with their ACL, not through writeFile")},
+		{"secrets env", func(h *harness) string { return h.l.SecretsEnvFile }, syscall.ENOSPC, onWindows("the secret env stays in memory")},
+		{"secrets state", func(h *harness) string { return h.l.SecretsStateFile }, syscall.EDQUOT, ""},
+		{"ssh ca", func(h *harness) string { return h.l.SSHUserCA }, syscall.ENOSPC, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.skip != "" {
+				t.Skip(tc.skip)
+			}
 			h := newHarness(t)
 			failWrites(h.m, tc.path(h), tc.errno)
 			_, err := h.m.Claim(context.Background(), fullRequest())
 			wantDetail(t, err, connect.CodeResourceExhausted, errs.NoSpace)
 		})
 	}
+}
+
+// onWindows returns why on Windows, "" elsewhere.
+func onWindows(why string) string {
+	if runtime.GOOS == "windows" {
+		return why
+	}
+	return ""
 }
 
 func TestClaimHostnameNoSpace(t *testing.T) {
@@ -64,12 +81,15 @@ func TestUpdatesNoSpace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	failWrites(h.m, h.l.SbxEnvFile, syscall.ENOSPC)
-	_, err := h.m.UpdateEnv(ctx, &agentv1.UpdateEnvRequest{Env: map[string]string{"A": "b"}})
-	wantDetail(t, err, connect.CodeResourceExhausted, errs.NoSpace)
+	// Windows has no /etc/sbx/env: UpdateEnv writes no file there.
+	if h.l.SbxEnvFile != "" {
+		failWrites(h.m, h.l.SbxEnvFile, syscall.ENOSPC)
+		_, err := h.m.UpdateEnv(ctx, &agentv1.UpdateEnvRequest{Env: map[string]string{"A": "b"}})
+		wantDetail(t, err, connect.CodeResourceExhausted, errs.NoSpace)
+	}
 
 	failWrites(h.m, h.l.SecretsStateFile, syscall.ENOSPC)
-	_, err = h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretEnv: map[string]string{"TOKEN": "x"}})
+	_, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{SecretEnv: map[string]string{"TOKEN": "x"}})
 	wantDetail(t, err, connect.CodeResourceExhausted, errs.NoSpace)
 
 	failWrites(h.m, h.l.SSHUserCA, syscall.EDQUOT)

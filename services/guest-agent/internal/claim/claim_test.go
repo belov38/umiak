@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -129,6 +130,39 @@ func (h *harness) hostnameCalls() []string {
 	return slices.Clone(h.hostnames)
 }
 
+// wantHostnames is the hostname calls of claims for names: none where the
+// claim does not set the hostname (Windows, appliesHostname).
+func wantHostnames(names ...string) []string {
+	if !appliesHostname {
+		return nil
+	}
+	return names
+}
+
+// claimEnvHas reports whether the non-secret claim env has key=value: in
+// /etc/sbx/env on Linux. Windows has no such file (the env socket serves
+// the EnvBuilder), so there the EnvBuilder is asked.
+func (h *harness) claimEnvHas(key, value string) bool {
+	h.t.Helper()
+	if h.l.SbxEnvFile == "" {
+		return slices.Contains(h.m.EnvBuilder().Build(testUser(), &agentv1.CommandSpec{}), key+"="+value)
+	}
+	return strings.Contains(h.read(h.l.SbxEnvFile), key+`="`+value+`"`+"\n")
+}
+
+// secretEnvFile returns the content of secrets/env, or "" where the
+// secret env stays in memory (Windows): the file must not exist there.
+func (h *harness) secretEnvFile() string {
+	h.t.Helper()
+	if secretEnvMemoryOnly {
+		if _, err := os.Lstat(h.l.SecretsEnvFile); !errors.Is(err, fs.ErrNotExist) {
+			h.t.Errorf("secrets/env exists with the secret env in memory (%v)", err)
+		}
+		return ""
+	}
+	return h.read(h.l.SecretsEnvFile)
+}
+
 func (h *harness) read(path string) string {
 	h.t.Helper()
 	b, err := os.ReadFile(path)
@@ -192,43 +226,45 @@ func TestClaimAppliesAll(t *testing.T) {
 		t.Errorf("response not ready: %v", resp)
 	}
 
-	if got := h.hostnameCalls(); !slices.Equal(got, []string{"my-box"}) {
+	if got := h.hostnameCalls(); !slices.Equal(got, wantHostnames("my-box")) {
 		t.Errorf("hostname calls = %v", got)
 	}
 
-	env := h.read(h.l.SbxEnvFile)
-	for _, line := range []string{
-		`FOO="bar"`,
-		`SBX="1"`,
-		`SBX_SANDBOX_ID="sbx_1"`,
-		`SBX_PORT_DOMAIN="sbx.example.com"`,
-		`__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=".sbx.example.com"`,
+	for _, kv := range [][2]string{
+		{"FOO", "bar"},
+		{"SBX", "1"},
+		{"SBX_SANDBOX_ID", "sbx_1"},
+		{"SBX_PORT_DOMAIN", "sbx.example.com"},
+		{"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", ".sbx.example.com"},
 	} {
-		if !strings.Contains(env, line+"\n") {
-			t.Errorf("/etc/sbx/env lacks %s:\n%s", line, env)
+		if !h.claimEnvHas(kv[0], kv[1]) {
+			t.Errorf("claim env lacks %s=%s", kv[0], kv[1])
 		}
 	}
-	if strings.Contains(env, secretEnvValue) {
+	if h.l.SbxEnvFile != "" && strings.Contains(h.read(h.l.SbxEnvFile), secretEnvValue) {
 		t.Error("/etc/sbx/env contains a secret")
 	}
 
-	if got := h.read(h.l.SecretsEnvFile); got != `TOKEN="`+secretEnvValue+`"`+"\n" {
+	// Windows: the secret env stays in memory, the ACLs of the secret
+	// store are checked by TestSecretFileACL and TestSecretDirACL.
+	if got := h.secretEnvFile(); !secretEnvMemoryOnly && got != `TOKEN="`+secretEnvValue+`"`+"\n" {
 		t.Errorf("secrets/env = %q", got)
-	}
-	if m := h.mode(h.l.SecretsEnvFile); m != 0o440 {
-		t.Errorf("secrets/env mode = %o", m)
 	}
 	file := filepath.Join(h.l.SecretFilesDir, "key.pem")
 	if got := h.read(file); got != secretFileValue {
 		t.Errorf("secret file = %q", got)
 	}
-	if m := h.mode(file); m != 0o440 {
-		t.Errorf("secret file mode = %o", m)
+	if runtime.GOOS != "windows" {
+		for _, c := range []struct {
+			path string
+			mode fs.FileMode
+		}{{h.l.SecretsEnvFile, 0o440}, {file, 0o440}, {h.l.SecretsDir, 0o750}} {
+			if m := h.mode(c.path); m != c.mode {
+				t.Errorf("%s mode = %o, want %o", filepath.Base(c.path), m, c.mode)
+			}
+		}
 	}
-	if m := h.mode(h.l.SecretsDir); m != 0o750 {
-		t.Errorf("secrets dir mode = %o", m)
-	}
-	link, err := h.l.Rooted("/home/user/.config/key.pem")
+	link, err := h.l.Rooted(testLinkPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +365,7 @@ func TestClaimReplaySameRequest(t *testing.T) {
 	if !proto.Equal(first, second) {
 		t.Errorf("replay = %v, want %v", second, first)
 	}
-	if got := h.hostnameCalls(); len(got) != 1 {
+	if got := h.hostnameCalls(); len(got) != len(wantHostnames("my-box")) {
 		t.Errorf("hostname set %d times", len(got))
 	}
 	if n := len(h.rec.Of(events.TypeClaimApplied)); n != 1 {
@@ -356,8 +392,8 @@ func TestClaimOtherContentAlreadyClaimed(t *testing.T) {
 	_, err = h.m.Claim(ctx, resume)
 	wantDetail(t, err, connect.CodeFailedPrecondition, errs.AlreadyClaimed)
 
-	if got := h.read(h.l.SbxEnvFile); !strings.Contains(got, `FOO="bar"`) {
-		t.Errorf("env changed by a refused claim: %s", got)
+	if !h.claimEnvHas("FOO", "bar") {
+		t.Error("env changed by a refused claim")
 	}
 }
 
@@ -384,16 +420,16 @@ func TestClaimResumeSameSandbox(t *testing.T) {
 		if !resp.GetReady() {
 			t.Errorf("%v: not ready: %v", reason, resp)
 		}
-		if got := h.read(h.l.SbxEnvFile); !strings.Contains(got, `FOO="new-`+reason.String()+`"`) {
-			t.Errorf("%v: env not updated: %s", reason, got)
+		if !h.claimEnvHas("FOO", "new-"+reason.String()) {
+			t.Errorf("%v: env not updated", reason)
 		}
-		if got := h.read(h.l.SecretsEnvFile); got != `OTHER="v2"`+"\n" {
+		if got := h.secretEnvFile(); !secretEnvMemoryOnly && got != `OTHER="v2"`+"\n" {
 			t.Errorf("%v: secret env = %q", reason, got)
 		}
 		if _, err := os.Stat(filepath.Join(h.l.SecretFilesDir, "key.pem")); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%v: removed secret file still present (%v)", reason, err)
 		}
-		link, _ := h.l.Rooted("/home/user/.config/key.pem")
+		link, _ := h.l.Rooted(testLinkPath)
 		if _, err := os.Lstat(link); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%v: link of a removed secret file still present (%v)", reason, err)
 		}
@@ -412,7 +448,7 @@ func TestClaimResumeSameSandbox(t *testing.T) {
 			t.Errorf("%v: stored authorized_keys = %v", reason, stored.GetAuthorizedKeys())
 		}
 	}
-	if got := h.hostnameCalls(); !slices.Equal(got, []string{"my-box"}) {
+	if got := h.hostnameCalls(); !slices.Equal(got, wantHostnames("my-box")) {
 		t.Errorf("hostname calls = %v", got)
 	}
 	if info := h.m.ClaimInfo(); info.GetHostname() != "my-box" || info.GetEnv()["FOO"] != "new-CLAIM_REASON_RECOVER" {
@@ -488,13 +524,20 @@ func TestUpdatesBeforeClaim(t *testing.T) {
 
 func TestStartCreatesFiles(t *testing.T) {
 	h := newHarness(t)
-	for _, p := range []string{h.l.SecretsEnvFile, h.l.SbxEnvFile} {
-		if got := h.read(p); got != "" {
-			t.Errorf("%s = %q, want empty", p, got)
+	// Windows has no /etc/sbx/env and no cmd-spec/, and keeps the secret
+	// env in memory.
+	if got := h.secretEnvFile(); got != "" {
+		t.Errorf("secrets/env = %q, want empty", got)
+	}
+	if h.l.SbxEnvFile != "" {
+		if got := h.read(h.l.SbxEnvFile); got != "" {
+			t.Errorf("/etc/sbx/env = %q, want empty", got)
 		}
 	}
-	if m := h.mode(h.l.CmdSpecDir); m != 0o700 {
-		t.Errorf("cmd-spec mode = %o", m)
+	if h.l.CmdSpecDir != "" {
+		if m := h.mode(h.l.CmdSpecDir); m != 0o700 {
+			t.Errorf("cmd-spec mode = %o", m)
+		}
 	}
 	if st, _ := h.tr.State(readiness.PhaseClaim); st != pending {
 		t.Errorf("claim phase before claim = %v", st)
@@ -515,11 +558,13 @@ func TestSecretsPendingAfterReboot(t *testing.T) {
 	}
 
 	// Agent restart without reboot: tmpfs content matches the digest.
+	// Where the secret env lives only in memory (Windows) it is gone and
+	// the secrets are pending (TestSecretEnvNotPersistedWhenDisabled).
 	m2 := h.newManager()
-	if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready {
+	if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready && !secretEnvMemoryOnly {
 		t.Errorf("secrets after restart = %v, want ready", st)
 	}
-	if env := m2.EnvBuilder().Build(testUser(), &agentv1.CommandSpec{}); !slices.Contains(env, "TOKEN="+secretEnvValue) {
+	if env := m2.EnvBuilder().Build(testUser(), &agentv1.CommandSpec{}); !slices.Contains(env, "TOKEN="+secretEnvValue) && !secretEnvMemoryOnly {
 		t.Errorf("secret env not restored from tmpfs: %v", env)
 	}
 
@@ -566,7 +611,7 @@ func TestPrepareStopWipes(t *testing.T) {
 	if wiped, err := h.m.PrepareStop(ctx); err != nil || !wiped {
 		t.Fatalf("PrepareStop = %v, %v; want true, nil", wiped, err)
 	}
-	if got := h.read(h.l.SecretsEnvFile); got != "" {
+	if got := h.secretEnvFile(); got != "" {
 		t.Errorf("secrets/env = %q after PrepareStop", got)
 	}
 	entries, err := os.ReadDir(h.l.SecretFilesDir)
@@ -604,6 +649,9 @@ func TestPrepareStopWithoutSecretsKeepsReady(t *testing.T) {
 }
 
 func TestHostnameWriter(t *testing.T) {
+	if !appliesHostname {
+		t.Skip("the claim does not set the hostname on this OS (TestClaimDoesNotApplyHostnameOnWindows)")
+	}
 	l := paths.ForRoot(t.TempDir())
 	if err := os.MkdirAll(filepath.Dir(l.HostsFile), 0o755); err != nil {
 		t.Fatal(err)
@@ -628,17 +676,15 @@ func TestHostnameWriter(t *testing.T) {
 }
 
 func TestSecretsStateFileMode(t *testing.T) {
-	h := newHarness(t)
+	h := newHarnessWith(t, stateFileMod)
 	if _, err := h.m.Claim(context.Background(), fullRequest()); err != nil {
 		t.Fatal(err)
 	}
-	if m := h.mode(h.l.SecretsStateFile); m != 0o600 {
-		t.Errorf("secrets.json mode = %o, want 600", m)
-	}
+	wantRootOnly(t, h.l.SecretsStateFile)
 }
 
 func TestLinkPathOccupied(t *testing.T) {
-	const linkPath = "/home/user/.config/key.pem"
+	const linkPath = testLinkPath
 	tests := []struct {
 		name    string
 		noLink  bool // link_path stays as it is
@@ -748,20 +794,22 @@ func TestLinkPathOccupied(t *testing.T) {
 
 func TestLinkPathParentsOwnership(t *testing.T) {
 	h := newHarness(t)
-	home, _ := h.l.Rooted("/home/user")
+	home, _ := h.l.Rooted(testPath("/home/user"))
 	mustMkdir(t, home)
 	req := fullRequest()
 	req.SecretFiles = []*agentv1.SecretFile{
-		{Name: "a", Content: []byte("1"), LinkPath: "/home/user/new/deep/a"},
-		{Name: "b", Content: []byte("2"), LinkPath: "/opt/app/conf/b"},
+		{Name: "a", Content: []byte("1"), LinkPath: testPath("/home/user/new/deep/a")},
+		{Name: "b", Content: []byte("2"), LinkPath: testPath("/opt/app/conf/b")},
 	}
 	if _, err := h.m.Claim(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	inHome, _ := h.l.Rooted("/home/user/new/deep")
-	outside, _ := h.l.Rooted("/opt/app")
+	inHome, _ := h.l.Rooted(testPath("/home/user/new/deep"))
+	outside, _ := h.l.Rooted(testPath("/opt/app"))
 	for _, d := range []string{inHome, outside} {
-		if m := h.mode(d); m != 0o755 {
+		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
+			t.Errorf("%s: %v %v", d, fi, err)
+		} else if m := fi.Mode().Perm(); m != 0o755 && runtime.GOOS != "windows" {
 			t.Errorf("%s mode = %o", d, m)
 		}
 	}
@@ -785,12 +833,12 @@ func TestUpdateSecretsPartialFailure(t *testing.T) {
 	if _, err := h.m.Claim(ctx, fullRequest()); err != nil {
 		t.Fatal(err)
 	}
-	blocker, _ := h.l.Rooted("/blocker")
+	blocker, _ := h.l.Rooted(testPath("/blocker"))
 	mustWrite(t, blocker, "a file, not a directory")
 
 	_, err := h.m.UpdateSecrets(ctx, &agentv1.UpdateSecretsRequest{
 		SecretEnv:   map[string]string{"TOKEN": "new"},
-		SecretFiles: []*agentv1.SecretFile{{Name: "key.pem", Content: []byte("changed"), LinkPath: "/blocker/key.pem"}},
+		SecretFiles: []*agentv1.SecretFile{{Name: "key.pem", Content: []byte("changed"), LinkPath: testPath("/blocker/key.pem")}},
 	})
 	if err == nil {
 		t.Fatal("UpdateSecrets succeeded with a blocked link_path")
@@ -806,10 +854,10 @@ func TestUpdateSecretsPartialFailure(t *testing.T) {
 func TestFailedFirstClaimLeavesNoSecrets(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	blocker, _ := h.l.Rooted("/blocker")
+	blocker, _ := h.l.Rooted(testPath("/blocker"))
 	mustWrite(t, blocker, "a file, not a directory")
 	req := fullRequest()
-	req.SecretFiles[0].LinkPath = "/blocker/key.pem"
+	req.SecretFiles[0].LinkPath = testPath("/blocker/key.pem")
 	if _, err := h.m.Claim(ctx, req); err == nil {
 		t.Fatal("claim succeeded with a blocked link_path")
 	}
@@ -817,7 +865,7 @@ func TestFailedFirstClaimLeavesNoSecrets(t *testing.T) {
 	if len(entries) != 0 {
 		t.Errorf("secret files left behind: %v", entries)
 	}
-	if got := h.read(h.l.SecretsEnvFile); got != "" {
+	if got := h.secretEnvFile(); got != "" {
 		t.Errorf("secrets/env = %q", got)
 	}
 	if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready {

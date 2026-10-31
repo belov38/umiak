@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -298,9 +299,7 @@ func TestEnvSocketServesSessionEnv(t *testing.T) {
 			t.Errorf("env %q has no %q", env.Env, want)
 		}
 	}
-	if fi, err := os.Stat(h.l.EnvSocket); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Errorf("env socket: %v %v", fi, err)
-	}
+	wantPrivateSocket(t, h.l.EnvSocket)
 	h.stop()
 	for _, p := range []string{h.l.AdminSocket, h.l.EnvSocket} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
@@ -324,10 +323,15 @@ func decodeJSON(res *http.Response, v any) error {
 	return json.NewDecoder(res.Body).Decode(v)
 }
 
-// currentUser is the name of the user running the test (process.LookupUser
-// resolves it).
+// currentUser is the name of the user running the test, on Windows user
+// (process.LookupUser resolves both).
 func currentUser(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		// The tests run as SYSTEM there; user is the account of the
+		// template that is not SYSTEM.
+		return "user"
+	}
 	u, err := user.Current()
 	if err != nil {
 		t.Fatal(err)

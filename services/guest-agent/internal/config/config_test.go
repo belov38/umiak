@@ -95,6 +95,8 @@ pty_idle = "3s"
 		IdleWindow:            30 * time.Second,
 		IdentityDir:           "/run/fake-dmi",
 		PTYIdle:               3 * time.Second,
+		// Not in agent.toml: the OS default (30 s on Windows, 0 on Linux).
+		PendingSecretsWait: Defaults().PendingSecretsWait,
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("cfg = %+v, want %+v", cfg, want)

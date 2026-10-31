@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -285,3 +286,33 @@ func mustEqualBytes(t *testing.T, what string, got, want []byte) {
 }
 
 func itoa(n int) string { return fmt.Sprint(n) }
+
+// errBusy is readShared's error for an open refused by a sharing violation.
+var errBusy = errors.New("test: the file is busy")
+
+// infoMode is the FileInfo.mode of a file (or directory) named name that was
+// given mode m: m itself, on Windows the synthesized mode (S9 spec 12.9) in
+// which only the owner write bit of m survives, as the read-only attribute.
+func infoMode(name string, dir bool, m uint32) uint32 {
+	if runtime.GOOS != "windows" {
+		return m
+	}
+	return synthMode(name, dir, false, m&0o200 == 0, os.Getenv("PATHEXT"))
+}
+
+// statPerm is what os.Stat reports as the permission bits of a file (or
+// directory) that was given mode m: m itself, on Windows 0666 or, without
+// the owner write bit, 0444, plus 0111 for a directory.
+func statPerm(dir bool, m os.FileMode) os.FileMode {
+	if runtime.GOOS != "windows" {
+		return m
+	}
+	perm := os.FileMode(0o666)
+	if m&0o200 == 0 {
+		perm = 0o444
+	}
+	if dir {
+		perm |= 0o111
+	}
+	return perm
+}

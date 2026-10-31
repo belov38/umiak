@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,7 +99,10 @@ func TestPutAtomic(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for !stop.Load() {
-			b, err := os.ReadFile(p)
+			b, err := readShared(p)
+			if errors.Is(err, errBusy) {
+				continue
+			}
 			if err != nil {
 				bad.Store(-1)
 				return
@@ -122,14 +126,14 @@ func TestPutAtomic(t *testing.T) {
 	}
 	mustEqualBytes(t, "content", got, big)
 	fi := fileInfo(t, body)
-	if fi.GetSize() != uint64(len(big)) || fi.GetMode() != 0o640 || fi.GetPath() != p || fi.GetName() != "atomic.bin" {
+	if fi.GetSize() != uint64(len(big)) || fi.GetMode() != infoMode("atomic.bin", false, 0o640) || fi.GetPath() != p || fi.GetName() != "atomic.bin" {
 		t.Fatalf("FileInfo = %v", fi)
 	}
 	if fi.GetUid() != h.user.UID || fi.GetGid() != h.user.GID {
 		t.Fatalf("owner %d:%d, want %d:%d", fi.GetUid(), fi.GetGid(), h.user.UID, h.user.GID)
 	}
 	st, _ := os.Stat(p)
-	if st.Mode().Perm() != 0o640 {
+	if st.Mode().Perm() != statPerm(false, 0o640) {
 		t.Fatalf("mode %v", st.Mode())
 	}
 	entries, _ := os.ReadDir(h.root)
@@ -222,7 +226,7 @@ func TestUploadChunksResume(t *testing.T) {
 	res = commit(id, map[string]any{"path": dst, "sha256": hex.EncodeToString(sum[:]), "mode": 0o600})
 	b1 := wantStatus(t, res, http.StatusOK)
 	fi := fileInfo(t, b1)
-	if fi.GetSize() != uint64(len(data)) || fi.GetMode() != 0o600 || fi.GetPath() != dst {
+	if fi.GetSize() != uint64(len(data)) || fi.GetMode() != infoMode("file.bin", false, 0o600) || fi.GetPath() != dst {
 		t.Fatalf("FileInfo %v", fi)
 	}
 	content, err := os.ReadFile(dst)

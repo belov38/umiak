@@ -3,10 +3,11 @@ package ident
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 )
 
 func earlySource(bootID string) Static {
@@ -176,13 +177,12 @@ func TestEarlySecuresAgentDirs(t *testing.T) {
 	if err := Early(context.Background(), l, earlySource("boot-1"), r); err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range []string{l.RunDir, l.StateDir} {
-		fi, err := os.Stat(d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if fi.Mode().Perm() != 0o700 {
-			t.Errorf("%s mode = %v, want 0700 (the protected DACL on Windows)", d, fi.Mode().Perm())
+	for _, d := range []struct {
+		dir string
+		a   fsutil.DirAccess
+	}{{l.RunDir, fsutil.SystemAndAdmins}, {l.StateDir, fsutil.SystemOnly}} {
+		if ok, err := fsutil.IsSecure(d.dir, d.a); err != nil || !ok {
+			t.Errorf("%s: IsSecure = %v, %v; want 0700, the protected DACL on Windows", d.dir, ok, err)
 		}
 	}
 }

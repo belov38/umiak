@@ -41,8 +41,9 @@ func TestPackVerifyRoundTrip(t *testing.T) {
 	if m.CreatedAt.IsZero() {
 		t.Error("created_at is zero")
 	}
+	// Windows has no executable bit (an .exe runs by its extension).
 	fi, err := os.Stat(filepath.Join(dir, BinaryName))
-	if err != nil || fi.Mode().Perm()&0o100 == 0 {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm()&0o100 == 0) {
 		t.Errorf("binary mode = %v, %v", fi.Mode(), err)
 	}
 

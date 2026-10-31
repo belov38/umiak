@@ -63,7 +63,9 @@ func TestDoctorWindowsParts(t *testing.T) {
 	}
 
 	// Linux: no early.json path, no service check, the systemd units.
-	rep = Doctor(context.Background(), paths.ForRoot(t.TempDir()), config.Defaults(), DoctorOptions{
+	linux := paths.ForRoot(t.TempDir())
+	linux.EarlyFile = ""
+	rep = Doctor(context.Background(), linux, config.Defaults(), DoctorOptions{
 		Source:   src,
 		IsActive: opts.IsActive,
 		Statfs:   opts.Statfs,

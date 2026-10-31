@@ -175,6 +175,7 @@ func (f *Fake) Launch(ctx context.Context, id string, shimPath string, extraArgs
 
 // FakeSpecLauncher is a Fake that also implements SpecLauncher, like the
 // Windows supervisor: the spec comes with the launch, not as a CmdSpec file.
+// On Windows the Fake itself is one (fake_windows.go).
 type FakeSpecLauncher struct {
 	*Fake
 }

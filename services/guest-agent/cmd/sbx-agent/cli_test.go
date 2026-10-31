@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -58,13 +59,9 @@ func startCLIAgent(t *testing.T) *cliAgent {
 	l.AdminSocket = filepath.Join(dir, "a.sock")
 	l.EnvSocket = filepath.Join(dir, "e.sock")
 	l.LogDir = filepath.Join(l.RunDir, "..", "logs")
-	u, err := user.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
 	cfg := config.Defaults()
 	cfg.DockerEnabled = false
-	cfg.DefaultUser = u.Username
+	cfg.DefaultUser = cliUser(t)
 	cfg.TunnelURL = "wss://tunnel.test/v1/connect"
 	sup := supervisor.NewFake(l)
 	t.Cleanup(func() { _ = sup.Close() })
@@ -91,6 +88,9 @@ func startCLIAgent(t *testing.T) *cliAgent {
 			return nil
 		},
 	}
+	if runtime.GOOS == "windows" {
+		cliWindowsStart(t, l, &ad)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- agent.Run(ctx, l, cfg, "1.2.3", ad) }()
@@ -113,6 +113,58 @@ func startCLIAgent(t *testing.T) *cliAgent {
 		t.Fatal("no READY=1")
 	}
 	return &cliAgent{l: l, sup: sup, d: deps{layout: l, stdin: strings.NewReader("")}}
+}
+
+// cliUser is the default user of the CLI agent: the current user, on
+// Windows SYSTEM (the tests run as SYSTEM, and the agent knows only SYSTEM
+// and user there; user.Current names SYSTEM WORKGROUP\<host>$).
+func cliUser(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return "SYSTEM"
+	}
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Username
+}
+
+// cliWindowsStart makes ad start like the Windows service (agent.WinBoot):
+// the boot step of this boot is done (early.json) and identity.json names
+// this machine, so the start applies nothing and reboots nothing.
+func cliWindowsStart(t *testing.T, l paths.Layout, ad *agent.Deps) {
+	t.Helper()
+	bootID, err := ad.BootID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(l.RunDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsutil.WriteJSONAtomic(l.EarlyFile, ident.EarlyMarker{BootID: bootID}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&ident.File{MachineID: cliMachineID}).Save(l.IdentityFile); err != nil {
+		t.Fatal(err)
+	}
+	ad.Resetter = nil
+	ad.WinBoot = &agent.WinBoot{
+		Resetter:        &ident.FakeWinResetter{Active: ident.WindowsComputerName(cliMachineID)},
+		SetupInProgress: func() bool { return false },
+		StartSSH:        func(context.Context) error { return nil },
+	}
+}
+
+// run returns the fake run of command id; the test fails when it was
+// never launched.
+func (a *cliAgent) run(t *testing.T, id string) *supervisor.FakeRun {
+	t.Helper()
+	r := a.sup.Run(id)
+	if r == nil {
+		t.Fatalf("command %s was never launched", id)
+	}
+	return r
 }
 
 // cli runs the CLI with stdin and returns the exit code, stdout and stderr.
@@ -198,14 +250,19 @@ func TestExecSubcommandExitCode(t *testing.T) {
 	if code != 7 || out != "hi\n" || errOut != "oops\n" {
 		t.Errorf("exec: exit %d, stdout %q, stderr %q; want 7, hi, oops", code, out, errOut)
 	}
-	if argv := a.sup.Run(id).Spec().Argv; strings.Join(argv, "|") != "prog|--flag|a b" {
+	if argv := a.run(t, id).Spec().Argv; strings.Join(argv, "|") != "prog|--flag|a b" {
 		t.Errorf("argv = %q", argv)
 	}
 
+	// A killed command exits 128+9, on Windows 1 (TerminateJobObject).
+	killed := 137
+	if runtime.GOOS == "windows" {
+		killed = 1
+	}
 	id = "cli-exec-2"
 	a.sup.Script(id, func(r *supervisor.FakeRun) { _ = r.Signal(syscall.SIGKILL) })
-	if code, _, errOut := a.cli(t, "", "exec", "--", "sleep", "1000"); code != 137 {
-		t.Errorf("killed: exit %d, want 137: %s", code, errOut)
+	if code, _, errOut := a.cli(t, "", "exec", "--", "sleep", "1000"); code != killed {
+		t.Errorf("killed: exit %d, want %d: %s", code, killed, errOut)
 	}
 
 	id = "cli-exec-3"
@@ -268,7 +325,7 @@ func TestSelftestPTY(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "ok") {
 		t.Errorf("selftest --pty: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
-	if a.sup.Run(id).Spec().PTY == nil {
+	if a.run(t, id).Spec().PTY == nil {
 		t.Error("selftest --pty ran without a pty")
 	}
 }

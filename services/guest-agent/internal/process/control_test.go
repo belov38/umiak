@@ -3,6 +3,8 @@ package process
 import (
 	"bytes"
 	"fmt"
+	"runtime"
+	"syscall"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -181,16 +183,21 @@ func TestSignal(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Setup("c1", func(r *supervisor.FakeRun) { r.IgnoreSignals() })
 	h.start("c1", argvSpec("/bin/sleep", "100"))
-	for _, s := range []string{"SIGINT", "INT", "2", "SIGUSR1"} {
+	// Windows delivers only INT, TERM, KILL and HUP of a pty (S9 spec 12.6).
+	last, lastNum, bads := "SIGUSR1", syscall.Signal(10), []string{"", "SIGNOPE", "0", "65", "-1"}
+	if runtime.GOOS == "windows" {
+		last, lastNum, bads = "SIGTERM", 15, append(bads, "SIGUSR1")
+	}
+	for _, s := range []string{"SIGINT", "INT", "2", last} {
 		if _, err := h.client.Signal(h.ctx(), connect.NewRequest(&agentv1.SignalRequest{CommandId: "c1", Signal: s})); err != nil {
 			t.Fatalf("Signal %s: %v", s, err)
 		}
 	}
 	ss := h.run("c1").Signals()
-	if len(ss) != 4 || ss[0].Sig != 2 || ss[2].Sig != 2 || ss[3].Sig != 10 || ss[0].Cgroup {
+	if len(ss) != 4 || ss[0].Sig != 2 || ss[2].Sig != 2 || ss[3].Sig != lastNum || ss[0].Cgroup {
 		t.Fatalf("signals %+v", ss)
 	}
-	for _, bad := range []string{"", "SIGNOPE", "0", "65", "-1"} {
+	for _, bad := range bads {
 		_, err := h.client.Signal(h.ctx(), connect.NewRequest(&agentv1.SignalRequest{CommandId: "c1", Signal: bad}))
 		wantCode(t, err, connect.CodeInvalidArgument, "")
 	}

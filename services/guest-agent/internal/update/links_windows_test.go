@@ -83,16 +83,16 @@ func TestMountPointReparseData(t *testing.T) {
 	if tag := le.Uint32(b); tag != windows.IO_REPARSE_TAG_MOUNT_POINT {
 		t.Errorf("tag = %#x", tag)
 	}
-	// 6 + 1 and 4 + 1 UTF-16 units of path buffer.
-	if n := le.Uint16(b[4:]); int(n) != 8+2*(7+5) || len(b) != 8+int(n) {
+	// 8 + 1 and 4 + 1 UTF-16 units of path buffer.
+	if n := le.Uint16(b[4:]); int(n) != 8+2*(9+5) || len(b) != 8+int(n) {
 		t.Errorf("data length = %d, buffer %d", n, len(b))
 	}
-	if off, n, poff, pn := le.Uint16(b[8:]), le.Uint16(b[10:]), le.Uint16(b[12:]), le.Uint16(b[14:]); off != 0 || n != 12 || poff != 14 || pn != 8 {
+	if off, n, poff, pn := le.Uint16(b[8:]), le.Uint16(b[10:]), le.Uint16(b[12:]), le.Uint16(b[14:]); off != 0 || n != 16 || poff != 18 || pn != 8 {
 		t.Errorf("offsets = %d %d %d %d", off, n, poff, pn)
 	}
-	want := []byte{'\\', 0, '?', 0, '?', 0, '\\', 0, 'C', 0, ':', 0, '\\', 0, 'x', 0, 0, 0}
-	if !bytes.HasPrefix(b[16:], want[:12]) {
-		t.Errorf("substitute name = %q", b[16:28])
+	want := []byte{'\\', 0, '?', 0, '?', 0, '\\', 0, 'C', 0, ':', 0, '\\', 0, 'x', 0, 0, 0, 'C', 0, ':', 0, '\\', 0, 'x', 0, 0, 0}
+	if !bytes.Equal(b[16:], want) {
+		t.Errorf("path buffer = %q, want %q", b[16:], want)
 	}
 	if _, err := mountPointReparseData(`\??\`+strings.Repeat("a", 9000), "a"); err == nil {
 		t.Error("an oversized target was accepted")

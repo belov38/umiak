@@ -3,7 +3,6 @@ package quiesce
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -58,12 +57,12 @@ func TestWatchdogMidQuiesce(t *testing.T) {
 	e.addHook(t, "b", "#!/bin/sh\n", 0o755)
 	unit := steps{freezer: e.fz, docker: e.dk, log: testLog,
 		runHook: func(_ context.Context, p, arg string) error {
-			e.log.add("unit hook %s %s", filepath.Base(p), arg)
+			e.log.add("unit hook %s %s", hookLabel(p), arg)
 			return nil
 		}}
 	e.m.steps.runHook = func(ctx context.Context, p, arg string) error {
-		e.log.add("hook %s %s", filepath.Base(p), arg)
-		if arg == hookFreeze && filepath.Base(p) == "a" {
+		e.log.add("hook %s %s", hookLabel(p), arg)
+		if arg == hookFreeze && hookLabel(p) == "a" {
 			// The unit wakes while hook a runs (its clock is past the
 			// deadline).
 			runWatchdog(ctx, e.l, "lease-1", unit, func() time.Time { return time.Now().Add(time.Hour) })
@@ -104,7 +103,7 @@ func TestQuiesceStopsAtDeadline(t *testing.T) {
 	e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
 	e.addHook(t, "20-b", "#!/bin/sh\n", 0o755)
 	e.m.steps.runHook = func(_ context.Context, p, arg string) error {
-		e.log.add("hook %s %s", filepath.Base(p), arg)
+		e.log.add("hook %s %s", hookLabel(p), arg)
 		if arg == hookFreeze {
 			time.Sleep(150 * time.Millisecond)
 		}
@@ -131,7 +130,7 @@ func TestQuiesceBudget(t *testing.T) {
 	e.m.freezeBudget = 50 * time.Millisecond
 	e.addHook(t, "10-a", "#!/bin/sh\n", 0o755)
 	e.m.steps.runHook = func(ctx context.Context, p, arg string) error {
-		e.log.add("hook %s %s", filepath.Base(p), arg)
+		e.log.add("hook %s %s", hookLabel(p), arg)
 		if arg == hookFreeze {
 			<-ctx.Done() // a hook that only stops when killed
 			return ctx.Err()
