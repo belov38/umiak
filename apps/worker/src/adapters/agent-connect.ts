@@ -36,7 +36,10 @@ export interface ConnectAgentPortOptions {
 	timeoutMs?: number;
 	/** Domain of the published ports, sent as `port_domain` on every Claim. */
 	portDomain?: string;
-	/** SSH user CA public keys, sent as `ssh_user_ca_keys` on every Claim. */
+	/**
+	 * SSH user CA public keys, sent as `ssh_user_ca_keys` on every Claim and
+	 * as `keys` of `UpdateSshCa` on every boot.
+	 */
 	sshUserCaKeys?: string[];
 }
 
@@ -212,6 +215,12 @@ export class ConnectAgentPort implements AgentPort {
 				},
 				o,
 			),
+		);
+	}
+
+	async updateSshCa(machineId: string, requestId: string): Promise<void> {
+		await this.#call(machineId, "updateSshCa", requestId, (c, o) =>
+			c.updateSshCa({ keys: this.#sshUserCaKeys }, o),
 		);
 	}
 

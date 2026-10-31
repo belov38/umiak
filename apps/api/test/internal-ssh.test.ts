@@ -168,6 +168,28 @@ describe.skipIf(skipPg())("POST /internal/v1/gateway/ssh/authorize", () => {
 			);
 		});
 
+		it("a sandbox blocked by an operator is denied, also on recheck; unblocked it is allowed again (S8 C3)", async () => {
+			const s = await w.seed({ state: "ready" });
+			const u = await person();
+			const k = await registered(u.userId);
+			const req = {
+				sandbox: s.slug,
+				publicKey: k.line,
+				fingerprint: k.fingerprint,
+			};
+			const block = (on: boolean) =>
+				db.pool.query(
+					`UPDATE runtime.sandboxes SET blocked = $2, block_reason = CASE WHEN $2 THEN 'abuse' END
+					 WHERE id = $1`,
+					[s.sandboxId, on],
+				);
+			await block(true);
+			expect(body(await authorize(req))).toEqual(DENIED);
+			expect(body(await authorize({ ...req, recheck: true }))).toEqual(DENIED);
+			await block(false);
+			expect(body(await authorize(req))).toMatchObject({ allowed: true });
+		});
+
 		it("a stored fingerprint with another public key is denied", async () => {
 			const s = await w.seed({ state: "ready" });
 			const u = await person();

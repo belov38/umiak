@@ -1,4 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import v8 from "node:v8";
+import vm from "node:vm";
 import {
 	afterEach,
 	beforeEach,
@@ -312,6 +316,52 @@ describe("retries", () => {
 		expect(err).toMatchObject({ name: "AbortError" });
 		expect(f.seen).toHaveLength(1);
 	});
+
+	it.each([
+		["before the response headers", false],
+		["while the body is read", true],
+	])(
+		"an abort still reaches a fetch after a garbage collection %s",
+		async (_, headersFirst) => {
+			vi.useRealTimers();
+			// undici's Request follows its signal through a WeakRef: a Request of
+			// the chain that nothing holds is collected and the abort is lost.
+			// The flag is process-wide; it only makes `gc` callable (vitest runs
+			// each test file in its own worker).
+			v8.setFlagsFromString("--expose-gc");
+			const gc = vm.runInNewContext("gc") as () => void;
+			const server = createServer((_req, res) => {
+				if (headersFirst) {
+					res.writeHead(200, { "Content-Type": "application/json" });
+					res.write('{"data":');
+				}
+				setTimeout(() => res.end(headersFirst ? "[]}" : "{}"), 3000).unref();
+			});
+			await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+			const { port } = server.address() as AddressInfo;
+			try {
+				const raw = createRawClient({
+					baseUrl: `http://127.0.0.1:${port}`,
+					apiKey: "sbx_test",
+					env: {},
+				});
+				const ac = new AbortController();
+				const started = Date.now();
+				const p = raw
+					.POST("/v1/sandboxes", { body: {}, signal: ac.signal })
+					.catch((e: unknown) => e);
+				await new Promise((r) => setTimeout(r, 200));
+				gc();
+				await new Promise((r) => setTimeout(r, 100));
+				ac.abort(new Error("caller gave up"));
+				expect(await p).toMatchObject({ message: "caller gave up" });
+				expect(Date.now() - started).toBeLessThan(1500);
+			} finally {
+				server.closeAllConnections();
+				server.close();
+			}
+		},
+	);
 
 	it("an error body without the envelope becomes unexpected_response", async () => {
 		const f = fakeFetch(
@@ -636,6 +686,26 @@ describe("content types", () => {
 			{ params: { path: { sandbox: "sb_1", port: 8000 } } },
 		);
 		expect(data).toBeUndefined();
+	});
+
+	it("204 with an empty body stream (browsers) is answered once", async () => {
+		// Chrome gives a 204 answer a non-null, empty body; a Response with a
+		// null-body status cannot be rebuilt around it.
+		const browser204 = () => {
+			const res = new Response(null, { status: 204 });
+			Object.defineProperty(res, "body", {
+				value: new ReadableStream({ start: (c) => c.close() }),
+			});
+			return res;
+		};
+		const f = fakeFetch(browser204(), browser204());
+		const { data, response } = await client(f.fetch).DELETE(
+			"/v1/sandboxes/{sandbox}/ports/{port}",
+			{ params: { path: { sandbox: "sb_1", port: 8000 } } },
+		);
+		expect(data).toBeUndefined();
+		expect(response.status).toBe(204);
+		expect(f.seen).toHaveLength(1);
 	});
 
 	it("HEAD has no data", async () => {

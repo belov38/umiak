@@ -80,6 +80,7 @@ export {
 } from "./retry.ts";
 export {
 	type ActionOptions,
+	type BlockInput,
 	type ForkInput,
 	type HostedPort,
 	type HostedPortWrite,
@@ -91,12 +92,14 @@ export {
 	Sandbox,
 	type SandboxData,
 	type SandboxPorts,
+	type UnblockInput,
 	type WaitOptions,
 } from "./sandbox.ts";
 export {
 	type CreateOptions,
 	type CreateSandboxInput,
 	type CreateSnapshotInput,
+	type OperatorSandboxFilter,
 	type SandboxFilter,
 	Sbx,
 	type SnapshotData,

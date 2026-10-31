@@ -204,12 +204,12 @@ export const METRIC_DEFS: readonly MetricDef[] = [
 	{
 		name: "sbx_secrets_old_key_rows",
 		kind: "gauge",
-		help: "sandbox_secrets rows still encrypted with an old key version",
+		help: "sandbox_secrets and environments rows still encrypted with an old key version",
 	},
 	{
 		name: "sbx_secrets_reencrypt_failed_total",
 		kind: "counter",
-		help: "sandbox_secrets rows cleanup failed to re-encrypt",
+		help: "sandbox_secrets and environments rows cleanup failed to re-encrypt",
 	},
 	{
 		name: "sbx_idp_sync_total",
@@ -222,6 +222,17 @@ export const METRIC_DEFS: readonly MetricDef[] = [
 		kind: "histogram",
 		help: "IdP sync run time",
 		buckets: [0.1, 0.5, 1, 5, 10, 30, 60, 300],
+	},
+	{
+		name: "sbx_idp_sync_aborted_total",
+		kind: "counter",
+		help: "IdP sync passes that changed nothing because a guard tripped, per reason",
+		labels: ["reason"],
+	},
+	{
+		name: "sbx_idp_sync_aborted",
+		kind: "gauge",
+		help: "1 after an aborted IdP sync pass, 0 after a successful one (alert when 1)",
 	},
 ];
 

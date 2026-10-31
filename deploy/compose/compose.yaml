@@ -34,13 +34,29 @@ x-keycloak-url: &keycloak-url ${SBX_KEYCLOAK_URL:-http://localhost:8180}
 x-app-origin: &app-origin ${SBX_APP_ORIGIN:-http://localhost:4180}
 x-oidc-issuer: &oidc-issuer ${SBX_OIDC_ISSUER:-${SBX_KEYCLOAK_URL:-http://localhost:8180}/realms/sbx}
 x-oauth2-proxy-redirect-url: &oauth2-proxy-redirect-url ${SBX_OAUTH2_PROXY_REDIRECT_URL:-${SBX_APP_ORIGIN:-http://localhost:4180}/oauth2/callback}
+# Keycloak end-session page that web's sign-out link passes to oauth2-proxy
+# (/oauth2/sign_out?rd=...): Keycloak ends the SSO session and returns to
+# <app origin>/app (web has no page at /); the realm allows <app origin>/* as
+# post-logout redirect.
+x-logout-url: &logout-url ${SBX_LOGOUT_URL:-${SBX_KEYCLOAK_URL:-http://localhost:8180}/realms/sbx/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=${SBX_APP_ORIGIN:-http://localhost:4180}/app}
+
+# web image (S8): the Next.js server (`web`) and the Payload migrations
+# (`web-migrate`).
+x-web-build: &web-build
+  context: ../..
+  dockerfile: apps/web/Dockerfile
 
 x-service-defaults: &service-defaults
   logging: *logging
   networks: [sbx]
 
+# sbx: every service. web-internal (no outside access): only web,
+# oauth2-proxy and postgres, so web:3000 is reachable from oauth2-proxy
+# (and postgres) only; web is on no other network. See README "web (S8)".
 networks:
   sbx:
+  web-internal:
+    internal: true
 
 volumes:
   postgres-data:
@@ -49,6 +65,11 @@ services:
   postgres:
     <<: *service-defaults
     image: postgres:18.6-alpine
+    # api (~36 connections), worker (~37), web (~11) and Keycloak share the
+    # instance; the default 100 is too tight.
+    command: ["postgres", "-c", "max_connections=200"]
+    # web reaches Postgres on web-internal (it is on no other network).
+    networks: [sbx, web-internal]
     # Dev-only credentials; the port is published on loopback for psql/debugging.
     environment:
       POSTGRES_USER: sbx
@@ -116,13 +137,51 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # One-shot: apply the Payload migrations (schema `payload`: identities,
+  # templates, sizes, platform defaults; S8 §12) with the web image. Runs
+  # after `migrate`, so the first one sees the S7 identity tables it copies;
+  # api, worker and web start only after it.
+  web-migrate:
+    <<: *service-defaults
+    image: sbx-web:dev
+    build: *web-build
+    working_dir: /app/migrate
+    # PAYLOAD_SECRET is an environment value; read it from its secret file.
+    command:
+      - sh
+      - -c
+      - >-
+        export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        && exec node packages/payload/src/migrate.ts
+    environment:
+      <<: *db-env
+    volumes:
+      - ./secrets/web:/run/sbx-secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
+    # The image's HEALTHCHECK is for the web server.
+    healthcheck:
+      disable: true
+    restart: "no"
+
   worker:
     <<: *service-defaults
     image: sbx-worker:dev
     build: *worker-build
+    # PAYLOAD_SECRET is an environment value; read it from its secret file.
+    command:
+      - sh
+      - -c
+      - >-
+        export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        && exec node apps/worker/src/main.ts
     environment:
       <<: *db-env
-      SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
       SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
       SBX_SECRETS_DIR: /run/sbx-pve
       # The PVE API URL and TLS name are in the database (migrate: config/sbx.yaml
@@ -135,8 +194,13 @@ services:
       # The migrate service already applied migrations.
       SBX_MIGRATE_ON_START: "0"
       SBX_HTTP_PORT: "9090"
+      # ctl-idp-sync (S8 §20.1): deactivates users disabled or deleted in
+      # Keycloak, through the Admin API with the realm client sbx-worker.
+      SBX_IDP_SYNC_KEYCLOAK_URL: http://keycloak:8080
+      SBX_IDP_SYNC_REALM: sbx
+      SBX_IDP_SYNC_CLIENT_ID: sbx-worker
+      SBX_IDP_SYNC_CLIENT_SECRET_FILE: /run/sbx-secrets/idp-sync-client-secret
     volumes:
-      - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
       # pve-token, pve-root-ca.pem, sbx-node_ed25519, known_hosts.
       - ${SBX_PVE_SECRETS_DIR:-${HOME}/.config/sbx}:/run/sbx-pve:ro
       # Written by secrets-init (a directory: its files appear after the
@@ -145,10 +209,13 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     depends_on:
-      migrate:
+      web-migrate:
         condition: service_completed_successfully
       secrets-init:
         condition: service_completed_successfully
+      # ctl-idp-sync calls the Keycloak Admin API on its first run.
+      keycloak:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
@@ -241,6 +308,11 @@ services:
         condition: service_completed_successfully
       secrets-init:
         condition: service_completed_successfully
+      # Keycloak's connection pool does not drop connections that Postgres closed; when compose
+      # recreates postgres (a config change), restart Keycloak with it, or logins fail.
+      postgres:
+        condition: service_healthy
+        restart: true
     healthcheck:
       # No curl in the image: bash /dev/tcp against the management port.
       test:
@@ -265,16 +337,19 @@ services:
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
-    # The cursor key is an environment value; read it from its secret file.
+    # The cursor key and PAYLOAD_SECRET are environment values; read them
+    # from their secret files.
     command:
       - sh
       - -c
       - >-
         export SBX_API_CURSOR_KEY="$$(cat /run/sbx-secrets/cursor-key)"
+        PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
         && exec node apps/api/src/main.ts
     environment:
       <<: *db-env
-      SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
+      # Upserted into Payload at every start (templates, sizes and quotas
+      # come from Payload; config/sbx.yaml is only for `migrate`).
       SBX_IDENTITY_FILE: /etc/sbx/identity.yaml
       SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
       SBX_API_SERVICE_TOKENS_FILE: /run/sbx-secrets/service-tokens.json
@@ -300,7 +375,6 @@ services:
       SBX_API_TRUSTED_PROXY_CIDRS: ${SBX_API_TRUSTED_PROXY_CIDRS:-}
       SBX_LOG_LEVEL: ${SBX_API_LOG_LEVEL:-info}
     volumes:
-      - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
       - ./config/identity.yaml:/etc/sbx/identity.yaml:ro
       - ./secrets/api:/run/sbx-secrets:ro
     ports:
@@ -308,7 +382,7 @@ services:
       # /healthz, /readyz, /metrics (9090 on the host is the worker's).
       - "127.0.0.1:9091:9090"
     depends_on:
-      migrate:
+      web-migrate:
         condition: service_completed_successfully
       secrets-init:
         condition: service_completed_successfully
@@ -331,12 +405,15 @@ services:
     restart: unless-stopped
 
   # Browser sessions (architecture §10): routes /api/* (without /api) and
-  # /sbx-auth/* to the proxied api listener with the X-Auth-Request-* headers.
-  # Plain http on localhost: the cookie has no Secure flag and no __Host- prefix.
-  # Per-deployment settings are OAUTH2_PROXY_* variables (flags would win
-  # over an override file); oauth2-proxy.yaml reads SBX_OIDC_ISSUER.
+  # /sbx-auth/* to the proxied api listener, everything else to web, with the
+  # X-Auth-Request-* headers. Plain http on localhost: the cookie has no
+  # Secure flag and no __Host- prefix. Per-deployment settings are
+  # OAUTH2_PROXY_* variables (flags would win over an override file);
+  # oauth2-proxy.yaml reads SBX_OIDC_ISSUER.
   oauth2-proxy:
     <<: *service-defaults
+    # sbx: api and Keycloak; web-internal: web.
+    networks: [sbx, web-internal]
     image: sbx-oauth2-proxy:dev
     build:
       context: ./oauth2-proxy
@@ -349,16 +426,18 @@ services:
       - --alpha-config=/etc/oauth2-proxy/oauth2-proxy.yaml
       - --cookie-secret-file=/run/sbx-secrets/cookie-secret
       - --cookie-refresh=5m
-      - --cookie-expire=168h
+      - --cookie-expire=12h
       - --email-domain=*
       - --skip-provider-button=true
       - --silence-ping-logging=true
     environment:
       SBX_OIDC_ISSUER: *oidc-issuer
       OAUTH2_PROXY_REDIRECT_URL: *oauth2-proxy-redirect-url
-      # Hosts allowed in an absolute post-login redirect: host:port of the app
-      # origin. Not derived from SBX_APP_ORIGIN (compose cannot cut the scheme).
-      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SBX_OAUTH2_PROXY_WHITELIST_DOMAIN:-localhost:4180}
+      # Hosts allowed in an absolute redirect (`rd`): host:port of the app
+      # origin (after login) and of Keycloak (web's sign-out goes on to the
+      # Keycloak end-session page). Not derived from SBX_APP_ORIGIN and
+      # SBX_KEYCLOAK_URL (compose cannot cut the scheme).
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SBX_OAUTH2_PROXY_WHITELIST_DOMAIN:-localhost:4180},${SBX_OAUTH2_PROXY_WHITELIST_KEYCLOAK:-localhost:8180}
       OAUTH2_PROXY_COOKIE_NAME: ${SBX_OAUTH2_PROXY_COOKIE_NAME:-_sbx_session}
       OAUTH2_PROXY_COOKIE_SECURE: ${SBX_OAUTH2_PROXY_COOKIE_SECURE:-false}
       # true behind a TLS proxy that sets X-Forwarded-* (Proto, Host, For).
@@ -390,5 +469,86 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  # Dashboard /app and Payload admin /admin (S8), the `/` upstream of
+  # oauth2-proxy. Only on web-internal: no published port, and no service
+  # but oauth2-proxy (and postgres) can reach :3000, because web trusts the
+  # X-Auth-Request-* headers. Health: the image's HEALTHCHECK
+  # (`node healthcheck.js`, /healthz inside the container).
+  web:
+    logging: *logging
+    networks: [web-internal]
+    image: sbx-web:dev
+    build: *web-build
+    # PAYLOAD_SECRET is an environment value; read it from its secret file.
+    command:
+      - sh
+      - -c
+      - >-
+        export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        && exec node server.js
+    environment:
+      <<: *db-env
+      # The only Origin of unsafe requests; the dashboard's public address.
+      SBX_APP_ORIGIN: *app-origin
+      SBX_OPERATOR_GROUPS: sbx-operators
+      # CSP frame-src https://*.<domain> (port previews).
+      SBX_SBX_DOMAIN: ${SBX_SBX_DOMAIN:-sbx.localhost}
+      # Shown in CLI and SDK hints.
+      SBX_API_PUBLIC_URL: ${SBX_API_PUBLIC_URL:-http://localhost:8080}
+      SBX_LOGOUT_URL: *logout-url
+    volumes:
+      - ./secrets/web:/run/sbx-secrets:ro
+    depends_on:
+      web-migrate:
+        condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
+    stop_grace_period: 30s
+    restart: unless-stopped
+
   # ---- Add the services of later threads below this line --------------------
-  # web            (S8)  behind oauth2-proxy: add it as the `/` upstream
+  # Remote MCP server (S11): /mcp (Streamable HTTP, stateless) on :8080 and
+  # /healthz, /readyz, /metrics on :9090. It holds no state and no secrets: it
+  # forwards the caller's own bearer token to the api public listener, which
+  # authorizes every call. Behind a reverse proxy, /mcp and
+  # /.well-known/oauth-protected-resource/mcp go to this service (S11 §6.2);
+  # locally it has its own port.
+  mcp:
+    <<: *service-defaults
+    image: sbx-mcp:dev
+    build:
+      context: ../..
+      dockerfile: apps/mcp/Dockerfile
+    environment:
+      SBX_MCP_API_URL: http://api:8080
+      # The URL clients use; its host must match the Host header they send.
+      SBX_MCP_PUBLIC_URL: ${SBX_MCP_PUBLIC_URL:-http://localhost:8090/mcp}
+      # Authorization server named in the protected resource metadata.
+      SBX_OIDC_ISSUER: *oidc-issuer
+      # MCP clients are not browsers: no browser origin may call /mcp.
+      SBX_MCP_ALLOWED_ORIGINS: ""
+      # Extra Host values besides the host of SBX_MCP_PUBLIC_URL.
+      SBX_MCP_ALLOWED_HOSTS: ${SBX_MCP_ALLOWED_HOSTS:-127.0.0.1:8090}
+      SBX_LOG_LEVEL: ${SBX_MCP_LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:8090:8080"
+      # /healthz, /readyz, /metrics (9090 is the worker's, 9091 the api's).
+      - "127.0.0.1:9092:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:9090/readyz')
+          .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    # SIGTERM: the server stops within 25 s (calls in flight get the rest).
+    stop_grace_period: 30s
+    restart: unless-stopped

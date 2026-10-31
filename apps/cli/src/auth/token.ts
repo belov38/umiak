@@ -14,7 +14,7 @@
 
 import type { Profile } from "../config.ts";
 import { CliError, NOT_LOGGED_IN } from "../exit-codes.ts";
-import type { Fetch } from "../http.ts";
+import { deadline, type Fetch } from "../http.ts";
 import { refreshTokens } from "./device-grant.ts";
 import { withFileLock } from "./lock.ts";
 import type { CredentialStore } from "./store.ts";
@@ -132,13 +132,19 @@ export async function getBearer(d: BearerDeps): Promise<Bearer> {
 			return { kind: "key" as const, token: now.token, expiresAt: null };
 		}
 		if (usable(now)) return oidcBearer(now);
-		const t = await refreshTokens({
-			issuer: now.issuer,
-			clientId: now.clientId,
-			refreshToken: now.refreshToken,
-			fetch: d.fetch,
-			signal: AbortSignal.timeout(d.refreshTimeoutMs ?? REFRESH_TIMEOUT_MS),
-		});
+		const limit = deadline(d.refreshTimeoutMs ?? REFRESH_TIMEOUT_MS);
+		let t: Awaited<ReturnType<typeof refreshTokens>>;
+		try {
+			t = await refreshTokens({
+				issuer: now.issuer,
+				clientId: now.clientId,
+				refreshToken: now.refreshToken,
+				fetch: d.fetch,
+				signal: limit.signal,
+			});
+		} finally {
+			limit.clear();
+		}
 		const next: StoredCredential = { ...now, ...t };
 		await d.store.set(name, JSON.stringify(next));
 		return oidcBearer(next);

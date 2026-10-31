@@ -606,6 +606,55 @@ func TestSecretsPendingAfterReboot(t *testing.T) {
 	}
 }
 
+// The worker sends UpdateSshCa on every boot (S6 provision): a machine
+// claimed without keys gets them after a reboot, and a repeat with the same
+// keys changes nothing else.
+func TestUpdateSshCaAfterRebootIsIdempotent(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	req := fullRequest()
+	req.SshUserCaKeys = nil
+	if _, err := h.m.Claim(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.read(h.l.SSHUserCA); got != templateCA {
+		t.Fatalf("ssh ca after claim without keys = %q, want template", got)
+	}
+
+	// Reboot: the tmpfs is empty, the secrets phase pending.
+	if err := os.RemoveAll(h.l.SecretsMount); err != nil {
+		t.Fatal(err)
+	}
+	m := h.newManager()
+	keys := []string{"ssh-ed25519 AAAAcurrent ca-1", "ssh-ed25519 AAAAnext ca-2"}
+	const want = "ssh-ed25519 AAAAcurrent ca-1\nssh-ed25519 AAAAnext ca-2\n"
+	for i := range 2 {
+		if _, err := m.UpdateSshCa(ctx, &agentv1.UpdateSshCaRequest{Keys: keys}); err != nil {
+			t.Fatalf("update %d: %v", i, err)
+		}
+		if got := h.read(h.l.SSHUserCA); got != want {
+			t.Errorf("update %d: ssh ca = %q", i, got)
+		}
+		if got := h.mode(h.l.SSHUserCA); got != 0o644 {
+			t.Errorf("update %d: ssh ca mode = %v", i, got)
+		}
+		info := m.ClaimInfo()
+		if !slices.Equal(info.GetSshUserCaKeys(), keys) || info.GetEnv()["FOO"] != "bar" ||
+			!slices.Equal(info.GetSecretEnvKeys(), []string{"TOKEN"}) {
+			t.Errorf("update %d: claim info = %v", i, info)
+		}
+		// The CA update does not stand in for the secrets.
+		if st, _ := h.tr.State(readiness.PhaseSecrets); st != pending {
+			t.Errorf("update %d: secrets phase = %v, want pending", i, st)
+		}
+	}
+
+	// The keys survive an agent restart.
+	if got := h.newManager().ClaimInfo().GetSshUserCaKeys(); !slices.Equal(got, keys) {
+		t.Errorf("keys after restart = %v", got)
+	}
+}
+
 func TestPrepareStopWipes(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

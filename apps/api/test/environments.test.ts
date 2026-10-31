@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { decodeUuid, encodeUuid } from "@sbx/auth";
+import { decodeUuid, encodeUuid, PgIdentityStore } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { captureLogs } from "../src/testing/index.ts";
+import { captureLogs, testSettings } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
+import { newTeam, personOf } from "./helpers/security.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: response bodies are checked by the conformance harness
@@ -294,6 +295,41 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 		const rec = await w.environments.get(w.teamId, name);
 		expect(rec?.sets.env).toEqual({ K: "v" });
 		expect(rec?.revision).toBe(1);
+	});
+
+	it("an operator session writes the environments of a team it is not in (S8 §6.2, §6.4)", async () => {
+		const OPS = "sbx-operators";
+		const o = await personOf(w, await newTeam(db.pool), "member", {
+			identity: new PgIdentityStore({ pool: db.pool, operatorGroups: [OPS] }),
+			settings: testSettings({ SBX_OPERATOR_GROUPS: OPS }),
+		});
+		const headers = {
+			...o.headers,
+			"x-auth-request-groups": OPS,
+			"sbx-team": encodeUuid("team", w.teamId),
+		};
+		const req = (method: string, path: string, json?: unknown) =>
+			o.h.request(method, path, {
+				headers,
+				...(json === undefined ? {} : { json }),
+			});
+		const name = uniqueName("op");
+		expect((await req("POST", "/v1/environments", { name })).status).toBe(201);
+		const p = await req("PATCH", `/v1/environments/${name}`, {
+			env: { K: "v" },
+		});
+		expect(p.status).toBe(200);
+		expect(body(p).revision).toBe(2);
+		expect((await req("DELETE", `/v1/environments/${name}`)).status).toBe(204);
+		expect(await w.environments.get(w.teamId, name)).toBeNull();
+
+		// The same person without the operator group is refused.
+		const plain = await o.h.request("POST", "/v1/environments", {
+			headers: { ...o.headers, "sbx-team": encodeUuid("team", w.teamId) },
+			json: { name: uniqueName("op") },
+		});
+		expect(plain.status).toBe(403);
+		expect(body(plain).error.code).toBe("team_forbidden");
 	});
 
 	it("team keys need only the scopes: environments:write writes, environments:read reads", async () => {

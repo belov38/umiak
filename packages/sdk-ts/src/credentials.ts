@@ -1,4 +1,4 @@
-// Credential chain (S7 §7.6, §15.2):
+// Credential chain (S7 §7.6, §15.2), unless `session` (browser cookie, S8):
 //   explicit apiKey / accessToken / tokenProvider → SBX_API_KEY → SBX_ACCESS_TOKEN
 //   → `sbx auth token --json` (Node and Bun only; the CLI owns refresh).
 // Browsers have no `sbx`: they must pass apiKey, accessToken or tokenProvider.
@@ -32,6 +32,8 @@ export interface Credentials {
 	/** API URL without a trailing slash. */
 	baseUrl: string;
 	team?: string;
+	/** Browser session (SbxOptions.session): no bearer is sent. */
+	session?: true;
 	/**
 	 * The bearer to send; `force` skips the cache (after `401 token_expired`).
 	 * `signal` ends the wait; a running `sbx` keeps going for other callers.
@@ -89,6 +91,15 @@ function noCredentials(why: string): SbxError {
 	});
 }
 
+function noApiUrl(): SbxError {
+	return new SbxError({
+		status: 0,
+		code: NO_API_URL,
+		message: "no API URL: pass baseUrl or set SBX_API_URL",
+		retryable: false,
+	});
+}
+
 export async function resolveCredentials(
 	opts: SbxOptions = {},
 ): Promise<Credentials> {
@@ -96,16 +107,23 @@ export async function resolveCredentials(
 	const url = nonEmpty(opts.baseUrl) ?? nonEmpty(env.SBX_API_URL);
 	const team = nonEmpty(opts.team) ?? nonEmpty(env.SBX_TEAM);
 
+	if (opts.session) {
+		if (url === undefined) throw noApiUrl();
+		return withTeam(
+			{
+				baseUrl: trimSlash(url),
+				session: true,
+				getToken: async () => {
+					throw noCredentials("a browser session sends no token");
+				},
+			},
+			team,
+		);
+	}
+
 	const provider = tokenSource(opts, env);
 	if (provider) {
-		if (url === undefined) {
-			throw new SbxError({
-				status: 0,
-				code: NO_API_URL,
-				message: "no API URL: pass baseUrl or set SBX_API_URL",
-				retryable: false,
-			});
-		}
+		if (url === undefined) throw noApiUrl();
 		return withTeam(
 			{
 				baseUrl: trimSlash(url),

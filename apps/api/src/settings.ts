@@ -40,7 +40,11 @@ export interface Settings {
 	/** The proxied listener (oauth2-proxy) is started. */
 	proxiedEnabled: boolean;
 	databaseUrl: string;
-	configFile: string;
+	/**
+	 * PAYLOAD_SECRET: identities and config come from Payload (S8 plan
+	 * decision 5); there is no config file any more.
+	 */
+	payloadSecret: string;
 	dataKeysFile: string;
 	/** HMAC key of list cursors, at least 32 bytes. */
 	cursorKey: Buffer;
@@ -187,7 +191,7 @@ const schema = z.object({
 	SBX_API_METRICS_PORT: port(9090),
 	SBX_API_PROXIED_ENABLED: bool(true),
 	DATABASE_URL: url("postgres connection string", ["postgres:", "postgresql:"]),
-	SBX_CONFIG_FILE: required("path of the YAML config"),
+	PAYLOAD_SECRET: required("secret of the Payload config, as web"),
 	SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
 	SBX_API_CURSOR_KEY: cursorKey,
 	SBX_API_SERVICE_TOKENS_FILE: required("path of the service tokens JSON"),
@@ -255,7 +259,7 @@ export function loadSettings(
 		metricsPort: e.SBX_API_METRICS_PORT,
 		proxiedEnabled: e.SBX_API_PROXIED_ENABLED,
 		databaseUrl: e.DATABASE_URL,
-		configFile: e.SBX_CONFIG_FILE,
+		payloadSecret: e.PAYLOAD_SECRET,
 		dataKeysFile: e.SBX_DATA_KEYS_FILE,
 		cursorKey: e.SBX_API_CURSOR_KEY,
 		serviceTokensFile: e.SBX_API_SERVICE_TOKENS_FILE,

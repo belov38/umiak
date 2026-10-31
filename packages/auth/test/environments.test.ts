@@ -4,6 +4,10 @@ import {
 	randomBytes,
 	randomUUID,
 } from "node:crypto";
+import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { MIGRATIONS_DIR, migrate } from "@sbx/db";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -76,11 +80,10 @@ describe.skipIf(skipPg())("PgEnvironmentStore", () => {
 		await t?.drop();
 	});
 
+	// Teams live in the `payload` schema since S8, so a team id is only an id
+	// here: runtime.environments has no foreign keys.
 	async function team(): Promise<string> {
-		const r = await t.pool.query<{ id: string }>(
-			"INSERT INTO identity.teams (name) VALUES ('t') RETURNING id",
-		);
-		return r.rows[0]?.id as string;
+		return randomUUID();
 	}
 
 	const sets: SecretSets = {
@@ -124,7 +127,7 @@ describe.skipIf(skipPg())("PgEnvironmentStore", () => {
 		expect(keys.aads).toContain(`environment:${e.id}:v7`);
 
 		const raw = await t.pool.query<{ ciphertext: Buffer; key_version: number }>(
-			"SELECT ciphertext, key_version FROM identity.environments WHERE id = $1",
+			"SELECT ciphertext, key_version FROM runtime.environments WHERE id = $1",
 			[e.id],
 		);
 		const blob = raw.rows[0]?.ciphertext.toString("latin1") ?? "";
@@ -276,9 +279,118 @@ describe.skipIf(skipPg())("PgEnvironmentStore", () => {
 		});
 	});
 
-	it("an unknown team is not_found", async () => {
-		expect(await codeOf(store.create(randomUUID(), { name: "x" }, null))).toBe(
-			"not_found",
+	it("a team without a row in identity.teams (a Payload team) can hold environments", async () => {
+		const teamId = randomUUID();
+		const known = await t.pool.query(
+			"SELECT 1 FROM identity.teams WHERE id = $1",
+			[teamId],
 		);
+		expect(known.rowCount).toBe(0);
+		const e = await store.create(
+			teamId,
+			{ name: "payload-team", ...sets },
+			randomUUID(),
+		);
+		expect((await store.get(teamId, "payload-team"))?.id).toBe(e.id);
+	});
+
+	it("the table has no foreign keys and keeps the unique indexes", async () => {
+		const fk = await t.pool.query(
+			"SELECT 1 FROM pg_constraint WHERE conrelid = 'runtime.environments'::regclass AND contype = 'f'",
+		);
+		expect(fk.rowCount).toBe(0);
+		const idx = await t.pool.query<{ indexdef: string }>(
+			"SELECT indexdef FROM pg_indexes WHERE schemaname = 'runtime' AND tablename = 'environments'",
+		);
+		const defs = idx.rows.map((r) => r.indexdef).join("\n");
+		expect(defs).toMatch(/UNIQUE INDEX .*\(team_id, name\)/);
+		expect(defs).toMatch(/UNIQUE INDEX .*\(team_id\) WHERE is_default/);
+	});
+});
+
+describe.skipIf(skipPg())("migration 0400 environments_runtime", () => {
+	let t: TestDatabase;
+	let dir: string;
+
+	beforeAll(async () => {
+		t = await createTestDatabase({ migrated: false });
+		// Everything before 0400 first, so identity.environments holds rows
+		// when 0400 runs.
+		dir = await mkdtemp(path.join(tmpdir(), "sbx-env-mig-"));
+		for (const n of await readdir(MIGRATIONS_DIR)) {
+			if (/^\d{4}_/.test(n) && Number(n.slice(0, 4)) < 400) {
+				await cp(path.join(MIGRATIONS_DIR, n), path.join(dir, n));
+			}
+		}
+		await migrate(t.pool, { dir });
+	});
+	afterAll(async () => {
+		await t?.drop();
+		if (dir) await rm(dir, { recursive: true, force: true });
+	});
+
+	it("copies identity.environments with the same ids; ciphertext decrypts", async () => {
+		const keys = testKeys();
+		const team = (
+			await t.pool.query<{ id: string }>(
+				"INSERT INTO identity.teams (name) VALUES ('old') RETURNING id",
+			)
+		).rows[0]?.id as string;
+		const user = (
+			await t.pool.query<{ id: string }>(
+				"INSERT INTO identity.users (email) VALUES ('old@example.com') RETURNING id",
+			)
+		).rows[0]?.id as string;
+		const sets: SecretSets = {
+			env: { A: "1" },
+			secrets: { S: "s3cret" },
+			secretFiles: [],
+		};
+		const seeded: string[] = [];
+		for (const [name, isDefault] of [
+			["one", true],
+			["two", false],
+		] as const) {
+			const id = randomUUID();
+			const blob = keys.encryptFor("environment", id, JSON.stringify(sets));
+			await t.pool.query(
+				`INSERT INTO identity.environments
+				   (id, team_id, name, is_default, revision, key_version, nonce, ciphertext,
+				    repositories, exclude_owner_secrets, updated_by)
+				 VALUES ($1, $2, $3, $4, 3, $5, $6, $7, '[{"url":"https://x/a.git"}]', true, $8)`,
+				[
+					id,
+					team,
+					name,
+					isDefault,
+					blob.keyVersion,
+					blob.nonce,
+					blob.ciphertext,
+					user,
+				],
+			);
+			seeded.push(id);
+		}
+
+		const res = await migrate(t.pool, { dir: MIGRATIONS_DIR });
+		expect(res.applied).toContain("0400_environments_runtime.sql");
+
+		const store = new PgEnvironmentStore(t.pool, keys);
+		const list = await store.list(team);
+		expect(list.map((e) => e.name)).toEqual(["one", "two"]);
+		expect(list.map((e) => e.id).sort()).toEqual([...seeded].sort());
+		expect(list[0]).toMatchObject({
+			teamId: team,
+			isDefault: true,
+			revision: 3,
+			sets,
+			repositories: [{ url: "https://x/a.git" }],
+			excludeOwnerSecrets: true,
+			updatedBy: user,
+		});
+		expect((await store.getDefault(team))?.name).toBe("one");
+		// The old table is kept (contract phase is a later release).
+		const old = await t.pool.query("SELECT 1 FROM identity.environments");
+		expect(old.rowCount).toBe(2);
 	});
 });

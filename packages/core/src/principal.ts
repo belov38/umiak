@@ -20,6 +20,14 @@ export interface Principal {
 	scopes: readonly Scope[];
 }
 
+/**
+ * Operator rights (S8 C3, C6): a browser session of a platform operator.
+ * Keys and Keycloak tokens never carry them, whatever `isOperator` says.
+ */
+export function hasOperatorRights(p: Principal): boolean {
+	return p.kind === "session" && p.isOperator === true;
+}
+
 /** Principal id of idempotency keys: the API key, else the user (decision 9). */
 export function idempotencyPrincipal(p: Principal): string {
 	const id = p.apiKeyId ?? p.userId;

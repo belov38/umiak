@@ -2,6 +2,7 @@
 // (they run before validation) or before a plain handler. They read
 // `c.var.auth`, set by the listener's authentication.
 import type { Scope } from "@sbx/auth";
+import { hasOperatorRights } from "@sbx/core";
 import type { MiddlewareHandler } from "hono";
 import type { ApiEnv } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
@@ -69,14 +70,37 @@ export function requireOwner(): MiddlewareHandler<ApiEnv> {
 }
 
 /**
- * A person needs the `owner` role (403 `role`); a team key passes, its
- * scopes stand in for the role (an owner chose them, §7.5). Use after
- * `requireScope`.
+ * A person needs the `owner` role (403 `role`) or platform operator rights
+ * (S8 §6.2: operators manage any team's environments, and remove them
+ * before a team delete, §6.4); a team key passes, its scopes stand in for
+ * the role (an owner chose them, §7.5). Use after `requireScope`.
  */
 export function requireOwnerUnlessKey(): MiddlewareHandler<ApiEnv> {
 	return async (c, next) => {
 		const p = authOf(c).principal;
-		if (p.kind !== "team_key" && p.role !== "owner") throw ownerRequired();
+		if (p.kind !== "team_key" && p.role !== "owner" && !hasOperatorRights(p)) {
+			throw ownerRequired();
+		}
+		await next();
+	};
+}
+
+/**
+ * Operator-only routes (S8 C3): 403 `operator_required` unless the caller is
+ * a platform operator's browser session (C6: never a key or a Keycloak
+ * token). Runs before the path is resolved, so nothing about the sandbox
+ * leaks; core checks again.
+ */
+export function requireOperator(): MiddlewareHandler<ApiEnv> {
+	return async (c, next) => {
+		if (!hasOperatorRights(authOf(c).principal)) {
+			throw new ApiError(
+				403,
+				"forbidden",
+				"only a platform operator (dashboard session) can do this",
+				{ details: { reason: "operator_required" } },
+			);
+		}
 		await next();
 	};
 }

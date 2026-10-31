@@ -200,6 +200,11 @@ export interface AgentPort {
 		secrets: { secretEnv: Record<string, string>; secretFiles: SecretFile[] },
 		requestId: string,
 	): Promise<void>;
+	/**
+	 * `System/UpdateSshCa` with the worker's SSH user CA keys (the set sent in
+	 * Claim). Idempotent: the agent rewrites the same file.
+	 */
+	updateSshCa(machineId: string, requestId: string): Promise<void>;
 	/** `secretFilesWiped`: the agent confirms that no secret file remains on disk (Windows). */
 	prepareStop(machineId: string): Promise<PrepareStopResult>;
 	/**

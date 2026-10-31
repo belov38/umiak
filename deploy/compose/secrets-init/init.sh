@@ -5,9 +5,13 @@
 # compose mounts directories (a file mount needs its file before any
 # container is created):
 #   data-keys.json        S6 key ring, the source of the copies below
+#   payload-secret        PAYLOAD_SECRET (S8), the source of the copies below
 #   api/                  data-keys.json, cursor-key, service-tokens.json,
-#                         gateway-token, ssh-login-ca, ssh-host-keys.pub
-#   worker/               data-keys.json
+#                         gateway-token, ssh-login-ca, ssh-host-keys.pub,
+#                         payload-secret
+#   worker/               data-keys.json, payload-secret,
+#                         idp-sync-client-secret
+#   web/                  payload-secret
 #   keycloak/             oauth2-proxy-client-secret, sbx-worker-client-secret,
 #                         admin-password
 #   oauth2-proxy/         client-secret, cookie-secret
@@ -29,7 +33,7 @@ KEYCLOAK_UID=1000
 # distroless nonroot in the oauth2-proxy image.
 OAUTH2_PROXY_UID=65532
 
-mkdir -p "$S/api" "$S/worker" "$S/keycloak" "$S/oauth2-proxy"
+mkdir -p "$S/api" "$S/worker" "$S/web" "$S/keycloak" "$S/oauth2-proxy"
 
 # Base64 of N random bytes.
 rand() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
@@ -99,6 +103,13 @@ new "$S/data-keys.json" data_keys
 synced "$S/api/data-keys.json" cat "$S/data-keys.json"
 synced "$S/worker/data-keys.json" cat "$S/data-keys.json"
 
+# PAYLOAD_SECRET of the Payload config (S8): one value for web, web-migrate,
+# api and worker, which load the same config.
+new "$S/payload-secret" line "$(token)"
+synced "$S/api/payload-secret" cat "$S/payload-secret"
+synced "$S/worker/payload-secret" cat "$S/payload-secret"
+synced "$S/web/payload-secret" cat "$S/payload-secret"
+
 # api: HMAC key of list cursors (SBX_API_CURSOR_KEY).
 new "$S/api/cursor-key" line "$(rand 32)"
 
@@ -132,6 +143,8 @@ new "$S/keycloak/oauth2-proxy-client-secret" line "$(token)"
 new "$S/keycloak/sbx-worker-client-secret" line "$(token)"
 # Bootstrap admin of Keycloak, used unless KEYCLOAK_ADMIN_PASSWORD is set in .env.
 new "$S/keycloak/admin-password" line "$(token)"
+# worker: ctl-idp-sync reads users with the sbx-worker client (trimmed).
+synced "$S/worker/idp-sync-client-secret" cat "$S/keycloak/sbx-worker-client-secret"
 # oauth2-proxy reads its secret files as they are: no trailing newline.
 synced "$S/oauth2-proxy/client-secret" no_newline "$S/keycloak/oauth2-proxy-client-secret"
 # Exactly 32 bytes (an AES-256 key as is).
@@ -146,6 +159,7 @@ own() {
 }
 own "$NODE_UID" "$S/api"
 own "$NODE_UID" "$S/worker"
+own "$NODE_UID" "$S/web"
 own "$KEYCLOAK_UID" "$S/keycloak"
 own "$OAUTH2_PROXY_UID" "$S/oauth2-proxy"
 if [ "$(id -u)" = 0 ]; then

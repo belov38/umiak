@@ -45,6 +45,8 @@ interface Case {
 	req: RouteRequest;
 	human: boolean;
 	websocket: boolean;
+	/** Operator-only: everyone else is 403 operator_required, never 404. */
+	operator: boolean;
 	/**
 	 * For ids that live in a sandbox (commands, terminals, uploads) used
 	 * under A's sandbox: the same request with ids nobody ever issued. The
@@ -67,6 +69,7 @@ function cases(a: Fixture, b: TeamFixture): Case[] {
 				req,
 				human: r.human === true,
 				websocket: r.websocket === true,
+				operator: r.operator === true,
 				...(unknown === undefined ? {} : { unknown }),
 			});
 		if (r.bodyRefs) {
@@ -155,7 +158,10 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 		details: (r.body as Any)?.error?.details,
 	});
 
-	/** 404 (or, for ids of a sandbox, the answer for ids never issued). */
+	/**
+	 * 404 (or, for ids of a sandbox, the answer for ids never issued; for
+	 * operator-only routes 403 operator_required, as for A's own resources).
+	 */
 	async function expectNotFound(
 		c: Case,
 		send: (req: RouteRequest) => Promise<HarnessResponse>,
@@ -163,6 +169,15 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 	): Promise<void> {
 		const r = await send(c.req);
 		const where = `${who}: ${c.op} (${c.label}) ${c.method} ${c.req.path}`;
+		if (c.operator) {
+			// Refused before any lookup: the same for A's own resources.
+			expect(answer(r), where).toEqual({
+				status: 403,
+				code: "forbidden",
+				details: { reason: "operator_required" },
+			});
+			return;
+		}
 		if (c.unknown !== undefined) {
 			const u = await send(c.unknown);
 			expect(answer(r), `${where}: ${r.text.slice(0, 300)}`).toEqual(answer(u));

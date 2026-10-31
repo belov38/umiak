@@ -109,6 +109,8 @@ export function toSandboxResource(
 		endpoints: sandboxEndpoints(s.slug, ctx.settings),
 		environment: null,
 		excludeOwnerSecrets: false,
+		blocked: s.blocked,
+		blockReason: s.blocked ? s.blockReason : null,
 		createdAt: iso(s.createdAt),
 		readyAt: isoOrNull(s.readyAt),
 		stoppedAt: isoOrNull(s.stoppedAt),

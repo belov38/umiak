@@ -59,6 +59,23 @@ export function caWebSocket(
 		new WebSocket(url, { ...init, tls: { ca } } as unknown as string[]);
 }
 
+/**
+ * A signal that aborts after `ms` with a `TimeoutError`, like
+ * `AbortSignal.timeout`, but held by its timer until it fires or `clear()`.
+ * undici's Request follows the signal it was made with through a WeakRef, so
+ * an `AbortSignal.timeout` that nothing else references can be collected
+ * during the fetch and its abort never reaches the request.
+ */
+export function deadline(ms: number): { signal: AbortSignal; clear(): void } {
+	const c = new AbortController();
+	const timer = setTimeout(
+		() => c.abort(new DOMException("The operation timed out.", "TimeoutError")),
+		ms,
+	);
+	timer.unref?.();
+	return { signal: c.signal, clear: () => clearTimeout(timer) };
+}
+
 /** Sends a request; a failure to connect is SbxError `network_error` (retryable). */
 export async function send(f: Fetch, req: Request): Promise<Response> {
 	try {

@@ -2,10 +2,11 @@ import { withTx } from "@sbx/db";
 import {
 	invalidState,
 	notFound,
+	operatorRequired,
 	type ValidationIssue,
 	validation,
 } from "../errors.ts";
-import type { Principal } from "../principal.ts";
+import { hasOperatorRights, type Principal } from "../principal.ts";
 import {
 	type Operation,
 	operationFromRow,
@@ -52,6 +53,10 @@ export interface ListFilter {
 	q?: string;
 	/** 1-200, default 50 (S7 §5.6). */
 	limit?: number;
+	/** Every team's sandboxes (S8 C3): operators only, else `forbidden`. */
+	allTeams?: boolean;
+	/** With `allTeams`: only this team (UUID). */
+	teamId?: string;
 }
 
 export interface UpdateInput {
@@ -96,7 +101,7 @@ function escapeLike(s: string): string {
 	return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
-/** The team's sandboxes, newest first (`created_at DESC, id DESC`). */
+/** The team's (or, for operators, every team's) sandboxes, newest first (`created_at DESC, id DESC`). */
 export async function listSandboxes(
 	deps: SandboxServiceDeps,
 	p: Principal,
@@ -109,9 +114,19 @@ export async function listSandboxes(
 	}
 	checkKnownKeys(
 		filter as Record<string, unknown>,
-		["state", "labels", "template", "q", "limit"],
+		["state", "labels", "template", "q", "limit", "allTeams", "teamId"],
 		issues,
 	);
+	if (filter.allTeams !== undefined && typeof filter.allTeams !== "boolean") {
+		issues.push({ path: "allTeams", message: "must be a boolean" });
+	}
+	if (filter.teamId !== undefined) {
+		if (filter.allTeams !== true) {
+			issues.push({ path: "teamId", message: "needs allTeams=true" });
+		} else if (!isUuid(filter.teamId)) {
+			issues.push({ path: "teamId", message: "must be a team id" });
+		}
+	}
 	const limit = filter.limit ?? LIST_DEFAULT_LIMIT;
 	if (!Number.isInteger(limit) || limit < 1 || limit > LIST_MAX_LIMIT) {
 		issues.push({
@@ -133,14 +148,22 @@ export async function listSandboxes(
 		issues.push({ path: "q", message: "must be a string" });
 	}
 	if (issues.length > 0) throw validation(issues);
+	if (filter.allTeams === true && !hasOperatorRights(p)) {
+		throw operatorRequired();
+	}
 	const after = cursor === undefined ? null : decodeCursor(cursor);
 
-	const where = ["s.team_id = $1"];
-	const args: unknown[] = [p.teamId];
+	const where: string[] = [];
+	const args: unknown[] = [];
 	const arg = (v: unknown): string => {
 		args.push(v);
 		return `$${args.length}`;
 	};
+	if (filter.allTeams !== true) {
+		where.push(`s.team_id = ${arg(p.teamId)}`);
+	} else if (filter.teamId !== undefined) {
+		where.push(`s.team_id = ${arg(filter.teamId)}::uuid`);
+	}
 	if (filter.state !== undefined && filter.state.length > 0) {
 		where.push(`s.state = ANY(${arg(filter.state)}::text[])`);
 	} else {
@@ -220,7 +243,10 @@ export async function updateSandbox(
 	if (issues.length > 0) throw validation(issues);
 
 	return withTx(deps.pool, async (tx) => {
-		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
+		const row = await findSandboxRow(tx.client, p, idOrSlug, {
+			lock: true,
+			write: true,
+		});
 		if (row.state === "deleting" || row.state === "deleted") {
 			throw invalidState(row.state);
 		}
@@ -280,7 +306,10 @@ export async function extendSandbox(
 		if (issues.length > 0) throw validation(issues);
 	}
 	return withTx(deps.pool, async (tx) => {
-		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
+		const row = await findSandboxRow(tx.client, p, idOrSlug, {
+			lock: true,
+			write: true,
+		});
 		if (row.state !== "ready") throw invalidState(row.state);
 		const ttl: number | null = ttlSeconds ?? row.ttl_seconds;
 		if (ttl === null) {

@@ -196,10 +196,12 @@ export async function waitAgentSession(
 }
 
 /**
- * Delivery of env and secrets on the current boot (S6 §7.6 `provision`, S3
- * §8.1): `System/UpdateEnv` and `System/UpdateSecrets` with deterministic
- * request ids, then `provisioned_boot_id` = the boot they were delivered to.
- * Both sets are sent whole: the guest keeps no secrets across a boot.
+ * Delivery of env, secrets and SSH user CA keys on the current boot (S6 §7.6
+ * `provision`, S3 §8.1): `System/UpdateEnv`, `System/UpdateSecrets` and
+ * `System/UpdateSshCa` with deterministic request ids, then
+ * `provisioned_boot_id` = the boot they were delivered to. The sets are sent
+ * whole: the guest keeps no secrets across a boot, and a machine claimed
+ * before a CA change gets the current keys.
  */
 export async function deliverProvision(
 	ctx: WorkerCtx,
@@ -226,6 +228,10 @@ export async function deliverProvision(
 			secretFiles: deliverableFiles(sets.secretFiles),
 		},
 		stepRequestId(fenced.id, `${step}:secrets`),
+	);
+	await ctx.agent.updateSshCa(
+		machineId,
+		stepRequestId(fenced.id, `${step}:ssh_ca`),
 	);
 	await fenced.tx(async (tx) => {
 		await tx.client.query(

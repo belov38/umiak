@@ -1,11 +1,11 @@
 import type { ConfigReader, TemplateOs } from "@sbx/config";
 import type { Tx } from "@sbx/db";
 import type pg from "pg";
-import { notFound } from "../errors.ts";
+import { notFound, sandboxBlocked } from "../errors.ts";
 import { uuidv7 } from "../ids.ts";
 import type { JobSender } from "../jobs.ts";
 import type { Notifier } from "../notifier.ts";
-import type { Principal } from "../principal.ts";
+import { hasOperatorRights, type Principal } from "../principal.ts";
 import {
 	type Operation,
 	type OperationKind,
@@ -106,28 +106,58 @@ export async function loadSandbox(
 	return r.rows[0] ? toSandbox(q, r.rows[0]) : null;
 }
 
+export interface FindSandboxOptions {
+	/** `FOR UPDATE` (inside a transaction). */
+	lock?: boolean;
+	/**
+	 * The caller changes the sandbox or works in its guest: a sandbox blocked
+	 * by an operator is `forbidden` (`sandbox_blocked`) unless the principal
+	 * is an operator (S8 C3). Inside a transaction with `lock` the check is
+	 * exact. Without a lock (the api's agent paths: files, command input,
+	 * PTYs) it is best-effort: a block that commits between this read and
+	 * the agent call lets that one in-flight call through; open streams are
+	 * closed by the block's NOTIFY.
+	 */
+	write?: boolean;
+}
+
 /**
  * The principal's team sandbox by id (UUID) or slug; another team's sandbox
- * is `not_found` (S7 §7.5). `lock` takes `FOR UPDATE` (inside a transaction).
+ * is `not_found` (S7 §7.5), also when blocked.
  */
 export async function findSandboxRow(
 	q: Queryable,
 	p: Principal,
 	idOrSlug: string,
-	opts: { lock?: boolean } = {},
+	opts: FindSandboxOptions = {},
 ): Promise<SandboxRow> {
-	if (typeof idOrSlug !== "string" || idOrSlug === "") {
-		throw notFound("sandbox");
-	}
+	const row = await selectSandboxRow(q, idOrSlug, p.teamId, opts.lock);
+	if (row === null) throw notFound("sandbox");
+	if (opts.write) assertNotBlocked(p, row);
+	return row;
+}
+
+/** A sandbox of any team by id or slug (operators, S8 C3); null if unknown. */
+export async function selectSandboxRow(
+	q: Queryable,
+	idOrSlug: string,
+	teamId: string | null,
+	lock = false,
+): Promise<SandboxRow | null> {
+	if (typeof idOrSlug !== "string" || idOrSlug === "") return null;
 	const byId = isUuid(idOrSlug);
 	const r = await q.query<SandboxRow>(
-		`SELECT * FROM runtime.sandboxes WHERE ${byId ? "id" : "slug"} = $1 AND team_id = $2
-		 ${opts.lock ? "FOR UPDATE" : ""}`,
-		[idOrSlug, p.teamId],
+		`SELECT * FROM runtime.sandboxes
+		 WHERE ${byId ? "id" : "slug"} = $1 AND ($2::uuid IS NULL OR team_id = $2::uuid)
+		 ${lock ? "FOR UPDATE" : ""}`,
+		[idOrSlug, teamId],
 	);
-	const row = r.rows[0];
-	if (!row) throw notFound("sandbox");
-	return row;
+	return r.rows[0] ?? null;
+}
+
+/** `sandbox_blocked` unless the sandbox is not blocked or `p` is an operator. */
+export function assertNotBlocked(p: Principal, row: SandboxRow): void {
+	if (row.blocked === true && !hasOperatorRights(p)) throw sandboxBlocked();
 }
 
 export interface NewOperation {

@@ -31,7 +31,7 @@ export interface ApiDeps {
 	hostKeys: string[];
 	/** SSH login CA (SBX_SSH_LOGIN_CA_KEY_FILE); null: no certificates. */
 	sshCa: SshCa | null;
-	/** Users, teams, keys (PgIdentityStore until S8). */
+	/** Users, teams, keys (PayloadIdentityStore; PgIdentityStore in tests). */
 	identity: IdentityStore;
 	/** LISTEN sbx_identity; its connection is part of `/readyz`. */
 	identityEvents: IdentityListener;
@@ -48,9 +48,9 @@ export interface ApiDeps {
 	svc: SandboxService;
 	/** pg-boss jobs of core calls outside the service (agent events intake). */
 	jobs: JobSender;
-	/** Templates, sizes, quotas, platform defaults. */
+	/** Templates, sizes, quotas, platform defaults (PayloadConfigReader in production). */
 	config: ConfigReader;
-	/** Environments of the teams (PgEnvironmentStore until S8). */
+	/** Environments of the teams (PgEnvironmentStore over runtime.environments). */
 	environments: EnvironmentStore;
 	/** RPCs of the guest agents (ConnectAgentApi; FakeAgent in tests). */
 	agent: AgentApi;
@@ -62,6 +62,12 @@ export interface ApiDeps {
 	ptyTimings: PtyTimings;
 	/** Shutting down: `/readyz` 503 and new requests 503 (S7 §9.7). */
 	lifecycle: ApiLifecycle;
+	/**
+	 * Throws while a Payload migration known to the code is not applied
+	 * (`assertPayloadMigrated`): `/readyz` reason `payload_migrations`. Null
+	 * without Payload (tests with the stand-in stores).
+	 */
+	payloadReady: (() => Promise<void>) | null;
 }
 
 /** Hono env of every listener app. */

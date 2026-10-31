@@ -380,7 +380,18 @@ describe("sandbox lifecycle", () => {
 		await w.markSnapshotReady(name);
 		const s = await save;
 		expect(s.code, s.stderr).toBe(0);
-		expect(JSON.parse(s.stdout)).toMatchObject({ name, state: "ready" });
+		// JSON Lines like the other waiting commands: accepted first, ready last.
+		const lines = s.lines();
+		expect(lines[0]).toMatchObject({
+			event: "accepted",
+			snapshot: { state: "creating" },
+			operation: { kind: "save_snapshot" },
+		});
+		expect(lines.at(-1)).toMatchObject({
+			event: "ready",
+			snapshot: { name, state: "ready" },
+		});
+		expect(lines).toHaveLength(2);
 		const list = await sbx(["snapshot", "list"]);
 		expect(
 			JSON.parse(list.stdout).data.map((x: { name: string }) => x.name),
@@ -398,6 +409,53 @@ describe("sandbox lifecycle", () => {
 			snapshot: { name: `${name}-2`, state: "creating" },
 			operation: { kind: "save_snapshot" },
 		});
+	});
+
+	it("snapshot save --wait: a failed snapshot ends with the error line, exit 1; text in a TTY", async () => {
+		const sb = await w.readySandbox();
+		const name = `snap-${crypto.randomUUID().slice(0, 8)}`;
+		const save = sbx(["snapshot", "save", sb.slug, name, "--wait"]);
+		await until(async () => {
+			const r = await w.db.pool.query(
+				`UPDATE runtime.operations
+				 SET state = 'failed', finished_at = now(),
+				     error_code = 'snapshot_failed', error_message = 'lvcreate failed', retryable = false
+				 WHERE sandbox_id = (SELECT source_sandbox_id FROM runtime.snapshots WHERE pending_name = $1)
+				   AND kind = 'save_snapshot' AND state IN ('pending', 'running')`,
+				[name],
+			);
+			return r.rowCount ? true : undefined;
+		});
+		const s = await save;
+		expect(s.code).toBe(1);
+		const lines = s.lines();
+		expect(lines[0]).toMatchObject({ event: "accepted" });
+		expect(lines.at(-1)).toMatchObject({
+			event: "error",
+			code: "snapshot_failed",
+			message: "lvcreate failed",
+		});
+
+		const human = `snap-${crypto.randomUUID().slice(0, 8)}`;
+		const tty = sbx(["snapshot", "save", sb.id, human, "--wait"], {
+			tty: true,
+		});
+		await until(async () => {
+			const r = await w.db.pool.query(
+				"SELECT 1 FROM runtime.snapshots WHERE pending_name = $1",
+				[human],
+			);
+			return r.rowCount ? true : undefined;
+		});
+		await w.markSnapshotReady(human);
+		const t = await tty;
+		expect(t.code, t.stderr).toBe(0);
+		expect(t.stdout).toMatch(
+			new RegExp(`^Saving ${human} \\(snap_[^)]+\\): creating\\n`),
+		);
+		expect(t.stdout).toMatch(
+			new RegExp(`${human} \\(snap_[^)]+\\): ready\\n$`),
+		);
 	});
 
 	it("templates, sizes and limits", async () => {

@@ -17,6 +17,7 @@ export type AgentMethod =
 	| "claim"
 	| "updateEnv"
 	| "updateSecrets"
+	| "updateSshCa"
 	| "prepareStop"
 	| "freeze"
 	| "thaw"
@@ -101,6 +102,10 @@ export class FakeAgent implements AgentPort {
 			requestId,
 			args: secrets,
 		});
+	}
+
+	async updateSshCa(machineId: string, requestId: string): Promise<void> {
+		this.#record({ method: "updateSshCa", machineId, requestId });
 	}
 
 	async prepareStop(machineId: string): Promise<PrepareStopResult> {

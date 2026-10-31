@@ -16,6 +16,7 @@
 	},
 	"dependencies": {
 		"@sbx/auth": "workspace:*",
+		"@sbx/mcp": "workspace:*",
 		"@sbx/sdk": "workspace:*",
 		"commander": "15.0.0"
 	},

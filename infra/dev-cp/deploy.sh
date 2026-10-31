@@ -7,7 +7,7 @@
 # Copies the working tree (git ls-files, without ignored files) to sbx@<CT>:boat-dev-clone,
 # the PVE secrets and the dev CA (dev-ca.sh) to ~/.config/sbx on the CT (0600), writes
 # deploy/compose/.env and the dev sbx.yaml, then runs `docker compose up -d --build`, waits for
-# worker, gateway, api and oauth2-proxy, applies the Tailscale Serve mapping (names.sh) and
+# worker, gateway, api, oauth2-proxy, web and mcp, applies the Tailscale Serve mapping (names.sh) and
 # checks the names and certificates from this Mac.
 set -euo pipefail
 
@@ -111,8 +111,8 @@ fi
 
 # 3. The dev CA for the gateway, .env, the dev sbx.yaml, data keys; then the stack.
 ct "PVE_LAN_IP=$PVE_LAN_IP" "PORT_DOMAIN=$PORT_DOMAIN" "TUNNEL_HOST=$TUNNEL_HOST" "TUNNEL_URL=$TUNNEL_URL" \
-	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" \
-	"KEYCLOAK_URL=$KEYCLOAK_URL" "OIDC_ISSUER=$OIDC_ISSUER" "SERVE=$SERVE" \
+	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" "MCP_URL=$MCP_URL" \
+	"KEYCLOAK_URL=$KEYCLOAK_URL" "OIDC_ISSUER=$OIDC_ISSUER" "LOGOUT_URL=$LOGOUT_URL" "SERVE=$SERVE" \
 	"FILES=$FILES" "EXTRA_ENV=$EXTRA_ENV" <<'EOF'
 ts=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
 [ "$ts" = "$TS_NAME" ] || { echo "the CT's MagicDNS name is $ts, not $TS_NAME (set SBX_DEVCP_TS_NAME)" >&2; exit 1; }
@@ -144,7 +144,7 @@ fi
 cat >.env <<ENV
 # Written by infra/dev-cp/deploy.sh; changes are overwritten on the next deploy.
 COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml
-# The PVE host over the LAN. The worker reads the API URL from secrets/devcp/sbx.yaml.
+# The PVE host over the LAN. migrate (bootstrap) loads the API URL from secrets/devcp/sbx.yaml.
 SBX_PVE_URL=https://$PVE_LAN_IP:8006
 SBX_PVE_TLS_NAME=pve
 SBX_NODE_SSH_HOST=$PVE_LAN_IP
@@ -161,18 +161,35 @@ SBX_DEVCP_SSH_HOST=$SSH_HOST
 SBX_DEVCP_TS_NAME=$TS_NAME
 SBX_APP_ORIGIN=$APP_ORIGIN
 SBX_API_PUBLIC_URL=$API_URL
+SBX_MCP_PUBLIC_URL=$MCP_URL
 SBX_KEYCLOAK_URL=$KEYCLOAK_URL
 SBX_OIDC_ISSUER=$OIDC_ISSUER
 SBX_GATEWAY_AUTH_URL=$APP_ORIGIN/sbx-auth/authorize
 SBX_OAUTH2_PROXY_REDIRECT_URL=$APP_ORIGIN/oauth2/callback
+SBX_LOGOUT_URL=$LOGOUT_URL
 $EXTRA_ENV
 ENV
 docker compose config --quiet
-docker compose up -d --build --remove-orphans 2>&1 | grep -vE '^ *#[0-9]+ ' | tail -30
-# api and oauth2-proxy wait for Keycloak, whose first start (realm import) takes a minute or two.
+# The one-time switch to S8 (identities move from the schema identity to payload): the pre-S8 api
+# and worker keep writing into identity while web-migrate copies it, and later rows would be lost.
+# Stop them first when the stack runs and has identity but no Payload migrations yet; any later
+# deploy finds payload.payload_migrations and skips this. Images are built first, so a failed
+# build leaves the running api and worker alone.
+docker compose build 2>&1 | grep -vE '^ *#[0-9]+ ' | tail -30
+if [ -n "$(docker compose ps -q --status running postgres)" ]; then
+	first_s8=$(docker compose exec -T postgres psql -U sbx -d sbx -tAc \
+		"SELECT to_regclass('identity.users') IS NOT NULL AND to_regclass('payload.payload_migrations') IS NULL")
+	if [ "$first_s8" = t ]; then
+		echo "first S8 deploy: stopping api and worker before web-migrate copies identity into payload"
+		docker compose stop api worker
+	fi
+fi
+docker compose up -d --remove-orphans 2>&1 | tail -30
+# api and oauth2-proxy wait for Keycloak, whose first start (realm import) takes a minute or two;
+# api, worker and web wait for migrate and web-migrate.
 healthy() {
 	local s
-	for s in worker gateway api oauth2-proxy; do
+	for s in worker gateway api oauth2-proxy web mcp; do
 		[ "$(docker compose ps --format '{{.Health}}' "$s")" = healthy ] || return 1
 	done
 }
@@ -184,6 +201,7 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 echo "worker /readyz: $(curl -sS http://127.0.0.1:9090/readyz)"
 echo "gateway /readyz: $(curl -sS http://127.0.0.1:9190/readyz)"
 echo "api /readyz: $(curl -sS http://127.0.0.1:9091/readyz)"
+echo "mcp /readyz: $(curl -sS http://127.0.0.1:9092/readyz)"
 healthy
 
 # Tailscale Serve (operator sbx, set by `infra/pve/setup.sh cp-tailscale`): rebuilt from SERVE.
@@ -204,15 +222,22 @@ EOF
 # with api 404 route_not_found; either proves DNS, TLS and routing. Serve with the system trust
 # store: oauth2-proxy on 8443 (a sign-in redirect), Keycloak on 10000, and /v1/meta of the api
 # public listener on 8443.
-# check name url [curl args]: logs the HTTP status and the body.
+# check name url [curl args]: logs the HTTP status and the body; any HTTP answer passes
+# (CHECK_CODE keeps the status).
 check() {
-	local name=$1 url=$2 out code
+	local name=$1 url=$2 out
 	shift 2
 	out=$(curl -sS --max-time 30 -w '\n%{http_code}' "$@" "$url" 2>&1) || true
-	code=${out##*$'\n'}
-	log "$name $url: HTTP $code ${out%$'\n'*}"
-	[[ "$code" =~ ^[0-9]{3}$ && "$code" != 000 ]]
+	CHECK_CODE=${out##*$'\n'}
+	log "$name $url: HTTP $CHECK_CODE ${out%$'\n'*}"
+	[[ "$CHECK_CODE" =~ ^[0-9]{3}$ && "$CHECK_CODE" != 000 ]]
 }
+# check_ok name url [curl args]: like check, but only HTTP 200 passes (a 421 for a Host the
+# server does not take, or a 404 of a missing Serve path, must not).
+check_ok() { check "$@" && [[ "$CHECK_CODE" == 200 ]]; }
+# Protected Resource Metadata of MCP_URL (RFC 9728): the well-known prefix before its path.
+MCP_ORIGIN=$(sed -E 's#^(https?://[^/]+).*#\1#' <<<"$MCP_URL")
+MCP_PRM_URL="$MCP_ORIGIN/.well-known/oauth-protected-resource${MCP_URL#"$MCP_ORIGIN"}"
 check tunnel "https://$TUNNEL_HOST/v1/connect" --cacert "$CA_DIR/ca.pem" ||
 	log "WARNING: the tunnel host is not reachable from this Mac (outside the LAN?)"
 check preview "https://x-y-z-3000.$PORT_DOMAIN/" --cacert "$CA_DIR/ca.pem" ||
@@ -223,4 +248,6 @@ for port in $(tr ' ' '\n' <<<"$SERVE" | cut -d: -f1 | sort -u); do
 done
 check api "$API_URL/v1/meta" ||
 	log "WARNING: the api is not reachable through Tailscale Serve from this Mac"
+check_ok mcp "$MCP_PRM_URL" ||
+	log "WARNING: the MCP server is not reachable through Tailscale Serve from this Mac"
 log "deployed"

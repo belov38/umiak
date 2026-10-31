@@ -1,5 +1,5 @@
 // Exit codes of `sbx` (S7 §14.3), the same in a terminal and in JSON mode.
-// `exec` and `run` exit with the command's own code instead (128 + n for a
+// `exec`, `run` and `logs -f` exit with the command's own code instead (128 + n for a
 // signal, 124 for timed_out, 125 for lost or failed_to_start; Task 21).
 
 import {

@@ -7,7 +7,15 @@
 	},
 	"files": {
 		"ignoreUnknown": true,
-		"includes": ["**", "!**/*.md", "!**/gen", "!apps/api/openapi"]
+		"includes": [
+			"**",
+			"!**/*.md",
+			"!**/gen",
+			"!apps/api/openapi",
+			"!**/.next",
+			"!apps/web/src/app/(payload)/admin/importMap.js",
+			"!apps/mcp/golden"
+		]
 	},
 	"formatter": {
 		"enabled": true,
@@ -17,6 +25,11 @@
 		"enabled": true,
 		"rules": {
 			"preset": "recommended"
+		}
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
 		}
 	},
 	"javascript": {

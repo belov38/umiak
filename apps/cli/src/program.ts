@@ -65,6 +65,8 @@ import type { GlobalOptions } from "./profile.ts";
 export interface CommandMeta {
 	/** stdout carries the command's data (errors go to stderr without --json). */
 	rawData?: boolean;
+	/** stdout carries a protocol (`sbx mcp`: JSON-RPC): errors go to stderr even with --json. */
+	protocol?: boolean;
 }
 
 export type Handler = (
@@ -95,6 +97,8 @@ export interface CliIo {
 
 /** Actions made by a Runner with `rawData`, so their command is marked. */
 const rawActions = new WeakSet<object>();
+/** Actions made by a Runner with `protocol`. */
+const protocolActions = new WeakSet<object>();
 
 /**
  * A command that knows whether its stdout is data (`rawData` of its
@@ -103,6 +107,7 @@ const rawActions = new WeakSet<object>();
  */
 class SbxCommand extends Command {
 	rawData = false;
+	protocol = false;
 
 	override createCommand(name?: string): Command {
 		return new SbxCommand(name);
@@ -110,6 +115,7 @@ class SbxCommand extends Command {
 
 	override action(fn: Parameters<Command["action"]>[0]): this {
 		if (rawActions.has(fn)) this.rawData = true;
+		if (protocolActions.has(fn)) this.protocol = true;
 		return super.action(fn);
 	}
 }
@@ -201,6 +207,7 @@ export async function runCli(io: CliIo): Promise<number> {
 			const cmd = a.at(-1) as Command;
 			const opts = (a.at(-2) ?? {}) as Record<string, unknown>;
 			out.rawData = meta.rawData === true;
+			out.protocol = meta.protocol === true;
 			try {
 				const ctx = new Context({
 					out,
@@ -224,6 +231,7 @@ export async function runCli(io: CliIo): Promise<number> {
 			}
 		};
 		if (meta.rawData === true) rawActions.add(action);
+		if (meta.protocol === true) protocolActions.add(action);
 		return action;
 	};
 	const program = buildProgram(io, run);
@@ -231,6 +239,7 @@ export async function runCli(io: CliIo): Promise<number> {
 	for (const c of allCommands(program)) {
 		c.hook("preSubcommand", (_parent, sub) => {
 			out.rawData = sub instanceof SbxCommand && sub.rawData;
+			out.protocol = sub instanceof SbxCommand && sub.protocol;
 		});
 	}
 	try {

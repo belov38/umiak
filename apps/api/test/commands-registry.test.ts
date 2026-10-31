@@ -4,8 +4,9 @@
 // `reconnect server_shutdown` by closeAll.
 import { randomUUID } from "node:crypto";
 import { type AddressInfo, connect } from "node:net";
-import { PgIdentityStore } from "@sbx/auth";
+import { PgIdentityStore, SCOPES } from "@sbx/auth";
 import { pgIdentitySeeding } from "@sbx/auth/testing";
+import type { Principal } from "@sbx/core";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
 import {
 	afterAll,
@@ -219,6 +220,84 @@ describe("StreamRegistry", () => {
 		expect(closed.k1).toHaveLength(1);
 	});
 
+	it("'sandboxes:<id>' (a block, S8 C3) closes the bound non-operator connections of that sandbox; '*' re-checks blocks", async () => {
+		const { identity, events, state, emit } = stubs();
+		const blocked = new Set<string>();
+		const asked: string[][] = [];
+		const r = new StreamRegistry({
+			identity,
+			events,
+			maxPerPrincipal: 10,
+			blockedSandboxes: async (ids) => {
+				asked.push([...ids].sort());
+				return new Set(ids.filter((id) => blocked.has(id)));
+			},
+		});
+		const closed: Record<string, CloseFrame[]> = {};
+		const reg = (name: string, o: Any, sandbox: string | null) => {
+			const h = r.register(o, (f) => {
+				const list = closed[name] ?? [];
+				list.push(f);
+				closed[name] = list;
+			});
+			if (sandbox !== null) h.bindSandbox(sandbox);
+			return h;
+		};
+		const key = { userId: null, apiKeyId: "k", teamId: "t" };
+		reg("a", key, "sbA");
+		reg("a2", { userId: "u", apiKeyId: null, teamId: "t" }, "sbA");
+		reg("b", key, "sbB");
+		reg("unbound", key, null);
+		reg(
+			"op",
+			{ userId: "op", apiKeyId: null, teamId: "t", blockExempt: true },
+			"sbA",
+		);
+
+		// Not blocked in the database (e.g. a stale notification): nothing closes.
+		await emit({ all: false, collection: "sandboxes", id: "sbA" });
+		expect(asked).toEqual([["sbA"]]);
+		expect(closed).toEqual({});
+
+		blocked.add("sbA");
+		await emit({ all: false, collection: "sandboxes", id: "sbA" });
+		const frame = {
+			type: "error",
+			code: "forbidden",
+			retryable: false,
+			details: { reason: "sandbox_blocked" },
+		};
+		expect(closed.a).toEqual([expect.objectContaining(frame)]);
+		expect(closed.a2).toEqual([expect.objectContaining(frame)]);
+		expect(closed.b).toBeUndefined();
+		expect(closed.unbound).toBeUndefined();
+		expect(closed.op).toBeUndefined();
+		// No identity re-check for a block.
+		expect(state.calls).toBe(0);
+
+		// '*' (LISTEN came back, notifications may be lost) checks every bound sandbox.
+		blocked.add("sbB");
+		await emit({ all: true });
+		expect(closed.b).toEqual([expect.objectContaining(frame)]);
+		expect(closed.a).toHaveLength(1);
+		r.close();
+	});
+
+	it("without blockedSandboxes the notification is trusted and '*' does not close for blocks", async () => {
+		const { identity, events, emit } = stubs();
+		const r = new StreamRegistry({ identity, events, maxPerPrincipal: 10 });
+		const frames: CloseFrame[] = [];
+		r.register({ userId: null, apiKeyId: "k", teamId: "t" }, (f) =>
+			frames.push(f),
+		).bindSandbox("sb");
+		await emit({ all: true });
+		expect(frames).toEqual([]);
+		await emit({ all: false, collection: "sandboxes", id: "other" });
+		expect(frames).toEqual([]);
+		await emit({ all: false, collection: "sandboxes", id: "sb" });
+		expect(frames).toEqual([expect.objectContaining({ code: "forbidden" })]);
+	});
+
 	it("revoke(match) and closeAll: reconnect frames, then new streams are refused", async () => {
 		const { identity, events } = stubs();
 		const r = new StreamRegistry({ identity, events, maxPerPrincipal: 10 });
@@ -337,6 +416,81 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 		});
 		expect(again.status).toBe(401);
 		await other.cancel();
+		gate.open();
+	});
+
+	/** A platform operator's browser session (core principal). */
+	const operator = (): Principal => ({
+		kind: "session",
+		userId: randomUUID(),
+		teamId: randomUUID(),
+		role: null,
+		isOperator: true,
+		scopes: [...SCOPES],
+	});
+
+	it("a sandbox blocked during an exec stream: error forbidden sandbox_blocked pushed by NOTIFY (timers frozen); a read-only follow stays; the command keeps running", async () => {
+		const s = await readySandbox(w);
+		const gate = shellGate();
+		const exec = await openStream(h, "POST", s.commands, {
+			json: { mode: "stream", command: `echo hi; ${gate.shell}` },
+		});
+		expect(exec.status).toBe(200);
+		await exec.until((f) => f.type === "stdout");
+		const id = (exec.frames[0] as Any).commandId;
+		const follow = await openStream(h, "GET", `${s.commands}/${id}/stream`);
+		await follow.until((f) => f.type === "stdout");
+		// Another sandbox's exec is untouched.
+		const other = await readySandbox(w);
+		const otherExec = await openStream(h, "POST", other.commands, {
+			json: { mode: "stream", command: gate.shell },
+		});
+		await otherExec.next();
+		const before = h.deps.streams.size;
+
+		const t0 = Date.now();
+		freezeTimers();
+		let last: Any;
+		try {
+			await w.env.svc.block(operator(), s.sandboxId, { reason: "abuse" });
+			last = await exec.until((f) => f.type === "error");
+		} finally {
+			vi.useRealTimers();
+		}
+		expect(Date.now() - t0).toBeLessThan(WAIT_MS);
+		expect(last).toMatchObject({
+			type: "error",
+			code: "forbidden",
+			retryable: false,
+			details: { reason: "sandbox_blocked" },
+			stdoutOffset: 3,
+		});
+		expect(await exec.next()).toBeNull();
+		await until(
+			async () => h.deps.streams.size === before - 1,
+			WAIT_MS,
+			"exec unregistered",
+		);
+		const g = await h.request("GET", `${s.commands}/${id}`);
+		expect((g.body as Any).status).toBe("running");
+		await follow.cancel();
+		await otherExec.cancel();
+		gate.open();
+	});
+
+	it("a sync request whose sandbox is blocked meanwhile is 403 sandbox_blocked", async () => {
+		const s = await readySandbox(w);
+		const gate = shellGate();
+		const cmd = `${gate.shell}; : ${randomUUID()}`;
+		const pending = h.request("POST", s.commands, { json: { command: cmd } });
+		await runningCommands([cmd]);
+		await w.env.svc.block(operator(), s.sandboxId, { reason: "operator" });
+		const r = await pending;
+		expect(r.status, r.text).toBe(403);
+		expect((r.body as Any).error).toMatchObject({
+			code: "forbidden",
+			details: { reason: "sandbox_blocked" },
+		});
 		gate.open();
 	});
 

@@ -46,6 +46,11 @@ export interface SandboxFilter {
 	limit?: number;
 }
 
+/** `sbx.operator.listSandboxes`: SandboxFilter plus one team (`team_...`). */
+export interface OperatorSandboxFilter extends SandboxFilter {
+	teamId?: string;
+}
+
 export interface CreateOptions extends CallOptions {
 	/** Wait until the sandbox is ready (SandboxFailedError if it fails). */
 	wait?: boolean;
@@ -60,6 +65,13 @@ export class Sbx {
 		create(input?: CreateSandboxInput, opts?: CreateOptions): Promise<Sandbox>;
 		/** By id (`sb_...`) or slug. */
 		get(ref: string, opts?: CallOptions): Promise<Sandbox>;
+		/**
+		 * A handle without a request. By id (`sb_...`) or slug: for commands,
+		 * files and ports (their paths take either); `data` holds only `id`
+		 * and `slug` (both `ref`) until `refresh`. By SandboxData: a sandbox
+		 * already read (e.g. from a cache).
+		 */
+		handle(ref: string | SandboxData): Sandbox;
 		/** Every sandbox of the team matching the filter, newest first, all pages. */
 		list(
 			filter?: SandboxFilter,
@@ -76,6 +88,17 @@ export class Sbx {
 		list(opts?: CallOptions): AsyncIterable<SnapshotData>;
 		/** Sets `Sbx-Confirm-Delete` to the snapshot's id (read first). */
 		delete(name: string, opts?: CallOptions): Promise<void>;
+	};
+	/**
+	 * Platform operators only (a dashboard session; keys and Keycloak tokens
+	 * get 403 `operator_required`, S8 C3).
+	 */
+	readonly operator: {
+		/** Sandboxes of every team (or of `teamId`), newest first, all pages. */
+		listSandboxes(
+			filter?: OperatorSandboxFilter,
+			opts?: CallOptions,
+		): AsyncIterable<SandboxData>;
 	};
 	readonly #core: ClientCore;
 
@@ -108,29 +131,25 @@ export class Sbx {
 				});
 				return new Sandbox(core, data);
 			},
-			list: (filter = {}, o = {}) =>
-				paginate(async (cursor) => {
-					const query: Record<string, unknown> = {};
-					if (filter.state !== undefined) {
-						query.state = Array.isArray(filter.state)
-							? filter.state.join(",")
-							: filter.state;
-					}
-					if (filter.label !== undefined) {
-						query.label = Object.entries(filter.label).map(
-							([k, v]) => `${k}=${v}`,
-						);
-					}
-					if (filter.template !== undefined) query.template = filter.template;
-					if (filter.q !== undefined) query.q = filter.q;
-					if (filter.limit !== undefined) query.limit = filter.limit;
-					if (cursor !== undefined) query.cursor = cursor;
-					const { data } = await core.raw.GET("/v1/sandboxes", {
-						params: { query },
-						...callOf(o),
-					});
-					return data;
-				}),
+			list: (filter = {}, o = {}) => listSandboxes(core, filter, {}, o),
+			handle: (ref) =>
+				new Sandbox(
+					core,
+					typeof ref === "string"
+						? ({ id: ref, slug: ref } as SandboxData)
+						: ref,
+				),
+		};
+		this.operator = {
+			listSandboxes: (filter = {}, o = {}) => {
+				const { teamId, ...rest } = filter;
+				return listSandboxes(
+					core,
+					rest,
+					{ allTeams: "true", ...(teamId === undefined ? {} : { teamId }) },
+					o,
+				);
+			},
 		};
 		this.snapshots = {
 			create: async (input, o = {}) => {
@@ -200,6 +219,35 @@ export class Sbx {
 		const { data } = await this.raw.GET("/v1/sizes", callOf(opts));
 		return data.data;
 	}
+}
+
+/** `GET /v1/sandboxes` over all pages; `extra` adds query parameters. */
+function listSandboxes(
+	core: ClientCore,
+	filter: SandboxFilter,
+	extra: Record<string, string>,
+	o: CallOptions,
+): AsyncIterable<SandboxData> {
+	return paginate(async (cursor) => {
+		const query: Record<string, unknown> = { ...extra };
+		if (filter.state !== undefined) {
+			query.state = Array.isArray(filter.state)
+				? filter.state.join(",")
+				: filter.state;
+		}
+		if (filter.label !== undefined) {
+			query.label = Object.entries(filter.label).map(([k, v]) => `${k}=${v}`);
+		}
+		if (filter.template !== undefined) query.template = filter.template;
+		if (filter.q !== undefined) query.q = filter.q;
+		if (filter.limit !== undefined) query.limit = filter.limit;
+		if (cursor !== undefined) query.cursor = cursor;
+		const { data } = await core.raw.GET("/v1/sandboxes", {
+			params: { query },
+			...callOf(o),
+		});
+		return data;
+	});
 }
 
 /** The error of an operation that did not succeed (failed or superseded). */

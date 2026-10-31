@@ -3,8 +3,26 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ConfigError, StaticConfigReader } from "../src/index.ts";
+import { runConfigReaderContract } from "../src/testing.ts";
 
 const POC = fileURLToPath(new URL("./fixtures/poc.yaml", import.meta.url));
+
+// The static reader gives an unknown team the default quota (S6 S3).
+runConfigReaderContract(
+	"StaticConfigReader",
+	async (fx) =>
+		StaticConfigReader.fromObject({
+			templates: fx.templates,
+			sizes: fx.sizes,
+			pools: fx.pools,
+			quotas: {
+				default: fx.defaultQuota,
+				teams: { [fx.team.id]: fx.team.quota },
+			},
+			defaults: fx.defaults,
+		}),
+	{ unknownTeamQuota: "default" },
+);
 
 describe("StaticConfigReader.fromFile(poc.yaml)", () => {
 	const reader = StaticConfigReader.fromFile(POC);

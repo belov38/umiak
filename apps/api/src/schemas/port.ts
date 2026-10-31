@@ -9,6 +9,7 @@ import {
 } from "@sbx/core";
 import { extensibleEnum } from "../openapi/registry.ts";
 import { Timestamp } from "./common.ts";
+import { BlockReasonSchema } from "./sandbox.ts";
 
 const ACCESS = PORT_MODES as readonly ["token", "sso", "public"];
 const HOST_REWRITES = PORT_HOST_REWRITES as readonly ["preserve", "localhost"];
@@ -75,9 +76,11 @@ const hostedPortFields = {
 	hostRewrite: extensibleEnum(HOST_REWRITES),
 	appProtocol: extensibleEnum(APP_PROTOCOLS),
 	blocked: z.boolean().openapi({
-		description: "An operator blocked the port; the gateway refuses it",
+		description:
+			"An operator blocked the port: the gateway refuses it, and PUT, rotate-token and " +
+			"DELETE of the port are 403 `forbidden` (details.reason `port_blocked`)",
 	}),
-	blockReason: z.string().nullable(),
+	blockReason: BlockReasonSchema.nullable(),
 	createdAt: Timestamp,
 };
 

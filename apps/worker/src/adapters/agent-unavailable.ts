@@ -47,6 +47,10 @@ export class UnavailableAgentPort implements AgentPort {
 		throw unavailable("updateSecrets");
 	}
 
+	async updateSshCa(_machineId: string, _requestId: string): Promise<void> {
+		throw unavailable("updateSshCa");
+	}
+
 	async prepareStop(_machineId: string): Promise<PrepareStopResult> {
 		throw unavailable("prepareStop");
 	}

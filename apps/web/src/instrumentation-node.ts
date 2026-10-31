@@ -1,0 +1,12 @@
+// A bad environment stops the process with every problem listed, instead of
+// failing each request (S8 §14.1).
+import { isNextBuild, parseWebEnv } from "./lib/env";
+
+if (!isNextBuild()) {
+	try {
+		parseWebEnv(process.env);
+	} catch (e) {
+		console.error(e instanceof Error ? e.message : e);
+		process.exit(1);
+	}
+}

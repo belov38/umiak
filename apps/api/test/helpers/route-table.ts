@@ -69,6 +69,11 @@ export interface Route {
 	owner?: true;
 	/** A team key only: a person gets 403 `api_key_required`. */
 	keyOnly?: true;
+	/**
+	 * A platform operator's browser session only (S8 C3): keys, Keycloak
+	 * tokens and other people get 403 `operator_required` before any lookup.
+	 */
+	operator?: true;
 	/** A WebSocket upgrade (`app.request` answers 426 past the guards). */
 	websocket?: true;
 	/** Changes or consumes a resource of the fixture. */
@@ -409,6 +414,23 @@ export const ROUTES: Record<string, Route> = {
 		resources: ["sandbox"],
 		request: (f) => ({ path: `${sb(f)}/extend`, json: { ttlSeconds: 3600 } }),
 	},
+	"sandboxes.block": {
+		method: "POST",
+		path: "/v1/sandboxes/{sandbox}/block",
+		scope: null,
+		operator: true,
+		destructive: true,
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/block`, json: { reason: "abuse" } }),
+	},
+	"sandboxes.unblock": {
+		method: "POST",
+		path: "/v1/sandboxes/{sandbox}/unblock",
+		scope: null,
+		operator: true,
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/unblock` }),
+	},
 	"sandboxes.getEnv": {
 		method: "GET",
 		path: "/v1/sandboxes/{sandbox}/env",
@@ -707,6 +729,26 @@ export const ROUTES: Record<string, Route> = {
 		destructive: true,
 		resources: ["sandbox", "port"],
 		request: (f) => ({ path: `${sb(f)}/ports/${f.port}` }),
+	},
+	"ports.block": {
+		method: "POST",
+		path: "/v1/sandboxes/{sandbox}/ports/{port}/block",
+		scope: null,
+		operator: true,
+		destructive: true,
+		resources: ["sandbox", "port"],
+		request: (f) => ({
+			path: `${sb(f)}/ports/${f.port}/block`,
+			json: { reason: "operator", note: "test" },
+		}),
+	},
+	"ports.unblock": {
+		method: "POST",
+		path: "/v1/sandboxes/{sandbox}/ports/{port}/unblock",
+		scope: null,
+		operator: true,
+		resources: ["sandbox", "port"],
+		request: (f) => ({ path: `${sb(f)}/ports/${f.port}/unblock` }),
 	},
 	"ssh.get": {
 		method: "GET",

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..models.command_error_frame_type import CommandErrorFrameType
 from ..types import UNSET, Unset
+
+if TYPE_CHECKING:
+    from ..models.command_error_frame_details import CommandErrorFrameDetails
+
 
 T = TypeVar("T", bound="CommandErrorFrame")
 
@@ -23,6 +27,8 @@ class CommandErrorFrame:
         stderr_offset (int):
         stdout_offset (int):
         type_ (CommandErrorFrameType):
+        details (CommandErrorFrameDetails | Unset): Only on some errors: `forbidden` after an operator blocked the
+            sandbox has `reason: sandbox_blocked`
         pty_offset (int | Unset): PTY commands only
     """
 
@@ -33,6 +39,7 @@ class CommandErrorFrame:
     stderr_offset: int
     stdout_offset: int
     type_: CommandErrorFrameType
+    details: CommandErrorFrameDetails | Unset = UNSET
     pty_offset: int | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -51,6 +58,10 @@ class CommandErrorFrame:
 
         type_ = self.type_.value
 
+        details: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.details, Unset):
+            details = self.details.to_dict()
+
         pty_offset = self.pty_offset
 
         field_dict: dict[str, Any] = {}
@@ -66,6 +77,8 @@ class CommandErrorFrame:
                 "type": type_,
             }
         )
+        if details is not UNSET:
+            field_dict["details"] = details
         if pty_offset is not UNSET:
             field_dict["ptyOffset"] = pty_offset
 
@@ -73,6 +86,8 @@ class CommandErrorFrame:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.command_error_frame_details import CommandErrorFrameDetails  # noqa: PLC0415
+
         d = dict(src_dict)
         code = d.pop("code")
 
@@ -88,6 +103,13 @@ class CommandErrorFrame:
 
         type_ = CommandErrorFrameType(d.pop("type"))
 
+        _details = d.pop("details", UNSET)
+        details: CommandErrorFrameDetails | Unset
+        if isinstance(_details, Unset):
+            details = UNSET
+        else:
+            details = CommandErrorFrameDetails.from_dict(_details)
+
         pty_offset = d.pop("ptyOffset", UNSET)
 
         command_error_frame = cls(
@@ -98,6 +120,7 @@ class CommandErrorFrame:
             stderr_offset=stderr_offset,
             stdout_offset=stdout_offset,
             type_=type_,
+            details=details,
             pty_offset=pty_offset,
         )
 

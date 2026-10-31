@@ -6,6 +6,8 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { type EnvironmentStore, encodeUuid, type SecretSets } from "@sbx/auth";
 import {
+	type BlockInput,
+	type BlockReason,
 	type CreateInput,
 	type ForkInput,
 	type ListFilter,
@@ -13,10 +15,11 @@ import {
 	type ResumeInput,
 	SANDBOX_STATES,
 	type SandboxState,
+	type UnblockInput,
 } from "@sbx/core";
-import { authOf } from "../auth/principal.ts";
+import { authOf, decodeTeamRef } from "../auth/principal.ts";
 import { limitStarts } from "../auth/rate-limit.ts";
-import { checkScope, requireScope } from "../auth/scopes.ts";
+import { checkScope, requireOperator, requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { requireConfirmDelete } from "../http/confirm-delete.ts";
 import { decodeCursor, signNextCursor } from "../http/cursor.ts";
@@ -42,6 +45,7 @@ import {
 } from "../openapi/registry.ts";
 import { compact, csvList, SandboxParams } from "../schemas/common.ts";
 import {
+	BlockRequest,
 	CreateSandboxRequest,
 	ExtendSandboxRequest,
 	ForkSandboxRequest,
@@ -53,6 +57,7 @@ import {
 	SandboxForkSchema,
 	SandboxListSchema,
 	SandboxSchema,
+	UnblockRequest,
 	UpdateSandboxRequest,
 } from "../schemas/sandbox.ts";
 import { environmentRef } from "./environments.ts";
@@ -167,13 +172,20 @@ const listSandboxes = createRoute({
 	description:
 		"Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. " +
 		"Filters: `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` " +
-		"(repeat; all must match), `template`, `q` (prefix of name or slug).",
+		"(repeat; all must match), `template`, `q` (prefix of name or slug). A platform " +
+		"operator in the dashboard may list every team with `allTeams=true` (and `teamId`).",
 	tags: TAGS,
 	middleware: [requireScope("sandboxes:read")] as const,
 	request: { query: ListSandboxesQuery },
 	responses: {
 		200: jsonResponse(SandboxListSchema, "A page of sandboxes"),
-		400: errorResponse("`validation` or `invalid_cursor`"),
+		400: errorResponse(
+			"`validation` (also `teamId` without allTeams=true) or `invalid_cursor`",
+		),
+		403: errorResponse(
+			"`forbidden` with details.reason `operator_required`: allTeams=true by anyone " +
+				"but a platform operator's browser session",
+		),
 		...ERROR_RESPONSES,
 	},
 });
@@ -419,6 +431,76 @@ const extendSandbox = createRoute({
 	},
 });
 
+// --- operator blocks (S8 C3) ---
+
+/** The core input of a validated BlockRequest. */
+export function blockInput(b: {
+	reason: BlockReason;
+	note?: string | undefined;
+}): BlockInput {
+	return b.note === undefined
+		? { reason: b.reason }
+		: { reason: b.reason, note: b.note };
+}
+
+/** The core input of a validated UnblockRequest. */
+export function unblockInput(b: { note?: string | undefined }): UnblockInput {
+	return b.note === undefined ? {} : { note: b.note };
+}
+
+const OPERATOR_ONLY =
+	"Only a platform operator's browser session (the dashboard); API keys and Keycloak " +
+	"tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found " +
+	"in any team, no Sbx-Team needed.";
+const operator403 = errorResponse(
+	"`forbidden` with details.reason `operator_required`: not a platform operator",
+);
+
+const blockSandbox = createRoute({
+	...action({
+		path: "/v1/sandboxes/{sandbox}/block",
+		operationId: "sandboxes.block",
+		summary: "Block a sandbox (operator)",
+		description:
+			"Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but " +
+			"an operator only reads, stop and delete are allowed; anything else is 403 " +
+			"`forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. " +
+			`The same reason again changes nothing. ${OPERATOR_ONLY}`,
+	}),
+	middleware: [requireOperator()] as const,
+	request: {
+		params: SandboxParams,
+		body: jsonBody(BlockRequest, "Why"),
+	},
+	responses: {
+		200: jsonResponse(SandboxSchema, "The blocked sandbox"),
+		403: operator403,
+		404: errorResponse("`not_found`: no such sandbox in any team"),
+		409: errorResponse("`invalid_state`: deleted"),
+		...ERROR_RESPONSES,
+	},
+});
+
+const unblockSandbox = createRoute({
+	...action({
+		path: "/v1/sandboxes/{sandbox}/unblock",
+		operationId: "sandboxes.unblock",
+		summary: "Unblock a sandbox (operator)",
+		description: `Lifts the block at once; on a sandbox that is not blocked nothing changes. ${OPERATOR_ONLY}`,
+	}),
+	middleware: [requireOperator()] as const,
+	request: {
+		params: SandboxParams,
+		body: optionalJsonBody(UnblockRequest, "Optional note"),
+	},
+	responses: {
+		200: jsonResponse(SandboxSchema, "The sandbox"),
+		403: operator403,
+		404: errorResponse("`not_found`: no such sandbox in any team"),
+		...ERROR_RESPONSES,
+	},
+});
+
 export function registerSandboxRoutes(app: ApiApp, deps: ApiDeps): void {
 	const svc = deps.svc;
 	const one = (s: Parameters<typeof sandboxResource>[1]) =>
@@ -474,6 +556,11 @@ export function registerSandboxRoutes(app: ApiApp, deps: ApiDeps): void {
 			template: q.template,
 			q: q.q,
 			limit: q.limit,
+			allTeams: q.allTeams === undefined ? undefined : q.allTeams === "true",
+			teamId:
+				q.teamId === undefined
+					? undefined
+					: decodeTeamRef(q.teamId, "query.teamId"),
 		});
 		const key = deps.settings.cursorKey;
 		const inner =
@@ -615,6 +702,20 @@ export function registerSandboxRoutes(app: ApiApp, deps: ApiDeps): void {
 		const p = authOf(c).principal;
 		const ref = resolveSandboxRef(c.req.valid("param").sandbox);
 		const s = await svc.extend(p, ref, c.req.valid("json").ttlSeconds);
+		return c.json(await one(s), 200);
+	});
+
+	app.openapi(blockSandbox, async (c) => {
+		const p = authOf(c).principal;
+		const ref = resolveSandboxRef(c.req.valid("param").sandbox);
+		const s = await svc.block(p, ref, blockInput(c.req.valid("json")));
+		return c.json(await one(s), 200);
+	});
+
+	app.openapi(unblockSandbox, async (c) => {
+		const p = authOf(c).principal;
+		const ref = resolveSandboxRef(c.req.valid("param").sandbox);
+		const s = await svc.unblock(p, ref, unblockInput(c.req.valid("json")));
 		return c.json(await one(s), 200);
 	});
 }

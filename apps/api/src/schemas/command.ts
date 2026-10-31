@@ -351,6 +351,14 @@ const ErrorFrame = z
 		code: z.string(),
 		message: z.string(),
 		retryable: z.boolean(),
+		details: z
+			.record(z.string(), z.unknown())
+			.optional()
+			.openapi({
+				description:
+					"Only on some errors: `forbidden` after an operator blocked the sandbox has " +
+					"`reason: sandbox_blocked`",
+			}),
 		requestId: z.string(),
 		...offsets,
 	})

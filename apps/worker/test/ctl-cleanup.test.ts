@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { ENVIRONMENT_AAD_PREFIX } from "@sbx/auth";
 import { StaticConfigReader } from "@sbx/config";
 import { DELETE_RETRY_LIMIT, KeyRing } from "@sbx/core";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
@@ -481,6 +482,107 @@ describe("ctl-cleanup (§15.4)", () => {
 		expect((await runCleanup(w.ctx)).reencrypted).toBe(0);
 		// No secret in the logs.
 		expect(w.logs.join("\n")).not.toContain("s3cr3t");
+	});
+
+	it("re-encrypts team environments of key version 1 with version 2 (S8 §10.3)", async () => {
+		const w = await createWorld(db);
+		const k1 = randomBytes(32).toString("base64");
+		const k2 = randomBytes(32).toString("base64");
+		const v1 = KeyRing.fromObject({ current: 1, keys: { "1": k1 } });
+		const sets = JSON.stringify({
+			env: { A: "1" },
+			secrets: { TOKEN: "env-s3cr3t" },
+			secretFiles: [{ name: "f", contentBase64: "eA==" }],
+		});
+		const teamId = randomUUID();
+		const ids: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			const id = randomUUID();
+			const blob = v1.encryptFor(ENVIRONMENT_AAD_PREFIX, id, sets);
+			await w.pool.query(
+				`INSERT INTO runtime.environments
+				   (id, team_id, name, is_default, revision, key_version, nonce, ciphertext, updated_at)
+				 VALUES ($1, $2, $3, $4, 4, $5, $6, $7, now() - interval '1 day')`,
+				[
+					id,
+					teamId,
+					`env-${i}`,
+					i === 0,
+					blob.keyVersion,
+					blob.nonce,
+					blob.ciphertext,
+				],
+			);
+			ids.push(id);
+		}
+		// A row of a key the ring does not know cannot be re-encrypted: it is
+		// counted as failed and skipped, the others go on.
+		const k9 = randomBytes(32).toString("base64");
+		const v9 = KeyRing.fromObject({ current: 9, keys: { "9": k9 } });
+		const broken = randomUUID();
+		const b9 = v9.encryptFor(ENVIRONMENT_AAD_PREFIX, broken, sets);
+		await w.pool.query(
+			`INSERT INTO runtime.environments (id, team_id, name, key_version, nonce, ciphertext)
+			 VALUES ($1, $2, 'broken', $3, $4, $5)`,
+			[broken, teamId, b9.keyVersion, b9.nonce, b9.ciphertext],
+		);
+		const before = await w.pool.query<{ updated_at: Date }>(
+			"SELECT updated_at FROM runtime.environments WHERE id = $1",
+			[ids[0]],
+		);
+		w.ctx.keys = KeyRing.fromObject({
+			current: 2,
+			keys: { "1": k1, "2": k2 },
+		});
+
+		const res = await runCleanup(w.ctx);
+		expect(res.environmentsReencrypted).toBe(3);
+		expect(res.environmentsReencryptFailed).toBe(1);
+		expect(res.failed).not.toContain("reencrypt");
+		const only2 = KeyRing.fromObject({ current: 2, keys: { "2": k2 } });
+		for (const id of ids) {
+			const r = await w.pool.query(
+				"SELECT key_version, nonce, ciphertext, revision, updated_at FROM runtime.environments WHERE id = $1",
+				[id],
+			);
+			const x = r.rows[0];
+			expect(x.key_version).toBe(2);
+			expect(
+				only2
+					.decryptFor(ENVIRONMENT_AAD_PREFIX, id, {
+						keyVersion: 2,
+						nonce: x.nonce,
+						ciphertext: x.ciphertext,
+					})
+					.toString("utf8"),
+			).toBe(sets);
+			// The content did not change: no new revision, no update time.
+			expect(x.revision).toBe(4);
+			if (id === ids[0])
+				expect(x.updated_at).toEqual(before.rows[0]?.updated_at);
+		}
+		expect(w.metrics.count("sbx_secrets_reencrypt_failed_total")).toBe(1);
+		// The broken row is still on an old key: the old key cannot go yet.
+		expect(
+			w.metrics.calls
+				.filter((c) => c.name === "sbx_secrets_old_key_rows")
+				.at(-1)?.value,
+		).toBe(1);
+		await w.pool.query("DELETE FROM runtime.environments WHERE id = $1", [
+			broken,
+		]);
+		const again = await runCleanup(w.ctx);
+		expect(again.environmentsReencrypted).toBe(0);
+		expect(again.environmentsReencryptFailed).toBe(0);
+		expect(
+			w.metrics.calls
+				.filter((c) => c.name === "sbx_secrets_old_key_rows")
+				.at(-1)?.value,
+		).toBe(0);
+		expect(w.logs.join("\n")).not.toContain("env-s3cr3t");
+		await w.pool.query("DELETE FROM runtime.environments WHERE team_id = $1", [
+			teamId,
+		]);
 	});
 
 	it("port_auth_codes older than a day, only when the table exists (S7 §12.2)", async () => {

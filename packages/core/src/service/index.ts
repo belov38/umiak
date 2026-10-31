@@ -11,7 +11,16 @@ import type {
 import type { SecretPatch, SecretSets } from "../secrets.ts";
 import type { SandboxState } from "../states.ts";
 import {
+	type BlockInput,
+	blockPort,
+	blockSandbox,
+	type UnblockInput,
+	unblockPort,
+	unblockSandbox,
+} from "./block.ts";
+import {
 	type AgentTarget,
+	type AgentTargetOptions,
 	type CommandListFilter,
 	type CommandResult,
 	type CommandSpec,
@@ -76,7 +85,13 @@ import {
 } from "./snapshots.ts";
 
 export {
+	BLOCK_NOTE_MAX_CHARS,
+	type BlockInput,
+	type UnblockInput,
+} from "./block.ts";
+export {
 	type AgentTarget,
+	type AgentTargetOptions,
 	API_ACTIVITY_THROTTLE_SECONDS,
 	COMMAND_CMD_MAX_BYTES,
 	COMMAND_DEFAULT_USER,
@@ -222,8 +237,15 @@ export interface SandboxService {
 		idOrSlug: string,
 		patch: SecretPatch,
 	): Promise<EnvUpdateResult>;
-	/** `sandbox_not_ready` (details.state) unless `ready`. */
-	resolveAgentTarget(p: Principal, idOrSlug: string): Promise<AgentTarget>;
+	/**
+	 * `sandbox_not_ready` (details.state) unless `ready`. `write`: the call
+	 * changes the guest, refused on a blocked sandbox (S8 C3).
+	 */
+	resolveAgentTarget(
+		p: Principal,
+		idOrSlug: string,
+		opts?: AgentTargetOptions,
+	): Promise<AgentTarget>;
 	createCommand(
 		p: Principal,
 		idOrSlug: string,
@@ -279,6 +301,30 @@ export interface SandboxService {
 		idOrSlug: string,
 		port: number,
 	): Promise<{ token: string }>;
+	/**
+	 * Operator block of a sandbox of any team (S8 C3): every route blocked,
+	 * the team keeps reads, stop and delete. Operators only (`forbidden`,
+	 * `operator_required`); the same reason again is a no-op.
+	 */
+	block(p: Principal, idOrSlug: string, input: BlockInput): Promise<Sandbox>;
+	unblock(
+		p: Principal,
+		idOrSlug: string,
+		input?: UnblockInput,
+	): Promise<Sandbox>;
+	/** Operator block of a hosted port: its route, PUT, rotate and DELETE. */
+	blockPort(
+		p: Principal,
+		idOrSlug: string,
+		port: number,
+		input: BlockInput,
+	): Promise<HostedPort>;
+	unblockPort(
+		p: Principal,
+		idOrSlug: string,
+		port: number,
+		input?: UnblockInput,
+	): Promise<HostedPort>;
 }
 
 export class SandboxServiceImpl implements SandboxService {
@@ -415,8 +461,12 @@ export class SandboxServiceImpl implements SandboxService {
 		return patchEnv(this.deps, p, idOrSlug, patch);
 	}
 
-	resolveAgentTarget(p: Principal, idOrSlug: string): Promise<AgentTarget> {
-		return resolveAgentTarget(this.deps, p, idOrSlug);
+	resolveAgentTarget(
+		p: Principal,
+		idOrSlug: string,
+		opts: AgentTargetOptions = {},
+	): Promise<AgentTarget> {
+		return resolveAgentTarget(this.deps, p, idOrSlug, opts);
 	}
 
 	createCommand(
@@ -500,5 +550,35 @@ export class SandboxServiceImpl implements SandboxService {
 		port: number,
 	): Promise<{ token: string }> {
 		return rotatePortToken(this.deps, p, idOrSlug, port);
+	}
+
+	block(p: Principal, idOrSlug: string, input: BlockInput): Promise<Sandbox> {
+		return blockSandbox(this.deps, p, idOrSlug, input);
+	}
+
+	unblock(
+		p: Principal,
+		idOrSlug: string,
+		input: UnblockInput = {},
+	): Promise<Sandbox> {
+		return unblockSandbox(this.deps, p, idOrSlug, input);
+	}
+
+	blockPort(
+		p: Principal,
+		idOrSlug: string,
+		port: number,
+		input: BlockInput,
+	): Promise<HostedPort> {
+		return blockPort(this.deps, p, idOrSlug, port, input);
+	}
+
+	unblockPort(
+		p: Principal,
+		idOrSlug: string,
+		port: number,
+		input: UnblockInput = {},
+	): Promise<HostedPort> {
+		return unblockPort(this.deps, p, idOrSlug, port, input);
 	}
 }

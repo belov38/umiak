@@ -7,7 +7,7 @@
 //   {"event":"error",code,message,retryable,details,requestId}; the text for a
 //   person goes to stderr. Commands whose stdout is data (`rawData`: exec,
 //   run, logs, cp, push, auth token) print that line to stderr unless the
-//   --json flag was given.
+//   --json flag was given; a protocol command (`sbx mcp`) always does.
 // - Raw-data commands switch to JSON (NDJSON frames) only with the --json
 //   flag, never with SBX_OUTPUT=json (ruling R25): `sbx exec … > file`
 //   writes bytes whatever the env says.
@@ -148,6 +148,8 @@ export class Output {
 	readonly jsonFlag: boolean;
 	/** stdout carries data of the command (set by the command runner). */
 	rawData = false;
+	/** stdout carries a protocol (`sbx mcp`): an error never goes there, not even with --json. */
+	protocol = false;
 	readonly #stdout: Sink;
 	readonly #stderr: Sink;
 
@@ -226,7 +228,7 @@ export class Output {
 			return;
 		}
 		const line = JSON.stringify({ event: "error", ...p });
-		if (this.rawData && !this.jsonFlag) {
+		if (this.protocol || (this.rawData && !this.jsonFlag)) {
 			this.#line(this.#stderr, line);
 			return;
 		}
