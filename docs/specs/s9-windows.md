@@ -810,6 +810,8 @@ packages/pve/, services/node-agent/   + §18.1
 21. **Загрузка клона:** если служба видела идущий Windows Setup, после его конца она сразу делает boot step сама, без 60 s ожидания `early.json` (на первой загрузке клона startup-скрипт отработал во время Setup и ничего не сделал). Ошибка boot step → выход 75 и повтор через failure actions. Пока идентичность не готова, сокеты не открыты.
 22. **Шаги сборки:** `00-base`…`90-cleanup` в `infra/templates/_windows/steps/`; `60-desktop` — только экран блокировки, первый вход и Default User hive. Шаг `10-system` ставит OpenSSH только из FoD (`openssh.source = inbox`), запасной `github` не реализован.
 23. **Первая загрузка клона** (§10.2, §11.1): `SkipMachineOOBE`/`SkipUserOOBE`, заглушка `ComputerName=SBXTEMPLATE`, без `SystemLocale`; `SetupComplete.cmd` клона запускает `firstboot.ps1`, который возвращает то, что сбросил sysprep (службы, кодовые страницы, BCD, WinRE, NetBIOS, политика firewall). Проверено на клоне 26H2: OOBE проходит, autologon `user` работает; ACP применяется только после перезагрузки на переименование.
+24. **Путь с файлом вместо каталога в середине:** NTFS отвечает `ERROR_PATH_NOT_FOUND`, а Go определяет `syscall.ENOTDIR` как тот же код, поэтому на Windows это `not_found path_not_found`, если файловый сервис не увидел файл на пути сам (тогда `failed_precondition not_directory`, как на Linux).
+25. **Гранулярность обрезки вывода на Windows — 64 KiB** (sparse-файлы NTFS освобождают место блоками по 64 KiB); `available_from` всегда кратен 64 KiB, на Linux — 4 KiB.
 
 ### 24.3 Решения координатора (R1–R17)
 
@@ -837,15 +839,15 @@ packages/pve/, services/node-agent/   + §18.1
 
 | Что | Значение |
 |---|---|
-| Длительность сборки (`sbx-tpl build windows`, без verify / с verify) | TBD (Task 29) |
-| Размер шаблона в thin pool (`base-598-disk-*`) | TBD (Task 29) |
-| Способ установки OpenSSH (FoD inbox, версия) | TBD (Task 29) |
-| Счётчик `BootId` (надёжен / запасной путь) | TBD (Task 29) |
-| Перезагрузки на первой загрузке клона (specialize, §15 п. 2) | TBD (Task 29) |
-| Create: `create_to_agent_ready` (медиана / p95) | TBD (Task 29) |
-| Fork: `fork_to_agent_ready` (медиана / p95; snapshot + clone→ready) | TBD (Task 29) |
-| `freeze_ms` (QGA VSS freeze → thaw) | TBD (Task 29) |
-| `first_boot_to_agent_ready` / `boot_to_agent_ready` | TBD (Task 29) |
+| Длительность сборки (`sbx-tpl build windows`, без verify / с verify) | ≈ 27 min / 34.7 min (сборка `20261031.9`; verify отдельно 7.5 min) |
+| Размер шаблона в thin pool (`base-598-disk-*`) | 16.6 GiB занято из 96 GiB (`diskUsedGiB`) |
+| Способ установки OpenSSH (FoD inbox, версия) | FoD inbox, `OpenSSH_9.5p2 for Windows` |
+| Счётчик `BootId` (надёжен / запасной путь) | надёжен: читается на клоне (`PrefetchParameters\BootId`), volatile-ключ агента не создаётся |
+| Перезагрузки на первой загрузке клона (specialize, §15 п. 2) | 3 загрузки после seal: 2 от Setup (sysprep, winlogon) + 1 переименование агентом (R16) |
+| Create: `create_to_agent_ready` (медиана / p95) | S1 create ≈ 2 s; start → агент готов: медиана 111.0 s, максимум 127.2 s (7 замеров: 5 попыток bench + 2 verify) |
+| Fork: `fork_to_agent_ready` (медиана / p95; snapshot + clone→ready) | start fork → агент готов под новым именем: 44.6 / 45.8 / 47.7 s (3 verify); snapshot ≈ 2–4 s; bench `--runs 3` не завершён (зависание thaw, §24.5) |
+| `freeze_ms` (QGA VSS freeze → thaw) | 544 / 614 / 1100 ms (окно pause + `lvcreate` в snapshot, 3 verify) |
+| `first_boot_to_agent_ready` / `boot_to_agent_ready` | медиана 111.0 s / 16.5–21.3 s; после hard stop 14.0–16.9 s (медиана 15.2 s) |
 
 ### 24.5 Контракты для соседних областей
 
@@ -855,5 +857,7 @@ packages/pve/, services/node-agent/   + §18.1
   - для Windows всегда отправлять `fs: false` (по умолчанию `fs` = true → `fs_freeze_unsupported`);
   - `lease_ms` quiesce больше 20 s (§24.2 п. 15);
   - повторная отправка `UpdateSecrets` при `readiness.changed{secrets: pending}` без смены `boot_id` (§18.6 п. 7) — в S9 не делалась.
+  - `stop` сразу после `shutdown` + `start` может упасть с `can't lock file ... got timeout`: qmeventd до 30 s держит lock VM, пока ждёт выхода старого QEMU (видно на `pve`). Worker считает это временной ошибкой (`TRANSIENT_4XX_RE`) и повторяет; повторы должны покрывать 30 s. Snapshot в этом окне ждёт lock внутри бюджета заморозки и падает по `freeze took … (budget …)`; worker должен повторять и это (или не снимать snapshot раньше 35 s после start, `VM_LOCK_AFTER_RESTART_MS`). `retryOnVmLock` из `@sbx/pve` — готовый повтор для stop и snapshot.
+  - **Открыто:** S1 snapshot работающей Windows-machine (QGA VSS freeze → pause → `lvcreate` → resume → thaw) примерно в половине попыток подвешивает thaw в qemu-ga: гость остаётся замороженным (12 min без записей на диск, `agent.log` и журналы Windows пусты), сокет QGA занят до hard stop (`ThawFailedError`). Видно в bench (snapshot через 35 s после рестарта, 3 из 3) и вручную (3 из 6); fork-snapshot verify прошёл во всех трёх прогонах, ручная последовательность `qm` + `lvcreate` на свежей загрузке — тоже. Нагрузка хоста, разогрев (freeze + thaw заранее) и время после загрузки причину не объясняют; она в qemu-ga/VSS Windows и не найдена. После hard stop NTFS целая, записи гостя после freeze потеряны. До выяснения S6 должен ограничивать время thaw (сейчас ждёт ответа PVE) и после `ThawFailedError` делать hard stop machine.
 - **S7.** Документация семантики Windows и коды ошибок §18.7, в том числе `desktop_not_ready` (пока на любой `desktop: true`), `secrets_in_use`, `fs_freeze_unsupported`; `hostname_applied = false`; `exec`/`call` — локальные инструменты, не API.
 - **S10.** Не сделано в S9: `sbx-session.exe`, задача `\sbx\session`, `run\session.sock`, фаза `desktop` (и `desktop` в `readiness.required`), запуск команд с `CommandSpec.desktop` в консольной сессии (§13). Есть: autologon `user`, без блокировки и мастеров первого входа.
