@@ -31,12 +31,12 @@ func MkdirSecure(dir string, a DirAccess) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	if ok, err := IsSecure(dir, a); err == nil && ok {
+		return nil
+	}
 	want, err := windows.SecurityDescriptorFromString(a.sddl())
 	if err != nil {
 		return fmt.Errorf("fsutil: ACL %q: %w", a.sddl(), err)
-	}
-	if cur, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION); err == nil && sameProtectedDACL(cur.String(), want.String()) {
-		return nil
 	}
 	dacl, _, err := want.DACL()
 	if err != nil {
@@ -47,6 +47,19 @@ func MkdirSecure(dir string, a DirAccess) error {
 		return fmt.Errorf("fsutil: set ACL of %s: %w", dir, err)
 	}
 	return nil
+}
+
+// IsSecure reports whether dir has the protected DACL of a (MkdirSecure).
+func IsSecure(dir string, a DirAccess) (bool, error) {
+	want, err := windows.SecurityDescriptorFromString(a.sddl())
+	if err != nil {
+		return false, fmt.Errorf("fsutil: ACL %q: %w", a.sddl(), err)
+	}
+	cur, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return false, err
+	}
+	return sameProtectedDACL(cur.String(), want.String()), nil
 }
 
 // sameProtectedDACL reports whether the DACL in SDDL cur is protected and
