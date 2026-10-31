@@ -108,6 +108,33 @@ async function setup(o: { env?: Record<string, string> } = {}): Promise<Env> {
 }
 
 describe("PveInfraRegistry", () => {
+	it("hard-stops a guest after failed thaw and allows a normal start", async () => {
+		const e = await setup();
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		const err = await e.infra
+			.snapshot(vm.vmid, {
+				lvId: randomUUID().replaceAll("-", ""),
+				hook: {
+					freeze: async () => {},
+					thaw: async () => {
+						throw new Error("QGA dead");
+					},
+				},
+			})
+			.catch((x: unknown) => x);
+		expect(err).toBeInstanceOf(QuiesceFailed);
+		expect((err as Error).message).toMatch(/hard-stopped/);
+		expect(await e.infra.status(vm.vmid)).toBe("stopped");
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		expect(await e.infra.status(vm.vmid)).toBe("running");
+	});
 	it("builds the clients of a node once and caches them", async () => {
 		const e = await setup();
 		expect(await e.registry.forNode(e.topo.nodeId)).toBe(e.infra);

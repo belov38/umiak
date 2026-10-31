@@ -24,6 +24,7 @@ import {
 	type SnapshotRef,
 	type SnapshotStore,
 	SshNodeOps,
+	ThawFailedError,
 } from "@sbx/pve";
 import type pg from "pg";
 import { QuiesceFailed } from "../ops/snapshot-step.ts";
@@ -674,10 +675,32 @@ export class PveNodeInfra implements NodeInfra {
 		opts: { lvId: string; hook?: QuiesceHook },
 	): Promise<InfraSnapshotResult> {
 		return this.#run("snapshot", async () => {
-			const ref = await this.#base.snapshot(vmid, {
-				id: opts.lvId,
-				...(opts.hook ? { hook: opts.hook } : {}),
-			});
+			const lease = await this.#allocator.get(vmid);
+			const expectedOwner = lease?.ownerId ?? null;
+			const ref = await this.#base
+				.snapshot(vmid, {
+					id: opts.lvId,
+					...(opts.hook ? { hook: opts.hook } : {}),
+				})
+				.catch(async (error: unknown) => {
+					if (!(error instanceof ThawFailedError)) throw error;
+					// A dead QGA cannot thaw the guest. Serialize with power operations
+					// and fence the lease so a recycled VMID is never stopped.
+					try {
+						await this.#powerSerialized(() =>
+							this.#base.stop(vmid, { expectedOwner }),
+						);
+					} catch (stopError) {
+						throw new QuiesceFailed(
+							`VM ${vmid}: thaw failed; hard stop also failed: ${String(stopError)}`,
+							{ cause: error },
+						);
+					}
+					throw new QuiesceFailed(
+						`VM ${vmid}: thaw failed; machine hard-stopped to release frozen filesystems; start it again normally`,
+						{ cause: error },
+					);
+				});
 			if (ref.autoThawed) {
 				// S1's QGA hook tolerates a guest that thawed itself; a stored snapshot
 				// must be quiesced, so it is discarded like qgaFreezeHook's outcome.

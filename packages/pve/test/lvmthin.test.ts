@@ -30,7 +30,13 @@ const winTpl: DiskSet = parseDiskSet(
 	"local-lvm",
 );
 
-function setup(opts: { budgetMs?: number; freezeTimeoutMs?: number } = {}) {
+function setup(
+	opts: {
+		budgetMs?: number;
+		freezeTimeoutMs?: number;
+		thawTimeoutMs?: number;
+	} = {},
+) {
 	const log: string[] = [];
 	const node = new FakeNode(log);
 	const clock = new FakeClock();
@@ -51,6 +57,7 @@ function setup(opts: { budgetMs?: number; freezeTimeoutMs?: number } = {}) {
 			? { freezeTimeoutMs: opts.freezeTimeoutMs }
 			: {}),
 		thawRetryDelayMs: 0,
+		thawTimeoutMs: opts.thawTimeoutMs ?? 10000,
 		now: clock.now,
 		newSnapshotId: () => "snap1",
 	});
@@ -312,6 +319,17 @@ describe("snapshot", () => {
 		finishFreeze();
 		await new Promise((r) => setTimeout(r, 5));
 		expect(log.filter((l) => l === "thaw")).toHaveLength(2);
+	});
+
+	it("bounds a thaw that never returns and discards snapshot LVs", async () => {
+		const { driver, node, hook } = setup({ thawTimeoutMs: 5 });
+		hook.thaw = () => new Promise(() => {});
+		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toBeInstanceOf(
+			ThawFailedError,
+		);
+		expect(node.lvs.filter((l) => l.tags.includes("sbx-snap-snap1"))).toEqual(
+			[],
+		);
 	});
 
 	it("retries thaw and reports a machine that needs attention after the last retry", async () => {

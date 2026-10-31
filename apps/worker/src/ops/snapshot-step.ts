@@ -60,9 +60,14 @@ export function composeHooks(
 	outer: QuiesceHook,
 	inner: QuiesceHook,
 ): QuiesceHook {
+	let cancelled = false;
 	return {
 		freeze: async () => {
 			await outer.freeze();
+			if (cancelled) {
+				await outer.thaw();
+				return;
+			}
 			try {
 				await inner.freeze();
 			} catch (e) {
@@ -71,6 +76,7 @@ export function composeHooks(
 			}
 		},
 		thaw: async () => {
+			cancelled = true;
 			let first: { error: unknown } | undefined;
 			for (const h of [inner, outer]) {
 				try {
@@ -119,6 +125,7 @@ function bareRef(lvId: string, sourceVmid: number): InfraSnapshotRef {
 async function agentCanQuiesce(
 	ctx: WorkerCtx,
 	machineId: string,
+	requireWipe = false,
 ): Promise<boolean> {
 	const r = await ctx.pool.query<{
 		state: string;
@@ -128,6 +135,15 @@ async function agentCanQuiesce(
 		[machineId],
 	);
 	const s = r.rows[0];
+	if (
+		requireWipe &&
+		s?.state === "connected" &&
+		!(s.capabilities ?? []).includes("system.quiesce.wipe_secrets.v1")
+	) {
+		throw new QuiesceFailed(
+			`machine ${machineId}: saved Windows snapshot requires system.quiesce.wipe_secrets.v1 to wipe secret files`,
+		);
+	}
 	return (
 		s?.state === "connected" &&
 		(s.capabilities ?? []).includes(QUIESCE_CAPABILITY)
@@ -284,7 +300,7 @@ export async function takeSnapshot(
 			const saved = s.kind === "saved";
 			needsAgent = windows && saved;
 			const viaQga = fenced.op.progress.quiesceVia === "qga" && !needsAgent;
-			if (!viaQga && (await agentCanQuiesce(ctx, m.id))) {
+			if (!viaQga && (await agentCanQuiesce(ctx, m.id, needsAgent))) {
 				agentHook = true;
 				const agent = ctx.agent.quiesceHook(
 					m.id,

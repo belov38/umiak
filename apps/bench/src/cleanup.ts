@@ -9,7 +9,14 @@ import {
 export const AGENT_TESTS_ISO_RE = /^sbx-build-agenttests-\d{14}\.iso$/;
 
 /** Removes everything a failed run may have left (spec §7.1). Never touches the template or sbx-tpl LVs. */
-export async function cleanup(ctx: Ctx): Promise<string[]> {
+export async function cleanup(
+	ctx: Ctx,
+	opts: { allSandboxResources?: boolean } = {},
+): Promise<string[]> {
+	if (!opts.allSandboxResources)
+		throw new Error(
+			"broad cleanup requires --all-sandbox-resources; it deletes resources belonging to other runs",
+		);
 	const { api, node, cfg, store, machines } = ctx;
 	const report: string[] = [];
 	const vms = await api.get<VmResource[]>("/cluster/resources", {

@@ -635,7 +635,7 @@ func TestUpdateSshCaAfterRebootIsIdempotent(t *testing.T) {
 		if got := h.read(h.l.SSHUserCA); got != want {
 			t.Errorf("update %d: ssh ca = %q", i, got)
 		}
-		if got := h.mode(h.l.SSHUserCA); got != 0o644 {
+		if got := h.mode(h.l.SSHUserCA); runtime.GOOS != "windows" && got != 0o644 {
 			t.Errorf("update %d: ssh ca mode = %v", i, got)
 		}
 		info := m.ClaimInfo()

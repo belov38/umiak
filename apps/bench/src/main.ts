@@ -16,7 +16,7 @@ const USAGE = `usage:
   sbx-bench s5 --template <vmid> [--baseline 599] [--runs 5] [--ram-cap 8g] [--keep]
   sbx-bench s9 --template <vmid> [--runs 3] [--ram-cap 8g] [--connect-url <wss>] [--dev-cp-ssh <host>] [--keep]
   sbx-bench s9 agent-tests --template <vmid> --dir <test binaries> [--run <regex>] [--ram-cap 8g] [--keep]
-  sbx-bench cleanup`;
+  sbx-bench cleanup --all-sandbox-resources`;
 
 /** --runs: a positive integer. */
 export function parseRuns(v: string | undefined, fallback: number): number {
@@ -38,6 +38,7 @@ async function main(argv: string[]): Promise<number> {
 		allowPositionals: true,
 		options: {
 			runs: { type: "string" },
+			"all-sandbox-resources": { type: "boolean", default: false },
 			size: { type: "string", default: "2g" },
 			parallel: { type: "string", default: "1,2,4" },
 			"clone-only": { type: "string", default: "8" },
@@ -71,7 +72,9 @@ async function main(argv: string[]): Promise<number> {
 			return checks.every((c) => c.ok) ? 0 : 1;
 		}
 		if (cmd === "cleanup") {
-			const report = await cleanup(ctx);
+			const report = await cleanup(ctx, {
+				allSandboxResources: values["all-sandbox-resources"],
+			});
 			process.stdout.write(
 				`${report.length ? report.join("\n") : "nothing to clean"}\n`,
 			);

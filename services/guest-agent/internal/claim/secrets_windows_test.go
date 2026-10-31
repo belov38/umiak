@@ -355,7 +355,7 @@ func TestRestoreOverHeldFileSetsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := openShared(t, filepath.Join(h.l.SecretFilesDir, "key.pem"), windows.FILE_SHARE_READ)
-	defer f.Close() //nolint:errcheck // test cleanup
+	defer func() { _ = f.Close() }() //nolint:errcheck // test cleanup
 	if _, err := h.m.WipeSecretFiles(); !errors.Is(err, ErrSecretInUse) {
 		t.Fatalf("WipeSecretFiles = %v, want ErrSecretInUse", err)
 	}
@@ -376,5 +376,24 @@ func TestRestoreOverHeldFileSetsPending(t *testing.T) {
 	}
 	if st, _ := h.tr.State(readiness.PhaseSecrets); st != pending {
 		t.Errorf("secrets phase = %v, want pending", st)
+	}
+}
+
+func TestReplaceFailureRemovesZeroedSecret(t *testing.T) {
+	dir := t.TempDir()
+	dst, tmp := filepath.Join(dir, "secret"), filepath.Join(dir, "temp")
+	if err := os.WriteFile(dst, []byte("old secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmp, []byte("new secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f := openShared(t, tmp, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
+	defer func() { _ = f.Close() }()
+	if err := replaceSecret(tmp, dst); err == nil {
+		t.Fatal("replacement failure was hidden")
+	}
+	if _, err := os.Stat(dst); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("zeroed secret remains: %v", err)
 	}
 }

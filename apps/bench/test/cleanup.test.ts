@@ -64,6 +64,12 @@ function ctx(): {
 }
 
 describe("cleanup", () => {
+	it("refuses broad cleanup without explicit opt-in before any side effect", async () => {
+		const { c, api, node } = ctx();
+		await expect(cleanup(c)).rejects.toThrow(/all-sandbox-resources/);
+		expect(api.paths()).toEqual([]);
+		expect(node.calls).toEqual([]);
+	});
 	it("keeps the DHCP entries of template lease MACs", async () => {
 		const { c, node, store } = ctx();
 		const t = Date.now();
@@ -78,7 +84,7 @@ describe("cleanup", () => {
 		});
 		node.leases.push({ mac: "02:01:00:00:02:56", ip: "10.88.0.150" });
 		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
-		const report = await cleanup(c);
+		const report = await cleanup(c, { allSandboxResources: true });
 		const released = node.calls
 			.filter((x) => x.op === "dhcp.release")
 			.map((x) => x.args.mac);
@@ -101,7 +107,7 @@ describe("cleanup", () => {
 				firewall: { rules: [], ipsets: {} },
 			});
 		}
-		const report = await cleanup(c);
+		const report = await cleanup(c, { allSandboxResources: true });
 		expect(api.paths().some((p) => p.startsWith("DELETE"))).toBe(false);
 		expect([...api.vms.keys()].sort()).toEqual([596, 597, 598]);
 		expect(report.join("\n")).not.toMatch(/59[678]/);
@@ -112,7 +118,7 @@ describe("cleanup", () => {
 		await c.machines.create({});
 		node.leases.push({ mac: "02:01:00:00:01:f4", ip: "10.88.0.101" });
 		node.handlers["dhcp.release"] = () => ({ released: false });
-		const report = await cleanup(c);
+		const report = await cleanup(c, { allSandboxResources: true });
 		expect(store.get(1, 500)).toBeDefined();
 		expect(report.join("\n")).toMatch(/500/);
 	});
@@ -121,7 +127,7 @@ describe("cleanup", () => {
 		const { c, node, store } = ctx();
 		const m = await c.machines.create({});
 		await c.machines.snapshot(m.vmid);
-		const report = await cleanup(c);
+		const report = await cleanup(c, { allSandboxResources: true });
 		expect(store.list(1)).toEqual([]);
 		expect(store.listSnapshots()).toEqual([]);
 		expect(node.lvs).toEqual([]);
@@ -154,7 +160,7 @@ describe("cleanup", () => {
 			if (vmid === 510) throw new Error("locked");
 			return del(vmid, o);
 		};
-		const report = await cleanup(c);
+		const report = await cleanup(c, { allSandboxResources: true });
 		const removed = node.calls.filter((x) => x.op === "media.remove");
 		expect(removed.map((x) => x.args.names)).toEqual([
 			["sbx-build-agenttests-20261031050000.iso"],

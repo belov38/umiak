@@ -103,6 +103,8 @@ export interface LvmThinOptions {
 	maxDataPercent?: number;
 	maxMetadataPercent?: number;
 	thawRetries?: number;
+	/** Maximum wait for each thaw attempt, including a hung QGA/VSS call. */
+	thawTimeoutMs?: number;
 	thawRetryDelayMs?: number;
 	newSnapshotId?: () => string;
 	now?: () => number;
@@ -138,6 +140,7 @@ export class LvmThinDriver implements StorageDriver {
 			maxDataPercent: 80,
 			maxMetadataPercent: 70,
 			thawRetries: 3,
+			thawTimeoutMs: 10_000,
 			thawRetryDelayMs: 500,
 			newSnapshotId: randomId,
 			now: Date.now,
@@ -346,7 +349,21 @@ export class LvmThinDriver implements StorageDriver {
 		let last: unknown;
 		for (let i = 0; i < this.#o.thawRetries; i++) {
 			try {
-				const r = await hook.thaw();
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				let r: Awaited<ReturnType<QuiesceHook["thaw"]>>;
+				try {
+					r = await Promise.race([
+						hook.thaw(),
+						new Promise<never>((_, reject) => {
+							timer = setTimeout(
+								() => reject(new Error("thaw timed out")),
+								this.#o.thawTimeoutMs,
+							);
+						}),
+					]);
+				} finally {
+					clearTimeout(timer);
+				}
 				return r?.autoThawed === true;
 			} catch (err) {
 				last = err;

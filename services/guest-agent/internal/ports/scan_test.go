@@ -90,7 +90,13 @@ func (f *fakeProc) setTables(v4, v6 string) {
 		if err := os.WriteFile(tmp, []byte(tcpHeader+body), 0o644); err != nil {
 			f.t.Fatal(err)
 		}
-		if err := os.Rename(tmp, filepath.Join(f.dir, "net", name)); err != nil {
+		root, err := os.OpenRoot(filepath.Dir(tmp))
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		err = root.Rename(filepath.Base(tmp), name)
+		_ = root.Close()
+		if err != nil {
 			f.t.Fatal(err)
 		}
 	}

@@ -114,6 +114,23 @@ describe("stop on Windows", () => {
 });
 
 describe("snapshot of a running Windows machine", () => {
+	it("saved: missing wipe capability fails permanently before freezing", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const src = await readySandbox(w, e);
+		await makeWindows(w);
+		await w.pool.query(
+			"UPDATE tunnel.tunnel_sessions SET capabilities = ARRAY['system.quiesce.v1'] WHERE machine_id = $1",
+			[src.machineId],
+		);
+		const s = await save(e, src.sandboxId, "no-wipe");
+		expect(await run(w, s.operationId)).toBe("failed");
+		expect(w.infra.callsOf("snapshot")).toHaveLength(0);
+		expect((await row(w, "operations", s.operationId)).error_message).toMatch(
+			/wipe_secrets/,
+		);
+	});
+
 	it("fork: agent quiesce (fs=false, wipe=false), QGA freeze, snapshot, QGA thaw, agent thaw", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
@@ -290,6 +307,28 @@ describe("snapshot of a running Windows machine", () => {
 });
 
 describe("composeHooks", () => {
+	it("does not start VSS after an aborted slow agent freeze", async () => {
+		const log: string[] = [];
+		let release!: () => void;
+		const h = composeHooks(
+			{
+				freeze: () =>
+					new Promise<void>((r) => {
+						release = r;
+					}),
+				thaw: async () => {
+					log.push("outer.thaw");
+				},
+			},
+			recorder("inner", log),
+		);
+		const pending = h.freeze();
+		await h.thaw();
+		release();
+		await pending;
+		expect(log).not.toContain("inner.freeze");
+	});
+
 	function recorder(name: string, log: string[], fail?: "freeze" | "thaw") {
 		const hook: QuiesceHook = {
 			freeze: async () => {

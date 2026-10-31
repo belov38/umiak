@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
@@ -206,7 +207,15 @@ func placeVersion(l paths.Layout, pkgDir string, m *Manifest, keys []ed25519.Pub
 		restoreOld()
 		return nil, err
 	}
-	if err := os.Rename(pkgDir, p.dir); err != nil {
+	// NTFS rename retains staging's SYSTEM-only DACL. Copy verified files
+	// under VersionsDir so they inherit its readable ACL before activation.
+	move := func() error {
+		if runtime.GOOS == "windows" {
+			return syscall.EXDEV
+		}
+		return os.Rename(pkgDir, p.dir)
+	}
+	if err := move(); err != nil {
 		// StagingDir and VersionsDir may be on different filesystems.
 		tmp := filepath.Join(l.VersionsDir, incomingPrefix+randHex())
 		if cerr := copyTree(pkgDir, tmp); cerr != nil {

@@ -176,15 +176,33 @@ func createSecret(path string, data []byte, mode fs.FileMode, user *windows.SID)
 // replaceSecret moves tmp (in the directory of path) to path. An existing
 // regular file at path is overwritten with zeros first; anything else there
 // is removed.
-func replaceSecret(tmp, path string) error {
+func replaceSecret(tmp, path string) (retErr error) {
+	// Keep DELETE access until replacement finishes. On failure unlink the
+	// zeroed old file rather than exposing it as a successfully kept secret.
+	var old *os.File
+	var handle windows.Handle
+	defer func() {
+		if old == nil {
+			return
+		}
+		if retErr != nil {
+			retErr = errors.Join(retErr, deleteOnClose(handle))
+		}
+		retErr = errors.Join(retErr, old.Close())
+	}()
 	fi, err := os.Lstat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
 		return secretFileError("inspect", path, err)
 	case fi.Mode().IsRegular():
-		if err := zeroInPlace(path); err != nil {
-			return err
+		var err error
+		old, handle, err = openExisting(path)
+		if err != nil {
+			return secretFileError("open replacement", path, err)
+		}
+		if err := zeroFile(old); err != nil {
+			return fmt.Errorf("claim: zero replacement %s: %w", path, err)
 		}
 	default:
 		if err := os.RemoveAll(path); err != nil {
@@ -193,13 +211,13 @@ func replaceSecret(tmp, path string) error {
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		// NTFS refuses to replace a file that is open, even by a reader
-		// that shares delete (zeroInPlace let it through). A POSIX rename
+		// that shares delete (the overwrite handle let it through). A POSIX rename
 		// replaces it; the reader keeps the zeroed old file.
 		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			return secretFileError("replace", path, err)
+			return fmt.Errorf("claim: replace %s (old secret removed): %w", path, err)
 		}
 		if perr := posixRename(tmp, path); perr != nil {
-			return secretFileError("replace", path, errors.Join(err, perr))
+			return fmt.Errorf("claim: replace %s (old secret removed): %w", path, errors.Join(err, perr))
 		}
 	}
 	return nil
@@ -236,24 +254,6 @@ func wipeFile(path string) error {
 	if werr == nil {
 		werr = deleteOnClose(h)
 	}
-	cerr := f.Close()
-	if werr != nil {
-		return secretFileError("wipe", path, werr)
-	}
-	if cerr != nil {
-		return secretFileError("wipe", path, cerr)
-	}
-	return nil
-}
-
-// zeroInPlace overwrites the secret file path with zeros and flushes it,
-// keeping the file; the in-use rules are those of wipeFile.
-func zeroInPlace(path string) error {
-	f, _, err := openExisting(path)
-	if err != nil {
-		return secretFileError("wipe", path, err)
-	}
-	werr := zeroFile(f)
 	cerr := f.Close()
 	if werr != nil {
 		return secretFileError("wipe", path, werr)
