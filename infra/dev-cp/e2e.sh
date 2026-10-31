@@ -41,6 +41,10 @@ arch=$(uname -m)
 SBX="${SBX_E2E_SBX:-$REPO/apps/cli/dist/sbx-$os-$arch}"
 
 W=$(mktemp -d "${TMPDIR:-/tmp}/sbx-e2e.XXXXXX")
+# mise keeps its config and trust records under the XDG dirs; pin them before the override, or the
+# python3/node shims stop working ("config files are not trusted").
+export MISE_CONFIG_DIR="${MISE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mise}"
+export MISE_STATE_DIR="${MISE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mise}"
 export XDG_CONFIG_HOME="$W/config" XDG_STATE_HOME="$W/state"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME" "$W/bin" "$W/files"
 
@@ -340,13 +344,14 @@ done
 
 step "no leftovers on pve"
 left=""
-for _ in $(seq 1 30); do
+# The last rm returns while the sandbox is still deleting; wait for it to leave the list too.
+for _ in $(seq 1 40); do
 	left=$(vms_in_range)
 	snaps=$(ssh -o BatchMode=yes "$PVE_SSH" 'lvs --noheadings -o lv_name pve | grep -c sbx-snap-')
-	[[ "$left" == "$BASE_VMS" && "$snaps" == 0 ]] && break
+	mine=$("$SBX" list --json | json 'len(d["data"])')
+	[[ "$left" == "$BASE_VMS" && "$snaps" == 0 && "$mine" == 0 ]] && break
 	sleep 3
 done
-mine=$("$SBX" list --json | json 'len(d["data"])')
 [[ "$left" == "$BASE_VMS" && "$snaps" == 0 && "$mine" == 0 ]] &&
 	pass "VMs 500-589: ${left:-none}; snapshot LVs: 0; sandboxes of the e2e team: 0" ||
 	fail "VMs '$left' (before '$BASE_VMS'), snapshot LVs $snaps, sandboxes $mine"
