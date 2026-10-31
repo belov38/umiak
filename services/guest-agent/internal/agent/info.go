@@ -56,12 +56,16 @@ func capabilityList() []string {
 // infoResponse is the Control/Info answer. The tunnel library appends
 // sbx.tunnel.v1 to the proto packages.
 func (a *agent) infoResponse() *tunnelv1.InfoResponse {
+	caps := capabilityList()
+	if a.cfg.DesktopEnabled {
+		caps = append(caps, "desktop.v1", "desktop.stream.v1", "desktop.input.v1", "desktop.clipboard.v1")
+	}
 	return &tunnelv1.InfoResponse{
 		AgentVersion:  a.version,
 		Os:            runtime.GOOS,
 		Arch:          runtime.GOARCH,
 		ProtoPackages: []string{agentPackage},
-		Capabilities:  capabilityList(),
+		Capabilities:  caps,
 	}
 }
 
@@ -82,9 +86,12 @@ func (a *agent) newMux() http.Handler {
 	fsPath, fsH := a.files.ConnectHandler()
 	sysPath, sysH := a.system.ConnectHandler()
 	filesH := a.files.HTTPHandler()
+	desktopPath, desktopH := a.desktop.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		switch {
+		case strings.HasPrefix(p, desktopPath):
+			desktopH.ServeHTTP(w, r)
 		case strings.HasPrefix(p, procPath):
 			procH.ServeHTTP(w, r)
 		case strings.HasPrefix(p, fsPath):

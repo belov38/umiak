@@ -20,6 +20,7 @@ import (
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/claim"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/files"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
@@ -71,6 +72,9 @@ type DockerClient interface {
 // it with fakes on any OS. Nil fields take the production default unless
 // noted otherwise.
 type Deps struct {
+	// DesktopSession and DesktopStreamer isolate OS and upstream integration.
+	DesktopSession  desktop.Session
+	DesktopStreamer desktop.Streamer
 	// Supervisor runs command shims and quiesce watchdogs. Required.
 	Supervisor supervisor.Supervisor
 	// IdentSource reads the smbios identity. Required.
@@ -254,6 +258,7 @@ type agent struct {
 	tcp      *ports.Counter
 	updater  *update.Manager
 	guard    *update.StartGuard // update deadline until CheckPending
+	desktop  *desktop.Service
 	system   *system.Service
 	idle     *system.IdleLoop
 	gopsutil *system.GopsutilMetrics // nil when Deps.Metrics is set
@@ -430,7 +435,7 @@ func (a *agent) startLoops(ctx context.Context) {
 		Now:          a.d.Now,
 		RemoveRecord: a.proc.RemoveRecord,
 	}
-	activity := &system.ActivityLoop{Counts: a.proc, TCP: a.tcp, Emit: a.emit, Now: a.d.Now}
+	activity := &system.ActivityLoop{Counts: a.proc, TCP: a.tcp, DesktopStreams: a.desktop.Streams, Emit: a.emit, Now: a.d.Now}
 	var dockerPing func(context.Context) error
 	if a.cfg.DockerEnabled && a.d.Docker != nil {
 		dockerPing = a.d.Docker.Ping
@@ -440,6 +445,7 @@ func (a *agent) startLoops(ctx context.Context) {
 	a.goBG(func() { a.files.Janitor(ctx) })
 	a.goBG(func() { a.ports.Run(ctx) })
 	a.goBG(func() { activity.Run(ctx) })
+	a.goBG(func() { a.desktopLoop(ctx) })
 	a.goBG(func() { a.idle.Run(ctx) })
 	if a.gopsutil != nil {
 		a.goBG(func() { a.gopsutil.Run(ctx) })

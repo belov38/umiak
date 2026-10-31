@@ -49,3 +49,11 @@
 - TypeScript lint, recursive typecheck и build: PASS. Recursive test: результат ниже после окончания.
 - Recursive `mise exec -- pnpm -r test`: PASS (включая API 955, worker 346 + 5 skipped, MCP 696 + 1 skipped, Python SDK 77, CLI 155). В полном прогоне template-builder 307 PASS; после добавления последнего негативного теста отдельный прогон 308/308 PASS. Production code после полного прогона не менялся.
 - Итог прохода: это подготовительная часть S10, не готовый MVP. Ждём освобождения pve для Linux spike; независимо остаются кодовые задачи 2–7, после сообщения master — интеграции S8/S9. Никаких ресурсов S10 на pve для cleanup нет, CT590 не redeploy-ился.
+
+### Уточнение master: продолжать без pve
+
+Выполнить последовательно и коммитить каждый этап: (1) agent/proto/lifecycle/activity; (2) gateway auth routing + compose TURN; (3) worker Configure + activity/idle-stop; (4) API/SDK/CLI/MCP contracts; (5) recipe/step/verify с unit-тестами. Не проверять qm list до завершения всех пяти этапов.
+
+Spike items для pve: точные вызовы pairing Sunshine/moonlight-web v3; надёжный источник active stream count/streaming и поведение второго зрителя; coturn expiry на Refresh. До спайка OS streamer реализуется через интерфейс, default stub явно возвращает unavailable, fake в тестах управляет состоянием. Не объявлять реальную аппаратную готовность на основании fake.
+
+Этап 1 (agent/proto): Desktop RPC реализован и подключён к mux/request cache; private credentials per machine identity и atomic TURN config; local authEpoch/PrepareStop; screenshot crop/scale/PNG/JPEG, batch validation/input serialization, UTF-8 clipboard; Session и Streamer interfaces. PendingStreamer явно unavailable до спайка. desktopStreams включён в события, System/Activity и локальный idle sampler; readiness зависит от secrets и session. Proto Go/TS сгенерирован, buf lint PASS, TS proto typecheck PASS. Targeted Go race (desktop/system/agent/config) PASS, golangci-lint 0 issues. Полный Go race поймал существующий timing-sensitive TestQuiesceBudget; повтор теста 3 раза PASS. Self-review: credentials не уходят через RPC; fork удаляет TURN/pairing state; screenshot не вызывает streamer. Реальный Session adapter и upstream pairing проверяются отдельно, fake не выдаётся за рабочий экран.

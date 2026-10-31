@@ -19,6 +19,8 @@ import (
 
 // Config is the agent configuration with defaults applied.
 type Config struct {
+	// DesktopEnabled enables the desktop RPC service and readiness phase.
+	DesktopEnabled bool
 	// TunnelURL is the gateway WebSocket endpoint.
 	TunnelURL string
 	// TrustDir overrides the trust directory. Empty means
@@ -77,6 +79,9 @@ func Defaults() Config {
 // file mirrors the TOML document. Pointers distinguish absent keys from zero
 // values, so a partial file keeps the defaults.
 type file struct {
+	Desktop struct {
+		Enabled *bool `toml:"enabled"`
+	} `toml:"desktop"`
 	Tunnel struct {
 		URL      *string `toml:"url"`
 		TrustDir *string `toml:"trust_dir"`
@@ -134,6 +139,9 @@ func Load(path string) (Config, error) {
 }
 
 func (f *file) apply(cfg *Config) error {
+	if f.Desktop.Enabled != nil {
+		cfg.DesktopEnabled = *f.Desktop.Enabled
+	}
 	if f.Tunnel.URL != nil {
 		cfg.TunnelURL = *f.Tunnel.URL
 	}
