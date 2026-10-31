@@ -1,10 +1,17 @@
+import { execFileSync } from "node:child_process";
 // Real acceptance runner. Uses the existing CLI profile; never logs ticket URLs or secrets.
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { verifyLiveDesktopMcp } from "../../apps/mcp/test/live-desktop.ts";
 import { verifyDesktopMedia } from "../../apps/web/e2e/desktop-media.ts";
 import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
 import { waitForDesktopBudget } from "./desktop-budget.ts";
+import {
+	observeDesktop,
+	verifyDesktopIdleHold,
+	waitDesktopIdleStop,
+} from "./desktop-observe.ts";
 
 const client = new Sbx();
 const created: Sandbox[] = [];
@@ -24,6 +31,8 @@ try {
 		template: process.env.SBX_E2E_TEMPLATE ?? "linux-desktop",
 		size: "4gb",
 		labels: { e2e: "desktop" },
+		idleTimeoutSeconds: 60,
+		ttlSeconds: 3600,
 	});
 	created.push(sb);
 	await sb.waitUntilReady({ timeoutMs: 300_000 });
@@ -35,7 +44,20 @@ try {
 		"1920x1080 screenshot",
 	);
 	await writeFile(join(output, "before.png"), before.bytes, { mode: 0o600 });
-	await sb.start(["xfce4-terminal", "--disable-server"]);
+	await sb.exec([
+		"env",
+		"XDG_RUNTIME_DIR=/run/user/1000",
+		"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+		"systemd-run",
+		"--user",
+		"--collect",
+		"--unit=s10-test-terminal",
+		"--setenv=DISPLAY=:0",
+		"--setenv=XAUTHORITY=/home/user/.Xauthority",
+		"xfce4-terminal",
+		"--disable-server",
+		"--geometry=100x25+100+100",
+	]);
 	await sb.desktop.act({ actions: [{ type: "wait", ms: 1000 }] });
 	const baseline = await sb.desktop.screenshot({ cursor: "false" });
 	await sb.desktop.act({
@@ -64,6 +86,7 @@ try {
 		(await sb.desktop.clipboardGet()).text === text,
 		"clipboard round-trip",
 	);
+	await verifyLiveDesktopMcp(sb, process.env.SBX_DESKTOP_MCP_URL ?? "");
 	const link = await sb.desktop.link();
 	const jar = new Map<string, string>();
 	let url = link.url;
@@ -90,8 +113,39 @@ try {
 		response?.status === 200 && (await response.text()).includes("<html"),
 		"gateway stream page",
 	);
-	await verifyDesktopMedia(sb, output);
+	try {
+		await verifyDesktopMedia(sb, output, async () => {
+			const holdMs = Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0);
+			if (holdMs > 0)
+				await verifyDesktopIdleHold(
+					sb,
+					holdMs,
+					join(output, "idle-observations.ndjson"),
+				);
+		});
+	} catch (error) {
+		const diagnostic = await sb.exec([
+			"sudo",
+			"journalctl",
+			"-u",
+			"sbx-moonlight-web",
+			"--no-pager",
+			"-n",
+			"60",
+		]);
+		await writeFile(join(output, "moonlight.log"), diagnostic.stdout, {
+			mode: 0o600,
+		});
+		console.log("media diagnostics", output);
+		throw error;
+	}
 	await sb.desktop.endStreams();
+	if (Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0) {
+		await waitDesktopIdleStop(sb);
+		await waitForDesktopBudget();
+		await sb.resume({}, { wait: true });
+	}
+
 	// Fork a stopped source so this track uses only 4GiB while S9 is running.
 	const credentialHash = async (s: Sandbox) => {
 		const result = await s.exec([
@@ -126,6 +180,46 @@ try {
 	);
 	await sb.desktop.screenshot();
 	console.log(`artifacts ${output}`);
+} catch (error) {
+	for (const sandbox of created) {
+		try {
+			const row = observeDesktop(sandbox.data.slug);
+			const id = Number(row.runtime_id);
+			if (id >= 500 && id <= 589) {
+				const log = execFileSync(
+					"ssh",
+					[
+						"-o",
+						"BatchMode=yes",
+						"-o",
+						"HostKeyAlias=pve.tail0000.ts.net",
+						"root@100.64.10.2",
+						"qm",
+						"guest",
+						"exec",
+						String(id),
+						"--timeout",
+						"15",
+						"--",
+						"journalctl",
+						"-u",
+						"sbx-agent",
+						"--no-pager",
+						"-n",
+						"100",
+					],
+					{ encoding: "utf8", timeout: 30_000 },
+				);
+				await writeFile(join(output, "agent-failure.log"), log, {
+					mode: 0o600,
+				});
+			}
+		} catch {
+			/* Cleanup still runs if a failed guest cannot be inspected. */
+		}
+	}
+	console.log("failure artifacts", output);
+	throw error;
 } finally {
 	const results = await Promise.allSettled(
 		created.reverse().map((sb) => sb.delete({ wait: true })),
