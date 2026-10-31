@@ -278,7 +278,9 @@ export interface S9Deps {
 		| "stop"
 		| "shutdown"
 		| "delete"
-	> & { qga: Pick<Qga, "ping" | "exec"> };
+	> & {
+		qga: Pick<Qga, "ping" | "exec" | "fsfreezeFreeze" | "fsfreezeThaw">;
+	};
 	ram: Pick<RamGuard, "reserve" | "release">;
 	connect?: { url: string; registrar: TunnelRegistrar };
 	keep: boolean;
@@ -427,6 +429,12 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 			log(`VM ${vmA}: waiting ${settle} ms for the VM lock after the restart`);
 			await sleep(settle);
 		}
+		// The first VSS freeze after a boot followed by pause and lvcreate hung qemu-ga's thaw in
+		// 3 of 5 tries (the guest stayed frozen); after a plain freeze and thaw it never did.
+		// verify freezes once before its snapshot too. Open issue for S6 (spec 24.5).
+		log(`VM ${vmA}: VSS warm-up (freeze, thaw)`);
+		await machines.qga.fsfreezeFreeze(vmA);
+		await machines.qga.fsfreezeThaw(vmA);
 		log(`VM ${vmA}: snapshot (QGA fsfreeze hook)`);
 		// The lock may still be busy (retryOnVmLock); only the attempt that succeeds is timed.
 		let snapAt = 0;
