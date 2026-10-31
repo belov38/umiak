@@ -1,6 +1,6 @@
 # S10. Рабочий стол и computer-use: спецификация
 
-Статус: согласовано master-сессией 2026-10-29 (лицензии GPL-3.0 ждут подтверждения Ильи, §26). Область S10 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §8, §10). Опирается на S2 (туннель), S3 (агент), S4 (gateway), S5 (шаблон Linux), S6 (control plane), S7 (публичное API), S8 (дашборд), S9 (Windows). Граница с фазой 2 — S29 «рабочий стол v2» в `docs/roadmap-phase2.md`.
+Статус: согласовано master-сессией 2026-10-29 (решения Ильи уточнены 2026-10-31, §26). Область S10 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §8, §10). Опирается на S2 (туннель), S3 (агент), S4 (gateway), S5 (шаблон Linux), S6 (control plane), S7 (публичное API), S8 (дашборд), S9 (Windows). Граница с фазой 2 — S29 «рабочий стол v2» в `docs/roadmap-phase2.md`.
 
 Пометка **[S10]** — решение автора спеки в рамках брифа master-сессии; его можно менять без нового согласования, если причина записана. Пометка **[исполнитель]** — деталь, которую исполнитель выбирает сам по результатам спайков и тестов. Решения master и открытые вопросы — §26.
 
@@ -18,8 +18,8 @@ AI-агентам и людям нужен графический рабочий
 
 Успех:
 - `linux-desktop` и `windows` дают одинаковые API рабочего стола и computer-use;
-- поток идёт без публичных IP у sandbox, в том числе через Tailscale в тестах;
-- claim `linux-desktop` из пула не медленнее 15 s (§15);
+- поток идёт без публичных IP у sandbox; dev-адреса и транспорт доступа к стенду задаются только в `infra/dev-cp/`;
+- холодный create `linux-desktop` допускает до ~1 min, Windows — до 5 min (§15);
 - платформа ничего не форкает: Sunshine, moonlight-web и coturn ставятся из upstream-релизов без изменений.
 
 ## 2. Цели, не-цели, анти-цели
@@ -30,7 +30,7 @@ AI-агентам и людям нужен графический рабочий
 - стрим в браузер для дашборда и API-клиентов через gateway S4: WebRTC через TURN и запасной транспорт WebSocket;
 - примитивы computer-use (скриншот, мышь, клавиатура, буфер обмена) в агенте и в публичном API S7, чтобы S11 обернул их в MCP;
 - доступ к потоку в режимах `token`, `sso`, `public`;
-- размеры и влияние на warm pool.
+- размеры и admission RAM при холодном создании.
 
 **Не-цели** (фаза 2, S29, если не сказано иначе):
 - поток только браузера с профилями Chrome (`boat browser`);
@@ -55,7 +55,7 @@ AI-агентам и людям нужен графический рабочий
 
 ## 3. Ограничения
 
-- Публичных IP у sandbox нет. Тесты идут через Tailscale.
+- Публичных IP у sandbox нет. Продукт не зависит от Tailscale; настройки dev-доступа находятся только в `infra/dev-cp/`. Внешние туннельные/relay-сервисы (cloudflared, ngrok, trycloudflare) запрещены; TURN self-hosted.
 - Control plane работает в Kubernetes за oauth2-proxy.
 - Граница доверия — VM (S2 §16). Всё, что внутри VM, может читать данные стримера своей VM.
 - Windows Server Core не входит в MVP.
@@ -86,7 +86,7 @@ AI-агентам и людям нужен графический рабочий
 - moonlight-web v3 закрывает наши нужды конфигурацией, без форка (boat держит свой форк — мы этого избегаем, анти-цель);
 - запасной транспорт WebSocket встроен (`dataTransport: auto`: сначала WebRTC 15 s, затем WebSocket). Для сетей без UDP поток идёт через gateway и туннель, TURN не нужен.
 
-Цена — GPL-3.0 у двух компонентов (ждёт подтверждения Ильи, §17, §26) и CPU на x264 (§15).
+GPL-3.0 у двух компонентов разрешена Ильёй (§17, §26). Кодирование x264 использует CPU (§15).
 
 **Computer-use — собственные примитивы агента, а не прокси к cua-driver** [S10]. Это меняет формулировку architecture §8. Причины:
 - cua-driver развивается очень быстро: релизы `cua-driver-rs` 0.30–0.38 вышли за месяц, и все помечены prerelease. Контракт публичного API v1 не должен зависеть от его схем;
@@ -136,8 +136,8 @@ hw:
   vga: std                       # operator console only; the desktop uses the Xorg dummy driver
   tablet: 0
 steps: [00-base, reboot, 10-system, 20-docker, 30-toolchains, 40-coding-agents, 50-sbx-agent, 60-desktop, 90-cleanup]
-pool: { mode: hibernated }       # §15.3
-size_default: 4gb                # §15.1
+vmids: [595, 596]               # own template slots; never 597/598/599
+# Default size 4gb, allowed 4gb/8gb: runtime seeds/config, not S5 recipe keys.
 boot_timeout_s: 300
 verify: linux-desktop
 ```
@@ -166,7 +166,7 @@ verify: linux-desktop
 - **Google Chrome stable** — `.deb` из репозитория Google (решение архитектуры §1). Репозиторий Google остаётся в источниках apt, автообновления нет (S5 их выключает). Managed policy в `/etc/opt/chrome/policies/managed/sbx.json`: без first run, без проверки браузера по умолчанию, без промо-вкладок, без отчётов. Chrome — браузер по умолчанию (`xdg-settings`, `update-alternatives`);
 - **Sunshine** — `sunshine_<v>-1+ubuntu26.04_amd64.deb` из релиза LizardByte;
 - **moonlight-web** — `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` из релиза, в `/opt/sbx-desktop/moonlight-web/<v>/`;
-- **cua-driver** — `cua-driver-rs-<v>-linux-x86_64.tar.gz`, подпись sigstore проверяется при сборке, в `/opt/sbx-desktop/cua-driver/<v>/`. Расширение `cua-perception` (AGPL) не ставится.
+- **cua-driver** — `cua-driver-rs-<v>-linux-x86_64-binary.tar.gz`, подпись sigstore проверяется при сборке, в `/opt/sbx-desktop/cua-driver/<v>/`. Расширение `cua-perception` (AGPL) не ставится.
 
 Конфигурация:
 - `/etc/X11/xorg.conf.d/10-sbx-dummy.conf`: драйвер `dummy`, `VideoRam 256000`, режим `1920x1080` (modeline из `cvt 1920 1080 60`), 24 bit, DPI 96.
@@ -184,7 +184,7 @@ verify: linux-desktop
 
 | Момент | Что делает агент | Зачем |
 |---|---|---|
-| загрузка без claim (подготовка пула) | запустить сессию, дождаться `desktop: ready` | `pool_ready` проверяет, что экран работает |
+| холодная загрузка до claim | дождаться идентичности и claim | пул в MVP отсутствует |
 | первый claim этой идентичности (S6 `System/Claim{reason: claim}`) | после шагов S3 §8.1 перезапустить сессию | PAM сессии должен прочитать env и секреты claim. Пользовательских программ на рабочем столе ещё нет, терять нечего |
 | загрузка после claim (resume, recover, reprovision) | запустить сессию, когда секреты для текущей загрузки применены (фаза `secrets` = `ready` при новом `bootId`) | сессия получает секреты. До этого `desktop: pending` |
 | смена env или секретов у работающей sandbox в той же загрузке | сессию не трогать | как у запущенных команд (S3 §8.1): новый env видят новые процессы агента. Документируется в S7 |
@@ -296,7 +296,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 Права роли `viewer`: `allow_add_hosts = false`; только H.264; без HDR; `maximum_bitrate_kbps = 20000`; оба транспорта разрешены.
 
-Смена идентичности стирает это состояние, а также `sunshine_state.json` и данные moonlight-web: fork и VM из snapshot не уносят креды стримера источника. Pairing для пула выполняется при подготовке machine (до усыпления, §15.3), для fork — лениво, при первом открытии (несколько секунд).
+Смена идентичности стирает это состояние, а также `sunshine_state.json` и данные moonlight-web: fork и VM из snapshot не уносят креды стримера источника. Pairing выполняется лениво при первом открытии для каждой новой идентичности, включая create и fork (несколько секунд).
 
 Точные вызовы API moonlight-web v3 и Sunshine фиксирует спайк L **[исполнитель]**.
 
@@ -691,7 +691,7 @@ S8 оставил заглушку; вкладку реализует испол
 
 В `docs/roadmap-phase2.md` §5.2 эти инструменты помечены S29; после S10 они переходят в S11 (MVP). Правку roadmap делает master.
 
-## 15. Размеры и warm pool
+## 15. Размеры и холодное создание
 
 ### 15.1 Размеры [S10]
 
@@ -699,7 +699,7 @@ S8 оставил заглушку; вкладку реализует испол
 |---|---|---|---|
 | `2gb` | 2 | 2048 | `linux` (есть) |
 | `4gb` | 4 | 4096 | по умолчанию для `linux-desktop` и `windows` |
-| `8gb` | 8 | 8192 | разрешён для `linux-desktop` и `windows`; в PoC вместе с пулом не помещается |
+| `8gb` | 8 | 8192 | разрешён для `linux-desktop` и `windows`; в PoC занимает весь бюджет sandbox |
 
 - `linux-desktop`: `defaultSize = 4gb`, `allowedSizes = [4gb, 8gb]`. На 2 GB Chrome с несколькими вкладками и рабочий стол упираются в OOM.
 - `windows`: размер по умолчанию `4gb` теперь означает 4 vCPU вместо 2 (S9 §9). На `pve` 24 ядра, CPU не ограничен, а x264 и Windows вместе на 2 vCPU дают рывки. Ограничен только RAM (S6 §8.1).
@@ -711,24 +711,11 @@ S8 оставил заглушку; вкладку реализует испол
 - Сеть на зрителя: 8 Mbit/s по умолчанию, до 20 Mbit/s. Через TURN (WebRTC) или через gateway и туннель (WebSocket).
 - Узкое место на одной ноде — CPU хоста при нескольких потоках одновременно. Квота на число одновременных потоков в MVP не вводится; метрики (§18) показывают, когда она понадобится.
 
-### 15.3 Warm pool [S10]
+### 15.3 Холодное создание (решение Ильи 2026-10-31)
 
-- `linux-desktop` использует **спящий пул**, как Windows (S9 §14, механизм S6 `poolTargets.mode = hibernated`): готовая machine на диске, в простое RAM не занимает.
-- Подготовка machine пула: S6 §9.3 до `pool_ready` (`agent` + `identity` + `docker` + `desktop`), затем `Desktop/Open` для pairing (§8.3) и `StopStreamer`, затем `hibernate`.
-- Claim из спящего пула: S9 §14.3 (admission RAM, start, QGA `sbx-agent resume-hint`, подключение), затем `System/Claim` с перезапуском сессии (§6.4) и `Desktop/Configure`. Linux-агенту нужна подкоманда `resume-hint` (выставить время, `chronyc makestep`, переподключиться сразу) — изменение S3 (§21).
-- Цель: claim-to-ready `linux-desktop` ≤ 15 s.
-- **Цели пула в PoC** (8 GB):
+Warm и hibernated pools не входят в MVP ни для Linux, ни для Windows. Create: cold clone → boot → claim → Desktop/Configure → desktop ready. Никаких pool targets, подготовки machine пула, hibernate/resume-hint для пула и цели ≤15 s.
 
-| Пара | Цель | Режим | RAM в простое |
-|---|---|---|---|
-| `linux/2gb` | 1 | running | 2 GB |
-| `windows/4gb` | 1 | hibernated | 0 |
-| `linux-desktop/4gb` | 1 | hibernated | 0 |
-
-  Свободно 6 GB: одна sandbox с рабочим столом (4 GB) и одна `linux` (2 GB) одновременно, или три `linux`.
-- Если спайк L покажет, что спящий режим для Linux ненадёжен, — цель `linux-desktop` = 0. Холодный create — загрузка Linux (S5 §13.2) плюс старт рабочего стола, ожидается 20–40 s. Решение пишется в §24. Running-пул на 4 GB в PoC не держим: это половина свободной RAM.
-- `vmstate` спящей machine занимает на `local-lvm` примерно столько, сколько занятой RAM гостя (thin).
-- Смена сборки шаблона заменяет спящие machine, как warm (S6 §9.4).
+Для `linux-desktop` ожидается 20–40 s, допускается до ~1 min; для Windows допускается до 5 min. Это ориентиры до замеров, не измеренный результат. Stop/resume обычной sandbox остаётся в приёмке. Размер `4gb` по умолчанию, `8gb` разрешён; общий бюджет работающих sandbox на pve — 8 GB.
 
 ## 16. Безопасность
 
@@ -755,7 +742,7 @@ S8 оставил заглушку; вкладку реализует испол
 | Google Chrome | Google Chrome Terms of Service | в образе `linux-desktop` (решение архитектуры §1) |
 | openbox, LightDM, tint2, Xorg, PipeWire | GPL-2.0 / GPL-3.0 / MIT | пакеты Ubuntu |
 
-GPL-3.0 при распространении бинарников требует предложить исходный код. Мы не модифицируем код. Манифест сборки (S5 §11) записывает версию и URL исходников каждого GPL-компонента: этого достаточно для предложения исходников. Допустимость GPL-3.0-компонентов в образах внутренней платформы ждёт подтверждения Ильи; master рекомендует принять: бинарники не изменяются, используются только внутри компании, третьим лицам не распространяются (§26). Замена без GPL на обеих ОС — Guacamole (Apache-2.0), но с худшей задержкой и проблемами RDP на Windows (§4.1).
+GPL-3.0 при распространении бинарников требует предложить исходный код. Мы не модифицируем код. Манифест сборки (S5 §11) записывает версию и URL исходников каждого GPL-компонента: этого достаточно для предложения исходников. GPL-3.0-компоненты разрешены Ильёй: бинарники не изменяются, используются только внутри компании, третьим лицам не распространяются (§26). Замена без GPL на обеих ОС — Guacamole (Apache-2.0), но с худшей задержкой и проблемами RDP на Windows (§4.1).
 
 ## 18. Наблюдаемость
 
@@ -772,17 +759,17 @@ GPL-3.0 при распространении бинарников требуе�
 ### 19.1 Спайк L (Linux) — первым
 
 На `pve` в рамках ограничений §3: одна VM 4 GB (VMID 5xx), вместе с ней другие sandbox — не больше 8 GB.
-1. VM из шаблона S5 `linux` (или 599, если S5 ещё не собран), шаг `60-desktop` вручную через QGA.
+1. VM из шаблона S5 `linux` (только clone; исходные 597/598/599 не менять), шаг `60-desktop` вручную через QGA.
 2. Проверить вопросы: pairing через API moonlight-web v3 и Sunshine; поведение при втором зрителе; как агент узнаёт об активном потоке; проверяет ли coturn срок кредов при `Refresh`.
 3. Замеры §20: CPU при 1080p30 и 1080p60, RAM, время старта стримера, задержка «от стекла до стекла» по WebSocket и WebRTC через TURN.
-4. Спящий режим Linux: `hibernate`, пробуждение, `resume-hint`, перезапуск сессии; время claim-to-ready.
+4. Измерить холодный create и обычный stop/resume; часть спайка про hibernation исключена решением Ильи.
 
-Как браузер на Mac достаёт VM до готового gateway **[исполнитель]**: gateway и агент из треков `s2-impl` и `s4-impl`, если они уже работают; иначе — временный проброс через `pve`. Любое правило firewall для спайка — только с таймером отката (S1 §4.4). coturn для спайка — контейнер на Mac, доступный по Tailscale; если SNAT `sbx0` не выпускает VM в Tailscale хоста, спайк проверяет только WebSocket, а TURN проверяется в kind/k3s (S12). Изменения хоста `pve` сверх этого — только через master.
+Браузер открывает поток через gateway CT 590; адреса задаются только в `infra/dev-cp/`. TURN — собственный coturn в compose. Любое изменение firewall предварительно сообщается master и выполняется только с таймером отката (S1 §4.4). Внешние туннели и relay-сервисы запрещены.
 
 ### 19.2 Спайк W (Windows)
 
-После спайка S9 (vTPM и `suspend --todisk`), одна VM 4 GB:
-1. Видеоадаптер (§7): `std`, `virtio` + `viogpudo`, IddCx-драйвер. Захват `ddx`, скриншот `BitBlt`/DXGI до и после пробуждения из спящего режима.
+После merge S9 и сообщения master, одна VM 4 GB:
+1. Видеоадаптер (§7): `std`, `virtio` + `viogpudo`, IddCx-драйвер. Захват `ddx`, скриншот `BitBlt`/DXGI после cold boot и обычного stop/resume.
 2. Sunshine с `encoder = software` на Windows: поток идёт, CPU при 1080p30.
 3. Нужен ли аудиоустройство для старта потока.
 4. `SendInput` и `KEYEVENTF_UNICODE` из `sbx-session`: клики, печать, буфер.
@@ -791,7 +778,7 @@ GPL-3.0 при распространении бинарников требуе�
 
 1. Спайк L.
 2. Proto `desktop.proto` и сообщения `session.proto`; `sbx-session` на Linux; сервис `Desktop` в агенте (скриншот, ввод, буфер), фаза `desktop`, `desktop: true`, env.
-3. Рецепт `linux-desktop`, профиль `verify`, пул `hibernated` для Linux и `resume-hint`.
+3. Рецепт `linux-desktop` с VMIDs `[595, 596]`, профиль `verify`, холодное создание без пула.
 4. Стример: супервизор, pairing, `Open`, `EndStreams`, `Configure`.
 5. Gateway: `kind = desktop`, билеты, `GET /`, заголовок, `Origin`, cookie `Partitioned`.
 6. `api`: ручки §13, таблицы, внутренние ручки; `worker`: TURN-креды, `authEpoch` при stop, `desktopStreams`.
@@ -842,9 +829,9 @@ GPL-3.0 при распространении бинарников требуе�
 29. Креды с истёкшим сроком → `401` на `Allocate`. Продление контроллером: креды у `ready` sandbox никогда не старше 24 h.
 30. Firewall: из VM сверх правил S1 доступен только `sbx-turn` UDP 3478; TCP и другие порты TURN-хоста — нет.
 
-**Шаблон и пул:**
+**Шаблон и холодный create:**
 31. Проверки §6.6 и `windows-desktop` зелёные.
-32. Claim `linux-desktop` из спящего пула: claim-to-ready ≤ 15 s, `desktop: ready`, env claim виден в терминале на рабочем столе, запущенном вручную после claim. В пределах 8 GB одновременно работают пулы §15.3 и одна sandbox `linux-desktop`.
+32. Холодный create `linux-desktop`: измерить clone + boot + desktop start (ориентир до ~1 min), `desktop: ready`, env claim виден в терминале. Windows — до 5 min. RAM всех sandbox ≤8 GB, без пула.
 33. Fork работающей `linux-desktop`: у fork новые креды Sunshine и moonlight-web, pairing проходит при первом открытии; профиль Chrome сохранён.
 34. Idle-stop: при открытом потоке через TURN и без других действий sandbox не останавливается 30 min (`desktopStreams` в `activity` и в `System/Activity`); после закрытия потока останавливается через `idle_timeout_seconds`.
 35. Отзыв ключа, которым выдан билет, и удаление участника из команды: cookie зрителя сразу даёт `401`, поток обрывается не позже чем через 5 s после `NOTIFY sbx_identity`.
@@ -854,14 +841,14 @@ GPL-3.0 при распространении бинарников требуе�
 
 Вносят исполнители этих областей по этой спеке (как S7 §20); согласование — через master.
 
-- **S1:** IPSet `sbx-turn` и правило UDP 3478 в `sbx-egress` (§9.2), шаг runbook с таймером отката. `hibernate` для Linux machine (уже есть для S9) — без изменений кода, только для `os = linux`.
+- **S1:** IPSet `sbx-turn` и правило UDP 3478 в `sbx-egress` (§9.2), шаг runbook с таймером отката.
 - **S2 / `libs/tunnel`:** лимит размера сообщения Connect до 32 MiB для `sbx.agent.v1.Desktop/Screenshot` (если сейчас меньше).
 - **S3:** сервис `Desktop`; `sbx-session` на Linux и его сокет; фаза `desktop` на Linux; `CommandSpec.desktop` на Linux; `DISPLAY`/`XAUTHORITY` в платформенном env шаблонов с рабочим столом; перезапуск сессии при claim и после секретов; событие `desktop.streaming_changed` и `desktopStreams` в `activity` и `System/Activity`; учёт потока в признаке простоя; сокет `/run/sbx-session/`; подкоманда `resume-hint` на Linux; стирание состояния стримера при смене идентичности; коды ошибок §11.1; capabilities.
 - **S4:** поле `kind` в маршруте; для `kind = desktop` — билеты и обмен, `GET /` → `Open` → `302`, заголовок `X-Sbx-Desktop-User` только после авторизации, без пропуска CORS preflight, `Origin`-проверка, cookie `m: "d"` с `SameSite=None; Partitioned`, страница `desktop_starting`; порты стримера в зарезервированных (`SBX_GATEWAY_RESERVED_PORTS`).
-- **S5:** `extends` (S5 §16 уже предусмотрел), рецепт `linux-desktop`, профиль `verify: linux-desktop`, `pool.mode` и `size_default` в рецепте (как у S9).
-- **S6:** `desktopStreams` в `activity`, `System/Activity` и idle-stop; `authEpoch+1` рабочего стола в stop; `Desktop/Configure` в шагах `claim` и `provision`; контроллер `desktop-turn`; спящий пул для `os = linux`; `pool_ready` для `linux-desktop` = `agent` + `identity` + `docker` + `desktop`; таблицы §13.5 через `packages/core`.
+- **S5:** `extends` (S5 §16 уже предусмотрел), рецепт `linux-desktop`, профиль `verify: linux-desktop`, VMIDs `[595, 596]`; default size 4gb и allowed 4gb/8gb в runtime seeds/config.
+- **S6:** `desktopStreams` в `activity`, `System/Activity` и idle-stop; `authEpoch+1` рабочего стола в stop; `Desktop/Configure` в шагах `claim` и `provision`; контроллер `desktop-turn`; таблицы §13.5 через `packages/core`.
 - **S7:** scope `desktop`; ручки §13.2 и §13.3; ошибки; `endpoints.desktop`; зарезервированные порты стримера; политика `sso` для `kind = desktop`; отзыв доступа к рабочему столу в обработчике `NOTIFY sbx_identity` (§10.5, расширение S8 C9); креды TURN выдаёт `worker`, а не `api` (переопределение S4 §13); документация (смена env не меняет запущенный рабочий стол, Safari и чужой iframe).
-- **S8:** `PlatformDefaults.publicDesktopEnabled` (по умолчанию `false`) с `NOTIFY sbx_routes '*'`; сид шаблона `linux-desktop` (`capabilities` с `desktop`, `defaultSize: 4gb`); сид размеров `4gb` (4 vCPU) и `8gb`; цель пула `linux-desktop/4gb = 1, hibernated`; вкладка Desktop (§14.1) — делает исполнитель S10; scope `desktop` в форме ключей.
+- **S8:** `PlatformDefaults.publicDesktopEnabled` (по умолчанию `false`) с `NOTIFY sbx_routes '*'`; сид шаблона `linux-desktop` (`capabilities` с `desktop`, `defaultSize: 4gb`); сид размеров `4gb` (4 vCPU) и `8gb`; вкладка Desktop (§14.1) — делает исполнитель S10; scope `desktop` в форме ключей.
 - **S9:** шаг `60-desktop` дополняется §7; `hw.vga` — по спайку W; `sbx-session` получает `Capture`, `Input`, `ClipboardGet/Set` и запускает cua-driver; размер `windows` по умолчанию — `4gb` с 4 vCPU.
 - **S11:** инструменты §14.4.
 - **S12:** coturn (Deployment `hostNetwork` на ноде с меткой или UDP LB, Secret `static-auth-secret`, сертификат `turn.<domain>`, DNS), конфиг `SBX_TURN_URLS` и `SBX_TURN_SECRET_FILE` для `worker`, тревога по квоте TURN; IP TURN в IPSet `sbx-turn`.
@@ -890,7 +877,7 @@ apps/cli/                               sbx desktop
 
 ## 23. Версии
 
-Правило проекта: последние стабильные версии, перепроверить перед реализацией. Проверено 2026-10-29 (GitHub Releases, Google Version History API):
+Правило проекта: последние стабильные версии, перепроверить перед реализацией. Sunshine, moonlight-web, coturn и cua-driver перепроверены 2026-10-31 через GitHub Releases API; Chrome наследуется из актуальных pins S5.
 
 | Компонент | Версия | Примечание |
 |---|---|---|
@@ -898,13 +885,25 @@ apps/cli/                               sbx desktop
 | moonlight-web (`MrCreativ3001/moonlight-web-stream`) | v3.0.1 | linux-gnu и windows-gnu архивы |
 | coturn | 4.18.0 | та же, что в S4 §18 |
 | cua-driver (`trycua/cua`, тег `cua-driver-rs-v*`) | 0.38.0 | все релизы помечены prerelease; закрепляем последний не-nightly |
-| Google Chrome stable (Linux) | 156.0.8078.73 | закрепляется в `versions.toml` при сборке |
+| Google Chrome stable (Linux) | 156.0.8078.79-1 | наследуется из Linux versions.toml; закрепляется в `versions.toml` при сборке |
 | Go-модули | `github.com/jezek/xgb` и `golang.org/x/image` — последние на момент реализации | проверить `go list -m -versions` |
 | Для сравнения (§4.1) | KasmVNC 1.5.2, Selkies 2.1.0, noVNC 1.7.0, Guacamole 1.6.0, neko 3.2.0, TigerVNC 1.16.2, x11vnc 0.9.17 | не используются |
 
 ## 24. Результаты
 
-Заполняется при реализации: цифры спайков L и W (CPU, RAM, задержки, время старта стримера, claim-to-ready), выбранный видеоадаптер Windows, режим пула `linux-desktop`, поведение второго зрителя, способ определения активного потока.
+Состояние 2026-10-31: `qm list` показывает работающую Windows-сборку S9 в VM 598 (4096 MiB). S10 не запускал VM, не менял firewall, шаблоны и CT 590. Сборки desktop и измерений пока нет. SSH по IP использует сохранённый host key через alias из `infra/dev-cp/README.md`.
+
+Метаданные upstream (GitHub asset digest, не результат локального скачивания/проверки бинарника):
+
+| Артефакт | SHA256 |
+|---|---|
+| [Sunshine ubuntu26.04 amd64](https://github.com/LizardByte/Sunshine/releases/tag/v2026.914.233613) `sunshine_2026.914.233613-1+ubuntu26.04_amd64.deb` | `b8a8ceeeb2b3f30a18a994ad268c94e0c91170f33a864c7aad31eed927ad7d47` |
+| [moonlight-web linux x86_64](https://github.com/MrCreativ3001/moonlight-web-stream/releases/tag/v3.0.1) `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` | `a46acb1f663faaff9cd97abd9671fe049dd525bfe955e95f7b9f753cc2b99f1a` |
+| [cua-driver linux x86_64 binary](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.38.0) `cua-driver-rs-0.38.0-linux-x86_64-binary.tar.gz` | `31ab9709dd91ce73677e49b9f3e75c6f0d3e4d9625c286c9e58262bfbea698dd` |
+
+cua-driver 0.38.0 — последний versioned release в просмотренной ленте (nightly исключены); GitHub помечает его prerelease, как уже предусмотрено §23. Перед сборкой нужны download/hash и Sigstore verification. Проверка coturn: latest tag `docker/4.18.0-r0`.
+
+Заполняется при реализации: цифры спайков L и W (CPU, RAM, задержки, время старта стримера, claim-to-ready), выбранный видеоадаптер Windows, время холодного create `linux-desktop` (пула нет), поведение второго зрителя, способ определения активного потока.
 
 ## 25. Оставлено исполнителю
 
@@ -928,3 +927,7 @@ apps/cli/                               sbx desktop
    - билет, выпущенный по JWT, привязан к пользователю, а не к `desktop_tickets.api_key_id`;
    - отзыв по деактивации пользователя идёт через путь S8 §20.1;
    - код ошибки для `public` при выключенном `publicDesktopEnabled` один: в §13 и в проверках §22 сейчас написано по-разному (`forbidden` и `route_blocked`).
+
+5. **MVP без пулов — решение Ильи 2026-10-31:** warm и hibernated pools исключены, включая Linux spike L; цель claim ≤15 s снята. Cold create: Linux до ~1 min, Windows до 5 min. Обычный stop/resume сохраняется.
+6. **Сеть — решение Ильи 2026-10-31:** продукт не привязан к Tailscale, dev-адреса только в `infra/dev-cp/`; cloudflared/ngrok/trycloudflare и внешние relay-сервисы запрещены. TURN собственный, self-hosted в compose.
+7. **Template slots — решение Ильи 2026-10-31:** `linux-desktop` только `[595, 596]`, диапазон dev-infra 590–596; CT 590 остаётся. 597, 598, 599 не менять. Sandbox VMIDs 500–589; перед стартом проверять S9 и общий RAM ≤8 GB.

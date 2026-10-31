@@ -171,3 +171,20 @@ infra/dev-cp/smoke.sh [--keep]
 ```
 
 Builds the dev-signed agent package (`services/guest-agent/test/linux/run.sh`, `BUILD_ONLY`, `TUNNEL_CA` = the dev CA), registers a machine (bootstrap secret hash in `tunnel.tunnel_credentials`), clones one 2 GB VM from template 599 into the free VMID nearest to 589 with the machine's smbios, and checks from the VM that the CT answers on 443 only (not 22, 2222, 5432, 7000, 8080, 9090, 9190, ping), that the host (LAN and `10.88.0.1`), the router and a LAN guest are closed, and that the internet is open. Then it checks that the tunnel host resolves to the CT through the VM's own DNS (not `/etc/hosts`), installs the agent as the S3 stand does (`stand-setup.sh install`, a package that pins the dev CA) with the tunnel URL in the smbios `family`, checks `sbx-agent doctor` (URL from `smbios`), waits for a `connected` row in `tunnel.tunnel_sessions` and calls `System/Info` through `@sbx/agent-client` in the worker container with the worker's service token. The VM and the database rows are removed at the end. About 4 minutes.
+
+### S10: host access and template slots
+
+S10 runs tools against the host IP, with TLS SNI kept separate:
+
+```sh
+export SBX_PVE_URL=https://100.64.10.2:8006
+export SBX_PVE_TLS_NAME=pve
+export SBX_NODE_SSH_HOST=100.64.10.2
+# Reuse the existing verified host key when connecting by IP; do not disable verification.
+ssh -o BatchMode=yes -o HostKeyAlias=pve.tail0000.ts.net root@100.64.10.2 qm list
+```
+
+Desktop template slots are **595 and 596**; sandbox clones use **500–589**.
+CT 590 remains unchanged. Do not modify templates 597/598/599/9000/9001.
+Before starting any VM, inspect `qm list`: while S9 is building/verifying Windows,
+S10 must wait. All sandbox VMs together may use at most 8 GiB RAM.

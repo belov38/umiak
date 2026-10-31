@@ -1,0 +1,49 @@
+# S10: Desktop implementation
+
+Статус: в работе. Исполнитель: s10-impl. Основание: `docs/specs/s10-desktop.md`, решения Ильи из брифа.
+
+## Ограничения и порядок
+
+Холодный clone → boot → desktop, без warm/hibernated pool; Linux до ~1 min, Windows до 5 min. Sunshine + moonlight-web upstream, GPL разрешён. TURN только собственный coturn; продукт не зависит от Tailscale. Шаблоны S10 только 595/596; sandbox 500–589, общий RAM ≤8192 MiB. Перед каждым стартом проверять `qm list`; при работающих Windows VM S9 продолжать код и fake-тесты. Не менять CT 590 config, vmbr0, 597/598/599/9000/9001. Firewall только после уведомления master и с rollback timer.
+
+Работу выполняю последовательно в этом checkout. Каждый пункт: failing test → реализация → targeted suite → self-review diff → commit. S8 dashboard и Windows отложены до явного сообщения master о merge соответствующего трека.
+
+## Задачи
+
+1. **Решения и S5 metadata.** Устранить противоречия в S10, S5 и roadmap. Закрепить recipe `extends: linux`, slots `[595,596]`, profile `linux-desktop`; проверить наследование и отсутствие pool. Размеры 4gb/8gb в runtime config после готовности capability.
+2. **Linux spike и upstream pins.** Проверить актуальные stable releases Sunshine, moonlight-web, cua-driver, coturn, их assets и hashes. Не выдумывать отсутствующие artifacts. TDD для расширения `Versions` и сериализации pins в seed. Добавить `60-desktop`, Xorg dummy, LightDM session, Chrome policies, user services, verify profile. Сборка на pve только при свободном бюджете.
+3. **Desktop agent и session helper.** `proto/sbx/agent/v1/desktop.proto`; Connect Status/Configure/Open/StopStreamer/EndStreams/Screenshot/Act/GetClipboard/SetClipboard. Linux helper: X11 capture/XTEST/CLIPBOARD, authenticated local socket. Тесты fake helper: ready/not-ready, bounds/crop/scale, Unicode, clipboard 1 MiB, actions ≤100/60 s и сериализация с ожиданием ≤10 s. Сначала валидировать весь batch, затем исполнять. Screenshot работает без streamer.
+4. **Streamer lifecycle.** Fresh per-identity credentials and pairing, atomic Configure, process supervision/backoff, wipe on seal/fork identity; tests identity change, retry, restart, secret permissions. Activity desktopStreams в journal и System/Activity.
+5. **Runtime + worker + TURN.** Миграции 0400–0499: desktops и одноразовые hashed tickets. `authEpoch` на stop, fork не наследует access, delete cascade, notify routes. Worker Configure после claim/secrets на каждом boot, HMAC TURN TTL 24h, refresh 12h; idle-stop recheck учитывает streams. Tests fake agent и lifecycle. Coturn compose: authenticated, only own relay IP allowed, quotas; никаких relay SaaS.
+6. **Gateway + API.** Desktop labels route to loopback 47800; token/sso/public, ticket consume atomic и epoch binding; revoke active connections; strip incoming identity header, inject trusted header; CSP/no-referrer/no-store. API §13 строго совпадает с `apps/mcp/src/desktop/api.ts` и fake OpenAPI: binary screenshot headers, actions optional screenshot, clipboard, errors/scopes. Tests replay/expired/cross-team ticket, wrong epoch, revoked key, redirect/header abuse и unsupported/outdated agents.
+7. **SDK, CLI, MCP.** TS/Python desktop methods, CLI desktop/screenshot/input/clipboard, generated OpenAPI. MCP capability-aware fallback: desktop advertised означает реальные ошибки, а не unsupported. Contract tests against real API fake agent.
+8. **Linux acceptance.** `infra/dev-cp/e2e-desktop.sh`: create timing, screenshot/input diff/clipboard, gateway web stream, fork credentials, stop/resume, delete cleanup. Сохранить timings и versions в S10 §24. Если redeploy CT590 — восстановить current main после теста.
+9. **После S8/S9 merge.** Rebase main; dashboard Desktop tab; Windows helper/backend и `windows-desktop` verify. Повторить acceptance и timings Windows.
+10. **Final validation.** `mise exec -- pnpm -r test`, lint/typecheck/build; Go race/vet/golangci-lint agent/gateway и Windows build. Review spec acceptance, убрать созданные ресурсы, push s10-impl без merge; сообщить фактические результаты, blockers и SHA.
+
+## Review focus
+
+- Невалидное действие в конце batch не допускает ввода в начале (task 3).
+- Fork/resume не переиспользуют streamer credentials/tickets (tasks 4–6).
+- Активный desktop stream блокирует idle-stop и в event, и в live recheck (task 5).
+- TURN credentials не позволяют relay к произвольному peer (tasks 5, 8).
+- Screenshot metadata сохраняет исходный screen после crop/scale; MCP использует camelCase JSON (tasks 3, 6–7).
+
+## Прогресс
+
+- План записан до изменения production code.
+- pve: первый read-only SSH по IP завершился `Host key verification failed`; проверяется существующий host alias без отключения проверки.
+- S8/S9: ждём сообщения master; их части не начаты.
+
+### Проход 1: решения и контракт pins S5
+
+- Решения Ильи внесены в S10, S5 и roadmap: без пула/15 s, GPL разрешена, сеть без зависимости от Tailscale, self-hosted TURN, slots 595/596.
+- S5 `Versions.desktop`: optional complete stack (`sunshine`, `moonlight_web`, `cua_driver`), version + SHA256 каждого. TOML serializer сохраняет секцию в seed; base tools update сохраняет явно закреплённые desktop pins. Неполный stack отвергается до записи файла.
+- TDD: новая секция отвергалась схемой (RED), затем 306 PASS; updater терял desktop pins (RED), исправлен, 307 PASS; добавлена проверка неизменности файла при invalid pins, 308 PASS.
+- Self-review: проверены round-trip, совместимость headless, неверные SHA256/ключи/неполный stack, сохранение при обновлении. Новых зависимостей нет. Автообновление desktop-релизов ещё не реализовано; pins сохраняются намеренно, как `sbx.cli`.
+- Upstream versions и asset digests записаны в S10 §24. Фактический cua asset — `linux-x86_64-binary.tar.gz`, пример спецификации исправлен.
+- `qm list`: 598 `sbx-tpl-windows-20261031-3` running (4096 MiB). VM S10 не создавались; build/spike отложены до сигнала master о свободном pve. Работает SSH по IP с сохранённым host key alias (см. `infra/dev-cp/README.md`).
+- Остаток task 1 (recipe/seeds/config) и tasks 2–10 не завершены. S8/S9 не интегрированы. API/S11 контракт пока не менялся; реальных desktop endpoints пока нет.
+- Native Go race и vet agent/gateway: PASS; native golangci-lint обоих: 0 issues. Первый параллельный запуск lint агента столкнулся с глобальным lock, последовательный повтор PASS.
+- Windows production agent/gateway build и vet: PASS; gateway golangci-lint: 0 issues. Windows agent lint обнаружил существующий SA4006 в `internal/claim/claim_test.go:785`; широкий Windows build включает Unix-only `cmd/sbx-agent-harness` и падает на syscall/unix symbols. Эти файлы в S10 не менялись; перед Windows-этапом согласовать с S9.
+- TypeScript lint, recursive typecheck и build: PASS. Recursive test: результат ниже после окончания.
