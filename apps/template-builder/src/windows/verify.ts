@@ -49,6 +49,8 @@ const AGENT_TIMEOUT_MS = 2 * MIN;
 const LICENSE_WAIT_MS = 10 * MIN;
 const LICENSE_POLL_MS = 30_000;
 const LOG_LINES = 2000;
+const CLEANUP_TRIES = 3;
+const CLEANUP_RETRY_MS = 10_000;
 /** Spec 15.1 p.12: freeze to thaw. */
 const FREEZE_LIMIT_MS = 10_000;
 /** Spec 15.1 p.14: a hard restart may take at most this much longer than a normal boot. */
@@ -1239,11 +1241,21 @@ export async function verifyWindows(
 	// Cleanup: fork, snapshot, clone, registration. Every part is attempted; delete runs
 	// verifyGone (VM, config, IPAM, LVs, DHCP lease).
 	const problems: string[] = [];
+	// A loaded host times out on VM locks now and then ("can't lock file ... got timeout", seen on
+	// pve): each cleanup step is tried three times, 10 s apart.
 	const attempt = async (what: string, fn: () => Promise<void>) => {
-		try {
-			await fn();
-		} catch (err) {
-			problems.push(`${what}: ${errorText(err)}`);
+		for (let i = 1; ; i++) {
+			try {
+				await fn();
+				return;
+			} catch (err) {
+				if (i >= CLEANUP_TRIES) {
+					problems.push(`${what}: ${errorText(err)}`);
+					return;
+				}
+				log(`cleanup ${what}: ${errorText(err)}; retrying`);
+				await sleep(CLEANUP_RETRY_MS);
+			}
 		}
 	};
 	if (o.keep) {
