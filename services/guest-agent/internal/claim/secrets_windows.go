@@ -173,8 +173,9 @@ func createSecret(path string, data []byte, mode fs.FileMode, user *windows.SID)
 	return nil
 }
 
-// replaceSecret moves tmp to path. An existing regular file at path is
-// overwritten with zeros first; anything else there is removed.
+// replaceSecret moves tmp (in the directory of path) to path. An existing
+// regular file at path is overwritten with zeros first; anything else there
+// is removed.
 func replaceSecret(tmp, path string) error {
 	fi, err := os.Lstat(path)
 	switch {
@@ -191,9 +192,26 @@ func replaceSecret(tmp, path string) error {
 		}
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return secretFileError("replace", path, err)
+		// NTFS refuses to replace a file that is open, even by a reader
+		// that shares delete (zeroInPlace let it through). A POSIX rename
+		// replaces it; the reader keeps the zeroed old file.
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || posixRename(tmp, path) != nil {
+			return secretFileError("replace", path, err)
+		}
 	}
 	return nil
+}
+
+// posixRename renames src over dst in their common directory with POSIX
+// semantics (os.Root does it with FILE_RENAME_POSIX_SEMANTICS): open
+// handles of dst keep the old file.
+func posixRename(src, dst string) error {
+	r, err := os.OpenRoot(filepath.Dir(dst))
+	if err != nil {
+		return err
+	}
+	defer r.Close() //nolint:errcheck // directory handle
+	return r.Rename(filepath.Base(src), filepath.Base(dst))
 }
 
 // wipeFile overwrites path with zeros to its size, flushes it and deletes
