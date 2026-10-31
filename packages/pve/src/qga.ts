@@ -46,6 +46,7 @@ export class QgaExecStatusLostError extends Error {
 const CLIENT_TIMEOUT_RE = /^GET \S+\/agent\/exec-status: timeout$/;
 
 /** Raw bytes per exec in fileWriteWindows. */
+const WRITE_CHUNK_TIMEOUT_MS = 180_000;
 const WRITE_CHUNK_BYTES = 32 * 1024;
 
 /**
@@ -157,7 +158,11 @@ export class Qga {
 					path,
 				],
 				// An empty chunk still needs a non-empty input-data for PVE; whitespace is valid base64.
-				{ input: chunk.length > 0 ? chunk.toString("base64") : "\n" },
+				// The first PowerShell on a fresh Windows clone can take over 30 s (seen on pve).
+				{
+					input: chunk.length > 0 ? chunk.toString("base64") : "\n",
+					timeoutMs: WRITE_CHUNK_TIMEOUT_MS,
+				},
 			);
 			if (r.exitCode !== 0)
 				throw new Error(
