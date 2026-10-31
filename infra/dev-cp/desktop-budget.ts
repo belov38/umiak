@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 
 export function runningSandboxMemory(
 	list: string,
-	desktopOnly = false,
+	ownedVmids?: readonly number[],
 ): number {
 	const rows = list.trim().split("\n");
 	if (!rows.shift()?.includes("VMID"))
@@ -12,20 +12,19 @@ export function runningSandboxMemory(
 		const row = line.trim().split(/\s+/);
 		if (Number(row[0]) < 500 || Number(row[0]) > 599 || row[2] !== "running")
 			return sum;
-		if (
-			desktopOnly &&
-			!(Number(row[0]) >= 580 && Number(row[0]) <= 589) &&
-			![595, 596].includes(Number(row[0]))
-		)
-			return sum;
+		if (ownedVmids && !ownedVmids.includes(Number(row[0]))) return sum;
 		const memory = Number(row[3]);
 		if (!Number.isFinite(memory) || memory <= 0)
 			throw new Error("invalid running VM memory");
 		return sum + memory;
 	}, 0);
 }
-export async function waitForDesktopBudget() {
+export async function waitForDesktopBudget(
+	ownedVmids: readonly number[] = [],
+	signal?: AbortSignal,
+) {
 	for (;;) {
+		signal?.throwIfAborted();
 		const list = execFileSync(
 			"ssh",
 			[
@@ -41,7 +40,11 @@ export async function waitForDesktopBudget() {
 		);
 		console.log(list);
 		const used = runningSandboxMemory(list);
-		if (used + 4096 <= 8192 && runningSandboxMemory(list, true) === 0) return;
+		if (
+			used + 4096 <= 8192 &&
+			runningSandboxMemory(list, [...ownedVmids, 595, 596]) === 0
+		)
+			return;
 		console.log(`RAM budget occupied (${used} MiB), retry in 10s`);
 		await new Promise((done) => setTimeout(done, 10_000));
 	}

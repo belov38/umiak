@@ -26,16 +26,33 @@ if (
 process.env.SBX_VMID_RANGE ??= "580-589";
 const ctx = await makeContext({ node: manifest.node });
 const real = machinesFor(ctx, manifest.pveVmid as number);
+const owned = new Set<number>();
+const abort = new AbortController();
+process.once("SIGINT", () => abort.abort(new Error("verification cancelled")));
+process.once("SIGTERM", () => abort.abort(new Error("verification cancelled")));
 const machines = new Proxy(real, {
 	get(target, prop) {
 		if (prop === "start")
 			return async (vmid: number) => {
 				if (vmid < 500 || vmid > 589)
 					throw new Error("verify sandbox outside 500–589");
-				await waitForDesktopBudget();
+				await waitForDesktopBudget([...owned], abort.signal);
 				return target.start(vmid);
 			};
 		const value = Reflect.get(target, prop, target);
+		if (prop === "create" || prop === "fork")
+			return async (...args: unknown[]) => {
+				const result = (await Reflect.apply(value, target, args)) as {
+					vmid: number;
+				};
+				owned.add(result.vmid);
+				return result;
+			};
+		if (prop === "delete")
+			return async (vmid: number) => {
+				await target.delete(vmid);
+				owned.delete(vmid);
+			};
 		return typeof value === "function" ? value.bind(target) : value;
 	},
 });
@@ -59,6 +76,7 @@ try {
 			log: console.log,
 		},
 		manifest,
+		{ signal: abort.signal },
 	);
 	registry.update(manifest.buildId, { verify: result });
 	console.log(result.ok ? "verify: ok" : "verify: FAILED");

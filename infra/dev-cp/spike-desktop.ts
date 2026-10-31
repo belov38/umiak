@@ -41,7 +41,10 @@ try {
 		})
 	).vmid;
 	if (vmid < 500 || vmid > 589) throw new Error("invalid sandbox allocation");
-	await waitForDesktopBudget();
+	await waitForDesktopBudget([
+		vmid,
+		...(forkVmid === undefined ? [] : [forkVmid]),
+	]);
 	await machines.start(vmid);
 	const ready = await machines.waitReady(vmid, {
 		startedAt: start,
@@ -150,7 +153,10 @@ try {
 			},
 		})
 	).vmid;
-	await waitForDesktopBudget();
+	await waitForDesktopBudget([
+		vmid,
+		...(forkVmid === undefined ? [] : [forkVmid]),
+	]);
 	await machines.start(forkVmid);
 	await machines.waitReady(forkVmid, { timeoutMs: 300_000 });
 	const forkIo = pveGuestIo(ctx.api, ctx.cfg.node, forkVmid);
@@ -162,7 +168,10 @@ try {
 	forkVmid = undefined;
 	await machines.deleteSnapshot(snapshot);
 	snapshot = undefined;
-	await waitForDesktopBudget();
+	await waitForDesktopBudget([
+		vmid,
+		...(forkVmid === undefined ? [] : [forkVmid]),
+	]);
 	await machines.start(vmid);
 	await machines.waitReady(vmid, { timeoutMs: 300_000 });
 	await probe(io);

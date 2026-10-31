@@ -15,6 +15,14 @@ import {
 
 const client = new Sbx();
 const created: Sandbox[] = [];
+const removed = new Set<string>();
+const budget = () =>
+	waitForDesktopBudget(
+		created
+			.filter((s) => !removed.has(s.id))
+			.map((s) => Number(observeDesktop(s.data.slug).runtime_id))
+			.filter((id) => id >= 500 && id <= 589),
+	);
 const output = process.env.SBX_E2E_OUTPUT;
 if (!output) throw new Error("SBX_E2E_OUTPUT is required");
 await mkdir(output, { recursive: true, mode: 0o700 });
@@ -25,7 +33,7 @@ function check(value: unknown, label: string) {
 	console.log(`ok ${label}`);
 }
 try {
-	await waitForDesktopBudget();
+	await budget();
 	const start = performance.now();
 	const sb = await client.sandboxes.create({
 		template: process.env.SBX_E2E_TEMPLATE ?? "linux-desktop",
@@ -142,7 +150,7 @@ try {
 	await sb.desktop.endStreams();
 	if (Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0) {
 		await waitDesktopIdleStop(sb);
-		await waitForDesktopBudget();
+		await budget();
 		await sb.resume({}, { wait: true });
 	}
 
@@ -163,7 +171,7 @@ try {
 	};
 	const original = await credentialHash(sb);
 	await sb.stop({ wait: true });
-	await waitForDesktopBudget();
+	await budget();
 	const copy = await sb.fork();
 	created.push(copy);
 	await copy.waitUntilReady();
@@ -172,7 +180,8 @@ try {
 		"fork gets fresh streamer state",
 	);
 	await copy.delete({ wait: true });
-	await waitForDesktopBudget();
+	removed.add(copy.id);
+	await budget();
 	await sb.resume({}, { wait: true });
 	check(
 		(await sb.desktop.status()).state === "ready",
