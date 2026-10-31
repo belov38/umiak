@@ -31,6 +31,9 @@ services:
     profiles: [replaced-by-e2e-backend]
   gateway:
     profiles: [no-gateway-in-e2e]
+  # S11: talks to api, which this stack does not run.
+  mcp:
+    profiles: [no-mcp-in-e2e]
 
   e2e-backend:
     logging:
