@@ -1,8 +1,15 @@
 packages:
   - "apps/*"
   - "packages/*"
+# next is not hoisted into node_modules/.pnpm/node_modules: payload's type
+# declarations import it without declaring it, and through them next's
+# global types (a required NODE_ENV in ProcessEnv) leaked into every package.
+hoistPattern:
+  - "*"
+  - "!next"
 allowBuilds:
   cpu-features: false
+  esbuild: false
   ssh2: false
   "@modelcontextprotocol/inspector": false
 minimumReleaseAgeExclude:
@@ -19,3 +26,4 @@ minimumReleaseAgeExclude:
   - "@biomejs/cli-win32-x64@2.6.4"
   - "@types/node@26.6.6"
   - jose@6.2.14
+  - lucide-react@1.65.0

@@ -118,6 +118,16 @@ export interface AgentTarget {
 	capabilities: string[];
 }
 
+export interface AgentTargetOptions {
+	/**
+	 * The call changes the guest (file writes, command input and signals,
+	 * PTYs): `sandbox_blocked` on a blocked sandbox unless an operator (S8 C3).
+	 * Best-effort: the agent call happens after this check, so a block that
+	 * commits in between lets that one in-flight call through.
+	 */
+	write?: boolean;
+}
+
 const SPEC_KEYS = [
 	"cmd",
 	"cwd",
@@ -161,8 +171,11 @@ export async function resolveAgentTarget(
 	deps: SandboxServiceDeps,
 	p: Principal,
 	idOrSlug: string,
+	opts: AgentTargetOptions = {},
 ): Promise<AgentTarget> {
-	const row = await findSandboxRow(deps.pool, p, idOrSlug);
+	const row = await findSandboxRow(deps.pool, p, idOrSlug, {
+		write: opts.write === true,
+	});
 	const machineId = readyTarget(row);
 	// NULL until the agent reports its capabilities: none known yet.
 	const s = await deps.pool.query<{ capabilities: string[] | null }>(
@@ -293,7 +306,7 @@ export async function createCommand(
 	spec: CommandSpec,
 ): Promise<Command> {
 	validateSpec(spec);
-	const row = await findSandboxRow(deps.pool, p, idOrSlug);
+	const row = await findSandboxRow(deps.pool, p, idOrSlug, { write: true });
 	return insertCommand(deps.pool, p, row, spec, ulid());
 }
 
@@ -326,7 +339,9 @@ export async function createCommandWithKey(
 	requestBody: unknown,
 ): Promise<{ command: Command; replayed: boolean }> {
 	validateSpec(spec);
-	const sandboxId = (await findSandboxRow(deps.pool, p, idOrSlug)).id;
+	const sandboxId = (
+		await findSandboxRow(deps.pool, p, idOrSlug, { write: true })
+	).id;
 	const commandId = ulid();
 	return withTx(deps.pool, async (tx) => {
 		const claim = await claimIdempotencyKey(tx, {
@@ -350,7 +365,9 @@ export async function createCommandWithKey(
 			if (command === null) throw idempotencyKeyReused();
 			return { command, replayed: true };
 		}
-		const row = await findSandboxRow(tx.client, p, sandboxId);
+		const row = await findSandboxRow(tx.client, p, sandboxId, {
+			write: true,
+		});
 		const command = await insertCommand(tx.client, p, row, spec, commandId);
 		return { command, replayed: false };
 	});

@@ -1,0 +1,30 @@
+{
+	"name": "@sbx/payload",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Payload 3 config of the platform (schema payload): collections, global platform-defaults, migrations and the shared Local API instance",
+	"exports": {
+		".": "./src/index.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p .",
+		"migrate": "node src/migrate.ts",
+		"migration:create": "node src/create-migration.ts"
+	},
+	"dependencies": {
+		"@payloadcms/db-postgres": "3.92.1",
+		"@sbx/auth": "workspace:*",
+		"@sbx/config": "workspace:*",
+		"graphql": "16.14.2",
+		"payload": "3.92.1",
+		"pg": "8.23.1"
+	},
+	"devDependencies": {
+		"@sbx/db": "workspace:*",
+		"@types/pg": "8.23.1",
+		"pg-boss": "12.38.0"
+	}
+}

@@ -2,10 +2,11 @@
 # of the proxied api listener (S7 §7.4, §17.6; architecture §10).
 #   /api/*      -> api:8081 with /api cut off (http://localhost:4180/api/v1/me)
 #   /sbx-auth/* -> api:8081 unchanged (port SSO, S7 §7.7)
-# The dashboard (S8, `web`) takes the rest later. Cookie, session and
-# redirect settings are flags and OAUTH2_PROXY_* variables in compose.yaml;
-# the alpha config owns the provider, the upstreams, the injected headers
-# and the listen address.
+#   /*          -> web:3000, the rest (S8: /app, /admin, /cms-api)
+# oauth2-proxy tries the longest path first, so `/` is the fallback.
+# Cookie, session and redirect settings are flags and OAUTH2_PROXY_*
+# variables in compose.yaml; the alpha config owns the provider, the
+# upstreams, the injected headers and the listen address.
 server:
   bindAddress: 0.0.0.0:4180
 
@@ -26,10 +27,19 @@ upstreamConfig:
       uri: http://api:8081
       timeout: 660s
       passHostHeader: true
+    # web checks Origin against SBX_APP_ORIGIN and Next compares it with the
+    # Host of server actions: keep the browser's Host.
+    - id: web
+      path: /
+      uri: http://web:3000
+      passHostHeader: true
+      proxyWebSockets: true
 
 # The api trusts these headers on :8081, which is meant for oauth2-proxy
 # alone (S7 §7.1). In this dev stack any container of the sbx network can
 # reach it (accepted for dev); the NetworkPolicy of S12 closes it in prod.
+# web trusts them too; it is only on the web-internal network with
+# oauth2-proxy (and postgres), so no other container can reach it.
 injectRequestHeaders:
   - name: X-Auth-Request-User
     values:

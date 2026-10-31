@@ -122,6 +122,9 @@ describe("dev-cp", () => {
 		SBX_API_PUBLIC_URL: "https://ts.test:8443",
 		SBX_OIDC_ISSUER: "https://ts.test:10000/realms/sbx",
 		SBX_DEVCP_TS_NAME: "ts.test",
+		// S8 web: sign-out through Keycloak's end-session page.
+		SBX_LOGOUT_URL:
+			"https://ts.test:10000/realms/sbx/protocol/openid-connect/logout",
 	};
 	const files = [COMPOSE, join(DEVCP, "compose.dev-cp.yaml")];
 

@@ -688,6 +688,26 @@ describe("content types", () => {
 		expect(data).toBeUndefined();
 	});
 
+	it("204 with an empty body stream (browsers) is answered once", async () => {
+		// Chrome gives a 204 answer a non-null, empty body; a Response with a
+		// null-body status cannot be rebuilt around it.
+		const browser204 = () => {
+			const res = new Response(null, { status: 204 });
+			Object.defineProperty(res, "body", {
+				value: new ReadableStream({ start: (c) => c.close() }),
+			});
+			return res;
+		};
+		const f = fakeFetch(browser204(), browser204());
+		const { data, response } = await client(f.fetch).DELETE(
+			"/v1/sandboxes/{sandbox}/ports/{port}",
+			{ params: { path: { sandbox: "sb_1", port: 8000 } } },
+		);
+		expect(data).toBeUndefined();
+		expect(response.status).toBe(204);
+		expect(f.seen).toHaveLength(1);
+	});
+
 	it("HEAD has no data", async () => {
 		const f = fakeFetch(
 			new Response(null, {

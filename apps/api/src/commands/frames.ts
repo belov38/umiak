@@ -64,6 +64,8 @@ export type ErrorFrame = {
 	code: string;
 	message: string;
 	retryable: boolean;
+	/** Only on some errors (a sandbox block: `reason`). */
+	details?: Record<string, unknown>;
 	requestId: string;
 } & FrameOffsets;
 
@@ -82,7 +84,13 @@ export type Frame =
  * `reconnect` frame without offsets and requestId; the stream adds them.
  */
 export type CloseFrame =
-	| { type: "error"; code: string; message: string; retryable: boolean }
+	| {
+			type: "error";
+			code: string;
+			message: string;
+			retryable: boolean;
+			details?: Record<string, unknown>;
+	  }
 	| { type: "reconnect"; reason: ReconnectReason };
 
 /** Abort reason of a stream closed with a final frame. */

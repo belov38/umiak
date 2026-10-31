@@ -1,0 +1,33 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"target": "es2024",
+		"lib": ["dom", "dom.iterable", "es2024"],
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"jsx": "react-jsx",
+		"allowJs": true,
+		"allowImportingTsExtensions": true,
+		"erasableSyntaxOnly": true,
+		"resolveJsonModule": true,
+		"incremental": false,
+		"declaration": false,
+		"sourceMap": false,
+		"types": ["node"],
+		"plugins": [{ "name": "next" }],
+		"paths": {
+			"@/*": ["./src/*"],
+			"@payload-config": ["./src/payload.config.ts"]
+		}
+	},
+	"include": [
+		"next-env.d.ts",
+		"src",
+		"test",
+		"dev",
+		"*.ts",
+		".next/types/**/*.ts"
+	],
+	"exclude": ["node_modules", ".next"]
+}

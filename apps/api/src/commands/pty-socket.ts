@@ -124,11 +124,17 @@ export const ptySize = {
 };
 const ResizeMessage = z.object({ type: z.literal("resize"), ...ptySize });
 
-/** The PTY command of the path (404 unless a PTY of the sandbox) and its machine. */
+/**
+ * The PTY command of the path (404 unless a PTY of the sandbox) and its
+ * machine. A PTY is input to the guest: 403 `sandbox_blocked` on a blocked
+ * sandbox (S8 C3).
+ */
 export async function ptyTarget(
 	deps: ApiDeps,
 	p: Principal,
 	params: { sandbox: string; command: string },
+	/** The sandbox once known, before the block check (StreamHandle.bindSandbox). */
+	onSandbox?: (sandboxId: string) => void,
 ): Promise<{ command: Command; machineId: string }> {
 	const command = await deps.svc.getCommand(
 		p,
@@ -136,7 +142,14 @@ export async function ptyTarget(
 		resolveCommandRef(params.command),
 	);
 	if (command.mode !== "pty") throw notFoundError("pty");
-	const { machineId } = await deps.svc.resolveAgentTarget(p, command.sandboxId);
+	onSandbox?.(command.sandboxId);
+	const { machineId } = await deps.svc.resolveAgentTarget(
+		p,
+		command.sandboxId,
+		{
+			write: true,
+		},
+	);
 	requireSameMachine(command, machineId);
 	return { command, machineId };
 }
@@ -156,6 +169,8 @@ export interface PtyConnection {
 	closed: AbortSignal;
 	/** Leaves the StreamRegistry (idempotent). */
 	unregister(): void;
+	/** Ties the registry entry to the sandbox: a block closes the socket (S8 C3). */
+	bindSandbox?(sandboxId: string): void;
 }
 
 type ErrorInfo = Pick<
@@ -277,7 +292,7 @@ export async function runPtySocket(
 
 	let target: { command: Command; machineId: string };
 	try {
-		target = await ptyTarget(deps, conn.auth.principal, conn);
+		target = await ptyTarget(deps, conn.auth.principal, conn, conn.bindSandbox);
 		// tailBytes wins over offset and never resolves past the end.
 		if (conn.tailBytes === undefined && (conn.offset ?? 0) > 0) {
 			await checkStreamOffsets(
@@ -374,7 +389,7 @@ export async function runPtySocket(
 							code: f.code,
 							message: f.message,
 							retryable: f.retryable,
-							details: {},
+							details: f.details ?? {},
 						},
 						f.ptyOffset ?? offset,
 					);

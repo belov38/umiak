@@ -132,6 +132,8 @@ const CORE_STATUS: Record<string, number> = {
 	slug_taken: 409,
 	snapshot_name_taken: 409,
 	agent_unavailable: 503,
+	// S8 C3: details.reason operator_required, sandbox_blocked, port_blocked.
+	forbidden: 403,
 };
 
 /** Seconds of `Retry-After` when a 429/503 has no hint of its own. */

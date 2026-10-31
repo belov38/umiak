@@ -1,0 +1,285 @@
+"use client";
+// /app/t/<team>/keys (S8 §9.8): team API keys from GET /v1/api-keys. Every
+// member sees them; New and Rotate are for owners, Revoke for owners and
+// operators (§6.2). Keys whose creator left or was deactivated are marked;
+// the IdP-sync notice (§20.1) sits above the table. Revoked and expired
+// keys are collapsed at the bottom.
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type ReactNode, useState } from "react";
+import { toast } from "sonner";
+import { ConfirmButton } from "@/components/app/confirm-button";
+import { QueryError } from "@/components/app/query-error";
+import { useTeamPermission } from "@/components/app/session-context";
+import { TeamNotices } from "@/components/app/team-notices";
+import { Badge } from "@/components/ui/badge";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useSbx } from "@/lib/api";
+import {
+	type ApiKey,
+	creatorNote,
+	maskedKey,
+	partitionKeys,
+	presetOf,
+} from "@/lib/api-keys";
+import { attempt } from "@/lib/client-call";
+import { formatAgo, formatDate } from "@/lib/format";
+import { can } from "@/lib/permissions";
+import type { TeamNoticeView } from "@/lib/team-actions/team-settings";
+import { NewKeyDialog } from "./new-key-dialog";
+import { SecretDialog, type ShownSecret } from "./secret-dialog";
+
+export function KeysPage({
+	teamId,
+	notices,
+}: {
+	teamId: string;
+	notices: TeamNoticeView[];
+}) {
+	const sbx = useSbx(teamId);
+	const queryClient = useQueryClient();
+	const { session, team } = useTeamPermission(teamId);
+	const canIssue = can(session, team, "issueApiKeys");
+	const canRevoke = can(session, team, "revokeApiKeys");
+	const [shown, setShown] = useState<ShownSecret | null>(null);
+
+	const keys = useQuery({
+		queryKey: ["api-keys", teamId],
+		queryFn: async ({ signal }) => {
+			const { data } = await sbx.raw.GET("/v1/api-keys", { signal });
+			return data.data;
+		},
+	});
+	const refresh = () =>
+		queryClient.invalidateQueries({ queryKey: ["api-keys", teamId] });
+
+	const rotate = async (k: ApiKey): Promise<boolean> => {
+		const r = await attempt(async () => {
+			const { data } = await sbx.raw.POST("/v1/api-keys/{key}/rotate", {
+				params: { path: { key: k.id } },
+			});
+			return data;
+		});
+		await refresh();
+		if (r === undefined) return false;
+		setShown({ keyName: r.apiKey.name, secret: r.secret, rotated: true });
+		return true;
+	};
+
+	const revoke = async (k: ApiKey): Promise<boolean> => {
+		const r = await attempt(() =>
+			sbx.raw.DELETE("/v1/api-keys/{key}", {
+				params: { path: { key: k.id } },
+			}),
+		);
+		await refresh();
+		if (r === undefined) return false;
+		toast.success(`Revoked ${k.name}`);
+		return true;
+	};
+
+	const now = Date.now();
+	const { live, inactive } = partitionKeys(keys.data ?? [], now);
+	const team0 = session.teams.find((t) => t.id === teamId);
+
+	return (
+		<section className="space-y-4">
+			<TeamNotices
+				teamId={teamId}
+				notices={notices}
+				canAcknowledge={can(session, team, "acknowledgeNotice")}
+				canRevoke={canRevoke}
+			/>
+			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+				<h1 className="text-xl font-semibold">
+					Team API keys
+					{team0 && (
+						<span className="ml-2 text-base font-normal text-muted-foreground">
+							(team {team0.name})
+						</span>
+					)}
+				</h1>
+				<div className="ml-auto">
+					{canIssue && (
+						<NewKeyDialog
+							teamId={teamId}
+							onIssued={async (s) => {
+								setShown(s);
+								await refresh();
+							}}
+						/>
+					)}
+				</div>
+			</div>
+			<p className="text-sm text-muted-foreground">
+				Keys are for CI and agents and belong to the team. People do not need
+				one: run <code>sbx login</code> to use the CLI with your own account.
+				{!canIssue && " Only an owner of the team can issue and rotate keys."}
+			</p>
+			{keys.isError && (
+				<QueryError
+					error={keys.error}
+					what="API keys"
+					onRetry={() => keys.refetch()}
+				/>
+			)}
+			{keys.isPending && (
+				<p className="text-sm text-muted-foreground">Loading…</p>
+			)}
+			{keys.data && live.length === 0 && (
+				<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+					No active keys.
+				</div>
+			)}
+			{live.length > 0 && (
+				<KeyTable
+					keys={live}
+					now={now}
+					actions={(k) => (
+						<>
+							{canIssue && (
+								<ConfirmButton
+									title={`Rotate ${k.name}?`}
+									description="A new secret is issued and the old one stops working at once everywhere it is used."
+									confirmLabel="Rotate"
+									size="xs"
+									onConfirm={() => rotate(k)}
+								>
+									Rotate
+								</ConfirmButton>
+							)}
+							{canRevoke && (
+								<ConfirmButton
+									title={`Revoke ${k.name}?`}
+									description="It stops working at once on every server; its open streams and terminals are closed. This cannot be undone."
+									confirmLabel="Revoke"
+									variant="ghost"
+									size="xs"
+									onConfirm={() => revoke(k)}
+								>
+									Revoke
+								</ConfirmButton>
+							)}
+						</>
+					)}
+				/>
+			)}
+			{inactive.length > 0 && (
+				<details className="group" data-testid="inactive-keys">
+					<summary className="cursor-pointer text-sm text-muted-foreground select-none">
+						Revoked and expired ({inactive.length})
+					</summary>
+					<div className="pt-2 opacity-70">
+						<KeyTable keys={inactive} now={now} />
+					</div>
+				</details>
+			)}
+			<SecretDialog shown={shown} onClose={() => setShown(null)} />
+		</section>
+	);
+}
+
+function ScopesCell({ scopes }: { scopes: ApiKey["scopes"] }) {
+	const preset = presetOf(scopes);
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<span className="cursor-default">
+					{preset ?? `${scopes.length} scope${scopes.length === 1 ? "" : "s"}`}
+				</span>
+			</TooltipTrigger>
+			<TooltipContent className="max-w-80">
+				<code className="text-xs">{scopes.join(" ")}</code>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
+function KeyTable({
+	keys,
+	now,
+	actions,
+}: {
+	keys: ApiKey[];
+	now: number;
+	actions?: (k: ApiKey) => ReactNode;
+}) {
+	return (
+		<Table>
+			<TableHeader>
+				<TableRow>
+					<TableHead>Name</TableHead>
+					<TableHead>Key</TableHead>
+					<TableHead>Scopes</TableHead>
+					<TableHead>Created by</TableHead>
+					<TableHead>Expires</TableHead>
+					<TableHead>Last used</TableHead>
+					{actions && <TableHead />}
+				</TableRow>
+			</TableHeader>
+			<TableBody>
+				{keys.map((k) => {
+					const note = creatorNote(k);
+					return (
+						<TableRow key={k.id} data-testid="key-row">
+							<TableCell className="font-medium">{k.name}</TableCell>
+							<TableCell>
+								<code className="text-xs">{maskedKey(k)}</code>
+							</TableCell>
+							<TableCell>
+								<ScopesCell scopes={k.scopes} />
+							</TableCell>
+							<TableCell>
+								{k.createdBy?.email ?? "—"}
+								{note && (
+									<Badge
+										variant="outline"
+										className="ml-2 border-amber-300 text-amber-800"
+										data-testid="creator-note"
+									>
+										{note}
+									</Badge>
+								)}
+								<div className="text-xs text-muted-foreground">
+									{formatDate(k.createdAt)} via {k.createdVia}
+								</div>
+							</TableCell>
+							<TableCell>
+								{k.revokedAt ? (
+									<Badge variant="secondary">
+										revoked {formatDate(k.revokedAt)}
+									</Badge>
+								) : Date.parse(k.expiresAt) <= now ? (
+									<Badge variant="secondary">
+										expired {formatDate(k.expiresAt)}
+									</Badge>
+								) : (
+									formatDate(k.expiresAt)
+								)}
+							</TableCell>
+							<TableCell>
+								{k.lastUsedAt ? formatAgo(k.lastUsedAt, now) : "never"}
+							</TableCell>
+							{actions && (
+								<TableCell>
+									<div className="flex justify-end gap-1">{actions(k)}</div>
+								</TableCell>
+							)}
+						</TableRow>
+					);
+				})}
+			</TableBody>
+		</Table>
+	);
+}

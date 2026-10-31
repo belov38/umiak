@@ -7,7 +7,6 @@
 // only in authentication.
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { MiddlewareHandler } from "hono";
-import type pg from "pg";
 import { serviceAuth } from "./auth/internal.ts";
 import { proxiedAuth } from "./auth/proxied.ts";
 import { publicAuth, stripProxyHeaders } from "./auth/public.ts";
@@ -131,11 +130,12 @@ export function createInternalApp(deps: ApiDeps): ApiApp {
 
 const READY_TIMEOUT_MS = 2000;
 
-async function postgresAnswers(pool: pg.Pool): Promise<boolean> {
+/** True when `check` resolves within READY_TIMEOUT_MS. */
+async function passes(check: () => Promise<void>): Promise<boolean> {
 	let timer: NodeJS.Timeout | undefined;
 	try {
 		return await Promise.race([
-			pool.query("SELECT 1").then(() => true),
+			check().then(() => true),
 			new Promise<boolean>((resolve) => {
 				timer = setTimeout(() => resolve(false), READY_TIMEOUT_MS);
 			}),
@@ -148,8 +148,9 @@ async function postgresAnswers(pool: pg.Pool): Promise<boolean> {
 }
 
 /**
- * `/healthz` (liveness), `/readyz` (not shutting down, Postgres and the
- * LISTEN sbx_identity connection), `/metrics` (Prometheus).
+ * `/healthz` (liveness), `/readyz` (not shutting down, Postgres, the
+ * LISTEN sbx_identity connection and the Payload migrations), `/metrics`
+ * (Prometheus).
  */
 export function createOpsApp(deps: ApiDeps): ApiApp {
 	const app = new OpenAPIHono<ApiEnv>();
@@ -160,10 +161,17 @@ export function createOpsApp(deps: ApiDeps): ApiApp {
 	app.get("/readyz", async (c) => {
 		const reasons: string[] = [];
 		if (deps.lifecycle.shuttingDown) reasons.push("shutting_down");
-		if (deps.pool !== null && !(await postgresAnswers(deps.pool))) {
+		const pool = deps.pool;
+		if (
+			pool !== null &&
+			!(await passes(async () => void (await pool.query("SELECT 1"))))
+		) {
 			reasons.push("postgres");
 		}
 		if (!deps.identityEvents.isReady()) reasons.push("identity_listener");
+		if (deps.payloadReady !== null && !(await passes(deps.payloadReady))) {
+			reasons.push("payload_migrations");
+		}
 		if (reasons.length > 0) {
 			throw new ApiError(503, "not_ready", `not ready: ${reasons.join(", ")}`, {
 				retryable: true,

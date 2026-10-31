@@ -30,3 +30,13 @@ deploy/compose/secrets
 # Go and unrelated services
 services
 bin
+
+# web: the dev auth stand-in, tests and local build output never enter the image
+apps/web/dev
+apps/web/test
+apps/web/.next
+apps/web/next-env.d.ts
+apps/web/e2e
+apps/web/test-results
+apps/web/playwright-report
+apps/web/e2e/.state

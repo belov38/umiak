@@ -12,7 +12,7 @@ import { SessionResolver } from "../auth/principal.ts";
 import { RateLimits } from "../auth/rate-limit.ts";
 import { DEFAULT_COMMAND_TIMINGS } from "../commands/attach.ts";
 import { DEFAULT_PTY_TIMINGS } from "../commands/pty-socket.ts";
-import { StreamRegistry } from "../commands/registry.ts";
+import { blockedSandboxesOf, StreamRegistry } from "../commands/registry.ts";
 import type { ApiDeps } from "../deps.ts";
 import { createApiLogger } from "../http/logger.ts";
 import { ApiMetrics } from "../http/metrics.ts";
@@ -33,7 +33,7 @@ export * from "./oidc-server.ts";
 /** A complete valid environment with test values (no files are read). */
 export const TEST_ENV: Readonly<Record<string, string>> = {
 	DATABASE_URL: "postgres://sbx:sbx@127.0.0.1:5432/sbx",
-	SBX_CONFIG_FILE: "/nonexistent/config.yaml",
+	PAYLOAD_SECRET: "test-payload-secret-0123456789abcdef",
 	SBX_DATA_KEYS_FILE: "/nonexistent/data-keys.json",
 	SBX_API_CURSOR_KEY: Buffer.alloc(32, 7).toString("base64"),
 	SBX_API_SERVICE_TOKENS_FILE: "/nonexistent/service-tokens.json",
@@ -116,7 +116,8 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  * - streams: a StreamRegistry over the final identity and identityEvents;
  *   commandTimings: the defaults (60 s, 15 s, 60 min); ptyTimings: the
  *   defaults (ping 15 s, input 5 ms, 1 MiB);
- * - lifecycle: running (not shutting down).
+ * - lifecycle: running (not shutting down);
+ * - payloadReady: null (no Payload: `/readyz` does not check it).
  */
 export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 	const settings = over.settings ?? testSettings();
@@ -161,11 +162,15 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 				identity,
 				events: identityEvents,
 				maxPerPrincipal: settings.maxStreams,
+				...(pool === null
+					? {}
+					: { blockedSandboxes: blockedSandboxesOf(pool) }),
 				log,
 			}),
 		commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 		ptyTimings: { ...DEFAULT_PTY_TIMINGS },
 		lifecycle: new ApiLifecycle(),
+		payloadReady: null,
 		...over,
 	};
 }

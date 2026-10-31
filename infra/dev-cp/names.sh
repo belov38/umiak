@@ -25,6 +25,9 @@ API_URL="https://$TS_NAME:8443"
 MCP_URL="https://$TS_NAME:8443/mcp"
 KEYCLOAK_URL="https://$TS_NAME:10000"
 OIDC_ISSUER="$KEYCLOAK_URL/realms/sbx"
+# web's sign-out (S8): after oauth2-proxy, Keycloak's end-session page returns to the app origin
+# (the realm allows "$APP_ORIGIN/*" as post-logout redirect for the oauth2-proxy client).
+LOGOUT_URL="$OIDC_ISSUER/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=$APP_ORIGIN/app"
 SSH_HOST="$TS_NAME"
 
 # Names from the public wildcard DNS sslip.io (<a-b-c-d>.sslip.io resolves to a.b.c.d). It answers

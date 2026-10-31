@@ -64,7 +64,10 @@ async function updateSets(
 	next: (cur: SecretSets) => SecretSets,
 ): Promise<EnvUpdateResult> {
 	return withTx(deps.pool, async (tx) => {
-		const row = await findSandboxRow(tx.client, p, idOrSlug, { lock: true });
+		const row = await findSandboxRow(tx.client, p, idOrSlug, {
+			lock: true,
+			write: true,
+		});
 		if (row.state === "deleting" || row.state === "deleted") {
 			throw invalidState(row.state);
 		}

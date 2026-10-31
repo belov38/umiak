@@ -6,6 +6,7 @@ import httpx
 from ...client import AuthenticatedClient, Client
 from ...models.error import Error
 from ...models.sandbox_list import SandboxList
+from ...models.sandboxes_list_all_teams import SandboxesListAllTeams
 from ...types import UNSET, Response, Unset
 
 
@@ -15,6 +16,8 @@ def _get_kwargs(
     label: list[str] | str | Unset = UNSET,
     template: str | Unset = UNSET,
     q: str | Unset = UNSET,
+    all_teams: SandboxesListAllTeams | Unset = UNSET,
+    team_id: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     cursor: str | Unset = UNSET,
 ) -> dict[str, Any]:
@@ -36,6 +39,14 @@ def _get_kwargs(
     params["template"] = template
 
     params["q"] = q
+
+    json_all_teams: str | Unset = UNSET
+    if not isinstance(all_teams, Unset):
+        json_all_teams = all_teams.value
+
+    params["allTeams"] = json_all_teams
+
+    params["teamId"] = team_id
 
     params["limit"] = limit
 
@@ -65,6 +76,11 @@ def _parse_response(
 
         return response_400
 
+    if response.status_code == 403:
+        response_403 = Error.from_dict(response.json())
+
+        return response_403
+
     response_default = Error.from_dict(response.json())
 
     return response_default
@@ -88,6 +104,8 @@ def sync_detailed(
     label: list[str] | str | Unset = UNSET,
     template: str | Unset = UNSET,
     q: str | Unset = UNSET,
+    all_teams: SandboxesListAllTeams | Unset = UNSET,
+    team_id: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     cursor: str | Unset = UNSET,
 ) -> Response[Error | SandboxList]:
@@ -95,7 +113,8 @@ def sync_detailed(
 
      Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters:
     `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must
-    match), `template`, `q` (prefix of name or slug).
+    match), `template`, `q` (prefix of name or slug). A platform operator in the dashboard may list
+    every team with `allTeams=true` (and `teamId`).
 
     Args:
         state (str | Unset): Comma-separated states; default: all but deleted (deleted only when
@@ -104,6 +123,11 @@ def sync_detailed(
             session=42.
         template (str | Unset):
         q (str | Unset): Prefix of the name or slug, case-insensitive
+        all_teams (SandboxesListAllTeams | Unset): `true`: sandboxes of every team. Only a
+            platform operator in the dashboard (browser session); anyone else is 403 `forbidden`
+            (details.reason `operator_required`)
+        team_id (str | Unset): With allTeams=true: only this team (`team_...`) Example:
+            team_01jbx2v7d3m6c8q9w0e4r5t6y7.
         limit (int | Unset): Page size, 1-200 (default 50)
         cursor (str | Unset): `nextCursor` of the previous page, unchanged
 
@@ -120,6 +144,8 @@ def sync_detailed(
         label=label,
         template=template,
         q=q,
+        all_teams=all_teams,
+        team_id=team_id,
         limit=limit,
         cursor=cursor,
     )
@@ -138,6 +164,8 @@ def sync(
     label: list[str] | str | Unset = UNSET,
     template: str | Unset = UNSET,
     q: str | Unset = UNSET,
+    all_teams: SandboxesListAllTeams | Unset = UNSET,
+    team_id: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     cursor: str | Unset = UNSET,
 ) -> Error | SandboxList | None:
@@ -145,7 +173,8 @@ def sync(
 
      Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters:
     `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must
-    match), `template`, `q` (prefix of name or slug).
+    match), `template`, `q` (prefix of name or slug). A platform operator in the dashboard may list
+    every team with `allTeams=true` (and `teamId`).
 
     Args:
         state (str | Unset): Comma-separated states; default: all but deleted (deleted only when
@@ -154,6 +183,11 @@ def sync(
             session=42.
         template (str | Unset):
         q (str | Unset): Prefix of the name or slug, case-insensitive
+        all_teams (SandboxesListAllTeams | Unset): `true`: sandboxes of every team. Only a
+            platform operator in the dashboard (browser session); anyone else is 403 `forbidden`
+            (details.reason `operator_required`)
+        team_id (str | Unset): With allTeams=true: only this team (`team_...`) Example:
+            team_01jbx2v7d3m6c8q9w0e4r5t6y7.
         limit (int | Unset): Page size, 1-200 (default 50)
         cursor (str | Unset): `nextCursor` of the previous page, unchanged
 
@@ -171,6 +205,8 @@ def sync(
         label=label,
         template=template,
         q=q,
+        all_teams=all_teams,
+        team_id=team_id,
         limit=limit,
         cursor=cursor,
     ).parsed
@@ -183,6 +219,8 @@ async def asyncio_detailed(
     label: list[str] | str | Unset = UNSET,
     template: str | Unset = UNSET,
     q: str | Unset = UNSET,
+    all_teams: SandboxesListAllTeams | Unset = UNSET,
+    team_id: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     cursor: str | Unset = UNSET,
 ) -> Response[Error | SandboxList]:
@@ -190,7 +228,8 @@ async def asyncio_detailed(
 
      Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters:
     `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must
-    match), `template`, `q` (prefix of name or slug).
+    match), `template`, `q` (prefix of name or slug). A platform operator in the dashboard may list
+    every team with `allTeams=true` (and `teamId`).
 
     Args:
         state (str | Unset): Comma-separated states; default: all but deleted (deleted only when
@@ -199,6 +238,11 @@ async def asyncio_detailed(
             session=42.
         template (str | Unset):
         q (str | Unset): Prefix of the name or slug, case-insensitive
+        all_teams (SandboxesListAllTeams | Unset): `true`: sandboxes of every team. Only a
+            platform operator in the dashboard (browser session); anyone else is 403 `forbidden`
+            (details.reason `operator_required`)
+        team_id (str | Unset): With allTeams=true: only this team (`team_...`) Example:
+            team_01jbx2v7d3m6c8q9w0e4r5t6y7.
         limit (int | Unset): Page size, 1-200 (default 50)
         cursor (str | Unset): `nextCursor` of the previous page, unchanged
 
@@ -215,6 +259,8 @@ async def asyncio_detailed(
         label=label,
         template=template,
         q=q,
+        all_teams=all_teams,
+        team_id=team_id,
         limit=limit,
         cursor=cursor,
     )
@@ -231,6 +277,8 @@ async def asyncio(
     label: list[str] | str | Unset = UNSET,
     template: str | Unset = UNSET,
     q: str | Unset = UNSET,
+    all_teams: SandboxesListAllTeams | Unset = UNSET,
+    team_id: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     cursor: str | Unset = UNSET,
 ) -> Error | SandboxList | None:
@@ -238,7 +286,8 @@ async def asyncio(
 
      Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters:
     `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must
-    match), `template`, `q` (prefix of name or slug).
+    match), `template`, `q` (prefix of name or slug). A platform operator in the dashboard may list
+    every team with `allTeams=true` (and `teamId`).
 
     Args:
         state (str | Unset): Comma-separated states; default: all but deleted (deleted only when
@@ -247,6 +296,11 @@ async def asyncio(
             session=42.
         template (str | Unset):
         q (str | Unset): Prefix of the name or slug, case-insensitive
+        all_teams (SandboxesListAllTeams | Unset): `true`: sandboxes of every team. Only a
+            platform operator in the dashboard (browser session); anyone else is 403 `forbidden`
+            (details.reason `operator_required`)
+        team_id (str | Unset): With allTeams=true: only this team (`team_...`) Example:
+            team_01jbx2v7d3m6c8q9w0e4r5t6y7.
         limit (int | Unset): Page size, 1-200 (default 50)
         cursor (str | Unset): `nextCursor` of the previous page, unchanged
 
@@ -265,6 +319,8 @@ async def asyncio(
             label=label,
             template=template,
             q=q,
+            all_teams=all_teams,
+            team_id=team_id,
             limit=limit,
             cursor=cursor,
         )

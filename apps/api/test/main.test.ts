@@ -1,7 +1,7 @@
 // The api process (S7 §7.1, Task 15): `startApi` builds the production
 // dependencies from the settings (Postgres pool, LISTEN sbx_identity,
-// pg-boss sender, config, key ring, identity file, service tokens, SSH CA
-// and host keys) and serves the four listeners; `onShutdownSignals` turns
+// pg-boss sender, Payload identity and config, key ring, identity file,
+// service tokens, SSH CA and host keys) and serves the four listeners; `onShutdownSignals` turns
 // SIGTERM/SIGINT into one graceful close and the exit code.
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -11,6 +11,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apiKeyHash, generateApiKeySecret } from "@sbx/auth";
 import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	closeSbxPayload,
+	getSbxPayload,
+	migrateSbxPayload,
+} from "@sbx/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { onShutdownSignals, type RunningApi, startApi } from "../src/index.ts";
 import { testSettings } from "../src/testing/index.ts";
@@ -39,6 +44,15 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 
 	beforeAll(async () => {
 		db = await createTestDatabase();
+		const payloadSecret = "main-test-payload-secret-0123456789";
+		const p = await getSbxPayload({
+			databaseUrl: db.url,
+			secret: payloadSecret,
+			operatorGroups: [],
+			poolMax: 4,
+		});
+		await migrateSbxPayload(p, () => {});
+		await closeSbxPayload(db.url);
 		dir = mkdtempSync(join(tmpdir(), "sbx-api-main-"));
 		const file = (name: string, text: string) => {
 			const p = join(dir, name);
@@ -47,7 +61,7 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 		};
 		env = {
 			DATABASE_URL: db.url,
-			SBX_CONFIG_FILE: file("sbx.yaml", "templates: []\nsizes: []\n"),
+			PAYLOAD_SECRET: payloadSecret,
 			SBX_DATA_KEYS_FILE: file(
 				"data-keys.json",
 				JSON.stringify({

@@ -58,6 +58,8 @@ SANDBOX: dict[str, Any] = {
     },
     "environment": None,
     "excludeOwnerSecrets": False,
+    "blocked": False,
+    "blockReason": None,
     "createdAt": "2026-10-30T07:48:37.791Z",
     "readyAt": None,
     "stoppedAt": None,

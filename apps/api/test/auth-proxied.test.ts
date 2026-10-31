@@ -4,6 +4,7 @@ import { createRoute, z } from "@hono/zod-openapi";
 import { encodeUuid } from "@sbx/auth";
 import { skipPg } from "@sbx/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { parseGroups } from "../src/auth/proxied.ts";
 import { ERROR_RESPONSES, jsonBody } from "../src/index.ts";
 import { testSettings } from "../src/testing/index.ts";
 import {
@@ -20,6 +21,15 @@ function errorOf(body: unknown) {
 	return (body as { error: { code: string; details: Record<string, unknown> } })
 		.error;
 }
+
+describe("parseGroups", () => {
+	it("splits, trims, dedups and drops the role:<name> entries of keycloak-oidc", () => {
+		expect(
+			parseGroups(" devs, role:offline_access,,sbx-operators,role:a:b,devs"),
+		).toEqual(["devs", "sbx-operators"]);
+		expect(parseGroups(undefined)).toEqual([]);
+	});
+});
 
 describe("proxied listener without Postgres", () => {
 	it("no X-Auth-Request-Email: 401", async () => {

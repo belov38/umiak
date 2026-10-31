@@ -296,7 +296,7 @@ export async function teamState(
 		),
 		events: await of("runtime.sandbox_events", `sandbox_id IN (${sandboxes})`),
 		snapshots: await of("runtime.snapshots", "team_id = $1"),
-		environments: await of("identity.environments", "team_id = $1"),
+		environments: await of("runtime.environments", "team_id = $1"),
 		apiKeys: await rows(
 			`SELECT json_agg(to_jsonb(t) - 'last_used_at' ORDER BY t.id) AS j
 			 FROM identity.api_keys t WHERE team_id = $1`,

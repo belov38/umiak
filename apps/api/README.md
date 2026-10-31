@@ -13,8 +13,13 @@ mise exec -- pnpm --filter "@sbx/agent-client..." run build   # или mise exec
 mise exec -- node apps/api/src/main.ts                         # переменные окружения — ниже
 ```
 
+Личности (пользователи, команды, ключи) и конфиг (шаблоны, размеры, квоты, `defaults`) берутся из Payload
+(`@sbx/payload`: `PayloadIdentityStore`, `PayloadConfigReader` с `LISTEN sbx_config`, свой пул на 10 соединений).
+Миграции схемы `payload` `api` не применяет: это делает `node packages/payload/src/migrate.ts` (в compose —
+`web-migrate`) до старта; до тех пор `/readyz` отвечает `503`.
+
 В docker compose это сервис `api` (`deploy/compose/README.md`), образ — `apps/api/Dockerfile`. Неверное
-окружение — выход с кодом `1` и список всех ошибок. Битый файл (конфиг, ключи, токены, CA) роняет старт до
+окружение — выход с кодом `1` и список всех ошибок. Битый файл (ключи, токены, CA, личности) роняет старт до
 первого подключения к Postgres. SIGTERM/SIGINT: readiness → false, стримам — кадр `reconnect`, PTY — `1012`,
 sync-командам — `503 server_shutting_down`, выход не позже чем через 10 s; второй сигнал — выход `1` сразу.
 
@@ -27,8 +32,9 @@ sync-командам — `503 server_shutting_down`, выход не позже
 | `SBX_API_INTERNAL_PORT` | 8082 | gateway (S4) | service token |
 | `SBX_API_METRICS_PORT` | 9090 | Prometheus, пробы | нет: `/healthz`, `/readyz`, `/metrics` |
 
-`/readyz` готов, когда работают Postgres и `LISTEN sbx_identity` и процесс не останавливается; иначе `503 not_ready`
-с `details.reasons` (`postgres`, `identity_listener`, `shutting_down`).
+`/readyz` готов, когда работают Postgres и `LISTEN sbx_identity`, применены все известные коду миграции Payload и
+процесс не останавливается; иначе `503 not_ready` с `details.reasons` (`postgres`, `identity_listener`,
+`payload_migrations`, `shutting_down`).
 OpenAPI — `GET /v1/openapi.json`, документация — `GET /v1/docs` (без аутентификации; docs — только на public:
 страница грузит Scalar с jsDelivr, закреплённый с SRI).
 
@@ -45,12 +51,12 @@ principal, то есть после аутентификации; до неё к
 | Переменная | По умолчанию | Что |
 |---|---|---|
 | `DATABASE_URL` | обязательна | Postgres (`postgres://…`) |
-| `SBX_CONFIG_FILE` | обязательна | YAML конфига S6 (шаблоны, размеры, квоты, `defaults`) |
+| `PAYLOAD_SECRET` | обязательна | секрет конфига Payload (тот же, что у `web` и `worker`) |
 | `SBX_DATA_KEYS_FILE` | обязательна | ключи данных S6 (формат `deploy/compose/config/data-keys.example.json`) |
 | `SBX_API_CURSOR_KEY` | обязательна | base64, не меньше 32 байт: HMAC курсоров |
 | `SBX_API_SERVICE_TOKENS_FILE` | обязательна | JSON `{"gateway": ["<t1>", "<t2>"]}`: токены, которые принимает internal listener |
 | `SBX_API_GATEWAY_TOKEN_FILE` | — | токен `api` для internal listener gateway (одна строка). Без него RPC агента и `/files/*` — `503 agent_unavailable` |
-| `SBX_IDENTITY_FILE` | — | YAML личностей: `teams`, `users`, `apiKeys` по sha256 (формат — `packages/auth/src/seed.ts`); upsert при каждом старте |
+| `SBX_IDENTITY_FILE` | — | YAML личностей: `teams`, `users`, `apiKeys` по sha256 (формат — `packages/auth/src/seed.ts`); upsert в Payload (`seedPayloadIdentity`) при каждом старте; без применённых миграций Payload старт падает |
 | `SBX_OPERATOR_GROUPS` | — | группы IdP операторов, через запятую |
 | `SBX_OIDC_ISSUER` | — | issuer Keycloak (`https://<keycloak>/realms/sbx`); без него JWT не принимаются, `/v1/meta` `oidc: null` |
 | `SBX_OIDC_DISCOVERY_URL` | `<issuer>/.well-known/openid-configuration` | discovery по внутреннему адресу |
@@ -85,8 +91,10 @@ principal, то есть после аутентификации; до неё к
 | `POST /internal/v1/gateway/port-auth/exchange` | одноразовый код SSO порта → `{userId, email, label, authEpoch}` или `400 invalid_code` |
 | `POST /internal/v1/agent-events` | binary protobuf `AgentEventsRequest` → `{ackedSeq}` |
 
-Изменения маршрутов gateway узнаёт по `NOTIFY sbx_routes '<slug>'`, разрывы SSH-сессий — по
-`NOTIFY sbx_ssh_revoke` (триггеры миграций `0204` и `0302`).
+Изменения маршрутов gateway узнаёт по `NOTIFY sbx_routes '<slug>'` (триггеры миграций `0201` и `0204`, в том числе
+блокировки, `0206`), разрывы SSH-сессий — по `NOTIFY sbx_ssh_revoke`: личности, членства, ключи и команды — из хуков
+Payload (`@sbx/payload`, те же payload-ы, что у триггеров `0302`/`0303` на `identity`), блокировка sandbox —
+`''` из `SandboxService.block` (gateway перепроверяет все сессии через `ssh/authorize`).
 
 ## Агент: `AgentApi`
 

@@ -1,0 +1,167 @@
+// The Payload config of the platform (S8 §7): one config for api, worker
+// (Local API, plain Node) and web (Next). No React imports here: admin
+// components are referenced by import-map path strings from apps/web.
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { postgresAdapter } from "@payloadcms/db-postgres";
+import { buildConfig, type EmailAdapter, type SanitizedConfig } from "payload";
+import { nobody, operatorAccess, operatorOnly } from "./access.ts";
+import { ApiKeys } from "./collections/api-keys.ts";
+import { Memberships } from "./collections/memberships.ts";
+import { PoolTargets } from "./collections/pool-targets.ts";
+import { Sizes } from "./collections/sizes.ts";
+import { SshKeys } from "./collections/ssh-keys.ts";
+import { TeamNotices } from "./collections/team-notices.ts";
+import { Teams } from "./collections/teams.ts";
+import { Templates } from "./collections/templates.ts";
+import { Users } from "./collections/users.ts";
+import { PlatformDefaults } from "./globals/platform-defaults.ts";
+import { attachSessionCache } from "./identity/session-cache.ts";
+
+export interface SbxPayloadOptions {
+	databaseUrl: string;
+	/** PAYLOAD_SECRET. */
+	secret: string;
+	/** SBX_OPERATOR_GROUPS (S8 §5.5). */
+	operatorGroups: string[];
+	/** SBX_APP_ORIGIN: the only origin of unsafe requests (S8 §5.6). */
+	appOrigin?: string;
+	/** Size of the pg pool of the adapter (default 10). */
+	poolMax?: number;
+	/**
+	 * Cache resolved browser sessions on the instance (web, plan decision 8):
+	 * attached in onInit, with LISTEN sbx_identity on its own connection
+	 * unless `listen` is false. api and worker leave it off.
+	 */
+	sessionCache?: {
+		ttlMs?: number;
+		listen?: boolean;
+		reconnectDelayMs?: number;
+		onListenError?: (err: unknown) => void;
+	};
+}
+
+/** Postgres schema owned by Payload. */
+export const PAYLOAD_SCHEMA = "payload";
+
+/**
+ * Migrations of the payload schema (committed, applied by src/migrate.ts).
+ * Not `new URL("./migrations", import.meta.url)`: bundlers (Turbopack in
+ * apps/web) turn that form into an asset reference.
+ */
+export const PAYLOAD_MIGRATIONS_DIR: string = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"migrations",
+);
+
+/** Settings of the platform kept in config.custom.sbx (read by the auth strategy). */
+export interface SbxCustomConfig {
+	operatorGroups: string[];
+}
+
+const noEmail: EmailAdapter = () => ({
+	name: "none",
+	defaultFromAddress: "noreply@invalid",
+	defaultFromName: "sbx",
+	sendEmail: async () => {
+		throw new Error("email is not configured");
+	},
+});
+
+/**
+ * Payload's own collections. payload-locked-documents takes any signed-in
+ * user by default (/cms-api would show every member who edits what in
+ * /admin): operators only, as /admin. payload-migrations (no REST
+ * endpoints) is closed too. payload-preferences stays: Payload scopes it to
+ * the user of the request.
+ */
+function restrictInternalCollections(config: SanitizedConfig): SanitizedConfig {
+	for (const c of config.collections) {
+		if (c.slug === "payload-locked-documents") {
+			c.access = { ...c.access, ...operatorAccess };
+		} else if (c.slug === "payload-migrations") {
+			c.access = {
+				...c.access,
+				read: operatorOnly,
+				create: nobody,
+				update: nobody,
+				delete: nobody,
+			};
+		}
+	}
+	return config;
+}
+
+export async function buildSbxConfig(
+	o: SbxPayloadOptions,
+): Promise<SanitizedConfig> {
+	const sbx: SbxCustomConfig = { operatorGroups: [...o.operatorGroups] };
+	const config = await buildConfig({
+		secret: o.secret,
+		telemetry: false,
+		db: postgresAdapter({
+			schemaName: PAYLOAD_SCHEMA,
+			idType: "uuidv7",
+			// Schema changes only through committed migrations, in dev too (S8 §12).
+			push: false,
+			migrationDir: PAYLOAD_MIGRATIONS_DIR,
+			// No prodMigrations: migrations are applied by the web-migrate job,
+			// never at start (S8 §12).
+			// The database is provisioned by the deployment.
+			disableCreateDatabase: true,
+			pool: { connectionString: o.databaseUrl, max: o.poolMax ?? 10 },
+		}),
+		// The platform sends no email (S8 §6.3); this also keeps Payload from
+		// warning about a missing adapter at every start.
+		email: noEmail,
+		graphQL: { disable: true },
+		// /api/* of app.<domain> belongs to the api service (S7 §5.1).
+		routes: { api: "/cms-api", admin: "/admin" },
+		csrf: o.appOrigin ? [o.appOrigin] : [],
+		cookiePrefix: "__Host-payload",
+		// avatar "default": no Gravatar request (an external origin, and it
+		// would hand every user's email hash to a third party).
+		admin: { user: "users", avatar: "default" },
+		typescript: { autoGenerate: false },
+		collections: [
+			Users,
+			Teams,
+			Memberships,
+			ApiKeys,
+			TeamNotices,
+			SshKeys,
+			Templates,
+			Sizes,
+			PoolTargets,
+		],
+		globals: [PlatformDefaults],
+		custom: { sbx },
+		...(o.sessionCache === undefined
+			? {}
+			: { onInit: (payload) => sessionCacheOnInit(payload, o) }),
+	});
+	return restrictInternalCollections(config);
+}
+
+function sessionCacheOnInit(
+	payload: Parameters<typeof attachSessionCache>[0],
+	o: SbxPayloadOptions,
+): Promise<void> {
+	const c = o.sessionCache ?? {};
+	return attachSessionCache(payload, {
+		...(c.ttlMs === undefined ? {} : { ttlMs: c.ttlMs }),
+		...(c.listen === false
+			? {}
+			: {
+					listen: {
+						databaseUrl: o.databaseUrl,
+						...(c.reconnectDelayMs === undefined
+							? {}
+							: { reconnectDelayMs: c.reconnectDelayMs }),
+					},
+				}),
+		...(c.onListenError === undefined
+			? {}
+			: { onListenError: c.onListenError }),
+	});
+}

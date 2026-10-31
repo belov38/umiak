@@ -1,0 +1,377 @@
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import type { Payload } from "payload";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+	assertPayloadMigrated,
+	migrateSbxPayload,
+	payloadMigrations,
+	pendingPayloadMigrations,
+} from "../src/index.ts";
+import { closePayload, openPayload } from "./helpers.ts";
+
+describe.skipIf(skipPg())("payload migrations on an empty database", () => {
+	let t: TestDatabase;
+	let payload: Payload;
+
+	beforeAll(async () => {
+		t = await createTestDatabase({ migrated: false, max: 2 });
+		payload = await openPayload(t.url);
+	});
+	afterAll(async () => {
+		if (t) await closePayload(t.url);
+		await t?.drop();
+	});
+
+	it("assertPayloadMigrated throws before the migrations, naming them", async () => {
+		const names = payloadMigrations.map((m) => m.name);
+		expect(names.length).toBeGreaterThan(0);
+		expect(await pendingPayloadMigrations(payload)).toEqual(names);
+		await expect(assertPayloadMigrated(payload)).rejects.toThrow(
+			names[0] as string,
+		);
+	});
+
+	it("applies every migration once; a second run changes nothing", async () => {
+		await migrateSbxPayload(payload);
+		expect(await pendingPayloadMigrations(payload)).toEqual([]);
+		await assertPayloadMigrated(payload);
+		const before = await t.pool.query(
+			"SELECT name, batch FROM payload.payload_migrations ORDER BY name",
+		);
+		await migrateSbxPayload(payload);
+		const after = await t.pool.query(
+			"SELECT name, batch FROM payload.payload_migrations ORDER BY name",
+		);
+		expect(after.rows).toEqual(before.rows);
+		expect(before.rows.map((r) => r.name)).toEqual(
+			payloadMigrations.map((m) => m.name),
+		);
+	});
+
+	it("applied migrations unknown to the code are allowed", async () => {
+		await t.pool.query(
+			"INSERT INTO payload.payload_migrations (id, name, batch) VALUES (uuidv7(), '29991231_000000_future', 99)",
+		);
+		await assertPayloadMigrated(payload);
+		expect(await pendingPayloadMigrations(payload)).toEqual([]);
+		await t.pool.query(
+			"DELETE FROM payload.payload_migrations WHERE name = '29991231_000000_future'",
+		);
+	});
+
+	it("seeds platform-defaults with the S6, S7 and S8 defaults", async () => {
+		const d = await payload.findGlobal({ slug: "platform-defaults" });
+		expect(d).toMatchObject({
+			ttlSeconds: null,
+			maxTtlSeconds: 604800,
+			idleTimeoutSeconds: 900,
+			stoppedRetentionDays: null,
+			errorRetentionDays: 7,
+			recoverMinIntervalSeconds: 600,
+			defaultTemplate: "linux",
+			publicPortsEnabled: true,
+			ssoPortPolicy: "any",
+			rateLimits: { requestsPerSecond: 20, burst: 100, startsPerMinute: 30 },
+			defaultQuota: {
+				maxActiveSandboxes: 3,
+				maxRamMb: 6144,
+				maxSavedSnapshots: 10,
+			},
+			newSharedTeamQuota: {
+				maxActiveSandboxes: 3,
+				maxRamMb: 6144,
+				maxSavedSnapshots: 10,
+			},
+			maxOwnedTeamsPerUser: 3,
+			ssoPolicyEpoch: 0,
+		});
+	});
+
+	it("seeds the PoC template and size, no pool target", async () => {
+		const tpl = await payload.find({
+			collection: "templates",
+			where: { slug: { equals: "linux" } },
+		});
+		expect(tpl.docs).toHaveLength(1);
+		expect(tpl.docs[0]).toMatchObject({
+			slug: "linux",
+			name: "linux",
+			os: "linux",
+			enabled: true,
+			defaultSize: "2gb",
+			allowedSizes: ["2gb"],
+			loginUser: "user",
+			capabilities: ["exec", "files", "ssh"],
+		});
+		const size = await payload.find({
+			collection: "sizes",
+			where: { slug: { equals: "2gb" } },
+		});
+		expect(size.docs).toHaveLength(1);
+		expect(size.docs[0]).toMatchObject({
+			slug: "2gb",
+			vcpu: 2,
+			memoryMb: 2048,
+		});
+		// Warm pools are not in the MVP: no pool target is seeded.
+		const pool = await payload.find({ collection: "pool-targets" });
+		expect(pool.docs).toHaveLength(0);
+	});
+
+	it("pool targets are unique per template and size when providerId is empty", async () => {
+		const first = await payload.create({
+			collection: "pool-targets",
+			data: { template: "linux", size: "2gb", target: 1 },
+		});
+		try {
+			await expect(
+				payload.create({
+					collection: "pool-targets",
+					data: { template: "linux", size: "2gb", target: 2 },
+				}),
+			).rejects.toThrow();
+			const r = await payload.find({ collection: "pool-targets" });
+			expect(r.docs).toHaveLength(1);
+		} finally {
+			await payload.delete({ collection: "pool-targets", id: first.id });
+		}
+	});
+
+	it("ids of new documents are UUIDs", async () => {
+		const doc = await payload.create({
+			collection: "sizes",
+			data: { slug: `s-${Date.now()}`, vcpu: 1, memoryMb: 1024 },
+		});
+		expect(String(doc.id)).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+		);
+	});
+});
+
+describe.skipIf(skipPg())(
+	"payload migrations copy the identity stand-in",
+	() => {
+		let t: TestDatabase;
+		let payload: Payload;
+		const ids = {
+			personal: randomUUID(),
+			shared: randomUUID(),
+			alice: randomUUID(),
+			bob: randomUUID(),
+			key: randomUUID(),
+			ssh: randomUUID(),
+		};
+		const hash = "a".repeat(64);
+		const created = new Date("2026-10-01T10:00:00Z");
+		const expires = new Date("2027-10-01T10:00:00Z");
+		const revoked = new Date("2026-10-20T10:00:00Z");
+		const rotated = new Date("2026-10-10T10:00:00Z");
+
+		beforeAll(async () => {
+			// Copy of the template: db/migrations applied, identity schema included.
+			t = await createTestDatabase({ max: 2 });
+			const q = (sql: string, args: unknown[]) => t.pool.query(sql, args);
+			await q(
+				"INSERT INTO identity.teams (id, name, personal, created_at) VALUES ($1, 'alice', true, $3), ($2, 'Shared', false, $3)",
+				[ids.personal, ids.shared, created],
+			);
+			await q(
+				`INSERT INTO identity.users (id, email, name, active, is_operator, idp_subject, default_team_id, created_at)
+			 VALUES ($1, 'alice@example.com', 'Alice', true, true, 'sub-alice', $3, $4),
+			        ($2, 'bob@example.com', NULL, false, false, NULL, NULL, $4)`,
+				[ids.alice, ids.bob, ids.personal, created],
+			);
+			await q(
+				`INSERT INTO identity.memberships (user_id, team_id, role, created_at)
+			 VALUES ($1, $3, 'owner', $4), ($1, $5, 'owner', $4), ($2, $5, 'member', $4)`,
+				[ids.alice, ids.bob, ids.personal, created, ids.shared],
+			);
+			await q(
+				`INSERT INTO identity.api_keys (id, team_id, name, secret_hash, prefix, last4, scopes,
+			   created_by, created_via, created_at, expires_at, last_used_at, revoked_at,
+			   revoked_by, revoked_by_key, rotated_at)
+			 VALUES ($1, $2, 'ci', $3, 'sbx_key_abc', 'wxyz', ARRAY['sandboxes:read','sandboxes:write'],
+			   $4, 'cli', $5, $6, $5, $7, $4, $1, $8)`,
+				[
+					ids.key,
+					ids.shared,
+					hash,
+					ids.alice,
+					created,
+					expires,
+					revoked,
+					rotated,
+				],
+			);
+			await q(
+				`INSERT INTO identity.ssh_keys (id, user_id, name, public_key, fingerprint, type, created_at, last_used_at)
+			 VALUES ($1, $2, 'laptop', 'ssh-ed25519 AAAA test', 'SHA256:abc', 'ssh-ed25519', $3, $3)`,
+				[ids.ssh, ids.alice, created],
+			);
+			payload = await openPayload(t.url);
+			await migrateSbxPayload(payload);
+		});
+		afterAll(async () => {
+			if (t) await closePayload(t.url);
+			await t?.drop();
+		});
+
+		it("keeps the UUIDs and fields of teams and users", async () => {
+			const teams = await payload.find({
+				collection: "teams",
+				sort: "name",
+				depth: 0,
+			});
+			expect(teams.docs.map((d) => [d.id, d.name, d.personal])).toEqual([
+				[ids.shared, "Shared", false],
+				[ids.personal, "alice", true],
+			]);
+			const alice = await payload.findByID({
+				collection: "users",
+				id: ids.alice,
+				depth: 0,
+			});
+			expect(alice).toMatchObject({
+				email: "alice@example.com",
+				name: "Alice",
+				active: true,
+				isOperator: true,
+				idpSubject: "sub-alice",
+				defaultTeam: ids.personal,
+				personalTeam: ids.personal,
+			});
+			expect(new Date(alice.createdAt).toISOString()).toBe(
+				created.toISOString(),
+			);
+			// A user with an IdP subject has logged in; stubs have no lastLoginAt.
+			expect(alice.lastLoginAt).not.toBeNull();
+			const bob = await payload.findByID({
+				collection: "users",
+				id: ids.bob,
+				depth: 0,
+			});
+			expect(bob).toMatchObject({
+				email: "bob@example.com",
+				active: false,
+				isOperator: false,
+			});
+			expect(bob.idpSubject ?? null).toBeNull();
+			expect(bob.lastLoginAt ?? null).toBeNull();
+		});
+
+		it("copies memberships with new ids", async () => {
+			const ms = await payload.find({
+				collection: "memberships",
+				depth: 0,
+				limit: 0,
+			});
+			const rows = ms.docs.map((d) => `${d.user}:${d.team}:${d.role}`).sort();
+			expect(rows).toEqual(
+				[
+					`${ids.alice}:${ids.personal}:owner`,
+					`${ids.alice}:${ids.shared}:owner`,
+					`${ids.bob}:${ids.shared}:member`,
+				].sort(),
+			);
+		});
+
+		it("copies api keys with every field", async () => {
+			const k = await payload.findByID({
+				collection: "api-keys",
+				id: ids.key,
+				depth: 0,
+			});
+			expect(k).toMatchObject({
+				name: "ci",
+				team: ids.shared,
+				kind: "team",
+				secretHash: hash,
+				prefix: "sbx_key_abc",
+				last4: "wxyz",
+				scopes: ["sandboxes:read", "sandboxes:write"],
+				createdBy: ids.alice,
+				createdVia: "cli",
+				revokedBy: ids.alice,
+				revokedByKey: ids.key,
+			});
+			expect(k.sandbox ?? null).toBeNull();
+			expect(new Date(k.expiresAt).toISOString()).toBe(expires.toISOString());
+			expect(new Date(k.revokedAt).toISOString()).toBe(revoked.toISOString());
+			expect(new Date(k.rotatedAt).toISOString()).toBe(rotated.toISOString());
+			expect(new Date(k.lastUsedAt).toISOString()).toBe(created.toISOString());
+		});
+
+		it("copies ssh keys", async () => {
+			const s = await payload.findByID({
+				collection: "ssh-keys",
+				id: ids.ssh,
+				depth: 0,
+			});
+			expect(s).toMatchObject({
+				user: ids.alice,
+				name: "laptop",
+				publicKey: "ssh-ed25519 AAAA test",
+				fingerprint: "SHA256:abc",
+				type: "ssh-ed25519",
+			});
+		});
+
+		it("leaves the identity schema in place", async () => {
+			const r = await t.pool.query(
+				"SELECT count(*)::int AS n FROM identity.users",
+			);
+			expect(r.rows[0].n).toBe(2);
+		});
+	},
+);
+
+describe.skipIf(skipPg())("src/migrate.ts", () => {
+	let t: TestDatabase;
+	const script = fileURLToPath(new URL("../src/migrate.ts", import.meta.url));
+	const run = (env: Record<string, string>) =>
+		new Promise<{ code: number | null; out: string }>((resolve) => {
+			execFile(
+				process.execPath,
+				[script],
+				{ env: { PATH: process.env.PATH ?? "", ...env } },
+				(err, stdout, stderr) => {
+					resolve({
+						code: err ? ((err as { code?: number }).code ?? 1) : 0,
+						out: `${stdout}${stderr}`,
+					});
+				},
+			);
+		});
+
+	beforeAll(async () => {
+		t = await createTestDatabase({ migrated: false, max: 2 });
+	});
+	afterAll(async () => {
+		await t?.drop();
+	});
+
+	it("migrates the database of DATABASE_URL and exits 0, twice", async () => {
+		const env = { DATABASE_URL: t.url, PAYLOAD_SECRET: "cli-secret" };
+		const first = await run(env);
+		expect(first.out).toContain("applied payload migrations");
+		expect(first.code).toBe(0);
+		const r = await t.pool.query(
+			"SELECT name FROM payload.payload_migrations ORDER BY name",
+		);
+		expect(r.rows.map((x) => x.name)).toEqual(
+			payloadMigrations.map((m) => m.name),
+		);
+		const second = await run(env);
+		expect(second.out).toContain("up to date");
+		expect(second.code).toBe(0);
+	});
+
+	it("exits 1 without PAYLOAD_SECRET", async () => {
+		const r = await run({ DATABASE_URL: t.url });
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("PAYLOAD_SECRET");
+	});
+});

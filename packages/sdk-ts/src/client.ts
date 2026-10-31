@@ -95,6 +95,13 @@ export interface SbxOptions {
 	baseUrl?: string;
 	/** Team (`team_...`) sent as Sbx-Team; else SBX_TEAM, else the sbx profile. */
 	team?: string;
+	/**
+	 * Browser session of the dashboard (S8 §9.1): the cookie of the page's
+	 * own origin is the credential. No Authorization header is sent and no
+	 * credential chain is used; `baseUrl` may be a path (`/api`). The PTY
+	 * WebSocket gets the team as `?team=` (browsers set no headers there).
+	 */
+	session?: boolean;
 	apiKey?: string;
 	accessToken?: string;
 	/**
@@ -221,10 +228,12 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 		async onRequest({ request, schemaPath }) {
 			const creds = await credentials();
 			const h = request.headers;
-			h.set(
-				"Authorization",
-				`Bearer ${await creds.getToken(false, request.signal)}`,
-			);
+			if (!creds.session) {
+				h.set(
+					"Authorization",
+					`Bearer ${await creds.getToken(false, request.signal)}`,
+				);
+			}
 			if (creds.team !== undefined && !h.has("Sbx-Team")) {
 				h.set("Sbx-Team", creds.team);
 			}
@@ -314,7 +323,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 					try {
 						return await send();
 					} catch (err) {
-						if (refreshed || !isTokenExpired(err)) throw err;
+						if (refreshed || creds.session || !isTokenExpired(err)) throw err;
 						refreshed = true;
 						const token = await creds.getToken(true, signal);
 						request.headers.set("Authorization", `Bearer ${token}`);
@@ -431,6 +440,9 @@ function isJsonBody(body: unknown): boolean {
 	return proto === Object.prototype || proto === null || Array.isArray(body);
 }
 
+/** Statuses whose Response must have a null body (Fetch standard). */
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
 /** The response with a body that fails after `ms` without data. */
 function withBodyIdleTimeout(
 	res: Response,
@@ -441,6 +453,16 @@ function withBodyIdleTimeout(
 ): Response {
 	const source = res.body;
 	if (source === null) return res;
+	// A null-body status (204, 205, 304) cannot be rebuilt around a body;
+	// browsers give such answers an empty body stream anyway.
+	if (NULL_BODY_STATUSES.has(res.status)) {
+		source.cancel().catch(() => {});
+		return new Response(null, {
+			status: res.status,
+			statusText: res.statusText,
+			headers: res.headers,
+		});
+	}
 	const reader = source.getReader();
 	// Captured by the closures below: the requests live as long as the body.
 	const keep = { requests };

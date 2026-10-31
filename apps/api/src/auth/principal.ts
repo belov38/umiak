@@ -222,8 +222,11 @@ export interface SessionResolverOptions {
 /** Cached sessions before expired ones are pruned. */
 const MAX_SESSIONS = 10_000;
 
-/** Collections whose changes do not affect a SessionIdentity. */
-const NOT_SESSION = new Set(["api-keys", "ssh-keys"]);
+/**
+ * Collections whose changes do not affect a SessionIdentity. `sandboxes` is
+ * not an identity collection: a sandbox block for the stream registry.
+ */
+const NOT_SESSION = new Set(["api-keys", "ssh-keys", "sandboxes"]);
 
 /**
  * `IdentityStore.resolveSession` with a 30 s cache keyed by the claims

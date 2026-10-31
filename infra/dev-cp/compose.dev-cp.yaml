@@ -4,7 +4,8 @@
 # deploy/compose (the directory of the first compose file).
 #
 # Tailscale Serve terminates TLS on the CT and forwards to loopback ports (names.sh):
-#   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/*, /sbx-auth/*; web in S8)
+#   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/* and /sbx-auth/* -> api,
+#                                 the rest -> web, S8)
 #   https://<TS name>:8443/v1  -> 127.0.0.1:8080 api public listener (path kept)
 #   https://<TS name>:8443/mcp -> 127.0.0.1:8090 MCP server (S11; path kept, plus the protected
 #                                 resource metadata /.well-known/oauth-protected-resource/mcp)
@@ -25,14 +26,13 @@ services:
     volumes:
       - ./secrets/devcp/sbx.yaml:/etc/sbx/sbx.yaml:ro
 
+  # The worker reads templates, sizes and quotas from Payload (S8); sbx.yaml is only for migrate.
   worker:
     environment:
       # The tunnel URL that the worker writes into smbios family (S5 §14) of every new machine.
       SBX_TUNNEL_URL: ${SBX_TUNNEL_URL:?set by deploy.sh}
       # The port domain that the worker passes to agents in Claim (port_domain).
       SBX_PORT_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
-    volumes:
-      - ./secrets/devcp/sbx.yaml:/etc/sbx/sbx.yaml:ro
 
   # The gateway certificates: deploy.sh puts the dev CA (infra/dev-cp/dev-ca.sh) into
   # secrets/gateway, dev-secrets issues the tunnel and *.sbx. certificates with it.
@@ -109,10 +109,22 @@ services:
     environment:
       SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}
       OAUTH2_PROXY_REDIRECT_URL: ${SBX_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
-      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SBX_DEVCP_TS_NAME:?set by deploy.sh}:8443
+      # The app (post-login) and Keycloak (web's sign-out goes on to its end-session page).
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SBX_DEVCP_TS_NAME:?set by deploy.sh}:8443,${SBX_DEVCP_TS_NAME:?set by deploy.sh}:10000
       OAUTH2_PROXY_COOKIE_NAME: __Host-sbx_session
       OAUTH2_PROXY_COOKIE_SECURE: "true"
       OAUTH2_PROXY_REVERSE_PROXY: "true"
+
+  # S8: the dashboard and the Payload admin behind oauth2-proxy (`/` of :8443), not published
+  # (base: only on the web-internal network). Previews (sslip.io) are framed from the dashboard
+  # (ts.net), hence frame-src *.<port domain> and the gateway's cross-site port cookie above.
+  # Sign-out: oauth2-proxy, then Keycloak's end-session page, back to the app origin (names.sh).
+  web:
+    environment:
+      SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:?set by deploy.sh}
+      SBX_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
+      SBX_API_PUBLIC_URL: ${SBX_API_PUBLIC_URL:?set by deploy.sh}
+      SBX_LOGOUT_URL: ${SBX_LOGOUT_URL:?set by deploy.sh}
 
   # S11: the remote MCP server behind Serve (:8443/mcp). The public URL is what MCP clients use
   # and what the protected resource metadata names. Serve may pass the Host header either as the

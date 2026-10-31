@@ -69,28 +69,71 @@ const int = (dflt: number, min: number, max: number) =>
 			.default(dflt),
 	);
 
-const workerSchema = z.object({
-	DATABASE_URL: databaseUrl,
-	SBX_CONFIG_FILE: required("path of the YAML config"),
-	SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
-	SBX_SECRETS_DIR: required("directory with the PVE and sbx-node secrets"),
-	SBX_GATEWAY_SERVICE_TOKEN_FILE: optional,
-	SBX_RECONCILE_DRY_RUN: bool(true),
-	SBX_HTTP_PORT: int(9090, 0, 65535),
-	SBX_MIGRATE_ON_START: bool(true),
-	SBX_LOG_LEVEL: z.preprocess(
-		unsetEmpty,
-		z
-			.enum(LOG_LEVELS, {
-				error: () => `must be one of ${LOG_LEVELS.join(", ")}`,
-			})
-			.default("info"),
-	),
-	SBX_DB_POOL_MAX: int(30, 2, 1000),
-	SBX_IDP_SYNC_INTERVAL: int(300, 10, 86_400),
-	SBX_PORT_DOMAIN: optional,
-	SBX_SSH_USER_CA_KEYS_FILE: optional,
-});
+const logLevel = z.preprocess(
+	unsetEmpty,
+	z
+		.enum(LOG_LEVELS, {
+			error: () => `must be one of ${LOG_LEVELS.join(", ")}`,
+		})
+		.default("info"),
+);
+
+const optionalHttpUrl = z.preprocess(
+	unsetEmpty,
+	z
+		.string()
+		.refine(
+			(v) => {
+				try {
+					const u = new URL(v);
+					return u.protocol === "http:" || u.protocol === "https:";
+				} catch {
+					return false;
+				}
+			},
+			{ message: "must be an http:// or https:// URL" },
+		)
+		.optional(),
+);
+
+const workerSchema = z
+	.object({
+		DATABASE_URL: databaseUrl,
+		// Templates, sizes, quotas and defaults come from Payload (S8 plan
+		// decision 5); SBX_CONFIG_FILE is read only by `sbx-admin bootstrap`.
+		PAYLOAD_SECRET: required("secret of the Payload config, as web"),
+		SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
+		SBX_SECRETS_DIR: required("directory with the PVE and sbx-node secrets"),
+		SBX_GATEWAY_SERVICE_TOKEN_FILE: optional,
+		SBX_RECONCILE_DRY_RUN: bool(true),
+		SBX_HTTP_PORT: int(9090, 0, 65535),
+		SBX_MIGRATE_ON_START: bool(true),
+		SBX_LOG_LEVEL: logLevel,
+		SBX_DB_POOL_MAX: int(30, 2, 1000),
+		SBX_IDP_SYNC_INTERVAL: int(300, 10, 86_400),
+		// ctl-idp-sync (S8 §20.1, plan decision 9): on when the URL is set.
+		SBX_IDP_SYNC_KEYCLOAK_URL: optionalHttpUrl,
+		SBX_IDP_SYNC_REALM: z.preprocess(unsetEmpty, z.string().default("sbx")),
+		SBX_IDP_SYNC_CLIENT_ID: z.preprocess(
+			unsetEmpty,
+			z.string().default("sbx-worker"),
+		),
+		SBX_IDP_SYNC_CLIENT_SECRET_FILE: optional,
+		SBX_PORT_DOMAIN: optional,
+		SBX_SSH_USER_CA_KEYS_FILE: optional,
+	})
+	.superRefine((e, ctx) => {
+		if (
+			e.SBX_IDP_SYNC_KEYCLOAK_URL !== undefined &&
+			e.SBX_IDP_SYNC_CLIENT_SECRET_FILE === undefined
+		) {
+			ctx.addIssue({
+				code: "custom",
+				path: ["SBX_IDP_SYNC_CLIENT_SECRET_FILE"],
+				message: "required with SBX_IDP_SYNC_KEYCLOAK_URL (client secret file)",
+			});
+		}
+	});
 
 const optionalHttpsUrl = z.preprocess(
 	unsetEmpty,
@@ -116,12 +159,13 @@ const adminSchema = z.object({
 	SBX_SECRETS_DIR: optional,
 	SBX_PVE_URL: optionalHttpsUrl,
 	SBX_PVE_TLS_NAME: optional,
-	SBX_LOG_LEVEL: workerSchema.shape.SBX_LOG_LEVEL,
+	SBX_LOG_LEVEL: logLevel,
 });
 
 export interface WorkerEnv {
 	databaseUrl: string;
-	configFile: string;
+	/** PAYLOAD_SECRET: the Payload instance of the config reader. */
+	payloadSecret: string;
 	dataKeysFile: string;
 	secretsDir: string;
 	gatewayServiceTokenFile: string | undefined;
@@ -131,10 +175,24 @@ export interface WorkerEnv {
 	logLevel: (typeof LOG_LEVELS)[number];
 	dbPoolMax: number;
 	idpSyncIntervalMs: number;
+	/** Keycloak of ctl-idp-sync; undefined = the controller is off. */
+	idpSync: IdpSyncEnv | undefined;
 	/** Domain of the published ports (`<port>-<sandbox>.<domain>`), sent on every Claim. */
 	portDomain: string | undefined;
 	/** File with the SSH user CA public keys (one per line), sent on every Claim. */
 	sshUserCaKeysFile: string | undefined;
+}
+
+/** Keycloak Admin API access of ctl-idp-sync (S8 §20.1). */
+export interface IdpSyncEnv {
+	/** SBX_IDP_SYNC_KEYCLOAK_URL: internal Keycloak address, without `/realms`. */
+	keycloakUrl: string;
+	/** SBX_IDP_SYNC_REALM (default `sbx`). */
+	realm: string;
+	/** SBX_IDP_SYNC_CLIENT_ID (default `sbx-worker`). */
+	clientId: string;
+	/** SBX_IDP_SYNC_CLIENT_SECRET_FILE: file with the client secret. */
+	clientSecretFile: string;
 }
 
 /**
@@ -167,7 +225,7 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 	const e = r.data;
 	return {
 		databaseUrl: e.DATABASE_URL,
-		configFile: e.SBX_CONFIG_FILE,
+		payloadSecret: e.PAYLOAD_SECRET,
 		dataKeysFile: e.SBX_DATA_KEYS_FILE,
 		secretsDir: e.SBX_SECRETS_DIR,
 		gatewayServiceTokenFile: e.SBX_GATEWAY_SERVICE_TOKEN_FILE,
@@ -177,6 +235,16 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 		logLevel: e.SBX_LOG_LEVEL,
 		dbPoolMax: e.SBX_DB_POOL_MAX,
 		idpSyncIntervalMs: e.SBX_IDP_SYNC_INTERVAL * 1000,
+		idpSync:
+			e.SBX_IDP_SYNC_KEYCLOAK_URL === undefined ||
+			e.SBX_IDP_SYNC_CLIENT_SECRET_FILE === undefined
+				? undefined
+				: {
+						keycloakUrl: e.SBX_IDP_SYNC_KEYCLOAK_URL,
+						realm: e.SBX_IDP_SYNC_REALM,
+						clientId: e.SBX_IDP_SYNC_CLIENT_ID,
+						clientSecretFile: e.SBX_IDP_SYNC_CLIENT_SECRET_FILE,
+					},
 		portDomain: e.SBX_PORT_DOMAIN,
 		sshUserCaKeysFile: e.SBX_SSH_USER_CA_KEYS_FILE,
 	};

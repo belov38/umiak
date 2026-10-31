@@ -37,3 +37,8 @@ bench-results/
 
 # Template build step logs
 build-logs/
+
+# web E2E (Playwright) output and run state
+/apps/web/test-results/
+/apps/web/playwright-report/
+/apps/web/e2e/.state/

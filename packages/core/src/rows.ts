@@ -17,6 +17,10 @@ export const OPERATION_KINDS = [
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
+/** Why an operator blocked a sandbox or a port (S8 C3, S4 §6.1). */
+export const BLOCK_REASONS = ["operator", "abuse"] as const;
+export type BlockReason = (typeof BLOCK_REASONS)[number];
+
 export type SandboxOrigin = "template" | "snapshot" | "fork";
 export type StopReason =
 	| "user"
@@ -96,6 +100,9 @@ export interface Sandbox {
 	deletedAt: Date | null;
 	stateChangedAt: Date;
 	version: number;
+	/** Blocked by an operator (S8 C3): only reads, stop and delete for the team. */
+	blocked: boolean;
+	blockReason: BlockReason | null;
 	/** The pending/running operation, including internal `reprovision`. */
 	activeOperation: Operation | null;
 }
@@ -240,7 +247,7 @@ export interface HostedPort {
 	appProtocol: PortAppProtocol;
 	/** Blocked by an operator (S8); the sandbox block is separate (`RouteTarget.blocked`). */
 	blocked: boolean;
-	blockReason: string | null;
+	blockReason: BlockReason | null;
 }
 
 export interface Page<T> {
@@ -328,6 +335,8 @@ export function sandboxFromRow(
 		deletedAt: r.deleted_at,
 		stateChangedAt: r.state_changed_at,
 		version: r.version,
+		blocked: r.blocked ?? false,
+		blockReason: r.block_reason ?? null,
 		activeOperation,
 	};
 }

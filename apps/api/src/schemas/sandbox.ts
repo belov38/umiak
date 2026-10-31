@@ -1,6 +1,6 @@
 // Sandbox resource and the bodies of the sandbox routes (S7 §8.1, §8.2).
 import { z } from "@hono/zod-openapi";
-import { SANDBOX_STATES } from "@sbx/core";
+import { BLOCK_NOTE_MAX_CHARS, BLOCK_REASONS, SANDBOX_STATES } from "@sbx/core";
 import { extensibleEnum } from "../openapi/registry.ts";
 import {
 	EnvPatchFields,
@@ -22,6 +22,11 @@ export const SandboxStateSchema = extensibleEnum(SANDBOX_STATES).openapi(
 			"`ready` means usable; creating, stopping, stopped, starting, error, deleting, deleted",
 	},
 );
+
+const REASONS = BLOCK_REASONS as readonly ["operator", "abuse"];
+
+/** Why a platform operator blocked a sandbox or a port; inline (not a component). */
+export const BlockReasonSchema = extensibleEnum(REASONS);
 
 export const SandboxSchema = z
 	.object({
@@ -113,6 +118,14 @@ export const SandboxSchema = z
 				description: "Environment the sandbox was created from",
 			}),
 		excludeOwnerSecrets: z.boolean(),
+		blocked: z.boolean().openapi({
+			description:
+				"A platform operator blocked the sandbox: its ports are refused and only reads, " +
+				"stop and delete are allowed (403 `forbidden`, details.reason `sandbox_blocked`)",
+		}),
+		blockReason: BlockReasonSchema.nullable().openapi({
+			description: "Why it is blocked; null unless blocked",
+		}),
 		createdAt: Timestamp,
 		readyAt: NullableTimestamp,
 		stoppedAt: NullableTimestamp,
@@ -285,6 +298,27 @@ export const ExtendSandboxRequest = z
 	})
 	.openapi("ExtendSandboxRequest");
 
+// --- operator blocks (S8 C3) ---
+
+const BlockNote = z
+	.string()
+	.max(BLOCK_NOTE_MAX_CHARS)
+	.optional()
+	.openapi({
+		description: `Up to ${BLOCK_NOTE_MAX_CHARS} characters for the record (the sandbox's events)`,
+	});
+
+export const BlockRequest = z
+	.strictObject({
+		reason: z.enum(REASONS),
+		note: BlockNote,
+	})
+	.openapi("BlockRequest");
+
+export const UnblockRequest = z
+	.strictObject({ note: BlockNote })
+	.openapi("UnblockRequest");
+
 // --- queries ---
 
 export const ListSandboxesQuery = z.object({
@@ -303,6 +337,18 @@ export const ListSandboxesQuery = z.object({
 	template: z.string().optional(),
 	q: z.string().optional().openapi({
 		description: "Prefix of the name or slug, case-insensitive",
+	}),
+	allTeams: z
+		.enum(["true", "false"])
+		.optional()
+		.openapi({
+			description:
+				"`true`: sandboxes of every team. Only a platform operator in the dashboard " +
+				"(browser session); anyone else is 403 `forbidden` (details.reason `operator_required`)",
+		}),
+	teamId: z.string().optional().openapi({
+		description: "With allTeams=true: only this team (`team_...`)",
+		example: "team_01jbx2v7d3m6c8q9w0e4r5t6y7",
 	}),
 	...PageQuery,
 });

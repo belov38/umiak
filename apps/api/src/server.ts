@@ -5,13 +5,15 @@
 //   internal SBX_API_INTERNAL_PORT (8082)  gateway, service tokens
 //   ops      SBX_API_METRICS_PORT  (9090)  /healthz, /readyz, /metrics
 // `close()` is the graceful stop of shutdown.ts (at most 10 s).
+// Identities and config come from Payload (S8 plan decision 5): the Local
+// API of `@sbx/payload` with its own pg pool; its migrations are applied by
+// `node packages/payload/src/migrate.ts` (compose: web-migrate), not here.
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAdaptorServer } from "@hono/node-server";
 import { AgentClient, PgRegistry } from "@sbx/agent-client";
-import { PgEnvironmentStore, PgIdentityStore, seedIdentity } from "@sbx/auth";
-import { StaticConfigReader } from "@sbx/config";
+import { PgEnvironmentStore } from "@sbx/auth";
 import {
 	ensureQueues,
 	KeyRing,
@@ -38,7 +40,7 @@ import { SessionResolver } from "./auth/principal.ts";
 import { RateLimits } from "./auth/rate-limit.ts";
 import { DEFAULT_COMMAND_TIMINGS } from "./commands/attach.ts";
 import { DEFAULT_PTY_TIMINGS } from "./commands/pty-socket.ts";
-import { StreamRegistry } from "./commands/registry.ts";
+import { blockedSandboxesOf, StreamRegistry } from "./commands/registry.ts";
 import type { ApiDeps } from "./deps.ts";
 import { createApiLogger } from "./http/logger.ts";
 import { ApiMetrics } from "./http/metrics.ts";
@@ -48,6 +50,12 @@ import { ApiLifecycle, type Listener, shutdown } from "./shutdown.ts";
 
 /** Postgres connections of the request pool. */
 const DB_POOL_MAX = 20;
+
+/**
+ * Connections of the Payload adapter pool (identity reads on key cache
+ * misses and session resolution, config reads; the adapter keeps one).
+ */
+const PAYLOAD_POOL_MAX = 10;
 
 /** How long an agent call waits for the machine's tunnel (S7 §9.7). */
 const AGENT_WAIT_MS = 30_000;
@@ -64,7 +72,7 @@ const KEEP_ALIVE_TIMEOUT_MS = 65_000;
 
 export interface ProductionDeps {
 	deps: ApiDeps;
-	/** Releases the pools, the LISTEN connections and pg-boss. */
+	/** Releases the pools (Payload's too), the LISTEN connections and pg-boss. */
 	dispose(): Promise<void>;
 }
 
@@ -81,14 +89,14 @@ function readToken(file: string): string {
 /**
  * The real dependencies: files are read first (a broken one fails the start
  * before anything connects), then Postgres, LISTEN sbx_identity (shared with
- * the service's waits), the identity file, pg-boss (send only) and the agent
+ * the service's waits), Payload with the config reader (LISTEN sbx_config),
+ * the identity file (loaded into Payload), pg-boss (send only) and the agent
  * registry of the gateway tunnels.
  */
 export async function buildDeps(
 	settings: Settings,
 	log: Logger,
 ): Promise<ProductionDeps> {
-	const config = StaticConfigReader.fromFile(settings.configFile);
 	const keys = KeyRing.fromFile(settings.dataKeysFile);
 	const serviceTokens = loadServiceTokens(settings.serviceTokensFile);
 	const hostKeys = readHostKeys(settings.sshHostKeysFile);
@@ -127,8 +135,34 @@ export async function buildDeps(
 		cleanups.push(() => events.close());
 		events.start();
 
+		// Loaded here, not at module load: tests import this module through
+		// the package index without needing Payload.
+		const sbx = await import("@sbx/payload");
+		const databaseUrl = settings.databaseUrl;
+		const payload = await sbx.getSbxPayload({
+			databaseUrl,
+			secret: settings.payloadSecret,
+			operatorGroups: settings.operatorGroups,
+			appOrigin: settings.appOrigin,
+			poolMax: PAYLOAD_POOL_MAX,
+		});
+		cleanups.push(() => sbx.closeSbxPayload(databaseUrl));
+		const config = new sbx.PayloadConfigReader({
+			payload,
+			listen: { databaseUrl },
+			onListenError: (err) =>
+				log.warn({ err: errText(err) }, "LISTEN sbx_config: connection lost"),
+		});
+		await config.start();
+		cleanups.push(() => config.close());
+
 		if (identityYaml !== null) {
-			const r = await seedIdentity(pool, identityYaml);
+			await sbx.assertPayloadMigrated(payload).catch((e: unknown) => {
+				throw new Error(
+					`SBX_IDENTITY_FILE cannot be loaded: ${errText(e)} (run packages/payload/src/migrate.ts)`,
+				);
+			});
+			const r = await sbx.seedPayloadIdentity(payload, identityYaml);
 			log.info({ ...r }, "identity file loaded");
 		}
 
@@ -171,14 +205,15 @@ export async function buildDeps(
 			cleanups.push(() => client.close());
 		}
 
-		const identity = new PgIdentityStore({
-			pool,
+		const identity = new sbx.PayloadIdentityStore({
+			payload,
 			operatorGroups: settings.operatorGroups,
 		});
 		const streams = new StreamRegistry({
 			identity,
 			events,
 			maxPerPrincipal: settings.maxStreams,
+			blockedSandboxes: blockedSandboxesOf(pool),
 			log,
 		});
 		cleanups.push(async () => streams.close());
@@ -214,6 +249,7 @@ export async function buildDeps(
 			commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 			ptyTimings: { ...DEFAULT_PTY_TIMINGS },
 			lifecycle: new ApiLifecycle(),
+			payloadReady: () => sbx.assertPayloadMigrated(payload),
 		};
 		return { deps, dispose };
 	} catch (e) {

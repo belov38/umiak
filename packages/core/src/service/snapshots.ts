@@ -78,7 +78,9 @@ export async function saveSnapshot(
 ): Promise<SaveSnapshotResult> {
 	validateSnapshotName(name);
 	// The sandbox is part of the idempotency hash (S7 §20.2 item 11).
-	const sourceId = (await findSandboxRow(deps.pool, p, idOrSlug)).id;
+	const sourceId = (
+		await findSandboxRow(deps.pool, p, idOrSlug, { write: true })
+	).id;
 	const snapshotId = uuidv7();
 	const operationId = uuidv7();
 
@@ -102,7 +104,10 @@ export async function saveSnapshot(
 			}
 		}
 
-		const src = await findSandboxRow(tx.client, p, sourceId, { lock: true });
+		const src = await findSandboxRow(tx.client, p, sourceId, {
+			lock: true,
+			write: true,
+		});
 		const active = await activeOperation(tx.client, src.id);
 		if (active !== null) throw operationInProgress(active);
 		sandboxNext(src.state, "save_snapshot");

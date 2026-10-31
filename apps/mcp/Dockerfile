@@ -18,6 +18,7 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/config/package.json packages/config/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
+COPY packages/payload/package.json packages/payload/
 COPY packages/proto/package.json packages/proto/
 COPY packages/pve/package.json packages/pve/
 COPY packages/sdk-py/package.json packages/sdk-py/
@@ -27,6 +28,7 @@ COPY apps/bench/package.json apps/bench/
 COPY apps/cli/package.json apps/cli/
 COPY apps/mcp/package.json apps/mcp/
 COPY apps/template-builder/package.json apps/template-builder/
+COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 
 # ---- runtime: production dependencies of @sbx/mcp and @sbx/sdk only

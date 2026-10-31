@@ -29,7 +29,7 @@ import {
 import { type Profile, readConfig, writeConfig } from "../config.ts";
 import type { Context } from "../context.ts";
 import { CliError, usageError } from "../exit-codes.ts";
-import { getJson } from "../http.ts";
+import { deadline, getJson } from "../http.ts";
 import { readAll } from "../io.ts";
 import type { Runner } from "../program.ts";
 import { CLI_VERSION } from "./version.ts";
@@ -193,17 +193,20 @@ async function login(
 		oldCred?.kind === "oidc" &&
 		!(cred.kind === "oidc" && cred.refreshToken === oldCred.refreshToken)
 	) {
+		const limit = deadline(10_000);
 		await revokeRefreshToken({
 			issuer: oldCred.issuer,
 			clientId: oldCred.clientId,
 			refreshToken: oldCred.refreshToken,
 			fetch: ctx.fetch,
-			signal: AbortSignal.timeout(10_000),
-		}).catch((err: unknown) => {
-			ctx.out.warn(
-				`could not revoke the previous refresh token at Keycloak: ${(err as Error).message}`,
-			);
-		});
+			signal: limit.signal,
+		})
+			.finally(() => limit.clear())
+			.catch((err: unknown) => {
+				ctx.out.warn(
+					`could not revoke the previous refresh token at Keycloak: ${(err as Error).message}`,
+				);
+			});
 	}
 	if (store.kind === "file") {
 		ctx.out.warn(

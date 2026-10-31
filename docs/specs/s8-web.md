@@ -142,7 +142,7 @@ S8 — человеческое лицо платформы. Операторы 
 
 ### 6.1 Модель
 
-- **Личная команда.** Создаётся при первом входе: `name` = имя пользователя, `personal: true`, единственный участник — пользователь (`owner`). Её нельзя удалить, переименовать можно; приглашать в неё других нельзя [решение S8]: «личная» должна оставаться личной, для совместной работы есть общие команды.
+- **Личная команда.** Создаётся при первом входе: `name` = имя пользователя (в реализации — `<email>'s team`, §21.5), `personal: true`, единственный участник — пользователь (`owner`). Её нельзя удалить, переименовать можно; приглашать в неё других нельзя [решение S8]: «личная» должна оставаться личной, для совместной работы есть общие команды.
 - **Общая команда.** Создаёт любой пользователь в `/app` (создатель — `owner`). Ограничение — не больше 3 общих команд, где пользователь `owner` [решение S8; значение `maxOwnedTeamsPerUser` в `PlatformDefaults`, оператор может поменять]. Новая общая команда получает квоту `newSharedTeamQuota` из `PlatformDefaults` (по умолчанию равна `defaultQuota`; оператор может поставить нули, тогда команда работает только после того, как оператор выдаст квоту).
 - **Квоты — справедливость, а не ёмкость** [решение S8 по ревью]: от превышения RAM ноды защищает admission S6 (§8.2, `out_of_capacity`), а не квоты. Пользователь с несколькими командами может занять больше одной квоты; это осознанный компромисс внутренней платформы, рычаги — `maxOwnedTeamsPerUser`, `newSharedTeamQuota` и квоты отдельных команд.
 - **Команда по умолчанию** (`users.defaultTeam`) — та, что используется без `Sbx-Team` (S7 §7.4); по умолчанию личная, пользователь меняет её в настройках. Если пользователь вышел из команды по умолчанию, она снова становится личной.
@@ -454,7 +454,7 @@ unique (team_id) where is_default and deleted_at is null
 - Шифрование и кольцо ключей — как `sandbox_secrets` (S6 §13.1), AAD = `environment:<id>:v<keyVersion>`; ротация ключа перешифровывает и эти строки (тот же контроллер cleanup).
 - Сервис — `EnvironmentService` в `packages/core` (`list`, `get`, `create`, `patch`, `delete`, `resolveForCreate(teamId, name|undefined|null)`); `SandboxService.create` вызывает `resolveForCreate` и сливает наборы до шифрования `sandbox_secrets`.
 - Значения не попадают в `operations.request`, `idempotency_keys.response`, логи и метрики (S6 §13.1). Hash идемпотентности create считается от тела запроса (с именем environment, без её значений).
-- В `sandboxes` добавляются `environment_id uuid null`, `environment_revision int null`, `exclude_owner_secrets bool not null default false`.
+- В `sandboxes` добавляются `environment_id uuid null`, `environment_revision int null`, `exclude_owner_secrets bool not null default false` (в MVP не добавлены, §21.1, §21.7).
 
 ## 11. Сроки распространения изменений
 
@@ -476,8 +476,8 @@ unique (team_id) where is_default and deleted_at is null
 ## 12. Миграции схемы `payload`
 
 - Миграции Payload (`payload migrate:create`) лежат в `packages/payload/src/migrations` и коммитятся; `push: false` везде, в dev тоже [решение S8]: схема в dev и в проде одинаковая, а drift ловит CI (`payload migrate:create --skip-empty` без изменений → пусто).
-- Первая миграция создаёт схему `payload`, таблицы, сид `platform-defaults`, сид шаблона `linux` и размера `2gb` (PoC, S6 §9.1), цель пула `linux/2gb = 1`.
-- Миграции применяет **один** Kubernetes Job (`web-migrate`, образ `web`, команда `payload migrate`) до выката `web`, `api`, `worker` (Helm hook или шаг пайплайна, S12). Адаптер Payload не берёт advisory-блокировку, поэтому миграции при старте подов не выполняются (`prodMigrations` не используются). Порядок с миграциями runtime (`db/migrations`, раннер S6) любой: схемы не ссылаются друг на друга внешними ключами.
+- Первая миграция создаёт схему `payload`, таблицы, сид `platform-defaults`, сид шаблона `linux` и размера `2gb` (PoC, S6 §9.1), цель пула `linux/2gb = 1` (не засеяна, §21.3).
+- Миграции применяет **один** Kubernetes Job (`web-migrate`, образ `web`, команда `payload migrate`; в реализации — свой раннер, §21.3) до выката `web`, `api`, `worker` (Helm hook или шаг пайплайна, S12). Адаптер Payload не берёт advisory-блокировку, поэтому миграции при старте подов не выполняются (`prodMigrations` не используются). Порядок с миграциями runtime (`db/migrations`, раннер S6) любой: схемы не ссылаются друг на друга внешними ключами.
 - **Expand/contract** [решение S8 по ревью]: миграция не ломает предыдущую версию кода (новые столбцы — nullable или с default; удаление и переименование — отдельным релизом после того, как старый код ушёл). Поэтому при rolling deploy старые поды продолжают работать на новой схеме.
 - `api`, `worker` и `web` при старте и в readiness проверяют, что **все миграции, известные их коду, применены** (более новые, неизвестные коду, допустимы); иначе `/readyz` (`/healthz` у `web`) отвечает ошибкой: новый под не принимает трафик до Job миграций.
 - Роли Postgres [решение S8, настраивает S12]: Job миграций — отдельная роль `sbx_payload_migrate` (DDL в `payload`). `sbx_web` — DML в `payload`, кроме `INSERT` в таблицы `api_keys` и `ssh_keys` (`web` их никогда не создаёт), без доступа к `runtime`, `tunnel`, `pgboss`. `api` и `worker` — DML в `payload` (Local API пишет ключи, SSH-ключи, пользователей).
@@ -668,3 +668,157 @@ Keycloak в кластере рядом с control plane, realm `sbx` и кли�
 
 - Имя группы операторов в Keycloak — S12 / Илья (architecture §13).
 - Квота по умолчанию для команды (PoC: 3 sandbox, 6144 MB, 10 снапшотов) — пересмотреть после замеров S6 и появления второй ноды.
+
+## 21. Реализация MVP (`s8-impl`)
+
+Добавлено после реализации (ветка `s8-impl`, 2026-10-31). Здесь записано, что сделано иначе или подробнее, чем в разделах выше; такие места выше помечены ссылкой на §21. «Решение N» — список «Решения исполнителя» в `docs/plans/s8-web.md`; остальное решено по ходу реализации. Разделы 1–20 остаются историей согласования.
+
+### 21.1 Не вошло в MVP
+
+- **Тёплый пул** (решение Ильи 2026-10-29): цель пула `linux/2gb = 1` из §12 не засеяна, коллекция `pool-targets` пуста (§21.3). Состояния пула и нод в разделе «Оператор» нет (фаза 2, §18).
+- **Метрики `web`** (§19): не сделаны. Есть только `/healthz`.
+- **Список «команды без активного owner»** в `/admin` (§20.1): не сделан. Уведомления о таких командах оператор видит в коллекции `team-notices` в `/admin`.
+- **Колонки `sandboxes.environment_id`, `environment_revision`, `exclude_owner_secrets`** (S6 S1, §10.3) не добавлены (решение 2): остаётся решение 7 S7. В ресурсе Sandbox `environment: null`; `excludeOwnerSecrets: true` в create — `400`. Сервис environments — `PgEnvironmentStore` S7 (`packages/auth`), а не `EnvironmentService` в `core`.
+- **Роли Postgres** (§12): в compose `web`, `web-migrate`, `api`, `worker` ходят под общим суперпользователем `sbx`. Роли — S12.
+- **Python SDK:** для блокировок только сгенерированный клиент (`sandboxes_block`, `ports_block` и т. п.), методов фасада нет.
+- **dev-cp** (`infra/dev-cp`): `web` и маршруты добавлены, но на CT 590 не проверены (список проверок — в `infra/dev-cp/README.md`).
+
+### 21.2 Хранилище личностей и переход с `identity`
+
+- Личности живут в схеме `payload` (решение 1). Первая миграция Payload копирует `identity.teams`, `users`, `memberships`, `api_keys`, `ssh_keys` с теми же UUID, если `identity.users` существует (`ON CONFLICT DO NOTHING`). Членства получают новые id. Пользователь с `idp_subject` получает `lastLoginAt = createdAt` (иначе он стал бы заготовкой). `personalTeam` — личная команда, где пользователь `owner`.
+- Схема `identity` и `PgIdentityStore` остаются: контрактная фаза — отдельным релизом. `PgIdentityStore` — эталон контрактного набора `IdentityStore` (`packages/auth`); `PayloadIdentityStore` проходит тот же набор.
+- Переход со stand-in — однократный, с остановкой `api` и `worker`: старый код пишет в `identity`, а строки, записанные после копии, не переносятся. Перед первым выкатом S8 на существующий том — `docker compose stop api worker`, затем `docker compose up` (`web-migrate` копирует, `api` и `worker` стартуют после него). `infra/dev-cp/deploy.sh` делает это сам, если в Postgres есть `identity.users`, но нет `payload.payload_migrations`. Дальше — expand/contract (§12).
+- `api` и `worker` берут личности и конфиг только из Payload (решение 5). `SBX_CONFIG_FILE` у них убран (лишняя переменная игнорируется), новая обязательная переменная — `PAYLOAD_SECRET` (`api`, `worker`, `web`). `SBX_IDENTITY_FILE` у `api` остаётся: тот же YAML грузится upsert-ом в Payload (`seedPayloadIdentity`). Новые команды, пользователи и ключи из файла вставляются SQL-ом (Local API не создаёт строку с заданным id), NOTIFY хуков создания шлются явно. Изменение роли в файле, которое снимает последнего `owner`, роняет весь seed (`last_owner`); stand-in это пропускал.
+- `/readyz` `api` и `worker`, `/healthz` `web` не готовы, пока не применены все миграции Payload, известные коду (причина `payload_migrations`). `@sbx/payload` в `api` грузится динамическим `import()` в `buildDeps`, чтобы тесты, импортирующие `@sbx/api`, не поднимали Payload.
+- Тесты `api` собирают зависимости через `makeTestDeps` (`PgIdentityStore`, `StaticConfigReader`); `buildDeps` с Payload проверяет отдельный тест (`test/payload-deps.test.ts`).
+
+### 21.3 Payload
+
+- **ID** — `idType: "uuidv7"` (решение 7: адаптер 3.92.1 его поддерживает). Id генерирует приложение: у столбцов `id` нет default в базе, сырые `INSERT` (сиды, копии) передают `uuidv7()` Postgres 18.
+- **Миграции** применяет свой раннер `node packages/payload/src/migrate.ts` (решение 6), а не `payload migrate` и не `payload.db.migrate()`: раннер Payload делает `process.exit(1)` при ошибке, спрашивает про dev-batch и не берёт блокировку. Свой раннер держит `pg_advisory_lock(727003)`, выполняет каждую миграцию в транзакции Payload и бросает исключение при ошибке. Пулу нужно не меньше 3 соединений (адаптер держит одно навсегда). Новые миграции — `node packages/payload/src/create-migration.ts <name>` (обёртка над `payload.db.createMigration`, правит импорты под type stripping). Drift ловит тест `schema.test.ts`. Миграции: `20261030_164255_initial`, `20261030_171459_api_keys_team_nullable`.
+- `CREATE SCHEMA "payload"` в первой миграции дописан вручную (генератор его не пишет).
+- **`pool-targets`** уникальны по (`template`, `size`, `providerId`) с `NULLS NOT DISTINCT`: иначе две цели без провайдера проходили бы. Payload это не выражает: правка вручную в первой миграции, её нет в `.json`-снимке; миграция, которая пересоздаст индекс, должна добавить условие снова.
+- **Цель пула не засеяна** (решение Ильи об отсутствии тёплого пула в MVP; в `sbx.yaml` тоже `pools: []`). Сиды: `platform-defaults`, шаблон `linux`, размер `2gb`.
+- **`api_keys.team` nullable** в базе (`ON DELETE SET NULL`), обязательно только при создании. Payload делает обязательные связи `NOT NULL` с `ON DELETE SET NULL`, поэтому удаление команды с ключами падало бы. При удалении команды ключи отзываются и остаются для аудита без команды; членства и `team-notices` хук `beforeDelete` удаляет.
+- **Правила коллекций** — коды `APIError(code, 400)`: `last_owner`, `personal_team`, `user_not_stub` (удалить можно только заготовку), `size_in_use`, `membership_immutable` (у членства нельзя менять `user` и `team`: замена — удаление и создание, чтобы удаление закрыло SSH-сессии). Массовые `update`/`delete` по `where` для `memberships` и `teams` через access запрещены (`operatorByIdOnly`): Payload выполняет хуки массовой операции параллельно в одной транзакции, и проверка последнего `owner` их не видит. Серверный код тоже меняет членства только по одному id.
+- `api-keys` через `/admin` и REST: можно только один раз поставить `revokedAt` (хук пишет `revokedBy`); остальные поля молча отбрасываются. `secretHash` не читается через access.
+- Многозначные поля (`groups`, `scopes`, `allowedSizes`, `capabilities`, `apiKeys`) — `json`, а не `select hasMany` (лишние таблицы).
+- **Один экземпляр на процесс:** `getSbxPayload` считает ссылки по `DATABASE_URL`, `closeSbxPayload` отпускает одну. Больший `poolMax` следующего вызова поднимает размер пула; остальные опции (секрет, группы операторов, кэш сессий) — от первого вызова. Пулы: `api` — 10, `worker` — 4. `web` берёт экземпляр Payload через `getPayload({config})` (тот же, что у админки).
+
+### 21.4 NOTIFY
+
+- Хелпер `notify(req, channel, payload)` шлёт `pg_notify` в сессии адаптера по `req.transactionID` (решение 3): доставка после коммита, откат не шлёт ничего, ошибка `pg_notify` откатывает запись. Без транзакции — отдельный оператор; закрытый `transactionID` — исключение.
+- `sbx_identity`: `'<collection>:<uuid>'`; у `memberships` — `'memberships:<userUuid>:<teamUuid>'`, а не id членства, как в решении 3: формат S7 §23.10, который разбирает реестр стримов `api` (после удаления строки id членства не сопоставить). Обновления только `lastUsedAt`, `lastLoginAt`, `updatedAt` (у `users` — ещё `groups` и `preferredUsername`: их нет в `SessionIdentity`) ничего не шлют.
+- `sbx_identity 'sandboxes:<uuid>'` — новый payload: блокировка sandbox (§21.8). Кэши сессий `api` и `web` и кэш ключей его не сбрасывают.
+- `sbx_ssh_revoke` из хуков — те же payload-ы, что у триггеров `0302`/`0303` (`user:usr_…`, `member:team_…:usr_…`, `key:key_…`, `team:team_…`). Триггеры остаются на `identity` до контрактной фазы.
+- `sbx_ssh_revoke ''` (пустой payload) шлёт блокировка sandbox: gateway перепроверяет все открытые SSH-сессии через `ssh/authorize`, а он отказывает заблокированной sandbox. Изменений в gateway не нужно.
+- `sbx_config` — у `teams` и на создание (появилась квота), не только на смену `quota` и удаление.
+
+### 21.5 JIT и сессии
+
+- **Имя личной команды** — `<email>'s team` (`personalTeamName` `@sbx/auth`), а не имя пользователя (§6.1): так требует контрактный набор S7.
+- `resolveSession` работает в одной транзакции Payload: строки пользователей под `FOR UPDATE`, записи — через Local API с тем же `req`. Гонка первых входов — повтор при unique violation, до 3 попыток (10 параллельных входов дают одного пользователя и одну личную команду).
+- Смена email при том же `sub`, если email занят заготовкой: членства заготовки переносятся по одному (создание или повышение до `owner`, затем удаление членства заготовки), заготовка удаляется. Неактивная заготовка не сливается — `identity_conflict`.
+- Кроме `groups`, `isOperator`, `lastLoginAt` (§5.3 п. 5) обновляется и `preferredUsername`. `lastLoginAt` пишется не чаще раза в 60 s и не шлёт `sbx_identity`.
+- Провайдер `keycloak-oidc` oauth2-proxy добавляет в `X-Auth-Request-Groups` роли realm и клиентов как `role:<имя>`, а JWT CLI несёт только claim `groups`. Записи `role:` отбрасываются при разборе заголовков (`parseAuthHeaders` в `@sbx/payload`, `parseGroups` в `api`), иначе вход из браузера и из CLI переписывали бы `users.groups` по очереди. Смена только `groups` или `preferredUsername` не шлёт `sbx_identity` (смена `isOperator` шлёт).
+- `isOperator` и `groups` в `/admin` и `/cms-api` не пишутся (field access `create`/`update: false`), только `resolveSession` через Local API. `isOperator` у `req.user` стратегии — из разрешённой сессии, не из повторного чтения документа.
+- `teams.personal` не меняется после создания (`personal_immutable`). В личной команде одно членство: `owner` — её создатель (`createdBy`), первым; любое другое членство, в том числе из `/admin`, — `400 personal_team`.
+- `users.active` `true → false` без причины (оператор в `/admin`) пишет `deactivatedReason: "operator"` и `deactivatedAt`; `false → true` очищает оба. `ctl-idp-sync` передаёт свою причину.
+- Служебная коллекция Payload `payload-locked-documents` (по умолчанию доступна любому вошедшему) — только операторам; `payload-migrations` закрыта; `payload-preferences` Payload сам ограничивает строками пользователя.
+- `parseAuthHeaders`: пустой, повторённый или склеенный через запятую `X-Auth-Request-Email` или `X-Auth-Request-User` считается отсутствующим (`401`).
+- Стратегия Payload — `packages/payload/src/identity/strategy.ts`. Отказ (`subject_required`, `user_disabled`, `identity_conflict`) в REST-ответе — заголовок `X-Sbx-Auth-Denied: <code>`. Свои страницы `web` берут причину из `authenticateHeaders` (`anonymous` / `denied` / `session`).
+- Кэш сессий `web` (решение 8) живёт в `@sbx/payload` и подключается к экземпляру в `onInit`, поэтому стратегия Payload (`/admin`, `/cms-api`) и `/app` используют один кэш. Ключ — sha256 email, `sub`, групп и имён (как `SessionResolver` `api`). Кэшируются только сессии. `LISTEN sbx_identity` сбрасывает кэш на любой payload, кроме `sandboxes:`, `api-keys:`, `ssh-keys:`, и на каждое переподключение. Server actions сбрасывают кэш своего процесса сразу после успеха.
+
+### 21.6 `ConfigReader`
+
+- `PayloadConfigReader` лежит в `@sbx/payload`, а не в `packages/config` (решение 4: иначе цикл зависимостей). Контрактный набор — `runConfigReaderContract` в `@sbx/config/testing`; его проходят `StaticConfigReader` и `PayloadConfigReader`. Различие наборов параметризовано: квота неизвестной команды у `StaticConfigReader` — значения по умолчанию, у Payload — нули (S6 S3).
+- Кэш сбрасывается по `LISTEN sbx_config` на своём соединении (переподключение с растущей задержкой, переподключение тоже сбрасывает кэш); без LISTEN — TTL 5 s. `defaults()` не кэшируется (C7). Пустое поле квоты в `platform-defaults` — квота PoC 3 / 6144 / 10.
+
+### 21.7 Environments
+
+- Таблица — `runtime.environments` (`0400_environments_runtime.sql`, решение 2): у `identity.environments` внешние ключи на `identity.teams/users`, а команды теперь в `payload`. Новая таблица без внешних ключей, строки копируются с теми же id (AAD `environment:<id>:v<n>` остаётся верным). `identity.environments` остаётся до контрактной фазы.
+- `PgEnvironmentStore` больше не отвечает `not_found` на неизвестную команду: команду даёт principal.
+- Строки environments удалённой команды не удаляются: оператор удаляет environments до удаления команды (§6.4, кнопка проверяет).
+- **Перешифровка ключом:** контроллер cleanup перешифровывает и `runtime.environments` (по строке в своей транзакции под `FOR UPDATE`; `revision` и `updated_at` не меняются). Gauge `sbx_secrets_old_key_rows` — сумма по `sandbox_secrets` и `environments`, так что «0 — старый ключ можно убрать» по-прежнему верно.
+- Операторская сессия может писать environments любой команды (§6.2): `requireOwnerUnlessKey` в `api` пускает оператора. Без этого оператор не мог бы очистить команду перед удалением.
+
+### 21.8 Блокировки (C3)
+
+- Миграция `0206_sandbox_block_meta.sql` (диапазон runtime): `blocked_at`, `blocked_by` у `sandboxes` и `hosted_ports`; `CHECK` `block_reason IN ('operator', 'abuse')`. `sbx_routes` на изменение блокировки уже шлют триггеры `0204` (sandboxes) и `0201` (hosted_ports).
+- Ручки — как в C3. `requireOperator` стоит до разбора пути: любой не-оператор получает `403 forbidden` с `details.reason: "operator_required"`, даже для несуществующей sandbox. Оператор находит sandbox в любой команде (id или slug), `Sbx-Team` не нужен. Повтор с той же причиной — no-op, другая причина — обновление и новое событие. Снятие незаблокированной — no-op. Блокировка `deleted` — `409 invalid_state`. События — `blocked`, `unblocked`, `port_blocked`, `port_unblocked` с `{reason, note, by[, port]}`.
+- Запрещённые действия — `403 forbidden` с `details.reason: "sandbox_blocked"` или `"port_blocked"` (`details.port`). Сверх §17.1 запрещены: `input`, `kill`, `signal` команды, PTY connect и resize, `DELETE /ports/{port}` у заблокированной sandbox. Оператор тоже не входит по SSH в заблокированную sandbox (C6). `PATCH` с пустым телом отвечает `200` без изменений (вызова core нет). Переименование не снимает блокировку порта.
+- `routes.lookup`: причина — блокировка порта, затем sandbox, затем `public_disabled` (S4 в §17.2).
+- **Открытые сессии при блокировке sandbox** закрываются сразу: в транзакции блокировки шлются `sbx_ssh_revoke ''` (SSH, §21.4) и `sbx_identity 'sandboxes:<uuid>'`. Реестр стримов `api` закрывает exec-стримы, sync-команды и PTY этой sandbox, открытые не операторами: кадр `error` `forbidden` с `details.reason: "sandbox_blocked"`, PTY — close `4403`. Чтение вывода (`GET …/commands/{id}/stream`) остаётся открытым: чтение разрешено. Блокировка порта и снятие блокировки ничего не закрывают.
+- Проверка блокировки на путях к агенту — без блокировки строки: один вызов, начатый до коммита блокировки, может пройти.
+- Ресурсы: у Sandbox — `blocked`, `blockReason`; `HostedPort.blockReason` — тот же расширяемый enum. `GET /v1/sandboxes?allTeams=true&teamId=team_…`: `teamId` только вместе с `allTeams`. OpenAPI — без ломающих изменений (добавления; `HostedPort.blockReason` сужен до enum в ответе). SDK TS: `sb.block`, `sb.unblock`, `sb.ports.block`, `sb.ports.unblock`, `sbx.operator.listSandboxes`.
+
+### 21.9 ctl-idp-sync
+
+- Логика — `KeycloakAdminClient` и `KeycloakIdpSync` в `@sbx/payload`, контроллер — `apps/worker` (решение 9). Включается, если задан `SBX_IDP_SYNC_KEYCLOAK_URL` (внутренний адрес Keycloak). Остальные переменные: `SBX_IDP_SYNC_REALM` (`sbx`), `SBX_IDP_SYNC_CLIENT_ID` (`sbx-worker`), `SBX_IDP_SYNC_CLIENT_SECRET_FILE` (обязательна вместе с URL), `SBX_IDP_SYNC_INTERVAL` (300 s).
+- Метрики: `sbx_idp_sync_total{result}`, счётчик `sbx_idp_sync_aborted_total{reason}`, gauge `sbx_idp_sync_aborted` (1 после отмены, 0 после удачного прохода, ошибка прохода его не меняет) и `log.error` с `wouldDeactivate`, `active`.
+- Порог считает только подтверждённые удаления (после проверки `404`). При пустом списке это один `GET /users/{id}` на каждого активного пользователя до отмены — для PoC приемлемо.
+- Каждый пользователь — своя транзакция, строка под `FOR UPDATE` и перепроверкой: одновременная деактивация оператором выигрывает. Ошибка одного пользователя не останавливает остальных; проход затем бросает исключение (pg-boss повторит, проход идемпотентен).
+- Уведомление: `apiKeys` — `[{id, publicId, name, prefix}]`, `publicId` — публичный `key_…` для `DELETE /v1/api-keys/{key}`; отозванные ключи не попадают. Пока есть неподтверждённое уведомление о том же (команда, пользователь), новое не создаётся. Личная команда деактивированного тоже получает уведомление.
+- Не меняются: `idp_disabled`, удалённый потом в Keycloak, остаётся `idp_disabled`; `idp_deleted`, снова появившийся выключенным, остаётся `idp_deleted`.
+
+### 21.10 `web`
+
+- **SDK в браузере** — новый режим `new Sbx({baseUrl: "/api", session: true, team})`: без цепочки учётных данных и без `Authorization` (proxied listener отвечает `400` на любой `Authorization`), `baseUrl` может быть относительным, PTY получает команду в `?team=`. Бюджет повторов SDK в дашборде — 5 s. Добавлены `sbx.sandboxes.handle(data)` (handle без запроса) и исправление ответа `204` в браузере.
+- **401/403** — `unauthorized()` / `forbidden()` Next (`experimental.authInterrupts`). Если флаг уберут из Next, страницам нужен другой механизм.
+- **CSP** — как в `apps/web/README.md`; `script-src` и `style-src` с `'unsafe-inline'` (inline-чанки Next и стили Payload/Radix). Чтобы ничего не грузилось с чужого origin, в админке выключены Gravatar (`admin.avatar: "default"`) и Monaco (грузится с jsDelivr): пять JSON-полей — `textarea`.
+- **Cookie `__Host-payload`** (§19): админка пишет `__Host-payload-theme` из JS без `Secure`, браузер его отбрасывает, тема между визитами не сохраняется. Права эти cookie не дают; не исправлялось.
+- **ID только для дашборда** — `mbr_…` (членство) и `ntc_…` (уведомление), тот же base32 над UUID; их принимают только server actions. В `/api/v1` их нет.
+- **Server actions:** человек получает `forbidden` и для чужой, и для несуществующей строки (не узнать, существует ли чужая команда); оператор — `not_found`. `removeMember`, как и `leaveTeam`, возвращает удалённому команду по умолчанию на личную. Подтвердить уведомление в дашборде может только `owner`; оператор — в `/admin`.
+- **Создание и fork** держат `Idempotency-Key` между ручными повторами, пока тело то же, а исход последней попытки неизвестен: повтор не создаёт вторую sandbox.
+- **Удаление команды** (решение 12): кнопка в `/admin` на странице общей команды проверяет, что sandbox, снапшотов и environments нет, и шлёт `DELETE /cms-api/teams/<uuid>` с заголовком `x-sbx-delete-team: checked`. Без заголовка удаление команды — `403`, поэтому штатный Delete Payload для команд не показывается. Это защита от случайного удаления, а не граница безопасности; гонка §6.4 остаётся.
+- `/` → `307` на `/app` (страница, а не `redirects` конфига: иначе аноним получал бы `307` вместо `401`). Proxy защищает и `/_next/image`; свободны только `/healthz`, `/_next/static` и `favicon.ico`.
+- **`/admin` и `/cms-api` — только операторам уже в `proxy.ts`**: оператор определяется так же, как в сессии (§5.5), — группа из `SBX_OPERATOR_GROUPS` в `X-Auth-Request-Groups`; остальным — `403` «Operators only» до Payload. Так не-оператор не получает клиентский конфиг админки с именами полей (`secretHash`, `idpSubject`, `ssoPolicyEpoch`) и не достаёт до `payload-preferences` и `payload-locked-documents`. Права по-прежнему проверяет и access Payload (деактивированный оператор и т. п.).
+- **Закрыты auth-ручки `users`**, которым нужны локальная стратегия или JWT Payload (их нет, §5.4): `login`, `refresh-token` (выдавал бы JWT, который нигде не принимается), `first-register`, `forgot-password`, `reset-password`, `unlock`, `verify/:id`, `:id/api-key/reveal` — `403` всем, операторам тоже. `me`, `access`, `init`, `logout` админке нужны и открыты операторам.
+- Раздел «Оператор» без `Sbx-Team` берёт команду оператора по умолчанию: оператор без команд получит `team_forbidden`.
+- Сборка: `next build` не проверяет типы (`typescript.ignoreBuildErrors`: у TypeScript 7 нет JS API), это делает `pnpm typecheck`. `hoistPattern: ["*", "!next"]` в `pnpm-workspace.yaml`: иначе глобальные типы Next ломали typecheck других пакетов. Образ ~725 MB (standalone и полный prod-набор `@sbx/payload` для миграций).
+- HTML админки содержит имя поля `secretHash` в клиентском конфиге (без значения); получают его только операторы (proxy, выше).
+
+### 21.11 compose и dev-cp
+
+- `web` — только в сети `web-internal` (`internal: true`) вместе с `oauth2-proxy` и `postgres`; порт на хосте не публикуется. Из сети `sbx` имя `web` не резолвится.
+- `web-migrate` (образ `web`, `node packages/payload/src/migrate.ts`) — после `migrate` и `secrets-init`, до `api`, `worker`, `web`: первая миграция видит таблицы `identity`, которые копирует.
+- oauth2-proxy: `/` → `web:3000`, `/api/` и `/sbx-auth/` — как в S7.
+- Postgres: `max_connections=200` (`api` ~36 соединений, `worker` ~37, `web` ~11).
+- Секреты: `payload-secret` (копии для `api`, `worker`, `web`), `worker/idp-sync-client-secret` (из секрета клиента `sbx-worker`).
+- **Выход** (решение 11): `/oauth2/sign_out?rd=<SBX_LOGOUT_URL>`; по умолчанию — logout Keycloak с возвратом на `<SBX_APP_ORIGIN>/app`. Домен Keycloak добавлен в `OAUTH2_PROXY_WHITELIST_DOMAINS`.
+- `worker` ждёт здорового Keycloak (`depends_on: keycloak: service_healthy`), поэтому первый проход `ctl-idp-sync` на свежем стеке не падает.
+- Первый выкат S8 на существующий том: собрать образы, остановить `api` и `worker`, затем `up` (`deploy/compose/README.md`; в dev-cp это делает `deploy.sh`, сборка идёт до остановки).
+- `dev@example.com` не оператор; как сделать оператором — `deploy/compose/README.md`.
+
+### 21.12 `sbx-admin`
+
+`sbx-admin` берёт конфиг из YAML (`SBX_CONFIG_FILE`): `bootstrap` (топология и сборки шаблонов) и `pool status` (цели пула). `api` и `worker` читают Payload. Пока тёплого пула нет, расхождения не видно; когда появится, `pool status` надо перевести на `PayloadConfigReader`. В compose у контейнера `worker` YAML нет, и `pool status` показывает пары без целей.
+
+### 21.13 E2E
+
+Стек — `deploy/compose/e2e.yaml` (решение 10): настоящие Keycloak, oauth2-proxy, Postgres, `web`, `web-migrate`; вместо `api` и `worker` — `e2e-backend` (код `api` и `worker` в одном процессе, `FakeAgent`, фейковый мир PVE, настоящий `KeycloakIdpSync`). Запуск — `pnpm --filter @sbx/web test:e2e`; 8 файлов, 18 тестов. Каждый ответ страницы проверяется на секреты (`secretHash` со значением, секрет ключа, токен порта, значения секретов).
+
+- **Покрыто:** сценарии §15 E2E, кроме перечисленных ниже, в том числе device grant `sbx login` (тот же пользователь, что в браузере; JWT оператора не даёт прав оператора) и безопасность §15 (поддельные заголовки, CSRF `/cms-api` и server actions, сеть `web`, содержимое образа).
+- **Приближено:** маршрут `blocked` и эпоха `sso` (`ssoPortPolicy any → team`) проверяются по `GET /internal/v1/gateway/routes/{label}`, а не через gateway: gateway в стеке нет. Resize PTY — по размерам, которые получил агент; эхо — через вывод команды (у фейкового PTY нет tty).
+- **Пропущено:** закрытие SSH-сессий при offboarding и блокировке (нет gateway; покрыто тестами `api` и gateway); UI environments (создание `owner`-ом, только чтение у `member`). Environments при create покрыты: фейковый гость получил имена env и секретов.
+
+### 21.14 Отложенные мелочи
+
+- **Payload:** нет `sbx_identity users:<id>` пользователям, чья личная команда или команда по умолчанию обнулена удалением команды; тест «ошибка NOTIFY откатывает запись» не идёт через хук; `api-keys.sandbox` принимает любой текст; комментарий `platform-defaults` про совпадение defaults с сидом неточен.
+- **JIT:** `resolveSession` открывает транзакцию с `FOR UPDATE` на каждый вызов (смягчают кэши); нет тестов на неактивную заготовку при смене email и на выключенную заготовку.
+- **Кэши и LISTEN:** `ChannelListener.start()` дважды — утечка клиента, исключение в `onError` пропускает переподключение; нет теста на NOTIFY во время загрузки; проверка TTL в тесте может мигать на медленном CI; паритет «голого» шаблона у `StaticConfigReader` не закреплён.
+- **`api`:** `seedPayloadIdentity` без advisory-блокировки (гонка нескольких реплик на пустой базе); `/readyz` при упавшем Postgres сообщает и `payload_migrations`; поле лога cleanup `sandboxId` вместо `id`; в матрице HTTP блокировок нет части строк (move, chmod, archive PUT, upload commit/delete, signal, PTY connect); текст `403` записи environments в OpenAPI устарел.
+- **ctl-idp-sync:** нет раннего выхода, когда порог уже превышен; пагинация останавливается только на пустой странице (предохранитель — повтор полной страницы и предел числа страниц); не хватает тестов (отмена при ожидающих реактивациях, ровно 20%, сбой посреди применения, не-`404` в `userExists`); уведомление при дедупликации хранит старый список ключей; в список попадают просроченные ключи.
+- **`web`:** параллельный Dismiss перезаписывает первое подтверждение; бесконечный список перезапрашивает все страницы каждые 5 s; у отключённых кнопок шапки нет причины на каждой; завершённые команды читаются с `follow=true`; оператор в редакторе environments показан как «former member»; подтверждение удаления команды не перепроверяет; число снапшотов при удалении команды — одна страница; `lucide-react` в `minimumReleaseAgeExclude` убрать позже.
+- **SDK:** `NULL_BODY_STATUSES` включает `101`/`103`; признак подключения WebSocket — по подстроке.
+- **E2E:** `typecheck:e2e` не входит в `pnpm -r typecheck`; проверки `403` JWT не привязаны к `details.reason`; `deviceLogin` зависит от текста темы Keycloak; на сохранённом стеке копятся sandbox прогонов.
+
+### 21.15 Открытые вопросы
+
+- Контрактная фаза: удалить схему `identity` (таблицы, триггеры `0302`/`0303`, `identity.environments`) и `PgIdentityStore` как бэкенд — отдельным релизом после перехода.
+- `pool status` `sbx-admin` на `PayloadConfigReader` — вместе с тёплым пулом (фаза 2).
+- Метрики `web` (§19) и список «команды без активного owner» в `/admin` (§20.1).
+- `experimental.authInterrupts` Next: следить при обновлениях.
+- Роли Postgres (§12), NetworkPolicy и размер образа `web` — S12.
+- Проверка `web` на dev-стенде CT 590.
+- Из §20.2: имя группы операторов в Keycloak; квота по умолчанию.

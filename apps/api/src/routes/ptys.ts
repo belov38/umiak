@@ -317,6 +317,7 @@ export function registerPtyRoutes(app: ApiApp, deps: ApiDeps): void {
 					requestId,
 					closed: close.signal,
 					unregister,
+					bindSandbox: unregister.bindSandbox,
 				});
 			},
 			cancel: unregister,

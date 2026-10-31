@@ -4,10 +4,15 @@
 // - when the principal stops passing its checks after NOTIFY sbx_identity
 //   (key revoked, rotated or expired, member removed, user deactivated):
 //   `error {code: unauthorized, retryable: false}`;
+// - when an operator blocks the sandbox of an exec stream, a sync command or
+//   a PTY socket (NOTIFY sbx_identity 'sandboxes:<id>', S8 C3, §11):
+//   `error {code: forbidden, details.reason: sandbox_blocked}`, unless an
+//   operator opened it; '*' checks the blocks again;
 // - on shutdown (`closeAll`): `reconnect {reason: server_shutdown}`.
 // A connection receives the close as a CloseFrame and writes its own final
 // frame (with offsets) or WebSocket close.
 import type { IdentityStore } from "@sbx/auth";
+import { hasOperatorRights } from "@sbx/core";
 import type { Logger } from "pino";
 import type {
 	IdentityChange,
@@ -28,6 +33,8 @@ export interface StreamOwner {
 	apiKeyHash?: string | null;
 	/** An operator in a team they are not a member of (browser session). */
 	operator?: boolean;
+	/** Operator rights (browser session): sandbox blocks do not close it (S8 C3). */
+	blockExempt?: boolean;
 }
 
 /** Fields that select connections for `revoke`; all given ones must match. */
@@ -39,12 +46,28 @@ export interface StreamMatch {
 
 export type StreamAbort = (frame: CloseFrame) => void;
 
+/**
+ * What `register` returns: call it to unregister (idempotent). `bindSandbox`
+ * ties the connection to its sandbox (once known), so a block of that
+ * sandbox closes it. Bind before the block check of the request: a block
+ * that commits after the check then always reaches the connection.
+ */
+export type StreamHandle = (() => void) & {
+	bindSandbox(sandboxId: string): void;
+};
+
 export interface StreamRegistryOptions {
 	identity: Pick<IdentityStore, "findApiKeyByHash" | "user" | "membership">;
 	/** NOTIFY sbx_identity of this process. */
 	events: Pick<IdentityListener, "subscribe">;
 	/** Open connections per principal (SBX_API_MAX_STREAMS, default 100). */
 	maxPerPrincipal: number;
+	/**
+	 * The blocked ones of these sandboxes (runtime.sandboxes). Without it a
+	 * 'sandboxes:<id>' notification is trusted as is and '*' does not
+	 * re-check blocks (tests without Postgres).
+	 */
+	blockedSandboxes?: (ids: string[]) => Promise<ReadonlySet<string>>;
 	log?: Logger;
 	now?: () => number;
 }
@@ -53,6 +76,7 @@ interface Entry {
 	owner: StreamOwner;
 	abort: StreamAbort;
 	closed: boolean;
+	sandboxId: string | null;
 }
 
 /** The owner of an authenticated request. */
@@ -63,6 +87,7 @@ export function streamOwner(a: AuthContext): StreamOwner {
 		teamId: a.principal.teamId,
 		apiKeyHash: a.apiKey?.secretHash ?? null,
 		operator: a.principal.isOperator && a.team.role === null,
+		blockExempt: hasOperatorRights(a.principal),
 	};
 }
 
@@ -74,6 +99,29 @@ export const UNAUTHORIZED_CLOSE: CloseFrame = {
 	retryable: false,
 };
 
+export const SANDBOX_BLOCKED_CLOSE: CloseFrame = {
+	type: "error",
+	code: "forbidden",
+	message:
+		"the sandbox was blocked by the platform operator; only reads, stop and delete are allowed",
+	retryable: false,
+	details: { reason: "sandbox_blocked" },
+};
+
+/** `blockedSandboxes` over runtime.sandboxes. */
+export function blockedSandboxesOf(pool: {
+	query(sql: string, args: unknown[]): Promise<{ rows: { id: string }[] }>;
+}): (ids: string[]) => Promise<ReadonlySet<string>> {
+	return async (ids) => {
+		if (ids.length === 0) return new Set();
+		const r = await pool.query(
+			"SELECT id FROM runtime.sandboxes WHERE id = ANY($1::uuid[]) AND blocked",
+			[ids],
+		);
+		return new Set(r.rows.map((row) => row.id));
+	};
+}
+
 function principalKey(o: StreamOwner): string {
 	return o.apiKeyId ?? o.userId ?? `team:${o.teamId}`;
 }
@@ -84,6 +132,7 @@ function ownerKey(o: StreamOwner): string {
 
 export class StreamRegistry {
 	readonly #identity: StreamRegistryOptions["identity"];
+	readonly #blockedSandboxes: StreamRegistryOptions["blockedSandboxes"];
 	readonly #log: Logger | undefined;
 	readonly #max: number;
 	readonly #now: () => number;
@@ -95,11 +144,13 @@ export class StreamRegistry {
 
 	constructor(o: StreamRegistryOptions) {
 		this.#identity = o.identity;
+		this.#blockedSandboxes = o.blockedSandboxes;
 		this.#log = o.log;
 		this.#max = o.maxPerPrincipal;
 		this.#now = o.now ?? Date.now;
 		this.#unsubscribe = o.events.subscribe((c) => {
 			void this.#onChange(c);
+			if (c.all || c.collection === "sandboxes") void this.#onBlock(c);
 		});
 	}
 
@@ -128,7 +179,7 @@ export class StreamRegistry {
 		owner: StreamOwner,
 		abort: StreamAbort,
 		opts: { capped?: boolean; signal?: AbortSignal } = {},
-	): () => void {
+	): StreamHandle {
 		if (this.#closing) {
 			throw new ApiError(
 				503,
@@ -150,7 +201,12 @@ export class StreamRegistry {
 				},
 			);
 		}
-		const entry: Entry = { owner: { ...owner }, abort, closed: false };
+		const entry: Entry = {
+			owner: { ...owner },
+			abort,
+			closed: false,
+			sandboxId: null,
+		};
 		this.#entries.add(entry);
 		if (capped) this.#perPrincipal.set(pk, this.count(pk) + 1);
 		let done = false;
@@ -168,7 +224,11 @@ export class StreamRegistry {
 		};
 		if (opts.signal?.aborted) unregister();
 		else opts.signal?.addEventListener("abort", unregister, { once: true });
-		return unregister;
+		return Object.assign(unregister, {
+			bindSandbox(sandboxId: string) {
+				entry.sandboxId = sandboxId;
+			},
+		});
 	}
 
 	/** Closes the matching connections with `error unauthorized`; returns how many. */
@@ -259,6 +319,7 @@ export class StreamRegistry {
 			case "teams":
 				return all.filter((e) => e.owner.teamId === c.id);
 			case "ssh-keys":
+			case "sandboxes":
 				return [];
 			default:
 				return all;
@@ -293,6 +354,44 @@ export class StreamRegistry {
 				}
 			}),
 		);
+	}
+
+	/**
+	 * 'sandboxes:<id>' (a block, S8 C3) or '*': closes the non-operator
+	 * connections of blocked sandboxes. The notification is checked against
+	 * the database when it can be.
+	 */
+	async #onBlock(c: IdentityChange): Promise<void> {
+		const bound = [...this.#entries].filter(
+			(e) =>
+				!e.closed &&
+				e.sandboxId !== null &&
+				e.owner.blockExempt !== true &&
+				(c.all || e.sandboxId === c.id),
+		);
+		if (bound.length === 0) return;
+		let blocked: ReadonlySet<string>;
+		if (this.#blockedSandboxes === undefined) {
+			if (c.all) return;
+			blocked = new Set([c.id]);
+		} else {
+			try {
+				blocked = await this.#blockedSandboxes([
+					...new Set(bound.map((e) => e.sandboxId as string)),
+				]);
+			} catch (err) {
+				this.#log?.warn(
+					{ err: err instanceof Error ? err.message : String(err) },
+					"stream registry: block check failed",
+				);
+				return;
+			}
+		}
+		for (const e of bound) {
+			if (blocked.has(e.sandboxId as string)) {
+				this.#close(e, SANDBOX_BLOCKED_CLOSE);
+			}
+		}
 	}
 
 	async #stillValid(o: StreamOwner): Promise<boolean> {

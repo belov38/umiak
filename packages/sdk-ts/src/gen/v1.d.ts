@@ -269,7 +269,7 @@ export interface paths {
         };
         /**
          * List sandboxes
-         * @description Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters: `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must match), `template`, `q` (prefix of name or slug).
+         * @description Sandboxes of the team, newest first, in pages of `limit` (default 50) with `nextCursor`. Filters: `state` (comma-separated; deleted ones only with state=deleted), `label=k=v` (repeat; all must match), `template`, `q` (prefix of name or slug). A platform operator in the dashboard may list every team with `allTeams=true` (and `teamId`).
          */
         get: operations["sandboxes.list"];
         put?: never;
@@ -310,6 +310,26 @@ export interface paths {
          * @description Changes name, slug, labels (replaced whole), ttlSeconds (deadline = now + ttl on a ready sandbox; null removes it) and idleTimeoutSeconds. A new slug changes the URLs of published ports at once; old URLs and cookies stop working.
          */
         patch: operations["sandboxes.update"];
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Block a sandbox (operator)
+         * @description Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         */
+        post: operations["sandboxes.block"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/sandboxes/{sandbox}/commands": {
@@ -808,6 +828,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sandboxes/{sandbox}/ports/{port}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Block a hosted port (operator)
+         * @description Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         */
+        post: operations["ports.block"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sandboxes/{sandbox}/ports/{port}/rotate-token": {
         parameters: {
             query?: never;
@@ -822,6 +862,26 @@ export interface paths {
          * @description Replaces the token of a token port: the old token, its links and cookies stop working at once. The new token is returned only here.
          */
         post: operations["ports.rotateToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/ports/{port}/unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unblock a hosted port (operator)
+         * @description Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         */
+        post: operations["ports.unblock"];
         delete?: never;
         options?: never;
         head?: never;
@@ -982,6 +1042,26 @@ export interface paths {
          * @description Shuts the VM down and keeps its disk; resume brings it back. Only from `ready`. A repeat while the stop runs returns the same operation.
          */
         post: operations["sandboxes.stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sandboxes/{sandbox}/unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unblock a sandbox (operator)
+         * @description Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         */
+        post: operations["sandboxes.unblock"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1194,6 +1274,12 @@ export interface components {
             /** @description Bytes of regular file data written */
             sizeBytes: number;
         };
+        BlockRequest: {
+            /** @description Up to 500 characters for the record (the sandbox's events) */
+            note?: string;
+            /** @enum {string} */
+            reason: "operator" | "abuse";
+        };
         ChmodRequest: {
             group?: string;
             mode?: number;
@@ -1271,6 +1357,10 @@ export interface components {
         };
         CommandErrorFrame: {
             code: string;
+            /** @description Only on some errors: `forbidden` after an operator blocked the sandbox has `reason: sandbox_blocked` */
+            details?: {
+                [key: string]: unknown;
+            };
             message: string;
             /** @description PTY commands only */
             ptyOffset?: number;
@@ -1721,8 +1811,9 @@ export interface components {
             access: "token" | "sso" | "public" | (string & {});
             /** @enum {string} */
             appProtocol: "http1" | "h2c" | (string & {});
-            blockReason: string | null;
-            /** @description An operator blocked the port; the gateway refuses it */
+            /** @enum {string|null} */
+            blockReason: "operator" | "abuse" | null | (string & {});
+            /** @description An operator blocked the port: the gateway refuses it, and PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`) */
             blocked: boolean;
             /**
              * Format: date-time
@@ -1747,8 +1838,9 @@ export interface components {
             access: "token" | "sso" | "public" | (string & {});
             /** @enum {string} */
             appProtocol: "http1" | "h2c" | (string & {});
-            blockReason: string | null;
-            /** @description An operator blocked the port; the gateway refuses it */
+            /** @enum {string|null} */
+            blockReason: "operator" | "abuse" | null | (string & {});
+            /** @description An operator blocked the port: the gateway refuses it, and PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`) */
             blocked: boolean;
             /**
              * Format: date-time
@@ -2028,6 +2120,13 @@ export interface components {
             activeOperation: components["schemas"]["Operation"] | null;
             /** @enum {string} */
             activity: "busy" | "idle" | "unknown" | (string & {});
+            /**
+             * @description Why it is blocked; null unless blocked
+             * @enum {string|null}
+             */
+            blockReason: "operator" | "abuse" | null | (string & {});
+            /** @description A platform operator blocked the sandbox: its ports are refused and only reads, stop and delete are allowed (403 `forbidden`, details.reason `sandbox_blocked`) */
+            blocked: boolean;
             /**
              * Format: date-time
              * @description ISO 8601 UTC with milliseconds
@@ -2458,6 +2557,10 @@ export interface components {
         };
         TemplateList: {
             data: components["schemas"]["Template"][];
+        };
+        UnblockRequest: {
+            /** @description Up to 500 characters for the record (the sandbox's events) */
+            note?: string;
         };
         /** @description Sets merge by key (null deletes a key or a file); repositories are replaced; revision + 1 */
         UpdateEnvironmentRequest: {
@@ -3197,6 +3300,10 @@ export interface operations {
                 template?: string;
                 /** @description Prefix of the name or slug, case-insensitive */
                 q?: string;
+                /** @description `true`: sandboxes of every team. Only a platform operator in the dashboard (browser session); anyone else is 403 `forbidden` (details.reason `operator_required`) */
+                allTeams?: "true" | "false";
+                /** @description With allTeams=true: only this team (`team_...`) */
+                teamId?: string;
                 /** @description Page size, 1-200 (default 50) */
                 limit?: number;
                 /** @description `nextCursor` of the previous page, unchanged */
@@ -3217,8 +3324,17 @@ export interface operations {
                     "application/json": components["schemas"]["SandboxList"];
                 };
             };
-            /** @description `validation` or `invalid_cursor` */
+            /** @description `validation` (also `teamId` without allTeams=true) or `invalid_cursor` */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `forbidden` with details.reason `operator_required`: allTeams=true by anyone but a platform operator's browser session */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3465,6 +3581,70 @@ export interface operations {
                 };
             };
             /** @description `slug_taken` or `invalid_state` (deleting, deleted) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "sandboxes.block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        /** @description Why */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockRequest"];
+            };
+        };
+        responses: {
+            /** @description The blocked sandbox */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Sandbox"];
+                };
+            };
+            /** @description `forbidden` with details.reason `operator_required`: not a platform operator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no such sandbox in any team */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `invalid_state`: deleted */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5450,7 +5630,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `forbidden` with details.reason `public_disabled`: the operator turned public ports off */
+            /** @description `forbidden` with details.reason `public_disabled` (the operator turned public ports off), `port_blocked` (an operator blocked this port) or `sandbox_blocked` */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5518,7 +5698,82 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description `forbidden` with details.reason `port_blocked` (an operator blocked this port) or `sandbox_blocked` (an operator blocked the sandbox) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description `not_found`: no such sandbox in the team */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "ports.block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+                /** @description TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform) */
+                port: number;
+            };
+            cookie?: never;
+        };
+        /** @description Why */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockRequest"];
+            };
+        };
+        responses: {
+            /** @description The blocked port */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedPort"];
+                };
+            };
+            /** @description `validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, 48010), or more than 50 hosted ports */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `forbidden` with details.reason `operator_required`: not a platform operator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no such sandbox in any team, or the port is not hosted */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5570,6 +5825,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description `forbidden` with details.reason `port_blocked` (an operator blocked this port) or `sandbox_blocked` (an operator blocked the sandbox) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description `not_found`: no such sandbox, or the port is not hosted */
             404: {
                 headers: {
@@ -5581,6 +5845,72 @@ export interface operations {
             };
             /** @description `invalid_state`: deleting or deleted */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "ports.unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+                /** @description TCP port in the guest, 1-65535; not 22, 47800, 47984, 47989, 47990, 48010 (platform) */
+                port: number;
+            };
+            cookie?: never;
+        };
+        /** @description Optional note */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["UnblockRequest"];
+            };
+        };
+        responses: {
+            /** @description The port */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedPort"];
+                };
+            };
+            /** @description `validation`: port outside 1-65535, a reserved port (22, 47800, 47984, 47989, 47990, 48010), or more than 50 hosted ports */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `forbidden` with details.reason `operator_required`: not a platform operator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no such sandbox in any team, or the port is not hosted */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6069,6 +6399,61 @@ export interface operations {
             };
             /** @description `invalid_state` (details.state) or `operation_in_progress` (retryable; details.operationId, kind) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "sandboxes.unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        /** @description Optional note */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["UnblockRequest"];
+            };
+        };
+        responses: {
+            /** @description The sandbox */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Sandbox"];
+                };
+            };
+            /** @description `forbidden` with details.reason `operator_required`: not a platform operator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: no such sandbox in any team */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -830,13 +830,13 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 			});
 
 			await t.pool.query(
-				`UPDATE runtime.hosted_ports SET blocked = true, block_reason = 'port abuse'
+				`UPDATE runtime.hosted_ports SET blocked = true, block_reason = 'operator'
 				 WHERE sandbox_id = $1`,
 				[s.sandboxId],
 			);
 			expect(await lookupRoute(t.pool, `${s.slug}-3000`)).toMatchObject({
 				blocked: true,
-				blockReason: "port abuse",
+				blockReason: "operator",
 			});
 			await t.pool.query(
 				`UPDATE runtime.hosted_ports SET blocked = false, block_reason = NULL
@@ -859,6 +859,8 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 				teamId: env.p.teamId,
 				slug: s.slug,
 				templateSlug: env.template,
+				// The sandbox block set above.
+				blocked: true,
 			});
 		});
 	});

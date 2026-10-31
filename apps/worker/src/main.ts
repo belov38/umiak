@@ -2,12 +2,13 @@
 // the worker itself).
 // Reads the environment (src/env.ts), builds the real adapters and runs the
 // worker until SIGTERM/SIGINT: stop taking jobs, give active ones 60 s
-// (S6 §15.2), close the PVE clients, the S2 registry and the pool, exit 0.
+// (S6 §15.2), close the PVE clients, the S2 registry, Payload and the pool,
+// exit 0. Templates, sizes, quotas and defaults come from Payload
+// (src/payload.ts); its migrations are applied by the web-migrate job.
 // `@sbx/agent-client` and `@sbx/proto` are loaded from their `dist`: run
 // `pnpm build` once before `node src/main.ts` (the image does it).
 import { readFileSync } from "node:fs";
 import { AgentClient, PgRegistry } from "@sbx/agent-client";
-import { StaticConfigReader } from "@sbx/config";
 import { KeyRing } from "@sbx/core";
 import { createPool } from "@sbx/db";
 import { ConnectAgentPort, parseCaKeys } from "./adapters/agent-connect.ts";
@@ -20,6 +21,11 @@ import { PveInfraRegistry } from "./adapters/pve-infra.ts";
 import { parseWorkerEnv, type WorkerEnv } from "./env.ts";
 import { errText, processLogger } from "./log.ts";
 import { PromMetrics } from "./metrics.ts";
+import {
+	createWorkerIdpSync,
+	openWorkerPayload,
+	type WorkerPayload,
+} from "./payload.ts";
 import type { AgentPort, GatewayPort } from "./ports.ts";
 import { createWorker, STOP_TIMEOUT_MS, type Worker } from "./worker.ts";
 
@@ -52,6 +58,8 @@ async function main(): Promise<void> {
 	let registry: PgRegistry | undefined;
 	// Agent RPC client over the same registry; closed before it.
 	let agentClient: AgentClient | undefined;
+	// Payload instance of the config reader; its own pool and LISTEN connection.
+	let payload: WorkerPayload | undefined;
 	let exiting = false;
 	const shutdown = async (signal: string) => {
 		if (exiting) {
@@ -64,6 +72,7 @@ async function main(): Promise<void> {
 			await worker?.stop({ graceful: true, timeoutMs: STOP_TIMEOUT_MS });
 			await agentClient?.close();
 			await registry?.close();
+			await payload?.close();
 			await pool.end();
 		} catch (err) {
 			log.error({ err: errText(err) }, "shutdown failed");
@@ -75,8 +84,21 @@ async function main(): Promise<void> {
 	process.on("SIGINT", () => void shutdown("SIGINT"));
 
 	try {
-		const config = StaticConfigReader.fromFile(env.configFile);
 		const keys = KeyRing.fromFile(env.dataKeysFile);
+		payload = await openWorkerPayload({
+			databaseUrl: env.databaseUrl,
+			secret: env.payloadSecret,
+			log,
+		});
+		const p = payload;
+		const idpSync = createWorkerIdpSync({
+			env: env.idpSync,
+			payload: p.payload,
+			log,
+		});
+		if (idpSync === undefined) {
+			log.info("SBX_IDP_SYNC_KEYCLOAK_URL is not set: ctl-idp-sync is off");
+		}
 		let gateway: GatewayPort;
 		let agent: AgentPort;
 		if (env.gatewayServiceTokenFile !== undefined) {
@@ -107,7 +129,7 @@ async function main(): Promise<void> {
 		}
 		worker = createWorker({
 			pool,
-			config,
+			config: p.config,
 			keys,
 			infra: new PveInfraRegistry(pool, { secretsDir: env.secretsDir }),
 			agent,
@@ -118,6 +140,8 @@ async function main(): Promise<void> {
 			migrateOnStart: env.migrateOnStart,
 			httpPort: env.httpPort,
 			idpSyncIntervalMs: env.idpSyncIntervalMs,
+			...(idpSync === undefined ? {} : { idpSync }),
+			payloadReady: () => p.ready(),
 		});
 		await worker.start();
 	} catch (err) {
@@ -125,6 +149,7 @@ async function main(): Promise<void> {
 		await worker?.stop({ graceful: false }).catch(() => {});
 		await agentClient?.close().catch(() => {});
 		await registry?.close().catch(() => {});
+		await payload?.close().catch(() => {});
 		await pool.end().catch(() => {});
 		process.exit(1);
 	}

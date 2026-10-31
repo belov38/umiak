@@ -12,6 +12,8 @@
 			"!**/*.md",
 			"!**/gen",
 			"!apps/api/openapi",
+			"!**/.next",
+			"!apps/web/src/app/(payload)/admin/importMap.js",
 			"!apps/mcp/golden"
 		]
 	},
@@ -23,6 +25,11 @@
 		"enabled": true,
 		"rules": {
 			"preset": "recommended"
+		}
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
 		}
 	},
 	"javascript": {
