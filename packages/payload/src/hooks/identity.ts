@@ -4,6 +4,9 @@
 // which a membership id cannot do after a delete. As the
 // stand-in trigger (db/migrations/0300), updates that only touch the
 // bookkeeping fields (lastUsedAt, lastLoginAt, updatedAt) send nothing.
+// For users, groups and preferredUsername are bookkeeping too: they are not
+// part of SessionIdentity, and a browser and a CLI login of one user may
+// rewrite them in turn; each NOTIFY would flush every session cache.
 import type {
 	CollectionAfterChangeHook,
 	CollectionAfterDeleteHook,
@@ -20,6 +23,12 @@ export type IdentityCollection =
 
 const BOOKKEEPING = new Set(["lastUsedAt", "lastLoginAt", "updatedAt"]);
 
+const USERS_BOOKKEEPING = new Set([
+	...BOOKKEEPING,
+	"groups",
+	"preferredUsername",
+]);
+
 function key(slug: IdentityCollection, doc: Record<string, unknown>): string {
 	if (slug === "memberships") {
 		return `memberships:${relId(doc.user)}:${relId(doc.team)}`;
@@ -30,6 +39,7 @@ function key(slug: IdentityCollection, doc: Record<string, unknown>): string {
 export function identityAfterChange(
 	slug: IdentityCollection,
 ): CollectionAfterChangeHook {
+	const bookkeeping = slug === "users" ? USERS_BOOKKEEPING : BOOKKEEPING;
 	return async ({ collection, doc, previousDoc, operation, req }) => {
 		if (operation === "update") {
 			const changed = changedFields(
@@ -37,7 +47,7 @@ export function identityAfterChange(
 				previousDoc,
 				doc,
 			);
-			if (![...changed].some((f) => !BOOKKEEPING.has(f))) return doc;
+			if (![...changed].some((f) => !bookkeeping.has(f))) return doc;
 			// A changed key (memberships cannot change theirs) notifies both.
 			const before = key(slug, previousDoc);
 			if (before !== key(slug, doc)) {

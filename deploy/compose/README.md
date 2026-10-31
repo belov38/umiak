@@ -216,7 +216,9 @@ CLI печатает код и ссылку http://localhost:8180/realms/sbx/dev
 NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
 префикса `__Host-`: стек работает по http на localhost (за TLS — `__Host-sbx_session` и `Secure`, см. «Публичные
 адреса»). Сессия обновляется каждые
-5 минут (`--cookie-refresh=5m`).
+5 минут (`--cookie-refresh=5m`) и живёт не больше 12 часов (`--cookie-expire=12h`, S8 §5.1), затем — новый вход.
+Роли Keycloak, которые провайдер `keycloak-oidc` добавляет в `X-Auth-Request-Groups` как `role:<имя>`, `web` и
+`api` отбрасывают: в JWT CLI их нет, а `users.groups` должен совпадать при входе из браузера и из CLI.
 
 ## web (S8)
 

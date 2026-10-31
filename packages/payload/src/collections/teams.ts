@@ -3,7 +3,10 @@ import { operatorAccess, teamDeleteAccess } from "../access.ts";
 import { DELETE_TEAM_COMPONENT } from "../admin-components.ts";
 import { configAfterDelete, teamsConfigAfterChange } from "../hooks/config.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
-import { teamsBeforeDelete } from "../hooks/rules.ts";
+import {
+	teamsBeforeDelete,
+	teamsPersonalFixedBeforeChange,
+} from "../hooks/rules.ts";
 import { teamsRevokeAfterDelete } from "../hooks/ssh-revoke.ts";
 
 /** Quota fields of a team and of platform-defaults (S8 §7, S6 S3). */
@@ -27,6 +30,7 @@ export const Teams: CollectionConfig = {
 	// page (S8 §6.4), never in bulk and not with Payload's own Delete.
 	access: { ...operatorAccess, delete: teamDeleteAccess },
 	hooks: {
+		beforeChange: [teamsPersonalFixedBeforeChange],
 		beforeDelete: [teamsBeforeDelete],
 		afterChange: [identityAfterChange("teams"), teamsConfigAfterChange],
 		afterDelete: [

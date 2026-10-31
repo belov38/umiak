@@ -69,6 +69,43 @@ export const membershipsFixedPairBeforeChange: CollectionBeforeChangeHook = ({
 	return data;
 };
 
+/**
+ * A personal team (S8 §6.1) has one member: its creator as owner, added by
+ * JIT right after the team. Any other membership is refused, with
+ * overrideAccess too (/admin, server actions). The team row is locked as in
+ * assertAnotherOwner, so two concurrent first memberships cannot both pass.
+ */
+export const membershipsPersonalTeamBeforeChange: CollectionBeforeChangeHook =
+	async ({ data, operation, req }) => {
+		if (operation !== "create") return data;
+		const teamId = relId(data.team);
+		if (teamId === null) return data;
+		const locked = await txQuery<{
+			personal: boolean | null;
+			created_by_id: string | null;
+		}>(
+			req,
+			sql`SELECT personal, created_by_id FROM ${table(req, "teams")}
+			     WHERE id = ${teamId} FOR NO KEY UPDATE`,
+		);
+		const team = locked[0];
+		if (!team?.personal) return data;
+		const members = await req.payload.count({
+			collection: "memberships",
+			where: { team: { equals: teamId } },
+			req,
+		});
+		if (
+			members.totalDocs > 0 ||
+			data.role !== "owner" ||
+			team.created_by_id === null ||
+			relId(data.user) !== String(team.created_by_id)
+		) {
+			throw new APIError("personal_team", 400);
+		}
+		return data;
+	};
+
 export const membershipsLastOwnerBeforeChange: CollectionBeforeChangeHook =
 	async ({ data, originalDoc, operation, req }) => {
 		if (operation !== "update" || !originalDoc) return data;
@@ -151,6 +188,21 @@ export const teamsBeforeDelete: CollectionBeforeDeleteHook = async ({
 	}
 };
 
+/** personal is fixed at create: the rules above depend on it. */
+export const teamsPersonalFixedBeforeChange: CollectionBeforeChangeHook = ({
+	data,
+	originalDoc,
+	operation,
+}) => {
+	if (operation !== "update" || !originalDoc || data.personal === undefined) {
+		return data;
+	}
+	if ((data.personal === true) !== (originalDoc.personal === true)) {
+		throw new APIError("personal_immutable", 400);
+	}
+	return data;
+};
+
 // ---------------------------------------------------------------- api-keys
 
 /** Revoking sets revokedBy to the user of the request (operator in /admin). */
@@ -182,6 +234,33 @@ export const requiredOnCreate: Validate = (
 		: true;
 
 // ---------------------------------------------------------------- users
+
+/**
+ * active true -> false without a reason (an operator in /admin) records
+ * deactivatedReason "operator" and deactivatedAt; ctl-idp-sync passes its
+ * own reason. false -> true clears both.
+ */
+export const usersDeactivationBeforeChange: CollectionBeforeChangeHook = ({
+	data,
+	originalDoc,
+	operation,
+}) => {
+	if (operation !== "update" || !originalDoc || data.active === undefined) {
+		return data;
+	}
+	const was = originalDoc.active !== false;
+	const now = data.active !== false;
+	if (was && !now) {
+		if (data.deactivatedReason == null) data.deactivatedReason = "operator";
+		if (data.deactivatedAt == null) {
+			data.deactivatedAt = new Date().toISOString();
+		}
+	} else if (!was && now) {
+		data.deactivatedReason = null;
+		data.deactivatedAt = null;
+	}
+	return data;
+};
 
 /**
  * Users are never deleted (S8 §7), except stubs: no idpSubject, never logged

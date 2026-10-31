@@ -2,12 +2,19 @@ import type { CollectionConfig } from "payload";
 import { isOperatorReq, operatorOnly } from "../access.ts";
 import { jsonFieldAdmin } from "../admin-components.ts";
 import { identityAfterChange, identityAfterDelete } from "../hooks/identity.ts";
-import { usersStubOnlyBeforeDelete } from "../hooks/rules.ts";
+import {
+	usersDeactivationBeforeChange,
+	usersStubOnlyBeforeDelete,
+} from "../hooks/rules.ts";
 import {
 	usersRevokeAfterChange,
 	usersRevokeAfterDelete,
 } from "../hooks/ssh-revoke.ts";
 import { oauth2ProxyStrategy } from "../identity/strategy.ts";
+
+// Only resolveSession writes them, from the IdP claims (Local API,
+// overrideAccess): through /admin and /cms-api the values are dropped.
+const fromIdp = { create: () => false, update: () => false };
 
 const lowercase = ({ value }: { value?: unknown }) =>
 	typeof value === "string" ? value.trim().toLowerCase() : value;
@@ -32,6 +39,7 @@ export const Users: CollectionConfig = {
 		delete: operatorOnly,
 	},
 	hooks: {
+		beforeChange: [usersDeactivationBeforeChange],
 		beforeDelete: [usersStubOnlyBeforeDelete],
 		afterChange: [identityAfterChange("users"), usersRevokeAfterChange],
 		afterDelete: [identityAfterDelete("users"), usersRevokeAfterDelete],
@@ -58,6 +66,7 @@ export const Users: CollectionConfig = {
 		{
 			name: "groups",
 			type: "json",
+			access: fromIdp,
 			admin: {
 				...jsonFieldAdmin,
 				readOnly: true,
@@ -68,6 +77,7 @@ export const Users: CollectionConfig = {
 			name: "isOperator",
 			type: "checkbox",
 			defaultValue: false,
+			access: fromIdp,
 			admin: { readOnly: true },
 		},
 		{ name: "active", type: "checkbox", defaultValue: true },

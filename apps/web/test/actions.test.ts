@@ -638,9 +638,23 @@ describe.skipIf(skipPg())("server actions (S8 §9.11)", () => {
 				},
 				depth: 0,
 			});
+			// A key entry edited by hand in /admin with a non-UUID id.
+			await payload.create({
+				collection: "team-notices",
+				data: {
+					team: uuidOf(teamId),
+					kind: "member_deactivated",
+					user: member.userId,
+					apiKeys: [
+						{ id: "not-a-uuid", publicId: "key_bad", name: "bad", prefix: "x" },
+					],
+				},
+				depth: 0,
+			});
 			const s = await loadTeamSettingsImpl(owner.ctx, { teamId });
 			if (!("ok" in s)) throw new Error(JSON.stringify(s));
-			expect(s.notices).toHaveLength(1);
+			expect(s.notices).toHaveLength(2);
+			expect(s.notices[1]?.apiKeys).toEqual([]);
 			expect(s.notices[0]?.user?.email).toBe(member.session.user.email);
 			expect(s.notices[0]?.apiKeys).toEqual([
 				{

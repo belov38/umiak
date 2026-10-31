@@ -119,6 +119,71 @@ describe.skipIf(skipPg())("collection and global access", () => {
 		});
 	}
 
+	it("payload-locked-documents: operators only (/cms-api would list who edits what)", async () => {
+		const as = { overrideAccess: false, user: member };
+		const team = await payload.create({
+			collection: "teams",
+			data: { name: "locked" },
+		});
+		const lock = await payload.create({
+			collection: "payload-locked-documents",
+			data: {
+				document: { relationTo: "teams", value: team.id },
+				user: { relationTo: "users", value: operator.id },
+			},
+		});
+		const slug = "payload-locked-documents";
+		await forbidden(payload.find({ collection: slug, ...as }));
+		await forbidden(payload.findByID({ collection: slug, id: lock.id, ...as }));
+		await forbidden(
+			payload.create({
+				collection: slug,
+				data: { user: { relationTo: "users", value: member.id } },
+				...as,
+			}),
+		);
+		await forbidden(
+			payload.update({ collection: slug, id: lock.id, data: {}, ...as }),
+		);
+		await forbidden(payload.delete({ collection: slug, id: lock.id, ...as }));
+		const r = await payload.find({
+			collection: slug,
+			overrideAccess: false,
+			user: operator,
+		});
+		expect(r.docs.map((d) => d.id)).toContain(lock.id);
+	});
+
+	it("payload-migrations: closed to non-operators; payload-preferences: own rows only", async () => {
+		await forbidden(
+			payload.find({
+				collection: "payload-migrations",
+				overrideAccess: false,
+				user: member,
+			}),
+		);
+		await forbidden(
+			payload.create({
+				collection: "payload-migrations",
+				data: { name: "x", batch: 1 },
+				overrideAccess: false,
+				user: operator,
+			}),
+		);
+		await payload.create({
+			collection: "payload-preferences",
+			data: { key: "k", value: { a: 1 } },
+			user: operator,
+			overrideAccess: false,
+		});
+		const mine = await payload.find({
+			collection: "payload-preferences",
+			overrideAccess: false,
+			user: member,
+		});
+		expect(mine.docs).toEqual([]);
+	});
+
 	it("nobody creates api-keys through Payload access, operators neither", async () => {
 		await forbidden(
 			payload.create({

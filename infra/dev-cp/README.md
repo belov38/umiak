@@ -91,8 +91,9 @@ infra/dev-cp/deploy.sh [--dry-run]
 1. Runs `dev-ca.sh`. Copies the working tree (`git ls-files`, ignored files excluded) to `~/boat-dev-clone` on the CT and removes files that are gone. `deploy/compose/secrets/` and `deploy/compose/.env` stay.
 2. Copies `pve-token`, `pve-root-ca.pem`, `sbx-node_ed25519`, `known_hosts` and `dev-ca/ca.{pem,key}` from `~/.config/sbx` to `~/.config/sbx` on the CT (mode 0600). `known_hosts` gets the host key pinned for the host LAN address too.
 3. Checks the CT's MagicDNS name against `names.sh`, puts the dev CA into `secrets/gateway` when it changed, writes `deploy/compose/.env` (below), `secrets/devcp/sbx.yaml` (the PVE API on the LAN address) and `secrets/data-keys.json` once.
-4. `docker compose up -d --build --remove-orphans`, waits until `worker`, `gateway`, `api`, `oauth2-proxy` and `web` are healthy (the first Keycloak start takes a minute or two), prints the worker, gateway and api `/readyz`, applies the Serve config.
-5. From the Mac, with real DNS: the tunnel host and a preview host with the dev CA, each Serve port and the api `/v1/meta` with the system trust store.
+4. On the first S8 deploy (Postgres runs, `identity.users` exists, `payload.payload_migrations` does not) stops `api` and `worker` (`docker compose stop api worker`): the pre-S8 api writes into `identity` while `web-migrate` copies it into `payload`, and rows written after the copy would be lost (S8 §21.2). Later deploys skip this step.
+5. `docker compose up -d --build --remove-orphans`, waits until `worker`, `gateway`, `api`, `oauth2-proxy` and `web` are healthy (the first Keycloak start takes a minute or two), prints the worker, gateway and api `/readyz`, applies the Serve config.
+6. From the Mac, with real DNS: the tunnel host and a preview host with the dev CA, each Serve port and the api `/v1/meta` with the system trust store.
 
 `.env`: `COMPOSE_FILE` (the stack plus `compose.dev-cp.yaml`), `SBX_PVE_URL`, `SBX_PVE_TLS_NAME`, `SBX_NODE_SSH_HOST` (host LAN address `192.168.68.116`), `SBX_PVE_SECRETS_DIR`, the names (`SBX_DEVCP_TUNNEL_HOST`, `SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`, `SBX_DEVCP_SSH_HOST`) and the public URLs (`SBX_DEVCP_TS_NAME`, `SBX_APP_ORIGIN`, `SBX_API_PUBLIC_URL`, `SBX_KEYCLOAK_URL`, `SBX_OIDC_ISSUER`, `SBX_GATEWAY_AUTH_URL`, `SBX_OAUTH2_PROXY_REDIRECT_URL`, `SBX_LOGOUT_URL`).
 
@@ -141,6 +142,8 @@ On the CT, `cd ~/boat-dev-clone/deploy/compose`; `docker compose ps|logs|exec` p
 > - `web:3000` is not reachable from a container on the `sbx` network (`deploy/compose/README.md`, «web (S8)»), and nothing listens on 3000 on the CT.
 > - `worker` log: `ctl-idp-sync` passes without `KeycloakError` (the service account `sbx-worker` has `view-users`).
 > - Postgres `SHOW max_connections` is 200.
+
+**First S8 deploy onto an S7 volume.** Stop `api` and `worker` before it (`docker compose stop api worker` on the CT, in `deploy/compose`): the old api writes into `identity` while the first Payload migration copies it, and rows written after the copy are not moved (S8 §21.2). `deploy.sh` does this itself when Postgres runs with `identity.users` and without `payload.payload_migrations` (step 4 of «Deploy»); by hand, do it before `docker compose up`.
 
 `deploy.sh` writes `SBX_LOGOUT_URL` from `names.sh` and waits for `web` too. The api and worker take templates, sizes and quotas from Payload now; `secrets/devcp/sbx.yaml` is read only by `migrate` (topology and template builds).
 

@@ -7,13 +7,22 @@ import {
 	killTransaction,
 	type Payload,
 } from "payload";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	AUTH_DENIED_HEADER,
 	authenticateHeaders,
 	getSbxPayload,
 	migrateSbxPayload,
 	oauth2ProxyStrategy,
+	parseAuthHeaders,
 	resolveSession,
 } from "../src/index.ts";
 import { closePayload, Listener, testOptions } from "./helpers.ts";
@@ -256,6 +265,55 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 		]);
 	});
 
+	it("alternating browser (headers with role: entries) and CLI (JWT groups) logins notify nothing", async () => {
+		const e = email();
+		const sub = randomUUID();
+		const header = parseAuthHeaders({
+			"x-auth-request-email": e,
+			"x-auth-request-user": sub,
+			"x-auth-request-groups":
+				"role:offline_access,devs,role:uma_authorization,role:sbx-api:read",
+			"x-auth-request-preferred-username": "bob",
+		});
+		if (header === null) throw new Error("no claims");
+		expect(header.groups).toEqual(["devs"]);
+		const token = { email: e, user: sub, groups: ["devs"] };
+		const first = await resolveSession(payload, header, opts);
+		await listener.settle();
+		listener.clear();
+		for (let i = 0; i < 3; i++) {
+			await resolveSession(payload, token, opts);
+			await resolveSession(payload, header, opts);
+		}
+		expect(await listener.settle()).toEqual([]);
+
+		// groups and preferredUsername that do differ are written, still
+		// without sbx_identity (not part of SessionIdentity).
+		await resolveSession(
+			payload,
+			{ ...token, groups: ["devs", "qa"], preferredUsername: "robert" },
+			opts,
+		);
+		await resolveSession(payload, header, opts);
+		const row = await one<{ groups: unknown; preferred_username: string }>(
+			"SELECT groups, preferred_username FROM payload.users WHERE id = $1",
+			[first.user.id],
+		);
+		expect(row).toEqual({ groups: ["devs"], preferred_username: "bob" });
+		expect(await listener.settle()).toEqual([]);
+
+		// isOperator still notifies.
+		const op = await resolveSession(
+			payload,
+			{ ...token, groups: ["devs", OPS] },
+			opts,
+		);
+		expect(op.isOperator).toBe(true);
+		expect((await listener.settle()).map((n) => n.payload)).toEqual([
+			`users:${first.user.id}`,
+		]);
+	});
+
 	it("lastLoginAt is written at most once per 60 s", async () => {
 		const e = email();
 		const sub = randomUUID();
@@ -343,6 +401,32 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 				_strategy: "oauth2-proxy",
 			});
 			expect(res.responseHeaders).toBeUndefined();
+		});
+
+		it("isOperator of the user comes from the resolved session, not from the second read", async () => {
+			const e = email();
+			const real = payload.findByID.bind(payload);
+			// A concurrent write between resolveSession and the read of the doc.
+			const spy = vi.spyOn(payload, "findByID").mockImplementationOnce((async (
+				a: Parameters<typeof real>[0],
+			) => ({
+				...(await real(a)),
+				isOperator: false,
+			})) as never);
+			try {
+				const res = await oauth2ProxyStrategy.authenticate({
+					payload,
+					headers: headers({
+						"x-auth-request-email": e,
+						"x-auth-request-user": randomUUID(),
+						"x-auth-request-groups": OPS,
+					}),
+				});
+				expect(spy).toHaveBeenCalledTimes(1);
+				expect(res.user).toMatchObject({ email: e, isOperator: true });
+			} finally {
+				spy.mockRestore();
+			}
 		});
 
 		it("no email header -> no user; no sub -> no user", async () => {

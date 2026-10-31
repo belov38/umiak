@@ -35,6 +35,16 @@ describe("parseAuthHeaders (S8 §5.2)", () => {
 		expect(parseAuthHeaders(h)?.groups).toEqual(["a", "b", "c"]);
 	});
 
+	it("drops the role:<name> entries of oauth2-proxy's keycloak-oidc provider", () => {
+		expect(
+			parseAuthHeaders({
+				"x-auth-request-email": "a@b.com",
+				"x-auth-request-groups":
+					"role:offline_access,sbx-operators,role:sbx-api:read, role:uma_authorization,devs",
+			})?.groups,
+		).toEqual(["sbx-operators", "devs"]);
+	});
+
 	it("no email is null", () => {
 		expect(parseAuthHeaders(new Headers())).toBe(null);
 		expect(parseAuthHeaders({ "x-auth-request-email": "  " })).toBe(null);

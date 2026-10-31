@@ -29,6 +29,7 @@ export {
 export {
 	AUTH_HEADERS,
 	type HeaderSource,
+	isRoleEntry,
 	parseAuthHeaders,
 } from "./identity/headers.ts";
 export {
@@ -71,6 +72,7 @@ export {
 	type KeycloakAdminClientOptions,
 	KeycloakError,
 	type KeycloakUser,
+	MAX_USER_PAGES,
 } from "./idp-sync/keycloak.ts";
 export {
 	type IdpDeactivatedReason,

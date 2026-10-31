@@ -5,6 +5,7 @@ import {
 	membershipsFixedPairBeforeChange,
 	membershipsLastOwnerBeforeChange,
 	membershipsLastOwnerBeforeDelete,
+	membershipsPersonalTeamBeforeChange,
 } from "../hooks/rules.ts";
 import { membershipsRevokeAfterDelete } from "../hooks/ssh-revoke.ts";
 
@@ -25,6 +26,7 @@ export const Memberships: CollectionConfig = {
 		beforeChange: [
 			membershipsFixedPairBeforeChange,
 			membershipsLastOwnerBeforeChange,
+			membershipsPersonalTeamBeforeChange,
 		],
 		beforeDelete: [membershipsLastOwnerBeforeDelete],
 		afterChange: [identityAfterChange("memberships")],

@@ -17,6 +17,7 @@ import {
 	type IdpSyncAbort,
 	KeycloakAdminClient,
 	KeycloakIdpSync,
+	MAX_USER_PAGES,
 	migrateSbxPayload,
 } from "../src/index.ts";
 import { closePayload, Listener, openPayload } from "./helpers.ts";
@@ -40,12 +41,14 @@ interface FakeUser {
 /**
  * Keycloak over node:http: the client credentials token endpoint and the
  * admin user list/lookup. `users` is the realm; `exists` overrides the
- * lookup of a user id; `failPage` answers 500 for that page index.
+ * lookup of a user id; `failPage` answers 500 for that page index;
+ * `ignoreFirst` always answers the first page.
  */
 class FakeKeycloak {
 	users: FakeUser[] = [];
 	exists = new Map<string, number>();
 	failPage: number | undefined;
+	ignoreFirst = false;
 	tokens = 0;
 	lookups: string[] = [];
 	pages = 0;
@@ -111,11 +114,16 @@ class FakeKeycloak {
 			return this.#json(
 				res,
 				200,
-				this.users.slice(first, first + max).map((u) => ({
-					id: u.id,
-					username: u.id,
-					enabled: u.enabled,
-				})),
+				this.users
+					.slice(
+						this.ignoreFirst ? 0 : first,
+						(this.ignoreFirst ? 0 : first) + max,
+					)
+					.map((u) => ({
+						id: u.id,
+						username: u.id,
+						enabled: u.enabled,
+					})),
 			);
 		}
 		if (req.method === "GET" && url.pathname.startsWith(`${base}/`)) {
@@ -139,6 +147,7 @@ class FakeKeycloak {
 		this.users = [];
 		this.exists.clear();
 		this.failPage = undefined;
+		this.ignoreFirst = false;
 		this.lookups = [];
 		this.pages = 0;
 	}
@@ -199,6 +208,39 @@ describe("KeycloakAdminClient", () => {
 		expect(err).toBeInstanceOf(Error);
 		expect(err.message).toMatch(/token request returned 401/);
 		expect(err.message).not.toContain("wrong-secret-value");
+	});
+
+	it("a server that ignores first: a full page without new users throws", async () => {
+		kc.users = [1, 2, 3].map((i) => ({ id: `u${i}`, enabled: true }));
+		kc.ignoreFirst = true;
+		await expect(client().listUsers()).rejects.toThrow(
+			/full page without new users/,
+		);
+		expect(kc.pages).toBe(2);
+	});
+
+	it(`more than ${MAX_USER_PAGES} pages throws`, async () => {
+		let pages = 0;
+		const json = (body: unknown) =>
+			new Response(JSON.stringify(body), {
+				headers: { "content-type": "application/json" },
+			});
+		const c = new KeycloakAdminClient({
+			baseUrl: url,
+			realm: REALM,
+			clientId: CLIENT_ID,
+			clientSecret: SECRET,
+			pageSize: 1,
+			fetch: async (u) => {
+				if (String(u).includes("/token")) {
+					return json({ access_token: "t", expires_in: 300 });
+				}
+				pages += 1;
+				return json([{ id: `u${pages}`, enabled: true }]);
+			},
+		});
+		await expect(c.listUsers()).rejects.toThrow(/more than 10000 pages/);
+		expect(pages).toBe(MAX_USER_PAGES);
 	});
 
 	it("a timeout is an error", async () => {

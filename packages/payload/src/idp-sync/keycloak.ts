@@ -33,6 +33,9 @@ export class KeycloakError extends Error {
 	}
 }
 
+/** listUsers gives up after this many pages (a server that ignores `first`). */
+export const MAX_USER_PAGES = 10_000;
+
 /** Renews the token this long before it expires. */
 const TOKEN_MARGIN_MS = 30_000;
 
@@ -65,10 +68,17 @@ export class KeycloakAdminClient {
 	 * Every user of the realm: pages of `GET /users?briefRepresentation=true`
 	 * until an empty page. Any failed page throws: a partial list is never
 	 * returned. A user seen on two pages (the list shifted) is kept once.
+	 * A full page without a new user, or more than MAX_USER_PAGES pages,
+	 * throws instead of looping forever.
 	 */
 	async listUsers(): Promise<KeycloakUser[]> {
 		const out = new Map<string, KeycloakUser>();
-		for (let first = 0; ; first += this.#pageSize) {
+		for (let n = 0, first = 0; ; n++, first += this.#pageSize) {
+			if (n >= MAX_USER_PAGES) {
+				throw new KeycloakError(
+					`keycloak: GET users: more than ${MAX_USER_PAGES} pages`,
+				);
+			}
 			const q = new URLSearchParams({
 				briefRepresentation: "true",
 				first: String(first),
@@ -83,7 +93,13 @@ export class KeycloakAdminClient {
 			}
 			const page = parseUsers(await readJson(res, "GET users"));
 			if (page.length === 0) break;
+			const before = out.size;
 			for (const u of page) out.set(u.id, u);
+			if (page.length >= this.#pageSize && out.size === before) {
+				throw new KeycloakError(
+					`keycloak: GET users (first=${first}): a full page without new users`,
+				);
+			}
 		}
 		return [...out.values()];
 	}

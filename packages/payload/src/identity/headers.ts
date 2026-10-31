@@ -53,12 +53,23 @@ function strict(h: HeaderSource, name: string): string | undefined {
 }
 
 /**
+ * oauth2-proxy's keycloak-oidc provider adds the realm and client roles to
+ * X-Auth-Request-Groups as `role:<name>`. They are not IdP groups: the
+ * Keycloak JWT of CLI, SDK and MCP carries only the `groups` claim, and a
+ * browser and a CLI login of one user must store the same `users.groups`.
+ */
+export function isRoleEntry(group: string): boolean {
+	return group.startsWith("role:");
+}
+
+/**
  * S8 §5.2: email (lowercased, trimmed; required, else null; an empty,
  * repeated or comma-joined value counts as none), user (`sub`; the same
  * rule: an empty, repeated or comma-joined value counts as none),
  * groups (one comma-separated value or several values; split by `,`,
  * trimmed, empty and duplicate names dropped; names with a comma are not
- * supported), preferredUsername. A missing `user` is kept as undefined:
+ * supported; `role:<name>` entries dropped, see isRoleEntry),
+ * preferredUsername. A missing `user` is kept as undefined:
  * resolveSession answers subject_required.
  */
 export function parseAuthHeaders(h: HeaderSource): SessionHeaders | null {
@@ -69,7 +80,7 @@ export function parseAuthHeaders(h: HeaderSource): SessionHeaders | null {
 			values(h, AUTH_HEADERS.groups)
 				.flatMap((v) => v.split(","))
 				.map((g) => g.trim())
-				.filter((g) => g !== ""),
+				.filter((g) => g !== "" && !isRoleEntry(g)),
 		),
 	];
 	const out: SessionHeaders = { email: e, groups };

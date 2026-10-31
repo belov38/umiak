@@ -105,7 +105,13 @@ async function resolveRequest(
 		depth: 0,
 		disableErrors: true,
 	});
-	return { ...out, user: (doc as UserDoc | null) ?? null };
+	// isOperator of the resolved session, not of the second read: access
+	// rules (isOperatorReq) and the session must agree.
+	const user =
+		doc === null || doc === undefined
+			? null
+			: { ...(doc as UserDoc), isOperator: out.session.isOperator };
+	return { ...out, user };
 }
 
 /**

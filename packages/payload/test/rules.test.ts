@@ -256,8 +256,12 @@ describe.skipIf(skipPg())("collection rules", () => {
 		});
 
 		it("a personal team cannot be deleted", async () => {
-			const tm = await team({ personal: true });
-			await member(tm.id, "owner");
+			const u = await user();
+			const tm = await team({ personal: true, createdBy: u.id });
+			await payload.create({
+				collection: "memberships",
+				data: { user: u.id, team: tm.id, role: "owner" },
+			});
 			await apiError(
 				payload.delete({ collection: "teams", id: tm.id }),
 				"personal_team",
@@ -485,6 +489,180 @@ describe.skipIf(skipPg())("collection rules", () => {
 				data: { slug: "32gb", vcpu: 8, memoryMb: 32768 },
 			});
 			await payload.delete({ collection: "sizes", id: free.id });
+		});
+	});
+
+	describe("personal teams", () => {
+		it("personal is fixed after create, both ways", async () => {
+			const u = await user();
+			const mine = await team({ personal: true, createdBy: u.id });
+			await apiError(
+				payload.update({
+					collection: "teams",
+					id: mine.id,
+					data: { personal: false },
+				}),
+				"personal_immutable",
+			);
+			const shared = await team();
+			await apiError(
+				payload.update({
+					collection: "teams",
+					id: shared.id,
+					data: { personal: true },
+				}),
+				"personal_immutable",
+			);
+			// Saving the same value (the /admin form sends every field) is fine.
+			await payload.update({
+				collection: "teams",
+				id: mine.id,
+				data: { personal: true, name: "renamed" },
+			});
+			await payload.update({
+				collection: "teams",
+				id: shared.id,
+				data: { personal: false, name: "renamed" },
+			});
+		});
+
+		it("only the creator's owner membership, and only as the first one", async () => {
+			const creator = await user();
+			const other = await user();
+			const tm = await team({ personal: true, createdBy: creator.id });
+			const add = (u: string | number, role: "owner" | "member") =>
+				payload.create({
+					collection: "memberships",
+					data: { user: u, team: tm.id, role },
+				});
+			await apiError(add(other.id, "owner"), "personal_team");
+			await apiError(add(creator.id, "member"), "personal_team");
+			await add(creator.id, "owner");
+			await apiError(add(other.id, "member"), "personal_team");
+			await apiError(
+				payload.create({
+					collection: "memberships",
+					data: { user: other.id, team: tm.id, role: "member" },
+					overrideAccess: false,
+					user: operator,
+				}),
+				"personal_team",
+			);
+			expect(await count("memberships", { team: { equals: tm.id } })).toBe(1);
+			const orphan = await team({ personal: true });
+			await apiError(
+				payload.create({
+					collection: "memberships",
+					data: { user: creator.id, team: orphan.id, role: "owner" },
+				}),
+				"personal_team",
+			);
+		});
+	});
+
+	describe("users: deactivation", () => {
+		const read = (id: string | number) =>
+			payload.findByID({ collection: "users", id, depth: 0 });
+
+		it("true -> false without a reason records operator and the time; false -> true clears both", async () => {
+			const u = await user({ active: true });
+			const before = Date.now();
+			await payload.update({
+				collection: "users",
+				id: u.id,
+				data: { active: false },
+				overrideAccess: false,
+				user: operator,
+			});
+			const off = await read(u.id);
+			expect(off.active).toBe(false);
+			expect(off.deactivatedReason).toBe("operator");
+			expect(
+				new Date(off.deactivatedAt as string).getTime(),
+			).toBeGreaterThanOrEqual(before - 1000);
+			await payload.update({
+				collection: "users",
+				id: u.id,
+				data: { active: true },
+				overrideAccess: false,
+				user: operator,
+			});
+			const on = await read(u.id);
+			expect(on.active).toBe(true);
+			expect(on.deactivatedReason ?? null).toBe(null);
+			expect(on.deactivatedAt ?? null).toBe(null);
+		});
+
+		it("a given reason and time are kept (ctl-idp-sync)", async () => {
+			const u = await user({ active: true });
+			const at = "2026-01-02T03:04:05.000Z";
+			await payload.update({
+				collection: "users",
+				id: u.id,
+				data: {
+					active: false,
+					deactivatedReason: "idp_deleted",
+					deactivatedAt: at,
+				},
+			});
+			const off = await read(u.id);
+			expect(off.deactivatedReason).toBe("idp_deleted");
+			expect(off.deactivatedAt).toBe(at);
+			// Other updates of an inactive user leave them alone.
+			await payload.update({
+				collection: "users",
+				id: u.id,
+				data: { name: "x" },
+			});
+			expect((await read(u.id)).deactivatedReason).toBe("idp_deleted");
+		});
+	});
+
+	describe("users: IdP-owned fields", () => {
+		it("isOperator and groups are not written through access-checked updates", async () => {
+			const u = await user({ isOperator: false, groups: ["devs"] });
+			await payload.update({
+				collection: "users",
+				id: u.id,
+				data: { isOperator: true, groups: ["sbx-operators"], name: "n" },
+				overrideAccess: false,
+				user: operator,
+			});
+			const after = await payload.findByID({
+				collection: "users",
+				id: u.id,
+				depth: 0,
+			});
+			expect(after.name).toBe("n");
+			expect(after.isOperator).toBe(false);
+			expect(after.groups).toEqual(["devs"]);
+			const created = await payload.create({
+				collection: "users",
+				data: {
+					email: `c-${randomUUID()}@example.com`,
+					isOperator: true,
+					groups: ["sbx-operators"],
+				},
+				overrideAccess: false,
+				user: operator,
+			});
+			const c = await payload.findByID({
+				collection: "users",
+				id: created.id,
+				depth: 0,
+			});
+			expect(c.isOperator).toBe(false);
+			expect(c.groups ?? null).toBe(null);
+			// The Local API with overrideAccess (resolveSession) still writes them.
+			await payload.update({
+				collection: "users",
+				id: u.id,
+				data: { isOperator: true },
+			});
+			expect(
+				(await payload.findByID({ collection: "users", id: u.id, depth: 0 }))
+					.isOperator,
+			).toBe(true);
 		});
 	});
 

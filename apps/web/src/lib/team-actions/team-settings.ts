@@ -190,14 +190,21 @@ interface StoredNoticeKey {
 	prefix: string;
 }
 
-/** `team-notices.apiKeys` as written by the IdP sync; anything else dropped. */
+const UUID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `team-notices.apiKeys` as written by the IdP sync; anything else dropped,
+ * a non-UUID id too (an operator's JSON in /admin): it would fail the
+ * `id in [...]` query of the uuid column and the whole page with it.
+ */
 function noticeKeys(v: unknown): StoredNoticeKey[] {
 	if (!Array.isArray(v)) return [];
 	const out: StoredNoticeKey[] = [];
 	for (const k of v) {
 		if (!k || typeof k !== "object") continue;
 		const r = k as Record<string, unknown>;
-		if (typeof r.id !== "string") continue;
+		if (typeof r.id !== "string" || !UUID_RE.test(r.id)) continue;
 		let publicId: string;
 		try {
 			publicId =

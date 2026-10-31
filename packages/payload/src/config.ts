@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { postgresAdapter } from "@payloadcms/db-postgres";
 import { buildConfig, type EmailAdapter, type SanitizedConfig } from "payload";
+import { nobody, operatorAccess, operatorOnly } from "./access.ts";
 import { ApiKeys } from "./collections/api-keys.ts";
 import { Memberships } from "./collections/memberships.ts";
 import { PoolTargets } from "./collections/pool-targets.ts";
@@ -67,9 +68,35 @@ const noEmail: EmailAdapter = () => ({
 	},
 });
 
-export function buildSbxConfig(o: SbxPayloadOptions): Promise<SanitizedConfig> {
+/**
+ * Payload's own collections. payload-locked-documents takes any signed-in
+ * user by default (/cms-api would show every member who edits what in
+ * /admin): operators only, as /admin. payload-migrations (no REST
+ * endpoints) is closed too. payload-preferences stays: Payload scopes it to
+ * the user of the request.
+ */
+function restrictInternalCollections(config: SanitizedConfig): SanitizedConfig {
+	for (const c of config.collections) {
+		if (c.slug === "payload-locked-documents") {
+			c.access = { ...c.access, ...operatorAccess };
+		} else if (c.slug === "payload-migrations") {
+			c.access = {
+				...c.access,
+				read: operatorOnly,
+				create: nobody,
+				update: nobody,
+				delete: nobody,
+			};
+		}
+	}
+	return config;
+}
+
+export async function buildSbxConfig(
+	o: SbxPayloadOptions,
+): Promise<SanitizedConfig> {
 	const sbx: SbxCustomConfig = { operatorGroups: [...o.operatorGroups] };
-	return buildConfig({
+	const config = await buildConfig({
 		secret: o.secret,
 		telemetry: false,
 		db: postgresAdapter({
@@ -113,6 +140,7 @@ export function buildSbxConfig(o: SbxPayloadOptions): Promise<SanitizedConfig> {
 			? {}
 			: { onInit: (payload) => sessionCacheOnInit(payload, o) }),
 	});
+	return restrictInternalCollections(config);
 }
 
 function sessionCacheOnInit(

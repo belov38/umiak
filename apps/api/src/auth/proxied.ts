@@ -23,7 +23,13 @@ const FORM_TYPES = [
 	"text/plain",
 ];
 
-/** `X-Auth-Request-Groups`: comma-separated and/or repeated (Node joins repeats with ", "). */
+/**
+ * `X-Auth-Request-Groups`: comma-separated and/or repeated (Node joins
+ * repeats with ", "). `role:<name>` entries (realm and client roles that
+ * oauth2-proxy's keycloak-oidc provider adds) are dropped, as in
+ * parseAuthHeaders of @sbx/payload: the CLI JWT has only `groups`, and both
+ * logins must store the same users.groups.
+ */
 export function parseGroups(v: string | undefined): string[] {
 	if (v === undefined) return [];
 	return [
@@ -31,7 +37,7 @@ export function parseGroups(v: string | undefined): string[] {
 			v
 				.split(",")
 				.map((g) => g.trim())
-				.filter((g) => g !== ""),
+				.filter((g) => g !== "" && !g.startsWith("role:")),
 		),
 	];
 }
