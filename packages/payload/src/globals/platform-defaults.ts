@@ -49,6 +49,7 @@ export const PlatformDefaults: GlobalConfig = {
 			required: true,
 			defaultValue: "linux",
 		},
+		{ name: "publicDesktopEnabled", type: "checkbox", defaultValue: false },
 		{ name: "publicPortsEnabled", type: "checkbox", defaultValue: true },
 		{
 			name: "ssoPortPolicy",

@@ -593,7 +593,7 @@ export const environments = runtime.table("environments", {
 	updatedBy: uuid("updated_by"),
 });
 
-// S10 policy and single-use ticket state (migrations 0400-0401).
+// S10 policy and single-use ticket state (migrations 0401-0402).
 export const sandboxDesktops = runtime.table("sandbox_desktops", {
 	sandboxId: uuid("sandbox_id")
 		.primaryKey()

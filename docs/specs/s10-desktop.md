@@ -628,7 +628,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 
 ### 13.5 Таблицы
 
-Схема `runtime`, миграции S10 в `db/migrations/` с номерами **0400–0499** [S10, по прецеденту S7]:
+Схема `runtime`, миграции S10 в `db/migrations/` с номерами **0401–0499** (0400 занята S8 environments) [S10, по прецеденту S7]:
 
 ```
 sandbox_desktops(
@@ -978,3 +978,5 @@ TimeoutStopSec3. Revoke отменяет ещё и незавершённые Op
 чтобы disconnect не ждал30s HTTP handshake. Windows Cua task запускает serve
 через hidden wrapper; PowerShell7.6.9 закреплён в mise, как в S9. Windows POSIX
 file modes синтетические: private access обеспечивается DACL и проверяется live.
+
+S8 integration (2026-10-31): Desktop tab uses real SDK, fresh single-use tickets outside query cache, retry2s on desktop_not_ready, iframe/fullscreen/new-tab/access/disconnect/resume. Payload migration adds publicDesktopEnabled=false + route invalidation and desktop4gb/8gb seeds. Runtime desktop migrations moved to0401/0402 after S8 environments0400. Linux verify stops source clone before booting fork (one4GiB VM). Master permits S9≤4GiB + S10≤4GiB; total≤8GiB.

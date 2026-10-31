@@ -90,6 +90,32 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 		});
 	});
 
+	it("seeds desktop capability and 4gb/8gb without a pool", async () => {
+		const templates = await payload.find({
+			collection: "templates",
+			where: { slug: { equals: "linux-desktop" } },
+		});
+		expect(templates.docs[0]).toMatchObject({
+			defaultSize: "4gb",
+			allowedSizes: ["4gb", "8gb"],
+			capabilities: ["exec", "files", "ssh", "desktop"],
+		});
+		for (const [slug, vcpu, memoryMb] of [
+			["4gb", 4, 4096],
+			["8gb", 8, 8192],
+		] as const) {
+			const result = await payload.find({
+				collection: "sizes",
+				where: { slug: { equals: slug } },
+			});
+			expect(result.docs[0]).toMatchObject({ vcpu, memoryMb });
+		}
+		expect(
+			(await payload.findGlobal({ slug: "platform-defaults" }))
+				.publicDesktopEnabled,
+		).toBe(false);
+	});
+
 	it("seeds the PoC template and size, no pool target", async () => {
 		const tpl = await payload.find({
 			collection: "templates",
@@ -141,9 +167,10 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			where: { slug: { equals: "4gb" } },
 		});
 		expect(sizes.docs).toHaveLength(1);
+		// S9 seeds 2 vCPU; the S10 desktop migration raises it to 4 (S10 §11).
 		expect(sizes.docs[0]).toMatchObject({
 			slug: "4gb",
-			vcpu: 2,
+			vcpu: 4,
 			memoryMb: 4096,
 		});
 		expect((await payload.find({ collection: "pool-targets" })).docs).toEqual(

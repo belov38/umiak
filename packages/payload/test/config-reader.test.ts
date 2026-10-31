@@ -304,10 +304,11 @@ describe.skipIf(skipPg())("PayloadConfigReader", () => {
 			expect((await r.defaults()).ssoPolicyEpoch).toBe(4);
 			await payload.updateGlobal({
 				slug: "platform-defaults",
-				data: { publicPortsEnabled: true },
+				data: { publicPortsEnabled: true, publicDesktopEnabled: true },
 				overrideAccess: true,
 			});
 			expect((await r.defaults()).publicPortsEnabled).toBe(true);
+			expect((await r.defaults()).publicDesktopEnabled).toBe(true);
 			// ssoPortPolicy team -> any keeps the epoch, any -> team adds one.
 			await payload.updateGlobal({
 				slug: "platform-defaults",

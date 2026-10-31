@@ -74,6 +74,7 @@ describe.skipIf(skipPg())("worker with Payload", () => {
 		expect((await w.ctx.config.sizes()).map((s) => s.slug)).toEqual([
 			"2gb",
 			"4gb",
+			"8gb",
 		]);
 	});
 });

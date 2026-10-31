@@ -169,7 +169,7 @@ export function SandboxPage({
 					</TabsContent>
 					{desktop && (
 						<TabsContent value="desktop" className="pt-3">
-							<DesktopTab />
+							<DesktopTab sandbox={s} handle={handle} track={live.track} />
 						</TabsContent>
 					)}
 				</Tabs>
