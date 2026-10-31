@@ -2,8 +2,8 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { verifyDesktopMedia } from "../../apps/web/e2e/desktop-media.ts";
 import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
-
 import { waitForDesktopBudget } from "./desktop-budget.ts";
 
 const client = new Sbx();
@@ -90,6 +90,7 @@ try {
 		response?.status === 200 && (await response.text()).includes("<html"),
 		"gateway stream page",
 	);
+	await verifyDesktopMedia(sb, output);
 	await sb.desktop.endStreams();
 	// Fork a stopped source so this track uses only 4GiB while S9 is running.
 	const credentialHash = async (s: Sandbox) => {
