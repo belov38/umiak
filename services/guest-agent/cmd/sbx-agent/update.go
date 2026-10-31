@@ -123,7 +123,7 @@ func selftestCmd(ctx context.Context, d deps, args []string, stdout, stderr io.W
 	}
 	exe, err := d.executable()
 	if err == nil {
-		exe, err = filepath.EvalSymlinks(exe)
+		exe, err = resolveBinary(exe)
 	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "sbx-agent selftest: %v\n", err)

@@ -154,8 +154,13 @@ func TestSelftestCLI(t *testing.T) {
 	if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, "v1", priv, pub)}, io.Discard, io.Discard); code != 0 {
 		t.Fatal("install failed")
 	}
-	// The binary runs through the CLI link.
-	d.executable = func() (string, error) { return d.layout.BinLink, nil }
+	// The binary runs through the CLI link, on Windows through the current
+	// junction on the system Path.
+	exe := d.layout.BinLink
+	if exe == "" {
+		exe = filepath.Join(d.layout.CurrentLink, update.BinaryName)
+	}
+	d.executable = func() (string, error) { return exe, nil }
 	d.version = "v1"
 
 	var out, errOut bytes.Buffer

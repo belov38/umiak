@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/coreos/go-systemd/v22/daemon"
@@ -88,3 +89,8 @@ func sdNotify(state string) error {
 // serviceDeps keeps the systemd defaults of install-package, rollback and
 // doctor.
 func serviceDeps(*deps) {}
+
+// resolveBinary resolves the symlinks of the path of the running binary.
+func resolveBinary(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
+}

@@ -172,6 +172,12 @@ func platformAgentDeps(ctx context.Context, d deps) (agent.Deps, func(), error) 
 // letter path); x/sys has no constant for it.
 const volumeNameDOS = 0
 
+// resolveBinary resolves the path of the running binary, which runs
+// through the current junction on the system Path (finalPath).
+func resolveBinary(path string) (string, error) {
+	return finalPath(path)
+}
+
 // finalPath resolves path with junctions and symlinks followed
 // (GetFinalPathNameByHandle): filepath.EvalSymlinks leaves junctions such
 // as current alone since Go 1.23.
