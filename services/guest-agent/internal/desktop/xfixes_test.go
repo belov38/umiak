@@ -1,12 +1,13 @@
 package desktop
 
 import (
-	"github.com/jezek/xgb"
-	"github.com/jezek/xgb/xfixes"
 	"io"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/jezek/xgb"
+	"github.com/jezek/xgb/xfixes"
 )
 
 // Wire fixture follows xserver/xfixes/xfixes.c: only QueryVersion is
@@ -14,9 +15,9 @@ import (
 func TestXFixesNegotiatesBeforeCursorCapture(t *testing.T) {
 	client, server := net.Pipe()
 	_ = server.SetDeadline(time.Now().Add(3 * time.Second))
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	go func() {
-		defer server.Close()
+		defer func() { _ = server.Close() }()
 		hello := make([]byte, 12)
 		if _, e := io.ReadFull(server, hello); e != nil {
 			return
