@@ -25,7 +25,8 @@ class Snapshot:
 
     Attributes:
         consistency (None | SnapshotConsistencyType1 | SnapshotConsistencyType2Type1 | SnapshotConsistencyType3Type1):
-            quiesced: filesystems frozen in a running VM; powered_off: taken from a stopped VM; null until ready
+            quiesced: filesystems frozen in a running VM; powered_off: taken from a stopped VM; crash: a running VM paused
+            without a filesystem freeze (Windows), like a power loss; null until ready
         created_at (datetime.datetime): ISO 8601 UTC with milliseconds
         error (None | SnapshotErrorType0): Why it failed; null otherwise
         id (str):  Example: snap_01jbx2v7d3m6c8q9w0e4r5t6y7.

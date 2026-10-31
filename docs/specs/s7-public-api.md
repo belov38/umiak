@@ -861,7 +861,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
   - `POST /v1/snapshots {sandbox, name}` (`Idempotency-Key`) → `202 {snapshot, operation}`. Существующий снапшот с тем же именем заменяется, когда новый станет `ready` (S6 §7.8).
   - `GET /v1/snapshots` → список, включая `creating` (их `name` — ожидаемое имя) и `failed` за последние сутки; `GET /v1/snapshots/{name}` → ready-снапшот или создающийся с этим именем.
   - `DELETE /v1/snapshots/{name}` → `204` (S6 сразу освобождает имя).
-  - Ресурс: `{id: "snap_...", name, state: "creating"|"ready"|"failed"|"deleting", sourceSandboxId, template, templateVersion, size, consistency: "quiesced"|"powered_off", error, createdAt, readyAt}`.
+  - Ресурс: `{id: "snap_...", name, state: "creating"|"ready"|"failed"|"deleting", sourceSandboxId, template, templateVersion, size, consistency: "quiesced"|"powered_off"|"crash", error, createdAt, readyAt}`.
   - Create из снапшота — `POST /v1/sandboxes {from: {snapshot: name}}`.
 - **API-ключи:**
   - `GET /v1/api-keys` — все ключи команды запроса; видят все участники и ключ с `keys:admin`;

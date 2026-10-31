@@ -239,9 +239,11 @@ func TestCallWithoutAgent(t *testing.T) {
 
 func TestCallUTF8BOMStdin(t *testing.T) {
 	a := startCLIAgent(t)
-	code, out, errOut := a.cli(t, "\xef\xbb\xbf{}\r\n", "call", "sbx.agent.v1.System/Info", "-")
-	if code != 0 || !strings.Contains(out, cliMachineID) {
-		t.Fatalf("call BOM stdin: exit %d, stdout %q, stderr %q", code, out, errOut)
+	for _, in := range []string{"\xef\xbb\xbf{}\r\n", "\xef\xbb\xbf\xef\xbb\xbf{}\r\n"} {
+		code, out, errOut := a.cli(t, in, "call", "sbx.agent.v1.System/Info", "-")
+		if code != 0 || !strings.Contains(out, cliMachineID) {
+			t.Fatalf("call BOM stdin %q: exit %d, stdout %q, stderr %q", in, code, out, errOut)
+		}
 	}
 }
 
