@@ -195,8 +195,11 @@ func replaceSecret(tmp, path string) error {
 		// NTFS refuses to replace a file that is open, even by a reader
 		// that shares delete (zeroInPlace let it through). A POSIX rename
 		// replaces it; the reader keeps the zeroed old file.
-		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || posixRename(tmp, path) != nil {
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 			return secretFileError("replace", path, err)
+		}
+		if perr := posixRename(tmp, path); perr != nil {
+			return secretFileError("replace", path, errors.Join(err, perr))
 		}
 	}
 	return nil

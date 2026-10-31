@@ -28,6 +28,7 @@ import (
 
 	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
 	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 )
 
 // tunnelPackage is the proto package of the tunnel control API.
@@ -93,7 +94,8 @@ func (a *agent) serveLocal(ctx context.Context, ln net.Listener, path string, h 
 
 // listenPrivate listens on a unix socket at path that nobody but the owner
 // can connect to at any moment: the socket is created in a fresh 0700
-// directory next to path, made 0600 (on Windows given the DACL of the admin
+// directory next to path (on Windows a directory with the SYSTEM and
+// Administrators DACL), made 0600 (on Windows given the DACL of the admin
 // socket) and only then renamed into place.
 func listenPrivate(ctx context.Context, path string) (net.Listener, error) {
 	dir, err := os.MkdirTemp(filepath.Dir(path), ".sbx-debug-")
@@ -101,6 +103,11 @@ func listenPrivate(ctx context.Context, path string) (net.Listener, error) {
 		return nil, fmt.Errorf("agent: debug socket dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
+	// MkdirTemp's 0700 means nothing on Windows; MkdirSecure sets the DACL
+	// there (and keeps 0700 elsewhere).
+	if err := fsutil.MkdirSecure(dir, fsutil.SystemAndAdmins); err != nil {
+		return nil, fmt.Errorf("agent: debug socket dir: %w", err)
+	}
 	tmp := filepath.Join(dir, "s")
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "unix", tmp)

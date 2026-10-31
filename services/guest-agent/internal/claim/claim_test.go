@@ -561,8 +561,12 @@ func TestSecretsPendingAfterReboot(t *testing.T) {
 	// Where the secret env lives only in memory (Windows) it is gone and
 	// the secrets are pending (TestSecretEnvNotPersistedWhenDisabled).
 	m2 := h.newManager()
-	if st, _ := h.tr.State(readiness.PhaseSecrets); st != ready && !secretEnvMemoryOnly {
-		t.Errorf("secrets after restart = %v, want ready", st)
+	wantRestart := ready
+	if secretEnvMemoryOnly {
+		wantRestart = pending
+	}
+	if st, _ := h.tr.State(readiness.PhaseSecrets); st != wantRestart {
+		t.Errorf("secrets after restart = %v, want %v", st, wantRestart)
 	}
 	if env := m2.EnvBuilder().Build(testUser(), &agentv1.CommandSpec{}); !slices.Contains(env, "TOKEN="+secretEnvValue) && !secretEnvMemoryOnly {
 		t.Errorf("secret env not restored from tmpfs: %v", env)
