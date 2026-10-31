@@ -7,11 +7,20 @@ templates:
     enabled: true
     defaultSize: 2gb
     allowedSizes: [2gb]
+  # S9: Windows 11 Pro 26H2 (template build below). 4 GB is the Windows 11 minimum.
+  - slug: windows
+    os: windows
+    enabled: true
+    defaultSize: 4gb
+    allowedSizes: [4gb]
 
 sizes:
   - slug: 2gb
     vcpu: 2
     memoryMb: 2048
+  - slug: 4gb
+    vcpu: 2
+    memoryMb: 4096
 
 # Decision 17: warm pools are off. The worker must not create VMs on pve by
 # itself. Set a target here (and SBX_RECONCILE_DRY_RUN=0) to enable one.
@@ -82,3 +91,41 @@ topology:
           discard: "on"
           iothread: "1"
           ssd: "1"
+    # S9 template build (sbx-tpl build windows): Windows 11 Pro 26H2 from the ISO in
+    # local:iso, agent baked in (tunnel CA = the dev CA of the CT 590 gateway). Create is cold:
+    # clone, specialize, OOBE skip, one rename reboot (~2 min to agent ready).
+    - templateSlug: windows
+      version: "20261031.9"
+      os: windows
+      node: pve
+      storage: local-lvm
+      pveVmid: 598
+      bootTimeoutS: 1200
+      agentVersion: 0.1.0+20261031.a595e60
+      hw:
+        machine: pc-q35-11.0+pve2
+        cpu: host
+        bios: ovmf
+        ostype: win11
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        vga: std
+        tablet: "1"
+        localtime: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
+      diskLayout:
+        efidisk0:
+          index: "0"
+          efitype: 4m
+          pre-enrolled-keys: "1"
+          ms-cert: 2023k
+        scsi0:
+          index: "1"
+          size: 96G
+          discard: "on"
+          iothread: "1"
+          ssd: "1"
+        tpmstate0:
+          index: "2"
+          version: v2.0
