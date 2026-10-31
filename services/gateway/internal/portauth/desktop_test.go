@@ -69,3 +69,36 @@ func TestDesktopTicketCookieReplayEpochAndOrigin(t *testing.T) {
 		t.Fatal("unauthenticated preflight accepted")
 	}
 }
+
+func TestDesktopWebRTCMediaAndWebSocketRequireCurrentOriginAndEpoch(t *testing.T) {
+	h := newHarness(t, nil)
+	label := routes.Label{Raw: "quiet-otter-desktop", Slug: "quiet-otter", Kind: routes.KindDesktop}
+	rt := cpapi.Route{Access: "token", AuthEpoch: 7}
+	api := &desktopAPI{epoch: 7}
+	root := "https://" + label.Raw + "." + testDomain
+	issue := httptest.NewRequestWithContext(t.Context(), "GET", root+"/?_ticket=sbxd_secret", nil)
+	grant := h.auth.CheckDesktop(httptest.NewRecorder(), issue, label, rt, clientIP, "rid", api)
+	if grant.SetCookie == nil {
+		t.Fatal("no viewer cookie")
+	}
+	for _, media := range []struct{ method, path, upgrade string }{{"POST", "/api/host/stream/webrtc", ""}, {"PATCH", "/api/host/stream/webrtc/session", ""}, {"DELETE", "/api/host/stream/webrtc/session", ""}, {"GET", "/api/host/stream/web_socket", "websocket"}} {
+		for _, current := range []bool{true, false} {
+			req := httptest.NewRequestWithContext(t.Context(), media.method, root+media.path, nil)
+			req.AddCookie(grant.SetCookie)
+			req.Header.Set("Origin", root)
+			req.Header.Set("Upgrade", media.upgrade)
+			route := rt
+			if !current {
+				route.AuthEpoch++
+			}
+			result := h.auth.CheckDesktop(httptest.NewRecorder(), req, label, route, clientIP, "rid", api)
+			if result.Proceed != current {
+				t.Fatalf("%s %s epoch enforcement", media.method, media.path)
+			}
+			req.Header.Set("Origin", "https://other.example")
+			if h.auth.CheckDesktop(httptest.NewRecorder(), req, label, rt, clientIP, "rid", api).Proceed {
+				t.Fatal("foreign Origin reached media endpoint")
+			}
+		}
+	}
+}

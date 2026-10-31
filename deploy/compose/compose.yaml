@@ -182,7 +182,7 @@ services:
         export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
         && exec node apps/worker/src/main.ts
     environment:
-      SBX_TURN_SECRET_FILE: ${SBX_TURN_SECRET_FILE:-}
+      SBX_TURN_SECRET_FILE: ${SBX_TURN_SECRET_FILE:-/turn-secrets/auth-secret}
       SBX_TURN_URLS: ${SBX_TURN_URLS:-}
       <<: *db-env
       SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json

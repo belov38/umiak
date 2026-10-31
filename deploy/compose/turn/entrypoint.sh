@@ -4,12 +4,16 @@ set -eu
 : "${SBX_TURN_IP:?set the dedicated TURN listening/relay IP}"
 : "${SBX_TURN_REALM:?set the TURN DNS realm}"
 case "$SBX_TURN_IP" in *[!0-9.]*|'') echo 'SBX_TURN_IP must be an IPv4 address' >&2; exit 1;; esac
+printf '%s\n' "$SBX_TURN_IP" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++)if($i=="" || $i>255)exit 1}' || { echo 'invalid TURN IPv4 address' >&2; exit 1; }
 case "$SBX_TURN_REALM" in *[!A-Za-z0-9.-]*|'') echo 'invalid TURN realm' >&2; exit 1;; esac
-secret=$(cat /secrets/auth-secret)
+secrets=${SBX_TURN_SECRETS_DIR:-/secrets}
+run=${SBX_TURN_RUN_DIR:-/run/turn}
+[ -s "$secrets/tls.crt" ] && [ -s "$secrets/tls.key" ] || { echo 'TURN TLS certificate and key are required' >&2; exit 1; }
+secret=$(cat "$secrets/auth-secret")
 case "$secret" in *[!A-Za-z0-9+/=_-]*|'') echo 'invalid TURN secret' >&2; exit 1;; esac
 [ "${#secret}" -ge 43 ] || { echo 'TURN secret must encode at least 32 random bytes' >&2; exit 1; }
 umask 077
-config=$(mktemp /run/turn/config.XXXXXX)
+config=$(mktemp "$run/config.XXXXXX")
 cat >"$config" <<CONF
 listening-port=3478
 tls-listening-port=443
@@ -20,8 +24,8 @@ realm=$SBX_TURN_REALM
 fingerprint
 use-auth-secret
 static-auth-secret=$secret
-cert=/secrets/tls.crt
-pkey=/secrets/tls.key
+cert=$secrets/tls.crt
+pkey=$secrets/tls.key
 min-port=49152
 max-port=65535
 denied-peer-ip=0.0.0.0-255.255.255.255

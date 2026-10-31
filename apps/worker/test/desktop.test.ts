@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { configureDesktop, issueTurnCredentials } from "../src/desktop.ts";
@@ -20,9 +19,8 @@ it("issues 24h TURN REST credentials without disclosing the shared secret", () =
 		new Date("2026-10-31T00:00:00Z"),
 	);
 	expect(result.username).toBe("1793491200:sandbox");
-	expect(result.credential).toBe(
-		createHmac("sha1", secret).update(result.username).digest("base64"),
-	);
+	// Independently calculated HMAC-SHA1 fixture, compatible with coturn REST auth.
+	expect(result.credential).toBe("yUyU9P6EteZXHjgq7N199Y7aUBw=");
 	expect(JSON.stringify(result)).not.toContain(secret);
 });
 it("configures a desktop after cold claim, keeps headless claims unchanged", async () => {
