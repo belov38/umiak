@@ -11,6 +11,24 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// wantPrivateSocket checks that the socket path has a protected DACL that
+// lets SYSTEM and Administrators connect and no group of users (the env
+// socket adds one account).
+func wantPrivateSocket(t *testing.T, path string) {
+	t.Helper()
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := sd.String()
+	if !strings.Contains(s, "D:P") || !strings.Contains(s, ";;;SY)") || !strings.Contains(s, ";;;BA)") {
+		t.Errorf("%s DACL = %s, want protected SYSTEM and Administrators", path, s)
+	}
+	if strings.Contains(s, ";;;BU)") || strings.Contains(s, ";;;WD)") || strings.Contains(s, ";;;AU)") {
+		t.Errorf("%s DACL = %s grants users", path, s)
+	}
+}
+
 // TestSecureSocketACL opens an admin socket and reads its DACL back: SYSTEM
 // and Administrators only, nothing inherited from the directory.
 func TestSecureSocketACL(t *testing.T) {

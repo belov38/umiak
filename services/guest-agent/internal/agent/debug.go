@@ -93,7 +93,8 @@ func (a *agent) serveLocal(ctx context.Context, ln net.Listener, path string, h 
 
 // listenPrivate listens on a unix socket at path that nobody but the owner
 // can connect to at any moment: the socket is created in a fresh 0700
-// directory next to path, made 0600 and only then renamed into place.
+// directory next to path, made 0600 (on Windows given the DACL of the admin
+// socket) and only then renamed into place.
 func listenPrivate(ctx context.Context, path string) (net.Listener, error) {
 	dir, err := os.MkdirTemp(filepath.Dir(path), ".sbx-debug-")
 	if err != nil {
@@ -111,7 +112,7 @@ func listenPrivate(ctx context.Context, path string) (net.Listener, error) {
 		ul.SetUnlinkOnClose(false)
 	}
 	_ = os.Remove(path) // a socket left by a killed run
-	err = os.Chmod(tmp, 0o600)
+	err = secureSocket(tmp, socketAdmin, "")
 	if err == nil {
 		err = os.Rename(tmp, path)
 	}
