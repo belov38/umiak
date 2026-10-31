@@ -152,15 +152,17 @@ var errnoTable = map[syscall.Errno]mapping{
 }
 
 // lookupErrno returns the table entry of the first errno in err's chain.
+// osErrnoTable comes first: on Windows some invented errnos of package
+// syscall are real Win32 codes (syscall.ENOTDIR is ERROR_PATH_NOT_FOUND).
 func lookupErrno(err error) (mapping, bool) {
 	var errno syscall.Errno
 	if !errors.As(err, &errno) {
 		return mapping{}, false
 	}
-	if m, ok := errnoTable[errno]; ok {
+	if m, ok := osErrnoTable[errno]; ok {
 		return m, true
 	}
-	m, ok := osErrnoTable[errno]
+	m, ok := errnoTable[errno]
 	return m, ok
 }
 

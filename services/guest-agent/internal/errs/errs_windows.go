@@ -12,8 +12,12 @@ import (
 var fileInUse = mapping{code: connect.CodeFailedPrecondition, detail: FileInUse, retryable: true}
 
 // osErrnoTable maps the Win32 error codes that the fs sentinels and
-// errnoTable do not cover.
+// errnoTable do not cover. It is consulted before errnoTable.
 var osErrnoTable = map[syscall.Errno]mapping{
+	// A missing parent directory. Package syscall defines ENOTDIR as this
+	// code, so without the entry every missing parent would map to
+	// not_directory; a non-directory in the way is ERROR_DIRECTORY here.
+	windows.ERROR_PATH_NOT_FOUND:      {code: connect.CodeNotFound, detail: PathNotFound},
 	windows.ERROR_DIR_NOT_EMPTY:       notEmpty,
 	windows.ERROR_DIRECTORY:           notDirectory,
 	windows.ERROR_DISK_FULL:           noSpace,

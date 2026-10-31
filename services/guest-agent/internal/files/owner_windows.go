@@ -10,6 +10,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// errNotDir is the errno of a non-directory in the way: ERROR_DIRECTORY,
+// since package syscall defines ENOTDIR as ERROR_PATH_NOT_FOUND (a missing
+// parent, mapped to not_found).
+var errNotDir error = windows.ERROR_DIRECTORY
+
 // sysInfo is the part of a stat result that fs.FileInfo does not expose.
 // Windows has no numeric owners: owner names come from the SID
 // (setOwnerMode) and owners are set by account (lchown).

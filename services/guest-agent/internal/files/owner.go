@@ -157,14 +157,14 @@ func statInfo(path string, follow bool, n *names) (*agentv1.FileInfo, error) {
 
 // mkdirAll creates dir and its missing parents with perm (exactly, not
 // masked by the umask) and gives the new directories to o. An existing
-// non-directory on the way is ENOTDIR.
+// non-directory on the way is errNotDir.
 func mkdirAll(dir string, perm fs.FileMode, o owner) error {
 	fi, err := os.Stat(dir)
 	if err == nil {
 		if fi.IsDir() {
 			return nil
 		}
-		return &fs.PathError{Op: "mkdir", Path: dir, Err: syscall.ENOTDIR}
+		return &fs.PathError{Op: "mkdir", Path: dir, Err: errNotDir}
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
 		return err

@@ -19,6 +19,9 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 )
 
+// errNotDir is the errno of a non-directory in the way.
+var errNotDir error = syscall.ENOTDIR
+
 // sysInfo is the part of a stat result that fs.FileInfo does not expose.
 type sysInfo struct {
 	ino, dev uint64

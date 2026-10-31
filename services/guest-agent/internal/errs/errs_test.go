@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"syscall"
 	"testing"
 
@@ -16,6 +17,12 @@ import (
 )
 
 func TestFromErrno(t *testing.T) {
+	// On Windows package syscall defines ENOTDIR as ERROR_PATH_NOT_FOUND, a
+	// missing parent (see TestFromErrnoWindows).
+	notDirCode, notDirDetail := connect.CodeFailedPrecondition, NotDirectory
+	if runtime.GOOS == "windows" {
+		notDirCode, notDirDetail = connect.CodeNotFound, PathNotFound
+	}
 	tests := []struct {
 		errno      syscall.Errno
 		wantCode   connect.Code
@@ -23,7 +30,7 @@ func TestFromErrno(t *testing.T) {
 	}{
 		{syscall.ENOENT, connect.CodeNotFound, PathNotFound},
 		{syscall.EEXIST, connect.CodeAlreadyExists, AlreadyExists},
-		{syscall.ENOTDIR, connect.CodeFailedPrecondition, NotDirectory},
+		{syscall.ENOTDIR, notDirCode, notDirDetail},
 		{syscall.EISDIR, connect.CodeFailedPrecondition, IsDirectory},
 		{syscall.ENOSPC, connect.CodeResourceExhausted, NoSpace},
 		{syscall.EDQUOT, connect.CodeResourceExhausted, NoSpace},

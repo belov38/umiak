@@ -49,7 +49,8 @@ func TestFromErrnoWindows(t *testing.T) {
 		{windows.ERROR_DISK_QUOTA_EXCEEDED, connect.CodeResourceExhausted, NoSpace},
 		{windows.ERROR_NOT_SAME_DEVICE, connect.CodeFailedPrecondition, CrossDevice},
 		// The invented errnos of package syscall, used by portable code.
-		{syscall.ENOTDIR, connect.CodeFailedPrecondition, NotDirectory},
+		// ENOTDIR is ERROR_PATH_NOT_FOUND on Windows: a missing parent.
+		{syscall.ENOTDIR, connect.CodeNotFound, PathNotFound},
 		{syscall.ENOSPC, connect.CodeResourceExhausted, NoSpace},
 		{windows.ERROR_INVALID_FUNCTION, connect.CodeInternal, Internal},
 	}
