@@ -34,6 +34,8 @@ tar -xzf "$SBX_WORK_DIR/moonlight-web.tar.gz" -C "/opt/sbx-desktop/moonlight-web
 tar -xzf "$SBX_WORK_DIR/cua-driver.tar.gz" -C "/opt/sbx-desktop/cua-driver/$cua" --no-same-owner
 ln -sfn "$moonlight" /opt/sbx-desktop/moonlight-web/current
 ln -sfn "$cua" /opt/sbx-desktop/cua-driver/current
+# Upstream v3.0.1 ships web-server as 0644; normalize verified binaries.
+chmod 0755 /opt/sbx-desktop/moonlight-web/current/web-server /opt/sbx-desktop/cua-driver/current/cua-driver
 # Upstream archive layout is checked explicitly, never guessed at runtime.
 [ -x /opt/sbx-desktop/moonlight-web/current/web-server ] || die "moonlight-web executable missing"
 [ -x /opt/sbx-desktop/cua-driver/current/cua-driver ] || die "cua-driver executable missing"

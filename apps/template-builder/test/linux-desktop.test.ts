@@ -74,3 +74,41 @@ it("desktop scripts parse and do not start a VM or configure a warm pool", () =>
 		/pool:|hibernated|size_default:/,
 	);
 });
+
+it("normalizes non-executable upstream archive binaries before checking them", () => {
+	const root = mkdtempSync(join(tmpdir(), "desktop-archive-"));
+	try {
+		const script = readFileSync(
+			join(templates, "linux-desktop/steps/60-desktop.sh"),
+			"utf8",
+		);
+		const start = script.indexOf('ln -sfn "$moonlight"');
+		const end = script.indexOf("id sbxstream", start);
+		const fragment = script
+			.slice(start, end)
+			.replaceAll("/opt/sbx-desktop", root);
+		spawnSync("mkdir", [
+			"-p",
+			join(root, "moonlight-web/test"),
+			join(root, "cua-driver/test"),
+		]);
+		writeFileSync(
+			join(root, "moonlight-web/test/web-server"),
+			"#!/bin/sh\nexit 0\n",
+			{ mode: 0o644 },
+		);
+		writeFileSync(
+			join(root, "cua-driver/test/cua-driver"),
+			"#!/bin/sh\nexit 0\n",
+			{ mode: 0o644 },
+		);
+		const result = spawnSync(
+			"bash",
+			["-e", "-c", "moonlight=test; cua=test; die() { exit 1; };\n" + fragment],
+			{ encoding: "utf8" },
+		);
+		expect(result.status, result.stderr).toBe(0);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
