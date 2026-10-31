@@ -16,6 +16,49 @@ import {
 import { installTestAgent } from "./guest-package.ts";
 
 const client = new Sbx();
+const template = process.env.SBX_E2E_TEMPLATE ?? "linux-desktop";
+const windows = template.startsWith("windows");
+/** One argument for the remote shell of ssh. */
+const shq = (a: string) => `'${a.replaceAll("'", "'\\''")}'`;
+/** Runs argv as SYSTEM (Windows) or root (Linux) through QGA on the pve host. */
+function guestRoot(
+	sb: Sandbox,
+	argv: string[],
+): { exitcode: number; out: string } {
+	const id = Number(observeDesktop(sb.data.slug).runtime_id);
+	if (!(id >= 500 && id <= 589)) throw new Error(`unexpected VMID ${id}`);
+	const raw = execFileSync(
+		"ssh",
+		[
+			"-o",
+			"BatchMode=yes",
+			"-o",
+			"HostKeyAlias=pve.tail0000.ts.net",
+			"root@100.64.10.2",
+			"qm",
+			"guest",
+			"exec",
+			String(id),
+			"--timeout",
+			"30",
+			"--",
+			...argv.map(shq),
+		],
+		{ encoding: "utf8", timeout: 60_000 },
+	);
+	const r = JSON.parse(raw) as { exitcode?: number; "out-data"?: string };
+	return { exitcode: r.exitcode ?? -1, out: r["out-data"] ?? "" };
+}
+const PWSH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+const pwsh = (script: string, ...args: string[]) => [
+	PWSH,
+	"-NoLogo",
+	"-NoProfile",
+	"-NonInteractive",
+	"-Command",
+	script,
+	...args,
+];
 const created: Sandbox[] = [];
 const removed = new Set<string>();
 const budget = () =>
@@ -38,14 +81,14 @@ try {
 	await budget();
 	const start = performance.now();
 	const sb = await client.sandboxes.create({
-		template: process.env.SBX_E2E_TEMPLATE ?? "linux-desktop",
+		template,
 		size: "4gb",
 		labels: { e2e: "desktop" },
 		idleTimeoutSeconds: process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE ? 300 : 60,
 		ttlSeconds: 3600,
 	});
 	created.push(sb);
-	await sb.waitUntilReady({ timeoutMs: 300_000 });
+	await sb.waitUntilReady({ timeoutMs: windows ? 600_000 : 300_000 });
 	const createMs = Math.round(performance.now() - start);
 	if (process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE) {
 		process.env.SBX_PVE_URL ??= "https://100.64.10.2:8006";
@@ -86,15 +129,24 @@ try {
 	console.log(`create_ms ${createMs}`);
 	const turnHost = process.env.SBX_DESKTOP_TURN_HOST;
 	if (!turnHost) throw new Error("dev TURN host missing");
-	const egress = await sb.exec([
-		"python3",
-		"-I",
-		"-c",
-		"import socket,struct,os,sys; host=sys.argv[1]; port=int(sys.argv[2]); tid=os.urandom(12); s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(3); s.sendto(struct.pack('!HHI12s',1,0,0x2112a442,tid),(host,port)); data=s.recv(1024); assert data[8:20]==tid; s.close();\nfor p in (port,int(sys.argv[3])):\n t=socket.socket(); t.settimeout(2); assert t.connect_ex((host,p))!=0, 'VM TCP TURN egress allowed'; t.close()",
-		turnHost,
-		process.env.SBX_DESKTOP_TURN_PORT ?? "",
-		process.env.SBX_DESKTOP_TURN_TLS_PORT ?? "",
-	]);
+	const egress = await sb.exec(
+		windows
+			? pwsh(
+					"$h=$args[0];$p=[int]$args[1];$tid=[byte[]]::new(12);[Security.Cryptography.RandomNumberGenerator]::Fill($tid);$m=[byte[]](0,1,0,0,0x21,0x12,0xa4,0x42)+$tid;$u=[Net.Sockets.UdpClient]::new();$u.Client.ReceiveTimeout=3000;[void]$u.Send($m,$m.Length,$h,$p);$ep=[Net.IPEndPoint]::new([Net.IPAddress]::Any,0);$d=$u.Receive([ref]$ep);if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$d[8..19],$tid)){exit 2};foreach($q in @($p,[int]$args[2])){$t=[Net.Sockets.TcpClient]::new();if($t.ConnectAsync($h,$q).Wait(2000)){exit 3};$t.Dispose()}",
+					turnHost,
+					process.env.SBX_DESKTOP_TURN_PORT ?? "",
+					process.env.SBX_DESKTOP_TURN_TLS_PORT ?? "",
+				)
+			: [
+					"python3",
+					"-I",
+					"-c",
+					"import socket,struct,os,sys; host=sys.argv[1]; port=int(sys.argv[2]); tid=os.urandom(12); s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(3); s.sendto(struct.pack('!HHI12s',1,0,0x2112a442,tid),(host,port)); data=s.recv(1024); assert data[8:20]==tid; s.close();\nfor p in (port,int(sys.argv[3])):\n t=socket.socket(); t.settimeout(2); assert t.connect_ex((host,p))!=0, 'VM TCP TURN egress allowed'; t.close()",
+					turnHost,
+					process.env.SBX_DESKTOP_TURN_PORT ?? "",
+					process.env.SBX_DESKTOP_TURN_TLS_PORT ?? "",
+				],
+	);
 	check(egress.exitCode === 0, "VM TURN egress UDP only; TCP/TLS blocked");
 
 	check(sb.data.endpoints.desktop, "desktop capability");
@@ -104,41 +156,71 @@ try {
 		"1920x1080 screenshot",
 	);
 	await writeFile(join(output, "before.png"), before.bytes, { mode: 0o600 });
-	await sb.exec([
-		"env",
-		"XDG_RUNTIME_DIR=/run/user/1000",
-		"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
-		"systemd-run",
-		"--user",
-		"--collect",
-		"--unit=s10-test-terminal",
-		"--setenv=DISPLAY=:0",
-		"--setenv=XAUTHORITY=/home/user/.Xauthority",
-		"xfce4-terminal",
-		"--disable-server",
-		"--geometry=100x25+100+100",
-	]);
-	await sb.desktop.act({ actions: [{ type: "wait", ms: 1000 }] });
-	const baseline = await sb.desktop.screenshot({ cursor: "false" });
+	const proofText = "S10 экран 世界";
+	let baseline: typeof before;
+	if (windows) {
+		// Win+R runs a pwsh line typed with KEYEVENTF_UNICODE in the console session of user.
+		baseline = await sb.desktop.screenshot({ cursor: "false" });
+		await sb.desktop.act({
+			actions: [
+				{ type: "click", x: 960, y: 540 },
+				{ type: "key", keys: ["win", "r"] },
+				{ type: "wait", ms: 1500 },
+				{
+					type: "type",
+					text: `pwsh -NoProfile -Command "Set-Content -NoNewline -Encoding utf8 $env:USERPROFILE\\s10-input-proof '${proofText}'"`,
+					delayMs: 5,
+				},
+				{ type: "wait", ms: 300 },
+			],
+		});
+	} else {
+		await sb.exec([
+			"env",
+			"XDG_RUNTIME_DIR=/run/user/1000",
+			"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+			"systemd-run",
+			"--user",
+			"--collect",
+			"--unit=s10-test-terminal",
+			"--setenv=DISPLAY=:0",
+			"--setenv=XAUTHORITY=/home/user/.Xauthority",
+			"xfce4-terminal",
+			"--disable-server",
+			"--geometry=100x25+100+100",
+		]);
+		await sb.desktop.act({ actions: [{ type: "wait", ms: 1000 }] });
+		baseline = await sb.desktop.screenshot({ cursor: "false" });
+		await sb.desktop.act({
+			actions: [
+				{ type: "click", x: 600, y: 400 },
+				{
+					type: "type",
+					text: `printf '%s' '${proofText}' > /tmp/s10-input-proof`,
+					delayMs: 5,
+				},
+			],
+		});
+	}
+	const after = await sb.desktop.screenshot({ cursor: "false" });
 	await sb.desktop.act({
 		actions: [
-			{ type: "click", x: 600, y: 400 },
-			{
-				type: "type",
-				text: "printf '%s' 'S10 экран 世界' > /tmp/s10-input-proof",
-				delayMs: 5,
-			},
 			{ type: "key", keys: ["enter"] },
-			{ type: "wait", ms: 500 },
+			{ type: "wait", ms: windows ? 4000 : 500 },
 		],
 	});
-	const after = await sb.desktop.screenshot({ cursor: "false" });
 	await writeFile(join(output, "after.png"), after.bytes, { mode: 0o600 });
 	check(hash(baseline.bytes) !== hash(after.bytes), "input changes screenshot");
-	const proof = await sb.exec(["cat", "/tmp/s10-input-proof"]);
+	const proof = await sb.exec(
+		windows
+			? pwsh(
+					"[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);[Console]::Write((Get-Content -Raw -Encoding utf8 (Join-Path $env:USERPROFILE 's10-input-proof')))",
+				)
+			: ["cat", "/tmp/s10-input-proof"],
+	);
 	check(
-		proof.exitCode === 0 && proof.stdout === "S10 экран 世界",
-		"keyboard Unicode reached terminal",
+		proof.exitCode === 0 && proof.stdout === proofText,
+		"keyboard Unicode reached the shell",
 	);
 	const text = "S10 clipboard — Привет 世界";
 	await sb.desktop.clipboardSet(text);
@@ -146,7 +228,11 @@ try {
 		(await sb.desktop.clipboardGet()).text === text,
 		"clipboard round-trip",
 	);
-	await verifyLiveDesktopMcp(sb, process.env.SBX_DESKTOP_MCP_URL ?? "");
+	await verifyLiveDesktopMcp(
+		sb,
+		process.env.SBX_DESKTOP_MCP_URL ?? "",
+		windows,
+	);
 	const link = await sb.desktop.link();
 	const jar = new Map<string, string>();
 	let url = link.url;
@@ -189,15 +275,21 @@ try {
 			Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0,
 		);
 	} catch (error) {
-		const diagnostic = await sb.exec([
-			"sudo",
-			"journalctl",
-			"-u",
-			"sbx-moonlight-web",
-			"--no-pager",
-			"-n",
-			"60",
-		]);
+		const diagnostic = await sb.exec(
+			windows
+				? pwsh(
+						"Get-Content -Tail 80 'C:\\Program Files\\Sunshine\\config\\sunshine.log'",
+					)
+				: [
+						"sudo",
+						"journalctl",
+						"-u",
+						"sbx-moonlight-web",
+						"--no-pager",
+						"-n",
+						"60",
+					],
+		);
 		await writeFile(join(output, "moonlight.log"), diagnostic.stdout, {
 			mode: 0o600,
 		});
@@ -214,18 +306,31 @@ try {
 
 	// Fork a stopped source so this track uses only 4GiB while S9 is running.
 	const credentialHash = async (s: Sandbox) => {
-		const result = await s.exec([
-			"sudo",
-			"python3",
-			"-I",
-			"-c",
-			"import hashlib,json; s=json.load(open('/var/lib/sbx-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
-		]);
+		let out: string;
+		if (windows) {
+			// state\desktop is SYSTEM-only: read it through QGA, never print the values.
+			const r = guestRoot(
+				s,
+				pwsh(
+					"$s=Get-Content -Raw 'C:\\ProgramData\\sbx-agent\\state\\desktop\\identity.json'|ConvertFrom-Json;$j=$s.credentials|ConvertTo-Json -Compress;[BitConverter]::ToString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($j))).Replace('-','').ToLower()",
+				),
+			);
+			out = r.exitcode === 0 ? r.out : "";
+		} else {
+			const result = await s.exec([
+				"sudo",
+				"python3",
+				"-I",
+				"-c",
+				"import hashlib,json; s=json.load(open('/var/lib/sbx-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
+			]);
+			out = result.exitCode === 0 ? result.stdout : "";
+		}
 		check(
-			result.exitCode === 0 && /^[a-f0-9]{64}\s*$/.test(result.stdout),
+			/^[a-f0-9]{64}\s*$/.test(out),
 			"streamer credential digest available",
 		);
-		return result.stdout.trim();
+		return out.trim();
 	};
 	const original = await credentialHash(sb);
 	await sb.stop({ wait: true });
@@ -258,30 +363,14 @@ try {
 			const row = observeDesktop(sandbox.data.slug);
 			const id = Number(row.runtime_id);
 			if (id >= 500 && id <= 589) {
-				const log = execFileSync(
-					"ssh",
-					[
-						"-o",
-						"BatchMode=yes",
-						"-o",
-						"HostKeyAlias=pve.tail0000.ts.net",
-						"root@100.64.10.2",
-						"qm",
-						"guest",
-						"exec",
-						String(id),
-						"--timeout",
-						"15",
-						"--",
-						"journalctl",
-						"-u",
-						"sbx-agent",
-						"--no-pager",
-						"-n",
-						"100",
-					],
-					{ encoding: "utf8", timeout: 30_000 },
-				);
+				const log = guestRoot(
+					sandbox,
+					windows
+						? pwsh(
+								"Get-Content -Tail 200 'C:\\ProgramData\\sbx-agent\\logs\\agent.log'",
+							)
+						: ["journalctl", "-u", "sbx-agent", "--no-pager", "-n", "100"],
+				).out;
 				await writeFile(join(output, "agent-failure.log"), log, {
 					mode: 0o600,
 				});

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Real desktop acceptance, never a fake or a template build. Shares the host with S9, with a 4GiB per-track budget.
 # Needs a logged-in sbx CLI on PATH, deployed branch, promoted desktop template and TURN.
-# The Windows variant is added after S9/S10 Windows integration.
+# SBX_E2E_TEMPLATE=windows-desktop runs the same scenario on Windows (pwsh, Win+R, QGA as SYSTEM).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"

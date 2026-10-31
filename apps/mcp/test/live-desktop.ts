@@ -6,7 +6,11 @@ import {
 } from "@modelcontextprotocol/client";
 import type { Sandbox } from "@sbx/sdk";
 
-export async function verifyLiveDesktopMcp(sandbox: Sandbox, url: string) {
+export async function verifyLiveDesktopMcp(
+	sandbox: Sandbox,
+	url: string,
+	windows = false,
+) {
 	const auth = JSON.parse(
 		execFileSync("sbx", ["auth", "token", "--json"], { encoding: "utf8" }),
 	) as { token: string };
@@ -46,13 +50,31 @@ export async function verifyLiveDesktopMcp(sandbox: Sandbox, url: string) {
 		});
 		await call("computer_scroll", { dy: 1, screenshot_after: false });
 		await call("computer_key", { keys: "ctrl+c", screenshot_after: false });
+		const proofText = "MCP Привет 世界";
+		if (windows) {
+			// The Run dialog of the console session executes the typed pwsh line.
+			await call("computer_key", { keys: "win+r", screenshot_after: false });
+			await new Promise((done) => setTimeout(done, 1500));
+		}
 		await call("computer_type", {
-			text: "printf '%s' 'MCP Привет 世界' > /tmp/s10-mcp-input",
+			text: windows
+				? `pwsh -NoProfile -Command "Set-Content -NoNewline -Encoding utf8 $env:USERPROFILE\\s10-mcp-input '${proofText}'"`
+				: `printf '%s' '${proofText}' > /tmp/s10-mcp-input`,
 			screenshot_after: false,
 		});
 		await call("computer_key", { keys: "enter", screenshot_after: false });
-		const proof = await sandbox.exec(["cat", "/tmp/s10-mcp-input"]);
-		if (proof.exitCode !== 0 || proof.stdout !== "MCP Привет 世界")
+		if (windows) await new Promise((done) => setTimeout(done, 4000));
+		const proof = await sandbox.exec(
+			windows
+				? [
+						"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+						"-NoProfile",
+						"-Command",
+						"[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);[Console]::Write((Get-Content -Raw -Encoding utf8 (Join-Path $env:USERPROFILE 's10-mcp-input')))",
+					]
+				: ["cat", "/tmp/s10-mcp-input"],
+		);
+		if (proof.exitCode !== 0 || proof.stdout !== proofText)
 			throw new Error("MCP keyboard proof failed");
 		await call("computer_clipboard_write", { text: "MCP clipboard 世界" });
 		const clip = await call("computer_clipboard_read");
