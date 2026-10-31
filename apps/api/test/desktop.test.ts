@@ -138,6 +138,10 @@ it("revoked and expired ticket principals advance the epoch and disconnect viewe
 		`/v1/sandboxes/${seeded.slug}/desktop/links`,
 	);
 	expect(link.status).toBe(201);
+	await db.pool.query(
+		"UPDATE runtime.desktop_tickets SET created_at=now()-interval '13 hours',used_at=now()-interval '13 hours' WHERE sandbox_id=$1",
+		[seeded.sandboxId],
+	);
 	await w.identity.revokeApiKey(key.id, {});
 	await recheckDesktopAccess(h.deps);
 	const policy = await db.pool.query(
@@ -146,3 +150,64 @@ it("revoked and expired ticket principals advance the epoch and disconnect viewe
 	);
 	expect(policy.rows[0]).toEqual({ auth_epoch: 2, pending_disconnect: false });
 });
+
+it.each(["public", "blocked"])(
+	"revokes direct media when route policy becomes %s, only once per transition",
+	async (kind) => {
+		let publicEnabled = false;
+		const config = new Proxy(w.env.config, {
+			get(target, key) {
+				if (key === "defaults")
+					return async () => ({
+						...(await target.defaults()),
+						publicDesktopEnabled: publicEnabled,
+					});
+				if (key === "template")
+					return async (slug: string) => {
+						const t = await target.template(slug);
+						return t
+							? { ...t, capabilities: [...t.capabilities, "desktop"] }
+							: null;
+					};
+				const value = Reflect.get(target, key);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const h = w.harness({ deps: { config } });
+		const seeded = await w.seed({ state: "ready" });
+		await db.pool.query(
+			"INSERT INTO runtime.sandbox_desktops(sandbox_id,access) VALUES($1,$2)",
+			[seeded.sandboxId, kind === "public" ? "public" : "token"],
+		);
+		if (kind === "blocked")
+			await db.pool.query(
+				"UPDATE runtime.sandboxes SET blocked=true WHERE id=$1",
+				[seeded.sandboxId],
+			);
+		await recheckDesktopAccess(h.deps);
+		const epoch = async () =>
+			(
+				await db.pool.query(
+					"SELECT auth_epoch,pending_disconnect FROM runtime.sandbox_desktops WHERE sandbox_id=$1",
+					[seeded.sandboxId],
+				)
+			).rows[0];
+		expect(await epoch()).toEqual({ auth_epoch: 2, pending_disconnect: false });
+		await recheckDesktopAccess(h.deps);
+		expect((await epoch()).auth_epoch).toBe(2);
+		publicEnabled = true;
+		await db.pool.query(
+			"UPDATE runtime.sandboxes SET blocked=false WHERE id=$1",
+			[seeded.sandboxId],
+		);
+		await recheckDesktopAccess(h.deps);
+		publicEnabled = false;
+		if (kind === "blocked")
+			await db.pool.query(
+				"UPDATE runtime.sandboxes SET blocked=true WHERE id=$1",
+				[seeded.sandboxId],
+			);
+		await recheckDesktopAccess(h.deps);
+		expect((await epoch()).auth_epoch).toBe(3);
+	},
+);

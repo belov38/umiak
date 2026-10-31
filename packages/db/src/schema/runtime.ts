@@ -593,7 +593,7 @@ export const environments = runtime.table("environments", {
 	updatedBy: uuid("updated_by"),
 });
 
-// S10 policy and single-use ticket state (migrations 0401-0402).
+// S10 policy and single-use ticket state (migrations 0401-0403).
 export const sandboxDesktops = runtime.table("sandbox_desktops", {
 	sandboxId: uuid("sandbox_id")
 		.primaryKey()
@@ -608,6 +608,7 @@ export const sandboxDesktops = runtime.table("sandbox_desktops", {
 	lastStopOperationId: uuid("last_stop_operation_id"),
 	updatedAt: tstz("updated_at").notNull().defaultNow(),
 	pendingDisconnect: boolean("pending_disconnect").notNull().default(false),
+	policyRevoked: boolean("policy_revoked").notNull().default(false),
 });
 export const desktopTickets = runtime.table("desktop_tickets", {
 	ticketHash: bytea("ticket_hash").primaryKey(),

@@ -66,6 +66,39 @@ export async function revokeDesktop(
 }
 /** Also catches key expiry without a database notification. */
 export async function recheckDesktopAccess(deps: ApiDeps): Promise<void> {
+	const publicEnabled =
+		(await deps.config.defaults()).publicDesktopEnabled === true;
+	const routes = await poolOf(deps).query<{
+		sandbox_id: string;
+		machine_id: string | null;
+		auth_epoch: number;
+		access: string;
+		blocked: boolean;
+		template_slug: string;
+		policy_revoked: boolean;
+	}>(
+		"SELECT d.sandbox_id,s.machine_id,d.auth_epoch,d.access,(d.blocked OR s.blocked) AS blocked,s.template_slug,d.policy_revoked FROM runtime.sandbox_desktops d JOIN runtime.sandboxes s ON s.id=d.sandbox_id WHERE s.state='ready'",
+	);
+	for (const route of routes.rows) {
+		const denied =
+			route.blocked ||
+			(route.access === "public" && !publicEnabled) ||
+			!(await deps.config.template(route.template_slug))?.capabilities.includes(
+				"desktop",
+			);
+		if (denied && !route.policy_revoked) {
+			await poolOf(deps).query(
+				"UPDATE runtime.sandbox_desktops SET auth_epoch=auth_epoch+1,pending_disconnect=true,policy_revoked=true,updated_at=now() WHERE sandbox_id=$1 AND auth_epoch=$2 AND NOT policy_revoked",
+				[route.sandbox_id, route.auth_epoch],
+			);
+		} else if (!denied && route.policy_revoked) {
+			await poolOf(deps).query(
+				"UPDATE runtime.sandbox_desktops SET policy_revoked=false WHERE sandbox_id=$1 AND auth_epoch=$2",
+				[route.sandbox_id, route.auth_epoch],
+			);
+		}
+	}
+
 	const grants = await poolOf(deps).query<
 		Grant & {
 			sandbox_id: string;
@@ -74,7 +107,7 @@ export async function recheckDesktopAccess(deps: ApiDeps): Promise<void> {
 			auth_epoch: number;
 		}
 	>(
-		`SELECT t.user_id,t.api_key_id,t.created_at,t.sandbox_id,s.team_id,s.machine_id,d.auth_epoch FROM runtime.desktop_tickets t JOIN runtime.sandbox_desktops d ON d.sandbox_id=t.sandbox_id AND d.auth_epoch=t.auth_epoch JOIN runtime.sandboxes s ON s.id=t.sandbox_id WHERE t.created_at>now()-interval '12 hours' AND s.state='ready'`,
+		`SELECT t.user_id,t.api_key_id,t.created_at,t.sandbox_id,s.team_id,s.machine_id,d.auth_epoch FROM runtime.desktop_tickets t JOIN runtime.sandbox_desktops d ON d.sandbox_id=t.sandbox_id AND d.auth_epoch=t.auth_epoch JOIN runtime.sandboxes s ON s.id=t.sandbox_id WHERE s.state='ready'`,
 	);
 	for (const grant of grants.rows) {
 		if (!(await validDesktopGrant(deps, grant, grant.team_id))) {
