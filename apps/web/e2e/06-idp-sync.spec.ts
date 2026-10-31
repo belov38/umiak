@@ -83,6 +83,18 @@ test("disabled in Keycloak → deactivated by ctl-idp-sync, notice, keys keep wo
 
 	// dave works in a terminal of the team's sandbox.
 	await createSandbox(alice.page, team, { slug: `idp-${state.run}` });
+	// Close codes of the page's WebSockets (Playwright does not expose them).
+	await dave.context.addInitScript(() => {
+		const w = window as unknown as { __wsCloses: number[] };
+		w.__wsCloses = [];
+		window.WebSocket = new Proxy(window.WebSocket, {
+			construct(target, args) {
+				const ws = Reflect.construct(target, args) as WebSocket;
+				ws.addEventListener("close", (e) => w.__wsCloses.push(e.code));
+				return ws;
+			},
+		});
+	});
 	await dave.page.goto(
 		`/app/t/${team}/sandboxes/idp-${state.run}?tab=terminal`,
 	);
@@ -94,6 +106,23 @@ test("disabled in Keycloak → deactivated by ctl-idp-sync, notice, keys keep wo
 
 	const op = await as("op");
 	expect((await payloadUser(op, daveUser.email)).active).toBe(true);
+
+	// The operator's api-keys surfaces are audited too (no secret, no
+	// secretHash value): the admin list and Payload REST from the page.
+	await op.page.goto("/admin/collections/api-keys");
+	await expect(op.page.getByText(keyName).first()).toBeVisible();
+	const rest = await op.page.evaluate(async () => {
+		const r = await fetch("/cms-api/api-keys?depth=1&limit=100");
+		return { status: r.status, text: await r.text() };
+	});
+	expect(rest.status).toBe(200);
+	expect(rest.text).toContain(keyName);
+	expect(await audit.drain()).toEqual([]);
+	expect(
+		audit.seen.some(
+			(s) => s.url.includes("/cms-api/api-keys") && s.text.includes(keyName),
+		),
+	).toBe(true);
 
 	// Disabled in Keycloak; one pass.
 	await setEnabled(daveUser.id, false);
@@ -112,6 +141,13 @@ test("disabled in Keycloak → deactivated by ctl-idp-sync, notice, keys keep wo
 	await expect
 		.poll(() => frames.find((f) => f.includes('"type":"error"')))
 		.toMatch(/"code":"unauthorized"/);
+	await expect
+		.poll(() =>
+			dave.page.evaluate(
+				() => (window as unknown as { __wsCloses: number[] }).__wsCloses,
+			),
+		)
+		.toContain(4401);
 
 	// dave's open browser session is refused at once.
 	await dave.page.reload();

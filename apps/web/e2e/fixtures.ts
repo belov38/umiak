@@ -11,7 +11,6 @@ import {
 	test as base,
 	expect,
 	type Page,
-	type Response,
 	type WebSocket,
 } from "@playwright/test";
 import { APP, CONTROL } from "./env.ts";
@@ -20,20 +19,38 @@ import { type RunState, runState } from "./state.ts";
 
 export { expect };
 
-/** Responses not read: static build files, downloads and live streams. */
-function skipped(r: Response): boolean {
-	const url = r.url();
-	const type = r.headers()["content-type"] ?? "";
-	if (url.includes("/_next/static/")) return true;
-	if (/\/files\/content|\/files\/archive|\/output\?/.test(url)) return true;
-	if (type.includes("ndjson") || type.includes("octet-stream")) return true;
-	return !/text\/|json|x-component/.test(type);
+const APP_ORIGIN = new URL(APP).origin;
+
+/**
+ * Requests of the app the audit does not hold: Next's static files, the
+ * oauth2-proxy endpoints (sign-in sets its cookie), file transfers and
+ * output downloads, live streams (NDJSON follow) and long-polls
+ * (`waitSeconds`: the same resources come through the plain GETs too).
+ */
+function passThrough(u: URL): boolean {
+	if (u.origin !== APP_ORIGIN) return true;
+	const p = u.pathname;
+	if (p.startsWith("/_next/static/") || p.startsWith("/oauth2/")) return true;
+	if (/\/files\/(content|archive|uploads)/.test(p)) return true;
+	if (u.searchParams.has("waitSeconds")) return true;
+	return /\/(stream|output|connect)$/.test(p);
+}
+
+/** Bodies that are scanned: text, JSON and RSC payloads. */
+function textual(type: string): boolean {
+	if (type.includes("ndjson") || type.includes("octet-stream")) return false;
+	return /text\/|json|x-component/.test(type);
 }
 
 const SECRET_HASH_KEY = /\\*"secretHash\\*"\s*:/;
 
-interface Seen {
+export interface Seen {
 	url: string;
+	method: string;
+	/** Content-Type of the response. */
+	type: string;
+	/** `next-action` of the request: a server action's answer. */
+	action: string | null;
 	at: number;
 	text: string;
 }
@@ -45,26 +62,77 @@ interface Forbidden {
 	since: number;
 }
 
+/**
+ * Every app response a context receives goes through `route`: the body is
+ * fetched in the test process, recorded, then handed to the page. Reading
+ * it from the response event instead loses bodies whenever the page
+ * navigates or aborts (Chromium evicts them), which the audit cannot afford.
+ */
 export class ResponseAudit {
 	readonly seen: Seen[] = [];
-	readonly #pending = new Set<Promise<void>>();
+	/** Requests whose upstream fetch failed (the page got an abort). */
+	readonly failed: string[] = [];
+	/** Handlers in flight. */
+	readonly #pending = new Map<Promise<void>, string>();
 	readonly #forbidden: Forbidden[] = [];
 
-	attach(ctx: BrowserContext): void {
-		ctx.on("response", (r) => {
-			if (skipped(r)) return;
-			const at = Date.now();
-			const p = r
-				.text()
-				.then(
-					(text) => {
-						this.seen.push({ url: r.url(), at, text });
-					},
-					() => {},
-				)
-				.finally(() => this.#pending.delete(p));
-			this.#pending.add(p);
-		});
+	async attach(ctx: BrowserContext): Promise<void> {
+		await ctx.route(
+			(u) => !passThrough(u),
+			(route) => {
+				const req = route.request();
+				const url = req.url();
+				const p: Promise<void> = (async () => {
+					let res: Awaited<ReturnType<typeof route.fetch>>;
+					try {
+						// Redirects go back to the page as they are.
+						res = await route.fetch({ maxRedirects: 0, timeout: 120_000 });
+					} catch (e) {
+						this.failed.push(
+							`${url}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`,
+						);
+						await route.abort().catch(() => {});
+						return;
+					}
+					const body = await res.body();
+					const type = res.headers()["content-type"] ?? "";
+					if (textual(type)) {
+						this.seen.push({
+							url,
+							method: req.method(),
+							type,
+							action: req.headers()["next-action"] ?? null,
+							at: Date.now(),
+							text: body.toString("utf8"),
+						});
+					}
+					// The page may have gone meanwhile.
+					await route.fulfill({ response: res, body }).catch(() => {});
+				})().finally(() => this.#pending.delete(p));
+				this.#pending.set(p, url);
+				return p;
+			},
+		);
+	}
+
+	/**
+	 * Waits until every routed response is recorded; returns the URLs still
+	 * in flight after `timeoutMs` (empty when drained). Call before a context
+	 * closes.
+	 */
+	async drain(timeoutMs = 15_000): Promise<string[]> {
+		const end = Date.now() + timeoutMs;
+		while (this.#pending.size > 0 && Date.now() < end) {
+			let timer: NodeJS.Timeout | undefined;
+			await Promise.race([
+				Promise.all([...this.#pending.keys()]),
+				new Promise((r) => {
+					timer = setTimeout(r, Math.max(0, end - Date.now()));
+				}),
+			]);
+			clearTimeout(timer);
+		}
+		return [...this.#pending.values()];
 	}
 
 	/** `value` must not appear in any response (since `since`). */
@@ -84,12 +152,8 @@ export class ResponseAudit {
 		);
 	}
 
-	/** Waits for the bodies in flight (bounded), then lists violations. */
-	async violations(): Promise<string[]> {
-		await Promise.race([
-			Promise.all([...this.#pending]),
-			new Promise((r) => setTimeout(r, 5000)),
-		]);
+	/** Violations among the bodies read so far (drain first). */
+	violations(): string[] {
 		const out: string[] = [];
 		for (const s of this.seen) {
 			// `secretHash` with a value (plain or escaped JSON). The field's
@@ -164,7 +228,7 @@ async function newSession(
 	user: KcUser,
 ): Promise<Session> {
 	const context = await browser.newContext({ baseURL: APP });
-	audit.attach(context);
+	await audit.attach(context);
 	const page = await context.newPage();
 	await signIn(page, user);
 	return { user, context, page, request: context.request };
@@ -178,9 +242,16 @@ export const test = base.extend<Fixtures>({
 	audit: [
 		async ({ context }, use) => {
 			const audit = new ResponseAudit();
-			audit.attach(context);
+			await audit.attach(context);
 			await use(audit);
-			expect(await audit.violations()).toEqual([]);
+			expect(await audit.drain(), "responses still in flight").toEqual([]);
+			if (audit.failed.length > 0) {
+				test.info().annotations.push({
+					type: "requests failed upstream",
+					description: audit.failed.join("\n"),
+				});
+			}
+			expect(audit.violations()).toEqual([]);
 		},
 		{ auto: true },
 	],
@@ -191,6 +262,8 @@ export const test = base.extend<Fixtures>({
 			sessions.push(s);
 			return s;
 		});
+		// Every body is read before the contexts close (closing drops them).
+		expect(await audit.drain(), "responses still in flight").toEqual([]);
 		for (const s of sessions) await s.context.close();
 	},
 });

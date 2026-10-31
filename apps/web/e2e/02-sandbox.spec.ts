@@ -35,8 +35,10 @@ test("commands: run, live output, kill", async ({ as, state }) => {
 	await expect.poll(() => xtermText(page)).toContain("tick-8");
 	await panel.getByRole("button", { name: "Kill" }).click();
 	await expect(row.getByRole("cell").first()).toHaveText("killed");
+	// Killed: the output stops growing.
 	const after = await xtermText(page);
-	await expect.poll(() => xtermText(page), { timeout: 2000 }).toBe(after);
+	await page.waitForTimeout(1000);
+	expect(await xtermText(page)).toBe(after);
 });
 
 async function sha256(path: string): Promise<string> {

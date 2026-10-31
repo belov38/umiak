@@ -1,4 +1,5 @@
 // Keycloak Admin REST API of the E2E stack (master realm admin).
+import type { Page } from "@playwright/test";
 import { KEYCLOAK, KEYCLOAK_ADMIN, KEYCLOAK_ADMIN_PASSWORD } from "./env.ts";
 
 async function adminToken(): Promise<string> {
@@ -99,4 +100,44 @@ export async function setEmail(id: string, email: string): Promise<void> {
 
 export async function deleteUser(id: string): Promise<void> {
 	await admin("DELETE", `/users/${id}`);
+}
+
+/**
+ * `sbx login` as the CLI does it (S7 §7.6): the device grant of the public
+ * client `sbx-cli`, approved in `page` (a browser already signed in to
+ * Keycloak), then the token endpoint polled at the given interval.
+ */
+export async function deviceLogin(page: Page): Promise<string> {
+	const oidc = `${KEYCLOAK}/realms/sbx/protocol/openid-connect`;
+	const start = await fetch(`${oidc}/auth/device`, {
+		method: "POST",
+		body: new URLSearchParams({ client_id: "sbx-cli", scope: "openid" }),
+	});
+	if (!start.ok) throw new Error(`device start: ${start.status}`);
+	const d = (await start.json()) as {
+		device_code: string;
+		verification_uri_complete: string;
+		interval: number;
+	};
+	await page.goto(d.verification_uri_complete);
+	await page.getByRole("button", { name: "Yes" }).click();
+	await page.getByText(/device login successful/i).waitFor();
+	const end = Date.now() + 60_000;
+	for (;;) {
+		const r = await fetch(`${oidc}/token`, {
+			method: "POST",
+			body: new URLSearchParams({
+				grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+				client_id: "sbx-cli",
+				device_code: d.device_code,
+			}),
+		});
+		const body = (await r.json()) as { access_token?: string; error?: string };
+		if (body.access_token) return body.access_token;
+		if (body.error !== "authorization_pending" && body.error !== "slow_down") {
+			throw new Error(`device token: ${r.status} ${body.error}`);
+		}
+		if (Date.now() > end) throw new Error("device token: timed out");
+		await new Promise((res) => setTimeout(res, (d.interval || 5) * 1000));
+	}
 }

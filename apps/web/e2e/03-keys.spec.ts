@@ -27,6 +27,9 @@ test("API key: works on the public API, revoke ends streams and PTYs, then 401",
 	expect(secret).toMatch(/^sbx_/);
 	await shown.getByRole("button", { name: "I have copied it" }).click();
 	await expect(shown).toHaveCount(0);
+	// Positive control: the audit reads the bodies the dialog came from.
+	expect(await audit.drain()).toEqual([]);
+	expect(audit.seen.some((s) => s.text.includes(secret as string))).toBe(true);
 	audit.forbidKey(secret as string, Date.now());
 	await expect(page.getByText(secret as string)).toHaveCount(0);
 

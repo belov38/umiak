@@ -16,6 +16,7 @@ import {
 
 test("owner invites, member sees the sandbox but cannot manage; cross-team and CSRF are refused", async ({
 	as,
+	audit,
 	state,
 }) => {
 	const alice = await as("alice");
@@ -48,6 +49,17 @@ test("owner invites, member sees the sandbox but cannot manage; cross-team and C
 	await expect(
 		alice.page.getByText(state.users.bob.email).first(),
 	).toBeVisible();
+	// Positive control of the response audit: the server action's answer and
+	// the RSC payloads are read (here: the members list with bob).
+	expect(await audit.drain()).toEqual([]);
+	expect(audit.seen.some((s) => s.action === invite.id)).toBe(true);
+	expect(
+		audit.seen.some(
+			(s) =>
+				s.type.includes("x-component") &&
+				s.text.includes(state.users.bob.email),
+		),
+	).toBe(true);
 
 	const bob = await as("bob");
 	await bob.page.getByRole("button", { name: /^Team:/ }).click();

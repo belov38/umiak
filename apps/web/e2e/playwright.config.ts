@@ -28,5 +28,22 @@ export default defineConfig({
 		actionTimeout: 30_000,
 		navigationTimeout: 60_000,
 	},
-	projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+	projects: [
+		{
+			name: "chromium",
+			use: {
+				...devices["Desktop Chrome"],
+				launchOptions: {
+					// The response audit routes every request (fixtures.ts). With
+					// interception on, Chromium's Local Network Access checks
+					// refuse the PTY WebSocket to localhost
+					// (ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS); page and
+					// socket share one origin, so the check has no meaning here.
+					args: [
+						"--disable-features=LocalNetworkAccessChecks,LocalNetworkAccessChecksWebSockets",
+					],
+				},
+			},
+		},
+	],
 });

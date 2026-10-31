@@ -325,13 +325,21 @@ against it. `SBX_E2E_LARGE=1` uploads 100 MiB instead of 70 MiB. `pnpm test`
   Payload "filler" users; `fixtures.ts` signs in through the real Keycloak
   page and audits every response of every page: no `secretHash` value, no
   registered secret, no API key secret or port token after its dialog.
+  The audit routes every app request (`context.route` + `route.fetch`) and
+  scans the body before the page gets it (reading bodies from response
+  events loses them on navigation); downloads, uploads, NDJSON streams,
+  long-polls and `/oauth2/*` pass through. With interception on, Chromium's
+  Local Network Access checks refuse the PTY WebSocket to localhost, so the
+  config disables that feature for the test browser.
 - Specs: `01-onboarding` (JIT, create, terminal echo/resize/reload),
   `02-sandbox` (commands, files, ports), `03-keys` (key on the public API,
   revoke closes streams and PTYs), `04-teams` (invite, member rights,
   cross-team, CSRF), `05-operator` (403s, block), `06-idp-sync`
   (Keycloak offboarding, empty answer), `07-security` (forged headers,
   `/cms-api` CSRF, web network, image content, secrets), `08-identity`
-  (IdP email change, deletion, reused email, sso epoch).
+  (IdP email change, deletion, reused email, sso epoch, `sbx login` device
+  grant: same user as the browser, an operator's JWT has no operator
+  rights).
 - `e2e/backend` is test-only: its own image
   (`e2e/backend/Dockerfile`, context filter `Dockerfile.dockerignore`);
   the root `.dockerignore` keeps `apps/web/e2e` out of every other image.

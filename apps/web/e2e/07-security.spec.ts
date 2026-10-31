@@ -16,15 +16,24 @@ import {
 
 const PROJECT = process.env.SBX_E2E_PROJECT ?? "sbx-e2e";
 
-function docker(args: string[]): { ok: boolean; out: string } {
+function docker(args: string[]): {
+	ok: boolean;
+	status: number;
+	out: string;
+} {
 	try {
 		return {
 			ok: true,
+			status: 0,
 			out: execFileSync("docker", args, { encoding: "utf8", stdio: "pipe" }),
 		};
 	} catch (e) {
-		const err = e as { stdout?: string; stderr?: string };
-		return { ok: false, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+		const err = e as { status?: number; stdout?: string; stderr?: string };
+		return {
+			ok: false,
+			status: err.status ?? -1,
+			out: `${err.stdout ?? ""}${err.stderr ?? ""}`,
+		};
 	}
 }
 
@@ -131,15 +140,21 @@ test("web answers 401 without the identity header and only oauth2-proxy reaches 
 	]);
 	expect(direct.ok).toBe(false);
 	expect(direct.out).toMatch(/HTTP\/1\.1 401/);
-	// From the sbx network (the backend's container) web does not resolve.
-	const other = docker([
-		"exec",
-		`${PROJECT}-e2e-backend-1`,
-		"node",
-		"-e",
-		"fetch('http://web:3000/healthz').then(() => process.exit(0), () => process.exit(3))",
-	]);
-	expect(other.ok).toBe(false);
+	// From the sbx network (the backend's container) web does not resolve,
+	// while Keycloak on the same network does (the probe itself works).
+	const probe = (url: string) =>
+		docker([
+			"exec",
+			`${PROJECT}-e2e-backend-1`,
+			"node",
+			"-e",
+			`fetch(${JSON.stringify(url)}).then(() => process.exit(0), (e) => { console.log(e.cause?.code ?? e.message); process.exit(3); })`,
+		]);
+	const other = probe("http://web:3000/healthz");
+	expect(other.status, other.out).toBe(3);
+	expect(other.out).toMatch(/ENOTFOUND|EAI_AGAIN/);
+	const control = probe("http://keycloak:8080/realms/sbx");
+	expect(control.status, control.out).toBe(0);
 });
 
 test("the web image has no dev auth proxy", () => {
@@ -150,10 +165,15 @@ test("the web image has no dev auth proxy", () => {
 		"sh",
 		"sbx-web:dev",
 		"-c",
-		"find / -xdev \\( -name 'auth-proxy*' -o -path '*/apps/web/dev' -o -path '*/apps/web/e2e' \\) 2>/dev/null; echo done",
+		[
+			"find / -xdev \\( -name 'auth-proxy*' -o -path '*/apps/web/dev' -o -path '*/apps/web/e2e' \\) -printf 'BAD:%p\\n' 2>/dev/null",
+			"find /app -name server.js -path '*/apps/web/*' -printf 'OK:%p\\n'",
+		].join("; "),
 	]);
 	expect(r.ok, r.out).toBe(true);
-	expect(r.out.trim()).toBe("done");
+	// Positive control: the same search finds the server of the image.
+	expect(r.out).toContain("OK:/app/web/apps/web/server.js");
+	expect(r.out).not.toContain("BAD:");
 });
 
 test("secret values never come back; the guest gets them", async ({

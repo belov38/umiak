@@ -3,7 +3,7 @@
 // becomes `idp_deleted` after a ctl-idp-sync pass; a new IdP account (other
 // `sub`) with that taken email is refused (403); ssoPortPolicy any → team
 // raises the epoch routes.lookup hands to the gateway (old sso cookies end).
-import { APP } from "./env.ts";
+import { APP, PUBLIC_API } from "./env.ts";
 import {
 	control,
 	ensureSandbox,
@@ -13,7 +13,8 @@ import {
 	signIn,
 	test,
 } from "./fixtures.ts";
-import { createUser, deleteUser, setEmail } from "./keycloak.ts";
+import { createUser, deleteUser, deviceLogin, setEmail } from "./keycloak.ts";
+import { bearer } from "./keys-api.ts";
 
 test("IdP email change, deletion and a reused email", async ({
 	as,
@@ -139,4 +140,60 @@ test("ssoPortPolicy any → team raises the sso epoch of routes.lookup", async (
 	}
 	// Back to any: no new epoch (only a tightening ends cookies).
 	expect(await epoch()).toBe(start + 1);
+});
+
+test("Keycloak JWT of the CLI: same user as the browser; an operator's JWT has no operator rights", async ({
+	as,
+	state,
+}) => {
+	const alice = await as("alice");
+	const team = await personalTeam(alice);
+	const sandboxId = await ensureSandbox(alice, team, `term-${state.run}`);
+	const browserMe = (await (
+		await alice.request.get(`/api/v1/me?team=${team}`)
+	).json()) as { user: { id: string } };
+
+	// `sbx login`: device grant approved in alice's signed-in browser.
+	const aliceJwt = await deviceLogin(alice.page);
+	const cliMe = await fetch(`${PUBLIC_API}/v1/me`, {
+		headers: bearer(aliceJwt),
+	});
+	expect(cliMe.status).toBe(200);
+	const cli = (await cliMe.json()) as { user: { id: string; email: string } };
+	expect(cli.user).toMatchObject({
+		id: browserMe.user.id,
+		email: state.users.alice.email,
+	});
+
+	// The operator signs in to the CLI the same way: no operator rights.
+	const op = await as("op");
+	const opTeam = await personalTeam(op);
+	const opJwt = await deviceLogin(op.page);
+	expect(
+		(await fetch(`${PUBLIC_API}/v1/me`, { headers: bearer(opJwt) })).status,
+	).toBe(200);
+	const all = await fetch(`${PUBLIC_API}/v1/sandboxes?allTeams=true`, {
+		headers: { ...bearer(opJwt), "Sbx-Team": opTeam },
+	});
+	expect(all.status).toBe(403);
+	const block = await fetch(`${PUBLIC_API}/v1/sandboxes/${sandboxId}/block`, {
+		method: "POST",
+		headers: {
+			...bearer(opJwt),
+			"Sbx-Team": team,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify({ reason: "operator" }),
+	});
+	expect(block.status).toBe(403);
+	// The same calls from the operator's browser session are allowed.
+	expect(
+		(
+			await op.request.get(`/api/v1/sandboxes?allTeams=true&team=${opTeam}`)
+		).status(),
+	).toBe(200);
+	const r = await alice.request.get(
+		`/api/v1/sandboxes/${sandboxId}?team=${team}`,
+	);
+	expect(((await r.json()) as { blocked: boolean }).blocked).toBe(false);
 });

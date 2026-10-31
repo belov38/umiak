@@ -92,8 +92,35 @@ test("operator blocks another team's sandbox: route blocked, owner refused write
 	await op.page
 		.getByRole("textbox", { name: "Search name or slug" })
 		.fill(slug);
-	const row = op.page.getByRole("row").filter({ hasText: slug });
+	const row = op.page.getByTestId("operator-row").filter({ hasText: slug });
 	await expect(row).toBeVisible();
+	// First the port alone: the owner can neither unpublish nor change it.
+	await row.getByRole("button", { name: "Ports" }).click();
+	const portItem = op.page.getByRole("listitem").filter({ hasText: /^3000/ });
+	await portItem.getByRole("button", { name: "Block…" }).click();
+	const portBlock = op.page.getByRole("dialog", {
+		name: `Block port 3000 of ${slug}?`,
+	});
+	await portBlock.getByRole("button", { name: "Block" }).click();
+	await expect(
+		portItem.getByRole("button", { name: "Unblock…" }),
+	).toBeVisible();
+	const portRefused = async (method: string) => {
+		const r = await alice.request.fetch(`/api/v1/sandboxes/${id}/ports/3000`, {
+			method,
+			headers: { ...apiHeaders(team), "content-type": "application/json" },
+			...(method === "PUT" ? { data: { access: "token" } } : {}),
+		});
+		expect(r.status(), method).toBe(403);
+		expect(
+			((await r.json()) as { error: { details?: { reason?: string } } }).error
+				.details?.reason,
+			method,
+		).toBe("port_blocked");
+	};
+	await portRefused("DELETE");
+	await portRefused("PUT");
+
 	await row.getByRole("button", { name: "Block…" }).click();
 	const block = op.page.getByRole("dialog", { name: `Block ${slug}?` });
 	await block.getByRole("textbox", { name: "Note" }).fill("e2e abuse check");
@@ -150,4 +177,17 @@ test("operator blocks another team's sandbox: route blocked, owner refused write
 	});
 	// Resume of a blocked sandbox is refused too.
 	await refused("POST", `/sandboxes/${id}/resume`, {});
+	// Delete works.
+	const del = await alice.request.delete(`/api/v1/sandboxes/${id}`, {
+		headers: { ...apiHeaders(team), "Sbx-Confirm-Delete": id },
+	});
+	expect(del.status(), await del.text()).toBeLessThan(300);
+	await expect
+		.poll(async () => {
+			const r = await alice.request.get(`/api/v1/sandboxes/${id}?team=${team}`);
+			return r.status() === 404
+				? "gone"
+				: ((await r.json()) as { state: string }).state;
+		})
+		.toMatch(/^(deleted|gone)$/);
 });
