@@ -301,7 +301,7 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 - RPC агента в `api` отвечают `503 agent_unavailable`, пока не подключён `ConnectAgentApi` (S3 уже в `main`, подключение — по команде master-сессии; решение 3 плана S7, `apps/api/README.md`); файлы идут через gateway.
 - Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой схемы `tunnel` (до этой миграции), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
 - С `SBX_GATEWAY_SERVICE_TOKEN_FILE` worker находит gateway, который держит туннель machine, через `PgRegistry` из `@sbx/agent-client` (своё небольшое подключение к Postgres и LISTEN `tunnel_sessions`) и вызывает на нём `rotate-token`.
-- `SBX_PORT_DOMAIN` (домен опубликованных портов, например `sbx.example.com`) и `SBX_SSH_USER_CA_KEYS_FILE` (файл с публичными ключами SSH user CA, по одному в строке) необязательны: worker передаёт их агенту в каждом Claim (`port_domain`, `ssh_user_ca_keys`). Без них поля пустые.
+- `SBX_PORT_DOMAIN` (домен опубликованных портов, например `sbx.example.com`) и `SBX_SSH_USER_CA_KEYS_FILE` (файл с публичными ключами SSH user CA, по одному в строке) worker передаёт агенту в каждом Claim (`port_domain`, `ssh_user_ca_keys`); ключи CA он, кроме того, отправляет `System/UpdateSshCa` при каждом resume, recover и reprovision. `gateway.yaml` задаёт `SBX_SSH_USER_CA_KEYS_FILE` = `ssh_user_ca.pub` gateway: без него sshd в VM не примет вход gateway и SSH не работает. Worker читает файл при старте: после смены CA перезапустите worker, и существующие sandbox получат новые ключи при следующем resume (для работающих — после stop/resume).
 
 ## Smoke-тест реального адаптера Proxmox
 
@@ -331,7 +331,7 @@ curl -si -X POST http://localhost:8090/mcp -H 'content-type: application/json' -
 curl -s http://localhost:8090/.well-known/oauth-protected-resource/mcp    # authorization_servers: [issuer Keycloak]
 ```
 
-Подключение клиентов (Claude Code, Codex, OpenCode, Gemini CLI, Inspector) — `apps/mcp/README.md`. Коротко: командный ключ `sbx_…` (`sbx keys create`) в `Authorization: Bearer`, или вход через браузер клиентом Keycloak `sbx-mcp` (публичный, authorization code + PKCE, redirect `http://127.0.0.1:33418/*` и `http://localhost:33418/*`, он уже есть в realm).
+Подключение клиентов (Claude Code, Codex, OpenCode, Gemini CLI, Inspector) — `apps/mcp/README.md`. Коротко: командный ключ `sbx_…` (`sbx keys create`) в `Authorization: Bearer`, или вход через браузер клиентом Keycloak `sbx-mcp` (публичный, authorization code + PKCE, redirect `http://127.0.0.1:33418/*`, `http://localhost:33418/*` и `http://127.0.0.1:19876/*` для OpenCode, он уже есть в realm).
 
 - Проверка `Host`: допустимы host и hostname из `SBX_MCP_PUBLIC_URL` (по умолчанию `localhost:8090`) и значения `SBX_MCP_ALLOWED_HOSTS` через запятую (по умолчанию в стеке `127.0.0.1:8090`). Другой `Host` — `421`. Запрос с `Origin` отклоняется (`403`), пока origin не в `SBX_MCP_ALLOWED_ORIGINS` (в стеке пусто: клиенты MCP — не браузеры).
 - За TLS-прокси задайте `SBX_MCP_PUBLIC_URL` (`https://…/mcp`); прокси отдаёт сервису `/mcp` и `/.well-known/oauth-protected-resource/mcp` (у `api.<домен>` в проде — те же пути, S11 §6.2). Пример — `infra/dev-cp/README.md`, «S11 MCP behind Tailscale Serve».

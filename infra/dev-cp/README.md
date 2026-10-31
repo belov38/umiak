@@ -105,14 +105,11 @@ On the CT, `cd ~/boat-dev-clone/deploy/compose`; `docker compose ps|logs|exec` p
 
 ### S7 behind Tailscale Serve (api, Keycloak, oauth2-proxy)
 
-> **Не проверено на CT.** This wiring was checked only locally (`docker compose config` with the dev-cp files and a local stack); `deploy.sh` with the S7 services has not been run on CT 590. Until the master allows a deploy, treat the section as a plan. To verify on the CT:
-> - `docker compose config` on the CT with the real `.env` (every `${VAR:?}` set) and `docker compose up -d`: api, keycloak, keycloak-db, oauth2-proxy, secrets-init healthy; api `/readyz` 200 on `127.0.0.1:9091`.
-> - Tailscale Serve: `:8443` → oauth2-proxy and `/v1` → api; `:10000` → Keycloak; discovery at `https://<TS name>:10000/realms/sbx/.well-known/openid-configuration` keeps `:10000` in `issuer` and the endpoints (front channel) while the containers reach `http://keycloak:8080` (back channel, `KC_HOSTNAME_BACKCHANNEL_DYNAMIC`).
-> - A Keycloak database left from an earlier import keeps old redirect URIs: drop the `keycloak` database if the browser login ends in `redirect_uri` mismatch.
-> - Docker bridge addresses on the CT are inside `172.16.0.0/12` (`SBX_API_TRUSTED_PROXY_CIDRS`, Keycloak trusted proxies): `clientIp` in the api log is the tailnet client.
-> - Browser: `https://<TS name>:8443/` → Keycloak login → back with the `__Host-sbx_session` cookie; `https://<TS name>:8443/api/v1/me` answers the user.
-> - CLI from the Mac: `sbx login --api-url https://<TS name>:8443` (device grant), `sbx whoami`, `sbx create --wait` and `sbx exec` once S3 is wired in the api.
-> - SSO port: a port with access `sso` opens through the gateway after the redirect to `/sbx-auth/authorize` (cross-site cookie).
+Checked on CT 590 by `e2e.sh` (`docs/plans/e2e-devcp.md`): every service healthy, Serve on `:8443` and `:10000`, discovery keeps the public issuer with `:10000` while containers use `http://keycloak:8080`, `sbx login` (device grant), browser login through oauth2-proxy, token and SSO ports, SSH through the gateway.
+
+- A Keycloak database left from an earlier import keeps old redirect URIs: drop the `keycloak` database if the browser login ends in `redirect_uri` mismatch.
+- Keycloak runs with a fixed heap (`-Xmx512m`, `mem_limit: 1200m`): without a limit of its own the JVM sizes its heap from the host's RAM and starves the 3 GB CT.
+- The single gateway drains for 20 s (`SBX_GATEWAY_DRAIN_TIMEOUT`, `stop_grace_period: 30s`) instead of the product 950 s: there is no peer to drain to, and a recreated gateway would keep the stack down for 16 minutes.
 
 `compose.yaml` has the S7 services and includes `gateway.yaml`; `compose.dev-cp.yaml` publishes them on loopback for Serve and feeds them the `.env` values. The product compose takes the same public URLs as generic variables with localhost defaults (`deploy/compose/README.md`, «Публичные адреса»); the override repeats the ones from `.env` as required values (`${VAR:?}`) so the CT never runs with a localhost default, and adds what the base leaves neutral (Keycloak proxy headers, trusted proxies, the `__Host-` cookie, cross-site port cookies).
 
@@ -127,7 +124,7 @@ On the CT, `cd ~/boat-dev-clone/deploy/compose`; `docker compose ps|logs|exec` p
 - Containers on the CT cannot reach the Serve address (checked: `ECONNREFUSED` from the worker container to `100.64.10.7:10000`; the CT itself can). So every service talks to Keycloak as `http://keycloak:8080` while tokens keep the public issuer `https://<TS name>:10000/realms/sbx` (`KC_HOSTNAME_BACKCHANNEL_DYNAMIC`).
 - Keycloak clients: `oauth2-proxy` redirect URI `https://sbx-dev-cp.tail0000.ts.net:8443/oauth2/callback`, web origin `https://sbx-dev-cp.tail0000.ts.net:8443`; `sbx-cli` is a public device-flow client without redirect URIs. The realm is imported into an empty Keycloak only: after changing the names, drop the `keycloak` database (`deploy/compose/README.md`, «Keycloak»).
 - Client addresses: Serve connects to the published loopback ports, and Docker hands the connection to the container from the bridge gateway (`172.x.0.1`); oauth2-proxy calls the api from its container address. Both are in `172.16.0.0/12` (Docker's default bridge pools), so `X-Forwarded-For` from them gives the tailnet client in the api log (`clientIp`). Any container in the `sbx` network can forge it too; it only affects logs.
-- Keycloak admin: `https://sbx-dev-cp.tail0000.ts.net:10000/admin`, password on the CT in `~/boat-dev-clone/deploy/compose/secrets/keycloak/admin-password`. Dev user `dev@example.com`, temporary password `dev`.
+- Keycloak admin: `https://sbx-dev-cp.tail0000.ts.net:10000/admin`, password on the CT in `~/boat-dev-clone/deploy/compose/secrets/keycloak/admin-password`. Dev user `dev@example.com`, temporary password `dev`. Ilia and the e2e user: `dev-users.sh` (below).
 - The LAN firewall still admits 8080/4180, which are now unused; nothing listens there on the LAN.
 
 ### S11 MCP behind Tailscale Serve
@@ -142,6 +139,12 @@ On the CT, `cd ~/boat-dev-clone/deploy/compose`; `docker compose ps|logs|exec` p
 `compose.dev-cp.yaml` gives the `mcp` service the public URL `SBX_MCP_PUBLIC_URL=https://<TS name>:8443/mcp` (from `.env`, required), the issuer `SBX_OIDC_ISSUER` (the protected resource metadata names it; Keycloak tokens carry the public issuer) and the Host allowlist `<TS name>:8443,<TS name>,127.0.0.1:8090`. The service reaches the api inside the network (`http://api:8080`) with the caller's own bearer; it cannot reach the Serve address and does not need to. `names.sh` has `MCP_URL` and the two Serve mappings (`8443:/mcp` and `8443:/.well-known/oauth-protected-resource/mcp`, both to `127.0.0.1:8090`); `deploy.sh` writes `SBX_MCP_PUBLIC_URL` into `.env`.
 
 The tokens come from the realm client `sbx-mcp` (redirect URIs `http://127.0.0.1:33418/*`, `http://localhost:33418/*`, in the base realm; nothing dev-specific). Clients are configured in `apps/mcp/README.md` with the Serve URL.
+
+## People, e2e and the quick start
+
+- `dev-users.sh` creates `ilia@example.com` (temporary password in `~/.config/sbx/dev-cp/ilia-initial-password` on the Mac, 0600) and `e2e@example.com` (permanent password in `~/.config/sbx/dev-cp/e2e-password`). The realm takes the email as the username; Keycloak 26 needs first and last name, or the login stops at the profile form. Each gets a personal team with the owner role at the first login.
+- `e2e.sh [--keep-going]` runs the whole scenario from the Mac with the real CLI and both SDKs, prints a PASS/FAIL table and checks that nothing is left on `pve`. It uses its own CLI config (mktemp), `kc-browser.py` for the Keycloak pages and `e2e-pty.py` for `sbx shell`. About 5 minutes, at most two 2 GB sandboxes at once. The work dir (tokens, SSH key) is deleted at the end; `SBX_E2E_KEEP_WORKDIR=1` keeps it.
+- `QUICKSTART.md`: the short guide for Ilia (Russian).
 
 ## Smoke test
 

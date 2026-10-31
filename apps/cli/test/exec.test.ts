@@ -361,6 +361,41 @@ describe("exec, logs, kill, ps, run", () => {
 		expect(table.stdout).toMatch(/ID\s+STATUS/);
 	});
 
+	it("logs -f exits with the command's code; logs without -f exits 0", async () => {
+		const d = await sbx([
+			"exec",
+			sb.id,
+			"--detach",
+			"--",
+			"sh",
+			"-c",
+			"echo done; exit 7",
+		]);
+		const id = d.stdout.trim();
+		const f = await sbx(["logs", sb.id, id, "-f"]);
+		expect(f.code, f.stderr).toBe(7);
+		expect(f.stdout).toBe("done\n");
+		const fj = await sbx(["logs", sb.id, id, "-f", "--json"]);
+		expect(fj.code, fj.stderr).toBe(7);
+		expect(fj.last()).toMatchObject({ event: "exit", exitCode: 7 });
+		// Without -f it only prints the output, even of a finished command.
+		const plain = await sbx(["logs", sb.id, id]);
+		expect(plain.code, plain.stderr).toBe(0);
+		expect(plain.stdout).toBe("done\n");
+
+		const sig = await sbx([
+			"exec",
+			sb.id,
+			"--detach",
+			"--",
+			"sh",
+			"-c",
+			"kill -TERM $$",
+		]);
+		const killed = await sbx(["logs", sb.id, sig.stdout.trim(), "-f"]);
+		expect(killed.code, killed.stderr).toBe(128 + 15);
+	});
+
 	it("logs --json prints frames with `event`", async () => {
 		const d = await sbx(["exec", sb.id, "--detach", "--", "echo framed"]);
 		const id = d.stdout.trim();

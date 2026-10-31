@@ -127,10 +127,10 @@ Browser sign-in: `opencode mcp auth sbx-remote`.
 
 Verified: `type` `local`/`remote`, `command` array, `url`, `headers` with `{env:VAR}`, `oauth` object (`clientId`, `clientSecret`, `scope`) or `false`, `opencode mcp auth <name>`. Differences from the spec:
 
-- The OAuth callback of OpenCode is **fixed**: `http://127.0.0.1:19876/mcp/oauth/callback` (port 19876), not 33418. The documented `oauth` table lists `clientId`, `clientSecret`, `scope` only; the config schema in the source also has `callbackPort` ("Port for the local OAuth callback server (default: 19876)") and `redirectUri`, which is why the snippet sets `callbackPort: 33418`. The realm stays as is (`http://127.0.0.1:33418/*` matches `/mcp/oauth/callback`).
+- The OAuth callback of OpenCode is **fixed**: `http://127.0.0.1:19876/mcp/oauth/callback` (port 19876), not 33418. The documented `oauth` table lists `clientId`, `clientSecret`, `scope` only; the config schema in the source also has `callbackPort` ("Port for the local OAuth callback server (default: 19876)") and `redirectUri`, which is why the snippet sets `callbackPort: 33418`. `http://127.0.0.1:33418/*` of the realm matches `/mcp/oauth/callback`.
 - The preview docs for OpenCode v2 (`opencode.ai/v2/docs/mcp-servers`) use another layout: servers under `mcp.servers`, snake_case keys (`client_id`, `callback_port`), no fixed port by default. Which layout applies depends on the installed version; the snippet above is the layout of the current stable docs.
 
-**Open question for master:** confirm `callbackPort: 33418` with a real OpenCode (the key is not on its documentation page), or add `http://127.0.0.1:19876/*` to the redirect URIs of `sbx-mcp` (S11 §6.4, a realm change that needs master's decision). Not done here.
+The realm also allows `http://127.0.0.1:19876/*` (master decision 2026-10-31), so OpenCode works with its default callback too.
 
 ### Gemini CLI (`~/.gemini/settings.json`)
 

@@ -616,6 +616,10 @@ describe("sandboxes", () => {
 	});
 
 	it("stops, resumes, recovers and forks with operations", async () => {
+		// The second POST /stop must land while the stop is still running; 10 ms is too short
+		// under load.
+		await api.close();
+		api = await startFakeApi({ heartbeatMs: 30, readyAfterMs: 300 });
 		const id = await createReady({ slug: "life", ttlSeconds: 900 });
 		const stop = await call("POST", `${sbPath(id)}/stop`);
 		expect(stop.status).toBe(202);
