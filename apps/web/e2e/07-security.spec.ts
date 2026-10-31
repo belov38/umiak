@@ -1,0 +1,189 @@
+// S8 §15 "Security" against the real oauth2-proxy: forged
+// X-Auth-Request-* before sign-in → the login redirect; after sign-in
+// forged groups and email change nothing; web refuses requests without the
+// identity header and is reachable from oauth2-proxy only; secret values
+// never come back in a response; the web image has no auth-proxy.
+import { execFileSync } from "node:child_process";
+import { APP } from "./env.ts";
+import {
+	control,
+	createSandbox,
+	expect,
+	openTab,
+	personalTeam,
+	test,
+} from "./fixtures.ts";
+
+const PROJECT = process.env.SBX_E2E_PROJECT ?? "sbx-e2e";
+
+function docker(args: string[]): { ok: boolean; out: string } {
+	try {
+		return {
+			ok: true,
+			out: execFileSync("docker", args, { encoding: "utf8", stdio: "pipe" }),
+		};
+	} catch (e) {
+		const err = e as { stdout?: string; stderr?: string };
+		return { ok: false, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+	}
+}
+
+test("forged identity headers before sign-in: oauth2-proxy sends to the login", async ({
+	state,
+}) => {
+	const forged = {
+		"X-Auth-Request-Email": state.users.op.email,
+		"X-Auth-Request-User": state.users.op.id,
+		"X-Auth-Request-Groups": "sbx-operators",
+		"X-Auth-Request-Preferred-Username": "op",
+	};
+	for (const path of ["/app", "/app/operator", "/admin", "/cms-api/users"]) {
+		const r = await fetch(`${APP}${path}`, {
+			headers: forged,
+			redirect: "manual",
+		});
+		expect(r.status, path).toBe(302);
+		expect(r.headers.get("location"), path).toContain(
+			"/realms/sbx/protocol/openid-connect/auth",
+		);
+	}
+	// The api behind oauth2-proxy: no session, no answer from the api.
+	const api = await fetch(`${APP}/api/v1/me`, {
+		headers: forged,
+		redirect: "manual",
+	});
+	expect([302, 401]).toContain(api.status);
+	expect(await api.text()).not.toContain(state.users.op.email);
+});
+
+test("forged identity headers after sign-in grant nothing", async ({
+	as,
+	state,
+}) => {
+	const alice = await as("alice");
+	const team = await personalTeam(alice);
+	const forged = {
+		"X-Auth-Request-Email": state.users.op.email,
+		"X-Auth-Request-User": state.users.op.id,
+		"X-Auth-Request-Groups": "sbx-operators",
+	};
+	await alice.context.setExtraHTTPHeaders(forged);
+	const r = await alice.page.goto("/app/operator");
+	expect(r?.status()).toBe(403);
+	await alice.page.goto("/admin");
+	await expect(alice.page).toHaveURL(/\/admin\/unauthorized/);
+	const meR = await alice.request.get(`/api/v1/me?team=${team}`);
+	expect(meR.status()).toBe(200);
+	const body = (await meR.json()) as {
+		user?: { email?: string; isOperator?: boolean };
+	};
+	expect(JSON.stringify(body)).toContain(state.users.alice.email);
+	expect(JSON.stringify(body)).not.toContain(state.users.op.email);
+	expect(
+		(
+			await alice.request.get(`/api/v1/sandboxes?allTeams=true&team=${team}`)
+		).status(),
+	).toBe(403);
+	await alice.context.setExtraHTTPHeaders({});
+});
+
+test("unsafe /cms-api requests with a foreign Origin are 403, also for an operator", async ({
+	as,
+	state,
+}) => {
+	const op = await as("op");
+	for (const path of [
+		"/cms-api/users",
+		"/cms-api/teams",
+		"/cms-api/templates",
+	]) {
+		const r = await op.request.post(path, {
+			headers: {
+				origin: "http://evil.example",
+				"content-type": "application/json",
+			},
+			data: {
+				email: `evil-${state.run}@e2e.example.com`,
+				name: `evil-${state.run}`,
+			},
+		});
+		expect(r.status(), path).toBe(403);
+	}
+	// No Origin at all is refused the same way.
+	const none = await op.request.fetch("/cms-api/teams", {
+		method: "POST",
+		headers: { "content-type": "application/json", origin: "" },
+		data: { name: `none-${state.run}` },
+	});
+	expect(none.status()).toBe(403);
+});
+
+test("web answers 401 without the identity header and only oauth2-proxy reaches it", () => {
+	const direct = docker([
+		"exec",
+		`${PROJECT}-oauth2-proxy-1`,
+		"/bin/busybox",
+		"wget",
+		"-S",
+		"-O",
+		"/dev/null",
+		"http://web:3000/app",
+	]);
+	expect(direct.ok).toBe(false);
+	expect(direct.out).toMatch(/HTTP\/1\.1 401/);
+	// From the sbx network (the backend's container) web does not resolve.
+	const other = docker([
+		"exec",
+		`${PROJECT}-e2e-backend-1`,
+		"node",
+		"-e",
+		"fetch('http://web:3000/healthz').then(() => process.exit(0), () => process.exit(3))",
+	]);
+	expect(other.ok).toBe(false);
+});
+
+test("the web image has no dev auth proxy", () => {
+	const r = docker([
+		"run",
+		"--rm",
+		"--entrypoint",
+		"sh",
+		"sbx-web:dev",
+		"-c",
+		"find / -xdev \\( -name 'auth-proxy*' -o -path '*/apps/web/dev' -o -path '*/apps/web/e2e' \\) 2>/dev/null; echo done",
+	]);
+	expect(r.ok, r.out).toBe(true);
+	expect(r.out.trim()).toBe("done");
+});
+
+test("secret values never come back; the guest gets them", async ({
+	as,
+	audit,
+	state,
+}) => {
+	const alice = await as("alice");
+	const team = await personalTeam(alice);
+	const secret = `S3cr3t-${state.run}-value`;
+	audit.forbid(secret, "sandbox secret value");
+	const id = await createSandbox(alice.page, team, {
+		slug: `sec-${state.run}`,
+		env: { PLAIN: `plain-${state.run}` },
+		secrets: { API_TOKEN: secret },
+	});
+	const env = await openTab(alice.page, "Env");
+	await expect(
+		env.getByRole("row").filter({ hasText: "API_TOKEN" }),
+	).toContainText("•••");
+	await expect(env.getByRole("row").filter({ hasText: "PLAIN" })).toContainText(
+		`plain-${state.run}`,
+	);
+	await openTab(alice.page, "Overview");
+	await alice.page.reload();
+	const guest = await control<{
+		env: Record<string, string>;
+		secretEnvNames: string[];
+	}>("GET", `/machine/${id}`);
+	expect(guest.status).toBe(200);
+	expect(guest.body.env.PLAIN).toBe(`plain-${state.run}`);
+	expect(guest.body.secretEnvNames).toContain("API_TOKEN");
+});
