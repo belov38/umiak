@@ -180,6 +180,8 @@ S10 runs tools against the host IP, with TLS SNI kept separate:
 export SBX_PVE_URL=https://100.64.10.2:8006
 export SBX_PVE_TLS_NAME=pve
 export SBX_NODE_SSH_HOST=100.64.10.2
+export SBX_TEMPLATE_VMID_RANGE=595-596
+export SBX_VMID_RANGE=580-589
 # Reuse the existing verified host key when connecting by IP; do not disable verification.
 ssh -o BatchMode=yes -o HostKeyAlias=pve.tail0000.ts.net root@100.64.10.2 qm list
 ```
