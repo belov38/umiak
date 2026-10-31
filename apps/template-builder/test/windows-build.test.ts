@@ -146,6 +146,12 @@ function setup(
 		sysprepResult: "running" as AgentExecResult,
 		/** The WinPE boot powers off after this many polls. */
 		offlineStopsAfter: 2,
+		/** The one-time WinPE boot entry is set for the next reboot. */
+		peArmed: false,
+		/** Reboots with the entry set that start Windows again (the entry ignored). */
+		peIgnored: 0,
+		/** WinPE runs (no guest agent). */
+		winpe: false,
 		sysprepStarted: false,
 		polls: 0,
 	};
@@ -203,23 +209,34 @@ function setup(
 		if (method !== "GET" || path !== `${vm}/status/current`) return;
 		const v = pve.vms.get(598);
 		if (v?.status !== "running") return;
-		const limit =
-			v.config.boot === "order=ide2"
-				? state.offlineStopsAfter
-				: state.sysprepStarted
-					? state.sysprepStopsAfter
-					: undefined;
+		const limit = state.winpe
+			? state.offlineStopsAfter
+			: state.sysprepStarted
+				? state.sysprepStopsAfter
+				: undefined;
 		if (limit !== undefined && ++state.polls >= limit) {
 			v.status = "stopped";
 			state.polls = 0;
 			state.sysprepStarted = false;
+			state.winpe = false;
 		}
 	};
-	// QGA exists only in the installed Windows, never in WinPE.
-	guest.alive = () => {
-		const v = pve.vms.get(598);
-		return v?.status === "running" && v.config.boot !== "order=ide2";
+	// A reboot with the one-time entry set starts WinPE from the ramdisk.
+	guest.onPeSetup = () => {
+		state.peArmed = true;
 	};
+	guest.onReboot = () => {
+		if (!state.peArmed) return;
+		state.peArmed = false;
+		if (state.peIgnored > 0) {
+			state.peIgnored--;
+			return;
+		}
+		state.winpe = true;
+		state.polls = 0;
+	};
+	// QGA exists only in the installed Windows, never in WinPE.
+	guest.alive = () => pve.vms.get(598)?.status === "running" && !state.winpe;
 	const virtio = join(work, "virtio-win-0.1.271.iso");
 	writeFileSync(virtio, "virtio-win iso bytes");
 	const isos: {
@@ -379,14 +396,16 @@ describe("iso-install build: happy path", () => {
 			"guest:mkdir-sbx-template",
 			`qga:write ${BUILD_JSON}`,
 			"guest:step 90-cleanup",
-			// offline: WinPE from the CD while Windows is not sealed yet
+			// offline: the CD swapped on the running Windows (not sealed yet), a one-time boot
+			// entry for WinPE from a ramdisk, a reboot into it; WinPE powers off
 			`api:PUT ${vm}/config`,
-			`api:POST ${vm}/status/start`,
-			`api:PUT ${vm}/sendkey`,
-			// verify-offline: the disk boots, the log and the services are read
+			"guest:pe-setup",
+			"guest:reboot",
+			// verify-offline: the disk boots, the log and the services are read, the entry goes
 			`api:PUT ${vm}/config`,
 			`api:POST ${vm}/status/start`,
 			"guest:check-offline",
+			"guest:pe-cleanup",
 			`qga:write ${BUILD_JSON}`,
 			// seal
 			"guest:rm-sbx-build",
@@ -405,17 +424,21 @@ describe("iso-install build: happy path", () => {
 		});
 		expect(s.guest.started).toEqual(["00-base", "10-system", "90-cleanup"]);
 
-		// Boot-from-CD key presses: four per second for 60 s at install and at the offline boot.
+		// Boot-from-CD key presses: four per second for 60 s at install only. The offline stage
+		// neither starts the VM nor presses keys, and Windows is not shut down before it.
 		const starts = s.log
 			.map((e, i) => (e === `api:POST ${vm}/status/start` ? i : -1))
 			.filter((i) => i >= 0);
-		expect(starts).toHaveLength(3);
+		expect(starts).toHaveLength(2);
 		const firstStep = s.log.indexOf("guest:step 00-base");
 		expect(keysBetween(s.log, starts[0] ?? 0, firstStep)).toBe(240);
-		expect(keysBetween(s.log, starts[1] ?? 0, starts[2] ?? 0)).toBe(240);
-		expect(keysBetween(s.log, starts[2] ?? 0, s.log.length)).toBe(0);
+		expect(keysBetween(s.log, firstStep, s.log.length)).toBe(0);
+		const offline = s.log.indexOf("guest:step 90-cleanup");
+		expect(
+			s.log.slice(offline, starts[1]).includes(`api:POST ${vm}/agent/shutdown`),
+		).toBe(false);
 		// The disk boots once after WinPE, before sysprep.
-		expect(s.log.indexOf("guest:sysprep")).toBeGreaterThan(starts[2] ?? 0);
+		expect(s.log.indexOf("guest:sysprep")).toBeGreaterThan(starts[1] ?? 0);
 		for (const c of s.pve.calls.filter((c) => c.path === `${vm}/sendkey`))
 			expect(c.params).toEqual({ key: "f12" });
 	});
@@ -474,10 +497,7 @@ describe("iso-install build: happy path", () => {
 			{
 				net0: "virtio=02:01:00:00:02:56,bridge=sbx0,firewall=1,link_down=0",
 			},
-			{
-				sata2: `local:iso/${offlineIso(m)},media=cdrom`,
-				boot: "order=ide2",
-			},
+			{ sata2: `local:iso/${offlineIso(m)},media=cdrom` },
 			{ sata2: "none,media=cdrom", boot: "order=scsi0" },
 			{
 				delete: "ide2,sata1,sata2",
@@ -883,115 +903,109 @@ describe("iso-install build: failures", () => {
 		expect(s.pve.vms.has(598)).toBe(false);
 	});
 
-	it("the offline WinPE powering off inside the key window ends the presses", async () => {
+	it("keys refused while the start task runs do not end the presses", async () => {
 		const s = setup();
-		let offKeys = 0;
+		// QEMU is not up until the start task ends; the task takes a while on a slow uplink.
+		let starting = false;
+		const api = s.deps.api;
+		const waitTask = api.waitTask.bind(api);
+		api.waitTask = async (n, u, o) => {
+			await new Promise((r) => setTimeout(r, 20));
+			starting = false;
+			return waitTask(n, u, o);
+		};
 		const base = s.pve.before;
 		s.pve.before = (method, path, params) => {
 			base?.(method, path, params);
-			const v = s.pve.vms.get(598);
-			if (
-				method !== "PUT" ||
-				path !== `${vm}/sendkey` ||
-				v?.config.boot !== "order=ide2"
-			)
-				return;
-			if (v.status !== "running")
+			if (method === "POST" && path === `${vm}/status/start`) starting = true;
+			if (method === "PUT" && path === `${vm}/sendkey` && starting)
 				throw new Error(`PUT ${vm}/sendkey: VM 598 not running`);
-			if (++offKeys >= 5) v.status = "stopped";
 		};
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(m.status).toBe("ready");
-		expect(offKeys).toBe(5);
 	});
 
-	it("a disk boot instead of WinPE is powered off and the offline boot retried", async () => {
+	it("the offline stage sets a one-time BCD ramdisk entry for WinPE, verify-offline removes it", async () => {
 		const s = setup();
-		let offlineStarts = 0;
-		const base = s.pve.before;
-		s.pve.before = (method, path, params) => {
-			base?.(method, path, params);
-			const offline = s.pve.vms.get(598)?.config.boot === "order=ide2";
-			if (method === "POST" && path === `${vm}/status/start` && offline)
-				offlineStarts++;
-		};
-		// OVMF missed the CD prompt on the first offline boot: Windows (not sealed yet) answers.
-		s.guest.alive = () => {
-			const v = s.pve.vms.get(598);
-			return (
-				v?.status === "running" &&
-				(v.config.boot !== "order=ide2" || offlineStarts === 1)
-			);
-		};
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(m.status).toBe("ready");
-		expect(offlineStarts).toBe(2);
-		expectInOrder(s.log, [
-			"guest:step 90-cleanup",
-			`api:POST ${vm}/status/start`,
-			`api:PUT ${vm}/sendkey`,
-			`api:POST ${vm}/agent/shutdown`,
-			`api:POST ${vm}/status/start`,
-			`api:PUT ${vm}/sendkey`,
-			"guest:check-offline",
-			"guest:sysprep",
-		]);
-		expect(s.messages.join("\n")).toMatch(
-			/offline attempt 1 of 3: the disk booted/,
+		const scripts = s.guest.calls
+			.filter((c) => c.cmd.includes("-EncodedCommand"))
+			.map((c) =>
+				Buffer.from(String(c.cmd.at(-1)), "base64").toString("utf16le"),
+			);
+		const pe = scripts.find((t) => t.includes("/bootsequence")) ?? "";
+		for (const want of [
+			"sources\\boot.wim",
+			"boot\\boot.sdi",
+			"'C:\\sbx-pe'",
+			"'/create', '{ramdiskoptions}', '/d', 'sbx offline'",
+			"'ramdisksdidevice', 'partition=C:'",
+			"'ramdisksdipath', '\\sbx-pe\\boot.sdi'",
+			"'/create', '/d', 'sbx offline', '/application', 'osloader'",
+			"'ramdisk=[C:]\\sbx-pe\\boot.wim,{ramdiskoptions}'",
+			"'device', $dev",
+			"'osdevice', $dev",
+			"'path', '\\windows\\system32\\boot\\winload.efi'",
+			"'systemroot', '\\windows'",
+			"'winpe', 'yes'",
+			"'detecthal', 'yes'",
+			"'/bootsequence', $id",
+			"$LASTEXITCODE -ne 0",
+		])
+			expect(pe).toContain(want);
+		const cleanup =
+			scripts.find(
+				(t) => t.includes("C:\\sbx-pe") && !t.includes("/bootsequence"),
+			) ?? "";
+		expect(cleanup).toContain("'/delete'");
+		expect(cleanup).toContain("'/enum', 'all', '/v'");
+		expect(cleanup).toContain("sbx offline");
+		expect(cleanup).toContain("Remove-Item -LiteralPath 'C:\\sbx-pe'");
+		// The reboot goes through the guest (the reboot step is the other one).
+		expect(s.log.filter((e) => e === "guest:reboot")).toHaveLength(2);
+		expect(s.messages.join("\n")).toContain(
+			"{6a7c3b1e-0d2f-11f1-9a3c-525400a1b2c3}",
 		);
-		// The config is set once; the retry only starts the VM again.
+		// The boot order stays on the disk: Windows Boot Manager starts WinPE.
 		expect(
-			s.pve.calls.filter(
+			s.pve.calls.some(
 				(c) =>
 					c.method === "PUT" &&
 					c.path === `${vm}/config` &&
-					c.params?.boot === "order=ide2",
+					String(c.params?.boot ?? "").includes("ide2"),
 			),
-		).toHaveLength(1);
+		).toBe(false);
 	});
 
-	it("a disk boot whose agent refuses the shutdown is stopped hard, then retried", async () => {
+	it("Windows booting instead of WinPE is detected and the entry set once more", async () => {
 		const s = setup();
-		let offlineStarts = 0;
-		const base = s.pve.before;
-		s.pve.before = (method, path, params) => {
-			base?.(method, path, params);
-			const offline = s.pve.vms.get(598)?.config.boot === "order=ide2";
-			if (method === "POST" && path === `${vm}/status/start` && offline)
-				offlineStarts++;
-			// Only the disk boot during the offline stage refuses the shutdown.
-			if (method === "POST" && path === `${vm}/agent/shutdown` && offline)
-				throw new PveApiError(500, "QEMU guest agent is not running");
-		};
-		s.guest.alive = () => {
-			const v = s.pve.vms.get(598);
-			return (
-				v?.status === "running" &&
-				(v.config.boot !== "order=ide2" || offlineStarts === 1)
-			);
-		};
+		s.state.peIgnored = 1;
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(m.status).toBe("ready");
 		expectInOrder(s.log, [
-			`api:POST ${vm}/agent/shutdown`,
-			`api:POST ${vm}/status/stop`,
-			`api:POST ${vm}/status/start`,
+			"guest:step 90-cleanup",
+			"guest:pe-setup",
+			"guest:reboot",
+			"guest:pe-setup",
+			"guest:reboot",
 			"guest:check-offline",
+			"guest:sysprep",
 		]);
+		expect(s.log.filter((e) => e === "guest:pe-setup")).toHaveLength(2);
+		expect(s.messages.join("\n")).toMatch(
+			/offline attempt 1 of 2: .*Windows booted/,
+		);
 	});
 
-	it("three disk boots in a row fail the offline stage before sysprep", async () => {
+	it("Windows booting again after every reboot fails the offline stage before sysprep", async () => {
 		const s = setup();
-		// Every offline boot reaches Windows instead of WinPE.
-		s.guest.alive = () => s.pve.vms.get(598)?.status === "running";
-		s.state.offlineStopsAfter = 1000;
+		s.state.peIgnored = 1000;
 		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
 		expect(m.error?.stage).toBe("offline");
-		expect(m.error?.message).toMatch(/3 attempts/);
-		expect(m.error?.message).toMatch(/not sealed/);
-		expect(
-			s.log.filter((e) => e === `api:POST ${vm}/agent/shutdown`),
-		).toHaveLength(4); // the shutdown after the steps, then one per disk boot
+		expect(m.error?.message).toMatch(/bootsequence/);
+		expect(m.error?.message).toMatch(/2 attempts/);
+		expect(s.log.filter((e) => e === "guest:pe-setup")).toHaveLength(2);
 		expect(s.log).not.toContain("guest:seal");
 		expect(s.log).not.toContain("guest:sysprep");
 		expect(s.log).not.toContain(`api:POST ${vm}/template`);
@@ -999,6 +1013,88 @@ describe("iso-install build: failures", () => {
 		expect(
 			s.node.calls.filter((c) => c.op === "media.remove").map((c) => c.args),
 		).toEqual([{ names: [buildIso(m), offlineIso(m)] }]);
+	});
+
+	it("a CD change the running VM refuses or leaves pending falls back to a shutdown and a boot into Windows", async () => {
+		const offlineCd = (params: Record<string, unknown> | undefined) =>
+			String(params?.sata2 ?? "").includes("sbx-offline");
+		const refused = (s: ReturnType<typeof setup>) => {
+			const base = s.pve.before;
+			s.pve.before = (method, path, params) => {
+				base?.(method, path, params);
+				if (
+					method === "PUT" &&
+					path === `${vm}/config` &&
+					offlineCd(params) &&
+					s.pve.vms.get(598)?.status === "running"
+				)
+					throw new PveApiError(500, "hotplug problem - cdrom change refused");
+			};
+		};
+		const pending = (s: ReturnType<typeof setup>) => {
+			const api = s.deps.api;
+			const put = api.put.bind(api);
+			api.put = async <T>(path: string, params?: Parameters<typeof put>[1]) => {
+				const v = s.pve.vms.get(598);
+				const was = v?.config.sata2;
+				const r = await put<T>(path, params);
+				// The change waits in the pending section until the VM stops.
+				if (v && offlineCd(params) && v.status === "running" && was)
+					v.config.sata2 = was;
+				return r;
+			};
+		};
+		for (const arrange of [refused, pending]) {
+			const s = setup();
+			arrange(s);
+			const m = await buildTemplate(s.deps, s.opts);
+			expect(m.status).toBe("ready");
+			expectInOrder(s.log, [
+				"guest:step 90-cleanup",
+				`api:POST ${vm}/agent/shutdown`,
+				`api:PUT ${vm}/config`,
+				`api:POST ${vm}/status/start`,
+				"guest:pe-setup",
+				"guest:reboot",
+				"guest:check-offline",
+			]);
+			expect(s.messages.join("\n")).toMatch(
+				arrange === refused
+					? /offline ISO on sata2 .*cdrom change refused/
+					: /offline ISO on sata2 .*pending/,
+			);
+		}
+	});
+
+	it("a failing bcdedit fails the offline stage with its output, before any reboot", async () => {
+		const s = setup();
+		s.guest.peSetupExit = 1;
+		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+		expect(m.error?.stage).toBe("offline");
+		expect(m.error?.message).toMatch(/bcdedit \/create failed/);
+		// Only the reboot step rebooted.
+		expect(s.log.filter((e) => e === "guest:reboot")).toHaveLength(1);
+		expect(s.log).not.toContain("guest:sysprep");
+	});
+
+	it("a WinPE that never powers off fails the offline stage after its timeout", async () => {
+		const s = setup();
+		s.state.offlineStopsAfter = 1_000_000;
+		s.deps.offlineTimeoutMs = 30;
+		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+		expect(m.error?.stage).toBe("offline");
+		expect(m.error?.message).toMatch(/did not power off within 30 ms/);
+		expect(s.log).not.toContain("guest:sysprep");
+	});
+
+	it("a WinPE boot entry left after the cleanup fails verify-offline", async () => {
+		const s = setup();
+		s.guest.peCleanupExit = 1;
+		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
+		expect(m.error?.stage).toBe("verify-offline");
+		expect(m.error?.message).toMatch(/sbx offline/);
+		expect(s.log).not.toContain("guest:seal");
+		expect(s.log).not.toContain("guest:sysprep");
 	});
 
 	it("an offline log with errors fails verify-offline with its tail, before sysprep", async () => {

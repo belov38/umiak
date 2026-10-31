@@ -76,6 +76,7 @@ import {
 	renderWindowsAgentToml,
 } from "./media.ts";
 import {
+	bootTime,
 	networkUp,
 	readGuestFiles,
 	rebootWindows,
@@ -84,8 +85,8 @@ import {
 
 // Stages of an iso-install build (spec S9 sections 6, 7, 10): media, vm, install, steps, offline,
 // verify-offline, seal, template. build.ts runs them in order, then verify, and rolls back on
-// failure. The offline WinPE boot comes before sysprep: a boot prompt OVMF misses then boots a
-// disk that is not sealed yet, which is harmless and retried.
+// failure. The offline WinPE boot comes before sysprep: WinPE starts from a one-time boot entry of
+// the installed Windows, which is not sealed yet.
 
 const MIN = 60_000;
 const SBX_AGENT_EXE = "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe";
@@ -115,18 +116,24 @@ export const CLEANUP_STEP = "90-cleanup";
  * from the disk comes minutes later.
  */
 const INSTALL_KEYS = 240;
-const OFFLINE_KEYS = 240;
 const DEFAULT_KEY_INTERVAL_MS = 250;
 // Any key passes the boot prompt. Not Enter or Space: Setup's progress window has the Cancel
 // button focused, and Enter there opens "Are you sure you want to quit?" (seen on a real build).
 const BOOT_KEY = "f12";
 const SYSPREP_TIMEOUT_MS = 30 * MIN;
 const OFFLINE_TIMEOUT_MS = 10 * MIN;
-/** Offline boots in a row that may reach Windows instead of WinPE. */
-const OFFLINE_ATTEMPTS = 3;
-/** A disk boot of the offline stage: how long Windows may take to power off on request. */
-const OFFLINE_POWEROFF_MS = 3 * MIN;
-/** verify-offline: the boot from the disk up to the guest agent. */
+/** Rounds of boot entry + reboot when the reboot starts Windows again instead of WinPE. */
+const OFFLINE_ATTEMPTS = 2;
+/** The setup script copies boot.wim (about 500 MB) from the ISO. */
+const PE_SETUP_TIMEOUT_MS = 10 * MIN;
+/** boot.wim and boot.sdi of the user's ISO for the ramdisk boot, relative to C:. */
+const PE_DIR_REL = "\\sbx-pe";
+const PE_DIR = `C:${PE_DIR_REL}`;
+/** Description of the BCD entries of the WinPE boot; the cleanup finds them by it. */
+const PE_ENTRY = "sbx offline";
+const GUID_RE =
+	/^\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}$/i;
+/** The boot of Windows from the disk up to the guest agent (verify-offline, CD swap fallback). */
 const OFFLINE_BOOT_TIMEOUT_MS = 15 * MIN;
 const OFFLINE_CHECK_TIMEOUT_MS = 2 * MIN;
 const OFFLINE_LOG = "C:\\Windows\\Setup\\Scripts\\sbx-offline.log";
@@ -613,21 +620,22 @@ async function startPressingKeys(
 	node: string,
 	vmid: number,
 	count: number,
-	between?: () => Promise<void>,
 ): Promise<void> {
 	const upid = await deps.api.post<string>(
 		`/nodes/${node}/qemu/${vmid}/status/start`,
 	);
-	const started = deps.api.waitTask(node, upid);
+	let running = false;
+	const started = deps.api.waitTask(node, upid).then(() => {
+		running = true;
+	});
 	started.catch(() => {});
 	try {
-		await pressKeys(deps, node, vmid, count, between);
+		await pressKeys(deps, node, vmid, count, () => running);
 	} finally {
 		await started;
 	}
 }
 
-/** Enter at "Press any key to boot from CD or DVD", `count` times one interval apart. */
 async function vmStopped(
 	deps: BuildDeps,
 	node: string,
@@ -640,52 +648,45 @@ async function vmStopped(
 	}
 }
 
+/** The boot key at "Press any key to boot from CD or DVD", `count` times one interval apart. */
 async function pressKeys(
 	deps: BuildDeps,
 	node: string,
 	vmid: number,
 	count: number,
-	/** Runs repeatedly while the keys are pressed; an error from it ends the presses. */
-	between?: () => Promise<void>,
+	/** False while the start task runs: a key refused then says nothing about the VM. */
+	started: () => boolean = () => true,
 ): Promise<void> {
 	const interval = deps.keyIntervalMs ?? DEFAULT_KEY_INTERVAL_MS;
 	// The prompt waits about 5 s and one API call can take seconds on a slow uplink (3 s seen),
 	// so presses start on a fixed cadence without waiting for the previous one.
-	let done = false;
 	let stopped = false;
-	let failure: unknown;
+	let refused = 0;
+	let lastError: unknown;
 	const presses: Promise<void>[] = [];
 	const press = async () => {
 		try {
 			await sendKey(deps.api, node, vmid, BOOT_KEY);
 		} catch (err) {
-			// The offline WinPE boot can finish and power off within the key window.
-			if (await vmStopped(deps, node, vmid)) stopped = true;
-			else failure ??= err;
+			// Single keys fail now and then ("not running" before QEMU is up, "Broken pipe" from
+			// the monitor while the firmware starts; both seen on pve). The presses are best
+			// effort: what booted is checked afterwards. Only a VM that powered off ends them.
+			refused++;
+			lastError = err;
+			if (started() && (await vmStopped(deps, node, vmid))) stopped = true;
 		}
 	};
-	const watch = (async () => {
-		if (!between) return;
-		while (!done) {
-			await between();
-			await sleep(Math.max(interval, 1));
-		}
-	})();
-	watch.catch(() => {});
-	try {
-		for (let i = 0; i < count && !stopped && failure === undefined; i++) {
-			presses.push(press());
-			if (i < count - 1) {
-				await sleep(interval);
-				await Promise.race([watch, Promise.resolve()]);
-			}
-		}
-		await Promise.all(presses);
-	} finally {
-		done = true;
+	for (let i = 0; i < count && !stopped; i++) {
+		presses.push(press());
+		if (i < count - 1) await sleep(interval);
 	}
-	await watch;
-	if (!stopped && failure !== undefined) throw failure;
+	await Promise.all(presses);
+	if (!stopped && refused === presses.length && lastError !== undefined)
+		throw lastError;
+	if (refused > 0)
+		deps.log(
+			`${refused} of ${presses.length} boot key presses failed (last: ${errorText(lastError)})`,
+		);
 }
 
 export async function stageInstall(
@@ -1067,66 +1068,201 @@ export async function stageSysprep(
 
 // offline
 
-/** The offline boot reached Windows on the disk instead of WinPE (OVMF missed the CD prompt). */
-class DiskBootedError extends Error {}
+/**
+ * PowerShell helpers of the WinPE boot entry. `Bcd` runs bcdedit and throws on a non-zero exit
+ * code. `Remove-SbxEntries` deletes every BCD object described as "sbx offline": the labels of
+ * `bcdedit /enum` are localized, ids and values are not, so blocks are matched by the value.
+ */
+const PE_BCD_PS1 = `function Bcd([string[]]$A) {
+  $ErrorActionPreference = 'Continue'
+  $out = & bcdedit.exe @A 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) { throw "bcdedit $($A -join ' ') failed (exit $LASTEXITCODE): $($out.Trim())" }
+  $out
+}
+function Remove-SbxEntries {
+  $ids = foreach ($b in ((Bcd @('/enum', 'all', '/v')) -split '\\r?\\n\\s*\\r?\\n')) {
+    if ($b.Contains('${PE_ENTRY}') -and $b -match '\\{[0-9a-fA-F-]{36}\\}') { $Matches[0] }
+  }
+  foreach ($id in $ids) { $null = Bcd @('/delete', $id, '/f') }
+}`;
 
-/** Asks Windows to power off; a hard stop if the agent refuses or it takes too long. */
-async function powerOffDiskBoot(
-	deps: BuildDeps,
-	node: string,
-	vmid: number,
-): Promise<void> {
-	const vmPath = `/nodes/${node}/qemu/${vmid}`;
-	let graceMs = OFFLINE_POWEROFF_MS;
-	try {
-		await deps.api.post(`${vmPath}/agent/shutdown`);
-	} catch (err) {
-		deps.signal?.throwIfAborted();
-		// Windows is not sealed yet: a hard stop does no harm.
-		deps.log(`agent/shutdown: ${errorText(err)}`);
-		graceMs = 0;
-	}
-	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
-	const deadline = Date.now() + graceMs;
-	while ((await vmStatus(deps, node, vmid)) !== "stopped") {
-		if (Date.now() >= deadline) {
-			deps.log(`VM ${vmid} is still running: stopping it`);
-			const upid = await deps.api.post<string>(`${vmPath}/status/stop`);
-			await deps.api.waitTask(node, upid);
-			return;
-		}
-		await sleep(pollMs);
+/**
+ * Copies boot.wim and boot.sdi of the user's ISO to C:\sbx-pe and makes a ramdisk entry for that
+ * WinPE the next boot, once (`bcdedit /bootsequence`). What an earlier run left goes first.
+ */
+const PE_SETUP_PS1 = `$ErrorActionPreference = 'Stop'
+${PE_BCD_PS1}
+$iso = $null
+foreach ($d in [IO.DriveInfo]::GetDrives()) {
+  if ($d.DriveType -eq 'CDRom' -and $d.IsReady -and (Test-Path -LiteralPath ($d.Name + 'sources\\boot.wim'))) { $iso = $d.Name; break }
+}
+if ($null -eq $iso) { throw 'no CD with \\sources\\boot.wim (the Windows ISO on ide2)' }
+Remove-SbxEntries
+try { $null = Bcd @('/delete', '{ramdiskoptions}', '/f') } catch {}
+if (Test-Path -LiteralPath '${PE_DIR}') { Remove-Item -LiteralPath '${PE_DIR}' -Recurse -Force }
+$null = New-Item -ItemType Directory -Path '${PE_DIR}'
+Copy-Item -LiteralPath ($iso + 'sources\\boot.wim') -Destination '${PE_DIR}\\boot.wim'
+Copy-Item -LiteralPath ($iso + 'boot\\boot.sdi') -Destination '${PE_DIR}\\boot.sdi'
+$null = Bcd @('/create', '{ramdiskoptions}', '/d', '${PE_ENTRY}')
+$null = Bcd @('/set', '{ramdiskoptions}', 'ramdisksdidevice', 'partition=C:')
+$null = Bcd @('/set', '{ramdiskoptions}', 'ramdisksdipath', '${PE_DIR_REL}\\boot.sdi')
+$out = Bcd @('/create', '/d', '${PE_ENTRY}', '/application', 'osloader')
+if ($out -notmatch '\\{[0-9a-fA-F-]{36}\\}') { throw "no entry id in: $out" }
+$id = $Matches[0]
+$dev = 'ramdisk=[C:]${PE_DIR_REL}\\boot.wim,{ramdiskoptions}'
+$null = Bcd @('/set', $id, 'device', $dev)
+$null = Bcd @('/set', $id, 'osdevice', $dev)
+$null = Bcd @('/set', $id, 'path', '\\windows\\system32\\boot\\winload.efi')
+$null = Bcd @('/set', $id, 'systemroot', '\\windows')
+$null = Bcd @('/set', $id, 'winpe', 'yes')
+$null = Bcd @('/set', $id, 'detecthal', 'yes')
+$null = Bcd @('/bootsequence', $id)
+Write-Output "SBXPE $id"
+`;
+
+/** Removes the WinPE entries and C:\sbx-pe and checks that `bcdedit /enum all` has no "sbx offline". */
+const PE_CLEANUP_PS1 = `$ErrorActionPreference = 'Stop'
+${PE_BCD_PS1}
+Remove-SbxEntries
+try { $null = Bcd @('/delete', '{ramdiskoptions}', '/f') } catch {}
+try { $null = Bcd @('/deletevalue', '{bootmgr}', 'bootsequence') } catch {}
+if ((Bcd @('/enum', 'all', '/v')).Contains('${PE_ENTRY}')) { throw "BCD entries '${PE_ENTRY}' are still there after the cleanup" }
+if (Test-Path -LiteralPath '${PE_DIR}') { Remove-Item -LiteralPath '${PE_DIR}' -Recurse -Force }
+if (Test-Path -LiteralPath '${PE_DIR}') { throw '${PE_DIR} is still there' }
+Write-Output 'SBXPE removed'
+`;
+
+/** The reboot into WinPE started Windows from the disk again. */
+class WindowsBootedError extends Error {
+	constructor() {
+		super(
+			"Windows booted again instead of WinPE (Windows Boot Manager ignored the one-time bcdedit /bootsequence entry)",
+		);
 	}
 }
 
-/** One offline boot: start, key presses, wait for WinPE to power off. */
-async function offlineBoot(
+/** Starts the VM and waits for the guest agent of Windows on the disk. */
+async function bootWindows(
 	deps: BuildDeps,
 	o: BuildOptions,
 	io: GuestIo,
 	vmid: number,
+	what: string,
 ): Promise<void> {
-	// WinPE has no guest agent: an answer means Windows booted from the disk.
-	await startPressingKeys(deps, o.node, vmid, OFFLINE_KEYS, async () => {
-		if (await io.ping()) throw new DiskBootedError();
-	});
-	const timeoutMs = deps.offlineTimeoutMs ?? OFFLINE_TIMEOUT_MS;
+	await startVm(deps, o.node, vmid);
 	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
-	const deadline = Date.now() + timeoutMs;
-	while ((await vmStatus(deps, o.node, vmid)) !== "stopped") {
-		if (await io.ping()) throw new DiskBootedError();
+	const deadline = Date.now() + OFFLINE_BOOT_TIMEOUT_MS;
+	while (!(await io.ping())) {
 		if (Date.now() >= deadline)
 			throw new Error(
-				`the offline WinPE boot did not power off within ${timeoutMs} ms (WinPE has no guest agent: look at the console of a --keep-on-failure build)`,
+				`the guest agent did not answer within ${OFFLINE_BOOT_TIMEOUT_MS} ms of the boot ${what}`,
 			);
 		await sleep(pollMs);
 	}
 }
 
 /**
- * Boots WinPE from the user's ISO with the offline ISO on sata2; offline.cmd edits the SYSTEM hive
- * of the installed (not yet sealed) Windows and powers off. When OVMF misses "Press any key" and
- * boots the disk instead, Windows is powered off and the boot repeated.
+ * Puts the offline ISO on sata2 of the running Windows: a CD change applies at once. When Proxmox
+ * refuses it or leaves it pending, Windows is shut down, the config set and Windows booted again.
+ */
+async function insertOfflineCd(
+	deps: BuildDeps,
+	o: BuildOptions,
+	io: GuestIo,
+	vmid: number,
+	cd: string,
+): Promise<void> {
+	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
+	const boot = "with the offline ISO";
+	if ((await vmStatus(deps, o.node, vmid)) === "stopped") {
+		await deps.api.put(`${vmPath}/config`, { sata2: cd });
+		await bootWindows(deps, o, io, vmid, boot);
+		return;
+	}
+	let why: string;
+	try {
+		await deps.api.put(`${vmPath}/config`, { sata2: cd });
+		const cfg = await deps.api.get<Record<string, string>>(`${vmPath}/config`, {
+			current: 1,
+		});
+		if (cfg.sata2?.split(",")[0] === cd.split(",")[0]) return;
+		why = `sata2 is "${cfg.sata2 ?? ""}" (the change is pending)`;
+	} catch (err) {
+		deps.signal?.throwIfAborted();
+		why = errorText(err);
+	}
+	deps.log(
+		`offline ISO on sata2 of the running VM: ${why}; shutting Windows down to change it`,
+	);
+	await shutdown(deps, o, vmid);
+	await deps.api.put(`${vmPath}/config`, { sata2: cd });
+	await bootWindows(deps, o, io, vmid, boot);
+}
+
+/** Runs PE_SETUP_PS1; returns the id of the one-time boot entry. */
+async function armWinPe(deps: BuildDeps, io: GuestIo): Promise<string> {
+	const what = "setting the one-time WinPE boot entry";
+	// The script first removes what an earlier run left, so a lost exec status is retried.
+	const out = await retryTransient(
+		() => mustRun(io, what, powershell(PE_SETUP_PS1), PE_SETUP_TIMEOUT_MS),
+		Date.now() + OFFLINE_CHECK_TIMEOUT_MS,
+		deps.pollMs ?? DEFAULT_POLL_MS,
+		(err) => deps.log(`${what}: ${errorText(err)}; retrying`),
+	);
+	const id = /^SBXPE (\S+)/m.exec(out)?.[1];
+	if (id === undefined || !GUID_RE.test(id))
+		throw new Error(`${what}: no entry id in ${out.slice(0, 200)}`);
+	return id;
+}
+
+/** WinPE has no guest agent: an agent under a new boot time is Windows started again. */
+async function windowsAgain(io: GuestIo, before: string): Promise<boolean> {
+	try {
+		return (await io.ping()) && (await bootTime(io)) !== before;
+	} catch {
+		// The agent is going down or coming up.
+		return false;
+	}
+}
+
+/** Reboots Windows into the one-time entry and waits for WinPE to power the VM off. */
+async function rebootIntoWinPe(
+	deps: BuildDeps,
+	o: BuildOptions,
+	io: GuestIo,
+	vmid: number,
+	before: string,
+): Promise<void> {
+	let r: Awaited<ReturnType<GuestIo["exec"]>> | undefined;
+	try {
+		r = await io.exec(["shutdown.exe", "/r", "/t", "0"], { timeoutMs: MIN });
+	} catch (err) {
+		deps.signal?.throwIfAborted();
+		// The agent may go down before it answers.
+		deps.log(`shutdown /r: ${errorText(err)}`);
+	}
+	if (r && r.exitCode !== 0)
+		throw new Error(
+			`shutdown /r failed (exit ${r.exitCode}): ${(r.stderr || r.stdout).trim()}`,
+		);
+	const timeoutMs = deps.offlineTimeoutMs ?? OFFLINE_TIMEOUT_MS;
+	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+	const deadline = Date.now() + timeoutMs;
+	while ((await vmStatus(deps, o.node, vmid)) !== "stopped") {
+		if (Date.now() >= deadline)
+			throw new Error(
+				`the offline WinPE boot did not power off within ${timeoutMs} ms (WinPE has no guest agent: look at the console of a --keep-on-failure build)`,
+			);
+		await sleep(pollMs);
+		if (await windowsAgain(io, before)) throw new WindowsBootedError();
+	}
+}
+
+/**
+ * Boots WinPE of the user's ISO once, from a ramdisk entry of the installed (not yet sealed)
+ * Windows, with the offline ISO on sata2: Setup finds its autounattend.xml there, offline.cmd edits
+ * the SYSTEM hive and powers off. Windows Boot Manager on the disk starts WinPE, so there is no
+ * "Press any key" prompt to hit (R17). verify-offline removes the entry and C:\sbx-pe.
  */
 export async function stageOffline(
 	deps: BuildDeps,
@@ -1135,28 +1271,38 @@ export async function stageOffline(
 	st: State,
 ): Promise<void> {
 	const vmid = st.vmid as number;
-	// The steps leave Windows running; WinPE needs a cold boot from the CD.
-	if ((await vmStatus(deps, o.node, vmid)) !== "stopped")
-		await shutdown(deps, o, vmid);
-	await deps.api.put(`/nodes/${o.node}/qemu/${vmid}/config`, {
-		sata2: `${MEDIA_STORAGE}:iso/${offlineIsoName(st.m)},media=cdrom`,
-		boot: "order=ide2",
-	});
+	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+	await insertOfflineCd(
+		deps,
+		o,
+		io,
+		vmid,
+		`${MEDIA_STORAGE}:iso/${offlineIsoName(st.m)},media=cdrom`,
+	);
 	for (let attempt = 1; ; attempt++) {
+		const before = await retryTransient(
+			() => bootTime(io),
+			Date.now() + OFFLINE_CHECK_TIMEOUT_MS,
+			pollMs,
+			(err) => deps.log(`reading the boot time: ${errorText(err)}; retrying`),
+		);
+		const id = await armWinPe(deps, io);
+		deps.log(
+			`one-time boot entry ${id} (WinPE from ${PE_DIR}\\boot.wim); rebooting into it`,
+		);
 		try {
-			await offlineBoot(deps, o, io, vmid);
+			await rebootIntoWinPe(deps, o, io, vmid, before);
 			break;
 		} catch (err) {
-			if (!(err instanceof DiskBootedError)) throw err;
-		}
-		deps.log(
-			`offline attempt ${attempt} of ${OFFLINE_ATTEMPTS}: the disk booted instead of WinPE (OVMF missed the CD prompt); powering it off`,
-		);
-		await powerOffDiskBoot(deps, o.node, vmid);
-		if (attempt >= OFFLINE_ATTEMPTS)
-			throw new Error(
-				`the offline WinPE boot reached Windows on the disk in all ${OFFLINE_ATTEMPTS} attempts (OVMF missed "Press any key to boot from CD"); Windows is not sealed yet, so the disk is fine: build again, or look at the console of a --keep-on-failure build`,
+			if (!(err instanceof WindowsBootedError)) throw err;
+			if (attempt >= OFFLINE_ATTEMPTS)
+				throw new Error(
+					`${err.message} in ${OFFLINE_ATTEMPTS} attempts; Windows is not sealed yet, so the disk is fine: look at the console of a --keep-on-failure build`,
+				);
+			deps.log(
+				`offline attempt ${attempt} of ${OFFLINE_ATTEMPTS}: ${err.message}; setting the entry again`,
 			);
+		}
 	}
 	deps.log("offline stage done");
 }
@@ -1188,8 +1334,9 @@ const offlineCheckSchema = z.object({
 /**
  * Boots the disk after the offline stage and checks its effect before sysprep: sbx-offline.log
  * ends with `DONE errors 0`, every service of the offline set has Start=4 (or no key at all, as
- * offline.cmd allows), MsMpEng does not run. The agent service runs on this boot; there is no
- * sbx SMBIOS serial on the build VM, so identity apply skips, and `sbx-agent seal` comes next.
+ * offline.cmd allows), MsMpEng does not run. Then the WinPE boot entries and C:\sbx-pe go. The
+ * agent service runs on this boot; there is no sbx SMBIOS serial on the build VM, so identity
+ * apply skips, and `sbx-agent seal` comes next.
  */
 export async function stageVerifyOffline(
 	deps: BuildDeps,
@@ -1204,16 +1351,8 @@ export async function stageVerifyOffline(
 		sata2: "none,media=cdrom",
 		boot: `order=${p.recipe.disk.slot}`,
 	});
-	await startVm(deps, o.node, vmid);
+	await bootWindows(deps, o, io, vmid, "after the offline stage");
 	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
-	const bootDeadline = Date.now() + OFFLINE_BOOT_TIMEOUT_MS;
-	while (!(await io.ping())) {
-		if (Date.now() >= bootDeadline)
-			throw new Error(
-				`the guest agent did not answer within ${OFFLINE_BOOT_TIMEOUT_MS} ms of the boot after the offline stage`,
-			);
-		await sleep(pollMs);
-	}
 	const services = offlineServices(p.recipe.offline);
 	const what = "reading the offline stage's result";
 	// Read-only, so a status qemu-ga lost right after the boot is retried.
@@ -1271,6 +1410,14 @@ export async function stageVerifyOffline(
 			tail,
 			"MsMpEng is running after the offline stage (Defender is still on)",
 		);
+	// The ramdisk entry and the WinPE files must not reach the image. Idempotent, so retried.
+	const cleanup = `removing the WinPE boot entry and ${PE_DIR}`;
+	await retryTransient(
+		() => mustRun(io, cleanup, powershell(PE_CLEANUP_PS1)),
+		Date.now() + OFFLINE_CHECK_TIMEOUT_MS,
+		pollMs,
+		(err) => deps.log(`${cleanup}: ${errorText(err)}; retrying`),
+	);
 	const missing = services.filter((n) => c.start[n] === null);
 	save({
 		windows: {

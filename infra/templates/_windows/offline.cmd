@@ -1,8 +1,8 @@
 @echo off
 rem Offline WinPE stage (spec S9 section 10.3): sets Start=4 for services in
 rem the offline SYSTEM hive of the installed Windows, then powers the VM off.
-rem It runs before sysprep: a boot prompt OVMF misses boots a disk that is not
-rem sealed yet, and sbx-tpl retries.
+rem It runs before sysprep, in WinPE of the Windows ISO that sbx-tpl boots once
+rem from a ramdisk BCD entry of the installed, not yet sealed Windows.
 rem WinPE of Windows Setup has no PowerShell: cmd, reg, drvload, diskpart only.
 rem offline-config.cmd (written by sbx-tpl) sets SBX_DRIVERS and SBX_SERVICES.
 rem Log lines: OK / MISSING / ERROR <key>, last line "DONE errors <n>".

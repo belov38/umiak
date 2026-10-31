@@ -476,7 +476,15 @@ export class FakeWinGuest implements GuestIo {
 	/** Start values the offline check reads; services not listed have Start=4. */
 	serviceStart: Record<string, number | null> = {};
 	msMpEng = false;
+	/** Exit code of the script that sets the one-time WinPE boot entry. */
+	peSetupExit = 0;
+	/** Exit code of the script that removes the WinPE boot entry and C:\sbx-pe. */
+	peCleanupExit = 0;
 	onStep?: (step: string) => void;
+	/** The one-time WinPE boot entry was set. */
+	onPeSetup?: () => void;
+	/** shutdown.exe /r ran. */
+	onReboot?: () => void;
 	alive: () => boolean = () => true;
 	log: string[];
 	#boot = 1;
@@ -514,12 +522,36 @@ export class FakeWinGuest implements GuestIo {
 		if (c0 === "shutdown.exe") {
 			this.#boot++;
 			this.log.push("guest:reboot");
+			this.onReboot?.();
 			return ok();
 		}
 		const read = guestFilesRequest(cmd);
 		if (read) return this.#readFiles(read);
 		if (c0 === "powershell.exe" && cmd.includes("-EncodedCommand")) {
 			const text = Buffer.from(script, "base64").toString("utf16le");
+			if (text.includes("/bootsequence")) {
+				this.log.push("guest:pe-setup");
+				if (this.peSetupExit !== 0)
+					return {
+						exitCode: this.peSetupExit,
+						stdout: "",
+						stderr:
+							"bcdedit /create failed (exit 1): The parameter is incorrect.",
+					};
+				this.onPeSetup?.();
+				return ok("SBXPE {6a7c3b1e-0d2f-11f1-9a3c-525400a1b2c3}\r\n");
+			}
+			if (text.includes("C:\\sbx-pe")) {
+				this.log.push("guest:pe-cleanup");
+				return this.peCleanupExit === 0
+					? ok("SBXPE removed\r\n")
+					: {
+							exitCode: this.peCleanupExit,
+							stdout: "",
+							stderr:
+								"BCD entries 'sbx offline' left: {6a7c3b1e-0d2f-11f1-9a3c-525400a1b2c3}",
+						};
+			}
 			if (text.includes("sbx-offline.log")) {
 				this.log.push("guest:check-offline");
 				const names = (/\$names = @\(([^)]*)\)/.exec(text)?.[1] ?? "")

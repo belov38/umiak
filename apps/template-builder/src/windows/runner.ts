@@ -452,7 +452,7 @@ async function taskStarted(
 	return false;
 }
 
-async function bootTime(io: GuestIo): Promise<string> {
+export async function bootTime(io: GuestIo): Promise<string> {
 	const r = await io.exec([
 		...POWERSHELL,
 		"(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('o')",

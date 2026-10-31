@@ -107,7 +107,7 @@ export interface BuildDeps {
 	signal?: AbortSignal;
 	/** Poll interval for the guest and Proxmox (default 2 s). */
 	pollMs?: number;
-	/** iso-install: interval of the boot-from-CD key presses (default 1 s); their number is fixed. */
+	/** iso-install: interval of the boot-from-CD key presses (default 250 ms); their number is fixed. */
 	keyIntervalMs?: number;
 	/** iso-install: how long sysprep may take to power the VM off (default 30 min). */
 	sysprepTimeoutMs?: number;
