@@ -280,20 +280,20 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 		it("templates, sizes and pool targets notify '<collection>:<uuid>'", async () => {
 			const size = await payload.create({
 				collection: "sizes",
-				data: { slug: "4gb", vcpu: 2, memoryMb: 4096 },
+				data: { slug: "notify-4gb", vcpu: 2, memoryMb: 4096 },
 			});
 			const tpl = await payload.create({
 				collection: "templates",
 				data: {
 					slug: "win",
 					os: "windows",
-					defaultSize: "4gb",
-					allowedSizes: ["4gb"],
+					defaultSize: "notify-4gb",
+					allowedSizes: ["notify-4gb"],
 				},
 			});
 			const pt = await payload.create({
 				collection: "pool-targets",
-				data: { template: "win", size: "4gb", target: 0 },
+				data: { template: "win", size: "notify-4gb", target: 0 },
 			});
 			await payload.delete({ collection: "pool-targets", id: pt.id });
 			expect(only(await listener.settle(), "sbx_config")).toEqual([

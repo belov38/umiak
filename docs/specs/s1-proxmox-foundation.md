@@ -334,7 +334,7 @@ interface QuiesceHook {
 
 - `sbx-bench preflight` — только чтение: journal ноды не читается никем, кроме root и `adm`; токен отвечает и имеет права на каждую операцию стенда (проверяется на «пустых» вызовах, где это возможно), `sbx-node version`, `sbx0` и группы firewall на месте, `ip_forward=1`, IPv6 forwarding 0, thin pool ниже порогов, шаблон 599 существует и является template, нет хвостов прошлых прогонов (VM в pool кроме 599, LV с тегом `sbx`, строки аллокатора).
 - `sbx-bench s1 [--runs 3] [--size 2g] [--parallel 1,2,4] [--clone-only 8] [--ram-cap 8g] [--no-baseline] [--keep]` — полный прогон. Таблица в stdout, JSON в `bench-results/s1-<timestamp>.json` (каталог в `.gitignore`).
-- `sbx-bench cleanup` — уборка после сбоя: VM в pool `sandbox` кроме 599, LV с тегом `sbx`, строки аллокатора, lease-записи наших MAC. Шаблон 599 и LV с тегом `sbx-tpl` не трогает.
+- `sbx-bench cleanup --all-sandbox-resources` — глобальная уборка после сбоя: VM в pool `sandbox` кроме 599, LV с тегом `sbx`, строки аллокатора, lease-записи наших MAC. Требует явного флага, поскольку удаляет ресурсы всех запусков. Шаблон 599 и LV с тегом `sbx-tpl` не трогает.
 
 ### 7.2 Сценарий `s1`
 
@@ -485,3 +485,17 @@ p95 считается по nearest-rank; при n = 3 он равен max.
 - Исходящий трафик sandbox выходит в интернет с домашнего публичного IP Ильи. Для PoC это принято; политика egress для production — в S12/фазе 2.
 - **Запись ethers при параллельных start (риск для S6).** Proxmox (`PVE::Network::SDN::Dhcp::Dnsmasq::add_ip_mapping`) берёт `flock` на сам файл `ethers`, пишет `ethers.tmp` и делает `rename` поверх. Ожидающий writer может получить lock на уже заменённом inode, и тогда два writer работают одновременно: в эмуляции с двумя конкурентными writer Proxmox терялось ~47% добавлений. `mac-cache.json` читается вне lock. Потерянная статическая привязка даёт VM динамический IP не из IPAM, и `ipfilter` её блокирует. `sbx-node` проверяет inode перед своим `rename` и своё изменение после него (`hostfs.ReplaceLocked`), но запись Proxmox, попавшая между проверкой и нашим `rename`, теряется. **S6 сериализует start и delete на ноде** (как минимум шаги, которые пишут ethers). Порядок delete: stop → `dhcp.release` → destroy → проверка следов; release идёт до destroy, пока IP ещё принадлежит VM.
 - **`cpu host` и вложенный KVM** (MVP-рек. R6, решение master 2026-10-29). Вложенная виртуализация в MVP не гарантируется: `/dev/kvm` в госте есть, только если на хосте `kvm_intel`/`kvm_amd` загружен с `nested=1` (проверить на `pve`: `cat /sys/module/kvm_*/parameters/nested`); runbook и код S1 это не меняют, шаблон S5 только даёт доступ (S5 §8.6, §10 п. 19). `cpu host` остаётся, пока нода одна. Живая миграция между нодами с разными CPU с `cpu host` невозможна: для такого кластера нужна именованная модель CPU (например, `x86-64-v3`) в шаблоне — решение S12 / фазы 2.
+
+
+### Windows snapshot fallback (S9 follow-ups, 2026-11-01)
+
+Для `ostype=win*` `Machines.snapshot` по умолчанию выбирает crash-consistent
+режим без QGA freeze/thaw: pause всех vCPU, snapshot всех дисковых LV, resume.
+Причина — воспроизводимый QGA/VSS hang и на 109.1.0, и на 110.2.3, даже при
+интервале freeze→thaw менее 10 s (S9 §24.7). Linux сохраняет прежний quiesce.
+`SnapshotRef.consistency` у новых snapshot явно `crash`, `quiesced` или
+`powered_off`; поле optional только для совместимости со старым state.
+External hook применяется и в crash-режиме (worker очищает secret files),
+но отсутствие filesystem freeze не повышает consistency до quiesced.
+`crashConsistent:false` оставлен как диагностический opt-in VSS; не применять
+его к Windows в штатном worker. Тайм-ауты thaw и cleanup при ошибке сохранены.

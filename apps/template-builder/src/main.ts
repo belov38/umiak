@@ -470,7 +470,7 @@ async function main(argv: string[]): Promise<number> {
 			const ctx = await makeContext({ node: m.node });
 			const interrupt = trapSignals(
 				() =>
-					"exiting without cleanup; run remove only the verify VMIDs and snapshot listed in this run; sbx-bench cleanup --all-sandbox-resources is global and deletes other runs",
+					"exiting without cleanup; remove only the verify VMIDs and snapshot listed in this run; sbx-bench cleanup --all-sandbox-resources is global and deletes other runs",
 			);
 			try {
 				const ramGuard = new RamGuard({

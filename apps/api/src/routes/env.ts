@@ -148,11 +148,29 @@ async function deliver(
 			await deps.agent.updateEnv(s.machineId, sets.env, randomUUID());
 		}
 		if (changed.secrets) {
+			// A lost response may still have written files. Record uncertainty
+			// before the RPC and keep it until an empty delivery is confirmed.
+			const tracked = await deps.pool?.query<{ secrets_generation: number }>(
+				`UPDATE runtime.machines m SET secrets_generation = secrets_generation + 1,
+				 secret_files_on_disk = secret_files_on_disk OR ($2 AND EXISTS (
+				 SELECT 1 FROM runtime.template_builds b WHERE b.id = m.template_build_id AND b.os = 'windows')),
+				 version = version + 1 WHERE m.id = $1 RETURNING secrets_generation`,
+				[s.machineId, sets.secretFiles.length > 0],
+			);
+			const generation = tracked?.rows[0]?.secrets_generation;
 			await deps.agent.updateSecrets(
 				s.machineId,
 				agentSecrets(sets),
 				randomUUID(),
 			);
+			if (generation !== undefined) {
+				await deps.pool?.query(
+					`UPDATE runtime.machines SET provisioned_secrets_generation = $2,
+					 secret_files_on_disk = CASE WHEN secrets_generation = $2 AND NOT $3 THEN false ELSE secret_files_on_disk END,
+					 version = version + 1 WHERE id = $1`,
+					[s.machineId, generation, sets.secretFiles.length > 0],
+				);
+			}
 		}
 		return true;
 	} catch (e) {

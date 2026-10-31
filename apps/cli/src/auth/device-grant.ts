@@ -57,6 +57,7 @@ async function postForm(
 			body: new URLSearchParams(form).toString(),
 			...(signal === undefined ? {} : { signal }),
 		}),
+		signal,
 	);
 	const text = await readText(res);
 	let body: unknown;

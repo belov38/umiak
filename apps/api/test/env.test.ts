@@ -64,6 +64,41 @@ describe.skipIf(skipPg())("env routes", () => {
 		expect(r.text).not.toContain(B64);
 	});
 
+	it("tracks Windows files before live delivery, keeps uncertainty on failure, clears only after empty delivery", async () => {
+		const s = await w.seed({ state: "ready" });
+		await db.pool.query(
+			"UPDATE runtime.template_builds SET os = 'windows' WHERE id = (SELECT template_build_id FROM runtime.machines WHERE id = $1)",
+			[s.machineId],
+		);
+		const dirty = async () =>
+			(
+				await db.pool.query<{ secret_files_on_disk: boolean }>(
+					"SELECT secret_files_on_disk FROM runtime.machines WHERE id = $1",
+					[s.machineId],
+				)
+			).rows[0]?.secret_files_on_disk;
+		const put = await h.request("PUT", `/v1/sandboxes/${s.slug}/env`, {
+			json: { secretFiles: [{ name: "key", contentBase64: B64 }] },
+		});
+		expect(body(put).delivered).toBe(true);
+		expect(await dirty()).toBe(true);
+		w.agent.setUnavailable(s.machineId as string, true);
+		try {
+			const empty = await h.request("PUT", `/v1/sandboxes/${s.slug}/env`, {
+				json: { secretFiles: [] },
+			});
+			expect(body(empty).delivered).toBe(false);
+			expect(await dirty()).toBe(true);
+		} finally {
+			w.agent.setUnavailable(s.machineId as string, false);
+		}
+		const empty = await h.request("PUT", `/v1/sandboxes/${s.slug}/env`, {
+			json: { secretFiles: [] },
+		});
+		expect(body(empty).delivered).toBe(true);
+		expect(await dirty()).toBe(false);
+	});
+
 	it("PUT /env on a ready sandbox replaces the given sets and delivers them; the secret is in no log", async () => {
 		const logs = captureLogs();
 		const lh = w.harness({ deps: { log: logs.log } });

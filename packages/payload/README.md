@@ -249,6 +249,12 @@ The initial migration creates the schema and tables (generated), seeds
 `platform-defaults` (S6/S7/S8 defaults), template `linux` and size `2gb`, and
 copies `identity.teams/users/memberships/api_keys/
 ssh_keys` with the same UUIDs when `identity.users` exists (plan decision 1).
+The data migration `20261101_000000_windows_template` adds template `windows`
+(`user`, exec/files/ssh, default and allowed size `4gb`) and size `4gb`
+(2 vCPU, 4096 MB) to new and existing installations. It inserts missing slugs
+only, preserving operator settings, and sends `sbx_config '*'`. Its rollback
+keeps catalog entries because sandboxes may already reference them. The JSON
+snapshot is unchanged because the migration changes data only.
 No pool target is seeded (deviation from S8 §12, controller ruling): warm
 pools are not in the MVP, as in `deploy/compose/config/sbx.yaml` (`pools: []`).
 Copy rules: memberships get new ids; a user with an `idp_subject` gets

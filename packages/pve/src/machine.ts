@@ -686,11 +686,15 @@ export class Machines {
 	): Promise<SnapshotRef> {
 		const config = await this.config(vmid);
 		const running = (await this.status(vmid)) === "running";
+		// Windows QGA/VSS can deadlock even with a sub-second snapshot window.
+		// Default to the explicit crash fallback; false is a diagnostic opt-in.
+		const crash =
+			opts.crashConsistent ?? String(config.ostype ?? "").startsWith("win");
 		let hook: QuiesceHook = { freeze: async () => {}, thaw: async () => {} };
 		if (opts.hook) {
 			// External quiesce (S3 agent): QGA is not involved.
 			hook = opts.hook;
-		} else if (running && !opts.crashConsistent) {
+		} else if (running && !crash) {
 			if (!(await this.qga.ping(vmid))) throw new QgaUnavailableError(vmid);
 			// Only Windows (VSS) thaws by itself.
 			const selfThaw = String(config.ostype ?? "").startsWith("win");
@@ -713,7 +717,15 @@ export class Machines {
 		for (const k of SNAPSHOT_HW_KEYS)
 			if (config[k] !== undefined) hardware[k] = String(config[k]);
 		hardware[SNAPSHOT_CLOUDINIT_KEY] = hasCloudInitDrive(config) ? "1" : "0";
-		const snap: SnapshotRef = { ...ref, hardware };
+		const snap: SnapshotRef = {
+			...ref,
+			hardware,
+			consistency: running
+				? crash || ref.autoThawed
+					? "crash"
+					: "quiesced"
+				: "powered_off",
+		};
 		this.#o.snapshots.putSnapshot(snap);
 		return snap;
 	}

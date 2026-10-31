@@ -83,7 +83,12 @@ interface Env {
 	factoryCalls: number;
 }
 
-async function setup(o: { env?: Record<string, string> } = {}): Promise<Env> {
+async function setup(
+	o: {
+		env?: Record<string, string>;
+		vmLockSleep?: (ms: number) => Promise<void>;
+	} = {},
+): Promise<Env> {
 	const topo = await createTopology(db.pool);
 	const name = await nodeName(topo.nodeId);
 	const api = new FakePve([], { node: name });
@@ -96,6 +101,7 @@ async function setup(o: { env?: Record<string, string> } = {}): Promise<Env> {
 	const node = new FakeNode();
 	const env = { topo, name, api, node, factoryCalls: 0 } as Env;
 	env.registry = new PveInfraRegistry(db.pool, {
+		...(o.vmLockSleep ? { vmLockSleep: o.vmLockSleep } : {}),
 		secretsDir: "/nonexistent",
 		...(o.env ? { env: o.env } : {}),
 		clients: () => {
@@ -108,6 +114,175 @@ async function setup(o: { env?: Record<string, string> } = {}): Promise<Env> {
 }
 
 describe("PveInfraRegistry", () => {
+	it("preserves S1's Windows crash consistency without QGA, including an agent-only preparation hook", async () => {
+		const e = await setup();
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		const config = e.api.vms.get(vm.vmid)?.config;
+		if (!config) throw new Error("fake VM missing");
+		config.ostype = "win11";
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		e.api.agentUp = false;
+		const first = await e.infra.snapshot(vm.vmid, {
+			lvId: randomUUID().replaceAll("-", ""),
+		});
+		expect(first.consistency).toBe("crash");
+		const trace: string[] = [];
+		const second = await e.infra.snapshot(vm.vmid, {
+			lvId: randomUUID().replaceAll("-", ""),
+			hook: {
+				freeze: async () => {
+					trace.push("agent.prepare");
+				},
+				thaw: async () => {
+					trace.push("agent.restore");
+				},
+			},
+		});
+		expect(second.consistency).toBe("crash");
+		expect(trace).toEqual(["agent.prepare", "agent.restore"]);
+		expect(e.api.calls.filter((c) => c.path.includes("/agent/"))).toHaveLength(
+			0,
+		);
+	});
+	it("retries the stop inside delete while releasing the power lock between attempts", async () => {
+		let key = "";
+		let elapsed = 0;
+		const e = await setup({
+			vmLockSleep: async (ms) => {
+				elapsed += ms;
+				if (elapsed >= 30_000) delete e.api.fail[key];
+			},
+		});
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		key = `POST /nodes/${e.name}/qemu/${vm.vmid}/status/stop`;
+		e.api.fail[key] = new PveTaskError(
+			"upid",
+			"can't lock file 'vm' - got timeout",
+		);
+		await e.infra.delete(vm.vmid, { expectedOwner: m });
+		expect(elapsed).toBe(30_000);
+		expect(e.api.vms.has(vm.vmid)).toBe(false);
+	});
+
+	it("retries stop past qmeventd's 30 second window and rechecks its fence", async () => {
+		let elapsed = 0;
+		const e = await setup({
+			vmLockSleep: async (ms) => {
+				elapsed += ms;
+			},
+		});
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		const key = `POST /nodes/${e.name}/qemu/${vm.vmid}/status/stop`;
+		e.api.fail[key] = new PveTaskError(
+			"upid",
+			"can't lock file '/var/lock/qemu-server/lock.conf' - got timeout",
+		);
+		let checks = 0;
+		await e.infra.stop(vm.vmid, {
+			expectedOwner: m,
+			beforeAct: async () => {
+				checks++;
+				if (elapsed > 30_000) delete e.api.fail[key];
+			},
+		});
+		expect(elapsed).toBe(40_000);
+		expect(checks).toBeGreaterThanOrEqual(5);
+		expect(await e.infra.status(vm.vmid)).toBe("stopped");
+	});
+
+	it("does not retry a stop after its executor is fenced out", async () => {
+		let stale = false;
+		const e = await setup({
+			vmLockSleep: async () => {
+				stale = true;
+			},
+		});
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		const path = `/nodes/${e.name}/qemu/${vm.vmid}/status/stop`;
+		e.api.fail[`POST ${path}`] = new PveTaskError(
+			"upid",
+			"can't lock file 'vm' - got timeout",
+		);
+		await expect(
+			e.infra.stop(vm.vmid, {
+				expectedOwner: m,
+				beforeAct: async () => {
+					if (stale) throw new FencedOut("superseded during lock retry");
+				},
+			}),
+		).rejects.toBeInstanceOf(FencedOut);
+		expect(
+			e.api.calls.filter((c) => c.method === "POST" && c.path === path),
+		).toHaveLength(1);
+		expect(await e.infra.status(vm.vmid)).toBe("running");
+	});
+
+	it("rechecks ownership before retrying a stop on a recycled VMID", async () => {
+		let recycle!: () => Promise<void>;
+		let changed = false;
+		const e = await setup({
+			vmLockSleep: async () => {
+				if (!changed) {
+					changed = true;
+					await recycle();
+				}
+			},
+		});
+		const m = randomUUID();
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
+		const path = `/nodes/${e.name}/qemu/${vm.vmid}/status/stop`;
+		e.api.fail[`POST ${path}`] = new PveTaskError(
+			"upid",
+			"can't lock file 'vm' - got timeout",
+		);
+		recycle = async () => {
+			delete e.api.fail[`POST ${path}`];
+			await db.pool.query(
+				"UPDATE runtime.vmid_leases SET machine_id = $3 WHERE provider_id = $1 AND vmid = $2",
+				[e.topo.providerId, vm.vmid, randomUUID()],
+			);
+		};
+		await expect(
+			e.infra.stop(vm.vmid, { expectedOwner: m }),
+		).rejects.toBeInstanceOf(OwnerMismatchError);
+		expect(
+			e.api.calls.filter((c) => c.method === "POST" && c.path === path),
+		).toHaveLength(1);
+		expect(await e.infra.status(vm.vmid)).toBe("running");
+	});
 	it("hard-stops a guest after failed thaw and allows a normal start", async () => {
 		const e = await setup();
 		const m = randomUUID();

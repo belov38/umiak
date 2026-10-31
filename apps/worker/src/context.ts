@@ -26,6 +26,8 @@ export interface Timing {
 	prepareStopTimeoutMs?: number;
 	/** S1 shutdown timeout of a stop before the hard stop (S6 §7.5: 60 s). */
 	shutdownTimeoutS?: number;
+	/** Test clock for snapshot VM-lock retries; production uses real delays. */
+	vmLockSleep?: (ms: number) => Promise<void>;
 }
 
 export const DEFAULT_TIMING: Timing = {

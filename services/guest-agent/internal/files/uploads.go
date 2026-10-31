@@ -310,6 +310,10 @@ func (s *Service) dropUpload(ctx context.Context, rec *store.Upload) error {
 	if rec.TempPath != "" {
 		_ = os.Remove(rec.TempPath)
 	}
+	if rec.CommitStage != "" {
+		_ = os.Remove(rec.CommitStage + ".place")
+		_ = os.Remove(rec.CommitStage)
+	}
 	return nil
 }
 
@@ -382,6 +386,9 @@ func (s *Service) commitUpload(r *http.Request, id string) ([]byte, error) {
 		// An earlier attempt moved the file but lost its result.
 		return s.storeCommit(r.Context(), rec)
 	}
+	if rec.CommitStage != "" && p != rec.CommitPath {
+		return nil, invalidArg("a commit to %s is already in progress", rec.CommitPath)
+	}
 	if _, err := os.Lstat(rec.TempPath); errors.Is(err, fs.ErrNotExist) {
 		if err := s.deleteUploadRecord(r.Context(), id); err != nil {
 			return nil, err
@@ -404,13 +411,16 @@ func (s *Service) commitUpload(r *http.Request, id string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if rec.CommitStage != "" && target != rec.CommitTarget {
+		return nil, invalidArg("the target of an in-progress commit changed")
+	}
 	// The intent is durable before the file moves, so a retry after a lost
 	// result finds the file at its target instead of a missing upload.
 	rec.CommitPath, rec.CommitTarget = p, target
 	if err := s.putUpload(r.Context(), rec); err != nil {
 		return nil, err
 	}
-	if err := finishUpload(rec.TempPath, target, mode, o, overwrite); err != nil {
+	if err := s.finishUpload(r.Context(), rec, target, mode, o, overwrite); err != nil {
 		return nil, err
 	}
 	if s.testHookAfterPlace != nil {
@@ -420,15 +430,22 @@ func (s *Service) commitUpload(r *http.Request, id string) ([]byte, error) {
 }
 
 // movedEarlier reports whether an earlier commit of rec already moved the
-// upload to its recorded target: the upload file is gone (or is the same
-// file as the target, a hard link not yet removed) and the target exists.
+// upload to its recorded target. Copy commits retain an adjacent identity
+// anchor: equal contents alone never prove ownership of an existing target.
 func (s *Service) movedEarlier(rec *store.Upload) (bool, error) {
 	if rec.CommitTarget == "" {
 		return false, nil
 	}
-	tfi, err := os.Stat(rec.CommitTarget)
+	tfi, err := os.Lstat(rec.CommitTarget)
 	if err != nil {
 		return false, nil
+	}
+	if rec.CommitStage != "" {
+		stage, err := os.Lstat(rec.CommitStage)
+		if err != nil {
+			return false, fsError(err)
+		}
+		return os.SameFile(tfi, stage), nil
 	}
 	ufi, err := os.Lstat(rec.TempPath)
 	switch {
@@ -437,9 +454,6 @@ func (s *Service) movedEarlier(rec *store.Upload) (bool, error) {
 	case err != nil:
 		return false, fsError(err)
 	case os.SameFile(tfi, ufi):
-		if err := os.Remove(rec.TempPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return false, fsError(err)
-		}
 		return true, nil
 	}
 	return false, nil
@@ -459,19 +473,32 @@ func (s *Service) storeCommit(ctx context.Context, rec *store.Upload) ([]byte, e
 		return nil, errs.New(connect.CodeInternal, errs.Internal, err.Error())
 	}
 	rec.Commit = body
-	rec.TempPath = ""
 	rec.LastActivity = s.opts.Now()
 	if err := s.putUpload(context.WithoutCancel(ctx), rec); err != nil {
 		return nil, err
+	}
+	// Placement and its durable result have succeeded. Failed cleanup must
+	// not turn a committed upload into an error; retain the paths in the
+	// record so the janitor can retry their removal.
+	if rec.TempPath != "" {
+		_ = os.Remove(rec.TempPath)
+	}
+	if rec.CommitStage != "" {
+		_ = os.Remove(rec.CommitStage + ".place")
+		_ = os.Remove(rec.CommitStage)
 	}
 	return body, nil
 }
 
 // finishUpload gives the temporary file of an upload its owner and mode
 // and moves it to target. Across filesystems it is copied to a temporary
-// file next to target, fsynced and renamed, then removed. On error the
-// upload file stays where it was.
-func finishUpload(tempPath, target string, mode fs.FileMode, o owner, overwrite bool) error {
+// file next to target, fsynced and placed. The staged copy remains an
+// identity anchor until storeCommit records the result durably.
+func (s *Service) finishUpload(ctx context.Context, rec *store.Upload, target string, mode fs.FileMode, o owner, overwrite bool) error {
+	if rec.CommitStage != "" {
+		return placeUploadStage(rec.CommitStage, target, overwrite)
+	}
+	tempPath := rec.TempPath
 	if err := lchown(tempPath, o); err != nil {
 		return fsError(err)
 	}
@@ -501,16 +528,33 @@ func finishUpload(tempPath, target string, mode fs.FileMode, o owner, overwrite 
 	if err != nil {
 		return err
 	}
-	if err := placeTemp(tmp, target, overwrite); err != nil {
+	if err := in.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fsError(err)
+	}
+	if err := syncDir(filepath.Dir(tmp)); err != nil {
+		_ = os.Remove(tmp)
+		return fsError(err)
+	}
+	rec.CommitStage = tmp
+	if err := s.putUpload(ctx, rec); err != nil {
+		// A timed-out store write can still have committed. Keep the
+		// anchor so an intent that became durable remains recoverable.
 		return err
 	}
-	if err := in.Close(); err != nil {
+	return placeUploadStage(tmp, target, overwrite)
+}
+
+// placeUploadStage preserves stage while atomically publishing its inode.
+// NTFS and Unix filesystems support hard links; the anchor prevents a
+// retry from mistaking an unrelated equal-content target for our copy.
+func placeUploadStage(stage, target string, overwrite bool) error {
+	tmp := stage + ".place"
+	_ = os.Remove(tmp) // a process may have crashed just before placement
+	if err := os.Link(stage, tmp); err != nil {
 		return fsError(err)
 	}
-	if err := os.Remove(tempPath); err != nil {
-		return fsError(err)
-	}
-	return nil
+	return placeTemp(tmp, target, overwrite)
 }
 
 // fileSHA256 returns the hex sha256 of a file.
@@ -546,8 +590,10 @@ func (s *Service) UploadPath(id string) (string, error) {
 		return info.GetPath(), nil
 	}
 	if rec.CommitPath != "" {
-		if _, err := os.Lstat(rec.TempPath); errors.Is(err, fs.ErrNotExist) {
-			return rec.CommitPath, nil // moved; the result is not stored yet
+		if done, err := s.movedEarlier(rec); err != nil {
+			return "", err
+		} else if done {
+			return rec.CommitPath, nil
 		}
 	}
 	return rec.TempPath, nil

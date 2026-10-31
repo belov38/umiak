@@ -64,9 +64,16 @@ describe.skipIf(skipPg())("worker with Payload", () => {
 		expect(ready.status).toBe(200);
 		expect(JSON.parse(ready.body)).toEqual({ ready: true, reasons: [] });
 
-		// The initial Payload migration seeds template linux and size 2gb.
+		// Payload migrations seed both OS templates and their default sizes.
 		const t = await w.ctx.config.template("linux");
 		expect(t).toMatchObject({ slug: "linux", defaultSize: "2gb" });
-		expect((await w.ctx.config.sizes()).map((s) => s.slug)).toEqual(["2gb"]);
+		expect(await w.ctx.config.template("windows")).toMatchObject({
+			slug: "windows",
+			defaultSize: "4gb",
+		});
+		expect((await w.ctx.config.sizes()).map((s) => s.slug)).toEqual([
+			"2gb",
+			"4gb",
+		]);
 	});
 });

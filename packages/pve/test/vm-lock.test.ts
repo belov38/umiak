@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PveTaskError, retryOnVmLock } from "../src/index.ts";
+import { PveTaskError, retryOnVmLock, ThawFailedError } from "../src/index.ts";
 
 const lockErr = () =>
 	new PveTaskError(
@@ -8,6 +8,54 @@ const lockErr = () =>
 	);
 
 describe("retryOnVmLock", () => {
+	it("does not repeat a snapshot when thaw failed and emergency stop hit the VM lock", async () => {
+		const error = new Error(
+			"thaw failed; hard stop also failed: can't lock file 'vm' - got timeout",
+			{ cause: new ThawFailedError(501, new Error("QGA unavailable")) },
+		);
+		let calls = 0;
+		await expect(
+			retryOnVmLock(
+				async () => {
+					calls++;
+					throw error;
+				},
+				{ retryFreezeBudget: true, sleep: async () => {} },
+			),
+		).rejects.toBe(error);
+		expect(calls).toBe(1);
+	});
+	it("covers the qmeventd 30 second cleanup window by default", async () => {
+		let elapsed = 0;
+		let calls = 0;
+		await retryOnVmLock(
+			async () => {
+				calls++;
+				if (elapsed <= 30_000) throw lockErr();
+			},
+			{
+				sleep: async (ms) => {
+					elapsed += ms;
+				},
+			},
+		);
+		expect(calls).toBe(5);
+		expect(elapsed).toBe(40_000);
+	});
+
+	it("optionally retries the freeze budget exhausted while waiting on the VM lock", async () => {
+		let calls = 0;
+		await retryOnVmLock(
+			async () => {
+				if (++calls === 1)
+					throw new Error(
+						"freeze took 12000 ms (budget 1000 ms); snapshot discarded",
+					);
+			},
+			{ retryFreezeBudget: true, sleep: async () => {} },
+		);
+		expect(calls).toBe(2);
+	});
 	it("retries a task that timed out on the VM lock", async () => {
 		const slept: number[] = [];
 		let calls = 0;

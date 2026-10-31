@@ -24,7 +24,11 @@ export const REPROVISION_OP: SandboxOpHandler = {
 				skipIf: async () => {
 					const m = await currentMachine(ctx, fenced.sandboxId);
 					const s = await sessionOf(ctx.pool, m.id);
-					return s?.boot_id != null && s.boot_id === m.provisioned_boot_id;
+					return (
+						s?.boot_id != null &&
+						s.boot_id === m.provisioned_boot_id &&
+						m.secrets_generation === m.provisioned_secrets_generation
+					);
 				},
 				run: async () => {
 					const m = await currentMachine(ctx, fenced.sandboxId);

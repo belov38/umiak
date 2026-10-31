@@ -12,11 +12,13 @@ import type { ClaimRequest } from "../ports.ts";
 import type { Fenced, Step } from "../steps.ts";
 import { retryClaim } from "./claim.ts";
 import {
+	beforeSecretDelivery,
 	bootTimeoutMs,
 	currentMachine,
 	deliverableFiles,
 	loadSandboxRow,
 	loadSecretSets,
+	recordSecretDelivery,
 	runOp,
 	sessionOf,
 	transitionSandbox,
@@ -134,14 +136,21 @@ export function createSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					secretFiles: deliverableFiles(sets.secretFiles),
 					authorizedKeys: [],
 				};
+				const generation = await beforeSecretDelivery(
+					fenced,
+					m.id,
+					sets.secretFiles,
+				);
 				await fenced.check();
 				await ctx.agent.claim(m.id, req, stepRequestId(fenced.id, "claim"));
 				const bootId = (await sessionOf(ctx.pool, m.id))?.boot_id ?? null;
 				await fenced.tx(async (tx) => {
-					await tx.client.query(
-						`UPDATE runtime.machines SET provisioned_boot_id = $2, version = version + 1
-						 WHERE id = $1`,
-						[m.id, bootId],
+					await recordSecretDelivery(
+						tx,
+						m.id,
+						bootId,
+						generation,
+						sets.secretFiles,
 					);
 				});
 				return { claimedMachineId: m.id };

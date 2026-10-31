@@ -80,7 +80,10 @@ function recoverSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					await fenced.check();
 					if (status !== "stopped")
 						await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
-							infra.stop(vmid, { expectedOwner: m.id }),
+							infra.stop(vmid, {
+								expectedOwner: m.id,
+								beforeAct: () => fenced.check(),
+							}),
 						);
 					await fenced.check();
 					await ownedPowerOp(ctx, m.id, vmid, "start", () =>
@@ -95,7 +98,10 @@ function recoverSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					if (status === "running" || status === "paused") {
 						await fenced.check();
 						await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
-							infra.stop(vmid, { expectedOwner: m.id }),
+							infra.stop(vmid, {
+								expectedOwner: m.id,
+								beforeAct: () => fenced.check(),
+							}),
 						);
 					}
 					await startMachine(ctx, fenced, m);

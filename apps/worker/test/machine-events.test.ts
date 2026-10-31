@@ -353,7 +353,7 @@ describe("machine-events (§10.2)", () => {
 		const ops = await activeOps(w, l.sandboxId);
 		expect(ops).toHaveLength(1);
 		expect(ops[0]?.kind).toBe("reprovision");
-		expect(ops[0]?.request).toEqual({ cause: "rebooted", bootId: fresh });
+		expect(ops[0]?.request).toEqual({ cause: "connected", bootId: fresh });
 		const op = await row(w, "operations", ops[0]?.id as string);
 		expect(op.deadline_at).not.toBeNull();
 		expect(op.requested_by).toBeNull();
@@ -398,7 +398,7 @@ describe("machine-events (§10.2)", () => {
 		expect(await activeOps(w, stopping.sandboxId)).toEqual([]);
 	});
 
-	it("phase secrets_missing on the current, unprovisioned boot enqueues reprovision", async () => {
+	it("phase secrets_missing on the current boot enqueues reprovision even if already provisioned", async () => {
 		const w = await createWorld(db);
 		const boot = randomUUID();
 		const done = await linkedSandbox(w, { provisionedBootId: boot });
@@ -406,7 +406,7 @@ describe("machine-events (§10.2)", () => {
 		await agentEvents(w, done.machineId, [
 			ev(1, boot, "phase", { phase: "secrets_missing" }),
 		]);
-		expect(await activeOps(w, done.sandboxId)).toEqual([]);
+		expect(await activeOps(w, done.sandboxId)).toHaveLength(1);
 
 		const l = await linkedSandbox(w, { provisionedBootId: randomUUID() });
 		const cur = await setSession(w, l.machineId);

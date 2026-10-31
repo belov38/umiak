@@ -20,6 +20,9 @@ type Upload struct {
 	Commit       json.RawMessage `json:"commit,omitempty"`
 	CommitPath   string          `json:"commit_path,omitempty"`
 	CommitTarget string          `json:"commit_target,omitempty"`
+	// CommitStage is an adjacent copy retained as an identity anchor until
+	// the result is durable. The placed target is a hard link to this file.
+	CommitStage string `json:"commit_stage,omitempty"`
 }
 
 // GetUpload returns the upload with id.

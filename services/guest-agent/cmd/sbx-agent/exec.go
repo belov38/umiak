@@ -18,6 +18,9 @@ import (
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
+	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 )
 
 const execUsage = "usage: sbx-agent exec [--user <u>] [--pty] [--cwd <dir>] [-i] (--shell <script> | -- <argv>...)\n"
@@ -84,6 +87,11 @@ func execCmd(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 	close(finished)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "sbx-agent exec: %v\n", err)
+		// The API reports an unknown account as validation (S7), before
+		// an ExitEvent exists. For exec it still means "did not start".
+		if detail, ok := rpcconv.Detail(err); ok && detail.GetCode() == errs.UserNotFound {
+			return exitNotStarted
+		}
 		return exitAgent
 	}
 	c.remove(ctx)

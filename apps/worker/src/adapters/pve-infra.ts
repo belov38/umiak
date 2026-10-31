@@ -20,6 +20,7 @@ import {
 	QgaTimeoutError,
 	type QuiesceHook,
 	readSecretFile,
+	retryOnVmLock,
 	type Smbios,
 	type SnapshotRef,
 	type SnapshotStore,
@@ -242,6 +243,8 @@ interface Resource {
 }
 
 export interface PveNodeInfraOptions {
+	/** Test clock; production waits between VM-lock retries. */
+	vmLockSleep?: (ms: number) => Promise<void>;
 	vnet: string;
 	pool: string;
 	/** Machines poll interval (delete verification); S1 default when unset. */
@@ -348,7 +351,7 @@ export class PveNodeInfra implements NodeInfra {
 				// The rollback delete of a failed create/fork is a delete like any
 				// other: serialized with starts. No deadlock: create/fork never run
 				// under the power lock, and power operations never wait for a clone.
-				powerLock: (fn) => this.#powerSerialized(fn),
+				powerLock: (fn) => this.#retryPowerOnVmLock(fn),
 				...(this.#o.pollMs !== undefined ? { pollMs: this.#o.pollMs } : {}),
 			});
 			this.#machines.set(templateVmid, m);
@@ -494,6 +497,14 @@ export class PveNodeInfra implements NodeInfra {
 		return run;
 	}
 
+	/** Delete/rollback recheck the lease on every attempt; never sleep under the power lock. */
+	#retryPowerOnVmLock<T>(fn: () => Promise<T>): Promise<T> {
+		return retryOnVmLock(
+			() => this.#powerSerialized(fn),
+			this.#o.vmLockSleep ? { sleep: this.#o.vmLockSleep } : {},
+		);
+	}
+
 	/**
 	 * The caller's `beforeAct`, the owner check and the shutdown request run
 	 * under the power lock, the wait for the guest (up to timeoutS) outside
@@ -544,13 +555,36 @@ export class PveNodeInfra implements NodeInfra {
 	 * stop are one step for other power operations.
 	 */
 	stop(vmid: number, o: PowerOpts): Promise<void> {
-		return this.#guarded(o.beforeAct, (g) =>
-			this.#run("stop", () =>
-				this.#powerSerialized(async () => {
-					await g.before();
-					await this.#base.stop(vmid, { expectedOwner: o.expectedOwner });
-				}),
-			),
+		return this.#stopOwned(vmid, o);
+	}
+
+	#stopOwned(
+		vmid: number,
+		o: { expectedOwner: string | null; beforeAct?: () => Promise<unknown> },
+	): Promise<void> {
+		return retryOnVmLock(
+			() =>
+				this.#guarded(o.beforeAct, (g) =>
+					this.#run("stop", () =>
+						this.#powerSerialized(async () => {
+							await g.before();
+							await this.#base.stop(vmid, { expectedOwner: o.expectedOwner });
+						}),
+					),
+				),
+			{
+				sleep: async (ms) => {
+					// The power lock is released between attempts. Recheck the caller's
+					// fence while waiting and again under that lock before acting.
+					for (let remaining = ms; remaining > 0; remaining -= 2000) {
+						await (
+							this.#o.vmLockSleep ??
+							((delay) => new Promise((resolve) => setTimeout(resolve, delay)))
+						)(Math.min(remaining, 2000));
+						await o.beforeAct?.();
+					}
+				},
+			},
 		);
 	}
 
@@ -650,7 +684,7 @@ export class PveNodeInfra implements NodeInfra {
 					`refusing to delete the template VM ${vmid}`,
 					"delete",
 				);
-			await this.#powerSerialized(() =>
+			await this.#retryPowerOnVmLock(() =>
 				this.#base.delete(vmid, { expectedOwner: o.expectedOwner }),
 			);
 		});
@@ -672,50 +706,72 @@ export class PveNodeInfra implements NodeInfra {
 
 	snapshot(
 		vmid: number,
-		opts: { lvId: string; hook?: QuiesceHook },
+		opts: {
+			lvId: string;
+			hook?: QuiesceHook;
+			crashConsistent?: boolean;
+			expectedOwner?: string;
+			beforeAct?: () => Promise<unknown>;
+		},
 	): Promise<InfraSnapshotResult> {
-		return this.#run("snapshot", async () => {
-			const lease = await this.#allocator.get(vmid);
-			const expectedOwner = lease?.ownerId ?? null;
-			const ref = await this.#base
-				.snapshot(vmid, {
-					id: opts.lvId,
-					...(opts.hook ? { hook: opts.hook } : {}),
-				})
-				.catch(async (error: unknown) => {
-					if (!(error instanceof ThawFailedError)) throw error;
-					// A dead QGA cannot thaw the guest. Serialize with power operations
-					// and fence the lease so a recycled VMID is never stopped.
-					try {
-						await this.#powerSerialized(() =>
-							this.#base.stop(vmid, { expectedOwner }),
-						);
-					} catch (stopError) {
+		return this.#guarded(opts.beforeAct, (g) =>
+			this.#run("snapshot", async () => {
+				await g.before();
+				const lease = await this.#allocator.get(vmid);
+				const expectedOwner = lease?.ownerId ?? null;
+				if (
+					opts.expectedOwner !== undefined &&
+					opts.expectedOwner !== expectedOwner
+				) {
+					throw infraRejected(
+						"owner_mismatch",
+						`snapshot of VM ${vmid}: lease owner changed`,
+						"snapshot",
+					);
+				}
+				const ref = await this.#base
+					.snapshot(vmid, {
+						id: opts.lvId,
+						...(opts.crashConsistent !== undefined
+							? { crashConsistent: opts.crashConsistent }
+							: {}),
+						...(opts.hook ? { hook: opts.hook } : {}),
+					})
+					.catch(async (error: unknown) => {
+						if (!(error instanceof ThawFailedError)) throw error;
+						// A dead QGA cannot thaw the guest. Serialize with power operations
+						// and fence the lease so a recycled VMID is never stopped.
+						try {
+							await this.#stopOwned(vmid, { expectedOwner });
+						} catch (stopError) {
+							throw new QuiesceFailed(
+								`VM ${vmid}: thaw failed; hard stop also failed: ${String(stopError)}`,
+								{ cause: error },
+							);
+						}
 						throw new QuiesceFailed(
-							`VM ${vmid}: thaw failed; hard stop also failed: ${String(stopError)}`,
+							`VM ${vmid}: thaw failed; machine hard-stopped to release frozen filesystems; start it again normally`,
 							{ cause: error },
 						);
-					}
+					});
+				if (ref.autoThawed) {
+					// S1's QGA hook tolerates a guest that thawed itself; a stored snapshot
+					// must be quiesced, so it is discarded like qgaFreezeHook's outcome.
+					await this.#base.deleteSnapshot(ref);
 					throw new QuiesceFailed(
-						`VM ${vmid}: thaw failed; machine hard-stopped to release frozen filesystems; start it again normally`,
-						{ cause: error },
+						`VM ${vmid}: the guest thawed itself before the snapshot was done`,
 					);
-				});
-			if (ref.autoThawed) {
-				// S1's QGA hook tolerates a guest that thawed itself; a stored snapshot
-				// must be quiesced, so it is discarded like qgaFreezeHook's outcome.
-				await this.#base.deleteSnapshot(ref);
-				throw new QuiesceFailed(
-					`VM ${vmid}: the guest thawed itself before the snapshot was done`,
-				);
-			}
-			return {
-				disks: toInfraDisks(ref.disks),
-				hw: { ...ref.hardware },
-				// S1 measures the freeze only on the running path (QGA or the hook).
-				consistency: ref.freezeMs !== undefined ? "quiesced" : "powered_off",
-			};
-		});
+				}
+				return {
+					disks: toInfraDisks(ref.disks),
+					hw: { ...ref.hardware },
+					// S1 measures the freeze only on the running path (QGA or the hook).
+					consistency:
+						ref.consistency ??
+						(ref.freezeMs !== undefined ? "quiesced" : "powered_off"),
+				};
+			}),
+		);
 	}
 
 	deleteSnapshot(ref: InfraSnapshotRef): Promise<void> {
@@ -828,6 +884,7 @@ export class PveNodeInfra implements NodeInfra {
 }
 
 export interface PveInfraRegistryOptions {
+	vmLockSleep?: (ms: number) => Promise<void>;
 	/** Root of the mounted Secret directories (`SBX_SECRETS_DIR`). */
 	secretsDir: string;
 	/** `SBX_PVE_TOKEN_ID`, `SBX_NODE_SSH_HOST`, `SBX_PVE_VNET`, `SBX_PVE_POOL`. */
@@ -884,6 +941,7 @@ export class PveInfraRegistry implements InfraRegistry {
 		const t = await loadNodeTopology(this.#db, nodeId);
 		const clients = await this.#clients(t);
 		const infra = new PveNodeInfra(this.#db, t, clients, {
+			...(this.#o.vmLockSleep ? { vmLockSleep: this.#o.vmLockSleep } : {}),
 			vnet: this.#env.SBX_PVE_VNET ?? "sbx0",
 			pool: this.#env.SBX_PVE_POOL ?? "sandbox",
 			...(this.#o.pollMs !== undefined ? { pollMs: this.#o.pollMs } : {}),

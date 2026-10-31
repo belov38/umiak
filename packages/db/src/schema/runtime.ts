@@ -240,6 +240,11 @@ export const machines = runtime.table("machines", {
 		.notNull()
 		.default([]),
 	provisionedBootId: text("provisioned_boot_id"),
+	secretFilesOnDisk: boolean("secret_files_on_disk").notNull().default(false),
+	secretsGeneration: integer("secrets_generation").notNull().default(0),
+	provisionedSecretsGeneration: integer("provisioned_secrets_generation")
+		.notNull()
+		.default(0),
 	readyBootId: text("ready_boot_id"),
 	agentPhase: text("agent_phase"),
 	execAttempt: integer("exec_attempt").notNull().default(0),

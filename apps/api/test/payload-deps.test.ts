@@ -126,7 +126,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 			expect(rows.rows).toEqual([{ name: "payload-team" }]);
 		});
 
-		it("/v1/templates serves the Payload seed (linux) and follows a change", async () => {
+		it("/v1/templates serves the Payload seed (linux and windows) and follows a change", async () => {
 			const app = createPublicApp(deps);
 			const get = async () => {
 				const r = await app.request("/v1/templates", {
@@ -136,7 +136,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				return ((await r.json()) as { data: { slug: string; name: string }[] })
 					.data;
 			};
-			expect((await get()).map((t) => t.slug)).toEqual(["linux"]);
+			expect((await get()).map((t) => t.slug)).toEqual(["linux", "windows"]);
 			// A change through Payload reaches the cached reader (LISTEN sbx_config).
 			const payload = await getSbxPayload({
 				databaseUrl: db.url,

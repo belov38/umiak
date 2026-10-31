@@ -78,7 +78,13 @@ async function stopMachine(
 				// A mismatch: the VMID is not this machine's any more; destroy
 				// finds the machine's VM gone.
 				await ownedTeardown(ctx, machineId, vmid, "stop", () =>
-					infra.stop(vmid, { expectedOwner: machineId }),
+					infra.stop(vmid, {
+						expectedOwner: machineId,
+						beforeAct: async () => {
+							await fence.check();
+							await fenced.check();
+						},
+					}),
 				);
 			}
 		}

@@ -851,6 +851,8 @@ packages/pve/, services/node-agent/   + §18.1
 
 ### 24.5 Контракты для соседних областей
 
+Исторический список приёмки; актуальные решения follow-ups, включая замену QGA/VSS на crash fallback, — §24.7.
+
 - **S6.** Сделано в worker (S9 Task 4): тайм-аут shutdown для `os = windows` — 120 s; составной quiesce-хук (агент `fs: false`, `wipe_secret_files` для `kind = saved`, затем QGA VSS); результат `PrepareStop{secret_files_wiped}` пишется в прогресс stop. Осталось S6:
   - `machines.secret_files_on_disk` и правила saved snapshot (§18.6 п. 5): `secrets_in_use` → `snapshot_requires_stop`, остановленная machine с `true` → `snapshot_requires_clean_stop`;
   - saved snapshot с `auto_thawed` выбрасывать: истёкший lease между `Quiesce` агента и QGA `fsfreeze` восстанавливает файлы секретов до VSS;
@@ -891,3 +893,109 @@ packages/pve/, services/node-agent/   + §18.1
 Проверки: workspace build, typecheck, Biome; TS suites последовательно (worker 381 + 5 skipped, PVE 192, bench 44); Python SDK 77; Go race/vet/golangci-lint всех модулей, Linux cross-build; Windows build/vet/lint всех применимых модулей (node-agent Linux-only). Первоначальный параллельный API suite имел teardown-flake `terminating connection due to administrator command`; последовательный API прогон — 1008 passed.
 
 Итоговая очистка `pve`: VM 570 удалена, allocator snapshots своего прогона пусты; оба ISO (`sbx-build-agenttests-20261031123309.iso`, `sbx-build-s9-fix.iso`) удалены. Проверки `qm list`, `lvs -o lv_name,lv_tags` и `pvesm list local --content iso` подтвердили отсутствие моих VM/LVs/ISO и любых `sbx-snap-*` LVs. VM 596 другого потока оставлена без изменений.
+
+### 24.7 S9 follow-ups (2026-11-01 NZ)
+
+**Решение по snapshot: Windows использует crash-consistent fallback без QGA/VSS.**
+`Machines.snapshot` по `ostype=win*` по умолчанию не вызывает QGA freeze/thaw;
+многодисковый snapshot по-прежнему делает pause → LVM snapshots → resume.
+Новые метаданные содержат `consistency=crash` (остановленная VM — `powered_off`).
+Worker явно выбирает тот же режим. Saved snapshot требует доступный агент с
+`system.quiesce.wipe_secrets.v1`: `Quiesce{fs:false,wipe_secret_files:true}` →
+snapshot → agent Thaw, **без второго QGA-хука**. Watchdog/auto-thaw агента
+по-прежнему делает saved snapshot недействительным: иначе секреты могли
+восстановиться до копирования. Это не application-consistent/VSS backup;
+приложения восстанавливаются как после потери питания. Linux не меняется.
+`crashConsistent:false` в S1 оставлен для явных диагностических опытов;
+worker его для Windows не использует. Защита bounded thaw / hard stop остаётся.
+
+**Наблюдения на отдельном клоне 580 шаблона 598:**
+
+- QGA/provider `109.1.0`, командная строка `qemu-ga.exe -d --retry-path`.
+  Provider зарегистрирован; службы QEMU-GA, VSS и provider работали после
+  успешных циклов. В Application есть VSS 8194: System Writer,
+  `IVssWriterCallback`, `0x80070005`; он встречается и при успешных snapshot.
+- 10 ручных циклов QGA freeze → pause → snapshot трёх LV → resume → thaw
+  прошли; затем 10 последовательных snapshot через настоящий S1 тоже прошли.
+  После hard stop/start первый S1 snapshot воспроизвёл `ThawFailedError`.
+  В опыте нет sbx-agent quiesce: коллизия составных хуков не обязательна.
+- На **этом клоне**, без изменения 598, установлен актуальный на момент опыта
+  MSI из `https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-qemu-ga/qemu-ga-x86_64.msi`.
+  SHA-256 `19dcf8abc30f70c2eb6e87282601fd0476e4e0b19936f63d9c80be30db0796ed`,
+  размер 11909632 bytes; MSI install exit 0, QGA/provider стали `110.2.3`.
+  10 S1 snapshot прошли, но **первый после hard stop/start снова завис**.
+  Обновление QGA само по себе не является исправлением.
+- Трасса нового QGA: freeze POST 13:50:17.896–13:50:22.443 UTC (4.547 s),
+  pause/LVM/resume до 13:50:23.305 (0.862 s); первый thaw начат сразу затем
+  и не ответил. Следующие thaw/status дали `QEMU guest agent is not running`.
+  Интервал от начала freeze до thaw 5.409 s; одной гипотезы превышения
+  10 s VSS hold window недостаточно. PVE suspend/resume без includestate
+  вызывает QMP stop/cont и не запускает второй VSS requestor.
+
+**Первопричина внутри Windows/QGA/VSS остаётся открытой.** Не доказано,
+что виноват VSS 8194, VirtIO serial/SCSI, либо ожидание VSS async completion.
+Следующий эксперимент для возврата application-consistent режима: на отдельном
+клоне с 110.2.3 собрать thread stacks QGA и VSS provider при hang (WinDbg/WPR),
+параллельно сырой virtio-serial request/response и QMP timeline; отдельно
+сравнить freeze/thaw без pause и с pause после hard restart. В upstream
+`requester_thaw` сигналит event, затем без ограничения ждёт `IVssAsync::Wait`;
+нужно определить, вошёл ли зависший поток туда и где стоит provider.
+Источники: [QGA protocol](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html),
+[upstream requester](https://github.com/qemu/qemu/blob/master/qga/vss-win32/requester.cpp).
+Режим без writers в публичном QGA RPC не предусмотрен; не подменяем его
+недокументированными registry-настройками. Рецепт QGA не меняем: новая версия
+не устранила hang, **перестройка 598 для этого fallback не требуется**.
+
+**Контракты и мелкие исправления.** Миграция runtime `0207` консервативно
+отмечает существующие Windows machines с арендатором как потенциально dirty.
+Непустые secret files отмечаются до RPC; clean PrepareStop/успешная пустая
+замена очищают флаг. Running saved с dirty flag → `snapshot_requires_stop`,
+stopped dirty → `snapshot_requires_clean_stop`; fork не ограничен этим флагом.
+Это консервативное уточнение §18.6 п.5: live сохранение с файлами требует
+сначала clean stop. Доставка секретов повторяется при reconnect/restart и
+same-boot `secrets:pending`, с durable поколениями для pending во время другой
+операции; stop/snapshot повторяют lock qmeventd с новым fencing и свежим hook.
+Подробности и тестовые контракты — S6.
+
+Payload data migration `20261101_000000_windows_template` добавляет отсутствующие
+`windows`/`4gb` на существующих установках, не затирая настройки оператора;
+сборка 598 уже регистрируется из compose YAML отдельно. Деплоя в CT 590 нет.
+CLI refresh regression воспроизведён forced GC: слабая ссылка Request на
+AbortController могла теряться. HTTP send держит Request и ждёт исходный abort
+напрямую, timeout и lock release проверяются в отдельном GC-процессе.
+`sbx-agent call … -` снимает ведущий UTF-8 BOM; typed `user_not_found` в exec
+даёт 127 (остальные RPC ошибки 125), API S7 сохраняет 400 validation.
+Upload copy-commit хранит durable identity anchor рядом с целью, распознаёт
+повтор по inode, а не совпадению байтов; cleanup после durable commit best effort.
+Copy fallback требует hardlinks (в частности NTFS), обычный Unix rename сохранён.
+
+**Проверка fallback:** на исходном 598 (QGA 109.1.0), VM 570,
+10 последовательных snapshot работающей VM 13:56:57–13:57:11 UTC,
+все `consistency=crash`, pause/snapshot/resume 543–862 ms; после каждой
+попытки snapshot LVs удалены. Серия выполнена на первом boot A второго
+bench-прогона: она добавляет паузы в его create-to-ready, поэтому эти
+времена нельзя считать чистым сравнением производительности.
+
+**Локальные проверки ветки.** `mise exec -- pnpm --workspace-concurrency=1 -r
+--if-present build`, serial `typecheck`, `pnpm lint` прошли. Полный serial
+workspace test: 4342 TS passed, 6 skipped; Python SDK 77 passed. После
+добавления покрытия stop-inside-delete повторный worker: 397 passed,
+5 skipped; PVE: 195 passed; bench unit: 44 passed. Все пять Go-модулей:
+`go test -race ./...`, `go vet ./...`, `golangci-lint run` — exit 0.
+Для guest-agent собраны 19 Windows test binaries (GOOS=windows/amd64);
+исполнение новых Windows regression tests на госте здесь не заявляется.
+
+**Итог bench и уборки:** `sbx-bench s9 --template 598 --runs 3` через
+`runS9` с дополнительным host guard перед каждым start завершён с exit 0,
+3/3 runs (14:06:35 UTC). Диапазон этого прогона — 570–579, отдельный
+локальный allocator state; CT 590/tunnel registrar не использовался.
+Все три fork загрузились с новой идентичностью и hostname. Snapshot total /
+pause-window: 1040/815, 1745/1067, 791/562 ms. Это проверка **fallback**,
+а не успешного VSS thaw; в шаблоне остался QGA 109.1.0.
+Итоговые `qm list`, `lvs -o lv_name,lv_tags`, `pvesm list local --content iso`
+подтвердили отсутствие VM 570/571/580, snapshot LVs и временного
+`s9-followups-qga.iso`. Ресурсы параллельного S10 не менялись.
+Дальше: независимая приёмка master и деплой с обеими миграциями. Исправления
+sbx-agent нужно доставить существующим гостям через обновление либо будущую
+сборку шаблона; перестройки 598 в этой ветке не было и для crash fallback
+она не требуется.

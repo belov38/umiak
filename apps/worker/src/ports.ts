@@ -59,7 +59,7 @@ export interface InfraLv {
 export interface InfraSnapshotResult {
 	disks: InfraDisk[];
 	hw: Record<string, string>;
-	consistency: "quiesced" | "powered_off";
+	consistency: "quiesced" | "crash" | "powered_off";
 }
 
 /**
@@ -134,7 +134,13 @@ export interface NodeInfra {
 	): Promise<{ vmid: number; mac: string } | undefined>;
 	snapshot(
 		vmid: number,
-		opts: { lvId: string; hook?: QuiesceHook },
+		opts: {
+			lvId: string;
+			hook?: QuiesceHook;
+			crashConsistent?: boolean;
+			expectedOwner?: string;
+			beforeAct?: () => Promise<unknown>;
+		},
 	): Promise<InfraSnapshotResult>;
 	deleteSnapshot(ref: InfraSnapshotRef): Promise<void>;
 	listVms(): Promise<InfraVm[]>;
