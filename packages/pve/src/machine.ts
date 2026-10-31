@@ -512,12 +512,22 @@ export class Machines {
 				diskParams.boot = "order=scsi0";
 			await api.put(this.#vmPath(vmid, "/config"), diskParams);
 			if (tpmTemplate) {
-				// Proxmox allocates vm-<vmid>-disk-<n> (no sbx tag; delete purges it).
+				// Proxmox allocates vm-<vmid>-disk-<n> without our tags; lv.adopt adds sbx and
+				// sbx-vm-<vmid>, or sbx-node refuses it as a snapshot origin.
 				const version = tpmTemplate.options.version ?? "v2.0";
 				await api.put(this.#vmPath(vmid, "/config"), {
 					tpmstate0: `${cfg.storage}:1,version=${version}`,
 				});
 				disks = parseDiskSet(await this.config(vmid), cfg.storage);
+				const tpm = disks.find((d) => d.slot === "tpmstate0")?.lv;
+				const { tagged, already } = await this.#o.node.call<{
+					tagged: string[];
+					already: string[];
+				}>("lv.adopt", { vmid });
+				if (!tpm || ![...tagged, ...already].includes(tpm))
+					throw new Error(
+						`VM ${vmid}: tpmstate0 volume ${tpm ?? "(none)"} is not tagged (lv.adopt tagged [${tagged}], already [${already}])`,
+					);
 			}
 			await this.#firewall(vmid, mac);
 			await allocator.markActive(vmid);

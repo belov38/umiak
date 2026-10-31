@@ -82,6 +82,7 @@ var handlers = map[string]handler{
 	"lv.scan":        (*Server).lvScan,
 	"lv.usage":       (*Server).lvUsage,
 	"lv.tagTemplate": (*Server).lvTagTemplate,
+	"lv.adopt":       (*Server).lvAdopt,
 }
 
 // decodeArgs decodes optional args strictly.

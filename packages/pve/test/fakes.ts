@@ -26,6 +26,8 @@ export class FakeNode implements NodeOps {
 	vmfiles: string[] = [];
 	fail: Record<string, Error> = {};
 	handlers: Record<string, Handler> = {};
+	/** VM configs lv.adopt reads, as sbx-node reads /etc/pve/qemu-server/<vmid>.conf. */
+	pve: { vms: Map<number, { config: Record<string, string> }> } | undefined;
 
 	constructor(log: string[] = []) {
 		this.log = log;
@@ -43,7 +45,26 @@ export class FakeNode implements NodeOps {
 			case "pool.usage":
 				return this.usage as T;
 			case "lv.snapshot": {
-				const items = a.items as { name: string; tags: string[] }[];
+				const items = a.items as {
+					origin: string;
+					name: string;
+					tags: string[];
+				}[];
+				// Like sbx-node, a known vm-<id>-* origin must carry sbx and sbx-vm-<id>.
+				for (const it of items) {
+					const id = /^vm-(\d+)-/.exec(it.origin)?.[1];
+					const l = this.lvs.find((x) => x.name === it.origin);
+					if (
+						id &&
+						l &&
+						!(l.tags.includes("sbx") && l.tags.includes(`sbx-vm-${id}`))
+					)
+						throw new NodeOpsError(
+							op,
+							"forbidden",
+							`origin "${it.origin}" is not a sandbox disk`,
+						);
+				}
 				for (const it of items) this.lvs.push({ name: it.name, tags: it.tags });
 				return { created: items.map((i) => i.name) } as T;
 			}
@@ -58,6 +79,8 @@ export class FakeNode implements NodeOps {
 				this.lvs = this.lvs.filter((l) => !names.includes(l.name));
 				return { removed: names, missing: [] } as T;
 			}
+			case "lv.adopt":
+				return this.#adopt(Number(a.vmid)) as T;
 			case "dhcp.leases":
 				return { leases: this.leases, ethers: this.ethers } as T;
 			case "dhcp.release": {
@@ -71,6 +94,30 @@ export class FakeNode implements NodeOps {
 			default:
 				throw new NodeOpsError(op, "bad_request", "unknown op in fake");
 		}
+	}
+
+	/** Tags the vm-<vmid>-disk-N LVs the VM config attaches, as sbx-node's lv.adopt. */
+	#adopt(vmid: number): { tagged: string[]; already: string[] } {
+		const config = this.pve?.vms.get(vmid)?.config;
+		if (!config || config.template === "1")
+			throw new NodeOpsError("lv.adopt", "forbidden", `VM ${vmid} refused`);
+		const tagged: string[] = [];
+		const already: string[] = [];
+		for (const [k, v] of Object.entries(config)) {
+			if (!/^(efidisk|tpmstate|scsi|sata|virtio|ide)\d+$/.test(k)) continue;
+			const name = /^[^:,]+:([^,]+)/.exec(v)?.[1] ?? "";
+			const l = this.lvs.find((x) => x.name === name);
+			if (!l || !new RegExp(`^vm-${vmid}-disk-\\d+$`).test(name)) continue;
+			const missing = ["sbx", `sbx-vm-${vmid}`].filter(
+				(t) => !l.tags.includes(t),
+			);
+			if (missing.length === 0) already.push(name);
+			else {
+				l.tags = [...l.tags, ...missing];
+				tagged.push(name);
+			}
+		}
+		return { tagged, already };
 	}
 
 	close(): void {}

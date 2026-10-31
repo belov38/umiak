@@ -28,6 +28,9 @@ function setup(
 	const log: string[] = [];
 	const api = new FakePve(log);
 	const node = new FakeNode(log);
+	// PVE-allocated volumes (a fresh tpmstate0) land in sbx-node's LV list; lv.adopt reads configs.
+	api.lvStore = node;
+	node.pve = api;
 	const store = new SqliteStateStore(":memory:");
 	const allocator = new Allocator({
 		store,
@@ -1178,18 +1181,69 @@ describe("Windows template (three disks)", () => {
 		expect(puts).toHaveLength(1);
 	});
 
+	it("create tags the PVE-allocated tpmstate0 LV through lv.adopt", async () => {
+		const { api, node, machines, log } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		await machines.create({});
+		expect(node.calls.find((c) => c.op === "lv.adopt")?.args).toEqual({
+			vmid: 500,
+		});
+		// After the tpmstate0 PUT, before the firewall.
+		const adopt = log.indexOf("node:lv.adopt");
+		expect(adopt).toBeGreaterThan(
+			log.lastIndexOf("api:PUT /nodes/pve/qemu/500/config"),
+		);
+		expect(adopt).toBeLessThan(
+			log.indexOf("api:PUT /nodes/pve/qemu/500/firewall/options"),
+		);
+		expect(node.lvs).toEqual(
+			[0, 1, 2].map((n) => ({
+				name: `vm-500-disk-${n}`,
+				tags: ["sbx", "sbx-vm-500"],
+			})),
+		);
+	});
+
+	it("snapshot of a Windows clone snapshots all three LVs", async () => {
+		const { node, api, machines } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		await machines.start(m.vmid);
+		node.calls.length = 0;
+		const snap = await machines.snapshot(m.vmid);
+		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
+			.items as { origin: string; name: string }[];
+		expect(items.map((i) => `${i.origin}->${i.name}`)).toEqual([
+			`vm-500-disk-0->sbx-snap-${snap.id}-efidisk0`,
+			`vm-500-disk-1->sbx-snap-${snap.id}-scsi0`,
+			`vm-500-disk-2->sbx-snap-${snap.id}-tpmstate0`,
+		]);
+	});
+
+	it("a create whose tpmstate0 LV lv.adopt does not report rolls back", async () => {
+		const { api, node, machines, store } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		node.handlers["lv.adopt"] = () => ({
+			tagged: [],
+			already: ["vm-500-disk-0", "vm-500-disk-1"],
+		});
+		await expect(machines.create({})).rejects.toThrow(
+			/tpmstate0.*vm-500-disk-2/,
+		);
+		expect(api.vms.has(500)).toBe(false);
+		expect(node.lvs).toEqual([]);
+		expect(store.get(1, 500)).toBeUndefined();
+	});
+
 	it("delete removes the PVE-allocated tpmstate0 volume", async () => {
 		const { api, node, machines } = setup();
 		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
-		api.lvStore = node;
 		const m = await machines.create({});
 		expect(node.lvs.map((l) => l.name).sort()).toEqual([
 			"vm-500-disk-0",
 			"vm-500-disk-1",
 			"vm-500-disk-2",
 		]);
-		// The untagged volume is not found by the driver's tag lookup: only destroy removes it.
-		expect(node.lvs.find((l) => l.name === "vm-500-disk-2")?.tags).toEqual([]);
 		await machines.delete(m.vmid);
 		expect(node.lvs).toEqual([]);
 	});
@@ -1197,7 +1251,6 @@ describe("Windows template (three disks)", () => {
 	it("a create failing right after the tpmstate0 PUT rolls back without traces", async () => {
 		const { api, node, machines, store } = setup();
 		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
-		api.lvStore = node;
 		// The re-read of the config after the tpmstate0 PUT fails once; the rollback reads it again.
 		const get = api.get.bind(api);
 		let failed = false;
