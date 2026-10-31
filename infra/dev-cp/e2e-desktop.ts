@@ -4,6 +4,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
 
+import { waitForDesktopBudget } from "./desktop-budget.ts";
+
 const client = new Sbx();
 const created: Sandbox[] = [];
 const output = process.env.SBX_E2E_OUTPUT;
@@ -16,6 +18,7 @@ function check(value: unknown, label: string) {
 	console.log(`ok ${label}`);
 }
 try {
+	await waitForDesktopBudget();
 	const start = performance.now();
 	const sb = await client.sandboxes.create({
 		template: process.env.SBX_E2E_TEMPLATE ?? "linux-desktop",
@@ -88,7 +91,7 @@ try {
 		"gateway stream page",
 	);
 	await sb.desktop.endStreams();
-	// Copy while both 4GB VMs fit the host's 8GB cap. Compare only hashes, never credentials.
+	// Fork a stopped source so this track uses only 4GiB while S9 is running.
 	const credentialHash = async (s: Sandbox) => {
 		const result = await s.exec([
 			"sudo",
@@ -104,6 +107,8 @@ try {
 		return result.stdout.trim();
 	};
 	const original = await credentialHash(sb);
+	await sb.stop({ wait: true });
+	await waitForDesktopBudget();
 	const copy = await sb.fork();
 	created.push(copy);
 	await copy.waitUntilReady();
@@ -112,7 +117,7 @@ try {
 		"fork gets fresh streamer state",
 	);
 	await copy.delete({ wait: true });
-	await sb.stop({ wait: true });
+	await waitForDesktopBudget();
 	await sb.resume({}, { wait: true });
 	check(
 		(await sb.desktop.status()).state === "ready",
