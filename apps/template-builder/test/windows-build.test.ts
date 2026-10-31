@@ -405,14 +405,14 @@ describe("iso-install build: happy path", () => {
 		});
 		expect(s.guest.started).toEqual(["00-base", "10-system", "90-cleanup"]);
 
-		// Boot-from-CD key presses: every second for 60 s at install and at the offline boot.
+		// Boot-from-CD key presses: four per second for 60 s at install and at the offline boot.
 		const starts = s.log
 			.map((e, i) => (e === `api:POST ${vm}/status/start` ? i : -1))
 			.filter((i) => i >= 0);
 		expect(starts).toHaveLength(3);
 		const firstStep = s.log.indexOf("guest:step 00-base");
-		expect(keysBetween(s.log, starts[0] ?? 0, firstStep)).toBe(60);
-		expect(keysBetween(s.log, starts[1] ?? 0, starts[2] ?? 0)).toBe(60);
+		expect(keysBetween(s.log, starts[0] ?? 0, firstStep)).toBe(240);
+		expect(keysBetween(s.log, starts[1] ?? 0, starts[2] ?? 0)).toBe(240);
 		expect(keysBetween(s.log, starts[2] ?? 0, s.log.length)).toBe(0);
 		// The disk boots once after WinPE, before sysprep.
 		expect(s.log.indexOf("guest:sysprep")).toBeGreaterThan(starts[2] ?? 0);

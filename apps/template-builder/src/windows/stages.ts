@@ -111,12 +111,12 @@ const BUILD_DIR_RETRY_MS = 10_000;
 export const CLEANUP_STEP = "90-cleanup";
 /**
  * "Press any key to boot from CD": one press per interval. OVMF on a fresh efidisk can take well
- * over 20 s to reach the prompt, so the presses go on after Setup has started; the first reboot
+ * over 20 s to reach the prompt, so the presses (60 s, four per second) go on after Setup has started; the first reboot
  * from the disk comes minutes later.
  */
-const INSTALL_KEYS = 60;
-const OFFLINE_KEYS = 60;
-const DEFAULT_KEY_INTERVAL_MS = 1000;
+const INSTALL_KEYS = 240;
+const OFFLINE_KEYS = 240;
+const DEFAULT_KEY_INTERVAL_MS = 250;
 // Any key passes the boot prompt. Not Enter or Space: Setup's progress window has the Cancel
 // button focused, and Enter there opens "Are you sure you want to quit?" (seen on a real build).
 const BOOT_KEY = "f12";
@@ -621,23 +621,47 @@ async function pressKeys(
 	node: string,
 	vmid: number,
 	count: number,
-	/** Runs after every pause between two key presses. */
+	/** Runs repeatedly while the keys are pressed; an error from it ends the presses. */
 	between?: () => Promise<void>,
 ): Promise<void> {
 	const interval = deps.keyIntervalMs ?? DEFAULT_KEY_INTERVAL_MS;
-	for (let i = 0; i < count; i++) {
+	// The prompt waits about 5 s and one API call can take seconds on a slow uplink (3 s seen),
+	// so presses start on a fixed cadence without waiting for the previous one.
+	let done = false;
+	let stopped = false;
+	let failure: unknown;
+	const presses: Promise<void>[] = [];
+	const press = async () => {
 		try {
 			await sendKey(deps.api, node, vmid, BOOT_KEY);
 		} catch (err) {
 			// The offline WinPE boot can finish and power off within the key window.
-			if (await vmStopped(deps, node, vmid)) return;
-			throw err;
+			if (await vmStopped(deps, node, vmid)) stopped = true;
+			else failure ??= err;
 		}
-		if (i < count - 1) {
-			await sleep(interval);
-			await between?.();
+	};
+	const watch = (async () => {
+		if (!between) return;
+		while (!done) {
+			await between();
+			await sleep(Math.max(interval, 1));
 		}
+	})();
+	watch.catch(() => {});
+	try {
+		for (let i = 0; i < count && !stopped && failure === undefined; i++) {
+			presses.push(press());
+			if (i < count - 1) {
+				await sleep(interval);
+				await Promise.race([watch, Promise.resolve()]);
+			}
+		}
+		await Promise.all(presses);
+	} finally {
+		done = true;
 	}
+	await watch;
+	if (!stopped && failure !== undefined) throw failure;
 }
 
 export async function stageInstall(
