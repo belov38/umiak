@@ -4,6 +4,13 @@
   Step 50-sbx-agent copies it to C:\Windows\System32\Sysprep\sbx-unattend.xml;
   identity apply deletes it on the clone. No accounts and no secrets: user
   already exists, the agent sets its credentials and autologon.
+  SkipMachineOOBE and SkipUserOOBE: without them OOBE stops at "Who's going
+  to use this device?". Setup overwrites any computer name set during
+  specialize, so ComputerName is a fixed interim name and the agent renames
+  the machine to SBX<12 hex> with one reboot after setup (ruling R16).
+  No system locale: it rewrites the code pages; files\firstboot.ps1
+  (SetupComplete.cmd of the clone) restores them and the other settings
+  sysprep resets.
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
   <settings pass="generalize">
@@ -31,17 +38,16 @@
     </component>
     <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <InputLocale>en-US</InputLocale>
-      <SystemLocale>en-US</SystemLocale>
       <UserLocale>en-US</UserLocale>
     </component>
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <ComputerName>SBXTEMPLATE</ComputerName>
       <TimeZone>UTC</TimeZone>
     </component>
   </settings>
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
       <InputLocale>en-US</InputLocale>
-      <SystemLocale>en-US</SystemLocale>
       <UserLocale>en-US</UserLocale>
     </component>
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
@@ -53,6 +59,8 @@
         <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
         <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
         <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
       </OOBE>
       <TimeZone>UTC</TimeZone>
     </component>

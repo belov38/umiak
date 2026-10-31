@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { PveApiError, type PveClient, QgaTimeoutError } from "./pve-api.ts";
+import {
+	isConnectionError,
+	PveApiError,
+	type PveClient,
+	QgaTimeoutError,
+} from "./pve-api.ts";
 
 export interface ExecResult {
 	exitCode: number;
@@ -199,11 +204,15 @@ export class Qga {
 			try {
 				st = await this.#api.get(this.#path(vmid, "exec-status"), { pid });
 			} catch (err) {
-				// Polling on after a timeout or while the agent restarts is harmless: the status of a
-				// running process is not consumed, and a lost one shows up as a missing PID. PveApi
-				// giving up on an answer (plain Error, see pve-api.ts) counts as a timeout too.
+				// Polling on after a timeout, a broken connection or while the agent restarts is
+				// harmless: the status of a running process is not consumed, and a lost one shows up
+				// as a missing PID. PveApi giving up on an answer (plain Error, see pve-api.ts) counts
+				// as a timeout too.
 				if (!(err instanceof PveApiError)) {
-					if (!(err instanceof Error) || !CLIENT_TIMEOUT_RE.test(err.message))
+					if (
+						!(err instanceof Error) ||
+						!(CLIENT_TIMEOUT_RE.test(err.message) || isConnectionError(err))
+					)
 						throw err;
 				} else if (/PID \S+ does not exist/.test(err.message)) {
 					// \S+: qemu-ga for Windows prints "PID lld does not exist" (format unexpanded).

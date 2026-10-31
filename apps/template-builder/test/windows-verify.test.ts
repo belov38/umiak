@@ -496,6 +496,8 @@ class WinWorld {
 	forkKeepsName = false;
 	/** Info answers of a fork's first boot that carry the machine id but the old computer name. */
 	forkStaleHostnames = 0;
+	/** Same for A's first boot: setup's interim name before the agent's rename reboot (R16). */
+	firstStaleHostnames = 0;
 	frozen = false;
 	onExec?: (vmid: number, cmd: string[]) => void;
 
@@ -618,7 +620,7 @@ class WinWorld {
 			notReady: 0,
 			secretEnv: undefined,
 			forked: false,
-			staleHostname: 0,
+			staleHostname: what === "create" ? this.firstStaleHostnames : 0,
 		});
 		this.log.push(`${what} ${vmid}`);
 		return { vmid, mac: "BC:24:11:00:00:01", node: "pve", disks: [] };
@@ -773,10 +775,12 @@ class WinWorld {
 					vm.notReady--;
 					return { exitCode: 1, stdout: "", stderr: "unavailable" };
 				}
+				const stale = vm.staleHostname > 0;
+				if (stale) vm.staleHostname--;
 				return ok({
 					version: "0.5.0",
 					machineId: vm.disk.identity,
-					hostname: computerNameFor(vm.disk.identity),
+					hostname: stale ? "SBXTEMPLATE" : computerNameFor(vm.disk.identity),
 					readiness: [{ name: "identity", state: "PHASE_STATE_READY" }],
 					...(vm.disk.claimed ? { claim: { sandboxId: "sbx-verify" } } : {}),
 				});
@@ -1152,6 +1156,20 @@ describe("verifyWindows", () => {
 		expect(ready?.evidence).toContain(`hostname ${computerNameFor(UUID_B)}`);
 	});
 
+	it("the first boot is ready only once the agent renamed the machine (R16)", async () => {
+		const { w, deps } = setup();
+		w.firstStaleHostnames = 3;
+		const v = await verifyWindows(deps, manifest(), {});
+		expect(failed(v.checks)).toEqual([]);
+		const ready = v.checks.find((c) => c.id === "agent_ready");
+		expect(ready?.evidence).toContain(`hostname ${computerNameFor(UUID_A)}`);
+		const vm = w.execs.filter((e) => e.vmid === 501);
+		// No Info answer with the interim name ends the wait: three stale answers were polled.
+		expect(
+			vm.filter((e) => e.cmd.includes("sbx.agent.v1.System/Info")).length,
+		).toBeGreaterThan(3);
+	});
+
 	it("a thaw is attempted when the freeze call threw", async () => {
 		const { w, deps } = setup();
 		let thaws = 0;
@@ -1422,6 +1440,7 @@ Write-Output "capture $($r.Code)"
 			"bcd",
 			"winre_off",
 			"codepage",
+			"firstboot_log",
 			"npm_prefix",
 			"ipv4",
 			"dns",
@@ -1437,6 +1456,136 @@ Write-Output "capture $($r.Code)"
 		expect(t).toMatch(/'TOOLS '/);
 		expect(t).toMatch(/'LICENSE '/);
 		expect(t).toMatch(/'FACTS '/);
+	});
+
+	/** Runs `body` after loading the named functions of verify.ps1 (StrictMode on). */
+	const runFunctions = (names: string[], body: string) => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-verify-ps1-"));
+		try {
+			const script = join(dir, "fn.ps1");
+			writeFileSync(
+				script,
+				`Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$null, [ref]$null)
+$want = @(${names.map((n) => `'${n}'`).join(", ")})
+foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+  if ($f.Name -in $want) { . ([scriptblock]::Create($f.Extent.Text)) }
+}
+$SetupBoots = 2
+${body}
+`,
+			);
+			const r = spawnSync(
+				PWSH,
+				["-NoProfile", "-NonInteractive", "-File", script, VERIFY_PS1, dir],
+				{ encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } },
+			);
+			return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	};
+
+	it("first_boot_reboots: setup's boots plus one planned restart by sbx-agent.exe (R16)", () => {
+		const r = runFunctions(
+			["Get-RestartProcessName", "Get-FirstBootVerdict"],
+			String.raw`$agent = Get-RestartProcessName 'C:\Program Files\sbx-agent\versions\0.5.0\sbx-agent.exe (SBXTEMPLATE)'
+Write-Output "name $agent|$(Get-RestartProcessName 'C:\Program Files (x86)\x\Setup.EXE')"
+foreach ($c in @(
+    @{ b = 2; by = @() }, @{ b = 3; by = @() }, @{ b = 3; by = @($agent) }, @{ b = 4; by = @($agent) },
+    @{ b = 4; by = @($agent, $agent) }, @{ b = 1; by = @($agent) }, @{ b = 0; by = @() }, @{ b = 3; by = @('winlogon.exe') }
+)) {
+  $v = Get-FirstBootVerdict $c.b ([string[]]$c.by)
+  Write-Output "$($c.b) $($c.by.Count) $($v.Ok)"
+}
+Write-Output (Get-FirstBootVerdict 3 @($agent)).Evidence`,
+		);
+		expect(r.stderr).toBe("");
+		const lines = r.stdout.trim().split(/\r?\n/);
+		expect(lines.slice(0, 9)).toEqual([
+			"name sbx-agent.exe|Setup.EXE",
+			"2 0 True",
+			"3 0 False",
+			"3 1 True",
+			"4 1 False",
+			"4 2 False",
+			"1 1 True",
+			"0 0 False",
+			"3 1 False",
+		]);
+		expect(lines[9]).toMatch(/3 boots since the seal/);
+		expect(lines[9]).toMatch(/sbx-agent\.exe/);
+	});
+
+	it("users: the salted hash of the LSA secret works with an empty salt (null-safe)", () => {
+		const secret = "p@ss-\u00e9";
+		const bytes = Buffer.from(secret, "utf16le");
+		const r = runFunctions(
+			["Get-SaltedHash"],
+			`$s = [Convert]::FromHexString('${bytes.toString("hex")}')
+Write-Output (Get-SaltedHash '' $s)
+Write-Output (Get-SaltedHash $null $s)
+Write-Output (Get-SaltedHash '0a0b' $s)
+Write-Output (Get-SaltedHash '' ([byte[]]::new(0)))`,
+		);
+		expect(r.stderr).toBe("");
+		expect(r.stdout.trim().split(/\r?\n/)).toEqual([
+			createHash("sha256").update(bytes).digest("hex"),
+			createHash("sha256").update(bytes).digest("hex"),
+			createHash("sha256")
+				.update(Buffer.concat([Buffer.from([10, 11]), bytes]))
+				.digest("hex"),
+			createHash("sha256").update(Buffer.alloc(0)).digest("hex"),
+		]);
+	});
+
+	it("firstboot_log: present and ends with done", () => {
+		const r = runFunctions(
+			["Report", "Test-FirstBootLog"],
+			`$d = $args[1]
+Test-FirstBootLog (Join-Path $d 'missing.log')
+Set-Content -LiteralPath (Join-Path $d 'ok.log') -Value @('[10:00:00] start', '[10:00:01] ERROR service Spooler: boom', '[10:00:02] done', '')
+Test-FirstBootLog (Join-Path $d 'ok.log')
+Set-Content -LiteralPath (Join-Path $d 'cut.log') -Value @('[10:00:00] start', '[10:00:01] service WinRM: Start=4, Stopped')
+Test-FirstBootLog (Join-Path $d 'cut.log')
+Set-Content -LiteralPath (Join-Path $d 'empty.log') -Value @()
+Test-FirstBootLog (Join-Path $d 'empty.log')`,
+		);
+		expect(r.stderr).toBe("");
+		const lines = r.stdout.trim().split(/\r?\n/);
+		expect(lines).toHaveLength(4);
+		expect(lines[0]).toMatch(/^CHECK firstboot_log FAIL .*missing/);
+		expect(lines[1]).toMatch(/^CHECK firstboot_log PASS .*ERROR lines: 1/);
+		expect(lines[2]).toMatch(/^CHECK firstboot_log FAIL .*WinRM/);
+		expect(lines[3]).toMatch(/^CHECK firstboot_log FAIL /);
+	});
+
+	it("firewall_rules judges the active store when the policy ignores local rules", () => {
+		const t = text();
+		const fw = t.slice(t.indexOf("function Test-Firewall"));
+		expect(t).toMatch(
+			/^\$FirewallPolicy = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\WindowsFirewall'$/m,
+		);
+		expect(fw).toMatch(
+			/@\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)[^\n]*\$FirewallPolicy\\\$p" 'AllowLocalPolicyMerge'/,
+		);
+		expect(fw).toMatch(
+			/Get-NetFirewallRule -PolicyStore ActiveStore -Direction Inbound -Action Allow -Enabled True/,
+		);
+		// Without the policy: the local rules as before.
+		expect(fw).toMatch(
+			/Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction/,
+		);
+	});
+
+	it("codepage checks the registry and the active code pages", () => {
+		const t = text();
+		expect(t).toMatch(/GetACP\(\)/);
+		expect(t).toMatch(/GetOEMCP\(\)/);
+		expect(t).toMatch(
+			/Report codepage \(\$acp -eq '65001' -and \$oem -eq '65001' -and/,
+		);
 	});
 
 	it("prints only a hash of the LSA secret, never the value", () => {

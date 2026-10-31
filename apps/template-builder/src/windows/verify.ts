@@ -24,7 +24,7 @@ import {
 } from "../verify.ts";
 
 // `sbx-tpl verify` of a Windows template (spec S9 section 15): clone A from the template boots
-// through specialize; guest checks (verify.ps1 over QGA), agent checks through the sbx-agent CLI,
+// through specialize, OOBE and the agent's rename reboot (R16); guest checks (verify.ps1 over QGA), agent checks through the sbx-agent CLI,
 // secrets, VSS; then an S1 snapshot of A, A shut down, fork B with a new identity (one rename
 // reboot, data and password kept), a normal and a hard restart of B. Everything is removed at the
 // end. At most one Windows VM runs at a time (4 GB each, Decision 9).
@@ -609,8 +609,9 @@ export async function verifyWindows(
 		startedAt: number,
 		label: string,
 	): Promise<number> => {
-		// A fork also renames the machine: its machine id alone is not enough (spec 11.2 p.4).
-		const wantName = label.startsWith("fork_") ? computerNameFor(c.uuid) : "";
+		// The machine id alone is not enough: the first boot of a clone (setup overwrites the
+		// specialize name, R16) and of a fork end with the agent's rename reboot (spec 11.2 p.8).
+		const wantName = computerNameFor(c.uuid);
 		const deadline = startedAt + bootTimeoutMs;
 		let last = "no answer";
 		for (;;) {
@@ -619,8 +620,7 @@ export async function verifyWindows(
 				const r = await call(c, INFO, {});
 				if (r.json !== undefined) {
 					const st = infoState(r.json);
-					const nameOk =
-						wantName === "" || st.hostname.toUpperCase() === wantName;
+					const nameOk = st.hostname.toUpperCase() === wantName;
 					if (
 						sameId(st.machineId, c.uuid) &&
 						isReadyState(st.identity) &&
@@ -631,7 +631,7 @@ export async function verifyWindows(
 							pass(
 								`${label}agent_ready`,
 								true,
-								`machine_id ${st.machineId}${wantName ? `, hostname ${st.hostname}` : ""}, identity ready ${at - startedAt} ms after start`,
+								`machine_id ${st.machineId}, hostname ${st.hostname}, identity ready ${at - startedAt} ms after start`,
 							),
 						);
 						return at;
@@ -832,7 +832,7 @@ export async function verifyWindows(
 		};
 		cloneA = A;
 		await reserve(A);
-		step(`booting VM ${A.vmid} (specialize, OOBE)`);
+		step(`booting VM ${A.vmid} (specialize, OOBE, the rename reboot)`);
 		const firstStart = now();
 		boot.first = await startClone(A, "");
 		let firstReadyAt = firstStart + (boot.first.startToAgentActiveMs ?? 0);

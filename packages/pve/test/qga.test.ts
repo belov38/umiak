@@ -112,11 +112,42 @@ describe("Qga.exec", () => {
 	it("still fails on other plain errors while polling", async () => {
 		const api = new ScriptedPve({
 			exec: [{ pid: 42 }],
-			"exec-status": [new Error("read ECONNRESET")],
+			"exec-status": [new Error("boom")],
 		});
 		await expect(new Qga(api, "pve").exec(500, ["true"])).rejects.toThrow(
-			"ECONNRESET",
+			"boom",
 		);
+	});
+
+	it("keeps polling after a broken connection of exec-status (flaky uplink)", async () => {
+		const conn = (code: string, msg: string) =>
+			Object.assign(new Error(msg), { code });
+		const api = new ScriptedPve({
+			exec: [{ pid: 42 }],
+			"exec-status": [
+				running,
+				conn("ECONNRESET", "socket hang up"),
+				conn("ETIMEDOUT", "connect ETIMEDOUT 100.64.10.2:8006"),
+				done,
+			],
+		});
+		const r = await new Qga(api, "pve").exec(500, ["true"]);
+		expect(r).toEqual({ exitCode: 3, stdout: "out", stderr: "err" });
+		expect(api.calls.filter((c) => c === "POST exec")).toHaveLength(1);
+	});
+
+	it("reports a lost exit status when the PID vanished after a broken connection", async () => {
+		const api = new ScriptedPve({
+			exec: [{ pid: 42 }],
+			"exec-status": [
+				Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+				pidGone,
+			],
+		});
+		const err = await new Qga(api, "pve")
+			.exec(500, ["true"])
+			.catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(QgaExecStatusLostError);
 	});
 
 	it("treats an agent restart during exec-status like a timeout", async () => {

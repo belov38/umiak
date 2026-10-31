@@ -2,10 +2,11 @@
 # 90-cleanup (spec S9 section 8.8): update services off, component store
 # (after the recipe's reboot: pending servicing makes DISM fail with 0x800f0806;
 # DISM must not leave a reboot pending either, sysprep follows without one),
-# downloads and caches, answer files with the build password, event logs,
-# TRIM, then a self-check. The builder wrote C:\ProgramData\sbx-template\build.json
-# right before this step (it stays) and removes C:\sbx-build after reading
-# this log; it runs `sbx-agent seal` and sysprep itself.
+# downloads and caches, answer files with the build password, the clone's
+# SetupComplete.cmd and firstboot.ps1, event logs, TRIM, then a self-check.
+# The builder wrote C:\ProgramData\sbx-template\build.json right before this
+# step (it stays) and removes C:\sbx-build after reading this log; it runs
+# `sbx-agent seal` and sysprep itself.
 . (Join-Path $PSScriptRoot '..\lib.ps1')
 
 # Removes a path; files in use (Temp) are reported, not fatal.
@@ -91,10 +92,23 @@ foreach ($p in @(
         (Join-Path $env:SystemRoot 'Panther\Unattend'),
         (Join-Path $env:SystemRoot 'System32\Sysprep\unattend*.xml'),
         (Join-Path $env:SystemRoot 'System32\Sysprep\Panther\unattend*.xml'),
-        # It would run again at the end of every clone's setup.
+        # The build one would run again at the end of every clone's setup.
         (Join-Path $env:SystemRoot 'Setup\Scripts\SetupComplete.cmd'))) {
     Remove-Leftover $p
 }
+
+# --- Clone first boot: SetupComplete.cmd runs firstboot.ps1 (spec 10.2) ---
+# Sysprep resets services, code pages, BCD, WinRE, NetBIOS and firewall rules.
+$setupComplete = Join-Path $env:SystemRoot 'Setup\Scripts\SetupComplete.cmd'
+$firstBoot = Join-Path $env:ProgramData 'sbx-template\firstboot.ps1'
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $setupComplete) | Out-Null
+# cmd mis-parses files with bare LF line ends.
+$cmdText = (Get-Content -LiteralPath (Join-Path $SbxFilesDir 'SetupComplete-clone.cmd') -Raw) -replace "`r?`n", "`r`n"
+Set-Content -LiteralPath $setupComplete -Value $cmdText -Encoding Ascii -NoNewline
+Write-BuildLog "$setupComplete <- files\SetupComplete-clone.cmd"
+Copy-BuildFile -Name 'firstboot.ps1' -Destination $firstBoot
+# Runs as SYSTEM: only SYSTEM and Administrators may change it.
+Invoke-Native -FilePath icacls.exe -ArgumentList @($firstBoot, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '/grant:r', '*S-1-5-32-544:F', '/grant:r', '*S-1-5-32-545:R')
 
 # --- Event logs (last, after everything above logged) ---
 # Get-NativeOutput already returns an array (return , $out); @() would nest it.
@@ -157,6 +171,12 @@ if ($bde.Conversion -ne '' -and ($bde.Conversion -ne 'Fully Decrypted' -or $bde.
     $problems.Add("BitLocker C: is '$($bde.Conversion)', '$($bde.Protection)'")
 }
 if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\Sysprep\sbx-unattend.xml'))) { $problems.Add('sbx-unattend.xml is missing') }
+foreach ($f in @($setupComplete, $firstBoot)) {
+    if (-not (Test-Path -LiteralPath $f)) { $problems.Add("$f is missing") }
+}
+if ((Test-Path -LiteralPath $setupComplete) -and -not (Select-String -LiteralPath $setupComplete -SimpleMatch 'firstboot.ps1' -Quiet)) {
+    $problems.Add("$setupComplete does not run firstboot.ps1")
+}
 # Informative: sysprep /generalize fails (0x80073cf2) on a package installed for
 # a user but not provisioned; setuperr.log then names it.
 try {

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	isConnectionError,
 	PveApi,
 	PveApiError,
 	PveTaskError,
@@ -173,6 +174,53 @@ describe("PveApi", () => {
 			api(url).get("/nodes/pve/qemu/500/agent/exec-status", { pid: 1 }),
 		).rejects.toThrow();
 		expect(n).toBe(1);
+	});
+
+	it("repeats a guest agent GET other than exec-status after a connection error, never a POST", async () => {
+		const counts: Record<string, number> = {};
+		const url = await serve((req, _b, res) => {
+			const k = `${req.method} ${req.url?.split("?")[0]}`;
+			counts[k] = (counts[k] ?? 0) + 1;
+			if (counts[k] === 1) req.socket.destroy();
+			else json(res, 200, { data: { result: [] } });
+		});
+		const a = api(url);
+		expect(
+			await a.get("/nodes/pve/qemu/500/agent/network-get-interfaces"),
+		).toEqual({ result: [] });
+		await expect(
+			a.post("/nodes/pve/qemu/500/agent/exec", { command: "x" }),
+		).rejects.toThrow(/socket hang up|ECONNRESET/);
+		expect(counts).toEqual({
+			"GET /api2/json/nodes/pve/qemu/500/agent/network-get-interfaces": 2,
+			"POST /api2/json/nodes/pve/qemu/500/agent/exec": 1,
+		});
+		expect(a.retryCount).toBe(1);
+	});
+
+	it("isConnectionError: reset, hang up, timeouts and unreachable hosts, nothing else", () => {
+		const withCode = (code: string, msg = code) =>
+			Object.assign(new Error(msg), { code });
+		for (const e of [
+			withCode("ECONNRESET", "socket hang up"),
+			withCode("ECONNRESET", "read ECONNRESET"),
+			withCode("EPIPE"),
+			withCode("ETIMEDOUT"),
+			withCode("ECONNREFUSED"),
+			withCode("EHOSTUNREACH"),
+			withCode("ENETUNREACH"),
+			withCode("EAI_AGAIN"),
+			new Error("socket hang up"),
+		])
+			expect(isConnectionError(e), e.message).toBe(true);
+		for (const e of [
+			new Error("boom"),
+			new PveApiError(500, "GET /x: socket hang up"),
+			new PveApiError(503, "GET /x: service unavailable"),
+			"socket hang up",
+			null,
+		])
+			expect(isConnectionError(e), String(e)).toBe(false);
 	});
 
 	it("retries a lock timeout of a non-agent POST but not other timeouts", async () => {

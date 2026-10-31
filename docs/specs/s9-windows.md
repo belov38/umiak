@@ -214,12 +214,12 @@ build/
 ### 8.1 Система и службы (`00-base`)
 
 - **Политики до сети:** Windows Update (`NoAutoUpdate=1`; серверы Windows Update не блокируются, потому что из них ставится OpenSSH FoD в `10-system`; служба `wuauserv` выключается в `90-cleanup`), Store (`AutoDownload=2`, без автообновлений приложений), consumer features и CloudContent выключены, Delivery Optimization выключен, телеметрия на минимальном уровне редакции (0 для Enterprise и Server, 1 для Pro), Error Reporting выключен, Edge без first-run и без фоновых обновлений, Copilot, Widgets, Spotlight, советы и рекомендации Start выключены, OneDrive не ставится.
-- **Службы выключены** (Disabled): `wuauserv`, `UsoSvc`, `DoSvc`, `WSearch`, `SysMain`, `DiagTrack`, `dmwappushservice`, `MapsBroker`, `lfsvc`, `WerSvc`, `RemoteRegistry`, `Spooler`, `SSDPSRV`, `FDResPub`, `LanmanServer` (нет SMB-сервера и порта 445), `TermService` (RDP), `WinRM`. `WaaSMedicSvc` защищён от изменения онлайн и выключается offline-этапом (§10.3). Запланированные задачи обслуживания (дефрагментация, Compatibility Appraiser, CEIP, автоматическое обслуживание) выключены.
+- **Службы выключены** (Disabled): `wuauserv`, `UsoSvc`, `DoSvc`, `WSearch`, `SysMain`, `DiagTrack`, `dmwappushservice`, `MapsBroker`, `lfsvc`, `WerSvc`, `RemoteRegistry`, `Spooler`, `SSDPSRV`, `FDResPub`, `LanmanServer` (нет SMB-сервера и порта 445), `TermService` (RDP), `WinRM`, `CDPSvc` (порт 5040). `WaaSMedicSvc` защищён от изменения онлайн и выключается offline-этапом (§10.3). Запланированные задачи обслуживания (дефрагментация, Compatibility Appraiser, CEIP, автоматическое обслуживание) выключены.
 - **Defender полностью выключен** offline-этапом (§10.3) — службы и драйверы `WinDefend`, `WdNisSvc`, `Sense`, `WdBoot`, `WdFilter`, `WdNisDrv` с `Start=4`. Движок не запускается, поэтому Tamper Protection не возвращается (проверено Ильёй на 9001). Почему выключен: граница доверия — VM, Windows Update выключен, а сканирование заметно тормозит `npm install` и сборки.
 - **Питание и загрузка:** схема High performance, сон и отключение монитора — никогда, спящий режим гостя выключен (`powercfg /h off`, нет `hiberfil.sys`), Fast Startup выключен. Для BCD: `bootstatuspolicy ignoreallfailures`, `recoveryenabled no`; WinRE выключен (`reagentc /disable`), раздела восстановления нет. Это аналог `GRUB_RECORDFAIL_TIMEOUT=0`: жёсткая остановка не должна приводить к Automatic Repair.
 - **Память и секреты** (решение master, §12.8): pagefile включён фиксированного размера (2 GiB **[S9]**: commit = RAM + pagefile, а время очистки при выключении ограничено), `ClearPageFileAtShutdown=1`, дампы памяти выключены (`CrashDumpEnabled=0`). Выключены System Restore и запланированные теневые копии; службы VSS (`VSS`, `swprv`) остаются в режиме Manual: на них работает `fsfreeze` QGA (§12.10).
 - **Прочее:** часовой пояс UTC, локаль и раскладка en-US, системная кодовая страница UTF-8 (ACP/OEMCP 65001), `LongPathsEnabled=1`, Developer Mode (символические ссылки без повышения), VBS и HVCI выключены (с `cpu: host` и nested virt на хосте Windows иначе включает Hyper-V под собой и замедляется). Для w32time: NTP `time.windows.com`, `MaxPosPhaseCorrection` и `MaxNegPhaseCorrection` = `0xFFFFFFFF` (большие скачки после пробуждения, §14.3).
-- **Firewall включён** во всех профилях: входящие запрещены, все предустановленные разрешающие входящие правила выключены, уведомления о новых слушателях выключены (`NotifyOnListen=False`, иначе диалог «разрешить доступ» мешает computer-use). Loopback firewall не фильтрует, поэтому CONNECT агента и sshd на loopback работают. Дальнейшая защита — firewall Proxmox (`policy_in=DROP`, S1 §4.4).
+- **Firewall включён** во всех профилях: входящие запрещены, все предустановленные разрешающие входящие правила выключены, локальные правила игнорируются политикой (`AllowLocalPolicyMerge=0` в `HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<Profile>` для Domain/Private/Public: Setup и регистрация Appx на клоне снова включают правила), уведомления о новых слушателях выключены (`NotifyOnListen=False`, иначе диалог «разрешить доступ» мешает computer-use). Loopback firewall не фильтрует, поэтому CONNECT агента и sshd на loopback работают. Дальнейшая защита — firewall Proxmox (`policy_in=DROP`, S1 §4.4).
 - **Appx (`windows`):** удалить provisioned-пакеты, которые не нужны sandbox и ломают sysprep при обновлении (Teams, новый Outlook, Clipchamp, News, Weather, Xbox, Solitaire, Bing, Feedback Hub, Get Help, Office Hub, To Do, Copilot и т.п.; список — `files/appx-remove.txt`). Оставить Edge, Terminal, Notepad, Calculator, Paint, Snipping Tool, Photos, Store и App Installer (`winget` для пользователя). В профиле `user` до sysprep никто не входит, поэтому per-user MSIX, ломающих sysprep (`0x80073cf2`, опыт 9001), нет.
 
 ### 8.2 Пользователи и вход (`10-system`)
@@ -302,8 +302,10 @@ build/
 ### 10.2 `sbx-unattend.xml` (ответы для клонов)
 
 - `generalize`: `PersistAllDeviceInstalls=true` (драйверы virtio не переустанавливаются, specialize короче), `SkipRearm=0`.
-- `specialize`: `RunSynchronous` → `"C:\Program Files\sbx-agent\current\sbx-agent.exe" identity apply --specialize` (§11.2), затем `reg.exe add` `Start=4` для `dmwappushservice` (§10.3). Имя компьютера ставит агент; если для этого нужна заглушка `ComputerName` в Shell-Setup или определённый порядок компонентов, это выбирает исполнитель. Требование проверяется §15 п. 2: machine пула становится warm с именем `SBX<12 hex>` без перезагрузок сверх тех, что делает сам setup.
-- `oobeSystem`: все экраны OOBE скрыты (`HideEULAPage`, `HideOEMRegistrationScreen`, `HideOnlineAccountScreens`, `HideWirelessSetupInOOBE`, `ProtectYourPC=3`), локаль en-US, UTC. Новых учётных записей нет (`user` уже существует), autologon здесь не задаётся (его пишет агент).
+- `specialize`: `RunSynchronous` → `"C:\Program Files\sbx-agent\current\sbx-agent.exe" identity apply --specialize` (§11.2), затем `reg.exe add` `Start=4` для `dmwappushservice` (§10.3). В Shell-Setup — заглушка `ComputerName=SBXTEMPLATE`: Setup всегда перезаписывает имя, заданное в specialize, поэтому `SBX<12 hex>` ставит агент одной перезагрузкой после setup (R16).
+- `oobeSystem`: все экраны OOBE скрыты (`HideEULAPage`, `HideLocalAccountScreen`, `HideOEMRegistrationScreen`, `HideOnlineAccountScreens`, `HideWirelessSetupInOOBE`, `ProtectYourPC=3`) и пропущены (`SkipMachineOOBE`, `SkipUserOOBE`: без них OOBE останавливается на «Who's going to use this device?»), локаль en-US, UTC. Новых учётных записей нет (`user` уже существует), autologon здесь не задаётся (его пишет агент).
+- `SystemLocale` нет ни в одном проходе: он переписывает кодовые страницы.
+- **Скрипт первой загрузки клона.** Generalize, specialize и OOBE сбрасывают часть настроек образа. `90-cleanup` ставит `C:\Windows\Setup\Scripts\SetupComplete.cmd` (`files/SetupComplete-clone.cmd`) и `C:\ProgramData\sbx-template\firstboot.ps1` (ACL: SYSTEM и Administrators — полный доступ, Users — чтение). Setup запускает его от SYSTEM после OOBE, до первого входа: службы §8.1 (список `lib.ps1`, `CDPSvc`, `dmwappushservice`) → Disabled, ACP/OEMCP/MACCP = 65001 (действуют со следующей загрузки — перезагрузки на переименование), `reagentc /disable`, BCD `recoveryenabled no` и `bootstatuspolicy ignoreallfailures`, NetBIOS выключен, политика firewall `AllowLocalPolicyMerge=0`. Ошибки только пишутся в `C:\ProgramData\sbx-template\firstboot.log` (без секретов, последняя строка `done`), выход всегда 0.
 - Файл лежит в `C:\Windows\System32\Sysprep\` и паролей не содержит. После первой загрузки setup сам заменяет копии ответов в `Panther`; агент удаляет `sbx-unattend.xml` на клоне в `identity apply`.
 
 ### 10.3 Offline-этап WinPE
@@ -322,10 +324,11 @@ build/
 ### 11.1 Machine пула (из шаблона)
 
 1. Specialize: `identity apply --specialize` (§11.2), без перезагрузки от агента.
-2. OOBE по ответам, без экранов.
-3. Обычная загрузка: startup-скрипт `sbx-agent early` (идентичность совпадает, очистка секретов), служба `sbx-agent` запускает sshd, подключается к туннелю.
-4. `windows`: autologon `user` → первый вход создаёт профиль → `\sbx\session` запускает `sbx-session` → фаза `desktop: ready` (§13). *Как сделано: только autologon и профиль; helper и фаза `desktop` — S10.*
-5. Фаза `pool_ready` (§12.13) → S6 переводит machine в спящий режим (§14). *Не реализуется в MVP (решение Ильи 2026-10-31): после готовности агента — сразу claim (холодный create).*
+2. OOBE по ответам, без экранов (`SkipMachineOOBE`, `SkipUserOOBE`); `SetupComplete.cmd` → `firstboot.ps1` (§10.2).
+3. Setup перезаписал имя на `SBXTEMPLATE`: агент переименовывает machine в `SBX<12 hex>` одной перезагрузкой (§11.2 п. 8, R16).
+4. Обычная загрузка: startup-скрипт `sbx-agent early` (идентичность совпадает, очистка секретов), служба `sbx-agent` запускает sshd, подключается к туннелю.
+5. `windows`: autologon `user` → первый вход создаёт профиль → `\sbx\session` запускает `sbx-session` → фаза `desktop: ready` (§13). *Как сделано: только autologon и профиль; helper и фаза `desktop` — S10.*
+6. Фаза `pool_ready` (§12.13) → S6 переводит machine в спящий режим (§14). *Не реализуется в MVP (решение Ильи 2026-10-31): после готовности агента — сразу claim (холодный create).*
 
 ### 11.2 `identity apply`
 
@@ -338,7 +341,7 @@ build/
 5. **Только для клона шаблона** (`identity.json` нет, то есть первая загрузка после `seal`): новый случайный пароль `user` (32 символа), `L$sbx_user`, у `windows` — ещё `DefaultPassword` и ключи Winlogon (`AutoAdminLogon=1`, `DefaultUserName=user`, `DefaultDomainName=.`). Профиля `user` в этот момент ещё нет, поэтому ничего не теряется. **Fork и VM из saved snapshot пароль не меняют:** сброс пароля администратором делает недоступными данные DPAPI пользователя (Credential Manager, токены `gh`, cookies Edge), а fork — копия той же машины. LSA secret копируется вместе с диском, autologon и токены агента продолжают работать.
 6. Удалить `C:\Windows\System32\Sysprep\sbx-unattend.xml`, если он ещё есть.
 7. Записать `identity.json` с `resetPending` (FlushFileBuffers).
-8. Если действующее имя (`ActiveComputerName`) ≠ новое и это не режим `--specialize` — перезагрузка (`InitiateShutdownW`, причина «planned»). Fork и VM из saved snapshot поэтому загружаются на одну перезагрузку дольше (решение master: +15–25 s).
+8. Если действующее имя (`ActiveComputerName`) ≠ новое и это не режим `--specialize` — перезагрузка (`InitiateShutdownW`, причина «planned»). Fork и VM из saved snapshot поэтому загружаются на одну перезагрузку дольше (решение master: +15–25 s). Клон шаблона тоже: Setup после specialize всегда ставит имя из ответов (`SBXTEMPLATE`), поэтому на его первой загрузке агент делает ровно одну такую перезагрузку после setup (R16, ~25 s).
 
 SID машины не меняется: домена нет, а дубликат machine SID вне домена ни на что не влияет. Следствие для будущего KMS: fork наследует CMID (§17).
 
@@ -585,9 +588,9 @@ Stop пользовательской sandbox через `suspend --todisk` со
 `verify` создаёт machine из шаблона примитивом S1 (тестовый `smbios1` с `family`), загружает её (specialize), проверяет через QGA и удаляет со следами (включая LV состояния спящего режима, §18.1). Команды от `user` выполняются через `sbx-agent exec --user user` (§12.14), то есть тем же путём, что команды агента.
 
 1. ОС: редакция и сборка = рецепт/манифест; `Get-ComputerInfo`.
-2. **Specialize:** имя `SBX<12 hex>` тестового `machineId`; `MachineGuid` = `machineId`; число перезагрузок первой загрузки не больше, чем у setup без агента (по журналу событий, ID 6005/6006/1074); `sbx-unattend.xml` удалён; в `Panther` нет пароля.
+2. **Specialize:** имя `SBX<12 hex>` тестового `machineId`; `MachineGuid` = `machineId`; число загрузок первой загрузки не больше, чем у setup без агента, плюс одна плановая перезагрузка `sbx-agent.exe` на переименование (R16; по журналу событий, ID 6005/1074); `firstboot.log` кончается `done`; `sbx-unattend.xml` удалён; в `Panther` нет пароля.
 3. **Сокеты:** TCP-слушатели только из allow-list рецепта: `127.0.0.1:22`, `[::1]:22`, 135 и динамические RPC 49664–49670 (`lsass`, `wininit`, `services`, `svchost`, `spoolsv`, `System`). Портов 3389, 5985, 5986, 445, 139, 5357, 7680 нет. UDP: DHCP-клиент, mDNS и LLMNR выключены.
-4. **Firewall:** включён во всех профилях, входящие по умолчанию запрещены, ни одного включённого разрешающего входящего правила, `NotifyOnListen=False`.
+4. **Firewall:** включён во всех профилях, входящие по умолчанию запрещены, ни одного включённого разрешающего входящего правила (при `AllowLocalPolicyMerge=0` во всех трёх профилях — в действующих правилах, `-PolicyStore ActiveStore`), `NotifyOnListen=False`.
 5. **sshd:** `sshd -T` — `passwordauthentication no`, `trustedusercakeys`, оба `listenaddress`; служба работает (её запустил агент); host keys созданы в эту загрузку; `DefaultShell` = pwsh 7. Вход по сертификату с тестовым CA: `ssh -i <key> -o CertificateFile=<cert> user@127.0.0.1 "$env:SBX"` (CA подкладывается через `sbx_user_ca.pub` на время проверки).
 6. **Агент:** `sbx-agent doctor --json` — версия, `identity` ready, URL туннеля из `family`, служба Running, failure actions заданы, startup-скрипт отработал (`early.json`), фазы по профилю.
 7. **Пользователи и вход:** `user` в Administrators, пароль бессрочный, LSA secret есть; Administrator и Guest выключены; UAC: `EnableLUA=1`, `ConsentPromptBehaviorAdmin=0`, `PromptOnSecureDesktop=0`. `windows`: сессия `user` активна (`query user`), `LogonUI.exe` не работает, фаза `desktop` = ready.
@@ -806,8 +809,9 @@ packages/pve/, services/node-agent/   + §18.1
 20. **ACL каталогов агента:** `state\` — защищённый DACL только SYSTEM, `run\` — SYSTEM + Administrators; ставятся до чтения `early.json` и открытия сокетов. `early.json` с владельцем не SYSTEM/Administrators игнорируется.
 21. **Загрузка клона:** если служба видела идущий Windows Setup, после его конца она сразу делает boot step сама, без 60 s ожидания `early.json` (на первой загрузке клона startup-скрипт отработал во время Setup и ничего не сделал). Ошибка boot step → выход 75 и повтор через failure actions. Пока идентичность не готова, сокеты не открыты.
 22. **Шаги сборки:** `00-base`…`90-cleanup` в `infra/templates/_windows/steps/`; `60-desktop` — только экран блокировки, первый вход и Default User hive. Шаг `10-system` ставит OpenSSH только из FoD (`openssh.source = inbox`), запасной `github` не реализован.
+23. **Первая загрузка клона** (§10.2, §11.1): `SkipMachineOOBE`/`SkipUserOOBE`, заглушка `ComputerName=SBXTEMPLATE`, без `SystemLocale`; `SetupComplete.cmd` клона запускает `firstboot.ps1`, который возвращает то, что сбросил sysprep (службы, кодовые страницы, BCD, WinRE, NetBIOS, политика firewall). Проверено на клоне 26H2: OOBE проходит, autologon `user` работает; ACP применяется только после перезагрузки на переименование.
 
-### 24.3 Решения координатора (R1–R15)
+### 24.3 Решения координатора (R1–R16)
 
 | | Решение | Что меняет |
 |---|---|---|
@@ -826,6 +830,7 @@ packages/pve/, services/node-agent/   + §18.1
 | R13 | `fork_to_agent_ready` = длительность snapshot + (`cloneFromSnapshot` → start → готовность с новым именем); выключение источника между ними не входит; обе части в отчёте | §16 |
 | R14 | `env --format pwsh`: значения с управляющими символами (или не UTF-8) — `$env:K = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('<b64>'))`, остальные — `$env:K = '<v>'` с удвоенными `'`; `profile.ps1` принимает ровно эти две формы | §8.4, §12.7 |
 | R15 | offline-этап до sysprep (сборка 9 загрузила запечатанный диск): загрузка диска вместо WinPE выключается и повторяется (до 3 попыток), результат проверяется загрузкой диска до sysprep (verify-offline); `dmwappushservice` выключает specialize клона, а не offline-этап | §7 п. 6–7, §10.1, §10.3, §15.2 |
+| R16 | одна перезагрузка агента на переименование на первой загрузке клона (запасной вариант §23): Setup перезаписывает имя из specialize во всех опробованных вариантах; цена ошибки ~25 s на create | §10.2, §11.1, §11.2 п. 8, §15.1 п. 2 |
 
 ### 24.4 Результаты на `pve`
 

@@ -323,26 +323,47 @@ describe("SBX_UNATTEND", () => {
 		]);
 	});
 
-	it("oobeSystem hides every screen, en-US, UTC", () => {
+	it("specialize sets the interim computer name; the agent renames with one reboot (R16)", () => {
+		const doc = parse(SBX_UNATTEND);
+		const shell = component(
+			pass(doc, "specialize"),
+			"Microsoft-Windows-Shell-Setup",
+		);
+		expect(shell.ComputerName).toBe("SBXTEMPLATE");
+		expect(shell.TimeZone).toBe("UTC");
+	});
+
+	it("oobeSystem skips machine and user OOBE, hides every screen, en-US, UTC", () => {
 		const doc = parse(SBX_UNATTEND);
 		const oobe = pass(doc, "oobeSystem");
 		const shell = component(oobe, "Microsoft-Windows-Shell-Setup");
-		expect(shell.OOBE).toMatchObject({
+		expect(shell.OOBE).toEqual({
 			HideEULAPage: "true",
 			HideLocalAccountScreen: "true",
 			HideOEMRegistrationScreen: "true",
 			HideOnlineAccountScreens: "true",
 			HideWirelessSetupInOOBE: "true",
 			ProtectYourPC: "3",
+			SkipMachineOOBE: "true",
+			SkipUserOOBE: "true",
 		});
 		expect(shell.TimeZone).toBe("UTC");
-		expect(
-			component(oobe, "Microsoft-Windows-International-Core"),
-		).toMatchObject({
-			InputLocale: "en-US",
-			SystemLocale: "en-US",
-			UserLocale: "en-US",
-		});
+		// SystemLocale would rewrite the code pages; firstboot.ps1 sets them on the clone.
+		for (const p of ["specialize", "oobeSystem"])
+			expect(
+				component(pass(doc, p), "Microsoft-Windows-International-Core"),
+				p,
+			).toEqual({
+				"@name": "Microsoft-Windows-International-Core",
+				"@processorArchitecture": "amd64",
+				"@publicKeyToken": "31bf3856ad364e35",
+				"@language": "neutral",
+				"@versionScope": "nonSxS",
+				InputLocale: "en-US",
+				UserLocale: "en-US",
+			});
+		expect(SBX_UNATTEND).not.toContain("SystemLocale");
+		expect(SBX_UNATTEND).not.toMatch(/CodePage/i);
 	});
 });
 

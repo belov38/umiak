@@ -60,6 +60,7 @@ const DISABLED_SERVICES = [
 	"LanmanServer",
 	"TermService",
 	"WinRM",
+	"CDPSvc",
 ];
 
 /** Appx packages the image keeps (spec S9 section 8.1) and frameworks they need. */
@@ -163,6 +164,7 @@ describe("windows steps: files", () => {
 			"files/scripts.ini",
 			"files/gpt.ini",
 			"files/sbx-early.cmd",
+			"files/SetupComplete-clone.cmd",
 		])
 			expect(
 				[...read(rel)].every(
@@ -510,8 +512,124 @@ describe("windows steps: build ISO", () => {
 				"build/files/scripts.ini",
 				"build/files/gpt.ini",
 				"build/files/sbx-early.cmd",
+				"build/files/firstboot.ps1",
+				"build/files/SetupComplete-clone.cmd",
 			]),
 		);
+	});
+});
+
+describe("windows steps: clone first boot", () => {
+	it("00-base ignores local firewall rules through the policy of every profile", () => {
+		const s = code(read("steps/00-base.ps1"));
+		expect(s).toMatch(
+			/foreach \(\$p in @\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)\) \{\s*Set-RegValue "\$policies\\WindowsFirewall\\\$p" AllowLocalPolicyMerge 0/,
+		);
+	});
+
+	it("firstboot.ps1 disables the services of lib.ps1, CDPSvc and dmwappushservice", () => {
+		const lib = read("lib.ps1");
+		const want = new Set([
+			...psArray(lib, "SbxDisabledServices"),
+			...psArray(lib, "SbxUpdateServices"),
+			"CDPSvc",
+			"dmwappushservice",
+		]);
+		const fb = read("files/firstboot.ps1");
+		expect(psArray(fb, "Services").sort()).toEqual([...want].sort());
+		expect(psArray(lib, "SbxDisabledServices")).toContain("CDPSvc");
+	});
+
+	it("firstboot.ps1 is self-contained 5.1, restores code pages, BCD, WinRE, NetBIOS, firewall policy", () => {
+		const raw = read("files/firstboot.ps1");
+		const s = code(raw);
+		expect(raw.split(/\r?\n/, 1)[0]).not.toMatch(PWSH7_HEADER);
+		expect(s).not.toMatch(/lib\.ps1/);
+		expect(s).toMatch(
+			/\[string\]\$LogPath = 'C:\\ProgramData\\sbx-template\\firstboot\.log'/,
+		);
+		expect(s).toMatch(/Control\\Nls\\CodePage/);
+		expect(s).toMatch(/@\('ACP', 'OEMCP', 'MACCP'\)[\s\S]*'65001'/);
+		expect(s).toMatch(/reagentc\.exe' @\('\/disable'\)/);
+		expect(s).toMatch(/'\{current\}', 'recoveryenabled', 'no'/);
+		expect(s).toMatch(/'\{current\}', 'bootstatuspolicy', 'ignoreallfailures'/);
+		expect(s).toMatch(/NetbiosOptions/);
+		expect(s).toMatch(/SetTcpipNetbios/);
+		expect(s).toMatch(
+			/@\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)[\s\S]*AllowLocalPolicyMerge/,
+		);
+		// Never fails Setup.
+		expect(s).not.toMatch(/\bexit [1-9]/);
+		expect(s).not.toMatch(/\bthrow\b/);
+		expect(s.trimEnd().split("\n").at(-1)).toBe("exit 0");
+		expect(s).toMatch(/Write-Log 'done'\s*exit 0\s*$/);
+	});
+
+	it("firstboot.ps1 exits 0 and ends its log with done even when every part fails", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sbx-firstboot-"));
+		try {
+			const log = join(dir, "firstboot.log");
+			const r = spawnSync(
+				PWSH,
+				[
+					"-NoProfile",
+					"-NonInteractive",
+					"-File",
+					join(shared, "files/firstboot.ps1"),
+					"-LogPath",
+					log,
+				],
+				{ encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } },
+			);
+			expect(r.status, r.stdout + r.stderr).toBe(0);
+			const lines = readFileSync(log, "utf8").trimEnd().split(/\r?\n/);
+			expect(lines[0]).toMatch(/^\[\d\d:\d\d:\d\d\] start/);
+			expect(lines.at(-1)).toMatch(/^\[\d\d:\d\d:\d\d\] done$/);
+			// Off Windows every part fails, and each failure is logged.
+			expect(lines.some((l) => / ERROR /.test(l))).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("SetupComplete-clone.cmd (CRLF) runs firstboot.ps1 with Windows PowerShell and never fails", () => {
+		const raw = read("files/SetupComplete-clone.cmd");
+		expect(raw.split("\n").every((l) => l === "" || l.endsWith("\r"))).toBe(
+			true,
+		);
+		expect(raw).toMatch(
+			/^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\\ProgramData\\sbx-template\\firstboot\.ps1"\r$/m,
+		);
+		expect(raw.trimEnd().split(/\r?\n/).at(-1)).toBe("exit /b 0");
+	});
+
+	it("90-cleanup replaces the build SetupComplete.cmd with the clone's and installs firstboot.ps1", () => {
+		const s = code(read("steps/90-cleanup.ps1"));
+		const removed = s.indexOf("'Setup\\Scripts\\SetupComplete.cmd'");
+		expect(removed).toBeGreaterThan(0);
+		const install = s.indexOf("SetupComplete-clone.cmd");
+		expect(install).toBeGreaterThan(removed);
+		expect(s.slice(install)).toMatch(
+			/-replace "`r\?`n", "`r`n"[\s\S]*Set-Content -LiteralPath \$setupComplete[^\n]*-Encoding Ascii -NoNewline/,
+		);
+		expect(s).toMatch(
+			/\$setupComplete = Join-Path \$env:SystemRoot 'Setup\\Scripts\\SetupComplete\.cmd'/,
+		);
+		expect(s).toMatch(
+			/\$firstBoot = Join-Path \$env:ProgramData 'sbx-template\\firstboot\.ps1'/,
+		);
+		expect(s).toMatch(
+			/Copy-BuildFile -Name 'firstboot\.ps1' -Destination \$firstBoot/,
+		);
+		expect(s).toMatch(
+			/icacls\.exe -ArgumentList @\(\$firstBoot, '\/inheritance:r', '\/grant:r', '\*S-1-5-18:F', '\/grant:r', '\*S-1-5-32-544:F', '\/grant:r', '\*S-1-5-32-545:R'\)/,
+		);
+		// The self-check sees both.
+		const check = s.slice(
+			s.indexOf("$problems = [Collections.Generic.List[string]]::new()"),
+		);
+		expect(check).toMatch(/\$setupComplete/);
+		expect(check).toMatch(/\$firstBoot/);
 	});
 });
 

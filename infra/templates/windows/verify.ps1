@@ -42,14 +42,18 @@ $BuildJson = Join-Path $env:ProgramData 'sbx-template\build.json'
 $NpmPrefix = Join-Path $env:ProgramData 'npm'
 $UserName = 'user'
 # Boots of a clone's first start without the agent: specialize, then OOBE and the logon.
+# The agent adds one rename reboot after setup (ruling R16).
 $SetupBoots = 2
 # Spec 8.1: $SbxDisabledServices of _windows/lib.ps1 plus dmwappushservice,
 # which the specialize pass of sbx-unattend.xml disables on the clone.
 $DisabledServices = @(
     'wuauserv', 'UsoSvc', 'DoSvc', 'WSearch', 'SysMain', 'DiagTrack',
     'dmwappushservice', 'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',
-    'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM'
+    'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM',
+    'CDPSvc'
 )
+$FirstBootLog = Join-Path $env:ProgramData 'sbx-template\firstboot.log'
+$FirewallPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall'
 $DefenderServices = @('WinDefend', 'WdNisSvc', 'Sense', 'WdBoot', 'WdFilter', 'WdNisDrv')
 $ServicesKey = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 
@@ -172,19 +176,29 @@ function Get-RegValue([string]$Path, [string]$Name) {
     return $p.$Name
 }
 
+# Lower-case hex sha256 of the salt bytes followed by the secret bytes.
+function Get-SaltedHash([string]$SaltHex, [byte[]]$Secret) {
+    # Not `$x = if (...) { [byte[]]::new(0) }`: the pipeline unrolls an empty array to $null.
+    $saltBytes = [byte[]]::new(0)
+    if ($SaltHex) { $saltBytes = [Convert]::FromHexString($SaltHex) }
+    if ($null -eq $Secret) { $Secret = [byte[]]::new(0) }
+    $data = [byte[]]::new($saltBytes.Length + $Secret.Length)
+    try {
+        [Array]::Copy($saltBytes, 0, $data, 0, $saltBytes.Length)
+        [Array]::Copy($Secret, 0, $data, $saltBytes.Length, $Secret.Length)
+        return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($data)).ToLowerInvariant()
+    } finally {
+        [Array]::Clear($data)
+    }
+}
+
 # Salted sha256 and length of an LSA secret, $null when it does not exist.
 function Get-LsaSecretHash([string]$Name, [string]$SaltHex) {
     if (-not ('SbxLsa' -as [type])) { Add-Type -TypeDefinition $LsaSource }
     $secret = [SbxLsa]::Retrieve($Name)
     if ($null -eq $secret) { return $null }
     try {
-        $saltBytes = if ($SaltHex) { [Convert]::FromHexString($SaltHex) } else { [byte[]]::new(0) }
-        $data = [byte[]]::new($saltBytes.Length + $secret.Length)
-        [Array]::Copy($saltBytes, $data, $saltBytes.Length)
-        [Array]::Copy($secret, 0, $data, $saltBytes.Length, $secret.Length)
-        $hash = [Security.Cryptography.SHA256]::HashData($data)
-        [Array]::Clear($data)
-        return [pscustomobject]@{ Length = $secret.Length; Hash = [Convert]::ToHexString($hash).ToLowerInvariant() }
+        return [pscustomobject]@{ Length = $secret.Length; Hash = (Get-SaltedHash $SaltHex $secret) }
     } finally {
         [Array]::Clear($secret)
     }
@@ -230,12 +244,46 @@ function Test-Identity {
     Report machine_guid ($guid.ToLowerInvariant() -eq $MachineId.ToLowerInvariant()) "MachineGuid $guid, want $MachineId"
 }
 
-# [2] Boots of the first start: no more than setup's own (logs were cleared before sysprep).
+# File name of the process of a planned restart (event 1074, first value:
+# '<path> (<computer name>)').
+function Get-RestartProcessName([string]$Value) {
+    return (($Value -replace '\s*\([^()]*\)\s*$', '') -split '\\')[-1]
+}
+
+# Setup's boots plus at most one planned restart by sbx-agent.exe: the rename
+# after setup overwrote the specialize name (ruling R16). Ok and Evidence.
+function Get-FirstBootVerdict([int]$Boots, [string[]]$RestartBy) {
+    $by = @($RestartBy | Where-Object { $_ })
+    $agent = @($by | Where-Object { $_ -ieq 'sbx-agent.exe' }).Count
+    $limit = $SetupBoots + [math]::Min($agent, 1)
+    $ok = $Boots -ge 1 -and $agent -le 1 -and $Boots -le $limit
+    $names = if ($by.Count) { ($by | Group-Object | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ', ' } else { 'none' }
+    return [pscustomobject]@{
+        Ok = $ok
+        Evidence = "$Boots boots since the seal (event 6005), allowed $limit (setup $SetupBoots + $([math]::Min($agent, 1)) rename by sbx-agent.exe, at most one); planned restarts (1074) by: $names"
+    }
+}
+
+# firstboot.ps1 (SetupComplete.cmd of the clone) ran to its end.
+function Test-FirstBootLog([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Report firstboot_log $false "$Path missing"
+        return
+    }
+    $lines = @(Get-Content -LiteralPath $Path | Where-Object { "$_".Trim() })
+    $last = if ($lines.Count -gt 0) { "$($lines[-1])".Trim() } else { '' }
+    $errors = @($lines | Where-Object { $_ -match '\] ERROR ' })
+    Report firstboot_log ($last -match '\]\s*done$') "$Path $($lines.Count) lines, last '$last'; ERROR lines: $($errors.Count)$(if ($errors.Count) { ' (' + ($errors -join '; ') + ')' })"
+}
+
+# [2] Boots of the first start (logs were cleared before sysprep), firstboot.ps1.
 function Test-FirstBoot {
     $starts = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 6005 } -ErrorAction SilentlyContinue)
     $by = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 1074 } -ErrorAction SilentlyContinue |
-            ForEach-Object { ([string]$_.Properties[0].Value -split '\\')[-1] } | Select-Object -Unique)
-    Report first_boot_reboots ($starts.Count -ge 1 -and $starts.Count -le $SetupBoots) "$($starts.Count) boots since the seal (event 6005), setup alone takes $SetupBoots; planned restarts (1074) by: $(if ($by.Count) { $by -join ', ' } else { 'none' })"
+            ForEach-Object { Get-RestartProcessName ([string]$_.Properties[0].Value) })
+    $v = Get-FirstBootVerdict $starts.Count ([string[]]$by)
+    Report first_boot_reboots $v.Ok $v.Evidence
+    Test-FirstBootLog $FirstBootLog
 }
 
 # [2] sbx-unattend.xml removed, no password values left in the answer file copies.
@@ -297,8 +345,18 @@ function Test-Firewall {
         if ("$($p.Enabled)" -ne 'True' -or "$($p.DefaultInboundAction)" -ne 'Block' -or "$($p.NotifyOnListen)" -ne 'False') { $bad++ }
     }
     Report firewall_profiles ($desc.Count -eq 3 -and $bad -eq 0) ($desc -join '; ')
-    $allow = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
-    Report firewall_rules ($allow.Count -eq 0) $(if ($allow.Count) { "inbound allow rules: $(($allow | ForEach-Object { $_.Name }) -join ', ')" } else { 'no enabled inbound allow rule' })
+    # 00-base and firstboot.ps1 set AllowLocalPolicyMerge=0: Windows ignores the
+    # local rules Setup and Appx enable again, so the effective rules count.
+    $merge = @(foreach ($p in @('DomainProfile', 'PrivateProfile', 'PublicProfile')) { "$p=$(Get-RegValue "$FirewallPolicy\$p" 'AllowLocalPolicyMerge')" })
+    $policy = @($merge | Where-Object { $_ -match '=0$' }).Count -eq 3
+    if ($policy) {
+        $allow = @(Get-NetFirewallRule -PolicyStore ActiveStore -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
+        $what = 'effective (ActiveStore)'
+    } else {
+        $allow = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
+        $what = 'local'
+    }
+    Report firewall_rules ($allow.Count -eq 0) "policy AllowLocalPolicyMerge: $($merge -join ', ') (local rules $(if ($policy) { 'ignored' } else { 'merged' })); $(if ($allow.Count) { "$what inbound allow rules: $(($allow | ForEach-Object { $_.Name }) -join ', ')" } else { "no $what enabled inbound allow rule" })"
 }
 
 # [5] sshd: effective config, running (the agent started it), host keys of this clone, shell.
@@ -396,8 +454,12 @@ function Test-Users {
     }
     Report user_admin ($UserName -in $members) "${admins}: $($members -join ', ')"
     $accounts = @(Get-CimInstance -ClassName Win32_UserAccount -Filter 'LocalAccount=True')
-    $u = $accounts | Where-Object { $_.Name -eq $UserName } | Select-Object -First 1
-    Report user_password ($null -ne $u -and -not $u.Disabled -and -not $u.PasswordExpires) "$UserName disabled $($u.Disabled), password expires $($u.PasswordExpires)"
+    $u = @($accounts | Where-Object { $_.Name -eq $UserName }) | Select-Object -First 1
+    if ($null -eq $u) {
+        Report user_password $false "$UserName missing"
+    } else {
+        Report user_password (-not $u.Disabled -and -not $u.PasswordExpires) "$UserName disabled $($u.Disabled), password expires $($u.PasswordExpires)"
+    }
     $lsa = Get-LsaSecretHash 'L$sbx_user' ''
     Report lsa_secret ($null -ne $lsa -and $lsa.Length -gt 0) $(if ($lsa) { "L`$sbx_user present ($($lsa.Length) bytes)" } else { 'L$sbx_user missing' })
     $enabled = @($accounts | Where-Object { -not $_.Disabled } | ForEach-Object Name)
@@ -498,10 +560,16 @@ function Test-Services {
     $re = Invoke-Capture reagentc.exe @('/info')
     $reStatus = @($re.Lines | Where-Object { $_ -match 'Windows RE status:\s*(\S+)' } | ForEach-Object { $Matches[1] }) | Select-Object -First 1
     Report winre_off ($reStatus -eq 'Disabled') "Windows RE status $reStatus"
+    # firstboot.ps1 writes them; they apply at the next boot (the agent's rename reboot).
     $nls = 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage'
     $acp = Get-RegValue $nls 'ACP'
     $oem = Get-RegValue $nls 'OEMCP'
-    Report codepage ($acp -eq '65001' -and $oem -eq '65001') "ACP $acp, OEMCP $oem"
+    if (-not ('SbxNls' -as [type])) {
+        Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class SbxNls { [DllImport("kernel32.dll")] public static extern uint GetACP(); [DllImport("kernel32.dll")] public static extern uint GetOEMCP(); }'
+    }
+    $activeAcp = [SbxNls]::GetACP()
+    $activeOem = [SbxNls]::GetOEMCP()
+    Report codepage ($acp -eq '65001' -and $oem -eq '65001' -and $activeAcp -eq 65001 -and $activeOem -eq 65001) "registry ACP $acp, OEMCP $oem; active GetACP() $activeAcp, GetOEMCP() $activeOem"
 }
 
 # [9] Tool versions as user (direct argv and the pwsh shell path), npm global prefix.

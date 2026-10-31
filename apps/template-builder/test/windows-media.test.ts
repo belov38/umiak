@@ -269,6 +269,8 @@ describe("buildIsoFiles", () => {
 				"build/files/sbx-early.cmd",
 				"build/files/scripts.ini",
 				"build/files/sshd_config",
+				"build/files/firstboot.ps1",
+				"build/files/SetupComplete-clone.cmd",
 			].sort(),
 		);
 		expect(

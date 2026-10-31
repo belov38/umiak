@@ -210,6 +210,12 @@ Set-NetFirewallProfile -All -Enabled True -DefaultInboundAction Block -DefaultOu
 $allow = @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue)
 if ($allow.Count -gt 0) { $allow | Disable-NetFirewallRule }
 Write-BuildLog "firewall: $($allow.Count) inbound allow rules disabled"
+# Local rules are ignored: Windows Setup and Appx registration on a clone add
+# and enable inbound allow rules again (firstboot.ps1 sets the same on the clone).
+foreach ($p in @('DomainProfile', 'PrivateProfile', 'PublicProfile')) {
+    Set-RegValue "$policies\WindowsFirewall\$p" AllowLocalPolicyMerge 0
+}
+Write-BuildLog 'firewall: local rules ignored (policy AllowLocalPolicyMerge=0)'
 
 # --- BitLocker: never encrypt (also set in specialize of the install) ---
 Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker' PreventDeviceEncryption 1

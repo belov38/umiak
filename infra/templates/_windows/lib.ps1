@@ -19,12 +19,15 @@ $SbxWorkDir = 'C:\sbx-build\work'
 # the update services: the OpenSSH FoD in 10-system comes from Windows Update
 # through Delivery Optimization. 90-cleanup disables those and checks the
 # whole list. dmwappushservice is not here: sysprep /generalize can hang or
-# fail without it, so it stays Manual and the offline stage disables it
-# (SYSPREP_DEFERRED_SERVICES in apps/template-builder/src/windows/media.ts).
+# fail without it, so it stays Manual and the specialize pass of the clone
+# disables it (SYSPREP_DEFERRED_SERVICES in apps/template-builder/src/windows/media.ts).
+# CDPSvc listens on TCP 5040. Sysprep resets some of these on the clone:
+# files\firstboot.ps1 disables the same list again (a test keeps them equal).
 $SbxDisabledServices = @(
     'wuauserv', 'UsoSvc', 'DoSvc', 'WSearch', 'SysMain', 'DiagTrack',
     'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',
-    'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM'
+    'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM',
+    'CDPSvc'
 )
 $SbxUpdateServices = @('wuauserv', 'UsoSvc', 'DoSvc')
 
