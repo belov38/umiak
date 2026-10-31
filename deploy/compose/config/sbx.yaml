@@ -156,6 +156,43 @@ topology:
           index: "2"
           version: v2.0
 
+    # S10: windows-desktop (extends windows, slot 595); verify 109 checks, 0 FAIL.
+    - templateSlug: windows-desktop
+      version: "20261031.3"
+      os: windows
+      node: pve
+      storage: local-lvm
+      pveVmid: 595
+      bootTimeoutS: 1200
+      agentVersion: 0.1.0+20261031.e8e881c0
+      hw:
+        machine: pc-q35-11.0+pve2
+        cpu: host
+        bios: ovmf
+        ostype: win11
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        vga: std
+        tablet: "1"
+        localtime: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
+      diskLayout:
+        efidisk0:
+          index: "0"
+          efitype: 4m
+          pre-enrolled-keys: "1"
+          ms-cert: 2023k
+        scsi0:
+          index: "1"
+          size: 96G
+          discard: "on"
+          iothread: "1"
+          ssd: "1"
+        tpmstate0:
+          index: "2"
+          version: v2.0
+
     # S10: verified Linux desktop build; no warm/hibernated pool.
     - templateSlug: linux-desktop
       version: "20261031.6"
