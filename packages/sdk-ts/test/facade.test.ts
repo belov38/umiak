@@ -327,6 +327,41 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		expect(await c.wait()).toMatchObject({ status: "killed" });
 	});
 
+	it("onStarted reports the command and replayed: true on a repeat with the same key", async () => {
+		const key = `on-started-${process.pid}`;
+		const seen: { commandId: string; replayed: boolean }[] = [];
+		for (let i = 0; i < 2; i++) {
+			for await (const ev of sb.run("echo started-once", {
+				idempotencyKey: key,
+				onStarted: (s) => seen.push(s),
+			})) {
+				if (ev.type === "exit") expect(ev.exitCode).toBe(0);
+			}
+		}
+		expect(seen).toHaveLength(2);
+		expect(seen[0]).toEqual({
+			commandId: expect.stringMatching(/^cmd_/),
+			replayed: false,
+		});
+		expect(seen[1]).toEqual({ commandId: seen[0]?.commandId, replayed: true });
+	});
+
+	it("sandboxes.handle(slug) runs commands without reading the sandbox", async () => {
+		const before = api.requests.length;
+		const h = sbx.sandboxes.handle(sb.slug);
+		expect(h.id).toBe(sb.slug);
+		const r = await h.exec("echo via-handle");
+		expect(r.stdout).toBe("via-handle\n");
+		const mine = api.requests.slice(before);
+		expect(
+			mine.filter(
+				(q) =>
+					q.method === "GET" &&
+					/\/v1\/sandboxes\/[^/]+$/.test(q.path.split("?")[0] ?? ""),
+			),
+		).toEqual([]);
+	});
+
 	it("start + follow from the start, from the end, output()", async () => {
 		const cmd = await sb.start("for i in 1 2 3; do echo n$i; sleep 0.1; done");
 		expect(cmd.id).toMatch(/^cmd_/);

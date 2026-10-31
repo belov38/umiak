@@ -269,14 +269,21 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 							}, headerTimeoutMs)
 						: undefined;
 				// Redirects are not followed (like the Python SDK): a 3xx is an error.
+				// undici's Request follows the signal it was made with through a
+				// WeakRef: a Request of the chain that nothing holds may be collected
+				// during the fetch, and a later abort (the caller's signal, the
+				// header timeout) then never reaches the connection. So the signal
+				// comes from `request`, not from the clone, and `request` and `sent`
+				// stay referenced until the body is read (withBodyIdleTimeout).
 				const init: RequestInit & { duplex?: "half" } = {
-					signal: AbortSignal.any([base.signal, timeout.signal]),
+					signal: AbortSignal.any([request.signal, timeout.signal]),
 					redirect: "manual",
 				};
 				if (base.body !== null) init.duplex = "half";
+				const sent = new Request(base, init);
 				let res: Response;
 				try {
-					res = await fetchImpl(new Request(base, init));
+					res = await fetchImpl(sent);
 				} catch (err) {
 					if (signal?.aborted) throw signal.reason;
 					if (timedOut) {
@@ -297,6 +304,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 					res,
 					bodyIdleMs,
 					isSafeToRepeat(request.method, keyed),
+					[request, sent],
 				);
 			};
 			if (oneShot) return send();
@@ -428,10 +436,14 @@ function withBodyIdleTimeout(
 	res: Response,
 	ms: number,
 	retryable: boolean,
+	/** Held until the body ends, so an abort still reaches it (see transport). */
+	requests: Request[],
 ): Response {
 	const source = res.body;
 	if (source === null) return res;
 	const reader = source.getReader();
+	// Captured by the closures below: the requests live as long as the body.
+	const keep = { requests };
 	const body = new ReadableStream<Uint8Array>({
 		async pull(ctl) {
 			let timer: ReturnType<typeof setTimeout> | undefined;
@@ -451,9 +463,12 @@ function withBodyIdleTimeout(
 			});
 			try {
 				const r = await Promise.race([reader.read(), idle]);
-				if (r.done) ctl.close();
-				else ctl.enqueue(r.value);
+				if (r.done) {
+					keep.requests = [];
+					ctl.close();
+				} else ctl.enqueue(r.value);
 			} catch (err) {
+				keep.requests = [];
 				reader.cancel().catch(() => {});
 				ctl.error(err);
 			} finally {
@@ -461,6 +476,7 @@ function withBodyIdleTimeout(
 			}
 		},
 		cancel(reason) {
+			keep.requests = [];
 			return reader.cancel(reason);
 		},
 	});

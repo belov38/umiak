@@ -60,6 +60,12 @@ export class Sbx {
 		create(input?: CreateSandboxInput, opts?: CreateOptions): Promise<Sandbox>;
 		/** By id (`sb_...`) or slug. */
 		get(ref: string, opts?: CallOptions): Promise<Sandbox>;
+		/**
+		 * A handle by id or slug without a request: for commands, files and
+		 * ports (their paths take either). `data` holds only `id` and `slug`
+		 * (both `ref`) until `refresh`.
+		 */
+		handle(ref: string): Sandbox;
 		/** Every sandbox of the team matching the filter, newest first, all pages. */
 		list(
 			filter?: SandboxFilter,
@@ -108,6 +114,7 @@ export class Sbx {
 				});
 				return new Sandbox(core, data);
 			},
+			handle: (ref) => new Sandbox(core, { id: ref, slug: ref } as SandboxData),
 			list: (filter = {}, o = {}) =>
 				paginate(async (cursor) => {
 					const query: Record<string, unknown> = {};

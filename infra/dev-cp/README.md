@@ -50,6 +50,7 @@ All names are set in `names.sh`. sslip.io is a public wildcard DNS (`<a-b-c-d>.s
 | Previews (browser) | `https://<slug>-<port>.sbx.100-64-10-7.sslip.io` | tailnet `100.64.10.7:443`, gateway | dev CA (wildcard) |
 | oauth2-proxy (S7; dashboard S8) | `https://sbx-dev-cp.tail0000.ts.net:8443/` | Tailscale Serve → `127.0.0.1:4180` | Let's Encrypt (Serve) |
 | api public listener (S7, CLI, SDK) | `https://sbx-dev-cp.tail0000.ts.net:8443/v1/…` | Tailscale Serve → `127.0.0.1:8080/v1` | Let's Encrypt (Serve) |
+| MCP server (S11) | `https://sbx-dev-cp.tail0000.ts.net:8443/mcp` | Tailscale Serve → `127.0.0.1:8090/mcp` (plus `/.well-known/oauth-protected-resource/mcp`) | Let's Encrypt (Serve) |
 | Keycloak (S7) | `https://sbx-dev-cp.tail0000.ts.net:10000/` | Tailscale Serve → `127.0.0.1:8180` | Let's Encrypt (Serve) |
 | SSH gateway (S4) | `ssh -p 2222 <slug>@sbx-dev-cp.tail0000.ts.net` | tailnet or LAN, port 2222 | gateway host keys |
 
@@ -57,7 +58,7 @@ Why it is split this way:
 
 - Sandboxes use public DNS (1.1.1.1 from `sbx0`), are not on the tailnet, and can reach only `192.168.68.90:443`. The gateway rejects TLS without SNI, so agents need a public name for the LAN address.
 - Serve gives a trusted certificate only for the MagicDNS name, without wildcards, and only on ports 443, 8443 and 10000. Previews need a wildcard, so they keep a dev CA certificate on sslip.io.
-- The gateway routes a preview only when `Host` has no port or `:443` (S4 §4.2). So 443 of the tailnet address belongs to the gateway, and Serve uses 8443 and 10000: `/` of 8443 goes to oauth2-proxy (web, `/api/*`, `/sbx-auth/*` as on `app.<domain>`), `/v1` of the same port goes to the api public listener (the path is kept). Serve intercepts its ports on the tailnet address before Docker sees them; with 443 in Serve, previews would break, so `deploy.sh` refuses it. The gateway publishes 443 on all CT addresses; nothing else listens there.
+- The gateway routes a preview only when `Host` has no port or `:443` (S4 §4.2). So 443 of the tailnet address belongs to the gateway, and Serve uses 8443 and 10000: `/` of 8443 goes to oauth2-proxy (web, `/api/*`, `/sbx-auth/*` as on `app.<domain>`), `/v1` of the same port goes to the api public listener (the path is kept), `/mcp` and `/.well-known/oauth-protected-resource/mcp` go to the MCP server (S11, same). Serve intercepts its ports on the tailnet address before Docker sees them; with 443 in Serve, previews would break, so `deploy.sh` refuses it. The gateway publishes 443 on all CT addresses; nothing else listens there.
 - Serve passes `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto: https` and the `Tailscale-User-*` headers. The api never takes an identity from `Tailscale-User-*` (tests in `apps/api`: public and proxied listener, every operation); S8 must not either.
 
 **Dev CA.** `dev-ca.sh` (run by `deploy.sh`) creates `~/.config/sbx/dev-ca/ca.pem` and `ca.key` on the Mac once (ECDSA P-256, 10 years, outside git, 0600). Name constraints limit it to `tunnel.192-168-68-90.sslip.io` and `sbx.100-64-10-7.sslip.io`. `deploy.sh` copies it to `~/.config/sbx/dev-ca/` on the CT (0600) and into `deploy/compose/secrets/gateway/`; the gateway's `dev-secrets` (S4) then issues `tunnel.pem` and `sbx.pem` (`*.sbx.…`, 397 days) with it. A new CA or new names make `deploy.sh` reissue both; it also renews them 30 days before expiry. Other names need a new CA: move `~/.config/sbx/dev-ca` away, run `deploy.sh` and `trust-mac.sh` again, and rebuild agent packages that pin the old one.
@@ -91,10 +92,10 @@ infra/dev-cp/deploy.sh [--dry-run]
 1. Runs `dev-ca.sh`. Copies the working tree (`git ls-files`, ignored files excluded) to `~/boat-dev-clone` on the CT and removes files that are gone. `deploy/compose/secrets/` and `deploy/compose/.env` stay.
 2. Copies `pve-token`, `pve-root-ca.pem`, `sbx-node_ed25519`, `known_hosts` and `dev-ca/ca.{pem,key}` from `~/.config/sbx` to `~/.config/sbx` on the CT (mode 0600). `known_hosts` gets the host key pinned for the host LAN address too.
 3. Checks the CT's MagicDNS name against `names.sh`, puts the dev CA into `secrets/gateway` when it changed, writes `deploy/compose/.env` (below), `secrets/devcp/sbx.yaml` (the PVE API on the LAN address) and `secrets/data-keys.json` once.
-4. `docker compose up -d --build --remove-orphans`, waits until `worker`, `gateway`, `api` and `oauth2-proxy` are healthy (the first Keycloak start takes a minute or two), prints the worker, gateway and api `/readyz`, applies the Serve config.
-5. From the Mac, with real DNS: the tunnel host and a preview host with the dev CA, each Serve port and the api `/v1/meta` with the system trust store.
+4. `docker compose up -d --build --remove-orphans`, waits until `worker`, `gateway`, `api`, `oauth2-proxy` and `mcp` are healthy (the first Keycloak start takes a minute or two), prints the worker, gateway, api and mcp `/readyz`, applies the Serve config.
+5. From the Mac, with real DNS: the tunnel host and a preview host with the dev CA, each Serve port, the api `/v1/meta` and the MCP protected resource metadata with the system trust store.
 
-`.env`: `COMPOSE_FILE` (the stack plus `compose.dev-cp.yaml`), `SBX_PVE_URL`, `SBX_PVE_TLS_NAME`, `SBX_NODE_SSH_HOST` (host LAN address `192.168.68.116`), `SBX_PVE_SECRETS_DIR`, the names (`SBX_DEVCP_TUNNEL_HOST`, `SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`, `SBX_DEVCP_SSH_HOST`) and the public URLs (`SBX_DEVCP_TS_NAME`, `SBX_APP_ORIGIN`, `SBX_API_PUBLIC_URL`, `SBX_KEYCLOAK_URL`, `SBX_OIDC_ISSUER`, `SBX_GATEWAY_AUTH_URL`, `SBX_OAUTH2_PROXY_REDIRECT_URL`).
+`.env`: `COMPOSE_FILE` (the stack plus `compose.dev-cp.yaml`), `SBX_PVE_URL`, `SBX_PVE_TLS_NAME`, `SBX_NODE_SSH_HOST` (host LAN address `192.168.68.116`), `SBX_PVE_SECRETS_DIR`, the names (`SBX_DEVCP_TUNNEL_HOST`, `SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`, `SBX_DEVCP_SSH_HOST`) and the public URLs (`SBX_DEVCP_TS_NAME`, `SBX_APP_ORIGIN`, `SBX_API_PUBLIC_URL`, `SBX_MCP_PUBLIC_URL`, `SBX_KEYCLOAK_URL`, `SBX_OIDC_ISSUER`, `SBX_GATEWAY_AUTH_URL`, `SBX_OAUTH2_PROXY_REDIRECT_URL`).
 
 `compose.dev-cp.yaml` overrides only what the CT needs: the names for `gateway-secrets`, `gateway` and `worker` (`SBX_TUNNEL_URL`, `SBX_PORT_DOMAIN`), the gateway ports (443 and 2222 on all addresses, the rest on loopback), the `sbx.yaml` mount, and the S7 services behind Serve (below). Each value it takes from `.env` is required (`${VAR:?set by deploy.sh}`), so a stale `.env` fails `docker compose config` instead of falling back to localhost.
 
@@ -125,6 +126,19 @@ Checked on CT 590 by `e2e.sh` (`docs/plans/e2e-devcp.md`): every service healthy
 - Client addresses: Serve connects to the published loopback ports, and Docker hands the connection to the container from the bridge gateway (`172.x.0.1`); oauth2-proxy calls the api from its container address. Both are in `172.16.0.0/12` (Docker's default bridge pools), so `X-Forwarded-For` from them gives the tailnet client in the api log (`clientIp`). Any container in the `sbx` network can forge it too; it only affects logs.
 - Keycloak admin: `https://sbx-dev-cp.tail0000.ts.net:10000/admin`, password on the CT in `~/boat-dev-clone/deploy/compose/secrets/keycloak/admin-password`. Dev user `dev@example.com`, temporary password `dev`. Ilia and the e2e user: `dev-users.sh` (below).
 - The LAN firewall still admits 8080/4180, which are now unused; nothing listens there on the LAN.
+
+### S11 MCP behind Tailscale Serve
+
+> **Not checked on the CT.** The wiring was checked locally only (`docker compose config` with the dev-cp files, a local image build and container smoke); `deploy.sh` has not been run with the `mcp` service, and nothing was run on CT 590. To verify after the master allows a deploy:
+> - `docker compose ps` on the CT: `mcp` healthy; `curl http://127.0.0.1:9092/readyz` answers 200.
+> - Which `Host` Serve passes to the target: the MagicDNS name with `:8443` or `127.0.0.1:8090`. Both are in `SBX_MCP_ALLOWED_HOSTS` (`compose.dev-cp.yaml`); a `421 this Host is not served here` from `/mcp` through Serve means a third form, add it there.
+> - `curl -i https://<TS name>:8443/mcp -X POST -H 'content-type: application/json' -d '{}'` answers `401` with `WWW-Authenticate: Bearer resource_metadata="https://<TS name>:8443/.well-known/oauth-protected-resource/mcp"`; that metadata names `authorization_servers: ["https://<TS name>:10000/realms/sbx"]`.
+> - Two Serve paths on one port (`/mcp` and the dot-prefixed `/.well-known/...`) next to `/` and `/v1`: `tailscale serve status` lists all four mappings of 8443.
+> - A team key (`Authorization: Bearer sbx_...`) and the browser sign-in of the `sbx-mcp` client with each client from `apps/mcp/README.md`.
+
+`compose.dev-cp.yaml` gives the `mcp` service the public URL `SBX_MCP_PUBLIC_URL=https://<TS name>:8443/mcp` (from `.env`, required), the issuer `SBX_OIDC_ISSUER` (the protected resource metadata names it; Keycloak tokens carry the public issuer) and the Host allowlist `<TS name>:8443,<TS name>,127.0.0.1:8090`. The service reaches the api inside the network (`http://api:8080`) with the caller's own bearer; it cannot reach the Serve address and does not need to. `names.sh` has `MCP_URL` and the two Serve mappings (`8443:/mcp` and `8443:/.well-known/oauth-protected-resource/mcp`, both to `127.0.0.1:8090`); `deploy.sh` writes `SBX_MCP_PUBLIC_URL` into `.env`.
+
+The tokens come from the realm client `sbx-mcp` (redirect URIs `http://127.0.0.1:33418/*`, `http://localhost:33418/*`, in the base realm; nothing dev-specific). Clients are configured in `apps/mcp/README.md` with the Serve URL.
 
 ## People, e2e and the quick start
 

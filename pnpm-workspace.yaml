@@ -4,6 +4,7 @@ packages:
 allowBuilds:
   cpu-features: false
   ssh2: false
+  "@modelcontextprotocol/inspector": false
 minimumReleaseAgeExclude:
   - "@biomejs/biome@2.6.4"
   - "@biomejs/cli-android-arm64@2.6.4"
