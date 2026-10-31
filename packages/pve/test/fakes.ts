@@ -258,6 +258,9 @@ export class FakePve {
 				...TEMPLATE_CONFIG,
 				name: String(p.name),
 			};
+			// The clone keeps the template's guest OS type (Windows tests).
+			if (this.templateConfig.ostype !== undefined)
+				config.ostype = this.templateConfig.ostype;
 			delete config.template;
 			config.scsi0 = `local-lvm:vm-${vmid}-disk-0,discard=on,iothread=1,size=40G,ssd=1`;
 			config.net0 = "virtio=BC:24:11:00:00:01,bridge=sbx0,firewall=1";

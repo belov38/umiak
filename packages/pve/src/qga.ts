@@ -115,13 +115,19 @@ export class Qga {
 
 	/**
 	 * Windows VSS releases the writers by itself after about 10 s; guest-fsfreeze-thaw then
-	 * fails. A failed thaw of a guest that reports "thawed" is autoThawed, not an error.
+	 * fails. With `selfThaw` (Windows guests), a failed thaw of a guest that reports "thawed" is
+	 * autoThawed, not an error. Linux qemu-ga never thaws by itself: there a failed thaw is
+	 * thrown (the answer may be lost while the thaw took effect; a retry succeeds).
 	 */
-	async fsfreezeThaw(vmid: number): Promise<{ autoThawed: boolean }> {
+	async fsfreezeThaw(
+		vmid: number,
+		opts: { selfThaw?: boolean } = {},
+	): Promise<{ autoThawed: boolean }> {
 		try {
 			await this.#api.post(this.#path(vmid, "fsfreeze-thaw"));
 			return { autoThawed: false };
 		} catch (err) {
+			if (!opts.selfThaw) throw err;
 			const state = await this.fsfreezeStatus(vmid).catch(() => undefined);
 			if (state === "thawed") return { autoThawed: true };
 			throw err;

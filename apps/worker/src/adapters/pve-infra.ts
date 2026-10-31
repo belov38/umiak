@@ -765,10 +765,11 @@ export class PveNodeInfra implements NodeInfra {
 				}
 				if (!attempted) return;
 				if (!frozen) {
-					// The freeze failed half-way: release whatever it did; the snapshot is
-					// cancelled anyway, so a failure here only leaves the guest's own timeout.
-					attempted = false;
-					await qga.fsfreezeThaw(vmid).catch(() => {});
+					// The freeze failed half-way or is still running (S1 gave up waiting):
+					// release whatever it did; the snapshot is cancelled anyway, so a failure
+					// here only leaves the guest's own timeout. `attempted` stays set: S1 thaws
+					// again when a late freeze returns, and that thaw must reach the guest.
+					await qga.fsfreezeThaw(vmid, { selfThaw: true }).catch(() => {});
 					return;
 				}
 				if ((await qga.fsfreezeStatus(vmid)) === "thawed") {
@@ -779,7 +780,7 @@ export class PveNodeInfra implements NodeInfra {
 					throw outcome;
 				}
 				// The thaw call fails when VSS lets go between the status and the thaw.
-				if ((await qga.fsfreezeThaw(vmid)).autoThawed) {
+				if ((await qga.fsfreezeThaw(vmid, { selfThaw: true })).autoThawed) {
 					outcome = new QuiesceFailed(
 						`VM ${vmid}: the guest thawed itself before the snapshot was done`,
 					);

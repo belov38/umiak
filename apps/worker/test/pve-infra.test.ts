@@ -331,6 +331,38 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(e.api.paths().filter((p) => p === thaw)).toHaveLength(1);
 	});
 
+	it("qgaFreezeHook: a freeze that returns after a thaw request is thawed by the next thaw", async () => {
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		const freezePath = `/nodes/${e.name}/qemu/${vmid}/agent/fsfreeze-freeze`;
+		const api = e.api;
+		const post = api.post.bind(api);
+		let release = () => {};
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		// VSS takes effect only after S1 gave up waiting for the freeze.
+		api.post = (async (path: string, params?: never) => {
+			if (path === freezePath) await gate;
+			return post(path, params);
+		}) as typeof api.post;
+		const hook = e.infra.qgaFreezeHook(vmid);
+		const pending = hook.freeze();
+		await hook.thaw();
+		release();
+		await pending;
+		expect(api.guestFrozen).toBe(true);
+		// S1 thaws again once the late freeze returns (lvmthin #freeze).
+		await hook.thaw();
+		expect(api.guestFrozen).toBe(false);
+	});
+
 	it("qgaFreezeHook: a thaw call that fails because VSS thawed meanwhile is a QuiesceFailed", async () => {
 		const m = randomUUID();
 		const { vmid } = await e.infra.create({

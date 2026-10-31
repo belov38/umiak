@@ -111,6 +111,8 @@ export class FakeInfra implements NodeInfra {
 	qgaAlreadyThawed = false;
 	/** Test control: the next snapshot with a hook fails with this error (as classified by the adapter). */
 	snapshotFailure: Error | undefined;
+	/** Test control: as snapshotFailure, but after the hook's freeze returned (and its thaw). */
+	snapshotFailureAfterFreeze: Error | undefined;
 
 	#call(method: string, ...args: unknown[]): void {
 		this.calls.push({ method, args });
@@ -382,6 +384,13 @@ export class FakeInfra implements NodeInfra {
 		if (injected && opts.hook) {
 			this.snapshotFailure = undefined;
 			throw injected;
+		}
+		const late = this.snapshotFailureAfterFreeze;
+		if (late && opts.hook) {
+			this.snapshotFailureAfterFreeze = undefined;
+			await opts.hook.freeze();
+			await opts.hook.thaw().catch(() => {});
+			throw late;
 		}
 		const vm = this.#vm(vmid);
 		// As sbx-node lv.snapshot: an LV of that name must not exist yet.

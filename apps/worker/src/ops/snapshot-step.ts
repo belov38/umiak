@@ -274,6 +274,8 @@ export async function takeSnapshot(
 		let hook: QuiesceHook | undefined;
 		let agentUnavailable = false;
 		let agentHook = false;
+		// The agent's own freeze returned: a later freeze timeout is VSS's (Windows), not the agent's.
+		let agentFrozen = false;
 		// A saved snapshot of a Windows machine must not carry secret files: only the
 		// agent can wipe them, so there is no QGA-only fallback (S9 §12.10).
 		let needsAgent = false;
@@ -294,7 +296,10 @@ export async function takeSnapshot(
 					throw e;
 				};
 				const watched: QuiesceHook = {
-					freeze: () => agent.freeze().catch(watch),
+					freeze: async () => {
+						await agent.freeze().catch(watch);
+						agentFrozen = true;
+					},
 					thaw: () => agent.thaw().catch(watch),
 				};
 				// Windows: the agent prepares, VSS freezes the filesystem through QGA.
@@ -324,6 +329,7 @@ export async function takeSnapshot(
 			// QuiesceFailed caused by FreezeTimeoutError): same fallback as an unanswered hook.
 			const frozeTooLong =
 				agentHook &&
+				!agentFrozen &&
 				(e instanceof FreezeTimeoutError ||
 					(e instanceof QuiesceFailed &&
 						e.cause instanceof FreezeTimeoutError));

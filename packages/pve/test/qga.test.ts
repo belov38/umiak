@@ -251,9 +251,9 @@ describe("Qga.fsfreezeThaw", () => {
 			"fsfreeze-thaw": [new PveApiError(500, "guest-fsfreeze-thaw failed")],
 			"fsfreeze-status": [{ result: "thawed" }],
 		});
-		await expect(new Qga(api, "pve").fsfreezeThaw(500)).resolves.toEqual({
-			autoThawed: true,
-		});
+		await expect(
+			new Qga(api, "pve").fsfreezeThaw(500, { selfThaw: true }),
+		).resolves.toEqual({ autoThawed: true });
 		expect(api.calls).toEqual(["POST fsfreeze-thaw", "POST fsfreeze-status"]);
 	});
 
@@ -263,16 +263,26 @@ describe("Qga.fsfreezeThaw", () => {
 			"fsfreeze-thaw": [thawErr],
 			"fsfreeze-status": [{ result: "frozen" }],
 		});
-		await expect(new Qga(frozen, "pve").fsfreezeThaw(500)).rejects.toBe(
-			thawErr,
-		);
+		await expect(
+			new Qga(frozen, "pve").fsfreezeThaw(500, { selfThaw: true }),
+		).rejects.toBe(thawErr);
 		const noStatus = new ScriptedPve({
 			"fsfreeze-thaw": [thawErr],
 			"fsfreeze-status": [new PveApiError(500, "agent timeout")],
 		});
-		await expect(new Qga(noStatus, "pve").fsfreezeThaw(500)).rejects.toBe(
-			thawErr,
-		);
+		await expect(
+			new Qga(noStatus, "pve").fsfreezeThaw(500, { selfThaw: true }),
+		).rejects.toBe(thawErr);
+	});
+
+	it("without selfThaw (Linux) a failed thaw is thrown even if the guest reports thawed", async () => {
+		const thawErr = new PveApiError(500, "guest-fsfreeze-thaw failed");
+		const api = new ScriptedPve({
+			"fsfreeze-thaw": [thawErr],
+			"fsfreeze-status": [{ result: "thawed" }],
+		});
+		await expect(new Qga(api, "pve").fsfreezeThaw(500)).rejects.toBe(thawErr);
+		expect(api.calls).toEqual(["POST fsfreeze-thaw"]);
 	});
 });
 

@@ -692,9 +692,11 @@ export class Machines {
 			hook = opts.hook;
 		} else if (running && !opts.crashConsistent) {
 			if (!(await this.qga.ping(vmid))) throw new QgaUnavailableError(vmid);
+			// Only Windows (VSS) thaws by itself.
+			const selfThaw = String(config.ostype ?? "").startsWith("win");
 			hook = {
 				freeze: () => this.qga.fsfreezeFreeze(vmid),
-				thaw: () => this.qga.fsfreezeThaw(vmid),
+				thaw: () => this.qga.fsfreezeThaw(vmid, { selfThaw }),
 			};
 		}
 		const ref = await this.#o.driver.snapshot(

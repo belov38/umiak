@@ -1,7 +1,7 @@
 // S9 Windows in the worker (S9 §12.10, §18.6 p. 5, 6, 10): shutdown timeout by
 // OS, PrepareStop result, and the composite quiesce hook (agent + QGA/VSS).
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import type { QuiesceHook } from "@sbx/pve";
+import { FreezeTimeoutError, type QuiesceHook } from "@sbx/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
 import { composeHooks, QuiesceFailed } from "../src/ops/snapshot-step.ts";
@@ -267,6 +267,25 @@ describe("snapshot of a running Windows machine", () => {
 		const trace = shareTrace(w);
 		expect(await run(w, s.operationId)).toBe("succeeded");
 		expect(trace[0]).toBe("agent.quiesce(fs=false, wipe=true)");
+	});
+
+	it("saved: S1 gives up after the agent froze (VSS slow): quiesce_failed, not blamed on the agent", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const src = await readySandbox(w, e);
+		await makeWindows(w);
+		const s = await save(e, src.sandboxId, "win");
+		w.infra.snapshotFailureAfterFreeze = new QuiesceFailed("freeze timed out", {
+			cause: new FreezeTimeoutError("freeze did not return within 30000 ms"),
+		});
+
+		expect(await run(w, s.operationId)).toBe("failed");
+
+		expect(w.agent.callsOf("freeze")).toHaveLength(1);
+		expect((await row(w, "operations", s.operationId)).error_code).toBe(
+			"quiesce_failed",
+		);
+		expect(snapshotLvs(w, s.lvId)).toEqual([]);
 	});
 });
 

@@ -1118,6 +1118,7 @@ describe("occupiedVmids", () => {
 const WIN_TEMPLATE_CONFIG: Record<string, string> = {
 	...TEMPLATE_CONFIG,
 	bios: "ovmf",
+	ostype: "win11",
 	machine: "pc-q35-9.2",
 	efidisk0:
 		"local-lvm:base-599-disk-0,efitype=4m,pre-enrolled-keys=1,ms-cert=2023k,size=4M",

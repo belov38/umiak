@@ -139,7 +139,7 @@ function runVerify(
 			secretFiles: defaultSecretFiles(cfg),
 			windows: {
 				fsfreezeFreeze: (vmid) => qga.fsfreezeFreeze(vmid),
-				fsfreezeThaw: (vmid) => qga.fsfreezeThaw(vmid),
+				fsfreezeThaw: (vmid) => qga.fsfreezeThaw(vmid, { selfThaw: true }),
 				fsfreezeStatus: (vmid) => qga.fsfreezeStatus(vmid),
 				writeFile: (vmid, path, data) => qga.fileWriteWindows(vmid, path, data),
 			},
