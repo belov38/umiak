@@ -1180,6 +1180,41 @@ describe("verifyWindows", () => {
 		expect(failed(v.checks)).toEqual(["hard_stop_restart"]);
 	});
 
+	it("retries a hard stop that hits the VM lock held by qmeventd", async () => {
+		const { w, deps } = setup();
+		const stop = w.machines.stop;
+		let locked = 2;
+		deps.machines = {
+			...w.machines,
+			stop: async (vmid) => {
+				if (vmid === 502 && locked-- > 0)
+					throw new Error(
+						"task failed: can't lock file '/var/lock/qemu-server/lock-502.conf' - got timeout",
+					);
+				await stop(vmid);
+			},
+		};
+		const v = await verifyWindows(deps, manifest(), {});
+		expect(v.ok).toBe(true);
+		expect(locked).toBe(-1);
+	});
+
+	it("does not retry other stop errors", async () => {
+		const { w, deps } = setup();
+		let calls = 0;
+		deps.machines = {
+			...w.machines,
+			stop: async () => {
+				calls++;
+				throw new Error("VM 501 not running");
+			},
+		};
+		await expect(verifyWindows(deps, manifest(), {})).rejects.toThrow(
+			/not running/,
+		);
+		expect(calls).toBe(1);
+	});
+
 	it("cleanup runs on failure", async () => {
 		const { w, deps, ram } = setup();
 		deps.machines = {

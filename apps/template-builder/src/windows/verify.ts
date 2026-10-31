@@ -51,6 +51,10 @@ const LICENSE_POLL_MS = 30_000;
 const LOG_LINES = 2000;
 const CLEANUP_TRIES = 3;
 const CLEANUP_RETRY_MS = 10_000;
+/** qmeventd's cleanup of the previous QEMU holds the VM lock for up to 30 s after a restart. */
+const LOCK_TRIES = 5;
+const LOCK_RETRY_MS = 10_000;
+const LOCK_TIMEOUT_RE = /can't lock file .* got timeout/;
 /** Spec 15.1 p.12: freeze to thaw. */
 const FREEZE_LIMIT_MS = 10_000;
 /** Spec 15.1 p.14: a hard restart may take at most this much longer than a normal boot. */
@@ -565,6 +569,19 @@ export async function verifyWindows(
 	const uuid = deps.randomUUID ?? randomUUID;
 	const { machines, log } = deps;
 	const { signal } = o;
+	// After a shutdown and a quick start, qmeventd waits up to 30 s for the old QEMU to exit
+	// while holding the VM lock, and a stop in that window fails (seen on pve).
+	const stopVm = async (vmid: number) => {
+		for (let i = 1; ; i++) {
+			try {
+				return await machines.stop(vmid);
+			} catch (err) {
+				if (i >= LOCK_TRIES || !LOCK_TIMEOUT_RE.test(errorText(err))) throw err;
+				log(`stop VM ${vmid}: ${errorText(err)}; retrying`);
+				await sleep(LOCK_RETRY_MS);
+			}
+		}
+	};
 	const tunnelUrl = o.connect?.url ?? TEST_TUNNEL_URL;
 	const family = familyForTunnelUrl(tunnelUrl);
 	const bootTimeoutMs = m.bootTimeoutS * 1000;
@@ -1059,7 +1076,7 @@ export async function verifyWindows(
 			),
 		);
 		step(`hard stop and restart of VM ${A.vmid}`);
-		await machines.stop(A.vmid);
+		await stopVm(A.vmid);
 		const aRestart = await startClone(A, "secrets_restart_");
 		const afterHard = await secretFile(A);
 		add(
@@ -1216,7 +1233,7 @@ export async function verifyWindows(
 		const normal = await startClone(B, "fork_reboot_");
 		boot.bootToAgentReadyMs = normal.startToAgentActiveMs;
 		step(`hard stop and restart of VM ${B.vmid}`);
-		await machines.stop(B.vmid);
+		await stopVm(B.vmid);
 		const hard = await startClone(B, "fork_hard_stop_");
 		boot.hardRestart = hard;
 		boot.hardStopRestartMs = hard.startToAgentActiveMs;
@@ -1241,8 +1258,8 @@ export async function verifyWindows(
 	// Cleanup: fork, snapshot, clone, registration. Every part is attempted; delete runs
 	// verifyGone (VM, config, IPAM, LVs, DHCP lease).
 	const problems: string[] = [];
-	// A loaded host times out on VM locks now and then ("can't lock file ... got timeout", seen on
-	// pve): each cleanup step is tried three times, 10 s apart.
+	// VM locks time out now and then ("can't lock file ... got timeout", seen on pve; see
+	// stopVm): each cleanup step is tried three times, 10 s apart.
 	const attempt = async (what: string, fn: () => Promise<void>) => {
 		for (let i = 1; ; i++) {
 			try {
