@@ -603,6 +603,30 @@ async function startVm(
 	await deps.api.waitTask(node, upid);
 }
 
+/**
+ * Starts the VM and presses the boot key from the moment the start call returns: the CD prompt
+ * comes a few seconds after power-on, and waiting for the start task first (seconds per poll on
+ * a slow uplink) let it pass on real builds.
+ */
+async function startPressingKeys(
+	deps: BuildDeps,
+	node: string,
+	vmid: number,
+	count: number,
+	between?: () => Promise<void>,
+): Promise<void> {
+	const upid = await deps.api.post<string>(
+		`/nodes/${node}/qemu/${vmid}/status/start`,
+	);
+	const started = deps.api.waitTask(node, upid);
+	started.catch(() => {});
+	try {
+		await pressKeys(deps, node, vmid, count, between);
+	} finally {
+		await started;
+	}
+}
+
 /** Enter at "Press any key to boot from CD or DVD", `count` times one interval apart. */
 async function vmStopped(
 	deps: BuildDeps,
@@ -674,8 +698,7 @@ export async function stageInstall(
 	const vmid = st.vmid as number;
 	await deps.ramGuard.reserve(vmid, p.recipe.buildVm.memoryMb);
 	st.ramReserved = true;
-	await startVm(deps, o.node, vmid);
-	await pressKeys(deps, o.node, vmid, INSTALL_KEYS);
+	await startPressingKeys(deps, o.node, vmid, INSTALL_KEYS);
 	// Windows Setup runs unattended; SetupComplete.cmd installs the guest agent at its end.
 	const timeoutS = p.recipe.installTimeoutS;
 	const deadline = Date.now() + timeoutS * 1000;
@@ -1083,9 +1106,8 @@ async function offlineBoot(
 	io: GuestIo,
 	vmid: number,
 ): Promise<void> {
-	await startVm(deps, o.node, vmid);
 	// WinPE has no guest agent: an answer means Windows booted from the disk.
-	await pressKeys(deps, o.node, vmid, OFFLINE_KEYS, async () => {
+	await startPressingKeys(deps, o.node, vmid, OFFLINE_KEYS, async () => {
 		if (await io.ping()) throw new DiskBootedError();
 	});
 	const timeoutMs = deps.offlineTimeoutMs ?? OFFLINE_TIMEOUT_MS;
