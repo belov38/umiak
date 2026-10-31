@@ -36,7 +36,7 @@ Dev-стенд control plane (решение 2026-10-30): unprivileged LXC CT 59
 
 Слоты шаблонов (решение master 2026-10-31): `linux` — 597/599, `windows` — 598, `linux-desktop` (S10) — 595/596 из диапазона dev-инфраструктуры 590–596 (CT 590 остаётся). S10 запущен параллельно с S9: сначала Linux, Windows desktop и вкладка Desktop в web — после слияния S9 и S8.
 
-Доработки после приёмки S9 (2026-11-01): S9 follow-ups реализует Windows crash-consistent snapshot без QGA/VSS (первопричина VSS hang остаётся открытой; обновление QGA 109.1.0 → 110.2.3 на клоне не помогло), контракты S6 по secret files/reconnect и lock retry, Payload migration windows/4gb, BOM/exec/upload агента, GC-flake CLI. Решения и evidence — `docs/specs/s9-windows.md` §24.7. Перестройка 598 для snapshot fallback не нужна; деплой выполняет master после независимой приёмки.
+Доработки после приёмки S9 (2026-10-31): закрыты в `s9-followups` (в main). Snapshot работающей Windows теперь crash-consistent: пауза vCPU ~0,5–0,9 s без QGA/VSS, `consistency: "crash"` (зависание thaw в qemu-ga/VSS обойдено, первопричина не найдена — S9 §24.7); `secret_files_on_disk` → `snapshot_requires_stop`, повтор `UpdateSecrets`, повторы при lock qmeventd; шаблон `windows` и размер `4gb` в Payload (миграции `0207` и Payload `20261101_000000_windows_template`); мелочи агента и тест CLI исправлены. При слиянии S10 поправить порядок Payload-миграций (`20261031_105048_desktop_defaults` из `s10-impl`) и последний JSON-снимок.
 
 Доработки после приёмки S8 (2026-10-31, не блокируют MVP): метрики `web` (§19) и список команд без активного owner в `/admin` (§20.1); `sbx-admin` кроме `bootstrap` читает YAML, а не Payload; роли Postgres (web сейчас под суперпользователем `sbx`) — S12.
 
