@@ -96,7 +96,12 @@ func (a *Auth) callback(w http.ResponseWriter, r *http.Request, l routes.Label, 
 	}
 
 	h := w.Header()
-	h.Add("Set-Cookie", a.sessionCookie(in.session, a.cfg.SSOTTL).String())
+	cookie := a.sessionCookie(in.session, a.cfg.SSOTTL)
+	if in.session.Mode == ModeDesktop {
+		cookie.SameSite = http.SameSiteNoneMode
+		cookie.Partitioned = true
+	}
+	h.Add("Set-Cookie", cookie.String())
 	h.Add("Set-Cookie", a.cookie(in.stateCookie, "", 0).String())
 	h.Set("Referrer-Policy", "no-referrer")
 	a.count(AccessSSO, ResultOK)
@@ -134,8 +139,12 @@ func (a *Auth) finishLogin(r *http.Request, l routes.Label, rt *cpapi.Route) (lo
 	if g.Label != l.Raw || g.AuthEpoch != rt.AuthEpoch {
 		return login{}, errCallback
 	}
+	mode := ModeSSO
+	if l.Kind == routes.KindDesktop {
+		mode = ModeDesktop
+	}
 	return login{
-		session:     Session{Label: l.Raw, Mode: ModeSSO, Epoch: g.AuthEpoch, UserID: g.UserID, Email: g.Email},
+		session:     Session{Label: l.Raw, Mode: mode, Epoch: g.AuthEpoch, UserID: g.UserID, Email: g.Email},
 		rd:          safeRD(st.RD),
 		stateCookie: name,
 	}, nil

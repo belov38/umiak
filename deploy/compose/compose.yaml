@@ -11,6 +11,7 @@ name: sbx
 # the api internal listener (SBX_GATEWAY_API_URL, default http://api:8082).
 include:
   - gateway.yaml
+  - turn.yaml
 
 x-logging: &logging
   driver: json-file
