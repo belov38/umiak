@@ -11,6 +11,7 @@ Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
 | `/healthz` | `200 ok` once Postgres answers, Payload is up and every payload migration known to this code is applied; `503` otherwise. No identity headers needed (exec probe `node healthcheck.js`). |
 | `/admin` | Payload admin (`app/(payload)`, from Payload's Next.js template). Operators only: `users` admin access; others get Payload's `/admin/unauthorized`. |
 | `/cms-api/*` | Payload REST (collection access: operators). A refused login answers with `X-Sbx-Auth-Denied: <reason>`. |
+| `/` | `307` to `/app` (a page, not a config redirect, so an anonymous `/` is still `401`). |
 | `/app` | Redirect to the default team, `/app/t/<team_…>`. |
 | `/app/t/<team>` | Team frame (S8 §9.3): team switcher, sections, operator links, user menu with sign-out. A team the user is not in: 403 page (operators may open any team). The page itself: sandboxes (§9.4), below. |
 | `/app/t/<team>` (page) | Sandboxes: `GET /v1/sandboxes` with search (`q`), state and `label=k=v` filters, infinite scroll over `nextCursor`; quota line from `GET /v1/limits`. Polled every 5 s while the tab is visible and refetched at once after an action. Transitional states with a spinner and `activeOperation.kind: step`, `error` red with its message, `degraded` with `healthReason`, a lock for a blocked sandbox. Row actions: Stop / Resume, Fork (→ the new sandbox page), Open terminal (`?tab=terminal`), Delete (type the slug; `Sbx-Confirm-Delete` = id). Blocked: Resume and Fork disabled. |

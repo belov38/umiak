@@ -91,8 +91,10 @@ principal, то есть после аутентификации; до неё к
 | `POST /internal/v1/gateway/port-auth/exchange` | одноразовый код SSO порта → `{userId, email, label, authEpoch}` или `400 invalid_code` |
 | `POST /internal/v1/agent-events` | binary protobuf `AgentEventsRequest` → `{ackedSeq}` |
 
-Изменения маршрутов gateway узнаёт по `NOTIFY sbx_routes '<slug>'`, разрывы SSH-сессий — по
-`NOTIFY sbx_ssh_revoke` (триггеры миграций `0204` и `0302`).
+Изменения маршрутов gateway узнаёт по `NOTIFY sbx_routes '<slug>'` (триггеры миграций `0201` и `0204`, в том числе
+блокировки, `0206`), разрывы SSH-сессий — по `NOTIFY sbx_ssh_revoke`: личности, членства, ключи и команды — из хуков
+Payload (`@sbx/payload`, те же payload-ы, что у триггеров `0302`/`0303` на `identity`), блокировка sandbox —
+`''` из `SandboxService.block` (gateway перепроверяет все сессии через `ssh/authorize`).
 
 ## Агент: `AgentApi`
 

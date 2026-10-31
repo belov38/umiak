@@ -152,7 +152,7 @@ docker compose -f deploy/compose/compose.yaml exec keycloak cat /run/sbx-secrets
 **Дашборд.** http://localhost:4180/ → вход Keycloak → `/app` → личная команда пользователя
 (`/app/t/team_…`). Пользователь и личная команда создаются при первом входе (одинаково в `web` и `api`).
 Выход (меню пользователя → Sign out): `/oauth2/sign_out?rd=<SBX_LOGOUT_URL>` — oauth2-proxy удаляет cookie,
-Keycloak показывает страницу выхода и возвращает на http://localhost:4180/app (у `web` нет страницы `/`: это 404).
+Keycloak показывает страницу выхода и возвращает на http://localhost:4180/app (`/` у `web` тоже ведёт на `/app`).
 
 **Тестовый пользователь.** В realm `sbx` уже есть `dev@example.com` (email подтверждён) с временным паролем
 `SBX_DEV_PASSWORD` из `.env` (по умолчанию `dev`). При первом входе Keycloak попросит задать новый пароль.

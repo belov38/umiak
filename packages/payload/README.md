@@ -16,7 +16,11 @@ components are referenced by import-map path strings from `apps/web`.
   adapter. `o.operatorGroups` is kept in `config.custom.sbx`.
 - `getSbxPayload(o)` / `closeSbxPayload(databaseUrl)` — one instance per
   process and database URL (`new BasePayload().init`, not `getPayload`, so no
-  Next HMR socket is opened in `api`/`worker`).
+  Next HMR socket is opened in `api`/`worker`). Every call takes a
+  reference and `closeSbxPayload` releases one; the last release destroys
+  the instance. A later call with a larger `poolMax` raises the pool's max;
+  other options (secret, groups, session cache) stay the first caller's.
+  `sbxPayloadRefs(databaseUrl)` counts the references.
 - `migrateSbxPayload(p)`, `pendingPayloadMigrations(p)`,
   `assertPayloadMigrated(p)` — see below.
 - `isOperatorReq(req)` — `req.user?.isOperator === true`. Every collection
@@ -260,10 +264,9 @@ only; `rotated_at` is copied when 0303 is applied.
   Postgres 18).
 - `cookiePrefix: "__Host-payload"` is accepted by the config (cookie names
   `__Host-payload-token`, `-lng`, `-theme`). Payload has no login cookie here
-  (local strategy off). Whether the admin UI sets its `-lng`/`-theme` cookies
-  with `Secure; Path=/` (required by browsers for `__Host-`) can only be
-  checked in `apps/web`; if not, those cookies are dropped, which only loses
-  the admin language/theme preference.
+  (local strategy off). The admin writes `__Host-payload-theme` from the
+  browser without `Secure`, so browsers drop it and the admin theme is not
+  kept between visits (`apps/web/README.md`). These cookies grant nothing.
 - The adapter keeps one pool client checked out for good (`connect`), so the
   pool needs at least 3 connections for `migrateSbxPayload` (lock + migration
   transaction); it refuses smaller pools. `closeSbxPayload` does not wait for
