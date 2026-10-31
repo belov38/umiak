@@ -375,8 +375,14 @@ export class FakePve {
 				this.guestFrozen = false;
 				return { result: 1 };
 			}
-			if (sub === "/agent/fsfreeze-status")
+			if (sub === "/agent/fsfreeze-status") {
+				if (method !== "POST")
+					throw new PveApiError(
+						501,
+						`Method '${method} ${path}' not implemented`,
+					);
 				return { result: this.guestFrozen ? "frozen" : "thawed" };
+			}
 			if (sub === "/agent/exec") return { pid: 42 };
 			if (sub === "/agent/exec-status")
 				return { exited: 1, exitcode: 0, "out-data": "ok\n" };

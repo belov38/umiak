@@ -1540,6 +1540,35 @@ Write-Output (Get-SaltedHash '' ([byte[]]::new(0)))`,
 		]);
 	});
 
+	it("vss_events: the benign 8194 IVssWriterCallback 0x80070005 is INFO, other VSS errors still fail", () => {
+		const r = runFunctions(
+			["Report", "Test-VssEvents"],
+			`$BootTime = Get-Date
+function mk($id, $msg) { [pscustomobject]@{ Id = $id; Message = $msg } }
+$benign = 'Unexpected error querying for the IVssWriterCallback interface. hr = 0x80070005, Access is denied.'
+$script:events = @()
+function Get-WinEvent { param($FilterHashtable, $ErrorAction) $script:events }
+Test-VssEvents
+$script:events = @((mk 8194 $benign), (mk 8194 $benign))
+Test-VssEvents
+$script:events = @((mk 8194 $benign), (mk 12302 'VSS writer failed'))
+Test-VssEvents
+$script:events = @((mk 8194 'Unexpected error querying for the IVssWriterCallback interface. hr = 0x80040154'))
+Test-VssEvents`,
+		);
+		expect(r.stderr).toBe("");
+		const lines = r.stdout.trim().split(/\r?\n/);
+		expect(lines).toHaveLength(4);
+		expect(lines[0]).toMatch(/^CHECK vss_events PASS /);
+		expect(lines[1]).toMatch(
+			/^CHECK vss_events INFO 2 known benign event 8194/,
+		);
+		expect(lines[2]).toMatch(
+			/^CHECK vss_events FAIL 1 VSS errors: 12302 .*1 known benign 8194 ignored/,
+		);
+		expect(lines[3]).toMatch(/^CHECK vss_events FAIL 1 VSS errors: 8194 /);
+	});
+
 	it("firstboot_log: present and ends with done", () => {
 		const r = runFunctions(
 			["Report", "Test-FirstBootLog"],

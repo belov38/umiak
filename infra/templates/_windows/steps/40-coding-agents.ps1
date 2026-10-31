@@ -33,6 +33,16 @@ function Write-ConfigFile([string]$Path, [string]$Content) {
     Write-BuildLog "$Path written"
 }
 
+# ProgramData dirs inherit write access for Users; gemini refuses a system settings file
+# under such a parent ("Parent directory is insecure") and prints a warning before its
+# version. Only SYSTEM and Administrators write; Users read and execute.
+function Protect-ConfigDir([string]$Dir) {
+    Invoke-Native -FilePath icacls.exe -ArgumentList @($Dir, '/inheritance:r', '/grant', '*S-1-5-18:(OI)(CI)F', '/grant', '*S-1-5-32-544:(OI)(CI)F', '/grant', '*S-1-5-32-545:(OI)(CI)RX')
+    foreach ($f in Get-ChildItem -LiteralPath $Dir -Recurse -File -Force) {
+        Invoke-Native -FilePath icacls.exe -ArgumentList @($f.FullName, '/inheritance:r', '/grant', '*S-1-5-18:F', '/grant', '*S-1-5-32-544:F', '/grant', '*S-1-5-32-545:RX')
+    }
+}
+
 # Claude Code: managed settings (Program Files on Windows) and the env switch.
 Write-ConfigFile (Join-Path $env:ProgramFiles 'ClaudeCode\managed-settings.json') "{ `"env`": { `"DISABLE_AUTOUPDATER`": `"1`" } }`n"
 Set-MachineEnv DISABLE_AUTOUPDATER 1
@@ -43,6 +53,8 @@ Write-ConfigFile (Join-Path $env:ProgramData 'opencode\opencode.json') "{ `"auto
 Set-MachineEnv OPENCODE_DISABLE_AUTOUPDATE 1
 # Codex: system config.
 Write-ConfigFile (Join-Path $env:ProgramData 'OpenAI\Codex\config.toml') "# System config of the Codex CLI: versions come with the template build.`ncheck_for_update_on_startup = false`n"
+
+foreach ($d in @('gemini-cli', 'opencode', 'OpenAI')) { Protect-ConfigDir (Join-Path $env:ProgramData $d) }
 
 $npmPrefix = Join-Path $env:ProgramData 'npm'
 foreach ($t in @('claude', 'codex', 'opencode', 'gemini')) {

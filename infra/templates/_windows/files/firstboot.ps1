@@ -111,5 +111,13 @@ Invoke-Part 'firewall' {
     Write-Log 'firewall: local rules ignored (policy AllowLocalPolicyMerge=0)'
 }
 
+# OOBE registers AppX capability inbound allow rules (*-ServerCapability, ...) in the local
+# store; the policy above hides them from some views only, so they are disabled as well.
+Invoke-Part 'firewall rules' {
+    $rules = @(Get-NetFirewallRule -PolicyStore PersistentStore -Direction Inbound -Action Allow -Enabled True)
+    foreach ($r in $rules) { Disable-NetFirewallRule -InputObject $r }
+    Write-Log "firewall: disabled $($rules.Count) enabled inbound allow rules in the local store"
+}
+
 Write-Log 'done'
 exit 0

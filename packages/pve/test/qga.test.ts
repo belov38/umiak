@@ -226,7 +226,7 @@ describe("Qga.fsfreezeStatus", () => {
 		const qga = new Qga(api, "pve");
 		await expect(qga.fsfreezeStatus(500)).resolves.toBe("frozen");
 		await expect(qga.fsfreezeStatus(500)).resolves.toBe("thawed");
-		expect(api.calls[0]).toBe("GET fsfreeze-status");
+		expect(api.calls[0]).toBe("POST fsfreeze-status");
 	});
 
 	it("rejects an unknown state", async () => {

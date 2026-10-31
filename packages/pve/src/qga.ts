@@ -107,8 +107,9 @@ export class Qga {
 		await this.#api.post(this.#path(vmid, "fsfreeze-thaw"));
 	}
 
+	/** PVE implements fsfreeze-status as POST only; GET answers "not implemented". */
 	async fsfreezeStatus(vmid: number): Promise<"thawed" | "frozen"> {
-		const r = await this.#api.get<{ result?: string } | string>(
+		const r = await this.#api.post<{ result?: string } | string>(
 			this.#path(vmid, "fsfreeze-status"),
 		);
 		const state = typeof r === "string" ? r : r?.result;

@@ -98,6 +98,7 @@ export const TEMPLATE_HW_KEYS = [
 	"vga",
 	"tablet",
 	"rng0",
+	"localtime",
 ];
 /**
  * Proxmox defaults to ciupgrade=1: cloud-init runs apt upgrade on first boot, which restarts

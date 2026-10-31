@@ -658,10 +658,21 @@ function Test-Leftovers {
     Report leftovers ($bad.Count -eq 0) $(if ($bad.Count) { $bad -join ', ' } else { "no C:\sbx-build, installers or authorized_keys; $BuildJson present" })
 }
 
-# [12] No VSS errors since this boot (after a QGA freeze and thaw).
+# [12] No VSS errors since this boot (after a QGA freeze and thaw). Event 8194 "Unexpected
+# error querying for the IVssWriterCallback interface. hr = 0x80070005" is the known benign
+# COM security message of the qemu-ga VSS requestor; it is reported as INFO, not a failure.
 function Test-VssEvents {
     $ev = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'VSS'; Level = 1, 2; StartTime = $BootTime } -ErrorAction SilentlyContinue)
-    Report vss_events ($ev.Count -eq 0) $(if ($ev.Count) { "$($ev.Count) VSS errors: $(($ev | Select-Object -First 3 | ForEach-Object { "$($_.Id) $($_.Message)" }) -join ' | ')" } else { 'no VSS errors since boot' })
+    $known = @($ev | Where-Object { $_.Id -eq 8194 -and $_.Message -match 'IVssWriterCallback' -and $_.Message -match '0x80070005' })
+    $bad = @($ev | Where-Object { $known -notcontains $_ })
+    if ($bad.Count) {
+        $ignored = if ($known.Count) { "; $($known.Count) known benign 8194 ignored" } else { '' }
+        Report vss_events $false "$($bad.Count) VSS errors: $(($bad | Select-Object -First 3 | ForEach-Object { "$($_.Id) $($_.Message)" }) -join ' | ')$ignored"
+    } elseif ($known.Count) {
+        Report vss_events INFO "$($known.Count) known benign event 8194 (IVssWriterCallback hr = 0x80070005, qemu-ga VSS requestor COM security); no other VSS errors"
+    } else {
+        Report vss_events $true 'no VSS errors since boot'
+    }
 }
 
 # Salted hash of the password of user (fork: unchanged).

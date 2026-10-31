@@ -442,6 +442,23 @@ describe("windows steps: step content", () => {
 		expect(check).not.toMatch(/\$problems\.Add\([^\n]*[Aa]ppx/);
 	});
 
+	it("40-coding-agents protects the ProgramData config dirs (no Users write, gemini warns otherwise)", () => {
+		const s = code(read("steps/40-coding-agents.ps1"));
+		expect(s).toMatch(
+			/function Protect-ConfigDir[\s\S]*'\/inheritance:r'[\s\S]*'\*S-1-5-18:\(OI\)\(CI\)F'[\s\S]*'\*S-1-5-32-544:\(OI\)\(CI\)F'[\s\S]*'\*S-1-5-32-545:\(OI\)\(CI\)RX'/,
+		);
+		expect(s).toMatch(
+			/@\('gemini-cli', 'opencode', 'OpenAI'\)\) \{ Protect-ConfigDir/,
+		);
+		// The protection comes after the files are written and before the version probes.
+		expect(s.indexOf("Protect-ConfigDir (Join-Path")).toBeGreaterThan(
+			s.indexOf("OpenAI\\Codex\\config.toml"),
+		);
+		expect(s.indexOf("Protect-ConfigDir (Join-Path")).toBeLessThan(
+			s.indexOf("Get-InstalledVersion $path"),
+		);
+	});
+
 	it("--version probes go through Invoke-Probe (stdin closed, time limit)", () => {
 		for (const st of ["30-toolchains", "40-coding-agents"]) {
 			const s = code(read(`steps/${st}.ps1`));
@@ -558,6 +575,11 @@ describe("windows steps: clone first boot", () => {
 		expect(s).toMatch(
 			/@\('DomainProfile', 'PrivateProfile', 'PublicProfile'\)[\s\S]*AllowLocalPolicyMerge/,
 		);
+		// OOBE's AppX inbound allow rules are disabled in the local store.
+		expect(s).toMatch(
+			/Get-NetFirewallRule -PolicyStore PersistentStore -Direction Inbound -Action Allow -Enabled True[\s\S]*Disable-NetFirewallRule/,
+		);
+		expect(s).toMatch(/firewall: disabled \$\(\$rules\.Count\)/);
 		// Never fails Setup.
 		expect(s).not.toMatch(/\bexit [1-9]/);
 		expect(s).not.toMatch(/\bthrow\b/);

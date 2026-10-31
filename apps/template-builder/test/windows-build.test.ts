@@ -79,6 +79,7 @@ hw:
   agent: "enabled=1"
   vga: std
   tablet: 1
+  localtime: 0
   rng0: "source=/dev/urandom"
   efidisk0: { efitype: 4m, pre-enrolled-keys: 1, ms-cert: 2023k }
   tpmstate0: { version: v2.0 }
@@ -460,6 +461,7 @@ describe("iso-install build: happy path", () => {
 			scsihw: "virtio-scsi-single",
 			agent: "enabled=1",
 			tablet: "1",
+			localtime: "0",
 			cores: 4,
 			memory: 4096,
 			balloon: 0,

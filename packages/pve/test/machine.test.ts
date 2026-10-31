@@ -204,6 +204,22 @@ describe("create", () => {
 		expect(api.vms.get(500)?.config.rng0).toBe("source=/dev/urandom");
 	});
 
+	it("create from a template with localtime=0 posts localtime 0, and a fork keeps it", async () => {
+		const { api, machines } = setup();
+		api.templateConfig.localtime = "0";
+		const a = await machines.create({});
+		const post = () =>
+			api.calls.filter(
+				(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
+			);
+		expect(post()[0]?.params).toMatchObject({ localtime: "0" });
+		await machines.start(a.vmid);
+		const s = await machines.snapshot(a.vmid);
+		expect(s.hardware.localtime).toBe("0");
+		await machines.fork(s, {});
+		expect(post().at(-1)?.params).toMatchObject({ localtime: "0" });
+	});
+
 	it("posts no cloud-init parameters when the template has no cloud-init drive", async () => {
 		const { api, machines } = setup();
 		const cfg = { ...api.templateConfig };

@@ -17,6 +17,7 @@ hw:
   agent: "enabled=1"
   vga: std # S10 may change
   tablet: 1 # absolute pointer for the console and computer-use
+  localtime: 0 # RTC in UTC; PVE defaults to local time for Windows ostypes, which skews the guest clock
   rng0: "source=/dev/urandom"
   efidisk0: { efitype: 4m, pre-enrolled-keys: 1, ms-cert: 2023k }
   tpmstate0: { version: v2.0 }
