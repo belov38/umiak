@@ -13,7 +13,8 @@
 			"!**/gen",
 			"!apps/api/openapi",
 			"!**/.next",
-			"!apps/web/src/app/(payload)/admin/importMap.js"
+			"!apps/web/src/app/(payload)/admin/importMap.js",
+			"!apps/mcp/golden"
 		]
 	},
 	"formatter": {

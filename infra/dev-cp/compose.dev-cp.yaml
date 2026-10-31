@@ -7,6 +7,8 @@
 #   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/* and /sbx-auth/* -> api,
 #                                 the rest -> web, S8)
 #   https://<TS name>:8443/v1  -> 127.0.0.1:8080 api public listener (path kept)
+#   https://<TS name>:8443/mcp -> 127.0.0.1:8090 MCP server (S11; path kept, plus the protected
+#                                 resource metadata /.well-known/oauth-protected-resource/mcp)
 #   https://<TS name>:10000/   -> 127.0.0.1:8180 Keycloak
 # The base compose already publishes these ports on loopback, and every service talks to
 # http://keycloak:8080 while tokens carry the public issuer (KC_HOSTNAME_BACKCHANNEL_DYNAMIC):
@@ -54,6 +56,11 @@ services:
       # port cookie needs SameSite=None (S4 §8.2) to work in the dashboard iframe.
       SBX_GATEWAY_AUTH_URL: ${SBX_GATEWAY_AUTH_URL:?set by deploy.sh}
       SBX_GATEWAY_COOKIE_CROSS_SITE: "true"
+      # One gateway on the CT: there is no peer to drain tunnels and SSH sessions to, and the
+      # product drain (up to 950 s, stop_grace_period 960 s) would keep the old container, and
+      # the worker waiting on it, down for 16 minutes on every deploy that recreates it.
+      SBX_GATEWAY_DRAIN_TIMEOUT: 20s
+    stop_grace_period: 30s
     # Public listeners on all addresses of the CT (its firewall admits only the LAN; sandboxes
     # reach only 443). 443 serves the tunnel host on the LAN address and the previews on the
     # tailnet address: preview hosts route only without a port in Host (S4 4.2), so Tailscale
@@ -67,8 +74,13 @@ services:
 
   # S7: Keycloak behind Serve on :10000. The realm (imported on the first start only) gets the
   # oauth2-proxy redirect URI and web origin of the Serve name.
+  # The CT has 3 GB and no swap. Without a cgroup limit of its own the JVM in Docker in LXC sizes
+  # its heap from the host's RAM (sysinfo is not virtualised), grows past 2.5 GB and starves the
+  # CT. A fixed heap and a container limit keep Keycloak under ~1 GB.
   keycloak:
+    mem_limit: 1200m
     environment:
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
       KC_HOSTNAME: ${SBX_KEYCLOAK_URL:?set by deploy.sh}
       KC_HTTP_ENABLED: "true"
       SBX_KEYCLOAK_PROXY_HEADERS: xforwarded
@@ -113,3 +125,14 @@ services:
       SBX_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
       SBX_API_PUBLIC_URL: ${SBX_API_PUBLIC_URL:?set by deploy.sh}
       SBX_LOGOUT_URL: ${SBX_LOGOUT_URL:?set by deploy.sh}
+
+  # S11: the remote MCP server behind Serve (:8443/mcp). The public URL is what MCP clients use
+  # and what the protected resource metadata names. Serve may pass the Host header either as the
+  # MagicDNS name (with :8443) or as the target (127.0.0.1:8090); the Host allowlist admits both
+  # and nothing else. Calls reach the api as http://api:8080 inside the network, with the
+  # caller's own bearer token. Keycloak issues for the public issuer (SBX_OIDC_ISSUER).
+  mcp:
+    environment:
+      SBX_MCP_PUBLIC_URL: ${SBX_MCP_PUBLIC_URL:?set by deploy.sh}
+      SBX_MCP_ALLOWED_HOSTS: ${SBX_DEVCP_TS_NAME:?set by deploy.sh}:8443,${SBX_DEVCP_TS_NAME},127.0.0.1:8090
+      SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}

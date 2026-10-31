@@ -7,7 +7,7 @@
 # Copies the working tree (git ls-files, without ignored files) to sbx@<CT>:boat-dev-clone,
 # the PVE secrets and the dev CA (dev-ca.sh) to ~/.config/sbx on the CT (0600), writes
 # deploy/compose/.env and the dev sbx.yaml, then runs `docker compose up -d --build`, waits for
-# worker, gateway, api, oauth2-proxy and web, applies the Tailscale Serve mapping (names.sh) and
+# worker, gateway, api, oauth2-proxy, web and mcp, applies the Tailscale Serve mapping (names.sh) and
 # checks the names and certificates from this Mac.
 set -euo pipefail
 
@@ -111,7 +111,7 @@ fi
 
 # 3. The dev CA for the gateway, .env, the dev sbx.yaml, data keys; then the stack.
 ct "PVE_LAN_IP=$PVE_LAN_IP" "PORT_DOMAIN=$PORT_DOMAIN" "TUNNEL_HOST=$TUNNEL_HOST" "TUNNEL_URL=$TUNNEL_URL" \
-	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" \
+	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" "MCP_URL=$MCP_URL" \
 	"KEYCLOAK_URL=$KEYCLOAK_URL" "OIDC_ISSUER=$OIDC_ISSUER" "LOGOUT_URL=$LOGOUT_URL" "SERVE=$SERVE" \
 	"FILES=$FILES" "EXTRA_ENV=$EXTRA_ENV" <<'EOF'
 ts=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
@@ -161,6 +161,7 @@ SBX_DEVCP_SSH_HOST=$SSH_HOST
 SBX_DEVCP_TS_NAME=$TS_NAME
 SBX_APP_ORIGIN=$APP_ORIGIN
 SBX_API_PUBLIC_URL=$API_URL
+SBX_MCP_PUBLIC_URL=$MCP_URL
 SBX_KEYCLOAK_URL=$KEYCLOAK_URL
 SBX_OIDC_ISSUER=$OIDC_ISSUER
 SBX_GATEWAY_AUTH_URL=$APP_ORIGIN/sbx-auth/authorize
@@ -186,7 +187,7 @@ docker compose up -d --build --remove-orphans 2>&1 | grep -vE '^ *#[0-9]+ ' | ta
 # api, worker and web wait for migrate and web-migrate.
 healthy() {
 	local s
-	for s in worker gateway api oauth2-proxy web; do
+	for s in worker gateway api oauth2-proxy web mcp; do
 		[ "$(docker compose ps --format '{{.Health}}' "$s")" = healthy ] || return 1
 	done
 }
@@ -198,6 +199,7 @@ docker compose ps -a --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 echo "worker /readyz: $(curl -sS http://127.0.0.1:9090/readyz)"
 echo "gateway /readyz: $(curl -sS http://127.0.0.1:9190/readyz)"
 echo "api /readyz: $(curl -sS http://127.0.0.1:9091/readyz)"
+echo "mcp /readyz: $(curl -sS http://127.0.0.1:9092/readyz)"
 healthy
 
 # Tailscale Serve (operator sbx, set by `infra/pve/setup.sh cp-tailscale`): rebuilt from SERVE.
@@ -218,15 +220,22 @@ EOF
 # with api 404 route_not_found; either proves DNS, TLS and routing. Serve with the system trust
 # store: oauth2-proxy on 8443 (a sign-in redirect), Keycloak on 10000, and /v1/meta of the api
 # public listener on 8443.
-# check name url [curl args]: logs the HTTP status and the body.
+# check name url [curl args]: logs the HTTP status and the body; any HTTP answer passes
+# (CHECK_CODE keeps the status).
 check() {
-	local name=$1 url=$2 out code
+	local name=$1 url=$2 out
 	shift 2
 	out=$(curl -sS --max-time 30 -w '\n%{http_code}' "$@" "$url" 2>&1) || true
-	code=${out##*$'\n'}
-	log "$name $url: HTTP $code ${out%$'\n'*}"
-	[[ "$code" =~ ^[0-9]{3}$ && "$code" != 000 ]]
+	CHECK_CODE=${out##*$'\n'}
+	log "$name $url: HTTP $CHECK_CODE ${out%$'\n'*}"
+	[[ "$CHECK_CODE" =~ ^[0-9]{3}$ && "$CHECK_CODE" != 000 ]]
 }
+# check_ok name url [curl args]: like check, but only HTTP 200 passes (a 421 for a Host the
+# server does not take, or a 404 of a missing Serve path, must not).
+check_ok() { check "$@" && [[ "$CHECK_CODE" == 200 ]]; }
+# Protected Resource Metadata of MCP_URL (RFC 9728): the well-known prefix before its path.
+MCP_ORIGIN=$(sed -E 's#^(https?://[^/]+).*#\1#' <<<"$MCP_URL")
+MCP_PRM_URL="$MCP_ORIGIN/.well-known/oauth-protected-resource${MCP_URL#"$MCP_ORIGIN"}"
 check tunnel "https://$TUNNEL_HOST/v1/connect" --cacert "$CA_DIR/ca.pem" ||
 	log "WARNING: the tunnel host is not reachable from this Mac (outside the LAN?)"
 check preview "https://x-y-z-3000.$PORT_DOMAIN/" --cacert "$CA_DIR/ca.pem" ||
@@ -237,4 +246,6 @@ for port in $(tr ' ' '\n' <<<"$SERVE" | cut -d: -f1 | sort -u); do
 done
 check api "$API_URL/v1/meta" ||
 	log "WARNING: the api is not reachable through Tailscale Serve from this Mac"
+check_ok mcp "$MCP_PRM_URL" ||
+	log "WARNING: the MCP server is not reachable through Tailscale Serve from this Mac"
 log "deployed"

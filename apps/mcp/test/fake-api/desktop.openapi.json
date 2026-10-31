@@ -1,0 +1,1112 @@
+{
+	"openapi": "3.1.0",
+	"info": {
+		"title": "sbx desktop API (S10 §13.2), contract fragment for the MCP fake",
+		"version": "draft",
+		"description": "Written by hand from docs/specs/s10-desktop.md §12-§13.2 because S10 is not implemented and apps/api/openapi/v1.json has no /desktop routes. openapi-check.ts merges `paths` and `components.schemas` into v1.json; `$ref`s such as #/components/schemas/Error resolve against the merged document. Replace this file with the real part of v1.json once S10 lands. Action field names are the camelCase of the S10 §12.2 table (delay_ms -> delayMs), like the rest of the public JSON. Not included: PUT /desktop/access, DELETE /desktop/streams (the MCP does not call them)."
+	},
+	"paths": {
+		"/v1/sandboxes/{sandbox}/desktop": {
+			"get": {
+				"operationId": "desktop.get",
+				"summary": "Desktop status",
+				"tags": ["desktop"],
+				"description": "S10 §13.2. Scope sandboxes:read. Templates without the `desktop` capability answer 422 `desktop_unsupported`.",
+				"parameters": [
+					{
+						"name": "sandbox",
+						"in": "path",
+						"required": true,
+						"description": "Sandbox id (`sb_...`) or slug",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Status",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/DesktopStatus"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "`not_found`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "`sandbox_not_ready`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "`desktop_unsupported`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "Error; `error.code` says what happened",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/links": {
+			"post": {
+				"operationId": "desktop.links",
+				"summary": "One-time desktop link",
+				"tags": ["desktop"],
+				"description": "S10 §13.2. Scope desktop. The url is a secret.",
+				"parameters": [
+					{
+						"name": "sandbox",
+						"in": "path",
+						"required": true,
+						"description": "Sandbox id (`sb_...`) or slug",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"required": false,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/DesktopLinkRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": {
+						"description": "The link",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/DesktopLink"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "`validation`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "`not_found`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "`sandbox_not_ready`, `desktop_not_ready`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "`desktop_unsupported`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "`streamer_unavailable`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "Error; `error.code` says what happened",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/screenshot": {
+			"get": {
+				"operationId": "desktop.screenshot",
+				"summary": "Screenshot",
+				"tags": ["desktop"],
+				"description": "S10 §12.1, §13.2. Scope desktop. The image is scaled to fit maxWidth x maxHeight (never upscaled).",
+				"parameters": [
+					{
+						"name": "sandbox",
+						"in": "path",
+						"required": true,
+						"description": "Sandbox id (`sb_...`) or slug",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "format",
+						"in": "query",
+						"required": false,
+						"description": "Default png",
+						"schema": {
+							"enum": ["png", "jpeg"],
+							"type": "string"
+						}
+					},
+					{
+						"name": "quality",
+						"in": "query",
+						"required": false,
+						"description": "JPEG quality 1-100",
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "maxWidth",
+						"in": "query",
+						"required": false,
+						"description": "Fit within this width",
+						"schema": {
+							"type": "integer",
+							"minimum": 1
+						}
+					},
+					{
+						"name": "maxHeight",
+						"in": "query",
+						"required": false,
+						"description": "Fit within this height",
+						"schema": {
+							"type": "integer",
+							"minimum": 1
+						}
+					},
+					{
+						"name": "x",
+						"in": "query",
+						"required": false,
+						"description": "Region left, before scaling",
+						"schema": {
+							"type": "integer",
+							"minimum": 0
+						}
+					},
+					{
+						"name": "y",
+						"in": "query",
+						"required": false,
+						"description": "Region top, before scaling",
+						"schema": {
+							"type": "integer",
+							"minimum": 0
+						}
+					},
+					{
+						"name": "width",
+						"in": "query",
+						"required": false,
+						"description": "Region width",
+						"schema": {
+							"type": "integer",
+							"minimum": 1
+						}
+					},
+					{
+						"name": "height",
+						"in": "query",
+						"required": false,
+						"description": "Region height",
+						"schema": {
+							"type": "integer",
+							"minimum": 1
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"description": "Draw the cursor (default true)",
+						"schema": {
+							"enum": ["true", "false"],
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The image",
+						"content": {
+							"image/png": {
+								"schema": {
+									"type": "string",
+									"format": "binary"
+								}
+							},
+							"image/jpeg": {
+								"schema": {
+									"type": "string",
+									"format": "binary"
+								}
+							}
+						},
+						"headers": {
+							"Sbx-Screen-Width": {
+								"description": "Screen width",
+								"required": true,
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Screen-Height": {
+								"description": "Screen height",
+								"required": true,
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Image-Width": {
+								"description": "Image width",
+								"required": true,
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Image-Height": {
+								"description": "Image height",
+								"required": true,
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Cursor-X": {
+								"description": "Cursor x (screen pixels)",
+								"required": true,
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Sbx-Cursor-Y": {
+								"description": "Cursor y (screen pixels)",
+								"required": true,
+								"schema": {
+									"type": "integer"
+								}
+							},
+							"Cache-Control": {
+								"description": "no-store",
+								"required": true,
+								"schema": {
+									"enum": ["no-store"],
+									"type": "string"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "`validation`, `invalid_action`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "`not_found`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "`sandbox_not_ready`, `desktop_not_ready`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "`desktop_unsupported`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "`streamer_unavailable`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "Error; `error.code` says what happened",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/actions": {
+			"post": {
+				"operationId": "desktop.actions",
+				"summary": "Input actions",
+				"tags": ["desktop"],
+				"description": "S10 §12.2, §13.2. Scope desktop. Actions run in order and stop at the first failure.",
+				"parameters": [
+					{
+						"name": "sandbox",
+						"in": "path",
+						"required": true,
+						"description": "Sandbox id (`sb_...`) or slug",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": false,
+						"description": "Optional",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/DesktopActionsRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Done",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/DesktopActionsResult"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "`validation`, `invalid_action` (details.index, details.reason)",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "`not_found`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "`sandbox_not_ready`, `desktop_not_ready`, `desktop_busy` (retryable)",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "`desktop_unsupported`, `action_failed` (details.index, details.completed)",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "`streamer_unavailable`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "Error; `error.code` says what happened",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/v1/sandboxes/{sandbox}/desktop/clipboard": {
+			"get": {
+				"operationId": "desktop.clipboard.get",
+				"summary": "Read the clipboard",
+				"tags": ["desktop"],
+				"description": "S10 §12.3, §13.2. Scope desktop.",
+				"parameters": [
+					{
+						"name": "sandbox",
+						"in": "path",
+						"required": true,
+						"description": "Sandbox id (`sb_...`) or slug",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Clipboard text",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/DesktopClipboard"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "`not_found`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "`sandbox_not_ready`, `desktop_not_ready`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "`desktop_unsupported`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "Error; `error.code` says what happened",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			},
+			"put": {
+				"operationId": "desktop.clipboard.put",
+				"summary": "Write the clipboard",
+				"tags": ["desktop"],
+				"description": "S10 §12.3, §13.2. Scope desktop. Text up to 1 MiB.",
+				"parameters": [
+					{
+						"name": "sandbox",
+						"in": "path",
+						"required": true,
+						"description": "Sandbox id (`sb_...`) or slug",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/DesktopClipboardWrite"
+							}
+						}
+					}
+				},
+				"responses": {
+					"204": {
+						"description": "Written"
+					},
+					"400": {
+						"description": "`validation`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "`not_found`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "`sandbox_not_ready`, `desktop_not_ready`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "`desktop_unsupported`",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "Error; `error.code` says what happened",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"DesktopPoint": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": ["x", "y"],
+				"properties": {
+					"x": {
+						"type": "integer"
+					},
+					"y": {
+						"type": "integer"
+					}
+				}
+			},
+			"DesktopSize": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": ["width", "height"],
+				"properties": {
+					"width": {
+						"type": "integer",
+						"minimum": 1
+					},
+					"height": {
+						"type": "integer",
+						"minimum": 1
+					}
+				}
+			},
+			"DesktopStatus": {
+				"type": "object",
+				"required": [
+					"state",
+					"reason",
+					"screen",
+					"cursor",
+					"access",
+					"url",
+					"streamer"
+				],
+				"properties": {
+					"state": {
+						"enum": ["ready", "starting", "unavailable"],
+						"type": "string"
+					},
+					"reason": {
+						"type": ["string", "null"]
+					},
+					"screen": {
+						"$ref": "#/components/schemas/DesktopSize"
+					},
+					"cursor": {
+						"$ref": "#/components/schemas/DesktopPoint"
+					},
+					"access": {
+						"enum": ["token", "sso", "public"],
+						"type": "string"
+					},
+					"url": {
+						"type": "string"
+					},
+					"streamer": {
+						"type": "object",
+						"required": ["running", "streaming"],
+						"properties": {
+							"running": {
+								"type": "boolean"
+							},
+							"streaming": {
+								"type": "boolean"
+							}
+						}
+					}
+				}
+			},
+			"DesktopLinkRequest": {
+				"type": "object",
+				"additionalProperties": false,
+				"properties": {
+					"fps": {
+						"enum": [30, 60],
+						"type": "integer"
+					},
+					"bitrateKbps": {
+						"type": "integer",
+						"minimum": 1000,
+						"maximum": 20000
+					},
+					"transport": {
+						"enum": ["auto", "webrtc", "websocket"],
+						"type": "string"
+					}
+				}
+			},
+			"DesktopLink": {
+				"type": "object",
+				"required": ["url", "expiresAt"],
+				"properties": {
+					"url": {
+						"type": "string"
+					},
+					"expiresAt": {
+						"type": "string",
+						"format": "date-time"
+					}
+				}
+			},
+			"DesktopAction": {
+				"description": "One input action (S10 §12.2); the field names are the camelCase of the table.",
+				"oneOf": [
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type", "x", "y"],
+						"properties": {
+							"type": {
+								"const": "move"
+							},
+							"x": {
+								"type": "integer"
+							},
+							"y": {
+								"type": "integer"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type"],
+						"properties": {
+							"type": {
+								"const": "click"
+							},
+							"x": {
+								"type": "integer"
+							},
+							"y": {
+								"type": "integer"
+							},
+							"button": {
+								"enum": ["left", "right", "middle"],
+								"type": "string"
+							},
+							"count": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 3
+							},
+							"modifiers": {
+								"type": "array",
+								"items": {
+									"enum": ["ctrl", "alt", "shift", "meta"],
+									"type": "string"
+								}
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type"],
+						"properties": {
+							"type": {
+								"const": "mouse_down"
+							},
+							"x": {
+								"type": "integer"
+							},
+							"y": {
+								"type": "integer"
+							},
+							"button": {
+								"enum": ["left", "right", "middle"],
+								"type": "string"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type"],
+						"properties": {
+							"type": {
+								"const": "mouse_up"
+							},
+							"x": {
+								"type": "integer"
+							},
+							"y": {
+								"type": "integer"
+							},
+							"button": {
+								"enum": ["left", "right", "middle"],
+								"type": "string"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type"],
+						"properties": {
+							"type": {
+								"const": "scroll"
+							},
+							"x": {
+								"type": "integer"
+							},
+							"y": {
+								"type": "integer"
+							},
+							"dx": {
+								"type": "integer"
+							},
+							"dy": {
+								"type": "integer"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type", "path"],
+						"properties": {
+							"type": {
+								"const": "drag"
+							},
+							"path": {
+								"type": "array",
+								"minItems": 2,
+								"items": {
+									"$ref": "#/components/schemas/DesktopPoint"
+								}
+							},
+							"button": {
+								"enum": ["left", "right", "middle"],
+								"type": "string"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type", "keys"],
+						"properties": {
+							"type": {
+								"const": "key"
+							},
+							"keys": {
+								"type": "array",
+								"minItems": 1,
+								"items": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type", "key"],
+						"properties": {
+							"type": {
+								"const": "key_down"
+							},
+							"key": {
+								"type": "string"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type", "key"],
+						"properties": {
+							"type": {
+								"const": "key_up"
+							},
+							"key": {
+								"type": "string"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type", "text"],
+						"properties": {
+							"type": {
+								"const": "type"
+							},
+							"text": {
+								"type": "string",
+								"maxLength": 10000
+							},
+							"delayMs": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 100
+							}
+						}
+					},
+					{
+						"type": "object",
+						"additionalProperties": false,
+						"required": ["type", "ms"],
+						"properties": {
+							"type": {
+								"const": "wait"
+							},
+							"ms": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 10000
+							}
+						}
+					}
+				]
+			},
+			"DesktopScreenshot": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": ["contentType", "width", "height", "data"],
+				"properties": {
+					"contentType": {
+						"enum": ["image/png", "image/jpeg"],
+						"type": "string"
+					},
+					"width": {
+						"type": "integer"
+					},
+					"height": {
+						"type": "integer"
+					},
+					"data": {
+						"type": "string",
+						"description": "base64"
+					}
+				}
+			},
+			"DesktopActionsRequest": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": ["actions"],
+				"properties": {
+					"actions": {
+						"type": "array",
+						"minItems": 1,
+						"maxItems": 100,
+						"items": {
+							"$ref": "#/components/schemas/DesktopAction"
+						}
+					},
+					"coordinateSpace": {
+						"$ref": "#/components/schemas/DesktopSize"
+					},
+					"screenshot": {
+						"type": "object",
+						"additionalProperties": false,
+						"properties": {
+							"format": {
+								"enum": ["png", "jpeg"],
+								"type": "string"
+							},
+							"quality": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 100
+							},
+							"maxWidth": {
+								"type": "integer",
+								"minimum": 1
+							},
+							"maxHeight": {
+								"type": "integer",
+								"minimum": 1
+							}
+						}
+					}
+				}
+			},
+			"DesktopActionsResult": {
+				"type": "object",
+				"required": ["completed", "cursor", "screen"],
+				"properties": {
+					"completed": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"cursor": {
+						"$ref": "#/components/schemas/DesktopPoint"
+					},
+					"screen": {
+						"$ref": "#/components/schemas/DesktopSize"
+					},
+					"screenshot": {
+						"$ref": "#/components/schemas/DesktopScreenshot"
+					}
+				}
+			},
+			"DesktopClipboard": {
+				"type": "object",
+				"required": ["text", "hasText"],
+				"properties": {
+					"text": {
+						"type": "string"
+					},
+					"hasText": {
+						"type": "boolean"
+					}
+				}
+			},
+			"DesktopClipboardWrite": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": ["text"],
+				"properties": {
+					"text": {
+						"type": "string"
+					}
+				}
+			}
+		}
+	}
+}

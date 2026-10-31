@@ -1,0 +1,33 @@
+{
+	"name": "@sbx/mcp",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "sbx MCP server: the public API of the platform as MCP tools (stdio and streamable HTTP), on @sbx/sdk",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
+	},
+	"dependencies": {
+		"@hono/node-server": "2.1.5",
+		"@modelcontextprotocol/server": "2.4.0",
+		"@sbx/sdk": "workspace:*",
+		"hono": "4.13.14",
+		"pino": "10.4.0",
+		"prom-client": "15.1.3",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@modelcontextprotocol/client": "2.4.0",
+		"@modelcontextprotocol/conformance": "0.1.16",
+		"@modelcontextprotocol/inspector": "2.13.0",
+		"@sbx/api": "workspace:*",
+		"@sbx/core": "workspace:*",
+		"@sbx/db": "workspace:*",
+		"ajv": "8.20.0",
+		"ajv-formats": "3.0.1"
+	}
+}

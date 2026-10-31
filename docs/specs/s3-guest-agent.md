@@ -225,7 +225,7 @@ message SecretFile {
 Дальнейшие изменения — полной заменой набора:
 - `System/UpdateEnv{env}` — новые команды видят новый env, запущенные — нет;
 - `System/UpdateSecrets{secret_env, secret_files}` — после каждой перезагрузки (resume) control plane вызывает его заново: при старте агента фаза `secrets` = `pending`, если `secretsDigest` непустой. S6 хранит секреты зашифрованными и пересылает при resume; fork наследует env источника и получает claim заново; saved snapshot секретов не несёт;
-- `System/UpdateSshCa{keys}` — ротация CA gateway.
+- `System/UpdateSshCa{keys}` — ротация CA gateway. Control plane вызывает его после каждой загрузки вместе с `UpdateEnv` и `UpdateSecrets` (S6 §7.6, шаг `provision`) с текущим набором ключей, поэтому ключи, сменившиеся после claim, доходят до sandbox при resume. Повтор с теми же ключами ничего не меняет: файл перезаписывается тем же содержимым, sshd перезапускать не нужно.
 
 ### 8.2 Env команд и SSH-сессий
 

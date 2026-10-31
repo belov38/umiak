@@ -14,6 +14,7 @@
 | `api` | публичное API v1 (S7) | 8080 (public), 9091 (`/readyz`, `/metrics`) |
 | `oauth2-proxy` | браузерные сессии: `/api/*` и `/sbx-auth/*` → proxied listener `api`, остальное → `web` | 4180 |
 | `web` | S8: дашборд `/app`, админка Payload `/admin`, REST Payload `/cms-api` | — (только через oauth2-proxy) |
+| `mcp` | удалённый MCP-сервер (S11), `/mcp` по Streamable HTTP (см. «MCP (S11)» ниже) | 8090 (`/mcp`, метаданные), 9092 (`/readyz`, `/metrics`) |
 | `gateway-secrets` | одноразовый (`gateway.yaml`): dev-секреты gateway в `secrets/gateway/` | — |
 | `gateway` | S4: preview-адреса, SSH, туннели агентов (см. «Gateway (S4)» ниже) | 8443 (TLS), 2222 (SSH), 7000, 9190 |
 
@@ -102,7 +103,7 @@ mkdir -p deploy/compose/secrets                       # один раз
 docker compose -f deploy/compose/compose.yaml up -d --build
 docker compose -f deploy/compose/compose.yaml ps -a
 # gateway-secrets, secrets-init, keycloak-db, migrate, web-migrate: Exited (0)
-# postgres, keycloak, api, oauth2-proxy, gateway, worker, web: healthy
+# postgres, keycloak, api, oauth2-proxy, gateway, worker, web, mcp: healthy
 curl -s http://localhost:8080/v1/meta                                     # api: oidc.issuer = Keycloak
 curl -s http://localhost:9091/readyz                                      # api: {"ready":true,...}
 curl -s http://localhost:8180/realms/sbx/.well-known/openid-configuration # Keycloak
@@ -325,6 +326,7 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 | Переменная | По умолчанию | Куда идёт |
 |---|---|---|
 | `SBX_API_PUBLIC_URL` | `http://localhost:8080` | `api` `SBX_API_URL` (`/v1/meta` `apiUrl`), `web` (подсказки CLI и SDK) |
+| `SBX_MCP_PUBLIC_URL` | `http://localhost:8090/mcp` | `mcp` `SBX_MCP_PUBLIC_URL`: адрес, по которому клиенты MCP ходят на сервер; его host — единственный допустимый `Host` (плюс `SBX_MCP_ALLOWED_HOSTS`), а сам адрес — `resource` в метаданных защищённого ресурса |
 | `SBX_APP_ORIGIN` | `http://localhost:4180` | `api` `SBX_APP_URL` и `SBX_APP_ORIGIN` (Origin для небезопасных методов на proxied listener); `web` `SBX_APP_ORIGIN`; web origin и post-logout redirect клиента `oauth2-proxy` в realm |
 | `SBX_KEYCLOAK_URL` | `http://localhost:8180` | Keycloak `KC_HOSTNAME` |
 | `SBX_OIDC_ISSUER` | `<SBX_KEYCLOAK_URL>/realms/sbx` | `api` и oauth2-proxy (issuer, адрес входа) |
@@ -370,7 +372,7 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
   `SBX_NODE_SSH_HOST`, `SBX_PVE_TOKEN_ID`, `SBX_PVE_SECRETS_DIR`), `SBX_RECONCILE_DRY_RUN`, Keycloak
   (`KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `SBX_DEV_PASSWORD`), публичные адреса (см. «Публичные адреса»),
   `SBX_GATEWAY_API_URL`, `SBX_API_LOG_LEVEL`.
-- Порты на хосте фиксированы: 8080 (api), 9091 (ops api), 8180 (Keycloak), 4180 (oauth2-proxy), плюс 5432
+- Порты на хосте фиксированы: 8080 (api), 9091 (ops api), 8090 (mcp), 9092 (ops mcp), 8180 (Keycloak), 4180 (oauth2-proxy), плюс 5432
   и 9090. Публичные адреса по умолчанию указывают на них (`http://localhost:8180`, `http://localhost:4180`);
   другой порт — это другие публичные адреса, их надо задать вместе (см. «Публичные адреса»).
 - Учётные данные Postgres `sbx/sbx/sbx` — только для разработки; порт опубликован на `127.0.0.1:5432`.
@@ -384,7 +386,7 @@ curl -sk --connect-to x-3000.sbx.localhost:443:127.0.0.1:8443 https://x-3000.sbx
 - RPC агента в `api` отвечают `503 agent_unavailable`, пока не подключён `ConnectAgentApi` (S3 уже в `main`, подключение — по команде master-сессии; решение 3 плана S7, `apps/api/README.md`); файлы идут через gateway.
 - Схему `tunnel` создаёт миграция S2 `db/migrations/0100_tunnel_init.sql` (её применяет `migrate` вместе с миграциями S6). Том, созданный раньше временной фикстурой схемы `tunnel` (до этой миграции), с ней несовместим: пересоздать его `down -v`, затем `up -d --build`.
 - С `SBX_GATEWAY_SERVICE_TOKEN_FILE` worker находит gateway, который держит туннель machine, через `PgRegistry` из `@sbx/agent-client` (своё небольшое подключение к Postgres и LISTEN `tunnel_sessions`) и вызывает на нём `rotate-token`.
-- `SBX_PORT_DOMAIN` (домен опубликованных портов, например `sbx.example.com`) и `SBX_SSH_USER_CA_KEYS_FILE` (файл с публичными ключами SSH user CA, по одному в строке) необязательны: worker передаёт их агенту в каждом Claim (`port_domain`, `ssh_user_ca_keys`). Без них поля пустые.
+- `SBX_PORT_DOMAIN` (домен опубликованных портов, например `sbx.example.com`) и `SBX_SSH_USER_CA_KEYS_FILE` (файл с публичными ключами SSH user CA, по одному в строке) worker передаёт агенту в каждом Claim (`port_domain`, `ssh_user_ca_keys`); ключи CA он, кроме того, отправляет `System/UpdateSshCa` при каждом resume, recover и reprovision. `gateway.yaml` задаёт `SBX_SSH_USER_CA_KEYS_FILE` = `ssh_user_ca.pub` gateway: без него sshd в VM не примет вход gateway и SSH не работает. Worker читает файл при старте: после смены CA перезапустите worker, и существующие sandbox получат новые ключи при следующем resume (для работающих — после stop/resume).
 
 ## Smoke-тест реального адаптера Proxmox
 
@@ -402,6 +404,23 @@ SBX_PVE_SMOKE=1 mise exec -- pnpm --filter @sbx/worker exec vitest run test/pve-
 - Создаёт VM только в диапазоне 500–589 (590–596 — dev-инфраструктура, 597–599 — шаблоны) из шаблона 599, по 2 vCPU / 2 GB, не больше двух одновременно запущенных.
   Перед запуском в этом диапазоне не должно быть VM: тест проверяет это в начале.
 - Идёт около 90 секунд, большая часть уходит на `shutdown` (гостю шаблона не хватает 60 с, дальше идёт `stop`).
+
+## MCP (S11)
+
+Сервис `mcp` (образ `sbx-mcp:dev`, `apps/mcp/Dockerfile`) отдаёт публичное API как инструменты MCP по Streamable HTTP. Состояния и секретов у него нет: он проверяет bearer вызовом `GET /v1/me` в `api` (`http://api:8080`) и передаёт тот же bearer во всех вызовах SDK, так что права решает `api`.
+
+```sh
+curl -s http://localhost:9092/readyz                                      # mcp: {"ready":true,...}
+curl -si -X POST http://localhost:8090/mcp -H 'content-type: application/json' -d '{}'
+# 401 с WWW-Authenticate: Bearer resource_metadata="http://localhost:8090/.well-known/oauth-protected-resource/mcp"
+curl -s http://localhost:8090/.well-known/oauth-protected-resource/mcp    # authorization_servers: [issuer Keycloak]
+```
+
+Подключение клиентов (Claude Code, Codex, OpenCode, Gemini CLI, Inspector) — `apps/mcp/README.md`. Коротко: командный ключ `sbx_…` (`sbx keys create`) в `Authorization: Bearer`, или вход через браузер клиентом Keycloak `sbx-mcp` (публичный, authorization code + PKCE, redirect `http://127.0.0.1:33418/*`, `http://localhost:33418/*` и `http://127.0.0.1:19876/*` для OpenCode, он уже есть в realm).
+
+- Проверка `Host`: допустимы host и hostname из `SBX_MCP_PUBLIC_URL` (по умолчанию `localhost:8090`) и значения `SBX_MCP_ALLOWED_HOSTS` через запятую (по умолчанию в стеке `127.0.0.1:8090`). Другой `Host` — `421`. Запрос с `Origin` отклоняется (`403`), пока origin не в `SBX_MCP_ALLOWED_ORIGINS` (в стеке пусто: клиенты MCP — не браузеры).
+- За TLS-прокси задайте `SBX_MCP_PUBLIC_URL` (`https://…/mcp`); прокси отдаёт сервису `/mcp` и `/.well-known/oauth-protected-resource/mcp` (у `api.<домен>` в проде — те же пути, S11 §6.2). Пример — `infra/dev-cp/README.md`, «S11 MCP behind Tailscale Serve».
+- Логи: `SBX_MCP_LOG_LEVEL` (по умолчанию `info`). Остановка по SIGTERM за 25 s (`stop_grace_period: 30s`).
 
 ## Как добавить сервис
 

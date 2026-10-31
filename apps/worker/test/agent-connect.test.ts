@@ -173,6 +173,29 @@ describe("ConnectAgentPort", () => {
 		]);
 	});
 
+	it("updateSshCa sends the configured SSH user CA keys with the request id", async () => {
+		const seen: { id: string | null; keys: string[] }[] = [];
+		const impl: SystemImpl = {
+			async updateSshCa(req, ctx) {
+				seen.push({
+					id: ctx.requestHeader.get(HEADER_REQUEST_ID),
+					keys: req.keys,
+				});
+				return {};
+			},
+		};
+		await portFor(impl, {
+			sshUserCaKeys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"],
+		}).updateSshCa(machineId, "r1");
+		// Without the worker setting the list is empty: the agent restores the
+		// template keys, as for a claim without keys.
+		await portFor(impl).updateSshCa(machineId, "r2");
+		expect(seen).toEqual([
+			{ id: "r1", keys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"] },
+			{ id: "r2", keys: [] },
+		]);
+	});
+
 	it("parseCaKeys keeps key lines and drops blanks and comments", () => {
 		expect(
 			parseCaKeys(

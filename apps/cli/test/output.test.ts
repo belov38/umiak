@@ -356,15 +356,6 @@ describe("sbx against the api", () => {
 		const bad = await runCli(["completion", "tcsh"], { env: home.env });
 		expect(bad.code).toBe(2);
 	});
-
-	it("mcp is a placeholder of S11: message on stderr, nothing on stdout, exit 1", async () => {
-		const r = await runCli(["mcp", "--toolsets", "core", "--read-only"], {
-			env: home.env,
-		});
-		expect(r.code).toBe(1);
-		expect(r.stdout).toBe("");
-		expect(r.stderr).toContain("implemented by S11");
-	});
 });
 
 /** A well-formed team key the api does not know. */

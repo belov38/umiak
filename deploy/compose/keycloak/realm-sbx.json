@@ -284,7 +284,11 @@
 			"implicitFlowEnabled": false,
 			"directAccessGrantsEnabled": false,
 			"serviceAccountsEnabled": false,
-			"redirectUris": ["http://127.0.0.1:33418/*", "http://localhost:33418/*"],
+			"redirectUris": [
+				"http://127.0.0.1:33418/*",
+				"http://localhost:33418/*",
+				"http://127.0.0.1:19876/*"
+			],
 			"webOrigins": [],
 			"attributes": {
 				"pkce.code.challenge.method": "S256",
