@@ -101,6 +101,10 @@ foreach ($p in @(
 # Sysprep resets services, code pages, BCD, WinRE, NetBIOS and firewall rules.
 $setupComplete = Join-Path $env:SystemRoot 'Setup\Scripts\SetupComplete.cmd'
 $firstBoot = Join-Path $env:ProgramData 'sbx-template\firstboot.ps1'
+# Written by firstboot.ps1 on the clone; the agent waits for it before the
+# rename reboot, so the image must not carry one.
+$firstBootDone = Join-Path $env:ProgramData 'sbx-template\firstboot.done'
+Remove-Leftover $firstBootDone
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $setupComplete) | Out-Null
 # cmd mis-parses files with bare LF line ends.
 $cmdText = (Get-Content -LiteralPath (Join-Path $SbxFilesDir 'SetupComplete-clone.cmd') -Raw) -replace "`r?`n", "`r`n"
@@ -174,6 +178,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\Sysprep\sb
 foreach ($f in @($setupComplete, $firstBoot)) {
     if (-not (Test-Path -LiteralPath $f)) { $problems.Add("$f is missing") }
 }
+if (Test-Path -LiteralPath $firstBootDone) { $problems.Add("$firstBootDone exists") }
 if ((Test-Path -LiteralPath $setupComplete) -and -not (Select-String -LiteralPath $setupComplete -SimpleMatch 'firstboot.ps1' -Quiet)) {
     $problems.Add("$setupComplete does not run firstboot.ps1")
 }

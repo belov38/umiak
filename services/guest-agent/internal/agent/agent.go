@@ -238,7 +238,10 @@ type agent struct {
 	// bootErr is the failure of the Windows boot step (or of the reboot
 	// for the computer name); set during startup, read-only afterwards.
 	bootErr error
-	monoRef monoRef
+	// firstBootWaited is set once the start waited for the clone
+	// first-boot script (startup only).
+	firstBootWaited bool
+	monoRef         monoRef
 
 	st       *store.Store
 	emit     events.Emitter

@@ -27,6 +27,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
 )
 
@@ -352,5 +353,227 @@ func TestWinBootRunsEarlyRightAfterSetup(t *testing.T) {
 	if !ident.EarlyDoneForBoot(h.l.EarlyFile, bootOne) {
 		t.Error("the service did not run the boot step after Windows Setup")
 	}
+	h.stop()
+}
+
+// fakeClock is a clock whose sleep advances the time at once.
+type fakeClock struct {
+	t      time.Time
+	sleeps []time.Duration
+	// onSleep, if set, runs after each sleep with the number of sleeps.
+	onSleep func(n int)
+}
+
+func (c *fakeClock) now() time.Time { return c.t }
+
+func (c *fakeClock) sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.sleeps = append(c.sleeps, d)
+	c.t = c.t.Add(d)
+	if c.onSleep != nil {
+		c.onSleep(len(c.sleeps))
+	}
+	return nil
+}
+
+// firstBootLayout returns a layout under a temporary root with the clone's
+// SetupComplete.cmd installed when installed is true.
+func firstBootLayout(t *testing.T, installed bool) paths.Layout {
+	t.Helper()
+	l := paths.ForRoot(t.TempDir())
+	l.SetupCompleteScript = filepath.Join(filepath.Dir(l.StateDir), "Windows", "Setup", "Scripts", "SetupComplete.cmd")
+	l.FirstBootDone = filepath.Join(filepath.Dir(l.StateDir), "sbx-template", "firstboot.done")
+	if installed {
+		writeFile(t, l.SetupCompleteScript, "@echo off\r\n")
+	}
+	return l
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWaitFirstBoot(t *testing.T) {
+	const wait, poll = 5 * time.Minute, 2 * time.Second
+	start := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+
+	t.Run("no setupcomplete", func(t *testing.T) {
+		l := firstBootLayout(t, false)
+		c := &fakeClock{t: start}
+		done, err := waitFirstBoot(context.Background(), l, wait, poll, c.now, c.sleep)
+		if err != nil || !done || len(c.sleeps) != 0 {
+			t.Errorf("done=%v err=%v sleeps=%d, want done at once", done, err, len(c.sleeps))
+		}
+	})
+	t.Run("marker present", func(t *testing.T) {
+		l := firstBootLayout(t, true)
+		writeFile(t, l.FirstBootDone, "2026-10-31T12:00:00Z")
+		c := &fakeClock{t: start}
+		done, err := waitFirstBoot(context.Background(), l, wait, poll, c.now, c.sleep)
+		if err != nil || !done || len(c.sleeps) != 0 {
+			t.Errorf("done=%v err=%v sleeps=%d, want done at once", done, err, len(c.sleeps))
+		}
+	})
+	t.Run("empty layout (linux)", func(t *testing.T) {
+		l := paths.ForRoot(t.TempDir())
+		l.SetupCompleteScript, l.FirstBootDone = "", ""
+		c := &fakeClock{t: start}
+		done, err := waitFirstBoot(context.Background(), l, wait, poll, c.now, c.sleep)
+		if err != nil || !done || len(c.sleeps) != 0 {
+			t.Errorf("done=%v err=%v sleeps=%d, want done at once", done, err, len(c.sleeps))
+		}
+	})
+	t.Run("marker appears", func(t *testing.T) {
+		l := firstBootLayout(t, true)
+		c := &fakeClock{t: start}
+		c.onSleep = func(n int) {
+			if n == 3 {
+				writeFile(t, l.FirstBootDone, "x")
+			}
+		}
+		done, err := waitFirstBoot(context.Background(), l, wait, poll, c.now, c.sleep)
+		if err != nil || !done {
+			t.Fatalf("done=%v err=%v, want done", done, err)
+		}
+		if len(c.sleeps) != 3 || c.sleeps[0] != poll {
+			t.Errorf("sleeps = %v, want 3 of %v", c.sleeps, poll)
+		}
+	})
+	t.Run("timeout", func(t *testing.T) {
+		l := firstBootLayout(t, true)
+		c := &fakeClock{t: start}
+		done, err := waitFirstBoot(context.Background(), l, wait, poll, c.now, c.sleep)
+		if err != nil || done {
+			t.Fatalf("done=%v err=%v, want a timeout", done, err)
+		}
+		if got := c.t.Sub(start); got < wait || got > wait+poll {
+			t.Errorf("waited %v, want %v", got, wait)
+		}
+		if n := len(c.sleeps); n != int(wait/poll) {
+			t.Errorf("%d sleeps, want %d", n, wait/poll)
+		}
+	})
+	t.Run("context ends", func(t *testing.T) {
+		l := firstBootLayout(t, true)
+		ctx, cancel := context.WithCancel(context.Background())
+		c := &fakeClock{t: start}
+		c.onSleep = func(n int) {
+			if n == 2 {
+				cancel()
+			}
+		}
+		done, err := waitFirstBoot(ctx, l, wait, poll, c.now, c.sleep)
+		if !errors.Is(err, context.Canceled) || done {
+			t.Errorf("done=%v err=%v, want context.Canceled", done, err)
+		}
+	})
+}
+
+// markerResetter records at each reboot whether firstboot.done existed.
+type markerResetter struct {
+	*ident.FakeWinResetter
+	marker string
+	seen   chan bool
+}
+
+func (r *markerResetter) Reboot(reason string) error {
+	_, err := os.Stat(r.marker)
+	r.seen <- err == nil
+	return r.FakeWinResetter.Reboot(reason)
+}
+
+// firstBootHarness is a win harness on the first boot of a clone: the
+// clone's SetupComplete.cmd is installed, firstboot.done is not written yet
+// and the new computer name needs a reboot. The returned channel gets, for
+// each reboot, whether firstboot.done existed at that moment.
+func firstBootHarness(t *testing.T) (*winHarness, chan bool) {
+	t.Helper()
+	h := newWinHarness(t)
+	fl := firstBootLayout(t, true)
+	h.l.SetupCompleteScript, h.l.FirstBootDone = fl.SetupCompleteScript, fl.FirstBootDone
+	h.r.Active = "WIN-TEMPLATE"
+	h.identityRetry = time.Minute
+	h.winBoot.FirstBootPoll = 10 * time.Millisecond
+	seen := make(chan bool, 4)
+	h.winBoot.Resetter = &markerResetter{FakeWinResetter: h.r, marker: h.l.FirstBootDone, seen: seen}
+	return h, seen
+}
+
+func TestWinBootRenameWaitsForFirstBoot(t *testing.T) {
+	h, seen := firstBootHarness(t)
+	h.winBoot.FirstBootWait = time.Minute
+	h.start()
+	select {
+	case <-seen:
+		t.Fatal("rebooted while the clone first-boot script runs")
+	case <-h.notify.ready:
+		t.Fatal("READY=1 (boot step done) while the clone first-boot script runs")
+	case <-time.After(300 * time.Millisecond):
+	}
+	writeFile(t, h.l.FirstBootDone, "2026-10-31T12:00:00Z")
+	select {
+	case ok := <-seen:
+		if !ok {
+			t.Error("rebooted before firstboot.done")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no reboot after firstboot.done")
+	}
+	h.waitReady()
+	if h.calls("Reboot") != 1 {
+		t.Errorf("calls = %v, want one reboot", h.r.Calls)
+	}
+	h.stop()
+}
+
+func TestWinBootFirstBootTimeout(t *testing.T) {
+	h, seen := firstBootHarness(t)
+	h.winBoot.FirstBootWait = 50 * time.Millisecond
+	h.start()
+	select {
+	case ok := <-seen:
+		if ok {
+			t.Error("firstboot.done exists, want the timeout path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no reboot after the first-boot timeout")
+	}
+	h.waitReady()
+	if h.calls("Reboot") != 1 {
+		t.Errorf("calls = %v, want the reboot after the timeout", h.r.Calls)
+	}
+	h.stop()
+}
+
+// The rename reboot of the identity phase (after a boot step that left the
+// name alone) waits for the first-boot script as well.
+func TestWinBootIdentityRebootWaitsForFirstBoot(t *testing.T) {
+	h, seen := firstBootHarness(t)
+	h.winBoot.FirstBootWait = time.Minute
+	h.writeEarly(bootOne) // the startup script finished the boot step
+	h.start()
+	select {
+	case <-seen:
+		t.Fatal("rebooted while the clone first-boot script runs")
+	case <-time.After(300 * time.Millisecond):
+	}
+	writeFile(t, h.l.FirstBootDone, "x")
+	select {
+	case ok := <-seen:
+		if !ok {
+			t.Error("rebooted before firstboot.done")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no reboot after firstboot.done")
+	}
+	h.waitReady()
 	h.stop()
 }

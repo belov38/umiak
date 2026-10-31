@@ -56,6 +56,9 @@ func build(f func(string) string, root string) Layout {
 		SSHDir:          f(ssh),
 		SysprepUnattend: f(`C:\Windows\System32\Sysprep\sbx-unattend.xml`),
 
+		SetupCompleteScript: f(`C:\Windows\Setup\Scripts\SetupComplete.cmd`),
+		FirstBootDone:       f(`C:\ProgramData\sbx-template\firstboot.done`),
+
 		root: root,
 	}
 }

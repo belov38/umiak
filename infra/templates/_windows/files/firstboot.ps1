@@ -6,8 +6,12 @@
 # policy. 90-cleanup installs it to C:\ProgramData\sbx-template\firstboot.ps1.
 # Self-contained (lib.ps1 is not on the clone), Windows PowerShell 5.1, ASCII.
 # Never fails Setup: every failure is logged and the script exits 0. The log
-# holds no secrets.
-param([string]$LogPath = 'C:\ProgramData\sbx-template\firstboot.log')
+# holds no secrets. Its last action writes firstboot.done (a UTC timestamp),
+# also after failed parts: the agent holds the rename reboot until then.
+param(
+    [string]$LogPath = 'C:\ProgramData\sbx-template\firstboot.log',
+    [string]$DonePath = 'C:\ProgramData\sbx-template\firstboot.done'
+)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -120,4 +124,11 @@ Invoke-Part 'firewall rules' {
 }
 
 Write-Log 'done'
+try {
+    $dir = Split-Path -Parent $DonePath
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    [IO.File]::WriteAllText($DonePath, (Get-Date).ToUniversalTime().ToString('o'))
+} catch {
+    Write-Log "ERROR done marker: $($_.Exception.Message)"
+}
 exit 0

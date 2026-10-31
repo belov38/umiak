@@ -102,6 +102,13 @@ type Layout struct {
 	// SysprepUnattend is the answer file of the template's sysprep run,
 	// deleted once the clone's identity is applied (Windows).
 	SysprepUnattend string
+	// SetupCompleteScript is the script Windows Setup runs at the end of a
+	// clone's first boot; the template installs one that runs the clone
+	// first-boot script (Windows).
+	SetupCompleteScript string
+	// FirstBootDone is the marker the clone first-boot script writes as its
+	// last action (Windows).
+	FirstBootDone string
 
 	// root is the directory the layout is mounted under; empty for Default.
 	root string

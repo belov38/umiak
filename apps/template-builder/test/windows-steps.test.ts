@@ -442,19 +442,40 @@ describe("windows steps: step content", () => {
 		expect(check).not.toMatch(/\$problems\.Add\([^\n]*[Aa]ppx/);
 	});
 
-	it("40-coding-agents protects the ProgramData config dirs (no Users write, gemini warns otherwise)", () => {
+	it("40-coding-agents protects the ProgramData config dirs (no Users write)", () => {
 		const s = code(read("steps/40-coding-agents.ps1"));
 		expect(s).toMatch(
 			/function Protect-ConfigDir[\s\S]*'\/inheritance:r'[\s\S]*'\*S-1-5-18:\(OI\)\(CI\)F'[\s\S]*'\*S-1-5-32-544:\(OI\)\(CI\)F'[\s\S]*'\*S-1-5-32-545:\(OI\)\(CI\)RX'/,
 		);
-		expect(s).toMatch(
-			/@\('gemini-cli', 'opencode', 'OpenAI'\)\) \{ Protect-ConfigDir/,
-		);
+		expect(s).toMatch(/@\('opencode', 'OpenAI'\)\) \{ Protect-ConfigDir/);
 		// The protection comes after the files are written and before the version probes.
 		expect(s.indexOf("Protect-ConfigDir (Join-Path")).toBeGreaterThan(
 			s.indexOf("OpenAI\\Codex\\config.toml"),
 		);
 		expect(s.indexOf("Protect-ConfigDir (Join-Path")).toBeLessThan(
+			s.indexOf("Get-InstalledVersion $path"),
+		);
+	});
+
+	it("40-coding-agents puts the gemini system settings under Program Files, not ProgramData", () => {
+		const s = code(read("steps/40-coding-agents.ps1"));
+		// gemini refuses a settings file whose parent lets Users create
+		// folders, which C:\ProgramData does.
+		expect(s).toMatch(
+			/\$geminiSettings = Join-Path \$env:ProgramFiles 'gemini-cli\\settings\.json'/,
+		);
+		expect(s).toMatch(
+			/Write-ConfigFile \$geminiSettings "\{ `"general`": \{ `"enableAutoUpdate`": false, `"enableAutoUpdateNotification`": false \} \}`n"/,
+		);
+		expect(s).toMatch(
+			/Set-MachineEnv GEMINI_CLI_SYSTEM_SETTINGS_PATH \$geminiSettings/,
+		);
+		expect(s).toMatch(
+			/Remove-Item -LiteralPath \(Join-Path \$env:ProgramData 'gemini-cli'\) -Recurse -Force/,
+		);
+		expect(s).not.toMatch(/ProgramData 'gemini-cli\\settings\.json'/);
+		// The env is set before the version probes run.
+		expect(s.indexOf("GEMINI_CLI_SYSTEM_SETTINGS_PATH")).toBeLessThan(
 			s.indexOf("Get-InstalledVersion $path"),
 		);
 	});
@@ -584,13 +605,21 @@ describe("windows steps: clone first boot", () => {
 		expect(s).not.toMatch(/\bexit [1-9]/);
 		expect(s).not.toMatch(/\bthrow\b/);
 		expect(s.trimEnd().split("\n").at(-1)).toBe("exit 0");
-		expect(s).toMatch(/Write-Log 'done'\s*exit 0\s*$/);
+		// firstboot.done (a timestamp) is the last action: the agent waits
+		// for it before the rename reboot.
+		expect(s).toMatch(
+			/\[string\]\$DonePath = 'C:\\ProgramData\\sbx-template\\firstboot\.done'/,
+		);
+		expect(s).toMatch(
+			/Write-Log 'done'\s*try \{[^\n]*\n(\s+[^\n]*\n)*?\s+\[IO\.File\]::WriteAllText\(\$DonePath, \(Get-Date\)\.ToUniversalTime\(\)\.ToString\('o'\)\)\s*\} catch \{\s*Write-Log "ERROR done marker: [^\n]*"\s*\}\s*exit 0\s*$/,
+		);
 	});
 
-	it("firstboot.ps1 exits 0 and ends its log with done even when every part fails", () => {
+	it("firstboot.ps1 exits 0, ends its log with done and writes firstboot.done even when every part fails", () => {
 		const dir = mkdtempSync(join(tmpdir(), "sbx-firstboot-"));
 		try {
 			const log = join(dir, "firstboot.log");
+			const done = join(dir, "marker", "firstboot.done");
 			const r = spawnSync(
 				PWSH,
 				[
@@ -600,6 +629,8 @@ describe("windows steps: clone first boot", () => {
 					join(shared, "files/firstboot.ps1"),
 					"-LogPath",
 					log,
+					"-DonePath",
+					done,
 				],
 				{ encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } },
 			);
@@ -609,6 +640,10 @@ describe("windows steps: clone first boot", () => {
 			expect(lines.at(-1)).toMatch(/^\[\d\d:\d\d:\d\d\] done$/);
 			// Off Windows every part fails, and each failure is logged.
 			expect(lines.some((l) => / ERROR /.test(l))).toBe(true);
+			// The done marker is written even after failed parts.
+			const stamp = readFileSync(done, "utf8").trim();
+			expect(stamp).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/);
+			expect(Number.isNaN(Date.parse(stamp))).toBe(false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -652,6 +687,20 @@ describe("windows steps: clone first boot", () => {
 		);
 		expect(check).toMatch(/\$setupComplete/);
 		expect(check).toMatch(/\$firstBoot/);
+	});
+
+	it("90-cleanup leaves no firstboot.done in the image (the agent waits for it on the clone)", () => {
+		const s = code(read("steps/90-cleanup.ps1"));
+		expect(s).toMatch(
+			/\$firstBootDone = Join-Path \$env:ProgramData 'sbx-template\\firstboot\.done'/,
+		);
+		expect(s).toMatch(/Remove-Leftover \$firstBootDone/);
+		const check = s.slice(
+			s.indexOf("$problems = [Collections.Generic.List[string]]::new()"),
+		);
+		expect(check).toMatch(
+			/if \(Test-Path -LiteralPath \$firstBootDone\) \{ \$problems\.Add\("\$firstBootDone exists"\) \}/,
+		);
 	});
 });
 

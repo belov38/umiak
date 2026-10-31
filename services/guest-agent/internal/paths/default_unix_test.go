@@ -39,6 +39,8 @@ func TestDefaultLayoutMatchesSpec(t *testing.T) {
 		{"AdminSocket", l.AdminSocket, ""},
 		{"EnvSocket", l.EnvSocket, ""},
 		{"SysprepUnattend", l.SysprepUnattend, ""},
+		{"SetupCompleteScript", l.SetupCompleteScript, ""},
+		{"FirstBootDone", l.FirstBootDone, ""},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {
@@ -54,6 +56,9 @@ var emptyFields = map[string]bool{
 	"AdminSocket":     true,
 	"EnvSocket":       true,
 	"SysprepUnattend": true,
+
+	"SetupCompleteScript": true,
+	"FirstBootDone":       true,
 }
 
 func TestForRootUnix(t *testing.T) {

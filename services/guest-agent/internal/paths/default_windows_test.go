@@ -65,6 +65,9 @@ func TestWindowsDefaultLayout(t *testing.T) {
 		"SSHDir":          ssh,
 		"SSHUserCA":       ssh + `\sbx_user_ca.pub`,
 		"SysprepUnattend": `C:\Windows\System32\Sysprep\sbx-unattend.xml`,
+
+		"SetupCompleteScript": `C:\Windows\Setup\Scripts\SetupComplete.cmd`,
+		"FirstBootDone":       `C:\ProgramData\sbx-template\firstboot.done`,
 	}
 	v := reflect.ValueOf(Default())
 	for i := range v.NumField() {

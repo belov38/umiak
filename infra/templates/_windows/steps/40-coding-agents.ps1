@@ -33,9 +33,8 @@ function Write-ConfigFile([string]$Path, [string]$Content) {
     Write-BuildLog "$Path written"
 }
 
-# ProgramData dirs inherit write access for Users; gemini refuses a system settings file
-# under such a parent ("Parent directory is insecure") and prints a warning before its
-# version. Only SYSTEM and Administrators write; Users read and execute.
+# ProgramData dirs inherit write access for Users. Only SYSTEM and Administrators
+# write; Users read and execute.
 function Protect-ConfigDir([string]$Dir) {
     Invoke-Native -FilePath icacls.exe -ArgumentList @($Dir, '/inheritance:r', '/grant', '*S-1-5-18:(OI)(CI)F', '/grant', '*S-1-5-32-544:(OI)(CI)F', '/grant', '*S-1-5-32-545:(OI)(CI)RX')
     foreach ($f in Get-ChildItem -LiteralPath $Dir -Recurse -File -Force) {
@@ -46,15 +45,20 @@ function Protect-ConfigDir([string]$Dir) {
 # Claude Code: managed settings (Program Files on Windows) and the env switch.
 Write-ConfigFile (Join-Path $env:ProgramFiles 'ClaudeCode\managed-settings.json') "{ `"env`": { `"DISABLE_AUTOUPDATER`": `"1`" } }`n"
 Set-MachineEnv DISABLE_AUTOUPDATER 1
-# Gemini CLI: system settings.
-Write-ConfigFile (Join-Path $env:ProgramData 'gemini-cli\settings.json') "{ `"general`": { `"enableAutoUpdate`": false, `"enableAutoUpdateNotification`": false } }`n"
+# Gemini CLI: system settings. gemini refuses its default C:\ProgramData\gemini-cli\settings.json
+# because C:\ProgramData lets Users create folders ("Parent directory is insecure") and prints
+# that warning before its version; Program Files is admin-only, the env names the file.
+$geminiSettings = Join-Path $env:ProgramFiles 'gemini-cli\settings.json'
+Write-ConfigFile $geminiSettings "{ `"general`": { `"enableAutoUpdate`": false, `"enableAutoUpdateNotification`": false } }`n"
+Set-MachineEnv GEMINI_CLI_SYSTEM_SETTINGS_PATH $geminiSettings
+Remove-Item -LiteralPath (Join-Path $env:ProgramData 'gemini-cli') -Recurse -Force -ErrorAction SilentlyContinue
 # OpenCode: managed config dir and the env switch.
 Write-ConfigFile (Join-Path $env:ProgramData 'opencode\opencode.json') "{ `"autoupdate`": false }`n"
 Set-MachineEnv OPENCODE_DISABLE_AUTOUPDATE 1
 # Codex: system config.
 Write-ConfigFile (Join-Path $env:ProgramData 'OpenAI\Codex\config.toml') "# System config of the Codex CLI: versions come with the template build.`ncheck_for_update_on_startup = false`n"
 
-foreach ($d in @('gemini-cli', 'opencode', 'OpenAI')) { Protect-ConfigDir (Join-Path $env:ProgramData $d) }
+foreach ($d in @('opencode', 'OpenAI')) { Protect-ConfigDir (Join-Path $env:ProgramData $d) }
 
 $npmPrefix = Join-Path $env:ProgramData 'npm'
 foreach ($t in @('claude', 'codex', 'opencode', 'gemini')) {

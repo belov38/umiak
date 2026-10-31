@@ -3,7 +3,10 @@ package agent
 // The Windows start (S9 spec 12.3, 11.2). Before the S3 sequence the agent
 // waits while Windows Setup runs, then waits for early.json of this boot
 // from the startup script `sbx-agent early`, and runs the boot step itself
-// when the script did not finish in time. The identity is then applied with
+// when the script did not finish in time. Before that step and before a
+// reboot for the computer name it waits for the clone first-boot script
+// (firstboot.done), which Windows Setup runs from SetupComplete.cmd while
+// the service already runs. The identity is then applied with
 // ident.ApplyWindows (ModeService) instead of ident.Apply. Until the boot
 // step is done nothing is served; if it fails, the identity phase fails and
 // Claim, UpdateSecrets and Process/Start (outside the admin socket) answer
@@ -15,6 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -24,6 +29,7 @@ import (
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
 )
 
@@ -33,6 +39,9 @@ const (
 	DefaultEarlyWait  = 60 * time.Second
 	DefaultEarlyPoll  = time.Second
 	DefaultRebootWait = 2 * time.Minute
+
+	DefaultFirstBootWait = 5 * time.Minute
+	DefaultFirstBootPoll = 2 * time.Second
 )
 
 // WinBoot configures the Windows start. Zero timings take the defaults.
@@ -56,6 +65,12 @@ type WinBoot struct {
 	// RebootWait bounds the wait for a reboot the boot step asked for.
 	// Default 2 min.
 	RebootWait time.Duration
+	// FirstBootWait bounds the wait for the clone first-boot script
+	// (firstboot.done) before the boot step and the rename reboot.
+	// Default 5 min.
+	FirstBootWait time.Duration
+	// FirstBootPoll is the period of the firstboot.done check. Default 2 s.
+	FirstBootPoll time.Duration
 }
 
 // withDefaults fills the defaults and checks the required fields.
@@ -81,6 +96,12 @@ func (w WinBoot) withDefaults() (*WinBoot, error) {
 	if w.RebootWait <= 0 {
 		w.RebootWait = DefaultRebootWait
 	}
+	if w.FirstBootWait <= 0 {
+		w.FirstBootWait = DefaultFirstBootWait
+	}
+	if w.FirstBootPoll <= 0 {
+		w.FirstBootPoll = DefaultFirstBootPoll
+	}
 	return &w, nil
 }
 
@@ -94,6 +115,60 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+// firstBootPending reports whether the clone first-boot script is installed
+// (l.SetupCompleteScript exists) and has not written l.FirstBootDone yet.
+// Always false for a layout without these paths (Linux).
+func firstBootPending(l paths.Layout) bool {
+	if l.SetupCompleteScript == "" || l.FirstBootDone == "" {
+		return false
+	}
+	if _, err := os.Stat(l.SetupCompleteScript); err != nil {
+		return false
+	}
+	_, err := os.Stat(l.FirstBootDone)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// waitFirstBoot polls every poll until the clone first-boot script is done
+// (see firstBootPending), at most wait. It reports false on a timeout and
+// returns the error of sleep (ctx ended).
+func waitFirstBoot(ctx context.Context, l paths.Layout, wait, poll time.Duration,
+	now func() time.Time, sleep func(context.Context, time.Duration) error) (bool, error) {
+	deadline := now().Add(wait)
+	for firstBootPending(l) {
+		if !now().Before(deadline) {
+			return false, nil
+		}
+		if err := sleep(ctx, poll); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// awaitFirstBoot waits once per run for the clone first-boot script, which
+// Windows Setup runs from SetupComplete.cmd while the service already runs:
+// a reboot for the computer name would cut it off. A timeout is logged and
+// the start goes on.
+func (a *agent) awaitFirstBoot(ctx context.Context) error {
+	if a.firstBootWaited || !firstBootPending(a.l) {
+		return nil
+	}
+	a.firstBootWaited = true
+	w := a.d.WinBoot
+	a.log.Info("agent: waiting for the clone first-boot script", "marker", a.l.FirstBootDone, "wait", w.FirstBootWait)
+	done, err := waitFirstBoot(ctx, a.l, w.FirstBootWait, w.FirstBootPoll, time.Now, sleepCtx)
+	if err != nil {
+		return err
+	}
+	if !done {
+		a.log.Warn("agent: the clone first-boot script did not finish in time, going on", "marker", a.l.FirstBootDone, "wait", w.FirstBootWait)
+		return nil
+	}
+	a.log.Info("agent: the clone first-boot script finished")
+	return nil
 }
 
 // windowsBootStep waits out Windows Setup and the boot step of this boot
@@ -134,6 +209,9 @@ func (a *agent) windowsBootStep(ctx context.Context) error {
 // runEarlyStep runs `sbx-agent early` in the service (ModeService).
 func (a *agent) runEarlyStep(ctx context.Context) error {
 	w := a.d.WinBoot
+	if err := a.awaitFirstBoot(ctx); err != nil {
+		return err
+	}
 	a.log.Warn("agent: the startup script did not finish the boot step of this boot, running it in the service")
 	if err := ident.EarlyIn(ctx, a.l, a.d.IdentSource, w.Resetter, ident.ModeService); err != nil {
 		if ctx.Err() != nil {
@@ -171,6 +249,9 @@ func (a *agent) applyIdentityWindows(ctx context.Context) {
 		if changed {
 			a.log.Warn("agent: the machine identity changed after the boot step; the agent reset the identity",
 				"machine_id", id.MachineID)
+		}
+		if err == nil && reboot {
+			err = a.awaitFirstBoot(ctx)
 		}
 		if err == nil && reboot {
 			a.log.Warn("agent: the computer name is not in effect, rebooting")
