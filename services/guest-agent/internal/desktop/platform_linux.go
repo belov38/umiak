@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
 )
@@ -23,6 +25,14 @@ func PlatformEnvironment() map[string]string {
 func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(context.Context) error, error) {
 	rooted := func(p string) string { r, _ := l.Rooted(p); return r }
 	h := &FileHost{SunDir: rooted("/home/user/.local/state/sbx-sunshine"), MoonDir: rooted("/var/lib/sbx-stream"), Template: rooted("/etc/sbx-desktop/moonlight.json"), IceScript: "/usr/local/lib/sbx-desktop/ice-servers", Run: ExecCommand}
+	h.FlowTimeout = func() (uint32, error) {
+		data, e := os.ReadFile(rooted("/proc/sys/net/netfilter/nf_conntrack_udp_timeout_stream"))
+		if e != nil {
+			return 0, e
+		}
+		ttl, e := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
+		return uint32(ttl), e
+	}
 	h.Service = func(ctx context.Context, action, name string) error {
 		unit := "sbx-sunshine.service"
 		if name == "moonlight" {

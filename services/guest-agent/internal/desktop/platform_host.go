@@ -34,6 +34,7 @@ type FileHost struct {
 	Service                              func(context.Context, string, string) error
 	Own                                  func(context.Context, string, string) error
 	Running                              func(context.Context) (bool, error)
+	FlowTimeout                          func() (uint32, error)
 	mu                                   sync.Mutex
 }
 
@@ -179,7 +180,19 @@ func (h *FileHost) Viewers(ctx context.Context) (uint32, error) {
 			return 0, nil
 		}
 	}
-	// Pinned Sunshine logs one CONNECT/DISCONNECT per ENet control session.
+	// Active ENet keepalives refresh the ASSURED UDP flow timeout. A closed
+	// socket leaves conntrack state behind, but no recent traffic. Sunshine's
+	// forced session stop does not emit an ENet DISCONNECT log event.
+	if h.FlowTimeout != nil {
+		ttl, err := h.FlowTimeout()
+		if err == nil && ttl > 5 {
+			data, err := h.Run(ctx, "conntrack", "-L", "-p", "udp", "--dport", "47999", "-o", "extended")
+			if err == nil {
+				return recentConntrackViewers(string(data), ttl), nil
+			}
+		}
+	}
+	// Lifecycle logs remain a conservative fallback when flow sampling fails.
 	file, e := os.Open(filepath.Join(h.SunDir, "sunshine.log"))
 	var count uint32
 	if e == nil {

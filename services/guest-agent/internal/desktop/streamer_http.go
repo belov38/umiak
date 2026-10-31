@@ -371,3 +371,22 @@ func conntrackViewers(text string) uint32 {
 	}
 	return n
 }
+
+// recentConntrackViewers excludes UDP entries left behind by closed sessions.
+func recentConntrackViewers(text string, timeout uint32) uint32 {
+	if timeout <= 5 {
+		return 0
+	}
+	var recent []string
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		ttl, e := strconv.ParseUint(fields[2], 10, 32)
+		if e == nil && ttl >= uint64(timeout-5) {
+			recent = append(recent, line)
+		}
+	}
+	return conntrackViewers(strings.Join(recent, "\n"))
+}

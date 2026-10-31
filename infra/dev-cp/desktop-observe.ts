@@ -9,10 +9,11 @@ export interface Observation {
 	api_age: number | null;
 	stop_reason: string | null;
 	runtime_id: string | null;
+	machine_id: string | null;
 }
 export function observeDesktop(slug: string): Observation {
 	if (!/^[a-z0-9-]+$/.test(slug)) throw new Error("unsafe sandbox slug");
-	const sql = `SELECT row_to_json(x) FROM (SELECT s.state,s.activity_counters AS counters,extract(epoch FROM now()-s.last_api_call_at)::int AS api_age,s.stop_reason,m.vmid::text AS runtime_id FROM runtime.sandboxes s LEFT JOIN runtime.machines m ON m.id=s.machine_id WHERE s.slug='${slug}' AND s.labels->>'e2e'='desktop') x;`;
+	const sql = `SELECT row_to_json(x) FROM (SELECT s.state,s.activity_counters AS counters,extract(epoch FROM now()-s.last_api_call_at)::int AS api_age,s.stop_reason,m.vmid::text AS runtime_id,m.id::text AS machine_id FROM runtime.sandboxes s LEFT JOIN runtime.machines m ON m.id=s.machine_id WHERE s.slug='${slug}' AND s.labels->>'e2e'='desktop') x;`;
 	const text = execFileSync(
 		"ssh",
 		[

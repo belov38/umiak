@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { verifyLiveDesktopMcp } from "../../apps/mcp/test/live-desktop.ts";
+import { makeContext } from "../../apps/template-builder/src/context.ts";
 import { verifyDesktopMedia } from "../../apps/web/e2e/desktop-media.ts";
 import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
 import { waitForDesktopBudget } from "./desktop-budget.ts";
@@ -12,6 +13,7 @@ import {
 	verifyDesktopIdleHold,
 	waitDesktopIdleStop,
 } from "./desktop-observe.ts";
+import { installTestAgent } from "./guest-package.ts";
 
 const client = new Sbx();
 const created: Sandbox[] = [];
@@ -44,7 +46,40 @@ try {
 	});
 	created.push(sb);
 	await sb.waitUntilReady({ timeoutMs: 300_000 });
-	console.log(`create_ms ${Math.round(performance.now() - start)}`);
+	const createMs = Math.round(performance.now() - start);
+	if (process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE) {
+		process.env.SBX_PVE_URL ??= "https://100.64.10.2:8006";
+		process.env.SBX_PVE_TLS_NAME ??= "pve";
+		process.env.SBX_NODE_SSH_HOST ??= "100.64.10.2";
+		process.env.SBX_TEMPLATE_VMID_RANGE ??= "595-596";
+		const ctx = await makeContext();
+		try {
+			const row = observeDesktop(sb.data.slug);
+			await installTestAgent(
+				ctx,
+				Number(row.runtime_id),
+				row.machine_id ?? "",
+				process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE,
+			);
+		} finally {
+			ctx.close();
+		}
+		const until = Date.now() + 60_000;
+		for (;;) {
+			try {
+				if ((await sb.desktop.status()).state === "ready") break;
+			} catch {
+				/* Reconnecting after service restart. */
+			}
+			if (Date.now() > until) throw new Error("test agent did not reconnect");
+			await new Promise((done) => setTimeout(done, 1000));
+		}
+		console.log(
+			"installed experimental signed agent; immutable recipe rebuild still required",
+		);
+	}
+
+	console.log(`create_ms ${createMs}`);
 	check(sb.data.endpoints.desktop, "desktop capability");
 	const before = await sb.desktop.screenshot({ cursor: "false" });
 	check(
