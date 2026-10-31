@@ -5,6 +5,7 @@ import {
 	familyForTunnelUrl,
 	type Machines,
 	type Qga,
+	retryOnVmLock,
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
@@ -410,7 +411,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 
 		signal?.throwIfAborted();
 		log(`VM ${vmA}: hard stop and start`);
-		await machines.stop(vmA);
+		await retryOnVmLock(() => machines.stop(vmA as number));
 		const restartAt = now();
 		await machines.start(vmA);
 		const again = await waitAgent(vmA, { machineId: a.uuid }, `VM ${vmA}`);
@@ -419,8 +420,18 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 
 		signal?.throwIfAborted();
 		log(`VM ${vmA}: snapshot (QGA fsfreeze hook)`);
-		const snapAt = now();
-		snap = await machines.snapshot(vmA);
+		// Right after the restart qmeventd may still hold the VM lock (retryOnVmLock); only the
+		// attempt that succeeds is timed.
+		let snapAt = 0;
+		snap = await retryOnVmLock(
+			() => {
+				snapAt = now();
+				return machines.snapshot(vmA as number);
+			},
+			{
+				onRetry: (err) => log(`VM ${vmA}: snapshot: ${String(err)}; retrying`),
+			},
+		);
 		const forkSnapshotMs = now() - snapAt;
 		const freezeMs = snap.freezeMs ?? null;
 		log(
@@ -435,7 +446,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 				.shutdown(vmA as number, SHUTDOWN_TIMEOUT_S)
 				.catch(async (err) => {
 					log(`VM ${vmA}: shutdown failed (${String(err)}), hard stop`);
-					await machines.stop(vmA as number);
+					await retryOnVmLock(() => machines.stop(vmA as number));
 				});
 		};
 		await shutdownA();
