@@ -9,6 +9,7 @@ import {
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
+	VM_LOCK_AFTER_RESTART_MS,
 } from "@sbx/pve";
 import { devCpRegistrar } from "../../template-builder/src/devcp.ts";
 import { type Ctx, RamGuard } from "./context.ts";
@@ -419,9 +420,15 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		log(`VM ${vmA}: restart to agent ready ${hardStopRestartMs} ms`);
 
 		signal?.throwIfAborted();
+		// qmeventd may still hold the VM lock after the restart, and the snapshot would wait for
+		// it inside the freeze budget: wait it out so freeze_ms measures the freeze.
+		const settle = restartAt + VM_LOCK_AFTER_RESTART_MS - now();
+		if (settle > 0) {
+			log(`VM ${vmA}: waiting ${settle} ms for the VM lock after the restart`);
+			await sleep(settle);
+		}
 		log(`VM ${vmA}: snapshot (QGA fsfreeze hook)`);
-		// Right after the restart qmeventd may still hold the VM lock (retryOnVmLock); only the
-		// attempt that succeeds is timed.
+		// The lock may still be busy (retryOnVmLock); only the attempt that succeeds is timed.
 		let snapAt = 0;
 		snap = await retryOnVmLock(
 			() => {

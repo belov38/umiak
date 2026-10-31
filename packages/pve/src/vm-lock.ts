@@ -1,6 +1,13 @@
 /** A Proxmox task or call that could not take the VM config lock. */
 export const VM_LOCK_TIMEOUT_RE = /can't lock file .* got timeout/;
 
+/**
+ * How long after a start that follows a stop or shutdown the VM lock may still be held: qmeventd
+ * waits up to 30 s for the old QEMU process before it gives up (seen on pve), plus a margin.
+ * A snapshot in that window waits for the lock inside its freeze budget.
+ */
+export const VM_LOCK_AFTER_RESTART_MS = 35_000;
+
 export interface VmLockRetryOptions {
 	/** Attempts in total (default 5). */
 	tries?: number;
