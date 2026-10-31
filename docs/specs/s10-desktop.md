@@ -937,3 +937,26 @@ cua-driver 0.38.0 — последний versioned release в просмотре
 Agent/worker/gateway/API/TS+Python SDK/CLI/MCP contract implemented and fake-tested. Production `Session` and `Streamer` adapters remain behind interfaces until Linux/Windows helper and upstream pairing spikes; default behavior is unavailable, never a fake ready screen. This is the master's explicit temporary implementation allowance, not an acceptance waiver. Remaining: session startup after secrets, helper OS bindings, private streamer databases/process lifecycle, observed viewer count and real media acceptance.
 
 The linux-desktop recipe now inherits Linux pins, adds pinned cosign3.1.4 for cua signature verification, and installs upstream-generated moonlight config. The release archive contains `package/web-server`; extraction strips `package/`. Sunshine/moonlight services are manual; config templates contain no credentials. Audio starts disabled pending the best-effort spike (§8.5). `linux-desktop` verification combines Linux baseline and desktop image checks; full screen/input/stream acceptance runs after real claim through `infra/dev-cp/e2e-desktop.sh`. No template build/version or latency result has been claimed yet.
+
+### Adapter implementation choices (source-backed, 2026-10-31)
+
+`sbx-session` is implemented as the `session --socket` subcommand of the signed
+agent binary. This keeps helper and agent versions together across updates.
+Its local transport is bounded HTTP/JSON over an ACL-protected AF_UNIX socket,
+not a second public API; this replaces the proposed custom protobuf framing.
+Linux uses X11/XTEST/XFixes directly (no xdotool/scrot dependency for API calls),
+including Unicode keymap input and INCR clipboard transfers. systemd owns restarts.
+
+Sunshine source at v2026.914.233613 has no REST session-count endpoint.
+`/api/clients/list` lists paired certificates only. RTSP TCP requests are short-lived.
+Observed ENet CLIENT CONNECTED/DISCONNECTED log transitions are the primary count;
+ASSURED UDP47999 conntrack flows are the fallback (conservative until flow expiry).
+A failed observation never clears a previously active count. The agent also observes
+already-running streamers after its own restart. Empty/no streamer is zero activity.
+
+Sunshine password bootstrap uses POST/api/password and exact on-disk TLS certificate
+pinning; pairing uses GET/api/pin and POST/api/pin with pairing_id. Moonlight v3.0.1
+returns streamed NDJSON Pin then Paired. The proxy user sbx is a pre-created ordinary
+User, cannot add hosts; only the generated private administrator manages pairing.
+Source-derived wire fixtures are committed under internal/desktop/testdata/upstream;
+they are not live pve recordings.

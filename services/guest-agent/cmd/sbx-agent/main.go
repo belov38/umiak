@@ -62,6 +62,8 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 		return 2
 	}
 	switch args[0] {
+	case "session":
+		return sessionCmd(ctx, args[1:], stderr)
 	case "version":
 		_, _ = fmt.Fprintln(stdout, d.version)
 		return 0

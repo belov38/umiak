@@ -23,12 +23,17 @@ type fakeSession struct {
 	failAt  int
 }
 
+// State returns the live screen dimensions and pointer.
 func (*fakeSession) State(context.Context) (*v1.DesktopSize, *v1.DesktopPoint, error) {
 	return &v1.DesktopSize{Width: 1920, Height: 1080}, &v1.DesktopPoint{X: 100, Y: 200}, nil
 }
+
+// Capture captures the desktop independently of video streaming.
 func (*fakeSession) Capture(context.Context, bool) (image.Image, error) {
 	return image.NewRGBA(image.Rect(0, 0, 1920, 1080)), nil
 }
+
+// Input dispatches a validated input action.
 func (f *fakeSession) Input(_ context.Context, _ *v1.DesktopAction) error {
 	f.actions++
 	if f.failAt > 0 && f.actions == f.failAt {
@@ -36,9 +41,13 @@ func (f *fakeSession) Input(_ context.Context, _ *v1.DesktopAction) error {
 	}
 	return nil
 }
+
+// ClipboardGet reads the interactive text selection.
 func (f *fakeSession) ClipboardGet(context.Context) (string, bool, error) {
 	return f.text, f.text != "", nil
 }
+
+// ClipboardSet owns the interactive text selection.
 func (f *fakeSession) ClipboardSet(_ context.Context, s string) error { f.text = s; return nil }
 
 type fakeStreamer struct {
@@ -46,11 +55,16 @@ type fakeStreamer struct {
 	stops int
 }
 
+// Open starts and pairs the pinned upstream streaming stack.
 func (f *fakeStreamer) Open(_ context.Context, c Credentials, _ []*v1.DesktopIceServer) (string, string, error) {
 	f.creds = c
 	return "host", "desktop", nil
 }
-func (f *fakeStreamer) Stop(context.Context) error       { f.stops++; return nil }
+
+// Stop stops both streaming services.
+func (f *fakeStreamer) Stop(context.Context) error { f.stops++; return nil }
+
+// EndStreams implements the desktop adapter boundary.
 func (f *fakeStreamer) EndStreams(context.Context) error { return nil }
 
 func service(t *testing.T, id string, dir string, session *fakeSession, stream *fakeStreamer, emit *events.Recorder) *Service {
@@ -61,6 +75,8 @@ func service(t *testing.T, id string, dir string, session *fakeSession, stream *
 	}
 	return s
 }
+
+// TestIdentityCredentialsAndEpoch implements the desktop adapter boundary.
 func TestIdentityCredentialsAndEpoch(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -108,6 +124,7 @@ func TestIdentityCredentialsAndEpoch(t *testing.T) {
 	}
 }
 
+// TestActRejectsInvalidScreenshotBeforeInput implements the desktop adapter boundary.
 func TestActRejectsInvalidScreenshotBeforeInput(t *testing.T) {
 	for _, shot := range []*v1.DesktopScreenshotRequest{
 		{Format: "gif"}, {Quality: 101}, {Region: &v1.DesktopRegion{X: 1919, Y: 0, Width: 2, Height: 1}},
@@ -121,6 +138,7 @@ func TestActRejectsInvalidScreenshotBeforeInput(t *testing.T) {
 	}
 }
 
+// TestInvalidActionCarriesStructuredIndex implements the desktop adapter boundary.
 func TestInvalidActionCarriesStructuredIndex(t *testing.T) {
 	_, err := validateActions(&v1.DesktopActRequest{Actions: []*v1.DesktopAction{{Type: "wait"}, {Type: "key", Keys: []string{"unknown"}}}}, &v1.DesktopSize{Width: 1920, Height: 1080})
 	cerr := new(connect.Error)
@@ -142,6 +160,7 @@ func TestInvalidActionCarriesStructuredIndex(t *testing.T) {
 	t.Fatal("missing structured action failure")
 }
 
+// TestFailedActionCarriesPartialProgress implements the desktop adapter boundary.
 func TestFailedActionCarriesPartialProgress(t *testing.T) {
 	f := &fakeSession{failAt: 3}
 	s := service(t, "machine", t.TempDir(), f, &fakeStreamer{}, &events.Recorder{})
@@ -167,6 +186,8 @@ func TestFailedActionCarriesPartialProgress(t *testing.T) {
 	}
 	t.Fatal("missing partial progress")
 }
+
+// TestValidateEntireBatchBeforeInput implements the desktop adapter boundary.
 func TestValidateEntireBatchBeforeInput(t *testing.T) {
 	f := &fakeSession{}
 	s := service(t, "a", t.TempDir(), f, &fakeStreamer{}, nil)
@@ -177,6 +198,8 @@ func TestValidateEntireBatchBeforeInput(t *testing.T) {
 		t.Fatalf("invalid batch executed %d actions: %v", f.actions, e)
 	}
 }
+
+// TestScreenshotAndClipboardWithoutStreamer implements the desktop adapter boundary.
 func TestScreenshotAndClipboardWithoutStreamer(t *testing.T) {
 	s := service(t, "a", t.TempDir(), &fakeSession{}, &fakeStreamer{}, nil)
 	ctx := context.Background()
@@ -197,6 +220,7 @@ func TestScreenshotAndClipboardWithoutStreamer(t *testing.T) {
 	}
 }
 
+// TestInvalidActionLimits implements the desktop adapter boundary.
 func TestInvalidActionLimits(t *testing.T) {
 	screen := &v1.DesktopSize{Width: 1920, Height: 1080}
 	for _, a := range []*v1.DesktopAction{{Type: "unknown"}, {Type: "key", Keys: []string{"made-up"}}, {Type: "click", Modifiers: []string{"enter"}}, {Type: "wait", Ms: 10001}, {Type: "type", DelayMs: proto.Uint32(101)}, {Type: "drag", Path: []*v1.DesktopPoint{{X: 0, Y: 0}}}} {

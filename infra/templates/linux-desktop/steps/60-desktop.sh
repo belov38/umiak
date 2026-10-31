@@ -7,7 +7,7 @@ set -euo pipefail
 apt_install xserver-xorg-core xserver-xorg-video-dummy xserver-xorg-input-libinput \
  x11-xserver-utils dbus-x11 lightdm lightdm-gtk-greeter openbox tint2 \
  xfce4-terminal pcmanfm fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
- fonts-dejavu-core at-spi2-core pipewire pipewire-pulse wireplumber xdotool xclip scrot
+ fonts-dejavu-core at-spi2-core pipewire pipewire-pulse wireplumber xdotool xclip scrot conntrack
 
 sunshine=$(toml_get desktop.sunshine.version)
 moonlight=$(toml_get desktop.moonlight_web.version)
@@ -54,7 +54,8 @@ PY
 for path in etc/X11/xorg.conf.d/10-sbx-dummy.conf etc/lightdm/lightdm.conf.d/50-sbx.conf \
  etc/systemd/system/lightdm.service.d/10-sbx.conf etc/systemd/user/cua-driver.service \
  etc/opt/chrome/policies/managed/sbx.json usr/share/xsessions/sbx.desktop etc/xdg/openbox/autostart \
- etc/sbx-desktop/sunshine.conf etc/systemd/system/sbx-moonlight-web.service; do
+ etc/sbx-desktop/sunshine.conf etc/systemd/system/sbx-moonlight-web.service \
+ etc/systemd/system/sbx-sunshine.service etc/systemd/user/sbx-session.service; do
  install_file "$path"
 done
 install_file usr/local/lib/sbx-desktop/session 0755

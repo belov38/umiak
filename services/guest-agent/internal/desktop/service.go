@@ -190,7 +190,7 @@ func (s *Service) Status(ctx context.Context, _ *connect.Request[v1.DesktopStatu
 }
 
 // Configure atomically installs issued TURN credentials, rejecting stale epochs.
-func (s *Service) Configure(_ context.Context, r *connect.Request[v1.DesktopConfigureRequest]) (*connect.Response[v1.DesktopConfigureResponse], error) {
+func (s *Service) Configure(ctx context.Context, r *connect.Request[v1.DesktopConfigureRequest]) (*connect.Response[v1.DesktopConfigureResponse], error) {
 	if err := s.supported(); err != nil {
 		return nil, err
 	}
@@ -217,6 +217,13 @@ func (s *Service) Configure(_ context.Context, r *connect.Request[v1.DesktopConf
 	}
 	s.state.AuthEpoch = r.Msg.AuthEpoch
 	s.state.Stopped = false
+	if adapter, ok := s.opts.Streamer.(interface {
+		Configure(context.Context, []*v1.DesktopIceServer) error
+	}); ok {
+		if err = adapter.Configure(ctx, s.ice); err != nil {
+			return nil, err
+		}
+	}
 	if err = s.save(); err != nil {
 		return nil, err
 	}

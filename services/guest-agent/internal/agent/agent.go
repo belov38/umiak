@@ -247,26 +247,27 @@ type agent struct {
 	firstBootWaited bool
 	monoRef         monoRef
 
-	st       *store.Store
-	emit     events.Emitter
-	tracker  *readiness.Tracker
-	quiesce  *quiesce.Manager
-	claim    *claim.Manager
-	proc     *process.Manager
-	files    *files.Service
-	ports    *ports.Scanner
-	tcp      *ports.Counter
-	updater  *update.Manager
-	guard    *update.StartGuard // update deadline until CheckPending
-	desktop  *desktop.Service
-	system   *system.Service
-	idle     *system.IdleLoop
-	gopsutil *system.GopsutilMetrics // nil when Deps.Metrics is set
-	mux      http.Handler
-	confirm  *confirmer
-	reqcache *reqcache.Cache
-	tunnel   *tunnelState
-	identity *identityState
+	st           *store.Store
+	emit         events.Emitter
+	tracker      *readiness.Tracker
+	quiesce      *quiesce.Manager
+	claim        *claim.Manager
+	proc         *process.Manager
+	files        *files.Service
+	ports        *ports.Scanner
+	tcp          *ports.Counter
+	updater      *update.Manager
+	guard        *update.StartGuard // update deadline until CheckPending
+	desktop      *desktop.Service
+	desktopStart func(context.Context) error
+	system       *system.Service
+	idle         *system.IdleLoop
+	gopsutil     *system.GopsutilMetrics // nil when Deps.Metrics is set
+	mux          http.Handler
+	confirm      *confirmer
+	reqcache     *reqcache.Cache
+	tunnel       *tunnelState
+	identity     *identityState
 
 	stopOnce sync.Once
 

@@ -14,6 +14,7 @@ func (a *agent) desktopLoop(ctx context.Context) {
 	if !a.cfg.DesktopEnabled {
 		return
 	}
+	started := false
 	sample := func() {
 		phases, _ := a.tracker.Snapshot()
 		secretsReady := false
@@ -25,6 +26,14 @@ func (a *agent) desktopLoop(ctx context.Context) {
 		state := v1.PhaseState_PHASE_STATE_PENDING
 		reason := "desktop_not_ready"
 		if secretsReady {
+			if !started && a.desktopStart != nil {
+				if err := a.desktopStart(ctx); err != nil {
+					a.tracker.Set("desktop", v1.PhaseState_PHASE_STATE_PENDING, "desktop_not_ready")
+					return
+				}
+				started = true
+			}
+			a.desktop.PollViewers(ctx)
 			r, err := a.desktop.Status(ctx, connect.NewRequest(&v1.DesktopStatusRequest{}))
 			if err == nil && r.Msg.State == "ready" {
 				state = v1.PhaseState_PHASE_STATE_READY
