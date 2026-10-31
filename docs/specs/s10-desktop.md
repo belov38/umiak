@@ -1053,3 +1053,34 @@ The S8 Desktop tab and S11 API contract are unchanged by the live fixes.
 Open: Windows desktop (§8) after S9; production TURN on TLS 443 (dedicated address or
 SNI). Audio stays disabled; performance, glass-to-glass latency and multi-viewer
 behaviour are not characterised by this acceptance.
+
+
+### Windows desktop — решения реализации (2026-11-01, после merge S9)
+
+- **Отдельный шаблон `windows-desktop`** (`extends: windows`, слот **595**), решение master
+  2026-11-01. Шаблон `windows` (598) остаётся headless и не меняется; §7 «S10 добавляет в
+  `60-desktop`» заменено отдельным шагом `65-streamer` дочернего рецепта (общие шаги
+  `_windows` без изменений). `linux-desktop` теперь занимает один слот **596**; как у
+  `windows`, пересборка одного слота требует сначала вывести старый шаблон.
+- **`agent.toml`** desktop-рецепта рендерит `sbx-tpl` (`isDesktopRecipe`): `[desktop] enabled`,
+  фаза `desktop` в `[readiness] required`, порты стримера в `[ports] exclude`. Установщик
+  `desktop-install.ps1` больше не правит `agent.toml` регулярными выражениями.
+- **Пины Windows-артефактов** (Sunshine MSI, moonlight-web zip, cua-driver zip, cosign) — в
+  `windows-desktop/files/desktop-pins.json` с sha256; cua-driver дополнительно проверяется
+  `cosign verify-blob`. Перенос в типизированный `versions.toml [desktop]` для Windows — follow-up.
+- **Edge**: политики `HideFirstRunExperience`, `BrowserSignin=0`, `SyncDisabled`,
+  `DefaultBrowserSettingEnabled=0`, без промо и рекомендаций.
+- **Verify `windows-desktop`**: базовый `windows/verify.ps1` целиком плюс группа `desktop`
+  (файлы стримеров, службы Manual/Stopped и учётная запись `NT SERVICE\sbx-moonlight-web`,
+  шаблон moonlight-web на loopback без STUN, `agent.toml`, нет слушателей стримера до Open,
+  политики Edge). Группа вставляется перед `# --- main ---` и регистрируется через
+  `$SbxExtraGroups`; в `windows/verify.ps1` добавлен только этот хук.
+- **Activity на Windows**: conntrack нет, а лог Sunshine не пишет DISCONNECT при
+  принудительном завершении. Основной признак — UDP-сокеты процесса moonlight-web
+  (`web-server.exe`, `GetExtendedUdpTable` с владельцем): ENet-канал к Sunshine есть у каждого
+  потока при любом транспорте браузера, без потока у moonlight-web UDP-сокетов нет. Число
+  потоков не определяется, агент сообщает `desktopStreams = 1` при наличии сокетов.
+  Ошибка выборки — запасной путь через лог Sunshine (консервативно).
+- **Сессия**: `register-session.ps1` регистрирует задачи `\sbx\session` и `\sbx\cua-driver`
+  (Interactive, `user`, триггер AtLogOn) при каждом старте агента; запуск сразу — только если
+  `user` уже вошёл, иначе их запускает триггер автологона.
