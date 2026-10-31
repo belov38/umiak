@@ -179,6 +179,11 @@ try {
 		"stop/resume desktop ready",
 	);
 	await sb.desktop.screenshot();
+	const revoked = await fetch(url, {
+		redirect: "manual",
+		headers: { cookie: [...jar.values()].join("; ") },
+	});
+	check(revoked.status === 401, "old desktop cookie revoked after stop/resume");
 	console.log(`artifacts ${output}`);
 } catch (error) {
 	for (const sandbox of created) {

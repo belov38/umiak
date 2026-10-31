@@ -13,6 +13,12 @@ export async function verifyDesktopMedia(
 	output: string,
 	onWebRtcReady?: () => Promise<void>,
 ) {
+	const protocols = (process.env.SBX_DESKTOP_TURN_TRANSPORTS ?? "udp").split(
+		",",
+	);
+	if (protocols.some((p) => !["udp", "tcp", "tls"].includes(p)))
+		throw new Error("invalid TURN verification transport");
+	const cases = ["websocket", ...protocols.map((p) => `webrtc-${p}`)];
 	const browser = await chromium.launch({
 		headless: true,
 		args: [
@@ -24,13 +30,36 @@ export async function verifyDesktopMedia(
 				: []),
 		],
 	});
+
 	try {
-		for (const transport of ["websocket", "webrtc"] as const) {
+		for (const label of cases) {
+			const transport = label === "websocket" ? "websocket" : "webrtc";
+			const protocol = label.slice("webrtc-".length);
 			const page = await browser.newPage({
 				viewport: { width: 1280, height: 800 },
 			});
 			if (transport === "webrtc")
-				await page.addInitScript(() => {
+				await page.addInitScript((protocol) => {
+					const force = (config: RTCConfiguration = {}): RTCConfiguration => ({
+						...config,
+						iceTransportPolicy: "relay",
+						iceServers: (config.iceServers ?? [])
+							.map((server) => ({
+								...server,
+								urls: (Array.isArray(server.urls)
+									? server.urls
+									: [server.urls]
+								).filter((url) =>
+									protocol === "tls"
+										? url.startsWith("turns:")
+										: url.startsWith("turn:") &&
+											(protocol === "tcp"
+												? url.includes("transport=tcp")
+												: !url.includes("transport=tcp")),
+								),
+							}))
+							.filter((server) => server.urls.length > 0),
+					});
 					const peers: RTCPeerConnection[] = [];
 					const Native = window.RTCPeerConnection;
 					(
@@ -38,11 +67,14 @@ export async function verifyDesktopMedia(
 					).__s10Peers = peers;
 					window.RTCPeerConnection = class extends Native {
 						constructor(config?: RTCConfiguration) {
-							super({ ...config, iceTransportPolicy: "relay" });
+							super(force(config));
 							peers.push(this);
 						}
+						override setConfiguration(config: RTCConfiguration) {
+							super.setConfiguration(force(config));
+						}
 					};
-				});
+				}, protocol);
 			try {
 				const fresh = await sb.desktop.link({ transport });
 				try {
@@ -56,8 +88,7 @@ export async function verifyDesktopMedia(
 				}
 				const deadline = Date.now() + 90_000;
 				while (!(await sb.desktop.status()).streamer.streaming) {
-					if (Date.now() > deadline)
-						throw new Error(`no live ${transport} viewer`);
+					if (Date.now() > deadline) throw new Error(`no live ${label} viewer`);
 					await new Promise((done) => setTimeout(done, 1000));
 				}
 				const media = page.locator("video:visible, canvas:visible").first();
@@ -66,15 +97,15 @@ export async function verifyDesktopMedia(
 				const first = await media.screenshot();
 				await sb.desktop.act({
 					actions: [
-						{ type: "type", text: `echo S10-${transport}-frame-change` },
+						{ type: "type", text: `echo S10-${label}-frame-change` },
 						{ type: "key", keys: ["enter"] },
 					],
 				});
 				await page.waitForTimeout(3000);
 				const second = await media.screenshot();
 				if (hash(first) === hash(second))
-					throw new Error(`${transport} live viewer frame did not change`);
-				console.log(`ok ${transport} live viewer frame diff`);
+					throw new Error(`${label} live viewer frame did not change`);
+				console.log(`ok ${label} live viewer frame diff`);
 				if (transport === "webrtc") {
 					const pair = await page.evaluate(async () => {
 						const peers = (
@@ -103,25 +134,27 @@ export async function verifyDesktopMedia(
 						throw new Error(
 							"WebRTC did not select a relay-to-relay candidate pair",
 						);
+					if (pair.protocol !== protocol)
+						throw new Error(`TURN did not select ${protocol}`);
 					console.log("ok TURN selected relay-to-relay", JSON.stringify(pair));
-					await onWebRtcReady?.();
+					if (protocol === protocols[0]) await onWebRtcReady?.();
 				}
 
-				await writeFile(join(output, `${transport}-viewer.png`), second, {
+				await writeFile(join(output, `${label}-viewer.png`), second, {
 					mode: 0o600,
 				});
 			} catch (error) {
 				const logs = page.getByText("Show Logs", { exact: true });
 				if (await logs.count()) await logs.click();
 				await page.screenshot({
-					path: join(output, `${transport}-failure.png`),
+					path: join(output, `${label}-failure.png`),
 				});
 				await writeFile(
-					join(output, `${transport}-failure.txt`),
+					join(output, `${label}-failure.txt`),
 					(await page.locator("body").textContent()) ?? "",
 					{ mode: 0o600 },
 				);
-				console.log(`viewer ${transport} diagnostics saved privately`);
+				console.log(`viewer ${label} diagnostics saved privately`);
 				throw error;
 			} finally {
 				await page.close();

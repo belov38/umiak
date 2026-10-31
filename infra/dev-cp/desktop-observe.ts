@@ -44,6 +44,11 @@ export async function verifyDesktopIdleHold(
 	while (Date.now() - start < holdMs) {
 		const row = observeDesktop(sb.data.slug);
 		const c = row.counters;
+		await appendFile(
+			logFile,
+			`${JSON.stringify({ elapsedMs: Date.now() - start, ...row })}\n`,
+			{ mode: 0o600 },
+		);
 		if (row.state !== "ready")
 			throw new Error(`desktop stopped with live viewer: ${row.state}`);
 		if (
@@ -53,13 +58,9 @@ export async function verifyDesktopIdleHold(
 			c.tcpStreams !== 0
 		)
 			throw new Error(
-				"idle proof requires desktopStreams alone, all other counters zero",
+				`idle proof requires desktopStreams alone, counters=${JSON.stringify(c)}`,
 			);
-		await appendFile(
-			logFile,
-			`${JSON.stringify({ elapsedMs: Date.now() - start, ...row })}\n`,
-			{ mode: 0o600 },
-		);
+
 		if (Date.now() - start > 70_000 && (row.api_age ?? 0) < 60)
 			throw new Error("idle proof was refreshed by API activity");
 		console.log(
@@ -75,13 +76,18 @@ export async function verifyDesktopIdleHold(
 	console.log("ok live viewer prevents idle-stop", holdMs);
 }
 export async function waitDesktopIdleStop(sb: Sandbox) {
-	const deadline = Date.now() + 180_000;
+	const start = Date.now();
+	const deadline = start + 180_000;
 	for (;;) {
 		const row = observeDesktop(sb.data.slug);
 		if (row.state === "stopped") {
 			if (row.stop_reason !== "idle")
 				throw new Error(`wrong stop reason ${row.stop_reason}`);
-			console.log("ok idle-stop after closing viewer");
+			console.log(
+				"ok idle-stop after closing viewer",
+				"idle_stop_ms",
+				Date.now() - start,
+			);
 			return;
 		}
 		if (Date.now() > deadline)
