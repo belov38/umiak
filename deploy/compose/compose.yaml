@@ -308,6 +308,11 @@ services:
         condition: service_completed_successfully
       secrets-init:
         condition: service_completed_successfully
+      # Keycloak's connection pool does not drop connections that Postgres closed; when compose
+      # recreates postgres (a config change), restart Keycloak with it, or logins fail.
+      postgres:
+        condition: service_healthy
+        restart: true
     healthcheck:
       # No curl in the image: bash /dev/tcp against the management port.
       test:
