@@ -308,3 +308,33 @@ env parsing, team paths, the operator guard and list query
 routing, WebSocket upgrade, 127.0.0.1 only), and the web Payload config
 against Postgres (`@sbx/db/testing/global-setup`): strategy, shared session
 cache, public-id session.
+
+## E2E (Playwright, S8 §15)
+
+`pnpm --filter @sbx/web test:e2e` (`e2e/run.ts`) brings up the compose E2E
+stack (`deploy/compose/e2e.yaml`, project `sbx-e2e`: real Keycloak,
+oauth2-proxy, Postgres and this image; `api` + `worker` replaced by
+`e2e/backend`, the real api and worker code in one process with the fake
+agent and the fake PVE world), runs `e2e/playwright.config.ts` (Chromium,
+one worker, files in order) and tears the stack down with its volumes.
+`SBX_E2E_KEEP=1` keeps it; then `pnpm exec playwright test -c e2e` runs
+against it. `SBX_E2E_LARGE=1` uploads 100 MiB instead of 70 MiB. `pnpm test`
+(vitest) never runs these. `pnpm typecheck:e2e` checks `e2e/`.
+
+- `global-setup.ts` creates this run's Keycloak users (Admin API) and the
+  Payload "filler" users; `fixtures.ts` signs in through the real Keycloak
+  page and audits every response of every page: no `secretHash` value, no
+  registered secret, no API key secret or port token after its dialog.
+- Specs: `01-onboarding` (JIT, create, terminal echo/resize/reload),
+  `02-sandbox` (commands, files, ports), `03-keys` (key on the public API,
+  revoke closes streams and PTYs), `04-teams` (invite, member rights,
+  cross-team, CSRF), `05-operator` (403s, block), `06-idp-sync`
+  (Keycloak offboarding, empty answer), `07-security` (forged headers,
+  `/cms-api` CSRF, web network, image content, secrets), `08-identity`
+  (IdP email change, deletion, reused email, sso epoch).
+- `e2e/backend` is test-only: its own image
+  (`e2e/backend/Dockerfile`, context filter `Dockerfile.dockerignore`);
+  the root `.dockerignore` keeps `apps/web/e2e` out of every other image.
+  Its control listener (`127.0.0.1:19099` on the host) runs ctl-idp-sync
+  passes, switches the Keycloak list to empty, reads `routes.lookup` from
+  the internal listener and what the fake guest received.

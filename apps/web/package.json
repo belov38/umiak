@@ -11,7 +11,9 @@
 		"check:image": "node check-image.ts",
 		"generate:importmap": "NEXT_PHASE=phase-production-build PAYLOAD_CONFIG_PATH=src/payload.config.ts payload generate:importmap",
 		"test": "vitest run",
-		"typecheck": "tsc --noEmit -p ."
+		"test:e2e": "node e2e/run.ts",
+		"typecheck": "tsc --noEmit -p .",
+		"typecheck:e2e": "tsc --noEmit -p e2e"
 	},
 	"dependencies": {
 		"@payloadcms/next": "3.92.1",
@@ -39,6 +41,7 @@
 		"zod": "4.6.7"
 	},
 	"devDependencies": {
+		"@playwright/test": "1.64.1",
 		"@sbx/db": "workspace:*",
 		"@tailwindcss/postcss": "4.3.3",
 		"@types/react": "19.3.0",

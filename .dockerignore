@@ -36,3 +36,7 @@ apps/web/dev
 apps/web/test
 apps/web/.next
 apps/web/next-env.d.ts
+apps/web/e2e
+apps/web/test-results
+apps/web/playwright-report
+apps/web/e2e/.state

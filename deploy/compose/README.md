@@ -259,6 +259,30 @@ NetworkPolicy S12). Cookie `_sbx_session` без `Secure` и без
   `<SBX_APP_ORIGIN>/*`.
 - Логи: `docker compose -f deploy/compose/compose.yaml logs -f web web-migrate`.
 
+## E2E-стек дашборда (S8 §15)
+
+`e2e.yaml` — оверлей для Playwright-тестов `apps/web/e2e` (решение 10 плана S8): настоящие `postgres`, `keycloak`,
+`oauth2-proxy`, `web`, `web-migrate`, `migrate`, но без Proxmox, gateway и гостя. `api` и `worker` выключены
+(профили), вместо них один `e2e-backend` (`apps/web/e2e/backend`, образ `sbx-e2e-backend:dev`): код `api` и
+`worker` в одном процессе на Payload, с фейковым агентом (`apps/api/src/testing`) и фейковым миром PVE
+(`apps/worker/test/fakes`). В сети `sbx` у него алиас `api`, поэтому маршруты oauth2-proxy те же. Тестовая ручка
+управления (проход `ctl-idp-sync`, «пустой» Keycloak, `routes.lookup`, что получил фейковый гость) — только на
+`127.0.0.1:19099`, в продовом коде её нет.
+
+```sh
+pnpm --filter @sbx/web test:e2e          # up --build --wait, playwright, down -v
+SBX_E2E_KEEP=1 pnpm --filter @sbx/web test:e2e   # стек остаётся; повтор: cd apps/web && pnpm exec playwright test -c e2e
+docker compose --env-file deploy/compose/e2e.env -f deploy/compose/compose.yaml -f deploy/compose/e2e.yaml down -v
+```
+
+- Проект `sbx-e2e` (свои тома), порты на хосте из `e2e.env` (`14180` приложение, `18180` Keycloak, `18080` публичный
+  API, `15432` Postgres, `19099` ручка): можно держать рядом с dev-стеком. `e2e.env` передаётся `--env-file`, так что
+  `deploy/compose/.env` dev-стека не подмешивается. Каталог `secrets/` общий с dev-стеком.
+- Тестовых пользователей (`alice`, `bob`, `op` в `sbx-operators`, `dave`, пять «filler») global setup создаёт через
+  Admin API Keycloak (пароль администратора — `KEYCLOAK_ADMIN_PASSWORD` из `e2e.env`), с суффиксом прогона: повторный
+  прогон на живом стеке не сталкивается с прошлым.
+- `e2e-backend` поднимает `ram_cap_mb` узла из `config/sbx.yaml` (фейковые VM ничего не стоят).
+
 ## Gateway (S4)
 
 `compose.yaml` включает `gateway.yaml` (`include`), так что `up -d --build` поднимает `gateway-secrets` и
