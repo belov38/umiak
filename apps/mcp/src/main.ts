@@ -118,6 +118,9 @@ export async function startMcp(
 		opsPort,
 		async close() {
 			stopping = true;
+			// First: /readyz of the main port is 503 and a new /mcp request
+			// (on a connection still open) gets 503 with Retry-After.
+			http.drain();
 			const deadline = Date.now() + (o.graceMs ?? SHUTDOWN_GRACE_MS) - 500;
 			const draining = closed(main, deadline);
 			// In-flight calls finish until the deadline; then their exchanges

@@ -265,6 +265,85 @@ describe("startMcp", () => {
 		expect(answer).toMatch(/^HTTP\/1\.1 408/);
 	}, 15_000);
 
+	it("drains the main port at once: /readyz and a new POST /mcp are 503 while a call is in flight", async () => {
+		api = await startFakeApi();
+		const r = await startMcp(settings(api.url), {
+			log: quiet(),
+			graceMs: 10_000,
+		});
+		running = r;
+		const client = new Client(TEST_CLIENT_INFO);
+		await client.connect(
+			new StreamableHTTPClientTransport(
+				new URL(`http://127.0.0.1:${r.port}/mcp`),
+				{
+					requestInit: {
+						headers: { Authorization: `Bearer ${FAKE_TOKENS.full}` },
+					},
+				},
+			),
+		);
+		const created = await client.callTool({
+			name: "sandbox_create",
+			arguments: {},
+		});
+		const sb = JSON.parse(
+			(created.content as { text: string }[])[0]?.text ?? "{}",
+		).id as string;
+		const call = client.callTool({
+			name: "exec_run",
+			arguments: { sandbox: sb, command: "fake:sleep 60", wait_seconds: 3 },
+		});
+		await vi.waitFor(() => expect(api?.state.commands.size).toBe(1));
+
+		// Requests already started on open connections (a closing server
+		// takes no new connection): their headers end after close() began.
+		const started = (head: string) => {
+			const sock = connect(r.port, "127.0.0.1");
+			sock.write(head);
+			let got = "";
+			sock.on("data", (d: Buffer) => {
+				got += d.toString();
+			});
+			const done = new Promise<string>((resolve) => {
+				sock.on("close", () => resolve(got));
+				sock.on("error", () => resolve(got));
+			});
+			return { sock, done };
+		};
+		const ready = started("GET /readyz HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+		const body = '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}';
+		const post = started(
+			[
+				"POST /mcp HTTP/1.1",
+				"Host: 127.0.0.1",
+				`Authorization: Bearer ${FAKE_TOKENS.full}`,
+				"Content-Type: application/json",
+				"Accept: application/json, text/event-stream",
+				`Content-Length: ${body.length}`,
+				"",
+			].join("\r\n"),
+		);
+		await new Promise((res) => setTimeout(res, 100));
+		const closing = r.close();
+		running = undefined;
+		await new Promise((res) => setTimeout(res, 200));
+		ready.sock.end("Connection: close\r\n\r\n");
+		post.sock.end(`Connection: close\r\n\r\n${body}`);
+		const readyAnswer = await ready.done;
+		expect(readyAnswer).toMatch(/^HTTP\/1\.1 503/);
+		expect(readyAnswer).toContain("shutting_down");
+		const postAnswer = await post.done;
+		expect(postAnswer).toMatch(/^HTTP\/1\.1 503/);
+		expect(postAnswer.toLowerCase()).toContain("retry-after: 1");
+
+		// The call in flight still gets its answer.
+		const result = await call;
+		expect(result.isError).toBeFalsy();
+		await closing;
+		await client.close().catch(() => {});
+	}, 20_000);
+
 	it("cuts a call still running when the grace period ends", async () => {
 		api = await startFakeApi();
 		const r = await startMcp(settings(api.url), {
