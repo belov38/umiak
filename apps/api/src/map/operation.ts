@@ -11,6 +11,28 @@ export const iso = (d: Date): string => d.toISOString();
 export const isoOrNull = (d: Date | null): string | null =>
 	d === null ? null : d.toISOString();
 
+/**
+ * S9 §24.8: a forced fork/save_snapshot (`request.forceStop`) reports the
+ * stop and restart of the source from its progress (worker force-stop.ts).
+ */
+function forceStopOf(op: Operation): OperationResource["forceStop"] {
+	if (op.request.forceStop !== true) return null;
+	const p = op.progress;
+	const err = p.restartError as { code?: unknown; message?: unknown } | null;
+	return {
+		sourceStopped: p.forceStopped === true,
+		sourceRestarted:
+			typeof p.sourceRestarted === "boolean" ? p.sourceRestarted : null,
+		restartError:
+			err && typeof err.code === "string"
+				? {
+						code: err.code,
+						message: typeof err.message === "string" ? err.message : err.code,
+					}
+				: null,
+	};
+}
+
 /** Throws for `reprovision`: callers hide it first (`isPublicOperation`). */
 export function toOperationResource(op: Operation): OperationResource {
 	if (op.kind === "reprovision") {
@@ -30,6 +52,7 @@ export function toOperationResource(op: Operation): OperationResource {
 						message: op.errorMessage ?? op.errorCode,
 						retryable: op.retryable ?? false,
 					},
+		forceStop: forceStopOf(op),
 		createdAt: iso(op.createdAt),
 		startedAt: isoOrNull(op.startedAt),
 		finishedAt: isoOrNull(op.finishedAt),

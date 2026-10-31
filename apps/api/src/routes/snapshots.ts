@@ -68,7 +68,9 @@ const createSnapshot = createRoute({
 		"Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with " +
 		"the snapshot in `creating` and the `save_snapshot` operation of the sandbox; wait with " +
 		"GET /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is " +
-		"replaced once the new one is ready. Send an Idempotency-Key to retry safely.",
+		"replaced once the new one is ready. A running Windows sandbox is saved only from a " +
+		"stopped VM: send `forceStop: true` to stop it, save and start it again, otherwise 409 " +
+		"`snapshot_requires_stop`. Send an Idempotency-Key to retry safely.",
 	tags: TAGS,
 	middleware: [requireScope("snapshots:write")] as const,
 	request: {
@@ -91,8 +93,9 @@ const createSnapshot = createRoute({
 		),
 		404: errorResponse("`not_found`: no such sandbox in the team"),
 		409: errorResponse(
-			"`invalid_state` (details.state), `operation_in_progress` (retryable) or " +
-				"`idempotency_key_reused`",
+			"`invalid_state` (details.state), `operation_in_progress` (retryable), " +
+				"`idempotency_key_reused` or `snapshot_requires_stop` (a running Windows sandbox " +
+				"without `forceStop`; details `{reason: windows_running, retryWith: {forceStop: true}, cli: --force-stop}`)",
 		),
 		...ERROR_RESPONSES,
 	},
@@ -161,7 +164,7 @@ export function registerSnapshotRoutes(app: ApiApp, deps: ApiDeps): void {
 
 	app.openapi(createSnapshot, async (c) => {
 		const p = authOf(c).principal;
-		const { sandbox, name } = c.req.valid("json");
+		const { sandbox, name, forceStop } = c.req.valid("json");
 		const idemKey = idempotencyKeyHeader(c);
 		const start = await idempotencyStart(deps.pool, idemKey);
 		const r = await svc.saveSnapshot(
@@ -169,6 +172,7 @@ export function registerSnapshotRoutes(app: ApiApp, deps: ApiDeps): void {
 			resolveSandboxRef(sandbox),
 			name,
 			idemKey,
+			forceStop === undefined ? {} : { forceStop },
 		);
 		return c.json(
 			{

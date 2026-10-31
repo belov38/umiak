@@ -149,6 +149,10 @@ from .meta_ssh import MetaSsh
 from .move_request import MoveRequest
 from .operation import Operation
 from .operation_error_type_0 import OperationErrorType0
+from .operation_force_stop_type_0 import OperationForceStopType0
+from .operation_force_stop_type_0_restart_error_type_0 import (
+    OperationForceStopType0RestartErrorType0,
+)
 from .operation_kind import OperationKind
 from .operation_state import OperationState
 from .port_token import PortToken
@@ -367,6 +371,8 @@ __all__ = (
     "MoveRequest",
     "Operation",
     "OperationErrorType0",
+    "OperationForceStopType0",
+    "OperationForceStopType0RestartErrorType0",
     "OperationKind",
     "OperationState",
     "PortToken",

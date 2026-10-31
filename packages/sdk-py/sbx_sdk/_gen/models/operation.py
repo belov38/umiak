@@ -12,6 +12,7 @@ from ..models.operation_state import OperationState
 
 if TYPE_CHECKING:
     from ..models.operation_error_type_0 import OperationErrorType0
+    from ..models.operation_force_stop_type_0 import OperationForceStopType0
 
 
 T = TypeVar("T", bound="Operation")
@@ -25,6 +26,8 @@ class Operation:
         created_at (datetime.datetime): ISO 8601 UTC with milliseconds
         error (None | OperationErrorType0): Why the operation failed; null otherwise
         finished_at (datetime.datetime | None): ISO 8601 UTC with milliseconds
+        force_stop (None | OperationForceStopType0): fork and save_snapshot sent with `forceStop: true` on a running
+            Windows sandbox: the stop and restart of the source; null otherwise
         id (str):  Example: op_01jbx2v7d3m6c8q9w0e4r5t6y7.
         kind (OperationKind):
         sandbox_id (str):  Example: sb_01jbx4q3m7f8r2t6v9w0y1z2a3.
@@ -36,6 +39,7 @@ class Operation:
     created_at: datetime.datetime
     error: None | OperationErrorType0
     finished_at: datetime.datetime | None
+    force_stop: None | OperationForceStopType0
     id: str
     kind: OperationKind
     sandbox_id: str
@@ -46,6 +50,7 @@ class Operation:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.operation_error_type_0 import OperationErrorType0  # noqa: PLC0415
+        from ..models.operation_force_stop_type_0 import OperationForceStopType0  # noqa: PLC0415
 
         created_at = self.created_at.isoformat()
 
@@ -60,6 +65,12 @@ class Operation:
             finished_at = self.finished_at.isoformat()
         else:
             finished_at = self.finished_at
+
+        force_stop: dict[str, Any] | None
+        if isinstance(self.force_stop, OperationForceStopType0):
+            force_stop = self.force_stop.to_dict()
+        else:
+            force_stop = self.force_stop
 
         id = self.id
 
@@ -85,6 +96,7 @@ class Operation:
                 "createdAt": created_at,
                 "error": error,
                 "finishedAt": finished_at,
+                "forceStop": force_stop,
                 "id": id,
                 "kind": kind,
                 "sandboxId": sandbox_id,
@@ -99,6 +111,7 @@ class Operation:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.operation_error_type_0 import OperationErrorType0  # noqa: PLC0415
+        from ..models.operation_force_stop_type_0 import OperationForceStopType0  # noqa: PLC0415
 
         d = dict(src_dict)
         created_at = datetime.datetime.fromisoformat(d.pop("createdAt"))
@@ -132,6 +145,21 @@ class Operation:
             return cast(datetime.datetime | None, data)
 
         finished_at = _parse_finished_at(d.pop("finishedAt"))
+
+        def _parse_force_stop(data: object) -> None | OperationForceStopType0:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                force_stop_type_0 = OperationForceStopType0.from_dict(data)
+
+                return force_stop_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | OperationForceStopType0, data)
+
+        force_stop = _parse_force_stop(d.pop("forceStop"))
 
         id = d.pop("id")
 
@@ -167,6 +195,7 @@ class Operation:
             created_at=created_at,
             error=error,
             finished_at=finished_at,
+            force_stop=force_stop,
             id=id,
             kind=kind,
             sandbox_id=sandbox_id,

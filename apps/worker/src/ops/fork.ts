@@ -11,6 +11,13 @@ import {
 	type Step,
 } from "../steps.ts";
 import { currentMachine } from "./common.ts";
+import {
+	extendDeadlineForRestart,
+	forceStopSteps,
+	isForced,
+	restartForcedSource,
+	restartSteps,
+} from "./force-stop.ts";
 import type { SandboxOpHandler } from "./kind.ts";
 import {
 	deleteSnapshotLvs,
@@ -20,7 +27,8 @@ import {
 } from "./snapshot-step.ts";
 
 // Fork, the operation on the source (S6 §7.7): `snapshot` (fork_source row,
-// S1 snapshot with quiesce), then one fenced transaction: snapshot `ready`,
+// S1 snapshot with quiesce; a forced Windows fork stops the source before and
+// starts it again after, force-stop.ts), then one fenced transaction: snapshot `ready`,
 // fork `succeeded`, the target's create gets `deadline_at` and its job. From
 // `ready` on the target owns the snapshot (cleanup_source, its compensation,
 // its delete); while `creating` this operation (or the source's delete) does.
@@ -102,12 +110,24 @@ async function ensureForkSource(
 }
 
 function forkSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
-	return [
-		{
-			name: "snapshot",
-			run: async () =>
-				takeSnapshot(ctx, fenced, await ensureForkSource(ctx, fenced)),
+	const snapshot: Step = {
+		name: "snapshot",
+		run: async () => {
+			const taken = await takeSnapshot(
+				ctx,
+				fenced,
+				await ensureForkSource(ctx, fenced),
+			);
+			if (isForced(fenced)) await extendDeadlineForRestart(ctx, fenced);
+			return taken;
 		},
+	};
+	// S9 §24.8: a forced fork stops the source, snapshots it and starts it again.
+	if (!isForced(fenced)) return [snapshot];
+	return [
+		...forceStopSteps(ctx, fenced),
+		snapshot,
+		...restartSteps(ctx, fenced),
 	];
 }
 
@@ -217,6 +237,7 @@ async function compensateFork(
 	);
 	const ids = r.rows.map((x) => x.id);
 	for (const id of ids) await deleteSnapshotLvs(ctx, fenced, id, ["creating"]);
+	await restartForcedSource(ctx, fenced);
 	await fenced.finish("failed", error, async (tx) => {
 		for (const id of ids) await markSnapshot(tx, id, "deleted", ["creating"]);
 		await enqueueOrphanedChildren(ctx, tx, fenced.sandboxId);

@@ -24,7 +24,7 @@ afterAll(async () => {
 });
 
 describe("S9 worker contracts", () => {
-	it("allows a fork from dirty Windows disks, while a saved quiesce secrets_in_use requires stop", async () => {
+	it("allows a forced fork from dirty Windows disks", async () => {
 		const w = await createWorld(db);
 		await w.pool.query(
 			"UPDATE runtime.template_builds SET os = 'windows' WHERE id = $1",
@@ -32,19 +32,12 @@ describe("S9 worker contracts", () => {
 		);
 		const e = opsEnv(w);
 		const s = await readySandbox(w, e);
-		const fork = await forkSandbox(e, s.sandboxId);
+		expect((await row(w, "machines", s.machineId)).secret_files_on_disk).toBe(
+			true,
+		);
+		// PrepareStop does not confirm the wipe: a fork is still allowed.
+		const fork = await forkSandbox(e, s.sandboxId, { forceStop: true });
 		expect(await run(w, fork.forkOpId)).toBe("succeeded");
-		// A clean tracked machine can still have a file raced into use in the guest.
-		await w.pool.query(
-			"UPDATE runtime.machines SET secret_files_on_disk = false WHERE id = $1",
-			[s.machineId],
-		);
-		w.agent.fail("freeze", { rejected: "secrets_in_use" });
-		const snap = await e.svc.saveSnapshot(e.p, s.sandboxId, "in-use");
-		expect(await run(w, snap.operation.id)).toBe("failed");
-		expect((await row(w, "operations", snap.operation.id)).error_code).toBe(
-			"snapshot_requires_stop",
-		);
 	});
 
 	it("retains a newer pending generation received while UpdateSecrets is returning", async () => {
@@ -77,11 +70,9 @@ describe("S9 worker contracts", () => {
 		expect((await row(w, "machines", s.machineId)).secret_files_on_disk).toBe(
 			true,
 		);
-		const snap = await e.svc.saveSnapshot(e.p, s.sandboxId, "dirty");
-		expect(await run(w, snap.operation.id)).toBe("failed");
-		expect((await row(w, "operations", snap.operation.id)).error_code).toBe(
-			"snapshot_requires_stop",
-		);
+		await expect(
+			e.svc.saveSnapshot(e.p, s.sandboxId, "dirty"),
+		).rejects.toMatchObject({ code: "snapshot_requires_stop" });
 		expect(w.infra.callsOf("snapshot")).toHaveLength(0);
 		w.agent.secretFilesWiped = true;
 		const stop = await e.svc.stop(e.p, s.sandboxId);
@@ -203,10 +194,6 @@ describe("S9 worker contracts", () => {
 		w.ctx.timing.vmLockSleep = async () => {};
 		const e = opsEnv(w);
 		const s = await readySandbox(w, e, { secretFiles: [] });
-		await w.pool.query(
-			"UPDATE runtime.template_builds SET os = 'windows' WHERE id = $1",
-			[w.topo.templateBuildId],
-		);
 		const snap = await e.svc.saveSnapshot(e.p, s.sandboxId, "retry");
 		w.infra.snapshotFailureAfterFreeze = new QuiesceFailed(
 			"freeze took 12000 ms (budget 1000 ms); snapshot discarded",

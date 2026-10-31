@@ -49,6 +49,7 @@ import {
 	readSandboxSecrets,
 	writeSandboxSecrets,
 } from "./secret-patch.ts";
+import { forceStopApplies } from "./snapshots.ts";
 import { withServiceTx } from "./tx.ts";
 import {
 	checkKnownKeys,
@@ -76,6 +77,12 @@ export interface ForkInput extends SecretPatch {
 	idleTimeoutSeconds?: number | null;
 	/** Default: the source's size. */
 	size?: string;
+	/**
+	 * A running Windows source is stopped for the snapshot and started again
+	 * (S9 §24.8); without it such a fork is `snapshot_requires_stop`.
+	 * Ignored for Linux and for a stopped source.
+	 */
+	forceStop?: boolean;
 }
 
 export interface ForkResult {
@@ -96,6 +103,7 @@ const FORK_KEYS = [
 	"ttlSeconds",
 	"idleTimeoutSeconds",
 	"size",
+	"forceStop",
 	"env",
 	"secrets",
 	"secretFiles",
@@ -110,6 +118,9 @@ function validateForkInput(input: ForkInput): void {
 	if (input.name !== undefined) checkName("name", input.name, issues);
 	if (input.labels !== undefined) checkLabels("labels", input.labels, issues);
 	if (input.size !== undefined) checkString("size", input.size, issues);
+	if (input.forceStop !== undefined && typeof input.forceStop !== "boolean") {
+		issues.push({ path: "forceStop", message: "must be a boolean" });
+	}
 	if (input.ttlSeconds !== undefined) {
 		checkSeconds("ttlSeconds", input.ttlSeconds, issues, { nullable: true });
 	}
@@ -188,6 +199,8 @@ export async function forkSandbox(
 		const active = await activeOperation(tx.client, src.id);
 		if (active !== null) throw operationInProgress(active);
 		sandboxNext(src.state, "fork");
+		const os = await buildOs(tx.client, src.template_build_id);
+		const forceStop = forceStopApplies("fork", os, src.state, input.forceStop);
 		const srcMachine = await machineInfo(tx.client, src.machine_id);
 		if (srcMachine === null) {
 			throw notFound("source machine");
@@ -295,14 +308,16 @@ export async function forkSandbox(
 		);
 		await writeSandboxSecrets(tx, deps.keys, targetId, sets);
 
-		const os = await buildOs(tx.client, src.template_build_id);
 		await insertOperation(tx, {
 			id: forkOpId,
 			sandboxId: src.id,
 			kind: "fork",
-			request: { targetSandboxId: targetId },
+			request: {
+				targetSandboxId: targetId,
+				...(forceStop ? { forceStop: true } : {}),
+			},
 			principal: p,
-			deadlineMs: operationDeadline("fork", os),
+			deadlineMs: operationDeadline("fork", os, { forceStop }),
 		});
 		await insertOperation(tx, {
 			id: createOpId,

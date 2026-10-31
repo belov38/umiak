@@ -1,7 +1,7 @@
 // Saved snapshots (S7 §13): addressed by name within the team.
 import { z } from "@hono/zod-openapi";
 import { extensibleEnum } from "../openapi/registry.ts";
-import { NullableTimestamp, Timestamp } from "./common.ts";
+import { ForceStopField, NullableTimestamp, Timestamp } from "./common.ts";
 import { OperationSchema } from "./operation.ts";
 
 export const SNAPSHOT_NAME_PATTERN = "^[a-z0-9][a-z0-9-]{0,62}$";
@@ -29,6 +29,7 @@ export const CreateSnapshotRequest = z
 			example: "quiet-otter-lamp",
 		}),
 		name: SnapshotName,
+		forceStop: ForceStopField,
 	})
 	.openapi("CreateSnapshotRequest", {
 		description:

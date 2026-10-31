@@ -20,7 +20,8 @@ const sqlList = (xs: readonly string[]): string =>
 /**
  * S6 §8.1 `reserved`: RAM promised on the node. Machines in a reserved state,
  * plus a `stopped` machine that is its sandbox's current machine while the
- * sandbox has a pending/running resume or recover (its start was admitted).
+ * sandbox has a pending/running resume or recover (its start was admitted),
+ * or a fork/save_snapshot with `forceStop` (it starts the source again).
  * `failed`/`deleting` machines gave their place back. Alias `m` = machines.
  */
 export const RESERVED_SQL = `(m.state IN (${sqlList(RESERVED_MACHINE_STATES)})
@@ -28,7 +29,8 @@ export const RESERVED_SQL = `(m.state IN (${sqlList(RESERVED_MACHINE_STATES)})
     SELECT 1 FROM runtime.sandboxes s
     JOIN runtime.operations o ON o.sandbox_id = s.id
     WHERE s.machine_id = m.id
-      AND o.kind IN ('resume', 'recover')
+      AND (o.kind IN ('resume', 'recover')
+        OR (o.kind IN ('fork', 'save_snapshot') AND o.request->>'forceStop' = 'true'))
       AND o.state IN ('pending', 'running'))))`;
 
 /**

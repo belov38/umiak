@@ -50,11 +50,16 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 	}
 }
 
-function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
+/**
+ * prepare → shutdown → verify of the sandbox's current machine. `prefix`
+ * names the steps inside another operation (forced fork/save_snapshot, S9
+ * §24.8: `stop_prepare`, ...).
+ */
+export function stopSteps(ctx: WorkerCtx, fenced: Fenced, prefix = ""): Step[] {
 	const machine = () => currentMachine(ctx, fenced.sandboxId);
 	return [
 		{
-			name: "prepare",
+			name: `${prefix}prepare`,
 			// System/PrepareStop: the agent flushes buffers and wipes secrets
 			// (tmpfs; secret files on Windows). Best effort: an unavailable agent
 			// does not block a stop. `secretFilesWiped` is the agent's confirmation.
@@ -89,7 +94,7 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 			},
 		},
 		{
-			name: "shutdown",
+			name: `${prefix}shutdown`,
 			run: async () => {
 				const m = await machine();
 				const vmid = vmidOf(m);
@@ -128,7 +133,7 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 			},
 		},
 		{
-			name: "verify",
+			name: `${prefix}verify`,
 			run: async () => {
 				const m = await machine();
 				const vmid = vmidOf(m);

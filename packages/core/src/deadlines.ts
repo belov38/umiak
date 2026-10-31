@@ -22,15 +22,33 @@ const DEADLINES: Record<Exclude<OperationKind, "create" | "delete">, Pair> = {
 	save_snapshot: { linux: 5 * MIN, windows: 5 * MIN },
 };
 
-/** Deadline of an operation in ms, or null for delete (it never gives up). */
+/**
+ * Deadline of an operation in ms, or null for delete (it never gives up).
+ * `forceStop` (fork and save_snapshot of a running Windows sandbox, S9
+ * §24.8) adds the stop deadline: the operation stops the source first. The
+ * restart after the snapshot gets its own budget (`FORCE_STOP_RESTART_MS`).
+ */
 export function operationDeadline(
 	kind: OperationKind,
 	os: TemplateOs,
-	opts: { fromPool?: boolean } = {},
+	opts: { fromPool?: boolean; forceStop?: boolean } = {},
 ): number | null {
 	if (kind === "delete") return null;
 	if (kind === "create") {
 		return (opts.fromPool ? CREATE_FROM_POOL : CREATE_COLD)[os];
 	}
-	return DEADLINES[kind][os];
+	const base = DEADLINES[kind][os];
+	if (opts.forceStop && (kind === "fork" || kind === "save_snapshot")) {
+		return base + DEADLINES.stop[os];
+	}
+	return base;
+}
+
+/**
+ * After the snapshot of a force-stopped source, the operation's deadline is
+ * moved to at least now + this (the resume deadline): the source is started
+ * again and its failure must not fail the fork (S9 §24.8).
+ */
+export function forceStopRestartMs(os: TemplateOs): number {
+	return DEADLINES.resume[os];
 }
