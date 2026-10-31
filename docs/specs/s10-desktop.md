@@ -1011,3 +1011,13 @@ peer; coturn закономерно отвечает400. Подтвержден�
 стандартный `stale-nonce=0`. Повторная HMAC/REST timestamp проверка каждого Refresh
 сохраняется патчем; это не отключает срок credentials. Ротацию nonce можно вернуть
 после обновления исправленного upstream rtc-turn и повторной long-idle приёмки.
+
+
+TURN reconnect sizing (live, 2026-11-01): штатные browser ICE allocations и остатки
+предыдущего Moon peer при reconnect исчерпывали исходную user-quota4 (486; relay
+candidate на VM отсутствовал). Wire fixture с6 одновременными allocations того же
+REST principal воспроизводит486. По измерению выбраны user-quota16 и
+max-allocate-lifetime60s: закрытые UDP allocations освобождаются не позже1min,
+действующие обновляются каждые~30s. rtc-turn0.21.1 соблюдает выданный LIFETIME.
+Проверены6 allocations, LIFETIME≤60, valid/expired Refresh, peer403 и UDP/TCP/TLS.
+Квота400 и per-session bandwidth остаются; peer allowlist не расширялся.

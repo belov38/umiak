@@ -85,6 +85,7 @@ class Turn:
         self.key = hashlib.md5(self.username + b":" + realm + b":" + self.password).digest()
         kind, response, code = self.request(3, attrs)
         assert kind == 0x103 and code == 0, f"allocate failed {code}"
+        assert 0 < struct.unpack("!I", response[0xD])[0] <= 60, "unbounded stale allocation lifetime"
         address = response[0x16]
         port = struct.unpack("!H", address[2:4])[0] ^ (COOKIE >> 16)
         self.relay_port = port
@@ -148,6 +149,17 @@ def main():
             print(f"ok TURN {transport}: allocate, restricted peers, refresh", flush=True)
         finally:
             turn.close()
+    if os.environ.get("SBX_TURN_PROBE_RECONNECTS"):
+        clients = []
+        try:
+            for _ in range(6):
+                client = Turn("udp", ip, host, ca, secret)
+                clients.append(client)
+                client.allocate()
+            print("ok six overlapping TURN allocations for reconnect", flush=True)
+        finally:
+            for client in clients:
+                client.close()
     expired = Turn("udp", ip, host, ca, secret, ttl=5)
     try:
         expired.allocate()

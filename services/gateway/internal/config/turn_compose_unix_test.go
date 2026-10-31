@@ -66,7 +66,7 @@ func TestDesktopTURNSecretInitAndRestrictedConfig(t *testing.T) {
 			t.Fatal(e)
 		}
 		config := string(b)
-		for _, required := range []string{"use-auth-secret\n", "stale-nonce=0\n", "static-auth-secret=" + string(secret) + "\n", "allowed-peer-ip=203.0.113.9\n", "denied-peer-ip=0.0.0.0-255.255.255.255\n", "user-quota=4\n", "no-tcp-relay\n", "tls-listening-port=23844\n", "min-port=55000\n", "max-port=55040\n", "pidfile=" + filepath.Join(dir, "turnserver.pid") + "\n"} {
+		for _, required := range []string{"use-auth-secret\n", "stale-nonce=0\n", "static-auth-secret=" + string(secret) + "\n", "allowed-peer-ip=203.0.113.9\n", "denied-peer-ip=0.0.0.0-255.255.255.255\n", "user-quota=16\n", "max-allocate-lifetime=60\n", "no-tcp-relay\n", "tls-listening-port=23844\n", "min-port=55000\n", "max-port=55040\n", "pidfile=" + filepath.Join(dir, "turnserver.pid") + "\n"} {
 			if !strings.Contains(config, required) {
 				t.Fatal("missing TURN restriction")
 			}

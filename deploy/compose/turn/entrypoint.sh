@@ -45,7 +45,8 @@ denied-peer-ip=::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
 allowed-peer-ip=$SBX_TURN_IP
 no-tcp-relay
 no-multicast-peers
-user-quota=4
+user-quota=16
+max-allocate-lifetime=60
 total-quota=400
 max-bps=3000000
 log-file=stdout
