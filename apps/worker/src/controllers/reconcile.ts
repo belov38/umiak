@@ -8,6 +8,7 @@ import { type Tx, withTx } from "@sbx/db";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { lockSandboxRow } from "../db.ts";
+import { ensureMachineProvision } from "../handlers/machine-events.ts";
 import { snapshotInUse } from "../handlers/snapshot-op.ts";
 import { errFields } from "../log.ts";
 import { isOwnerMismatch, noteOwnerMismatch } from "../machine-prep.ts";
@@ -1025,6 +1026,25 @@ async function planQueues(
 ): Promise<Plan[]> {
 	const plans: Plan[] = [];
 	const base = { applied: false, providerId };
+	const deliveries = await ctx.pool.query<{ id: string }>(
+		`SELECT m.id FROM runtime.machines m
+		 JOIN runtime.sandboxes s ON s.machine_id = m.id
+		 JOIN tunnel.tunnel_sessions ts ON ts.machine_id = m.id
+		 WHERE m.provider_id IS NOT DISTINCT FROM $1::uuid AND s.state = 'ready' AND ts.state = 'connected'
+		 AND (m.provisioned_boot_id IS DISTINCT FROM ts.boot_id OR m.secrets_generation <> m.provisioned_secrets_generation)
+		 AND NOT ${ACTIVE_OP_OF_MACHINE}`,
+		[providerId],
+	);
+	for (const m of deliveries.rows)
+		plans.push({
+			action: {
+				...base,
+				kind: "requeue_op",
+				target: `machine:${m.id}`,
+				detail: "reprovision pending secrets",
+			},
+			apply: () => ensureMachineProvision(ctx, m.id),
+		});
 	const liveOps = await jobs.keys("sandbox-op", "operationId");
 	const ops = await ctx.pool.query<{
 		id: string;

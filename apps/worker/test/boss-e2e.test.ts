@@ -292,6 +292,14 @@ describe("worker over pg-boss", () => {
 		const op = await opRow(operation.id);
 		expect(op.state).toBe("succeeded");
 		expect(op.attempt).toBeGreaterThanOrEqual(2);
+		// Sandbox readiness commits before the handler's deferred-delivery
+		// check and pg-boss completion. Wait for the queue's own terminal state.
+		await until(
+			async () =>
+				(await jobsOf("sandbox-op", "operationId", operation.id))[0]?.state ===
+				"completed",
+			{ what: "takeover job completed" },
+		);
 		const jobs = await jobsOf("sandbox-op", "operationId", operation.id);
 		expect(jobs).toHaveLength(1);
 		expect(jobs[0]?.state).toBe("completed");

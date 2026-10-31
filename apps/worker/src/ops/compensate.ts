@@ -231,7 +231,7 @@ export async function compensateStart(
 	const code = untouched ? error.code : sandboxErrorCode(fallback, error);
 	if (m !== null && !untouched && code !== "machine_lost") {
 		await fenced.check();
-		await hardStop(ctx, m);
+		await hardStop(ctx, m, fenced);
 	}
 	await fenced.finish("failed", error, async (tx) => {
 		if (m !== null && !untouched) {

@@ -221,7 +221,10 @@ export async function destroyVms(
 		const status = await infra.status(vmid);
 		if (status === "running" || status === "paused") {
 			const own = await ownedTeardown(ctx, machineId, vmid, "stop", () =>
-				infra.stop(vmid, { expectedOwner: machineId }),
+				infra.stop(vmid, {
+					expectedOwner: machineId,
+					beforeAct: () => fence.check(),
+				}),
 			);
 			if (!own) continue;
 		}

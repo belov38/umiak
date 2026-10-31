@@ -62,9 +62,8 @@ export function caWebSocket(
 /**
  * A signal that aborts after `ms` with a `TimeoutError`, like
  * `AbortSignal.timeout`, but held by its timer until it fires or `clear()`.
- * undici's Request follows the signal it was made with through a WeakRef, so
- * an `AbortSignal.timeout` that nothing else references can be collected
- * during the fetch and its abort never reaches the request.
+ * Unlike an otherwise unreferenced `AbortSignal.timeout`, the source stays
+ * alive through GC. `send` also keeps Request's dependent controller alive.
  */
 export function deadline(ms: number): { signal: AbortSignal; clear(): void } {
 	const c = new AbortController();
@@ -76,10 +75,28 @@ export function deadline(ms: number): { signal: AbortSignal; clear(): void } {
 	return { signal: c.signal, clear: () => clearTimeout(timer) };
 }
 
-/** Sends a request; a failure to connect is SbxError `network_error` (retryable). */
-export async function send(f: Fetch, req: Request): Promise<Response> {
+/**
+ * Sends a request; a failure to connect is SbxError `network_error` (retryable).
+ * Pass the original deadline signal to wait for its abort directly: Request's
+ * weak link to its controller can disappear under GC while a fetch is pending.
+ */
+export async function send(
+	f: Fetch,
+	req: Request,
+	signal?: AbortSignal,
+): Promise<Response> {
+	let onAbort: (() => void) | undefined;
 	try {
-		return await f(req);
+		if (signal === undefined) return await f(req);
+		signal.throwIfAborted();
+		const aborted = new Promise<never>((_, reject) => {
+			// The original signal keeps this listener, and thus Request and its
+			// controller, alive until the request finishes or the deadline fires.
+			onAbort = () =>
+				reject(req.signal.aborted ? req.signal.reason : signal.reason);
+			signal.addEventListener("abort", onAbort, { once: true });
+		});
+		return await Promise.race([f(req), aborted]);
 	} catch (err) {
 		throw new SbxError({
 			status: 0,
@@ -88,6 +105,8 @@ export async function send(f: Fetch, req: Request): Promise<Response> {
 			retryable: true,
 			cause: err,
 		});
+	} finally {
+		if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
 	}
 }
 

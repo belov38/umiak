@@ -126,6 +126,42 @@ export function deliverableFiles(files: SecretFile[]): SecretFile[] {
 	return files.map((f) => ({ ...f, mode: f.mode ?? SECRET_FILE_DEFAULT_MODE }));
 }
 
+/** Mark before the RPC: a lost response may still have written files in the guest. */
+export async function beforeSecretDelivery(
+	fenced: Fenced,
+	machineId: string,
+	files: SecretFile[],
+): Promise<number> {
+	return fenced.tx(async (tx) => {
+		const r = await tx.client.query<{ secrets_generation: number }>(
+			`UPDATE runtime.machines m
+			 SET secret_files_on_disk = m.secret_files_on_disk OR
+			     ($2 AND EXISTS (SELECT 1 FROM runtime.template_builds b WHERE b.id = m.template_build_id AND b.os = 'windows')),
+			     version = version + 1
+			 WHERE m.id = $1 RETURNING secrets_generation`,
+			[machineId, files.length > 0],
+		);
+		return r.rows[0]?.secrets_generation ?? 0;
+	});
+}
+
+/** Only a successful empty replacement confirms that files are absent. */
+export async function recordSecretDelivery(
+	tx: Tx,
+	machineId: string,
+	bootId: string | null,
+	generation: number,
+	files: SecretFile[],
+): Promise<void> {
+	await tx.client.query(
+		`UPDATE runtime.machines SET provisioned_boot_id = $2,
+		 provisioned_secrets_generation = $3,
+		 secret_files_on_disk = CASE WHEN $4 OR secrets_generation <> $3 THEN secret_files_on_disk ELSE false END,
+		 version = version + 1 WHERE id = $1`,
+		[machineId, bootId, generation, files.length > 0],
+	);
+}
+
 export interface SessionRow {
 	boot_id: string | null;
 	state: string | null;
@@ -215,6 +251,11 @@ export async function deliverProvision(
 	}
 	const bootId = s.boot_id;
 	const sets = await loadSecretSets(ctx, fenced.sandboxId);
+	const generation = await beforeSecretDelivery(
+		fenced,
+		machineId,
+		sets.secretFiles,
+	);
 	await fenced.check();
 	await ctx.agent.updateEnv(
 		machineId,
@@ -234,10 +275,12 @@ export async function deliverProvision(
 		stepRequestId(fenced.id, `${step}:ssh_ca`),
 	);
 	await fenced.tx(async (tx) => {
-		await tx.client.query(
-			`UPDATE runtime.machines SET provisioned_boot_id = $2, version = version + 1
-			 WHERE id = $1`,
-			[machineId, bootId],
+		await recordSecretDelivery(
+			tx,
+			machineId,
+			bootId,
+			generation,
+			sets.secretFiles,
 		);
 	});
 	return { bootId };
@@ -309,6 +352,7 @@ export async function startMachine(
 export async function hardStop(
 	ctx: WorkerCtx,
 	m: MachineRow,
+	fence?: StepFence,
 ): Promise<"running" | "stopped" | "paused" | "missing" | "none"> {
 	const vmid = m.vmid;
 	if (vmid === null) return "none";
@@ -316,7 +360,10 @@ export async function hardStop(
 	const status = await infra.status(vmid);
 	if (status === "running" || status === "paused") {
 		const own = await ownedTeardown(ctx, m.id, vmid, "stop", () =>
-			infra.stop(vmid, { expectedOwner: m.id }),
+			infra.stop(vmid, {
+				expectedOwner: m.id,
+				...(fence ? { beforeAct: () => fence.check() } : {}),
+			}),
 		);
 		if (!own) return "missing";
 	}

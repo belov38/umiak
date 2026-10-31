@@ -1,5 +1,5 @@
 // S9 Windows in the worker (S9 §12.10, §18.6 p. 5, 6, 10): shutdown timeout by
-// OS, PrepareStop result, and the composite quiesce hook (agent + QGA/VSS).
+// OS, PrepareStop result, and Windows crash-consistent snapshots without QGA/VSS.
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { FreezeTimeoutError, type QuiesceHook } from "@sbx/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -131,7 +131,7 @@ describe("snapshot of a running Windows machine", () => {
 		);
 	});
 
-	it("fork: agent quiesce (fs=false, wipe=false), QGA freeze, snapshot, QGA thaw, agent thaw", async () => {
+	it("fork: crash-consistent snapshot does not call the agent or QGA/VSS", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
 		const src = await readySandbox(w, e);
@@ -141,13 +141,8 @@ describe("snapshot of a running Windows machine", () => {
 
 		expect(await run(w, f.forkOpId)).toBe("succeeded");
 
-		expect(trace).toEqual([
-			"agent.quiesce(fs=false, wipe=false)",
-			"qga.freeze",
-			"snapshot",
-			"qga.thaw",
-			"agent.thaw",
-		]);
+		expect(trace).toEqual(["snapshot"]);
+		expect(w.infra.callsOf("qgaFreezeHook")).toHaveLength(0);
 	});
 
 	it("saved: the agent is asked to wipe secret files", async () => {
@@ -162,14 +157,12 @@ describe("snapshot of a running Windows machine", () => {
 
 		expect(trace).toEqual([
 			"agent.quiesce(fs=false, wipe=true)",
-			"qga.freeze",
 			"snapshot",
-			"qga.thaw",
 			"agent.thaw",
 		]);
 		expect(await row(w, "snapshots", s.snapshotId)).toMatchObject({
 			state: "ready",
-			consistency: "quiesced",
+			consistency: "crash",
 		});
 	});
 
@@ -191,41 +184,34 @@ describe("snapshot of a running Windows machine", () => {
 		expect(w.infra.callsOf("qgaFreezeHook")).toHaveLength(0);
 	});
 
-	it("QGA freeze failure: the agent is thawed and the operation fails", async () => {
+	it("saved ignores broken QGA/VSS and records crash consistency", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
 		const src = await readySandbox(w, e);
 		await makeWindows(w);
 		const s = await save(e, src.sandboxId, "win");
-		const trace = shareTrace(w);
 		w.infra.qgaFreezeFailure = new QuiesceFailed("VSS freeze failed");
-
-		expect(await run(w, s.operationId)).toBe("failed");
-
-		expect(trace).toEqual([
-			"agent.quiesce(fs=false, wipe=true)",
-			"qga.freeze(failed)",
-			"agent.thaw",
-		]);
-		expect((await row(w, "operations", s.operationId)).error_code).toBe(
-			"quiesce_failed",
-		);
-		expect(snapshotLvs(w, s.lvId)).toEqual([]);
+		expect(await run(w, s.operationId)).toBe("succeeded");
+		expect(w.infra.callsOf("qgaFreezeHook")).toHaveLength(0);
+		expect(await row(w, "snapshots", s.snapshotId)).toMatchObject({
+			state: "ready",
+			consistency: "crash",
+		});
 	});
 
-	it("VSS already released the writers at thaw: quiesce_failed, LVs removed", async () => {
+	it("saved discards a crash snapshot when the agent watchdog restored secret files", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
 		const src = await readySandbox(w, e);
 		await makeWindows(w);
 		const s = await save(e, src.sandboxId, "win");
-		const trace = shareTrace(w);
-		w.infra.qgaAlreadyThawed = true;
-
+		w.agent.onThaw = async () => {
+			await w.pool.query(
+				"UPDATE runtime.snapshots SET quiesce_broken = true WHERE id = $1",
+				[s.snapshotId],
+			);
+		};
 		expect(await run(w, s.operationId)).toBe("failed");
-
-		// Both thaws are attempted even though the first fails.
-		expect(trace.slice(-2)).toEqual(["qga.thaw", "agent.thaw"]);
 		expect((await row(w, "operations", s.operationId)).error_code).toBe(
 			"quiesce_failed",
 		);
@@ -251,7 +237,7 @@ describe("snapshot of a running Windows machine", () => {
 		expect(op.progress).not.toMatchObject({ quiesceVia: "qga" });
 	});
 
-	it("fork with the agent unavailable: QGA hook only", async () => {
+	it("fork with the agent unavailable: crash snapshot without QGA", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
 		const src = await readySandbox(w, e);
@@ -262,7 +248,8 @@ describe("snapshot of a running Windows machine", () => {
 
 		expect(await run(w, f.forkOpId)).toBe("succeeded");
 
-		expect(trace).toEqual(["qga.freeze", "snapshot", "qga.thaw"]);
+		expect(trace).toEqual(["snapshot"]);
+		expect(w.infra.callsOf("qgaFreezeHook")).toHaveLength(0);
 		expect(w.agent.callsOf("freeze")).toHaveLength(0);
 	});
 
@@ -286,7 +273,7 @@ describe("snapshot of a running Windows machine", () => {
 		expect(trace[0]).toBe("agent.quiesce(fs=false, wipe=true)");
 	});
 
-	it("saved: S1 gives up after the agent froze (VSS slow): quiesce_failed, not blamed on the agent", async () => {
+	it("saved: an infrastructure failure after agent preparation stays quiesce_failed", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
 		const src = await readySandbox(w, e);

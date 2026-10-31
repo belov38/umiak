@@ -51,6 +51,8 @@ func callCmd(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 				_, _ = fmt.Fprintf(stderr, "sbx-agent call: read stdin: %v\n", err)
 				return 1
 			}
+			// Windows PowerShell 5.1 writes UTF-8 files with a BOM.
+			body = bytes.TrimPrefix(body, []byte{0xef, 0xbb, 0xbf})
 		}
 	}
 	in := dynamicpb.NewMessage(md.Input())

@@ -377,8 +377,23 @@ export class FakeInfra implements NodeInfra {
 
 	async snapshot(
 		vmid: number,
-		opts: { lvId: string; hook?: QuiesceHook },
+		opts: {
+			lvId: string;
+			hook?: QuiesceHook;
+			crashConsistent?: boolean;
+			expectedOwner?: string;
+			beforeAct?: () => Promise<unknown>;
+		},
 	): Promise<InfraSnapshotResult> {
+		await opts.beforeAct?.();
+		if (opts.expectedOwner !== undefined) {
+			const lease = await this.allocator.get(vmid);
+			if (lease?.ownerId !== opts.expectedOwner)
+				throw Object.assign(new Error("snapshot lease owner changed"), {
+					code: "owner_mismatch",
+					retryable: false,
+				});
+		}
 		this.#call("snapshot", vmid, { lvId: opts.lvId, hook: !!opts.hook });
 		const injected = this.snapshotFailure;
 		if (injected && opts.hook) {
@@ -424,7 +439,11 @@ export class FakeInfra implements NodeInfra {
 					},
 				],
 				hw: { cores: String(vm.vcpu), memory: String(vm.memoryMb) },
-				consistency: running ? "quiesced" : "powered_off",
+				consistency: running
+					? opts.crashConsistent
+						? "crash"
+						: "quiesced"
+					: "powered_off",
 			};
 		} finally {
 			if (running && opts.hook) await opts.hook.thaw();

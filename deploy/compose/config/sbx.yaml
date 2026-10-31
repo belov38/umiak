@@ -1,8 +1,8 @@
 # PoC configuration for the local compose stack, matching the real host `pve`.
 # Read only by `sbx-admin bootstrap` in `migrate` (topology and template
 # builds). api and worker take templates, sizes, quotas and pool targets from
-# Payload (S8, edited in /admin); its initial migration seeds the same
-# `linux`, `2gb` and default quota as below. The templates, sizes, pools and
+# Payload (S8, edited in /admin); its migrations seed the same `linux`, `windows`,
+# `2gb`, `4gb` and default quota as below. The templates, sizes, pools and
 # quotas sections here are not read by api or worker.
 # After editing: docker compose -f deploy/compose/compose.yaml up -d --force-recreate migrate
 templates:
@@ -12,8 +12,9 @@ templates:
     defaultSize: 2gb
     allowedSizes: [2gb]
   # S9: Windows 11 Pro 26H2 (template build below). 4 GB is the Windows 11 minimum.
-  # Like the rest of this section, api and worker read it from Payload: create the
-  # `windows` template and the `4gb` size there.
+  # Like the rest of this section, api and worker read it from Payload. Migration
+  # 20261101_000000_windows_template inserts missing catalog entries there;
+  # existing operator settings are preserved. The build below is separate.
   - slug: windows
     os: windows
     enabled: true

@@ -18,6 +18,7 @@ import {
 	FencedOut,
 	type OperationError,
 } from "../steps.ts";
+import { ensureMachineProvision } from "./machine-events.ts";
 
 // sandbox-op queue (S6 §7.1, §15.1): data {operationId}, singletonKey
 // sandboxId. The job is only a trigger; the operations row is the truth.
@@ -118,6 +119,22 @@ export async function handleSandboxOp(
 	} catch (e) {
 		if (e instanceof FencedOut) return fencedOut(ctx, fenced, e);
 		throw e;
+	} finally {
+		// A pending-secrets event during fork/save cannot start another operation
+		// until this one has finished. The generations retain that request.
+		try {
+			const s = await ctx.pool.query<{ machine_id: string | null }>(
+				"SELECT machine_id FROM runtime.sandboxes WHERE id = $1",
+				[fenced.sandboxId],
+			);
+			const machineId = s.rows[0]?.machine_id;
+			if (machineId) await ensureMachineProvision(ctx, machineId);
+		} catch {
+			ctx.log.warn(
+				{ sandboxId: fenced.sandboxId },
+				"deferred secret delivery check failed; reconcile will retry",
+			);
+		}
 	}
 }
 

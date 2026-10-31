@@ -179,8 +179,14 @@ async function superseded(
 	const r = await tx.client.query(
 		`SELECT 1 FROM runtime.agent_events
 		 WHERE machine_id = $1 AND type = $2 AND seq > $3 AND processed_at IS NOT NULL
+		   AND ($2 <> 'readiness.changed' OR payload->>'phase' = $4)
 		 LIMIT 1`,
-		[machineId, row.type, row.seq],
+		[
+			machineId,
+			row.type,
+			row.seq,
+			(row.payload as { phase?: string } | null)?.phase ?? null,
+		],
 	);
 	return (r.rowCount ?? 0) > 0;
 }
@@ -290,6 +296,35 @@ async function onConnected(s: EventScope): Promise<void> {
 			data: { machineId: s.machine.id },
 		});
 	}
+	await requestSecrets(s, "connected");
+}
+
+/** Durable invalidation also survives an operation that currently blocks reprovision. */
+async function requestSecrets(s: EventScope, cause: string): Promise<void> {
+	const sb = await currentSandbox(s);
+	if (sb === null) return;
+	await s.tx.client.query(
+		"UPDATE runtime.machines SET secrets_generation = secrets_generation + 1, version = version + 1 WHERE id = $1",
+		[s.machine.id],
+	);
+	s.machine.secrets_generation += 1;
+	const boot = await sessionBoot(s);
+	if (boot !== null) await maybeReprovision(s, sb, boot, cause);
+}
+
+/** Rechecks a durable delivery request after an operation or worker restart. */
+export async function ensureMachineProvision(
+	ctx: WorkerCtx,
+	machineId: string,
+): Promise<boolean> {
+	return withMachineLocked(ctx.pool, machineId, async (tx, machine) => {
+		if (machine === null) return false;
+		const s = { ctx, tx, machine };
+		const sb = await currentSandbox(s);
+		const boot = await sessionBoot(s);
+		if (sb === null || boot === null) return false;
+		return maybeReprovision(s, sb, boot, "secrets_pending");
+	});
 }
 
 /**
@@ -312,9 +347,8 @@ async function onPhase(
 		if (e.phase === "secrets_missing") {
 			// Only for the boot the machine is on now: an event of an older boot
 			// says nothing about the current one.
-			const sb = await currentSandbox(s);
-			if (sb !== null && (await sessionBoot(s)) === row.boot_id) {
-				await maybeReprovision(s, sb, row.boot_id, "secrets_missing");
+			if ((await sessionBoot(s)) === row.boot_id) {
+				await requestSecrets(s, "secrets_missing");
 			}
 		}
 		return;
@@ -384,6 +418,7 @@ async function onAgentRestarted(s: EventScope, e: SyntheticRow): Promise<void> {
 		{ machineId: s.machine.id, epoch: e.epoch, instanceId: e.instance_id },
 		"agent restarted",
 	);
+	await requestSecrets(s, "agent_restarted");
 }
 
 /**
@@ -455,15 +490,24 @@ async function maybeReprovision(
 	sb: CurrentSandbox,
 	bootId: string,
 	cause: string,
-): Promise<void> {
-	if (sb.state !== "ready") return;
-	if (bootId === s.machine.provisioned_boot_id) return;
+): Promise<boolean> {
+	if (sb.state !== "ready") return false;
+	if (
+		bootId === s.machine.provisioned_boot_id &&
+		s.machine.secrets_generation === s.machine.provisioned_secrets_generation
+	)
+		return false;
+	const connected = await s.tx.client.query(
+		"SELECT 1 FROM tunnel.tunnel_sessions WHERE machine_id = $1 AND boot_id = $2 AND state = 'connected'",
+		[s.machine.id, bootId],
+	);
+	if (connected.rowCount !== 1) return false;
 	const active = await s.tx.client.query(
 		`SELECT 1 FROM runtime.operations
 		 WHERE sandbox_id = $1 AND state IN ('pending', 'running')`,
 		[sb.id],
 	);
-	if ((active.rowCount ?? 0) > 0) return;
+	if ((active.rowCount ?? 0) > 0) return false;
 	const os = await s.tx.client.query<{ os: "linux" | "windows" }>(
 		"SELECT os FROM runtime.template_builds WHERE id = $1",
 		[sb.template_build_id],
@@ -481,7 +525,7 @@ async function maybeReprovision(
 	} catch (err) {
 		if ((err as { code?: string }).code !== "23505") throw err;
 		await s.tx.client.query("ROLLBACK TO SAVEPOINT reprovision");
-		return;
+		return false;
 	}
 	await s.tx.client.query("RELEASE SAVEPOINT reprovision");
 	await s.ctx.jobs.send(
@@ -494,6 +538,7 @@ async function maybeReprovision(
 		{ sandboxId: sb.id, machineId: s.machine.id, operationId, cause },
 		"reprovision enqueued",
 	);
+	return true;
 }
 
 /**

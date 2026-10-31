@@ -171,6 +171,9 @@ machines(
   power_observed_at,
   unexpected_stops jsonb,           -- timestamps of recent unexpected stops (§11.3)
   provisioned_boot_id text null,    -- boot_id on which env and secrets were last delivered (§10.2)
+  secret_files_on_disk bool,        -- Windows: files may remain until a confirmed wipe (§7.8)
+  secrets_generation int,           -- pending/reconnect/restart delivery requests, default 0
+  provisioned_secrets_generation int, -- generation captured before the last successful delivery
   exec_attempt int,                 -- fencing token for machine-op handlers (§15.1)
   error_code text, error_detail text,
   created_at, warm_at, claimed_at, deleted_at, state_changed_at, version int)
@@ -549,10 +552,12 @@ Durable-маркер шага — состояние machine: `allocating`/`prov
 
 | Шаг | Что делает |
 |---|---|
-| `prepare` | Best effort, 10 s: `System/PrepareStop` (агент сбрасывает буферы и стирает секреты из tmpfs) |
-| `shutdown` | S1 `shutdown(timeout 60 s)`; если VM не выключилась — S1 `stop` (жёстко) |
+| `prepare` | Best effort, 10 s: `System/PrepareStop` (агент сбрасывает буферы и стирает секреты). Только подтверждение `secret_files_wiped = true` снимает `machines.secret_files_on_disk`; недоступность, timeout или `false` сохраняют флаг |
+| `shutdown` | S1 `shutdown(timeout 60 s Linux / 120 s Windows)`; если VM не выключилась — S1 `stop` (жёстко) |
 | `verify` | статус VM `stopped` |
 | `finish` | machine → `stopped`, sandbox → `stopped`, `stopped_at`, `stop_reason`; команды этой machine в `starting`/`running` → `lost`; `NOTIFY sbx_routes` |
+
+S1 `stop` во всех путях worker (stop, recover, delete, компенсация, reconcile, аварийная остановка после failed thaw) повторяется через `retryOnVmLock`: 5 попыток с паузами 10 s покрывают 30 s очистки старого QEMU в qmeventd. Power lock освобождается между попытками, перед каждой заново проверяются fence вызывающей операции (если есть) и исходный владелец VMID; при ожидании fence проверяется каждые 2 s. Смена владельца или попытки прекращает повторы.
 
 ### 7.6 Resume
 
@@ -579,7 +584,7 @@ API: состояние `stopped` или `error` с machine в `stopped` (§6.1)
 - операция `fork` на источнике (`pending`) и операция `create` на цели (`pending`, `parent_operation_id` = fork). Задание ставится только для `fork`.
 
 **Worker, операция `fork` на источнике:**
-1. `snapshot`: строка `snapshots` (`kind = fork_source`, `consumer_sandbox_id` = цель, `creating`). Если источник работает — S1 `snapshot` с `QuiesceHook` от S3 (`System/Quiesce` с lease и watchdog; запасной путь — QGA fsfreeze через S1), `consistency = quiesced`. Если агент и QGA не отвечают — ошибка `quiesce_failed` (crash-consistent режим не используется по умолчанию). Если источник выключен — без freeze, `powered_off`. После thaw обработчик проверяет `quiesce_broken`: если watchdog успел разморозить ФС раньше, снапшот несогласован, операция падает с `quiesce_failed`.
+1. `snapshot`: строка `snapshots` (`kind = fork_source`, `consumer_sandbox_id` = цель, `creating`). Если Linux-источник работает — S1 `snapshot` с `QuiesceHook` от S3 (`System/Quiesce` с lease и watchdog; запасной путь — QGA fsfreeze через S1), `consistency = quiesced`. Если агент и QGA не отвечают — ошибка `quiesce_failed`. Для работающей Windows действует явно разрешённый crash-consistent fallback (§7.8): без QGA/VSS, с pause vCPU на время LVM snapshot, `consistency = crash`; fork не требует агента. Если источник выключен — без freeze, `powered_off`. После thaw обработчик проверяет `quiesce_broken`: если watchdog успел разморозить ФС раньше, снапшот несогласован, операция падает с `quiesce_failed`.
 2. Снапшот → `ready`. В одной транзакции: операция `fork` → `succeeded`; у операции цели `deadline_at = now + дедлайн`; задание `sandbox-op` для цели. Если цель к этому моменту уже `deleting`/`deleted`, задание не ставится, а снапшот удаляется этой же операцией.
 
 **Worker, операция `create` на цели:** шаги `provision` (S1 `fork(snapshot)`), `boot`, `claim` (агент увидит смену `machineId` и сменит идентичность, S3), `finish` — как cold create. Затем `cleanup_source`: S1 `delete(snapshot)`, снапшот → `deleted` (thin-снимки независимы).
@@ -594,13 +599,19 @@ Fork наследует от источника: диск, env и секреты
 
 ### 7.8 Saved snapshot, recover, reprovision, update
 
-**Save snapshot** (операция `save_snapshot` на источнике в `ready`/`stopped`): снапшот `kind = saved`, `pending_name`, тем же способом, что в fork. Когда он `ready`, в одной транзакции: старый `ready`-снапшот с этим именем → `deleting` (имя снимается), новый получает `name`. При ошибке имя остаётся за прежним снапшотом. Секретов в снапшоте нет: агент держит их только в tmpfs.
+**Save snapshot** (операция `save_snapshot` на источнике в `ready`/`stopped`): снапшот `kind = saved`, `pending_name`, тем же способом, что в fork. Когда он `ready`, в одной транзакции: старый `ready`-снапшот с этим именем → `deleting` (имя снимается), новый получает `name`. При ошибке имя остаётся за прежним снапшотом. Linux держит секреты в tmpfs. Для Windows действует уточнение S9 §18.6 п. 5: при `machines.secret_files_on_disk = true` работающая VM получает `snapshot_requires_stop`, остановленная — `snapshot_requires_clean_stop`, до freeze и создания LVs. `secrets_in_use` от quiesce тоже отображается в `snapshot_requires_stop`. Fork этим правилом не ограничен.
+
+`secret_files_on_disk` консервативно ставится **до** `Claim` / `UpdateSecrets` с непустыми secret-файлами Windows (включая живые PUT/PATCH env): потерянный ответ мог означать успешную запись. Успешная доставка пустого набора снимает флаг, неудачная — сохраняет. Только подтверждённый `PrepareStop{secret_files_wiped: true}` снимает его при stop; hard stop сам по себе ничего не подтверждает. Миграция старых Windows-machine без подтверждения очистки выставляет `true`.
+
+**Windows crash-consistent fallback (решение пользователя, S9 §24).** QGA/VSS thaw зависает и с обновлённым QGA; worker для работающей Windows не вызывает QGA freeze/thaw. Fork использует no-op hook; saved при чистом флаге всё ещё требует подключённого агента с capability wipe и `System/Quiesce{fs: false, wipe_secret_files: true, lease_ms: 30000}`. S1 приостанавливает vCPU на время LVM snapshot; метаданные явно `consistency = crash`, даже при успешной подготовке агента. Согласованность приложений не гарантируется; `powered_off` для остановленной VM сохраняется. Dirty-проверки выше продолжают действовать. `auto_thawed` / `quiesce_broken` у saved означает возможное восстановление секрет-файлов: такой snapshot выбрасывается и в crash-режиме.
+
+Snapshot после restart тоже использует `retryOnVmLock` (5 попыток, паузы 10 s), включая `freeze took … (budget …)` после ожидания VM lock. Каждая попытка заново читает источник, проверяет fence и дедлайн, удаляет остатки прежней попытки и создаёт свежие hooks; ошибка thaw не повторяет snapshot. Проверки fence продолжаются во время пауз.
 
 **Удаление saved snapshot** (`deleteSavedSnapshot` или замена при save): снапшот сразу → `deleting` (имя освобождается, новые create из него невозможны), задание `snapshot-op delete`. Обработчик удаляет LV только когда нет sandbox в `creating` с `origin_snapshot_id` = этот снапшот, у которых операция ещё не прошла шаг `provision`; до этого ждёт (повтор задания через 30 s). Так create из снапшота, ждущий RAM, не теряет диски.
 
 **Recover** (`ready` или `error` с machine; не чаще раза в `recoverMinIntervalSeconds` = 600): sandbox → `starting`; шаги `reset` (S1 `stop` + `start`, жёсткий power-cycle), `wait_agent`, `provision`, `finish`. Автоматически не запускается никогда.
 
-**Reprovision** (внутренняя, ставит обработчик событий): если sandbox `ready`, а агент сообщил о перезагрузке гостя или фазе `secrets: missing` с `boot_id`, отличным от `machines.provisioned_boot_id`, — доставка как в шаге `provision` resume (§7.6) и новое `provisioned_boot_id`. Не ставится, если активна другая операция (её шаг `provision` всё сделает) или если `boot_id` события уже провижен (запоздавшее событие той же загрузки, которую обработал resume или recover).
+**Reprovision** (внутренняя): новая загрузка требует доставки как в шаге `provision` resume (§7.6). `readiness.changed{phase: secrets, state: pending}` / `secrets_missing` текущей загрузки, `connected` и `agent_restarted` требуют повторной доставки даже при прежнем `boot_id`; команды после restart остаются живы. События увеличивают `secrets_generation`, успешная доставка записывает поколение, прочитанное **до** RPC, в `provisioned_secrets_generation`. Поэтому новый pending во время RPC не теряется. Для `ready` sandbox без активной операции отличие поколений или загрузки ставит reprovision. При активной операции запрос остаётся в машине: проверяется после её завершения и reconcile (восстановление после падения worker). Старый boot и повторная обработка уже обработанного события не создают запроса. Живая доставка PUT/PATCH env тоже учитывает поколения; пустой ответ не снимает флаг файлов при более новом запросе.
 
 **Update** (`name`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`) и **extend** (`deadline_at = now + ttl`) — без операции, обычный `UPDATE` с проверкой `version`.
 
@@ -713,12 +724,12 @@ RETURNING *;
 
 | Событие | Реакция S6 |
 |---|---|
-| `connected` (синт.) | если `health=degraded` → `ok`, `sandbox_events: recovered`; machine `booting` — отметить подключение |
+| `connected` (синт.) | если `health=degraded` → `ok`, `sandbox_events: recovered`; повторная доставка секретов текущей загрузки (§7.8) |
 | `disconnected` (синт.) | ничего сразу; правило degraded — контроллер `health` (§11.1) |
-| `agent_restarted` (синт.) | запись в журнал; команды живы (S2) |
+| `agent_restarted` (синт.) | запись в журнал; команды живы (S2); повторная доставка секретов даже без смены `boot_id` |
 | `rebooted` (синт.) | `last_reboot_at`; команды этой machine с прошлым `boot_id` → `lost`; если sandbox `ready`, нет активной операции и новый `boot_id` (из `tunnel_sessions`) ≠ `provisioned_boot_id` → `reprovision` |
 | `identity_changed` (синт.) | ожидается только при первом подключении fork-цели или VM из снапшота; иначе метрика тревоги `sbx_unexpected_identity_change` |
-| `phase{pool_ready \| ready \| secrets_missing}` | `pool_ready` → machine `warm` (если ждёт); `secrets_missing` у `ready` sandbox с `boot_id` ≠ `provisioned_boot_id` → `reprovision` |
+| `phase{pool_ready \| ready \| secrets_missing}` | `pool_ready` → machine `warm` (если ждёт); `secrets_missing` текущего boot сохраняет запрос повторной доставки, даже если boot уже provisioned (§7.8) |
 | `command.exited{commandId, status, code, signal, stdoutEnd, stderrEnd}` | терминальный статус команды, если ещё не терминальный |
 | `pty.closed{commandId}` | статус команды PTY |
 | `activity{runningCommands, openPtys, tcpStreams}` | счётчики, `activity`, `last_activity_at` (§12) |
@@ -924,7 +935,7 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
 - **S5.** Регистрирует сборки (§14.3). Шаблон содержит агента и qemu-guest-agent.
 - **S7.** Строит HTTP поверх `SandboxService`; создаёт `commands` до `Process/Start`; вызывает `touchApiActivity`; выставляет внутренние ручки §10.1 и §14.2; формат id и ошибок.
 - **S8.** Коллекции: Templates (`slug`, `os`, `enabled`, `defaultSize`, `allowedSizes`), Sizes (`slug`, `vcpu`, `memoryMb`), PoolTargets, Quotas (на команду), PlatformDefaults (глобальная настройка); `afterChange`-хуки шлют `NOTIFY sbx_config`; Payload-конфиг экспортируется пакетом без Next, чтобы `api` и `worker` вызывали `getPayload`. Публичные SSH-ключи пользователя для `authorizedKeys`.
-- **S9.** Дедлайны Windows (§7.9), `boot_timeout_s`, VSS как `QuiesceHook`.
+- **S9.** Дедлайны Windows (§7.9), `boot_timeout_s`, crash-consistent fallback без QGA/VSS и защита secret-файлов saved snapshot (§7.8).
 - **S12.** Deployment `worker` (2 реплики, grace 90 s), Secret с ключами данных (`SBX_DATA_KEYS_FILE`), Secret PVE и `sbx-node`, NetworkPolicy для `/internal/v1/*`, Postgres 18.
 
 ## 17. Библиотеки
@@ -991,3 +1002,9 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
 3. **Запуск остановленной sandbox при обращении к её URL** — фаза 2.
 
 Остаётся на фазу 2: перенос sandbox между нодами и архив остановленных в PBS потребуют новой machine у той же sandbox; модель 1:N это уже допускает.
+
+
+**Дополнение проверки lock (S9 follow-ups).** Stop внутри удаления VM и rollback
+не обходят `retryOnVmLock`: вся попытка удаления повторяется с новой проверкой
+владельца lease, общий node power lock освобождается между попытками.
+Fake-PVE regression удерживает lock до 30 s, затем подтверждает удаление.

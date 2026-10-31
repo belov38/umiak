@@ -48,6 +48,8 @@ export interface SnapshotRef extends NodeRef {
 	kind: "snapshot";
 	id: string;
 	sourceVmid: number;
+	/** Set by Machines; absent in historical snapshot metadata. */
+	consistency?: "crash" | "quiesced" | "powered_off";
 	disks: DiskSet;
 	/** Hardware config of the source without identity (smbios1, vmgenid, MAC, name) and disks. */
 	hardware: Record<string, string>;

@@ -28,6 +28,9 @@ export interface MachineRow {
 	power_observed: string;
 	ready_boot_id: string | null;
 	provisioned_boot_id: string | null;
+	secret_files_on_disk: boolean;
+	secrets_generation: number;
+	provisioned_secrets_generation: number;
 	agent_phase: string | null;
 	exec_attempt: number;
 }

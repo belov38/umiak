@@ -1,4 +1,5 @@
 // Credential stores, their selection and the config lock (unit, no api).
+import { execFile } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -13,6 +14,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileStore } from "../src/auth/file-store.ts";
 import { KeychainStore, type SecretsBackend } from "../src/auth/keychain.ts";
@@ -302,6 +305,24 @@ describe("withFileLock", () => {
 });
 
 describe("getBearer refresh", () => {
+	it("keeps the refresh deadline alive through garbage collection", async () => {
+		const script = fileURLToPath(
+			new URL("./helpers/refresh-gc.ts", import.meta.url),
+		);
+		const { stdout } = await promisify(execFile)(process.execPath, [
+			"--expose-gc",
+			"--conditions=source",
+			script,
+			dir,
+		]);
+		expect(JSON.parse(stdout)).toEqual({
+			code: "network_error",
+			retryable: true,
+			lockReleased: true,
+			requestAborted: true,
+		});
+	});
+
 	it("a refresh that hangs is given up within its timeout and the lock is released", async () => {
 		const lock = join(dir, ".lock");
 		const file = new FileStore(join(dir, "credentials.json"));

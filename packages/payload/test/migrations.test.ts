@@ -121,6 +121,36 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 		expect(pool.docs).toHaveLength(0);
 	});
 
+	it("registers Windows with 4 GB without enabling a warm pool", async () => {
+		const templates = await payload.find({
+			collection: "templates",
+			where: { slug: { equals: "windows" } },
+		});
+		expect(templates.docs).toHaveLength(1);
+		expect(templates.docs[0]).toMatchObject({
+			slug: "windows",
+			os: "windows",
+			enabled: true,
+			defaultSize: "4gb",
+			allowedSizes: ["4gb"],
+			loginUser: "user",
+			capabilities: ["exec", "files", "ssh"],
+		});
+		const sizes = await payload.find({
+			collection: "sizes",
+			where: { slug: { equals: "4gb" } },
+		});
+		expect(sizes.docs).toHaveLength(1);
+		expect(sizes.docs[0]).toMatchObject({
+			slug: "4gb",
+			vcpu: 2,
+			memoryMb: 4096,
+		});
+		expect((await payload.find({ collection: "pool-targets" })).docs).toEqual(
+			[],
+		);
+	});
+
 	it("pool targets are unique per template and size when providerId is empty", async () => {
 		const first = await payload.create({
 			collection: "pool-targets",
@@ -149,6 +179,98 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
 		);
 	});
+});
+
+describe.skipIf(skipPg())("Windows catalog upgrade", () => {
+	let t: TestDatabase;
+	let payload: Payload;
+	const migration = "20261101_000000_windows_template";
+
+	beforeAll(async () => {
+		t = await createTestDatabase({ migrated: false, max: 2 });
+		payload = await openPayload(t.url);
+		await migrateSbxPayload(payload);
+	});
+	afterAll(async () => {
+		if (t) await closePayload(t.url);
+		await t?.drop();
+	});
+
+	it.each([
+		{ existingSize: false, existingTemplate: false },
+		{ existingSize: true, existingTemplate: false },
+		{ existingSize: false, existingTemplate: true },
+		{ existingSize: true, existingTemplate: true },
+	])(
+		"fills missing entries and preserves operator records: %j",
+		async (preset) => {
+			// Replay only the data migration on a pre-S9 catalog. Both entries may
+			// have been created independently through /admin before the upgrade.
+			await t.pool.query(
+				"DELETE FROM payload.templates WHERE slug = 'windows'",
+			);
+			await t.pool.query("DELETE FROM payload.sizes WHERE slug = '4gb'");
+			await t.pool.query(
+				"DELETE FROM payload.payload_migrations WHERE name = $1",
+				[migration],
+			);
+			const size = preset.existingSize
+				? await payload.create({
+						collection: "sizes",
+						data: { slug: "4gb", vcpu: 4, memoryMb: 8192, sortOrder: 37 },
+					})
+				: undefined;
+			const template = preset.existingTemplate
+				? await payload.create({
+						collection: "templates",
+						data: {
+							slug: "windows",
+							name: "Operator Windows",
+							os: "windows",
+							enabled: false,
+							defaultSize: "2gb",
+							allowedSizes: ["2gb"],
+							loginUser: "operator",
+							capabilities: ["files"],
+							sortOrder: 42,
+						},
+					})
+				: undefined;
+			const before = await t.pool.query(`
+			SELECT row_to_json(t) AS doc FROM payload.templates t WHERE slug = 'linux'
+			UNION ALL SELECT row_to_json(s) FROM payload.sizes s WHERE slug = '2gb'
+			UNION ALL SELECT row_to_json(d) FROM payload.platform_defaults d
+			UNION ALL SELECT row_to_json(p) FROM payload.pool_targets p
+		`);
+			expect(await migrateSbxPayload(payload)).toEqual([migration]);
+			expect(await migrateSbxPayload(payload)).toEqual([]);
+			const templates = await payload.find({
+				collection: "templates",
+				where: { slug: { equals: "windows" } },
+			});
+			const sizes = await payload.find({
+				collection: "sizes",
+				where: { slug: { equals: "4gb" } },
+			});
+			expect(templates.docs).toHaveLength(1);
+			expect(sizes.docs).toHaveLength(1);
+			if (template) expect(templates.docs[0]).toEqual(template);
+			else
+				expect(templates.docs[0]).toMatchObject({
+					defaultSize: "4gb",
+					enabled: true,
+				});
+			if (size) expect(sizes.docs[0]).toEqual(size);
+			else expect(sizes.docs[0]).toMatchObject({ vcpu: 2, memoryMb: 4096 });
+			const after = await t.pool.query(`
+			SELECT row_to_json(t) AS doc FROM payload.templates t WHERE slug = 'linux'
+			UNION ALL SELECT row_to_json(s) FROM payload.sizes s WHERE slug = '2gb'
+			UNION ALL SELECT row_to_json(d) FROM payload.platform_defaults d
+			UNION ALL SELECT row_to_json(p) FROM payload.pool_targets p
+		`);
+			expect(after.rows).toEqual(before.rows);
+		},
+	);
 });
 
 describe.skipIf(skipPg())(

@@ -20,7 +20,7 @@ import { type Summary, summarize } from "./stats.ts";
 
 // sbx-bench s9 (spec S9 section 16): create and fork timings of the Windows template.
 // One Windows VM at a time (4 GB each, RAM guard 8 GB): create A (S1) -> start -> agent ready
-// -> hard stop and start -> snapshot with the QGA fsfreeze hook -> shut A down -> fork B with a
+// -> hard stop and start -> crash-consistent snapshot without QGA/VSS -> shut A down -> fork B with a
 // new identity -> start -> agent ready under the new computer name -> delete everything.
 
 const SIZE = { cores: 2, memoryMb: 4096 };
@@ -95,10 +95,10 @@ export const S9_METRICS: [string, string, (r: S9Run) => number | null][] = [
 	],
 	[
 		"fork_snapshot_ms",
-		"snapshot of the running A with the QGA fsfreeze hook",
+		"crash-consistent snapshot of the running A without QGA/VSS",
 		(r) => r.forkSnapshotMs,
 	],
-	["freeze_ms", "fsfreeze freeze -> thaw", (r) => r.freezeMs],
+	["freeze_ms", "pause -> snapshot -> resume (no VSS)", (r) => r.freezeMs],
 	[
 		"fork_clone_ms",
 		"cloneFromSnapshot of B (disks, config, firewall), no boot",
@@ -427,7 +427,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 			log(`VM ${vmA}: waiting ${settle} ms for the VM lock after the restart`);
 			await sleep(settle);
 		}
-		log(`VM ${vmA}: snapshot (QGA fsfreeze hook)`);
+		log(`VM ${vmA}: snapshot (Windows crash fallback, no QGA/VSS)`);
 		// The lock may still be busy (retryOnVmLock); only the attempt that succeeds is timed.
 		let snapAt = 0;
 		snap = await retryOnVmLock(
@@ -442,7 +442,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		const forkSnapshotMs = now() - snapAt;
 		const freezeMs = snap.freezeMs ?? null;
 		log(
-			`snapshot ${snap.id}: ${forkSnapshotMs} ms, frozen ${freezeMs ?? "-"} ms`,
+			`snapshot ${snap.id}: ${forkSnapshotMs} ms, paused ${freezeMs ?? "-"} ms`,
 		);
 
 		// One Windows VM at a time: A is off before it starts again and before B starts.

@@ -1206,12 +1206,14 @@ describe("Windows template (three disks)", () => {
 	});
 
 	it("snapshot of a Windows clone snapshots all three LVs", async () => {
-		const { node, api, machines } = setup();
+		const { node, api, machines, log } = setup();
 		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
 		const m = await machines.create({});
 		await machines.start(m.vmid);
 		node.calls.length = 0;
 		const snap = await machines.snapshot(m.vmid);
+		expect(snap.consistency).toBe("crash");
+		expect(log.some((line) => line.includes("fsfreeze"))).toBe(false);
 		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
 			.items as { origin: string; name: string }[];
 		expect(items.map((i) => `${i.origin}->${i.name}`)).toEqual([
@@ -1235,8 +1237,9 @@ describe("Windows template (three disks)", () => {
 			api.fail[thaw] = new PveApiError(500, "guest-fsfreeze-thaw failed");
 			return { created: items.map((i) => i.name) };
 		};
-		const snap = await machines.snapshot(m.vmid);
+		const snap = await machines.snapshot(m.vmid, { crashConsistent: false });
 		expect(snap.autoThawed).toBe(true);
+		expect(snap.consistency).toBe("crash");
 		expect(store.getSnapshot(snap.id)?.autoThawed).toBe(true);
 		expect(
 			node.lvs.filter((l) => l.tags.includes(`sbx-snap-${snap.id}`)),
@@ -1250,9 +1253,9 @@ describe("Windows template (three disks)", () => {
 		await machines.start(m.vmid);
 		api.fail[`POST /nodes/pve/qemu/${m.vmid}/agent/fsfreeze-thaw`] =
 			new PveApiError(500, "guest-fsfreeze-thaw failed");
-		await expect(machines.snapshot(m.vmid, { id: "s1" })).rejects.toThrow(
-			/thaw failed for VM 500/,
-		);
+		await expect(
+			machines.snapshot(m.vmid, { id: "s1", crashConsistent: false }),
+		).rejects.toThrow(/thaw failed for VM 500/);
 		expect(node.lvs.filter((l) => l.name.startsWith("sbx-snap-"))).toEqual([]);
 	});
 

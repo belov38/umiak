@@ -237,6 +237,31 @@ func TestCallWithoutAgent(t *testing.T) {
 	}
 }
 
+func TestCallUTF8BOMStdin(t *testing.T) {
+	a := startCLIAgent(t)
+	code, out, errOut := a.cli(t, "\xef\xbb\xbf{}\r\n", "call", "sbx.agent.v1.System/Info", "-")
+	if code != 0 || !strings.Contains(out, cliMachineID) {
+		t.Fatalf("call BOM stdin: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+func TestExecUnknownUserNotStarted(t *testing.T) {
+	a := startCLIAgent(t)
+	code, out, errOut := a.cli(t, "", "exec", "--user", "no-such-user-sbx-test", "--", "prog")
+	if code != 127 || out != "" || !strings.Contains(errOut, "no-such-user-sbx-test") {
+		t.Fatalf("exec unknown user: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+func TestExecOtherAgentValidationStill125(t *testing.T) {
+	a := startCLIAgent(t)
+	a.d.newID = func() string { return "bad/id" }
+	code, _, errOut := a.cli(t, "", "exec", "--", "prog")
+	if code != 125 || !strings.Contains(errOut, "invalid_argument") {
+		t.Fatalf("exec agent validation: exit %d, stderr %q", code, errOut)
+	}
+}
+
 func TestExecSubcommandExitCode(t *testing.T) {
 	a := startCLIAgent(t)
 	id := "cli-exec-1"

@@ -1,3 +1,5 @@
+import { ThawFailedError } from "./storage/lvmthin.ts";
+
 /** A Proxmox task or call that could not take the VM config lock. */
 export const VM_LOCK_TIMEOUT_RE = /can't lock file .* got timeout/;
 
@@ -9,6 +11,8 @@ export const VM_LOCK_TIMEOUT_RE = /can't lock file .* got timeout/;
 export const VM_LOCK_AFTER_RESTART_MS = 35_000;
 
 export interface VmLockRetryOptions {
+	/** Snapshot pause/resume may consume its freeze budget while waiting for the same lock. */
+	retryFreezeBudget?: boolean;
 	/** Attempts in total (default 5). */
 	tries?: number;
 	/** Pause between attempts (default 10 s). */
@@ -34,8 +38,19 @@ export async function retryOnVmLock<T>(
 		try {
 			return await fn();
 		} catch (err) {
+			// Failed thaw is an emergency-stop path; starting another snapshot
+			// could leave a frozen guest behind, even if that stop hit a lock.
+			if (
+				err instanceof ThawFailedError ||
+				(err instanceof Error && err.cause instanceof ThawFailedError)
+			)
+				throw err;
 			const text = err instanceof Error ? err.message : String(err);
-			if (attempt >= tries || !VM_LOCK_TIMEOUT_RE.test(text)) throw err;
+			const lock = VM_LOCK_TIMEOUT_RE.test(text);
+			const budget =
+				o.retryFreezeBudget &&
+				/freeze took \d+(?:\.\d+)? ms \(budget \d+(?:\.\d+)? ms\)/.test(text);
+			if (attempt >= tries || (!lock && !budget)) throw err;
 			o.onRetry?.(err, attempt);
 			await sleep(o.delayMs ?? 10_000);
 		}

@@ -1,6 +1,6 @@
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import type { Tx } from "@sbx/db";
-import { FreezeTimeoutError, type QuiesceHook } from "@sbx/pve";
+import { FreezeTimeoutError, type QuiesceHook, retryOnVmLock } from "@sbx/pve";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { insertDisks, loadSnapshot, snapshotRef } from "../db.ts";
@@ -11,7 +11,8 @@ import {
 	type InfraSnapshotRef,
 	type NodeInfra,
 } from "../ports.ts";
-import { type Fenced, FencedOut } from "../steps.ts";
+import { DeadlineExceeded, type Fenced, FencedOut } from "../steps.ts";
+import { sleep } from "../wait.ts";
 import { currentMachine, machineOs, vmidOf } from "./common.ts";
 
 // The snapshot step of fork and save_snapshot (S6 §7.7 step 1, §7.8). The
@@ -47,6 +48,21 @@ export class SnapshotLost extends Error {
 	constructor(snapshotId: string, state: string) {
 		super(`snapshot ${snapshotId} is ${state}`);
 		this.name = "SnapshotLost";
+	}
+}
+
+/** Saved Windows disks must have a durable confirmation that secret files are absent. */
+export class SnapshotRequiresStop extends Error {
+	readonly retryable = false;
+	readonly code: "snapshot_requires_stop" | "snapshot_requires_clean_stop";
+	constructor(machineId: string, stopped = false) {
+		super(
+			`machine ${machineId}: saved snapshot requires ${stopped ? "a clean stop confirming secret-file cleanup" : "stopping the machine before saving secret files"}`,
+		);
+		this.code = stopped
+			? "snapshot_requires_clean_stop"
+			: "snapshot_requires_stop";
+		this.name = "SnapshotRequiresStop";
 	}
 }
 
@@ -260,16 +276,44 @@ export interface SnapshotTaken {
  *   `system.quiesce.v1`, else no hook (S1 freezes through QGA); neither
  *   answers → `QuiesceFailed`. An agent hook that failed `AgentUnavailable`
  *   records `progress.quiesceVia = "qga"`: the retry uses the QGA fallback;
- *   Windows (S9 §12.10): the hook is composite, the agent (`fs: false`, with
- *   `wipeSecretFiles` for a saved snapshot) then QGA/VSS; the fallback is QGA
- *   alone, except for a saved snapshot, which needs the agent
- *   (`AgentUnavailable`, the job is repeated);
+ *   Windows: explicitly crash-consistent (vCPU pause + LVM, without QGA/VSS).
+ *   A saved snapshot still requires the agent's `fs: false` preparation and
+ *   secret-file wipe; a fork uses a no-op hook and needs no agent;
  * - VM stopped: no freeze (`powered_off`);
  * - disks, `hw` and `consistency` recorded under the fence;
  * - after the thaw, `quiesce_broken` (set by the `quiesce.watchdog_thawed`
  *   event) → `QuiesceFailed`; the compensation removes the LVs.
  */
 export async function takeSnapshot(
+	ctx: WorkerCtx,
+	fenced: Fenced,
+	snapshotId: string,
+): Promise<SnapshotTaken> {
+	// A retry needs fresh hooks: the previous attempt has already thawed.
+	// All attempts share the row and LV tag.
+	return retryOnVmLock(
+		async () => {
+			await fenced.check();
+			if (fenced.deadlinePassed()) throw new DeadlineExceeded(fenced.id);
+			return takeSnapshotOnce(ctx, fenced, snapshotId);
+		},
+		{
+			retryFreezeBudget: true,
+			sleep: async (ms) => {
+				const interval = Math.max(1, ctx.timing.supersedeCheckMs);
+				for (let remaining = ms; remaining > 0; remaining -= interval) {
+					await (ctx.timing.vmLockSleep ?? sleep)(
+						Math.min(remaining, interval),
+					);
+					await fenced.check();
+					if (fenced.deadlinePassed()) throw new DeadlineExceeded(fenced.id);
+				}
+			},
+		},
+	);
+}
+
+async function takeSnapshotOnce(
 	ctx: WorkerCtx,
 	fenced: Fenced,
 	snapshotId: string,
@@ -287,20 +331,27 @@ export async function takeSnapshot(
 
 		const status = await infra.status(vmid);
 		if (status === "missing") throw new MachineGone(m.id, `VM ${vmid} missing`);
+		const windows = (await machineOs(ctx.pool, m)) === "windows";
+		if (s.kind === "saved" && m.secret_files_on_disk && windows) {
+			throw new SnapshotRequiresStop(m.id, status === "stopped");
+		}
 		let hook: QuiesceHook | undefined;
 		let agentUnavailable = false;
 		let agentHook = false;
-		// The agent's own freeze returned: a later freeze timeout is VSS's (Windows), not the agent's.
+		// The agent's own freeze returned: a later freeze timeout is not the agent's.
 		let agentFrozen = false;
 		// A saved snapshot of a Windows machine must not carry secret files: only the
-		// agent can wipe them, so there is no QGA-only fallback (S9 §12.10).
+		// agent can wipe them, so the crash-consistent fallback still requires it.
 		let needsAgent = false;
 		if (status === "running") {
-			const windows = (await machineOs(ctx.pool, m)) === "windows";
 			const saved = s.kind === "saved";
 			needsAgent = windows && saved;
 			const viaQga = fenced.op.progress.quiesceVia === "qga" && !needsAgent;
-			if (!viaQga && (await agentCanQuiesce(ctx, m.id, needsAgent))) {
+			if (windows && !needsAgent) {
+				// Windows VSS thaw can hang even on a fresh QGA. S1 pauses the
+				// vCPUs for an explicitly crash-consistent disk snapshot instead.
+				hook = { freeze: async () => {}, thaw: async () => {} };
+			} else if (!viaQga && (await agentCanQuiesce(ctx, m.id, needsAgent))) {
 				agentHook = true;
 				const agent = ctx.agent.quiesceHook(
 					m.id,
@@ -309,6 +360,12 @@ export async function takeSnapshot(
 				);
 				const watch = (e: unknown): never => {
 					if (e instanceof AgentUnavailable) agentUnavailable = true;
+					if (
+						needsAgent &&
+						(e as { code?: string })?.code === "secrets_in_use"
+					) {
+						throw new SnapshotRequiresStop(m.id);
+					}
 					throw e;
 				};
 				let thawing = false;
@@ -323,10 +380,8 @@ export async function takeSnapshot(
 						return agent.thaw().catch(watch);
 					},
 				};
-				// Windows: the agent prepares, VSS freezes the filesystem through QGA.
-				hook = windows
-					? composeHooks(watched, infra.qgaFreezeHook(vmid))
-					: watched;
+				// Windows prepares/wipes secrets only; it never calls QGA/VSS.
+				hook = watched;
 			} else if (needsAgent) {
 				throw new AgentUnavailable(
 					`machine ${m.id}: a saved snapshot of a Windows machine needs the agent to wipe secret files`,
@@ -335,8 +390,6 @@ export async function takeSnapshot(
 				throw new QuiesceFailed(
 					`machine ${m.id}: neither the agent nor QGA can freeze the guest`,
 				);
-			} else if (windows) {
-				hook = infra.qgaFreezeHook(vmid);
 			}
 		}
 		await fenced.check();
@@ -344,7 +397,13 @@ export async function takeSnapshot(
 		const storageId = s.storage_id;
 		let res: Awaited<ReturnType<NodeInfra["snapshot"]>>;
 		try {
-			res = await infra.snapshot(vmid, hook ? { lvId, hook } : { lvId });
+			res = await infra.snapshot(vmid, {
+				lvId,
+				...(hook ? { hook } : {}),
+				crashConsistent: windows,
+				expectedOwner: m.id,
+				beforeAct: () => fenced.check(),
+			});
 		} catch (e) {
 			// S1 gave up waiting for the agent's freeze (the infra adapter reports it as
 			// QuiesceFailed caused by FreezeTimeoutError): same fallback as an unanswered hook.
@@ -359,13 +418,17 @@ export async function takeSnapshot(
 				// through QGA. The error stays transient (the job is repeated).
 				ctx.log.info(
 					{ operationId: fenced.id, machineId: m.id },
-					"agent quiesce unavailable; the retry uses QGA",
+					needsAgent
+						? "agent secret-file preparation unavailable; retry requires the agent"
+						: "agent quiesce unavailable; the retry uses QGA",
 				);
 				if (!needsAgent) await mergeProgress(fenced, { quiesceVia: "qga" });
 				// Transient, so the job is repeated through QGA.
 				if (frozeTooLong)
 					throw new AgentUnavailable(
-						"agent quiesce did not finish in time; the retry uses QGA",
+						needsAgent
+							? "agent secret-file preparation did not finish in time"
+							: "agent quiesce did not finish in time; the retry uses QGA",
 						{ cause: e },
 					);
 			}
@@ -397,7 +460,10 @@ export async function takeSnapshot(
 		s = await loadStepSnapshot(ctx.pool, snapshotId);
 		if (s === null) throw new SnapshotLost(snapshotId, "missing");
 	}
-	if (s.consistency === "quiesced" && s.quiesce_broken) {
+	if (
+		(s.consistency === "quiesced" || s.kind === "saved") &&
+		s.quiesce_broken
+	) {
 		throw new QuiesceFailed(
 			`snapshot ${snapshotId}: the quiesce watchdog thawed the guest before the snapshot was done`,
 		);

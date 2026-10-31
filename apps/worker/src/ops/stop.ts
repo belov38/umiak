@@ -60,12 +60,13 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 			// does not block a stop. `secretFilesWiped` is the agent's confirmation.
 			run: async () => {
 				const m = await machine();
+				let secretFilesWiped: boolean;
 				try {
 					const r = await withTimeout(
 						ctx.agent.prepareStop(m.id),
 						ctx.timing.prepareStopTimeoutMs ?? PREPARE_STOP_TIMEOUT_MS,
 					);
-					return { prepared: true, secretFilesWiped: r.secretFilesWiped };
+					secretFilesWiped = r.secretFilesWiped;
 				} catch (e) {
 					ctx.log.info(
 						{
@@ -76,6 +77,15 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					);
 					return { prepared: false, secretFilesWiped: false };
 				}
+				if (secretFilesWiped) {
+					await fenced.tx(async (tx) => {
+						await tx.client.query(
+							"UPDATE runtime.machines SET secret_files_on_disk = false, version = version + 1 WHERE id = $1",
+							[m.id],
+						);
+					});
+				}
+				return { prepared: true, secretFilesWiped };
 			},
 		},
 		{
@@ -107,7 +117,10 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 				if (res === "timeout") {
 					await fenced.check();
 					await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
-						infra.stop(vmid, { expectedOwner: m.id }),
+						infra.stop(vmid, {
+							expectedOwner: m.id,
+							beforeAct: () => fenced.check(),
+						}),
 					);
 					return { shutdown: "hard" };
 				}
@@ -127,7 +140,10 @@ function stopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 				if (status !== "stopped") {
 					await fenced.check();
 					await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
-						infra.stop(vmid, { expectedOwner: m.id }),
+						infra.stop(vmid, {
+							expectedOwner: m.id,
+							beforeAct: () => fenced.check(),
+						}),
 					);
 					status = await infra.status(vmid);
 				}
