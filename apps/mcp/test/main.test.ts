@@ -296,11 +296,14 @@ describe("startMcp", () => {
 		});
 		await vi.waitFor(() => expect(api?.state.commands.size).toBe(1));
 
-		// Requests already started on open connections (a closing server
-		// takes no new connection): their headers end after close() began.
-		const started = (head: string) => {
+		// A closing server takes no new connection and closes idle ones: the
+		// requests start on open connections before close() and end after it.
+		// Each connection first answers GET /healthz (it is accepted and kept
+		// alive), then gets the start of its next request; one check phase
+		// later the server has read it (a poll phase runs in between), so the
+		// connection counts as busy, not idle.
+		const startedOn = async (head: string) => {
 			const sock = connect(r.port, "127.0.0.1");
-			sock.write(head);
 			let got = "";
 			sock.on("data", (d: Buffer) => {
 				got += d.toString();
@@ -309,11 +312,17 @@ describe("startMcp", () => {
 				sock.on("close", () => resolve(got));
 				sock.on("error", () => resolve(got));
 			});
+			sock.write("GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+			await vi.waitFor(() => expect(got).toContain('{"ok":true}'));
+			got = "";
+			sock.write(head);
 			return { sock, done };
 		};
-		const ready = started("GET /readyz HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+		const ready = await startedOn(
+			"GET /readyz HTTP/1.1\r\nHost: 127.0.0.1\r\n",
+		);
 		const body = '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}';
-		const post = started(
+		const post = await startedOn(
 			[
 				"POST /mcp HTTP/1.1",
 				"Host: 127.0.0.1",
@@ -324,12 +333,14 @@ describe("startMcp", () => {
 				"",
 			].join("\r\n"),
 		);
-		await new Promise((res) => setTimeout(res, 100));
+		await new Promise((res) => setImmediate(res));
 		const closing = r.close();
 		running = undefined;
+		// Several sweeps of idle connections (every 50 ms) pass first.
 		await new Promise((res) => setTimeout(res, 200));
-		ready.sock.end("Connection: close\r\n\r\n");
-		post.sock.end(`Connection: close\r\n\r\n${body}`);
+		// No half-close: Connection: close makes the server end the socket.
+		ready.sock.write("Connection: close\r\n\r\n");
+		post.sock.write(`Connection: close\r\n\r\n${body}`);
 		const readyAnswer = await ready.done;
 		expect(readyAnswer).toMatch(/^HTTP\/1\.1 503/);
 		expect(readyAnswer).toContain("shutting_down");
