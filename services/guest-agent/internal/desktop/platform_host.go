@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
@@ -188,10 +189,16 @@ func (h *FileHost) Viewers(ctx context.Context) (uint32, error) {
 		if len(data) > 16<<20 {
 			e = errors.New("stream log exceeds scan budget")
 		} else if e == nil {
-			count = viewerLogCount(string(data))
+			text := string(data)
+			count = viewerLogCount(text)
+			// A known lifecycle is authoritative. UDP conntrack outlives closed
+			// ENet sockets and must not keep a disconnected desktop busy.
+			if strings.Contains(text, "CLIENT CONNECTED") {
+				return count, nil
+			}
 		}
 	}
-	// Conntrack ASSURED control flows cover a missing/rotated log conservatively.
+	// Conntrack covers missing, oversized or lifecycle-less logs conservatively.
 	data, ce := h.Run(ctx, "conntrack", "-L", "-p", "udp", "--dport", "47999", "-o", "extended")
 	if ce == nil {
 		return max(count, conntrackViewers(string(data))), nil
