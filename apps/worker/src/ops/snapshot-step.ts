@@ -295,12 +295,17 @@ export async function takeSnapshot(
 					if (e instanceof AgentUnavailable) agentUnavailable = true;
 					throw e;
 				};
+				let thawing = false;
 				const watched: QuiesceHook = {
 					freeze: async () => {
 						await agent.freeze().catch(watch);
-						agentFrozen = true;
+						// A freeze that returns after S1 gave up and thawed still counts as late.
+						if (!thawing) agentFrozen = true;
 					},
-					thaw: () => agent.thaw().catch(watch),
+					thaw: () => {
+						thawing = true;
+						return agent.thaw().catch(watch);
+					},
 				};
 				// Windows: the agent prepares, VSS freezes the filesystem through QGA.
 				hook = windows
