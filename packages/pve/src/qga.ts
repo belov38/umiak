@@ -42,11 +42,20 @@ export class QgaExecStatusLostError extends Error {
 	}
 }
 
+/** A guest exec did not exit within its timeout; the process may still be running. */
+export class QgaExecTimeoutError extends Error {
+	constructor(vmid: number, command: string[]) {
+		super(`guest exec on VM ${vmid} timed out: ${command.join(" ")}`);
+		this.name = "QgaExecTimeoutError";
+	}
+}
+
 /** Message of PveApi's client-side timeout on an exec-status poll. */
 const CLIENT_TIMEOUT_RE = /^GET \S+\/agent\/exec-status: timeout$/;
 
 /** Raw bytes per exec in fileWriteWindows. */
-const WRITE_CHUNK_TIMEOUT_MS = 180_000;
+const WRITE_CHUNK_TIMEOUT_MS = 120_000;
+const WRITE_ATTEMPTS = 3;
 const WRITE_CHUNK_BYTES = 32 * 1024;
 
 /**
@@ -151,6 +160,26 @@ export class Qga {
 			throw new Error(
 				`unsupported Windows path ${JSON.stringify(path)}: spaces, quotes and shell metacharacters are not allowed`,
 			);
+		// A chunk exec now and then never finishes on a fresh Windows clone (qemu-ga keeps its
+		// stdin open; seen on pve). The whole file is written again from the first chunk.
+		for (let attempt = 1; ; attempt++) {
+			try {
+				await this.#writeChunks(vmid, path, data);
+				return;
+			} catch (err) {
+				if (
+					attempt >= WRITE_ATTEMPTS ||
+					!(
+						err instanceof QgaExecTimeoutError ||
+						err instanceof QgaExecStatusLostError
+					)
+				)
+					throw err;
+			}
+		}
+	}
+
+	async #writeChunks(vmid: number, path: string, data: Buffer): Promise<void> {
 		const chunks = Math.max(1, Math.ceil(data.length / WRITE_CHUNK_BYTES));
 		for (let i = 0; i < chunks; i++) {
 			const last = i === chunks - 1;
@@ -247,10 +276,7 @@ export class Qga {
 					stdout: st["out-data"] ?? "",
 					stderr: st["err-data"] ?? "",
 				};
-			if (Date.now() > deadline)
-				throw new Error(
-					`guest exec on VM ${vmid} timed out: ${command.join(" ")}`,
-				);
+			if (Date.now() > deadline) throw new QgaExecTimeoutError(vmid, command);
 			await sleep(delay);
 		}
 	}

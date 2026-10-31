@@ -295,8 +295,14 @@ class FakeWindowsGuest implements PveClient {
 	file = Buffer.alloc(0);
 	hashOverride: string | undefined;
 	failChunk: number | undefined;
+	/** Exec index whose status qemu-ga loses (once). */
+	lostExec: number | undefined;
 	#last = { exited: 1, exitcode: 0, "out-data": "" };
 	async get<T>(_path: string, _p?: Params): Promise<T> {
+		if (this.lostExec === this.execs.length - 1) {
+			this.lostExec = undefined;
+			throw new PveApiError(500, "PID lld does not exist");
+		}
 		return this.#last as T;
 	}
 	async post<T>(path: string, p?: Params): Promise<T> {
@@ -390,6 +396,18 @@ describe("Qga.fileWriteWindows", () => {
 			new Qga(guest, "pve").fileWriteWindows(500, "C:\\x.bin", data),
 		).rejects.toThrow(/chunk 2/);
 		expect(guest.execs).toHaveLength(2);
+	});
+
+	it("writes the whole file again when a chunk's exec status is lost", async () => {
+		const guest = new FakeWindowsGuest();
+		guest.lostExec = 1;
+		await new Qga(guest, "pve").fileWriteWindows(500, "C:\\x.bin", data);
+		// Chunks 1-2 of the first attempt, then all three chunks from Create again.
+		expect(guest.execs).toHaveLength(5);
+		expect(
+			/FileMode\]::Create/.test(guest.execs[2]?.command.at(-2) ?? ""),
+		).toBe(true);
+		expect(guest.file.equals(data)).toBe(true);
 	});
 
 	it("rejects paths that would not survive PowerShell command-line parsing", async () => {
