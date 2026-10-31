@@ -20,7 +20,7 @@ AI-агентам и людям нужен графический рабочий
 - `linux-desktop` и `windows` дают одинаковые API рабочего стола и computer-use;
 - поток идёт без публичных IP у sandbox; dev-адреса и транспорт доступа к стенду задаются только в `infra/dev-cp/`;
 - холодный create `linux-desktop` допускает до ~1 min, Windows — до 5 min (§15);
-- платформа ничего не форкает: Sunshine, moonlight-web и coturn ставятся из upstream-релизов без изменений.
+- Sunshine и moonlight-web ставятся из upstream-релизов без изменений. Исключение S10: pinned coturn с минимальным патчем повторной проверки REST credentials на Refresh (обоснование и RED→GREEN ниже).
 
 ## 2. Цели, не-цели, анти-цели
 
@@ -991,3 +991,23 @@ S8 integration (2026-10-31): Desktop tab uses real SDK, fresh single-use tickets
 - Pending live spikes: CT590 publicAPI create, actual WebSocket/WebRTC/TURN frames and stream activity/long-idle checks. Dedicated self-hosted TURN listener IP/TLS443 is still needed for devCP. Windows depends on S9 merge. No public API/S11 field changes in this pass.
 
 Dev TURN decision (master, 2026-11-01): CT590 may share its address with gateway; dev listeners3478UDP/TCP,5349TLS, narrow UDP relay range configured only under infra/dev-cp. TLS from existing dev CA, hostname under its permitted tunnel DNS namespace. Dedicated address/TLS443 or SNI multiplexing is a production follow-up, not an MVP dev blocker. CT590 RAM6144MiB maximum. Master redeploys main after merges; this acceptance may leave s10-impl deployed.
+
+
+Coturn Refresh policy (implementation, 2026-11-01): upstream4.18.0 intentionally
+caches the password for an established allocation ([upstream REST documentation](https://github.com/coturn/coturn/blob/23c6c1d32a3d2b21a56cee65d3203bcc4ea82d2b/README.turnserver)). To satisfy expiry-on-Refresh, compose builds the same pinned source with
+`deploy/compose/turn/refresh-auth.patch`: clear the cached key on the first Refresh
+pass and use the existing async credential callback; preserve it on the resumed
+pass. Source commit/archive SHA256 and patch are pinned in Dockerfile; no new auth
+algorithm. Live wire regression: original expired Refresh succeeds (RED), patched
+image rejects it while valid Refresh and UDP/TCP/TLS allocation succeed (GREEN).
+This intentionally tightens upstream's session policy; API and TURN credential
+format/TTL remain unchanged.
+
+
+Совместимость TURN channels (live, 2026-11-01): pinned rtc-turn0.21.1 из
+moonlight-web3.0.1 удаляет binding при438 и создаёт новый channel number для того же
+peer; coturn закономерно отвечает400. Подтверждено live-обрывом через10min и
+изолированным wire fixture с nonceTTL2s (тот же400 за3s). Для этой версии выбран
+стандартный `stale-nonce=0`. Повторная HMAC/REST timestamp проверка каждого Refresh
+сохраняется патчем; это не отключает срок credentials. Ротацию nonce можно вернуть
+после обновления исправленного upstream rtc-turn и повторной long-idle приёмки.

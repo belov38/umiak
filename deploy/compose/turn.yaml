@@ -1,7 +1,8 @@
-# Opt in with --profile desktop after assigning a dedicated host IP and TLS cert.
+# Opt in with --profile desktop after assigning the TURN listener and TLS certificate.
 services:
   turn:
-    image: coturn/coturn:4.18.0-r0
+    image: sbx-turn:dev
+    build: { context: ./turn, dockerfile: Dockerfile }
     profiles: [desktop]
     network_mode: host
     user: "1000:1000"

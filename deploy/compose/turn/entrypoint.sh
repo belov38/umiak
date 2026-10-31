@@ -29,8 +29,11 @@ tls-listening-port=$tls_port
 listening-ip=$SBX_TURN_IP
 relay-ip=$SBX_TURN_IP
 external-ip=$SBX_TURN_IP
+pidfile=$run/turnserver.pid
 realm=$SBX_TURN_REALM
 fingerprint
+# rtc-turn 0.21.1 cannot renew ChannelBind after 438; Refresh still rechecks REST expiry.
+stale-nonce=0
 use-auth-secret
 static-auth-secret=$secret
 cert=$secrets/tls.crt
@@ -42,12 +45,9 @@ denied-peer-ip=::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
 allowed-peer-ip=$SBX_TURN_IP
 no-tcp-relay
 no-multicast-peers
-no-cli
-no-software-attribute
 user-quota=4
 total-quota=400
 max-bps=3000000
-no-dtls
 log-file=stdout
 simple-log
 CONF

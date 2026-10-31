@@ -87,12 +87,30 @@ class Turn:
         assert kind == 0x103 and code == 0, f"allocate failed {code}"
         address = response[0x16]
         port = struct.unpack("!H", address[2:4])[0] ^ (COOKIE >> 16)
+        self.relay_port = port
         assert 49160 <= port <= 49200, "relay escaped dev port range"
 
-    def permission(self, ip):
+    def peer(self, ip):
         value = bytes([0, 1]) + struct.pack("!H", 50000 ^ (COOKIE >> 16))
-        value += bytes(a ^ b for a, b in zip(socket.inet_aton(ip), struct.pack("!I", COOKIE)))
-        return self.request(8, [(0x12, value)])[2]
+        return value + bytes(a ^ b for a, b in zip(socket.inet_aton(ip), struct.pack("!I", COOKIE)))
+
+    def permission(self, ip):
+        return self.request(8, [(0x12, self.peer(ip))])[2]
+
+    def renew_channel_like_moonlight(self, ip):
+        # rtc-turn 0.21.1 deletes its binding on 438, then allocates a new number.
+        # Coturn correctly refuses changing a channel number for an existing peer.
+        channel = 0x4000
+        def bind():
+            return self.request(9, [(0x12, self.peer(ip)), (0xC, struct.pack("!HH", channel, 0))])
+        assert bind()[2] == 0, "initial ChannelBind failed"
+        time.sleep(3)
+        _, response, code = bind()
+        if code == 438:
+            self.auth = [(k, response[0x15] if k == 0x15 else v) for k, v in self.auth]
+            channel += 1
+            code = bind()[2]
+        assert code == 0, f"moonlight ChannelBind renewal failed: {code}"
 
     def refresh(self, lifetime):
         return self.request(4, [(0xD, struct.pack("!I", lifetime))])[2]
@@ -108,10 +126,14 @@ def main():
     ip = os.environ.get("SBX_CP_IP", "192.168.68.90")
     host = os.environ.get("SBX_DEVCP_TURN_HOST", f"turn.tunnel.{ip.replace('.', '-')}.sslip.io")
     ca = os.environ.get("SBX_DEVCP_CA_DIR", str(Path.home() / ".config/sbx/dev-ca")) + "/ca.pem"
-    secret = subprocess.check_output([
-        "ssh", "-o", "BatchMode=yes", os.environ.get("SBX_DEVCP_SSH", f"sbx@{ip}"),
-        "cat", "boat-dev-clone/deploy/compose/secrets/turn/auth-secret",
-    ]).strip()
+    local_secret = os.environ.get("SBX_TURN_PROBE_SECRET_FILE")
+    if local_secret:
+        secret = Path(local_secret).read_bytes().strip()
+    else:
+        secret = subprocess.check_output([
+            "ssh", "-o", "BatchMode=yes", os.environ.get("SBX_DEVCP_SSH", f"sbx@{ip}"),
+            "cat", "boat-dev-clone/deploy/compose/secrets/turn/auth-secret",
+        ]).strip()
     for transport in ("udp", "tcp", "tls"):
         turn = Turn(transport, ip, host, ca, secret)
         try:
@@ -120,6 +142,9 @@ def main():
                 assert turn.permission(denied) == 403, "TURN allowed a forbidden peer"
             assert turn.permission(ip) == 0, "TURN denied its own relay address"
             assert turn.refresh(60) == 0, "valid credential refresh failed"
+            if transport == "udp" and os.environ.get("SBX_TURN_PROBE_CHANNEL_RENEWAL"):
+                turn.renew_channel_like_moonlight(ip)
+                print("ok moonlight-compatible ChannelBind renewal", flush=True)
             print(f"ok TURN {transport}: allocate, restricted peers, refresh", flush=True)
         finally:
             turn.close()
