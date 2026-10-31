@@ -16,8 +16,8 @@ $cuaAction=New-ScheduledTaskAction -Execute $pwsh -Argument ("-NoLogo -NoProfile
 Register-ScheduledTask -TaskName cua-driver -TaskPath '\sbx\' -Action $cuaAction -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
 # Before the autologon of user an interactive task cannot start; the logon trigger starts both.
 # The agent calls this script on every start, so a running helper is also kept.
-if (Get-CimInstance -ClassName Win32_ComputerSystem).UserName {
+if ((Get-CimInstance -ClassName Win32_ComputerSystem).UserName) {
     foreach ($task in @('session', 'cua-driver')) {
-        try { Start-ScheduledTask -TaskName $task -TaskPath '\sbx\' } catch { Write-Warning "start $task: $_" }
+        try { Start-ScheduledTask -TaskName $task -TaskPath '\sbx\' } catch { Write-Warning "start ${task}: $_" }
     }
 }
