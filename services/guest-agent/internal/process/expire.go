@@ -74,8 +74,10 @@ func (m *Manager) expireOne(id string) (bool, error) {
 // with code 127 and a line in its last stream, emits command.exited and
 // removes the stale cmd-spec file. The record lock of c is held.
 func (m *Manager) expireLocked(ctx context.Context, c *command) error {
-	if err := os.Remove(m.opts.Layout.CmdSpec(c.id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		m.log.Warn("process: remove stale cmd-spec", "id", c.id, "err", err)
+	if p := m.opts.Layout.CmdSpec(c.id); p != "" {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			m.log.Warn("process: remove stale cmd-spec", "id", c.id, "err", err)
+		}
 	}
 	m.log.Warn("process: start was never retried, ending the command", "id", c.id, "ttl", m.opts.StartingTTL)
 	return m.recordStartFailedLocked(ctx, c, "start was never retried within "+formatTTL(m.opts.StartingTTL), true)

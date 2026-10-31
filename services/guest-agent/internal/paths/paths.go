@@ -168,7 +168,11 @@ func (l Layout) ShimSocket(id string) string {
 	return filepath.Join(l.ShimSockDir, id+".sock")
 }
 
-// CmdSpec returns the spec file path of command id.
+// CmdSpec returns the spec file path of command id, or "" without a
+// CmdSpecDir (Windows).
 func (l Layout) CmdSpec(id string) string {
+	if l.CmdSpecDir == "" {
+		return ""
+	}
 	return filepath.Join(l.CmdSpecDir, id)
 }

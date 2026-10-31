@@ -55,3 +55,13 @@ func TestDefaultFieldsAreAbsoluteAndDistinct(t *testing.T) {
 		seen[got] = name
 	}
 }
+
+// A layout without the directory (Windows has no cmd-spec directory) has no
+// spec path: filepath.Join would make "<id>" relative to the working
+// directory.
+func TestCmdSpecWithoutDir(t *testing.T) {
+	var l Layout
+	if got := l.CmdSpec("c1"); got != "" {
+		t.Errorf("CmdSpec without CmdSpecDir = %q, want empty", got)
+	}
+}
