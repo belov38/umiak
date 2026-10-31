@@ -592,3 +592,33 @@ export const environments = runtime.table("environments", {
 	updatedAt: tstz("updated_at").notNull().defaultNow(),
 	updatedBy: uuid("updated_by"),
 });
+
+// S10 policy and single-use ticket state (migrations 0400-0401).
+export const sandboxDesktops = runtime.table("sandbox_desktops", {
+	sandboxId: uuid("sandbox_id")
+		.primaryKey()
+		.references(() => sandboxes.id, { onDelete: "cascade" }),
+	access: text("access", { enum: ["token", "sso", "public"] })
+		.notNull()
+		.default("token"),
+	authEpoch: integer("auth_epoch").notNull().default(1),
+	blocked: boolean("blocked").notNull().default(false),
+	blockReason: text("block_reason"),
+	turnIssuedAt: tstz("turn_issued_at"),
+	lastStopOperationId: uuid("last_stop_operation_id"),
+	updatedAt: tstz("updated_at").notNull().defaultNow(),
+	pendingDisconnect: boolean("pending_disconnect").notNull().default(false),
+});
+export const desktopTickets = runtime.table("desktop_tickets", {
+	ticketHash: bytea("ticket_hash").primaryKey(),
+	sandboxId: uuid("sandbox_id")
+		.notNull()
+		.references(() => sandboxDesktops.sandboxId, { onDelete: "cascade" }),
+	label: text("label").notNull(),
+	userId: text("user_id"),
+	apiKeyId: text("api_key_id"),
+	authEpoch: integer("auth_epoch").notNull(),
+	expiresAt: tstz("expires_at").notNull(),
+	usedAt: tstz("used_at"),
+	createdAt: tstz("created_at").notNull().defaultNow(),
+});

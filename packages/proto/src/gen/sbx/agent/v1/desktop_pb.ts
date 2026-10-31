@@ -10,7 +10,36 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file sbx/agent/v1/desktop.proto.
  */
 export const file_sbx_agent_v1_desktop: GenFile = /*@__PURE__*/
-  fileDesc("ChpzYngvYWdlbnQvdjEvZGVza3RvcC5wcm90bxIMc2J4LmFnZW50LnYxIiwKC0Rlc2t0b3BTaXplEg0KBXdpZHRoGAEgASgNEg4KBmhlaWdodBgCIAEoDSIkCgxEZXNrdG9wUG9pbnQSCQoBeBgBIAEoBRIJCgF5GAIgASgFIkQKDURlc2t0b3BSZWdpb24SCQoBeBgBIAEoBRIJCgF5GAIgASgFEg0KBXdpZHRoGAMgASgNEg4KBmhlaWdodBgEIAEoDSIWChREZXNrdG9wU3RhdHVzUmVxdWVzdCLLAQoVRGVza3RvcFN0YXR1c1Jlc3BvbnNlEg0KBXN0YXRlGAEgASgJEg4KBnJlYXNvbhgCIAEoCRIpCgZzY3JlZW4YAyABKAsyGS5zYnguYWdlbnQudjEuRGVza3RvcFNpemUSKgoGY3Vyc29yGAQgASgLMhouc2J4LmFnZW50LnYxLkRlc2t0b3BQb2ludBIPCgdydW5uaW5nGAUgASgIEhcKD2Rlc2t0b3Bfc3RyZWFtcxgGIAEoDRISCgphdXRoX2Vwb2NoGAcgASgEIkYKEERlc2t0b3BJY2VTZXJ2ZXISDAoEdXJscxgBIAMoCRIQCgh1c2VybmFtZRgCIAEoCRISCgpjcmVkZW50aWFsGAMgASgJImIKF0Rlc2t0b3BDb25maWd1cmVSZXF1ZXN0EjMKC2ljZV9zZXJ2ZXJzGAEgAygLMh4uc2J4LmFnZW50LnYxLkRlc2t0b3BJY2VTZXJ2ZXISEgoKYXV0aF9lcG9jaBgCIAEoBCIaChhEZXNrdG9wQ29uZmlndXJlUmVzcG9uc2UiFAoSRGVza3RvcE9wZW5SZXF1ZXN0IjYKE0Rlc2t0b3BPcGVuUmVzcG9uc2USDwoHaG9zdF9pZBgBIAEoCRIOCgZhcHBfaWQYAiABKAkiHAoaRGVza3RvcFN0b3BTdHJlYW1lclJlcXVlc3QiHQobRGVza3RvcFN0b3BTdHJlYW1lclJlc3BvbnNlIhoKGERlc2t0b3BFbmRTdHJlYW1zUmVxdWVzdCIbChlEZXNrdG9wRW5kU3RyZWFtc1Jlc3BvbnNlIq8BChhEZXNrdG9wU2NyZWVuc2hvdFJlcXVlc3QSDgoGZm9ybWF0GAEgASgJEg8KB3F1YWxpdHkYAiABKA0SEQoJbWF4X3dpZHRoGAMgASgNEhIKCm1heF9oZWlnaHQYBCABKA0SKwoGcmVnaW9uGAUgASgLMhsuc2J4LmFnZW50LnYxLkRlc2t0b3BSZWdpb24SEwoGY3Vyc29yGAYgASgISACIAQFCCQoHX2N1cnNvciLPAQoZRGVza3RvcFNjcmVlbnNob3RSZXNwb25zZRIMCgRkYXRhGAEgASgMEhQKDGNvbnRlbnRfdHlwZRgCIAEoCRIpCgZzY3JlZW4YAyABKAsyGS5zYnguYWdlbnQudjEuRGVza3RvcFNpemUSKAoFaW1hZ2UYBCABKAsyGS5zYnguYWdlbnQudjEuRGVza3RvcFNpemUSKgoGY3Vyc29yGAUgASgLMhouc2J4LmFnZW50LnYxLkRlc2t0b3BQb2ludBINCgVzY2FsZRgGIAEoASKWAgoNRGVza3RvcEFjdGlvbhIMCgR0eXBlGAEgASgJEg4KAXgYAiABKAVIAIgBARIOCgF5GAMgASgFSAGIAQESDgoGYnV0dG9uGAQgASgJEg0KBWNvdW50GAUgASgNEhEKCW1vZGlmaWVycxgGIAMoCRIKCgJkeBgHIAEoBRIKCgJkeRgIIAEoBRIoCgRwYXRoGAkgAygLMhouc2J4LmFnZW50LnYxLkRlc2t0b3BQb2ludBIMCgRrZXlzGAogAygJEgsKA2tleRgLIAEoCRIMCgR0ZXh0GAwgASgJEhUKCGRlbGF5X21zGA0gASgNSAKIAQESCgoCbXMYDiABKA1CBAoCX3hCBAoCX3lCCwoJX2RlbGF5X21zIrIBChFEZXNrdG9wQWN0UmVxdWVzdBIsCgdhY3Rpb25zGAEgAygLMhsuc2J4LmFnZW50LnYxLkRlc2t0b3BBY3Rpb24SMwoQY29vcmRpbmF0ZV9zcGFjZRgCIAEoCzIZLnNieC5hZ2VudC52MS5EZXNrdG9wU2l6ZRI6CgpzY3JlZW5zaG90GAMgASgLMiYuc2J4LmFnZW50LnYxLkRlc2t0b3BTY3JlZW5zaG90UmVxdWVzdCK7AQoSRGVza3RvcEFjdFJlc3BvbnNlEhEKCWNvbXBsZXRlZBgBIAEoDRIqCgZjdXJzb3IYAiABKAsyGi5zYnguYWdlbnQudjEuRGVza3RvcFBvaW50EikKBnNjcmVlbhgDIAEoCzIZLnNieC5hZ2VudC52MS5EZXNrdG9wU2l6ZRI7CgpzY3JlZW5zaG90GAQgASgLMicuc2J4LmFnZW50LnYxLkRlc2t0b3BTY3JlZW5zaG90UmVzcG9uc2UiHAoaRGVza3RvcEdldENsaXBib2FyZFJlcXVlc3QiPQobRGVza3RvcEdldENsaXBib2FyZFJlc3BvbnNlEgwKBHRleHQYASABKAkSEAoIaGFzX3RleHQYAiABKAgiKgoaRGVza3RvcFNldENsaXBib2FyZFJlcXVlc3QSDAoEdGV4dBgBIAEoCSIdChtEZXNrdG9wU2V0Q2xpcGJvYXJkUmVzcG9uc2UiOwoXRGVza3RvcFN0cmVhbWluZ0NoYW5nZWQSEQoJc3RyZWFtaW5nGAEgASgIEg0KBWNvdW50GAIgASgNMtoGCgdEZXNrdG9wElYKBlN0YXR1cxIiLnNieC5hZ2VudC52MS5EZXNrdG9wU3RhdHVzUmVxdWVzdBojLnNieC5hZ2VudC52MS5EZXNrdG9wU3RhdHVzUmVzcG9uc2UiA5ACARJaCglDb25maWd1cmUSJS5zYnguYWdlbnQudjEuRGVza3RvcENvbmZpZ3VyZVJlcXVlc3QaJi5zYnguYWdlbnQudjEuRGVza3RvcENvbmZpZ3VyZVJlc3BvbnNlElAKBE9wZW4SIC5zYnguYWdlbnQudjEuRGVza3RvcE9wZW5SZXF1ZXN0GiEuc2J4LmFnZW50LnYxLkRlc2t0b3BPcGVuUmVzcG9uc2UiA5ACAhJoCgxTdG9wU3RyZWFtZXISKC5zYnguYWdlbnQudjEuRGVza3RvcFN0b3BTdHJlYW1lclJlcXVlc3QaKS5zYnguYWdlbnQudjEuRGVza3RvcFN0b3BTdHJlYW1lclJlc3BvbnNlIgOQAgISYgoKRW5kU3RyZWFtcxImLnNieC5hZ2VudC52MS5EZXNrdG9wRW5kU3RyZWFtc1JlcXVlc3QaJy5zYnguYWdlbnQudjEuRGVza3RvcEVuZFN0cmVhbXNSZXNwb25zZSIDkAICEmIKClNjcmVlbnNob3QSJi5zYnguYWdlbnQudjEuRGVza3RvcFNjcmVlbnNob3RSZXF1ZXN0Gicuc2J4LmFnZW50LnYxLkRlc2t0b3BTY3JlZW5zaG90UmVzcG9uc2UiA5ACARJICgNBY3QSHy5zYnguYWdlbnQudjEuRGVza3RvcEFjdFJlcXVlc3QaIC5zYnguYWdlbnQudjEuRGVza3RvcEFjdFJlc3BvbnNlEmgKDEdldENsaXBib2FyZBIoLnNieC5hZ2VudC52MS5EZXNrdG9wR2V0Q2xpcGJvYXJkUmVxdWVzdBopLnNieC5hZ2VudC52MS5EZXNrdG9wR2V0Q2xpcGJvYXJkUmVzcG9uc2UiA5ACARJjCgxTZXRDbGlwYm9hcmQSKC5zYnguYWdlbnQudjEuRGVza3RvcFNldENsaXBib2FyZFJlcXVlc3QaKS5zYnguYWdlbnQudjEuRGVza3RvcFNldENsaXBib2FyZFJlc3BvbnNlQkNaQWdpdGh1Yi5jb20vYmVsb3YzOC9ib2F0LWRldi1jbG9uZS9saWJzL3Byb3RvL3NieC9hZ2VudC92MTthZ2VudHYxYgZwcm90bzM");
+  fileDesc("ChpzYngvYWdlbnQvdjEvZGVza3RvcC5wcm90bxIMc2J4LmFnZW50LnYxIkgKFERlc2t0b3BBY3Rpb25GYWlsdXJlEg0KBWluZGV4GAEgASgNEhEKCWNvbXBsZXRlZBgCIAEoDRIOCgZyZWFzb24YAyABKAkiLAoLRGVza3RvcFNpemUSDQoFd2lkdGgYASABKA0SDgoGaGVpZ2h0GAIgASgNIiQKDERlc2t0b3BQb2ludBIJCgF4GAEgASgFEgkKAXkYAiABKAUiRAoNRGVza3RvcFJlZ2lvbhIJCgF4GAEgASgFEgkKAXkYAiABKAUSDQoFd2lkdGgYAyABKA0SDgoGaGVpZ2h0GAQgASgNIhYKFERlc2t0b3BTdGF0dXNSZXF1ZXN0IssBChVEZXNrdG9wU3RhdHVzUmVzcG9uc2USDQoFc3RhdGUYASABKAkSDgoGcmVhc29uGAIgASgJEikKBnNjcmVlbhgDIAEoCzIZLnNieC5hZ2VudC52MS5EZXNrdG9wU2l6ZRIqCgZjdXJzb3IYBCABKAsyGi5zYnguYWdlbnQudjEuRGVza3RvcFBvaW50Eg8KB3J1bm5pbmcYBSABKAgSFwoPZGVza3RvcF9zdHJlYW1zGAYgASgNEhIKCmF1dGhfZXBvY2gYByABKAQiRgoQRGVza3RvcEljZVNlcnZlchIMCgR1cmxzGAEgAygJEhAKCHVzZXJuYW1lGAIgASgJEhIKCmNyZWRlbnRpYWwYAyABKAkiYgoXRGVza3RvcENvbmZpZ3VyZVJlcXVlc3QSMwoLaWNlX3NlcnZlcnMYASADKAsyHi5zYnguYWdlbnQudjEuRGVza3RvcEljZVNlcnZlchISCgphdXRoX2Vwb2NoGAIgASgEIhoKGERlc2t0b3BDb25maWd1cmVSZXNwb25zZSIUChJEZXNrdG9wT3BlblJlcXVlc3QiNgoTRGVza3RvcE9wZW5SZXNwb25zZRIPCgdob3N0X2lkGAEgASgJEg4KBmFwcF9pZBgCIAEoCSIcChpEZXNrdG9wU3RvcFN0cmVhbWVyUmVxdWVzdCIdChtEZXNrdG9wU3RvcFN0cmVhbWVyUmVzcG9uc2UiGgoYRGVza3RvcEVuZFN0cmVhbXNSZXF1ZXN0IhsKGURlc2t0b3BFbmRTdHJlYW1zUmVzcG9uc2UirwEKGERlc2t0b3BTY3JlZW5zaG90UmVxdWVzdBIOCgZmb3JtYXQYASABKAkSDwoHcXVhbGl0eRgCIAEoDRIRCgltYXhfd2lkdGgYAyABKA0SEgoKbWF4X2hlaWdodBgEIAEoDRIrCgZyZWdpb24YBSABKAsyGy5zYnguYWdlbnQudjEuRGVza3RvcFJlZ2lvbhITCgZjdXJzb3IYBiABKAhIAIgBAUIJCgdfY3Vyc29yIs8BChlEZXNrdG9wU2NyZWVuc2hvdFJlc3BvbnNlEgwKBGRhdGEYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJEikKBnNjcmVlbhgDIAEoCzIZLnNieC5hZ2VudC52MS5EZXNrdG9wU2l6ZRIoCgVpbWFnZRgEIAEoCzIZLnNieC5hZ2VudC52MS5EZXNrdG9wU2l6ZRIqCgZjdXJzb3IYBSABKAsyGi5zYnguYWdlbnQudjEuRGVza3RvcFBvaW50Eg0KBXNjYWxlGAYgASgBIpYCCg1EZXNrdG9wQWN0aW9uEgwKBHR5cGUYASABKAkSDgoBeBgCIAEoBUgAiAEBEg4KAXkYAyABKAVIAYgBARIOCgZidXR0b24YBCABKAkSDQoFY291bnQYBSABKA0SEQoJbW9kaWZpZXJzGAYgAygJEgoKAmR4GAcgASgFEgoKAmR5GAggASgFEigKBHBhdGgYCSADKAsyGi5zYnguYWdlbnQudjEuRGVza3RvcFBvaW50EgwKBGtleXMYCiADKAkSCwoDa2V5GAsgASgJEgwKBHRleHQYDCABKAkSFQoIZGVsYXlfbXMYDSABKA1IAogBARIKCgJtcxgOIAEoDUIECgJfeEIECgJfeUILCglfZGVsYXlfbXMisgEKEURlc2t0b3BBY3RSZXF1ZXN0EiwKB2FjdGlvbnMYASADKAsyGy5zYnguYWdlbnQudjEuRGVza3RvcEFjdGlvbhIzChBjb29yZGluYXRlX3NwYWNlGAIgASgLMhkuc2J4LmFnZW50LnYxLkRlc2t0b3BTaXplEjoKCnNjcmVlbnNob3QYAyABKAsyJi5zYnguYWdlbnQudjEuRGVza3RvcFNjcmVlbnNob3RSZXF1ZXN0IrsBChJEZXNrdG9wQWN0UmVzcG9uc2USEQoJY29tcGxldGVkGAEgASgNEioKBmN1cnNvchgCIAEoCzIaLnNieC5hZ2VudC52MS5EZXNrdG9wUG9pbnQSKQoGc2NyZWVuGAMgASgLMhkuc2J4LmFnZW50LnYxLkRlc2t0b3BTaXplEjsKCnNjcmVlbnNob3QYBCABKAsyJy5zYnguYWdlbnQudjEuRGVza3RvcFNjcmVlbnNob3RSZXNwb25zZSIcChpEZXNrdG9wR2V0Q2xpcGJvYXJkUmVxdWVzdCI9ChtEZXNrdG9wR2V0Q2xpcGJvYXJkUmVzcG9uc2USDAoEdGV4dBgBIAEoCRIQCghoYXNfdGV4dBgCIAEoCCIqChpEZXNrdG9wU2V0Q2xpcGJvYXJkUmVxdWVzdBIMCgR0ZXh0GAEgASgJIh0KG0Rlc2t0b3BTZXRDbGlwYm9hcmRSZXNwb25zZSI7ChdEZXNrdG9wU3RyZWFtaW5nQ2hhbmdlZBIRCglzdHJlYW1pbmcYASABKAgSDQoFY291bnQYAiABKA0y2gYKB0Rlc2t0b3ASVgoGU3RhdHVzEiIuc2J4LmFnZW50LnYxLkRlc2t0b3BTdGF0dXNSZXF1ZXN0GiMuc2J4LmFnZW50LnYxLkRlc2t0b3BTdGF0dXNSZXNwb25zZSIDkAIBEloKCUNvbmZpZ3VyZRIlLnNieC5hZ2VudC52MS5EZXNrdG9wQ29uZmlndXJlUmVxdWVzdBomLnNieC5hZ2VudC52MS5EZXNrdG9wQ29uZmlndXJlUmVzcG9uc2USUAoET3BlbhIgLnNieC5hZ2VudC52MS5EZXNrdG9wT3BlblJlcXVlc3QaIS5zYnguYWdlbnQudjEuRGVza3RvcE9wZW5SZXNwb25zZSIDkAICEmgKDFN0b3BTdHJlYW1lchIoLnNieC5hZ2VudC52MS5EZXNrdG9wU3RvcFN0cmVhbWVyUmVxdWVzdBopLnNieC5hZ2VudC52MS5EZXNrdG9wU3RvcFN0cmVhbWVyUmVzcG9uc2UiA5ACAhJiCgpFbmRTdHJlYW1zEiYuc2J4LmFnZW50LnYxLkRlc2t0b3BFbmRTdHJlYW1zUmVxdWVzdBonLnNieC5hZ2VudC52MS5EZXNrdG9wRW5kU3RyZWFtc1Jlc3BvbnNlIgOQAgISYgoKU2NyZWVuc2hvdBImLnNieC5hZ2VudC52MS5EZXNrdG9wU2NyZWVuc2hvdFJlcXVlc3QaJy5zYnguYWdlbnQudjEuRGVza3RvcFNjcmVlbnNob3RSZXNwb25zZSIDkAIBEkgKA0FjdBIfLnNieC5hZ2VudC52MS5EZXNrdG9wQWN0UmVxdWVzdBogLnNieC5hZ2VudC52MS5EZXNrdG9wQWN0UmVzcG9uc2USaAoMR2V0Q2xpcGJvYXJkEiguc2J4LmFnZW50LnYxLkRlc2t0b3BHZXRDbGlwYm9hcmRSZXF1ZXN0Gikuc2J4LmFnZW50LnYxLkRlc2t0b3BHZXRDbGlwYm9hcmRSZXNwb25zZSIDkAIBEmMKDFNldENsaXBib2FyZBIoLnNieC5hZ2VudC52MS5EZXNrdG9wU2V0Q2xpcGJvYXJkUmVxdWVzdBopLnNieC5hZ2VudC52MS5EZXNrdG9wU2V0Q2xpcGJvYXJkUmVzcG9uc2VCQ1pBZ2l0aHViLmNvbS9iZWxvdjM4L2JvYXQtZGV2LWNsb25lL2xpYnMvcHJvdG8vc2J4L2FnZW50L3YxO2FnZW50djFiBnByb3RvMw");
+
+/**
+ * DesktopActionFailure preserves partial progress in structured RPC error details.
+ *
+ * @generated from message sbx.agent.v1.DesktopActionFailure
+ */
+export type DesktopActionFailure = Message<"sbx.agent.v1.DesktopActionFailure"> & {
+  /**
+   * @generated from field: uint32 index = 1;
+   */
+  index: number;
+
+  /**
+   * @generated from field: uint32 completed = 2;
+   */
+  completed: number;
+
+  /**
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message sbx.agent.v1.DesktopActionFailure.
+ * Use `create(DesktopActionFailureSchema)` to create a new message.
+ */
+export const DesktopActionFailureSchema: GenMessage<DesktopActionFailure> = /*@__PURE__*/
+  messageDesc(file_sbx_agent_v1_desktop, 0);
 
 /**
  * DesktopSize describes a pixel coordinate space.
@@ -34,7 +63,7 @@ export type DesktopSize = Message<"sbx.agent.v1.DesktopSize"> & {
  * Use `create(DesktopSizeSchema)` to create a new message.
  */
 export const DesktopSizeSchema: GenMessage<DesktopSize> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 0);
+  messageDesc(file_sbx_agent_v1_desktop, 1);
 
 /**
  * DesktopPoint is a location in screen pixels.
@@ -58,7 +87,7 @@ export type DesktopPoint = Message<"sbx.agent.v1.DesktopPoint"> & {
  * Use `create(DesktopPointSchema)` to create a new message.
  */
 export const DesktopPointSchema: GenMessage<DesktopPoint> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 1);
+  messageDesc(file_sbx_agent_v1_desktop, 2);
 
 /**
  * DesktopRegion crops the source before resizing.
@@ -92,7 +121,7 @@ export type DesktopRegion = Message<"sbx.agent.v1.DesktopRegion"> & {
  * Use `create(DesktopRegionSchema)` to create a new message.
  */
 export const DesktopRegionSchema: GenMessage<DesktopRegion> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 2);
+  messageDesc(file_sbx_agent_v1_desktop, 3);
 
 /**
  * @generated from message sbx.agent.v1.DesktopStatusRequest
@@ -105,7 +134,7 @@ export type DesktopStatusRequest = Message<"sbx.agent.v1.DesktopStatusRequest"> 
  * Use `create(DesktopStatusRequestSchema)` to create a new message.
  */
 export const DesktopStatusRequestSchema: GenMessage<DesktopStatusRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 3);
+  messageDesc(file_sbx_agent_v1_desktop, 4);
 
 /**
  * @generated from message sbx.agent.v1.DesktopStatusResponse
@@ -152,7 +181,7 @@ export type DesktopStatusResponse = Message<"sbx.agent.v1.DesktopStatusResponse"
  * Use `create(DesktopStatusResponseSchema)` to create a new message.
  */
 export const DesktopStatusResponseSchema: GenMessage<DesktopStatusResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 4);
+  messageDesc(file_sbx_agent_v1_desktop, 5);
 
 /**
  * DesktopIceServer uses TURN REST credentials; never the shared TURN secret.
@@ -181,7 +210,7 @@ export type DesktopIceServer = Message<"sbx.agent.v1.DesktopIceServer"> & {
  * Use `create(DesktopIceServerSchema)` to create a new message.
  */
 export const DesktopIceServerSchema: GenMessage<DesktopIceServer> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 5);
+  messageDesc(file_sbx_agent_v1_desktop, 6);
 
 /**
  * @generated from message sbx.agent.v1.DesktopConfigureRequest
@@ -203,7 +232,7 @@ export type DesktopConfigureRequest = Message<"sbx.agent.v1.DesktopConfigureRequ
  * Use `create(DesktopConfigureRequestSchema)` to create a new message.
  */
 export const DesktopConfigureRequestSchema: GenMessage<DesktopConfigureRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 6);
+  messageDesc(file_sbx_agent_v1_desktop, 7);
 
 /**
  * @generated from message sbx.agent.v1.DesktopConfigureResponse
@@ -216,7 +245,7 @@ export type DesktopConfigureResponse = Message<"sbx.agent.v1.DesktopConfigureRes
  * Use `create(DesktopConfigureResponseSchema)` to create a new message.
  */
 export const DesktopConfigureResponseSchema: GenMessage<DesktopConfigureResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 7);
+  messageDesc(file_sbx_agent_v1_desktop, 8);
 
 /**
  * @generated from message sbx.agent.v1.DesktopOpenRequest
@@ -229,7 +258,7 @@ export type DesktopOpenRequest = Message<"sbx.agent.v1.DesktopOpenRequest"> & {
  * Use `create(DesktopOpenRequestSchema)` to create a new message.
  */
 export const DesktopOpenRequestSchema: GenMessage<DesktopOpenRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 8);
+  messageDesc(file_sbx_agent_v1_desktop, 9);
 
 /**
  * @generated from message sbx.agent.v1.DesktopOpenResponse
@@ -251,7 +280,7 @@ export type DesktopOpenResponse = Message<"sbx.agent.v1.DesktopOpenResponse"> & 
  * Use `create(DesktopOpenResponseSchema)` to create a new message.
  */
 export const DesktopOpenResponseSchema: GenMessage<DesktopOpenResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 9);
+  messageDesc(file_sbx_agent_v1_desktop, 10);
 
 /**
  * @generated from message sbx.agent.v1.DesktopStopStreamerRequest
@@ -264,7 +293,7 @@ export type DesktopStopStreamerRequest = Message<"sbx.agent.v1.DesktopStopStream
  * Use `create(DesktopStopStreamerRequestSchema)` to create a new message.
  */
 export const DesktopStopStreamerRequestSchema: GenMessage<DesktopStopStreamerRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 10);
+  messageDesc(file_sbx_agent_v1_desktop, 11);
 
 /**
  * @generated from message sbx.agent.v1.DesktopStopStreamerResponse
@@ -277,7 +306,7 @@ export type DesktopStopStreamerResponse = Message<"sbx.agent.v1.DesktopStopStrea
  * Use `create(DesktopStopStreamerResponseSchema)` to create a new message.
  */
 export const DesktopStopStreamerResponseSchema: GenMessage<DesktopStopStreamerResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 11);
+  messageDesc(file_sbx_agent_v1_desktop, 12);
 
 /**
  * @generated from message sbx.agent.v1.DesktopEndStreamsRequest
@@ -290,7 +319,7 @@ export type DesktopEndStreamsRequest = Message<"sbx.agent.v1.DesktopEndStreamsRe
  * Use `create(DesktopEndStreamsRequestSchema)` to create a new message.
  */
 export const DesktopEndStreamsRequestSchema: GenMessage<DesktopEndStreamsRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 12);
+  messageDesc(file_sbx_agent_v1_desktop, 13);
 
 /**
  * @generated from message sbx.agent.v1.DesktopEndStreamsResponse
@@ -303,7 +332,7 @@ export type DesktopEndStreamsResponse = Message<"sbx.agent.v1.DesktopEndStreamsR
  * Use `create(DesktopEndStreamsResponseSchema)` to create a new message.
  */
 export const DesktopEndStreamsResponseSchema: GenMessage<DesktopEndStreamsResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 13);
+  messageDesc(file_sbx_agent_v1_desktop, 14);
 
 /**
  * @generated from message sbx.agent.v1.DesktopScreenshotRequest
@@ -345,7 +374,7 @@ export type DesktopScreenshotRequest = Message<"sbx.agent.v1.DesktopScreenshotRe
  * Use `create(DesktopScreenshotRequestSchema)` to create a new message.
  */
 export const DesktopScreenshotRequestSchema: GenMessage<DesktopScreenshotRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 14);
+  messageDesc(file_sbx_agent_v1_desktop, 15);
 
 /**
  * @generated from message sbx.agent.v1.DesktopScreenshotResponse
@@ -387,7 +416,7 @@ export type DesktopScreenshotResponse = Message<"sbx.agent.v1.DesktopScreenshotR
  * Use `create(DesktopScreenshotResponseSchema)` to create a new message.
  */
 export const DesktopScreenshotResponseSchema: GenMessage<DesktopScreenshotResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 15);
+  messageDesc(file_sbx_agent_v1_desktop, 16);
 
 /**
  * Key names: ctrl/alt/shift/meta, navigation, f1..f24, or one printable rune.
@@ -472,7 +501,7 @@ export type DesktopAction = Message<"sbx.agent.v1.DesktopAction"> & {
  * Use `create(DesktopActionSchema)` to create a new message.
  */
 export const DesktopActionSchema: GenMessage<DesktopAction> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 16);
+  messageDesc(file_sbx_agent_v1_desktop, 17);
 
 /**
  * @generated from message sbx.agent.v1.DesktopActRequest
@@ -499,7 +528,7 @@ export type DesktopActRequest = Message<"sbx.agent.v1.DesktopActRequest"> & {
  * Use `create(DesktopActRequestSchema)` to create a new message.
  */
 export const DesktopActRequestSchema: GenMessage<DesktopActRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 17);
+  messageDesc(file_sbx_agent_v1_desktop, 18);
 
 /**
  * @generated from message sbx.agent.v1.DesktopActResponse
@@ -531,7 +560,7 @@ export type DesktopActResponse = Message<"sbx.agent.v1.DesktopActResponse"> & {
  * Use `create(DesktopActResponseSchema)` to create a new message.
  */
 export const DesktopActResponseSchema: GenMessage<DesktopActResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 18);
+  messageDesc(file_sbx_agent_v1_desktop, 19);
 
 /**
  * @generated from message sbx.agent.v1.DesktopGetClipboardRequest
@@ -544,7 +573,7 @@ export type DesktopGetClipboardRequest = Message<"sbx.agent.v1.DesktopGetClipboa
  * Use `create(DesktopGetClipboardRequestSchema)` to create a new message.
  */
 export const DesktopGetClipboardRequestSchema: GenMessage<DesktopGetClipboardRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 19);
+  messageDesc(file_sbx_agent_v1_desktop, 20);
 
 /**
  * @generated from message sbx.agent.v1.DesktopGetClipboardResponse
@@ -566,7 +595,7 @@ export type DesktopGetClipboardResponse = Message<"sbx.agent.v1.DesktopGetClipbo
  * Use `create(DesktopGetClipboardResponseSchema)` to create a new message.
  */
 export const DesktopGetClipboardResponseSchema: GenMessage<DesktopGetClipboardResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 20);
+  messageDesc(file_sbx_agent_v1_desktop, 21);
 
 /**
  * @generated from message sbx.agent.v1.DesktopSetClipboardRequest
@@ -583,7 +612,7 @@ export type DesktopSetClipboardRequest = Message<"sbx.agent.v1.DesktopSetClipboa
  * Use `create(DesktopSetClipboardRequestSchema)` to create a new message.
  */
 export const DesktopSetClipboardRequestSchema: GenMessage<DesktopSetClipboardRequest> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 21);
+  messageDesc(file_sbx_agent_v1_desktop, 22);
 
 /**
  * @generated from message sbx.agent.v1.DesktopSetClipboardResponse
@@ -596,7 +625,7 @@ export type DesktopSetClipboardResponse = Message<"sbx.agent.v1.DesktopSetClipbo
  * Use `create(DesktopSetClipboardResponseSchema)` to create a new message.
  */
 export const DesktopSetClipboardResponseSchema: GenMessage<DesktopSetClipboardResponse> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 22);
+  messageDesc(file_sbx_agent_v1_desktop, 23);
 
 /**
  * DesktopStreamingChanged is emitted on stream transitions.
@@ -620,7 +649,7 @@ export type DesktopStreamingChanged = Message<"sbx.agent.v1.DesktopStreamingChan
  * Use `create(DesktopStreamingChangedSchema)` to create a new message.
  */
 export const DesktopStreamingChangedSchema: GenMessage<DesktopStreamingChanged> = /*@__PURE__*/
-  messageDesc(file_sbx_agent_v1_desktop, 23);
+  messageDesc(file_sbx_agent_v1_desktop, 24);
 
 /**
  * Desktop exposes session primitives independently of the video streamer.

@@ -21,6 +21,67 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// DesktopActionFailure preserves partial progress in structured RPC error details.
+type DesktopActionFailure struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Completed     uint32                 `protobuf:"varint,2,opt,name=completed,proto3" json:"completed,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesktopActionFailure) Reset() {
+	*x = DesktopActionFailure{}
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopActionFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopActionFailure) ProtoMessage() {}
+
+func (x *DesktopActionFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopActionFailure.ProtoReflect.Descriptor instead.
+func (*DesktopActionFailure) Descriptor() ([]byte, []int) {
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *DesktopActionFailure) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *DesktopActionFailure) GetCompleted() uint32 {
+	if x != nil {
+		return x.Completed
+	}
+	return 0
+}
+
+func (x *DesktopActionFailure) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 // DesktopSize describes a pixel coordinate space.
 type DesktopSize struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -32,7 +93,7 @@ type DesktopSize struct {
 
 func (x *DesktopSize) Reset() {
 	*x = DesktopSize{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[0]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +105,7 @@ func (x *DesktopSize) String() string {
 func (*DesktopSize) ProtoMessage() {}
 
 func (x *DesktopSize) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[0]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +118,7 @@ func (x *DesktopSize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSize.ProtoReflect.Descriptor instead.
 func (*DesktopSize) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{0}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *DesktopSize) GetWidth() uint32 {
@@ -85,7 +146,7 @@ type DesktopPoint struct {
 
 func (x *DesktopPoint) Reset() {
 	*x = DesktopPoint{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[1]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -97,7 +158,7 @@ func (x *DesktopPoint) String() string {
 func (*DesktopPoint) ProtoMessage() {}
 
 func (x *DesktopPoint) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[1]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -110,7 +171,7 @@ func (x *DesktopPoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopPoint.ProtoReflect.Descriptor instead.
 func (*DesktopPoint) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{1}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DesktopPoint) GetX() int32 {
@@ -140,7 +201,7 @@ type DesktopRegion struct {
 
 func (x *DesktopRegion) Reset() {
 	*x = DesktopRegion{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[2]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -152,7 +213,7 @@ func (x *DesktopRegion) String() string {
 func (*DesktopRegion) ProtoMessage() {}
 
 func (x *DesktopRegion) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[2]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -165,7 +226,7 @@ func (x *DesktopRegion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopRegion.ProtoReflect.Descriptor instead.
 func (*DesktopRegion) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{2}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DesktopRegion) GetX() int32 {
@@ -204,7 +265,7 @@ type DesktopStatusRequest struct {
 
 func (x *DesktopStatusRequest) Reset() {
 	*x = DesktopStatusRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[3]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -216,7 +277,7 @@ func (x *DesktopStatusRequest) String() string {
 func (*DesktopStatusRequest) ProtoMessage() {}
 
 func (x *DesktopStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[3]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -229,7 +290,7 @@ func (x *DesktopStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopStatusRequest.ProtoReflect.Descriptor instead.
 func (*DesktopStatusRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{3}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{4}
 }
 
 type DesktopStatusResponse struct {
@@ -247,7 +308,7 @@ type DesktopStatusResponse struct {
 
 func (x *DesktopStatusResponse) Reset() {
 	*x = DesktopStatusResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[4]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +320,7 @@ func (x *DesktopStatusResponse) String() string {
 func (*DesktopStatusResponse) ProtoMessage() {}
 
 func (x *DesktopStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[4]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,7 +333,7 @@ func (x *DesktopStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopStatusResponse.ProtoReflect.Descriptor instead.
 func (*DesktopStatusResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{4}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DesktopStatusResponse) GetState() string {
@@ -336,7 +397,7 @@ type DesktopIceServer struct {
 
 func (x *DesktopIceServer) Reset() {
 	*x = DesktopIceServer{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[5]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -348,7 +409,7 @@ func (x *DesktopIceServer) String() string {
 func (*DesktopIceServer) ProtoMessage() {}
 
 func (x *DesktopIceServer) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[5]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -361,7 +422,7 @@ func (x *DesktopIceServer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopIceServer.ProtoReflect.Descriptor instead.
 func (*DesktopIceServer) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{5}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DesktopIceServer) GetUrls() []string {
@@ -395,7 +456,7 @@ type DesktopConfigureRequest struct {
 
 func (x *DesktopConfigureRequest) Reset() {
 	*x = DesktopConfigureRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[6]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +468,7 @@ func (x *DesktopConfigureRequest) String() string {
 func (*DesktopConfigureRequest) ProtoMessage() {}
 
 func (x *DesktopConfigureRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[6]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +481,7 @@ func (x *DesktopConfigureRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopConfigureRequest.ProtoReflect.Descriptor instead.
 func (*DesktopConfigureRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{6}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DesktopConfigureRequest) GetIceServers() []*DesktopIceServer {
@@ -445,7 +506,7 @@ type DesktopConfigureResponse struct {
 
 func (x *DesktopConfigureResponse) Reset() {
 	*x = DesktopConfigureResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[7]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -457,7 +518,7 @@ func (x *DesktopConfigureResponse) String() string {
 func (*DesktopConfigureResponse) ProtoMessage() {}
 
 func (x *DesktopConfigureResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[7]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -470,7 +531,7 @@ func (x *DesktopConfigureResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopConfigureResponse.ProtoReflect.Descriptor instead.
 func (*DesktopConfigureResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{7}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{8}
 }
 
 type DesktopOpenRequest struct {
@@ -481,7 +542,7 @@ type DesktopOpenRequest struct {
 
 func (x *DesktopOpenRequest) Reset() {
 	*x = DesktopOpenRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[8]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -493,7 +554,7 @@ func (x *DesktopOpenRequest) String() string {
 func (*DesktopOpenRequest) ProtoMessage() {}
 
 func (x *DesktopOpenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[8]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -506,7 +567,7 @@ func (x *DesktopOpenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopOpenRequest.ProtoReflect.Descriptor instead.
 func (*DesktopOpenRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{8}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{9}
 }
 
 type DesktopOpenResponse struct {
@@ -519,7 +580,7 @@ type DesktopOpenResponse struct {
 
 func (x *DesktopOpenResponse) Reset() {
 	*x = DesktopOpenResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[9]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -531,7 +592,7 @@ func (x *DesktopOpenResponse) String() string {
 func (*DesktopOpenResponse) ProtoMessage() {}
 
 func (x *DesktopOpenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[9]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -544,7 +605,7 @@ func (x *DesktopOpenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopOpenResponse.ProtoReflect.Descriptor instead.
 func (*DesktopOpenResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{9}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DesktopOpenResponse) GetHostId() string {
@@ -569,7 +630,7 @@ type DesktopStopStreamerRequest struct {
 
 func (x *DesktopStopStreamerRequest) Reset() {
 	*x = DesktopStopStreamerRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[10]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +642,7 @@ func (x *DesktopStopStreamerRequest) String() string {
 func (*DesktopStopStreamerRequest) ProtoMessage() {}
 
 func (x *DesktopStopStreamerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[10]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +655,7 @@ func (x *DesktopStopStreamerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopStopStreamerRequest.ProtoReflect.Descriptor instead.
 func (*DesktopStopStreamerRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{10}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{11}
 }
 
 type DesktopStopStreamerResponse struct {
@@ -605,7 +666,7 @@ type DesktopStopStreamerResponse struct {
 
 func (x *DesktopStopStreamerResponse) Reset() {
 	*x = DesktopStopStreamerResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[11]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -617,7 +678,7 @@ func (x *DesktopStopStreamerResponse) String() string {
 func (*DesktopStopStreamerResponse) ProtoMessage() {}
 
 func (x *DesktopStopStreamerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[11]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -630,7 +691,7 @@ func (x *DesktopStopStreamerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopStopStreamerResponse.ProtoReflect.Descriptor instead.
 func (*DesktopStopStreamerResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{11}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{12}
 }
 
 type DesktopEndStreamsRequest struct {
@@ -641,7 +702,7 @@ type DesktopEndStreamsRequest struct {
 
 func (x *DesktopEndStreamsRequest) Reset() {
 	*x = DesktopEndStreamsRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[12]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -653,7 +714,7 @@ func (x *DesktopEndStreamsRequest) String() string {
 func (*DesktopEndStreamsRequest) ProtoMessage() {}
 
 func (x *DesktopEndStreamsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[12]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -666,7 +727,7 @@ func (x *DesktopEndStreamsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopEndStreamsRequest.ProtoReflect.Descriptor instead.
 func (*DesktopEndStreamsRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{12}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{13}
 }
 
 type DesktopEndStreamsResponse struct {
@@ -677,7 +738,7 @@ type DesktopEndStreamsResponse struct {
 
 func (x *DesktopEndStreamsResponse) Reset() {
 	*x = DesktopEndStreamsResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[13]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -689,7 +750,7 @@ func (x *DesktopEndStreamsResponse) String() string {
 func (*DesktopEndStreamsResponse) ProtoMessage() {}
 
 func (x *DesktopEndStreamsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[13]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -702,7 +763,7 @@ func (x *DesktopEndStreamsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopEndStreamsResponse.ProtoReflect.Descriptor instead.
 func (*DesktopEndStreamsResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{13}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{14}
 }
 
 type DesktopScreenshotRequest struct {
@@ -719,7 +780,7 @@ type DesktopScreenshotRequest struct {
 
 func (x *DesktopScreenshotRequest) Reset() {
 	*x = DesktopScreenshotRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[14]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -731,7 +792,7 @@ func (x *DesktopScreenshotRequest) String() string {
 func (*DesktopScreenshotRequest) ProtoMessage() {}
 
 func (x *DesktopScreenshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[14]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -744,7 +805,7 @@ func (x *DesktopScreenshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopScreenshotRequest.ProtoReflect.Descriptor instead.
 func (*DesktopScreenshotRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{14}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DesktopScreenshotRequest) GetFormat() string {
@@ -803,7 +864,7 @@ type DesktopScreenshotResponse struct {
 
 func (x *DesktopScreenshotResponse) Reset() {
 	*x = DesktopScreenshotResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[15]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -815,7 +876,7 @@ func (x *DesktopScreenshotResponse) String() string {
 func (*DesktopScreenshotResponse) ProtoMessage() {}
 
 func (x *DesktopScreenshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[15]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -828,7 +889,7 @@ func (x *DesktopScreenshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopScreenshotResponse.ProtoReflect.Descriptor instead.
 func (*DesktopScreenshotResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{15}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DesktopScreenshotResponse) GetData() []byte {
@@ -897,7 +958,7 @@ type DesktopAction struct {
 
 func (x *DesktopAction) Reset() {
 	*x = DesktopAction{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[16]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -909,7 +970,7 @@ func (x *DesktopAction) String() string {
 func (*DesktopAction) ProtoMessage() {}
 
 func (x *DesktopAction) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[16]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -922,7 +983,7 @@ func (x *DesktopAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopAction.ProtoReflect.Descriptor instead.
 func (*DesktopAction) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{16}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DesktopAction) GetType() string {
@@ -1034,7 +1095,7 @@ type DesktopActRequest struct {
 
 func (x *DesktopActRequest) Reset() {
 	*x = DesktopActRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[17]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1046,7 +1107,7 @@ func (x *DesktopActRequest) String() string {
 func (*DesktopActRequest) ProtoMessage() {}
 
 func (x *DesktopActRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[17]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1059,7 +1120,7 @@ func (x *DesktopActRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopActRequest.ProtoReflect.Descriptor instead.
 func (*DesktopActRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{17}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DesktopActRequest) GetActions() []*DesktopAction {
@@ -1095,7 +1156,7 @@ type DesktopActResponse struct {
 
 func (x *DesktopActResponse) Reset() {
 	*x = DesktopActResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[18]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1107,7 +1168,7 @@ func (x *DesktopActResponse) String() string {
 func (*DesktopActResponse) ProtoMessage() {}
 
 func (x *DesktopActResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[18]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1120,7 +1181,7 @@ func (x *DesktopActResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopActResponse.ProtoReflect.Descriptor instead.
 func (*DesktopActResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{18}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DesktopActResponse) GetCompleted() uint32 {
@@ -1159,7 +1220,7 @@ type DesktopGetClipboardRequest struct {
 
 func (x *DesktopGetClipboardRequest) Reset() {
 	*x = DesktopGetClipboardRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[19]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1171,7 +1232,7 @@ func (x *DesktopGetClipboardRequest) String() string {
 func (*DesktopGetClipboardRequest) ProtoMessage() {}
 
 func (x *DesktopGetClipboardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[19]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1184,7 +1245,7 @@ func (x *DesktopGetClipboardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopGetClipboardRequest.ProtoReflect.Descriptor instead.
 func (*DesktopGetClipboardRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{19}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{20}
 }
 
 type DesktopGetClipboardResponse struct {
@@ -1197,7 +1258,7 @@ type DesktopGetClipboardResponse struct {
 
 func (x *DesktopGetClipboardResponse) Reset() {
 	*x = DesktopGetClipboardResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[20]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1209,7 +1270,7 @@ func (x *DesktopGetClipboardResponse) String() string {
 func (*DesktopGetClipboardResponse) ProtoMessage() {}
 
 func (x *DesktopGetClipboardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[20]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1222,7 +1283,7 @@ func (x *DesktopGetClipboardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopGetClipboardResponse.ProtoReflect.Descriptor instead.
 func (*DesktopGetClipboardResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{20}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *DesktopGetClipboardResponse) GetText() string {
@@ -1248,7 +1309,7 @@ type DesktopSetClipboardRequest struct {
 
 func (x *DesktopSetClipboardRequest) Reset() {
 	*x = DesktopSetClipboardRequest{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[21]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1260,7 +1321,7 @@ func (x *DesktopSetClipboardRequest) String() string {
 func (*DesktopSetClipboardRequest) ProtoMessage() {}
 
 func (x *DesktopSetClipboardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[21]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1273,7 +1334,7 @@ func (x *DesktopSetClipboardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSetClipboardRequest.ProtoReflect.Descriptor instead.
 func (*DesktopSetClipboardRequest) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{21}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DesktopSetClipboardRequest) GetText() string {
@@ -1291,7 +1352,7 @@ type DesktopSetClipboardResponse struct {
 
 func (x *DesktopSetClipboardResponse) Reset() {
 	*x = DesktopSetClipboardResponse{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[22]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1303,7 +1364,7 @@ func (x *DesktopSetClipboardResponse) String() string {
 func (*DesktopSetClipboardResponse) ProtoMessage() {}
 
 func (x *DesktopSetClipboardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[22]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1316,7 +1377,7 @@ func (x *DesktopSetClipboardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopSetClipboardResponse.ProtoReflect.Descriptor instead.
 func (*DesktopSetClipboardResponse) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{22}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{23}
 }
 
 // DesktopStreamingChanged is emitted on stream transitions.
@@ -1330,7 +1391,7 @@ type DesktopStreamingChanged struct {
 
 func (x *DesktopStreamingChanged) Reset() {
 	*x = DesktopStreamingChanged{}
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[23]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1342,7 +1403,7 @@ func (x *DesktopStreamingChanged) String() string {
 func (*DesktopStreamingChanged) ProtoMessage() {}
 
 func (x *DesktopStreamingChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[23]
+	mi := &file_sbx_agent_v1_desktop_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1355,7 +1416,7 @@ func (x *DesktopStreamingChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopStreamingChanged.ProtoReflect.Descriptor instead.
 func (*DesktopStreamingChanged) Descriptor() ([]byte, []int) {
-	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{23}
+	return file_sbx_agent_v1_desktop_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DesktopStreamingChanged) GetStreaming() bool {
@@ -1376,7 +1437,11 @@ var File_sbx_agent_v1_desktop_proto protoreflect.FileDescriptor
 
 const file_sbx_agent_v1_desktop_proto_rawDesc = "" +
 	"\n" +
-	"\x1asbx/agent/v1/desktop.proto\x12\fsbx.agent.v1\";\n" +
+	"\x1asbx/agent/v1/desktop.proto\x12\fsbx.agent.v1\"b\n" +
+	"\x14DesktopActionFailure\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12\x1c\n" +
+	"\tcompleted\x18\x02 \x01(\rR\tcompleted\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\";\n" +
 	"\vDesktopSize\x12\x14\n" +
 	"\x05width\x18\x01 \x01(\rR\x05width\x12\x16\n" +
 	"\x06height\x18\x02 \x01(\rR\x06height\"*\n" +
@@ -1501,66 +1566,67 @@ func file_sbx_agent_v1_desktop_proto_rawDescGZIP() []byte {
 	return file_sbx_agent_v1_desktop_proto_rawDescData
 }
 
-var file_sbx_agent_v1_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_sbx_agent_v1_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_sbx_agent_v1_desktop_proto_goTypes = []any{
-	(*DesktopSize)(nil),                 // 0: sbx.agent.v1.DesktopSize
-	(*DesktopPoint)(nil),                // 1: sbx.agent.v1.DesktopPoint
-	(*DesktopRegion)(nil),               // 2: sbx.agent.v1.DesktopRegion
-	(*DesktopStatusRequest)(nil),        // 3: sbx.agent.v1.DesktopStatusRequest
-	(*DesktopStatusResponse)(nil),       // 4: sbx.agent.v1.DesktopStatusResponse
-	(*DesktopIceServer)(nil),            // 5: sbx.agent.v1.DesktopIceServer
-	(*DesktopConfigureRequest)(nil),     // 6: sbx.agent.v1.DesktopConfigureRequest
-	(*DesktopConfigureResponse)(nil),    // 7: sbx.agent.v1.DesktopConfigureResponse
-	(*DesktopOpenRequest)(nil),          // 8: sbx.agent.v1.DesktopOpenRequest
-	(*DesktopOpenResponse)(nil),         // 9: sbx.agent.v1.DesktopOpenResponse
-	(*DesktopStopStreamerRequest)(nil),  // 10: sbx.agent.v1.DesktopStopStreamerRequest
-	(*DesktopStopStreamerResponse)(nil), // 11: sbx.agent.v1.DesktopStopStreamerResponse
-	(*DesktopEndStreamsRequest)(nil),    // 12: sbx.agent.v1.DesktopEndStreamsRequest
-	(*DesktopEndStreamsResponse)(nil),   // 13: sbx.agent.v1.DesktopEndStreamsResponse
-	(*DesktopScreenshotRequest)(nil),    // 14: sbx.agent.v1.DesktopScreenshotRequest
-	(*DesktopScreenshotResponse)(nil),   // 15: sbx.agent.v1.DesktopScreenshotResponse
-	(*DesktopAction)(nil),               // 16: sbx.agent.v1.DesktopAction
-	(*DesktopActRequest)(nil),           // 17: sbx.agent.v1.DesktopActRequest
-	(*DesktopActResponse)(nil),          // 18: sbx.agent.v1.DesktopActResponse
-	(*DesktopGetClipboardRequest)(nil),  // 19: sbx.agent.v1.DesktopGetClipboardRequest
-	(*DesktopGetClipboardResponse)(nil), // 20: sbx.agent.v1.DesktopGetClipboardResponse
-	(*DesktopSetClipboardRequest)(nil),  // 21: sbx.agent.v1.DesktopSetClipboardRequest
-	(*DesktopSetClipboardResponse)(nil), // 22: sbx.agent.v1.DesktopSetClipboardResponse
-	(*DesktopStreamingChanged)(nil),     // 23: sbx.agent.v1.DesktopStreamingChanged
+	(*DesktopActionFailure)(nil),        // 0: sbx.agent.v1.DesktopActionFailure
+	(*DesktopSize)(nil),                 // 1: sbx.agent.v1.DesktopSize
+	(*DesktopPoint)(nil),                // 2: sbx.agent.v1.DesktopPoint
+	(*DesktopRegion)(nil),               // 3: sbx.agent.v1.DesktopRegion
+	(*DesktopStatusRequest)(nil),        // 4: sbx.agent.v1.DesktopStatusRequest
+	(*DesktopStatusResponse)(nil),       // 5: sbx.agent.v1.DesktopStatusResponse
+	(*DesktopIceServer)(nil),            // 6: sbx.agent.v1.DesktopIceServer
+	(*DesktopConfigureRequest)(nil),     // 7: sbx.agent.v1.DesktopConfigureRequest
+	(*DesktopConfigureResponse)(nil),    // 8: sbx.agent.v1.DesktopConfigureResponse
+	(*DesktopOpenRequest)(nil),          // 9: sbx.agent.v1.DesktopOpenRequest
+	(*DesktopOpenResponse)(nil),         // 10: sbx.agent.v1.DesktopOpenResponse
+	(*DesktopStopStreamerRequest)(nil),  // 11: sbx.agent.v1.DesktopStopStreamerRequest
+	(*DesktopStopStreamerResponse)(nil), // 12: sbx.agent.v1.DesktopStopStreamerResponse
+	(*DesktopEndStreamsRequest)(nil),    // 13: sbx.agent.v1.DesktopEndStreamsRequest
+	(*DesktopEndStreamsResponse)(nil),   // 14: sbx.agent.v1.DesktopEndStreamsResponse
+	(*DesktopScreenshotRequest)(nil),    // 15: sbx.agent.v1.DesktopScreenshotRequest
+	(*DesktopScreenshotResponse)(nil),   // 16: sbx.agent.v1.DesktopScreenshotResponse
+	(*DesktopAction)(nil),               // 17: sbx.agent.v1.DesktopAction
+	(*DesktopActRequest)(nil),           // 18: sbx.agent.v1.DesktopActRequest
+	(*DesktopActResponse)(nil),          // 19: sbx.agent.v1.DesktopActResponse
+	(*DesktopGetClipboardRequest)(nil),  // 20: sbx.agent.v1.DesktopGetClipboardRequest
+	(*DesktopGetClipboardResponse)(nil), // 21: sbx.agent.v1.DesktopGetClipboardResponse
+	(*DesktopSetClipboardRequest)(nil),  // 22: sbx.agent.v1.DesktopSetClipboardRequest
+	(*DesktopSetClipboardResponse)(nil), // 23: sbx.agent.v1.DesktopSetClipboardResponse
+	(*DesktopStreamingChanged)(nil),     // 24: sbx.agent.v1.DesktopStreamingChanged
 }
 var file_sbx_agent_v1_desktop_proto_depIdxs = []int32{
-	0,  // 0: sbx.agent.v1.DesktopStatusResponse.screen:type_name -> sbx.agent.v1.DesktopSize
-	1,  // 1: sbx.agent.v1.DesktopStatusResponse.cursor:type_name -> sbx.agent.v1.DesktopPoint
-	5,  // 2: sbx.agent.v1.DesktopConfigureRequest.ice_servers:type_name -> sbx.agent.v1.DesktopIceServer
-	2,  // 3: sbx.agent.v1.DesktopScreenshotRequest.region:type_name -> sbx.agent.v1.DesktopRegion
-	0,  // 4: sbx.agent.v1.DesktopScreenshotResponse.screen:type_name -> sbx.agent.v1.DesktopSize
-	0,  // 5: sbx.agent.v1.DesktopScreenshotResponse.image:type_name -> sbx.agent.v1.DesktopSize
-	1,  // 6: sbx.agent.v1.DesktopScreenshotResponse.cursor:type_name -> sbx.agent.v1.DesktopPoint
-	1,  // 7: sbx.agent.v1.DesktopAction.path:type_name -> sbx.agent.v1.DesktopPoint
-	16, // 8: sbx.agent.v1.DesktopActRequest.actions:type_name -> sbx.agent.v1.DesktopAction
-	0,  // 9: sbx.agent.v1.DesktopActRequest.coordinate_space:type_name -> sbx.agent.v1.DesktopSize
-	14, // 10: sbx.agent.v1.DesktopActRequest.screenshot:type_name -> sbx.agent.v1.DesktopScreenshotRequest
-	1,  // 11: sbx.agent.v1.DesktopActResponse.cursor:type_name -> sbx.agent.v1.DesktopPoint
-	0,  // 12: sbx.agent.v1.DesktopActResponse.screen:type_name -> sbx.agent.v1.DesktopSize
-	15, // 13: sbx.agent.v1.DesktopActResponse.screenshot:type_name -> sbx.agent.v1.DesktopScreenshotResponse
-	3,  // 14: sbx.agent.v1.Desktop.Status:input_type -> sbx.agent.v1.DesktopStatusRequest
-	6,  // 15: sbx.agent.v1.Desktop.Configure:input_type -> sbx.agent.v1.DesktopConfigureRequest
-	8,  // 16: sbx.agent.v1.Desktop.Open:input_type -> sbx.agent.v1.DesktopOpenRequest
-	10, // 17: sbx.agent.v1.Desktop.StopStreamer:input_type -> sbx.agent.v1.DesktopStopStreamerRequest
-	12, // 18: sbx.agent.v1.Desktop.EndStreams:input_type -> sbx.agent.v1.DesktopEndStreamsRequest
-	14, // 19: sbx.agent.v1.Desktop.Screenshot:input_type -> sbx.agent.v1.DesktopScreenshotRequest
-	17, // 20: sbx.agent.v1.Desktop.Act:input_type -> sbx.agent.v1.DesktopActRequest
-	19, // 21: sbx.agent.v1.Desktop.GetClipboard:input_type -> sbx.agent.v1.DesktopGetClipboardRequest
-	21, // 22: sbx.agent.v1.Desktop.SetClipboard:input_type -> sbx.agent.v1.DesktopSetClipboardRequest
-	4,  // 23: sbx.agent.v1.Desktop.Status:output_type -> sbx.agent.v1.DesktopStatusResponse
-	7,  // 24: sbx.agent.v1.Desktop.Configure:output_type -> sbx.agent.v1.DesktopConfigureResponse
-	9,  // 25: sbx.agent.v1.Desktop.Open:output_type -> sbx.agent.v1.DesktopOpenResponse
-	11, // 26: sbx.agent.v1.Desktop.StopStreamer:output_type -> sbx.agent.v1.DesktopStopStreamerResponse
-	13, // 27: sbx.agent.v1.Desktop.EndStreams:output_type -> sbx.agent.v1.DesktopEndStreamsResponse
-	15, // 28: sbx.agent.v1.Desktop.Screenshot:output_type -> sbx.agent.v1.DesktopScreenshotResponse
-	18, // 29: sbx.agent.v1.Desktop.Act:output_type -> sbx.agent.v1.DesktopActResponse
-	20, // 30: sbx.agent.v1.Desktop.GetClipboard:output_type -> sbx.agent.v1.DesktopGetClipboardResponse
-	22, // 31: sbx.agent.v1.Desktop.SetClipboard:output_type -> sbx.agent.v1.DesktopSetClipboardResponse
+	1,  // 0: sbx.agent.v1.DesktopStatusResponse.screen:type_name -> sbx.agent.v1.DesktopSize
+	2,  // 1: sbx.agent.v1.DesktopStatusResponse.cursor:type_name -> sbx.agent.v1.DesktopPoint
+	6,  // 2: sbx.agent.v1.DesktopConfigureRequest.ice_servers:type_name -> sbx.agent.v1.DesktopIceServer
+	3,  // 3: sbx.agent.v1.DesktopScreenshotRequest.region:type_name -> sbx.agent.v1.DesktopRegion
+	1,  // 4: sbx.agent.v1.DesktopScreenshotResponse.screen:type_name -> sbx.agent.v1.DesktopSize
+	1,  // 5: sbx.agent.v1.DesktopScreenshotResponse.image:type_name -> sbx.agent.v1.DesktopSize
+	2,  // 6: sbx.agent.v1.DesktopScreenshotResponse.cursor:type_name -> sbx.agent.v1.DesktopPoint
+	2,  // 7: sbx.agent.v1.DesktopAction.path:type_name -> sbx.agent.v1.DesktopPoint
+	17, // 8: sbx.agent.v1.DesktopActRequest.actions:type_name -> sbx.agent.v1.DesktopAction
+	1,  // 9: sbx.agent.v1.DesktopActRequest.coordinate_space:type_name -> sbx.agent.v1.DesktopSize
+	15, // 10: sbx.agent.v1.DesktopActRequest.screenshot:type_name -> sbx.agent.v1.DesktopScreenshotRequest
+	2,  // 11: sbx.agent.v1.DesktopActResponse.cursor:type_name -> sbx.agent.v1.DesktopPoint
+	1,  // 12: sbx.agent.v1.DesktopActResponse.screen:type_name -> sbx.agent.v1.DesktopSize
+	16, // 13: sbx.agent.v1.DesktopActResponse.screenshot:type_name -> sbx.agent.v1.DesktopScreenshotResponse
+	4,  // 14: sbx.agent.v1.Desktop.Status:input_type -> sbx.agent.v1.DesktopStatusRequest
+	7,  // 15: sbx.agent.v1.Desktop.Configure:input_type -> sbx.agent.v1.DesktopConfigureRequest
+	9,  // 16: sbx.agent.v1.Desktop.Open:input_type -> sbx.agent.v1.DesktopOpenRequest
+	11, // 17: sbx.agent.v1.Desktop.StopStreamer:input_type -> sbx.agent.v1.DesktopStopStreamerRequest
+	13, // 18: sbx.agent.v1.Desktop.EndStreams:input_type -> sbx.agent.v1.DesktopEndStreamsRequest
+	15, // 19: sbx.agent.v1.Desktop.Screenshot:input_type -> sbx.agent.v1.DesktopScreenshotRequest
+	18, // 20: sbx.agent.v1.Desktop.Act:input_type -> sbx.agent.v1.DesktopActRequest
+	20, // 21: sbx.agent.v1.Desktop.GetClipboard:input_type -> sbx.agent.v1.DesktopGetClipboardRequest
+	22, // 22: sbx.agent.v1.Desktop.SetClipboard:input_type -> sbx.agent.v1.DesktopSetClipboardRequest
+	5,  // 23: sbx.agent.v1.Desktop.Status:output_type -> sbx.agent.v1.DesktopStatusResponse
+	8,  // 24: sbx.agent.v1.Desktop.Configure:output_type -> sbx.agent.v1.DesktopConfigureResponse
+	10, // 25: sbx.agent.v1.Desktop.Open:output_type -> sbx.agent.v1.DesktopOpenResponse
+	12, // 26: sbx.agent.v1.Desktop.StopStreamer:output_type -> sbx.agent.v1.DesktopStopStreamerResponse
+	14, // 27: sbx.agent.v1.Desktop.EndStreams:output_type -> sbx.agent.v1.DesktopEndStreamsResponse
+	16, // 28: sbx.agent.v1.Desktop.Screenshot:output_type -> sbx.agent.v1.DesktopScreenshotResponse
+	19, // 29: sbx.agent.v1.Desktop.Act:output_type -> sbx.agent.v1.DesktopActResponse
+	21, // 30: sbx.agent.v1.Desktop.GetClipboard:output_type -> sbx.agent.v1.DesktopGetClipboardResponse
+	23, // 31: sbx.agent.v1.Desktop.SetClipboard:output_type -> sbx.agent.v1.DesktopSetClipboardResponse
 	23, // [23:32] is the sub-list for method output_type
 	14, // [14:23] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
@@ -1573,15 +1639,15 @@ func file_sbx_agent_v1_desktop_proto_init() {
 	if File_sbx_agent_v1_desktop_proto != nil {
 		return
 	}
-	file_sbx_agent_v1_desktop_proto_msgTypes[14].OneofWrappers = []any{}
-	file_sbx_agent_v1_desktop_proto_msgTypes[16].OneofWrappers = []any{}
+	file_sbx_agent_v1_desktop_proto_msgTypes[15].OneofWrappers = []any{}
+	file_sbx_agent_v1_desktop_proto_msgTypes[17].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sbx_agent_v1_desktop_proto_rawDesc), len(file_sbx_agent_v1_desktop_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

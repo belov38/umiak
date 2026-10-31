@@ -33,16 +33,28 @@ try {
 	);
 	await writeFile(join(output, "before.png"), before.bytes, { mode: 0o600 });
 	await sb.start(["xfce4-terminal", "--disable-server"]);
+	await sb.desktop.act({ actions: [{ type: "wait", ms: 1000 }] });
+	const baseline = await sb.desktop.screenshot({ cursor: "false" });
 	await sb.desktop.act({
 		actions: [
-			{ type: "wait", ms: 1000 },
 			{ type: "click", x: 600, y: 400 },
-			{ type: "type", text: "S10 экран keyboard input", delayMs: 5 },
+			{
+				type: "type",
+				text: "printf '%s' 'S10 экран 世界' > /tmp/s10-input-proof",
+				delayMs: 5,
+			},
+			{ type: "key", keys: ["enter"] },
+			{ type: "wait", ms: 500 },
 		],
 	});
 	const after = await sb.desktop.screenshot({ cursor: "false" });
 	await writeFile(join(output, "after.png"), after.bytes, { mode: 0o600 });
-	check(hash(before.bytes) !== hash(after.bytes), "input changes screenshot");
+	check(hash(baseline.bytes) !== hash(after.bytes), "input changes screenshot");
+	const proof = await sb.exec(["cat", "/tmp/s10-input-proof"]);
+	check(
+		proof.exitCode === 0 && proof.stdout === "S10 экран 世界",
+		"keyboard Unicode reached terminal",
+	);
 	const text = "S10 clipboard — Привет 世界";
 	await sb.desktop.clipboardSet(text);
 	check(
@@ -77,16 +89,20 @@ try {
 	);
 	await sb.desktop.endStreams();
 	// Copy while both 4GB VMs fit the host's 8GB cap. Compare only hashes, never credentials.
-	const credentialHash = async (s: Sandbox) =>
-		(
-			await s.exec([
-				"sudo",
-				"python3",
-				"-I",
-				"-c",
-				"import hashlib,json; s=json.load(open('/var/lib/sbx-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
-			])
-		).stdout.split(" ")[0];
+	const credentialHash = async (s: Sandbox) => {
+		const result = await s.exec([
+			"sudo",
+			"python3",
+			"-I",
+			"-c",
+			"import hashlib,json; s=json.load(open('/var/lib/sbx-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
+		]);
+		check(
+			result.exitCode === 0 && /^[a-f0-9]{64}\s*$/.test(result.stdout),
+			"streamer credential digest available",
+		);
+		return result.stdout.trim();
+	};
 	const original = await credentialHash(sb);
 	const copy = await sb.fork();
 	created.push(copy);

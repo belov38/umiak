@@ -3,6 +3,13 @@ package sbx.agent.v1;
 
 option go_package = "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1;agentv1";
 
+// DesktopActionFailure preserves partial progress in structured RPC error details.
+message DesktopActionFailure {
+  uint32 index = 1;
+  uint32 completed = 2;
+  string reason = 3;
+}
+
 // Desktop exposes session primitives independently of the video streamer.
 service Desktop {
   rpc Status(DesktopStatusRequest) returns (DesktopStatusResponse) {

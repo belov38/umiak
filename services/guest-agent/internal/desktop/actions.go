@@ -31,6 +31,28 @@ func knownKey(key string) bool {
 	}
 	return false
 }
+
+// Validate inline captures before input so rejected batches have no effects.
+func validateScreenshot(q *v1.DesktopScreenshotRequest, screen *v1.DesktopSize) error {
+	if q.Format != "" && q.Format != "png" && q.Format != "jpeg" || q.Quality > 100 {
+		return failure(connect.CodeInvalidArgument, "invalid_argument")
+	}
+	if r := q.Region; r != nil {
+		if r.X < 0 || r.Y < 0 || r.Width == 0 || r.Height == 0 || uint64(r.X)+uint64(r.Width) > uint64(screen.Width) || uint64(r.Y)+uint64(r.Height) > uint64(screen.Height) {
+			return failure(connect.CodeInvalidArgument, "invalid_argument")
+		}
+	}
+	return nil
+}
+
+func actionFailure(code connect.Code, detail string, index int, completed uint32, reason string) error {
+	err := errs.Newf(code, detail, "action %d: %s; completed %d", index, reason, completed)
+	d, e := connect.NewErrorDetail(&v1.DesktopActionFailure{Index: uint32(index), Completed: completed, Reason: reason})
+	if e == nil {
+		err.AddDetail(d)
+	}
+	return err
+}
 func validateActions(req *v1.DesktopActRequest, screen *v1.DesktopSize) ([]*v1.DesktopAction, error) {
 	if len(req.Actions) == 0 || len(req.Actions) > 100 {
 		return nil, failure(connect.CodeInvalidArgument, "invalid_action")
@@ -46,7 +68,7 @@ func validateActions(req *v1.DesktopActRequest, screen *v1.DesktopSize) ([]*v1.D
 	out := make([]*v1.DesktopAction, len(req.Actions))
 	for i, raw := range req.Actions {
 		bad := func(reason string) ([]*v1.DesktopAction, error) {
-			return nil, errs.Newf(connect.CodeInvalidArgument, "invalid_action", "action %d: %s", i, reason)
+			return nil, actionFailure(connect.CodeInvalidArgument, "invalid_action", i, 0, reason)
 		}
 		if raw == nil {
 			return bad("missing action")

@@ -308,6 +308,9 @@ func (s *Service) Screenshot(ctx context.Context, r *connect.Request[v1.DesktopS
 		return nil, err
 	}
 	q := r.Msg
+	if err = validateScreenshot(q, screen); err != nil {
+		return nil, err
+	}
 	format := q.Format
 	if format == "" {
 		format = "png"
@@ -396,6 +399,11 @@ func (s *Service) Act(ctx context.Context, r *connect.Request[v1.DesktopActReque
 	if err != nil {
 		return nil, err
 	}
+	if r.Msg.Screenshot != nil {
+		if err = validateScreenshot(r.Msg.Screenshot, screen); err != nil {
+			return nil, err
+		}
+	}
 	wait := time.NewTimer(10 * time.Second)
 	defer wait.Stop()
 	select {
@@ -422,7 +430,7 @@ func (s *Service) Act(ctx context.Context, r *connect.Request[v1.DesktopActReque
 			err = s.opts.Session.Input(ctx, a)
 		}
 		if err != nil {
-			return nil, errs.Newf(connect.CodeFailedPrecondition, "action_failed", "action %d failed; completed %d", i, result.Completed)
+			return nil, actionFailure(connect.CodeFailedPrecondition, "action_failed", i, result.Completed, "action failed")
 		}
 		result.Completed++
 	}

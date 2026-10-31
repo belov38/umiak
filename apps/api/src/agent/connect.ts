@@ -45,6 +45,7 @@ import {
 	type CommandSpecSchema,
 	CommandState,
 	Desktop,
+	DesktopActionFailureSchema,
 	type ExitEvent,
 	type ExitInfo,
 	ExitReason,
@@ -342,8 +343,23 @@ export function toAgentError(e: unknown): unknown {
 		/^desktop_|^streamer_|^action_failed$|^invalid_action$|^clipboard_unavailable$/.test(
 			desktopCode,
 		)
-	)
-		return new AgentCallError(desktopCode, e.rawMessage || desktopCode);
+	) {
+		let details: Record<string, unknown> = {};
+		try {
+			const action = e.findDetails(DesktopActionFailureSchema)[0];
+			if (action && desktopCode === "invalid_action")
+				details = { index: action.index, reason: action.reason };
+			if (action && desktopCode === "action_failed")
+				details = { index: action.index, completed: action.completed };
+		} catch {
+			/* Malformed optional details do not change the primary error. */
+		}
+		return new AgentCallError(
+			desktopCode,
+			e.rawMessage || desktopCode,
+			details,
+		);
+	}
 	if (isConnectionError(e)) return e;
 	if (
 		e.code === Code.Unavailable ||

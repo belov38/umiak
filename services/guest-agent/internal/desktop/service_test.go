@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"image"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 type fakeSession struct {
 	actions int
 	text    string
+	failAt  int
 }
 
 func (*fakeSession) State(context.Context) (*v1.DesktopSize, *v1.DesktopPoint, error) {
@@ -27,7 +29,13 @@ func (*fakeSession) State(context.Context) (*v1.DesktopSize, *v1.DesktopPoint, e
 func (*fakeSession) Capture(context.Context, bool) (image.Image, error) {
 	return image.NewRGBA(image.Rect(0, 0, 1920, 1080)), nil
 }
-func (f *fakeSession) Input(_ context.Context, _ *v1.DesktopAction) error { f.actions++; return nil }
+func (f *fakeSession) Input(_ context.Context, _ *v1.DesktopAction) error {
+	f.actions++
+	if f.failAt > 0 && f.actions == f.failAt {
+		return errors.New("input refused")
+	}
+	return nil
+}
 func (f *fakeSession) ClipboardGet(context.Context) (string, bool, error) {
 	return f.text, f.text != "", nil
 }
@@ -98,6 +106,66 @@ func TestIdentityCredentialsAndEpoch(t *testing.T) {
 	if st.Msg.AuthEpoch != 6 || s.Streams() != 0 {
 		t.Fatalf("stop: %v", st.Msg)
 	}
+}
+
+func TestActRejectsInvalidScreenshotBeforeInput(t *testing.T) {
+	for _, shot := range []*v1.DesktopScreenshotRequest{
+		{Format: "gif"}, {Quality: 101}, {Region: &v1.DesktopRegion{X: 1919, Y: 0, Width: 2, Height: 1}},
+	} {
+		f := &fakeSession{}
+		s := service(t, "machine", t.TempDir(), f, &fakeStreamer{}, &events.Recorder{})
+		_, err := s.Act(context.Background(), connect.NewRequest(&v1.DesktopActRequest{Actions: []*v1.DesktopAction{{Type: "type", Text: "must not type"}}, Screenshot: shot}))
+		if connect.CodeOf(err) != connect.CodeInvalidArgument || f.actions != 0 {
+			t.Fatalf("err=%v inputs=%d", err, f.actions)
+		}
+	}
+}
+
+func TestInvalidActionCarriesStructuredIndex(t *testing.T) {
+	_, err := validateActions(&v1.DesktopActRequest{Actions: []*v1.DesktopAction{{Type: "wait"}, {Type: "key", Keys: []string{"unknown"}}}}, &v1.DesktopSize{Width: 1920, Height: 1080})
+	cerr := new(connect.Error)
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected Connect error, got %v", err)
+	}
+	for _, detail := range cerr.Details() {
+		value, e := detail.Value()
+		if e != nil {
+			t.Fatal(e)
+		}
+		if action, ok := value.(*v1.DesktopActionFailure); ok {
+			if action.Index != 1 || action.Reason != "unknown key" {
+				t.Fatalf("wrong detail: %v", action)
+			}
+			return
+		}
+	}
+	t.Fatal("missing structured action failure")
+}
+
+func TestFailedActionCarriesPartialProgress(t *testing.T) {
+	f := &fakeSession{failAt: 3}
+	s := service(t, "machine", t.TempDir(), f, &fakeStreamer{}, &events.Recorder{})
+	_, err := s.Act(context.Background(), connect.NewRequest(&v1.DesktopActRequest{Actions: []*v1.DesktopAction{{Type: "click"}, {Type: "click"}, {Type: "click"}, {Type: "click"}}}))
+	cerr := new(connect.Error)
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected Connect error, got %v", err)
+	}
+	if f.actions != 3 {
+		t.Fatalf("input did not stop: %d", f.actions)
+	}
+	for _, detail := range cerr.Details() {
+		value, e := detail.Value()
+		if e != nil {
+			t.Fatal(e)
+		}
+		if action, ok := value.(*v1.DesktopActionFailure); ok {
+			if action.Index != 2 || action.Completed != 2 {
+				t.Fatalf("wrong partial progress: %v", action)
+			}
+			return
+		}
+	}
+	t.Fatal("missing partial progress")
 }
 func TestValidateEntireBatchBeforeInput(t *testing.T) {
 	f := &fakeSession{}

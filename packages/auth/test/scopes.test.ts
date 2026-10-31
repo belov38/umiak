@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isScope, PRESETS, SANDBOX_SELF_PRESET, SCOPES } from "../src/index.ts";
 
 describe("SCOPES", () => {
-	it("has the 14 v1 scopes in contract order", () => {
+	it("has the 15 v1 scopes in contract order", () => {
 		expect([...SCOPES]).toEqual([
 			"sandboxes:read",
 			"sandboxes:write",
@@ -13,6 +13,7 @@ describe("SCOPES", () => {
 			"files:write",
 			"ports:write",
 			"ssh:connect",
+			"desktop",
 			"snapshots:read",
 			"snapshots:write",
 			"environments:read",
@@ -24,7 +25,7 @@ describe("SCOPES", () => {
 	it("isScope narrows known names only", () => {
 		expect(isScope("keys:admin")).toBe(true);
 		expect(isScope("keys:Admin")).toBe(false);
-		expect(isScope("desktop")).toBe(false);
+		expect(isScope("desktop")).toBe(true);
 		expect(isScope("")).toBe(false);
 	});
 });

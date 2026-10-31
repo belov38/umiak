@@ -52,6 +52,8 @@ describe("drizzle schema", () => {
 				"runtime.idempotency_keys",
 				"runtime.commands",
 				"runtime.hosted_ports",
+				"runtime.sandbox_desktops",
+				"runtime.desktop_tickets",
 				"runtime.agent_events",
 				"runtime.agent_synthetic_events",
 				"runtime.node_clone_slots",
