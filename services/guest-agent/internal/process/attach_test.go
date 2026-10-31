@@ -115,7 +115,9 @@ func TestAttachFollowFalse(t *testing.T) {
 
 func TestAttachTruncated(t *testing.T) {
 	h := newHarness(t)
-	payload := bytes.Repeat([]byte("0123456789abcdef"), 1024) // 16 KiB
+	// The hole is 64 KiB: the punch granularity on Windows (a multiple of 4 KiB on Linux).
+	const hole = 64 << 10
+	payload := bytes.Repeat([]byte("0123456789abcdef"), 8192) // 128 KiB
 	h.fake.Script("c1", func(r *supervisor.FakeRun) {
 		_ = r.Write(shim.StdoutFile, payload)
 		_ = r.Exit(0)
@@ -126,7 +128,7 @@ func TestAttachTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := output.Default().PunchFront(f, 8192); err != nil {
+	if err := output.Default().PunchFront(f, hole); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Close()
@@ -136,10 +138,10 @@ func TestAttachTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr := evs[0].GetTruncated()
-	if tr == nil || tr.GetStream() != agentv1.Stream_STREAM_STDOUT || tr.GetAvailableFrom() != 8192 {
-		t.Fatalf("first event %v, want truncated at 8192", evs[0])
+	if tr == nil || tr.GetStream() != agentv1.Stream_STREAM_STDOUT || tr.GetAvailableFrom() != hole {
+		t.Fatalf("first event %v, want truncated at %d", evs[0], hole)
 	}
-	if got := dataOf(t, evs, agentv1.Stream_STREAM_STDOUT, 8192); got != string(payload[8192:]) {
+	if got := dataOf(t, evs, agentv1.Stream_STREAM_STDOUT, hole); got != string(payload[hole:]) {
 		t.Fatalf("data after truncation: %d bytes", len(got))
 	}
 	info, err := h.get("c1")
@@ -148,7 +150,7 @@ func TestAttachTruncated(t *testing.T) {
 	}
 	for _, s := range info.GetStreams() {
 		if s.GetStream() == agentv1.Stream_STREAM_STDOUT &&
-			(s.GetAvailableFrom() != 8192 || s.GetSize() != uint64(len(payload)) || s.GetEnd() != uint64(len(payload))) {
+			(s.GetAvailableFrom() != hole || s.GetSize() != uint64(len(payload)) || s.GetEnd() != uint64(len(payload))) {
 			t.Fatalf("stdout stream info %v", s)
 		}
 	}
