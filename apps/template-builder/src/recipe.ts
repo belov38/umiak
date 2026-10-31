@@ -497,6 +497,14 @@ export const versionsSchema = z.strictObject({
 	chrome: z.strictObject({ google_chrome_stable: versionSha }),
 	npm: z.record(z.string(), nonEmpty),
 	sbx: z.strictObject({ cli: versionSha }).optional(),
+	// The desktop stack is optional for headless recipes, complete when present.
+	desktop: z
+		.strictObject({
+			sunshine: versionSha,
+			moonlight_web: versionSha,
+			cua_driver: versionSha,
+		})
+		.optional(),
 });
 
 export type Versions = z.infer<typeof versionsSchema>;
