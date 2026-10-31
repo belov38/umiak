@@ -23,7 +23,7 @@ it("issues 24h TURN REST credentials without disclosing the shared secret", () =
 	expect(result.credential).toBe("yUyU9P6EteZXHjgq7N199Y7aUBw=");
 	expect(JSON.stringify(result)).not.toContain(secret);
 });
-it("configures a desktop after cold claim, keeps headless claims unchanged", async () => {
+async function desktopWorld() {
 	const w = await createWorld(db);
 	const base = w.ctx.config;
 	w.ctx.config = {
@@ -40,10 +40,16 @@ it("configures a desktop after cold claim, keeps headless claims unchanged", asy
 		teamQuota: base.teamQuota.bind(base),
 	};
 	w.ctx.turn = { secret: "x".repeat(32), urls: ["turn:turn.example:3478"] };
+	return w;
+}
+it("configures a desktop after cold claim, keeps headless claims unchanged", async () => {
+	const w = await desktopWorld();
+	w.agent.desktopReadyStates = [false, false, true];
 	const env = opsEnv(w);
 	const { sandboxId, operationId } = await createSandbox(w, env);
 	expect(await run(w, operationId)).toBe("succeeded");
 	const s = await row(w, "sandboxes", sandboxId);
+	expect(w.agent.callsOf("desktopReady")).toHaveLength(3);
 	const calls = w.agent.callsOf("configureDesktop");
 	expect(calls).toHaveLength(1);
 	expect(w.agent.calls.findIndex((c) => c.method === "claim")).toBeLessThan(
@@ -64,7 +70,23 @@ it("configures a desktop after cold claim, keeps headless claims unchanged", asy
 		[sandboxId],
 	);
 	expect(policy.rows[0].auth_epoch).toBe(2);
+	w.agent.desktopReadyStates = [false, true];
 	const resume = await e.svc.resume(e.p, sandboxId);
 	expect(await run(w, resume.id)).toBe("succeeded");
 	expect(w.agent.callsOf("configureDesktop")).toHaveLength(3);
+	expect(w.agent.callsOf("desktopReady")).toHaveLength(5);
+});
+
+it("does not finish desktop readiness on another boot", async () => {
+	const w = await desktopWorld();
+	const env = opsEnv(w);
+	const { operationId } = await createSandbox(w, env);
+	w.agent.desktopReady = async (machineId) => {
+		await w.pool.query(
+			"UPDATE tunnel.tunnel_sessions SET boot_id='changed-boot' WHERE machine_id=$1",
+			[machineId],
+		);
+		return true;
+	};
+	await expect(run(w, operationId)).rejects.toThrow("desktop boot changed");
 });

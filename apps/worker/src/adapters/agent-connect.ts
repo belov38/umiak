@@ -232,6 +232,20 @@ export class ConnectAgentPort implements AgentPort {
 		return { secretFilesWiped: r.secretFilesWiped };
 	}
 
+	async desktopReady(machineId: string): Promise<boolean> {
+		try {
+			return (
+				(
+					await createClient(Desktop, this.#client.transport(machineId)).status(
+						{},
+						{ timeoutMs: this.#timeoutMs },
+					)
+				).state === "ready"
+			);
+		} catch (error) {
+			throw toPortError(error);
+		}
+	}
 	async configureDesktop(
 		machineId: string,
 		configuration: DesktopConfiguration,

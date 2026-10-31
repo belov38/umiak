@@ -2,7 +2,7 @@ import { stepRequestId } from "@sbx/core";
 import type { Tx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine, type MachineRow } from "../db.ts";
-import { configureDesktop } from "../desktop.ts";
+import { configureDesktop, waitForDesktopReady } from "../desktop.ts";
 import {
 	MachineStateConflict,
 	type PrepSource,
@@ -150,6 +150,7 @@ export function createSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					m.id,
 					stepRequestId(fenced.id, "claim:desktop"),
 				);
+				await waitForDesktopReady(ctx, fenced, fenced.sandboxId, m.id);
 				const bootId = (await sessionOf(ctx.pool, m.id))?.boot_id ?? null;
 				await fenced.tx(async (tx) => {
 					await recordSecretDelivery(

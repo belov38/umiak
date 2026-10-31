@@ -11,7 +11,7 @@ import type { Tx } from "@sbx/db";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine, type MachineRow } from "../db.ts";
-import { configureDesktop } from "../desktop.ts";
+import { configureDesktop, waitForDesktopReady } from "../desktop.ts";
 import {
 	capacityWait,
 	MachineGone,
@@ -277,6 +277,7 @@ export async function deliverProvision(
 		machineId,
 		stepRequestId(fenced.id, `${step}:desktop`),
 	);
+	await waitForDesktopReady(ctx, fenced, fenced.sandboxId, machineId);
 	await ctx.agent.updateSshCa(
 		machineId,
 		stepRequestId(fenced.id, `${step}:ssh_ca`),

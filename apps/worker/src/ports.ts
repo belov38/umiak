@@ -201,6 +201,7 @@ export interface QuiesceHookOpts {
  * `NodeInfra.qgaExec`.
  */
 export interface AgentPort {
+	desktopReady(machineId: string): Promise<boolean>;
 	configureDesktop(
 		machineId: string,
 		configuration: DesktopConfiguration,

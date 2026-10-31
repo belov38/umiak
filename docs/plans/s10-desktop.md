@@ -129,3 +129,5 @@ Shared guard now also checks S10 own580–589/595–596 memory: at most one4GiB 
 
 Audit correction: while S9 temporarily had no running guest, total-only guard allowed verify's source500 and a probe580 to overlap at4GiB each. Total remained≤8GiB but this exceeded S10's assigned4GiB; reported to master. Current guard checks own580–589/595–596 as well as total, runners default580–589. No retained probes; third clean build is single4GiB596.
 Build3: linux-desktop20261031.3, buildId01a191bb-b1bd-74a7-882a-cd90a8643348, slot596, signed agent0.1.0+20261031.ebe5ea8. Clean source commit for build, includes claim gate, parent ownership, stable mapping; --no-verify then separate guarded verify. Old595 kept only until replacement checked.
+
+Fresh read-only review completed: no Critical/minors; 3 Important. Fixed readiness (RED fake status sequence0calls→3calls→ready, same-boot fence regression, resume sequence, real Connect Status adapter contract). Identity/ready already normalizes to pool_ready before claim, so claim gate causes no preclaim deadlock. create and shared provision helper now wait desktop ready before finish; headless unchanged.

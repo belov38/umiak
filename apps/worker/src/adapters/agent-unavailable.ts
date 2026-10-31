@@ -23,6 +23,9 @@ function unavailable(what: string): AgentUnavailable {
  * since nothing was frozen through this port.
  */
 export class UnavailableAgentPort implements AgentPort {
+	async desktopReady(): Promise<boolean> {
+		throw unavailable("desktopReady");
+	}
 	async configureDesktop(): Promise<void> {
 		throw unavailable("configureDesktop");
 	}
