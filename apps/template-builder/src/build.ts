@@ -1,5 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { familyForTunnelUrl, PveApiError, type PveClient } from "@sbx/pve";
 import { stringify as stringifyYaml } from "yaml";
 import { verifyAgentPackage } from "./agent-package.ts";
@@ -7,6 +6,7 @@ import type { BuildError, Manifest } from "./manifest.ts";
 import {
 	type LinuxRecipe,
 	loadRecipe,
+	loadVerifyScript,
 	loadVersions,
 	REBOOT_STEP,
 	type Recipe,
@@ -104,10 +104,7 @@ function prepare(
 	] as const)
 		if (file !== undefined && !existsSync(file))
 			throw new Error(`${flag}: ${file} not found`);
-	const verifyScript = readFileSync(
-		join(o.templatesDir, recipe.verify, "verify.sh"),
-		"utf8",
-	);
+	const verifyScript = loadVerifyScript(o.templatesDir, recipe.verify);
 	const agent = verifyAgentPackage(o.agentPackage, o.updateKeysFile);
 
 	const now = deps.now();
@@ -132,6 +129,18 @@ function prepare(
 			sha256: versions.base.sha256,
 		},
 		apt: { snapshot: versions.apt.snapshot },
+		...(versions.desktop
+			? {
+					desktop: {
+						pins: versions.desktop,
+						sources: {
+							sunshine: `https://github.com/LizardByte/Sunshine/tree/v${versions.desktop.sunshine.version}`,
+							moonlight_web: `https://github.com/MrCreativ3001/moonlight-web-stream/tree/v${versions.desktop.moonlight_web.version}`,
+							cua_driver: `https://github.com/trycua/cua/tree/cua-driver-rs-v${versions.desktop.cua_driver.version}`,
+						},
+					},
+				}
+			: {}),
 		kernel: null,
 		systemd: null,
 		packages: {},

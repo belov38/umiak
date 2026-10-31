@@ -1,0 +1,6 @@
+# Checked against upstream GitHub Releases 2026-10-31. Base pins are inherited.
+[desktop]
+sunshine = { version = "2026.914.233613", sha256 = "b8a8ceeeb2b3f30a18a994ad268c94e0c91170f33a864c7aad31eed927ad7d47" }
+moonlight_web = { version = "3.0.1", sha256 = "a46acb1f663faaff9cd97abd9671fe049dd525bfe955e95f7b9f753cc2b99f1a" }
+cua_driver = { version = "0.38.0", sha256 = "31ab9709dd91ce73677e49b9f3e75c6f0d3e4d9625c286c9e58262bfbea698dd" }
+cosign = { version = "3.1.4", sha256 = "424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa" }

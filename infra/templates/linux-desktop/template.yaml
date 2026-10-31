@@ -1,0 +1,20 @@
+slug: linux-desktop
+os: linux
+extends: linux
+vmids: [595, 596]
+hw: { vga: std, tablet: 0 }
+build_vm: { cores: 4, memory_mb: 4096 }
+steps:
+  [
+    00-base,
+    reboot,
+    10-system,
+    20-docker,
+    30-toolchains,
+    40-coding-agents,
+    50-sbx-agent,
+    60-desktop,
+    90-cleanup,
+  ]
+boot_timeout_s: 300
+verify: linux-desktop

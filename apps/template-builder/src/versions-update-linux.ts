@@ -340,6 +340,9 @@ export function formatVersionsToml(v: Versions): string {
 				["sunshine", inline(v.desktop.sunshine)],
 				["moonlight_web", inline(v.desktop.moonlight_web)],
 				["cua_driver", inline(v.desktop.cua_driver)],
+				...(v.desktop.cosign
+					? [["cosign", inline(v.desktop.cosign)] as [string, string]]
+					: []),
 			]),
 		);
 	}

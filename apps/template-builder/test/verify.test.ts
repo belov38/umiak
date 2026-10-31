@@ -610,6 +610,32 @@ function setup(over: Partial<VerifyDeps> = {}) {
 }
 
 describe("verifyTemplate", () => {
+	it("verifies desktop clones at the required 4gb size", async () => {
+		const { w, deps } = setup();
+		const sizes: (MachineSize | undefined)[] = [];
+		const create = w.machines.create;
+		const fork = w.machines.fork;
+		deps.machines = {
+			...w.machines,
+			create: async (o) => {
+				sizes.push(o?.size);
+				return create(o);
+			},
+			fork: async (s, o) => {
+				sizes.push(o?.size);
+				return fork(s, o);
+			},
+		};
+		await verifyTemplate(deps, {
+			...manifest(),
+			templateSlug: "linux-desktop",
+			pveVmid: 595,
+		});
+		expect(sizes).toEqual([
+			{ cores: 4, memoryMb: 4096 },
+			{ cores: 4, memoryMb: 4096 },
+		]);
+	});
 	it("checks a clone, its hard restart and a fork, then removes everything", async () => {
 		const { w, deps, ram, logs } = setup();
 		const v = await verifyTemplate(deps, manifest(), {});

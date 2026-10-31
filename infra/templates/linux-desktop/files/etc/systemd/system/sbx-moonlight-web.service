@@ -1,0 +1,18 @@
+[Unit]
+Description=Sandbox Moonlight web stream
+After=network.target
+[Service]
+User=sbxstream
+Group=sbxstream
+StateDirectory=sbx-stream
+StateDirectoryMode=0700
+WorkingDirectory=/opt/sbx-desktop/moonlight-web/current
+ExecStart=/opt/sbx-desktop/moonlight-web/current/web-server --config-path /var/lib/sbx-stream/config.json --disable-default-webrtc-ice-servers
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

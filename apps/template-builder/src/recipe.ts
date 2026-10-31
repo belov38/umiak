@@ -13,6 +13,25 @@ const SHARED_RE = /^_[a-z0-9][a-z0-9-]*$/;
 const STEP_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]*";
 const STEP_RE = new RegExp(`^${STEP_PATTERN}$`);
 const PARENT_TOKEN = "@parent";
+// Desktop profiles extend a headless profile and must pass its complete baseline as well.
+const VERIFY_BASE: Record<string, string> = {
+	"linux-desktop": "linux",
+	"windows-desktop": "windows",
+};
+
+/** The verify script of `profile`, prefixed with its headless baseline. */
+export function loadVerifyScript(
+	templatesDir: string,
+	profile: string,
+	os: "linux" | "windows" = "linux",
+): string {
+	const file = os === "windows" ? "verify.ps1" : "verify.sh";
+	const script = readFileSync(join(templatesDir, profile, file), "utf8");
+	const base = VERIFY_BASE[profile];
+	return base
+		? `${readFileSync(join(templatesDir, base, file), "utf8")}\n${script}`
+		: script;
+}
 export const REBOOT_STEP = "reboot";
 /** Windows only: `net0 link_down=0`, then wait for an IPv4 (spec S9 section 5). */
 export const NETWORK_UP_STEP = "network-up";
@@ -503,6 +522,7 @@ export const versionsSchema = z.strictObject({
 			sunshine: versionSha,
 			moonlight_web: versionSha,
 			cua_driver: versionSha,
+			cosign: versionSha.optional(),
 		})
 		.optional(),
 });

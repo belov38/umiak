@@ -21,7 +21,20 @@ templates:
     defaultSize: 4gb
     allowedSizes: [4gb]
 
+  - slug: linux-desktop
+    os: linux
+    enabled: true
+    defaultSize: 4gb
+    allowedSizes: [4gb, 8gb]
+    capabilities: [exec, files, ssh, desktop]
+
 sizes:
+  - slug: 4gb
+    vcpu: 4
+    memoryMb: 4096
+  - slug: 8gb
+    vcpu: 8
+    memoryMb: 8192
   - slug: 2gb
     vcpu: 2
     memoryMb: 2048
@@ -37,7 +50,7 @@ pools: []
 quotas:
   default:
     maxActiveSandboxes: 3
-    maxRamMb: 6144
+    maxRamMb: 8192
     maxSavedSnapshots: 10
 
 topology:

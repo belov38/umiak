@@ -121,6 +121,11 @@ export interface Manifest {
 	packages: Record<string, string>;
 	/** Tool -> first line of its version output; null when the command is missing. */
 	tools: Record<string, string | null>;
+	/** Desktop artifact pins and upstream sources (S10, including GPL source offers). */
+	desktop?: {
+		pins: import("./recipe.ts").Versions["desktop"];
+		sources: Record<string, string>;
+	};
 	agentVersion: string;
 	defaultTunnelUrl: string | null;
 	/** Template hardware: recipe `hw` plus `cloudinit`; windows: `machine` pinned at build time. */

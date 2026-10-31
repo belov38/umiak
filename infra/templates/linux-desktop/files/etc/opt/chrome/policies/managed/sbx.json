@@ -1,0 +1,10 @@
+{
+	"BrowserSignin": 0,
+	"BrowserGuestModeEnabled": false,
+	"DefaultBrowserSettingEnabled": false,
+	"PromotionalTabsEnabled": false,
+	"MetricsReportingEnabled": false,
+	"SyncDisabled": true,
+	"PasswordManagerEnabled": false,
+	"BackgroundModeEnabled": false
+}

@@ -501,6 +501,10 @@ export async function verifyTemplate(
 ): Promise<VerifyResult> {
 	if (manifest.os === "windows") return verifyWindows(deps, manifest, o);
 	const tplVmid = manifest.pveVmid;
+	const size =
+		manifest.templateSlug === "linux-desktop"
+			? { cores: 4, memoryMb: 4096 }
+			: SIZE;
 	if (tplVmid === null) throw new Error("the build has no template VMID");
 	const now = deps.now ?? Date.now;
 	const sleep =
@@ -549,7 +553,7 @@ export async function verifyTemplate(
 	let kvm: VerifyResult["kvm"] = { available: false, reason: "not reported" };
 
 	const reserve = async (c: Clone) => {
-		await deps.ramGuard.reserve(c.vmid, SIZE.memoryMb);
+		await deps.ramGuard.reserve(c.vmid, size.memoryMb);
 		c.reserved = true;
 	};
 
@@ -636,7 +640,7 @@ export async function verifyTemplate(
 		step(`cloning template ${tplVmid}`);
 		const A: Clone = {
 			...a,
-			vmid: (await machines.create({ size: SIZE, smbios: a.smbios })).vmid,
+			vmid: (await machines.create({ size, smbios: a.smbios })).vmid,
 			reserved: false,
 		};
 		cloneA = A;
@@ -746,7 +750,7 @@ export async function verifyTemplate(
 		const f = identity();
 		const F: Clone = {
 			...f,
-			vmid: (await machines.fork(snap, { size: SIZE, smbios: f.smbios })).vmid,
+			vmid: (await machines.fork(snap, { size, smbios: f.smbios })).vmid,
 			reserved: false,
 		};
 		cloneF = F;

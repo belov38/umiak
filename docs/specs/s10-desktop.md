@@ -206,7 +206,7 @@ verify: linux-desktop
 Все проверки S5 §10, кроме п. 4, плюс:
 
 1. Проверка S5 §10 п. 4 (слушающие сокеты) со списком для рабочего стола: при остановленном стримере новых TCP-сокетов нет; Xorg слушает только unix-сокет.
-2. После загрузки без claim: LightDM активен, `user` в сессии `x11` на seat0 (`loginctl`), openbox работает, разрешение 1920×1080 (`xrandr`), фаза `desktop` = `ready`.
+2. После загрузки до claim: LightDM не стартует, `desktop: pending`. После claim и применения secrets текущего boot: LightDM активен, `user` в сессии `x11` на seat0 (`loginctl`), openbox работает, разрешение 1920×1080 (`xrandr`), фаза `desktop` = `ready`. Это уточнение согласует проверку с §6.4 и отсутствием pool в MVP.
 3. `sbx-agent doctor --desktop --json`: скриншот через `sbx-session` — PNG 1920×1080, не одноцветный (на рабочем столе есть панель tint2).
 4. Ввод: агент двигает курсор и кликает (позиция курсора совпадает); `type` печатает строку с не-ASCII символами в `xfce4-terminal`, и она совпадает; буфер: `SetClipboard` → `xclip -o` из сессии выдаёт тот же текст, и обратно.
 5. Стример: `Desktop/Open` запускает Sunshine и moonlight-web, pairing проходит, ответ содержит `hostId` и `appId`; при этом Sunshine и moonlight-web слушают только `127.0.0.1`. `Desktop/StopStreamer` их останавливает.
@@ -931,3 +931,9 @@ cua-driver 0.38.0 — последний versioned release в просмотре
 5. **MVP без пулов — решение Ильи 2026-10-31:** warm и hibernated pools исключены, включая Linux spike L; цель claim ≤15 s снята. Cold create: Linux до ~1 min, Windows до 5 min. Обычный stop/resume сохраняется.
 6. **Сеть — решение Ильи 2026-10-31:** продукт не привязан к Tailscale, dev-адреса только в `infra/dev-cp/`; cloudflared/ngrok/trycloudflare и внешние relay-сервисы запрещены. TURN собственный, self-hosted в compose.
 7. **Template slots — решение Ильи 2026-10-31:** `linux-desktop` только `[595, 596]`, диапазон dev-infra 590–596; CT 590 остаётся. 597, 598, 599 не менять. Sandbox VMIDs 500–589; перед стартом проверять S9 и общий RAM ≤8 GB.
+
+### S10 code pass 2026-10-31 (before pve spike)
+
+Agent/worker/gateway/API/TS+Python SDK/CLI/MCP contract implemented and fake-tested. Production `Session` and `Streamer` adapters remain behind interfaces until Linux/Windows helper and upstream pairing spikes; default behavior is unavailable, never a fake ready screen. This is the master's explicit temporary implementation allowance, not an acceptance waiver. Remaining: session startup after secrets, helper OS bindings, private streamer databases/process lifecycle, observed viewer count and real media acceptance.
+
+The linux-desktop recipe now inherits Linux pins, adds pinned cosign3.1.4 for cua signature verification, and installs upstream-generated moonlight config. The release archive contains `package/web-server`; extraction strips `package/`. Sunshine/moonlight services are manual; config templates contain no credentials. Audio starts disabled pending the best-effort spike (§8.5). `linux-desktop` verification combines Linux baseline and desktop image checks; full screen/input/stream acceptance runs after real claim through `infra/dev-cp/e2e-desktop.sh`. No template build/version or latency result has been claimed yet.
