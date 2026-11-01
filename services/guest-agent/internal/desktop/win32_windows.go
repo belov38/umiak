@@ -194,6 +194,14 @@ func (s *win32Desktop) Capture(cursor bool) (image.Image, error) {
 	}
 	return decodeXImage(pixels, w, h, 32, false, 0xff0000, 0xff00, 0xff)
 }
+
+// sendInputRetryWindow bounds how long a blocked SendInput is retried. Windows
+// refuses input (0 inserted, ERROR_ACCESS_DENIED) while the input desktop is
+// briefly not the user's Default desktop, for example during the logon
+// transition of a freshly booted fork. An action waits at most this long
+// before action_failed.
+const sendInputRetryWindow = 2 * time.Second
+
 func (s *win32Desktop) Send(inputs []WinInput) error {
 	if len(inputs) == 0 {
 		return nil

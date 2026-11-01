@@ -237,13 +237,6 @@ func (s *WinSession) Input(ctx context.Context, a *v1.DesktopAction) error {
 	return errors.New("unsupported Windows input")
 }
 
-// sendInputRetryWindow bounds how long a blocked SendInput is retried. Windows
-// refuses input (0 inserted, ERROR_ACCESS_DENIED) while the input desktop is
-// briefly not the user's Default desktop, for example during the logon
-// transition of a freshly booted fork. Spec S10 section 12.2: one action
-// never runs longer than this before action_failed.
-const sendInputRetryWindow = 2 * time.Second
-
 // sendInputRetryDelay is the pause between two attempts.
 const sendInputRetryDelay = 50 * time.Millisecond
 
