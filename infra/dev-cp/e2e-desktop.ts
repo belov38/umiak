@@ -355,6 +355,21 @@ try {
 		return out.trim();
 	};
 	const original = await credentialHash(sb);
+	if (windows) {
+		// S6 section 7.8: a running Windows source is forked only after a clean
+		// stop; without forceStop the API refuses before any work.
+		const refused = await sb.fork().then(
+			(copy) => {
+				created.push(copy);
+				return "";
+			},
+			(e: unknown) => (e as { code?: string }).code ?? String(e),
+		);
+		check(
+			refused === "snapshot_requires_stop",
+			"running Windows fork refused without forceStop",
+		);
+	}
 	await sb.stop({ wait: true });
 	await budget();
 	const copy = await sb.fork();
@@ -363,6 +378,17 @@ try {
 	check(
 		original && original !== (await credentialHash(copy)),
 		"fork gets fresh streamer state",
+	);
+	const forkShot = await copy.desktop.screenshot({ cursor: "false" });
+	check(
+		forkShot.screen.width === 1920 && forkShot.screen.height === 1080,
+		"fork desktop screenshot 1920x1080",
+	);
+	// computer_* against the fork: input, Unicode and clipboard on the new identity.
+	await verifyLiveDesktopMcp(
+		copy,
+		process.env.SBX_DESKTOP_MCP_URL ?? "",
+		windows,
 	);
 	await copy.delete({ wait: true });
 	removed.add(copy.id);
