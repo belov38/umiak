@@ -149,10 +149,19 @@ grep -q "apiUrl: https://$PVE_LAN_IP:8006" secrets/devcp/umiak.yaml
 if [ ! -s secrets/data-keys.json ]; then
 	(umask 077 && printf '{"current":1,"keys":{"1":"%s"}}\n' "$(head -c 32 /dev/urandom | base64)" >secrets/data-keys.json)
 fi
+# Stand-only passwords are regenerated only for a fresh deployment, never on a redeploy.
+for name in postgres-password dev-user-password; do
+ if [ ! -s "secrets/devcp/$name" ]; then
+  (umask 077; openssl rand -hex 32 >"secrets/devcp/$name")
+ fi
+done
+umask 077
 cat >.env <<ENV
 # Written by infra/dev-cp/deploy.sh; changes are overwritten on the next deploy.
 COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml
 COMPOSE_PROFILES=desktop
+UMIAK_DEVCP_DB_PASSWORD=$(cat secrets/devcp/postgres-password)
+UMIAK_DEVCP_USER_PASSWORD=$(cat secrets/devcp/dev-user-password)
 UMIAK_DEVCP_TURN_IP=$TURN_IP
 UMIAK_DEVCP_TURN_HOST=$TURN_HOST
 # Dev TURN on the CT address (README): TLS on 5349 (443 is the gateway), relay ports above

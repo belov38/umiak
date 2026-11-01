@@ -20,18 +20,37 @@
 # oauth2-proxy calls the api from its container address in the same range.
 x-devcp-proxy-cidrs: &devcp-proxy-cidrs 172.16.0.0/12,127.0.0.1/32
 
+# Rotated stand credentials; the local compose defaults stay unchanged.
+x-devcp-db-env: &devcp-db-env
+  DATABASE_URL: postgres://umiak:${UMIAK_DEVCP_DB_PASSWORD:?set by deploy.sh}@postgres:5432/umiak
+
 services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${UMIAK_DEVCP_DB_PASSWORD:?set by deploy.sh}
+
+  keycloak-db:
+    environment:
+      PGPASSWORD: ${UMIAK_DEVCP_DB_PASSWORD:?set by deploy.sh}
+
+  web-migrate:
+    environment:
+      <<: *devcp-db-env
+
   # turn (desktop profile) takes UMIAK_TURN_* from .env (deploy.sh): its published ports and
   # sysctls are interpolated in deploy/compose/turn.yaml, not only its environment.
 
   # umiak.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/umiak.yaml).
   migrate:
+    environment:
+      <<: *devcp-db-env
     volumes:
       - ./secrets/devcp/umiak.yaml:/etc/umiak/umiak.yaml:ro
 
   # The worker reads templates, sizes and quotas from Payload (S8); umiak.yaml is only for migrate.
   worker:
     environment:
+      <<: *devcp-db-env
       # The tunnel URL that the worker writes into smbios family (S5 §14) of every new machine.
       UMIAK_TURN_URLS: ${UMIAK_DEVCP_TURN_URLS:?set by deploy.sh}
       UMIAK_TUNNEL_URL: ${UMIAK_TUNNEL_URL:?set by deploy.sh}
@@ -84,6 +103,8 @@ services:
   keycloak:
     mem_limit: 1200m
     environment:
+      KC_DB_PASSWORD: ${UMIAK_DEVCP_DB_PASSWORD:?set by deploy.sh}
+      UMIAK_DEV_PASSWORD: ${UMIAK_DEVCP_USER_PASSWORD:?set by deploy.sh}
       JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
       KC_HOSTNAME: ${UMIAK_KEYCLOAK_URL:?set by deploy.sh}
       KC_HTTP_ENABLED: "true"
@@ -97,6 +118,7 @@ services:
   # headers from Serve are never an identity (the api reads only Authorization here).
   api:
     environment:
+      <<: *devcp-db-env
       UMIAK_API_URL: ${UMIAK_API_PUBLIC_URL:?set by deploy.sh}
       UMIAK_APP_URL: ${UMIAK_APP_ORIGIN:?set by deploy.sh}
       UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:?set by deploy.sh}
@@ -125,6 +147,7 @@ services:
   # Sign-out: oauth2-proxy, then Keycloak's end-session page, back to the app origin (names.sh).
   web:
     environment:
+      <<: *devcp-db-env
       UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:?set by deploy.sh}
       UMIAK_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN:?set by deploy.sh}
       UMIAK_API_PUBLIC_URL: ${UMIAK_API_PUBLIC_URL:?set by deploy.sh}
