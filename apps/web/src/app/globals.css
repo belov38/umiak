@@ -1,7 +1,8 @@
-/* Styles of the dashboard /app: Tailwind CSS 4 and the shadcn/ui theme
-   (radix-nova, neutral). No web fonts: system font stacks only (S8 §19). */
+/* Customer dashboard only; Payload admin has its own root layout. */
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/funnel-display";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -68,9 +69,9 @@
 }
 
 @theme inline {
-	--font-heading: var(--font-sans);
+	--font-heading: "Funnel Display Variable", system-ui, sans-serif;
 	--font-sans:
-		ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		"Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	--color-sidebar-ring: var(--sidebar-ring);
 	--color-sidebar-border: var(--sidebar-border);
@@ -114,17 +115,17 @@
 
 :root {
 	--background: oklch(1 0 0);
-	--foreground: oklch(0.145 0 0);
+	--foreground: #060606;
 	--card: oklch(1 0 0);
 	--card-foreground: oklch(0.145 0 0);
 	--popover: oklch(1 0 0);
 	--popover-foreground: oklch(0.145 0 0);
-	--primary: oklch(0.205 0 0);
+	--primary: #263fa9;
 	--primary-foreground: oklch(0.985 0 0);
-	--secondary: oklch(0.97 0 0);
-	--secondary-foreground: oklch(0.205 0 0);
+	--secondary: #f1f3f9;
+	--secondary-foreground: #263fa9;
 	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
+	--muted-foreground: #4d4d4d;
 	--accent: oklch(0.97 0 0);
 	--accent-foreground: oklch(0.205 0 0);
 	--destructive: oklch(0.577 0.245 27.325);
@@ -136,7 +137,7 @@
 	--chart-3: oklch(0.439 0 0);
 	--chart-4: oklch(0.371 0 0);
 	--chart-5: oklch(0.269 0 0);
-	--radius: 0.625rem;
+	--radius: 0.125rem;
 	--sidebar: oklch(0.985 0 0);
 	--sidebar-foreground: oklch(0.145 0 0);
 	--sidebar-primary: oklch(0.205 0 0);
@@ -190,5 +191,219 @@
 	}
 	html {
 		@apply font-sans;
+	}
+}
+
+/* Measurements use CSS pixels, independent of the reference browser's zoom. */
+.dashboard-shell {
+	min-height: 100dvh;
+}
+.dashboard-sidebar {
+	position: fixed;
+	inset: 0 auto 0 0;
+	width: 280px;
+	border-right: 1px solid var(--border);
+	background: var(--background);
+}
+.dashboard-sidebar-content {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 24px 16px;
+	gap: 24px;
+	overflow-y: auto;
+}
+.dashboard-brand {
+	display: block;
+	font: 600 44px / 1.2 var(--font-heading);
+	letter-spacing: -2px;
+	padding: 0 12px;
+}
+.dashboard-nav {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.dashboard-nav [data-slot="button"] {
+	width: 100%;
+	justify-content: flex-start;
+	height: 40px;
+	gap: 10px;
+	padding: 0 12px;
+	font-size: 16px;
+	font-weight: 400;
+	color: var(--muted-foreground);
+}
+.dashboard-nav [aria-current="page"] {
+	color: var(--secondary-foreground);
+	background: var(--secondary);
+}
+.dashboard-sidebar-footer {
+	margin-top: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+}
+.dashboard-sidebar-footer > [data-testid="user-menu"] {
+	justify-content: space-between;
+}
+.dashboard-theme {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	border: 1px solid var(--border);
+	margin-top: 12px;
+}
+.dashboard-theme [data-slot="button"] {
+	height: 48px;
+	border-radius: 0;
+	font-weight: 400;
+}
+.dashboard-theme [data-slot="button"] + [data-slot="button"] {
+	border-left: 1px solid var(--border);
+}
+.dashboard-content {
+	margin-left: 280px;
+	padding: 32px max(24px, calc((100vw - 280px - 1152px) / 2));
+	min-width: 0;
+}
+.dashboard-content h1 {
+	font: 500 32px / 1.1 var(--font-heading);
+	letter-spacing: -1px;
+}
+.dashboard-content h2,
+.dashboard-content h3 {
+	font-family: var(--font-heading);
+}
+.dashboard-content h2 {
+	font-size: 22px;
+	font-weight: 500;
+}
+.dashboard-content > section,
+.dashboard-content > div {
+	width: 100%;
+}
+.dashboard-content [data-slot="table-container"] {
+	border: 1px solid var(--border);
+}
+.dashboard-content [data-slot="table-head"] {
+	height: 40px;
+	font-weight: 400;
+	color: var(--muted-foreground);
+	font-size: 14px;
+	padding: 8px 12px;
+}
+.dashboard-content [data-slot="table-cell"] {
+	padding: 16px 12px;
+}
+.dashboard-content [data-slot="table-row"]:last-child {
+	border-bottom: 0;
+}
+[data-slot="button"][data-size="default"] {
+	min-height: 48px;
+	padding-inline: 16px;
+	font-weight: 400;
+}
+[data-slot="input"],
+[data-slot="select-trigger"] {
+	min-height: 48px;
+	border-radius: 0;
+	box-shadow: none;
+}
+[data-slot="dialog-content"] {
+	border-radius: 2px;
+	padding: 28px;
+}
+[data-slot="dialog-title"] {
+	font: 500 26px / 1.2 var(--font-heading);
+}
+[data-slot="dropdown-menu-content"],
+[data-slot="select-content"] {
+	border-radius: 2px;
+}
+.dashboard-content .border-dashed {
+	border-style: solid;
+	border-radius: 0;
+	padding-block: 48px;
+}
+.dashboard-skip {
+	position: fixed;
+	left: 16px;
+	top: -100px;
+	z-index: 100;
+	background: var(--background);
+	padding: 12px;
+	border: 1px solid var(--primary);
+}
+.dashboard-skip:focus {
+	top: 8px;
+}
+@media (max-width: 900px) {
+	.dashboard-sidebar {
+		width: 224px;
+	}
+	.dashboard-content {
+		margin-left: 224px;
+		padding: 24px;
+	}
+}
+@media (max-width: 640px) {
+	.dashboard-sidebar {
+		position: static;
+		width: 100%;
+		border-right: 0;
+		border-bottom: 1px solid var(--border);
+	}
+	.dashboard-sidebar-content {
+		padding: 16px;
+		gap: 16px;
+	}
+	.dashboard-brand {
+		font-size: 32px;
+	}
+	.dashboard-nav {
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+	.dashboard-nav [data-slot="button"] {
+		width: auto;
+		font-size: 14px;
+	}
+	.dashboard-sidebar-footer {
+		flex-direction: row;
+		flex-wrap: wrap;
+		align-items: center;
+	}
+	.dashboard-theme {
+		margin: 0 0 0 auto;
+	}
+	.dashboard-theme [data-slot="button"] {
+		height: 36px;
+		min-height: 36px;
+		padding-inline: 10px;
+	}
+	.dashboard-content {
+		margin-left: 0;
+		padding: 24px 16px;
+	}
+	.dashboard-content h1 {
+		font-size: 28px;
+	}
+}
+
+.sandbox-facts {
+	display: grid;
+	grid-template-columns: 120px minmax(0, 1fr);
+	gap: 12px 24px;
+	font-size: 14px;
+	padding-block: 20px;
+	border-block: 1px solid var(--border);
+}
+.sandbox-facts dd {
+	overflow-wrap: anywhere;
+}
+@media (min-width: 1100px) {
+	.sandbox-facts {
+		grid-template-columns: 120px minmax(0, 1fr) 100px minmax(0, 1fr);
 	}
 }

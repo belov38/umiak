@@ -1,11 +1,21 @@
 "use client";
-// The common frame of /app (S8 §9.3):
-// sbx  [Team: <name> v]  Sandboxes Snapshots Environments Keys Team
-//                                 [Operator] [Admin]   <email> (v)
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
+// Customer dashboard frame; team routes and authorization stay unchanged.
+import {
+	ArchiveIcon,
+	BoxIcon,
+	CheckIcon,
+	ChevronDownIcon,
+	KeyRoundIcon,
+	LayersIcon,
+	MoonIcon,
+	SettingsIcon,
+	SunIcon,
+	UserIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type React from "react";
+import { useEffect, useState } from "react";
 import { useAppSession } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,12 +36,12 @@ import type { AppTeam } from "@/lib/app-session";
 import { signOutHref, switchTeamPath, teamPath } from "@/lib/team-path";
 import { cn } from "@/lib/utils";
 
-const NAV: { label: string; section?: string }[] = [
-	{ label: "Sandboxes" },
-	{ label: "Snapshots", section: "snapshots" },
-	{ label: "Environments", section: "environments" },
-	{ label: "Keys", section: "keys" },
-	{ label: "Team", section: "settings" },
+const NAV = [
+	{ label: "Sandboxes", section: undefined, icon: BoxIcon },
+	{ label: "Snapshots", section: "snapshots", icon: ArchiveIcon },
+	{ label: "Environment", section: "environments", icon: LayersIcon },
+	{ label: "API keys", section: "keys", icon: KeyRoundIcon },
+	{ label: "Team", section: "settings", icon: SettingsIcon },
 ];
 
 export function AppShell({
@@ -58,16 +68,23 @@ export function AppShell({
 	};
 
 	return (
-		<div className="min-h-screen">
-			<header className="border-b">
-				<div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2">
-					<Link href="/app" className="font-semibold tracking-tight">
+		<div className="dashboard-shell">
+			<aside className="dashboard-sidebar" aria-label="Dashboard">
+				<a href="#dashboard-content" className="dashboard-skip">
+					Skip to content
+				</a>
+				<div className="dashboard-sidebar-content">
+					<Link href="/app" className="dashboard-brand">
 						sbx
 					</Link>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button variant="outline" size="sm" data-testid="team-switcher">
-								<span className="text-muted-foreground">Team:</span>
+							<Button
+								variant="outline"
+								className="w-full justify-between"
+								data-testid="team-switcher"
+							>
+								<span className="sr-only">Team:</span>
 								<span className="max-w-48 truncate">{team.name}</span>
 								{!member && <Badge variant="secondary">operator</Badge>}
 								<ChevronDownIcon />
@@ -96,7 +113,7 @@ export function AppShell({
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
-					<nav className="flex items-center gap-1">
+					<nav className="dashboard-nav" aria-label="Team navigation">
 						{NAV.map((n) => (
 							<Button
 								key={n.label}
@@ -104,11 +121,31 @@ export function AppShell({
 								variant={active(n.section) ? "secondary" : "ghost"}
 								size="sm"
 							>
-								<Link href={teamPath(team.id, n.section)}>{n.label}</Link>
+								<Link
+									href={teamPath(team.id, n.section)}
+									aria-current={active(n.section) ? "page" : undefined}
+								>
+									<n.icon />
+									{n.label}
+								</Link>
 							</Button>
 						))}
+
+						<Button
+							asChild
+							variant={pathname === "/app/account" ? "secondary" : "ghost"}
+							size="sm"
+						>
+							<Link
+								href="/app/account"
+								aria-current={pathname === "/app/account" ? "page" : undefined}
+							>
+								<UserIcon />
+								Account
+							</Link>
+						</Button>
 					</nav>
-					<div className="ml-auto flex items-center gap-1">
+					<div className="dashboard-sidebar-footer">
 						{session.isOperator && (
 							<>
 								<Button asChild variant="ghost" size="sm">
@@ -154,10 +191,50 @@ export function AppShell({
 								</Tooltip>
 							</DropdownMenuContent>
 						</DropdownMenu>
+						<ThemeSwitch />
 					</div>
 				</div>
-			</header>
-			<main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+			</aside>
+			<main id="dashboard-content" className="dashboard-content">
+				{children}
+			</main>
 		</div>
+	);
+}
+
+function ThemeSwitch() {
+	const [dark, setDark] = useState(false);
+	useEffect(() => {
+		const saved = localStorage.getItem("sbx-theme");
+		const next = saved
+			? saved === "dark"
+			: matchMedia("(prefers-color-scheme: dark)").matches;
+		setDark(next);
+		document.documentElement.classList.toggle("dark", next);
+	}, []);
+	const choose = (next: boolean) => {
+		setDark(next);
+		document.documentElement.classList.toggle("dark", next);
+		localStorage.setItem("sbx-theme", next ? "dark" : "light");
+	};
+	return (
+		<fieldset className="dashboard-theme" aria-label="Appearance">
+			<Button
+				variant={!dark ? "secondary" : "ghost"}
+				aria-pressed={!dark}
+				onClick={() => choose(false)}
+			>
+				<SunIcon />
+				Light
+			</Button>
+			<Button
+				variant={dark ? "secondary" : "ghost"}
+				aria-pressed={dark}
+				onClick={() => choose(true)}
+			>
+				<MoonIcon />
+				Dark
+			</Button>
+		</fieldset>
 	);
 }

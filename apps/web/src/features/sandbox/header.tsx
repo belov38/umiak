@@ -292,7 +292,7 @@ function Facts({
 }) {
 	const labels = Object.entries(s.labels);
 	return (
-		<dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr_auto_1fr]">
+		<dl className="sandbox-facts">
 			<dt className="text-muted-foreground">State</dt>
 			<dd>
 				<StateCell sandbox={s} />

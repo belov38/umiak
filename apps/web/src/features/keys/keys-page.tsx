@@ -103,10 +103,10 @@ export function KeysPage({
 			/>
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<h1 className="text-xl font-semibold">
-					Team API keys
+					API keys
 					{team0 && (
 						<span className="ml-2 text-base font-normal text-muted-foreground">
-							(team {team0.name})
+							· {team0.name}
 						</span>
 					)}
 				</h1>

@@ -119,7 +119,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 			<div className="flex flex-wrap items-start gap-2">
 				<Input
 					aria-label="Search name or slug"
-					placeholder="Search name/slug"
+					placeholder="Search name or slug"
 					className="w-56"
 					value={q}
 					onChange={(e) => setQ(e.target.value)}
@@ -132,7 +132,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
-						<SelectItem value="all">state: all</SelectItem>
+						<SelectItem value="all">State: all</SelectItem>
 						{STATE_FILTERS.map((s) => (
 							<SelectItem key={s} value={s}>
 								{s}

@@ -80,7 +80,7 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 	return (
 		<section className="space-y-4">
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-				<h1 className="text-xl font-semibold">Saved snapshots</h1>
+				<h1 className="text-xl font-semibold">Snapshots</h1>
 				{limits.data && (
 					<p className="text-sm text-muted-foreground">
 						{limits.data.usage.savedSnapshots} of{" "}
@@ -88,6 +88,7 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 					</p>
 				)}
 			</div>
+			<h2>Saved snapshots</h2>
 			<p className="text-sm text-muted-foreground">
 				Save a snapshot from a sandbox's page. A snapshot belongs to this team
 				only.

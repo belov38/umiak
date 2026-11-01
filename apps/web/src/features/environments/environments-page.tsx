@@ -64,7 +64,7 @@ export function EnvironmentsPage({
 	return (
 		<section className="space-y-4">
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-				<h1 className="text-xl font-semibold">Environments</h1>
+				<h1 className="text-xl font-semibold">Environment</h1>
 				<p className="text-sm text-muted-foreground">
 					Named env, secrets, secret files and repositories that new sandboxes
 					get at create. Changes apply to new sandboxes only.
