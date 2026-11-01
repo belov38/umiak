@@ -27,7 +27,7 @@ new_password() {
 	if [[ -s "$1" ]]; then
 		echo 0
 	else
-		(umask 077 && LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20 >"$1")
+		(umask 077; openssl rand -hex 16 >"$1")
 		echo 1
 	fi
 }
