@@ -42,7 +42,7 @@ function shareTrace(w: TestWorld): string[] {
 }
 
 describe("stop on Windows", () => {
-	it("shutdown timeout is 120 s for windows and 60 s for linux", async () => {
+	it("shutdown timeout is 300 s for windows and 60 s for linux", async () => {
 		const lin = await createWorld(db);
 		const le = opsEnv(lin);
 		const ls = await readySandbox(lin, le);
@@ -61,7 +61,7 @@ describe("stop on Windows", () => {
 		expect(await run(win, wop.id)).toBe("succeeded");
 		expect(win.infra.callsOf("shutdown")[0]?.args).toEqual([
 			expect.any(Number),
-			120,
+			300,
 		]);
 	});
 

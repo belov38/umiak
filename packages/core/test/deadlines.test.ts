@@ -12,7 +12,7 @@ describe("operationDeadline (S6 §7.9)", () => {
 		["fork", "linux", false, 2 * MIN],
 		["fork", "windows", false, 3 * MIN],
 		["stop", "linux", false, 3 * MIN],
-		["stop", "windows", false, 5 * MIN],
+		["stop", "windows", false, 7 * MIN],
 		["resume", "linux", false, 5 * MIN],
 		["resume", "windows", false, 15 * MIN],
 		["recover", "linux", false, 5 * MIN],
@@ -23,6 +23,15 @@ describe("operationDeadline (S6 §7.9)", () => {
 		["save_snapshot", "windows", false, 5 * MIN],
 	] as const)("%s %s fromPool=%s -> %d ms", (kind, os, fromPool, ms) => {
 		expect(operationDeadline(kind, os, { fromPool })).toBe(ms);
+	});
+
+	it("forceStop adds the stop deadline to fork and save_snapshot", () => {
+		expect(operationDeadline("fork", "windows", { forceStop: true })).toBe(
+			10 * MIN,
+		);
+		expect(
+			operationDeadline("save_snapshot", "windows", { forceStop: true }),
+		).toBe(12 * MIN);
 	});
 
 	it("delete has no deadline", () => {

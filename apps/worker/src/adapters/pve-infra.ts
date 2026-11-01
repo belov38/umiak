@@ -26,6 +26,7 @@ import {
 	type SnapshotStore,
 	SshNodeOps,
 	ThawFailedError,
+	VM_LOCK_TIMEOUT_RE,
 } from "@sbx/pve";
 import type pg from "pg";
 import { QuiesceFailed } from "../ops/snapshot-step.ts";
@@ -510,9 +511,22 @@ export class PveNodeInfra implements NodeInfra {
 	 * under the power lock, the wait for the guest (up to timeoutS) outside
 	 * it: once Proxmox accepted the task it acts on that VM, and holding the
 	 * lock that long would stall every start and delete of the node. Same
-	 * rule as S1 (checkLeaseOwner).
+	 * rule as S1 (checkLeaseOwner). A task that could not take the VM config
+	 * lock (qmeventd after a stop and a quick start) never asked the guest:
+	 * it is repeated like a stop, not reported as `timeout` (that would make
+	 * the caller hard-stop a guest that was never asked to shut down).
 	 */
 	shutdown(
+		vmid: number,
+		timeoutS: number,
+		o: PowerOpts,
+	): Promise<"stopped" | "timeout"> {
+		return retryOnVmLock(() => this.#shutdownOnce(vmid, timeoutS, o), {
+			sleep: this.#fencedLockSleep(o.beforeAct),
+		});
+	}
+
+	#shutdownOnce(
 		vmid: number,
 		timeoutS: number,
 		o: PowerOpts,
@@ -537,6 +551,8 @@ export class PveNodeInfra implements NodeInfra {
 					await this.#c.api.waitTask(this.#t.nodeName, upid);
 				} catch (err) {
 					if (err instanceof OwnerMismatchError || g.failed()) throw err;
+					if (err instanceof Error && VM_LOCK_TIMEOUT_RE.test(err.message))
+						throw err;
 					// The shutdown task fails when the guest ignores ACPI within the timeout.
 					const s = await this.#statusOf(vmid).catch(() => undefined);
 					if (s === "stopped") return "stopped";
@@ -572,20 +588,27 @@ export class PveNodeInfra implements NodeInfra {
 						}),
 					),
 				),
-			{
-				sleep: async (ms) => {
-					// The power lock is released between attempts. Recheck the caller's
-					// fence while waiting and again under that lock before acting.
-					for (let remaining = ms; remaining > 0; remaining -= 2000) {
-						await (
-							this.#o.vmLockSleep ??
-							((delay) => new Promise((resolve) => setTimeout(resolve, delay)))
-						)(Math.min(remaining, 2000));
-						await o.beforeAct?.();
-					}
-				},
-			},
+			{ sleep: this.#fencedLockSleep(o.beforeAct) },
 		);
+	}
+
+	/**
+	 * The pause between VM-lock retries. The power lock is released between
+	 * attempts; the caller's fence is rechecked while waiting and again under
+	 * that lock before acting.
+	 */
+	#fencedLockSleep(
+		beforeAct?: () => Promise<unknown>,
+	): (ms: number) => Promise<void> {
+		return async (ms) => {
+			for (let remaining = ms; remaining > 0; remaining -= 2000) {
+				await (
+					this.#o.vmLockSleep ??
+					((delay) => new Promise((resolve) => setTimeout(resolve, delay)))
+				)(Math.min(remaining, 2000));
+				await beforeAct?.();
+			}
+		};
 	}
 
 	/**

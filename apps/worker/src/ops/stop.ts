@@ -20,18 +20,15 @@ import type { SandboxOpHandler } from "./kind.ts";
 export const STOP_STEPS = ["prepare", "shutdown", "verify", "finish"] as const;
 
 const PREPARE_STOP_TIMEOUT_MS = 10_000;
-/** Windows clears the pagefile at shutdown (S9 §8.1), which takes longer. */
-export const SHUTDOWN_TIMEOUT_S = { linux: 60, windows: 120 } as const;
 /**
- * The stop of a forced fork/save (S9 §24.8). Its snapshot must not be
- * crash-consistent, so a timeout fails the operation instead of a hard stop
- * (`ShutdownTimeout`), and Windows gets a longer budget: the first shutdown
- * of a fresh Windows clone took 118 s live.
+ * Graceful shutdown budget before a stop gives up on the guest. Windows
+ * clears the pagefile at shutdown (S9 §8.1), and the first shutdown of a
+ * fresh Windows clone took 118 s live: 300 s (S9 §24.9). A plain stop
+ * hard-stops after it (no clean stop); the stop of a forced fork/save (S9
+ * §24.8) fails `ShutdownTimeout` instead, so its snapshot is never
+ * crash-consistent.
  */
-export const FORCE_STOP_SHUTDOWN_TIMEOUT_S = {
-	linux: 60,
-	windows: 300,
-} as const;
+export const SHUTDOWN_TIMEOUT_S = { linux: 60, windows: 300 } as const;
 
 /** The VM still runs after shutdown and a hard stop; repeated until the deadline. */
 export class StopNotConfirmed extends Error {
@@ -143,10 +140,10 @@ export function stopSteps(ctx: WorkerCtx, fenced: Fenced, prefix = ""): Step[] {
 				}
 				if (status === "stopped") return { shutdown: "already" };
 				const os = await machineOs(ctx.pool, m);
-				const timeoutS = forced
-					? (ctx.timing.forceStopShutdownTimeoutS ??
-						FORCE_STOP_SHUTDOWN_TIMEOUT_S[os])
-					: (ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S[os]);
+				const timeoutS =
+					(forced ? ctx.timing.forceStopShutdownTimeoutS : undefined) ??
+					ctx.timing.shutdownTimeoutS ??
+					SHUTDOWN_TIMEOUT_S[os];
 				await fenced.check();
 				const res = await ownedPowerOp(ctx, m.id, vmid, "shutdown", () =>
 					infra.shutdown(vmid, timeoutS, { expectedOwner: m.id }),

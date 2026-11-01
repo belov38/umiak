@@ -206,8 +206,8 @@ describe("forced fork of a running Windows sandbox", () => {
 		const op = await row(w, "operations", f.forkOpId);
 		const ms =
 			(op.deadline_at as Date).getTime() - (op.created_at as Date).getTime();
-		// fork windows 3 min + stop windows 5 min.
-		expect(ms).toBe(8 * 60_000);
+		// fork windows 3 min + stop windows 7 min.
+		expect(ms).toBe(10 * 60_000);
 
 		expect(await run(w, f.forkOpId)).toBe("succeeded");
 		const after = await row(w, "operations", f.forkOpId);

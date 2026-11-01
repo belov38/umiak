@@ -723,6 +723,43 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(await e.infra.status(vmid)).toBe("stopped");
 	});
 
+	it("shutdown that hit the VM lock is repeated, not reported as a guest timeout", async () => {
+		let key = "";
+		let slept = 0;
+		const e = await setup({
+			vmLockSleep: async (ms) => {
+				slept += ms;
+				if (slept >= 10_000) delete e.api.fail[key];
+			},
+		});
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		key = `POST /nodes/${e.name}/qemu/${vmid}/status/shutdown`;
+		// As on pve right after a hard stop and a start (qmeventd holds the lock).
+		e.api.fail[key] = new PveTaskError(
+			"UPID:x",
+			`can't lock file '/var/lock/qemu-server/lock-${vmid}.conf' - got timeout`,
+		);
+		let fenceChecks = 0;
+		expect(
+			await e.infra.shutdown(vmid, 300, {
+				expectedOwner: m,
+				beforeAct: async () => {
+					fenceChecks += 1;
+				},
+			}),
+		).toBe("stopped");
+		expect(slept).toBe(10_000);
+		expect(fenceChecks).toBeGreaterThan(1);
+		expect(await e.infra.status(vmid)).toBe("stopped");
+	});
+
 	it("configure sets cores and memory", async () => {
 		const m = randomUUID();
 		const { vmid } = await e.infra.create({

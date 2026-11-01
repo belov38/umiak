@@ -14,7 +14,9 @@ const CREATE_COLD: Pair = { linux: 6 * MIN, windows: 20 * MIN };
 
 const DEADLINES: Record<Exclude<OperationKind, "create" | "delete">, Pair> = {
 	fork: { linux: 2 * MIN, windows: 3 * MIN },
-	stop: { linux: 3 * MIN, windows: 5 * MIN },
+	// Windows: the guest gets up to 300 s to shut down cleanly (S9 §24.9),
+	// plus PrepareStop, VM-lock retries and the verify.
+	stop: { linux: 3 * MIN, windows: 7 * MIN },
 	resume: { linux: 5 * MIN, windows: 15 * MIN },
 	recover: { linux: 5 * MIN, windows: 15 * MIN },
 	// Not in §7.9: reprovision delivers like the provision step of resume.

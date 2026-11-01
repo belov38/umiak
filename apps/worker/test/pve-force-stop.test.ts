@@ -679,4 +679,65 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 		},
 		STEP_TIMEOUT,
 	);
+
+	// S9 §24.9: a plain stop of Windows shuts down cleanly (budget 300 s, a
+	// VM-lock failure is retried, not hard-stopped), and the stopped sandbox
+	// forks without forceStop: no 409, a powered_off snapshot. Run alone with
+	// `-t "plain stop"`.
+	it(
+		"plain stop: clean shutdown; fork of the stopped sandbox without the flag is powered_off",
+		async () => {
+			await roomForWindows();
+			const c = await createSandbox(w, e, { size: "4gb" });
+			sandboxes.push(c.sandboxId);
+			let t0 = Date.now();
+			expect(await runLogged(w, c.operationId)).toBe("succeeded");
+			log(`source create → ready: ${Date.now() - t0} ms`);
+			const src = await row(w, "sandboxes", c.sandboxId);
+			const srcMachine = src.machine_id as string;
+
+			const marksBefore = marks.length;
+			const stop = await e.svc.stop(e.p, c.sandboxId);
+			t0 = Date.now();
+			expect(await runLogged(w, stop.id)).toBe("succeeded");
+			const stopMs = Date.now() - t0;
+			const stopOp = await row(w, "operations", stop.id);
+			const shutdownMs = marks
+				.slice(marksBefore)
+				.find((m) => m.what === "shutdown")?.ms;
+			const hardStops = marks
+				.slice(marksBefore)
+				.filter((m) => m.what === "stop").length;
+			log(
+				`plain stop ${stopMs} ms: guest shutdown ${shutdownMs} ms (budget 300 s), hard stops ${hardStops}, progress ${JSON.stringify(stopOp.progress)}`,
+			);
+			expect(stopOp.progress).toMatchObject({ shutdown: "clean" });
+			expect(hardStops).toBe(0);
+			expect(await row(w, "machines", srcMachine)).toMatchObject({
+				state: "stopped",
+				clean_stop: true,
+			});
+
+			const f = await forkSandbox(e, c.sandboxId);
+			sandboxes.push(f.targetId);
+			expect(
+				(await row(w, "operations", f.forkOpId)).request,
+			).not.toHaveProperty("forceStop");
+			t0 = Date.now();
+			expect(await runLogged(w, f.forkOpId)).toBe("succeeded");
+			log(`fork of the stopped sandbox: ${Date.now() - t0} ms`);
+			const [snap] = await snapshotsOf(w, f.targetId);
+			expect(snap).toMatchObject({
+				state: "ready",
+				consistency: "powered_off",
+			});
+			expect((await row(w, "sandboxes", c.sandboxId)).state).toBe("stopped");
+
+			await roomForWindows();
+			t0 = Date.now();
+			expect(await runLogged(w, f.createOpId)).toBe("succeeded");
+			log(`fork target create → ready: ${Date.now() - t0} ms`);
+		},
+		STEP_TIMEOUT,
+	);
 });

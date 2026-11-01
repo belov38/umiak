@@ -34,8 +34,8 @@ import { cleanStop, stopSteps } from "./stop.ts";
 // stays `ready` with this operation active; its machine goes
 // running → stopping → stopped → starting → running.
 //
-// The shutdown gets a longer budget (FORCE_STOP_SHUTDOWN_TIMEOUT_S) and no
-// hard stop: a timeout is `shutdown_timeout`, nothing is snapshotted, and
+// The shutdown has the stop's budget (SHUTDOWN_TIMEOUT_S) but no hard
+// stop: a timeout is `shutdown_timeout`, nothing is snapshotted, and
 // the compensation hard-stops the VM and starts it again. A crash-consistent
 // copy is never labelled `powered_off`.
 //

@@ -24,9 +24,9 @@ export interface Timing {
 	agentConnectTimeoutMs?: number;
 	/** Best-effort `System/PrepareStop` of a stop (S6 §7.5: 10 s). */
 	prepareStopTimeoutMs?: number;
-	/** S1 shutdown timeout of a stop before the hard stop (S6 §7.5: 60 s). */
+	/** S1 shutdown timeout of a stop before the hard stop (SHUTDOWN_TIMEOUT_S). */
 	shutdownTimeoutS?: number;
-	/** S1 shutdown timeout of the stop inside a forced fork/save (S9 §24.8); no hard stop after it. */
+	/** As shutdownTimeoutS, only for the stop inside a forced fork/save (S9 §24.8). */
 	forceStopShutdownTimeoutS?: number;
 	/** Pause between retries of a transient error while restarting a force-stopped source. */
 	restartRetryMs?: number;
