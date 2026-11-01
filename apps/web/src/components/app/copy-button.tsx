@@ -33,7 +33,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 export function CopyLine({ text, label }: { text: string; label: string }) {
 	return (
 		<div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-2">
-			<code className="flex-1 font-mono text-xs break-all select-all">
+			<code className="min-w-0 flex-1 font-mono text-xs break-all select-all">
 				{text}
 			</code>
 			<CopyButton text={text} label={label} />

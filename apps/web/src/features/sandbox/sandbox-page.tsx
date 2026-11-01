@@ -139,14 +139,14 @@ export function SandboxPage({
 				</p>
 			) : (
 				<Tabs value={tab} onValueChange={(v) => open(v as Tab)}>
-					<TabsList variant="line" className="flex-wrap">
+					<TabsList variant="line" className="flex-nowrap">
 						{tabs.map((t) => (
 							<TabsTrigger key={t.id} value={t.id} data-testid={`tab-${t.id}`}>
 								{t.label}
 							</TabsTrigger>
 						))}
 					</TabsList>
-					<TabsContent value="overview" className="sandbox-workspace">
+					<TabsContent value="overview" className="min-w-0">
 						<OverviewTab
 							teamId={teamId}
 							sandbox={s}

@@ -113,7 +113,7 @@ function Notice({
 	return (
 		<div
 			role="alert"
-			className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"
+			className="rounded-lg border border-warning/35 bg-warning-tint p-4 text-sm text-warning"
 		>
 			<div className="flex items-start gap-2">
 				<TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />

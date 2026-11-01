@@ -10,6 +10,7 @@ import type { SandboxData } from "@sbx/sdk";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	ArchiveIcon,
+	ChevronLeftIcon,
 	ClockPlusIcon,
 	GitForkIcon,
 	LoaderCircleIcon,
@@ -95,21 +96,17 @@ export function SandboxHeader({
 	};
 
 	return (
-		<header className="space-y-4">
+		<header className="sandbox-header space-y-2">
 			<Link
 				href={teamPath(teamId)}
-				className="text-sm text-muted-foreground hover:underline"
+				className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
 			>
-				← Sandboxes
+				<ChevronLeftIcon className="size-4" /> Sandboxes
 			</Link>
-			<div className="space-y-3">
+			<div className="space-y-2">
 				<div className="sandbox-title">
 					<h1 className="sandbox-detail-heading flex items-center gap-2 font-semibold">
 						<span className="truncate">{s.name ?? s.slug}</span>
-						<BlockLock sandbox={s} />
-					</h1>
-					<div className="flex items-center gap-1 text-sm text-muted-foreground">
-						<code data-testid="sandbox-slug">{s.slug}</code>
 						<Button
 							size="icon-xs"
 							variant="ghost"
@@ -120,6 +117,11 @@ export function SandboxHeader({
 						>
 							<PencilIcon />
 						</Button>
+						<BlockLock sandbox={s} />
+					</h1>
+					<div className="flex items-center gap-1 text-sm text-muted-foreground">
+						<code data-testid="sandbox-slug">{s.slug}</code>
+
 						<code className="ml-3 text-xs">{s.id}</code>
 						<CopyButton text={s.id} label="Copy sandbox ID" />
 					</div>
@@ -129,7 +131,10 @@ export function SandboxHeader({
 						variant="ghost"
 						disabled={s.state !== "ready" || s.blocked}
 						onClick={() =>
-							void attempt(() => navigator.clipboard.writeText(s.endpoints.ssh))
+							void attempt(async () => {
+								await navigator.clipboard.writeText(s.endpoints.ssh);
+								toast.success("SSH command copied");
+							})
 						}
 					>
 						<TerminalIcon />
@@ -250,7 +255,7 @@ export function SandboxHeader({
 			{s.blocked && (
 				<div
 					role="status"
-					className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"
+					className="flex items-center gap-2 rounded-lg border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
 				>
 					<LockIcon className="size-4 shrink-0" />
 					<p>
@@ -701,12 +706,12 @@ function SnapshotDialog({
 				/>
 			</Field>
 			{replaces && (
-				<p className="text-sm text-amber-800">
+				<p className="text-sm text-warning">
 					A snapshot named {n} exists: it is replaced when the new one is ready.
 				</p>
 			)}
 			{forceStop && (
-				<p role="alert" className="text-sm text-amber-800">
+				<p role="alert" className="text-sm text-warning">
 					{requiresStop
 						? "This Windows sandbox is snapshotted only from a stopped VM. "
 						: ""}

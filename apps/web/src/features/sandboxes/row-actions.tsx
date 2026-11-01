@@ -1,7 +1,7 @@
 "use client";
-// Actions of a sandbox row (S8 §9.4): Stop / Resume by state, and a menu
-// with Fork, Open terminal, Delete. A blocked sandbox keeps stop and delete
-// only (S8 §11): Resume, Fork and Open terminal are disabled. After an action the list and the quota refresh at once.
+// Row/card actions (S8 §9.4): open detail, plus a menu for Stop/Resume,
+// Fork, terminal and Delete. Operator blocks keep read/stop/delete available;
+// successful mutations refresh both the list and quota.
 import type { SandboxData } from "@sbx/sdk";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
@@ -81,8 +81,8 @@ export function RowActions({
 	};
 
 	return (
-		<div className="flex items-center justify-end gap-1">
-			<Button asChild size="icon-xs" variant="ghost">
+		<div className="sandbox-row-actions flex items-center justify-end gap-1">
+			<Button asChild size="icon-sm" variant="ghost">
 				<Link
 					href={sandboxHref(teamId, sandbox.slug)}
 					aria-label={`Open ${sandbox.name ?? sandbox.slug}`}
@@ -93,7 +93,7 @@ export function RowActions({
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<Button
-						size="icon-xs"
+						size="icon-sm"
 						variant="ghost"
 						aria-label={`Actions of ${sandbox.slug}`}
 						disabled={busy}
@@ -110,9 +110,17 @@ export function RowActions({
 					{sandbox.state === "stopped" && (
 						<DropdownMenuItem
 							disabled={busy || !canResume(sandbox)}
+							title={
+								sandbox.blocked ? "Blocked by a platform operator" : undefined
+							}
 							onSelect={resume}
 						>
 							Resume
+							{sandbox.blocked && (
+								<span className="text-xs text-muted-foreground">
+									Blocked by a platform operator
+								</span>
+							)}
 						</DropdownMenuItem>
 					)}
 

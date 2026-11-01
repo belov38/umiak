@@ -31,7 +31,7 @@ export function BlockLock({ sandbox }: { sandbox: SandboxData }) {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
-					className="inline-flex items-center text-amber-700"
+					className="inline-flex items-center text-warning"
 					data-testid="sandbox-blocked"
 				>
 					<LockIcon className="size-3.5" />
@@ -108,7 +108,7 @@ export function HealthCell({ sandbox }: { sandbox: SandboxData }) {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span>
-					<Badge className="bg-amber-100 text-amber-900">degraded</Badge>
+					<Badge className="bg-warning-tint text-warning">degraded</Badge>
 				</span>
 			</TooltipTrigger>
 			<TooltipContent className="max-w-72">

@@ -43,7 +43,7 @@ function SelectTrigger({
 			data-slot="select-trigger"
 			data-size={size}
 			className={cn(
-				"flex w-fit items-center justify-between gap-2 rounded-none border border-input bg-background px-4 text-sm whitespace-nowrap outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:text-[#9e9e9e] data-placeholder:text-muted-foreground data-[size=default]:h-[var(--control-height)] data-[size=sm]:h-10 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+				"flex min-w-0 max-w-full w-fit items-center justify-between gap-2 rounded-none border border-input bg-background px-4 text-sm whitespace-nowrap outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:text-[#9e9e9e] data-placeholder:text-muted-foreground data-[size=default]:h-[var(--control-height)] data-[size=sm]:h-10 [&>span]:min-w-0 [&>span]:truncate [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
 				className,
 			)}
 			{...props}

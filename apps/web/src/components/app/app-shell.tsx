@@ -62,17 +62,16 @@ export function AppShell({
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const [dark, setDark] = useState(false);
 	useEffect(() => {
-		const saved = localStorage.getItem("sbx-theme");
-		const next = saved
-			? saved === "dark"
-			: matchMedia("(prefers-color-scheme: dark)").matches;
-		setDark(next);
-		document.documentElement.classList.toggle("dark", next);
+		setDark(document.documentElement.classList.contains("dark"));
 	}, []);
 	const chooseTheme = (next: boolean) => {
 		setDark(next);
 		document.documentElement.classList.toggle("dark", next);
-		localStorage.setItem("sbx-theme", next ? "dark" : "light");
+		try {
+			localStorage.setItem("sbx-theme", next ? "dark" : "light");
+		} catch {
+			// The in-memory preference still works if storage is unavailable.
+		}
 	};
 	useEffect(() => {
 		const wide = matchMedia("(min-width: 1024px)");
@@ -185,8 +184,17 @@ export function AppShell({
 			<div className="dashboard-sidebar-footer">
 				{session.isOperator && (
 					<>
-						<Button asChild variant="ghost" size="sm">
-							<Link href="/app/operator">Operator</Link>
+						<Button
+							asChild
+							variant={pathname === "/app/operator" ? "secondary" : "ghost"}
+							size="sm"
+						>
+							<Link
+								href="/app/operator"
+								aria-current={pathname === "/app/operator" ? "page" : undefined}
+							>
+								Operator
+							</Link>
 						</Button>
 						<Button asChild variant="ghost" size="sm">
 							{/* The admin is another root layout: a full page load. */}
@@ -232,6 +240,9 @@ export function AppShell({
 	);
 	return (
 		<div className="dashboard-shell">
+			<a href="#dashboard-content" className="dashboard-skip">
+				Skip to content
+			</a>
 			<header className="dashboard-mobile-header">
 				<Link href="/app" className="dashboard-brand">
 					sbx
@@ -254,9 +265,6 @@ export function AppShell({
 				data-open={mobileOpen}
 				aria-label="Dashboard"
 			>
-				<a href="#dashboard-content" className="dashboard-skip">
-					Skip to content
-				</a>
 				{sidebar}
 			</aside>
 			<Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -269,7 +277,7 @@ export function AppShell({
 					{sidebar}
 				</DialogContent>
 			</Dialog>
-			<main id="dashboard-content" className="dashboard-content">
+			<main id="dashboard-content" className="dashboard-content" tabIndex={-1}>
 				<div className="dashboard-page">{children}</div>
 			</main>
 		</div>

@@ -1,6 +1,7 @@
 "use client";
 // Issue a team key (S8 §9.8, S7 §7.2): name, a preset (read-only, ci,
 // full) or scopes by hand, lifetime (90 days by default, at most 365).
+import { PlusIcon } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,7 +76,10 @@ export function NewKeyForm({
 			aria-label="New team API key"
 		>
 			<div className="grid gap-4 sm:grid-cols-2">
-				<label htmlFor="new-key-name" className="grid gap-2">
+				<label
+					htmlFor="new-key-name"
+					className="grid min-w-0 content-start gap-2"
+				>
 					Key name
 					<Input
 						id="new-key-name"
@@ -105,68 +109,69 @@ export function NewKeyForm({
 					</span>
 				</div>
 			</div>
-			<fieldset className="space-y-1.5 text-sm">
-				<legend className="mb-1 font-medium">Access</legend>
-				{PRESET_NAMES.map((p) => (
-					<label key={p} className="key-preset flex items-start gap-3">
+			<div>
+				<p id="key-access-label" className="mb-2 text-xs">
+					Access
+				</p>
+				<fieldset aria-labelledby="key-access-label" className="text-sm">
+					{PRESET_NAMES.map((p) => (
+						<label key={p} className="key-preset flex items-start gap-3">
+							<input
+								type="radio"
+								className="mt-1"
+								checked={form.preset === p}
+								onChange={() => setForm((f) => ({ ...f, preset: p }))}
+							/>
+							<span>
+								<span className="key-preset-title block font-medium">{p}</span>
+								<span className="mt-1 block text-muted-foreground">
+									{PRESET_TEXT[p]}
+								</span>
+								{form.preset === p && (
+									<span className="mt-3 flex flex-wrap gap-2">
+										{PRESETS[p].map((scope) => (
+											<span key={scope} className="bg-muted px-1 text-xs">
+												{scope}
+											</span>
+										))}
+									</span>
+								)}
+							</span>
+						</label>
+					))}
+					<label className="key-preset flex items-center gap-3">
 						<input
 							type="radio"
-							className="mt-1"
-							checked={form.preset === p}
-							onChange={() => setForm((f) => ({ ...f, preset: p }))}
+							checked={form.preset === "custom"}
+							onChange={() =>
+								setForm((f) => ({
+									...f,
+									preset: "custom",
+									scopes:
+										f.scopes.length > 0
+											? f.scopes
+											: [...PRESETS[f.preset === "custom" ? "ci" : f.preset]],
+								}))
+							}
 						/>
-						<span>
-							<span className="block font-medium">{p}</span>
-							<span className="mt-1 block text-muted-foreground">
-								{PRESET_TEXT[p]}
-							</span>
-							{form.preset === p && (
-								<span className="mt-3 flex flex-wrap gap-2">
-									{PRESETS[p].map((scope) => (
-										<span
-											key={scope}
-											className="border border-border px-1 font-mono text-xs"
-										>
-											{scope}
-										</span>
-									))}
-								</span>
-							)}
-						</span>
+						<span className="font-medium">custom scopes</span>
 					</label>
-				))}
-				<label className="key-preset flex items-center gap-3">
-					<input
-						type="radio"
-						checked={form.preset === "custom"}
-						onChange={() =>
-							setForm((f) => ({
-								...f,
-								preset: "custom",
-								scopes:
-									f.scopes.length > 0
-										? f.scopes
-										: [...PRESETS[f.preset === "custom" ? "ci" : f.preset]],
-							}))
-						}
-					/>
-					<span className="font-medium">custom scopes</span>
-				</label>
-				{form.preset === "custom" && (
-					<div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-6">
-						{SCOPES.map((s) => (
-							<label key={s} className="flex items-center gap-1.5">
-								<input
-									type="checkbox"
-									checked={form.scopes.includes(s)}
-									onChange={(e) => toggleScope(s, e.target.checked)}
-								/>
-								<code className="text-xs">{s}</code>
-							</label>
-						))}
-					</div>
-				)}
-			</fieldset>
+					{form.preset === "custom" && (
+						<div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-6">
+							{SCOPES.map((s) => (
+								<label key={s} className="flex items-center gap-1.5">
+									<input
+										type="checkbox"
+										checked={form.scopes.includes(s)}
+										onChange={(e) => toggleScope(s, e.target.checked)}
+									/>
+									<code className="text-xs">{s}</code>
+								</label>
+							))}
+						</div>
+					)}
+				</fieldset>
+			</div>
 			{error && (
 				<p role="alert" className="text-sm text-destructive">
 					{error}
@@ -174,7 +179,7 @@ export function NewKeyForm({
 			)}
 			<div>
 				<Button type="submit" disabled={busy}>
-					Create key
+					<PlusIcon /> Create key
 				</Button>
 			</div>
 		</form>

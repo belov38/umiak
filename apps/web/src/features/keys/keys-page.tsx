@@ -105,13 +105,17 @@ export function KeysPage({
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<h1 className="text-xl font-semibold">API keys</h1>
 			</div>
-			<div className="dashboard-card">
-				<h2>{team0?.name ?? "Team"} keys</h2>
-				<p className="text-sm text-muted-foreground">
-					Keys are for CI and agents and belong to the team. People do not need
-					one: run <code>sbx login</code> to use the CLI with your own account.
-					{!canIssue && " Only an owner of the team can issue and rotate keys."}
-				</p>
+			<div className="dashboard-card keys-card">
+				<div className="key-intro">
+					<h2>{team0?.name ?? "Team"} keys</h2>
+					<p className="text-sm text-muted-foreground">
+						Keys are for CI and agents and belong to the team. People do not
+						need one: run <code>sbx login</code> to use the CLI with your own
+						account.
+						{!canIssue &&
+							" Only an owner of the team can issue and rotate keys."}
+					</p>
+				</div>
 				{canIssue && (
 					<NewKeyForm
 						teamId={teamId}
@@ -239,7 +243,7 @@ function KeyTable({
 								{note && (
 									<Badge
 										variant="outline"
-										className="ml-2 border-amber-300 text-amber-800"
+										className="ml-2 border-warning/35 text-warning"
 										data-testid="creator-note"
 									>
 										{note}

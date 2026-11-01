@@ -4,7 +4,7 @@
 // secret file metadata, repositories, default, revision, last change.
 // Create, edit and delete for owners and operators (§6.2); members read.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PlusIcon } from "lucide-react";
+import { LayersIcon, PencilIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
@@ -75,7 +75,7 @@ export function EnvironmentsPage({
 		list.data?.find((e) => e.isDefault) ??
 		list.data?.[0];
 	return (
-		<section className="space-y-4">
+		<section className="environments-page space-y-4">
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<h1 className="text-xl font-semibold">Environment</h1>
 			</div>
@@ -86,7 +86,11 @@ export function EnvironmentsPage({
 			<div className="environment-toolbar">
 				{selected && (
 					<Select value={selected.id} onValueChange={setSelectedId}>
-						<SelectTrigger aria-label="Environment">
+						<SelectTrigger
+							aria-label="Environment"
+							className="min-w-48 max-w-full"
+						>
+							<LayersIcon />
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
@@ -99,9 +103,14 @@ export function EnvironmentsPage({
 					</Select>
 				)}
 				{canManage && (
-					<Button variant="ghost" onClick={() => setDialog({ editing: null })}>
+					<Button
+						variant="ghost"
+						size="icon"
+						aria-label="New environment"
+						title="New environment"
+						onClick={() => setDialog({ editing: null })}
+					>
 						<PlusIcon />
-						New environment
 					</Button>
 				)}
 			</div>
@@ -129,14 +138,24 @@ export function EnvironmentsPage({
 				</DashboardEmpty>
 			)}
 			<div className="grid gap-3" data-testid="environment-list">
-				{(selected ? [selected] : []).map((e) => (
+				{(list.data ?? []).map((e) => (
 					<article
 						key={e.id}
 						className="environment-summary space-y-3"
 						data-testid="environment"
+						data-selected={e.id === selected?.id}
 					>
 						<header className="flex flex-wrap items-center gap-2">
-							<h2 className="font-mono font-medium">{e.name}</h2>
+							<h2>
+								<button
+									type="button"
+									className="environment-name"
+									aria-expanded={e.id === selected?.id}
+									onClick={() => setSelectedId(e.id)}
+								>
+									{e.name}
+								</button>
+							</h2>
 							{e.isDefault && <Badge>default</Badge>}
 							{e.excludeOwnerSecrets && (
 								<Badge variant="outline">no personal secrets</Badge>
@@ -151,75 +170,82 @@ export function EnvironmentsPage({
 							{canManage && (
 								<div className="ml-auto flex gap-1">
 									<Button
-										size="sm"
-										variant="outline"
+										size="icon-sm"
+										variant="ghost"
+										aria-label={`Edit environment ${e.name}`}
+										title={`Edit environment ${e.name}`}
 										onClick={() => setDialog({ editing: e.id })}
 									>
-										Edit
+										<PencilIcon />
 									</Button>
 									<ConfirmButton
 										title={`Delete environment ${e.name}?`}
 										description="Sandboxes created from it keep their values. New creates no longer get it."
 										confirmLabel="Delete"
+										size="icon-sm"
+										variant="ghost"
+										ariaLabel={`Delete environment ${e.name}`}
 										onConfirm={() => remove(e)}
 									>
-										Delete
+										<TrashIcon />
 									</ConfirmButton>
 								</div>
 							)}
 						</header>
-						<dl className="grid gap-2 text-sm sm:grid-cols-[10rem_1fr]">
-							<Row label="Env">
-								<Names names={e.envKeys} />
-							</Row>
-							<Row label="Secrets">
-								<Names names={e.secretKeys} secret />
-							</Row>
-							<Row label="Secret files">
-								{e.secretFiles.length === 0 ? (
-									<None />
-								) : (
-									<ul className="space-y-0.5">
-										{e.secretFiles.map((f) => (
-											<li key={f.name}>
-												<span className="font-mono">{f.name}</span>{" "}
-												<span className="text-xs text-muted-foreground">
-													{f.mode.toString(8).padStart(4, "0")} ·{" "}
-													{formatBytes(f.sizeBytes)}
-													{f.linkPath ? ` · → ${f.linkPath}` : ""}
-												</span>
-											</li>
-										))}
-									</ul>
-								)}
-							</Row>
-							<Row label="Repositories">
-								{e.repositories.length === 0 ? (
-									<None />
-								) : (
-									<ul className="space-y-0.5">
-										{e.repositories.map((r, i) => (
-											// biome-ignore lint/suspicious/noArrayIndexKey: the same URL may appear twice
-											<li key={i} className="font-mono text-xs">
-												{r.url}
-												{r.branch && (
-													<span className="text-muted-foreground">
-														{" "}
-														@ {r.branch}
+						{e.id === selected?.id && (
+							<dl className="grid gap-2 text-sm sm:grid-cols-[10rem_minmax(0,1fr)]">
+								<Row label="Env">
+									<Names names={e.envKeys} />
+								</Row>
+								<Row label="Secrets">
+									<Names names={e.secretKeys} secret />
+								</Row>
+								<Row label="Secret files">
+									{e.secretFiles.length === 0 ? (
+										<None />
+									) : (
+										<ul className="space-y-0.5">
+											{e.secretFiles.map((f) => (
+												<li key={f.name}>
+													<span className="font-mono">{f.name}</span>{" "}
+													<span className="text-xs text-muted-foreground">
+														{f.mode.toString(8).padStart(4, "0")} ·{" "}
+														{formatBytes(f.sizeBytes)}
+														{f.linkPath ? ` · → ${f.linkPath}` : ""}
 													</span>
-												)}
-												{r.path && (
-													<span className="text-muted-foreground">
-														{" "}
-														→ ~/{r.path}
-													</span>
-												)}
-											</li>
-										))}
-									</ul>
-								)}
-							</Row>
-						</dl>
+												</li>
+											))}
+										</ul>
+									)}
+								</Row>
+								<Row label="Repositories">
+									{e.repositories.length === 0 ? (
+										<None />
+									) : (
+										<ul className="space-y-0.5">
+											{e.repositories.map((r, i) => (
+												// biome-ignore lint/suspicious/noArrayIndexKey: the same URL may appear twice
+												<li key={i} className="font-mono text-xs">
+													{r.url}
+													{r.branch && (
+														<span className="text-muted-foreground">
+															{" "}
+															@ {r.branch}
+														</span>
+													)}
+													{r.path && (
+														<span className="text-muted-foreground">
+															{" "}
+															→ ~/{r.path}
+														</span>
+													)}
+												</li>
+											))}
+										</ul>
+									)}
+								</Row>
+							</dl>
+						)}
 					</article>
 				))}
 			</div>
@@ -228,6 +254,7 @@ export function EnvironmentsPage({
 				editing={dialog?.editing ?? null}
 				open={dialog !== null}
 				onOpenChange={(o) => !o && setDialog(null)}
+				onCreated={setSelectedId}
 			/>
 		</section>
 	);

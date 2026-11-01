@@ -89,7 +89,7 @@ function Profile() {
 			title="Profile"
 			description="From your identity provider; change it there."
 		>
-			<dl className="grid max-w-xl grid-cols-[8rem_1fr] gap-y-1 text-sm">
+			<dl className="grid max-w-xl grid-cols-[8rem_minmax(0,1fr)] gap-y-1 text-sm">
 				<dt className="text-muted-foreground">Name</dt>
 				<dd>{s.user.name}</dd>
 				<dt className="text-muted-foreground">Email</dt>
@@ -142,7 +142,7 @@ function DefaultTeam() {
 					})
 				}
 			>
-				<SelectTrigger className="w-72" aria-label="Default team">
+				<SelectTrigger className="w-full max-w-72" aria-label="Default team">
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>

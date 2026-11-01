@@ -22,6 +22,7 @@ export function ConfirmButton({
 	children,
 	size = "sm",
 	variant = "outline",
+	ariaLabel,
 }: {
 	title: string;
 	description: ReactNode;
@@ -30,7 +31,8 @@ export function ConfirmButton({
 	onConfirm: () => Promise<boolean>;
 	disabled?: boolean;
 	children: ReactNode;
-	size?: "sm" | "default" | "xs";
+	size?: "sm" | "default" | "xs" | "icon-sm";
+	ariaLabel?: string;
 	variant?: "outline" | "destructive" | "ghost";
 }) {
 	const [open, setOpen] = useState(false);
@@ -38,7 +40,13 @@ export function ConfirmButton({
 	return (
 		<Dialog open={open} onOpenChange={(o) => !busy && setOpen(o)}>
 			<DialogTrigger asChild>
-				<Button size={size} variant={variant} disabled={disabled}>
+				<Button
+					size={size}
+					variant={variant}
+					disabled={disabled}
+					aria-label={ariaLabel}
+					title={ariaLabel}
+				>
 					{children}
 				</Button>
 			</DialogTrigger>

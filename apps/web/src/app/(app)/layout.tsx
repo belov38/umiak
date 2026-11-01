@@ -16,7 +16,11 @@ export default function AppRootLayout({
 	children: React.ReactNode;
 }) {
 	return (
-		<html lang="en">
+		<html lang="en" suppressHydrationWarning>
+			<head>
+				{/* Static bootstrap runs before paint; it contains no user input. */}
+				<script>{`(()=>{let saved;try{saved=localStorage.getItem("sbx-theme")}catch{}document.documentElement.classList.toggle("dark",saved?saved==="dark":matchMedia("(prefers-color-scheme: dark)").matches)})()`}</script>
+			</head>
 			<body className="min-h-screen antialiased">
 				<TooltipProvider>{children}</TooltipProvider>
 				<Toaster />

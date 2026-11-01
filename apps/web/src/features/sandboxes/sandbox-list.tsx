@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/table";
 import { useSbx } from "@/lib/api";
 import type { ApiKey } from "@/lib/api-keys";
-import { formatAgo } from "@/lib/format";
+import { formatAgo, formatTime } from "@/lib/format";
 import {
 	type ListFilter,
 	listQuery,
@@ -108,7 +108,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 
 	return (
 		<section className="sandbox-list space-y-4">
-			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+			<div className="sandbox-list-header flex flex-wrap items-center gap-x-4 gap-y-2">
 				<h1 className="text-xl font-semibold">Sandboxes</h1>
 				<QuotaLine teamId={teamId} />
 				<Button asChild className="ml-auto">
@@ -118,7 +118,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 					</Link>
 				</Button>
 			</div>
-			<div className="flex flex-wrap items-start gap-2">
+			<div className="sandbox-filters flex flex-wrap items-start gap-2">
 				<Input
 					aria-label="Search name or slug"
 					placeholder="Search name or slug"
@@ -201,7 +201,7 @@ function QuotaLine({ teamId }: { teamId: string }) {
 		<p className="text-sm text-muted-foreground" data-testid="quota-line">
 			{usage.activeSandboxes} of {quota.maxActiveSandboxes} active ·{" "}
 			{usage.ramMb} of {quota.maxRamMb} MB
-			{!canCreate && <span className="ml-2 text-amber-700">quota reached</span>}
+			{!canCreate && <span className="ml-2 text-warning">quota reached</span>}
 		</p>
 	);
 }
@@ -313,9 +313,11 @@ function SandboxTable({
 								<TableCell>
 									<StateCell sandbox={s} />
 								</TableCell>
-								<TableCell className="text-xs">
-									{formatAgo(s.createdAt, now)}
-									<div className="text-muted-foreground">by {creator(s)}</div>
+								<TableCell
+									className="text-xs whitespace-nowrap"
+									title={`by ${creator(s)}`}
+								>
+									{formatTime(s.createdAt)}
 								</TableCell>
 								<TableCell className="text-xs">
 									<span title={`${s.vcpu} vCPU / ${s.memoryMb} MB`}>
@@ -344,7 +346,7 @@ function SandboxTable({
 						className="sandbox-card"
 						data-testid="sandbox-card"
 					>
-						<header className="flex flex-wrap items-center gap-3">
+						<header className="flex flex-col items-start gap-1 pr-16">
 							<Link
 								href={sandboxHref(teamId, s.slug)}
 								className="sandbox-row-name"
@@ -353,6 +355,7 @@ function SandboxTable({
 							</Link>
 							<StateCell sandbox={s} />
 							<BlockLock sandbox={s} />
+							<RowActions teamId={teamId} sandbox={s} />
 						</header>
 						<div className="font-mono text-xs text-muted-foreground">
 							{s.slug}
@@ -364,11 +367,19 @@ function SandboxTable({
 						<p className="text-xs text-muted-foreground">
 							{s.template} · {s.size} · {s.vcpu} vCPU / {s.memoryMb} MB
 						</p>
+						<div className="flex flex-wrap items-center gap-2 text-xs">
+							<HealthCell sandbox={s} />
+							<span className="text-muted-foreground">
+								Activity: {s.activity}
+							</span>
+						</div>
+						{s.health === "degraded" && s.healthReason && (
+							<p className="text-xs text-warning">{s.healthReason}</p>
+						)}
 						<footer className="flex items-center justify-between gap-2 text-xs">
 							<span>
 								created {formatAgo(s.createdAt, now)} by {creator(s)}
 							</span>
-							<RowActions teamId={teamId} sandbox={s} />
 						</footer>
 					</article>
 				))}

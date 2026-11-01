@@ -106,9 +106,9 @@ function Row({
 	children: ReactNode;
 }) {
 	return (
-		<div className="grid gap-1 sm:grid-cols-[9rem_1fr] sm:gap-4">
+		<div className="create-field grid min-w-0 gap-1 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4">
 			<div className="pt-1.5 text-sm font-medium">{label}</div>
-			<div className="space-y-1">
+			<div className="min-w-0 space-y-1">
 				{children}
 				{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
 			</div>
@@ -259,7 +259,7 @@ export function CreateSandboxForm({
 				}}
 			>
 				<DialogContent className="create-dialog">
-					<section className="space-y-6">
+					<section className="min-w-0 space-y-4">
 						<DialogHeader>
 							<DialogTitle asChild>
 								<h1>New sandbox</h1>
@@ -278,7 +278,7 @@ export function CreateSandboxForm({
 						<form
 							method="post"
 							onSubmit={submit}
-							className="space-y-5"
+							className="min-w-0 space-y-3"
 							autoComplete="off"
 							data-testid="create-form"
 						>
@@ -367,7 +367,7 @@ export function CreateSandboxForm({
 													— {t.name}
 												</span>
 												{t.version === null && (
-													<span className="text-xs text-amber-700">
+													<span className="text-xs text-warning">
 														(no active build)
 													</span>
 												)}
@@ -547,7 +547,7 @@ export function CreateSandboxForm({
 							</Row>
 
 							{limits.data && !limits.data.canCreate && (
-								<p className="text-sm text-amber-700">
+								<p className="text-sm text-warning">
 									The team's quota is used up: stop or delete a sandbox first.
 								</p>
 							)}
@@ -563,7 +563,7 @@ export function CreateSandboxForm({
 									className={cn(
 										"flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm",
 										submitError.apiUnavailable || submitError.retry
-											? "border-amber-300 bg-amber-50 text-amber-950"
+											? "border-warning/35 bg-warning-tint text-warning"
 											: "border-destructive/30 bg-destructive/5 text-destructive",
 									)}
 								>
