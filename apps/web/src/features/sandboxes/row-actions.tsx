@@ -4,7 +4,7 @@
 // only (S8 §11): Resume, Fork and Open terminal are disabled. After an action the list and the quota refresh at once.
 import type { SandboxData } from "@sbx/sdk";
 import { useQueryClient } from "@tanstack/react-query";
-import { EllipsisIcon } from "lucide-react";
+import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -82,22 +82,14 @@ export function RowActions({
 
 	return (
 		<div className="flex items-center justify-end gap-1">
-			{canStop(sandbox) && (
-				<Button size="xs" variant="outline" disabled={busy} onClick={stop}>
-					Stop
-				</Button>
-			)}
-			{sandbox.state === "stopped" && (
-				<Button
-					size="xs"
-					variant="outline"
-					disabled={busy || !canResume(sandbox)}
-					title={sandbox.blocked ? "Blocked by a platform operator" : undefined}
-					onClick={resume}
+			<Button asChild size="icon-xs" variant="ghost">
+				<Link
+					href={sandboxHref(teamId, sandbox.slug)}
+					aria-label={`Open ${sandbox.name ?? sandbox.slug}`}
 				>
-					Resume
-				</Button>
-			)}
+					<ChevronRightIcon />
+				</Link>
+			</Button>
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<Button
@@ -110,6 +102,20 @@ export function RowActions({
 					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" className="min-w-40">
+					{canStop(sandbox) && (
+						<DropdownMenuItem disabled={busy} onSelect={stop}>
+							Stop
+						</DropdownMenuItem>
+					)}
+					{sandbox.state === "stopped" && (
+						<DropdownMenuItem
+							disabled={busy || !canResume(sandbox)}
+							onSelect={resume}
+						>
+							Resume
+						</DropdownMenuItem>
+					)}
+
 					<DropdownMenuItem disabled={!canFork(sandbox)} onSelect={fork}>
 						Fork
 					</DropdownMenuItem>

@@ -43,7 +43,7 @@ export function OverviewTab({
 	});
 	const now = Date.now();
 	return (
-		<div className="grid gap-6 lg:grid-cols-2">
+		<div className="sandbox-overview">
 			<section className="space-y-2">
 				<h2 className="font-medium">Properties</h2>
 				<dl className="grid grid-cols-[9rem_1fr] gap-y-1 text-sm">

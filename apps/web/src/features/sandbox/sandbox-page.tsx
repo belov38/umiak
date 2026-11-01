@@ -120,7 +120,12 @@ export function SandboxPage({
 
 	return (
 		<section className="space-y-4">
-			<SandboxHeader teamId={teamId} sandbox={s} track={live.track} />
+			<SandboxHeader
+				teamId={teamId}
+				sandbox={s}
+				desktop={desktop}
+				track={live.track}
+			/>
 			{live.error !== null && (
 				<QueryError
 					error={live.error}
@@ -141,7 +146,7 @@ export function SandboxPage({
 							</TabsTrigger>
 						))}
 					</TabsList>
-					<TabsContent value="overview" className="pt-3">
+					<TabsContent value="overview" className="sandbox-workspace">
 						<OverviewTab
 							teamId={teamId}
 							sandbox={s}
@@ -149,26 +154,26 @@ export function SandboxPage({
 							onOpenTab={open}
 						/>
 					</TabsContent>
-					<TabsContent value="terminal" className="pt-3">
+					<TabsContent value="terminal" className="sandbox-workspace">
 						<TerminalTab teamId={teamId} sandbox={s} handle={handle} />
 					</TabsContent>
-					<TabsContent value="commands" className="pt-3">
+					<TabsContent value="commands" className="sandbox-workspace">
 						<CommandsTab teamId={teamId} sandbox={s} handle={handle} />
 					</TabsContent>
-					<TabsContent value="files" className="pt-3">
+					<TabsContent value="files" className="sandbox-workspace">
 						<FilesTab teamId={teamId} sandbox={s} handle={handle} />
 					</TabsContent>
-					<TabsContent value="ports" className="pt-3">
+					<TabsContent value="ports" className="sandbox-workspace">
 						<PortsTab teamId={teamId} sandbox={s} handle={handle} />
 					</TabsContent>
-					<TabsContent value="ssh" className="pt-3">
+					<TabsContent value="ssh" className="sandbox-workspace">
 						<SshTab teamId={teamId} sandbox={s} handle={handle} />
 					</TabsContent>
-					<TabsContent value="env" className="pt-3">
+					<TabsContent value="env" className="sandbox-workspace">
 						<EnvTab teamId={teamId} sandbox={s} handle={handle} />
 					</TabsContent>
 					{desktop && (
-						<TabsContent value="desktop" className="pt-3">
+						<TabsContent value="desktop" className="sandbox-workspace">
 							<DesktopTab sandbox={s} handle={handle} track={live.track} />
 						</TabsContent>
 					)}

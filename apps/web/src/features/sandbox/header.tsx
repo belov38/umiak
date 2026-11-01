@@ -8,12 +8,26 @@
 // restart it (S9 §24.8).
 import type { SandboxData } from "@sbx/sdk";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircleIcon, LockIcon, PencilIcon } from "lucide-react";
+import {
+	ArchiveIcon,
+	ClockPlusIcon,
+	GitForkIcon,
+	LoaderCircleIcon,
+	LockIcon,
+	MonitorIcon,
+	PauseIcon,
+	PencilIcon,
+	PlayIcon,
+	RotateCcwIcon,
+	TerminalIcon,
+	TrashIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { CopyButton } from "@/components/app/copy-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,10 +60,12 @@ import { sandboxQueryKey } from "./use-sandbox";
 export function SandboxHeader({
 	teamId,
 	sandbox: s,
+	desktop = false,
 	track,
 }: {
 	teamId: string;
 	sandbox: SandboxData;
+	desktop?: boolean;
 	track: (operationId: string) => void;
 }) {
 	const sbx = useSbx(teamId);
@@ -79,15 +95,15 @@ export function SandboxHeader({
 	};
 
 	return (
-		<header className="space-y-3">
+		<header className="space-y-4">
 			<Link
 				href={teamPath(teamId)}
 				className="text-sm text-muted-foreground hover:underline"
 			>
 				← Sandboxes
 			</Link>
-			<div className="flex flex-col items-stretch gap-4">
-				<div className="min-w-0 space-y-1">
+			<div className="space-y-3">
+				<div className="sandbox-title">
 					<h1 className="sandbox-detail-heading flex items-center gap-2 font-semibold">
 						<span className="truncate">{s.name ?? s.slug}</span>
 						<BlockLock sandbox={s} />
@@ -104,13 +120,37 @@ export function SandboxHeader({
 						>
 							<PencilIcon />
 						</Button>
+						<code className="ml-3 text-xs">{s.id}</code>
+						<CopyButton text={s.id} label="Copy sandbox ID" />
 					</div>
 				</div>
-				<div className="flex flex-wrap items-center gap-1.5">
+				<div className="sandbox-actions">
+					<Button
+						variant="ghost"
+						disabled={s.state !== "ready" || s.blocked}
+						onClick={() =>
+							void attempt(() => navigator.clipboard.writeText(s.endpoints.ssh))
+						}
+					>
+						<TerminalIcon />
+						Copy SSH
+					</Button>
+					{desktop && (
+						<Button
+							variant="ghost"
+							disabled={s.state !== "ready" || s.blocked}
+							onClick={() =>
+								router.replace(sandboxHref(teamId, s.slug, "desktop"))
+							}
+						>
+							<MonitorIcon />
+							Desktop
+						</Button>
+					)}
 					{s.state === "stopped" ? (
 						<Button
-							size="sm"
-							variant="outline"
+							size="default"
+							variant="ghost"
 							disabled={busy || !a.resume}
 							onClick={() =>
 								act(`Resuming ${s.slug}`, () =>
@@ -121,12 +161,13 @@ export function SandboxHeader({
 								)
 							}
 						>
+							<PlayIcon />
 							Resume
 						</Button>
 					) : (
 						<Button
-							size="sm"
-							variant="outline"
+							size="default"
+							variant="ghost"
 							disabled={busy || !a.stop}
 							onClick={() =>
 								act(`Stopping ${s.slug}`, () =>
@@ -134,12 +175,13 @@ export function SandboxHeader({
 								)
 							}
 						>
+							<PauseIcon />
 							Stop
 						</Button>
 					)}
 					<Button
-						size="sm"
-						variant="outline"
+						size="default"
+						variant="ghost"
 						disabled={busy || !a.fork}
 						onClick={async () => {
 							setBusy(true);
@@ -150,9 +192,12 @@ export function SandboxHeader({
 							}
 						}}
 					>
+						<GitForkIcon />
 						Fork
 					</Button>
 					<ConfirmButton
+						size="default"
+						variant="ghost"
 						title={`Recover ${s.slug}?`}
 						description="Recover restarts the VM (a power cycle): running commands and terminals end, files on disk stay."
 						confirmLabel="Recover"
@@ -163,11 +208,12 @@ export function SandboxHeader({
 							)
 						}
 					>
+						<RotateCcwIcon />
 						Recover
 					</ConfirmButton>
 					<Button
-						size="sm"
-						variant="outline"
+						size="default"
+						variant="ghost"
 						disabled={busy || !a.extend}
 						title={
 							s.ttlSeconds === null && s.deadlineAt === null
@@ -176,22 +222,26 @@ export function SandboxHeader({
 						}
 						onClick={() => setDialog("extend")}
 					>
+						<ClockPlusIcon />
 						Extend
 					</Button>
 					<Button
-						size="sm"
-						variant="outline"
+						size="default"
+						variant="ghost"
 						disabled={busy || !a.saveSnapshot}
 						onClick={() => setDialog("snapshot")}
 					>
+						<ArchiveIcon />
 						Save snapshot
 					</Button>
 					<Button
-						size="sm"
+						size="default"
 						variant="destructive"
+						className="basis-full justify-start"
 						disabled={busy || !a.delete}
 						onClick={() => setDialog("delete")}
 					>
+						<TrashIcon />
 						Delete
 					</Button>
 				</div>

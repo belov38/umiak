@@ -8,10 +8,18 @@ import { PlusIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
 import { useTeamPermission } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { formatBytes } from "@/features/sandbox/rules";
 import { useSbx } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
@@ -32,6 +40,7 @@ export function EnvironmentsPage({
 	const queryClient = useQueryClient();
 	const { session, team } = useTeamPermission(teamId);
 	const canManage = can(session, team, "manageEnvironments");
+	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<{ editing: string | null } | null>(null);
 
 	const list = useQuery({
@@ -61,19 +70,36 @@ export function EnvironmentsPage({
 	};
 
 	const now = Date.now();
+	const selected =
+		list.data?.find((e) => e.id === selectedId) ??
+		list.data?.find((e) => e.isDefault) ??
+		list.data?.[0];
 	return (
 		<section className="space-y-4">
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<h1 className="text-xl font-semibold">Environment</h1>
-				<p className="text-sm text-muted-foreground">
-					Named env, secrets, secret files and repositories that new sandboxes
-					get at create. Changes apply to new sandboxes only.
-				</p>
+			</div>
+			<p className="text-sm text-muted-foreground">
+				Named env, secrets, secret files and repositories that new sandboxes get
+				at create. Changes apply to new sandboxes only.
+			</p>
+			<div className="environment-toolbar">
+				{selected && (
+					<Select value={selected.id} onValueChange={setSelectedId}>
+						<SelectTrigger aria-label="Environment">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{list.data?.map((e) => (
+								<SelectItem key={e.id} value={e.id}>
+									{e.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				)}
 				{canManage && (
-					<Button
-						className="ml-auto"
-						onClick={() => setDialog({ editing: null })}
-					>
+					<Button variant="ghost" onClick={() => setDialog({ editing: null })}>
 						<PlusIcon />
 						New environment
 					</Button>
@@ -95,18 +121,18 @@ export function EnvironmentsPage({
 				<p className="text-sm text-muted-foreground">Loading…</p>
 			)}
 			{list.data && list.data.length === 0 && (
-				<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+				<DashboardEmpty kind="environments">
 					No environments yet.
 					{canManage
 						? " Create one to give new sandboxes shared env, secrets and repositories."
 						: ""}
-				</div>
+				</DashboardEmpty>
 			)}
 			<div className="grid gap-3" data-testid="environment-list">
-				{(list.data ?? []).map((e) => (
+				{(selected ? [selected] : []).map((e) => (
 					<article
 						key={e.id}
-						className="space-y-3 rounded-lg border p-4"
+						className="environment-summary space-y-3"
 						data-testid="environment"
 					>
 						<header className="flex flex-wrap items-center gap-2">

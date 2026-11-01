@@ -85,16 +85,14 @@ export function StateCell({ sandbox }: { sandbox: SandboxData }) {
 			data-testid="sandbox-state"
 			className={cn(
 				"inline-flex items-center gap-2",
-				sandbox.state === "ready" && "text-emerald-700",
+				sandbox.state === "ready" && "text-[var(--success)]",
 			)}
 		>
 			<span
 				aria-hidden="true"
 				className={cn(
 					"size-1.5 rounded-full",
-					sandbox.state === "ready"
-						? "bg-emerald-700"
-						: "bg-muted-foreground/40",
+					sandbox.state === "ready" ? "bg-[var(--success)]" : "bg-[#c4c4c4]",
 				)}
 			/>
 			{sandbox.state}

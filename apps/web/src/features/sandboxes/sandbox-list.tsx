@@ -12,6 +12,8 @@ import {
 import { PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CopyButton } from "@/components/app/copy-button";
+import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
 import { useAppSession } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
@@ -105,7 +107,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 		Object.keys(labels).length > 0;
 
 	return (
-		<section className="space-y-4">
+		<section className="sandbox-list space-y-4">
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<h1 className="text-xl font-semibold">Sandboxes</h1>
 				<QuotaLine teamId={teamId} />
@@ -120,7 +122,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 				<Input
 					aria-label="Search name or slug"
 					placeholder="Search name or slug"
-					className="w-56"
+					className="w-80 max-w-full"
 					value={q}
 					onChange={(e) => setQ(e.target.value)}
 				/>
@@ -128,11 +130,11 @@ export function SandboxList({ teamId }: { teamId: string }) {
 					value={state}
 					onValueChange={(v) => setState(v as SandboxState | "all")}
 				>
-					<SelectTrigger aria-label="State" className="w-36">
+					<SelectTrigger aria-label="State">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
-						<SelectItem value="all">State: all</SelectItem>
+						<SelectItem value="all">State</SelectItem>
 						{STATE_FILTERS.map((s) => (
 							<SelectItem key={s} value={s}>
 								{s}
@@ -212,7 +214,7 @@ function EmptyState({
 	filtered: boolean;
 }) {
 	return (
-		<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+		<DashboardEmpty kind="sandboxes">
 			{filtered ? (
 				"No sandbox matches the filters."
 			) : (
@@ -227,7 +229,7 @@ function EmptyState({
 					here, or with <code>sbx create</code>.
 				</>
 			)}
-		</div>
+		</DashboardEmpty>
 	);
 }
 
@@ -267,70 +269,111 @@ function SandboxTable({
 	const creator = useCreatorName(teamId);
 	const now = Date.now();
 	return (
-		<Table data-testid="sandbox-table">
-			<TableHeader>
-				<TableRow>
-					<TableHead>Name / slug</TableHead>
-					<TableHead>Template</TableHead>
-					<TableHead>Size</TableHead>
-					<TableHead>State</TableHead>
-					<TableHead>Health</TableHead>
-					<TableHead>Activity</TableHead>
-					<TableHead>Created</TableHead>
-					<TableHead />
-				</TableRow>
-			</TableHeader>
-			<TableBody>
+		<>
+			<div className="sandbox-desktop-table">
+				<Table data-testid="sandbox-table">
+					<TableHeader>
+						<TableRow>
+							<TableHead>Name / slug</TableHead>
+							<TableHead>Sandbox ID</TableHead>
+							<TableHead>State</TableHead>
+							<TableHead>Created</TableHead>
+							<TableHead>Type</TableHead>
+							<TableHead>Health</TableHead>
+							<TableHead>Activity</TableHead>
+							<TableHead>Actions</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{rows.map((s) => (
+							<TableRow key={s.id} data-testid="sandbox-row">
+								<TableCell>
+									<Link
+										href={sandboxHref(teamId, s.slug)}
+										className="sandbox-row-name"
+									>
+										{s.name ?? s.slug}
+										<BlockLock sandbox={s} />
+									</Link>
+									<div className="mt-2 truncate font-mono text-xs text-muted-foreground">
+										{s.slug}
+									</div>
+								</TableCell>
+								<TableCell>
+									<div className="flex items-center gap-1">
+										<code
+											title={s.id}
+											className="max-w-28 truncate text-xs text-muted-foreground"
+										>
+											{s.id}
+										</code>
+										<CopyButton text={s.id} label="Copy sandbox ID" />
+									</div>
+								</TableCell>
+								<TableCell>
+									<StateCell sandbox={s} />
+								</TableCell>
+								<TableCell className="text-xs">
+									{formatAgo(s.createdAt, now)}
+									<div className="text-muted-foreground">by {creator(s)}</div>
+								</TableCell>
+								<TableCell className="text-xs">
+									<span title={`${s.vcpu} vCPU / ${s.memoryMb} MB`}>
+										{s.size}
+									</span>
+									<div className="mt-1 text-muted-foreground">{s.template}</div>
+								</TableCell>
+								<TableCell className="text-xs">
+									<HealthCell sandbox={s} />
+								</TableCell>
+								<TableCell className="text-xs text-muted-foreground">
+									{s.activity}
+								</TableCell>
+								<TableCell>
+									<RowActions teamId={teamId} sandbox={s} />
+								</TableCell>
+							</TableRow>
+						))}
+					</TableBody>
+				</Table>
+			</div>
+			<div className="sandbox-cards">
 				{rows.map((s) => (
-					<TableRow key={s.id} data-testid="sandbox-row">
-						<TableCell>
+					<article
+						key={s.id}
+						className="sandbox-card"
+						data-testid="sandbox-card"
+					>
+						<header className="flex flex-wrap items-center gap-3">
 							<Link
 								href={sandboxHref(teamId, s.slug)}
-								className="flex items-center gap-1 font-medium hover:underline"
+								className="sandbox-row-name"
 							>
 								{s.name ?? s.slug}
-								<BlockLock sandbox={s} />
 							</Link>
-							{s.name !== null && (
-								<div className="text-xs text-muted-foreground">{s.slug}</div>
-							)}
-						</TableCell>
-						<TableCell>
-							{s.template}
-							{s.templateVersion && (
-								<div className="text-xs text-muted-foreground">
-									{s.templateVersion}
-								</div>
-							)}
-						</TableCell>
-						<TableCell>
-							{s.size}
-							<div className="text-xs text-muted-foreground">
-								{s.vcpu} vCPU · {s.memoryMb} MB
-							</div>
-						</TableCell>
-						<TableCell>
 							<StateCell sandbox={s} />
-						</TableCell>
-						<TableCell>
-							<HealthCell sandbox={s} />
-						</TableCell>
-						<TableCell className="text-muted-foreground">
-							{s.activity}
-						</TableCell>
-						<TableCell>
-							{formatAgo(s.createdAt, now)}
-							<div className="text-xs text-muted-foreground">
-								by {creator(s)}
-							</div>
-						</TableCell>
-						<TableCell>
+							<BlockLock sandbox={s} />
+						</header>
+						<div className="font-mono text-xs text-muted-foreground">
+							{s.slug}
+						</div>
+						<div className="flex flex-wrap items-center gap-2 text-xs">
+							<code>{s.id}</code>
+							<CopyButton text={s.id} label="Copy sandbox ID" />
+						</div>
+						<p className="text-xs text-muted-foreground">
+							{s.template} · {s.size} · {s.vcpu} vCPU / {s.memoryMb} MB
+						</p>
+						<footer className="flex items-center justify-between gap-2 text-xs">
+							<span>
+								created {formatAgo(s.createdAt, now)} by {creator(s)}
+							</span>
 							<RowActions teamId={teamId} sandbox={s} />
-						</TableCell>
-					</TableRow>
+						</footer>
+					</article>
 				))}
-			</TableBody>
-		</Table>
+			</div>
+		</>
 	);
 }
 

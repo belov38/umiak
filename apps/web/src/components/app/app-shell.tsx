@@ -7,6 +7,7 @@ import {
 	ChevronDownIcon,
 	KeyRoundIcon,
 	LayersIcon,
+	MenuIcon,
 	MoonIcon,
 	SettingsIcon,
 	SunIcon,
@@ -19,6 +20,7 @@ import { useEffect, useState } from "react";
 import { useAppSession } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -41,7 +43,6 @@ const NAV = [
 	{ label: "Snapshots", section: "snapshots", icon: ArchiveIcon },
 	{ label: "Environment", section: "environments", icon: LayersIcon },
 	{ label: "API keys", section: "keys", icon: KeyRoundIcon },
-	{ label: "Team", section: "settings", icon: SettingsIcon },
 ];
 
 export function AppShell({
@@ -58,151 +59,7 @@ export function AppShell({
 }) {
 	const session = useAppSession();
 	const pathname = usePathname();
-	const base = teamPath(team.id);
-	const active = (section?: string) => {
-		if (section === undefined) {
-			return pathname === base || pathname.startsWith(`${base}/sandboxes`);
-		}
-		const p = teamPath(team.id, section);
-		return pathname === p || pathname.startsWith(`${p}/`);
-	};
-
-	return (
-		<div className="dashboard-shell">
-			<aside className="dashboard-sidebar" aria-label="Dashboard">
-				<a href="#dashboard-content" className="dashboard-skip">
-					Skip to content
-				</a>
-				<div className="dashboard-sidebar-content">
-					<Link href="/app" className="dashboard-brand">
-						sbx
-					</Link>
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								variant="outline"
-								className="w-full justify-between"
-								data-testid="team-switcher"
-							>
-								<span className="sr-only">Team:</span>
-								<span className="max-w-48 truncate">{team.name}</span>
-								{!member && <Badge variant="secondary">operator</Badge>}
-								<ChevronDownIcon />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start" className="min-w-56">
-							<DropdownMenuLabel>Teams</DropdownMenuLabel>
-							{session.teams.map((t) => (
-								<DropdownMenuItem key={t.id} asChild>
-									<Link href={switchTeamPath(pathname, t.id)}>
-										<CheckIcon
-											className={cn(t.id === team.id ? "" : "invisible")}
-										/>
-										<span className="truncate">{t.name}</span>
-										{t.personal && (
-											<span className="ml-auto text-xs text-muted-foreground">
-												personal
-											</span>
-										)}
-									</Link>
-								</DropdownMenuItem>
-							))}
-							<DropdownMenuSeparator />
-							<DropdownMenuItem asChild>
-								<Link href="/app/teams/new">Create team…</Link>
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-					<nav className="dashboard-nav" aria-label="Team navigation">
-						{NAV.map((n) => (
-							<Button
-								key={n.label}
-								asChild
-								variant={active(n.section) ? "secondary" : "ghost"}
-								size="sm"
-							>
-								<Link
-									href={teamPath(team.id, n.section)}
-									aria-current={active(n.section) ? "page" : undefined}
-								>
-									<n.icon />
-									{n.label}
-								</Link>
-							</Button>
-						))}
-
-						<Button
-							asChild
-							variant={pathname === "/app/account" ? "secondary" : "ghost"}
-							size="sm"
-						>
-							<Link
-								href="/app/account"
-								aria-current={pathname === "/app/account" ? "page" : undefined}
-							>
-								<UserIcon />
-								Account
-							</Link>
-						</Button>
-					</nav>
-					<div className="dashboard-sidebar-footer">
-						{session.isOperator && (
-							<>
-								<Button asChild variant="ghost" size="sm">
-									<Link href="/app/operator">Operator</Link>
-								</Button>
-								<Button asChild variant="ghost" size="sm">
-									{/* The admin is another root layout: a full page load. */}
-									<a href="/admin">Admin</a>
-								</Button>
-							</>
-						)}
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button variant="ghost" size="sm" data-testid="user-menu">
-									<span className="max-w-56 truncate">
-										{session.user.email}
-									</span>
-									<ChevronDownIcon />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end" className="min-w-56">
-								<DropdownMenuLabel className="font-normal">
-									<div className="font-medium">{session.user.name}</div>
-									<div className="text-xs text-muted-foreground">
-										{session.user.email}
-									</div>
-								</DropdownMenuLabel>
-								<DropdownMenuSeparator />
-								<DropdownMenuItem asChild>
-									<Link href="/app/account">Account</Link>
-								</DropdownMenuItem>
-								<Tooltip>
-									<TooltipTrigger asChild>
-										<DropdownMenuItem asChild>
-											{/* oauth2-proxy route: a full page load. */}
-											<a href={signOutHref(logoutUrl)}>Sign out</a>
-										</DropdownMenuItem>
-									</TooltipTrigger>
-									<TooltipContent side="left" className="max-w-64">
-										Signs you out of the single sign-on session too: the CLI
-										will ask for `sbx login` again.
-									</TooltipContent>
-								</Tooltip>
-							</DropdownMenuContent>
-						</DropdownMenu>
-						<ThemeSwitch />
-					</div>
-				</div>
-			</aside>
-			<main id="dashboard-content" className="dashboard-content">
-				{children}
-			</main>
-		</div>
-	);
-}
-
-function ThemeSwitch() {
+	const [mobileOpen, setMobileOpen] = useState(false);
 	const [dark, setDark] = useState(false);
 	useEffect(() => {
 		const saved = localStorage.getItem("sbx-theme");
@@ -212,17 +69,226 @@ function ThemeSwitch() {
 		setDark(next);
 		document.documentElement.classList.toggle("dark", next);
 	}, []);
-	const choose = (next: boolean) => {
+	const chooseTheme = (next: boolean) => {
 		setDark(next);
 		document.documentElement.classList.toggle("dark", next);
 		localStorage.setItem("sbx-theme", next ? "dark" : "light");
 	};
+	useEffect(() => {
+		const wide = matchMedia("(min-width: 1024px)");
+		const close = () => {
+			if (wide.matches) setMobileOpen(false);
+		};
+		wide.addEventListener("change", close);
+		return () => wide.removeEventListener("change", close);
+	}, []);
+
+	const base = teamPath(team.id);
+	const active = (section?: string) => {
+		if (section === undefined) {
+			return pathname === base || pathname.startsWith(`${base}/sandboxes`);
+		}
+		const p = teamPath(team.id, section);
+		return pathname === p || pathname.startsWith(`${p}/`);
+	};
+
+	const switcher = (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<Button
+					variant="outline"
+					className="w-full justify-between"
+					data-testid="team-switcher"
+				>
+					<span className="sr-only">Team:</span>
+					<span className="max-w-48 truncate">{team.name}</span>
+					{!member && <Badge variant="secondary">operator</Badge>}
+					<ChevronDownIcon />
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start" className="min-w-56">
+				<DropdownMenuLabel>Teams</DropdownMenuLabel>
+				{session.teams.map((t) => (
+					<DropdownMenuItem key={t.id} asChild>
+						<Link href={switchTeamPath(pathname, t.id)}>
+							<CheckIcon className={cn(t.id === team.id ? "" : "invisible")} />
+							<span className="truncate">{t.name}</span>
+							{t.personal && (
+								<span className="ml-auto text-xs text-muted-foreground">
+									personal
+								</span>
+							)}
+						</Link>
+					</DropdownMenuItem>
+				))}
+				<DropdownMenuSeparator />
+				<DropdownMenuItem asChild>
+					<Link href="/app/teams/new">Create team…</Link>
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+	const sidebar = (
+		<div className="dashboard-sidebar-content">
+			<Link href="/app" className="dashboard-brand">
+				sbx
+			</Link>
+			<div className="desktop-team-switcher">{switcher}</div>
+			<nav className="dashboard-nav" aria-label="Team navigation">
+				{NAV.map((n) => (
+					<Button
+						key={n.label}
+						asChild
+						variant={active(n.section) ? "secondary" : "ghost"}
+						size="sm"
+					>
+						<Link
+							href={teamPath(team.id, n.section)}
+							onClick={() => setMobileOpen(false)}
+							aria-current={active(n.section) ? "page" : undefined}
+						>
+							<n.icon />
+							{n.label}
+						</Link>
+					</Button>
+				))}
+
+				<Button
+					asChild
+					variant={pathname === "/app/account" ? "secondary" : "ghost"}
+					size="sm"
+				>
+					<Link
+						href="/app/account"
+						onClick={() => setMobileOpen(false)}
+						aria-current={pathname === "/app/account" ? "page" : undefined}
+					>
+						<UserIcon />
+						Account
+					</Link>
+				</Button>
+				<Button
+					asChild
+					variant={active("settings") ? "secondary" : "ghost"}
+					size="sm"
+				>
+					<Link
+						onClick={() => setMobileOpen(false)}
+						href={teamPath(team.id, "settings")}
+						aria-current={active("settings") ? "page" : undefined}
+					>
+						<SettingsIcon />
+						Team
+					</Link>
+				</Button>
+			</nav>
+			<div className="dashboard-sidebar-footer">
+				{session.isOperator && (
+					<>
+						<Button asChild variant="ghost" size="sm">
+							<Link href="/app/operator">Operator</Link>
+						</Button>
+						<Button asChild variant="ghost" size="sm">
+							{/* The admin is another root layout: a full page load. */}
+							<a href="/admin">Admin</a>
+						</Button>
+					</>
+				)}
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<Button variant="ghost" size="sm" data-testid="user-menu">
+							<span className="max-w-56 truncate">{session.user.email}</span>
+							<ChevronDownIcon />
+						</Button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end" className="min-w-56">
+						<DropdownMenuLabel className="font-normal">
+							<div className="font-medium">{session.user.name}</div>
+							<div className="text-xs text-muted-foreground">
+								{session.user.email}
+							</div>
+						</DropdownMenuLabel>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem asChild>
+							<Link href="/app/account">Account</Link>
+						</DropdownMenuItem>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<DropdownMenuItem asChild>
+									{/* oauth2-proxy route: a full page load. */}
+									<a href={signOutHref(logoutUrl)}>Sign out</a>
+								</DropdownMenuItem>
+							</TooltipTrigger>
+							<TooltipContent side="left" className="max-w-64">
+								Signs you out of the single sign-on session too: the CLI will
+								ask for `sbx login` again.
+							</TooltipContent>
+						</Tooltip>
+					</DropdownMenuContent>
+				</DropdownMenu>
+				<ThemeSwitch dark={dark} onChange={chooseTheme} />
+			</div>
+		</div>
+	);
+	return (
+		<div className="dashboard-shell">
+			<header className="dashboard-mobile-header">
+				<Link href="/app" className="dashboard-brand">
+					sbx
+				</Link>
+				<div className="mobile-team-switcher">{switcher}</div>
+				<Button
+					variant="ghost"
+					size="icon"
+					aria-label="Open navigation"
+					aria-expanded={mobileOpen}
+					aria-controls="dashboard-mobile-navigation"
+					onClick={() => setMobileOpen(!mobileOpen)}
+				>
+					<MenuIcon />
+				</Button>
+			</header>
+			<aside
+				id="dashboard-navigation"
+				className="dashboard-sidebar"
+				data-open={mobileOpen}
+				aria-label="Dashboard"
+			>
+				<a href="#dashboard-content" className="dashboard-skip">
+					Skip to content
+				</a>
+				{sidebar}
+			</aside>
+			<Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
+				<DialogContent
+					className="dashboard-drawer"
+					placement="left"
+					id="dashboard-mobile-navigation"
+				>
+					<DialogTitle className="sr-only">Dashboard navigation</DialogTitle>
+					{sidebar}
+				</DialogContent>
+			</Dialog>
+			<main id="dashboard-content" className="dashboard-content">
+				<div className="dashboard-page">{children}</div>
+			</main>
+		</div>
+	);
+}
+
+function ThemeSwitch({
+	dark,
+	onChange,
+}: {
+	dark: boolean;
+	onChange: (next: boolean) => void;
+}) {
 	return (
 		<fieldset className="dashboard-theme" aria-label="Appearance">
 			<Button
 				variant={!dark ? "secondary" : "ghost"}
 				aria-pressed={!dark}
-				onClick={() => choose(false)}
+				onClick={() => onChange(false)}
 			>
 				<SunIcon />
 				Light
@@ -230,7 +296,7 @@ function ThemeSwitch() {
 			<Button
 				variant={dark ? "secondary" : "ghost"}
 				aria-pressed={dark}
-				onClick={() => choose(true)}
+				onClick={() => onChange(true)}
 			>
 				<MoonIcon />
 				Dark

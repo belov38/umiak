@@ -8,6 +8,7 @@ import { LoaderCircleIcon } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,12 +82,6 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 		<section className="space-y-4">
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
 				<h1 className="text-xl font-semibold">Snapshots</h1>
-				{limits.data && (
-					<p className="text-sm text-muted-foreground">
-						{limits.data.usage.savedSnapshots} of{" "}
-						{limits.data.quota.maxSavedSnapshots} saved
-					</p>
-				)}
 			</div>
 			<div className="snapshot-panel space-y-3 border p-5">
 				<h2>Saved snapshots</h2>
@@ -94,6 +89,12 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 					Save a snapshot from a sandbox's page. A snapshot belongs to this team
 					only.
 				</p>
+				{limits.data && (
+					<p className="text-sm text-muted-foreground">
+						{limits.data.usage.savedSnapshots} of{" "}
+						{limits.data.quota.maxSavedSnapshots} saved
+					</p>
+				)}
 				{snapshots.isError && (
 					<QueryError
 						error={snapshots.error}
@@ -105,9 +106,9 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 					<p className="text-sm text-muted-foreground">Loading…</p>
 				)}
 				{snapshots.data && snapshots.data.length === 0 && (
-					<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+					<DashboardEmpty kind="snapshots">
 						No saved snapshots yet.
-					</div>
+					</DashboardEmpty>
 				)}
 				{snapshots.data && snapshots.data.length > 0 && (
 					<Table data-testid="snapshot-table">
@@ -215,5 +216,5 @@ function SnapshotState({ snapshot: s }: { snapshot: SnapshotData }) {
 			</Tooltip>
 		);
 	}
-	return <span className="text-emerald-700">{s.state}</span>;
+	return <span className="text-[var(--success)]">{s.state}</span>;
 }
