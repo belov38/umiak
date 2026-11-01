@@ -60,7 +60,7 @@ func TestSMBIOSSerialRoundTrip(t *testing.T) {
 	if _, _, err := wire.ParseSMBIOSSerial("umiak2:m-123:" + wire.EncodeSecret(bs)); err == nil {
 		t.Error("umiak2 must be rejected")
 	}
-	for _, bad := range []string{"", "umiak1:", "umiak1:m", "umiak1::" + wire.EncodeSecret(bs), "umiak1:m:AAAA"} {
+	for _, bad := range []string{"sbx1:m-123:" + wire.EncodeSecret(bs), "", "umiak1:", "umiak1:m", "umiak1::" + wire.EncodeSecret(bs), "umiak1:m:AAAA"} {
 		if _, _, err := wire.ParseSMBIOSSerial(bad); err == nil {
 			t.Errorf("%q: expected error", bad)
 		}

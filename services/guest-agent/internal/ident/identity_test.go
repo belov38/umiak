@@ -57,6 +57,7 @@ func TestParseSerial(t *testing.T) {
 	})
 	for _, tt := range []struct{ name, serial string }{
 		{"empty", ""},
+		{"legacy serial", "sbx1:" + testMachineID + ":" + wire.EncodeSecret(testBS())},
 		{"wrong version", "umiak2:" + testMachineID + ":" + wire.EncodeSecret(testBS())},
 		{"no secret", "umiak1:" + testMachineID},
 		{"bad base64", "umiak1:" + testMachineID + ":!!!"},
@@ -95,6 +96,7 @@ func TestParseFamily(t *testing.T) {
 		{"empty host", "umiakt1:wss:///v1/connect", "", true},
 		{"no scheme", "umiakt1:h/v1/connect", "", true},
 		{"no prefix", "wss://h/v1/connect", "", true},
+		{"legacy family", "sbxt1:wss://h/v1/connect", "", true},
 		{"other prefix", "umiakt2:wss://h/v1/connect", "", true},
 		{"whitespace in url", "umiakt1:wss://h /v1/connect", "", true},
 		{"absent", "", "", false},

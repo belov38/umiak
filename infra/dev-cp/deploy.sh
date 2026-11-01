@@ -200,6 +200,7 @@ UMIAK_OAUTH2_PROXY_REDIRECT_URL=$APP_ORIGIN/oauth2/callback
 UMIAK_LOGOUT_URL=$LOGOUT_URL
 $EXTRA_ENV
 ENV
+chmod 600 .env
 docker compose config --quiet
 # The one-time switch to S8 (identities move from the schema identity to payload): the pre-S8 api
 # and worker keep writing into identity while web-migrate copies it, and later rows would be lost.

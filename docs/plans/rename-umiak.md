@@ -66,3 +66,5 @@
 - TURN fault probe under its own 5-minute host rollback timer: relaying stopped 0.2 s after deleting its namespace table, recovered in 2.5 s; CT nftables reload preserved Docker/TURN. UDP/TCP/TLS, peer filtering, host-socket isolation, six reconnect allocations and expired Refresh all passed; timer cancelled after SSH/PVE/API checks. CT config touches only `inet filter`, never flushes the ruleset.
 
 - Dashboard integration gate: build/lint/typecheck/typecheck:e2e, 228 unit tests and Playwright 21/21 pass. The first browser run found the fake E2E stack depended on the temporarily empty stand topology; added an independent four-build fake topology fixture mounted only by e2e.yaml. The rerun passed and removed its containers/volume/networks.
+
+- Live legacy tunnel handshake with `sbx-tunnel.v1` returns 426 and advertises only `umiak-tunnel.v1`. Explicit legacy `sbx1`/`sbxt1` rejection cases added to wire/identity tests; both affected packages pass with race detection. These literals are intentional negative-test inventory exceptions. Private stand `.env` mode enforced on every deploy, including existing files.
