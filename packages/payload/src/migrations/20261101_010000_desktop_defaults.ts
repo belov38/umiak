@@ -2,7 +2,8 @@
 // 4 vCPU for 4gb (S10 section 15.1; S9 seeded 2) and the linux-desktop and
 // windows-desktop templates.
 // Operator-edited records are kept: inserts skip existing slugs and the 4gb
-// update applies only to the untouched S9 seed value.
+// update applies only to the untouched S9 seed value. IF NOT EXISTS: dev stands that ran
+// the pre-rebase S10 migration 20261031_105048_desktop_defaults already have the column.
 import {
 	type MigrateDownArgs,
 	type MigrateUpArgs,
@@ -11,7 +12,7 @@ import {
 
 export async function up({ db }: MigrateUpArgs): Promise<void> {
 	await db.execute(sql`
-    ALTER TABLE "payload"."platform_defaults" ADD COLUMN "public_desktop_enabled" boolean DEFAULT false;
+    ALTER TABLE "payload"."platform_defaults" ADD COLUMN IF NOT EXISTS "public_desktop_enabled" boolean DEFAULT false;
 
     INSERT INTO "payload"."sizes" ("id", "slug", "vcpu", "memory_mb", "sort_order")
     VALUES (uuidv7(), '4gb', 4, 4096, 1), (uuidv7(), '8gb', 8, 8192, 2)
@@ -35,5 +36,5 @@ export async function up({ db }: MigrateUpArgs): Promise<void> {
 
 export async function down({ db }: MigrateDownArgs): Promise<void> {
 	await db.execute(sql`
-    ALTER TABLE "payload"."platform_defaults" DROP COLUMN "public_desktop_enabled";`);
+    ALTER TABLE "payload"."platform_defaults" DROP COLUMN IF EXISTS "public_desktop_enabled";`);
 }
