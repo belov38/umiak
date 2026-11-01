@@ -228,9 +228,9 @@ Dev TURN runs in the desktop compose profile on CT590's existing address: UDP/TC
 TLS5349 are published from its own network namespace (the address is on `lo` inside it);
 the UDP relay range 61000–61040 lies above the CT's ephemeral ports (32768–60999), is
 reserved in that namespace and is not published (s10-fix2; was 49160–49200 on the host
-network). deploy.sh writes `SBX_TURN_*` into `.env`. The PVE firewall of 590 still has the
-old `udp 49160:49200` accept from the first TURN setup; nothing listens there for TURN any
-more, `turn-firewall.py` no longer adds it, and removing it is a host change for master.
+network). deploy.sh writes `SBX_TURN_*` into `.env`. The PVE firewall of 590 accepts only
+UDP 3478 and TCP 3478/5349 from the LAN for TURN; the old `udp 49160:49200` accept was
+removed on 2026-11-01 (with a rollback timer, `verify-turn.py` green afterwards).
 
 CT590's `/etc/nftables.conf` (s10-fix2, also written by `infra/pve/setup.sh cp`) manages
 only `table inet filter`; Debian's `flush ruleset` would also drop Docker's iptables-nft
