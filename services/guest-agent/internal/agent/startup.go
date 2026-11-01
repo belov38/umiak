@@ -15,6 +15,7 @@ import (
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 
+	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/claim"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
@@ -338,6 +339,7 @@ func (a *agent) buildServices() error {
 	if err != nil {
 		return err
 	}
+	a.reqcache.Scrub(agentv1connect.DesktopActProcedure, a.desktop.ActScrubber())
 	a.idle = &system.IdleLoop{
 		DesktopStreams: a.desktop.Streams,
 		Counts:         a.proc,

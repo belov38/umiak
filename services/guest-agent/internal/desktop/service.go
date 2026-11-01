@@ -28,6 +28,7 @@ import (
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
 )
 
 // Session is implemented by the interactive session helper, never the streamer.
@@ -462,4 +463,31 @@ func (s *Service) Act(ctx context.Context, r *connect.Request[v1.DesktopActReque
 		result.Screenshot = shot.Msg
 	}
 	return connect.NewResponse(result), nil
+}
+
+// ActScrubber keeps screenshots out of the request cache (spec section 16):
+// the stored Act outcome has no image. A repeat of the same Act does not
+// repeat its input; when the request asked for a screenshot, the replay takes
+// a fresh one (Screenshot has no side effects).
+func (s *Service) ActScrubber() reqcache.Scrubber {
+	return reqcache.Scrubber{
+		Strip: func(res proto.Message) {
+			if r, ok := res.(*v1.DesktopActResponse); ok {
+				r.Screenshot = nil
+			}
+		},
+		Refill: func(ctx context.Context, req, res proto.Message) error {
+			in, ok := req.(*v1.DesktopActRequest)
+			out, ok2 := res.(*v1.DesktopActResponse)
+			if !ok || !ok2 || in.Screenshot == nil {
+				return nil
+			}
+			shot, err := s.Screenshot(ctx, connect.NewRequest(in.Screenshot))
+			if err != nil {
+				return err
+			}
+			out.Screenshot = shot.Msg
+			return nil
+		},
+	}
 }

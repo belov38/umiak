@@ -9,6 +9,11 @@
 // notes). A success larger than Options.MaxResponseBytes keeps its hash only,
 // so a repeat runs the handler again.
 //
+// Payloads that must not persist (S10 section 16: screenshots) are removed
+// by a Scrubber registered for the procedure before the outcome is stored; a
+// replay then asks the Scrubber to complete the response again without
+// repeating the call's side effects.
+//
 // The outcome is written with a context detached from the call, so a client
 // that gave up does not lose it. While the agent's own filesystem is frozen
 // (spec section 14.4) the store accepts no writes: outcomes are then kept in
@@ -77,6 +82,19 @@ type Options struct {
 	Now func() time.Time
 	// Log receives store failures. Default slog.Default().
 	Log *slog.Logger
+	// Scrubbers by procedure; Cache.Scrub adds more.
+	Scrubbers map[string]Scrubber
+}
+
+// Scrubber keeps a payload of a successful response out of the store.
+type Scrubber struct {
+	// Strip removes the payload from a copy of the response before it is
+	// stored. The caller that ran the handler still gets the full response.
+	Strip func(res proto.Message)
+	// Refill completes a replayed (stripped) response for req, for example
+	// with a fresh screenshot. It must not repeat the call's side effects.
+	// nil replays the stripped response as is.
+	Refill func(ctx context.Context, req, res proto.Message) error
 }
 
 func (o *Options) setDefaults() {
@@ -129,6 +147,13 @@ func NewCache(st *store.Store) *Cache {
 	}
 }
 
+// Scrub registers a Scrubber for procedure. Call it before serving.
+func (c *Cache) Scrub(procedure string, sc Scrubber) {
+	c.ic.scrubMu.Lock()
+	defer c.ic.scrubMu.Unlock()
+	c.ic.scrubbers[procedure] = sc
+}
+
 // Options returns the handler options of the cache.
 func (c *Cache) Options() []connect.HandlerOption {
 	return slices.Clone(c.opts)
@@ -159,12 +184,17 @@ func newInterceptor(st *store.Store, opts Options) *interceptor {
 	for _, p := range opts.Exempt {
 		exempt[p] = struct{}{}
 	}
+	scrubbers := make(map[string]Scrubber, len(opts.Scrubbers))
+	for p, sc := range opts.Scrubbers {
+		scrubbers[p] = sc
+	}
 	return &interceptor{
-		st:      st,
-		opts:    opts,
-		exempt:  exempt,
-		flights: &flights{m: make(map[string]*flight)},
-		pending: newPendingSet(opts.MaxPending),
+		st:        st,
+		opts:      opts,
+		exempt:    exempt,
+		scrubbers: scrubbers,
+		flights:   &flights{m: make(map[string]*flight)},
+		pending:   newPendingSet(opts.MaxPending),
 	}
 }
 
@@ -190,6 +220,35 @@ type interceptor struct {
 	pending *pendingSet
 	puts    atomic.Uint64
 	pruning atomic.Bool
+
+	scrubMu   sync.RWMutex
+	scrubbers map[string]Scrubber
+}
+
+func (i *interceptor) scrubber(procedure string) (Scrubber, bool) {
+	i.scrubMu.RLock()
+	defer i.scrubMu.RUnlock()
+	sc, ok := i.scrubbers[procedure]
+	return sc, ok
+}
+
+// replay rebuilds a stored outcome and lets the procedure's Scrubber
+// complete it.
+func (i *interceptor) replay(ctx context.Context, rec *store.Request, md protoreflect.MethodDescriptor, procedure string, req connect.AnyRequest) (connect.AnyResponse, error) {
+	res, err := replay(rec, md)
+	if err != nil {
+		return nil, err
+	}
+	sc, ok := i.scrubber(procedure)
+	if !ok || sc.Refill == nil {
+		return res, nil
+	}
+	in, _ := req.Any().(proto.Message)
+	out, _ := res.Any().(proto.Message)
+	if err := sc.Refill(ctx, in, out); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // WrapUnary implements connect.Interceptor.
@@ -245,7 +304,7 @@ func (i *interceptor) call(
 		}
 		switch {
 		case rec != nil:
-			return replay(rec, md)
+			return i.replay(ctx, rec, md, procedure, req)
 		case lead != nil:
 			return i.execute(ctx, id, hash, procedure, lead, req, next)
 		}
@@ -256,7 +315,7 @@ func (i *interceptor) call(
 			return nil, ctx.Err()
 		}
 		if f.rec != nil {
-			return replay(f.rec, md)
+			return i.replay(ctx, f.rec, md, procedure, req)
 		}
 		// The first call left nothing to replay (retryable error, canceled,
 		// oversized response): look again, probably run it ourselves.
@@ -454,6 +513,10 @@ func (i *interceptor) outcome(procedure, hash string, res connect.AnyResponse, e
 	msg, ok := res.Any().(proto.Message)
 	if !ok {
 		return nil
+	}
+	if sc, found := i.scrubber(procedure); found && sc.Strip != nil {
+		msg = proto.Clone(msg)
+		sc.Strip(msg)
 	}
 	b, merr := proto.MarshalOptions{Deterministic: true}.Marshal(msg)
 	if merr != nil {
