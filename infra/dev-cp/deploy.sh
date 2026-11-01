@@ -163,6 +163,8 @@ SBX_TURN_PORT=3478
 SBX_TURN_TLS_PORT=5349
 SBX_TURN_RELAY_MIN=61000
 SBX_TURN_RELAY_MAX=61040
+# The entrypoint is bind-mounted: a new hash recreates turn on deploy (turn.yaml label).
+SBX_TURN_ENTRYPOINT_SHA256=$(sha256sum turn/entrypoint.sh | cut -d' ' -f1)
 SBX_DEVCP_TURN_URLS=turn:$TURN_HOST:3478?transport=udp,turn:$TURN_HOST:3478?transport=tcp,turns:$TURN_HOST:5349?transport=tcp
 # The PVE host over the LAN. migrate (bootstrap) loads the API URL from secrets/devcp/sbx.yaml.
 SBX_PVE_URL=https://$PVE_LAN_IP:8006

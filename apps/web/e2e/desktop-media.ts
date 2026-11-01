@@ -3,25 +3,130 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { chromium } from "@playwright/test";
+import { chromium, type Page } from "@playwright/test";
 import type { Sandbox } from "@sbx/sdk";
 
 const MIN_PICTURE_BYTES = 30_000;
 const hash = (bytes: Uint8Array) =>
 	createHash("sha256").update(bytes).digest("hex");
-export async function verifyDesktopMedia(
-	sb: Sandbox,
-	output: string,
-	onWebRtcReady?: () => Promise<void>,
-	naturalCloseLast = false,
-) {
-	const protocols = (process.env.SBX_DESKTOP_TURN_TRANSPORTS ?? "udp").split(
-		",",
-	);
-	if (protocols.some((p) => !["udp", "tcp", "tls"].includes(p)))
-		throw new Error("invalid TURN verification transport");
-	const cases = ["websocket", ...protocols.map((p) => `webrtc-${p}`)];
-	const browser = await chromium.launch({
+/**
+ * Counts what reaches the viewer: video messages and keyframes on the websocket,
+ * VideoDecoder input, output and errors. Main-thread only; a worker decoder shows
+ * up as messages without decoder calls.
+ */
+export function instrumentViewer() {
+	const s = {
+		ws: { video: 0, videoKey: 0, control: 0, other: 0, firstKeyAt: 0 },
+		decoder: {
+			instances: 0,
+			configure: 0,
+			codec: "",
+			key: 0,
+			delta: 0,
+			output: 0,
+			reset: 0,
+			maxQueue: 0,
+			firstOutputAt: 0,
+			errors: [] as string[],
+		},
+		startedAt: Date.now(),
+	};
+	(window as unknown as { __s10Viewer: typeof s }).__s10Viewer = s;
+	const NativeSocket = window.WebSocket;
+	window.WebSocket = class extends NativeSocket {
+		constructor(url: string | URL, protocols?: string | string[]) {
+			super(url, protocols);
+			this.addEventListener("message", (event) => {
+				if (!(event.data instanceof ArrayBuffer)) return;
+				const view = new Uint8Array(event.data);
+				// moonlight-web WebSocketChannel: video frames carry an IDR flag next.
+				if (view[0] === 1) {
+					s.ws.video++;
+					if (view[1] === 1) {
+						s.ws.videoKey++;
+						s.ws.firstKeyAt ||= Date.now() - s.startedAt;
+					}
+				} else if (view[0] === 0) s.ws.control++;
+				else s.ws.other++;
+			});
+		}
+	};
+	const NativeDecoder = window.VideoDecoder;
+	if (!NativeDecoder) return;
+	window.VideoDecoder = class extends NativeDecoder {
+		constructor(init: VideoDecoderInit) {
+			s.decoder.instances++;
+			super({
+				output: (frame) => {
+					s.decoder.output++;
+					s.decoder.firstOutputAt ||= Date.now() - s.startedAt;
+					init.output(frame);
+				},
+				error: (error) => {
+					s.decoder.errors.push(String(error).slice(0, 300));
+					init.error(error);
+				},
+			});
+		}
+		override configure(config: VideoDecoderConfig) {
+			s.decoder.configure++;
+			s.decoder.codec = config.codec;
+			super.configure(config);
+		}
+		override decode(chunk: EncodedVideoChunk) {
+			if (chunk.type === "key") s.decoder.key++;
+			else s.decoder.delta++;
+			super.decode(chunk);
+			s.decoder.maxQueue = Math.max(s.decoder.maxQueue, this.decodeQueueSize);
+		}
+		override reset() {
+			s.decoder.reset++;
+			super.reset();
+		}
+	};
+}
+
+/** Viewer-side counters plus video element and WebRTC inbound video stats. */
+export async function viewerStats(page: Page): Promise<unknown> {
+	return await page.evaluate(async () => {
+		const w = window as unknown as {
+			__s10Viewer?: unknown;
+			__s10Peers?: RTCPeerConnection[];
+		};
+		const videos = [...document.querySelectorAll("video")].map((v) => ({
+			readyState: v.readyState,
+			width: v.videoWidth,
+			height: v.videoHeight,
+			currentTime: v.currentTime,
+			paused: v.paused,
+			quality: v.getVideoPlaybackQuality?.(),
+		}));
+		const inbound: unknown[] = [];
+		for (const peer of w.__s10Peers ?? []) {
+			const stats = await peer.getStats();
+			for (const item of stats.values())
+				if (item.type === "inbound-rtp" && item.kind === "video")
+					inbound.push({
+						connectionState: peer.connectionState,
+						framesReceived: item.framesReceived,
+						framesDecoded: item.framesDecoded,
+						keyFramesDecoded: item.keyFramesDecoded,
+						framesDropped: item.framesDropped,
+						packetsLost: item.packetsLost,
+						nackCount: item.nackCount,
+						pliCount: item.pliCount,
+						firCount: item.firCount,
+						freezeCount: item.freezeCount,
+						decoderImplementation: item.decoderImplementation,
+					});
+		}
+		return { viewer: w.__s10Viewer, videos, inbound };
+	});
+}
+
+/** Headless Chromium that trusts only the pinned dev gateway and TURN leaves. */
+export async function launchViewerBrowser() {
+	return await chromium.launch({
 		headless: true,
 		args: [
 			"--autoplay-policy=no-user-gesture-required",
@@ -32,6 +137,23 @@ export async function verifyDesktopMedia(
 				: []),
 		],
 	});
+}
+
+export async function verifyDesktopMedia(
+	sb: Sandbox,
+	output: string,
+	onWebRtcReady?: () => Promise<void>,
+	naturalCloseLast = false,
+	/** Collects guest logs before the page closes and EndStreams restarts moonlight-web. */
+	onFailure?: (label: string) => Promise<void>,
+) {
+	const protocols = (process.env.SBX_DESKTOP_TURN_TRANSPORTS ?? "udp").split(
+		",",
+	);
+	if (protocols.some((p) => !["udp", "tcp", "tls"].includes(p)))
+		throw new Error("invalid TURN verification transport");
+	const cases = ["websocket", ...protocols.map((p) => `webrtc-${p}`)];
+	const browser = await launchViewerBrowser();
 
 	try {
 		for (const [index, label] of cases.entries()) {
@@ -40,6 +162,7 @@ export async function verifyDesktopMedia(
 			const page = await browser.newPage({
 				viewport: { width: 1280, height: 800 },
 			});
+			await page.addInitScript(instrumentViewer);
 			// Viewer logs for failures only; links and tickets are masked.
 			const consoleLines: string[] = [];
 			page.on("console", (m) =>
@@ -113,6 +236,10 @@ export async function verifyDesktopMedia(
 				}
 				console.log(
 					`${label} first picture after ${Date.now() - pictureFrom} ms`,
+				);
+				console.log(
+					`${label} viewer stats`,
+					JSON.stringify(await viewerStats(page)),
 				);
 				await page.waitForTimeout(1000);
 				first = await media.screenshot();
@@ -189,6 +316,27 @@ export async function verifyDesktopMedia(
 					mode: 0o600,
 				});
 			} catch (error) {
+				// Each step is best effort: the original error is what the run reports.
+				await writeFile(
+					join(output, `${label}-stats.json`),
+					JSON.stringify(await viewerStats(page).catch(String), null, 2),
+					{ mode: 0o600 },
+				).catch(() => undefined);
+				await sb.desktop
+					.screenshot({ cursor: "false" })
+					.then((shot) =>
+						writeFile(
+							join(output, `${label}-agent-screenshot.png`),
+							shot.bytes,
+							{
+								mode: 0o600,
+							},
+						),
+					)
+					.catch(() => undefined);
+				await onFailure?.(label).catch((e: unknown) =>
+					console.log(`guest diagnostics failed: ${String(e).slice(0, 200)}`),
+				);
 				const logs = page.getByText("Show Logs", { exact: true });
 				if (await logs.isVisible()) await logs.click({ timeout: 1000 });
 				await page.screenshot({

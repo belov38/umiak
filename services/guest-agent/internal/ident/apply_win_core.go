@@ -138,7 +138,7 @@ func applyWindows(ctx context.Context, l paths.Layout, id Identity, r WinResette
 	switch {
 	case err == nil:
 		if oldHex, _ := machineIDHex(old.MachineID); oldHex == hexID {
-			reboot, err := renameAgain(l, old, r, name, mode)
+			reboot, err := renameAgain(l, old, r, name, id.BootID, mode)
 			return false, reboot, err
 		}
 	case errors.Is(err, fs.ErrNotExist):
@@ -184,12 +184,15 @@ func applyWindows(ctx context.Context, l paths.Layout, id Identity, r WinResette
 			return false, false, fmt.Errorf("ident: remove sysprep answer file: %w", err)
 		}
 	}
+	reboot, rerr := needReboot(r, name, mode)
 	f := &File{MachineID: id.MachineID, HostKeyFingerprints: fps, ResetPending: true}
+	if rerr == nil && reboot {
+		f.RebootBoot = id.BootID
+	}
 	if err := f.Save(l.IdentityFile); err != nil {
 		return false, false, fmt.Errorf("ident: write identity.json: %w", err)
 	}
-	reboot, err := needReboot(r, name, mode)
-	return true, reboot, err
+	return true, reboot, rerr
 }
 
 // renameAgain handles an unchanged identity whose computer name is not in
@@ -198,19 +201,30 @@ func applyWindows(ctx context.Context, l paths.Layout, id Identity, r WinResette
 // not fix a foreign rename) and asks for a reboot, at most MaxRenameReboots
 // times in a row, counted in identity.json; then it logs an error and
 // stops rebooting. A name in effect resets the counter.
-func renameAgain(l paths.Layout, f *File, r WinResetter, name string, mode ApplyMode) (bool, error) {
+//
+// A reboot asked for in this boot (bootID, recorded in identity.json) that
+// has not happened yet is asked for again without counting: Windows can
+// take minutes to act on it under load, and giving up in that boot would
+// let the machine go ready and reboot later under its user.
+func renameAgain(l paths.Layout, f *File, r WinResetter, name, bootID string, mode ApplyMode) (bool, error) {
 	reboot, err := needReboot(r, name, mode)
 	if err != nil {
 		return false, err
 	}
 	if !reboot {
-		if f.RenameReboots != 0 && mode != ModeSpecialize {
+		if (f.RenameReboots != 0 || f.RebootBoot != "") && mode != ModeSpecialize {
 			f.RenameReboots = 0
+			f.RebootBoot = ""
 			if err := f.Save(l.IdentityFile); err != nil {
 				return false, fmt.Errorf("ident: write identity.json: %w", err)
 			}
 		}
 		return false, nil
+	}
+	if bootID != "" && f.RebootBoot == bootID {
+		slog.Warn("the reboot for the computer name asked for in this boot has not happened yet, asking again",
+			"want", name, "boot_id", bootID)
+		return true, nil
 	}
 	if f.RenameReboots >= MaxRenameReboots {
 		slog.Error("the computer name does not take effect, no more reboots",
@@ -221,6 +235,7 @@ func renameAgain(l paths.Layout, f *File, r WinResetter, name string, mode Apply
 		return false, fmt.Errorf("ident: set computer name: %w", err)
 	}
 	f.RenameReboots++
+	f.RebootBoot = bootID
 	if err := f.Save(l.IdentityFile); err != nil {
 		return false, fmt.Errorf("ident: write identity.json: %w", err)
 	}

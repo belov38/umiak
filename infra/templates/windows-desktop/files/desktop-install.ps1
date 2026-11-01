@@ -19,6 +19,19 @@ function Invoke-SbxDesktopNative {
         if($process.ExitCode -notin $allowed){throw "desktop installer command failed: $File, exit $($process.ExitCode)"}
     }finally{$process.Dispose()}
 }
+# Upstream web-server.exe can stream no video at all on Windows: Sunshine may take its
+# audio socket for the video address (S10 spec 8.6). The recipe ships a build of the same
+# release with moonlight-web/ping-order.patch (moonlight-web/build.sh); only the server
+# binary of the pinned zip is replaced.
+function Install-SbxPatchedMoonlight {
+    param([string]$Source,[string]$VersionDir)
+    $exe=Join-Path $Source 'web-server.exe';$build=Join-Path $Source 'build.json'
+    if(-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $build)){throw 'patched moonlight-web missing: run infra/templates/windows-desktop/moonlight-web/build.sh'}
+    $info=Get-Content -Raw -LiteralPath $build | ConvertFrom-Json
+    if((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $info.sha256){throw 'patched moonlight-web SHA256 mismatch'}
+    Copy-Item -LiteralPath $exe -Destination (Join-Path $VersionDir 'web-server.exe') -Force
+    Copy-Item -LiteralPath $build -Destination (Join-Path $VersionDir 'sbx-build.json') -Force
+}
 function Install-SbxDesktop {
     param([string]$ProgramRoot,[string]$AgentRoot,[string]$WorkRoot,[string]$FilesRoot,[hashtable]$Ops=@{})
     $defaults=@{
@@ -47,6 +60,7 @@ function Install-SbxDesktop {
         Copy-Item -LiteralPath $source -Destination $versionDir -Recurse -Force
         $binary=Join-Path $versionDir $(if($key -eq 'moonlight'){'web-server.exe'}else{'cua-driver.exe'})
         if(-not (Test-Path -LiteralPath $binary)){throw "desktop archive missing executable: $key"}
+        if($key -eq 'moonlight'){Install-SbxPatchedMoonlight (Join-Path $FilesRoot 'moonlight-web') $versionDir}
         & $Ops.Link (Join-Path $parent 'current') $versionDir
     }
     $bundle=Join-Path $WorkRoot 'cua.sigstore.json'

@@ -15,6 +15,16 @@ function Test-Desktop {
         Report $p[0] (Test-Path -LiteralPath $p[1] -PathType Leaf) $p[1]
     }
 
+    # moonlight-web runs the patched server build (spec S10 section 8.6), not the upstream binary.
+    $moonDir = Join-Path $StreamerRoot 'moonlight-web\current'
+    try {
+        $info = Get-Content -Raw -LiteralPath (Join-Path $moonDir 'sbx-build.json') | ConvertFrom-Json
+        $hash = (Get-FileHash -LiteralPath (Join-Path $moonDir 'web-server.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        Report desktop_moonlight_patch ($hash -eq $info.sha256 -and $info.patch -eq 'ping-order.patch') "$($info.upstream) + $($info.patch), sha256 $hash"
+    } catch {
+        Report desktop_moonlight_patch $false "no patched build: $($_.Exception.Message)"
+    }
+
     # Both streamer services exist, start on demand only and are stopped on a fresh clone.
     $bad = [Collections.Generic.List[string]]::new()
     foreach ($name in @('SunshineService', 'sbx-moonlight-web')) {

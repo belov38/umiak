@@ -204,7 +204,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			expect(await events(t.pool, s.sandboxId, "unblocked")).toHaveLength(1);
 		});
 
-		it("block notifies sbx_ssh_revoke '' (recheck SSH) and sbx_identity 'sandboxes:<id>' (api streams); unblock and port blocks do not", async () => {
+		it("block notifies sbx_ssh_revoke '' (recheck SSH) and sbx_identity 'sandboxes:<id>' (api streams); unblock only sbx_identity (desktop recheck); port blocks nothing", async () => {
 			const env = await serviceEnv(t.pool);
 			const s = await seedSandbox(t.pool, env, { state: "ready" });
 			await env.svc.hostPort(env.p, s.sandboxId, 3000, "token");
@@ -228,10 +228,22 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 				expect(notes.sort()).toEqual([...want].sort());
 				// A repeat with the same reason changes nothing and sends nothing.
 				await env.svc.block(op, s.sandboxId, { reason: "abuse" });
-				await env.svc.unblock(op, s.sandboxId);
 				await env.svc.unblockPort(op, s.sandboxId, 3000);
 				await new Promise((r) => setTimeout(r, 200));
 				expect(notes).toHaveLength(2);
+				// Unblock wakes the desktop access monitor at once (S10 §13.2).
+				await env.svc.unblock(op, s.sandboxId);
+				for (const end = Date.now() + 10_000; notes.length < 3; ) {
+					if (Date.now() > end) break;
+					await new Promise((r) => setTimeout(r, 20));
+				}
+				expect(notes.slice(2)).toEqual([
+					`sbx_identity=sandboxes:${s.sandboxId}`,
+				]);
+				// A repeat unblock changes nothing and sends nothing.
+				await env.svc.unblock(op, s.sandboxId);
+				await new Promise((r) => setTimeout(r, 200));
+				expect(notes).toHaveLength(3);
 			} finally {
 				await listener.end();
 			}

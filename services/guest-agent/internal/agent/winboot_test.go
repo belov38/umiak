@@ -224,6 +224,35 @@ func TestWinBootRebootPendingGates(t *testing.T) {
 	h.stop()
 }
 
+// A rename reboot that does not happen within RebootWait is asked for again
+// by every run of the same boot, and that boot never makes the identity
+// ready: a machine that went ready would reboot later under its user.
+func TestWinBootRenameRebootSameBootNeverReady(t *testing.T) {
+	h := newWinHarness(t)
+	h.r.Active = "WIN-TEMPLATE" // the reboot asked for never happens
+	runs := ident.MaxRenameReboots + 2
+	for run := 1; run <= runs; run++ {
+		h.start()
+		h.waitReady()
+		select {
+		case err := <-h.done:
+			if err != nil {
+				t.Fatalf("run %d: Run = %v, want a graceful exit to repeat", run, err)
+			}
+			h.done = nil
+		case <-time.After(10 * time.Second):
+			t.Fatalf("run %d: the agent went on without the reboot (calls %v)", run, h.r.Calls)
+		}
+		if got := h.calls("Reboot"); got != run {
+			t.Fatalf("run %d: %d reboots asked for, want %d", run, got, run)
+		}
+	}
+	f, err := ident.LoadFile(h.l.IdentityFile)
+	if err != nil || f.RebootBoot != bootOne || f.RenameReboots != 0 {
+		t.Errorf("identity.json = %+v, %v; want the reboot due in %s, none counted", f, err, bootOne)
+	}
+}
+
 func TestWinBootGateRefusesStartOutsideAdmin(t *testing.T) {
 	h := newWinHarness(t)
 	h.r.Active = "WIN-TEMPLATE"

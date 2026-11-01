@@ -93,9 +93,10 @@ export async function recheckDesktopAccess(deps: ApiDeps): Promise<void> {
 			);
 		} else if (!denied && route.policy_revoked) {
 			// A link issued while the block was being applied carries the epoch of the
-			// block; advancing again keeps it dead after unblock.
+			// block; advancing again keeps it dead after unblock. The disconnect ends
+			// anything that got through before this run.
 			await poolOf(deps).query(
-				"UPDATE runtime.sandbox_desktops SET auth_epoch=auth_epoch+1,policy_revoked=false,updated_at=now() WHERE sandbox_id=$1 AND auth_epoch=$2",
+				"UPDATE runtime.sandbox_desktops SET auth_epoch=auth_epoch+1,pending_disconnect=true,policy_revoked=false,updated_at=now() WHERE sandbox_id=$1 AND auth_epoch=$2",
 				[route.sandbox_id, route.auth_epoch],
 			);
 		}

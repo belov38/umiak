@@ -135,6 +135,10 @@ type File struct {
 	// computer name was not in effect while the identity was unchanged
 	// (Windows); at MaxRenameReboots the agent stops rebooting.
 	RenameReboots int `json:"renameReboots,omitempty"`
+	// RebootBoot is the boot id of the boot that asked for the last rename
+	// reboot (Windows). While the boot id is unchanged that reboot is still
+	// due: the agent asks again and does not become ready.
+	RebootBoot string `json:"rebootBoot,omitempty"`
 }
 
 // LoadFile reads identity.json. A missing file returns an error for which
