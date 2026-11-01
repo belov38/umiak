@@ -57,9 +57,9 @@ are not verified. Do not claim pixel parity for these unobserved states.
 
 ## Visual decisions
 
-Reference at 90% browser zoom: 252 px sidebar, 1037 px main content, 43 px
-controls. Implement at CSS scale: 280 px sidebar, 1152 px centered work area,
-48 px controls, 40 px navigation rows, 32 px Funnel Display headings, Inter body,
+Reference measured at 252 px sidebar, 1037 px main content, 43 px controls.
+Implement with 90% root rem scale: 17.5rem sidebar, 72rem centered work area,
+3rem controls, 2.5rem navigation rows, 2rem Funnel Display headings, Inter body,
 white background, thin neutral borders, minimal corner radius, blue `#263fa9`
 primary and selected text, selected fill `#f1f3f9`, muted text `#4d4d4d`.
 Font packages are open-licensed Fontsource variable distributions (5.3.0; checked
@@ -79,3 +79,23 @@ This is the repository-supported local stack for exercising sandboxes without
 accessing the shared `pve` host. No production mocks or remote deployment.
 `09-dashboard.spec.ts` additionally checks sidebar selection, absence of unsupported
 navigation, persisted appearance and mobile overflow and captures the real pages.
+
+### Recorded validation (2026-11-02)
+
+- Workspace build, Biome lint and TypeScript checks passed; E2E TypeScript also passed.
+- Full local compose Playwright suite: **20/20 passed**, including Keycloak/JIT,
+  team switching and roles, API key revocation, secret response audit, files,
+  commands, ports and operator authorization.
+- Additional visual-only run: **1/1 passed**. Captures include supported sandbox
+  tabs, empty list, create form, snapshots, environment and key dialogs, account,
+  team settings/new team, light/dark and mobile. Animations are disabled during
+  captures so theme transition frames are not mistaken for final colors.
+- Fixed a tablet regression discovered by E2E: the taller detail summary pushed
+  xterm outside the viewport after reload at 800×600. Compact tablet facts keep
+  terminal rendering and scrollback checks working (onboarding passes again).
+- Eight side-by-side PNG comparisons and a contact sheet are local in `compare/`.
+  API differences explain the intentionally different content and forms; exact
+  pixel parity is not asserted for account/provider controls, team organization
+  settings, the create page versus original dialog, or unobservable running views.
+- Local compose test containers and volumes are removed by the test runner.
+  Shared Proxmox and CT 590 were not used. No API/schema changes.
