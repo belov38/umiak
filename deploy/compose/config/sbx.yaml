@@ -156,15 +156,16 @@ topology:
           index: "2"
           version: v2.0
 
-    # S10: windows-desktop (extends windows, slot 595); verify 110 checks, 0 FAIL.
+    # S10: windows-desktop (extends windows, slot 595), patched moonlight-web (s10-followups);
+    # verify 112 checks, 0 FAIL.
     - templateSlug: windows-desktop
-      version: "20261101.3"
+      version: "20261101.6"
       os: windows
       node: pve
       storage: local-lvm
       pveVmid: 595
       bootTimeoutS: 1200
-      agentVersion: 0.1.0+20261101.fabc0b94
+      agentVersion: 0.1.0+20261101.b84f61b8
       hw:
         machine: pc-q35-11.0+pve2
         cpu: host
