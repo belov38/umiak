@@ -1,9 +1,11 @@
 #!/bin/sh
 set -eu
 run=${SBX_TURN_RUN_DIR:-/run/turn}
-# Compose healthcheck: the relay egress table is exactly what this start installed.
+# The TURN address is still on lo: without it relays and new allocations fail.
+on_lo() { ip -4 -o addr show dev lo | awk -v a="$1/32" '$4 == a {found = 1} END {exit !found}'; }
+# Compose healthcheck: the relay egress table and the address are what this start installed.
 if [ "${1:-}" = health ]; then
- [ -s "$run/guard.nft" ] && [ "$(nft -s list table inet sbx_turn 2>/dev/null)" = "$(cat "$run/guard.nft")" ]
+ [ -s "$run/guard.nft" ] && [ -s "$run/guard.ip" ] && [ "$(nft -s list table inet sbx_turn 2>/dev/null)" = "$(cat "$run/guard.nft")" ] && on_lo "$(cat "$run/guard.ip")"
  exit
 fi
 # Explicit listener address; no open relay or unauthenticated fallback.
@@ -72,6 +74,7 @@ NFT
 
 umask 077
 nft -s list table inet sbx_turn >"$run/guard.nft"
+printf '%s\n' "$SBX_TURN_IP" >"$run/guard.ip"
 install -d -m 0700 -o "$uid" -g "$uid" "$run/state"
 # Mode first: without CAP_FOWNER root cannot chmod a file it no longer owns.
 for f in tls.crt tls.key; do
@@ -114,8 +117,9 @@ CONF
 unset secret
 chmod 0400 "$config"
 chown "$uid:$uid" "$config"
-# Fail closed: this shell stays the container's init and watches the table; if it
-# disappears or changes (root in this namespace, e.g. docker exec), init exits and
+# Fail closed: this shell stays the container's init and watches the table and the
+# address on lo; if either disappears or the table changes (root in this namespace,
+# e.g. docker exec), init exits and
 # the kernel kills turnserver with the PID namespace (root lacks CAP_KILL for the
 # relay uid; init itself cannot be killed from inside). The restart policy starts
 # again with a fresh table. A wrapper reports turnserver's own exit with USR2.
@@ -137,8 +141,8 @@ expected=$(cat "$run/guard.nft")
 while :; do
  sleep "$interval" &
  wait "$!" || true
- [ "$(nft -s list table inet sbx_turn 2>/dev/null)" = "$expected" ] && continue
- echo 'sbx-turn: relay egress table removed or changed, stopping turnserver' >&2
+ [ "$(nft -s list table inet sbx_turn 2>/dev/null)" = "$expected" ] && on_lo "$SBX_TURN_IP" && continue
+ echo 'sbx-turn: relay egress table or TURN address on lo removed or changed, stopping turnserver' >&2
  # Outside a PID namespace (tests) init's exit would not stop it.
  kill "$(cat "$run/server.pid")" 2>/dev/null || true
  exit 1

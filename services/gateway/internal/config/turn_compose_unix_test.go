@@ -51,7 +51,7 @@ func TestDesktopTURNSecretInitAndRestrictedConfig(t *testing.T) {
 	// as the applied rules until the test deletes or edits that file.
 	_ = os.WriteFile(filepath.Join(bin, "nft"), []byte("#!/bin/sh\nif [ \"$1\" = -f ]; then cat >\"$SBX_TURN_CAPTURE.nft\"; exit 0; fi\n[ \"$*\" = '-s list table inet sbx_turn' ] && [ -f \"$SBX_TURN_CAPTURE.nft\" ] || exit 1\ncat \"$SBX_TURN_CAPTURE.nft\"\n"), 0700)
 	// The namespace: a container interface, or the TURN address itself on the host network.
-	_ = os.WriteFile(filepath.Join(bin, "ip"), []byte("#!/bin/sh\ncase \"$*\" in\n'-4 -o addr show'*) printf '1: lo    inet 127.0.0.1/8 scope host lo\\n2: eth0    inet %s/16 brd 172.30.255.255 scope global eth0\\n' \"${SBX_TURN_FAKE_ETH0:-172.30.0.2}\";;\n*) echo \"$*\" >>\"$SBX_TURN_CAPTURE.ip\";;\nesac\n"), 0700)
+	_ = os.WriteFile(filepath.Join(bin, "ip"), []byte("#!/bin/sh\ncase \"$*\" in\n'-4 -o addr show dev lo') printf '1: lo    inet 127.0.0.1/8 scope host lo\\n'; [ -f \"$SBX_TURN_CAPTURE.nolo\" ] || sed -n 's|^-4 addr replace \\([0-9.]*/32\\) dev lo$|1: lo    inet \\1 scope global lo|p' \"$SBX_TURN_CAPTURE.ip\" 2>/dev/null;;\n'-4 -o addr show'*) printf '1: lo    inet 127.0.0.1/8 scope host lo\\n2: eth0    inet %s/16 brd 172.30.255.255 scope global eth0\\n' \"${SBX_TURN_FAKE_ETH0:-172.30.0.2}\";;\n*) echo \"$*\" >>\"$SBX_TURN_CAPTURE.ip\";;\nesac\n"), 0700)
 	sysctl := filepath.Join(dir, "sysctl")
 	_ = os.Mkdir(sysctl, 0700)
 	_ = os.WriteFile(filepath.Join(sysctl, "ip_local_port_range"), []byte("32768\t60999\n"), 0600)
@@ -127,11 +127,15 @@ func TestDesktopTURNSecretInitAndRestrictedConfig(t *testing.T) {
 	}
 
 	// The watchdog stops the server within the interval once the table is gone or
-	// changed; the healthcheck reports the same.
+	// changed or the TURN address left lo; the healthcheck reports the same.
+	nolo := filepath.Join(dir, "config.nolo")
 	for _, tamper := range []func(string) error{
 		os.Remove,
 		func(p string) error { return os.WriteFile(p, []byte("table inet sbx_turn {}\n"), 0600) },
+		func(string) error { return os.WriteFile(nolo, nil, 0600) },
 	} {
+		_ = os.Remove(nolo)
+		_ = os.Remove(filepath.Join(dir, "config.ip"))
 		// A fresh tmpfs in the container: the previous start left 0400 files.
 		for _, f := range []string{"tls.crt", "tls.key", "turnserver.conf"} {
 			_ = os.Remove(filepath.Join(dir, f))
@@ -154,13 +158,13 @@ func TestDesktopTURNSecretInitAndRestrictedConfig(t *testing.T) {
 			t.Fatal(e)
 		}
 		if health() == nil {
-			t.Fatal("healthcheck passed without the installed table")
+			t.Fatal("healthcheck passed without the installed table or address")
 		}
 		exited := make(chan error, 1)
 		go func() { exited <- cmd.Wait() }()
 		select {
 		case e := <-exited:
-			if e == nil || !strings.Contains(out.String(), "relay egress table removed or changed") {
+			if e == nil || !strings.Contains(out.String(), "relay egress table or TURN address on lo removed or changed") {
 				t.Fatalf("watchdog exit: %v %s", e, out.String())
 			}
 		case <-time.After(5 * time.Second):
