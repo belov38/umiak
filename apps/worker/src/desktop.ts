@@ -73,15 +73,23 @@ export async function configureDesktop(
 /** Desktops renewed per controller run; the rest wait for the next run. */
 export const DESKTOP_TURN_BATCH = 100;
 /**
- * Every ten minutes refresh credentials older than twelve hours, oldest first.
- * One unreachable guest is logged and skipped: it stays due and is retried on
- * the next run, the others are renewed now.
+ * Every ten minutes refresh credentials older than twelve hours: never attempted
+ * first, then the longest since the last attempt, then the oldest credentials.
+ * An unreachable guest is logged and skipped: it stays due but goes behind the
+ * others, so a full batch of dead guests cannot starve the rest.
  */
-export async function refreshDesktopTurn(ctx: WorkerCtx): Promise<number> {
+export async function refreshDesktopTurn(
+	ctx: WorkerCtx,
+	batch = DESKTOP_TURN_BATCH,
+): Promise<number> {
 	if (!ctx.turn) return 0;
 	const due = await ctx.pool.query<{ id: string; machine_id: string }>(
-		`SELECT s.id,s.machine_id FROM runtime.sandboxes s JOIN runtime.sandbox_desktops d ON d.sandbox_id=s.id WHERE s.state='ready' AND s.machine_id IS NOT NULL AND (d.turn_issued_at IS NULL OR d.turn_issued_at<now()-interval '12 hours') ORDER BY d.turn_issued_at ASC NULLS FIRST, s.id LIMIT $1`,
-		[DESKTOP_TURN_BATCH],
+		`SELECT s.id,s.machine_id FROM runtime.sandboxes s JOIN runtime.sandbox_desktops d ON d.sandbox_id=s.id WHERE s.state='ready' AND s.machine_id IS NOT NULL AND (d.turn_issued_at IS NULL OR d.turn_issued_at<now()-interval '12 hours') ORDER BY d.turn_attempted_at ASC NULLS FIRST, d.turn_issued_at ASC NULLS FIRST, s.id LIMIT $1`,
+		[batch],
+	);
+	await ctx.pool.query(
+		"UPDATE runtime.sandbox_desktops SET turn_attempted_at=now() WHERE sandbox_id=ANY($1::uuid[])",
+		[due.rows.map((s) => s.id)],
 	);
 	let count = 0;
 	for (const s of due.rows) {

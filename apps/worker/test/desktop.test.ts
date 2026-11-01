@@ -128,3 +128,40 @@ it("desktop-turn renews every due desktop in a fixed order even when one guest f
 		[ids[0], ids[2]].sort(),
 	);
 });
+
+it("desktop-turn moves past unreachable desktops that fill a whole batch", async () => {
+	const w = await desktopWorld();
+	const env = opsEnv(w);
+	const ids: string[] = [];
+	for (let i = 0; i < 3; i++) {
+		const { sandboxId, operationId } = await createSandbox(w, env);
+		expect(await run(w, operationId)).toBe("succeeded");
+		ids.push(sandboxId);
+	}
+	// ids[0] has the oldest credentials and its guest never answers.
+	await w.pool.query(
+		"UPDATE runtime.sandbox_desktops SET turn_issued_at=now()-interval '20 hours'+(interval '1 minute'*array_position($1::uuid[],sandbox_id)) WHERE sandbox_id=ANY($1::uuid[])",
+		[ids],
+	);
+	const machines = new Map<string, string>();
+	for (const id of ids)
+		machines.set((await row(w, "sandboxes", id)).machine_id as string, id);
+	const unreachable = (await row(w, "sandboxes", ids[0] as string))
+		.machine_id as string;
+	const configure = w.agent.configureDesktop.bind(w.agent);
+	w.agent.configureDesktop = async (machineId, ...rest) => {
+		const result = await configure(machineId, ...rest);
+		if (machineId === unreachable) throw new Error("unavailable");
+		return result;
+	};
+	const before = w.agent.callsOf("configureDesktop").length;
+	const counts: number[] = [];
+	for (let i = 0; i < 3; i++) counts.push(await refreshDesktopTurn(w.ctx, 1));
+	expect(counts).toEqual([0, 1, 1]);
+	expect(
+		w.agent
+			.callsOf("configureDesktop")
+			.slice(before)
+			.map((c) => machines.get(c.machineId)),
+	).toEqual(ids);
+});
