@@ -15,8 +15,7 @@ test("API key: works on the public API, revoke ends streams and PTYs, then 401",
 	const sandboxId = await ensureSandbox(alice, team, `term-${state.run}`);
 
 	await page.goto(`/app/t/${team}/keys`);
-	await page.getByRole("button", { name: "New key" }).click();
-	const dialog = page.getByRole("dialog", { name: "New team API key" });
+	const dialog = page.getByRole("form", { name: "New team API key" });
 	await dialog
 		.getByRole("textbox", { name: "Key name" })
 		.fill(`ci-${state.run}`);
