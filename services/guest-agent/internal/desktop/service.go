@@ -40,10 +40,31 @@ type Session interface {
 	ClipboardSet(context.Context, string) error
 }
 
-// Credentials are fresh random secrets for one machine identity.
+// Credentials are fresh random secrets for one machine identity. Username and
+// Password are the Sunshine web UI login; the moonlight-web administrator and
+// its proxy user sbx have their own secrets. State written before they were
+// separated has none: the Sunshine password stays their secret there.
 type Credentials struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username          string `json:"username"`
+	Password          string `json:"password"`
+	MoonlightPassword string `json:"moonlightPassword,omitempty"`
+	ViewerPassword    string `json:"viewerPassword,omitempty"`
+}
+
+// Moonlight is the moonlight-web administrator password.
+func (c Credentials) Moonlight() string {
+	if c.MoonlightPassword != "" {
+		return c.MoonlightPassword
+	}
+	return c.Password
+}
+
+// Viewer is the password of the moonlight-web proxy user sbx.
+func (c Credentials) Viewer() string {
+	if c.ViewerPassword != "" {
+		return c.ViewerPassword
+	}
+	return c.Password
 }
 
 // Streamer isolates upstream pairing and stream detection until the pve spike.
@@ -117,7 +138,7 @@ func New(o Options) (*Service, error) {
 		return nil, err
 	}
 	if s.state.Identity != o.Identity {
-		s.state = identityState{Identity: o.Identity, Credentials: Credentials{Username: randomSecret(), Password: randomSecret()}, AuthEpoch: 1}
+		s.state = identityState{Identity: o.Identity, Credentials: Credentials{Username: randomSecret(), Password: randomSecret(), MoonlightPassword: randomSecret(), ViewerPassword: randomSecret()}, AuthEpoch: 1}
 		// Identity changes must not retain pairing databases or TURN credentials.
 		entries, e := os.ReadDir(o.Dir)
 		if e != nil {

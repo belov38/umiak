@@ -2,6 +2,8 @@ package desktop
 
 import (
 	"context"
+	"crypto/pbkdf2"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -76,7 +78,9 @@ func (h *FileHost) Prepare(ctx context.Context, c Credentials, ice []*v1.Desktop
 		}
 		web := cfg["web_server"].(map[string]any)
 		web["bind_address"] = "127.0.0.1:47800"
-		web["first_login_create_admin"] = true
+		// The administrator exists before moonlight-web listens (seedMoonlight):
+		// no first /api/login may claim it.
+		web["first_login_create_admin"] = false
 		web["first_login_assign_global_hosts"] = false
 		web["forwarded_header"] = map[string]any{"username_header": "X-Sbx-Desktop-User", "auto_create_missing_user": false}
 		rtc := cfg["webrtc"].(map[string]any)
@@ -90,6 +94,13 @@ func (h *FileHost) Prepare(ctx context.Context, c Credentials, ice []*v1.Desktop
 			return false, e
 		}
 		if e = fsutil.WriteFileAtomic(filepath.Join(h.MoonDir, "config.json"), b, 0600); e != nil {
+			return false, e
+		}
+		seed, e := seedMoonlight(c.Username, c.Moonlight())
+		if e != nil {
+			return false, e
+		}
+		if e = fsutil.WriteFileAtomic(filepath.Join(h.MoonDir, "data.json"), seed, 0600); e != nil {
 			return false, e
 		}
 		capture := h.Capture
@@ -239,4 +250,40 @@ func (s *HTTPStreamer) Configure(ctx context.Context, ice []*v1.DesktopIceServer
 		return h.Configure(ctx, ice)
 	}
 	return nil
+}
+
+// moonlightHashIterations is HASH_ITERATIONS of moonlight-web v3.0.1
+// (src/app/password.rs): PBKDF2-HMAC-SHA256, 16-byte salt, 32-byte hash.
+const moonlightHashIterations = 600_000
+
+// seedMoonlight returns a moonlight-web v3.0.1 data store (JSON version "3",
+// src/app/storage/json/versions.rs) with only the Admin role and its user.
+// The agent writes it before moonlight-web first starts, so the server never
+// runs without an administrator and first_login_create_admin stays off.
+func seedMoonlight(name, password string) ([]byte, error) {
+	if name == "" || password == "" {
+		return nil, errors.New("moonlight administrator credentials are empty")
+	}
+	salt := make([]byte, 16)
+	if _, e := rand.Read(salt); e != nil {
+		return nil, e
+	}
+	hash, e := pbkdf2.Key(sha256.New, password, salt, moonlightHashIterations, 32)
+	if e != nil {
+		return nil, e
+	}
+	all := map[string]any{"allow_add_hosts": true, "maximum_bitrate_kbps": nil, "allow_codec_h264": true, "allow_codec_h265": true, "allow_codec_av1": true, "allow_hdr": true, "allow_transport_webrtc": true, "allow_transport_websockets": true}
+	return json.MarshalIndent(map[string]any{
+		"version": "3",
+		"users": map[string]any{"0": map[string]any{
+			"role_id":          0,
+			"name":             name,
+			"password":         map[string]any{"salt": hex.EncodeToString(salt), "hash": hex.EncodeToString(hash), "iterations": moonlightHashIterations},
+			"client_unique_id": name,
+		}},
+		"hosts":           map[string]any{},
+		"roles":           map[string]any{"0": map[string]any{"name": "Admin", "ty": "Admin", "default_settings": nil, "permissions": all}},
+		"default_role_id": nil,
+		"default_user_id": nil,
+	}, "", "  ")
 }

@@ -66,11 +66,21 @@ func TestPinnedPairingAndReuse(t *testing.T) {
 			}
 			_, _ = fmt.Fprint(w, `{"status":true}`)
 		case "/api/login":
+			var b map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			if b["name"] != "admin" || b["password"] != "moon-admin" {
+				t.Error("moonlight administrator must use its own secret")
+			}
 			http.SetCookie(w, &http.Cookie{Name: "sessionToken", Value: "fixture", Path: "/"})
 		case "/api/user":
 			if r.Method == "GET" {
 				http.Error(w, "not found", 404)
 			} else {
+				var b map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&b)
+				if b["name"] != "sbx" || b["password"] != "viewer-secret" {
+					t.Error("proxy user sbx must use its own secret")
+				}
 				_, _ = fmt.Fprint(w, `{"user_id":11}`)
 			}
 		case "/api/role/default":
@@ -119,7 +129,7 @@ func TestPinnedPairingAndReuse(t *testing.T) {
 	host := &fakeStreamHost{count: 2}
 	s := NewHTTPStreamer(host, server.Client(), server.URL, server.URL)
 	for range 2 {
-		h, a, e := s.Open(context.Background(), Credentials{"admin", "private"}, nil)
+		h, a, e := s.Open(context.Background(), Credentials{Username: "admin", Password: "private", MoonlightPassword: "moon-admin", ViewerPassword: "viewer-secret"}, nil)
 		if e != nil || h != "7" || a != "1" {
 			t.Fatalf("open %q %q %v", h, a, e)
 		}

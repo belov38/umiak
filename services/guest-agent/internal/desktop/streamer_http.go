@@ -138,7 +138,7 @@ func (s *HTTPStreamer) Open(ctx context.Context, c Credentials, ice []*v1.Deskto
 		}
 	}
 	for {
-		e = s.json(ctx, "POST", s.moon, "/api/login", map[string]string{"name": c.Username, "password": c.Password}, nil)
+		e = s.json(ctx, "POST", s.moon, "/api/login", map[string]string{"name": c.Username, "password": c.Moonlight()}, nil)
 		if e == nil {
 			break
 		}
@@ -159,7 +159,7 @@ func (s *HTTPStreamer) Open(ctx context.Context, c Credentials, ice []*v1.Deskto
 		if e = s.json(ctx, "PATCH", s.moon, "/api/role", map[string]any{"id": role.ID, "ty": "User", "permissions": permissions}, nil); e != nil {
 			return "", "", e
 		}
-		if e = s.json(ctx, "POST", s.moon, "/api/user", map[string]any{"name": "sbx", "password": c.Password, "role_id": role.ID, "client_unique_id": "sbx-desktop"}, &user); e != nil {
+		if e = s.json(ctx, "POST", s.moon, "/api/user", map[string]any{"name": "sbx", "password": c.Viewer(), "role_id": role.ID, "client_unique_id": "sbx-desktop"}, &user); e != nil {
 			return "", "", e
 		}
 	}
