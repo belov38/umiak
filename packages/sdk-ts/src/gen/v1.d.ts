@@ -2364,7 +2364,7 @@ export interface components {
         /** @description A saved snapshot; create a sandbox from it with POST /v1/sandboxes {from: {snapshot: name}} */
         Snapshot: {
             /**
-             * @description quiesced: filesystems frozen in a running VM; powered_off: taken from a stopped VM; crash: a running VM paused without a filesystem freeze (Windows), like a power loss; null until ready
+             * @description quiesced: filesystems frozen in a running VM; powered_off: taken from a VM stopped by a clean guest shutdown; crash: disks as after a power loss (a Linux VM after a hard stop, or an older Windows snapshot); null until ready
              * @enum {string|null}
              */
             consistency: "quiesced" | "powered_off" | "crash" | null | (string & {});

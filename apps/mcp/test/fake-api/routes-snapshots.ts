@@ -164,7 +164,7 @@ export function registerSnapshotRoutes(app: FakeApp, fake: Fake): void {
 			snap.state = "ready";
 			snap.readyAt = new Date();
 			snap.consistency = wasReady && !forced ? "quiesced" : "powered_off";
-			if (forced) markForceStopped(op);
+			if (forced) markForceStopped(fake, op, sb);
 			// The new snapshot replaces a ready one of the same name.
 			for (const other of state.snapshots.values()) {
 				if (

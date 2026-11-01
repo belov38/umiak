@@ -70,6 +70,45 @@ describe("force_stop", () => {
 		});
 	});
 
+	it("a failed source restart is reported by sandbox_fork and snapshot_save alike", async () => {
+		h = await startHarness();
+		const sb = await sandbox(h, "windows");
+		h.api.state.forceStopRestartError = {
+			code: "agent_timeout",
+			message: "the agent did not connect in time",
+		};
+		const fork = await h.call("sandbox_fork", {
+			sandbox: sb,
+			force_stop: true,
+		});
+		expect(fork.isError).toBe(false);
+		expect(fork.json.state).toBe("ready");
+		expect(fork.json.source_operation).toMatchObject({ state: "succeeded" });
+		const note =
+			"did not start again after the forced stop (agent_timeout: the agent did not connect in time)";
+		expect(fork.texts.join("\n")).toContain(note);
+		expect(fork.texts.join("\n")).toContain("call sandbox_resume");
+
+		const other = await sandbox(h, "windows");
+		const save = await h.call("snapshot_save", {
+			sandbox: other,
+			name: "win",
+			force_stop: true,
+		});
+		expect(save.isError).toBe(false);
+		expect(save.texts.join("\n")).toContain(note);
+	});
+
+	it("a forced fork whose source restarted adds no note", async () => {
+		h = await startHarness();
+		const sb = await sandbox(h, "windows");
+		const fork = await h.call("sandbox_fork", {
+			sandbox: sb,
+			force_stop: true,
+		});
+		expect(fork.texts.join("\n")).not.toContain("did not start again");
+	});
+
 	it("Linux ignores the flag; without it nothing is added to the body", async () => {
 		h = await startHarness();
 		const sb = await sandbox(h, "linux");

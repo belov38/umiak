@@ -118,8 +118,10 @@ function forkSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 				fenced,
 				await ensureForkSource(ctx, fenced),
 			);
-			if (isForced(fenced)) await extendDeadlineForRestart(ctx, fenced);
-			return taken;
+			if (!isForced(fenced)) return taken;
+			await extendDeadlineForRestart(ctx, fenced);
+			// From here on the operation does not fail (force-stop.ts).
+			return { ...taken, snapshotTaken: true };
 		},
 	};
 	// S9 §24.8: a forced fork stops the source, snapshots it and starts it again.

@@ -61,6 +61,27 @@ async function thrown(p: Promise<unknown>): Promise<SbxError> {
 	throw new Error("expected an SbxError");
 }
 
+/** The guest ignores the shutdown: S1 reports a timeout, the VM keeps running. */
+function shutdownTimesOut(w: TestWorld): void {
+	w.infra.shutdown = (vmid, timeoutS) => {
+		w.infra.calls.push({ method: "shutdown", args: [vmid, timeoutS] });
+		return Promise.resolve("timeout" as const);
+	};
+}
+
+async function setDeadline(
+	w: TestWorld,
+	opId: string,
+	secondsFromNow: number,
+): Promise<void> {
+	await w.pool.query(
+		`UPDATE runtime.operations
+		 SET deadline_at = now() + make_interval(secs => $2::double precision)
+		 WHERE id = $1`,
+		[opId, secondsFromNow],
+	);
+}
+
 async function opCount(w: TestWorld, sandboxId: string): Promise<number> {
 	const r = await w.pool.query<{ n: number }>(
 		"SELECT count(*)::int AS n FROM runtime.operations WHERE sandbox_id = $1",
@@ -400,5 +421,278 @@ describe("unchanged paths", () => {
 			e.svc.fork(e.p, s.sandboxId, { forceStop: "yes" as unknown as boolean }),
 		);
 		expect(err.code).toBe("validation");
+	});
+});
+
+describe("shutdown timeout of a forced operation (no crash-consistent snapshot)", () => {
+	it("Windows gets the longer forced shutdown budget", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		const f = await forkSandbox(e, s.sandboxId, { forceStop: true });
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+		expect(w.infra.callsOf("shutdown").at(-1)?.args[1]).toBe(300);
+	});
+
+	it("fork: shutdown_timeout (retryable), nothing snapshotted, the source hard-stopped and started again", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		const f = await forkSandbox(e, s.sandboxId, { forceStop: true });
+		shutdownTimesOut(w);
+		w.infra.calls.length = 0;
+
+		expect(await run(w, f.forkOpId)).toBe("failed");
+
+		const op = await row(w, "operations", f.forkOpId);
+		expect(op).toMatchObject({
+			error_code: "shutdown_timeout",
+			retryable: true,
+		});
+		expect(op.error_message).toMatch(
+			/did not shut down cleanly.*nothing was snapshotted/,
+		);
+		expect(op.progress).toMatchObject({ sourceRestarted: true });
+		expect(op.progress).not.toHaveProperty("forceStopped");
+		expect(powerCalls(w)).toEqual(["shutdown", "stop", "start"]);
+		expect(w.infra.callsOf("snapshot")).toHaveLength(0);
+		// The stop failed before the fork_source row was made.
+		expect(await snapshotsOf(w, f.targetId)).toEqual([]);
+		expect(await row(w, "machines", s.machineId)).toMatchObject({
+			state: "running",
+			clean_stop: false,
+		});
+		expect((await row(w, "sandboxes", s.sandboxId)).state).toBe("ready");
+		await run(w, f.createOpId);
+		expect(await row(w, "sandboxes", f.targetId)).toMatchObject({
+			state: "error",
+			error_code: "fork_failed",
+		});
+	});
+
+	it("save: shutdown_timeout, the snapshot row failed, the source runs again", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		w.agent.secretFilesWiped = true;
+		const r = await e.svc.saveSnapshot(e.p, s.sandboxId, "win", undefined, {
+			forceStop: true,
+		});
+		shutdownTimesOut(w);
+		w.infra.calls.length = 0;
+
+		expect(await run(w, r.operation.id)).toBe("failed");
+
+		expect(await row(w, "operations", r.operation.id)).toMatchObject({
+			error_code: "shutdown_timeout",
+			retryable: true,
+		});
+		expect(w.infra.callsOf("snapshot")).toHaveLength(0);
+		expect((await row(w, "snapshots", r.snapshot.id)).state).toBe("failed");
+		expect((await row(w, "machines", s.machineId)).state).toBe("running");
+		expect((await row(w, "sandboxes", s.sandboxId)).state).toBe("ready");
+	});
+});
+
+describe("a snapshot after a stop that was not clean is never powered_off", () => {
+	async function hardStopped(
+		w: TestWorld,
+		e: OpsEnv,
+	): Promise<{ sandboxId: string; machineId: string }> {
+		const s = await readySandbox(w, e);
+		shutdownTimesOut(w);
+		const op = await e.svc.stop(e.p, s.sandboxId);
+		expect(await run(w, op.id)).toBe("succeeded");
+		expect((await row(w, "operations", op.id)).progress).toMatchObject({
+			shutdown: "hard",
+		});
+		expect(await row(w, "machines", s.machineId)).toMatchObject({
+			state: "stopped",
+			clean_stop: false,
+		});
+		return s;
+	}
+
+	it("a clean stop records clean_stop; a resume clears it", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await stoppedSandbox(w, e);
+		expect((await row(w, "machines", s.machineId)).clean_stop).toBe(true);
+		const resume = await e.svc.resume(e.p, s.sandboxId);
+		expect(await run(w, resume.id)).toBe("succeeded");
+		expect(await row(w, "machines", s.machineId)).toMatchObject({
+			state: "running",
+			clean_stop: false,
+		});
+	});
+
+	it("Windows after a hard stop: fork and save are snapshot_requires_clean_stop, nothing snapshotted", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await hardStopped(w, e);
+		await makeWindows(w);
+		await w.pool.query(
+			"UPDATE runtime.machines SET secret_files_on_disk = false WHERE id = $1",
+			[s.machineId],
+		);
+		w.infra.calls.length = 0;
+
+		const f = await forkSandbox(e, s.sandboxId);
+		expect(await run(w, f.forkOpId)).toBe("failed");
+		const op = await row(w, "operations", f.forkOpId);
+		expect(op.error_code).toBe("snapshot_requires_clean_stop");
+		expect(op.error_message).toMatch(/not shut down cleanly/);
+		expect(op.error_message).toMatch(/forceStop: true/);
+
+		const saved = await e.svc.saveSnapshot(e.p, s.sandboxId, "hard");
+		expect(await run(w, saved.operation.id)).toBe("failed");
+		expect((await row(w, "operations", saved.operation.id)).error_code).toBe(
+			"snapshot_requires_clean_stop",
+		);
+		expect(w.infra.callsOf("snapshot")).toHaveLength(0);
+		expect((await row(w, "sandboxes", s.sandboxId)).state).toBe("stopped");
+	});
+
+	it("Linux after a hard stop: the fork's snapshot is labelled crash", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await hardStopped(w, e);
+		const f = await forkSandbox(e, s.sandboxId);
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+		const [snap] = await snapshotsOf(w, f.targetId);
+		expect(snap).toMatchObject({ state: "ready", consistency: "crash" });
+	});
+});
+
+describe("the restart after the forced snapshot never fails the operation", () => {
+	it("the restart budget covers the template's boot timeout plus a margin", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		await w.pool.query(
+			"UPDATE runtime.template_builds SET boot_timeout_s = 1200 WHERE id = $1",
+			[w.topo.templateBuildId],
+		);
+		const f = await forkSandbox(e, s.sandboxId, { forceStop: true });
+		let atStart = 0;
+		const start = w.infra.start.bind(w.infra);
+		w.infra.start = async (vmid, o) => {
+			const op = await row(w, "operations", f.forkOpId);
+			atStart = (op.deadline_at as Date).getTime() - Date.now();
+			return start(vmid, o);
+		};
+
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+		// 1200 s boot timeout + 5 min > the 15 min resume deadline.
+		expect(atStart).toBeGreaterThan(24 * 60_000);
+	});
+
+	it("deadline passed during the restart: the fork succeeds and the source runs", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		const f = await forkSandbox(e, s.sandboxId, { forceStop: true });
+		const start = w.infra.start.bind(w.infra);
+		w.infra.start = async (vmid, o) => {
+			await setDeadline(w, f.forkOpId, -1);
+			return start(vmid, o);
+		};
+
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+
+		expect((await row(w, "operations", f.forkOpId)).progress).toMatchObject({
+			snapshotTaken: true,
+			sourceRestarted: true,
+		});
+		const [snap] = await snapshotsOf(w, f.targetId);
+		expect(snap).toMatchObject({ state: "ready", consistency: "powered_off" });
+		expect((await row(w, "machines", s.machineId)).state).toBe("running");
+		expect(sandboxOpJobs(w, f.createOpId)).toHaveLength(1);
+	});
+
+	it("deadline passed and the agent never comes back: the fork succeeds, the source shows resume_failed", async () => {
+		const w = await createWorld(db);
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		await w.pool.query(
+			"UPDATE runtime.template_builds SET boot_timeout_s = 2 WHERE id = $1",
+			[w.topo.templateBuildId],
+		);
+		const f = await forkSandbox(e, s.sandboxId, { forceStop: true });
+		const start = w.infra.start.bind(w.infra);
+		w.infra.start = async (vmid, o) => {
+			await setDeadline(w, f.forkOpId, 1);
+			w.agentWorld.behavior = "never";
+			return start(vmid, o);
+		};
+
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+
+		expect((await row(w, "operations", f.forkOpId)).progress).toMatchObject({
+			sourceRestarted: false,
+			restartError: { code: "agent_timeout" },
+		});
+		const [snap] = await snapshotsOf(w, f.targetId);
+		expect(snap?.state).toBe("ready");
+		expect(await row(w, "sandboxes", s.sandboxId)).toMatchObject({
+			state: "error",
+			error_code: "resume_failed",
+		});
+		expect(sandboxOpJobs(w, f.createOpId)).toHaveLength(1);
+	});
+
+	it("a transient start error is retried: the source runs again", async () => {
+		const w = await createWorld(db);
+		w.ctx.timing.restartRetryMs = 1;
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		const f = await forkSandbox(e, s.sandboxId, { forceStop: true });
+		const start = w.infra.start.bind(w.infra);
+		let failures = 1;
+		w.infra.start = (vmid, o) => {
+			if (failures-- > 0) {
+				return Promise.reject(
+					Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+				);
+			}
+			return start(vmid, o);
+		};
+
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+
+		expect((await row(w, "operations", f.forkOpId)).progress).toMatchObject({
+			sourceRestarted: true,
+		});
+		expect((await row(w, "machines", s.machineId)).state).toBe("running");
+		expect((await row(w, "sandboxes", s.sandboxId)).state).toBe("ready");
+	});
+
+	it("a transient error that outlasts the restart budget is a failed restart, not a failed fork", async () => {
+		const w = await createWorld(db);
+		w.ctx.timing.restartRetryMs = 1;
+		const e = opsEnv(w);
+		const s = await windowsSource(w, e);
+		const f = await forkSandbox(e, s.sandboxId, { forceStop: true });
+		let attempts = 0;
+		w.infra.start = async () => {
+			attempts += 1;
+			if (attempts === 3) await setDeadline(w, f.forkOpId, -1);
+			throw Object.assign(new Error("read ECONNRESET"), {
+				code: "ECONNRESET",
+			});
+		};
+
+		expect(await run(w, f.forkOpId)).toBe("succeeded");
+
+		expect(attempts).toBe(3);
+		expect((await row(w, "operations", f.forkOpId)).progress).toMatchObject({
+			sourceRestarted: false,
+			restartError: { code: "ECONNRESET" },
+		});
+		const [snap] = await snapshotsOf(w, f.targetId);
+		expect(snap?.state).toBe("ready");
+		expect((await row(w, "sandboxes", s.sandboxId)).error_code).toBe(
+			"resume_failed",
+		);
 	});
 });

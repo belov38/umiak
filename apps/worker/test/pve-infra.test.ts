@@ -114,7 +114,7 @@ async function setup(
 }
 
 describe("PveInfraRegistry", () => {
-	it("preserves S1's Windows crash consistency without QGA, including an agent-only preparation hook", async () => {
+	it("a running Windows snapshot needs an explicit crashConsistent, also with an agent-only preparation hook", async () => {
 		const e = await setup();
 		const m = randomUUID();
 		const vm = await e.infra.create({
@@ -128,13 +128,35 @@ describe("PveInfraRegistry", () => {
 		config.ostype = "win11";
 		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
 		e.api.agentUp = false;
+		const hook = {
+			freeze: async () => {
+				trace.push("agent.prepare");
+			},
+			thaw: async () => {
+				trace.push("agent.restore");
+			},
+		};
+		const trace: string[] = [];
+		for (const o of [{}, { hook }]) {
+			await expect(
+				e.infra.snapshot(vm.vmid, {
+					lvId: randomUUID().replaceAll("-", ""),
+					...o,
+				}),
+			).rejects.toMatchObject({
+				code: "snapshot_requires_stop",
+				retryable: false,
+			});
+		}
+		expect(trace).toEqual([]);
 		const first = await e.infra.snapshot(vm.vmid, {
 			lvId: randomUUID().replaceAll("-", ""),
+			crashConsistent: true,
 		});
 		expect(first.consistency).toBe("crash");
-		const trace: string[] = [];
 		const second = await e.infra.snapshot(vm.vmid, {
 			lvId: randomUUID().replaceAll("-", ""),
+			crashConsistent: true,
 			hook: {
 				freeze: async () => {
 					trace.push("agent.prepare");

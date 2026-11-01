@@ -577,6 +577,7 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 			// 4. Forced fork through the worker.
 			const f = await forkSandbox(e, c.sandboxId, { forceStop: true });
 			sandboxes.push(f.targetId);
+			const marksBefore = marks.length;
 			t0 = Date.now();
 			expect(await runLogged(w, f.forkOpId)).toBe("succeeded");
 			const forkMs = Date.now() - t0;
@@ -601,6 +602,48 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 			expect((await row(w, "sandboxes", c.sandboxId)).state).toBe("ready");
 			const back = await sessions.info(srcVmid);
 			expect(back?.boot_id).not.toBe(srcInfo?.boot_id);
+			const shutdownMs = marks
+				.slice(marksBefore)
+				.find((m) => m.what === "shutdown")?.ms;
+			log(`forced fork: guest shutdown ${shutdownMs} ms (budget 300 s)`);
+
+			// 4b. The shutdown-timeout path (S9 §24.9): a forced save with a
+			// 5 s shutdown budget fails shutdown_timeout, snapshots nothing,
+			// and the source runs again.
+			w.ctx.timing.forceStopShutdownTimeoutS = 5;
+			const save = await e.svc.saveSnapshot(
+				e.p,
+				c.sandboxId,
+				"fs-timeout",
+				undefined,
+				{ forceStop: true },
+			);
+			t0 = Date.now();
+			expect(await runLogged(w, save.operation.id)).toBe("failed");
+			delete w.ctx.timing.forceStopShutdownTimeoutS;
+			const saveOp = await row(w, "operations", save.operation.id);
+			log(
+				`save with a 5 s shutdown budget: ${Date.now() - t0} ms, ${saveOp.error_code} (retryable ${saveOp.retryable}): ${saveOp.error_message}; progress ${JSON.stringify(saveOp.progress)}`,
+			);
+			expect(saveOp).toMatchObject({
+				error_code: "shutdown_timeout",
+				retryable: true,
+			});
+			expect(saveOp.progress).toMatchObject({ sourceRestarted: true });
+			const failedSnap = await row(w, "snapshots", save.snapshot.id);
+			expect(failedSnap).toMatchObject({
+				state: "failed",
+				consistency: null,
+			});
+			const lvTag = `sbx-snap-${failedSnap.lv_id as string}`;
+			expect(
+				(await infra.listLvs()).filter((l) => l.tags.includes(lvTag)),
+			).toEqual([]);
+			expect((await row(w, "sandboxes", c.sandboxId)).state).toBe("ready");
+			expect(await row(w, "machines", srcMachine)).toMatchObject({
+				state: "running",
+			});
+			expect(await infra.status(srcVmid)).toBe("running");
 
 			// 5. One 4 GB VM at a time: stop the source before the fork boots.
 			const stop = await e.svc.stop(e.p, c.sandboxId);

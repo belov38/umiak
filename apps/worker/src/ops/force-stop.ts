@@ -3,6 +3,7 @@ import { retryOnVmLock } from "@sbx/pve";
 import type { WorkerCtx } from "../context.ts";
 import { errFields } from "../log.ts";
 import { MachineStateConflict } from "../machine-prep.ts";
+import { isPermanent } from "../ports.ts";
 import { type Fenced, FencedOut, type Step } from "../steps.ts";
 import {
 	bootTimeoutMs,
@@ -18,7 +19,7 @@ import {
 } from "./common.ts";
 import { sandboxErrorCode } from "./compensate.ts";
 import { fencedVmLockSleep, mergeProgress } from "./snapshot-step.ts";
-import { stopSteps } from "./stop.ts";
+import { cleanStop, stopSteps } from "./stop.ts";
 
 // Forced fork and save_snapshot of a running Windows sandbox (S9 §24.8).
 // Windows disks are snapshotted only from a stopped VM, so with
@@ -31,15 +32,31 @@ import { stopSteps } from "./stop.ts";
 //
 // and then its own finish (fork: the hand-off to the target). The sandbox
 // stays `ready` with this operation active; its machine goes
-// running → stopping → stopped → starting → running. A failed restart does
-// not fail the operation once the snapshot is done: the VM is hard-stopped,
-// the machine `stopped`, the sandbox `ready → error` (`resume_failed`; the
-// user resumes it), and progress records `sourceRestarted: false` with
-// `restartError`. A failure before the snapshot is done compensates as
-// usual, and the compensation starts the source again (`restartForcedSource`).
+// running → stopping → stopped → starting → running.
+//
+// The shutdown gets a longer budget (FORCE_STOP_SHUTDOWN_TIMEOUT_S) and no
+// hard stop: a timeout is `shutdown_timeout`, nothing is snapshotted, and
+// the compensation hard-stops the VM and starts it again. A crash-consistent
+// copy is never labelled `powered_off`.
+//
+// Once the snapshot is done (`progress.snapshotTaken`), nothing fails the
+// operation: the deadline no longer applies (steps.ts `deadlinePassed`; it
+// is moved to cover the restart only to bound its waits), transient restart
+// errors are retried until that deadline, and a restart that still fails
+// leaves the VM hard-stopped, the machine `stopped`, the sandbox
+// `ready → error` (`resume_failed`; the user resumes it), and progress
+// `sourceRestarted: false` with `restartError`. A failure before the
+// snapshot compensates as usual, and the compensation starts the source
+// again (`restartForcedSource`).
 //
 // Progress keys (the API's Operation.forceStop): `forceStopped`,
-// `sourceRestarted`, `restartError {code, message}`.
+// `sourceRestarted`, `restartError {code, message}`; internal:
+// `snapshotTaken`.
+
+/** Start gate, provisioning and retries on top of the template's boot timeout. */
+const RESTART_MARGIN_MS = 5 * 60_000;
+/** Pause between retries of a transient restart error. */
+const RESTART_RETRY_MS = 5_000;
 
 /** The operation stops and restarts its source (`request.forceStop`). */
 export function isForced(fenced: Fenced): boolean {
@@ -58,9 +75,9 @@ export function forceStopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 					const r = await tx.client.query(
 						`UPDATE runtime.machines
 						 SET state = 'stopped', power_observed = 'stopped', power_observed_at = now(),
-						     state_changed_at = now(), version = version + 1
+						     clean_stop = $2, state_changed_at = now(), version = version + 1
 						 WHERE id = $1 AND state IN ('running', 'stopping')`,
-						[m.id],
+						[m.id, cleanStop(fenced)],
 					);
 					if (r.rowCount !== 1 && m.state !== "stopped") {
 						throw new MachineStateConflict(m.id, `state ${m.state}`);
@@ -79,16 +96,19 @@ export function forceStopSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 }
 
 /**
- * After the snapshot: the deadline becomes at least now + the resume
- * deadline, so the restart is not cut short (and cannot fail the operation
- * through `deadline_exceeded`).
+ * Before the restart: the deadline becomes at least now + the restart
+ * budget (the resume deadline, and at least the template's boot timeout plus
+ * a margin), so the restart's waits are not cut short.
  */
 export async function extendDeadlineForRestart(
 	ctx: WorkerCtx,
 	fenced: Fenced,
 ): Promise<void> {
 	const m = await currentMachine(ctx, fenced.sandboxId);
-	const ms = forceStopRestartMs(await machineOs(ctx.pool, m));
+	const ms = Math.max(
+		forceStopRestartMs(await machineOs(ctx.pool, m)),
+		(await bootTimeoutMs(ctx, m.template_build_id)) + RESTART_MARGIN_MS,
+	);
 	await fenced.tx(async (tx) => {
 		await tx.client.query(
 			`UPDATE runtime.operations
@@ -174,7 +194,39 @@ async function restartFailed(
 	await fenced.check();
 }
 
-/** A restart step: skipped after a failed restart; its errors end the restart, not the operation. */
+/**
+ * Repeats `fn` on transient errors (not `retryable === false`, as the step
+ * engine) until the operation's deadline, which covers the restart.
+ */
+async function retryTransient<T>(
+	ctx: WorkerCtx,
+	fenced: Fenced,
+	what: string,
+	fn: () => Promise<T>,
+): Promise<T> {
+	for (;;) {
+		try {
+			return await fn();
+		} catch (e) {
+			if (e instanceof FencedOut || isPermanent(e)) throw e;
+			const at = (await fenced.check()).deadlineAt;
+			if (at !== null && at.getTime() <= Date.now()) throw e;
+			ctx.log.info(
+				{ ...errFields(e), operationId: fenced.id, step: what },
+				"transient error while restarting the force-stopped source; retrying",
+			);
+			await fencedVmLockSleep(
+				ctx,
+				fenced,
+			)(ctx.timing.restartRetryMs ?? RESTART_RETRY_MS);
+		}
+	}
+}
+
+/**
+ * A restart step: skipped after a failed restart; transient errors are
+ * retried; its errors end the restart, not the operation.
+ */
 function restartStep(
 	ctx: WorkerCtx,
 	fenced: Fenced,
@@ -186,7 +238,7 @@ function restartStep(
 		skipIf: async () => restartFailedBefore(fenced),
 		run: async () => {
 			try {
-				return await run();
+				return await retryTransient(ctx, fenced, name, run);
 			} catch (e) {
 				if (e instanceof FencedOut) throw e;
 				await restartFailed(ctx, fenced, e);
@@ -286,9 +338,15 @@ export async function restartForcedSource(
 				);
 			});
 		}
-		await startSource(ctx, fenced);
-		await waitSourceAgent(ctx, fenced);
-		await provisionSource(ctx, fenced);
+		await retryTransient(ctx, fenced, "restart", () =>
+			startSource(ctx, fenced),
+		);
+		await retryTransient(ctx, fenced, "restart_agent", () =>
+			waitSourceAgent(ctx, fenced),
+		);
+		await retryTransient(ctx, fenced, "restart_provision", () =>
+			provisionSource(ctx, fenced),
+		);
 		await mergeProgress(fenced, { sourceRestarted: true });
 	} catch (e) {
 		if (e instanceof FencedOut) throw e;

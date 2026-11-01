@@ -55,8 +55,8 @@ export const SnapshotSchema = z
 			.openapi({
 				description:
 					"quiesced: filesystems frozen in a running VM; powered_off: taken from a " +
-					"stopped VM; crash: a running VM paused without a filesystem freeze " +
-					"(Windows), like a power loss; null until ready",
+					"VM stopped by a clean guest shutdown; crash: disks as after a power loss " +
+					"(a Linux VM after a hard stop, or an older Windows snapshot); null until ready",
 			}),
 		error: z
 			.object({ code: z.string(), message: z.string() })

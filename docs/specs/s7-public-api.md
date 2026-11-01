@@ -583,7 +583,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 
 `kind`: `create | fork | stop | resume | recover | delete | save_snapshot` (внутренние `reprovision` наружу не отдаются; в `activeOperation` они выглядят как `null`). `state`: `pending | running | succeeded | failed | superseded`. `error`: `{code, message, retryable}`. `step` — для отладки, значения не входят в контракт.
 
-`forceStop` (S9 §24.8): `null`, кроме fork и save_snapshot, принятых с `forceStop: true` для работающей Windows-sandbox: `{sourceStopped, sourceRestarted, restartError}`. `sourceStopped` — источник остановлен этой операцией; `sourceRestarted` — `true` после запуска, `null` пока не дошло, `false` — запуск не удался: операция всё равно `succeeded` (снапшот цел, fork продолжается), а источник в `error` с `resume_failed` (`restartError {code, message}`), его поднимают обычным `resume`. Если операция упала до снапшота, источник запускается снова её компенсацией.
+`forceStop` (S9 §24.8): `null`, кроме fork и save_snapshot, принятых с `forceStop: true` для работающей Windows-sandbox: `{sourceStopped, sourceRestarted, restartError}`. `sourceStopped` — источник остановлен этой операцией; `sourceRestarted` — `true` после запуска, `null` пока не дошло, `false` — запуск не удался: операция всё равно `succeeded` (снапшот цел, fork продолжается), а источник в `error` с `resume_failed` (`restartError {code, message}`), его поднимают обычным `resume`. Если операция упала до снапшота, источник запускается снова её компенсацией; гость, не выключившийся за 300 s, даёт `error {code: "shutdown_timeout", retryable: true}` без снапшота (S9 §24.9).
 
 ## 9. Команды
 

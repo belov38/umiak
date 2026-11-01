@@ -26,6 +26,10 @@ export interface Timing {
 	prepareStopTimeoutMs?: number;
 	/** S1 shutdown timeout of a stop before the hard stop (S6 §7.5: 60 s). */
 	shutdownTimeoutS?: number;
+	/** S1 shutdown timeout of the stop inside a forced fork/save (S9 §24.8); no hard stop after it. */
+	forceStopShutdownTimeoutS?: number;
+	/** Pause between retries of a transient error while restarting a force-stopped source. */
+	restartRetryMs?: number;
 	/** Test clock for snapshot VM-lock retries; production uses real delays. */
 	vmLockSleep?: (ms: number) => Promise<void>;
 }

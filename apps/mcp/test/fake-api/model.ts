@@ -210,13 +210,29 @@ export function forceStopFor(
 	);
 }
 
-/** A forced operation: the source was stopped and started again. */
-export function markForceStopped(op: FakeOperation): void {
+/**
+ * A forced operation: the source was stopped and started again, or its
+ * restart failed (`state.forceStopRestartError`; the source is then `error`).
+ */
+export function markForceStopped(
+	fake: Fake,
+	op: FakeOperation,
+	src: FakeSandbox,
+): void {
+	const restartError = fake.state.forceStopRestartError;
 	op.forceStop = {
 		sourceStopped: true,
-		sourceRestarted: true,
-		restartError: null,
+		sourceRestarted: restartError === null,
+		restartError,
 	};
+	if (restartError !== null) {
+		src.state = "error";
+		src.error = {
+			code: "resume_failed",
+			message: `the restart after the forced snapshot failed: ${restartError.message}`,
+		};
+		src.updatedAt = new Date();
+	}
 }
 
 export function finishOperation(

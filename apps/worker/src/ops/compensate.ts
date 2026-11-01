@@ -42,6 +42,7 @@ export async function markCompensating(
 				JSON.stringify({
 					compensating: error.code,
 					compensatingMessage: error.message,
+					...(error.retryable ? { compensatingRetryable: true } : {}),
 				}),
 			],
 		);
@@ -57,7 +58,7 @@ export function pendingCompensation(op: Operation): OperationError | null {
 	return {
 		code,
 		message: typeof message === "string" ? message : code,
-		retryable: false,
+		retryable: op.progress.compensatingRetryable === true,
 	};
 }
 

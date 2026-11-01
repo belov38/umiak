@@ -835,10 +835,13 @@ async function applyPowerDrift(
 		noteOwnerMismatch(ctx, e, { op, machineId: m.id, vmid });
 		return false;
 	}
+	// A hard stop leaves the disks as after a power loss (S6 §7.8).
 	await ctx.pool.query(
-		`UPDATE runtime.machines SET power_observed = 'stopped', power_observed_at = now()
+		`UPDATE runtime.machines
+		 SET power_observed = 'stopped', power_observed_at = now(),
+		     clean_stop = clean_stop AND $2
 		 WHERE id = $1 AND state = 'stopped'`,
-		[m.id],
+		[m.id, op === "shutdown"],
 	);
 	return true;
 }

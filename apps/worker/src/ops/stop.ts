@@ -22,6 +22,16 @@ export const STOP_STEPS = ["prepare", "shutdown", "verify", "finish"] as const;
 const PREPARE_STOP_TIMEOUT_MS = 10_000;
 /** Windows clears the pagefile at shutdown (S9 §8.1), which takes longer. */
 export const SHUTDOWN_TIMEOUT_S = { linux: 60, windows: 120 } as const;
+/**
+ * The stop of a forced fork/save (S9 §24.8). Its snapshot must not be
+ * crash-consistent, so a timeout fails the operation instead of a hard stop
+ * (`ShutdownTimeout`), and Windows gets a longer budget: the first shutdown
+ * of a fresh Windows clone took 118 s live.
+ */
+export const FORCE_STOP_SHUTDOWN_TIMEOUT_S = {
+	linux: 60,
+	windows: 300,
+} as const;
 
 /** The VM still runs after shutdown and a hard stop; repeated until the deadline. */
 export class StopNotConfirmed extends Error {
@@ -30,6 +40,23 @@ export class StopNotConfirmed extends Error {
 	constructor(vmid: number, status: string) {
 		super(`VM ${vmid} is ${status} after stop`);
 		this.name = "StopNotConfirmed";
+	}
+}
+
+/**
+ * The guest of a forced fork/save did not shut down in time (S9 §24.8). Nothing
+ * was snapshotted; the compensation hard-stops the VM and starts it again.
+ * Permanent for the step engine; the client may repeat the request.
+ */
+export class ShutdownTimeout extends Error {
+	readonly retryable = false;
+	readonly operationRetryable = true;
+	readonly code = "shutdown_timeout";
+	constructor(vmid: number, timeoutS: number) {
+		super(
+			`VM ${vmid}: the guest did not shut down cleanly within ${timeoutS} s; nothing was snapshotted, the sandbox is started again`,
+		);
+		this.name = "ShutdownTimeout";
 	}
 }
 
@@ -53,9 +80,12 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 /**
  * prepare → shutdown → verify of the sandbox's current machine. `prefix`
  * names the steps inside another operation (forced fork/save_snapshot, S9
- * §24.8: `stop_prepare`, ...).
+ * §24.8: `stop_prepare`, ...); there a shutdown timeout is `ShutdownTimeout`
+ * instead of a hard stop. Progress `shutdown`: `clean`, `hard` or `already`;
+ * only `clean` confirms a clean stop (`machines.clean_stop`).
  */
 export function stopSteps(ctx: WorkerCtx, fenced: Fenced, prefix = ""): Step[] {
+	const forced = prefix !== "";
 	const machine = () => currentMachine(ctx, fenced.sandboxId);
 	return [
 		{
@@ -112,13 +142,19 @@ export function stopSteps(ctx: WorkerCtx, fenced: Fenced, prefix = ""): Step[] {
 					throw new MachineGone(m.id, `VM ${vmid} missing`);
 				}
 				if (status === "stopped") return { shutdown: "already" };
-				const timeoutS =
-					ctx.timing.shutdownTimeoutS ??
-					SHUTDOWN_TIMEOUT_S[await machineOs(ctx.pool, m)];
+				const os = await machineOs(ctx.pool, m);
+				const timeoutS = forced
+					? (ctx.timing.forceStopShutdownTimeoutS ??
+						FORCE_STOP_SHUTDOWN_TIMEOUT_S[os])
+					: (ctx.timing.shutdownTimeoutS ?? SHUTDOWN_TIMEOUT_S[os]);
 				await fenced.check();
 				const res = await ownedPowerOp(ctx, m.id, vmid, "shutdown", () =>
 					infra.shutdown(vmid, timeoutS, { expectedOwner: m.id }),
 				);
+				if (res === "timeout" && forced) {
+					// No hard stop here: the compensation does it, then starts the VM again.
+					throw new ShutdownTimeout(vmid, timeoutS);
+				}
 				if (res === "timeout") {
 					await fenced.check();
 					await ownedPowerOp(ctx, m.id, vmid, "stop", () =>
@@ -151,11 +187,19 @@ export function stopSteps(ctx: WorkerCtx, fenced: Fenced, prefix = ""): Step[] {
 						}),
 					);
 					status = await infra.status(vmid);
+					if (status !== "stopped") throw new StopNotConfirmed(vmid, status);
+					// Not a clean stop after all.
+					return { shutdown: "hard" };
 				}
-				if (status !== "stopped") throw new StopNotConfirmed(vmid, status);
+				return undefined;
 			},
 		},
 	];
+}
+
+/** The stop steps saw a clean guest shutdown (S6 §7.8: `powered_off` snapshots). */
+export function cleanStop(fenced: Fenced): boolean {
+	return fenced.op.progress.shutdown === "clean";
 }
 
 export const STOP_OP: SandboxOpHandler = {
@@ -169,9 +213,9 @@ export const STOP_OP: SandboxOpHandler = {
 			const m = await tx.client.query(
 				`UPDATE runtime.machines
 				 SET state = 'stopped', power_observed = 'stopped', power_observed_at = now(),
-				     state_changed_at = now(), version = version + 1
+				     clean_stop = $2, state_changed_at = now(), version = version + 1
 				 WHERE id = $1 AND state IN ('running', 'stopping')`,
-				[machineId],
+				[machineId, cleanStop(fenced)],
 			);
 			if (m.rowCount !== 1) {
 				throw new MachineStateConflict(

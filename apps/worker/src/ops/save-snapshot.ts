@@ -106,8 +106,10 @@ function saveSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 		name: "snapshot",
 		run: async () => {
 			const taken = await takeSnapshot(ctx, fenced, snapshotId);
-			if (isForced(fenced)) await extendDeadlineForRestart(ctx, fenced);
-			return taken;
+			if (!isForced(fenced)) return taken;
+			await extendDeadlineForRestart(ctx, fenced);
+			// From here on the operation does not fail (force-stop.ts).
+			return { ...taken, snapshotTaken: true };
 		},
 	};
 	// S9 §24.8: a forced save stops the source, snapshots it and starts it again.

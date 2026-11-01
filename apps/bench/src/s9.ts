@@ -433,7 +433,7 @@ export async function runS9Once(deps: S9Deps): Promise<S9Run> {
 		snap = await retryOnVmLock(
 			() => {
 				snapAt = now();
-				return machines.snapshot(vmA as number);
+				return machines.snapshot(vmA as number, { crashConsistent: true });
 			},
 			{
 				onRetry: (err) => log(`VM ${vmA}: snapshot: ${String(err)}; retrying`),

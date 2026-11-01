@@ -54,27 +54,34 @@ export class SnapshotLost extends Error {
 /**
  * Windows disks are snapshotted only from a stopped VM (S9 §24.8): a running
  * source without `forceStop` (the API refuses it first; this is the worker's
- * own check). Saved Windows disks also need a durable confirmation that
- * secret files are absent: a stopped machine that still has them is
- * `snapshot_requires_clean_stop`.
+ * own check). The stop must have been a clean guest shutdown
+ * (`machines.clean_stop`; a hard stop or a crash leaves the disks as after a
+ * power loss): otherwise `snapshot_requires_clean_stop`. Saved Windows disks
+ * also need a durable confirmation that secret files are absent: a stopped
+ * machine that still has them is `snapshot_requires_clean_stop` too.
  */
 export class SnapshotRequiresStop extends Error {
 	readonly retryable = false;
 	readonly code: "snapshot_requires_stop" | "snapshot_requires_clean_stop";
 	constructor(
 		machineId: string,
-		why: "windows_running" | "secret_files" = "windows_running",
+		why:
+			| "windows_running"
+			| "secret_files"
+			| "unclean_stop" = "windows_running",
 		kind: "fork" | "save_snapshot" = "fork",
 	) {
 		super(
 			why === "secret_files"
 				? `machine ${machineId}: saved snapshot requires a clean stop confirming secret-file cleanup`
-				: `machine ${machineId}: ${windowsSnapshotRequiresStop(kind).message}`,
+				: why === "unclean_stop"
+					? `machine ${machineId}: the VM was not shut down cleanly (hard stop or crash), and a Windows snapshot would be crash-consistent; resume the sandbox and retry with forceStop: true (CLI --force-stop), or stop it again`
+					: `machine ${machineId}: ${windowsSnapshotRequiresStop(kind).message}`,
 		);
 		this.code =
-			why === "secret_files"
-				? "snapshot_requires_clean_stop"
-				: "snapshot_requires_stop";
+			why === "windows_running"
+				? "snapshot_requires_stop"
+				: "snapshot_requires_clean_stop";
 		this.name = "SnapshotRequiresStop";
 	}
 }
@@ -281,8 +288,11 @@ export interface SnapshotTaken {
  *   records `progress.quiesceVia = "qga"`: the retry uses the QGA fallback;
  *   Windows: never (S9 §24.8), `snapshot_requires_stop`; a forced operation
  *   stops the VM first;
- * - VM stopped: no freeze (`powered_off`); a saved Windows snapshot needs
- *   the clean-stop confirmation (`secret_files_on_disk = false`);
+ * - VM stopped: no freeze; `powered_off` only after a clean guest shutdown
+ *   (`machines.clean_stop`), else `crash` for Linux and
+ *   `snapshot_requires_clean_stop` for Windows (S6 §7.8); a saved Windows
+ *   snapshot also needs the secret-wipe confirmation
+ *   (`secret_files_on_disk = false`);
  * - disks, `hw` and `consistency` recorded under the fence;
  * - after the thaw, `quiesce_broken` (set by the `quiesce.watchdog_thawed`
  *   event) → `QuiesceFailed`; the compensation removes the LVs.
@@ -348,6 +358,16 @@ async function takeSnapshotOnce(
 				s.kind === "saved" ? "save_snapshot" : "fork",
 			);
 		}
+		// A stop that was not a clean shutdown (or a VM that died) leaves the
+		// disks as after a power loss: never labelled `powered_off`.
+		const unclean = status !== "running" && !m.clean_stop;
+		if (unclean && windows) {
+			throw new SnapshotRequiresStop(
+				m.id,
+				"unclean_stop",
+				s.kind === "saved" ? "save_snapshot" : "fork",
+			);
+		}
 		if (s.kind === "saved" && m.secret_files_on_disk && windows) {
 			throw new SnapshotRequiresStop(m.id, "secret_files");
 		}
@@ -391,6 +411,8 @@ async function takeSnapshotOnce(
 			res = await infra.snapshot(vmid, {
 				lvId,
 				...(hook ? { hook } : {}),
+				// Never a crash-consistent copy (§7.7, S9 §24.8).
+				crashConsistent: false,
 				expectedOwner: m.id,
 				beforeAct: () => fenced.check(),
 			});
@@ -434,7 +456,14 @@ async function takeSnapshotOnce(
 					 SET hw = $2, consistency = $3, source_machine_id = COALESCE(source_machine_id, $4),
 					     version = version + 1
 					 WHERE id = $1`,
-					[snapshotId, JSON.stringify(res.hw), res.consistency, m.id],
+					[
+						snapshotId,
+						JSON.stringify(res.hw),
+						unclean && res.consistency === "powered_off"
+							? "crash"
+							: res.consistency,
+						m.id,
+					],
 				);
 			});
 		} catch (e) {

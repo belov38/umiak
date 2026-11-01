@@ -816,7 +816,7 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 			};
 		}
 		fake.later(state.readyAfterMs, () => {
-			if (forced) markForceStopped(sourceOp);
+			if (forced) markForceStopped(fake, sourceOp, src);
 			finishOperation(fake, sourceOp, "succeeded");
 		});
 		claim?.save({

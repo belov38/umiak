@@ -11,6 +11,7 @@ import {
 	QgaExecStatusLostError,
 	QgaTimeoutError,
 	QgaUnavailableError,
+	SnapshotModeRequiredError,
 	StorageFullError,
 	ThawFailedError,
 	TracesRemainError,
@@ -108,7 +109,8 @@ function pveApiRetryable(err: PveApiError): boolean {
  * Permanent (`retryable: false`): quiesce failures of a snapshot (QGA does not
  * answer, freeze budget exceeded, thaw failed) as `QuiesceFailed`, and PVE API
  * 4xx answers other than 404, 409, lock or timeout messages and the 403
- * "Permission check failed (/vms/<id>, ...)" of a VM that is gone. Port errors
+ * "Permission check failed (/vms/<id>, ...)" of a VM that is gone, and S1's
+ * refusal of a running Windows snapshot without a mode. Port errors
  * with their own `retryable` flag (AgentUnavailable, AgentRejected from the
  * hook) pass through. Everything else is transient, including
  * TracesRemainError (the verified delete is repeated).
@@ -141,6 +143,12 @@ export function classifyInfraError(err: unknown, op?: InfraOp): Error {
 			...at,
 		});
 	}
+	// S9 §24.8: never a silent crash-consistent Windows snapshot.
+	if (err instanceof SnapshotModeRequiredError)
+		return new InfraError("snapshot_requires_stop", messageOf(err), {
+			retryable: false,
+			...at,
+		});
 	if (err instanceof TracesRemainError)
 		return new InfraError("traces_remain", messageOf(err), {
 			retryable: true,

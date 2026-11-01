@@ -9,6 +9,7 @@ import {
 	QgaUnavailableError,
 	SmbiosTooLongError,
 	SNAPSHOT_CLOUDINIT_KEY,
+	SnapshotModeRequiredError,
 	s2SerialPayload,
 	sendKey,
 	TracesRemainError,
@@ -1211,7 +1212,7 @@ describe("Windows template (three disks)", () => {
 		const m = await machines.create({});
 		await machines.start(m.vmid);
 		node.calls.length = 0;
-		const snap = await machines.snapshot(m.vmid);
+		const snap = await machines.snapshot(m.vmid, { crashConsistent: true });
 		expect(snap.consistency).toBe("crash");
 		expect(log.some((line) => line.includes("fsfreeze"))).toBe(false);
 		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
@@ -1221,6 +1222,23 @@ describe("Windows template (three disks)", () => {
 			`vm-500-disk-1->sbx-snap-${snap.id}-scsi0`,
 			`vm-500-disk-2->sbx-snap-${snap.id}-tpmstate0`,
 		]);
+	});
+
+	it("a running Windows VM without an explicit crashConsistent is refused, nothing snapshotted", async () => {
+		const { node, api, machines, log } = setup();
+		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
+		const m = await machines.create({});
+		await machines.start(m.vmid);
+		node.calls.length = 0;
+		await expect(machines.snapshot(m.vmid)).rejects.toBeInstanceOf(
+			SnapshotModeRequiredError,
+		);
+		expect(node.calls.some((c) => c.op === "lv.snapshot")).toBe(false);
+		expect(log.some((line) => line.includes("fsfreeze"))).toBe(false);
+		// A stopped Windows VM needs no choice: powered_off.
+		await machines.stop(m.vmid);
+		const snap = await machines.snapshot(m.vmid);
+		expect(snap.consistency).toBe("powered_off");
 	});
 
 	it("Windows VSS thawed by itself during the snapshot: the ref says autoThawed, no error", async () => {
@@ -1311,7 +1329,7 @@ describe("Windows template (three disks)", () => {
 		api.templateConfig = { ...WIN_TEMPLATE_CONFIG };
 		const a = await machines.create({});
 		await machines.start(a.vmid);
-		const snap = await machines.snapshot(a.vmid);
+		const snap = await machines.snapshot(a.vmid, { crashConsistent: true });
 		expect(snap.disks.map((d) => d.slot)).toEqual([
 			"efidisk0",
 			"scsi0",

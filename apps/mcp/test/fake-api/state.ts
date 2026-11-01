@@ -335,6 +335,8 @@ export interface IdempotencyRecord {
 export interface FakeState {
 	/** Mutable: creating/starting -> ready delay. */
 	readyAfterMs: number;
+	/** Mutable: the restart after a forced stop fails with this (S9 §24.8). */
+	forceStopRestartError: { code: string; message: string } | null;
 	sandboxes: Map<string, FakeSandbox>;
 	operations: Map<string, FakeOperation>;
 	commands: Map<string, FakeCommand>;
@@ -418,6 +420,7 @@ export function createState(
 	const fsCache = new Map<string, SandboxFs>();
 	return {
 		readyAfterMs: o.readyAfterMs,
+		forceStopRestartError: null,
 		sandboxes: new Map(),
 		operations: new Map(),
 		commands: new Map(),

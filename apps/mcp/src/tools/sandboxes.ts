@@ -60,6 +60,9 @@ const NEW_RESOURCE = {
 	openWorldHint: false,
 } as const;
 
+/** A fork's source operation ends before its copy starts; this only covers a slow read. */
+const SOURCE_OPERATION_WAIT_SECONDS = 5;
+
 interface ActionAnswer {
 	sandbox: SandboxData;
 	operation: OperationData;
@@ -103,11 +106,20 @@ async function finishAction(
 			);
 		}
 	}
+	let sourceOperation = answer.sourceOperation;
+	if (o.wait && sourceOperation?.forceStop) {
+		sourceOperation = await refreshOperation(ctx, sourceOperation);
+		// As snapshot_save: the copy is fine, the source did not start again.
+		if (sourceOperation.forceStop?.sourceRestarted === false) {
+			const e = sourceOperation.forceStop.restartError;
+			notes.push(
+				`the copy is made, but the source sandbox did not start again after the forced stop${e === null ? "" : ` (${safeLine(e.code)}: ${safeLine(e.message)})`}; call sandbox_resume on the source.`,
+			);
+		}
+	}
 	return sandboxResult(sandbox, {
 		operation: answer.operation,
-		...(answer.sourceOperation === undefined
-			? {}
-			: { sourceOperation: answer.sourceOperation }),
+		...(sourceOperation === undefined ? {} : { sourceOperation }),
 		target: o.target,
 		pinned: ctx.pinned,
 		...(o.replayed === undefined ? {} : { replayed: o.replayed }),
@@ -116,6 +128,30 @@ async function finishAction(
 			: { idempotencyKey: o.idempotencyKey }),
 		notes,
 	});
+}
+
+/**
+ * The operation's latest state (a short long-poll while it is active); the
+ * old data when that fails: it only adds detail to an answer.
+ */
+async function refreshOperation(
+	ctx: ToolContext,
+	op: OperationData,
+): Promise<OperationData> {
+	const active = op.state === "pending" || op.state === "running";
+	try {
+		const r = await ctx.sbx().raw.GET("/v1/operations/{operation}", {
+			params: {
+				path: { operation: op.id },
+				query: { waitSeconds: active ? SOURCE_OPERATION_WAIT_SECONDS : 0 },
+			},
+			...ctx.call,
+		});
+		return r.data;
+	} catch (err) {
+		if (!(err instanceof SbxError) || err.status === 401) throw err;
+		return op;
+	}
 }
 
 /** `{K: v}` and a list of names to remove -> the API's `{K: v | null}`. */

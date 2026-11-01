@@ -393,7 +393,11 @@ export function operationErrorOf(e: unknown): OperationError {
 			? (e as { code: string }).code
 			: "internal";
 	const message = e instanceof Error ? e.message : String(e);
-	return { code, message, retryable: false };
+	// `operationRetryable`: permanent for the step engine, but the client may
+	// repeat the request (e.g. `shutdown_timeout`).
+	const retryable =
+		(e as { operationRetryable?: unknown })?.operationRetryable === true;
+	return { code, message, retryable };
 }
 
 /**
