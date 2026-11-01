@@ -263,7 +263,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 {
   "web_server": {
     "bind_address": "127.0.0.1:47800",
-    "first_login_create_admin": true,
+    "first_login_create_admin": false,
     "first_login_assign_global_hosts": false,
     "forwarded_header": {
       "username_header": "X-Sbx-Desktop-User",
@@ -285,11 +285,13 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 Состояние стримера (`/var/lib/sbx-agent/desktop/` на Linux, `ProgramData\sbx-agent\desktop\` на Windows; доступ root/SYSTEM) содержит:
 - логин и пароль веб-UI Sunshine (32 случайных байта);
-- пароль администратора moonlight-web;
+- пароль администратора moonlight-web и пароль пользователя `sbx` — отдельные случайные секреты, не пароль Sunshine (s10-fix; в состоянии, записанном до разделения, остаётся общий пароль до следующей смены идентичности);
 - идентификаторы `hostId` и `appId` после pairing.
 
+Администратор moonlight-web создаётся до первого старта сервиса: агент кладёт в `data.json` хранилище формата v3 upstream (роль `Admin` и один пользователь, PBKDF2-HMAC-SHA256, 600 000 итераций, как `src/app/password.rs` v3.0.1), а `first_login_create_admin = false`. Первый `/api/login` больше не создаёт администратора, гонки с другим клиентом нет (s10-fix).
+
 Агент генерирует их сам и проводит pairing при первом запуске стримера после смены идентичности (S3 §7, S9 §11):
-1. Задать креды Sunshine (`sunshine --creds`), запустить Sunshine и moonlight-web.
+1. Задать креды Sunshine, записать хранилище moonlight-web с администратором, запустить Sunshine и moonlight-web.
 2. Через HTTP API moonlight-web (как администратор): создать роль `viewer` и пользователя `sbx` с этой ролью, добавить хост `localhost`, начать pairing и получить PIN.
 3. Передать PIN в Sunshine через API веб-UI: `POST https://127.0.0.1:47990/api/pin` с basic auth, CSRF-токеном и `pairing_id`, как требует текущая версия.
 4. Прочитать `hostId` и `appId` приложения `Desktop`.
@@ -304,7 +306,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 - Стример не работает, пока рабочий стол не открывают. Скриншот и ввод через API идут мимо него.
 - `Desktop/Open` (§11.1) запускает Sunshine и moonlight-web, если они не запущены, ждёт готовности (до 20 s) и возвращает `{hostId, appId}`.
-- Агент останавливает стример через 15 min без активного потока [S10]. Так он не тратит CPU и RAM.
+- Агент останавливает стример через 15 min без активного потока [S10]. Так он не тратит CPU и RAM. Отсчёт — от последнего `Open` или последнего замеченного зрителя; цикл рабочего стола агента (раз в секунду) делает `StopStreamer` один раз за период простоя, следующий `Open` запускает стример заново. Остановка идемпотентна, поэтому работает и для стримера, который пережил перезапуск агента (s10-fix).
 - **Идёт ли поток.** Агенту нужен признак `streaming` (идёт хотя бы один поток): для простоя (§11.4) и для остановки по таймеру. Готового источника upstream нет: moonlight-web v3 — один процесс без отдельного процесса на поток, а API Sunshine отдаёт только список сопряжённых клиентов. Кандидаты по порядку **[исполнитель, спайк L]**:
   1. строки подключения и отключения клиента в логе Sunshine;
   2. подключённые UDP-сокеты moonlight-web к управляющему порту Sunshine (`127.0.0.1:47999`);
@@ -372,6 +374,7 @@ total-quota=400
 prometheus
 ```
 
+- **Фильтр relay по портам** (s10-fix). `allowed-peer-ip` coturn задаёт только IP: разрешение на собственный адрес TURN пускает allocation к любому UDP-порту этого адреса, то есть к другим службам хоста (на CT 590 приёмка достучалась Send indication до слушателя `:40123`; tailscaled `:41641`). Поэтому relay-сокеты coturn (свой uid `SBX_TURN_UID`, адрес `relay-ip`, порты `min-port–max-port`) могут слать только на relay-порты того же адреса. Это таблица nftables `inet sbx_turn` (hook `output`, совпадение по `meta skuid` + адрес + порт relay), которую entrypoint контейнера ставит от root при каждом старте и только потом сбрасывает права до `SBX_TURN_UID` (`setpriv`, остаётся лишь `NET_BIND_SERVICE`). Без таблицы turnserver не стартует. Свой network namespace с NAT отвергнут: hairpin-NAT Docker переписывает адрес пира relay↔relay и ломает permissions, а публикация диапазона relay портов даёт по процессу `docker-proxy` на порт. **Требование к продакшену (S12, фаза 2 для изоляции):** TURN на выделенном адресе (нода с меткой или свой netns), где эта таблица ставится в namespace TURN (init-контейнер с `NET_ADMIN` на `hostNetwork`), и на этом адресе нет других служб. `no-software-attribute` и `no-cli` включены.
 - **Почему так.** Пиры, которых TURN пускает, — только его собственные relay-адреса. Поэтому утёкшие креды не превращают TURN в прокси наружу (анти-цель). Пары ICE, где TURN должен слать на host- или srflx-кандидат другой стороны, сразу получают отказ `CreatePermission`, и ICE выбирает relay ↔ relay (или прямой путь из п. 4 §9.1, если он есть). Relay от TURN к адресу браузера не поддерживается.
 
 ### 9.3 Креды TURN
@@ -499,6 +502,7 @@ Gateway сам обрабатывает `GET /` на метке `desktop` пос
 | `Act{actions, coordinate_space}` | последовательность действий ввода (§12.2) | `Sbx-Request-Id` |
 | `GetClipboard` / `SetClipboard{text}` | текст буфера обмена (§12.3) | `NO_SIDE_EFFECTS` / `Sbx-Request-Id` |
 
+- **Кэш `Sbx-Request-Id` и полезная нагрузка** (s10-fix). Исход `Act` хранится в кэше запросов агента (`state.db`, до 24 h) без скриншота: повтор с тем же id не повторяет ввод и возвращает сохранённый результат (`completed`, курсор, экран) со **свежим** скриншотом, если он был запрошен (`Screenshot` без побочных эффектов). Тело `SetClipboard` в кэше не хранится (только хеш запроса), `Screenshot` и `GetClipboard` не кэшируются. Так скриншоты не попадают в `state.db`, snapshot и fork (§16).
 - Скриншот возвращается в теле ответа (`bytes`). Для этого сервиса лимит сообщения Connect — 32 MiB **[исполнитель: проверить, что `libs/tunnel` его пропускает]**.
 - Ввод сериализуется: на machine одновременно выполняется один `Act`. Остальные ждут до 10 s, затем `resource_exhausted desktop_busy`.
 - Capabilities (S2 §10.2): `desktop.v1`, `desktop.stream.v1`, `desktop.input.v1`, `desktop.clipboard.v1`. Если их нет у агента, `api` отвечает `409 agent_outdated`.
@@ -530,6 +534,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 - Новое событие журнала `desktop.streaming_changed{streaming, count?}` (§8.4).
 - Счётчик **`desktopStreams`** (1, если идёт поток и число неизвестно) добавляется в оба места, откуда S6 берёт простой (S6 §12): в payload события `activity` и в ответ `System/Activity`, который S6 вызывает живьём перед idle-stop. При `desktopStreams > 0` sandbox `busy`, и idle-stop её не останавливает. Без этого зритель через TURN был бы невидим: TCP-потоков через туннель у WebRTC-потока нет.
 - Агентский признак простоя (S3 §13) тоже считает активный поток занятостью.
+- **Ошибка наблюдения** (s10-fix). Неудачная выборка зрителей сохраняет прошлое значение (не меньше 1) не дольше 2 min подряд идущих ошибок; после этого агент считает `desktopStreams = 0`. Иначе сломанный источник держал бы sandbox занятой и idle-stop не срабатывал бы никогда. Успешная выборка сбрасывает окно.
 - Вызовы computer-use API обновляют `last_api_call_at` как любые вызовы API (S6 `touchApiActivity`).
 
 ## 12. Примитивы computer-use
@@ -562,6 +567,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 
 - `coordinate_space {width, height}` в запросе: координаты даны в пространстве уменьшенного скриншота, агент пересчитывает их в экранные. Так LLM передаёт координаты с картинки 1280×720 без пересчёта.
 - Координаты вне экрана → `invalid_action` до выполнения первого действия (весь список проверяется заранее).
+- **Windows: заблокированный ввод** (s10-fix). `SendInput` возвращает 0 вставленных событий, пока входной рабочий стол не `Default` (переход входа в систему на свежем fork, защищённый рабочий стол). Helper повторяет только невставленные события каждые 50 ms до 2 s; затем `action_failed` с именем входного рабочего стола в сообщении. Ни одно нажатие не отправляется дважды.
 - Пределы: до 100 действий в запросе, суммарно до 60 s.
 - **Имена клавиш** — фиксированный словарь в proto, нижний регистр: модификаторы `ctrl`, `alt`, `shift`, `meta` (Super/Win); `enter`, `tab`, `escape`, `backspace`, `delete`, `insert`, `space`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `f1`…`f24`, `capslock`, `printscreen`, `menu`; одиночные печатные символы (`a`, `1`, `/`). Неизвестное имя → `invalid_action`.
 - Модификаторы `click` — тот же словарь.
@@ -608,6 +614,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 | 403 | `forbidden` | нет | `public` при выключенном `publicDesktopEnabled` (`details.reason: "public_disabled"`) |
 
 - Состояние sandbox — как для команд (S7 §9.1): не `ready` → `409 sandbox_not_ready`.
+- **Блокировка оператором** (S8 C3, s10-fix): `POST /links`, `PUT /access`, `POST /actions`, `PUT /clipboard` на заблокированной sandbox → `403 forbidden` с `details.reason: "sandbox_blocked"`, как `exec` (оператор проходит). Чтение (`GET /desktop`, `GET /screenshot`, `GET /clipboard`) разрешено, как чтение файлов; `DELETE /streams` разрешён (только отключает). Сама блокировка шлёт `NOTIFY sbx_identity 'sandboxes:<id>'`; монитор доступа `api` по нему (и раз в 5 s) поднимает `authEpoch`, вызывает `EndStreams` и отмечает `policy_revoked`, поэтому выданные билеты и cookie перестают действовать, а маршрут gateway получает `blocked`.
 - Ресурс Sandbox (S7 §8.1): `endpoints.desktop = "https://<slug>-desktop.<sbx-domain>/"` у шаблонов с capability `desktop` (без билета).
 
 ### 13.3 Внутренние ручки (internal listener, service token gateway)
@@ -628,15 +635,15 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 
 ### 13.5 Таблицы
 
-Схема `runtime`, миграции S10 в `db/migrations/` с номерами **0401–0499** (0400 занята S8 environments) [S10, по прецеденту S7]:
+Схема `runtime`, миграции S10 в `db/migrations/`: **0401–0404** внутри блока S8 `0400–0499` по решению master (0400 занята S8 environments); следующий свободный номер блока — 0405 (`docs/roadmap.md`):
 
 ```
 sandbox_desktops(
   sandbox_id uuid pk,             -- runtime.sandboxes
   access text,                    -- token | sso | public
   auth_epoch int,
-  blocked bool, block_reason text null,
   turn_issued_at timestamptz null,
+  pending_disconnect bool, policy_revoked bool,
   updated_at timestamptz)
 
 desktop_tickets(
@@ -647,7 +654,7 @@ desktop_tickets(
   used_at timestamptz null, created_at timestamptz)
 ```
 
-Триггер на `sandbox_desktops` шлёт `NOTIFY sbx_routes '<slug>'`. Cleanup S6 удаляет билеты старше суток. Изменения `packages/core` (`SandboxService`: `desktopLink`, `setDesktopAccess`, `endDesktopStreams`, шаг `authEpoch+1` в stop, шаг TURN в claim и provision) вносит исполнитель S10, согласуя с треком S6, как S7 (S7 §20.2).
+Блокировка — только `runtime.sandboxes.blocked` (S8): колонки `sandbox_desktops.blocked/block_reason` никто не писал, `0404_desktop_drop_block.sql` их удаляет (s10-fix). Триггер на `sandbox_desktops` шлёт `NOTIFY sbx_routes '<slug>'`. Cleanup S6 удаляет билеты старше суток. Изменения `packages/core` (`SandboxService`: `desktopLink`, `setDesktopAccess`, `endDesktopStreams`, шаг `authEpoch+1` в stop, шаг TURN в claim и provision) вносит исполнитель S10, согласуя с треком S6, как S7 (S7 §20.2).
 
 ## 14. Дашборд, CLI, SDK, MCP
 
@@ -670,11 +677,14 @@ S8 оставил заглушку; вкладку реализует испол
 
 | Команда | Что |
 |---|---|
-| `sbx desktop <id> [--fps 60] [--transport websocket] [--print]` | открыть ссылку в браузере (`--print` — только вывести) |
-| `sbx desktop screenshot <id> [-o file.png] [--max-width N] [--jpeg]` | скриншот в файл или stdout |
-| `sbx desktop act <id> [--json <file\|->]` | список действий из JSON; плюс короткие формы `click X Y`, `type TEXT`, `key ctrl+c`, `scroll DY` |
+| `sbx desktop [open] <id> [--fps 60] [--bitrate N] [--transport websocket] [--print]` | открыть ссылку в браузере (`--print` — только вывести) |
+| `sbx desktop screenshot <id> [-o file.png] [--max-width N] [--max-height N] [--jpeg] [--quality N]` | скриншот в файл или stdout |
+| `sbx desktop act <id> [--file <path\|->]` | список действий из JSON; плюс короткие формы `click X Y`, `type TEXT`, `key ctrl+c`, `scroll DY` |
 | `sbx desktop clipboard <id> [get\|set TEXT]` | буфер |
 | `sbx desktop access <id> token\|sso\|public` | режим доступа |
+| `sbx desktop end-streams <id>` | `DELETE /desktop/streams` |
+
+Реализация s10-fix: вход действий — `--file <path|->` (`-f`), а не `--json`, потому что глобальный `--json` CLI — формат вывода (S7 §14.3) и перехватывает флаг подкоманды. `end-streams` добавлен для `DELETE /desktop/streams`. Команды первого прохода `sbx screenshot|input|clipboard` и опции `sbx desktop --access/--end-streams` оставлены скрытыми синонимами.
 
 Контракт вывода — как у остального CLI (S7 §14.3): JSON, если stdout не TTY.
 
