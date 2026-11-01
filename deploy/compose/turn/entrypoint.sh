@@ -29,7 +29,11 @@ interval=${SBX_TURN_GUARD_INTERVAL:-2}
 case "$interval" in ''|*[!0-9.]*) echo 'invalid TURN guard interval' >&2; exit 1;; esac
 # Relay ports must never be ephemeral ports of this namespace: a relay could
 # otherwise reach a client socket of another process (S10 spec 9.2).
-read -r eph_min eph_max <"${SBX_TURN_SYSCTL_DIR:-/proc/sys/net/ipv4}/ip_local_port_range"
+# One read(2): dash's read builtin reads byte by byte, and sysctl files return
+# nothing past offset 0.
+range=$(cat "${SBX_TURN_SYSCTL_DIR:-/proc/sys/net/ipv4}/ip_local_port_range")
+eph_min=${range%%[!0-9]*} eph_max=${range##*[!0-9]}
+case "$eph_min$eph_max" in ''|*[!0-9]*) echo 'cannot read the ephemeral port range' >&2; exit 1;; esac
 [ "$relay_max" -lt "$eph_min" ] || [ "$relay_min" -gt "$eph_max" ] || {
  echo "TURN relay range overlaps the ephemeral ports $eph_min-$eph_max" >&2; exit 1; }
 [ -s "$secrets/tls.crt" ] && [ -s "$secrets/tls.key" ] || { echo 'TURN TLS certificate and key are required' >&2; exit 1; }
