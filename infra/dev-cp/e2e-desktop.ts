@@ -93,6 +93,16 @@ try {
 	}
 
 	console.log(`create_ms ${createMs}`);
+	// S9 11.2 p. 8 (s10-followups): the rename reboot happens before ready, never after claim.
+	const bootInfo = () =>
+		guestRoot(
+			sb,
+			pwsh(
+				"$b=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o');$r=@(Get-WinEvent -FilterHashtable @{LogName='System';Id=1074} -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'sbx identity changed' }).Count;\"$b $r\"",
+			),
+		).out.trim();
+	const readyBoot = windows ? bootInfo() : "";
+	if (windows) console.log(`boot after ready: ${readyBoot}`);
 	const turnHost = process.env.SBX_DESKTOP_TURN_HOST;
 	if (!turnHost) throw new Error("dev TURN host missing");
 	const egress = await sb.exec(
@@ -208,6 +218,14 @@ try {
 		process.env.SBX_DESKTOP_MCP_URL ?? "",
 		windows,
 	);
+	if (windows) {
+		const now = bootInfo();
+		check(
+			now.split(" ")[0] === readyBoot.split(" ")[0] &&
+				Number(readyBoot.split(" ")[1]) >= 1,
+			`rename reboot before ready, none after claim (${readyBoot} -> ${now})`,
+		);
+	}
 	// The first open starts the streamer: like the Desktop tab, a retryable
 	// desktop_starting gets a fresh single-use ticket after 2 s.
 	const jar = new Map<string, string>();
