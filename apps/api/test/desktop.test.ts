@@ -246,9 +246,10 @@ it("a ticket written while a block is applied stays invalid after unblock", asyn
 		 SELECT $1,$2,$3,$4,auth_epoch,now()+interval '10 minutes' FROM runtime.sandbox_desktops WHERE sandbox_id=$2`,
 		[ticketHash(ticket), s.sandboxId, `${s.slug}-desktop`, key.id],
 	);
-	await db.pool.query("UPDATE runtime.sandboxes SET blocked=false WHERE id=$1", [
-		s.sandboxId,
-	]);
+	await db.pool.query(
+		"UPDATE runtime.sandboxes SET blocked=false WHERE id=$1",
+		[s.sandboxId],
+	);
 	await recheckDesktopAccess(h.deps);
 	const gateway = w.harness({
 		listener: "internal",
