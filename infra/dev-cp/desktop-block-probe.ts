@@ -5,6 +5,7 @@
 //
 //   SBX_API_URL=<dev api> NODE_EXTRA_CA_CERTS=<dev ca> mise exec -- node infra/dev-cp/desktop-block-probe.ts
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
 import { runningSandboxMemory } from "./desktop-budget.ts";
 
@@ -136,7 +137,12 @@ try {
 		"screenshot (read) still allowed",
 	);
 	let after = before;
-	for (let i = 0; i < 20 && after === before; i++) {
+	// The epoch moves first; pending_disconnect clears once EndStreams has run.
+	for (
+		let i = 0;
+		i < 40 && (after === before || !after.endsWith(":false"));
+		i++
+	) {
 		await new Promise((done) => setTimeout(done, 500));
 		after = epoch();
 	}
@@ -153,8 +159,40 @@ try {
 		old.status === 401 || old.status === 403,
 		`old viewer cookie refused (${old.status})`,
 	);
+	// A link issued while the block was applied carries the block's epoch. Between the
+	// unblock and the access monitor (5 s tick; core's NOTIFY may be lost) it must not
+	// open the desktop: the row is unblocked here without the NOTIFY.
+	const ticket = `sbxd_${randomBytes(32).toString("base64url")}`;
+	sql(
+		`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,user_id,auth_epoch,expires_at) SELECT sha256(convert_to('${ticket}','UTF8')),d.sandbox_id,'${sb.data.slug}-desktop',(SELECT user_id FROM runtime.desktop_tickets WHERE sandbox_id='${raw}' AND user_id IS NOT NULL LIMIT 1),d.auth_epoch,now()+interval '10 minutes' FROM runtime.sandbox_desktops d WHERE d.sandbox_id='${raw}'`,
+	);
+	const blockUrl = new URL(viewer.url);
+	blockUrl.pathname = "/";
+	blockUrl.search = "";
+	blockUrl.searchParams.set("_ticket", ticket);
 	sql(
 		`UPDATE runtime.sandboxes SET blocked=false,block_reason=NULL,blocked_at=NULL,version=version+1 WHERE id='${raw}'`,
+	);
+	const racing = await open(blockUrl.href);
+	check(
+		racing.status !== 200 && !racing.jar.size,
+		`block-epoch ticket refused right after unblock (${racing.status})`,
+	);
+	let lifted = "";
+	for (let i = 0; i < 30; i++) {
+		lifted = sql(
+			`SELECT auth_epoch||':'||policy_revoked||':'||pending_disconnect FROM runtime.sandbox_desktops WHERE sandbox_id='${raw}'`,
+		);
+		if (lifted.endsWith(":false:false")) break;
+		await new Promise((done) => setTimeout(done, 500));
+	}
+	check(
+		Number(lifted.split(":")[0]) > (a ?? 0) && lifted.endsWith(":false:false"),
+		`monitor lifted the block with a new epoch and ended streams (${after} -> ${lifted})`,
+	);
+	check(
+		(await open(blockUrl.href)).status !== 200,
+		"block-epoch ticket still refused after the monitor",
 	);
 	check(
 		(await code(
@@ -162,6 +200,12 @@ try {
 		)) === "ok",
 		"unblocked: actions work again",
 	);
+	let fresh = await open((await sb.desktop.link()).url);
+	for (let i = 0; fresh.status === 503 && i < 30; i++) {
+		await new Promise((done) => setTimeout(done, 2000));
+		fresh = await open((await sb.desktop.link()).url);
+	}
+	check(fresh.status === 200, "a fresh link opens the desktop after unblock");
 	console.log(`sandbox ${id}`);
 } finally {
 	if (sb) await sb.delete({ wait: true });
