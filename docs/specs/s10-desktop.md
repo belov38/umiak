@@ -90,7 +90,7 @@ GPL-3.0 у двух компонентов разрешена Ильёй (§17, 
 
 **Computer-use — собственные примитивы агента, а не прокси к cua-driver** [S10]. Это меняет формулировку architecture §8. Причины:
 - cua-driver развивается очень быстро: релизы `cua-driver-rs` 0.30–0.38 вышли за месяц, и все помечены prerelease. Контракт публичного API v1 не должен зависеть от его схем;
-- четыре примитива (скриншот, мышь, клавиатура, буфер) — небольшой объём кода. На Windows для них уже есть место в helper `sbx-session` (S9 §13);
+- четыре примитива (скриншот, мышь, клавиатура, буфер) — небольшой объём кода. На Windows для них уже есть место в helper `umiak-session` (S9 §13);
 - скриншот через API работает и без стримера.
 
 cua-driver всё равно ставится в шаблоны (§6.3, §7) как MCP-сервер для агентов внутри VM: дерево доступности, работа с окнами в фоне. Его регистрация в harness — S15, API поверх него — S29.
@@ -99,25 +99,25 @@ cua-driver всё равно ставится в шаблоны (§6.3, §7) к�
 
 ```
  browser: dashboard iframe / API client page
-   | HTTPS + WSS: https://<slug>-desktop.sbx.<domain>         | browser: UDP/TCP 3478, TLS 443
+   | HTTPS + WSS: https://<slug>-desktop.umiak.<domain>         | browser: UDP/TCP 3478, TLS 443
    v                                                          v
  gateway (S4): label "<slug>-desktop", access,         coturn "turn.<domain>"
-   open redirect, X-Sbx-Desktop-User                   relays only between its own allocations
+   open redirect, X-Umiak-Desktop-User                   relays only between its own allocations
    |  tunnel CONNECT 127.0.0.1:47800 (S2)                     ^
    v                                                          | UDP 3478 egress via node SNAT
- VM ----------------------------------------------------------+-- (IPSet sbx-turn)
- |  sbx-agent (root / SYSTEM): Desktop service, streamer manager, TURN config
+ VM ----------------------------------------------------------+-- (IPSet umiak-turn)
+ |  umiak-agent (root / SYSTEM): Desktop service, streamer manager, TURN config
  |    |-- moonlight-web 127.0.0.1:47800  (WebRTC relay candidates or WebSocket media)
  |    |      | GameStream over loopback
  |    |   Sunshine 127.0.0.1:47989  (x11 / ddx capture, x264)
- |    |-- sbx-session (in user session): screenshot, input, clipboard
+ |    |-- umiak-session (in user session): screenshot, input, clipboard
  |  Linux: LightDM autologin -> Xorg :0 (dummy, 1920x1080) -> openbox, tint2, Chrome
  |  Windows: autologon console session (S9) -> Edge
  |  cua-driver (user service) for in-VM agents (S15)
 ```
 
 Пути данных:
-- **Computer-use API:** клиент → `api` (`/v1/sandboxes/{sb}/desktop/*`) → туннель → агент `Desktop` → `sbx-session` → экран. Стример не участвует.
+- **Computer-use API:** клиент → `api` (`/v1/sandboxes/{sb}/desktop/*`) → туннель → агент `Desktop` → `umiak-session` → экран. Стример не участвует.
 - **Стрим, WebRTC:** браузер загружает страницу viewer-а и сигналинг через gateway. Медиа и ввод идут по WebRTC; обе стороны ходят через TURN.
 - **Стрим, WebSocket:** то же, но медиа идёт WebSocket-ом через gateway и туннель.
 
@@ -135,7 +135,7 @@ extends: linux                   # inherits source, disk, hw, steps of linux; li
 hw:
   vga: std                       # operator console only; the desktop uses the Xorg dummy driver
   tablet: 0
-steps: [00-base, reboot, 10-system, 20-docker, 30-toolchains, 40-coding-agents, 50-sbx-agent, 60-desktop, 90-cleanup]
+steps: [00-base, reboot, 10-system, 20-docker, 30-toolchains, 40-coding-agents, 50-umiak-agent, 60-desktop, 90-cleanup]
 vmids: [595, 596]               # own template slots; never 597/598/599
 # Default size 4gb, allowed 4gb/8gb: runtime seeds/config, not S5 recipe keys.
 boot_timeout_s: 300
@@ -163,18 +163,18 @@ verify: linux-desktop
 - `xdotool`, `xclip`, `scrot` — для людей и агентов в VM; агент на них не опирается.
 
 Не из Ubuntu (версии и sha256 в `versions.toml`, §23):
-- **Google Chrome stable** — `.deb` из репозитория Google (решение архитектуры §1). Репозиторий Google остаётся в источниках apt, автообновления нет (S5 их выключает). Managed policy в `/etc/opt/chrome/policies/managed/sbx.json`: без first run, без проверки браузера по умолчанию, без промо-вкладок, без отчётов. Chrome — браузер по умолчанию (`xdg-settings`, `update-alternatives`);
+- **Google Chrome stable** — `.deb` из репозитория Google (решение архитектуры §1). Репозиторий Google остаётся в источниках apt, автообновления нет (S5 их выключает). Managed policy в `/etc/opt/chrome/policies/managed/umiak.json`: без first run, без проверки браузера по умолчанию, без промо-вкладок, без отчётов. Chrome — браузер по умолчанию (`xdg-settings`, `update-alternatives`);
 - **Sunshine** — `sunshine_<v>-1+ubuntu26.04_amd64.deb` из релиза LizardByte;
-- **moonlight-web** — `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` из релиза, в `/opt/sbx-desktop/moonlight-web/<v>/`;
-- **cua-driver** — `cua-driver-rs-<v>-linux-x86_64-binary.tar.gz`, подпись sigstore проверяется при сборке, в `/opt/sbx-desktop/cua-driver/<v>/`. Расширение `cua-perception` (AGPL) не ставится.
+- **moonlight-web** — `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` из релиза, в `/opt/umiak-desktop/moonlight-web/<v>/`;
+- **cua-driver** — `cua-driver-rs-<v>-linux-x86_64-binary.tar.gz`, подпись sigstore проверяется при сборке, в `/opt/umiak-desktop/cua-driver/<v>/`. Расширение `cua-perception` (AGPL) не ставится.
 
 Конфигурация:
-- `/etc/X11/xorg.conf.d/10-sbx-dummy.conf`: драйвер `dummy`, `VideoRam 256000`, режим `1920x1080` (modeline из `cvt 1920 1080 60`), 24 bit, DPI 96.
-- `/etc/lightdm/lightdm.conf.d/50-sbx.conf`: `autologin-user=user`, `autologin-session=sbx`, `xserver-command=X -nolisten tcp -dpms -s 0`.
-- Сессия `sbx` (`/usr/share/xsessions/sbx.desktop` → `/usr/local/lib/sbx-desktop/session`): импортирует `DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS` в менеджер пользователя (`systemctl --user import-environment`, `dbus-update-activation-environment --systemd`), запускает user-unit-ы `sbx-session.service` и `cua-driver.service`, затем `exec openbox-session`.
+- `/etc/X11/xorg.conf.d/10-umiak-dummy.conf`: драйвер `dummy`, `VideoRam 256000`, режим `1920x1080` (modeline из `cvt 1920 1080 60`), 24 bit, DPI 96.
+- `/etc/lightdm/lightdm.conf.d/50-umiak.conf`: `autologin-user=user`, `autologin-session=umiak`, `xserver-command=X -nolisten tcp -dpms -s 0`.
+- Сессия `umiak` (`/usr/share/xsessions/umiak.desktop` → `/usr/local/lib/umiak-desktop/session`): импортирует `DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS` в менеджер пользователя (`systemctl --user import-environment`, `dbus-update-activation-environment --systemd`), запускает user-unit-ы `umiak-session.service` и `cua-driver.service`, затем `exec openbox-session`.
 - Без экрана блокировки, заставки и DPMS: `light-locker` и `xscreensaver` не ставятся, `xset s off -dpms` в autostart openbox.
 - `/etc/pam.d/lightdm-autologin` содержит те же две строки `pam_env`, что `sshd` (S3 §8.2): сессия получает env и секреты sandbox.
-- `uinput`: модуль в `/etc/modules-load.d/sbx-uinput.conf`, правило udev из пакета Sunshine (uaccess для активной сессии).
+- `uinput`: модуль в `/etc/modules-load.d/umiak-uinput.conf`, правило udev из пакета Sunshine (uaccess для активной сессии).
 - `OOMScoreAdjust=-500` для Xorg и LightDM (drop-in): при нехватке памяти ядро убивает сначала приложения пользователя, а не экран.
 - `agent.toml`: `[readiness] required = ["identity", "claim", "secrets", "docker", "desktop"]`, `[desktop] enabled = true`, `[ports] exclude` дополняется портами стримера (§8.1).
 
@@ -197,7 +197,7 @@ verify: linux-desktop
 
 ### 6.5 Env
 
-- **Все команды и SSH-сессии** на шаблоне с рабочим столом получают в платформенный env (S3 §8.2, п. 2) `DISPLAY=:0` и `XAUTHORITY=/home/user/.Xauthority`. Тогда `google-chrome https://…` из `exec` открывает окно на рабочем столе. Пишется и в `/etc/sbx/env` для SSH.
+- **Все команды и SSH-сессии** на шаблоне с рабочим столом получают в платформенный env (S3 §8.2, п. 2) `DISPLAY=:0` и `XAUTHORITY=/home/user/.Xauthority`. Тогда `google-chrome https://…` из `exec` открывает окно на рабочем столе. Пишется и в `/etc/umiak/env` для SSH.
 - **`CommandSpec.desktop: true`** (поле S9 §13) на Linux: агент проверяет, что фаза `desktop` = `ready` (иначе `failed_precondition desktop_not_ready`), и добавляет env графической сессии: `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus`, `XDG_SESSION_TYPE=x11`, `XDG_CURRENT_DESKTOP=openbox`. Процесс по-прежнему запускается в своём unit-е под shim (S3 §9.3).
 - На шаблоне без рабочего стола `desktop: true` → `failed_precondition desktop_unsupported`.
 
@@ -207,7 +207,7 @@ verify: linux-desktop
 
 1. Проверка S5 §10 п. 4 (слушающие сокеты) со списком для рабочего стола: при остановленном стримере новых TCP-сокетов нет; Xorg слушает только unix-сокет.
 2. После загрузки до claim: LightDM не стартует, `desktop: pending`. После claim и применения secrets текущего boot: LightDM активен, `user` в сессии `x11` на seat0 (`loginctl`), openbox работает, разрешение 1920×1080 (`xrandr`), фаза `desktop` = `ready`. Это уточнение согласует проверку с §6.4 и отсутствием pool в MVP.
-3. `sbx-agent doctor --desktop --json`: скриншот через `sbx-session` — PNG 1920×1080, не одноцветный (на рабочем столе есть панель tint2).
+3. `umiak-agent doctor --desktop --json`: скриншот через `umiak-session` — PNG 1920×1080, не одноцветный (на рабочем столе есть панель tint2).
 4. Ввод: агент двигает курсор и кликает (позиция курсора совпадает); `type` печатает строку с не-ASCII символами в `xfce4-terminal`, и она совпадает; буфер: `SetClipboard` → `xclip -o` из сессии выдаёт тот же текст, и обратно.
 5. Стример: `Desktop/Open` запускает Sunshine и moonlight-web, pairing проходит, ответ содержит `hostId` и `appId`; при этом Sunshine и moonlight-web слушают только `127.0.0.1`. `Desktop/StopStreamer` их останавливает.
 6. Версии `google-chrome --version`, `sunshine --version`, moonlight-web, cua-driver совпадают с манифестом. `cua-driver` user-unit активен, его socket отвечает на `get_screen_size`.
@@ -216,14 +216,14 @@ verify: linux-desktop
 
 ## 7. Рабочий стол Windows
 
-Шаблон `windows` (S9) уже даёт autologon `user`, разблокированную консольную сессию, helper `sbx-session` и фазу `desktop` (S9 §13). S10 добавляет в шаг `60-desktop`:
+Шаблон `windows` (S9) уже даёт autologon `user`, разблокированную консольную сессию, helper `umiak-session` и фазу `desktop` (S9 §13). S10 добавляет в шаг `60-desktop`:
 
 - **Sunshine** — `Sunshine-Windows-AMD64-installer.msi`, тихая установка. Служба `SunshineService` — тип запуска Manual. Служба upstream сама запускает `sunshine.exe` в активной консольной сессии; агент стартует и останавливает её через SCM. Конфиг — §8.2.
-- **moonlight-web** — `moonlight-web-x86_64-pc-windows-gnu.zip` в `C:\Program Files\sbx-desktop\moonlight-web\<v>\`. Агент регистрирует службу `sbx-moonlight-web` (Manual, виртуальная учётная запись `NT SERVICE\sbx-moonlight-web`). Рабочий стол ей не нужен: она только пересылает поток Sunshine.
-- **cua-driver** — `cua-driver-rs-<v>-windows-x86_64.zip`; запускает `sbx-session` в сессии `user`.
+- **moonlight-web** — `moonlight-web-x86_64-pc-windows-gnu.zip` в `C:\Program Files\umiak-desktop\moonlight-web\<v>\`. Агент регистрирует службу `umiak-moonlight-web` (Manual, виртуальная учётная запись `NT SERVICE\umiak-moonlight-web`). Рабочий стол ей не нужен: она только пересылает поток Sunshine.
+- **cua-driver** — `cua-driver-rs-<v>-windows-x86_64.zip`; запускает `umiak-session` в сессии `user`.
 - **Браузер — Edge**, который есть в Windows 11 [S10]. Chrome на Windows не ставится. Политики Edge: `HideFirstRunExperience=1`, без предложений входа и синхронизации.
-- **Видеоадаптер** — по спайку W (§19.2). Кандидаты по порядку: `vga: std` (Microsoft Basic Display Adapter), `vga: virtio` с драйвером `viogpudo` из закреплённого virtio-win, IddCx-драйвер виртуального дисплея (Virtual Display Driver, MIT, или SudoVDA). Критерий: захват `ddx` Sunshine и скриншот `sbx-session` дают 1920×1080 без чёрного экрана после пробуждения из спящего режима. Победитель записывается в `hw.vga` рецепта и в §24.
-- **Разрешение:** `sbx-session` при старте выставляет 1920×1080, 96 DPI (`ChangeDisplaySettingsExW`), если адаптер это позволяет.
+- **Видеоадаптер** — по спайку W (§19.2). Кандидаты по порядку: `vga: std` (Microsoft Basic Display Adapter), `vga: virtio` с драйвером `viogpudo` из закреплённого virtio-win, IddCx-драйвер виртуального дисплея (Virtual Display Driver, MIT, или SudoVDA). Критерий: захват `ddx` Sunshine и скриншот `umiak-session` дают 1920×1080 без чёрного экрана после пробуждения из спящего режима. Победитель записывается в `hw.vga` рецепта и в §24.
+- **Разрешение:** `umiak-session` при старте выставляет 1920×1080, 96 DPI (`ChangeDisplaySettingsExW`), если адаптер это позволяет.
 - **Звук** — best effort: `audio0: device=ich9-intel-hda,driver=none`, если спайк покажет, что без него Sunshine не начинает поток. Иначе `stream_audio = disabled`.
 - `agent.toml`: `[ports] exclude` дополняется портами стримера (§8.1). `[readiness]` — как в S9.
 - Профиль проверки `windows-desktop` (S9 §15) дополняется проверками §6.6 п. 3–6 в варианте Windows.
@@ -237,7 +237,7 @@ verify: linux-desktop
 | Процесс | Linux | Windows | Слушает |
 |---|---|---|---|
 | Sunshine | user-unit пользователя `user` из пакета (`app-dev.lizardbyte.app.Sunshine.service`) | `SunshineService` → `sunshine.exe` в консольной сессии | `127.0.0.1`: TCP 47984, 47989, 47990 (веб-UI), 48010; UDP 47998–48000, 48002, 48010 |
-| moonlight-web | system unit `sbx-moonlight-web.service`, пользователь `sbxstream` (системный, без shell) | служба `sbx-moonlight-web` | `127.0.0.1:47800` TCP; UDP — эфемерные порты для WebRTC |
+| moonlight-web | system unit `umiak-moonlight-web.service`, пользователь `umiakstream` (системный, без shell) | служба `umiak-moonlight-web` | `127.0.0.1:47800` TCP; UDP — эфемерные порты для WebRTC |
 
 Порты TCP `47800`, `47984`, `47989`, `47990`, `48010` входят в общий список зарезервированных портов платформы (S4 §4.2, S7 §11.2): опубликовать их как обычный порт нельзя. Они же — в `[ports] exclude` агента.
 
@@ -266,13 +266,13 @@ moonlight-web (`config.json`): шаблон получает его команд
     "first_login_create_admin": false,
     "first_login_assign_global_hosts": false,
     "forwarded_header": {
-      "username_header": "X-Sbx-Desktop-User",
+      "username_header": "X-Umiak-Desktop-User",
       "auto_create_missing_user": false
     }
   },
   "webrtc": {
     "ice_servers": [],
-    "ice_server_script": "/usr/local/lib/sbx-desktop/ice-servers"
+    "ice_server_script": "/usr/local/lib/umiak-desktop/ice-servers"
   }
 }
 ```
@@ -283,16 +283,16 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 ### 8.3 Pairing и пользователи moonlight-web
 
-Состояние стримера (`/var/lib/sbx-agent/desktop/` на Linux, `ProgramData\sbx-agent\desktop\` на Windows; доступ root/SYSTEM) содержит:
+Состояние стримера (`/var/lib/umiak-agent/desktop/` на Linux, `ProgramData\umiak-agent\desktop\` на Windows; доступ root/SYSTEM) содержит:
 - логин и пароль веб-UI Sunshine (32 случайных байта);
-- пароль администратора moonlight-web и пароль пользователя `sbx` — отдельные случайные секреты, не пароль Sunshine (s10-fix; в состоянии, записанном до разделения, остаётся общий пароль до следующей смены идентичности);
+- пароль администратора moonlight-web и пароль пользователя `umiak` — отдельные случайные секреты, не пароль Sunshine (s10-fix; в состоянии, записанном до разделения, остаётся общий пароль до следующей смены идентичности);
 - идентификаторы `hostId` и `appId` после pairing.
 
 Администратор moonlight-web создаётся до первого старта сервиса: агент кладёт в `data.json` хранилище формата v3 upstream (роль `Admin` и один пользователь, PBKDF2-HMAC-SHA256, 600 000 итераций, как `src/app/password.rs` v3.0.1), а `first_login_create_admin = false`. Первый `/api/login` больше не создаёт администратора, гонки с другим клиентом нет (s10-fix).
 
 Агент генерирует их сам и проводит pairing при первом запуске стримера после смены идентичности (S3 §7, S9 §11):
 1. Задать креды Sunshine, записать хранилище moonlight-web с администратором, запустить Sunshine и moonlight-web.
-2. Через HTTP API moonlight-web (как администратор): создать роль `viewer` и пользователя `sbx` с этой ролью, добавить хост `localhost`, начать pairing и получить PIN.
+2. Через HTTP API moonlight-web (как администратор): создать роль `viewer` и пользователя `umiak` с этой ролью, добавить хост `localhost`, начать pairing и получить PIN.
 3. Передать PIN в Sunshine через API веб-UI: `POST https://127.0.0.1:47990/api/pin` с basic auth, CSRF-токеном и `pairing_id`, как требует текущая версия.
 4. Прочитать `hostId` и `appId` приложения `Desktop`.
 
@@ -330,7 +330,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 **Исправление.** Шаблон `windows-desktop` ставит `web-server.exe`, собранный из того же релиза moonlight-web v3.0.1 с патчем `infra/templates/windows-desktop/moonlight-web/ping-order.patch` к закреплённому moonlight-common-rust: аудиопоток (и его ping) не опрашивается, пока видеопоток не получил первый пакет (Sunshine уже записал адрес видео), но не дольше 3 s (тайм-аут ping Sunshine — 10 s). Аудио в потоке выключено (`stream_audio = disabled`), поэтому ошибочный адрес аудио безвреден. Сборка — `moonlight-web/build.sh` (Docker, `rust:1.99.0-trixie` + mingw-w64, без PE-метки времени); выход `files/moonlight-web/{web-server.exe,build.json}` не хранится в git. Установщик заменяет сервер из закреплённого zip и проверяет SHA256 из `build.json`; веб-ресурсы остаются из zip. Verify: `desktop_moonlight_patch`. Linux остаётся на upstream-сборке. Исправление в Sunshine (отдельный `endpoint` на сокет) — кандидат в upstream, после него патч снимается.
 
-Диагностика (s10-followups): служба `sbx-moonlight-web` сохраняет лог прошлого запуска как `web-server.log.1` (`EndStreams` перезапускает её); `e2e-desktop.ts` при сбое потока до `EndStreams` снимает лог moonlight-web, лог Sunshine, скриншот через агент и счётчики просмотрщика (видеосообщения и IDR WebSocket, вызовы и ошибки `VideoDecoder`, `inbound-rtp` WebRTC).
+Диагностика (s10-followups): служба `umiak-moonlight-web` сохраняет лог прошлого запуска как `web-server.log.1` (`EndStreams` перезапускает её); `e2e-desktop.ts` при сбое потока до `EndStreams` снимает лог moonlight-web, лог Sunshine, скриншот через агент и счётчики просмотрщика (видеосообщения и IDR WebSocket, вызовы и ошибки `VideoDecoder`, `inbound-rtp` WebRTC).
 
 ## 9. Транспорт и TURN
 
@@ -338,7 +338,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 1. Страница viewer-а (`stream.html`) и сигналинг WebRTC идут по HTTPS через gateway и туннель к moonlight-web.
 2. moonlight-web и браузер получают одинаковый список ICE-серверов — только наш TURN.
-3. Адрес VM в `sbx0` браузеру недоступен, а TURN запрещает relay ко всем адресам, кроме своих (§9.2). Поэтому в PoC и в корпоративной сети ICE сходится на паре relay ↔ relay. VM ходит к TURN по UDP: WebRTC-стек moonlight-web (webrtc-rs) собирает relay-кандидаты только через UDP. Браузер может ходить к TURN по UDP, TCP или TLS 443.
+3. Адрес VM в `umiak0` браузеру недоступен, а TURN запрещает relay ко всем адресам, кроме своих (§9.2). Поэтому в PoC и в корпоративной сети ICE сходится на паре relay ↔ relay. VM ходит к TURN по UDP: WebRTC-стек moonlight-web (webrtc-rs) собирает relay-кандидаты только через UDP. Браузер может ходить к TURN по UDP, TCP или TLS 443.
 4. **Прямой путь в продакшене.** Если у браузера публичный адрес (например, сотрудник вне VPN), ICE может собрать прямую пару «VM через SNAT ноды ↔ браузер»: исходящий UDP в интернет sandbox разрешён (S1). Это допустимо [S10]: у sandbox по-прежнему нет входящего адреса, это обычный исходящий трафик VM. Отзыв доступа такой поток тоже обрывает (`EndStreams` в VM, §10.5). Гарантированный путь — TURN.
 5. Если WebRTC не соединился за 15 s (например, у браузера закрыт UDP, а TCP/TLS к TURN тоже не проходит), viewer сам переключается на WebSocket: медиа идёт через gateway и туннель.
 
@@ -350,13 +350,13 @@ moonlight-web (`config.json`): шаблон получает его команд
 ### 9.2 coturn: размещение и конфигурация
 
 - **Где.** В Kubernetes рядом с gateway, но не в процессе gateway (S4 §13). TURN работает в **собственном network namespace** (s10-fix2), не на сети хоста: в compose — отдельная bridge-сеть, в Kubernetes — обычный под (не `hostNetwork`). Внутри namespace адрес TURN навешивается на `lo`, поэтому relay ↔ relay остаётся внутри namespace, а наружу публикуются только 3478/udp, 3478/tcp и 443/tcp (DNAT с сохранением адреса клиента: compose `ports`, в Kubernetes — Service `LoadBalancer`/`NodePort` с `externalTrafficPolicy: Local`). Выбор Service — S12, проверка — §20.
-- **Имя:** `turn.<domain>` → IP TURN. Сертификат для `turns:` выпускает cert-manager (как `*.sbx`).
-- **Порты:** `3478/udp`, `3478/tcp`, TLS на `443/tcp` (у TURN свой IP, поэтому 443 не конфликтует с `gateway-edge`). Порты relay — **61000–65535** (`SBX_TURN_RELAY_MIN/MAX`), выше эфемерного диапазона Linux (`ip_local_port_range` по умолчанию 32768–60999); наружу их не публикуют. В namespace TURN диапазон relay резервируется (`net.ipv4.ip_local_reserved_ports`), а entrypoint отказывается стартовать, если диапазон relay пересекается с `ip_local_port_range` этого namespace.
-- **Sandbox → TURN.** VM ходит к TURN исходящими UDP-пакетами на 3478 через SNAT ноды. В firewall S1 нужен IPSet `sbx-turn` с адресом TURN и правило в группе `sbx-egress` перед запретами (TCP не нужен: VM использует TURN только по UDP, п. 3 §9.1):
+- **Имя:** `turn.<domain>` → IP TURN. Сертификат для `turns:` выпускает cert-manager (как `*.umiak`).
+- **Порты:** `3478/udp`, `3478/tcp`, TLS на `443/tcp` (у TURN свой IP, поэтому 443 не конфликтует с `gateway-edge`). Порты relay — **61000–65535** (`UMIAK_TURN_RELAY_MIN/MAX`), выше эфемерного диапазона Linux (`ip_local_port_range` по умолчанию 32768–60999); наружу их не публикуют. В namespace TURN диапазон relay резервируется (`net.ipv4.ip_local_reserved_ports`), а entrypoint отказывается стартовать, если диапазон relay пересекается с `ip_local_port_range` этого namespace.
+- **Sandbox → TURN.** VM ходит к TURN исходящими UDP-пакетами на 3478 через SNAT ноды. В firewall S1 нужен IPSet `umiak-turn` с адресом TURN и правило в группе `umiak-egress` перед запретами (TCP не нужен: VM использует TURN только по UDP, п. 3 §9.1):
 
 ```
-[IPSET sbx-turn] # boat-dev-clone S10: TURN server address(es)
-OUT ACCEPT -dest +sbx-turn -p udp -dport 3478
+[IPSET umiak-turn] # umiak S10: TURN server address(es)
+OUT ACCEPT -dest +umiak-turn -p udp -dport 3478
 ```
 
   Изменение firewall — шагом runbook S1 с таймером отката (S1 §4.4).
@@ -386,11 +386,11 @@ prometheus
 
 - **Фильтр relay по портам** (s10-fix, s10-fix2). `allowed-peer-ip` coturn задаёт только IP: разрешение на собственный адрес TURN пускает allocation к любому UDP-порту этого адреса. На сети хоста это были бы другие службы хоста (на CT 590 приёмка достучалась Send indication до слушателя `:40123` и tailscaled `:41641`) и любые его сокеты в диапазоне relay — в том числе эфемерные клиентские сокеты (DNS и т. п.), потому что старый диапазон 49152–65535 пересекался с 32768–60999. Защита в три слоя:
   1. **Свой namespace.** Entrypoint добавляет адрес TURN на `lo` своего namespace и отказывается стартовать, если этот адрес уже есть на другом интерфейсе (значит, контейнер запущен на сети хоста). `listening-ip` — адрес интерфейса namespace (куда приходит DNAT), `relay-ip` и `external-ip` — адрес TURN. В namespace нет других процессов с сокетами на адресе TURN, поэтому пиром может быть только relay-сокет этого же coturn. Прежний отказ от своего namespace касался NAT: hairpin-NAT Docker переписывал адрес пира relay ↔ relay. Здесь адрес TURN локален внутри namespace, пакеты relay ↔ relay не выходят из него и NAT не проходят.
-  2. **Таблица nftables `inet sbx_turn`** в namespace TURN (hook `output`, `meta skuid` + адрес + порт relay): relay-сокеты coturn (uid `SBX_TURN_UID`) шлют только на relay-порты того же адреса. Entrypoint ставит её от root при каждом старте, потом запускает turnserver под `SBX_TURN_UID` (`setpriv`, остаётся только `NET_BIND_SERVICE`).
-  3. **Fail closed.** Entrypoint остаётся init-процессом контейнера и каждые `SBX_TURN_GUARD_INTERVAL` (2 s) сравнивает `nft -s list table inet sbx_turn` с тем, что поставил. Если таблицы нет или она изменилась (например, root в контейнере через `docker exec`), init завершается, ядро убивает turnserver вместе с namespace PID, политика `restart` поднимает контейнер с новой таблицей. Healthcheck compose (`entrypoint.sh health`) делает ту же проверку; обе проверяют и адрес TURN на `lo` (ниже). Перезагрузка nftables на хосте (`flush ruleset`) таблицу в namespace TURN не трогает.
+  2. **Таблица nftables `inet umiak_turn`** в namespace TURN (hook `output`, `meta skuid` + адрес + порт relay): relay-сокеты coturn (uid `UMIAK_TURN_UID`) шлют только на relay-порты того же адреса. Entrypoint ставит её от root при каждом старте, потом запускает turnserver под `UMIAK_TURN_UID` (`setpriv`, остаётся только `NET_BIND_SERVICE`).
+  3. **Fail closed.** Entrypoint остаётся init-процессом контейнера и каждые `UMIAK_TURN_GUARD_INTERVAL` (2 s) сравнивает `nft -s list table inet umiak_turn` с тем, что поставил. Если таблицы нет или она изменилась (например, root в контейнере через `docker exec`), init завершается, ядро убивает turnserver вместе с namespace PID, политика `restart` поднимает контейнер с новой таблицей. Healthcheck compose (`entrypoint.sh health`) делает ту же проверку; обе проверяют и адрес TURN на `lo` (ниже). Перезагрузка nftables на хосте (`flush ruleset`) таблицу в namespace TURN не трогает.
 
-  **Посылка на запрещённый порт убивает свою allocation** (ожидаемо, s10-followups). Пакет relay-сокета на порт вне диапазона relay отбрасывает правило `drop` таблицы `inet sbx_turn` в hook `output`, и `sendto` в coturn получает `EPERM`. coturn считает это ошибкой сокета и закрывает allocation: следующий `Refresh` получает `437 Allocation Mismatch`. Это самоотказ отправителя — пострадавшая allocation принадлежит тому, кто послал запрещённый пакет (его кредам и его 5-tuple); чужие allocations, relay ↔ relay и сам coturn продолжают работать. Обычный WebRTC такие пакеты не шлёт: `CreatePermission` разрешает только адрес TURN, а кандидаты другой стороны — relay-порты. Чинить не нужно: отказ закрытый, а клиент, который пробует запрещённые порты, теряет только свою allocation.
-  **Адрес TURN на `lo`** тоже под надзором (s10-followups): init и healthcheck проверяют, что `SBX_TURN_IP/32` остаётся на `lo` namespace. Без него новые allocations получают `508 Insufficient Capacity`, а relay ↔ relay не работает; раньше healthcheck при этом оставался `healthy`. Теперь init завершается, и контейнер перезапускается с адресом.
+  **Посылка на запрещённый порт убивает свою allocation** (ожидаемо, s10-followups). Пакет relay-сокета на порт вне диапазона relay отбрасывает правило `drop` таблицы `inet umiak_turn` в hook `output`, и `sendto` в coturn получает `EPERM`. coturn считает это ошибкой сокета и закрывает allocation: следующий `Refresh` получает `437 Allocation Mismatch`. Это самоотказ отправителя — пострадавшая allocation принадлежит тому, кто послал запрещённый пакет (его кредам и его 5-tuple); чужие allocations, relay ↔ relay и сам coturn продолжают работать. Обычный WebRTC такие пакеты не шлёт: `CreatePermission` разрешает только адрес TURN, а кандидаты другой стороны — relay-порты. Чинить не нужно: отказ закрытый, а клиент, который пробует запрещённые порты, теряет только свою allocation.
+  **Адрес TURN на `lo`** тоже под надзором (s10-followups): init и healthcheck проверяют, что `UMIAK_TURN_IP/32` остаётся на `lo` namespace. Без него новые allocations получают `508 Insufficient Capacity`, а relay ↔ relay не работает; раньше healthcheck при этом оставался `healthy`. Теперь init завершается, и контейнер перезапускается с адресом.
 
   **Требование к продакшену (S12):** TURN — под со своим network namespace (не `hostNetwork`), адрес TURN на `lo` пода, `NET_ADMIN` только у entrypoint (turnserver — под отдельным uid), диапазон relay выше `ip_local_port_range` и в `ip_local_reserved_ports` пода (обе sysctl в Kubernetes namespaced и разрешены как safe), публикуются только 3478 и 443 с сохранением адреса клиента. Liveness — та же проверка `entrypoint.sh health`. Если хостовый firewall перезагружается с `flush ruleset`, он не должен удалять NAT-правила публикации (иначе TURN недоступен, но не открыт). `no-software-attribute` и `no-cli` включены.
 - **Почему так.** Пиры, которых TURN пускает, — только его собственные relay-адреса. Поэтому утёкшие креды не превращают TURN в прокси наружу (анти-цель). Пары ICE, где TURN должен слать на host- или srflx-кандидат другой стороны, сразу получают отказ `CreatePermission`, и ICE выбирает relay ↔ relay (или прямой путь из п. 4 §9.1, если он есть). Relay от TURN к адресу браузера не поддерживается.
@@ -402,7 +402,7 @@ prometheus
   - в шаге `claim` (S6 §7.3) после `System/Claim`;
   - в шаге `provision` после каждой загрузки (resume, recover, reprovision — S6 §7.6, §7.8), сразу после доставки секретов;
   - контроллер `desktop-turn` раз в 10 min продлевает креды у `ready` sandbox с рабочим столом, если им больше 12 h.
-- Агент пишет их в `desktop/ice-servers.json` (`[{urls: [...], username, credential}]`). URL-ы — из конфига `SBX_TURN_URLS`: `turn:turn.<domain>:3478?transport=udp`, `turn:turn.<domain>:3478?transport=tcp`, `turns:turn.<domain>:443?transport=tcp`.
+- Агент пишет их в `desktop/ice-servers.json` (`[{urls: [...], username, credential}]`). URL-ы — из конфига `UMIAK_TURN_URLS`: `turn:turn.<domain>:3478?transport=udp`, `turn:turn.<domain>:3478?transport=tcp`, `turns:turn.<domain>:443?transport=tcp`.
 - Те же креды получает браузер зрителя. Это допустимо: TURN не relay наружу (§9.2), и у кредов есть квота.
 - Поток живёт не дольше срока кредов, которые были в момент его старта. На практике это не меньше 12 h; затем viewer переподключается. Проверяет ли coturn срок при `Refresh` существующего allocation, записывает спайк L.
 - Ротация `static-auth-secret` — S12. Если coturn 4.18 принимает только один секрет из файла, ротация идёт с коротким окном, когда новые потоки не стартуют.
@@ -436,7 +436,7 @@ prometheus
 
 - `404 route_not_found`, если у шаблона sandbox нет capability `desktop`.
 - `blocked: true, blockReason: "public_disabled"`, если `access = public`, а оператор не разрешил публичный рабочий стол (§10.4).
-- `NOTIFY sbx_routes '<slug>'` — триггер на `sandbox_desktops` (§13.5), как для портов.
+- `NOTIFY umiak_routes '<slug>'` — триггер на `sandbox_desktops` (§13.5), как для портов.
 
 ### 10.2 Доступ
 
@@ -449,20 +449,20 @@ prometheus
 Билет принимается во всех режимах, кроме `public` (там он не нужен). Так дашборд работает одинаково при любом режиме.
 
 **Билет** [S10]:
-- `sbxd_` + 32 случайных байта (base64url). В `api` хранится SHA-256.
+- `umiakd_` + 32 случайных байта (base64url). В `api` хранится SHA-256.
 - Срок 10 min. Одноразовый. Привязан к `(sandboxId, label, userId, authEpoch)`.
 - Передаётся в query `_ticket`: gateway видит только query, фрагмент URL ему недоступен.
 
 Порядок проверки на `<slug>-desktop` (вместо S4 §8.3):
-1. Валидная cookie `__Host-sbx_auth` для этого label с `m: "d"` и текущим `authEpoch` → пропустить. `_ticket`, если он есть, вырезается без обмена.
+1. Валидная cookie `__Host-umiak_auth` для этого label с `m: "d"` и текущим `authEpoch` → пропустить. `_ticket`, если он есть, вырезается без обмена.
 2. `_ticket` в query → `POST /internal/v1/gateway/desktop-auth/exchange {ticket, label}`. Верный → cookie, `302` на тот же URL без `_ticket`, `Referrer-Policy: no-referrer`. Неверный или использованный → `401 token_invalid` (счётчик ошибок авторизации S4 §11).
 3. `sso` → поток S4 §8.4. `api` проверяет политику для `kind = desktop` (команда или оператор), а не `ssoPortPolicy`.
 4. `public` → пропустить.
 5. Иначе `401 auth_required`, страница «нужна ссылка на рабочий стол».
 
-**Cookie** — та же `__Host-sbx_auth` (S4 §8.2): `m: "d"`, срок 12 h, атрибуты `Secure; HttpOnly; Path=/; SameSite=None; Partitioned`. `SameSite=None; Partitioned` нужен, чтобы поток работал в iframe чужого сайта (сценарий 3). В iframe дашборда (тот же сайт) cookie работает в любом браузере; в iframe чужого сайта — там, где есть CHIPS (Chrome, Firefox, Edge). Safari в чужом iframe не поддерживается.
+**Cookie** — та же `__Host-umiak_auth` (S4 §8.2): `m: "d"`, срок 12 h, атрибуты `Secure; HttpOnly; Path=/; SameSite=None; Partitioned`. `SameSite=None; Partitioned` нужен, чтобы поток работал в iframe чужого сайта (сценарий 3). В iframe дашборда (тот же сайт) cookie работает в любом браузере; в iframe чужого сайта — там, где есть CHIPS (Chrome, Firefox, Edge). Safari в чужом iframe не поддерживается.
 
-**Защита от CSRF** при `SameSite=None`: на метках `kind = desktop` gateway требует `Origin` = `https://<label>.<sbx-domain>` у всех запросов, кроме `GET`/`HEAD`, и у WebSocket upgrade. Иначе `403 origin_forbidden`.
+**Защита от CSRF** при `SameSite=None`: на метках `kind = desktop` gateway требует `Origin` = `https://<label>.<umiak-domain>` у всех запросов, кроме `GET`/`HEAD`, и у WebSocket upgrade. Иначе `403 origin_forbidden`.
 
 **Без пропуска CORS preflight.** Правило S4 §8.5 (preflight проходит без авторизации) на метках `kind = desktop` **не действует**: `OPTIONS` требует авторизации, как любой запрос. Viewer moonlight-web живёт на том же origin, CORS ему не нужен. Причина: `OPTIONS /api/host/stream/webrtc` у moonlight-web отвечает заголовками `Link` с ICE-серверами, то есть с кредами TURN, любому запросу с заголовком пользователя (§10.4).
 
@@ -473,13 +473,13 @@ Gateway сам обрабатывает `GET /` на метке `desktop` пос
 2. `302` на `/stream.html?hostId=<h>&appId=<a>` плюс разрешённые параметры из исходного query: `fps`, `bitrate`, `dataTransport`, `language`. Остальные отбрасываются.
 3. Стример не успел запуститься за 20 s → `503 desktop_starting` (страница с автообновлением через 5 s). Фаза `desktop` не `ready` → тоже `503 desktop_starting`.
 
-Ссылка из API имеет вид `https://<slug>-desktop.sbx.<domain>/?_ticket=…&fps=30`. Шаги 2 из §10.2 и §10.3 сливаются в один редирект: обмен билета, затем `Open`, затем `302` на `stream.html` с cookie.
+Ссылка из API имеет вид `https://<slug>-desktop.umiak.<domain>/?_ticket=…&fps=30`. Шаги 2 из §10.2 и §10.3 сливаются в один редирект: обмен билета, затем `Open`, затем `302` на `stream.html` с cookie.
 
 ### 10.4 Заголовки и прочее
 
-- В запрос к moonlight-web gateway ставит `X-Sbx-Desktop-User: sbx` (имя заголовка и значение — конфиг gateway) **только после успешной авторизации** по §10.2. Запрос без авторизации до moonlight-web не доходит вообще. Входящий заголовок с этим именем вырезается вместе со всеми `X-Sbx-*` (S4 §7.4). Остальные правила вырезания S4 §7.4 действуют.
+- В запрос к moonlight-web gateway ставит `X-Umiak-Desktop-User: umiak` (имя заголовка и значение — конфиг gateway) **только после успешной авторизации** по §10.2. Запрос без авторизации до moonlight-web не доходит вообще. Входящий заголовок с этим именем вырезается вместе со всеми `X-Umiak-*` (S4 §7.4). Остальные правила вырезания S4 §7.4 действуют.
 - `hostRewrite: localhost`: moonlight-web видит `Host: localhost:47800`.
-- Глобальный выключатель `publicDesktopEnabled` — в S8 `PlatformDefaults`, отдельно от `publicPortsEnabled`. Его смена шлёт `NOTIFY sbx_routes '*'`.
+- Глобальный выключатель `publicDesktopEnabled` — в S8 `PlatformDefaults`, отдельно от `publicPortsEnabled`. Его смена шлёт `NOTIFY umiak_routes '*'`.
 - Страницы ошибок, лимиты, логи — как у портов. В access log `access=desktop`.
 - Лимит запросов по метке (S4 §11) действует, но статические файлы viewer-а загружаются один раз, поэтому в него не упираются.
 
@@ -494,7 +494,7 @@ Gateway сам обрабатывает `GET /` на метке `desktop` пос
 
 Вместе с этим `api` вызывает `Desktop/EndStreams`, если sandbox `ready`. Cookie сразу перестают действовать, а активный поток (в том числе через TURN, мимо gateway) обрывается в VM. После resume нужна новая ссылка; в режиме `sso` браузер проходит вход заново сам.
 
-**Отзыв доступа у человека или ключа.** `api` уже ведёт реестр открытых стримов по principal и закрывает их по `NOTIFY sbx_identity` (изменение S8 C9). Тот же обработчик для рабочего стола [S10]:
+**Отзыв доступа у человека или ключа.** `api` уже ведёт реестр открытых стримов по principal и закрывает их по `NOTIFY umiak_identity` (изменение S8 C9). Тот же обработчик для рабочего стола [S10]:
 
 | Событие | Какие sandbox | Действие |
 |---|---|---|
@@ -505,33 +505,33 @@ Gateway сам обрабатывает `GET /` на метке `desktop` пос
 
 ## 11. Агент
 
-### 11.1 Сервис `sbx.agent.v1.Desktop`
+### 11.1 Сервис `umiak.agent.v1.Desktop`
 
-Новый Connect-сервис, `proto/sbx/agent/v1/desktop.proto`:
+Новый Connect-сервис, `proto/umiak/agent/v1/desktop.proto`:
 
 | Метод | Что | Идемпотентность |
 |---|---|---|
 | `Status` | фаза `desktop`, размер экрана, позиция курсора, стример (`running`, `streaming`, `stream_count` если известно), версии Sunshine, moonlight-web, cua-driver | `NO_SIDE_EFFECTS` |
-| `Configure{ice_servers}` | креды TURN (§9.3) в `desktop/ice-servers.json` | `Sbx-Request-Id` |
+| `Configure{ice_servers}` | креды TURN (§9.3) в `desktop/ice-servers.json` | `Umiak-Request-Id` |
 | `Open` | запустить стример по требованию, pairing при необходимости (§8.3), ответ `{host_id, app_id}` | `IDEMPOTENT` |
 | `StopStreamer` | остановить Sunshine и moonlight-web | `IDEMPOTENT` |
 | `EndStreams` | оборвать активные потоки (§8.4) | `IDEMPOTENT` |
 | `Screenshot{format, quality, max_width, max_height, region, cursor}` | изображение и размеры (§12.1) | `NO_SIDE_EFFECTS` |
-| `Act{actions, coordinate_space}` | последовательность действий ввода (§12.2) | `Sbx-Request-Id` |
-| `GetClipboard` / `SetClipboard{text}` | текст буфера обмена (§12.3) | `NO_SIDE_EFFECTS` / `Sbx-Request-Id` |
+| `Act{actions, coordinate_space}` | последовательность действий ввода (§12.2) | `Umiak-Request-Id` |
+| `GetClipboard` / `SetClipboard{text}` | текст буфера обмена (§12.3) | `NO_SIDE_EFFECTS` / `Umiak-Request-Id` |
 
-- **Кэш `Sbx-Request-Id` и полезная нагрузка** (s10-fix). Исход `Act` хранится в кэше запросов агента (`state.db`, до 24 h) без скриншота: повтор с тем же id не повторяет ввод и возвращает сохранённый результат (`completed`, курсор, экран) со **свежим** скриншотом, если он был запрошен (`Screenshot` без побочных эффектов). Тело `SetClipboard` в кэше не хранится (только хеш запроса), `Screenshot` и `GetClipboard` не кэшируются. Так скриншоты не попадают в `state.db`, snapshot и fork (§16).
+- **Кэш `Umiak-Request-Id` и полезная нагрузка** (s10-fix). Исход `Act` хранится в кэше запросов агента (`state.db`, до 24 h) без скриншота: повтор с тем же id не повторяет ввод и возвращает сохранённый результат (`completed`, курсор, экран) со **свежим** скриншотом, если он был запрошен (`Screenshot` без побочных эффектов). Тело `SetClipboard` в кэше не хранится (только хеш запроса), `Screenshot` и `GetClipboard` не кэшируются. Так скриншоты не попадают в `state.db`, snapshot и fork (§16).
 - Скриншот возвращается в теле ответа (`bytes`). Для этого сервиса лимит сообщения Connect — 32 MiB **[исполнитель: проверить, что `libs/tunnel` его пропускает]**.
 - Ввод сериализуется: на machine одновременно выполняется один `Act`. Остальные ждут до 10 s, затем `resource_exhausted desktop_busy`.
 - Capabilities (S2 §10.2): `desktop.v1`, `desktop.stream.v1`, `desktop.input.v1`, `desktop.clipboard.v1`. Если их нет у агента, `api` отвечает `409 agent_outdated`.
 - Коды `ErrorDetail.code`: `desktop_unsupported`, `desktop_not_ready`, `desktop_busy`, `streamer_failed`, `action_failed`, `invalid_action`, `clipboard_unavailable`.
 
-### 11.2 `sbx-session` на Linux
+### 11.2 `umiak-session` на Linux
 
-S9 ввёл `sbx-session` — helper в интерактивной сессии Windows. S10 делает его общим для обеих ОС [S10]: один протокол, одна логика в агенте, ОС-зависимый код в helper-е.
+S9 ввёл `umiak-session` — helper в интерактивной сессии Windows. S10 делает его общим для обеих ОС [S10]: один протокол, одна логика в агенте, ОС-зависимый код в helper-е.
 
-- Бинарник `sbx-session` в пакете агента (`versions/<v>/sbx-session` на Linux). Запускается user-unit-ом `sbx-session.service` пользователя `user` из скрипта сессии (§6.3), `Restart=always`.
-- Подключается к агенту по unix-сокету `/run/sbx-session/session.sock`: каталог `0750 root:user`, сокет `0660 root:user`. Не внутри `/run/sbx-agent`: тот каталог `0700 root` (S3 §5), и `user` до сокета не дошёл бы. Протокол S9 §13 (protobuf с префиксом длины, `proto/sbx/session/v1/session.proto`) дополняется сообщениями `Capture`, `Input`, `ClipboardGet`, `ClipboardSet` и ответами на них.
+- Бинарник `umiak-session` в пакете агента (`versions/<v>/umiak-session` на Linux). Запускается user-unit-ом `umiak-session.service` пользователя `user` из скрипта сессии (§6.3), `Restart=always`.
+- Подключается к агенту по unix-сокету `/run/umiak-session/session.sock`: каталог `0750 root:user`, сокет `0660 root:user`. Не внутри `/run/umiak-agent`: тот каталог `0700 root` (S3 §5), и `user` до сокета не дошёл бы. Протокол S9 §13 (protobuf с префиксом длины, `proto/umiak/session/v1/session.proto`) дополняется сообщениями `Capture`, `Input`, `ClipboardGet`, `ClipboardSet` и ответами на них.
 - **Фаза `desktop` на Linux** = `ready`, когда helper подключён, X-сервер отвечает, а helper сообщил `State{width, height}`. Для Windows — как в S9 §13.
 - Реализация на Linux **[исполнитель]**:
   - скриншот — `GetImage` (или MIT-SHM) по X11 из Go (`github.com/jezek/xgb`);
@@ -543,7 +543,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 
 ### 11.3 Супервизор стримера
 
-- Linux: `systemctl start|stop sbx-moonlight-web.service` и `systemctl --user -M user@ start|stop sunshine.service` через D-Bus.
+- Linux: `systemctl start|stop umiak-moonlight-web.service` и `systemctl --user -M user@ start|stop sunshine.service` через D-Bus.
 - Windows: SCM (`ServiceManager`, S3 §18).
 - Агент следит за процессами и перезапускает упавший стример не чаще раза в 10 s. После 5 падений подряд `Open` отвечает `streamer_failed`.
 
@@ -617,8 +617,8 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 | `GET /v1/sandboxes/{sandbox}/desktop/clipboard` | `{text, hasText}` | `desktop` |
 | `PUT /v1/sandboxes/{sandbox}/desktop/clipboard` | `{text}` → `204` | `desktop` |
 
-- **Ссылка** строится как `https://<slug>-desktop.<sbx-domain>/?_ticket=<t>&fps=<n>…` (§10.3). Это секрет, как URL с токеном порта. В списках и `GET` она не возвращается. `POST /links` заранее вызывает `Desktop/Open` в фоне, чтобы стример был готов к открытию.
-- **Скриншот** — байты изображения с заголовками `Sbx-Screen-Width`, `Sbx-Screen-Height`, `Sbx-Image-Width`, `Sbx-Image-Height`, `Sbx-Cursor-X`, `Sbx-Cursor-Y`, `Cache-Control: no-store`. В ответе `actions` с `screenshot` — JSON `{contentType, width, height, data: <base64>}`: это скриншот после действий одним вызовом, как нужно MCP.
+- **Ссылка** строится как `https://<slug>-desktop.<umiak-domain>/?_ticket=<t>&fps=<n>…` (§10.3). Это секрет, как URL с токеном порта. В списках и `GET` она не возвращается. `POST /links` заранее вызывает `Desktop/Open` в фоне, чтобы стример был готов к открытию.
+- **Скриншот** — байты изображения с заголовками `Umiak-Screen-Width`, `Umiak-Screen-Height`, `Umiak-Image-Width`, `Umiak-Image-Height`, `Umiak-Cursor-X`, `Umiak-Cursor-Y`, `Cache-Control: no-store`. В ответе `actions` с `screenshot` — JSON `{contentType, width, height, data: <base64>}`: это скриншот после действий одним вызовом, как нужно MCP.
 - **Ошибки** (дополнение к S7 §5.5):
 
 | HTTP | `code` | `retryable` | Когда |
@@ -632,14 +632,14 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 | 403 | `forbidden` | нет | `public` при выключенном `publicDesktopEnabled` (`details.reason: "public_disabled"`) |
 
 - Состояние sandbox — как для команд (S7 §9.1): не `ready` → `409 sandbox_not_ready`.
-- **Блокировка оператором** (S8 C3, s10-fix): `POST /links`, `PUT /access`, `POST /actions`, `PUT /clipboard` на заблокированной sandbox → `403 forbidden` с `details.reason: "sandbox_blocked"`, как `exec` (оператор проходит). Чтение (`GET /desktop`, `GET /screenshot`, `GET /clipboard`) разрешено, как чтение файлов; `DELETE /streams` разрешён (только отключает). Сама блокировка шлёт `NOTIFY sbx_identity 'sandboxes:<id>'`; монитор доступа `api` по нему (и раз в 5 s) поднимает `authEpoch`, вызывает `EndStreams` и отмечает `policy_revoked`, поэтому выданные билеты и cookie перестают действовать, а маршрут gateway получает `blocked`. Снятие блокировки снова поднимает `authEpoch` (s10-fix2): билет, выданный в те миллисекунды, пока ставилась блокировка, мог получить эпоху блокировки и иначе ожил бы после разблокировки.
-- Ресурс Sandbox (S7 §8.1): `endpoints.desktop = "https://<slug>-desktop.<sbx-domain>/"` у шаблонов с capability `desktop` (без билета).
+- **Блокировка оператором** (S8 C3, s10-fix): `POST /links`, `PUT /access`, `POST /actions`, `PUT /clipboard` на заблокированной sandbox → `403 forbidden` с `details.reason: "sandbox_blocked"`, как `exec` (оператор проходит). Чтение (`GET /desktop`, `GET /screenshot`, `GET /clipboard`) разрешено, как чтение файлов; `DELETE /streams` разрешён (только отключает). Сама блокировка шлёт `NOTIFY umiak_identity 'sandboxes:<id>'`; монитор доступа `api` по нему (и раз в 5 s) поднимает `authEpoch`, вызывает `EndStreams` и отмечает `policy_revoked`, поэтому выданные билеты и cookie перестают действовать, а маршрут gateway получает `blocked`. Снятие блокировки снова поднимает `authEpoch` (s10-fix2): билет, выданный в те миллисекунды, пока ставилась блокировка, мог получить эпоху блокировки и иначе ожил бы после разблокировки.
+- Ресурс Sandbox (S7 §8.1): `endpoints.desktop = "https://<slug>-desktop.<umiak-domain>/"` у шаблонов с capability `desktop` (без билета).
 
 ### 13.3 Внутренние ручки (internal listener, service token gateway)
 
 - `POST /internal/v1/gateway/desktop-auth/exchange {ticket, label}` → `{label, authEpoch, userId}` или `400 {"code": "invalid_ticket"}`. Атомарно, как обмен кода SSO (S7 §12.1): `UPDATE desktop_tickets SET used_at = now() WHERE ticket_hash = $1 AND label = $2 AND used_at IS NULL AND expires_at > now() AND auth_epoch = <текущий> RETURNING …`.
 - `POST /internal/v1/gateway/desktop/open {label}` → `Desktop/Open` у агента → `{hostId, appId}`; `409 desktop_not_ready`, `503 streamer_unavailable`. Обновляет `last_api_call_at`.
-- `GET /sbx-auth/authorize` (S7 §7.7) для меток `kind = desktop` проверяет, что пользователь — участник команды sandbox или оператор.
+- `GET /umiak-auth/authorize` (S7 §7.7) для меток `kind = desktop` проверяет, что пользователь — участник команды sandbox или оператор.
 
 ### 13.4 Поведение при жизненном цикле
 
@@ -673,7 +673,7 @@ desktop_tickets(
   used_at timestamptz null, created_at timestamptz)
 ```
 
-Блокировка — только `runtime.sandboxes.blocked` (S8): колонки `sandbox_desktops.blocked/block_reason` никто не писал, `0404_desktop_drop_block.sql` их удаляет (s10-fix). Триггер на `sandbox_desktops` шлёт `NOTIFY sbx_routes '<slug>'`. Cleanup S6 удаляет билеты старше суток. Изменения `packages/core` (`SandboxService`: `desktopLink`, `setDesktopAccess`, `endDesktopStreams`, шаг `authEpoch+1` в stop, шаг TURN в claim и provision) вносит исполнитель S10, согласуя с треком S6, как S7 (S7 §20.2).
+Блокировка — только `runtime.sandboxes.blocked` (S8): колонки `sandbox_desktops.blocked/block_reason` никто не писал, `0404_desktop_drop_block.sql` их удаляет (s10-fix). Триггер на `sandbox_desktops` шлёт `NOTIFY umiak_routes '<slug>'`. Cleanup S6 удаляет билеты старше суток. Изменения `packages/core` (`SandboxService`: `desktopLink`, `setDesktopAccess`, `endDesktopStreams`, шаг `authEpoch+1` в stop, шаг TURN в claim и provision) вносит исполнитель S10, согласуя с треком S6, как S7 (S7 §20.2).
 
 ## 14. Дашборд, CLI, SDK, MCP
 
@@ -690,20 +690,20 @@ S8 оставил заглушку; вкладку реализует испол
 - Новая ссылка — при каждом монтировании вкладки и после перехода sandbox в `ready` (resume).
 - Кнопки: «открыть в новой вкладке» (новая ссылка), полный экран, выбор режима доступа, «отключить всех зрителей» (`DELETE /desktop/streams`).
 - Sandbox не `ready` → сообщение и кнопка Resume. `desktop_not_ready` → «рабочий стол запускается», повтор через 2 s.
-- CSP S8 уже разрешает `frame-src https://*.<sbx-domain>`.
+- CSP S8 уже разрешает `frame-src https://*.<umiak-domain>`.
 
 ### 14.2 CLI
 
 | Команда | Что |
 |---|---|
-| `sbx desktop [open] <id> [--fps 60] [--bitrate N] [--transport websocket] [--print]` | открыть ссылку в браузере (`--print` — только вывести) |
-| `sbx desktop screenshot <id> [-o file.png] [--max-width N] [--max-height N] [--jpeg] [--quality N]` | скриншот в файл или stdout |
-| `sbx desktop act <id> [--file <path\|->]` | список действий из JSON; плюс короткие формы `click X Y`, `type TEXT`, `key ctrl+c`, `scroll DY` |
-| `sbx desktop clipboard <id> [get\|set TEXT]` | буфер |
-| `sbx desktop access <id> token\|sso\|public` | режим доступа |
-| `sbx desktop end-streams <id>` | `DELETE /desktop/streams` |
+| `umiak desktop [open] <id> [--fps 60] [--bitrate N] [--transport websocket] [--print]` | открыть ссылку в браузере (`--print` — только вывести) |
+| `umiak desktop screenshot <id> [-o file.png] [--max-width N] [--max-height N] [--jpeg] [--quality N]` | скриншот в файл или stdout |
+| `umiak desktop act <id> [--file <path\|->]` | список действий из JSON; плюс короткие формы `click X Y`, `type TEXT`, `key ctrl+c`, `scroll DY` |
+| `umiak desktop clipboard <id> [get\|set TEXT]` | буфер |
+| `umiak desktop access <id> token\|sso\|public` | режим доступа |
+| `umiak desktop end-streams <id>` | `DELETE /desktop/streams` |
 
-Реализация s10-fix: вход действий — `--file <path|->` (`-f`), а не `--json`, потому что глобальный `--json` CLI — формат вывода (S7 §14.3) и перехватывает флаг подкоманды. `end-streams` добавлен для `DELETE /desktop/streams`. Команды первого прохода `sbx screenshot|input|clipboard` и опции `sbx desktop --access/--end-streams` оставлены скрытыми синонимами.
+Реализация s10-fix: вход действий — `--file <path|->` (`-f`), а не `--json`, потому что глобальный `--json` CLI — формат вывода (S7 §14.3) и перехватывает флаг подкоманды. `end-streams` добавлен для `DELETE /desktop/streams`. Команды первого прохода `umiak screenshot|input|clipboard` и опции `umiak desktop --access/--end-streams` оставлены скрытыми синонимами.
 
 Контракт вывода — как у остального CLI (S7 §14.3): JSON, если stdout не TTY.
 
@@ -753,7 +753,7 @@ Warm и hibernated pools не входят в MVP ни для Linux, ни для
 - **Отзыв действует на поток через TURN**: `EndStreams` в VM (§10.5). TURN-креды при этом остаются действительными до истечения, но через TURN нельзя ходить ни к чему, кроме его собственных allocation (§9.2).
 - **TURN не открытый relay:** пиры — только свои relay-адреса; квоты на пользователя и сессию; `no-tcp-relay`; секрет только в `worker` и coturn.
 - **Стример только на loopback.** Sunshine `bind_address = 127.0.0.1`, moonlight-web `127.0.0.1:47800`. Креды Sunshine и moonlight-web свои у каждой идентичности machine. Всё, что внутри VM, может к ним подключиться — это в пределах границы доверия (VM).
-- **Подделка пользователя moonlight-web** снаружи невозможна: `X-Sbx-Desktop-User` ставит только gateway и только после авторизации, входящий вырезается. Preflight без авторизации на метке рабочего стола не пропускается, иначе `OPTIONS` отдал бы креды TURN (§10.2).
+- **Подделка пользователя moonlight-web** снаружи невозможна: `X-Umiak-Desktop-User` ставит только gateway и только после авторизации, входящий вырезается. Preflight без авторизации на метке рабочего стола не пропускается, иначе `OPTIONS` отдал бы креды TURN (§10.2).
 - **Скриншоты** не хранятся и не пишутся в логи `api` и агента. На экране могут быть секреты — это такой же доступ, как `files:read`.
 - **Буфер обмена** в логи не пишется.
 - **CSRF** на метке рабочего стола — проверка `Origin` (§10.2).
@@ -776,8 +776,8 @@ GPL-3.0 при распространении бинарников требуе�
 ## 18. Наблюдаемость
 
 - **Агент:** `Desktop/Status`; событие `desktop.streaming_changed`; в `doctor --desktop` — версии, состояние сессии, стримера, pairing. Логи Sunshine и moonlight-web — в journald (Linux) и файлах службы (Windows), агент их не пересылает.
-- **`api`:** метрики `sbx_api_desktop_links_total`, `sbx_api_desktop_actions_total{type, result}`, `sbx_api_desktop_screenshot_bytes` (histogram), `sbx_api_desktop_action_duration_seconds`.
-- **Gateway:** существующие метрики с `access=desktop`; `sbx_gateway_desktop_open_total{result}`.
+- **`api`:** метрики `umiak_api_desktop_links_total`, `umiak_api_desktop_actions_total{type, result}`, `umiak_api_desktop_screenshot_bytes` (histogram), `umiak_api_desktop_action_duration_seconds`.
+- **Gateway:** существующие метрики с `access=desktop`; `umiak_gateway_desktop_open_total{result}`.
 - **coturn:** встроенный Prometheus-экспортёр (allocations, трафик, сессии). Тревога S12 при `total-quota` ближе 80%.
 - **S6:** `desktopStreams` в activity — сколько sandbox сейчас смотрят. CPU sandbox во время потока — из `System/Metrics`.
 
@@ -801,24 +801,24 @@ GPL-3.0 при распространении бинарников требуе�
 1. Видеоадаптер (§7): `std`, `virtio` + `viogpudo`, IddCx-драйвер. Захват `ddx`, скриншот `BitBlt`/DXGI после cold boot и обычного stop/resume.
 2. Sunshine с `encoder = software` на Windows: поток идёт, CPU при 1080p30.
 3. Нужен ли аудиоустройство для старта потока.
-4. `SendInput` и `KEYEVENTF_UNICODE` из `sbx-session`: клики, печать, буфер.
+4. `SendInput` и `KEYEVENTF_UNICODE` из `umiak-session`: клики, печать, буфер.
 
 ### 19.3 Порядок
 
 1. Спайк L.
-2. Proto `desktop.proto` и сообщения `session.proto`; `sbx-session` на Linux; сервис `Desktop` в агенте (скриншот, ввод, буфер), фаза `desktop`, `desktop: true`, env.
+2. Proto `desktop.proto` и сообщения `session.proto`; `umiak-session` на Linux; сервис `Desktop` в агенте (скриншот, ввод, буфер), фаза `desktop`, `desktop: true`, env.
 3. Рецепт `linux-desktop` с VMIDs `[595, 596]`, профиль `verify`, холодное создание без пула.
 4. Стример: супервизор, pairing, `Open`, `EndStreams`, `Configure`.
 5. Gateway: `kind = desktop`, билеты, `GET /`, заголовок, `Origin`, cookie `Partitioned`.
 6. `api`: ручки §13, таблицы, внутренние ручки; `worker`: TURN-креды, `authEpoch` при stop, `desktopStreams`.
-7. coturn: конфиг и манифест (передаётся в S12), IPSet `sbx-turn` в runbook S1.
+7. coturn: конфиг и манифест (передаётся в S12), IPSet `umiak-turn` в runbook S1.
 8. Спайк W и интеграция Windows.
 9. Вкладка дашборда, CLI, SDK.
 10. Приёмка §20, цифры в §24.
 
 ## 20. Приёмка
 
-Где идут тесты: unit (фейки `sbx-session` и стримера); kind/k3s (gateway, `api`, coturn, агент-процесс на Linux runner-е с Xvfb для `sbx-session`); стенд `pve` с реальными VM; браузер — Chrome на Mac через Tailscale.
+Где идут тесты: unit (фейки `umiak-session` и стримера); kind/k3s (gateway, `api`, coturn, агент-процесс на Linux runner-е с Xvfb для `umiak-session`); стенд `pve` с реальными VM; браузер — Chrome на Mac через Tailscale.
 
 **Computer-use (Linux и Windows):**
 1. Скриншот PNG и JPEG 1920×1080; с `maxWidth=1280` — 1280×720 и `scale = 0.667`; `region` вырезает нужный прямоугольник. p50 ≤ 300 ms для полного PNG.
@@ -849,48 +849,48 @@ GPL-3.0 при распространении бинарников требуе�
 22. Смена режима и `DELETE /desktop/streams`: старая cookie сразу даёт `401`, а активный поток (в том числе через TURN) обрывается не позже чем через 5 s.
 23. Stop: поток обрывается; после resume старая cookie не работает.
 24. Ключ без scope `desktop` → `403` на всех ручках §13.2, кроме статуса.
-25. Подделка `X-Sbx-Desktop-User` клиентом не доходит до moonlight-web (эхо-тест).
+25. Подделка `X-Umiak-Desktop-User` клиентом не доходит до moonlight-web (эхо-тест).
 26. WebSocket upgrade и `POST` на метку рабочего стола с чужим `Origin` → `403 origin_forbidden`.
 27. Iframe на другом сайте (тестовая страница на отдельном домене) в Chrome: поток работает (partitioned cookie).
 
 **TURN:**
 28. С кредами sandbox клиент TURN не может создать permission к внешнему адресу (`8.8.8.8`), адресу ноды, pod-у кластера или другой VM — отказ 403. Relay ↔ relay работает.
 29. Креды с истёкшим сроком → `401` на `Allocate`. Продление контроллером: креды у `ready` sandbox никогда не старше 24 h.
-30. Firewall: из VM сверх правил S1 доступен только `sbx-turn` UDP 3478; TCP и другие порты TURN-хоста — нет.
+30. Firewall: из VM сверх правил S1 доступен только `umiak-turn` UDP 3478; TCP и другие порты TURN-хоста — нет.
 
 **Шаблон и холодный create:**
 31. Проверки §6.6 и `windows-desktop` зелёные.
 32. Холодный create `linux-desktop`: измерить clone + boot + desktop start (ориентир до ~1 min), `desktop: ready`, env claim виден в терминале. Windows — до 5 min. RAM всех sandbox ≤8 GB, без пула.
 33. Fork работающей `linux-desktop`: у fork новые креды Sunshine и moonlight-web, pairing проходит при первом открытии; профиль Chrome сохранён.
 34. Idle-stop: при открытом потоке через TURN и без других действий sandbox не останавливается 30 min (`desktopStreams` в `activity` и в `System/Activity`); после закрытия потока останавливается через `idle_timeout_seconds`.
-35. Отзыв ключа, которым выдан билет, и удаление участника из команды: cookie зрителя сразу даёт `401`, поток обрывается не позже чем через 5 s после `NOTIFY sbx_identity`.
+35. Отзыв ключа, которым выдан билет, и удаление участника из команды: cookie зрителя сразу даёт `401`, поток обрывается не позже чем через 5 s после `NOTIFY umiak_identity`.
 36. `OPTIONS` на метку рабочего стола без авторизации → `401`; заголовков `Link` с кредами TURN в ответе нет.
 
 ## 21. Изменения в соседних областях
 
 Вносят исполнители этих областей по этой спеке (как S7 §20); согласование — через master.
 
-- **S1:** IPSet `sbx-turn` и правило UDP 3478 в `sbx-egress` (§9.2), шаг runbook с таймером отката.
-- **S2 / `libs/tunnel`:** лимит размера сообщения Connect до 32 MiB для `sbx.agent.v1.Desktop/Screenshot` (если сейчас меньше).
-- **S3:** сервис `Desktop`; `sbx-session` на Linux и его сокет; фаза `desktop` на Linux; `CommandSpec.desktop` на Linux; `DISPLAY`/`XAUTHORITY` в платформенном env шаблонов с рабочим столом; перезапуск сессии при claim и после секретов; событие `desktop.streaming_changed` и `desktopStreams` в `activity` и `System/Activity`; учёт потока в признаке простоя; сокет `/run/sbx-session/`; подкоманда `resume-hint` на Linux; стирание состояния стримера при смене идентичности; коды ошибок §11.1; capabilities.
-- **S4:** поле `kind` в маршруте; для `kind = desktop` — билеты и обмен, `GET /` → `Open` → `302`, заголовок `X-Sbx-Desktop-User` только после авторизации, без пропуска CORS preflight, `Origin`-проверка, cookie `m: "d"` с `SameSite=None; Partitioned`, страница `desktop_starting`; порты стримера в зарезервированных (`SBX_GATEWAY_RESERVED_PORTS`).
+- **S1:** IPSet `umiak-turn` и правило UDP 3478 в `umiak-egress` (§9.2), шаг runbook с таймером отката.
+- **S2 / `libs/tunnel`:** лимит размера сообщения Connect до 32 MiB для `umiak.agent.v1.Desktop/Screenshot` (если сейчас меньше).
+- **S3:** сервис `Desktop`; `umiak-session` на Linux и его сокет; фаза `desktop` на Linux; `CommandSpec.desktop` на Linux; `DISPLAY`/`XAUTHORITY` в платформенном env шаблонов с рабочим столом; перезапуск сессии при claim и после секретов; событие `desktop.streaming_changed` и `desktopStreams` в `activity` и `System/Activity`; учёт потока в признаке простоя; сокет `/run/umiak-session/`; подкоманда `resume-hint` на Linux; стирание состояния стримера при смене идентичности; коды ошибок §11.1; capabilities.
+- **S4:** поле `kind` в маршруте; для `kind = desktop` — билеты и обмен, `GET /` → `Open` → `302`, заголовок `X-Umiak-Desktop-User` только после авторизации, без пропуска CORS preflight, `Origin`-проверка, cookie `m: "d"` с `SameSite=None; Partitioned`, страница `desktop_starting`; порты стримера в зарезервированных (`UMIAK_GATEWAY_RESERVED_PORTS`).
 - **S5:** `extends` (S5 §16 уже предусмотрел), рецепт `linux-desktop`, профиль `verify: linux-desktop`, VMIDs `[595, 596]`; default size 4gb и allowed 4gb/8gb в runtime seeds/config.
 - **S6:** `desktopStreams` в `activity`, `System/Activity` и idle-stop; `authEpoch+1` рабочего стола в stop; `Desktop/Configure` в шагах `claim` и `provision`; контроллер `desktop-turn`; таблицы §13.5 через `packages/core`.
-- **S7:** scope `desktop`; ручки §13.2 и §13.3; ошибки; `endpoints.desktop`; зарезервированные порты стримера; политика `sso` для `kind = desktop`; отзыв доступа к рабочему столу в обработчике `NOTIFY sbx_identity` (§10.5, расширение S8 C9); креды TURN выдаёт `worker`, а не `api` (переопределение S4 §13); документация (смена env не меняет запущенный рабочий стол, Safari и чужой iframe).
-- **S8:** `PlatformDefaults.publicDesktopEnabled` (по умолчанию `false`) с `NOTIFY sbx_routes '*'`; сид шаблона `linux-desktop` (`capabilities` с `desktop`, `defaultSize: 4gb`); сид размеров `4gb` (4 vCPU) и `8gb`; вкладка Desktop (§14.1) — делает исполнитель S10; scope `desktop` в форме ключей.
-- **S9:** шаг `60-desktop` дополняется §7; `hw.vga` — по спайку W; `sbx-session` получает `Capture`, `Input`, `ClipboardGet/Set` и запускает cua-driver; размер `windows` по умолчанию — `4gb` с 4 vCPU.
+- **S7:** scope `desktop`; ручки §13.2 и §13.3; ошибки; `endpoints.desktop`; зарезервированные порты стримера; политика `sso` для `kind = desktop`; отзыв доступа к рабочему столу в обработчике `NOTIFY umiak_identity` (§10.5, расширение S8 C9); креды TURN выдаёт `worker`, а не `api` (переопределение S4 §13); документация (смена env не меняет запущенный рабочий стол, Safari и чужой iframe).
+- **S8:** `PlatformDefaults.publicDesktopEnabled` (по умолчанию `false`) с `NOTIFY umiak_routes '*'`; сид шаблона `linux-desktop` (`capabilities` с `desktop`, `defaultSize: 4gb`); сид размеров `4gb` (4 vCPU) и `8gb`; вкладка Desktop (§14.1) — делает исполнитель S10; scope `desktop` в форме ключей.
+- **S9:** шаг `60-desktop` дополняется §7; `hw.vga` — по спайку W; `umiak-session` получает `Capture`, `Input`, `ClipboardGet/Set` и запускает cua-driver; размер `windows` по умолчанию — `4gb` с 4 vCPU.
 - **S11:** инструменты §14.4.
-- **S12:** coturn (Deployment `hostNetwork` на ноде с меткой или UDP LB, Secret `static-auth-secret`, сертификат `turn.<domain>`, DNS), конфиг `SBX_TURN_URLS` и `SBX_TURN_SECRET_FILE` для `worker`, тревога по квоте TURN; IP TURN в IPSet `sbx-turn`.
+- **S12:** coturn (Deployment `hostNetwork` на ноде с меткой или UDP LB, Secret `static-auth-secret`, сертификат `turn.<domain>`, DNS), конфиг `UMIAK_TURN_URLS` и `UMIAK_TURN_SECRET_FILE` для `worker`, тревога по квоте TURN; IP TURN в IPSet `umiak-turn`.
 
 ## 22. Раскладка кода
 
 ```
-proto/sbx/agent/v1/desktop.proto        Desktop service (§11.1)
-proto/sbx/session/v1/session.proto      agent <-> sbx-session (S9 §13 + Capture, Input, Clipboard)
+proto/umiak/agent/v1/desktop.proto        Desktop service (§11.1)
+proto/umiak/session/v1/session.proto      agent <-> umiak-session (S9 §13 + Capture, Input, Clipboard)
 services/guest-agent/
   internal/desktop/                     Desktop service, streamer supervisor, pairing, TURN config
   internal/session/                     session socket server, shared by Linux and Windows
-  cmd/sbx-session/                      helper: *_linux.go (X11), *_windows.go (Win32)
+  cmd/umiak-session/                      helper: *_linux.go (X11), *_windows.go (Win32)
 infra/templates/linux-desktop/          recipe, versions.toml, steps/60-desktop.sh, files/
 infra/templates/_windows/steps/60-desktop.ps1   S10 additions (§7)
 services/gateway/internal/desktopauth/  tickets, open redirect, header, Origin check
@@ -899,7 +899,7 @@ packages/core/                          desktop methods, TURN credential issuing
 db/migrations/04xx_*.sql                §13.5
 infra/turn/                             coturn config template (manifests: S12)
 apps/web/                               Desktop tab
-apps/cli/                               sbx desktop
+apps/cli/                               umiak desktop
 ```
 
 Структура пакетов внутри — **[исполнитель]**.
@@ -919,6 +919,8 @@ apps/cli/                               sbx desktop
 | Для сравнения (§4.1) | KasmVNC 1.5.2, Selkies 2.1.0, noVNC 1.7.0, Guacamole 1.6.0, neko 3.2.0, TigerVNC 1.16.2, x11vnc 0.9.17 | не используются |
 
 ## 24. Результаты
+
+> Исторический отчёт до R1; действующие имена — `docs/specs/rename-umiak.md`.
 
 Состояние 2026-10-31: `qm list` показывает работающую Windows-сборку S9 в VM 598 (4096 MiB). S10 не запускал VM, не менял firewall, шаблоны и CT 590. Сборки desktop и измерений пока нет. SSH по IP использует сохранённый host key через alias из `infra/dev-cp/README.md`.
 
@@ -952,7 +954,7 @@ cua-driver 0.38.0 — последний versioned release в просмотре
 2. **Политика доступа к рабочему столу — решено master** (2026-10-29): отдельный scope `desktop`; `sso` пускает только участников команды sandbox и операторов; `public` есть, но выключен глобально по умолчанию (`publicDesktopEnabled = false`) и включается оператором (§10.2, §13.1, §16).
 3. **Граница фаз — решено master:** примитивы computer-use входят в MVP. Правку `docs/roadmap-phase2.md` (§2.9 D6, §4 S29, §5.2 инструменты `computer_*` → S11) вносит master.
 4. **Сверка с моделью аутентификации Keycloak** (S7 §7, внесена параллельно со S10) — задача треда реализации:
-   - человек приходит с Keycloak JWT, у которого нет scope; scope `desktop` проверяется только у командных ключей `sbx_`;
+   - человек приходит с Keycloak JWT, у которого нет scope; scope `desktop` проверяется только у командных ключей `umiak_`;
    - билет, выпущенный по JWT, привязан к пользователю, а не к `desktop_tickets.api_key_id`;
    - отзыв по деактивации пользователя идёт через путь S8 §20.1;
    - код ошибки для `public` при выключенном `publicDesktopEnabled` один: в §13 и в проверках §22 сейчас написано по-разному (`forbidden` и `route_blocked`).
@@ -969,7 +971,7 @@ The linux-desktop recipe now inherits Linux pins, adds pinned cosign3.1.4 for cu
 
 ### Adapter implementation choices (source-backed, 2026-10-31)
 
-`sbx-session` is implemented as the `session --socket` subcommand of the signed
+`umiak-session` is implemented as the `session --socket` subcommand of the signed
 agent binary. This keeps helper and agent versions together across updates.
 Its local transport is bounded HTTP/JSON over an ACL-protected AF_UNIX socket,
 not a second public API; this replaces the proposed custom protobuf framing.
@@ -988,7 +990,7 @@ already-running streamers after its own restart. Empty/no streamer is zero activ
 
 Sunshine password bootstrap uses POST/api/password and exact on-disk TLS certificate
 pinning; pairing uses GET/api/pin and POST/api/pin with pairing_id. Moonlight v3.0.1
-returns streamed NDJSON Pin then Paired. The proxy user sbx is a pre-created ordinary
+returns streamed NDJSON Pin then Paired. The proxy user umiak is a pre-created ordinary
 User, cannot add hosts; only the generated private administrator manages pairing.
 Source-derived wire fixtures are committed under internal/desktop/testdata/upstream;
 they are not live pve recordings.
@@ -998,12 +1000,12 @@ published). Its autologon/user creation stays in S9. S10 registers session and
 cua-driver tasks after secrets/account readiness. Helper is the signed agent's
 session subcommand; GDI, SendInput and clipboard operate in that user's console.
 The upstream SunshineService owns Sunshine's console process. Moonlight runs in
-an SCM wrapper under NT SERVICE\\sbx-moonlight-web. Installer overlay adds65-streamer;
+an SCM wrapper under NT SERVICE\\umiak-moonlight-web. Installer overlay adds65-streamer;
 Windows artifact pins are in windows/files/desktop-pins.json until the typed S9/S10
 manifest integration. No Windows VM or slot598 is touched by this code-only pass.
 Cua v0.38.0 defaults to stdio MCP; service/task explicitly launches serve.
 
-Linux Sunshine запускается system unit `sbx-sunshine.service` с `User=user` и явным
+Linux Sunshine запускается system unit `umiak-sunshine.service` с `User=user` и явным
 session environment; upstream user unit выключен. Это упрощает один controller
 для root agent без DBus вызовов в user manager. Оба Linux streamer unit имеют
 TimeoutStopSec3. Revoke отменяет ещё и незавершённые Open/pairing requests,
@@ -1091,7 +1093,7 @@ behaviour are not characterised by this acceptance.
   `60-desktop`» заменено отдельным шагом `65-streamer` дочернего рецепта (общие шаги
   `_windows` без изменений). `linux-desktop` теперь занимает один слот **596**; как у
   `windows`, пересборка одного слота требует сначала вывести старый шаблон.
-- **`agent.toml`** desktop-рецепта рендерит `sbx-tpl` (`isDesktopRecipe`): `[desktop] enabled`,
+- **`agent.toml`** desktop-рецепта рендерит `umiak-tpl` (`isDesktopRecipe`): `[desktop] enabled`,
   фаза `desktop` в `[readiness] required`, порты стримера в `[ports] exclude`. Установщик
   `desktop-install.ps1` больше не правит `agent.toml` регулярными выражениями.
 - **Пины Windows-артефактов** (Sunshine MSI, moonlight-web zip, cua-driver zip, cosign) — в
@@ -1100,17 +1102,17 @@ behaviour are not characterised by this acceptance.
 - **Edge**: политики `HideFirstRunExperience`, `BrowserSignin=0`, `SyncDisabled`,
   `DefaultBrowserSettingEnabled=0`, без промо и рекомендаций.
 - **Verify `windows-desktop`**: базовый `windows/verify.ps1` целиком плюс группа `desktop`
-  (файлы стримеров, службы Manual/Stopped и учётная запись `NT SERVICE\sbx-moonlight-web`,
+  (файлы стримеров, службы Manual/Stopped и учётная запись `NT SERVICE\umiak-moonlight-web`,
   шаблон moonlight-web на loopback без STUN, `agent.toml`, нет слушателей стримера до Open,
   политики Edge). Группа вставляется перед `# --- main ---` и регистрируется через
-  `$SbxExtraGroups`; в `windows/verify.ps1` добавлен только этот хук.
+  `$UmiakExtraGroups`; в `windows/verify.ps1` добавлен только этот хук.
 - **Activity на Windows**: conntrack нет, а лог Sunshine не пишет DISCONNECT при
   принудительном завершении. Основной признак — UDP-сокеты процесса moonlight-web
   (`web-server.exe`, `GetExtendedUdpTable` с владельцем): ENet-канал к Sunshine есть у каждого
   потока при любом транспорте браузера, без потока у moonlight-web UDP-сокетов нет. Число
   потоков не определяется, агент сообщает `desktopStreams = 1` при наличии сокетов.
   Ошибка выборки — запасной путь через лог Sunshine (консервативно).
-- **Сессия**: `register-session.ps1` регистрирует задачи `\sbx\session` и `\sbx\cua-driver`
+- **Сессия**: `register-session.ps1` регистрирует задачи `\umiak\session` и `\umiak\cua-driver`
   (Interactive, `user`, триггер AtLogOn) при каждом старте агента; запуск сразу — только если
   `user` уже вошёл, иначе их запускает триггер автологона.
 - **Видео (спайк W, §19.2)**: `hw.vga: std` (Microsoft Basic Display Adapter), без смены
@@ -1138,7 +1140,7 @@ OVMF `PlatformConfig` 1920×1080.
 - Сборка 31.8 min (сборка + первый verify), диск 17.1 GiB. `verify: windows-desktop`:
   110 проверок, 0 FAIL (базовый профиль S9 + группа `desktop`, включая `desktop_display`).
   Первый verify этой сборки прервался потерей QGA на fork сразу после готовности агента
-  (перезагрузка переименования S9, R16); повторный `sbx-tpl verify` прошёл полностью.
+  (перезагрузка переименования S9, R16); повторный `umiak-tpl verify` прошёл полностью.
   В сборке 3 тот же шаг прошёл с первого раза.
 - Публичный холодный create до `ready` с фазой `desktop`: 139 s и 146 s (лимит 5 min).
   Первое открытие стримера: 22 s (тест энкодеров Sunshine), повторные — < 1 s.
@@ -1190,7 +1192,7 @@ runtime-миграции S10 остаются 0401–0403 и идут после
 Независимая приёмка master нашла 12 замечаний; правила записаны в разделах выше (помечены s10-fix).
 
 - **Блокировка оператором (H1).** Ручки рабочего стола, которые управляют гостем, проверяют блокировку как `exec` (§13.2). Live на CT 590 (`desktop-block-probe.ts`, `windows-desktop`): после блокировки `exec`, `POST /actions`, `PUT /clipboard`, `POST /links`, `PUT /access` → `403 sandbox_blocked`; скриншот разрешён; `authEpoch` 1→2, `EndStreams` выполнен, старая cookie зрителя → 403; после снятия блокировки действия снова работают. MCP `computer_*` показывает ошибку с подсказкой «не повторять».
-- **TURN и порты своего адреса (M3).** Таблица `inet sbx_turn` (§9.2). Live `verify-turn.py`: relay↔relay до UDP-, TCP- и TLS-клиента работает; Send indication на `192.168.68.90:40123` и `:41641` не доходит, счётчик drop растёт. Контроль: без таблицы тот же зонд доходит до слушателя `:40123` (`received 14`). turnserver работает от uid 3478 только с `CAP_NET_BIND_SERVICE`.
+- **TURN и порты своего адреса (M3).** Таблица `inet umiak_turn` (§9.2). Live `verify-turn.py`: relay↔relay до UDP-, TCP- и TLS-клиента работает; Send indication на `192.168.68.90:40123` и `:41641` не доходит, счётчик drop растёт. Контроль: без таблицы тот же зонд доходит до слушателя `:40123` (`received 14`). turnserver работает от uid 3478 только с `CAP_NET_BIND_SERVICE`.
 - **Скриншоты в кэше запросов (M1).** Live (`desktop-cache-probe.ts`, `linux-desktop 20261101.2`): после 22 `Act` со скриншотами 1920×1080 в `state.db`, `-wal`, `-shm` 0 сигнатур PNG; повтор с тем же `Idempotency-Key` возвращает сохранённый результат и свежий скриншот.
 - **Контроллер `desktop-turn` (M2).** Ошибка одной sandbox пишется в лог и не прерывает остальные; порядок — старые креды первыми, `id`; партия до 100.
 - **Квота при `forceStop` (B3).** Счёт был верным: работающий источник уже учтён один раз, fork добавляет свой размер. С квотой 6144 MB fork 4 GB от источника 4 GB действительно не помещается (оба работают после fork). Сообщение теперь называет занятое, запрошенное и правило `forceStop`: `quota 'maxRamMb' exceeded (4096 MB in use + 4096 MB requested > limit 6144 MB); the source restarts after a forceStop fork…`, `details.requested`. Тест: при квоте 8192 forced fork проходит.
@@ -1208,8 +1210,8 @@ Live на CT 590 (`s10-fix`): Linux `e2e-desktop` зелёный целиком 
 
 Вторая независимая приёмка master приняла H1, M1, M2, B1–B3 и п. 8–12 и нашла S1, S2, W1, N1, N2.
 
-- **S1, S2 — TURN (§9.2).** coturn перенесён в собственный network namespace (compose-сеть `turn`): адрес TURN на `lo` внутри, наружу опубликованы только 3478/udp, 3478/tcp и TLS; на сети хоста entrypoint отказывается стартовать. Порты relay — 61000–65535 (dev 61000–61040), выше `ip_local_port_range`, зарезервированы sysctl в namespace TURN; пересечение — отказ старта. Entrypoint остаётся init и каждые 2 s сравнивает таблицу `inet sbx_turn` с поставленной; при удалении или изменении init выходит, turnserver умирает вместе с namespace PID, compose перезапускает с новой таблицей; healthcheck — та же проверка. На CT 590 `nftables.conf` без `flush ruleset` (`infra/dev-cp/README.md`).
-  Live (`verify-turn.py`, `SBX_TURN_PROBE_GUARD=1`): relay↔relay до UDP/TCP/TLS-клиента работает; UDP-слушатели хоста на `192.168.68.90:40123` и `:61039` (внутри диапазона relay) ничего не получают, `:41641` тоже, счётчик drop растёт; после `docker exec … nft delete table inet sbx_turn` relay перестал работать через 0.5 s, восстановился с таблицей через 2.7 s; `systemctl reload nftables` в CT 590 не перезапускает TURN и не ломает публикацию портов. Запрещённые пиры (8.8.8.8, LAN, сеть VM) — 403.
+- **S1, S2 — TURN (§9.2).** coturn перенесён в собственный network namespace (compose-сеть `turn`): адрес TURN на `lo` внутри, наружу опубликованы только 3478/udp, 3478/tcp и TLS; на сети хоста entrypoint отказывается стартовать. Порты relay — 61000–65535 (dev 61000–61040), выше `ip_local_port_range`, зарезервированы sysctl в namespace TURN; пересечение — отказ старта. Entrypoint остаётся init и каждые 2 s сравнивает таблицу `inet umiak_turn` с поставленной; при удалении или изменении init выходит, turnserver умирает вместе с namespace PID, compose перезапускает с новой таблицей; healthcheck — та же проверка. На CT 590 `nftables.conf` без `flush ruleset` (`infra/dev-cp/README.md`).
+  Live (`verify-turn.py`, `UMIAK_TURN_PROBE_GUARD=1`): relay↔relay до UDP/TCP/TLS-клиента работает; UDP-слушатели хоста на `192.168.68.90:40123` и `:61039` (внутри диапазона relay) ничего не получают, `:41641` тоже, счётчик drop растёт; после `docker exec … nft delete table inet umiak_turn` relay перестал работать через 0.5 s, восстановился с таблицей через 2.7 s; `systemctl reload nftables` в CT 590 не перезапускает TURN и не ломает публикацию портов. Запрещённые пиры (8.8.8.8, LAN, сеть VM) — 403.
 - **N1.** Снятие запрета политики (блокировка, public) тоже поднимает `authEpoch` (§13.2); тест: билет, записанный с эпохой блокировки, после разблокировки не обменивается.
 - **N2.** `ctl-desktop-turn` отмечает попытку (`turn_attempted_at`, миграция `0405`) и выбирает сначала не пробованные, потом самые давние попытки: полная партия недоступных гостей больше не блокирует остальных; тест с партией 1.
 - **W1 — Windows e2e.**
@@ -1221,6 +1223,6 @@ Live на CT 590 (`s10-fix2`): `e2e.sh` 20/20, Linux `e2e-desktop` зелёны�
 ### Доработки s10-followups (2026-11-02)
 
 - **W1-B — чёрный WebSocket на Windows.** Причина и исправление — §8.6. Воспроизведение до правки: на шаблоне `20261101.3` первый же Windows `e2e-desktop` чёрный, проба `desktop-media-probe.ts` — 1 из 4 открытий чёрное на тёплой VM. С патченным `web-server.exe` на той же VM — 18 из 18 с картинкой; в логе Sunshine video ping каждый раз первый и с порта видеосокета, audio ping через ~25 ms с другого порта. Сборка `windows-desktop 20261101.6` (VM 595, агент `0.1.0+20261101.b84f61b8`, verify 112 проверок, 0 FAIL, в том числе `desktop_moonlight_patch`). Windows `e2e-desktop` на `20261101.6`: 6 из 6 подряд зелёные (по 44 проверки; create 117–130 s, первое открытие потока 22–23 s, первый кадр WebSocket через 148–174 ms, ровно один ключевой кадр на открытие, Run — с первой попытки; нагрузка `pve` во время сборки и прогонов 6–27). Linux `e2e-desktop` зелёный (44 проверки), `e2e.sh` 20/20.
-- **Окно после разблокировки (§13.2).** `unblockSandbox` шлёт `sbx_identity 'sandboxes:<id>'`, монитор доступа срабатывает сразу. Пока `policy_revoked` не снят, маршрут рабочего стола считается заблокированным (`blockReason = policy_revoked`): обмен билета, `open` и cookie отказывают. Снятие запрета ставит `pending_disconnect`, так что поток из окна (если бы он был) завершается. Тест: билет с эпохой блокировки сразу после разблокировки — 401 (до правки 200). Live (`desktop-block-probe.ts`): 403 сразу после разблокировки без NOTIFY, монитор поднял эпоху и завершил потоки, свежая ссылка открывается.
-- **Перезагрузка переименования после claim (S9 §11.2 п. 8).** `rebootBoot` в `identity.json`: загрузка, попросившая перезагрузку, не становится готовой и просит её снова при каждом перезапуске агента. Тесты агента и `ident` падают на старом коде (на четвёртом запуске той же загрузки агент шёл дальше без перезагрузки) и проходят на новом. Live: каждый Windows `e2e-desktop` проверяет, что событие 1074 «sbx identity changed» было до ready, а `LastBootUpTime` после claim не менялся. Медленную перезагрузку под нагрузкой искусственно не воспроизводили.
+- **Окно после разблокировки (§13.2).** `unblockSandbox` шлёт `umiak_identity 'sandboxes:<id>'`, монитор доступа срабатывает сразу. Пока `policy_revoked` не снят, маршрут рабочего стола считается заблокированным (`blockReason = policy_revoked`): обмен билета, `open` и cookie отказывают. Снятие запрета ставит `pending_disconnect`, так что поток из окна (если бы он был) завершается. Тест: билет с эпохой блокировки сразу после разблокировки — 401 (до правки 200). Live (`desktop-block-probe.ts`): 403 сразу после разблокировки без NOTIFY, монитор поднял эпоху и завершил потоки, свежая ссылка открывается.
+- **Перезагрузка переименования после claim (S9 §11.2 п. 8).** `rebootBoot` в `identity.json`: загрузка, попросившая перезагрузку, не становится готовой и просит её снова при каждом перезапуске агента. Тесты агента и `ident` падают на старом коде (на четвёртом запуске той же загрузки агент шёл дальше без перезагрузки) и проходят на новом. Live: каждый Windows `e2e-desktop` проверяет, что событие 1074 «umiak identity changed» было до ready, а `LastBootUpTime` после claim не менялся. Медленную перезагрузку под нагрузкой искусственно не воспроизводили.
 - **TURN.** Watchdog и healthcheck проверяют адрес TURN на `lo` (§9.2). Live на CT 590: `ip addr del` в namespace TURN → healthcheck сразу 1, init вышел, контейнер перезапущен через 1.7 s с адресом, `healthy`. Самоотказ allocation при посылке на запрещённый порт задокументирован (§9.2).

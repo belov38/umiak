@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 )
 
 // Mem is a thread-safe in-memory journal. Seqs start at 1.

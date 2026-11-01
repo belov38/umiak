@@ -1,7 +1,7 @@
 // A bare JSON-RPC peer over newline-delimited streams (the stdio wire): the
 // test sees every byte the server wrote to stdout and fails on anything that
 // is not a JSON-RPC 2.0 message. Used against runStdio in memory and against
-// a real `sbx mcp` child process.
+// a real `umiak mcp` child process.
 
 export type Json = Record<string, unknown>;
 

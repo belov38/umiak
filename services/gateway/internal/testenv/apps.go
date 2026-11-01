@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
+	"github.com/belov38/umiak/services/gateway/internal/testenv/sshdtest"
 )
 
 // appReadHeaderTimeout bounds request headers on the test apps.

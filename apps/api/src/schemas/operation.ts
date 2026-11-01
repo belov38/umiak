@@ -1,7 +1,7 @@
 // Operation resource (S7 §8.4). Internal `reprovision` operations and the
 // stored request (`request`, its `bodyHash`) are never part of it.
 import { z } from "@hono/zod-openapi";
-import { OPERATION_STATES } from "@sbx/core";
+import { OPERATION_STATES } from "@umiak/core";
 import { extensibleEnum } from "../openapi/registry.ts";
 import { NullableTimestamp, Timestamp } from "./common.ts";
 

@@ -1,12 +1,12 @@
 // The OS keychain through Bun.secrets (macOS Keychain, libsecret, Windows
-// Credential Manager): entries `service: "sbx"`, `name: "<profile>@<issuer|apiUrl>"`.
+// Credential Manager): entries `service: "umiak"`, `name: "<profile>@<issuer|apiUrl>"`.
 // Windows entries use `persist: "local"`: a rotating refresh token belongs
 // to this computer only.
 
 import { CliError } from "../exit-codes.ts";
 import type { CredentialStore } from "./store.ts";
 
-export const KEYCHAIN_SERVICE = "sbx";
+export const KEYCHAIN_SERVICE = "umiak";
 
 /** The part of Bun.secrets the store uses. */
 export interface SecretsBackend {

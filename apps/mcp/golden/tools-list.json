@@ -830,7 +830,7 @@
     {
       "name": "files_write",
       "title": "Write a file",
-      "description": "Writes a file atomically; creates parent directories and replaces an existing file by default. Up to 1 MiB: for larger files and directories ask the human to run sbx cp or sbx push in a terminal. mode is octal, e.g. 0644.",
+      "description": "Writes a file atomically; creates parent directories and replaces an existing file by default. Up to 1 MiB: for larger files and directories ask the human to run umiak cp or umiak push in a terminal. mode is octal, e.g. 0644.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

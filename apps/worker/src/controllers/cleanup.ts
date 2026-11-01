@@ -1,13 +1,17 @@
-import { ENVIRONMENT_AAD_PREFIX } from "@sbx/auth";
-import { DELETE_RETRY_LIMIT, requestSystemDelete, SbxError } from "@sbx/core";
-import { withTx } from "@sbx/db";
+import { ENVIRONMENT_AAD_PREFIX } from "@umiak/auth";
+import {
+	DELETE_RETRY_LIMIT,
+	requestSystemDelete,
+	UmiakError,
+} from "@umiak/core";
+import { withTx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import { lockSandboxRow } from "../db.ts";
 
 // Controller `cleanup` (S6 §15.4, every 10 min). Each part is idempotent and
 // works in bounded batches; what is left goes to the next run.
 //
-// Every part runs in its own try/catch (log + `sbx_cleanup_failed_total{part}`),
+// Every part runs in its own try/catch (log + `umiak_cleanup_failed_total{part}`),
 // so one failure does not skip the others.
 //
 // Retention: idempotency keys past `expires_at`; processed agent and synthetic
@@ -34,7 +38,7 @@ import { lockSandboxRow } from "../db.ts";
 // under its sandbox row lock (lock order: sandbox row first). Team
 // environments (`runtime.environments`, S8 §10.3) the same way, each under
 // its own row lock; their revision and update time stay (same content). The
-// gauge `sbx_secrets_old_key_rows` reports what is left in both tables
+// gauge `umiak_secrets_old_key_rows` reports what is left in both tables
 // (0 = the old key can go).
 
 export const AGENT_EVENTS_RETENTION_DAYS = 7;
@@ -79,7 +83,7 @@ export interface CleanupResult {
 	/** runtime.environments rows re-encrypted with the current key. */
 	environmentsReencrypted: number;
 	environmentsReencryptFailed: number;
-	/** Parts that threw in this run (logged, `sbx_cleanup_failed_total{part}`). */
+	/** Parts that threw in this run (logged, `umiak_cleanup_failed_total{part}`). */
 	failed: CleanupPart[];
 }
 
@@ -107,7 +111,7 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 			await fn();
 		} catch (err) {
 			res.failed.push(name);
-			ctx.metrics.inc("sbx_cleanup_failed_total", { part: name });
+			ctx.metrics.inc("umiak_cleanup_failed_total", { part: name });
 			ctx.log.error(
 				{ part: name, err: err instanceof Error ? err.message : String(err) },
 				"cleanup part failed",
@@ -219,7 +223,7 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 			      + (SELECT count(*) FROM runtime.environments WHERE key_version <> $1)::int AS n`,
 			[current],
 		);
-		ctx.metrics.set("sbx_secrets_old_key_rows", left.rows[0]?.n ?? 0);
+		ctx.metrics.set("umiak_secrets_old_key_rows", left.rows[0]?.n ?? 0);
 	});
 	ctx.log.info({ ...res }, "cleanup done");
 	return res;
@@ -374,13 +378,13 @@ async function systemDeletes(
 			});
 			if (op === null) continue;
 			out.push(id);
-			ctx.metrics.inc("sbx_cleanup_delete_total", { reason });
+			ctx.metrics.inc("umiak_cleanup_delete_total", { reason });
 			ctx.log.info(
 				{ sandboxId: id, operationId: op.id, reason },
 				"cleanup: sandbox deleted",
 			);
 		} catch (err) {
-			if (!(err instanceof SbxError)) throw err;
+			if (!(err instanceof UmiakError)) throw err;
 			ctx.log.warn(
 				{ sandboxId: id, code: err.code },
 				"cleanup: delete skipped",
@@ -435,7 +439,7 @@ async function reencryptRows(
 				if (await table.one(ctx, id, current)) done += 1;
 			} catch (err) {
 				failed.add(id);
-				ctx.metrics.inc("sbx_secrets_reencrypt_failed_total");
+				ctx.metrics.inc("umiak_secrets_reencrypt_failed_total");
 				ctx.log.error(
 					{ id, err: err instanceof Error ? err.message : String(err) },
 					`cleanup: ${table.what} re-encryption failed`,
@@ -482,7 +486,7 @@ async function reencryptSandboxSecrets(
 }
 
 // The blob is opaque here: decrypted and encrypted again as bytes, with the
-// AAD of PgEnvironmentStore (@sbx/auth). Writers of an environment lock its
+// AAD of PgEnvironmentStore (@umiak/auth). Writers of an environment lock its
 // row (SELECT ... FOR UPDATE), so a concurrent patch waits or wins.
 async function reencryptEnvironment(
 	ctx: WorkerCtx,

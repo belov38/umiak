@@ -1,0 +1,14 @@
+[Unit]
+Description=umiak machine identity
+DefaultDependencies=no
+After=local-fs.target systemd-remount-fs.service
+Before=network-pre.target systemd-networkd.service ssh.service ssh.socket cloud-init-local.service umiak-agent.service systemd-journal-flush.service sysinit.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent identity apply
+
+[Install]
+WantedBy=sysinit.target

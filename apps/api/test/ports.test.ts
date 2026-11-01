@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { encodeUuid } from "@sbx/auth";
-import type { ConfigReader } from "@sbx/config";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid } from "@umiak/auth";
+import type { ConfigReader } from "@umiak/config";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { captureLogs } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
@@ -59,7 +63,7 @@ describe.skipIf(skipPg())("hosted ports (S7 §11.2)", () => {
 		const r = await lh.request("PUT", `/v1/sandboxes/${s.slug}/ports/3000`);
 		expect(r.status).toBe(201);
 		const p = body(r);
-		const domain = h.deps.settings.sbxDomain;
+		const domain = h.deps.settings.umiakDomain;
 		expect(p).toMatchObject({
 			port: 3000,
 			label: `${s.slug}-3000`,
@@ -70,7 +74,7 @@ describe.skipIf(skipPg())("hosted ports (S7 §11.2)", () => {
 			blocked: false,
 			blockReason: null,
 		});
-		expect(p.token).toMatch(/^sbxp_[A-Za-z0-9_-]{43}$/);
+		expect(p.token).toMatch(/^umiakp_[A-Za-z0-9_-]{43}$/);
 		expect(p.urlWithToken).toBe(
 			`https://${s.slug}-3000.${domain}/?_token=${p.token}`,
 		);
@@ -124,7 +128,7 @@ describe.skipIf(skipPg())("hosted ports (S7 §11.2)", () => {
 
 		const tok = await h.request("PUT", path, { json: { access: "token" } });
 		expect(tok.status).toBe(200);
-		expect(body(tok).token).toMatch(/^sbxp_/);
+		expect(body(tok).token).toMatch(/^umiakp_/);
 		expect(await tokenHash(s.sandboxId, 5173)).toEqual(sha256(body(tok).token));
 	});
 
@@ -138,10 +142,10 @@ describe.skipIf(skipPg())("hosted ports (S7 §11.2)", () => {
 		);
 		expect(r.status).toBe(200);
 		const { token, urlWithToken } = body(r);
-		expect(token).toMatch(/^sbxp_/);
+		expect(token).toMatch(/^umiakp_/);
 		expect(token).not.toBe(first);
 		expect(urlWithToken).toBe(
-			`https://${s.slug}-8080.${h.deps.settings.sbxDomain}/?_token=${token}`,
+			`https://${s.slug}-8080.${h.deps.settings.umiakDomain}/?_token=${token}`,
 		);
 		expect(await tokenHash(s.sandboxId, 8080)).toEqual(sha256(token));
 

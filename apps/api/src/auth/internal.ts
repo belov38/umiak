@@ -1,5 +1,5 @@
 // Service tokens of the internal listener (S7 §7.8, S2 §5.5): the file
-// SBX_API_SERVICE_TOKENS_FILE maps each caller to the tokens it may use
+// UMIAK_API_SERVICE_TOKENS_FILE maps each caller to the tokens it may use
 // (`{"gateway": ["<t1>", "<t2>"]}`, two at a time for rotation). Tokens are
 // compared as sha256 digests with timingSafeEqual, against every entry.
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -40,7 +40,7 @@ export class ServiceTokens {
 	}
 }
 
-/** Reads SBX_API_SERVICE_TOKENS_FILE; a missing or malformed file throws. */
+/** Reads UMIAK_API_SERVICE_TOKENS_FILE; a missing or malformed file throws. */
 export function loadServiceTokens(file: string): ServiceTokens {
 	let text: string;
 	try {

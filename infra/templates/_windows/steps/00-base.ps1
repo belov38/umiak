@@ -10,14 +10,14 @@ Write-BuildLog "edition $($cv.EditionID), build $($cv.CurrentBuild).$($cv.UBR)"
 # --- Defender: exclusions for the build (the offline stage disables the engine) ---
 $pyVer = (Get-ToolVersion 'python').Split('.')
 $exclusions = @(
-    'C:\sbx-build', $env:TEMP, (Join-Path $env:SystemRoot 'Temp'),
+    'C:\umiak-build', $env:TEMP, (Join-Path $env:SystemRoot 'Temp'),
     (Join-Path $env:SystemRoot 'System32\config\systemprofile\AppData'),
     (Join-Path $env:ProgramData 'npm'), (Join-Path $env:ProgramData 'Package Cache'),
     (Join-Path $env:ProgramFiles 'Git'), (Join-Path $env:ProgramFiles 'nodejs'),
     (Join-Path $env:ProgramFiles "Python$($pyVer[0])$($pyVer[1])"), (Join-Path $env:ProgramFiles 'uv'),
     (Join-Path $env:ProgramFiles 'bun'), (Join-Path $env:ProgramFiles 'Go'),
     (Join-Path $env:ProgramFiles 'GitHub CLI'), (Join-Path $env:ProgramFiles 'PowerShell'),
-    (Join-Path $env:ProgramFiles 'sbx-agent')
+    (Join-Path $env:ProgramFiles 'umiak-agent')
 )
 try {
     Add-MpPreference -ExclusionPath $exclusions
@@ -74,14 +74,14 @@ Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' Enabl
 Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters' NodeType 2
 
 # --- Services ---
-foreach ($s in ($SbxDisabledServices | Where-Object { $_ -notin $SbxUpdateServices })) {
-    Disable-SbxService -Name $s
+foreach ($s in ($UmiakDisabledServices | Where-Object { $_ -notin $UmiakUpdateServices })) {
+    Disable-UmiakService -Name $s
 }
-foreach ($s in @('edgeupdate', 'edgeupdatem')) { Disable-SbxService -Name $s }
+foreach ($s in @('edgeupdate', 'edgeupdatem')) { Disable-UmiakService -Name $s }
 # fsfreeze of QGA runs on VSS (spec 12.10).
-foreach ($s in @('VSS', 'swprv')) { Set-SbxServiceStartup -Name $s -StartupType Manual }
+foreach ($s in @('VSS', 'swprv')) { Set-UmiakServiceStartup -Name $s -StartupType Manual }
 # Time sync must work after hard stops and long pauses.
-Set-SbxServiceStartup -Name W32Time -StartupType Automatic
+Set-UmiakServiceStartup -Name W32Time -StartupType Automatic
 
 # Maintenance tasks. Their set differs between builds: a missing task is skipped.
 $tasks = @(
@@ -240,7 +240,7 @@ if ($bde.Conversion -ne '' -and $bde.Conversion -ne 'Fully Decrypted') {
 }
 
 # --- Appx: provisioned packages of files\appx-remove.txt (display name or * pattern) ---
-$patterns = @(Get-Content -LiteralPath (Join-Path $SbxFilesDir 'appx-remove.txt') |
+$patterns = @(Get-Content -LiteralPath (Join-Path $UmiakFilesDir 'appx-remove.txt') |
     ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and -not $_.StartsWith('#') })
 # A package Windows refuses to remove is reported and kept; the builder records
 # in the manifest which entries are really gone (removedAppx).

@@ -1,4 +1,4 @@
-// `sbx info [<sb>]`: the sandbox resource (S7 §8.1).
+// `umiak info [<sb>]`: the sandbox resource (S7 §8.1).
 
 import type { Command } from "commander";
 import { useSandbox } from "../current.ts";

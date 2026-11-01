@@ -1,4 +1,4 @@
-module github.com/belov38/boat-dev-clone/services/node-agent
+module github.com/belov38/umiak/services/node-agent
 
 go 1.27
 

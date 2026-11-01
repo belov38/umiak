@@ -25,7 +25,7 @@ export function proxy(req: NextRequest): NextResponse {
 					headers: { "Content-Type": "text/html; charset=utf-8" },
 				});
 	const headers = securityHeaders({
-		sbxDomain: env.sbxDomain,
+		umiakDomain: env.umiakDomain,
 		dev: process.env.NODE_ENV === "development",
 	});
 	for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);

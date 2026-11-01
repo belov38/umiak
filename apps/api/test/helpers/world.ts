@@ -4,8 +4,8 @@
 // builders. State helpers stand in for the worker (markReady, markState,
 // finishOperation).
 import { randomUUID } from "node:crypto";
-import { PgEnvironmentStore, PgIdentityStore, type Scope } from "@sbx/auth";
-import { validateSecretSets } from "@sbx/core";
+import { PgEnvironmentStore, PgIdentityStore, type Scope } from "@umiak/auth";
+import { validateSecretSets } from "@umiak/core";
 import {
 	type EnvOptions,
 	type Seeded,
@@ -13,8 +13,8 @@ import {
 	type ServiceEnv,
 	seedSandbox,
 	serviceEnv,
-} from "@sbx/core/testing";
-import { withTx } from "@sbx/db";
+} from "@umiak/core/testing";
+import { withTx } from "@umiak/db";
 import type pg from "pg";
 import type { ApiDeps } from "../../src/index.ts";
 import {
@@ -92,8 +92,8 @@ export async function apiWorld(
 	const agent = new FakeAgent();
 	const { secret, key } = await issueApiKey(identity, { teamId });
 	const settings = testSettings({
-		SBX_API_RATE_BURST: "100000",
-		SBX_API_RATE_STARTS_PER_MIN: "100000",
+		UMIAK_API_RATE_BURST: "100000",
+		UMIAK_API_RATE_STARTS_PER_MIN: "100000",
 	});
 
 	const deps = (over: Partial<ApiDeps> = {}): Partial<ApiDeps> => ({

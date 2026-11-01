@@ -164,7 +164,7 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 		// The browser endpoint of port SSO answers errors with an HTML page.
 		const htmlPage =
 			listener === "proxied" &&
-			path.startsWith("/sbx-auth/") &&
+			path.startsWith("/umiak-auth/") &&
 			/^text\/html\b/i.test(contentType);
 		if (res.status >= 400 && !isJson && !htmlPage) {
 			throw new Error(`${where}: error without a JSON envelope`);

@@ -1,28 +1,28 @@
 {
-	"name": "@sbx/cli",
+	"name": "@umiak/cli",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "sbx: the command line of the sbx public API (Bun, on @sbx/sdk): login, profiles, sandboxes, commands, files, ports",
+	"description": "umiak: the command line of the umiak public API (Bun, on @umiak/sdk): login, profiles, sandboxes, commands, files, ports",
 	"bin": {
-		"sbx": "./src/main.ts"
+		"umiak": "./src/main.ts"
 	},
 	"scripts": {
-		"sbx": "bun src/main.ts",
+		"umiak": "bun src/main.ts",
 		"build": "bun scripts/build.ts",
 		"build:all": "bun scripts/build.ts --all",
 		"test": "vitest run",
-		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
+		"typecheck": "pnpm --filter \"@umiak/agent-client...\" run build && tsc --noEmit -p ."
 	},
 	"dependencies": {
-		"@sbx/auth": "workspace:*",
-		"@sbx/mcp": "workspace:*",
-		"@sbx/sdk": "workspace:*",
+		"@umiak/auth": "workspace:*",
+		"@umiak/mcp": "workspace:*",
+		"@umiak/sdk": "workspace:*",
 		"commander": "15.0.0"
 	},
 	"devDependencies": {
-		"@sbx/api": "workspace:*",
-		"@sbx/core": "workspace:*",
-		"@sbx/db": "workspace:*"
+		"@umiak/api": "workspace:*",
+		"@umiak/core": "workspace:*",
+		"@umiak/db": "workspace:*"
 	}
 }

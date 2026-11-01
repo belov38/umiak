@@ -13,19 +13,19 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winproc"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/wincmd"
+	"github.com/belov38/umiak/services/guest-agent/internal/winproc"
 )
 
 // watchdogJobPrefix names the job of a quiesce watchdog.
-const watchdogJobPrefix = "sbx-wd-"
+const watchdogJobPrefix = "umiak-wd-"
 
 // windowsSup is the Supervisor on Windows (S9 spec 12.6): a shim is a
 // detached process outside the agent's job, its command lives in the
-// permanent job `Global\sbx-cmd-<id>`, and the shim's mutex
-// `Global\sbx-shim-<id>` tells whether the shim is alive. Nothing of a
+// permanent job `Global\umiak-cmd-<id>`, and the shim's mutex
+// `Global\umiak-shim-<id>` tells whether the shim is alive. Nothing of a
 // command depends on the agent process, so commands survive its restart.
 type windowsSup struct {
 	layout paths.Layout
@@ -259,7 +259,7 @@ func (s *windowsSup) Stop(_ context.Context, id string) error {
 }
 
 // StartWatchdog implements Supervisor: argv runs detached in the ordinary
-// job `Global\sbx-wd-<lease>`, whose handle the supervisor keeps. The job
+// job `Global\umiak-wd-<lease>`, whose handle the supervisor keeps. The job
 // has no KILL_ON_JOB_CLOSE: the watchdog outlives the agent, which is its
 // point. A running watchdog of leaseID is ErrUnitExists; a finished one is
 // replaced.

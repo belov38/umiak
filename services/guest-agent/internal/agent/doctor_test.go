@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 const overrideURL = "wss://override.test/v1/connect"
@@ -37,7 +37,7 @@ func TestDoctorJSONFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := rawFor(machineA)
-	raw.Family = "sbxt1:" + overrideURL
+	raw.Family = "umiakt1:" + overrideURL
 	h.src.set(raw)
 	h.seedIdentity(machineA)
 	h.start()
@@ -83,8 +83,8 @@ func TestDoctorJSONFields(t *testing.T) {
 	want := map[string]any{
 		"versions.current":      "1.2.3",
 		"versions.previous":     "1.2.2",
-		"units.sbx-identity":    "active:sbx-identity.service",
-		"units.sbx-agent":       "active:sbx-agent.service",
+		"units.umiak-identity":    "active:umiak-identity.service",
+		"units.umiak-agent":       "active:umiak-agent.service",
 		"identity.machine_id":   machineA,
 		"tunnel_url.url":        overrideURL,
 		"tunnel_url.source":     "smbios",
@@ -121,7 +121,7 @@ func TestDoctorJSONFields(t *testing.T) {
 
 	var text bytes.Buffer
 	rep.WriteText(&text)
-	for _, s := range []string{"1.2.3", "1.2.2", machineA, overrideURL, "smbios", "sbx-agent", "lease-1"} {
+	for _, s := range []string{"1.2.3", "1.2.2", machineA, overrideURL, "smbios", "umiak-agent", "lease-1"} {
 		if !strings.Contains(text.String(), s) {
 			t.Errorf("human output lacks %q:\n%s", s, text.String())
 		}

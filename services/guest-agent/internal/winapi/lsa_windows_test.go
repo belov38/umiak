@@ -14,7 +14,7 @@ import (
 
 // Needs SYSTEM or an administrator (LSA private data).
 func TestLsaStoreRetrieveDelete(t *testing.T) {
-	name := "L$sbx_test_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	name := "L$umiak_test_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	data := []byte("pa55-wörd\x00tail")
 	if err := LsaStore(name, data); err != nil {
 		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
@@ -40,7 +40,7 @@ func TestLsaStoreRetrieveDelete(t *testing.T) {
 }
 
 func TestLogonUserTokenUnknownUser(t *testing.T) {
-	if _, err := LogonUserToken("sbx-no-such-user", []byte("x")); err == nil {
+	if _, err := LogonUserToken("umiak-no-such-user", []byte("x")); err == nil {
 		t.Fatal("logon of an unknown user succeeded")
 	}
 }

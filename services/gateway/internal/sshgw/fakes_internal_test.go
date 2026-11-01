@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi/cpapitest"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 // note is one notify call on a fake target.

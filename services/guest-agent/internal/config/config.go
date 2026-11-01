@@ -1,5 +1,5 @@
-// Package config loads agent.toml: /etc/sbx-agent/agent.toml on Linux (S3
-// spec section 5), C:\ProgramData\sbx-agent\agent.toml on Windows (S9 spec
+// Package config loads agent.toml: /etc/umiak-agent/agent.toml on Linux (S3
+// spec section 5), C:\ProgramData\umiak-agent\agent.toml on Windows (S9 spec
 // section 12.1). The defaults differ per OS (defaults_unix.go,
 // defaults_windows.go).
 package config

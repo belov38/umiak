@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/devsecrets"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/devsecrets"
 )
 
 func generate(t *testing.T, dir string) []string {
@@ -54,22 +54,22 @@ func snapshot(t *testing.T, dir string) map[string]string {
 func envFor(dir string) map[string]string {
 	f := func(name string) string { return filepath.Join(dir, name) }
 	return map[string]string{
-		"SBX_GATEWAY_INTERNAL_URL":           "http://gateway:7000",
-		"SBX_GATEWAY_DATABASE_URL":           "postgres://sbx:sbx@postgres:5432/sbx",
-		"SBX_GATEWAY_SBX_DOMAIN":             "sbx.localhost",
-		"SBX_GATEWAY_TUNNEL_HOST":            "tunnel.localhost",
-		"SBX_GATEWAY_SSH_HOST":               "ssh.localhost",
-		"SBX_GATEWAY_API_URL":                "http://api:8082",
-		"SBX_GATEWAY_API_TOKEN_FILE":         f("api-token"),
-		"SBX_GATEWAY_SERVICE_TOKENS_FILE":    f("service-tokens.json"),
-		"SBX_GATEWAY_COOKIE_KEYS_FILE":       f("cookie-keys"),
-		"SBX_GATEWAY_TLS_SBX_CERT_FILE":      f("sbx.pem"),
-		"SBX_GATEWAY_TLS_SBX_KEY_FILE":       f("sbx.key"),
-		"SBX_GATEWAY_TLS_TUNNEL_CERT_FILE":   f("tunnel.pem"),
-		"SBX_GATEWAY_TLS_TUNNEL_KEY_FILE":    f("tunnel.key"),
-		"SBX_GATEWAY_SSH_HOST_KEY_FILES":     f("ssh_host_ed25519_key") + "," + f("ssh_host_ecdsa_key"),
-		"SBX_GATEWAY_SSH_USER_CA_KEY_FILE":   f("ssh_user_ca"),
-		"SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE": f("login-ca-keys"),
+		"UMIAK_GATEWAY_INTERNAL_URL":           "http://gateway:7000",
+		"UMIAK_GATEWAY_DATABASE_URL":           "postgres://umiak:umiak@postgres:5432/umiak",
+		"UMIAK_GATEWAY_UMIAK_DOMAIN":             "umiak.localhost",
+		"UMIAK_GATEWAY_TUNNEL_HOST":            "tunnel.localhost",
+		"UMIAK_GATEWAY_SSH_HOST":               "ssh.localhost",
+		"UMIAK_GATEWAY_API_URL":                "http://api:8082",
+		"UMIAK_GATEWAY_API_TOKEN_FILE":         f("api-token"),
+		"UMIAK_GATEWAY_SERVICE_TOKENS_FILE":    f("service-tokens.json"),
+		"UMIAK_GATEWAY_COOKIE_KEYS_FILE":       f("cookie-keys"),
+		"UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE":      f("umiak.pem"),
+		"UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE":       f("umiak.key"),
+		"UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE":   f("tunnel.pem"),
+		"UMIAK_GATEWAY_TLS_TUNNEL_KEY_FILE":    f("tunnel.key"),
+		"UMIAK_GATEWAY_SSH_HOST_KEY_FILES":     f("ssh_host_ed25519_key") + "," + f("ssh_host_ecdsa_key"),
+		"UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE":   f("ssh_user_ca"),
+		"UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE": f("login-ca-keys"),
 	}
 }
 
@@ -97,7 +97,7 @@ func TestDevSecretsIdempotent(t *testing.T) {
 	created := generate(t, dir)
 	want := []string{
 		"api-token", "ca.key", "ca.pem", "cookie-keys", "login-ca-keys",
-		"sbx.key", "sbx.pem", "service-tokens.json",
+		"umiak.key", "umiak.pem", "service-tokens.json",
 		"ssh_host_ecdsa_key", "ssh_host_ecdsa_key.pub", "ssh_host_ed25519_key", "ssh_host_ed25519_key.pub",
 		"ssh_login_ca", "ssh_login_ca.pub", "ssh_user_ca", "ssh_user_ca.pub",
 		"tunnel.key", "tunnel.pem", "worker-gateway-token",
@@ -146,7 +146,7 @@ func TestDevSecretsIdempotent(t *testing.T) {
 	if len(cfg.SSHHostKeys) != 2 || cfg.SSHUserCA == nil || len(cfg.SSHLoginCAKeys) != 1 || len(cfg.CookieKeys) != 1 {
 		t.Fatalf("keys: host %d, user CA %v, login CAs %d, cookie %d", len(cfg.SSHHostKeys), cfg.SSHUserCA != nil, len(cfg.SSHLoginCAKeys), len(cfg.CookieKeys))
 	}
-	verifyLeaf(t, dir, "sbx", "demo-3000.sbx.localhost")
+	verifyLeaf(t, dir, "umiak", "demo-3000.umiak.localhost")
 	verifyLeaf(t, dir, "tunnel", "tunnel.localhost")
 
 	// The worker's token is the first worker token the gateway accepts.
@@ -180,14 +180,14 @@ func TestDevSecretsRecreatesOnlyMissing(t *testing.T) {
 	dir := t.TempDir()
 	generate(t, dir)
 	before := snapshot(t, dir)
-	for _, name := range []string{"sbx.pem", "sbx.key", "worker-gateway-token", "ssh_user_ca.pub", "login-ca-keys"} {
+	for _, name := range []string{"umiak.pem", "umiak.key", "worker-gateway-token", "ssh_user_ca.pub", "login-ca-keys"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	created := generate(t, dir)
 	slices.Sort(created)
-	if want := []string{"login-ca-keys", "sbx.key", "sbx.pem", "ssh_user_ca.pub", "worker-gateway-token"}; !slices.Equal(created, want) {
+	if want := []string{"login-ca-keys", "umiak.key", "umiak.pem", "ssh_user_ca.pub", "worker-gateway-token"}; !slices.Equal(created, want) {
 		t.Fatalf("created %v, want %v", created, want)
 	}
 	after := snapshot(t, dir)
@@ -198,7 +198,7 @@ func TestDevSecretsRecreatesOnlyMissing(t *testing.T) {
 			t.Errorf("%s differs after regeneration", name)
 		}
 	}
-	verifyLeaf(t, dir, "sbx", "x.sbx.localhost")
+	verifyLeaf(t, dir, "umiak", "x.umiak.localhost")
 }
 
 func TestDevSecretsIncompletePair(t *testing.T) {
@@ -229,29 +229,29 @@ func TestDevSecretsIncompletePair(t *testing.T) {
 
 func TestDevSecretsNames(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := devsecrets.Generate(devsecrets.Options{Dir: dir, Domain: "sbx.example.test", TunnelHost: "t.example.test"}); err != nil {
+	if _, err := devsecrets.Generate(devsecrets.Options{Dir: dir, Domain: "umiak.example.test", TunnelHost: "t.example.test"}); err != nil {
 		t.Fatal(err)
 	}
-	verifyLeaf(t, dir, "sbx", "a-8080.sbx.example.test")
+	verifyLeaf(t, dir, "umiak", "a-8080.umiak.example.test")
 	verifyLeaf(t, dir, "tunnel", "t.example.test")
 
 	// The dev CA is name-constrained: it cannot vouch for other hosts.
 	caPEM, _ := os.ReadFile(filepath.Join(dir, "ca.pem"))
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(caPEM)
-	pair, err := tls.LoadX509KeyPair(filepath.Join(dir, "sbx.pem"), filepath.Join(dir, "sbx.key"))
+	pair, err := tls.LoadX509KeyPair(filepath.Join(dir, "umiak.pem"), filepath.Join(dir, "umiak.key"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pair.Leaf.Verify(x509.VerifyOptions{DNSName: "example.com", Roots: roots}); err == nil {
-		t.Fatal("sbx.pem verifies for example.com")
+		t.Fatal("umiak.pem verifies for example.com")
 	}
 	blk, _ := pem.Decode(caPEM)
 	ca, err := x509.ParseCertificate(blk.Bytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ca.PermittedDNSDomainsCritical || !slices.Contains(ca.PermittedDNSDomains, "sbx.example.test") {
+	if !ca.PermittedDNSDomainsCritical || !slices.Contains(ca.PermittedDNSDomains, "umiak.example.test") {
 		t.Fatalf("CA name constraints: critical=%v permitted=%v", ca.PermittedDNSDomainsCritical, ca.PermittedDNSDomains)
 	}
 }

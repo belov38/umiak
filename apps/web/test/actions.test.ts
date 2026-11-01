@@ -1,14 +1,18 @@
 // Server actions of S8 §9.11 against Postgres and Payload, without Next:
 // the …Impl functions take {payload, session} directly.
 import { randomBytes, randomUUID } from "node:crypto";
-import { decodeUuid, encodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid, encodeUuid } from "@umiak/auth";
 import {
-	closeSbxPayload,
-	getSbxPayload,
-	migrateSbxPayload,
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
+import {
+	closeUmiakPayload,
+	getUmiakPayload,
+	migrateUmiakPayload,
 	resolveSession,
-} from "@sbx/payload";
+} from "@umiak/payload";
 import type { Payload } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeDashboardId } from "../src/lib/ids.ts";
@@ -27,7 +31,7 @@ import {
 	renameTeamImpl,
 } from "../src/lib/team-actions/teams.ts";
 
-const OPS = "sbx-operators";
+const OPS = "umiak-operators";
 
 describe.skipIf(skipPg())("server actions (S8 §9.11)", () => {
 	let t: TestDatabase;
@@ -110,17 +114,17 @@ describe.skipIf(skipPg())("server actions (S8 §9.11)", () => {
 
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
-		payload = await getSbxPayload({
+		payload = await getUmiakPayload({
 			databaseUrl: t.url,
 			secret: "test-payload-secret-0123456789",
 			operatorGroups: [OPS],
-			appOrigin: "https://app.sbx.test",
+			appOrigin: "https://app.umiak.test",
 			poolMax: 6,
 		});
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 	});
 	afterAll(async () => {
-		if (t) await closeSbxPayload(t.url);
+		if (t) await closeUmiakPayload(t.url);
 		await t?.drop();
 	});
 

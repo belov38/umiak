@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Allocator, macFor, SqliteStateStore } from "@sbx/pve";
-import { FakeNode } from "@sbx/pve/testing";
+import { Allocator, macFor, SqliteStateStore } from "@umiak/pve";
+import { FakeNode } from "@umiak/pve/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "../src/manifest.ts";
 import { FileRegistry } from "../src/registry.ts";
@@ -32,7 +32,7 @@ function row(over: Partial<Manifest>): Manifest {
 		node: "pve",
 		storage: "local-lvm",
 		pveVmid: 598,
-		vmName: "sbx-tpl-linux-20261030-15",
+		vmName: "umiak-tpl-linux-20261030-15",
 		gitCommit: "c",
 		recipeDigest: "d",
 		base: {
@@ -61,7 +61,7 @@ function row(over: Partial<Manifest>): Manifest {
 }
 
 async function setup() {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-retire-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-retire-"));
 	dirs.push(dir);
 	const log: string[] = [];
 	const pve = new BuildPve(log);
@@ -81,21 +81,21 @@ async function setup() {
 	const template = (name: string) => ({
 		config: {
 			name,
-			tags: "sbx-tpl",
+			tags: "umiak-tpl",
 			// Proxmox returns `template` as a JSON number.
 			template: 1 as unknown as string,
 		},
 		status: "stopped" as const,
 		firewall: { rules: [], ipsets: {} },
 	});
-	pve.vms.set(598, template("sbx-tpl-linux-20261030-15"));
+	pve.vms.set(598, template("umiak-tpl-linux-20261030-15"));
 	// Slot 597 now holds the newest build; 599 a Linux build of the PoC slot.
-	pve.vms.set(597, template("sbx-tpl-linux-20261031-1"));
-	pve.vms.set(599, template("sbx-tpl-linux-20261029-1"));
+	pve.vms.set(597, template("umiak-tpl-linux-20261031-1"));
+	pve.vms.set(599, template("umiak-tpl-linux-20261029-1"));
 	// The fake answers 599's config from templateConfig.
 	pve.templateConfig = {
 		...pve.templateConfig,
-		name: "sbx-tpl-linux-20261029-1",
+		name: "umiak-tpl-linux-20261029-1",
 	};
 	for (const vmid of [597, 598])
 		await store.tryInsert({
@@ -113,7 +113,7 @@ async function setup() {
 			buildId: ID_REUSED,
 			version: "20261030.11",
 			pveVmid: 597,
-			vmName: "sbx-tpl-linux-20261030-11",
+			vmName: "umiak-tpl-linux-20261030-11",
 		}),
 	);
 	registry.create(
@@ -121,7 +121,7 @@ async function setup() {
 			buildId: ID_GONE,
 			version: "20261030.7",
 			pveVmid: 596,
-			vmName: "sbx-tpl-linux-20261030-7",
+			vmName: "umiak-tpl-linux-20261030-7",
 		}),
 	);
 	registry.create(
@@ -136,7 +136,7 @@ async function setup() {
 			buildId: ID_POC,
 			version: "20261029.1",
 			pveVmid: 599,
-			vmName: "sbx-tpl-linux-20261029-1",
+			vmName: "umiak-tpl-linux-20261029-1",
 			startedAt: "2026-10-29T09:00:00.000Z",
 		}),
 	);
@@ -145,7 +145,7 @@ async function setup() {
 			buildId: ID_NEWEST,
 			version: "20261031.1",
 			pveVmid: 597,
-			vmName: "sbx-tpl-linux-20261031-1",
+			vmName: "umiak-tpl-linux-20261031-1",
 			startedAt: "2026-10-31T09:00:00.000Z",
 		}),
 	);
@@ -162,7 +162,7 @@ async function setup() {
 		cfg,
 		// The worker config uses the newest build and the PoC seed.
 		configured: {
-			file: "sbx.yaml",
+			file: "umiak.yaml",
 			builds: [
 				{ templateSlug: "linux", version: "599-seed", pveVmid: 599 },
 				{ templateSlug: "linux", version: "20261031.1", pveVmid: 597 },
@@ -254,7 +254,7 @@ describe("retire", () => {
 			version: "20261030.15",
 		});
 		await expect(retire(s.deps, ID_LIVE, { deleteVm: true })).rejects.toThrow(
-			/sbx\.yaml.*--force/,
+			/umiak\.yaml.*--force/,
 		);
 		expect(s.pve.calls.filter((c) => c.method !== "GET")).toEqual([]);
 		expect(s.registry.get(ID_LIVE)?.status).toBe("ready");
@@ -311,9 +311,9 @@ describe("retire", () => {
 
 describe("configuredBuilds", () => {
 	it("reads topology.templateBuilds of a worker config", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-retire-cfg-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-retire-cfg-"));
 		dirs.push(dir);
-		const file = join(dir, "sbx.yaml");
+		const file = join(dir, "umiak.yaml");
 		writeFileSync(
 			file,
 			[
@@ -344,7 +344,7 @@ describe("configuredBuilds", () => {
 
 	it("reads the dev stand config", () => {
 		const builds = configuredBuilds(
-			join(import.meta.dirname, "../../../deploy/compose/config/sbx.yaml"),
+			join(import.meta.dirname, "../../../deploy/compose/config/umiak.yaml"),
 		);
 		expect(builds.some((b) => b.templateSlug === "linux")).toBe(true);
 	});

@@ -2,7 +2,7 @@
 // here and passed to core, which stores and replays the result. A replay is
 // recognised by its operation: one created before this request started
 // (database clock on both sides, so host clock skew does not matter).
-import { validateIdempotencyKey } from "@sbx/core";
+import { validateIdempotencyKey } from "@umiak/core";
 import type { Context } from "hono";
 import type pg from "pg";
 import type { ApiEnv } from "../deps.ts";

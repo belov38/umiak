@@ -15,14 +15,14 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 // sandboxID is the sandbox the tests claim the machine for.
-const sandboxID = "sbx-it-sandbox"
+const sandboxID = "umiak-it-sandbox"
 
 // portDomain is the port domain of the test claim.
-const portDomain = "p.sbx.example.test"
+const portDomain = "p.umiak.example.test"
 
 // claim applies req for sandboxID: reason CLAIM on an unclaimed machine,
 // RESUME when the machine is already claimed for it (an earlier test).
@@ -133,7 +133,7 @@ func TestClaimEnvAndSSH(t *testing.T) {
 		if got := strings.TrimSpace(string(readFileT(t, "/etc/hostname"))); got != "it-host" {
 			t.Errorf("/etc/hostname = %q, want it-host", got)
 		}
-		if hosts := string(readFileT(t, "/etc/hosts")); !strings.Contains(hosts, "127.0.1.1 it-host\n") || strings.Count(hosts, "# BEGIN sbx") != 1 {
+		if hosts := string(readFileT(t, "/etc/hosts")); !strings.Contains(hosts, "127.0.1.1 it-host\n") || strings.Count(hosts, "# BEGIN umiak") != 1 {
 			t.Errorf("/etc/hosts:\n%s", hosts)
 		}
 		assertBindMounts(t)
@@ -143,7 +143,7 @@ func TestClaimEnvAndSSH(t *testing.T) {
 		env := agentEnv(t, c, map[string]string{"IT_OVERRIDE": "from-spec"})
 		want := map[string]string{
 			"IT_CLAIM": "from-claim", "IT_OVERRIDE": "from-spec", "IT_SECRET": secret,
-			"SBX": "1", "SBX_SANDBOX_ID": sandboxID, "SBX_PORT_DOMAIN": portDomain,
+			"UMIAK": "1", "UMIAK_SANDBOX_ID": sandboxID, "UMIAK_PORT_DOMAIN": portDomain,
 			"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": "." + portDomain,
 		}
 		for k, v := range want {
@@ -151,7 +151,7 @@ func TestClaimEnvAndSSH(t *testing.T) {
 				t.Errorf("%s = %q, want %q", k, env[k], v)
 			}
 		}
-		if got := string(readFileT(t, "/run/sbx/secrets/files/token.txt")); got != secret+"-file" {
+		if got := string(readFileT(t, "/run/umiak/secrets/files/token.txt")); got != secret+"-file" {
 			t.Errorf("secret file = %q", got)
 		}
 	})
@@ -164,7 +164,7 @@ func TestClaimEnvAndSSH(t *testing.T) {
 		env := envLines(out)
 		for k, v := range map[string]string{
 			"IT_CLAIM": "from-claim", "IT_OVERRIDE": "from-claim", "IT_SECRET": secret,
-			"SBX_SANDBOX_ID": sandboxID, "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": "." + portDomain,
+			"UMIAK_SANDBOX_ID": sandboxID, "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": "." + portDomain,
 		} {
 			if env[k] != v {
 				t.Errorf("ssh env %s = %q, want %q", k, env[k], v)
@@ -208,7 +208,7 @@ func TestClaimEnvAndSSH(t *testing.T) {
 	})
 }
 
-// TestPamEnvFormat checks the escaping of /etc/sbx/env against the real
+// TestPamEnvFormat checks the escaping of /etc/umiak/env against the real
 // pam_env through sshd (spec 8.2): values with spaces, quotes, backslashes
 // (also trailing) and `$` arrive unchanged; values with `#` or a newline are
 // left out of the PAM files and reach only the agent's commands.
@@ -242,7 +242,7 @@ func TestPamEnvFormat(t *testing.T) {
 	if _, err := c.sys.UpdateEnv(tctx(t, 30*time.Second), connect.NewRequest(&agentv1.UpdateEnvRequest{Env: env})); err != nil {
 		t.Fatalf("UpdateEnv: %v", err)
 	}
-	t.Logf("/etc/sbx/env:\n%s", readFileT(t, "/etc/sbx/env"))
+	t.Logf("/etc/umiak/env:\n%s", readFileT(t, "/etc/umiak/env"))
 
 	out, err := ca.ssh("", "env", "-0")
 	if err != nil {
@@ -273,8 +273,8 @@ func TestPamEnvFormat(t *testing.T) {
 }
 
 // Spec 21 item 14 (container part): a unique secret from secret_env,
-// secret_files and a command's env is nowhere under /var/lib/sbx-agent or
-// /etc after sync; /run/sbx is a tmpfs mounted noswap when the kernel has
+// secret_files and a command's env is nowhere under /var/lib/umiak-agent or
+// /etc after sync; /run/umiak is a tmpfs mounted noswap when the kernel has
 // it. The block-device grep of an LV snapshot belongs to the pve stand.
 func TestSecretsNotOnDisk(t *testing.T) {
 	c := newClient()
@@ -295,7 +295,7 @@ func TestSecretsNotOnDisk(t *testing.T) {
 	if want := sha256hex(s3) + "  -\n" + sha256hex(s1) + "  -\n"; string(r.stdout) != want {
 		t.Fatalf("secrets in the command env: %q, want hashes %q", r.stdout, want)
 	}
-	if got := sha256hex(string(readFileT(t, "/run/sbx/secrets/files/token.txt"))); got != sha256hex(s2) {
+	if got := sha256hex(string(readFileT(t, "/run/umiak/secrets/files/token.txt"))); got != sha256hex(s2) {
 		t.Fatal("secret file content differs")
 	}
 	sh(t, "sync")
@@ -306,13 +306,13 @@ func TestSecretsNotOnDisk(t *testing.T) {
 		}
 	}
 
-	opts := strings.TrimSpace(sh(t, "findmnt -no FSTYPE,OPTIONS /run/sbx"))
-	t.Logf("/run/sbx: %s", opts)
+	opts := strings.TrimSpace(sh(t, "findmnt -no FSTYPE,OPTIONS /run/umiak"))
+	t.Logf("/run/umiak: %s", opts)
 	if !strings.HasPrefix(opts, "tmpfs ") {
-		t.Fatalf("/run/sbx is not a tmpfs: %s", opts)
+		t.Fatalf("/run/umiak is not a tmpfs: %s", opts)
 	}
 	if kernelHasNoswap(t) && !strings.Contains(opts, "noswap") {
-		t.Errorf("/run/sbx options %q lack noswap on a kernel that supports it", opts)
+		t.Errorf("/run/umiak options %q lack noswap on a kernel that supports it", opts)
 	}
 }
 

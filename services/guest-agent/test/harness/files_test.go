@@ -18,9 +18,9 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 func TestHarnessMutationRequiresRequestID(t *testing.T) {
@@ -30,7 +30,7 @@ func TestHarnessMutationRequiresRequestID(t *testing.T) {
 
 	_, err := e.filesystem().MakeDir(ctx(t), connect.NewRequest(req))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("MakeDir without Sbx-Request-Id = %v, want invalid_argument", err)
+		t.Fatalf("MakeDir without Umiak-Request-Id = %v, want invalid_argument", err)
 	}
 	if d, ok := rpcconv.Detail(err); !ok || d.GetCode() != wire.CodeRequestIDRequired {
 		t.Fatalf("detail %v, want %s", d, wire.CodeRequestIDRequired)
@@ -91,7 +91,7 @@ func TestHarnessUploadOffsetHeaderPasses(t *testing.T) {
 	}
 	got := res.header.Get(wire.HeaderUploadOffset)
 	if got != "1000" {
-		t.Fatalf("Sbx-Upload-Offset = %q, want 1000", got)
+		t.Fatalf("Umiak-Upload-Offset = %q, want 1000", got)
 	}
 	var body struct {
 		Code string `json:"code"`

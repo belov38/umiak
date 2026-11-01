@@ -1,4 +1,4 @@
-// `sbx login` (S7 §7.6):
+// `umiak login` (S7 §7.6):
 // - people: Keycloak device flow. `GET /v1/meta` gives `oidc {issuer,
 //   clientId}`; the code and the link are printed (and the browser opened,
 //   unless --no-browser or not in a terminal); then `GET /v1/me` with the
@@ -15,8 +15,8 @@
 // `{"event":"logged_in","profile","apiUrl","me"}`.
 
 import { spawn } from "node:child_process";
-import { isWellFormedApiKey } from "@sbx/auth/api-key";
-import { Sbx } from "@sbx/sdk";
+import { isWellFormedApiKey } from "@umiak/auth/api-key";
+import { Umiak } from "@umiak/sdk";
 import type { Command } from "commander";
 import { deviceLogin, revokeRefreshToken } from "../auth/device-grant.ts";
 import { withFileLock } from "../auth/lock.ts";
@@ -46,15 +46,15 @@ async function meWith(
 	token: string,
 	team: string | undefined,
 ): Promise<Me> {
-	const sbx = new Sbx({
+	const umiak = new Umiak({
 		baseUrl: apiUrl,
 		apiKey: token,
 		...(team === undefined ? {} : { team }),
 		fetch: ctx.fetch as typeof fetch,
-		userAgent: `sbx-cli/${CLI_VERSION}`,
+		userAgent: `umiak-cli/${CLI_VERSION}`,
 		env: {},
 	});
-	return sbx.me();
+	return umiak.me();
 }
 
 /** The program that opens `url` in the browser (Windows: no cmd parsing of the URL). */
@@ -89,7 +89,7 @@ async function deviceFlow(
 	if (meta.oidc === null) {
 		throw new CliError({
 			code: "oidc_unavailable",
-			message: `${apiUrl} accepts only team keys; run: sbx login --key-stdin`,
+			message: `${apiUrl} accepts only team keys; run: umiak login --key-stdin`,
 			retryable: false,
 		});
 	}
@@ -129,7 +129,7 @@ export function keyFromStdin(text: string): string {
 	}
 	if (!isWellFormedApiKey(key)) {
 		throw usageError(
-			"--key-stdin: stdin is not a well-formed team API key (sbx_ and 49 letters or digits with a valid checksum)",
+			"--key-stdin: stdin is not a well-formed team API key (umiak_ and 49 letters or digits with a valid checksum)",
 		);
 	}
 	return key;
@@ -141,7 +141,7 @@ async function login(
 ): Promise<void> {
 	const r = ctx.resolved;
 	if (r.apiUrl === undefined) {
-		throw usageError("no API URL: pass --api-url <url> or set SBX_API_URL");
+		throw usageError("no API URL: pass --api-url <url> or set UMIAK_API_URL");
 	}
 	const apiUrl = r.apiUrl;
 	let cred: StoredCredential;
@@ -228,7 +228,7 @@ export function register(program: Command, run: Runner): void {
 			"log in: Keycloak device flow for people, or a team key from stdin (--key-stdin)",
 		)
 		.option("--no-browser", "only print the login link, do not open a browser")
-		.option("--key-stdin", "read a team API key (sbx_…) from stdin")
+		.option("--key-stdin", "read a team API key (umiak_…) from stdin")
 		.action(
 			run(async (ctx, _args, opts) => {
 				await login(ctx, opts as { browser?: boolean; keyStdin?: boolean });

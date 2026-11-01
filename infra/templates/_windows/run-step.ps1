@@ -1,11 +1,11 @@
 # Build step wrapper (spec S9 section 7 p.5), started by a SYSTEM scheduled task:
-#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File <SBXBUILD>:\build\run-step.ps1 -Step <n>
-# Runs build\steps\<n>.ps1 of the build ISO (volume label SBXBUILD) in pwsh when
+#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File <UMIAKBUILD>:\build\run-step.ps1 -Step <n>
+# Runs build\steps\<n>.ps1 of the build ISO (volume label UMIAKBUILD) in pwsh when
 # its first line is "#requires -Version 7", else in Windows PowerShell 5.1.
-# All output goes to C:\sbx-build\logs\<n>.log (UTF-8 without BOM, truncated at
+# All output goes to C:\umiak-build\logs\<n>.log (UTF-8 without BOM, truncated at
 # start); the exit code goes to <n>.exit, written last through a rename from
 # <n>.exit.tmp, so the builder never reads a partial value.
-# Steps get SBX_BUILD_DIR = <drive>:\build of the build ISO.
+# Steps get UMIAK_BUILD_DIR = <drive>:\build of the build ISO.
 # A log write never fails the step: another handle may hold the log for a while.
 # Runs in Windows PowerShell 5.1: keep this file ASCII and 5.1-compatible.
 param(
@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$logDir = 'C:\sbx-build\logs'
+$logDir = 'C:\umiak-build\logs'
 $log = Join-Path $logDir "$Step.log"
 $exitFile = Join-Path $logDir "$Step.exit"
 $exitTmp = "$exitFile.tmp"
@@ -70,7 +70,7 @@ try {
     # A missing Storage module throws even with SilentlyContinue.
     $vol = $null
     try {
-        $vol = Get-Volume -FileSystemLabel SBXBUILD -ErrorAction SilentlyContinue |
+        $vol = Get-Volume -FileSystemLabel UMIAKBUILD -ErrorAction SilentlyContinue |
             Where-Object { $_.DriveLetter } | Select-Object -First 1
     } catch { }
     if ($vol) {
@@ -78,7 +78,7 @@ try {
     } else {
         # Storage cmdlets unavailable: this script itself lives in <drive>:\build.
         $root = Split-Path -Parent $PSScriptRoot
-        Write-Log "run-step: no volume labelled SBXBUILD, using $root"
+        Write-Log "run-step: no volume labelled UMIAKBUILD, using $root"
     }
     $buildDir = Join-Path $root 'build'
     $script = Join-Path $buildDir "steps\$Step.ps1"
@@ -96,7 +96,7 @@ try {
     # The child inherits the console code page, so it writes UTF-8, and the
     # pipeline below decodes it as UTF-8.
     try { [Console]::OutputEncoding = $utf8 } catch { Write-Log "run-step: console encoding: $($_.Exception.Message)" }
-    $env:SBX_BUILD_DIR = $buildDir
+    $env:UMIAK_BUILD_DIR = $buildDir
     # Plain error records in the log: pwsh 7 colours them with ANSI sequences otherwise.
     $env:NO_COLOR = '1'
 

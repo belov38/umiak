@@ -14,12 +14,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }

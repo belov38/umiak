@@ -1,4 +1,8 @@
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgNotifier, uuidv7 } from "../src/index.ts";
 import { expectCode, principal, serviceEnv } from "./helpers/service.ts";
@@ -263,7 +267,7 @@ describe.skipIf(skipPg())("SandboxService reads and updates", () => {
 	});
 
 	describe("waitForState", () => {
-		it("resolves on a transition notified through LISTEN sbx_sandboxes", async () => {
+		it("resolves on a transition notified through LISTEN umiak_sandboxes", async () => {
 			const notifier = new PgNotifier({ connectionString: t.url });
 			try {
 				// No fallback poll within the test: only the notification (or the

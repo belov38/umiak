@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { SBX_NAMESPACE, stepRequestId, uuidv5, uuidv7 } from "../src/index.ts";
+import {
+	stepRequestId,
+	UMIAK_NAMESPACE,
+	uuidv5,
+	uuidv7,
+} from "../src/index.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -36,9 +41,9 @@ describe("uuidv5", () => {
 		).toBe("2ed6657d-e927-568b-95e1-2665a8aea6a2");
 	});
 
-	it("uses SBX_NAMESPACE by default", () => {
-		expect(SBX_NAMESPACE).toMatch(UUID);
-		expect(uuidv5("x")).toBe(uuidv5("x", SBX_NAMESPACE));
+	it("uses UMIAK_NAMESPACE by default", () => {
+		expect(UMIAK_NAMESPACE).toMatch(UUID);
+		expect(uuidv5("x")).toBe(uuidv5("x", UMIAK_NAMESPACE));
 		expect(uuidv5("x")[14]).toBe("5");
 	});
 

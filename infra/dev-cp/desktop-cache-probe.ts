@@ -2,10 +2,10 @@
 // put images into the agent's state.db, and a repeated Idempotency-Key does not repeat input
 // but still answers with a fresh screenshot. Linux desktop only.
 //
-//   SBX_API_URL=<dev api> NODE_EXTRA_CA_CERTS=<dev ca> mise exec -- node infra/dev-cp/desktop-cache-probe.ts
+//   UMIAK_API_URL=<dev api> NODE_EXTRA_CA_CERTS=<dev ca> mise exec -- node infra/dev-cp/desktop-cache-probe.ts
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
+import { type Sandbox, Umiak } from "../../packages/sdk-ts/src/index.ts";
 import { runningSandboxMemory } from "./desktop-budget.ts";
 
 function check(value: unknown, label: string) {
@@ -14,7 +14,7 @@ function check(value: unknown, label: string) {
 }
 // PNG signatures and bytes of the agent database files (state.db, -wal, -shm).
 const SCAN =
-	"import glob,os,json; fs=glob.glob('/var/lib/sbx-agent/state.db*'); print(json.dumps({'png':sum(open(f,'rb').read().count(b'\\x89PNG\\r\\n\\x1a\\n') for f in fs),'bytes':sum(os.path.getsize(f) for f in fs)}))";
+	"import glob,os,json; fs=glob.glob('/var/lib/umiak-agent/state.db*'); print(json.dumps({'png':sum(open(f,'rb').read().count(b'\\x89PNG\\r\\n\\x1a\\n') for f in fs),'bytes':sum(os.path.getsize(f) for f in fs)}))";
 async function scan(sb: Sandbox) {
 	const r = await sb.exec(["sudo", "python3", "-I", "-c", SCAN]);
 	if (r.exitCode !== 0) throw new Error(`scan failed: ${r.stderr}`);
@@ -36,7 +36,7 @@ const list = execFileSync(
 );
 const used = runningSandboxMemory(list);
 if (used + 4096 > 8192) throw new Error(`RAM budget occupied (${used} MiB)`);
-const client = new Sbx();
+const client = new Umiak();
 let sb: Sandbox | undefined;
 try {
 	sb = await client.sandboxes.create({

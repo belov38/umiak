@@ -2,9 +2,9 @@
 // hand-off to the target), the target's `create` (provision from the
 // fork_source; cleanup_source hands the snapshot to snapshot-op), their
 // failures and delete during a fork.
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import { FreezeTimeoutError } from "@sbx/pve";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
+import { FreezeTimeoutError } from "@umiak/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOpDeadLetter } from "../src/handlers/dlq.ts";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
@@ -274,7 +274,7 @@ describe("fork of a running source", () => {
 		expect(snap.quiesce_broken).toBe(true);
 		expect(snap.state).toBe("deleted");
 		expect(snapshotLvs(w, snap.lv_id as string)).toEqual([]);
-		expect(w.metrics.count("sbx_quiesce_watchdog_thawed_total")).toBe(1);
+		expect(w.metrics.count("umiak_quiesce_watchdog_thawed_total")).toBe(1);
 
 		await expectTargetForkFailed(w, f);
 	});

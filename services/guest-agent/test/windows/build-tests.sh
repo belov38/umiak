@@ -5,7 +5,7 @@
 #
 # For every package that contains a *_windows_test.go file, builds a windows/amd64 test binary
 # <out-dir>/<package path with / replaced by _>.test.exe (for example internal_winapi.test.exe).
-# `sbx-bench s9 agent-tests --dir <out-dir>` copies the binaries into a running Windows clone and
+# `umiak-bench s9 agent-tests --dir <out-dir>` copies the binaries into a running Windows clone and
 # runs them as SYSTEM. Nothing is downloaded: the module cache must already hold the dependencies
 # (GOPROXY=off, GOFLAGS=-mod=readonly), and nothing runs on the host.
 set -euo pipefail

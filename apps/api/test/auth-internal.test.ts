@@ -1,4 +1,4 @@
-// Internal listener: service tokens of SBX_API_SERVICE_TOKENS_FILE (S7 §7.8,
+// Internal listener: service tokens of UMIAK_API_SERVICE_TOKENS_FILE (S7 §7.8,
 // S2 §5.5).
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,7 +11,7 @@ const T1 = "gw-token-one-0123456789abcdef";
 const T2 = "gw-token-two-fedcba9876543210";
 
 function tokensFile(content: string): string {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-tokens-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-tokens-"));
 	const file = join(dir, "service-tokens.json");
 	writeFileSync(file, content);
 	return file;

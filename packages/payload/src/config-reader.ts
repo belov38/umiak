@@ -1,6 +1,6 @@
-// ConfigReader of @sbx/config over the Payload collections (S6 §5.11, S8 §7).
+// ConfigReader of @umiak/config over the Payload collections (S6 §5.11, S8 §7).
 // Lists and quotas are cached for ttlMs; the cache is dropped by any
-// `sbx_config` notification and whenever LISTEN is re-established, so with
+// `umiak_config` notification and whenever LISTEN is re-established, so with
 // LISTEN a change shows up right after its commit and without it after ttlMs.
 // defaults() is never cached: routes.lookup needs the current policy (C7).
 import type {
@@ -11,13 +11,13 @@ import type {
 	SizeConfig,
 	TemplateConfig,
 	TemplateOs,
-} from "@sbx/config";
+} from "@umiak/config";
 import type { Payload } from "payload";
 import { ChannelListener, CONFIG_CHANNEL } from "./config-listener.ts";
 
 export interface PayloadConfigReaderOptions {
 	payload: Payload;
-	/** LISTEN sbx_config on its own connection; without it only ttlMs applies. */
+	/** LISTEN umiak_config on its own connection; without it only ttlMs applies. */
 	listen?: { databaseUrl: string; reconnectDelayMs?: number };
 	/** Cache lifetime; default 5000. */
 	ttlMs?: number;
@@ -154,7 +154,7 @@ export class PayloadConfigReader implements ConfigReader {
 	}
 
 	/**
-	 * Starts LISTEN sbx_config (when configured) and resolves once it is
+	 * Starts LISTEN umiak_config (when configured) and resolves once it is
 	 * confirmed. Rejects when the first connection fails.
 	 */
 	async start(): Promise<void> {

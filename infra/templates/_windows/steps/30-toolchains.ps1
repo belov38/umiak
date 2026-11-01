@@ -13,7 +13,7 @@ if ((Get-BuildVersionInfo).options.vsBuildtools) {
 $v = Get-ToolVersion 'git'
 if ((Get-InstalledVersion 'git' @('--version')) -ne "git version $v") {
     $exe = Get-ToolFile -Name 'git'
-    $log = Join-Path $SbxLogDir 'git-install.log'
+    $log = Join-Path $UmiakLogDir 'git-install.log'
     Invoke-Installer -FilePath $exe -Arguments "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /SP- /ALLUSERS /LOG=`"$log`" /o:PathOption=Cmd /o:EnableSymlinks=Enabled /o:CRLFOption=CRLFCommitAsIs"
 }
 $git = Assert-Command 'git'
@@ -47,7 +47,7 @@ if ($prefix -ne $npmPrefix) { throw "npm prefix -g is '$prefix', want $npmPrefix
 # --- Python 3 (all users, py launcher) ---
 $v = Get-ToolVersion 'python'
 if ((Get-InstalledVersion 'python' @('--version')) -ne "Python $v") {
-    $log = Join-Path $SbxLogDir 'python-install.log'
+    $log = Join-Path $UmiakLogDir 'python-install.log'
     Invoke-Installer -FilePath (Get-ToolFile -Name 'python') -Arguments "/quiet /log `"$log`" InstallAllUsers=1 PrependPath=1 Include_launcher=1 InstallLauncherAllUsers=1 Include_test=0 Shortcuts=0"
 }
 Assert-Command 'python' | Out-Null

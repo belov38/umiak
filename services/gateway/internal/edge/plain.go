@@ -8,16 +8,16 @@ import (
 
 // PlainHandler dispatches the requests of the plain listener (spec 5.2,
 // behind an ingress) by Host: tunnelHost goes to tunnel, everything else to
-// sbx. The Host is compared case-insensitively without its port and a
+// umiak. The Host is compared case-insensitively without its port and a
 // trailing dot.
-func PlainHandler(sbx, tunnel http.Handler, tunnelHost string) http.Handler {
+func PlainHandler(umiak, tunnel http.Handler, tunnelHost string) http.Handler {
 	tunnelHost = strings.TrimSuffix(strings.ToLower(tunnelHost), ".")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tunnelHost != "" && hostOnly(r.Host) == tunnelHost {
 			tunnel.ServeHTTP(w, r)
 			return
 		}
-		sbx.ServeHTTP(w, r)
+		umiak.ServeHTTP(w, r)
 	})
 }
 

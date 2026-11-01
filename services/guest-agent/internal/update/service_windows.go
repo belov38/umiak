@@ -13,16 +13,16 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // AgentService is the agent service that Rollback starts.
-const AgentService = "sbx-agent"
+const AgentService = "umiak-agent"
 
 // Settings of the agent service (S9 spec 12.2).
 const (
-	serviceDisplayName = "sbx agent"
-	serviceDescription = "Guest agent of the sbx sandbox"
+	serviceDisplayName = "umiak agent"
+	serviceDescription = "Guest agent of the umiak sandbox"
 	serviceAccount     = "LocalSystem"
 	// PreshutdownTimeout is how long the service may take on PRESHUTDOWN.
 	PreshutdownTimeout = 15 * time.Second
@@ -159,7 +159,7 @@ func serviceCommandLine(l paths.Layout) string {
 
 // recoveryCommand is the run-command failure action: `rollback` of the
 // previous version, or of the current one when there is no previous. The
-// choice is made when the command runs, like sbx-agent-rollback.service.
+// choice is made when the command runs, like umiak-agent-rollback.service.
 func recoveryCommand(l paths.Layout) (string, error) {
 	sys, err := windows.GetSystemDirectory()
 	if err != nil {
@@ -173,7 +173,7 @@ func recoveryCommand(l paths.Layout) (string, error) {
 
 // installService creates or updates the agent service (S9 spec 12.2):
 // LocalSystem, automatic start (not delayed), ImagePath
-// `"<current>\sbx-agent.exe" run`, failure actions with the rollback
+// `"<current>\umiak-agent.exe" run`, failure actions with the rollback
 // command, failure actions also on non-crash failures, a 15 s preshutdown
 // timeout. It does not start the service: an image build VM must never run
 // the agent before sysprep. With SystemPath it adds current to the system

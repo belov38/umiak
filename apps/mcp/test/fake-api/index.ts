@@ -1,8 +1,8 @@
-// In-memory fake of the sbx public API v1 and the S10 desktop routes, for the
+// In-memory fake of the umiak public API v1 and the S10 desktop routes, for the
 // contract tests of the MCP server (S11 §14.2).
 //
 //   const api = await startFakeApi();
-//   const sbx = new Sbx({ baseUrl: api.url, apiKey: FAKE_TOKENS.full });
+//   const umiak = new Umiak({ baseUrl: api.url, apiKey: FAKE_TOKENS.full });
 //   ...
 //   expect(api.contractErrors).toEqual([]);   // every request and response fit the OpenAPI document
 //   await api.close();
@@ -93,13 +93,13 @@ export interface FakeApi {
 /** The bearer tokens every fake starts with. */
 export const FAKE_TOKENS = {
 	/** Team key, all scopes, team FAKE_TEAM. */
-	full: "sbx_fake_full",
+	full: "umiak_fake_full",
 	/** A person (Keycloak token), all scopes, team FAKE_TEAM. */
 	oidc: "fake_oidc_user",
 	/** Team key with the `read-only` preset. */
-	readOnly: "sbx_fake_readonly",
+	readOnly: "umiak_fake_readonly",
 	/** Team key, all scopes, team OTHER_TEAM. */
-	otherTeam: "sbx_fake_other_team",
+	otherTeam: "umiak_fake_other_team",
 } as const;
 
 /** Scope of every route (S7 §7.3, S10 §13.1); routes not listed need any valid credential. */
@@ -152,7 +152,7 @@ function sharedContract(): Contract {
 const DESKTOP_PATH = /^\/v1\/sandboxes\/[^/]+\/desktop(\/|$)/;
 
 export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
-	const filesRoot = await mkdtemp(join(tmpdir(), "sbx-fake-api-"));
+	const filesRoot = await mkdtemp(join(tmpdir(), "umiak-fake-api-"));
 	const state = createState(filesRoot, {
 		readyAfterMs: o.readyAfterMs ?? 50,
 		screen: o.screen ?? { width: 1920, height: 1080 },
@@ -341,7 +341,7 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 	}
 
 	/**
-	 * The team of the request (Sbx-Team, else the default), as the real API
+	 * The team of the request (Umiak-Team, else the default), as the real API
 	 * selects it (apps/api/src/auth/public.ts, principal.ts): checked only
 	 * after the credential passed.
 	 */
@@ -353,7 +353,7 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 		const team = header.trim();
 		if (!/^team_\S+$/.test(team)) {
 			throw validation([
-				{ path: "header.sbx-team", message: "must be a team id (team_...)" },
+				{ path: "header.umiak-team", message: "must be a team id (team_...)" },
 			]);
 		}
 		if (team === p.teamId) return p;
@@ -361,14 +361,14 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 			throw new FakeApiError(
 				403,
 				"team_forbidden",
-				"the API key belongs to another team than Sbx-Team",
+				"the API key belongs to another team than Umiak-Team",
 			);
 		}
 		if (!(p.teams ?? []).includes(team)) {
 			throw new FakeApiError(
 				403,
 				"team_forbidden",
-				"you are not a member of the team in Sbx-Team",
+				"you are not a member of the team in Umiak-Team",
 			);
 		}
 		return { ...p, teamId: team };
@@ -440,7 +440,7 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 				throw noRoute(method, path);
 			const auth = authenticate(
 				c.req.header("Authorization"),
-				c.req.header("Sbx-Team"),
+				c.req.header("Umiak-Team"),
 			);
 			c.set("token", auth.token);
 			c.set("principal", auth.principal);

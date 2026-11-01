@@ -35,7 +35,7 @@ type HTTPEntry struct {
 	Method        string
 	Path          string // a query part is dropped on write
 	Status        int
-	SbxError      string
+	UmiakError      string
 	BytesIn       int64
 	BytesOut      int64
 	DurationMs    int64
@@ -61,7 +61,7 @@ type httpLine struct {
 	Method        string `json:"method"`
 	Path          string `json:"path"`
 	Status        int    `json:"status"`
-	SbxError      string `json:"sbxError"`
+	UmiakError      string `json:"umiakError"`
 	BytesIn       int64  `json:"bytesIn"`
 	BytesOut      int64  `json:"bytesOut"`
 	DurationMs    int64  `json:"durationMs"`
@@ -93,7 +93,7 @@ func (l *AccessLog) HTTP(e HTTPEntry) {
 		Method:        e.Method,
 		Path:          stripQuery(e.Path),
 		Status:        e.Status,
-		SbxError:      e.SbxError,
+		UmiakError:      e.UmiakError,
 		BytesIn:       e.BytesIn,
 		BytesOut:      e.BytesOut,
 		DurationMs:    e.DurationMs,

@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
 )
 
 // syncBuffer is a bytes.Buffer safe for concurrent log writes.
@@ -77,7 +77,7 @@ func TestLoginCertMaxValidity(t *testing.T) {
 			Key:             newKey().PublicKey(),
 			Serial:          7,
 			CertType:        ssh.UserCert,
-			KeyId:           "sbx:user:usr_1",
+			KeyId:           "umiak:user:usr_1",
 			ValidPrincipals: []string{"sb_x"},
 			ValidAfter:      uint64(now.Add(-time.Minute).Unix()),
 			ValidBefore:     uint64(now.Add(-time.Minute + validFor).Unix()),

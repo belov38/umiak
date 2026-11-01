@@ -13,15 +13,15 @@ Self-hosted platform of API-driven VM sandboxes for AI agents on Proxmox VE. Arc
 ## Repo layout
 
 - TS (pnpm workspace, `pnpm-workspace.yaml`): `apps/<name>` for deployables and CLIs (api, worker, web, mcp, cli, bench), `packages/<name>` for libraries (pve, agent-client, ...). Each package extends `tsconfig.base.json`; tests with vitest; lint and format with biome (`pnpm lint`).
-- Go (workspace `go.work`, one module per directory, module path `github.com/belov38/boat-dev-clone/<dir>`): `services/<name>` for binaries (node-agent, guest-agent, gateway), `libs/<name>` for shared Go libraries (tunnel, ...). Add your module to `go.work` with `go work use`. Lint with golangci-lint.
-- Protobuf: `proto/sbx/<area>/v1`, generated with buf.
+- Go (workspace `go.work`, one module per directory, module path `github.com/belov38/umiak/<dir>`): `services/<name>` for binaries (node-agent, guest-agent, gateway), `libs/<name>` for shared Go libraries (tunnel, ...). Add your module to `go.work` with `go work use`. Lint with golangci-lint.
+- Protobuf: `proto/umiak/<area>/v1`, generated with buf.
 - Specs: `docs/specs/sN-*.md`. Implementation plans: `docs/plans/sN-*.md`.
 - Keep root files (`package.json`, `pnpm-workspace.yaml`, `go.work`, `biome.json`) minimal; parallel threads edit them, so add only your own entries.
 
 ## Git
 
 - Only real code and `docs/` go to git. `research/`, `sdks/`, `vendor-repos/`, `scripts/` are local research material and stay gitignored.
-- Remote: private `github.com/belov38/boat-dev-clone`. Push your work.
+- Remote: private `github.com/belov38/umiak`. Push your work.
 - Never add a `Claude-Session:` trailer or a claude.ai session link to commit messages or PR descriptions.
 
 ## CI

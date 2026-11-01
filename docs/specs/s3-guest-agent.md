@@ -18,9 +18,9 @@
 
 ## 2. Цели, не-цели, анти-цели
 
-**Цели:** сервисы `proto/sbx/agent/v1` (`Process`, `Filesystem`, `System`) и ручки `/files/*`; shim и supervisor; durable-состояние и retention; claim и готовность; смена идентичности; quiesce/thaw; порты и CONNECT; установка, unit-файлы, самообновление, восстановление через QEMU guest agent; модель пользователей. Код переносим на Windows: всё, что зависит от ОС, — за интерфейсами (§18), без cgo.
+**Цели:** сервисы `proto/umiak/agent/v1` (`Process`, `Filesystem`, `System`) и ручки `/files/*`; shim и supervisor; durable-состояние и retention; claim и готовность; смена идентичности; quiesce/thaw; порты и CONNECT; установка, unit-файлы, самообновление, восстановление через QEMU guest agent; модель пользователей. Код переносим на Windows: всё, что зависит от ОС, — за интерфейсами (§18), без cgo.
 
-**Не-цели:** протокол туннеля и общая Go-библиотека туннеля (S2, `libs/tunnel`); gateway, HTTP-прокси `*.sbx`, SSH gateway (S4); операции Proxmox (S1); сборка образа (S5, здесь только требования к нему, §20); модель данных и машины состояний (S6); публичное API (S7); Windows-специфика (S9) кроме переносимости; рабочий стол и computer-use (S10); встроенные coding-агенты, AI-прокси, копия вывода вне VM (фаза 2).
+**Не-цели:** протокол туннеля и общая Go-библиотека туннеля (S2, `libs/tunnel`); gateway, HTTP-прокси `*.umiak`, SSH gateway (S4); операции Proxmox (S1); сборка образа (S5, здесь только требования к нему, §20); модель данных и машины состояний (S6); публичное API (S7); Windows-специфика (S9) кроме переносимости; рабочий стол и computer-use (S10); встроенные coding-агенты, AI-прокси, копия вывода вне VM (фаза 2).
 
 **Анти-цели** (провал, даже если формально работает):
 - команда выполнилась дважды после повтора `Start`;
@@ -36,43 +36,43 @@
 ```
  VM (Ubuntu)
  +-------------------------------------------------------------------------+
- | sbx-identity.service (oneshot, early boot, before network and sshd)     |
+ | umiak-identity.service (oneshot, early boot, before network and sshd)     |
  |                                                                         |
- | sbx-agent.service (root)                     sbx-cmd.slice              |
+ | umiak-agent.service (root)                     umiak-cmd.slice              |
  |  +------------------------------+            +-----------------------+  |
- |  | libs/tunnel client (WSS, h2) |            | sbx-cmd-<id>.service  |  |
- |  | Connect: sbx.agent.v1.*      |  D-Bus     |  shim (root)          |  |
- |  |          sbx.tunnel.v1.*     |----------->|  payload/ (cgroup)    |  |
+ |  | libs/tunnel client (WSS, h2) |            | umiak-cmd-<id>.service  |  |
+ |  | Connect: umiak.agent.v1.*      |  D-Bus     |  shim (root)          |  |
+ |  |          umiak.tunnel.v1.*     |----------->|  payload/ (cgroup)    |  |
  |  | /files/*, CONNECT            |  unix sock |   bash -lc ... (user) |  |
  |  | state: bbolt + log files     |<---------->|  pipes -> log files   |  |
  |  +------------------------------+            +-----------------------+  |
- |         | Docker API (unix)        sbx-quiesce-watchdog-<lease>.service |
+ |         | Docker API (unix)        umiak-quiesce-watchdog-<lease>.service |
  |  sshd 127.0.0.1:22 / [::1]:22 (TrustedUserCAKeys from claim)            |
  |  qemu-guest-agent (fallback channel, S1)                                |
  +-------------------------------------------------------------------------+
 ```
 
-- Один бинарник `sbx-agent` (`services/guest-agent`, Go-модуль `github.com/belov38/boat-dev-clone/services/guest-agent`) с подкомандами: `run` (агент), `shim`, `identity`, `quiesce-watchdog`, `rollback`, `doctor`, `thaw`, `install-package`, `seal`, `selftest`.
+- Один бинарник `umiak-agent` (`services/guest-agent`, Go-модуль `github.com/belov38/umiak/services/guest-agent`) с подкомандами: `run` (агент), `shim`, `identity`, `quiesce-watchdog`, `rollback`, `doctor`, `thaw`, `install-package`, `seal`, `selftest`.
 - Туннель — библиотека `libs/tunnel` из S2: агент даёт ей `http.Handler` (Connect-сервисы, `/files/*`, CONNECT) и реализацию журнала событий и capabilities (§16, §17).
-- Входящих TCP-портов у агента нет. С shim агент говорит через unix-сокеты в `/run/sbx-agent` (root 0700).
+- Входящих TCP-портов у агента нет. С shim агент говорит через unix-сокеты в `/run/umiak-agent` (root 0700).
 
 ## 4. Пользователи, права, безопасность
 
 Модель безопасности: **граница доверия — VM.** Root внутри VM принят Ильёй (S2 §16, п. 1): он может прочитать BS и MT своей VM, но это даёт только доступ к своей же VM. Отсюда решения ниже (согласовано master-сессией, Илья проинформирован и может пересмотреть):
 
-- Агент работает от **root** (`sbx-agent.service`, `User=root`).
+- Агент работает от **root** (`umiak-agent.service`, `User=root`).
 - Команды по умолчанию идут от **`user`** (uid 1000, группы `sudo` и `docker`, **NOPASSWD sudo**, linger включён). Пользователь создаётся в шаблоне (S5); имя берётся из `agent.toml` (`[user] default`).
 - Поле `user` в spec команды допускает любого существующего пользователя, включая `root`.
 - Файловые операции агент выполняет от root. Новые файлы и каталоги получают владельца `user` (или `owner` из запроса). Ограничений по путям нет (в отличие от boat).
-- Секреты — только в отдельном tmpfs `/run/sbx` с опцией `noswap` (ядро ≥ 6.4), который агент монтирует при старте. Там же на время запуска лежит spec команды с env. Env из spec команды на диск не пишется (§9.2). Swap в шаблоне запрещён (§20): секреты есть и в памяти процессов, а `noswap` защищает только tmpfs.
+- Секреты — только в отдельном tmpfs `/run/umiak` с опцией `noswap` (ядро ≥ 6.4), который агент монтирует при старте. Там же на время запуска лежит spec команды с env. Env из spec команды на диск не пишется (§9.2). Swap в шаблоне запрещён (§20): секреты есть и в памяти процессов, а `noswap` защищает только tmpfs.
 - Агент не пишет в лог значения env, секретов, тела файлов и тела RPC.
-- Каталоги состояния (`/var/lib/sbx-agent`, `/run/sbx-agent`) — root 0700. Это не защита от `user` (у него sudo), а защита от случайной порчи.
+- Каталоги состояния (`/var/lib/umiak-agent`, `/run/umiak-agent`) — root 0700. Это не защита от `user` (у него sudo), а защита от случайной порчи.
 - CONNECT только на адреса самой VM (S2 §4.2).
 - Обновления подписаны ed25519 (§17.3).
 
 ## 5. Конфигурация и каталоги
 
-`/etc/sbx-agent/agent.toml` — настройки шаблона (кладёт S5) **[исполнитель: формат TOML]**:
+`/etc/umiak-agent/agent.toml` — настройки шаблона (кладёт S5) **[исполнитель: формат TOML]**:
 
 ```toml
 [tunnel]
@@ -106,27 +106,27 @@ window = "5m"
 
 | Путь | Что | Переживает |
 |---|---|---|
-| `/usr/local/lib/sbx-agent/versions/<v>/` | `sbx-agent`, `manifest.json`, `manifest.sig`, `trust/tunnel-ca.pem`, `trust/update-keys.pub` | всё |
-| `/usr/local/lib/sbx-agent/current`, `previous` | symlink на версии | всё |
-| `/usr/local/bin/sbx-agent` | symlink на `current/sbx-agent` (CLI для `doctor` и QGA) | всё |
-| `/var/lib/sbx-agent/state.db` | bbolt: команды, кэш `requestId`, журнал событий, загрузки, claim без секретов, meta | перезагрузку; стирается при смене идентичности |
-| `/var/lib/sbx-agent/commands/<id>/` | `stdout`, `stderr`, `pty`, `shim.json`, `exit.json` | перезагрузку; стирается при смене идентичности |
-| `/var/lib/sbx-agent/uploads/` | временные файлы загрузок | перезагрузку; стирается при смене идентичности |
-| `/var/lib/sbx-agent/identity.json` | machineId, записанный machine-id, отпечатки host keys | всё; переписывается при смене идентичности |
-| `/var/lib/sbx-agent/pending-update.json` | незавершённое обновление `{from, to, deadline}`. Это файл, а не bbolt: его читает `rollback` (§17.4) | перезагрузку |
-| `/run/sbx-agent/` | сокеты shim, lease quiesce, `status.json` | только до перезагрузки |
-| `/run/sbx/` | tmpfs `noswap`, монтирует агент: `secrets/` (0750 `root:user`: `env`, `files/<name>`), `cmd-spec/` (0700 root: spec команды, пока его не прочитал shim) | только до перезагрузки |
-| `/etc/sbx/env` | несекретный env sandbox для PAM (SSH-сессии), §8.2 | перезагрузку; при смене идентичности очищается |
-| `/etc/sbx-agent/ssh-user-ca.pub` | ключи SSH CA gateway из шаблона (может быть пуст) | всё (часть шаблона) |
-| `/etc/ssh/sbx_user_ca.pub` | действующие ключи SSH CA: из claim, иначе копия шаблонных | перезагрузку; при смене идентичности переписывается из шаблона |
+| `/usr/local/lib/umiak-agent/versions/<v>/` | `umiak-agent`, `manifest.json`, `manifest.sig`, `trust/tunnel-ca.pem`, `trust/update-keys.pub` | всё |
+| `/usr/local/lib/umiak-agent/current`, `previous` | symlink на версии | всё |
+| `/usr/local/bin/umiak-agent` | symlink на `current/umiak-agent` (CLI для `doctor` и QGA) | всё |
+| `/var/lib/umiak-agent/state.db` | bbolt: команды, кэш `requestId`, журнал событий, загрузки, claim без секретов, meta | перезагрузку; стирается при смене идентичности |
+| `/var/lib/umiak-agent/commands/<id>/` | `stdout`, `stderr`, `pty`, `shim.json`, `exit.json` | перезагрузку; стирается при смене идентичности |
+| `/var/lib/umiak-agent/uploads/` | временные файлы загрузок | перезагрузку; стирается при смене идентичности |
+| `/var/lib/umiak-agent/identity.json` | machineId, записанный machine-id, отпечатки host keys | всё; переписывается при смене идентичности |
+| `/var/lib/umiak-agent/pending-update.json` | незавершённое обновление `{from, to, deadline}`. Это файл, а не bbolt: его читает `rollback` (§17.4) | перезагрузку |
+| `/run/umiak-agent/` | сокеты shim, lease quiesce, `status.json` | только до перезагрузки |
+| `/run/umiak/` | tmpfs `noswap`, монтирует агент: `secrets/` (0750 `root:user`: `env`, `files/<name>`), `cmd-spec/` (0700 root: spec команды, пока его не прочитал shim) | только до перезагрузки |
+| `/etc/umiak/env` | несекретный env sandbox для PAM (SSH-сессии), §8.2 | перезагрузку; при смене идентичности очищается |
+| `/etc/umiak-agent/ssh-user-ca.pub` | ключи SSH CA gateway из шаблона (может быть пуст) | всё (часть шаблона) |
+| `/etc/ssh/umiak_user_ca.pub` | действующие ключи SSH CA: из claim, иначе копия шаблонных | перезагрузку; при смене идентичности переписывается из шаблона |
 
 ## 6. Загрузка и жизненный цикл агента
 
 Порядок при загрузке:
 
-1. `sbx-identity.service` (oneshot, §7): сверяет smbios с `identity.json` и при смене сбрасывает идентичность. Идёт до сети, sshd и агента.
-2. `sbx-agent.service`:
-   1. Если есть `/run/sbx-agent/quiesce.json` — снять заморозку (§14.4). Иначе пробная запись в state-каталог; если она висит дольше 15 s — принудительный thaw (§14.4). До этого агент на диск не пишет. Затем смонтировать tmpfs `/run/sbx` (если его ещё нет) и создать пустые `secrets/env` и `/etc/sbx/env`, если их нет.
+1. `umiak-identity.service` (oneshot, §7): сверяет smbios с `identity.json` и при смене сбрасывает идентичность. Идёт до сети, sshd и агента.
+2. `umiak-agent.service`:
+   1. Если есть `/run/umiak-agent/quiesce.json` — снять заморозку (§14.4). Иначе пробная запись в state-каталог; если она висит дольше 15 s — принудительный thaw (§14.4). До этого агент на диск не пишет. Затем смонтировать tmpfs `/run/umiak` (если его ещё нет) и создать пустые `secrets/env` и `/etc/umiak/env`, если их нет.
    2. Открыть `state.db`, миграции (только добавляющие, §17.5).
    3. Если `bootId` изменился — всем командам в `RUNNING` без `exit.json` поставить `LOST` (reason `REBOOT`), выпустить `command.exited`. Иначе — найти живые shim и переподключиться к их сокетам (§9.6).
    4. Подтвердить или откатить ожидающее обновление (`pending-update.json`, §17.4).
@@ -147,25 +147,25 @@ window = "5m"
 
 ### 7.1 Источник
 
-- `/sys/class/dmi/id/product_serial` (читает только root) содержит `sbx1:<machineId>:<base64url(BS)>`: Proxmox декодирует `base64=1` из `smbios1` (S2 §5.2, S1 §6.4). `product_uuid` должен совпадать с `machineId`; при расхождении — предупреждение в лог, верим serial.
-- **vmgenid на Linux не читается**: драйвер `vmgenid` только пересевает RNG и значение в userspace не отдаёт (uevent `NEW_VMGENID` был откатан в 2024). Поэтому на Linux fork определяется только по `machineId`. Заголовок `Sbx-Vmgenid` агент шлёт пустым. На Windows (S9) vmgenid читается.
+- `/sys/class/dmi/id/product_serial` (читает только root) содержит `umiak1:<machineId>:<base64url(BS)>`: Proxmox декодирует `base64=1` из `smbios1` (S2 §5.2, S1 §6.4). `product_uuid` должен совпадать с `machineId`; при расхождении — предупреждение в лог, верим serial.
+- **vmgenid на Linux не читается**: драйвер `vmgenid` только пересевает RNG и значение в userspace не отдаёт (uevent `NEW_VMGENID` был откатан в 2024). Поэтому на Linux fork определяется только по `machineId`. Заголовок `Umiak-Vmgenid` агент шлёт пустым. На Windows (S9) vmgenid читается.
 - Fork у нас всегда холодный старт новой VM (снимков памяти нет), поэтому смена идентичности видна только при загрузке, а не на работающей VM.
 - Если serial нет или он не разбирается (сборка шаблона), агент работает без туннеля, фаза `identity: failed`, повтор чтения раз в 60 s.
 
-### 7.2 `sbx-identity.service`
+### 7.2 `umiak-identity.service`
 
 ```ini
 [Unit]
-Description=sbx machine identity
+Description=umiak machine identity
 DefaultDependencies=no
 After=local-fs.target systemd-remount-fs.service
-Before=network-pre.target systemd-networkd.service ssh.service ssh.socket cloud-init-local.service sbx-agent.service systemd-journal-flush.service sysinit.target
+Before=network-pre.target systemd-networkd.service ssh.service ssh.socket cloud-init-local.service umiak-agent.service systemd-journal-flush.service sysinit.target
 Wants=network-pre.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent identity apply
+ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent identity apply
 
 [Install]
 WantedBy=sysinit.target
@@ -173,10 +173,10 @@ WantedBy=sysinit.target
 
 `identity apply`: если `machineId` из smbios равен сохранённому в `identity.json` — ничего не делать. Иначе (или если `identity.json` нет — первая загрузка после `seal`):
 
-1. Стереть состояние агента: `state.db`, `commands/`, `uploads/`, `pending-update.json`, другие файлы из списка управляемых (`/var/lib/sbx-agent/managed-files`); `/etc/sbx/env` оставить пустым. `/etc/ssh/sbx_user_ca.pub` переписать копией `/etc/sbx-agent/ssh-user-ca.pub` из шаблона.
+1. Стереть состояние агента: `state.db`, `commands/`, `uploads/`, `pending-update.json`, другие файлы из списка управляемых (`/var/lib/umiak-agent/managed-files`); `/etc/umiak/env` оставить пустым. `/etc/ssh/umiak_user_ca.pub` переписать копией `/etc/umiak-agent/ssh-user-ca.pub` из шаблона.
 2. **machine-id.** Если `/etc/machine-id` пуст, равен `uninitialized` или равен значению из старого `identity.json` (унаследован), записать новый: hex `machineId` без дефисов (32 символа). Если systemd уже выставил другое значение (`systemd.machine_id=firmware`, §20), оставить его. `/var/lib/dbus/machine-id` — symlink на `/etc/machine-id`.
 3. **SSH host keys.** Удалить `/etc/ssh/ssh_host_*`, выполнить `ssh-keygen -A`. На Linux вызов системной утилиты допустим: OpenSSH в образе есть; на Windows (S9) свой путь.
-4. **Hostname.** `sbx-<последние 12 hex machineId>` (последние, потому что первые 48 бит UUIDv7 — время создания и у соседних machine совпадают). `sethostname`, `/etc/hostname`, строка `127.0.1.1` в `/etc/hosts` (управляемый блок). Claim потом заменит hostname.
+4. **Hostname.** `umiak-<последние 12 hex machineId>` (последние, потому что первые 48 бит UUIDv7 — время создания и у соседних machine совпадают). `sethostname`, `/etc/hostname`, строка `127.0.1.1` в `/etc/hosts` (управляемый блок). Claim потом заменит hostname.
 5. Записать `identity.json` с флагом `resetPending` (fsync).
 6. **journald.** Если шаг 2 заменил действовавший machine-id (форк унаследовал id родителя), `systemctl try-restart systemd-journald` и дождаться перезапуска. journald запомнил старый id на старте и писал бы в `/var/log/journal/<старый id>`, где `journalctl` форка ничего не находит. Юнит идёт до `systemd-journal-flush.service`, поэтому сброс runtime-журнала в `/var/log/journal` идёт уже под новым id и забирает записи начала загрузки. Ошибка перезапуска пишется в лог и apply не валит.
 
@@ -184,30 +184,30 @@ WantedBy=sysinit.target
 
 Так machine-id и DHCP DUID (systemd-networkd выводит его из machine-id) меняются до старта сети. Это закрывает риск S1 «одинаковый IP у A и F». PID 1 кэширует machine-id с ранней загрузки; journald перезапускается шагом 6, остальным процессам хватает нового `/etc/machine-id`.
 
-**Страховка в агенте.** Если агент при старте видит несовпадение (`sbx-identity` выключен или упал), он выполняет те же шаги сам, затем `systemctl try-restart ssh` и `networkctl renew`, пишет предупреждение.
+**Страховка в агенте.** Если агент при старте видит несовпадение (`umiak-identity` выключен или упал), он выполняет те же шаги сам, затем `systemctl try-restart ssh` и `networkctl renew`, пишет предупреждение.
 
-### 7.3 `sbx-agent seal` (для S5)
+### 7.3 `umiak-agent seal` (для S5)
 
-Подготовка образа перед `qm template`: остановить агента, стереть `/var/lib/sbx-agent` целиком (вместе с `identity.json`) и host keys, очистить `/etc/machine-id` (пустой файл), вернуть управляемые файлы к шаблонным (`/etc/sbx/env` пустой, `/etc/ssh/sbx_user_ca.pub` — копия шаблонных ключей). Каталог версий `/usr/local/lib/sbx-agent` остаётся. Первая загрузка из шаблона пройдёт §7.2 как смена идентичности.
+Подготовка образа перед `qm template`: остановить агента, стереть `/var/lib/umiak-agent` целиком (вместе с `identity.json`) и host keys, очистить `/etc/machine-id` (пустой файл), вернуть управляемые файлы к шаблонным (`/etc/umiak/env` пустой, `/etc/ssh/umiak_user_ca.pub` — копия шаблонных ключей). Каталог версий `/usr/local/lib/umiak-agent` остаётся. Первая загрузка из шаблона пройдёт §7.2 как смена идентичности.
 
 ## 8. Claim, env, секреты, SSH, готовность
 
 ### 8.1 Claim
 
-`System/Claim` (с `Sbx-Request-Id`) выполняется **один раз на идентичность machine**. Повтор с тем же `requestId` возвращает сохранённый ответ. Claim с другим содержимым после успешного — `failed_precondition` `already_claimed`. Если фаза `identity` ещё не `ready` — `unavailable` `identity_not_ready` (retryable).
+`System/Claim` (с `Umiak-Request-Id`) выполняется **один раз на идентичность machine**. Повтор с тем же `requestId` возвращает сохранённый ответ. Claim с другим содержимым после успешного — `failed_precondition` `already_claimed`. Если фаза `identity` ещё не `ready` — `unavailable` `identity_not_ready` (retryable).
 
 ```proto
 message ClaimRequest {
   string sandbox_id = 1;
   string hostname = 2;                 // e.g. sandbox slug; RFC 1123 label
-  string port_domain = 3;              // e.g. "sbx.example.com", for default env
-  map<string, string> env = 4;         // non-secret, persisted in /etc/sbx/env
+  string port_domain = 3;              // e.g. "umiak.example.com", for default env
+  map<string, string> env = 4;         // non-secret, persisted in /etc/umiak/env
   map<string, string> secret_env = 5;  // tmpfs only
   repeated SecretFile secret_files = 6;
   repeated string ssh_user_ca_keys = 7; // gateway SSH CA public keys (current + next)
 }
 message SecretFile {
-  string name = 1;        // file name under /run/sbx/secrets/files/
+  string name = 1;        // file name under /run/umiak/secrets/files/
   bytes content = 2;      // <= 1 MiB each, <= 8 MiB total
   uint32 mode = 3;        // default 0440, group = default user
   string link_path = 4;   // optional symlink on disk pointing into tmpfs
@@ -216,9 +216,9 @@ message SecretFile {
 
 Шаги (каждый идемпотентен):
 1. Hostname: `sethostname`, `/etc/hostname`, `/etc/hosts`.
-2. Env (платформенный и `env`) — в `state.db` (запись claim) и в `/etc/sbx/env` для PAM, атомарно (tmp + fsync + rename).
-3. Секреты в `/run/sbx/secrets` (`env`, `files/`); symlink-и `link_path` (на диске лежит только symlink, содержимое в tmpfs; после перезагрузки symlink висит битым до повторной отправки секретов).
-4. `/etc/ssh/sbx_user_ca.pub` атомарно; пустой список в claim → копия шаблонных ключей. Перезагружать sshd не нужно: он читает `TrustedUserCAKeys` при каждой аутентификации. Исполнитель проверяет это тестом §21; если окажется не так — `systemctl try-reload-or-restart ssh.service`, неактивный unit не считается ошибкой.
+2. Env (платформенный и `env`) — в `state.db` (запись claim) и в `/etc/umiak/env` для PAM, атомарно (tmp + fsync + rename).
+3. Секреты в `/run/umiak/secrets` (`env`, `files/`); symlink-и `link_path` (на диске лежит только symlink, содержимое в tmpfs; после перезагрузки symlink висит битым до повторной отправки секретов).
+4. `/etc/ssh/umiak_user_ca.pub` атомарно; пустой список в claim → копия шаблонных ключей. Перезагружать sshd не нужно: он читает `TrustedUserCAKeys` при каждой аутентификации. Исполнитель проверяет это тестом §21; если окажется не так — `systemctl try-reload-or-restart ssh.service`, неактивный unit не считается ошибкой.
 5. Записать claim без секретов и `secretsDigest` (sha256 канонического набора секретов, не сами значения) в `state.db`.
 6. Фазы `claim` и `secrets` → `ready`, событие `claim.applied`.
 
@@ -231,7 +231,7 @@ message SecretFile {
 
 Агент собирает env процесса сам, не полагаясь на shell. Порядок (последний выигрывает):
 1. базовый: `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH` (по умолчанию Ubuntu), `LANG=C.UTF-8`, `XDG_RUNTIME_DIR=/run/user/<uid>` (есть благодаря linger), `TERM` для PTY;
-2. платформенный по умолчанию: `SBX=1`, `SBX_SANDBOX_ID`, `SBX_PORT_DOMAIN`, `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.<port_domain>` (Vite dev server принимает хосты `*.sbx.<domain>`, требование S4);
+2. платформенный по умолчанию: `UMIAK=1`, `UMIAK_SANDBOX_ID`, `UMIAK_PORT_DOMAIN`, `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.<port_domain>` (Vite dev server принимает хосты `*.umiak.<domain>`, требование S4);
 3. `env` из claim;
 4. `secret_env`;
 5. `env` из spec команды.
@@ -241,8 +241,8 @@ Login-shell (`bash -lc`) читает `/etc/profile` и `~/.profile`, но env �
 **SSH-сессии** (login и не-login: `ssh host cmd`, scp, sftp) получают пункты 2–4 через PAM. S5 добавляет в `/etc/pam.d/sshd` две строки:
 
 ```
-session required pam_env.so readenv=1 envfile=/etc/sbx/env
-session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env
+session required pam_env.so readenv=1 envfile=/etc/umiak/env
+session required pam_env.so readenv=1 envfile=/run/umiak/secrets/env
 ```
 
 - Агент пишет оба файла в формате `KEY=VALUE`, который читает `pam_env`. Точное экранирование исполнитель проверяет тестом.
@@ -254,14 +254,14 @@ session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env
 
 Решение S4: gateway терминирует SSH и ходит через туннель (CONNECT `127.0.0.1:22`) в системный OpenSSH VM с короткоживущими user-сертификатами от SSH CA gateway. Поэтому:
 - sshd слушает только `127.0.0.1` и `::1` (настройка шаблона, S5);
-- `TrustedUserCAKeys /etc/ssh/sbx_user_ca.pub`; содержимое приходит в claim (`ssh_user_ca_keys`, текущий и следующий ключ), а если в claim пусто — копия `/etc/sbx-agent/ssh-user-ca.pub` из шаблона;
+- `TrustedUserCAKeys /etc/ssh/umiak_user_ca.pub`; содержимое приходит в claim (`ssh_user_ca_keys`, текущий и следующий ключ), а если в claim пусто — копия `/etc/umiak-agent/ssh-user-ca.pub` из шаблона;
 - principal в сертификате — имя пользователя VM (`user`, при необходимости `root`); выбор principal-ов — S4;
 - ключи пользователей проверяет gateway, `authorized_keys` агент не ведёт;
 - публичные host keys отдаются в `System/Info.ssh_host_keys`, чтобы gateway мог их закрепить (S4).
 
 ### 8.4 Hostname
 
-До claim — `sbx-<12 hex>` из §7.2, после — из claim. Агент проверяет, что значение — допустимая метка RFC 1123 (до 63 символов), иначе `invalid_argument`.
+До claim — `umiak-<12 hex>` из §7.2, после — из claim. Агент проверяет, что значение — допустимая метка RFC 1123 (до 63 символов), иначе `invalid_argument`.
 
 ### 8.5 Фазы готовности
 
@@ -278,7 +278,7 @@ session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env
 
 ## 9. Процессы
 
-### 9.1 API (`sbx.agent.v1.Process`)
+### 9.1 API (`umiak.agent.v1.Process`)
 
 | Метод | Вид | Идемпотентность |
 |---|---|---|
@@ -325,8 +325,8 @@ message Pty { uint32 cols = 1; uint32 rows = 2; string term = 3; } // term defau
    - есть и `spec_hash` совпадает → вернуть текущий `CommandInfo` (если запись в `STARTING` — см. п. 5);
    - есть с другим hash → `already_exists`.
 3. Записать `STARTING`: spec без значений env + `spec_hash` (sha256 полного spec, включая env) + `bootId`; fsync. Env на диск не пишется: при повторе `Start` после сбоя вызывающий пришлёт spec заново, и hash подтвердит, что это тот же spec.
-4. Положить полный spec в `/run/sbx/cmd-spec/<id>` (tmpfs `noswap`, 0600). Shim прочитает его и удалит.
-5. Запустить transient unit `sbx-cmd-<id>.service` через D-Bus `StartTransientUnit` (§9.3). Имя детерминированное: systemd не создаст второй unit с тем же именем, пока жив первый.
+4. Положить полный spec в `/run/umiak/cmd-spec/<id>` (tmpfs `noswap`, 0600). Shim прочитает его и удалит.
+5. Запустить transient unit `umiak-cmd-<id>.service` через D-Bus `StartTransientUnit` (§9.3). Имя детерминированное: systemd не создаст второй unit с тем же именем, пока жив первый.
    - Shim пишет маркер `shim.json` `{state: "launching", agentVersion, shimProto}` с fsync **до** запуска процесса. pid в маркере нет: в Go нет точки между fork и exec. pid shim дописывает после запуска (атомарная перезапись того же файла).
    - Повтор для записи в `STARTING`: если `shim.json` есть, запуск мог состояться, и команда считается запущенной (ждём или читаем её состояние). Если нет ни `shim.json`, ни unit-а — запуска не было, запускаем.
    - Поэтому повтор никогда не даст второго запуска. В худшем случае (shim умер между маркером и запуском) команда будет `LOST` с `SHIM_LOST`.
@@ -339,10 +339,10 @@ message Pty { uint32 cols = 1; uint32 rows = 2; string term = 3; } // term defau
 Unit (свойства передаются в `StartTransientUnit`):
 
 ```
-sbx-cmd-<id>.service
-  Slice=sbx-cmd.slice
+umiak-cmd-<id>.service
+  Slice=umiak-cmd.slice
   Type=notify, NotifyAccess=main
-  ExecStart=/usr/local/lib/sbx-agent/versions/<v>/sbx-agent shim --id <id>
+  ExecStart=/usr/local/lib/umiak-agent/versions/<v>/umiak-agent shim --id <id>
   Delegate=yes
   KillMode=control-group      # only used by explicit unit stop during cleanup
   # OOMScoreAdjust stays 0 so the payload inherits 0; the shim lowers only itself to -900 after the start
@@ -364,7 +364,7 @@ Shim:
    - `Setpgid` (не-PTY) или `Setsid` + `Setctty` (PTY).
 
    Процесс наследует `oom_score_adj` 0 от unit-а. После запуска shim пишет -900 только в свой `/proc/self/oom_score_adj` (у root есть `CAP_SYS_RESOURCE`). Затем дописывает `pid` и `startedAt` в `shim.json` и отправляет `READY=1`.
-9. Слушает `/run/sbx-agent/cmd/<id>.sock` (§9.6).
+9. Слушает `/run/umiak-agent/cmd/<id>.sock` (§9.6).
 10. Следит за `timeout_ms`: по истечении выполняет Kill (§9.5) с `reason TIMEOUT`. Таймер живёт в shim, поэтому от агента не зависит.
 
 **Выход.** Когда главный процесс завершился:
@@ -398,7 +398,7 @@ Shim:
 
 ### 9.6 Протокол агент ↔ shim
 
-Unix-сокет `/run/sbx-agent/cmd/<id>.sock` (root 0700), сообщения protobuf с префиксом длины **[исполнитель]**.
+Unix-сокет `/run/umiak-agent/cmd/<id>.sock` (root 0700), сообщения protobuf с префиксом длины **[исполнитель]**.
 
 Сообщения: `Hello{shim_proto_min, shim_proto_max}`, `Status → {pid, state, last_seq по сессиям, leftovers}`, `Input{session, seq, data}`, `CloseStdin`, `Resize{cols, rows}`, `Kill{grace_ms}`, `SignalGroup{sig}`, событие shim → агент `Exited{...}`.
 
@@ -449,8 +449,8 @@ Shim запускается из `versions/<v>/`; эта версия не уд�
 |---|---|
 | `GET /files?path=&user=` | Содержимое. `Range` (один диапазон; несколько → весь файл с `200`), `If-Range`, `ETag` = `"<inode>-<size>-<mtime_ns>"`, `Last-Modified`, `Accept-Ranges: bytes`. Каталог → `400 is_directory`. `HEAD` тоже |
 | `PUT /files?path=&mode=&owner=&make_parents=true` | Запись одним потоком любого размера: временный файл в том же каталоге → fsync → rename. Ответ — `FileInfo` JSON. Невозобновляемая; повтор с тем же телом даёт тот же результат |
-| `PUT /files/uploads/{uploadId}?offset=&path=` | Чанк до 8 MiB. `offset` обязан равняться текущему размеру, иначе `409` с заголовком `Sbx-Upload-Offset`. `path` в первом чанке — подсказка, где держать временный файл (§11.3) |
-| `HEAD /files/uploads/{uploadId}` | `Sbx-Upload-Offset`; `404`, если загрузки нет |
+| `PUT /files/uploads/{uploadId}?offset=&path=` | Чанк до 8 MiB. `offset` обязан равняться текущему размеру, иначе `409` с заголовком `Umiak-Upload-Offset`. `path` в первом чанке — подсказка, где держать временный файл (§11.3) |
+| `HEAD /files/uploads/{uploadId}` | `Umiak-Upload-Offset`; `404`, если загрузки нет |
 | `POST /files/uploads/{uploadId}/commit` | JSON `{path, sha256?, mode?, owner?, overwrite=true, make_parents=true}` → `FileInfo`. Идемпотентен по `uploadId`: повтор возвращает сохранённый результат 24 h. Несовпадение `sha256` → `422 checksum_mismatch`, загрузка удаляется |
 | `DELETE /files/uploads/{uploadId}` | Отмена |
 | `GET /files/archive?path=&user=&format=tar\|tar.gz` | Каталог `path` одним потоком tar (POSIX pax; `tar.gz` — gzip потоком), имена относительно `path`. Обход без перехода по symlink-ам (они пишутся как symlink), hardlink-и — как отдельные файлы, сокеты, FIFO и устройства пропускаются. Не каталог → `400 not_directory`. Файлы, которые меняются во время чтения, отдаются как прочитаны: снимка каталога нет. Ошибка посреди потока обрывает ответ без завершающих блоков tar |
@@ -460,20 +460,20 @@ Shim запускается из `versions/<v>/`; эта версия не уд�
 
 ### 11.3 Где лежит временный файл загрузки
 
-- В `/var/lib/sbx-agent/uploads/<uploadId>`, если подсказка `path` на той же FS (обычно у VM один диск). При смене идентичности такие файлы стираются вместе с состоянием.
-- Иначе — `.sbx-upload-<uploadId>` в каталоге назначения; путь записан в `state.db`, janitor найдёт его по записи.
+- В `/var/lib/umiak-agent/uploads/<uploadId>`, если подсказка `path` на той же FS (обычно у VM один диск). При смене идентичности такие файлы стираются вместе с состоянием.
+- Иначе — `.umiak-upload-<uploadId>` в каталоге назначения; путь записан в `state.db`, janitor найдёт его по записи.
 - При `commit` rename; если `EXDEV` (подсказки не было) — копирование во временный файл в каталоге назначения, fsync, rename.
 
-### 11.4 `sbx.agent.v1.Filesystem` (Connect unary)
+### 11.4 `umiak.agent.v1.Filesystem` (Connect unary)
 
 | Метод | Поля | Идемпотентность |
 |---|---|---|
 | `Stat` | `path, user, no_follow` → `FileInfo` | `NO_SIDE_EFFECTS` |
 | `List` | `path, user, depth (1–8, default 1), include_hidden (default true), page_size (≤ 10 000), page_token` → `entries[], next_page_token`. Порядок по пути, курсор — последний путь | `NO_SIDE_EFFECTS` |
-| `MakeDir` | `path, user, parents, mode, owner`. Уже есть каталог → успех `created=false` | `Sbx-Request-Id` |
-| `Move` | `src, dst, user, overwrite`. Между FS: файлы копируются, каталоги → `failed_precondition cross_device` **[исполнитель]** | `Sbx-Request-Id` |
-| `Chmod` | `path, user, mode?, owner?, group?, recursive` | `Sbx-Request-Id` |
-| `Remove` | `path, user, recursive`. Нет пути → успех `existed=false` | `Sbx-Request-Id` |
+| `MakeDir` | `path, user, parents, mode, owner`. Уже есть каталог → успех `created=false` | `Umiak-Request-Id` |
+| `Move` | `src, dst, user, overwrite`. Между FS: файлы копируются, каталоги → `failed_precondition cross_device` **[исполнитель]** | `Umiak-Request-Id` |
+| `Chmod` | `path, user, mode?, owner?, group?, recursive` | `Umiak-Request-Id` |
+| `Remove` | `path, user, recursive`. Нет пути → успех `existed=false` | `Umiak-Request-Id` |
 
 `FileInfo`: `path, name, type (FILE/DIR/SYMLINK/OTHER), size, mode, owner, group, uid, gid, mtime, symlink_target`.
 
@@ -493,21 +493,21 @@ Shim запускается из `versions/<v>/`; эта версия не уд�
 **CONNECT** (S2 §4.2). Агент принимает `CONNECT <host>:<port>` от gateway:
 - `host` — `localhost`, `127.0.0.1` или пусто: агент пробует по очереди `127.0.0.1`, `[::1]`, затем адреса интерфейсов VM (сначала IPv4, потом IPv6), на каждую попытку 1 s. Подключение отказано → следующий адрес. Так сервис, который слушает только `::1` или только адрес интерфейса, тоже доступен (так ожидает S4, отдельный флаг `--localhost` не нужен). Порядок можно начать с адреса, на котором порт виден в обнаружении, — результат тот же;
 - другой адрес VM — подключение строго к нему;
-- адрес не из VM → `403`; порт вне 1–65535 → `400`; все попытки отказаны → `502` с `Sbx-Dial-Error: refused` (или `timeout`, если хотя бы одна попытка или общий срок 10 s истекли по времени);
+- адрес не из VM → `403`; порт вне 1–65535 → `400`; все попытки отказаны → `502` с `Umiak-Dial-Error: refused` (или `timeout`, если хотя бы одна попытка или общий срок 10 s истекли по времени);
 - поток полный дуплекс, half-close через END_STREAM; сокеты принадлежат агенту и рвутся при его перезапуске (S2 §11).
 
 ## 13. System: информация, метрики, простой
 
-`sbx.agent.v1.System`:
+`umiak.agent.v1.System`:
 
 | Метод | Что | Идемпотентность |
 |---|---|---|
 | `Info` | версия (`current`, `previous`), os/arch, ядро, `boot_id`, время загрузки, `machine_id`, hostname, `sandbox_id`, claim (без секретов), фазы готовности, `ssh_host_keys`, состояние quiesce, состояние обновления, `idle_since`, пользователь по умолчанию | `NO_SIDE_EFFECTS` |
 | `Metrics` | CPU (использование за 5 s, число ядер, load 1/5/15), память (total, available, used, swap), диски по точкам монтирования (total, used, free, inodes), сеть (rx/tx байт и скорость), число процессов, работающих команд, attach-стримов и TCP-потоков | `NO_SIDE_EFFECTS` |
 | `ListPorts` | §12 | `NO_SIDE_EFFECTS` |
-| `Claim`, `UpdateEnv`, `UpdateSecrets`, `UpdateSshCa` | §8 | `Sbx-Request-Id` |
-| `Quiesce`, `Thaw` | §14 | `Sbx-Request-Id` |
-| `ApplyUpdate` | §17.4 | `Sbx-Request-Id` |
+| `Claim`, `UpdateEnv`, `UpdateSecrets`, `UpdateSshCa` | §8 | `Umiak-Request-Id` |
+| `Quiesce`, `Thaw` | §14 | `Umiak-Request-Id` |
+| `ApplyUpdate` | §17.4 | `Umiak-Request-Id` |
 
 Capabilities (`Control/Info`, S2 §10.2) — строки: `process.v1`, `process.pty`, `process.stdin`, `files.v1`, `files.upload.v1`, `files.archive.v1`, `system.claim.v1`, `system.quiesce.v1`, `system.update.v1`, `system.ports.v1`, `system.metrics.v1`.
 
@@ -529,10 +529,10 @@ S1 сейчас реализует `QuiesceHook` через QGA `fsfreeze`, по
 ### 14.2 `Quiesce{lease_ms = 30000 (≤ 120000), docker = true, fs = true}`
 
 1. Если уже заморожено → `failed_precondition` `already_quiesced` с `lease_id`.
-2. Записать lease в `/run/sbx-agent/quiesce.json` (tmpfs): `lease_id`, `deadline`, затем по ходу — список приостановленных контейнеров и замороженных mount-ов.
-3. Запустить watchdog: transient unit `sbx-quiesce-watchdog-<lease_id>.service` (`sbx-agent quiesce-watchdog --lease ...`). Он ждёт `deadline` и снимает заморозку сам (§14.3). Плюс таймер внутри агента.
+2. Записать lease в `/run/umiak-agent/quiesce.json` (tmpfs): `lease_id`, `deadline`, затем по ходу — список приостановленных контейнеров и замороженных mount-ов.
+3. Запустить watchdog: transient unit `umiak-quiesce-watchdog-<lease_id>.service` (`umiak-agent quiesce-watchdog --lease ...`). Он ждёт `deadline` и снимает заморозку сам (§14.3). Плюс таймер внутри агента.
 4. Docker: `GET /containers/json` по unix-сокету, `POST /containers/{id}/pause` для работающих (параллельно до 8, всего до 5 s). Каждый id пишется в lease **до** паузы.
-5. Хуки `/etc/sbx-agent/quiesce.d/*` (исполняемые, по имени) с аргументом `freeze`, до 5 s каждый (для СУБД и т.п.; аналог QGA `fsfreeze-hook`).
+5. Хуки `/etc/umiak-agent/quiesce.d/*` (исполняемые, по имени) с аргументом `freeze`, до 5 s каждый (для СУБД и т.п.; аналог QGA `fsfreeze-hook`).
 6. `sync()`.
 7. FIFREEZE (ioctl) на точках монтирования из `/proc/self/mountinfo`: блочные `ext4`, `xfs`, `btrfs`, не `ro`.
    - Одна точка на источник (устройство): bind-mount-ы и подтома btrfs делят superblock, и второй FIFREEZE дал бы `EBUSY`.
@@ -547,7 +547,7 @@ S1 сейчас реализует `QuiesceHook` через QGA `fsfreeze`, по
 - `Thaw`: FITHAW в обратном порядке (`EINVAL`, то есть не заморожено, — норма), хуки с `thaw` в обратном порядке, `unpause` контейнеров, остановка watchdog-unit-а, удаление lease, сброс буферов на диск.
 - Ответ: `{auto_thawed, auto_thawed_at}`. Повтор, неизвестный или уже снятый lease → успех с `already_thawed = true`.
 - Если `auto_thawed = true` и время авто-разморозки раньше конца снимка, снимок только crash-consistent. Worker (S6, через S1) повторяет снимок или помечает его.
-- Watchdog по `deadline` делает то же, что `Thaw`, и оставляет маркер в `/run/sbx-agent`. Агент по маркеру шлёт `quiesce.auto_thawed{by: watchdog}`.
+- Watchdog по `deadline` делает то же, что `Thaw`, и оставляет маркер в `/run/umiak-agent`. Агент по маркеру шлёт `quiesce.auto_thawed{by: watchdog}`.
 
 ### 14.4 Поведение агента при заморозке и после сбоя
 
@@ -561,7 +561,7 @@ S1 сейчас реализует `QuiesceHook` через QGA `fsfreeze`, по
 - Процессы пользователя, которые пишут на диск, блокируются (так и задумано); shim пишет вывод PTY и тоже ждёт.
 - **Агент перезапустился во время заморозки:** до первой записи он видит `quiesce.json` и выполняет thaw с `by: agent_start`.
 - **Чужая забытая заморозка** (например, QGA-путь с упавшим worker). При старте, а затем раз в 5 s, если своего lease нет, агент в отдельной горутине делает пробную запись с `fdatasync` в state-каталог. Если она не завершилась за 15 s — FITHAW всех блочных FS и событие `quiesce.auto_thawed{by: foreign}`. 15 s больше бюджета S1 (10 s), поэтому штатный QGA-снимок это не задевает.
-- Аварийная команда для QGA: `sbx-agent thaw --force` (FITHAW всех и `unpause` всех приостановленных контейнеров).
+- Аварийная команда для QGA: `umiak-agent thaw --force` (FITHAW всех и `unpause` всех приостановленных контейнеров).
 
 ## 15. Durable-состояние
 
@@ -590,7 +590,7 @@ S1 сейчас реализует `QuiesceHook` через QGA `fsfreeze`, по
 
 ## 16. События (тип → payload)
 
-Payload — сообщения из `proto/sbx/agent/v1/events.proto`, в конверте S2 (`protobuf Any`). Это ответ на открытый вопрос S2 §19 со стороны агента; S6 добавит свои типы.
+Payload — сообщения из `proto/umiak/agent/v1/events.proto`, в конверте S2 (`protobuf Any`). Это ответ на открытый вопрос S2 §19 со стороны агента; S6 добавит свои типы.
 
 | Тип | Payload | Когда |
 |---|---|---|
@@ -613,30 +613,30 @@ Payload — сообщения из `proto/sbx/agent/v1/events.proto`, в кон
 
 ### 17.1 Пакет
 
-`sbx-agent-<version>-linux-<arch>.tar`:
-- `sbx-agent`;
-- `manifest.json`: `{format: "sbx-agent-manifest/v1", version, os, arch, files: {name: sha256}, created_at}`;
+`umiak-agent-<version>-linux-<arch>.tar`:
+- `umiak-agent`;
+- `manifest.json`: `{format: "umiak-agent-manifest/v1", version, os, arch, files: {name: sha256}, created_at}`;
 - `manifest.sig` — подпись ed25519 над байтами `manifest.json`;
 - `trust/tunnel-ca.pem` — бандл tunnel CA, текущий и следующий (S2 §5.4);
 - `trust/update-keys.pub` — ключи обновлений, текущий и следующий.
 
-Установка в шаблон (S5) и обновление идут одним путём: `sbx-agent install-package <tar>` проверяет подпись и раскладывает пакет в `versions/<v>`. Первичная установка доверяет ключам, вшитым в установщик (сборка из репозитория).
+Установка в шаблон (S5) и обновление идут одним путём: `umiak-agent install-package <tar>` проверяет подпись и раскладывает пакет в `versions/<v>`. Первичная установка доверяет ключам, вшитым в установщик (сборка из репозитория).
 
 ### 17.2 Unit-ы
 
 ```ini
-# sbx-agent.service
+# umiak-agent.service
 [Unit]
-Description=sbx guest agent
-After=network-online.target sbx-identity.service
-Wants=network-online.target sbx-identity.service
-OnFailure=sbx-agent-rollback.service
+Description=umiak guest agent
+After=network-online.target umiak-identity.service
+Wants=network-online.target umiak-identity.service
+OnFailure=umiak-agent-rollback.service
 StartLimitIntervalSec=120
 StartLimitBurst=5
 
 [Service]
 Type=notify
-ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run
+ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent run
 Restart=always
 RestartMode=direct
 RestartSec=1
@@ -654,36 +654,36 @@ WantedBy=multi-user.target
 - `RestartMode=direct` (systemd ≥ 254): автоматический перезапуск минует состояние failed, поэтому `OnFailure=` (откат) срабатывает только после исчерпания `StartLimitBurst`, а не на первом падении.
 - `TimeoutStartSec=90`: старт до `READY=1` может ждать запасных путей идентичности (до 60 s), поэтому срок с запасом выше; задан явно, чтобы не зависеть от `DefaultTimeoutStartSec` образа. Версия, зависшая при старте, убивается через 90 s. Срок подтверждения обновления (§17.4) агент взводит сразу после quiesce Startup, до медленных шагов старта: зависшая новая версия откатывается по сроку, а перезапуск после него сразу возвращает `current` на старую версию.
 - `OOMScoreAdjust=-900`, а не -1000 (как у boat): при нехватке памяти ядро сначала убивает задачи пользователя, но агент не может довести VM до паники.
-- `sbx-agent-rollback.service` — oneshot `/usr/local/lib/sbx-agent/previous/sbx-agent rollback` (если `previous` нет — из `current`). Поведение описано в §17.4.
-- `sbx-cmd.slice` — общий slice команд (место для будущих лимитов).
-- `sbx-identity.service` — §7.2.
+- `umiak-agent-rollback.service` — oneshot `/usr/local/lib/umiak-agent/previous/umiak-agent rollback` (если `previous` нет — из `current`). Поведение описано в §17.4.
+- `umiak-cmd.slice` — общий slice команд (место для будущих лимитов).
+- `umiak-identity.service` — §7.2.
 
 ### 17.3 Подпись
 
-- Ключ ed25519. **PoC:** ключ сгенерирован локально и хранится вне репозитория (`~/.config/sbx/update-signing/`). Публичные ключи (текущий и следующий) закреплены в `trust/update-keys.pub`.
+- Ключ ed25519. **PoC:** ключ сгенерирован локально и хранится вне репозитория (`~/.config/umiak/update-signing/`). Публичные ключи (текущий и следующий) закреплены в `trust/update-keys.pub`.
 - **Production:** ключ подписи держит CI, его сертифицирует offline root. Решается в S12.
 - Ротация: следующий ключ закрепляется заранее, пакет, подписанный текущим ключом, приносит новую пару `trust/`.
 - Инструмент подписи — подкоманда release-утилиты в `services/guest-agent` **[исполнитель]**.
 
 ### 17.4 Самообновление
 
-1. Control plane загружает пакет через `/files/uploads` (§11.2) с подсказкой `path=/var/lib/sbx-agent/staging/` и вызывает `System/ApplyUpdate{upload_id}` (с `Sbx-Request-Id`). Агент сам ничего не скачивает: исходящий доступ VM нужен только к туннелю.
+1. Control plane загружает пакет через `/files/uploads` (§11.2) с подсказкой `path=/var/lib/umiak-agent/staging/` и вызывает `System/ApplyUpdate{upload_id}` (с `Umiak-Request-Id`). Агент сам ничего не скачивает: исходящий доступ VM нужен только к туннелю.
 2. Агент распаковывает пакет в `staging/<v>` и проверяет:
    - подпись ключами из `current/trust`;
    - sha256 файлов;
    - `os` и `arch`;
    - что `version` ≠ текущей. Откат на старую подписанную версию разрешён: это решение control plane.
-3. Перенести в `versions/<v>` и выполнить `versions/<v>/sbx-agent selftest --schema <N> --shim-protos <список>` (до 10 s). Selftest проверяет конфиг и доверенные материалы, а также что новая версия поддерживает текущую схему `state.db` и протоколы живых shim-ов. Сам `state.db` selftest не открывает: на нём эксклюзивная блокировка bbolt работающего агента.
+3. Перенести в `versions/<v>` и выполнить `versions/<v>/umiak-agent selftest --schema <N> --shim-protos <список>` (до 10 s). Selftest проверяет конфиг и доверенные материалы, а также что новая версия поддерживает текущую схему `state.db` и протоколы живых shim-ов. Сам `state.db` selftest не открывает: на нём эксклюзивная блокировка bbolt работающего агента.
 4. Записать `pending-update.json` `{from, to, deadline = now + 120 s}` (fsync). Переключить `previous` → `from`, `current` → `to` (атомарная замена symlink через rename).
 5. Ответить и выйти с кодом 0 после отправки ответа; systemd перезапускает агента (`Restart=always`) уже новой версии.
 6. Новый агент видит `pending-update.json`, подключается к туннелю:
    - первый `101` и обслуженный `Control/Info` → подтверждение, `update.result{ok}`;
    - не подключился до `deadline` → вернуть `current` на `from`, выйти; старая версия пишет `update.result{rolled_back}`;
-   - падает в цикле → `StartLimitBurst` → `OnFailure` → `sbx-agent-rollback.service`.
-   - `sbx-agent rollback`:
+   - падает в цикле → `StartLimitBurst` → `OnFailure` → `umiak-agent-rollback.service`.
+   - `umiak-agent rollback`:
      - есть `pending-update.json` → `current` = `from`, `previous` не меняется. Версия `to` записывается в `bad-versions`: control plane повторит её только явным флагом. Файл удаляется, событие `update.result{rolled_back}` уходит при следующем старте;
      - нет `pending-update.json` (падает давно стабильная версия: баг, полный диск) → версии не трогает и ждёт 30 s;
-     - в обоих случаях затем выполняет `systemctl reset-failed sbx-agent` и `systemctl start sbx-agent`. Агент перезапускается бесконечно с паузой, версии туда-сюда не переключаются;
+     - в обоих случаях затем выполняет `systemctl reset-failed umiak-agent` и `systemctl start umiak-agent`. Агент перезапускается бесконечно с паузой, версии туда-сюда не переключаются;
      - `rollback --to <v>` (вручную через QGA) переключает на указанную версию из уже установленных.
 7. Команды и PTY не затрагиваются: shim-ы живут в своих unit-ах и работают из своих каталогов версий. Хранятся `current`, `previous` и версии с живыми shim-ами; остальные удаляет janitor.
 
@@ -701,12 +701,12 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 
 | Команда | Зачем |
 |---|---|
-| `sbx-agent doctor --json` | версии `current`/`previous`, состояние unit-ов, идентичность (без BS), состояние туннеля и последние ошибки (из `/run/sbx-agent/status.json`, агент обновляет его раз в 5 s), quiesce, свободное место |
-| `journalctl -u sbx-agent -n 500 --no-pager` | лог |
-| `systemctl restart sbx-agent` | перезапуск |
-| `sbx-agent rollback [--to <v>]` | откат на имеющуюся версию |
-| `sbx-agent thaw --force` | аварийная разморозка |
-| `sbx-agent install-package <path>` | установка пакета, загруженного через QGA `file-write` чанками в `/var/lib/sbx-agent/staging/` |
+| `umiak-agent doctor --json` | версии `current`/`previous`, состояние unit-ов, идентичность (без BS), состояние туннеля и последние ошибки (из `/run/umiak-agent/status.json`, агент обновляет его раз в 5 s), quiesce, свободное место |
+| `journalctl -u umiak-agent -n 500 --no-pager` | лог |
+| `systemctl restart umiak-agent` | перезапуск |
+| `umiak-agent rollback [--to <v>]` | откат на имеющуюся версию |
+| `umiak-agent thaw --force` | аварийная разморозка |
+| `umiak-agent install-package <path>` | установка пакета, загруженного через QGA `file-write` чанками в `/var/lib/umiak-agent/staging/` |
 
 Агент ниже минимальной версии по безопасности (`426`, S2 §5.3): warm-машины списываются (S6), на занятые пакет заливается через QGA и ставится `install-package`. Дальше — `recover` (перезагрузка VM).
 
@@ -716,44 +716,44 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 
 | Интерфейс | Linux (S3) | Windows (S9, как сделано; пакеты в `services/guest-agent/internal/`) |
 |---|---|---|
-| `Supervisor` (запуск unit-а команды, поиск, kill) | systemd transient service через D-Bus + shim, cgroup v2 | `supervisor/windows.go`: shim запускается с `CREATE_BREAKAWAY_FROM_JOB \| DETACHED_PROCESS`, spec — в stdin, готовность — строка `READY`; живость — mutex `Global\sbx-shim-<id>`, команда — постоянный job `Global\sbx-cmd-<id>` (`winproc/job_windows.go`, `NtCreateJobObject` + `OBJ_PERMANENT`); shim — `shim/*_windows.go` |
+| `Supervisor` (запуск unit-а команды, поиск, kill) | systemd transient service через D-Bus + shim, cgroup v2 | `supervisor/windows.go`: shim запускается с `CREATE_BREAKAWAY_FROM_JOB \| DETACHED_PROCESS`, spec — в stdin, готовность — строка `READY`; живость — mutex `Global\umiak-shim-<id>`, команда — постоянный job `Global\umiak-cmd-<id>` (`winproc/job_windows.go`, `NtCreateJobObject` + `OBJ_PERMANENT`); shim — `shim/*_windows.go` |
 | IPC агент ↔ shim | AF_UNIX, shimproto | то же: AF_UNIX `run\cmd\<id>.sock`, shimproto без изменений |
 | `PTY` | `creack/pty` | ConPTY (`winproc/conpty_windows.go`) |
 | Командная строка | `argv` как есть, `shell` = `bash -lc` (`-c` без login) | `wincmd`: правила MSVCRT, `.cmd`/`.bat` через `cmd.exe /d /s /c` (BatBadBut → `unsafe_batch_args`), `shell` = `pwsh -EncodedCommand` с эпилогом кода выхода (S9 §12.6) |
 | `IdentitySource` (machineId, BS, vmgenid, bootId) | DMI sysfs, `/proc/sys/kernel/random/boot_id`; vmgenid нет | `ident/source_windows.go`: `GetSystemFirmwareTable('RSMB')` (`ident/smbios.go`), bootId = UUIDv5(machineId, счётчик `BootId` в реестре), запасной — volatile-ключ реестра; vmgenid не читается |
-| `IdentityResetter` | machine-id, host keys, hostname | `ident/{apply,reset,early,seal}_windows.go`: `MachineGuid`, host keys встроенного OpenSSH, имя `SBX<12 hex>`, пароль `user` только на клоне шаблона; `identity apply --specialize`, `early` (startup-скрипт `sbx-early.cmd`) |
+| `IdentityResetter` | machine-id, host keys, hostname | `ident/{apply,reset,early,seal}_windows.go`: `MachineGuid`, host keys встроенного OpenSSH, имя `UMIAK<12 hex>`, пароль `user` только на клоне шаблона; `identity apply --specialize`, `early` (startup-скрипт `umiak-early.cmd`) |
 | `Quiescer` | Docker pause + FIFREEZE | `quiesce/{freeze,hooks}_windows.go`: только хуки `quiesce.d\*.ps1` и очистка файлов секретов; FS замораживает QGA VSS из worker |
 | `PortScanner` | `/proc/net/tcp{,6}` | `ports/scan_windows.go`: `GetExtendedTcpTable` раз в 1 s, фильтр по процессам (`ports/filter.go`) |
 | `Metrics` | `gopsutil` | `gopsutil` |
-| `Credentials` | uid/gid/groups (`os/user` без cgo) | `process/users_windows.go`, `winapi/{logon,lsa,profile}_windows.go`: `LogonUserW` + связанный повышенный токен, пароль из LSA secret `L$sbx_user`; `root` = `SYSTEM` |
-| `SecretStore` | tmpfs `noswap` | `claim/secrets_windows.go`, `claim/acl_windows.go`: `C:\ProgramData\sbx\secrets\files`, ACL SYSTEM + `user`, `FILE_ATTRIBUTE_TEMPORARY`, перезапись нулями перед удалением; `secret_env` и содержимое файлов — только в памяти |
-| `ServiceManager` | systemd D-Bus | SCM (`x/sys/windows/svc`, `update/service_windows.go`, `cmd/sbx-agent/service_windows.go`) |
+| `Credentials` | uid/gid/groups (`os/user` без cgo) | `process/users_windows.go`, `winapi/{logon,lsa,profile}_windows.go`: `LogonUserW` + связанный повышенный токен, пароль из LSA secret `L$umiak_user`; `root` = `SYSTEM` |
+| `SecretStore` | tmpfs `noswap` | `claim/secrets_windows.go`, `claim/acl_windows.go`: `C:\ProgramData\umiak\secrets\files`, ACL SYSTEM + `user`, `FILE_ATTRIBUTE_TEMPORARY`, перезапись нулями перед удалением; `secret_env` и содержимое файлов — только в памяти |
+| `ServiceManager` | systemd D-Bus | SCM (`x/sys/windows/svc`, `update/service_windows.go`, `cmd/umiak-agent/service_windows.go`) |
 | Переключение версий | symlink-и `current`/`previous` | junction-ы NTFS (`update/junction_windows.go`) |
 | `OutputStore` (выбивание дыр) | `fallocate PUNCH_HOLE` | sparse-файлы: `FSCTL_SET_SPARSE`, `FSCTL_SET_ZERO_DATA` с шагом 64 KiB, `FSCTL_QUERY_ALLOCATED_RANGES` (`output/store_windows.go`) |
 | Файлы | POSIX | `files/*_windows.go`: пути `C:\…`, `mode`/`owner` синтезируются, `file_in_use` (S9 §12.9) |
 | Локальные сокеты | `--debug-listen` (тесты) | `run\admin.sock` (SYSTEM + Administrators, клиенты `exec`, `call`), `run\env.sock` (`env --format pwsh`) — `agent/localsock_windows.go` |
 
-Пакет Windows: `sbx-agent-<v>-windows-amd64.tar` с `sbx-agent.exe` (`sbx-release pack --os windows`, `infra/templates/agent-package.sh --os windows`). Отличия и решения реализации — S9 §24.
+Пакет Windows: `umiak-agent-<v>-windows-amd64.tar` с `umiak-agent.exe` (`umiak-release pack --os windows`, `infra/templates/agent-package.sh --os windows`). Отличия и решения реализации — S9 §24.
 
 ## 19. Proto
 
-`proto/sbx/agent/v1/`: `process.proto`, `filesystem.proto`, `system.proto`, `events.proto`, `common.proto` (`FileInfo`, `CommandInfo`). Соглашения S2 §10: только добавления, `buf breaking`; `idempotency_level` на методах как в таблицах §9.1, §11.4, §13; ошибки — коды Connect + `ErrorDetail{code, retryable}` из `sbx.tunnel.v1`.
+`proto/umiak/agent/v1/`: `process.proto`, `filesystem.proto`, `system.proto`, `events.proto`, `common.proto` (`FileInfo`, `CommandInfo`). Соглашения S2 §10: только добавления, `buf breaking`; `idempotency_level` на методах как в таблицах §9.1, §11.4, §13; ошибки — коды Connect + `ErrorDetail{code, retryable}` из `umiak.tunnel.v1`.
 
 Коды `ErrorDetail.code` агента: `already_exists`, `command_not_found`, `command_exited`, `too_many_commands`, `start_failed`, `user_not_found`, `path_not_found`, `is_directory`, `not_directory`, `no_space`, `cross_device`, `upload_offset_mismatch`, `checksum_mismatch`, `identity_not_ready`, `already_claimed`, `not_claimed`, `quiesced`, `already_quiesced`, `frozen_by_other`, `signature_invalid`, `update_in_progress`, `shim_outdated`.
 
 Добавлены в S9 (Windows): `unsupported_signal`, `unsafe_batch_args`, `file_in_use`, `secrets_in_use`, `secrets_pending`, `fs_freeze_unsupported`, `desktop_not_ready`. Поля proto S9 (только добавления): `CommandSpec.desktop`, `ClaimResponse.hostname_applied` (Linux всегда `true`), `QuiesceRequest.wipe_secret_files`, `PrepareStopResponse.secret_files_wiped` (Linux `true` после успешной очистки). Capability `system.quiesce.wipe_secrets.v1` объявляет только Windows-агент.
 
-Сгенерированный код кладётся как в реализации S2: Go — в `libs/proto` (`github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1`), TS — в `packages/proto`.
+Сгенерированный код кладётся как в реализации S2: Go — в `libs/proto` (`github.com/belov38/umiak/libs/proto/umiak/agent/v1`), TS — в `packages/proto`.
 
 ## 20. Требования к шаблону (S5)
 
-- Ubuntu 26.04 (шаблон S1 `ubuntu-2604-dev-tpl`), systemd ≥ 257: в cmdline ядра `systemd.machine_id=firmware`. Тогда machine-id = `product_uuid` = `machineId` с самого PID 1; `sbx-identity` это учитывает (§7.2). Ядро ≥ 6.4 для `tmpfs noswap`.
+- Ubuntu 26.04 (шаблон S1 `ubuntu-2604-dev-tpl`), systemd ≥ 257: в cmdline ядра `systemd.machine_id=firmware`. Тогда machine-id = `product_uuid` = `machineId` с самого PID 1; `umiak-identity` это учитывает (§7.2). Ядро ≥ 6.4 для `tmpfs noswap`.
 - **Без swap** (ни раздела, ни swap-файла): секреты есть в памяти процессов.
-- Пользователь `user` (uid 1000), группы `sudo` и `docker`, `/etc/sudoers.d/90-sbx-user`: `user ALL=(ALL) NOPASSWD:ALL`; `loginctl enable-linger user`.
-- sshd: `ListenAddress 127.0.0.1` и `::1`, `PasswordAuthentication no`, `TrustedUserCAKeys /etc/ssh/sbx_user_ca.pub`. Ключи CA шаблона (если есть) — в `/etc/sbx-agent/ssh-user-ca.pub`. В `/etc/pam.d/sshd` — две строки `pam_env` из §8.2.
+- Пользователь `user` (uid 1000), группы `sudo` и `docker`, `/etc/sudoers.d/90-umiak-user`: `user ALL=(ALL) NOPASSWD:ALL`; `loginctl enable-linger user`.
+- sshd: `ListenAddress 127.0.0.1` и `::1`, `PasswordAuthentication no`, `TrustedUserCAKeys /etc/ssh/umiak_user_ca.pub`. Ключи CA шаблона (если есть) — в `/etc/umiak-agent/ssh-user-ca.pub`. В `/etc/pam.d/sshd` — две строки `pam_env` из §8.2.
 - cloud-init после сборки отключён (`/etc/cloud/cloud-init.disabled`) или выключены модули `ssh`, `set_hostname`, `update_hostname`, `users-groups`: идентичностью владеет агент. Сеть — netplan с DHCP по имени (`en*`), не по MAC. Диск cloud-init от S1 при этом безвреден.
 - Docker (userland-proxy по умолчанию), `qemu-guest-agent`, OpenSSH.
-- Агент: `sbx-agent install-package`, `agent.toml`, unit-ы включены; последний шаг сборки — `sbx-agent seal` (§7.3).
+- Агент: `umiak-agent install-package`, `agent.toml`, unit-ы включены; последний шаг сборки — `umiak-agent seal` (§7.3).
 
 ## 21. Приёмка
 
@@ -790,7 +790,7 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 
 - **S1:** `AgentQuiesceHook` — основная реализация `QuiesceHook`, QGA fsfreeze — запасная (§14.1). Smbios по S2 §5.2. QGA exec для восстановления (§17.6).
 - **S2 / `libs/tunnel`** (план `s2-impl`, пакет `libs/tunnel/agent`). Агент заполняет `agent.Config`:
-  - `Handler` — Connect `sbx.agent.v1` и `/files/*`;
+  - `Handler` — Connect `umiak.agent.v1` и `/files/*`;
   - `Journal` — `EventJournal` поверх `state.db` (§15);
   - `Info` — capabilities (§13);
   - `Credentials` — smbios (§7.1);
@@ -798,7 +798,7 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 
   CONNECT обслуживает сама библиотека с политикой `LocalOnly`. Для порядка адресов из §12 **нужно добавление в S2**: поле `Dial func(ctx context.Context, host string, port int) (net.Conn, error)` в `agent.Config`. При `nil` dial прямой, как сейчас; ошибка `Dial` → `502`. Ответы на открытые вопросы S2 §19: retention — §10, типы событий агента — §16.
 - **S4:** порядок адресов CONNECT (§12); sshd только на loopback с `TrustedUserCAKeys` из claim (§8.3); host keys в `System/Info`; `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` в env по умолчанию.
-- **S5:** требования §20, `sbx-agent seal`, `install-package`.
+- **S5:** требования §20, `umiak-agent seal`, `install-package`.
 - **S6:**
   - claim при выдаче из warm pool; `UpdateSecrets` после каждой загрузки (по `agent.started{reason: boot}` или фазе `secrets: pending`); claim для fork с env источника;
   - блокировка на machine для quiesce, обработка `auto_thawed`;

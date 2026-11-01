@@ -21,7 +21,7 @@ function pubBlob(openssh: string): string {
 let server: InstanceType<typeof Server> | undefined;
 let clients: SshNodeOps[] = [];
 
-/** Fake sbx-node behind an SSH server: echoes the op, fails op "boom". */
+/** Fake umiak-node behind an SSH server: echoes the op, fails op "boom". */
 /**
  * Like OpenSSH, the server allows maxSessions sessions per connection and frees a session only a
  * moment after its channel closed (sshd collects dead channels in a later main loop pass).
@@ -187,11 +187,11 @@ describe("SshNodeOps", () => {
 		const c = client(port);
 		const results = await Promise.all([
 			c.call("version"),
-			c.call("lv.list", { tags: ["sbx"] }),
+			c.call("lv.list", { tags: ["umiak"] }),
 		]);
 		expect(results).toEqual([
 			{ op: "version", args: {} },
-			{ op: "lv.list", args: { tags: ["sbx"] } },
+			{ op: "lv.list", args: { tags: ["umiak"] } },
 		]);
 		expect(requests).toHaveLength(2);
 		expect((requests[0] as { requestId: string }).requestId).toMatch(

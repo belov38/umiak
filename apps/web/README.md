@@ -1,4 +1,4 @@
-# @sbx/web
+# @umiak/web
 
 The dashboard `/app` and the Payload admin `/admin` (S8): Next.js 16 with
 Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
@@ -10,30 +10,30 @@ Payload 3 in one app, behind oauth2-proxy. Payload REST is at `/cms-api`
 |---|---|
 | `/healthz` | `200 ok` once Postgres answers, Payload is up and every payload migration known to this code is applied; `503` otherwise. No identity headers needed (exec probe `node healthcheck.js`). |
 | `/admin` | Payload admin (`app/(payload)`, from Payload's Next.js template). Operators only: `proxy.ts` answers 403 "Operators only" to anyone without an operator group in `X-Auth-Request-Groups` (before Payload renders its config); Payload's `users` admin access checks again. |
-| `/cms-api/*` | Payload REST: operators only in `proxy.ts` (403 for others, preferences and document locks included), then collection access. The password and JWT endpoints of `users` (`login`, `refresh-token`, `first-register`, `forgot-password`, `reset-password`, `unlock`, `verify`, `api-key/reveal`) are 403 for everyone. A refused login answers with `X-Sbx-Auth-Denied: <reason>`. |
+| `/cms-api/*` | Payload REST: operators only in `proxy.ts` (403 for others, preferences and document locks included), then collection access. The password and JWT endpoints of `users` (`login`, `refresh-token`, `first-register`, `forgot-password`, `reset-password`, `unlock`, `verify`, `api-key/reveal`) are 403 for everyone. A refused login answers with `X-Umiak-Auth-Denied: <reason>`. |
 | `/` | `307` to `/app` (a page, not a config redirect, so an anonymous `/` is still `401`). |
 | `/app` | Redirect to the default team, `/app/t/<team_…>`. |
 | `/app/t/<team>` | Team frame (S8 §9.3): team switcher, sections, operator links, user menu with sign-out. A team the user is not in: 403 page (operators may open any team). The page itself: sandboxes (§9.4), below. |
-| `/app/t/<team>` (page) | Sandboxes: `GET /v1/sandboxes` with search (`q`), state and `label=k=v` filters, infinite scroll over `nextCursor`; quota line from `GET /v1/limits`. Polled every 5 s while the tab is visible and refetched at once after an action. Transitional states with a spinner and `activeOperation.kind: step`, `error` red with its message, `degraded` with `healthReason`, a lock for a blocked sandbox. Row actions: Stop / Resume, Fork (→ the new sandbox page), Open terminal (`?tab=terminal`), Delete (type the slug; `Sbx-Confirm-Delete` = id). Blocked: Resume and Fork disabled. |
+| `/app/t/<team>` (page) | Sandboxes: `GET /v1/sandboxes` with search (`q`), state and `label=k=v` filters, infinite scroll over `nextCursor`; quota line from `GET /v1/limits`. Polled every 5 s while the tab is visible and refetched at once after an action. Transitional states with a spinner and `activeOperation.kind: step`, `error` red with its message, `degraded` with `healthReason`, a lock for a blocked sandbox. Row actions: Stop / Resume, Fork (→ the new sandbox page), Open terminal (`?tab=terminal`), Delete (type the slug; `Umiak-Confirm-Delete` = id). Blocked: Resume and Fork disabled. |
 | `/app/t/<team>/sandboxes/new` | Create (§9.5): template (enabled ones only), size (`allowedSizes`, the quota reason from `/v1/limits`), from a saved snapshot, name, slug (checked live), environment (team default → field omitted, a name, `none` → `environment: null`), labels, env, secrets (`type=password` with a show toggle), secret files (read into memory as base64; name, mode, link path), TTL and idle-stop (platform default → omitted, `none` → `null`). `POST /v1/sandboxes` through the SDK (Idempotency-Key), then the sandbox page. `quota_exceeded`, `out_of_capacity` (with "Try again"), `slug_taken`, `template_unavailable` as text at the form. The URL carries only `template`, `size`, `snapshot` (`newSandboxHref`/`parsePrefill`); inputs have no `name`, so a submit before hydration sends nothing. |
 | `/app/t/<team>/sandboxes/<slug>` | Sandbox page (§9.6), below. `<slug>` may also be an `sb_…` id (snapshot sources link by id; the URL then shows the slug). |
-| `/app/t/<team>/snapshots` | Saved snapshots (§9.7): `GET /v1/snapshots` (polled while one is creating or deleting), "Create sandbox" → the create form with the snapshot chosen, Delete (`sbx.snapshots.delete`, confirm). |
-| `/app/t/<team>/keys` | Team API keys (§9.8): `GET /v1/api-keys`; presets `read-only`/`ci`/`full` (`@sbx/auth/scopes`) or scopes by hand, lifetime 90 days by default, at most 365; the secret once in a dialog with copy, `export SBX_API_KEY=…` and `sbx login --key-stdin`; Rotate (new secret in the same dialog), Revoke. New and Rotate for owners, Revoke for owners and operators (§6.2). Marks "creator left the team" / "creator deactivated" (`createdBy.member`/`active`); the IdP-sync notice banner above (same loader as settings); revoked and expired keys collapsed at the bottom; the `sbx login` hint for people. |
+| `/app/t/<team>/snapshots` | Saved snapshots (§9.7): `GET /v1/snapshots` (polled while one is creating or deleting), "Create sandbox" → the create form with the snapshot chosen, Delete (`umiak.snapshots.delete`, confirm). |
+| `/app/t/<team>/keys` | Team API keys (§9.8): `GET /v1/api-keys`; presets `read-only`/`ci`/`full` (`@umiak/auth/scopes`) or scopes by hand, lifetime 90 days by default, at most 365; the secret once in a dialog with copy, `export UMIAK_API_KEY=…` and `umiak login --key-stdin`; Rotate (new secret in the same dialog), Revoke. New and Rotate for owners, Revoke for owners and operators (§6.2). Marks "creator left the team" / "creator deactivated" (`createdBy.member`/`active`); the IdP-sync notice banner above (same loader as settings); revoked and expired keys collapsed at the bottom; the `umiak login` hint for people. |
 | `/app/t/<team>/settings` | Team (S8 §9.9): name (rename: owner, operator), members (email, name, role, "Not signed in yet", last sign-in), invite / role / remove (owner, operator), leave, quota and usage (`GET /v1/limits`), the IdP-sync notice banner (§9.8, §20.1) for owners and operators: "Revoke selected" (`DELETE /v1/api-keys/{key_…}` through the SDK), "Dismiss" (`acknowledgeNotice`, owners). |
 | `/app/teams/new` | New shared team: name → `createTeam` → the new team. |
-| `/app/account` | Profile (read-only), default team (`setDefaultTeam`), SSH keys (`GET/POST/DELETE /v1/ssh-keys`; `ssh_key_in_use` and unsupported types as text), sign-out with the `sbx login` hint. |
+| `/app/account` | Profile (read-only), default team (`setDefaultTeam`), SSH keys (`GET/POST/DELETE /v1/ssh-keys`; `ssh_key_in_use` and unsupported types as text), sign-out with the `umiak login` hint. |
 | `/app/t/<team>/environments` | Environments (§10): `GET /v1/environments`, a card per environment with env and secret names (values never), secret file metadata, repositories, default, "no personal secrets", revision, last change and by whom (member names from Payload, like settings). New / Edit / Delete for owners and operators (`can(…, "manageEnvironments")`), members read. Edit reads `GET /v1/environments/{id}` (env values) and sends a merge `PATCH`: only what changed, `null` for removed keys and files, secret values only when typed, `repositories` whole when changed (`src/lib/environment-form.ts`). Repository URLs are checked like the api (https, ssh or `user@host:path`; no credentials, query or fragment), at most 20. `excludeOwnerSecrets` is stored only (S7 decision 7). |
-| `/app/operator` | Operator section (§9.10). The server page checks `isOperator` of the resolved session (`requireOperator`, `src/lib/operator.ts`); others get the 403 page (`operator/forbidden.tsx`). Every team comes from Payload (`toOperatorTeams`) for the team column and filter. `GET /v1/sandboxes?allTeams=true` with team, state and search filters, polled every 5 s. Per row: Ports (hosted ports with Block / Unblock), Block / Unblock (reason `operator`/`abuse`, note ≤ 500), Stop, Delete (type the slug), links to the team and the sandbox page. Actions carry `Sbx-Team` of the sandbox's team. Link to `/admin`. No pool or node status (phase 2). |
+| `/app/operator` | Operator section (§9.10). The server page checks `isOperator` of the resolved session (`requireOperator`, `src/lib/operator.ts`); others get the 403 page (`operator/forbidden.tsx`). Every team comes from Payload (`toOperatorTeams`) for the team column and filter. `GET /v1/sandboxes?allTeams=true` with team, state and search filters, polled every 5 s. Per row: Ports (hosted ports with Block / Unblock), Block / Unblock (reason `operator`/`abuse`, note ≤ 500), Stop, Delete (type the slug), links to the team and the sandbox page. Actions carry `Umiak-Team` of the sandbox's team. Link to `/admin`. No pool or node status (phase 2). |
 
 ## Delete team in /admin (S8 §6.4)
 
 The team edit view shows "Delete team" for shared teams
 (`src/components/admin/delete-team-control.tsx`, a server component
-registered in `@sbx/payload` by path). In the operator's browser it reads
+registered in `@umiak/payload` by path). In the operator's browser it reads
 `/api/v1/sandboxes?allTeams=true&teamId=…&limit=1`, `/api/v1/snapshots` and
-`/api/v1/environments` with `Sbx-Team` of the team and refuses with what is
+`/api/v1/environments` with `Umiak-Team` of the team and refuses with what is
 left; otherwise it confirms and sends `DELETE /cms-api/teams/<uuid>` with
-`x-sbx-delete-team: checked` (`src/lib/team-delete.ts`), then opens the
+`x-umiak-delete-team: checked` (`src/lib/team-delete.ts`), then opens the
 teams list. Payload's own Delete is not offered for teams: teams access
 requires that header. A sandbox created between the check and the delete
 is the known race of §6.4.
@@ -68,7 +68,7 @@ mounted, so leaving a tab (or the page) closes its streams and sockets.
   (`GET /commands?mode=pty&status=running`) plus new ones (`POST /ptys`);
   the open tab attaches with `tailBytes=65536` through `sb.connectPty`
   (WebSocket `/api/v1/sandboxes/{sb}/ptys/{cmd}/connect?team=…`,
-  `sbx.pty.v1`). The SDK reconnects by offset; `src/lib/ws.ts` (the
+  `umiak.pty.v1`). The SDK reconnects by offset; `src/lib/ws.ts` (the
   browser WebSocket factory: subprotocols only) reports socket closes for the
   "Reconnecting…" bar. Final errors (`4409`, `4503` after retries, `4401`,
   `4404`, `4416`) get text and, where it helps, "Reconnect". Detach keeps the
@@ -93,7 +93,7 @@ mounted, so leaving a tab (or the page) closes its streams and sockets.
   Unpublish; a blocked port shows the lock and keeps its buttons disabled;
   `403 public_disabled` → hint at the form and `public` disabled.
 - **SSH**: command, `known_hosts` lines, `hasKeys: false` → link to
-  `/app/account` and the `sbx ssh` hint.
+  `/app/account` and the `umiak ssh` hint.
 - **Env**: env with values, secret names with `•••` (values are never
   fetched), secret files; every change is one key through `PATCH /env`
   (merge); `delivered: false` → "applies at the next start".
@@ -154,12 +154,12 @@ server actions. Teams are `team_…`, users `usr_…`, notice keys `key_…`.
 - `src/proxy.ts` (Next 16 proxy, Node runtime) on every path but `/healthz`
   and Next's static files: no `X-Auth-Request-Email` → `401` HTML page; an
   unsafe method (anything but GET, HEAD, OPTIONS) whose `Origin` is not
-  exactly `SBX_APP_ORIGIN` (or missing) → `403`. It also sets the security
+  exactly `UMIAK_APP_ORIGIN` (or missing) → `403`. It also sets the security
   headers below on every answer. The checks live in `src/lib/guard.ts`.
-- The identity is resolved by `authenticateRequest` of `@sbx/payload`: the
+- The identity is resolved by `authenticateRequest` of `@umiak/payload`: the
   same function the Payload strategy calls, through one per-process session
   cache (30 s, keyed by sha256 of email, sub, groups and names; flushed by
-  `LISTEN sbx_identity` on its own connection, `sandboxes:`, `api-keys:`
+  `LISTEN umiak_identity` on its own connection, `sandboxes:`, `api-keys:`
   and `ssh-keys:` payloads ignored; plan decision 8). `/admin` and `/app`
   therefore always agree on who is logged in.
 - `/app` layouts call `getAppSession()` (`src/lib/session.ts`): anonymous or
@@ -167,13 +167,13 @@ server actions. Teams are `team_…`, users `usr_…`, notice keys `key_…`.
   `identity_conflict` → `forbidden()` (403 page with the reason). This uses
   Next's `authInterrupts` (experimental flag in `next.config.ts`).
 - The browser gets `AppSession` with public ids only (`usr_…`, `team_…`).
-- Sign-out: `/oauth2/sign_out?rd=<SBX_LOGOUT_URL>` (or without `rd`).
+- Sign-out: `/oauth2/sign_out?rd=<UMIAK_LOGOUT_URL>` (or without `rd`).
 
 ## Browser data access
 
-`src/lib/api.ts`: `SbxProvider` (TanStack Query client + per-team SDK
-clients) and `useSbx(teamId)`. The SDK runs in session mode
-(`new Sbx({baseUrl: "/api", session: true, team})`): no Authorization
+`src/lib/api.ts`: `UmiakProvider` (TanStack Query client + per-team SDK
+clients) and `useUmiak(teamId)`. The SDK runs in session mode
+(`new Umiak({baseUrl: "/api", session: true, team})`): no Authorization
 header (the proxied listener refuses one), the oauth2-proxy cookie of the
 same origin is the credential; PTY WebSockets get the team as `?team=`.
 The dashboard's SDK clients retry for at most 5 s (`DASHBOARD_RETRY_BUDGET_MS`;
@@ -208,11 +208,11 @@ every problem listed at once, the process exits on error.
 |---|---|
 | `DATABASE_URL` | Postgres (schema `payload`) |
 | `PAYLOAD_SECRET` | ≥ 16 characters (Payload requires it; no JWT is issued) |
-| `SBX_APP_ORIGIN` | e.g. `https://app.example.com` (no path, no trailing slash) |
-| `SBX_OPERATOR_GROUPS` | comma-separated IdP groups |
-| `SBX_SBX_DOMAIN` | sandbox host domain, for CSP `frame-src https://*.<domain>` |
-| `SBX_API_PUBLIC_URL` | public API URL shown in the UI |
-| `SBX_LOGOUT_URL` | optional: Keycloak logout page after oauth2-proxy sign-out |
+| `UMIAK_APP_ORIGIN` | e.g. `https://app.example.com` (no path, no trailing slash) |
+| `UMIAK_OPERATOR_GROUPS` | comma-separated IdP groups |
+| `UMIAK_PREVIEW_DOMAIN` | sandbox host domain, for CSP `frame-src https://*.<domain>` |
+| `UMIAK_API_PUBLIC_URL` | public API URL shown in the UI |
+| `UMIAK_LOGOUT_URL` | optional: Keycloak logout page after oauth2-proxy sign-out |
 
 ## Security headers and CSP
 
@@ -221,7 +221,7 @@ Every answer that passes through `proxy.ts`:
 ```
 Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none';
   form-action 'self'; frame-ancestors 'self'; connect-src 'self';
-  frame-src https://*.<SBX_SBX_DOMAIN>; img-src 'self' data: blob:;
+  frame-src https://*.<UMIAK_PREVIEW_DOMAIN>; img-src 'self' data: blob:;
   font-src 'self' data:; style-src 'self' 'unsafe-inline';
   script-src 'self' 'unsafe-inline'; worker-src 'self' blob:
 X-Content-Type-Options: nosniff
@@ -236,7 +236,7 @@ X-Frame-Options: SAMEORIGIN
 - `next dev` adds `'unsafe-eval'` to `script-src` (React dev tooling).
 - `connect-src 'self'` also covers `wss://` of the own host (PTY, HMR).
 - Nothing loads from another origin. Two admin defaults that did are
-  changed in `@sbx/payload`: `admin.avatar: "default"` (no Gravatar) and
+  changed in `@umiak/payload`: `admin.avatar: "default"` (no Gravatar) and
   JSON fields render as a textarea (`src/components/admin/json-field.tsx`)
   instead of Monaco, which Payload loads from cdn.jsdelivr.net.
 
@@ -255,33 +255,33 @@ between visits. These cookies grant nothing; no change made.
 
 `src/app/(payload)/admin/importMap.js` is generated (`pnpm generate:importmap`,
 needs no database) and committed; `next dev` also rewrites it when the
-config gains components. Component paths in `@sbx/payload` are relative to
+config gains components. Component paths in `@umiak/payload` are relative to
 this directory (`/src/components/...`).
 
 ## Development (S8 §13)
 
 ```
-pnpm --filter @sbx/payload migrate      # DATABASE_URL, PAYLOAD_SECRET
-DATABASE_URL=postgres://… pnpm --filter @sbx/web dev
+pnpm --filter @umiak/payload migrate      # DATABASE_URL, PAYLOAD_SECRET
+DATABASE_URL=postgres://… pnpm --filter @umiak/web dev
 open http://127.0.0.1:3000/__dev/login
 ```
 
 `dev/dev.ts` runs `next dev` on 127.0.0.1:3001 and `dev/auth-proxy.ts` on
-127.0.0.1:3000 (ports: `SBX_DEV_PORT`, `SBX_DEV_NEXT_PORT`,
-`SBX_DEV_API_PORT`). The proxy plays ingress + oauth2-proxy: it listens on
+127.0.0.1:3000 (ports: `UMIAK_DEV_PORT`, `UMIAK_DEV_NEXT_PORT`,
+`UMIAK_DEV_API_PORT`). The proxy plays ingress + oauth2-proxy: it listens on
 127.0.0.1 only, drops client `X-Auth-Request-*` headers and sets them from
-the `sbx_dev_identity` cookie chosen at `/__dev/login` (user, second user,
-operator in `sbx-operators`, or custom; the form's POST needs `Origin` =
-`SBX_APP_ORIGIN`, and an identity with control characters or a comma in the
+the `umiak_dev_identity` cookie chosen at `/__dev/login` (user, second user,
+operator in `umiak-operators`, or custom; the form's POST needs `Origin` =
+`UMIAK_APP_ORIGIN`, and an identity with control characters or a comma in the
 email or sub is refused, also from a hand-made cookie); `/__dev/logout` and
 `/oauth2/sign_out` clear it. Routes as in `deploy/compose/oauth2-proxy`:
-`/api/*` → 127.0.0.1:8081 without `/api`, `/sbx-auth/*` → 127.0.0.1:8081,
+`/api/*` → 127.0.0.1:8081 without `/api`, `/umiak-auth/*` → 127.0.0.1:8081,
 the rest → `next dev`; WebSocket upgrades too. Without the api, `/admin` and
 the team frame still work.
 
-Dev defaults (only in `dev/dev.ts`): `SBX_APP_ORIGIN=http://127.0.0.1:3000`,
-`SBX_OPERATOR_GROUPS=sbx-operators`, `SBX_SBX_DOMAIN=sbx.localhost`,
-`SBX_API_PUBLIC_URL=http://127.0.0.1:8080`, a dev `PAYLOAD_SECRET`.
+Dev defaults (only in `dev/dev.ts`): `UMIAK_APP_ORIGIN=http://127.0.0.1:3000`,
+`UMIAK_OPERATOR_GROUPS=umiak-operators`, `UMIAK_PREVIEW_DOMAIN=umiak.localhost`,
+`UMIAK_API_PUBLIC_URL=http://127.0.0.1:8080`, a dev `PAYLOAD_SECRET`.
 
 `web` itself has no dev-auth code path: `dev/` is outside `src`, excluded
 from the image (`.dockerignore`) and `pnpm check:image` fails if any file of
@@ -289,8 +289,8 @@ from the image (`.dockerignore`) and `pnpm check:image` fails if any file of
 
 ## Build and image (S8 §14.1)
 
-- `pnpm --filter @sbx/web build`: `next build` (Turbopack), `output:
-  "standalone"`, `transpilePackages` for `@sbx/*` (TypeScript sources with
+- `pnpm --filter @umiak/web build`: `next build` (Turbopack), `output:
+  "standalone"`, `transpilePackages` for `@umiak/*` (TypeScript sources with
   `.ts` import extensions). Types are checked by `pnpm typecheck`, not by
   `next build` (TypeScript 7 has no JS API).
 - `docker build -f apps/web/Dockerfile .` (repo root context). Default
@@ -300,7 +300,7 @@ from the image (`.dockerignore`) and `pnpm check:image` fails if any file of
 
 ## Tests
 
-`pnpm --filter @sbx/web test`: the role table (`permissions.test.ts`), the
+`pnpm --filter @umiak/web test`: the role table (`permissions.test.ts`), the
 dashboard logic without a DOM (`errors.test.ts`: a text per create error,
 retry for `out_of_capacity`, "API unavailable"; `create-form.test.ts`: the
 create body, blank rows dropped, `environment: null` for none, secrets never
@@ -313,19 +313,19 @@ env parsing, team paths, the operator guard and list query
 (`operator-page.test.ts`), the environment form and its merge patch
 (`environment-form.test.ts`), the team-delete checks (`team-delete.test.ts`), the dev proxy over real sockets (header stripping,
 routing, WebSocket upgrade, 127.0.0.1 only), and the web Payload config
-against Postgres (`@sbx/db/testing/global-setup`): strategy, shared session
+against Postgres (`@umiak/db/testing/global-setup`): strategy, shared session
 cache, public-id session.
 
 ## E2E (Playwright, S8 §15)
 
-`pnpm --filter @sbx/web test:e2e` (`e2e/run.ts`) brings up the compose E2E
-stack (`deploy/compose/e2e.yaml`, project `sbx-e2e`: real Keycloak,
+`pnpm --filter @umiak/web test:e2e` (`e2e/run.ts`) brings up the compose E2E
+stack (`deploy/compose/e2e.yaml`, project `umiak-e2e`: real Keycloak,
 oauth2-proxy, Postgres and this image; `api` + `worker` replaced by
 `e2e/backend`, the real api and worker code in one process with the fake
 agent and the fake PVE world), runs `e2e/playwright.config.ts` (Chromium,
 one worker, files in order) and tears the stack down with its volumes.
-`SBX_E2E_KEEP=1` keeps it; then `pnpm exec playwright test -c e2e` runs
-against it. `SBX_E2E_LARGE=1` uploads 100 MiB instead of 70 MiB. `pnpm test`
+`UMIAK_E2E_KEEP=1` keeps it; then `pnpm exec playwright test -c e2e` runs
+against it. `UMIAK_E2E_LARGE=1` uploads 100 MiB instead of 70 MiB. `pnpm test`
 (vitest) never runs these. `pnpm typecheck:e2e` checks `e2e/`.
 
 - `global-setup.ts` creates this run's Keycloak users (Admin API) and the
@@ -344,7 +344,7 @@ against it. `SBX_E2E_LARGE=1` uploads 100 MiB instead of 70 MiB. `pnpm test`
   cross-team, CSRF), `05-operator` (403s, block), `06-idp-sync`
   (Keycloak offboarding, empty answer), `07-security` (forged headers,
   `/cms-api` CSRF, web network, image content, secrets), `08-identity`
-  (IdP email change, deletion, reused email, sso epoch, `sbx login` device
+  (IdP email change, deletion, reused email, sso epoch, `umiak login` device
   grant: same user as the browser, an operator's JWT has no operator
   rights).
 - `e2e/backend` is test-only: its own image

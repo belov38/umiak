@@ -6,7 +6,7 @@
 //   r.json   // the JSON header of the first text block
 //   r.lines  // the text blocks after the header
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { expect } from "vitest";
 import { createLogger } from "../../src/log.ts";
 import { createServer, type ServerOptions } from "../../src/server.ts";
@@ -43,7 +43,7 @@ export interface Answer {
 export interface Harness {
 	api: FakeApi;
 	conn: InMemoryConnection;
-	sbx: Sbx;
+	umiak: Umiak;
 	requests: RecordedRequest[];
 	logs: Record<string, unknown>[];
 	call(
@@ -106,7 +106,7 @@ export async function startHarness(o: HarnessOptions = {}): Promise<Harness> {
 		});
 		return fetch(req);
 	};
-	const sbx = new Sbx({
+	const umiak = new Umiak({
 		baseUrl: api.url,
 		apiKey: o.token ?? FAKE_TOKENS.full,
 		env: {},
@@ -120,7 +120,7 @@ export async function startHarness(o: HarnessOptions = {}): Promise<Harness> {
 	const conn = await connectInMemory(
 		createServer({
 			tools: ALL_TOOLS,
-			sbx: () => sbx,
+			umiak: () => umiak,
 			transport: "stdio",
 			log,
 			...o.server,
@@ -129,7 +129,7 @@ export async function startHarness(o: HarnessOptions = {}): Promise<Harness> {
 	return {
 		api,
 		conn,
-		sbx,
+		umiak,
 		requests,
 		logs,
 		async call(name, args = {}, opts = {}) {

@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
  * A fixed random UUID chosen once for this project; never change it, or retried
  * steps would send the agent a different request id.
  */
-export const SBX_NAMESPACE = "8936fdf5-56ac-44bd-8e77-4e050ecf5b5c";
+export const UMIAK_NAMESPACE = "8936fdf5-56ac-44bd-8e77-4e050ecf5b5c";
 
 const UUID_RE =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,7 +38,7 @@ export function uuidv7(nowMs: number = Date.now()): string {
 /** UUIDv5 (RFC 9562 §5.5): SHA-1 of namespace bytes and the UTF-8 name. */
 export function uuidv5(
 	name: string,
-	namespace: string = SBX_NAMESPACE,
+	namespace: string = UMIAK_NAMESPACE,
 ): string {
 	if (!UUID_RE.test(namespace)) {
 		throw new TypeError(`uuidv5: invalid namespace UUID: ${namespace}`);

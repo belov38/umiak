@@ -1,5 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ErrorDetailSchema } from "@sbx/proto";
+import { ErrorDetailSchema } from "@umiak/proto";
 import {
 	CODE_AGENT_OUTDATED,
 	CODE_AGENT_UNAVAILABLE,
@@ -107,7 +107,7 @@ export type Classification = "moved" | "unavailable" | "retry" | "fatal";
 
 /**
  * Classifies an error from a call through the gateway. The gateway's
- * Sbx-Error-Code header (error metadata) wins, then the ErrorDetail, then the
+ * Umiak-Error-Code header (error metadata) wins, then the ErrorDetail, then the
  * Connect code. Pass the caller's signal: Canceled is a connection error
  * (a listener reset) unless that signal is aborted.
  */
@@ -140,7 +140,7 @@ export function classify(err: unknown, signal?: AbortSignal): Classification {
 
 /**
  * Classifies an error by its Connect code and connection state only,
- * ignoring Sbx-Error-Code and the ErrorDetail: for a 421 whose hint the
+ * ignoring Umiak-Error-Code and the ErrorDetail: for a 421 whose hint the
  * registry did not confirm, which is then not a gateway's answer, and for
  * errors of a started stream (the route watch, resumableAttach), whose
  * metadata and details come from the agent's end-stream message.
@@ -168,7 +168,7 @@ export function classifyByCode(
 	}
 }
 
-/** The gateway error code from Sbx-Error-Code metadata or the ErrorDetail. */
+/** The gateway error code from Umiak-Error-Code metadata or the ErrorDetail. */
 function gatewayCode(err: ConnectError): string | undefined {
 	const header = err.metadata.get(HEADER_ERROR_CODE);
 	if (header !== null && header !== "") {

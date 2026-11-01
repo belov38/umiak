@@ -3,17 +3,17 @@ package paths
 import "path/filepath"
 
 // build maps the Windows production paths (S9 spec section 12.1) through f.
-// Linux-only fields (BinLink, CmdSpecDir, SbxEnvFile, MachineIDFile,
+// Linux-only fields (BinLink, CmdSpecDir, UmiakEnvFile, MachineIDFile,
 // DbusMachineID, HostnameFile, HostsFile, SystemdUnitDir) stay empty: the
 // code that uses them does not run on Windows.
 func build(f func(string) string, root string) Layout {
 	const (
-		lib   = `C:\Program Files\sbx-agent`
-		etc   = `C:\ProgramData\sbx-agent`
-		state = `C:\ProgramData\sbx-agent\state`
-		run   = `C:\ProgramData\sbx-agent\run`
-		logs  = `C:\ProgramData\sbx-agent\logs`
-		sbx   = `C:\ProgramData\sbx`
+		lib   = `C:\Program Files\umiak-agent`
+		etc   = `C:\ProgramData\umiak-agent`
+		state = `C:\ProgramData\umiak-agent\state`
+		run   = `C:\ProgramData\umiak-agent\run`
+		logs  = `C:\ProgramData\umiak-agent\logs`
+		umiak   = `C:\ProgramData\umiak`
 		ssh   = `C:\ProgramData\ssh`
 	)
 	j := filepath.Join
@@ -42,22 +42,22 @@ func build(f func(string) string, root string) Layout {
 		EnvSocket:        f(j(run, "env.sock")),
 		LogDir:           f(logs),
 
-		SecretsMount:     f(sbx),
-		SecretsDir:       f(j(sbx, "secrets")),
-		SecretsEnvFile:   f(j(sbx, "secrets", "env")),
-		SecretFilesDir:   f(j(sbx, "secrets", "files")),
-		SecretsStateFile: f(j(sbx, "secrets.json")),
+		SecretsMount:     f(umiak),
+		SecretsDir:       f(j(umiak, "secrets")),
+		SecretsEnvFile:   f(j(umiak, "secrets", "env")),
+		SecretFilesDir:   f(j(umiak, "secrets", "files")),
+		SecretsStateFile: f(j(umiak, "secrets.json")),
 
 		EtcDir:          f(etc),
 		ConfigFile:      f(j(etc, "agent.toml")),
 		TemplateSSHCA:   f(j(etc, "ssh-user-ca.pub")),
 		QuiesceHooksDir: f(j(etc, "quiesce.d")),
-		SSHUserCA:       f(j(ssh, "sbx_user_ca.pub")),
+		SSHUserCA:       f(j(ssh, "umiak_user_ca.pub")),
 		SSHDir:          f(ssh),
-		SysprepUnattend: f(`C:\Windows\System32\Sysprep\sbx-unattend.xml`),
+		SysprepUnattend: f(`C:\Windows\System32\Sysprep\umiak-unattend.xml`),
 
 		SetupCompleteScript: f(`C:\Windows\Setup\Scripts\SetupComplete.cmd`),
-		FirstBootDone:       f(`C:\ProgramData\sbx-template\firstboot.done`),
+		FirstBootDone:       f(`C:\ProgramData\umiak-template\firstboot.done`),
 
 		root: root,
 	}

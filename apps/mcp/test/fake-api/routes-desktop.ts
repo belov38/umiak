@@ -94,7 +94,7 @@ export function registerDesktopRoutes(app: FakeApp, fake: Fake): void {
 			screen,
 			cursor: cursorOf(sb, screen),
 			access: "token",
-			url: `https://${sb.slug}-desktop.sbx.example.com/`,
+			url: `https://${sb.slug}-desktop.umiak.example.com/`,
 			streamer: { running: true, streaming: false },
 		});
 	});
@@ -103,7 +103,7 @@ export function registerDesktopRoutes(app: FakeApp, fake: Fake): void {
 		const { sb } = await target(c);
 		const b = (c.get("json") ?? {}) as Json;
 		const ticket = fake.newId("ticket");
-		const url = `https://${sb.slug}-desktop.sbx.example.com/?_ticket=${ticket}&fps=${String(b.fps ?? 30)}`;
+		const url = `https://${sb.slug}-desktop.umiak.example.com/?_ticket=${ticket}&fps=${String(b.fps ?? 30)}`;
 		desktop.links.push({ sandboxId: sb.id, url });
 		return c.json(
 			{ url, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() },
@@ -162,12 +162,12 @@ export function registerDesktopRoutes(app: FakeApp, fake: Fake): void {
 			headers: {
 				"Content-Type": format === "jpeg" ? "image/jpeg" : "image/png",
 				"Cache-Control": "no-store",
-				"Sbx-Screen-Width": String(screen.width),
-				"Sbx-Screen-Height": String(screen.height),
-				"Sbx-Image-Width": String(image.width),
-				"Sbx-Image-Height": String(image.height),
-				"Sbx-Cursor-X": String(cursor.x),
-				"Sbx-Cursor-Y": String(cursor.y),
+				"Umiak-Screen-Width": String(screen.width),
+				"Umiak-Screen-Height": String(screen.height),
+				"Umiak-Image-Width": String(image.width),
+				"Umiak-Image-Height": String(image.height),
+				"Umiak-Cursor-X": String(cursor.x),
+				"Umiak-Cursor-Y": String(cursor.y),
 			},
 		});
 	});

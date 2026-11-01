@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // notifyWindow is the longest a NOTIFY may take to change answers (spec
@@ -42,7 +42,7 @@ func TestRenameWithin1s(t *testing.T) {
 	for i, f := range fronts {
 		took := within(t, notifyWindow, "old label 404 on front "+strconv.Itoa(i), func() bool {
 			r := get(t, f, oldHost, "/")
-			return r.status == http.StatusNotFound && r.sbxError == "route_not_found"
+			return r.status == http.StatusNotFound && r.umiakError == "route_not_found"
 		})
 		t.Logf("front %d: old label 404 after %s", i, took)
 		mustGet(t, f, testenv.Host(renamed.Label), "/")
@@ -68,7 +68,7 @@ func TestBlockWithin1s(t *testing.T) {
 	for i, f := range fronts {
 		took := within(t, notifyWindow, "403 route_blocked on front "+strconv.Itoa(i), func() bool {
 			r := get(t, f, host, "/")
-			return r.status == http.StatusForbidden && r.sbxError == "route_blocked"
+			return r.status == http.StatusForbidden && r.umiakError == "route_blocked"
 		})
 		t.Logf("front %d: blocked after %s", i, took)
 	}
@@ -97,7 +97,7 @@ func TestAPIDownStale(t *testing.T) {
 		if r.took > 3*time.Second {
 			t.Errorf("%s took %s, want <= 3 s", what, r.took)
 		}
-		if r.err != nil || r.status != status || r.sbxError != code {
+		if r.err != nil || r.status != status || r.umiakError != code {
 			t.Errorf("%s = %v, want %d %s", what, r, status, code)
 		}
 	}
@@ -188,7 +188,7 @@ func TestMachineMoveMidTraffic(t *testing.T) {
 
 	var first, last time.Time
 	for _, r := range results {
-		if r.err != nil || r.status != http.StatusServiceUnavailable || r.sbxError != "agent_unavailable" || r.retry == "" {
+		if r.err != nil || r.status != http.StatusServiceUnavailable || r.umiakError != "agent_unavailable" || r.retry == "" {
 			t.Errorf("answer during the move: %v (Retry-After %q) after %s", r, r.retry, r.took)
 			continue
 		}
@@ -206,7 +206,7 @@ func TestMachineMoveMidTraffic(t *testing.T) {
 		t.Errorf("503s lasted %s, want <= AgentWait %s", last.Sub(first), agentWait)
 	}
 	for _, r := range results {
-		t.Logf("non-200 at cut%+v took %s: %d %s", r.start.Sub(cutAt), r.took, r.status, r.sbxError)
+		t.Logf("non-200 at cut%+v took %s: %d %s", r.start.Sub(cutAt), r.took, r.status, r.umiakError)
 	}
 	t.Logf("%d requests, %d non-200 during the move", requests.Load(), len(results))
 }

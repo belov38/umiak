@@ -1,5 +1,5 @@
-// `sbx ssh-cert [<sb>] [--ensure]` (S7 §11.3, §14.2): the key and
-// certificate that `sbx ssh-config` points ssh at, in
+// `umiak ssh-cert [<sb>] [--ensure]` (S7 §11.3, §14.2): the key and
+// certificate that `umiak ssh-config` points ssh at, in
 // `<config dir>/ssh/<sb_id>/`: `id_ed25519` (made once with ssh-keygen under
 // a temporary name and linked into place, so concurrent first runs agree),
 // `id_ed25519-cert.pub` and `cert.json` (its validity, so --ensure needs no
@@ -50,7 +50,7 @@ async function ensureCert(
 	// An id needs no lookup (ssh-config writes ids); a slug is read once.
 	const id = ref.ref.startsWith("sb_")
 		? ref.ref
-		: (await ctx.sbx().sandboxes.get(ref.ref)).id;
+		: (await ctx.umiak().sandboxes.get(ref.ref)).id;
 	if (ref.explicit && !ensure) writeCurrent(ctx, id);
 	const dir = certDir(ctx, id);
 	const key = join(dir, "id_ed25519");
@@ -69,7 +69,7 @@ async function ensureCert(
 		}
 	}
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
-	ensureKey(key, `sbx-${id}`);
+	ensureKey(key, `umiak-${id}`);
 	const cert = await certify(ctx, id, publicKeyOf(key), key);
 	const meta: CertMeta = {
 		sandboxId: id,
@@ -90,7 +90,7 @@ export function register(program: Command, run: Runner): void {
 	program
 		.command("ssh-cert")
 		.description(
-			"get the SSH certificate used by sbx ssh-config (new, or with --ensure only when due)",
+			"get the SSH certificate used by umiak ssh-config (new, or with --ensure only when due)",
 		)
 		.argument("[sb]", "sandbox ID or slug (default: the current one)")
 		.option(

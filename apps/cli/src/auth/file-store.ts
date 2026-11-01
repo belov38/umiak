@@ -1,5 +1,5 @@
 // The file credential store: credentials.json in the config dir, mode 0600,
-// `{"<profile>@<issuer|apiUrl>": "<value>"}`. `sbx login` warns on stderr
+// `{"<profile>@<issuer|apiUrl>": "<value>"}`. `umiak login` warns on stderr
 // when it stores secrets here. Writes happen under the config lock
 // (lock.ts), so read-modify-write needs no lock of its own.
 

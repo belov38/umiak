@@ -3,7 +3,7 @@
 // public ids (Crockford base32 over the 128-bit Payload UUID), so the
 // browser never sees a raw UUID. They are not accepted anywhere but the
 // server actions of web.
-import { decodeUuid, encodeUuid } from "@sbx/auth";
+import { decodeUuid, encodeUuid } from "@umiak/auth";
 
 export type DashboardIdKind = "membership" | "teamNotice";
 

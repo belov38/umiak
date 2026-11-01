@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 	stoppedExitStatus = 255
 )
 
-// Results of sbx_gateway_ssh_sessions_total, counted per session channel:
+// Results of umiak_gateway_ssh_sessions_total, counted per session channel:
 // ok (opened on the VM), limited (over the per-user limit), rejected
 // (refused by the VM, or answered with the stopped message).
 const (

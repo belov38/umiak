@@ -9,7 +9,7 @@
 // wait_agent/finish, delete retire/ports/secrets/finish, the fork hand-off,
 // the save's name move) are repeated by the same redelivery: the crash of the
 // previous step leaves them unrecorded too.
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
 import { crashAfter, SimulatedCrash } from "./fakes/crash.ts";

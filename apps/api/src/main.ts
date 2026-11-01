@@ -2,7 +2,7 @@
 // the api itself). Reads the environment (src/settings.ts), starts the four
 // listeners (src/server.ts) and stops gracefully on SIGTERM/SIGINT
 // (src/shutdown.ts): at most 10 s, then exit 0.
-// `@sbx/agent-client` and `@sbx/proto` are loaded from their `dist`: run
+// `@umiak/agent-client` and `@umiak/proto` are loaded from their `dist`: run
 // `pnpm build` once before `node src/main.ts` (the image does it).
 import { createApiLogger } from "./http/logger.ts";
 import { startApi } from "./server.ts";
@@ -15,7 +15,7 @@ async function main(): Promise<void> {
 		settings = loadSettings(process.env);
 	} catch (err) {
 		process.stderr.write(
-			`sbx-api: ${err instanceof Error ? err.message : String(err)}\n`,
+			`umiak-api: ${err instanceof Error ? err.message : String(err)}\n`,
 		);
 		process.exit(1);
 	}

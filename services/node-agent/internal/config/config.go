@@ -1,4 +1,4 @@
-// Package config loads /etc/sbx-node.toml.
+// Package config loads /etc/umiak-node.toml.
 package config
 
 import (
@@ -11,9 +11,9 @@ import (
 )
 
 // DefaultPath is where the runbook installs the config.
-const DefaultPath = "/etc/sbx-node.toml"
+const DefaultPath = "/etc/umiak-node.toml"
 
-// Config describes the node resources sbx-node may touch.
+// Config describes the node resources umiak-node may touch.
 type Config struct {
 	Node     string `toml:"node" json:"node"`
 	VG       string `toml:"vg" json:"vg"`
@@ -23,7 +23,7 @@ type Config struct {
 	VMIDMin int `toml:"vmidMin" json:"vmidMin"`
 	VMIDMax int `toml:"vmidMax" json:"vmidMax"`
 	// TemplateMin..TemplateMax: template slots (pve: 597-599). Their base-<id>-* disks, tagged
-	// sbx-tpl, are clone origins. 590-596 (dev infrastructure) is in neither range.
+	// umiak-tpl, are clone origins. 590-596 (dev infrastructure) is in neither range.
 	TemplateMin  int    `toml:"templateVmidMin" json:"templateVmidMin"`
 	TemplateMax  int    `toml:"templateVmidMax" json:"templateVmidMax"`
 	TemplateVMID int    `toml:"templateVmid" json:"templateVmid"` // legacy template, 0 = none
@@ -35,7 +35,7 @@ type Config struct {
 	MacCacheFile string `toml:"macCacheFile" json:"macCacheFile"`
 	IsoDir       string `toml:"isoDir" json:"isoDir"`
 	ImportDir    string `toml:"importDir" json:"importDir"`
-	StateDir     string `toml:"stateDir" json:"stateDir"` // sbx-node's own cache files (media.sha256)
+	StateDir     string `toml:"stateDir" json:"stateDir"` // umiak-node's own cache files (media.sha256)
 }
 
 // Default returns the PoC values from the S1 spec.
@@ -49,15 +49,15 @@ func Default() Config {
 		VMIDMax:      589,
 		TemplateMin:  597,
 		TemplateMax:  599,
-		SDNZone:      "sbx",
-		VNet:         "sbx0",
+		SDNZone:      "umiak",
+		VNet:         "umiak0",
 		ClusterID:    1,
-		LeaseFile:    "/var/lib/misc/dnsmasq.sbx.leases",
-		EthersFile:   "/etc/dnsmasq.d/sbx/ethers",
+		LeaseFile:    "/var/lib/misc/dnsmasq.umiak.leases",
+		EthersFile:   "/etc/dnsmasq.d/umiak/ethers",
 		MacCacheFile: "/etc/pve/sdn/mac-cache.json",
 		IsoDir:       "/var/lib/vz/template/iso",
 		ImportDir:    "/var/lib/vz/import",
-		StateDir:     "/var/lib/sbx-node",
+		StateDir:     "/var/lib/umiak-node",
 	}
 }
 

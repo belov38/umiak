@@ -22,8 +22,8 @@ import { formatVersionsToml } from "./versions-update.ts";
 
 // Seed ISO for the build VM (spec S5 sections 6.2, 7.2 step 3, 14)
 
-/** Seed path of the agent package (step 50-sbx-agent reads it). */
-export const SEED_AGENT_PACKAGE = "build/sbx-agent.tar";
+/** Seed path of the agent package (step 50-umiak-agent reads it). */
+export const SEED_AGENT_PACKAGE = "build/umiak-agent.tar";
 export interface SeedInput {
 	recipe: Recipe;
 	versions: Versions;
@@ -33,8 +33,8 @@ export interface SeedInput {
 	/** Path of the signed agent package (.tar), already verified. */
 	agentPackage: string;
 	agentVersion: string;
-	/** Path of the `sbx` CLI binary. */
-	sbxCli?: string;
+	/** Path of the `umiak` CLI binary. */
+	umiakCli?: string;
 	apiUrl?: string;
 	tunnelUrl?: string;
 	/** Path of the template SSH user CA public key. */
@@ -177,10 +177,10 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 		"build/env",
 		(
 			[
-				["SBX_BUILD_ID", i.buildId],
-				["SBX_BUILD_VERSION", i.version],
-				["SBX_AGENT_VERSION", i.agentVersion],
-				["SBX_APT_SNAPSHOT", snapshot],
+				["UMIAK_BUILD_ID", i.buildId],
+				["UMIAK_BUILD_VERSION", i.version],
+				["UMIAK_AGENT_VERSION", i.agentVersion],
+				["UMIAK_APT_SNAPSHOT", snapshot],
 			] satisfies [string, string][]
 		)
 			.map(([k, v]) => `${k}=${shellQuote(v)}\n`)
@@ -196,10 +196,11 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 		"build/ssh-user-ca.pub",
 		i.sshUserCa === undefined ? "" : readFileSync(i.sshUserCa),
 	);
-	if (i.sbxCli !== undefined) out.set("build/sbx", readFileSync(i.sbxCli));
+	if (i.umiakCli !== undefined)
+		out.set("build/umiak", readFileSync(i.umiakCli));
 	if (i.apiUrl !== undefined)
 		out.set(
-			"build/sbx-config.json",
+			"build/umiak-config.json",
 			`${JSON.stringify({ apiUrl: i.apiUrl })}\n`,
 		);
 	out.set("build/build.json", `${JSON.stringify(i.manifestBase, null, 2)}\n`);
@@ -227,7 +228,7 @@ export function makeIso(
 ): void {
 	if (!VOLUME_LABEL_RE.test(label))
 		throw new Error(`invalid ISO volume label "${label}"`);
-	const root = mkdtempSync(join(tmpdir(), "sbx-seed-"));
+	const root = mkdtempSync(join(tmpdir(), "umiak-seed-"));
 	try {
 		for (const [rel, data] of files) {
 			const p = join(root, rel);

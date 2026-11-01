@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // Linux signal numbers the fake shim interprets. The fake emulates a Linux
@@ -357,7 +357,7 @@ func (r *FakeRun) start(setup func(*FakeRun), raw []byte) error {
 	r.mu.Unlock()
 	if failMsg != "" {
 		streams := r.streams()
-		if err := r.Write(streams[len(streams)-1], []byte("sbx-agent: cannot start command: "+failMsg+"\n")); err != nil {
+		if err := r.Write(streams[len(streams)-1], []byte("umiak-agent: cannot start command: "+failMsg+"\n")); err != nil {
 			return err
 		}
 		// READY=1 follows exit.json; the shim then ends.

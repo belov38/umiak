@@ -3,9 +3,13 @@
 // ended, attaches to the same command; the agent runs it once. A Start
 // whose outcome is unknown is 503 agent_unavailable, retryable only with a
 // key.
-import { AgentUnavailableError } from "@sbx/agent-client";
-import { uuidv5 } from "@sbx/core";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { AgentUnavailableError } from "@umiak/agent-client";
+import { uuidv5 } from "@umiak/core";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type AgentApi, AgentCallError } from "../src/index.ts";
 import {

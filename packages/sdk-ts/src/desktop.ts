@@ -72,14 +72,14 @@ export class Desktop {
 			bytes: new Uint8Array(data),
 			contentType: response.headers.get("content-type") ?? "image/png",
 			screen: {
-				width: number("Sbx-Screen-Width"),
-				height: number("Sbx-Screen-Height"),
+				width: number("Umiak-Screen-Width"),
+				height: number("Umiak-Screen-Height"),
 			},
 			image: {
-				width: number("Sbx-Image-Width"),
-				height: number("Sbx-Image-Height"),
+				width: number("Umiak-Image-Width"),
+				height: number("Umiak-Image-Height"),
 			},
-			cursor: { x: number("Sbx-Cursor-X"), y: number("Sbx-Cursor-Y") },
+			cursor: { x: number("Umiak-Cursor-X"), y: number("Umiak-Cursor-Y") },
 		};
 	}
 	async act(body: DesktopActions, options: CallOptions = {}) {

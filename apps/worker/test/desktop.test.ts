@@ -1,4 +1,4 @@
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import {
 	configureDesktop,

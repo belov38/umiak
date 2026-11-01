@@ -1,5 +1,5 @@
 // Idempotency-Key policy of create and fork retries in the dashboard.
-import { NETWORK_ERROR, SbxError, UNEXPECTED_RESPONSE } from "@sbx/sdk";
+import { NETWORK_ERROR, UmiakError, UNEXPECTED_RESPONSE } from "@umiak/sdk";
 import { describe, expect, it } from "vitest";
 import { describeError } from "../src/lib/errors.ts";
 import {
@@ -14,7 +14,7 @@ const err = (
 	status: number,
 	details: Record<string, unknown> = {},
 ) =>
-	new SbxError({
+	new UmiakError({
 		status,
 		code,
 		message: code,

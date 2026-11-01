@@ -1,6 +1,6 @@
-import type { ConfigReader } from "@sbx/config";
-import type { JobSender, KeyRing } from "@sbx/core";
-import type { Db } from "@sbx/db";
+import type { ConfigReader } from "@umiak/config";
+import type { JobSender, KeyRing } from "@umiak/core";
+import type { Db } from "@umiak/db";
 import type pg from "pg";
 import { type DestinationStream, type Logger, pino } from "pino";
 import type { IdpSync } from "./controllers/idp-sync.ts";
@@ -43,7 +43,7 @@ export const DEFAULT_TIMING: Timing = {
 	cloneSlotTimeoutMs: 300_000,
 };
 
-/** Metric sink. Task 13 backs it with prom-client; names follow S6 (`sbx_*`). */
+/** Metric sink. Task 13 backs it with prom-client; names follow S6 (`umiak_*`). */
 export interface Metrics {
 	inc(name: string, labels?: Record<string, string>, value?: number): void;
 	set(name: string, value: number, labels?: Record<string, string>): void;
@@ -103,7 +103,7 @@ export interface WorkerCtx {
 	/** S8 IdP sync; `ctl-idp-sync` is registered only when set (decision 15). */
 	idpSync?: IdpSync;
 	/**
-	 * `ctl-reconcile` only reports (S6 §11.2 `SBX_RECONCILE_DRY_RUN=1`).
+	 * `ctl-reconcile` only reports (S6 §11.2 `UMIAK_RECONCILE_DRY_RUN=1`).
 	 * Default true: the first runs of a PoC are dry (Task 13 reads the env).
 	 */
 	reconcileDryRun?: boolean;
@@ -141,7 +141,7 @@ export function createLogger(
 ): Logger {
 	const options = {
 		level: opts.level ?? "info",
-		name: opts.name ?? "sbx-worker",
+		name: opts.name ?? "umiak-worker",
 		redact: { paths: REDACT_PATHS, censor: "[redacted]" },
 	};
 	return destination ? pino(options, destination) : pino(options);

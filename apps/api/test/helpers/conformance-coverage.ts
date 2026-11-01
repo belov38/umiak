@@ -39,6 +39,6 @@ export interface CoverageRecord {
 declare module "vitest" {
 	export interface ProvidedContext {
 		/** Directory of the per-file coverage records; empty when off. */
-		sbxConformanceDir: string;
+		umiakConformanceDir: string;
 	}
 }

@@ -24,7 +24,7 @@ test("API key: works on the public API, revoke ends streams and PTYs, then 401",
 	await dialog.getByRole("button", { name: "Create key" }).click();
 	const shown = page.getByTestId("key-secret-dialog");
 	const secret = (await shown.getByTestId("key-secret").textContent())?.trim();
-	expect(secret).toMatch(/^sbx_/);
+	expect(secret).toMatch(/^umiak_/);
 	await shown.getByRole("button", { name: "I have copied it" }).click();
 	await expect(shown).toHaveCount(0);
 	// Positive control: the audit reads the bodies the dialog came from.

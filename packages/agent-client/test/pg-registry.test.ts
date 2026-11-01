@@ -257,7 +257,7 @@ describe.skipIf(skipPg())("PgRegistry", () => {
 		const wait = registry.waitForChange(other, 60_000);
 		const killed = await db.pool.query(
 			`SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-			 WHERE application_name = 'sbx-agent-client-listen' AND datname = current_database()`,
+			 WHERE application_name = 'umiak-agent-client-listen' AND datname = current_database()`,
 		);
 		expect(killed.rowCount).toBe(1);
 		await wait;

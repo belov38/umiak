@@ -1,5 +1,5 @@
-"""Helpers of the sbx-sdk tests: the control client of tests/api_server.ts
-and the facade under test (``Sbx``, or ``AsyncSbx`` through ``Blocking``,
+"""Helpers of the umiak-sdk tests: the control client of tests/api_server.ts
+and the facade under test (``Umiak``, or ``AsyncUmiak`` through ``Blocking``,
 which runs every coroutine and async iterator of the asyncio facade on one
 event loop, so one scenario checks both facades).
 """
@@ -122,7 +122,7 @@ def _blocking(v: Any, loop: asyncio.AbstractEventLoop) -> Any:
             return _blocking(v(*args, **kwargs), loop)
 
         return call
-    if type(v).__module__.startswith("sbx_sdk._async"):
+    if type(v).__module__.startswith("umiak_sdk._async"):
         return Blocking(v, loop)
     return v
 
@@ -156,19 +156,19 @@ class Client:
         self.api = api
         self._loop = asyncio.new_event_loop() if kind == "async" else None
         self._made: list[Any] = []
-        self.sbx = self.make()
+        self.umiak = self.make()
 
     def make(self, **opts: Any) -> Any:
         """A new facade of this kind against the test api (``opts`` override)."""
-        from sbx_sdk import AsyncSbx, Sbx
+        from umiak_sdk import AsyncUmiak, Umiak
 
         kw: dict[str, Any] = {"base_url": self.api.url, "api_key": self.api.secret, "env": {}}
         kw.update(opts)
         if self._loop is None:
-            made = Sbx(**kw)
+            made = Umiak(**kw)
             self._made.append(made)
             return made
-        made = AsyncSbx(**kw)
+        made = AsyncUmiak(**kw)
         self._made.append(made)
         return Blocking(made, self._loop)
 

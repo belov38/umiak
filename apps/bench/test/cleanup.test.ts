@@ -4,7 +4,7 @@ import {
 	Machines,
 	pveVcpuControl,
 	SqliteStateStore,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { describe, expect, it } from "vitest";
 import { FakeNode, FakePve } from "../../../packages/pve/test/fakes.ts";
 import { cleanup } from "../src/cleanup.ts";
@@ -23,8 +23,8 @@ function ctx(): {
 	const cfg = {
 		node: "pve",
 		storage: "local-lvm",
-		vnet: "sbx0",
-		pool: "sandbox",
+		vnet: "umiak0",
+		pool: "umiak",
 		templateVmid: 599,
 		clusterId: 1,
 		vmidRange: { min: 500, max: 598 },
@@ -94,11 +94,11 @@ describe("cleanup", () => {
 		expect(store.get(1, 598)).toBeDefined();
 	});
 
-	it("never deletes a template VM (tag sbx-tpl or template: 1)", async () => {
+	it("never deletes a template VM (tag umiak-tpl or template: 1)", async () => {
 		const { c, api } = ctx();
 		for (const [vmid, config] of [
-			[598, { name: "t1", tags: "sbx-tpl", template: "1" }],
-			[597, { name: "t2", tags: "sbx;sbx-tpl" }],
+			[598, { name: "t1", tags: "umiak-tpl", template: "1" }],
+			[597, { name: "t2", tags: "umiak;umiak-tpl" }],
 			[596, { name: "t3", template: "1" }],
 		] as const) {
 			api.vms.set(vmid, {
@@ -138,9 +138,9 @@ describe("cleanup", () => {
 		const { c, api, node } = ctx();
 		node.handlers["media.list"] = () => ({
 			iso: [
-				{ name: "sbx-build-agenttests-20261031050000.iso" },
-				{ name: "sbx-build-agenttests-20261031060000.iso" },
-				{ name: "sbx-build-seed-abc.iso" },
+				{ name: "umiak-build-agenttests-20261031050000.iso" },
+				{ name: "umiak-build-agenttests-20261031060000.iso" },
+				{ name: "umiak-build-seed-abc.iso" },
 				{ name: "Win11.iso" },
 			],
 			import: [],
@@ -149,7 +149,7 @@ describe("cleanup", () => {
 		api.vms.set(510, {
 			config: {
 				name: "x",
-				ide2: "local:iso/sbx-build-agenttests-20261031060000.iso,media=cdrom",
+				ide2: "local:iso/umiak-build-agenttests-20261031060000.iso,media=cdrom",
 			},
 			status: "stopped",
 			firewall: { rules: [], ipsets: {} },
@@ -163,10 +163,10 @@ describe("cleanup", () => {
 		const report = await cleanup(c, { allSandboxResources: true });
 		const removed = node.calls.filter((x) => x.op === "media.remove");
 		expect(removed.map((x) => x.args.names)).toEqual([
-			["sbx-build-agenttests-20261031050000.iso"],
+			["umiak-build-agenttests-20261031050000.iso"],
 		]);
 		expect(report.join("\n")).toMatch(
-			/removed ISOs sbx-build-agenttests-20261031050000/,
+			/removed ISOs umiak-build-agenttests-20261031050000/,
 		);
 	});
 });

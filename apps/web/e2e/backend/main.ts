@@ -9,7 +9,7 @@
 //     topology, FakeAgentWorld boots the "VM": tunnel session + agent
 //     `pool_ready`), a fake gateway, and the real ctl-idp-sync against
 //     Keycloak;
-//   - a control listener (SBX_E2E_CONTROL_PORT, default 9099; compose
+//   - a control listener (UMIAK_E2E_CONTROL_PORT, default 9099; compose
 //     publishes it on 127.0.0.1 only) for the Playwright run.
 // Test-only: lives under apps/web/e2e, never in a production image or code
 // path. Imports are relative (the image installs the api and worker
@@ -49,8 +49,8 @@ import {
 	TEST_TIMING,
 } from "../../../worker/test/fakes/world.ts";
 
-const CONTROL_PORT = Number(process.env.SBX_E2E_CONTROL_PORT ?? 9099);
-const WORKER_HTTP_PORT = Number(process.env.SBX_E2E_WORKER_HTTP_PORT ?? 9095);
+const CONTROL_PORT = Number(process.env.UMIAK_E2E_CONTROL_PORT ?? 9099);
+const WORKER_HTTP_PORT = Number(process.env.UMIAK_E2E_WORKER_HTTP_PORT ?? 9095);
 
 function required(name: string): string {
 	const v = process.env[name];
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
 		   FROM runtime.nodes n JOIN runtime.providers p ON p.id = n.provider_id`,
 	);
 	// Fake VMs cost nothing: room for every sandbox of repeated runs on a
-	// reused stack (the topology of config/sbx.yaml caps the node at 8 GB,
+	// reused stack (the topology of config/umiak.yaml caps the node at 8 GB,
 	// four 2 GB sandboxes).
 	await pool.query(
 		"UPDATE runtime.nodes SET ram_cap_mb = GREATEST(ram_cap_mb, 1048576)",
@@ -213,19 +213,19 @@ async function main(): Promise<void> {
 	}
 	if (nodes.rows.length === 0) {
 		throw new Error(
-			"no topology: run the migrate service (sbx-admin bootstrap)",
+			"no topology: run the migrate service (umiak-admin bootstrap)",
 		);
 	}
 
 	const kcSecret = readFileSync(
-		required("SBX_IDP_SYNC_CLIENT_SECRET_FILE"),
+		required("UMIAK_IDP_SYNC_CLIENT_SECRET_FILE"),
 		"utf8",
 	).trim();
 	const keycloak = new SwitchableKeycloak(
 		new KeycloakAdminClient({
-			baseUrl: required("SBX_IDP_SYNC_KEYCLOAK_URL"),
-			realm: process.env.SBX_IDP_SYNC_REALM ?? "sbx",
-			clientId: process.env.SBX_IDP_SYNC_CLIENT_ID ?? "sbx-worker",
+			baseUrl: required("UMIAK_IDP_SYNC_KEYCLOAK_URL"),
+			realm: process.env.UMIAK_IDP_SYNC_REALM ?? "umiak",
+			clientId: process.env.UMIAK_IDP_SYNC_CLIENT_ID ?? "umiak-worker",
 			clientSecret: kcSecret,
 		}),
 	);
@@ -294,7 +294,7 @@ async function main(): Promise<void> {
 					};
 					await runIdpSync(worker.ctx, once);
 					const text = await metrics.registry.metrics();
-					const gauge = /^sbx_idp_sync_aborted (\d+)$/m.exec(text)?.[1];
+					const gauge = /^umiak_idp_sync_aborted (\d+)$/m.exec(text)?.[1];
 					return reply(200, { result, abortedGauge: Number(gauge) });
 				}
 				if (req.method === "PUT" && url.pathname === "/keycloak") {

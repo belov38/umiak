@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // classifyDialError maps a CONNECT target dial error to a wire.DialError*

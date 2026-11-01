@@ -36,7 +36,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
  +------v-------------v------+         +---------------------------+
  | Proxmox node(s)           |         | services/gateway (Go)     |
  |  services/node-agent (Go) |         | - agent tunnels (WS)      |
- |  VMs: guest-agent (Go)  --+--WS---->| - HTTP *.sbx.<domain>     |
+ |  VMs: guest-agent (Go)  --+--WS---->| - HTTP *.umiak.<domain>     |
  |  SDN VNet + SNAT          |  out    | - SSH gateway             |
  +---------------------------+         | - TLS edge, L4 LB         |
                                        +---------------------------+
@@ -49,11 +49,11 @@ API-платформа, которая выдаёт AI-агентам и люд�
 | `apps/worker` | TS, pg-boss | Машины состояний sandbox и machine, warm pool, операции Proxmox, снапшоты и fork, auto-stop, очистка |
 | `apps/web` | TS, Next.js + Payload 3 | `/admin`: операторы (пользователи, команды, ключи, шаблоны, размеры, квоты). `/app`: клиентский дашборд (список sandbox, терминал xterm.js, iframe рабочего стола, логи). С sandbox работает только через `apps/api` |
 | `apps/cli` | TS (Bun compile) | Клиент публичного API |
-| `apps/mcp` | TS | MCP-сервер поверх публичного API и `@sbx/sdk`: stdio (`sbx mcp` в бинарнике CLI) и Streamable HTTP (`api.<domain>/mcp`, Deployment `mcp`); `docs/specs/s11-mcp.md` |
+| `apps/mcp` | TS | MCP-сервер поверх публичного API и `@umiak/sdk`: stdio (`umiak mcp` в бинарнике CLI) и Streamable HTTP (`api.<domain>/mcp`, Deployment `mcp`); `docs/specs/s11-mcp.md` |
 | `packages/sdk-ts`, `sdk-py` | генерация + фасады | Из OpenAPI; хелперы ожидания, стрима с переподключением, загрузки, PTY |
 | `packages/auth` | TS | Формат API-ключей, scopes, интерфейс `IdentityStore` (общий для `api` и `web`) |
 | `services/guest-agent` | Go | Агент внутри VM (Linux: systemd unit, Windows: служба) |
-| `services/gateway` | Go | Приём туннелей агентов, HTTP-прокси портов, SSH gateway, TLS-edge для `*.sbx`, `tunnel`, `ssh` (S2, S4). TURN — отдельный coturn (S10) |
+| `services/gateway` | Go | Приём туннелей агентов, HTTP-прокси портов, SSH gateway, TLS-edge для `*.umiak`, `tunnel`, `ssh` (S2, S4). TURN — отдельный coturn (S10) |
 | `services/node-agent` | Go | На каждой ноде Proxmox: операции LVM-thin, QMP, метрики ноды. В PoC можно заменить на SSH-исполнитель с тем же интерфейсом |
 | Postgres | — | Одна БД: схема Payload (конфигурация) + схема API (рантайм) |
 
@@ -86,7 +86,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Files.** read, write (поток), list, stat, delete, mkdir, move, chmod, каталог одним tar-потоком туда и обратно (`/files/archive`).
 - **Ports.** Список слушающих портов; проксирование входящих потоков на `localhost:port` (127.0.0.1, затем ::1, затем адреса интерфейсов).
 - **Хуки снапшота.** `quiesce` (Docker pause, fsfreeze / VSS) и `thaw`, с watchdog авто-разморозки. QEMU guest agent fsfreeze — запасной путь, когда агента нет.
-- **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние. На Windows вместо этого — имя компьютера `SBX<12 hex>`, `MachineGuid` и host keys; переименование требует одной перезагрузки, поэтому hostname из claim на Windows не применяется (S9 §11). Признак смены — `machineId`; vmgenid на Windows читается, но только информационно.
+- **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние. На Windows вместо этого — имя компьютера `UMIAK<12 hex>`, `MachineGuid` и host keys; переименование требует одной перезагрузки, поэтому hostname из claim на Windows не применяется (S9 §11). Признак смены — `machineId`; vmgenid на Windows читается, но только информационно.
 - **Health.** Heartbeat, CPU/RAM/disk, признак простоя.
 - **Self-update.** Подписанный ed25519 пакет (бинарник + бандл tunnel CA) приходит через туннель; неудачная версия откатывается сама.
 
@@ -102,7 +102,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Переподключение.** Backoff 0.25 s → 10 s с full jitter. Одно активное соединение на machine, новое получает `epoch+1`. Сочетание `connId`, `agentInstanceId`, `bootId` и `machineId` отличает обрыв от перезапуска агента, перезагрузки и fork.
 - **Процессы не зависят от соединения.** Каждая команда работает под shim (Linux: systemd scope; Windows: job object), который пишет вывод в файлы с монотонными байтовыми offset-ами и переживает перезапуск агента.
 - **Возобновляемые стримы.** `agent-client` в API сам продолжает attach по `commandId` и offset, клиент видит паузу. `exit` приходит только после всего вывода. PTY живёт 10 минут без клиента.
-- **Идемпотентность.** `commandId` создаёт control plane, и он же служит ключом `Start`. Мутирующие unary-вызовы несут `Sbx-Request-Id`, агент хранит ответы на диске 24 h. Файлы докачиваются через `Range` и чанки с offset.
+- **Идемпотентность.** `commandId` создаёт control plane, и он же служит ключом `Start`. Мутирующие unary-вызовы несут `Umiak-Request-Id`, агент хранит ответы на диске 24 h. Файлы докачиваются через `Range` и чанки с offset.
 - **Поведение API во время обрыва.** Вызов ждёт агента до 30 s, затем `503 agent_unavailable` с `retryable: true`. Sandbox `degraded`, если агента нет дольше 60 s.
 - **Несколько gateway.** Реестр `machineId → gatewayInstance` в Postgres (`tunnel_sessions`, `gateway_instances`, `NOTIFY`), Redis не нужен. При деплое пода gateway `preStop` вызывает у агентов `Control/Drain`. Агенты переподключаются по схеме make-before-break, старый под отвечает `421 machine_moved`, стримы продолжаются по offset.
 - **События агента.** Durable-журнал с `seq` на агенте; gateway доставляет его в `api` at-least-once.
@@ -140,9 +140,9 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - Firewall: sandbox не видят друг друга (isolate ports), LAN и management-интерфейс хоста; исходящий интернет разрешён; входящего нет.
 - Вместо SDN можно вручную настроить bridge без физического порта, nftables masquerade и dnsmasq. Результат тот же; SDN выбран, потому что управляется через API Proxmox.
 - Весь входящий трафик идёт через туннель агента к `gateway`:
-  - **HTTP:** `https://<slug>-<port>.sbx.<domain>` → любой под gateway → туннель (локально или через под-владелец) → `localhost:port`. Режимы доступа `token`, `sso`, `public`. Подробно: `docs/specs/s4-gateway.md`.
+  - **HTTP:** `https://<slug>-<port>.umiak.<domain>` → любой под gateway → туннель (локально или через под-владелец) → `localhost:port`. Режимы доступа `token`, `sso`, `public`. Подробно: `docs/specs/s4-gateway.md`.
   - **SSH:** `ssh <sandbox>@ssh.<domain>` → gateway терминирует SSH и проверяет короткий сертификат от `api` или ключ пользователя через `api` → туннель → системный sshd VM на `127.0.0.1:22` с короткоживущим сертификатом от SSH CA gateway (`TrustedUserCAKeys`). Ключи пользователей в VM не копируются.
-  - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.sbx`); медиа WebRTC через отдельный TURN (coturn, только relay между своими allocation), запасной транспорт — WebSocket через gateway и туннель (S10 §9).
+  - **Рабочий стол:** сигналинг moonlight-web через туннель (`<slug>-desktop.umiak`); медиа WebRTC через отдельный TURN (coturn, только relay между своими allocation), запасной транспорт — WebSocket через gateway и туннель (S10 §9).
 
 ## 8. Рабочий стол и computer-use
 
@@ -150,72 +150,72 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 - Linux и Windows: Sunshine (захват экрана, x264 на CPU) + moonlight-web (WebRTC в браузер), upstream без форка, только на loopback VM. Стример запускается по требованию.
 - Ссылка рабочего стола с одноразовым билетом на 10 min, встраивается в iframe дашборда. Режимы доступа `token`, `sso` (только команда), `public` (выключен по умолчанию).
-- Computer-use API (скриншот, мышь, клавиатура, буфер обмена) — собственные примитивы агента через helper `sbx-session` в пользовательской сессии (Linux и Windows), не зависят от стримера. MCP-обёртка в `apps/mcp`.
+- Computer-use API (скриншот, мышь, клавиатура, буфер обмена) — собственные примитивы агента через helper `umiak-session` в пользовательской сессии (Linux и Windows), не зависят от стримера. MCP-обёртка в `apps/mcp`.
 - cua-driver (MIT) ставится в шаблоны как MCP для агентов внутри VM (регистрация — S15).
-- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; helper `sbx-session` в интерактивной сессии (фаза `desktop`, S9 §13).
+- Windows: autologon пользователя-агента, отключённый lock screen и UAC-промпты в шаблоне; helper `umiak-session` в интерактивной сессии (фаза `desktop`, S9 §13).
 
 ## 9. Публичное API (v1, кратко)
 
 Подробно: `docs/specs/s7-public-api.md`.
 
 - `/v1/sandboxes` (create, get с long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON-стрим, detached, attach по offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, запись потоком, загрузка чанками, tar каталога, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/desktop` (ссылки, доступ, скриншот, действия, буфер; S10 §13), `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/environments`, `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Семантика как у boat (`research/03-api-sdk-surface.md`), формат свой, не wire-совместим.
-- ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды. Удаление sandbox и saved snapshot — только с `Sbx-Confirm-Delete: <id>`. CLI без TTY печатает JSON и JSONL (S7 §14.3).
+- ID с префиксами (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), в пути можно передать slug. Ресурсы без обёртки, списки `{data, nextCursor}`, ошибки `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` для create, fork и команд: повтор не запускает команду дважды. Удаление sandbox и saved snapshot — только с `Umiak-Confirm-Delete: <id>`. CLI без TTY печатает JSON и JSONL (S7 §14.3).
 - Три listener-а `api`: публичный (Keycloak JWT и командные ключи), за oauth2-proxy (браузер, проверка Origin), внутренний (gateway, service tokens).
-- OpenAPI генерируется из zod-схем; SDK TS (`openapi-typescript` + `openapi-fetch`) и Python (`openapi-python-client`) с рукописными хелперами; CLI `sbx` на TS SDK через Bun compile.
+- OpenAPI генерируется из zod-схем; SDK TS (`openapi-typescript` + `openapi-fetch`) и Python (`openapi-python-client`) с рукописными хелперами; CLI `umiak` на TS SDK через Bun compile.
 
 ## 10. Развёртывание и аутентификация
 
-**Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `sbx-node` остаются вне Kubernetes.
+**Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `umiak-node` остаются вне Kubernetes.
 
-**IdP — Keycloak** (решение Ильи 2026-10-29), один realm `sbx`. Позже он может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет. Роли и команды берутся из групп и claims Keycloak (S8 §5).
+**IdP — Keycloak** (решение Ильи 2026-10-29), один realm `umiak`. Позже он может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет. Роли и команды берутся из групп и claims Keycloak (S8 §5).
 
 **Пользователи (браузер) — через oauth2-proxy** (провайдер `keycloak-oidc`, `--cookie-refresh=5m`: выключенный в Keycloak пользователь теряет дашборд и `/admin` за 5 min).
 - `web` (`/admin`, `/app`) и браузерные вызовы API закрыты oauth2-proxy.
 - Пользователь создаётся при первом входе (JIT) из заголовков oauth2-proxy: `X-Auth-Request-Email`, `-User`, `-Groups`. Это кастомная auth-стратегия Payload; API читает того же пользователя.
-- Роли берутся из групп Keycloak: группа из `SBX_OPERATOR_GROUPS` → оператор платформы. Права оператора (в том числе блокировки и `allTeams`, S8 §17.1 C3) действуют только в браузерной сессии, не по API-ключу и не по JWT CLI. Команды и роли `owner`/`member` — в Payload, при первом входе создаётся личная команда (S8 §6).
-- Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy. oauth2-proxy работает в upstream-режиме и маршрутизирует `app.<domain>`: `/api/*` (без `/api`), `/sbx-auth/*` → `api :8081`, остальное → `web` (S8 §5.1).
+- Роли берутся из групп Keycloak: группа из `UMIAK_OPERATOR_GROUPS` → оператор платформы. Права оператора (в том числе блокировки и `allTeams`, S8 §17.1 C3) действуют только в браузерной сессии, не по API-ключу и не по JWT CLI. Команды и роли `owner`/`member` — в Payload, при первом входе создаётся личная команда (S8 §6).
+- Заголовкам доверяем только от oauth2-proxy. Прямой доступ к подам закрыт NetworkPolicy. oauth2-proxy работает в upstream-режиме и маршрутизирует `app.<domain>`: `/api/*` (без `/api`), `/umiak-auth/*` → `api :8081`, остальное → `web` (S8 §5.1).
 
-**Люди в CLI, SDK и MCP — Keycloak JWT, без личных долгоживущих ключей** (S7 §7.6, §7.10). Удалённый MCP принимает тот же JWT; вход через браузер — клиент `sbx-mcp` (S11 §6.4).
-- `sbx login` — OAuth 2.0 Device Authorization Grant с публичным клиентом `sbx-cli`. Access token живёт 5 min, refresh token привязан к SSO-сессии Keycloak и лежит в хранилище ОС (запасной вариант — файл `0600`). SDK и MCP берут токен у CLI (`sbx auth token`).
-- `api` сам проверяет JWT (JWKS, `iss`, `aud=sbx-api`, `exp`), без introspection на запрос; `sub` → тот же пользователь Payload, что в браузере. Выключенный пользователь не обновит токен: доступ кончается за 5 min.
+**Люди в CLI, SDK и MCP — Keycloak JWT, без личных долгоживущих ключей** (S7 §7.6, §7.10). Удалённый MCP принимает тот же JWT; вход через браузер — клиент `umiak-mcp` (S11 §6.4).
+- `umiak login` — OAuth 2.0 Device Authorization Grant с публичным клиентом `umiak-cli`. Access token живёт 5 min, refresh token привязан к SSO-сессии Keycloak и лежит в хранилище ОС (запасной вариант — файл `0600`). SDK и MCP берут токен у CLI (`umiak auth token`).
+- `api` сам проверяет JWT (JWKS, `iss`, `aud=umiak-api`, `exp`), без introspection на запрос; `sub` → тот же пользователь Payload, что в браузере. Выключенный пользователь не обновит токен: доступ кончается за 5 min.
 
-**Автоматизация и CI — командные ключи `sbx_`** (S7 §7.2). Принадлежат команде, выпускает `owner` в дашборде, создатель записан для аудита; scopes «ресурс × действие», срок 90 d по умолчанию, максимум 365 d. Уход создателя ключи не выключает, их отзывают `owner`-ы.
+**Автоматизация и CI — командные ключи `umiak_`** (S7 §7.2). Принадлежат команде, выпускает `owner` в дашборде, создатель записан для аудита; scopes «ресурс × действие», срок 90 d по умолчанию, максимум 365 d. Уход создателя ключи не выключает, их отзывают `owner`-ы.
 
-Маршруты `/v1/*` с `Authorization: Bearer` (JWT или `sbx_`) идут на `api.<domain>` мимо oauth2-proxy: oauth2-proxy — только для браузера. Пути `/mcp` и `/.well-known/oauth-protected-resource/mcp` на том же хосте идут в Deployment `mcp` (S11 §6.2).
+Маршруты `/v1/*` с `Authorization: Bearer` (JWT или `umiak_`) идут на `api.<domain>` мимо oauth2-proxy: oauth2-proxy — только для браузера. Пути `/mcp` и `/.well-known/oauth-protected-resource/mcp` на том же хосте идут в Deployment `mcp` (S11 §6.2).
 
-**Деактивация (offboarding, вариант A, S8 §20.1).** `worker` раз в 5 min читает пользователей через Keycloak Admin API (клиент `sbx-worker`). Выключенный или удалённый пользователь деактивируется в Payload; его стримы, PTY и SSH-сессии закрываются сразу; `owner`-ы его команд получают список командных ключей, которые он создал. Ключи автоматически не отзываются.
+**Деактивация (offboarding, вариант A, S8 §20.1).** `worker` раз в 5 min читает пользователей через Keycloak Admin API (клиент `umiak-worker`). Выключенный или удалённый пользователь деактивируется в Payload; его стримы, PTY и SSH-сессии закрываются сразу; `owner`-ы его команд получают список командных ключей, которые он создал. Ключи автоматически не отзываются.
 
-**Настройки Keycloak** (realm `sbx`, Keycloak 26.8; ставит S12):
+**Настройки Keycloak** (realm `umiak`, Keycloak 26.8; ставит S12):
 
 | Что | Настройка |
 |---|---|
-| Общий client scope `groups` | Group Membership mapper → claim `groups`, Full group path выключен; подключён по умолчанию к `oauth2-proxy`, `sbx-cli` и `sbx-mcp`, чтобы браузер и CLI получали группы в одном формате |
+| Общий client scope `groups` | Group Membership mapper → claim `groups`, Full group path выключен; подключён по умолчанию к `oauth2-proxy`, `umiak-cli` и `umiak-mcp`, чтобы браузер и CLI получали группы в одном формате |
 | Клиент `oauth2-proxy` | конфиденциальный (Client authentication on), Standard flow; Audience mapper на себя; scope `groups` |
-| Клиент `sbx-cli` | публичный (Client authentication off), только OAuth 2.0 Device Authorization Grant; Audience mapper (Included Client Audience `sbx-api`, Add to access token); default scopes `basic` (`sub`), `email`, `profile`, `groups`; `offline_access` убран и из default, и из optional (refresh не переживает SSO-сессию); lightweight access token выключен |
-| Клиент `sbx-mcp` | публичный, только Standard flow (authorization code) с PKCE `S256`; redirect URIs `http://127.0.0.1:33418/*`, `http://localhost:33418/*`; Audience mapper `sbx-api`; scopes и запрет `offline_access` — как у `sbx-cli`; вход в удалённый MCP через браузер (S11 §6.4) |
-| Клиент `sbx-api` | только аудитория: без flow, токенов себе не получает |
-| Клиент `sbx-worker` | конфиденциальный, только Service accounts; роль `view-users` клиента `realm-management` |
+| Клиент `umiak-cli` | публичный (Client authentication off), только OAuth 2.0 Device Authorization Grant; Audience mapper (Included Client Audience `umiak-api`, Add to access token); default scopes `basic` (`sub`), `email`, `profile`, `groups`; `offline_access` убран и из default, и из optional (refresh не переживает SSO-сессию); lightweight access token выключен |
+| Клиент `umiak-mcp` | публичный, только Standard flow (authorization code) с PKCE `S256`; redirect URIs `http://127.0.0.1:33418/*`, `http://localhost:33418/*`; Audience mapper `umiak-api`; scopes и запрет `offline_access` — как у `umiak-cli`; вход в удалённый MCP через браузер (S11 §6.4) |
+| Клиент `umiak-api` | только аудитория: без flow, токенов себе не получает |
+| Клиент `umiak-worker` | конфиденциальный, только Service accounts; роль `view-users` клиента `realm-management` |
 | Сроки | Access Token Lifespan 5 min; SSO Session Idle 24 h; SSO Session Max 7 d (вход в CLI раз в неделю, при ежедневной работе); Client Session Idle/Max — как у realm; Revoke Refresh Token выключен (CLI обновляет под блокировкой); device code 600 s, интервал опроса 5 s |
-| Пользователи | email обязателен и подтверждён; группа операторов — `SBX_OPERATOR_GROUPS` |
+| Пользователи | email обязателен и подтверждён; группа операторов — `UMIAK_OPERATOR_GROUPS` |
 
 **Мимо oauth2-proxy (своя аутентификация):**
 - `tunnel.<domain>`: туннели агентов (WSS, bootstrap secret / machine token, см. S2).
 - Внутренний listener gateway (ClusterIP) для вызовов `api` и `worker`, авторизация сервисными токенами.
-- `*.sbx.<domain>`: публичные URL портов. Режимы доступа: `token` (как у boat), `sso` (вход через oauth2-proxy на основном домене и одноразовый код, cookie IdP на sbx не попадает), `public`.
+- `*.umiak.<domain>`: публичные URL портов. Режимы доступа: `token` (как у boat), `sso` (вход через oauth2-proxy на основном домене и одноразовый код, cookie IdP на umiak не попадает), `public`.
 - `ssh.<domain>`: SSH gateway. Вход по коротким SSH-сертификатам, которые `api` выпускает по JWT человека или командному ключу, или по зарегистрированному ключу человека; личность проверяет `api` на каждом подключении (S4 §9.2, S7 §11.3).
 
-**Edge gateway.** `tunnel.<domain>`, `*.sbx.<domain>` и `ssh.<domain>` идут не через ingress, а через отдельный L4 LoadBalancer Service `gateway-edge` (443 и 22; IP клиента — PROXY protocol v2 или `externalTrafficPolicy: Local`). TLS терминирует сам gateway: wildcard `*.sbx` от cert-manager (DNS-01), `tunnel` — от tunnel CA. Запасной режим «за ingress» поддерживается (S4 §5). Все cookie платформы на основном домене — host-only с префиксом `__Host-`, иначе код в sandbox может их подбросить (S4 §14.1).
+**Edge gateway.** `tunnel.<domain>`, `*.umiak.<domain>` и `ssh.<domain>` идут не через ingress, а через отдельный L4 LoadBalancer Service `gateway-edge` (443 и 22; IP клиента — PROXY protocol v2 или `externalTrafficPolicy: Local`). TLS терминирует сам gateway: wildcard `*.umiak` от cert-manager (DNS-01), `tunnel` — от tunnel CA. Запасной режим «за ingress» поддерживается (S4 §5). Все cookie платформы на основном домене — host-only с префиксом `__Host-`, иначе код в sandbox может их подбросить (S4 §14.1).
 
 **Деплой gateway.** Rolling update: `preStop` запускает drain (S2, S4 §10). HTTP-потоки живут до 2 min, SSH-сессии до 15 min с предупреждением, `terminationGracePeriodSeconds: 960`.
 
-**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `sbx-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу `gateway-edge` (`tunnel.<domain>:443`, IPSet `sbx-gateway`). TURN (UDP) для рабочего стола — отдельный coturn `turn.<domain>` с hostNetwork на выделенной ноде или UDP LoadBalancer (S12); sandbox ходят к нему по UDP 3478 (IPSet `sbx-turn`, S10 §9.2).
+**Сеть.** `worker` ходит из кластера к Proxmox API (`:8006`) и к `umiak-node` по SSH (секреты в Kubernetes Secret). Sandbox-сеть разрешает исходящее соединение только к адресу `gateway-edge` (`tunnel.<domain>:443`, IPSet `umiak-gateway`). TURN (UDP) для рабочего стола — отдельный coturn `turn.<domain>` с hostNetwork на выделенной ноде или UDP LoadBalancer (S12); sandbox ходят к нему по UDP 3478 (IPSet `umiak-turn`, S10 §9.2).
 
 ## 11. Безопасность
 
 - Командные API-ключи со scopes «ресурс × действие» (`sandboxes:read`, `commands:exec`, …) и обязательным сроком жизни, хранятся хешами в Payload. У людей долгоживущих ключей нет: CLI работает по коротким JWT Keycloak. Тип ключа `sandbox` (одна sandbox, для CLI в VM) зарезервирован, в MVP не выпускается (S7 §7.2–7.3).
 - У каждой machine свой bootstrap secret в `smbios1` и машинный токен для туннеля только в памяти агента; токен перевыпускается при claim. Machine не переиспользуется между sandbox (S2).
 - Секреты в госте в tmpfs (Linux). На Windows `secret_env` только в памяти, `secret_files` — в каталоге с ACL (SYSTEM и `user`), стираются при каждой загрузке до входа пользователя, при stop и перед saved snapshot; pagefile с очисткой при выключении. Остатки в pagefile и метаданных NTFS у снапшота работающей VM — принятый риск (S9 §12.8).
-- Proxmox: отдельный пользователь и API-токен с правами только на pool `sandbox` и нужные хранилища.
+- Proxmox: отдельный пользователь и API-токен с правами только на pool `umiak` и нужные хранилища.
 
 ## 12. Фазы
 
@@ -228,6 +228,6 @@ API-платформа, которая выдаёт AI-агентам и люд�
 ## 13. Открытые вопросы
 
 - Ресурсы под PoC на `pve`: RAM, диапазон VMID, согласие на изменения хоста (пользователь и токен, SDN, pool).
-- Домен для `*.sbx`: по умолчанию `sbx.<domain>`; отдельный регистрируемый домен — выбор Ильи, можно позже (S4 §14.1). TLS: wildcard через cert-manager DNS-01 (S4 §5).
+- Домен для `*.umiak`: по умолчанию `umiak.<domain>`; отдельный регистрируемый домен — выбор Ильи, можно позже (S4 §14.1). TLS: wildcard через cert-manager DNS-01 (S4 §5).
 - Kubernetes: какой кластер и ingress controller; какая группа Keycloak даёт роль оператора. ~~Какой IdP~~ — Keycloak (решение Ильи 2026-10-29).
 - ~~SSH в госте: системный sshd или встроенный SSH-сервер в агенте.~~ Решено в S4: системный sshd на loopback с сертификатами от SSH CA gateway.

@@ -39,7 +39,7 @@ export default async function globalSetup(): Promise<void> {
 	const users: Record<string, KcUser> = {
 		alice: await user("alice"),
 		bob: await user("bob"),
-		op: await user("op", ["/sbx-operators"]),
+		op: await user("op", ["/umiak-operators"]),
 		dave: await user("dave"),
 	};
 	// Active platform users bound to real Keycloak accounts: with them the

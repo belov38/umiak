@@ -7,7 +7,7 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BasePayload } from "payload";
-import { buildSbxConfig, PAYLOAD_MIGRATIONS_DIR } from "./config.ts";
+import { buildUmiakConfig, PAYLOAD_MIGRATIONS_DIR } from "./config.ts";
 
 const name = process.argv[2];
 if (!name || !/^[a-z0-9_]+$/.test(name)) {
@@ -15,7 +15,7 @@ if (!name || !/^[a-z0-9_]+$/.test(name)) {
 	process.exit(1);
 }
 
-const config = await buildSbxConfig({
+const config = await buildUmiakConfig({
 	databaseUrl: "postgres://unused@127.0.0.1:1/unused",
 	secret: "create-migration",
 	operatorGroups: [],

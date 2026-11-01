@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // startingExpired reports whether rec is a STARTING record older than

@@ -4,7 +4,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type Any,
@@ -61,7 +65,7 @@ describe.skipIf(skipPg())("files uploads", () => {
 		const res = await rawRequest(h, "HEAD", uploads(s, `/${id}`));
 		if (res.status === 404) return null;
 		expect(res.status).toBe(200);
-		return Number(res.headers.get("sbx-upload-offset"));
+		return Number(res.headers.get("umiak-upload-offset"));
 	}
 
 	it("POST answers the upload id, chunk sizes and expiry", async () => {
@@ -94,7 +98,7 @@ describe.skipIf(skipPg())("files uploads", () => {
 			);
 			expect(r.status).toBe(200);
 			expect(r.body).toEqual({ offset: off + size });
-			expect(r.headers.get("sbx-upload-offset")).toBe(String(off + size));
+			expect(r.headers.get("umiak-upload-offset")).toBe(String(off + size));
 		}
 		// The 4th chunk breaks after 1 MiB: nothing of it reaches the agent.
 		let sent = false;
@@ -126,7 +130,7 @@ describe.skipIf(skipPg())("files uploads", () => {
 			code: "upload_offset_mismatch",
 			details: { offset: 3 * size },
 		});
-		expect(again.headers.get("sbx-upload-offset")).toBe(String(3 * size));
+		expect(again.headers.get("umiak-upload-offset")).toBe(String(3 * size));
 		while ((at ?? 0) < total) {
 			const off = at ?? 0;
 			const r = await chunk(id, off, data.subarray(off, off + size));
@@ -191,7 +195,7 @@ describe.skipIf(skipPg())("files uploads", () => {
 		const r = await chunk(id, 5, new Uint8Array(3));
 		expect(r.status).toBe(409);
 		expect(err(r).details).toEqual({ offset: 0 });
-		expect(r.headers.get("sbx-upload-offset")).toBe("0");
+		expect(r.headers.get("umiak-upload-offset")).toBe("0");
 	});
 
 	it("commit with a wrong sha256 is 422 checksum_mismatch and drops the upload", async () => {

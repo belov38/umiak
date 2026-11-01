@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // FakeLaunch is one recorded Launch call.

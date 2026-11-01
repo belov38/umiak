@@ -9,25 +9,25 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // TestInstallCreatesServiceConfig installs a package with the service under
 // a throwaway name and checks the service configuration; the service is
 // never started. Needs administrator rights (the agent tests run as SYSTEM);
-// without them it fails unless SBX_TEST_ALLOW_SKIP=1.
+// without them it fails unless UMIAK_TEST_ALLOW_SKIP=1.
 func TestInstallCreatesServiceConfig(t *testing.T) {
 	m, err := mgr.Connect()
 	if err != nil {
-		if os.Getenv("SBX_TEST_ALLOW_SKIP") == "1" {
+		if os.Getenv("UMIAK_TEST_ALLOW_SKIP") == "1" {
 			t.Skipf("no access to the service manager: %v", err)
 		}
-		t.Fatalf("no access to the service manager (run as an administrator, or set SBX_TEST_ALLOW_SKIP=1): %v", err)
+		t.Fatalf("no access to the service manager (run as an administrator, or set UMIAK_TEST_ALLOW_SKIP=1): %v", err)
 	}
 	_ = m.Disconnect()
 	pub, priv := testKey(t)
 	l := paths.ForRoot(t.TempDir())
-	name := "sbx-agent-test-" + randHex()
+	name := "umiak-agent-test-" + randHex()
 	t.Cleanup(func() { deleteTestService(t, name) })
 
 	opts := InstallOptions{Activate: true, InstallUnits: true, ServiceName: name}

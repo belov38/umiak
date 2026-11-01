@@ -1,19 +1,23 @@
 // Production dependencies on Payload (S8 plan decision 5): `buildDeps` takes
 // identities and config from Payload (PayloadIdentityStore,
-// PayloadConfigReader), loads SBX_IDENTITY_FILE into Payload, and `/readyz`
+// PayloadConfigReader), loads UMIAK_IDENTITY_FILE into Payload, and `/readyz`
 // reports `payload_migrations` while the Payload schema is behind the code.
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apiKeyHash, generateApiKeySecret } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { apiKeyHash, generateApiKeySecret } from "@umiak/auth";
 import {
-	closeSbxPayload,
-	getSbxPayload,
-	migrateSbxPayload,
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
+import {
+	closeUmiakPayload,
+	getUmiakPayload,
+	migrateUmiakPayload,
 	PayloadConfigReader,
 	PayloadIdentityStore,
-} from "@sbx/payload";
+} from "@umiak/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type ApiDeps,
@@ -32,27 +36,27 @@ const PAYLOAD_SECRET = "api-payload-secret-0123456789abcdef";
 const log = createApiLogger({ level: "silent" });
 
 function files(identityYaml: string | null): Record<string, string> {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-api-payload-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-api-payload-"));
 	const file = (name: string, text: string) => {
 		const p = join(dir, name);
 		writeFileSync(p, text);
 		return p;
 	};
 	return {
-		SBX_DATA_KEYS_FILE: file(
+		UMIAK_DATA_KEYS_FILE: file(
 			"data-keys.json",
 			JSON.stringify({
 				current: 1,
 				keys: { "1": Buffer.alloc(32, 5).toString("base64") },
 			}),
 		),
-		SBX_API_SERVICE_TOKENS_FILE: file(
+		UMIAK_API_SERVICE_TOKENS_FILE: file(
 			"service-tokens.json",
 			JSON.stringify({ gateway: ["gw-token-payload-0123456789"] }),
 		),
 		...(identityYaml === null
 			? {}
-			: { SBX_IDENTITY_FILE: file("identity.yaml", identityYaml) }),
+			: { UMIAK_IDENTITY_FILE: file("identity.yaml", identityYaml) }),
 	};
 }
 
@@ -73,18 +77,18 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 
 		beforeAll(async () => {
 			db = await createTestDatabase();
-			const p = await getSbxPayload({
+			const p = await getUmiakPayload({
 				databaseUrl: db.url,
 				secret: PAYLOAD_SECRET,
 				operatorGroups: [],
 				poolMax: 4,
 			});
-			await migrateSbxPayload(p, () => {});
-			await closeSbxPayload(db.url);
+			await migrateUmiakPayload(p, () => {});
+			await closeUmiakPayload(db.url);
 			const settings = testSettings({
 				DATABASE_URL: db.url,
 				PAYLOAD_SECRET,
-				SBX_OPERATOR_GROUPS: "sbx-operators",
+				UMIAK_OPERATOR_GROUPS: "umiak-operators",
 				...files(
 					[
 						"teams:",
@@ -142,8 +146,8 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				"linux-desktop",
 				"windows-desktop",
 			]);
-			// A change through Payload reaches the cached reader (LISTEN sbx_config).
-			const payload = await getSbxPayload({
+			// A change through Payload reaches the cached reader (LISTEN umiak_config).
+			const payload = await getUmiakPayload({
 				databaseUrl: db.url,
 				secret: PAYLOAD_SECRET,
 				operatorGroups: [],
@@ -157,7 +161,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				});
 			} finally {
 				// Releases this reference only: buildDeps keeps its own.
-				await closeSbxPayload(db.url);
+				await closeUmiakPayload(db.url);
 			}
 			await until(
 				async () => (await get())[0]?.name === "Linux (Payload)",

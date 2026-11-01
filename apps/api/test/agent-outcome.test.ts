@@ -3,8 +3,12 @@
 // unreachable agent) answers 503 agent_unavailable with retryable false and
 // details.outcome "unknown"; idempotent calls and reads stay retryable.
 import { Code, ConnectError } from "@connectrpc/connect";
-import { AgentUnavailableError } from "@sbx/agent-client";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { AgentUnavailableError } from "@umiak/agent-client";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { AgentApi } from "../src/index.ts";
 import {

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/config"
+	"github.com/belov38/umiak/services/node-agent/internal/config"
 )
 
 var (
@@ -19,12 +19,12 @@ var (
 	baseRe     = regexp.MustCompile(`^base-([1-9][0-9]*)-[a-z0-9+_.-]+$`)
 	vmAnyRe    = regexp.MustCompile(`^vm-([1-9][0-9]*)-[a-z0-9+_.-]+$`)
 	vmDiskRe   = regexp.MustCompile(`^vm-([1-9][0-9]*)-disk-[0-9]+$`)
-	mediaISORe = regexp.MustCompile(`^sbx-(seed|build|offline)-[a-z0-9-]{1,64}\.iso$|^sbx-virtio-win-[0-9]+\.[0-9]+\.[0-9]+\.iso$`)
-	mediaImgRe = regexp.MustCompile(`^sbx-[a-z0-9.+_-]{1,96}\.(qcow2|img|raw)$`)
-	snapLVRe   = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})-([a-z0-9]{1,16})$`)
-	vmTagRe    = regexp.MustCompile(`^sbx-(vm|src)-([1-9][0-9]*)$`)
-	snapTagRe  = regexp.MustCompile(`^sbx-snap-([a-z0-9]{1,32})$`)
-	serialRe   = regexp.MustCompile(`^sbx1:[0-9a-fA-F-]{36}:[A-Za-z0-9_-]{43}$`)
+	mediaISORe = regexp.MustCompile(`^umiak-(seed|build|offline)-[a-z0-9-]{1,64}\.iso$|^umiak-virtio-win-[0-9]+\.[0-9]+\.[0-9]+\.iso$`)
+	mediaImgRe = regexp.MustCompile(`^umiak-[a-z0-9.+_-]{1,96}\.(qcow2|img|raw)$`)
+	snapLVRe   = regexp.MustCompile(`^umiak-snap-([a-z0-9]{1,32})-([a-z0-9]{1,16})$`)
+	vmTagRe    = regexp.MustCompile(`^umiak-(vm|src)-([1-9][0-9]*)$`)
+	snapTagRe  = regexp.MustCompile(`^umiak-snap-([a-z0-9]{1,32})$`)
+	serialRe   = regexp.MustCompile(`^umiak1:[0-9a-fA-F-]{36}:[A-Za-z0-9_-]{43}$`)
 	errBadName = errors.New("invalid LV name")
 )
 
@@ -44,7 +44,7 @@ func atoiMatch(m []string, i int) int {
 }
 
 // ValidOrigin allows snapshots only of template disks (base-<id> of a template slot; lv.snapshot
-// also requires the sbx-tpl tag), our snapshots and our VM disks.
+// also requires the umiak-tpl tag), our snapshots and our VM disks.
 func ValidOrigin(cfg config.Config, name string) error {
 	if !lvNameRe.MatchString(name) {
 		return errBadName
@@ -75,13 +75,13 @@ func ValidTargetName(cfg config.Config, name string) error {
 	return forbidden("target name %q is not allowed", name)
 }
 
-// ValidTags requires the "sbx" marker and allows only our tag shapes.
+// ValidTags requires the "umiak" marker and allows only our tag shapes.
 func ValidTags(cfg config.Config, tags []string) error {
-	if !slices.Contains(tags, "sbx") {
-		return forbidden("tag sbx is required")
+	if !slices.Contains(tags, "umiak") {
+		return forbidden("tag umiak is required")
 	}
 	for _, t := range tags {
-		if t == "sbx" || snapTagRe.MatchString(t) {
+		if t == "umiak" || snapTagRe.MatchString(t) {
 			continue
 		}
 		if m := vmTagRe.FindStringSubmatch(t); m != nil && cfg.InRange(atoiMatch(m, 2)) {
@@ -113,9 +113,9 @@ func ValidSnapshotItem(cfg config.Config, it SnapshotItem) error {
 	}
 	var owner string
 	if m := vmDiskRe.FindStringSubmatch(it.Name); m != nil {
-		owner = "sbx-vm-" + m[1]
+		owner = "umiak-vm-" + m[1]
 	} else if m := snapLVRe.FindStringSubmatch(it.Name); m != nil {
-		owner = "sbx-snap-" + m[1]
+		owner = "umiak-snap-" + m[1]
 	}
 	if !slices.Contains(it.Tags, owner) {
 		return forbidden("LV %q needs tag %q", it.Name, owner)
@@ -154,5 +154,5 @@ func ValidSearchNeedle(needle string) error {
 	if raw, err := base64.StdEncoding.DecodeString(needle); err == nil && serialRe.Match(raw) {
 		return nil
 	}
-	return forbidden("search string must be an sbx1 serial payload")
+	return forbidden("search string must be an umiak1 serial payload")
 }

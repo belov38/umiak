@@ -7,7 +7,7 @@ import {
 	encodeUuid,
 	IdentityError,
 	type SshKeyRecord,
-} from "@sbx/auth";
+} from "@umiak/auth";
 import { authOf } from "../auth/principal.ts";
 import { requireHuman, requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
@@ -41,7 +41,7 @@ const listSshKeys = createRoute({
 	summary: "List my SSH keys",
 	description:
 		"SSH public keys of the calling person, oldest first. Only a person (browser session " +
-		"or `sbx login`).",
+		"or `umiak login`).",
 	tags: TAGS,
 	security: HUMAN_ONLY,
 	middleware: [requireHuman(), requireScope("ssh:connect")] as const,

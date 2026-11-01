@@ -15,11 +15,11 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
 )
 
 // Service tokens of the internal listener in these tests.
@@ -48,7 +48,7 @@ func (e *env) internalGateway(name string, mod func(*Config)) *internalGW {
 	gw := e.gateway(name, func(c *Config) {
 		c.InternalURL = u
 		c.ServiceTokens = testTokens()
-		c.AllowedServicePrefixes = []string{"sbx.agent.v1.", "sbx.testing.v1."}
+		c.AllowedServicePrefixes = []string{"umiak.agent.v1.", "umiak.testing.v1."}
 		if mod != nil {
 			mod(c)
 		}
@@ -164,7 +164,7 @@ type upload struct {
 	header      http.Header
 }
 
-// stubAgent is the agent Handler of these tests: a stub sbx.testing.v1.Process
+// stubAgent is the agent Handler of these tests: a stub umiak.testing.v1.Process
 // and /files handlers, recording the request headers it sees.
 type stubAgent struct {
 	testingv1connect.UnimplementedProcessHandler

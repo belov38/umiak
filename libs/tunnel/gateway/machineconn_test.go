@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/transport"
 )
 
 // duplexEcho echoes the request body as it arrives, like a bidi stream.

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // TestDoctorWindowsParts: the units, the service check and the early.json
@@ -26,15 +26,15 @@ func TestDoctorWindowsParts(t *testing.T) {
 	opts := DoctorOptions{
 		Source:   src,
 		IsActive: func(_ context.Context, unit string) string { return "running:" + unit },
-		Units:    []DoctorUnit{{Key: "sbx-agent", Unit: "sbx-agent"}},
+		Units:    []DoctorUnit{{Key: "umiak-agent", Unit: "umiak-agent"}},
 		Service: func(context.Context) *ServiceReport {
-			return &ServiceReport{Name: "sbx-agent", State: "running", Problems: []string{"preshutdown timeout 0s, want 15s"}}
+			return &ServiceReport{Name: "umiak-agent", State: "running", Problems: []string{"preshutdown timeout 0s, want 15s"}}
 		},
 		Statfs: func(string) (uint64, uint64, error) { return 1, 1, nil },
 	}
 
 	rep := Doctor(context.Background(), l, config.Defaults(), opts)
-	if len(rep.Units) != 1 || rep.Units["sbx-agent"] != "running:sbx-agent" {
+	if len(rep.Units) != 1 || rep.Units["umiak-agent"] != "running:umiak-agent" {
 		t.Errorf("units = %v", rep.Units)
 	}
 	if rep.Service == nil || rep.Service.Configured {
@@ -56,7 +56,7 @@ func TestDoctorWindowsParts(t *testing.T) {
 	}
 	var text bytes.Buffer
 	rep.WriteText(&text)
-	for _, want := range []string{"unit:       sbx-agent running:sbx-agent", "service:    sbx-agent misconfigured: preshutdown", "early:      ran for boot boot-7"} {
+	for _, want := range []string{"unit:       umiak-agent running:umiak-agent", "service:    umiak-agent misconfigured: preshutdown", "early:      ran for boot boot-7"} {
 		if !strings.Contains(text.String(), want) {
 			t.Errorf("text misses %q:\n%s", want, text.String())
 		}

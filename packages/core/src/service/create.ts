@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import { requestHash } from "../canonical.ts";
 import { checkQuota } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";

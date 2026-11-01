@@ -16,9 +16,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -80,7 +80,7 @@ func loopClient(c *cluster, front *testenv.Inst) *http.Client {
 // result is one answer of the gateway.
 type result struct {
 	status   int
-	sbxError string
+	umiakError string
 	retry    string
 	body     string
 	err      error
@@ -92,7 +92,7 @@ func (r result) String() string {
 	if r.err != nil {
 		return "error " + r.err.Error()
 	}
-	return fmt.Sprintf("%d %s %q", r.status, r.sbxError, r.body)
+	return fmt.Sprintf("%d %s %q", r.status, r.umiakError, r.body)
 }
 
 // send runs one request and reads the whole body.
@@ -107,7 +107,7 @@ func send(c *http.Client, req *http.Request) result {
 	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	r.took = time.Since(r.start)
-	r.status, r.sbxError, r.retry, r.body, r.err = resp.StatusCode, resp.Header.Get("Sbx-Error"), resp.Header.Get("Retry-After"), string(b), err
+	r.status, r.umiakError, r.retry, r.body, r.err = resp.StatusCode, resp.Header.Get("Umiak-Error"), resp.Header.Get("Retry-After"), string(b), err
 	return r
 }
 
@@ -282,14 +282,14 @@ func (a *wsEchoApp) Open() int {
 }
 
 // dialWS opens a WebSocket to url over c (HTTP/1.1). A refused handshake
-// returns the status and Sbx-Error of the answer with the error.
-func dialWS(ctx context.Context, c *http.Client, url string) (ws *websocket.Conn, status int, sbxError string, err error) {
+// returns the status and Umiak-Error of the answer with the error.
+func dialWS(ctx context.Context, c *http.Client, url string) (ws *websocket.Conn, status int, umiakError string, err error) {
 	// coder/websocket owns the response body; it never needs closing.
 	ws, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPClient: c}) //nolint:bodyclose // see above
 	if resp != nil {
-		status, sbxError = resp.StatusCode, resp.Header.Get("Sbx-Error")
+		status, umiakError = resp.StatusCode, resp.Header.Get("Umiak-Error")
 	}
-	return ws, status, sbxError, err
+	return ws, status, umiakError, err
 }
 
 // echoOnce writes msg and expects it back.

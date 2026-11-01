@@ -22,10 +22,10 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // maxCommitBody bounds the JSON body of a commit.
@@ -57,7 +57,7 @@ func uploadNotFound(id string) error {
 }
 
 // offsetMismatch is the 409 of a chunk at the wrong offset; the caller sets
-// the Sbx-Upload-Offset header.
+// the Umiak-Upload-Offset header.
 func offsetMismatch(want, got uint64) error {
 	return errs.HTTPError{
 		Status:  http.StatusConflict,
@@ -97,7 +97,7 @@ func (s *Service) getUpload(id string) (*store.Upload, bool, error) {
 
 // putChunk serves PUT /files/uploads/{id}?offset=&path=&user=. The chunk
 // (at most MaxChunk bytes) is appended at offset, which must equal the
-// current size; otherwise 409 with Sbx-Upload-Offset. The first chunk
+// current size; otherwise 409 with Umiak-Upload-Offset. The first chunk
 // creates the upload; path is the hint where to keep its temporary file
 // (spec 11.3).
 func (s *Service) putChunk(w http.ResponseWriter, r *http.Request, id string) {
@@ -233,7 +233,7 @@ func (s *Service) chunkTooLarge() error {
 
 // tempPathFor chooses the temporary file of a new upload (spec 11.3):
 // UploadsDir/<id> unless the path hint q["path"] names a directory on
-// another filesystem than StateDir, then .sbx-upload-<id> in that
+// another filesystem than StateDir, then .umiak-upload-<id> in that
 // directory.
 func (s *Service) tempPathFor(id string, q url.Values) (string, error) {
 	inState := filepath.Join(s.opts.Layout.UploadsDir, id)
@@ -250,7 +250,7 @@ func (s *Service) tempPathFor(id string, q url.Values) (string, error) {
 		stateDev, ok1 := deviceOf(s.opts.Layout.StateDir)
 		dirDev, ok2 := deviceOf(dir)
 		if fi, err := os.Stat(dir); err == nil && fi.IsDir() && ok1 && ok2 && stateDev != dirDev {
-			return filepath.Join(dir, ".sbx-upload-"+id), nil
+			return filepath.Join(dir, ".umiak-upload-"+id), nil
 		}
 	}
 	if err := os.MkdirAll(s.opts.Layout.UploadsDir, 0o700); err != nil {
@@ -259,7 +259,7 @@ func (s *Service) tempPathFor(id string, q url.Values) (string, error) {
 	return inState, nil
 }
 
-// headUpload serves HEAD /files/uploads/{id}: Sbx-Upload-Offset, or 404.
+// headUpload serves HEAD /files/uploads/{id}: Umiak-Upload-Offset, or 404.
 func (s *Service) headUpload(w http.ResponseWriter, id string) {
 	rec, ok, err := s.getUpload(id)
 	if err != nil {

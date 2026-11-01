@@ -26,7 +26,7 @@ it("limits S10 itself to one 4GiB guest even while S9 is idle", () => {
 
 it("does not claim S9's VM580 as S10 while preserving the combined cap", () => {
 	const list =
-		"VMID NAME STATUS MEM(MB)\n580 sbx-s9-followups running 4096\n581 sbx-581 stopped 4096";
+		"VMID NAME STATUS MEM(MB)\n580 umiak-s9-followups running 4096\n581 umiak-581 stopped 4096";
 	expect(runningSandboxMemory(list, [581, 595, 596])).toBe(0);
 	expect(runningSandboxMemory(list)).toBe(4096);
 });

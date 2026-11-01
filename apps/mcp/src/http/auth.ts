@@ -4,7 +4,7 @@
 // without verifying it, only for the cache lifetime and the 55 s rule:
 // the api decides whether it is valid.
 import { createHash } from "node:crypto";
-import { Sbx, SbxError } from "@sbx/sdk";
+import { Umiak, UmiakError } from "@umiak/sdk";
 import type { Metrics } from "../metrics.ts";
 
 /** A JWT with less than this left is refused: a call may take 50 s. */
@@ -21,7 +21,7 @@ export const ME_CACHE_MAX_ENTRIES = 10_000;
 export interface Principal {
 	/** The bearer of this request: forwarded to the api as is, never another (6.5). */
 	token: string;
-	/** Team requested by Sbx-Team or `?team=`; absent: the default team. */
+	/** Team requested by Umiak-Team or `?team=`; absent: the default team. */
 	team?: string;
 	kind: "oidc" | "team_key" | "session";
 	scopes: string[];
@@ -64,7 +64,7 @@ export function tokenHash(token: string): string {
 
 /** `exp` of a JWT in ms, read without checking the signature; null when it is not a JWT. */
 export function jwtExpiresAt(token: string): number | null {
-	if (token.startsWith("sbx_")) return null;
+	if (token.startsWith("umiak_")) return null;
 	const parts = token.split(".");
 	if (parts.length !== 3 || parts[1] === undefined) return null;
 	try {
@@ -158,7 +158,7 @@ function rejectionOf(err: unknown): {
 	rejection: AuthRejection;
 	cache: boolean;
 } {
-	if (err instanceof SbxError && err.status === 401) {
+	if (err instanceof UmiakError && err.status === 401) {
 		return {
 			rejection: {
 				status: 401,
@@ -170,7 +170,7 @@ function rejectionOf(err: unknown): {
 			cache: true,
 		};
 	}
-	if (err instanceof SbxError && (err.status === 403 || err.status === 400)) {
+	if (err instanceof UmiakError && (err.status === 403 || err.status === 400)) {
 		const reason = err.details.reason;
 		return {
 			rejection: {
@@ -188,7 +188,7 @@ function rejectionOf(err: unknown): {
 			status: 503,
 			reason: "api_unavailable",
 			code: "api_unavailable",
-			message: "the sbx API did not answer the credential check; retry",
+			message: "the umiak API did not answer the credential check; retry",
 		},
 		cache: false,
 	};
@@ -202,9 +202,9 @@ export function createAuthenticator(o: AuthenticatorOptions): Authenticate {
 	async function ask(token: string, team: string | undefined) {
 		o.metrics?.meCacheMisses.inc();
 		const exp = jwtExpiresAt(token);
-		const sbx = new Sbx({
+		const umiak = new Umiak({
 			baseUrl: o.apiUrl,
-			...(token.startsWith("sbx_")
+			...(token.startsWith("umiak_")
 				? { apiKey: token }
 				: { accessToken: token }),
 			...(team === undefined ? {} : { team }),
@@ -215,7 +215,7 @@ export function createAuthenticator(o: AuthenticatorOptions): Authenticate {
 		let verdict: Verdict;
 		let ttl: number;
 		try {
-			const me = await sbx.me({
+			const me = await umiak.me({
 				signal: AbortSignal.timeout(ME_TIMEOUT_MS),
 				retryBudgetMs: ME_TIMEOUT_MS,
 			});

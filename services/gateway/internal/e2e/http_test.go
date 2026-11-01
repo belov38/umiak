@@ -19,11 +19,11 @@ import (
 	"connectrpc.com/connect"
 	"github.com/coder/websocket"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/process"
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/process"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 func TestPeerProxy(t *testing.T) {
@@ -162,7 +162,7 @@ func echoAll(t *testing.T, conns []*websocket.Conn) {
 func TestOverloaded801(t *testing.T) {
 	t.Parallel()
 	opts := testenv.Options{Deps: func(d *server.Deps) {
-		d.AllowedServicePrefixes = []string{"sbx.agent.v1.", "sbx.testing.v1."}
+		d.AllowedServicePrefixes = []string{"umiak.agent.v1.", "umiak.testing.v1."}
 	}}
 	c := newCluster(t, opts, nil)
 	store := process.NewStore(process.Options{})
@@ -184,7 +184,7 @@ func TestOverloaded801(t *testing.T) {
 	// The keep-alive pool of A is empty (only upgrades so far), so the
 	// next request needs stream number limit+1.
 	r := get(t, client, host, "/")
-	if r.err != nil || r.status != http.StatusServiceUnavailable || r.sbxError != "overloaded" {
+	if r.err != nil || r.status != http.StatusServiceUnavailable || r.umiakError != "overloaded" {
 		t.Fatalf("request %d = %v, want 503 overloaded", limit+1, r)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeout)
@@ -245,8 +245,8 @@ func (b bearerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func TestBigTransfer(t *testing.T) {
-	if os.Getenv("SBX_E2E_BIG") != "1" {
-		t.Skip("5 GiB transfer; set SBX_E2E_BIG=1 to run it")
+	if os.Getenv("UMIAK_E2E_BIG") != "1" {
+		t.Skip("5 GiB transfer; set UMIAK_E2E_BIG=1 to run it")
 	}
 	const size = 5 << 30
 	c := newCluster(t, testenv.Options{}, nil)

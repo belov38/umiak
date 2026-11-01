@@ -1,7 +1,7 @@
 // Helpers for the agent's HTTP `/files*` (S3 §11.2) behind
 // `AgentApi.files`: query strings, JSON error bodies and the protojson
 // FileInfo the agent answers with.
-import { parseUploadOffset, readBodyCapped } from "@sbx/agent-client";
+import { parseUploadOffset, readBodyCapped } from "@umiak/agent-client";
 import { AgentCallError } from "./errors.ts";
 import type { AgentFileInfo, AgentFileType } from "./types.ts";
 
@@ -34,7 +34,7 @@ export async function readAgentJson(
  * retryable, entries_written?}` from the body; a body that is not that JSON
  * (or is too large) gives `range_not_satisfiable` for 416, else
  * `http_<status>`. upload_offset_mismatch gets `details.offset` from
- * `Sbx-Upload-Offset`.
+ * `Umiak-Upload-Offset`.
  */
 export async function agentHttpError(res: Response): Promise<AgentCallError> {
 	let body: Record<string, unknown> = {};
@@ -55,7 +55,7 @@ export async function agentHttpError(res: Response): Promise<AgentCallError> {
 			: `the agent answered ${res.status}`;
 	const details: Record<string, unknown> = {};
 	if (code === "upload_offset_mismatch") {
-		const offset = parseUploadOffset(res.headers.get("sbx-upload-offset"));
+		const offset = parseUploadOffset(res.headers.get("umiak-upload-offset"));
 		if (offset !== undefined) details.offset = Number(offset);
 	}
 	if (typeof body.entries_written === "number") {

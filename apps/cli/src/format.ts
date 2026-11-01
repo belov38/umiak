@@ -1,7 +1,7 @@
 // Text for a person (TTY output): tables and one-line summaries of the API
 // resources. JSON output never goes through here.
 
-import type { SandboxData } from "@sbx/sdk";
+import type { SandboxData } from "@umiak/sdk";
 
 /** Columns padded to the widest cell; the last column is not padded. */
 export function table(headers: string[], rows: (string | null)[][]): string {

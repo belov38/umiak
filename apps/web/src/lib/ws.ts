@@ -2,7 +2,7 @@
 // tab to watch its own connection (attached, closed with a code) for the
 // "reconnecting…" bar. The SDK's Pty reconnects by itself; it only does not
 // tell when.
-import type { WebSocketFactory } from "@sbx/sdk";
+import type { WebSocketFactory } from "@umiak/sdk";
 
 export type PtySocketEvent =
 	| { type: "attached" }

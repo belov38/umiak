@@ -2,8 +2,8 @@
 
 // Package integration holds the Linux integration tests of the guest agent
 // (spec S3 section 21). They run as root inside the privileged systemd
-// container that test/linux/run.sh prepares: the real sbx-agent is installed
-// as a package, sbx-identity.service and sbx-agent.service run under systemd,
+// container that test/linux/run.sh prepares: the real umiak-agent is installed
+// as a package, umiak-identity.service and umiak-agent.service run under systemd,
 // and the tests drive the agent over its debug socket
 // (`run --debug-listen`), which serves the agent API, Control/Info and a
 // read-only Events/Subscribe without a gateway.
@@ -29,23 +29,23 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // Paths prepared by run.sh.
 const (
-	debugSock  = "/run/sbx-agent/debug.sock"
-	configFile = "/etc/sbx-agent/agent.toml"
-	baseConfig = "/var/lib/sbx-it/agent.toml"
-	dmiDir     = "/var/lib/sbx-it/dmi"
+	debugSock  = "/run/umiak-agent/debug.sock"
+	configFile = "/etc/umiak-agent/agent.toml"
+	baseConfig = "/var/lib/umiak-it/agent.toml"
+	dmiDir     = "/var/lib/umiak-it/dmi"
 	pkgDir     = "/it/pkg"
-	agentUnit  = "sbx-agent.service"
-	stateDir   = "/var/lib/sbx-agent"
+	agentUnit  = "umiak-agent.service"
+	stateDir   = "/var/lib/umiak-agent"
 )
 
 // waitAgentTimeout bounds a wait for the agent to (re)start.
@@ -69,7 +69,7 @@ type agentClient struct {
 }
 
 // newClient returns a client of the debug socket. Every call carries a fresh
-// Sbx-Request-Id.
+// Umiak-Request-Id.
 func newClient() *agentClient {
 	hc := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -89,7 +89,7 @@ func newClient() *agentClient {
 	}
 }
 
-// requestIDs sets a new Sbx-Request-Id on every call that has none.
+// requestIDs sets a new Umiak-Request-Id on every call that has none.
 type requestIDs struct{}
 
 func (requestIDs) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
@@ -152,7 +152,7 @@ func eventually(t *testing.T, d time.Duration, what string, cond func() bool) {
 	}
 }
 
-// mainPID returns the main pid of sbx-agent.service, 0 when it is not running.
+// mainPID returns the main pid of umiak-agent.service, 0 when it is not running.
 func mainPID(t *testing.T) int {
 	t.Helper()
 	out := strings.TrimSpace(sh(t, "systemctl show -p MainPID --value "+agentUnit))
@@ -182,7 +182,7 @@ func waitAgent(t *testing.T) *agentv1.InfoResponse {
 	return info
 }
 
-// restartAgent restarts sbx-agent.service and waits until it answers.
+// restartAgent restarts umiak-agent.service and waits until it answers.
 func restartAgent(t *testing.T) {
 	t.Helper()
 	sh(t, "systemctl restart "+agentUnit)
@@ -458,10 +458,10 @@ func waitEventLoose(t *testing.T, after uint64, typ string, d time.Duration, msg
 	return found
 }
 
-// doctor runs `sbx-agent doctor --json` and returns the decoded report.
+// doctor runs `umiak-agent doctor --json` and returns the decoded report.
 func doctor(t *testing.T) map[string]any {
 	t.Helper()
-	out, err := exec.CommandContext(t.Context(), "/usr/local/bin/sbx-agent", "doctor", "--json").Output()
+	out, err := exec.CommandContext(t.Context(), "/usr/local/bin/umiak-agent", "doctor", "--json").Output()
 	if err != nil {
 		t.Fatalf("doctor: %v", err)
 	}
@@ -478,7 +478,7 @@ func pids(pattern string) []string {
 	return strings.Fields(string(out))
 }
 
-// errDetail returns the sbx detail code of a Connect error, or "".
+// errDetail returns the umiak detail code of a Connect error, or "".
 func errDetail(err error) string {
 	d, ok := rpcconv.Detail(err)
 	if !ok {
@@ -492,7 +492,7 @@ func cmdDir(id string) string { return filepath.Join(stateDir, "commands", id) }
 
 func TestContainerSmoke(t *testing.T) {
 	if out, err := shErr("systemctl is-active " + agentUnit); strings.TrimSpace(out) != "active" {
-		t.Fatalf("sbx-agent is %q (%v)", strings.TrimSpace(out), err)
+		t.Fatalf("umiak-agent is %q (%v)", strings.TrimSpace(out), err)
 	}
 	info := waitAgent(t)
 	if info.GetMachineId() == "" || info.GetVersion() == "" {
@@ -500,7 +500,7 @@ func TestContainerSmoke(t *testing.T) {
 	}
 	rep := doctor(t)
 	units, _ := rep["units"].(map[string]any)
-	if units["sbx-agent"] != "active" || units["sbx-identity"] != "active" {
+	if units["umiak-agent"] != "active" || units["umiak-identity"] != "active" {
 		t.Errorf("doctor units = %v", units)
 	}
 	if id, _ := rep["identity"].(map[string]any); id == nil || id["machine_id"] != info.GetMachineId() {

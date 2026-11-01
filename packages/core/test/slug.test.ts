@@ -4,8 +4,8 @@ import {
 	isValidSlug,
 	RESERVED_SLUG_SUFFIXES,
 	RESERVED_SLUGS,
-	SbxError,
 	SLUG_WORDS,
+	UmiakError,
 	validateSlug,
 } from "../src/index.ts";
 
@@ -16,9 +16,9 @@ function expectInvalid(s: string) {
 	} catch (e) {
 		err = e;
 	}
-	expect(err, s).toBeInstanceOf(SbxError);
-	expect((err as SbxError).code).toBe("validation");
-	expect((err as SbxError).details.issues).toEqual([
+	expect(err, s).toBeInstanceOf(UmiakError);
+	expect((err as UmiakError).code).toBe("validation");
+	expect((err as UmiakError).details.issues).toEqual([
 		{ path: "slug", message: expect.any(String) },
 	]);
 	expect(isValidSlug(s)).toBe(false);
@@ -62,7 +62,7 @@ describe("validateSlug", () => {
 	it("exports the reserved lists", () => {
 		expect(RESERVED_SLUG_SUFFIXES).toEqual(["-desktop"]);
 		expect([...RESERVED_SLUGS].sort()).toEqual(
-			["admin", "api", "app", "sbx", "ssh", "static", "tunnel", "www"].sort(),
+			["admin", "api", "app", "umiak", "ssh", "static", "tunnel", "www"].sort(),
 		);
 	});
 });

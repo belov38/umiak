@@ -9,9 +9,9 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
+	"github.com/belov38/umiak/services/guest-agent/internal/winapi"
 )
 
 // NTFS has no Unix modes or numeric owners. FileInfo synthesizes the mode

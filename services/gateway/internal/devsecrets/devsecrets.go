@@ -1,5 +1,5 @@
 // Package devsecrets creates the secrets a gateway needs for a local stack
-// (docker compose): a dev CA with the sbx wildcard and tunnel certificates,
+// (docker compose): a dev CA with the umiak wildcard and tunnel certificates,
 // the cookie keys, the SSH host keys and CAs, and the service tokens. It only
 // creates missing files, so it is safe to run on every start.
 package devsecrets
@@ -33,7 +33,7 @@ import (
 
 // Defaults of the names.
 const (
-	DefaultDomain     = "sbx.localhost"
+	DefaultDomain     = "umiak.localhost"
 	DefaultTunnelHost = "tunnel.localhost"
 	DefaultSSHHost    = "ssh.localhost"
 )
@@ -42,8 +42,8 @@ const (
 const (
 	FileCACert         = "ca.pem"
 	FileCAKey          = "ca.key"
-	FileSbxCert        = "sbx.pem"
-	FileSbxKey         = "sbx.key"
+	FileUmiakCert        = "umiak.pem"
+	FileUmiakKey         = "umiak.key"
 	FileTunnelCert     = "tunnel.pem"
 	FileTunnelKey      = "tunnel.key"
 	FileCookieKeys     = "cookie-keys"
@@ -83,7 +83,7 @@ func ParseOwner(s string) (*Owner, error) {
 type Options struct {
 	// Dir is the output directory; it is created (0700) when missing.
 	Dir string
-	// Domain is the sbx domain; the certificate is for *.Domain and Domain.
+	// Domain is the umiak domain; the certificate is for *.Domain and Domain.
 	Domain string
 	// TunnelHost is the agents' tunnel host name.
 	TunnelHost string
@@ -130,10 +130,10 @@ func Generate(o Options) ([]string, error) {
 	steps := []func() error{
 		g.tls,
 		func() error { return g.once(FileCookieKeys, modeSecret, cookieKeys) },
-		func() error { return g.sshKey(FileHostEd25519, ed25519Key, "sbx-gateway@"+o.SSHHost) },
-		func() error { return g.sshKey(FileHostECDSA, ecdsaKey, "sbx-gateway@"+o.SSHHost) },
-		func() error { return g.sshKey(FileUserCA, ed25519Key, "sbx-gateway user CA") },
-		func() error { return g.sshKey(FileLoginCA, ed25519Key, "sbx login CA") },
+		func() error { return g.sshKey(FileHostEd25519, ed25519Key, "umiak-gateway@"+o.SSHHost) },
+		func() error { return g.sshKey(FileHostECDSA, ecdsaKey, "umiak-gateway@"+o.SSHHost) },
+		func() error { return g.sshKey(FileUserCA, ed25519Key, "umiak-gateway user CA") },
+		func() error { return g.sshKey(FileLoginCA, ed25519Key, "umiak login CA") },
 		func() error { return g.derived(FileLoginCAKeys, modePublic, g.loginCAKeys) },
 		func() error { return g.once(FileServiceTokens, modeSecret, serviceTokens) },
 		func() error { return g.once(FileAPIToken, modeSecret, tokenFile) },
@@ -150,7 +150,7 @@ func Generate(o Options) ([]string, error) {
 
 // allFiles are the files of the set, for chownAll.
 var allFiles = []string{
-	FileCACert, FileCAKey, FileSbxCert, FileSbxKey, FileTunnelCert, FileTunnelKey,
+	FileCACert, FileCAKey, FileUmiakCert, FileUmiakKey, FileTunnelCert, FileTunnelKey,
 	FileCookieKeys,
 	FileHostEd25519, FileHostEd25519 + ".pub", FileHostECDSA, FileHostECDSA + ".pub",
 	FileUserCA, FileUserCA + ".pub", FileLoginCA, FileLoginCA + ".pub", FileLoginCAKeys,
@@ -307,7 +307,7 @@ func (g *gen) tls() error {
 	if err != nil {
 		return err
 	}
-	haveSbx, err := g.pair(FileSbxCert, FileSbxKey)
+	haveUmiak, err := g.pair(FileUmiakCert, FileUmiakKey)
 	if err != nil {
 		return err
 	}
@@ -315,11 +315,11 @@ func (g *gen) tls() error {
 	if err != nil {
 		return err
 	}
-	if !haveCA && (haveSbx || haveTunnel) {
+	if !haveCA && (haveUmiak || haveTunnel) {
 		return fmt.Errorf("%s and %s are missing while certificates of the old CA exist: remove %s, %s, %s and %s too",
-			FileCACert, FileCAKey, FileSbxCert, FileSbxKey, FileTunnelCert, FileTunnelKey)
+			FileCACert, FileCAKey, FileUmiakCert, FileUmiakKey, FileTunnelCert, FileTunnelKey)
 	}
-	if haveSbx && haveTunnel {
+	if haveUmiak && haveTunnel {
 		return nil
 	}
 	if haveCA {
@@ -329,8 +329,8 @@ func (g *gen) tls() error {
 	} else if err := g.newCA(); err != nil {
 		return err
 	}
-	if !haveSbx {
-		if err := g.leaf(FileSbxCert, FileSbxKey, []string{"*." + g.o.Domain, g.o.Domain}); err != nil {
+	if !haveUmiak {
+		if err := g.leaf(FileUmiakCert, FileUmiakKey, []string{"*." + g.o.Domain, g.o.Domain}); err != nil {
 			return err
 		}
 	}
@@ -352,7 +352,7 @@ func (g *gen) newCA() error {
 	now := g.o.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial(),
-		Subject:               pkix.Name{CommonName: "sbx dev CA " + hex.EncodeToString(id[:]), Organization: []string{"sbx local development"}},
+		Subject:               pkix.Name{CommonName: "umiak dev CA " + hex.EncodeToString(id[:]), Organization: []string{"umiak local development"}},
 		NotBefore:             now.Add(-clockSkewAllowance),
 		NotAfter:              now.Add(caValidity),
 		IsCA:                  true,
@@ -544,7 +544,7 @@ func authorizedKey(k ssh.PublicKey, comment string) []byte {
 	return []byte(line + "\n")
 }
 
-// loginCAKeys is SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE: the login CA's public
+// loginCAKeys is UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE: the login CA's public
 // key in authorized_keys format.
 func (g *gen) loginCAKeys() ([]byte, error) {
 	s, err := g.sshSigner(FileLoginCA)
@@ -552,7 +552,7 @@ func (g *gen) loginCAKeys() ([]byte, error) {
 		return nil, err
 	}
 	return append([]byte("# CAs of the short-lived SSH login certificates (api signs them with ssh_login_ca)\n"),
-		authorizedKey(s.PublicKey(), "sbx login CA")...), nil
+		authorizedKey(s.PublicKey(), "umiak login CA")...), nil
 }
 
 func cookieKeys() ([]byte, error) {
@@ -579,7 +579,7 @@ func tokenFile() ([]byte, error) {
 	return []byte(t + "\n"), nil
 }
 
-// serviceTokens is SBX_GATEWAY_SERVICE_TOKENS_FILE: one token per caller.
+// serviceTokens is UMIAK_GATEWAY_SERVICE_TOKENS_FILE: one token per caller.
 func serviceTokens() ([]byte, error) {
 	set := map[string][]string{}
 	for _, k := range []string{"api", "worker", "gateway"} {
@@ -596,7 +596,7 @@ func serviceTokens() ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
-// workerToken is the worker's SBX_GATEWAY_SERVICE_TOKEN_FILE: the first
+// workerToken is the worker's UMIAK_GATEWAY_SERVICE_TOKEN_FILE: the first
 // worker token of the service tokens.
 func (g *gen) workerToken() ([]byte, error) {
 	b, err := os.ReadFile(g.path(FileServiceTokens))

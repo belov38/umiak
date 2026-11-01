@@ -11,7 +11,7 @@ import {
 	readSecretFile,
 	SqliteStateStore,
 	SshNodeOps,
-} from "@sbx/pve";
+} from "@umiak/pve";
 
 export interface Ctx {
 	cfg: Config;
@@ -165,7 +165,7 @@ export interface VmResource {
 	template?: number;
 }
 
-/** Template VMs and template build VMs (tag sbx-tpl) are never bench leftovers. */
+/** Template VMs and template build VMs (tag umiak-tpl) are never bench leftovers. */
 export function isTemplateVm(v: VmResource): boolean {
-	return v.template === 1 || (v.tags ?? "").split(/[;,]/).includes("sbx-tpl");
+	return v.template === 1 || (v.tags ?? "").split(/[;,]/).includes("umiak-tpl");
 }

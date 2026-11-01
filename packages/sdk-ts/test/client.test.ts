@@ -16,10 +16,10 @@ import { generateTypes, outputUrl } from "../scripts/gen.ts";
 import {
 	createRawClient,
 	type RawResponse,
-	type SbxOptions,
 	SDK_VERSION,
+	type UmiakOptions,
 } from "../src/client.ts";
-import { SbxError } from "../src/errors.ts";
+import { UmiakError } from "../src/errors.ts";
 import type { components, paths } from "../src/gen/v1.d.ts";
 
 const API = "https://api.example.test";
@@ -91,7 +91,9 @@ const SANDBOX = { id: "sb_1", slug: "quiet-otter-lamp", state: "creating" };
 
 function client(
 	fetch: typeof globalThis.fetch,
-	creds: Pick<SbxOptions, "apiKey" | "tokenProvider"> = { apiKey: "sbx_test" },
+	creds: Pick<UmiakOptions, "apiKey" | "tokenProvider"> = {
+		apiKey: "umiak_test",
+	},
 ) {
 	return createRawClient({
 		baseUrl: API,
@@ -110,16 +112,16 @@ afterEach(() => {
 });
 
 describe("headers", () => {
-	it("sends Authorization, Sbx-Team and User-Agent", async () => {
+	it("sends Authorization, Umiak-Team and User-Agent", async () => {
 		const f = fakeFetch(json(200, { user: null }));
 		const { data, response } = await client(f.fetch).GET("/v1/me");
 		expect(data).toEqual({ user: null });
 		expect(response.status).toBe(200);
 		const h = f.seen[0]?.headers;
 		expect(f.seen[0]?.url).toBe(`${API}/v1/me`);
-		expect(h?.get("authorization")).toBe("Bearer sbx_test");
-		expect(h?.get("sbx-team")).toBe("team_1");
-		expect(h?.get("user-agent")).toBe(`sbx-sdk-ts/${SDK_VERSION}`);
+		expect(h?.get("authorization")).toBe("Bearer umiak_test");
+		expect(h?.get("umiak-team")).toBe("team_1");
+		expect(h?.get("user-agent")).toBe(`umiak-sdk-ts/${SDK_VERSION}`);
 		expect(h?.has("idempotency-key")).toBe(false);
 	});
 
@@ -130,17 +132,17 @@ describe("headers", () => {
 		expect(SDK_VERSION).toBe(pkg.version);
 	});
 
-	it("userAgent option replaces the default; no team, no Sbx-Team", async () => {
+	it("userAgent option replaces the default; no team, no Umiak-Team", async () => {
 		const f = fakeFetch(json(200, {}));
 		await createRawClient({
 			baseUrl: API,
-			apiKey: "sbx_test",
+			apiKey: "umiak_test",
 			fetch: f.fetch,
 			userAgent: "my-tool/1.0",
 			env: {},
 		}).GET("/v1/me");
 		expect(f.seen[0]?.headers.get("user-agent")).toBe("my-tool/1.0");
-		expect(f.seen[0]?.headers.has("sbx-team")).toBe(false);
+		expect(f.seen[0]?.headers.has("umiak-team")).toBe(false);
 	});
 
 	it("generates an Idempotency-Key for the keyed POSTs only", async () => {
@@ -228,7 +230,7 @@ describe("retries", () => {
 				params: { path: { sandbox: "sb_1" } },
 			})
 			.catch((e: unknown) => e);
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({
 			status: 503,
 			code: "server_shutting_down",
@@ -249,7 +251,7 @@ describe("retries", () => {
 			})
 			.catch((e: unknown) => e);
 		expect(err).toMatchObject({
-			name: "SbxError",
+			name: "UmiakError",
 			status: 0,
 			code: "network_error",
 			retryable: false,
@@ -342,7 +344,7 @@ describe("retries", () => {
 			try {
 				const raw = createRawClient({
 					baseUrl: `http://127.0.0.1:${port}`,
-					apiKey: "sbx_test",
+					apiKey: "umiak_test",
 					env: {},
 				});
 				const ac = new AbortController();
@@ -444,7 +446,7 @@ describe("retryBudgetMs option", () => {
 			baseUrl: API,
 			fetch: f.fetch,
 			env: {},
-			apiKey: "sbx_test",
+			apiKey: "umiak_test",
 			retryBudgetMs: 1500,
 		});
 		const start = Date.now();
@@ -459,7 +461,7 @@ describe("retryBudgetMs option", () => {
 			baseUrl: API,
 			fetch: g.fetch,
 			env: {},
-			apiKey: "sbx_test",
+			apiKey: "umiak_test",
 			retryBudgetMs: 1500,
 		});
 		const q = raw2.GET("/v1/me", { retryBudgetMs: 0 }).catch((e: unknown) => e);
@@ -480,7 +482,7 @@ describe("malformed answers and token providers", () => {
 		const err = await client(f.fetch)
 			.GET("/v1/me")
 			.catch((e: unknown) => e);
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({
 			status: 200,
 			code: "unexpected_response",
@@ -501,7 +503,7 @@ describe("malformed answers and token providers", () => {
 		const p = raw.GET("/v1/me").catch((e: unknown) => e);
 		await vi.runAllTimersAsync();
 		const err = await p;
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({
 			status: 0,
 			code: "token_provider_failed",
@@ -605,8 +607,8 @@ describe("timeouts and redirects", () => {
 		const err = await client(f.fetch)
 			.GET("/v1/me")
 			.catch((e: unknown) => e);
-		expect(err).toBeInstanceOf(SbxError);
-		expect((err as SbxError).status).toBe(302);
+		expect(err).toBeInstanceOf(UmiakError);
+		expect((err as UmiakError).status).toBe(302);
 		expect(f.seen).toHaveLength(1);
 	});
 
@@ -629,8 +631,8 @@ describe("timeouts and redirects", () => {
 			.catch((e: unknown) => e);
 		await vi.advanceTimersByTimeAsync(1_000);
 		const err = await p;
-		expect((err as SbxError).code).toBe("network_error");
-		expect((err as SbxError).message).toContain("1000 ms");
+		expect((err as UmiakError).code).toBe("network_error");
+		expect((err as UmiakError).message).toContain("1000 ms");
 	});
 
 	it("a body silent for 60 s fails with network_error", async () => {
@@ -650,8 +652,8 @@ describe("timeouts and redirects", () => {
 			.catch((e: unknown) => e);
 		await vi.advanceTimersByTimeAsync(60_000);
 		const err = await p;
-		expect(err).toBeInstanceOf(SbxError);
-		expect((err as SbxError).code).toBe("network_error");
+		expect(err).toBeInstanceOf(UmiakError);
+		expect((err as UmiakError).code).toBe("network_error");
 	});
 });
 
@@ -712,7 +714,7 @@ describe("content types", () => {
 		const f = fakeFetch(
 			new Response(null, {
 				status: 200,
-				headers: { "Sbx-Upload-Offset": "12" },
+				headers: { "Umiak-Upload-Offset": "12" },
 			}),
 		);
 		const { data, response } = await client(f.fetch).HEAD(
@@ -720,7 +722,7 @@ describe("content types", () => {
 			{ params: { path: { sandbox: "sb_1", upload: "upl_1" } } },
 		);
 		expect(data).toBeUndefined();
-		expect(response.headers.get("sbx-upload-offset")).toBe("12");
+		expect(response.headers.get("umiak-upload-offset")).toBe("12");
 	});
 });
 
@@ -766,7 +768,7 @@ describe("generated types", () => {
 		expectTypeOf<undefined>().not.toExtend<Got>();
 	});
 
-	it("src/gen/v1.d.ts is fresh (pnpm --filter @sbx/sdk gen)", async () => {
+	it("src/gen/v1.d.ts is fresh (pnpm --filter @umiak/sdk gen)", async () => {
 		vi.useRealTimers();
 		const committed = await readFile(outputUrl, "utf8");
 		expect(committed).toBe(await generateTypes());

@@ -32,8 +32,8 @@ func TestMetricsNames(t *testing.T) {
 	m.SSHSessions.WithLabelValues("ok").Inc()
 	m.SSHAuth.WithLabelValues("ok").Inc()
 	m.SSHChannels.WithLabelValues("session").Inc()
-	m.TLSHandshakeErrors.WithLabelValues("sbx").Inc()
-	m.CertExpiry.WithLabelValues("sbx").Set(1)
+	m.TLSHandshakeErrors.WithLabelValues("umiak").Inc()
+	m.CertExpiry.WithLabelValues("umiak").Set(1)
 	m.DrainOpenStreams.WithLabelValues("http").Set(1)
 	m.DependencyUp.WithLabelValues("postgres").Set(1)
 	m.TunnelAdmitLimited.Inc()
@@ -55,26 +55,26 @@ func TestMetricsNames(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"sbx_gateway_http_requests_total":            "access,code_class,sbx_error,via",
-		"sbx_gateway_http_request_duration_seconds":  "access,via",
-		"sbx_gateway_http_bytes_total":               "direction",
-		"sbx_gateway_http_active_streams":            "",
-		"sbx_gateway_upstream_dial_duration_seconds": "via",
-		"sbx_gateway_upstream_dial_errors_total":     "reason",
-		"sbx_gateway_route_lookups_total":            "result",
-		"sbx_gateway_route_invalidations_total":      "",
-		"sbx_gateway_auth_total":                     "access,result",
-		"sbx_gateway_ratelimited_total":              "limit",
-		"sbx_gateway_peer_streams_active":            "",
-		"sbx_gateway_ssh_connections_active":         "",
-		"sbx_gateway_ssh_sessions_total":             "result",
-		"sbx_gateway_ssh_auth_total":                 "result",
-		"sbx_gateway_ssh_channels_total":             "type",
-		"sbx_gateway_tls_handshake_errors_total":     "sni_kind",
-		"sbx_gateway_cert_expiry_timestamp_seconds":  "cert",
-		"sbx_gateway_drain_open_streams":             "kind",
-		"sbx_gateway_dependency_up":                  "dep",
-		"sbx_gateway_tunnel_admit_limited_total":     "",
+		"umiak_gateway_http_requests_total":            "access,code_class,umiak_error,via",
+		"umiak_gateway_http_request_duration_seconds":  "access,via",
+		"umiak_gateway_http_bytes_total":               "direction",
+		"umiak_gateway_http_active_streams":            "",
+		"umiak_gateway_upstream_dial_duration_seconds": "via",
+		"umiak_gateway_upstream_dial_errors_total":     "reason",
+		"umiak_gateway_route_lookups_total":            "result",
+		"umiak_gateway_route_invalidations_total":      "",
+		"umiak_gateway_auth_total":                     "access,result",
+		"umiak_gateway_ratelimited_total":              "limit",
+		"umiak_gateway_peer_streams_active":            "",
+		"umiak_gateway_ssh_connections_active":         "",
+		"umiak_gateway_ssh_sessions_total":             "result",
+		"umiak_gateway_ssh_auth_total":                 "result",
+		"umiak_gateway_ssh_channels_total":             "type",
+		"umiak_gateway_tls_handshake_errors_total":     "sni_kind",
+		"umiak_gateway_cert_expiry_timestamp_seconds":  "cert",
+		"umiak_gateway_drain_open_streams":             "kind",
+		"umiak_gateway_dependency_up":                  "dep",
+		"umiak_gateway_tunnel_admit_limited_total":     "",
 	}
 	for name, labels := range want {
 		g, ok := got[name]
@@ -109,15 +109,15 @@ func TestAccessLogFields(t *testing.T) {
 		Time:          time.Date(2026, 10, 29, 1, 2, 3, 0, time.UTC),
 		RequestID:     "01HX",
 		ClientIP:      "203.0.113.5",
-		Host:          "my-app-3000.sbx.example.com",
+		Host:          "my-app-3000.umiak.example.com",
 		Label:         "my-app-3000",
-		SandboxID:     "sbx_1",
+		SandboxID:     "umiak_1",
 		MachineID:     "m_1",
 		Port:          3000,
 		Method:        "GET",
 		Path:          "/index.html?_token=secret&x=1",
 		Status:        200,
-		SbxError:      "",
+		UmiakError:      "",
 		BytesIn:       10,
 		BytesOut:      20,
 		DurationMs:    5,
@@ -144,7 +144,7 @@ func TestAccessLogFields(t *testing.T) {
 	}
 	want := []string{
 		"time", "requestId", "clientIp", "host", "label", "sandboxId", "machineId", "port",
-		"method", "path", "status", "sbxError", "bytesIn", "bytesOut", "durationMs", "ttfbMs",
+		"method", "path", "status", "umiakError", "bytesIn", "bytesOut", "durationMs", "ttfbMs",
 		"access", "authResult", "userId", "upgrade", "via", "ownerInstance", "userAgent",
 	}
 	var keys []string
@@ -193,7 +193,7 @@ func TestAccessLogSSH(t *testing.T) {
 		ActorKind:      "user",
 		UserID:         "usr_1",
 		Fingerprint:    "SHA256:abc",
-		SandboxID:      "sbx_1",
+		SandboxID:      "umiak_1",
 		Start:          time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC),
 		End:            time.Date(2026, 10, 29, 1, 5, 0, 0, time.UTC),
 		BytesIn:        1,

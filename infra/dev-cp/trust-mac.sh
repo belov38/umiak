@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# boat-dev-clone dev control plane: trust the dev CA in the macOS login keychain, for port
+# umiak dev control plane: trust the dev CA in the macOS login keychain, for port
 # previews in the browser only. Dev only.
 #
 #   infra/dev-cp/trust-mac.sh [--remove]

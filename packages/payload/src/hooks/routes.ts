@@ -1,5 +1,5 @@
 // Public port settings of platform-defaults (S8 §8, S7 C7): the gateway
-// refetches every route on NOTIFY sbx_routes '*'. A change of ssoPortPolicy
+// refetches every route on NOTIFY umiak_routes '*'. A change of ssoPortPolicy
 // from any to team bumps ssoPolicyEpoch, which ends sso cookies issued
 // under the old policy (authEpoch = hosted_ports.auth_epoch + ssoPolicyEpoch).
 import type { GlobalAfterChangeHook, GlobalBeforeChangeHook } from "payload";
@@ -28,7 +28,7 @@ export const routesAfterChange: GlobalAfterChangeHook = async ({
 		previousDoc?.publicDesktopEnabled !== doc.publicDesktopEnabled ||
 		previousDoc?.ssoPortPolicy !== doc.ssoPortPolicy
 	) {
-		await notify(req, "sbx_routes", "*");
+		await notify(req, "umiak_routes", "*");
 	}
 	return doc;
 };

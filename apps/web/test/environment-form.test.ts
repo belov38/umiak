@@ -160,7 +160,7 @@ describe("toCreateEnvironmentRequest", () => {
 			form({
 				name: "Bad Name",
 				env: [{ key: "1X", value: "v" }],
-				secrets: [{ key: "SBX_FOO", value: "v" }],
+				secrets: [{ key: "UMIAK_FOO", value: "v" }],
 				repositories: [
 					{ url: "https://u:p@github.com/a/b.git", branch: "", path: "" },
 					{ url: "https://github.com/a/c.git", branch: "a b", path: "/abs" },

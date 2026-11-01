@@ -8,8 +8,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 )
 
 // readAll returns every committed event with seq > after without blocking.
@@ -78,7 +78,7 @@ func TestJournalEnvelope(t *testing.T) {
 	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	s, _ := openTest(t, Options{Now: func() time.Time { return now }})
 	s.SetBootID("boot-1")
-	s.AppendEvent("claim.applied", wrapperspb.String("sbx-1"))
+	s.AppendEvent("claim.applied", wrapperspb.String("umiak-1"))
 	if err := s.Flush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestJournalEnvelope(t *testing.T) {
 		t.Errorf("event = %v", ev)
 	}
 	var v wrapperspb.StringValue
-	if err := ev.GetPayload().UnmarshalTo(&v); err != nil || v.GetValue() != "sbx-1" {
+	if err := ev.GetPayload().UnmarshalTo(&v); err != nil || v.GetValue() != "umiak-1" {
 		t.Errorf("payload = %v, %v", v.GetValue(), err)
 	}
 }

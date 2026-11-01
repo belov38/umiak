@@ -10,7 +10,7 @@ import {
 	type McpRequestContext,
 	TRACEPARENT_META_KEY,
 } from "@modelcontextprotocol/server";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { type Context, Hono } from "hono";
 import { type ClientInfo, userAgentOf } from "../context.ts";
 import { apiCallLogger, type Logger } from "../log.ts";
@@ -43,15 +43,15 @@ import {
 } from "./prm.ts";
 
 export interface HttpOptions {
-	/** SBX_MCP_API_URL: the api's public listener. */
+	/** UMIAK_MCP_API_URL: the api's public listener. */
 	apiUrl: string;
-	/** SBX_MCP_PUBLIC_URL, e.g. https://api.example.com/mcp. */
+	/** UMIAK_MCP_PUBLIC_URL, e.g. https://api.example.com/mcp. */
 	publicUrl: string;
-	/** SBX_OIDC_ISSUER (PRM authorization_servers); null: none. */
+	/** UMIAK_OIDC_ISSUER (PRM authorization_servers); null: none. */
 	issuer: string | null;
-	/** Extra Host values (SBX_MCP_ALLOWED_HOSTS). */
+	/** Extra Host values (UMIAK_MCP_ALLOWED_HOSTS). */
 	allowedHosts?: string[];
-	/** Origins a browser may call from (SBX_MCP_ALLOWED_ORIGINS); default none. */
+	/** Origins a browser may call from (UMIAK_MCP_ALLOWED_ORIGINS); default none. */
 	allowedOrigins?: string[];
 	log: Logger;
 	metrics?: Metrics;
@@ -76,7 +76,7 @@ export interface HttpApp {
 }
 
 /** authInfo.extra key of the request state the factory reads. */
-const STATE = "sbx";
+const STATE = "umiak";
 
 /** What one HTTP request hands to its McpServer. */
 interface RequestState {
@@ -227,16 +227,16 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		const state = ctx.authInfo?.extra?.[STATE] as RequestState | undefined;
 		if (state === undefined) throw new Error("request without its state");
 		const p = state.principal;
-		let sbx: Sbx | undefined;
+		let umiak: Umiak | undefined;
 		return createServer({
 			tools: ALL_TOOLS,
 			...(state.toolsets === undefined ? {} : { toolsets: state.toolsets }),
 			readOnly: state.readOnly,
 			principal: { kind: p.kind, scopes: p.scopes },
-			sbx: () => {
-				sbx ??= new Sbx({
+			umiak: () => {
+				umiak ??= new Umiak({
 					baseUrl: o.apiUrl,
-					...(p.token.startsWith("sbx_")
+					...(p.token.startsWith("umiak_")
 						? { apiKey: p.token }
 						: { accessToken: p.token }),
 					...(p.team === undefined ? {} : { team: p.team }),
@@ -244,7 +244,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 					userAgent: userAgentOf("http", state.client),
 					env: {},
 				});
-				return sbx;
+				return umiak;
 			},
 			transport: "http",
 			log,
@@ -298,10 +298,10 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		}
 		const flags = queryFlags(url);
 		if (typeof flags === "string") return rpcError(400, flags);
-		// Sbx-Team wins over ?team=; either must look like a team id, so
+		// Umiak-Team wins over ?team=; either must look like a team id, so
 		// nothing odd reaches /v1/me or the SDK's headers.
 		const team =
-			req.headers.get("sbx-team")?.trim() ||
+			req.headers.get("umiak-team")?.trim() ||
 			url.searchParams.get("team")?.trim() ||
 			undefined;
 		if (team !== undefined && !TEAM_ID.test(team)) {
@@ -309,7 +309,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 				status: 400,
 				reason: "bad_team",
 				code: "validation",
-				message: "Sbx-Team and ?team= take a team id (team_...)",
+				message: "Umiak-Team and ?team= take a team id (team_...)",
 			});
 		}
 		const principal = await authenticate(req, team);
@@ -404,7 +404,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 	};
 }
 
-/** Ops listener (SBX_MCP_OPS_PORT): /metrics, /healthz, /readyz. */
+/** Ops listener (UMIAK_MCP_OPS_PORT): /metrics, /healthz, /readyz. */
 export function createOpsApp(o: {
 	metrics: Metrics;
 	ready: () => boolean;

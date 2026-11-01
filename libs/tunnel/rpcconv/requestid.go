@@ -7,11 +7,11 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // RequireRequestID returns a handler-side interceptor that makes the
-// Sbx-Request-Id header (UUID or ULID) mandatory on mutating unary calls. A
+// Umiak-Request-Id header (UUID or ULID) mandatory on mutating unary calls. A
 // call is exempt when its idempotency level is IDEMPOTENT or NO_SIDE_EFFECTS,
 // or when its procedure is in exempt. Streaming handlers pass through.
 func RequireRequestID(exempt ...string) connect.Interceptor {

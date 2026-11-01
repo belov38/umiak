@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DELETE_RETRY_LIMIT, isSbxError, type SbxError } from "../src/index.ts";
+import {
+	DELETE_RETRY_LIMIT,
+	isUmiakError,
+	type UmiakError,
+} from "../src/index.ts";
 import {
 	expectCode,
 	insertSavedSnapshot,
@@ -172,8 +180,10 @@ describe.skipIf(skipPg())("SandboxService saved snapshots (S6 §7.8)", () => {
 		const err = await env.svc
 			.deleteSavedSnapshot(env.p, "web", randomUUID())
 			.catch((e: unknown) => e);
-		expect(isSbxError(err, "snapshot_not_found")).toBe(true);
-		expect((err as SbxError).details).toMatchObject({ reason: "id_mismatch" });
+		expect(isUmiakError(err, "snapshot_not_found")).toBe(true);
+		expect((err as UmiakError).details).toMatchObject({
+			reason: "id_mismatch",
+		});
 		expect((await snap(id)).state).toBe("ready");
 		expect(env.jobs.sent).toEqual([]);
 

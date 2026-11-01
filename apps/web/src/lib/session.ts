@@ -1,9 +1,9 @@
 // The session of a request to /app (S8 §9.1): the same cached resolution the
-// Payload strategy uses (authenticateRequest of @sbx/payload), so /admin and
+// Payload strategy uses (authenticateRequest of @umiak/payload), so /admin and
 // /app always agree. Refusals end rendering with the 401/403 pages
 // (unauthorized(), forbidden(); see app/(app)/forbidden.tsx).
 import "server-only";
-import { authenticateRequest, type RequestAuth } from "@sbx/payload";
+import { authenticateRequest, type RequestAuth } from "@umiak/payload";
 import { headers } from "next/headers";
 import { forbidden, unauthorized } from "next/navigation";
 import { cache } from "react";

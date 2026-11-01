@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -87,7 +87,7 @@ func TestInstanceRunReady(t *testing.T) {
 	}
 	eventually(t, 10*time.Second, "postgres dependency up", func() bool {
 		_, body := get(t, base+"/metrics")
-		return strings.Contains(body, `sbx_gateway_dependency_up{dep="postgres"} 1`)
+		return strings.Contains(body, `umiak_gateway_dependency_up{dep="postgres"} 1`)
 	})
 
 	cancel()
@@ -160,7 +160,7 @@ func TestInstanceInternalListener(t *testing.T) {
 
 func label(t *testing.T, raw string) routes.Label {
 	t.Helper()
-	l, ok := routes.ParseHost(raw+"."+testenv.SbxDomain, testenv.SbxDomain, routes.DefaultGrammar())
+	l, ok := routes.ParseHost(raw+"."+testenv.UmiakDomain, testenv.UmiakDomain, routes.DefaultGrammar())
 	if !ok {
 		t.Fatalf("bad label %q", raw)
 	}
@@ -276,7 +276,7 @@ func TestDrainBeforeRunBounded(t *testing.T) {
 
 	// Run fails at once: TLS on without certificate files.
 	cfg := env.InstanceConfig("gw-bad-tls", "http://127.0.0.1:1")
-	cfg.SbxCertFile, cfg.SbxKeyFile = "/nonexistent.pem", "/nonexistent.key"
+	cfg.UmiakCertFile, cfg.UmiakKeyFile = "/nonexistent.pem", "/nonexistent.key"
 	inst, err = server.New(cfg, env.Deps())
 	if err != nil {
 		t.Fatal(err)

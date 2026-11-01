@@ -19,7 +19,7 @@ func TestCopiedUploadRetryBeforeSourceRemoval(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			stage := h.writeFile(".sbx-tmp-copy", []byte("content"), 0o644)
+			stage := h.writeFile(".umiak-tmp-copy", []byte("content"), 0o644)
 			target := h.path("file.txt")
 			if placed {
 				err = os.Link(stage, target)
@@ -70,7 +70,7 @@ func TestCommitCleanupFailureStillSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stage := h.writeFile(".sbx-tmp-cleanup", []byte("content"), 0o644)
+	stage := h.writeFile(".umiak-tmp-cleanup", []byte("content"), 0o644)
 	target := h.path("file.txt")
 	if err := os.Link(stage, target); err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestCopiedUploadRetryBeforePlacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec.CommitStage = h.writeFile(".sbx-tmp-staged", []byte("content"), 0o644)
+	rec.CommitStage = h.writeFile(".umiak-tmp-staged", []byte("content"), 0o644)
 	target := h.path("file.txt")
 	rec.CommitPath, rec.CommitTarget = target, target
 	if err := h.st.PutUpload(t.Context(), rec); err != nil {

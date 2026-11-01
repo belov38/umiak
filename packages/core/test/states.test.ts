@@ -17,16 +17,16 @@ import {
 	SANDBOX_STATES,
 	type SandboxEvent,
 	type SandboxState,
-	SbxError,
 	sandboxNext,
+	UmiakError,
 } from "../src/index.ts";
 
 function outcome<T>(fn: () => T): T | "invalid" {
 	try {
 		return fn();
 	} catch (e) {
-		expect(e).toBeInstanceOf(SbxError);
-		expect((e as SbxError).code).toBe("invalid_state");
+		expect(e).toBeInstanceOf(UmiakError);
+		expect((e as UmiakError).code).toBe("invalid_state");
 		return "invalid";
 	}
 }
@@ -111,7 +111,7 @@ describe("sandboxNext", () => {
 			sandboxNext("stopped", "stop");
 			expect.unreachable();
 		} catch (e) {
-			expect((e as SbxError).details).toEqual({
+			expect((e as UmiakError).details).toEqual({
 				state: "stopped",
 				event: "stop",
 			});

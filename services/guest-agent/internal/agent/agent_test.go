@@ -22,18 +22,18 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 func TestStartupOrderIdentityReset(t *testing.T) {
@@ -327,7 +327,7 @@ func TestStatusFileHasNoSecrets(t *testing.T) {
 
 func TestDebugListenConfirmsUpdate(t *testing.T) {
 	h := newHarness(t)
-	dir, err := os.MkdirTemp("", "sbxdbg")
+	dir, err := os.MkdirTemp("", "umiakdbg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestDebugListenConfirmsUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Control/Info over the debug socket: %v", err)
 	}
-	if !slices.Contains(res.Msg.GetCapabilities(), "system.activity.v1") || !slices.Contains(res.Msg.GetProtoPackages(), "sbx.agent.v1") {
+	if !slices.Contains(res.Msg.GetCapabilities(), "system.activity.v1") || !slices.Contains(res.Msg.GetProtoPackages(), "umiak.agent.v1") {
 		t.Errorf("Control/Info = %v", res.Msg)
 	}
 	eventually(t, "the pending update to be confirmed", func() bool {
@@ -399,7 +399,7 @@ func TestDebugListenConfirmsUpdate(t *testing.T) {
 
 func TestDebugInfoAloneDoesNotConfirm(t *testing.T) {
 	h := newHarness(t)
-	dir, err := os.MkdirTemp("", "sbxdbg")
+	dir, err := os.MkdirTemp("", "umiakdbg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func (nopFreezer) Thaw(string) error   { return nil }
 func TestShutdownFlushesBufferedOutcome(t *testing.T) {
 	h := newHarness(t)
 	h.seedIdentity(machineA)
-	dir, err := os.MkdirTemp("", "sbxdbg")
+	dir, err := os.MkdirTemp("", "umiakdbg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,7 +547,7 @@ func TestShutdownFlushesBufferedOutcome(t *testing.T) {
 func TestShutdownThawsActiveLease(t *testing.T) {
 	h := newHarness(t)
 	h.seedIdentity(machineA)
-	dir, err := os.MkdirTemp("", "sbxdbg")
+	dir, err := os.MkdirTemp("", "umiakdbg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ const reqQuiesce = "0192f1a4-7c3e-7b2a-9d4f-000000000001"
 func TestDebugEventsSubscribe(t *testing.T) {
 	h := newHarness(t)
 	h.seedIdentity(machineA)
-	dir, err := os.MkdirTemp("", "sbxdbg")
+	dir, err := os.MkdirTemp("", "umiakdbg")
 	if err != nil {
 		t.Fatal(err)
 	}

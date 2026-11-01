@@ -1,6 +1,6 @@
-// The bearer of a profile (S7 §7.6), shared by every command, `sbx auth
+// The bearer of a profile (S7 §7.6), shared by every command, `umiak auth
 // token` (SDK, MCP) and later the in-process MCP module (S11 §6.1):
-// - SBX_API_KEY in the env wins over the stored login;
+// - UMIAK_API_KEY in the env wins over the stored login;
 // - a stored team key (`login --key-stdin`) is used as is;
 // - a Keycloak access token is used until `exp − 90 s` (ruling R23: the SDK
 //   treats a token as stale at `exp − 60 s`, so a token handed over must
@@ -20,7 +20,7 @@ import { withFileLock } from "./lock.ts";
 import type { CredentialStore } from "./store.ts";
 
 /** Keycloak client of the CLI (architecture §10). */
-export const OIDC_CLIENT_ID = "sbx-cli";
+export const OIDC_CLIENT_ID = "umiak-cli";
 /** An access token is refreshed this long before it expires (ruling R23). */
 export const REFRESH_MARGIN_MS = 90_000;
 /** Limit of one refresh request; below the stale age of the lock (30 s). */
@@ -83,7 +83,7 @@ export function parseCredential(v: string | null): StoredCredential | null {
 
 export interface BearerDeps {
 	profileName: string;
-	/** The profile; undefined when there is none (only SBX_API_KEY can work). */
+	/** The profile; undefined when there is none (only UMIAK_API_KEY can work). */
 	profile: Profile | undefined;
 	store: CredentialStore;
 	lockPath: string;
@@ -100,7 +100,7 @@ export interface BearerDeps {
 function notLoggedIn(profileName: string): CliError {
 	return new CliError({
 		code: NOT_LOGGED_IN,
-		message: `profile ${JSON.stringify(profileName)} is not logged in; run: sbx login (or set SBX_API_KEY)`,
+		message: `profile ${JSON.stringify(profileName)} is not logged in; run: umiak login (or set UMIAK_API_KEY)`,
 		retryable: false,
 	});
 }
@@ -111,7 +111,7 @@ function fresh(c: { expiresAt: string }): boolean {
 
 /** The bearer to send now (see the header). */
 export async function getBearer(d: BearerDeps): Promise<Bearer> {
-	const envKey = d.env.SBX_API_KEY;
+	const envKey = d.env.UMIAK_API_KEY;
 	if (envKey !== undefined && envKey !== "") {
 		return { kind: "key", token: envKey, expiresAt: null };
 	}

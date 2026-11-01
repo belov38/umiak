@@ -63,55 +63,59 @@ describe("ports and ssh", () => {
 	});
 	beforeEach(() => {
 		home = cliHome();
-		env = { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+		env = { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: w.secret };
 	});
 	afterEach(() => home.rm());
 
-	const sbx = (args: string[], o: { tty?: boolean } = {}) =>
+	const umiak = (args: string[], o: { tty?: boolean } = {}) =>
 		runCli(args, { env, ...o });
 
 	it("port --token prints the URL with its token; ports, port-token and unport", async () => {
-		const human = await sbx(["port", sb.slug, "3000", "--token"], {
+		const human = await umiak(["port", sb.slug, "3000", "--token"], {
 			tty: true,
 		});
 		expect(human.code, human.stderr).toBe(0);
 		expect(human.stdout.trim()).toMatch(
-			new RegExp(`^https://${sb.slug}-3000\\.sbx\\.test/\\?_token=sbxp_\\S+$`),
+			new RegExp(
+				`^https://${sb.slug}-3000\\.umiak\\.test/\\?_token=umiakp_\\S+$`,
+			),
 		);
 		// A second PUT issues no token: the URL alone.
-		const again = await sbx(["port", "3000"], { tty: true });
+		const again = await umiak(["port", "3000"], { tty: true });
 		expect(again.code, again.stderr).toBe(0);
-		expect(again.stdout.trim()).toBe(`https://${sb.slug}-3000.sbx.test`);
+		expect(again.stdout.trim()).toBe(`https://${sb.slug}-3000.umiak.test`);
 
-		const pub = await sbx(["port", sb.id, "8080", "--public", "--json"]);
+		const pub = await umiak(["port", sb.id, "8080", "--public", "--json"]);
 		expect(pub.code, pub.stderr).toBe(0);
 		expect(pub.last()).toMatchObject({
 			port: 8080,
 			access: "public",
-			url: `https://${sb.slug}-8080.sbx.test`,
+			url: `https://${sb.slug}-8080.umiak.test`,
 		});
 		expect(pub.last()).not.toHaveProperty("token");
-		expect((await sbx(["port", sb.id, "1", "--public", "--sso"])).code).toBe(2);
-		expect((await sbx(["port", sb.id, "http"])).code).toBe(2);
+		expect((await umiak(["port", sb.id, "1", "--public", "--sso"])).code).toBe(
+			2,
+		);
+		expect((await umiak(["port", sb.id, "http"])).code).toBe(2);
 
-		const ports = await sbx(["ports", sb.id]);
+		const ports = await umiak(["ports", sb.id]);
 		expect(ports.code, ports.stderr).toBe(0);
 		const hosted = (ports.last().hosted as { port: number }[]).map(
 			(p) => p.port,
 		);
 		expect(hosted.sort()).toEqual([3000, 8080]);
-		const table = await sbx(["ports", sb.id], { tty: true });
+		const table = await umiak(["ports", sb.id], { tty: true });
 		expect(table.stdout).toContain("3000");
-		expect(table.stdout).toContain(`https://${sb.slug}-8080.sbx.test`);
+		expect(table.stdout).toContain(`https://${sb.slug}-8080.umiak.test`);
 
-		const tok = await sbx(["port-token", sb.id, "3000"], { tty: true });
+		const tok = await umiak(["port-token", sb.id, "3000"], { tty: true });
 		expect(tok.code, tok.stderr).toBe(0);
-		expect(tok.stdout.trim()).toMatch(/\?_token=sbxp_/);
+		expect(tok.stdout.trim()).toMatch(/\?_token=umiakp_/);
 		expect(tok.stdout.trim()).not.toBe(human.stdout.trim());
 
-		const un = await sbx(["unport", sb.id, "3000"]);
+		const un = await umiak(["unport", sb.id, "3000"]);
 		expect(un.code, un.stderr).toBe(0);
-		const after = await sbx(["ports", sb.id]);
+		const after = await umiak(["ports", sb.id]);
 		expect(
 			(after.last().hosted as { port: number }[]).map((p) => p.port),
 		).toEqual([8080]);
@@ -159,7 +163,7 @@ describe("ports and ssh", () => {
 			`UserKnownHostsFile=${knownHosts}`,
 			"-p",
 			"2222",
-			`${sb.slug}@ssh.sbx.test`,
+			`${sb.slug}@ssh.umiak.test`,
 			"echo",
 			"hi there",
 		]);
@@ -169,13 +173,13 @@ describe("ports and ssh", () => {
 		);
 		const info = certInfo(join(rec, "cert"));
 		expect(info.principals).toEqual([sb.id]);
-		expect(info.keyId).toMatch(/^sbx:key:key_/);
+		expect(info.keyId).toMatch(/^umiak:key:key_/);
 		// The files are gone after ssh exits.
 		expect(existsSync(key)).toBe(false);
 		expect(existsSync(dirname(key))).toBe(false);
 		// known_hosts names the non-standard port as [host]:port.
 		expect(readFileSync(knownHosts, "utf8")).toBe(
-			`[ssh.sbx.test]:2222 ${w.hostKeys[0]}\n`,
+			`[ssh.umiak.test]:2222 ${w.hostKeys[0]}\n`,
 		);
 	});
 
@@ -216,7 +220,7 @@ describe("ports and ssh", () => {
 	});
 
 	it("ssh-cert writes a certificate; --ensure keeps a fresh one and renews one about to expire", async () => {
-		const first = await sbx(["ssh-cert", sb.id, "--json"]);
+		const first = await umiak(["ssh-cert", sb.id, "--json"]);
 		expect(first.code, first.stderr).toBe(0);
 		const c = first.last() as {
 			identityFile: string;
@@ -229,14 +233,18 @@ describe("ports and ssh", () => {
 		expect(c.certificateFile).toBe(`${c.identityFile}-cert.pub`);
 		expect(certInfo(c.certificateFile).principals).toEqual([sb.id]);
 		expect(readFileSync(join(home.configDir, "known_hosts"), "utf8")).toContain(
-			"[ssh.sbx.test]:2222 ssh-ed25519 ",
+			"[ssh.umiak.test]:2222 ssh-ed25519 ",
 		);
 		const cert1 = readFileSync(c.certificateFile, "utf8");
 		// Concurrent first runs in a fresh home end with one key that matches
 		// the certificate.
 		const other = cliHome();
 		try {
-			const oenv = { ...other.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+			const oenv = {
+				...other.env,
+				UMIAK_API_URL: w.url,
+				UMIAK_API_KEY: w.secret,
+			};
 			const runs = await Promise.all(
 				[1, 2, 3].map(() =>
 					runCli(["ssh-cert", sb.id, "--json"], { env: oenv }),
@@ -259,7 +267,7 @@ describe("ports and ssh", () => {
 			other.rm();
 		}
 
-		const ensure = await sbx(["ssh-cert", sb.slug, "--ensure", "--json"]);
+		const ensure = await umiak(["ssh-cert", sb.slug, "--ensure", "--json"]);
 		expect(ensure.code, ensure.stderr).toBe(0);
 		expect(ensure.last()).toMatchObject({ renewed: false });
 		expect(readFileSync(c.certificateFile, "utf8")).toBe(cert1);
@@ -274,44 +282,44 @@ describe("ports and ssh", () => {
 				validBefore: new Date(Date.now() + 60_000).toISOString(),
 			}),
 		);
-		const renew = await sbx(["ssh-cert", sb.id, "--ensure", "--json"]);
+		const renew = await umiak(["ssh-cert", sb.id, "--ensure", "--json"]);
 		expect(renew.last()).toMatchObject({ renewed: true });
 		const cert2 = readFileSync(c.certificateFile, "utf8");
 		expect(cert2).not.toBe(cert1);
 		// The key stays; without --ensure the certificate is always new.
-		const plain = await sbx(["ssh-cert", sb.id], { tty: true });
+		const plain = await umiak(["ssh-cert", sb.id], { tty: true });
 		expect(plain.code, plain.stderr).toBe(0);
 		expect(plain.stdout.trim()).toBe(c.certificateFile);
 		expect(readFileSync(c.certificateFile, "utf8")).not.toBe(cert2);
 	});
 
 	it("ssh-config prints a Host block whose Match exec gets the certificate (checked with ssh -G)", async () => {
-		const r = await sbx(["ssh-config", sb.slug]);
+		const r = await umiak(["ssh-config", sb.slug]);
 		expect(r.code, r.stderr).toBe(0);
 		const cfg = r.stdout;
-		expect(cfg).toContain(`Host sbx-${sb.slug}\n`);
+		expect(cfg).toContain(`Host umiak-${sb.slug}\n`);
 		expect(cfg).toContain(
-			`Match originalhost sbx-${sb.slug} exec "sbx ssh-cert ${sb.id} --ensure"`,
+			`Match originalhost umiak-${sb.slug} exec "umiak ssh-cert ${sb.id} --ensure"`,
 		);
 		const file = join(home.dir, "ssh_config");
 		writeFileSync(file, cfg);
-		// `sbx` on PATH is this CLI.
+		// `umiak` on PATH is this CLI.
 		const bin = join(home.dir, "bin");
 		mkdirSync(bin);
 		const bun = execFileSync(
 			"sh",
-			["-c", `command -v ${process.env.SBX_TEST_BUN ?? "bun"}`],
+			["-c", `command -v ${process.env.UMIAK_TEST_BUN ?? "bun"}`],
 			{ encoding: "utf8" },
 		).trim();
 		writeFileSync(
-			join(bin, "sbx"),
+			join(bin, "umiak"),
 			`#!/bin/sh\nexec "${bun}" "${MAIN}" "$@"\n`,
 		);
-		chmodSync(join(bin, "sbx"), 0o755);
+		chmodSync(join(bin, "umiak"), 0o755);
 		// Async: the api runs in this process and must answer the Match exec.
 		const { stdout: g } = await promisify(execFile)(
 			"ssh",
-			["-G", "-F", file, `sbx-${sb.slug}`],
+			["-G", "-F", file, `umiak-${sb.slug}`],
 			{
 				encoding: "utf8",
 				env: { ...env, PATH: `${bin}:${env.PATH}` },
@@ -323,7 +331,7 @@ describe("ports and ssh", () => {
 				.split("\n")
 				.filter((l) => l.startsWith(`${k} `))
 				.map((l) => l.slice(k.length + 1));
-		expect(opt("hostname")).toEqual(["ssh.sbx.test"]);
+		expect(opt("hostname")).toEqual(["ssh.umiak.test"]);
 		expect(opt("port")).toEqual(["2222"]);
 		expect(opt("user")).toEqual([sb.slug]);
 		const certFile = join(home.configDir, "ssh", sb.id, "id_ed25519-cert.pub");
@@ -331,7 +339,7 @@ describe("ports and ssh", () => {
 		expect(opt("userknownhostsfile")).toEqual([
 			join(home.configDir, "known_hosts"),
 		]);
-		// The Match exec ran `sbx ssh-cert --ensure`: the certificate is there.
+		// The Match exec ran `umiak ssh-cert --ensure`: the certificate is there.
 		expect(certInfo(certFile).principals).toEqual([sb.id]);
 	});
 
@@ -410,7 +418,7 @@ describe("ports and ssh", () => {
 			3,
 		);
 		// A team key has no SSH keys of its own.
-		const team = await sbx(["ssh-keys", "add", `${other}.pub`]);
+		const team = await umiak(["ssh-keys", "add", `${other}.pub`]);
 		expect(team.code).toBe(4);
 	});
 });

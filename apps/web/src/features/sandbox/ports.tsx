@@ -1,12 +1,12 @@
 "use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 // Ports tab (S8 §9.6): GET /ports; publish with access token/sso/public and
 // hostRewrite (PUT /ports/{port}); the token and urlWithToken shown once
 // in a dialog after a publish or a rotation; Rotate token, Unpublish; a
 // blocked port shows the lock and its reason; `403 public_disabled` → a
 // hint at the form.
-import type { HostedPort, Sandbox, SandboxData } from "@sbx/sdk";
-import { SbxError } from "@sbx/sdk";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { HostedPort, Sandbox, SandboxData } from "@umiak/sdk";
+import { UmiakError } from "@umiak/sdk";
 import { ExternalLinkIcon, LockIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -53,7 +53,7 @@ export function portsKey(teamId: string, sandboxId: string) {
 
 function isPublicDisabled(e: unknown): boolean {
 	return (
-		e instanceof SbxError &&
+		e instanceof UmiakError &&
 		e.code === "forbidden" &&
 		e.details.reason === "public_disabled"
 	);

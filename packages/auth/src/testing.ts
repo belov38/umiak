@@ -1,4 +1,4 @@
-// Test helpers of @sbx/auth (export "./testing"). Imports vitest: never import
+// Test helpers of @umiak/auth (export "./testing"). Imports vitest: never import
 // this from production code.
 import type pg from "pg";
 import {

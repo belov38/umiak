@@ -3,8 +3,12 @@
 // active member of the sandbox's team without the operator exception, a live
 // team key with ssh:connect; `recheck` skips the certificate's validity.
 import { randomBytes, randomUUID } from "node:crypto";
-import { encodeUuid, parseSshPublicKey } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid, parseSshPublicKey } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ServiceTokens } from "../src/index.ts";
 import { captureLogs, issueApiKey } from "../src/testing/index.ts";
@@ -88,8 +92,9 @@ describe.skipIf(skipPg())("POST /internal/v1/gateway/ssh/authorize", () => {
 	}
 
 	const userKeyId = (userId: string) =>
-		`sbx:user:${encodeUuid("user", userId)}`;
-	const teamKeyId = (keyId: string) => `sbx:key:${encodeUuid("apiKey", keyId)}`;
+		`umiak:user:${encodeUuid("user", userId)}`;
+	const teamKeyId = (keyId: string) =>
+		`umiak:key:${encodeUuid("apiKey", keyId)}`;
 
 	async function sshKeyUsed(id: string): Promise<Date | null> {
 		const r = await db.pool.query<{ last_used_at: Date | null }>(
@@ -385,10 +390,10 @@ describe.skipIf(skipPg())("POST /internal/v1/gateway/ssh/authorize", () => {
 			const u = await person();
 			for (const keyId of [
 				"",
-				`sbx:usr:${encodeUuid("user", u.userId)}`,
-				`sbx:user:${u.userId}`,
-				`sbx:key:${encodeUuid("user", u.userId)}`,
-				`sbx:user:${encodeUuid("user", u.userId)}:x`,
+				`umiak:usr:${encodeUuid("user", u.userId)}`,
+				`umiak:user:${u.userId}`,
+				`umiak:key:${encodeUuid("user", u.userId)}`,
+				`umiak:user:${encodeUuid("user", u.userId)}:x`,
 			]) {
 				const r = await authorize({
 					sandbox: s.slug,
@@ -522,7 +527,7 @@ describe.skipIf(skipPg())("POST /internal/v1/gateway/ssh/authorize", () => {
 				sandbox: s.slug,
 				publicKey: ed25519PublicKey(),
 				fingerprint: "SHA256:x",
-				certificate: cert("sbx:user:x", s.sandboxId),
+				certificate: cert("umiak:user:x", s.sandboxId),
 			},
 			{ publicKey: ed25519PublicKey(), fingerprint: "SHA256:x" },
 		]) {

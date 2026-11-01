@@ -2,7 +2,7 @@
 
 Статус: согласовано, 2026-10-29. Область S2 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4, §10, §11).
 
-Документ задаёт контракт между гостевым агентом (Go, внутри каждой VM), `gateway` (Go, в Kubernetes) и control plane (`api`, `worker` на TS). Что агент умеет делать (exec, files, ports, claim), решает S3, здесь только общие правила, по которым это вызывается. HTTP-маршрутизация `*.sbx` и публичный TLS — S4.
+Документ задаёт контракт между гостевым агентом (Go, внутри каждой VM), `gateway` (Go, в Kubernetes) и control plane (`api`, `worker` на TS). Что агент умеет делать (exec, files, ports, claim), решает S3, здесь только общие правила, по которым это вызывается. HTTP-маршрутизация `*.umiak` и публичный TLS — S4.
 
 Пометка **[исполнитель]** означает решение, которое принял автор спеки в рамках брифа; его можно менять без нового согласования, если причина изменения записана.
 
@@ -23,7 +23,7 @@
 
 **Цели:** один исходящий канал от VM; мультиплексирование RPC и TCP-потоков с flow control; аутентификация machine без секретов на диске гостя; быстрое обнаружение обрыва; drain без потерь при деплое; возобновление вывода по offset; идемпотентность мутаций; один proto для Go и TS; работа на Linux и Windows одним кодом.
 
-**Не-цели:** набор функций агента (S3); публичный HTTP-прокси, TLS `*.sbx`, SSH gateway (S4); операции Proxmox (S1); модель данных и машины состояний (S6); публичный API и его NDJSON (S7).
+**Не-цели:** набор функций агента (S3); публичный HTTP-прокси, TLS `*.umiak`, SSH gateway (S4); операции Proxmox (S1); модель данных и машины состояний (S6); публичный API и его NDJSON (S7).
 
 **Анти-цели** (провал, даже если формально работает):
 - команда выполнилась дважды после повтора;
@@ -39,8 +39,8 @@
  +---------------------------+                +----------------------------------+
  | guest-agent               |   WSS :443     | ingress tunnel.<domain>          |
  |  h2 SERVER on the WS conn |--------------->|   (no oauth2-proxy)              |
- |  Connect: sbx.agent.v1.*  |  agent dials   +----------------+-----------------+
- |           sbx.tunnel.v1.* |                                 |
+ |  Connect: umiak.agent.v1.*  |  agent dials   +----------------+-----------------+
+ |           umiak.tunnel.v1.* |                                 |
  |  /files/* (plain HTTP)    |                +----------------v-----------------+
  |  CONNECT host:port        |                | gateway pod (Deployment)         |
  |  shim per command         |                |  h2 CLIENT on the WS conn        |
@@ -67,28 +67,28 @@ Gateway для RPC — authenticated reverse proxy: тела Connect-запро�
 
 ### 4.1 Соединение
 
-- `GET wss://tunnel.<domain>/v1/connect`, WS subprotocol `sbx-tunnel.v1`.
+- `GET wss://tunnel.<domain>/v1/connect`, WS subprotocol `umiak-tunnel.v1`.
 - Сообщения WS бинарные; поверх WS — поток байт (`websocket.NetConn`), на нём HTTP/2 с prior knowledge (h2c внутри уже зашифрованного WSS).
 - Заголовки upgrade-запроса:
 
 | Заголовок | Значение |
 |---|---|
-| `Authorization` | `Bearer <MT>` или `Sbx-Bootstrap <BS>` (§5.2) |
-| `Sbx-Machine-Id` | machineId из smbios |
-| `Sbx-Boot-Id` | id загрузки ОС (Linux `/proc/sys/kernel/random/boot_id`, Windows — эквивалент, выбирает S3/S9) |
-| `Sbx-Agent-Instance-Id` | случайный id, новый при каждом старте процесса агента |
-| `Sbx-Vmgenid` | VM Generation ID |
-| `Sbx-Agent-Version` | semver агента |
+| `Authorization` | `Bearer <MT>` или `Umiak-Bootstrap <BS>` (§5.2) |
+| `Umiak-Machine-Id` | machineId из smbios |
+| `Umiak-Boot-Id` | id загрузки ОС (Linux `/proc/sys/kernel/random/boot_id`, Windows — эквивалент, выбирает S3/S9) |
+| `Umiak-Agent-Instance-Id` | случайный id, новый при каждом старте процесса агента |
+| `Umiak-Vmgenid` | VM Generation ID |
+| `Umiak-Agent-Version` | semver агента |
 
-- Ответ `101` содержит `Sbx-Gateway-Instance` и `Sbx-Conn-Epoch`. Ошибки — в §5.3.
-- После `101` gateway вызывает у агента `sbx.tunnel.v1.Control/Info` (capabilities, версии, §10), при необходимости `Control/SetToken`, и открывает `Events/Subscribe` (§9.6).
+- Ответ `101` содержит `Umiak-Gateway-Instance` и `Umiak-Conn-Epoch`. Ошибки — в §5.3.
+- После `101` gateway вызывает у агента `umiak.tunnel.v1.Control/Info` (capabilities, версии, §10), при необходимости `Control/SetToken`, и открывает `Events/Subscribe` (§9.6).
 
 ### 4.2 Что ходит по HTTP/2
 
 | Что | Как | Инициатор |
 |---|---|---|
-| RPC агента (`sbx.agent.v1.*`) | Connect, unary и server-streaming | control plane → gateway → агент |
-| Служебные RPC (`sbx.tunnel.v1.*`) | Connect | только сам gateway |
+| RPC агента (`umiak.agent.v1.*`) | Connect, unary и server-streaming | control plane → gateway → агент |
+| Служебные RPC (`umiak.tunnel.v1.*`) | Connect | только сам gateway |
 | Файлы | обычный HTTP `/files/*` (§9.5) | control plane → gateway → агент |
 | TCP-потоки (порты, SSH, сигналинг рабочего стола) | `CONNECT <addr>:<port>`, полный дуплекс, half-close через END_STREAM | gateway → агент |
 
@@ -109,7 +109,7 @@ CONNECT агент разрешает только на адреса самой 
 
 ### 4.4 Head-of-line
 
-HTTP/2 делит одно TCP-соединение, поэтому большой поток файла может задержать терминал на уровне TCP. Правило: **одно соединение на агента**. Отдельное bulk-соединение добавляем, только если перф-тест (§14.3) покажет p99 эха терминала больше 50 ms во время передачи 1 GB. Протокол к этому готов: `Sbx-Lane` в upgrade зарезервирован, в v1 не используется.
+HTTP/2 делит одно TCP-соединение, поэтому большой поток файла может задержать терминал на уровне TCP. Правило: **одно соединение на агента**. Отдельное bulk-соединение добавляем, только если перф-тест (§14.3) покажет p99 эха терминала больше 50 ms во время передачи 1 GB. Протокол к этому готов: `Umiak-Lane` в upgrade зарезервирован, в v1 не используется.
 
 ### 4.5 Транспорт за интерфейсом
 
@@ -159,7 +159,7 @@ Userspace WireGuard (wireguard-go + netstack) в фазе 2 встаёт под 
 - **Одно активное соединение на machine.** Новое соединение получает `epoch+1` и вытесняет старое (§8.3). Исключение — короткое окно make-before-break при drain. Два живых соединения с одной machine вне drain дают метрику тревоги `tunnel_duplicate_sessions_total`.
 - **Списание.** Worker ставит `retired_at`. Gateway закрывает соединение (по `NOTIFY`) и отвечает `403` на новые попытки.
 
-Формат smbios **[исполнитель]**: `smbios1: uuid=<machineId>,serial=<base64("sbx1:" + machineId + ":" + base64url(BS))>,base64=1`. Версия `sbx1` позволяет поменять формат позже. Длину поля проверить в S1.
+Формат smbios **[исполнитель]**: `smbios1: uuid=<machineId>,serial=<base64("umiak1:" + machineId + ":" + base64url(BS))>,base64=1`. Версия `umiak1` позволяет поменять формат позже. Длину поля проверить в S1.
 
 ### 5.3 Ответы на upgrade и поведение агента
 
@@ -176,14 +176,14 @@ Userspace WireGuard (wireguard-go + netstack) в фазе 2 встаёт под 
 
 - Отдельный приватный **tunnel CA**. Сертификат `tunnel.<domain>` выпущен этим CA. TLS терминирует ingress или gateway (TLS passthrough), это решает S12. Важно только, чтобы агент видел сертификат от tunnel CA.
 - Агент доверяет только бандлу CA из своего конфига (текущий и следующий CA, для ротации). Системные корни не используются. Бандл обновляется вместе с агентом (S3).
-- Публичный TLS для `*.sbx` и `api.<domain>` (S4, S12) с этим не связан.
+- Публичный TLS для `*.umiak` и `api.<domain>` (S4, S12) с этим не связан.
 
 ### 5.5 Control plane → gateway
 
 - Внутренний listener gateway (ClusterIP Service и pod IP), h2c, NetworkPolicy пускает только `api`, `worker` и другие поды gateway.
 - `Authorization: Bearer <service-token>`. Токен свой для каждого вызывающего (`api`, `worker`, `gateway`), хранится в Kubernetes Secret. Одновременно действуют два токена на вызывающего, чтобы ротировать без простоя. mTLS — позже.
 - Обратное направление — `POST /internal/v1/agent-events` в `api` — тоже по сети кластера, с service token gateway, мимо oauth2-proxy.
-- Через `/rpc/` прокси пропускает только `sbx.agent.v1.*`, через `/files/` — только `/files/*` агента. `sbx.tunnel.v1.*` вызывает только сам gateway, снаружи — `403`.
+- Через `/rpc/` прокси пропускает только `umiak.agent.v1.*`, через `/files/` — только `/files/*` агента. `umiak.tunnel.v1.*` вызывает только сам gateway, снаружи — `403`.
 
 ## 6. Живость и переподключение
 
@@ -281,7 +281,7 @@ tunnel_credentials(
 ### 8.4 Как control plane вызывает агента
 
 Пакет `packages/agent-client` (TS):
-- клиенты сгенерированы `protoc-gen-es` из `proto/sbx/agent/v1`, transport — `@connectrpc/connect-node`, HTTP/2;
+- клиенты сгенерированы `protoc-gen-es` из `proto/umiak/agent/v1`, transport — `@connectrpc/connect-node`, HTTP/2;
 - `baseUrl = <internal_url>/v1/machines/{machineId}/rpc`, заголовок `Authorization: Bearer <service-token>`;
 - поиск экземпляра: `tunnel_sessions` join `gateway_instances`, где `state = connected` и heartbeat свежий. Результат кэшируется, кэш сбрасывается по `LISTEN tunnel_sessions`;
 - **повтор:** на `421`, ошибку соединения, Connect `unavailable` — заново найти экземпляр и повторить. Если machine не подключена, ждать `NOTIFY` (с опросом раз в 1 s на всякий случай) до 30 s, затем ошибка `agent_unavailable` с `retryable: true`, которую API отдаёт как `503`;
@@ -291,8 +291,8 @@ tunnel_credentials(
 
 Gateway как прокси:
 - проверяет service token и путь;
-- снимает `Authorization`, ставит `Sbx-Caller: api|worker`;
-- пробрасывает заголовки Connect (`Connect-Timeout-Ms`, `Sbx-Request-Id`);
+- снимает `Authorization`, ставит `Umiak-Caller: api|worker`;
+- пробрасывает заголовки Connect (`Connect-Timeout-Ms`, `Umiak-Request-Id`);
 - стримит тела без буферизации.
 
 Для S4 и SSH:
@@ -333,7 +333,7 @@ Gateway как прокси:
 
 ### 9.2 `requestId`
 
-- Заголовок `Sbx-Request-Id` (UUID или ULID) **обязателен** на мутирующих unary. Без него агент отвечает `invalid_argument`.
+- Заголовок `Umiak-Request-Id` (UUID или ULID) **обязателен** на мутирующих unary. Без него агент отвечает `invalid_argument`.
 - Освобождены методы с `option idempotency_level = IDEMPOTENT` или `NO_SIDE_EFFECTS`, а также `Start` (ключ — `commandId`).
 - Middleware агента хранит на диске `requestId → (hash запроса, код, тело ответа)` с TTL 24 h и ограничением размера (S3).
   - Повтор с тем же телом → сохранённый ответ.
@@ -385,23 +385,23 @@ Bidi-стримы не используются: всё работает по HT
 
 ### 10.1 Proto
 
-- `proto/sbx/tunnel/v1/` — владеет S2:
+- `proto/umiak/tunnel/v1/` — владеет S2:
   - `Control`: `Info`, `SetToken`, `Drain`;
   - `Events`: `Subscribe`, `Ack`;
   - общие сообщения: `ErrorDetail`, конверт события.
-- `proto/sbx/agent/v1/` — наполняет S3: `Process` (`Start`, `Run`, `Attach`, `SendInput`, `Update`, `Signal`, `List`), `Filesystem`, `System` (claim, quiesce, identity) — по соглашениям из этой спеки.
+- `proto/umiak/agent/v1/` — наполняет S3: `Process` (`Start`, `Run`, `Attach`, `SendInput`, `Update`, `Signal`, `List`), `Filesystem`, `System` (claim, quiesce, identity) — по соглашениям из этой спеки.
 - Codec — protobuf binary. JSON Connect принимается всегда, для отладки через curl.
 - Ошибки: коды Connect + деталь `ErrorDetail{code string, retryable bool}`. `retryable` — истина для `unavailable` и `deadline_exceeded`.
 
 ### 10.2 Три уровня версий
 
-1. **Провод.** WS subprotocol `sbx-tunnel.v1` и заголовки §4.1. Gateway поддерживает текущую и предыдущую major-версии. Ломающее изменение — `sbx-tunnel.v2`.
+1. **Провод.** WS subprotocol `umiak-tunnel.v1` и заголовки §4.1. Gateway поддерживает текущую и предыдущую major-версии. Ломающее изменение — `umiak-tunnel.v2`.
 2. **RPC.** Пакеты `v1`, только добавление (новые поля, методы, сервисы). `buf breaking` в CI сравнивает с `main`. Ломающее — `v2` рядом с `v1`.
 3. **Возможности.** `Control/Info` возвращает `{agentVersion, os, arch, protoPackages[], capabilities[]}`, например `process.pty`, `files.upload.v1`. Это сохраняется в `tunnel_sessions.capabilities`. API проверяет нужную возможность до вызова, иначе отвечает `409 agent_outdated`.
 
 Старые агенты при подключении **не отвергаются**: они живут в warm pool и остановленных VM. Единственное исключение — минимальная версия по безопасности в конфиге gateway (`426`). Обновление агента — S3.
 
-Gateway не разбирает `sbx.agent.v1`, поэтому его версия не связана с версией агента. Связаны только `sbx.tunnel.v1` и проводной уровень.
+Gateway не разбирает `umiak.agent.v1`, поэтому его версия не связана с версией агента. Связаны только `umiak.tunnel.v1` и проводной уровень.
 
 ## 11. Что рвётся и фаза 2
 
@@ -426,11 +426,11 @@ sequenceDiagram
   participant A as guest-agent
   participant G as gateway
   W->>DB: tunnel_credentials(machineId, bs_hash)
-  W->>W: create VM with smbios1 uuid=machineId, serial=sbx1:machineId:BS (S1)
+  W->>W: create VM with smbios1 uuid=machineId, serial=umiak1:machineId:BS (S1)
   A->>A: boot, read smbios: machineId, BS
-  A->>G: WSS upgrade, Authorization: Sbx-Bootstrap BS, Sbx-Machine-Id, Boot-Id, ...
+  A->>G: WSS upgrade, Authorization: Umiak-Bootstrap BS, Umiak-Machine-Id, Boot-Id, ...
   G->>DB: check bs_hash, retired_at; epoch+1; tunnel_sessions=connected; NOTIFY
-  G-->>A: 101, Sbx-Conn-Epoch
+  G-->>A: 101, Umiak-Conn-Epoch
   Note over A,G: HTTP/2 inside the WS: agent = server, gateway = client
   G->>A: Control/Info
   A-->>G: version, capabilities
@@ -591,7 +591,7 @@ sequenceDiagram
 
 - Fork и VM из saved snapshot не могут подключиться как исходная machine: на диске нет секрета, в smbios — новый.
 - Списанная machine получает `403`.
-- Вызов `sbx.tunnel.v1.*` через `/rpc/` → `403`.
+- Вызов `umiak.tunnel.v1.*` через `/rpc/` → `403`.
 - CONNECT на адрес вне VM → `403`.
 - Вызов внутреннего listener-а без service token → `401`.
 
@@ -603,7 +603,7 @@ sequenceDiagram
 
 ### 14.7 Объём реализации S2 и приёмка
 
-- **S2 при реализации даёт только контракт и общие части:** proto (`sbx.tunnel.v1` и соглашения), Go-библиотеку туннеля, приёмник туннелей, реестр, drain и прокси в gateway, клиентскую часть туннеля в агенте и TS `agent-client`.
+- **S2 при реализации даёт только контракт и общие части:** proto (`umiak.tunnel.v1` и соглашения), Go-библиотеку туннеля, приёмник туннелей, реестр, drain и прокси в gateway, клиентскую часть туннеля в агенте и TS `agent-client`.
 - **Проверка S2:** in-memory транспорт с инъекцией сбоев и тестовый двойник `Process`, который соблюдает контракт `commandId`/offset/`exit`. Двойник не идёт в продукт.
 - **Полный §14** (chaos-, drain-, перф-, терминальный тесты на реальных компонентах) — совместная приёмка, когда реализованы S3 и S4.
 - **Windows:** в CI S2 только кросс-компиляция (`GOOS=windows`, без cgo). Реальная проверка — в S9.

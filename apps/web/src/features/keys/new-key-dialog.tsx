@@ -15,7 +15,7 @@ import {
 	DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import {
 	emptyKeyForm,
 	KEY_DAYS_MAX,
@@ -43,7 +43,7 @@ export function NewKeyDialog({
 	teamId: string;
 	onIssued: (s: ShownSecret) => void | Promise<void>;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const [open, setOpen] = useState(false);
 	const [form, setForm] = useState<NewKeyForm>(emptyKeyForm);
 	const [error, setError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export function NewKeyDialog({
 		setError(null);
 		setBusy(true);
 		try {
-			const { data } = await sbx.raw.POST("/v1/api-keys", { body: r.body });
+			const { data } = await umiak.raw.POST("/v1/api-keys", { body: r.body });
 			setOpen(false);
 			setForm(emptyKeyForm());
 			await onIssued({

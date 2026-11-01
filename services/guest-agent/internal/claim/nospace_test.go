@@ -12,10 +12,10 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
 )
 
 // failWrites makes the Manager's file writes to path fail with errno, as a
@@ -38,7 +38,7 @@ func TestClaimNoSpace(t *testing.T) {
 		// on this OS, or "".
 		skip string
 	}{
-		{"sbx env", func(h *harness) string { return h.l.SbxEnvFile }, syscall.ENOSPC, onWindows("no /etc/sbx/env")},
+		{"umiak env", func(h *harness) string { return h.l.UmiakEnvFile }, syscall.ENOSPC, onWindows("no /etc/umiak/env")},
 		{"secret file", func(h *harness) string { return filepath.Join(h.l.SecretFilesDir, "key.pem") }, syscall.ENOSPC,
 			onWindows("secret files are created with their ACL, not through writeFile")},
 		{"secrets env", func(h *harness) string { return h.l.SecretsEnvFile }, syscall.ENOSPC, onWindows("the secret env stays in memory")},
@@ -81,9 +81,9 @@ func TestUpdatesNoSpace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Windows has no /etc/sbx/env: UpdateEnv writes no file there.
-	if h.l.SbxEnvFile != "" {
-		failWrites(h.m, h.l.SbxEnvFile, syscall.ENOSPC)
+	// Windows has no /etc/umiak/env: UpdateEnv writes no file there.
+	if h.l.UmiakEnvFile != "" {
+		failWrites(h.m, h.l.UmiakEnvFile, syscall.ENOSPC)
 		_, err := h.m.UpdateEnv(ctx, &agentv1.UpdateEnvRequest{Env: map[string]string{"A": "b"}})
 		wantDetail(t, err, connect.CodeResourceExhausted, errs.NoSpace)
 	}

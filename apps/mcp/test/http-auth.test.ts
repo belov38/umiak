@@ -1,6 +1,6 @@
 // Bearer check of the remote MCP server (S11 6.3, 11.5): challenges and
 // Protected Resource Metadata, GET /v1/me with its cache, the 55 s rule, and
-// the team (Sbx-Team, ?team=) of /v1/me and of the calls.
+// the team (Umiak-Team, ?team=) of /v1/me and of the calls.
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	bearerOf,
@@ -95,7 +95,7 @@ describe("challenges and metadata", () => {
 			authorization_servers: [TEST_ISSUER],
 			scopes_supported: ["openid", "email", "profile"],
 			bearer_methods_supported: ["header"],
-			resource_name: "sbx sandboxes",
+			resource_name: "umiak sandboxes",
 		});
 		expect(doc.scopes_supported).not.toContain("offline_access");
 	});
@@ -157,7 +157,7 @@ describe("challenges and metadata", () => {
 
 	it("answers 401 invalid_token to a bearer the API rejects", async () => {
 		h = await startHttp();
-		const r = await post("sbx_not_a_key");
+		const r = await post("umiak_not_a_key");
 		expect(r.status).toBe(401);
 		expect(r.headers["www-authenticate"]).toMatch(
 			/^Bearer resource_metadata="http:\/\/127\.0\.0\.1:\d+\/\.well-known\/oauth-protected-resource\/mcp", error="invalid_token"/,
@@ -221,11 +221,11 @@ describe("the /v1/me cache", () => {
 		expect((await post(FAKE_TOKENS.full)).status).toBe(200);
 		expect(meCalls()).toBe(2);
 
-		expect((await post("sbx_bad")).status).toBe(401);
-		expect((await post("sbx_bad")).status).toBe(401);
+		expect((await post("umiak_bad")).status).toBe(401);
+		expect((await post("umiak_bad")).status).toBe(401);
 		expect(meCalls()).toBe(3);
 		h.clock.now += 5_001;
-		expect((await post("sbx_bad")).status).toBe(401);
+		expect((await post("umiak_bad")).status).toBe(401);
 		expect(meCalls()).toBe(4);
 		const misses = await h.metrics.meCacheMisses.get();
 		expect(misses.values[0]?.value).toBe(4);
@@ -260,7 +260,7 @@ describe("the /v1/me cache", () => {
 
 	it("reads exp of a JWT and the bearer of the header only", () => {
 		expect(jwtExpiresAt(fakeJwt(1_000))).toBe(1_000_000);
-		expect(jwtExpiresAt("sbx_abc")).toBeNull();
+		expect(jwtExpiresAt("umiak_abc")).toBeNull();
 		expect(jwtExpiresAt("a.b.c")).toBeNull();
 		expect(EXP_MARGIN_MS).toBe(55_000);
 		const req = (headers: Record<string, string>) =>
@@ -289,12 +289,12 @@ describe("the team of a request", () => {
 	const teamOf = (path: string) =>
 		H()
 			.apiCalls.filter((c) => c.path === path)
-			.map((c) => c.headers.get("sbx-team"));
+			.map((c) => c.headers.get("umiak-team"));
 
-	it("sends Sbx-Team to /v1/me and to every call", async () => {
+	it("sends Umiak-Team to /v1/me and to every call", async () => {
 		const s = await setup();
 		const c = await s.connect(twoTeams, {
-			headers: { "Sbx-Team": OTHER_TEAM },
+			headers: { "Umiak-Team": OTHER_TEAM },
 		});
 		const r = await c.client.callTool({ name: "sandbox_list", arguments: {} });
 		expect(r.isError).toBeFalsy();
@@ -302,7 +302,7 @@ describe("the team of a request", () => {
 		expect(teamOf("/v1/sandboxes")).toEqual([OTHER_TEAM]);
 	});
 
-	it("takes ?team= when there is no Sbx-Team header", async () => {
+	it("takes ?team= when there is no Umiak-Team header", async () => {
 		const s = await setup();
 		const c = await s.connect(twoTeams, { query: `?team=${OTHER_TEAM}` });
 		await c.client.callTool({ name: "sandbox_list", arguments: {} });
@@ -314,10 +314,10 @@ describe("the team of a request", () => {
 		expect(teamOf("/v1/sandboxes")).toEqual([OTHER_TEAM, null]);
 	});
 
-	it("Sbx-Team wins over ?team=", async () => {
+	it("Umiak-Team wins over ?team=", async () => {
 		const s = await setup();
 		const c = await s.connect(twoTeams, {
-			headers: { "Sbx-Team": OTHER_TEAM },
+			headers: { "Umiak-Team": OTHER_TEAM },
 			query: "?team=team_nobody",
 		});
 		await c.client.callTool({ name: "sandbox_list", arguments: {} });
@@ -336,7 +336,7 @@ describe("the team of a request", () => {
 				},
 				body: INIT,
 			}),
-			await post(twoTeams, { "sbx-team": "my team" }),
+			await post(twoTeams, { "umiak-team": "my team" }),
 		]) {
 			expect(r.status).toBe(400);
 			expect(JSON.parse(r.text) as Json).toMatchObject({
@@ -349,14 +349,16 @@ describe("the team of a request", () => {
 	it("caches per team and passes the API's refusal of a foreign team", async () => {
 		const s = await setup();
 		expect((await post(twoTeams)).status).toBe(200);
-		expect((await post(twoTeams, { "sbx-team": OTHER_TEAM })).status).toBe(200);
+		expect((await post(twoTeams, { "umiak-team": OTHER_TEAM })).status).toBe(
+			200,
+		);
 		expect(meCalls()).toBe(2);
-		const r = await post(twoTeams, { "sbx-team": "team_nobody" });
+		const r = await post(twoTeams, { "umiak-team": "team_nobody" });
 		expect(r.status).toBe(403);
 		expect(JSON.parse(r.text) as Json).toMatchObject({
 			error: "team_forbidden",
 		});
-		const key = await post(FAKE_TOKENS.full, { "sbx-team": OTHER_TEAM });
+		const key = await post(FAKE_TOKENS.full, { "umiak-team": OTHER_TEAM });
 		expect(key.status).toBe(403);
 		const rejections = await s.metrics.authRejections.get();
 		expect(

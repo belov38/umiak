@@ -1,4 +1,4 @@
-// Package process is a test double of the sbx.testing.v1.Process service
+// Package process is a test double of the umiak.testing.v1.Process service
 // that honours the command contract of spec 9.1: Start is idempotent by
 // command_id, output is addressed by per-stream byte offsets, Attach resumes
 // from any offset and sends exit only after all output, and old output may
@@ -19,7 +19,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
 )
 
 // Defaults.

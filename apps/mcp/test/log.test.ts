@@ -60,14 +60,18 @@ describe("createLogger", () => {
 	});
 
 	it("writes to a file path", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-mcp-log-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-mcp-log-"));
 		try {
 			const file = join(dir, "mcp.log");
 			const log = createLogger({ level: "info", destination: file });
 			log.info({ tool: "x" }, "hello");
 			log.flush();
 			const line = JSON.parse(readFileSync(file, "utf8").trim());
-			expect(line).toMatchObject({ msg: "hello", tool: "x", name: "sbx-mcp" });
+			expect(line).toMatchObject({
+				msg: "hello",
+				tool: "x",
+				name: "umiak-mcp",
+			});
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

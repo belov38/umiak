@@ -1,4 +1,4 @@
-// `sbx keys` (S7 §13, §14.2): team keys; create and rotate only with a
+// `umiak keys` (S7 §13, §14.2): team keys; create and rotate only with a
 // Keycloak login of an owner.
 import {
 	afterAll,
@@ -12,7 +12,7 @@ import {
 import { type CliWorld, startWorld } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 
-describe("sbx keys", () => {
+describe("umiak keys", () => {
 	let w: CliWorld;
 	let home: CliHome;
 	beforeAll(async () => {
@@ -27,7 +27,7 @@ describe("sbx keys", () => {
 	afterEach(() => home.rm());
 
 	it("a team key lists keys but cannot create one (exit 4, no API call needed)", async () => {
-		const env = { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+		const env = { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: w.secret };
 		const list = await runCli(["keys", "list"], { env });
 		expect(list.code, list.stderr).toBe(0);
 		expect(JSON.parse(list.stdout).data.length).toBeGreaterThan(0);
@@ -38,7 +38,7 @@ describe("sbx keys", () => {
 			code: "user_required",
 			requestId: null,
 		});
-		expect(c.stderr).toContain("sbx login");
+		expect(c.stderr).toContain("umiak login");
 	});
 
 	it("an owner logged in with Keycloak creates, lists, rotates and revokes a key", async () => {
@@ -56,7 +56,7 @@ describe("sbx keys", () => {
 		);
 		expect(c.code, c.stderr).toBe(0);
 		const created = JSON.parse(c.stdout);
-		expect(created.secret).toMatch(/^sbx_/);
+		expect(created.secret).toMatch(/^umiak_/);
 		expect(created.apiKey).toMatchObject({
 			name: "ci-main",
 			createdVia: "cli",
@@ -66,7 +66,7 @@ describe("sbx keys", () => {
 		expect(Math.round(days)).toBe(30);
 		// The new key works.
 		const who = await runCli(["whoami"], {
-			env: { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: created.secret },
+			env: { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: created.secret },
 		});
 		expect(JSON.parse(who.stdout).auth.kind).toBe("team_key");
 
@@ -103,7 +103,7 @@ describe("sbx keys", () => {
 		const k = list.data.find((x: { id: string }) => x.id === created.apiKey.id);
 		expect(k.revokedAt).not.toBeNull();
 		const gone = await runCli(["whoami"], {
-			env: { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: rotated.secret },
+			env: { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: rotated.secret },
 		});
 		expect(gone.code).toBe(4);
 

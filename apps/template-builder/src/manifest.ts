@@ -72,7 +72,7 @@ export interface WindowsFacts {
 	options: { vsBuildtools: boolean };
 	/**
 	 * What the build checked on the boot after the offline WinPE stage: services with Start=4,
-	 * services without a key, and the last line of sbx-offline.log.
+	 * services without a key, and the last line of umiak-offline.log.
 	 */
 	offline?: { services: string[]; missing: string[]; log: string };
 }
@@ -144,6 +144,6 @@ export interface Manifest {
 	durationS: number | null;
 	verify?: VerifyResult;
 	error?: BuildError;
-	/** When `sbx-tpl retire` marked the build. */
+	/** When `umiak-tpl retire` marked the build. */
 	retiredAt?: string;
 }

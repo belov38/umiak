@@ -17,14 +17,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/journal"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/journal"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/memnet"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -33,7 +33,7 @@ func TestMain(m *testing.M) { pgtest.Main(m) }
 const waitTimeout = 10 * time.Second
 
 func testLogger() *slog.Logger {
-	if os.Getenv("SBX_TEST_LOG") != "" {
+	if os.Getenv("UMIAK_TEST_LOG") != "" {
 		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	return slog.New(slog.DiscardHandler)

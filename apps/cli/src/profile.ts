@@ -1,6 +1,6 @@
 // Which profile, API and team a command uses (S7 §14.1):
-// flags > env (SBX_API_URL, SBX_TEAM, SBX_PROFILE; SBX_API_KEY in auth/token.ts)
-// > the profile in config.json > /etc/sbx/config.json (only apiUrl).
+// flags > env (UMIAK_API_URL, UMIAK_TEAM, UMIAK_PROFILE; UMIAK_API_KEY in auth/token.ts)
+// > the profile in config.json > /etc/umiak/config.json (only apiUrl).
 
 import {
 	type Config,
@@ -62,16 +62,16 @@ export function resolveProfile(
 	const config = readConfig(paths);
 	const profileName =
 		nonEmpty(g.profile) ??
-		nonEmpty(env.SBX_PROFILE) ??
+		nonEmpty(env.UMIAK_PROFILE) ??
 		nonEmpty(config.current) ??
 		DEFAULT_PROFILE;
 	const profile = config.profiles[profileName];
 	const apiUrl =
 		nonEmpty(g.apiUrl) ??
-		nonEmpty(env.SBX_API_URL) ??
+		nonEmpty(env.UMIAK_API_URL) ??
 		profile?.apiUrl ??
 		systemApiUrl(paths);
-	const team = nonEmpty(g.team) ?? nonEmpty(env.SBX_TEAM) ?? profile?.team;
+	const team = nonEmpty(g.team) ?? nonEmpty(env.UMIAK_TEAM) ?? profile?.team;
 	return {
 		config,
 		profileName,

@@ -25,7 +25,7 @@ function core() {
 	let calls = 0;
 	const c = createClientCore({
 		baseUrl: API,
-		apiKey: "sbx_test",
+		apiKey: "umiak_test",
 		env: {},
 		fetch: (async () => {
 			calls += 1;

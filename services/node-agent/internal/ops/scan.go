@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 )
 
 // lv.scan (S5 section 10): counts occurrences of secret patterns on a template or VM disk, on
@@ -174,7 +174,7 @@ func (s *Server) lvUsage(ctx context.Context, raw json.RawMessage) (any, error) 
 }
 
 // readTarget returns the LV that lv.scan and lv.usage may read: a template disk base-<id>-* of
-// a template slot tagged sbx-tpl, or a sandbox disk vm-<id>-disk-N tagged sbx and sbx-vm-<id>.
+// a template slot tagged umiak-tpl, or a sandbox disk vm-<id>-disk-N tagged umiak and umiak-vm-<id>.
 // Names alone prove nothing (any guest may use a VMID or a base-* name), and dev infrastructure
 // (590-596) is in neither range. Nothing is activated before this check.
 func (s *Server) readTarget(ctx context.Context, name string) (lvm.LV, error) {
@@ -183,9 +183,9 @@ func (s *Server) readTarget(ctx context.Context, name string) (lvm.LV, error) {
 	}
 	var need []string
 	if m := baseRe.FindStringSubmatch(name); m != nil && s.Cfg.IsTemplateSlot(atoiMatch(m, 1)) {
-		need = []string{"sbx-tpl"}
+		need = []string{"umiak-tpl"}
 	} else if m := vmDiskRe.FindStringSubmatch(name); m != nil && s.Cfg.InRange(atoiMatch(m, 1)) {
-		need = []string{"sbx", "sbx-vm-" + m[1]}
+		need = []string{"umiak", "umiak-vm-" + m[1]}
 	} else {
 		return lvm.LV{}, forbidden("%q is not a template or sandbox disk", name)
 	}

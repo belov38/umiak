@@ -1,8 +1,8 @@
 // Proxied listener (oauth2-proxy, S7 §7.4, S8 §5.2, C4, C6).
 import { randomUUID } from "node:crypto";
 import { createRoute, z } from "@hono/zod-openapi";
-import { encodeUuid } from "@sbx/auth";
-import { skipPg } from "@sbx/db/testing";
+import { encodeUuid } from "@umiak/auth";
+import { skipPg } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseGroups } from "../src/auth/proxied.ts";
 import { ERROR_RESPONSES, jsonBody } from "../src/index.ts";
@@ -15,7 +15,7 @@ import {
 } from "./helpers/auth.ts";
 import { createHarness } from "./helpers/harness.ts";
 
-const APP_ORIGIN = "https://app.sbx.test";
+const APP_ORIGIN = "https://app.umiak.test";
 
 function errorOf(body: unknown) {
 	return (body as { error: { code: string; details: Record<string, unknown> } })
@@ -25,8 +25,8 @@ function errorOf(body: unknown) {
 describe("parseGroups", () => {
 	it("splits, trims, dedups and drops the role:<name> entries of keycloak-oidc", () => {
 		expect(
-			parseGroups(" devs, role:offline_access,,sbx-operators,role:a:b,devs"),
-		).toEqual(["devs", "sbx-operators"]);
+			parseGroups(" devs, role:offline_access,,umiak-operators,role:a:b,devs"),
+		).toEqual(["devs", "umiak-operators"]);
 		expect(parseGroups(undefined)).toEqual([]);
 	});
 });
@@ -58,7 +58,7 @@ describe("proxied listener without Postgres", () => {
 		h.app.get("/v1/__test/private", (c) => c.body(null, 204));
 		const r = await h.request("GET", "/v1/__test/private", {
 			headers: {
-				authorization: "Bearer sbx_x",
+				authorization: "Bearer umiak_x",
 				"x-auth-request-email": "a@example.com",
 				"x-auth-request-user": "sub-a",
 			},
@@ -87,7 +87,7 @@ describe.skipIf(skipPg())("proxied listener", () => {
 		const h = createHarness({
 			listener: "proxied",
 			deps: {
-				settings: testSettings({ SBX_OPERATOR_GROUPS: OPERATOR_GROUP }),
+				settings: testSettings({ UMIAK_OPERATOR_GROUPS: OPERATOR_GROUP }),
 				pool: w.db.pool,
 				identity: w.identity,
 				identityEvents: w.events,
@@ -204,7 +204,7 @@ describe.skipIf(skipPg())("proxied listener", () => {
 		expect(ok.status).toBe(204);
 	});
 
-	it("?team= on GET selects the team; a mismatch with Sbx-Team: 400; on POST: 400", async () => {
+	it("?team= on GET selects the team; a mismatch with Umiak-Team: 400; on POST: 400", async () => {
 		const p = person();
 		const h = harness();
 		const first = await h.request("GET", "/v1/me", { headers: p.headers });
@@ -215,7 +215,7 @@ describe.skipIf(skipPg())("proxied listener", () => {
 		expect(q.status).toBe(200);
 		const other = encodeUuid("team", await w.team());
 		const mismatch = await h.request("GET", `/v1/me?team=${own}`, {
-			headers: { ...p.headers, "sbx-team": other },
+			headers: { ...p.headers, "umiak-team": other },
 		});
 		expect(mismatch.status).toBe(400);
 		expect(errorOf(mismatch.body).code).toBe("validation");
@@ -240,7 +240,7 @@ describe.skipIf(skipPg())("proxied listener", () => {
 		p.headers["x-auth-request-groups"] = ` other, ${OPERATOR_GROUP},,other`;
 		const teamId = await w.team();
 		const r = await harness().request("GET", "/v1/me", {
-			headers: { ...p.headers, "sbx-team": encodeUuid("team", teamId) },
+			headers: { ...p.headers, "umiak-team": encodeUuid("team", teamId) },
 		});
 		expect(r.status).toBe(200);
 		expect(r.body).toMatchObject({
@@ -252,7 +252,7 @@ describe.skipIf(skipPg())("proxied listener", () => {
 	it("an operator naming a team that does not exist: 403 team_forbidden", async () => {
 		const p = person([OPERATOR_GROUP]);
 		const r = await harness().request("GET", "/v1/me", {
-			headers: { ...p.headers, "sbx-team": encodeUuid("team", randomUUID()) },
+			headers: { ...p.headers, "umiak-team": encodeUuid("team", randomUUID()) },
 		});
 		expect(r.status).toBe(403);
 		expect(errorOf(r.body).code).toBe("team_forbidden");

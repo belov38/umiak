@@ -9,8 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Allocator, PveApiError, SqliteStateStore } from "@sbx/pve";
-import { FakeNode } from "@sbx/pve/testing";
+import { Allocator, PveApiError, SqliteStateStore } from "@umiak/pve";
+import { FakeNode } from "@umiak/pve/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
@@ -40,7 +40,7 @@ const STEPS = [
 	"20-docker",
 	"30-toolchains",
 	"40-coding-agents",
-	"50-sbx-agent",
+	"50-umiak-agent",
 	"90-cleanup",
 ];
 
@@ -49,7 +49,7 @@ const sha = (b: Buffer | string) =>
 
 const dirs: string[] = [];
 function tmp(): string {
-	const d = mkdtempSync(join(tmpdir(), "sbx-build-test-"));
+	const d = mkdtempSync(join(tmpdir(), "umiak-build-test-"));
 	dirs.push(d);
 	return d;
 }
@@ -150,9 +150,9 @@ function setup(
 		slug: "linux",
 		node: "pve",
 		storage: "local-lvm",
-		pool: "sandbox",
-		vnet: "sbx0",
-		agentPackage: join(agentFixtures, "sbx-agent-fixture.tar"),
+		pool: "umiak",
+		vnet: "umiak0",
+		agentPackage: join(agentFixtures, "umiak-agent-fixture.tar"),
 		keepOnFailure: false,
 		noVerify: false,
 		templatesDir,
@@ -193,7 +193,7 @@ function expectInOrder(log: string[], seq: string[]) {
 	}
 }
 
-const seedName = (m: Manifest) => `sbx-seed-${m.buildId}.raw`;
+const seedName = (m: Manifest) => `umiak-seed-${m.buildId}.raw`;
 const vm = "/nodes/pve/qemu/597";
 
 describe("buildTemplate: happy path", () => {
@@ -203,7 +203,7 @@ describe("buildTemplate: happy path", () => {
 
 		expect(m.status).toBe("ready");
 		expect(m.version).toBe("20261030.1");
-		expect(m.vmName).toBe("sbx-tpl-linux-20261030-1");
+		expect(m.vmName).toBe("umiak-tpl-linux-20261030-1");
 		expect(m.pveVmid).toBe(597);
 		expect(s.registry.get(m.buildId)).toEqual(m);
 
@@ -225,12 +225,12 @@ describe("buildTemplate: happy path", () => {
 			"guest:step 20-docker",
 			"guest:step 30-toolchains",
 			"guest:step 40-coding-agents",
-			"guest:step 50-sbx-agent",
+			"guest:step 50-umiak-agent",
 			"guest:step 90-cleanup",
 			"guest:dpkg-query",
 			"guest:verify-tools",
-			"guest:write /etc/sbx-template/build.json.tmp",
-			"guest:mv /etc/sbx-template/build.json",
+			"guest:write /etc/umiak-template/build.json.tmp",
+			"guest:mv /etc/umiak-template/build.json",
 			"guest:rm-build-logs",
 			"guest:random-seed",
 			"guest:seal",
@@ -260,7 +260,7 @@ describe("buildTemplate: happy path", () => {
 		const guest = s.log.filter((e) => e.startsWith("guest:"));
 		expect(guest[guest.indexOf("guest:seal") - 1]).toBe("guest:random-seed");
 		const i = s.guest.calls.findIndex(
-			(c) => c.cmd.join(" ") === "sbx-agent seal",
+			(c) => c.cmd.join(" ") === "umiak-agent seal",
 		);
 		const cmd = s.guest.calls[i - 1]?.cmd;
 		expect(cmd).toEqual([
@@ -300,8 +300,8 @@ describe("buildTemplate: happy path", () => {
 		);
 		expect(create?.params).toMatchObject({
 			vmid: 597,
-			name: "sbx-tpl-linux-20261030-1",
-			pool: "sandbox",
+			name: "umiak-tpl-linux-20261030-1",
+			pool: "umiak",
 			machine: "q35",
 			cpu: "host",
 			bios: "seabios",
@@ -317,8 +317,8 @@ describe("buildTemplate: happy path", () => {
 			memory: 4096,
 			balloon: 0,
 			scsi0: `local-lvm:0,import-from=local:import/${IMAGE_NAME},discard=on,iothread=1,ssd=1`,
-			scsi1: `local-lvm:0,import-from=local:import/sbx-seed-${m.buildId}.raw`,
-			net0: "virtio=02:01:00:00:02:55,bridge=sbx0,firewall=1",
+			scsi1: `local-lvm:0,import-from=local:import/umiak-seed-${m.buildId}.raw`,
+			net0: "virtio=02:01:00:00:02:55,bridge=umiak0,firewall=1",
 			boot: "order=scsi0",
 		});
 		for (const k of ["ciuser", "ipconfig0", "cloudinit", "sshkeys"])
@@ -405,7 +405,7 @@ describe("buildTemplate: happy path", () => {
 			kernel: "7.0.0-10-generic",
 			systemd: "systemd 259 (259.1-1ubuntu1)",
 			packages: { bash: "5.2.37-1", curl: "8.14.1-1" },
-			tools: { node: "v24.11.0", sbx: null },
+			tools: { node: "v24.11.0", umiak: null },
 			agentVersion: "0.0.0-fixture",
 			defaultTunnelUrl: "wss://tunnel.example.test/v1/connect",
 			hw: { cpu: "host", rng0: "source=/dev/urandom", cloudinit: false },
@@ -422,7 +422,7 @@ describe("buildTemplate: happy path", () => {
 		expect(m.error).toBeUndefined();
 
 		const inGuest = JSON.parse(
-			String(s.guest.files.get("/etc/sbx-template/build.json")),
+			String(s.guest.files.get("/etc/umiak-template/build.json")),
 		);
 		expect(inGuest).not.toHaveProperty("verify");
 		expect(inGuest).toMatchObject({
@@ -452,7 +452,7 @@ describe("buildTemplate: happy path", () => {
 			(c) => c.cmd[0] === "bash" && c.cmd[1] === "-s",
 		);
 		expect(tools?.cmd).toEqual(["bash", "-s"]);
-		expect(tools?.input?.startsWith("export SBX_VERIFY_MODE=tools\n")).toBe(
+		expect(tools?.input?.startsWith("export UMIAK_VERIFY_MODE=tools\n")).toBe(
 			true,
 		);
 		expect(tools?.input).toContain(
@@ -461,7 +461,7 @@ describe("buildTemplate: happy path", () => {
 		const cmds = s.guest.commands();
 		expect(cmds).toContain("uname -r");
 		expect(cmds).toContain("systemctl --version");
-		expect(cmds).toContain("sbx-agent seal");
+		expect(cmds).toContain("umiak-agent seal");
 	});
 
 	it("writes a large build.json in chunks of at most 32 KiB", async () => {
@@ -478,7 +478,7 @@ describe("buildTemplate: happy path", () => {
 		for (const w of writes)
 			expect(Buffer.byteLength(w.input ?? "")).toBeLessThanOrEqual(32 * 1024);
 		const inGuest = JSON.parse(
-			String(s.guest.files.get("/etc/sbx-template/build.json")),
+			String(s.guest.files.get("/etc/umiak-template/build.json")),
 		);
 		expect(Object.keys(inGuest.packages)).toHaveLength(4000);
 		expect(inGuest.buildId).toBe(m.buildId);
@@ -588,7 +588,7 @@ describe("buildTemplate: failures", () => {
 			"20-docker",
 		]);
 		expect(s.guest.files.get(FAIL_STEP_SCRIPT)).toBe(
-			'echo "sbx-tpl: --fail-step"\nexit 1\n',
+			'echo "umiak-tpl: --fail-step"\nexit 1\n',
 		);
 		expect(s.log).not.toContain("guest:seal");
 
@@ -627,7 +627,7 @@ describe("buildTemplate: failures", () => {
 		const ok = setup();
 		const m = await buildTemplate(ok.deps, ok.opts);
 		expect(m.diskUsedGiB).toBe(6);
-		// The template disk is tagged sbx-tpl (a clone origin for sbx-node) before it is measured.
+		// The template disk is tagged umiak-tpl (a clone origin for umiak-node) before it is measured.
 		const ops = ok.node.calls.map((c) => c.op);
 		expect(ops.indexOf("lv.tagTemplate")).toBeGreaterThan(-1);
 		expect(ops.indexOf("lv.tagTemplate")).toBeLessThan(ops.indexOf("lv.usage"));
@@ -645,7 +645,7 @@ describe("buildTemplate: failures", () => {
 
 	it("refuses an agent package that changed after its signature was verified", async () => {
 		const s = setup();
-		const pkg = join(mkdtempSync(join(tmpdir(), "sbx-pkg-")), "pkg.tar");
+		const pkg = join(mkdtempSync(join(tmpdir(), "umiak-pkg-")), "pkg.tar");
 		copyFileSync(s.opts.agentPackage, pkg);
 		const opts = { ...s.opts, agentPackage: pkg };
 		const fetchImage = s.deps.fetchImage;
@@ -706,7 +706,7 @@ describe("buildTemplate: failures", () => {
 			(c) =>
 				c.method === "PUT" &&
 				c.path === `${vm}/config` &&
-				c.params?.tags === "sbx-tpl",
+				c.params?.tags === "umiak-tpl",
 		);
 		expect(tag).toBeGreaterThan(i);
 		const resize = s.pve.calls.findIndex(
@@ -918,7 +918,7 @@ describe("buildTemplate: failures", () => {
 		const second = setup({}, { registry: first.registry, work: first.work });
 		const m = await buildTemplate(second.deps, second.opts);
 		expect(m.version).toBe("20261030.2");
-		expect(m.vmName).toBe("sbx-tpl-linux-20261030-2");
+		expect(m.vmName).toBe("umiak-tpl-linux-20261030-2");
 		expect(first.registry.list("linux").map((x) => x.status)).toEqual([
 			"failed",
 			"ready",
@@ -940,9 +940,9 @@ describe("register output", () => {
 		hw: { cpu: "host", cloudinit: false, note: "it's" },
 	} as unknown as Manifest;
 
-	it("prints the sbx-admin template register line", () => {
+	it("prints the umiak-admin template register line", () => {
 		expect(registerCommand(m)).toBe(
-			"sbx-admin template register --template linux --version 20261030.1 --os linux --node pve --storage local-lvm --pve-vmid 597 --boot-timeout-s 300 --agent-version 1.2.3 " +
+			"umiak-admin template register --template linux --version 20261030.1 --os linux --node pve --storage local-lvm --pve-vmid 597 --boot-timeout-s 300 --agent-version 1.2.3 " +
 				`--disk-layout '{"scsi0":{"size":"64G","ssd":"1"}}' --hw '{"cpu":"host","cloudinit":false,"note":"it'\\''s"}'`,
 		);
 	});

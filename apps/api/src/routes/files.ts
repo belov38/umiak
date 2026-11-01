@@ -13,9 +13,9 @@
 // upload route is a plain GET route documented as HEAD.
 import { randomUUID } from "node:crypto";
 import { createRoute } from "@hono/zod-openapi";
-import type { AgentFetchInit } from "@sbx/agent-client";
-import { parseUploadOffset } from "@sbx/agent-client";
-import { decodeUlid, newPublicUlid } from "@sbx/auth";
+import type { AgentFetchInit } from "@umiak/agent-client";
+import { parseUploadOffset } from "@umiak/agent-client";
+import { decodeUlid, newPublicUlid } from "@umiak/auth";
 import type { Context } from "hono";
 import {
 	AgentCallError,
@@ -123,7 +123,7 @@ const contentHeaders = {
 };
 
 const uploadOffsetHeader = {
-	"Sbx-Upload-Offset": {
+	"Umiak-Upload-Offset": {
 		description: "Bytes received so far",
 		schema: { type: "integer" as const },
 	},
@@ -136,7 +136,7 @@ const CONTENT_DESCRIPTION =
 	"several ranges give the whole file with 200) and `If-Range` (ETag or date); ETag, " +
 	"Last-Modified, Accept-Ranges. Always `application/octet-stream` with " +
 	"`Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. A directory is " +
-	"409 is_directory. In the browser (dashboard origin) `?team=` may replace the Sbx-Team " +
+	"409 is_directory. In the browser (dashboard origin) `?team=` may replace the Umiak-Team " +
 	"header.";
 
 const getContentRoute = createRoute({
@@ -209,9 +209,9 @@ const putContentRoute = createRoute({
 const UPLOADS_FLOW =
 	"Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to " +
 	"8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a " +
-	"break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose " +
+	"break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose " +
 	"offset is not the current size is 409 upload_offset_mismatch with the current offset " +
-	"(header Sbx-Upload-Offset, details.offset): continue from there.";
+	"(header Umiak-Upload-Offset, details.offset): continue from there.";
 
 const createUploadRoute = createRoute({
 	method: "post",
@@ -257,7 +257,7 @@ const putChunkRoute = createRoute({
 		},
 		404: errorResponse("`not_found` or `upload_not_found`"),
 		409: errorResponse(
-			"`upload_offset_mismatch` (details.offset, header Sbx-Upload-Offset), " +
+			"`upload_offset_mismatch` (details.offset, header Umiak-Upload-Offset), " +
 				`\`invalid_state\` (already committed), ${notReady409}`,
 		),
 		408: errorResponse(
@@ -878,13 +878,13 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 			},
 		);
 		await ensureOk(res);
-		const header = parseUploadOffset(res.headers.get("sbx-upload-offset"));
+		const header = parseUploadOffset(res.headers.get("umiak-upload-offset"));
 		const offset =
 			header === undefined
 				? agentCount((await agentJson(res)).offset, "offset")
 				: Number(header);
 		if (header !== undefined) await res.body?.cancel().catch(() => {});
-		return c.json({ offset }, 200, { "Sbx-Upload-Offset": String(offset) });
+		return c.json({ offset }, 200, { "Umiak-Upload-Offset": String(offset) });
 	});
 
 	// HEAD .../uploads/{upload}: Hono routes HEAD to GET handlers.
@@ -908,11 +908,11 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 			});
 			if (res.status === 404) throw uploadNotFoundError();
 			await ensureOk(res);
-			const offset = parseUploadOffset(res.headers.get("sbx-upload-offset"));
+			const offset = parseUploadOffset(res.headers.get("umiak-upload-offset"));
 			if (offset === undefined) {
-				throw badResponse("the agent sent no Sbx-Upload-Offset");
+				throw badResponse("the agent sent no Umiak-Upload-Offset");
 			}
-			return c.body(null, 200, { "Sbx-Upload-Offset": String(offset) });
+			return c.body(null, 200, { "Umiak-Upload-Offset": String(offset) });
 		},
 	);
 	app.openAPIRegistry.registerPath({
@@ -921,7 +921,7 @@ export function registerFileRoutes(app: ApiApp, deps: ApiDeps): void {
 		operationId: "files.uploadOffset",
 		summary: "Offset of an upload",
 		description:
-			`Sbx-Upload-Offset: the bytes received so far, where the next chunk starts. 404 ` +
+			`Umiak-Upload-Offset: the bytes received so far, where the next chunk starts. 404 ` +
 			`when the upload does not exist (expired, cancelled, committed with a bad checksum, ` +
 			`or no chunk yet). ${UPLOADS_FLOW}`,
 		tags: TAGS,

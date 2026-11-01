@@ -1,5 +1,5 @@
 // PTY over WebSocket (S7 §10): POST /ptys (Idempotency-Key, process.pty),
-// resize, and GET /ptys/{cmd}/connect with the subprotocol sbx.pty.v1 over
+// resize, and GET /ptys/{cmd}/connect with the subprotocol umiak.pty.v1 over
 // a real HTTP server (createApiServer) and the `ws` client: echo, input
 // batching with session/seq, resize, reconnect by offset without loss or
 // duplicates, scrollback, refusals before the upgrade (HTTP with the error
@@ -8,8 +8,12 @@
 
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { encodeUuid, SCOPES } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid, SCOPES } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import {
 	afterAll,
 	afterEach,
@@ -653,7 +657,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		expect(r1.body.error).toMatchObject({ code: "validation" });
 		expect(r1.headers["request-id"]).toMatch(/^req_/);
 
-		const wrong = connect(connectPath(id), { protocols: ["sbx.pty.v0"] });
+		const wrong = connect(connectPath(id), { protocols: ["umiak.pty.v0"] });
 		expect((await wrong.refused).status).toBe(400);
 
 		const anon = connect(connectPath(id), { bearer: null });

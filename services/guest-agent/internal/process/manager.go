@@ -1,5 +1,5 @@
 // Package process runs and tracks commands (spec sections 9 and 10): the
-// sbx.agent.v1.Process Connect service, the durable command records, one
+// umiak.agent.v1.Process Connect service, the durable command records, one
 // monitor per live shim, Attach over the output logs, recovery after an
 // agent restart or a reboot, and the PTY idle timeout.
 //
@@ -22,17 +22,17 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/output"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 // Command record states (store.Command.State).
@@ -77,9 +77,9 @@ const (
 	// DefaultPageSize and MaxPageSize bound List pages.
 	DefaultPageSize = 100
 	MaxPageSize     = 1000
-	// maxIDLen keeps "sbx-cmd-<id>.service" within the 255-byte unit name
+	// maxIDLen keeps "umiak-cmd-<id>.service" within the 255-byte unit name
 	// limit of systemd.
-	maxIDLen = 255 - len("sbx-cmd-") - len(".service")
+	maxIDLen = 255 - len("umiak-cmd-") - len(".service")
 )
 
 // Timeouts of calls to a shim made by the agent itself.

@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // TestJunctionSwitch switches the current junction v1 -> v2: LinkVersion
@@ -100,12 +100,12 @@ func TestMountPointReparseData(t *testing.T) {
 }
 
 func TestWithPathEntry(t *testing.T) {
-	const dir = `C:\Program Files\sbx-agent\current`
+	const dir = `C:\Program Files\umiak-agent\current`
 	for _, tt := range []struct{ in, want string }{
 		{"", dir},
 		{`C:\Windows`, `C:\Windows;` + dir},
 		{`C:\Windows;`, `C:\Windows;` + dir},
-		{`C:\Windows;c:\program files\SBX-AGENT\current\`, `C:\Windows;c:\program files\SBX-AGENT\current\`},
+		{`C:\Windows;c:\program files\UMIAK-AGENT\current\`, `C:\Windows;c:\program files\UMIAK-AGENT\current\`},
 	} {
 		got, changed := withPathEntry(tt.in, dir)
 		if got != tt.want || changed != (tt.in != tt.want) {

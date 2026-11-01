@@ -25,7 +25,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import {
 	type ApiKey,
 	creatorNote,
@@ -47,7 +47,7 @@ export function KeysPage({
 	teamId: string;
 	notices: TeamNoticeView[];
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const { session, team } = useTeamPermission(teamId);
 	const canIssue = can(session, team, "issueApiKeys");
@@ -57,7 +57,7 @@ export function KeysPage({
 	const keys = useQuery({
 		queryKey: ["api-keys", teamId],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/api-keys", { signal });
+			const { data } = await umiak.raw.GET("/v1/api-keys", { signal });
 			return data.data;
 		},
 	});
@@ -66,7 +66,7 @@ export function KeysPage({
 
 	const rotate = async (k: ApiKey): Promise<boolean> => {
 		const r = await attempt(async () => {
-			const { data } = await sbx.raw.POST("/v1/api-keys/{key}/rotate", {
+			const { data } = await umiak.raw.POST("/v1/api-keys/{key}/rotate", {
 				params: { path: { key: k.id } },
 			});
 			return data;
@@ -79,7 +79,7 @@ export function KeysPage({
 
 	const revoke = async (k: ApiKey): Promise<boolean> => {
 		const r = await attempt(() =>
-			sbx.raw.DELETE("/v1/api-keys/{key}", {
+			umiak.raw.DELETE("/v1/api-keys/{key}", {
 				params: { path: { key: k.id } },
 			}),
 		);
@@ -124,7 +124,7 @@ export function KeysPage({
 			</div>
 			<p className="text-sm text-muted-foreground">
 				Keys are for CI and agents and belong to the team. People do not need
-				one: run <code>sbx login</code> to use the CLI with your own account.
+				one: run <code>umiak login</code> to use the CLI with your own account.
 				{!canIssue && " Only an owner of the team can issue and rotate keys."}
 			</p>
 			{keys.isError && (

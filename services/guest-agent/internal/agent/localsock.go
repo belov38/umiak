@@ -2,9 +2,9 @@ package agent
 
 // The local sockets of the agent on Windows (S9 Decision 4, spec 12.7):
 // Layout.AdminSocket serves the full agent API, like --debug-listen, to
-// SYSTEM and Administrators (its clients are `sbx-agent exec`, `call`,
+// SYSTEM and Administrators (its clients are `umiak-agent exec`, `call`,
 // `selftest --pty` and `thaw --force`); Layout.EnvSocket serves only the
-// session env to `sbx-agent env` for SSH session profiles, also to the
+// session env to `umiak-agent env` for SSH session profiles, also to the
 // default user. AF_UNIX has no peer credentials on Windows: the ACL of the
 // socket file decides who connects, and it is set right after Listen.
 // Layouts without the paths (Linux) open neither socket.
@@ -40,7 +40,7 @@ type adminCallKey struct{}
 
 // isAdminCall reports whether ctx belongs to a request on the admin socket.
 // Such a request comes from a local administrator: Process/Start does not
-// wait for pending secrets or for the boot step then, so `sbx-agent exec`
+// wait for pending secrets or for the boot step then, so `umiak-agent exec`
 // works before a claim, after PrepareStop and on a machine whose boot step
 // failed.
 func isAdminCall(ctx context.Context) bool {

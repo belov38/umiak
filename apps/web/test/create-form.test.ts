@@ -61,13 +61,13 @@ describe("toCreateRequest", () => {
 		expect(body.env).toEqual({ A: "  x  ", EMPTY: "" });
 	});
 
-	it("refuses a value without a key, bad keys, SBX_ and duplicates", () => {
+	it("refuses a value without a key, bad keys, UMIAK_ and duplicates", () => {
 		const r = toCreateRequest(
 			form({
 				env: [
 					{ key: "", value: "orphan" },
 					{ key: "1BAD", value: "x" },
-					{ key: "SBX_FOO", value: "x" },
+					{ key: "UMIAK_FOO", value: "x" },
 					{ key: "A", value: "1" },
 					{ key: "A", value: "2" },
 				],
@@ -83,11 +83,11 @@ describe("toCreateRequest", () => {
 		]);
 	});
 
-	it("allows the CLI variables of SBX_ as secrets", () => {
+	it("allows the CLI variables of UMIAK_ as secrets", () => {
 		const body = ok(
-			form({ secrets: [{ key: "SBX_API_KEY", value: "sbx_x" }] }),
+			form({ secrets: [{ key: "UMIAK_API_KEY", value: "umiak_x" }] }),
 		);
-		expect(body.secrets).toEqual({ SBX_API_KEY: "sbx_x" });
+		expect(body.secrets).toEqual({ UMIAK_API_KEY: "umiak_x" });
 	});
 
 	it("environment: omitted for the team default, null for none, the name otherwise", () => {

@@ -2,8 +2,8 @@
 // Windows source is refused (`snapshot_requires_stop`) unless the request has
 // `forceStop`; then the operation stops the source, snapshots it, starts it
 // again and only then hands the fork over. Linux ignores the flag.
-import { isSbxError, type SbxError } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { isUmiakError, type UmiakError } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createWorld, type TestWorld } from "./fakes/world.ts";
 import {
@@ -51,14 +51,14 @@ function powerCalls(w: TestWorld): string[] {
 		.filter((m) => ["shutdown", "stop", "start", "snapshot"].includes(m));
 }
 
-async function thrown(p: Promise<unknown>): Promise<SbxError> {
+async function thrown(p: Promise<unknown>): Promise<UmiakError> {
 	try {
 		await p;
 	} catch (e) {
-		if (isSbxError(e)) return e;
+		if (isUmiakError(e)) return e;
 		throw e;
 	}
-	throw new Error("expected an SbxError");
+	throw new Error("expected an UmiakError");
 }
 
 /** The guest ignores the shutdown: S1 reports a timeout, the VM keeps running. */

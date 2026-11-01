@@ -15,7 +15,7 @@ function rows(v: unknown): string[] {
 	return [JSON.stringify(v)];
 }
 
-/** Human-readable differences between two sbx-node inventories. Empty means the world is unchanged. */
+/** Human-readable differences between two umiak-node inventories. Empty means the world is unchanged. */
 export function diffWorld(before: World, after: World): string[] {
 	const out: string[] = [];
 	const keys = new Set([...Object.keys(before), ...Object.keys(after)]);

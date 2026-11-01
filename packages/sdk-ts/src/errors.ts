@@ -7,9 +7,9 @@ export const NETWORK_ERROR = "network_error";
 export const UNEXPECTED_RESPONSE = "unexpected_response";
 /** No credentials found in the chain (S7 §7.6). */
 export const NO_CREDENTIALS = "no_credentials";
-/** No API URL: neither `baseUrl`, `SBX_API_URL` nor an `sbx` profile. */
+/** No API URL: neither `baseUrl`, `UMIAK_API_URL` nor an `umiak` profile. */
 export const NO_API_URL = "no_api_url";
-/** `sbx auth token --json` failed or printed something unexpected. */
+/** `umiak auth token --json` failed or printed something unexpected. */
 export const AUTH_COMMAND_FAILED = "auth_command_failed";
 /** A Node/Bun-only helper (local paths, the system tar) used elsewhere. */
 export const UNSUPPORTED_RUNTIME = "unsupported_runtime";
@@ -18,7 +18,7 @@ export const WAIT_TIMEOUT = "wait_timeout";
 /** The tokenProvider option rejected or returned no token. */
 export const TOKEN_PROVIDER_FAILED = "token_provider_failed";
 
-export interface SbxErrorInit {
+export interface UmiakErrorInit {
 	status: number;
 	code: string;
 	message: string;
@@ -30,7 +30,7 @@ export interface SbxErrorInit {
 	cause?: unknown;
 }
 
-export class SbxError extends Error {
+export class UmiakError extends Error {
 	/** HTTP status; 0 when there is no response (network, credentials). */
 	readonly status: number;
 	/** Stable snake_case code (S7 §5.5) or one of the SDK codes above. */
@@ -41,12 +41,12 @@ export class SbxError extends Error {
 	readonly requestId: string | null;
 	readonly retryAfterMs: number | null;
 
-	constructor(init: SbxErrorInit) {
+	constructor(init: UmiakErrorInit) {
 		super(
 			init.message,
 			init.cause === undefined ? undefined : { cause: init.cause },
 		);
-		this.name = "SbxError";
+		this.name = "UmiakError";
 		this.status = init.status;
 		this.code = init.code;
 		this.retryable = init.retryable;
@@ -57,8 +57,8 @@ export class SbxError extends Error {
 }
 
 /** The sandbox ended up in `error`, `deleting`, `deleted` or `stopped` while waiting for `ready`. */
-export class SandboxFailedError extends SbxError {
-	constructor(init: SbxErrorInit) {
+export class SandboxFailedError extends UmiakError {
+	constructor(init: UmiakErrorInit) {
 		super(init);
 		this.name = "SandboxFailedError";
 	}
@@ -81,8 +81,8 @@ export function parseRetryAfter(
 	return Math.max(0, at - now);
 }
 
-/** Builds the SbxError for an error response; reads the body. */
-export async function errorFromResponse(res: Response): Promise<SbxError> {
+/** Builds the UmiakError for an error response; reads the body. */
+export async function errorFromResponse(res: Response): Promise<UmiakError> {
 	const text = await res.text().catch(() => "");
 	let body: unknown;
 	try {
@@ -97,7 +97,7 @@ export async function errorFromResponse(res: Response): Promise<SbxError> {
 		typeof env.code === "string" &&
 		typeof env.retryable === "boolean"
 	) {
-		return new SbxError({
+		return new UmiakError({
 			status: res.status,
 			code: env.code,
 			message: typeof env.message === "string" ? env.message : env.code,
@@ -111,7 +111,7 @@ export async function errorFromResponse(res: Response): Promise<SbxError> {
 		});
 	}
 	const snippet = text.slice(0, 200).trim();
-	return new SbxError({
+	return new UmiakError({
 		status: res.status,
 		code: UNEXPECTED_RESPONSE,
 		message: `HTTP ${res.status}${snippet ? `: ${snippet}` : ""}`,

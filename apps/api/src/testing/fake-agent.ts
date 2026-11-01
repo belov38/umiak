@@ -29,7 +29,7 @@ import {
 	type AgentFetchInit,
 	AgentOutdatedError,
 	AgentUnavailableError,
-} from "@sbx/agent-client";
+} from "@umiak/agent-client";
 import type { AgentCallError } from "../agent/errors.ts";
 import {
 	AGENT_CAPABILITIES,
@@ -406,7 +406,7 @@ export class FakeAgent implements AgentApi {
 		if (s === undefined) {
 			if (this.#closed) throw new Error("FakeAgent is closed");
 			this.#root ??= realpathSync(
-				mkdtempSync(join(tmpdir(), "sbx-fake-agent-")),
+				mkdtempSync(join(tmpdir(), "umiak-fake-agent-")),
 			);
 			const dir = join(this.#root, `m${this.#machines.size}`);
 			mkdirSync(dir);

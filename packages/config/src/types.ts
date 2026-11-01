@@ -108,7 +108,7 @@ export interface TemplateBuildTopology {
 	hw: Record<string, unknown>;
 }
 
-/** Environment data that `sbx-admin bootstrap` writes to the database. */
+/** Environment data that `umiak-admin bootstrap` writes to the database. */
 export interface TopologyConfig {
 	providers: ProviderTopology[];
 	templateBuilds: TemplateBuildTopology[];

@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 // armIdleLocked (re)starts the PTY idle timer of c to fire after d. It does

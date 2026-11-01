@@ -5,11 +5,11 @@
 // other tests and the real one. The worker is not running: the test plays its
 // part with markReady and markStopped.
 //
-// Needs Postgres like the CLI tests (Docker, or SBX_TEST_DATABASE_URL;
-// SBX_TEST_SKIP_PG=1 skips it).
+// Needs Postgres like the CLI tests (Docker, or UMIAK_TEST_DATABASE_URL;
+// UMIAK_TEST_SKIP_PG=1 skips it).
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { skipPg } from "@sbx/db/testing";
-import { Sbx } from "@sbx/sdk";
+import { skipPg } from "@umiak/db/testing";
+import { Umiak } from "@umiak/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLogger } from "../src/log.ts";
 import { createServer } from "../src/server.ts";
@@ -25,11 +25,11 @@ describe.skipIf(skipPg())("MCP tools against the real api", () => {
 
 	beforeAll(async () => {
 		api = await startRealApi();
-		const sbx = new Sbx({ baseUrl: api.url, apiKey: api.secret, env: {} });
+		const umiak = new Umiak({ baseUrl: api.url, apiKey: api.secret, env: {} });
 		conn = await connectInMemory(
 			createServer({
 				tools: ALL_TOOLS,
-				sbx: () => sbx,
+				umiak: () => umiak,
 				transport: "stdio",
 				log: createLogger({
 					level: "debug",

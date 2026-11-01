@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# sbx-gateway image. Build context is the repo root:
-#   docker build -f services/gateway/Dockerfile -t sbx-gateway:dev .
+# umiak-gateway image. Build context is the repo root:
+#   docker build -f services/gateway/Dockerfile -t umiak-gateway:dev .
 # Dockerfile.dockerignore next to this file replaces the root .dockerignore for
 # this build and limits the context to the Go modules the gateway needs.
 ARG GO_IMAGE=golang:1.27.3-trixie
@@ -21,13 +21,13 @@ COPY libs/tunnel /src/libs/tunnel
 COPY services/gateway /src/services/gateway
 ARG VERSION=dev
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/sbx-gateway ./cmd/sbx-gateway
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/umiak-gateway ./cmd/umiak-gateway
 
 FROM ${RUNTIME_IMAGE}
-COPY --from=build /out/sbx-gateway /sbx-gateway
+COPY --from=build /out/umiak-gateway /umiak-gateway
 USER nonroot
-# 8443 TLS (sbx and tunnel), 2222 SSH, 7000 internal (peers, api, worker),
+# 8443 TLS (umiak and tunnel), 2222 SSH, 7000 internal (peers, api, worker),
 # 9090 metrics and health.
 EXPOSE 8443 2222 7000 9090
-ENTRYPOINT ["/sbx-gateway"]
+ENTRYPOINT ["/umiak-gateway"]
 CMD ["serve"]

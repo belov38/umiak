@@ -11,7 +11,7 @@ import (
 
 	xhttp2 "golang.org/x/net/http2"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/h2"
 )
 
 func TestServerSettings(t *testing.T) {

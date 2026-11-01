@@ -204,7 +204,7 @@ export class SandboxFs {
 			if (!parent.exists) throw pathNotFound(dirname(r.virtual));
 		}
 		await mkdir(dirname(r.host), { recursive: true });
-		const tmp = `${r.host}.sbx-tmp-${process.pid}`;
+		const tmp = `${r.host}.umiak-tmp-${process.pid}`;
 		await writeFile(tmp, data);
 		if (o.mode !== undefined) await chmod(tmp, o.mode);
 		if (o.mtime) await utimes(tmp, o.mtime, o.mtime);

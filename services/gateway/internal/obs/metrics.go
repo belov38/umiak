@@ -7,7 +7,7 @@ import "github.com/prometheus/client_golang/prometheus"
 // by sandbox or machine: with thousands of machines that would explode the
 // cardinality. Per-sandbox data comes from the access log.
 type Metrics struct {
-	HTTPRequests         *prometheus.CounterVec   // access, code_class, sbx_error, via
+	HTTPRequests         *prometheus.CounterVec   // access, code_class, umiak_error, via
 	HTTPDuration         *prometheus.HistogramVec // access, via; time to response headers
 	HTTPBytes            *prometheus.CounterVec   // direction
 	HTTPActiveStreams    prometheus.Gauge         // WebSocket, SSE, upgrade
@@ -23,7 +23,7 @@ type Metrics struct {
 	SSHAuth              *prometheus.CounterVec // result
 	SSHChannels          *prometheus.CounterVec // type
 	TLSHandshakeErrors   *prometheus.CounterVec // sni_kind
-	CertExpiry           *prometheus.GaugeVec   // cert: sbx, tunnel
+	CertExpiry           *prometheus.GaugeVec   // cert: umiak, tunnel
 	DrainOpenStreams     *prometheus.GaugeVec   // kind: http, ssh
 	DependencyUp         *prometheus.GaugeVec   // dep
 	TunnelAdmitLimited   prometheus.Counter
@@ -32,7 +32,7 @@ type Metrics struct {
 // NewMetrics creates the metrics and registers them on reg. It panics when a
 // metric is already registered, like prometheus.MustRegister.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
-	const ns = "sbx_gateway_"
+	const ns = "umiak_gateway_"
 	// Time to response headers: from milliseconds up to the 5 minute limit.
 	latency := []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300}
 	dial := []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}
@@ -40,7 +40,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		HTTPRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: ns + "http_requests_total", Help: "HTTP requests handled by the gateway.",
-		}, []string{"access", "code_class", "sbx_error", "via"}),
+		}, []string{"access", "code_class", "umiak_error", "via"}),
 		HTTPDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: ns + "http_request_duration_seconds", Help: "Time until the response headers.", Buckets: latency,
 		}, []string{"access", "via"}),

@@ -7,7 +7,7 @@ import {
 	type WebSocketInit,
 } from "../src/client.ts";
 import { Command } from "../src/commands.ts";
-import { SbxError } from "../src/errors.ts";
+import { UmiakError } from "../src/errors.ts";
 import { PTY_SUBPROTOCOL, Pty } from "../src/pty.ts";
 
 describe("Pty input while not connected", () => {
@@ -25,13 +25,13 @@ describe("Pty input while not connected", () => {
 		} catch (e) {
 			err = e;
 		}
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({ code: "pty_input_overflow", retryable: true });
 		pty.close();
 	});
 });
 
-describe("Pty WebSocket factory (SbxOptions.webSocket)", () => {
+describe("Pty WebSocket factory (UmiakOptions.webSocket)", () => {
 	it("opens the connection through the factory with the URL, subprotocol and headers", async () => {
 		const calls: { url: string; init: WebSocketInit }[] = [];
 		const factory: WebSocketFactory = (url, init) => {
@@ -45,7 +45,7 @@ describe("Pty WebSocket factory (SbxOptions.webSocket)", () => {
 		};
 		const core = createClientCore({
 			baseUrl: "https://api.example.com",
-			apiKey: "sbx_test",
+			apiKey: "umiak_test",
 			team: "team_1",
 			userAgent: "ua/1",
 			webSocket: factory,
@@ -65,9 +65,9 @@ describe("Pty WebSocket factory (SbxOptions.webSocket)", () => {
 		expect(calls[0]?.init).toEqual({
 			protocols: [PTY_SUBPROTOCOL],
 			headers: {
-				Authorization: "Bearer sbx_test",
+				Authorization: "Bearer umiak_test",
 				"User-Agent": "ua/1",
-				"Sbx-Team": "team_1",
+				"Umiak-Team": "team_1",
 			},
 		});
 	});
@@ -83,7 +83,7 @@ describe("Pty offset past the end", () => {
 		};
 		const core = createClientCore({
 			baseUrl: "https://api.example.com",
-			apiKey: "sbx_test",
+			apiKey: "umiak_test",
 			webSocket: factory,
 		});
 		const pty = new Pty(core, new Command({ core, id: "sb_1" }, "cmd_1"), {
@@ -118,7 +118,7 @@ describe("Pty offset past the end", () => {
 			),
 			new Promise((r) => setTimeout(() => r("still running"), 5000)),
 		]);
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({
 			code: "range_not_satisfiable",
 			retryable: false,
@@ -139,7 +139,7 @@ describe("Pty truncated", () => {
 		};
 		const core = createClientCore({
 			baseUrl: "https://api.example.com",
-			apiKey: "sbx_test",
+			apiKey: "umiak_test",
 			webSocket: factory,
 		});
 		const pty = new Pty(core, new Command({ core, id: "sb_1" }, "cmd_1"), {});

@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // watchdogGrace delays the watchdog unit past the deadline, so the agent's
@@ -18,8 +18,8 @@ import (
 // gone. The unit still thaws well within deadline + 5 s (spec 21, item 11).
 const watchdogGrace = time.Second
 
-// Watchdog is `sbx-agent quiesce-watchdog --lease <id>`, run in the
-// transient unit sbx-quiesce-watchdog-<id>.service. It sleeps until the
+// Watchdog is `umiak-agent quiesce-watchdog --lease <id>`, run in the
+// transient unit umiak-quiesce-watchdog-<id>.service. It sleeps until the
 // lease deadline (plus watchdogGrace) or its stop signal, re-reads the lease
 // file and, if the
 // lease is still there, claims the lease file (renames it), thaws it like

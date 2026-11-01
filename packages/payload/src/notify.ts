@@ -9,10 +9,10 @@ import { type PostgresAdapter, sql } from "@payloadcms/db-postgres";
 import type { PayloadRequest } from "payload";
 
 export type NotifyChannel =
-	| "sbx_identity"
-	| "sbx_config"
-	| "sbx_routes"
-	| "sbx_ssh_revoke";
+	| "umiak_identity"
+	| "umiak_config"
+	| "umiak_routes"
+	| "umiak_ssh_revoke";
 
 type SQL = ReturnType<typeof sql>;
 

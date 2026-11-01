@@ -1,4 +1,8 @@
-import type { PlatformDefaults, SizeConfig, TemplateConfig } from "@sbx/config";
+import type {
+	PlatformDefaults,
+	SizeConfig,
+	TemplateConfig,
+} from "@umiak/config";
 import {
 	templateUnavailable,
 	type ValidationIssue,

@@ -1,16 +1,16 @@
 // Payload of the worker (S8 plan decision 5): the config reader over the
-// Payload collections (LISTEN sbx_config drops its cache) and the readiness
+// Payload collections (LISTEN umiak_config drops its cache) and the readiness
 // check of the Payload migrations. The migrations themselves are applied by
 // `node packages/payload/src/migrate.ts` (compose: web-migrate), never here.
 import { readFileSync } from "node:fs";
 import {
 	assertPayloadMigrated,
-	closeSbxPayload,
-	getSbxPayload,
+	closeUmiakPayload,
+	getUmiakPayload,
 	KeycloakAdminClient,
 	KeycloakIdpSync,
 	PayloadConfigReader,
-} from "@sbx/payload";
+} from "@umiak/payload";
 import type { Logger } from "pino";
 import type { IdpSync } from "./controllers/idp-sync.ts";
 import type { IdpSyncEnv } from "./env.ts";
@@ -30,7 +30,7 @@ export interface WorkerPayloadOptions {
 }
 
 export interface WorkerPayload {
-	payload: Awaited<ReturnType<typeof getSbxPayload>>;
+	payload: Awaited<ReturnType<typeof getUmiakPayload>>;
 	config: PayloadConfigReader;
 	/** Throws while a Payload migration known to the code is not applied. */
 	ready(): Promise<void>;
@@ -42,7 +42,7 @@ export interface WorkerPayload {
 export async function openWorkerPayload(
 	o: WorkerPayloadOptions,
 ): Promise<WorkerPayload> {
-	const payload = await getSbxPayload({
+	const payload = await getUmiakPayload({
 		databaseUrl: o.databaseUrl,
 		secret: o.secret,
 		// The worker authenticates nobody (the strategy is web's and api's).
@@ -53,13 +53,13 @@ export async function openWorkerPayload(
 		payload,
 		listen: { databaseUrl: o.databaseUrl },
 		onListenError: (err) =>
-			o.log.warn({ err: errText(err) }, "LISTEN sbx_config: connection lost"),
+			o.log.warn({ err: errText(err) }, "LISTEN umiak_config: connection lost"),
 	});
 	try {
 		await config.start();
 	} catch (err) {
 		await config.close().catch(() => {});
-		await closeSbxPayload(o.databaseUrl);
+		await closeUmiakPayload(o.databaseUrl);
 		throw err;
 	}
 	let closing: Promise<void> | undefined;
@@ -72,7 +72,7 @@ export async function openWorkerPayload(
 				await config.close().catch((err: unknown) => {
 					o.log.warn({ err: errText(err) }, "closing the config reader failed");
 				});
-				await closeSbxPayload(o.databaseUrl);
+				await closeUmiakPayload(o.databaseUrl);
 			})();
 			return closing;
 		},
@@ -90,7 +90,7 @@ export interface WorkerIdpSyncOptions {
 
 /**
  * ctl-idp-sync over Keycloak (S8 §20.1), or undefined without
- * SBX_IDP_SYNC_KEYCLOAK_URL. The client secret is read once from its file
+ * UMIAK_IDP_SYNC_KEYCLOAK_URL. The client secret is read once from its file
  * and never logged; aborts are reported through the result (runIdpSync
  * turns them into metrics and log.error).
  */

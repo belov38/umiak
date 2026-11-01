@@ -1,4 +1,4 @@
-import { type Tx, withTx } from "@sbx/db";
+import { type Tx, withTx } from "@umiak/db";
 import { outOfCapacity } from "../errors.ts";
 import type { SandboxServiceDeps } from "./common.ts";
 import { OUT_OF_CAPACITY_RETRY_SECONDS } from "./create-placement.ts";

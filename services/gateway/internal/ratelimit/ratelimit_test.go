@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
 type fakeClock struct {
@@ -450,7 +450,7 @@ func TestRun(t *testing.T) {
 }
 
 // TestTunnelConnsPerIP: the tunnel conns of one IP have their own count,
-// separate from the sbx conns; exempt IPs skip it.
+// separate from the umiak conns; exempt IPs skip it.
 func TestTunnelConnsPerIP(t *testing.T) {
 	l, _, m := newTest(t, func(c *Config) {
 		c.ConnsPerIP = 1
@@ -459,7 +459,7 @@ func TestTunnelConnsPerIP(t *testing.T) {
 	})
 	addr := ip("192.0.2.1")
 	if _, ok := l.AcquireConn(addr); !ok {
-		t.Fatal("sbx conn refused")
+		t.Fatal("umiak conn refused")
 	}
 	var releases []func()
 	for i := range 3 {

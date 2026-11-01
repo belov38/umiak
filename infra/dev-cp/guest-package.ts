@@ -48,7 +48,7 @@ export async function installTestAgent(
 				"bash",
 				"-eu",
 				"-c",
-				'cat "$1"/p* > "$1"/agent.tar.gz\ngzip -d "$1"/agent.tar.gz\nsbx-agent install-package --no-units "$1"/agent.tar\nsystemctl restart sbx-agent',
+				'cat "$1"/p* > "$1"/agent.tar.gz\ngzip -d "$1"/agent.tar.gz\numiak-agent install-package --no-units "$1"/agent.tar\nsystemctl restart umiak-agent',
 				"bash",
 				dir,
 			],

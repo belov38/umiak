@@ -15,8 +15,8 @@ import {
 	type AgentFetchInit,
 	AgentUnavailableError,
 	HEADER_REQUEST_ID,
-} from "@sbx/agent-client";
-import { ErrorDetailSchema } from "@sbx/proto";
+} from "@umiak/agent-client";
+import { ErrorDetailSchema } from "@umiak/proto";
 import {
 	type AttachResponse,
 	CommandInfoSchema,
@@ -29,7 +29,7 @@ import {
 	Process,
 	Stream,
 	System,
-} from "@sbx/proto/agent/v1";
+} from "@umiak/proto/agent/v1";
 import { describe, expect, it } from "vitest";
 import {
 	AgentCallError,
@@ -129,7 +129,7 @@ const SPEC: AgentCommandSpec = {
 };
 
 describe("ConnectAgentApi: Process", () => {
-	it("start: the spec in proto form, Sbx-Request-Id, the info in AgentApi form", async () => {
+	it("start: the spec in proto form, Umiak-Request-Id, the info in AgentApi form", async () => {
 		let seen: { req: unknown; id: string | null } | undefined;
 		const { agent, machines } = api({
 			process: {
@@ -726,7 +726,7 @@ describe("ConnectAgentApi: Filesystem and System", () => {
 		expect(seen.list).toMatchObject({ includeHidden: false });
 	});
 
-	it("mutations carry Sbx-Request-Id: makeDir, move, chmod, remove", async () => {
+	it("mutations carry Umiak-Request-Id: makeDir, move, chmod, remove", async () => {
 		const ids: Record<string, string | null> = {};
 		const reqs: Record<string, unknown> = {};
 		const { agent } = api({
@@ -797,7 +797,7 @@ describe("ConnectAgentApi: Filesystem and System", () => {
 		});
 	});
 
-	it("listPorts, updateEnv and updateSecrets (with Sbx-Request-Id)", async () => {
+	it("listPorts, updateEnv and updateSecrets (with Umiak-Request-Id)", async () => {
 		const seen: Record<string, unknown> = {};
 		const { agent } = api({
 			system: {

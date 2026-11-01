@@ -13,7 +13,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 )
 
 func TestFromErrno(t *testing.T) {

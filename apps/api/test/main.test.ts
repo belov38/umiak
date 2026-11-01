@@ -1,5 +1,5 @@
 // The api process (S7 §7.1, Task 15): `startApi` builds the production
-// dependencies from the settings (Postgres pool, LISTEN sbx_identity,
+// dependencies from the settings (Postgres pool, LISTEN umiak_identity,
 // pg-boss sender, Payload identity and config, key ring, identity file,
 // service tokens, SSH CA and host keys) and serves the four listeners; `onShutdownSignals` turns
 // SIGTERM/SIGINT into one graceful close and the exit code.
@@ -9,13 +9,17 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { type AddressInfo, connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apiKeyHash, generateApiKeySecret } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { apiKeyHash, generateApiKeySecret } from "@umiak/auth";
 import {
-	closeSbxPayload,
-	getSbxPayload,
-	migrateSbxPayload,
-} from "@sbx/payload";
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
+import {
+	closeUmiakPayload,
+	getUmiakPayload,
+	migrateUmiakPayload,
+} from "@umiak/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { onShutdownSignals, type RunningApi, startApi } from "../src/index.ts";
 import { testSettings } from "../src/testing/index.ts";
@@ -45,15 +49,15 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 	beforeAll(async () => {
 		db = await createTestDatabase();
 		const payloadSecret = "main-test-payload-secret-0123456789";
-		const p = await getSbxPayload({
+		const p = await getUmiakPayload({
 			databaseUrl: db.url,
 			secret: payloadSecret,
 			operatorGroups: [],
 			poolMax: 4,
 		});
-		await migrateSbxPayload(p, () => {});
-		await closeSbxPayload(db.url);
-		dir = mkdtempSync(join(tmpdir(), "sbx-api-main-"));
+		await migrateUmiakPayload(p, () => {});
+		await closeUmiakPayload(db.url);
+		dir = mkdtempSync(join(tmpdir(), "umiak-api-main-"));
 		const file = (name: string, text: string) => {
 			const p = join(dir, name);
 			writeFileSync(p, text);
@@ -62,20 +66,20 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 		env = {
 			DATABASE_URL: db.url,
 			PAYLOAD_SECRET: payloadSecret,
-			SBX_DATA_KEYS_FILE: file(
+			UMIAK_DATA_KEYS_FILE: file(
 				"data-keys.json",
 				JSON.stringify({
 					current: 1,
 					keys: { "1": Buffer.alloc(32, 3).toString("base64") },
 				}),
 			),
-			SBX_API_SERVICE_TOKENS_FILE: file(
+			UMIAK_API_SERVICE_TOKENS_FILE: file(
 				"service-tokens.json",
 				JSON.stringify({ gateway: [GW] }),
 			),
-			SBX_API_GATEWAY_TOKEN_FILE: file("gateway-token", "outbound-token\n"),
-			SBX_SSH_HOST_KEYS_FILE: file("host-keys.pub", `${hostKey}\n`),
-			SBX_IDENTITY_FILE: file(
+			UMIAK_API_GATEWAY_TOKEN_FILE: file("gateway-token", "outbound-token\n"),
+			UMIAK_SSH_HOST_KEYS_FILE: file("host-keys.pub", `${hostKey}\n`),
+			UMIAK_IDENTITY_FILE: file(
 				"identity.yaml",
 				[
 					"teams:",
@@ -90,11 +94,11 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 					"",
 				].join("\n"),
 			),
-			SBX_API_PUBLIC_PORT: "0",
-			SBX_API_PROXIED_PORT: "0",
-			SBX_API_INTERNAL_PORT: "0",
-			SBX_API_METRICS_PORT: "0",
-			SBX_LOG_LEVEL: "silent",
+			UMIAK_API_PUBLIC_PORT: "0",
+			UMIAK_API_PROXIED_PORT: "0",
+			UMIAK_API_INTERNAL_PORT: "0",
+			UMIAK_API_METRICS_PORT: "0",
+			UMIAK_LOG_LEVEL: "silent",
 		};
 	});
 	afterAll(async () => {
@@ -148,7 +152,7 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 			});
 
 			const metrics = await fetch(url(ports.metrics, "/metrics"));
-			expect(await metrics.text()).toContain("sbx_api_requests_total");
+			expect(await metrics.text()).toContain("umiak_api_requests_total");
 		} finally {
 			await api.close();
 		}
@@ -162,8 +166,8 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 		}
 	});
 
-	it("SBX_API_PROXIED_ENABLED=0: no proxied listener", async () => {
-		const api = await start({ SBX_API_PROXIED_ENABLED: "0" });
+	it("UMIAK_API_PROXIED_ENABLED=0: no proxied listener", async () => {
+		const api = await start({ UMIAK_API_PROXIED_ENABLED: "0" });
 		try {
 			expect(api.ports.proxied).toBeNull();
 			const meta = await fetch(`http://127.0.0.1:${api.ports.public}/v1/meta`);
@@ -198,8 +202,8 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 		try {
 			await expect(
 				start({
-					SBX_API_SERVICE_TOKENS_FILE: bad,
-					DATABASE_URL: `postgres://sbx:sbx@127.0.0.1:${port}/${dbName}`,
+					UMIAK_API_SERVICE_TOKENS_FILE: bad,
+					DATABASE_URL: `postgres://umiak:umiak@127.0.0.1:${port}/${dbName}`,
 				}),
 			).rejects.toThrow(/service tokens file/);
 			// Give a pool or LISTEN connection that might have started time to arrive.

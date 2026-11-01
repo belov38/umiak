@@ -1,4 +1,4 @@
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ApiMetrics, bodyLimitFor } from "../src/index.ts";
@@ -15,7 +15,7 @@ describe("ops listener", () => {
 
 	it("/readyz is 503 when Postgres does not answer", async () => {
 		const pool = new pg.Pool({
-			connectionString: "postgres://sbx:sbx@127.0.0.1:1/none",
+			connectionString: "postgres://umiak:umiak@127.0.0.1:1/none",
 			connectionTimeoutMillis: 500,
 		});
 		try {
@@ -63,7 +63,7 @@ describe("ops listener", () => {
 		expect(r.headers.get("content-type")).toContain("text/plain");
 		const text = r.text;
 		expect(text).toMatch(
-			/sbx_api_requests_total\{[^}]*route="\/v1\/meta"[^}]*method="GET"[^}]*status="200"[^}]*\} 1/,
+			/umiak_api_requests_total\{[^}]*route="\/v1\/meta"[^}]*method="GET"[^}]*status="200"[^}]*\} 1/,
 		);
 		// Answers produced in middleware keep the route label (413 here).
 		const big = await pub.request("POST", "/v1/__test/upload", {
@@ -73,12 +73,12 @@ describe("ops listener", () => {
 		expect(big.status).toBe(413);
 		const text2 = (await ops.request("GET", "/metrics")).text;
 		expect(text2).toMatch(
-			/sbx_api_requests_total\{[^}]*route="\/v1\/__test\/upload"[^}]*status="413"[^}]*\} 1/,
+			/umiak_api_requests_total\{[^}]*route="\/v1\/__test\/upload"[^}]*status="413"[^}]*\} 1/,
 		);
 		// Unknown paths share one label value (no cardinality from URLs).
 		expect(text).toMatch(/route="unmatched"[^}]*status="404"/);
 		expect(text).not.toContain("/v1/nope/123");
-		expect(text).toContain("sbx_api_request_duration_seconds_bucket");
+		expect(text).toContain("umiak_api_request_duration_seconds_bucket");
 	});
 });
 
@@ -137,7 +137,7 @@ describe("request log", () => {
 		const logs = captureLogs();
 		logs.log.info(
 			{
-				req: { headers: { authorization: "Bearer sbx_secret" } },
+				req: { headers: { authorization: "Bearer umiak_secret" } },
 				body: {
 					env: { A: "1" },
 					secrets: { B: "2" },
@@ -151,7 +151,15 @@ describe("request log", () => {
 			"x",
 		);
 		const text = JSON.stringify(logs.entries());
-		for (const s of ["sbx_secret", '"1"', '"2"', '"s"', '"t"', '"c"', "Zm9v"]) {
+		for (const s of [
+			"umiak_secret",
+			'"1"',
+			'"2"',
+			'"s"',
+			'"t"',
+			'"c"',
+			"Zm9v",
+		]) {
 			expect(text).not.toContain(s);
 		}
 	});

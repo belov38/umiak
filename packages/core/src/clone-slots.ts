@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import type pg from "pg";
 
 // Shared per-node semaphore for S1 clones (S6 §8.3). Pool provisioning, create

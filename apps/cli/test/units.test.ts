@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ExitEvent } from "@sbx/sdk";
+import type { ExitEvent } from "@umiak/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	parseDuration,
@@ -27,7 +27,7 @@ import { Output, OutputClosedError, outputMode } from "../src/output.ts";
 
 let dir: string;
 beforeEach(() => {
-	dir = mkdtempSync(join(tmpdir(), "sbx-units-"));
+	dir = mkdtempSync(join(tmpdir(), "umiak-units-"));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -151,16 +151,16 @@ describe("args", () => {
 });
 
 describe("output", () => {
-	it("only the --json flag (not SBX_OUTPUT=json) asks raw-data commands for frames", () => {
+	it("only the --json flag (not UMIAK_OUTPUT=json) asks raw-data commands for frames", () => {
 		expect(outputMode(["exec", "--json"], {}).jsonFlag).toBe(true);
-		expect(outputMode(["exec"], { SBX_OUTPUT: "json" }).jsonFlag).toBe(false);
+		expect(outputMode(["exec"], { UMIAK_OUTPUT: "json" }).jsonFlag).toBe(false);
 		expect(outputMode(["exec", "--json", "--human"], {}).jsonFlag).toBe(false);
 		const w = { write: () => true };
 		const env = new Output({
 			stdout: w,
 			stderr: w,
 			isTTY: false,
-			...outputMode(["exec"], { SBX_OUTPUT: "json" }),
+			...outputMode(["exec"], { UMIAK_OUTPUT: "json" }),
 		});
 		expect(env.json).toBe(true);
 		expect(env.jsonFlag).toBe(false);

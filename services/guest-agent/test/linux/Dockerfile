@@ -3,7 +3,7 @@
 # a dev-signed agent package and runs the integration test binary inside.
 # The image follows the template requirements of spec section 20 where a
 # container can: user `user` (uid 1000, sudo, linger), sshd on loopback with
-# the sbx user CA and the two pam_env lines of section 8.2. No Docker inside.
+# the umiak user CA and the two pam_env lines of section 8.2. No Docker inside.
 FROM ubuntu:26.04
 
 RUN apt-get update \
@@ -21,25 +21,25 @@ RUN apt-get update \
 RUN userdel -r ubuntu 2>/dev/null || true \
  && useradd -m -u 1000 -s /bin/bash -G sudo user \
  && rm -f /home/user/.bash_logout /root/.bash_logout \
- && echo 'user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-sbx-user \
- && chmod 0440 /etc/sudoers.d/90-sbx-user \
+ && echo 'user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-umiak-user \
+ && chmod 0440 /etc/sudoers.d/90-umiak-user \
  && mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/user
 
-# sshd per spec section 20: loopback only, no passwords, the sbx user CA.
-RUN mkdir -p /etc/sbx /etc/sbx-agent \
- && : > /etc/sbx/env \
- && : > /etc/sbx-agent/ssh-user-ca.pub \
- && : > /etc/ssh/sbx_user_ca.pub \
+# sshd per spec section 20: loopback only, no passwords, the umiak user CA.
+RUN mkdir -p /etc/umiak /etc/umiak-agent \
+ && : > /etc/umiak/env \
+ && : > /etc/umiak-agent/ssh-user-ca.pub \
+ && : > /etc/ssh/umiak_user_ca.pub \
  && printf '%s\n' \
       'ListenAddress 127.0.0.1' \
       'ListenAddress ::1' \
       'PasswordAuthentication no' \
       'KbdInteractiveAuthentication no' \
-      'TrustedUserCAKeys /etc/ssh/sbx_user_ca.pub' \
-      > /etc/ssh/sshd_config.d/50-sbx.conf \
+      'TrustedUserCAKeys /etc/ssh/umiak_user_ca.pub' \
+      > /etc/ssh/sshd_config.d/50-umiak.conf \
  && printf '%s\n' \
-      'session required pam_env.so readenv=1 envfile=/etc/sbx/env' \
-      'session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env' \
+      'session required pam_env.so readenv=1 envfile=/etc/umiak/env' \
+      'session required pam_env.so readenv=1 envfile=/run/umiak/secrets/env' \
       >> /etc/pam.d/sshd \
  && rm -f /etc/ssh/ssh_host_* \
  && systemctl enable ssh.service

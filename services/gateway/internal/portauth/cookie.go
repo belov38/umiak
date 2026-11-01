@@ -1,6 +1,6 @@
 // Package portauth implements the token and sso access modes of published
 // ports (spec 8): the signed gateway cookies, the access checks, the reserved
-// /__sbx/* endpoints and the request strip helper (7.4).
+// /__umiak/* endpoints and the request strip helper (7.4).
 package portauth
 
 import (
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/config"
 )
 
 // Cookie names. All are __Host- cookies: no Domain, Path=/, Secure.
@@ -22,8 +22,8 @@ import (
 // stateKeyLen characters of its state, so parallel logins (several tabs,
 // session restore) do not overwrite each other's state.
 const (
-	AuthCookie        = "__Host-sbx_auth"
-	StateCookiePrefix = "__Host-sbx_state"
+	AuthCookie        = "__Host-umiak_auth"
+	StateCookiePrefix = "__Host-umiak_state"
 	stateKeyLen       = 8
 )
 
@@ -60,7 +60,7 @@ const (
 // format, unknown version or kid, bad MAC, bad payload or expired.
 var ErrInvalidCookie = errors.New("portauth: invalid cookie")
 
-// Session is the payload of __Host-sbx_auth (spec 8.2).
+// Session is the payload of __Host-umiak_auth (spec 8.2).
 type Session struct {
 	Label  string
 	Mode   string // ModeToken, ModeSSO or ModeDesktop
@@ -70,7 +70,7 @@ type Session struct {
 	Expiry time.Time
 }
 
-// State is the payload of __Host-sbx_state (spec 8.4).
+// State is the payload of __Host-umiak_state (spec 8.4).
 type State struct {
 	State  string
 	RD     string

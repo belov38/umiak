@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/desktop"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
 )
 
 func TestDesktopDoesNotStartBeforeClaim(t *testing.T) {

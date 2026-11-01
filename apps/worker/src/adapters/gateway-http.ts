@@ -1,12 +1,12 @@
 // GatewayPort over the gateway's internal listener (S2 §5.2, §8.4): the call
 // goes to the instance that owns the machine's tunnel, found through the S2
-// registry (`@sbx/agent-client` PgRegistry: connected session, live instance).
+// registry (`@umiak/agent-client` PgRegistry: connected session, live instance).
 import {
 	HEADER_ERROR_CODE,
 	HEADER_INSTANCE_URL,
 	type Registry,
 	SCHEME_BEARER,
-} from "@sbx/agent-client";
+} from "@umiak/agent-client";
 import {
 	type GatewayPort,
 	GatewayRejected,
@@ -84,7 +84,7 @@ export class HttpGatewayPort implements GatewayPort {
 	 * `POST <internal_url>/v1/machines/{id}/rotate-token`. On `421
 	 * machine_moved` the cached route is dropped and the call is repeated once
 	 * against the new owner: a fresh registry route if it names another
-	 * instance, else the answer's `Sbx-Instance-Url` when the registry knows it
+	 * instance, else the answer's `Umiak-Instance-Url` when the registry knows it
 	 * as a live instance (the hint is never followed blindly: the service
 	 * token goes only to registered instances). No owner, a moved route, a
 	 * connection error, a registry failure or 5xx are transient
@@ -173,14 +173,14 @@ export class HttpGatewayPort implements GatewayPort {
 
 /**
  * GatewayPort when the worker has no service token
- * (`SBX_GATEWAY_SERVICE_TOKEN_FILE` unset): every rotation is the transient
+ * (`UMIAK_GATEWAY_SERVICE_TOKEN_FILE` unset): every rotation is the transient
  * `GatewayUnavailable`, so a create waits in retries until the deadline
  * instead of failing at once.
  */
 export class UnconfiguredGatewayPort implements GatewayPort {
 	async rotateToken(machineId: string): Promise<void> {
 		throw new GatewayUnavailable(
-			`gateway not configured (SBX_GATEWAY_SERVICE_TOKEN_FILE unset); cannot rotate the token of machine ${machineId}`,
+			`gateway not configured (UMIAK_GATEWAY_SERVICE_TOKEN_FILE unset); cannot rotate the token of machine ${machineId}`,
 		);
 	}
 }

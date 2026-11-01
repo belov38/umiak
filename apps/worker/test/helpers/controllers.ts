@@ -2,7 +2,7 @@
 // its current machine, tunnel sessions, gateway instances and direct
 // timestamp edits (no sleeping).
 import { randomUUID } from "node:crypto";
-import { ingestAgentEvents, type SyntheticEventType } from "@sbx/core";
+import { ingestAgentEvents, type SyntheticEventType } from "@umiak/core";
 import { handleMachineEvents } from "../../src/handlers/machine-events.ts";
 import {
 	insertMachine,

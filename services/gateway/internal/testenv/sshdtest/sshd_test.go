@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
+	"github.com/belov38/umiak/services/gateway/internal/testenv/sshdtest"
 )
 
 func signer(t *testing.T) ssh.Signer {
@@ -29,7 +29,7 @@ func signer(t *testing.T) ssh.Signer {
 func login(t *testing.T, principals []string) error {
 	t.Helper()
 	ca, key := signer(t), signer(t)
-	srv := sshdtest.New(t, ca.PublicKey(), "sbx")
+	srv := sshdtest.New(t, ca.PublicKey(), "umiak")
 	now := time.Now()
 	cert := &ssh.Certificate{
 		Key:             key.PublicKey(),
@@ -72,7 +72,7 @@ func login(t *testing.T, principals []string) error {
 		<-done
 	}()
 	c, _, _, err := ssh.NewClientConn(a, "sshd", &ssh.ClientConfig{
-		User:            "sbx",
+		User:            "umiak",
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(cs)},
 		HostKeyCallback: ssh.FixedHostKey(srv.HostKey()),
 	})
@@ -83,7 +83,7 @@ func login(t *testing.T, principals []string) error {
 }
 
 func TestCertPrincipals(t *testing.T) {
-	if err := login(t, []string{"sbx"}); err != nil {
+	if err := login(t, []string{"umiak"}); err != nil {
 		t.Fatalf("valid certificate refused: %v", err)
 	}
 	if err := login(t, nil); err == nil {

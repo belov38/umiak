@@ -11,7 +11,7 @@ import (
 func TestOwnUserDesktopParents(t *testing.T) {
 	root := filepath.Join("home", "user", ".local")
 	var calls [][]string
-	err := ownUserDesktopParents(t.Context(), filepath.Join(root, "state", "sbx-sunshine"), func(_ context.Context, name string, args ...string) ([]byte, error) {
+	err := ownUserDesktopParents(t.Context(), filepath.Join(root, "state", "umiak-sunshine"), func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, append([]string{name}, args...))
 		return nil, nil
 	})

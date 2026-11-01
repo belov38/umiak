@@ -1,4 +1,4 @@
-// openapi-typescript (@sbx/sdk codegen) needs the TypeScript JS API; TypeScript 7
+// openapi-typescript (@umiak/sdk codegen) needs the TypeScript JS API; TypeScript 7
 // ships none. Give it its own TypeScript 5 instead of the workspace peer.
 module.exports = {
 	hooks: {

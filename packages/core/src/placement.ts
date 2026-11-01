@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import { RESERVED_SQL } from "./capacity.ts";
 
 /**

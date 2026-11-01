@@ -1,4 +1,4 @@
-import { type Tx, withTx } from "@sbx/db";
+import { type Tx, withTx } from "@umiak/db";
 import {
 	invalidState,
 	notFound,
@@ -26,13 +26,13 @@ import { validatePort } from "./ports.ts";
 import { checkKnownKeys, isPlainObject } from "./validate.ts";
 
 // Operator blocks (S8 §17.1 C3, §17.2 S4). Only an operator's browser session
-// blocks and unblocks; the sandbox is found in any team (no Sbx-Team needed).
+// blocks and unblocks; the sandbox is found in any team (no Umiak-Team needed).
 // A sandbox block makes every route of the sandbox `blocked` and leaves the
 // team only reads, stop and delete (`findSandboxRow({write})`); a port block
 // blocks its route and PUT/rotate/DELETE of the port (`ports.ts`). The
-// triggers notify `sbx_routes` (0201 for hosted ports, 0204 for sandboxes);
-// a sandbox block also notifies `sbx_ssh_revoke` and `sbx_identity`, an unblock
-// `sbx_identity` (below).
+// triggers notify `umiak_routes` (0201 for hosted ports, 0204 for sandboxes);
+// a sandbox block also notifies `umiak_ssh_revoke` and `umiak_identity`, an unblock
+// `umiak_identity` (below).
 // Each change is a `sandbox_events` row with `{reason, note, by}`.
 
 export const BLOCK_NOTE_MAX_CHARS = 500;
@@ -144,8 +144,8 @@ export async function blockSandbox(
 		// denies a blocked sandbox, S4 §9.5); 'sandboxes:<id>' makes every api
 		// close the sandbox's exec streams and PTY sockets (StreamRegistry).
 		await tx.client.query(
-			`SELECT pg_notify('sbx_ssh_revoke', ''),
-			        pg_notify('sbx_identity', 'sandboxes:' || $1::text)`,
+			`SELECT pg_notify('umiak_ssh_revoke', ''),
+			        pg_notify('umiak_identity', 'sandboxes:' || $1::text)`,
 			[row.id],
 		);
 		return toSandbox(tx.client, updated);
@@ -182,7 +182,7 @@ export async function unblockSandbox(
 		// right away instead of on its next 5 s tick (S10 §13.2); the stream
 		// registry rechecks the block and closes nothing.
 		await tx.client.query(
-			`SELECT pg_notify('sbx_identity', 'sandboxes:' || $1::text)`,
+			`SELECT pg_notify('umiak_identity', 'sandboxes:' || $1::text)`,
 			[row.id],
 		);
 		return toSandbox(tx.client, updated);

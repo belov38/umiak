@@ -1,7 +1,7 @@
 // Operation (core) -> Operation resource (S7 §8.4): public ids, ISO times,
 // `error {code, message, retryable}`; never `request` (it holds bodyHash).
-import { encodeUuid } from "@sbx/auth";
-import type { Operation } from "@sbx/core";
+import { encodeUuid } from "@umiak/auth";
+import type { Operation } from "@umiak/core";
 import type {
 	OperationResource,
 	PUBLIC_OPERATION_KINDS,

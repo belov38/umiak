@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -64,28 +64,28 @@ func newFixture(t *testing.T) *fixture {
 	_, loginCA := writeSSHKey(t, dir, "login_ca_unused")
 	loginCAFile := writeFile(t, dir, "login_ca.pub", "# login CAs\n"+string(ssh.MarshalAuthorizedKey(loginCA.PublicKey())))
 	return &fixture{dir: dir, env: map[string]string{
-		"SBX_GATEWAY_INTERNAL_URL":           "http://gw-0.gateway.svc:7000",
-		"SBX_GATEWAY_SERVICE_TOKENS_FILE":    writeFile(t, dir, "tokens.json", `{"api":["a1"],"worker":["w1"],"gateway":["g1","g2"]}`),
-		"SBX_GATEWAY_COOKIE_KEYS_FILE":       writeFile(t, dir, "cookie.keys", "k1:"+b64key('a')+"\n"),
-		"SBX_GATEWAY_TLS_SBX_CERT_FILE":      "/tls/sbx.crt",
-		"SBX_GATEWAY_TLS_SBX_KEY_FILE":       "/tls/sbx.key",
-		"SBX_GATEWAY_TLS_TUNNEL_CERT_FILE":   "/tls/tunnel.crt",
-		"SBX_GATEWAY_TLS_TUNNEL_KEY_FILE":    "/tls/tunnel.key",
-		"SBX_GATEWAY_SSH_HOST_KEY_FILES":     hostKey,
-		"SBX_GATEWAY_SSH_USER_CA_KEY_FILE":   caKey,
-		"SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE": loginCAFile,
-		"SBX_GATEWAY_API_TOKEN_FILE":         writeFile(t, dir, "api.token", "  api-secret\n"),
-		"SBX_GATEWAY_API_URL":                "http://api:3000",
-		"SBX_GATEWAY_SBX_DOMAIN":             "sbx.example.com",
-		"SBX_GATEWAY_TUNNEL_HOST":            "tunnel.example.com",
-		"SBX_GATEWAY_SSH_HOST":               "ssh.example.com",
-		"SBX_GATEWAY_DATABASE_URL":           "postgres://x",
+		"UMIAK_GATEWAY_INTERNAL_URL":           "http://gw-0.gateway.svc:7000",
+		"UMIAK_GATEWAY_SERVICE_TOKENS_FILE":    writeFile(t, dir, "tokens.json", `{"api":["a1"],"worker":["w1"],"gateway":["g1","g2"]}`),
+		"UMIAK_GATEWAY_COOKIE_KEYS_FILE":       writeFile(t, dir, "cookie.keys", "k1:"+b64key('a')+"\n"),
+		"UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE":      "/tls/umiak.crt",
+		"UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE":       "/tls/umiak.key",
+		"UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE":   "/tls/tunnel.crt",
+		"UMIAK_GATEWAY_TLS_TUNNEL_KEY_FILE":    "/tls/tunnel.key",
+		"UMIAK_GATEWAY_SSH_HOST_KEY_FILES":     hostKey,
+		"UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE":   caKey,
+		"UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE": loginCAFile,
+		"UMIAK_GATEWAY_API_TOKEN_FILE":         writeFile(t, dir, "api.token", "  api-secret\n"),
+		"UMIAK_GATEWAY_API_URL":                "http://api:3000",
+		"UMIAK_GATEWAY_UMIAK_DOMAIN":             "umiak.example.com",
+		"UMIAK_GATEWAY_TUNNEL_HOST":            "tunnel.example.com",
+		"UMIAK_GATEWAY_SSH_HOST":               "ssh.example.com",
+		"UMIAK_GATEWAY_DATABASE_URL":           "postgres://x",
 	}}
 }
 
 func TestFromEnvDefaults(t *testing.T) {
 	f := newFixture(t)
-	f.env["SBX_GATEWAY_DATABASE_URL"] = ""
+	f.env["UMIAK_GATEWAY_DATABASE_URL"] = ""
 	f.env["DATABASE_URL"] = "postgres://fallback"
 	cfg, err := FromEnv(f.getenv)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestFromEnvDefaults(t *testing.T) {
 		{"ReservedPorts[0]", cfg.ReservedPorts[0], 22},
 		{"ReservedPorts[5]", cfg.ReservedPorts[5], 48010},
 		{"ReservedSuffixes", strings.Join(cfg.ReservedSuffixes, ","), "desktop"},
-		{"ReservedSlugs", strings.Join(cfg.ReservedSlugs, ","), "api,app,www,ssh,tunnel,admin,static,sbx"},
+		{"ReservedSlugs", strings.Join(cfg.ReservedSlugs, ","), "api,app,www,ssh,tunnel,admin,static,umiak"},
 		{"HTTPDrainDeadline", cfg.HTTPDrainDeadline, 2 * time.Minute},
 		{"SSHDrainDeadline", cfg.SSHDrainDeadline, 15 * time.Minute},
 		{"SSHKeepaliveInterval", cfg.SSHKeepaliveInterval, 30 * time.Second},
@@ -162,35 +162,35 @@ func TestFromEnvDefaults(t *testing.T) {
 func TestFromEnvOverrides(t *testing.T) {
 	f := newFixture(t)
 	for k, v := range map[string]string{
-		"SBX_GATEWAY_INSTANCE_ID":                   "gw-1",
-		"SBX_GATEWAY_TLS_LISTEN":                    ":443",
-		"SBX_GATEWAY_HTTP_LISTEN":                   ":8080",
-		"SBX_GATEWAY_PROXY_PROTOCOL":                "v2",
-		"SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":          "10.0.0.0/8, fd00::/8",
-		"SBX_GATEWAY_TRUSTED_PROXY_CIDRS":           "192.168.0.0/16",
-		"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":        "203.0.113.0/24",
-		"SBX_GATEWAY_RATELIMIT_IP_RATE":             "5.5",
-		"SBX_GATEWAY_RATELIMIT_AUTH_BLOCK":          "1m",
-		"SBX_GATEWAY_RESERVED_PORTS":                "22, 8080",
-		"SBX_GATEWAY_TIMEOUT_DIAL":                  "3s",
-		"SBX_GATEWAY_TIMEOUT_STREAM_IDLE":           "30m",
-		"SBX_GATEWAY_MAX_HEADER_BYTES":              "1024",
-		"SBX_GATEWAY_COOKIE_CROSS_SITE":             "true",
-		"SBX_GATEWAY_HTTP_DRAIN_DEADLINE":           "30s",
-		"SBX_GATEWAY_TUNNEL_ADMIT_RATE":             "50",
-		"SBX_GATEWAY_TUNNEL_ADMIT_BURST":            "60",
-		"SBX_GATEWAY_MIN_AGENT_VERSION":             "1.2.3",
-		"SBX_GATEWAY_LOG_LEVEL":                     "debug",
-		"SBX_GATEWAY_STRIP_COOKIE_PREFIXES":         "a,b",
-		"SBX_GATEWAY_AUTH_URL":                      "https://app.example.com/authorize",
-		"SBX_GATEWAY_RESERVED_SUFFIXES":             "desktop,vnc",
-		"SBX_GATEWAY_RESERVED_SLUGS":                "api",
-		"SBX_GATEWAY_TIMEOUT_RESPONSE_HEADER":       "1m",
-		"SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP":     "16",
-		"SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY":   "1h",
-		"SBX_GATEWAY_PROXY_HEADER_TIMEOUT":          "500ms",
-		"SBX_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP": "32",
-		"SBX_GATEWAY_TIMEOUT_TUNNEL_READ_HEADER":    "3s",
+		"UMIAK_GATEWAY_INSTANCE_ID":                   "gw-1",
+		"UMIAK_GATEWAY_TLS_LISTEN":                    ":443",
+		"UMIAK_GATEWAY_HTTP_LISTEN":                   ":8080",
+		"UMIAK_GATEWAY_PROXY_PROTOCOL":                "v2",
+		"UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS":          "10.0.0.0/8, fd00::/8",
+		"UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS":           "192.168.0.0/16",
+		"UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS":        "203.0.113.0/24",
+		"UMIAK_GATEWAY_RATELIMIT_IP_RATE":             "5.5",
+		"UMIAK_GATEWAY_RATELIMIT_AUTH_BLOCK":          "1m",
+		"UMIAK_GATEWAY_RESERVED_PORTS":                "22, 8080",
+		"UMIAK_GATEWAY_TIMEOUT_DIAL":                  "3s",
+		"UMIAK_GATEWAY_TIMEOUT_STREAM_IDLE":           "30m",
+		"UMIAK_GATEWAY_MAX_HEADER_BYTES":              "1024",
+		"UMIAK_GATEWAY_COOKIE_CROSS_SITE":             "true",
+		"UMIAK_GATEWAY_HTTP_DRAIN_DEADLINE":           "30s",
+		"UMIAK_GATEWAY_TUNNEL_ADMIT_RATE":             "50",
+		"UMIAK_GATEWAY_TUNNEL_ADMIT_BURST":            "60",
+		"UMIAK_GATEWAY_MIN_AGENT_VERSION":             "1.2.3",
+		"UMIAK_GATEWAY_LOG_LEVEL":                     "debug",
+		"UMIAK_GATEWAY_STRIP_COOKIE_PREFIXES":         "a,b",
+		"UMIAK_GATEWAY_AUTH_URL":                      "https://app.example.com/authorize",
+		"UMIAK_GATEWAY_RESERVED_SUFFIXES":             "desktop,vnc",
+		"UMIAK_GATEWAY_RESERVED_SLUGS":                "api",
+		"UMIAK_GATEWAY_TIMEOUT_RESPONSE_HEADER":       "1m",
+		"UMIAK_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP":     "16",
+		"UMIAK_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY":   "1h",
+		"UMIAK_GATEWAY_PROXY_HEADER_TIMEOUT":          "500ms",
+		"UMIAK_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP": "32",
+		"UMIAK_GATEWAY_TIMEOUT_TUNNEL_READ_HEADER":    "3s",
 	} {
 		f.env[k] = v
 	}
@@ -238,12 +238,12 @@ func TestFromEnvOverrides(t *testing.T) {
 
 func TestFromEnvDisableListeners(t *testing.T) {
 	f := newFixture(t)
-	f.env["SBX_GATEWAY_TLS_LISTEN"] = "off"
-	f.env["SBX_GATEWAY_SSH_LISTEN"] = "off"
+	f.env["UMIAK_GATEWAY_TLS_LISTEN"] = "off"
+	f.env["UMIAK_GATEWAY_SSH_LISTEN"] = "off"
 	for _, k := range []string{
-		"SBX_GATEWAY_TLS_SBX_CERT_FILE", "SBX_GATEWAY_TLS_SBX_KEY_FILE",
-		"SBX_GATEWAY_TLS_TUNNEL_CERT_FILE", "SBX_GATEWAY_TLS_TUNNEL_KEY_FILE",
-		"SBX_GATEWAY_SSH_HOST_KEY_FILES", "SBX_GATEWAY_SSH_USER_CA_KEY_FILE", "SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE",
+		"UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE", "UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE",
+		"UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE", "UMIAK_GATEWAY_TLS_TUNNEL_KEY_FILE",
+		"UMIAK_GATEWAY_SSH_HOST_KEY_FILES", "UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE", "UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE",
 	} {
 		delete(f.env, k)
 	}
@@ -259,13 +259,13 @@ func TestFromEnvDisableListeners(t *testing.T) {
 func TestFromEnvFiles(t *testing.T) {
 	f := newFixture(t)
 	k2 := base64.URLEncoding.EncodeToString([]byte(strings.Repeat("\xfb", 32)))
-	f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "cookie2.keys",
+	f.env["UMIAK_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "cookie2.keys",
 		"# comment\n\nk1:"+b64key('a')+"\nk2:"+k2+"\n")
 	hk2, signer2 := writeSSHKey(t, f.dir, "host2")
-	f.env["SBX_GATEWAY_SSH_HOST_KEY_FILES"] += "," + hk2
+	f.env["UMIAK_GATEWAY_SSH_HOST_KEY_FILES"] += "," + hk2
 	_, l2 := writeSSHKey(t, f.dir, "l2")
 	_, l3 := writeSSHKey(t, f.dir, "l3")
-	f.env["SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE"] = writeFile(t, f.dir, "login2.pub",
+	f.env["UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE"] = writeFile(t, f.dir, "login2.pub",
 		string(ssh.MarshalAuthorizedKey(l2.PublicKey()))+"\n# c\n"+string(ssh.MarshalAuthorizedKey(l3.PublicKey())))
 
 	cfg, err := FromEnv(f.getenv)
@@ -301,50 +301,50 @@ func TestFromEnvErrors(t *testing.T) {
 		mut  func(f *fixture)
 		want string
 	}{
-		{"missing internal url", func(f *fixture) { delete(f.env, "SBX_GATEWAY_INTERNAL_URL") }, "SBX_GATEWAY_INTERNAL_URL"},
+		{"missing internal url", func(f *fixture) { delete(f.env, "UMIAK_GATEWAY_INTERNAL_URL") }, "UMIAK_GATEWAY_INTERNAL_URL"},
 		{"cookie key not 32 bytes", func(f *fixture) {
-			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "short.keys", "k1:"+base64.StdEncoding.EncodeToString([]byte("short"))+"\n")
-		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
+			f.env["UMIAK_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "short.keys", "k1:"+base64.StdEncoding.EncodeToString([]byte("short"))+"\n")
+		}, "UMIAK_GATEWAY_COOKIE_KEYS_FILE"},
 		{"cookie key duplicate kid", func(f *fixture) {
-			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "dup.keys", "k1:"+b64key('a')+"\nk1:"+b64key('b')+"\n")
-		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
+			f.env["UMIAK_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "dup.keys", "k1:"+b64key('a')+"\nk1:"+b64key('b')+"\n")
+		}, "UMIAK_GATEWAY_COOKIE_KEYS_FILE"},
 		{"cookie keys empty", func(f *fixture) {
-			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "empty.keys", "# nothing\n")
-		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
+			f.env["UMIAK_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "empty.keys", "# nothing\n")
+		}, "UMIAK_GATEWAY_COOKIE_KEYS_FILE"},
 		{"cookie key id not cookie-safe", func(f *fixture) {
-			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "badkid.keys", "k;1:"+b64key('a')+"\n")
-		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
+			f.env["UMIAK_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "badkid.keys", "k;1:"+b64key('a')+"\n")
+		}, "UMIAK_GATEWAY_COOKIE_KEYS_FILE"},
 		{"cookie key id with space", func(f *fixture) {
-			f.env["SBX_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "spacekid.keys", "k 1:"+b64key('a')+"\n")
-		}, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
-		{"cookie keys unset", func(f *fixture) { delete(f.env, "SBX_GATEWAY_COOKIE_KEYS_FILE") }, "SBX_GATEWAY_COOKIE_KEYS_FILE"},
-		{"bad cidr", func(f *fixture) { f.env["SBX_GATEWAY_TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8,nonsense" }, "SBX_GATEWAY_TRUSTED_PROXY_CIDRS"},
-		{"bad exempt cidr", func(f *fixture) { f.env["SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"] = "1.2.3.4/99" }, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
-		{"bad proxy protocol", func(f *fixture) { f.env["SBX_GATEWAY_PROXY_PROTOCOL"] = "v3" }, "SBX_GATEWAY_PROXY_PROTOCOL"},
-		{"bad duration", func(f *fixture) { f.env["SBX_GATEWAY_TIMEOUT_DIAL"] = "ten" }, "SBX_GATEWAY_TIMEOUT_DIAL"},
-		{"non-positive duration", func(f *fixture) { f.env["SBX_GATEWAY_TIMEOUT_DIAL"] = "-1s" }, "SBX_GATEWAY_TIMEOUT_DIAL"},
-		{"bad int", func(f *fixture) { f.env["SBX_GATEWAY_MAX_HEADER_BYTES"] = "x" }, "SBX_GATEWAY_MAX_HEADER_BYTES"},
-		{"bad tunnel conns per ip", func(f *fixture) { f.env["SBX_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP"] = "0" }, "SBX_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP"},
-		{"bad handshakes per ip", func(f *fixture) { f.env["SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"] = "0" }, "SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"},
-		{"bad port", func(f *fixture) { f.env["SBX_GATEWAY_RESERVED_PORTS"] = "22,70000" }, "SBX_GATEWAY_RESERVED_PORTS"},
-		{"bad bool", func(f *fixture) { f.env["SBX_GATEWAY_COOKIE_CROSS_SITE"] = "maybe" }, "SBX_GATEWAY_COOKIE_CROSS_SITE"},
-		{"bad log level", func(f *fixture) { f.env["SBX_GATEWAY_LOG_LEVEL"] = "loud" }, "SBX_GATEWAY_LOG_LEVEL"},
+			f.env["UMIAK_GATEWAY_COOKIE_KEYS_FILE"] = writeFile(t, f.dir, "spacekid.keys", "k 1:"+b64key('a')+"\n")
+		}, "UMIAK_GATEWAY_COOKIE_KEYS_FILE"},
+		{"cookie keys unset", func(f *fixture) { delete(f.env, "UMIAK_GATEWAY_COOKIE_KEYS_FILE") }, "UMIAK_GATEWAY_COOKIE_KEYS_FILE"},
+		{"bad cidr", func(f *fixture) { f.env["UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8,nonsense" }, "UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS"},
+		{"bad exempt cidr", func(f *fixture) { f.env["UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS"] = "1.2.3.4/99" }, "UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
+		{"bad proxy protocol", func(f *fixture) { f.env["UMIAK_GATEWAY_PROXY_PROTOCOL"] = "v3" }, "UMIAK_GATEWAY_PROXY_PROTOCOL"},
+		{"bad duration", func(f *fixture) { f.env["UMIAK_GATEWAY_TIMEOUT_DIAL"] = "ten" }, "UMIAK_GATEWAY_TIMEOUT_DIAL"},
+		{"non-positive duration", func(f *fixture) { f.env["UMIAK_GATEWAY_TIMEOUT_DIAL"] = "-1s" }, "UMIAK_GATEWAY_TIMEOUT_DIAL"},
+		{"bad int", func(f *fixture) { f.env["UMIAK_GATEWAY_MAX_HEADER_BYTES"] = "x" }, "UMIAK_GATEWAY_MAX_HEADER_BYTES"},
+		{"bad tunnel conns per ip", func(f *fixture) { f.env["UMIAK_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP"] = "0" }, "UMIAK_GATEWAY_RATELIMIT_TUNNEL_CONNS_PER_IP"},
+		{"bad handshakes per ip", func(f *fixture) { f.env["UMIAK_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"] = "0" }, "UMIAK_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP"},
+		{"bad port", func(f *fixture) { f.env["UMIAK_GATEWAY_RESERVED_PORTS"] = "22,70000" }, "UMIAK_GATEWAY_RESERVED_PORTS"},
+		{"bad bool", func(f *fixture) { f.env["UMIAK_GATEWAY_COOKIE_CROSS_SITE"] = "maybe" }, "UMIAK_GATEWAY_COOKIE_CROSS_SITE"},
+		{"bad log level", func(f *fixture) { f.env["UMIAK_GATEWAY_LOG_LEVEL"] = "loud" }, "UMIAK_GATEWAY_LOG_LEVEL"},
 		{"tokens without gateway", func(f *fixture) {
-			f.env["SBX_GATEWAY_SERVICE_TOKENS_FILE"] = writeFile(t, f.dir, "t2.json", `{"api":["a"]}`)
-		}, "SBX_GATEWAY_SERVICE_TOKENS_FILE"},
+			f.env["UMIAK_GATEWAY_SERVICE_TOKENS_FILE"] = writeFile(t, f.dir, "t2.json", `{"api":["a"]}`)
+		}, "UMIAK_GATEWAY_SERVICE_TOKENS_FILE"},
 		{"tokens bad json", func(f *fixture) {
-			f.env["SBX_GATEWAY_SERVICE_TOKENS_FILE"] = writeFile(t, f.dir, "t3.json", `{`)
-		}, "SBX_GATEWAY_SERVICE_TOKENS_FILE"},
-		{"tokens file missing", func(f *fixture) { f.env["SBX_GATEWAY_SERVICE_TOKENS_FILE"] = "/nonexistent/tokens.json" }, "SBX_GATEWAY_SERVICE_TOKENS_FILE"},
-		{"tls cert missing with tls listen", func(f *fixture) { delete(f.env, "SBX_GATEWAY_TLS_SBX_CERT_FILE") }, "SBX_GATEWAY_TLS_SBX_CERT_FILE"},
-		{"ssh host key missing with ssh listen", func(f *fixture) { delete(f.env, "SBX_GATEWAY_SSH_HOST_KEY_FILES") }, "SBX_GATEWAY_SSH_HOST_KEY_FILES"},
-		{"ssh user ca missing", func(f *fixture) { delete(f.env, "SBX_GATEWAY_SSH_USER_CA_KEY_FILE") }, "SBX_GATEWAY_SSH_USER_CA_KEY_FILE"},
+			f.env["UMIAK_GATEWAY_SERVICE_TOKENS_FILE"] = writeFile(t, f.dir, "t3.json", `{`)
+		}, "UMIAK_GATEWAY_SERVICE_TOKENS_FILE"},
+		{"tokens file missing", func(f *fixture) { f.env["UMIAK_GATEWAY_SERVICE_TOKENS_FILE"] = "/nonexistent/tokens.json" }, "UMIAK_GATEWAY_SERVICE_TOKENS_FILE"},
+		{"tls cert missing with tls listen", func(f *fixture) { delete(f.env, "UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE") }, "UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE"},
+		{"ssh host key missing with ssh listen", func(f *fixture) { delete(f.env, "UMIAK_GATEWAY_SSH_HOST_KEY_FILES") }, "UMIAK_GATEWAY_SSH_HOST_KEY_FILES"},
+		{"ssh user ca missing", func(f *fixture) { delete(f.env, "UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE") }, "UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE"},
 		{"ssh host key garbage", func(f *fixture) {
-			f.env["SBX_GATEWAY_SSH_HOST_KEY_FILES"] = writeFile(t, f.dir, "junk", "not a key")
-		}, "SBX_GATEWAY_SSH_HOST_KEY_FILES"},
+			f.env["UMIAK_GATEWAY_SSH_HOST_KEY_FILES"] = writeFile(t, f.dir, "junk", "not a key")
+		}, "UMIAK_GATEWAY_SSH_HOST_KEY_FILES"},
 		{"login ca garbage", func(f *fixture) {
-			f.env["SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE"] = writeFile(t, f.dir, "junk.pub", "ssh-ed25519 !!!\n")
-		}, "SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE"},
+			f.env["UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE"] = writeFile(t, f.dir, "junk.pub", "ssh-ed25519 !!!\n")
+		}, "UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -370,8 +370,8 @@ func TestFromEnvDrainKnobs(t *testing.T) {
 	if cfg.EndpointWait != 0 || cfg.DrainTimeout != 0 {
 		t.Fatalf("defaults: EndpointWait=%v DrainTimeout=%v, want 0 (library defaults)", cfg.EndpointWait, cfg.DrainTimeout)
 	}
-	f.env["SBX_GATEWAY_ENDPOINT_WAIT"] = "100ms"
-	f.env["SBX_GATEWAY_DRAIN_TIMEOUT"] = "3s"
+	f.env["UMIAK_GATEWAY_ENDPOINT_WAIT"] = "100ms"
+	f.env["UMIAK_GATEWAY_DRAIN_TIMEOUT"] = "3s"
 	if cfg, err = FromEnv(f.getenv); err != nil {
 		t.Fatal(err)
 	}
@@ -433,31 +433,31 @@ func TestValidateServe(t *testing.T) {
 		mutate func(*Config)
 		want   string
 	}{
-		{"no domain", func(c *Config) { c.SbxDomain = "" }, "SBX_GATEWAY_SBX_DOMAIN"},
-		{"no tunnel host", func(c *Config) { c.TunnelHost = "" }, "SBX_GATEWAY_TUNNEL_HOST"},
-		{"no database", func(c *Config) { c.DatabaseURL = "" }, "SBX_GATEWAY_DATABASE_URL"},
-		{"no api url", func(c *Config) { c.APIURL = "" }, "SBX_GATEWAY_API_URL"},
-		{"bad api url", func(c *Config) { c.APIURL = "api:3000" }, "SBX_GATEWAY_API_URL"},
-		{"no api token", func(c *Config) { c.APIToken = "" }, "SBX_GATEWAY_API_TOKEN_FILE"},
-		{"bad internal url", func(c *Config) { c.InternalURL = "gateway:7000" }, "SBX_GATEWAY_INTERNAL_URL"},
-		{"proxy v2 without cidrs", func(c *Config) { c.ProxyProtocol, c.ProxyProtocolCIDRs = true, nil }, "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS"},
+		{"no domain", func(c *Config) { c.UmiakDomain = "" }, "UMIAK_GATEWAY_UMIAK_DOMAIN"},
+		{"no tunnel host", func(c *Config) { c.TunnelHost = "" }, "UMIAK_GATEWAY_TUNNEL_HOST"},
+		{"no database", func(c *Config) { c.DatabaseURL = "" }, "UMIAK_GATEWAY_DATABASE_URL"},
+		{"no api url", func(c *Config) { c.APIURL = "" }, "UMIAK_GATEWAY_API_URL"},
+		{"bad api url", func(c *Config) { c.APIURL = "api:3000" }, "UMIAK_GATEWAY_API_URL"},
+		{"no api token", func(c *Config) { c.APIToken = "" }, "UMIAK_GATEWAY_API_TOKEN_FILE"},
+		{"bad internal url", func(c *Config) { c.InternalURL = "gateway:7000" }, "UMIAK_GATEWAY_INTERNAL_URL"},
+		{"proxy v2 without cidrs", func(c *Config) { c.ProxyProtocol, c.ProxyProtocolCIDRs = true, nil }, "UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS"},
 		// 5 s + 5 s + 15 min 11 s + 10 s + 30 s = 961 s > 960 s.
-		{"drain over the grace period", func(c *Config) { c.SSHDrainDeadline = 15*time.Minute + 11*time.Second }, "SBX_GATEWAY_SSH_DRAIN_DEADLINE"},
+		{"drain over the grace period", func(c *Config) { c.SSHDrainDeadline = 15*time.Minute + 11*time.Second }, "UMIAK_GATEWAY_SSH_DRAIN_DEADLINE"},
 		{"endpoint wait over the grace period", func(c *Config) {
 			c.EndpointWait = 6 * time.Second
 			c.SSHDrainDeadline = 15*time.Minute + 10*time.Second
-		}, "SBX_GATEWAY_SSH_DRAIN_DEADLINE"},
+		}, "UMIAK_GATEWAY_SSH_DRAIN_DEADLINE"},
 		{"exempt cidr inside the proxy cidrs", func(c *Config) {
 			c.ProxyProtocol = true
 			c.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 			c.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("10.1.0.0/16")}
-		}, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
+		}, "UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
 		{"exempt cidr containing a proxy cidr", func(c *Config) {
 			c.ProxyProtocol = true
 			c.ProxyProtocolCIDRs = []netip.Prefix{netip.MustParsePrefix("10.0.0.5/32")}
 			c.RateLimit.Exempt = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}
-		}, "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
-		{"http drain longer than ssh drain", func(c *Config) { c.HTTPDrainDeadline = 3 * time.Minute; c.SSHDrainDeadline = 2 * time.Minute }, "SBX_GATEWAY_HTTP_DRAIN_DEADLINE"},
+		}, "UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS"},
+		{"http drain longer than ssh drain", func(c *Config) { c.HTTPDrainDeadline = 3 * time.Minute; c.SSHDrainDeadline = 2 * time.Minute }, "UMIAK_GATEWAY_HTTP_DRAIN_DEADLINE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid(t)
@@ -474,12 +474,12 @@ func TestValidateServe(t *testing.T) {
 // IPv4 prefix (client addresses are unmapped before matching); a shorter one
 // is refused, naming its variable.
 func TestFromEnvMappedCIDRs(t *testing.T) {
-	vars := []string{"SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS", "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS", "SBX_GATEWAY_TRUSTED_PROXY_CIDRS"}
+	vars := []string{"UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS", "UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS", "UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS"}
 	got := func(c Config, name string) []netip.Prefix {
 		switch name {
-		case "SBX_GATEWAY_RATELIMIT_EXEMPT_CIDRS":
+		case "UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS":
 			return c.RateLimit.Exempt
-		case "SBX_GATEWAY_PROXY_PROTOCOL_CIDRS":
+		case "UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS":
 			return c.ProxyProtocolCIDRs
 		default:
 			return c.TrustedProxyCIDRs
@@ -519,11 +519,11 @@ func TestFromEnvMappedCIDRs(t *testing.T) {
 	}
 }
 
-// TestValidateServeDrainTimeout: SBX_GATEWAY_DRAIN_TIMEOUT may not exceed the
+// TestValidateServeDrainTimeout: UMIAK_GATEWAY_DRAIN_TIMEOUT may not exceed the
 // grace period minus 10 s (950 s, the default process bound).
 func TestValidateServeDrainTimeout(t *testing.T) {
 	f := newFixture(t)
-	f.env["SBX_GATEWAY_DRAIN_TIMEOUT"] = "950s"
+	f.env["UMIAK_GATEWAY_DRAIN_TIMEOUT"] = "950s"
 	cfg, err := FromEnv(f.getenv)
 	if err != nil {
 		t.Fatal(err)
@@ -533,8 +533,8 @@ func TestValidateServeDrainTimeout(t *testing.T) {
 	}
 	cfg.DrainTimeout = 951 * time.Second
 	err = cfg.ValidateServe()
-	if err == nil || !strings.Contains(err.Error(), "SBX_GATEWAY_DRAIN_TIMEOUT") {
-		t.Fatalf("DRAIN_TIMEOUT=951s: err = %v, want one naming SBX_GATEWAY_DRAIN_TIMEOUT", err)
+	if err == nil || !strings.Contains(err.Error(), "UMIAK_GATEWAY_DRAIN_TIMEOUT") {
+		t.Fatalf("DRAIN_TIMEOUT=951s: err = %v, want one naming UMIAK_GATEWAY_DRAIN_TIMEOUT", err)
 	}
 }
 
@@ -542,9 +542,9 @@ func TestValidateServeDrainTimeout(t *testing.T) {
 // variables set above their defaults.
 func TestValidateServeDrainBudgetCause(t *testing.T) {
 	const (
-		endpoint = "SBX_GATEWAY_ENDPOINT_WAIT"
-		ssh      = "SBX_GATEWAY_SSH_DRAIN_DEADLINE"
-		http     = "SBX_GATEWAY_HTTP_DRAIN_DEADLINE"
+		endpoint = "UMIAK_GATEWAY_ENDPOINT_WAIT"
+		ssh      = "UMIAK_GATEWAY_SSH_DRAIN_DEADLINE"
+		http     = "UMIAK_GATEWAY_HTTP_DRAIN_DEADLINE"
 	)
 	for _, tc := range []struct {
 		name    string

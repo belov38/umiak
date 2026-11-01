@@ -1,9 +1,9 @@
-// The desktop API of S10 (13.1-13.2) through `sbx.raw`. The routes are not in
+// The desktop API of S10 (13.1-13.2) through `umiak.raw`. The routes are not in
 // apps/api/openapi/v1.json yet (S10 is not implemented), so the raw client is
 // used with a cast and every answer is checked here. When S10 lands, SDK
 // helpers replace this module. Names of JSON fields are camelCase, as in the
 // rest of the public API.
-import { type Sbx, SbxError, UNEXPECTED_RESPONSE } from "@sbx/sdk";
+import { type Umiak, UmiakError, UNEXPECTED_RESPONSE } from "@umiak/sdk";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
 import { safeLine } from "../output/sanitize.ts";
@@ -129,8 +129,8 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /** An answer that does not fit the S10 contract: the API is wrong, not the model. */
-function unexpected(what: string): SbxError {
-	return new SbxError({
+function unexpected(what: string): UmiakError {
+	return new UmiakError({
 		status: 502,
 		code: UNEXPECTED_RESPONSE,
 		message: `the desktop API sent an unexpected ${what}`,
@@ -183,20 +183,20 @@ const SCREEN_CACHE_MAX = 500;
  * unique only in a team, so slugs are cached per SDK client.
  */
 const screensById = new Map<string, CachedScreen>();
-const screensBySbx = new WeakMap<Sbx, Map<string, CachedScreen>>();
+const screensByUmiak = new WeakMap<Umiak, Map<string, CachedScreen>>();
 
-function screenCache(sbx: Sbx, sandbox: string): Map<string, CachedScreen> {
+function screenCache(umiak: Umiak, sandbox: string): Map<string, CachedScreen> {
 	if (sandbox.toLowerCase().startsWith("sb_")) return screensById;
-	let map = screensBySbx.get(sbx);
+	let map = screensByUmiak.get(umiak);
 	if (map === undefined) {
 		map = new Map();
-		screensBySbx.set(sbx, map);
+		screensByUmiak.set(umiak, map);
 	}
 	return map;
 }
 
-function remember(sbx: Sbx, sandbox: string, screen: Size): void {
-	const map = screenCache(sbx, sandbox);
+function remember(umiak: Umiak, sandbox: string, screen: Size): void {
+	const map = screenCache(umiak, sandbox);
 	const now = Date.now();
 	if (map.size >= SCREEN_CACHE_MAX) {
 		for (const [k, v] of map) if (now - v.at >= SCREEN_CACHE_MS) map.delete(k);
@@ -204,8 +204,8 @@ function remember(sbx: Sbx, sandbox: string, screen: Size): void {
 	map.set(sandbox, { screen, at: now });
 }
 
-function recall(sbx: Sbx, sandbox: string): Size | undefined {
-	const hit = screenCache(sbx, sandbox).get(sandbox);
+function recall(umiak: Umiak, sandbox: string): Size | undefined {
+	const hit = screenCache(umiak, sandbox).get(sandbox);
 	return hit !== undefined && Date.now() - hit.at < SCREEN_CACHE_MS
 		? hit.screen
 		: undefined;
@@ -228,8 +228,8 @@ export interface DesktopApi {
 }
 
 export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
-	const sbx = ctx.sbx();
-	const raw = sbx.raw as unknown as LooseRaw;
+	const umiak = ctx.umiak();
+	const raw = umiak.raw as unknown as LooseRaw;
 	const init = (
 		extra: Pick<LooseInit, "body" | "parseAs"> & {
 			query?: Record<string, string | number>;
@@ -254,8 +254,8 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 		try {
 			return await call();
 		} catch (err) {
-			if (!(err instanceof SbxError) || err.status !== 404) throw err;
-			const exists = await sbx.raw
+			if (!(err instanceof UmiakError) || err.status !== 404) throw err;
+			const exists = await umiak.raw
 				.GET("/v1/sandboxes/{sandbox}", {
 					params: { path: { sandbox } },
 					...ctx.call,
@@ -295,7 +295,7 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 	return {
 		status,
 		async screen() {
-			const cached = recall(sbx, sandbox);
+			const cached = recall(umiak, sandbox);
 			if (cached !== undefined) return cached;
 			const st = await status();
 			if (st.state !== "ready") {
@@ -306,7 +306,7 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 					retryable: st.state === "starting",
 				});
 			}
-			remember(sbx, sandbox, st.screen);
+			remember(umiak, sandbox, st.screen);
 			return st.screen;
 		},
 		async link() {
@@ -341,20 +341,20 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 					: Number.NaN;
 			};
 			const screen = sizeFrom(
-				h("Sbx-Screen-Width"),
-				h("Sbx-Screen-Height"),
+				h("Umiak-Screen-Width"),
+				h("Umiak-Screen-Height"),
 				"screenshot screen size",
 			);
 			const image = sizeFrom(
-				h("Sbx-Image-Width"),
-				h("Sbx-Image-Height"),
+				h("Umiak-Image-Width"),
+				h("Umiak-Image-Height"),
 				"screenshot image size",
 			);
-			const cursor = { x: h("Sbx-Cursor-X"), y: h("Sbx-Cursor-Y") };
+			const cursor = { x: h("Umiak-Cursor-X"), y: h("Umiak-Cursor-Y") };
 			if (!Number.isInteger(cursor.x) || !Number.isInteger(cursor.y)) {
 				throw unexpected("screenshot cursor");
 			}
-			remember(sbx, sandbox, screen);
+			remember(umiak, sandbox, screen);
 			return {
 				bytes: new Uint8Array(data),
 				contentType: imageType(response.headers.get("Content-Type")),
@@ -371,7 +371,7 @@ export function desktopApi(ctx: ToolContext, sandbox: string): DesktopApi {
 			);
 			if (!isRecord(data)) throw unexpected("actions result");
 			const screen = sizeOf(data.screen, "screen size");
-			remember(sbx, sandbox, screen);
+			remember(umiak, sandbox, screen);
 			const shot = data.screenshot;
 			if (shot !== undefined && !isRecord(shot)) throw unexpected("screenshot");
 			if (shot !== undefined && typeof shot.data !== "string") {

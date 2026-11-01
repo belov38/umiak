@@ -18,7 +18,7 @@ import {
 	AgentOutdatedError,
 	AgentUnavailableError,
 	resumableAttach,
-} from "@sbx/agent-client";
+} from "@umiak/agent-client";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
 	type AgentAttachEvent,
@@ -945,7 +945,7 @@ describe("files HTTP", () => {
 		try {
 			const m = randomUUID();
 			const root = f.machine(m).root;
-			const name = `sbx-fake-${randomUUID()}`;
+			const name = `umiak-fake-${randomUUID()}`;
 			const res = await f.files(
 				m,
 				`?path=${encodeURIComponent(`/tmp/${name}`)}`,
@@ -1036,7 +1036,7 @@ describe("files HTTP", () => {
 		expect(parseAgentFileInfo(await mode.json()).mode).toBe(0o755);
 	});
 
-	it("chunked upload: wrong offset → 409 with Sbx-Upload-Offset; HEAD; commit idempotent", async () => {
+	it("chunked upload: wrong offset → 409 with Umiak-Upload-Offset; HEAD; commit idempotent", async () => {
 		const m = newMachine();
 		const id = "upl_1";
 		const chunk = (offset: number, body: string) =>
@@ -1046,7 +1046,7 @@ describe("files HTTP", () => {
 			});
 		const notStarted = await chunk(5, "x");
 		expect(notStarted.status).toBe(409);
-		expect(notStarted.headers.get("sbx-upload-offset")).toBe("0");
+		expect(notStarted.headers.get("umiak-upload-offset")).toBe("0");
 		await notStarted.body?.cancel();
 
 		const c1 = await chunk(0, "hello ");
@@ -1054,14 +1054,14 @@ describe("files HTTP", () => {
 		expect(await c1.json()).toEqual({ offset: 6 });
 		const wrong = await chunk(3, "zzz");
 		expect(wrong.status).toBe(409);
-		expect(wrong.headers.get("sbx-upload-offset")).toBe("6");
+		expect(wrong.headers.get("umiak-upload-offset")).toBe("6");
 		const werr = await agentHttpError(wrong);
 		expect(werr.code).toBe("upload_offset_mismatch");
 		expect(werr.details).toEqual({ offset: 6 });
 
 		const head = await fake.files(m, `/uploads/${id}`, { method: "HEAD" });
 		expect(head.status).toBe(200);
-		expect(head.headers.get("sbx-upload-offset")).toBe("6");
+		expect(head.headers.get("umiak-upload-offset")).toBe("6");
 		expect((await chunk(6, "world")).status).toBe(200);
 
 		const body = JSON.stringify({

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 )
 
 // logBuffer collects log output safely across goroutines.

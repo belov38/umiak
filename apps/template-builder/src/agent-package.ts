@@ -8,14 +8,17 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { entryName, readTar } from "./tar.ts";
 
-// Verification of a signed sbx-agent package on the build machine (spec S5
+// Verification of a signed umiak-agent package on the build machine (spec S5
 // section 7.2 step 1). Mirrors services/guest-agent/internal/update: package
 // layout in pkg.go (Pack), checks in Verify and checkManifest, key file in
 // keys.go (ParseKeys), names in manifest.go.
 
-const MANIFEST_FORMAT = "sbx-agent-manifest/v1";
+const MANIFEST_FORMAT = "umiak-agent-manifest/v1";
 /** update.BinaryName per GOOS. */
-const BINARY_NAME = { linux: "sbx-agent", windows: "sbx-agent.exe" } as const;
+const BINARY_NAME = {
+	linux: "umiak-agent",
+	windows: "umiak-agent.exe",
+} as const;
 const MANIFEST_NAME = "manifest.json";
 const SIGNATURE_NAME = "manifest.sig";
 const TRUST_FILES = ["trust/tunnel-ca.pem", "trust/update-keys.pub"];

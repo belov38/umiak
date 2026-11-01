@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { Sbx, SbxError } from "@sbx/sdk";
+import { Umiak, UmiakError } from "@umiak/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -51,10 +51,14 @@ async function setup(
 		level: "debug",
 		destination: { write: (line: string) => logs.push(JSON.parse(line)) },
 	});
-	const sbx = new Sbx({ baseUrl: "http://127.0.0.1:9", apiKey: "k", env: {} });
+	const umiak = new Umiak({
+		baseUrl: "http://127.0.0.1:9",
+		apiKey: "k",
+		env: {},
+	});
 	const opts: ServerOptions = {
 		tools: fake.tools,
-		sbx: () => sbx,
+		umiak: () => umiak,
 		transport: "stdio",
 		log,
 		...overrides,
@@ -97,7 +101,7 @@ describe.each(ERAS)("tools/list (%s era)", (era) => {
 		const { conn } = await setup({}, era);
 		expect(conn.client.getProtocolEra()).toBe(era);
 		expect(conn.client.getServerVersion()).toMatchObject({
-			name: "sbx",
+			name: "umiak",
 			version: MCP_VERSION,
 		});
 		expect(conn.client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
@@ -212,7 +216,7 @@ describe.each(ERAS)("pinned mode (%s era)", (era) => {
 		for (const code of ["sandbox_not_ready", "not_found", "quota_exceeded"]) {
 			const { conn, fake } = await setup({ pinnedSandbox: "sb_pinned" }, era);
 			fake.behaviour = async () => {
-				throw new SbxError({
+				throw new UmiakError({
 					status: code === "quota_exceeded" ? 403 : 409,
 					code,
 					message: code,
@@ -230,7 +234,7 @@ describe.each(ERAS)("pinned mode (%s era)", (era) => {
 		}
 		const { conn, fake } = await setup({ pinnedSandbox: "sb_pinned" }, era);
 		fake.behaviour = async () => {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 409,
 				code: "sandbox_not_ready",
 				message: "stopped",
@@ -302,7 +306,7 @@ describe.each(ERAS)("tools/call (%s era)", (era) => {
 			arguments: { sandbox: "sb_1", path: "/" },
 		});
 		expect(fake.calls[0]?.ctx.userAgent).toBe(
-			`sbx-mcp/${MCP_VERSION} (${TEST_CLIENT_INFO.name}/${TEST_CLIENT_INFO.version}; stdio)`,
+			`umiak-mcp/${MCP_VERSION} (${TEST_CLIENT_INFO.name}/${TEST_CLIENT_INFO.version}; stdio)`,
 		);
 	});
 });
@@ -319,7 +323,7 @@ describe("registration", () => {
 		expect(() =>
 			createServer({
 				tools: [bad],
-				sbx: () => {
+				umiak: () => {
 					throw new Error("unused");
 				},
 				transport: "stdio",
@@ -357,18 +361,18 @@ describe("registration", () => {
 });
 
 describe("tool context", () => {
-	it("ctx.sbx() is the factory's client, read lazily", async () => {
-		const sbx = new Sbx({
+	it("ctx.umiak() is the factory's client, read lazily", async () => {
+		const umiak = new Umiak({
 			baseUrl: "http://127.0.0.1:9",
 			apiKey: "k",
 			env: {},
 		});
-		const factory = vi.fn(() => sbx);
-		const { conn, fake } = await setup({ sbx: factory });
+		const factory = vi.fn(() => umiak);
+		const { conn, fake } = await setup({ umiak: factory });
 		fake.behaviour = async ({ ctx }) => {
 			expect(factory).not.toHaveBeenCalled();
-			expect(ctx.sbx()).toBe(sbx);
-			expect(ctx.sbx()).toBe(sbx);
+			expect(ctx.umiak()).toBe(umiak);
+			expect(ctx.umiak()).toBe(umiak);
 			return toolText({ ok: true });
 		};
 		const r = await conn.client.callTool({
@@ -379,9 +383,9 @@ describe("tool context", () => {
 		expect(factory).toHaveBeenCalledTimes(1);
 	});
 
-	it("ctx.sbx() throwing not_logged_in becomes the tool error", async () => {
+	it("ctx.umiak() throwing not_logged_in becomes the tool error", async () => {
 		const { conn, fake } = await setup({
-			sbx: () => {
+			umiak: () => {
 				throw new ToolError({
 					code: "not_logged_in",
 					message: "not logged in",
@@ -389,7 +393,7 @@ describe("tool context", () => {
 			},
 		});
 		fake.behaviour = async ({ ctx }) => {
-			ctx.sbx();
+			ctx.umiak();
 			return toolText({});
 		};
 		const r = await conn.client.callTool({
@@ -398,7 +402,7 @@ describe("tool context", () => {
 		});
 		expect(r.isError).toBe(true);
 		expect(text(r)).toContain("error: not_logged_in");
-		expect(text(r)).toContain("sbx login");
+		expect(text(r)).toContain("umiak login");
 	});
 
 	it("ctx.call carries the deadline signal and the remaining time", async () => {
@@ -520,10 +524,10 @@ describe("tool context", () => {
 });
 
 describe("errors", () => {
-	it("an SbxError becomes the error result, hint names the sandbox of the args", async () => {
+	it("an UmiakError becomes the error result, hint names the sandbox of the args", async () => {
 		const { conn, fake } = await setup();
 		fake.behaviour = async () => {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 409,
 				code: "sandbox_not_ready",
 				message: "Sandbox is stopped.",
@@ -562,7 +566,7 @@ describe("errors", () => {
 		const onAuthFailure = vi.fn();
 		const { conn, fake } = await setup({ onAuthFailure, transport: "http" });
 		fake.behaviour = async () => {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 401,
 				code: "token_expired",
 				message: "token expired",
@@ -583,7 +587,7 @@ describe("errors", () => {
 	it("API 401 over stdio answers unauthorized with a re-login hint, not retryable", async () => {
 		const { conn, fake } = await setup({ transport: "stdio" });
 		fake.behaviour = async () => {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 401,
 				code: "unauthorized",
 				message: "invalid credentials",
@@ -597,17 +601,17 @@ describe("errors", () => {
 		expect(r.isError).toBe(true);
 		expect(text(r)).toContain("error: unauthorized");
 		expect(text(r)).toContain("retryable: false");
-		expect(text(r)).toContain("run `sbx login` in a terminal");
+		expect(text(r)).toContain("run `umiak login` in a terminal");
 		expect(text(r)).not.toContain("retry the call");
 	});
 
 	it("unauthorizedHint replaces the stdio 401 hint", async () => {
 		const { conn, fake } = await setup({
 			transport: "stdio",
-			unauthorizedHint: "fix SBX_API_KEY and restart the MCP server.",
+			unauthorizedHint: "fix UMIAK_API_KEY and restart the MCP server.",
 		});
 		fake.behaviour = async () => {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 401,
 				code: "api_key_expired",
 				message: "expired",
@@ -619,7 +623,7 @@ describe("errors", () => {
 			arguments: { sandbox: "sb_1", path: "/" },
 		});
 		expect(text(r)).toContain(
-			"hint: fix SBX_API_KEY and restart the MCP server.",
+			"hint: fix UMIAK_API_KEY and restart the MCP server.",
 		);
 		expect(text(r)).toContain("retryable: false");
 	});
@@ -781,7 +785,7 @@ describe("result cap and call log", () => {
 			arguments: { sandbox: "sb_1", path: "/p", content: "TOP-SECRET" },
 		});
 		fake.behaviour = async () => {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 404,
 				code: "path_not_found",
 				message: "no such file",

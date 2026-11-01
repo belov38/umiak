@@ -1,4 +1,4 @@
-// `sbx stop|resume|recover [<sb>] [--wait]` and `sbx fork [<sb>] [--wait]`
+// `umiak stop|resume|recover [<sb>] [--wait]` and `umiak fork [<sb>] [--wait]`
 // (S7 §8.2, §14.2, §14.3). Without --wait each prints the action's answer
 // (`{sandbox, operation}`, fork also `sourceOperation`); with --wait the
 // JSON Lines `accepted`, `state`…, last `ready` (`stopped` for stop).
@@ -6,7 +6,7 @@
 // fork --force-stop: a running Windows source is stopped for the snapshot and
 // started again (S9 §24.8); with --wait a failed restart is a warning.
 
-import { newIdempotencyKey } from "@sbx/sdk";
+import { newIdempotencyKey } from "@umiak/sdk";
 import type { Command } from "commander";
 import { collect, envSet, parseDuration, parsePairs } from "../args.ts";
 import type { Context } from "../context.ts";
@@ -79,16 +79,16 @@ async function action(
 ): Promise<void> {
 	const ref = sandboxRef(ctx, arg);
 	const params = { params: { path: { sandbox: ref.ref } } };
-	const sbx = ctx.sbx();
+	const umiak = ctx.umiak();
 	const { data } =
 		kind === "stop"
-			? await sbx.raw.POST("/v1/sandboxes/{sandbox}/stop", params)
+			? await umiak.raw.POST("/v1/sandboxes/{sandbox}/stop", params)
 			: kind === "resume"
-				? await sbx.raw.POST("/v1/sandboxes/{sandbox}/resume", {
+				? await umiak.raw.POST("/v1/sandboxes/{sandbox}/resume", {
 						...params,
 						body: body ?? {},
 					})
-				: await sbx.raw.POST("/v1/sandboxes/{sandbox}/recover", params);
+				: await umiak.raw.POST("/v1/sandboxes/{sandbox}/recover", params);
 	if (ref.explicit) writeCurrent(ctx, data.sandbox.id);
 	if (f.wait === true) {
 		await reportWait(
@@ -196,7 +196,7 @@ export function register(program: Command, run: Runner): void {
 			if (f.forceStop === true) body.forceStop = true;
 			const ref = sandboxRef(ctx, args[0] as string | undefined);
 			const { data } = await ctx
-				.sbx()
+				.umiak()
 				.raw.POST("/v1/sandboxes/{sandbox}/fork", {
 					params: { path: { sandbox: ref.ref } },
 					body,
@@ -208,7 +208,7 @@ export function register(program: Command, run: Runner): void {
 				if (data.sourceOperation.forceStop !== null) {
 					// Final by now: the fork succeeds before the copy is created.
 					const { data: src } = await ctx
-						.sbx()
+						.umiak()
 						.raw.GET("/v1/operations/{operation}", {
 							params: { path: { operation: data.sourceOperation.id } },
 						});

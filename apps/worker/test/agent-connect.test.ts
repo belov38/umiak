@@ -10,9 +10,9 @@ import {
 	HEADER_REQUEST_ID,
 	type Registry,
 	type Route,
-} from "@sbx/agent-client";
-import { ErrorDetailSchema } from "@sbx/proto";
-import { ClaimReason, Desktop, System } from "@sbx/proto/agent/v1";
+} from "@umiak/agent-client";
+import { ErrorDetailSchema } from "@umiak/proto";
+import { ClaimReason, Desktop, System } from "@umiak/proto/agent/v1";
 import { describe, expect, it } from "vitest";
 import {
 	ConnectAgentPort,
@@ -84,7 +84,7 @@ describe("ConnectAgentPort", () => {
 			machineId,
 			{
 				reason: "claim",
-				sandboxId: "sbx-1",
+				sandboxId: "umiak-1",
 				hostname: "box",
 				env: { A: "1" },
 				secretEnv: { S: "x" },
@@ -120,7 +120,7 @@ describe("ConnectAgentPort", () => {
 			}[];
 		};
 		expect(req.reason).toBe(ClaimReason.CLAIM);
-		expect(req.sandboxId).toBe("sbx-1");
+		expect(req.sandboxId).toBe("umiak-1");
 		expect(req.hostname).toBe("box");
 		expect(req.env).toEqual({ A: "1" });
 		expect(req.secretEnv).toEqual({ S: "x" });
@@ -150,13 +150,13 @@ describe("ConnectAgentPort", () => {
 				},
 			},
 			{
-				portDomain: "sbx.example.com",
+				portDomain: "umiak.example.com",
 				sshUserCaKeys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"],
 			},
 		);
 		const req = {
 			reason: "claim" as const,
-			sandboxId: "sbx-1",
+			sandboxId: "umiak-1",
 			hostname: "box",
 			env: {},
 			secretEnv: {},
@@ -167,11 +167,11 @@ describe("ConnectAgentPort", () => {
 		await port.claim(machineId, req, "r2");
 		expect(seen).toEqual([
 			{
-				portDomain: "sbx.example.com",
+				portDomain: "umiak.example.com",
 				sshUserCaKeys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"],
 			},
 			{
-				portDomain: "sbx.example.com",
+				portDomain: "umiak.example.com",
 				sshUserCaKeys: ["ssh-ed25519 AAAA ca-1", "ssh-ed25519 BBBB ca-2"],
 			},
 		]);

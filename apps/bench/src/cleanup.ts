@@ -5,10 +5,10 @@ import {
 	type VmResource,
 } from "./context.ts";
 
-/** ISOs made by `sbx-bench s9 agent-tests`. */
-export const AGENT_TESTS_ISO_RE = /^sbx-build-agenttests-\d{14}\.iso$/;
+/** ISOs made by `umiak-bench s9 agent-tests`. */
+export const AGENT_TESTS_ISO_RE = /^umiak-build-agenttests-\d{14}\.iso$/;
 
-/** Removes everything a failed run may have left (spec §7.1). Never touches the template or sbx-tpl LVs. */
+/** Removes everything a failed run may have left (spec §7.1). Never touches the template or umiak-tpl LVs. */
 export async function cleanup(
 	ctx: Ctx,
 	opts: { allSandboxResources?: boolean } = {},
@@ -61,9 +61,9 @@ export async function cleanup(
 	try {
 		const { lvs } = await node.call<{
 			lvs: { name: string; tags: string[] }[];
-		}>("lv.list", { tags: ["sbx"] });
+		}>("lv.list", { tags: ["umiak"] });
 		const ours = lvs
-			.filter((l) => !l.tags.includes("sbx-tpl"))
+			.filter((l) => !l.tags.includes("umiak-tpl"))
 			.map((l) => l.name);
 		if (ours.length > 0) {
 			await node.call("lv.remove", { names: ours });

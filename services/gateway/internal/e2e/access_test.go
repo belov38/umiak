@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 func tokenHash(tok string) string {
@@ -27,7 +27,7 @@ func tokenHash(tok string) string {
 // (testenv's AuthURL).
 const authHost = "app.test"
 
-// browser is an HTTPS client with a cookie jar that sends every sbx host to
+// browser is an HTTPS client with a cookie jar that sends every umiak host to
 // the TLS listener of front and app.test to authz (when set). It follows
 // redirects when follow is set.
 func browser(t *testing.T, c *cluster, front *testenv.Inst, authz string, follow bool) *http.Client {
@@ -81,7 +81,7 @@ func navigate(t *testing.T, cl *http.Client, rawURL string, hdr http.Header) pag
 	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	return page{
-		result:  result{status: resp.StatusCode, sbxError: resp.Header.Get("Sbx-Error"), body: string(b), err: err},
+		result:  result{status: resp.StatusCode, umiakError: resp.Header.Get("Umiak-Error"), body: string(b), err: err},
 		header:  resp.Header,
 		cookies: resp.Cookies(),
 		url:     resp.Request.URL,
@@ -108,7 +108,7 @@ func TestTokenFlowE2E(t *testing.T) {
 	}
 	var auth *http.Cookie
 	for _, ck := range p.cookies {
-		if ck.Name == "__Host-sbx_auth" {
+		if ck.Name == "__Host-umiak_auth" {
 			auth = ck
 		}
 	}
@@ -126,10 +126,10 @@ func TestTokenFlowE2E(t *testing.T) {
 	if e.RawQuery != "y=2" {
 		t.Fatalf("app saw query %q", e.RawQuery)
 	}
-	if r := send(curl, newReq(t, http.MethodGet, "https", host, "/api?_token=wrong", nil)); r.status != http.StatusUnauthorized || r.sbxError != "token_invalid" {
+	if r := send(curl, newReq(t, http.MethodGet, "https", host, "/api?_token=wrong", nil)); r.status != http.StatusUnauthorized || r.umiakError != "token_invalid" {
 		t.Fatalf("wrong token = %v", r)
 	}
-	if r := send(curl, newReq(t, http.MethodGet, "https", host, "/api", nil)); r.status != http.StatusUnauthorized || r.sbxError != "auth_required" {
+	if r := send(curl, newReq(t, http.MethodGet, "https", host, "/api", nil)); r.status != http.StatusUnauthorized || r.umiakError != "auth_required" {
 		t.Fatalf("no token = %v", r)
 	}
 
@@ -153,9 +153,9 @@ func TestTokenFlowE2E(t *testing.T) {
 	c.env.NotifyRoutes(rt.Slug)
 	within(t, notifyWindow, "old cookie refused", func() bool {
 		r := navigate(t, br, base+"/page", nil)
-		return r.status == http.StatusUnauthorized && r.sbxError == "auth_required"
+		return r.status == http.StatusUnauthorized && r.umiakError == "auth_required"
 	})
-	if r := send(curl, newReq(t, http.MethodGet, "https", host, "/api?_token=tok-1", nil)); r.status != http.StatusUnauthorized || r.sbxError != "token_invalid" {
+	if r := send(curl, newReq(t, http.MethodGet, "https", host, "/api?_token=tok-1", nil)); r.status != http.StatusUnauthorized || r.umiakError != "token_invalid" {
 		t.Fatalf("old token after rotation = %v", r)
 	}
 	decodeEcho(t, send(curl, newReq(t, http.MethodGet, "https", host, "/api?_token=tok-2", nil)))
@@ -200,7 +200,7 @@ func (f *fakeAuthorize) serve(w http.ResponseWriter, r *http.Request) {
 	code := f.c.env.API.IssueCode(label, cpapi.PortAuthGrant{UserID: "usr_1", Email: "u@example.com", AuthEpoch: f.epoch})
 	f.codes = append(f.codes, code)
 	f.mu.Unlock()
-	w.Header().Set("Location", "https://"+testenv.Host(label)+"/__sbx/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state))
+	w.Header().Set("Location", "https://"+testenv.Host(label)+"/__umiak/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state))
 	w.WriteHeader(http.StatusFound)
 }
 
@@ -230,22 +230,22 @@ func TestSSOFlowE2E(t *testing.T) {
 	authz := newFakeAuthorize(t, c, rt.AuthEpoch)
 
 	// The full cycle: page → authorize → callback → page, as a browser
-	// follows it. The client's own X-Sbx-User-Email never reaches the app.
+	// follows it. The client's own X-Umiak-User-Email never reaches the app.
 	full := browser(t, c, c.A, authz.addr(), true)
-	p := navigate(t, full, base+"/page?q=1", http.Header{"X-Sbx-User-Email": {"forged@example.com"}})
+	p := navigate(t, full, base+"/page?q=1", http.Header{"X-Umiak-User-Email": {"forged@example.com"}})
 	e := decodeEcho(t, p.result)
 	if p.url.String() != base+"/page?q=1" || e.Path != "/page" || e.RawQuery != "q=1" {
 		t.Fatalf("landed on %s, app saw %s?%s", p.url, e.Path, e.RawQuery)
 	}
-	if got := e.Header.Values("X-Sbx-User-Email"); len(got) != 1 || got[0] != "u@example.com" {
-		t.Fatalf("app saw X-Sbx-User-Email %q", got)
+	if got := e.Header.Values("X-Umiak-User-Email"); len(got) != 1 || got[0] != "u@example.com" {
+		t.Fatalf("app saw X-Umiak-User-Email %q", got)
 	}
 	if e.Header.Get("Cookie") != "" {
 		t.Fatalf("app saw Cookie %q", e.Header.Get("Cookie"))
 	}
 	// The session works for fetches too.
-	if got := decodeEcho(t, send(full, newReq(t, http.MethodGet, "https", host, "/api", nil))).Header.Get("X-Sbx-User-Email"); got != "u@example.com" {
-		t.Fatalf("fetch with the session: X-Sbx-User-Email %q", got)
+	if got := decodeEcho(t, send(full, newReq(t, http.MethodGet, "https", host, "/api", nil))).Header.Get("X-Umiak-User-Email"); got != "u@example.com" {
+		t.Fatalf("fetch with the session: X-Umiak-User-Email %q", got)
 	}
 
 	// A swapped state: the callback carries the state of another browser's
@@ -257,9 +257,9 @@ func TestSSOFlowE2E(t *testing.T) {
 	code := c.env.API.IssueCode(rt.Label, cpapi.PortAuthGrant{UserID: "usr_1", Email: "u@example.com", AuthEpoch: rt.AuthEpoch})
 	callback := func(cl *http.Client, code, state, extra string) page {
 		t.Helper()
-		return navigate(t, cl, base+"/__sbx/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state)+extra, nil)
+		return navigate(t, cl, base+"/__umiak/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state)+extra, nil)
 	}
-	if r := callback(victim, code, attackerState, ""); r.status != http.StatusUnauthorized || r.sbxError != "auth_required" {
+	if r := callback(victim, code, attackerState, ""); r.status != http.StatusUnauthorized || r.umiakError != "auth_required" {
 		t.Fatalf("callback with a swapped state = %v", r)
 	}
 	// rd in the callback query is ignored: the target comes from the state
@@ -272,7 +272,7 @@ func TestSSOFlowE2E(t *testing.T) {
 	// The code is single-use (a new browser, the victim is signed in now).
 	reuser := browser(t, c, c.A, "", false)
 	again := startLogin(t, reuser, base, "/dash")
-	if r := callback(reuser, code, again, ""); r.status != http.StatusUnauthorized || r.sbxError != "auth_required" {
+	if r := callback(reuser, code, again, ""); r.status != http.StatusUnauthorized || r.umiakError != "auth_required" {
 		t.Fatalf("callback with a reused code = %v", r)
 	}
 
@@ -290,7 +290,7 @@ func TestSSOFlowE2E(t *testing.T) {
 	if p.url.Host != host || p.url.Path != "/" {
 		t.Fatalf("//evil.com login landed on %s (%v)", p.url, p.result)
 	}
-	if e := decodeEcho(t, p.result); e.Header.Get("X-Sbx-User-Email") != "u@example.com" {
-		t.Fatalf("app saw X-Sbx-User-Email %q", e.Header.Get("X-Sbx-User-Email"))
+	if e := decodeEcho(t, p.result); e.Header.Get("X-Umiak-User-Email") != "u@example.com" {
+		t.Fatalf("app saw X-Umiak-User-Email %q", e.Header.Get("X-Umiak-User-Email"))
 	}
 }

@@ -1,15 +1,15 @@
 "use client";
-// Files tab (S8 §9.6): GET /files/list with pages, breadcrumbs, hidden
-// files, a text preview of up to 1 MiB in <pre> (never HTML or an iframe),
-// download through a link with `?team=`, upload by button or drag and drop
-// (≤ 64 MiB one PUT, larger in resumable chunks with progress), mkdir,
-// move/rename, delete (recursive with a confirmation).
-import type { FileInfo, Sandbox, SandboxData } from "@sbx/sdk";
 import {
 	useInfiniteQuery,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
+// Files tab (S8 §9.6): GET /files/list with pages, breadcrumbs, hidden
+// files, a text preview of up to 1 MiB in <pre> (never HTML or an iframe),
+// download through a link with `?team=`, upload by button or drag and drop
+// (≤ 64 MiB one PUT, larger in resumable chunks with progress), mkdir,
+// move/rename, delete (recursive with a confirmation).
+import type { FileInfo, Sandbox, SandboxData } from "@umiak/sdk";
 import {
 	FileIcon,
 	FolderIcon,
@@ -224,7 +224,7 @@ export function FilesTab({
 		const dirs = items.filter((i) => i.webkitGetAsEntry?.()?.isDirectory);
 		if (dirs.length > 0) {
 			toast.info(
-				"Folders are not uploaded from the browser: use `sbx push` or `sbx cp -r` from the CLI.",
+				"Folders are not uploaded from the browser: use `umiak push` or `umiak cp -r` from the CLI.",
 			);
 		}
 		const files = items

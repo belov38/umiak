@@ -153,7 +153,7 @@ test("Keycloak JWT of the CLI: same user as the browser; an operator's JWT has n
 		await alice.request.get(`/api/v1/me?team=${team}`)
 	).json()) as { user: { id: string } };
 
-	// `sbx login`: device grant approved in alice's signed-in browser.
+	// `umiak login`: device grant approved in alice's signed-in browser.
 	const aliceJwt = await deviceLogin(alice.page);
 	const cliMe = await fetch(`${PUBLIC_API}/v1/me`, {
 		headers: bearer(aliceJwt),
@@ -173,14 +173,14 @@ test("Keycloak JWT of the CLI: same user as the browser; an operator's JWT has n
 		(await fetch(`${PUBLIC_API}/v1/me`, { headers: bearer(opJwt) })).status,
 	).toBe(200);
 	const all = await fetch(`${PUBLIC_API}/v1/sandboxes?allTeams=true`, {
-		headers: { ...bearer(opJwt), "Sbx-Team": opTeam },
+		headers: { ...bearer(opJwt), "Umiak-Team": opTeam },
 	});
 	expect(all.status).toBe(403);
 	const block = await fetch(`${PUBLIC_API}/v1/sandboxes/${sandboxId}/block`, {
 		method: "POST",
 		headers: {
 			...bearer(opJwt),
-			"Sbx-Team": team,
+			"Umiak-Team": team,
 			"content-type": "application/json",
 		},
 		body: JSON.stringify({ reason: "operator" }),

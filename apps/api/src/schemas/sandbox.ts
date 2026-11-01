@@ -1,6 +1,10 @@
 // Sandbox resource and the bodies of the sandbox routes (S7 §8.1, §8.2).
 import { z } from "@hono/zod-openapi";
-import { BLOCK_NOTE_MAX_CHARS, BLOCK_REASONS, SANDBOX_STATES } from "@sbx/core";
+import {
+	BLOCK_NOTE_MAX_CHARS,
+	BLOCK_REASONS,
+	SANDBOX_STATES,
+} from "@umiak/core";
 import { extensibleEnum } from "../openapi/registry.ts";
 import {
 	EnvPatchFields,
@@ -106,7 +110,7 @@ export const SandboxSchema = z
 			desktop: z.string().optional(),
 			portUrlTemplate: z.string().openapi({
 				description: "URL of a published port; replace {port}",
-				example: "https://quiet-otter-lamp-{port}.sbx.example.com",
+				example: "https://quiet-otter-lamp-{port}.umiak.example.com",
 			}),
 			ssh: z.string().openapi({
 				description: "SSH command (needs a certificate or a registered key)",

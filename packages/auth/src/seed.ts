@@ -4,7 +4,7 @@ import { z } from "zod";
 import { inTx } from "./pg-util.ts";
 import { PRESETS, SCOPES, type Scope } from "./scopes.ts";
 
-// Identity file of the stand-in (SBX_IDENTITY_FILE, S7 plan decision 2):
+// Identity file of the stand-in (UMIAK_IDENTITY_FILE, S7 plan decision 2):
 // users, teams, memberships and team keys by sha256, upserted at api start.
 // Upsert only: rows missing from the file are kept, a revoked key stays
 // revoked, JIT bindings (idp_subject, personal teams) are not touched, and

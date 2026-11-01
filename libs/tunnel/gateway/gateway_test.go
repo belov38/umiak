@@ -14,13 +14,13 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/journal"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/journal"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // localSession waits for a local session of the machine in any live state.
@@ -562,7 +562,7 @@ func TestGatewayOnSessionChange(t *testing.T) {
 				<-block
 			}
 		}
-		c.ListenChannels = map[string]func(string){"sbx_routes": func(p string) { routes <- p }}
+		c.ListenChannels = map[string]func(string){"umiak_routes": func(p string) { routes <- p }}
 	})
 	t.Cleanup(func() { blockOnce.Do(func() { close(block) }) })
 	select {
@@ -576,7 +576,7 @@ func TestGatewayOnSessionChange(t *testing.T) {
 	select {
 	case p := <-routes:
 		if p != "" {
-			t.Fatalf("first sbx_routes call %q, want \"\"", p)
+			t.Fatalf("first umiak_routes call %q, want \"\"", p)
 		}
 	case <-time.After(waitTimeout):
 		t.Fatal("ListenChannels handler was not called after LISTEN")
@@ -600,16 +600,16 @@ func TestGatewayOnSessionChange(t *testing.T) {
 		return !ok
 	})
 	waitDone(t, old)
-	if _, err := e.pool.Exec(context.Background(), `SELECT pg_notify('sbx_routes', 'r1')`); err != nil {
+	if _, err := e.pool.Exec(context.Background(), `SELECT pg_notify('umiak_routes', 'r1')`); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case p := <-routes:
 		if p != "r1" {
-			t.Fatalf("sbx_routes payload %q, want r1", p)
+			t.Fatalf("umiak_routes payload %q, want r1", p)
 		}
 	case <-time.After(waitTimeout):
-		t.Fatal("sbx_routes notification not delivered while OnSessionChange is blocked")
+		t.Fatal("umiak_routes notification not delivered while OnSessionChange is blocked")
 	}
 
 	blockOnce.Do(func() { close(block) })

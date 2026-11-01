@@ -14,9 +14,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 // Spec 21 item 1: exact output, exit codes, /dev/stdout and /dev/stderr
@@ -187,7 +187,7 @@ func TestLeftovers(t *testing.T) {
 		if len(left) != 1 || len(daemon) != 1 {
 			t.Fatalf("leftovers: %v %v", left, daemon)
 		}
-		want := "/sbx-cmd.slice/" + supervisor.UnitName(id) + "/payload"
+		want := "/umiak-cmd.slice/" + supervisor.UnitName(id) + "/payload"
 		for _, p := range append(left, daemon...) {
 			if cg := cgroupOf(t, p); !strings.HasSuffix(cg, want) {
 				t.Errorf("leftover %s in cgroup %s, want .../%s", p, cg, want)
@@ -253,9 +253,9 @@ func TestTimeoutAndOOM(t *testing.T) {
 		pid := mainPID(t)
 		// The limit is set on the slice of all commands, without swap, so
 		// the payload's 512 MiB cannot fit.
-		sh(t, "systemctl set-property --runtime sbx-cmd.slice MemoryMax=64M MemorySwapMax=0")
+		sh(t, "systemctl set-property --runtime umiak-cmd.slice MemoryMax=64M MemorySwapMax=0")
 		t.Cleanup(func() {
-			_, _ = shErr("systemctl set-property --runtime sbx-cmd.slice MemoryMax=infinity MemorySwapMax=infinity")
+			_, _ = shErr("systemctl set-property --runtime umiak-cmd.slice MemoryMax=infinity MemorySwapMax=infinity")
 		})
 		r := run(t, c, newID("oom"), &agentv1.CommandSpec{
 			Cmd:  &agentv1.CommandSpec_Argv{Argv: &agentv1.Argv{Args: []string{"python3", "-c", "b=bytearray(512<<20)\nfor i in range(0, len(b), 4096): b[i] = 1"}}},

@@ -1,7 +1,7 @@
 // Command output in a read-only terminal (S8 §9.6 Commands), without the
 // DOM: NDJSON frames (S7 §9.5) → text for xterm, the stream filter, and the
 // download links of `/output` (S7 §9.4).
-import type { CommandData } from "@sbx/sdk";
+import type { CommandData } from "@umiak/sdk";
 import { API_BASE_URL } from "@/lib/api-base";
 
 export type OutputFilter = "all" | "stdout" | "stderr";
@@ -145,7 +145,7 @@ export function hasLongOutput(c: Pick<CommandData, "streams">): boolean {
 
 /**
  * Link of up to 4 MiB of a stream from `offset` (default: the last 4 MiB
- * still kept). A link carries no Sbx-Team header: the team is in the query.
+ * still kept). A link carries no Umiak-Team header: the team is in the query.
  */
 export function outputDownloadUrl(o: {
 	sandboxId: string;

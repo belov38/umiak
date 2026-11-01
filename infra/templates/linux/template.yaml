@@ -28,10 +28,10 @@ steps:
     20-docker,
     30-toolchains,
     40-coding-agents,
-    50-sbx-agent,
+    50-umiak-agent,
     90-cleanup,
   ]
-seal: sbx-agent # S9: sysprep
+seal: umiak-agent # S9: sysprep
 boot_timeout_s: 300
 verify: linux
 # Template slots on pve (S1 4.7): Linux alternates 597 and 599 (599 is skipped while the PoC

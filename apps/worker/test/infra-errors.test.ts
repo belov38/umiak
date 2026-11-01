@@ -12,7 +12,7 @@ import {
 	StorageFullError,
 	ThawFailedError,
 	TracesRemainError,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { describe, expect, it } from "vitest";
 import {
 	classifyInfraError,
@@ -28,7 +28,7 @@ import {
 } from "../src/ports.ts";
 
 const MACHINE = "0199a8f0-0000-7000-8000-000000000001";
-const SERIAL = `sbx1:${MACHINE}:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA`;
+const SERIAL = `umiak1:${MACHINE}:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA`;
 const SMBIOS1 = formatSmbios1({ uuid: MACHINE, serial: SERIAL });
 const SERIAL_B64 = Buffer.from(SERIAL).toString("base64");
 
@@ -145,7 +145,7 @@ describe("classifyInfraError", () => {
 				"GET /nodes/pve/qemu/512/config: Permission check failed (/vms/512, VM.Audit)",
 			),
 		).toBe(true);
-		expect(t(403, "Permission check failed (/pool/sandbox, VM.Allocate)")).toBe(
+		expect(t(403, "Permission check failed (/pool/umiak, VM.Allocate)")).toBe(
 			false,
 		);
 		expect(t(500, "VM 512 is running - destroy failed")).toBe(true);

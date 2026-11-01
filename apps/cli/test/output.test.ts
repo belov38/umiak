@@ -3,7 +3,7 @@
 // current, version, completion, mcp).
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { SbxError } from "@sbx/sdk";
+import { UmiakError } from "@umiak/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Context } from "../src/context.ts";
 import {
@@ -28,7 +28,7 @@ function capture() {
 	};
 }
 
-const apiErr = new SbxError({
+const apiErr = new UmiakError({
 	status: 401,
 	code: "unauthorized",
 	message: "bad key",
@@ -64,12 +64,12 @@ describe("Output (unit)", () => {
 			explicitHuman: true,
 			jsonFlag: false,
 		});
-		expect(outputMode(["whoami"], { SBX_OUTPUT: "json" })).toEqual({
+		expect(outputMode(["whoami"], { UMIAK_OUTPUT: "json" })).toEqual({
 			explicitJson: true,
 			explicitHuman: false,
 			jsonFlag: false,
 		});
-		expect(outputMode(["--human"], { SBX_OUTPUT: "json" })).toEqual({
+		expect(outputMode(["--human"], { UMIAK_OUTPUT: "json" })).toEqual({
 			explicitJson: false,
 			explicitHuman: true,
 			jsonFlag: false,
@@ -122,7 +122,7 @@ describe("Output (unit)", () => {
 		const b = capture();
 		new Output({ ...b, isTTY: true }).error(apiErr);
 		expect(b.out).toEqual([]);
-		expect(b.err.join("")).toBe("sbx: bad key (unauthorized, req_1)\n");
+		expect(b.err.join("")).toBe("umiak: bad key (unauthorized, req_1)\n");
 	});
 
 	it("a raw-data command puts the error line on stderr unless --json is explicit", () => {
@@ -145,7 +145,7 @@ describe("Output (unit)", () => {
 		j.rawData = true;
 		j.error(apiErr);
 		expect(JSON.parse(b.out.join(""))).toMatchObject({ event: "error" });
-		// SBX_OUTPUT=json is not the flag: stdout stays the data.
+		// UMIAK_OUTPUT=json is not the flag: stdout stays the data.
 		const c = capture();
 		const e = new Output({ ...c, isTTY: false, explicitJson: true });
 		e.rawData = true;
@@ -155,7 +155,7 @@ describe("Output (unit)", () => {
 
 	it("exit codes: 4 auth, 3 not found, 75 retryable, 1 other, 2 usage", () => {
 		const e = (status: number, code: string, retryable = false) =>
-			new SbxError({ status, code, message: code, retryable });
+			new UmiakError({ status, code, message: code, retryable });
 		expect(exitCodeOf(e(401, "unauthorized"))).toBe(EXIT_NO_AUTH);
 		expect(exitCodeOf(e(401, "token_expired"))).toBe(4);
 		expect(exitCodeOf(e(403, "forbidden"))).toBe(4);
@@ -181,7 +181,7 @@ describe("Output (unit)", () => {
 	});
 });
 
-describe("sbx against the api", () => {
+describe("umiak against the api", () => {
 	let w: CliWorld;
 	let home: CliHome;
 	beforeAll(async () => {
@@ -194,8 +194,8 @@ describe("sbx against the api", () => {
 	});
 	const keyEnv = () => ({
 		...home.env,
-		SBX_API_URL: w.url,
-		SBX_API_KEY: w.secret,
+		UMIAK_API_URL: w.url,
+		UMIAK_API_KEY: w.secret,
 	});
 
 	it("whoami without a terminal prints /v1/me as JSON", async () => {
@@ -222,7 +222,7 @@ describe("sbx against the api", () => {
 
 	it("an API error is the last stdout line with requestId; 401 exits 4", async () => {
 		const r = await runCli(["whoami"], {
-			env: { ...keyEnv(), SBX_API_KEY: await revokedLookingKey() },
+			env: { ...keyEnv(), UMIAK_API_KEY: await revokedLookingKey() },
 		});
 		expect(r.code).toBe(4);
 		const last = r.last();
@@ -233,12 +233,12 @@ describe("sbx against the api", () => {
 		});
 		expect(last.requestId).toMatch(/^req_[0-9a-z]{26}$/);
 		expect(last.details).toBeTypeOf("object");
-		expect(r.stderr).toContain("sbx: ");
+		expect(r.stderr).toContain("umiak: ");
 	});
 
 	it("without credentials: not_logged_in, exit 4; without an API URL: exit 4", async () => {
 		const r = await runCli(["whoami"], {
-			env: { ...home.env, SBX_API_URL: w.url },
+			env: { ...home.env, UMIAK_API_URL: w.url },
 		});
 		expect(r.code).toBe(4);
 		expect(r.last()).toMatchObject({
@@ -307,7 +307,7 @@ describe("sbx against the api", () => {
 		expect(JSON.parse(get.stdout).sandbox.id).toBe(sb.id);
 		// Another shell has its own current sandbox.
 		const other = await runCli(["current"], {
-			env: { ...env, SBX_SESSION: "other-shell" },
+			env: { ...env, UMIAK_SESSION: "other-shell" },
 		});
 		expect(other.code).toBe(3);
 
@@ -351,7 +351,7 @@ describe("sbx against the api", () => {
 			}
 		}
 		const bash = await runCli(["completion", "bash"], { env: home.env });
-		expect(bash.stdout).toContain("complete -o default -F _sbx sbx");
+		expect(bash.stdout).toContain("complete -o default -F _umiak umiak");
 		expect(bash.stdout).toMatch(/auth\)\n.*token/);
 		const bad = await runCli(["completion", "tcsh"], { env: home.env });
 		expect(bad.code).toBe(2);
@@ -360,7 +360,7 @@ describe("sbx against the api", () => {
 
 /** A well-formed team key the api does not know. */
 async function revokedLookingKey(): Promise<string> {
-	const { generateApiKeySecret } = await import("@sbx/auth");
+	const { generateApiKeySecret } = await import("@umiak/auth");
 	return generateApiKeySecret();
 }
 
@@ -380,9 +380,9 @@ describe("retry budget of interactive commands", () => {
 			const r = await runCli(["whoami"], {
 				env: {
 					...home.env,
-					SBX_API_URL: url,
-					SBX_API_KEY: "sbx_dead",
-					SBX_RETRY_BUDGET_MS: "1000",
+					UMIAK_API_URL: url,
+					UMIAK_API_KEY: "umiak_dead",
+					UMIAK_RETRY_BUDGET_MS: "1000",
 				},
 			});
 			expect(r.code, r.stderr).toBe(EXIT_TEMPORARY);
@@ -407,7 +407,7 @@ describe("retry budget of interactive commands", () => {
 		expect(ctx.retryBudgetMs).toBe(15_000);
 		const b = new Context({
 			out: new Output({ ...a, isTTY: false }),
-			env: { SBX_RETRY_BUDGET_MS: "2500" },
+			env: { UMIAK_RETRY_BUDGET_MS: "2500" },
 			globals: {},
 			stdin: process.stdin,
 		});

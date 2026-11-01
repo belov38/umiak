@@ -20,11 +20,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
 )
 
-const envPrefix = "SBX_GATEWAY_"
+const envPrefix = "UMIAK_GATEWAY_"
 
 // CookieKey is one key of the session cookie codec. The first key signs; all
 // keys verify.
@@ -67,13 +67,13 @@ type Config struct {
 	MetricsListen string
 
 	// Names.
-	SbxDomain  string
+	UmiakDomain  string
 	TunnelHost string
 	SSHHost    string
 
 	// TLS files (required when TLSListen is set).
-	SbxCertFile    string
-	SbxKeyFile     string
+	UmiakCertFile    string
+	UmiakKeyFile     string
 	TunnelCertFile string
 	TunnelKeyFile  string
 
@@ -147,7 +147,7 @@ type Config struct {
 	LogLevel string
 }
 
-// APIURLNone as SBX_GATEWAY_API_URL runs the gateway without api (local
+// APIURLNone as UMIAK_GATEWAY_API_URL runs the gateway without api (local
 // development): every route lookup and SSH authorization fails as
 // unavailable and agent events are logged and dropped.
 const APIURLNone = "none"
@@ -196,18 +196,18 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.HTTPListen = l.listen("HTTP_LISTEN", "")
 	c.MetricsListen = l.str("METRICS_LISTEN", ":9090")
 
-	c.SbxDomain = l.str("SBX_DOMAIN", "")
+	c.UmiakDomain = l.str("UMIAK_DOMAIN", "")
 	c.TunnelHost = l.str("TUNNEL_HOST", "")
 	c.SSHHost = l.str("SSH_HOST", "")
 
 	if c.TLSListen != "" {
-		c.SbxCertFile = l.required("TLS_SBX_CERT_FILE")
-		c.SbxKeyFile = l.required("TLS_SBX_KEY_FILE")
+		c.UmiakCertFile = l.required("TLS_UMIAK_CERT_FILE")
+		c.UmiakKeyFile = l.required("TLS_UMIAK_KEY_FILE")
 		c.TunnelCertFile = l.required("TLS_TUNNEL_CERT_FILE")
 		c.TunnelKeyFile = l.required("TLS_TUNNEL_KEY_FILE")
 	} else {
-		c.SbxCertFile = l.str("TLS_SBX_CERT_FILE", "")
-		c.SbxKeyFile = l.str("TLS_SBX_KEY_FILE", "")
+		c.UmiakCertFile = l.str("TLS_UMIAK_CERT_FILE", "")
+		c.UmiakKeyFile = l.str("TLS_UMIAK_KEY_FILE", "")
 		c.TunnelCertFile = l.str("TLS_TUNNEL_CERT_FILE", "")
 		c.TunnelKeyFile = l.str("TLS_TUNNEL_KEY_FILE", "")
 	}
@@ -241,7 +241,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 
 	c.ReservedPorts = l.ports("RESERVED_PORTS", []int{22, 47800, 47984, 47989, 47990, 48010})
 	c.ReservedSuffixes = l.list("RESERVED_SUFFIXES", []string{"desktop"})
-	c.ReservedSlugs = l.list("RESERVED_SLUGS", []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "sbx"})
+	c.ReservedSlugs = l.list("RESERVED_SLUGS", []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "umiak"})
 
 	c.RateLimit = ratelimit.Config{
 		IPRate:             l.float("RATELIMIT_IP_RATE", 300),
@@ -309,7 +309,7 @@ func (c Config) ValidateServe() error {
 			errs = append(errs, fmt.Errorf("%s%s: is required", envPrefix, name))
 		}
 	}
-	need("SBX_DOMAIN", c.SbxDomain)
+	need("UMIAK_DOMAIN", c.UmiakDomain)
 	need("TUNNEL_HOST", c.TunnelHost)
 	if c.DatabaseURL == "" {
 		errs = append(errs, fmt.Errorf("%sDATABASE_URL (or DATABASE_URL): is required", envPrefix))

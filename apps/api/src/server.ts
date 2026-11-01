@@ -1,19 +1,19 @@
 // The api process: production dependencies from the settings and the four
 // listeners (S7 §7.1).
-//   public   SBX_API_PUBLIC_PORT   (8080)  SDK, CLI, MCP, CI; WebSockets
-//   proxied  SBX_API_PROXIED_PORT  (8081)  browser via oauth2-proxy; WebSockets
-//   internal SBX_API_INTERNAL_PORT (8082)  gateway, service tokens
-//   ops      SBX_API_METRICS_PORT  (9090)  /healthz, /readyz, /metrics
+//   public   UMIAK_API_PUBLIC_PORT   (8080)  SDK, CLI, MCP, CI; WebSockets
+//   proxied  UMIAK_API_PROXIED_PORT  (8081)  browser via oauth2-proxy; WebSockets
+//   internal UMIAK_API_INTERNAL_PORT (8082)  gateway, service tokens
+//   ops      UMIAK_API_METRICS_PORT  (9090)  /healthz, /readyz, /metrics
 // `close()` is the graceful stop of shutdown.ts (at most 10 s).
 // Identities and config come from Payload (S8 plan decision 5): the Local
-// API of `@sbx/payload` with its own pg pool; its migrations are applied by
+// API of `@umiak/payload` with its own pg pool; its migrations are applied by
 // `node packages/payload/src/migrate.ts` (compose: web-migrate), not here.
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAdaptorServer } from "@hono/node-server";
-import { AgentClient, PgRegistry } from "@sbx/agent-client";
-import { PgEnvironmentStore } from "@sbx/auth";
+import { AgentClient, PgRegistry } from "@umiak/agent-client";
+import { PgEnvironmentStore } from "@umiak/auth";
 import {
 	ensureQueues,
 	KeyRing,
@@ -21,8 +21,8 @@ import {
 	PgNotifier,
 	SandboxServiceImpl,
 	validateSecretSets,
-} from "@sbx/core";
-import { createPool } from "@sbx/db";
+} from "@umiak/core";
+import { createPool } from "@umiak/db";
 import { PgBoss } from "pg-boss";
 import type { Logger } from "pino";
 import { ConnectAgentApi } from "./agent/connect.ts";
@@ -89,8 +89,8 @@ function readToken(file: string): string {
 
 /**
  * The real dependencies: files are read first (a broken one fails the start
- * before anything connects), then Postgres, LISTEN sbx_identity (shared with
- * the service's waits), Payload with the config reader (LISTEN sbx_config),
+ * before anything connects), then Postgres, LISTEN umiak_identity (shared with
+ * the service's waits), Payload with the config reader (LISTEN umiak_config),
  * the identity file (loaded into Payload), pg-boss (send only) and the agent
  * registry of the gateway tunnels.
  */
@@ -138,32 +138,32 @@ export async function buildDeps(
 
 		// Loaded here, not at module load: tests import this module through
 		// the package index without needing Payload.
-		const sbx = await import("@sbx/payload");
+		const umiak = await import("@umiak/payload");
 		const databaseUrl = settings.databaseUrl;
-		const payload = await sbx.getSbxPayload({
+		const payload = await umiak.getUmiakPayload({
 			databaseUrl,
 			secret: settings.payloadSecret,
 			operatorGroups: settings.operatorGroups,
 			appOrigin: settings.appOrigin,
 			poolMax: PAYLOAD_POOL_MAX,
 		});
-		cleanups.push(() => sbx.closeSbxPayload(databaseUrl));
-		const config = new sbx.PayloadConfigReader({
+		cleanups.push(() => umiak.closeUmiakPayload(databaseUrl));
+		const config = new umiak.PayloadConfigReader({
 			payload,
 			listen: { databaseUrl },
 			onListenError: (err) =>
-				log.warn({ err: errText(err) }, "LISTEN sbx_config: connection lost"),
+				log.warn({ err: errText(err) }, "LISTEN umiak_config: connection lost"),
 		});
 		await config.start();
 		cleanups.push(() => config.close());
 
 		if (identityYaml !== null) {
-			await sbx.assertPayloadMigrated(payload).catch((e: unknown) => {
+			await umiak.assertPayloadMigrated(payload).catch((e: unknown) => {
 				throw new Error(
-					`SBX_IDENTITY_FILE cannot be loaded: ${errText(e)} (run packages/payload/src/migrate.ts)`,
+					`UMIAK_IDENTITY_FILE cannot be loaded: ${errText(e)} (run packages/payload/src/migrate.ts)`,
 				);
 			});
-			const r = await sbx.seedPayloadIdentity(payload, identityYaml);
+			const r = await umiak.seedPayloadIdentity(payload, identityYaml);
 			log.info({ ...r }, "identity file loaded");
 		}
 
@@ -188,7 +188,7 @@ export async function buildDeps(
 		let agentClient: AgentClient | null = null;
 		if (gatewayToken === null) {
 			log.warn(
-				"SBX_API_GATEWAY_TOKEN_FILE is not set: agent calls answer 503 agent_unavailable",
+				"UMIAK_API_GATEWAY_TOKEN_FILE is not set: agent calls answer 503 agent_unavailable",
 			);
 		} else {
 			const registry = await PgRegistry.connect({
@@ -206,7 +206,7 @@ export async function buildDeps(
 			cleanups.push(() => client.close());
 		}
 
-		const identity = new sbx.PayloadIdentityStore({
+		const identity = new umiak.PayloadIdentityStore({
 			payload,
 			operatorGroups: settings.operatorGroups,
 		});
@@ -250,7 +250,7 @@ export async function buildDeps(
 			commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 			ptyTimings: { ...DEFAULT_PTY_TIMINGS },
 			lifecycle: new ApiLifecycle(),
-			payloadReady: () => sbx.assertPayloadMigrated(payload),
+			payloadReady: () => umiak.assertPayloadMigrated(payload),
 		};
 		cleanups.push(watchDesktopAccess(deps));
 		return { deps, dispose };
@@ -262,7 +262,7 @@ export async function buildDeps(
 
 export interface ApiPorts {
 	public: number;
-	/** null when SBX_API_PROXIED_ENABLED is off. */
+	/** null when UMIAK_API_PROXIED_ENABLED is off. */
 	proxied: number | null;
 	internal: number;
 	metrics: number;
@@ -273,7 +273,7 @@ export interface StartOptions {
 	host?: string;
 	/** Upper bound of `close()` (default SHUTDOWN_GRACE_MS, 10 s). */
 	graceMs?: number;
-	/** Logger of the production deps (default from SBX_LOG_LEVEL). */
+	/** Logger of the production deps (default from UMIAK_LOG_LEVEL). */
 	log?: Logger;
 }
 

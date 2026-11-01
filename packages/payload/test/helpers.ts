@@ -1,28 +1,28 @@
 import type { Payload } from "payload";
 import pg from "pg";
 import {
-	closeSbxPayload,
-	getSbxPayload,
-	type SbxPayloadOptions,
+	closeUmiakPayload,
+	getUmiakPayload,
+	type UmiakPayloadOptions,
 } from "../src/index.ts";
 
-export function testOptions(databaseUrl: string): SbxPayloadOptions {
+export function testOptions(databaseUrl: string): UmiakPayloadOptions {
 	return {
 		databaseUrl,
 		secret: "test-payload-secret-0123456789abcdef",
-		operatorGroups: ["sbx-operators"],
-		appOrigin: "https://app.sbx.test",
+		operatorGroups: ["umiak-operators"],
+		appOrigin: "https://app.umiak.test",
 		poolMax: 4,
 	};
 }
 
 /** The Payload instance of a test database; close it with closePayload. */
 export function openPayload(databaseUrl: string): Promise<Payload> {
-	return getSbxPayload(testOptions(databaseUrl));
+	return getUmiakPayload(testOptions(databaseUrl));
 }
 
 export function closePayload(databaseUrl: string): Promise<void> {
-	return closeSbxPayload(databaseUrl);
+	return closeUmiakPayload(databaseUrl);
 }
 
 export interface Note {
@@ -53,7 +53,7 @@ export class Listener {
 			this.notes.push(n);
 			if (!n.payload.startsWith("sentinel:")) void this.#onNote?.(n);
 		});
-		for (const c of [...channels, "sbx_test_sentinel"]) {
+		for (const c of [...channels, "umiak_test_sentinel"]) {
 			await this.client.query(`LISTEN ${c}`);
 		}
 	}
@@ -88,7 +88,7 @@ export class Listener {
 		const c = new pg.Client({ connectionString: this.#url });
 		await c.connect();
 		try {
-			await c.query("SELECT pg_notify('sbx_test_sentinel', $1)", [s]);
+			await c.query("SELECT pg_notify('umiak_test_sentinel', $1)", [s]);
 		} finally {
 			await c.end();
 		}

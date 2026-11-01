@@ -7,11 +7,11 @@ import "context"
 
 // Raw holds the unparsed values of the identity sources.
 type Raw struct {
-	// Serial is the smbios product serial: sbx1:<machineId>:<base64url(BS)>.
+	// Serial is the smbios product serial: umiak1:<machineId>:<base64url(BS)>.
 	Serial string
 	// UUID is the smbios product UUID. It must equal the machine id.
 	UUID string
-	// Family is the smbios product family: sbxt1:<tunnel url> or empty.
+	// Family is the smbios product family: umiakt1:<tunnel url> or empty.
 	Family string
 	// BootID is the kernel boot id.
 	BootID string

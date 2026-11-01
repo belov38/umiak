@@ -1,5 +1,5 @@
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import { blockAfter, blockBefore, spyBefore } from "./fakes/crash.ts";

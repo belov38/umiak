@@ -2,7 +2,7 @@
 // VMID still leased to the machine, and a start never runs for an executor
 // that was fenced out while it waited for the node's power lock.
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
@@ -95,7 +95,7 @@ describe("M3: fence re-checked after the power lock", () => {
 		await a;
 		expect(vmOf(w, machineId).starts).toBe(startsBefore);
 		expect(vmOf(w, machineId).status).toBe("stopped");
-		expect(w.metrics.count("sbx_fenced_out_total")).toBeGreaterThanOrEqual(1);
+		expect(w.metrics.count("umiak_fenced_out_total")).toBeGreaterThanOrEqual(1);
 	});
 });
 
@@ -118,7 +118,7 @@ describe("H1: owner-checked power operations", () => {
 		expect(s.error_code).toBe("machine_state_conflict");
 		expect(vm.starts).toBe(startsBefore);
 		expect(vm.status).toBe("stopped");
-		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
+		expect(w.metrics.count("umiak_owner_mismatch_total")).toBe(1);
 	});
 
 	it("stop of a machine whose VMID is leased to another machine: machine_state_conflict, the VM keeps running", async () => {
@@ -134,9 +134,9 @@ describe("H1: owner-checked power operations", () => {
 			"machine_state_conflict",
 		);
 		expect(vm.status).toBe("running");
-		expect(w.metrics.count("sbx_owner_mismatch_total")).toBeGreaterThanOrEqual(
-			1,
-		);
+		expect(
+			w.metrics.count("umiak_owner_mismatch_total"),
+		).toBeGreaterThanOrEqual(1);
 	});
 
 	it("a sandbox delete whose lease read went stale before S1 stop and delete leaves the new owner's VM alone", async () => {
@@ -164,7 +164,7 @@ describe("H1: owner-checked power operations", () => {
 			[w.topo.providerId, vm.vmid],
 		);
 		expect(lease.rows).toEqual([{ machine_id: other, state: "active" }]);
-		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
+		expect(w.metrics.count("umiak_owner_mismatch_total")).toBe(1);
 	});
 
 	it("a machine-op delete whose lease read went stale before S1 delete deletes nothing", async () => {
@@ -186,6 +186,6 @@ describe("H1: owner-checked power operations", () => {
 		w.useInfra(w.infra);
 		expect((await row(w, "machines", machineId)).state).toBe("deleted");
 		expect(w.infra.vms.has(vm.vmid)).toBe(true);
-		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
+		expect(w.metrics.count("umiak_owner_mismatch_total")).toBe(1);
 	});
 });

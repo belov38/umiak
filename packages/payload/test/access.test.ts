@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { type CollectionSlug, Forbidden, type Payload } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	DELETE_TEAM_HEADER,
 	isOperatorReq,
-	migrateSbxPayload,
+	migrateUmiakPayload,
 	teamDeleteAccess,
 } from "../src/index.ts";
 import { closePayload, openPayload } from "./helpers.ts";
@@ -74,7 +78,7 @@ describe.skipIf(skipPg())("collection and global access", () => {
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
 		payload = await openPayload(t.url);
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 		member = {
 			...(await payload.create({
 				collection: "users",
@@ -207,7 +211,7 @@ describe.skipIf(skipPg())("collection and global access", () => {
 				team: team.id,
 				kind: "team",
 				secretHash: "b".repeat(64),
-				prefix: "sbx_key_x",
+				prefix: "umiak_key_x",
 				last4: "abcd",
 				scopes: ["sandboxes:read"],
 				expiresAt: new Date(Date.now() + 86400_000).toISOString(),

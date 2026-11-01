@@ -18,7 +18,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 func mustWrite(t *testing.T, path, content string) {
@@ -72,7 +72,7 @@ func newFake(t *testing.T, l paths.Layout) (*FakeResetter, *string) {
 
 // linuxApply skips a test of the Linux identity apply (Apply, Seal) on
 // Windows: the Windows layout has none of its files (machine-id, hosts,
-// /etc/sbx/env), and Windows runs ApplyWindows and SealWindows instead
+// /etc/umiak/env), and Windows runs ApplyWindows and SealWindows instead
 // (apply_win_core_test.go, seal_win_core_test.go).
 func linuxApply(t *testing.T) {
 	t.Helper()
@@ -89,7 +89,7 @@ func TestApplySameMachineNoop(t *testing.T) {
 	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
 	mustWrite(t, l.StateDB, "db")
-	mustWrite(t, l.SbxEnvFile, "A=1\n")
+	mustWrite(t, l.UmiakEnvFile, "A=1\n")
 	f := &File{MachineID: testMachineID, WrittenMachineID: testHex}
 	if err := f.Save(l.IdentityFile); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestApplySameMachineNoop(t *testing.T) {
 	if len(r.Calls) != 0 {
 		t.Errorf("resetter calls = %v", r.Calls)
 	}
-	if mustRead(t, l.StateDB) != "db" || mustRead(t, l.SbxEnvFile) != "A=1\n" {
+	if mustRead(t, l.StateDB) != "db" || mustRead(t, l.UmiakEnvFile) != "A=1\n" {
 		t.Error("files were touched")
 	}
 	got, err := LoadFile(l.IdentityFile)
@@ -134,7 +134,7 @@ func TestApplyChangedResetsState(t *testing.T) {
 	}
 	mustWrite(t, managed, "x")
 	mustWrite(t, l.ManagedFilesList, "# comment\n\nrelative/path\n/etc/managed.conf\n/etc/absent\n")
-	mustWrite(t, l.SbxEnvFile, "SECRET_ISH=1\n")
+	mustWrite(t, l.UmiakEnvFile, "SECRET_ISH=1\n")
 	mustWrite(t, l.SSHUserCA, "ssh-ed25519 OLD\n")
 	mustWrite(t, l.TemplateSSHCA, "ssh-ed25519 TEMPLATE\n")
 	mustWrite(t, l.MachineIDFile, old+"\n")
@@ -155,7 +155,7 @@ func TestApplyChangedResetsState(t *testing.T) {
 	mustNotExist(t, l.UploadsDir)
 	mustNotExist(t, l.PendingUpdateFile)
 	mustNotExist(t, managed)
-	if got := mustRead(t, l.SbxEnvFile); got != "" {
+	if got := mustRead(t, l.UmiakEnvFile); got != "" {
 		t.Errorf("env = %q, want empty", got)
 	}
 	if got := mustRead(t, l.SSHUserCA); got != "ssh-ed25519 TEMPLATE\n" {
@@ -169,7 +169,7 @@ func TestApplyChangedResetsState(t *testing.T) {
 	}
 	hosts := mustRead(t, l.HostsFile)
 	if !strings.Contains(hosts, "127.0.0.1 localhost\n") ||
-		!strings.Contains(hosts, "# BEGIN sbx\n127.0.1.1 "+testHostname+"\n# END sbx\n") {
+		!strings.Contains(hosts, "# BEGIN umiak\n127.0.1.1 "+testHostname+"\n# END umiak\n") {
 		t.Errorf("hosts = %q", hosts)
 	}
 
@@ -204,13 +204,13 @@ func TestApplyFirstBootAfterSeal(t *testing.T) {
 	if got := mustRead(t, l.MachineIDFile); got != testHex+"\n" {
 		t.Errorf("machine-id = %q", got)
 	}
-	if m, _ := filepath.Glob(filepath.Join(filepath.Dir(l.SbxEnvFile), ".*.tmp-*")); len(m) != 0 {
+	if m, _ := filepath.Glob(filepath.Join(filepath.Dir(l.UmiakEnvFile), ".*.tmp-*")); len(m) != 0 {
 		t.Errorf("temporary files left behind: %v", m)
 	}
 	if got := mustRead(t, l.SSHUserCA); got != "" {
 		t.Errorf("ssh ca = %q, want empty", got)
 	}
-	if got := mustRead(t, l.HostsFile); got != "# BEGIN sbx\n127.0.1.1 "+testHostname+"\n# END sbx\n" {
+	if got := mustRead(t, l.HostsFile); got != "# BEGIN umiak\n127.0.1.1 "+testHostname+"\n# END umiak\n" {
 		t.Errorf("hosts = %q", got)
 	}
 }
@@ -227,13 +227,13 @@ func TestApplyHostsBlockReplacedNotDuplicated(t *testing.T) {
 		}
 	}
 	hosts := mustRead(t, l.HostsFile)
-	if n := strings.Count(hosts, "# BEGIN sbx"); n != 1 {
+	if n := strings.Count(hosts, "# BEGIN umiak"); n != 1 {
 		t.Errorf("BEGIN count = %d in %q", n, hosts)
 	}
 	if strings.Contains(hosts, testHostname) {
 		t.Errorf("old hostname left in %q", hosts)
 	}
-	want := "127.0.0.1 localhost\n::1 localhost\n# BEGIN sbx\n127.0.1.1 sbx-ffffffffffff\n# END sbx\n"
+	want := "127.0.0.1 localhost\n::1 localhost\n# BEGIN umiak\n127.0.1.1 umiak-ffffffffffff\n# END umiak\n"
 	if hosts != want {
 		t.Errorf("hosts = %q, want %q", hosts, want)
 	}
@@ -242,11 +242,11 @@ func TestApplyHostsBlockReplacedNotDuplicated(t *testing.T) {
 func TestHostsBlockKeepsSurroundingLines(t *testing.T) {
 	linuxApply(t)
 	l := paths.ForRoot(t.TempDir())
-	mustWrite(t, l.HostsFile, "a\n# BEGIN sbx\n127.0.1.1 old\n# END sbx\nb\n")
+	mustWrite(t, l.HostsFile, "a\n# BEGIN umiak\n127.0.1.1 old\n# END umiak\nb\n")
 	if err := SetHostsBlock(l.HostsFile, "new"); err != nil {
 		t.Fatal(err)
 	}
-	want := "a\n# BEGIN sbx\n127.0.1.1 new\n# END sbx\nb\n"
+	want := "a\n# BEGIN umiak\n127.0.1.1 new\n# END umiak\nb\n"
 	if got := mustRead(t, l.HostsFile); got != want {
 		t.Errorf("hosts = %q, want %q", got, want)
 	}
@@ -420,14 +420,14 @@ func TestSealWipes(t *testing.T) {
 	}
 	mustWrite(t, managed, "x")
 	mustWrite(t, l.ManagedFilesList, "/etc/managed.conf\n")
-	mustWrite(t, l.SbxEnvFile, "A=1\n")
+	mustWrite(t, l.UmiakEnvFile, "A=1\n")
 	mustWrite(t, l.SSHUserCA, "ssh-ed25519 OLD\n")
 	mustWrite(t, l.TemplateSSHCA, "ssh-ed25519 TEMPLATE\n")
 	mustWrite(t, l.MachineIDFile, testHex+"\n")
 	mustWrite(t, filepath.Join(l.SSHDir, "ssh_host_ed25519_key"), "priv")
 	mustWrite(t, filepath.Join(l.SSHDir, "ssh_host_ed25519_key.pub"), "pub")
 	mustWrite(t, filepath.Join(l.SSHDir, "sshd_config"), "keep")
-	versions := filepath.Join(l.VersionsDir, "1.0", "sbx-agent")
+	versions := filepath.Join(l.VersionsDir, "1.0", "umiak-agent")
 	mustWrite(t, versions, "bin")
 
 	stopped := false
@@ -447,7 +447,7 @@ func TestSealWipes(t *testing.T) {
 	if fi, err := os.Stat(l.MachineIDFile); err != nil || fi.Size() != 0 {
 		t.Errorf("machine-id: err = %v, want an empty file", err)
 	}
-	if got := mustRead(t, l.SbxEnvFile); got != "" {
+	if got := mustRead(t, l.UmiakEnvFile); got != "" {
 		t.Errorf("env = %q", got)
 	}
 	if got := mustRead(t, l.SSHUserCA); got != "ssh-ed25519 TEMPLATE\n" {

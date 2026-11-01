@@ -87,16 +87,16 @@ let built: Promise<{ dir: string; bin: string }> | undefined;
 
 /**
  * Builds the harness once per test run into a temporary directory.
- * SBX_E2E_RACE=1 builds it with the Go race detector.
+ * UMIAK_E2E_RACE=1 builds it with the Go race detector.
  */
 export function buildHarness(): Promise<{ dir: string; bin: string }> {
 	built ??= (async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "sbx-tunnelharness-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "umiak-tunnelharness-"));
 		const bin = path.join(
 			dir,
 			process.platform === "win32" ? "tunnelharness.exe" : "tunnelharness",
 		);
-		const race = process.env.SBX_E2E_RACE === "1" ? ["-race"] : [];
+		const race = process.env.UMIAK_E2E_RACE === "1" ? ["-race"] : [];
 		try {
 			await run(
 				"mise",

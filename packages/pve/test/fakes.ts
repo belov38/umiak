@@ -9,7 +9,7 @@ export interface Call {
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
-/** In-memory sbx-node: a list of LVs with tags plus a call log. */
+/** In-memory umiak-node: a list of LVs with tags plus a call log. */
 export class FakeNode implements NodeOps {
 	calls: Call[] = [];
 	log: string[];
@@ -26,7 +26,7 @@ export class FakeNode implements NodeOps {
 	vmfiles: string[] = [];
 	fail: Record<string, Error> = {};
 	handlers: Record<string, Handler> = {};
-	/** VM configs lv.adopt reads, as sbx-node reads /etc/pve/qemu-server/<vmid>.conf. */
+	/** VM configs lv.adopt reads, as umiak-node reads /etc/pve/qemu-server/<vmid>.conf. */
 	pve: { vms: Map<number, { config: Record<string, string> }> } | undefined;
 
 	constructor(log: string[] = []) {
@@ -50,14 +50,14 @@ export class FakeNode implements NodeOps {
 					name: string;
 					tags: string[];
 				}[];
-				// Like sbx-node, a known vm-<id>-* origin must carry sbx and sbx-vm-<id>.
+				// Like umiak-node, a known vm-<id>-* origin must carry umiak and umiak-vm-<id>.
 				for (const it of items) {
 					const id = /^vm-(\d+)-/.exec(it.origin)?.[1];
 					const l = this.lvs.find((x) => x.name === it.origin);
 					if (
 						id &&
 						l &&
-						!(l.tags.includes("sbx") && l.tags.includes(`sbx-vm-${id}`))
+						!(l.tags.includes("umiak") && l.tags.includes(`umiak-vm-${id}`))
 					)
 						throw new NodeOpsError(
 							op,
@@ -96,7 +96,7 @@ export class FakeNode implements NodeOps {
 		}
 	}
 
-	/** Tags the vm-<vmid>-disk-N LVs the VM config attaches, as sbx-node's lv.adopt. */
+	/** Tags the vm-<vmid>-disk-N LVs the VM config attaches, as umiak-node's lv.adopt. */
 	#adopt(vmid: number): { tagged: string[]; already: string[] } {
 		const config = this.pve?.vms.get(vmid)?.config;
 		if (!config || config.template === "1")
@@ -108,7 +108,7 @@ export class FakeNode implements NodeOps {
 			const name = /^[^:,]+:([^,]+)/.exec(v)?.[1] ?? "";
 			const l = this.lvs.find((x) => x.name === name);
 			if (!l || !new RegExp(`^vm-${vmid}-disk-\\d+$`).test(name)) continue;
-			const missing = ["sbx", `sbx-vm-${vmid}`].filter(
+			const missing = ["umiak", `umiak-vm-${vmid}`].filter(
 				(t) => !l.tags.includes(t),
 			);
 			if (missing.length === 0) already.push(name);
@@ -152,7 +152,7 @@ export const TEMPLATE_CONFIG: Record<string, string> = {
 	agent: "enabled=1,fstrim_cloned_disks=1",
 	balloon: "0",
 	boot: "order=scsi0",
-	ciuser: "sbx",
+	ciuser: "umiak",
 	cores: "2",
 	cpu: "host",
 	description: "template",
@@ -160,8 +160,8 @@ export const TEMPLATE_CONFIG: Record<string, string> = {
 	ipconfig0: "ip=dhcp",
 	machine: "q35",
 	memory: "2048",
-	name: "sbx-ubuntu-poc",
-	net0: "virtio=02:01:00:00:02:57,bridge=sbx0,firewall=1",
+	name: "umiak-ubuntu-poc",
+	net0: "virtio=02:01:00:00:02:57,bridge=umiak0,firewall=1",
 	ostype: "l26",
 	rng0: "source=/dev/urandom",
 	scsi0: "local-lvm:base-599-disk-0,discard=on,iothread=1,size=40G,ssd=1",
@@ -169,7 +169,7 @@ export const TEMPLATE_CONFIG: Record<string, string> = {
 	serial0: "socket",
 	smbios1: "uuid=c21a67ce-9d7e-4f1f-a375-2a2f09354836",
 	sshkeys: "ssh-ed25519%20AAAA",
-	tags: "sbx-tpl",
+	tags: "umiak-tpl",
 	template: "1",
 	vga: "std",
 	vmgenid: "9284e86e-d1f5-4d93-b063-5ebf6c414d42",
@@ -177,7 +177,7 @@ export const TEMPLATE_CONFIG: Record<string, string> = {
 
 type P = Record<string, unknown> | undefined;
 
-/** In-memory Proxmox API for one node ("pve" by default) with pool "sandbox". */
+/** In-memory Proxmox API for one node ("pve" by default) with pool "umiak". */
 export class FakePve {
 	/** Node name in /nodes/<node>/... paths. */
 	readonly node: string;
@@ -263,7 +263,7 @@ export class FakePve {
 				config.ostype = this.templateConfig.ostype;
 			delete config.template;
 			config.scsi0 = `local-lvm:vm-${vmid}-disk-0,discard=on,iothread=1,size=40G,ssd=1`;
-			config.net0 = "virtio=BC:24:11:00:00:01,bridge=sbx0,firewall=1";
+			config.net0 = "virtio=BC:24:11:00:00:01,bridge=umiak0,firewall=1";
 			config.vmgenid = `gen-clone-${vmid}`;
 			this.vms.set(vmid, {
 				config,
@@ -282,7 +282,7 @@ export class FakePve {
 				vmid: e.vmid,
 				mac: e.mac,
 				ip: e.ip,
-				vnet: "sbx0",
+				vnet: "umiak0",
 			}));
 		}
 		if (key === "GET /cluster/resources") {
@@ -295,7 +295,7 @@ export class FakePve {
 				status:
 					this.staleStatus.get(vmid) ??
 					(vm.status === "paused" ? "running" : vm.status),
-				pool: "sandbox",
+				pool: "umiak",
 				maxmem: Number(vm.config.memory ?? 0) * 1024 * 1024,
 				template: vm.config.template === "1" ? 1 : 0,
 			}));
@@ -312,10 +312,10 @@ export class FakePve {
 				throw new PveApiError(500, `VM ${id} is running - destroy failed`);
 			this.vms.delete(id);
 			// destroy-unreferenced-disks: Proxmox removes the VM's own volumes (not our tagged clones,
-			// which sbx-node removes by tag).
+			// which umiak-node removes by tag).
 			if (this.lvStore)
 				this.lvStore.lvs = this.lvStore.lvs.filter(
-					(l) => l.tags.includes("sbx") || !l.name.startsWith(`vm-${id}-`),
+					(l) => l.tags.includes("umiak") || !l.name.startsWith(`vm-${id}-`),
 				);
 			if (!this.keepIpamOnDelete)
 				this.ipam = this.ipam.filter((e) => e.vmid !== id);

@@ -1,47 +1,47 @@
 // Credential chain (S7 §7.6, §15.2), unless `session` (browser cookie, S8):
-//   explicit apiKey / accessToken / tokenProvider → SBX_API_KEY → SBX_ACCESS_TOKEN
-//   → `sbx auth token --json` (Node and Bun only; the CLI owns refresh).
-// Browsers have no `sbx`: they must pass apiKey, accessToken or tokenProvider.
-// The API URL is `baseUrl`, then SBX_API_URL, then the apiUrl of the sbx profile;
-// the team is `team`, then SBX_TEAM, then the team of the profile. A token from
-// the sbx profile is never sent to another API than the profile's apiUrl.
-// /etc/sbx/config.json (the CLI's system apiUrl) is not read here.
+//   explicit apiKey / accessToken / tokenProvider → UMIAK_API_KEY → UMIAK_ACCESS_TOKEN
+//   → `umiak auth token --json` (Node and Bun only; the CLI owns refresh).
+// Browsers have no `umiak`: they must pass apiKey, accessToken or tokenProvider.
+// The API URL is `baseUrl`, then UMIAK_API_URL, then the apiUrl of the umiak profile;
+// the team is `team`, then UMIAK_TEAM, then the team of the profile. A token from
+// the umiak profile is never sent to another API than the profile's apiUrl.
+// /etc/umiak/config.json (the CLI's system apiUrl) is not read here.
 
 import { canRunAuthCommand, runAuthCommand } from "./auth-command.ts";
-import type { SbxOptions } from "./client.ts";
+import type { UmiakOptions } from "./client.ts";
 import {
 	AUTH_COMMAND_FAILED,
 	isAbortError,
 	NO_API_URL,
 	NO_CREDENTIALS,
-	SbxError,
 	TOKEN_PROVIDER_FAILED,
+	UmiakError,
 } from "./errors.ts";
 import { abortable } from "./retry.ts";
 
 export const DEFAULT_AUTH_COMMAND: readonly string[] = [
-	"sbx",
+	"umiak",
 	"auth",
 	"token",
 	"--json",
 ];
-/** A token from `sbx auth token` is used until this long before it expires. */
+/** A token from `umiak auth token` is used until this long before it expires. */
 const EXPIRY_MARGIN_MS = 60_000;
 
 export interface Credentials {
 	/** API URL without a trailing slash. */
 	baseUrl: string;
 	team?: string;
-	/** Browser session (SbxOptions.session): no bearer is sent. */
+	/** Browser session (UmiakOptions.session): no bearer is sent. */
 	session?: true;
 	/**
 	 * The bearer to send; `force` skips the cache (after `401 token_expired`).
-	 * `signal` ends the wait; a running `sbx` keeps going for other callers.
+	 * `signal` ends the wait; a running `umiak` keeps going for other callers.
 	 */
 	getToken(force?: boolean, signal?: AbortSignal): Promise<string>;
 }
 
-/** Output of `sbx auth token --json`. */
+/** Output of `umiak auth token --json`. */
 export interface AuthToken {
 	kind: string;
 	token: string;
@@ -80,10 +80,10 @@ export function sameApi(a: string, b: string): boolean {
 }
 
 const NO_CREDENTIALS_HINT =
-	"pass apiKey, accessToken or tokenProvider, set SBX_API_KEY or SBX_ACCESS_TOKEN, or run `sbx login`";
+	"pass apiKey, accessToken or tokenProvider, set UMIAK_API_KEY or UMIAK_ACCESS_TOKEN, or run `umiak login`";
 
-function noCredentials(why: string): SbxError {
-	return new SbxError({
+function noCredentials(why: string): UmiakError {
+	return new UmiakError({
 		status: 0,
 		code: NO_CREDENTIALS,
 		message: `no credentials: ${why}; ${NO_CREDENTIALS_HINT}`,
@@ -91,21 +91,21 @@ function noCredentials(why: string): SbxError {
 	});
 }
 
-function noApiUrl(): SbxError {
-	return new SbxError({
+function noApiUrl(): UmiakError {
+	return new UmiakError({
 		status: 0,
 		code: NO_API_URL,
-		message: "no API URL: pass baseUrl or set SBX_API_URL",
+		message: "no API URL: pass baseUrl or set UMIAK_API_URL",
 		retryable: false,
 	});
 }
 
 export async function resolveCredentials(
-	opts: SbxOptions = {},
+	opts: UmiakOptions = {},
 ): Promise<Credentials> {
 	const env = opts.env ?? defaultEnv();
-	const url = nonEmpty(opts.baseUrl) ?? nonEmpty(env.SBX_API_URL);
-	const team = nonEmpty(opts.team) ?? nonEmpty(env.SBX_TEAM);
+	const url = nonEmpty(opts.baseUrl) ?? nonEmpty(env.UMIAK_API_URL);
+	const team = nonEmpty(opts.team) ?? nonEmpty(env.UMIAK_TEAM);
 
 	if (opts.session) {
 		if (url === undefined) throw noApiUrl();
@@ -135,9 +135,9 @@ export async function resolveCredentials(
 	return fromAuthCommand(opts, env, url, team);
 }
 
-/** Explicit options first, then SBX_API_KEY, then SBX_ACCESS_TOKEN. */
+/** Explicit options first, then UMIAK_API_KEY, then UMIAK_ACCESS_TOKEN. */
 function tokenSource(
-	opts: SbxOptions,
+	opts: UmiakOptions,
 	env: Env,
 ): ((force: boolean) => Promise<string>) | undefined {
 	const explicit = nonEmpty(opts.apiKey) ?? nonEmpty(opts.accessToken);
@@ -146,13 +146,14 @@ function tokenSource(
 	if (tokenProvider) {
 		return (force) => callTokenProvider(() => tokenProvider({ force }));
 	}
-	const fromEnv = nonEmpty(env.SBX_API_KEY) ?? nonEmpty(env.SBX_ACCESS_TOKEN);
+	const fromEnv =
+		nonEmpty(env.UMIAK_API_KEY) ?? nonEmpty(env.UMIAK_ACCESS_TOKEN);
 	if (fromEnv !== undefined) return async () => fromEnv;
 	return undefined;
 }
 
 /**
- * Calls the caller's tokenProvider. A rejection that is not an SbxError or an
+ * Calls the caller's tokenProvider. A rejection that is not an UmiakError or an
  * abort becomes `token_provider_failed` (not retryable): the transport must
  * not repeat a request because a token source failed.
  */
@@ -163,9 +164,9 @@ async function callTokenProvider(
 	try {
 		token = await provider();
 	} catch (err) {
-		if (err instanceof SbxError || isAbortError(err)) throw err;
+		if (err instanceof UmiakError || isAbortError(err)) throw err;
 		const why = err instanceof Error ? err.message : String(err);
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: TOKEN_PROVIDER_FAILED,
 			message: `tokenProvider failed: ${why}`,
@@ -174,7 +175,7 @@ async function callTokenProvider(
 		});
 	}
 	if (typeof token !== "string" || token === "") {
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: TOKEN_PROVIDER_FAILED,
 			message: "tokenProvider returned no token",
@@ -189,14 +190,14 @@ function withTeam(c: Credentials, team: string | undefined): Credentials {
 }
 
 async function fromAuthCommand(
-	opts: SbxOptions,
+	opts: UmiakOptions,
 	env: Env,
 	url: string | undefined,
 	team: string | undefined,
 ): Promise<Credentials> {
 	if (!canRunAuthCommand()) {
 		throw noCredentials(
-			"no explicit credentials, and this runtime cannot run `sbx`",
+			"no explicit credentials, and this runtime cannot run `umiak`",
 		);
 	}
 	const cmd = opts.authCommand ?? DEFAULT_AUTH_COMMAND;
@@ -205,7 +206,9 @@ async function fromAuthCommand(
 
 	let current = await run();
 	if (url !== undefined && !sameApi(url, current.apiUrl)) {
-		throw noCredentials(`the sbx profile is for ${current.apiUrl}, not ${url}`);
+		throw noCredentials(
+			`the umiak profile is for ${current.apiUrl}, not ${url}`,
+		);
 	}
 	const baseUrl = trimSlash(url ?? current.apiUrl);
 	let inflight: Promise<AuthToken> | undefined;
@@ -213,7 +216,7 @@ async function fromAuthCommand(
 		const next = await run();
 		if (!sameApi(baseUrl, next.apiUrl)) {
 			throw noCredentials(
-				`the sbx profile is now for ${next.apiUrl}, not ${baseUrl}`,
+				`the umiak profile is now for ${next.apiUrl}, not ${baseUrl}`,
 			);
 		}
 		current = next;
@@ -238,7 +241,7 @@ async function fromAuthCommand(
 	);
 }
 
-/** Validates the JSON printed by `sbx auth token --json`. */
+/** Validates the JSON printed by `umiak auth token --json`. */
 export function parseAuthToken(stdout: string): AuthToken {
 	let v: unknown;
 	try {
@@ -258,11 +261,11 @@ export function parseAuthToken(stdout: string): AuthToken {
 		(o.expiresAt === null || typeof o.expiresAt === "string") &&
 		(o.team === undefined || o.team === null || typeof o.team === "string");
 	if (!ok) {
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: AUTH_COMMAND_FAILED,
 			message:
-				"`sbx auth token --json` printed no {kind, token, expiresAt, apiUrl, team}",
+				"`umiak auth token --json` printed no {kind, token, expiresAt, apiUrl, team}",
 			retryable: false,
 		});
 	}

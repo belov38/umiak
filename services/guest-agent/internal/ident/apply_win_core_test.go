@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
-const testComputerName = "SBX0C1D2E3F4A5B"
+const testComputerName = "UMI0C1D2E3F4A5B"
 
 // winLayout returns a layout under a temporary root with the Windows-only
 // fields filled in (the darwin layout leaves them empty).
@@ -26,11 +26,11 @@ func winLayout(t *testing.T) paths.Layout {
 	t.Helper()
 	root := t.TempDir()
 	l := paths.ForRoot(root)
-	l.SysprepUnattend = filepath.Join(root, "Windows", "System32", "Sysprep", "sbx-unattend.xml")
+	l.SysprepUnattend = filepath.Join(root, "Windows", "System32", "Sysprep", "umiak-unattend.xml")
 	l.EarlyFile = filepath.Join(l.RunDir, "early.json")
 	l.AdminSocket = filepath.Join(l.RunDir, "admin.sock")
 	l.EnvSocket = filepath.Join(l.RunDir, "env.sock")
-	l.SbxEnvFile = ""
+	l.UmiakEnvFile = ""
 	return l
 }
 
@@ -66,7 +66,7 @@ func methods(calls []string) []string {
 
 func TestComputerNameFromMachineID(t *testing.T) {
 	for in, want := range map[string]string{
-		"0190a1b2-c3d4-7e5f-8a9b-0123456789ab": "SBX0123456789AB",
+		"0190a1b2-c3d4-7e5f-8a9b-0123456789ab": "UMI0123456789AB",
 		"0190A1B2C3D47E5F8A9B0C1D2E3F4A5B":     testComputerName,
 	} {
 		if got := WindowsComputerName(in); got != want {
@@ -109,7 +109,7 @@ func TestApplyFirstBootChangesPassword(t *testing.T) {
 	mustNotExist(t, l.CommandsDir)
 	mustNotExist(t, l.SysprepUnattend)
 	if got := mustRead(t, l.SSHUserCA); got != "ssh-ed25519 AAAA template-ca\n" {
-		t.Errorf("sbx_user_ca.pub = %q, want the template copy", got)
+		t.Errorf("umiak_user_ca.pub = %q, want the template copy", got)
 	}
 	f, err := LoadFile(l.IdentityFile)
 	if err != nil {
@@ -125,7 +125,7 @@ func TestApplyForkKeepsPassword(t *testing.T) {
 	if err := (&File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}).Save(l.IdentityFile); err != nil {
 		t.Fatal(err)
 	}
-	r := newWinFake(t, l, "SBXEEEEEEEEEEEE")
+	r := newWinFake(t, l, "UMIEEEEEEEEEEEE")
 	changed, reboot, err := ApplyWindows(context.Background(), l, testIdentity(testMachineID), r, ModeEarly)
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +274,7 @@ func TestApplyRenameRebootsBounded(t *testing.T) {
 // later under its user. Only boots that did reboot count.
 func TestApplyRenameRebootSameBootNeverGivesUp(t *testing.T) {
 	l := winLayout(t)
-	r := newWinFake(t, l, "SBXTEMPLATE")
+	r := newWinFake(t, l, "UMIAKTEMPLATE")
 	boot := func(id string) Identity {
 		i := testIdentity(testMachineID)
 		i.BootID = id
@@ -318,7 +318,7 @@ func TestApplyInterruptedForkKeepsPassword(t *testing.T) {
 	if err := (&File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}).Save(l.IdentityFile); err != nil {
 		t.Fatal(err)
 	}
-	r := newWinFake(t, l, "SBXEEEEEEEEEEEE")
+	r := newWinFake(t, l, "UMIEEEEEEEEEEEE")
 	r.Errs = map[string]error{"SetComputerName": errors.New("power loss")}
 	if _, _, err := ApplyWindows(context.Background(), l, testIdentity(testMachineID), r, ModeEarly); err == nil {
 		t.Fatal("apply succeeded with a failing resetter")

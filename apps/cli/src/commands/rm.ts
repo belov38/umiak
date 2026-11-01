@@ -1,11 +1,11 @@
-// `sbx rm <sb>... [--yes]` (S7 §5.12, §14.2): deletes sandboxes (a running
+// `umiak rm <sb>... [--yes]` (S7 §5.12, §14.2): deletes sandboxes (a running
 // one too). Asks in a terminal; without one --yes is required (exit 2
-// otherwise, nothing deleted). Each DELETE carries `Sbx-Confirm-Delete`
+// otherwise, nothing deleted). Each DELETE carries `Umiak-Confirm-Delete`
 // with the sandbox id read before. Prints the answer `{sandbox, operation}`
 // (an array of them for several sandboxes, one JSON document either way);
 // a deleted current sandbox is forgotten.
 
-import type { Sandbox } from "@sbx/sdk";
+import type { Sandbox } from "@umiak/sdk";
 import type { Command } from "commander";
 import { confirm } from "../confirm.ts";
 import { clearCurrent, readCurrent } from "../current.ts";
@@ -27,7 +27,7 @@ export function register(program: Command, run: Runner): void {
 					await confirm(ctx, false, "");
 				}
 				const sbs: Sandbox[] = [];
-				for (const ref of refs) sbs.push(await ctx.sbx().sandboxes.get(ref));
+				for (const ref of refs) sbs.push(await ctx.umiak().sandboxes.get(ref));
 				const names = sbs.map((s) => `${s.slug} (${s.id})`).join(", ");
 				await confirm(
 					ctx,
@@ -42,10 +42,10 @@ export function register(program: Command, run: Runner): void {
 				for (const sb of sbs) {
 					try {
 						const { data } = await ctx
-							.sbx()
+							.umiak()
 							.raw.DELETE("/v1/sandboxes/{sandbox}", {
 								params: { path: { sandbox: sb.id } },
-								headers: { "Sbx-Confirm-Delete": sb.id },
+								headers: { "Umiak-Confirm-Delete": sb.id },
 							});
 						if (current === sb.id) clearCurrent(ctx);
 						answers.push(data as { sandbox: Sandbox["data"] });

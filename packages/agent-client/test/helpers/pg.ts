@@ -16,9 +16,9 @@ export interface TestDatabase {
 	drop(): Promise<void>;
 }
 
-/** True when database tests must be skipped (SBX_TEST_SKIP_PG=1 and no URL). */
+/** True when database tests must be skipped (UMIAK_TEST_SKIP_PG=1 and no URL). */
 export function skipPg(): boolean {
-	return inject("sbxPgAdminDsn") === "" && inject("sbxPgError") === "";
+	return inject("umiakPgAdminDsn") === "" && inject("umiakPgError") === "";
 }
 
 export interface TestDatabaseOptions {
@@ -33,15 +33,15 @@ export interface TestDatabaseOptions {
 export async function createTestDatabase(
 	opts: TestDatabaseOptions = {},
 ): Promise<TestDatabase> {
-	const admin = inject("sbxPgAdminDsn");
-	const startErr = inject("sbxPgError");
+	const admin = inject("umiakPgAdminDsn");
+	const startErr = inject("umiakPgError");
 	if (startErr !== "") {
 		throw new Error(startErr);
 	}
 	if (admin === "") {
-		throw new Error("no Postgres available (SBX_TEST_SKIP_PG=1)");
+		throw new Error("no Postgres available (UMIAK_TEST_SKIP_PG=1)");
 	}
-	const name = `sbx_test_${randomBytes(6).toString("hex")}`;
+	const name = `umiak_test_${randomBytes(6).toString("hex")}`;
 	const adminClient = new pg.Client({ connectionString: admin });
 	await adminClient.connect();
 	try {

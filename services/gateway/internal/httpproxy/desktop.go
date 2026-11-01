@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
 )
 
 // desktopOpen replaces the upstream host picker with one sandbox's desktop.
@@ -13,12 +13,12 @@ func (h *handler) desktopOpen(x *exchange) bool {
 		return false
 	}
 	if h.cfg.DesktopAPI == nil {
-		x.fail(sbxerr.Error{Status: http.StatusServiceUnavailable, Code: "route_lookup_unavailable", Retryable: true, RetryAfter: 5})
+		x.fail(umiakerr.Error{Status: http.StatusServiceUnavailable, Code: "route_lookup_unavailable", Retryable: true, RetryAfter: 5})
 		return true
 	}
 	opened, err := h.cfg.DesktopAPI.OpenDesktop(x.r.Context(), x.label.Raw)
 	if err != nil {
-		x.fail(sbxerr.Error{Status: http.StatusServiceUnavailable, Code: "desktop_starting", Retryable: true, RetryAfter: 5, Refresh: true})
+		x.fail(umiakerr.Error{Status: http.StatusServiceUnavailable, Code: "desktop_starting", Retryable: true, RetryAfter: 5, Refresh: true})
 		return true
 	}
 	q := url.Values{"hostId": {opened.HostID}, "appId": {opened.AppID}}

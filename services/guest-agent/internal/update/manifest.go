@@ -9,7 +9,7 @@ import (
 )
 
 // ManifestFormat is the Format value of a v1 manifest.
-const ManifestFormat = "sbx-agent-manifest/v1"
+const ManifestFormat = "umiak-agent-manifest/v1"
 
 // Entry names inside a package and a version directory. The agent binary
 // is BinaryName (BinaryNameFor the package OS).
@@ -22,12 +22,12 @@ const (
 )
 
 // BinaryNameFor returns the agent binary name of a package for goos:
-// sbx-agent.exe on Windows, sbx-agent elsewhere.
+// umiak-agent.exe on Windows, umiak-agent elsewhere.
 func BinaryNameFor(goos string) string {
 	if goos == "windows" {
-		return "sbx-agent.exe"
+		return "umiak-agent.exe"
 	}
-	return "sbx-agent"
+	return "umiak-agent"
 }
 
 // requiredFiles returns the files every manifest for goos must list.

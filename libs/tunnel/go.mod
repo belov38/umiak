@@ -1,4 +1,4 @@
-module github.com/belov38/boat-dev-clone/libs/tunnel
+module github.com/belov38/umiak/libs/tunnel
 
 go 1.27
 
@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	connectrpc.com/connect v1.21.1
-	github.com/belov38/boat-dev-clone/libs/proto v0.0.0
+	github.com/belov38/umiak/libs/proto v0.0.0
 	github.com/coder/websocket v1.8.15
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
@@ -23,4 +23,4 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 )
 
-replace github.com/belov38/boat-dev-clone/libs/proto => ../proto
+replace github.com/belov38/umiak/libs/proto => ../proto

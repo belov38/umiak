@@ -13,7 +13,7 @@ import {
 // uses fresh emails, subjects and teams, so the suite shares one database.
 
 /** IdP group the store under test must treat as an operator group. */
-export const CONTRACT_OPERATOR_GROUP = "sbx-contract-operators";
+export const CONTRACT_OPERATOR_GROUP = "umiak-contract-operators";
 
 /** Direct writes the contract needs that IdentityStore does not offer. */
 export interface IdentityContractSeeding {

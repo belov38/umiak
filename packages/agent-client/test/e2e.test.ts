@@ -1,6 +1,6 @@
 // Cross-language e2e (spec section 14.1, scaled down): the TS agent-client
 // against the Go gateways and agent of the tunnel harness, with random faults
-// while two readers follow a command's output. SBX_E2E_KEEP_LOG=1 keeps the
+// while two readers follow a command's output. UMIAK_E2E_KEEP_LOG=1 keeps the
 // harness log (stderr) also when the test passes; its path is printed.
 import { createHash, randomUUID } from "node:crypto";
 import type { MessageInitShape } from "@bufbuild/protobuf";
@@ -36,7 +36,7 @@ import {
 	ExitStatus,
 	Process,
 	Stream,
-} from "./gen/sbx/testing/v1/process_pb.js";
+} from "./gen/umiak/testing/v1/process_pb.js";
 import {
 	FAULT_KINDS,
 	type FaultKind,
@@ -304,7 +304,7 @@ describe.skipIf(skipPg())("e2e: agent-client against the Go tunnel", () => {
 				await db?.drop();
 			}
 		}
-		if (failed || process.env.SBX_E2E_KEEP_LOG === "1") {
+		if (failed || process.env.UMIAK_E2E_KEEP_LOG === "1") {
 			console.error(`tunnel harness log kept at ${harness?.logPath ?? "-"}`);
 		} else {
 			await removeHarnessBuild();
@@ -481,7 +481,7 @@ describe.skipIf(skipPg())("e2e: agent-client against the Go tunnel", () => {
 		const requestId = randomUUID();
 		const res = await proc.setLabel(
 			{ commandId, label: "after-faults" },
-			{ headers: { "Sbx-Request-Id": requestId } },
+			{ headers: { "Umiak-Request-Id": requestId } },
 		);
 		expect(res.calls).toBe(1n);
 		expect(await h.labelCalls(commandId)).toBe(1);

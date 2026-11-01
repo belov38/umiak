@@ -7,8 +7,8 @@
 
 Update-SessionPath
 $npm = Assert-Command 'npm.cmd'
-# The cache goes with C:\sbx-build, not into the SYSTEM profile.
-$env:npm_config_cache = Join-Path $SbxWorkDir 'npm-cache'
+# The cache goes with C:\umiak-build, not into the SYSTEM profile.
+$env:npm_config_cache = Join-Path $UmiakWorkDir 'npm-cache'
 $env:npm_config_update_notifier = 'false'
 $env:npm_config_fund = 'false'
 $env:npm_config_audit = 'false'

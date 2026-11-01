@@ -1,14 +1,14 @@
-// `sbx ssh-config [<sb>]` (S7 §11.3, §14.2): prints an ssh_config block for
-// plain `ssh sbx-<slug>` and VS Code Remote-SSH (append it to
+// `umiak ssh-config [<sb>]` (S7 §11.3, §14.2): prints an ssh_config block for
+// plain `ssh umiak-<slug>` and VS Code Remote-SSH (append it to
 // ~/.ssh/config):
 //
-//   Host sbx-<slug>
+//   Host umiak-<slug>
 //     HostName <gateway host>
 //     Port <port>
 //     User <slug>
 //     IdentitiesOnly yes
 //     UserKnownHostsFile <config dir>/known_hosts
-//   Match originalhost sbx-<slug> exec "sbx ssh-cert <sb_id> --ensure"
+//   Match originalhost umiak-<slug> exec "umiak ssh-cert <sb_id> --ensure"
 //     IdentityFile <config dir>/ssh/<sb_id>/id_ed25519
 //     CertificateFile <config dir>/ssh/<sb_id>/id_ed25519-cert.pub
 //
@@ -17,7 +17,7 @@
 // gets a fresh certificate when the old one is about to expire. The global
 // flags given here (--profile, --api-url, --team, --cacert,
 // --credential-store) are repeated in it; credentials from the env
-// (SBX_API_KEY) are not, so use a profile. stdout is the block whatever
+// (UMIAK_API_KEY) are not, so use a profile. stdout is the block whatever
 // the terminal; `--json` prints {host, config}.
 
 import { join, resolve } from "node:path";
@@ -53,11 +53,11 @@ export function matchExecLine(alias: string, words: string[]): string {
 	return `Match originalhost ${alias} exec "${cmd.replace(/[\\"]/g, "\\$&")}"`;
 }
 
-/** The `sbx` to run from ssh: this binary when compiled, else `sbx` on PATH. */
-function sbxCommand(): string {
+/** The `umiak` to run from ssh: this binary when compiled, else `umiak` on PATH. */
+function umiakCommand(): string {
 	const exe = process.execPath;
 	const name = exe.split(/[\\/]/).pop() ?? "";
-	return /^sbx(-|\.exe$|$)/.test(name) ? exe : "sbx";
+	return /^umiak(-|\.exe$|$)/.test(name) ? exe : "umiak";
 }
 
 /** Global flags of this run that the `Match exec` must repeat. */
@@ -78,7 +78,7 @@ export function register(program: Command, run: Runner): void {
 	program
 		.command("ssh-config")
 		.description(
-			"print an ssh_config block (Host sbx-<slug>) for plain ssh and VS Code",
+			"print an ssh_config block (Host umiak-<slug>) for plain ssh and VS Code",
 		)
 		.argument("[sb]", "sandbox ID or slug (default: the current one)")
 		.action(
@@ -86,15 +86,15 @@ export function register(program: Command, run: Runner): void {
 				async (ctx, args) => {
 					const sb = await useSandbox(ctx, args[0] as string | undefined);
 					const { data: ssh } = await ctx
-						.sbx()
+						.umiak()
 						.raw.GET("/v1/sandboxes/{sandbox}/ssh", {
 							params: { path: { sandbox: sb.id } },
 						});
 					await refreshKnownHosts(ctx, ssh);
-					const alias = `sbx-${sb.slug}`;
+					const alias = `umiak-${sb.slug}`;
 					const dir = certDir(ctx, sb.id);
 					const ensure = [
-						sbxCommand(),
+						umiakCommand(),
 						...globalFlags(ctx),
 						"ssh-cert",
 						sb.id,

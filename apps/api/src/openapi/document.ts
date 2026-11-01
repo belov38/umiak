@@ -18,7 +18,7 @@ export interface DocumentUrls {
 export type OpenApiDocument = Record<string, unknown>;
 
 const DESCRIPTION = [
-	"API of sbx: VM sandboxes for AI agents on Proxmox VE.",
+	"API of umiak: VM sandboxes for AI agents on Proxmox VE.",
 	"",
 	"Errors always have the shape {error: {code, message, retryable, details, requestId}}.",
 	"Every response carries a Request-Id header.",
@@ -33,7 +33,7 @@ export function buildOpenApiDocument(
 ): OpenApiDocument {
 	const doc = app.getOpenAPI31Document({
 		openapi: "3.1.0",
-		info: { title: "sbx API", version: "v1", description: DESCRIPTION },
+		info: { title: "umiak API", version: "v1", description: DESCRIPTION },
 		servers: [{ url: urls.apiUrl }],
 		security: DEFAULT_SECURITY,
 	}) as unknown as OpenApiDocument;

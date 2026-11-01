@@ -14,12 +14,12 @@ def update(root: Path, enable: bool) -> None:
     cleaned = ["\n".join(line for line in text.split("\n") if MARKER not in line)
                for text in (original_cluster, original_ct)]
     if enable:
-        if "[group sbx-egress]" not in cleaned[0] or "[RULES]" not in cleaned[1]:
+        if "[group umiak-egress]" not in cleaned[0] or "[RULES]" not in cleaned[1]:
             raise ValueError("expected firewall sections missing")
-        anchor = "OUT DROP -dest +sbx-deny\n"
+        anchor = "OUT DROP -dest +umiak-deny\n"
         if anchor not in cleaned[0]:
             raise ValueError("private egress guard missing")
-        rules = f"OUT ACCEPT -dest +sbx-gateway -p udp -dport 3478 {MARKER}\n"
+        rules = f"OUT ACCEPT -dest +umiak-gateway -p udp -dport 3478 {MARKER}\n"
         cleaned[0] = cleaned[0].replace(anchor, rules + anchor, 1)
         rules = (f"IN ACCEPT -source 192.168.68.0/24 -p tcp -dport 3478,5349 {MARKER}\n"
                  f"IN ACCEPT -source 192.168.68.0/24 -p udp -dport 3478 {MARKER}\n")

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Run ONLY on a disposable S10 clone via QGA; never bake this debug override into a template.
 set -euo pipefail
-install -d /etc/systemd/system/sbx-agent.service.d
-cat >/etc/systemd/system/sbx-agent.service.d/99-desktop-spike.conf <<'UNIT'
+install -d /etc/systemd/system/umiak-agent.service.d
+cat >/etc/systemd/system/umiak-agent.service.d/99-desktop-spike.conf <<'UNIT'
 [Service]
 ExecStart=
-ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run --debug-listen unix:/run/sbx-agent/desktop-spike.sock
+ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent run --debug-listen unix:/run/umiak-agent/desktop-spike.sock
 UNIT
 systemctl daemon-reload
-systemctl restart sbx-agent
+systemctl restart umiak-agent
 python3 -I - <<'PY'
 import base64, hashlib, json, subprocess, time, uuid
-sock='/run/sbx-agent/desktop-spike.sock'
+sock='/run/umiak-agent/desktop-spike.sock'
 def rpc(service, method, body={}):
- p=subprocess.run(['curl','--silent','--show-error','--fail-with-body','--unix-socket',sock,'-H','Content-Type: application/json','-H','Sbx-Request-Id: '+str(uuid.uuid4()),'-d',json.dumps(body),'http://localhost/sbx.agent.v1.'+service+'/'+method],capture_output=True,text=True)
+ p=subprocess.run(['curl','--silent','--show-error','--fail-with-body','--unix-socket',sock,'-H','Content-Type: application/json','-H','Umiak-Request-Id: '+str(uuid.uuid4()),'-d',json.dumps(body),'http://localhost/umiak.agent.v1.'+service+'/'+method],capture_output=True,text=True)
  if p.returncode: raise RuntimeError(method+': '+p.stdout[:1000]+p.stderr[:200])
  return json.loads(p.stdout)
 for _ in range(60):

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# boat-dev-clone dev control plane: agent tunnel smoke test through the gateway on CT 590.
+# umiak dev control plane: agent tunnel smoke test through the gateway on CT 590.
 # Runs on the operator's Mac after infra/dev-cp/deploy.sh. Dev only.
 #
 #   infra/dev-cp/smoke.sh [--keep]
@@ -7,27 +7,27 @@
 # 1. Builds the dev-signed agent package (services/guest-agent/test/linux/run.sh BUILD_ONLY).
 # 2. Registers a new machine (bootstrap secret hash) in the CT database, as the worker does.
 # 3. Clones one VM (2 GB) from template 599 into the free VMID nearest to 589, with the
-#    machine's smbios, on sbx0 with group sbx-egress.
+#    machine's smbios, on umiak0 with group umiak-egress.
 # 4. From the VM: the gateway port on the CT is reachable; other CT ports, the host, the
 #    router and other LAN guests are not.
 # 5. Installs the agent as the S3 stand does (stand-setup.sh install) and waits for the session
 #    in tunnel.tunnel_sessions. Nothing in the VM is patched: the tunnel URL comes from the
-#    smbios family (sbxt1:<url>, S5 14) as the worker will set it, the tunnel host resolves
+#    smbios family (umiakt1:<url>, S5 14) as the worker will set it, the tunnel host resolves
 #    through the VM's public DNS (sslip.io), and the package pins the dev CA as its tunnel CA.
-# 6. Calls System/Info through @sbx/agent-client in the worker container.
+# 6. Calls System/Info through @umiak/agent-client in the worker container.
 # The VM and the database rows are deleted at the end (unless --keep).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=infra/dev-cp/names.sh
 source "$HERE/names.sh"
-HOST="${SBX_SETUP_SSH:-pve}"
-CT="${SBX_DEVCP_SSH:-sbx@$CT_IP}"
-PVE_LAN_IP="${SBX_PVE_LAN_IP:-192.168.68.116}"
-LAN_GW="${SBX_CP_GW:-192.168.68.1}"
+HOST="${UMIAK_SETUP_SSH:-pve}"
+CT="${UMIAK_DEVCP_SSH:-umiak@$CT_IP}"
+PVE_LAN_IP="${UMIAK_PVE_LAN_IP:-192.168.68.116}"
+LAN_GW="${UMIAK_CP_GW:-192.168.68.1}"
 # A LAN guest that must stay unreachable from sandboxes (CT 104 by default).
-LAN_PEER="${SBX_DEVCP_SMOKE_LAN_PEER:-192.168.68.117}"
-NAME=sbx-devcp-smoke
+LAN_PEER="${UMIAK_DEVCP_SMOKE_LAN_PEER:-192.168.68.117}"
+NAME=umiak-devcp-smoke
 REPO="$(cd "$HERE/../.." && pwd)"
 
 KEEP=0
@@ -61,7 +61,7 @@ remote() {
 
 # ctsql runs SQL on the CT database.
 ctsql() {
-	ssh -o BatchMode=yes "$CT" "cd boat-dev-clone/deploy/compose && docker compose exec -T postgres psql -U sbx -d sbx -v ON_ERROR_STOP=1 -Atq" <<<"$1"
+	ssh -o BatchMode=yes "$CT" "cd umiak/deploy/compose && docker compose exec -T postgres psql -U umiak -d umiak -v ON_ERROR_STOP=1 -Atq" <<<"$1"
 }
 
 work=$(mktemp -d)
@@ -75,12 +75,12 @@ cleanup() {
 		remote "NAME=$NAME" <<'EOF' || rc=1
 for id in $(qm list | awk -v n="$NAME" '$2 == n {print $1}'); do
 	[ "$id" -ge 500 ] && [ "$id" -le 589 ] || continue
-	qm config "$id" | grep -q '^tags:.*sbx-devcp-smoke' || continue
+	qm config "$id" | grep -q '^tags:.*umiak-devcp-smoke' || continue
 	qm stop "$id" >/dev/null 2>&1 || true
 	qm destroy "$id" --purge 1
 	echo "cleanup: VM $id destroyed"
 done
-rm -rf /tmp/sbx-devcp-smoke
+rm -rf /tmp/umiak-devcp-smoke
 EOF
 		ctsql "DELETE FROM tunnel.tunnel_sessions WHERE machine_id = '$MID'; DELETE FROM tunnel.tunnel_credentials WHERE machine_id = '$MID';" || rc=1
 	fi
@@ -92,22 +92,22 @@ trap cleanup EXIT
 # 1. The agent package, signed with a throwaway dev key, with the dev CA as its tunnel CA (the
 # gateway on the CT uses the same CA: deploy.sh), and stand-setup.sh.
 [[ -s "$CA_DIR/ca.pem" ]] || die "no $CA_DIR/ca.pem (infra/dev-cp/deploy.sh)"
-[[ "$(ssh -o BatchMode=yes "$CT" 'cat boat-dev-clone/deploy/compose/secrets/gateway/ca.pem')" == "$(cat "$CA_DIR/ca.pem")" ]] ||
+[[ "$(ssh -o BatchMode=yes "$CT" 'cat umiak/deploy/compose/secrets/gateway/ca.pem')" == "$(cat "$CA_DIR/ca.pem")" ]] ||
 	die "the gateway on the CT does not use $CA_DIR/ca.pem (run infra/dev-cp/deploy.sh)"
 log "build the agent package (linux/amd64, tunnel CA $CA_DIR/ca.pem)"
 BUILD_ONLY="$work" GOARCH_IT=amd64 TUNNEL_CA="$CA_DIR/ca.pem" "$REPO/services/guest-agent/test/linux/run.sh" >/dev/null
 [[ -s "$work/it/pkg/v1.tar" ]] || die "no $work/it/pkg/v1.tar"
 [[ "$(tar -xOf "$work/it/pkg/v1.tar" trust/tunnel-ca.pem)" == "$(cat "$CA_DIR/ca.pem")" ]] || die "the package does not pin the dev CA"
-ssh -o BatchMode=yes "$HOST" 'rm -rf /tmp/sbx-devcp-smoke && mkdir -m 700 /tmp/sbx-devcp-smoke'
-scp -q "$work/it/pkg/v1.tar" "$REPO/services/guest-agent/test/linux/stand-setup.sh" "$HOST:/tmp/sbx-devcp-smoke/"
+ssh -o BatchMode=yes "$HOST" 'rm -rf /tmp/umiak-devcp-smoke && mkdir -m 700 /tmp/umiak-devcp-smoke'
+scp -q "$work/it/pkg/v1.tar" "$REPO/services/guest-agent/test/linux/stand-setup.sh" "$HOST:/tmp/umiak-devcp-smoke/"
 log "package $(($(wc -c <"$work/it/pkg/v1.tar") / 1024)) KiB"
 
 # 2. Machine identity: the bootstrap secret stays in this process and in the VM's smbios;
 # the database gets only its SHA-256 (S2 §5.2).
 head -c 32 /dev/urandom >"$work/bs"
 bs64=$(base64 <"$work/bs" | tr '+/' '-_' | tr -d '=\n')
-serial=$(printf 'sbx1:%s:%s' "$MID" "$bs64" | base64 | tr -d '\n')
-family=$(printf 'sbxt1:%s' "$TUNNEL_URL" | base64 | tr -d '\n')
+serial=$(printf 'umiak1:%s:%s' "$MID" "$bs64" | base64 | tr -d '\n')
+family=$(printf 'umiakt1:%s' "$TUNNEL_URL" | base64 | tr -d '\n')
 hash=$(shasum -a 256 "$work/bs" | cut -d' ' -f1)
 rm -f "$work/bs"
 ctsql "INSERT INTO tunnel.tunnel_credentials (machine_id, bs_hash) VALUES ('$MID', '\\x$hash');"
@@ -116,7 +116,7 @@ log "machine $MID registered"
 # 3-5. The VM, network probes, the agent.
 remote "NAME=$NAME" "MID=$MID" "SERIAL=$serial" "FAMILY=$family" "CT_IP=$CT_IP" "TUNNEL_HOST=$TUNNEL_HOST" \
 	"TUNNEL_URL=$TUNNEL_URL" "PVE_LAN_IP=$PVE_LAN_IP" "LAN_GW=$LAN_GW" "LAN_PEER=$LAN_PEER" <<'EOF'
-d=/tmp/sbx-devcp-smoke
+d=/tmp/umiak-devcp-smoke
 avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge $((2048 + 4096)) ] || { echo "smoke: only $avail MB available on the host" >&2; exit 1; }
 # One VM, the free sandbox VMID nearest to 589 (500-589; 590-596 dev, 597-599 templates); qm clone fails if another thread took it meanwhile.
@@ -124,13 +124,13 @@ id=""
 for c in $(seq 589 -1 500); do
 	qm config "$c" >/dev/null 2>&1 && continue
 	pct config "$c" >/dev/null 2>&1 && continue
-	if qm clone 599 "$c" --name "$NAME" --pool sandbox >/dev/null 2>&1; then id=$c; break; fi
+	if qm clone 599 "$c" --name "$NAME" --pool umiak >/dev/null 2>&1; then id=$c; break; fi
 done
 [ -n "$id" ] || { echo "smoke: no free VMID in 500-589" >&2; exit 1; }
-qm set "$id" --tags sbx-devcp-smoke --memory 2048 --cores 2 --smbios1 "uuid=$MID,serial=$SERIAL,family=$FAMILY,base64=1" >/dev/null
-grep -q 'GROUP sbx-egress -i net0' "/etc/pve/firewall/$id.fw" || { echo "smoke: VM $id has no sbx-egress rule" >&2; exit 1; }
-qm config "$id" | grep -q 'bridge=sbx0,firewall=1' || { echo "smoke: VM $id is not on sbx0 with firewall" >&2; exit 1; }
-echo "smoke: VM $id cloned from 599 (sbx0, firewall group sbx-egress)"
+qm set "$id" --tags umiak-devcp-smoke --memory 2048 --cores 2 --smbios1 "uuid=$MID,serial=$SERIAL,family=$FAMILY,base64=1" >/dev/null
+grep -q 'GROUP umiak-egress -i net0' "/etc/pve/firewall/$id.fw" || { echo "smoke: VM $id has no umiak-egress rule" >&2; exit 1; }
+qm config "$id" | grep -q 'bridge=umiak0,firewall=1' || { echo "smoke: VM $id is not on umiak0 with firewall" >&2; exit 1; }
+echo "smoke: VM $id cloned from 599 (umiak0, firewall group umiak-egress)"
 qm start "$id"
 for _ in $(seq 1 120); do qm guest cmd "$id" ping >/dev/null 2>&1 && break; sleep 2; done
 qm guest cmd "$id" ping >/dev/null
@@ -195,7 +195,7 @@ push "$d/v1.tar" /it/pkg/v1.tar
 push "$d/stand-setup.sh" /it/stand-setup.sh
 g 300 bash /it/stand-setup.sh install 2>&1 | tail -3
 sleep 3
-doctor=$(g 30 /usr/local/bin/sbx-agent doctor --json)
+doctor=$(g 30 /usr/local/bin/umiak-agent doctor --json)
 python3 -c '
 import json, sys
 d = json.loads(sys.argv[1])
@@ -203,7 +203,7 @@ t = d["tunnel_url"]
 print("smoke: agent", d["versions"]["current"], "tunnel", t["url"], "source", t["source"])
 if t["url"] != sys.argv[2] or t["source"] != "smbios":
     sys.exit("smoke: the agent does not use the tunnel URL from the smbios family")' "$doctor" "$TUNNEL_URL"
-g 10 sh -c 'grep -E "^ *(url|trust_dir) *=" /etc/sbx-agent/agent.toml' | sed 's/^/smoke: agent.toml /'
+g 10 sh -c 'grep -E "^ *(url|trust_dir) *=" /etc/umiak-agent/agent.toml' | sed 's/^/smoke: agent.toml /'
 echo "VMID=$id"
 EOF
 
@@ -223,10 +223,10 @@ log "tunnel.tunnel_sessions: $MID $state"
 info_js='
 import { readFileSync } from "node:fs";
 import { createClient } from "@connectrpc/connect";
-import { AgentClient, PgRegistry } from "@sbx/agent-client";
-import { System } from "@sbx/proto/agent/v1";
+import { AgentClient, PgRegistry } from "@umiak/agent-client";
+import { System } from "@umiak/proto/agent/v1";
 const registry = await PgRegistry.connect({ connectionString: process.env.DATABASE_URL, maxConnections: 2 });
-const client = new AgentClient({ registry, serviceToken: readFileSync(process.env.SBX_GATEWAY_SERVICE_TOKEN_FILE, "utf8").trim() });
+const client = new AgentClient({ registry, serviceToken: readFileSync(process.env.UMIAK_GATEWAY_SERVICE_TOKEN_FILE, "utf8").trim() });
 try {
 	const r = await createClient(System, client.transport(process.argv[1])).info({}, { timeoutMs: 30000 });
 	console.log(JSON.stringify({ machineId: r.machineId, version: r.version, os: r.os, arch: r.arch, kernel: r.kernel, hostname: r.hostname, tunnelUrl: r.tunnelUrl, tunnelUrlSource: r.tunnelUrlSource }));
@@ -234,7 +234,7 @@ try {
 	await client.close();
 	await registry.close();
 }'
-info=$(ssh -o BatchMode=yes "$CT" "cd boat-dev-clone/deploy/compose && docker compose exec -T -w /app/apps/worker worker node --input-type=module -e $(printf '%q' "$info_js") $MID")
+info=$(ssh -o BatchMode=yes "$CT" "cd umiak/deploy/compose && docker compose exec -T -w /app/apps/worker worker node --input-type=module -e $(printf '%q' "$info_js") $MID")
 log "System/Info: $info"
 [[ "$info" == *"\"machineId\":\"$MID\""* ]] || die "System/Info returned another machine"
 log "smoke: ok"

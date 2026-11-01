@@ -121,7 +121,7 @@ describe("cloneFromTemplate", () => {
 				{
 					origin: "base-599-disk-0",
 					name: "vm-500-disk-0",
-					tags: ["sbx", "sbx-vm-500"],
+					tags: ["umiak", "umiak-vm-500"],
 					activationSkip: false,
 				},
 			],
@@ -203,30 +203,30 @@ describe("snapshot", () => {
 			items: [
 				{
 					origin: "vm-500-disk-0",
-					name: "sbx-snap-snap1-scsi0",
-					tags: ["sbx", "sbx-snap-snap1", "sbx-src-500"],
+					name: "umiak-snap-snap1-scsi0",
+					tags: ["umiak", "umiak-snap-snap1", "umiak-src-500"],
 					activationSkip: true,
 				},
 			],
 		});
 		expect(s).toMatchObject({ kind: "snapshot", id: "snap1", sourceVmid: 500 });
-		expect(s.disks[0]?.lv).toBe("sbx-snap-snap1-scsi0");
+		expect(s.disks[0]?.lv).toBe("umiak-snap-snap1-scsi0");
 	});
 
 	it("uses the caller-supplied snapshot id for LV names and tags", async () => {
 		const { node, driver, hook } = setup();
 		const s = await driver.snapshot(machine(linuxTpl), hook, { id: "abc123" });
 		expect(s.id).toBe("abc123");
-		expect(s.disks[0]?.lv).toBe("sbx-snap-abc123-scsi0");
+		expect(s.disks[0]?.lv).toBe("umiak-snap-abc123-scsi0");
 		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
 			.items as { name: string; tags: string[] }[];
 		expect(items[0]).toMatchObject({
-			name: "sbx-snap-abc123-scsi0",
-			tags: ["sbx", "sbx-snap-abc123", "sbx-src-500"],
+			name: "umiak-snap-abc123-scsi0",
+			tags: ["umiak", "umiak-snap-abc123", "umiak-src-500"],
 		});
 	});
 
-	it("accepts a 32-character hex id and rejects ids the sbx-node guard would refuse", async () => {
+	it("accepts a 32-character hex id and rejects ids the umiak-node guard would refuse", async () => {
 		const { node, driver, hook } = setup();
 		await driver.snapshot(machine(linuxTpl), hook, {
 			id: "0123456789abcdef0123456789abcdef",
@@ -277,7 +277,7 @@ describe("snapshot", () => {
 		expect(log).toContain("thaw");
 		expect(node.calls.at(-1)).toEqual({
 			op: "lv.remove",
-			args: { names: ["sbx-snap-snap1-scsi0"] },
+			args: { names: ["umiak-snap-snap1-scsi0"] },
 		});
 	});
 
@@ -327,7 +327,7 @@ describe("snapshot", () => {
 		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toBeInstanceOf(
 			ThawFailedError,
 		);
-		expect(node.lvs.filter((l) => l.tags.includes("sbx-snap-snap1"))).toEqual(
+		expect(node.lvs.filter((l) => l.tags.includes("umiak-snap-snap1"))).toEqual(
 			[],
 		);
 	});
@@ -393,7 +393,7 @@ describe("snapshot", () => {
 		await expect(driver.snapshot(machine(winTpl), hook)).rejects.toBeInstanceOf(
 			ThawFailedError,
 		);
-		expect(node.lvs.filter((l) => l.tags.includes("sbx-snap-snap1"))).toEqual(
+		expect(node.lvs.filter((l) => l.tags.includes("umiak-snap-snap1"))).toEqual(
 			[],
 		);
 		expect(node.ops()).toContain("lv.remove");
@@ -461,9 +461,9 @@ describe("cloneFromSnapshot / delete / usage", () => {
 		expect(node.calls[1]?.args).toEqual({
 			items: [
 				{
-					origin: "sbx-snap-snap1-scsi0",
+					origin: "umiak-snap-snap1-scsi0",
 					name: "vm-501-disk-0",
-					tags: ["sbx", "sbx-vm-501"],
+					tags: ["umiak", "umiak-vm-501"],
 					activationSkip: false,
 				},
 			],
@@ -481,7 +481,7 @@ describe("cloneFromSnapshot / delete / usage", () => {
 		node.calls = [];
 		await driver.delete({ kind: "machine", node: "pve", vmid: 500 });
 		expect(node.calls).toEqual([
-			{ op: "lv.list", args: { tags: ["sbx", "sbx-vm-500"] } },
+			{ op: "lv.list", args: { tags: ["umiak", "umiak-vm-500"] } },
 			{ op: "lv.remove", args: { names: ["vm-500-disk-0"] } },
 		]);
 		await driver.delete(s);

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // newTestFake returns a Fake over a layout in a short temporary root: darwin
@@ -46,7 +46,7 @@ func writeSpec(t *testing.T, l paths.Layout, s shim.Spec) {
 func launch(t *testing.T, f *Fake, l paths.Layout, s shim.Spec) *FakeRun {
 	t.Helper()
 	writeSpec(t, l, s)
-	if err := f.Launch(t.Context(), s.ID, "/usr/local/lib/sbx-agent/current/sbx-agent", nil); err != nil {
+	if err := f.Launch(t.Context(), s.ID, "/usr/local/lib/umiak-agent/current/umiak-agent", nil); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 	r := f.Run(s.ID)
@@ -467,7 +467,7 @@ func TestFakeWatchdog(t *testing.T) {
 }
 
 func TestCheckCommandID(t *testing.T) {
-	longest := string(bytes.Repeat([]byte("a"), maxUnitName-len("sbx-cmd-.service")))
+	longest := string(bytes.Repeat([]byte("a"), maxUnitName-len("umiak-cmd-.service")))
 	tests := []struct {
 		id string
 		ok bool

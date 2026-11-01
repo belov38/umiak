@@ -1,5 +1,5 @@
-import { insertSandboxEvent } from "@sbx/core";
-import { withTx } from "@sbx/db";
+import { insertSandboxEvent } from "@umiak/core";
+import { withTx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import { lockSandboxRow } from "../db.ts";
 import type { VmStatus } from "../ports.ts";
@@ -28,7 +28,7 @@ import type { VmStatus } from "../ports.ts";
 // crash after the call never repeats it sooner than the interval.
 //
 // Also cheap here: `deleteStuckCount` (§7.9), delete operations active for
-// more than 30 min, exported as the gauge `sbx_delete_stuck`.
+// more than 30 min, exported as the gauge `umiak_delete_stuck`.
 
 /** Agent absence before `degraded` (§11.1). */
 export const HEALTH_DISCONNECT_GRACE_S = 60;
@@ -43,7 +43,7 @@ export const DELETE_STUCK_AFTER_S = 1800;
 export const AGENT_RESTART_ARGV: readonly string[] = [
 	"systemctl",
 	"restart",
-	"sbx-agent",
+	"umiak-agent",
 ];
 
 export type HealthReason =
@@ -88,7 +88,7 @@ export async function runHealth(ctx: WorkerCtx): Promise<HealthResult> {
 		}
 	}
 	const deleteStuckCount = await countStuckDeletes(ctx);
-	ctx.metrics.set("sbx_delete_stuck", deleteStuckCount);
+	ctx.metrics.set("umiak_delete_stuck", deleteStuckCount);
 	if (deleteStuckCount > 0) {
 		ctx.log.error({ count: deleteStuckCount }, "delete operations stuck");
 	}
@@ -184,7 +184,7 @@ async function markDegraded(ctx: WorkerCtx): Promise<string[]> {
 		});
 		if (done) {
 			out.push(id);
-			ctx.metrics.inc("sbx_sandbox_degraded_total");
+			ctx.metrics.inc("umiak_sandbox_degraded_total");
 			ctx.log.warn({ sandboxId: id }, "sandbox degraded: agent unreachable");
 		}
 	}
@@ -249,7 +249,7 @@ async function probe(ctx: WorkerCtx, row: DegradedRow): Promise<boolean> {
 	if (!claimed) return false;
 	try {
 		const r = await infra.qgaExec(row.vmid, [...AGENT_RESTART_ARGV]);
-		ctx.metrics.inc("sbx_agent_restart_total", {
+		ctx.metrics.inc("umiak_agent_restart_total", {
 			result: r.exitCode === 0 ? "ok" : "failed",
 		});
 		ctx.log.warn(
@@ -257,7 +257,7 @@ async function probe(ctx: WorkerCtx, row: DegradedRow): Promise<boolean> {
 			"agent service restarted through QGA",
 		);
 	} catch (err) {
-		ctx.metrics.inc("sbx_agent_restart_total", { result: "error" });
+		ctx.metrics.inc("umiak_agent_restart_total", { result: "error" });
 		ctx.log.warn(
 			{ sandboxId: row.id, err: errText(err) },
 			"agent service restart through QGA failed",

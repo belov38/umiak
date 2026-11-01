@@ -1,8 +1,8 @@
 import pg from "pg";
 
 /**
- * LISTEN/NOTIFY fan-out over one connection (`sbx_sandboxes`, `sbx_operations`,
- * `sbx_routes`).
+ * LISTEN/NOTIFY fan-out over one connection (`umiak_sandboxes`, `umiak_operations`,
+ * `umiak_routes`).
  *
  * `fn(payload)` runs for each notification on the channel. `fn(null)` runs once
  * LISTEN is active for that subscriber: right after subscribing (or as soon as

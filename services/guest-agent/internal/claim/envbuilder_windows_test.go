@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
 )
 
 func TestEnvBuilderWindowsLayers(t *testing.T) {
@@ -34,15 +34,15 @@ func TestEnvBuilderWindowsLayers(t *testing.T) {
 		`=C:=C:\`,
 		"A=secret",
 		`Path=C:\spec`,
-		"SBX=1",
-		"SBX_ENV_APPLIED=1",
-		"SBX_HOSTNAME=my-box",
-		"SBX_PORT_DOMAIN=sbx.example.com",
-		"SBX_SANDBOX_ID=sbx_1",
+		"UMIAK=1",
+		"UMIAK_ENV_APPLIED=1",
+		"UMIAK_HOSTNAME=my-box",
+		"UMIAK_PORT_DOMAIN=umiak.example.com",
+		"UMIAK_SANDBOX_ID=umiak_1",
 		"TEMP=claim",
 		"TERM=xterm-256color",
 		`USERPROFILE=C:\Users\user`,
-		"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.sbx.example.com",
+		"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.umiak.example.com",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("env =\n%q\nwant\n%q", got, want)
@@ -56,7 +56,7 @@ func TestEnvBuilderWindowsFallback(t *testing.T) {
 	userEnvBlock = func(*process.User) ([]string, error) { return nil, errors.New("logon failed") }
 	u := &process.User{Name: "user", Home: `C:\Users\user`, Windows: &process.WinUser{Account: "user"}}
 	env := h.m.EnvBuilder().Build(u, &agentv1.CommandSpec{})
-	for _, kv := range []string{`USERPROFILE=C:\Users\user`, "USERNAME=user", "SBX=1", "SBX_ENV_APPLIED=1"} {
+	for _, kv := range []string{`USERPROFILE=C:\Users\user`, "USERNAME=user", "UMIAK=1", "UMIAK_ENV_APPLIED=1"} {
 		if !slices.Contains(env, kv) {
 			t.Errorf("%s missing: %q", kv, env)
 		}

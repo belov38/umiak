@@ -1,7 +1,7 @@
 "use client";
 // Delete of a sandbox (S8 §9.4): confirmed by typing its slug; the request
-// carries Sbx-Confirm-Delete with the sandbox id (S7 §5.12).
-import type { SandboxData } from "@sbx/sdk";
+// carries Umiak-Confirm-Delete with the sandbox id (S7 §5.12).
+import type { SandboxData } from "@umiak/sdk";
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +14,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 
 export function DeleteSandboxDialog({
@@ -30,7 +30,7 @@ export function DeleteSandboxDialog({
 	onOpenChange: (open: boolean) => void;
 	onDeleted: () => void | Promise<void>;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const [typed, setTyped] = useState("");
 	const [busy, setBusy] = useState(false);
 	const matches = typed.trim() === sandbox.slug;
@@ -40,9 +40,9 @@ export function DeleteSandboxDialog({
 		if (!matches) return;
 		setBusy(true);
 		const r = await attempt(() =>
-			sbx.raw.DELETE("/v1/sandboxes/{sandbox}", {
+			umiak.raw.DELETE("/v1/sandboxes/{sandbox}", {
 				params: { path: { sandbox: sandbox.id } },
-				headers: { "Sbx-Confirm-Delete": sandbox.id },
+				headers: { "Umiak-Confirm-Delete": sandbox.id },
 			}),
 		);
 		setBusy(false);

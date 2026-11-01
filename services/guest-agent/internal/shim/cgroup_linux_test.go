@@ -15,7 +15,7 @@ func TestOwnCgroup(t *testing.T) {
 		want    string
 		ok      bool
 	}{
-		{"v2", "0::/sbx-cmd.slice/sbx-cmd-c1.service\n", "/sbx-cmd.slice/sbx-cmd-c1.service", true},
+		{"v2", "0::/umiak-cmd.slice/umiak-cmd-c1.service\n", "/umiak-cmd.slice/umiak-cmd-c1.service", true},
 		{"hybrid", "1:name=systemd:/x\n0::/system.slice/a.service\n", "/system.slice/a.service", true},
 		{"root", "0::/\n", "", false},
 		{"v1 only", "1:name=systemd:/x\n", "", false},

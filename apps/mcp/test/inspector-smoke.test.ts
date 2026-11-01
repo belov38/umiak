@@ -1,4 +1,4 @@
-// Inspector smoke test (S11 14.3): `inspector --cli` runs `sbx mcp` (the real
+// Inspector smoke test (S11 14.3): `inspector --cli` runs `umiak mcp` (the real
 // CLI under Bun) over stdio against the fake API. The Inspector's own build
 // script stays disabled (pnpm-workspace.yaml allowBuilds): the published
 // package ships the built CLI, and its postinstall only installs clients of
@@ -21,7 +21,7 @@ const CLI_MAIN = join(
 	"src",
 	"main.ts",
 );
-const BUN = process.env.SBX_TEST_BUN ?? "bun";
+const BUN = process.env.UMIAK_TEST_BUN ?? "bun";
 
 function launcher(): string {
 	const require = createRequire(import.meta.url);
@@ -35,13 +35,13 @@ interface Run {
 	stderr: string;
 }
 
-describe("inspector --cli against sbx mcp", () => {
+describe("inspector --cli against umiak mcp", () => {
 	let api: FakeApi;
 	let dir: string;
 
 	beforeAll(async () => {
 		api = await startFakeApi();
-		dir = mkdtempSync(join(tmpdir(), "sbx-inspector-"));
+		dir = mkdtempSync(join(tmpdir(), "umiak-inspector-"));
 	});
 	afterAll(async () => {
 		await api?.close();
@@ -52,13 +52,13 @@ describe("inspector --cli against sbx mcp", () => {
 	function inspect(args: string[]): Promise<Run> {
 		// A hermetic home for the CLI: no profile, the file credential store.
 		const env = {
-			SBX_API_URL: api.url,
-			SBX_API_KEY: FAKE_TOKENS.oidc,
+			UMIAK_API_URL: api.url,
+			UMIAK_API_KEY: FAKE_TOKENS.oidc,
 			HOME: dir,
 			XDG_CONFIG_HOME: join(dir, "config"),
 			XDG_STATE_HOME: join(dir, "state"),
-			SBX_SYSTEM_CONFIG: join(dir, "system-config.json"),
-			SBX_CREDENTIAL_STORE: "file",
+			UMIAK_SYSTEM_CONFIG: join(dir, "system-config.json"),
+			UMIAK_CREDENTIAL_STORE: "file",
 		};
 		const argv = [
 			launcher(),

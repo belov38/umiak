@@ -10,14 +10,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // MachineOptions configure NewMachine.
 type MachineOptions struct {
-	// Handler serves the agent's non-CONNECT requests (sbx.agent.v1, test
+	// Handler serves the agent's non-CONNECT requests (umiak.agent.v1, test
 	// services such as the tunneltest/process double); nil answers 404.
 	Handler http.Handler
 }

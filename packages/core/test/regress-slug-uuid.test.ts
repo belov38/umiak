@@ -2,7 +2,11 @@
 // but findSandboxRow treats any UUID-shaped string as an id, so such a
 // sandbox was unreachable by its slug and a slug equal to another sandbox's
 // id resolved to that other sandbox. UUID-shaped slugs are now rejected.
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { slugProblem } from "../src/index.ts";
 import { expectCode, serviceEnv } from "./helpers/service.ts";

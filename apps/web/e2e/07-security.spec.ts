@@ -14,7 +14,7 @@ import {
 	test,
 } from "./fixtures.ts";
 
-const PROJECT = process.env.SBX_E2E_PROJECT ?? "sbx-e2e";
+const PROJECT = process.env.UMIAK_E2E_PROJECT ?? "umiak-e2e";
 
 function docker(args: string[]): {
 	ok: boolean;
@@ -43,7 +43,7 @@ test("forged identity headers before sign-in: oauth2-proxy sends to the login", 
 	const forged = {
 		"X-Auth-Request-Email": state.users.op.email,
 		"X-Auth-Request-User": state.users.op.id,
-		"X-Auth-Request-Groups": "sbx-operators",
+		"X-Auth-Request-Groups": "umiak-operators",
 		"X-Auth-Request-Preferred-Username": "op",
 	};
 	for (const path of ["/app", "/app/operator", "/admin", "/cms-api/users"]) {
@@ -53,7 +53,7 @@ test("forged identity headers before sign-in: oauth2-proxy sends to the login", 
 		});
 		expect(r.status, path).toBe(302);
 		expect(r.headers.get("location"), path).toContain(
-			"/realms/sbx/protocol/openid-connect/auth",
+			"/realms/umiak/protocol/openid-connect/auth",
 		);
 	}
 	// The api behind oauth2-proxy: no session, no answer from the api.
@@ -74,7 +74,7 @@ test("forged identity headers after sign-in grant nothing", async ({
 	const forged = {
 		"X-Auth-Request-Email": state.users.op.email,
 		"X-Auth-Request-User": state.users.op.id,
-		"X-Auth-Request-Groups": "sbx-operators",
+		"X-Auth-Request-Groups": "umiak-operators",
 	};
 	await alice.context.setExtraHTTPHeaders(forged);
 	const r = await alice.page.goto("/app/operator");
@@ -172,7 +172,7 @@ test("web answers 401 without the identity header and only oauth2-proxy reaches 
 	]);
 	expect(direct.ok).toBe(false);
 	expect(direct.out).toMatch(/HTTP\/1\.1 401/);
-	// From the sbx network (the backend's container) web does not resolve,
+	// From the umiak network (the backend's container) web does not resolve,
 	// while Keycloak on the same network does (the probe itself works).
 	const probe = (url: string) =>
 		docker([
@@ -185,7 +185,7 @@ test("web answers 401 without the identity header and only oauth2-proxy reaches 
 	const other = probe("http://web:3000/healthz");
 	expect(other.status, other.out).toBe(3);
 	expect(other.out).toMatch(/ENOTFOUND|EAI_AGAIN/);
-	const control = probe("http://keycloak:8080/realms/sbx");
+	const control = probe("http://keycloak:8080/realms/umiak");
 	expect(control.status, control.out).toBe(0);
 });
 
@@ -195,7 +195,7 @@ test("the web image has no dev auth proxy", () => {
 		"--rm",
 		"--entrypoint",
 		"sh",
-		"sbx-web:dev",
+		"umiak-web:dev",
 		"-c",
 		[
 			"find / -xdev \\( -name 'auth-proxy*' -o -path '*/apps/web/dev' -o -path '*/apps/web/e2e' \\) -printf 'BAD:%p\\n' 2>/dev/null",

@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 
-root = Path.home() / "boat-dev-clone"
+root = Path.home() / "umiak"
 allowed = set(sys.stdin.read().splitlines())
 if "CLAUDE.md" not in allowed or "infra/dev-cp/prune.py" not in allowed:
     raise SystemExit("invalid deployment file inventory")

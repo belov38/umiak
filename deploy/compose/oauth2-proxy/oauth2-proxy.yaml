@@ -1,7 +1,7 @@
 # oauth2-proxy (alpha config) of the local stack: browser sessions in front
 # of the proxied api listener (S7 §7.4, §17.6; architecture §10).
 #   /api/*      -> api:8081 with /api cut off (http://localhost:4180/api/v1/me)
-#   /sbx-auth/* -> api:8081 unchanged (port SSO, S7 §7.7)
+#   /umiak-auth/* -> api:8081 unchanged (port SSO, S7 §7.7)
 #   /*          -> web:3000, the rest (S8: /app, /admin, /cms-api)
 # oauth2-proxy tries the longest path first, so `/` is the fallback.
 # Cookie, session and redirect settings are flags and OAUTH2_PROXY_*
@@ -22,12 +22,12 @@ upstreamConfig:
       flushInterval: 100ms
       passHostHeader: true
       proxyWebSockets: true
-    - id: sbx-auth
-      path: /sbx-auth/
+    - id: umiak-auth
+      path: /umiak-auth/
       uri: http://api:8081
       timeout: 660s
       passHostHeader: true
-    # web checks Origin against SBX_APP_ORIGIN and Next compares it with the
+    # web checks Origin against UMIAK_APP_ORIGIN and Next compares it with the
     # Host of server actions: keep the browser's Host.
     - id: web
       path: /
@@ -36,7 +36,7 @@ upstreamConfig:
       proxyWebSockets: true
 
 # The api trusts these headers on :8081, which is meant for oauth2-proxy
-# alone (S7 §7.1). In this dev stack any container of the sbx network can
+# alone (S7 §7.1). In this dev stack any container of the umiak network can
 # reach it (accepted for dev); the NetworkPolicy of S12 closes it in prod.
 # web trusts them too; it is only on the web-internal network with
 # oauth2-proxy (and postgres), so no other container can reach it.
@@ -62,20 +62,20 @@ providers:
   - id: keycloak
     provider: keycloak-oidc
     clientID: oauth2-proxy
-    clientSecretFile: /run/sbx-secrets/client-secret
+    clientSecretFile: /run/umiak-secrets/client-secret
     scope: openid email profile groups
     # The browser goes to the public Keycloak address: the issuer, from the
-    # SBX_OIDC_ISSUER environment variable (oauth2-proxy substitutes
+    # UMIAK_OIDC_ISSUER environment variable (oauth2-proxy substitutes
     # environment references in this file). oauth2-proxy itself talks to
     # Keycloak inside the compose network.
-    loginURL: ${SBX_OIDC_ISSUER}/protocol/openid-connect/auth
-    redeemURL: http://keycloak:8080/realms/sbx/protocol/openid-connect/token
-    profileURL: http://keycloak:8080/realms/sbx/protocol/openid-connect/userinfo
-    validateURL: http://keycloak:8080/realms/sbx/protocol/openid-connect/userinfo
+    loginURL: ${UMIAK_OIDC_ISSUER}/protocol/openid-connect/auth
+    redeemURL: http://keycloak:8080/realms/umiak/protocol/openid-connect/token
+    profileURL: http://keycloak:8080/realms/umiak/protocol/openid-connect/userinfo
+    validateURL: http://keycloak:8080/realms/umiak/protocol/openid-connect/userinfo
     oidcConfig:
-      issuerURL: ${SBX_OIDC_ISSUER}
+      issuerURL: ${UMIAK_OIDC_ISSUER}
       skipDiscovery: true
-      jwksURL: http://keycloak:8080/realms/sbx/protocol/openid-connect/certs
+      jwksURL: http://keycloak:8080/realms/umiak/protocol/openid-connect/certs
       # The session user (X-Auth-Request-User) is the token's `sub`, the same
       # claim the api reads from a CLI token (S7 §7.10). Do not set
       # userIDClaim: oauth2-proxy then also copies it into the email.

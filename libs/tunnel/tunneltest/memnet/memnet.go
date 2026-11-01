@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/transport"
 )
 
 const (

@@ -42,7 +42,7 @@ interface Doc {
 }
 
 describe("openapi/v1.json", () => {
-	it("equals the generated document (run `pnpm --filter @sbx/api openapi`)", () => {
+	it("equals the generated document (run `pnpm --filter @umiak/api openapi`)", () => {
 		expect(generated()).toBe(COMMITTED);
 	});
 
@@ -66,7 +66,7 @@ describe("openapi/v1.json", () => {
 		expect(doc.components.securitySchemes.teamKey).toMatchObject({
 			type: "http",
 			scheme: "bearer",
-			bearerFormat: "sbx_",
+			bearerFormat: "umiak_",
 		});
 		expect(doc.components.schemas.Error).toBeDefined();
 	});
@@ -125,11 +125,11 @@ describe("openapi/v1.json", () => {
 		expect(anonymous.sort()).toEqual(routes.sort());
 	});
 
-	it("the PTY WebSocket is a GET with 101 and x-sbx-websocket (§15.1)", () => {
+	it("the PTY WebSocket is a GET with 101 and x-umiak-websocket (§15.1)", () => {
 		const op = doc.paths["/v1/sandboxes/{sandbox}/ptys/{command}/connect"]?.get;
 		expect(op?.operationId).toBe("ptys.connect");
 		expect(Object.keys(op?.responses as object)).toContain("101");
-		expect(op?.["x-sbx-websocket"]).toEqual({ subprotocol: "sbx.pty.v1" });
+		expect(op?.["x-umiak-websocket"]).toEqual({ subprotocol: "umiak.pty.v1" });
 	});
 
 	it("every pattern is a JSON Schema regex (ECMA-262 source, no /flags suffix)", () => {
@@ -178,7 +178,7 @@ describe("openapi/v1.json", () => {
 			build: "dev",
 			appUrl: "https://app.x.test",
 			apiUrl: "https://api.x.test",
-			sbxDomain: "x.test",
+			umiakDomain: "x.test",
 			oidc: null,
 			ssh: { host: "ssh.x.test", port: 22, hostKeys: [] },
 			minCliVersion: null,

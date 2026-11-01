@@ -3,8 +3,8 @@ package routes
 import (
 	"net/http"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
 )
 
 // Decide maps a route to the gateway's action. It returns ok=true when the
@@ -15,14 +15,14 @@ import (
 // is treated as "ready" and "resuming" as "starting" for compatibility.
 // A deleted sandbox answers 404 whatever else the route says; a blocked route
 // is refused in every other state.
-func Decide(r cpapi.Route) (ok bool, e sbxerr.Error) {
+func Decide(r cpapi.Route) (ok bool, e umiakerr.Error) {
 	switch r.SandboxState {
 	case "deleting", "deleted":
-		return false, sbxerr.Error{Status: http.StatusNotFound, Code: sbxerr.CodeRouteNotFound}
+		return false, umiakerr.Error{Status: http.StatusNotFound, Code: umiakerr.CodeRouteNotFound}
 	}
 	if r.Blocked {
-		return false, sbxerr.Error{
-			Status: http.StatusForbidden, Code: sbxerr.CodeRouteBlocked,
+		return false, umiakerr.Error{
+			Status: http.StatusForbidden, Code: umiakerr.CodeRouteBlocked,
 			Message: blockMessage(r.BlockReason),
 		}
 	}
@@ -32,21 +32,21 @@ func Decide(r cpapi.Route) (ok bool, e sbxerr.Error) {
 			// The state says the machine exists but api sent none.
 			return false, unavailable()
 		}
-		return true, sbxerr.Error{}
+		return true, umiakerr.Error{}
 	case "creating", "starting", "resuming":
-		return false, sbxerr.Error{
-			Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxStarting,
+		return false, umiakerr.Error{
+			Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxStarting,
 			Retryable: true, RetryAfter: 5, Refresh: true,
 		}
 	case "stopping", "stopped":
-		return false, sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxStopped}
+		return false, umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxStopped}
 	default:
 		return false, unavailable()
 	}
 }
 
-func unavailable() sbxerr.Error {
-	return sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxUnavailable}
+func unavailable() umiakerr.Error {
+	return umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxUnavailable}
 }
 
 // blockMessage returns the text for a block reason; empty selects the

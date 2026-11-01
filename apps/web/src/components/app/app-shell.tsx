@@ -1,6 +1,6 @@
 "use client";
 // The common frame of /app (S8 §9.3):
-// sbx  [Team: <name> v]  Sandboxes Snapshots Environments Keys Team
+// umiak  [Team: <name> v]  Sandboxes Snapshots Environments Keys Team
 //                                 [Operator] [Admin]   <email> (v)
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import Link from "next/link";
@@ -62,7 +62,7 @@ export function AppShell({
 			<header className="border-b">
 				<div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2">
 					<Link href="/app" className="font-semibold tracking-tight">
-						sbx
+						umiak
 					</Link>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
@@ -149,7 +149,7 @@ export function AppShell({
 									</TooltipTrigger>
 									<TooltipContent side="left" className="max-w-64">
 										Signs you out of the single sign-on session too: the CLI
-										will ask for `sbx login` again.
+										will ask for `umiak login` again.
 									</TooltipContent>
 								</Tooltip>
 							</DropdownMenuContent>

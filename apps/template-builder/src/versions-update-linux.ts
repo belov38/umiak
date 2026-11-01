@@ -260,7 +260,7 @@ async function resolveChrome(fetch: Fetch): Promise<Versions["chrome"]> {
 	};
 }
 
-/** Everything `versions.toml` pins except `sbx`, which has no release source yet. */
+/** Everything `versions.toml` pins except `umiak`, which has no release source yet. */
 export async function resolveLatest(
 	fetch: Fetch,
 	now: Date,
@@ -346,7 +346,7 @@ export function formatVersionsToml(v: Versions): string {
 			]),
 		);
 	}
-	if (v.sbx) sections.push(table("sbx", [["cli", inline(v.sbx.cli)]]));
+	if (v.umiak) sections.push(table("umiak", [["cli", inline(v.umiak.cli)]]));
 	return `${UPDATE_HEADER}\n\n${sections.join("\n\n")}\n`;
 }
 
@@ -354,7 +354,7 @@ export function formatVersionsToml(v: Versions): string {
 
 type Section = Record<string, unknown>;
 
-/** Re-resolves every linux pin; `[sbx]` and `[desktop]` are kept from the previous file. */
+/** Re-resolves every linux pin; `[umiak]` and `[desktop]` are kept from the previous file. */
 export async function updateLinuxVersions(
 	file: string,
 	prev: Section | null,
@@ -368,12 +368,12 @@ export async function updateLinuxVersions(
 		npmNames(DEFAULT_NPM_PACKAGES, prev?.npm),
 	);
 
-	let sbx: Versions["sbx"];
+	let umiak: Versions["umiak"];
 	try {
-		sbx = versionsSchema.shape.sbx.parse(prev?.sbx);
+		umiak = versionsSchema.shape.umiak.parse(prev?.umiak);
 	} catch (err) {
 		throw new Error(
-			`${file}: [sbx]: ${err instanceof z.ZodError ? z.prettifyError(err) : String(err)}`,
+			`${file}: [umiak]: ${err instanceof z.ZodError ? z.prettifyError(err) : String(err)}`,
 		);
 	}
 	let desktop: Versions["desktop"];
@@ -386,7 +386,7 @@ export async function updateLinuxVersions(
 	}
 	const next: Versions = {
 		...resolved,
-		...(sbx ? { sbx } : {}),
+		...(umiak ? { umiak } : {}),
 		...(desktop ? { desktop } : {}),
 	};
 	return { text: formatVersionsToml(next), changes: diffVersions(prev, next) };

@@ -1,4 +1,4 @@
-// AgentPort over the guest agent's Connect API (sbx.agent.v1 System service,
+// AgentPort over the guest agent's Connect API (umiak.agent.v1 System service,
 // S3 §8.1). Calls go through `AgentClient.transport(machineId)`: the client
 // finds the gateway instance that owns the machine's tunnel (S2 §8.4) and
 // follows 421/503 answers. Request bodies carry secrets: never log them.
@@ -10,11 +10,11 @@ import {
 	AgentUnavailableError,
 	classify,
 	HEADER_REQUEST_ID,
-} from "@sbx/agent-client";
-import type { SecretFile } from "@sbx/core";
-import { ErrorDetailSchema } from "@sbx/proto";
-import { ClaimReason, Desktop, System } from "@sbx/proto/agent/v1";
-import type { QuiesceHook } from "@sbx/pve";
+} from "@umiak/agent-client";
+import type { SecretFile } from "@umiak/core";
+import { ErrorDetailSchema } from "@umiak/proto";
+import { ClaimReason, Desktop, System } from "@umiak/proto/agent/v1";
+import type { QuiesceHook } from "@umiak/pve";
 import { QuiesceFailed } from "../ops/snapshot-step.ts";
 import {
 	type AgentActivity,
@@ -135,7 +135,7 @@ export class ConnectAgentPort implements AgentPort {
 	}
 
 	/**
-	 * Runs one System call. `requestId` goes in `Sbx-Request-Id` (mutating
+	 * Runs one System call. `requestId` goes in `Umiak-Request-Id` (mutating
 	 * calls only). A failure is logged without the request and mapped by
 	 * `toPortError`.
 	 */

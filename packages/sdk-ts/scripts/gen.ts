@@ -1,5 +1,5 @@
 // Generates src/gen/v1.d.ts from the committed OpenAPI document of apps/api.
-//   pnpm --filter @sbx/sdk gen
+//   pnpm --filter @umiak/sdk gen
 //
 // Open enums (S7 §5.9): every schema marked `x-extensible-enum: true` becomes
 // `"a" | "b" | (string & {})` instead of a closed union. Known values still

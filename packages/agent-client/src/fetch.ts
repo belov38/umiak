@@ -1,5 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ErrorDetailSchema } from "@sbx/proto";
+import { ErrorDetailSchema } from "@umiak/proto";
 import {
 	CODE_AGENT_UNAVAILABLE,
 	CODE_BAD_AGENT_RESPONSE,
@@ -296,7 +296,7 @@ export async function readBodyCapped(
 const maxUploadOffset = (1n << 63n) - 1n;
 
 /**
- * Parses an Sbx-Upload-Offset value. It comes from the agent: only 1 to 20
+ * Parses an Umiak-Upload-Offset value. It comes from the agent: only 1 to 20
  * ASCII digits up to 2^63-1 are accepted, anything else (signs, spaces,
  * exponents, a list, an absent header) yields undefined.
  */

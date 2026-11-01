@@ -21,17 +21,17 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/process"
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/memnet"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/process"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -67,7 +67,7 @@ func fastTiming() gateway.Timing {
 }
 
 func testLogger(args ...any) *slog.Logger {
-	if os.Getenv("SBX_TEST_LOG") != "" {
+	if os.Getenv("UMIAK_TEST_LOG") != "" {
 		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With(args...)
 	}
 	return slog.New(slog.DiscardHandler)
@@ -126,20 +126,20 @@ type env struct {
 }
 
 // newEnv creates the environment. The seed of the scenario's random choices
-// is SBX_E2E_SEED or random, and is logged when the test fails.
+// is UMIAK_E2E_SEED or random, and is logged when the test fails.
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	seed := mrand.Uint64()
-	if s := os.Getenv("SBX_E2E_SEED"); s != "" {
+	if s := os.Getenv("UMIAK_E2E_SEED"); s != "" {
 		v, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
-			t.Fatalf("SBX_E2E_SEED: %v", err)
+			t.Fatalf("UMIAK_E2E_SEED: %v", err)
 		}
 		seed = v
 	}
 	t.Cleanup(func() {
 		if t.Failed() {
-			t.Logf("scenario seed %d (rerun with SBX_E2E_SEED=%d)", seed, seed)
+			t.Logf("scenario seed %d (rerun with UMIAK_E2E_SEED=%d)", seed, seed)
 		}
 	})
 	pool, _ := pgtest.New(t)
@@ -188,7 +188,7 @@ func (e *env) startGateway(mod func(*gateway.Config)) (*gw, error) {
 		Store:                  e.store,
 		ServiceTokens:          gateway.TokenSet{"api": {serviceToken}},
 		Sink:                   e.sink,
-		AllowedServicePrefixes: []string{"sbx.testing.v1."},
+		AllowedServicePrefixes: []string{"umiak.testing.v1."},
 		Timing:                 fastTiming(),
 		HTTP2:                  h2.ClientConfig{PingIdle: 200 * time.Millisecond, PingTimeout: 200 * time.Millisecond},
 		Logger:                 testLogger("gw", name),
@@ -377,7 +377,7 @@ func retryable(err error) bool {
 	}
 }
 
-// movedURL returns Sbx-Instance-Url of a 421 answer to a unary call.
+// movedURL returns Umiak-Instance-Url of a 421 answer to a unary call.
 func movedURL(err error) string {
 	var ce *connect.Error
 	if errors.As(err, &ce) {

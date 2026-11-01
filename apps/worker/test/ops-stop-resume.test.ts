@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { nodeRam, stepRequestId } from "@sbx/core";
-import { withTx } from "@sbx/db";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { nodeRam, stepRequestId } from "@umiak/core";
+import { withTx } from "@umiak/db";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
 import {

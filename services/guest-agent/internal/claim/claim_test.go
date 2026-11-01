@@ -16,15 +16,15 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 const (
@@ -140,14 +140,14 @@ func wantHostnames(names ...string) []string {
 }
 
 // claimEnvHas reports whether the non-secret claim env has key=value: in
-// /etc/sbx/env on Linux. Windows has no such file (the env socket serves
+// /etc/umiak/env on Linux. Windows has no such file (the env socket serves
 // the EnvBuilder), so there the EnvBuilder is asked.
 func (h *harness) claimEnvHas(key, value string) bool {
 	h.t.Helper()
-	if h.l.SbxEnvFile == "" {
+	if h.l.UmiakEnvFile == "" {
 		return slices.Contains(h.m.EnvBuilder().Build(testUser(), &agentv1.CommandSpec{}), key+"="+value)
 	}
-	return strings.Contains(h.read(h.l.SbxEnvFile), key+`="`+value+`"`+"\n")
+	return strings.Contains(h.read(h.l.UmiakEnvFile), key+`="`+value+`"`+"\n")
 }
 
 // secretEnvFile returns the content of secrets/env, or "" where the
@@ -183,9 +183,9 @@ func (h *harness) mode(path string) fs.FileMode {
 
 func fullRequest() *agentv1.ClaimRequest {
 	return &agentv1.ClaimRequest{
-		SandboxId:  "sbx_1",
+		SandboxId:  "umiak_1",
 		Hostname:   "my-box",
-		PortDomain: "sbx.example.com",
+		PortDomain: "umiak.example.com",
 		Env:        map[string]string{"FOO": "bar"},
 		SecretEnv:  map[string]string{"TOKEN": secretEnvValue},
 		SecretFiles: []*agentv1.SecretFile{{
@@ -232,17 +232,17 @@ func TestClaimAppliesAll(t *testing.T) {
 
 	for _, kv := range [][2]string{
 		{"FOO", "bar"},
-		{"SBX", "1"},
-		{"SBX_SANDBOX_ID", "sbx_1"},
-		{"SBX_PORT_DOMAIN", "sbx.example.com"},
-		{"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", ".sbx.example.com"},
+		{"UMIAK", "1"},
+		{"UMIAK_SANDBOX_ID", "umiak_1"},
+		{"UMIAK_PORT_DOMAIN", "umiak.example.com"},
+		{"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", ".umiak.example.com"},
 	} {
 		if !h.claimEnvHas(kv[0], kv[1]) {
 			t.Errorf("claim env lacks %s=%s", kv[0], kv[1])
 		}
 	}
-	if h.l.SbxEnvFile != "" && strings.Contains(h.read(h.l.SbxEnvFile), secretEnvValue) {
-		t.Error("/etc/sbx/env contains a secret")
+	if h.l.UmiakEnvFile != "" && strings.Contains(h.read(h.l.UmiakEnvFile), secretEnvValue) {
+		t.Error("/etc/umiak/env contains a secret")
 	}
 
 	// Windows: the secret env stays in memory, the ACLs of the secret
@@ -277,7 +277,7 @@ func TestClaimAppliesAll(t *testing.T) {
 	}
 
 	applied := h.rec.Of(events.TypeClaimApplied)
-	if len(applied) != 1 || applied[0].(*agentv1.ClaimApplied).GetSandboxId() != "sbx_1" {
+	if len(applied) != 1 || applied[0].(*agentv1.ClaimApplied).GetSandboxId() != "umiak_1" {
 		t.Errorf("claim.applied events = %v", applied)
 	}
 	var claimReady bool
@@ -295,7 +295,7 @@ func TestClaimAppliesAll(t *testing.T) {
 	}
 
 	info := h.m.ClaimInfo()
-	if info.GetSandboxId() != "sbx_1" || info.GetHostname() != "my-box" ||
+	if info.GetSandboxId() != "umiak_1" || info.GetHostname() != "my-box" ||
 		!slices.Equal(info.GetSecretEnvKeys(), []string{"TOKEN"}) ||
 		!slices.Equal(info.GetSecretFileNames(), []string{"key.pem"}) {
 		t.Errorf("claim info = %v", info)
@@ -326,7 +326,7 @@ func TestClaimAppliesAll(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetClaim = %v %v", ok, err)
 	}
-	if c.SandboxID != "sbx_1" || c.SecretsDigest == "" || c.RequestHash == "" {
+	if c.SandboxID != "umiak_1" || c.SecretsDigest == "" || c.RequestHash == "" {
 		t.Errorf("stored claim = %+v", c)
 	}
 }
@@ -387,7 +387,7 @@ func TestClaimOtherContentAlreadyClaimed(t *testing.T) {
 
 	// RESUME for another sandbox is refused too.
 	resume := fullRequest()
-	resume.SandboxId = "sbx_2"
+	resume.SandboxId = "umiak_2"
 	resume.Reason = agentv1.ClaimReason_CLAIM_REASON_RESUME
 	_, err = h.m.Claim(ctx, resume)
 	wantDetail(t, err, connect.CodeFailedPrecondition, errs.AlreadyClaimed)
@@ -524,14 +524,14 @@ func TestUpdatesBeforeClaim(t *testing.T) {
 
 func TestStartCreatesFiles(t *testing.T) {
 	h := newHarness(t)
-	// Windows has no /etc/sbx/env and no cmd-spec/, and keeps the secret
+	// Windows has no /etc/umiak/env and no cmd-spec/, and keeps the secret
 	// env in memory.
 	if got := h.secretEnvFile(); got != "" {
 		t.Errorf("secrets/env = %q, want empty", got)
 	}
-	if h.l.SbxEnvFile != "" {
-		if got := h.read(h.l.SbxEnvFile); got != "" {
-			t.Errorf("/etc/sbx/env = %q, want empty", got)
+	if h.l.UmiakEnvFile != "" {
+		if got := h.read(h.l.UmiakEnvFile); got != "" {
+			t.Errorf("/etc/umiak/env = %q, want empty", got)
 		}
 	}
 	if h.l.CmdSpecDir != "" {
@@ -750,7 +750,7 @@ func TestLinkPathOccupied(t *testing.T) {
 				mustWrite(t, link, "user data")
 			},
 			check: func(t *testing.T, link string) {
-				if b, err := os.ReadFile(link + ".sbx-orig"); err != nil || string(b) != "user data" {
+				if b, err := os.ReadFile(link + ".umiak-orig"); err != nil || string(b) != "user data" {
 					t.Errorf("aside = %q (%v)", b, err)
 				}
 			},
@@ -759,13 +759,13 @@ func TestLinkPathOccupied(t *testing.T) {
 			name: "second aside name when taken",
 			prepare: func(t *testing.T, link, _ string) {
 				mustWrite(t, link, "new")
-				mustWrite(t, link+".sbx-orig", "old")
+				mustWrite(t, link+".umiak-orig", "old")
 			},
 			check: func(t *testing.T, link string) {
-				if b, _ := os.ReadFile(link + ".sbx-orig"); string(b) != "old" {
+				if b, _ := os.ReadFile(link + ".umiak-orig"); string(b) != "old" {
 					t.Errorf("first aside changed: %q", b)
 				}
-				m, _ := filepath.Glob(link + ".sbx-orig.*")
+				m, _ := filepath.Glob(link + ".umiak-orig.*")
 				if len(m) != 1 {
 					t.Fatalf("aside files = %v", m)
 				}
@@ -784,7 +784,7 @@ func TestLinkPathOccupied(t *testing.T) {
 				if b, err := os.ReadFile(filepath.Join(link, "inner")); err != nil || string(b) != "x" {
 					t.Errorf("dir content = %q (%v)", b, err)
 				}
-				if _, err := os.Lstat(link + ".sbx-orig"); !errors.Is(err, fs.ErrNotExist) {
+				if _, err := os.Lstat(link + ".umiak-orig"); !errors.Is(err, fs.ErrNotExist) {
 					t.Errorf("directory moved aside (%v)", err)
 				}
 			},
@@ -798,7 +798,7 @@ func TestLinkPathOccupied(t *testing.T) {
 				}
 			},
 			check: func(t *testing.T, link string) {
-				if _, err := os.Lstat(link + ".sbx-orig"); !errors.Is(err, fs.ErrNotExist) {
+				if _, err := os.Lstat(link + ".umiak-orig"); !errors.Is(err, fs.ErrNotExist) {
 					t.Errorf("symlink moved aside (%v)", err)
 				}
 			},
@@ -812,7 +812,7 @@ func TestLinkPathOccupied(t *testing.T) {
 				}
 			},
 			check: func(t *testing.T, link string) {
-				if _, err := os.Lstat(link + ".sbx-orig"); !errors.Is(err, fs.ErrNotExist) {
+				if _, err := os.Lstat(link + ".umiak-orig"); !errors.Is(err, fs.ErrNotExist) {
 					t.Errorf("symlink moved aside (%v)", err)
 				}
 			},

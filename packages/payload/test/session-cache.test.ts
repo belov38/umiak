@@ -1,14 +1,18 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import type { Payload } from "payload";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	authenticateRequest,
-	closeSbxPayload,
+	closeUmiakPayload,
 	flushesSessions,
-	getSbxPayload,
-	migrateSbxPayload,
+	getUmiakPayload,
+	migrateUmiakPayload,
 	SESSION_LISTENER_APPLICATION_NAME,
 	SessionCache,
 	sessionCacheKey,
@@ -90,7 +94,7 @@ describe("SessionCache", () => {
 		expect(k).toMatch(/^[0-9a-f]{64}$/);
 	});
 
-	it("sbx_identity payloads that flush", () => {
+	it("umiak_identity payloads that flush", () => {
 		expect(flushesSessions(null)).toBe(true);
 		expect(flushesSessions("*")).toBe(true);
 		expect(flushesSessions("users:1")).toBe(true);
@@ -119,7 +123,7 @@ describe.skipIf(skipPg())(
 			});
 
 		const notify = (payloadText: string) =>
-			t.pool.query("SELECT pg_notify('sbx_identity', $1)", [payloadText]);
+			t.pool.query("SELECT pg_notify('umiak_identity', $1)", [payloadText]);
 
 		/** Waits until the cache is flushed (the notification went through LISTEN). */
 		async function flushed(): Promise<void> {
@@ -132,18 +136,21 @@ describe.skipIf(skipPg())(
 
 		beforeAll(async () => {
 			t = await createTestDatabase({ migrated: false, max: 4 });
-			payload = await getSbxPayload({
+			payload = await getUmiakPayload({
 				...testOptions(t.url),
 				poolMax: 6,
 				sessionCache: {},
 			});
-			await migrateSbxPayload(payload);
+			await migrateUmiakPayload(payload);
 			plainDb = await createTestDatabase({ migrated: false, max: 2 });
-			plain = await getSbxPayload({ ...testOptions(plainDb.url), poolMax: 4 });
+			plain = await getUmiakPayload({
+				...testOptions(plainDb.url),
+				poolMax: 4,
+			});
 		});
 		afterAll(async () => {
-			if (t) await closeSbxPayload(t.url);
-			if (plainDb) await closeSbxPayload(plainDb.url);
+			if (t) await closeUmiakPayload(t.url);
+			if (plainDb) await closeUmiakPayload(plainDb.url);
 			await t?.drop();
 			await plainDb?.drop();
 		});
@@ -226,12 +233,12 @@ describe.skipIf(skipPg())(
 		it("closing the instance closes the listener", async () => {
 			const db = await createTestDatabase({ migrated: false, max: 2 });
 			try {
-				const p = await getSbxPayload({
+				const p = await getUmiakPayload({
 					...testOptions(db.url),
 					poolMax: 4,
 					sessionCache: {},
 				});
-				await closeSbxPayload(db.url);
+				await closeUmiakPayload(db.url);
 				expect(sessionCacheOf(p)).toBe(null);
 				const c = new pg.Client({ connectionString: db.url });
 				await c.connect();

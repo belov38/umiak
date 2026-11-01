@@ -1,6 +1,6 @@
-import { createPublicApp } from "@sbx/api";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import { Sbx } from "@sbx/sdk";
+import { createPublicApp } from "@umiak/api";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
+import { Umiak } from "@umiak/sdk";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { type ApiWorld, apiWorld } from "../../api/test/helpers/world.ts";
 import { createLogger } from "../src/log.ts";
@@ -39,14 +39,14 @@ it("SDK facade and computer tools use the real public desktop API with a fake gu
 	});
 	const h = w.harness({ deps: { config } });
 	const app = createPublicApp(h.deps);
-	const sbx = new Sbx({
+	const umiak = new Umiak({
 		baseUrl: "http://desktop-api.test",
 		apiKey: w.secret,
 		env: {},
 		fetch: async (request) => app.fetch(request as Request),
 	});
 	const seeded = await w.seed({ state: "ready" });
-	const sb = await sbx.sandboxes.get(seeded.slug);
+	const sb = await umiak.sandboxes.get(seeded.slug);
 	await sb.desktop.clipboardSet("SDK текст");
 	expect((await sb.desktop.clipboardGet()).text).toBe("SDK текст");
 	expect((await sb.desktop.screenshot({ format: "png" })).screen).toEqual({
@@ -56,7 +56,7 @@ it("SDK facade and computer tools use the real public desktop API with a fake gu
 	connection = await connectInMemory(
 		createServer({
 			tools: DESKTOP_TOOLS,
-			sbx: () => sbx,
+			umiak: () => umiak,
 			transport: "stdio",
 			log: createLogger({ level: "silent" }),
 		}),
@@ -94,7 +94,7 @@ it("computer tools surface an operator block as a non-retryable error", async ()
 		},
 	});
 	const app = createPublicApp(w.harness({ deps: { config } }).deps);
-	const sbx = new Sbx({
+	const umiak = new Umiak({
 		baseUrl: "http://desktop-api.test",
 		apiKey: w.secret,
 		env: {},
@@ -107,7 +107,7 @@ it("computer tools surface an operator block as a non-retryable error", async ()
 	const blocked = await connectInMemory(
 		createServer({
 			tools: DESKTOP_TOOLS,
-			sbx: () => sbx,
+			umiak: () => umiak,
 			transport: "stdio",
 			log: createLogger({ level: "silent" }),
 		}),

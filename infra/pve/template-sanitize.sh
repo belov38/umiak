@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# boat-dev-clone S1 PoC: sanitize the root filesystem of template 599 offline, before it ever boots.
+# umiak S1 PoC: sanitize the root filesystem of template 599 offline, before it ever boots.
 # 599 is a thin snapshot of Ilia's personal dev template 9000, so this removes Tailscale, the personal
 # account with all its data, and build-time state. Runs on the Proxmox host as root:
 #   template-sanitize.sh <mounted root>
@@ -61,18 +61,18 @@ find "$R/var/log" -type f -exec truncate -s 0 {} +
 # The build VM's netplan file is bound to its MAC. cloud-init writes a new one from ipconfig0;
 # the fallback below gives any en* NIC DHCP if cloud-init does not.
 rm -f "$R/etc/netplan/50-cloud-init.yaml"
-cat >"$R/etc/netplan/90-sbx-fallback.yaml" <<'EOF'
-# boat-dev-clone S1 PoC: DHCP on any virtio NIC regardless of MAC.
+cat >"$R/etc/netplan/90-umiak-fallback.yaml" <<'EOF'
+# umiak S1 PoC: DHCP on any virtio NIC regardless of MAC.
 network:
   version: 2
   ethernets:
-    sbx-fallback:
+    umiak-fallback:
       match:
         name: "en*"
       dhcp4: true
       dhcp-identifier: mac
 EOF
-chmod 600 "$R/etc/netplan/90-sbx-fallback.yaml"
+chmod 600 "$R/etc/netplan/90-umiak-fallback.yaml"
 
 # 4. Units that distort boot timings or change the image in the background.
 for u in systemd-networkd-wait-online.service unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer; do

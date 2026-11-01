@@ -11,14 +11,14 @@
 // with an `idpSubject`, nothing changes and the pass reports an abort.
 //
 // Changes go through the Local API with a req in a transaction per user, so
-// the `users` hooks send `NOTIFY sbx_identity` and `sbx_ssh_revoke` in it.
+// the `users` hooks send `NOTIFY umiak_identity` and `umiak_ssh_revoke` in it.
 // The user row is locked and checked again before the write: a concurrent
 // operator deactivation or IdP rebinding wins. A deactivated user gets a
 // `team-notices` row `member_deactivated` in every team they are a member
 // of, with the team's non-revoked keys they created (keys stay live, owners
 // decide, S7 §7.2); an unacknowledged notice for the same (team, user) is
 // not duplicated.
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import type { Payload, PayloadRequest } from "payload";
 import { inTransaction, rows, sql, tbl } from "../identity/db.ts";
 import type { KeycloakAdminClient } from "./keycloak.ts";

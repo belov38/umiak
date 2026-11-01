@@ -1,7 +1,7 @@
 // What the sandbox page offers in a state (S8 §9.6) and why something is
 // off. A blocked sandbox keeps reads, stop and delete only (S8 §17.1 C3);
 // the API refuses the rest with 403 sandbox_blocked anyway.
-import type { SandboxData } from "@sbx/sdk";
+import type { SandboxData } from "@umiak/sdk";
 import { canDelete, canFork, canResume, canStop } from "@/lib/sandboxes";
 
 export type Gate = { ok: true } | { ok: false; reason: string };

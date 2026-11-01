@@ -36,7 +36,11 @@ const METHODS = ["get", "put", "post", "delete", "patch", "head"] as const;
 
 /** Response headers that the real API always sends (v1.json lacks `required`). */
 const ALWAYS_HEADERS: Record<string, string[]> = {
-	"commands.output": ["Sbx-Offset", "Sbx-Next-Offset", "Sbx-Available-From"],
+	"commands.output": [
+		"Umiak-Offset",
+		"Umiak-Next-Offset",
+		"Umiak-Available-From",
+	],
 };
 
 export interface MatchedOperation {

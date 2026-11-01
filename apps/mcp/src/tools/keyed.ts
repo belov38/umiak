@@ -1,7 +1,7 @@
 // Idempotency of the tools that create things (S11 7.4, 7.5): the model-facing
 // key, the key sent to the API, and the "outcome unknown" error.
 import { randomUUID } from "node:crypto";
-import { SbxError } from "@sbx/sdk";
+import { UmiakError } from "@umiak/sdk";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
 import { apiIdempotencyKey } from "../idempotency.ts";
@@ -34,7 +34,7 @@ export function keyFor(
  */
 export function outcomeUnknown(err: unknown, ctx: ToolContext): boolean {
 	if (ctx.deadline.cancelled()) return false;
-	if (err instanceof SbxError) return err.status === 0;
+	if (err instanceof UmiakError) return err.status === 0;
 	return ctx.deadline.expired();
 }
 

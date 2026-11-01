@@ -15,7 +15,7 @@ import {
 	StorageFullError,
 	ThawFailedError,
 	TracesRemainError,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { QuiesceFailed } from "../ops/snapshot-step.ts";
 import { isRetryable } from "../ports.ts";
 
@@ -66,7 +66,7 @@ export class InfraError extends Error {
 
 const REDACTED = "<redacted>";
 
-// base64("sbx1:") starts every encoded serial; the raw payload starts with "sbx1:".
+// base64("umiak1:") starts every encoded serial; the raw payload starts with "umiak1:".
 const SECRET_PATTERNS: [RegExp, string][] = [
 	// "smbios1": "..." inside a JSON errors object.
 	[/("smbios1"\s*:\s*")(?:[^"\\]|\\.)*"/g, `$1${REDACTED}"`],
@@ -74,7 +74,7 @@ const SECRET_PATTERNS: [RegExp, string][] = [
 	[/smbios1=[^\s"']*/g, `smbios1=${REDACTED}`],
 	[/serial=[^\s,"'&]*/g, `serial=${REDACTED}`],
 	[/c2J4MTo[A-Za-z0-9+/_-]*={0,2}/g, REDACTED],
-	[/sbx1:[^\s,"']*/g, REDACTED],
+	[/umiak1:[^\s,"']*/g, REDACTED],
 ];
 
 /** Removes SMBIOS serial values (raw and base64) and smbios1 strings from a text. */
@@ -176,7 +176,7 @@ export function classifyInfraError(err: unknown, op?: InfraOp): Error {
 	if (err instanceof StorageFullError) return transient("storage_full");
 	if (err instanceof AllocatorError) return transient(err.code);
 	if (err instanceof NodeOpsError)
-		// busy: sbx-node found a file it guards mid-rewrite (dnsmasq leases).
+		// busy: umiak-node found a file it guards mid-rewrite (dnsmasq leases).
 		return transient(err.code === "busy" ? "node_busy" : "node_ops_error");
 	return transient("infra_error");
 }

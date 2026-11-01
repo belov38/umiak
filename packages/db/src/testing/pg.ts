@@ -1,5 +1,5 @@
-// Test databases without vitest (`@sbx/db/testing/pg`): the template
-// database sbx_tmpl migrated from db/migrations, copies of it, and their
+// Test databases without vitest (`@umiak/db/testing/pg`): the template
+// database umiak_tmpl migrated from db/migrations, copies of it, and their
 // removal. createTestDatabase (vitest) and test servers run outside vitest
 // (packages/sdk-py/tests/api_server.ts) share this code, so they serialize
 // on the same advisory lock and template.
@@ -8,7 +8,7 @@ import Pg from "pg";
 import { MIGRATIONS_DIR, migrate } from "../migrate.ts";
 import { createPool } from "../tx.ts";
 
-export const TEMPLATE_DB = "sbx_tmpl";
+export const TEMPLATE_DB = "umiak_tmpl";
 
 /** Advisory lock on the admin database: template creation and cloning are serialized. */
 export const TEMPLATE_LOCK_KEY = 727002;
@@ -31,15 +31,15 @@ export interface CreateDatabaseOptions {
 }
 
 /**
- * Creates `sbx_test_<random>` on the server of `admin` and returns its name
- * and DSN. A migrated copy brings sbx_tmpl up to date first.
+ * Creates `umiak_test_<random>` on the server of `admin` and returns its name
+ * and DSN. A migrated copy brings umiak_tmpl up to date first.
  */
 export async function createDatabase(
 	admin: string,
 	opts: CreateDatabaseOptions = {},
 ): Promise<{ name: string; url: string }> {
 	const migrated = opts.migrated !== false;
-	const name = `sbx_test_${randomBytes(6).toString("hex")}`;
+	const name = `umiak_test_${randomBytes(6).toString("hex")}`;
 	const client = new Pg.Client({ connectionString: admin });
 	await client.connect();
 	try {
@@ -70,7 +70,7 @@ export async function dropDatabase(admin: string, name: string): Promise<void> {
 	}
 }
 
-// Brings sbx_tmpl up to date. An existing template (SBX_TEST_DATABASE_URL reused
+// Brings umiak_tmpl up to date. An existing template (UMIAK_TEST_DATABASE_URL reused
 // across runs) is migrated forward; if that fails (a changed migration file, a
 // template left by an older layout) it is rebuilt from scratch. The caller
 // holds TEMPLATE_LOCK_KEY.

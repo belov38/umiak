@@ -29,7 +29,7 @@ function setup(
 	const log: string[] = [];
 	const api = new FakePve(log);
 	const node = new FakeNode(log);
-	// PVE-allocated volumes (a fresh tpmstate0) land in sbx-node's LV list; lv.adopt reads configs.
+	// PVE-allocated volumes (a fresh tpmstate0) land in umiak-node's LV list; lv.adopt reads configs.
 	api.lvStore = node;
 	node.pve = api;
 	const store = new SqliteStateStore(":memory:");
@@ -55,8 +55,8 @@ function setup(
 		cfg: {
 			node: "pve",
 			storage: "local-lvm",
-			vnet: "sbx0",
-			pool: "sandbox",
+			vnet: "umiak0",
+			pool: "umiak",
 			templateVmid: 599,
 			clusterId: 1,
 		},
@@ -70,19 +70,19 @@ function setup(
 
 describe("smbios", () => {
 	it("formats smbios1 with a base64 serial", () => {
-		expect(formatSmbios1({ uuid: "u", serial: "sbx1:x" })).toBe(
-			"uuid=u,serial=c2J4MTp4,base64=1",
+		expect(formatSmbios1({ uuid: "u", serial: "umiak1:x" })).toBe(
+			"uuid=u,serial=dW1pYWsxOng=,base64=1",
 		);
 	});
 	it("puts a base64 family before base64=1", () => {
-		const family = "sbxt1:wss://t.example/v1/connect";
-		expect(formatSmbios1({ uuid: "u", serial: "sbx1:x", family })).toBe(
-			`uuid=u,serial=c2J4MTp4,family=${Buffer.from(family).toString("base64")},base64=1`,
+		const family = "umiakt1:wss://t.example/v1/connect";
+		expect(formatSmbios1({ uuid: "u", serial: "umiak1:x", family })).toBe(
+			`uuid=u,serial=dW1pYWsxOng=,family=${Buffer.from(family).toString("base64")},base64=1`,
 		);
 	});
 	it("accepts exactly 512 chars and rejects 513", () => {
 		const family = "f".repeat(300);
-		const s = { uuid: "", serial: "sbx1:x", family };
+		const s = { uuid: "", serial: "umiak1:x", family };
 		// Pad the uuid so the string is exactly 512 chars, then one more.
 		const uuid = "u".repeat(512 - formatSmbios1(s).length);
 		expect(formatSmbios1({ ...s, uuid })).toHaveLength(512);
@@ -92,7 +92,7 @@ describe("smbios", () => {
 	});
 	it("builds the family for a wss tunnel URL and limits it", () => {
 		expect(familyForTunnelUrl("wss://t.example/v1/connect")).toBe(
-			"sbxt1:wss://t.example/v1/connect",
+			"umiakt1:wss://t.example/v1/connect",
 		);
 		expect(() => familyForTunnelUrl("https://x")).toThrow();
 		expect(() => familyForTunnelUrl("ws://host/x")).toThrow();
@@ -100,16 +100,16 @@ describe("smbios", () => {
 		expect(() => familyForTunnelUrl("wss://")).toThrow();
 		const url = (n: number) => `wss://h.example/${"a".repeat(n - 16)}`;
 		expect(url(200)).toHaveLength(200);
-		expect(familyForTunnelUrl(url(200))).toBe(`sbxt1:${url(200)}`);
+		expect(familyForTunnelUrl(url(200))).toBe(`umiakt1:${url(200)}`);
 		expect(() => familyForTunnelUrl(url(201))).toThrow();
 	});
 	it("builds the S2 serial payload", () => {
 		const bs = new Uint8Array(32).fill(255);
 		const p = s2SerialPayload("11111111-2222-3333-4444-555555555555", bs);
 		expect(p).toBe(
-			`sbx1:11111111-2222-3333-4444-555555555555:${Buffer.from(bs).toString("base64url")}`,
+			`umiak1:11111111-2222-3333-4444-555555555555:${Buffer.from(bs).toString("base64url")}`,
 		);
-		expect(p).toHaveLength(85);
+		expect(p).toHaveLength(87);
 	});
 });
 
@@ -137,18 +137,18 @@ describe("create", () => {
 
 		const vm = api.vms.get(500);
 		expect(vm?.config).toMatchObject({
-			name: "sbx-500",
-			net0: "virtio=02:01:00:00:01:F4,bridge=sbx0,firewall=1",
+			name: "umiak-500",
+			net0: "virtio=02:01:00:00:01:F4,bridge=umiak0,firewall=1",
 			ide2: "local-lvm:cloudinit",
 			ipconfig0: "ip=dhcp",
-			ciuser: "sbx",
+			ciuser: "umiak",
 			balloon: "0",
 			cores: "2",
 			memory: "2048",
 			machine: "q35",
 			scsi0: "local-lvm:vm-500-disk-0,discard=on,iothread=1,ssd=1",
 			boot: "order=scsi0",
-			tags: "sbx",
+			tags: "umiak",
 		});
 		expect(vm?.firewall.options).toEqual({
 			enable: 1,
@@ -161,7 +161,7 @@ describe("create", () => {
 			ipfilter: 1,
 		});
 		expect(vm?.firewall.rules).toEqual([
-			{ type: "group", action: "sbx-egress", iface: "net0", enable: 1 },
+			{ type: "group", action: "umiak-egress", iface: "net0", enable: 1 },
 		]);
 		expect(vm?.firewall.ipsets).toEqual({ "ipfilter-net0": ["10.88.0.101"] });
 	});
@@ -180,7 +180,7 @@ describe("create", () => {
 		const post =
 			api.calls.find((c) => c.method === "POST" && c.path === "/nodes/pve/qemu")
 				?.params ?? {};
-		expect(post.pool).toBe("sandbox");
+		expect(post.pool).toBe("umiak");
 		for (const k of [
 			"sshkeys",
 			"smbios1",
@@ -235,7 +235,7 @@ describe("create", () => {
 				?.params ?? {};
 		for (const k of ["ide2", "ipconfig0", "ciuser", "ciupgrade"])
 			expect(post).not.toHaveProperty(k);
-		expect(post).toMatchObject({ name: "sbx-500", balloon: 0 });
+		expect(post).toMatchObject({ name: "umiak-500", balloon: 0 });
 	});
 
 	it("does not take an ISO named cloudinit for a cloud-init drive", async () => {
@@ -261,7 +261,7 @@ describe("create", () => {
 		expect(api.vms.get(500)?.config).toMatchObject({
 			ide2: "local-lvm:cloudinit",
 			ipconfig0: "ip=dhcp",
-			ciuser: "sbx",
+			ciuser: "umiak",
 			ciupgrade: "0",
 		});
 	});
@@ -269,12 +269,12 @@ describe("create", () => {
 	it("passes the caller's smbios1", async () => {
 		const { api, machines } = setup();
 		await machines.create({
-			smbios: { uuid: "u-1", serial: "sbx1:x" },
+			smbios: { uuid: "u-1", serial: "umiak1:x" },
 			size: { cores: 1, memoryMb: 1024 },
 		});
 		const post =
 			api.calls.find((c) => c.path === "/nodes/pve/qemu")?.params ?? {};
-		expect(post.smbios1).toBe("uuid=u-1,serial=c2J4MTp4,base64=1");
+		expect(post.smbios1).toBe("uuid=u-1,serial=dW1pYWsxOng=,base64=1");
 		expect(post).toMatchObject({ cores: 1, memory: 1024 });
 	});
 
@@ -282,10 +282,10 @@ describe("create", () => {
 		const { api, machines } = setup();
 		const family = familyForTunnelUrl("wss://t.example/v1/connect");
 		await machines.create({
-			smbios: { uuid: "u-1", serial: "sbx1:x", family },
+			smbios: { uuid: "u-1", serial: "umiak1:x", family },
 		});
 		expect(api.vms.get(500)?.config.smbios1).toBe(
-			formatSmbios1({ uuid: "u-1", serial: "sbx1:x", family }),
+			formatSmbios1({ uuid: "u-1", serial: "umiak1:x", family }),
 		);
 	});
 
@@ -427,7 +427,7 @@ describe("snapshot and fork", () => {
 			"hook:thaw",
 		]);
 		expect(s.id).toBe("abc");
-		expect(node.lvs.map((l) => l.name)).toContain("sbx-snap-abc-scsi0");
+		expect(node.lvs.map((l) => l.name)).toContain("umiak-snap-abc-scsi0");
 		expect(store.getSnapshot("abc")).toEqual(s);
 	});
 
@@ -460,7 +460,7 @@ describe("snapshot and fork", () => {
 			"api:POST /nodes/pve/qemu/500/agent/fsfreeze-freeze",
 			"api:POST /nodes/pve/qemu/500/agent/fsfreeze-thaw",
 		]);
-		expect(node.lvs.some((l) => l.name.startsWith("sbx-snap-"))).toBe(false);
+		expect(node.lvs.some((l) => l.name.startsWith("umiak-snap-"))).toBe(false);
 	});
 
 	it("refuses to snapshot a running machine without QGA unless crash-consistent", async () => {
@@ -495,7 +495,7 @@ describe("snapshot and fork", () => {
 		const items = node.calls.filter((c) => c.op === "lv.snapshot").at(-1)?.args
 			.items as { origin: string }[] | undefined;
 		const snapItem = items?.[0];
-		expect(snapItem?.origin).toBe(`sbx-snap-${s.id}-scsi0`);
+		expect(snapItem?.origin).toBe(`umiak-snap-${s.id}-scsi0`);
 		expect(api.vms.get(501)?.config.vmgenid).not.toBe(
 			api.vms.get(500)?.config.vmgenid,
 		);
@@ -535,7 +535,7 @@ describe("snapshot and fork", () => {
 			(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
 		);
 		for (const p of posts.slice(-2)) {
-			expect(p.params).toMatchObject({ ciuser: "sbx", ciupgrade: 0 });
+			expect(p.params).toMatchObject({ ciuser: "umiak", ciupgrade: 0 });
 			expect(p.params).not.toHaveProperty(SNAPSHOT_CLOUDINIT_KEY);
 		}
 	});
@@ -627,7 +627,9 @@ describe("delete", () => {
 		const a = await machines.create({});
 		const s = await machines.snapshot(a.vmid);
 		await machines.deleteSnapshot(s);
-		expect(node.lvs.filter((l) => l.name.startsWith("sbx-snap-"))).toEqual([]);
+		expect(node.lvs.filter((l) => l.name.startsWith("umiak-snap-"))).toEqual(
+			[],
+		);
 		expect(store.getSnapshot(s.id)).toBeUndefined();
 	});
 });
@@ -660,14 +662,14 @@ describe("createViaQmClone (baseline)", () => {
 		expect(clone).toEqual({
 			newid: 500,
 			full: 0,
-			pool: "sandbox",
-			name: "sbx-500",
+			pool: "umiak",
+			name: "umiak-500",
 		});
 		expect(api.vms.get(500)?.config).toMatchObject({
-			net0: "virtio=02:01:00:00:01:F4,bridge=sbx0,firewall=1",
+			net0: "virtio=02:01:00:00:01:F4,bridge=umiak0,firewall=1",
 			cores: "2",
 			memory: "2048",
-			tags: "sbx",
+			tags: "umiak",
 		});
 		expect(api.vms.get(500)?.firewall.ipsets).toEqual({
 			"ipfilter-net0": ["10.88.0.101"],
@@ -1063,7 +1065,7 @@ describe("delete of a template", () => {
 	it("refuses a VM with template: 1 and makes no DELETE call or lease change", async () => {
 		const { api, store, machines } = setup();
 		api.vms.set(598, {
-			config: { name: "sbx-tpl-x", template: "1", tags: "sbx-tpl" },
+			config: { name: "umiak-tpl-x", template: "1", tags: "umiak-tpl" },
 			status: "stopped",
 			firewall: { rules: [], ipsets: {} },
 		});
@@ -1106,7 +1108,7 @@ describe("occupiedVmids", () => {
 	it("counts VM disks and template disks, even of VMs the token cannot list", async () => {
 		const { node, machines } = setup();
 		node.lvs.push(
-			{ name: "vm-512-disk-0", tags: ["sbx"] },
+			{ name: "vm-512-disk-0", tags: ["umiak"] },
 			{ name: "base-597-disk-0", tags: [] },
 			{ name: "data", tags: [] },
 		);
@@ -1201,7 +1203,7 @@ describe("Windows template (three disks)", () => {
 		expect(node.lvs).toEqual(
 			[0, 1, 2].map((n) => ({
 				name: `vm-500-disk-${n}`,
-				tags: ["sbx", "sbx-vm-500"],
+				tags: ["umiak", "umiak-vm-500"],
 			})),
 		);
 	});
@@ -1218,9 +1220,9 @@ describe("Windows template (three disks)", () => {
 		const items = node.calls.find((c) => c.op === "lv.snapshot")?.args
 			.items as { origin: string; name: string }[];
 		expect(items.map((i) => `${i.origin}->${i.name}`)).toEqual([
-			`vm-500-disk-0->sbx-snap-${snap.id}-efidisk0`,
-			`vm-500-disk-1->sbx-snap-${snap.id}-scsi0`,
-			`vm-500-disk-2->sbx-snap-${snap.id}-tpmstate0`,
+			`vm-500-disk-0->umiak-snap-${snap.id}-efidisk0`,
+			`vm-500-disk-1->umiak-snap-${snap.id}-scsi0`,
+			`vm-500-disk-2->umiak-snap-${snap.id}-tpmstate0`,
 		]);
 	});
 
@@ -1260,7 +1262,7 @@ describe("Windows template (three disks)", () => {
 		expect(snap.consistency).toBe("crash");
 		expect(store.getSnapshot(snap.id)?.autoThawed).toBe(true);
 		expect(
-			node.lvs.filter((l) => l.tags.includes(`sbx-snap-${snap.id}`)),
+			node.lvs.filter((l) => l.tags.includes(`umiak-snap-${snap.id}`)),
 		).toHaveLength(3);
 	});
 
@@ -1274,7 +1276,9 @@ describe("Windows template (three disks)", () => {
 		await expect(
 			machines.snapshot(m.vmid, { id: "s1", crashConsistent: false }),
 		).rejects.toThrow(/thaw failed for VM 500/);
-		expect(node.lvs.filter((l) => l.name.startsWith("sbx-snap-"))).toEqual([]);
+		expect(node.lvs.filter((l) => l.name.startsWith("umiak-snap-"))).toEqual(
+			[],
+		);
 	});
 
 	it("a create whose tpmstate0 LV lv.adopt does not report rolls back", async () => {
@@ -1344,7 +1348,7 @@ describe("Windows template (three disks)", () => {
 			`vm-${b.vmid}-disk-1`,
 			`vm-${b.vmid}-disk-2`,
 		]);
-		expect(items[2]?.origin).toBe(`sbx-snap-${snap.id}-tpmstate0`);
+		expect(items[2]?.origin).toBe(`umiak-snap-${snap.id}-tpmstate0`);
 		expect(api.vms.get(b.vmid)?.config.tpmstate0).toBe(
 			`local-lvm:vm-${b.vmid}-disk-2,version=v2.0`,
 		);

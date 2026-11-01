@@ -13,7 +13,7 @@ import { txQuery } from "../notify.ts";
 import { relId } from "./doc.ts";
 
 /** req.context key: the team being deleted (its owners may go). */
-const DELETING_TEAM = "sbxDeletingTeam";
+const DELETING_TEAM = "umiakDeletingTeam";
 
 function table(req: PayloadRequest, name: string) {
 	const schema = req.payload.db.schemaName ?? "public";

@@ -5,7 +5,7 @@
 //   starts (create, fork, resume): 30 per minute per team.
 // With several pods the effective limit multiplies; quotas and admission
 // protect the nodes, these limits protect the api itself.
-import type { Principal } from "@sbx/core";
+import type { Principal } from "@umiak/core";
 import type { MiddlewareHandler } from "hono";
 import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
 import type { ApiDeps, ApiEnv } from "../deps.ts";

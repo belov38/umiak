@@ -1,9 +1,9 @@
 // Caller identity passed by `api` to SandboxService (S7 §7.5).
 
-import type { Scope } from "@sbx/auth";
+import type { Scope } from "@umiak/auth";
 
-// Scopes live in @sbx/auth (S7 §7.3); re-exported for core consumers.
-export { SCOPES, type Scope } from "@sbx/auth";
+// Scopes live in @umiak/auth (S7 §7.3); re-exported for core consumers.
+export { SCOPES, type Scope } from "@umiak/auth";
 
 export interface Principal {
 	/** browser session, Keycloak JWT (S7 §7.10) or team API key (S7 §7.2) */

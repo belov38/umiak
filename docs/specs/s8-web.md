@@ -28,7 +28,7 @@ S8 — человеческое лицо платформы. Операторы 
 
 **Не-цели (другие области)**
 - Публичное API и его внутренности (S7), машины состояний и worker (S6), gateway (S4), рабочий стол (S10), MCP (S11), Helm-чарты и настройка IdP (S12), клон репозиториев из environments (S13; список репозиториев S8 только хранит, §10.1).
-- SSO для портов (`/sbx-auth/*`): его отдаёт `api` (S7 §7.7), S8 только хранит данные, которые он читает. Вход CLI — device grant Keycloak (S7 §7.6): своих страниц у `web` и `api` для него нет.
+- SSO для портов (`/umiak-auth/*`): его отдаёт `api` (S7 §7.7), S8 только хранит данные, которые он читает. Вход CLI — device grant Keycloak (S7 §7.6): своих страниц у `web` и `api` для него нет.
 - Биллинг, организации с кошельками, публичная регистрация.
 
 **Анти-цели (провал, даже если всё работает)**
@@ -44,7 +44,7 @@ S8 — человеческое лицо платформы. Операторы 
 - Toolchain из `mise.toml` (Node 26.13.0, pnpm 12.16.1). Версии библиотек — §16, проверены 2026-10-29; при реализации перепроверить и взять последние стабильные (`CLAUDE.md`).
 - Раскладка по `CLAUDE.md`: `apps/web`, `packages/payload`; тесты vitest и Playwright; линт biome.
 - Postgres один (S6 §3): схема `payload` принадлежит S8. `runtime` S8 не читает и не пишет из `web` (§14.3); runtime-таблицы для environments и блокировок добавляются миграциями в диапазоне S8 (§17.3) и используются только `api`/`worker`.
-- Внутренняя платформа компании; пользователи — только из Keycloak (realm `sbx`, architecture §10): в браузере — за oauth2-proxy, в CLI, SDK и MCP — по JWT Keycloak (S7 §7.10). Позже Keycloak может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет.
+- Внутренняя платформа компании; пользователи — только из Keycloak (realm `umiak`, architecture §10): в браузере — за oauth2-proxy, в CLI, SDK и MCP — по JWT Keycloak (S7 §7.10). Позже Keycloak может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет.
 - Интерфейсы `IdentityStore` и `ConfigReader` заданы S7/S6; S8 их реализует и расширяет только добавлениями (§17).
 
 ## 4. Обзор
@@ -57,20 +57,20 @@ S8 — человеческое лицо платформы. Операторы 
                               |  injects X-Auth-Request-Email/-User/-Groups/-Preferred-Username,
                               |  strips client-supplied copies
           ┌───────────────────┼───────────────────────────────┐
-          | /api/* (strip /api), /sbx-auth/*                   | everything else
+          | /api/* (strip /api), /umiak-auth/*                   | everything else
           v                                                    v
    apps/api :8081 (proxied listener, S7)              apps/web :3000 (Next.js 16 + Payload 3)
      IdentityStore ── packages/payload ──┐              /admin   Payload admin (operators)
-     ConfigReader ── packages/config ────┤              /app     dashboard (React, @sbx/sdk -> /api/v1)
+     ConfigReader ── packages/config ────┤              /app     dashboard (React, @umiak/sdk -> /api/v1)
                                          |              /cms-api Payload REST (operators only)
    apps/worker: ConfigReader ────────────┤              server actions: teams, members, settings
                                          v
                          Postgres: schema payload (S8)  <- Payload Local API (getPayload)
                                    schema runtime (S6/S7/S8 additions) <- only api, worker
-                         NOTIFY sbx_identity, sbx_config, sbx_routes '*'
+                         NOTIFY umiak_identity, umiak_config, umiak_routes '*'
 ```
 
-- Браузер говорит с `web` только за oauth2-proxy. `web` рендерит оболочку `/app` и формы управления командами (Payload Local API), а всё про sandbox, команды, файлы, порты, снапшоты, ключи, SSH-ключи и environments браузер берёт сам из `https://app.<domain>/api/v1/*` через `@sbx/sdk` (тот же origin, та же cookie oauth2-proxy).
+- Браузер говорит с `web` только за oauth2-proxy. `web` рендерит оболочку `/app` и формы управления командами (Payload Local API), а всё про sandbox, команды, файлы, порты, снапшоты, ключи, SSH-ключи и environments браузер берёт сам из `https://app.<domain>/api/v1/*` через `@umiak/sdk` (тот же origin, та же cookie oauth2-proxy).
 - `web` не вызывает `api` со стороны сервера и не пробрасывает заголовки личности [решение S8]: так нет второго пути, где можно подделать пользователя.
 - `api` и `worker` поднимают тот же конфиг Payload через `getPayload` (без Next) и читают/пишут коллекции через Local API.
 
@@ -78,17 +78,17 @@ S8 — человеческое лицо платформы. Операторы 
 
 | Путь | Имя | Что |
 |---|---|---|
-| `packages/payload` | `@sbx/payload` | `buildConfig` (без React-импортов; компоненты админки — по путям import map), коллекции и global, хуки `NOTIFY`, auth-стратегия `oauth2-proxy`, `resolveSession` (JIT), `PayloadIdentityStore`, миграции схемы `payload`, `getSbxPayload()` с кэшем экземпляра |
-| `packages/config` | S6 | S8 пишет `PayloadConfigReader` поверх `@sbx/payload` (S6 §5.11) |
+| `packages/payload` | `@umiak/payload` | `buildConfig` (без React-импортов; компоненты админки — по путям import map), коллекции и global, хуки `NOTIFY`, auth-стратегия `oauth2-proxy`, `resolveSession` (JIT), `PayloadIdentityStore`, миграции схемы `payload`, `getUmiakPayload()` с кэшем экземпляра |
+| `packages/config` | S6 | S8 пишет `PayloadConfigReader` поверх `@umiak/payload` (S6 §5.11) |
 | `packages/auth` | S7 | Интерфейс `IdentityStore`, формат ключей, кодеки публичных ID; S8 добавляет общий контрактный набор тестов `IdentityStore` (§15) |
-| `apps/web` | `@sbx/web` | Next.js-приложение: маршруты Payload (`/admin`, `/cms-api`), `/app`, server actions, `/healthz`; `dev/` — заглушка аутентификации (§13), в образ не входит |
+| `apps/web` | `@umiak/web` | Next.js-приложение: маршруты Payload (`/admin`, `/cms-api`), `/app`, server actions, `/healthz`; `dev/` — заглушка аутентификации (§13), в образ не входит |
 
 ## 5. Аутентификация
 
 ### 5.1 Цепочка доверия
 
-- Весь `app.<domain>` закрыт oauth2-proxy в режиме reverse proxy (upstream) [решение S8; конфиг — S12]. Провайдер — Keycloak: в alpha config `providers[].provider: keycloak-oidc`, `oidcConfig.issuerURL: https://<keycloak>/realms/sbx`, конфиденциальный клиент `oauth2-proxy` с Audience mapper на себя (oauth2-proxy сверяет `aud` с `client-id`) и mapper-ом Group Membership в claim `groups` (architecture §10). Через alpha config `injectRequestHeaders` oauth2-proxy ставит upstream-у `X-Auth-Request-Email` (claim `email`), `X-Auth-Request-User` (claim **`sub`** — неизменяемый идентификатор IdP, а не логин или email), `X-Auth-Request-Groups` (claim групп), `X-Auth-Request-Preferred-Username` из claims и вырезает присланные клиентом копии (`preserveRequestValue: false`, значение по умолчанию). Неподтверждённый email не принимается (oauth2-proxy по умолчанию требует `email_verified`; `--insecure-oidc-allow-unverified-email` не включается).
-- Требования к сессии oauth2-proxy (S12): `--cookie-refresh=5m` (флаг, в alpha config его нет; при обновлении Keycloak отказывает выключенному пользователю и отдаёт актуальные группы), `--cookie-expire` не больше 12 h. Только так выключение пользователя и снятие группы в IdP доходят до `web` и `api` (§11). Маршрутизация по путям — тоже в alpha config: `/api/` → `api:8081` с `rewriteTarget` без `/api`, `/sbx-auth/` → `api:8081`, остальное → `web:3000`. Если S12 выберет nginx-подобный `auth_request`, контракт для `web` и `api` тот же: эти четыре заголовка ставит только oauth2-proxy.
+- Весь `app.<domain>` закрыт oauth2-proxy в режиме reverse proxy (upstream) [решение S8; конфиг — S12]. Провайдер — Keycloak: в alpha config `providers[].provider: keycloak-oidc`, `oidcConfig.issuerURL: https://<keycloak>/realms/umiak`, конфиденциальный клиент `oauth2-proxy` с Audience mapper на себя (oauth2-proxy сверяет `aud` с `client-id`) и mapper-ом Group Membership в claim `groups` (architecture §10). Через alpha config `injectRequestHeaders` oauth2-proxy ставит upstream-у `X-Auth-Request-Email` (claim `email`), `X-Auth-Request-User` (claim **`sub`** — неизменяемый идентификатор IdP, а не логин или email), `X-Auth-Request-Groups` (claim групп), `X-Auth-Request-Preferred-Username` из claims и вырезает присланные клиентом копии (`preserveRequestValue: false`, значение по умолчанию). Неподтверждённый email не принимается (oauth2-proxy по умолчанию требует `email_verified`; `--insecure-oidc-allow-unverified-email` не включается).
+- Требования к сессии oauth2-proxy (S12): `--cookie-refresh=5m` (флаг, в alpha config его нет; при обновлении Keycloak отказывает выключенному пользователю и отдаёт актуальные группы), `--cookie-expire` не больше 12 h. Только так выключение пользователя и снятие группы в IdP доходят до `web` и `api` (§11). Маршрутизация по путям — тоже в alpha config: `/api/` → `api:8081` с `rewriteTarget` без `/api`, `/umiak-auth/` → `api:8081`, остальное → `web:3000`. Если S12 выберет nginx-подобный `auth_request`, контракт для `web` и `api` тот же: эти четыре заголовка ставит только oauth2-proxy.
 - Cookie oauth2-proxy — `__Host-oauth2_proxy`, host-only, `Secure`, без `--cookie-domain` (S4 §14.1).
 - `web` доверяет заголовкам только потому, что к его порту пускает лишь oauth2-proxy (NetworkPolicy, S12), как `api :8081` (S7 §7.1). Отдельного секрета между oauth2-proxy и `web` нет [решение S8]: NetworkPolicy — та же граница, что у `api`, и второй механизм только усложнил бы dev.
 - Пробы — **exec-пробы** внутри контейнера (`node healthcheck.js` → `http://127.0.0.1:3000/healthz`), а не HTTP-пробы kubelet [решение S8 по ревью]: тогда NetworkPolicy пускает на `:3000` только поды oauth2-proxy, без адресов нод (иначе любой hostNetwork-под или процесс ноды мог бы прислать поддельный `X-Auth-Request-*`). `/healthz` не требует заголовков и отдаёт только `200 ok` (Postgres, инициализация Payload, миграции §12).
@@ -102,7 +102,7 @@ S8 — человеческое лицо платформы. Операторы 
 
 ### 5.3 JIT и `resolveSession`
 
-`resolveSession({email, user, groups, preferredUsername})` живёт в `@sbx/payload` и используется трижды: auth-стратегией Payload в `web`, `PayloadIdentityStore.resolveSession` в `api` для браузера (S7 §7.4) и для Keycloak JWT из CLI, SDK и MCP (S7 §7.10, вход из claims `email`, `sub`, `groups`, `preferred_username`). Логика одна, поэтому браузер и CLI — одна и та же личность по `sub`:
+`resolveSession({email, user, groups, preferredUsername})` живёт в `@umiak/payload` и используется трижды: auth-стратегией Payload в `web`, `PayloadIdentityStore.resolveSession` в `api` для браузера (S7 §7.4) и для Keycloak JWT из CLI, SDK и MCP (S7 §7.10, вход из claims `email`, `sub`, `groups`, `preferred_username`). Логика одна, поэтому браузер и CLI — одна и та же личность по `sub`:
 
 Идентичность привязана к `sub` (`idpSubject`, уникальный индекс); email — второй ключ для первого входа и приглашений [решение S8 по ревью]. `X-Auth-Request-User` обязателен (без него `401`).
 
@@ -113,30 +113,30 @@ S8 — человеческое лицо платформы. Операторы 
    - пользователь с другим `idpSubject` → `403` («учётная запись IdP сменилась, обратитесь к оператору»): новый человек с переиспользованным email не получает чужие команды и ключи. Оператор сбрасывает `idpSubject` в `/admin`.
 3. Не нашёлся и по email — создать: `email`, `name` (`preferredUsername` → часть email до `@`), `idpSubject`, `active: true`. В той же транзакции — личная команда (§6.1) и членство `owner`; `defaultTeam` = личная команда. Гонку двух первых запросов решают уникальные индексы: проигравший перечитывает строку.
 4. `active: false` — отказ: в `web` страница «учётная запись отключена» (`403`), в `api` — `403 forbidden` с `details.reason: "user_disabled"` [решение S8].
-5. `isOperator` = пересечение `groups` с `SBX_OPERATOR_GROUPS` (список через запятую, имя группы задаёт S12/Илья). Записать `groups`, `isOperator`, `lastLoginAt`, если они изменились (не чаще раза в 60 s для `lastLoginAt`), чтобы обычный запрос не писал в БД.
+5. `isOperator` = пересечение `groups` с `UMIAK_OPERATOR_GROUPS` (список через запятую, имя группы задаёт S12/Илья). Записать `groups`, `isOperator`, `lastLoginAt`, если они изменились (не чаще раза в 60 s для `lastLoginAt`), чтобы обычный запрос не писал в БД.
 6. Ответ — `SessionIdentity`: пользователь, `isOperator`, команды с ролями, `defaultTeamId`.
 
-Кэш в процессе на 30 s по `sha256(email + groups + user)`, сброс по `LISTEN sbx_identity` (S7 §7.4 — то же поведение в `api`).
+Кэш в процессе на 30 s по `sha256(email + groups + user)`, сброс по `LISTEN umiak_identity` (S7 §7.4 — то же поведение в `api`).
 
 ### 5.4 Payload: стратегия вместо паролей
 
 - Коллекция `users`: `auth: { disableLocalStrategy: true, strategies: [{ name: "oauth2-proxy", authenticate }] }`. `authenticate({ headers, payload })` вызывает `resolveSession` и возвращает `{ user: { ...user, collection: "users", _strategy: "oauth2-proxy" } }` или `{ user: null }`.
 - Паролей, логина, logout, JWT и cookie Payload нет: стратегия выполняется на каждом запросе по заголовкам. `admin.user = "users"`.
 - `cookiePrefix` Payload — `__Host-payload` [решение S8]: служебные cookie админки (язык, тема) тоже host-only. Если Payload не сможет выставить их с этим префиксом, исполнитель фиксирует это в плане; эти cookie не дают доступа и не являются учётными данными.
-- Выход из системы — ссылка на `/oauth2/sign_out` oauth2-proxy (с `rd` на страницу выхода Keycloak, настраивает S12). Выход в Keycloak завершает SSO-сессию, к которой привязан и refresh token CLI (S7 §7.6): после выхода из дашборда CLI попросит `sbx login`. Это записывается в подсказке у кнопки выхода.
+- Выход из системы — ссылка на `/oauth2/sign_out` oauth2-proxy (с `rd` на страницу выхода Keycloak, настраивает S12). Выход в Keycloak завершает SSO-сессию, к которой привязан и refresh token CLI (S7 §7.6): после выхода из дашборда CLI попросит `umiak login`. Это записывается в подсказке у кнопки выхода.
 
 ### 5.5 Роль оператора
 
-- Оператор — пользователь, у которого в текущей сессии есть группа из `SBX_OPERATOR_GROUPS`. Поле `users.isOperator` — только чтение в `/admin`, обновляется при каждом `resolveSession`.
+- Оператор — пользователь, у которого в текущей сессии есть группа из `UMIAK_OPERATOR_GROUPS`. Поле `users.isOperator` — только чтение в `/admin`, обновляется при каждом `resolveSession`.
 - **Права оператора действуют только в браузерной сессии** [решение S8, изменение S7 C6]: у principal-а по API-ключу и по Keycloak JWT из CLI `isOperator = false`. Так ключ, утёкший из CI, не даёт доступа ко всем командам, а снятие группы в IdP отнимает права при следующем обновлении сессии oauth2-proxy (§5.1, §11), а не после ручных действий.
 - **SSH тоже без операторского исключения** [решение S8 по ревью, изменение S7 C6]: `ssh/authorize` пускает только участников команды sandbox; правило S7 §12.1 «или оператор» убирается. В сессии SSH нет свежих групп, а сохранённый флаг мог устареть. Оператору, которому нужен shell в чужой sandbox, хватает терминала в браузере (раздел «Оператор»).
 - Сохранённое `users.isOperator` служит только для отображения в `/admin` и фильтров.
 
 ### 5.6 CSRF в `web`
 
-- Все небезопасные запросы к `web` (server actions, REST Payload, загрузки в админке) требуют `Origin == SBX_APP_ORIGIN`; иначе `403`. Проверка — в `proxy.ts` Next 16 (бывший middleware) для всех путей, кроме `/healthz`. Server actions Next дополнительно сверяют `Origin` с `Host` сами; `serverActions.allowedOrigins` не расширяется.
-- `csrf` Payload = `[SBX_APP_ORIGIN]`.
-- Ответы `web`: `Content-Security-Policy` с `frame-ancestors 'self'`, `default-src 'self'`; `connect-src 'self'` (дашборд ходит только на свой origin, WebSocket — `wss://app.<domain>`); `frame-src https://*.<sbx-domain>` для превью портов и рабочего стола (S10). `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`. Точный список — исполнителю, Payload admin может потребовать `'unsafe-inline'` для стилей.
+- Все небезопасные запросы к `web` (server actions, REST Payload, загрузки в админке) требуют `Origin == UMIAK_APP_ORIGIN`; иначе `403`. Проверка — в `proxy.ts` Next 16 (бывший middleware) для всех путей, кроме `/healthz`. Server actions Next дополнительно сверяют `Origin` с `Host` сами; `serverActions.allowedOrigins` не расширяется.
+- `csrf` Payload = `[UMIAK_APP_ORIGIN]`.
+- Ответы `web`: `Content-Security-Policy` с `frame-ancestors 'self'`, `default-src 'self'`; `connect-src 'self'` (дашборд ходит только на свой origin, WebSocket — `wss://app.<domain>`); `frame-src https://*.<umiak-domain>` для превью портов и рабочего стола (S10). `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`. Точный список — исполнителю, Payload admin может потребовать `'unsafe-inline'` для стилей.
 
 ## 6. Команды и роли [решение Q1]
 
@@ -145,7 +145,7 @@ S8 — человеческое лицо платформы. Операторы 
 - **Личная команда.** Создаётся при первом входе: `name` = имя пользователя (в реализации — `<email>'s team`, §21.5), `personal: true`, единственный участник — пользователь (`owner`). Её нельзя удалить, переименовать можно; приглашать в неё других нельзя [решение S8]: «личная» должна оставаться личной, для совместной работы есть общие команды.
 - **Общая команда.** Создаёт любой пользователь в `/app` (создатель — `owner`). Ограничение — не больше 3 общих команд, где пользователь `owner` [решение S8; значение `maxOwnedTeamsPerUser` в `PlatformDefaults`, оператор может поменять]. Новая общая команда получает квоту `newSharedTeamQuota` из `PlatformDefaults` (по умолчанию равна `defaultQuota`; оператор может поставить нули, тогда команда работает только после того, как оператор выдаст квоту).
 - **Квоты — справедливость, а не ёмкость** [решение S8 по ревью]: от превышения RAM ноды защищает admission S6 (§8.2, `out_of_capacity`), а не квоты. Пользователь с несколькими командами может занять больше одной квоты; это осознанный компромисс внутренней платформы, рычаги — `maxOwnedTeamsPerUser`, `newSharedTeamQuota` и квоты отдельных команд.
-- **Команда по умолчанию** (`users.defaultTeam`) — та, что используется без `Sbx-Team` (S7 §7.4); по умолчанию личная, пользователь меняет её в настройках. Если пользователь вышел из команды по умолчанию, она снова становится личной.
+- **Команда по умолчанию** (`users.defaultTeam`) — та, что используется без `Umiak-Team` (S7 §7.4); по умолчанию личная, пользователь меняет её в настройках. Если пользователь вышел из команды по умолчанию, она снова становится личной.
 - Синхронизация команд из групп IdP — фаза 2 (§18).
 
 ### 6.2 Роли
@@ -176,7 +176,7 @@ S8 — человеческое лицо платформы. Операторы 
 
 ### 6.4 Удаление команды
 
-Удаляет только оператор в `/admin` [решение S8]: у `web` нет доступа к runtime, а удалить команду с живыми sandbox нельзя. Порядок: оператор в разделе «Оператор» (`/app/operator`, §9.10) видит sandbox и снапшоты команды и удаляет их; кнопка удаления команды в `/admin` (custom action) перед удалением вызывает из браузера оператора `GET /v1/sandboxes?allTeams=true&teamId=…&limit=1` и `GET /v1/snapshots` с `Sbx-Team` и отказывает, если что-то есть. Environments команды оператор тоже удаляет заранее (`DELETE /v1/environments/...`), проверка их учитывает. Между проверкой и удалением возможна гонка (кто-то успел создать sandbox); она не опасна: `api` больше не найдёт членств в команде, и такая sandbox доступна только оператору (раздел «Оператор»), который её удаляет. Это известное ограничение. При удалении команды хук `beforeDelete` удаляет её членства и ставит `revokedAt` всем её ключам (с `NOTIFY sbx_identity`).
+Удаляет только оператор в `/admin` [решение S8]: у `web` нет доступа к runtime, а удалить команду с живыми sandbox нельзя. Порядок: оператор в разделе «Оператор» (`/app/operator`, §9.10) видит sandbox и снапшоты команды и удаляет их; кнопка удаления команды в `/admin` (custom action) перед удалением вызывает из браузера оператора `GET /v1/sandboxes?allTeams=true&teamId=…&limit=1` и `GET /v1/snapshots` с `Umiak-Team` и отказывает, если что-то есть. Environments команды оператор тоже удаляет заранее (`DELETE /v1/environments/...`), проверка их учитывает. Между проверкой и удалением возможна гонка (кто-то успел создать sandbox); она не опасна: `api` больше не найдёт членств в команде, и такая sandbox доступна только оператору (раздел «Оператор»), который её удаляет. Это известное ограничение. При удалении команды хук `beforeDelete` удаляет её членства и ставит `revokedAt` всем её ключам (с `NOTIFY umiak_identity`).
 
 ## 7. Коллекции Payload (схема `payload`)
 
@@ -198,7 +198,7 @@ S8 — человеческое лицо платформы. Операторы 
 | `ssh-keys` | по S7 §17.3: `user`, `name`, `publicKey`, `fingerprint` (unique), `type`, `lastUsedAt`, `createdAt` | оператор может удалить |
 | `templates` | `slug` (unique, `[a-z0-9-]{1,40}`), `name`, `description`, `os` (`linux` \| `windows`), `enabled`, `defaultSize` (slug), `allowedSizes` (slugs), `loginUser` (по умолчанию `user`), `capabilities` (`exec`, `files`, `ssh`, `desktop`), `sortOrder` | S6 §5.11, S7 §13. Валидация: `defaultSize ∈ allowedSizes`, slug размеров существуют. Slug не меняется после создания (его хранят `template_builds` и `sandboxes`) |
 | `sizes` | `slug` (unique, например `2gb`), `vcpu`, `memoryMb`, `sortOrder` | slug не меняется; удалить размер, указанный в шаблоне или цели пула, нельзя |
-| `pool-targets` | `template` (slug), `size` (slug), `providerId` (uuid, необязательно, S6 `providers`), `target` (0–50), `maxAgeHours` | unique (`template`, `size`, `providerId`). `providerId` вводится как текст: топология живёт в runtime, список провайдеров — `sbx-admin` до фазы 2 |
+| `pool-targets` | `template` (slug), `size` (slug), `providerId` (uuid, необязательно, S6 `providers`), `target` (0–50), `maxAgeHours` | unique (`template`, `size`, `providerId`). `providerId` вводится как текст: топология живёт в runtime, список провайдеров — `umiak-admin` до фазы 2 |
 | global `platform-defaults` | S6: `ttlSeconds` (null), `maxTtlSeconds`, `idleTimeoutSeconds` (900), `stoppedRetentionDays` (null), `errorRetentionDays` (7), `recoverMinIntervalSeconds` (600); S7: `defaultTemplate`, `publicPortsEnabled` (true), `ssoPortPolicy` (`any`), `rateLimits {requestsPerSecond, burst, startsPerMinute}`; S8: `defaultQuota {maxActiveSandboxes, maxRamMb, maxSavedSnapshots}` (для личных команд и пустых полей), `newSharedTeamQuota` (копируется в `teams.quota` при создании общей команды), `maxOwnedTeamsPerUser` (3), `ssoPolicyEpoch` (только чтение, §8) | значения по умолчанию — первая миграция-сид. Квота PoC: 3 sandbox, 6144 MB, 10 снапшотов [решение S8, из бюджета 8 GB] |
 
 `ConfigReader.teamQuota(teamId)` = поля `teams.quota`, где пусто — `defaultQuota` [изменение S6 S3]. Удалённая или несуществующая команда → квота из нулей (create отказывает `quota_exceeded`).
@@ -207,15 +207,15 @@ S8 — человеческое лицо платформы. Операторы 
 
 | Канал | Payload | Кто шлёт | Кто слушает |
 |---|---|---|---|
-| `sbx_identity` | `'<collection>:<id>'` | хуки `users`, `teams`, `memberships`, `api-keys`, `ssh-keys` | `api` (кэш сессий и ключей, S7 §7.2, §7.4), `web` (кэш `resolveSession`) |
-| `sbx_config` | `'<collection-or-global>:<id>'` | хуки `templates`, `sizes`, `pool-targets`, `teams` (квота), global `platform-defaults` | `api`, `worker` (`ConfigReader`, S6 §5.11) |
-| `sbx_routes` | `'*'` | хук `platform-defaults`, если изменились `publicPortsEnabled` или `ssoPortPolicy` | gateway (S4 §6.2, S7 O7) |
-| `sbx_ssh_revoke` | `'user:<id>'`, `'member:<team>:<user>'`, `'key:<id>'`, `'team:<id>'` | хуки `users` (стал неактивным), `memberships` (`afterDelete`), `api-keys` (`revokedAt`), `teams` (`afterDelete`) | gateway: закрыть SSH-сессии (S4 §9.5) |
+| `umiak_identity` | `'<collection>:<id>'` | хуки `users`, `teams`, `memberships`, `api-keys`, `ssh-keys` | `api` (кэш сессий и ключей, S7 §7.2, §7.4), `web` (кэш `resolveSession`) |
+| `umiak_config` | `'<collection-or-global>:<id>'` | хуки `templates`, `sizes`, `pool-targets`, `teams` (квота), global `platform-defaults` | `api`, `worker` (`ConfigReader`, S6 §5.11) |
+| `umiak_routes` | `'*'` | хук `platform-defaults`, если изменились `publicPortsEnabled` или `ssoPortPolicy` | gateway (S4 §6.2, S7 O7) |
+| `umiak_ssh_revoke` | `'user:<id>'`, `'member:<team>:<user>'`, `'key:<id>'`, `'team:<id>'` | хуки `users` (стал неактивным), `memberships` (`afterDelete`), `api-keys` (`revokedAt`), `teams` (`afterDelete`) | gateway: закрыть SSH-сессии (S4 §9.5) |
 
 - `NOTIFY` выполняется **в транзакции запроса Payload** (через сессию адаптера для `req.transactionID`), поэтому Postgres доставляет его только после коммита: слушатель, получив уведомление, читает уже новые данные. Если транзакции нет (вызов Local API без `req`), хук открывает свою короткую транзакцию после записи. Ошибка `NOTIFY` откатывает запись [решение S8]: тихо устаревший кэш хуже явной ошибки.
-- **Порядок для `public`.** Gateway по `'*'` сразу перезапрашивает маршруты у `api`, а `api` мог ещё не обработать `sbx_config`; любой кэш в `api` здесь даёт гонку, после которой gateway закэширует старый ответ. Поэтому `routes.lookup` читает `publicPortsEnabled`, `ssoPortPolicy` и `ssoPolicyEpoch` **без кэша**: одна строка global из Payload на промах кэша gateway [изменение S7 C7]. Нагрузка мала (gateway кэширует маршруты), а приёмка S4 «`403` не позже чем через 1 s» выполняется.
+- **Порядок для `public`.** Gateway по `'*'` сразу перезапрашивает маршруты у `api`, а `api` мог ещё не обработать `umiak_config`; любой кэш в `api` здесь даёт гонку, после которой gateway закэширует старый ответ. Поэтому `routes.lookup` читает `publicPortsEnabled`, `ssoPortPolicy` и `ssoPolicyEpoch` **без кэша**: одна строка global из Payload на промах кэша gateway [изменение S7 C7]. Нагрузка мала (gateway кэширует маршруты), а приёмка S4 «`403` не позже чем через 1 s» выполняется.
 - **Смена `ssoPortPolicy`.** При переходе `any` → `team` старые cookie `sso` посторонних пользователей должны перестать действовать. Хук увеличивает `PlatformDefaults.ssoPolicyEpoch`, а `routes.lookup` для маршрутов `sso` отдаёт `authEpoch = hosted_ports.auth_epoch + ssoPolicyEpoch` (то же значение пишется в `port_auth_codes`) [изменение S7 C7]. Сумма растёт монотонно, gateway сравнивает её с эпохой в cookie (S4 §8.2) и ничего не меняет у себя.
-- `api` при отзыве ключа по API шлёт `sbx_identity` сам (S7 §7.2) — это тот же хук: `api` пишет через Local API.
+- `api` при отзыве ключа по API шлёт `umiak_identity` сам (S7 §7.2) — это тот же хук: `api` пишет через Local API.
 
 ## 9. Дашборд `/app`
 
@@ -223,7 +223,7 @@ S8 — человеческое лицо платформы. Операторы 
 
 - Next.js 16 App Router в том же приложении, что Payload. Маршрутная группа `(app)` рядом с `(payload)`.
 - Серверная часть `/app` только рендерит оболочку: `layout` получает пользователя через `payload.auth({ headers })` (та же стратегия) и отдаёт клиенту `{user, teams, isOperator}`. Страницы — клиентские компоненты.
-- Данные о sandbox, командах, файлах, портах, снапшотах, ключах, SSH-ключах, environments, лимитах — `@sbx/sdk` в браузере, `baseUrl = "/api"` (тот же origin), заголовок `Sbx-Team` на каждый запрос. Кэш, повторы и фоновое обновление — TanStack Query.
+- Данные о sandbox, командах, файлах, портах, снапшотах, ключах, SSH-ключах, environments, лимитах — `@umiak/sdk` в браузере, `baseUrl = "/api"` (тот же origin), заголовок `Umiak-Team` на каждый запрос. Кэш, повторы и фоновое обновление — TanStack Query.
 - Команды и участники, переименование команды, команда по умолчанию — server actions на Payload Local API (§9.11).
 - UI: Tailwind CSS 4 + shadcn/ui (компоненты копируются в `apps/web/src/components/ui`). Терминал и вывод команд — xterm.js 6.
 - Порядок соединений: ingress обязан отдавать HTTP/2 (S12), иначе браузер упрётся в 6 соединений на origin. Дашборд держит не больше одного long-poll и двух NDJSON-стримов на вкладку; остальное закрывается при уходе со страницы.
@@ -254,7 +254,7 @@ S8 — человеческое лицо платформы. Операторы 
 
 ```
 +--------------------------------------------------------------------------------+
-| sbx   [Team: platform-dev v]   Sandboxes  Snapshots  Environments  Keys  Team   |
+| umiak   [Team: platform-dev v]   Sandboxes  Snapshots  Environments  Keys  Team   |
 |                                              [Operator] [Admin]   ilia@... (v) |
 +--------------------------------------------------------------------------------+
 | <page>                                                                          |
@@ -310,7 +310,7 @@ New sandbox
 **Overview.** Свойства, endpoints (`portUrlTemplate`, SSH-команда), последние 10 команд, опубликованные порты.
 
 **Terminal.**
-- Кнопка «New terminal» → `POST /ptys {cols, rows}` (`Idempotency-Key`), затем WebSocket `wss://app.<domain>/api/v1/sandboxes/{sb}/ptys/{cmd}/connect?team=…` с subprotocol `sbx.pty.v1` (S7 §10.2) через `sb.pty()` SDK.
+- Кнопка «New terminal» → `POST /ptys {cols, rows}` (`Idempotency-Key`), затем WebSocket `wss://app.<domain>/api/v1/sandboxes/{sb}/ptys/{cmd}/connect?team=…` с subprotocol `umiak.pty.v1` (S7 §10.2) через `sb.pty()` SDK.
 - xterm.js 6 + `addon-fit` (размер по контейнеру, `resize` кадром), `addon-web-links`, `addon-search`; копирование и вставка средствами браузера.
 - Вкладки терминалов внутри страницы. Открытые PTY sandbox — `GET /commands?mode=pty&status=running`; после перезагрузки страницы дашборд переподключается к ним с `tailBytes = 64 KiB`. PTY без клиента закрывается агентом через 10 min (S7 §10.1) — об этом подсказка у кнопки закрытия вкладки («Detach» оставляет процесс, «Close» шлёт `exit` через `kill`).
 - Переподключение — SDK (по offset); во время паузы — полоска «reconnecting…». Коды закрытия `4409`/`4503` — понятный текст и кнопка повтора.
@@ -333,14 +333,14 @@ New sandbox
 - `GET /files/list` (с пагинацией), хлебные крошки, переход по каталогам, показ скрытых файлов.
 - Просмотр текстового файла до 1 MiB: `GET /files/content` с `Range: bytes=0-1048575`, отображается как текст в `<pre>` (никогда как HTML или через `<iframe>`); бинарный или больший — только скачивание. Редактирования в v1 нет (фаза 2).
 - Скачивание — ссылка на `/api/v1/sandboxes/{sb}/files/content?path=…&team=…` (S7 отдаёт `Content-Disposition: attachment`).
-- Загрузка: drag-and-drop или кнопка; файлы до 64 MiB — `PUT /files/content`, больше — `sb.files.upload()` чанками с прогрессом и докачкой. Каталоги целиком не загружаются (подсказка про `sbx push`).
+- Загрузка: drag-and-drop или кнопка; файлы до 64 MiB — `PUT /files/content`, больше — `sb.files.upload()` чанками с прогрессом и докачкой. Каталоги целиком не загружаются (подсказка про `umiak push`).
 - Mkdir, Move/Rename, Delete (рекурсивно — с подтверждением).
 
 **Ports.**
 
 ```
 Hosted
- 3000  https://quiet-otter-lamp-3000.sbx.example.com   access [token v]  [Copy URL] [Rotate token] [Unpublish]
+ 3000  https://quiet-otter-lamp-3000.umiak.example.com   access [token v]  [Copy URL] [Rotate token] [Unpublish]
 Listening (not published)
  5173  node (vite)  127.0.0.1                                              [Publish...]
 ```
@@ -366,12 +366,12 @@ Fork и Save snapshot работающей Windows-sandbox (S9 §24.8). OS бе�
 ```
 Team API keys (team platform-dev)                                      [+ New key]
  name        prefix…last4   scopes  created by               expires     last used
- ci-main     sbx_a1B2…9xYz  ci      ilia@… (left the team)   2027-01-27  2 min ago   [Rotate] [Revoke]
+ ci-main     umiak_a1B2…9xYz  ci      ilia@… (left the team)   2027-01-27  2 min ago   [Rotate] [Revoke]
 ```
 
-- Ключи — **командные** [решение Ильи 2026-10-29, изменение S7 C5]: принадлежат команде, создатель записан для аудита. `GET /v1/api-keys` видят все участники; кнопки New, Rotate, Revoke — только у `owner`. Людям ключи для CLI не нужны: страница подсказывает `sbx login` (Keycloak, S7 §7.6).
+- Ключи — **командные** [решение Ильи 2026-10-29, изменение S7 C5]: принадлежат команде, создатель записан для аудита. `GET /v1/api-keys` видят все участники; кнопки New, Rotate, Revoke — только у `owner`. Людям ключи для CLI не нужны: страница подсказывает `umiak login` (Keycloak, S7 §7.6).
 - Создатель деактивирован или вышел из команды — у ключа пометка, ключ работает; над таблицей — уведомление синхронизации (§20.1) со списком таких ключей и кнопкой «отозвать выбранные».
-- Создание: имя, пресет (`read-only`, `ci`, `full`) или выбор scopes галочками, срок (по умолчанию 90 дней, максимум 365, S7 §7.2). Секрет — один раз в диалоге с копированием и примерами `export SBX_API_KEY=…` и `sbx login --key-stdin`.
+- Создание: имя, пресет (`read-only`, `ci`, `full`) или выбор scopes галочками, срок (по умолчанию 90 дней, максимум 365, S7 §7.2). Секрет — один раз в диалоге с копированием и примерами `export UMIAK_API_KEY=…` и `umiak login --key-stdin`.
 - Rotate (новый секрет в том же диалоге), Revoke (подтверждение). Отозванные и просроченные — свёрнуты внизу.
 
 ### 9.9 Аккаунт и команда
@@ -385,9 +385,9 @@ Team API keys (team platform-dev)                                      [+ New ke
 
 `/app/operator`, только `isOperator` сессии:
 - Все sandbox всех команд: `GET /v1/sandboxes?allTeams=true` с фильтрами `teamId`, `state`, `q` [изменение S7 C3]; колонка команды (имя команды берётся из Payload в серверном `layout`, список команд передаётся клиенту).
-- Действия: Block / Unblock sandbox (причина `operator` или `abuse` и заметка), Block / Unblock отдельного порта, Stop, Delete (с `Sbx-Team` команды sandbox, S7 §7.4). Переход в страницу sandbox любой команды.
+- Действия: Block / Unblock sandbox (причина `operator` или `abuse` и заметка), Block / Unblock отдельного порта, Stop, Delete (с `Umiak-Team` команды sandbox, S7 §7.4). Переход в страницу sandbox любой команды.
 - Ссылка на `/admin` для конфигурации.
-- Состояние пула и нод — фаза 2; до тех пор `sbx-admin pool status` (S6 §15.3).
+- Состояние пула и нод — фаза 2; до тех пор `umiak-admin pool status` (S6 §15.3).
 
 ### 9.11 Server actions
 
@@ -433,7 +433,7 @@ Environment — именованный набор настроек команд�
 - `{environment}` — ID (`env_...`) или имя; имя `^[a-z0-9][a-z0-9-]{0,62}$`, уникально в команде.
 - Scopes `environments:read` (в пресетах `read-only`, `ci`, `full`) и `environments:write` (только в `full`), S7 §7.3. На запись (`environments:write`) роль `member` получает `403 forbidden` (`details.reason: "role"`), даже если scope есть: роль проверяется для сессий и для Keycloak JWT. У командного ключа роли нет, ему достаточно scope (S7 §7.5).
 - Значения секретов не отдаются никогда; логгер `api` вырезает `env`, `secrets`, `secretFiles` (как S7 §8.3).
-- CLI (`sbx env-sets list|show|create|set|unset|rm`, `sbx create --environment`) и SDK получают это из OpenAPI; имена команд CLI — исполнителю S7/S8.
+- CLI (`umiak env-sets list|show|create|set|unset|rm`, `umiak create --environment`) и SDK получают это из OpenAPI; имена команд CLI — исполнителю S7/S8.
 
 ### 10.3 Хранение [изменение S6 S1]
 
@@ -464,7 +464,7 @@ unique (team_id) where is_default and deleted_at is null
 |---|---|---|
 | Отзыв ключа, удаление участника, деактивация пользователя в `/admin` | новые запросы `api` | сразу по `NOTIFY`, не позже 30 s (S7 §7.2) |
 | То же | уже открытые стримы и PTY `api` | закрываются по `NOTIFY` (кадр `error` `unauthorized` / close `4401`) [изменение S7 C9] |
-| Удаление участника, деактивация пользователя, отзыв ключа | SSH-сессии gateway | закрываются сразу (`NOTIFY sbx_ssh_revoke`, S4 §9.5); новые входы отклоняются сразу |
+| Удаление участника, деактивация пользователя, отзыв ключа | SSH-сессии gateway | закрываются сразу (`NOTIFY umiak_ssh_revoke`, S4 §9.5); новые входы отклоняются сразу |
 | Деактивация пользователя в `/admin` | `web`, сессии `api` | сразу по `NOTIFY`, не позже 30 s |
 | Деактивация пользователя | `sso`-порты | до 12 h (cookie gateway, S4 §8.4); немедленный отзыв — фаза 2 (§18) |
 | Выключение пользователя или снятие группы в Keycloak | браузер (`web`, `api`) | не позже `cookie-refresh` (5 min) + 30 s кэша (§5.1) |
@@ -473,7 +473,7 @@ unique (team_id) where is_default and deleted_at is null
 | То же | командные ключи, которые он создал | не меняются; `owner`-ы получают уведомление (§20.1) |
 | Шаблоны, размеры, квоты, цели пула, `PlatformDefaults` | `api`, `worker` | сразу по `NOTIFY`, не позже 10 s (S6 §5.11) |
 | `publicPortsEnabled`, `ssoPortPolicy` | gateway | ≤ 1 s (§8) |
-| Блокировка sandbox или порта оператором | gateway, SSH | сразу (триггер `sbx_routes`, S4 §6.2) |
+| Блокировка sandbox или порта оператором | gateway, SSH | сразу (триггер `umiak_routes`, S4 §6.2) |
 
 ## 12. Миграции схемы `payload`
 
@@ -482,33 +482,33 @@ unique (team_id) where is_default and deleted_at is null
 - Миграции применяет **один** Kubernetes Job (`web-migrate`, образ `web`, команда `payload migrate`; в реализации — свой раннер, §21.3) до выката `web`, `api`, `worker` (Helm hook или шаг пайплайна, S12). Адаптер Payload не берёт advisory-блокировку, поэтому миграции при старте подов не выполняются (`prodMigrations` не используются). Порядок с миграциями runtime (`db/migrations`, раннер S6) любой: схемы не ссылаются друг на друга внешними ключами.
 - **Expand/contract** [решение S8 по ревью]: миграция не ломает предыдущую версию кода (новые столбцы — nullable или с default; удаление и переименование — отдельным релизом после того, как старый код ушёл). Поэтому при rolling deploy старые поды продолжают работать на новой схеме.
 - `api`, `worker` и `web` при старте и в readiness проверяют, что **все миграции, известные их коду, применены** (более новые, неизвестные коду, допустимы); иначе `/readyz` (`/healthz` у `web`) отвечает ошибкой: новый под не принимает трафик до Job миграций.
-- Роли Postgres [решение S8, настраивает S12]: Job миграций — отдельная роль `sbx_payload_migrate` (DDL в `payload`). `sbx_web` — DML в `payload`, кроме `INSERT` в таблицы `api_keys` и `ssh_keys` (`web` их никогда не создаёт), без доступа к `runtime`, `tunnel`, `pgboss`. `api` и `worker` — DML в `payload` (Local API пишет ключи, SSH-ключи, пользователей).
+- Роли Postgres [решение S8, настраивает S12]: Job миграций — отдельная роль `umiak_payload_migrate` (DDL в `payload`). `umiak_web` — DML в `payload`, кроме `INSERT` в таблицы `api_keys` и `ssh_keys` (`web` их никогда не создаёт), без доступа к `runtime`, `tunnel`, `pgboss`. `api` и `worker` — DML в `payload` (Local API пишет ключи, SSH-ключи, пользователей).
 
 ## 13. Локальная разработка
 
 - **Dev-прокси** `apps/web/dev/auth-proxy.ts` (Node, без зависимостей сверх `node:http`) изображает ingress + oauth2-proxy:
   - слушает только `127.0.0.1:3000` (отказывается от других адресов);
-  - на каждом запросе вырезает присланные `X-Auth-Request-*` и ставит их из dev-cookie `sbx_dev_identity`;
+  - на каждом запросе вырезает присланные `X-Auth-Request-*` и ставит их из dev-cookie `umiak_dev_identity`;
   - `/__dev/login` — страница выбора личности: email, имя, группы (готовые кнопки «user», «second user», «operator»); `/__dev/logout`;
-  - маршруты как в проде (§5.1): `/api/*` → `127.0.0.1:8081` без `/api`, `/sbx-auth/*` → `127.0.0.1:8081`, остальное → `next dev` на `127.0.0.1:3001`; WebSocket upgrade проксируется.
+  - маршруты как в проде (§5.1): `/api/*` → `127.0.0.1:8081` без `/api`, `/umiak-auth/*` → `127.0.0.1:8081`, остальное → `next dev` на `127.0.0.1:3001`; WebSocket upgrade проксируется.
 - В `web` и `api` нет ни флагов, ни веток кода «dev auth»: они получают те же заголовки, что в проде. Каталог `dev/` исключён из сборки образа (`.dockerignore`, проверка в CI, что в `.next/standalone` нет `auth-proxy`).
-- `pnpm --filter @sbx/web dev` поднимает `next dev` и прокси; Postgres — из общего dev-окружения S6 (docker compose или testcontainers); `api` с `PayloadIdentityStore` — по инструкции S7. Без `api` работают `/admin` и страницы команд, дашборд sandbox показывает «API недоступен».
-- `SBX_OPERATOR_GROUPS` в dev — `sbx-operators`.
-- CLI в dev: командный ключ (`sbx login --key-stdin`) или Keycloak из общего dev-окружения (`kc.sh start-dev` в контейнере с импортом realm `sbx` из `infra/keycloak/`, S12) для проверки device grant и JWT.
+- `pnpm --filter @umiak/web dev` поднимает `next dev` и прокси; Postgres — из общего dev-окружения S6 (docker compose или testcontainers); `api` с `PayloadIdentityStore` — по инструкции S7. Без `api` работают `/admin` и страницы команд, дашборд sandbox показывает «API недоступен».
+- `UMIAK_OPERATOR_GROUPS` в dev — `umiak-operators`.
+- CLI в dev: командный ключ (`umiak login --key-stdin`) или Keycloak из общего dev-окружения (`kc.sh start-dev` в контейнере с импортом realm `umiak` из `infra/keycloak/`, S12) для проверки device grant и JWT.
 
 ## 14. Сборка и деплой (форма; детали — S12)
 
 ### 14.1 Образ
 
-- Next `output: "standalone"`, образ `sbx-web` (Node 26 slim, непривилегированный пользователь). В том же образе — CLI Payload для Job миграций.
-- Конфигурация через env: `DATABASE_URL`, `PAYLOAD_SECRET` (Payload требует, хотя JWT не используются), `SBX_APP_ORIGIN`, `SBX_OPERATOR_GROUPS`, `SBX_SBX_DOMAIN` (для CSP `frame-src`), `SBX_API_PUBLIC_URL` (подсказки в UI). Секретов данных (`SBX_DATA_KEYS_FILE`) у `web` нет.
+- Next `output: "standalone"`, образ `umiak-web` (Node 26 slim, непривилегированный пользователь). В том же образе — CLI Payload для Job миграций.
+- Конфигурация через env: `DATABASE_URL`, `PAYLOAD_SECRET` (Payload требует, хотя JWT не используются), `UMIAK_APP_ORIGIN`, `UMIAK_OPERATOR_GROUPS`, `UMIAK_PREVIEW_DOMAIN` (для CSP `frame-src`), `UMIAK_API_PUBLIC_URL` (подсказки в UI). Секретов данных (`UMIAK_DATA_KEYS_FILE`) у `web` нет.
 
 ### 14.2 Kubernetes
 
 - Deployment `web`: 2 реплики, exec-пробы readiness/liveness на `/healthz` (§5.1), `terminationGracePeriodSeconds: 30`.
 - Job `web-migrate` (§12).
 - NetworkPolicy: вход в `web :3000` — только от подов oauth2-proxy (без адресов нод); выход — Postgres.
-- `api` и `worker` подключают `@sbx/payload` как библиотеку; им нужны `DATABASE_URL`, `PAYLOAD_SECRET`, `SBX_OPERATOR_GROUPS` (`api`).
+- `api` и `worker` подключают `@umiak/payload` как библиотеку; им нужны `DATABASE_URL`, `PAYLOAD_SECRET`, `UMIAK_OPERATOR_GROUPS` (`api`).
 - oauth2-proxy: upstream-режим, alpha config (§5.1), `--cookie-name=__Host-oauth2_proxy`, `--upstream-timeout ≥ 660s` (S7 §17.6), WebSocket. Ingress: HTTP/2, буферизация ответа выключена для NDJSON (S7 §17.6).
 
 ### 14.3 Граница данных `web`
@@ -526,7 +526,7 @@ unique (team_id) where is_default and deleted_at is null
 **Интеграционные** (Postgres 18, Payload с миграциями, без Next):
 - одновременные первые запросы одного пользователя (10 параллельных) → один пользователь, одна личная команда;
 - **контрактный набор `IdentityStore`** в `packages/auth` — один набор тестов, который проходят `StaticIdentityStore` (S7) и `PayloadIdentityStore`; аналогично для `ConfigReader` (`StaticConfigReader` и `PayloadConfigReader`);
-- `NOTIFY`: слушатель получает уведомление только после коммита и читает новые данные; откат записи — уведомления нет; изменение `publicPortsEnabled` даёт `sbx_config` и `sbx_routes '*'`;
+- `NOTIFY`: слушатель получает уведомление только после коммита и читает новые данные; откат записи — уведомления нет; изменение `publicPortsEnabled` даёт `umiak_config` и `umiak_routes '*'`;
 - доступ к REST Payload (`/cms-api/*`): пользователь без группы оператора получает `403` на чтение и запись каждой коллекции и global; создание `api-keys` в админке запрещено всем;
 - таблицы схемы `payload` не пересекаются по именам с `runtime`, `tunnel`, `pgboss` после всех миграций;
 - миграции: чистая БД → последняя версия; повторный запуск ничего не делает; дрейф схемы в CI.
@@ -541,7 +541,7 @@ unique (team_id) where is_default and deleted_at is null
 - `ssoPortPolicy` `any` → `team`: старая `sso`-cookie постороннего пользователя перестаёт действовать (эпоха выросла); выключение `public` → `routes.lookup` сразу отдаёт `blocked`;
 - отзыв ключа при открытом стриме и PTY → стрим получает `error unauthorized`, PTY закрывается `4401`;
 - вход: смена email в IdP при том же `sub` обновляет пользователя; чужой `sub` с занятым email → `403`;
-- Keycloak (тестовый realm в контейнере): вход в браузер и `sbx login` дают одного пользователя по `sub`; выключение пользователя в Keycloak → после прохода `ctl-idp-sync` `active: false`, открытый стрим получает `error unauthorized`, PTY закрывается `4401`, SSH-сессия закрыта, `owner`-ы видят уведомление со списком его командных ключей, ключи работают; удаление пользователя → `idp_deleted`; включение обратно → снова активен; ответ Keycloak с пустым списком не деактивирует никого (`sbx_idp_sync_aborted`);
+- Keycloak (тестовый realm в контейнере): вход в браузер и `umiak login` дают одного пользователя по `sub`; выключение пользователя в Keycloak → после прохода `ctl-idp-sync` `active: false`, открытый стрим получает `error unauthorized`, PTY закрывается `4401`, SSH-сессия закрыта, `owner`-ы видят уведомление со списком его командных ключей, ключи работают; удаление пользователя → `idp_deleted`; включение обратно → снова активен; ответ Keycloak с пустым списком не деактивирует никого (`umiak_idp_sync_aborted`);
 - командный ключ: создатель вышел из команды → ключ работает, у ключа пометка; `member` не видит кнопок выпуска;
 - environments (вторая очередь): создание `owner`-ом, create с ней, значения в госте (фейковый агент получил наборы), `member` не может изменить, значения секретов нигде в ответах.
 
@@ -549,7 +549,7 @@ unique (team_id) where is_default and deleted_at is null
 - запрос к `web` без `X-Auth-Request-Email` → `401`; присланный клиентом `X-Auth-Request-Email` вырезается прокси (dev-прокси повторяет поведение oauth2-proxy; в стенде S12 — тот же тест против настоящего oauth2-proxy);
 - server action и `POST /cms-api/*` с чужим `Origin` → `403`;
 - ни один ответ `web` и `/cms-api` не содержит `secretHash`, значений секретов, токенов портов (поиск по ответам E2E);
-- образ `sbx-web` не содержит `auth-proxy`.
+- образ `umiak-web` не содержит `auth-proxy`.
 
 **Критерий готовности S8 (MVP, первая очередь):** unit, интеграционные и E2E-тесты проходят; `api` работает с `PayloadIdentityStore` и `worker`/`api` — с `PayloadConfigReader` на стенде `pve`; сценарий «новый пользователь → терминал за минуту» проходит вручную через настоящий oauth2-proxy и IdP (S12).
 
@@ -566,7 +566,7 @@ unique (team_id) where is_default and deleted_at is null
 | Стили и компоненты | `tailwindcss` / `shadcn` (CLI) | 4.3.3 / 4.23.0 |
 | Данные на клиенте | `@tanstack/react-query` | 5.105.0 |
 | Терминал и вывод | `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`, `@xterm/addon-search` | 6.0.0, 0.11.0, 0.12.0, 0.16.0 |
-| Клиент API | `@sbx/sdk` (S7) | workspace |
+| Клиент API | `@umiak/sdk` (S7) | workspace |
 | Валидация | `zod` | как в S7 (4.6.7) |
 | E2E | `@playwright/test` | 1.64.1 |
 | Unit | `vitest` | 5.0.5 |
@@ -594,13 +594,13 @@ unique (team_id) where is_default and deleted_at is null
 | C6 | `Principal.isOperator = true` только для браузерной сессии; у principal-а по API-ключу и по Keycloak JWT — всегда `false`. `ssh/authorize` пускает только участников команды sandbox (правило «или оператор» из S7 §12.1 убирается) | §5.5 |
 | C7 | `routes.lookup` читает `publicPortsEnabled`, `ssoPortPolicy`, `ssoPolicyEpoch` без кэша; для `sso`-маршрутов `authEpoch = hosted_ports.auth_epoch + ssoPolicyEpoch`, то же значение — в `port_auth_codes` и проверке SSO (S7 §7.7) | §8 |
 | C8 | `resolveSession` у деактивированного пользователя → `403 forbidden` (`details.reason: "user_disabled"`), а не JIT; у `SessionIdentity` есть `defaultTeamId`; `X-Auth-Request-User` (`sub`) обязателен, поиск — §5.3 | §5.3 |
-| C9 | `api` ведёт реестр открытых NDJSON-стримов и PTY WebSocket по `(userId, apiKeyId, teamId)` и по `NOTIFY sbx_identity` закрывает те, чей principal больше не проходит проверку (ключ отозван, участник удалён, пользователь деактивирован): кадр `error` с `code: unauthorized`, `retryable: false` / close `4401`. SSH-сессии в тех же случаях закрывает gateway по `NOTIFY sbx_ssh_revoke` из хуков (§8, S4 §9.5) | §11 |
+| C9 | `api` ведёт реестр открытых NDJSON-стримов и PTY WebSocket по `(userId, apiKeyId, teamId)` и по `NOTIFY umiak_identity` закрывает те, чей principal больше не проходит проверку (ключ отозван, участник удалён, пользователь деактивирован): кадр `error` с `code: unauthorized`, `retryable: false` / close `4401`. SSH-сессии в тех же случаях закрывает gateway по `NOTIFY umiak_ssh_revoke` из хуков (§8, S4 §9.5) | §11 |
 | C10 | Keycloak: `api` принимает access token Keycloak (S7 §7.10) и вызывает тот же `resolveSession`; `/v1/meta.oidc`. Правило `owner_inactive` (30 дней без браузерной сессии) отменено: его заменяет синхронизация с Keycloak (§20.1) | §20.1 |
 
 **Семантика блокировки (C3)** [решение S8 по ревью]:
 - **Sandbox заблокирована:** все её маршруты приходят gateway с `blocked: true` и её `blockReason` (S4 §6.1); `ssh/authorize` отказывает. Для всех, кроме оператора, разрешены только чтение (get, list, operations, список команд, вывод команд, чтение и список файлов, `GET /env`, `GET /ports`) и `stop`, `delete`. Остальное — `403 forbidden` с `details.reason: "sandbox_blocked"`: exec и PTY, запись файлов, публикация и смена режима портов, `resume`, `fork`, `recover`, `extend`, save snapshot, `PUT`/`PATCH /env`, `PATCH` (в том числе slug). Так блокировку нельзя обойти через fork, снапшот или переименование.
 - **Порт заблокирован:** gateway получает `blocked: true`. Для всех, кроме оператора, `PUT /ports/{port}`, `rotate-token` и `DELETE /ports/{port}` этого порта — `403 forbidden` (`details.reason: "port_blocked"`): блокировка переживает попытку снять и заново опубликовать порт.
-- Оператор может всё; `unblock` снимает ограничения сразу (триггер `sbx_routes`).
+- Оператор может всё; `unblock` снимает ограничения сразу (триггер `umiak_routes`).
 
 Исполнитель: изменения C1–C10 вносит исполнитель S8 в `apps/api` (по прецеденту S7 §20.2), согласуя с треком `s7-impl`; если `s7-impl` ещё не слит — передаёт ему как дополнения к замороженному интерфейсу. OpenAPI регенерируется, `oasdiff` не должен находить ломающих изменений (всё — добавления). C6 и семантика блокировки — уточнения поведения, а не формы API.
 
@@ -611,9 +611,9 @@ unique (team_id) where is_default and deleted_at is null
 | S1 | Таблица `runtime.environments` и `EnvironmentService` (§10.3); в `sandboxes` — `environment_id`, `environment_revision`, `exclude_owner_secrets`; `create` принимает `environment` и сливает наборы до шифрования; ротация ключей данных перешифровывает и `environments` |
 | S2 | `patchEnv(p, id, patch)` — merge по ключам внутри `core` (расшифровать, слить, зашифровать), с доставкой агенту как у `updateEnv` |
 | S3 | `teamQuota(teamId)` = `teams.quota` с подстановкой `PlatformDefaults.defaultQuota` для пустых полей; несуществующая команда → нули |
-| S4 | Блокировки: столбцы и триггер уже входят в добавление S7 §20.2 п. 3 (`hosted_ports.blocked`, `block_reason`, «блокировка sandbox оператором»); S8 их не дублирует, а уточняет: в `sandboxes` — `blocked bool`, `block_reason text null`, `blocked_at`, `blocked_by uuid null`; триггер `sbx_routes` (S7 O7) срабатывает и на изменение этих полей; `routes.lookup` отдаёт `blocked` = блокировка порта ИЛИ блокировка sandbox ИЛИ `public` при выключенном `publicPortsEnabled`, причина — в этом порядке; проверки семантики блокировки (§17.1) в `SandboxService`; `list` с `allTeams` для операторов. Кто первый реализует (S7 или S8) — по готовности треков, второй использует |
+| S4 | Блокировки: столбцы и триггер уже входят в добавление S7 §20.2 п. 3 (`hosted_ports.blocked`, `block_reason`, «блокировка sandbox оператором»); S8 их не дублирует, а уточняет: в `sandboxes` — `blocked bool`, `block_reason text null`, `blocked_at`, `blocked_by uuid null`; триггер `umiak_routes` (S7 O7) срабатывает и на изменение этих полей; `routes.lookup` отдаёт `blocked` = блокировка порта ИЛИ блокировка sandbox ИЛИ `public` при выключенном `publicPortsEnabled`, причина — в этом порядке; проверки семантики блокировки (§17.1) в `SandboxService`; `list` с `allTeams` для операторов. Кто первый реализует (S7 или S8) — по готовности треков, второй использует |
 | S5 | `ConfigReader.defaults()` возвращает и поля S7/S8 `PlatformDefaults` (§7) |
-| S6 | Контроллер `ctl-idp-sync` в `apps/worker` (очередь `exclusive`, раз в 300 s, как контроллеры S6 §15.1); логика — в `@sbx/payload` (§20.1) |
+| S6 | Контроллер `ctl-idp-sync` в `apps/worker` (очередь `exclusive`, раз в 300 s, как контроллеры S6 §15.1); логика — в `@umiak/payload` (§20.1) |
 
 ### 17.3 Миграции runtime
 
@@ -623,11 +623,11 @@ unique (team_id) where is_default and deleted_at is null
 
 ### 17.4 S4
 
-`blockReason` уже содержит `operator`, `public_disabled`, `abuse` (S4 §6.1); `'*'` в `sbx_routes` шлёт хук S8 (§8). Новое: вход по SSH-сертификатам и `NOTIFY sbx_ssh_revoke` (S4 §9.2, §9.5).
+`blockReason` уже содержит `operator`, `public_disabled`, `abuse` (S4 §6.1); `'*'` в `umiak_routes` шлёт хук S8 (§8). Новое: вход по SSH-сертификатам и `NOTIFY umiak_ssh_revoke` (S4 §9.2, §9.5).
 
 ### 17.5 S12
 
-Keycloak в кластере рядом с control plane, realm `sbx` и клиенты по architecture §10; секрет клиента `sbx-worker` для `worker`. oauth2-proxy в upstream-режиме с alpha config и провайдером `keycloak-oidc` (§5.1): заголовки из claims (`X-Auth-Request-User` = `sub`), маршрутизация по путям, `--cookie-refresh=5m`, `--cookie-expire` ≤ 12 h, только подтверждённый email; HTTP/2 на ingress; Job миграций Payload до выката; роли Postgres (§12); exec-пробы и NetworkPolicy для `web` только от oauth2-proxy (§5.1, §14.2); группа операторов (`SBX_OPERATOR_GROUPS`) в IdP.
+Keycloak в кластере рядом с control plane, realm `umiak` и клиенты по architecture §10; секрет клиента `umiak-worker` для `worker`. oauth2-proxy в upstream-режиме с alpha config и провайдером `keycloak-oidc` (§5.1): заголовки из claims (`X-Auth-Request-User` = `sub`), маршрутизация по путям, `--cookie-refresh=5m`, `--cookie-expire` ≤ 12 h, только подтверждённый email; HTTP/2 на ingress; Job миграций Payload до выката; роли Postgres (§12); exec-пробы и NetworkPolicy для `web` только от oauth2-proxy (§5.1, §14.2); группа операторов (`UMIAK_OPERATOR_GROUPS`) в IdP.
 
 ### 17.6 `docs/architecture.md`
 
@@ -658,10 +658,10 @@ Keycloak в кластере рядом с control plane, realm `sbx` и кли�
 - **Браузер.** Выключенный в Keycloak пользователь теряет `/app` и `/admin` при следующем `cookie-refresh` oauth2-proxy (5 min, §5.1).
 - **CLI, SDK, MCP.** Личных долгоживущих ключей у людей нет (S7 §7.6): выключенный пользователь не может обновить токен, доступ кончается в пределах срока access token (5 min).
 - **Командные ключи** принадлежат команде и уходом создателя не выключаются (S7 §7.2); решение об их отзыве принимают `owner`-ы.
-- **Синхронизация.** Контроллер `ctl-idp-sync` в `worker` раз в 300 s (`SBX_IDP_SYNC_INTERVAL`) читает Keycloak Admin REST API клиентом `sbx-worker` (client credentials, service account с ролью `view-users` клиента `realm-management`, architecture §10): `GET /admin/realms/sbx/users?briefRepresentation=true&first=&max=` постранично (библиотека не нужна, хватает `fetch`). Сопоставление — `users.idpSubject` = `id` пользователя Keycloak (= `sub`).
-  - Активный пользователь платформы, у которого в Keycloak `enabled: false`, — деактивируется с `deactivatedReason: idp_disabled`; отсутствующий в полном списке — с `idp_deleted`, но только если `GET /admin/realms/sbx/users/{id}` подтверждает `404` (постраничный обход может пропустить пользователя, если список меняется во время прохода). Заготовки (без `idpSubject`) не трогаются.
-  - Изменения применяются только после полного успешного обхода. Если за один проход выходит деактивировать больше 20% активных пользователей (и больше 5), контроллер ничего не меняет и поднимает метрику тревоги `sbx_idp_sync_aborted`: так ошибка конфигурации или пустой ответ не выключат всех.
-  - Деактивация — тот же путь, что деактивация оператором в `/admin` и удаление участника: `active: false`, `deactivatedAt` через Local API, хуки шлют `NOTIFY sbx_identity` → `api` отклоняет сессии и JWT (`403 user_disabled`), закрывает стримы и PTY (C9), и `NOTIFY sbx_ssh_revoke 'user:<id>'` → gateway закрывает SSH-сессии (§8, S4 §9.5). Членства остаются для аудита и доступа не дают.
+- **Синхронизация.** Контроллер `ctl-idp-sync` в `worker` раз в 300 s (`UMIAK_IDP_SYNC_INTERVAL`) читает Keycloak Admin REST API клиентом `umiak-worker` (client credentials, service account с ролью `view-users` клиента `realm-management`, architecture §10): `GET /admin/realms/umiak/users?briefRepresentation=true&first=&max=` постранично (библиотека не нужна, хватает `fetch`). Сопоставление — `users.idpSubject` = `id` пользователя Keycloak (= `sub`).
+  - Активный пользователь платформы, у которого в Keycloak `enabled: false`, — деактивируется с `deactivatedReason: idp_disabled`; отсутствующий в полном списке — с `idp_deleted`, но только если `GET /admin/realms/umiak/users/{id}` подтверждает `404` (постраничный обход может пропустить пользователя, если список меняется во время прохода). Заготовки (без `idpSubject`) не трогаются.
+  - Изменения применяются только после полного успешного обхода. Если за один проход выходит деактивировать больше 20% активных пользователей (и больше 5), контроллер ничего не меняет и поднимает метрику тревоги `umiak_idp_sync_aborted`: так ошибка конфигурации или пустой ответ не выключат всех.
+  - Деактивация — тот же путь, что деактивация оператором в `/admin` и удаление участника: `active: false`, `deactivatedAt` через Local API, хуки шлют `NOTIFY umiak_identity` → `api` отклоняет сессии и JWT (`403 user_disabled`), закрывает стримы и PTY (C9), и `NOTIFY umiak_ssh_revoke 'user:<id>'` → gateway закрывает SSH-сессии (§8, S4 §9.5). Членства остаются для аудита и доступа не дают.
   - Пользователь, снова включённый в Keycloak, активируется при следующем проходе, если его выключила синхронизация (`idp_*`). Деактивацию оператором (`operator`) синхронизация не снимает.
   - **Уведомление `owner`-ам** каждой команды, где пользователь был участником: запись в коллекции `team-notices` (`team`, `kind: member_deactivated`, `user`, `apiKeys[]` — командные ключи, которые он создал, `createdAt`, `acknowledgedBy`), баннер на странице ключей и команды (§9.8). Писем нет (как в §6.3). Ключи автоматически не отзываются. Если у команды не осталось активного `owner`, уведомление видят операторы (список «команды без активного owner» в `/admin`), они назначают нового `owner` или отзывают ключи.
 - Правило «30 дней без браузерной сессии» (`apiKeyOwnerInactivityDays`, `owner_inactive`) отменено.
@@ -672,6 +672,8 @@ Keycloak в кластере рядом с control plane, realm `sbx` и кли�
 - Квота по умолчанию для команды (PoC: 3 sandbox, 6144 MB, 10 снапшотов) — пересмотреть после замеров S6 и появления второй ноды.
 
 ## 21. Реализация MVP (`s8-impl`)
+
+> Исторический отчёт до R1; действующие имена — `docs/specs/rename-umiak.md`.
 
 Добавлено после реализации (ветка `s8-impl`, 2026-10-31). Здесь записано, что сделано иначе или подробнее, чем в разделах выше; такие места выше помечены ссылкой на §21. «Решение N» — список «Решения исполнителя» в `docs/plans/s8-web.md`; остальное решено по ходу реализации. Разделы 1–20 остаются историей согласования.
 

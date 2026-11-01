@@ -31,17 +31,17 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ext"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/ext"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // DefaultDurableTimeout bounds a state.db write made for an RPC.
@@ -169,7 +169,7 @@ func New(opts Options) (*Manager, error) {
 
 // Start prepares the run-time files at boot: it mounts the secrets tmpfs,
 // creates secrets/ (0750 root:<user group>), files/ and cmd-spec/ (0700),
-// creates empty secrets/env and /etc/sbx/env if missing, loads the stored
+// creates empty secrets/env and /etc/umiak/env if missing, loads the stored
 // claim and sets the claim and secrets phases. The secrets phase is ready
 // without a claim, with an empty secret set, or when the tmpfs content
 // matches the stored digest; otherwise it is pending until UpdateSecrets.
@@ -233,7 +233,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // prepareDirs creates the tmpfs directories and the always-present env
 // files. Paths the layout leaves empty (Windows has no cmd-spec/ and no
-// /etc/sbx/env) are skipped.
+// /etc/umiak/env) are skipped.
 func (m *Manager) prepareDirs() error {
 	for _, d := range []struct {
 		path  string
@@ -261,15 +261,15 @@ func (m *Manager) prepareDirs() error {
 			}
 		}
 	}
-	if m.l.SbxEnvFile == "" {
+	if m.l.UmiakEnvFile == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(m.l.SbxEnvFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(m.l.UmiakEnvFile), 0o755); err != nil {
 		return fmt.Errorf("claim: %w", err)
 	}
-	if _, err := os.Lstat(m.l.SbxEnvFile); errors.Is(err, fs.ErrNotExist) {
-		if err := m.writeFile(m.l.SbxEnvFile, nil, 0o644); err != nil {
-			return fmt.Errorf("claim: create sbx env: %w", err)
+	if _, err := os.Lstat(m.l.UmiakEnvFile); errors.Is(err, fs.ErrNotExist) {
+		if err := m.writeFile(m.l.UmiakEnvFile, nil, 0o644); err != nil {
+			return fmt.Errorf("claim: create umiak env: %w", err)
 		}
 	}
 	return nil
@@ -328,7 +328,7 @@ func (m *Manager) Claim(ctx context.Context, req *agentv1.ClaimRequest) (*agentv
 			return nil, internal("set hostname", err)
 		}
 	}
-	if err := m.writeSbxEnv(req, req.GetEnv()); err != nil {
+	if err := m.writeUmiakEnv(req, req.GetEnv()); err != nil {
 		return nil, err
 	}
 	stripped := strip(req)
@@ -633,7 +633,7 @@ func (m *Manager) applyLocked(ctx context.Context, u update) error {
 // stores rec.
 func (m *Manager) applyFiles(ctx context.Context, u update, next *agentv1.ClaimRequest, rec *store.Claim) error {
 	if u.setEnv {
-		if err := m.writeSbxEnv(next, u.env); err != nil {
+		if err := m.writeUmiakEnv(next, u.env); err != nil {
 			return err
 		}
 		next.Env = maps.Clone(u.env)

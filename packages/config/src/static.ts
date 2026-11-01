@@ -266,7 +266,7 @@ function formatIssues(source: string, err: z.ZodError): string {
 	return `invalid config ${source}:\n${lines.join("\n")}`;
 }
 
-/** Configuration from a YAML file (SBX_CONFIG_FILE). Used until the Payload reader (S8) exists. */
+/** Configuration from a YAML file (UMIAK_CONFIG_FILE). Used until the Payload reader (S8) exists. */
 export class StaticConfigReader implements ConfigReader {
 	readonly #templates: Map<string, TemplateConfig>;
 	readonly #sizes: Map<string, SizeConfig>;

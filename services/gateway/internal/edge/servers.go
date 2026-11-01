@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/config"
 )
 
 // Limits of the public servers (spec 7.7, constraints of the tunnel
@@ -21,12 +21,12 @@ const (
 	tunnelMaxHeaderBytes    = 16 << 10
 )
 
-// NewSbxServer returns the server of *.sbx conns from Dispatcher.Sbx: HTTP/1
+// NewUmiakServer returns the server of *.umiak conns from Dispatcher.Umiak: HTTP/1
 // and HTTP/2 over the pre-handshaked *tls.Conn (the negotiated ALPN picks
 // the protocol), so it needs no TLSConfig. HTTP/2 SETTINGS carry no
 // ENABLE_CONNECT_PROTOCOL: the process never sets GODEBUG=http2xconnect
 // (spec 7.3). net/http recovers handler panics per conn.
-func NewSbxServer(h http.Handler, t config.Timeouts) *http.Server {
+func NewUmiakServer(h http.Handler, t config.Timeouts) *http.Server {
 	var p http.Protocols
 	p.SetHTTP1(true)
 	p.SetHTTP2(true)
@@ -58,10 +58,10 @@ func NewTunnelServer(h http.Handler, t config.Timeouts) *http.Server {
 }
 
 // NewPlainServer returns the server of the plain listener (spec 5.2): HTTP/1
-// and cleartext HTTP/2 with prior knowledge, with the timeouts of the sbx
+// and cleartext HTTP/2 with prior knowledge, with the timeouts of the umiak
 // server.
 func NewPlainServer(h http.Handler, t config.Timeouts) *http.Server {
-	s := NewSbxServer(h, t)
+	s := NewUmiakServer(h, t)
 	var p http.Protocols
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)

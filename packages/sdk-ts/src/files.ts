@@ -14,7 +14,7 @@
 
 import type { CallOptions } from "./client.ts";
 import { callOf, type SandboxRef } from "./commands.ts";
-import { NETWORK_ERROR, SbxError } from "./errors.ts";
+import { NETWORK_ERROR, UmiakError } from "./errors.ts";
 import type { components } from "./gen/v1.d.ts";
 import { fsPromises, sha256Hasher, tarCreate, tarExtract } from "./node.ts";
 import { paginate } from "./pages.ts";
@@ -328,7 +328,7 @@ export class Files {
 					const mismatch = mismatchOffset(err);
 					if (mismatch === null) {
 						// A chunk PUT is safe to repeat (the offset guards it).
-						if (!(err instanceof SbxError) || !isRetryable(err, true)) {
+						if (!(err instanceof UmiakError) || !isRetryable(err, true)) {
 							throw err;
 						}
 						failures += 1;
@@ -362,7 +362,7 @@ export class Files {
 					if (!counted) {
 						failures += 1;
 						if (failures >= MAX_FAILURES) {
-							throw new SbxError({
+							throw new UmiakError({
 								status: 0,
 								code: "upload_offset_mismatch",
 								message: `the upload stays at ${serverOffset} after ${failures} attempts`,
@@ -375,7 +375,7 @@ export class Files {
 				} else if (serverOffset === 0 && source.seekable) {
 					// The agent lost the upload: start again from the first byte.
 					if (restarts + 1 >= MAX_FAILURES) {
-						throw new SbxError({
+						throw new UmiakError({
 							status: 0,
 							code: "upload_offset_mismatch",
 							message: `the agent lost the upload ${restarts + 1} times`,
@@ -386,7 +386,7 @@ export class Files {
 					await sleep(retryDelayMs(undefined, restarts), call.signal);
 					return await this.#upload(path, src, opts, restarts + 1);
 				} else {
-					throw new SbxError({
+					throw new UmiakError({
 						status: 0,
 						code: "upload_offset_mismatch",
 						message: `the upload is at ${serverOffset}, this client at ${chunkStart}`,
@@ -414,7 +414,7 @@ export class Files {
 		}
 	}
 
-	/** Sbx-Upload-Offset of HEAD; 0 when the agent has no upload; null when unknown. */
+	/** Umiak-Upload-Offset of HEAD; 0 when the agent has no upload; null when unknown. */
 	async #headOffset(
 		uploadPath: { path: { sandbox: string; upload: string } },
 		call: CallOptions,
@@ -426,8 +426,8 @@ export class Files {
 			});
 			return uploadOffset(response, undefined);
 		} catch (err) {
-			if (err instanceof SbxError && err.status === 404) return 0;
-			if (err instanceof SbxError && isRetryable(err, true)) return null;
+			if (err instanceof UmiakError && err.status === 404) return 0;
+			if (err instanceof UmiakError && isRetryable(err, true)) return null;
 			throw err;
 		}
 	}
@@ -507,7 +507,7 @@ export class Files {
 				} catch (err) {
 					if (call.signal?.aborted) throw call.signal.reason;
 					if (
-						err instanceof SbxError &&
+						err instanceof UmiakError &&
 						err.code === "range_not_satisfiable" &&
 						total !== null &&
 						received >= total
@@ -515,9 +515,9 @@ export class Files {
 						ok = true;
 						return { sizeBytes: received, etag };
 					}
-					if (err instanceof SbxError && !isRetryable(err, true)) throw err;
+					if (err instanceof UmiakError && !isRetryable(err, true)) throw err;
 					lastError =
-						err instanceof SbxError
+						err instanceof UmiakError
 							? err
 							: broken(`the download broke: ${String(err)}`, err);
 				}
@@ -639,7 +639,7 @@ export class Files {
 					} catch (err) {
 						if (call.signal?.aborted) throw call.signal.reason;
 						// A broken download: repeat the whole archive.
-						throw err instanceof SbxError
+						throw err instanceof UmiakError
 							? err
 							: broken(`the archive download broke: ${String(err)}`, err);
 					}
@@ -722,8 +722,8 @@ function writeQuery(path: string, o: WriteOptions) {
 	};
 }
 
-function broken(message: string, cause?: unknown): SbxError {
-	return new SbxError({
+function broken(message: string, cause?: unknown): UmiakError {
+	return new UmiakError({
 		status: 0,
 		code: NETWORK_ERROR,
 		message,
@@ -733,10 +733,10 @@ function broken(message: string, cause?: unknown): SbxError {
 }
 
 function uploadOffset(res: Response, fromBody: number | undefined): number {
-	const h = res.headers.get("Sbx-Upload-Offset");
+	const h = res.headers.get("Umiak-Upload-Offset");
 	const v = h === null ? fromBody : Number(h);
 	if (v === undefined || !Number.isFinite(v)) {
-		throw new SbxError({
+		throw new UmiakError({
 			status: res.status,
 			code: "unexpected_response",
 			message: "the upload answer has no offset",
@@ -749,7 +749,7 @@ function uploadOffset(res: Response, fromBody: number | undefined): number {
 
 /** The current upload size from a 409 upload_offset_mismatch, else null. */
 function mismatchOffset(err: unknown): number | null {
-	if (!(err instanceof SbxError) || err.code !== "upload_offset_mismatch") {
+	if (!(err instanceof UmiakError) || err.code !== "upload_offset_mismatch") {
 		return null;
 	}
 	const v = Number(err.details.offset);
@@ -824,7 +824,7 @@ function streamSource(stream: ReadableStream<Uint8Array>): Source {
 		seekable: false,
 		async read(offset, n) {
 			if (offset !== pos) {
-				throw new SbxError({
+				throw new UmiakError({
 					status: 0,
 					code: "upload_offset_mismatch",
 					message: "a stream source cannot go back",
@@ -911,7 +911,7 @@ async function openSink(
 		},
 		async reset() {
 			if (!wrote) return;
-			throw new SbxError({
+			throw new UmiakError({
 				status: 0,
 				code: "file_changed",
 				message: "the file changed during the download",

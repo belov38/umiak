@@ -1,5 +1,5 @@
-import { AgentOutdatedError, AgentUnavailableError } from "@sbx/agent-client";
-import { SbxError } from "@sbx/core";
+import { AgentOutdatedError, AgentUnavailableError } from "@umiak/agent-client";
+import { UmiakError } from "@umiak/core";
 import { describe, expect, it } from "vitest";
 import {
 	AgentCallError,
@@ -85,12 +85,12 @@ describe("agentErrorToHttp", () => {
 		expect(e.details).toEqual({ reason: "too_many_commands" });
 	});
 
-	it("upload_offset_mismatch carries details.offset and Sbx-Upload-Offset", () => {
+	it("upload_offset_mismatch carries details.offset and Umiak-Upload-Offset", () => {
 		const e = agentErrorToHttp(
 			new AgentCallError("upload_offset_mismatch", "x", { offset: 4096 }),
 		);
 		expect(e.details).toEqual({ offset: 4096 });
-		expect(e.headers).toEqual({ "Sbx-Upload-Offset": "4096" });
+		expect(e.headers).toEqual({ "Umiak-Upload-Offset": "4096" });
 	});
 
 	it("archive errors keep details.entriesWritten", () => {
@@ -264,7 +264,7 @@ describe("agentErrorToHttp", () => {
 		expect(agentErrorToHttp(api)).toBe(api);
 		expect(agentErrorToHttp(new Error("bug")).code).toBe("internal");
 		expect(
-			agentErrorToHttp(new SbxError("not_found", "no sandbox")).status,
+			agentErrorToHttp(new UmiakError("not_found", "no sandbox")).status,
 		).toBe(404);
 	});
 });
@@ -296,17 +296,19 @@ describe("agentHttpError", () => {
 		expect(e.status).toBe(404);
 	});
 
-	it("takes the offset of upload_offset_mismatch from Sbx-Upload-Offset", async () => {
+	it("takes the offset of upload_offset_mismatch from Umiak-Upload-Offset", async () => {
 		const e = await agentHttpError(
 			res(
 				409,
 				JSON.stringify({ code: "upload_offset_mismatch", message: "m" }),
-				{ "Sbx-Upload-Offset": "123" },
+				{ "Umiak-Upload-Offset": "123" },
 			),
 		);
 		expect(e.code).toBe("upload_offset_mismatch");
 		expect(e.details).toEqual({ offset: 123 });
-		expect(agentErrorToHttp(e).headers).toEqual({ "Sbx-Upload-Offset": "123" });
+		expect(agentErrorToHttp(e).headers).toEqual({
+			"Umiak-Upload-Offset": "123",
+		});
 	});
 
 	it("keeps entries_written of an archive error", async () => {

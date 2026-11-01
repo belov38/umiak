@@ -10,11 +10,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // A machine whose tunnel is on this instance is proxied without the
@@ -73,7 +73,7 @@ func TestProxyLocalFirstWithRegistryDown(t *testing.T) {
 			el := time.Since(start)
 			_ = resp.Body.Close()
 			if resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != http.StatusGatewayTimeout {
-				t.Fatalf("status = %d (%s), want 503 or 504", resp.StatusCode, resp.Header.Get("Sbx-Error"))
+				t.Fatalf("status = %d (%s), want 503 or 504", resp.StatusCode, resp.Header.Get("Umiak-Error"))
 			}
 			if el > bound {
 				t.Fatalf("request to a machine elsewhere took %s, want under %s", el, bound)

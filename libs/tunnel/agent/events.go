@@ -7,8 +7,8 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // readBatch is the most events read from the journal per Read call.
@@ -41,7 +41,7 @@ func (emptyJournal) Read(ctx context.Context, _ uint64, _ int) ([]*tunnelv1.Even
 
 func (emptyJournal) Ack(context.Context, uint64) error { return nil }
 
-// eventsService implements sbx.tunnel.v1.Events.
+// eventsService implements umiak.tunnel.v1.Events.
 type eventsService struct {
 	j        EventJournal
 	maxBytes int // larger events are sent as a stub

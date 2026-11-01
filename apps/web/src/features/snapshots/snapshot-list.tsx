@@ -1,9 +1,9 @@
 "use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 // /app/t/<team>/snapshots (S8 §9.7): saved snapshots of the team from
 // GET /v1/snapshots; "Create sandbox" opens the create form with the
 // snapshot chosen; Delete asks first. Saving happens on the sandbox page.
-import type { SnapshotData } from "@sbx/sdk";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { SnapshotData } from "@umiak/sdk";
 import { LoaderCircleIcon } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -24,7 +24,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { newSandboxHref } from "@/lib/create-form";
 import { formatAgo } from "@/lib/format";
@@ -38,12 +38,12 @@ const CONSISTENCY: Record<string, string> = {
 };
 
 export function SnapshotList({ teamId }: { teamId: string }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const snapshots = useQuery({
 		queryKey: ["snapshots", teamId],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/snapshots", {
+			const { data } = await umiak.raw.GET("/v1/snapshots", {
 				signal,
 				retryBudgetMs: POLL_RETRY_BUDGET_MS,
 			});
@@ -60,12 +60,12 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 	});
 	const limits = useQuery({
 		queryKey: ["limits", teamId],
-		queryFn: ({ signal }) => sbx.limits({ signal }),
+		queryFn: ({ signal }) => umiak.limits({ signal }),
 	});
 
 	const remove = async (s: SnapshotData): Promise<boolean> => {
 		const r = await attempt(async () => {
-			await sbx.snapshots.delete(s.name);
+			await umiak.snapshots.delete(s.name);
 			return true;
 		});
 		await Promise.all([

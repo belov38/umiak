@@ -62,7 +62,7 @@ func run() int {
 	flag.Parse()
 
 	level := slog.LevelInfo
-	if os.Getenv("SBX_TEST_LOG") != "" {
+	if os.Getenv("UMIAK_TEST_LOG") != "" {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))

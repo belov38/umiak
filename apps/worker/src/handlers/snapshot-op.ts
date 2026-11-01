@@ -1,4 +1,4 @@
-import { withTx } from "@sbx/db";
+import { withTx } from "@umiak/db";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { loadSnapshot, snapshotRef } from "../db.ts";

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
 )
 
 func earlySource(bootID string) Static {
@@ -77,7 +77,7 @@ func TestEarlyRebootsOnNameChange(t *testing.T) {
 	if err := (&File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}).Save(l.IdentityFile); err != nil {
 		t.Fatal(err)
 	}
-	r := newWinFake(t, l, "SBXEEEEEEEEEEEE")
+	r := newWinFake(t, l, "UMIAKEEEEEEEEEEEE")
 	if err := Early(context.Background(), l, earlySource("boot-1"), r); err != nil {
 		t.Fatal(err)
 	}

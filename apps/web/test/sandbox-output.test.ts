@@ -1,5 +1,5 @@
 // Output viewer of the Commands tab and terminal state (S8 §9.6).
-import { SbxError } from "@sbx/sdk";
+import { UmiakError } from "@umiak/sdk";
 import { describe, expect, it } from "vitest";
 import {
 	defaultDownloadOffset,
@@ -152,7 +152,7 @@ describe("offsets and links", () => {
 
 describe("terminal state", () => {
 	const err = (code: string) =>
-		new SbxError({ status: 0, code, message: code, retryable: false });
+		new UmiakError({ status: 0, code, message: code, retryable: false });
 
 	it("4409 and 4503 explain and offer a retry; 4401 does not", () => {
 		expect(ptyFailure(err("sandbox_not_ready"))).toMatchObject({ retry: true });

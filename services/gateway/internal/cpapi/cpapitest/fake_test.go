@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi/cpapitest"
 )
 
 func TestFakeRoutes(t *testing.T) {
@@ -17,9 +17,9 @@ func TestFakeRoutes(t *testing.T) {
 	if _, err := f.LookupRoute(ctx, "foo-80"); !errors.Is(err, cpapi.ErrRouteNotFound) {
 		t.Fatalf("err = %v", err)
 	}
-	f.SetRoute(cpapi.Route{Label: "foo-80", SandboxID: "sbx_1"})
+	f.SetRoute(cpapi.Route{Label: "foo-80", SandboxID: "umiak_1"})
 	r, err := f.LookupRoute(ctx, "foo-80")
-	if err != nil || r.SandboxID != "sbx_1" || r.Kind != "port" {
+	if err != nil || r.SandboxID != "umiak_1" || r.Kind != "port" {
 		t.Fatalf("route = %+v, %v", r, err)
 	}
 	f.DeleteRoute("foo-80")

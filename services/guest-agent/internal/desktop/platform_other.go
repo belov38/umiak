@@ -7,7 +7,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // NativeSession opens the interactive OS desktop.

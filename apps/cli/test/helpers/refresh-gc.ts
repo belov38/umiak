@@ -10,14 +10,14 @@ const store = new FileStore(join(dir, "credentials.json"));
 const profile = {
 	apiUrl: "https://api.x",
 	auth: "oidc" as const,
-	issuer: "https://kc.x/realms/sbx",
+	issuer: "https://kc.x/realms/umiak",
 };
 await store.set(
 	credentialName("default", profile),
 	JSON.stringify({
 		kind: "oidc",
 		issuer: profile.issuer,
-		clientId: "sbx-cli",
+		clientId: "umiak-cli",
 		accessToken: "old",
 		refreshToken: "r1",
 		expiresAt: new Date(0).toISOString(),

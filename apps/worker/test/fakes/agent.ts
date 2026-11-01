@@ -1,6 +1,6 @@
 // Recording fake of the guest agent RPC (S3) with injectable failures.
-import type { SecretFile } from "@sbx/core";
-import type { QuiesceHook } from "@sbx/pve";
+import type { SecretFile } from "@umiak/core";
+import type { QuiesceHook } from "@umiak/pve";
 import {
 	type AgentActivity,
 	type AgentPort,

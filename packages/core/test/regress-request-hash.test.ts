@@ -5,7 +5,11 @@
 // version, so a key rotation inside the 24 h idempotency window still
 // replays the same request.
 import { createHash, randomBytes } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canonicalJson, KeyRing, SandboxServiceImpl } from "../src/index.ts";
 import { expectCode, seedSandbox, serviceEnv } from "./helpers/service.ts";

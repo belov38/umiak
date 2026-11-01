@@ -1,5 +1,5 @@
 // API error codes → the text the dashboard shows (S8 §9.5, S7 §5.5).
-import { NETWORK_ERROR, SbxError, UNEXPECTED_RESPONSE } from "@sbx/sdk";
+import { NETWORK_ERROR, UmiakError, UNEXPECTED_RESPONSE } from "@umiak/sdk";
 import { describe, expect, it } from "vitest";
 import {
 	CREATE_ERROR_CODES,
@@ -17,7 +17,7 @@ const err = (
 		details: Record<string, unknown>;
 	}> = {},
 ) =>
-	new SbxError({
+	new UmiakError({
 		status: init.status ?? 400,
 		code,
 		message: init.message ?? `server message of ${code}`,

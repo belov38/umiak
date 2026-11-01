@@ -6,7 +6,7 @@ import { verifyLiveDesktopMcp } from "../../apps/mcp/test/live-desktop.ts";
 import { typeIntoRunDialog } from "../../apps/mcp/test/windows-run.ts";
 import { makeContext } from "../../apps/template-builder/src/context.ts";
 import { verifyDesktopMedia } from "../../apps/web/e2e/desktop-media.ts";
-import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
+import { type Sandbox, Umiak } from "../../packages/sdk-ts/src/index.ts";
 import { waitForDesktopBudget } from "./desktop-budget.ts";
 import {
 	observeDesktop,
@@ -16,8 +16,8 @@ import {
 import { installTestAgent } from "./guest-package.ts";
 import { guestRoot, pwsh } from "./guest-root.ts";
 
-const client = new Sbx();
-const template = process.env.SBX_E2E_TEMPLATE ?? "linux-desktop";
+const client = new Umiak();
+const template = process.env.UMIAK_E2E_TEMPLATE ?? "linux-desktop";
 const windows = template.startsWith("windows");
 const created: Sandbox[] = [];
 const removed = new Set<string>();
@@ -28,8 +28,8 @@ const budget = () =>
 			.map((s) => Number(observeDesktop(s.data.slug).runtime_id))
 			.filter((id) => id >= 500 && id <= 589),
 	);
-const output = process.env.SBX_E2E_OUTPUT;
-if (!output) throw new Error("SBX_E2E_OUTPUT is required");
+const output = process.env.UMIAK_E2E_OUTPUT;
+if (!output) throw new Error("UMIAK_E2E_OUTPUT is required");
 await mkdir(output, { recursive: true, mode: 0o700 });
 const hash = (bytes: Uint8Array | string) =>
 	createHash("sha256").update(bytes).digest("hex");
@@ -40,15 +40,15 @@ function check(value: unknown, label: string) {
 try {
 	await budget();
 	const start = performance.now();
-	// SBX_E2E_SANDBOX reuses an existing sandbox (diagnostics); it is never deleted here.
-	const reuse = process.env.SBX_E2E_SANDBOX;
+	// UMIAK_E2E_SANDBOX reuses an existing sandbox (diagnostics); it is never deleted here.
+	const reuse = process.env.UMIAK_E2E_SANDBOX;
 	const sb = reuse
 		? await client.sandboxes.get(reuse)
 		: await client.sandboxes.create({
 				template,
 				size: "4gb",
 				labels: { e2e: "desktop" },
-				idleTimeoutSeconds: process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE
+				idleTimeoutSeconds: process.env.UMIAK_DESKTOP_TEST_AGENT_PACKAGE
 					? 300
 					: 60,
 				ttlSeconds: 3600,
@@ -56,11 +56,11 @@ try {
 	if (!reuse) created.push(sb);
 	await sb.waitUntilReady({ timeoutMs: windows ? 600_000 : 300_000 });
 	const createMs = Math.round(performance.now() - start);
-	if (process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE) {
-		process.env.SBX_PVE_URL ??= "https://100.64.10.2:8006";
-		process.env.SBX_PVE_TLS_NAME ??= "pve";
-		process.env.SBX_NODE_SSH_HOST ??= "100.64.10.2";
-		process.env.SBX_TEMPLATE_VMID_RANGE ??= "595-596";
+	if (process.env.UMIAK_DESKTOP_TEST_AGENT_PACKAGE) {
+		process.env.UMIAK_PVE_URL ??= "https://100.64.10.2:8006";
+		process.env.UMIAK_PVE_TLS_NAME ??= "pve";
+		process.env.UMIAK_NODE_SSH_HOST ??= "100.64.10.2";
+		process.env.UMIAK_TEMPLATE_VMID_RANGE ??= "595-596";
 		const ctx = await makeContext();
 		try {
 			const row = observeDesktop(sb.data.slug);
@@ -68,7 +68,7 @@ try {
 				ctx,
 				Number(row.runtime_id),
 				row.machine_id ?? "",
-				process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE,
+				process.env.UMIAK_DESKTOP_TEST_AGENT_PACKAGE,
 			);
 		} finally {
 			ctx.close();
@@ -98,17 +98,17 @@ try {
 		guestRoot(
 			sb,
 			pwsh(
-				"$b=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o');$r=@(Get-WinEvent -FilterHashtable @{LogName='System';Id=1074} -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'sbx identity changed' }).Count;\"$b $r\"",
+				"$b=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o');$r=@(Get-WinEvent -FilterHashtable @{LogName='System';Id=1074} -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'umiak identity changed' }).Count;\"$b $r\"",
 			),
 		).out.trim();
 	const readyBoot = windows ? bootInfo() : "";
 	if (windows) console.log(`boot after ready: ${readyBoot}`);
-	const turnHost = process.env.SBX_DESKTOP_TURN_HOST;
+	const turnHost = process.env.UMIAK_DESKTOP_TURN_HOST;
 	if (!turnHost) throw new Error("dev TURN host missing");
 	const egress = await sb.exec(
 		windows
 			? pwsh(
-					`$h='${turnHost}';$p=[int]'${process.env.SBX_DESKTOP_TURN_PORT ?? ""}';$tls=[int]'${process.env.SBX_DESKTOP_TURN_TLS_PORT ?? ""}';$tid=[byte[]]::new(12);[Security.Cryptography.RandomNumberGenerator]::Fill($tid);$m=[byte[]](0,1,0,0,0x21,0x12,0xa4,0x42)+$tid;$u=[Net.Sockets.UdpClient]::new();$u.Client.ReceiveTimeout=3000;[void]$u.Send($m,$m.Length,$h,$p);$ep=[Net.IPEndPoint]::new([Net.IPAddress]::Any,0);$d=$u.Receive([ref]$ep);if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$d[8..19],$tid)){exit 2};foreach($q in @($p,$tls)){$t=[Net.Sockets.TcpClient]::new();try{if($t.ConnectAsync($h,$q).Wait(2000)){exit 3}}catch{};$t.Dispose()}`,
+					`$h='${turnHost}';$p=[int]'${process.env.UMIAK_DESKTOP_TURN_PORT ?? ""}';$tls=[int]'${process.env.UMIAK_DESKTOP_TURN_TLS_PORT ?? ""}';$tid=[byte[]]::new(12);[Security.Cryptography.RandomNumberGenerator]::Fill($tid);$m=[byte[]](0,1,0,0,0x21,0x12,0xa4,0x42)+$tid;$u=[Net.Sockets.UdpClient]::new();$u.Client.ReceiveTimeout=3000;[void]$u.Send($m,$m.Length,$h,$p);$ep=[Net.IPEndPoint]::new([Net.IPAddress]::Any,0);$d=$u.Receive([ref]$ep);if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$d[8..19],$tid)){exit 2};foreach($q in @($p,$tls)){$t=[Net.Sockets.TcpClient]::new();try{if($t.ConnectAsync($h,$q).Wait(2000)){exit 3}}catch{};$t.Dispose()}`,
 				)
 			: [
 					"python3",
@@ -116,8 +116,8 @@ try {
 					"-c",
 					"import socket,struct,os,sys; host=sys.argv[1]; port=int(sys.argv[2]); tid=os.urandom(12); s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(3); s.sendto(struct.pack('!HHI12s',1,0,0x2112a442,tid),(host,port)); data=s.recv(1024); assert data[8:20]==tid; s.close();\nfor p in (port,int(sys.argv[3])):\n t=socket.socket(); t.settimeout(2); assert t.connect_ex((host,p))!=0, 'VM TCP TURN egress allowed'; t.close()",
 					turnHost,
-					process.env.SBX_DESKTOP_TURN_PORT ?? "",
-					process.env.SBX_DESKTOP_TURN_TLS_PORT ?? "",
+					process.env.UMIAK_DESKTOP_TURN_PORT ?? "",
+					process.env.UMIAK_DESKTOP_TURN_TLS_PORT ?? "",
 				],
 	);
 	if (egress.exitCode !== 0)
@@ -215,7 +215,7 @@ try {
 	);
 	await verifyLiveDesktopMcp(
 		sb,
-		process.env.SBX_DESKTOP_MCP_URL ?? "",
+		process.env.UMIAK_DESKTOP_MCP_URL ?? "",
 		windows,
 	);
 	if (windows) {
@@ -272,7 +272,7 @@ try {
 			sb,
 			output,
 			async () => {
-				const holdMs = Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0);
+				const holdMs = Number(process.env.UMIAK_DESKTOP_IDLE_HOLD_MS ?? 0);
 				if (holdMs > 0)
 					await verifyDesktopIdleHold(
 						sb,
@@ -280,13 +280,13 @@ try {
 						join(output, "idle-observations.ndjson"),
 					);
 			},
-			Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0,
+			Number(process.env.UMIAK_DESKTOP_IDLE_HOLD_MS ?? 0) > 0,
 			async (label) => {
 				// Read while the failed stream is still up: EndStreams restarts moonlight-web.
 				const logs = windows
 					? {
 							"web-server.log": pwsh(
-								"Get-Content -Tail 400 'C:\\ProgramData\\sbx-agent\\state\\desktop-moonlight\\web-server.log'",
+								"Get-Content -Tail 400 'C:\\ProgramData\\umiak-agent\\state\\desktop-moonlight\\web-server.log'",
 							),
 							"sunshine.log": pwsh(
 								"Get-Content -Tail 400 'C:\\Program Files\\Sunshine\\config\\sunshine.log'",
@@ -296,7 +296,7 @@ try {
 							"web-server.log": [
 								"journalctl",
 								"-u",
-								"sbx-moonlight-web",
+								"umiak-moonlight-web",
 								"--no-pager",
 								"-n",
 								"400",
@@ -305,7 +305,7 @@ try {
 								"tail",
 								"-n",
 								"400",
-								"/home/user/.local/state/sbx-sunshine/sunshine.log",
+								"/home/user/.local/state/umiak-sunshine/sunshine.log",
 							],
 						};
 				for (const [name, argv] of Object.entries(logs))
@@ -320,7 +320,7 @@ try {
 		console.log("media diagnostics", output);
 		throw error;
 	}
-	if (Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0) {
+	if (Number(process.env.UMIAK_DESKTOP_IDLE_HOLD_MS ?? 0) > 0) {
 		await waitDesktopIdleStop(sb);
 		await budget();
 		await sb.resume({}, { wait: true });
@@ -336,7 +336,7 @@ try {
 			const r = guestRoot(
 				s,
 				pwsh(
-					"$s=Get-Content -Raw 'C:\\ProgramData\\sbx-agent\\state\\desktop\\identity.json'|ConvertFrom-Json;$j=$s.credentials|ConvertTo-Json -Compress;[BitConverter]::ToString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($j))).Replace('-','').ToLower()",
+					"$s=Get-Content -Raw 'C:\\ProgramData\\umiak-agent\\state\\desktop\\identity.json'|ConvertFrom-Json;$j=$s.credentials|ConvertTo-Json -Compress;[BitConverter]::ToString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($j))).Replace('-','').ToLower()",
 				),
 			);
 			out = r.exitcode === 0 ? r.out : "";
@@ -346,7 +346,7 @@ try {
 				"python3",
 				"-I",
 				"-c",
-				"import hashlib,json; s=json.load(open('/var/lib/sbx-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
+				"import hashlib,json; s=json.load(open('/var/lib/umiak-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
 			]);
 			out = result.exitCode === 0 ? result.stdout : "";
 		}
@@ -389,7 +389,7 @@ try {
 	// computer_* against the fork: input, Unicode and clipboard on the new identity.
 	await verifyLiveDesktopMcp(
 		copy,
-		process.env.SBX_DESKTOP_MCP_URL ?? "",
+		process.env.UMIAK_DESKTOP_MCP_URL ?? "",
 		windows,
 	);
 	await copy.delete({ wait: true });
@@ -421,9 +421,9 @@ try {
 					sandbox,
 					windows
 						? pwsh(
-								"Get-Content -Tail 200 'C:\\ProgramData\\sbx-agent\\logs\\agent.log'",
+								"Get-Content -Tail 200 'C:\\ProgramData\\umiak-agent\\logs\\agent.log'",
 							)
-						: ["journalctl", "-u", "sbx-agent", "--no-pager", "-n", "100"],
+						: ["journalctl", "-u", "umiak-agent", "--no-pager", "-n", "100"],
 				).out;
 				await writeFile(join(output, "agent-failure.log"), log, {
 					mode: 0o600,

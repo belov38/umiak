@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const metadata: Metadata = {
-	title: "sbx",
+	title: "umiak",
 	robots: { index: false, follow: false },
 };
 

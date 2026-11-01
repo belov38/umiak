@@ -20,26 +20,26 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"golang.org/x/time/rate"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/edge"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/httpproxy"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sshgw"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/edge"
+	"github.com/belov38/umiak/services/gateway/internal/httpproxy"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/portauth"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/sshgw"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 // Postgres channels the gateway LISTENs on next to the tunnel channels.
 const (
 	// ChannelRoutes carries a slug whose routes changed, or "*" for all.
-	ChannelRoutes = "sbx_routes"
+	ChannelRoutes = "umiak_routes"
 	// ChannelSSHRevoke carries an SSH access revocation (spec 9.5).
-	ChannelSSHRevoke = "sbx_ssh_revoke"
+	ChannelSSHRevoke = "umiak_ssh_revoke"
 )
 
 const (
@@ -85,8 +85,8 @@ type Deps struct {
 	// instance enforces as the owner; 0 means 800. Tests shrink it.
 	MaxTCPStreamsPerMachine int
 	// AllowedServicePrefixes are the services the internal /rpc/ proxy
-	// passes to agents; nil keeps the libs/tunnel default (sbx.agent.v1).
-	// Tests add the sbx.testing.v1 Process double.
+	// passes to agents; nil keeps the libs/tunnel default (umiak.agent.v1).
+	// Tests add the umiak.testing.v1 Process double.
 	AllowedServicePrefixes []string
 	// Sink receives the agent and connection events. nil builds the HTTP
 	// sink of APIURL; with APIURL empty or config.APIURLNone the tunnel
@@ -133,9 +133,9 @@ type Instance struct {
 	internal   *http.Server
 	metricsSrv *http.Server
 	// The public servers: plain (behind an ingress) and, behind the TLS
-	// dispatcher, sbx and tunnel.
+	// dispatcher, umiak and tunnel.
 	plain     *http.Server
-	sbxSrv    *http.Server
+	umiakSrv    *http.Server
 	tunnelSrv *http.Server
 
 	pingEvery time.Duration
@@ -269,7 +269,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		Codec:     portauth.NewCodec(cfg.CookieKeys, deps.Now),
 		API:       deps.API,
 		AuthURL:   cfg.AuthURL,
-		SbxDomain: cfg.SbxDomain,
+		UmiakDomain: cfg.UmiakDomain,
 		CrossSite: cfg.CookieCrossSite,
 		Limits:    i.limits,
 		Metrics:   i.metrics,
@@ -278,7 +278,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	accessLog := obs.NewAccessLog(deps.AccessLog)
 	i.proxy = httpproxy.New(httpproxy.Config{
 		DesktopAPI:          cpapi.Desktop(deps.API),
-		SbxDomain:           cfg.SbxDomain,
+		UmiakDomain:           cfg.UmiakDomain,
 		Grammar:             grammar(cfg),
 		Routes:              i.routes,
 		Auth:                i.auth,
@@ -331,7 +331,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	tunnelHandler := edge.TunnelHandler(g.Admitter(), rate.NewLimiter(rate.Limit(rateLimit), burst), i.metrics)
 	errLog := slog.NewLogLogger(deps.Logger.Handler(), slog.LevelDebug)
 	i.plain = edge.NewPlainServer(edge.PlainHandler(i.proxy, tunnelHandler, cfg.TunnelHost), cfg.Timeouts)
-	i.sbxSrv = edge.NewSbxServer(i.proxy, cfg.Timeouts)
+	i.umiakSrv = edge.NewUmiakServer(i.proxy, cfg.Timeouts)
 	i.tunnelSrv = edge.NewTunnelServer(tunnelHandler, cfg.Timeouts)
 	for _, s := range i.edgeServers() {
 		s.ErrorLog = errLog
@@ -427,7 +427,7 @@ func (i *Instance) AddInstanceHook(h func(instanceID string)) {
 	i.instanceHooks = append(i.instanceHooks[:len(i.instanceHooks):len(i.instanceHooks)], h)
 }
 
-// SetRevokeHook sets the handler of sbx_ssh_revoke payloads, and of "" after
+// SetRevokeHook sets the handler of umiak_ssh_revoke payloads, and of "" after
 // every (re)LISTEN. It runs on the LISTEN goroutine and must not block.
 func (i *Instance) SetRevokeHook(h func(payload string)) {
 	i.hookMu.Lock()
@@ -497,13 +497,13 @@ func (i *Instance) HTTPHandler() http.Handler { return i.proxy }
 // edgeServers returns the public HTTP servers, for the shutdown and the
 // drain.
 func (i *Instance) edgeServers() []*http.Server {
-	return []*http.Server{i.plain, i.sbxSrv, i.tunnelSrv}
+	return []*http.Server{i.plain, i.umiakSrv, i.tunnelSrv}
 }
 
 // startEdge loads the certificates and builds the TLS dispatcher of ln
 // (PROXY protocol v2 first when configured).
 func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSource, error) {
-	sbx, err := edge.NewCertSource("sbx", i.cfg.SbxCertFile, i.cfg.SbxKeyFile, i.metrics)
+	umiak, err := edge.NewCertSource("umiak", i.cfg.UmiakCertFile, i.cfg.UmiakKeyFile, i.metrics)
 	if err != nil {
 		return nil, nil, fmt.Errorf("server: %w", err)
 	}
@@ -511,17 +511,17 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 	if err != nil {
 		return nil, nil, fmt.Errorf("server: %w", err)
 	}
-	for _, c := range []*edge.CertSource{sbx, tun} {
+	for _, c := range []*edge.CertSource{umiak, tun} {
 		c.SetLogger(i.log)
 	}
-	i.AddReadyCheck(func() bool { return sbx.Loaded() && tun.Loaded() })
+	i.AddReadyCheck(func() bool { return umiak.Loaded() && tun.Loaded() })
 	if i.cfg.ProxyProtocol {
 		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.ProxyHeaderTimeout)
 	}
 	d := edge.NewDispatcher(ln, edge.DispatchConfig{
-		SbxDomain:        i.cfg.SbxDomain,
+		UmiakDomain:        i.cfg.UmiakDomain,
 		TunnelHost:       i.cfg.TunnelHost,
-		Sbx:              sbx,
+		Umiak:              umiak,
 		Tunnel:           tun,
 		HandshakeTimeout: i.cfg.Timeouts.TLSHandshake,
 		// Node SNAT (spec 11) has its own handshake budget.
@@ -533,7 +533,7 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 		Metrics:            i.metrics,
 		Logger:             i.log,
 	})
-	return d, []*edge.CertSource{sbx, tun}, nil
+	return d, []*edge.CertSource{umiak, tun}, nil
 }
 
 // Run serves the non-nil listeners and runs the tunnel gateway until ctx is
@@ -592,7 +592,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	}
 	if disp != nil {
 		i.disp.Store(disp)
-		serve("tls sbx", i.sbxSrv, disp.Sbx())
+		serve("tls umiak", i.umiakSrv, disp.Umiak())
 		serve("tls tunnel", i.tunnelSrv, disp.Tunnel())
 		// Not cancelled with runCtx: the dispatcher is closed after its
 		// servers, so they see ErrServerClosed, not a closed listener.
@@ -677,7 +677,7 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	return err
 }
 
-// pingLoop keeps sbx_gateway_dependency_up{dep="postgres"} current.
+// pingLoop keeps umiak_gateway_dependency_up{dep="postgres"} current.
 func (i *Instance) pingLoop(ctx context.Context) {
 	t := time.NewTicker(i.pingEvery)
 	defer t.Stop()

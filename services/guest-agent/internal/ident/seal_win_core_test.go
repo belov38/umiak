@@ -19,7 +19,7 @@ func TestSealWindows(t *testing.T) {
 	mustWrite(t, filepath.Join(l.SSHDir, "sshd_config"), "cfg")
 	mustWrite(t, l.TemplateSSHCA, "template-ca\n")
 	mustWrite(t, l.SSHUserCA, "claimed-ca\n")
-	mustWrite(t, filepath.Join(l.VersionsDir, "1.0.0", "sbx-agent.exe"), "bin")
+	mustWrite(t, filepath.Join(l.VersionsDir, "1.0.0", "umiak-agent.exe"), "bin")
 
 	var order []string
 	stop := func() error { order = append(order, "stop"); return nil }
@@ -37,9 +37,9 @@ func TestSealWindows(t *testing.T) {
 	mustNotExist(t, filepath.Join(l.SSHDir, "ssh_host_ed25519_key"))
 	mustNotExist(t, filepath.Join(l.SSHDir, "ssh_host_ed25519_key.pub"))
 	mustRead(t, filepath.Join(l.SSHDir, "sshd_config"))
-	mustRead(t, filepath.Join(l.VersionsDir, "1.0.0", "sbx-agent.exe"))
+	mustRead(t, filepath.Join(l.VersionsDir, "1.0.0", "umiak-agent.exe"))
 	if got := mustRead(t, l.SSHUserCA); got != "template-ca\n" {
-		t.Errorf("sbx_user_ca.pub = %q", got)
+		t.Errorf("umiak_user_ca.pub = %q", got)
 	}
 }
 

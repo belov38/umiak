@@ -1,5 +1,5 @@
 // Per-test-file Postgres databases. Each one is a copy of the template database
-// sbx_tmpl, which is migrated from db/migrations (S2's 0100 tunnel schema and
+// umiak_tmpl, which is migrated from db/migrations (S2's 0100 tunnel schema and
 // S6's runtime schema). The admin DSN comes from global-setup.ts; the
 // database work itself (lock, template, copy, drop) is in pg.ts, which
 // servers run outside vitest use too.
@@ -27,17 +27,17 @@ export interface TestDatabaseOptions {
 	max?: number;
 }
 
-/** True when database tests must be skipped (SBX_TEST_SKIP_PG=1 and no URL). */
+/** True when database tests must be skipped (UMIAK_TEST_SKIP_PG=1 and no URL). */
 export function skipPg(): boolean {
-	return inject("sbxPgAdminDsn") === "" && inject("sbxPgError") === "";
+	return inject("umiakPgAdminDsn") === "" && inject("umiakPgError") === "";
 }
 
 function adminDsn(): string {
-	const admin = inject("sbxPgAdminDsn");
-	const startErr = inject("sbxPgError");
+	const admin = inject("umiakPgAdminDsn");
+	const startErr = inject("umiakPgError");
 	if (startErr !== "") throw new Error(startErr);
 	if (admin === "")
-		throw new Error("no Postgres available (SBX_TEST_SKIP_PG=1)");
+		throw new Error("no Postgres available (UMIAK_TEST_SKIP_PG=1)");
 	return admin;
 }
 

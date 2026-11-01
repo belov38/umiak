@@ -36,14 +36,14 @@ afterAll(async () => {
 it("desktop URL, clipboard, screenshot and JSON input reach the public API", async () => {
 	const env = {
 		...home.env,
-		SBX_API_URL: world.url,
-		SBX_API_KEY: world.secret,
+		UMIAK_API_URL: world.url,
+		UMIAK_API_KEY: world.secret,
 	};
 	const cli = (args: string[]) => runCli(args, { env });
 	const link = await cli(["desktop", ref, "--json"]);
 	expect(link.code, link.stderr).toBe(0);
 	expect(link.last()).toMatchObject({
-		url: expect.stringContaining("?_ticket=sbxd_"),
+		url: expect.stringContaining("?_ticket=umiakd_"),
 	});
 	expect((await cli(["clipboard", ref, "--text", "CLI текст"])).code).toBe(0);
 	const clip = await cli(["clipboard", ref, "--json"]);
@@ -62,11 +62,11 @@ it("desktop URL, clipboard, screenshot and JSON input reach the public API", asy
 	expect(result.last()).toMatchObject({ completed: 1 });
 });
 
-it("sbx desktop subcommands follow S10 14.2", async () => {
+it("umiak desktop subcommands follow S10 14.2", async () => {
 	const env = {
 		...home.env,
-		SBX_API_URL: world.url,
-		SBX_API_KEY: world.secret,
+		UMIAK_API_URL: world.url,
+		UMIAK_API_KEY: world.secret,
 	};
 	const cli = (args: string[], input?: string) =>
 		runCli(args, { env, ...(input === undefined ? {} : { stdin: input }) });

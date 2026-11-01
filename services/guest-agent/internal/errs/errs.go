@@ -12,7 +12,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 )
 
 // ErrorDetail codes of the agent (spec section 19 plus executor additions).

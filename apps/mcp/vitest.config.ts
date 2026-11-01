@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// Workspace packages with a build step (@sbx/agent-client, @sbx/proto) are
+// Workspace packages with a build step (@umiak/agent-client, @umiak/proto) are
 // resolved from their TypeScript sources: their package.json exports carry a
 // "source" condition. The api and the CLI enable that condition globally, but
 // Vitest forwards the conditions to Node as `--conditions`, and third-party
@@ -58,7 +58,7 @@ export default defineConfig({
 	},
 	test: {
 		include: ["test/**/*.test.ts"],
-		globalSetup: ["@sbx/db/testing/global-setup"],
+		globalSetup: ["@umiak/db/testing/global-setup"],
 		// A hang guard only: tests wait on conditions and spawn processes, which
 		// takes seconds on a loaded machine under a full parallel `pnpm -r test`.
 		testTimeout: 120_000,

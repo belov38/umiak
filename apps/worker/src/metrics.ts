@@ -1,12 +1,12 @@
 // Prometheus metrics (S6 §20) behind the `Metrics` hook of WorkerCtx.
 //
-// Event metrics (counters, histograms, the `sbx_delete_stuck` gauge of the
+// Event metrics (counters, histograms, the `umiak_delete_stuck` gauge of the
 // health controller) are pushed by the code through `inc`/`set`/`observe`.
 // State gauges that are a function of the database (pool size, node RAM,
 // degraded sandboxes, queue depth, event lag) are computed at scrape time by
 // `collectDb`: five cheap aggregate queries per scrape, no background loop,
 // and the values are never staler than the scrape.
-import { QUEUE_NAMES } from "@sbx/core";
+import { QUEUE_NAMES } from "@umiak/core";
 import type pg from "pg";
 import type { Logger } from "pino";
 import {
@@ -37,200 +37,200 @@ const DURATION_BUCKETS = [
 export const METRIC_DEFS: readonly MetricDef[] = [
 	// S6 §20
 	{
-		name: "sbx_pool_machines",
+		name: "umiak_pool_machines",
 		kind: "gauge",
 		help: "Warm pool machines (not claimed) per pair and state; computed on scrape",
 		labels: ["pair", "state"],
 	},
 	{
-		name: "sbx_operation_duration_seconds",
+		name: "umiak_operation_duration_seconds",
 		kind: "histogram",
 		help: "Operation time from creation to a terminal state, per kind and outcome",
 		labels: ["kind", "outcome"],
 		buckets: DURATION_BUCKETS,
 	},
 	{
-		name: "sbx_operation_errors_total",
+		name: "umiak_operation_errors_total",
 		kind: "counter",
 		help: "Errors of sandbox-op jobs (retried and final) per operation kind and error code",
 		labels: ["kind", "code"],
 	},
 	{
-		name: "sbx_node_ram_mb",
+		name: "umiak_node_ram_mb",
 		kind: "gauge",
 		help: "Node RAM: cap, reserved and powered (S6 §8.1); computed on scrape",
 		labels: ["node", "kind"],
 	},
 	{
-		name: "sbx_reconcile_actions_total",
+		name: "umiak_reconcile_actions_total",
 		kind: "counter",
 		help: "Reconcile actions per kind and mode (applied, skipped, failed, dry_run)",
 		labels: ["kind", "mode"],
 	},
 	{
-		name: "sbx_reconcile_skipped_total",
+		name: "umiak_reconcile_skipped_total",
 		kind: "counter",
 		help: "VMs reconcile refused to touch, per reason",
 		labels: ["reason"],
 	},
 	{
-		name: "sbx_reconcile_failed_total",
+		name: "umiak_reconcile_failed_total",
 		kind: "counter",
 		help: "Reconcile parts that failed",
 		labels: ["part"],
 	},
 	{
-		name: "sbx_degraded_sandboxes",
+		name: "umiak_degraded_sandboxes",
 		kind: "gauge",
 		help: "Live sandboxes with health degraded; computed on scrape",
 	},
 	{
-		name: "sbx_queue_depth",
+		name: "umiak_queue_depth",
 		kind: "gauge",
 		help: "pg-boss jobs waiting (created or retry) per queue; computed on scrape",
 		labels: ["queue"],
 	},
 	{
-		name: "sbx_event_lag_seconds",
+		name: "umiak_event_lag_seconds",
 		kind: "gauge",
 		help: "Age of the oldest unprocessed agent event; computed on scrape",
 	},
 	{
-		name: "sbx_delete_stuck",
+		name: "umiak_delete_stuck",
 		kind: "gauge",
 		help: "Delete operations active for more than 30 min (alert when > 0)",
 	},
 	{
-		name: "sbx_delete_dead_letter_total",
+		name: "umiak_delete_dead_letter_total",
 		kind: "counter",
 		help: "Delete jobs that reached the dead letter queue and were enqueued again",
 		labels: ["step"],
 	},
 	{
-		name: "sbx_unexpected_identity_change_total",
+		name: "umiak_unexpected_identity_change_total",
 		kind: "counter",
 		help: "Agent identity changes that were not a first boot from a snapshot",
 	},
 	{
-		name: "sbx_quiesce_watchdog_thawed_total",
+		name: "umiak_quiesce_watchdog_thawed_total",
 		kind: "counter",
 		help: "Quiesce leases the guest watchdog thawed on its own",
 	},
 	{
-		name: "sbx_cleanup_failed_total",
+		name: "umiak_cleanup_failed_total",
 		kind: "counter",
 		help: "Cleanup parts that failed",
 		labels: ["part"],
 	},
 	// Operations and jobs
 	{
-		name: "sbx_operation_failed_total",
+		name: "umiak_operation_failed_total",
 		kind: "counter",
 		help: "Operations that failed after compensation, per kind and code",
 		labels: ["kind", "code"],
 	},
 	{
-		name: "sbx_operation_retries_exhausted_total",
+		name: "umiak_operation_retries_exhausted_total",
 		kind: "counter",
 		help: "Operations whose job reached the dead letter queue",
 		labels: ["kind"],
 	},
 	{
-		name: "sbx_fenced_out_total",
+		name: "umiak_fenced_out_total",
 		kind: "counter",
 		help: "Executors that lost their fence (another attempt or a delete took over)",
 		labels: ["queue", "kind", "action"],
 	},
 	{
-		name: "sbx_owner_mismatch_total",
+		name: "umiak_owner_mismatch_total",
 		kind: "counter",
 		help: "Power operations S1 refused because the VMID's lease is not the machine's (freed and maybe reused)",
 		labels: ["op"],
 	},
 	{
-		name: "sbx_claim_retried_total",
+		name: "umiak_claim_retried_total",
 		kind: "counter",
 		help: "Creates that retried after a rejected pool claim",
 		labels: ["code", "path"],
 	},
 	{
-		name: "sbx_machine_provision_failed_total",
+		name: "umiak_machine_provision_failed_total",
 		kind: "counter",
 		help: "Pool machine provisions that failed",
 		labels: ["code"],
 	},
 	{
-		name: "sbx_snapshot_in_use_requeued_total",
+		name: "umiak_snapshot_in_use_requeued_total",
 		kind: "counter",
 		help: "snapshot-op deletes postponed because a create still clones from the snapshot",
 	},
 	// Controllers
 	{
-		name: "sbx_controller_runs_total",
+		name: "umiak_controller_runs_total",
 		kind: "counter",
 		help: "Controller runs per queue and result",
 		labels: ["queue", "result"],
 	},
 	{
-		name: "sbx_controller_duration_seconds",
+		name: "umiak_controller_duration_seconds",
 		kind: "histogram",
 		help: "Controller run time per queue",
 		labels: ["queue"],
 		buckets: [0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60, 300],
 	},
 	{
-		name: "sbx_sandbox_degraded_total",
+		name: "umiak_sandbox_degraded_total",
 		kind: "counter",
 		help: "Sandboxes the health controller marked degraded",
 	},
 	{
-		name: "sbx_agent_restart_total",
+		name: "umiak_agent_restart_total",
 		kind: "counter",
 		help: "Agent restarts through QGA per result",
 		labels: ["result"],
 	},
 	{
-		name: "sbx_autostop_total",
+		name: "umiak_autostop_total",
 		kind: "counter",
 		help: "Stops requested by auto-stop per reason (ttl, idle)",
 		labels: ["reason"],
 	},
 	{
-		name: "sbx_cleanup_delete_total",
+		name: "umiak_cleanup_delete_total",
 		kind: "counter",
 		help: "Sandboxes deleted by cleanup per reason",
 		labels: ["reason"],
 	},
 	{
-		name: "sbx_secrets_old_key_rows",
+		name: "umiak_secrets_old_key_rows",
 		kind: "gauge",
 		help: "sandbox_secrets and environments rows still encrypted with an old key version",
 	},
 	{
-		name: "sbx_secrets_reencrypt_failed_total",
+		name: "umiak_secrets_reencrypt_failed_total",
 		kind: "counter",
 		help: "sandbox_secrets and environments rows cleanup failed to re-encrypt",
 	},
 	{
-		name: "sbx_idp_sync_total",
+		name: "umiak_idp_sync_total",
 		kind: "counter",
 		help: "IdP sync runs per result",
 		labels: ["result"],
 	},
 	{
-		name: "sbx_idp_sync_duration_seconds",
+		name: "umiak_idp_sync_duration_seconds",
 		kind: "histogram",
 		help: "IdP sync run time",
 		buckets: [0.1, 0.5, 1, 5, 10, 30, 60, 300],
 	},
 	{
-		name: "sbx_idp_sync_aborted_total",
+		name: "umiak_idp_sync_aborted_total",
 		kind: "counter",
 		help: "IdP sync passes that changed nothing because a guard tripped, per reason",
 		labels: ["reason"],
 	},
 	{
-		name: "sbx_idp_sync_aborted",
+		name: "umiak_idp_sync_aborted",
 		kind: "gauge",
 		help: "1 after an aborted IdP sync pass, 0 after a successful one (alert when 1)",
 	},
@@ -408,21 +408,23 @@ export class PromMetrics implements Metrics {
 				 ) x`,
 			),
 		]);
-		const g = this.#gauge("sbx_pool_machines");
+		const g = this.#gauge("umiak_pool_machines");
 		g.reset();
 		for (const p of pool) g.set({ pair: p.pair, state: p.state }, p.count);
-		const r = this.#gauge("sbx_node_ram_mb");
+		const r = this.#gauge("umiak_node_ram_mb");
 		r.reset();
 		for (const n of ram) {
 			r.set({ node: n.node, kind: "cap" }, n.capMb);
 			r.set({ node: n.node, kind: "reserved" }, n.reservedMb);
 			r.set({ node: n.node, kind: "powered" }, n.poweredMb);
 		}
-		this.#gauge("sbx_degraded_sandboxes").set(degraded.rows[0]?.n ?? 0);
-		const d = this.#gauge("sbx_queue_depth");
+		this.#gauge("umiak_degraded_sandboxes").set(degraded.rows[0]?.n ?? 0);
+		const d = this.#gauge("umiak_queue_depth");
 		d.reset();
 		for (const queue of QUEUE_NAMES) d.set({ queue }, depth.get(queue) ?? 0);
-		this.#gauge("sbx_event_lag_seconds").set(Math.max(0, lag.rows[0]?.s ?? 0));
+		this.#gauge("umiak_event_lag_seconds").set(
+			Math.max(0, lag.rows[0]?.s ?? 0),
+		);
 	}
 }
 

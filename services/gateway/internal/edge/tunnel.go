@@ -5,10 +5,10 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wstransport"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wstransport"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
 // TunnelHandler serves the tunnel endpoint: GET wire.ConnectPath goes to

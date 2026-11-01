@@ -1,8 +1,8 @@
-// `sbx ps [<sb>] [--status s,s] [--limit n]` (S7 §9.4): the commands of a
+// `umiak ps [<sb>] [--status s,s] [--limit n]` (S7 §9.4): the commands of a
 // sandbox, newest first, as `{data, nextCursor}`. Works on a stopped
 // sandbox too (the list is stored).
 
-import type { CommandData } from "@sbx/sdk";
+import type { CommandData } from "@umiak/sdk";
 import type { Command } from "commander";
 import { parseCount } from "../args.ts";
 import { rememberExplicit, sandboxRef } from "../current.ts";
@@ -40,7 +40,7 @@ export function register(program: Command, run: Runner): void {
 					if (opts.status !== undefined) query.status = opts.status;
 					if (cursor !== undefined) query.cursor = cursor;
 					const { data: page } = await ctx
-						.sbx()
+						.umiak()
 						.raw.GET("/v1/sandboxes/{sandbox}/commands", {
 							params: { path: { sandbox: ref.ref }, query },
 						});

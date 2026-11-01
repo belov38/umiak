@@ -5,13 +5,13 @@
 // go through an in-process power gate (as the adapter's per-node power lock)
 // and S1's owner check (checkLeaseOwner) on the real lease rows.
 import { randomUUID } from "node:crypto";
-import { PgAllocatorStore } from "@sbx/db";
+import { PgAllocatorStore } from "@umiak/db";
 import {
 	Allocator,
 	checkLeaseOwner,
 	type PowerOp,
 	type QuiesceHook,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import type pg from "pg";
 import { QuiesceFailed } from "../../src/ops/snapshot-step.ts";
 import type {
@@ -204,7 +204,7 @@ export class FakeInfra implements NodeInfra {
 			size: p.size,
 		});
 		const snapLvs = [...this.lvs.values()].filter((l) =>
-			l.tags.includes(`sbx-snap-${p.snapshot.lvId}`),
+			l.tags.includes(`umiak-snap-${p.snapshot.lvId}`),
 		);
 		if (snapLvs.length === 0) {
 			throw new Error(`snapshot ${p.snapshot.lvId} has no LVs`);
@@ -233,7 +233,7 @@ export class FakeInfra implements NodeInfra {
 			);
 		}
 		const lv = `vm-${vmid}-disk-0`;
-		this.lvs.set(lv, { name: lv, tags: ["sbx"] });
+		this.lvs.set(lv, { name: lv, tags: ["umiak"] });
 		const disks: InfraDisk[] = [
 			{
 				slot: "scsi0",
@@ -251,8 +251,8 @@ export class FakeInfra implements NodeInfra {
 			vcpu: size.vcpu,
 			memoryMb: size.memoryMb,
 			disks,
-			tags: ["sbx"],
-			pool: "sandbox",
+			tags: ["umiak"],
+			pool: "umiak",
 			starts: 0,
 		});
 		await this.allocator.markActive(vmid);
@@ -408,10 +408,10 @@ export class FakeInfra implements NodeInfra {
 			throw late;
 		}
 		const vm = this.#vm(vmid);
-		// As sbx-node lv.snapshot: an LV of that name must not exist yet.
+		// As umiak-node lv.snapshot: an LV of that name must not exist yet.
 		if (
 			[...this.lvs.values()].some((l) =>
-				l.tags.includes(`sbx-snap-${opts.lvId}`),
+				l.tags.includes(`umiak-snap-${opts.lvId}`),
 			)
 		) {
 			throw new Error(`snapshot ${opts.lvId}: LV already exists`);
@@ -427,8 +427,8 @@ export class FakeInfra implements NodeInfra {
 		}
 		try {
 			this.trace?.push("snapshot");
-			const name = `sbx-snap-${opts.lvId}-scsi0`;
-			this.lvs.set(name, { name, tags: ["sbx", `sbx-snap-${opts.lvId}`] });
+			const name = `umiak-snap-${opts.lvId}-scsi0`;
+			this.lvs.set(name, { name, tags: ["umiak", `umiak-snap-${opts.lvId}`] });
 			return {
 				disks: [
 					{
@@ -453,14 +453,14 @@ export class FakeInfra implements NodeInfra {
 	async deleteSnapshot(ref: InfraSnapshotRef): Promise<void> {
 		this.#call("deleteSnapshot", { lvId: ref.lvId });
 		for (const [name, lv] of [...this.lvs]) {
-			if (lv.tags.includes(`sbx-snap-${ref.lvId}`)) this.lvs.delete(name);
+			if (lv.tags.includes(`umiak-snap-${ref.lvId}`)) this.lvs.delete(name);
 		}
 	}
 
 	/** Test setup: LVs of a snapshot that exists outside this fake's history. */
 	addSnapshotLvs(lvId: string): string {
-		const name = `sbx-snap-${lvId}-scsi0`;
-		this.lvs.set(name, { name, tags: ["sbx", `sbx-snap-${lvId}`] });
+		const name = `umiak-snap-${lvId}-scsi0`;
+		this.lvs.set(name, { name, tags: ["umiak", `umiak-snap-${lvId}`] });
 		return name;
 	}
 
@@ -482,14 +482,14 @@ export class FakeInfra implements NodeInfra {
 			vcpu: 2,
 			memoryMb: 2048,
 			disks: [],
-			tags: o.tags ?? ["sbx"],
-			pool: o.pool ?? "sandbox",
+			tags: o.tags ?? ["umiak"],
+			pool: o.pool ?? "umiak",
 			starts: 0,
 		};
 		this.vms.set(o.vmid, vm);
 		if (o.withDisk !== false) {
 			const lv = `vm-${o.vmid}-disk-0`;
-			this.lvs.set(lv, { name: lv, tags: ["sbx", `sbx-vm-${o.vmid}`] });
+			this.lvs.set(lv, { name: lv, tags: ["umiak", `umiak-vm-${o.vmid}`] });
 		}
 		return vm;
 	}

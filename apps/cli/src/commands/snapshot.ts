@@ -1,14 +1,14 @@
-// `sbx snapshot save [<sb>] <name> [--wait]`, `snapshot list`,
+// `umiak snapshot save [<sb>] <name> [--wait]`, `snapshot list`,
 // `snapshot rm <name>... [--yes]` (S7 §13, §5.12). save prints
 // `{snapshot, operation}`; with --wait, like the other waiting commands
 // (§14.3), the JSON Lines `accepted` ({snapshot, operation}) and last `ready`
 // ({snapshot}), or the error line if the save fails. A snapshot with the same
-// name is replaced once the new one is ready. rm asks like `sbx rm` and sends
-// `Sbx-Confirm-Delete`. save --force-stop: a running Windows sandbox is
+// name is replaced once the new one is ready. rm asks like `umiak rm` and sends
+// `Umiak-Confirm-Delete`. save --force-stop: a running Windows sandbox is
 // stopped for the snapshot and started again (S9 §24.8).
 
-import type { SnapshotData } from "@sbx/sdk";
-import { newIdempotencyKey, SbxError } from "@sbx/sdk";
+import type { SnapshotData } from "@umiak/sdk";
+import { newIdempotencyKey, UmiakError } from "@umiak/sdk";
 import type { Command } from "commander";
 import { parseDuration } from "../args.ts";
 import { confirm } from "../confirm.ts";
@@ -48,8 +48,8 @@ export function register(program: Command, run: Runner): void {
 						? WAIT_TIMEOUT_MS
 						: parseDuration(opts.waitTimeout as string, "--wait-timeout") *
 							1000;
-				const sbx = ctx.sbx();
-				const { data } = await sbx.raw.POST("/v1/snapshots", {
+				const umiak = ctx.umiak();
+				const { data } = await umiak.raw.POST("/v1/snapshots", {
 					body: {
 						sandbox: ref.ref,
 						name,
@@ -68,9 +68,9 @@ export function register(program: Command, run: Runner): void {
 					data,
 					(v) => `Saving ${snapshotLine(v.snapshot)}`,
 				);
-				const op = await sbx.waitForOperation(data.operation, { timeoutMs });
+				const op = await umiak.waitForOperation(data.operation, { timeoutMs });
 				if (op.state !== "succeeded") {
-					throw new SbxError({
+					throw new UmiakError({
 						status: 0,
 						code: op.error?.code ?? `operation_${op.state}`,
 						message:
@@ -80,7 +80,7 @@ export function register(program: Command, run: Runner): void {
 					});
 				}
 				warnForceStop(ctx, op);
-				const s = await sbx.snapshots.get(name);
+				const s = await umiak.snapshots.get(name);
 				ctx.out.event("ready", { snapshot: s }, (v) =>
 					snapshotLine(v.snapshot),
 				);
@@ -95,7 +95,7 @@ export function register(program: Command, run: Runner): void {
 		)
 		.action(
 			run(async (ctx) => {
-				const { data } = await ctx.sbx().raw.GET("/v1/snapshots");
+				const { data } = await ctx.umiak().raw.GET("/v1/snapshots");
 				ctx.out.result(data, (v) =>
 					v.data.length === 0
 						? "No snapshots."
@@ -124,9 +124,9 @@ export function register(program: Command, run: Runner): void {
 				const names = args[0] as string[];
 				const yes = opts.yes === true;
 				if (!yes && !ctx.interactive) await confirm(ctx, false, "");
-				const sbx = ctx.sbx();
+				const umiak = ctx.umiak();
 				const snaps: SnapshotData[] = [];
-				for (const n of names) snaps.push(await sbx.snapshots.get(n));
+				for (const n of names) snaps.push(await umiak.snapshots.get(n));
 				await confirm(
 					ctx,
 					yes,
@@ -135,9 +135,9 @@ export function register(program: Command, run: Runner): void {
 				let first: unknown;
 				for (const s of snaps) {
 					try {
-						await sbx.raw.DELETE("/v1/snapshots/{name}", {
+						await umiak.raw.DELETE("/v1/snapshots/{name}", {
 							params: { path: { name: s.name } },
-							headers: { "Sbx-Confirm-Delete": s.id },
+							headers: { "Umiak-Confirm-Delete": s.id },
 						});
 						ctx.out.result(
 							{ id: s.id, name: s.name, deleted: true },

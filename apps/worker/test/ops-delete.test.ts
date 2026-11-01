@@ -1,5 +1,5 @@
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOpDeadLetter } from "../src/handlers/dlq.ts";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
@@ -134,7 +134,7 @@ describe("delete", () => {
 
 		await deleteAndRun(w, e, sandboxId);
 
-		const lv = (x: { lvId: string }) => `sbx-snap-${x.lvId}-scsi0`;
+		const lv = (x: { lvId: string }) => `umiak-snap-${x.lvId}-scsi0`;
 		await expectAllGone(w, sandboxId, {
 			lvs: [lv(saved), lv(parentOwned)].sort(),
 		});
@@ -265,7 +265,7 @@ describe("delete", () => {
 				},
 			},
 		]);
-		expect(w.metrics.count("sbx_delete_dead_letter_total")).toBe(1);
+		expect(w.metrics.count("umiak_delete_dead_letter_total")).toBe(1);
 		expect((await row(w, "operations", op.id)).state).toBe("pending");
 		expect(await run(w, op.id)).toBe("succeeded");
 		await expectAllGone(w, sandboxId);

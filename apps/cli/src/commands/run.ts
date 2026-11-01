@@ -1,6 +1,6 @@
-// `sbx run [create flags] [--push dir] [--cwd] [--user] [--timeout] [--keep]
+// `umiak run [create flags] [--push dir] [--cwd] [--user] [--timeout] [--keep]
 // -- <cmd...>` (S7 §14.2): create a sandbox, wait until it is ready, push
-// `dir` (like `sbx push`) to `~/<name of dir>`, which becomes the command's
+// `dir` (like `umiak push`) to `~/<name of dir>`, which becomes the command's
 // working directory unless --cwd, run the command with its output streamed
 // like `exec`, then delete the sandbox (unless --keep, which makes it
 // current). Exits with the command's code. Progress goes to stderr; stdout
@@ -41,13 +41,13 @@ interface RunFlags extends CreateFlags {
 
 async function removeSandbox(ctx: Context, id: string): Promise<void> {
 	try {
-		await ctx.sbx().raw.DELETE("/v1/sandboxes/{sandbox}", {
+		await ctx.umiak().raw.DELETE("/v1/sandboxes/{sandbox}", {
 			params: { path: { sandbox: id } },
-			headers: { "Sbx-Confirm-Delete": id },
+			headers: { "Umiak-Confirm-Delete": id },
 		});
 	} catch (err) {
 		ctx.out.warn(
-			`could not delete ${id}: ${(err as Error).message}; run: sbx rm ${id} --yes`,
+			`could not delete ${id}: ${(err as Error).message}; run: umiak rm ${id} --yes`,
 		);
 	}
 }
@@ -57,7 +57,7 @@ export function register(program: Command, run: Runner): void {
 		program
 			.command("run")
 			.description(
-				"create a sandbox, run a command in it, delete it: sbx run [flags] -- <cmd...>",
+				"create a sandbox, run a command in it, delete it: umiak run [flags] -- <cmd...>",
 			)
 			.argument("[cmd...]", "-- and the command"),
 	)
@@ -73,7 +73,7 @@ export function register(program: Command, run: Runner): void {
 		)
 		.option(
 			"--push <dir>",
-			"upload this directory (like sbx push) to ~/<its name> and run the command there",
+			"upload this directory (like umiak push) to ~/<its name> and run the command there",
 		)
 		.option("--keep", "keep the sandbox (it becomes current)")
 		.action(
@@ -119,21 +119,21 @@ export function register(program: Command, run: Runner): void {
 						const created = await createSandbox(ctx, body);
 						id = created.sandbox.id;
 						slug = created.sandbox.slug;
-						ctx.out.info(`sbx: created ${slug} (${id})`);
+						ctx.out.info(`umiak: created ${slug} (${id})`);
 						if (ac.signal.aborted) return stopped();
 						try {
 							await waitForState(ctx, created.sandbox, "ready", {
 								...(timeoutMs === undefined ? {} : { timeoutMs }),
 								signal: ac.signal,
-								onState: (s) => ctx.out.info(`sbx: ${s.slug} is ${s.state}`),
+								onState: (s) => ctx.out.info(`umiak: ${s.slug} is ${s.state}`),
 							});
 							const sb = await ctx
-								.sbx()
+								.umiak()
 								.sandboxes.get(id, { signal: ac.signal });
 							if (f.push !== undefined && pushTo !== undefined) {
 								const r = await pushDir(ctx, sb, f.push, pushTo, ac.signal);
 								ctx.out.info(
-									`sbx: pushed ${r.entries} entries to ${slug}:${r.path}`,
+									`umiak: pushed ${r.entries} entries to ${slug}:${r.path}`,
 								);
 							}
 							executing = true;
@@ -148,7 +148,7 @@ export function register(program: Command, run: Runner): void {
 						if (id !== undefined) {
 							if (f.keep === true) {
 								writeCurrent(ctx, id);
-								ctx.out.info(`sbx: kept ${slug} (${id})`);
+								ctx.out.info(`umiak: kept ${slug} (${id})`);
 							} else {
 								await removeSandbox(ctx, id);
 							}

@@ -52,7 +52,7 @@ export function formatSmbios1(s: Smbios): string {
 
 const FAMILY_URL_MAX = 200;
 
-/** SMBIOS family of a sandbox: "sbxt1:" + the tunnel URL the guest agent dials. */
+/** SMBIOS family of a sandbox: "umiakt1:" + the tunnel URL the guest agent dials. */
 export function familyForTunnelUrl(url: string): string {
 	let host = "";
 	try {
@@ -65,15 +65,15 @@ export function familyForTunnelUrl(url: string): string {
 		throw new Error(`tunnel URL must be wss:// with a host: ${url}`);
 	if (Buffer.byteLength(url, "utf8") > FAMILY_URL_MAX)
 		throw new Error(`tunnel URL is longer than ${FAMILY_URL_MAX} bytes`);
-	return `sbxt1:${url}`;
+	return `umiakt1:${url}`;
 }
 
-/** Serial payload from S2 §5.2: "sbx1:" + machineId + ":" + base64url(bootstrap secret). */
+/** Serial payload from S2 §5.2: "umiak1:" + machineId + ":" + base64url(bootstrap secret). */
 export function s2SerialPayload(
 	machineId: string,
 	bootstrapSecret: Uint8Array,
 ): string {
-	return `sbx1:${machineId}:${Buffer.from(bootstrapSecret).toString("base64url")}`;
+	return `umiak1:${machineId}:${Buffer.from(bootstrapSecret).toString("base64url")}`;
 }
 
 export interface MachineSize {
@@ -127,7 +127,7 @@ async function ipamIp(
 }
 
 /**
- * Per-VM firewall (S1 §4.4): drop inbound, sbx-egress group on net0, macfilter, and with
+ * Per-VM firewall (S1 §4.4): drop inbound, umiak-egress group on net0, macfilter, and with
  * `ipfilter` an ipset pinned to the IPAM address. Also used for the template build VM.
  */
 export async function configureVmFirewall(
@@ -150,7 +150,7 @@ export async function configureVmFirewall(
 	});
 	await api.post(`${base}/rules`, {
 		type: "group",
-		action: "sbx-egress",
+		action: "umiak-egress",
 		iface: "net0",
 		enable: 1,
 	});
@@ -170,7 +170,7 @@ const SNAPSHOT_HW_KEYS = [...TEMPLATE_HW_KEYS, "cores", "memory", "balloon"];
  * sandbox gets no drive either (S5 section 17.1 p. 4). Snapshots without it predate the entry
  * and keep the drive.
  */
-export const SNAPSHOT_CLOUDINIT_KEY = "sbx-cloudinit";
+export const SNAPSHOT_CLOUDINIT_KEY = "umiak-cloudinit";
 
 export interface MachineInfo {
 	vmid: number;
@@ -384,7 +384,7 @@ export interface MachinesOptions {
 
 type Source = { kind: "template" } | { kind: "snapshot"; snap: SnapshotRef };
 
-/** Machine primitives on top of the PVE API, sbx-node and a storage driver (spec §6.3). */
+/** Machine primitives on top of the PVE API, umiak-node and a storage driver (spec §6.3). */
 export class Machines {
 	readonly qga: Qga;
 	/** Extra dhcp.release rounds in delete verification, reported by the bench. */
@@ -478,7 +478,7 @@ export class Machines {
 		try {
 			const params: Params = {
 				vmid,
-				name: `sbx-${vmid}`,
+				name: `umiak-${vmid}`,
 				pool: cfg.pool,
 				...hardware,
 				balloon: 0,
@@ -487,7 +487,7 @@ export class Machines {
 					? {
 							ide2: `${cfg.storage}:cloudinit`,
 							ipconfig0: "ip=dhcp",
-							ciuser: "sbx",
+							ciuser: "umiak",
 							...NO_CI_UPGRADE,
 						}
 					: {}),
@@ -520,14 +520,14 @@ export class Machines {
 							target,
 						);
 
-			const diskParams: Params = { tags: "sbx" };
+			const diskParams: Params = { tags: "umiak" };
 			for (const d of disks) diskParams[d.slot] = formatDisk(d);
 			if (disks.some((d) => d.slot === "scsi0"))
 				diskParams.boot = "order=scsi0";
 			await api.put(this.#vmPath(vmid, "/config"), diskParams);
 			if (tpmTemplate) {
-				// Proxmox allocates vm-<vmid>-disk-<n> without our tags; lv.adopt adds sbx and
-				// sbx-vm-<vmid>, or sbx-node refuses it as a snapshot origin.
+				// Proxmox allocates vm-<vmid>-disk-<n> without our tags; lv.adopt adds umiak and
+				// umiak-vm-<vmid>, or umiak-node refuses it as a snapshot origin.
 				const version = tpmTemplate.options.version ?? "v2.0";
 				await api.put(this.#vmPath(vmid, "/config"), {
 					tpmstate0: `${cfg.storage}:1,version=${version}`,
@@ -573,7 +573,7 @@ export class Machines {
 						newid: vmid,
 						full: 0,
 						pool: cfg.pool,
-						name: `sbx-${vmid}`,
+						name: `umiak-${vmid}`,
 					},
 				);
 				await api.waitTask(this.#node, upid);
@@ -581,7 +581,7 @@ export class Machines {
 					net0: `virtio=${mac},bridge=${cfg.vnet},firewall=1`,
 					cores: size.cores,
 					memory: size.memoryMb,
-					tags: "sbx",
+					tags: "umiak",
 					...NO_CI_UPGRADE,
 				});
 				await this.#firewall(vmid, mac);
@@ -749,7 +749,7 @@ export class Machines {
 	async deleteSnapshot(snap: SnapshotRef): Promise<void> {
 		await this.#o.driver.delete(snap);
 		const { lvs } = await this.#o.node.call<{ lvs: unknown[] }>("lv.list", {
-			tags: ["sbx", `sbx-snap-${snap.id}`],
+			tags: ["umiak", `umiak-snap-${snap.id}`],
 		});
 		if (lvs.length > 0)
 			throw new TracesRemainError(snap.sourceVmid, [
@@ -758,7 +758,7 @@ export class Machines {
 		this.#o.snapshots.removeSnapshot(snap.id);
 	}
 
-	/** VMs visible to the token (pool sandbox). */
+	/** VMs visible to the token (pool umiak). */
 	async #resources(): Promise<
 		{
 			vmid: number;
@@ -850,7 +850,7 @@ export class Machines {
 				await this.#task(vmid, "stop");
 			// Release while the IP, the ethers line and the lease still belong to this VM: once
 			// destroy frees the IP in IPAM, a new VM may take it and dnsmasq moves the lease to the
-			// new MAC, after which a release for our MAC finds nothing. sbx-node keeps the ethers
+			// new MAC, after which a release for our MAC finds nothing. umiak-node keeps the ethers
 			// line while the MAC is in mac-cache.json; verifyGone removes it after destroy.
 			await this.#o.node.call("dhcp.release", { mac });
 			const upid = await api.delete<string>(this.#vmPath(vmid), {
@@ -865,7 +865,7 @@ export class Machines {
 		await allocator.releaseOwned(vmid, lease?.ownerId ?? null);
 	}
 
-	/** dhcp.leases, repeated while sbx-node finds the lease file in the middle of a rewrite. */
+	/** dhcp.leases, repeated while umiak-node finds the lease file in the middle of a rewrite. */
 	async #dhcpLeases(): Promise<{
 		leases: { mac: string }[];
 		ethers?: { mac: string }[];

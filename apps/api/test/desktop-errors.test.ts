@@ -1,7 +1,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ErrorDetailSchema } from "@sbx/proto";
-import { DesktopActionFailureSchema } from "@sbx/proto/agent/v1";
+import { ErrorDetailSchema } from "@umiak/proto";
+import { DesktopActionFailureSchema } from "@umiak/proto/agent/v1";
 import { expect, it } from "vitest";
 import { toAgentError } from "../src/agent/connect.ts";
 import { AgentCallError, agentErrorToHttp } from "../src/agent/errors.ts";

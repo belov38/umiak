@@ -1,10 +1,14 @@
 // Sandbox routes (S7 §6, §8.2): create, list, get with long-poll, patch
-// (with slug rename), delete with Sbx-Confirm-Delete, and the actions stop,
+// (with slug rename), delete with Umiak-Confirm-Delete, and the actions stop,
 // resume, fork, recover, extend. Actions that start an operation answer 202
 // {sandbox, operation}; a repeat while the same kind is active returns that
 // operation (core), another kind is 409 operation_in_progress.
 import { createRoute, z } from "@hono/zod-openapi";
-import { type EnvironmentStore, encodeUuid, type SecretSets } from "@sbx/auth";
+import {
+	type EnvironmentStore,
+	encodeUuid,
+	type SecretSets,
+} from "@umiak/auth";
 import {
 	type BlockInput,
 	type BlockReason,
@@ -16,7 +20,7 @@ import {
 	SANDBOX_STATES,
 	type SandboxState,
 	type UnblockInput,
-} from "@sbx/core";
+} from "@umiak/core";
 import { authOf, decodeTeamRef } from "../auth/principal.ts";
 import { limitStarts } from "../auth/rate-limit.ts";
 import { checkScope, requireOperator, requireScope } from "../auth/scopes.ts";
@@ -95,7 +99,7 @@ const IdempotencyHeaders = z.object({
 });
 
 const ConfirmDeleteHeaders = z.object({
-	"Sbx-Confirm-Delete": z
+	"Umiak-Confirm-Delete": z
 		.string()
 		.optional()
 		.openapi({
@@ -279,7 +283,7 @@ const deleteSandbox = createRoute({
 	summary: "Delete a sandbox",
 	description:
 		"Deletes the sandbox and its VM; any running operation is superseded. Needs the header " +
-		"Sbx-Confirm-Delete with the sandbox id (or slug) — otherwise 428 and nothing happens. " +
+		"Umiak-Confirm-Delete with the sandbox id (or slug) — otherwise 428 and nothing happens. " +
 		"Answers 202 with the delete operation; on an already deleted sandbox 200 with " +
 		"`operation: null`. Repeating is safe.",
 	tags: TAGS,
@@ -290,7 +294,7 @@ const deleteSandbox = createRoute({
 		202: jsonResponse(SandboxDeleteSchema, "Deleting"),
 		404: notFound404,
 		428: errorResponse(
-			"`confirmation_required`: Sbx-Confirm-Delete is missing or names another resource",
+			"`confirmation_required`: Umiak-Confirm-Delete is missing or names another resource",
 		),
 		...ERROR_RESPONSES,
 	},
@@ -455,7 +459,7 @@ export function unblockInput(b: { note?: string | undefined }): UnblockInput {
 const OPERATOR_ONLY =
 	"Only a platform operator's browser session (the dashboard); API keys and Keycloak " +
 	"tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found " +
-	"in any team, no Sbx-Team needed.";
+	"in any team, no Umiak-Team needed.";
 const operator403 = errorResponse(
 	"`forbidden` with details.reason `operator_required`: not a platform operator",
 );

@@ -1,8 +1,12 @@
 // ConnectAgentApi against Postgres: capabilities from tunnel.tunnel_sessions,
 // and without a client (no gateway token) every call is agent_unavailable.
 import { randomUUID } from "node:crypto";
-import { AgentUnavailableError } from "@sbx/agent-client";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { AgentUnavailableError } from "@umiak/agent-client";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type AgentApi, ConnectAgentApi } from "../src/index.ts";
 

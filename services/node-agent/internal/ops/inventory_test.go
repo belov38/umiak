@@ -6,14 +6,14 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 )
 
 const qmList = `      VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID
        100 hasp                 running    512                4.00 4068746
-       598 sbx-tpl-windows-1    running    8192              64.00 4068750
-       599 sbx-ubuntu-poc       stopped    2048              40.00 0
-       590 sbx-dev-cp-vm        running    1024               8.00 4068751
+       598 umiak-tpl-windows-1    running    8192              64.00 4068750
+       599 umiak-ubuntu-poc       stopped    2048              40.00 0
+       590 umiak-dev-cp-vm        running    1024               8.00 4068751
 `
 
 const pctList = `VMID       Status     Lock         Name
@@ -25,8 +25,8 @@ func inventoryFS() fstest.MapFS {
 	old := time.Unix(1793200000, 0)
 	recent := time.Unix(1793299000, 0)
 	return fstest.MapFS{
-		"etc/pve/sdn/zones.cfg":                 {Data: []byte("simple: sbx\n")},
-		"etc/pve/sdn/vnets.cfg":                 {Data: []byte("vnet: sbx0\n")},
+		"etc/pve/sdn/zones.cfg":                 {Data: []byte("simple: umiak\n")},
+		"etc/pve/sdn/vnets.cfg":                 {Data: []byte("vnet: umiak0\n")},
 		"etc/pve/firewall/cluster.fw":           {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/firewall/500.fw":               {Data: []byte("[OPTIONS]\n")},
 		"etc/pve/firewall/599.fw":               {Data: []byte("[OPTIONS]\n")},
@@ -36,10 +36,10 @@ func inventoryFS() fstest.MapFS {
 		"etc/pve/qemu-server/500.conf":          {Data: []byte("memory: 2048\n")},
 		"etc/pve/qemu-server/101.conf":          {Data: []byte("memory: 2048\n")},
 		"etc/network/interfaces":                {Data: []byte("auto lo\n")},
-		"etc/network/interfaces.d/sdn":          {Data: []byte("auto sbx0\n")},
+		"etc/network/interfaces.d/sdn":          {Data: []byte("auto umiak0\n")},
 		"proc/sys/net/ipv4/ip_forward":          {Data: []byte("1\n")},
 		"proc/sys/net/ipv6/conf/all/forwarding": {Data: []byte("0\n")},
-		"proc/net/if_inet6":                     {Data: []byte("fe80000000000000a8bbccfffedd0011 0c 40 20 80     sbx0\nfe800000000000003a0525fffe3aa30a 05 40 20 80    vmbr0\n")},
+		"proc/net/if_inet6":                     {Data: []byte("fe80000000000000a8bbccfffedd0011 0c 40 20 80     umiak0\nfe800000000000003a0525fffe3aa30a 05 40 20 80    vmbr0\n")},
 		"etc/group":                             {Data: []byte("root:x:0:\nadm:x:4:\nsystemd-journal:x:999:alice,bob\n")},
 		"var/log/pve/tasks/A/UPID:pve:old":      {Data: []byte(testSerial), ModTime: old},
 		"var/log/pve/tasks/B/UPID:pve:recent":   {Data: []byte("nothing here"), ModTime: recent},
@@ -68,12 +68,12 @@ func TestInventoryDefaultSections(t *testing.T) {
 	lvs := m["lvs"].([]any)
 	for _, l := range lvs {
 		if l.(map[string]any)["name"] == "vm-500-disk-0" {
-			t.Errorf("lvs must exclude sbx-tagged LVs: %v", lvs)
+			t.Errorf("lvs must exclude umiak-tagged LVs: %v", lvs)
 		}
 	}
 	for _, l := range lvs {
 		if l.(map[string]any)["name"] == "base-599-disk-0" {
-			t.Errorf("lvs must exclude the template LV tagged sbx-tpl: %v", lvs)
+			t.Errorf("lvs must exclude the template LV tagged umiak-tpl: %v", lvs)
 		}
 	}
 	if len(lvs) != 2 {
@@ -99,8 +99,8 @@ func TestInventoryDefaultSections(t *testing.T) {
 	if sysctl["net.ipv4.ip_forward"] != "1" || sysctl["net.ipv6.conf.all.forwarding"] != "0" {
 		t.Errorf("sysctl = %v", sysctl)
 	}
-	if m["sbx0"].(map[string]any)["linkLocal"] != "fe80::a8bb:ccff:fedd:11" {
-		t.Errorf("sbx0 = %v", m["sbx0"])
+	if m["umiak0"].(map[string]any)["linkLocal"] != "fe80::a8bb:ccff:fedd:11" {
+		t.Errorf("umiak0 = %v", m["umiak0"])
 	}
 	vmfiles := m["vmfiles"].([]any)
 	if len(vmfiles) != 2 {
@@ -117,9 +117,9 @@ func TestInventoryDefaultSections(t *testing.T) {
 
 func TestInventoryLinkLocal(t *testing.T) {
 	fs := inventoryFS()
-	fs["proc/net/if_inet6"] = &fstest.MapFile{Data: []byte("fe80000000000000a8bbccfffedd0011 0c 40 20 80     sbx0\n")}
-	m := resultMap(t, newHarness(fs).call(t, "inventory", map[string]any{"sections": []string{"sbx0"}}))
-	if got := m["sbx0"].(map[string]any)["linkLocal"]; got != "fe80::a8bb:ccff:fedd:11" {
+	fs["proc/net/if_inet6"] = &fstest.MapFile{Data: []byte("fe80000000000000a8bbccfffedd0011 0c 40 20 80     umiak0\n")}
+	m := resultMap(t, newHarness(fs).call(t, "inventory", map[string]any{"sections": []string{"umiak0"}}))
+	if got := m["umiak0"].(map[string]any)["linkLocal"]; got != "fe80::a8bb:ccff:fedd:11" {
 		t.Errorf("linkLocal = %v", got)
 	}
 }
@@ -151,9 +151,9 @@ func TestInventoryHashesJSONCanonically(t *testing.T) {
 		m := resultMap(t, newHarness(fs).call(t, "inventory", map[string]any{"sections": []string{"hashes"}}))
 		return m["hashes"].(map[string]any)["/etc/pve/sdn/pve-ipam-state.json"]
 	}
-	a := hash(`{"zones":{"sbx":{"ips":{"10.88.0.1":{"gateway":1},"10.88.0.100":{"vmid":"599","mac":"x"}}}}}`)
-	b := hash(`{"zones":{"sbx":{"ips":{"10.88.0.100":{"mac":"x","vmid":"599"},"10.88.0.1":{"gateway":1}}}}}`)
-	c := hash(`{"zones":{"sbx":{"ips":{"10.88.0.1":{"gateway":1}}}}}`)
+	a := hash(`{"zones":{"umiak":{"ips":{"10.88.0.1":{"gateway":1},"10.88.0.100":{"vmid":"599","mac":"x"}}}}}`)
+	b := hash(`{"zones":{"umiak":{"ips":{"10.88.0.100":{"mac":"x","vmid":"599"},"10.88.0.1":{"gateway":1}}}}}`)
+	c := hash(`{"zones":{"umiak":{"ips":{"10.88.0.1":{"gateway":1}}}}}`)
 	if a != b || a == c {
 		t.Errorf("a=%v b=%v c=%v", a, b, c)
 	}

@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 // StreamHost isolates systemd/SCM and private files from the pinned HTTP protocol.
@@ -148,7 +148,7 @@ func (s *HTTPStreamer) Open(ctx context.Context, c Credentials, ice []*v1.Deskto
 	}
 	// Pre-create the fixed reverse-proxy user with the ordinary User role.
 	var user json.RawMessage
-	if e = s.json(ctx, "GET", s.moon, "/api/user?name=sbx", nil, &user); e != nil {
+	if e = s.json(ctx, "GET", s.moon, "/api/user?name=umiak", nil, &user); e != nil {
 		var role struct {
 			ID uint32 `json:"id"`
 		}
@@ -159,7 +159,7 @@ func (s *HTTPStreamer) Open(ctx context.Context, c Credentials, ice []*v1.Deskto
 		if e = s.json(ctx, "PATCH", s.moon, "/api/role", map[string]any{"id": role.ID, "ty": "User", "permissions": permissions}, nil); e != nil {
 			return "", "", e
 		}
-		if e = s.json(ctx, "POST", s.moon, "/api/user", map[string]any{"name": "sbx", "password": c.Viewer(), "role_id": role.ID, "client_unique_id": "sbx-desktop"}, &user); e != nil {
+		if e = s.json(ctx, "POST", s.moon, "/api/user", map[string]any{"name": "umiak", "password": c.Viewer(), "role_id": role.ID, "client_unique_id": "umiak-desktop"}, &user); e != nil {
 			return "", "", e
 		}
 	}
@@ -281,7 +281,7 @@ func (s *HTTPStreamer) pair(ctx context.Context, id uint32) error {
 	var status struct {
 		Status bool `json:"status"`
 	}
-	if e = s.json(ctx, "POST", s.sun, "/api/pin", map[string]string{"pairing_id": p.ID, "pin": first.PIN, "name": "sbx-desktop"}, &status); e != nil {
+	if e = s.json(ctx, "POST", s.sun, "/api/pin", map[string]string{"pairing_id": p.ID, "pin": first.PIN, "name": "umiak-desktop"}, &status); e != nil {
 		return e
 	}
 	if !status.Status {

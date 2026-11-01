@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 func TestDownloadRangeAndETag(t *testing.T) {
@@ -63,7 +63,7 @@ func TestDownloadRangeAndETag(t *testing.T) {
 	}
 
 	// A relative path resolves under the home of the request user.
-	res = h.do(http.MethodGet, "/files", q("path", "no-such-file-sbx-test"), nil, nil)
+	res = h.do(http.MethodGet, "/files", q("path", "no-such-file-umiak-test"), nil, nil)
 	wantError(t, res, http.StatusNotFound, errs.PathNotFound)
 }
 
@@ -138,7 +138,7 @@ func TestPutAtomic(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(h.root)
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".sbx-tmp-") {
+		if strings.HasPrefix(e.Name(), ".umiak-tmp-") {
 			t.Fatalf("temporary file left: %s", e.Name())
 		}
 	}
@@ -186,7 +186,7 @@ func TestUploadChunksResume(t *testing.T) {
 
 	res := h.do(http.MethodPut, "/files/uploads/"+id, q("offset", "0", "path", dst), bytes.NewReader(c1), nil)
 	wantStatus(t, res, http.StatusOK)
-	if got := res.Header.Get("Sbx-Upload-Offset"); got != itoa(len(c1)) {
+	if got := res.Header.Get("Umiak-Upload-Offset"); got != itoa(len(c1)) {
 		t.Fatalf("offset after chunk 1 = %q", got)
 	}
 	// The temp file lives in UploadsDir: the target is on the same device.
@@ -197,25 +197,25 @@ func TestUploadChunksResume(t *testing.T) {
 	// Wrong offset: 409 with the current offset.
 	res = h.do(http.MethodPut, "/files/uploads/"+id, q("offset", "5"), bytes.NewReader(c2), nil)
 	wantError(t, res, http.StatusConflict, errs.UploadOffsetMismatch)
-	got := res.Header.Get("Sbx-Upload-Offset")
+	got := res.Header.Get("Umiak-Upload-Offset")
 	if !offsetRE.MatchString(got) || got != itoa(len(c1)) {
-		t.Fatalf("Sbx-Upload-Offset = %q", got)
+		t.Fatalf("Umiak-Upload-Offset = %q", got)
 	}
 	for k := range res.Header {
-		if strings.HasPrefix(strings.ToLower(k), "sbx-") && k != "Sbx-Upload-Offset" {
+		if strings.HasPrefix(strings.ToLower(k), "umiak-") && k != "Umiak-Upload-Offset" {
 			t.Fatalf("unexpected header %s", k)
 		}
 	}
 	res = h.do(http.MethodHead, "/files/uploads/"+id, nil, nil, nil)
 	wantStatus(t, res, http.StatusOK)
-	if res.Header.Get("Sbx-Upload-Offset") != got {
-		t.Fatalf("HEAD offset = %q, want %q", res.Header.Get("Sbx-Upload-Offset"), got)
+	if res.Header.Get("Umiak-Upload-Offset") != got {
+		t.Fatalf("HEAD offset = %q, want %q", res.Header.Get("Umiak-Upload-Offset"), got)
 	}
 
 	res = h.do(http.MethodPut, "/files/uploads/"+id, q("offset", got), bytes.NewReader(c2), nil)
 	wantStatus(t, res, http.StatusOK)
-	if res.Header.Get("Sbx-Upload-Offset") != itoa(len(data)) {
-		t.Fatalf("final offset %q", res.Header.Get("Sbx-Upload-Offset"))
+	if res.Header.Get("Umiak-Upload-Offset") != itoa(len(data)) {
+		t.Fatalf("final offset %q", res.Header.Get("Umiak-Upload-Offset"))
 	}
 
 	sum := sha256.Sum256(data)
@@ -283,8 +283,8 @@ func TestUploadLimitsAndCancel(t *testing.T) {
 	res = h.do(http.MethodPut, "/files/uploads/u1", q("offset", "3"), bytes.NewReader(randomBytes(2000)), nil)
 	wantError(t, res, http.StatusRequestEntityTooLarge, errs.PayloadTooLarge)
 	res = h.do(http.MethodHead, "/files/uploads/u1", nil, nil, nil)
-	if wantStatus(t, res, http.StatusOK); res.Header.Get("Sbx-Upload-Offset") != "3" {
-		t.Fatalf("offset after rejected chunk = %q", res.Header.Get("Sbx-Upload-Offset"))
+	if wantStatus(t, res, http.StatusOK); res.Header.Get("Umiak-Upload-Offset") != "3" {
+		t.Fatalf("offset after rejected chunk = %q", res.Header.Get("Umiak-Upload-Offset"))
 	}
 	res = h.do(http.MethodPut, "/files/uploads/u1", q("offset", "-1"), strings.NewReader("x"), nil)
 	wantError(t, res, http.StatusBadRequest, errs.InvalidArgument)
@@ -470,8 +470,8 @@ func TestPutChunkAfterLostCommit(t *testing.T) {
 
 	res = h.do(http.MethodPut, "/files/uploads/lost", q("offset", "7"), strings.NewReader("more"), nil)
 	wantError(t, res, http.StatusConflict, errs.UploadOffsetMismatch)
-	if got := res.Header.Get("Sbx-Upload-Offset"); got != "7" {
-		t.Fatalf("Sbx-Upload-Offset = %q, want 7", got)
+	if got := res.Header.Get("Umiak-Upload-Offset"); got != "7" {
+		t.Fatalf("Umiak-Upload-Offset = %q, want 7", got)
 	}
 	if _, ok, _ := h.st.GetUpload("lost"); !ok {
 		t.Fatal("upload record dropped by the chunk")

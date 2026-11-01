@@ -1,9 +1,9 @@
-// `sbx login` (device grant and --key-stdin), `sbx logout`, the credential
-// store files, and --cacert / SBX_CA_FILE through a self-signed TLS front.
+// `umiak login` (device grant and --key-stdin), `umiak logout`, the credential
+// store files, and --cacert / UMIAK_CA_FILE through a self-signed TLS front.
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { startTestOidcServer, type TestOidcServer } from "@sbx/api/testing";
+import { startTestOidcServer, type TestOidcServer } from "@umiak/api/testing";
 import {
 	afterAll,
 	afterEach,
@@ -101,8 +101,8 @@ describe("deviceLogin (unit, scripted Keycloak)", () => {
 		const forms: Record<string, string>[] = [];
 		const sleeps: number[] = [];
 		const t = await deviceLogin({
-			issuer: "https://kc/realms/sbx/",
-			clientId: "sbx-cli",
+			issuer: "https://kc/realms/umiak/",
+			clientId: "umiak-cli",
 			fetch: async (req) => {
 				forms.push({
 					url: req.url,
@@ -120,20 +120,20 @@ describe("deviceLogin (unit, scripted Keycloak)", () => {
 		expect(t).toMatchObject({ accessToken: "at", refreshToken: "rt" });
 		expect(sleeps).toEqual([5000, 5000, 10_000, 10_000]);
 		expect(forms[0]).toEqual({
-			url: "https://kc/realms/sbx/protocol/openid-connect/auth/device",
-			client_id: "sbx-cli",
+			url: "https://kc/realms/umiak/protocol/openid-connect/auth/device",
+			client_id: "umiak-cli",
 			scope: "openid",
 		});
 		expect(forms[1]).toEqual({
-			url: "https://kc/realms/sbx/protocol/openid-connect/token",
+			url: "https://kc/realms/umiak/protocol/openid-connect/token",
 			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 			device_code: "dc",
-			client_id: "sbx-cli",
+			client_id: "umiak-cli",
 		});
 	});
 });
 
-describe("sbx login", () => {
+describe("umiak login", () => {
 	let w: CliWorld;
 	let home: CliHome;
 	beforeAll(async () => {
@@ -199,7 +199,11 @@ describe("sbx login", () => {
 		const tok = JSON.parse(t.stdout);
 		expect(tok).toMatchObject({ kind: "oidc", apiUrl: w.url, team: null });
 		expect(Date.parse(tok.expiresAt)).toBeGreaterThan(Date.now() + 200_000);
-		expect(jwtClaims(tok.token)).toMatchObject({ sub, email, azp: "sbx-cli" });
+		expect(jwtClaims(tok.token)).toMatchObject({
+			sub,
+			email,
+			azp: "umiak-cli",
+		});
 
 		const who = await runCli(["whoami"], { env: home.env });
 		expect(who.code, who.stderr).toBe(0);
@@ -209,7 +213,7 @@ describe("sbx login", () => {
 	it("--credential-store file keeps the tokens in credentials.json with mode 0600", async () => {
 		const sub = `kc-${crypto.randomUUID()}`;
 		w.oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
-		const env = { ...home.env, SBX_CREDENTIAL_STORE: undefined };
+		const env = { ...home.env, UMIAK_CREDENTIAL_STORE: undefined };
 		const r = await runCli(
 			[
 				"login",
@@ -233,7 +237,7 @@ describe("sbx login", () => {
 		expect(cred).toMatchObject({
 			kind: "oidc",
 			issuer: w.oidc.issuer,
-			clientId: "sbx-cli",
+			clientId: "umiak-cli",
 		});
 		expect(cred.refreshToken).toBeTypeOf("string");
 		const config = JSON.parse(
@@ -341,7 +345,7 @@ describe("sbx login", () => {
 	});
 
 	it("--key-stdin with an unknown key exits 4 and stores nothing", async () => {
-		const { generateApiKeySecret } = await import("@sbx/auth");
+		const { generateApiKeySecret } = await import("@umiak/auth");
 		const r = await runCli(["login", "--key-stdin", "--api-url", w.url], {
 			env: home.env,
 			stdin: generateApiKeySecret(),
@@ -359,7 +363,7 @@ describe("sbx login", () => {
 	});
 
 	it("--key-stdin checks the key locally: extra text or a bad key exits 2 before any request, without echoing it", async () => {
-		const { generateApiKeySecret } = await import("@sbx/auth");
+		const { generateApiKeySecret } = await import("@umiak/auth");
 		const key = generateApiKeySecret();
 		// Nothing listens there: a request would end with network_error (75).
 		const nowhere = "http://127.0.0.1:1";
@@ -471,7 +475,7 @@ describe("sbx login", () => {
 
 	it("re-login with another store deletes the secret from the old store", async () => {
 		const secrets = fakeSecrets();
-		const env = { ...home.env, SBX_CREDENTIAL_STORE: undefined };
+		const env = { ...home.env, UMIAK_CREDENTIAL_STORE: undefined };
 		const a = await inProcess(
 			[
 				"login",
@@ -484,7 +488,7 @@ describe("sbx login", () => {
 			{ env, stdin: w.secret, secrets },
 		);
 		expect(a.code, a.stderr).toBe(0);
-		expect([...secrets.data.keys()]).toEqual([`sbx/default@${w.url}`]);
+		expect([...secrets.data.keys()]).toEqual([`umiak/default@${w.url}`]);
 		const b = await inProcess(
 			[
 				"login",
@@ -504,15 +508,15 @@ describe("sbx login", () => {
 		expect(Object.keys(file)).toEqual([`default@${w.url}`]);
 	});
 
-	it("an empty SBX_CREDENTIAL_STORE is treated as unset (auto)", async () => {
+	it("an empty UMIAK_CREDENTIAL_STORE is treated as unset (auto)", async () => {
 		const secrets = fakeSecrets();
 		const r = await inProcess(["login", "--key-stdin", "--api-url", w.url], {
-			env: { ...home.env, SBX_CREDENTIAL_STORE: "" },
+			env: { ...home.env, UMIAK_CREDENTIAL_STORE: "" },
 			stdin: w.secret,
 			secrets,
 		});
 		expect(r.code, r.stderr).toBe(0);
-		expect([...secrets.data.keys()]).toEqual([`sbx/default@${w.url}`]);
+		expect([...secrets.data.keys()]).toEqual([`umiak/default@${w.url}`]);
 	});
 
 	it("logout of a key only erases it; --revoke also revokes the key", async () => {
@@ -530,7 +534,7 @@ describe("sbx login", () => {
 			revoked: false,
 		});
 		const still = await runCli(["whoami"], {
-			env: { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: key },
+			env: { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: key },
 		});
 		expect(still.code).toBe(0);
 
@@ -543,13 +547,13 @@ describe("sbx login", () => {
 			revoked: true,
 		});
 		const gone = await runCli(["whoami"], {
-			env: { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: key },
+			env: { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: key },
 		});
 		expect(gone.code).toBe(4);
 	});
 });
 
-describe("--cacert / SBX_CA_FILE (self-signed TLS front for api and Keycloak)", () => {
+describe("--cacert / UMIAK_CA_FILE (self-signed TLS front for api and Keycloak)", () => {
 	let tls: TlsFront;
 	let oidc: TestOidcServer;
 	let w: CliWorld;
@@ -558,12 +562,12 @@ describe("--cacert / SBX_CA_FILE (self-signed TLS front for api and Keycloak)", 
 		tls = await startTlsFront();
 		oidc = await startTestOidcServer({
 			deviceInterval: 0,
-			issuer: `${tls.url}/realms/sbx`,
+			issuer: `${tls.url}/realms/umiak`,
 		});
 		w = await startWorld({
 			oidcServer: oidc,
 			settings: {
-				SBX_OIDC_JWKS_URL: `${oidc.base}/realms/sbx/protocol/openid-connect/certs`,
+				UMIAK_OIDC_JWKS_URL: `${oidc.base}/realms/umiak/protocol/openid-connect/certs`,
 			},
 		});
 		tls.route("/realms/", oidc.base);
@@ -592,7 +596,7 @@ describe("--cacert / SBX_CA_FILE (self-signed TLS front for api and Keycloak)", 
 		expect(r.last().message).toMatch(/certificate/i);
 	});
 
-	it("--cacert: device login through HTTPS api and Keycloak; SBX_CA_FILE for later commands", async () => {
+	it("--cacert: device login through HTTPS api and Keycloak; UMIAK_CA_FILE for later commands", async () => {
 		const sub = `kc-${crypto.randomUUID()}`;
 		oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
 		const r = await runCli(
@@ -609,7 +613,7 @@ describe("--cacert / SBX_CA_FILE (self-signed TLS front for api and Keycloak)", 
 		expect(oidc.stats.deviceAuthorization).toBeGreaterThanOrEqual(1);
 
 		const who = await runCli(["whoami"], {
-			env: { ...home.env, SBX_CA_FILE: tls.caFile },
+			env: { ...home.env, UMIAK_CA_FILE: tls.caFile },
 		});
 		expect(who.code, who.stderr).toBe(0);
 		expect(JSON.parse(who.stdout).user.email).toBe(`${sub}@example.com`);
@@ -625,7 +629,7 @@ describe("--cacert / SBX_CA_FILE (self-signed TLS front for api and Keycloak)", 
 		writeFileSync(file, JSON.stringify(all), { mode: 0o600 });
 		const refreshes = oidc.stats.refresh;
 		const t = await runCli(["auth", "token", "--json"], {
-			env: { ...home.env, SBX_CA_FILE: tls.caFile },
+			env: { ...home.env, UMIAK_CA_FILE: tls.caFile },
 		});
 		expect(t.code, t.stderr).toBe(0);
 		expect(oidc.stats.refresh).toBe(refreshes + 1);
@@ -635,7 +639,7 @@ describe("--cacert / SBX_CA_FILE (self-signed TLS front for api and Keycloak)", 
 		const r = await runCli(
 			["whoami", "--api-url", tls.url, "--cacert", "/nonexistent/ca.pem"],
 			{
-				env: { ...home.env, SBX_API_KEY: w.secret },
+				env: { ...home.env, UMIAK_API_KEY: w.secret },
 			},
 		);
 		expect(r.code).toBe(2);

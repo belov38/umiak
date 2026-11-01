@@ -26,7 +26,7 @@ func TestLookupUser(t *testing.T) {
 		t.Fatal("empty shell")
 	}
 
-	if _, err := LookupUser("no-such-user-sbx-test"); !errors.Is(err, ErrUserNotFound) {
+	if _, err := LookupUser("no-such-user-umiak-test"); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("unknown user: %v", err)
 	}
 	if _, err := LookupUser(""); !errors.Is(err, ErrUserNotFound) {

@@ -1,4 +1,4 @@
-// Package ops implements the sbx-node operation whitelist.
+// Package ops implements the umiak-node operation whitelist.
 package ops
 
 import (
@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
+	"github.com/belov38/umiak/services/node-agent/internal/config"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 )
 
 // Request is one JSON request read from stdin.

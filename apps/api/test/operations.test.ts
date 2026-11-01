@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { decodeUuid, encodeUuid } from "@sbx/auth";
-import { insertOperation } from "@sbx/core/testing";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid, encodeUuid } from "@umiak/auth";
+import { insertOperation } from "@umiak/core/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";

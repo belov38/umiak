@@ -3,14 +3,14 @@
 // Ports are parameters so tests run the real process wiring over fakes;
 // main.ts passes the real adapters.
 import type { Server } from "node:http";
-import type { ConfigReader } from "@sbx/config";
+import type { ConfigReader } from "@umiak/config";
 import {
 	ensureQueues,
 	type KeyRing,
 	PgBossJobSender,
 	type QueueName,
-} from "@sbx/core";
-import { dbOf, MIGRATIONS_DIR, migrate, missingMigrations } from "@sbx/db";
+} from "@umiak/core";
+import { dbOf, MIGRATIONS_DIR, migrate, missingMigrations } from "@umiak/db";
 import type pg from "pg";
 import type { Db as BossDb, ConstructorOptions, PgBoss } from "pg-boss";
 import type { Logger } from "pino";
@@ -51,16 +51,16 @@ export interface WorkerOptions {
 	gateway: GatewayPort;
 	/** S8 IdP sync; `ctl-idp-sync` runs only when set (decision 15). */
 	idpSync?: IdpSync;
-	/** `SBX_IDP_SYNC_INTERVAL`; default the controller's 300 s. */
+	/** `UMIAK_IDP_SYNC_INTERVAL`; default the controller's 300 s. */
 	idpSyncIntervalMs?: number;
 	log?: Logger;
 	metrics?: PromMetrics;
 	timing?: Timing;
-	/** `SBX_RECONCILE_DRY_RUN` (default true). */
+	/** `UMIAK_RECONCILE_DRY_RUN` (default true). */
 	reconcileDryRun?: boolean;
 	/**
-	 * `SBX_MIGRATE_ON_START` (default true). When false the worker waits for
-	 * another process (api, `sbx-admin migrate`) to apply them; /readyz says
+	 * `UMIAK_MIGRATE_ON_START` (default true). When false the worker waits for
+	 * another process (api, `umiak-admin migrate`) to apply them; /readyz says
 	 * why in the meantime.
 	 */
 	migrateOnStart?: boolean;
@@ -222,7 +222,7 @@ export class Worker {
 				if (!logged) {
 					this.#log.warn(
 						{ missing },
-						"waiting for migrations (SBX_MIGRATE_ON_START=0)",
+						"waiting for migrations (UMIAK_MIGRATE_ON_START=0)",
 					);
 					logged = true;
 				}

@@ -17,7 +17,7 @@ import {
 	updateWindowsVersions,
 } from "./versions-update-windows.ts";
 
-// `sbx-tpl versions <slug> [--update]`: dispatch by recipe os
+// `umiak-tpl versions <slug> [--update]`: dispatch by recipe os
 
 export {
 	defaultFetch,

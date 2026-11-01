@@ -3,7 +3,7 @@
 // (requestAuth → authenticateRequest), and the Payload instance of the
 // process.
 import "server-only";
-import { sessionCacheOf } from "@sbx/payload";
+import { sessionCacheOf } from "@umiak/payload";
 import { revalidatePath } from "next/cache";
 import { getWebPayload } from "./payload";
 import { requestAuth } from "./session";

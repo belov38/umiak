@@ -62,7 +62,7 @@ function line(type: string, blob: Buffer, comment?: string): string {
 const NOW = new Date("2026-10-30T12:00:00Z");
 const AFTER = new Date(NOW.getTime() - 60_000);
 const BEFORE = new Date(NOW.getTime() + 600_000);
-const KEY_ID = "sbx:user:usr_01j8zq4w7k3m5n6p7q8r9s0t1v";
+const KEY_ID = "umiak:user:usr_01j8zq4w7k3m5n6p7q8r9s0t1v";
 const PRINCIPAL = "sb_01j8zq4w7k3m5n6p7q8r9s0t1v";
 const EXTENSIONS = [
 	"permit-X11-forwarding",
@@ -391,7 +391,7 @@ describe("signUserCertificate input checks (no ssh-keygen)", () => {
 		expect(() => signUserCertificate(ca, { ...base, keyId: "" })).toThrow(
 			RangeError,
 		);
-		for (const bad of ["sbx:user x", "a\nb", "a\x00b", "a\tb", "a\x7fb"]) {
+		for (const bad of ["umiak:user x", "a\nb", "a\x00b", "a\tb", "a\x7fb"]) {
 			expect(
 				() => signUserCertificate(ca, { ...base, keyId: bad }),
 				JSON.stringify(bad),
@@ -490,7 +490,7 @@ describe.skipIf(!hasKeygen)("with ssh-keygen", () => {
 	};
 
 	beforeAll(() => {
-		dir = mkdtempSync(join(tmpdir(), "sbx-ssh-test-"));
+		dir = mkdtempSync(join(tmpdir(), "umiak-ssh-test-"));
 		const specs: Record<string, string[]> = {
 			ed25519: ["-t", "ed25519"],
 			ecdsa256: ["-t", "ecdsa", "-b", "256"],

@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { withTx } from "@sbx/db";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { withTx } from "@umiak/db";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { place } from "../src/index.ts";
 import {

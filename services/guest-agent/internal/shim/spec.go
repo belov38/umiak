@@ -13,7 +13,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // Stream and marker file names inside the command directory.

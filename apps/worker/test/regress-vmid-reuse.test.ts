@@ -4,7 +4,7 @@
 // delete(vmid). The first one frees the VMID; a new create gets the same VMID
 // (lowest free); the second S1 delete must not destroy the new sandbox's VM:
 // S1 checks under the power lock that the lease is still the machine's.
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";

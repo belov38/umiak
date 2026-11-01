@@ -1,10 +1,10 @@
-// `sbx auth token`: refresh under the file lock (one refresh for parallel
-// processes), invalid_grant → exit 4, SBX_API_KEY priority, and the SDK
+// `umiak auth token`: refresh under the file lock (one refresh for parallel
+// processes), invalid_grant → exit 4, UMIAK_API_KEY priority, and the SDK
 // credential chain through the real CLI.
 import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import {
 	afterAll,
 	afterEach,
@@ -30,7 +30,7 @@ function jwtClaims(token: string): Record<string, unknown> {
 	);
 }
 
-describe("sbx auth token", () => {
+describe("umiak auth token", () => {
 	let w: CliWorld;
 	let home: CliHome;
 	let sub: string;
@@ -147,7 +147,7 @@ describe("sbx auth token", () => {
 		expect(() => readFileSync(lock)).toThrow();
 	});
 
-	it("invalid_grant (session over, user disabled) exits 4 with: run sbx login", async () => {
+	it("invalid_grant (session over, user disabled) exits 4 with: run umiak login", async () => {
 		expireAccessToken();
 		w.oidc.revokeRefreshTokens();
 		const r = await runCli(["auth", "token", "--json"], { env: home.env });
@@ -158,19 +158,19 @@ describe("sbx auth token", () => {
 			retryable: false,
 			requestId: null,
 		});
-		expect(r.stderr).toContain("sbx login");
+		expect(r.stderr).toContain("umiak login");
 		const plain = await runCli(["auth", "token"], { env: home.env });
 		expect(plain.code).toBe(4);
 		expect(plain.stdout).toBe("");
-		expect(plain.stderr).toContain("sbx login");
+		expect(plain.stderr).toContain("umiak login");
 		const who = await runCli(["whoami"], { env: home.env });
 		expect(who.code).toBe(4);
 		expect(who.last()).toMatchObject({ code: "login_required" });
 	});
 
-	it("SBX_API_KEY in the env wins over the stored login", async () => {
+	it("UMIAK_API_KEY in the env wins over the stored login", async () => {
 		const r = await runCli(["auth", "token", "--json"], {
-			env: { ...home.env, SBX_API_KEY: w.secret },
+			env: { ...home.env, UMIAK_API_KEY: w.secret },
 		});
 		expect(JSON.parse(r.stdout)).toEqual({
 			kind: "key",
@@ -180,14 +180,14 @@ describe("sbx auth token", () => {
 			team: null,
 		});
 		const who = await runCli(["whoami"], {
-			env: { ...home.env, SBX_API_KEY: w.secret },
+			env: { ...home.env, UMIAK_API_KEY: w.secret },
 		});
 		expect(JSON.parse(who.stdout).auth.kind).toBe("team_key");
 	});
 
 	it("a stored login is not used for another API URL", async () => {
 		const r = await runCli(["auth", "token", "--json"], {
-			env: { ...home.env, SBX_API_URL: "https://other.example.com" },
+			env: { ...home.env, UMIAK_API_URL: "https://other.example.com" },
 		});
 		expect(r.code).toBe(4);
 		expect(r.last()).toMatchObject({ code: "not_logged_in" });
@@ -197,7 +197,7 @@ describe("sbx auth token", () => {
 		const other = cliHome();
 		try {
 			const r = await runCli(["auth", "token", "--json"], {
-				env: { ...other.env, SBX_API_URL: w.url },
+				env: { ...other.env, UMIAK_API_URL: w.url },
 			});
 			expect(r.code).toBe(4);
 			expect(r.last()).toMatchObject({ event: "error", code: "not_logged_in" });
@@ -206,10 +206,10 @@ describe("sbx auth token", () => {
 		}
 	});
 
-	it("the SDK credential chain gets the same person through sbx auth token --json", async () => {
-		const sbx = new Sbx({
+	it("the SDK credential chain gets the same person through umiak auth token --json", async () => {
+		const umiak = new Umiak({
 			authCommand: [
-				process.env.SBX_TEST_BUN ?? "bun",
+				process.env.UMIAK_TEST_BUN ?? "bun",
 				MAIN,
 				"auth",
 				"token",
@@ -217,7 +217,7 @@ describe("sbx auth token", () => {
 			],
 			env: home.env,
 		});
-		const me = await sbx.me();
+		const me = await umiak.me();
 		expect(me.user?.email).toBe(`${sub}@example.com`);
 		expect(me.auth.kind).toBe("oidc");
 	});

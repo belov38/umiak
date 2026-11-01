@@ -7,7 +7,7 @@ import { FileRegistry, newBuildId } from "../src/registry.ts";
 
 const dirs: string[] = [];
 function reg(): { r: FileRegistry; dir: string } {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-registry-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-registry-"));
 	dirs.push(dir);
 	return {
 		r: new FileRegistry(join(dir, "templates")),
@@ -30,7 +30,7 @@ function manifest(over: Partial<Manifest> = {}): Manifest {
 		node: "pve",
 		storage: "local-lvm",
 		pveVmid: null,
-		vmName: "sbx-tpl-linux-20261030-1",
+		vmName: "umiak-tpl-linux-20261030-1",
 		gitCommit: "abc",
 		recipeDigest: "d",
 		base: {

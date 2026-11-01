@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { PgBoss } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CONTROLLERS } from "../src/controllers/index.ts";
@@ -149,18 +149,20 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(w.infra.vms.has(550)).toBe(false);
 		expect(w.infra.lvs.has("vm-550-disk-0")).toBe(false);
 		expect(
-			w.metrics.calls.some((c) => c.name === "sbx_reconcile_actions_total"),
+			w.metrics.calls.some((c) => c.name === "umiak_reconcile_actions_total"),
 		).toBe(true);
 	});
 
-	it("VMs outside pool sandbox, without the sbx tag, outside the range or the template are never touched; LVs without the sbx tag neither", async () => {
+	it("VMs outside pool umiak, without the umiak tag, outside the range or the template are never touched; LVs without the umiak tag neither", async () => {
 		const w = await createWorld(db);
 		w.infra.addVm({ vmid: 551, pool: "other" });
 		w.infra.addVm({ vmid: 552, tags: ["foo"] });
 		w.infra.addVm({ vmid: 450 });
 		w.infra.addVm({ vmid: 599 });
 		w.infra.addLv("vm-560-disk-0", []);
-		w.infra.addLv("sbx-snap-0123456789abcdef0123456789abcdef-scsi0", ["other"]);
+		w.infra.addLv("umiak-snap-0123456789abcdef0123456789abcdef-scsi0", [
+			"other",
+		]);
 		await seenLongAgo(w);
 		expect(await reconcile(w)).toEqual([]);
 		for (const vmid of [551, 552, 450, 599])
@@ -193,31 +195,37 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(w.infra.vms.has(571)).toBe(true);
 	});
 
-	it("orphan LVs: vm-N disks without VM, machine or disk row; zombie sbx-snap LVs; a ready snapshot's LVs stay", async () => {
+	it("orphan LVs: vm-N disks without VM, machine or disk row; zombie umiak-snap LVs; a ready snapshot's LVs stay", async () => {
 		const w = await createWorld(db);
-		w.infra.addLv("vm-580-disk-0", ["sbx", "sbx-vm-580"]);
+		w.infra.addLv("vm-580-disk-0", ["umiak", "umiak-vm-580"]);
 		const zombie = "0123456789abcdef0123456789abcdef";
-		w.infra.addLv(`sbx-snap-${zombie}-scsi0`, ["sbx", `sbx-snap-${zombie}`]);
+		w.infra.addLv(`umiak-snap-${zombie}-scsi0`, [
+			"umiak",
+			`umiak-snap-${zombie}`,
+		]);
 		const ready = await insertSnapshot(w, { state: "ready" });
 		const deleted = await insertSnapshot(w, { state: "deleted" });
 		const fresh = "fedcba9876543210fedcba9876543210";
 
 		await seenLongAgo(w);
-		w.infra.addLv(`sbx-snap-${fresh}-scsi0`, ["sbx", `sbx-snap-${fresh}`]);
+		w.infra.addLv(`umiak-snap-${fresh}-scsi0`, [
+			"umiak",
+			`umiak-snap-${fresh}`,
+		]);
 		const actions = await reconcile(w);
 		expect(kinds(actions)).toEqual(
 			[
 				["orphan_lv", "lv:vm-580-disk-0"],
-				["orphan_lv", `lv:sbx-snap-${zombie}-scsi0`],
-				["orphan_lv", `lv:sbx-snap-${deleted.lvId}-scsi0`],
+				["orphan_lv", `lv:umiak-snap-${zombie}-scsi0`],
+				["orphan_lv", `lv:umiak-snap-${deleted.lvId}-scsi0`],
 			].sort(),
 		);
 		expect(w.infra.lvs.has("vm-580-disk-0")).toBe(false);
-		expect(w.infra.lvs.has(`sbx-snap-${zombie}-scsi0`)).toBe(false);
-		expect(w.infra.lvs.has(`sbx-snap-${deleted.lvId}-scsi0`)).toBe(false);
-		expect(w.infra.lvs.has(`sbx-snap-${ready.lvId}-scsi0`)).toBe(true);
+		expect(w.infra.lvs.has(`umiak-snap-${zombie}-scsi0`)).toBe(false);
+		expect(w.infra.lvs.has(`umiak-snap-${deleted.lvId}-scsi0`)).toBe(false);
+		expect(w.infra.lvs.has(`umiak-snap-${ready.lvId}-scsi0`)).toBe(true);
 		// Younger than the grace.
-		expect(w.infra.lvs.has(`sbx-snap-${fresh}-scsi0`)).toBe(true);
+		expect(w.infra.lvs.has(`umiak-snap-${fresh}-scsi0`)).toBe(true);
 	});
 
 	it("a releasing lease is finished: S1 delete again, the lease is freed", async () => {
@@ -237,7 +245,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(l.rows.map((x) => x.vmid)).toEqual([591]);
 	});
 
-	it("lease_release never deletes a VM outside pool sandbox, without the sbx tag or a template", async () => {
+	it("lease_release never deletes a VM outside pool umiak, without the umiak tag or a template", async () => {
 		const w = await createWorld(db);
 		const m = await insertMachine(w, { state: "deleted" });
 		w.infra.addVm({ vmid: 593, pool: "other", machineId: m });
@@ -256,10 +264,10 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 			expect(w.infra.vms.has(vmid)).toBe(true);
 		expect(w.infra.callsOf("delete")).toEqual([]);
 		const skipped = w.metrics.calls
-			.filter((c) => c.name === "sbx_reconcile_skipped_total")
+			.filter((c) => c.name === "umiak_reconcile_skipped_total")
 			.map((c) => c.labels.reason)
 			.sort();
-		expect(skipped).toEqual(["no_sbx_tag", "not_in_pool", "template"]);
+		expect(skipped).toEqual(["no_umiak_tag", "not_in_pool", "template"]);
 	});
 
 	it("lease_release re-checks the VM at apply: a foreign VM that appears after planning is not deleted", async () => {
@@ -306,14 +314,14 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 	it("grace after an applied orphan delete: a new VM with the same VMID is fresh", async () => {
 		const w = await createWorld(db);
 		w.infra.addVm({ vmid: 554 });
-		w.infra.addLv("vm-555-disk-0", ["sbx", "sbx-vm-555"]);
+		w.infra.addLv("vm-555-disk-0", ["umiak", "umiak-vm-555"]);
 		await seenLongAgo(w);
 		expect(kinds(await reconcile(w))).toEqual([
 			["orphan_lv", "lv:vm-555-disk-0"],
 			["orphan_vm", "vm:554"],
 		]);
 		w.infra.addVm({ vmid: 554 });
-		w.infra.addLv("vm-555-disk-0", ["sbx", "sbx-vm-555"]);
+		w.infra.addLv("vm-555-disk-0", ["umiak", "umiak-vm-555"]);
 		expect(await reconcile(w)).toEqual([]);
 		expect(w.infra.vms.has(554)).toBe(true);
 		expect(w.infra.lvs.has("vm-555-disk-0")).toBe(true);
@@ -353,7 +361,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(kinds(actions)).toEqual([["orphan_vm", "vm:558"]]);
 		expect(actions[0]?.applied).toBe(false);
 		expect(w.infra.vms.has(558)).toBe(true);
-		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
+		expect(w.metrics.count("umiak_owner_mismatch_total")).toBe(1);
 	});
 
 	it("an ownerless releasing lease (a failed orphan delete's reservation) is finished by lease_release", async () => {
@@ -377,7 +385,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		const nodeB = `ffffffff-ffff-4fff-8fff-${randomUUID().slice(-12)}`;
 		await w.pool.query(
 			`INSERT INTO runtime.nodes (id, provider_id, name, ram_cap_mb, clone_concurrency, node_agent_ref)
-			 VALUES ($1, $2, $3, 8192, 4, 'sbx-node')`,
+			 VALUES ($1, $2, $3, 8192, 4, 'umiak-node')`,
 			[nodeB, w.topo.providerId, `node-b-${nodeB.slice(-6)}`],
 		);
 		const infraB = new FakeInfra({
@@ -408,7 +416,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		const nodeB = `ffffffff-ffff-4fff-8fff-${randomUUID().slice(-12)}`;
 		await w.pool.query(
 			`INSERT INTO runtime.nodes (id, provider_id, name, ram_cap_mb, clone_concurrency, node_agent_ref)
-			 VALUES ($1, $2, $3, 8192, 4, 'sbx-node')`,
+			 VALUES ($1, $2, $3, 8192, 4, 'umiak-node')`,
 			[nodeB, w.topo.providerId, `node-b-${nodeB.slice(-6)}`],
 		);
 		const infraB = new FakeInfra({
@@ -452,7 +460,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(kinds(actions)).toEqual([["lease_release", "lease:592"]]);
 		expect(actions[0]?.applied).toBe(false);
 		expect(w.infra.vms.has(592)).toBe(true);
-		expect(w.metrics.count("sbx_owner_mismatch_total")).toBe(1);
+		expect(w.metrics.count("umiak_owner_mismatch_total")).toBe(1);
 	});
 
 	it("TOCTOU: a machine row that appears between planning and apply saves an orphan VM", async () => {
@@ -711,7 +719,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(
 			w.metrics.calls.find(
 				(c) =>
-					c.name === "sbx_reconcile_actions_total" &&
+					c.name === "umiak_reconcile_actions_total" &&
 					c.labels.kind === "power_drift",
 			),
 		).toBeDefined();
@@ -838,7 +846,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 				opts: { singletonKey: snapshotId, retryLimit: DELETE_RETRY_LIMIT },
 			},
 		]);
-		expect(w.infra.lvs.has(`sbx-snap-${lvId}-scsi0`)).toBe(true);
+		expect(w.infra.lvs.has(`umiak-snap-${lvId}-scsi0`)).toBe(true);
 	});
 
 	it("dryRun changes nothing and returns the same actions as a real run", async () => {
@@ -859,7 +867,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		);
 		if (svm) svm.status = "stopped";
 		w.infra.addVm({ vmid: 560 });
-		w.infra.addLv("vm-581-disk-0", ["sbx", "sbx-vm-581"]);
+		w.infra.addLv("vm-581-disk-0", ["umiak", "umiak-vm-581"]);
 		const m = await insertMachine(w, { state: "deleted" });
 		await insertLease(w, 592, "releasing", m, 700);
 		const s = await insertSandbox(w, { state: "creating" });
@@ -965,7 +973,7 @@ describe("ctl-reconcile with real pg-boss jobs", () => {
 		});
 		boss.on("error", () => {});
 		await boss.start();
-		const { ensureQueues } = await import("@sbx/core");
+		const { ensureQueues } = await import("@umiak/core");
 		await ensureQueues(boss);
 	});
 	afterAll(async () => {

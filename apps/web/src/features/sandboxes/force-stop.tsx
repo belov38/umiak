@@ -1,10 +1,10 @@
 "use client";
+import { useQuery } from "@tanstack/react-query";
 // Consent to a forced fork or saved snapshot of a running Windows sandbox
 // (S9 §24.8): the source is stopped for the snapshot and started again.
 // `useNeedsForceStop` knows the OS from the template catalog; `ask()` opens
 // the confirm dialog and resolves to the user's answer.
-import type { SandboxData } from "@sbx/sdk";
-import { useQuery } from "@tanstack/react-query";
+import type { SandboxData } from "@umiak/sdk";
 import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,15 +15,15 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { FORCE_STOP_TEXT, needsForceStop } from "../sandbox/rules";
 
 /** The sandbox is a running Windows one (false while the catalog loads). */
 export function useNeedsForceStop(teamId: string, s: SandboxData): boolean {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const templates = useQuery({
 		queryKey: ["templates", teamId],
-		queryFn: ({ signal }) => sbx.templates({ signal }),
+		queryFn: ({ signal }) => umiak.templates({ signal }),
 		staleTime: 5 * 60_000,
 	});
 	return needsForceStop(s, templates.data);

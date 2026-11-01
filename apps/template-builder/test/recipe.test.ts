@@ -23,7 +23,7 @@ const fixtures = resolve(import.meta.dirname, "fixtures/templates");
 
 const tmpDirs: string[] = [];
 function copyFixtures(): string {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-tpl-test-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-tpl-test-"));
 	tmpDirs.push(dir);
 	cpSync(fixtures, dir, { recursive: true });
 	return dir;
@@ -44,7 +44,7 @@ describe("loadRecipe: real linux recipe", () => {
 			"20-docker",
 			"30-toolchains",
 			"40-coding-agents",
-			"50-sbx-agent",
+			"50-umiak-agent",
 			"90-cleanup",
 		]);
 	});
@@ -70,7 +70,7 @@ describe("loadRecipe: real linux recipe", () => {
 			release: "26.04",
 			flavor: "minimal",
 		});
-		expect(r.seal).toBe("sbx-agent");
+		expect(r.seal).toBe("umiak-agent");
 		expect(r.bootTimeoutS).toBe(300);
 		expect(r.verify).toBe("linux");
 		expect(r.dir).toBe(join(repoTemplates, "linux"));
@@ -94,7 +94,7 @@ describe("loadRecipe: real windows recipe", () => {
 			"30-toolchains",
 			"40-coding-agents",
 			"reboot",
-			"50-sbx-agent",
+			"50-umiak-agent",
 			"60-desktop",
 			"90-cleanup",
 		]);
@@ -236,7 +236,7 @@ describe("loadRecipe: extends", () => {
 		expect(child.cloudinit).toBe(false);
 		expect(child.buildVm).toEqual({ cores: 2, memoryMb: 2048 });
 		expect(child.disk.sizeGb).toBe(48);
-		expect(child.seal).toBe("sbx-agent");
+		expect(child.seal).toBe("umiak-agent");
 		expect(child.bootTimeoutS).toBe(300);
 		expect(child.verify).toBe("linux");
 	});
@@ -374,7 +374,7 @@ describe("loadVersions", () => {
 		expect(v.tools.rust.rustup_init_sha256).toMatch(/^6+$/);
 		expect(v.chrome.google_chrome_stable.version).toBe("156.0.8078.73-1");
 		expect(v.npm.pnpm).toBe("12.16.1");
-		expect(v.sbx).toBeUndefined();
+		expect(v.umiak).toBeUndefined();
 	});
 
 	it("merges the child's file over the parent's", () => {
@@ -576,10 +576,10 @@ describe("loadRecipe: windows (iso-install)", () => {
 		expect(() => loadRecipe(dir, "windows-fixture")).toThrow(/iso-install/);
 	});
 
-	it("rejects seal sbx-agent for os windows", () => {
+	it("rejects seal umiak-agent for os windows", () => {
 		const dir = copyFixtures();
 		const p = join(dir, "windows-fixture/template.yaml");
-		writeFileSync(p, readText(p).replace("seal: sysprep", "seal: sbx-agent"));
+		writeFileSync(p, readText(p).replace("seal: sysprep", "seal: umiak-agent"));
 		expect(() => loadRecipe(dir, "windows-fixture")).toThrow(/seal/);
 	});
 
@@ -596,7 +596,7 @@ describe("loadRecipe: windows (iso-install)", () => {
 			const key = extra.split(":")[0] as string;
 			const text =
 				key === "seal"
-					? readText(p).replace("seal: sbx-agent", extra)
+					? readText(p).replace("seal: umiak-agent", extra)
 					: `${readText(p)}${extra}\n`;
 			writeFileSync(p, text);
 			expect(() => loadRecipe(dir, "linux-fixture"), extra).toThrow(

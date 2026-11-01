@@ -8,14 +8,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // Seal prepares the image for use as a template (spec section 7.3). It stops
 // the agent, then removes the whole state directory including identity.json,
 // the SSH host keys and the managed files, empties /etc/machine-id and restores
-// the template state of /etc/sbx/env and the SSH CA keys. The agent version
+// the template state of /etc/umiak/env and the SSH CA keys. The agent version
 // directory stays. If stopAgent fails nothing is removed. A nil stopAgent is
 // allowed.
 func Seal(ctx context.Context, l paths.Layout, stopAgent func() error) error {

@@ -2,13 +2,13 @@
 // shared by reference count: api and worker may run in one process (the
 // E2E backend), each opening and closing it on its own.
 import { BasePayload, type Payload } from "payload";
-import { buildSbxConfig, type SbxPayloadOptions } from "./config.ts";
+import { buildUmiakConfig, type UmiakPayloadOptions } from "./config.ts";
 import { dbPool } from "./db.ts";
 import { detachSessionCache } from "./identity/session-cache.ts";
 
 interface Entry {
 	instance: Promise<Payload>;
-	/** Open references: getSbxPayload calls not yet matched by closeSbxPayload. */
+	/** Open references: getUmiakPayload calls not yet matched by closeUmiakPayload. */
 	refs: number;
 	/** The largest poolMax asked for so far. */
 	poolMax: number;
@@ -34,11 +34,11 @@ function growPool(payload: Payload, max: number): void {
 /**
  * The Payload instance of `o.databaseUrl`, initialized once per process.
  * Every call takes a reference; each must be released by one
- * `closeSbxPayload(databaseUrl)`, and the instance is destroyed with the
+ * `closeUmiakPayload(databaseUrl)`, and the instance is destroyed with the
  * last one. Later calls share the first call's config (secret, groups,
  * origin, session cache); a larger `poolMax` raises the pool's max.
  */
-export function getSbxPayload(o: SbxPayloadOptions): Promise<Payload> {
+export function getUmiakPayload(o: UmiakPayloadOptions): Promise<Payload> {
 	const poolMax = o.poolMax ?? DEFAULT_POOL_MAX;
 	const e = instances.get(o.databaseUrl);
 	if (e !== undefined) {
@@ -50,7 +50,7 @@ export function getSbxPayload(o: SbxPayloadOptions): Promise<Payload> {
 		return e.instance;
 	}
 	const entry: Entry = {
-		instance: buildSbxConfig(o).then((config) =>
+		instance: buildUmiakConfig(o).then((config) =>
 			new BasePayload().init({ config }),
 		),
 		refs: 1,
@@ -70,7 +70,7 @@ export function getSbxPayload(o: SbxPayloadOptions): Promise<Payload> {
 }
 
 /** Open references to the instance of a database (0: none cached). */
-export function sbxPayloadRefs(databaseUrl: string): number {
+export function umiakPayloadRefs(databaseUrl: string): number {
 	return instances.get(databaseUrl)?.refs ?? 0;
 }
 
@@ -78,7 +78,7 @@ export function sbxPayloadRefs(databaseUrl: string): number {
  * Releases one reference of the database's instance; the last one drops
  * the cached instance and releases its connections. Extra calls do nothing.
  */
-export async function closeSbxPayload(databaseUrl: string): Promise<void> {
+export async function closeUmiakPayload(databaseUrl: string): Promise<void> {
 	const e = instances.get(databaseUrl);
 	if (!e) return;
 	e.refs -= 1;

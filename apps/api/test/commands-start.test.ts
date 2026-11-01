@@ -2,8 +2,12 @@
 // validation, capabilities, the wait for a starting sandbox, states and
 // access.
 import { randomUUID } from "node:crypto";
-import { decodeUlid, encodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUlid, encodeUuid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type Any,
@@ -77,7 +81,7 @@ describe.skipIf(skipPg())("POST /commands", () => {
 			},
 		});
 		expect(b.command.id).toMatch(/^cmd_[0-9a-z]{26}$/);
-		expect(r.headers.get("sbx-command-id")).toBe(b.command.id);
+		expect(r.headers.get("umiak-command-id")).toBe(b.command.id);
 		const id = decodeUlid("command", b.command.id) as string;
 		const row = await db.pool.query(
 			"SELECT status, exit_code, stdout_bytes, stderr_bytes, pid FROM runtime.commands WHERE id = $1",
@@ -132,7 +136,7 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		expect((f.body as Any).stderr).toContain("/nonexistent/prog");
 	});
 
-	it("stream: 200 NDJSON with Sbx-Command-Id; started first, exit last", async () => {
+	it("stream: 200 NDJSON with Umiak-Command-Id; started first, exit last", async () => {
 		const s = await openStream(h, "POST", sb.commands, {
 			json: { command: "echo one; echo two >&2", mode: "stream" },
 		});
@@ -145,7 +149,7 @@ describe.skipIf(skipPg())("POST /commands", () => {
 		const first = frames[0] as Any;
 		expect(first).toMatchObject({ type: "started", encoding: "utf8" });
 		expect(first.replayed).toBeUndefined();
-		expect(first.commandId).toBe(s.headers.get("sbx-command-id"));
+		expect(first.commandId).toBe(s.headers.get("umiak-command-id"));
 		expect(first.pid).toBeGreaterThan(0);
 		expect(frames.at(-1)).toMatchObject({
 			type: "exit",
@@ -180,7 +184,7 @@ describe.skipIf(skipPg())("POST /commands", () => {
 			timeoutSeconds: null,
 		});
 		expect(c.pid).toBeGreaterThan(0);
-		expect(r.headers.get("sbx-command-id")).toBe(c.id);
+		expect(r.headers.get("umiak-command-id")).toBe(c.id);
 		for (let i = 0; i < 50; i++) {
 			const g = await h.request("GET", `${sb.commands}/${c.id}`);
 			if ((g.body as Any).status === "exited") {
@@ -416,7 +420,7 @@ describe.skipIf(skipPg())("POST /commands", () => {
 
 	it("Start DeadlineExceeded or Unavailable with a detail → 503 unknown outcome, row stays starting", async () => {
 		const { AgentCallError } = await import("../src/index.ts");
-		const { AgentUnavailableError } = await import("@sbx/agent-client");
+		const { AgentUnavailableError } = await import("@umiak/agent-client");
 		const ConnectError = Object.getPrototypeOf(AgentUnavailableError) as new (
 			message: string,
 			code: number,

@@ -16,8 +16,8 @@ import (
 	"strings"
 	"sync"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
 )
 
 // RunCommand is the injectable OS command boundary.
@@ -82,7 +82,7 @@ func (h *FileHost) Prepare(ctx context.Context, c Credentials, ice []*v1.Desktop
 		// no first /api/login may claim it.
 		web["first_login_create_admin"] = false
 		web["first_login_assign_global_hosts"] = false
-		web["forwarded_header"] = map[string]any{"username_header": "X-Sbx-Desktop-User", "auto_create_missing_user": false}
+		web["forwarded_header"] = map[string]any{"username_header": "X-Umiak-Desktop-User", "auto_create_missing_user": false}
 		rtc := cfg["webrtc"].(map[string]any)
 		rtc["ice_servers"] = []any{}
 		if h.IceScript != "" {

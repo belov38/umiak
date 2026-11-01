@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	COMMAND_CMD_MAX_BYTES,
@@ -362,7 +366,7 @@ describe.skipIf(skipPg())(
 
 				const res = await env.svc.hostPort(env.p, s.sandboxId, 5173, "token");
 
-				expect(res.token).toMatch(/^sbxp_[A-Za-z0-9_-]{43}$/);
+				expect(res.token).toMatch(/^umiakp_[A-Za-z0-9_-]{43}$/);
 				expect(res.hostedPort).toMatchObject({
 					sandboxId: s.sandboxId,
 					port: 5173,
@@ -398,7 +402,7 @@ describe.skipIf(skipPg())(
 				expect(pub.hostedPort.authEpoch).toBe(1);
 				expect(pub.hostedPort.tokenHash).toBeNull();
 				const back = await env.svc.hostPort(env.p, s.sandboxId, 3000, "token");
-				expect(back.token).toMatch(/^sbxp_/);
+				expect(back.token).toMatch(/^umiakp_/);
 				expect(back.hostedPort.authEpoch).toBe(2);
 			});
 
@@ -435,7 +439,7 @@ describe.skipIf(skipPg())(
 				const s = await seedSandbox(t.pool, env, { state: "ready" });
 				const first = await env.svc.hostPort(env.p, s.sandboxId, 8080, "token");
 				const rot = await env.svc.rotatePortToken(env.p, s.sandboxId, 8080);
-				expect(rot.token).toMatch(/^sbxp_/);
+				expect(rot.token).toMatch(/^umiakp_/);
 				expect(rot.token).not.toBe(first.token);
 				const row = await portRow(s.sandboxId, 8080);
 				expect(row.auth_epoch).toBe(1);

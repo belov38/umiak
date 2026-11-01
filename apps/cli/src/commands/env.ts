@@ -1,4 +1,4 @@
-// `sbx env [<sb>] [--set K=V]... [--secret K=V]... [--env-file f]...
+// `umiak env [<sb>] [--set K=V]... [--secret K=V]... [--env-file f]...
 // [--unset K]...` (S7 §8.3, S8 C2): without changes GET /env (env values,
 // secret names); with changes PATCH /env, merged by key: --unset removes
 // the key from env and from secrets. Secret values are never printed.
@@ -67,8 +67,8 @@ export function register(program: Command, run: Runner): void {
 				const changes = Object.keys(env).length + Object.keys(secrets).length;
 				const { data } =
 					changes === 0
-						? await ctx.sbx().raw.GET("/v1/sandboxes/{sandbox}/env", path)
-						: await ctx.sbx().raw.PATCH("/v1/sandboxes/{sandbox}/env", {
+						? await ctx.umiak().raw.GET("/v1/sandboxes/{sandbox}/env", path)
+						: await ctx.umiak().raw.PATCH("/v1/sandboxes/{sandbox}/env", {
 								...path,
 								body: {
 									...(Object.keys(env).length > 0 ? { env } : {}),

@@ -38,7 +38,7 @@ let dir: string;
 let emptyEnv: string;
 
 beforeAll(() => {
-	dir = mkdtempSync(join(tmpdir(), "sbx-mcp-compose-"));
+	dir = mkdtempSync(join(tmpdir(), "umiak-mcp-compose-"));
 	// An empty env file keeps a developer's deploy/compose/.env out of the result.
 	emptyEnv = join(dir, "empty.env");
 	writeFileSync(emptyEnv, "");
@@ -74,13 +74,13 @@ describe("product compose: service mcp", () => {
 	withDocker("has the documented environment and loopback ports", () => {
 		const mcp = resolve([COMPOSE]).mcp;
 		expect(mcp, "service mcp").toBeDefined();
-		expect(mcp?.image).toBe("sbx-mcp:dev");
+		expect(mcp?.image).toBe("umiak-mcp:dev");
 		expect(mcp?.build?.dockerfile).toBe("apps/mcp/Dockerfile");
 		const env = mcp?.environment ?? {};
-		expect(env.SBX_MCP_API_URL).toBe("http://api:8080");
-		expect(env.SBX_MCP_PUBLIC_URL).toBe("http://localhost:8090/mcp");
-		expect(env.SBX_OIDC_ISSUER).toBe("http://localhost:8180/realms/sbx");
-		expect(env.SBX_MCP_ALLOWED_ORIGINS).toBe("");
+		expect(env.UMIAK_MCP_API_URL).toBe("http://api:8080");
+		expect(env.UMIAK_MCP_PUBLIC_URL).toBe("http://localhost:8090/mcp");
+		expect(env.UMIAK_OIDC_ISSUER).toBe("http://localhost:8180/realms/umiak");
+		expect(env.UMIAK_MCP_ALLOWED_ORIGINS).toBe("");
 		expect(published(mcp as ComposeService).sort()).toEqual([
 			"127.0.0.1:8090:8080",
 			"127.0.0.1:9092:9090",
@@ -95,39 +95,39 @@ describe("product compose: service mcp", () => {
 		);
 		expect(mcp.restart).toBe("unless-stopped");
 		expect(mcp.stop_grace_period).toBe("30s");
-		expect(Object.keys(mcp.networks ?? {})).toEqual(["sbx"]);
+		expect(Object.keys(mcp.networks ?? {})).toEqual(["umiak"]);
 	});
 
-	withDocker("follows SBX_MCP_PUBLIC_URL and the issuer of the stack", () => {
+	withDocker("follows UMIAK_MCP_PUBLIC_URL and the issuer of the stack", () => {
 		const env =
 			resolve([COMPOSE], {
-				SBX_MCP_PUBLIC_URL: "https://mcp.example.test/mcp",
-				SBX_KEYCLOAK_URL: "https://kc.example.test",
+				UMIAK_MCP_PUBLIC_URL: "https://mcp.example.test/mcp",
+				UMIAK_KEYCLOAK_URL: "https://kc.example.test",
 			}).mcp?.environment ?? {};
-		expect(env.SBX_MCP_PUBLIC_URL).toBe("https://mcp.example.test/mcp");
-		expect(env.SBX_OIDC_ISSUER).toBe("https://kc.example.test/realms/sbx");
+		expect(env.UMIAK_MCP_PUBLIC_URL).toBe("https://mcp.example.test/mcp");
+		expect(env.UMIAK_OIDC_ISSUER).toBe("https://kc.example.test/realms/umiak");
 	});
 });
 
 describe("dev-cp", () => {
 	const required = {
-		SBX_DEVCP_TURN_IP: "192.0.2.90",
-		SBX_DEVCP_TURN_HOST: "turn.test",
-		SBX_DEVCP_TURN_URLS: "turn:turn.test:3478?transport=udp",
-		SBX_TUNNEL_URL: "wss://tunnel.test/v1/connect",
-		SBX_PORT_DOMAIN: "sbx.test",
-		SBX_DEVCP_TUNNEL_HOST: "tunnel.test",
-		SBX_DEVCP_SSH_HOST: "ts.test",
-		SBX_GATEWAY_AUTH_URL: "https://ts.test:8443/sbx-auth/authorize",
-		SBX_KEYCLOAK_URL: "https://ts.test:10000",
-		SBX_APP_ORIGIN: "https://ts.test:8443",
-		SBX_OAUTH2_PROXY_REDIRECT_URL: "https://ts.test:8443/oauth2/callback",
-		SBX_API_PUBLIC_URL: "https://ts.test:8443",
-		SBX_OIDC_ISSUER: "https://ts.test:10000/realms/sbx",
-		SBX_DEVCP_TS_NAME: "ts.test",
+		UMIAK_DEVCP_TURN_IP: "192.0.2.90",
+		UMIAK_DEVCP_TURN_HOST: "turn.test",
+		UMIAK_DEVCP_TURN_URLS: "turn:turn.test:3478?transport=udp",
+		UMIAK_TUNNEL_URL: "wss://tunnel.test/v1/connect",
+		UMIAK_PORT_DOMAIN: "umiak.test",
+		UMIAK_DEVCP_TUNNEL_HOST: "tunnel.test",
+		UMIAK_DEVCP_SSH_HOST: "ts.test",
+		UMIAK_GATEWAY_AUTH_URL: "https://ts.test:8443/umiak-auth/authorize",
+		UMIAK_KEYCLOAK_URL: "https://ts.test:10000",
+		UMIAK_APP_ORIGIN: "https://ts.test:8443",
+		UMIAK_OAUTH2_PROXY_REDIRECT_URL: "https://ts.test:8443/oauth2/callback",
+		UMIAK_API_PUBLIC_URL: "https://ts.test:8443",
+		UMIAK_OIDC_ISSUER: "https://ts.test:10000/realms/umiak",
+		UMIAK_DEVCP_TS_NAME: "ts.test",
 		// S8 web: sign-out through Keycloak's end-session page.
-		SBX_LOGOUT_URL:
-			"https://ts.test:10000/realms/sbx/protocol/openid-connect/logout",
+		UMIAK_LOGOUT_URL:
+			"https://ts.test:10000/realms/umiak/protocol/openid-connect/logout",
 	};
 	const files = [COMPOSE, join(DEVCP, "compose.dev-cp.yaml")];
 
@@ -135,19 +135,19 @@ describe("dev-cp", () => {
 		const env =
 			resolve(files, {
 				...required,
-				SBX_MCP_PUBLIC_URL: "https://ts.test:8443/mcp",
+				UMIAK_MCP_PUBLIC_URL: "https://ts.test:8443/mcp",
 			}).mcp?.environment ?? {};
-		expect(env.SBX_MCP_PUBLIC_URL).toBe("https://ts.test:8443/mcp");
-		expect(env.SBX_OIDC_ISSUER).toBe("https://ts.test:10000/realms/sbx");
+		expect(env.UMIAK_MCP_PUBLIC_URL).toBe("https://ts.test:8443/mcp");
+		expect(env.UMIAK_OIDC_ISSUER).toBe("https://ts.test:10000/realms/umiak");
 	});
 
 	withDocker("admits the Serve Host forms and nothing more", () => {
 		const env =
 			resolve(files, {
 				...required,
-				SBX_MCP_PUBLIC_URL: "https://ts.test:8443/mcp",
+				UMIAK_MCP_PUBLIC_URL: "https://ts.test:8443/mcp",
 			}).mcp?.environment ?? {};
-		expect(env.SBX_MCP_ALLOWED_HOSTS?.split(",").sort()).toEqual([
+		expect(env.UMIAK_MCP_ALLOWED_HOSTS?.split(",").sort()).toEqual([
 			"127.0.0.1:8090",
 			"ts.test",
 			"ts.test:8443",
@@ -155,7 +155,7 @@ describe("dev-cp", () => {
 	});
 
 	withDocker("refuses to run with a stale .env (no localhost default)", () => {
-		expect(() => resolve(files, required)).toThrow(/SBX_MCP_PUBLIC_URL/);
+		expect(() => resolve(files, required)).toThrow(/UMIAK_MCP_PUBLIC_URL/);
 	});
 
 	function names(): { SERVE: string; MCP_URL: string; TS_NAME: string } {
@@ -194,7 +194,7 @@ describe("dev-cp", () => {
 	it("deploy.sh passes the MCP URL into .env", () => {
 		const deploy = readFileSync(join(DEVCP, "deploy.sh"), "utf8");
 		expect(deploy).toContain('"MCP_URL=$MCP_URL"');
-		expect(deploy).toContain("SBX_MCP_PUBLIC_URL=$MCP_URL");
+		expect(deploy).toContain("UMIAK_MCP_PUBLIC_URL=$MCP_URL");
 	});
 });
 

@@ -13,7 +13,7 @@
 #                         idp-sync-client-secret
 #   web/                  payload-secret
 #   turn/                 auth-secret (32 random bytes, base64; worker/coturn only)
-#   keycloak/             oauth2-proxy-client-secret, sbx-worker-client-secret,
+#   keycloak/             oauth2-proxy-client-secret, umiak-worker-client-secret,
 #                         admin-password
 #   oauth2-proxy/         client-secret, cookie-secret
 # Rules:
@@ -26,7 +26,7 @@
 set -eu
 umask 077
 
-S=${SBX_SECRETS_ROOT:-/secrets}
+S=${UMIAK_SECRETS_ROOT:-/secrets}
 GW=$S/gateway
 # node in the api and worker images, keycloak in the Keycloak image.
 NODE_UID=1000
@@ -111,7 +111,7 @@ synced "$S/api/payload-secret" cat "$S/payload-secret"
 synced "$S/worker/payload-secret" cat "$S/payload-secret"
 synced "$S/web/payload-secret" cat "$S/payload-secret"
 
-# api: HMAC key of list cursors (SBX_API_CURSOR_KEY).
+# api: HMAC key of list cursors (UMIAK_API_CURSOR_KEY).
 new "$S/api/cursor-key" line "$(rand 32)"
 
 # api: tokens of the gateway, the SSH login CA and the gateway host keys,
@@ -129,23 +129,23 @@ fi
 if [ -s "$GW/ssh_login_ca" ]; then
 	synced "$S/api/ssh-login-ca" cat "$GW/ssh_login_ca"
 else
-	new "$S/api/ssh-login-ca" ed25519 sbx-dev-login-ca
+	new "$S/api/ssh-login-ca" ed25519 umiak-dev-login-ca
 fi
 if [ -s "$GW/ssh_host_ed25519_key.pub" ]; then
 	synced "$S/api/ssh-host-keys.pub" gw_host_keys
 else
 	# Stand-in host key until the S4 gateway runs (its private half is
 	# thrown away: nothing serves SSH here).
-	new "$S/api/ssh-host-keys.pub" ed25519 sbx-dev-host pub
+	new "$S/api/ssh-host-keys.pub" ed25519 umiak-dev-host pub
 fi
 
-# Keycloak and oauth2-proxy: client secrets of the realm `sbx`, cookie key.
+# Keycloak and oauth2-proxy: client secrets of the realm `umiak`, cookie key.
 new "$S/keycloak/oauth2-proxy-client-secret" line "$(token)"
-new "$S/keycloak/sbx-worker-client-secret" line "$(token)"
+new "$S/keycloak/umiak-worker-client-secret" line "$(token)"
 # Bootstrap admin of Keycloak, used unless KEYCLOAK_ADMIN_PASSWORD is set in .env.
 new "$S/keycloak/admin-password" line "$(token)"
-# worker: ctl-idp-sync reads users with the sbx-worker client (trimmed).
-synced "$S/worker/idp-sync-client-secret" cat "$S/keycloak/sbx-worker-client-secret"
+# worker: ctl-idp-sync reads users with the umiak-worker client (trimmed).
+synced "$S/worker/idp-sync-client-secret" cat "$S/keycloak/umiak-worker-client-secret"
 # oauth2-proxy reads its secret files as they are: no trailing newline.
 synced "$S/oauth2-proxy/client-secret" no_newline "$S/keycloak/oauth2-proxy-client-secret"
 # Exactly 32 bytes (an AES-256 key as is).

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // SealWindows prepares a Windows image for use as a template (S9 spec

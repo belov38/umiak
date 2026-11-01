@@ -19,10 +19,10 @@ import (
 
 	"connectrpc.com/connect"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/transport"
 )
 
 // Identity is the per-process identity the agent reports in the handshake.
@@ -89,11 +89,11 @@ type Config struct {
 	Dialer      transport.Dialer
 	Credentials Credentials
 	Identity    Identity
-	// Handler serves everything that is not CONNECT or sbx.tunnel.v1:
-	// sbx.agent.v1 and /files (S3). nil answers 404. Requests reach it only
+	// Handler serves everything that is not CONNECT or umiak.tunnel.v1:
+	// umiak.agent.v1 and /files (S3). nil answers 404. Requests reach it only
 	// over the tunnel, so the library does no authentication.
 	Handler http.Handler
-	// Info returns the Control/Info answer; nil uses defaults. sbx.tunnel.v1
+	// Info returns the Control/Info answer; nil uses defaults. umiak.tunnel.v1
 	// is appended to proto_packages if missing.
 	Info func(ctx context.Context) *tunnelv1.InfoResponse
 	// Journal is the event journal served by Events; nil serves no events.

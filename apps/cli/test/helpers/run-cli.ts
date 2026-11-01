@@ -1,7 +1,7 @@
 // Runs the real CLI (`bun src/main.ts`) as a child process with a hermetic
 // home: its own XDG_CONFIG_HOME, XDG_STATE_HOME, a missing system config,
 // the file credential store (the OS keychain is never touched) and a fixed
-// shell key. `tty: true` makes the CLI treat stdout as a terminal (SBX_TTY).
+// shell key. `tty: true` makes the CLI treat stdout as a terminal (UMIAK_TTY).
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLI_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const BUN = process.env.SBX_TEST_BUN ?? "bun";
+const BUN = process.env.UMIAK_TEST_BUN ?? "bun";
 
 export interface CliHome {
 	dir: string;
@@ -22,21 +22,21 @@ export interface CliHome {
 }
 
 export function cliHome(): CliHome {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-cli-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-cli-"));
 	const configDir = join(dir, "config");
 	const stateDir = join(dir, "state");
 	return {
 		dir,
-		configDir: join(configDir, "sbx"),
-		stateDir: join(stateDir, "sbx"),
+		configDir: join(configDir, "umiak"),
+		stateDir: join(stateDir, "umiak"),
 		env: {
 			PATH: process.env.PATH ?? "",
 			HOME: dir,
 			XDG_CONFIG_HOME: configDir,
 			XDG_STATE_HOME: stateDir,
-			SBX_SYSTEM_CONFIG: join(dir, "system-config.json"),
-			SBX_CREDENTIAL_STORE: "file",
-			SBX_SESSION: "test-shell",
+			UMIAK_SYSTEM_CONFIG: join(dir, "system-config.json"),
+			UMIAK_CREDENTIAL_STORE: "file",
+			UMIAK_SESSION: "test-shell",
 		},
 		rm: () => rmSync(dir, { recursive: true, force: true }),
 	};
@@ -74,7 +74,7 @@ export interface CliResult {
 export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 	const env: Record<string, string> = {};
 	for (const [k, v] of Object.entries(o.env)) if (v !== undefined) env[k] = v;
-	if (o.tty !== undefined) env.SBX_TTY = o.tty ? "1" : "0";
+	if (o.tty !== undefined) env.UMIAK_TTY = o.tty ? "1" : "0";
 	return new Promise((resolve, reject) => {
 		const child = spawn(BUN, [join(CLI_DIR, "src/main.ts"), ...args], {
 			cwd: o.cwd ?? CLI_DIR,
@@ -97,7 +97,7 @@ export function runCli(args: string[], o: RunOptions): Promise<CliResult> {
 		});
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
-			reject(new Error(`sbx ${args.join(" ")} timed out\n${stderr}`));
+			reject(new Error(`umiak ${args.join(" ")} timed out\n${stderr}`));
 			// A hang guard only; a spawn on a loaded machine can take seconds.
 		}, o.timeoutMs ?? 60_000);
 		child.on("error", reject);

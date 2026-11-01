@@ -10,11 +10,11 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // sealServices are stopped before seal, the agent first.
-var sealServices = []string{"sbx-agent", "sshd"}
+var sealServices = []string{"umiak-agent", "sshd"}
 
 // serviceStopTimeout bounds the wait for one service to stop.
 const serviceStopTimeout = time.Minute
@@ -26,7 +26,7 @@ func Seal(ctx context.Context, l paths.Layout, stopAgent func() error) error {
 	return SealWindows(ctx, l, stopAgent, nil)
 }
 
-// StopServices stops the sbx-agent and sshd services and waits until they
+// StopServices stops the umiak-agent and sshd services and waits until they
 // are stopped. A missing or already stopped service counts as stopped.
 func StopServices() error {
 	m, err := mgr.Connect()

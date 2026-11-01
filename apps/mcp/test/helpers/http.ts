@@ -31,7 +31,7 @@ import {
 	TEST_CLIENT_INFO,
 } from "./connect.ts";
 
-export const TEST_ISSUER = "https://keycloak.example.com/realms/sbx";
+export const TEST_ISSUER = "https://keycloak.example.com/realms/umiak";
 
 export interface ApiCall {
 	method: string;

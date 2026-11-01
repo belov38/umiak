@@ -37,7 +37,7 @@ describe("test OIDC server", () => {
 
 	async function startDevice() {
 		const r = await post(endpoints.device_authorization_endpoint as string, {
-			client_id: "sbx-cli",
+			client_id: "umiak-cli",
 			scope: "openid",
 		});
 		expect(r.status).toBe(200);
@@ -47,7 +47,7 @@ describe("test OIDC server", () => {
 	const poll = (deviceCode: string) =>
 		post(endpoints.token_endpoint as string, {
 			grant_type: DEVICE_GRANT,
-			client_id: "sbx-cli",
+			client_id: "umiak-cli",
 			device_code: deviceCode,
 		});
 
@@ -65,12 +65,12 @@ describe("test OIDC server", () => {
 		const jwks = createRemoteJWKSet(new URL(endpoints.jwks_uri as string));
 		const { payload } = await jwtVerify(await oidc.token({ sub: "s1" }), jwks, {
 			issuer: oidc.issuer,
-			audience: "sbx-api",
+			audience: "umiak-api",
 		});
 		expect(payload).toMatchObject({
 			sub: "s1",
 			typ: "Bearer",
-			azp: "sbx-cli",
+			azp: "umiak-cli",
 			email_verified: true,
 		});
 	});
@@ -109,7 +109,7 @@ describe("test OIDC server", () => {
 				`${short.issuer}/protocol/openid-connect/auth/device`,
 				{
 					method: "POST",
-					body: new URLSearchParams({ client_id: "sbx-cli" }),
+					body: new URLSearchParams({ client_id: "umiak-cli" }),
 				},
 			);
 			const { device_code } = (await r.json()) as { device_code: string };
@@ -133,7 +133,7 @@ describe("test OIDC server", () => {
 				`${slow.issuer}/protocol/openid-connect/auth/device`,
 				{
 					method: "POST",
-					body: new URLSearchParams({ client_id: "sbx-cli" }),
+					body: new URLSearchParams({ client_id: "umiak-cli" }),
 				},
 			);
 			const { device_code } = (await r.json()) as { device_code: string };
@@ -157,7 +157,7 @@ describe("test OIDC server", () => {
 		const refresh = () =>
 			post(endpoints.token_endpoint as string, {
 				grant_type: "refresh_token",
-				client_id: "sbx-cli",
+				client_id: "umiak-cli",
 				refresh_token: tokens.refresh_token as string,
 			});
 		const before = oidc.stats.refresh;
@@ -166,7 +166,7 @@ describe("test OIDC server", () => {
 		expect(decodeJwt(r.body.access_token as string).sub).toBe("auto");
 		expect(oidc.stats.refresh).toBe(before + 1);
 		const revoked = await post(endpoints.revocation_endpoint as string, {
-			client_id: "sbx-cli",
+			client_id: "umiak-cli",
 			token: tokens.refresh_token as string,
 			token_type_hint: "refresh_token",
 		});

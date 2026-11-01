@@ -2,7 +2,7 @@
 """A minimal browser for the Keycloak pages of the dev stack. Dev only (e2e.sh).
 
     kc-browser.py device <verification_uri_complete> <username> <password file>
-        Approves a device grant (sbx login) as the user.
+        Approves a device grant (umiak login) as the user.
     kc-browser.py get <url> <username> <password file> [--cacert <pem>]
         Opens the URL as a browser navigation (Accept: text/html), follows the
         redirects and signs in to Keycloak on the way (port SSO through

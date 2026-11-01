@@ -1,17 +1,17 @@
 {
-	"name": "sbx-sdk",
+	"name": "@umiak/sdk-py",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "Python SDK of the sbx public API (uv project): generated httpx client, Sbx/AsyncSbx facades; tested with pytest against apps/api (tests/api_server.ts)",
+	"description": "Python SDK of the umiak public API (uv project): generated httpx client, Umiak/AsyncUmiak facades; tested with pytest against apps/api (tests/api_server.ts)",
 	"scripts": {
 		"gen": "uv run --locked python scripts/gen.py",
-		"test": "pnpm --filter \"@sbx/agent-client...\" run build && uv run --locked ruff check . && uv run --locked ruff format --check . && uv run --locked pytest",
-		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
+		"test": "pnpm --filter \"@umiak/agent-client...\" run build && uv run --locked ruff check . && uv run --locked ruff format --check . && uv run --locked pytest",
+		"typecheck": "pnpm --filter \"@umiak/agent-client...\" run build && tsc --noEmit -p ."
 	},
 	"devDependencies": {
-		"@sbx/api": "workspace:*",
-		"@sbx/core": "workspace:*",
-		"@sbx/db": "workspace:*"
+		"@umiak/api": "workspace:*",
+		"@umiak/core": "workspace:*",
+		"@umiak/db": "workspace:*"
 	}
 }

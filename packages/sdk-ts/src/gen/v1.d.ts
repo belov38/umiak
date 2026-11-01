@@ -19,7 +19,7 @@ export interface paths {
         put?: never;
         /**
          * Issue a team API key
-         * @description Issues a key of the team for automation and CI with `scopes` or a `preset` (read-only, ci, full) and a lifetime (default 90 days, at most 365). The secret is in this answer only. Only an owner of the team, as a person (dashboard or `sbx login`); a key cannot issue keys. People use `sbx login` instead of keys.
+         * @description Issues a key of the team for automation and CI with `scopes` or a `preset` (read-only, ci, full) and a lifetime (default 90 days, at most 365). The secret is in this answer only. Only an owner of the team, as a person (dashboard or `umiak login`); a key cannot issue keys. People use `umiak login` instead of keys.
          */
         post: operations["apiKeys.create"];
         delete?: never;
@@ -40,7 +40,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke the calling key
-         * @description The team key of this request revokes itself (`sbx logout --revoke`); it stops working at once on every server. Any team key, no scope needed.
+         * @description The team key of this request revokes itself (`umiak logout --revoke`); it stops working at once on every server. Any team key, no scope needed.
          */
         delete: operations["apiKeys.revokeSelf"];
         options?: never;
@@ -189,7 +189,7 @@ export interface paths {
         };
         /**
          * Current caller
-         * @description Who is calling: the person (null for a team API key), the team this request acts in, the person's teams with roles, operator rights, and the credential (kind, scopes, expiry). `sbx login` and `sbx whoami` call it to show the account and the default team.
+         * @description Who is calling: the person (null for a team API key), the team this request acts in, the person's teams with roles, operator rights, and the credential (kind, scopes, expiry). `umiak login` and `umiak whoami` call it to show the account and the default team.
          */
         get: operations["me.get"];
         put?: never;
@@ -209,7 +209,7 @@ export interface paths {
         };
         /**
          * Platform information
-         * @description Public facts about this deployment: API and dashboard URLs, the domain of published ports, the Keycloak issuer for `sbx login`, the SSH endpoint with its host keys, and CLI versions. Needs no authentication; clients call it first to configure themselves.
+         * @description Public facts about this deployment: API and dashboard URLs, the domain of published ports, the Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. Needs no authentication; clients call it first to configure themselves.
          */
         get: operations["meta.get"];
         put?: never;
@@ -300,7 +300,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a sandbox
-         * @description Deletes the sandbox and its VM; any running operation is superseded. Needs the header Sbx-Confirm-Delete with the sandbox id (or slug) — otherwise 428 and nothing happens. Answers 202 with the delete operation; on an already deleted sandbox 200 with `operation: null`. Repeating is safe.
+         * @description Deletes the sandbox and its VM; any running operation is superseded. Needs the header Umiak-Confirm-Delete with the sandbox id (or slug) — otherwise 428 and nothing happens. Answers 202 with the delete operation; on an already deleted sandbox 200 with `operation: null`. Repeating is safe.
          */
         delete: operations["sandboxes.delete"];
         options?: never;
@@ -323,7 +323,7 @@ export interface paths {
         put?: never;
         /**
          * Block a sandbox (operator)
-         * @description Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         * @description Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["sandboxes.block"];
         delete?: never;
@@ -347,7 +347,7 @@ export interface paths {
         put?: never;
         /**
          * Run a command
-         * @description Starts a process in a ready sandbox (a creating or starting one is awaited up to 60 s). Exactly one of `command` (bash -lc) and `argv`. Modes: `sync` (default) answers 200 SyncCommandResult once the process exits (timeout at most 600 s; the connection is silent until then, so proxies may cut it: SDKs use stream); `stream` answers 200 application/x-ndjson frames (first `started`, last `exit`, `reconnect` or `error`) with `Sbx-Command-Id`; `detached` answers 201 Command right after the start. With an Idempotency-Key a repeat never starts the command twice: sync waits for the same command, stream streams it from offset 0 with `started.replayed: true`, detached answers 200.
+         * @description Starts a process in a ready sandbox (a creating or starting one is awaited up to 60 s). Exactly one of `command` (bash -lc) and `argv`. Modes: `sync` (default) answers 200 SyncCommandResult once the process exits (timeout at most 600 s; the connection is silent until then, so proxies may cut it: SDKs use stream); `stream` answers 200 application/x-ndjson frames (first `started`, last `exit`, `reconnect` or `error`) with `Umiak-Command-Id`; `detached` answers 201 Command right after the start. With an Idempotency-Key a repeat never starts the command twice: sync waits for the same command, stream streams it from offset 0 with `started.replayed: true`, detached answers 200.
          */
         post: operations["commands.create"];
         delete?: never;
@@ -425,7 +425,7 @@ export interface paths {
         };
         /**
          * Read output by offset
-         * @description Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: Sbx-Offset (where the bytes start), Sbx-Next-Offset, Sbx-Available-From, Sbx-Stream-End (only once the stream ended), Sbx-Truncated: true when `offset` was already evicted and reading started at Sbx-Available-From. An offset past the end is 416. For polling without streams.
+         * @description Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: Umiak-Offset (where the bytes start), Umiak-Next-Offset, Umiak-Available-From, Umiak-Stream-End (only once the stream ended), Umiak-Truncated: true when `offset` was already evicted and reading started at Umiak-Available-From. An offset past the end is 416. For polling without streams.
          */
         get: operations["commands.output"];
         put?: never;
@@ -741,7 +741,7 @@ export interface paths {
         };
         /**
          * Download a file
-         * @description The bytes of a file, streamed from the sandbox. One `Range` (`bytes=a-b`, `a-`, `-n`; several ranges give the whole file with 200) and `If-Range` (ETag or date); ETag, Last-Modified, Accept-Ranges. Always `application/octet-stream` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. A directory is 409 is_directory. In the browser (dashboard origin) `?team=` may replace the Sbx-Team header.
+         * @description The bytes of a file, streamed from the sandbox. One `Range` (`bytes=a-b`, `a-`, `-n`; several ranges give the whole file with 200) and `If-Range` (ETag or date); ETag, Last-Modified, Accept-Ranges. Always `application/octet-stream` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. A directory is 409 is_directory. In the browser (dashboard origin) `?team=` may replace the Umiak-Team header.
          */
         get: operations["files.download"];
         /**
@@ -851,7 +851,7 @@ export interface paths {
         put?: never;
         /**
          * Start a resumable upload
-         * @description Starts a resumable upload of a large file. Nothing is stored by the api; the partial file lives in the sandbox and is dropped after 24 h without activity. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.
+         * @description Starts a resumable upload of a large file. Nothing is stored by the api; the partial file lives in the sandbox and is dropped after 24 h without activity. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.
          */
         post: operations["files.createUpload"];
         delete?: never;
@@ -870,7 +870,7 @@ export interface paths {
         get?: never;
         /**
          * Upload a chunk
-         * @description Appends the body (up to 8 MiB, any content type) at `offset`. Send the destination as `path` too: it tells the sandbox where to keep the partial file. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.
+         * @description Appends the body (up to 8 MiB, any content type) at `offset`. Send the destination as `path` too: it tells the sandbox where to keep the partial file. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.
          */
         put: operations["files.putChunk"];
         post?: never;
@@ -882,7 +882,7 @@ export interface paths {
         options?: never;
         /**
          * Offset of an upload
-         * @description Sbx-Upload-Offset: the bytes received so far, where the next chunk starts. 404 when the upload does not exist (expired, cancelled, committed with a bad checksum, or no chunk yet). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.
+         * @description Umiak-Upload-Offset: the bytes received so far, where the next chunk starts. 404 when the upload does not exist (expired, cancelled, committed with a bad checksum, or no chunk yet). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.
          */
         head: operations["files.uploadOffset"];
         patch?: never;
@@ -899,7 +899,7 @@ export interface paths {
         put?: never;
         /**
          * Finish an upload
-         * @description Moves the uploaded bytes to `path`. Idempotent by upload id: a repeat returns the same FileInfo (24 h). A `sha256` that does not match is 422 checksum_mismatch and the upload is dropped (start over). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.
+         * @description Moves the uploaded bytes to `path`. Idempotent by upload id: a repeat returns the same FileInfo (24 h). A `sha256` that does not match is 422 checksum_mismatch and the upload is dropped (start over). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.
          */
         post: operations["files.commitUpload"];
         delete?: never;
@@ -958,7 +958,7 @@ export interface paths {
         get?: never;
         /**
          * Publish a port or change its access
-         * @description Publishes the guest port at `https://<slug>-<port>.<sbxDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.
+         * @description Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.
          */
         put: operations["ports.put"];
         post?: never;
@@ -983,7 +983,7 @@ export interface paths {
         put?: never;
         /**
          * Block a hosted port (operator)
-         * @description Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         * @description Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["ports.block"];
         delete?: never;
@@ -1023,7 +1023,7 @@ export interface paths {
         put?: never;
         /**
          * Unblock a hosted port (operator)
-         * @description Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         * @description Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["ports.unblock"];
         delete?: never;
@@ -1061,7 +1061,7 @@ export interface paths {
         };
         /**
          * Connect to a terminal (WebSocket)
-         * @description WebSocket upgrade with the subprotocol `sbx.pty.v1` (required). Server → client: binary frames are consecutive PTY output bytes; text frames are JSON: `{"type":"attached","offset":N}` first, `{"type":"truncated","availableFrom":N}`, `{"type":"exit",...}` (as in NDJSON), `{"type":"error","code","message","retryable","details","requestId"}`, `{"type":"reconnect","offset":N,"reason"}`. The client counts the offset itself: `attached.offset` (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are input (a key typed while the socket drops may be lost, never applied twice); text `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416 `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team header.
+         * @description WebSocket upgrade with the subprotocol `umiak.pty.v1` (required). Server → client: binary frames are consecutive PTY output bytes; text frames are JSON: `{"type":"attached","offset":N}` first, `{"type":"truncated","availableFrom":N}`, `{"type":"exit",...}` (as in NDJSON), `{"type":"error","code","message","retryable","details","requestId"}`, `{"type":"reconnect","offset":N,"reason"}`. The client counts the offset itself: `attached.offset` (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are input (a key typed while the socket drops may be lost, never applied twice); text `{"type":"resize","cols":N,"rows":N}`. Close codes: 1000 after exit; 1012 server shutdown (after `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416 `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Umiak-Team header.
          */
         get: operations["ptys.connect"];
         put?: never;
@@ -1203,7 +1203,7 @@ export interface paths {
         put?: never;
         /**
          * Unblock a sandbox (operator)
-         * @description Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.
+         * @description Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["sandboxes.unblock"];
         delete?: never;
@@ -1272,7 +1272,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a saved snapshot
-         * @description Deletes the ready snapshot of this name; the name is free at once, the disk is removed in the background. Needs the header Sbx-Confirm-Delete with the snapshot id (or name) — otherwise 428 and nothing happens. Sandboxes created from it stay.
+         * @description Deletes the ready snapshot of this name; the name is free at once, the disk is removed in the background. Needs the header Umiak-Confirm-Delete with the snapshot id (or name) — otherwise 428 and nothing happens. Sandboxes created from it stay.
          */
         delete: operations["snapshots.delete"];
         options?: never;
@@ -1289,7 +1289,7 @@ export interface paths {
         };
         /**
          * List my SSH keys
-         * @description SSH public keys of the calling person, oldest first. Only a person (browser session or `sbx login`).
+         * @description SSH public keys of the calling person, oldest first. Only a person (browser session or `umiak login`).
          */
         get: operations["sshKeys.list"];
         put?: never;
@@ -1387,7 +1387,7 @@ export interface components {
             lastUsedAt: string | null;
             name: string;
             /**
-             * @description First 8 characters after `sbx_`
+             * @description First 8 characters after `umiak_`
              * @example a1B2c3D4
              */
             prefix: string;
@@ -1408,7 +1408,7 @@ export interface components {
         };
         ApiKeySecret: {
             apiKey: components["schemas"]["ApiKey"];
-            /** @description The secret (`sbx_...`), shown only in this answer; keep it like a password */
+            /** @description The secret (`umiak_...`), shown only in this answer; keep it like a password */
             secret: string;
         };
         ArchiveResult: {
@@ -1766,11 +1766,11 @@ export interface components {
             secretFiles?: components["schemas"]["SecretFileInput"][];
             secrets?: components["schemas"]["EnvVars"] & unknown;
         };
-        /** @description Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a newline are not visible in SSH sessions. */
+        /** @description Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `UMIAK_` is reserved except UMIAK_API_KEY, UMIAK_API_URL, UMIAK_TEAM, UMIAK_PROFILE. Values with a newline are not visible in SSH sessions. */
         EnvVars: {
             [key: string]: string;
         };
-        /** @description Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a newline are not visible in SSH sessions. Merged by key: null deletes the key. */
+        /** @description Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `UMIAK_` is reserved except UMIAK_API_KEY, UMIAK_API_URL, UMIAK_TEAM, UMIAK_PROFILE. Values with a newline are not visible in SSH sessions. Merged by key: null deletes the key. */
         EnvVarsPatch: {
             [key: string]: string | null;
         };
@@ -1977,7 +1977,7 @@ export interface components {
             label: string;
             /** @example 3000 */
             port: number;
-            /** @example https://quiet-otter-lamp-3000.sbx.example.com */
+            /** @example https://quiet-otter-lamp-3000.umiak.example.com */
             url: string;
         };
         /** @description The hosted port; with the token when this call issued one */
@@ -2006,10 +2006,10 @@ export interface components {
             port: number;
             /**
              * @description Only when this call issued a token (a new token port or a switch to token). It is not stored and never shown again: replace a lost one with rotate-token
-             * @example sbxp_...
+             * @example umiakp_...
              */
             token?: string;
-            /** @example https://quiet-otter-lamp-3000.sbx.example.com */
+            /** @example https://quiet-otter-lamp-3000.umiak.example.com */
             url: string;
             /** @description `url` + `/?_token=<token>`, with `token` */
             urlWithToken?: string;
@@ -2120,7 +2120,7 @@ export interface components {
                 name: string | null;
             } | null;
         };
-        /** @description Team of this request (Sbx-Team or the default team) */
+        /** @description Team of this request (Umiak-Team or the default team) */
         MeTeam: {
             /** @example team_01jbx2v7d3m6c8q9w0e4r5t6y7 */
             id: string;
@@ -2156,20 +2156,15 @@ export interface components {
              * @example 0.4.0
              */
             minCliVersion: string | null;
-            /** @description Keycloak for people (device flow of `sbx login`); null when only team keys work */
+            /** @description Keycloak for people (device flow of `umiak login`); null when only team keys work */
             oidc: {
-                /** @example sbx-api */
+                /** @example umiak-api */
                 audience: string;
-                /** @example sbx-cli */
+                /** @example umiak-cli */
                 clientId: string;
                 /** Format: uri */
                 issuer: string;
             } | null;
-            /**
-             * @description Domain of published ports: https://<slug>-<port>.<sbxDomain>
-             * @example sbx.example.com
-             */
-            sbxDomain: string;
             ssh: {
                 /** @example ssh.example.com */
                 host: string;
@@ -2177,6 +2172,11 @@ export interface components {
                 hostKeys: string[];
                 port: number;
             };
+            /**
+             * @description Domain of published ports: https://<slug>-<port>.<umiakDomain>
+             * @example umiak.example.com
+             */
+            umiakDomain: string;
         };
         MoveRequest: {
             /**
@@ -2242,7 +2242,7 @@ export interface components {
         };
         /** @description The new token; the old token and its cookies stopped working */
         PortToken: {
-            /** @example sbxp_... */
+            /** @example umiakp_... */
             token: string;
             urlWithToken: string;
         };
@@ -2314,7 +2314,7 @@ export interface components {
                 desktop?: string;
                 /**
                  * @description URL of a published port; replace {port}
-                 * @example https://quiet-otter-lamp-{port}.sbx.example.com
+                 * @example https://quiet-otter-lamp-{port}.umiak.example.com
                  */
                 portUrlTemplate: string;
                 /**
@@ -3648,7 +3648,7 @@ export interface operations {
             query?: never;
             header?: {
                 /** @description Required: the id (`sb_...`) or slug of the sandbox in the path; without it or with another sandbox the answer is 428 and nothing is deleted */
-                "Sbx-Confirm-Delete"?: string;
+                "Umiak-Confirm-Delete"?: string;
             };
             path: {
                 /** @description Sandbox id (`sb_...`) or slug */
@@ -3685,7 +3685,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `confirmation_required`: Sbx-Confirm-Delete is missing or names another resource */
+            /** @description `confirmation_required`: Umiak-Confirm-Delete is missing or names another resource */
             428: {
                 headers: {
                     [name: string]: unknown;
@@ -3908,7 +3908,7 @@ export interface operations {
                     /** @description `true` when the command was started by an earlier request with this key */
                     "Idempotency-Replayed"?: "true";
                     /** @description Id (`cmd_...`) of the command */
-                    "Sbx-Command-Id"?: string;
+                    "Umiak-Command-Id"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3920,7 +3920,7 @@ export interface operations {
             201: {
                 headers: {
                     /** @description Id (`cmd_...`) of the command */
-                    "Sbx-Command-Id"?: string;
+                    "Umiak-Command-Id"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4161,12 +4161,12 @@ export interface operations {
             /** @description The bytes */
             200: {
                 headers: {
-                    "Sbx-Available-From"?: number;
-                    "Sbx-Next-Offset"?: number;
-                    "Sbx-Offset"?: number;
+                    "Umiak-Available-From"?: number;
+                    "Umiak-Next-Offset"?: number;
+                    "Umiak-Offset"?: number;
                     /** @description Final size of the stream, once it ended */
-                    "Sbx-Stream-End"?: number;
-                    "Sbx-Truncated"?: "true";
+                    "Umiak-Stream-End"?: number;
+                    "Umiak-Truncated"?: "true";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4304,7 +4304,7 @@ export interface operations {
             200: {
                 headers: {
                     /** @description Id (`cmd_...`) of the command */
-                    "Sbx-Command-Id"?: string;
+                    "Umiak-Command-Id"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5810,7 +5810,7 @@ export interface operations {
             200: {
                 headers: {
                     /** @description Bytes received so far */
-                    "Sbx-Upload-Offset"?: number;
+                    "Umiak-Upload-Offset"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5835,7 +5835,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `upload_offset_mismatch` (details.offset, header Sbx-Upload-Offset), `invalid_state` (already committed), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability) */
+            /** @description `upload_offset_mismatch` (details.offset, header Umiak-Upload-Offset), `invalid_state` (already committed), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5932,7 +5932,7 @@ export interface operations {
             200: {
                 headers: {
                     /** @description Bytes received so far */
-                    "Sbx-Upload-Offset"?: number;
+                    "Umiak-Upload-Offset"?: number;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -6521,7 +6521,7 @@ export interface operations {
                     /** @description `true`: an earlier request with this key started it */
                     "Idempotency-Replayed"?: "true";
                     /** @description Id (`cmd_...`) of the command */
-                    "Sbx-Command-Id"?: string;
+                    "Umiak-Command-Id"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6532,7 +6532,7 @@ export interface operations {
             201: {
                 headers: {
                     /** @description Id (`cmd_...`) of the command */
-                    "Sbx-Command-Id"?: string;
+                    "Umiak-Command-Id"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6596,14 +6596,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Switching Protocols: the WebSocket with the subprotocol sbx.pty.v1 */
+            /** @description Switching Protocols: the WebSocket with the subprotocol umiak.pty.v1 */
             101: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description `validation`: the subprotocol sbx.pty.v1 was not offered, or a bad query */
+            /** @description `validation`: the subprotocol umiak.pty.v1 was not offered, or a bad query */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7208,7 +7208,7 @@ export interface operations {
             query?: never;
             header?: {
                 /** @description Required: the id (`snap_...`) or the name of the snapshot in the path; without it or with another snapshot the answer is 428 and nothing is deleted */
-                "Sbx-Confirm-Delete"?: string;
+                "Umiak-Confirm-Delete"?: string;
             };
             path: {
                 /** @description Name of the saved snapshot */
@@ -7243,7 +7243,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `confirmation_required`: Sbx-Confirm-Delete is missing or names another resource */
+            /** @description `confirmation_required`: Umiak-Confirm-Delete is missing or names another resource */
             428: {
                 headers: {
                     [name: string]: unknown;

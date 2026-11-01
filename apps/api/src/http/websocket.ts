@@ -48,7 +48,7 @@ export interface WebSocketAccept {
 	cancel(): void;
 }
 
-const ACCEPT = Symbol("sbx.websocket.accept");
+const ACCEPT = Symbol("umiak.websocket.accept");
 
 /** Hono `c.env` of an upgrade request. */
 interface UpgradeEnv {

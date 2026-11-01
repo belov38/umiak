@@ -1,5 +1,5 @@
 // The api against the REAL guest agent (S3) behind the real S2 gateway, in
-// one helper process (services/guest-agent/cmd/sbx-agent-harness, built by
+// one helper process (services/guest-agent/cmd/umiak-agent-harness, built by
 // agent-harness-global.ts): ConnectAgentApi over AgentClient + PgRegistry
 // on the test database, through the public routes. Commands are host
 // processes driven by the harness's fake shim (see runner.go there).
@@ -25,7 +25,11 @@ import {
 import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { createApiServer, type Frame, PTY_SUBPROTOCOL } from "../src/index.ts";
@@ -412,7 +416,7 @@ describe.skipIf(skipPg() || skipReason !== "")(
 			});
 
 			it("an unknown user is 400 validation (user_not_found)", async () => {
-				const r = await run({ command: "true", user: "no-such-user-sbx" });
+				const r = await run({ command: "true", user: "no-such-user-umiak" });
 				expect(r.status).toBe(400);
 				expect(err(r).code).toBe("validation");
 			});
@@ -693,7 +697,7 @@ describe.skipIf(skipPg() || skipReason !== "")(
 				expect(one.body).toEqual({ offset: 100_000 });
 				const head = await rawRequest(h, "HEAD", url(`/uploads/${id}`));
 				expect(head.status).toBe(200);
-				expect(head.headers.get("sbx-upload-offset")).toBe("100000");
+				expect(head.headers.get("umiak-upload-offset")).toBe("100000");
 				const wrong = await chunk(id, 0, data.subarray(0, 10));
 				expect(wrong.status).toBe(409);
 				expect(err(wrong)).toMatchObject({
@@ -926,7 +930,7 @@ describe.skipIf(skipPg() || skipReason !== "")(
 			});
 
 			it("~, relative paths and the real home land in the scratch dir, never in $HOME", async () => {
-				const name = `sbx-guard-${randomBytes(6).toString("hex")}`;
+				const name = `umiak-guard-${randomBytes(6).toString("hex")}`;
 				const inHome = (rel: string) => join(homedir(), rel);
 				const created = [
 					`${name}.txt`,

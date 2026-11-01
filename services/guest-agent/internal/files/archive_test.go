@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // tarEntry is one entry of a test archive.
@@ -255,10 +255,10 @@ func TestArchiveHostile(t *testing.T) {
 			return []tarEntry{ok, {name: "a/../../x", typ: tar.TypeReg, body: []byte("x")}}
 		}, 1},
 		{"absolute", func(string) []tarEntry {
-			return []tarEntry{{name: "/etc/sbx-hostile-x", typ: tar.TypeReg, body: []byte("x")}}
+			return []tarEntry{{name: "/etc/umiak-hostile-x", typ: tar.TypeReg, body: []byte("x")}}
 		}, 0},
 		{"symlink to root", func(string) []tarEntry {
-			return []tarEntry{{name: "l", typ: tar.TypeSymlink, link: "/"}, {name: "l/sbx-hostile-x", typ: tar.TypeReg, body: []byte("x")}}
+			return []tarEntry{{name: "l", typ: tar.TypeSymlink, link: "/"}, {name: "l/umiak-hostile-x", typ: tar.TypeReg, body: []byte("x")}}
 		}, 1},
 		{"symlink outside", func(outside string) []tarEntry {
 			return []tarEntry{{name: "l", typ: tar.TypeSymlink, link: outside}, {name: "l/x", typ: tar.TypeReg, body: []byte("x")}}
@@ -299,11 +299,11 @@ func TestArchiveHostile(t *testing.T) {
 			if len(after) != len(before) || after["f"] != before["f"] {
 				t.Fatalf("outside changed: %v -> %v", before, after)
 			}
-			if _, err := os.Lstat("/sbx-hostile-x"); err == nil {
-				t.Fatal("/sbx-hostile-x written")
+			if _, err := os.Lstat("/umiak-hostile-x"); err == nil {
+				t.Fatal("/umiak-hostile-x written")
 			}
-			if _, err := os.Lstat("/etc/sbx-hostile-x"); err == nil {
-				t.Fatal("/etc/sbx-hostile-x written")
+			if _, err := os.Lstat("/etc/umiak-hostile-x"); err == nil {
+				t.Fatal("/etc/umiak-hostile-x written")
 			}
 		})
 	}

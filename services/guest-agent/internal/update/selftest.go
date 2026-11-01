@@ -12,18 +12,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
-// SelfTestTimeout bounds `sbx-agent selftest` during an update (spec 17.4
+// SelfTestTimeout bounds `umiak-agent selftest` during an update (spec 17.4
 // step 3).
 const SelfTestTimeout = 10 * time.Second
 
-// SelfTest is `sbx-agent selftest`: the version in versionDir (the
+// SelfTest is `umiak-agent selftest`: the version in versionDir (the
 // directory of the running binary, compiled as binVersion) checks that it
 // can take over this machine. binVersion must equal the directory name and
 // the manifest version: a binary that reports another version would not

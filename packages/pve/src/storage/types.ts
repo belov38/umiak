@@ -12,7 +12,7 @@ export interface Disk {
 	slot: DiskSlot;
 	/** Proxmox volume id, e.g. local-lvm:vm-500-disk-0. */
 	volid: string;
-	/** LV name in the VG, e.g. vm-500-disk-0 or sbx-snap-<id>-scsi0. */
+	/** LV name in the VG, e.g. vm-500-disk-0 or umiak-snap-<id>-scsi0. */
 	lv: string;
 	/** Disk options other than the volume and size: discard, iothread, ssd, efitype, version... */
 	options: Record<string, string>;

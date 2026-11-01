@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { EnvError, parseAdminEnv, parseWorkerEnv } from "../src/env.ts";
 
 const BASE = {
-	DATABASE_URL: "postgres://sbx:sbx@db:5432/sbx",
+	DATABASE_URL: "postgres://umiak:umiak@db:5432/umiak",
 	PAYLOAD_SECRET: "payload-secret-0123456789abcdef",
-	SBX_DATA_KEYS_FILE: "/etc/sbx/keys.json",
-	SBX_SECRETS_DIR: "/etc/sbx/secrets",
+	UMIAK_DATA_KEYS_FILE: "/etc/umiak/keys.json",
+	UMIAK_SECRETS_DIR: "/etc/umiak/secrets",
 };
 
 describe("worker env", () => {
@@ -24,22 +24,22 @@ describe("worker env", () => {
 	it("lists every problem at once", () => {
 		let msg = "";
 		try {
-			parseWorkerEnv({ SBX_HTTP_PORT: "abc" });
+			parseWorkerEnv({ UMIAK_HTTP_PORT: "abc" });
 		} catch (e) {
 			msg = (e as Error).message;
 		}
 		for (const name of [
 			"DATABASE_URL",
 			"PAYLOAD_SECRET",
-			"SBX_DATA_KEYS_FILE",
-			"SBX_SECRETS_DIR",
-			"SBX_HTTP_PORT",
+			"UMIAK_DATA_KEYS_FILE",
+			"UMIAK_SECRETS_DIR",
+			"UMIAK_HTTP_PORT",
 		]) {
 			expect(msg).toContain(name);
 		}
 	});
 
-	it("PAYLOAD_SECRET is required; SBX_CONFIG_FILE is not (config comes from Payload)", () => {
+	it("PAYLOAD_SECRET is required; UMIAK_CONFIG_FILE is not (config comes from Payload)", () => {
 		const { PAYLOAD_SECRET: _, ...rest } = BASE;
 		expect(() => parseWorkerEnv(rest)).toThrow(/PAYLOAD_SECRET: required/);
 		expect(() => parseWorkerEnv({ ...BASE, PAYLOAD_SECRET: "" })).toThrow(
@@ -47,9 +47,9 @@ describe("worker env", () => {
 		);
 		const env = parseWorkerEnv(BASE);
 		expect(env).not.toHaveProperty("configFile");
-		// A leftover SBX_CONFIG_FILE is ignored.
+		// A leftover UMIAK_CONFIG_FILE is ignored.
 		expect(
-			parseWorkerEnv({ ...BASE, SBX_CONFIG_FILE: "/etc/sbx/sbx.yaml" }),
+			parseWorkerEnv({ ...BASE, UMIAK_CONFIG_FILE: "/etc/umiak/umiak.yaml" }),
 		).toEqual(env);
 	});
 
@@ -58,8 +58,8 @@ describe("worker env", () => {
 		expect(env).toMatchObject({
 			databaseUrl: BASE.DATABASE_URL,
 			payloadSecret: BASE.PAYLOAD_SECRET,
-			dataKeysFile: BASE.SBX_DATA_KEYS_FILE,
-			secretsDir: BASE.SBX_SECRETS_DIR,
+			dataKeysFile: BASE.UMIAK_DATA_KEYS_FILE,
+			secretsDir: BASE.UMIAK_SECRETS_DIR,
 			gatewayServiceTokenFile: undefined,
 			reconcileDryRun: true,
 			httpPort: 9090,
@@ -75,15 +75,15 @@ describe("worker env", () => {
 	it("port domain and SSH user CA keys file", () => {
 		const env = parseWorkerEnv({
 			...BASE,
-			SBX_PORT_DOMAIN: "sbx.example.com",
-			SBX_SSH_USER_CA_KEYS_FILE: "/etc/sbx/ssh-user-ca.pub",
+			UMIAK_PORT_DOMAIN: "umiak.example.com",
+			UMIAK_SSH_USER_CA_KEYS_FILE: "/etc/umiak/ssh-user-ca.pub",
 		});
-		expect(env.portDomain).toBe("sbx.example.com");
-		expect(env.sshUserCaKeysFile).toBe("/etc/sbx/ssh-user-ca.pub");
+		expect(env.portDomain).toBe("umiak.example.com");
+		expect(env.sshUserCaKeysFile).toBe("/etc/umiak/ssh-user-ca.pub");
 		const empty = parseWorkerEnv({
 			...BASE,
-			SBX_PORT_DOMAIN: "",
-			SBX_SSH_USER_CA_KEYS_FILE: "",
+			UMIAK_PORT_DOMAIN: "",
+			UMIAK_SSH_USER_CA_KEYS_FILE: "",
 		});
 		expect(empty.portDomain).toBeUndefined();
 		expect(empty.sshUserCaKeysFile).toBeUndefined();
@@ -92,13 +92,13 @@ describe("worker env", () => {
 	it("parses explicit values", () => {
 		const env = parseWorkerEnv({
 			...BASE,
-			SBX_GATEWAY_SERVICE_TOKEN_FILE: "/run/secrets/gw",
-			SBX_RECONCILE_DRY_RUN: "0",
-			SBX_HTTP_PORT: "8080",
-			SBX_MIGRATE_ON_START: "false",
-			SBX_LOG_LEVEL: "debug",
-			SBX_DB_POOL_MAX: "50",
-			SBX_IDP_SYNC_INTERVAL: "60",
+			UMIAK_GATEWAY_SERVICE_TOKEN_FILE: "/run/secrets/gw",
+			UMIAK_RECONCILE_DRY_RUN: "0",
+			UMIAK_HTTP_PORT: "8080",
+			UMIAK_MIGRATE_ON_START: "false",
+			UMIAK_LOG_LEVEL: "debug",
+			UMIAK_DB_POOL_MAX: "50",
+			UMIAK_IDP_SYNC_INTERVAL: "60",
 		});
 		expect(env).toMatchObject({
 			gatewayServiceTokenFile: "/run/secrets/gw",
@@ -113,15 +113,15 @@ describe("worker env", () => {
 
 	it("rejects a bad boolean and log level", () => {
 		expect(() =>
-			parseWorkerEnv({ ...BASE, SBX_RECONCILE_DRY_RUN: "maybe" }),
-		).toThrow(/SBX_RECONCILE_DRY_RUN/);
-		expect(() => parseWorkerEnv({ ...BASE, SBX_LOG_LEVEL: "loud" })).toThrow(
-			/SBX_LOG_LEVEL/,
+			parseWorkerEnv({ ...BASE, UMIAK_RECONCILE_DRY_RUN: "maybe" }),
+		).toThrow(/UMIAK_RECONCILE_DRY_RUN/);
+		expect(() => parseWorkerEnv({ ...BASE, UMIAK_LOG_LEVEL: "loud" })).toThrow(
+			/UMIAK_LOG_LEVEL/,
 		);
 	});
 
 	it("empty strings count as unset", () => {
-		const env = parseWorkerEnv({ ...BASE, SBX_HTTP_PORT: "" });
+		const env = parseWorkerEnv({ ...BASE, UMIAK_HTTP_PORT: "" });
 		expect(env.httpPort).toBe(9090);
 	});
 });
@@ -136,19 +136,19 @@ describe("admin env", () => {
 		expect(() => parseAdminEnv({})).toThrow(/DATABASE_URL: required/);
 	});
 
-	it("SBX_PVE_URL and SBX_PVE_TLS_NAME become the provider override", () => {
+	it("UMIAK_PVE_URL and UMIAK_PVE_TLS_NAME become the provider override", () => {
 		expect(
 			parseAdminEnv({ DATABASE_URL: BASE.DATABASE_URL }).providerOverride,
 		).toEqual({});
 		expect(
 			parseAdminEnv({
 				DATABASE_URL: BASE.DATABASE_URL,
-				SBX_PVE_URL: "https://10.0.0.5:8006",
-				SBX_PVE_TLS_NAME: "pve",
+				UMIAK_PVE_URL: "https://10.0.0.5:8006",
+				UMIAK_PVE_TLS_NAME: "pve",
 			}).providerOverride,
 		).toEqual({ apiUrl: "https://10.0.0.5:8006", tlsName: "pve" });
 		expect(() =>
-			parseAdminEnv({ DATABASE_URL: BASE.DATABASE_URL, SBX_PVE_URL: "pve" }),
-		).toThrow(/SBX_PVE_URL/);
+			parseAdminEnv({ DATABASE_URL: BASE.DATABASE_URL, UMIAK_PVE_URL: "pve" }),
+		).toThrow(/UMIAK_PVE_URL/);
 	});
 });

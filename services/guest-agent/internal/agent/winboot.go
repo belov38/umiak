@@ -2,7 +2,7 @@ package agent
 
 // The Windows start (S9 spec 12.3, 11.2). Before the S3 sequence the agent
 // waits while Windows Setup runs, then waits for early.json of this boot
-// from the startup script `sbx-agent early`, and runs the boot step itself
+// from the startup script `umiak-agent early`, and runs the boot step itself
 // when the script did not finish in time. Before that step and before a
 // reboot for the computer name it waits for the clone first-boot script
 // (firstboot.done), which Windows Setup runs from SetupComplete.cmd while
@@ -25,12 +25,12 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/system"
 )
 
 // Defaults of the WinBoot timings.
@@ -206,7 +206,7 @@ func (a *agent) windowsBootStep(ctx context.Context) error {
 	return nil
 }
 
-// runEarlyStep runs `sbx-agent early` in the service (ModeService).
+// runEarlyStep runs `umiak-agent early` in the service (ModeService).
 func (a *agent) runEarlyStep(ctx context.Context) error {
 	w := a.d.WinBoot
 	if err := a.awaitFirstBoot(ctx); err != nil {
@@ -255,7 +255,7 @@ func (a *agent) applyIdentityWindows(ctx context.Context) {
 		}
 		if err == nil && reboot {
 			a.log.Warn("agent: the computer name is not in effect, rebooting")
-			if rerr := w.Resetter.Reboot("sbx identity changed"); rerr != nil {
+			if rerr := w.Resetter.Reboot("umiak identity changed"); rerr != nil {
 				err = fmt.Errorf("agent: reboot for the computer name: %w", rerr)
 			} else {
 				_ = sleepCtx(ctx, w.RebootWait)

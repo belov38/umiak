@@ -24,7 +24,7 @@ try {
 	if (
 		Number(config.template) !== 1 ||
 		config.name !== m.vmName ||
-		!config.tags.split(";").includes("sbx-tpl")
+		!config.tags.split(";").includes("umiak-tpl")
 	)
 		throw new Error("not the expected sealed template");
 	await ctx.node.call("lv.tagTemplate", { vmid });

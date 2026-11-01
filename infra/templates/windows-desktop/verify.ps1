@@ -1,9 +1,9 @@
-# Desktop checks of a windows-desktop build (spec S10 sections 6.6, 7, 8). sbx-tpl splices this
+# Desktop checks of a windows-desktop build (spec S10 sections 6.6, 7, 8). umiak-tpl splices this
 # file into windows/verify.ps1 before its main block, so Report and Invoke-Capture are defined.
 # API, screenshots and streamed media are checked by infra/dev-cp/e2e-desktop.sh.
 
-$DesktopRoot = Join-Path $env:ProgramData 'sbx-agent\desktop'
-$StreamerRoot = Join-Path $env:ProgramFiles 'sbx-desktop'
+$DesktopRoot = Join-Path $env:ProgramData 'umiak-agent\desktop'
+$StreamerRoot = Join-Path $env:ProgramFiles 'umiak-desktop'
 $StreamerPorts = @(47800, 47984, 47989, 47990, 48010)
 
 function Test-Desktop {
@@ -18,7 +18,7 @@ function Test-Desktop {
     # moonlight-web runs the patched server build (spec S10 section 8.6), not the upstream binary.
     $moonDir = Join-Path $StreamerRoot 'moonlight-web\current'
     try {
-        $info = Get-Content -Raw -LiteralPath (Join-Path $moonDir 'sbx-build.json') | ConvertFrom-Json
+        $info = Get-Content -Raw -LiteralPath (Join-Path $moonDir 'umiak-build.json') | ConvertFrom-Json
         $hash = (Get-FileHash -LiteralPath (Join-Path $moonDir 'web-server.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         Report desktop_moonlight_patch ($hash -eq $info.sha256 -and $info.patch -eq 'ping-order.patch') "$($info.upstream) + $($info.patch), sha256 $hash"
     } catch {
@@ -27,13 +27,13 @@ function Test-Desktop {
 
     # Both streamer services exist, start on demand only and are stopped on a fresh clone.
     $bad = [Collections.Generic.List[string]]::new()
-    foreach ($name in @('SunshineService', 'sbx-moonlight-web')) {
+    foreach ($name in @('SunshineService', 'umiak-moonlight-web')) {
         $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name='$name'" -ErrorAction SilentlyContinue
         if ($null -eq $svc) { $bad.Add("$name absent"); continue }
         if ($svc.StartMode -ne 'Manual' -or $svc.State -ne 'Stopped') { $bad.Add("$name $($svc.State)/$($svc.StartMode)") }
-        if ($name -eq 'sbx-moonlight-web' -and $svc.StartName -ne 'NT SERVICE\sbx-moonlight-web') { $bad.Add("$name runs as $($svc.StartName)") }
+        if ($name -eq 'umiak-moonlight-web' -and $svc.StartName -ne 'NT SERVICE\umiak-moonlight-web') { $bad.Add("$name runs as $($svc.StartName)") }
     }
-    Report desktop_services ($bad.Count -eq 0) $(if ($bad.Count) { $bad -join ', ' } else { 'SunshineService, sbx-moonlight-web: Manual, Stopped' })
+    Report desktop_services ($bad.Count -eq 0) $(if ($bad.Count) { $bad -join ', ' } else { 'SunshineService, umiak-moonlight-web: Manual, Stopped' })
 
     # moonlight-web template: loopback only, no default STUN, ICE from the agent's file.
     $cfgFile = Join-Path $DesktopRoot 'moonlight.json'
@@ -48,7 +48,7 @@ function Test-Desktop {
         $ok = $cfg.web_server.bind_address -eq '127.0.0.1:47800' -and
             @($cfg.webrtc.ice_servers).Count -eq 0 -and
             $cfg.webrtc.ice_server_script -eq (Join-Path $DesktopRoot 'ice-servers.cmd') -and
-            $cfg.web_server.forwarded_header.username_header -eq 'X-Sbx-Desktop-User'
+            $cfg.web_server.forwarded_header.username_header -eq 'X-Umiak-Desktop-User'
         $ev = "bind $($cfg.web_server.bind_address), ice_servers $(@($cfg.webrtc.ice_servers).Count), script $($cfg.webrtc.ice_server_script)"
     }
     Report desktop_moonlight_config $ok $ev
@@ -56,7 +56,7 @@ function Test-Desktop {
     Report desktop_files ($missing.Count -eq 0) "missing: $(if ($missing.Count) { $missing -join ', ' } else { 'none' })"
 
     # agent.toml: desktop enabled, desktop readiness, streamer ports never published.
-    $toml = Get-Content -Raw -LiteralPath (Join-Path $env:ProgramData 'sbx-agent\agent.toml')
+    $toml = Get-Content -Raw -LiteralPath (Join-Path $env:ProgramData 'umiak-agent\agent.toml')
     $missing = @($StreamerPorts | Where-Object { $toml -notmatch "exclude = \[[^\]]*\b$_\b" })
     $ok = $toml -match '(?m)^\[desktop\]\s*\r?\nenabled = true' -and
         $toml -match '(?m)^required = \[[^\]]*"desktop"' -and $missing.Count -eq 0
@@ -83,4 +83,4 @@ function Test-Desktop {
     Report desktop_edge_policy $ok $(if ($edge) { "HideFirstRunExperience $($edge.HideFirstRunExperience), BrowserSignin $($edge.BrowserSignin), SyncDisabled $($edge.SyncDisabled)" } else { 'no Edge policy key' })
 }
 
-$SbxExtraGroups = [ordered]@{ desktop = { Test-Desktop } }
+$UmiakExtraGroups = [ordered]@{ desktop = { Test-Desktop } }

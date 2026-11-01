@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/journal"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/journal"
 )
 
 // subscribeCounter counts Events/Subscribe calls served by the agent: each

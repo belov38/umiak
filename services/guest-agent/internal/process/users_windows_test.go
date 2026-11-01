@@ -16,7 +16,7 @@ func TestLookupUserSystemAlias(t *testing.T) {
 			t.Fatalf("%s: %+v %+v", name, u, u.Windows)
 		}
 	}
-	for _, name := range []string{"", "nobody-sbx", "Administrator"} {
+	for _, name := range []string{"", "nobody-umiak", "Administrator"} {
 		if _, err := LookupUser(name); !errors.Is(err, ErrUserNotFound) {
 			t.Errorf("%q: %v, want ErrUserNotFound", name, err)
 		}

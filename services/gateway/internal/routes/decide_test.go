@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
 )
 
 func TestDecide(t *testing.T) {
@@ -14,31 +14,31 @@ func TestDecide(t *testing.T) {
 		name  string
 		route cpapi.Route
 		ok    bool
-		want  sbxerr.Error
+		want  umiakerr.Error
 	}{
-		{"ready", cpapi.Route{SandboxState: "ready", MachineID: "m1"}, true, sbxerr.Error{}},
-		{"running", cpapi.Route{SandboxState: "running", MachineID: "m1"}, true, sbxerr.Error{}},
+		{"ready", cpapi.Route{SandboxState: "ready", MachineID: "m1"}, true, umiakerr.Error{}},
+		{"running", cpapi.Route{SandboxState: "running", MachineID: "m1"}, true, umiakerr.Error{}},
 		{"ready without machine", cpapi.Route{SandboxState: "ready"}, false,
-			sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxUnavailable}},
+			umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxUnavailable}},
 		{"running without machine", cpapi.Route{SandboxState: "running"}, false,
-			sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxUnavailable}},
+			umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxUnavailable}},
 		{"creating", cpapi.Route{SandboxState: "creating"}, false, starting()},
 		{"starting", cpapi.Route{SandboxState: "starting", MachineID: "m1"}, false, starting()},
 		{"resuming", cpapi.Route{SandboxState: "resuming"}, false, starting()},
 		{"stopping", cpapi.Route{SandboxState: "stopping", MachineID: "m1"}, false,
-			sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxStopped}},
+			umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxStopped}},
 		{"stopped", cpapi.Route{SandboxState: "stopped"}, false,
-			sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxStopped}},
+			umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxStopped}},
 		{"deleting", cpapi.Route{SandboxState: "deleting"}, false,
-			sbxerr.Error{Status: http.StatusNotFound, Code: sbxerr.CodeRouteNotFound}},
+			umiakerr.Error{Status: http.StatusNotFound, Code: umiakerr.CodeRouteNotFound}},
 		{"deleted", cpapi.Route{SandboxState: "deleted"}, false,
-			sbxerr.Error{Status: http.StatusNotFound, Code: sbxerr.CodeRouteNotFound}},
+			umiakerr.Error{Status: http.StatusNotFound, Code: umiakerr.CodeRouteNotFound}},
 		{"error", cpapi.Route{SandboxState: "error"}, false,
-			sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxUnavailable}},
+			umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxUnavailable}},
 		{"unknown", cpapi.Route{SandboxState: "teleporting", MachineID: "m1"}, false,
-			sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxUnavailable}},
+			umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxUnavailable}},
 		{"empty state", cpapi.Route{}, false,
-			sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxUnavailable}},
+			umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxUnavailable}},
 		{"blocked operator", cpapi.Route{SandboxState: "ready", MachineID: "m1", Blocked: true, BlockReason: "operator"}, false,
 			blocked("blocked by the operator")},
 		{"blocked public_disabled", cpapi.Route{SandboxState: "ready", MachineID: "m1", Blocked: true, BlockReason: "public_disabled"}, false,
@@ -63,13 +63,13 @@ func TestDecide(t *testing.T) {
 	}
 }
 
-func starting() sbxerr.Error {
-	return sbxerr.Error{
-		Status: http.StatusServiceUnavailable, Code: sbxerr.CodeSandboxStarting,
+func starting() umiakerr.Error {
+	return umiakerr.Error{
+		Status: http.StatusServiceUnavailable, Code: umiakerr.CodeSandboxStarting,
 		Retryable: true, RetryAfter: 5, Refresh: true,
 	}
 }
 
-func blocked(msg string) sbxerr.Error {
-	return sbxerr.Error{Status: http.StatusForbidden, Code: sbxerr.CodeRouteBlocked, Message: msg}
+func blocked(msg string) umiakerr.Error {
+	return umiakerr.Error{Status: http.StatusForbidden, Code: umiakerr.CodeRouteBlocked, Message: msg}
 }

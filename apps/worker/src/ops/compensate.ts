@@ -1,6 +1,6 @@
-import type { Operation } from "@sbx/core";
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import type { Tx } from "@sbx/db";
+import type { Operation } from "@umiak/core";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import type { Tx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import type { MachineRow } from "../db.ts";
 import type { Fenced, OperationError } from "../steps.ts";

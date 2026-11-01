@@ -17,17 +17,17 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/claim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ports"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/claim"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/ports"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/reqcache"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 const (
@@ -131,7 +131,7 @@ func serve(t *testing.T, opts Options) agentv1connect.SystemClient {
 	return agentv1connect.NewSystemClient(srv.Client(), srv.URL)
 }
 
-// withID returns a request carrying Sbx-Request-Id.
+// withID returns a request carrying Umiak-Request-Id.
 func withID[T any](msg *T, id string) *connect.Request[T] {
 	req := connect.NewRequest(msg)
 	req.Header().Set(wire.HeaderRequestID, id)
@@ -221,16 +221,16 @@ func TestInfoFields(t *testing.T) {
 	}
 
 	creq := &agentv1.ClaimRequest{
-		SandboxId:     "sbx_1",
+		SandboxId:     "umiak_1",
 		Hostname:      "my-box",
-		PortDomain:    "sbx.example.com",
+		PortDomain:    "umiak.example.com",
 		Env:           map[string]string{"FOO": "bar"},
 		SecretEnv:     map[string]string{"TOKEN": secretEnvValue},
 		SecretFiles:   []*agentv1.SecretFile{{Name: "key.pem", Content: []byte(secretFileValue)}},
 		SshUserCaKeys: []string{"ssh-ed25519 AAAAcurrent ca-1"},
 		Reason:        agentv1.ClaimReason_CLAIM_REASON_CLAIM,
 	}
-	// A mutating call without Sbx-Request-Id is rejected by the shared
+	// A mutating call without Umiak-Request-Id is rejected by the shared
 	// interceptors.
 	if _, err := client.Claim(t.Context(), connect.NewRequest(creq)); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("Claim without request id: %v", err)
@@ -260,14 +260,14 @@ func TestInfoFields(t *testing.T) {
 		{"boot", got.GetBootId() == "boot-1" && got.GetBootTime().AsTime().Equal(boot)},
 		{"machine_id", got.GetMachineId() == "mid-1"},
 		{"hostname", got.GetHostname() == "my-box"},
-		{"sandbox_id", got.GetSandboxId() == "sbx_1"},
+		{"sandbox_id", got.GetSandboxId() == "umiak_1"},
 		{"default_user", got.GetDefaultUser() == "user"},
 		{"tunnel", got.GetTunnelUrl() == "wss://gw.example/tunnel" && got.GetTunnelUrlSource() == "smbios"},
 		{"ssh_host_keys", slices.Equal(got.GetSshHostKeys(), []string{"ssh-ed25519 AAAAhost host"})},
 		{"ready", got.GetReady()},
 		{"readiness", len(got.GetReadiness()) == 5 && got.GetReadiness()[2].GetName() == readiness.PhaseClaim &&
 			got.GetReadiness()[2].GetState() == agentv1.PhaseState_PHASE_STATE_READY},
-		{"claim", got.GetClaim().GetSandboxId() == "sbx_1" && got.GetClaim().GetEnv()["FOO"] == "bar" &&
+		{"claim", got.GetClaim().GetSandboxId() == "umiak_1" && got.GetClaim().GetEnv()["FOO"] == "bar" &&
 			slices.Equal(got.GetClaim().GetSecretEnvKeys(), []string{"TOKEN"}) &&
 			slices.Equal(got.GetClaim().GetSecretFileNames(), []string{"key.pem"})},
 		{"quiesce", got.GetQuiesce().GetActive() && got.GetQuiesce().GetLeaseId() == "lease-9"},

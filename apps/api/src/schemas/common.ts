@@ -73,7 +73,7 @@ export const IdleTimeoutSeconds = z
 
 const ENV_DESCRIPTION =
 	"Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, " +
-	"256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. " +
+	"256 KiB per set. `UMIAK_` is reserved except UMIAK_API_KEY, UMIAK_API_URL, UMIAK_TEAM, UMIAK_PROFILE. " +
 	"Values with a newline are not visible in SSH sessions.";
 
 export const EnvVars = z

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# boat-dev-clone dev control plane: people of the dev Keycloak realm `sbx` on CT 590. Dev only.
+# umiak dev control plane: people of the dev Keycloak realm `umiak` on CT 590. Dev only.
 #
 #   infra/dev-cp/dev-users.sh
 #
 # Creates (or updates) two users with a verified email:
 # The realm takes the email as the username (registrationEmailAsUsername), so people log in
 # with the email.
-#   ilia@example.com temporary password in ~/.config/sbx/dev-cp/ilia-initial-password; Keycloak
+#   ilia@example.com temporary password in ~/.config/umiak/dev-cp/ilia-initial-password; Keycloak
 #                    asks for a new one at the first login. Set only when the file is new.
-#   e2e@example.com  permanent password in ~/.config/sbx/dev-cp/e2e-password (e2e.sh).
+#   e2e@example.com  permanent password in ~/.config/umiak/dev-cp/e2e-password (e2e.sh).
 # Passwords are generated on this Mac once (0600, outside git) and reach the CT over ssh stdin.
 # Each user gets a personal team with the owner role at the first login (api JIT).
 set -euo pipefail
@@ -16,10 +16,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=infra/dev-cp/names.sh
 source "$HERE/names.sh"
-CT="${SBX_DEVCP_SSH:-sbx@$CT_IP}"
-DIR="${SBX_CONFIG_DIR:-$HOME/.config/sbx}/dev-cp"
-ILIA_EMAIL="${SBX_DEVCP_ILIA_EMAIL:-ilia@example.com}"
-E2E_EMAIL="${SBX_DEVCP_E2E_EMAIL:-e2e@example.com}"
+CT="${UMIAK_DEVCP_SSH:-umiak@$CT_IP}"
+DIR="${UMIAK_CONFIG_DIR:-$HOME/.config/umiak}/dev-cp"
+ILIA_EMAIL="${UMIAK_DEVCP_ILIA_EMAIL:-ilia@example.com}"
+E2E_EMAIL="${UMIAK_DEVCP_E2E_EMAIL:-e2e@example.com}"
 
 install -d -m 700 "$DIR"
 # new_password file: creates the file with a random password; prints 1 if it was created.
@@ -42,7 +42,7 @@ new_password "$DIR/e2e-password" >/dev/null
 	done
 	cat <<'EOF'
 set -euo pipefail
-cd ~/boat-dev-clone/deploy/compose
+cd ~/umiak/deploy/compose
 kc() { docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@" </dev/null; }
 kc config credentials --server http://localhost:8080 --realm master --user admin \
 	--password "$(cat secrets/keycloak/admin-password)" >/dev/null
@@ -50,24 +50,24 @@ kc config credentials --server http://localhost:8080 --realm master --user admin
 # first and last name (VERIFY_PROFILE) when they are missing.
 ensure() {
 	local id set=$6
-	id=$(kc get users -r sbx -q "email=$1" -q exact=true --fields id --format csv --noquotes | head -1)
+	id=$(kc get users -r umiak -q "email=$1" -q exact=true --fields id --format csv --noquotes | head -1)
 	if [ -z "$id" ]; then
-		kc create users -r sbx -s "username=$1" -s "email=$1" -s "firstName=$2" -s "lastName=$3" \
+		kc create users -r umiak -s "username=$1" -s "email=$1" -s "firstName=$2" -s "lastName=$3" \
 			-s emailVerified=true -s enabled=true 2>/dev/null
-		id=$(kc get users -r sbx -q "email=$1" -q exact=true --fields id --format csv --noquotes | head -1)
+		id=$(kc get users -r umiak -q "email=$1" -q exact=true --fields id --format csv --noquotes | head -1)
 		set=1
 		echo "created $1"
 	else
-		kc update "users/$id" -r sbx -s "firstName=$2" -s "lastName=$3" -s emailVerified=true -s enabled=true
+		kc update "users/$id" -r umiak -s "firstName=$2" -s "lastName=$3" -s emailVerified=true -s enabled=true
 		echo "updated $1"
 	fi
 	[ -n "$id" ] || { echo "no user $1" >&2; exit 1; }
 	if [ "$set" = 1 ]; then
 		if [ "$4" = true ]; then
-			kc set-password -r sbx --userid "$id" --new-password "$5" --temporary
+			kc set-password -r umiak --userid "$id" --new-password "$5" --temporary
 		else
-			kc set-password -r sbx --userid "$id" --new-password "$5"
-			kc update "users/$id" -r sbx -s 'requiredActions=[]'
+			kc set-password -r umiak --userid "$id" --new-password "$5"
+			kc update "users/$id" -r umiak -s 'requiredActions=[]'
 		fi
 		echo "password set for $1 (temporary: $4)"
 	fi

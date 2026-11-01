@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import ssh2, { type Client as SshClient } from "ssh2";
 
-/** Transport-independent sbx-node interface; tests use a fake. */
+/** Transport-independent umiak-node interface; tests use a fake. */
 export interface NodeOps {
 	call<T = unknown>(op: string, args?: object): Promise<T>;
 	close(): void;
@@ -11,7 +11,7 @@ export class NodeOpsError extends Error {
 	readonly code: string;
 	readonly op: string;
 	constructor(op: string, code: string, message: string) {
-		super(`sbx-node ${op}: ${code}: ${message}`);
+		super(`umiak-node ${op}: ${code}: ${message}`);
 		this.name = "NodeOpsError";
 		this.code = code;
 		this.op = op;
@@ -72,7 +72,7 @@ export interface SshNodeOpsOptions {
 	 * after another closed may still be refused: keep well below the limit.
 	 */
 	maxChannels?: number;
-	/** Retries of a refused channel open; the request never reached sbx-node, so this is safe. */
+	/** Retries of a refused channel open; the request never reached umiak-node, so this is safe. */
 	openRetries?: number;
 	openRetryDelayMs?: number;
 	/** Per-call deadline; a hung call must not hold a channel slot forever. */
@@ -85,7 +85,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const CLOSE_GRACE_MS = 5_000;
 
 /**
- * sbx-node over SSH: a few connections, one exec channel per call. The server side is a forced
+ * umiak-node over SSH: a few connections, one exec channel per call. The server side is a forced
  * command, so the exec command string is ignored there.
  */
 export class SshNodeOps implements NodeOps {
@@ -159,7 +159,7 @@ export class SshNodeOps implements NodeOps {
 		for (let attempt = 0; ; attempt++) {
 			try {
 				return await new Promise<ssh2.ClientChannel>((resolve, reject) =>
-					conn.exec("sbx-node", (err, stream) =>
+					conn.exec("umiak-node", (err, stream) =>
 						err ? reject(err) : resolve(stream),
 					),
 				);
@@ -185,7 +185,7 @@ export class SshNodeOps implements NodeOps {
 			let stderr = "";
 			let timedOut = false;
 			let grace: NodeJS.Timeout | undefined;
-			const fail = () => reject(new Error(`sbx-node ${op}: timed out`));
+			const fail = () => reject(new Error(`umiak-node ${op}: timed out`));
 			const timer = setTimeout(() => {
 				timedOut = true;
 				stream.close();
@@ -203,7 +203,9 @@ export class SshNodeOps implements NodeOps {
 				if (timedOut) fail();
 				else if (stdout.trim()) resolve(stdout);
 				else
-					reject(new Error(`sbx-node ${op}: empty response ${stderr.trim()}`));
+					reject(
+						new Error(`umiak-node ${op}: empty response ${stderr.trim()}`),
+					);
 			});
 			stream.end(`${JSON.stringify({ op, args, requestId: randomUUID() })}\n`);
 		});

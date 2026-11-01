@@ -42,42 +42,42 @@ export interface ValidationIssue {
 	message: string;
 }
 
-export interface SbxErrorOptions {
+export interface UmiakErrorOptions {
 	retryable?: boolean;
 	details?: Record<string, unknown>;
 	cause?: unknown;
 }
 
-export class SbxError extends Error {
+export class UmiakError extends Error {
 	readonly code: ErrorCode;
 	readonly retryable: boolean;
 	readonly details: Record<string, unknown>;
 
-	constructor(code: ErrorCode, message: string, opts: SbxErrorOptions = {}) {
+	constructor(code: ErrorCode, message: string, opts: UmiakErrorOptions = {}) {
 		super(
 			message,
 			opts.cause === undefined ? undefined : { cause: opts.cause },
 		);
-		this.name = "SbxError";
+		this.name = "UmiakError";
 		this.code = code;
 		this.retryable = opts.retryable ?? RETRYABLE_BY_DEFAULT.has(code);
 		this.details = opts.details ?? {};
 	}
 }
 
-export function isSbxError(e: unknown, code?: ErrorCode): e is SbxError {
-	return e instanceof SbxError && (code === undefined || e.code === code);
+export function isUmiakError(e: unknown, code?: ErrorCode): e is UmiakError {
+	return e instanceof UmiakError && (code === undefined || e.code === code);
 }
 
-export function notFound(what = "resource"): SbxError {
-	return new SbxError("not_found", `${what} not found`);
+export function notFound(what = "resource"): UmiakError {
+	return new UmiakError("not_found", `${what} not found`);
 }
 
 export function invalidState(
 	state: string | null,
 	extra: Record<string, unknown> = {},
-): SbxError {
-	return new SbxError(
+): UmiakError {
+	return new UmiakError(
 		"invalid_state",
 		`operation is not allowed in state '${state ?? "none"}'`,
 		{ details: { state, ...extra } },
@@ -87,8 +87,8 @@ export function invalidState(
 export function operationInProgress(op: {
 	id: string;
 	kind: string;
-}): SbxError {
-	return new SbxError(
+}): UmiakError {
+	return new UmiakError(
 		"operation_in_progress",
 		`a '${op.kind}' operation is already in progress; retry after it finishes`,
 		{ details: { operationId: op.id, kind: op.kind } },
@@ -100,8 +100,8 @@ export function outOfCapacity(
 	retryAfterSeconds: number,
 	cause?: unknown,
 	reason?: string,
-): SbxError {
-	return new SbxError(
+): UmiakError {
+	return new UmiakError(
 		"out_of_capacity",
 		reason === undefined
 			? `not enough capacity; retry in ${retryAfterSeconds} s`
@@ -116,8 +116,8 @@ export function outOfCapacity(
 	);
 }
 
-export function poolExhausted(retryAfterSeconds: number): SbxError {
-	return new SbxError(
+export function poolExhausted(retryAfterSeconds: number): UmiakError {
+	return new UmiakError(
 		"pool_exhausted",
 		`no warm machine available; retry in ${retryAfterSeconds} s`,
 		{ details: { retryAfterSeconds } },
@@ -130,13 +130,13 @@ export function quotaExceeded(
 	current: number,
 	requested?: number,
 	note?: string,
-): SbxError {
+): UmiakError {
 	const unit = quota === "maxRamMb" ? " MB" : "";
 	const usage =
 		requested === undefined
 			? `${current} of ${limit}`
 			: `${current}${unit} in use + ${requested}${unit} requested > limit ${limit}${unit}`;
-	return new SbxError(
+	return new UmiakError(
 		"quota_exceeded",
 		`quota '${quota}' exceeded (${usage})${note ? `; ${note}` : ""}`,
 		{
@@ -150,19 +150,19 @@ export function quotaExceeded(
 	);
 }
 
-export function validation(issues: ValidationIssue[]): SbxError {
+export function validation(issues: ValidationIssue[]): UmiakError {
 	const first = issues[0];
 	const message = first
 		? `${first.path}: ${first.message}${issues.length > 1 ? ` (and ${issues.length - 1} more)` : ""}`
 		: "validation failed";
-	return new SbxError("validation", message, { details: { issues } });
+	return new UmiakError("validation", message, { details: { issues } });
 }
 
 export function templateUnavailable(
 	template: string,
 	size: string | null = null,
-): SbxError {
-	return new SbxError(
+): UmiakError {
+	return new UmiakError(
 		"template_unavailable",
 		size === null
 			? `template '${template}' is not available`
@@ -171,8 +171,8 @@ export function templateUnavailable(
 	);
 }
 
-export function snapshotNotFound(name: string): SbxError {
-	return new SbxError(
+export function snapshotNotFound(name: string): UmiakError {
+	return new UmiakError(
 		"snapshot_not_found",
 		`saved snapshot '${name}' not found`,
 		{
@@ -188,12 +188,12 @@ export function snapshotNotFound(name: string): SbxError {
  */
 export function windowsSnapshotRequiresStop(
 	kind: "fork" | "save_snapshot",
-): SbxError {
+): UmiakError {
 	const what =
 		kind === "fork"
 			? "Windows sandboxes are forked from a stopped VM"
 			: "Windows snapshots are saved from a stopped VM";
-	return new SbxError(
+	return new UmiakError(
 		"snapshot_requires_stop",
 		`${what}; stop it first or retry with forceStop: true (CLI --force-stop), which stops the sandbox, takes the snapshot and starts it again`,
 		{
@@ -206,15 +206,15 @@ export function windowsSnapshotRequiresStop(
 	);
 }
 
-export function idempotencyKeyReused(): SbxError {
-	return new SbxError(
+export function idempotencyKeyReused(): UmiakError {
+	return new UmiakError(
 		"idempotency_key_reused",
 		"the Idempotency-Key was already used with a different request",
 	);
 }
 
-export function slugTaken(slug: string): SbxError {
-	return new SbxError("slug_taken", `slug '${slug}' is already taken`, {
+export function slugTaken(slug: string): UmiakError {
+	return new UmiakError("slug_taken", `slug '${slug}' is already taken`, {
 		details: { slug },
 	});
 }
@@ -222,16 +222,16 @@ export function slugTaken(slug: string): SbxError {
 export function sandboxNotReady(
 	state: string,
 	extra: Record<string, unknown> = {},
-): SbxError {
-	return new SbxError(
+): UmiakError {
+	return new UmiakError(
 		"sandbox_not_ready",
 		`sandbox is not ready (state '${state}')`,
 		{ details: { state, ...extra } },
 	);
 }
 
-export function recoverRateLimited(retryAfterSeconds: number): SbxError {
-	return new SbxError(
+export function recoverRateLimited(retryAfterSeconds: number): UmiakError {
+	return new UmiakError(
 		"recover_rate_limited",
 		`recover was called recently; retry in ${retryAfterSeconds} s`,
 		{ details: { retryAfterSeconds } },
@@ -239,8 +239,8 @@ export function recoverRateLimited(retryAfterSeconds: number): SbxError {
 }
 
 /** An operator-only action by anyone else (S8 C3). */
-export function operatorRequired(): SbxError {
-	return new SbxError(
+export function operatorRequired(): UmiakError {
+	return new UmiakError(
 		"forbidden",
 		"only a platform operator (browser session) may do this",
 		{ details: { reason: "operator_required" } },
@@ -248,8 +248,8 @@ export function operatorRequired(): SbxError {
 }
 
 /** A change of a sandbox an operator has blocked (S8 C3). */
-export function sandboxBlocked(): SbxError {
-	return new SbxError(
+export function sandboxBlocked(): UmiakError {
+	return new UmiakError(
 		"forbidden",
 		"the sandbox is blocked by the platform operator; only reads, stop and delete are allowed",
 		{ details: { reason: "sandbox_blocked" } },
@@ -257,8 +257,8 @@ export function sandboxBlocked(): SbxError {
 }
 
 /** A change of a hosted port an operator has blocked (S8 C3). */
-export function portBlocked(port: number): SbxError {
-	return new SbxError(
+export function portBlocked(port: number): UmiakError {
+	return new UmiakError(
 		"forbidden",
 		`port ${port} is blocked by the platform operator`,
 		{ details: { reason: "port_blocked", port } },

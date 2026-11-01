@@ -30,7 +30,7 @@ import { exitCodeOf } from "../src/exit-codes.ts";
 
 let dir: string;
 beforeEach(() => {
-	dir = mkdtempSync(join(tmpdir(), "sbx-store-"));
+	dir = mkdtempSync(join(tmpdir(), "umiak-store-"));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -70,7 +70,7 @@ const mode = (p: string) => statSync(p).mode & 0o777;
 
 describe("FileStore", () => {
 	it("keeps values in credentials.json with mode 0600 in a 0700 dir", async () => {
-		const path = join(dir, "sbx", "credentials.json");
+		const path = join(dir, "umiak", "credentials.json");
 		const s = new FileStore(path);
 		expect(await s.get("a@x")).toBeNull();
 		await s.set("a@x", "v1");
@@ -81,7 +81,7 @@ describe("FileStore", () => {
 			"b@y": "v2",
 		});
 		expect(mode(path)).toBe(0o600);
-		expect(mode(join(dir, "sbx"))).toBe(0o700);
+		expect(mode(join(dir, "umiak"))).toBe(0o700);
 		await s.delete("a@x");
 		expect(await s.get("a@x")).toBeNull();
 		expect(await s.get("b@y")).toBe("v2");
@@ -98,22 +98,26 @@ describe("FileStore", () => {
 });
 
 describe("KeychainStore", () => {
-	it("uses service sbx, the entry name and persist local", async () => {
+	it("uses service umiak, the entry name and persist local", async () => {
 		const secrets = fakeSecrets();
 		const s = new KeychainStore(secrets);
-		await s.set("default@https://kc/realms/sbx", "tok");
-		expect(await s.get("default@https://kc/realms/sbx")).toBe("tok");
-		await s.delete("default@https://kc/realms/sbx");
+		await s.set("default@https://kc/realms/umiak", "tok");
+		expect(await s.get("default@https://kc/realms/umiak")).toBe("tok");
+		await s.delete("default@https://kc/realms/umiak");
 		expect(secrets.calls).toEqual([
 			{
 				op: "set",
-				service: "sbx",
-				name: "default@https://kc/realms/sbx",
+				service: "umiak",
+				name: "default@https://kc/realms/umiak",
 				value: "tok",
 				persist: "local",
 			},
-			{ op: "get", service: "sbx", name: "default@https://kc/realms/sbx" },
-			{ op: "delete", service: "sbx", name: "default@https://kc/realms/sbx" },
+			{ op: "get", service: "umiak", name: "default@https://kc/realms/umiak" },
+			{
+				op: "delete",
+				service: "umiak",
+				name: "default@https://kc/realms/umiak",
+			},
 		]);
 	});
 
@@ -145,7 +149,7 @@ describe("store selection", () => {
 		});
 		await s.set("p@u", "secret");
 		expect(s.kind).toBe("keychain");
-		expect(secrets.data.get("sbx/p@u")).toBe("secret");
+		expect(secrets.data.get("umiak/p@u")).toBe("secret");
 		expect(existsSync(file())).toBe(false);
 		expect(await s.get("p@u")).toBe("secret");
 		expect(warn).toEqual([]);
@@ -210,9 +214,9 @@ describe("store selection", () => {
 			credentialName("default", {
 				apiUrl: "https://api.x",
 				auth: "oidc",
-				issuer: "https://kc.x/realms/sbx",
+				issuer: "https://kc.x/realms/umiak",
 			}),
-		).toBe("default@https://kc.x/realms/sbx");
+		).toBe("default@https://kc.x/realms/umiak");
 		expect(credentialName("ci", { apiUrl: "https://api.x", auth: "key" })).toBe(
 			"ci@https://api.x",
 		);
@@ -221,7 +225,7 @@ describe("store selection", () => {
 
 describe("withFileLock", () => {
 	it("runs holders one at a time and removes the lock file", async () => {
-		const lock = join(dir, "sbx", ".lock");
+		const lock = join(dir, "umiak", ".lock");
 		let inside = 0;
 		let maxInside = 0;
 		const job = (n: number) =>
@@ -329,14 +333,14 @@ describe("getBearer refresh", () => {
 		const profile = {
 			apiUrl: "https://api.x",
 			auth: "oidc" as const,
-			issuer: "https://kc.x/realms/sbx",
+			issuer: "https://kc.x/realms/umiak",
 		};
 		await file.set(
 			credentialName("default", profile),
 			JSON.stringify({
 				kind: "oidc",
 				issuer: profile.issuer,
-				clientId: "sbx-cli",
+				clientId: "umiak-cli",
 				accessToken: "old",
 				refreshToken: "r1",
 				expiresAt: new Date(Date.now() - 1000).toISOString(),

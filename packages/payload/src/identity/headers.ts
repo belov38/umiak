@@ -1,7 +1,7 @@
 // oauth2-proxy identity headers (S8 §5.1, §5.2). Only oauth2-proxy (or the
 // dev auth proxy, outside the image) sets them; web trusts them because
 // nothing else reaches its port.
-import type { SessionHeaders } from "@sbx/auth";
+import type { SessionHeaders } from "@umiak/auth";
 
 export type HeaderSource =
 	| Headers

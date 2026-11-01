@@ -1,8 +1,8 @@
 // forceStop of fork and saved snapshot (S9 §24.8): the flag goes into the
 // request body; the 409 `snapshot_requires_stop` of a running Windows
-// sandbox reaches the caller as SbxError with its message and details.
+// sandbox reaches the caller as UmiakError with its message and details.
 import { describe, expect, it } from "vitest";
-import { Sbx, SbxError } from "../src/index.ts";
+import { Umiak, UmiakError } from "../src/index.ts";
 
 const API = "https://api.example.test";
 
@@ -52,8 +52,8 @@ const requiresStop = () =>
 		},
 	});
 
-function sbx(fetch: typeof globalThis.fetch) {
-	return new Sbx({ baseUrl: API, apiKey: "sbx_test", fetch, env: {} });
+function umiak(fetch: typeof globalThis.fetch) {
+	return new Umiak({ baseUrl: API, apiKey: "umiak_test", fetch, env: {} });
 }
 
 describe("forceStop", () => {
@@ -61,7 +61,7 @@ describe("forceStop", () => {
 		const h = fakeFetch([
 			json(202, { sandbox: { id: "sb_2", slug: "copy", state: "creating" } }),
 		]);
-		const copy = await sbx(h.fetch)
+		const copy = await umiak(h.fetch)
 			.sandboxes.handle("sb_1")
 			.fork({ forceStop: true });
 		expect(copy.id).toBe("sb_2");
@@ -76,7 +76,7 @@ describe("forceStop", () => {
 				operation: { id: "op_1" },
 			}),
 		]);
-		await sbx(h.fetch).snapshots.create({
+		await umiak(h.fetch).snapshots.create({
 			sandbox: "sb_1",
 			name: "s",
 			forceStop: true,
@@ -89,14 +89,14 @@ describe("forceStop", () => {
 		});
 	});
 
-	it("409 snapshot_requires_stop is an SbxError with message and details", async () => {
+	it("409 snapshot_requires_stop is an UmiakError with message and details", async () => {
 		for (const call of [
-			(s: Sbx) => s.sandboxes.handle("sb_1").fork(),
-			(s: Sbx) => s.snapshots.create({ sandbox: "sb_1", name: "s" }),
+			(s: Umiak) => s.sandboxes.handle("sb_1").fork(),
+			(s: Umiak) => s.snapshots.create({ sandbox: "sb_1", name: "s" }),
 		]) {
 			const h = fakeFetch([requiresStop()]);
-			const err = await call(sbx(h.fetch)).catch((e: unknown) => e);
-			expect(err).toBeInstanceOf(SbxError);
+			const err = await call(umiak(h.fetch)).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(UmiakError);
 			expect(err).toMatchObject({
 				status: 409,
 				code: "snapshot_requires_stop",

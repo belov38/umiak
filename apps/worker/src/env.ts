@@ -1,4 +1,4 @@
-// Environment of the worker process and of sbx-admin, validated once at
+// Environment of the worker process and of umiak-admin, validated once at
 // start. An invalid environment is a fatal error that lists every problem.
 import { z } from "zod";
 
@@ -100,39 +100,42 @@ const workerSchema = z
 	.object({
 		DATABASE_URL: databaseUrl,
 		// Templates, sizes, quotas and defaults come from Payload (S8 plan
-		// decision 5); SBX_CONFIG_FILE is read only by `sbx-admin bootstrap`.
+		// decision 5); UMIAK_CONFIG_FILE is read only by `umiak-admin bootstrap`.
 		PAYLOAD_SECRET: required("secret of the Payload config, as web"),
-		SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
-		SBX_SECRETS_DIR: required("directory with the PVE and sbx-node secrets"),
-		SBX_GATEWAY_SERVICE_TOKEN_FILE: optional,
-		SBX_RECONCILE_DRY_RUN: bool(true),
-		SBX_HTTP_PORT: int(9090, 0, 65535),
-		SBX_MIGRATE_ON_START: bool(true),
-		SBX_LOG_LEVEL: logLevel,
-		SBX_DB_POOL_MAX: int(30, 2, 1000),
-		SBX_IDP_SYNC_INTERVAL: int(300, 10, 86_400),
-		// ctl-idp-sync (S8 §20.1, plan decision 9): on when the URL is set.
-		SBX_IDP_SYNC_KEYCLOAK_URL: optionalHttpUrl,
-		SBX_IDP_SYNC_REALM: z.preprocess(unsetEmpty, z.string().default("sbx")),
-		SBX_IDP_SYNC_CLIENT_ID: z.preprocess(
-			unsetEmpty,
-			z.string().default("sbx-worker"),
+		UMIAK_DATA_KEYS_FILE: required("path of the data key ring JSON"),
+		UMIAK_SECRETS_DIR: required(
+			"directory with the PVE and umiak-node secrets",
 		),
-		SBX_IDP_SYNC_CLIENT_SECRET_FILE: optional,
-		SBX_TURN_SECRET_FILE: optional,
-		SBX_TURN_URLS: optional,
-		SBX_PORT_DOMAIN: optional,
-		SBX_SSH_USER_CA_KEYS_FILE: optional,
+		UMIAK_GATEWAY_SERVICE_TOKEN_FILE: optional,
+		UMIAK_RECONCILE_DRY_RUN: bool(true),
+		UMIAK_HTTP_PORT: int(9090, 0, 65535),
+		UMIAK_MIGRATE_ON_START: bool(true),
+		UMIAK_LOG_LEVEL: logLevel,
+		UMIAK_DB_POOL_MAX: int(30, 2, 1000),
+		UMIAK_IDP_SYNC_INTERVAL: int(300, 10, 86_400),
+		// ctl-idp-sync (S8 §20.1, plan decision 9): on when the URL is set.
+		UMIAK_IDP_SYNC_KEYCLOAK_URL: optionalHttpUrl,
+		UMIAK_IDP_SYNC_REALM: z.preprocess(unsetEmpty, z.string().default("umiak")),
+		UMIAK_IDP_SYNC_CLIENT_ID: z.preprocess(
+			unsetEmpty,
+			z.string().default("umiak-worker"),
+		),
+		UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: optional,
+		UMIAK_TURN_SECRET_FILE: optional,
+		UMIAK_TURN_URLS: optional,
+		UMIAK_PORT_DOMAIN: optional,
+		UMIAK_SSH_USER_CA_KEYS_FILE: optional,
 	})
 	.superRefine((e, ctx) => {
 		if (
-			e.SBX_IDP_SYNC_KEYCLOAK_URL !== undefined &&
-			e.SBX_IDP_SYNC_CLIENT_SECRET_FILE === undefined
+			e.UMIAK_IDP_SYNC_KEYCLOAK_URL !== undefined &&
+			e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE === undefined
 		) {
 			ctx.addIssue({
 				code: "custom",
-				path: ["SBX_IDP_SYNC_CLIENT_SECRET_FILE"],
-				message: "required with SBX_IDP_SYNC_KEYCLOAK_URL (client secret file)",
+				path: ["UMIAK_IDP_SYNC_CLIENT_SECRET_FILE"],
+				message:
+					"required with UMIAK_IDP_SYNC_KEYCLOAK_URL (client secret file)",
 			});
 		}
 	});
@@ -156,12 +159,12 @@ const optionalHttpsUrl = z.preprocess(
 
 const adminSchema = z.object({
 	DATABASE_URL: databaseUrl,
-	SBX_CONFIG_FILE: optional,
-	SBX_DATA_KEYS_FILE: optional,
-	SBX_SECRETS_DIR: optional,
-	SBX_PVE_URL: optionalHttpsUrl,
-	SBX_PVE_TLS_NAME: optional,
-	SBX_LOG_LEVEL: logLevel,
+	UMIAK_CONFIG_FILE: optional,
+	UMIAK_DATA_KEYS_FILE: optional,
+	UMIAK_SECRETS_DIR: optional,
+	UMIAK_PVE_URL: optionalHttpsUrl,
+	UMIAK_PVE_TLS_NAME: optional,
+	UMIAK_LOG_LEVEL: logLevel,
 });
 
 export interface WorkerEnv {
@@ -189,19 +192,19 @@ export interface WorkerEnv {
 
 /** Keycloak Admin API access of ctl-idp-sync (S8 §20.1). */
 export interface IdpSyncEnv {
-	/** SBX_IDP_SYNC_KEYCLOAK_URL: internal Keycloak address, without `/realms`. */
+	/** UMIAK_IDP_SYNC_KEYCLOAK_URL: internal Keycloak address, without `/realms`. */
 	keycloakUrl: string;
-	/** SBX_IDP_SYNC_REALM (default `sbx`). */
+	/** UMIAK_IDP_SYNC_REALM (default `umiak`). */
 	realm: string;
-	/** SBX_IDP_SYNC_CLIENT_ID (default `sbx-worker`). */
+	/** UMIAK_IDP_SYNC_CLIENT_ID (default `umiak-worker`). */
 	clientId: string;
-	/** SBX_IDP_SYNC_CLIENT_SECRET_FILE: file with the client secret. */
+	/** UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: file with the client secret. */
 	clientSecretFile: string;
 }
 
 /**
  * Replaces `apiUrl` / `tlsName` of the first topology provider in
- * `sbx-admin bootstrap` (SBX_PVE_URL / SBX_PVE_TLS_NAME): the YAML has no
+ * `umiak-admin bootstrap` (UMIAK_PVE_URL / UMIAK_PVE_TLS_NAME): the YAML has no
  * interpolation, and the PVE address differs between deployments.
  */
 export interface ProviderOverride {
@@ -228,31 +231,31 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 	if (!r.success) fail(r.error);
 	const e = r.data;
 	return {
-		turnSecretFile: e.SBX_TURN_SECRET_FILE,
-		turnUrls: e.SBX_TURN_URLS,
+		turnSecretFile: e.UMIAK_TURN_SECRET_FILE,
+		turnUrls: e.UMIAK_TURN_URLS,
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
-		dataKeysFile: e.SBX_DATA_KEYS_FILE,
-		secretsDir: e.SBX_SECRETS_DIR,
-		gatewayServiceTokenFile: e.SBX_GATEWAY_SERVICE_TOKEN_FILE,
-		reconcileDryRun: e.SBX_RECONCILE_DRY_RUN,
-		httpPort: e.SBX_HTTP_PORT,
-		migrateOnStart: e.SBX_MIGRATE_ON_START,
-		logLevel: e.SBX_LOG_LEVEL,
-		dbPoolMax: e.SBX_DB_POOL_MAX,
-		idpSyncIntervalMs: e.SBX_IDP_SYNC_INTERVAL * 1000,
+		dataKeysFile: e.UMIAK_DATA_KEYS_FILE,
+		secretsDir: e.UMIAK_SECRETS_DIR,
+		gatewayServiceTokenFile: e.UMIAK_GATEWAY_SERVICE_TOKEN_FILE,
+		reconcileDryRun: e.UMIAK_RECONCILE_DRY_RUN,
+		httpPort: e.UMIAK_HTTP_PORT,
+		migrateOnStart: e.UMIAK_MIGRATE_ON_START,
+		logLevel: e.UMIAK_LOG_LEVEL,
+		dbPoolMax: e.UMIAK_DB_POOL_MAX,
+		idpSyncIntervalMs: e.UMIAK_IDP_SYNC_INTERVAL * 1000,
 		idpSync:
-			e.SBX_IDP_SYNC_KEYCLOAK_URL === undefined ||
-			e.SBX_IDP_SYNC_CLIENT_SECRET_FILE === undefined
+			e.UMIAK_IDP_SYNC_KEYCLOAK_URL === undefined ||
+			e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE === undefined
 				? undefined
 				: {
-						keycloakUrl: e.SBX_IDP_SYNC_KEYCLOAK_URL,
-						realm: e.SBX_IDP_SYNC_REALM,
-						clientId: e.SBX_IDP_SYNC_CLIENT_ID,
-						clientSecretFile: e.SBX_IDP_SYNC_CLIENT_SECRET_FILE,
+						keycloakUrl: e.UMIAK_IDP_SYNC_KEYCLOAK_URL,
+						realm: e.UMIAK_IDP_SYNC_REALM,
+						clientId: e.UMIAK_IDP_SYNC_CLIENT_ID,
+						clientSecretFile: e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE,
 					},
-		portDomain: e.SBX_PORT_DOMAIN,
-		sshUserCaKeysFile: e.SBX_SSH_USER_CA_KEYS_FILE,
+		portDomain: e.UMIAK_PORT_DOMAIN,
+		sshUserCaKeysFile: e.UMIAK_SSH_USER_CA_KEYS_FILE,
 	};
 }
 
@@ -262,15 +265,15 @@ export function parseAdminEnv(env: Env = process.env): AdminEnv {
 	const e = r.data;
 	return {
 		databaseUrl: e.DATABASE_URL,
-		configFile: e.SBX_CONFIG_FILE,
-		dataKeysFile: e.SBX_DATA_KEYS_FILE,
-		secretsDir: e.SBX_SECRETS_DIR,
+		configFile: e.UMIAK_CONFIG_FILE,
+		dataKeysFile: e.UMIAK_DATA_KEYS_FILE,
+		secretsDir: e.UMIAK_SECRETS_DIR,
 		providerOverride: {
-			...(e.SBX_PVE_URL === undefined ? {} : { apiUrl: e.SBX_PVE_URL }),
-			...(e.SBX_PVE_TLS_NAME === undefined
+			...(e.UMIAK_PVE_URL === undefined ? {} : { apiUrl: e.UMIAK_PVE_URL }),
+			...(e.UMIAK_PVE_TLS_NAME === undefined
 				? {}
-				: { tlsName: e.SBX_PVE_TLS_NAME }),
+				: { tlsName: e.UMIAK_PVE_TLS_NAME }),
 		},
-		logLevel: e.SBX_LOG_LEVEL,
+		logLevel: e.UMIAK_LOG_LEVEL,
 	};
 }

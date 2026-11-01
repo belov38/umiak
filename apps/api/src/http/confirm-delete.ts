@@ -1,4 +1,4 @@
-// Sbx-Confirm-Delete (S7 §5.12): a DELETE of a sandbox or a saved snapshot
+// Umiak-Confirm-Delete (S7 §5.12): a DELETE of a sandbox or a saved snapshot
 // names the resource again, by public id (any case) or by slug / name. A
 // guard against wrong slugs and empty variables in scripts, not against an
 // attacker.
@@ -6,7 +6,7 @@ import type { Context } from "hono";
 import type { ApiEnv } from "../deps.ts";
 import { ApiError } from "./errors.ts";
 
-export const CONFIRM_DELETE_HEADER = "Sbx-Confirm-Delete";
+export const CONFIRM_DELETE_HEADER = "Umiak-Confirm-Delete";
 
 export interface ConfirmTarget {
 	/** Public id (`sb_...`, `snap_...`). */

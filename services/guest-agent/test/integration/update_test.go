@@ -18,9 +18,9 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
 )
 
 // versions returns the versions run.sh built: v1 (installed), v2 (good),
@@ -92,7 +92,7 @@ func waitVersion(t *testing.T, v string, d time.Duration) {
 // currentVersion returns the version current points at.
 func currentVersion(t *testing.T) string {
 	t.Helper()
-	target, err := os.Readlink("/usr/local/lib/sbx-agent/current")
+	target, err := os.Readlink("/usr/local/lib/umiak-agent/current")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestUpdateAndRollback(t *testing.T) {
 		if cur := currentVersion(t); cur != v2 {
 			t.Errorf("current = %s, want %s unchanged", cur, v2)
 		}
-		if _, err := os.Stat("/usr/local/lib/sbx-agent/versions/" + v4); !os.IsNotExist(err) {
+		if _, err := os.Stat("/usr/local/lib/umiak-agent/versions/" + v4); !os.IsNotExist(err) {
 			t.Errorf("version %s was placed: %v", v4, err)
 		}
 	})
@@ -170,7 +170,7 @@ func TestUpdateAndRollback(t *testing.T) {
 		}
 		began := time.Now()
 		// v3 exits 1 at every start; after StartLimitBurst=5 failures
-		// OnFailure runs sbx-agent-rollback.service, which restores v2, and
+		// OnFailure runs umiak-agent-rollback.service, which restores v2, and
 		// v2 reports the rollback.
 		var r agentv1.UpdateResult
 		waitEventLoose(t, after, events.TypeUpdateResult, 3*time.Minute, &r, func() bool { return r.GetTo() == v3 })
@@ -186,7 +186,7 @@ func TestUpdateAndRollback(t *testing.T) {
 		if bad := info.GetUpdate().GetBadVersions(); len(bad) != 1 || bad[0] != v3 {
 			t.Errorf("bad versions = %v, want [%s]", bad, v3)
 		}
-		if out := sh(t, "journalctl -m --no-pager -o cat -u sbx-agent-rollback.service"); strings.Count(out, "reverting an unconfirmed update") != 1 {
+		if out := sh(t, "journalctl -m --no-pager -o cat -u umiak-agent-rollback.service"); strings.Count(out, "reverting an unconfirmed update") != 1 {
 			t.Errorf("rollback unit journal:\n%s", out)
 		}
 		// RestartMode=direct: OnFailure ran once, after StartLimitBurst=5

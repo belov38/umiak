@@ -142,7 +142,7 @@ type Client interface {
 
 // Unavailable returns a Client whose every call fails with ErrUnavailable.
 // It stands in for api in local runs without a control plane
-// (SBX_GATEWAY_API_URL=none): routes answer 503 route_lookup_unavailable
+// (UMIAK_GATEWAY_API_URL=none): routes answer 503 route_lookup_unavailable
 // and SSH logins are refused.
 func Unavailable() Client { return unavailable{} }
 

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/registry"
 )
 
 // listenLoop feeds registry notifications to the fence, instance and

@@ -1,7 +1,7 @@
 # Remote MCP server image (S11). Build context is the repo root:
-#   docker build -f apps/mcp/Dockerfile -t sbx-mcp:dev .
+#   docker build -f apps/mcp/Dockerfile -t umiak-mcp:dev .
 # Nothing is built: Node 26 strips TypeScript types at runtime, and the only
-# workspace package at runtime is @sbx/sdk (also plain TypeScript, no build
+# workspace package at runtime is @umiak/sdk (also plain TypeScript, no build
 # step). So there is no build stage, unlike the api image.
 ARG NODE_IMAGE=node:26.13.0-bookworm-slim
 
@@ -31,10 +31,10 @@ COPY apps/template-builder/package.json apps/template-builder/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 
-# ---- runtime: production dependencies of @sbx/mcp and @sbx/sdk only
-# (@sbx/api, @sbx/core and @sbx/db are dev dependencies of the tests).
+# ---- runtime: production dependencies of @umiak/mcp and @umiak/sdk only
+# (@umiak/api, @umiak/core and @umiak/db are dev dependencies of the tests).
 FROM base
-RUN pnpm install --frozen-lockfile --prod --filter "@sbx/mcp..."
+RUN pnpm install --frozen-lockfile --prod --filter "@umiak/mcp..."
 
 COPY packages/sdk-ts/src packages/sdk-ts/src
 COPY apps/mcp/src apps/mcp/src

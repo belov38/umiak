@@ -70,7 +70,7 @@ func TestMediaSha256CacheSurvivesNewServer(t *testing.T) {
 	h, d, hashed := sha256Harness(t)
 	writeFile(t, filepath.Join(d.iso, "a.iso"), 5)
 	resultMap(t, h.call(t, "media.sha256", map[string]any{"name": "a.iso"}))
-	// Every sbx-node invocation is a fresh process: the cache must live on disk.
+	// Every umiak-node invocation is a fresh process: the cache must live on disk.
 	h2 := newHarness(nil)
 	h2.srv.Cfg = h.srv.Cfg
 	h2.srv.OnHash = func(string) { *hashed = append(*hashed, "again") }
@@ -128,7 +128,7 @@ func TestMediaSha256RejectsTraversal(t *testing.T) {
 
 func TestMediaRemoveAcceptsBuildIsos(t *testing.T) {
 	h, d := mediaHarness(t)
-	names := []string{"sbx-build-20261031-1.iso", "sbx-offline-20261031-1.iso", "sbx-virtio-win-0.1.271.iso"}
+	names := []string{"umiak-build-20261031-1.iso", "umiak-offline-20261031-1.iso", "umiak-virtio-win-0.1.271.iso"}
 	for _, n := range names {
 		writeFile(t, filepath.Join(d.iso, n), 1)
 	}
@@ -137,7 +137,7 @@ func TestMediaRemoveAcceptsBuildIsos(t *testing.T) {
 
 	m := resultMap(t, h.call(t, "media.list", nil))
 	if got := namesOf(t, m, "iso"); len(got) != 3 {
-		t.Errorf("list iso = %v, want the three sbx ISOs only", got)
+		t.Errorf("list iso = %v, want the three umiak ISOs only", got)
 	}
 	m = resultMap(t, h.call(t, "media.remove", map[string]any{"names": names}))
 	if removed := m["removed"].([]any); len(removed) != 3 {
@@ -148,7 +148,7 @@ func TestMediaRemoveAcceptsBuildIsos(t *testing.T) {
 			t.Errorf("%s still exists", n)
 		}
 	}
-	for _, bad := range []string{"Windows11_25H2_English_x64.iso", "sbx-virtio-win-latest.iso", "sbx-virtio-win-0.1.iso", "sbx-build-UP.iso", "sbx-offline-.iso"} {
+	for _, bad := range []string{"Windows11_25H2_English_x64.iso", "umiak-virtio-win-latest.iso", "umiak-virtio-win-0.1.iso", "umiak-build-UP.iso", "umiak-offline-.iso"} {
 		r := h.call(t, "media.remove", map[string]any{"names": []string{bad}})
 		if r.OK || r.Error.Code != "forbidden" {
 			t.Errorf("%s: want forbidden, got %+v", bad, r)

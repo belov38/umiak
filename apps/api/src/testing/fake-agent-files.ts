@@ -18,7 +18,7 @@ import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { createGunzip, createGzip } from "node:zlib";
-import type { AgentFetchInit } from "@sbx/agent-client";
+import type { AgentFetchInit } from "@umiak/agent-client";
 import { AgentCallError } from "../agent/errors.ts";
 import { agentFileInfoJson } from "../agent/files-http.ts";
 import type {
@@ -398,7 +398,7 @@ export class MachineFiles {
 		const makeParents = queryBool(q, "make_parents", true);
 		const overwrite = queryBool(q, "overwrite", true);
 		const target = await prepareTarget(p, overwrite, makeParents);
-		const tmp = join(dirname(target), `.sbx-tmp-${randomUUID()}`);
+		const tmp = join(dirname(target), `.umiak-tmp-${randomUUID()}`);
 		try {
 			await fsCall(() => writeBody(req, tmp, mode));
 			await fsCall(() => fsp.chmod(tmp, mode));
@@ -450,7 +450,7 @@ export class MachineFiles {
 		u.size += data.length;
 		return Response.json(
 			{ offset: u.size },
-			{ headers: { "Sbx-Upload-Offset": String(u.size) } },
+			{ headers: { "Umiak-Upload-Offset": String(u.size) } },
 		);
 	}
 
@@ -458,7 +458,7 @@ export class MachineFiles {
 		const up = this.#uploads.get(id);
 		if (up === undefined) return new Response(null, { status: 404 });
 		return new Response(null, {
-			headers: { "Sbx-Upload-Offset": String(up.size) },
+			headers: { "Umiak-Upload-Offset": String(up.size) },
 		});
 	}
 
@@ -803,7 +803,7 @@ function errorResponse(
 	const err = fsError(e);
 	const headers: Record<string, string> = {};
 	if (typeof err.details.offset === "number") {
-		headers["Sbx-Upload-Offset"] = String(err.details.offset);
+		headers["Umiak-Upload-Offset"] = String(err.details.offset);
 	}
 	return Response.json(
 		{ ...extra, code: err.code, message: err.message, retryable: false },

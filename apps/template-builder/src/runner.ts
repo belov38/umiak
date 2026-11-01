@@ -5,7 +5,7 @@ import {
 	Qga,
 	QgaExecStatusLostError,
 	QgaTimeoutError,
-} from "@sbx/pve";
+} from "@umiak/pve";
 
 // Build steps inside the build VM through the QEMU guest agent (spec S5 section 7.2 steps 5-6)
 
@@ -62,7 +62,7 @@ export class StepTimeoutError extends Error {
 	}
 }
 
-const LOG_DIR = "/var/log/sbx-build";
+const LOG_DIR = "/var/log/umiak-build";
 const SEED_DIR = "/mnt/seed";
 const BOOT_ID_FILE = "/proc/sys/kernel/random/boot_id";
 const STEP_NAME_RE = /^[a-z0-9-]+$/;
@@ -172,7 +172,7 @@ export function transientNotes(
 		const msg = errorText(err);
 		if (seen.has(msg)) return;
 		seen.add(msg);
-		log(`[sbx-tpl] transient error, retrying: ${msg}\n`);
+		log(`[umiak-tpl] transient error, retrying: ${msg}\n`);
 	};
 }
 
@@ -292,7 +292,7 @@ export class LogFollower {
 
 /** Stale files of an earlier attempt must not be mistaken for this run; the name is `$1`, not script text. */
 const PREPARE_SCRIPT =
-	'set -eu; mkdir -p /var/log/sbx-build; rm -f "/var/log/sbx-build/$1.rc" "/var/log/sbx-build/$1.log"';
+	'set -eu; mkdir -p /var/log/umiak-build; rm -f "/var/log/umiak-build/$1.rc" "/var/log/umiak-build/$1.log"';
 
 export interface RunStepOptions {
 	/** Step name, `[a-z0-9-]+`. */
@@ -321,14 +321,14 @@ export async function runStep(
 	const pollMs = o.pollMs ?? DEFAULT_POLL_MS;
 	const timeoutMs = o.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
 	const deadline = Date.now() + timeoutMs;
-	const unit = `sbx-build-${name}`;
+	const unit = `umiak-build-${name}`;
 	const logPath = `${LOG_DIR}/${name}.log`;
 	const rcPath = `${LOG_DIR}/${name}.rc`;
 	const note = transientNotes(o.log);
 
 	// Idempotent, so a lost reply is simply repeated.
 	const prep = await retryTransient(
-		() => io.exec(["bash", "-c", PREPARE_SCRIPT, "sbx-prep", name]),
+		() => io.exec(["bash", "-c", PREPARE_SCRIPT, "umiak-prep", name]),
 		deadline,
 		pollMs,
 		note,

@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/agent"
 )
 
 func TestWSAConnRefusedIsRefusal(t *testing.T) {

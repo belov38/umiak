@@ -1,6 +1,6 @@
 // Input of the server actions (zod). Public ids are decoded here: a
 // malformed id is a `validation` error.
-import { decodeUuid } from "@sbx/auth";
+import { decodeUuid } from "@umiak/auth";
 import { z } from "zod";
 import { decodeDashboardId } from "../ids";
 

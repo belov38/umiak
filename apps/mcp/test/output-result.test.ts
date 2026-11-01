@@ -97,7 +97,7 @@ describe("capResult", () => {
 		const texts = out.content.map((b) => (b.type === "text" ? b.text : ""));
 		expect(texts[0]).toBe('{"a":1}');
 		expect(texts[1]).toBe("stdout: last 50000 of 50000 bytes.");
-		expect(texts.join("\n")).not.toContain("<<<sbx-untrusted");
+		expect(texts.join("\n")).not.toContain("<<<umiak-untrusted");
 		expect(texts.at(-1)).toBe(
 			"sandbox output dropped: the response would exceed 80000 characters",
 		);

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AGENT_RESTART_ARGV, runHealth } from "../src/controllers/health.ts";
 import { createWorld, insertSandbox, type TestWorld } from "./fakes/world.ts";
@@ -82,7 +82,7 @@ describe("ctl-health (§11.1)", () => {
 		);
 		expect((await runHealth(w.ctx)).restarted).toEqual([r.sandboxId]);
 		expect(restarts(w)).toEqual([[r.vmid, [...AGENT_RESTART_ARGV]]]);
-		expect(AGENT_RESTART_ARGV).toEqual(["systemctl", "restart", "sbx-agent"]);
+		expect(AGENT_RESTART_ARGV).toEqual(["systemctl", "restart", "umiak-agent"]);
 		await runHealth(w.ctx);
 		await runHealth(w.ctx);
 		expect(restarts(w)).toHaveLength(1);
@@ -293,7 +293,7 @@ describe("ctl-health (§11.1)", () => {
 		const res = await runHealth(w.ctx);
 		expect(res.deleteStuckCount).toBe(base + 1);
 		expect(
-			w.metrics.calls.filter((c) => c.name === "sbx_delete_stuck").at(-1),
+			w.metrics.calls.filter((c) => c.name === "umiak_delete_stuck").at(-1),
 		).toMatchObject({ kind: "set", value: base + 1 });
 	});
 });

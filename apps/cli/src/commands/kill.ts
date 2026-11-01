@@ -1,4 +1,4 @@
-// `sbx kill [<sb>] <cmd> [--signal SIG] [--grace <duration>]` (S7 §9.4):
+// `umiak kill [<sb>] <cmd> [--signal SIG] [--grace <duration>]` (S7 §9.4):
 // SIGTERM then SIGKILL after the grace (default 10 s), or one signal with
 // --signal. Prints the Command resource.
 

@@ -1,4 +1,4 @@
-import { withTx } from "@sbx/db";
+import { withTx } from "@umiak/db";
 import {
 	invalidState,
 	notFound,
@@ -335,7 +335,7 @@ export async function extendSandbox(
 /**
  * Resolves with the sandbox once its state is one of `states`, or with its
  * current row when `timeoutMs` passes (long-poll). Woken by
- * `NOTIFY sbx_sandboxes '<id>'`, re-read when the listener becomes active
+ * `NOTIFY umiak_sandboxes '<id>'`, re-read when the listener becomes active
  * (closes the gap to the first read) and by a fallback poll.
  */
 export function waitForSandboxState(
@@ -347,7 +347,7 @@ export function waitForSandboxState(
 ): Promise<Sandbox> {
 	return waitForRow(deps, {
 		id,
-		channel: "sbx_sandboxes",
+		channel: "umiak_sandboxes",
 		what: "sandbox",
 		load: (q, rowId) => loadSandbox(q, rowId),
 		done: (s) => states.includes(s.state),
@@ -359,7 +359,7 @@ export function waitForSandboxState(
 /**
  * Resolves with the operation once it is terminal (`succeeded`, `failed`,
  * `superseded`), or with its current row when `timeoutMs` passes. Woken by
- * `NOTIFY sbx_operations '<id>'` (trigger of 0201) like `waitForSandboxState`.
+ * `NOTIFY umiak_operations '<id>'` (trigger of 0201) like `waitForSandboxState`.
  * No access check: the caller has read the operation with `getOperation`.
  */
 export function waitForOperation(
@@ -369,7 +369,7 @@ export function waitForOperation(
 ): Promise<Operation> {
 	return waitForRow(deps, {
 		id,
-		channel: "sbx_operations",
+		channel: "umiak_operations",
 		what: "operation",
 		load: (q, rowId) => loadOperation(q, rowId),
 		done: (op) => TERMINAL_OPERATION_STATES.includes(op.state),

@@ -39,13 +39,13 @@ export class ApiMetrics {
 	constructor(o: ApiMetricsOptions = {}) {
 		const registers = [this.registry];
 		this.requests = new Counter({
-			name: "sbx_api_requests_total",
+			name: "umiak_api_requests_total",
 			help: "HTTP requests per route template, method and status",
 			labelNames: ["route", "method", "status"],
 			registers,
 		});
 		this.duration = new Histogram({
-			name: "sbx_api_request_duration_seconds",
+			name: "umiak_api_request_duration_seconds",
 			help: "HTTP request time per route template and method",
 			labelNames: ["route", "method"],
 			buckets: [
@@ -54,31 +54,31 @@ export class ApiMetrics {
 			registers,
 		});
 		this.openStreams = new Gauge({
-			name: "sbx_api_open_streams",
+			name: "umiak_api_open_streams",
 			help: "Open NDJSON streams and WebSockets per kind",
 			labelNames: ["kind"],
 			registers,
 		});
 		this.reattaches = new Counter({
-			name: "sbx_api_reattach_total",
+			name: "umiak_api_reattach_total",
 			help: "Stream reattaches per segment",
 			labelNames: ["segment"],
 			registers,
 		});
 		this.agentCalls = new Counter({
-			name: "sbx_api_agent_calls_total",
+			name: "umiak_api_agent_calls_total",
 			help: "Agent calls per method and outcome",
 			labelNames: ["method", "outcome"],
 			registers,
 		});
 		this.authFailures = new Counter({
-			name: "sbx_api_auth_failures_total",
+			name: "umiak_api_auth_failures_total",
 			help: "Authentication failures per reason",
 			labelNames: ["reason"],
 			registers,
 		});
 		this.rateLimited = new Counter({
-			name: "sbx_api_rate_limited_total",
+			name: "umiak_api_rate_limited_total",
 			help: "Requests refused with 429 per limit",
 			labelNames: ["limit"],
 			registers,

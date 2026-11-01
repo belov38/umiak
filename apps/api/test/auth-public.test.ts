@@ -9,8 +9,8 @@ import {
 	encodeUuid,
 	generateApiKeySecret,
 	PRESETS,
-} from "@sbx/auth";
-import { skipPg } from "@sbx/db/testing";
+} from "@umiak/auth";
+import { skipPg } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ApiEnv, IdentityListener, needsAuth } from "../src/index.ts";
 import { issueApiKey, TEST_API_KEY } from "../src/testing/index.ts";
@@ -39,7 +39,7 @@ describe("public listener without credentials", () => {
 		const r = await h.request("GET", "/v1/__test/private");
 		expect(r.status).toBe(401);
 		expect(errorOf(r.body).code).toBe("unauthorized");
-		expect(r.headers.get("www-authenticate")).toBe('Bearer realm="sbx"');
+		expect(r.headers.get("www-authenticate")).toBe('Bearer realm="umiak"');
 	});
 
 	it("X-Auth-Request-Email without a bearer is ignored: 401", async () => {
@@ -72,8 +72,8 @@ describe("public listener without credentials", () => {
 	});
 
 	for (const [name, value] of [
-		["reserved sandbox key sbxs_", `Bearer sbxs_${"a".repeat(49)}`],
-		["port token sbxp_", `Bearer sbxp_${"a".repeat(43)}`],
+		["reserved sandbox key umiaks_", `Bearer umiaks_${"a".repeat(49)}`],
+		["port token umiakp_", `Bearer umiakp_${"a".repeat(43)}`],
 		["garbage", "Bearer not-a-token"],
 		[
 			"alg none (empty signature)",
@@ -90,7 +90,9 @@ describe("public listener without credentials", () => {
 			});
 			expect(r.status).toBe(401);
 			expect(errorOf(r.body).code).toBe("unauthorized");
-			expect(r.headers.get("www-authenticate")).toMatch(/^Bearer realm="sbx"/);
+			expect(r.headers.get("www-authenticate")).toMatch(
+				/^Bearer realm="umiak"/,
+			);
 		});
 	}
 
@@ -157,16 +159,16 @@ describe("public listener without credentials", () => {
 		);
 	});
 
-	it("an invalid bearer with a malformed Sbx-Team: 401, not 400", async () => {
+	it("an invalid bearer with a malformed Umiak-Team: 401, not 400", async () => {
 		const h = createHarness();
 		h.app.get("/v1/__test/private", (c) => c.body(null, 204));
 		const r = await h.request("GET", "/v1/__test/private", {
-			headers: { authorization: "Bearer junk", "sbx-team": "nope" },
+			headers: { authorization: "Bearer junk", "umiak-team": "nope" },
 		});
 		expect(r.status).toBe(401);
 	});
 
-	it("a JWT without SBX_OIDC_ISSUER: 401", async () => {
+	it("a JWT without UMIAK_OIDC_ISSUER: 401", async () => {
 		const h = createHarness();
 		h.app.get("/v1/__test/private", (c) => c.body(null, 204));
 		const r = await h.request("GET", "/v1/__test/private", {
@@ -178,7 +180,7 @@ describe("public listener without credentials", () => {
 			details: { reason: "invalid_token" },
 		});
 		expect(r.headers.get("www-authenticate")).toBe(
-			'Bearer realm="sbx", error="invalid_token"',
+			'Bearer realm="umiak", error="invalid_token"',
 		);
 	});
 });
@@ -245,7 +247,7 @@ describe.skipIf(skipPg())("team API keys", () => {
 				authorization: `Bearer ${secret}`,
 				"x-auth-request-email": "admin@example.com",
 				"x-auth-request-user": "sub",
-				"x-auth-request-groups": "sbx-operators",
+				"x-auth-request-groups": "umiak-operators",
 				"x-forwarded-user": "admin",
 				"x-forwarded-email": "admin@example.com",
 			},
@@ -348,13 +350,13 @@ describe.skipIf(skipPg())("team API keys", () => {
 		}
 	});
 
-	it("Sbx-Team: own team ok, another team 403 team_forbidden, garbage 400", async () => {
+	it("Umiak-Team: own team ok, another team 403 team_forbidden, garbage 400", async () => {
 		const { secret } = await issueApiKey(w.identity, { teamId });
 		const other = await w.team();
 		const h = harness();
 		const call = (team: string) =>
 			h.request("GET", "/v1/me", {
-				headers: { authorization: `Bearer ${secret}`, "sbx-team": team },
+				headers: { authorization: `Bearer ${secret}`, "umiak-team": team },
 			});
 		expect((await call(encodeUuid("team", teamId))).status).toBe(200);
 		const r = await call(encodeUuid("team", other));
@@ -366,12 +368,15 @@ describe.skipIf(skipPg())("team API keys", () => {
 	});
 });
 
-describe.skipIf(skipPg())("/readyz and the sbx_identity listener", () => {
+describe.skipIf(skipPg())("/readyz and the umiak_identity listener", () => {
 	it("503 until LISTEN is confirmed, 200 after", async () => {
 		const w = await identityWorld();
-		const dead = IdentityListener.connect("postgres://sbx:sbx@127.0.0.1:1/x", {
-			reconnectDelayMs: 10_000,
-		});
+		const dead = IdentityListener.connect(
+			"postgres://umiak:umiak@127.0.0.1:1/x",
+			{
+				reconnectDelayMs: 10_000,
+			},
+		);
 		dead.start();
 		try {
 			const bad = createHarness({
@@ -400,7 +405,7 @@ describe.skipIf(skipPg())("/readyz and the sbx_identity listener", () => {
 			expect(w.events.isReady()).toBe(true);
 			await w.db.pool.query(
 				`SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-				  WHERE query = 'LISTEN sbx_identity' AND datname = current_database()`,
+				  WHERE query = 'LISTEN umiak_identity' AND datname = current_database()`,
 			);
 			await eventually(async () => !w.events.isReady(), 2000);
 			await eventually(async () => w.events.isReady(), 3000);

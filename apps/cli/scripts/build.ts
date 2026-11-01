@@ -1,9 +1,9 @@
-// Builds the `sbx` binaries with `bun build --compile` (S7 §14.1):
+// Builds the `umiak` binaries with `bun build --compile` (S7 §14.1):
 //   bun scripts/build.ts         the current platform only (`pnpm build`)
 //   bun scripts/build.ts --all   the five release targets (`pnpm build:all`;
 //                                Bun downloads the other runtimes once)
-// Output: dist/sbx-<os>-<arch>[.exe] and dist/SHA256SUMS (sha256sum format)
-// of every sbx-* binary in dist/ after this run, so the file always matches
+// Output: dist/umiak-<os>-<arch>[.exe] and dist/SHA256SUMS (sha256sum format)
+// of every umiak-* binary in dist/ after this run, so the file always matches
 // what is there (a host-only build after --all keeps the other entries).
 // dist/ is not committed.
 
@@ -27,7 +27,7 @@ function target(os: string, arch: string): Target {
 	return {
 		name,
 		bunTarget: `bun-${name}`,
-		file: `sbx-${name}${os === "windows" ? ".exe" : ""}`,
+		file: `umiak-${name}${os === "windows" ? ".exe" : ""}`,
 	};
 }
 
@@ -46,7 +46,7 @@ export function hostTarget(platform: string, arch: string): Target {
 	const t = TARGETS.find((x) => x.name === `${os}-${arch}`);
 	if (t === undefined) {
 		throw new Error(
-			`no sbx build for ${os}-${arch}; targets: ${TARGETS.map((x) => x.name).join(", ")}`,
+			`no umiak build for ${os}-${arch}; targets: ${TARGETS.map((x) => x.name).join(", ")}`,
 		);
 	}
 	return t;
@@ -78,7 +78,7 @@ export function build(targets: readonly Target[]): void {
 		}
 	}
 	const sums = readdirSync(dist)
-		.filter((f) => f.startsWith("sbx-"))
+		.filter((f) => f.startsWith("umiak-"))
 		.sort()
 		.map((f) => {
 			const digest = createHash("sha256")

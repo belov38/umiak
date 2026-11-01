@@ -1,5 +1,5 @@
-import { migrate } from "@sbx/db";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { migrate } from "@umiak/db";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createWorker, type Worker } from "../src/worker.ts";
 import { FakeInfraRegistry } from "./fakes/infra.ts";
@@ -23,7 +23,7 @@ describe("worker HTTP: health, readiness, metrics", () => {
 		await db?.drop();
 	});
 
-	it("/readyz is 503 until migrations are applied, then 200; /metrics has sbx_delete_stuck", async () => {
+	it("/readyz is 503 until migrations are applied, then 200; /metrics has umiak_delete_stuck", async () => {
 		worker = createWorker(
 			workerOptions(db.pool, {
 				infra: new FakeInfraRegistry(),
@@ -64,10 +64,10 @@ describe("worker HTTP: health, readiness, metrics", () => {
 		const metrics = await getText(`${base}/metrics`);
 		expect(metrics.status).toBe(200);
 		expect(metrics.type).toMatch(/text\/plain/);
-		expect(metrics.body).toMatch(/^sbx_delete_stuck 0$/m);
-		expect(metrics.body).toMatch(/sbx_queue_depth\{queue="sandbox-op"\} 0/);
-		expect(metrics.body).toMatch(/^sbx_degraded_sandboxes 0$/m);
-		expect(metrics.body).toMatch(/^sbx_event_lag_seconds 0$/m);
+		expect(metrics.body).toMatch(/^umiak_delete_stuck 0$/m);
+		expect(metrics.body).toMatch(/umiak_queue_depth\{queue="sandbox-op"\} 0/);
+		expect(metrics.body).toMatch(/^umiak_degraded_sandboxes 0$/m);
+		expect(metrics.body).toMatch(/^umiak_event_lag_seconds 0$/m);
 
 		const missing = await getText(`${base}/nope`);
 		expect(missing.status).toBe(404);

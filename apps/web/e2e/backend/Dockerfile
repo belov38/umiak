@@ -31,18 +31,18 @@ COPY apps/mcp/package.json apps/mcp/
 COPY apps/template-builder/package.json apps/template-builder/
 COPY apps/web/package.json apps/web/
 
-# ---- build: compile @sbx/proto and @sbx/agent-client (needs dev dependencies)
+# ---- build: compile @umiak/proto and @umiak/agent-client (needs dev dependencies)
 FROM base AS build
-RUN pnpm install --frozen-lockfile --filter "@sbx/agent-client..." --filter "."
+RUN pnpm install --frozen-lockfile --filter "@umiak/agent-client..." --filter "."
 COPY packages/proto/tsconfig.json packages/proto/
 COPY packages/proto/src packages/proto/src
 COPY packages/agent-client/tsconfig.json packages/agent-client/tsconfig.build.json packages/agent-client/
 COPY packages/agent-client/src packages/agent-client/src
-RUN pnpm --filter "@sbx/proto" --filter "@sbx/agent-client" run build
+RUN pnpm --filter "@umiak/proto" --filter "@umiak/agent-client" run build
 
 # ---- runtime: production dependencies of the api and the worker
 FROM base
-RUN pnpm install --frozen-lockfile --prod --filter "@sbx/api..." --filter "@sbx/worker..."
+RUN pnpm install --frozen-lockfile --prod --filter "@umiak/api..." --filter "@umiak/worker..."
 
 COPY db/migrations db/migrations
 COPY --from=build /app/packages/proto/dist packages/proto/dist

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { PgRegistry, type Registry } from "@sbx/agent-client";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { PgRegistry, type Registry } from "@umiak/agent-client";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import {
 	afterAll,
 	afterEach,
@@ -177,8 +177,8 @@ const moved = (url?: string): Reply => ({
 	status: 421,
 	body: JSON.stringify({ code: "machine_moved", instanceUrl: url }),
 	headers: {
-		"sbx-error-code": "machine_moved",
-		...(url === undefined ? {} : { "sbx-instance-url": url }),
+		"umiak-error-code": "machine_moved",
+		...(url === undefined ? {} : { "umiak-instance-url": url }),
 	},
 });
 
@@ -307,7 +307,7 @@ describe("HttpGatewayPort.rotateToken", () => {
 			{
 				status: 503,
 				body: '{"code":"agent_unavailable"}',
-				headers: { "sbx-error-code": "agent_unavailable" },
+				headers: { "umiak-error-code": "agent_unavailable" },
 			},
 		]) {
 			const a = await gateway();

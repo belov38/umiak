@@ -26,13 +26,13 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/docker"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/docker"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // Who thawed a lease automatically (quiesce.auto_thawed.by). The agent's
@@ -155,7 +155,7 @@ type Options struct {
 	Emit events.Emitter
 	// Now is the clock. Default time.Now.
 	Now func() time.Time
-	// Self is the sbx-agent binary the watchdog unit runs. Default
+	// Self is the umiak-agent binary the watchdog unit runs. Default
 	// os.Executable().
 	Self string
 	// ProbeEvery is the foreign-freeze probe period. Default 5s.

@@ -23,9 +23,9 @@ import (
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // defaultPath is the search path when the spec environment has no PATH.
@@ -35,7 +35,7 @@ const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 // command loses its pipes (spec section 9.3).
 const shimOOMScoreAdj = "-900"
 
-// Main runs `sbx-agent shim --id <id> [--layout-root <dir>] [--no-cgroup]`
+// Main runs `umiak-agent shim --id <id> [--layout-root <dir>] [--no-cgroup]`
 // with its log on os.Stderr (the unit's journal). See Run.
 func Main(args []string) int {
 	return Run(args, os.Stderr)
@@ -61,7 +61,7 @@ func Run(args []string, stderr io.Writer) int {
 		return 2
 	}
 	if !validID(*id) || fs.NArg() != 0 {
-		log.Error("shim: usage: sbx-agent shim --id <id> [--layout-root <dir>] [--no-cgroup]")
+		log.Error("shim: usage: umiak-agent shim --id <id> [--layout-root <dir>] [--no-cgroup]")
 		return 2
 	}
 	l := paths.Default()
@@ -492,7 +492,7 @@ func hasEnv(env []string, key string) bool {
 func (s *shim) startFailed(cause error) error {
 	s.log.Warn("shim: start failed", "err", cause)
 	st := s.streams[len(s.streams)-1] // stderr, or the only pty stream
-	s.writeLog(st, fmt.Appendf(nil, "sbx-agent: cannot start command: %v\n", cause))
+	s.writeLog(st, fmt.Appendf(nil, "umiak-agent: cannot start command: %v\n", cause))
 	e := ExitFile{
 		Status:      shimproto.StatusExited,
 		Code:        127,

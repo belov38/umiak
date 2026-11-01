@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { KvRows } from "@/features/create/kv-rows";
 import { SecretFiles } from "@/features/create/secret-files";
 import { formatBytes } from "@/features/sandbox/rules";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import type { FormErrors } from "@/lib/create-form";
 import {
 	type EnvironmentDetail,
@@ -47,11 +47,11 @@ export function EnvironmentDialog({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const detail = useQuery({
 		queryKey: ["environments", teamId, "one", editing],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/environments/{environment}", {
+			const { data } = await umiak.raw.GET("/v1/environments/{environment}", {
 				params: { path: { environment: editing as string } },
 				signal,
 			});
@@ -101,7 +101,7 @@ function EnvironmentForm({
 	original: EnvironmentDetail | null;
 	onDone: () => void;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const [form, setForm] = useState<EnvironmentFormState>(() =>
 		original === null ? emptyEnvironmentForm() : formFromEnvironment(original),
@@ -119,7 +119,7 @@ function EnvironmentForm({
 				setErrors(r.errors);
 				return false;
 			}
-			await sbx.raw.POST("/v1/environments", { body: r.body });
+			await umiak.raw.POST("/v1/environments", { body: r.body });
 			toast.success(`Environment ${r.body.name} created`);
 			return true;
 		}
@@ -132,7 +132,7 @@ function EnvironmentForm({
 			toast.info("Nothing changed");
 			return true;
 		}
-		await sbx.raw.PATCH("/v1/environments/{environment}", {
+		await umiak.raw.PATCH("/v1/environments/{environment}", {
 			params: { path: { environment: original.id } },
 			body: r.body,
 		});

@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { type NodeOps, PveApiError, type PveClient } from "@sbx/pve";
+import { type NodeOps, PveApiError, type PveClient } from "@umiak/pve";
 import { describe, expect, it } from "vitest";
 import { preflight } from "../src/preflight.ts";
 
@@ -44,14 +44,14 @@ const GOOD = {
 		{
 			vmid: 500,
 			status: "running",
-			pool: "sandbox",
+			pool: "umiak",
 			maxmem: 2 * 2 ** 30,
 			template: 0,
 		},
 		{
 			vmid: 598,
 			status: "stopped",
-			pool: "sandbox",
+			pool: "umiak",
 			maxmem: 4 * 2 ** 30,
 			template: 1,
 		},
@@ -70,7 +70,7 @@ const nodeOk: NodeOps = {
 	close() {},
 };
 
-const cfg = { node: "pve", pool: "sandbox" };
+const cfg = { node: "pve", pool: "umiak" };
 
 describe("preflight", () => {
 	it("passes with the right permissions, content types, memory and tools", async () => {
@@ -98,7 +98,7 @@ describe("preflight", () => {
 			api: stub(bad),
 			node: {
 				call: async () => {
-					throw new Error("sbx-node media.list: forbidden");
+					throw new Error("umiak-node media.list: forbidden");
 				},
 				close() {},
 			},
@@ -119,7 +119,7 @@ describe("preflight", () => {
 				{
 					vmid: 500,
 					status: "running",
-					pool: "sandbox",
+					pool: "umiak",
 					maxmem: 6 * 2 ** 30,
 					template: 0,
 				},
@@ -182,8 +182,8 @@ describe("preflight", () => {
 	describe("windows", () => {
 		const WIN = {
 			...GOOD,
-			"/access/permissions?path=/pool/sandbox": {
-				"/pool/sandbox": { "VM.Console": 1, "VM.Audit": 1 },
+			"/access/permissions?path=/pool/umiak": {
+				"/pool/umiak": { "VM.Console": 1, "VM.Audit": 1 },
 			},
 			"/nodes/pve/capabilities/qemu/machines": [
 				{ id: "pc-q35-11.0+pve2", type: "q35" },
@@ -214,7 +214,7 @@ describe("preflight", () => {
 			expect(checks.filter((c) => !c.ok)).toEqual([]);
 			expect(checks.map((c) => c.name)).toEqual(
 				expect.arrayContaining([
-					"token: VM.Console on /pool/sandbox",
+					"token: VM.Console on /pool/umiak",
 					"machine types (pc-q35-*+pve*)",
 					`user ISO local:iso/${ISO}`,
 				]),
@@ -227,8 +227,8 @@ describe("preflight", () => {
 		it("fails without VM.Console, on a missing ISO and on a sha mismatch; warns on an unpinned sha", async () => {
 			const noConsole = {
 				...WIN,
-				"/access/permissions?path=/pool/sandbox": {
-					"/pool/sandbox": { "VM.Audit": 1 },
+				"/access/permissions?path=/pool/umiak": {
+					"/pool/umiak": { "VM.Audit": 1 },
 				},
 			};
 			const a = await preflight({

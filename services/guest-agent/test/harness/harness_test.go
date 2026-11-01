@@ -28,22 +28,22 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/memnet"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/agent"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/agent"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -80,9 +80,9 @@ func fastTiming() gateway.Timing {
 	}
 }
 
-// testLogger discards logs unless SBX_TEST_LOG is set.
+// testLogger discards logs unless UMIAK_TEST_LOG is set.
 func testLogger(args ...any) *slog.Logger {
-	if os.Getenv("SBX_TEST_LOG") != "" {
+	if os.Getenv("UMIAK_TEST_LOG") != "" {
 		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With(args...)
 	}
 	return slog.New(slog.DiscardHandler)
@@ -333,7 +333,7 @@ func (e *env) startGateway() {
 // and the fakes.
 func (e *env) setupMachine() {
 	t := e.t
-	root, err := os.MkdirTemp("", "sbxh")
+	root, err := os.MkdirTemp("", "umiakh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,12 +395,12 @@ func (e *env) deps(ready chan struct{}) agent.Deps {
 		MountSecrets: func(dir string) error { return os.MkdirAll(dir, 0o755) },
 		LookupUser:   func(string) (*process.User, error) { return e.user, nil },
 		Statfs:       func(string) (uint64, uint64, error) { return 100 << 30, 50 << 30, nil },
-		Hostname:     func() (string, error) { return "sbx-harness", nil },
+		Hostname:     func() (string, error) { return "umiak-harness", nil },
 		IdleSample:   func() (float64, uint64) { return 0, 0 },
 		// Loopback only: the interface addresses of a developer machine
 		// (VPN, firewalled) may time out instead of refusing.
 		LocalAddrs: func() []netip.Addr { return nil },
-		ShimPath:   "/usr/local/lib/sbx-agent/versions/" + agentVersion + "/sbx-agent",
+		ShimPath:   "/usr/local/lib/umiak-agent/versions/" + agentVersion + "/umiak-agent",
 		Log:        testLogger("agent", e.machineID),
 
 		IdentityRetry: 20 * time.Millisecond,
@@ -507,7 +507,7 @@ func (e *env) system() agentv1connect.SystemClient {
 	return agentv1connect.NewSystemClient(e.httpClient(), e.rpcURL())
 }
 
-// withRequestID sets Sbx-Request-Id on req.
+// withRequestID sets Umiak-Request-Id on req.
 func withRequestID[T any](req *connect.Request[T], id string) *connect.Request[T] {
 	req.Header().Set(wire.HeaderRequestID, id)
 	return req

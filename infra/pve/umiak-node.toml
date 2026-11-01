@@ -1,0 +1,22 @@
+# umiak S1 PoC: umiak-node config, installed to /etc/umiak-node.toml by infra/pve/setup.sh node.
+node = "pve"
+vg = "pve"
+thinPool = "data"
+storage = "local-lvm"
+# Sandboxes 500-589; template slots 595-599 (their base-<id> disks, tagged umiak-tpl, are clone
+# origins); 590-594 is dev infrastructure and in neither range (S1 spec 4.7).
+vmidMin = 500
+vmidMax = 589
+templateVmidMin = 595
+templateVmidMax = 599
+templateVmid = 599
+sdnZone = "umiak"
+vnet = "umiak0"
+clusterId = 1
+leaseFile = "/var/lib/misc/dnsmasq.umiak.leases"
+ethersFile = "/etc/dnsmasq.d/umiak/ethers"
+macCacheFile = "/etc/pve/sdn/mac-cache.json"
+isoDir = "/var/lib/vz/template/iso"
+importDir = "/var/lib/vz/import"
+# umiak-node's own state (media.sha256 cache); created on first use.
+stateDir = "/var/lib/umiak-node"

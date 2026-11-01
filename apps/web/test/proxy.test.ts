@@ -3,14 +3,14 @@ import { NextRequest } from "next/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import { guard } from "../src/lib/guard.ts";
 
-const ORIGIN = "https://app.sbx.example.com";
+const ORIGIN = "https://app.umiak.example.com";
 const ENV = {
-	DATABASE_URL: "postgres://u:p@127.0.0.1:5432/sbx",
+	DATABASE_URL: "postgres://u:p@127.0.0.1:5432/umiak",
 	PAYLOAD_SECRET: "0123456789abcdef0123",
-	SBX_APP_ORIGIN: ORIGIN,
-	SBX_OPERATOR_GROUPS: "sbx-operators",
-	SBX_SBX_DOMAIN: "sbx.example.com",
-	SBX_API_PUBLIC_URL: "https://api.sbx.example.com",
+	UMIAK_APP_ORIGIN: ORIGIN,
+	UMIAK_OPERATOR_GROUPS: "umiak-operators",
+	UMIAK_PREVIEW_DOMAIN: "umiak.example.com",
+	UMIAK_API_PUBLIC_URL: "https://api.umiak.example.com",
 };
 const SIGNED_IN = { "x-auth-request-email": "a@b.com" };
 
@@ -26,7 +26,7 @@ describe("guard (S8 §5.1, §5.6)", () => {
 	const g = (method: string, path: string, h: Record<string, string> = {}) =>
 		guard(
 			{ method, pathname: path, headers: new Headers(h) },
-			{ appOrigin: ORIGIN, operatorGroups: ["sbx-operators"] },
+			{ appOrigin: ORIGIN, operatorGroups: ["umiak-operators"] },
 		);
 
 	it("no identity header: 401 on every path but /healthz", () => {
@@ -40,7 +40,7 @@ describe("guard (S8 §5.1, §5.6)", () => {
 		expect(g("GET", "/healthz")).toBe(null);
 	});
 
-	it("unsafe methods need Origin == SBX_APP_ORIGIN", () => {
+	it("unsafe methods need Origin == UMIAK_APP_ORIGIN", () => {
 		expect(
 			g("POST", "/app", { ...SIGNED_IN, origin: "https://evil" })?.status,
 		).toBe(403);
@@ -65,9 +65,9 @@ describe("guard: operator gate and disabled auth endpoints (S8 §5.4, §5.5)", (
 	const g = (method: string, path: string, h: Record<string, string> = {}) =>
 		guard(
 			{ method, pathname: path, headers: new Headers(h) },
-			{ appOrigin: ORIGIN, operatorGroups: ["sbx-operators"] },
+			{ appOrigin: ORIGIN, operatorGroups: ["umiak-operators"] },
 		);
-	const OP = { ...SIGNED_IN, "x-auth-request-groups": "dev, sbx-operators" };
+	const OP = { ...SIGNED_IN, "x-auth-request-groups": "dev, umiak-operators" };
 
 	it("/admin and /cms-api: 403 without an operator group, before Payload", () => {
 		for (const path of [
@@ -81,7 +81,7 @@ describe("guard: operator gate and disabled auth endpoints (S8 §5.4, §5.5)", (
 		]) {
 			const d = g("GET", path, {
 				...SIGNED_IN,
-				"x-auth-request-groups": "dev,role:sbx-operators",
+				"x-auth-request-groups": "dev,role:umiak-operators",
 			});
 			expect(d?.status, path).toBe(403);
 			expect(d?.reason, path).toBe("operators_only");

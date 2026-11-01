@@ -3,7 +3,7 @@
 # from the template, through QGA.
 #
 #   stand-setup.sh install    install /it/pkg/v1.tar, the S5 pieces the tests
-#                             need, start sbx-identity and sbx-agent with the
+#                             need, start umiak-identity and umiak-agent with the
 #                             debug socket; identity from the real smbios
 #   stand-setup.sh it-mode    switch to a fake smbios on tmpfs (the layout of
 #                             test/linux/run.sh) for the container suite
@@ -15,26 +15,26 @@ set -euo pipefail
 
 log() { echo "stand-setup: $*" >&2; }
 
-real_config=/var/lib/sbx-stand/agent-real.toml
-it_dir=/var/lib/sbx-it
+real_config=/var/lib/umiak-stand/agent-real.toml
+it_dir=/var/lib/umiak-it
 
 wait_agent() {
 	for _ in $(seq 1 90); do
-		if [ "$(systemctl is-active sbx-agent.service || true)" = active ] && [ -S /run/sbx-agent/debug.sock ]; then
+		if [ "$(systemctl is-active umiak-agent.service || true)" = active ] && [ -S /run/umiak-agent/debug.sock ]; then
 			return 0
 		fi
 		sleep 1
 	done
 	log "the agent did not come up"
-	systemctl status sbx-agent --no-pager >&2 || true
-	journalctl -u sbx-agent -u sbx-identity --no-pager -n 80 >&2 || true
+	systemctl status umiak-agent --no-pager >&2 || true
+	journalctl -u umiak-agent -u umiak-identity --no-pager -n 80 >&2 || true
 	return 1
 }
 
 restart_identity() {
-	# The boot order of a fork: sbx-identity before ssh and the agent.
-	rm -f /run/sbx-agent/debug.sock
-	systemctl restart sbx-identity.service ssh.service sbx-agent.service
+	# The boot order of a fork: umiak-identity before ssh and the agent.
+	rm -f /run/umiak-agent/debug.sock
+	systemctl restart umiak-identity.service ssh.service umiak-agent.service
 	wait_agent
 }
 
@@ -47,29 +47,29 @@ install() {
 			useradd -m -u 1000 -s /bin/bash -G sudo user
 		fi
 	fi
-	echo 'user ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/90-sbx-user
-	chmod 0440 /etc/sudoers.d/90-sbx-user
+	echo 'user ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/90-umiak-user
+	chmod 0440 /etc/sudoers.d/90-umiak-user
 	mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/user
 	# Ubuntu's skeleton .bash_logout runs clear_console (S5 contract).
 	rm -f /etc/skel/.bash_logout /home/user/.bash_logout /root/.bash_logout
 
-	# sshd per spec 20: loopback only, no passwords, the sbx user CA; plain
+	# sshd per spec 20: loopback only, no passwords, the umiak user CA; plain
 	# ssh.service instead of Ubuntu's socket activation (as in the container).
-	mkdir -p /etc/sbx /etc/sbx-agent
-	: >/etc/sbx/env
-	: >/etc/sbx-agent/ssh-user-ca.pub
-	: >/etc/ssh/sbx_user_ca.pub
+	mkdir -p /etc/umiak /etc/umiak-agent
+	: >/etc/umiak/env
+	: >/etc/umiak-agent/ssh-user-ca.pub
+	: >/etc/ssh/umiak_user_ca.pub
 	printf '%s\n' \
 		'ListenAddress 127.0.0.1' \
 		'ListenAddress ::1' \
 		'PasswordAuthentication no' \
 		'KbdInteractiveAuthentication no' \
-		'TrustedUserCAKeys /etc/ssh/sbx_user_ca.pub' \
-		>/etc/ssh/sshd_config.d/50-sbx.conf
-	grep -q 'envfile=/etc/sbx/env' /etc/pam.d/sshd ||
-		echo 'session required pam_env.so readenv=1 envfile=/etc/sbx/env' >>/etc/pam.d/sshd
-	grep -q 'envfile=/run/sbx/secrets/env' /etc/pam.d/sshd ||
-		echo 'session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env' >>/etc/pam.d/sshd
+		'TrustedUserCAKeys /etc/ssh/umiak_user_ca.pub' \
+		>/etc/ssh/sshd_config.d/50-umiak.conf
+	grep -q 'envfile=/etc/umiak/env' /etc/pam.d/sshd ||
+		echo 'session required pam_env.so readenv=1 envfile=/etc/umiak/env' >>/etc/pam.d/sshd
+	grep -q 'envfile=/run/umiak/secrets/env' /etc/pam.d/sshd ||
+		echo 'session required pam_env.so readenv=1 envfile=/run/umiak/secrets/env' >>/etc/pam.d/sshd
 	if systemctl list-unit-files ssh.socket >/dev/null 2>&1; then
 		systemctl disable --now ssh.socket >/dev/null 2>&1 || true
 		rm -f /etc/systemd/system/ssh.service.d/00-socket.conf /etc/systemd/system/ssh.socket.d/addresses.conf
@@ -82,7 +82,7 @@ install() {
 	# instance for cloud-init). The template 599 keeps cloud-init enabled for
 	# the network; S5 disables it.
 	if [ -d /etc/cloud/cloud.cfg.d ]; then
-		cat >/etc/cloud/cloud.cfg.d/99-sbx-identity.cfg <<'CFG'
+		cat >/etc/cloud/cloud.cfg.d/99-umiak-identity.cfg <<'CFG'
 preserve_hostname: true
 ssh_deletekeys: false
 ssh_genkeytypes: []
@@ -94,7 +94,7 @@ CFG
 	# the real smbios (no [identity] section).
 	docker=false
 	[ -S /run/docker.sock ] && docker=true
-	mkdir -p /var/lib/sbx-stand
+	mkdir -p /var/lib/umiak-stand
 	cat >"$real_config" <<TOML
 [tunnel]
 url = "wss://127.0.0.1:9/v1/connect"
@@ -108,25 +108,25 @@ required = ["identity", "claim", "secrets"]
 [docker]
 enabled = $docker
 TOML
-	cp "$real_config" /etc/sbx-agent/agent.toml
+	cp "$real_config" /etc/umiak-agent/agent.toml
 	mkdir -p "$it_dir"
 	cp "$real_config" "$it_dir/agent.toml"
 
 	# The first install runs the binary of the package itself (as S5 does).
-	tar -xOf /it/pkg/v1.tar sbx-agent >/tmp/sbx-agent-installer
-	chmod 0755 /tmp/sbx-agent-installer
-	/tmp/sbx-agent-installer install-package --write-config /it/pkg/v1.tar
-	rm -f /tmp/sbx-agent-installer
+	tar -xOf /it/pkg/v1.tar umiak-agent >/tmp/umiak-agent-installer
+	chmod 0755 /tmp/umiak-agent-installer
+	/tmp/umiak-agent-installer install-package --write-config /it/pkg/v1.tar
+	rm -f /tmp/umiak-agent-installer
 
-	mkdir -p /etc/systemd/system/sbx-agent.service.d
-	cat >/etc/systemd/system/sbx-agent.service.d/50-debug.conf <<'UNIT'
+	mkdir -p /etc/systemd/system/umiak-agent.service.d
+	cat >/etc/systemd/system/umiak-agent.service.d/50-debug.conf <<'UNIT'
 [Service]
 ExecStart=
-ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run --debug-listen unix:/run/sbx-agent/debug.sock --debug-confirm
+ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent run --debug-listen unix:/run/umiak-agent/debug.sock --debug-confirm
 UNIT
 	systemctl daemon-reload
-	systemctl enable --now sbx-identity.service sbx-agent.service
-	# sbx-identity may have regenerated the host keys.
+	systemctl enable --now umiak-identity.service umiak-agent.service
+	# umiak-identity may have regenerated the host keys.
 	systemctl restart ssh.service
 	wait_agent
 	log "installed"
@@ -141,19 +141,19 @@ it_mode() {
 import base64, os, uuid
 mid = str(uuid.uuid4())
 bs = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
-open("/var/lib/sbx-it/dmi/product_serial", "w").write("sbx1:%s:%s\n" % (mid, bs))
-open("/var/lib/sbx-it/dmi/product_uuid", "w").write(mid + "\n")
+open("/var/lib/umiak-it/dmi/product_serial", "w").write("umiak1:%s:%s\n" % (mid, bs))
+open("/var/lib/umiak-it/dmi/product_uuid", "w").write(mid + "\n")
 PY
 	{
 		cat "$real_config"
 		printf '\n[identity]\nsysfs_dir = "%s"\n' "$it_dir/dmi"
 	} >"$it_dir/agent.toml"
-	cp "$it_dir/agent.toml" /etc/sbx-agent/agent.toml
+	cp "$it_dir/agent.toml" /etc/umiak-agent/agent.toml
 	restart_identity
 }
 
 real_mode() {
-	cp "$real_config" /etc/sbx-agent/agent.toml
+	cp "$real_config" /etc/umiak-agent/agent.toml
 	cp "$real_config" "$it_dir/agent.toml"
 	restart_identity
 	if mountpoint -q "$it_dir/dmi"; then umount "$it_dir/dmi"; fi

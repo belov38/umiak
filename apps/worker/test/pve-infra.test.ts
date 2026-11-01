@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import {
 	formatSmbios1,
 	NodeOpsError,
@@ -11,8 +11,8 @@ import {
 	PveApiError,
 	PveTaskError,
 	SshNodeOps,
-} from "@sbx/pve";
-import { FakeNode, FakePve, TEMPLATE_CONFIG } from "@sbx/pve/testing";
+} from "@umiak/pve";
+import { FakeNode, FakePve, TEMPLATE_CONFIG } from "@umiak/pve/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	loadNodeTopology,
@@ -47,7 +47,7 @@ const noFence = async () => {};
 function smbiosFor(machineId: string): InfraSmbios {
 	return {
 		uuid: machineId,
-		serial: `sbx1:${machineId}:${Buffer.alloc(32, 7).toString("base64url")}`,
+		serial: `umiak1:${machineId}:${Buffer.alloc(32, 7).toString("base64url")}`,
 	};
 }
 
@@ -354,9 +354,9 @@ describe("PveInfraRegistry", () => {
 });
 
 describe("tunnel URL in smbios family (S5 section 14)", () => {
-	it("create and fork write family=sbxt1:<SBX_TUNNEL_URL> into smbios1", async () => {
+	it("create and fork write family=umiakt1:<UMIAK_TUNNEL_URL> into smbios1", async () => {
 		const url = "wss://tunnel.example.com/v1/connect";
-		const e = await setup({ env: { SBX_TUNNEL_URL: url } });
+		const e = await setup({ env: { UMIAK_TUNNEL_URL: url } });
 		const m = randomUUID();
 		const smbios = smbiosFor(m);
 		const vm = await e.infra.create({
@@ -366,7 +366,7 @@ describe("tunnel URL in smbios family (S5 section 14)", () => {
 			smbios,
 		});
 		expect(e.api.vms.get(vm.vmid)?.config.smbios1).toBe(
-			formatSmbios1({ ...smbios, family: `sbxt1:${url}` }),
+			formatSmbios1({ ...smbios, family: `umiakt1:${url}` }),
 		);
 
 		const lvId = randomUUID().replaceAll("-", "");
@@ -384,11 +384,11 @@ describe("tunnel URL in smbios family (S5 section 14)", () => {
 		});
 		expect(forked.vmid).not.toBe(vm.vmid);
 		expect(e.api.vms.get(forked.vmid)?.config.smbios1).toBe(
-			formatSmbios1({ ...smbiosFor(child), family: `sbxt1:${url}` }),
+			formatSmbios1({ ...smbiosFor(child), family: `umiakt1:${url}` }),
 		);
 	});
 
-	it("without SBX_TUNNEL_URL there is no family", async () => {
+	it("without UMIAK_TUNNEL_URL there is no family", async () => {
 		const e = await setup({ env: {} });
 		const m = randomUUID();
 		const vm = await e.infra.create({
@@ -400,17 +400,17 @@ describe("tunnel URL in smbios family (S5 section 14)", () => {
 		expect(e.api.vms.get(vm.vmid)?.config.smbios1).not.toContain("family=");
 	});
 
-	it("an invalid SBX_TUNNEL_URL fails at start", () => {
+	it("an invalid UMIAK_TUNNEL_URL fails at start", () => {
 		expect(
 			() =>
 				new PveInfraRegistry(db.pool, {
 					secretsDir: "/nonexistent",
-					env: { SBX_TUNNEL_URL: "http://plain" },
+					env: { UMIAK_TUNNEL_URL: "http://plain" },
 					clients: () => {
 						throw new Error("unused");
 					},
 				}),
-		).toThrow(/SBX_TUNNEL_URL/);
+		).toThrow(/UMIAK_TUNNEL_URL/);
 	});
 });
 
@@ -467,7 +467,7 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(snap.disks).toEqual([
 			{
 				slot: "scsi0",
-				volume: `local-lvm:sbx-snap-${lvId}-scsi0`,
+				volume: `local-lvm:umiak-snap-${lvId}-scsi0`,
 				options: { discard: "on", iothread: "1", ssd: "1" },
 			},
 		]);
@@ -476,7 +476,7 @@ describe("PveNodeInfra lifecycle", () => {
 			`POST /nodes/${e.name}/qemu/500/agent/fsfreeze-freeze`,
 		);
 		expect((await e.infra.listLvs()).map((l) => l.name)).toContain(
-			`sbx-snap-${lvId}-scsi0`,
+			`umiak-snap-${lvId}-scsi0`,
 		);
 
 		await e.infra.delete(500, { expectedOwner: machineId });
@@ -681,7 +681,7 @@ describe("PveNodeInfra lifecycle", () => {
 				c.op === "lv.snapshot" &&
 				JSON.stringify(c.args).includes(`vm-${forked.vmid}-disk-0`),
 		);
-		expect(JSON.stringify(forkLv?.args)).toContain(`sbx-snap-${lvId}-scsi0`);
+		expect(JSON.stringify(forkLv?.args)).toContain(`umiak-snap-${lvId}-scsi0`);
 		expect(await e.infra.leaseOf(child)).toEqual({
 			vmid: forked.vmid,
 			mac: forked.mac,
@@ -695,7 +695,7 @@ describe("PveNodeInfra lifecycle", () => {
 		});
 		expect(
 			(await e.infra.listLvs()).filter((l) =>
-				l.tags.includes(`sbx-snap-${lvId}`),
+				l.tags.includes(`umiak-snap-${lvId}`),
 			),
 		).toEqual([]);
 	});
@@ -849,7 +849,7 @@ describe("PveNodeInfra lifecycle", () => {
 		).toEqual([]);
 	});
 
-	it("sbx-node busy during delete is transient; the VM survives and a retry finishes", async () => {
+	it("umiak-node busy during delete is transient; the VM survives and a retry finishes", async () => {
 		const m = randomUUID();
 		const { vmid } = await e.infra.create({
 			machineId: m,
@@ -931,7 +931,7 @@ describe("PveNodeInfra lifecycle", () => {
 
 	it("delete with expectedOwner null removes an orphan VM that has no lease", async () => {
 		e.api.vms.set(570, {
-			config: { tags: "sbx" },
+			config: { tags: "umiak" },
 			status: "running",
 			firewall: { rules: [], ipsets: {} },
 		});
@@ -1078,12 +1078,12 @@ describe("PveNodeInfra lifecycle", () => {
 			firewall: { rules: [], ipsets: {} },
 		});
 		e.api.vms.set(570, {
-			config: { tags: "sbx;extra" },
+			config: { tags: "umiak;extra" },
 			status: "running",
 			firewall: { rules: [], ipsets: {} },
 		});
 		e.api.vms.set(571, {
-			config: { tags: "sbx" },
+			config: { tags: "umiak" },
 			node: "elsewhere",
 			status: "running",
 			firewall: { rules: [], ipsets: {} },
@@ -1093,26 +1093,26 @@ describe("PveNodeInfra lifecycle", () => {
 		expect(vms.find((v) => v.vmid === vmid)).toEqual({
 			vmid,
 			status: "stopped",
-			pool: "sandbox",
-			tags: ["sbx"],
+			pool: "umiak",
+			tags: ["umiak"],
 			template: false,
 		});
-		expect(vms.find((v) => v.vmid === 570)?.tags).toEqual(["sbx", "extra"]);
+		expect(vms.find((v) => v.vmid === 570)?.tags).toEqual(["umiak", "extra"]);
 		expect(vms.find((v) => v.vmid === 599)?.template).toBe(true);
 	});
 
-	it("listLvs and removeLvs go through sbx-node", async () => {
+	it("listLvs and removeLvs go through umiak-node", async () => {
 		e.node.lvs.push(
-			{ name: "sbx-snap-aa-scsi0", tags: ["sbx", "sbx-snap-aa"] },
-			{ name: "vm-590-disk-0", tags: ["sbx", "sbx-vm-590"] },
+			{ name: "umiak-snap-aa-scsi0", tags: ["umiak", "umiak-snap-aa"] },
+			{ name: "vm-590-disk-0", tags: ["umiak", "umiak-vm-590"] },
 		);
 		expect(await e.infra.listLvs()).toEqual([
-			{ name: "sbx-snap-aa-scsi0", tags: ["sbx", "sbx-snap-aa"] },
-			{ name: "vm-590-disk-0", tags: ["sbx", "sbx-vm-590"] },
+			{ name: "umiak-snap-aa-scsi0", tags: ["umiak", "umiak-snap-aa"] },
+			{ name: "vm-590-disk-0", tags: ["umiak", "umiak-vm-590"] },
 		]);
 		await e.infra.removeLvs(["vm-590-disk-0"]);
 		await e.infra.removeLvs([]);
-		expect(e.node.lvs.map((l) => l.name)).toEqual(["sbx-snap-aa-scsi0"]);
+		expect(e.node.lvs.map((l) => l.name)).toEqual(["umiak-snap-aa-scsi0"]);
 		expect(e.node.ops().filter((o) => o === "lv.remove")).toHaveLength(1);
 	});
 });
@@ -1121,7 +1121,7 @@ describe("pveClientsFromSecrets", () => {
 	const KNOWN = (host: string) =>
 		`${host} ssh-ed25519 ${Buffer.from("fake-host-key").toString("base64")}\n`;
 
-	function writeSecrets(dir: string, host = "sbx-node") {
+	function writeSecrets(dir: string, host = "umiak-node") {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "pve-token"), "token-secret\n");
 		chmodSync(join(dir, "pve-token"), 0o600);
@@ -1129,15 +1129,15 @@ describe("pveClientsFromSecrets", () => {
 			join(dir, "pve-root-ca.pem"),
 			"-----BEGIN CERTIFICATE-----\n",
 		);
-		writeFileSync(join(dir, "sbx-node_ed25519"), "private key");
-		chmodSync(join(dir, "sbx-node_ed25519"), 0o600);
+		writeFileSync(join(dir, "umiak-node_ed25519"), "private key");
+		chmodSync(join(dir, "umiak-node_ed25519"), 0o600);
 		writeFileSync(join(dir, "known_hosts"), KNOWN(host));
 	}
 
 	it("reads <secretsDir>/<secret_ref>/ files and builds PveApi and SshNodeOps", async () => {
 		const topo = await createTopology(db.pool);
 		const t = await loadNodeTopology(db.pool, topo.nodeId);
-		const root = mkdtempSync(join(tmpdir(), "sbx-secrets-"));
+		const root = mkdtempSync(join(tmpdir(), "umiak-secrets-"));
 		writeSecrets(join(root, t.secretRef));
 		const c = await pveClientsFromSecrets(root, {})(t);
 		expect(c.api).toBeInstanceOf(PveApi);
@@ -1148,7 +1148,7 @@ describe("pveClientsFromSecrets", () => {
 	it("falls back to files directly in secretsDir when the secret_ref dir is absent", async () => {
 		const topo = await createTopology(db.pool);
 		const t = await loadNodeTopology(db.pool, topo.nodeId);
-		const root = mkdtempSync(join(tmpdir(), "sbx-secrets-"));
+		const root = mkdtempSync(join(tmpdir(), "umiak-secrets-"));
 		writeSecrets(root);
 		const c = await pveClientsFromSecrets(root, {})(t);
 		expect(c.api).toBeInstanceOf(PveApi);
@@ -1158,7 +1158,7 @@ describe("pveClientsFromSecrets", () => {
 	it("rejects a token file readable by others", async () => {
 		const topo = await createTopology(db.pool);
 		const t = await loadNodeTopology(db.pool, topo.nodeId);
-		const root = mkdtempSync(join(tmpdir(), "sbx-secrets-"));
+		const root = mkdtempSync(join(tmpdir(), "umiak-secrets-"));
 		writeSecrets(root);
 		chmodSync(join(root, "pve-token"), 0o644);
 		await expect(async () =>
@@ -1166,16 +1166,16 @@ describe("pveClientsFromSecrets", () => {
 		).rejects.toThrow(/mode 600/);
 	});
 
-	it("SBX_NODE_SSH_HOST overrides node_agent_ref as the SSH host", async () => {
+	it("UMIAK_NODE_SSH_HOST overrides node_agent_ref as the SSH host", async () => {
 		const topo = await createTopology(db.pool);
 		const t = await loadNodeTopology(db.pool, topo.nodeId);
-		const root = mkdtempSync(join(tmpdir(), "sbx-secrets-"));
+		const root = mkdtempSync(join(tmpdir(), "umiak-secrets-"));
 		writeSecrets(root, "pve.example.ts.net");
 		await expect(async () =>
 			pveClientsFromSecrets(root, {})(t),
-		).rejects.toThrow(/no pinned host key for sbx-node/);
+		).rejects.toThrow(/no pinned host key for umiak-node/);
 		const c = await pveClientsFromSecrets(root, {
-			SBX_NODE_SSH_HOST: "pve.example.ts.net",
+			UMIAK_NODE_SSH_HOST: "pve.example.ts.net",
 		})(t);
 		expect(c.node).toBeInstanceOf(SshNodeOps);
 		c.close?.();

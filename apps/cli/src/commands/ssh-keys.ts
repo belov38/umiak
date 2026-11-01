@@ -1,6 +1,6 @@
-// `sbx ssh-keys list|add [file]|rm <key>...` (S7 §11.3, §14.2): the SSH
+// `umiak ssh-keys list|add [file]|rm <key>...` (S7 §11.3, §14.2): the SSH
 // keys of the person logged in, for plain `ssh <slug>@<gateway>` without
-// sbx. Team keys have none (they use `sbx ssh` certificates).
+// umiak. Team keys have none (they use `umiak ssh` certificates).
 // - add: default ~/.ssh/id_ed25519.pub; the name is --name, else the key's
 //   comment, else the file name.
 // - rm: by id (`sshk_…`), name or fingerprint; a name of several keys is a
@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { components } from "@sbx/sdk";
+import type { components } from "@umiak/sdk";
 import type { Command } from "commander";
 import type { Context } from "../context.ts";
 import { CliError, usageError } from "../exit-codes.ts";
@@ -19,7 +19,7 @@ import type { Runner } from "../program.ts";
 type SshKey = components["schemas"]["SshKey"];
 
 async function listKeys(ctx: Context): Promise<SshKey[]> {
-	const { data } = await ctx.sbx().raw.GET("/v1/ssh-keys");
+	const { data } = await ctx.umiak().raw.GET("/v1/ssh-keys");
 	return data.data;
 }
 
@@ -47,7 +47,7 @@ async function keyId(
 	if (k === undefined) {
 		throw new CliError({
 			code: "not_found",
-			message: `no SSH key ${JSON.stringify(ref)}; see sbx ssh-keys list`,
+			message: `no SSH key ${JSON.stringify(ref)}; see umiak ssh-keys list`,
 			retryable: false,
 		});
 	}
@@ -68,7 +68,7 @@ export function register(program: Command, run: Runner): void {
 				const data = await listKeys(ctx);
 				ctx.out.result({ data }, (v) =>
 					v.data.length === 0
-						? "no SSH keys; add one with: sbx ssh-keys add"
+						? "no SSH keys; add one with: umiak ssh-keys add"
 						: table(
 								["NAME", "TYPE", "FINGERPRINT", "ID", "LAST USED"],
 								v.data.map((k) => [
@@ -106,7 +106,7 @@ export function register(program: Command, run: Runner): void {
 				const name =
 					(opts.name as string | undefined) ??
 					(comment === "" ? basename(file) : comment);
-				const { data } = await ctx.sbx().raw.POST("/v1/ssh-keys", {
+				const { data } = await ctx.umiak().raw.POST("/v1/ssh-keys", {
 					body: { name: name.slice(0, 100), publicKey: line },
 				});
 				ctx.out.result(
@@ -125,7 +125,7 @@ export function register(program: Command, run: Runner): void {
 				const cache: { keys?: SshKey[] } = {};
 				for (const ref of args[0] as string[]) {
 					const id = await keyId(ctx, ref, cache);
-					await ctx.sbx().raw.DELETE("/v1/ssh-keys/{key}", {
+					await ctx.umiak().raw.DELETE("/v1/ssh-keys/{key}", {
 						params: { path: { key: id } },
 					});
 					ctx.out.result({ id, deleted: true }, (v) => `removed ${v.id}`);

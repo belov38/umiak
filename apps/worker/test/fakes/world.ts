@@ -2,14 +2,14 @@
 // which plays the guest agent and the gateway when a fake VM starts.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
-import { StaticConfigReader } from "@sbx/config";
+import { StaticConfigReader } from "@umiak/config";
 import {
 	ingestAgentEvents,
 	type JobSender,
 	KeyRing,
 	RecordingJobSender,
-} from "@sbx/core";
-import type { TestDatabase } from "@sbx/db/testing";
+} from "@umiak/core";
+import type { TestDatabase } from "@umiak/db/testing";
 import type pg from "pg";
 import {
 	createLogger,
@@ -158,7 +158,7 @@ export class FakeAgentWorld implements VmLifecycle {
 		const parts = vm.serial.split(":");
 		if (
 			parts.length !== 3 ||
-			parts[0] !== "sbx1" ||
+			parts[0] !== "umiak1" ||
 			parts[1] !== vm.machineId
 		) {
 			return false;
@@ -294,7 +294,7 @@ export async function createTopology(
 	);
 	await q.query(
 		`INSERT INTO runtime.nodes (id, provider_id, name, ram_cap_mb, clone_concurrency, node_agent_ref)
-		 VALUES ($1, $2, $3, $4, $5, 'sbx-node')`,
+		 VALUES ($1, $2, $3, $4, $5, 'umiak-node')`,
 		[
 			nodeId,
 			providerId,
@@ -519,7 +519,7 @@ export async function insertSandbox(
 		         CASE WHEN $12 = 'degraded' THEN now() ELSE NULL END)`,
 		[
 			id,
-			`sbx-${id.slice(0, 8)}`,
+			`umiak-${id.slice(0, 8)}`,
 			randomUUID(),
 			w.topo.templateSlug,
 			w.topo.templateBuildId,

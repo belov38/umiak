@@ -2,17 +2,17 @@
 // uses (api and Keycloak), and small JSON helpers for the anonymous calls
 // (`/v1/meta`, the OIDC endpoints).
 //
-// `--cacert <file>` / SBX_CA_FILE: a PEM bundle of a private CA. The trusted
+// `--cacert <file>` / UMIAK_CA_FILE: a PEM bundle of a private CA. The trusted
 // roots of the CLI's requests become Node's bundled roots
 // (`tls.rootCertificates`, Mozilla's list) plus that PEM: the OS trust store
 // is no longer consulted, so a corporate root installed only in the OS must
 // be in the PEM too. The bundled roots stay because Keycloak and the api may
 // sit behind different CAs. Bun takes it as `fetch(req, {tls: {ca}})`, and
-// the PTY WebSocket of `sbx shell` as `new WebSocket(url, {tls: {ca}})`.
+// the PTY WebSocket of `umiak shell` as `new WebSocket(url, {tls: {ca}})`.
 
 import { readFileSync } from "node:fs";
 import { rootCertificates } from "node:tls";
-import { NETWORK_ERROR, SbxError, type WebSocketFactory } from "@sbx/sdk";
+import { NETWORK_ERROR, UmiakError, type WebSocketFactory } from "@umiak/sdk";
 import { usageError } from "./exit-codes.ts";
 
 export type Fetch = (req: Request) => Promise<Response>;
@@ -46,7 +46,7 @@ export function caFetch(caFile: string | undefined): Fetch {
 }
 
 /**
- * The SDK's WebSocket factory (the PTY of `sbx shell`) with the same roots,
+ * The SDK's WebSocket factory (the PTY of `umiak shell`) with the same roots,
  * or undefined (the SDK default) without a CA file. `tls` is Bun's
  * extension of the WebSocket constructor options.
  */
@@ -76,7 +76,7 @@ export function deadline(ms: number): { signal: AbortSignal; clear(): void } {
 }
 
 /**
- * Sends a request; a failure to connect is SbxError `network_error` (retryable).
+ * Sends a request; a failure to connect is UmiakError `network_error` (retryable).
  * Pass the original deadline signal to wait for its abort directly: Request's
  * weak link to its controller can disappear under GC while a fetch is pending.
  */
@@ -98,7 +98,7 @@ export async function send(
 		});
 		return await Promise.race([f(req), aborted]);
 	} catch (err) {
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: NETWORK_ERROR,
 			message: `${req.method} ${req.url}: ${(err as Error).message}`,
@@ -111,7 +111,7 @@ export async function send(
 }
 
 /** The API error of a non-2xx answer (envelope of S7 §5.5, or `unexpected_response`). */
-export async function apiError(res: Response): Promise<SbxError> {
+export async function apiError(res: Response): Promise<UmiakError> {
 	const text = await res.text().catch(() => "");
 	let body: unknown;
 	try {
@@ -122,7 +122,7 @@ export async function apiError(res: Response): Promise<SbxError> {
 	const e = (body as { error?: Record<string, unknown> } | undefined)?.error;
 	const requestId = res.headers.get("request-id");
 	if (typeof e === "object" && e !== null && typeof e.code === "string") {
-		return new SbxError({
+		return new UmiakError({
 			status: res.status,
 			code: e.code,
 			message: typeof e.message === "string" ? e.message : e.code,
@@ -134,7 +134,7 @@ export async function apiError(res: Response): Promise<SbxError> {
 			requestId: typeof e.requestId === "string" ? e.requestId : requestId,
 		});
 	}
-	return new SbxError({
+	return new UmiakError({
 		status: res.status,
 		code: "unexpected_response",
 		message: `HTTP ${res.status}: ${text.slice(0, 200)}`,

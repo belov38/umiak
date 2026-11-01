@@ -9,7 +9,7 @@ import (
 )
 
 func warning(n int) string {
-	return "sbx: gateway restarting, this SSH session will close in " + strconv.Itoa(n) + " min; reconnect to continue"
+	return "umiak: gateway restarting, this SSH session will close in " + strconv.Itoa(n) + " min; reconnect to continue"
 }
 
 func drainServer(t *testing.T, clk *fakeClock, mod func(*Config)) *Server {

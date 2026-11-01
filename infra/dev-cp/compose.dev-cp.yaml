@@ -4,7 +4,7 @@
 # deploy/compose (the directory of the first compose file).
 #
 # Tailscale Serve terminates TLS on the CT and forwards to loopback ports (names.sh):
-#   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/* and /sbx-auth/* -> api,
+#   https://<TS name>:8443/    -> 127.0.0.1:4180 oauth2-proxy (/api/* and /umiak-auth/* -> api,
 #                                 the rest -> web, S8)
 #   https://<TS name>:8443/v1  -> 127.0.0.1:8080 api public listener (path kept)
 #   https://<TS name>:8443/mcp -> 127.0.0.1:8090 MCP server (S11; path kept, plus the protected
@@ -21,49 +21,49 @@
 x-devcp-proxy-cidrs: &devcp-proxy-cidrs 172.16.0.0/12,127.0.0.1/32
 
 services:
-  # turn (desktop profile) takes SBX_TURN_* from .env (deploy.sh): its published ports and
+  # turn (desktop profile) takes UMIAK_TURN_* from .env (deploy.sh): its published ports and
   # sysctls are interpolated in deploy/compose/turn.yaml, not only its environment.
 
-  # sbx.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/sbx.yaml).
+  # umiak.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/umiak.yaml).
   migrate:
     volumes:
-      - ./secrets/devcp/sbx.yaml:/etc/sbx/sbx.yaml:ro
+      - ./secrets/devcp/umiak.yaml:/etc/umiak/umiak.yaml:ro
 
-  # The worker reads templates, sizes and quotas from Payload (S8); sbx.yaml is only for migrate.
+  # The worker reads templates, sizes and quotas from Payload (S8); umiak.yaml is only for migrate.
   worker:
     environment:
       # The tunnel URL that the worker writes into smbios family (S5 §14) of every new machine.
-      SBX_TURN_URLS: ${SBX_DEVCP_TURN_URLS:?set by deploy.sh}
-      SBX_TUNNEL_URL: ${SBX_TUNNEL_URL:?set by deploy.sh}
+      UMIAK_TURN_URLS: ${UMIAK_DEVCP_TURN_URLS:?set by deploy.sh}
+      UMIAK_TUNNEL_URL: ${UMIAK_TUNNEL_URL:?set by deploy.sh}
       # The port domain that the worker passes to agents in Claim (port_domain).
-      SBX_PORT_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
+      UMIAK_PORT_DOMAIN: ${UMIAK_PORT_DOMAIN:?set by deploy.sh}
 
   # The gateway certificates: deploy.sh puts the dev CA (infra/dev-cp/dev-ca.sh) into
-  # secrets/gateway, dev-secrets issues the tunnel and *.sbx. certificates with it.
+  # secrets/gateway, dev-secrets issues the tunnel and *.umiak. certificates with it.
   gateway-secrets:
     command: !override
       - dev-secrets
       - -dir=/secrets
-      - -domain=${SBX_PORT_DOMAIN:?set by deploy.sh}
-      - -tunnel-host=${SBX_DEVCP_TUNNEL_HOST:?set by deploy.sh}
-      - -ssh-host=${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
+      - -domain=${UMIAK_PORT_DOMAIN:?set by deploy.sh}
+      - -tunnel-host=${UMIAK_DEVCP_TUNNEL_HOST:?set by deploy.sh}
+      - -ssh-host=${UMIAK_DEVCP_SSH_HOST:?set by deploy.sh}
       - -owner=65532:65532
       - -worker-owner=1000:1000
 
   gateway:
     environment:
-      SBX_GATEWAY_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
-      SBX_GATEWAY_TUNNEL_HOST: ${SBX_DEVCP_TUNNEL_HOST:?set by deploy.sh}
-      SBX_GATEWAY_SSH_HOST: ${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
+      UMIAK_GATEWAY_UMIAK_DOMAIN: ${UMIAK_PORT_DOMAIN:?set by deploy.sh}
+      UMIAK_GATEWAY_TUNNEL_HOST: ${UMIAK_DEVCP_TUNNEL_HOST:?set by deploy.sh}
+      UMIAK_GATEWAY_SSH_HOST: ${UMIAK_DEVCP_SSH_HOST:?set by deploy.sh}
       # Port SSO (S4 §8.4): a private preview sends the browser to the api behind oauth2-proxy.
       # The preview domain (sslip.io) and the dashboard (ts.net) are different sites, so the
       # port cookie needs SameSite=None (S4 §8.2) to work in the dashboard iframe.
-      SBX_GATEWAY_AUTH_URL: ${SBX_GATEWAY_AUTH_URL:?set by deploy.sh}
-      SBX_GATEWAY_COOKIE_CROSS_SITE: "true"
+      UMIAK_GATEWAY_AUTH_URL: ${UMIAK_GATEWAY_AUTH_URL:?set by deploy.sh}
+      UMIAK_GATEWAY_COOKIE_CROSS_SITE: "true"
       # One gateway on the CT: there is no peer to drain tunnels and SSH sessions to, and the
       # product drain (up to 950 s, stop_grace_period 960 s) would keep the old container, and
       # the worker waiting on it, down for 16 minutes on every deploy that recreates it.
-      SBX_GATEWAY_DRAIN_TIMEOUT: 20s
+      UMIAK_GATEWAY_DRAIN_TIMEOUT: 20s
     stop_grace_period: 30s
     # Public listeners on all addresses of the CT (its firewall admits only the LAN; sandboxes
     # reach only 443). 443 serves the tunnel host on the LAN address and the previews on the
@@ -85,37 +85,37 @@ services:
     mem_limit: 1200m
     environment:
       JAVA_OPTS_KC_HEAP: -Xms128m -Xmx512m
-      KC_HOSTNAME: ${SBX_KEYCLOAK_URL:?set by deploy.sh}
+      KC_HOSTNAME: ${UMIAK_KEYCLOAK_URL:?set by deploy.sh}
       KC_HTTP_ENABLED: "true"
-      SBX_KEYCLOAK_PROXY_HEADERS: xforwarded
-      SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES: *devcp-proxy-cidrs
-      SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:?set by deploy.sh}
-      SBX_OAUTH2_PROXY_REDIRECT_URL: ${SBX_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
+      UMIAK_KEYCLOAK_PROXY_HEADERS: xforwarded
+      UMIAK_KEYCLOAK_PROXY_TRUSTED_ADDRESSES: *devcp-proxy-cidrs
+      UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:?set by deploy.sh}
+      UMIAK_OAUTH2_PROXY_REDIRECT_URL: ${UMIAK_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
 
   # S7: the public listener behind Serve (:8443/v1). /v1/meta tells the CLI and SDK the public
   # names; OIDC discovery and keys come from Keycloak inside the network (base). Tailscale-User-*
   # headers from Serve are never an identity (the api reads only Authorization here).
   api:
     environment:
-      SBX_API_URL: ${SBX_API_PUBLIC_URL:?set by deploy.sh}
-      SBX_APP_URL: ${SBX_APP_ORIGIN:?set by deploy.sh}
-      SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:?set by deploy.sh}
-      SBX_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
-      SBX_SSH_HOST: ${SBX_DEVCP_SSH_HOST:?set by deploy.sh}
-      SBX_SSH_PORT: "2222"
-      SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}
-      SBX_API_TRUSTED_PROXY_CIDRS: *devcp-proxy-cidrs
+      UMIAK_API_URL: ${UMIAK_API_PUBLIC_URL:?set by deploy.sh}
+      UMIAK_APP_URL: ${UMIAK_APP_ORIGIN:?set by deploy.sh}
+      UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:?set by deploy.sh}
+      UMIAK_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN:?set by deploy.sh}
+      UMIAK_SSH_HOST: ${UMIAK_DEVCP_SSH_HOST:?set by deploy.sh}
+      UMIAK_SSH_PORT: "2222"
+      UMIAK_OIDC_ISSUER: ${UMIAK_OIDC_ISSUER:?set by deploy.sh}
+      UMIAK_API_TRUSTED_PROXY_CIDRS: *devcp-proxy-cidrs
 
   # S7: browser sessions behind Serve (:8443/). HTTPS on the Serve name: a Secure __Host- cookie
   # (host-only, Path=/). Login goes to the public issuer; redeem, JWKS and profile stay on
   # http://keycloak:8080 (oauth2-proxy.yaml, skipDiscovery).
   oauth2-proxy:
     environment:
-      SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}
-      OAUTH2_PROXY_REDIRECT_URL: ${SBX_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
+      UMIAK_OIDC_ISSUER: ${UMIAK_OIDC_ISSUER:?set by deploy.sh}
+      OAUTH2_PROXY_REDIRECT_URL: ${UMIAK_OAUTH2_PROXY_REDIRECT_URL:?set by deploy.sh}
       # The app (post-login) and Keycloak (web's sign-out goes on to its end-session page).
-      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SBX_DEVCP_TS_NAME:?set by deploy.sh}:8443,${SBX_DEVCP_TS_NAME:?set by deploy.sh}:10000
-      OAUTH2_PROXY_COOKIE_NAME: __Host-sbx_session
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${UMIAK_DEVCP_TS_NAME:?set by deploy.sh}:8443,${UMIAK_DEVCP_TS_NAME:?set by deploy.sh}:10000
+      OAUTH2_PROXY_COOKIE_NAME: __Host-umiak_session
       OAUTH2_PROXY_COOKIE_SECURE: "true"
       OAUTH2_PROXY_REVERSE_PROXY: "true"
 
@@ -125,18 +125,18 @@ services:
   # Sign-out: oauth2-proxy, then Keycloak's end-session page, back to the app origin (names.sh).
   web:
     environment:
-      SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:?set by deploy.sh}
-      SBX_SBX_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
-      SBX_API_PUBLIC_URL: ${SBX_API_PUBLIC_URL:?set by deploy.sh}
-      SBX_LOGOUT_URL: ${SBX_LOGOUT_URL:?set by deploy.sh}
+      UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:?set by deploy.sh}
+      UMIAK_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN:?set by deploy.sh}
+      UMIAK_API_PUBLIC_URL: ${UMIAK_API_PUBLIC_URL:?set by deploy.sh}
+      UMIAK_LOGOUT_URL: ${UMIAK_LOGOUT_URL:?set by deploy.sh}
 
   # S11: the remote MCP server behind Serve (:8443/mcp). The public URL is what MCP clients use
   # and what the protected resource metadata names. Serve may pass the Host header either as the
   # MagicDNS name (with :8443) or as the target (127.0.0.1:8090); the Host allowlist admits both
   # and nothing else. Calls reach the api as http://api:8080 inside the network, with the
-  # caller's own bearer token. Keycloak issues for the public issuer (SBX_OIDC_ISSUER).
+  # caller's own bearer token. Keycloak issues for the public issuer (UMIAK_OIDC_ISSUER).
   mcp:
     environment:
-      SBX_MCP_PUBLIC_URL: ${SBX_MCP_PUBLIC_URL:?set by deploy.sh}
-      SBX_MCP_ALLOWED_HOSTS: ${SBX_DEVCP_TS_NAME:?set by deploy.sh}:8443,${SBX_DEVCP_TS_NAME},127.0.0.1:8090
-      SBX_OIDC_ISSUER: ${SBX_OIDC_ISSUER:?set by deploy.sh}
+      UMIAK_MCP_PUBLIC_URL: ${UMIAK_MCP_PUBLIC_URL:?set by deploy.sh}
+      UMIAK_MCP_ALLOWED_HOSTS: ${UMIAK_DEVCP_TS_NAME:?set by deploy.sh}:8443,${UMIAK_DEVCP_TS_NAME},127.0.0.1:8090
+      UMIAK_OIDC_ISSUER: ${UMIAK_OIDC_ISSUER:?set by deploy.sh}

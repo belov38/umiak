@@ -1,4 +1,4 @@
-// SBX_IDENTITY_FILE loaded into Payload (S8 plan decision 5): the format
+// UMIAK_IDENTITY_FILE loaded into Payload (S8 plan decision 5): the format
 // and upsert semantics of seedIdentity of the stand-in
 // (packages/auth/src/seed.ts). Upsert only: rows missing from the file are
 // kept, a revoked key stays revoked, JIT bindings (idpSubject, personal
@@ -9,13 +9,13 @@
 // Teams, users and keys keep the ids of the file. The Local API cannot
 // create a row with a given id, so new rows are inserted by SQL and the
 // NOTIFY of the create hooks is sent here; updates and memberships go
-// through the Local API (hooks notify, sbx_ssh_revoke on a deactivation).
+// through the Local API (hooks notify, umiak_ssh_revoke on a deactivation).
 import {
 	PRESETS,
 	parseIdentityFile,
 	type Scope,
 	type SeedResult,
-} from "@sbx/auth";
+} from "@umiak/auth";
 import type { Payload, PayloadRequest } from "payload";
 import { notify } from "../notify.ts";
 import { inTransaction, rows, sql, tbl, toDate } from "./db.ts";
@@ -47,8 +47,8 @@ export async function seedPayloadIdentity(
 						    VALUES (${team.id}, ${team.name}, false)`,
 						req,
 					);
-					await notify(req, "sbx_identity", `teams:${team.id}`);
-					await notify(req, "sbx_config", `teams:${team.id}`);
+					await notify(req, "umiak_identity", `teams:${team.id}`);
+					await notify(req, "umiak_config", `teams:${team.id}`);
 				} else if (cur[0].name !== team.name) {
 					await update(req, "teams", team.id, { name: team.name });
 				}
@@ -74,7 +74,7 @@ export async function seedPayloadIdentity(
 						    VALUES (${u.id}, ${u.email}, ${u.name ?? null}, ${u.active ?? true})`,
 						req,
 					);
-					await notify(req, "sbx_identity", `users:${u.id}`);
+					await notify(req, "umiak_identity", `users:${u.id}`);
 				} else {
 					const patch: Record<string, unknown> = {};
 					// After the first login the IdP owns the email (S8 §5.3).
@@ -124,7 +124,7 @@ export async function seedPayloadIdentity(
 						            ${k.last4}, ${JSON.stringify(scopes)}::jsonb, 'api', ${expiresAt.toISOString()})`,
 						req,
 					);
-					await notify(req, "sbx_identity", `api-keys:${k.id}`);
+					await notify(req, "umiak_identity", `api-keys:${k.id}`);
 					continue;
 				}
 				const patch: Record<string, unknown> = {};

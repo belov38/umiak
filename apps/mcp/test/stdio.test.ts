@@ -2,7 +2,7 @@
 // principal lookup, stdio cancellation semantics (spec 10.2) and a clean
 // stdout.
 import { PassThrough } from "node:stream";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolError } from "../src/errors.ts";
 import { pinnedInstructions } from "../src/instructions.ts";
@@ -41,7 +41,7 @@ async function setup(
 		await api.close();
 		expect(api.contractErrors).toEqual([]);
 	});
-	const sbx = new Sbx({
+	const umiak = new Umiak({
 		baseUrl: api.url,
 		apiKey: o.token ?? FAKE_TOKENS.oidc,
 		env: {},
@@ -55,7 +55,7 @@ async function setup(
 	});
 	const { token: _token, ...rest } = o;
 	const server = await runStdio({
-		sbx: () => sbx,
+		umiak: () => umiak,
 		log,
 		stdin,
 		stdout,
@@ -101,7 +101,7 @@ describe("runStdio", () => {
 	it("answers initialize and tools/list with all 38 tools for a person", async () => {
 		const { rpc } = await setup();
 		const init = await rpc.initialize();
-		expect(init.serverInfo).toMatchObject({ name: "sbx" });
+		expect(init.serverInfo).toMatchObject({ name: "umiak" });
 		expect(await toolNames(rpc)).toEqual(ALL_TOOLS.map((t) => t.name));
 		expect(ALL_TOOLS).toHaveLength(38);
 		expect(rpc.garbage).toEqual([]);
@@ -123,10 +123,10 @@ describe("runStdio", () => {
 
 	it("without a login: tools/list still lists every tool, a call answers not_logged_in", async () => {
 		const { rpc, logs } = await setup({
-			sbx: () => {
+			umiak: () => {
 				throw new ToolError({
 					code: "not_logged_in",
-					message: "run `sbx login` in a terminal, then retry",
+					message: "run `umiak login` in a terminal, then retry",
 				});
 			},
 		});
@@ -135,7 +135,7 @@ describe("runStdio", () => {
 		const r = await rpc.callTool("limits_get");
 		expect(r.isError).toBe(true);
 		expect(r.text).toContain("error: not_logged_in");
-		expect(r.text).toContain("run `sbx login` in a terminal");
+		expect(r.text).toContain("run `umiak login` in a terminal");
 		expect(logs).toContainEqual(
 			expect.objectContaining({
 				msg: "principal unknown, listing every tool",
@@ -159,13 +159,13 @@ describe("runStdio", () => {
 			}
 			return fetch(req);
 		};
-		const sbx = new Sbx({
+		const umiak = new Umiak({
 			baseUrl: api.url,
 			apiKey: FAKE_TOKENS.readOnly,
 			env: {},
 			fetch: hanging,
 		});
-		const s = await setup({ sbx: () => sbx });
+		const s = await setup({ umiak: () => umiak });
 		const started = Date.now();
 		await s.rpc.initialize();
 		expect(await toolNames(s.rpc)).toHaveLength(38);

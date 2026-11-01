@@ -2,7 +2,7 @@
 // environment is a fatal error that lists every problem.
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { loadSshCa, loadSshHostKeys, type SshCa } from "@sbx/auth";
+import { loadSshCa, loadSshHostKeys, type SshCa } from "@umiak/auth";
 import { z } from "zod";
 
 export class SettingsError extends Error {
@@ -56,13 +56,13 @@ export interface Settings {
 	gatewayTokenFile: string | null;
 	identityFile: string | null;
 	operatorGroups: string[];
-	/** Null when SBX_OIDC_ISSUER is not set: Keycloak JWTs are not accepted. */
+	/** Null when UMIAK_OIDC_ISSUER is not set: Keycloak JWTs are not accepted. */
 	oidc: OidcSettings | null;
 	/** Origin the proxied listener accepts for unsafe methods and upgrades. */
 	appOrigin: string;
 	apiUrl: string;
 	appUrl: string;
-	sbxDomain: string;
+	umiakDomain: string;
 	sshHost: string;
 	sshPort: number;
 	sshHostKeysFile: string | null;
@@ -185,44 +185,47 @@ const version = z.preprocess(
 );
 
 const schema = z.object({
-	SBX_API_PUBLIC_PORT: port(8080),
-	SBX_API_PROXIED_PORT: port(8081),
-	SBX_API_INTERNAL_PORT: port(8082),
-	SBX_API_METRICS_PORT: port(9090),
-	SBX_API_PROXIED_ENABLED: bool(true),
+	UMIAK_API_PUBLIC_PORT: port(8080),
+	UMIAK_API_PROXIED_PORT: port(8081),
+	UMIAK_API_INTERNAL_PORT: port(8082),
+	UMIAK_API_METRICS_PORT: port(9090),
+	UMIAK_API_PROXIED_ENABLED: bool(true),
 	DATABASE_URL: url("postgres connection string", ["postgres:", "postgresql:"]),
 	PAYLOAD_SECRET: required("secret of the Payload config, as web"),
-	SBX_DATA_KEYS_FILE: required("path of the data key ring JSON"),
-	SBX_API_CURSOR_KEY: cursorKey,
-	SBX_API_SERVICE_TOKENS_FILE: required("path of the service tokens JSON"),
-	SBX_API_GATEWAY_TOKEN_FILE: optional,
-	SBX_IDENTITY_FILE: optional,
-	SBX_OPERATOR_GROUPS: csv(""),
-	SBX_OIDC_ISSUER: optionalUrl,
-	SBX_OIDC_DISCOVERY_URL: optionalUrl,
-	SBX_OIDC_JWKS_URL: optionalUrl,
-	SBX_OIDC_AUDIENCE: z.preprocess(unsetEmpty, z.string().default("sbx-api")),
-	SBX_OIDC_ALLOWED_CLIENTS: csv("sbx-cli,sbx-mcp"),
-	SBX_APP_ORIGIN: optionalUrl,
-	SBX_API_URL: url("public URL of the API, https://api.<domain>"),
-	SBX_APP_URL: url("URL of the dashboard, https://app.<domain>"),
-	SBX_SBX_DOMAIN: required("domain of sandbox ports, <domain>").refine(
+	UMIAK_DATA_KEYS_FILE: required("path of the data key ring JSON"),
+	UMIAK_API_CURSOR_KEY: cursorKey,
+	UMIAK_API_SERVICE_TOKENS_FILE: required("path of the service tokens JSON"),
+	UMIAK_API_GATEWAY_TOKEN_FILE: optional,
+	UMIAK_IDENTITY_FILE: optional,
+	UMIAK_OPERATOR_GROUPS: csv(""),
+	UMIAK_OIDC_ISSUER: optionalUrl,
+	UMIAK_OIDC_DISCOVERY_URL: optionalUrl,
+	UMIAK_OIDC_JWKS_URL: optionalUrl,
+	UMIAK_OIDC_AUDIENCE: z.preprocess(
+		unsetEmpty,
+		z.string().default("umiak-api"),
+	),
+	UMIAK_OIDC_ALLOWED_CLIENTS: csv("umiak-cli,umiak-mcp"),
+	UMIAK_APP_ORIGIN: optionalUrl,
+	UMIAK_API_URL: url("public URL of the API, https://api.<domain>"),
+	UMIAK_APP_URL: url("URL of the dashboard, https://app.<domain>"),
+	UMIAK_PREVIEW_DOMAIN: required("domain of sandbox ports, <domain>").refine(
 		(v) => /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(v),
 		{ message: "must be a lower-case DNS name" },
 	),
-	SBX_SSH_HOST: optional,
-	SBX_SSH_PORT: int(22, 1, 65535),
-	SBX_SSH_HOST_KEYS_FILE: optional,
-	SBX_SSH_LOGIN_CA_KEY_FILE: optional,
-	SBX_API_TRUSTED_PROXY_CIDRS: cidrs,
-	SBX_API_RATE_RPS: int(20, 1, 1_000_000),
-	SBX_API_RATE_BURST: int(100, 1, 1_000_000),
-	SBX_API_RATE_STARTS_PER_MIN: int(30, 1, 1_000_000),
-	SBX_API_MAX_STREAMS: int(100, 1, 1_000_000),
-	SBX_MIN_CLI_VERSION: version,
-	SBX_LATEST_CLI_VERSION: version,
-	SBX_BUILD: z.preprocess(unsetEmpty, z.string().default("dev")),
-	SBX_LOG_LEVEL: z.preprocess(
+	UMIAK_SSH_HOST: optional,
+	UMIAK_SSH_PORT: int(22, 1, 65535),
+	UMIAK_SSH_HOST_KEYS_FILE: optional,
+	UMIAK_SSH_LOGIN_CA_KEY_FILE: optional,
+	UMIAK_API_TRUSTED_PROXY_CIDRS: cidrs,
+	UMIAK_API_RATE_RPS: int(20, 1, 1_000_000),
+	UMIAK_API_RATE_BURST: int(100, 1, 1_000_000),
+	UMIAK_API_RATE_STARTS_PER_MIN: int(30, 1, 1_000_000),
+	UMIAK_API_MAX_STREAMS: int(100, 1, 1_000_000),
+	UMIAK_MIN_CLI_VERSION: version,
+	UMIAK_LATEST_CLI_VERSION: version,
+	UMIAK_BUILD: z.preprocess(unsetEmpty, z.string().default("dev")),
+	UMIAK_LOG_LEVEL: z.preprocess(
 		unsetEmpty,
 		z
 			.enum(LOG_LEVELS, {
@@ -240,10 +243,13 @@ export function loadSettings(
 	const lines = r.success
 		? []
 		: r.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`);
-	if (r.success && r.data.SBX_OIDC_ISSUER === undefined) {
-		for (const k of ["SBX_OIDC_DISCOVERY_URL", "SBX_OIDC_JWKS_URL"] as const) {
+	if (r.success && r.data.UMIAK_OIDC_ISSUER === undefined) {
+		for (const k of [
+			"UMIAK_OIDC_DISCOVERY_URL",
+			"UMIAK_OIDC_JWKS_URL",
+		] as const) {
 			if (r.data[k] !== undefined) {
-				lines.push(`  ${k}: requires SBX_OIDC_ISSUER`);
+				lines.push(`  ${k}: requires UMIAK_OIDC_ISSUER`);
 			}
 		}
 	}
@@ -251,57 +257,57 @@ export function loadSettings(
 		throw new SettingsError(`invalid environment:\n${lines.join("\n")}`);
 	}
 	const e = r.data;
-	const issuer = e.SBX_OIDC_ISSUER?.replace(/\/+$/, "");
+	const issuer = e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "");
 	return {
-		publicPort: e.SBX_API_PUBLIC_PORT,
-		proxiedPort: e.SBX_API_PROXIED_PORT,
-		internalPort: e.SBX_API_INTERNAL_PORT,
-		metricsPort: e.SBX_API_METRICS_PORT,
-		proxiedEnabled: e.SBX_API_PROXIED_ENABLED,
+		publicPort: e.UMIAK_API_PUBLIC_PORT,
+		proxiedPort: e.UMIAK_API_PROXIED_PORT,
+		internalPort: e.UMIAK_API_INTERNAL_PORT,
+		metricsPort: e.UMIAK_API_METRICS_PORT,
+		proxiedEnabled: e.UMIAK_API_PROXIED_ENABLED,
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
-		dataKeysFile: e.SBX_DATA_KEYS_FILE,
-		cursorKey: e.SBX_API_CURSOR_KEY,
-		serviceTokensFile: e.SBX_API_SERVICE_TOKENS_FILE,
-		gatewayTokenFile: e.SBX_API_GATEWAY_TOKEN_FILE ?? null,
-		identityFile: e.SBX_IDENTITY_FILE ?? null,
-		operatorGroups: e.SBX_OPERATOR_GROUPS,
+		dataKeysFile: e.UMIAK_DATA_KEYS_FILE,
+		cursorKey: e.UMIAK_API_CURSOR_KEY,
+		serviceTokensFile: e.UMIAK_API_SERVICE_TOKENS_FILE,
+		gatewayTokenFile: e.UMIAK_API_GATEWAY_TOKEN_FILE ?? null,
+		identityFile: e.UMIAK_IDENTITY_FILE ?? null,
+		operatorGroups: e.UMIAK_OPERATOR_GROUPS,
 		oidc:
 			issuer === undefined
 				? null
 				: {
 						issuer,
 						discoveryUrl:
-							e.SBX_OIDC_DISCOVERY_URL ??
+							e.UMIAK_OIDC_DISCOVERY_URL ??
 							`${issuer}/.well-known/openid-configuration`,
-						jwksUrl: e.SBX_OIDC_JWKS_URL ?? null,
-						audience: e.SBX_OIDC_AUDIENCE,
-						allowedClients: e.SBX_OIDC_ALLOWED_CLIENTS,
+						jwksUrl: e.UMIAK_OIDC_JWKS_URL ?? null,
+						audience: e.UMIAK_OIDC_AUDIENCE,
+						allowedClients: e.UMIAK_OIDC_ALLOWED_CLIENTS,
 					},
-		appOrigin: new URL(e.SBX_APP_ORIGIN ?? e.SBX_APP_URL).origin,
-		apiUrl: e.SBX_API_URL.replace(/\/+$/, ""),
-		appUrl: e.SBX_APP_URL.replace(/\/+$/, ""),
-		sbxDomain: e.SBX_SBX_DOMAIN,
-		sshHost: e.SBX_SSH_HOST ?? `ssh.${e.SBX_SBX_DOMAIN}`,
-		sshPort: e.SBX_SSH_PORT,
-		sshHostKeysFile: e.SBX_SSH_HOST_KEYS_FILE ?? null,
-		sshLoginCaKeyFile: e.SBX_SSH_LOGIN_CA_KEY_FILE ?? null,
-		trustedProxyCidrs: e.SBX_API_TRUSTED_PROXY_CIDRS,
+		appOrigin: new URL(e.UMIAK_APP_ORIGIN ?? e.UMIAK_APP_URL).origin,
+		apiUrl: e.UMIAK_API_URL.replace(/\/+$/, ""),
+		appUrl: e.UMIAK_APP_URL.replace(/\/+$/, ""),
+		umiakDomain: e.UMIAK_PREVIEW_DOMAIN,
+		sshHost: e.UMIAK_SSH_HOST ?? `ssh.${e.UMIAK_PREVIEW_DOMAIN}`,
+		sshPort: e.UMIAK_SSH_PORT,
+		sshHostKeysFile: e.UMIAK_SSH_HOST_KEYS_FILE ?? null,
+		sshLoginCaKeyFile: e.UMIAK_SSH_LOGIN_CA_KEY_FILE ?? null,
+		trustedProxyCidrs: e.UMIAK_API_TRUSTED_PROXY_CIDRS,
 		rate: {
-			rps: e.SBX_API_RATE_RPS,
-			burst: e.SBX_API_RATE_BURST,
-			startsPerMinute: e.SBX_API_RATE_STARTS_PER_MIN,
+			rps: e.UMIAK_API_RATE_RPS,
+			burst: e.UMIAK_API_RATE_BURST,
+			startsPerMinute: e.UMIAK_API_RATE_STARTS_PER_MIN,
 		},
-		maxStreams: e.SBX_API_MAX_STREAMS,
-		minCliVersion: e.SBX_MIN_CLI_VERSION ?? null,
-		latestCliVersion: e.SBX_LATEST_CLI_VERSION ?? null,
-		build: e.SBX_BUILD,
-		logLevel: e.SBX_LOG_LEVEL,
+		maxStreams: e.UMIAK_API_MAX_STREAMS,
+		minCliVersion: e.UMIAK_MIN_CLI_VERSION ?? null,
+		latestCliVersion: e.UMIAK_LATEST_CLI_VERSION ?? null,
+		build: e.UMIAK_BUILD,
+		logLevel: e.UMIAK_LOG_LEVEL,
 	};
 }
 
 /**
- * Public host keys of the gateway for `/v1/meta` (SBX_SSH_HOST_KEYS_FILE);
+ * Public host keys of the gateway for `/v1/meta` (UMIAK_SSH_HOST_KEYS_FILE);
  * an empty list without the file. A missing or invalid file is fatal.
  */
 export function readHostKeys(file: string | null): string[] {
@@ -309,7 +315,7 @@ export function readHostKeys(file: string | null): string[] {
 }
 
 /**
- * The SSH login CA (SBX_SSH_LOGIN_CA_KEY_FILE: unencrypted ed25519, PKCS#8
+ * The SSH login CA (UMIAK_SSH_LOGIN_CA_KEY_FILE: unencrypted ed25519, PKCS#8
  * PEM or OpenSSH); null without the file. A missing or invalid file is fatal.
  */
 export function readSshCa(file: string | null): SshCa | null {

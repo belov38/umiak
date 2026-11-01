@@ -1,5 +1,5 @@
 // Writes openapi/v1.json from the routes of the public app:
-//   pnpm --filter @sbx/api openapi
+//   pnpm --filter @umiak/api openapi
 import { writeFileSync } from "node:fs";
 import {
 	buildOpenApiDocument,

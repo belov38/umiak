@@ -1,6 +1,6 @@
 // Request-Id (S7 §5.5): our own `req_<ulid>` on every response; a client's
 // `Request-Id` (up to 128 of [A-Za-z0-9._-]) is only logged next to ours.
-import { newPublicUlid } from "@sbx/auth";
+import { newPublicUlid } from "@umiak/auth";
 import type { MiddlewareHandler } from "hono";
 import type { ApiEnv } from "../deps.ts";
 

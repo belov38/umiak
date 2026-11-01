@@ -27,38 +27,38 @@ export class Metrics {
 	constructor() {
 		const registers = [this.registry];
 		this.calls = new Counter({
-			name: "sbx_mcp_tool_calls_total",
+			name: "umiak_mcp_tool_calls_total",
 			help: "Tool calls per tool and outcome (ok or an error code)",
 			labelNames: ["tool", "outcome"],
 			registers,
 		});
 		this.callDuration = new Histogram({
-			name: "sbx_mcp_tool_call_duration_seconds",
+			name: "umiak_mcp_tool_call_duration_seconds",
 			help: "Tool call time per tool",
 			labelNames: ["tool"],
 			buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 45, 60],
 			registers,
 		});
 		this.responseBytes = new Histogram({
-			name: "sbx_mcp_tool_response_bytes",
+			name: "umiak_mcp_tool_response_bytes",
 			help: "Size of tool results per tool",
 			labelNames: ["tool"],
 			buckets: [256, 1024, 4096, 16_384, 65_536, 262_144, 1_048_576],
 			registers,
 		});
 		this.inFlight = new Gauge({
-			name: "sbx_mcp_tool_calls_in_flight",
+			name: "umiak_mcp_tool_calls_in_flight",
 			help: "Tool calls running now",
 			registers,
 		});
 		this.authRejections = new Counter({
-			name: "sbx_mcp_auth_rejections_total",
+			name: "umiak_mcp_auth_rejections_total",
 			help: "Refused bearers of the MCP endpoint per HTTP status and reason",
 			labelNames: ["status", "reason"],
 			registers,
 		});
 		this.meCacheMisses = new Counter({
-			name: "sbx_mcp_me_cache_misses_total",
+			name: "umiak_mcp_me_cache_misses_total",
 			help: "Bearer checks that called GET /v1/me",
 			registers,
 		});

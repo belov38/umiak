@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 const (
@@ -80,19 +80,19 @@ func stateMessage(state, user string) string {
 	case stateReady, stateRunning:
 		return ""
 	case stateStopped, stateStopping:
-		return fmt.Sprintf("sbx: sandbox %s is stopped; run: sbx resume %s", user, user)
+		return fmt.Sprintf("umiak: sandbox %s is stopped; run: umiak resume %s", user, user)
 	case stateCreating, stateStarting, stateResuming:
-		return fmt.Sprintf("sbx: sandbox %s is starting; try again in a moment", user)
+		return fmt.Sprintf("umiak: sandbox %s is starting; try again in a moment", user)
 	}
 	return unavailableMessage(user)
 }
 
 func unavailableMessage(user string) string {
-	return fmt.Sprintf("sbx: sandbox %s is unavailable", user)
+	return fmt.Sprintf("umiak: sandbox %s is unavailable", user)
 }
 
 func unreachableMessage(user string) string {
-	return fmt.Sprintf("sbx: cannot reach sshd in sandbox %s", user)
+	return fmt.Sprintf("umiak: cannot reach sshd in sandbox %s", user)
 }
 
 // connectBackend dials port 22 of the sandbox and logs in to its sshd. When
@@ -203,7 +203,7 @@ func (s *Server) backendSigner(keyID, loginUser string) (ssh.Signer, error) {
 		Key:             key.PublicKey(),
 		Serial:          binary.BigEndian.Uint64(serial[:]),
 		CertType:        ssh.UserCert,
-		KeyId:           "sbx:" + keyID,
+		KeyId:           "umiak:" + keyID,
 		ValidPrincipals: []string{loginUser},
 		ValidAfter:      uint64(now.Add(-backendCertBackdate).Unix()),
 		ValidBefore:     uint64(now.Add(s.cfg.BackendCertTTL).Unix()),

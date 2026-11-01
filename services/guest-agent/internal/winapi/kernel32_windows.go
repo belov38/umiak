@@ -17,7 +17,7 @@ var (
 )
 
 // CreateJobObject creates the job object name (Win32 name, e.g.
-// `Global\sbx-wd-<lease>`; "" for an unnamed job) with default security.
+// `Global\umiak-wd-<lease>`; "" for an unnamed job) with default security.
 // When the name exists it returns the existing job's handle with
 // existed = true (the x/sys wrapper drops that ERROR_ALREADY_EXISTS).
 func CreateJobObject(name string) (h windows.Handle, existed bool, err error) {
@@ -35,7 +35,7 @@ func CreateJobObject(name string) (h windows.Handle, existed bool, err error) {
 }
 
 // OpenJobObject opens the named job object (Win32 name, e.g.
-// `Global\sbx-cmd-<id>`). A missing job is windows.ERROR_FILE_NOT_FOUND.
+// `Global\umiak-cmd-<id>`). A missing job is windows.ERROR_FILE_NOT_FOUND.
 func OpenJobObject(access uint32, inherit bool, name string) (windows.Handle, error) {
 	n, err := windows.UTF16PtrFromString(name)
 	if err != nil {

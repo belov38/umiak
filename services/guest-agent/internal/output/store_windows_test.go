@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
+	"github.com/belov38/umiak/services/guest-agent/internal/output"
 )
 
 // allocationSize returns the bytes NTFS has allocated for f.

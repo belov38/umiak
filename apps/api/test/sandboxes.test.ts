@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { decodeUuid, encodeUuid } from "@sbx/auth";
-import { insertOperation } from "@sbx/core/testing";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid, encodeUuid } from "@umiak/auth";
+import { insertOperation } from "@umiak/core/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decodeCursor, encodeCursor } from "../src/http/cursor.ts";
 import { testSettings } from "../src/testing/index.ts";
@@ -86,8 +90,8 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			expect(sandbox.environment).toBeNull();
 			expect(sandbox.excludeOwnerSecrets).toBe(false);
 			expect(sandbox.endpoints).toEqual({
-				portUrlTemplate: `https://${sandbox.slug}-{port}.sbx.test`,
-				ssh: `ssh ${sandbox.slug}@ssh.sbx.test`,
+				portUrlTemplate: `https://${sandbox.slug}-{port}.umiak.test`,
+				ssh: `ssh ${sandbox.slug}@ssh.umiak.test`,
 			});
 			expect(sandbox.createdAt).toMatch(
 				/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/,
@@ -342,7 +346,7 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 				labels: { a: "b" },
 				idleTimeoutSeconds: 120,
 			});
-			expect(body(r).endpoints.ssh).toBe(`ssh ${slug}@ssh.sbx.test`);
+			expect(body(r).endpoints.ssh).toBe(`ssh ${slug}@ssh.umiak.test`);
 			expect((await h.request("GET", `/v1/sandboxes/${s.slug}`)).status).toBe(
 				404,
 			);
@@ -367,7 +371,7 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 	});
 
 	describe("DELETE /v1/sandboxes/{sandbox}", () => {
-		it("without Sbx-Confirm-Delete: 428 missing; another sandbox's id: 428 mismatch; nothing deleted", async () => {
+		it("without Umiak-Confirm-Delete: 428 missing; another sandbox's id: 428 mismatch; nothing deleted", async () => {
 			const s = await w.seed({ state: "ready" });
 			const other = await w.seed({ state: "ready" });
 			const missing = await h.request("DELETE", `/v1/sandboxes/${s.slug}`);
@@ -379,7 +383,7 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			});
 			const mismatch = await h.request("DELETE", `/v1/sandboxes/${s.slug}`, {
 				headers: {
-					"sbx-confirm-delete": encodeUuid("sandbox", other.sandboxId),
+					"umiak-confirm-delete": encodeUuid("sandbox", other.sandboxId),
 				},
 			});
 			expect(mismatch.status).toBe(428);
@@ -397,13 +401,13 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			const s = await w.seed({ state: "ready" });
 			const id = encodeUuid("sandbox", s.sandboxId);
 			const r = await h.request("DELETE", `/v1/sandboxes/${id}`, {
-				headers: { "sbx-confirm-delete": s.slug },
+				headers: { "umiak-confirm-delete": s.slug },
 			});
 			expect(r.status).toBe(202);
 			expect(body(r).sandbox.state).toBe("deleting");
 			expect(body(r).operation.kind).toBe("delete");
 			const again = await h.request("DELETE", `/v1/sandboxes/${id}`, {
-				headers: { "sbx-confirm-delete": id.toUpperCase() },
+				headers: { "umiak-confirm-delete": id.toUpperCase() },
 			});
 			expect(again.status).toBe(202);
 			expect(body(again).operation.id).toBe(body(r).operation.id);
@@ -414,7 +418,7 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			);
 			await w.markState(s.sandboxId, "deleted");
 			const done = await h.request("DELETE", `/v1/sandboxes/${id}`, {
-				headers: { "sbx-confirm-delete": id },
+				headers: { "umiak-confirm-delete": id },
 			});
 			expect(done.status).toBe(200);
 			expect(body(done).operation).toBeNull();
@@ -427,7 +431,7 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			const r = await w
 				.harness({ bearer: k.secret })
 				.request("DELETE", `/v1/sandboxes/${s.slug}`, {
-					headers: { "sbx-confirm-delete": s.slug },
+					headers: { "umiak-confirm-delete": s.slug },
 				});
 			expect(r.status).toBe(403);
 			expect(errorOf(r).details.requiredScope).toBe("sandboxes:delete");
@@ -580,8 +584,8 @@ describe.skipIf(skipPg())("sandbox routes", () => {
 			const limited = w.harness({
 				deps: {
 					settings: testSettings({
-						SBX_API_RATE_BURST: "1000",
-						SBX_API_RATE_STARTS_PER_MIN: "1",
+						UMIAK_API_RATE_BURST: "1000",
+						UMIAK_API_RATE_STARTS_PER_MIN: "1",
 					}),
 				},
 			});

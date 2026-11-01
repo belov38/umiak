@@ -40,9 +40,9 @@ describe("parseAuthHeaders (S8 §5.2)", () => {
 			parseAuthHeaders({
 				"x-auth-request-email": "a@b.com",
 				"x-auth-request-groups":
-					"role:offline_access,sbx-operators,role:sbx-api:read, role:uma_authorization,devs",
+					"role:offline_access,umiak-operators,role:umiak-api:read, role:uma_authorization,devs",
 			})?.groups,
-		).toEqual(["sbx-operators", "devs"]);
+		).toEqual(["umiak-operators", "devs"]);
 	});
 
 	it("no email is null", () => {

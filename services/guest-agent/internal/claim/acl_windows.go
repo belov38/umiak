@@ -10,7 +10,7 @@ import (
 // Protected DACLs of the secret store (S9 spec 12.8). SDDL rights: FA full
 // control, FR read, FW write, FX execute (traverse).
 const (
-	// mountSDDL keeps C:\ProgramData\sbx and what inherits from it (the
+	// mountSDDL keeps C:\ProgramData\umiak and what inherits from it (the
 	// secrets state record) to SYSTEM and Administrators.
 	mountSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 	// secretDirSDDL is SYSTEM full control, inherited by new entries; secret

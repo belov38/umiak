@@ -2,9 +2,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExecResult, PveClient } from "@sbx/pve";
-import { QgaExecStatusLostError } from "@sbx/pve";
-import { FakePve } from "@sbx/pve/testing";
+import type { ExecResult, PveClient } from "@umiak/pve";
+import { QgaExecStatusLostError } from "@umiak/pve";
+import { FakePve } from "@umiak/pve/testing";
 import { describe, expect, it } from "vitest";
 import {
 	type GuestIo,
@@ -137,7 +137,7 @@ describe("runWindowsStep", () => {
 			"-NoProfile",
 			"-NonInteractive",
 			"-Command",
-			"(Get-Volume -FileSystemLabel SBXBUILD).DriveLetter",
+			"(Get-Volume -FileSystemLabel UMIAKBUILD).DriveLetter",
 		]);
 		// One exec registers the task: normal priority (schtasks /create gives 7), no time limit.
 		const create = g.calls.filter((c) =>
@@ -145,7 +145,7 @@ describe("runWindowsStep", () => {
 		);
 		expect(create).toHaveLength(1);
 		const reg = decoded(create[0] as string[]);
-		expect(reg).toContain("-TaskName 'sbx-build-00-base'");
+		expect(reg).toContain("-TaskName 'umiak-build-00-base'");
 		expect(reg).toContain("-Execute 'powershell.exe'");
 		expect(reg).toContain(
 			"-Argument '-NoProfile -ExecutionPolicy Bypass -File D:\\build\\run-step.ps1 -Step 00-base'",
@@ -161,7 +161,7 @@ describe("runWindowsStep", () => {
 			"schtasks.exe",
 			"/run",
 			"/tn",
-			"sbx-build-00-base",
+			"umiak-build-00-base",
 		]);
 		// Stale files are removed before the task exists, the task is deleted at the end.
 		expect(
@@ -174,7 +174,7 @@ describe("runWindowsStep", () => {
 			"/delete",
 			"/f",
 			"/tn",
-			"sbx-build-00-base",
+			"umiak-build-00-base",
 		]);
 	});
 
@@ -186,7 +186,7 @@ describe("runWindowsStep", () => {
 		});
 		await runWindowsStep(g.io, { step: "00-base", onLog: () => {}, ...fast });
 		const clean = g.calls.find((c) => c.at(-1)?.includes("Remove-Item"));
-		expect(clean?.at(-1)).toContain("C:\\sbx-build\\logs\\00-base.exit");
+		expect(clean?.at(-1)).toContain("C:\\umiak-build\\logs\\00-base.exit");
 		// Remove-Item of missing files leaves $? false, which -Command turns into exit 1.
 		expect(clean?.at(-1)).toMatch(/; exit 0$/);
 	});
@@ -238,8 +238,8 @@ describe("runWindowsStep", () => {
 		const polls = g.reads.filter((r) => r.exit !== "");
 		expect(polls.length).toBeGreaterThan(2);
 		for (const r of polls) {
-			expect(r.exit).toBe("C:\\sbx-build\\logs\\00-base.exit");
-			expect(r.log).toBe("C:\\sbx-build\\logs\\00-base.log");
+			expect(r.exit).toBe("C:\\umiak-build\\logs\\00-base.exit");
+			expect(r.log).toBe("C:\\umiak-build\\logs\\00-base.log");
 			expect(r.count).toBe(1024 * 1024);
 		}
 		const cmd = g.calls.find((c) => guestFilesRequest(c));
@@ -314,7 +314,7 @@ describe("runWindowsStep", () => {
 			"/delete",
 			"/f",
 			"/tn",
-			"sbx-build-30-toolchains",
+			"umiak-build-30-toolchains",
 		]);
 	});
 
@@ -427,7 +427,7 @@ describe("task registration script (pwsh)", () => {
 
 describe("readGuestFiles script (pwsh)", () => {
 	it("missing files read as no exit and an empty log", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-read-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-read-"));
 		try {
 			const r = await readGuestFiles(pwshIo, {
 				exit: join(dir, "x.exit"),
@@ -442,7 +442,7 @@ describe("readGuestFiles script (pwsh)", () => {
 	});
 
 	it("reads the exit file and a log chunk from an offset", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-read-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-read-"));
 		try {
 			const log = Buffer.from("caf\u00e9 \u2713 ok\n");
 			writeFileSync(join(dir, "x.exit"), "0\r\n");
@@ -473,7 +473,7 @@ describe("readGuestFiles script (pwsh)", () => {
 	});
 
 	it("a log locked by another process reads as empty, not as an error", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-read-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-read-"));
 		const path = join(dir, "x.log");
 		writeFileSync(path, "held\n");
 		// .NET on Unix takes an exclusive flock for FileShare.None.
@@ -623,7 +623,7 @@ describe("networkUp", () => {
 		const pve = new FakePve();
 		pve.vms.set(560, {
 			config: {
-				net0: `virtio=${MAC},bridge=sbx0,firewall=1,link_down=1`,
+				net0: `virtio=${MAC},bridge=umiak0,firewall=1,link_down=1`,
 			},
 			status: "running",
 			firewall: { rules: [], ipsets: {} },
@@ -638,24 +638,24 @@ describe("networkUp", () => {
 			pollMs: 1,
 		});
 		expect(pve.vms.get(560)?.config.net0).toBe(
-			`virtio=${MAC},bridge=sbx0,firewall=1,link_down=0`,
+			`virtio=${MAC},bridge=umiak0,firewall=1,link_down=0`,
 		);
 		const put = pve.calls.find((c) => c.method === "PUT");
 		expect(put?.path).toBe("/nodes/pve/qemu/560/config");
 		expect(put?.params).toEqual({
-			net0: `virtio=${MAC},bridge=sbx0,firewall=1,link_down=0`,
+			net0: `virtio=${MAC},bridge=umiak0,firewall=1,link_down=0`,
 		});
 	});
 
 	it("adds link_down=0 when net0 has no link_down", async () => {
 		const pve = setup("10.88.0.57");
 		const vm = pve.vms.get(560);
-		if (vm) vm.config.net0 = `virtio=${MAC},bridge=sbx0,firewall=1`;
+		if (vm) vm.config.net0 = `virtio=${MAC},bridge=umiak0,firewall=1`;
 		await networkUp(pve as unknown as PveClient, "pve", 560, MAC, {
 			pollMs: 1,
 		});
 		expect(vm?.config.net0).toBe(
-			`virtio=${MAC},bridge=sbx0,firewall=1,link_down=0`,
+			`virtio=${MAC},bridge=umiak0,firewall=1,link_down=0`,
 		);
 	});
 

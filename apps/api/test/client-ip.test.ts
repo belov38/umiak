@@ -1,5 +1,5 @@
 // Client address of the request log (S7 §7.1): X-Forwarded-For counts only
-// from SBX_API_TRUSTED_PROXY_CIDRS.
+// from UMIAK_API_TRUSTED_PROXY_CIDRS.
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
 import { describe, expect, it } from "vitest";
@@ -60,7 +60,7 @@ describe("request log clientIp on a real socket", () => {
 		const h = createHarness({
 			deps: {
 				log: logs.log,
-				settings: testSettings({ SBX_API_TRUSTED_PROXY_CIDRS: cidrs }),
+				settings: testSettings({ UMIAK_API_TRUSTED_PROXY_CIDRS: cidrs }),
 			},
 		});
 		const server = serve({

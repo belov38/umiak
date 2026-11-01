@@ -8,7 +8,7 @@ export const MAX_CALLS_PER_PRINCIPAL = 16;
 
 /**
  * Host values the endpoint answers (decision 8): the host of the public URL
- * with and without its port, plus the extra ones (SBX_MCP_ALLOWED_HOSTS).
+ * with and without its port, plus the extra ones (UMIAK_MCP_ALLOWED_HOSTS).
  * An entry without a port matches its hostname on any port (as the MCP
  * SDK's check); one with a port matches only that port.
  */

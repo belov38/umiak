@@ -111,9 +111,9 @@ describe("key list", () => {
 	it("presetOf, maskedKey, examples", () => {
 		expect(presetOf([...PRESETS["read-only"]].reverse())).toBe("read-only");
 		expect(presetOf(["sandboxes:read"])).toBeNull();
-		expect(maskedKey(key())).toBe("sbx_a1B2c3D4…9xYz");
-		const ex = keyExamples("sbx_SECRET");
-		expect(ex[0]).toBe("export SBX_API_KEY=sbx_SECRET");
-		expect(ex[1]).toContain("sbx login --key-stdin");
+		expect(maskedKey(key())).toBe("umiak_a1B2c3D4…9xYz");
+		const ex = keyExamples("umiak_SECRET");
+		expect(ex[0]).toBe("export UMIAK_API_KEY=umiak_SECRET");
+		expect(ex[1]).toContain("umiak login --key-stdin");
 	});
 });

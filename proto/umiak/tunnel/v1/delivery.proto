@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package umiak.tunnel.v1;
+
+import "umiak/tunnel/v1/event.proto";
+
+option go_package = "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1;tunnelv1";
+
+// Body of POST /internal/v1/agent-events in api, sent as binary protobuf
+// (Content-Type: application/proto). Event payloads are google.protobuf.Any
+// of S3/S6 types the gateway does not link; api resolves them with its own
+// registry. The response is binary protobuf or protojson, by its
+// Content-Type.
+message AgentEventsRequest {
+  string machine_id = 1;
+  repeated Event events = 2;
+  repeated ConnectionEvent connection_events = 3;
+}
+
+message AgentEventsResponse {
+  // Highest guest event seq stored by api; the gateway acks it to the agent.
+  uint64 acked_seq = 1;
+}

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf16"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 // WinInput is the portable representation of an amd64 Win32 INPUT record.

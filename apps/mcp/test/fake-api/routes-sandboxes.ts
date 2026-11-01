@@ -314,7 +314,7 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 			role: p.kind === "oidc" ? "owner" : null,
 		});
 		const team = teamOf(p.teamId);
-		// A person's teams: the one of the request (selected by Sbx-Team) and the rest.
+		// A person's teams: the one of the request (selected by Umiak-Team) and the rest.
 		const own = fake.tokens.get(c.get("token"));
 		const teams =
 			p.kind === "oidc" && own !== undefined
@@ -580,12 +580,12 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 		const sb = lookupSandbox(fake, p, c.req.param("sandbox"), {
 			allowDeleted: true,
 		});
-		const confirm = c.req.header("Sbx-Confirm-Delete");
+		const confirm = c.req.header("Umiak-Confirm-Delete");
 		if (confirm === undefined || (confirm !== sb.id && confirm !== sb.slug)) {
 			throw new FakeApiError(
 				428,
 				"confirmation_required",
-				`deleting needs the header Sbx-Confirm-Delete: ${sb.id}${confirm === undefined ? "" : ` (got ${confirm})`}`,
+				`deleting needs the header Umiak-Confirm-Delete: ${sb.id}${confirm === undefined ? "" : ` (got ${confirm})`}`,
 				{
 					details: { reason: confirm === undefined ? "missing" : "mismatch" },
 				},

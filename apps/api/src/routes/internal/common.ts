@@ -10,7 +10,7 @@ import {
 	zodValidationError,
 } from "../../http/errors.ts";
 
-/** Caller name of the gateway's tokens in SBX_API_SERVICE_TOKENS_FILE. */
+/** Caller name of the gateway's tokens in UMIAK_API_SERVICE_TOKENS_FILE. */
 export const GATEWAY_CALLER = "gateway";
 
 /** The gateway endpoints answer the gateway only (other service tokens: 403). */

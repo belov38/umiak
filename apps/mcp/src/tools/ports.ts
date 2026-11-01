@@ -1,7 +1,7 @@
 // Port tools (S11 8.5, 11.4): port_expose, port_list, port_unexpose. Calls go
 // through the SDK's no-fetch sandbox handle, so only the scopes of the table
 // are needed: ports:write for changes, sandboxes:read for the list.
-import type { HostedPort } from "@sbx/sdk";
+import type { HostedPort } from "@umiak/sdk";
 import { z } from "zod";
 import { ToolError } from "../errors.ts";
 import { fenceUntrusted } from "../output/fence.ts";
@@ -81,7 +81,7 @@ export const portExpose = defineTool({
 			),
 	},
 	async handler(args, ctx) {
-		const sb = ctx.sbx().sandboxes.handle(args.sandbox);
+		const sb = ctx.umiak().sandboxes.handle(args.sandbox);
 		const notes: string[] = [];
 
 		// PUT replaces the settings and a changed mode ends the issued links, so
@@ -169,7 +169,7 @@ export const portList = defineTool({
 	sandboxArg: true,
 	shape: {},
 	async handler(args, ctx) {
-		const sb = ctx.sbx().sandboxes.handle(args.sandbox);
+		const sb = ctx.umiak().sandboxes.handle(args.sandbox);
 		const data = await sb.ports.list(ctx.call);
 
 		const rows = new Map<number, PortRow>();
@@ -242,7 +242,7 @@ export const portUnexpose = defineTool({
 	shape: { port: portShape },
 	async handler(args, ctx) {
 		await ctx
-			.sbx()
+			.umiak()
 			.sandboxes.handle(args.sandbox)
 			.ports.unhost(args.port, ctx.call);
 		return toolText({ port: args.port, published: false });

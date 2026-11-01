@@ -1,4 +1,4 @@
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
 import type { WorkerCtx } from "../context.ts";
 import {
 	ownedTeardown,
@@ -42,7 +42,7 @@ function fencedOut(
 	action: MachineAction,
 ): MachineOpResult {
 	ctx.log.info({ err: e.message, action }, "machine-op fenced out");
-	ctx.metrics.inc("sbx_fenced_out_total", { queue: "machine-op", action });
+	ctx.metrics.inc("umiak_fenced_out_total", { queue: "machine-op", action });
 	return "fenced_out";
 }
 
@@ -146,7 +146,7 @@ async function failProvision(
 		throw e;
 	}
 	ctx.log.warn({ machineId, code, err: detail }, "pool provision failed");
-	ctx.metrics.inc("sbx_machine_provision_failed_total", { code });
+	ctx.metrics.inc("umiak_machine_provision_failed_total", { code });
 	return "failed";
 }
 

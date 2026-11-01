@@ -12,10 +12,10 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
-// Limit names, used as the "limit" label of sbx_gateway_ratelimited_total and
+// Limit names, used as the "limit" label of umiak_gateway_ratelimited_total and
 // as the second result of AllowRequest.
 const (
 	LimitIP         = "ip"

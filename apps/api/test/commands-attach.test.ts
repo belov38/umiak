@@ -1,7 +1,11 @@
 // /stream options (tailBytes, follow=false), truncated output under the
 // agent's retention, /output by offset with its headers, and the sync
 // tail (collectSync).
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { collectSync, type Frame } from "../src/index.ts";
 import {
@@ -229,13 +233,13 @@ describe.skipIf(skipPg())("attach and output", () => {
 			expect(frames.map((f) => f.type)).toEqual(["attached", "exit"]);
 		});
 
-		it("/output stops at the end and sets Sbx-Stream-End; past the end is 416", async () => {
+		it("/output stops at the end and sets Umiak-Stream-End; past the end is 416", async () => {
 			const id = await withLeftovers();
 			const r = await h.request("GET", `${sb.commands}/${id}/output`);
 			expect(r.status).toBe(200);
 			expect(r.text).toBe("0123456789");
-			expect(r.headers.get("sbx-next-offset")).toBe("10");
-			expect(r.headers.get("sbx-stream-end")).toBe("10");
+			expect(r.headers.get("umiak-next-offset")).toBe("10");
+			expect(r.headers.get("umiak-stream-end")).toBe("10");
 			const beyond = await h.request(
 				"GET",
 				`${sb.commands}/${id}/output?offset=12`,
@@ -312,7 +316,7 @@ describe.skipIf(skipPg())("attach and output", () => {
 		});
 	});
 
-	it("/output: bytes from an offset with Sbx-* headers and the limit", async () => {
+	it("/output: bytes from an offset with Umiak-* headers and the limit", async () => {
 		const id = await detached("printf '%s' 0123456789; printf E >&2");
 		await exited(id);
 		const r = await h.request(
@@ -322,11 +326,11 @@ describe.skipIf(skipPg())("attach and output", () => {
 		expect(r.status).toBe(200);
 		expect(r.headers.get("content-type")).toBe("application/octet-stream");
 		expect(r.text).toBe("3456");
-		expect(r.headers.get("sbx-offset")).toBe("3");
-		expect(r.headers.get("sbx-next-offset")).toBe("7");
-		expect(r.headers.get("sbx-available-from")).toBe("0");
-		expect(r.headers.get("sbx-stream-end")).toBe("10");
-		expect(r.headers.get("sbx-truncated")).toBeNull();
+		expect(r.headers.get("umiak-offset")).toBe("3");
+		expect(r.headers.get("umiak-next-offset")).toBe("7");
+		expect(r.headers.get("umiak-available-from")).toBe("0");
+		expect(r.headers.get("umiak-stream-end")).toBe("10");
+		expect(r.headers.get("umiak-truncated")).toBeNull();
 		const err = await h.request(
 			"GET",
 			`${sb.commands}/${id}/output?stream=stderr`,
@@ -338,7 +342,7 @@ describe.skipIf(skipPg())("attach and output", () => {
 		);
 		expect(past.status).toBe(200);
 		expect(past.text).toBe("");
-		expect(past.headers.get("sbx-next-offset")).toBe("10");
+		expect(past.headers.get("umiak-next-offset")).toBe("10");
 		const beyond = await h.request(
 			"GET",
 			`${sb.commands}/${id}/output?offset=11`,
@@ -360,26 +364,26 @@ describe.skipIf(skipPg())("attach and output", () => {
 		expect(big.status).toBe(400);
 	});
 
-	it("/output with offset < availableFrom starts at availableFrom with Sbx-Truncated", async () => {
+	it("/output with offset < availableFrom starts at availableFrom with Umiak-Truncated", async () => {
 		const id = await detached("printf '%s' 0123456789");
 		await exited(id);
 		w.agent.retention(3);
 		const r = await h.request("GET", `${sb.commands}/${id}/output?offset=2`);
 		expect(r.text).toBe("789");
-		expect(r.headers.get("sbx-truncated")).toBe("true");
-		expect(r.headers.get("sbx-offset")).toBe("7");
-		expect(r.headers.get("sbx-available-from")).toBe("7");
-		expect(r.headers.get("sbx-next-offset")).toBe("10");
+		expect(r.headers.get("umiak-truncated")).toBe("true");
+		expect(r.headers.get("umiak-offset")).toBe("7");
+		expect(r.headers.get("umiak-available-from")).toBe("7");
+		expect(r.headers.get("umiak-next-offset")).toBe("10");
 	});
 
-	it("/output of a running command has no Sbx-Stream-End", async () => {
+	it("/output of a running command has no Umiak-Stream-End", async () => {
 		const id = await detached("echo a; sleep 30");
 		const r = await until(async () => {
 			const r = await h.request("GET", `${sb.commands}/${id}/output`);
 			return r.text !== "" && r;
 		});
 		expect(r.text).toBe("a\n");
-		expect(r.headers.get("sbx-stream-end")).toBeNull();
+		expect(r.headers.get("umiak-stream-end")).toBeNull();
 		await h.request("POST", `${sb.commands}/${id}/kill`, {
 			json: { graceMs: 100 },
 		});

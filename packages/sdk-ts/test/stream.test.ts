@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClientCore } from "../src/client.ts";
 import { Command, runCommand } from "../src/commands.ts";
-import { SbxError } from "../src/errors.ts";
+import { UmiakError } from "../src/errors.ts";
 
 const API = "https://api.example.test";
 
@@ -14,7 +14,7 @@ function ndjson(...frames: unknown[]) {
 		status: 200,
 		headers: {
 			"Content-Type": "application/x-ndjson",
-			"Sbx-Command-Id": "cmd_1",
+			"Umiak-Command-Id": "cmd_1",
 		},
 	});
 }
@@ -46,7 +46,7 @@ function sandbox(reply: (req: Request, n: number) => Response) {
 	const urls: string[] = [];
 	const core = createClientCore({
 		baseUrl: API,
-		apiKey: "sbx_test",
+		apiKey: "umiak_test",
 		env: {},
 		fetch: (async (req: Request) => {
 			urls.push(
@@ -78,7 +78,7 @@ describe("command stream reconnects", () => {
 		})().catch((e: unknown) => e);
 		await vi.runAllTimersAsync();
 		const err = await p;
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({ code: "agent_unavailable" });
 		expect(events).toEqual([expect.objectContaining({ data: "ab" })]);
 		const gets = urls.filter((u) => u.startsWith("GET"));
@@ -195,7 +195,7 @@ describe("command stream reconnects", () => {
 			}
 		})().catch((e: unknown) => e);
 		expect(err).toMatchObject({
-			name: "SbxError",
+			name: "UmiakError",
 			code: "unauthorized",
 			retryable: false,
 			requestId: "req_9",

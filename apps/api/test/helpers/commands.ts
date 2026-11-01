@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import { vi } from "vitest";
 import type { Frame } from "../../src/index.ts";
 import { assertConforms, assertRequestConforms } from "./conformance.ts";
@@ -313,7 +313,7 @@ export async function until<T>(
  */
 let gateDir: string | undefined;
 let gates = 0;
-const GATE_PREFIX = "sbx-gate-";
+const GATE_PREFIX = "umiak-gate-";
 
 function removeOldGateDirs(): void {
 	const old = Date.now() - 3_600_000;

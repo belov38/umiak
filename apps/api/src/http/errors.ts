@@ -1,9 +1,9 @@
 // Error envelope of every listener (S7 §5.5):
 //   {"error": {code, message, retryable, details, requestId}} + Request-Id
-// Routes throw ApiError (or a core SbxError); `toHttpError` maps anything
+// Routes throw ApiError (or a core UmiakError); `toHttpError` maps anything
 // thrown to an ApiError and `renderError` renders it.
-import { encodeUuid } from "@sbx/auth";
-import { isSbxError, isUuid, type SbxError } from "@sbx/core";
+import { encodeUuid } from "@umiak/auth";
+import { isUmiakError, isUuid, type UmiakError } from "@umiak/core";
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Logger } from "pino";
@@ -116,7 +116,7 @@ export function internalError(): ApiError {
 
 // --- mapping ---
 
-/** Core codes (S6 `SbxError`) to HTTP (S7 §5.5). Others become 500 internal. */
+/** Core codes (S6 `UmiakError`) to HTTP (S7 §5.5). Others become 500 internal. */
 const CORE_STATUS: Record<string, number> = {
 	not_found: 404,
 	invalid_state: 409,
@@ -152,11 +152,11 @@ export const SHUTTING_DOWN_RETRY_AFTER_SECONDS = 1;
 /**
  * Maps anything thrown to an ApiError. `pool_exhausted` is not part of the
  * contract (no warm pool in the MVP) and maps to 500 like any unknown code;
- * so does an Error that is not an ApiError or SbxError.
+ * so does an Error that is not an ApiError or UmiakError.
  */
 export function toHttpError(e: unknown): ApiError {
 	if (e instanceof ApiError) return e;
-	if (isSbxError(e)) {
+	if (isUmiakError(e)) {
 		const status = CORE_STATUS[e.code];
 		if (status === undefined) return internalError();
 		return publicCoreError(status, e);
@@ -178,7 +178,7 @@ export function toHttpError(e: unknown): ApiError {
  * Details of core errors carry UUIDs and internal operations: operation ids
  * become `op_...`, and an active internal `reprovision` is not named.
  */
-function publicCoreError(status: number, e: SbxError): ApiError {
+function publicCoreError(status: number, e: UmiakError): ApiError {
 	const details: Record<string, unknown> = { ...e.details };
 	let message = e.message;
 	if (e.code === "operation_in_progress" && details.kind === "reprovision") {

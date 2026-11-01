@@ -2,7 +2,7 @@
 // snapshot_delete. Creating a sandbox from a snapshot is sandbox_create with
 // from_snapshot.
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { type OperationData, SbxError, type SnapshotData } from "@sbx/sdk";
+import { type OperationData, type SnapshotData, UmiakError } from "@umiak/sdk";
 import { z } from "zod";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
@@ -73,7 +73,7 @@ async function waitOperation(
 			Math.min(POLL_SECONDS, Math.floor((end - Date.now()) / 1000)),
 		);
 		try {
-			const r = await ctx.sbx().raw.GET(OPERATION_PATH, {
+			const r = await ctx.umiak().raw.GET(OPERATION_PATH, {
 				params: { path: { operation: op.id }, query: { waitSeconds: slice } },
 				...ctx.call,
 			});
@@ -128,7 +128,7 @@ export const snapshotSave = defineTool({
 		// No sandbox in the key: the same model key never saves twice (spec 7.4).
 		const { modelKey, apiKey } = keyFor("snapshot_save", args.idempotency_key);
 		const r = await withUnknownOutcome(ctx, modelKey, () =>
-			ctx.sbx().raw.POST("/v1/snapshots", {
+			ctx.umiak().raw.POST("/v1/snapshots", {
 				body: {
 					sandbox: args.sandbox,
 					name: args.name,
@@ -154,7 +154,7 @@ export const snapshotSave = defineTool({
 				);
 			} catch (err) {
 				// Cancel, 401 and bugs go to the call wrapper.
-				if (!(err instanceof SbxError) || err.status === 401) throw err;
+				if (!(err instanceof UmiakError) || err.status === 401) throw err;
 				notes.push(
 					`waiting for the snapshot failed (${safeLine(err.code)}): ${safeLine(err.message)}`,
 				);
@@ -222,7 +222,7 @@ export const snapshotList = defineTool({
 	},
 	async handler(args, ctx) {
 		// The API lists every snapshot in one answer, so the pages are cut here.
-		const { data } = await ctx.sbx().raw.GET("/v1/snapshots", ctx.call);
+		const { data } = await ctx.umiak().raw.GET("/v1/snapshots", ctx.call);
 		let from = 0;
 		if (args.cursor !== undefined) {
 			if (!/^[0-9]{1,9}$/.test(args.cursor)) {
@@ -282,9 +282,9 @@ export const snapshotDelete = defineTool({
 	async handler(args, ctx): Promise<CallToolResult> {
 		// Not the SDK facade: it reads the id and confirms by itself, which would
 		// make `confirm` pointless.
-		await ctx.sbx().raw.DELETE("/v1/snapshots/{name}", {
+		await ctx.umiak().raw.DELETE("/v1/snapshots/{name}", {
 			params: { path: { name: args.name } },
-			headers: { "Sbx-Confirm-Delete": args.confirm },
+			headers: { "Umiak-Confirm-Delete": args.confirm },
 			...ctx.call,
 		});
 		return toolText({ name: args.name, deleted: true });

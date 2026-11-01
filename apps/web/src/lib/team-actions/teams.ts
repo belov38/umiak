@@ -1,6 +1,6 @@
 // createTeam, renameTeam (S8 §6.1, §9.11).
-import { encodeUuid } from "@sbx/auth";
-import { rows, sql, tbl } from "@sbx/payload";
+import { encodeUuid } from "@umiak/auth";
+import { rows, sql, tbl } from "@umiak/payload";
 import { z } from "zod";
 import { can } from "../permissions";
 import {

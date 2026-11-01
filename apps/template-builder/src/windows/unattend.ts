@@ -109,8 +109,8 @@ export function renderAutounattend(
 	);
 }
 
-/** Sysprep answers for clones (`_windows/sbx-unattend.xml`); no accounts, no passwords. */
-export const SBX_UNATTEND = readWindowsFile("sbx-unattend.xml");
+/** Sysprep answers for clones (`_windows/umiak-unattend.xml`); no accounts, no passwords. */
+export const UMIAK_UNATTEND = readWindowsFile("umiak-unattend.xml");
 
 export interface OfflineAutounattendInput {
 	/** Language of the ISO, as for the install (`versions.iso.uiLanguage`). */

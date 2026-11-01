@@ -2,7 +2,7 @@
 // POST /v1/sandboxes and the search params of the page. Secrets, env,
 // labels and secret files live only in React state and in that body; the
 // URL carries the catalog choice (template, size, snapshot) and nothing else.
-import type { CreateSandboxInput } from "@sbx/sdk";
+import type { CreateSandboxInput } from "@umiak/sdk";
 import { teamPath } from "./team-path";
 
 export interface KvRow {
@@ -76,12 +76,12 @@ export const LIMITS = {
 } as const;
 
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
-/** `SBX_` is reserved except the variables of the CLI (S7 §8.3). */
-const SBX_ALLOWED = new Set([
-	"SBX_API_KEY",
-	"SBX_API_URL",
-	"SBX_TEAM",
-	"SBX_PROFILE",
+/** `UMIAK_` is reserved except the variables of the CLI (S7 §8.3). */
+const UMIAK_ALLOWED = new Set([
+	"UMIAK_API_KEY",
+	"UMIAK_API_URL",
+	"UMIAK_TEAM",
+	"UMIAK_PROFILE",
 ]);
 const FILE_NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -92,8 +92,8 @@ export function envKeyProblem(key: string): string | null {
 	if (!ENV_KEY_RE.test(key)) {
 		return "Letters, digits and _, not starting with a digit, up to 128 characters";
 	}
-	if (key.startsWith("SBX_") && !SBX_ALLOWED.has(key)) {
-		return "The SBX_ prefix is reserved";
+	if (key.startsWith("UMIAK_") && !UMIAK_ALLOWED.has(key)) {
+		return "The UMIAK_ prefix is reserved";
 	}
 	return null;
 }

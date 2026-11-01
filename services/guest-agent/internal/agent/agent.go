@@ -1,6 +1,6 @@
-// Package agent wires the guest agent together: `sbx-agent run` (the startup
+// Package agent wires the guest agent together: `umiak-agent run` (the startup
 // sequence of spec section 6, the services behind the tunnel, the background
-// loops, status.json and the graceful shutdown) and `sbx-agent doctor`
+// loops, status.json and the graceful shutdown) and `umiak-agent doctor`
 // (section 17.6).
 package agent
 
@@ -16,25 +16,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/transport"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/claim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/files"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ports"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/services/guest-agent/internal/claim"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/desktop"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/files"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/output"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/ports"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/reqcache"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/system"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 // Defaults of the Deps timings.
@@ -143,7 +143,7 @@ type Deps struct {
 	GCEvery time.Duration
 
 	// DebugListen, "unix:<path>", serves the agent mux and
-	// sbx.tunnel.v1.Control/Info on a local socket (test and QGA aid,
+	// umiak.tunnel.v1.Control/Info on a local socket (test and QGA aid,
 	// see debug.go). Empty disables it.
 	DebugListen string
 	// DebugConfirm lets a Control/Info served on the debug socket confirm
@@ -275,7 +275,7 @@ type agent struct {
 	bg sync.WaitGroup
 }
 
-// Run is `sbx-agent run`: it starts the agent in the order of spec section 6
+// Run is `umiak-agent run`: it starts the agent in the order of spec section 6
 // and S5 17.3, serves until ctx ends or the agent asks to exit (an applied
 // update, a changed identity), then shuts down: the tunnel closes, the
 // process monitors stop, the store is flushed and closed. Command shims are

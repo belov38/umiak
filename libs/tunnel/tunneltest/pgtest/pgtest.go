@@ -2,9 +2,9 @@
 // tests. It is test support only and must not be imported by library code.
 //
 // Usage: call Main from the package's TestMain, then New(t) in each test.
-// If SBX_TEST_DATABASE_URL is set it is used as the admin connection string
+// If UMIAK_TEST_DATABASE_URL is set it is used as the admin connection string
 // (a postgres:// URL). Otherwise a postgres container is started once per
-// test binary through the docker CLI. SBX_TEST_SKIP_PG=1 makes New skip the
+// test binary through the docker CLI. UMIAK_TEST_SKIP_PG=1 makes New skip the
 // test instead of failing when no database is available.
 package pgtest
 
@@ -29,8 +29,8 @@ import (
 )
 
 const (
-	envURL  = "SBX_TEST_DATABASE_URL"
-	envSkip = "SBX_TEST_SKIP_PG"
+	envURL  = "UMIAK_TEST_DATABASE_URL"
+	envSkip = "UMIAK_TEST_SKIP_PG"
 	image   = "postgres:18.6-alpine"
 )
 
@@ -79,7 +79,7 @@ func startContainer() (id, dsn string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // the image may need a pull
 	defer cancel()
 	out, err := exec.CommandContext(ctx, docker, "run", "-d", "--rm",
-		"-e", "POSTGRES_PASSWORD=sbx",
+		"-e", "POSTGRES_PASSWORD=umiak",
 		"-p", "127.0.0.1::5432", image).Output()
 	if err != nil {
 		return "", "", fmt.Errorf("docker run %s: %w%s", image, err, stderr(err))
@@ -95,7 +95,7 @@ func startContainer() (id, dsn string, err error) {
 	if idx < 0 {
 		return id, "", fmt.Errorf("unexpected docker port output %q", portOut)
 	}
-	dsn = "postgres://postgres:sbx@127.0.0.1:" + line[idx+1:] + "/postgres?sslmode=disable"
+	dsn = "postgres://postgres:umiak@127.0.0.1:" + line[idx+1:] + "/postgres?sslmode=disable"
 	if err := waitReady(dsn, 60*time.Second); err != nil {
 		return id, "", err
 	}
@@ -166,7 +166,7 @@ func New(t testing.TB) (*pgxpool.Pool, string) {
 	if _, err := rand.Read(rnd[:]); err != nil {
 		t.Fatalf("random: %v", err)
 	}
-	name := "sbx_test_" + hex.EncodeToString(rnd[:])
+	name := "umiak_test_" + hex.EncodeToString(rnd[:])
 
 	conn, err := pgx.Connect(ctx, adminURL)
 	if err != nil {

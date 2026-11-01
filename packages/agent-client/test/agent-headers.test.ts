@@ -7,13 +7,13 @@
 // calls, A answers with each attack of the tunnel harness (hostile.go) over
 // unary, server-stream and /files calls. B and C must see no error, the
 // session must never be replaced, and A's calls must end cleanly after one
-// request each. SBX_M1_LONG=1 repeats the attack set 200 times instead of 50.
+// request each. UMIAK_M1_LONG=1 repeats the attack set 200 times instead of 50.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import dc from "node:diagnostics_channel";
 import type { ClientHttp2Session, ClientHttp2Stream } from "node:http2";
 import type { Socket } from "node:net";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
-import { ErrorDetailSchema } from "@sbx/proto";
+import { ErrorDetailSchema } from "@umiak/proto";
 import {
 	afterAll,
 	beforeAll,
@@ -28,7 +28,7 @@ import {
 	ExitStatus,
 	Process,
 	Stream,
-} from "./gen/sbx/testing/v1/process_pb.js";
+} from "./gen/umiak/testing/v1/process_pb.js";
 import {
 	type Harness,
 	removeHarnessBuild,
@@ -37,7 +37,7 @@ import {
 import { createTestDatabase, skipPg, type TestDatabase } from "./helpers/pg.js";
 
 const serviceToken = "m1-service-token";
-const long = process.env.SBX_M1_LONG === "1";
+const long = process.env.UMIAK_M1_LONG === "1";
 const repetitions = long ? 200 : 50;
 
 /**
@@ -386,7 +386,7 @@ describe.skipIf(skipPg())(
 					await db?.drop();
 				}
 			}
-			if (failed || process.env.SBX_E2E_KEEP_LOG === "1") {
+			if (failed || process.env.UMIAK_E2E_KEEP_LOG === "1") {
 				console.error(`tunnel harness log kept at ${harness?.logPath ?? "-"}`);
 			} else {
 				await removeHarnessBuild();

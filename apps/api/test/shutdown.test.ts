@@ -7,7 +7,11 @@
 // takes at most 10 s even when a stream or a connection hangs.
 import { randomUUID } from "node:crypto";
 import { connect, type Socket } from "node:net";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
@@ -118,12 +122,12 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 
 	async function start(graceMs?: number): Promise<RunningApi> {
 		const settings = testSettings({
-			SBX_API_RATE_BURST: "100000",
-			SBX_API_RATE_STARTS_PER_MIN: "100000",
-			SBX_API_PUBLIC_PORT: "0",
-			SBX_API_PROXIED_PORT: "0",
-			SBX_API_INTERNAL_PORT: "0",
-			SBX_API_METRICS_PORT: "0",
+			UMIAK_API_RATE_BURST: "100000",
+			UMIAK_API_RATE_STARTS_PER_MIN: "100000",
+			UMIAK_API_PUBLIC_PORT: "0",
+			UMIAK_API_PROXIED_PORT: "0",
+			UMIAK_API_INTERNAL_PORT: "0",
+			UMIAK_API_METRICS_PORT: "0",
 		});
 		const deps = makeTestDeps(w.deps({ identityEvents: events, settings }));
 		return startApi(settings, deps, {

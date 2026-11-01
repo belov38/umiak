@@ -20,8 +20,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // maxReasonLen caps the response body kept as RejectError.Reason.

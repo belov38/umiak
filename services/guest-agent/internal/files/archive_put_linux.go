@@ -10,7 +10,7 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/sys/unix"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // resolveFlags confine every lookup to the directory and refuse symlinks in

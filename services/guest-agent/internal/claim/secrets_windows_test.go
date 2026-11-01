@@ -14,9 +14,9 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/sys/windows"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
 )
 
 // fileAllAccess is the SDDL right FA.
@@ -258,7 +258,7 @@ func TestSecretDirACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mount := filepath.Join(t.TempDir(), "sbx")
+	mount := filepath.Join(t.TempDir(), "umiak")
 	if err := mountSecrets(mount); err != nil {
 		t.Fatal(err)
 	}

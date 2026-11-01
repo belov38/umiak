@@ -1,4 +1,4 @@
-// `sbx ssh [<sb>] [-- ssh args]` (S7 §11.3, §14.2): logs in through the SSH
+// `umiak ssh [<sb>] [-- ssh args]` (S7 §11.3, §14.2): logs in through the SSH
 // gateway with the system `ssh` and a throwaway key:
 //   1. `ssh-keygen` makes an ed25519 key in a new 0700 temporary directory;
 //   2. the api certifies it for this sandbox (about 10 min, checked at login);
@@ -8,8 +8,8 @@
 //      runs in this terminal (the words after `--` follow the destination:
 //      ssh options such as `-L 3000:localhost:3000`, or a remote command);
 //   5. the directory is removed when ssh exits.
-// Works with a team key too. sbx exits with ssh's code. Ctrl-C belongs to
-// ssh; SIGTERM and SIGHUP (the terminal closed) are passed on to ssh. sbx
+// Works with a team key too. umiak exits with ssh's code. Ctrl-C belongs to
+// ssh; SIGTERM and SIGHUP (the terminal closed) are passed on to ssh. umiak
 // survives them until ssh exits, so the key is always removed (see sshInto).
 
 import { type ChildProcess, spawn } from "node:child_process";
@@ -62,11 +62,11 @@ function runSsh(
 }
 
 /**
- * The key, its certificate and ssh. From the temporary directory on, sbx
+ * The key, its certificate and ssh. From the temporary directory on, umiak
  * does not die of SIGINT, SIGTERM or SIGHUP: while ssh runs, SIGINT is left
  * to ssh (it reaches the whole foreground group) and SIGTERM/SIGHUP are
  * passed on to it; before that, they stop the preparation. Either way the
- * directory is removed and sbx exits 128 + n (or with ssh's code).
+ * directory is removed and umiak exits 128 + n (or with ssh's code).
  */
 async function sshInto(
 	ctx: Context,
@@ -87,11 +87,11 @@ async function sshInto(
 	};
 	const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 	for (const sig of signals) process.on(sig, onSignal);
-	const dir = mkdtempSync(join(tmpdir(), "sbx-ssh-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-ssh-"));
 	try {
 		chmodSync(dir, 0o700);
 		const key = join(dir, "id_ed25519");
-		sshKeygen(key, `sbx-${sb.slug}`);
+		sshKeygen(key, `umiak-${sb.slug}`);
 		ac.signal.throwIfAborted();
 		const cert = await certify(
 			ctx,
@@ -134,7 +134,7 @@ export function register(program: Command, run: Runner): void {
 	program
 		.command("ssh")
 		.description(
-			"log in to a sandbox with the system ssh and a short-lived certificate: sbx ssh [<sb>] [-- ssh args]",
+			"log in to a sandbox with the system ssh and a short-lived certificate: umiak ssh [<sb>] [-- ssh args]",
 		)
 		.argument("[args...]", "sandbox ID or slug, then -- and arguments of ssh")
 		.addHelpText(
@@ -142,8 +142,8 @@ export function register(program: Command, run: Runner): void {
 			[
 				"",
 				"The words after -- follow the destination: ssh options or a remote command.",
-				"  sbx ssh my-sb -- -L 3000:localhost:3000",
-				"  sbx ssh my-sb -- uname -a",
+				"  umiak ssh my-sb -- -L 3000:localhost:3000",
+				"  umiak ssh my-sb -- uname -a",
 				`The gateway's host keys are cached in <config dir>/known_hosts (${knownHostsName("ssh.example.com", 2222)} for a port other than 22).`,
 			].join("\n"),
 		)

@@ -20,15 +20,15 @@ export const LOG_LEVELS = [
 ] as const;
 
 export interface Settings {
-	/** SBX_MCP_PORT: /mcp, metadata, /healthz, /readyz. */
+	/** UMIAK_MCP_PORT: /mcp, metadata, /healthz, /readyz. */
 	port: number;
-	/** SBX_MCP_OPS_PORT: /metrics, /healthz, /readyz. */
+	/** UMIAK_MCP_OPS_PORT: /metrics, /healthz, /readyz. */
 	opsPort: number;
-	/** SBX_MCP_API_URL: the api's public listener, without a trailing slash. */
+	/** UMIAK_MCP_API_URL: the api's public listener, without a trailing slash. */
 	apiUrl: string;
-	/** SBX_MCP_PUBLIC_URL: the URL clients use, e.g. https://api.example.com/mcp. */
+	/** UMIAK_MCP_PUBLIC_URL: the URL clients use, e.g. https://api.example.com/mcp. */
 	publicUrl: string;
-	/** SBX_OIDC_ISSUER without a trailing slash; null: no authorization server. */
+	/** UMIAK_OIDC_ISSUER without a trailing slash; null: no authorization server. */
 	issuer: string | null;
 	allowedOrigins: string[];
 	allowedHosts: string[];
@@ -98,14 +98,14 @@ const origins = csv.pipe(
 );
 
 const schema = z.object({
-	SBX_MCP_PORT: port(8080),
-	SBX_MCP_OPS_PORT: port(9090),
-	SBX_MCP_API_URL: url("the api's public listener, e.g. http://api:8080"),
-	SBX_MCP_PUBLIC_URL: url("e.g. https://api.example.com/mcp"),
-	SBX_OIDC_ISSUER: optionalUrl,
-	SBX_MCP_ALLOWED_ORIGINS: origins,
-	SBX_MCP_ALLOWED_HOSTS: csv,
-	SBX_LOG_LEVEL: z.preprocess(unsetEmpty, z.enum(LOG_LEVELS).default("info")),
+	UMIAK_MCP_PORT: port(8080),
+	UMIAK_MCP_OPS_PORT: port(9090),
+	UMIAK_MCP_API_URL: url("the api's public listener, e.g. http://api:8080"),
+	UMIAK_MCP_PUBLIC_URL: url("e.g. https://api.example.com/mcp"),
+	UMIAK_OIDC_ISSUER: optionalUrl,
+	UMIAK_MCP_ALLOWED_ORIGINS: origins,
+	UMIAK_MCP_ALLOWED_HOSTS: csv,
+	UMIAK_LOG_LEVEL: z.preprocess(unsetEmpty, z.enum(LOG_LEVELS).default("info")),
 });
 
 /** Validates the environment; throws SettingsError listing every problem. */
@@ -121,13 +121,13 @@ export function loadSettings(
 	}
 	const e = r.data;
 	return {
-		port: e.SBX_MCP_PORT,
-		opsPort: e.SBX_MCP_OPS_PORT,
-		apiUrl: e.SBX_MCP_API_URL.replace(/\/+$/, ""),
-		publicUrl: e.SBX_MCP_PUBLIC_URL,
-		issuer: e.SBX_OIDC_ISSUER?.replace(/\/+$/, "") ?? null,
-		allowedOrigins: e.SBX_MCP_ALLOWED_ORIGINS,
-		allowedHosts: e.SBX_MCP_ALLOWED_HOSTS,
-		logLevel: e.SBX_LOG_LEVEL,
+		port: e.UMIAK_MCP_PORT,
+		opsPort: e.UMIAK_MCP_OPS_PORT,
+		apiUrl: e.UMIAK_MCP_API_URL.replace(/\/+$/, ""),
+		publicUrl: e.UMIAK_MCP_PUBLIC_URL,
+		issuer: e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "") ?? null,
+		allowedOrigins: e.UMIAK_MCP_ALLOWED_ORIGINS,
+		allowedHosts: e.UMIAK_MCP_ALLOWED_HOSTS,
+		logLevel: e.UMIAK_LOG_LEVEL,
 	};
 }

@@ -12,11 +12,11 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 // killOrder wraps the fake supervisor and records, for each KillCgroup,
@@ -53,7 +53,7 @@ func TestPreShutdownWipesSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	dir, err := os.MkdirTemp("", "sbxdbg")
+	dir, err := os.MkdirTemp("", "umiakdbg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +74,8 @@ func TestPreShutdownWipesSecrets(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req := connect.NewRequest(&agentv1.ClaimRequest{
-		SandboxId:   "sbx_1",
-		Hostname:    "sbx-1",
+		SandboxId:   "umiak_1",
+		Hostname:    "umiak-1",
 		SecretFiles: []*agentv1.SecretFile{{Name: "token", Content: []byte("s3cret"), Mode: 0o600}},
 	})
 	req.Header().Set(wire.HeaderRequestID, "0192f1a4-7c3e-7b2a-9d4f-000000000010")

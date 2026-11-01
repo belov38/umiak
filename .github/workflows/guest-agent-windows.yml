@@ -1,7 +1,7 @@
 name: guest-agent-windows
 
 # Runs the guest agent tests on a real Windows runner. Optional, not a gate: the gate is
-# `sbx-bench s9 agent-tests` on the pve Windows template.
+# `umiak-bench s9 agent-tests` on the pve Windows template.
 # Automatic push/PR triggers are disabled during development (Ilia, 2026-10-30); run manually.
 on:
   workflow_dispatch:

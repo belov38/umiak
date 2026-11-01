@@ -9,8 +9,8 @@ from typing import Any
 import httpx
 import pytest
 
-from sbx_sdk._async.desktop import AsyncDesktop
-from sbx_sdk._sync.desktop import Desktop
+from umiak_sdk._async.desktop import AsyncDesktop
+from umiak_sdk._sync.desktop import Desktop
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -26,12 +26,12 @@ async def test_desktop_wire_contract(asynchronous: bool) -> None:
                 content=b"png",
                 headers={
                     "Content-Type": "image/png",
-                    "Sbx-Screen-Width": "1920",
-                    "Sbx-Screen-Height": "1080",
-                    "Sbx-Image-Width": "1280",
-                    "Sbx-Image-Height": "720",
-                    "Sbx-Cursor-X": "4",
-                    "Sbx-Cursor-Y": "5",
+                    "Umiak-Screen-Width": "1920",
+                    "Umiak-Screen-Height": "1080",
+                    "Umiak-Image-Width": "1280",
+                    "Umiak-Image-Height": "720",
+                    "Umiak-Cursor-X": "4",
+                    "Umiak-Cursor-Y": "5",
                 },
             )
         return httpx.Response(200, json={"completed": 1})

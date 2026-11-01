@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/output"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 // DoctorUnit is a service whose state doctor reports under Key.
@@ -25,8 +25,8 @@ type DoctorUnit struct{ Key, Unit string }
 
 // doctorUnits are the systemd units doctor reports by default.
 var doctorUnits = []DoctorUnit{
-	{"sbx-identity", "sbx-identity.service"},
-	{"sbx-agent", "sbx-agent.service"},
+	{"umiak-identity", "umiak-identity.service"},
+	{"umiak-agent", "umiak-agent.service"},
 }
 
 // DoctorOptions holds the OS-specific parts of Doctor.
@@ -37,8 +37,8 @@ type DoctorOptions struct {
 	// IsActive returns the state of a unit (systemctl is-active; the
 	// service state on Windows). Default SystemctlIsActive.
 	IsActive func(ctx context.Context, unit string) string
-	// Units are the units reported in Report.Units. Default: sbx-identity
-	// and sbx-agent.service.
+	// Units are the units reported in Report.Units. Default: umiak-identity
+	// and umiak-agent.service.
 	Units []DoctorUnit
 	// Service checks the agent service configuration (Windows: failure
 	// actions, start type, preshutdown timeout); nil leaves Report.Service
@@ -52,12 +52,12 @@ type DoctorOptions struct {
 	TestAids []string
 }
 
-// Report is the result of `sbx-agent doctor` (spec 17.6, S5 17.3). It never
+// Report is the result of `umiak-agent doctor` (spec 17.6, S5 17.3). It never
 // holds the boot secret or the machine token.
 type Report struct {
 	Versions VersionsReport `json:"versions"`
-	// Units maps sbx-identity and sbx-agent to their systemctl is-active
-	// state (Windows: sbx-agent to its service state).
+	// Units maps umiak-identity and umiak-agent to their systemctl is-active
+	// state (Windows: umiak-agent to its service state).
 	Units map[string]string `json:"units"`
 	// Service is the agent service check (Windows only).
 	Service *ServiceReport `json:"service,omitempty"`
@@ -145,7 +145,7 @@ type DiskReport struct {
 	Error      string `json:"error,omitempty"`
 }
 
-// Doctor collects the diagnostics of `sbx-agent doctor`. It works with or
+// Doctor collects the diagnostics of `umiak-agent doctor`. It works with or
 // without a running agent and never fails as a whole: a part that cannot be
 // read carries its error.
 func Doctor(ctx context.Context, l paths.Layout, cfg config.Config, opts DoctorOptions) *Report {

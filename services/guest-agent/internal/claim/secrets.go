@@ -17,12 +17,12 @@ import (
 	"strconv"
 	"strings"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
 )
 
 // Secret limits (spec 8.1).
@@ -51,7 +51,7 @@ func SecretsDigest(env map[string]string, files []*agentv1.SecretFile) string {
 		return ""
 	}
 	h := sha256.New()
-	h.Write([]byte("sbx-secrets-v1"))
+	h.Write([]byte("umiak-secrets-v1"))
 	writeU64(h, uint64(len(env)))
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		writeField(h, []byte(k))
@@ -362,7 +362,7 @@ func (m *Manager) restoreFiles(files []*agentv1.SecretFile) error {
 }
 
 // WipeSecretsDir wipes the secret files, the state record and secrets/env
-// of layout l without a Manager: the boot step of Windows (sbx-agent early)
+// of layout l without a Manager: the boot step of Windows (umiak-agent early)
 // runs it before any logon.
 func WipeSecretsDir(l paths.Layout) error {
 	_, err := wipeDir(l.SecretFilesDir, removeSecretFile)
@@ -410,8 +410,8 @@ func wipeDir(dir string, remove func(string) error) (wiped bool, err error) {
 }
 
 // placeLink makes the link_path symlink point at target. An existing
-// symlink is replaced; an existing file is moved aside to <path>.sbx-orig
-// (or <path>.sbx-orig.<unix nanos> if that is taken) with a warning. An
+// symlink is replaced; an existing file is moved aside to <path>.umiak-orig
+// (or <path>.umiak-orig.<unix nanos> if that is taken) with a warning. An
 // existing directory is left alone and the link is skipped with a warning.
 // Missing parent directories are created (see mkdirAllOwned).
 func (m *Manager) placeLink(linkPath, target string) error {
@@ -440,7 +440,7 @@ func (m *Manager) placeLink(linkPath, target string) error {
 	if err := m.mkdirAllOwned(filepath.Dir(link)); err != nil {
 		return internal("create link_path parent", err)
 	}
-	tmp := link + ".sbx-link-tmp"
+	tmp := link + ".umiak-link-tmp"
 	_ = os.Remove(tmp)
 	if err := os.Symlink(target, tmp); err != nil {
 		return internal("create link_path", err)
@@ -452,11 +452,11 @@ func (m *Manager) placeLink(linkPath, target string) error {
 	return nil
 }
 
-// moveAside renames path to a free <path>.sbx-orig name and returns it.
+// moveAside renames path to a free <path>.umiak-orig name and returns it.
 func (m *Manager) moveAside(path string) (string, error) {
-	aside := path + ".sbx-orig"
+	aside := path + ".umiak-orig"
 	if _, err := os.Lstat(aside); err == nil {
-		aside = path + ".sbx-orig." + strconv.FormatInt(m.opts.Now().UnixNano(), 10)
+		aside = path + ".umiak-orig." + strconv.FormatInt(m.opts.Now().UnixNano(), 10)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", err
 	}

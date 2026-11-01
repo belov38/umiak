@@ -1,6 +1,6 @@
-import type { TemplateOs } from "@sbx/config";
-import { operationDeadline, uuidv7 } from "@sbx/core";
-import type { Tx } from "@sbx/db";
+import type { TemplateOs } from "@umiak/config";
+import { operationDeadline, uuidv7 } from "@umiak/core";
+import type { Tx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import {
 	DeadlineExceeded,

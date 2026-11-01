@@ -9,16 +9,16 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 )
 
 // diskKeyRe matches the config keys of attached disks (not unusedN, not snapshot sections).
 var diskKeyRe = regexp.MustCompile(`^(efidisk|tpmstate|scsi|sata|virtio|ide)[0-9]+$`)
 
 // lv.adopt (S9): tags the disks Proxmox allocated for a sandbox VM (the fresh tpmstate0 of a
-// Windows clone) with sbx and sbx-vm-<vmid>, so lv.snapshot, lv.remove and the tag-based cleanup
-// treat them like the disks sbx-node cloned. Only a non-template VM in the sandbox range whose
-// config carries the tag sbx qualifies, and only vm-<vmid>-disk-N volumes on our storage that the
+// Windows clone) with umiak and umiak-vm-<vmid>, so lv.snapshot, lv.remove and the tag-based cleanup
+// treat them like the disks umiak-node cloned. Only a non-template VM in the sandbox range whose
+// config carries the tag umiak qualifies, and only vm-<vmid>-disk-N volumes on our storage that the
 // current config section attaches.
 func (s *Server) lvAdopt(ctx context.Context, raw json.RawMessage) (any, error) {
 	var args struct {
@@ -36,7 +36,7 @@ func (s *Server) lvAdopt(ctx context.Context, raw json.RawMessage) (any, error) 
 	}
 	refs, ok := sandboxDisks(string(conf), s.Cfg.Storage, args.VMID)
 	if !ok {
-		return nil, forbidden("VM %d is a template or not tagged sbx", args.VMID)
+		return nil, forbidden("VM %d is a template or not tagged umiak", args.VMID)
 	}
 	all, err := s.LVM.List(ctx)
 	if err != nil {
@@ -46,9 +46,9 @@ func (s *Server) lvAdopt(ctx context.Context, raw json.RawMessage) (any, error) 
 	for _, l := range all {
 		byName[l.Name] = l
 	}
-	owner := fmt.Sprintf("sbx-vm-%d", args.VMID)
+	owner := fmt.Sprintf("umiak-vm-%d", args.VMID)
 	for _, name := range refs {
-		if l, ok := byName[name]; ok && slices.Contains(l.Tags, "sbx-tpl") {
+		if l, ok := byName[name]; ok && slices.Contains(l.Tags, "umiak-tpl") {
 			return nil, forbidden("LV %q is a template disk", name)
 		}
 	}
@@ -59,7 +59,7 @@ func (s *Server) lvAdopt(ctx context.Context, raw json.RawMessage) (any, error) 
 			continue
 		}
 		cmd := []string{}
-		for _, t := range []string{"sbx", owner} {
+		for _, t := range []string{"umiak", owner} {
 			if !slices.Contains(l.Tags, t) {
 				cmd = append(cmd, "--addtag", t)
 			}
@@ -78,7 +78,7 @@ func (s *Server) lvAdopt(ctx context.Context, raw json.RawMessage) (any, error) 
 
 // sandboxDisks reads the current section of a qemu-server config and returns the LV names of the
 // disks it attaches from storage as vm-<vmid>-disk-N, in config order. ok is false for a template
-// or a VM without the tag sbx.
+// or a VM without the tag umiak.
 func sandboxDisks(conf, storage string, vmid int) (names []string, ok bool) {
 	own := regexp.MustCompile(fmt.Sprintf(`^vm-%d-disk-[0-9]+$`, vmid))
 	template, tag := false, false
@@ -96,7 +96,7 @@ func sandboxDisks(conf, storage string, vmid int) (names []string, ok bool) {
 		case k == "template":
 			template = v == "1"
 		case k == "tags":
-			tag = slices.Contains(strings.FieldsFunc(v, func(r rune) bool { return r == ';' || r == ',' || r == ' ' }), "sbx")
+			tag = slices.Contains(strings.FieldsFunc(v, func(r rune) bool { return r == ';' || r == ',' || r == ' ' }), "umiak")
 		case diskKeyRe.MatchString(k):
 			volid, _, _ := strings.Cut(v, ",")
 			st, name, found := strings.Cut(volid, ":")

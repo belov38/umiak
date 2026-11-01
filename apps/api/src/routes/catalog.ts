@@ -3,7 +3,7 @@
 // its newest active build (template_builds), null without one. Disabled
 // templates are listed for operators only.
 import { createRoute } from "@hono/zod-openapi";
-import type { SizeConfig, TemplateConfig } from "@sbx/config";
+import type { SizeConfig, TemplateConfig } from "@umiak/config";
 import { authOf } from "../auth/principal.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { ERROR_RESPONSES, jsonResponse } from "../openapi/registry.ts";

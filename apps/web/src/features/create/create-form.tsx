@@ -25,7 +25,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import {
 	type CreateFormState,
@@ -115,7 +115,7 @@ export function CreateSandboxForm({
 	teamId: string;
 	prefill: CreatePrefill;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const queryClient = useQueryClient();
 	const [form, setForm] = useState<CreateFormState>(() => ({
@@ -134,29 +134,29 @@ export function CreateSandboxForm({
 
 	const templates = useQuery({
 		queryKey: ["templates", teamId],
-		queryFn: ({ signal }) => sbx.templates({ signal }),
+		queryFn: ({ signal }) => umiak.templates({ signal }),
 	});
 	const sizes = useQuery({
 		queryKey: ["sizes", teamId],
-		queryFn: ({ signal }) => sbx.sizes({ signal }),
+		queryFn: ({ signal }) => umiak.sizes({ signal }),
 	});
 	const snapshots = useQuery({
 		queryKey: ["snapshots", teamId],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/snapshots", { signal });
+			const { data } = await umiak.raw.GET("/v1/snapshots", { signal });
 			return data.data;
 		},
 	});
 	const environments = useQuery({
 		queryKey: ["environments", teamId],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/environments", { signal });
+			const { data } = await umiak.raw.GET("/v1/environments", { signal });
 			return data.data;
 		},
 	});
 	const limits = useQuery({
 		queryKey: ["limits", teamId],
-		queryFn: ({ signal }) => sbx.limits({ signal }),
+		queryFn: ({ signal }) => umiak.limits({ signal }),
 	});
 
 	// Disabled templates are listed for operators only; nobody creates from them.
@@ -216,7 +216,7 @@ export function CreateSandboxForm({
 		let slug: string;
 		try {
 			// Retryable errors are retried within the dashboard's budget (api.ts).
-			const sb = await sbx.sandboxes.create(r.body, {
+			const sb = await umiak.sandboxes.create(r.body, {
 				idempotencyKey: slot.key,
 			});
 			idempotency.current = slotAfter(slot, undefined);

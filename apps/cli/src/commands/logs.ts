@@ -1,4 +1,4 @@
-// `sbx logs [<sb>] <cmd> [-f] [--tail <bytes>]` (S7 §9.4, §14.2): the output
+// `umiak logs [<sb>] <cmd> [-f] [--tail <bytes>]` (S7 §9.4, §14.2): the output
 // of a command, raw (stdout to stdout, stderr to stderr) or with --json the
 // frames with `event`. Without -f it prints what there is now and exits;
 // with -f it follows until the command exits. --tail starts each stream at
@@ -9,8 +9,8 @@ import type {
 	Offsets,
 	OutputStream,
 	RunEvent,
-	Command as SbxCommand,
-} from "@sbx/sdk";
+	Command as UmiakCommand,
+} from "@umiak/sdk";
 import type { Command } from "commander";
 import { parseCount } from "../args.ts";
 import { useSandbox } from "../current.ts";
@@ -64,7 +64,7 @@ export function register(program: Command, run: Runner): void {
 				async (ctx, args, opts) => {
 					const [a, b] = args as [string, string | undefined];
 					const sb = await useSandbox(ctx, b === undefined ? undefined : a);
-					const cmd: SbxCommand = sb.command(b ?? a);
+					const cmd: UmiakCommand = sb.command(b ?? a);
 					const data = await cmd.refresh();
 					const streams = data.streams ?? {};
 					const size = (s: OutputStream) => streams[s]?.sizeBytes ?? 0;

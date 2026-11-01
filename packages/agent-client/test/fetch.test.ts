@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ErrorDetailSchema } from "@sbx/proto";
+import { ErrorDetailSchema } from "@umiak/proto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	AgentClient,
@@ -95,7 +95,7 @@ describe("AgentClient.fetch", () => {
 		expect(reqs[0]?.url).toBe(`/v1/machines/${m}/files?path=/data/f.bin`);
 	});
 
-	it("follows 421 to Sbx-Instance-Url keeping Range and Authorization", async () => {
+	it("follows 421 to Umiak-Instance-Url keeping Range and Authorization", async () => {
 		registry.set(route(m, a.url));
 		registry.addInstance(b.url);
 		// The machine stays moved on A. undici's fetch itself repeats a 421 once
@@ -105,7 +105,7 @@ describe("AgentClient.fetch", () => {
 			times: Number.POSITIVE_INFINITY,
 		});
 		const res = await agent().fetch(m, "?path=/data/f.bin", {
-			headers: { Range: "bytes=99990-", "Sbx-Request-Id": "r-7" },
+			headers: { Range: "bytes=99990-", "Umiak-Request-Id": "r-7" },
 		});
 		expect(res.status).toBe(206);
 		expect(Buffer.from(await readAll(res))).toEqual(
@@ -116,7 +116,7 @@ describe("AgentClient.fetch", () => {
 		const [rb] = fileRequests(b);
 		expect(rb?.headers.range).toBe("bytes=99990-");
 		expect(rb?.headers.authorization).toBe(`Bearer ${token}`);
-		expect(rb?.headers["sbx-request-id"]).toBe("r-7");
+		expect(rb?.headers["umiak-request-id"]).toBe("r-7");
 		expect(registry.invalidations).toContain(m);
 	});
 
@@ -284,8 +284,8 @@ describe("AgentClient.fetch", () => {
 			body,
 		});
 		expect(res.status).toBe(421);
-		expect(res.headers.get("sbx-error-code")).toBe("machine_moved");
-		expect(res.headers.get("sbx-instance-url")).toBe(b.url);
+		expect(res.headers.get("umiak-error-code")).toBe("machine_moved");
+		expect(res.headers.get("umiak-instance-url")).toBe(b.url);
 		expect(await res.json()).toEqual({
 			code: "machine_moved",
 			instanceUrl: b.url,
@@ -302,7 +302,7 @@ describe("AgentClient.fetch", () => {
 		expect(fileRequests(a)).toHaveLength(1);
 	});
 
-	it("returns a 503 without Sbx-Error-Code as the Response", async () => {
+	it("returns a 503 without Umiak-Error-Code as the Response", async () => {
 		registry.set(route(m, a.url));
 		a.script.push({ answer: { kind: "plain", status: 503 } });
 		const res = await agent().fetch(m, "?path=/data/f.bin");

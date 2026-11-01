@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 )
 
 func TestHarnessCapabilities(t *testing.T) {
@@ -45,7 +45,7 @@ func TestHarnessQuiesceThaw(t *testing.T) {
 	// Quiesce needs a request id like every mutation.
 	qreq := &agentv1.QuiesceRequest{LeaseMs: proto.Uint32(30000), Docker: proto.Bool(false), Fs: proto.Bool(true)}
 	if _, err := e.system().Quiesce(ctx(t), connect.NewRequest(qreq)); connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("Quiesce without Sbx-Request-Id = %v", err)
+		t.Fatalf("Quiesce without Umiak-Request-Id = %v", err)
 	}
 	q, err := e.system().Quiesce(ctx(t), withRequestID(connect.NewRequest(qreq), uuid.NewString()))
 	if err != nil {

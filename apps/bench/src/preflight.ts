@@ -8,7 +8,7 @@ import {
 
 interface Inventory {
 	sysctl: Record<string, string>;
-	sbx0: { linkLocal: string | null };
+	umiak0: { linkLocal: string | null };
 	journalReaders: Record<string, string[]>;
 }
 
@@ -21,7 +21,7 @@ export async function preflight(
 	let inv: Inventory | undefined;
 
 	checks.push(
-		await check("sbx-node answers with the expected config", async () => {
+		await check("umiak-node answers with the expected config", async () => {
 			const v = await node.call<{
 				version: string;
 				config: {
@@ -32,7 +32,7 @@ export async function preflight(
 					templateVmidMax?: number;
 				};
 			}>("version");
-			// sbx-node clones from the tagged base-<id> disks of its template slots (S5 templates);
+			// umiak-node clones from the tagged base-<id> disks of its template slots (S5 templates);
 			// its templateVmid is only the legacy 599.
 			const tplMin = v.config.templateVmidMin ?? v.config.templateVmid;
 			const tplMax = v.config.templateVmidMax ?? v.config.templateVmid;
@@ -45,14 +45,14 @@ export async function preflight(
 				v.config.vmidMax >= cfg.vmidRange.max;
 			return {
 				ok,
-				detail: `sbx-node ${v.version}, range ${v.config.vmidMin}-${v.config.vmidMax}, template ${cfg.templateVmid}`,
+				detail: `umiak-node ${v.version}, range ${v.config.vmidMin}-${v.config.vmidMax}, template ${cfg.templateVmid}`,
 			};
 		}),
 	);
 	checks.push(
 		await check("node journal readable only by root and adm", async () => {
 			inv = await node.call<Inventory>("inventory", {
-				sections: ["sysctl", "sbx0", "journalReaders"],
+				sections: ["sysctl", "umiak0", "journalReaders"],
 			});
 			const members = Object.entries(inv.journalReaders).filter(
 				([, m]) => m.length > 0,
@@ -76,9 +76,9 @@ export async function preflight(
 		),
 	);
 	checks.push(
-		await check("host link-local address on sbx0 known", async () => ({
-			ok: !!inv?.sbx0.linkLocal,
-			detail: inv?.sbx0.linkLocal ?? "",
+		await check("host link-local address on umiak0 known", async () => ({
+			ok: !!inv?.umiak0.linkLocal,
+			detail: inv?.umiak0.linkLocal ?? "",
 		})),
 	);
 
@@ -108,11 +108,11 @@ export async function preflight(
 		}),
 	);
 	checks.push(
-		await check("token: firewall group sbx-egress exists", async () => {
+		await check("token: firewall group umiak-egress exists", async () => {
 			const groups = await api.get<{ group: string }[]>(
 				"/cluster/firewall/groups",
 			);
-			return groups.some((g) => g.group === "sbx-egress");
+			return groups.some((g) => g.group === "umiak-egress");
 		}),
 	);
 	checks.push(
@@ -202,9 +202,9 @@ export async function preflight(
 		}),
 	);
 	checks.push(
-		await check("no leftover LVs tagged sbx", async () => {
+		await check("no leftover LVs tagged umiak", async () => {
 			const { lvs } = await node.call<{ lvs: { name: string }[] }>("lv.list", {
-				tags: ["sbx"],
+				tags: ["umiak"],
 			});
 			return { ok: lvs.length === 0, detail: lvs.map((l) => l.name).join(",") };
 		}),

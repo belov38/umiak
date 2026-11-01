@@ -1,6 +1,0 @@
-[Unit]
-Description=sbx guest agent rollback
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'if [ -x /usr/local/lib/sbx-agent/previous/sbx-agent ]; then exec /usr/local/lib/sbx-agent/previous/sbx-agent rollback; else exec /usr/local/lib/sbx-agent/current/sbx-agent rollback; fi'

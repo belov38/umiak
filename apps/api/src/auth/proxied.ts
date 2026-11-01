@@ -27,7 +27,7 @@ const FORM_TYPES = [
  * `X-Auth-Request-Groups`: comma-separated and/or repeated (Node joins
  * repeats with ", "). `role:<name>` entries (realm and client roles that
  * oauth2-proxy's keycloak-oidc provider adds) are dropped, as in
- * parseAuthHeaders of @sbx/payload: the CLI JWT has only `groups`, and both
+ * parseAuthHeaders of @umiak/payload: the CLI JWT has only `groups`, and both
  * logins must store the same users.groups.
  */
 export function parseGroups(v: string | undefined): string[] {
@@ -97,12 +97,12 @@ function checkRequest(deps: ApiDeps, c: Context<ApiEnv>): void {
 	}
 }
 
-/** Team of the request: Sbx-Team, or `?team=` on GET/HEAD/upgrade (C4). */
+/** Team of the request: Umiak-Team, or `?team=` on GET/HEAD/upgrade (C4). */
 function requestedTeam(c: Context<ApiEnv>): string | null {
 	const header = c.req.header(TEAM_HEADER);
 	const query = c.req.query("team");
 	const fromHeader =
-		header === undefined ? null : decodeTeamRef(header, "header.sbx-team");
+		header === undefined ? null : decodeTeamRef(header, "header.umiak-team");
 	if (query === undefined) return fromHeader;
 	const readOnly = c.req.method === "GET" || c.req.method === "HEAD";
 	if (!readOnly && !isUpgrade(c)) {
@@ -110,14 +110,14 @@ function requestedTeam(c: Context<ApiEnv>): string | null {
 			{
 				path: "query.team",
 				message:
-					"accepted only on GET, HEAD and WebSocket upgrades; send the Sbx-Team header",
+					"accepted only on GET, HEAD and WebSocket upgrades; send the Umiak-Team header",
 			},
 		]);
 	}
 	const fromQuery = decodeTeamRef(query, "query.team");
 	if (fromHeader !== null && fromHeader !== fromQuery) {
 		throw validationError([
-			{ path: "query.team", message: "differs from the Sbx-Team header" },
+			{ path: "query.team", message: "differs from the Umiak-Team header" },
 		]);
 	}
 	return fromQuery;

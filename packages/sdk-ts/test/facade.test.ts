@@ -9,14 +9,18 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type Command,
 	type RunEvent,
 	type Sandbox,
-	Sbx,
-	SbxError,
+	Umiak,
+	UmiakError,
 } from "../src/index.ts";
 import { startTestApi, type TestApi } from "./helpers/api.ts";
 
@@ -120,23 +124,23 @@ function joinOutput(events: RunEvent[]) {
 	return { ...text, next };
 }
 
-describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
+describe.skipIf(skipPg())("Umiak facade against apps/api", () => {
 	let db: TestDatabase;
 	let api: TestApi;
-	let sbx: Sbx;
+	let umiak: Umiak;
 	let sb: Sandbox;
 	let tmp: string;
 
 	beforeAll(async () => {
 		db = await createTestDatabase({ max: 20 });
 		api = await startTestApi(db);
-		sbx = new Sbx({
+		umiak = new Umiak({
 			baseUrl: api.url,
 			apiKey: api.secret,
 			fetch: api.fetch,
 			env: {},
 		});
-		tmp = await mkdtemp(join(tmpdir(), "sbx-sdk-facade-"));
+		tmp = await mkdtemp(join(tmpdir(), "umiak-sdk-facade-"));
 	});
 
 	afterAll(async () => {
@@ -146,7 +150,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 	});
 
 	it("create(wait) returns once the sandbox is ready (long-poll)", async () => {
-		const created = sbx.sandboxes.create(
+		const created = umiak.sandboxes.create(
 			{ labels: { suite: SUITE } },
 			{ wait: true },
 		);
@@ -284,7 +288,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 	});
 
 	it("a stream with no line for the idle timeout is reopened from its offsets", async () => {
-		const quick = new Sbx({
+		const quick = new Umiak({
 			baseUrl: api.url,
 			apiKey: api.secret,
 			fetch: api.fetch,
@@ -348,7 +352,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 
 	it("sandboxes.handle(slug) runs commands without reading the sandbox", async () => {
 		const before = api.requests.length;
-		const h = sbx.sandboxes.handle(sb.slug);
+		const h = umiak.sandboxes.handle(sb.slug);
 		expect(h.id).toBe(sb.slug);
 		const r = await h.exec("echo via-handle");
 		expect(r.stdout).toBe("via-handle\n");
@@ -415,7 +419,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		expect(await f.remove("notes/bin.dat")).toEqual({ existed: true });
 		expect(await f.remove("notes/bin.dat")).toEqual({ existed: false });
 		const err = await f.readText("notes/bin.dat").catch((e: unknown) => e);
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({ status: 404, code: "path_not_found" });
 	});
 
@@ -502,7 +506,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		await sb.files.writeBytes("big/changing.bin", first);
 		// A client without the hooks writes the new version while the first
 		// answer is cut; the resume's If-Range no longer matches.
-		const plain = new Sbx({ baseUrl: api.url, apiKey: api.secret, env: {} });
+		const plain = new Umiak({ baseUrl: api.url, apiKey: api.secret, env: {} });
 		const other = await plain.sandboxes.get(sb.slug);
 		api.intercept(async (req, next) => {
 			const p = new URL(req.url).pathname;
@@ -528,7 +532,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		const err = await sb.files
 			.download("no/such/file.txt", dest)
 			.catch((e: unknown) => e);
-		expect((err as SbxError).code).toBe("path_not_found");
+		expect((err as UmiakError).code).toBe("path_not_found");
 		expect(await readFile(dest, "utf8")).toBe("old content\n");
 		expect(existsSync(`${dest}.tmp`)).toBe(false);
 		await sb.files.writeText("small/new.txt", "new content\n");
@@ -590,7 +594,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 	it("ports: host with a token, list, rotate, unhost", async () => {
 		const p = await sb.ports.host(8000, { access: "token" });
 		expect(p).toMatchObject({ port: 8000, access: "token" });
-		expect(p.token).toMatch(/^sbxp_/);
+		expect(p.token).toMatch(/^umiakp_/);
 		expect(p.urlWithToken).toContain(p.token as string);
 		const list = await sb.ports.list();
 		expect(list.hosted.map((h) => h.port)).toEqual([8000]);
@@ -602,7 +606,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 
 	it("pty: a refused handshake (403 before the upgrade) ends at once", async () => {
 		const pty = await sb.pty({ command: "sleep 30" });
-		const readOnly = new Sbx({
+		const readOnly = new Umiak({
 			baseUrl: api.url,
 			apiKey: await api.key(["sandboxes:read"]),
 			env: {},
@@ -610,7 +614,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		const view = await readOnly.sandboxes.get(sb.slug);
 		const started = Date.now();
 		const err = await view.connectPty(pty.command.id).catch((e: unknown) => e);
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({ status: 403, code: "forbidden" });
 		// No retries (room for a loaded machine).
 		expect(Date.now() - started).toBeLessThan(10_000);
@@ -656,7 +660,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 	});
 
 	it("signal aborts waitUntilReady at once", async () => {
-		const other = await sbx.sandboxes.create({ labels: { suite: SUITE } });
+		const other = await umiak.sandboxes.create({ labels: { suite: SUITE } });
 		expect(other.state).toBe("creating");
 		const ac = new AbortController();
 		const started = Date.now();
@@ -671,7 +675,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 
 	it("sandboxes.list iterates every page; get by slug", async () => {
 		const found: string[] = [];
-		for await (const s of sbx.sandboxes.list({
+		for await (const s of umiak.sandboxes.list({
 			label: { suite: SUITE },
 			limit: 1,
 		})) {
@@ -683,13 +687,13 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 			(r) => r.method === "GET" && r.path.startsWith("/v1/sandboxes?"),
 		);
 		expect(pages.length).toBeGreaterThanOrEqual(2);
-		expect((await sbx.sandboxes.get(sb.slug)).id).toBe(sb.id);
-		expect(await sbx.me()).toBeTruthy();
-		expect((await sbx.templates()).length).toBeGreaterThan(0);
+		expect((await umiak.sandboxes.get(sb.slug)).id).toBe(sb.id);
+		expect(await umiak.me()).toBeTruthy();
+		expect((await umiak.templates()).length).toBeGreaterThan(0);
 	});
 
 	it("snapshots.create({wait}) throws the error of a failed operation", async () => {
-		const p = sbx.snapshots
+		const p = umiak.snapshots
 			.create({ sandbox: sb.slug, name: `snap-${process.pid}` }, { wait: true })
 			.catch((e: unknown) => e);
 		const { id } = await api.sandboxRow(sb.slug);
@@ -709,7 +713,7 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 			[opId],
 		);
 		const err = await p;
-		expect(err).toBeInstanceOf(SbxError);
+		expect(err).toBeInstanceOf(UmiakError);
 		expect(err).toMatchObject({
 			code: "snapshot_failed",
 			message: "disk full",
@@ -718,12 +722,12 @@ describe.skipIf(skipPg())("Sbx facade against apps/api", () => {
 		});
 	});
 
-	it("delete sends Sbx-Confirm-Delete with the sandbox id", async () => {
+	it("delete sends Umiak-Confirm-Delete with the sandbox id", async () => {
 		const op = await sb.delete();
 		expect(op?.kind).toBe("delete");
 		expect(sb.state).toBe("deleting");
 		const del = api.requests.filter((r) => r.method === "DELETE").at(-1);
-		expect(del?.headers.get("sbx-confirm-delete")).toBe(sb.id);
+		expect(del?.headers.get("umiak-confirm-delete")).toBe(sb.id);
 	});
 });
 

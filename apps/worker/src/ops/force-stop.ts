@@ -1,5 +1,5 @@
-import { forceStopRestartMs } from "@sbx/core";
-import { retryOnVmLock } from "@sbx/pve";
+import { forceStopRestartMs } from "@umiak/core";
+import { retryOnVmLock } from "@umiak/pve";
 import type { WorkerCtx } from "../context.ts";
 import { errFields } from "../log.ts";
 import { MachineStateConflict } from "../machine-prep.ts";

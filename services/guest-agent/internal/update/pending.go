@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // Pending is pending-update.json: an update that switched current but was
 // not confirmed yet (spec 17.4 step 4). It is a file and not a bbolt record
-// because `sbx-agent rollback` reads it while the agent is down.
+// because `umiak-agent rollback` reads it while the agent is down.
 type Pending struct {
 	From     string    `json:"from"`
 	To       string    `json:"to"`
@@ -109,7 +109,7 @@ type rollbackResult struct {
 	Error string `json:"error"`
 }
 
-// rollbackResultFile is /var/lib/sbx-agent/rollback-result.json.
+// rollbackResultFile is /var/lib/umiak-agent/rollback-result.json.
 func rollbackResultFile(l paths.Layout) string {
 	return filepath.Join(l.StateDir, "rollback-result.json")
 }

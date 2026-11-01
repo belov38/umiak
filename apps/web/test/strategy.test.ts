@@ -2,21 +2,25 @@
 // the oauth2-proxy strategy, the session cache it shares with /app, and the
 // public-id session sent to the browser.
 import { randomBytes, randomUUID } from "node:crypto";
-import { decodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import {
 	authenticateRequest,
 	dbPool,
 	detachSessionCache,
-	migrateSbxPayload,
+	migrateUmiakPayload,
 	oauth2ProxyStrategy,
 	sessionCacheOf,
-} from "@sbx/payload";
+} from "@umiak/payload";
 import { getPayload, type Payload } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toAppSession } from "../src/lib/app-session.ts";
 
-const OPS = "sbx-operators";
+const OPS = "umiak-operators";
 
 describe.skipIf(skipPg())(
 	"web Payload config: oauth2-proxy strategy (S8 §5.4)",
@@ -37,14 +41,14 @@ describe.skipIf(skipPg())(
 			Object.assign(process.env, {
 				DATABASE_URL: t.url,
 				PAYLOAD_SECRET: "test-payload-secret-0123456789",
-				SBX_APP_ORIGIN: "https://app.sbx.test",
-				SBX_OPERATOR_GROUPS: OPS,
-				SBX_SBX_DOMAIN: "sbx.test",
-				SBX_API_PUBLIC_URL: "https://api.sbx.test",
+				UMIAK_APP_ORIGIN: "https://app.umiak.test",
+				UMIAK_OPERATOR_GROUPS: OPS,
+				UMIAK_PREVIEW_DOMAIN: "umiak.test",
+				UMIAK_API_PUBLIC_URL: "https://api.umiak.test",
 			});
 			const { default: config } = await import("../src/payload.config.ts");
 			payload = await getPayload({ config, key: `web-test-${t.url}` });
-			await migrateSbxPayload(payload);
+			await migrateUmiakPayload(payload);
 		});
 		afterAll(async () => {
 			if (payload) {
@@ -59,7 +63,7 @@ describe.skipIf(skipPg())(
 		it("the config attaches the session cache (decision 8)", () => {
 			expect(sessionCacheOf(payload)).not.toBe(null);
 			expect(payload.config.routes.api).toBe("/cms-api");
-			expect(payload.config.csrf).toEqual(["https://app.sbx.test"]);
+			expect(payload.config.csrf).toEqual(["https://app.umiak.test"]);
 		});
 
 		it("returns the user with collection 'users'", async () => {

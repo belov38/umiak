@@ -11,9 +11,9 @@ const lvsJSON = `{
   "report": [
     {
       "lv": [
-        {"lv_name":"base-599-disk-0", "lv_size":"42949672960", "lv_attr":"Vri---tz-k", "lv_tags":"sbx-tpl", "origin":"", "data_percent":"", "metadata_percent":"", "pool_lv":"data"},
+        {"lv_name":"base-599-disk-0", "lv_size":"42949672960", "lv_attr":"Vri---tz-k", "lv_tags":"umiak-tpl", "origin":"", "data_percent":"", "metadata_percent":"", "pool_lv":"data"},
         {"lv_name":"data", "lv_size":"748156928000", "lv_attr":"twi-aotz--", "lv_tags":"", "origin":"", "data_percent":"6.36", "metadata_percent":"0.71", "pool_lv":""},
-        {"lv_name":"vm-500-disk-0", "lv_size":"42949672960", "lv_attr":"Vwi-a-tz--", "lv_tags":"sbx,sbx-vm-500", "origin":"base-599-disk-0", "data_percent":"10.00", "metadata_percent":"", "pool_lv":"data"}
+        {"lv_name":"vm-500-disk-0", "lv_size":"42949672960", "lv_attr":"Vwi-a-tz--", "lv_tags":"umiak,umiak-vm-500", "origin":"base-599-disk-0", "data_percent":"10.00", "metadata_percent":"", "pool_lv":"data"}
       ]
     }
   ]
@@ -41,7 +41,7 @@ func TestListParsesReport(t *testing.T) {
 	if len(lvs) != 3 {
 		t.Fatalf("got %d LVs", len(lvs))
 	}
-	want := LV{Name: "vm-500-disk-0", SizeBytes: 42949672960, Attr: "Vwi-a-tz--", Tags: []string{"sbx", "sbx-vm-500"}, Origin: "base-599-disk-0", DataPercent: 10, PoolLV: "data"}
+	want := LV{Name: "vm-500-disk-0", SizeBytes: 42949672960, Attr: "Vwi-a-tz--", Tags: []string{"umiak", "umiak-vm-500"}, Origin: "base-599-disk-0", DataPercent: 10, PoolLV: "data"}
 	if !reflect.DeepEqual(lvs[2], want) {
 		t.Errorf("lvs[2] = %+v, want %+v", lvs[2], want)
 	}
@@ -56,18 +56,18 @@ func TestListParsesReport(t *testing.T) {
 func TestCreateSnapshotAndRemoveCommands(t *testing.T) {
 	r := &recorder{}
 	e := &Exec{VG: "pve", Run: r.run}
-	if err := e.CreateSnapshot(context.Background(), CreateSpec{Origin: "base-599-disk-0", Name: "vm-500-disk-0", Tags: []string{"sbx", "sbx-vm-500"}}); err != nil {
+	if err := e.CreateSnapshot(context.Background(), CreateSpec{Origin: "base-599-disk-0", Name: "vm-500-disk-0", Tags: []string{"umiak", "umiak-vm-500"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.CreateSnapshot(context.Background(), CreateSpec{Origin: "vm-500-disk-0", Name: "sbx-snap-a-scsi0", Tags: []string{"sbx"}, ActivationSkip: true}); err != nil {
+	if err := e.CreateSnapshot(context.Background(), CreateSpec{Origin: "vm-500-disk-0", Name: "umiak-snap-a-scsi0", Tags: []string{"umiak"}, ActivationSkip: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Remove(context.Background(), "vm-500-disk-0"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"lvcreate -s -kn -n vm-500-disk-0 --addtag sbx --addtag sbx-vm-500 pve/base-599-disk-0",
-		"lvcreate -s -ky -n sbx-snap-a-scsi0 --addtag sbx pve/vm-500-disk-0",
+		"lvcreate -s -kn -n vm-500-disk-0 --addtag umiak --addtag umiak-vm-500 pve/base-599-disk-0",
+		"lvcreate -s -ky -n umiak-snap-a-scsi0 --addtag umiak pve/vm-500-disk-0",
 		"lvremove -y pve/vm-500-disk-0",
 	}
 	for i, w := range want {

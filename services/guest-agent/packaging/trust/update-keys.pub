@@ -1,8 +1,8 @@
-# sbx-agent update signing keys (ed25519), spec S3 section 17.3.
+# umiak-agent update signing keys (ed25519), spec S3 section 17.3.
 # One key per line: "ed25519 <base64 of the 32-byte public key> <comment>".
 # Lines starting with '#' and blank lines are ignored. A package verifies if
 # manifest.sig matches any listed key. The line below is the current key; for
 # rotation a "next" key line is added here in advance and shipped in a package
 # signed with the current key. The private key lives outside the repository
-# (PoC: ~/.config/sbx/update-signing/ed25519.key).
-ed25519 vo/77czm2ho6dvwtv4luPyJ2/FaEWvrPybqZs1IZ+3Y= sbx-update-poc-2026-10-30 current
+# (PoC: ~/.config/umiak/update-signing/ed25519.key).
+ed25519 vo/77czm2ho6dvwtv4luPyJ2/FaEWvrPybqZs1IZ+3Y= umiak-update-poc-2026-10-30 current

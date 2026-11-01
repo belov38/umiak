@@ -40,16 +40,16 @@ describe("cp, push, run --push", () => {
 	});
 	beforeEach(() => {
 		home = cliHome();
-		env = { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+		env = { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: w.secret };
 	});
 	afterEach(() => home.rm());
 
-	const sbx = (
+	const umiak = (
 		args: string[],
 		o: { stdin?: string; cwd?: string; timeoutMs?: number } = {},
 	) => runCli(args, { env, ...o });
 	const remote = async (cmd: string) => {
-		const r = await sbx(["exec", sb.id, "--", cmd]);
+		const r = await umiak(["exec", sb.id, "--", cmd]);
 		expect(r.code, r.stderr).toBe(0);
 		return r.stdout;
 	};
@@ -57,7 +57,7 @@ describe("cp, push, run --push", () => {
 	it("cp of a small file both ways, into directories, from stdin and to stdout", async () => {
 		const src = join(home.dir, "hello.sh");
 		writeFileSync(src, "#!/bin/sh\necho hi\n", { mode: 0o755 });
-		const up = await sbx(["cp", src, `${sb.slug}:small/`]);
+		const up = await umiak(["cp", src, `${sb.slug}:small/`]);
 		expect(up.code, up.stderr).toBe(0);
 		expect(up.stdout).toBe("");
 		expect(await remote("cat small/hello.sh")).toBe("#!/bin/sh\necho hi\n");
@@ -68,23 +68,23 @@ describe("cp, push, run --push", () => {
 			),
 		).toBe("755\n");
 		// The explicit sandbox became current: `:path` means it.
-		const json = await sbx(["cp", "--json", src, ":small/copy.sh"]);
+		const json = await umiak(["cp", "--json", src, ":small/copy.sh"]);
 		expect(json.code, json.stderr).toBe(0);
 		expect(json.last()).toMatchObject({ name: "copy.sh", type: "file" });
 
 		const dir = join(home.dir, "down");
 		mkdirSync(dir);
-		const down = await sbx(["cp", `${sb.id}:small/hello.sh`, dir]);
+		const down = await umiak(["cp", `${sb.id}:small/hello.sh`, dir]);
 		expect(down.code, down.stderr).toBe(0);
 		expect(readFileSync(join(dir, "hello.sh"), "utf8")).toBe(
 			"#!/bin/sh\necho hi\n",
 		);
 
-		const fromStdin = await sbx(["cp", "-", `${sb.id}:small/stdin.txt`], {
+		const fromStdin = await umiak(["cp", "-", `${sb.id}:small/stdin.txt`], {
 			stdin: "from stdin\n",
 		});
 		expect(fromStdin.code, fromStdin.stderr).toBe(0);
-		const toStdout = await sbx(["cp", `${sb.id}:small/stdin.txt`, "-"]);
+		const toStdout = await umiak(["cp", `${sb.id}:small/stdin.txt`, "-"]);
 		expect(toStdout.code, toStdout.stderr).toBe(0);
 		expect(toStdout.stdout).toBe("from stdin\n");
 	});
@@ -94,7 +94,7 @@ describe("cp, push, run --push", () => {
 		const src = join(home.dir, "big.bin");
 		writeFileSync(src, data);
 		const before = w.requests.length;
-		const up = await sbx(["cp", src, `${sb.id}:big/big.bin`], {
+		const up = await umiak(["cp", src, `${sb.id}:big/big.bin`], {
 			timeoutMs: 120_000,
 		});
 		expect(up.code, up.stderr).toBe(0);
@@ -116,7 +116,7 @@ describe("cp, push, run --push", () => {
 		expect(reqs.some((r) => /^PUT .*\/files\/content/.test(r))).toBe(false);
 
 		const out = join(home.dir, "back.bin");
-		const down = await sbx(["cp", `${sb.id}:big/big.bin`, out], {
+		const down = await umiak(["cp", `${sb.id}:big/big.bin`, out], {
 			timeoutMs: 120_000,
 		});
 		expect(down.code, down.stderr).toBe(0);
@@ -141,7 +141,7 @@ describe("cp, push, run --push", () => {
 		writeFileSync(join(src, ".hidden"), "h\n");
 		writeFileSync(join(src, "nested", "deep", "b.bin"), randomBytes(50_000));
 		const before = w.requests.length;
-		const up = await sbx(["cp", "-r", src, `${sb.id}:copies`]);
+		const up = await umiak(["cp", "-r", src, `${sb.id}:copies`]);
 		expect(up.code, up.stderr).toBe(0);
 		expect(
 			w.requests.slice(before).some((r) => /^PUT .*\/files\/archive/.test(r)),
@@ -149,11 +149,11 @@ describe("cp, push, run --push", () => {
 		// `copies` did not exist: it is the copy itself.
 		expect(await remote("cat copies/a.txt copies/.hidden")).toBe("a\nh\n");
 		// Now it exists: a second copy goes inside it, like cp -r.
-		expect((await sbx(["cp", "-r", src, `${sb.id}:copies`])).code).toBe(0);
+		expect((await umiak(["cp", "-r", src, `${sb.id}:copies`])).code).toBe(0);
 		expect(await remote("cat copies/tree/a.txt")).toBe("a\n");
 
 		const dest = join(home.dir, "fetched");
-		const down = await sbx(["cp", "-r", `${sb.id}:copies`, dest]);
+		const down = await umiak(["cp", "-r", `${sb.id}:copies`, dest]);
 		expect(down.code, down.stderr).toBe(0);
 		expect(readFileSync(join(dest, ".hidden"), "utf8")).toBe("h\n");
 		expect(sha256(readFileSync(join(dest, "nested", "deep", "b.bin")))).toBe(
@@ -165,14 +165,14 @@ describe("cp, push, run --push", () => {
 	it("cp argument errors exit 2", async () => {
 		const a = join(home.dir, "x");
 		writeFileSync(a, "x");
-		expect((await sbx(["cp", a, join(home.dir, "y")])).code).toBe(2);
-		expect((await sbx(["cp", `${sb.id}:a`, `${sb.id}:b`])).code).toBe(2);
-		expect((await sbx(["cp", home.dir, `${sb.id}:d`])).code).toBe(2);
+		expect((await umiak(["cp", a, join(home.dir, "y")])).code).toBe(2);
+		expect((await umiak(["cp", `${sb.id}:a`, `${sb.id}:b`])).code).toBe(2);
+		expect((await umiak(["cp", home.dir, `${sb.id}:d`])).code).toBe(2);
 		expect(await remote("mkdir -p adir && echo ok")).toBe("ok\n");
-		const dirNoR = await sbx(["cp", `${sb.id}:adir`, home.dir]);
+		const dirNoR = await umiak(["cp", `${sb.id}:adir`, home.dir]);
 		expect(dirNoR.code).toBe(2);
 		expect(dirNoR.stderr).toContain("-r");
-		const missing = await sbx(["cp", `${sb.id}:no/such/file`, a]);
+		const missing = await umiak(["cp", `${sb.id}:no/such/file`, a]);
 		expect(missing.code).toBe(3);
 	});
 
@@ -204,7 +204,7 @@ describe("cp, push, run --push", () => {
 		writeFileSync(join(repo, "node_modules", "dep", "index.js"), "dep\n");
 		execFileSync("rm", [join(repo, "gone.txt")]);
 
-		const r = await sbx(["push", "--json", repo, `${sb.id}:work/repo`]);
+		const r = await umiak(["push", "--json", repo, `${sb.id}:work/repo`]);
 		expect(r.code, r.stderr).toBe(0);
 		expect(r.last()).toMatchObject({ entries: expect.any(Number) });
 		const listing = await remote("cd work/repo && find . -type f | sort");
@@ -215,7 +215,7 @@ describe("cp, push, run --push", () => {
 			"./src/main.ts",
 		]);
 		// An ignored directory: git lists nothing, so all of it goes (warned).
-		const ignored = await sbx([
+		const ignored = await umiak([
 			"push",
 			join(repo, "node_modules"),
 			`${sb.id}:work/deps`,
@@ -225,7 +225,7 @@ describe("cp, push, run --push", () => {
 		expect(await remote("cat work/deps/dep/index.js")).toBe("dep\n");
 		// The default dir is the working directory.
 		writeFileSync(join(repo, "src", "main.ts"), "changed\n");
-		const again = await sbx(["push", `${sb.id}:work/repo`], { cwd: repo });
+		const again = await umiak(["push", `${sb.id}:work/repo`], { cwd: repo });
 		expect(again.code, again.stderr).toBe(0);
 		expect(await remote("cat work/repo/src/main.ts")).toBe("changed\n");
 	});
@@ -235,15 +235,15 @@ describe("cp, push, run --push", () => {
 		mkdirSync(join(dir, "sub"), { recursive: true });
 		writeFileSync(join(dir, "one.txt"), "1\n");
 		writeFileSync(join(dir, "sub", "two.log"), "2\n");
-		const r = await sbx(["push", dir, `${sb.id}:work/plain`]);
+		const r = await umiak(["push", dir, `${sb.id}:work/plain`]);
 		expect(r.code, r.stderr).toBe(0);
 		expect(r.stdout).toBe("");
 		expect(await remote("cat work/plain/one.txt work/plain/sub/two.log")).toBe(
 			"1\n2\n",
 		);
-		expect((await sbx(["push", dir, "no-colon"])).code).toBe(2);
+		expect((await umiak(["push", dir, "no-colon"])).code).toBe(2);
 		expect(
-			(await sbx(["push", join(home.dir, "missing"), `${sb.id}:x`])).code,
+			(await umiak(["push", join(home.dir, "missing"), `${sb.id}:x`])).code,
 		).toBe(2);
 	});
 
@@ -282,7 +282,7 @@ describe("cp, push, run --push", () => {
 		).toBe(true);
 		// A missing directory is checked before anything is created.
 		const before = w.requests.length;
-		const bad = await sbx([
+		const bad = await umiak([
 			"run",
 			"--push",
 			join(home.dir, "nope"),

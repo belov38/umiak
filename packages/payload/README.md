@@ -1,4 +1,4 @@
-# @sbx/payload
+# @umiak/payload
 
 Payload 3 config of the platform (S8 §7): collections `users`, `teams`,
 `memberships`, `api-keys`, `team-notices`, `ssh-keys`, `templates`, `sizes`,
@@ -9,19 +9,19 @@ components are referenced by import-map path strings from `apps/web`.
 
 ## API
 
-- `buildSbxConfig(o)` — the sanitized config: `postgresAdapter({schemaName:
+- `buildUmiakConfig(o)` — the sanitized config: `postgresAdapter({schemaName:
   "payload", idType: "uuidv7", push: false})`, GraphQL off, REST at
   `/cms-api`, admin at `/admin`, `csrf: [appOrigin]`, `cookiePrefix:
   "__Host-payload"`, `admin.user: "users"`, telemetry off, a no-op email
-  adapter. `o.operatorGroups` is kept in `config.custom.sbx`.
-- `getSbxPayload(o)` / `closeSbxPayload(databaseUrl)` — one instance per
+  adapter. `o.operatorGroups` is kept in `config.custom.umiak`.
+- `getUmiakPayload(o)` / `closeUmiakPayload(databaseUrl)` — one instance per
   process and database URL (`new BasePayload().init`, not `getPayload`, so no
   Next HMR socket is opened in `api`/`worker`). Every call takes a
-  reference and `closeSbxPayload` releases one; the last release destroys
+  reference and `closeUmiakPayload` releases one; the last release destroys
   the instance. A later call with a larger `poolMax` raises the pool's max;
   other options (secret, groups, session cache) stay the first caller's.
-  `sbxPayloadRefs(databaseUrl)` counts the references.
-- `migrateSbxPayload(p)`, `pendingPayloadMigrations(p)`,
+  `umiakPayloadRefs(databaseUrl)` counts the references.
+- `migrateUmiakPayload(p)`, `pendingPayloadMigrations(p)`,
   `assertPayloadMigrated(p)` — see below.
 - `isOperatorReq(req)` — `req.user?.isOperator === true`. Every collection
   and the global are operator-only through access; `api-keys.create` is
@@ -52,7 +52,7 @@ components are referenced by import-map path strings from `apps/web`.
   `owner` membership, `personalTeam` = `defaultTeam`. `active: false` is
   `user_disabled`, no `sub` is `subject_required`. Only changed fields are
   written: `groups` (compared as a set), `isOperator`, `preferredUsername`,
-  `lastLoginAt` (at most once per 60 s; bookkeeping, no `sbx_identity`).
+  `lastLoginAt` (at most once per 60 s; bookkeeping, no `umiak_identity`).
   Concurrent first logins collide on the unique email/`idpSubject`; the
   loser retries (3 attempts) and finds the winner's row. With `o.req` that
   already has a transaction the work joins it and is not retried.
@@ -60,8 +60,8 @@ components are referenced by import-map path strings from `apps/web`.
   `{user: {...doc, collection: "users", _strategy: "oauth2-proxy"}}` or
   `{user: null}`. A refused login (`subject_required`, `user_disabled`,
   `identity_conflict`) also gets the response header
-  `X-Sbx-Auth-Denied: <code>` (Payload copies it to REST responses).
-  Operator groups come from `config.custom.sbx.operatorGroups`.
+  `X-Umiak-Auth-Denied: <code>` (Payload copies it to REST responses).
+  Operator groups come from `config.custom.umiak.operatorGroups`.
 - `authenticateHeaders(payload, headers)` — the same check with the reason,
   for web's own pages: `{kind: "anonymous", status: 401}` (no email),
   `{kind: "denied", status: 401 | 403, reason}` (`subject_required` → 401,
@@ -70,29 +70,29 @@ components are referenced by import-map path strings from `apps/web`.
 - `authenticateRequest(payload, headers)` — `authenticateHeaders` plus the
   `users` document (`user`), through the session cache of the instance when
   one is attached. The strategy uses it too, so `/admin` and `/app` agree.
-- Session cache (plan decision 8): `buildSbxConfig({sessionCache: {ttlMs?,
+- Session cache (plan decision 8): `buildUmiakConfig({sessionCache: {ttlMs?,
   listen?}})` attaches it in `onInit` (web only): 30 s per claims key
   (`sessionCacheKey`: sha256 of email, sub, sorted groups, names), only
   sessions are cached (refusals and errors are not), concurrent loads of a
   key share one call, a load that spans a flush is not stored. `LISTEN
-  sbx_identity` on its own connection (`sbx-session-listener`) flushes it
+  umiak_identity` on its own connection (`umiak-session-listener`) flushes it
   on any payload but `sandboxes:`, `api-keys:`, `ssh-keys:` and on every
-  (re)connect. `closeSbxPayload` closes it; `attachSessionCache` /
+  (re)connect. `closeUmiakPayload` closes it; `attachSessionCache` /
   `detachSessionCache` for an instance from Payload's `getPayload`.
-- `PayloadIdentityStore` — `IdentityStore` of `@sbx/auth` over the
+- `PayloadIdentityStore` — `IdentityStore` of `@umiak/auth` over the
   collections, the semantics of `PgIdentityStore`; passes the contract
   suite (`test/identity-contract.test.ts`). Reads are SQL over the
   `payload` schema; writes go through the Local API (NOTIFY from hooks);
   `touchApiKey`/`touchSshKey` are a plain `UPDATE … last_used_at` without
   hooks or NOTIFY.
-- `seedPayloadIdentity(payload, yaml)` — `SBX_IDENTITY_FILE` with the
-  format and upsert semantics of `seedIdentity` of `@sbx/auth`, in one
+- `seedPayloadIdentity(payload, yaml)` — `UMIAK_IDENTITY_FILE` with the
+  format and upsert semantics of `seedIdentity` of `@umiak/auth`, in one
   transaction. New teams, users and keys keep the file's ids: the Local API
   cannot create with a given id, so they are inserted by SQL and the
   NOTIFY of the create hooks is sent explicitly; updates and memberships go
   through the Local API. Only differing values are written, so a second
   load writes and sends nothing.
-- `@sbx/payload/testing`: `payloadContractSubject(payload)` (store +
+- `@umiak/payload/testing`: `payloadContractSubject(payload)` (store +
   seeding of the contract suite). Its `removeMember` is a plain `DELETE`
   (the suite removes the last owner of a team, which the hook refuses).
 
@@ -109,10 +109,10 @@ a `transactionID` whose session is gone (committed or rolled back) throws.
 
 | Channel | Payload | Sent by |
 |---|---|---|
-| `sbx_identity` | `'<collection>:<uuid>'`, memberships `'memberships:<userUuid>:<teamUuid>'` (S7 §23.10) | `users`, `teams`, `memberships`, `api-keys`, `ssh-keys` after change/delete; updates that only change `lastUsedAt`, `lastLoginAt`, `updatedAt` (or nothing) send nothing |
-| `sbx_config` | `'<collection>:<uuid>'`, `'platform-defaults:global'` | `templates`, `sizes`, `pool-targets` (change/delete), `teams` (create, `quota` change, delete), `platform-defaults` |
-| `sbx_routes` | `'*'` | `platform-defaults` when `publicPortsEnabled` or `ssoPortPolicy` changed |
-| `sbx_ssh_revoke` | `user:usr_…`, `member:team_…:usr_…`, `key:key_…`, `team:team_…` | as the 0302/0303 triggers: a user becomes inactive (or an active one is deleted), a membership is deleted, a key gets `revokedAt` or a new `secretHash` while live (or a live key is deleted), a team is deleted |
+| `umiak_identity` | `'<collection>:<uuid>'`, memberships `'memberships:<userUuid>:<teamUuid>'` (S7 §23.10) | `users`, `teams`, `memberships`, `api-keys`, `ssh-keys` after change/delete; updates that only change `lastUsedAt`, `lastLoginAt`, `updatedAt` (or nothing) send nothing |
+| `umiak_config` | `'<collection>:<uuid>'`, `'platform-defaults:global'` | `templates`, `sizes`, `pool-targets` (change/delete), `teams` (create, `quota` change, delete), `platform-defaults` |
+| `umiak_routes` | `'*'` | `platform-defaults` when `publicPortsEnabled` or `ssoPortPolicy` changed |
+| `umiak_ssh_revoke` | `user:usr_…`, `member:team_…:usr_…`, `key:key_…`, `team:team_…` | as the 0302/0303 triggers: a user becomes inactive (or an active one is deleted), a membership is deleted, a key gets `revokedAt` or a new `secretHash` while live (or a live key is deleted), a team is deleted |
 
 `ssoPolicyEpoch` is owned by a `beforeChange` hook of `platform-defaults`:
 `ssoPortPolicy` `any` → `team` adds 1, written values are ignored.
@@ -132,7 +132,7 @@ Errors are `APIError(code, 400)` (message = code) or Payload
   `membership_immutable` with `overrideAccess`): a membership is replaced by
   delete + create, so the delete closes the old SSH sessions.
 - `teams` delete: one team by id only (no bulk delete through access) and
-  only with the header `x-sbx-delete-team: checked` (`teamDeleteAccess`),
+  only with the header `x-umiak-delete-team: checked` (`teamDeleteAccess`),
   which the "Delete team" button of apps/web sends after asking the api
   that the team has no sandboxes, snapshots or environments (S8 §6.4). The
   admin computes its permissions without the header, so Payload's own
@@ -158,10 +158,10 @@ Errors are `APIError(code, 400)` (message = code) or Payload
 ## ConfigReader (S8 §7, §8)
 
 - `PayloadConfigReader({payload, listen?: {databaseUrl, reconnectDelayMs?}, ttlMs = 5000})`
-  — `ConfigReader` of `@sbx/config` over `templates`, `sizes`, `pool-targets`,
+  — `ConfigReader` of `@umiak/config` over `templates`, `sizes`, `pool-targets`,
   `teams.quota` and the global `platform-defaults`. `start()` opens a
-  dedicated connection with `LISTEN sbx_config` (application name
-  `sbx-config-listener`; rejects if the first connect fails, reconnects by
+  dedicated connection with `LISTEN umiak_config` (application name
+  `umiak-config-listener`; rejects if the first connect fails, reconnects by
   itself with a growing delay); any notification and every (re)established
   LISTEN drops the cache. Without `listen` only `ttlMs` applies. `close()`.
 - `templates()`/`sizes()`: `sortOrder`, then slug. Template defaults as in
@@ -171,7 +171,7 @@ Errors are `APIError(code, 400)` (message = code) or Payload
   (an empty default field takes the PoC quota 3 / 6144 / 10); a zero is a
   value. An unknown or deleted team, or an id that is not a UUID, gets zeros.
 - `defaults()` is never cached (C7: `routes.lookup`).
-- The contract suite is `runConfigReaderContract` of `@sbx/config/testing`
+- The contract suite is `runConfigReaderContract` of `@umiak/config/testing`
   (`test/config-reader.test.ts`).
 
 ## IdP sync (S8 §20.1)
@@ -188,8 +188,8 @@ A).
   or malformed page throws `KeycloakError` (never a partial list).
   `userExists(id)`: `404` → `false`, other non-2xx throw. Errors carry
   status and path, never the secret or the token. The realm client
-  `sbx-worker` needs the service account role `view-users` of
-  `realm-management` (`deploy/compose/keycloak/realm-sbx.json` has it).
+  `umiak-worker` needs the service account role `view-users` of
+  `realm-management` (`deploy/compose/keycloak/realm-umiak.json` has it).
 - `KeycloakIdpSync({payload, keycloak, onAbort?, log?, now?}).run()` →
   `{deactivated, reactivated, aborted, abort?}` (Payload user uuids). One
   pass: the full list, then the plan over users with an `idpSubject`
@@ -203,13 +203,13 @@ A).
   - Guard: `n` planned deactivations, `a` active users with an
     `idpSubject`; `n > 5 && n > 0.2·a` → nothing changes, `onAbort({reason:
     "mass_deactivation", wouldDeactivate: n, active: a})`, result
-    `aborted: true` (the worker turns it into `sbx_idp_sync_aborted_total`,
-    gauge `sbx_idp_sync_aborted` = 1 and `log.error`).
+    `aborted: true` (the worker turns it into `umiak_idp_sync_aborted_total`,
+    gauge `umiak_idp_sync_aborted` = 1 and `log.error`).
 - Writes: one Payload transaction per user; the row is locked
   (`FOR UPDATE`) and checked again (same `idpSubject`, still active / still
   `idp_*`), so a concurrent operator deactivation wins. The update goes
   through the Local API with `req`: the `users` hooks send
-  `sbx_identity users:<uuid>` and `sbx_ssh_revoke user:usr_…`. A failed
+  `umiak_identity users:<uuid>` and `umiak_ssh_revoke user:usr_…`. A failed
   change is logged and the others continue; the pass then throws (pg-boss
   retries, the next pass is idempotent).
 - Notices: for every team the deactivated user is a member of, one
@@ -252,11 +252,11 @@ ssh_keys` with the same UUIDs when `identity.users` exists (plan decision 1).
 The data migration `20261101_000000_windows_template` adds template `windows`
 (`user`, exec/files/ssh, default and allowed size `4gb`) and size `4gb`
 (2 vCPU, 4096 MB) to new and existing installations. It inserts missing slugs
-only, preserving operator settings, and sends `sbx_config '*'`. Its rollback
+only, preserving operator settings, and sends `umiak_config '*'`. Its rollback
 keeps catalog entries because sandboxes may already reference them. The JSON
 snapshot is unchanged because the migration changes data only.
 No pool target is seeded (deviation from S8 §12, controller ruling): warm
-pools are not in the MVP, as in `deploy/compose/config/sbx.yaml` (`pools: []`).
+pools are not in the MVP, as in `deploy/compose/config/umiak.yaml` (`pools: []`).
 Copy rules: memberships get new ids; a user with an `idp_subject` gets
 `lastLoginAt = createdAt` (so it is not a stub); `personalTeam` is the user's
 personal team where they are `owner`; `createdBy` is set for personal teams
@@ -274,8 +274,8 @@ only; `rotated_at` is copied when 0303 is applied.
   browser without `Secure`, so browsers drop it and the admin theme is not
   kept between visits (`apps/web/README.md`). These cookies grant nothing.
 - The adapter keeps one pool client checked out for good (`connect`), so the
-  pool needs at least 3 connections for `migrateSbxPayload` (lock + migration
-  transaction); it refuses smaller pools. `closeSbxPayload` does not wait for
+  pool needs at least 3 connections for `migrateUmiakPayload` (lock + migration
+  transaction); it refuses smaller pools. `closeUmiakPayload` does not wait for
   `pool.end()` for the same reason.
 - Required relationships get `NOT NULL` with `ON DELETE SET NULL` foreign
   keys (Payload has no per-field `onDelete`). Deleting a team with

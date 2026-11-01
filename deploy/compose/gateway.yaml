@@ -5,7 +5,7 @@
 # include. Paths are relative to this directory. See README.gateway.md.
 #
 # Besides its own services the file extends `worker` of compose.yaml (the
-# gateway service token) and declares the `sbx` network, so it also works
+# gateway service token) and declares the `umiak` network, so it also works
 # alone with a stand-in for postgres, migrate and worker.
 
 x-gateway-build: &gateway-build
@@ -24,13 +24,13 @@ services:
   # gateway user (distroless nonroot, 65532) and the worker token to the
   # worker user (node, 1000).
   gateway-secrets:
-    image: sbx-gateway:dev
+    image: umiak-gateway:dev
     build: *gateway-build
     user: "0:0"
     command:
       - dev-secrets
       - -dir=/secrets
-      - -domain=sbx.localhost
+      - -domain=umiak.localhost
       - -tunnel-host=tunnel.localhost
       - -ssh-host=ssh.localhost
       - -owner=65532:65532
@@ -42,44 +42,44 @@ services:
     restart: "no"
 
   gateway:
-    image: sbx-gateway:dev
+    image: umiak-gateway:dev
     build: *gateway-build
     environment:
       # Same database as *db-env in compose.yaml.
-      DATABASE_URL: postgres://sbx:sbx@postgres:5432/sbx
+      DATABASE_URL: postgres://umiak:umiak@postgres:5432/umiak
       # The registered internal URL: the worker (and later api) call it.
-      SBX_GATEWAY_INTERNAL_URL: http://gateway:7000
-      SBX_GATEWAY_SBX_DOMAIN: sbx.localhost
-      SBX_GATEWAY_TUNNEL_HOST: tunnel.localhost
-      SBX_GATEWAY_SSH_HOST: ssh.localhost
+      UMIAK_GATEWAY_INTERNAL_URL: http://gateway:7000
+      UMIAK_GATEWAY_UMIAK_DOMAIN: umiak.localhost
+      UMIAK_GATEWAY_TUNNEL_HOST: tunnel.localhost
+      UMIAK_GATEWAY_SSH_HOST: ssh.localhost
       # The api internal listener (route lookups, SSH auth, agent events).
       # "none" (set in .env) turns it off for a stack without api: every route
       # then answers 503 route_lookup_unavailable and SSH logins fail.
-      SBX_GATEWAY_API_URL: ${SBX_GATEWAY_API_URL:-http://api:8082}
-      # Port SSO (sso ports): the api's /sbx-auth/authorize behind oauth2-proxy.
-      SBX_GATEWAY_AUTH_URL: ${SBX_GATEWAY_AUTH_URL:-${SBX_APP_ORIGIN:-http://localhost:4180}/sbx-auth/authorize}
-      SBX_GATEWAY_API_TOKEN_FILE: /secrets/api-token
-      SBX_GATEWAY_SERVICE_TOKENS_FILE: /secrets/service-tokens.json
-      SBX_GATEWAY_COOKIE_KEYS_FILE: /secrets/cookie-keys
-      SBX_GATEWAY_TLS_SBX_CERT_FILE: /secrets/sbx.pem
-      SBX_GATEWAY_TLS_SBX_KEY_FILE: /secrets/sbx.key
-      SBX_GATEWAY_TLS_TUNNEL_CERT_FILE: /secrets/tunnel.pem
-      SBX_GATEWAY_TLS_TUNNEL_KEY_FILE: /secrets/tunnel.key
-      SBX_GATEWAY_SSH_HOST_KEY_FILES: /secrets/ssh_host_ed25519_key,/secrets/ssh_host_ecdsa_key
-      SBX_GATEWAY_SSH_USER_CA_KEY_FILE: /secrets/ssh_user_ca
-      SBX_GATEWAY_SSH_LOGIN_CA_KEYS_FILE: /secrets/login-ca-keys
-      SBX_GATEWAY_LOG_LEVEL: ${SBX_GATEWAY_LOG_LEVEL:-info}
+      UMIAK_GATEWAY_API_URL: ${UMIAK_GATEWAY_API_URL:-http://api:8082}
+      # Port SSO (sso ports): the api's /umiak-auth/authorize behind oauth2-proxy.
+      UMIAK_GATEWAY_AUTH_URL: ${UMIAK_GATEWAY_AUTH_URL:-${UMIAK_APP_ORIGIN:-http://localhost:4180}/umiak-auth/authorize}
+      UMIAK_GATEWAY_API_TOKEN_FILE: /secrets/api-token
+      UMIAK_GATEWAY_SERVICE_TOKENS_FILE: /secrets/service-tokens.json
+      UMIAK_GATEWAY_COOKIE_KEYS_FILE: /secrets/cookie-keys
+      UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE: /secrets/umiak.pem
+      UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE: /secrets/umiak.key
+      UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE: /secrets/tunnel.pem
+      UMIAK_GATEWAY_TLS_TUNNEL_KEY_FILE: /secrets/tunnel.key
+      UMIAK_GATEWAY_SSH_HOST_KEY_FILES: /secrets/ssh_host_ed25519_key,/secrets/ssh_host_ecdsa_key
+      UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE: /secrets/ssh_user_ca
+      UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE: /secrets/login-ca-keys
+      UMIAK_GATEWAY_LOG_LEVEL: ${UMIAK_GATEWAY_LOG_LEVEL:-info}
     volumes:
       - ./secrets/gateway:/secrets:ro
     ports:
       # Host ports can be changed in deploy/compose/.env. Preview hosts route
       # only without a port in Host (spec 4.2), so browsers need
       # GATEWAY_HTTPS_PORT=443; curl can use --connect-to with 8443.
-      - "127.0.0.1:${GATEWAY_HTTPS_PORT:-8443}:8443" # TLS: *.sbx.localhost and tunnel.localhost
+      - "127.0.0.1:${GATEWAY_HTTPS_PORT:-8443}:8443" # TLS: *.umiak.localhost and tunnel.localhost
       - "127.0.0.1:${GATEWAY_SSH_PORT:-2222}:2222" # SSH
       - "127.0.0.1:${GATEWAY_INTERNAL_PORT:-7000}:7000" # internal listener, for local debugging
       - "127.0.0.1:${GATEWAY_METRICS_PORT:-9190}:9090" # metrics and health (the worker has 9090)
-    networks: [sbx]
+    networks: [umiak]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -89,7 +89,7 @@ services:
       # Distroless has no shell or curl; the binary checks /readyz itself.
       test:
         - CMD
-        - /sbx-gateway
+        - /umiak-gateway
         - healthcheck
         - -url
         - http://127.0.0.1:9090/readyz
@@ -104,21 +104,21 @@ services:
     restart: unless-stopped
 
   # The worker calls the gateway's internal listener with its service token
-  # (SBX_GATEWAY_SERVICE_TOKEN_FILE), e.g. to rotate machine tokens. It also
+  # (UMIAK_GATEWAY_SERVICE_TOKEN_FILE), e.g. to rotate machine tokens. It also
   # sends the gateway's SSH user CA public key to every agent in Claim
   # (ssh_user_ca_keys -> TrustedUserCAKeys of sshd in the VM); without it the
   # gateway cannot log in to the VM and every SSH session fails.
   worker:
     environment:
-      SBX_GATEWAY_SERVICE_TOKEN_FILE: /run/sbx-gateway/worker-gateway-token
-      SBX_SSH_USER_CA_KEYS_FILE: /run/sbx-gateway/ssh_user_ca.pub
+      UMIAK_GATEWAY_SERVICE_TOKEN_FILE: /run/umiak-gateway/worker-gateway-token
+      UMIAK_SSH_USER_CA_KEYS_FILE: /run/umiak-gateway/ssh_user_ca.pub
     volumes:
       # The directory, not the file: a missing file source would be created
       # as a directory by Docker before gateway-secrets writes it.
-      - ./secrets/gateway:/run/sbx-gateway:ro
+      - ./secrets/gateway:/run/umiak-gateway:ro
     depends_on:
       gateway-secrets:
         condition: service_completed_successfully
 
 networks:
-  sbx: {}
+  umiak: {}

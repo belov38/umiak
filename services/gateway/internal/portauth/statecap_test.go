@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
 )
 
 // TestStateCookieFlood: many sso navigations with a long path keep the

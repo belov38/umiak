@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winproc"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/winproc"
 )
 
 // These tests run the shim in the test process. They need
@@ -23,7 +23,7 @@ import (
 
 func requirePermanentJobs(t *testing.T) {
 	t.Helper()
-	name := fmt.Sprintf("sbx-test-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
+	name := fmt.Sprintf("umiak-test-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
 	j, err := winproc.CreatePermanentJob(name)
 	if errors.Is(err, winproc.ErrNoPermanentPrivilege) {
 		t.Skip("needs SeCreatePermanentPrivilege (run as SYSTEM):", err)
@@ -38,7 +38,7 @@ func requirePermanentJobs(t *testing.T) {
 // shortRoot is a layout root short enough for AF_UNIX socket paths.
 func shortRoot(t *testing.T) string {
 	t.Helper()
-	root, err := os.MkdirTemp(os.Getenv("SystemDrive")+`\`, "sbxs")
+	root, err := os.MkdirTemp(os.Getenv("SystemDrive")+`\`, "umiaks")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestShimStartFailed(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{"missing program", []string{"sbx-no-such-program"}, "program not found"},
+		{"missing program", []string{"umiak-no-such-program"}, "program not found"},
 		{"unsafe batch args", []string{"tool", "%PATH%"}, "batch file safely"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

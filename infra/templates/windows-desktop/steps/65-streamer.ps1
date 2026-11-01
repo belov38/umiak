@@ -1,17 +1,17 @@
 #requires -Version 7
 # 65-streamer (spec S10 section 7): Sunshine, moonlight-web and cua-driver on top of the
 # S9 image. The streamer services stay Manual; the agent starts them on Desktop/Open.
-# agent.toml with [desktop] and the streamer port exclusions is rendered by sbx-tpl.
+# agent.toml with [desktop] and the streamer port exclusions is rendered by umiak-tpl.
 . (Join-Path $PSScriptRoot '..\lib.ps1')
-. (Join-Path $SbxFilesDir 'desktop-install.ps1')
-Install-SbxDesktop -ProgramRoot $env:ProgramFiles -AgentRoot (Join-Path $env:ProgramData 'sbx-agent') -WorkRoot (Join-Path $SbxWorkDir 'desktop') -FilesRoot $SbxFilesDir
+. (Join-Path $UmiakFilesDir 'desktop-install.ps1')
+Install-UmiakDesktop -ProgramRoot $env:ProgramFiles -AgentRoot (Join-Path $env:ProgramData 'umiak-agent') -WorkRoot (Join-Path $UmiakWorkDir 'desktop') -FilesRoot $UmiakFilesDir
 
 # Display 1920x1080 (spec S10 section 7): OVMF sets the GOP mode of vga: std from its
 # PlatformConfig variable (OvmfPkg PlatformDxe), and the Microsoft Basic Display Adapter keeps
 # that mode. The variable lives in efidisk0, which clones copy from the template.
 Add-Type @'
 using System; using System.Runtime.InteropServices;
-public static class SbxFirmware {
+public static class UmiakFirmware {
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern bool SetFirmwareEnvironmentVariableExW(string name, string guid, byte[] value, int size, int attributes);
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -32,12 +32,12 @@ public static class SbxFirmware {
     }
 }
 '@
-if (-not [SbxFirmware]::EnableSystemEnvironment()) { throw 'SeSystemEnvironmentPrivilege unavailable' }
+if (-not [UmiakFirmware]::EnableSystemEnvironment()) { throw 'SeSystemEnvironmentPrivilege unavailable' }
 $mode = [byte[]]::new(8)
 [BitConverter]::GetBytes([uint32]1920).CopyTo($mode, 0)
 [BitConverter]::GetBytes([uint32]1080).CopyTo($mode, 4)
 # NON_VOLATILE | BOOTSERVICE_ACCESS | RUNTIME_ACCESS
-if (-not [SbxFirmware]::SetFirmwareEnvironmentVariableExW('PlatformConfig', '{7235c51c-0c80-4cab-87ac-3b084a6304b1}', $mode, 8, 7)) {
+if (-not [UmiakFirmware]::SetFirmwareEnvironmentVariableExW('PlatformConfig', '{7235c51c-0c80-4cab-87ac-3b084a6304b1}', $mode, 8, 7)) {
     throw "PlatformConfig: error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
 }
 Write-BuildLog 'OVMF PlatformConfig 1920x1080'

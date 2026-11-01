@@ -1,4 +1,4 @@
-// `sbx mcp` (S11 §6.1, §8.8, §10.2): the real CLI as a child process,
+// `umiak mcp` (S11 §6.1, §8.8, §10.2): the real CLI as a child process,
 // talked to over its stdio with a bare JSON-RPC peer. Every byte of its
 // stdout must be JSON-RPC. Against the MCP fake API (apps/mcp/test/fake-api)
 // for the list, filters, pinning and cancellation; against the CLI test world
@@ -8,8 +8,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateApiKeySecret } from "@sbx/auth/api-key";
-import { SbxError } from "@sbx/sdk";
+import { generateApiKeySecret } from "@umiak/auth/api-key";
+import { UmiakError } from "@umiak/sdk";
 import {
 	afterAll,
 	afterEach,
@@ -46,7 +46,7 @@ function jwtClaims(token: string): Record<string, unknown> {
 		Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
 	);
 }
-const BUN = process.env.SBX_TEST_BUN ?? "bun";
+const BUN = process.env.UMIAK_TEST_BUN ?? "bun";
 
 interface McpChild {
 	child: ChildProcess;
@@ -95,7 +95,7 @@ function startMcp(args: string[], env: Record<string, string>): McpChild {
 	child.stdin.on("error", () => {});
 	const exited = new Promise<number>((resolve) => {
 		child.on("close", (code) => {
-			rpc.fail(new Error(`sbx mcp exited with ${code}; stderr: ${err}`));
+			rpc.fail(new Error(`umiak mcp exited with ${code}; stderr: ${err}`));
 			resolve(code ?? -1);
 		});
 	});
@@ -126,9 +126,9 @@ function expectOnlyJsonRpc(m: McpChild): void {
 	}
 }
 
-describe("sbx mcp against the fake API", () => {
+describe("umiak mcp against the fake API", () => {
 	let api: FakeApi;
-	/** A well-formed team key (sbx login --key-stdin checks the format). */
+	/** A well-formed team key (umiak login --key-stdin checks the format). */
 	const loginKey = generateApiKeySecret();
 
 	beforeAll(async () => {
@@ -149,8 +149,8 @@ describe("sbx mcp against the fake API", () => {
 
 	const keyEnv = (h: CliHome, key: string = FAKE_TOKENS.full) => ({
 		...h.env,
-		SBX_API_URL: api.url,
-		SBX_API_KEY: key,
+		UMIAK_API_URL: api.url,
+		UMIAK_API_KEY: key,
 	});
 
 	async function readySandbox(rpc: RpcLines): Promise<string> {
@@ -161,7 +161,7 @@ describe("sbx mcp against the fake API", () => {
 
 	const kills = () => api.journal.filter((l) => l.endsWith("/kill"));
 
-	it("without a login: tools/list works and a call says to run sbx login; after the login the next call works", async () => {
+	it("without a login: tools/list works and a call says to run umiak login; after the login the next call works", async () => {
 		const h = home();
 		const m = startMcp([], h.env);
 		await m.rpc.initialize();
@@ -169,7 +169,7 @@ describe("sbx mcp against the fake API", () => {
 		const r = await m.rpc.callTool("limits_get");
 		expect(r.isError).toBe(true);
 		expect(r.text).toContain("error: not_logged_in");
-		expect(r.text).toContain("run `sbx login` in a terminal");
+		expect(r.text).toContain("run `umiak login` in a terminal");
 		// The person logs in from a terminal; the server reads the config again.
 		const login = await runCli(["login", "--key-stdin", "--api-url", api.url], {
 			env: h.env,
@@ -197,14 +197,14 @@ describe("sbx mcp against the fake API", () => {
 		expectOnlyJsonRpc(m);
 	});
 
-	it("--sandbox self without SBX_SANDBOX_ID: exit 2, the reason on stderr, nothing on stdout", async () => {
+	it("--sandbox self without UMIAK_SANDBOX_ID: exit 2, the reason on stderr, nothing on stdout", async () => {
 		const h = home();
 		const r = await runCli(["mcp", "--sandbox", "self"], {
 			env: keyEnv(h),
 		});
 		expect(r.code).toBe(2);
 		expect(r.stdout).toBe("");
-		expect(r.stderr).toContain("SBX_SANDBOX_ID is not set");
+		expect(r.stderr).toContain("UMIAK_SANDBOX_ID is not set");
 	});
 
 	it("--sandbox sb_x: schemas have no sandbox argument, the instructions name it", async () => {
@@ -223,11 +223,11 @@ describe("sbx mcp against the fake API", () => {
 		expectOnlyJsonRpc(m);
 	});
 
-	it("--sandbox self inside a sandbox binds to the sb_ id of SBX_SANDBOX_ID", async () => {
+	it("--sandbox self inside a sandbox binds to the sb_ id of UMIAK_SANDBOX_ID", async () => {
 		const h = home();
 		const m = startMcp(["--sandbox", "self"], {
 			...keyEnv(h),
-			SBX_SANDBOX_ID: "00000000-0000-4000-8000-000000000001",
+			UMIAK_SANDBOX_ID: "00000000-0000-4000-8000-000000000001",
 		});
 		const init = await m.rpc.initialize();
 		expect(init.instructions).toMatch(/bound to sandbox sb_[0-9a-z]+:/);
@@ -251,12 +251,12 @@ describe("sbx mcp against the fake API", () => {
 		expect(level.stdout).toBe("");
 	});
 
-	it("SBX_MCP_TOOLSETS and SBX_MCP_READ_ONLY=1 narrow the list", async () => {
+	it("UMIAK_MCP_TOOLSETS and UMIAK_MCP_READ_ONLY=1 narrow the list", async () => {
 		const h = home();
 		const m = startMcp([], {
 			...keyEnv(h),
-			SBX_MCP_TOOLSETS: "files",
-			SBX_MCP_READ_ONLY: "1",
+			UMIAK_MCP_TOOLSETS: "files",
+			UMIAK_MCP_READ_ONLY: "1",
 		});
 		await m.rpc.initialize();
 		expect(await toolNames(m.rpc)).toEqual([
@@ -327,7 +327,7 @@ describe("sbx mcp against the fake API", () => {
 		expectOnlyJsonRpc(m);
 	});
 
-	it("sbx --json mcp: usage errors still go to stderr, never to stdout", async () => {
+	it("umiak --json mcp: usage errors still go to stderr, never to stdout", async () => {
 		const h = home();
 		for (const args of [
 			["--json", "mcp", "--toolsets", "core,shell"],
@@ -341,7 +341,7 @@ describe("sbx mcp against the fake API", () => {
 		}
 	});
 
-	it("a stored key the API stops accepting (401): the next call after a new sbx login works without a restart", async () => {
+	it("a stored key the API stops accepting (401): the next call after a new umiak login works without a restart", async () => {
 		const h = home();
 		const first = generateApiKeySecret();
 		const second = generateApiKeySecret();
@@ -365,7 +365,7 @@ describe("sbx mcp against the fake API", () => {
 		const rejected = await m.rpc.callTool("limits_get");
 		expect(rejected.isError).toBe(true);
 		expect(rejected.text).toContain("error: unauthorized");
-		expect(rejected.text).toContain("run `sbx login` in a terminal");
+		expect(rejected.text).toContain("run `umiak login` in a terminal");
 		expect(rejected.text).toContain("retryable: false");
 		api.tokens.set(second, principal);
 		expect((await login(second)).code).toBe(0);
@@ -375,34 +375,34 @@ describe("sbx mcp against the fake API", () => {
 		expectOnlyJsonRpc(m);
 	});
 
-	it("SBX_API_KEY the API rejects: the hint says to fix it and restart the server", async () => {
+	it("UMIAK_API_KEY the API rejects: the hint says to fix it and restart the server", async () => {
 		const h = home();
 		const m = startMcp([], keyEnv(h, generateApiKeySecret()));
 		await m.rpc.initialize();
 		const r = await m.rpc.callTool("limits_get");
 		expect(r.isError).toBe(true);
 		expect(r.text).toContain("error: unauthorized");
-		expect(r.text).toContain("fix SBX_API_KEY");
+		expect(r.text).toContain("fix UMIAK_API_KEY");
 		expect(r.text).toContain("restart the MCP server");
-		expect(r.text).not.toContain("sbx login");
+		expect(r.text).not.toContain("umiak login");
 		expect(await m.close()).toBe(0);
 	});
 
-	it("not logged in to this API: the error keeps the CLI's reason and the sbx login hint", async () => {
+	it("not logged in to this API: the error keeps the CLI's reason and the umiak login hint", async () => {
 		const h = home();
 		const login = await runCli(["login", "--key-stdin", "--api-url", api.url], {
 			env: h.env,
 			stdin: `${loginKey}\n`,
 		});
 		expect(login.code).toBe(0);
-		const m = startMcp([], { ...h.env, SBX_API_URL: "http://127.0.0.1:9" });
+		const m = startMcp([], { ...h.env, UMIAK_API_URL: "http://127.0.0.1:9" });
 		await m.rpc.initialize();
 		const r = await m.rpc.callTool("limits_get");
 		expect(r.text).toContain("error: not_logged_in");
 		expect(r.text).toContain(
 			`is logged in to ${api.url}, not http://127.0.0.1:9`,
 		);
-		expect(r.text).toContain("hint: run `sbx login` in a terminal");
+		expect(r.text).toContain("hint: run `umiak login` in a terminal");
 		expect(await m.close()).toBe(0);
 	});
 
@@ -517,7 +517,7 @@ describe("mcpCredentials", () => {
 		let fail = true;
 		const c = mcpCredentials(async () => {
 			if (fail) {
-				throw new SbxError({
+				throw new UmiakError({
 					status: 0,
 					code: "not_logged_in",
 					message: "no",
@@ -532,7 +532,7 @@ describe("mcpCredentials", () => {
 	});
 });
 
-describe("sbx mcp with a Keycloak login", () => {
+describe("umiak mcp with a Keycloak login", () => {
 	let w: CliWorld;
 	beforeAll(async () => {
 		// Fresh for 2 s only (the CLI refreshes 90 s before expiry).

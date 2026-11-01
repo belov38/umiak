@@ -1,13 +1,13 @@
-// Exit codes of `sbx` (S7 §14.3), the same in a terminal and in JSON mode.
+// Exit codes of `umiak` (S7 §14.3), the same in a terminal and in JSON mode.
 // `exec`, `run` and `logs -f` exit with the command's own code instead (128 + n for a
 // signal, 124 for timed_out, 125 for lost or failed_to_start; Task 21).
 
 import {
 	type ExitEvent,
-	SbxError,
-	type SbxErrorInit,
+	UmiakError,
+	type UmiakErrorInit,
 	UNEXPECTED_RESPONSE,
-} from "@sbx/sdk";
+} from "@umiak/sdk";
 
 export const EXIT_OK = 0;
 /** An API or CLI error. */
@@ -23,7 +23,7 @@ export const EXIT_TEMPORARY = 75;
 
 /** Codes of the CLI itself (no API answer; `requestId: null`). */
 export const USAGE = "usage";
-/** No credentials for the profile: `sbx login` or SBX_API_KEY. */
+/** No credentials for the profile: `umiak login` or UMIAK_API_KEY. */
 export const NOT_LOGGED_IN = "not_logged_in";
 /** Keycloak refused the refresh token (`invalid_grant`): log in again. */
 export const LOGIN_REQUIRED = "login_required";
@@ -54,17 +54,17 @@ const NO_AUTH_CODES = new Set([
 	"origin_forbidden",
 ]);
 
-export interface CliErrorInit extends Omit<SbxErrorInit, "status"> {
+export interface CliErrorInit extends Omit<UmiakErrorInit, "status"> {
 	status?: number;
 	/** Overrides the exit code derived from the code. */
 	exitCode?: number;
 }
 
 /**
- * An error of the CLI. It is an SbxError, so it passes through the SDK
+ * An error of the CLI. It is an UmiakError, so it passes through the SDK
  * unchanged when thrown from a tokenProvider.
  */
-export class CliError extends SbxError {
+export class CliError extends UmiakError {
 	readonly exitCode: number | undefined;
 	constructor(init: CliErrorInit) {
 		super({ status: 0, ...init });
@@ -86,7 +86,7 @@ export function usageError(message: string): CliError {
 export function exitCodeOf(err: unknown): number {
 	if (err instanceof CliError && err.exitCode !== undefined)
 		return err.exitCode;
-	if (!(err instanceof SbxError)) return EXIT_ERROR;
+	if (!(err instanceof UmiakError)) return EXIT_ERROR;
 	if (err.code === USAGE || err.code === "validation") return EXIT_USAGE;
 	if (NO_AUTH_CODES.has(err.code) || err.status === 401) return EXIT_NO_AUTH;
 	if (err.status === 403 && err.code !== "quota_exceeded") return EXIT_NO_AUTH;

@@ -12,15 +12,15 @@
 //   themselves;
 // - the strategy calls authenticateRequest() too (so /admin and /app agree)
 //   and maps the outcome to {user} for Payload (/admin, /cms-api); when
-//   refused, it adds the response header `X-Sbx-Auth-Denied: <reason>`
+//   refused, it adds the response header `X-Umiak-Auth-Denied: <reason>`
 //   (Payload copies strategy response headers to its REST responses).
 import {
 	IdentityError,
 	type SessionHeaders,
 	type SessionIdentity,
-} from "@sbx/auth";
+} from "@umiak/auth";
 import type { AuthStrategy, Payload } from "payload";
-import type { SbxCustomConfig } from "../config.ts";
+import type { UmiakCustomConfig } from "../config.ts";
 import { type HeaderSource, parseAuthHeaders } from "./headers.ts";
 import { resolveSession } from "./resolve-session.ts";
 import { sessionCacheKey, sessionCacheOf } from "./session-cache.ts";
@@ -28,7 +28,7 @@ import { sessionCacheKey, sessionCacheOf } from "./session-cache.ts";
 export const OAUTH2_PROXY_STRATEGY = "oauth2-proxy";
 
 /** Response header of a refused login: the IdentityError code. */
-export const AUTH_DENIED_HEADER = "x-sbx-auth-denied";
+export const AUTH_DENIED_HEADER = "x-umiak-auth-denied";
 
 export type AuthDeniedReason =
 	| "subject_required"
@@ -48,10 +48,10 @@ const DENIED: ReadonlySet<string> = new Set<AuthDeniedReason>([
 	"identity_conflict",
 ]);
 
-/** SBX_OPERATOR_GROUPS of the config (config.custom.sbx). */
+/** UMIAK_OPERATOR_GROUPS of the config (config.custom.umiak). */
 export function operatorGroupsOf(payload: Payload): string[] {
-	const sbx = payload.config.custom?.sbx as SbxCustomConfig | undefined;
-	return sbx?.operatorGroups ?? [];
+	const umiak = payload.config.custom?.umiak as UmiakCustomConfig | undefined;
+	return umiak?.operatorGroups ?? [];
 }
 
 /**

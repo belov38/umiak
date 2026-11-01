@@ -1,21 +1,21 @@
 // Opt-in smoke test of the real Proxmox adapter (PveInfraRegistry) against the
-// host `pve`. Skipped unless SBX_PVE_SMOKE=1, so `pnpm -r test` stays offline.
+// host `pve`. Skipped unless UMIAK_PVE_SMOKE=1, so `pnpm -r test` stays offline.
 // It creates at most two 2 GB VMs at a time in the provider's VMID range,
 // deletes everything it created and checks that the world is unchanged.
 //
-//   SBX_PVE_SMOKE=1 pnpm --filter @sbx/worker exec vitest run test/pve-smoke.test.ts
+//   UMIAK_PVE_SMOKE=1 pnpm --filter @umiak/worker exec vitest run test/pve-smoke.test.ts
 //
-// Env: SBX_SECRETS_DIR (default ~/.config/sbx), SBX_NODE_SSH_HOST (default
-// 100.64.10.2), SBX_PVE_TOKEN_ID (adapter default).
+// Env: UMIAK_SECRETS_DIR (default ~/.config/umiak), UMIAK_NODE_SSH_HOST (default
+// 100.64.10.2), UMIAK_PVE_TOKEN_ID (adapter default).
 import { randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { StaticConfigReader } from "@sbx/config";
-import { type JobSender, KeyRing } from "@sbx/core";
-import { dbOf } from "@sbx/db";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import { type NodeOps, type PveClient, s2SerialPayload } from "@sbx/pve";
+import { StaticConfigReader } from "@umiak/config";
+import { type JobSender, KeyRing } from "@umiak/core";
+import { dbOf } from "@umiak/db";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
+import { type NodeOps, type PveClient, s2SerialPayload } from "@umiak/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UnavailableAgentPort } from "../src/adapters/agent-unavailable.ts";
 import {
@@ -40,13 +40,13 @@ import {
 } from "../src/ports.ts";
 import { testLogger } from "./helpers/worker.ts";
 
-const SMOKE = process.env.SBX_PVE_SMOKE === "1";
+const SMOKE = process.env.UMIAK_PVE_SMOKE === "1";
 const CONFIG_FILE = fileURLToPath(
-	new URL("../../../deploy/compose/config/sbx.yaml", import.meta.url),
+	new URL("../../../deploy/compose/config/umiak.yaml", import.meta.url),
 );
 const SECRETS_DIR =
-	process.env.SBX_SECRETS_DIR ?? join(homedir(), ".config", "sbx");
-const SSH_HOST = process.env.SBX_NODE_SSH_HOST ?? "100.64.10.2";
+	process.env.UMIAK_SECRETS_DIR ?? join(homedir(), ".config", "umiak");
+const SSH_HOST = process.env.UMIAK_NODE_SSH_HOST ?? "100.64.10.2";
 const TEMPLATE_VMID = 599;
 const SIZE: InfraSize = { vcpu: 2, memoryMb: 2048 };
 /** Host rule: at most 2 sandbox VMs of 2 GB running at once. */
@@ -273,7 +273,7 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 		nodeId = n.rows[0]?.id ?? "";
 		expect(nodeId).not.toBe("");
 
-		const env = { ...process.env, SBX_NODE_SSH_HOST: SSH_HOST };
+		const env = { ...process.env, UMIAK_NODE_SSH_HOST: SSH_HOST };
 		const factory = pveClientsFromSecrets(SECRETS_DIR, env);
 		registry = new PveInfraRegistry(db.pool, {
 			secretsDir: SECRETS_DIR,
@@ -294,7 +294,7 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 		vmsBefore = await infra.listVms();
 		lvsBefore = (await infra.listLvs()).map((l) => l.name).sort();
 		log(
-			`before: ${vmsBefore.length} VMs visible (${vmsBefore.map((v) => v.vmid).join(",")}), ${lvsBefore.length} sbx LVs`,
+			`before: ${vmsBefore.length} VMs visible (${vmsBefore.map((v) => v.vmid).join(",")}), ${lvsBefore.length} umiak LVs`,
 		);
 		// A leftover sandbox VM would break the RAM cap and the world check.
 		expect(vmsBefore.filter((v) => inRange(v.vmid))).toEqual([]);
@@ -361,7 +361,7 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 			expect(snap.consistency).toBe("powered_off");
 			expect(snap.disks.length).toBeGreaterThan(0);
 			const snapLvs = (await infra.listLvs()).filter((l) =>
-				l.tags.includes(`sbx-snap-${lvId}`),
+				l.tags.includes(`umiak-snap-${lvId}`),
 			);
 			expect(snapLvs.length).toBe(snap.disks.length);
 
@@ -399,7 +399,7 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 			snapshots.delete(lvId);
 			expect(
 				(await infra.listLvs()).filter((l) =>
-					l.tags.includes(`sbx-snap-${lvId}`),
+					l.tags.includes(`umiak-snap-${lvId}`),
 				),
 			).toEqual([]);
 
@@ -482,7 +482,7 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 				runReconcile(ctx, { dryRun: true }),
 			);
 			log(`reconcile actions: ${JSON.stringify(actions)}`);
-			expect(metrics.count("sbx_reconcile_failed_total")).toBe(0);
+			expect(metrics.count("umiak_reconcile_failed_total")).toBe(0);
 			expect(actions.filter((x) => x.applied)).toEqual([]);
 			const touches = (x: { target: string }) => {
 				const m = /^vm:(\d+)$/.exec(x.target);
@@ -520,8 +520,8 @@ describe.skipIf(!SMOKE)("real pve adapter smoke", () => {
 			);
 			const lvs = await infra.listLvs();
 			const ourTags = new Set([
-				...[...createdVmids].map((v) => `sbx-vm-${v}`),
-				...[...createdLvIds].map((id) => `sbx-snap-${id}`),
+				...[...createdVmids].map((v) => `umiak-vm-${v}`),
+				...[...createdLvIds].map((id) => `umiak-snap-${id}`),
 			]);
 			expect(lvs.filter((l) => l.tags.some((t) => ourTags.has(t)))).toEqual([]);
 			expect(lvs.map((l) => l.name).sort()).toEqual(lvsBefore);

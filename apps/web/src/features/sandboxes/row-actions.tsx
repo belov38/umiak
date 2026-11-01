@@ -1,9 +1,9 @@
 "use client";
+import { useQueryClient } from "@tanstack/react-query";
 // Actions of a sandbox row (S8 §9.4): Stop / Resume by state, and a menu
 // with Fork, Open terminal, Delete. A blocked sandbox keeps stop and delete
 // only (S8 §11): Resume, Fork and Open terminal are disabled. After an action the list and the quota refresh at once.
-import type { SandboxData } from "@sbx/sdk";
-import { useQueryClient } from "@tanstack/react-query";
+import type { SandboxData } from "@umiak/sdk";
 import { EllipsisIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -16,7 +16,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { canDelete, canFork, canResume, canStop } from "@/lib/sandboxes";
 import { DeleteSandboxDialog } from "./delete-dialog";
@@ -41,7 +41,7 @@ export function RowActions({
 	teamId: string;
 	sandbox: SandboxData;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const refresh = useRefreshSandboxes(teamId);
 	const [busy, setBusy] = useState(false);
 	const [deleting, setDeleting] = useState(false);
@@ -61,13 +61,13 @@ export function RowActions({
 
 	const stop = () =>
 		run(
-			() => sbx.raw.POST("/v1/sandboxes/{sandbox}/stop", path),
+			() => umiak.raw.POST("/v1/sandboxes/{sandbox}/stop", path),
 			`Stopping ${sandbox.slug}`,
 		);
 	const resume = () =>
 		run(
 			() =>
-				sbx.raw.POST("/v1/sandboxes/{sandbox}/resume", { ...path, body: {} }),
+				umiak.raw.POST("/v1/sandboxes/{sandbox}/resume", { ...path, body: {} }),
 			`Resuming ${sandbox.slug}`,
 		);
 	const forking = useFork(teamId, sandbox, refresh);

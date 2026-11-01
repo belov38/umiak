@@ -15,8 +15,8 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
 )
 
 const (
@@ -211,11 +211,11 @@ func TestFreezeLoopExt4(t *testing.T) {
 }
 
 // stateOnLoop moves the agent state directory onto the loop filesystem (a
-// bind mount over /var/lib/sbx-agent) with the agent stopped, and moves it
+// bind mount over /var/lib/umiak-agent) with the agent stopped, and moves it
 // back when the test ends.
 func stateOnLoop(t *testing.T) {
 	t.Helper()
-	const loopState = fzMount + "/sbx-state"
+	const loopState = fzMount + "/umiak-state"
 	sh(t, "systemctl stop "+agentUnit)
 	sh(t, "mkdir -p "+loopState+" && cp -a "+stateDir+"/. "+loopState+"/ && mount --bind "+loopState+" "+stateDir)
 	sh(t, "systemctl start "+agentUnit)

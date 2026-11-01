@@ -1,4 +1,4 @@
-// sbx-admin (S6 §15.3, decision 14): operator commands over the database.
+// umiak-admin (S6 §15.3, decision 14): operator commands over the database.
 // Every result is one JSON object per line on `out`; errors go to `err`.
 // The exit code is 0 on success and 1 on any error.
 import { randomBytes } from "node:crypto";
@@ -7,7 +7,7 @@ import type {
 	ConfigReader,
 	StaticConfigReader,
 	TopologyConfig,
-} from "@sbx/config";
+} from "@umiak/config";
 import {
 	DELETE_RETRY_LIMIT,
 	ensureCloneSlots,
@@ -16,8 +16,8 @@ import {
 	KeyRing,
 	loadOperation,
 	TERMINAL_OPERATION_STATES,
-} from "@sbx/core";
-import { dbOf, MIGRATIONS_DIR, migrate, type Tx, withTx } from "@sbx/db";
+} from "@umiak/core";
+import { dbOf, MIGRATIONS_DIR, migrate, type Tx, withTx } from "@umiak/db";
 import type pg from "pg";
 import type { Logger } from "pino";
 import { DEFAULT_TIMING, NoopMetrics, type WorkerCtx } from "../context.ts";
@@ -34,24 +34,24 @@ export interface AdminDeps {
 	pool: pg.Pool;
 	out(line: Line): void;
 	err(line: Line): void;
-	/** The YAML config (SBX_CONFIG_FILE); absent when the variable is unset. */
+	/** The YAML config (UMIAK_CONFIG_FILE); absent when the variable is unset. */
 	config?: () => StaticConfigReader;
 	/** A started pg-boss sender (op retry, machine delete). */
 	jobs?: () => Promise<JobSender>;
-	/** Real infrastructure (SBX_SECRETS_DIR); reconcile only. */
+	/** Real infrastructure (UMIAK_SECRETS_DIR); reconcile only. */
 	infra?: () => InfraRegistry & { close?(): Promise<void> };
-	/** Data key ring (SBX_DATA_KEYS_FILE); optional for reconcile. */
+	/** Data key ring (UMIAK_DATA_KEYS_FILE); optional for reconcile. */
 	keys?: () => KeyRing;
-	/** bootstrap: apiUrl/tlsName of the first provider (SBX_PVE_URL, SBX_PVE_TLS_NAME). */
+	/** bootstrap: apiUrl/tlsName of the first provider (UMIAK_PVE_URL, UMIAK_PVE_TLS_NAME). */
 	providerOverride?: ProviderOverride;
 	log: Logger;
 	migrationsDir?: string;
 }
 
-export const USAGE = `usage: sbx-admin <command>
+export const USAGE = `usage: umiak-admin <command>
   migrate                                    apply db/migrations (S2 tunnel and S6 runtime schemas)
-  bootstrap                                  topology and template builds from SBX_CONFIG_FILE
-                                             (SBX_PVE_URL, SBX_PVE_TLS_NAME override the first provider)
+  bootstrap                                  topology and template builds from UMIAK_CONFIG_FILE
+                                             (UMIAK_PVE_URL, UMIAK_PVE_TLS_NAME override the first provider)
   providers add --name N --cluster-mac-id N --vmid-min N --vmid-max N --api-url URL --secret-ref R [--tls-name T]
   nodes add --provider P --name N --ram-cap-mb N --node-agent-ref R [--clone-concurrency 4] [--storage local-lvm]
   nodes cordon|uncordon <node> [--provider P]
@@ -198,10 +198,10 @@ async function cmdMigrate(args: string[], d: AdminDeps): Promise<void> {
 // ---------------------------------------------------------------------------
 // Topology upserts (bootstrap, providers add, nodes add)
 
-/** Serializes topology writes of concurrent sbx-admin runs. */
+/** Serializes topology writes of concurrent umiak-admin runs. */
 async function lockTopology(tx: Tx): Promise<void> {
 	await tx.client.query(
-		"SELECT pg_advisory_xact_lock(hashtextextended('sbx-admin:topology', 0))",
+		"SELECT pg_advisory_xact_lock(hashtextextended('umiak-admin:topology', 0))",
 	);
 }
 
@@ -462,7 +462,7 @@ async function insertBuild(tx: Tx, b: BuildInput): Promise<string> {
 function topologyOf(d: AdminDeps): TopologyConfig {
 	if (!d.config) {
 		throw new AdminError(
-			"bootstrap needs SBX_CONFIG_FILE (the YAML with a topology section)",
+			"bootstrap needs UMIAK_CONFIG_FILE (the YAML with a topology section)",
 		);
 	}
 	const topo = d.config().topology();
@@ -860,7 +860,7 @@ const NO_JOBS: JobSender = {
 function unavailable<T extends object>(what: string): T {
 	return new Proxy({} as T, {
 		get: (_t, p) => () => {
-			throw new Error(`${what}.${String(p)} is not available in sbx-admin`);
+			throw new Error(`${what}.${String(p)} is not available in umiak-admin`);
 		},
 	});
 }
@@ -872,12 +872,12 @@ async function cmdReconcile(args: string[], d: AdminDeps): Promise<void> {
 	});
 	if (v["dry-run"] !== true) {
 		throw new UsageError(
-			"only `reconcile --dry-run` is supported; the controller applies actions when SBX_RECONCILE_DRY_RUN=0",
+			"only `reconcile --dry-run` is supported; the controller applies actions when UMIAK_RECONCILE_DRY_RUN=0",
 		);
 	}
 	if (!d.infra) {
 		throw new AdminError(
-			"reconcile needs SBX_SECRETS_DIR (PVE and sbx-node secrets)",
+			"reconcile needs UMIAK_SECRETS_DIR (PVE and umiak-node secrets)",
 		);
 	}
 	const providerRef = opt(v, "provider");
@@ -999,7 +999,7 @@ async function cmdMachineDelete(args: string[], d: AdminDeps): Promise<void> {
 			await tx.client.query(
 				`UPDATE runtime.machines
 				 SET state = 'deleting', error_code = COALESCE(error_code, 'operator'),
-				     error_detail = COALESCE(error_detail, 'sbx-admin machine delete'),
+				     error_detail = COALESCE(error_detail, 'umiak-admin machine delete'),
 				     state_changed_at = now(), version = version + 1
 				 WHERE id = $1`,
 				[id],

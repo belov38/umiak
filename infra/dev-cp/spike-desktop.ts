@@ -21,7 +21,7 @@ if (
 	![595, 596].includes(manifest.pveVmid ?? 0)
 )
 	throw new Error("expected desktop template595/596");
-process.env.SBX_VMID_RANGE ??= "580-589";
+process.env.UMIAK_VMID_RANGE ??= "580-589";
 const ctx = await makeContext({ node: manifest.node });
 const machines = machinesFor(ctx, manifest.pveVmid as number);
 const id = randomUUID();
@@ -36,7 +36,7 @@ try {
 			smbios: {
 				uuid: id,
 				serial: s2SerialPayload(id, randomBytes(32)),
-				family: "sbxt1:wss://tunnel.verify.invalid/v1/connect",
+				family: "umiakt1:wss://tunnel.verify.invalid/v1/connect",
 			},
 		})
 	).vmid;
@@ -54,7 +54,7 @@ try {
 		`clone_boot_qga_ms ${Date.now() - start} VM ${vmid} IP ${ready.ip}`,
 	);
 	const io = pveGuestIo(ctx.api, ctx.cfg.node, vmid);
-	const replacement = process.env.SBX_SPIKE_AGENT_PACKAGE;
+	const replacement = process.env.UMIAK_SPIKE_AGENT_PACKAGE;
 	if (replacement) {
 		const bytes = gzipSync(readFileSync(replacement));
 		const chunks = Array.from(
@@ -81,7 +81,7 @@ try {
 				"bash",
 				"-e",
 				"-c",
-				"cat /tmp/s10-agent-*.part > /tmp/s10-agent.tar.gz\ngzip -d /tmp/s10-agent.tar.gz\nsystemctl stop lightdm\nsbx-agent install-package --no-units /tmp/s10-agent.tar\nsystemctl restart sbx-agent",
+				"cat /tmp/s10-agent-*.part > /tmp/s10-agent.tar.gz\ngzip -d /tmp/s10-agent.tar.gz\nsystemctl stop lightdm\numiak-agent install-package --no-units /tmp/s10-agent.tar\nsystemctl restart umiak-agent",
 			],
 			{ timeoutMs: 120_000 },
 		);
@@ -114,11 +114,11 @@ try {
 				"-u",
 				"lightdm",
 				"-u",
-				"sbx-agent",
+				"umiak-agent",
 				"-u",
-				"sbx-sunshine",
+				"umiak-sunshine",
 				"-u",
-				"sbx-moonlight-web",
+				"umiak-moonlight-web",
 				"--no-pager",
 				"-n",
 				"100",
@@ -132,7 +132,7 @@ try {
 			"python3",
 			"-I",
 			"-c",
-			"import hashlib,json; s=json.load(open('/var/lib/sbx-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
+			"import hashlib,json; s=json.load(open('/var/lib/umiak-agent/desktop/identity.json')); print(hashlib.sha256(json.dumps(s['credentials'],sort_keys=True).encode()).hexdigest())",
 		]);
 		if (result.exitCode !== 0 || !/^[a-f0-9]{64}\s*$/.test(result.stdout))
 			throw new Error("credential digest unavailable");
@@ -149,7 +149,7 @@ try {
 			smbios: {
 				uuid: forkId,
 				serial: s2SerialPayload(forkId, randomBytes(32)),
-				family: "sbxt1:wss://tunnel.verify.invalid/v1/connect",
+				family: "umiakt1:wss://tunnel.verify.invalid/v1/connect",
 			},
 		})
 	).vmid;

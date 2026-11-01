@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { type NodeOps, PveApiError, type PveClient } from "@sbx/pve";
+import { type NodeOps, PveApiError, type PveClient } from "@umiak/pve";
 import { RAM_CAP_MB, RamGuard } from "./context.ts";
 import {
 	assertPinnedKey,
@@ -9,7 +9,7 @@ import {
 import { ISO_TOOL } from "./seed.ts";
 import { pinnedMachine } from "./windows/stages.ts";
 
-// `sbx-tpl preflight`: read-only checks before a build (spec S5 section 7.1)
+// `umiak-tpl preflight`: read-only checks before a build (spec S5 section 7.1)
 
 export interface Check {
 	name: string;
@@ -123,7 +123,7 @@ export async function preflight(d: {
 			);
 			return { ok: true, detail: d.keyFile };
 		}),
-		await check("sbx-node media.list", async () => {
+		await check("umiak-node media.list", async () => {
 			const r = await d.node.call<{ iso: unknown[]; import: unknown[] }>(
 				"media.list",
 			);
@@ -168,7 +168,7 @@ async function windowsChecks(
 				const msg = err instanceof Error ? err.message : String(err);
 				return {
 					ok: false,
-					detail: `${msg}; put it there with sbx-tpl iso upload <file> or the Proxmox web UI`,
+					detail: `${msg}; put it there with umiak-tpl iso upload <file> or the Proxmox web UI`,
 				};
 			}
 			if (w.isoSha256 === "")

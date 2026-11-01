@@ -2,10 +2,10 @@
 // they are unit-tested directly.
 //   - every path but /healthz needs X-Auth-Request-Email (only oauth2-proxy
 //     sets it; without it the request did not come through the proxy): 401;
-//   - an unsafe method needs Origin == SBX_APP_ORIGIN (server actions,
+//   - an unsafe method needs Origin == UMIAK_APP_ORIGIN (server actions,
 //     Payload REST, admin uploads): 403. A missing Origin is refused too;
 //   - /admin and /cms-api are for operators only (a group of
-//     SBX_OPERATOR_GROUPS in X-Auth-Request-Groups, S8 §5.5): 403 before
+//     UMIAK_OPERATOR_GROUPS in X-Auth-Request-Groups, S8 §5.5): 403 before
 //     Payload renders anything (its admin would send the field config);
 //   - Payload's password-login endpoints of `users` (local strategy is off,
 //     §5.4) are refused to everyone: 403.

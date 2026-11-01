@@ -11,7 +11,7 @@ import (
 
 // SecretUserPassword is the LSA secret with the password of the account
 // `user` (spec 11.2, 12.5). The L$ prefix makes it a local secret.
-const SecretUserPassword = "L$sbx_user"
+const SecretUserPassword = "L$umiak_user"
 
 // LSA policy access rights (ntsecapi.h).
 const (

@@ -1,13 +1,17 @@
 // StreamRegistry (S7 §5.8, §7.10, S8 C9, Review Focus 4): open streams of
 // a principal are capped, closed with `error unauthorized` on the NOTIFY
-// sbx_identity that revokes the principal (no timer on the way), and closed with
+// umiak_identity that revokes the principal (no timer on the way), and closed with
 // `reconnect server_shutdown` by closeAll.
 import { randomUUID } from "node:crypto";
 import { type AddressInfo, connect } from "node:net";
-import { PgIdentityStore, SCOPES } from "@sbx/auth";
-import { pgIdentitySeeding } from "@sbx/auth/testing";
-import type { Principal } from "@sbx/core";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { PgIdentityStore, SCOPES } from "@umiak/auth";
+import { pgIdentitySeeding } from "@umiak/auth/testing";
+import type { Principal } from "@umiak/core";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import {
 	afterAll,
 	afterEach,
@@ -560,14 +564,14 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 		}
 	});
 
-	it("at most SBX_API_MAX_STREAMS open streams per key: 429 before anything starts", async () => {
+	it("at most UMIAK_API_MAX_STREAMS open streams per key: 429 before anything starts", async () => {
 		const k = await w.key(["commands:exec", "commands:read"]);
 		const capped = w.harness({
 			bearer: k.secret,
 			deps: {
 				settings: testSettings({
-					SBX_API_RATE_BURST: "100000",
-					SBX_API_MAX_STREAMS: "2",
+					UMIAK_API_RATE_BURST: "100000",
+					UMIAK_API_MAX_STREAMS: "2",
 				}),
 			},
 		});
@@ -637,7 +641,7 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 			signal: ac.signal,
 		});
 		expect(res.status).toBe(200);
-		const id = res.headers.get("sbx-command-id");
+		const id = res.headers.get("umiak-command-id");
 		expect(h.deps.streams.size).toBe(1);
 		ac.abort();
 		await until(() => h.deps.streams.size === 0, WAIT_MS, "slot freed");

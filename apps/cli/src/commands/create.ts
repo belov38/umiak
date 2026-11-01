@@ -1,10 +1,10 @@
-// `sbx create` (S7 §8.2, §14.2): POST /v1/sandboxes with an Idempotency-Key.
+// `umiak create` (S7 §8.2, §14.2): POST /v1/sandboxes with an Idempotency-Key.
 // Without --wait prints the answer `{sandbox, operation}`; with --wait the
 // JSON Lines `accepted`, `state`…, last `ready`. The new sandbox becomes the
-// current one of this shell. The create flags are shared with `sbx run`.
+// current one of this shell. The create flags are shared with `umiak run`.
 
-import type { CreateSandboxInput } from "@sbx/sdk";
-import { newIdempotencyKey } from "@sbx/sdk";
+import type { CreateSandboxInput } from "@umiak/sdk";
+import { newIdempotencyKey } from "@umiak/sdk";
 import type { Command } from "commander";
 import { collect, envSet, parseDuration, parsePairs } from "../args.ts";
 import type { Context } from "../context.ts";
@@ -78,7 +78,7 @@ export function createBody(f: CreateFlags): CreateSandboxInput {
 
 /** POST /v1/sandboxes; the answer `{sandbox, operation}`. */
 export async function createSandbox(ctx: Context, body: CreateSandboxInput) {
-	const { data } = await ctx.sbx().raw.POST("/v1/sandboxes", {
+	const { data } = await ctx.umiak().raw.POST("/v1/sandboxes", {
 		body,
 		idempotencyKey: newIdempotencyKey(),
 	});

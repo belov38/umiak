@@ -5,7 +5,7 @@ export const MAX_RESULT_CHARS = 80_000;
 const CUT_NOTE = `response cut at ${MAX_RESULT_CHARS} characters`;
 const DROP_NOTE = `sandbox output dropped: the response would exceed ${MAX_RESULT_CHARS} characters`;
 /** Start of a fenced block (fence.ts): such a block is kept whole or dropped. */
-const FENCE_START = "<<<sbx-untrusted id=";
+const FENCE_START = "<<<umiak-untrusted id=";
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);

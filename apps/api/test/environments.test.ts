@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { decodeUuid, encodeUuid, PgIdentityStore } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid, encodeUuid, PgIdentityStore } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { captureLogs, testSettings } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
@@ -298,15 +302,15 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 	});
 
 	it("an operator session writes the environments of a team it is not in (S8 §6.2, §6.4)", async () => {
-		const OPS = "sbx-operators";
+		const OPS = "umiak-operators";
 		const o = await personOf(w, await newTeam(db.pool), "member", {
 			identity: new PgIdentityStore({ pool: db.pool, operatorGroups: [OPS] }),
-			settings: testSettings({ SBX_OPERATOR_GROUPS: OPS }),
+			settings: testSettings({ UMIAK_OPERATOR_GROUPS: OPS }),
 		});
 		const headers = {
 			...o.headers,
 			"x-auth-request-groups": OPS,
-			"sbx-team": encodeUuid("team", w.teamId),
+			"umiak-team": encodeUuid("team", w.teamId),
 		};
 		const req = (method: string, path: string, json?: unknown) =>
 			o.h.request(method, path, {
@@ -325,7 +329,7 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 
 		// The same person without the operator group is refused.
 		const plain = await o.h.request("POST", "/v1/environments", {
-			headers: { ...o.headers, "sbx-team": encodeUuid("team", w.teamId) },
+			headers: { ...o.headers, "umiak-team": encodeUuid("team", w.teamId) },
 			json: { name: uniqueName("op") },
 		});
 		expect(plain.status).toBe(403);

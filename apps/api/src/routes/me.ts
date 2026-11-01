@@ -1,7 +1,7 @@
 // GET /v1/me (S7 §13): who the caller is, the team of the request and how
 // the caller authenticated. Any valid credential; no scope needed.
 import { createRoute, z } from "@hono/zod-openapi";
-import { encodeUuid, SCOPES } from "@sbx/auth";
+import { encodeUuid, SCOPES } from "@umiak/auth";
 import { type AuthContext, type AuthTeam, authOf } from "../auth/principal.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import {
@@ -34,7 +34,7 @@ export const MeSchema = z
 			.nullable()
 			.openapi({ description: "The person; null for a team API key" }),
 		team: MeTeam.openapi({
-			description: "Team of this request (Sbx-Team or the default team)",
+			description: "Team of this request (Umiak-Team or the default team)",
 		}),
 		teams: z.array(MeTeam).openapi({
 			description: "Teams of the person; a team key sees only its own team",
@@ -77,7 +77,7 @@ const getMe = createRoute({
 	description:
 		"Who is calling: the person (null for a team API key), the team this request acts in, " +
 		"the person's teams with roles, operator rights, and the credential (kind, scopes, expiry). " +
-		"`sbx login` and `sbx whoami` call it to show the account and the default team.",
+		"`umiak login` and `umiak whoami` call it to show the account and the default team.",
 	tags: ["account"],
 	responses: {
 		200: jsonResponse(MeSchema, "The caller"),

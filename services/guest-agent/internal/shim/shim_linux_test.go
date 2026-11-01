@@ -23,15 +23,15 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
-// TestMain turns the test binary into the shim when SBX_SHIM_TEST=1, so the
+// TestMain turns the test binary into the shim when UMIAK_SHIM_TEST=1, so the
 // tests run the real Main in a separate process without root or cgroups.
 func TestMain(m *testing.M) {
-	if os.Getenv("SBX_SHIM_TEST") == "1" {
+	if os.Getenv("UMIAK_SHIM_TEST") == "1" {
 		os.Exit(Main(os.Args[1:]))
 	}
 	os.Exit(m.Run())
@@ -107,7 +107,7 @@ func startShimAfter(t *testing.T, s Spec, before func(paths.Layout)) *harness {
 	h := &harness{t: t, layout: l, id: s.ID, log: &syncBuffer{}, done: make(chan struct{})}
 	h.cmd = exec.CommandContext(context.Background(), os.Args[0], "--id", s.ID, "--layout-root", root, "--no-cgroup")
 	// The race detector sleeps 1 s at exit by default.
-	h.cmd.Env = append(os.Environ(), "SBX_SHIM_TEST=1", "GORACE=atexit_sleep_ms=0")
+	h.cmd.Env = append(os.Environ(), "UMIAK_SHIM_TEST=1", "GORACE=atexit_sleep_ms=0")
 	h.cmd.Stdout = h.log
 	h.cmd.Stderr = h.log
 	if err := h.cmd.Start(); err != nil {

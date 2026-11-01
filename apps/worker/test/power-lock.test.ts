@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import { FakeNode, FakePve } from "@sbx/pve/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
+import { FakeNode, FakePve } from "@umiak/pve/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withNodePowerLock } from "../src/adapters/power-lock.ts";
 import { PveInfraRegistry } from "../src/adapters/pve-infra.ts";
@@ -155,7 +155,7 @@ class GatedPve extends FakePve {
 		this.gates.set(vmid, deferred());
 		this.beganAt.set(vmid, deferred());
 		this.vms.set(vmid, {
-			config: { tags: "sbx" },
+			config: { tags: "umiak" },
 			status: "stopped",
 			firewall: { rules: [], ipsets: {} },
 		});
@@ -400,7 +400,7 @@ describe("PveNodeInfra start and delete serialization", () => {
 			machineId: m,
 			templateVmid: 599,
 			size: { vcpu: 1, memoryMb: 1024 },
-			smbios: { uuid: m, serial: `sbx1:${m}:x` },
+			smbios: { uuid: m, serial: `umiak1:${m}:x` },
 		});
 		expect(vm.vmid).toBeGreaterThanOrEqual(500);
 		a.api.release(512);

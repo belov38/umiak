@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 const (
 	testMachineID = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
 	testHex       = "0190a1b2c3d47e5f8a9b0c1d2e3f4a5b"
-	testHostname  = "sbx-0c1d2e3f4a5b"
+	testHostname  = "umiak-0c1d2e3f4a5b"
 )
 
 func testBS() []byte { return bytes.Repeat([]byte{0xab}, wire.SecretLen) }
@@ -57,10 +57,10 @@ func TestParseSerial(t *testing.T) {
 	})
 	for _, tt := range []struct{ name, serial string }{
 		{"empty", ""},
-		{"wrong version", "sbx2:" + testMachineID + ":" + wire.EncodeSecret(testBS())},
-		{"no secret", "sbx1:" + testMachineID},
-		{"bad base64", "sbx1:" + testMachineID + ":!!!"},
-		{"short secret", "sbx1:" + testMachineID + ":" + wire.EncodeSecret([]byte("short"))},
+		{"wrong version", "umiak2:" + testMachineID + ":" + wire.EncodeSecret(testBS())},
+		{"no secret", "umiak1:" + testMachineID},
+		{"bad base64", "umiak1:" + testMachineID + ":!!!"},
+		{"short secret", "umiak1:" + testMachineID + ":" + wire.EncodeSecret([]byte("short"))},
 		{"machine id not a uuid", testSerial("not-a-uuid")},
 		{"machine id too short", testSerial("0190a1b2")},
 		{"machine id not hex", testSerial("zzzzzzzz-c3d4-7e5f-8a9b-0c1d2e3f4a5b")},
@@ -85,18 +85,18 @@ func TestParseFamily(t *testing.T) {
 		name, family, want string
 		warn               bool
 	}{
-		{"valid", "sbxt1:wss://h.example.com/v1/connect", "wss://h.example.com/v1/connect", false},
-		{"valid with port", "sbxt1:wss://h:8443/v1/connect", "wss://h:8443/v1/connect", false},
-		{"trailing newline", "sbxt1:wss://h/v1/connect\n", "wss://h/v1/connect", false},
-		{"exactly 200 bytes", "sbxt1:" + long, long, false},
-		{"201 bytes", "sbxt1:" + long + "a", "", true},
-		{"http", "sbxt1:http://h/v1/connect", "", true},
-		{"ws", "sbxt1:ws://h/v1/connect", "", true},
-		{"empty host", "sbxt1:wss:///v1/connect", "", true},
-		{"no scheme", "sbxt1:h/v1/connect", "", true},
+		{"valid", "umiakt1:wss://h.example.com/v1/connect", "wss://h.example.com/v1/connect", false},
+		{"valid with port", "umiakt1:wss://h:8443/v1/connect", "wss://h:8443/v1/connect", false},
+		{"trailing newline", "umiakt1:wss://h/v1/connect\n", "wss://h/v1/connect", false},
+		{"exactly 200 bytes", "umiakt1:" + long, long, false},
+		{"201 bytes", "umiakt1:" + long + "a", "", true},
+		{"http", "umiakt1:http://h/v1/connect", "", true},
+		{"ws", "umiakt1:ws://h/v1/connect", "", true},
+		{"empty host", "umiakt1:wss:///v1/connect", "", true},
+		{"no scheme", "umiakt1:h/v1/connect", "", true},
 		{"no prefix", "wss://h/v1/connect", "", true},
-		{"other prefix", "sbxt2:wss://h/v1/connect", "", true},
-		{"whitespace in url", "sbxt1:wss://h /v1/connect", "", true},
+		{"other prefix", "umiakt2:wss://h/v1/connect", "", true},
+		{"whitespace in url", "umiakt1:wss://h /v1/connect", "", true},
 		{"absent", "", "", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -119,7 +119,7 @@ func TestValidHostname(t *testing.T) {
 		s    string
 		want bool
 	}{
-		{"sbx-0c1d2e3f4a5b", true},
+		{"umiak-0c1d2e3f4a5b", true},
 		{"a", true},
 		{"A1", true},
 		{"my-host-1", true},

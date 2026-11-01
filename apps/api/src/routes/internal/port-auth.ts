@@ -1,9 +1,9 @@
 // POST /internal/v1/gateway/port-auth/exchange (S7 §12.1, S4 §8.4): the
-// gateway burns a one-time code of /sbx-auth/authorize. One atomic UPDATE:
+// gateway burns a one-time code of /umiak-auth/authorize. One atomic UPDATE:
 // the code is used once, only for its label and before it expires, whatever
 // pod the gateway asks.
 import { createHash } from "node:crypto";
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import { z } from "zod";
 import type { ApiApp, ApiDeps } from "../../deps.ts";
 import { lookupDesktopRoute } from "../../desktop/service.ts";

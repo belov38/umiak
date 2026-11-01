@@ -9,10 +9,10 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
 )
 
 // envFileKey is a key pam_env accepts.
@@ -49,20 +49,20 @@ func FormatEnvFile(env map[string]string) []byte {
 }
 
 // platformEnv returns the platform defaults of the claim req (spec 8.2,
-// step 2; on Windows with SBX_HOSTNAME, S9 spec 12.7) plus the extensions'
+// step 2; on Windows with UMIAK_HOSTNAME, S9 spec 12.7) plus the extensions'
 // env. Keys without a value are left out before the claim.
 func (m *Manager) platformEnv(req *agentv1.ClaimRequest) map[string]string {
-	env := map[string]string{"SBX": "1"}
+	env := map[string]string{"UMIAK": "1"}
 	if id := req.GetSandboxId(); id != "" {
-		env["SBX_SANDBOX_ID"] = id
+		env["UMIAK_SANDBOX_ID"] = id
 	}
 	if pd := req.GetPortDomain(); pd != "" {
-		env["SBX_PORT_DOMAIN"] = pd
+		env["UMIAK_PORT_DOMAIN"] = pd
 		env["__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"] = "." + pd
 	}
 	if h := req.GetHostname(); h != "" && !appliesHostname {
 		// The system keeps its own name; the claimed one is only env.
-		env["SBX_HOSTNAME"] = h
+		env["UMIAK_HOSTNAME"] = h
 	}
 	for _, e := range m.opts.Extensions {
 		maps.Copy(env, e.PlatformEnv())
@@ -70,17 +70,17 @@ func (m *Manager) platformEnv(req *agentv1.ClaimRequest) map[string]string {
 	return env
 }
 
-// writeSbxEnv writes /etc/sbx/env: platform env of req, then env. Windows
+// writeUmiakEnv writes /etc/umiak/env: platform env of req, then env. Windows
 // has no such file (the layout leaves it empty); SSH sessions get the env
 // from the agent.
-func (m *Manager) writeSbxEnv(req *agentv1.ClaimRequest, env map[string]string) error {
-	if m.l.SbxEnvFile == "" {
+func (m *Manager) writeUmiakEnv(req *agentv1.ClaimRequest, env map[string]string) error {
+	if m.l.UmiakEnvFile == "" {
 		return nil
 	}
 	all := m.platformEnv(req)
 	maps.Copy(all, env)
-	if err := m.writeFile(m.l.SbxEnvFile, FormatEnvFile(all), 0o644); err != nil {
-		return internal("write sbx env", err)
+	if err := m.writeFile(m.l.UmiakEnvFile, FormatEnvFile(all), 0o644); err != nil {
+		return internal("write umiak env", err)
 	}
 	return nil
 }

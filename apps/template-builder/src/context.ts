@@ -13,9 +13,9 @@ import {
 	readSecretFile,
 	SqliteStateStore,
 	SshNodeOps,
-} from "@sbx/pve";
+} from "@umiak/pve";
 
-// Configuration and clients of sbx-tpl: the S1 variables (spec S5 section 7)
+// Configuration and clients of umiak-tpl: the S1 variables (spec S5 section 7)
 
 /** Cap for the memory of running pool VMs (build VM included). */
 export const RAM_CAP_MB = 8192;
@@ -26,14 +26,16 @@ export function registryDir(
 	env: Env = process.env,
 	home: string = homedir(),
 ): string {
-	return env.SBX_TEMPLATE_REGISTRY ?? join(home, ".local/state/sbx/templates");
+	return (
+		env.UMIAK_TEMPLATE_REGISTRY ?? join(home, ".local/state/umiak/templates")
+	);
 }
 
 export function imageCacheDir(
 	env: Env = process.env,
 	home: string = homedir(),
 ): string {
-	return env.SBX_IMAGE_CACHE ?? join(home, ".cache/sbx/images");
+	return env.UMIAK_IMAGE_CACHE ?? join(home, ".cache/umiak/images");
 }
 
 export interface Ctx {
@@ -73,7 +75,7 @@ export async function makeContext(over: { node?: string } = {}): Promise<Ctx> {
 		occupied: () => (machines as Machines).occupiedVmids(),
 	});
 	await allocator.ensureTemplate();
-	// Only for occupiedVmids: sbx-tpl never creates machines through it.
+	// Only for occupiedVmids: umiak-tpl never creates machines through it.
 	machines = new Machines({
 		api,
 		node,

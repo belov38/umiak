@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export DISPLAY=${DISPLAY:-:0}
+export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
+export XDG_CURRENT_DESKTOP=Openbox
+systemctl --user import-environment DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
+dbus-update-activation-environment --systemd DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
+systemctl --user restart umiak-session.service cua-driver.service
+exec openbox-session

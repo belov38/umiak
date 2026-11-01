@@ -1,0 +1,297 @@
+syntax = "proto3";
+
+package umiak.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+import "umiak/agent/v1/common.proto";
+
+option go_package = "github.com/belov38/umiak/libs/proto/umiak/agent/v1;agentv1";
+
+// System reports machine state and applies the platform lifecycle: claim,
+// environment updates, quiesce for snapshots, agent updates.
+service System {
+  // Info returns agent and machine identity and readiness.
+  rpc Info(InfoRequest) returns (InfoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Metrics returns a snapshot of resource usage.
+  rpc Metrics(MetricsRequest) returns (MetricsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // ListPorts returns listening TCP ports.
+  rpc ListPorts(ListPortsRequest) returns (ListPortsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Activity returns counters used for idle detection.
+  rpc Activity(ActivityRequest) returns (ActivityResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Claim binds the machine to a sandbox and applies its environment.
+  rpc Claim(ClaimRequest) returns (ClaimResponse);
+  // UpdateEnv replaces the sandbox environment.
+  rpc UpdateEnv(UpdateEnvRequest) returns (UpdateEnvResponse);
+  // UpdateSecrets replaces secret environment variables and files.
+  rpc UpdateSecrets(UpdateSecretsRequest) returns (UpdateSecretsResponse);
+  // UpdateSshCa replaces the trusted SSH user CA keys.
+  rpc UpdateSshCa(UpdateSshCaRequest) returns (UpdateSshCaResponse);
+  // PrepareStop flushes state and wipes secrets before the VM stops.
+  rpc PrepareStop(PrepareStopRequest) returns (PrepareStopResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Quiesce freezes containers and filesystems for a snapshot.
+  rpc Quiesce(QuiesceRequest) returns (QuiesceResponse);
+  // Thaw ends a quiesce lease.
+  rpc Thaw(ThawRequest) returns (ThawResponse);
+  // ApplyUpdate installs an uploaded agent package and restarts the agent.
+  rpc ApplyUpdate(ApplyUpdateRequest) returns (ApplyUpdateResponse);
+}
+
+// InfoRequest is empty.
+message InfoRequest {}
+
+// InfoResponse is the identity and state of the agent and machine.
+message InfoResponse {
+  string version = 1;
+  string previous_version = 2;
+  string os = 3;
+  string arch = 4;
+  string kernel = 5;
+  string boot_id = 6;
+  google.protobuf.Timestamp boot_time = 7;
+  string machine_id = 8;
+  string hostname = 9;
+  string sandbox_id = 10;
+  ClaimInfo claim = 11;
+  repeated Phase readiness = 12;
+  bool ready = 13;
+  repeated string ssh_host_keys = 14;
+  QuiesceStatus quiesce = 15;
+  UpdateStatus update = 16;
+  google.protobuf.Timestamp idle_since = 17;
+  string default_user = 18;
+  string tunnel_url = 19;
+  string tunnel_url_source = 20;
+}
+
+// ClaimInfo is the stored claim without secret values.
+message ClaimInfo {
+  string sandbox_id = 1;
+  string hostname = 2;
+  string port_domain = 3;
+  map<string, string> env = 4;
+  repeated string secret_env_keys = 5;
+  repeated string secret_file_names = 6;
+  repeated string ssh_user_ca_keys = 7;
+  google.protobuf.Timestamp claimed_at = 8;
+}
+
+// QuiesceStatus is the current quiesce lease, if any.
+message QuiesceStatus {
+  bool active = 1;
+  string lease_id = 2;
+  google.protobuf.Timestamp deadline = 3;
+}
+
+// UpdateStatus is the pending agent update, if any.
+message UpdateStatus {
+  bool pending = 1;
+  string from = 2;
+  string to = 3;
+  google.protobuf.Timestamp deadline = 4;
+  repeated string bad_versions = 5;
+}
+
+// MetricsRequest is empty.
+message MetricsRequest {}
+
+// MetricsResponse is a snapshot of resource usage.
+message MetricsResponse {
+  Cpu cpu = 1;
+  Memory memory = 2;
+  repeated Disk disks = 3;
+  Network network = 4;
+  uint32 processes = 5;
+  uint32 running_commands = 6;
+  uint32 attach_streams = 7;
+  uint32 tcp_streams = 8;
+}
+
+// Cpu is processor usage.
+message Cpu {
+  double usage_percent = 1;
+  uint32 cores = 2;
+  double load1 = 3;
+  double load5 = 4;
+  double load15 = 5;
+}
+
+// Memory is memory usage in bytes.
+message Memory {
+  uint64 total = 1;
+  uint64 available = 2;
+  uint64 used = 3;
+  uint64 swap_total = 4;
+  uint64 swap_used = 5;
+}
+
+// Disk is the usage of one mount.
+message Disk {
+  string mount = 1;
+  uint64 total = 2;
+  uint64 used = 3;
+  uint64 free = 4;
+  uint64 inodes_total = 5;
+  uint64 inodes_free = 6;
+}
+
+// Network is traffic since boot and the current rate.
+message Network {
+  uint64 rx_bytes = 1;
+  uint64 tx_bytes = 2;
+  double rx_bps = 3;
+  double tx_bps = 4;
+}
+
+// ListPortsRequest is empty.
+message ListPortsRequest {}
+
+// ListPortsResponse lists listening ports.
+message ListPortsResponse {
+  repeated Port ports = 1;
+}
+
+// ActivityRequest is empty.
+message ActivityRequest {}
+
+// ActivityResponse counts live work for idle detection.
+message ActivityResponse {
+  uint32 running_commands = 1;
+  uint32 open_ptys = 2;
+  uint32 tcp_streams = 3;
+  uint32 attach_streams = 4;
+  uint32 desktop_streams = 5;
+}
+
+// ClaimReason says why a claim is sent.
+enum ClaimReason {
+  CLAIM_REASON_UNSPECIFIED = 0;
+  CLAIM_REASON_CLAIM = 1;
+  CLAIM_REASON_RESUME = 2;
+  CLAIM_REASON_RECOVER = 3;
+}
+
+// SecretFile is a file written to the secrets tmpfs.
+message SecretFile {
+  string name = 1;
+  bytes content = 2;
+  uint32 mode = 3;
+  // Optional symlink to the file.
+  string link_path = 4;
+}
+
+// ClaimRequest binds the machine to a sandbox.
+message ClaimRequest {
+  string sandbox_id = 1;
+  string hostname = 2;
+  string port_domain = 3;
+  map<string, string> env = 4;
+  map<string, string> secret_env = 5;
+  repeated SecretFile secret_files = 6;
+  repeated string ssh_user_ca_keys = 7;
+  ClaimReason reason = 8;
+  repeated string authorized_keys = 9;
+}
+
+// ClaimResponse returns readiness after the claim is applied.
+message ClaimResponse {
+  repeated Phase readiness = 1;
+  bool ready = 2;
+  // HostnameApplied tells whether the agent set the OS hostname from the
+  // claim. Unset is treated as true by callers that predate the field.
+  optional bool hostname_applied = 3;
+}
+
+// UpdateEnvRequest replaces the environment.
+message UpdateEnvRequest {
+  map<string, string> env = 1;
+}
+
+// UpdateEnvResponse returns readiness after the update.
+message UpdateEnvResponse {
+  repeated Phase readiness = 1;
+  bool ready = 2;
+}
+
+// UpdateSecretsRequest replaces secret environment and files.
+message UpdateSecretsRequest {
+  map<string, string> secret_env = 1;
+  repeated SecretFile secret_files = 2;
+}
+
+// UpdateSecretsResponse returns readiness after the update.
+message UpdateSecretsResponse {
+  repeated Phase readiness = 1;
+  bool ready = 2;
+}
+
+// UpdateSshCaRequest replaces the trusted CA public keys.
+message UpdateSshCaRequest {
+  repeated string keys = 1;
+}
+
+// UpdateSshCaResponse is empty.
+message UpdateSshCaResponse {}
+
+// PrepareStopRequest is empty.
+message PrepareStopRequest {}
+
+// PrepareStopResponse reports the outcome of the secret wipe.
+message PrepareStopResponse {
+  // SecretFilesWiped is true when no secret file remains on disk.
+  bool secret_files_wiped = 1;
+}
+
+// QuiesceRequest starts a lease; docker and fs select what to freeze.
+message QuiesceRequest {
+  optional uint32 lease_ms = 1;
+  optional bool docker = 2;
+  optional bool fs = 3;
+  // WipeSecretFiles overwrites and deletes the secret files as part of the
+  // freeze (Windows). If a file is held open the lease is rolled back with
+  // secrets_in_use.
+  optional bool wipe_secret_files = 4;
+}
+
+// QuiesceResponse describes the lease and what was frozen.
+message QuiesceResponse {
+  string lease_id = 1;
+  google.protobuf.Timestamp deadline = 2;
+  repeated string paused_containers = 3;
+  repeated string frozen_mounts = 4;
+}
+
+// ThawRequest ends a lease.
+message ThawRequest {
+  string lease_id = 1;
+}
+
+// ThawResponse tells whether the lease was already thawed.
+message ThawResponse {
+  // The watchdog thawed the lease before this call.
+  bool auto_thawed = 1;
+  google.protobuf.Timestamp auto_thawed_at = 2;
+  bool already_thawed = 3;
+}
+
+// ApplyUpdateRequest installs an uploaded package.
+message ApplyUpdateRequest {
+  string upload_id = 1;
+  // AllowBadVersion permits a version previously marked bad.
+  bool allow_bad_version = 2;
+}
+
+// ApplyUpdateResponse names the versions of the update.
+message ApplyUpdateResponse {
+  string from = 1;
+  string to = 2;
+}

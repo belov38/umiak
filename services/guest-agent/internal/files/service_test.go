@@ -10,11 +10,11 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // wantCode checks the Connect code and ErrorDetail code of err.
@@ -204,10 +204,10 @@ func TestFilesystemRPCs(t *testing.T) {
 	if st, _ := os.Stat(ext); st.Mode().Perm() != statPerm(false, 0o644) {
 		t.Fatalf("Chmod followed a symlink: %v", st.Mode())
 	}
-	_, err = h.fs.Chmod(ctx, connect.NewRequest(&agentv1.ChmodRequest{Path: cdir, Owner: "no-such-user-sbx-test"}))
+	_, err = h.fs.Chmod(ctx, connect.NewRequest(&agentv1.ChmodRequest{Path: cdir, Owner: "no-such-user-umiak-test"}))
 	wantCode(t, err, connect.CodeInvalidArgument, errs.UserNotFound)
 
-	// Mutations need Sbx-Request-Id (reqcache interceptors from the wiring).
+	// Mutations need Umiak-Request-Id (reqcache interceptors from the wiring).
 	_, err = agentv1connect.NewFilesystemClient(h.srv.Client(), h.srv.URL).MakeDir(ctx, connect.NewRequest(&agentv1.MakeDirRequest{Path: h.path("noid")}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("MakeDir without request id: %v", err)

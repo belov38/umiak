@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { familyForTunnelUrl, PveApiError, type PveClient } from "@sbx/pve";
+import { familyForTunnelUrl, PveApiError, type PveClient } from "@umiak/pve";
 import { stringify as stringifyYaml } from "yaml";
 import { verifyAgentPackage } from "./agent-package.ts";
 import type { BuildError, Manifest } from "./manifest.ts";
@@ -54,9 +54,9 @@ export {
 	FAIL_STEP_SCRIPT,
 } from "./stages.ts";
 
-// `sbx-tpl build`: base image to Proxmox template (spec S5 section 7.2)
+// `umiak-tpl build`: base image to Proxmox template (spec S5 section 7.2)
 
-const GUEST_MANIFEST = "/etc/sbx-template/build.json";
+const GUEST_MANIFEST = "/etc/umiak-template/build.json";
 
 export class BuildFailedError extends Error {
 	readonly manifest: Manifest;
@@ -99,7 +99,7 @@ function prepare(
 	if (o.apiUrl !== undefined && !/^https?:\/\/[^/]/.test(o.apiUrl))
 		throw new Error(`--api-url must be an http(s) URL: ${o.apiUrl}`);
 	for (const [flag, file] of [
-		["--sbx-cli", o.sbxCli],
+		["--umiak-cli", o.umiakCli],
 		["--ssh-user-ca", o.sshUserCa],
 	] as const)
 		if (file !== undefined && !existsSync(file))
@@ -122,7 +122,7 @@ function prepare(
 		node: o.node,
 		storage: o.storage,
 		pveVmid: null,
-		vmName: `sbx-tpl-${o.slug}-${version.replace(".", "-")}`,
+		vmName: `umiak-tpl-${o.slug}-${version.replace(".", "-")}`,
 		gitCommit: o.gitCommit,
 		recipeDigest: recipeDigest(recipe),
 		base: {
@@ -401,7 +401,7 @@ function isBuildVm(cfg: Record<string, string>, m: Manifest): boolean {
 		cfg.name === m.vmName &&
 		(tags.includes(BUILD_TAG) ||
 			// Created, but the tag call after the create failed.
-			(cfg.description ?? "").includes(`sbx-tpl build ${m.buildId}`))
+			(cfg.description ?? "").includes(`umiak-tpl build ${m.buildId}`))
 	);
 }
 
@@ -434,7 +434,7 @@ async function rollback(
 				!(
 					tags.includes(BUILD_TAG) ||
 					// Created, but the tag call after the create failed.
-					(cfg.description ?? "").includes(`sbx-tpl build ${st.m.buildId}`)
+					(cfg.description ?? "").includes(`umiak-tpl build ${st.m.buildId}`)
 				)
 			) {
 				deps.log(
@@ -477,7 +477,7 @@ async function rollback(
 			warn(`removing ${st.isos.join(", ")}`, err);
 		}
 	}
-	// A VMID whose VM could not be deleted keeps its lease until `sbx-tpl cleanup`.
+	// A VMID whose VM could not be deleted keeps its lease until `umiak-tpl cleanup`.
 	if (st.vmid !== undefined && vmGone) {
 		try {
 			await deps.allocator.release(st.vmid);
@@ -526,10 +526,10 @@ async function dropBuildIso(
 
 const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
-/** The `sbx-admin template register` call for a ready build (S6 section 14.3). */
+/** The `umiak-admin template register` call for a ready build (S6 section 14.3). */
 export function registerCommand(m: Manifest): string {
 	return [
-		"sbx-admin template register",
+		"umiak-admin template register",
 		`--template ${m.templateSlug}`,
 		`--version ${m.version}`,
 		`--os ${m.os}`,
@@ -543,7 +543,7 @@ export function registerCommand(m: Manifest): string {
 	].join(" ");
 }
 
-/** A `topology.templateBuilds` list entry for deploy/compose/config/sbx.yaml. */
+/** A `topology.templateBuilds` list entry for deploy/compose/config/umiak.yaml. */
 export function topologySnippet(m: Manifest): string {
 	return stringifyYaml([
 		{

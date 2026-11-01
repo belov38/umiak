@@ -4,7 +4,7 @@ rem (spec S9 section 7 p.4). Installs the virtio guest tools (drivers, balloon,
 rem VSS provider) and the QEMU guest agent from the virtio-win ISO; the builder
 rem waits for QGA. Specialize copied this file from the build ISO.
 setlocal EnableExtensions
-set "LOGS=C:\sbx-build\logs"
+set "LOGS=C:\umiak-build\logs"
 if not exist "%LOGS%" mkdir "%LOGS%"
 set "LOG=%LOGS%\setupcomplete.log"
 >> "%LOG%" echo %DATE% %TIME% SetupComplete start

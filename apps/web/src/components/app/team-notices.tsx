@@ -12,7 +12,7 @@ import { acknowledgeNotice } from "@/actions/notices";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { describeError } from "@/lib/errors";
 import { formatTime } from "@/lib/format";
@@ -56,7 +56,7 @@ function Notice({
 	canAcknowledge: boolean;
 	canRevoke: boolean;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const queryClient = useQueryClient();
 	const live = notice.apiKeys.filter((k) => !k.revoked);
@@ -79,7 +79,7 @@ function Notice({
 		const failed: string[] = [];
 		for (const id of ids) {
 			try {
-				await sbx.raw.DELETE("/v1/api-keys/{key}", {
+				await umiak.raw.DELETE("/v1/api-keys/{key}", {
 					params: { path: { key: id } },
 				});
 			} catch (e) {

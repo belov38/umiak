@@ -38,14 +38,14 @@ describe("compose: worker and gateway", () => {
 	it("the worker sends the public key of the gateway's SSH user CA to agents", () => {
 		// The gateway signs its logins to sshd in the VM with SSH_USER_CA_KEY_FILE;
 		// the agent trusts what the worker sends in Claim (ssh_user_ca_keys).
-		const ca = gatewayFile("SBX_GATEWAY_SSH_USER_CA_KEY_FILE");
-		expect(services.worker?.environment?.SBX_SSH_USER_CA_KEYS_FILE).toBe(
+		const ca = gatewayFile("UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE");
+		expect(services.worker?.environment?.UMIAK_SSH_USER_CA_KEYS_FILE).toBe(
 			workerPath(`${ca}.pub`),
 		);
 	});
 
 	it("the worker uses the gateway's service token", () => {
-		expect(services.worker?.environment?.SBX_GATEWAY_SERVICE_TOKEN_FILE).toBe(
+		expect(services.worker?.environment?.UMIAK_GATEWAY_SERVICE_TOKEN_FILE).toBe(
 			workerPath("worker-gateway-token"),
 		);
 	});

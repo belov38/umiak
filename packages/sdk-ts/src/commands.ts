@@ -9,7 +9,7 @@
 // the loop early (break) closes the connection and leaves the command running.
 
 import type { CallOptions, ClientCore } from "./client.ts";
-import { SbxError } from "./errors.ts";
+import { UmiakError } from "./errors.ts";
 import type { components } from "./gen/v1.d.ts";
 import { newIdempotencyKey } from "./ids.ts";
 import { ndjsonObjects } from "./ndjson.ts";
@@ -222,7 +222,7 @@ export class Command {
 		for await (const ev of this.follow({ ...callOf(opts), from: "end" })) {
 			if (ev.type === "exit") return ev;
 		}
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: "unexpected_response",
 			message: "the stream ended without exit",
@@ -309,15 +309,15 @@ export class Command {
 		const bytes = new Uint8Array(
 			(data as ArrayBuffer | undefined) ?? new ArrayBuffer(0),
 		);
-		const start = num("Sbx-Offset", offset);
-		const end = h.get("Sbx-Stream-End");
+		const start = num("Umiak-Offset", offset);
+		const end = h.get("Umiak-Stream-End");
 		return {
 			data: bytes,
 			offset: start,
-			nextOffset: num("Sbx-Next-Offset", start + bytes.length),
-			availableFrom: num("Sbx-Available-From", 0),
+			nextOffset: num("Umiak-Next-Offset", start + bytes.length),
+			availableFrom: num("Umiak-Available-From", 0),
 			end: end === null ? null : Number(end),
-			truncated: h.get("Sbx-Truncated") === "true",
+			truncated: h.get("Umiak-Truncated") === "true",
 		};
 	}
 }
@@ -345,7 +345,7 @@ export async function execCommand(
 		}
 	}
 	if (exit === undefined || command === undefined) {
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: "unexpected_response",
 			message: "the command stream ended without exit",
@@ -438,14 +438,14 @@ export function runCommand<E extends Encoding = "utf8">(
 			});
 			const body = data as ReadableStream<Uint8Array> | null | undefined;
 			if (body === null || body === undefined) {
-				throw new SbxError({
+				throw new UmiakError({
 					status: response.status,
 					code: "unexpected_response",
 					message: "POST /commands answered without a stream",
 					retryable: false,
 				});
 			}
-			return { body, commandId: response.headers.get("Sbx-Command-Id") };
+			return { body, commandId: response.headers.get("Umiak-Command-Id") };
 		},
 	});
 }
@@ -616,7 +616,7 @@ async function* resumable<E extends Encoding>(
 					case "reconnect":
 						setOffsets(offsets, f);
 						reconnect = true;
-						lastError = new SbxError({
+						lastError = new UmiakError({
 							status: 0,
 							code: "network_error",
 							message: `the api asked to reconnect (${String(f.reason)})`,
@@ -636,7 +636,7 @@ async function* resumable<E extends Encoding>(
 				if (reconnect || f.type === "error") break;
 			}
 			if (lastError === undefined) {
-				lastError = new SbxError({
+				lastError = new UmiakError({
 					status: 0,
 					code: "network_error",
 					message: "the command stream ended without exit",
@@ -647,7 +647,7 @@ async function* resumable<E extends Encoding>(
 			if (signal?.aborted) throw signal.reason;
 			// Both the keyed POST and GET /stream are safe to repeat, so a proxy
 			// 502/503/504/429 without the envelope is retried too.
-			if (!(err instanceof SbxError) || !isRetryable(err, true)) throw err;
+			if (!(err instanceof UmiakError) || !isRetryable(err, true)) throw err;
 			lastError = err;
 		} finally {
 			signal?.removeEventListener("abort", onAbort);
@@ -697,7 +697,7 @@ async function openStream(
 		retryBudgetMs: 0,
 	});
 	if (data === null || data === undefined) {
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: "network_error",
 			message: "GET /stream answered without a body",
@@ -730,8 +730,8 @@ function exitEvent(f: Frame): ExitEvent {
 }
 
 /** Frames that do not fit the offsets: reattach from the tracked offsets. */
-function protocolError(message: string): SbxError {
-	return new SbxError({
+function protocolError(message: string): UmiakError {
+	return new UmiakError({
 		status: 0,
 		code: "protocol_error",
 		message: `command stream: ${message}`,
@@ -739,10 +739,10 @@ function protocolError(message: string): SbxError {
 	});
 }
 
-/** An `error` frame (NDJSON or PTY) as SbxError (status 0: the answer itself was 200/101). */
-export function frameError(f: Record<string, unknown>): SbxError {
+/** An `error` frame (NDJSON or PTY) as UmiakError (status 0: the answer itself was 200/101). */
+export function frameError(f: Record<string, unknown>): UmiakError {
 	const code = typeof f.code === "string" ? f.code : "internal";
-	return new SbxError({
+	return new UmiakError({
 		status: 0,
 		code,
 		message: typeof f.message === "string" ? f.message : code,

@@ -6,21 +6,21 @@ import (
 	"net/http"
 	"net/netip"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
 )
 
 // ReservedPrefix is the path prefix the gateway never proxies (spec 8.4).
-const ReservedPrefix = "/__sbx/"
+const ReservedPrefix = "/__umiak/"
 
 // Reserved endpoints.
 const (
-	CallbackPath = "/__sbx/auth/callback"
-	LogoutPath   = "/__sbx/auth/logout"
+	CallbackPath = "/__umiak/auth/callback"
+	LogoutPath   = "/__umiak/auth/logout"
 )
 
-// ServeReserved answers a request under /__sbx/. rt is nil when the route
+// ServeReserved answers a request under /__umiak/. rt is nil when the route
 // lookup failed; the callback then refuses and logout still works.
 func (a *Auth) ServeReserved(w http.ResponseWriter, r *http.Request, l routes.Label, rt *cpapi.Route, ip netip.Addr, requestID string) {
 	switch r.URL.Path {
@@ -29,7 +29,7 @@ func (a *Auth) ServeReserved(w http.ResponseWriter, r *http.Request, l routes.La
 	case LogoutPath:
 		a.logout(w, r)
 	default:
-		sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusNotFound, Code: sbxerr.CodeRouteNotFound, RequestID: requestID})
+		umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusNotFound, Code: umiakerr.CodeRouteNotFound, RequestID: requestID})
 	}
 }
 
@@ -76,19 +76,19 @@ func (a *Auth) callback(w http.ResponseWriter, r *http.Request, l routes.Label, 
 	case err == nil:
 	case errors.Is(err, errNoState):
 		a.count(AccessSSO, ResultMissing)
-		sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusUnauthorized, Code: sbxerr.CodeAuthRequired, RequestID: requestID})
+		umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusUnauthorized, Code: umiakerr.CodeAuthRequired, RequestID: requestID})
 		return
 	case errors.Is(err, errCallback):
 		a.authFailure(ip)
 		a.count(AccessSSO, ResultInvalid)
-		sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusUnauthorized, Code: sbxerr.CodeAuthRequired, RequestID: requestID})
+		umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusUnauthorized, Code: umiakerr.CodeAuthRequired, RequestID: requestID})
 		return
 	default:
 		// api could not answer. The user did nothing wrong, and the code
 		// may still be valid for a retry.
-		sbxerr.Write(w, r, sbxerr.Error{
+		umiakerr.Write(w, r, umiakerr.Error{
 			Status:    http.StatusServiceUnavailable,
-			Code:      sbxerr.CodeRouteLookupUnavailable,
+			Code:      umiakerr.CodeRouteLookupUnavailable,
 			Retryable: true,
 			RequestID: requestID,
 		})

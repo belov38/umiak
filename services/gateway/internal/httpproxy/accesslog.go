@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 const (
@@ -106,13 +106,13 @@ func (x *exchange) track(c interface{ Close() error }) {
 }
 
 // fail writes a gateway answer unless something was written already.
-func (x *exchange) fail(e sbxerr.Error) {
+func (x *exchange) fail(e umiakerr.Error) {
 	if x.w.status != 0 || x.w.hijacked {
 		return
 	}
 	e.RequestID = x.rid
 	x.w.Header().Set("X-Request-Id", x.rid)
-	sbxerr.Write(x.w, x.r, e)
+	umiakerr.Write(x.w, x.r, e)
 }
 
 // finish writes the access log line and the metrics. It runs when the
@@ -140,7 +140,7 @@ func (x *exchange) finish() {
 		Method:     capField(x.r.Method),
 		Path:       capField(x.r.URL.Path),
 		Status:     status,
-		SbxError:   x.w.sbxError,
+		UmiakError:   x.w.umiakError,
 		BytesIn:    x.in.Load(),
 		BytesOut:   x.w.out.Load(),
 		DurationMs: dur.Milliseconds(),
@@ -166,7 +166,7 @@ func (x *exchange) finish() {
 	}
 
 	if m := x.h.cfg.Metrics; m != nil {
-		m.HTTPRequests.WithLabelValues(access, codeClass(status), e.SbxError, via).Inc()
+		m.HTTPRequests.WithLabelValues(access, codeClass(status), e.UmiakError, via).Inc()
 		m.HTTPDuration.WithLabelValues(access, via).Observe(ttfb.Seconds())
 		m.HTTPBytes.WithLabelValues("in").Add(float64(e.BytesIn))
 		m.HTTPBytes.WithLabelValues("out").Add(float64(e.BytesOut))

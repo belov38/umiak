@@ -2,7 +2,7 @@
 // providers/nodes/storages rows and the mounted Secret files (S6 §8.4).
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { PgAllocatorStore } from "@sbx/db";
+import { PgAllocatorStore } from "@umiak/db";
 import {
 	Allocator,
 	checkLeaseOwner,
@@ -27,7 +27,7 @@ import {
 	SshNodeOps,
 	ThawFailedError,
 	VM_LOCK_TIMEOUT_RE,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import type pg from "pg";
 import { QuiesceFailed } from "../ops/snapshot-step.ts";
 import type {
@@ -143,7 +143,7 @@ export async function loadNodeTopology(
 
 /**
  * `<secretsDir>/<secretRef>` when that directory exists, else `secretsDir`
- * itself (the PoC mounts ~/.config/sbx directly).
+ * itself (the PoC mounts ~/.config/umiak directly).
  */
 export function secretDirOf(secretsDir: string, secretRef: string): string {
 	if (secretRef === "" || /[/\\]|^\.\.?$/.test(secretRef))
@@ -154,9 +154,9 @@ export function secretDirOf(secretsDir: string, secretRef: string): string {
 
 /**
  * Builds PveApi and SshNodeOps from the Secret files of the provider:
- * `pve-token` (mode 600), `pve-root-ca.pem`, `sbx-node_ed25519`,
- * `known_hosts`. Env: `SBX_PVE_TOKEN_ID` (default `sbx@pve!poc`),
- * `SBX_NODE_SSH_HOST` (default `nodes.node_agent_ref`).
+ * `pve-token` (mode 600), `pve-root-ca.pem`, `umiak-node_ed25519`,
+ * `known_hosts`. Env: `UMIAK_PVE_TOKEN_ID` (default `umiak@pve!dev`),
+ * `UMIAK_NODE_SSH_HOST` (default `nodes.node_agent_ref`).
  */
 export function pveClientsFromSecrets(
 	secretsDir: string,
@@ -166,7 +166,7 @@ export function pveClientsFromSecrets(
 		const dir = secretDirOf(secretsDir, t.secretRef);
 		const api = new PveApi({
 			url: t.apiUrl,
-			tokenId: env.SBX_PVE_TOKEN_ID ?? "sbx@pve!poc",
+			tokenId: env.UMIAK_PVE_TOKEN_ID ?? "umiak@pve!dev",
 			tokenSecret: readSecretFile(join(dir, "pve-token")),
 			ca: readFileSync(join(dir, "pve-root-ca.pem")),
 			tlsName: t.tlsName ?? new URL(t.apiUrl).hostname,
@@ -174,8 +174,8 @@ export function pveClientsFromSecrets(
 		let node: SshNodeOps;
 		try {
 			node = new SshNodeOps({
-				host: env.SBX_NODE_SSH_HOST ?? t.nodeAgentRef,
-				privateKey: readFileSync(join(dir, "sbx-node_ed25519")),
+				host: env.UMIAK_NODE_SSH_HOST ?? t.nodeAgentRef,
+				privateKey: readFileSync(join(dir, "umiak-node_ed25519")),
 				knownHosts: readFileSync(join(dir, "known_hosts"), "utf8"),
 			});
 		} catch (err) {
@@ -251,7 +251,7 @@ export interface PveNodeInfraOptions {
 	/** Machines poll interval (delete verification); S1 default when unset. */
 	pollMs?: number;
 	/**
-	 * smbios1 `family` of every new machine (`sbxt1:<SBX_TUNNEL_URL>`, S5 section 14): the
+	 * smbios1 `family` of every new machine (`umiakt1:<UMIAK_TUNNEL_URL>`, S5 section 14): the
 	 * agent's tunnel URL; templates carry no default. Unset: no family.
 	 */
 	family?: string;
@@ -908,9 +908,9 @@ export class PveNodeInfra implements NodeInfra {
 
 export interface PveInfraRegistryOptions {
 	vmLockSleep?: (ms: number) => Promise<void>;
-	/** Root of the mounted Secret directories (`SBX_SECRETS_DIR`). */
+	/** Root of the mounted Secret directories (`UMIAK_SECRETS_DIR`). */
 	secretsDir: string;
-	/** `SBX_PVE_TOKEN_ID`, `SBX_NODE_SSH_HOST`, `SBX_PVE_VNET`, `SBX_PVE_POOL`. */
+	/** `UMIAK_PVE_TOKEN_ID`, `UMIAK_NODE_SSH_HOST`, `UMIAK_PVE_VNET`, `UMIAK_PVE_POOL`. */
 	env?: Env;
 	/** Client factory; default `pveClientsFromSecrets(secretsDir, env)`. Tests pass fakes. */
 	clients?: NodeClientsFactory;
@@ -936,13 +936,13 @@ export class PveInfraRegistry implements InfraRegistry {
 		this.#db = pool;
 		this.#o = o;
 		this.#env = o.env ?? process.env;
-		const url = this.#env.SBX_TUNNEL_URL;
+		const url = this.#env.UMIAK_TUNNEL_URL;
 		if (url !== undefined && url !== "") {
 			try {
 				this.#family = familyForTunnelUrl(url);
 			} catch (err) {
 				throw new Error(
-					`SBX_TUNNEL_URL: ${err instanceof Error ? err.message : String(err)}`,
+					`UMIAK_TUNNEL_URL: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 		}
@@ -965,8 +965,8 @@ export class PveInfraRegistry implements InfraRegistry {
 		const clients = await this.#clients(t);
 		const infra = new PveNodeInfra(this.#db, t, clients, {
 			...(this.#o.vmLockSleep ? { vmLockSleep: this.#o.vmLockSleep } : {}),
-			vnet: this.#env.SBX_PVE_VNET ?? "sbx0",
-			pool: this.#env.SBX_PVE_POOL ?? "sandbox",
+			vnet: this.#env.UMIAK_PVE_VNET ?? "umiak0",
+			pool: this.#env.UMIAK_PVE_POOL ?? "umiak",
 			...(this.#o.pollMs !== undefined ? { pollMs: this.#o.pollMs } : {}),
 			...(this.#family !== undefined ? { family: this.#family } : {}),
 		});

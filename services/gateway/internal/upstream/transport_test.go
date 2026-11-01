@@ -13,9 +13,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 type gotConn struct {
@@ -72,7 +72,7 @@ func epoch(t *testing.T, i *testenv.Inst, machineID string) uint64 {
 func TestSyntheticHost(t *testing.T) {
 	id := uuid.NewString()
 	h := upstream.SyntheticHost(id, 7, 8080)
-	if want := "m-" + id + "-e7-8080.sbx.internal"; h != want {
+	if want := "m-" + id + "-e7-8080.umiak.internal"; h != want {
 		t.Fatalf("SyntheticHost = %q, want %q", h, want)
 	}
 	gotID, gotEpoch, gotPort, ok := upstream.ParseSyntheticHost(h + ":80")
@@ -83,17 +83,17 @@ func TestSyntheticHost(t *testing.T) {
 		h,          // no port
 		h + ":443", // not port 80
 		"example.com:80",
-		"m-" + id + "-e7-8080.sbx.internal.evil:80",
-		"m-" + id + "-e7-0.sbx.internal:80",
-		"m-" + id + "-e7-65536.sbx.internal:80",
-		"m-" + id + "-e07-8080.sbx.internal:80",
-		"m-" + id + "-e7-08080.sbx.internal:80",
-		"m-" + id + "-e-8080.sbx.internal:80",
-		"m-" + id + "-7-8080.sbx.internal:80",
-		"m-not-a-uuid-e7-8080.sbx.internal:80",
-		"m-" + id[:35] + "-e7-8080.sbx.internal:80",
-		"M-" + id + "-e7-8080.sbx.internal:80",
-		"m-{" + id + "}-e7-8080.sbx.internal:80",
+		"m-" + id + "-e7-8080.umiak.internal.evil:80",
+		"m-" + id + "-e7-0.umiak.internal:80",
+		"m-" + id + "-e7-65536.umiak.internal:80",
+		"m-" + id + "-e07-8080.umiak.internal:80",
+		"m-" + id + "-e7-08080.umiak.internal:80",
+		"m-" + id + "-e-8080.umiak.internal:80",
+		"m-" + id + "-7-8080.umiak.internal:80",
+		"m-not-a-uuid-e7-8080.umiak.internal:80",
+		"m-" + id[:35] + "-e7-8080.umiak.internal:80",
+		"M-" + id + "-e7-8080.umiak.internal:80",
+		"m-{" + id + "}-e7-8080.umiak.internal:80",
 	} {
 		if _, _, _, ok := upstream.ParseSyntheticHost(bad); ok {
 			t.Errorf("ParseSyntheticHost(%q) accepted", bad)

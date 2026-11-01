@@ -1,5 +1,5 @@
 // Keycloak access token verification (S7 §7.10): signature by the realm's
-// JWKS (discovery -> jwks_uri, or SBX_OIDC_JWKS_URL), RS256/ES256 only, iss,
+// JWKS (discovery -> jwks_uri, or UMIAK_OIDC_JWKS_URL), RS256/ES256 only, iss,
 // aud, exp/nbf/iat with 60 s tolerance, then typ "Bearer", azp in the allowed
 // clients and email_verified. No introspection per request.
 import {

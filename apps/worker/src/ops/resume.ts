@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import { MachineStateConflict } from "../machine-prep.ts";
 import type { Fenced, Step } from "../steps.ts";

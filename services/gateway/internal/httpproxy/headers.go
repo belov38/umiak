@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
+	"github.com/belov38/umiak/services/gateway/internal/portauth"
 )
 
 // Response header and trailer caps (not in the spec). Each field counts
@@ -72,21 +72,21 @@ var strippedHeaders = map[string]bool{
 }
 
 // normalizeName lower-cases a header name and maps "_" to "-". CGI, WSGI
-// and Rack turn both into the same variable (HTTP_X_SBX_USER_EMAIL), so an
+// and Rack turn both into the same variable (HTTP_X_UMIAK_USER_EMAIL), so an
 // underscore spelling must be treated like the dashed one.
 func normalizeName(k string) string {
 	return strings.ReplaceAll(strings.ToLower(k), "_", "-")
 }
 
-// stripRequestHeaders removes the client headers of spec 7.4: every Sbx-*
-// and X-Sbx-* (the gateway sets its own), X-Auth-Request-* and
+// stripRequestHeaders removes the client headers of spec 7.4: every Umiak-*
+// and X-Umiak-* (the gateway sets its own), X-Auth-Request-* and
 // strippedHeaders. Names are compared after normalizeName, so non-canonical
 // and underscore spellings are caught too. Cookies, _token and
-// Sbx-Port-Token are portauth.StripRequest's.
+// Umiak-Port-Token are portauth.StripRequest's.
 func stripRequestHeaders(h http.Header) {
 	for k := range h {
 		n := normalizeName(k)
-		if strings.HasPrefix(n, "sbx-") || strings.HasPrefix(n, "x-sbx-") ||
+		if strings.HasPrefix(n, "umiak-") || strings.HasPrefix(n, "x-umiak-") ||
 			strings.HasPrefix(n, "x-auth-request-") || strippedHeaders[n] {
 			delete(h, k)
 		}
@@ -124,17 +124,17 @@ func dropUpgrade(h http.Header) {
 
 // userEmailHeader is the identity header the gateway sets on sso requests
 // (spec 8.4), compared after normalizeName.
-const userEmailHeader = "x-sbx-user-email"
+const userEmailHeader = "x-umiak-user-email"
 
 // cleanResponseHeader applies the response policy of spec 7.4 to an
 // application's headers: no Set-Cookie of a gateway cookie (the app shares
-// the host), no Sbx-* (an app must not forge a gateway error) and no Alt-Svc
+// the host), no Umiak-* (an app must not forge a gateway error) and no Alt-Svc
 // (the app does not know how it is published). X-Request-Id is removed too:
-// the gateway sets its own; and X-Sbx-User-Email, in any spelling, so an app
+// the gateway sets its own; and X-Umiak-User-Email, in any spelling, so an app
 // cannot pass off an identity as the gateway's.
 func cleanResponseHeader(h http.Header) {
 	for k := range h {
-		if hasPrefixFold(k, "sbx-") || strings.EqualFold(k, "alt-svc") || strings.EqualFold(k, "x-request-id") ||
+		if hasPrefixFold(k, "umiak-") || strings.EqualFold(k, "alt-svc") || strings.EqualFold(k, "x-request-id") ||
 			normalizeName(k) == userEmailHeader {
 			delete(h, k)
 		}
@@ -165,8 +165,8 @@ func setCookieName(v string) string {
 }
 
 // gatewaySetCookie reports a Set-Cookie for a gateway cookie. A nameless
-// cookie ("=__Host-sbx_auth=v") counts too: a browser stores it with an
-// empty name and sends it back as "__Host-sbx_auth=v".
+// cookie ("=__Host-umiak_auth=v") counts too: a browser stores it with an
+// empty name and sends it back as "__Host-umiak_auth=v".
 func gatewaySetCookie(v string) bool {
 	name := setCookieName(v)
 	if name != "" {
@@ -196,11 +196,11 @@ func headerSize(h http.Header) int {
 	return n
 }
 
-// strippedTrailer reports a trailer the client never gets: Sbx-* and any
+// strippedTrailer reports a trailer the client never gets: Umiak-* and any
 // Set-Cookie, whatever the cookie (browsers may apply cookies from
 // trailers, which would bypass the Set-Cookie filter of the header).
 func strippedTrailer(k string) bool {
-	return hasPrefixFold(k, "sbx-") || strings.EqualFold(k, "Set-Cookie")
+	return hasPrefixFold(k, "umiak-") || strings.EqualFold(k, "Set-Cookie")
 }
 
 // sanitizeTrailers removes the stripped trailers, then drops every trailer

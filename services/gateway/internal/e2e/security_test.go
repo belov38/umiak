@@ -13,11 +13,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/portauth"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/testenv/sshdtest"
 )
 
 // tlsGet sends GET https://host/path to the TLS listener of front over
@@ -131,7 +131,7 @@ func TestCrossTenant(t *testing.T) {
 			expectGatewayError(t, "a's cookie, b in the URI", r.do(t, raw("https://"+hostTB+"/", hostTA, "Cookie: "+portauth.AuthCookie+"="+cookieA+"\r\n")),
 				http.StatusUnauthorized, "auth_required")
 			// a's token for b: refused too.
-			expectGatewayError(t, "a's token, b in the URI", r.do(t, raw("https://"+hostTB+"/", hostTA, "Sbx-Port-Token: tok-a\r\n")),
+			expectGatewayError(t, "a's token, b in the URI", r.do(t, raw("https://"+hostTB+"/", hostTA, "Umiak-Port-Token: tok-a\r\n")),
 				http.StatusUnauthorized, "token_invalid")
 		})
 		if na != 0 || nb != 0 {
@@ -139,7 +139,7 @@ func TestCrossTenant(t *testing.T) {
 		}
 		// b's own token for b in the URI works and reaches b only.
 		na, nb = counts(func() {
-			decodeAnswer(t, "b's token, b in the URI", r.do(t, raw("https://"+hostTB+"/", hostTA, "Sbx-Port-Token: tok-b\r\n")))
+			decodeAnswer(t, "b's token, b in the URI", r.do(t, raw("https://"+hostTB+"/", hostTA, "Umiak-Port-Token: tok-b\r\n")))
 			// And a's cookie still opens a (origin form): the cookie was valid.
 			decodeAnswer(t, "a's cookie on a", r.do(t, raw("/", hostTA, "Cookie: "+portauth.AuthCookie+"="+cookieA+"\r\n")))
 		})
@@ -268,7 +268,7 @@ func TestCookieScope(t *testing.T) {
 
 	callback := func(cl *http.Client, r cpapi.Route, code, state string, hdr http.Header) page {
 		t.Helper()
-		return navigate(t, cl, "https://"+host(r)+"/__sbx/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state), hdr)
+		return navigate(t, cl, "https://"+host(r)+"/__umiak/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state), hdr)
 	}
 	grant := func(r cpapi.Route) cpapi.PortAuthGrant {
 		return cpapi.PortAuthGrant{UserID: "usr_1", Email: "u@example.com", AuthEpoch: r.AuthEpoch}
@@ -278,7 +278,7 @@ func TestCookieScope(t *testing.T) {
 		br := browser(t, c, c.A, "", false)
 		state := startLogin(t, br, "https://"+host(sso), "/x")
 		codeY := c.env.API.IssueCode(sso2.Label, grant(sso2))
-		if p := callback(br, sso, codeY, state, nil); p.status != http.StatusUnauthorized || p.sbxError != "auth_required" {
+		if p := callback(br, sso, codeY, state, nil); p.status != http.StatusUnauthorized || p.umiakError != "auth_required" {
 			t.Fatalf("callback on X with Y's code = %v", p.result)
 		}
 		for _, ck := range jarCookies(br, host(sso)) {
@@ -313,7 +313,7 @@ func TestCookieScope(t *testing.T) {
 		plain := browser(t, c, c.A, "", false)
 		plain.Jar = nil
 		p := callback(plain, sso, codeX, stateY, http.Header{"Cookie": {stateCookie.Name + "=" + stateCookie.Value}})
-		if p.status != http.StatusUnauthorized || p.sbxError != "auth_required" {
+		if p.status != http.StatusUnauthorized || p.umiakError != "auth_required" {
 			t.Fatalf("callback on X with Y's state cookie = %v", p.result)
 		}
 		if n := c.env.API.Calls("ExchangePortAuthCode") - before; n != 0 {
@@ -342,7 +342,7 @@ func TestPlatformCredentialsStripped(t *testing.T) {
 			portauth.AuthCookie + "=x"},
 		"X-Auth-Request-Email": {"admin@example.com"},
 		"X-Forwarded-User":     {"admin"},
-		"Sbx-Port-Token":       {"tok"},
+		"Umiak-Port-Token":       {"tok"},
 	}
 	for _, r := range []cpapi.Route{public, token} {
 		for _, front := range []*testenv.Inst{c.A, c.C} {
@@ -350,7 +350,7 @@ func TestPlatformCredentialsStripped(t *testing.T) {
 			if got := e.Header.Values("Cookie"); len(got) != 1 || got[0] != "keep=1" {
 				t.Errorf("%s via %s: app saw Cookie %q", r.Access, front.Name, got)
 			}
-			for _, k := range []string{"X-Auth-Request-Email", "X-Forwarded-User", "Sbx-Port-Token"} {
+			for _, k := range []string{"X-Auth-Request-Email", "X-Forwarded-User", "Umiak-Port-Token"} {
 				if v := e.Header.Values(k); len(v) != 0 {
 					t.Errorf("%s via %s: app saw %s %q", r.Access, front.Name, k, v)
 				}
@@ -418,7 +418,7 @@ func TestSSHPrincipalsAcrossInstances(t *testing.T) {
 	t.Parallel()
 	c := newCluster(t, testenv.Options{}, nil)
 	m := c.newMachine(t)
-	const loginUser = "sbx"
+	const loginUser = "umiak"
 	sshd := sshdtest.New(t, c.env.Keys.UserCA.PublicKey(), loginUser)
 	m.ServeSSHD(sshd)
 
@@ -451,7 +451,7 @@ func TestSSHPrincipalsAcrossInstances(t *testing.T) {
 			Timeout:         testenv.WaitTimeout,
 		})
 	}
-	certX := loginCert(t, c, "sb_X", "sbx:user:usr_1")
+	certX := loginCert(t, c, "sb_X", "umiak:user:usr_1")
 
 	t.Run("cert for X used for Y", func(t *testing.T) {
 		for _, front := range []*testenv.Inst{c.A, c.B} {
@@ -470,7 +470,7 @@ func TestSSHPrincipalsAcrossInstances(t *testing.T) {
 			if n == nrec {
 				t.Fatalf("via %s: no new request recorded", front.Name)
 			}
-			if r.Sandbox != slugY || r.Certificate == nil || r.Certificate.Principal != "sb_X" || r.Certificate.KeyID != "sbx:user:usr_1" {
+			if r.Sandbox != slugY || r.Certificate == nil || r.Certificate.Principal != "sb_X" || r.Certificate.KeyID != "umiak:user:usr_1" {
 				t.Fatalf("via %s: api got %+v (certificate %+v)", front.Name, r, r.Certificate)
 			}
 		}
@@ -509,14 +509,14 @@ func TestSSHPrincipalsAcrossInstances(t *testing.T) {
 			if len(bc.ValidPrincipals) != 1 || bc.ValidPrincipals[0] != loginUser {
 				t.Fatalf("backend certificate principals %q, want only %q", bc.ValidPrincipals, loginUser)
 			}
-			if !strings.HasPrefix(bc.KeyId, "sbx:user:usr_1:") {
+			if !strings.HasPrefix(bc.KeyId, "umiak:user:usr_1:") {
 				t.Fatalf("backend certificate KeyId %q", bc.KeyId)
 			}
 		}
 	})
 
 	t.Run("bad KeyId refused before api", func(t *testing.T) {
-		for _, keyID := range []string{"sbx:user:usr_1\nsbx:key:key_1", "sbx:user:usr_1\n", "sbx:user:", "sbx:key:"} {
+		for _, keyID := range []string{"umiak:user:usr_1\numiak:key:key_1", "umiak:user:usr_1\n", "umiak:user:", "umiak:key:"} {
 			before := c.env.API.Calls("AuthorizeSSH")
 			if cl, err := dial(c.A, slugX, loginCert(t, c, "sb_X", keyID)); err == nil {
 				_ = cl.Close()

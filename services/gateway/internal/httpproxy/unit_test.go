@@ -97,16 +97,16 @@ func TestForwardedHeader(t *testing.T) {
 	cases := []struct {
 		ip, host, want string
 	}{
-		{"203.0.113.5", "app-3000.sbx.test", "for=203.0.113.5;proto=https;host=app-3000.sbx.test"},
-		{"2001:db8::1", "app-3000.sbx.test", `for="[2001:db8::1]";proto=https;host=app-3000.sbx.test`},
-		{"203.0.113.5", "app-3000.sbx.test:443", `for=203.0.113.5;proto=https;host="app-3000.sbx.test:443"`},
+		{"203.0.113.5", "app-3000.umiak.test", "for=203.0.113.5;proto=https;host=app-3000.umiak.test"},
+		{"2001:db8::1", "app-3000.umiak.test", `for="[2001:db8::1]";proto=https;host=app-3000.umiak.test`},
+		{"203.0.113.5", "app-3000.umiak.test:443", `for=203.0.113.5;proto=https;host="app-3000.umiak.test:443"`},
 	}
 	for _, c := range cases {
 		if got := forwardedHeader(netip.MustParseAddr(c.ip), c.host); got != c.want {
 			t.Errorf("forwardedHeader(%s, %s) = %q, want %q", c.ip, c.host, got, c.want)
 		}
 	}
-	if got := forwardedHeader(netip.Addr{}, "h.sbx.test"); got != "for=unknown;proto=https;host=h.sbx.test" {
+	if got := forwardedHeader(netip.Addr{}, "h.umiak.test"); got != "for=unknown;proto=https;host=h.umiak.test" {
 		t.Errorf("forwardedHeader(invalid) = %q", got)
 	}
 }
@@ -144,7 +144,7 @@ func isULID(s string) bool {
 func TestStripRequestHeaders(t *testing.T) {
 	h := http.Header{}
 	drop := []string{
-		"Sbx-Foo", "Sbx-Port-Token", "X-Sbx-User-Email", "X-Sbx-Anything",
+		"Umiak-Foo", "Umiak-Port-Token", "X-Umiak-User-Email", "X-Umiak-Anything",
 		"X-Auth-Request-Email", "X-Auth-Request-User", "X-Auth-Request-Groups",
 		"X-Forwarded-Email", "X-Forwarded-User", "X-Forwarded-Groups",
 		"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", "X-Real-Ip",
@@ -155,16 +155,16 @@ func TestStripRequestHeaders(t *testing.T) {
 	for _, k := range drop {
 		h.Set(k, "v")
 	}
-	h["sbx-lower"] = []string{"v"} // a non-canonical key
+	h["umiak-lower"] = []string{"v"} // a non-canonical key
 	// Underscore spellings: CGI-style servers map them to the same variable.
 	for _, k := range []string{
-		"X_Sbx_User_Email", "Sbx_Foo", "X_Forwarded_For", "X_Forwarded_Email", "X_Real_Ip",
+		"X_Umiak_User_Email", "Umiak_Foo", "X_Forwarded_For", "X_Forwarded_Email", "X_Real_Ip",
 		"X_Auth_Request_Email", "X_forwarded_host", "X_Forwarded_Proto", "X_Forwarded_Port",
 		"True_Client_Ip", "Cf_Connecting_Ip", "X_Original_Forwarded_For", "X_Request_Id",
 	} {
 		h[k] = []string{"v"}
 	}
-	keep := []string{"Authorization", "X-Sbxish", "Sbxfoo", "X-Forwarded-Prefix", "Cookie"}
+	keep := []string{"Authorization", "X-Umiakish", "Umiakfoo", "X-Forwarded-Prefix", "Cookie"}
 	for _, k := range keep {
 		h.Set(k, "v")
 	}
@@ -192,41 +192,41 @@ func contains(s []string, v string) bool {
 
 func TestCleanResponseHeader(t *testing.T) {
 	h := http.Header{}
-	h.Add("Set-Cookie", "__Host-sbx_auth=x; Path=/; Secure")
-	h.Add("Set-Cookie", "__host-SBX_auth=y")
-	h.Add("Set-Cookie", " __Host-sbx_state_abcdefgh=z")
-	h.Add("Set-Cookie", "__HOST-SBX_STATE=z")
+	h.Add("Set-Cookie", "__Host-umiak_auth=x; Path=/; Secure")
+	h.Add("Set-Cookie", "__host-UMIAK_auth=y")
+	h.Add("Set-Cookie", " __Host-umiak_state_abcdefgh=z")
+	h.Add("Set-Cookie", "__HOST-UMIAK_STATE=z")
 	h.Add("Set-Cookie", "keep=1; Path=/")
-	h.Add("Set-Cookie", "__Host-sbx_authx=2")
-	h.Add("Set-Cookie", "=__Host-sbx_auth=v; Path=/")
-	h.Add("Set-Cookie", "= __host-SBX_STATE_x=1")
+	h.Add("Set-Cookie", "__Host-umiak_authx=2")
+	h.Add("Set-Cookie", "=__Host-umiak_auth=v; Path=/")
+	h.Add("Set-Cookie", "= __host-UMIAK_STATE_x=1")
 	h.Add("Set-Cookie", "=other")
-	h.Set("Sbx-Error", "fake")
-	h.Set("Sbx-Instance-Url", "http://x")
-	h["sbx-lower"] = []string{"1"}
+	h.Set("Umiak-Error", "fake")
+	h.Set("Umiak-Instance-Url", "http://x")
+	h["umiak-lower"] = []string{"1"}
 	h.Set("Alt-Svc", `h3=":443"`)
-	h.Set("X-Sbx-App", "1")
+	h.Set("X-Umiak-App", "1")
 	h.Set("X-Request-Id", "app")
-	h.Set("X-Sbx-User-Email", "forged@example.com")
-	h["x-sbx-user_email"] = []string{"forged@example.com"}
+	h.Set("X-Umiak-User-Email", "forged@example.com")
+	h["x-umiak-user_email"] = []string{"forged@example.com"}
 	cleanResponseHeader(h)
-	if got := h.Values("Set-Cookie"); len(got) != 3 || got[0] != "keep=1; Path=/" || got[1] != "__Host-sbx_authx=2" || got[2] != "=other" {
+	if got := h.Values("Set-Cookie"); len(got) != 3 || got[0] != "keep=1; Path=/" || got[1] != "__Host-umiak_authx=2" || got[2] != "=other" {
 		t.Fatalf("Set-Cookie = %q", got)
 	}
-	// X-Sbx-User-Email is the gateway's identity header (spec 8.4): an app
+	// X-Umiak-User-Email is the gateway's identity header (spec 8.4): an app
 	// must not make a client believe the gateway set it.
-	for _, k := range []string{"Sbx-Error", "Sbx-Instance-Url", "sbx-lower", "Alt-Svc", "X-Request-Id", "X-Sbx-User-Email", "x-sbx-user_email"} {
+	for _, k := range []string{"Umiak-Error", "Umiak-Instance-Url", "umiak-lower", "Alt-Svc", "X-Request-Id", "X-Umiak-User-Email", "x-umiak-user_email"} {
 		if _, ok := h[k]; ok {
 			t.Errorf("%s kept", k)
 		}
 	}
-	if h.Get("X-Sbx-App") != "1" {
-		t.Error("X-Sbx-App dropped; only Sbx-* is the gateway's on responses")
+	if h.Get("X-Umiak-App") != "1" {
+		t.Error("X-Umiak-App dropped; only Umiak-* is the gateway's on responses")
 	}
 }
 
 func TestSanitizeTrailers(t *testing.T) {
-	tr := http.Header{"Sbx-X": {"1"}, "X-Ok": {"2"}}
+	tr := http.Header{"Umiak-X": {"1"}, "X-Ok": {"2"}}
 	if sanitizeTrailers(tr) {
 		t.Fatal("small trailers reported as dropped")
 	}

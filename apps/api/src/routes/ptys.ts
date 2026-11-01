@@ -1,6 +1,6 @@
 // PTY routes (S7 §6, §10): create a PTY command (Idempotency-Key, agent
 // capability process.pty), resize it, and connect to it over a WebSocket
-// with the subprotocol sbx.pty.v1 (protocol: commands/pty-socket.ts).
+// with the subprotocol umiak.pty.v1 (protocol: commands/pty-socket.ts).
 // Before the upgrade, refusals are HTTP errors with the envelope:
 // authentication 401, Origin on proxied and scopes 403, the subprotocol
 // 400, the open-connection cap 429, shutdown 503. Everything checked after
@@ -104,7 +104,7 @@ const createPtyRoute = createRoute({
 		200: {
 			...jsonResponse(CommandSchema, "Repeat with the same Idempotency-Key"),
 			headers: {
-				"Sbx-Command-Id": {
+				"Umiak-Command-Id": {
 					description: "Id (`cmd_...`) of the command",
 					schema: { type: "string" as const },
 				},
@@ -117,7 +117,7 @@ const createPtyRoute = createRoute({
 		201: {
 			...jsonResponse(CommandSchema, "The started PTY command"),
 			headers: {
-				"Sbx-Command-Id": {
+				"Umiak-Command-Id": {
 					description: "Id (`cmd_...`) of the command",
 					schema: { type: "string" as const },
 				},
@@ -164,7 +164,7 @@ const connectPtyRoute = createRoute({
 	operationId: "ptys.connect",
 	summary: "Connect to a terminal (WebSocket)",
 	description:
-		"WebSocket upgrade with the subprotocol `sbx.pty.v1` (required). Server → client: " +
+		"WebSocket upgrade with the subprotocol `umiak.pty.v1` (required). Server → client: " +
 		"binary frames are consecutive PTY output bytes; text frames are JSON: " +
 		'`{"type":"attached","offset":N}` first, `{"type":"truncated","availableFrom":N}`, ' +
 		'`{"type":"exit",...}` (as in NDJSON), `{"type":"error","code","message","retryable",' +
@@ -178,17 +178,17 @@ const connectPtyRoute = createRoute({
 		"(reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; " +
 		"`tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other requests; " +
 		"in the browser (dashboard origin) the session, with `Origin` checked and `?team=` " +
-		"instead of the Sbx-Team header.",
+		"instead of the Umiak-Team header.",
 	tags: TAGS,
 	middleware: [requireScope("commands:exec")] as const,
 	request: { params: CommandParams, query: PtyConnectQuery },
 	responses: {
 		101: {
 			description:
-				"Switching Protocols: the WebSocket with the subprotocol sbx.pty.v1",
+				"Switching Protocols: the WebSocket with the subprotocol umiak.pty.v1",
 		},
 		400: errorResponse(
-			"`validation`: the subprotocol sbx.pty.v1 was not offered, or a bad query",
+			"`validation`: the subprotocol umiak.pty.v1 was not offered, or a bad query",
 		),
 		426: errorResponse("`upgrade_required`: not a WebSocket upgrade"),
 		429: errorResponse(
@@ -196,7 +196,7 @@ const connectPtyRoute = createRoute({
 		),
 		...ERROR_RESPONSES,
 	},
-	"x-sbx-websocket": { subprotocol: PTY_SUBPROTOCOL },
+	"x-umiak-websocket": { subprotocol: PTY_SUBPROTOCOL },
 });
 
 function ptyPlan(b: CreatePtyBody): StartPlan {
@@ -247,7 +247,7 @@ export function registerPtyRoutes(app: ApiApp, deps: ApiDeps): void {
 			idemKey,
 		);
 		const headers: Record<string, string> = {
-			"Sbx-Command-Id": publicCommandId(r.command.id),
+			"Umiak-Command-Id": publicCommandId(r.command.id),
 		};
 		if (r.replayed) headers[IDEMPOTENCY_REPLAYED_HEADER] = "true";
 		return c.json(

@@ -13,24 +13,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // These tests need root and systemd as PID 1 (the container of
-// test/linux). SBX_AGENT_BIN points at the sbx-agent binary that runs the
-// shim; by default the installed current/sbx-agent.
+// test/linux). UMIAK_AGENT_BIN points at the umiak-agent binary that runs the
+// shim; by default the installed current/umiak-agent.
 
 func agentBin(t *testing.T) string {
 	t.Helper()
-	bin := os.Getenv("SBX_AGENT_BIN")
+	bin := os.Getenv("UMIAK_AGENT_BIN")
 	if bin == "" {
-		bin = filepath.Join(paths.Default().CurrentLink, "sbx-agent")
+		bin = filepath.Join(paths.Default().CurrentLink, "umiak-agent")
 	}
 	if _, err := os.Stat(bin); err != nil {
-		t.Fatalf("sbx-agent binary: %v (set SBX_AGENT_BIN)", err)
+		t.Fatalf("umiak-agent binary: %v (set UMIAK_AGENT_BIN)", err)
 	}
 	return bin
 }
@@ -214,7 +214,7 @@ func TestSystemdLaunchStartFailed(t *testing.T) {
 	e := newIT(t)
 	id := uniqueID(t)
 	// The shim records the start failure and sends READY=1: Launch succeeds.
-	e.launchArgv(t, id, []string{"/nonexistent/sbx-no-such-binary"})
+	e.launchArgv(t, id, []string{"/nonexistent/umiak-no-such-binary"})
 	x := e.waitExit(t, id)
 	if x.Code != 127 || x.Reason != shimproto.ReasonStartFailed || x.StartFailed == "" {
 		t.Fatalf("exit = %+v", x)

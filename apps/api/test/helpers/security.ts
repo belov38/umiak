@@ -3,8 +3,8 @@
 // which machines it was called for, and a dump of a team's stored state.
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { encodeUuid, SCOPES, type Scope } from "@sbx/auth";
-import { insertOperation, insertSavedSnapshot } from "@sbx/core/testing";
+import { encodeUuid, SCOPES, type Scope } from "@umiak/auth";
+import { insertOperation, insertSavedSnapshot } from "@umiak/core/testing";
 import type pg from "pg";
 import {
 	type AgentApi,

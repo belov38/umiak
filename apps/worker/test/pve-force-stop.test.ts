@@ -1,20 +1,20 @@
 // Opt-in live check of the forced Windows fork (S9 §24.8) on the host `pve`:
 // the real worker operations (create, fork with forceStop, stop, the fork
 // target's create, delete) over the real Proxmox adapter, with the agent
-// reached through QGA (`sbx-agent call` over the guest agent instead of the
+// reached through QGA (`umiak-agent call` over the guest agent instead of the
 // tunnel; no gateway or tunnel is needed). Skipped unless
-// SBX_PVE_FORCE_STOP=1:
+// UMIAK_PVE_FORCE_STOP=1:
 //
-//   SBX_PVE_FORCE_STOP=1 pnpm --filter @sbx/worker exec vitest run test/pve-force-stop.test.ts
+//   UMIAK_PVE_FORCE_STOP=1 pnpm --filter @umiak/worker exec vitest run test/pve-force-stop.test.ts
 //
 // Host rules: VMIDs 580-589 only, one 4 GB Windows VM at a time (the source
 // is stopped before the fork boots, a `qm list` check before each start),
 // template 598 is cloned only.
 // Everything made is deleted at the end.
 //
-// Env: SBX_PVE_URL (default https://100.64.10.2:8006), SBX_PVE_TLS_NAME
-// (pve), SBX_NODE_SSH_HOST (100.64.10.2), SBX_SECRETS_DIR (~/.config/sbx),
-// SBX_FORCE_STOP_TEMPLATE (598).
+// Env: UMIAK_PVE_URL (default https://100.64.10.2:8006), UMIAK_PVE_TLS_NAME
+// (pve), UMIAK_NODE_SSH_HOST (100.64.10.2), UMIAK_SECRETS_DIR (~/.config/umiak),
+// UMIAK_FORCE_STOP_TEMPLATE (598).
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
@@ -33,10 +33,10 @@ import {
 	type Transport,
 	type UnaryResponse,
 } from "@connectrpc/connect";
-import type { AgentClient } from "@sbx/agent-client";
-import { ingestAgentEvents, isSbxError } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import { Qga } from "@sbx/pve";
+import type { AgentClient } from "@umiak/agent-client";
+import { ingestAgentEvents, isUmiakError } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
+import { Qga } from "@umiak/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConnectAgentPort } from "../src/adapters/agent-connect.ts";
 import {
@@ -57,20 +57,20 @@ import {
 	snapshotsOf,
 } from "./helpers/ops.ts";
 
-const LIVE = process.env.SBX_PVE_FORCE_STOP === "1";
+const LIVE = process.env.UMIAK_PVE_FORCE_STOP === "1";
 const SECRETS_DIR =
-	process.env.SBX_SECRETS_DIR ?? join(homedir(), ".config", "sbx");
-const SSH_HOST = process.env.SBX_NODE_SSH_HOST ?? "100.64.10.2";
-const PVE_URL = process.env.SBX_PVE_URL ?? "https://100.64.10.2:8006";
-const TLS_NAME = process.env.SBX_PVE_TLS_NAME ?? "pve";
-const TEMPLATE_VMID = Number(process.env.SBX_FORCE_STOP_TEMPLATE ?? 598);
+	process.env.UMIAK_SECRETS_DIR ?? join(homedir(), ".config", "umiak");
+const SSH_HOST = process.env.UMIAK_NODE_SSH_HOST ?? "100.64.10.2";
+const PVE_URL = process.env.UMIAK_PVE_URL ?? "https://100.64.10.2:8006";
+const TLS_NAME = process.env.UMIAK_PVE_TLS_NAME ?? "pve";
+const TEMPLATE_VMID = Number(process.env.UMIAK_FORCE_STOP_TEMPLATE ?? 598);
 const VMIDS = { min: 580, max: 589 };
 const WIN_MB = 4096;
 /** Sandbox VMs (500-599) running at once, other threads included. */
 const HOST_SANDBOX_RAM_MB = 8192;
 const STEP_TIMEOUT = 30 * 60_000;
-const AGENT_EXE = "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe";
-const MARKER_PATH = "C:\\sbx-force-stop.txt";
+const AGENT_EXE = "C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe";
+const MARKER_PATH = "C:\\umiak-force-stop.txt";
 
 const log = (s: string) =>
 	process.stderr.write(
@@ -129,7 +129,7 @@ async function vmidOfMachine(w: TestWorld, machineId: string): Promise<number> {
 	return vmid;
 }
 
-/** `sbx-agent call <method> -` through QGA: the agent's own admin socket. */
+/** `umiak-agent call <method> -` through QGA: the agent's own admin socket. */
 async function agentCall(
 	qga: Qga,
 	vmid: number,
@@ -260,7 +260,7 @@ class QgaSessions {
 			return (await agentCall(
 				this.qga,
 				vmid,
-				"sbx.agent.v1.System/Info",
+				"umiak.agent.v1.System/Info",
 				{},
 				20_000,
 			)) as Info;
@@ -435,7 +435,7 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 			`UPDATE runtime.template_builds SET pve_vmid = $2, os = 'windows' WHERE id = $1`,
 			[w.topo.templateBuildId, TEMPLATE_VMID],
 		);
-		const env = { ...process.env, SBX_NODE_SSH_HOST: SSH_HOST };
+		const env = { ...process.env, UMIAK_NODE_SSH_HOST: SSH_HOST };
 		const factory = pveClientsFromSecrets(SECRETS_DIR, env);
 		registry = new PveInfraRegistry(w.pool, {
 			secretsDir: SECRETS_DIR,
@@ -504,10 +504,10 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 					(v) => v.vmid >= VMIDS.min && v.vmid <= VMIDS.max,
 				);
 				const snaps = (await infra.listLvs()).filter((l) =>
-					l.tags.some((t) => t.startsWith("sbx-snap-")),
+					l.tags.some((t) => t.startsWith("umiak-snap-")),
 				);
 				log(
-					`after cleanup: VMs in range ${JSON.stringify(vms.map((v) => v.vmid))}, our leases left ${(await w.pool.query("SELECT count(*)::int AS n FROM runtime.vmid_leases WHERE provider_id = $1 AND purpose = 'machine'", [w.topo.providerId])).rows[0]?.n}, sbx-snap LVs ${JSON.stringify(snaps.map((l) => l.name))}`,
+					`after cleanup: VMs in range ${JSON.stringify(vms.map((v) => v.vmid))}, our leases left ${(await w.pool.query("SELECT count(*)::int AS n FROM runtime.vmid_leases WHERE provider_id = $1 AND purpose = 'machine'", [w.topo.providerId])).rows[0]?.n}, umiak-snap LVs ${JSON.stringify(snaps.map((l) => l.name))}`,
 				);
 				log(`marks: ${JSON.stringify(marks)}`);
 			}
@@ -546,7 +546,7 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 			} catch (err) {
 				refused = err;
 			}
-			expect(isSbxError(refused, "snapshot_requires_stop")).toBe(true);
+			expect(isUmiakError(refused, "snapshot_requires_stop")).toBe(true);
 			const r = refused as { message: string; details: unknown };
 			log(`without forceStop: ${r.message} ${JSON.stringify(r.details)}`);
 			expect(r.details).toEqual({
@@ -635,7 +635,7 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 				state: "failed",
 				consistency: null,
 			});
-			const lvTag = `sbx-snap-${failedSnap.lv_id as string}`;
+			const lvTag = `umiak-snap-${failedSnap.lv_id as string}`;
 			expect(
 				(await infra.listLvs()).filter((l) => l.tags.includes(lvTag)),
 			).toEqual([]);
@@ -659,7 +659,7 @@ describe.skipIf(!LIVE)("forced Windows fork on pve (S9 §24.8)", () => {
 			const tgtVmid = await vmidOfMachine(w, tgt.machine_id as string);
 			const tgtInfo = await sessions.info(tgtVmid);
 			log(`fork VM ${tgtVmid} hostname ${tgtInfo?.hostname}`);
-			expect(tgtInfo?.hostname?.toUpperCase()).toMatch(/^SBX/);
+			expect(tgtInfo?.hostname?.toUpperCase()).toMatch(/^UMIAK/);
 			expect(tgtInfo?.hostname).not.toBe(srcInfo?.hostname);
 
 			// 7. The unflushed file is in the fork, whole.

@@ -13,7 +13,7 @@ steps:
     20-docker,
     30-toolchains,
     40-coding-agents,
-    50-sbx-agent,
+    50-umiak-agent,
     60-desktop,
     90-cleanup,
   ]

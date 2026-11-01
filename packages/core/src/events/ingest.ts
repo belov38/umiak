@@ -1,4 +1,4 @@
-import { withTx } from "@sbx/db";
+import { withTx } from "@umiak/db";
 import type pg from "pg";
 import { type ValidationIssue, validation } from "../errors.ts";
 import type { JobSender } from "../jobs.ts";

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
@@ -98,7 +98,7 @@ func getEcho(t *testing.T, c *http.Client, req *http.Request) (echoed, http.Head
 	defer func() { _ = resp.Body.Close() }()
 	body := readBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d (%s), body %s", resp.StatusCode, resp.Header.Get("Sbx-Error"), body)
+		t.Fatalf("status = %d (%s), body %s", resp.StatusCode, resp.Header.Get("Umiak-Error"), body)
 	}
 	var e echoed
 	if err := json.Unmarshal([]byte(body), &e); err != nil {

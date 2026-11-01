@@ -8,7 +8,7 @@
 # A tool value is the first line of its version output, the resolved path for
 # the command -v tools, "missing" when the command is not found, or
 # "error: rc=<n> <first line>" when it fails.
-# SBX_VERIFY_MODE=tools prints only the TOOLS line (the build manifest).
+# UMIAK_VERIFY_MODE=tools prints only the TOOLS line (the build manifest).
 #
 # Check ids (spec 10 item): os kernel systemd (1); cmdline machine_id (2);
 # swap (3); listen_tcp listen_udp (4); sshd_config ssh_host_keys (5); pam (6);
@@ -201,7 +201,7 @@ check_network() {
 	# activated sshd creates only per connection.
 	install -d -m 0755 /run/sshd
 	sshd_t=$(sshd -T 2>&1)
-	for line in 'passwordauthentication no' 'trustedusercakeys /etc/ssh/sbx_user_ca.pub' 'listenaddress 127.0.0.1:22' 'listenaddress [::1]:22'; do
+	for line in 'passwordauthentication no' 'trustedusercakeys /etc/ssh/umiak_user_ca.pub' 'listenaddress 127.0.0.1:22' 'listenaddress [::1]:22'; do
 		grep -qxF "$line" <<<"$sshd_t" || ok=1
 	done
 	eff=$(grep -E '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|trustedusercakeys|listenaddress) ' <<<"$sshd_t" | tr '\n' ';')
@@ -217,11 +217,11 @@ check_network() {
 	report ssh_host_keys $? "boot $boot; keys: $keys${old:+; older than boot: ${old[*]}}"
 
 	ok=0
-	for line in 'session required pam_env.so readenv=1 envfile=/etc/sbx/env' 'session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env'; do
+	for line in 'session required pam_env.so readenv=1 envfile=/etc/umiak/env' 'session required pam_env.so readenv=1 envfile=/run/umiak/secrets/env'; do
 		grep -qxF "$line" /etc/pam.d/sshd || ok=1
 	done
-	[ -f /etc/sbx/env ] || ok=1
-	report pam $ok "$(grep -c pam_env.so /etc/pam.d/sshd) pam_env lines; /etc/sbx/env $([ -f /etc/sbx/env ] && echo exists || echo missing)"
+	[ -f /etc/umiak/env ] || ok=1
+	report pam $ok "$(grep -c pam_env.so /etc/pam.d/sshd) pam_env lines; /etc/umiak/env $([ -f /etc/umiak/env ] && echo exists || echo missing)"
 
 	local ci
 	ci=$(cloud-init status 2>&1 | tr '\n' ' ')
@@ -230,7 +230,7 @@ check_network() {
 
 	local np
 	np=$(ls /etc/netplan)
-	[ ! -e /etc/netplan/50-cloud-init.yaml ] && grep -q 'name: "en\*"' /etc/netplan/10-sbx.yaml &&
+	[ ! -e /etc/netplan/50-cloud-init.yaml ] && grep -q 'name: "en\*"' /etc/netplan/10-umiak.yaml &&
 		! grep -rq macaddress /etc/netplan
 	report netplan $? "files: $np"
 
@@ -305,11 +305,11 @@ check_users() {
 	report userns $? "unshare -Ur true as user: ${u:-ok}"
 
 	local left=()
-	[ -e /var/log/sbx-build ] && left+=(/var/log/sbx-build)
+	[ -e /var/log/umiak-build ] && left+=(/var/log/umiak-build)
 	compgen -G '/var/lib/cloud/instances/*' >/dev/null && left+=(/var/lib/cloud/instances/*)
 	[ -e /root/.bash_history ] && left+=(/root/.bash_history)
 	[ -e /home/user/.bash_history ] && left+=(/home/user/.bash_history)
-	[ -f /etc/sbx-template/build.json ] || left+=("no /etc/sbx-template/build.json")
+	[ -f /etc/umiak-template/build.json ] || left+=("no /etc/umiak-template/build.json")
 	local p
 	for p in /home/user/.local/state/gh/device-id /root/.local/state/gh/device-id \
 		/home/user/.config/go/telemetry /root/.config/go/telemetry \
@@ -332,7 +332,7 @@ check_users() {
 	initrd=/boot/initrd.img-$(uname -r)
 	imid=$(lsinitrd -f etc/machine-id "$initrd" 2>/dev/null)
 	ihost=$(lsinitrd -f etc/hostname "$initrd" 2>/dev/null)
-	[ -f "$initrd" ] && [ -z "$imid" ] && { [ -z "$ihost" ] || [ "$ihost" = sbx ]; }
+	[ -f "$initrd" ] && [ -z "$imid" ] && { [ -z "$ihost" ] || [ "$ihost" = umiak ]; }
 	report initrd $? "$initrd machine-id=[${imid}] hostname=[${ihost}]"
 
 	local label
@@ -342,7 +342,7 @@ check_users() {
 
 	local want host
 	want=$(printf '%s' "${MACHINE_ID:-}" | tr -d '-' | tr 'A-F' 'a-f')
-	want=sbx-${want: -12}
+	want=umiak-${want: -12}
 	host=$(hostname)
 	[ "$host" = "$want" ]
 	report hostname $? "hostname=$host want=$want"
@@ -384,7 +384,7 @@ TOOLS=(
 	"opencode|opencode --version"
 	"gemini|gemini --version"
 	"pnpm|pnpm --version"
-	"sbx|sbx --version"
+	"umiak|umiak --version"
 	"git|git --version"
 	"git-lfs|git-lfs --version"
 	"rg|rg --version"
@@ -450,7 +450,7 @@ print(json.dumps(tools, separators=(",", ":")))
 }
 
 main() {
-	if [ "${SBX_VERIFY_MODE:-}" != tools ]; then
+	if [ "${UMIAK_VERIFY_MODE:-}" != tools ]; then
 		check_system
 		check_network
 		check_users

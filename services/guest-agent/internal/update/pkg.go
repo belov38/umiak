@@ -21,7 +21,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // Package limits: total size of the regular files and number of entries.
@@ -35,7 +35,7 @@ type PackOptions struct {
 	// Version, OS and Arch go into the manifest.
 	Version, OS, Arch string
 	// Binary, TunnelCA and UpdateKeys are the paths of the files packed as
-	// sbx-agent (sbx-agent.exe for OS windows), trust/tunnel-ca.pem and
+	// umiak-agent (umiak-agent.exe for OS windows), trust/tunnel-ca.pem and
 	// trust/update-keys.pub.
 	Binary, TunnelCA, UpdateKeys string
 	// Key signs manifest.json.

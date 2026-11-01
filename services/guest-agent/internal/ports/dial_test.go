@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/agent"
 )
 
 func listen(t *testing.T, network, addr string) net.Listener {

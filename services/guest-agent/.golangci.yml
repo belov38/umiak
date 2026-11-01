@@ -19,6 +19,6 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/belov38/boat-dev-clone
+        - github.com/belov38/umiak
   exclusions:
     generated: lax

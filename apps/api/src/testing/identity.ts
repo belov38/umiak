@@ -14,7 +14,7 @@ import {
 	type SessionIdentity,
 	type TeamMembership,
 	type UserRecord,
-} from "@sbx/auth";
+} from "@umiak/auth";
 
 export interface TestKeySpec {
 	secret: string;

@@ -1,8 +1,12 @@
 // Route lookup of the gateway (S7 §12.1, S4 §6.1, S8 C7): the S4 shape plus
 // `kind`, public ids, policy decided here (blocked, public_disabled, the
 // sso epoch), 404 route_not_found with a top-level code.
-import { encodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ServiceTokens } from "../src/index.ts";
 import { mutableDefaults } from "./helpers/config.ts";
@@ -181,7 +185,7 @@ describe.skipIf(skipPg())("GET /internal/v1/gateway/routes/{label}", () => {
 			`${s.slug}-70000`,
 			`${s.slug.toUpperCase()}-3000`,
 			"api-3000",
-			"sbx-3000",
+			"umiak-3000",
 			`${s.slug}-desktop`,
 			"nolabel",
 		]) {

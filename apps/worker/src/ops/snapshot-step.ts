@@ -1,6 +1,10 @@
-import { DELETE_RETRY_LIMIT, windowsSnapshotRequiresStop } from "@sbx/core";
-import type { Tx } from "@sbx/db";
-import { FreezeTimeoutError, type QuiesceHook, retryOnVmLock } from "@sbx/pve";
+import { DELETE_RETRY_LIMIT, windowsSnapshotRequiresStop } from "@umiak/core";
+import type { Tx } from "@umiak/db";
+import {
+	FreezeTimeoutError,
+	type QuiesceHook,
+	retryOnVmLock,
+} from "@umiak/pve";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { insertDisks, loadSnapshot, snapshotRef } from "../db.ts";
@@ -188,7 +192,7 @@ async function discardLeftovers(
 	s: StepSnapshot,
 	vmid: number,
 ): Promise<void> {
-	const tag = `sbx-snap-${s.lv_id}`;
+	const tag = `umiak-snap-${s.lv_id}`;
 	const lvs = await infra.listLvs();
 	if (lvs.some((l) => l.tags.includes(tag))) {
 		await fenced.check();

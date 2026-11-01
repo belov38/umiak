@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Allocator, macFor, SqliteStateStore } from "@sbx/pve";
-import { FakeNode } from "@sbx/pve/testing";
+import { Allocator, macFor, SqliteStateStore } from "@umiak/pve";
+import { FakeNode } from "@umiak/pve/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup } from "../src/cleanup.ts";
 import type { Manifest } from "../src/manifest.ts";
@@ -29,7 +29,7 @@ function row(over: Partial<Manifest>): Manifest {
 		node: "pve",
 		storage: "local-lvm",
 		pveVmid: null,
-		vmName: "sbx-tpl-linux-20261030-1",
+		vmName: "umiak-tpl-linux-20261030-1",
 		gitCommit: "c",
 		recipeDigest: "d",
 		base: {
@@ -58,22 +58,22 @@ function row(over: Partial<Manifest>): Manifest {
 }
 
 async function setup() {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-cleanup-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-cleanup-"));
 	dirs.push(dir);
 	const log: string[] = [];
 	const pve = new BuildPve(log);
 	const node = new FakeNode(log);
 	const iso = [
-		"sbx-seed-old.iso",
-		`sbx-seed-${ID_FRESH}.iso`,
-		"sbx-seed-used.iso",
+		"umiak-seed-old.iso",
+		`umiak-seed-${ID_FRESH}.iso`,
+		"umiak-seed-used.iso",
 	];
 	node.handlers["media.list"] = () => ({
 		iso: iso.map((name) => ({ name, size: 1 })),
 		import: [
-			{ name: "sbx-ubuntu-26.04-minimal-1.qcow2", size: 1 },
-			{ name: "sbx-seed-old.raw", size: 1 },
-			{ name: `sbx-seed-${ID_FRESH}.raw`, size: 1 },
+			{ name: "umiak-ubuntu-26.04-minimal-1.qcow2", size: 1 },
+			{ name: "umiak-seed-old.raw", size: 1 },
+			{ name: `umiak-seed-${ID_FRESH}.raw`, size: 1 },
 		],
 	});
 	node.handlers["media.remove"] = (a) => ({ removed: a.names, missing: [] });
@@ -97,31 +97,31 @@ async function setup() {
 	// Failed build left running: removed.
 	addVm(
 		598,
-		{ name: "sbx-tpl-linux-20261029-1", tags: "sbx-tpl", memory: "4096" },
+		{ name: "umiak-tpl-linux-20261029-1", tags: "umiak-tpl", memory: "4096" },
 		"running",
 	);
 	// Finished template: stays. Proxmox returns `template` as a JSON number.
 	addVm(597, {
-		name: "sbx-tpl-linux-20261028-1",
-		tags: "sbx-tpl",
+		name: "umiak-tpl-linux-20261028-1",
+		tags: "umiak-tpl",
 		template: 1 as unknown as string,
 	});
 	// Build in progress (fresh registry row): stays, and so does its ISO.
 	addVm(596, {
-		name: "sbx-tpl-linux-20261030-2",
-		tags: "sbx-tpl",
-		ide2: `local:iso/sbx-seed-${ID_FRESH}.iso,media=cdrom`,
+		name: "umiak-tpl-linux-20261030-2",
+		tags: "umiak-tpl",
+		ide2: `local:iso/umiak-seed-${ID_FRESH}.iso,media=cdrom`,
 	});
 	// A kept failed build that is not ours by name: stays.
 	addVm(595, {
 		name: "something",
-		tags: "sbx-tpl",
-		ide2: "local:iso/sbx-seed-used.iso,media=cdrom",
+		tags: "umiak-tpl",
+		ide2: "local:iso/umiak-seed-used.iso,media=cdrom",
 	});
 	// A sandbox without the tag: stays.
-	addVm(500, { name: "sbx-m", tags: "sbx" }, "running");
+	addVm(500, { name: "umiak-m", tags: "umiak" }, "running");
 	// Outside the range: never touched.
-	addVm(9000, { name: "sbx-tpl-linux-x", tags: "sbx-tpl" });
+	addVm(9000, { name: "umiak-tpl-linux-x", tags: "umiak-tpl" });
 	for (const vmid of [598, 597, 596]) {
 		await store.tryInsert({
 			cluster: 1,
@@ -150,7 +150,7 @@ async function setup() {
 		row({
 			buildId: ID_FRESH,
 			version: "20261030.2",
-			vmName: "sbx-tpl-linux-20261030-2",
+			vmName: "umiak-tpl-linux-20261030-2",
 			pveVmid: 596,
 			startedAt: "2026-10-30T11:30:00.000Z",
 		}),
@@ -165,7 +165,7 @@ async function setup() {
 	);
 	const cfg = {
 		node: "pve",
-		pool: "sandbox",
+		pool: "umiak",
 		templateVmidRange: { min: 500, max: 598 },
 		templateVmid: 599,
 	};
@@ -202,7 +202,7 @@ describe("cleanup", () => {
 			{
 				op: "media.remove",
 				// The base image cache and the running build's seed stay.
-				args: { names: ["sbx-seed-old.iso", "sbx-seed-old.raw"] },
+				args: { names: ["umiak-seed-old.iso", "umiak-seed-old.raw"] },
 			},
 		]);
 
@@ -235,7 +235,7 @@ describe("cleanup", () => {
 		const s = await setup();
 		for (const vmid of [450, 599, 9000, 9001])
 			s.pve.vms.set(vmid, {
-				config: { name: `sbx-tpl-linux-x-${vmid}`, tags: "sbx-tpl" },
+				config: { name: `umiak-tpl-linux-x-${vmid}`, tags: "umiak-tpl" },
 				status: "running",
 				firewall: { rules: [], ipsets: {} },
 			});
@@ -275,11 +275,11 @@ describe("cleanup", () => {
 		const s = await setup();
 		s.node.handlers["media.list"] = () => ({
 			iso: [
-				`sbx-build-${ID_STALE}.iso`,
-				`sbx-offline-${ID_STALE}.iso`,
-				`sbx-build-${ID_FRESH}.iso`,
-				`sbx-offline-${ID_FRESH}.iso`,
-				"sbx-virtio-win-0.1.271.iso",
+				`umiak-build-${ID_STALE}.iso`,
+				`umiak-offline-${ID_STALE}.iso`,
+				`umiak-build-${ID_FRESH}.iso`,
+				`umiak-offline-${ID_FRESH}.iso`,
+				"umiak-virtio-win-0.1.271.iso",
 				"Windows11_Client_x64_en-gb_26300_9457.iso",
 			].map((name) => ({ name, size: 1 })),
 			import: [],
@@ -295,7 +295,7 @@ describe("cleanup", () => {
 		const removed = s.node.calls.filter((c) => c.op === "media.remove");
 		expect(removed.map((c) => c.args)).toEqual([
 			{
-				names: [`sbx-build-${ID_STALE}.iso`, `sbx-offline-${ID_STALE}.iso`],
+				names: [`umiak-build-${ID_STALE}.iso`, `umiak-offline-${ID_STALE}.iso`],
 			},
 		]);
 	});

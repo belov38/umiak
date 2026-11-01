@@ -1,7 +1,7 @@
 // Per-call context handed to every tool handler: the SDK client, the 50 s
 // deadline, pinned substitution, progress, cancel state, logger, User-Agent.
 import type { ServerContext } from "@modelcontextprotocol/server";
-import type { Sbx } from "@sbx/sdk";
+import type { Umiak } from "@umiak/sdk";
 import { type Deadline, RESPONSE_MARGIN_MS } from "./deadline.ts";
 import type { Logger } from "./log.ts";
 import type { ServerOptions } from "./server.ts";
@@ -9,13 +9,13 @@ import { MCP_VERSION } from "./version.ts";
 
 export interface ToolContext {
 	/** The SDK client; may throw ToolError not_logged_in. */
-	sbx(): Sbx;
+	umiak(): Umiak;
 	deadline: Deadline;
 	/** Spread into every SDK call; read at the call, so SDK retries end before the response margin. */
 	call: { signal: AbortSignal; retryBudgetMs: number };
 	/** The pinned sandbox in pinned mode, else `ref`. */
 	sandbox(ref: string): string;
-	/** Pinned mode (`sbx mcp --sandbox`): answers must not name hidden tools. */
+	/** Pinned mode (`umiak mcp --sandbox`): answers must not name hidden tools. */
 	pinned: boolean;
 	/** `notifications/progress`; a no-op when the request has no progressToken. Never throws. */
 	progress(progress: number, total?: number, message?: string): Promise<void>;
@@ -23,7 +23,7 @@ export interface ToolContext {
 	cancelledByClient(): boolean;
 	transport: "stdio" | "http";
 	log: Logger;
-	/** sbx-mcp/<version> (<client>/<version>; stdio|http) */
+	/** umiak-mcp/<version> (<client>/<version>; stdio|http) */
 	userAgent: string;
 }
 
@@ -45,13 +45,13 @@ export function userAgentOf(
 		client === undefined
 			? ""
 			: `${token(client.name)}/${token(client.version)}; `;
-	return `sbx-mcp/${MCP_VERSION} (${who}${transport})`;
+	return `umiak-mcp/${MCP_VERSION} (${who}${transport})`;
 }
 
 export interface ContextInit {
 	o: Pick<
 		ServerOptions,
-		"sbx" | "transport" | "log" | "pinnedSandbox" | "wasCancelledByClient"
+		"umiak" | "transport" | "log" | "pinnedSandbox" | "wasCancelledByClient"
 	>;
 	deadline: Deadline;
 	req: ServerContext;
@@ -64,11 +64,11 @@ export function createToolContext({
 	req,
 	client,
 }: ContextInit): ToolContext {
-	let sbx: Sbx | undefined;
+	let umiak: Umiak | undefined;
 	return {
-		sbx() {
-			sbx ??= o.sbx();
-			return sbx;
+		umiak() {
+			umiak ??= o.umiak();
+			return umiak;
 		},
 		deadline,
 		get call() {

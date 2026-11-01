@@ -5,7 +5,7 @@
 //
 // Everything runs in one Payload transaction: user rows are locked with
 // SELECT ... FOR UPDATE, writes go through the Local API with the same req
-// (hooks send NOTIFY sbx_identity in it). Concurrent first logins collide
+// (hooks send NOTIFY umiak_identity in it). Concurrent first logins collide
 // on the unique indexes of email and idpSubject; the loser retries and
 // finds the winner's row.
 import {
@@ -15,7 +15,7 @@ import {
 	type SessionIdentity,
 	type TeamMembership,
 	type UserRecord,
-} from "@sbx/auth";
+} from "@umiak/auth";
 import type { Payload, PayloadRequest } from "payload";
 import { relId } from "../hooks/doc.ts";
 import {
@@ -28,7 +28,7 @@ import {
 } from "./db.ts";
 
 export interface ResolveSessionOptions {
-	/** IdP groups that make a user an operator (SBX_OPERATOR_GROUPS). */
+	/** IdP groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
 	operatorGroups: readonly string[];
 	/**
 	 * Run in this request. With an open transaction the work joins it (the

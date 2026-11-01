@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import type { PgBoss, SendOptions } from "pg-boss";
 import type { QueueName } from "./queues.ts";
 

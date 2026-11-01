@@ -1,8 +1,8 @@
-// Test helpers of the api, exported as `@sbx/api/testing` (also used by the
+// Test helpers of the api, exported as `@umiak/api/testing` (also used by the
 // SDK and CLI tests that run the api in process).
-import { type EnvironmentStore, PgIdentityStore } from "@sbx/auth";
-import { StaticConfigReader } from "@sbx/config";
-import { RecordingJobSender, type SandboxService } from "@sbx/core";
+import { type EnvironmentStore, PgIdentityStore } from "@umiak/auth";
+import { StaticConfigReader } from "@umiak/config";
+import { RecordingJobSender, type SandboxService } from "@umiak/core";
 import type { Logger } from "pino";
 import { IdentityListener } from "../auth/identity-listener.ts";
 import { ServiceTokens } from "../auth/internal.ts";
@@ -32,14 +32,14 @@ export * from "./oidc-server.ts";
 
 /** A complete valid environment with test values (no files are read). */
 export const TEST_ENV: Readonly<Record<string, string>> = {
-	DATABASE_URL: "postgres://sbx:sbx@127.0.0.1:5432/sbx",
+	DATABASE_URL: "postgres://umiak:umiak@127.0.0.1:5432/umiak",
 	PAYLOAD_SECRET: "test-payload-secret-0123456789abcdef",
-	SBX_DATA_KEYS_FILE: "/nonexistent/data-keys.json",
-	SBX_API_CURSOR_KEY: Buffer.alloc(32, 7).toString("base64"),
-	SBX_API_SERVICE_TOKENS_FILE: "/nonexistent/service-tokens.json",
-	SBX_API_URL: "https://api.sbx.test",
-	SBX_APP_URL: "https://app.sbx.test",
-	SBX_SBX_DOMAIN: "sbx.test",
+	UMIAK_DATA_KEYS_FILE: "/nonexistent/data-keys.json",
+	UMIAK_API_CURSOR_KEY: Buffer.alloc(32, 7).toString("base64"),
+	UMIAK_API_SERVICE_TOKENS_FILE: "/nonexistent/service-tokens.json",
+	UMIAK_API_URL: "https://api.umiak.test",
+	UMIAK_APP_URL: "https://app.umiak.test",
+	UMIAK_PREVIEW_DOMAIN: "umiak.test",
 };
 
 /** Settings from TEST_ENV with overrides (env variable names). */
@@ -108,7 +108,7 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  * - identity: PgIdentityStore over `pool` if given, else `testIdentityStore`
  *   that knows `TEST_API_KEY` (all scopes, team `TEST_TEAM_ID`);
  * - identityEvents: without a notifier (never emits, ready);
- * - oidc: a verifier when the settings have SBX_OIDC_ISSUER;
+ * - oidc: a verifier when the settings have UMIAK_OIDC_ISSUER;
  * - serviceTokens: none accepted;
  * - svc: `unconfiguredService()`, jobs: a RecordingJobSender,
  *   config: an empty StaticConfigReader,

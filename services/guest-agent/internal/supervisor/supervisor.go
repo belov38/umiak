@@ -10,15 +10,15 @@ import (
 )
 
 // DefaultSlice is the slice of the command units.
-const DefaultSlice = "sbx-cmd.slice"
+const DefaultSlice = "umiak-cmd.slice"
 
 // DefaultCgroupRoot is the cgroup v2 mount point.
 const DefaultCgroupRoot = "/sys/fs/cgroup"
 
 // Unit name prefixes and suffix.
 const (
-	cmdUnitPrefix      = "sbx-cmd-"
-	watchdogUnitPrefix = "sbx-quiesce-watchdog-"
+	cmdUnitPrefix      = "umiak-cmd-"
+	watchdogUnitPrefix = "umiak-quiesce-watchdog-"
 	serviceSuffix      = ".service"
 	// maxUnitName is the longest unit name systemd accepts.
 	maxUnitName = 255
@@ -63,7 +63,7 @@ func (s UnitState) String() string {
 
 // Supervisor runs command shims and quiesce watchdogs.
 type Supervisor interface {
-	// Launch starts sbx-cmd-<id>.service running
+	// Launch starts umiak-cmd-<id>.service running
 	// `shimPath shim --id <id> extraArgs...` and returns once the shim sent
 	// READY=1 (the command started or its start failure is recorded) or the
 	// unit failed. It returns ErrUnitExists if the unit is still loaded.
@@ -82,7 +82,7 @@ type Supervisor interface {
 	// Stop stops the unit of command id and everything in it. It is meant
 	// for cleanup only; a missing unit is not an error.
 	Stop(ctx context.Context, id string) error
-	// StartWatchdog starts sbx-quiesce-watchdog-<leaseID>.service running
+	// StartWatchdog starts umiak-quiesce-watchdog-<leaseID>.service running
 	// argv. It returns ErrUnitExists if the unit is still loaded.
 	StartWatchdog(ctx context.Context, leaseID string, argv []string) error
 	// StopWatchdog stops the watchdog unit of leaseID; a missing unit is

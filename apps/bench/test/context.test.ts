@@ -4,7 +4,7 @@ import { type Ctx, RamGuard } from "../src/context.ts";
 
 function guard(capMb = 8192) {
 	const api = new FakePve();
-	const ctx = { api, cfg: { pool: "sandbox", node: "pve" } } as unknown as Ctx;
+	const ctx = { api, cfg: { pool: "umiak", node: "pve" } } as unknown as Ctx;
 	const vm = (vmid: number, status: "running" | "stopped", memory = 2048) =>
 		api.vms.set(vmid, {
 			config: { memory: String(memory) },

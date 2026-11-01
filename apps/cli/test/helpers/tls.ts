@@ -22,7 +22,7 @@ export interface TlsFront {
 }
 
 export async function startTlsFront(): Promise<TlsFront> {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-tls-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-tls-"));
 	const key = join(dir, "key.pem");
 	const cert = join(dir, "cert.pem");
 	execFileSync(
@@ -40,7 +40,7 @@ export async function startTlsFront(): Promise<TlsFront> {
 			"-days",
 			"1",
 			"-subj",
-			"/CN=sbx test CA",
+			"/CN=umiak test CA",
 			"-addext",
 			"subjectAltName=IP:127.0.0.1,DNS:localhost",
 		],

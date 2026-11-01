@@ -10,13 +10,13 @@ import { runS9 } from "./s9.ts";
 import { runAgentTestsOn } from "./win-agent-tests.ts";
 
 const USAGE = `usage:
-  sbx-bench preflight
-  sbx-bench s1 [--runs 3] [--size 2g] [--parallel 1,2,4] [--clone-only 8] [--ram-cap 8g] [--no-baseline] [--keep]
-  sbx-bench s3 [--skip-suite] [--keep]
-  sbx-bench s5 --template <vmid> [--baseline 599] [--runs 5] [--ram-cap 8g] [--keep]
-  sbx-bench s9 --template <vmid> [--runs 3] [--ram-cap 8g] [--connect-url <wss>] [--dev-cp-ssh <host>] [--keep]
-  sbx-bench s9 agent-tests --template <vmid> --dir <test binaries> [--run <regex>] [--ram-cap 8g] [--keep]
-  sbx-bench cleanup --all-sandbox-resources`;
+  umiak-bench preflight
+  umiak-bench s1 [--runs 3] [--size 2g] [--parallel 1,2,4] [--clone-only 8] [--ram-cap 8g] [--no-baseline] [--keep]
+  umiak-bench s3 [--skip-suite] [--keep]
+  umiak-bench s5 --template <vmid> [--baseline 599] [--runs 5] [--ram-cap 8g] [--keep]
+  umiak-bench s9 --template <vmid> [--runs 3] [--ram-cap 8g] [--connect-url <wss>] [--dev-cp-ssh <host>] [--keep]
+  umiak-bench s9 agent-tests --template <vmid> --dir <test binaries> [--run <regex>] [--ram-cap 8g] [--keep]
+  umiak-bench cleanup --all-sandbox-resources`;
 
 /** --runs: a positive integer. */
 export function parseRuns(v: string | undefined, fallback: number): number {

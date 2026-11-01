@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var defaultSections = []string{"guests", "lvs", "hashes", "sysctl", "sbx0", "vmfiles", "journalReaders"}
+var defaultSections = []string{"guests", "lvs", "hashes", "sysctl", "umiak0", "vmfiles", "journalReaders"}
 
 // slotVolumeRe matches the volumes of a guest by VMID: vm-<id>-disk-N, base-<id>-disk-N,
 // vm-<id>-cloudinit and the like.
@@ -62,7 +62,7 @@ func (s *Server) inventory(ctx context.Context, raw json.RawMessage) (any, error
 			v, err = s.hashes()
 		case "sysctl":
 			v, err = s.sysctl()
-		case "sbx0":
+		case "umiak0":
 			v, err = s.vnetLinkLocal()
 		case "vmfiles":
 			v, err = s.vmFiles()
@@ -164,9 +164,9 @@ func (s *Server) foreignLVs(ctx context.Context) (any, error) {
 	}
 	out := []row{}
 	for _, l := range all {
-		// LVs outside our pool: neither sandbox disks (sbx), nor templates (sbx-tpl), nor the
+		// LVs outside our pool: neither sandbox disks (umiak), nor templates (umiak-tpl), nor the
 		// volumes of a template build.
-		if !slices.Contains(l.Tags, "sbx") && !slices.Contains(l.Tags, "sbx-tpl") && !s.inTemplateSlot(l.Name) {
+		if !slices.Contains(l.Tags, "umiak") && !slices.Contains(l.Tags, "umiak-tpl") && !s.inTemplateSlot(l.Name) {
 			out = append(out, row{l.Name, l.SizeBytes, l.Attr})
 		}
 	}

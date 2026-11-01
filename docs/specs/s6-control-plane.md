@@ -35,7 +35,7 @@ S6 — TypeScript-ядро между публичным API (S7) и инфра�
 **Анти-цели (провал, даже если всё работает)**
 - Machine выдана второй sandbox или вернулась в пул после того, как к ней прикоснулся арендатор.
 - Секрет (env, secret-файлы, bootstrap secret) попал в логи, в данные заданий pg-boss, в `operations.request`, в снапшот или в метрики.
-- Reconciler удалил что-то, что не помечено нами (не в pool `sandbox`, без тега `sbx`, вне диапазона VMID).
+- Reconciler удалил что-то, что не помечено нами (не в pool `umiak`, без тега `umiak`, вне диапазона VMID).
 - Sandbox с запущенной командой или открытым PTY остановлена по простою.
 - Сумма RAM на ноде превысила лимит из-за гонки двух подов.
 
@@ -57,7 +57,7 @@ S6 — TypeScript-ядро между публичным API (S7) и инфра�
                  v                                 │         v              v
            Postgres: runtime.*, tunnel.*, pgboss.* ┘   packages/pve    packages/agent-client
                  ^                                     (S1: PVE API,   (S2: gateway -> agent)
-                 │ ConfigReader                          sbx-node)
+                 │ ConfigReader                          umiak-node)
            Payload Local API (payload.*)  — packages/config
 ```
 
@@ -89,8 +89,8 @@ S6 — TypeScript-ядро между публичным API (S7) и инфра�
 providers(                         -- one Proxmox cluster
   id uuid pk, kind text,           -- 'proxmox'
   name text unique,
-  cluster_mac_id smallint unique,  -- S1 SBX_CLUSTER_ID, byte 2 of the MAC
-  vmid_min int, vmid_max int,      -- S1 SBX_VMID_RANGE
+  cluster_mac_id smallint unique,  -- S1 UMIAK_CLUSTER_ID, byte 2 of the MAC
+  vmid_min int, vmid_max int,      -- S1 UMIAK_VMID_RANGE
   api_url text, tls_name text,
   secret_ref text,                 -- name of the mounted Secret dir with token and CA, never the secret itself
   state text,                      -- active | draining | disabled
@@ -101,7 +101,7 @@ nodes(
   state text,                       -- active | cordoned | down
   ram_cap_mb int,                   -- budget for sandboxes on this node (8192 in the PoC)
   clone_concurrency int,            -- S1 limit, default 4
-  node_agent_ref text,              -- sbx-node endpoint and Secret dir
+  node_agent_ref text,              -- umiak-node endpoint and Secret dir
   last_seen_at, created_at, updated_at,
   unique(provider_id, name))
 
@@ -114,7 +114,7 @@ storages(
   unique(provider_id, node_id, name))
 ```
 
-Строки топологии заводятся миграцией-сидом или CLI оператора (`sbx-admin` в `apps/worker`, §15). Секреты — только файлы из Kubernetes Secret по `secret_ref` (S1 §6.1).
+Строки топологии заводятся миграцией-сидом или CLI оператора (`umiak-admin` в `apps/worker`, §15). Секреты — только файлы из Kubernetes Secret по `secret_ref` (S1 §6.1).
 
 ### 5.2 Сборки шаблонов
 
@@ -190,7 +190,7 @@ disks(
 
 Триггер запрещает менять `machines.sandbox_id`, если он уже не `null`. Это и есть правило S2 «machine не переиспользуется».
 
-`disks` — зеркало того, что вернул драйвер (`DiskSet`, `SnapshotRef`). Reconciler сверяет его с `sbx-node lv.list`.
+`disks` — зеркало того, что вернул драйвер (`DiskSet`, `SnapshotRef`). Reconciler сверяет его с `umiak-node lv.list`.
 
 ### 5.5 Снапшоты
 
@@ -218,7 +218,7 @@ unique (team_id, name) where kind = 'saved' and state = 'ready'
 ```
 sandboxes(
   id uuid pk,
-  slug text unique,                 -- S4 §4.2 grammar, 3-40 chars, default three words (S7 §5.4); DNS label part, hostname sbx-<slug>
+  slug text unique,                 -- S4 §4.2 grammar, 3-40 chars, default three words (S7 §5.4); DNS label part, hostname umiak-<slug>
   team_id uuid, created_by uuid,    -- Payload ids
   name text null, labels jsonb,
   template_slug text, size_slug text,
@@ -306,7 +306,7 @@ commands(
 
 hosted_ports(
   id uuid pk, sandbox_id uuid, port int,
-  label text,                       -- '<slug>-<port>', DNS label for *.sbx.<domain>
+  label text,                       -- '<slug>-<port>', DNS label for *.umiak.<domain>
   mode text,                        -- token | sso | public
   token_hash bytea null,            -- sha256 of the access token (mode=token)
   auth_epoch int,                   -- bumped on token rotation, mode change, revoke
@@ -360,8 +360,8 @@ interface ConfigReader {
 }
 ```
 
-- Реализация `PayloadConfigReader` — Payload Local API (`getPayload({ config })`, без Next). Кэш в процессе на 10 s; сброс по `LISTEN sbx_config`. `NOTIFY sbx_config` шлют `afterChange`-хуки коллекций Payload (обязанность S8).
-- Payload-конфиг должен импортироваться из пакета без Next (обязанность S8, §16). До S8 используется `StaticConfigReader` с YAML-файлом (`SBX_CONFIG_FILE`).
+- Реализация `PayloadConfigReader` — Payload Local API (`getPayload({ config })`, без Next). Кэш в процессе на 10 s; сброс по `LISTEN umiak_config`. `NOTIFY umiak_config` шлют `afterChange`-хуки коллекций Payload (обязанность S8).
+- Payload-конфиг должен импортироваться из пакета без Next (обязанность S8, §16). До S8 используется `StaticConfigReader` с YAML-файлом (`UMIAK_CONFIG_FILE`).
 - Пользователи, команды, API-ключи читает S7; S6 получает уже проверенный `Principal { userId, teamId, apiKeyId?, scopes }`.
 
 ### 5.12 Миграции (решение master-сессии, касается и S2)
@@ -498,7 +498,7 @@ Machine из пула (`pool_key` не null) после claim теряет `pool
 - В одной транзакции: активная операция → `superseded` (`superseded_by` = delete), sandbox → `deleting`, вставка операции delete, задание `sandbox-op`.
 - Задание delete стоит в той же singleton-очереди и стартует, когда вытесненное задание выйдет. Вызовы S1 длятся секунды, а долгие ожидания проверяют `superseded` раз в 2 s (§7.1), поэтому delete ждёт не больше нескольких секунд.
 - Delete сам убирает всё, что успела создать вытесненная операция: он работает по фактическому состоянию (все machine с этим `sandbox_id` не в `deleted`, `progress` вытесненной операции, снапшоты `fork_source` с `consumer_sandbox_id` = эта sandbox, а также снапшоты в `creating` с `source_sandbox_id` = эта sandbox), а не по плану. Готовые `fork_source` чужих целей и saved snapshots переживают delete источника.
-- Шаги delete: `retire` (`tunnel_credentials.retired_at`), `stop` (S1 stop, сразу `power_observed = stopped`, чтобы освободить RAM для ждущих стартов), `destroy` (S1 `delete` с проверкой), `snapshots`, `ports` (`hosted_ports.deleted_at`, `NOTIFY sbx_routes`), `secrets` (удалить `sandbox_secrets`), `finish` (`deleted`).
+- Шаги delete: `retire` (`tunnel_credentials.retired_at`), `stop` (S1 stop, сразу `power_observed = stopped`, чтобы освободить RAM для ждущих стартов), `destroy` (S1 `delete` с проверкой), `snapshots`, `ports` (`hosted_ports.deleted_at`, `NOTIFY umiak_routes`), `secrets` (удалить `sandbox_secrets`), `finish` (`deleted`).
 - Если цель fork ещё ждёт родителя, её delete просто вытесняет `pending`-операцию: родитель увидит это и после `ready` снапшота удалит его сам, раз цель уже `deleting`.
 
 ### 7.3 Create
@@ -521,8 +521,8 @@ Sandbox `creating`, `sandbox_secrets` (зашифрованные env и фай�
 | `provision` (только cold) | §7.4, включая проверку RAM и start | machine не в `allocating`/`provisioning` |
 | `boot` (только cold) | ждать подключения и фазы агента `pool_ready` (не дольше `boot_timeout_s`) | machine подключена, фаза получена |
 | `rotate_token` | `POST /v1/machines/{id}/rotate-token` на gateway (S2 §5.2) | идемпотентно само |
-| `claim` | `System/Claim{reason: claim, sandboxId, hostname: sbx-<slug>, env, secrets, secretFiles, authorizedKeys}` с `requestId`; ждать ответа с фазой `ready`; записать `provisioned_boot_id` | `requestId` агента |
-| `finish` | machine → `running`, sandbox → `ready`, `ready_at`, `deadline_at = now + ttl`, `sandbox_events`, `NOTIFY sbx_routes` | состояние |
+| `claim` | `System/Claim{reason: claim, sandboxId, hostname: umiak-<slug>, env, secrets, secretFiles, authorizedKeys}` с `requestId`; ждать ответа с фазой `ready`; записать `provisioned_boot_id` | `requestId` агента |
+| `finish` | machine → `running`, sandbox → `ready`, `ready_at`, `deadline_at = now + ttl`, `sandbox_events`, `NOTIFY umiak_routes` | состояние |
 
 Ошибки:
 - Агент недоступен — временная ошибка (повтор по S2 до 30 s на вызов, затем повтор задания).
@@ -555,7 +555,7 @@ Durable-маркер шага — состояние machine: `allocating`/`prov
 | `prepare` | Best effort, 10 s: `System/PrepareStop` (агент сбрасывает буферы и стирает секреты). Только подтверждение `secret_files_wiped = true` снимает `machines.secret_files_on_disk`; недоступность, timeout или `false` сохраняют флаг |
 | `shutdown` | S1 `shutdown(timeout 60 s Linux / 300 s Windows, S9 §24.9)`; если VM не выключилась — S1 `stop` (жёстко, `progress.shutdown = hard`). Задача, не взявшая VM lock (`can't lock file … got timeout`, qmeventd после stop и быстрого start), гостя не спрашивала: повтор (`retryOnVmLock`), а не hard stop |
 | `verify` | статус VM `stopped` |
-| `finish` | machine → `stopped`, sandbox → `stopped`, `stopped_at`, `stop_reason`; команды этой machine в `starting`/`running` → `lost`; `NOTIFY sbx_routes` |
+| `finish` | machine → `stopped`, sandbox → `stopped`, `stopped_at`, `stop_reason`; команды этой machine в `starting`/`running` → `lost`; `NOTIFY umiak_routes` |
 
 S1 `stop` во всех путях worker (stop, recover, delete, компенсация, reconcile, аварийная остановка после failed thaw) повторяется через `retryOnVmLock`: 5 попыток с паузами 10 s покрывают 30 s очистки старого QEMU в qmeventd. Power lock освобождается между попытками, перед каждой заново проверяются fence вызывающей операции (если есть) и исходный владелец VMID; при ожидании fence проверяется каждые 2 s. Смена владельца или попытки прекращает повторы.
 
@@ -634,7 +634,7 @@ Snapshot после restart тоже использует `retryOnVmLock` (5 п�
 | stop | 3 min | 7 min (shutdown до 300 s + PrepareStop, повторы VM lock, verify; S9 §24.9) |
 | resume, recover | 5 min | 15 min |
 | save_snapshot | 5 min | 5 min; с `forceStop` + 7 min (stop), после снапшота как у fork |
-| delete | без дедлайна: повторы с backoff до 10 min; через 30 min метрика тревоги `sbx_delete_stuck` | то же |
+| delete | без дедлайна: повторы с backoff до 10 min; через 30 min метрика тревоги `umiak_delete_stuck` | то же |
 
 Время загрузки до готовности агента берётся из `template_builds.boot_timeout_s`.
 
@@ -676,7 +676,7 @@ node_clone_slots(node_id, slot int, holder text null, expires_at null, primary k
 
 `place(templateSlug, sizeMb)`: ноды провайдеров `active`, нода `active`, есть `active`-сборка шаблона на этой ноде, хранилище ниже порогов (S1: data 80%, metadata 70%), admission проходит. Из подходящих — с наибольшей свободной RAM [решение S6]. Fork, resume и create из saved snapshot привязаны к ноде своих дисков. В PoC нода одна.
 
-Каждая нода получает свой экземпляр клиентов `packages/pve` (PVE API провайдера и `sbx-node` ноды) из реестра в worker по `providers`/`nodes` и файлам Secret.
+Каждая нода получает свой экземпляр клиентов `packages/pve` (PVE API провайдера и `umiak-node` ноды) из реестра в worker по `providers`/`nodes` и файлам Secret.
 
 ### 8.5 Квоты
 
@@ -737,7 +737,7 @@ RETURNING *;
 | `disconnected` (синт.) | ничего сразу; правило degraded — контроллер `health` (§11.1) |
 | `agent_restarted` (синт.) | запись в журнал; команды живы (S2); повторная доставка секретов даже без смены `boot_id` |
 | `rebooted` (синт.) | `last_reboot_at`; команды этой machine с прошлым `boot_id` → `lost`; если sandbox `ready`, нет активной операции и новый `boot_id` (из `tunnel_sessions`) ≠ `provisioned_boot_id` → `reprovision` |
-| `identity_changed` (синт.) | ожидается только при первом подключении fork-цели или VM из снапшота; иначе метрика тревоги `sbx_unexpected_identity_change` |
+| `identity_changed` (синт.) | ожидается только при первом подключении fork-цели или VM из снапшота; иначе метрика тревоги `umiak_unexpected_identity_change` |
 | `phase{pool_ready \| ready \| secrets_missing}` | `pool_ready` → machine `warm` (если ждёт); `secrets_missing` текущего boot сохраняет запрос повторной доставки, даже если boot уже provisioned (§7.8) |
 | `command.exited{commandId, status, code, signal, stdoutEnd, stderrEnd}` | терминальный статус команды, если ещё не терминальный |
 | `pty.closed{commandId}` | статус команды PTY |
@@ -761,12 +761,12 @@ RETURNING *;
 
 ### 11.2 Контроллер `reconcile` (раз в 60 s на провайдера)
 
-Читает: VM из `/cluster/resources` в pool `sandbox`, `sbx-node lv.list` (теги `sbx`), `vmid_leases`, `machines`, `disks`, `snapshots`. Ничего, что не в pool `sandbox`, без тега `sbx` или вне диапазона VMID, не трогает (защиты S1 дублируются в коде). Grace для «свежих» объектов — 10 min (дольше любого шага подготовки).
+Читает: VM из `/cluster/resources` в pool `umiak`, `umiak-node lv.list` (теги `umiak`), `vmid_leases`, `machines`, `disks`, `snapshots`. Ничего, что не в pool `umiak`, без тега `umiak` или вне диапазона VMID, не трогает (защиты S1 дублируются в коде). Grace для «свежих» объектов — 10 min (дольше любого шага подготовки).
 
 | Расхождение | Действие |
 |---|---|
 | VM в pool без строки machine (или machine `deleted`), старше grace | S1 `delete(vmid)`, метрика `orphan_vm` |
-| LV `sbx-vm-N` без VM и без machine/disk; LV `sbx-snap-<id>` без снапшота в `creating`/`ready`, старше grace | `lv.remove`, метрика `orphan_lv` |
+| LV `umiak-vm-N` без VM и без machine/disk; LV `umiak-snap-<id>` без снапшота в `creating`/`ready`, старше grace | `lv.remove`, метрика `orphan_lv` |
 | machine не в `allocating`/`provisioning`/`deleting`/`deleted`, а VM нет, активной операции нет | machine `failed` (`lost`); sandbox этой machine → `error` (`machine_lost`) (§6.1) |
 | machine `running`, VM выключена, активной операции нет | §11.3 |
 | machine `stopped`, а VM работает (запустили руками) | S1 `shutdown`, метрика `power_drift` |
@@ -775,7 +775,7 @@ RETURNING *;
 | операция `running`/`pending` дольше дедлайна + 5 min без задания pg-boss в работе | заново поставить задание (обработчик сам выполнит компенсацию по дедлайну) |
 | `pending`-операция старше 1 min без задания, без активного родителя (`parent_operation_id`) | заново поставить задание (если родитель активен, обработчик всё равно выйдет, §7.1) |
 
-Режим `SBX_RECONCILE_DRY_RUN=1` только пишет, что сделал бы. В PoC первый запуск — в этом режиме.
+Режим `UMIAK_RECONCILE_DRY_RUN=1` только пишет, что сделал бы. В PoC первый запуск — в этом режиме.
 
 ### 11.3 Неожиданное выключение
 
@@ -804,8 +804,8 @@ VM machine в `running` выключена без нашей операции (�
 
 - **Где хранятся.** Env, секреты и secret-файлы sandbox (из create, fork, resume и `PUT`/`PATCH /env`, S7 §8.3) хранятся в `sandbox_secrets` в виде одного зашифрованного блоба `{env, secrets, secretFiles}`.
 - **Шифрование.** AES-256-GCM через `node:crypto`, случайный 96-битный nonce на запись, AAD = `sandbox:<sandboxId>:v<keyVersion>`.
-- **Ключи.** Кольцо из Kubernetes Secret, файл `SBX_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Ротация: новый ключ сначала раздаётся всем репликам `api` и `worker` как не-`current` (каждая уже может им расшифровать и проверить hash), затем становится `current`; контроллер `cleanup` перешифровывает строки со старой версией; старый ключ убирается, когда строк с ним ноль (метрика) **и** с ротации прошло не меньше 24 h (срок идемпотентности, см. ниже).
-- **Hash тела запроса.** Тела create, fork и resume содержат значения env и секретов, поэтому `idempotency_keys.request_hash` и `operations.request.bodyHash` — не голый sha256, а `версия ключа (uint32 BE) || HMAC-SHA256(подключ, scope "\n" каноническое тело)`; подключ — HKDF-SHA256 от ключа данных этой версии (`info = sbx-request-hash/v1`). Сравнение пересчитывает HMAC на версии из сохранённого hash, поэтому ротация в пределах 24 h не ломает повтор с тем же `Idempotency-Key`. Отсюда правило удаления ключа выше (ноль строк и не раньше 24 h после ротации): hash, чей ключ уже убран, не совпадает ни с чем (`idempotency_key_reused`, дубля нет).
+- **Ключи.** Кольцо из Kubernetes Secret, файл `UMIAK_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Ротация: новый ключ сначала раздаётся всем репликам `api` и `worker` как не-`current` (каждая уже может им расшифровать и проверить hash), затем становится `current`; контроллер `cleanup` перешифровывает строки со старой версией; старый ключ убирается, когда строк с ним ноль (метрика) **и** с ротации прошло не меньше 24 h (срок идемпотентности, см. ниже).
+- **Hash тела запроса.** Тела create, fork и resume содержат значения env и секретов, поэтому `idempotency_keys.request_hash` и `operations.request.bodyHash` — не голый sha256, а `версия ключа (uint32 BE) || HMAC-SHA256(подключ, scope "\n" каноническое тело)`; подключ — HKDF-SHA256 от ключа данных этой версии (`info = umiak-request-hash/v1`). Сравнение пересчитывает HMAC на версии из сохранённого hash, поэтому ротация в пределах 24 h не ломает повтор с тем же `Idempotency-Key`. Отсюда правило удаления ключа выше (ноль строк и не раньше 24 h после ротации): hash, чей ключ уже убран, не совпадает ни с чем (`idempotency_key_reused`, дубля нет).
 - **Доставка.** Секреты передаются агенту при каждом claim, resume, recover и reprovision (`System/Claim`). В госте они живут только в tmpfs (Linux) или в каталоге с ACL SYSTEM (Windows) и стираются при stop (S3).
 - **Fork.** Наследует env и секреты источника: расшифровка, наложение значений из запроса (§7.7) и шифрование с AAD цели. Saved snapshot секретов не несёт.
 - **Delete.** Строка `sandbox_secrets` удаляется (crypto-erase для этой sandbox).
@@ -819,7 +819,7 @@ VM machine в `running` выключена без нашей операции (�
 
 ### 13.3 Прочее
 
-- Worker — единственный компонент с токеном PVE и SSH-ключом `sbx-node` (Kubernetes Secret, S1 §6.1). `api` их не получает.
+- Worker — единственный компонент с токеном PVE и SSH-ключом `umiak-node` (Kubernetes Secret, S1 §6.1). `api` их не получает.
 - Внутренние ручки `api` (`/internal/v1/*`) — только с service token (S2 §5.5) и только из сети кластера (NetworkPolicy, S12).
 - Reconciler и cleanup удаляют только помеченное нами (§11.2).
 
@@ -843,7 +843,7 @@ interface SandboxService {
   deleteSavedSnapshot(p: Principal, name: string): Promise<void>
   listSavedSnapshots(p: Principal): Promise<SavedSnapshot[]>
   getOperation(p: Principal, id: string): Promise<Operation>
-  waitForState(id: string, states: SandboxState[], timeoutMs: number): Promise<Sandbox> // LISTEN sbx_sandboxes
+  waitForState(id: string, states: SandboxState[], timeoutMs: number): Promise<Sandbox> // LISTEN umiak_sandboxes
   // commands, files, ports
   resolveAgentTarget(p: Principal, id: string): Promise<{ machineId: string; capabilities: string[] }> // throws sandbox_not_ready
   createCommand(p: Principal, id: string, spec: CommandSpec): Promise<Command>   // row before Process/Start
@@ -855,16 +855,16 @@ interface SandboxService {
 }
 ```
 
-Доменные ошибки (`SbxError{code, retryable, details}`), которые S7 отображает в HTTP: `not_found`, `invalid_state` (с текущим `state`), `operation_in_progress` (retryable, `operationId`), `out_of_capacity` (retryable, `retryAfterSeconds`), `pool_exhausted` (retryable, `retryAfterSeconds`; create с `failFast`, §7.3), `quota_exceeded`, `idempotency_key_reused` (тот же ключ, другое тело), `template_unavailable`, `snapshot_not_found`, `sandbox_not_ready`, `recover_rate_limited`, `validation`.
+Доменные ошибки (`UmiakError{code, retryable, details}`), которые S7 отображает в HTTP: `not_found`, `invalid_state` (с текущим `state`), `operation_in_progress` (retryable, `operationId`), `out_of_capacity` (retryable, `retryAfterSeconds`), `pool_exhausted` (retryable, `retryAfterSeconds`; create с `failFast`, §7.3), `quota_exceeded`, `idempotency_key_reused` (тот же ключ, другое тело), `template_unavailable`, `snapshot_not_found`, `sandbox_not_ready`, `recover_rate_limited`, `validation`.
 
 Идемпотентность: тот же `(principal, scope, key)` с тем же hash тела → сохранённый ответ (та же sandbox и операция); с другим hash → `idempotency_key_reused`; параллельный дубль ждёт коммита первого (уникальный ключ в транзакции). Срок 24 h. Повтор без ключа создаёт новую sandbox.
 
-`NOTIFY sbx_sandboxes '<sandboxId>'` шлёт триггер при смене `state` или `health`, для long-poll в S7 и дашборда S8.
+`NOTIFY umiak_sandboxes '<sandboxId>'` шлёт триггер при смене `state` или `health`, для long-poll в S7 и дашборда S8.
 
 ### 14.2 S4 (gateway): маршруты и SSH
 
 - `core.routes.lookup(label)` и ручка `GET /internal/v1/routes/{label}` в `api` → `{sandboxId, machineId, port, mode, tokenHash, authEpoch, state}`. `state` — состояние sandbox: gateway сам решает, что показать для не-`ready` (страница «остановлена» и т.п.). Метка — `<slug>-<port>`; slug по грамматике S4 §4.2 не заканчивается на `-<цифры>`, поэтому номер порта — всё после последнего `-`.
-- `NOTIFY sbx_routes '<label>'` при изменении `hosted_ports`; при смене `state` или `machine_id` sandbox — по одному уведомлению на каждую её метку (триггеры).
+- `NOTIFY umiak_routes '<label>'` при изменении `hosted_ports`; при смене `state` или `machine_id` sandbox — по одному уведомлению на каждую её метку (триггеры).
 - `POST /internal/v1/ssh/authorize {sandbox, user, publicKeyFingerprint}` → `{allowed, machineId, state}`. S6 даёт разрешение sandbox и её состояние; проверка ключа против ключей пользователя и прав на sandbox — S7/S8 (ключи и доступы в Payload).
 - Обмен SSO-кода для режима `sso` — S7/S8, не S6.
 
@@ -872,7 +872,7 @@ interface SandboxService {
 
 ### 14.3 S5: регистрация сборок
 
-S5 пишет `template_builds` (через `sbx-admin template register|promote` или прямую вставку в миграции): `template_slug`, `version`, `node`, `pve_vmid`, `disk_layout`, `hw`, `agent_version`, `boot_timeout_s`; затем `promote` (старая `active` → `deprecated`). Пул обновится сам (§9.4).
+S5 пишет `template_builds` (через `umiak-admin template register|promote` или прямую вставку в миграции): `template_slug`, `version`, `node`, `pve_vmid`, `disk_layout`, `hw`, `agent_version`, `boot_timeout_s`; затем `promote` (старая `active` → `deprecated`). Пул обновится сам (§9.4).
 
 ### 14.4 S8: что S6 ждёт от Payload
 
@@ -893,7 +893,7 @@ S5 пишет `template_builds` (через `sbx-admin template register|promote
 - Задание операции — только триггер; источник правды — строка `operations`. Повторная доставка безопасна (§7.1).
 - **Fencing.** Singleton и heartbeat pg-boss не защищают от зависшего пода, который потерял связь с БД, но ещё ходит в Proxmox: задание вернётся, и исполнителей станет два. Поэтому каждый обработчик при старте увеличивает счётчик (`operations.attempt`, `machines.exec_attempt` для `machine-op`) и пишет каждый шаг условно по своему значению (§7.1). Старый исполнитель на первой же записи получает ноль строк и выходит. Его вызов Proxmox в полёте безвреден: шаги идемпотентны, аллокатор выдаёт одной machine один lease (§5.3), а частичная подготовка выбрасывается при повторе (§7.4).
 - **Блокировка питания ноды** (2026-10-30). Proxmox start, stop, запрос shutdown, delete и откат create/fork в S1 (`MachinesOptions.powerLock`) на одной ноде идут по одному: сначала очередь в процессе (не больше одного ожидающего клиента пула на ноду), затем `pg_advisory_lock` по ключу `power:<nodeId>` на отдельном соединении. Причина — гонка записи `ethers` и IPAM при параллельных start/delete (S1 §12). Блокировка никогда не берётся внутри транзакции БД. Под ней, после ожидания и прямо перед вызовом Proxmox, идут проверка владельца S1 (§16) и колбэк вызывающего: у start — повторная проверка fence (исполнитель, вытесненный за время ожидания, VM не запускает), у reconcile (§11.2, расхождение питания) — повторная проверка, что machine не изменилась. Ожидание завершения shutdown гостем идёт уже вне блокировки. Клоны (create, fork) под неё не попадают и идут параллельно в пределах слотов (§8.3).
-- Задание в dead letter означает исчерпанные повторы: операция → `failed` с `error_code = retries_exhausted` и компенсацией, метрика тревоги. Для delete dead letter не используется: `retryLimit` без предела, alert по `sbx_delete_stuck`.
+- Задание в dead letter означает исчерпанные повторы: операция → `failed` с `error_code = retries_exhausted` и компенсацией, метрика тревоги. Для delete dead letter не используется: `retryLimit` без предела, alert по `umiak_delete_stuck`.
 - **Контроллеры.** Каждый контроллер — очередь `exclusive` (не больше одного ждущего или активного задания во всём кластере). Задание в конце ставит себя снова с `startAfter` (10 s пул и health, 15 s autostop, 60 s reconcile, 10 min cleanup). Страховка — cron pg-boss раз в минуту на каждую очередь (`exclusive` отбрасывает дубль). Выбор лидера не нужен.
 - **Heartbeat.** Долгие шаги (ожидание загрузки, shutdown) идут в заданиях с `heartbeatSeconds 30`. Если под умер, задание вернётся через ~30 s, и шаги продолжатся с последнего записанного.
 
@@ -903,9 +903,9 @@ S5 пишет `template_builds` (через `sbx-admin template register|promote
 - `localConcurrency` на под: `sandbox-op` 16, `machine-op` 8, `snapshot-op` 4, `machine-events` 8, контроллеры 1. Общая нагрузка на Proxmox ограничена слотами клонирования (§8.3), а не числом подов.
 - SIGTERM: `boss.stop({ graceful: true, timeout: 60_000 })`, `terminationGracePeriodSeconds: 90`. Незавершённые задания вернутся по heartbeat; шаги идемпотентны.
 - Readiness: pg-boss запущен и Postgres отвечает. Liveness: цикл событий не завис.
-- Пул соединений: `pg` Pool на под, 30 соединений по умолчанию (`SBX_DB_POOL_MAX`; было 20 до блокировки питания) (pg-boss и Drizzle делят один пул через адаптер) [решение S6]. Блокировка питания (§15.1) держит по одному соединению на ноду и ещё одно берёт под ней (проверки владельца и fence), поэтому размер пула (`SBX_DB_POOL_MAX`) должен заметно превышать число нод.
+- Пул соединений: `pg` Pool на под, 30 соединений по умолчанию (`UMIAK_DB_POOL_MAX`; было 20 до блокировки питания) (pg-boss и Drizzle делят один пул через адаптер) [решение S6]. Блокировка питания (§15.1) держит по одному соединению на ноду и ещё одно берёт под ней (проверки владельца и fence), поэтому размер пула (`UMIAK_DB_POOL_MAX`) должен заметно превышать число нод.
 
-### 15.3 `sbx-admin`
+### 15.3 `umiak-admin`
 
 CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordon|uncordon`, `template register|promote`, `pool status`, `reconcile --dry-run`, `op retry <id>`, `machine delete <id>`. Нужен в PoC до S8.
 
@@ -943,9 +943,9 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
 - **S4.** Использует §14.2. Счётчик `tcpStreams` даёт агент (он сервер CONNECT), gateway ничего для activity не шлёт.
 - **S5.** Регистрирует сборки (§14.3). Шаблон содержит агента и qemu-guest-agent.
 - **S7.** Строит HTTP поверх `SandboxService`; создаёт `commands` до `Process/Start`; вызывает `touchApiActivity`; выставляет внутренние ручки §10.1 и §14.2; формат id и ошибок.
-- **S8.** Коллекции: Templates (`slug`, `os`, `enabled`, `defaultSize`, `allowedSizes`), Sizes (`slug`, `vcpu`, `memoryMb`), PoolTargets, Quotas (на команду), PlatformDefaults (глобальная настройка); `afterChange`-хуки шлют `NOTIFY sbx_config`; Payload-конфиг экспортируется пакетом без Next, чтобы `api` и `worker` вызывали `getPayload`. Публичные SSH-ключи пользователя для `authorizedKeys`.
+- **S8.** Коллекции: Templates (`slug`, `os`, `enabled`, `defaultSize`, `allowedSizes`), Sizes (`slug`, `vcpu`, `memoryMb`), PoolTargets, Quotas (на команду), PlatformDefaults (глобальная настройка); `afterChange`-хуки шлют `NOTIFY umiak_config`; Payload-конфиг экспортируется пакетом без Next, чтобы `api` и `worker` вызывали `getPayload`. Публичные SSH-ключи пользователя для `authorizedKeys`.
 - **S9.** Дедлайны Windows (§7.9), `boot_timeout_s`, snapshot Windows только из остановленной VM с `forceStop` (§7.8, S9 §24.8) и защита secret-файлов saved snapshot (§7.8).
-- **S12.** Deployment `worker` (2 реплики, grace 90 s), Secret с ключами данных (`SBX_DATA_KEYS_FILE`), Secret PVE и `sbx-node`, NetworkPolicy для `/internal/v1/*`, Postgres 18.
+- **S12.** Deployment `worker` (2 реплики, grace 90 s), Secret с ключами данных (`UMIAK_DATA_KEYS_FILE`), Secret PVE и `umiak-node`, NetworkPolicy для `/internal/v1/*`, Postgres 18.
 
 ## 17. Библиотеки
 
@@ -978,7 +978,7 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
 - **Auto-stop.** Idle не срабатывает при `runningCommands > 0`, при открытом PTY, при `tcpStreams > 0`, при свежем вызове API и при недоступном агенте; TTL срабатывает всегда.
 - **Reconcile.** Внедрённые сироты (VM, LV, lease `releasing`) убираются; чужие объекты (VM вне pool, LV без тега) не трогаются.
 
-**E2E на `pve`** (после S3, S4, S5): сценарий `sbx-bench s6` в `apps/bench`:
+**E2E на `pve`** (после S3, S4, S5): сценарий `umiak-bench s6` в `apps/bench`:
 - пул заполняется;
 - create из пула → exec → stop → resume → exec;
 - fork работающей sandbox: маркер-файл на месте, идентичность новая;
@@ -1002,7 +1002,7 @@ CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordo
 
 - Раскладка файлов внутри пакетов, генерация id (`uuidv7()` в БД или в коде), формат канонического тела для hash идемпотентности.
 - Тестовая инфраструктура Postgres (testcontainers, сервис CI или PGlite для unit, если pg-boss и Drizzle работают с ней одинаково).
-- Библиотеки логов и метрик (`pino`, `prom-client` или OTel SDK) — последние стабильные; список метрик: размер пула по паре и состоянию, длительность и исход операций по виду, причины ошибок, занятая RAM и лимит по ноде, действия reconcile, число `degraded`, глубина очередей pg-boss, отставание обработки событий, `sbx_delete_stuck`.
+- Библиотеки логов и метрик (`pino`, `prom-client` или OTel SDK) — последние стабильные; список метрик: размер пула по паре и состоянию, длительность и исход операций по виду, причины ошибок, занятая RAM и лимит по ноде, действия reconcile, число `degraded`, глубина очередей pg-boss, отставание обработки событий, `umiak_delete_stuck`.
 
 ## 21. Ответы на открытые вопросы (master-сессия, 2026-10-29)
 

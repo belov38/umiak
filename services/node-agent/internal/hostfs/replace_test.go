@@ -25,7 +25,7 @@ func TestReplaceLockedRewritesFile(t *testing.T) {
 	if string(got) != "a\n" || st.Mode().Perm() != 0o644 {
 		t.Errorf("content %q mode %v", got, st.Mode().Perm())
 	}
-	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(p), ".ethers.sbx-*")); len(left) > 0 {
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(p), ".ethers.umiak-*")); len(left) > 0 {
 		t.Error("temp file left behind")
 	}
 }

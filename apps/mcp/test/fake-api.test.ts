@@ -1,7 +1,7 @@
 // The fake API of the MCP contract tests: every request and response is
 // checked against apps/api/openapi/v1.json (and the S10 desktop fragment).
 import { createHash } from "node:crypto";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	EMIT_UNIT,
@@ -204,7 +204,7 @@ describe("auth and teams", () => {
 		expect(api.contractErrors).toEqual([]);
 	});
 
-	it("selects the team of a person by Sbx-Team", async () => {
+	it("selects the team of a person by Umiak-Team", async () => {
 		api.tokens.set("t_two", {
 			kind: "oidc",
 			scopes: ["sandboxes:read", "sandboxes:write"],
@@ -212,7 +212,7 @@ describe("auth and teams", () => {
 			teams: [OTHER_TEAM],
 		});
 		const own = await createReady();
-		const other = { "Sbx-Team": OTHER_TEAM };
+		const other = { "Umiak-Team": OTHER_TEAM };
 		const me = await call("GET", "/v1/me", { token: "t_two", headers: other });
 		expect(me.status).toBe(200);
 		expect(me.json.team.id).toBe(OTHER_TEAM);
@@ -232,36 +232,36 @@ describe("auth and teams", () => {
 		expect(seen.status).toBe(200);
 		const stranger = await call("GET", "/v1/me", {
 			token: "t_two",
-			headers: { "Sbx-Team": "team_nobody" },
+			headers: { "Umiak-Team": "team_nobody" },
 		});
 		expect(stranger.status).toBe(403);
 		expect(stranger.json.error.code).toBe("team_forbidden");
 		const malformed = await call("GET", "/v1/me", {
 			token: "t_two",
-			headers: { "Sbx-Team": "nope" },
+			headers: { "Umiak-Team": "nope" },
 		});
 		expect(malformed.status).toBe(400);
 		expect(malformed.json.error.code).toBe("validation");
 		expect(api.contractErrors).toEqual([]);
 	});
 
-	it("rejects a team key with another team in Sbx-Team", async () => {
+	it("rejects a team key with another team in Umiak-Team", async () => {
 		const same = await call("GET", "/v1/me", {
-			headers: { "Sbx-Team": FAKE_TEAM },
+			headers: { "Umiak-Team": FAKE_TEAM },
 		});
 		expect(same.status).toBe(200);
 		const other = await call("GET", "/v1/me", {
-			headers: { "Sbx-Team": OTHER_TEAM },
+			headers: { "Umiak-Team": OTHER_TEAM },
 		});
 		expect(other.status).toBe(403);
 		expect(other.json.error).toMatchObject({
 			code: "team_forbidden",
-			message: "the API key belongs to another team than Sbx-Team",
+			message: "the API key belongs to another team than Umiak-Team",
 		});
 		// A bad credential is a 401 whatever the team says.
 		const bad = await call("GET", "/v1/me", {
 			token: "nope",
-			headers: { "Sbx-Team": "nope" },
+			headers: { "Umiak-Team": "nope" },
 		});
 		expect(bad.status).toBe(401);
 		expect(api.contractErrors).toEqual([]);
@@ -705,7 +705,7 @@ describe("sandboxes", () => {
 		expect(api.contractErrors).toEqual([]);
 	});
 
-	it("deletes only with a matching Sbx-Confirm-Delete (id or slug)", async () => {
+	it("deletes only with a matching Umiak-Confirm-Delete (id or slug)", async () => {
 		const id = await createReady({ slug: "doomed" });
 		const none = await call("DELETE", sbPath(id));
 		expect(none.status).toBe(428);
@@ -714,13 +714,13 @@ describe("sandboxes", () => {
 			details: { reason: "missing" },
 		});
 		const wrong = await call("DELETE", sbPath(id), {
-			headers: { "Sbx-Confirm-Delete": "sb_other" },
+			headers: { "Umiak-Confirm-Delete": "sb_other" },
 		});
 		expect(wrong.status).toBe(428);
 		expect(wrong.json.error.details.reason).toBe("mismatch");
 		expect(api.state.sandboxes.get(id)?.state).toBe("ready");
 		const ok = await call("DELETE", "/v1/sandboxes/doomed", {
-			headers: { "Sbx-Confirm-Delete": "doomed" },
+			headers: { "Umiak-Confirm-Delete": "doomed" },
 		});
 		expect(ok.status).toBe(202);
 		expect(ok.json.sandbox.state).toBe("deleting");
@@ -730,7 +730,7 @@ describe("sandboxes", () => {
 		expect((await call("GET", sbPath(id))).json.state).toBe("deleted");
 		expect((await call("GET", "/v1/sandboxes/doomed")).status).toBe(404);
 		const repeat = await call("DELETE", sbPath(id), {
-			headers: { "Sbx-Confirm-Delete": id },
+			headers: { "Umiak-Confirm-Delete": id },
 		});
 		expect(repeat.status).toBe(200);
 		expect(repeat.json.operation).toBeNull();
@@ -742,8 +742,8 @@ describe("sandboxes", () => {
 	});
 
 	it("drives a full SDK scenario with no contract error", async () => {
-		const sbx = new Sbx({ baseUrl: api.url, apiKey: FAKE_TOKENS.full });
-		const sb = await sbx.sandboxes.create(
+		const umiak = new Umiak({ baseUrl: api.url, apiKey: FAKE_TOKENS.full });
+		const sb = await umiak.sandboxes.create(
 			{ template: "linux" },
 			{ wait: true },
 		);
@@ -758,15 +758,15 @@ describe("sandboxes", () => {
 		expect(names).toEqual(["a.txt"]);
 		const hosted = await sb.ports.host(3000);
 		expect(hosted.access).toBe("token");
-		expect(hosted.token).toMatch(/^sbxp_/);
+		expect(hosted.token).toMatch(/^umiakp_/);
 		expect((await sb.ports.list()).hosted).toHaveLength(1);
 		await sb.ports.unhost(3000);
 		await sb.stop({ wait: true });
-		expect((await sbx.sandboxes.get(sb.id)).data.state).toBe("stopped");
+		expect((await umiak.sandboxes.get(sb.id)).data.state).toBe("stopped");
 		await sb.delete({ wait: true });
-		expect((await sbx.me()).auth.kind).toBe("team_key");
-		expect(await sbx.limits()).toHaveProperty("quota");
-		expect((await sbx.templates()).length).toBe(3);
+		expect((await umiak.me()).auth.kind).toBe("team_key");
+		expect(await umiak.limits()).toHaveProperty("quota");
+		expect((await umiak.templates()).length).toBe(3);
 		expect(api.contractErrors).toEqual([]);
 		expect(api.journal).toContain(`DELETE /v1/sandboxes/${sb.id}`);
 	});
@@ -784,7 +784,7 @@ describe("commands", () => {
 		expect(emitPattern(40).toString()).toBe(EMIT_UNIT + EMIT_UNIT);
 	});
 
-	it("streams started, output and exit with Sbx-Command-Id and base64", async () => {
+	it("streams started, output and exit with Umiak-Command-Id and base64", async () => {
 		const id = await ready();
 		const r = await call("POST", `${sbPath(id)}/commands`, {
 			body: {
@@ -798,7 +798,7 @@ describe("commands", () => {
 		const fs = frames(r);
 		expect(fs[0]).toMatchObject({ type: "started", encoding: "base64" });
 		expect(fs[0]?.replayed).toBeUndefined();
-		expect(r.headers.get("Sbx-Command-Id")).toBe(fs[0]?.commandId);
+		expect(r.headers.get("Umiak-Command-Id")).toBe(fs[0]?.commandId);
 		const data = Buffer.concat(
 			fs
 				.filter((f) => f.type === "stdout")
@@ -959,7 +959,7 @@ describe("commands", () => {
 		expect(api.contractErrors).toEqual([]);
 	});
 
-	it("reads output by offsets with Sbx headers, truncation and 416", async () => {
+	it("reads output by offsets with Umiak headers, truncation and 416", async () => {
 		const id = await ready();
 		const c = await call("POST", `${sbPath(id)}/commands`, {
 			body: { command: "fake:emit 100:100:0", mode: "detached" },
@@ -968,19 +968,19 @@ describe("commands", () => {
 		const all = await call("GET", `${cmdPath}/output`);
 		expect(all.headers.get("content-type")).toBe("application/octet-stream");
 		expect(all.bytes).toEqual(new Uint8Array(emitPattern(100)));
-		expect(all.headers.get("Sbx-Offset")).toBe("0");
-		expect(all.headers.get("Sbx-Next-Offset")).toBe("100");
-		expect(all.headers.get("Sbx-Stream-End")).toBe("100");
+		expect(all.headers.get("Umiak-Offset")).toBe("0");
+		expect(all.headers.get("Umiak-Next-Offset")).toBe("100");
+		expect(all.headers.get("Umiak-Stream-End")).toBe("100");
 		const part = await call("GET", `${cmdPath}/output?offset=10&limit=20`);
 		expect(part.bytes).toEqual(
 			new Uint8Array(emitPattern(100).subarray(10, 30)),
 		);
-		expect(part.headers.get("Sbx-Next-Offset")).toBe("30");
+		expect(part.headers.get("Umiak-Next-Offset")).toBe("30");
 		commandOf(c.json.id).availableFrom.stdout = 50;
 		const trunc = await call("GET", `${cmdPath}/output?offset=10`);
-		expect(trunc.headers.get("Sbx-Truncated")).toBe("true");
-		expect(trunc.headers.get("Sbx-Offset")).toBe("50");
-		expect(trunc.headers.get("Sbx-Available-From")).toBe("50");
+		expect(trunc.headers.get("Umiak-Truncated")).toBe("true");
+		expect(trunc.headers.get("Umiak-Offset")).toBe("50");
+		expect(trunc.headers.get("Umiak-Available-From")).toBe("50");
 		expect((await call("GET", `${cmdPath}/output?offset=101`)).status).toBe(
 			416,
 		);
@@ -1148,8 +1148,8 @@ describe("commands", () => {
 	});
 
 	it("cuts a stream once with breakStreamAfterBytes; the SDK reconnects without losing bytes", async () => {
-		const sbx = new Sbx({ baseUrl: api.url, apiKey: FAKE_TOKENS.full });
-		const sb = await sbx.sandboxes.create({}, { wait: true });
+		const umiak = new Umiak({ baseUrl: api.url, apiKey: FAKE_TOKENS.full });
+		const sb = await umiak.sandboxes.create({}, { wait: true });
 		api.script.breakStreamAfterBytes = 3000;
 		const run = sb.run("fake:emit 20000:1000:0", { encoding: "base64" });
 		const parts: Uint8Array[] = [];
@@ -1537,7 +1537,7 @@ describe("ports", () => {
 			appProtocol: "http1",
 			blocked: false,
 		});
-		expect(first.json.token).toMatch(/^sbxp_/);
+		expect(first.json.token).toMatch(/^umiakp_/);
 		expect(first.json.urlWithToken).toBe(
 			`${first.json.url}/?_token=${first.json.token}`,
 		);
@@ -1548,7 +1548,7 @@ describe("ports", () => {
 		expect(sso.json.access).toBe("sso");
 		expect(sso.json.token).toBeUndefined();
 		const back = await put(3000, { access: "token" });
-		expect(back.json.token).toMatch(/^sbxp_/);
+		expect(back.json.token).toMatch(/^umiakp_/);
 		expect(back.json.token).not.toBe(first.json.token);
 		const fresh = await put(4000, { access: "public" });
 		expect(fresh.status).toBe(201);
@@ -1736,7 +1736,7 @@ describe("snapshots", () => {
 		expect(over.json.error.code).toBe("quota_exceeded");
 	});
 
-	it("deletes only with Sbx-Confirm-Delete (id or name), 404 snapshot_not_found otherwise", async () => {
+	it("deletes only with Umiak-Confirm-Delete (id or name), 404 snapshot_not_found otherwise", async () => {
 		const id = await createReady();
 		const s = await call("POST", "/v1/snapshots", {
 			body: { sandbox: id, name: "gone" },
@@ -1744,7 +1744,7 @@ describe("snapshots", () => {
 		expect(
 			(
 				await call("DELETE", "/v1/snapshots/gone", {
-					headers: { "Sbx-Confirm-Delete": "gone" },
+					headers: { "Umiak-Confirm-Delete": "gone" },
 				})
 			).json.error.code,
 		).toBe("invalid_state");
@@ -1755,7 +1755,7 @@ describe("snapshots", () => {
 		expect(
 			(
 				await call("DELETE", "/v1/snapshots/gone", {
-					headers: { "Sbx-Confirm-Delete": "other" },
+					headers: { "Umiak-Confirm-Delete": "other" },
 				})
 			).json.error.details.reason,
 		).toBe("mismatch");
@@ -1763,12 +1763,12 @@ describe("snapshots", () => {
 		expect(
 			(
 				await call("DELETE", "/v1/snapshots/gone", {
-					headers: { "Sbx-Confirm-Delete": s.json.snapshot.id },
+					headers: { "Umiak-Confirm-Delete": s.json.snapshot.id },
 				})
 			).status,
 		).toBe(204);
 		const missing = await call("DELETE", "/v1/snapshots/gone", {
-			headers: { "Sbx-Confirm-Delete": "gone" },
+			headers: { "Umiak-Confirm-Delete": "gone" },
 		});
 		expect(missing.status).toBe(404);
 		expect(missing.json.error.code).toBe("snapshot_not_found");
@@ -1807,7 +1807,7 @@ describe("desktop", () => {
 		expect(scaleToFit(100, 33, 50)).toEqual({ width: 50, height: 17 });
 	});
 
-	it("returns real PNG and JPEG bytes of the scaled size with the Sbx headers", async () => {
+	it("returns real PNG and JPEG bytes of the scaled size with the Umiak headers", async () => {
 		const id = await desktop();
 		const png = await call(
 			"GET",
@@ -1829,7 +1829,7 @@ describe("desktop", () => {
 					"Image-Height",
 					"Cursor-X",
 					"Cursor-Y",
-				].map((h) => [h, png.headers.get(`Sbx-${h}`)]),
+				].map((h) => [h, png.headers.get(`Umiak-${h}`)]),
 			),
 		).toEqual({
 			"Screen-Width": "1920",
@@ -1853,7 +1853,7 @@ describe("desktop", () => {
 			(jpeg.bytes[sof + 4] ?? 0) * 256 + (jpeg.bytes[sof + 5] ?? 0),
 			(jpeg.bytes[sof + 6] ?? 0) * 256 + (jpeg.bytes[sof + 7] ?? 0),
 		]).toEqual([360, 640]);
-		expect(jpeg.headers.get("Sbx-Image-Width")).toBe("640");
+		expect(jpeg.headers.get("Umiak-Image-Width")).toBe("640");
 		expect(api.state.desktop.screenshots).toHaveLength(2);
 		expect(api.contractErrors).toEqual([]);
 	});
@@ -1864,9 +1864,9 @@ describe("desktop", () => {
 			"GET",
 			`${sbPath(id)}/desktop/screenshot?x=100&y=100&width=800&height=400&maxWidth=400`,
 		);
-		expect(r.headers.get("Sbx-Image-Width")).toBe("400");
-		expect(r.headers.get("Sbx-Image-Height")).toBe("200");
-		expect(r.headers.get("Sbx-Screen-Width")).toBe("1920");
+		expect(r.headers.get("Umiak-Image-Width")).toBe("400");
+		expect(r.headers.get("Umiak-Image-Height")).toBe("200");
+		expect(r.headers.get("Umiak-Screen-Width")).toBe("1920");
 		const out = await call(
 			"GET",
 			`${sbPath(id)}/desktop/screenshot?x=1900&y=0&width=100&height=100`,

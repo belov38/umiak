@@ -11,7 +11,7 @@ import {
 	type ReadyInfo,
 	type Smbios,
 	type SnapshotRef,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { describe, expect, it } from "vitest";
 import type { Manifest } from "../src/manifest.ts";
 import type { GuestIo } from "../src/runner.ts";
@@ -62,7 +62,7 @@ describe("parseWindowsOutput", () => {
 			"CHECK trim INFO warning: not supported",
 			'TOOLS {"node":{"direct":"v26.13.0","login":"v26.13.0"}}',
 			'LICENSE {"status":"Licensed","channel":"RETAIL"}',
-			'FACTS {"computerName":"SBX0123456789AB"}',
+			'FACTS {"computerName":"UMIAK0123456789AB"}',
 			"",
 		].join("\r\n");
 		const r = parseWindowsOutput(out);
@@ -83,7 +83,7 @@ describe("parseWindowsOutput", () => {
 			node: { direct: "v26.13.0", login: "v26.13.0" },
 		});
 		expect(r.license).toEqual({ status: "Licensed", channel: "RETAIL" });
-		expect(r.facts).toEqual({ computerName: "SBX0123456789AB" });
+		expect(r.facts).toEqual({ computerName: "UMIAK0123456789AB" });
 	});
 
 	it("a broken LICENSE or FACTS line becomes a FAIL check", () => {
@@ -98,7 +98,7 @@ describe("parseWindowsOutput", () => {
 });
 
 describe("agent CLI argv helpers", () => {
-	it("build every sbx-agent command line of the contract", () => {
+	it("build every umiak-agent command line of the contract", () => {
 		expect(agentDoctorCmd()).toEqual([AGENT_EXE, "doctor", "--json"]);
 		expect(agentLogsCmd(50)).toEqual([AGENT_EXE, "logs", "-n", "50"]);
 		expect(agentSelftestCmd()).toEqual([AGENT_EXE, "selftest", "--pty"]);
@@ -185,9 +185,9 @@ const probe = (over: Partial<ForkProbe> = {}): ForkProbe => ({
 const EXPECT_FORK = { marker: "marker-1", dpapi: "dpapi-1" };
 
 describe("checkWindowsFork", () => {
-	it("computer names are SBX + the last 12 hex digits upper-case", () => {
-		expect(computerNameFor(UUID_A)).toBe("SBX0123456789AB");
-		expect(computerNameFor(UUID_B)).toBe("SBXFEDCBA987654");
+	it("computer names are UMIAK + the last 12 hex digits upper-case", () => {
+		expect(computerNameFor(UUID_A)).toBe("UMIAK0123456789AB");
+		expect(computerNameFor(UUID_B)).toBe("UMIAKFEDCBA987654");
 	});
 
 	it("passes a fork with a new identity that kept the data and the password", () => {
@@ -267,7 +267,7 @@ describe("checkWindowsFork", () => {
 
 const doctor = (over: Record<string, unknown> = {}) => ({
 	versions: { current: "0.5.0", previous: "" },
-	units: { "sbx-agent": "running" },
+	units: { "umiak-agent": "running" },
 	identity: { machine_id: UUID_A },
 	tunnel_url: { url: TEST_TUNNEL_URL, source: "smbios" },
 	status: { identity: { state: "ready" } },
@@ -301,7 +301,7 @@ describe("checkWindowsDoctor", () => {
 				versions: { current: "0.4.0" },
 				identity: { machine_id: UUID_B },
 				tunnel_url: { url: TEST_TUNNEL_URL, source: "config" },
-				units: { "sbx-agent": "stopped" },
+				units: { "umiak-agent": "stopped" },
 				test_aids: ["failRun"],
 			}),
 			EXPECT_DOCTOR,
@@ -335,7 +335,7 @@ function manifest(over: Partial<Manifest> = {}): Manifest {
 		node: "pve",
 		storage: "local-lvm",
 		pveVmid: 598,
-		vmName: "sbx-tpl-windows-20261031-1",
+		vmName: "umiak-tpl-windows-20261031-1",
 		gitCommit: "abc",
 		recipeDigest: "d",
 		windows: {
@@ -472,8 +472,8 @@ interface FakeVm {
 	staleHostname: number;
 }
 
-const SECRET_FILE = "C:\\ProgramData\\sbx\\secrets\\files\\sbx-verify";
-const DPAPI = "C:\\Users\\user\\sbx-verify-dpapi.txt";
+const SECRET_FILE = "C:\\ProgramData\\umiak\\secrets\\files\\umiak-verify";
+const DPAPI = "C:\\Users\\user\\umiak-verify-dpapi.txt";
 
 const cloneDisk = (d: Disk): Disk => ({ ...d, files: new Map(d.files) });
 
@@ -538,7 +538,7 @@ class WinWorld {
 				vm.disk.claimed = false;
 			}
 			for (const k of [...vm.disk.files.keys()])
-				if (k.startsWith("C:\\ProgramData\\sbx\\secrets\\"))
+				if (k.startsWith("C:\\ProgramData\\umiak\\secrets\\"))
 					vm.disk.files.delete(k);
 			vm.secretEnv = undefined;
 			vm.notReady = changed ? this.readyPolls + 3 : this.readyPolls;
@@ -737,7 +737,7 @@ class WinWorld {
 					doctor({
 						identity: { machine_id: uuid },
 						tunnel_url: {
-							url: vm.smbios.family?.replace(/^sbxt1:/, ""),
+							url: vm.smbios.family?.replace(/^umiakt1:/, ""),
 							source: "smbios",
 						},
 					}),
@@ -770,18 +770,18 @@ class WinWorld {
 		});
 		const putSecrets = (b: Record<string, unknown>) => {
 			const env = b.secret_env as Record<string, string> | undefined;
-			vm.secretEnv = env?.SBX_VERIFY_SECRET;
+			vm.secretEnv = env?.UMIAK_VERIFY_SECRET;
 			for (const f of (b.secret_files ?? []) as {
 				name: string;
 				content: string;
 			}[])
 				vm.disk.files.set(
-					`C:\\ProgramData\\sbx\\secrets\\files\\${f.name}`,
+					`C:\\ProgramData\\umiak\\secrets\\files\\${f.name}`,
 					Buffer.from(f.content, "base64").toString("utf8"),
 				);
 		};
 		switch (method) {
-			case "sbx.agent.v1.System/Info": {
+			case "umiak.agent.v1.System/Info": {
 				if (this.agentDead || vm.notReady > 0) {
 					vm.notReady--;
 					return { exitCode: 1, stdout: "", stderr: "unavailable" };
@@ -791,37 +791,37 @@ class WinWorld {
 				return ok({
 					version: "0.5.0",
 					machineId: vm.disk.identity,
-					hostname: stale ? "SBXTEMPLATE" : computerNameFor(vm.disk.identity),
+					hostname: stale ? "UMIAKTEMPLATE" : computerNameFor(vm.disk.identity),
 					readiness: [{ name: "identity", state: "PHASE_STATE_READY" }],
-					...(vm.disk.claimed ? { claim: { sandboxId: "sbx-verify" } } : {}),
+					...(vm.disk.claimed ? { claim: { sandboxId: "umiak-verify" } } : {}),
 				});
 			}
-			case "sbx.agent.v1.System/Claim":
+			case "umiak.agent.v1.System/Claim":
 				vm.disk.claimed = true;
 				putSecrets(body);
 				return ok({ ready: true, hostnameApplied: false });
-			case "sbx.agent.v1.System/UpdateSecrets":
+			case "umiak.agent.v1.System/UpdateSecrets":
 				putSecrets(body);
 				return ok({ ready: true });
-			case "sbx.agent.v1.System/PrepareStop":
+			case "umiak.agent.v1.System/PrepareStop":
 				vm.disk.files.delete(SECRET_FILE);
 				vm.secretEnv = undefined;
 				return ok({ secretFilesWiped: true });
-			case "sbx.agent.v1.Filesystem/MakeDir":
+			case "umiak.agent.v1.Filesystem/MakeDir":
 				return ok({ info: { path: body.path }, created: true });
-			case "sbx.agent.v1.Filesystem/Stat": {
+			case "umiak.agent.v1.Filesystem/Stat": {
 				const c = vm.disk.files.get(String(body.path));
 				if (c === undefined)
 					return { exitCode: 1, stdout: "", stderr: "not_found" };
 				return ok({ info: { path: body.path, size: String(c.length) } });
 			}
-			case "sbx.agent.v1.Filesystem/Move": {
+			case "umiak.agent.v1.Filesystem/Move": {
 				const c = vm.disk.files.get(String(body.src)) ?? "";
 				vm.disk.files.delete(String(body.src));
 				vm.disk.files.set(String(body.dst), c);
 				return ok({ info: { path: body.dst } });
 			}
-			case "sbx.agent.v1.Filesystem/List": {
+			case "umiak.agent.v1.Filesystem/List": {
 				const dir = `${String(body.path)}\\`;
 				return ok({
 					entries: [...vm.disk.files.keys()]
@@ -829,7 +829,7 @@ class WinWorld {
 						.map((k) => ({ path: k, name: k.slice(dir.length) })),
 				});
 			}
-			case "sbx.agent.v1.Filesystem/Remove": {
+			case "umiak.agent.v1.Filesystem/Remove": {
 				const dir = String(body.path);
 				let existed = false;
 				for (const k of [...vm.disk.files.keys()])
@@ -860,7 +860,7 @@ class WinWorld {
 				stderr: "",
 			};
 		const quoted = [...script.matchAll(/'([^']*)'/g)].map((m) => m[1] ?? "");
-		if (script.includes("SBX_VERIFY_SECRET")) {
+		if (script.includes("UMIAK_VERIFY_SECRET")) {
 			const f = vm.disk.files.get(SECRET_FILE);
 			return ok(
 				`env=${vm.secretEnv === undefined ? "absent" : sha(vm.secretEnv)}\r\nfile=${f === undefined ? "absent" : sha(f)}\r\n`,
@@ -1092,9 +1092,9 @@ describe("verifyWindows", () => {
 		]);
 		expect(made.map((o) => o.smbios?.uuid)).toEqual([UUID_A, UUID_B]);
 		for (const o of made) {
-			expect(o.smbios?.family).toBe(`sbxt1:${TEST_TUNNEL_URL}`);
+			expect(o.smbios?.family).toBe(`umiakt1:${TEST_TUNNEL_URL}`);
 			expect(o.smbios?.serial).toMatch(
-				new RegExp(`^sbx1:${o.smbios?.uuid}:[A-Za-z0-9_-]{43}$`),
+				new RegExp(`^umiak1:${o.smbios?.uuid}:[A-Za-z0-9_-]{43}$`),
 			);
 		}
 	});
@@ -1102,15 +1102,17 @@ describe("verifyWindows", () => {
 	it("never puts secret values on a guest command line", async () => {
 		const { w, deps } = setup();
 		await verifyWindows(deps, manifest(), {});
-		const claim = w.execs.find((e) => e.cmd[2] === "sbx.agent.v1.System/Claim");
+		const claim = w.execs.find(
+			(e) => e.cmd[2] === "umiak.agent.v1.System/Claim",
+		);
 		expect(claim?.cmd).toEqual([
 			AGENT_EXE,
 			"call",
-			"sbx.agent.v1.System/Claim",
+			"umiak.agent.v1.System/Claim",
 			"-",
 		]);
 		const body = JSON.parse(claim?.input ?? "{}");
-		const env = body.secret_env.SBX_VERIFY_SECRET as string;
+		const env = body.secret_env.UMIAK_VERIFY_SECRET as string;
 		const file = Buffer.from(body.secret_files[0].content, "base64").toString(
 			"utf8",
 		);
@@ -1265,7 +1267,7 @@ describe("verifyWindows", () => {
 		const vm = w.execs.filter((e) => e.vmid === 501);
 		// No Info answer with the interim name ends the wait: three stale answers were polled.
 		expect(
-			vm.filter((e) => e.cmd.includes("sbx.agent.v1.System/Info")).length,
+			vm.filter((e) => e.cmd.includes("umiak.agent.v1.System/Info")).length,
 		).toBeGreaterThan(3);
 	});
 
@@ -1425,7 +1427,7 @@ describe("verify.ps1", () => {
 	const text = () => readFileSync(VERIFY_PS1, "utf8");
 
 	it("parses without errors", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-verify-ps1-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-verify-ps1-"));
 		try {
 			const script = join(dir, "parse.ps1");
 			writeFileSync(
@@ -1449,7 +1451,7 @@ exit $errs.Count
 	});
 
 	it("helpers: CHECK lines, the subnet test, first lines, native exit codes", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-verify-ps1-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-verify-ps1-"));
 		try {
 			const script = join(dir, "helpers.ps1");
 			writeFileSync(
@@ -1520,7 +1522,7 @@ Write-Output "capture $($r.Code)"
 			"computer_name",
 			"machine_guid",
 			"first_boot_reboots",
-			"sbx_unattend_gone",
+			"umiak_unattend_gone",
 			"panther_clean",
 			"listen_tcp",
 			"listen_udp",
@@ -1574,7 +1576,7 @@ Write-Output "capture $($r.Code)"
 
 	/** Runs `body` after loading the named functions of verify.ps1 (StrictMode on). */
 	const runFunctions = (names: string[], body: string) => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-verify-ps1-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-verify-ps1-"));
 		try {
 			const script = join(dir, "fn.ps1");
 			writeFileSync(
@@ -1601,10 +1603,10 @@ ${body}
 		}
 	};
 
-	it("first_boot_reboots: setup's boots plus one planned restart by sbx-agent.exe (R16)", () => {
+	it("first_boot_reboots: setup's boots plus one planned restart by umiak-agent.exe (R16)", () => {
 		const r = runFunctions(
 			["Get-RestartProcessName", "Get-FirstBootVerdict"],
-			String.raw`$agent = Get-RestartProcessName 'C:\Program Files\sbx-agent\versions\0.5.0\sbx-agent.exe (SBXTEMPLATE)'
+			String.raw`$agent = Get-RestartProcessName 'C:\Program Files\umiak-agent\versions\0.5.0\umiak-agent.exe (UMIAKTEMPLATE)'
 Write-Output "name $agent|$(Get-RestartProcessName 'C:\Program Files (x86)\x\Setup.EXE')"
 foreach ($c in @(
     @{ b = 2; by = @() }, @{ b = 3; by = @() }, @{ b = 3; by = @($agent) }, @{ b = 4; by = @($agent) },
@@ -1618,7 +1620,7 @@ Write-Output (Get-FirstBootVerdict 3 @($agent)).Evidence`,
 		expect(r.stderr).toBe("");
 		const lines = r.stdout.trim().split(/\r?\n/);
 		expect(lines.slice(0, 9)).toEqual([
-			"name sbx-agent.exe|Setup.EXE",
+			"name umiak-agent.exe|Setup.EXE",
 			"2 0 True",
 			"3 0 False",
 			"3 1 True",
@@ -1629,7 +1631,7 @@ Write-Output (Get-FirstBootVerdict 3 @($agent)).Evidence`,
 			"3 1 False",
 		]);
 		expect(lines[9]).toMatch(/3 boots since the seal/);
-		expect(lines[9]).toMatch(/sbx-agent\.exe/);
+		expect(lines[9]).toMatch(/umiak-agent\.exe/);
 	});
 
 	it("users: the salted hash of the LSA secret works with an empty salt (null-safe)", () => {

@@ -3,26 +3,26 @@
 # without Proxmox, the gateway and a guest. `api` and `worker` are replaced
 # by one `e2e-backend` (apps/web/e2e/backend): the real api and worker code
 # in one process with a fake agent and a fake PVE world. It answers as `api`
-# on the sbx network, so oauth2-proxy routes /api/* and /sbx-auth/* to it
-# unchanged. Run by `pnpm --filter @sbx/web test:e2e` (apps/web/e2e/run.ts):
-#   docker compose -p sbx-e2e --env-file deploy/compose/e2e.env \
+# on the umiak network, so oauth2-proxy routes /api/* and /umiak-auth/* to it
+# unchanged. Run by `pnpm --filter @umiak/web test:e2e` (apps/web/e2e/run.ts):
+#   docker compose -p umiak-e2e --env-file deploy/compose/e2e.env \
 #     -f deploy/compose/compose.yaml -f deploy/compose/e2e.yaml up -d --build --wait
 # The project name keeps its volumes apart from the dev stack; the host
 # ports (e2e.env) differ from the dev stack's. ./secrets is shared with it.
-name: sbx-e2e
+name: umiak-e2e
 
 services:
   postgres:
     ports: !override
-      - "127.0.0.1:${SBX_E2E_PG_PORT:-15432}:5432"
+      - "127.0.0.1:${UMIAK_E2E_PG_PORT:-15432}:5432"
 
   keycloak:
     ports: !override
-      - "127.0.0.1:${SBX_E2E_KEYCLOAK_PORT:-18180}:8080"
+      - "127.0.0.1:${UMIAK_E2E_KEYCLOAK_PORT:-18180}:8080"
 
   oauth2-proxy:
     ports: !override
-      - "127.0.0.1:${SBX_E2E_APP_PORT:-14180}:4180"
+      - "127.0.0.1:${UMIAK_E2E_APP_PORT:-14180}:4180"
 
   # Replaced by e2e-backend; never started in this stack.
   api:
@@ -42,9 +42,9 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
-      sbx:
+      umiak:
         aliases: [api]
-    image: sbx-e2e-backend:dev
+    image: umiak-e2e-backend:dev
     build:
       context: ../..
       dockerfile: apps/web/e2e/backend/Dockerfile
@@ -52,44 +52,44 @@ services:
       - sh
       - -c
       - >-
-        export SBX_API_CURSOR_KEY="$$(cat /run/sbx-secrets/cursor-key)"
-        PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        export UMIAK_API_CURSOR_KEY="$$(cat /run/umiak-secrets/cursor-key)"
+        PAYLOAD_SECRET="$$(cat /run/umiak-secrets/payload-secret)"
         && exec node apps/web/e2e/backend/main.ts
     environment:
-      DATABASE_URL: postgres://sbx:sbx@postgres:5432/sbx
-      # As the api service of compose.yaml (no SBX_API_GATEWAY_TOKEN_FILE:
+      DATABASE_URL: postgres://umiak:umiak@postgres:5432/umiak
+      # As the api service of compose.yaml (no UMIAK_API_GATEWAY_TOKEN_FILE:
       # the agent is the in-process fake).
-      SBX_IDENTITY_FILE: /etc/sbx/identity.yaml
-      SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
-      SBX_API_SERVICE_TOKENS_FILE: /run/sbx-secrets/service-tokens.json
-      SBX_SSH_LOGIN_CA_KEY_FILE: /run/sbx-secrets/ssh-login-ca
-      SBX_SSH_HOST_KEYS_FILE: /run/sbx-secrets/ssh-host-keys.pub
-      SBX_API_URL: ${SBX_API_PUBLIC_URL:-http://localhost:18080}
-      SBX_APP_URL: ${SBX_APP_ORIGIN:-http://localhost:14180}
-      SBX_APP_ORIGIN: ${SBX_APP_ORIGIN:-http://localhost:14180}
-      SBX_SBX_DOMAIN: sbx.localhost
-      SBX_SSH_HOST: ssh.localhost
-      SBX_SSH_PORT: "2222"
-      SBX_OIDC_ISSUER: ${SBX_KEYCLOAK_URL:-http://localhost:18180}/realms/sbx
-      SBX_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/sbx/.well-known/openid-configuration
-      SBX_OIDC_JWKS_URL: http://keycloak:8080/realms/sbx/protocol/openid-connect/certs
-      SBX_OPERATOR_GROUPS: sbx-operators
-      SBX_LOG_LEVEL: info
+      UMIAK_IDENTITY_FILE: /etc/umiak/identity.yaml
+      UMIAK_DATA_KEYS_FILE: /run/umiak-secrets/data-keys.json
+      UMIAK_API_SERVICE_TOKENS_FILE: /run/umiak-secrets/service-tokens.json
+      UMIAK_SSH_LOGIN_CA_KEY_FILE: /run/umiak-secrets/ssh-login-ca
+      UMIAK_SSH_HOST_KEYS_FILE: /run/umiak-secrets/ssh-host-keys.pub
+      UMIAK_API_URL: ${UMIAK_API_PUBLIC_URL:-http://localhost:18080}
+      UMIAK_APP_URL: ${UMIAK_APP_ORIGIN:-http://localhost:14180}
+      UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:-http://localhost:14180}
+      UMIAK_PREVIEW_DOMAIN: umiak.localhost
+      UMIAK_SSH_HOST: ssh.localhost
+      UMIAK_SSH_PORT: "2222"
+      UMIAK_OIDC_ISSUER: ${UMIAK_KEYCLOAK_URL:-http://localhost:18180}/realms/umiak
+      UMIAK_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/umiak/.well-known/openid-configuration
+      UMIAK_OIDC_JWKS_URL: http://keycloak:8080/realms/umiak/protocol/openid-connect/certs
+      UMIAK_OPERATOR_GROUPS: umiak-operators
+      UMIAK_LOG_LEVEL: info
       # ctl-idp-sync (passes on demand through the control listener).
-      SBX_IDP_SYNC_KEYCLOAK_URL: http://keycloak:8080
-      SBX_IDP_SYNC_REALM: sbx
-      SBX_IDP_SYNC_CLIENT_ID: sbx-worker
-      SBX_IDP_SYNC_CLIENT_SECRET_FILE: /run/sbx-worker-secrets/idp-sync-client-secret
-      SBX_E2E_CONTROL_PORT: "9099"
+      UMIAK_IDP_SYNC_KEYCLOAK_URL: http://keycloak:8080
+      UMIAK_IDP_SYNC_REALM: umiak
+      UMIAK_IDP_SYNC_CLIENT_ID: umiak-worker
+      UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: /run/umiak-worker-secrets/idp-sync-client-secret
+      UMIAK_E2E_CONTROL_PORT: "9099"
     volumes:
-      - ./config/identity.yaml:/etc/sbx/identity.yaml:ro
-      - ./secrets/api:/run/sbx-secrets:ro
-      - ./secrets/worker:/run/sbx-worker-secrets:ro
+      - ./config/identity.yaml:/etc/umiak/identity.yaml:ro
+      - ./secrets/api:/run/umiak-secrets:ro
+      - ./secrets/worker:/run/umiak-worker-secrets:ro
     ports:
       # Public API listener (API keys, `GET /v1/me`) and the test-only
       # control listener, on loopback only.
-      - "127.0.0.1:${SBX_E2E_API_PORT:-18080}:8080"
-      - "127.0.0.1:${SBX_E2E_CONTROL_PORT:-19099}:9099"
+      - "127.0.0.1:${UMIAK_E2E_API_PORT:-18080}:8080"
+      - "127.0.0.1:${UMIAK_E2E_CONTROL_PORT:-19099}:9099"
     depends_on:
       web-migrate:
         condition: service_completed_successfully

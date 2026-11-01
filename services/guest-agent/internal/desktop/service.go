@@ -23,12 +23,12 @@ import (
 	"golang.org/x/image/draw"
 	"google.golang.org/protobuf/proto"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/reqcache"
 )
 
 // Session is implemented by the interactive session helper, never the streamer.
@@ -42,7 +42,7 @@ type Session interface {
 
 // Credentials are fresh random secrets for one machine identity. Username and
 // Password are the Sunshine web UI login; the moonlight-web administrator and
-// its proxy user sbx have their own secrets. State written before they were
+// its proxy user umiak have their own secrets. State written before they were
 // separated has none: the Sunshine password stays their secret there.
 type Credentials struct {
 	Username          string `json:"username"`
@@ -59,7 +59,7 @@ func (c Credentials) Moonlight() string {
 	return c.Password
 }
 
-// Viewer is the password of the moonlight-web proxy user sbx.
+// Viewer is the password of the moonlight-web proxy user umiak.
 func (c Credentials) Viewer() string {
 	if c.ViewerPassword != "" {
 		return c.ViewerPassword

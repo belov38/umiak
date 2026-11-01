@@ -65,7 +65,7 @@ export async function openKeyPty(
 	const url = `${PUBLIC_API.replace(/^http/, "ws")}/v1/sandboxes/${sandboxId}/ptys/${id}/connect`;
 	// Node's WebSocket (undici) takes request headers in its init object.
 	const ws = new WebSocket(url, {
-		protocols: ["sbx.pty.v1"],
+		protocols: ["umiak.pty.v1"],
 		headers: bearer(secret),
 	} as unknown as string[]);
 	const closed = new Promise<number>((res) =>

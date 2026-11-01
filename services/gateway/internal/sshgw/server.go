@@ -17,11 +17,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 // Defaults for zero Config values (spec 9.2, 9.3, 10.3).
@@ -39,7 +39,7 @@ const (
 
 const (
 	// ServerVersion is the identification string sent to clients.
-	ServerVersion = "SSH-2.0-sbx-gateway"
+	ServerVersion = "SSH-2.0-umiak-gateway"
 	// Accept retry backoff, the same rule as the TLS edge.
 	acceptBackoffMin = 5 * time.Millisecond
 	acceptBackoffMax = time.Second

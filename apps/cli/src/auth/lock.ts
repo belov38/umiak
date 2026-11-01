@@ -1,5 +1,5 @@
-// The config lock ($XDG_CONFIG_HOME/sbx/.lock, S7 §7.6): parallel `sbx`
-// processes (CLI, SDK through `sbx auth token`, MCP) refresh the Keycloak
+// The config lock ($XDG_CONFIG_HOME/umiak/.lock, S7 §7.6): parallel `umiak`
+// processes (CLI, SDK through `umiak auth token`, MCP) refresh the Keycloak
 // token and write credentials one at a time.
 // - The lock is a file created with O_CREAT|O_EXCL holding a unique owner
 //   token; the holder removes it on release only while it still holds its
@@ -122,7 +122,7 @@ export async function withFileLock<T>(
 		if (Date.now() - start > timeoutMs) {
 			throw new CliError({
 				code: "lock_timeout",
-				message: `could not take ${path} within ${timeoutMs} ms; remove it if no other sbx is running`,
+				message: `could not take ${path} within ${timeoutMs} ms; remove it if no other umiak is running`,
 				retryable: true,
 			});
 		}

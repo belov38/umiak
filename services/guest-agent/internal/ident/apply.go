@@ -14,13 +14,13 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 const (
-	hostsBegin = "# BEGIN sbx"
-	hostsEnd   = "# END sbx"
+	hostsBegin = "# BEGIN umiak"
+	hostsEnd   = "# END umiak"
 	// uninitializedMachineID is what systemd treats as "no machine-id yet".
 	uninitializedMachineID = "uninitialized"
 )
@@ -32,7 +32,7 @@ const (
 // step, so an interrupted apply is repeated on the next boot.
 //
 // With fromAgent set (the agent found a mismatch itself because
-// sbx-identity.service did not run) it then also restarts sshd and renews
+// umiak-identity.service did not run) it then also restarts sshd and renews
 // network leases; failures of those two steps are logged and do not fail the
 // apply.
 func Apply(ctx context.Context, l paths.Layout, id Identity, r Resetter, fromAgent bool) (changed bool, err error) {
@@ -153,13 +153,13 @@ func managedFiles(l paths.Layout) []string {
 }
 
 // resetManagedFiles restores the files that the claim changes to their
-// template state: an empty /etc/sbx/env and the template SSH CA keys.
+// template state: an empty /etc/umiak/env and the template SSH CA keys.
 func resetManagedFiles(l paths.Layout) error {
-	if err := os.MkdirAll(filepath.Dir(l.SbxEnvFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(l.UmiakEnvFile), 0o755); err != nil {
 		return err
 	}
-	if err := fsutil.WriteFileAtomic(l.SbxEnvFile, nil, 0o644); err != nil {
-		return fmt.Errorf("ident: empty sbx env: %w", err)
+	if err := fsutil.WriteFileAtomic(l.UmiakEnvFile, nil, 0o644); err != nil {
+		return fmt.Errorf("ident: empty umiak env: %w", err)
 	}
 	ca, err := os.ReadFile(l.TemplateSSHCA)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {

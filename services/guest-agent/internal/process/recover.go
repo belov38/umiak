@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // Recover rebuilds the live state from the records after an agent start

@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
-import type { Allocator, NodeOps, PveClient } from "@sbx/pve";
+import type { Allocator, NodeOps, PveClient } from "@umiak/pve";
 import { parse as parseYaml } from "yaml";
 import type { FileRegistry } from "./registry.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
 
-// `sbx-tpl retire <buildId> [--delete-vm] [--force] [--force-poc]`: a ready build that is no
+// `umiak-tpl retire <buildId> [--delete-vm] [--force] [--force-poc]`: a ready build that is no
 // longer used. The registry marks it `retired`; with --delete-vm its template VM goes too, with
 // the VMID lease. A build the worker config uses, or the newest ready build of its template,
 // stays unless --force; a build in the PoC slot (599) stays unless --force-poc.
 
-const BUILD_TAG = "sbx-tpl";
+const BUILD_TAG = "umiak-tpl";
 
 /** A template build the worker config registers (`topology.templateBuilds`). */
 export interface ConfiguredBuild {
@@ -26,7 +26,7 @@ export interface RetireDeps {
 	registry: FileRegistry;
 	cfg: {
 		node: string;
-		/** Template slots sbx-tpl owns (pve: 597-599). */
+		/** Template slots umiak-tpl owns (pve: 597-599). */
 		templateVmidRange: { min: number; max: number };
 		/** The PoC template (pve: 599). */
 		templateVmid: number;
@@ -46,7 +46,7 @@ export interface RetireOptions {
 
 const tagsOf = (v: string | undefined) => (v ?? "").split(/[;,]/);
 
-/** `topology.templateBuilds` of a worker YAML config (SBX_CONFIG_FILE). */
+/** `topology.templateBuilds` of a worker YAML config (UMIAK_CONFIG_FILE). */
 export function configuredBuilds(file: string): ConfiguredBuild[] {
 	const doc = parseYaml(readFileSync(file, "utf8")) as {
 		topology?: { templateBuilds?: unknown };
@@ -71,7 +71,7 @@ export function configuredBuilds(file: string): ConfiguredBuild[] {
 
 /**
  * Marks a ready build retired. Its template VM (the VMID of the manifest, a template tagged
- * sbx-tpl with the build's VM name) blocks that unless `deleteVm` is set; then the VM is deleted
+ * umiak-tpl with the build's VM name) blocks that unless `deleteVm` is set; then the VM is deleted
  * and its template lease released. A VMID that is gone or now holds another build is left alone.
  * Every refusal comes before the first change.
  */
@@ -85,7 +85,7 @@ export async function retire(
 	if (m.status === "retired") return [`build ${buildId} is already retired`];
 	if (m.status !== "ready")
 		throw new Error(
-			`build ${buildId} is ${m.status}: only a ready build is retired (sbx-tpl cleanup removes failed ones)`,
+			`build ${buildId} is ${m.status}: only a ready build is retired (umiak-tpl cleanup removes failed ones)`,
 		);
 	const vmid = m.pveVmid;
 	if (vmid !== null && vmid === d.cfg.templateVmid && !opts.forcePoc)
@@ -156,7 +156,7 @@ export async function retire(
 			vmid > r.max ||
 			(!poc && (vmid === d.cfg.templateVmid || isProtectedVmid(vmid)))
 		)
-			throw new Error(`VM ${vmid} is not a template slot of sbx-tpl`);
+			throw new Error(`VM ${vmid} is not a template slot of umiak-tpl`);
 		const upid = await d.api.delete<string>(`/nodes/${m.node}/qemu/${vmid}`, {
 			purge: 1,
 			"destroy-unreferenced-disks": 1,

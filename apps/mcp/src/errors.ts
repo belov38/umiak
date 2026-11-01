@@ -1,7 +1,7 @@
 // Tool errors (S11 7.6): API errors and mcp's own checks become a tool result
 // with isError: true and a short key: value text the model can act on.
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { SbxError } from "@sbx/sdk";
+import { UmiakError } from "@umiak/sdk";
 import { safeLine } from "./output/sanitize.ts";
 
 export interface ToolErrorInit {
@@ -141,9 +141,9 @@ export function hintFor(code: string, ctx: HintContext): string | undefined {
 			return `${index === undefined ? "an action" : `action ${index}`} failed${completed === undefined ? "" : ` after ${completed} completed`}; completed actions are not rolled back. Call computer_screenshot to see the screen, then continue.`;
 		}
 		case "not_logged_in":
-			return "run `sbx login` in a terminal, then retry.";
+			return "run `umiak login` in a terminal, then retry.";
 		case "token_provider_failed":
-			return "the access token could not be obtained; run `sbx login` in a terminal, then retry.";
+			return "the access token could not be obtained; run `umiak login` in a terminal, then retry.";
 		case "deadline_exceeded":
 			return "the call ran out of time and the action may have started; call again (with the same idempotency_key, if one is shown) to attach to it.";
 		default:
@@ -186,7 +186,7 @@ function fieldsOf(err: unknown): {
 			},
 		};
 	}
-	if (err instanceof SbxError) {
+	if (err instanceof UmiakError) {
 		const seconds =
 			err.retryAfterMs === null
 				? num(err.details.retryAfterSeconds)

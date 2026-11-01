@@ -1,4 +1,4 @@
-// NOTIFY sbx_identity '<collection>:<uuid>' (S8 §8, S7 §7.2, §7.4) from the
+// NOTIFY umiak_identity '<collection>:<uuid>' (S8 §8, S7 §7.2, §7.4) from the
 // identity collections. Memberships send '<userUuid>:<teamUuid>' (S7 §23.10,
 // the stand-in format): api maps it to the streams of the removed member,
 // which a membership id cannot do after a delete. As the
@@ -51,10 +51,10 @@ export function identityAfterChange(
 			// A changed key (memberships cannot change theirs) notifies both.
 			const before = key(slug, previousDoc);
 			if (before !== key(slug, doc)) {
-				await notify(req, "sbx_identity", before);
+				await notify(req, "umiak_identity", before);
 			}
 		}
-		await notify(req, "sbx_identity", key(slug, doc));
+		await notify(req, "umiak_identity", key(slug, doc));
 		return doc;
 	};
 }
@@ -63,7 +63,7 @@ export function identityAfterDelete(
 	slug: IdentityCollection,
 ): CollectionAfterDeleteHook {
 	return async ({ id, req, doc }) => {
-		await notify(req, "sbx_identity", key(slug, { id, ...doc }));
+		await notify(req, "umiak_identity", key(slug, { id, ...doc }));
 		return doc;
 	};
 }

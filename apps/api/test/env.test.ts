@@ -1,5 +1,9 @@
-import { decodeUuid, encodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid, encodeUuid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { captureLogs } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
@@ -132,7 +136,7 @@ describe.skipIf(skipPg())("env routes", () => {
 		expect(put.text).not.toContain(SECRET);
 		// A refused value is not echoed either.
 		const bad = await lh.request("PUT", `/v1/sandboxes/${s.slug}/env`, {
-			json: { secrets: { SBX_RESERVED: SECRET } },
+			json: { secrets: { UMIAK_RESERVED: SECRET } },
 		});
 		expect(bad.status).toBe(400);
 		expect(bad.text).not.toContain(SECRET);

@@ -1,5 +1,5 @@
 // A Keycloak-shaped OIDC server for tests (S7 plan decision 13): realm
-// `sbx` with discovery, JWKS, the device authorization grant (RFC 8628),
+// `umiak` with discovery, JWKS, the device authorization grant (RFC 8628),
 // refresh and revocation at Keycloak's paths. Tokens are signed with real
 // RS256/ES256 keys, so the api verifies them exactly like Keycloak's.
 // Used by the api auth tests and later by the CLI and SDK tests.
@@ -42,8 +42,8 @@ export interface TestOidcServerOptions {
 	deviceExpiresIn?: number;
 	/**
 	 * Public issuer when the server sits behind a proxy (a TLS front, say),
-	 * e.g. `https://127.0.0.1:8443/realms/sbx`: tokens and discovery carry it.
-	 * The path must stay `/realms/sbx`. Default: the server's own address.
+	 * e.g. `https://127.0.0.1:8443/realms/umiak`: tokens and discovery carry it.
+	 * The path must stay `/realms/umiak`. Default: the server's own address.
 	 */
 	issuer?: string;
 }
@@ -70,11 +70,11 @@ export interface TestDeviceFlow {
 }
 
 export interface TestOidcServer {
-	/** `http://127.0.0.1:<port>/realms/sbx`, or the `issuer` option */
+	/** `http://127.0.0.1:<port>/realms/umiak`, or the `issuer` option */
 	issuer: string;
 	/** The server's own address, `http://127.0.0.1:<port>` */
 	base: string;
-	/** A signed token: access token claims of Keycloak's `sbx-cli` by default. */
+	/** A signed token: access token claims of Keycloak's `umiak-cli` by default. */
 	token(claims?: TestClaims, opts?: TestTokenOptions): Promise<string>;
 	/** New current RSA key; old keys stay in the JWKS. */
 	rotateKey(): void;
@@ -184,15 +184,15 @@ export async function startTestOidcServer(
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const port = (server.address() as AddressInfo).port;
 	const base = `http://127.0.0.1:${port}`;
-	const issuer = o.issuer?.replace(/\/+$/, "") ?? `${base}/realms/sbx`;
-	const oidcPath = "/realms/sbx/protocol/openid-connect";
+	const issuer = o.issuer?.replace(/\/+$/, "") ?? `${base}/realms/umiak`;
+	const oidcPath = "/realms/umiak/protocol/openid-connect";
 
 	function claimsOf(over: TestClaims, typ: string, ttl: number): TestClaims {
 		const now = Math.floor(Date.now() / 1000);
 		const all: TestClaims = {
 			iss: issuer,
-			aud: "sbx-api",
-			azp: "sbx-cli",
+			aud: "umiak-api",
+			azp: "umiak-cli",
 			sub: "test-user",
 			email: "user@example.com",
 			email_verified: true,
@@ -267,7 +267,7 @@ export async function startTestOidcServer(
 		const path = url.pathname;
 		if (
 			req.method === "GET" &&
-			path === "/realms/sbx/.well-known/openid-configuration"
+			path === "/realms/umiak/.well-known/openid-configuration"
 		) {
 			stats.discovery++;
 			if (failures.discovery !== null) {
@@ -387,7 +387,7 @@ export async function startTestOidcServer(
 				return;
 			}
 			g.state = "used";
-			send(res, 200, await tokenSet(g.claims, g.clientId || "sbx-cli"));
+			send(res, 200, await tokenSet(g.claims, g.clientId || "umiak-cli"));
 			return;
 		}
 		error("unsupported_grant_type");

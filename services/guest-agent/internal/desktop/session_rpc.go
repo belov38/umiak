@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"time"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 // RemoteSession talks only to the private socket owned by the interactive user.

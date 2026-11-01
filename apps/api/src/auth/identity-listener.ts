@@ -1,4 +1,4 @@
-// LISTEN sbx_identity (S7 §7.2, §7.4, S8 §8): identity changes from the
+// LISTEN umiak_identity (S7 §7.2, §7.4, S8 §8): identity changes from the
 // IdentityStore (Postgres triggers of the stand-in, Payload hooks in S8).
 // Payloads are '<collection>:<id>' (users, teams, memberships, api-keys,
 // ssh-keys; ids are opaque) or '*' (flush everything). Caches of the api
@@ -6,10 +6,10 @@
 // 'sandboxes:<uuid>' is not an identity change: core sends it when an
 // operator blocks or unblocks a sandbox; the stream registry and the desktop
 // access monitor act on it.
-import { type Notifier, PgNotifier } from "@sbx/core";
+import { type Notifier, PgNotifier } from "@umiak/core";
 import type { Logger } from "pino";
 
-export const IDENTITY_CHANNEL = "sbx_identity";
+export const IDENTITY_CHANNEL = "umiak_identity";
 
 export type IdentityChange =
 	| { all: false; collection: string; id: string }
@@ -34,7 +34,7 @@ export interface IdentityListenerOptions {
 }
 
 /**
- * Fan-out of `sbx_identity` to the caches of this process. Without a
+ * Fan-out of `umiak_identity` to the caches of this process. Without a
  * notifier (tests without Postgres) it never emits and counts as ready.
  */
 export class IdentityListener {
@@ -84,7 +84,7 @@ export class IdentityListener {
 			}
 			const change = parseIdentityPayload(p);
 			if (change === null) {
-				this.#log?.warn({ payload: p }, "unknown sbx_identity payload");
+				this.#log?.warn({ payload: p }, "unknown umiak_identity payload");
 				return;
 			}
 			this.#emit(change);
@@ -113,7 +113,7 @@ export class IdentityListener {
 		this.#ready = false;
 		this.#log?.warn(
 			{ err: err instanceof Error ? err.message : String(err) },
-			"sbx_identity listener lost its connection",
+			"umiak_identity listener lost its connection",
 		);
 	}
 
@@ -138,7 +138,7 @@ export class IdentityListener {
 			} catch (err) {
 				this.#log?.error(
 					{ err: err instanceof Error ? err.message : String(err) },
-					"sbx_identity handler failed",
+					"umiak_identity handler failed",
 				);
 			}
 		}

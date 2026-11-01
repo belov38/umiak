@@ -19,7 +19,7 @@ const ScriptFile = "script.ps1"
 // script can swallow it.
 const (
 	pwshPrologue = "$global:LASTEXITCODE = 0"
-	pwshEpilogue = "$__sbx_ok = $?; if ($__sbx_ok) { exit 0 } elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } else { exit 1 }"
+	pwshEpilogue = "$__umiak_ok = $?; if ($__umiak_ok) { exit 0 } elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } else { exit 1 }"
 )
 
 // WrapScript returns script between the prologue and the exit-code

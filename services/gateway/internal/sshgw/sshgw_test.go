@@ -15,13 +15,13 @@ import (
 	proxyproto "github.com/pires/go-proxyproto"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
-var sessionKeyID = regexp.MustCompile(`^sbx:(user|key):([A-Za-z0-9_]+):([0-9a-f]{16})$`)
+var sessionKeyID = regexp.MustCompile(`^umiak:(user|key):([A-Za-z0-9_]+):([0-9a-f]{16})$`)
 
 func TestSSHUserKey(t *testing.T) {
 	f := newFixture(t, nil)
@@ -29,7 +29,7 @@ func TestSSHUserKey(t *testing.T) {
 	f.allowKey(key.PublicKey(), f.userAuth("usr_1"))
 
 	c := f.mustDial(t, f.slug, ssh.PublicKeys(key))
-	if string(c.ServerVersion()) != "SSH-2.0-sbx-gateway" {
+	if string(c.ServerVersion()) != "SSH-2.0-umiak-gateway" {
 		t.Fatalf("server version %q", c.ServerVersion())
 	}
 	eventually(t, "one active session", func() bool { return f.inst.SSH().Sessions() == 1 })
@@ -116,7 +116,7 @@ func TestSSHCertLogin(t *testing.T) {
 		t.Fatalf("request %v", r)
 	}
 	ci := *r.Certificate
-	if ci.KeyID != "sbx:key:key_1" || ci.Serial != "12345" || ci.Principal != "sb_x" || !ci.ValidBefore.Equal(validBefore) {
+	if ci.KeyID != "umiak:key:key_1" || ci.Serial != "12345" || ci.Principal != "sb_x" || !ci.ValidBefore.Equal(validBefore) {
 		t.Fatalf("certificate fields %+v", ci)
 	}
 	ids := f.sshd.KeyIDs()
@@ -181,8 +181,8 @@ func TestSSHCertRejects(t *testing.T) {
 		{name: "two principals", mod: func(c *ssh.Certificate) { c.ValidPrincipals = []string{"sb_x", "sb_y"} }},
 		{name: "no principal", mod: func(c *ssh.Certificate) { c.ValidPrincipals = nil }},
 		{name: "other sandbox", mod: func(c *ssh.Certificate) { c.ValidPrincipals = []string{"sb_other"} }, apiCall: true},
-		{name: "bad key id", mod: func(c *ssh.Certificate) { c.KeyId = "sbx:admin:x" }},
-		{name: "key id with session suffix", mod: func(c *ssh.Certificate) { c.KeyId = "sbx:user:usr_1:abc" }},
+		{name: "bad key id", mod: func(c *ssh.Certificate) { c.KeyId = "umiak:admin:x" }},
+		{name: "key id with session suffix", mod: func(c *ssh.Certificate) { c.KeyId = "umiak:user:usr_1:abc" }},
 		{name: "host cert", mod: func(c *ssh.Certificate) { c.CertType = ssh.HostCert }},
 		{name: "critical option", mod: func(c *ssh.Certificate) {
 			c.CriticalOptions = map[string]string{"force-command": "/bin/true"}
@@ -299,10 +299,10 @@ func TestSSHPlusUser(t *testing.T) {
 
 func TestSSHStopped(t *testing.T) {
 	f := newFixture(t, nil)
-	stopped := "sbx: sandbox " + f.slug + " is stopped; run: sbx resume " + f.slug + "\r\n"
-	starting := "sbx: sandbox " + f.slug + " is starting; try again in a moment\r\n"
-	unavailable := "sbx: sandbox " + f.slug + " is unavailable\r\n"
-	unreachable := "sbx: cannot reach sshd in sandbox " + f.slug + "\r\n"
+	stopped := "umiak: sandbox " + f.slug + " is stopped; run: umiak resume " + f.slug + "\r\n"
+	starting := "umiak: sandbox " + f.slug + " is starting; try again in a moment\r\n"
+	unavailable := "umiak: sandbox " + f.slug + " is unavailable\r\n"
+	unreachable := "umiak: cannot reach sshd in sandbox " + f.slug + "\r\n"
 	noSSHD := f.env.NewMachine() // nothing listens on 22
 	cases := []struct {
 		name string
@@ -318,7 +318,7 @@ func TestSSHStopped(t *testing.T) {
 		{"agent unavailable", func(a *cpapi.SSHAuthorization) { a.MachineID = "00000000-0000-0000-0000-000000000000" }, unavailable},
 		{"no sshd", func(a *cpapi.SSHAuthorization) { a.MachineID = noSSHD.ID }, unreachable},
 		// Malformed ids from api never reach a backend certificate.
-		{"bad login user", func(a *cpapi.SSHAuthorization) { a.LoginUser = "sbx,root" }, unavailable},
+		{"bad login user", func(a *cpapi.SSHAuthorization) { a.LoginUser = "umiak,root" }, unavailable},
 		{"bad user id", func(a *cpapi.SSHAuthorization) { a.Actor.UserID = "usr_1:x" }, unavailable},
 	}
 	for _, tc := range cases {
@@ -417,7 +417,7 @@ func TestSSHConnRateLimit(t *testing.T) {
 	})
 	for i := range 2 {
 		v, err := f.rawVersion()
-		if err != nil || !strings.HasPrefix(v, "SSH-2.0-sbx-gateway") {
+		if err != nil || !strings.HasPrefix(v, "SSH-2.0-umiak-gateway") {
 			t.Fatalf("conn %d: %q %v", i, v, err)
 		}
 	}

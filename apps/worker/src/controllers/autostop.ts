@@ -1,5 +1,5 @@
-import { requestStop, SbxError, type StopRequestReason } from "@sbx/core";
-import { withTx } from "@sbx/db";
+import { requestStop, type StopRequestReason, UmiakError } from "@umiak/core";
+import { withTx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 
 // Controller `autostop` (S6 §12, every 15 s).
@@ -120,7 +120,7 @@ async function stop(
 			return requestStop(tx, ctx.jobs, sandboxId, reason);
 		});
 		if (op === null) return false;
-		ctx.metrics.inc("sbx_autostop_total", { reason });
+		ctx.metrics.inc("umiak_autostop_total", { reason });
 		ctx.log.info(
 			{ sandboxId, operationId: op.id, reason },
 			"autostop requested",
@@ -128,7 +128,7 @@ async function stop(
 		return true;
 	} catch (err) {
 		// Another operation became active or the state moved on: next run.
-		if (err instanceof SbxError) {
+		if (err instanceof UmiakError) {
 			ctx.log.debug({ sandboxId, reason, code: err.code }, "autostop skipped");
 			return false;
 		}

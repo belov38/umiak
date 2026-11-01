@@ -95,7 +95,7 @@ func replaceOnce(path string, edit func([]byte) ([]byte, error)) (bool, error) {
 	}
 	suffix := make([]byte, 6)
 	_, _ = rand.Read(suffix)
-	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".sbx-"+hex.EncodeToString(suffix))
+	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".umiak-"+hex.EncodeToString(suffix))
 	if err := writeSynced(tmp, out); err != nil {
 		_ = os.Remove(tmp)
 		return false, err

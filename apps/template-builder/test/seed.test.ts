@@ -26,7 +26,7 @@ const fixtures = resolve(import.meta.dirname, "fixtures/templates");
 
 const tmpDirs: string[] = [];
 function tmp(): string {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-seed-test-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-seed-test-"));
 	tmpDirs.push(dir);
 	return dir;
 }
@@ -76,7 +76,7 @@ describe("renderSeed cloud-init files", () => {
 		const files = renderSeed(input());
 		expect(parseYaml(text(files, "meta-data"))).toEqual({
 			"instance-id": BUILD_ID,
-			"local-hostname": "sbx-build",
+			"local-hostname": "umiak-build",
 		});
 	});
 
@@ -253,14 +253,14 @@ describe("renderSeed build tree", () => {
 
 	it("copies files/ with child over parent", () => {
 		const files = renderSeed(input("child"));
-		expect(text(files, "build/files/etc/sbx-fixture.conf")).toBe(
+		expect(text(files, "build/files/etc/umiak-fixture.conf")).toBe(
 			"origin=child\n",
 		);
-		expect(text(files, "build/files/etc/sbx-parent-only.conf")).toBe(
+		expect(text(files, "build/files/etc/umiak-parent-only.conf")).toBe(
 			"only=linux-fixture\n",
 		);
 		const parent = renderSeed(input());
-		expect(text(parent, "build/files/etc/sbx-fixture.conf")).toBe(
+		expect(text(parent, "build/files/etc/umiak-fixture.conf")).toBe(
 			"origin=linux-fixture\n",
 		);
 	});
@@ -270,10 +270,10 @@ describe("renderSeed build tree", () => {
 			input("linux-fixture", { version: "20261030.1", buildId: "a b'c" }),
 		);
 		const env = text(files, "build/env");
-		expect(env).toContain("SBX_BUILD_ID='a b'\\''c'\n");
-		expect(env).toContain("SBX_BUILD_VERSION='20261030.1'\n");
-		expect(env).toContain("SBX_AGENT_VERSION='1.2.3'\n");
-		expect(env).toContain("SBX_APT_SNAPSHOT='20261029T000000Z'\n");
+		expect(env).toContain("UMIAK_BUILD_ID='a b'\\''c'\n");
+		expect(env).toContain("UMIAK_BUILD_VERSION='20261030.1'\n");
+		expect(env).toContain("UMIAK_AGENT_VERSION='1.2.3'\n");
+		expect(env).toContain("UMIAK_APT_SNAPSHOT='20261029T000000Z'\n");
 		// The file is valid shell and round-trips the values.
 		const dir = tmp();
 		writeFileSync(join(dir, "env"), env);
@@ -281,7 +281,7 @@ describe("renderSeed build tree", () => {
 			"sh",
 			[
 				"-c",
-				'. "$1"; printf %s "$SBX_BUILD_ID|$SBX_AGENT_VERSION"',
+				'. "$1"; printf %s "$UMIAK_BUILD_ID|$UMIAK_AGENT_VERSION"',
 				"sh",
 				join(dir, "env"),
 			],
@@ -296,7 +296,7 @@ describe("renderSeed build tree", () => {
 			manifestBase: { slug: "linux-fixture", extra: [1, 2] },
 		});
 		const files = renderSeed(i);
-		const pkg = files.get("build/sbx-agent.tar");
+		const pkg = files.get("build/umiak-agent.tar");
 		expect(Buffer.isBuffer(pkg)).toBe(true);
 		expect((pkg as Buffer).equals(AGENT_BYTES)).toBe(true);
 		expect(text(files, "build/agent.toml")).toBe(
@@ -308,21 +308,21 @@ describe("renderSeed build tree", () => {
 		});
 	});
 
-	it("optional files: SSH CA, sbx CLI, config", () => {
+	it("optional files: SSH CA, umiak CLI, config", () => {
 		const bare = renderSeed(input());
 		expect(text(bare, "build/ssh-user-ca.pub")).toBe("");
-		expect(bare.has("build/sbx")).toBe(false);
-		expect(bare.has("build/sbx-config.json")).toBe(false);
+		expect(bare.has("build/umiak")).toBe(false);
+		expect(bare.has("build/umiak-config.json")).toBe(false);
 
 		const dir = tmp();
 		const ca = join(dir, "ca.pub");
-		const cli = join(dir, "sbx");
+		const cli = join(dir, "umiak");
 		writeFileSync(ca, "ssh-ed25519 AAAAC3Nza test-ca\n");
 		writeFileSync(cli, Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
 		const full = renderSeed(
 			input("linux-fixture", {
 				sshUserCa: ca,
-				sbxCli: cli,
+				umiakCli: cli,
 				apiUrl: "https://api.example.com",
 			}),
 		);
@@ -330,11 +330,11 @@ describe("renderSeed build tree", () => {
 			"ssh-ed25519 AAAAC3Nza test-ca\n",
 		);
 		expect(
-			(full.get("build/sbx") as Buffer).equals(
+			(full.get("build/umiak") as Buffer).equals(
 				Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
 			),
 		).toBe(true);
-		expect(JSON.parse(text(full, "build/sbx-config.json"))).toEqual({
+		expect(JSON.parse(text(full, "build/umiak-config.json"))).toEqual({
 			apiUrl: "https://api.example.com",
 		});
 	});
@@ -349,9 +349,9 @@ describe("makeIso", () => {
 			const files = renderSeed(input());
 			const deep = [
 				"build/steps/40-coding-agents.sh",
-				"build/files/etc/sudoers.d/90-sbx-user",
-				"build/files/etc/systemd/system/systemd-networkd-wait-online.service.d/10-sbx.conf",
-				"build/sbx-agent-0.1.0+20261030.abc1234-linux-amd64.tar",
+				"build/files/etc/sudoers.d/90-umiak-user",
+				"build/files/etc/systemd/system/systemd-networkd-wait-online.service.d/10-umiak.conf",
+				"build/umiak-agent-0.1.0+20261030.abc1234-linux-amd64.tar",
 			];
 			for (const p of deep) files.set(p, "x\n");
 			const out = join(tmp(), "seed.iso");

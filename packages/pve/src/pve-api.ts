@@ -318,7 +318,7 @@ export class PveApi implements PveClient {
 				return Promise.reject(
 					new Error(`upload ${path}: bad part name ${JSON.stringify(name)}`),
 				);
-		const boundary = `sbx-${randomBytes(16).toString("hex")}`;
+		const boundary = `umiak-${randomBytes(16).toString("hex")}`;
 		let head = "";
 		for (const [k, v] of uploadFieldOrder(fields))
 			head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;

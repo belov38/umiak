@@ -9,14 +9,18 @@ import {
 	timestampFromDate,
 	ValueSchema,
 } from "@bufbuild/protobuf/wkt";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import {
 	type AgentEventsRequest,
 	AgentEventsRequestSchema,
 	AgentEventsResponseSchema,
 	ConnectionEventSchema,
 	EventSchema,
-} from "@sbx/proto";
+} from "@umiak/proto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ServiceTokens } from "../src/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
@@ -84,14 +88,14 @@ describe.skipIf(skipPg())("POST /internal/v1/agent-events", () => {
 			machineId,
 			events: [
 				event(1, "activity", { runningCommands: 2, openPtys: 0 }),
-				event(2, "sbx.tunnel.event_too_large"),
+				event(2, "umiak.tunnel.event_too_large"),
 				create(EventSchema, {
 					seq: 3n,
 					time: timestampFromDate(T0),
 					bootId: "boot-1",
 					type: "s3.only",
 					payload: {
-						typeUrl: "type.googleapis.com/sbx.agent.v1.Unknown",
+						typeUrl: "type.googleapis.com/umiak.agent.v1.Unknown",
 						value: new Uint8Array([8, 1]),
 					},
 				}),
@@ -135,7 +139,7 @@ describe.skipIf(skipPg())("POST /internal/v1/agent-events", () => {
 			{
 				seq: 2,
 				boot_id: "boot-1",
-				type: "sbx.tunnel.event_too_large",
+				type: "umiak.tunnel.event_too_large",
 				time: T0,
 				payload: {},
 			},
@@ -144,7 +148,7 @@ describe.skipIf(skipPg())("POST /internal/v1/agent-events", () => {
 				boot_id: "boot-1",
 				type: "s3.only",
 				time: T0,
-				payload: { "@type": "type.googleapis.com/sbx.agent.v1.Unknown" },
+				payload: { "@type": "type.googleapis.com/umiak.agent.v1.Unknown" },
 			},
 		]);
 		expect(w.env.jobs.sent).toEqual([

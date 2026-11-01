@@ -1,7 +1,7 @@
 // API error → text of the dashboard (S8 §9.5, S7 §5.5, §23.2). The codes
 // the user can act on get their own words; anything else shows the API's
 // message, which is written for people too. Pure: no DOM, no toast.
-import { NETWORK_ERROR, SbxError, UNEXPECTED_RESPONSE } from "@sbx/sdk";
+import { NETWORK_ERROR, UmiakError, UNEXPECTED_RESPONSE } from "@umiak/sdk";
 
 export interface ErrorView {
 	/** The API code, or null for something that is not an API error. */
@@ -39,11 +39,11 @@ const QUOTA_NAMES: Record<string, string> = {
 	maxSavedSnapshots: "saved snapshots",
 };
 
-function isSbxError(e: unknown): e is SbxError {
+function isUmiakError(e: unknown): e is UmiakError {
 	return (
-		e instanceof SbxError ||
+		e instanceof UmiakError ||
 		(e instanceof Error &&
-			e.name === "SbxError" &&
+			e.name === "UmiakError" &&
 			typeof (e as { code?: unknown }).code === "string")
 	);
 }
@@ -53,12 +53,12 @@ function isSbxError(e: unknown): e is SbxError {
  * `forceStop` (S9 §24.8): ask the user, then retry with `forceStop: true`.
  */
 export function isSnapshotRequiresStop(e: unknown): boolean {
-	return isSbxError(e) && e.code === "snapshot_requires_stop";
+	return isUmiakError(e) && e.code === "snapshot_requires_stop";
 }
 
 /** No answer from the API: network, a proxy page instead of the API, or a pod going away. */
 export function isApiUnavailable(e: unknown): boolean {
-	if (!isSbxError(e)) return false;
+	if (!isUmiakError(e)) return false;
 	if (e.code === NETWORK_ERROR) return true;
 	if (e.code === UNEXPECTED_RESPONSE) {
 		return e.status === 502 || e.status === 503 || e.status === 504;
@@ -99,7 +99,7 @@ function issuesText(d: Record<string, unknown>, fallback: string): string {
 		: `Some fields are not valid: ${lines.join("; ")}.`;
 }
 
-function forbiddenText(e: SbxError): string {
+function forbiddenText(e: UmiakError): string {
 	switch (str(e.details.reason)) {
 		case "sandbox_blocked":
 			return "A platform operator blocked this sandbox: only reading, stop and delete work.";
@@ -116,7 +116,7 @@ function forbiddenText(e: SbxError): string {
 	}
 }
 
-function textOf(e: SbxError): { message: string; retry?: boolean } {
+function textOf(e: UmiakError): { message: string; retry?: boolean } {
 	const d = e.details;
 	switch (e.code) {
 		case "quota_exceeded":
@@ -189,7 +189,7 @@ function textOf(e: SbxError): { message: string; retry?: boolean } {
 
 /** What to tell the user about `e`. */
 export function describeError(e: unknown): ErrorView {
-	if (!isSbxError(e)) {
+	if (!isUmiakError(e)) {
 		return {
 			code: null,
 			message: GENERIC_ERROR,

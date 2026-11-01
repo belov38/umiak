@@ -1,4 +1,4 @@
-// stdio entry of the MCP server (S11 6.1, 10.2): `sbx mcp` calls runStdio
+// stdio entry of the MCP server (S11 6.1, 10.2): `umiak mcp` calls runStdio
 // with the CLI's SDK client. One connection per process: the principal is
 // read once (GET /v1/me, 5 s), stdout carries only JSON-RPC, and a client's
 // notifications/cancelled is told apart from a stdin close, so exec_run
@@ -15,7 +15,7 @@ import {
 	StdioServerTransport,
 	serveStdio,
 } from "@modelcontextprotocol/server/stdio";
-import type { Sbx } from "@sbx/sdk";
+import type { Umiak } from "@umiak/sdk";
 import type { Logger } from "./log.ts";
 import type { Toolset } from "./registry.ts";
 import { createServer, type ServerOptions } from "./server.ts";
@@ -25,13 +25,13 @@ import { ALL_TOOLS } from "./tools/index.ts";
 export const PRINCIPAL_TIMEOUT_MS = 5_000;
 
 export interface StdioOptions {
-	/** The SDK client; throws SbxError/ToolError not_logged_in when there is no login. */
-	sbx: () => Sbx;
+	/** The SDK client; throws UmiakError/ToolError not_logged_in when there is no login. */
+	umiak: () => Umiak;
 	toolsets?: Toolset[];
 	readOnly?: boolean;
 	/** Sandbox id or slug (`self` is resolved by the caller). */
 	pinnedSandbox?: string;
-	/** Hint of an API 401 a new token does not fix; default: run `sbx login`. */
+	/** Hint of an API 401 a new token does not fix; default: run `umiak login`. */
 	unauthorizedHint?: string;
 	log: Logger;
 	/** Default process.stdin / process.stdout (tests pass their own). */
@@ -122,11 +122,11 @@ const PRINCIPAL_KINDS = new Set<string>(["oidc", "team_key", "session"]);
 
 /** GET /v1/me within PRINCIPAL_TIMEOUT_MS; null (list every tool) on any failure. */
 async function resolvePrincipal(
-	sbx: () => Sbx,
+	umiak: () => Umiak,
 	log: Logger,
 ): Promise<Principal | null> {
 	try {
-		const me = await sbx().me({
+		const me = await umiak().me({
 			signal: AbortSignal.timeout(PRINCIPAL_TIMEOUT_MS),
 			retryBudgetMs: PRINCIPAL_TIMEOUT_MS,
 		});
@@ -151,7 +151,7 @@ export async function runStdio(o: StdioOptions): Promise<StdioServer> {
 		new StdioServerTransport(o.stdin, o.stdout),
 	);
 	// Started now, awaited by the first message: startup never waits for it.
-	const principal = resolvePrincipal(o.sbx, o.log);
+	const principal = resolvePrincipal(o.umiak, o.log);
 	const handle = serveStdio(
 		async () =>
 			createServer({
@@ -165,7 +165,7 @@ export async function runStdio(o: StdioOptions): Promise<StdioServer> {
 					? {}
 					: { unauthorizedHint: o.unauthorizedHint }),
 				principal: await principal,
-				sbx: o.sbx,
+				umiak: o.umiak,
 				transport: "stdio",
 				log: o.log,
 				wasCancelledByClient: (id) => wire.wasCancelled(id),

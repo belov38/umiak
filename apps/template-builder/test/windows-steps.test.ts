@@ -33,7 +33,7 @@ const shared = join(templates, "_windows");
 const PWSH7_STEPS = [
 	"30-toolchains",
 	"40-coding-agents",
-	"50-sbx-agent",
+	"50-umiak-agent",
 	"60-desktop",
 	"90-cleanup",
 ];
@@ -163,7 +163,7 @@ describe("windows steps: files", () => {
 			...ps1Files(),
 			"files/scripts.ini",
 			"files/gpt.ini",
-			"files/sbx-early.cmd",
+			"files/umiak-early.cmd",
 			"files/SetupComplete-clone.cmd",
 		])
 			expect(
@@ -216,7 +216,7 @@ describe("windows steps: files", () => {
 		for (const rel of ps1Files()) {
 			const src = code(read(rel));
 			expect(src, rel).not.toMatch(/sysprep\.exe|\bseal\b/i);
-			expect(src, rel).not.toMatch(/\\sbx\\session|sbx-session/i);
+			expect(src, rel).not.toMatch(/\\umiak\\session|umiak-session/i);
 			expect(src, rel).not.toMatch(
 				/Set-RegValue[^\n]*(AutoAdminLogon|DefaultPassword|DefaultUserName)/,
 			);
@@ -229,7 +229,7 @@ describe("windows steps: services", () => {
 		const lib = read("lib.ps1");
 		// dmwappushservice stays Manual through sysprep; specialize disables it on each clone.
 		expect(SYSPREP_DEFERRED_SERVICES).toEqual(["dmwappushservice"]);
-		expect(psArray(lib, "SbxDisabledServices").sort()).toEqual(
+		expect(psArray(lib, "UmiakDisabledServices").sort()).toEqual(
 			DISABLED_SERVICES.filter(
 				(s) => !SYSPREP_DEFERRED_SERVICES.includes(s),
 			).sort(),
@@ -242,16 +242,16 @@ describe("windows steps: services", () => {
 			[...DISABLED_SERVICES].sort(),
 		);
 		// DoSvc carries the Windows Update payloads of the OpenSSH FoD.
-		expect(psArray(lib, "SbxUpdateServices").sort()).toEqual(
+		expect(psArray(lib, "UmiakUpdateServices").sort()).toEqual(
 			["DoSvc", "UsoSvc", "wuauserv"].sort(),
 		);
 		const base = code(read("steps/00-base.ps1"));
 		expect(base).toMatch(
-			/\$SbxDisabledServices \| Where-Object \{ \$_ -notin \$SbxUpdateServices \}/,
+			/\$UmiakDisabledServices \| Where-Object \{ \$_ -notin \$UmiakUpdateServices \}/,
 		);
 		const cleanup = code(read("steps/90-cleanup.ps1"));
-		expect(cleanup).toMatch(/\$SbxUpdateServices/);
-		expect(cleanup).toMatch(/\$SbxDisabledServices/);
+		expect(cleanup).toMatch(/\$UmiakUpdateServices/);
+		expect(cleanup).toMatch(/\$UmiakDisabledServices/);
 	});
 
 	it("VSS stays Manual for QGA fsfreeze", () => {
@@ -304,7 +304,7 @@ describe("windows steps: files/", () => {
 				"PasswordAuthentication no",
 				"KbdInteractiveAuthentication no",
 				"PubkeyAuthentication yes",
-				"TrustedUserCAKeys __PROGRAMDATA__/ssh/sbx_user_ca.pub",
+				"TrustedUserCAKeys __PROGRAMDATA__/ssh/umiak_user_ca.pub",
 			]),
 		);
 		expect(lines.filter((l) => /^ListenAddress\b/i.test(l))).toHaveLength(2);
@@ -313,12 +313,12 @@ describe("windows steps: files/", () => {
 		]);
 	});
 
-	it("the local GPO runs sbx-agent early at startup", () => {
+	it("the local GPO runs umiak-agent early at startup", () => {
 		const scripts = read("files/scripts.ini");
 		expect(scripts).toMatch(/^\[Startup\]\r?$/m);
 		// The wrapper survives a missing "current" junction.
 		expect(scripts).toMatch(
-			/^0CmdLine=C:\\Program Files\\sbx-agent\\sbx-early\.cmd\r?$/m,
+			/^0CmdLine=C:\\Program Files\\umiak-agent\\umiak-early\.cmd\r?$/m,
 		);
 		expect(scripts).toMatch(/^0Parameters=\r?$/m);
 		const gpt = read("files/gpt.ini");
@@ -328,30 +328,30 @@ describe("windows steps: files/", () => {
 		expect(gpt).toMatch(/^Version=\d+\r?$/m);
 	});
 
-	it("sbx-early.cmd runs `early` from current, else previous, else the newest version", () => {
-		const raw = readFileSync(join(shared, "files/sbx-early.cmd"), "utf8");
+	it("umiak-early.cmd runs `early` from current, else previous, else the newest version", () => {
+		const raw = readFileSync(join(shared, "files/umiak-early.cmd"), "utf8");
 		expect(raw.split("\n").every((l) => l === "" || l.endsWith("\r"))).toBe(
 			true,
 		);
 		const c = code(raw);
 		const at = (re: RegExp) => c.search(re);
-		const cur = at(/exist "%SBX_DIR%current\\sbx-agent\.exe"/);
-		const prev = at(/exist "%SBX_DIR%previous\\sbx-agent\.exe"/);
-		const newest = at(/dir \/b \/ad \/o-d "%SBX_DIR%versions"/);
-		const run = at(/^"%SBX_EXE%" early\r?$/m);
+		const cur = at(/exist "%UMIAK_DIR%current\\umiak-agent\.exe"/);
+		const prev = at(/exist "%UMIAK_DIR%previous\\umiak-agent\.exe"/);
+		const newest = at(/dir \/b \/ad \/o-d "%UMIAK_DIR%versions"/);
+		const run = at(/^"%UMIAK_EXE%" early\r?$/m);
 		expect(cur).toBeGreaterThanOrEqual(0);
 		expect(prev).toBeGreaterThan(cur);
 		expect(newest).toBeGreaterThan(prev);
 		expect(run).toBeGreaterThan(newest);
 		expect(c).toMatch(/exit \/b %errorlevel%\s*$/);
 		expect(c).toMatch(
-			/if not defined SBX_EXE \(\r?\n\s*echo[^\n]*\n\s*exit \/b 1/,
+			/if not defined UMIAK_EXE \(\r?\n\s*echo[^\n]*\n\s*exit \/b 1/,
 		);
 	});
 
 	it("profile.ps1 applies the agent env without executing it", () => {
 		const p = code(read("files/profile.ps1"));
-		expect(p).toMatch(/SBX_ENV_APPLIED/);
+		expect(p).toMatch(/UMIAK_ENV_APPLIED/);
 		expect(p).toMatch(/env --format pwsh/);
 		expect(p).toMatch(/Parser\]::ParseInput/);
 	});
@@ -368,30 +368,30 @@ describe("windows steps: step content", () => {
 		expect(s).toMatch(/POWERSHELL_TELEMETRY_OPTOUT/);
 	});
 
-	it("50-sbx-agent installs the package, the startup script and the sysprep answers", () => {
-		const s = code(read("steps/50-sbx-agent.ps1"));
+	it("50-umiak-agent installs the package, the startup script and the sysprep answers", () => {
+		const s = code(read("steps/50-umiak-agent.ps1"));
 		expect(s).toMatch(/'install-package', '--write-config', \$tar/);
 		// The installer comes out of the package itself (Windows tar.exe).
 		expect(s).toMatch(
-			/tar\.exe'\) -ArgumentList @\('-xf', \$tar, '-C', \$unpack, 'sbx-agent\.exe'\)/,
+			/tar\.exe'\) -ArgumentList @\('-xf', \$tar, '-C', \$unpack, 'umiak-agent\.exe'\)/,
 		);
 		expect(s).toMatch(/SyncForegroundPolicy/);
 		// scripts.ini as Group Policy writes it: UTF-16 LE, CRLF.
 		expect(s).toMatch(/-replace "`r\?`n", "`r`n"/);
 		expect(s).toMatch(/scripts\.ini'\) -Value \$ini -Encoding Unicode/);
 		// The wrapper goes next to the agent, CRLF, and is what the GPO must register.
-		expect(s).toMatch(/'sbx-agent\\sbx-early\.cmd'/);
+		expect(s).toMatch(/'umiak-agent\\umiak-early\.cmd'/);
 		expect(s).toMatch(/Where-Object \{ \$_ -eq \$earlyCmd \}/);
 		expect(s).toMatch(/DelayedAutostart/);
 		expect(s).toMatch(/gpupdate\.exe/);
 		expect(s).toMatch(/QEMU-GA/);
-		expect(s).toMatch(/sbx-unattend\.xml/);
+		expect(s).toMatch(/umiak-unattend\.xml/);
 	});
 
 	it("90-cleanup keeps build.json and checks for leftovers", () => {
 		const s = code(read("steps/90-cleanup.ps1"));
-		expect(s).toMatch(/sbx-template\\build\.json/);
-		expect(s).not.toMatch(/Remove-Item[^\n]*sbx-template/);
+		expect(s).toMatch(/umiak-template\\build\.json/);
+		expect(s).not.toMatch(/Remove-Item[^\n]*umiak-template/);
 		expect(s).toMatch(/StartComponentCleanup/);
 		expect(s).toMatch(/authorized_keys/);
 		expect(s).toMatch(/Panther/);
@@ -513,7 +513,7 @@ describe("windows steps: step content", () => {
 		const last = reboots.at(-1) ?? -1;
 		expect(last).toBeGreaterThan(steps.indexOf("40-coding-agents"));
 		// The agent service and its startup script must never run on the build VM.
-		expect(last).toBeLessThan(steps.indexOf("50-sbx-agent"));
+		expect(last).toBeLessThan(steps.indexOf("50-umiak-agent"));
 	});
 
 	it("00-base keeps going when an Appx package or an Edge update task resists", () => {
@@ -549,7 +549,7 @@ describe("windows steps: build ISO", () => {
 				"build/files/profile.ps1",
 				"build/files/scripts.ini",
 				"build/files/gpt.ini",
-				"build/files/sbx-early.cmd",
+				"build/files/umiak-early.cmd",
 				"build/files/firstboot.ps1",
 				"build/files/SetupComplete-clone.cmd",
 			]),
@@ -578,14 +578,14 @@ describe("windows steps: clone first boot", () => {
 	it("firstboot.ps1 disables the services of lib.ps1, CDPSvc and dmwappushservice", () => {
 		const lib = read("lib.ps1");
 		const want = new Set([
-			...psArray(lib, "SbxDisabledServices"),
-			...psArray(lib, "SbxUpdateServices"),
+			...psArray(lib, "UmiakDisabledServices"),
+			...psArray(lib, "UmiakUpdateServices"),
 			"CDPSvc",
 			"dmwappushservice",
 		]);
 		const fb = read("files/firstboot.ps1");
 		expect(psArray(fb, "Services").sort()).toEqual([...want].sort());
-		expect(psArray(lib, "SbxDisabledServices")).toContain("CDPSvc");
+		expect(psArray(lib, "UmiakDisabledServices")).toContain("CDPSvc");
 	});
 
 	it("firstboot.ps1 is self-contained 5.1, restores code pages, BCD, WinRE, NetBIOS, firewall policy", () => {
@@ -594,7 +594,7 @@ describe("windows steps: clone first boot", () => {
 		expect(raw.split(/\r?\n/, 1)[0]).not.toMatch(PWSH7_HEADER);
 		expect(s).not.toMatch(/lib\.ps1/);
 		expect(s).toMatch(
-			/\[string\]\$LogPath = 'C:\\ProgramData\\sbx-template\\firstboot\.log'/,
+			/\[string\]\$LogPath = 'C:\\ProgramData\\umiak-template\\firstboot\.log'/,
 		);
 		expect(s).toMatch(/Control\\Nls\\CodePage/);
 		expect(s).toMatch(/@\('ACP', 'OEMCP', 'MACCP'\)[\s\S]*'65001'/);
@@ -623,7 +623,7 @@ describe("windows steps: clone first boot", () => {
 		// firstboot.done (a timestamp) is the last action: the agent waits
 		// for it before the rename reboot.
 		expect(s).toMatch(
-			/\[string\]\$DonePath = 'C:\\ProgramData\\sbx-template\\firstboot\.done'/,
+			/\[string\]\$DonePath = 'C:\\ProgramData\\umiak-template\\firstboot\.done'/,
 		);
 		expect(s).toMatch(
 			/Write-Log 'done'\s*try \{[^\n]*\n(\s+[^\n]*\n)*?\s+\[IO\.File\]::WriteAllText\(\$DonePath, \(Get-Date\)\.ToUniversalTime\(\)\.ToString\('o'\)\)\s*\} catch \{\s*Write-Log "ERROR done marker: [^\n]*"\s*\}\s*exit 0\s*$/,
@@ -631,7 +631,7 @@ describe("windows steps: clone first boot", () => {
 	});
 
 	it("firstboot.ps1 exits 0, ends its log with done and writes firstboot.done even when every part fails", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-firstboot-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-firstboot-"));
 		try {
 			const log = join(dir, "firstboot.log");
 			const done = join(dir, "marker", "firstboot.done");
@@ -670,7 +670,7 @@ describe("windows steps: clone first boot", () => {
 			true,
 		);
 		expect(raw).toMatch(
-			/^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\\ProgramData\\sbx-template\\firstboot\.ps1"\r$/m,
+			/^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\\ProgramData\\umiak-template\\firstboot\.ps1"\r$/m,
 		);
 		expect(raw.trimEnd().split(/\r?\n/).at(-1)).toBe("exit /b 0");
 	});
@@ -688,7 +688,7 @@ describe("windows steps: clone first boot", () => {
 			/\$setupComplete = Join-Path \$env:SystemRoot 'Setup\\Scripts\\SetupComplete\.cmd'/,
 		);
 		expect(s).toMatch(
-			/\$firstBoot = Join-Path \$env:ProgramData 'sbx-template\\firstboot\.ps1'/,
+			/\$firstBoot = Join-Path \$env:ProgramData 'umiak-template\\firstboot\.ps1'/,
 		);
 		expect(s).toMatch(
 			/Copy-BuildFile -Name 'firstboot\.ps1' -Destination \$firstBoot/,
@@ -707,7 +707,7 @@ describe("windows steps: clone first boot", () => {
 	it("90-cleanup leaves no firstboot.done in the image (the agent waits for it on the clone)", () => {
 		const s = code(read("steps/90-cleanup.ps1"));
 		expect(s).toMatch(
-			/\$firstBootDone = Join-Path \$env:ProgramData 'sbx-template\\firstboot\.done'/,
+			/\$firstBootDone = Join-Path \$env:ProgramData 'umiak-template\\firstboot\.done'/,
 		);
 		expect(s).toMatch(/Remove-Leftover \$firstBootDone/);
 		const check = s.slice(
@@ -730,30 +730,30 @@ describe("windows steps: PowerShell parser", () => {
 	});
 
 	it("profile.ps1 applies exactly the two env line forms and ignores everything else", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-profile-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-profile-"));
 		try {
 			const b64 = (v: string) => Buffer.from(v, "utf8").toString("base64");
 			const out = [
-				"$env:SBX_T_PLAIN = 'it''s plain'",
-				`$env:SBX_T_B64 = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64("line1\nline2 \u00e9")}'))`,
-				'$env:SBX_T_DOUBLE = "expanded $env:HOME"',
-				"$env:SBX_T_HERE = @'\nx\n'@",
-				"$" + "{env:SBX_T-BAD} = 'braced name'",
+				"$env:UMIAK_T_PLAIN = 'it''s plain'",
+				`$env:UMIAK_T_B64 = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64("line1\nline2 \u00e9")}'))`,
+				'$env:UMIAK_T_DOUBLE = "expanded $env:HOME"',
+				"$env:UMIAK_T_HERE = @'\nx\n'@",
+				"$" + "{env:UMIAK_T-BAD} = 'braced name'",
 				"$env:1BAD = 'digit first'",
-				"$env:SBX_T_CMD = (Get-Date).ToString()",
-				`$env:SBX_T_OTHER = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64("x")}')) + 'tail'`,
-				"$env:SBX_T_STATIC = [System.Environment]::MachineName",
-				"$script:SBX_T_VAR = 'not env'",
-				"Set-Content -LiteralPath SBX_T_MARK -Value x",
+				"$env:UMIAK_T_CMD = (Get-Date).ToString()",
+				`$env:UMIAK_T_OTHER = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64("x")}')) + 'tail'`,
+				"$env:UMIAK_T_STATIC = [System.Environment]::MachineName",
+				"$script:UMIAK_T_VAR = 'not env'",
+				"Set-Content -LiteralPath UMIAK_T_MARK -Value x",
 			];
-			const agent = join(dir, "sbx-agent");
+			const agent = join(dir, "umiak-agent");
 			writeFileSync(
 				agent,
-				`#!/bin/sh\ncat <<'EOF_SBX'\n${out.join("\n")}\nEOF_SBX\n`,
+				`#!/bin/sh\ncat <<'EOF_UMIAK'\n${out.join("\n")}\nEOF_UMIAK\n`,
 				{ mode: 0o755 },
 			);
 			const profile = read("files/profile.ps1").replace(
-				"'C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe'",
+				"'C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe'",
 				`'${agent}'`,
 			);
 			expect(profile).toContain(agent);
@@ -762,12 +762,12 @@ describe("windows steps: PowerShell parser", () => {
 				script,
 				`Set-Location '${dir}'
 . '${join(dir, "profile.ps1")}'
-foreach ($n in 'SBX_T_PLAIN','SBX_T_B64','SBX_T_DOUBLE','SBX_T_HERE','SBX_T_CMD','SBX_T_OTHER','SBX_T_STATIC','SBX_T_VAR') {
+foreach ($n in 'UMIAK_T_PLAIN','UMIAK_T_B64','UMIAK_T_DOUBLE','UMIAK_T_HERE','UMIAK_T_CMD','UMIAK_T_OTHER','UMIAK_T_STATIC','UMIAK_T_VAR') {
   $v = [Environment]::GetEnvironmentVariable($n)
   Write-Output ($n + '=' + $(if ($null -eq $v) { '<unset>' } else { $v.Replace("\`n", '|') }))
 }
-Write-Output ('applied=' + $env:SBX_ENV_APPLIED)
-Write-Output ('mark=' + (Test-Path -LiteralPath (Join-Path '${dir}' 'SBX_T_MARK')))
+Write-Output ('applied=' + $env:UMIAK_ENV_APPLIED)
+Write-Output ('mark=' + (Test-Path -LiteralPath (Join-Path '${dir}' 'UMIAK_T_MARK')))
 `,
 			);
 			writeFileSync(join(dir, "profile.ps1"), profile);
@@ -778,14 +778,14 @@ Write-Output ('mark=' + (Test-Path -LiteralPath (Join-Path '${dir}' 'SBX_T_MARK'
 			);
 			expect(r.stderr).toBe("");
 			expect(r.stdout.split(/\r?\n/).filter(Boolean)).toEqual([
-				"SBX_T_PLAIN=it's plain",
-				"SBX_T_B64=line1|line2 \u00e9",
-				"SBX_T_DOUBLE=<unset>",
-				"SBX_T_HERE=<unset>",
-				"SBX_T_CMD=<unset>",
-				"SBX_T_OTHER=<unset>",
-				"SBX_T_STATIC=<unset>",
-				"SBX_T_VAR=<unset>",
+				"UMIAK_T_PLAIN=it's plain",
+				"UMIAK_T_B64=line1|line2 \u00e9",
+				"UMIAK_T_DOUBLE=<unset>",
+				"UMIAK_T_HERE=<unset>",
+				"UMIAK_T_CMD=<unset>",
+				"UMIAK_T_OTHER=<unset>",
+				"UMIAK_T_STATIC=<unset>",
+				"UMIAK_T_VAR=<unset>",
 				"applied=1",
 				"mark=False",
 			]);
@@ -795,7 +795,7 @@ Write-Output ('mark=' + (Test-Path -LiteralPath (Join-Path '${dir}' 'SBX_T_MARK'
 	});
 
 	it("every .ps1 parses without errors", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-ps-parse-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-ps-parse-"));
 		try {
 			const script = join(dir, "parse.ps1");
 			writeFileSync(
@@ -825,7 +825,7 @@ exit $bad
 
 /** Runs `body` in pwsh after dot-sourcing lib.ps1; returns the exit status and output. */
 function runWithLib(body: string): { status: number | null; out: string } {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-lib-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-lib-"));
 	try {
 		writeFileSync(join(dir, "lib.ps1"), read("lib.ps1"));
 		const script = join(dir, "t.ps1");
@@ -835,7 +835,7 @@ function runWithLib(body: string): { status: number | null; out: string } {
 			["-NoProfile", "-NonInteractive", "-File", script],
 			{
 				encoding: "utf8",
-				env: { ...process.env, NO_COLOR: "1", SBX_BUILD_DIR: dir },
+				env: { ...process.env, NO_COLOR: "1", UMIAK_BUILD_DIR: dir },
 			},
 		);
 		return { status: r.status, out: r.stdout + r.stderr };
@@ -871,7 +871,7 @@ Write-Output "runs $script:runs"`);
 	});
 
 	it("Invoke-Probe closes stdin, returns the output and the exit code", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-probe-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-probe-"));
 		try {
 			const tool = join(dir, "tool");
 			// Waits for stdin like a CLI that prompts: EOF lets it go on at once.
@@ -895,7 +895,7 @@ Write-Output "err $($r.Errors -join '|')"`);
 	});
 
 	it("Invoke-Probe kills a tool that does not exit in time, with its children", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-probe-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-probe-"));
 		try {
 			const tool = join(dir, "hang");
 			const pidFile = join(dir, "child.pid");
@@ -927,12 +927,12 @@ Write-Output "err $($r.Errors -join '|')"`);
 
 describe("run-step.ps1 (pwsh)", () => {
 	it("a log write blocked by another handle never fails the step; the line is written later", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-run-step-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-run-step-"));
 		try {
 			const logs = join(dir, "logs");
 			const wrapper = read("run-step.ps1");
 			const patched = wrapper
-				.replace("$logDir = 'C:\\sbx-build\\logs'", `$logDir = '${logs}'`)
+				.replace("$logDir = 'C:\\umiak-build\\logs'", `$logDir = '${logs}'`)
 				.replace("$logRetries = 40", "$logRetries = 3")
 				.replace("$logRetryMs = 250", "$logRetryMs = 50");
 			expect(patched).toContain(`$logDir = '${logs}'`);
@@ -945,7 +945,7 @@ describe("run-step.ps1 (pwsh)", () => {
 			writeFileSync(
 				join(dir, "build", "steps", "t.ps1"),
 				`#requires -Version 7
-$h = [System.IO.File]::Open($env:SBX_TEST_LOG, 'Open', 'ReadWrite', 'None')
+$h = [System.IO.File]::Open($env:UMIAK_TEST_LOG, 'Open', 'ReadWrite', 'None')
 Write-Output 'during-lock'
 Start-Sleep -Milliseconds 1500
 $h.Dispose()
@@ -980,7 +980,7 @@ exit 0
 						...process.env,
 						NO_COLOR: "1",
 						ProgramFiles: join(dir, "pf"),
-						SBX_TEST_LOG: join(logs, "t.log"),
+						UMIAK_TEST_LOG: join(logs, "t.log"),
 					},
 				},
 			);

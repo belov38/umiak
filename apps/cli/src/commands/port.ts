@@ -1,15 +1,15 @@
 // Published ports (S7 §11.2, §14.2):
-// - `sbx port [<sb>] <port> [--token|--sso|--public] [--host-rewrite m]
+// - `umiak port [<sb>] <port> [--token|--sso|--public] [--host-rewrite m]
 //   [--app-protocol p]`: publishes the port (PUT; defaults token, preserve,
 //   http1) and prints its URL, with `?_token=` when this call issued a token
 //   (a new port in token mode, or a switch to it);
-// - `sbx ports [<sb>]`: hosted and listening ports;
-// - `sbx unport [<sb>] <port>`: unpublishes;
-// - `sbx port-token [<sb>] <port>`: a new token (the old one stops at once);
+// - `umiak ports [<sb>]`: hosted and listening ports;
+// - `umiak unport [<sb>] <port>`: unpublishes;
+// - `umiak port-token [<sb>] <port>`: a new token (the old one stops at once);
 //   prints the URL with it.
 // With one positional, the sandbox is the current one.
 
-import type { HostOptions, SandboxPorts } from "@sbx/sdk";
+import type { HostOptions, SandboxPorts } from "@umiak/sdk";
 import type { Command } from "commander";
 import { useSandbox } from "../current.ts";
 import { usageError } from "../exit-codes.ts";

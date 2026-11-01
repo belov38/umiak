@@ -30,7 +30,7 @@ it("desktop inherits Linux pins, uses only slot 596 and enables the desktop read
 	expect(loadVersions(recipe).tools).toEqual(
 		loadVersions(loadRecipe(templates, "linux")).tools,
 	);
-	expect(stepFile(recipe, "50-sbx-agent")).toContain("/linux/steps/");
+	expect(stepFile(recipe, "50-umiak-agent")).toContain("/linux/steps/");
 	expect(stepFile(recipe, "60-desktop")).toContain("/linux-desktop/steps/");
 	const dir = mkdtempSync(join(tmpdir(), "desktop-seed-"));
 	try {
@@ -56,9 +56,9 @@ it("desktop inherits Linux pins, uses only slot 596 and enables the desktop read
 			expect.arrayContaining([47800, 47984, 47989, 47990, 48010]),
 		);
 		expect(files.has("build/steps/60-desktop.sh")).toBe(true);
-		expect(files.has("build/files/etc/X11/xorg.conf.d/10-sbx-dummy.conf")).toBe(
-			true,
-		);
+		expect(
+			files.has("build/files/etc/X11/xorg.conf.d/10-umiak-dummy.conf"),
+		).toBe(true);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -83,10 +83,10 @@ it("normalizes non-executable upstream archive binaries before checking them", (
 			"utf8",
 		);
 		const start = script.indexOf('ln -sfn "$moonlight"');
-		const end = script.indexOf("id sbxstream", start);
+		const end = script.indexOf("id umiakstream", start);
 		const fragment = script
 			.slice(start, end)
-			.replaceAll("/opt/sbx-desktop", root);
+			.replaceAll("/opt/umiak-desktop", root);
 		spawnSync("mkdir", [
 			"-p",
 			join(root, "moonlight-web/test"),

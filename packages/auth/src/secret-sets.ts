@@ -1,6 +1,6 @@
 // Env and secrets of a sandbox or an environment (S7 §8.3, S8 §10) and the
 // patch rules shared by fork, resume, `PATCH /env` and environments. Lives in
-// auth so that the environments store and @sbx/core (which re-exports it) use
+// auth so that the environments store and @umiak/core (which re-exports it) use
 // one implementation; limits and encryption stay in core.
 
 export interface SecretFile {

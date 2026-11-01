@@ -2,7 +2,7 @@
 # Builds the patched moonlight-web web-server.exe of the windows-desktop recipe (S10 spec 8.6).
 # Upstream v3.0.1 with ping-order.patch applied to its pinned moonlight-common-rust: the audio
 # stream waits for the first video packet, so Sunshine cannot take the audio socket for the
-# video address. Run before `sbx-tpl build windows-desktop`; the output lands in
+# video address. Run before `umiak-tpl build windows-desktop`; the output lands in
 # ../files/moonlight-web/ (gitignored), where desktop-install.ps1 picks it up.
 #
 #   infra/templates/windows-desktop/moonlight-web/build.sh

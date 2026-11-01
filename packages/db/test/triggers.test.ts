@@ -48,7 +48,7 @@ class Listener {
 	 */
 	async reset(pool: pg.Pool): Promise<void> {
 		const sentinel = `sentinel-${Math.random()}`;
-		await pool.query("SELECT pg_notify('sbx_routes', $1)", [sentinel]);
+		await pool.query("SELECT pg_notify('umiak_routes', $1)", [sentinel]);
 		const deadline = Date.now() + 3000;
 		while (!this.notes.some((n) => n.payload === sentinel)) {
 			if (Date.now() > deadline) throw new Error("sentinel not received");
@@ -125,7 +125,11 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 			[ids.build, ids.provider, ids.node, ids.storage],
 		);
 		listener = new Listener(db.url);
-		await listener.start(["sbx_routes", "sbx_sandboxes", "sbx_operations"]);
+		await listener.start([
+			"umiak_routes",
+			"umiak_sandboxes",
+			"umiak_operations",
+		]);
 	});
 
 	afterAll(async () => {
@@ -171,7 +175,7 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 		});
 	});
 
-	describe("NOTIFY sbx_routes", () => {
+	describe("NOTIFY umiak_routes", () => {
 		it("sends the old and the new slug on rename", async () => {
 			const id = await insertSandbox("quiet-otter-lamp");
 			await listener.reset(db.pool);
@@ -180,7 +184,7 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 				[id],
 			);
 			const notes = (await listener.waitFor(2)).filter(
-				(n) => n.channel === "sbx_routes",
+				(n) => n.channel === "umiak_routes",
 			);
 			expect(notes.map((n) => n.payload)).toEqual([
 				"quiet-otter-lamp",
@@ -199,9 +203,9 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 				id,
 			]);
 			const notes = await listener.waitFor(3);
-			expect(notes.filter((n) => n.channel === "sbx_routes")).toEqual([
-				{ channel: "sbx_routes", payload: "calm-river-stone" },
-				{ channel: "sbx_routes", payload: "calm-river-stone" },
+			expect(notes.filter((n) => n.channel === "umiak_routes")).toEqual([
+				{ channel: "umiak_routes", payload: "calm-river-stone" },
+				{ channel: "umiak_routes", payload: "calm-river-stone" },
 			]);
 		});
 
@@ -221,14 +225,14 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 			await q("DELETE FROM runtime.hosted_ports WHERE id = $1", [port]);
 			const notes = await listener.waitFor(3);
 			expect(notes).toEqual([
-				{ channel: "sbx_routes", payload: "green-hill-path" },
-				{ channel: "sbx_routes", payload: "green-hill-path" },
-				{ channel: "sbx_routes", payload: "green-hill-path" },
+				{ channel: "umiak_routes", payload: "green-hill-path" },
+				{ channel: "umiak_routes", payload: "green-hill-path" },
+				{ channel: "umiak_routes", payload: "green-hill-path" },
 			]);
 		});
 	});
 
-	describe("NOTIFY sbx_sandboxes", () => {
+	describe("NOTIFY umiak_sandboxes", () => {
 		it("sends the id on state and health changes, not on other updates", async () => {
 			const id = await insertSandbox("tall-pine-wood");
 			await listener.reset(db.pool);
@@ -244,16 +248,16 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 				id,
 			]);
 			const notes = await listener.waitFor(3);
-			expect(notes.filter((n) => n.channel === "sbx_sandboxes")).toEqual([
-				{ channel: "sbx_sandboxes", payload: id },
-				{ channel: "sbx_sandboxes", payload: id },
+			expect(notes.filter((n) => n.channel === "umiak_sandboxes")).toEqual([
+				{ channel: "umiak_sandboxes", payload: id },
+				{ channel: "umiak_sandboxes", payload: id },
 			]);
 			// The labels update produced nothing at all.
 			expect(notes).toHaveLength(3);
 		});
 	});
 
-	describe("NOTIFY sbx_operations", () => {
+	describe("NOTIFY umiak_operations", () => {
 		it("sends the id on a terminal transition only", async () => {
 			const sb = await insertSandbox("wide-lake-shore");
 			const active = randomUUID();
@@ -271,7 +275,7 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 				[active],
 			);
 			const notes = await listener.waitFor(1);
-			expect(notes).toEqual([{ channel: "sbx_operations", payload: active }]);
+			expect(notes).toEqual([{ channel: "umiak_operations", payload: active }]);
 
 			for (const [i, state] of (["failed", "superseded"] as const).entries()) {
 				const op = randomUUID();
@@ -285,7 +289,10 @@ describe.skipIf(skipPg())("runtime triggers", () => {
 					state,
 				]);
 				const all = await listener.waitFor(2 + i);
-				expect(all.at(-1)).toEqual({ channel: "sbx_operations", payload: op });
+				expect(all.at(-1)).toEqual({
+					channel: "umiak_operations",
+					payload: op,
+				});
 			}
 		});
 	});

@@ -1,11 +1,11 @@
 "use client";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 // /app/operator (S8 §9.10): sandboxes of every team, GET /v1/sandboxes
 // ?allTeams=true with team, state and search filters; the team column and
 // filter come from Payload (passed in by the server page). Actions per row
 // in OperatorActions, the ports of a row on expand. Pool and node status
-// are phase 2 (`sbx-admin pool status`).
-import type { SandboxData } from "@sbx/sdk";
-import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
+// are phase 2 (`umiak-admin pool status`).
+import type { SandboxData } from "@umiak/sdk";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { QueryError } from "@/components/app/query-error";
@@ -32,7 +32,7 @@ import {
 	HealthCell,
 	StateCell,
 } from "@/features/sandboxes/state-cell";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
 import {
 	type OperatorFilter,
@@ -52,7 +52,7 @@ import { PortBlocks } from "./port-blocks";
 
 export function OperatorPage({ teams }: { teams: OperatorTeam[] }) {
 	// Not about one team: the operator's default team, allTeams does the rest.
-	const sbx = useSbx("");
+	const umiak = useUmiak("");
 	const names = useMemo(
 		() => new Map(teams.map((t) => [t.id, t.name])),
 		[teams],
@@ -76,7 +76,7 @@ export function OperatorPage({ teams }: { teams: OperatorTeam[] }) {
 	const list = useInfiniteQuery({
 		queryKey: [OPERATOR_SANDBOXES_KEY, filter],
 		queryFn: async ({ pageParam, signal }) => {
-			const { data } = await sbx.raw.GET("/v1/sandboxes", {
+			const { data } = await umiak.raw.GET("/v1/sandboxes", {
 				params: { query: operatorListQuery(filter, pageParam) },
 				signal,
 				retryBudgetMs: POLL_RETRY_BUDGET_MS,

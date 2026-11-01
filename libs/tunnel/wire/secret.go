@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const smbiosVersion = "sbx1"
+const smbiosVersion = "umiak1"
 
 var errSecretLen = errors.New("secret must be 32 bytes")
 
@@ -47,7 +47,7 @@ func NewSecret() ([]byte, error) {
 	return b, nil
 }
 
-// SMBIOSSerial returns the guest-visible serial "sbx1:<machineId>:<base64url(BS)>".
+// SMBIOSSerial returns the guest-visible serial "umiak1:<machineId>:<base64url(BS)>".
 // S1 base64-encodes it once more when it passes it to the hypervisor.
 func SMBIOSSerial(machineID string, bs []byte) string {
 	return smbiosVersion + ":" + machineID + ":" + EncodeSecret(bs)

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // defaultDialTimeout bounds the default CONNECT target dial.
@@ -19,7 +19,7 @@ const defaultDialTimeout = 10 * time.Second
 const copyBufSize = 32 << 10
 
 // DialError is returned by Config.Dial to tell the gateway why the target
-// could not be reached. serveConnect passes Reason in Sbx-Dial-Error on the
+// could not be reached. serveConnect passes Reason in Umiak-Dial-Error on the
 // 502 answer.
 type DialError struct {
 	// Reason is a short token such as "refused" or "timeout".

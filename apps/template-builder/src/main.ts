@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { Qga } from "@sbx/pve";
+import { Qga } from "@umiak/pve";
 import {
 	BuildFailedError,
 	type BuildOptions,
@@ -41,20 +41,20 @@ import { defaultSecretFiles, verifyTemplate } from "./verify.ts";
 import { formatRecipeVersions, updateVersionsFile } from "./versions-update.ts";
 
 const USAGE = `usage:
-  sbx-tpl preflight [<slug>] [--node <node>]
-  sbx-tpl versions <slug> [--update]
-  sbx-tpl build <slug> --agent-package <tar> [--node <node>] [--sbx-cli <file>] [--api-url <url>]
+  umiak-tpl preflight [<slug>] [--node <node>]
+  umiak-tpl versions <slug> [--update]
+  umiak-tpl build <slug> --agent-package <tar> [--node <node>] [--umiak-cli <file>] [--api-url <url>]
                 [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure]
                 [--no-verify] [--fail-step <step>] [--connect-url <wss-url> --dev-cp-ssh <user@host>]
                 windows: [--iso <file>] [--iso-sha256 <hex> | --accept-iso-sha256] [--edition <name>]
                 [--product-key-file <file>]
-  sbx-tpl iso upload <file> [--node <node>]
-  sbx-tpl verify <buildId> [--connect-url <wss-url> --dev-cp-ssh <user@host>]
-  sbx-tpl list [<slug>]
-  sbx-tpl show <buildId> [--field <name>]
-  sbx-tpl show --active-vmid <slug>
-  sbx-tpl cleanup [--node <node>]
-  sbx-tpl retire <buildId> [--delete-vm] [--config <sbx.yaml>] [--force] [--force-poc]`;
+  umiak-tpl iso upload <file> [--node <node>]
+  umiak-tpl verify <buildId> [--connect-url <wss-url> --dev-cp-ssh <user@host>]
+  umiak-tpl list [<slug>]
+  umiak-tpl show <buildId> [--field <name>]
+  umiak-tpl show --active-vmid <slug>
+  umiak-tpl cleanup [--node <node>]
+  umiak-tpl retire <buildId> [--delete-vm] [--config <umiak.yaml>] [--force] [--force-poc]`;
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const TEMPLATES_DIR = join(REPO_ROOT, "infra/templates");
@@ -86,12 +86,12 @@ function trapSignals(lastWords: () => string): {
 			// 128 + signal number, as a shell reports it.
 			exitCode = sig === "SIGTERM" ? 143 : 130;
 			out(
-				`\n[sbx-tpl] ${sig}: rolling back; send it again to exit without cleanup`,
+				`\n[umiak-tpl] ${sig}: rolling back; send it again to exit without cleanup`,
 			);
 			ac.abort(new Error(`interrupted by ${sig}`));
 			return;
 		}
-		out(`\n[sbx-tpl] ${lastWords()}`);
+		out(`\n[umiak-tpl] ${lastWords()}`);
 		process.exit(exitCode);
 	};
 	process.on("SIGINT", onSignal);
@@ -136,7 +136,7 @@ function runVerify(
 				fsfreezeStatus: (vmid) => qga.fsfreezeStatus(vmid),
 				writeFile: (vmid, path, data) => qga.fileWriteWindows(vmid, path, data),
 			},
-			log: (msg) => out(`[sbx-tpl] ${msg}`),
+			log: (msg) => out(`[umiak-tpl] ${msg}`),
 		},
 		m,
 		{
@@ -154,7 +154,7 @@ function runVerify(
 }
 
 /**
- * `sbx-tpl iso upload <file>`: the user's Windows ISO into local:iso under its own name, through
+ * `umiak-tpl iso upload <file>`: the user's Windows ISO into local:iso under its own name, through
  * the PVE API (spec S9 section 6.1). An ISO of that name is never replaced.
  */
 async function cmdIsoUpload(
@@ -162,9 +162,9 @@ async function cmdIsoUpload(
 	nodeOver: { node?: string },
 ): Promise<number> {
 	const name = basename(file);
-	if (!/^[A-Za-z0-9._()+-]+\.iso$/.test(name) || name.startsWith("sbx-"))
+	if (!/^[A-Za-z0-9._()+-]+\.iso$/.test(name) || name.startsWith("umiak-"))
 		throw new UsageError(
-			`${name}: expected an .iso file name of letters, digits and ._()+- (sbx-* names are the builder's)`,
+			`${name}: expected an .iso file name of letters, digits and ._()+- (umiak-* names are the builder's)`,
 		);
 	if (!existsSync(file)) throw new Error(`${file} not found`);
 	const size = statSync(file).size;
@@ -280,7 +280,7 @@ async function cmdBuild(
 	let buildId: string | undefined;
 	const interrupt = trapSignals(
 		() =>
-			`exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run sbx-tpl cleanup (build VM, seed, lease) and, if verify had started, remove only the verify VMIDs and snapshot listed in this run; sbx-bench cleanup --all-sandbox-resources is global and deletes other runs`,
+			`exiting without cleanup${buildId ? ` (build ${buildId})` : ""}; run umiak-tpl cleanup (build VM, seed, lease) and, if verify had started, remove only the verify VMIDs and snapshot listed in this run; umiak-bench cleanup --all-sandbox-resources is global and deletes other runs`,
 	);
 	try {
 		const { cfg, api } = ctx;
@@ -305,7 +305,7 @@ async function cmdBuild(
 			updateKeysFile: UPDATE_KEYS_FILE,
 			gitCommit: gitCommit(),
 			logDir: LOG_DIR,
-			...opt("sbx-cli", "sbxCli"),
+			...opt("umiak-cli", "umiakCli"),
 			...opt("api-url", "apiUrl"),
 			...opt("tunnel-url", "tunnelUrl"),
 			...opt("ssh-user-ca", "sshUserCa"),
@@ -346,7 +346,7 @@ async function cmdBuild(
 				makeIso: (files, path, label) => makeIso(files, path, label),
 				verify: (mf, o) => runVerify(ctx, ramGuard, mf, o),
 				ramGuard,
-				log: (msg) => out(`[sbx-tpl] ${msg}`),
+				log: (msg) => out(`[umiak-tpl] ${msg}`),
 				stepOutput: (_step, chunk) => process.stdout.write(chunk),
 				now: () => new Date(),
 			},
@@ -357,7 +357,7 @@ async function cmdBuild(
 		);
 		out(`\nregister in the control plane:\n${registerCommand(m)}`);
 		out(
-			`\nor add to topology.templateBuilds in deploy/compose/config/sbx.yaml:\n${topologySnippet(m)}`,
+			`\nor add to topology.templateBuilds in deploy/compose/config/umiak.yaml:\n${topologySnippet(m)}`,
 		);
 		return 0;
 	} catch (err) {
@@ -381,7 +381,7 @@ async function main(argv: string[]): Promise<number> {
 			update: { type: "boolean", default: false },
 			node: { type: "string" },
 			"agent-package": { type: "string" },
-			"sbx-cli": { type: "string" },
+			"umiak-cli": { type: "string" },
 			"api-url": { type: "string" },
 			"tunnel-url": { type: "string" },
 			"ssh-user-ca": { type: "string" },
@@ -463,7 +463,7 @@ async function main(argv: string[]): Promise<number> {
 			const ctx = await makeContext({ node: m.node });
 			const interrupt = trapSignals(
 				() =>
-					"exiting without cleanup; remove only the verify VMIDs and snapshot listed in this run; sbx-bench cleanup --all-sandbox-resources is global and deletes other runs",
+					"exiting without cleanup; remove only the verify VMIDs and snapshot listed in this run; umiak-bench cleanup --all-sandbox-resources is global and deletes other runs",
 			);
 			try {
 				const ramGuard = new RamGuard({
@@ -552,8 +552,8 @@ async function main(argv: string[]): Promise<number> {
 			// The config the worker reads: the one it is given, else the dev stand's.
 			const configFile =
 				values.config ??
-				process.env.SBX_CONFIG_FILE ??
-				join(REPO_ROOT, "deploy/compose/config/sbx.yaml");
+				process.env.UMIAK_CONFIG_FILE ??
+				join(REPO_ROOT, "deploy/compose/config/umiak.yaml");
 			const configured = {
 				file: configFile,
 				builds: configuredBuilds(configFile),

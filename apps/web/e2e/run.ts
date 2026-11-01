@@ -1,9 +1,9 @@
-// `pnpm --filter @sbx/web test:e2e`: brings the E2E stack up
-// (deploy/compose/e2e.yaml, project sbx-e2e), runs Playwright against it and
+// `pnpm --filter @umiak/web test:e2e`: brings the E2E stack up
+// (deploy/compose/e2e.yaml, project umiak-e2e), runs Playwright against it and
 // tears it down with its volumes. Extra arguments go to `playwright test`.
-//   SBX_E2E_KEEP=1   keep the stack after the run (then re-run with
+//   UMIAK_E2E_KEEP=1   keep the stack after the run (then re-run with
 //                    `pnpm exec playwright test -c e2e`)
-//   SBX_E2E_LARGE=1  upload 100 MiB instead of 70 MiB
+//   UMIAK_E2E_LARGE=1  upload 100 MiB instead of 70 MiB
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -39,8 +39,8 @@ if (code === 0) {
 } else {
 	run("docker", [...base, "logs", "--tail", "100"]);
 }
-if (process.env.SBX_E2E_KEEP === "1") {
-	console.error("SBX_E2E_KEEP=1: the stack sbx-e2e keeps running");
+if (process.env.UMIAK_E2E_KEEP === "1") {
+	console.error("UMIAK_E2E_KEEP=1: the stack umiak-e2e keeps running");
 } else {
 	run("docker", [...base, "down", "-v", "--remove-orphans"]);
 }

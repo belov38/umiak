@@ -2,7 +2,7 @@
 Description=Cua driver for the sandbox user session
 After=graphical-session-pre.target
 [Service]
-ExecStart=/opt/sbx-desktop/cua-driver/current/cua-driver serve
+ExecStart=/opt/umiak-desktop/cua-driver/current/cua-driver serve
 Restart=on-failure
 RestartSec=10
 [Install]

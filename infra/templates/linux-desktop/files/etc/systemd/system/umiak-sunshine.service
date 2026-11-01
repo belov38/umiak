@@ -1,0 +1,15 @@
+[Unit]
+Description=Sandbox Sunshine stream host
+After=lightdm.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+[Service]
+User=user
+Group=user
+Environment=DISPLAY=:0 XAUTHORITY=/home/user/.Xauthority XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+ExecStart=/usr/bin/sunshine /home/user/.local/state/umiak-sunshine/sunshine.conf
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=3
+UMask=0077
+OOMScoreAdjust=-500

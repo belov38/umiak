@@ -3,20 +3,20 @@
 # and before the agent's rename reboot (ruling R16). It restores what sysprep
 # generalize, specialize and OOBE reset: services, code pages (they apply at
 # the next boot, the rename reboot), BCD, WinRE, NetBIOS and the firewall
-# policy. 90-cleanup installs it to C:\ProgramData\sbx-template\firstboot.ps1.
+# policy. 90-cleanup installs it to C:\ProgramData\umiak-template\firstboot.ps1.
 # Self-contained (lib.ps1 is not on the clone), Windows PowerShell 5.1, ASCII.
 # Never fails Setup: every failure is logged and the script exits 0. The log
 # holds no secrets. Its last action writes firstboot.done (a UTC timestamp),
 # also after failed parts: the agent holds the rename reboot until then.
 param(
-    [string]$LogPath = 'C:\ProgramData\sbx-template\firstboot.log',
-    [string]$DonePath = 'C:\ProgramData\sbx-template\firstboot.done'
+    [string]$LogPath = 'C:\ProgramData\umiak-template\firstboot.log',
+    [string]$DonePath = 'C:\ProgramData\umiak-template\firstboot.done'
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-# $SbxDisabledServices and $SbxUpdateServices of _windows\lib.ps1 plus
+# $UmiakDisabledServices and $UmiakUpdateServices of _windows\lib.ps1 plus
 # dmwappushservice (Manual through sysprep, see SYSPREP_DEFERRED_SERVICES) and
 # CDPSvc. A test keeps this list equal to lib.ps1's.
 $Services = @(

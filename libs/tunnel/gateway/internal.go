@@ -12,8 +12,8 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // Internal listener parameters.
@@ -73,9 +73,9 @@ type internalHandler struct {
 //     POST /v1/machines/{id}/rotate-token            machine token rotation
 //     CONNECT <machineId>:<port>                     TCP stream into the machine
 //
-// A machine served by another instance gets 421 (Sbx-Error-Code:
-// machine_moved, Sbx-Instance-Url: <owner>), a machine connected nowhere 503
-// (Sbx-Error-Code: agent_unavailable, Retry-After: 1).
+// A machine served by another instance gets 421 (Umiak-Error-Code:
+// machine_moved, Umiak-Instance-Url: <owner>), a machine connected nowhere 503
+// (Umiak-Error-Code: agent_unavailable, Retry-After: 1).
 func (g *Gateway) InternalHandler() http.Handler {
 	h := &internalHandler{g: g, auth: newAuthenticator(g.cfg.ServiceTokens), errw: connect.NewErrorWriter()}
 	mux := http.NewServeMux()
@@ -222,7 +222,7 @@ func sameURL(a, b string) bool {
 // unavailableError is the Connect error of 421/503 answers and aborted
 // streams: code unavailable, message and ErrorDetail.code = code,
 // retryable, the owner's URL for machine_moved. The metadata carries
-// Sbx-Error-Code and Sbx-Instance-Url.
+// Umiak-Error-Code and Umiak-Instance-Url.
 func unavailableError(code, instanceURL string) *connect.Error {
 	err := connect.NewError(connect.CodeUnavailable, errors.New(code))
 	if d, derr := connect.NewErrorDetail(&tunnelv1.ErrorDetail{
@@ -329,7 +329,7 @@ func validName(s string) bool {
 }
 
 // serveRPC proxies /v1/machines/{id}/rpc/{service}/{method} to the agent's
-// /{service}/{method}. sbx.tunnel.v1 and services outside
+// /{service}/{method}. umiak.tunnel.v1 and services outside
 // AllowedServicePrefixes are refused with 403.
 func (h *internalHandler) serveRPC(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseMachineID(r.PathValue("id"))

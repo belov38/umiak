@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // The hostile tests mirror the S2 hostile-agent attacks
@@ -55,7 +55,7 @@ func (a *countingApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (a *countingApp) Count() int64 { return a.n.Load() }
 
 // h2Browser is an HTTP/2-only client of the TLS listener of front. Like a
-// browser that coalesces every *.sbx host on one conn, h2Get can send a
+// browser that coalesces every *.umiak host on one conn, h2Get can send a
 // request for any label over the conn of another (the pool key is the URL
 // host, :authority is the label's). dials counts the TCP dials.
 func h2Browser(t *testing.T, c *cluster, front *testenv.Inst) (tr *http.Transport, dials *atomic.Int64) {
@@ -92,7 +92,7 @@ func (a answer) String() string {
 	if a.err != nil && a.status == 0 {
 		return "error " + a.err.Error()
 	}
-	return fmt.Sprintf("%d %s %q (body err %v)", a.status, a.header.Get("Sbx-Error"), truncate(a.body, 200), a.err)
+	return fmt.Sprintf("%d %s %q (body err %v)", a.status, a.header.Get("Umiak-Error"), truncate(a.body, 200), a.err)
 }
 
 func truncate(b []byte, n int) string {
@@ -179,7 +179,7 @@ func (r *rawH1) do(t *testing.T, raw string) answer {
 // expectGatewayError checks a gateway-generated answer.
 func expectGatewayError(t *testing.T, what string, a answer, status int, codes ...string) {
 	t.Helper()
-	if a.status != status || len(codes) > 0 && !containsStr(codes, a.header.Get("Sbx-Error")) {
+	if a.status != status || len(codes) > 0 && !containsStr(codes, a.header.Get("Umiak-Error")) {
 		t.Fatalf("%s = %v; want %d %v", what, a, status, codes)
 	}
 }
@@ -347,22 +347,22 @@ func TestHostileApp(t *testing.T) {
 		}
 	})
 
-	t.Run("Sbx trailers", func(t *testing.T) {
+	t.Run("Umiak trailers", func(t *testing.T) {
 		port, host := route()
 		m.ServeHTTP(port, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Add("Trailer", "Sbx-Error")
+			w.Header().Add("Trailer", "Umiak-Error")
 			w.Header().Add("Trailer", "X-Ok")
 			_, _ = io.WriteString(w, "body")
-			w.Header().Set("Sbx-Error", "route_blocked")
+			w.Header().Set("Umiak-Error", "route_blocked")
 			w.Header().Set("X-Ok", "1")
-			w.Header().Set(http.TrailerPrefix+"sbx-dial-error", "refused")
+			w.Header().Set(http.TrailerPrefix+"umiak-dial-error", "refused")
 		}))
 		a := browserGet(t, host, nil)
 		if a.status != http.StatusOK || string(a.body) != "body" || a.err != nil {
 			t.Fatalf("answer = %v", a)
 		}
 		for k := range a.trailer {
-			if strings.HasPrefix(strings.ToLower(k), "sbx-") && a.trailer.Get(k) != "" {
+			if strings.HasPrefix(strings.ToLower(k), "umiak-") && a.trailer.Get(k) != "" {
 				t.Fatalf("trailer %s = %q reached the client", k, a.trailer.Get(k))
 			}
 		}
@@ -375,14 +375,14 @@ func TestHostileApp(t *testing.T) {
 		port, host := route()
 		m.ServeHTTP(port, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			h := w.Header()
-			h.Set("Sbx-Error", "route_blocked")
-			h.Set("sbx-instance-url", "http://evil")
-			h.Add("Set-Cookie", "__host-SBX_AUTH=forged; Path=/; Secure")
-			h.Add("Set-Cookie", "__Host-sbx_state_abcdefgh=forged; Path=/; Secure")
+			h.Set("Umiak-Error", "route_blocked")
+			h.Set("umiak-instance-url", "http://evil")
+			h.Add("Set-Cookie", "__host-UMIAK_AUTH=forged; Path=/; Secure")
+			h.Add("Set-Cookie", "__Host-umiak_state_abcdefgh=forged; Path=/; Secure")
 			h.Add("Set-Cookie", "app=1; Path=/")
 			h.Set("Alt-Svc", `h3=":443"; ma=86400`)
 			h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
-			h.Set("X-Sbx-User-Email", "forged@example.com")
+			h.Set("X-Umiak-User-Email", "forged@example.com")
 			_, _ = io.WriteString(w, "ok")
 		}))
 		a := browserGet(t, host, nil)
@@ -390,7 +390,7 @@ func TestHostileApp(t *testing.T) {
 			t.Fatalf("answer = %v", a)
 		}
 		for k := range a.header {
-			if l := strings.ToLower(k); strings.HasPrefix(l, "sbx-") || strings.HasPrefix(l, "x-sbx-") || l == "alt-svc" {
+			if l := strings.ToLower(k); strings.HasPrefix(l, "umiak-") || strings.HasPrefix(l, "x-umiak-") || l == "alt-svc" {
 				t.Errorf("header %s: %q reached the client", k, a.header.Values(k))
 			}
 		}
@@ -398,7 +398,7 @@ func TestHostileApp(t *testing.T) {
 			t.Errorf("Set-Cookie = %q, want only the app's own cookie", got)
 		}
 		// HSTS is the application's business: the gateway is HTTPS-only on
-		// *.sbx anyway, and a max-age set by one sandbox host covers only
+		// *.umiak anyway, and a max-age set by one sandbox host covers only
 		// that host (includeSubDomains of a label has no subdomains under
 		// it). Stripping it would take a security header away from apps
 		// that rely on it.
@@ -414,7 +414,7 @@ func TestHostileApp(t *testing.T) {
 			port, host := route()
 			m.ServeHTTP(port, http.RedirectHandler(loc, http.StatusFound))
 			a := browserGet(t, host, nil)
-			if a.status != http.StatusFound || a.header.Get("Location") != loc || a.header.Get("Sbx-Error") != "" {
+			if a.status != http.StatusFound || a.header.Get("Location") != loc || a.header.Get("Umiak-Error") != "" {
 				t.Fatalf("answer = %v, Location %q; want 302 %s", a, a.header.Get("Location"), loc)
 			}
 		}
@@ -534,12 +534,12 @@ type hostileAgent struct {
 
 // Ports of the hostile agent's answers.
 const (
-	portMoved     = 1001 // 421 with Sbx-Instance-Url of the attacker
+	portMoved     = 1001 // 421 with Umiak-Instance-Url of the attacker
 	port401       = 1002
 	port429       = 1003
 	port503       = 1004
 	portEOF       = 1005 // 200, then the stream ends at once
-	portDialError = 1006 // 502 with an Sbx-Dial-Error outside the closed set
+	portDialError = 1006 // 502 with an Umiak-Dial-Error outside the closed set
 )
 
 // agentSecret must never reach a client.
@@ -554,12 +554,12 @@ func (a *hostileAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, port, _ := net.SplitHostPort(r.Host)
 	h := w.Header()
 	h.Set("X-Agent-Evil", "1")
-	h.Set("Set-Cookie", "__Host-sbx_auth=forged; Path=/; Secure")
-	h.Set("Sbx-Error", "route_blocked")
+	h.Set("Set-Cookie", "__Host-umiak_auth=forged; Path=/; Secure")
+	h.Set("Umiak-Error", "route_blocked")
 	status := http.StatusOK
 	switch port {
 	case fmt.Sprint(portMoved):
-		h.Set("Sbx-Instance-Url", a.attackerURL)
+		h.Set("Umiak-Instance-Url", a.attackerURL)
 		status = http.StatusMisdirectedRequest
 	case fmt.Sprint(port401):
 		h.Set("Retry-After", "99999")
@@ -575,7 +575,7 @@ func (a *hostileAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = http.NewResponseController(w).Flush()
 		return
 	case fmt.Sprint(portDialError):
-		h.Set("Sbx-Dial-Error", "<script>alert(1)</script>")
+		h.Set("Umiak-Dial-Error", "<script>alert(1)</script>")
 		status = http.StatusBadGateway
 	}
 	w.WriteHeader(status)
@@ -605,7 +605,7 @@ func TestHostileAgent(t *testing.T) {
 		{"429 with Retry-After", port429, []string{"upstream_error"}, http.StatusBadGateway},
 		{"503 with Retry-After", port503, []string{"upstream_error"}, http.StatusBadGateway},
 		{"200 then EOF", portEOF, []string{"upstream_error"}, http.StatusBadGateway},
-		{"Sbx-Dial-Error outside the closed set", portDialError, []string{"upstream_error"}, http.StatusBadGateway},
+		{"Umiak-Dial-Error outside the closed set", portDialError, []string{"upstream_error"}, http.StatusBadGateway},
 	}
 	// Through C the agent's answer reaches the front directly; through A it
 	// crosses C's peer CONNECT first.
@@ -624,14 +624,14 @@ func TestHostileAgent(t *testing.T) {
 				}
 				if tc.status != 0 {
 					expectGatewayError(t, "answer", a, tc.status, tc.codes...)
-				} else if a.status != http.StatusBadGateway && a.status != http.StatusServiceUnavailable || !containsStr(tc.codes, a.header.Get("Sbx-Error")) {
+				} else if a.status != http.StatusBadGateway && a.status != http.StatusServiceUnavailable || !containsStr(tc.codes, a.header.Get("Umiak-Error")) {
 					t.Fatalf("answer = %v; want 502/503 %v", a, tc.codes)
 				}
 				if agent.connects.Load() == before {
 					t.Fatal("the agent got no CONNECT")
 				}
 				if a.header.Get("X-Agent-Evil") != "" || a.header.Get("Retry-After") == "99999" ||
-					a.header.Get("Sbx-Instance-Url") != "" || a.header.Get("Set-Cookie") != "" ||
+					a.header.Get("Umiak-Instance-Url") != "" || a.header.Get("Set-Cookie") != "" ||
 					bytes.Contains(a.body, []byte(agentSecret)) || bytes.Contains(a.body, []byte("<script>")) {
 					t.Fatalf("agent data reached the client: header %v body %q", a.header, a.body)
 				}

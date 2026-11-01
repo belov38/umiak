@@ -1,4 +1,4 @@
-// Test helpers of @sbx/config (export "./testing"). Imports vitest: never
+// Test helpers of @umiak/config (export "./testing"). Imports vitest: never
 // import this from production code.
 export {
 	type ConfigContractOptions,

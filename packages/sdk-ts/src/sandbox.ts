@@ -18,7 +18,7 @@ import {
 	type StartOptions,
 	startCommand,
 } from "./commands.ts";
-import { SandboxFailedError, SbxError, WAIT_TIMEOUT } from "./errors.ts";
+import { SandboxFailedError, UmiakError, WAIT_TIMEOUT } from "./errors.ts";
 import { Files } from "./files.ts";
 import type { components } from "./gen/v1.d.ts";
 import { newIdempotencyKey } from "./ids.ts";
@@ -304,7 +304,7 @@ export class Sandbox implements SandboxRef {
 	 * A copy of this sandbox; `wait`: until the copy is ready.
 	 *
 	 * A running Windows sandbox is forked only from a stopped VM: without
-	 * `input.forceStop` it throws SbxError 409 `snapshot_requires_stop`
+	 * `input.forceStop` it throws UmiakError 409 `snapshot_requires_stop`
 	 * (`details.retryWith: {forceStop: true}`). `forceStop: true` stops this
 	 * sandbox (running commands and sessions are interrupted), takes the
 	 * snapshot and starts it again; the fork operation's `forceStop` reports
@@ -327,13 +327,13 @@ export class Sandbox implements SandboxRef {
 
 	/**
 	 * Deletes the sandbox (a running one too: no stop needed). Sets
-	 * `Sbx-Confirm-Delete` to this sandbox's id. Returns the delete operation,
+	 * `Umiak-Confirm-Delete` to this sandbox's id. Returns the delete operation,
 	 * or null when it was already deleted; `wait`: until it is final.
 	 */
 	async delete(opts: ActionOptions = {}): Promise<OperationData | null> {
 		const { data } = await this.core.raw.DELETE(SANDBOX, {
 			params: this.#path(),
-			headers: { "Sbx-Confirm-Delete": this.id },
+			headers: { "Umiak-Confirm-Delete": this.id },
 			...callOf(opts),
 		});
 		this.data = data.sandbox;
@@ -405,8 +405,8 @@ function waitOpts(opts: ActionOptions): WaitOptions {
 	return w;
 }
 
-function waitTimeout(message: string): SbxError {
-	return new SbxError({
+function waitTimeout(message: string): UmiakError {
+	return new UmiakError({
 		status: 0,
 		code: WAIT_TIMEOUT,
 		message,

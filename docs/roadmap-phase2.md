@@ -12,7 +12,7 @@
 
 Известный долг для тёплого пула (S30): при двух и более нодах `retryClaim` (`apps/worker/src/ops/claim.ts`) держит блокировку ноды отклонённой machine и вызывает `admitCold`, поэтому возможен deadlock `40P01` (приёмка S6, раунд 2). Исправить до включения `ctl-pool`.
 
-Обновление 2026-10-29: рекомендации R1–R11 внесены в спецификации MVP. Аутентификация MVP теперь на Keycloak: `sbx login` через device flow, люди без долгих ключей, командные ключи `sbx_`, SSH-сертификаты (S7 §7, §11.3; S4 §9; S8 §20.1). Поэтому K6, K8, SH1 и S24 частично закрыты в MVP, а правило S24 «дочерний ключ не шире родителя» теряет смысл. Остаток уточняется при brainstorm S24.
+Обновление 2026-10-29: рекомендации R1–R11 внесены в спецификации MVP. Аутентификация MVP теперь на Keycloak: `umiak login` через device flow, люди без долгих ключей, командные ключи `umiak_`, SSH-сертификаты (S7 §7, §11.3; S4 §9; S8 §20.1). Поэтому K6, K8, SH1 и S24 частично закрыты в MVP, а правило S24 «дочерний ключ не шире родителя» теряет смысл. Остаток уточняется при brainstorm S24.
 
 ## 0. Кратко
 
@@ -172,7 +172,7 @@
 | SH2 | `POST /sshkey` добавляет ключ в `authorized_keys` | там же | Ключи в профиле пользователя (S8), сертификаты CA (S4) | ✅ | Механизм другой |
 | SH3 | `forward` локальный и обратный, переподключение | `cli:forward.txt` | S4 §9.4 (`-L`, `-R`) | ◐ | Обёртка CLI — S22 |
 | SH4 | `scp` (tar-over-SSH), `push` (git-aware) | `cli:scp.txt`, `cli:push.txt` | S4 SSH (scp/sftp работают) | ◐ | S22 |
-| SH5 | VS Code / Cursor: скрипт пишет `~/.ssh/boat/<id>.conf` | `docs:ssh-access/editors.md` | Работает через S4 | ◐ | `sbx ssh-config` — S22 |
+| SH5 | VS Code / Cursor: скрипт пишет `~/.ssh/boat/<id>.conf` | `docs:ssh-access/editors.md` | Работает через S4 | ◐ | `umiak ssh-config` — S22 |
 | SH6 | Обратный туннель к локальному MCP или Ollama | `docs:integrated-agents/customize.md` | S4 §9.4 `-R` | ✅ | — |
 
 ### 2.9 Рабочий стол, браузер, запись, computer use
@@ -252,7 +252,7 @@
 | K5 | Rotate, revoke, usage (запросы за 30 d, созданные ресурсы) | `docs:api-keys/store-rotate-revoke.md`, `cli:api-key.usage.txt` | Revoke — S8 | ◐ | S24 |
 | K6 | Чувствительное только из браузерной сессии (rotate, revoke, ZDR) | `docs:account.md` | Нет | ✗ | S24 |
 | K7 | Ключ sandbox внутри VM (только своя sandbox) + токен только на свои порты | `docs:api-keys/create-and-list.md`, `docs:environments/access.md` | Нет | ✗ | MVP-рек. R4 (тип ключа), S24 |
-| K8 | `login --key-stdin`, браузерный вход, `logout` (отзыв сессии устройства) | `cli:login.txt`, `cli:logout.txt` | S8 `sbx login` | ◐ | `--key-stdin`, `logout` — S22 |
+| K8 | `login --key-stdin`, браузерный вход, `logout` (отзыв сессии устройства) | `cli:login.txt`, `cli:logout.txt` | S8 `umiak login` | ◐ | `--key-stdin`, `logout` — S22 |
 | K9 | Самостоятельная регистрация агента (`auth.md`, RFC 9728/8414, claim-код человеком), `WWW-Authenticate resource_metadata` | `docs:agent-auth.md` | Нет | ✗ | S24: device flow с подтверждением в SSO, P3 |
 | K10 | Входы GitHub/Google/email/AgentID, связывание, закрытие аккаунта | `docs:account.md` | IdP через oauth2-proxy | ⊘ | Учётками управляет IdP |
 
@@ -297,7 +297,7 @@
 | I3 | Eve-адаптер (`spawn` эмулирован через файлы) | `docs:integrations/eve.md`, `vr:eve-box` | Нет | ✗ | S27, P3 |
 | I4 | Компонент Convex | `vr:boat-convex` | — | ⊘ | Convex в компании не используется (уточнить) |
 | I5 | optibox: потребительский чат с быстрым общим ответом, пока VM стартует | `vr:optibox`, `docs:platform-guide/patterns.md` | — | ⊘ | Потребительский продукт; уроки взяты в S15 |
-| I6 | Гайд «платформа для своих пользователей»: `--no-env`, тег арендатора, демон в VM + `host --private`, оценка числа sandbox | `docs:platform-guide.md`, `docs:platform-guide/*`, `docs:security.md` | — | ✗ | Skill `sbx-platform` — S21 |
+| I6 | Гайд «платформа для своих пользователей»: `--no-env`, тег арендатора, демон в VM + `host --private`, оценка числа sandbox | `docs:platform-guide.md`, `docs:platform-guide/*`, `docs:security.md` | — | ✗ | Skill `umiak-platform` — S21 |
 | I7 | battleships: сравнение 366 провайдеров, 78 признаков | `vr:battleships` | — | ⊘ | Источник признаков для §3 |
 | I8 | Агент-сервер в VM: systemd, `CPUWeight/IOWeight/MemoryMin=512M`, `/health`, порт 8911 входящий | `vr:agent-server-release/install.sh` | S3 §17.2 (`CPUWeight/IOWeight` те же, `MemoryMin=64M`), туннель исходящий | ✅ | Резерв памяти — см. L18 |
 
@@ -347,14 +347,14 @@
 | AG5 | Плагин Kimi: `/box:setup`, `/box:new <task>`, справочные skills (CLI, API, SDK TS/Py, platform) | `vr:kimi-box-plugin` | Нет | ✗ | S21 |
 | AG6 | Skill `boat` предустановлен для всех harness в sandbox | `docs:ai-tools.md` | Нет | ✗ | S15/S21 |
 | AG7 | MCP-сервер управления sandbox (у boat нет) | `vr:battleships/research/cards/boat.json` | S11 | ✅* | Лучше boat; список инструментов — §5.2 |
-| AG8 | Правило «не называй цены по памяти, вызови `limits`» | `docs:ai-tools.md` | — | ✗ | Аналог: «узнай шаблоны и квоты через `sbx limits`» — S21 |
+| AG8 | Правило «не называй цены по памяти, вызови `limits`» | `docs:ai-tools.md` | — | ✗ | Аналог: «узнай шаблоны и квоты через `umiak limits`» — S21 |
 | AG9 | Кнопки «открыть в Claude/ChatGPT/Cursor» на страницах документации | `docs:ai-tools.md` | — | ✗ | S21, P3 |
 
 ### 2.22 Соглашения API
 
 | # | Возможность boat | Источник | Наш план | Статус | Решение |
 |---|---|---|---|---|---|
-| API1 | Конверт `{ok, type}`, ошибки `{code, message, details.retryable}`, `requestId` | `docs:api/v1.md` | S6 §14.1 `SbxError{code, retryable}`; формат — S7 | ◐ | MVP-рек. R1 |
+| API1 | Конверт `{ok, type}`, ошибки `{code, message, details.retryable}`, `requestId` | `docs:api/v1.md` | S6 §14.1 `UmiakError{code, retryable}`; формат — S7 | ◐ | MVP-рек. R1 |
 | API2 | Cursor-пагинация `limit/cursor/sort`, `pageInfo` | `docs:api/v1.md` | S7 | ◐ | S7 |
 | API3 | Асинхронные операции с 202 и опросом | `docs:api/v1.md` | S6 операции | ✅ | — |
 | API4 | Префиксы id: `bx_`, `wh_`, `evt_`, `bdop_`, `bsh_` | `docs:api/v1.md` | S7 | ◐ | S7 |
@@ -409,14 +409,14 @@
 | # | Область | Что решаем | Зависит от | Размер | Приоритет |
 |---|---|---|---|---|---|
 | S14 | Environments v2 и setup | Именованные environments с версиями и `upgrade`; переменные, secret-файлы, репозитории, переключатели передачи (git, секреты, ключ sandbox, AI); `noEnv` и «без секретов владельца» с вычисткой диска; setup-скрипт репозитория и `--setup-file` со статусом; доступ к environment по участникам | S6, S7, S8, S13 | M | P1 |
-| S15 | Встроенные coding-агенты | Harness в шаблоне (Claude Code, Codex, OpenCode, позже pi и другие); раннер в VM; `prompt`, `promptRun`, события (стрим + cursor), conversations, `steer` с режимами доставки, `interrupt`, каталог моделей, вложения, смена harness в разговоре (P3); регистрация MCP `computer` и skill `sbx` в конфигах harness; prompt как активность для idle-stop | S3, S5, S7, S10, S14, S16 | L | P1 |
+| S15 | Встроенные coding-агенты | Harness в шаблоне (Claude Code, Codex, OpenCode, позже pi и другие); раннер в VM; `prompt`, `promptRun`, события (стрим + cursor), conversations, `steer` с режимами доставки, `interrupt`, каталог моделей, вложения, смена harness в разговоре (P3); регистрация MCP `computer` и skill `umiak` в конфигах harness; prompt как активность для idle-stop | S3, S5, S7, S10, S14, S16 | L | P1 |
 | S16 | Credentials proxy | Профили credentials (личные и командные), ключи и подписки, несколько аккаунтов; привязка профиля к environment; прокси с плейсхолдерами на старт, подстановка в заголовок, привязка к хосту; custom API для внутренних сервисов; **git-прокси без токена в VM** (отложенная часть S13 переходит сюда); учёт токенов, блокировка sandbox, бюджеты; обязательный прокси для команды | S4, S8, S13, S14 | L | P1 |
 | S17 | Сеть v2 | Egress-политики на sandbox или шаблон (deny-all, allowlist доменов и CIDR); приватная сеть sandbox одной команды; статический egress IP; TCP-порты наружу через gateway; свои домены | S1, S4, S12 | M | P2 |
 | S18 | Снапшоты v2 | Авто-снапшоты по расписанию с откатом к точке; snapshot-now; fork из снапшота по id; дерево и чтение файлов снапшота без VM (thin-снимок read-only на ноде); `snapshot pull` и экспорт; архив остановленных в PBS и восстановление на другую ноду (вместе с S12); общие тома (volumes, наше расширение) | S1, S6, S12 | L | P2 |
 | S19 | История и наблюдаемость в sandbox | Копия вывода команд вне VM (90 d) и чтение у остановленной; `history`; захват вывода всех процессов (journal, tty); `ps` с хранимыми сэмплами; ряды CPU/RAM/диска (заполнение диска — для уведомлений S20); дашборд History | S3, S6, S7 | M | P2 |
 | S20 | События наружу | Webhooks (события жизненного цикла, HMAC, повторы, журнал доставок) из outbox S6; экспорт OTLP метрик и событий на команду; usage в ресурсо-секундах для showback; журнал аудита; уведомления email/Slack (диск, ошибки, хранение) | S6, S7, S8 | M | P2 |
-| S21 | Агентам: skills, плагины, документация | Пакет skills (справочные + сценарные, §5.1; часть сценарных выходит вместе с S14, S15, S16, S22); плагин Claude Code со slash-командами и `.mcp.json`; манифесты для Codex, OpenCode, Cursor, Kimi; skill `sbx` внутри sandbox; `llms.txt`, `.md` для страниц, MCP-сервер документации; фрагмент для `AGENTS.md`; гайды evals и «sandbox на задачу» | S7, S11; S14, S15, S16, S22 для части skills | M | P1 |
-| S22 | CLI и SDK v2 | `run`, `push`, `scp`, `forward`, `ssh-config`, `ssh -t`; `current`/`self`; `login --key-stdin`, `logout`, `status --check`, `dashboard`; completions с живыми id, self-update; in-VM `sbx` и `host` (на ключе sandbox из S24); хелперы SDK (ожидания, `runCommand`, `followCommand`, стримы, загрузка файлов), плоские параметры и HTTP/2 в TS, async-клиент Python; подписанные URL файлов; поиск, замена и наблюдение за каталогом в файлах | S7, S4, S24 | M | P1 |
+| S21 | Агентам: skills, плагины, документация | Пакет skills (справочные + сценарные, §5.1; часть сценарных выходит вместе с S14, S15, S16, S22); плагин Claude Code со slash-командами и `.mcp.json`; манифесты для Codex, OpenCode, Cursor, Kimi; skill `umiak` внутри sandbox; `llms.txt`, `.md` для страниц, MCP-сервер документации; фрагмент для `AGENTS.md`; гайды evals и «sandbox на задачу» | S7, S11; S14, S15, S16, S22 для части skills | M | P1 |
+| S22 | CLI и SDK v2 | `run`, `push`, `scp`, `forward`, `ssh-config`, `ssh -t`; `current`/`self`; `login --key-stdin`, `logout`, `status --check`, `dashboard`; completions с живыми id, self-update; in-VM `umiak` и `host` (на ключе sandbox из S24); хелперы SDK (ожидания, `runCommand`, `followCommand`, стримы, загрузка файлов), плоские параметры и HTTP/2 в TS, async-клиент Python; подписанные URL файлов; поиск, замена и наблюдение за каталогом в файлах | S7, S4, S24 | M | P1 |
 | S23 | Команды и совместный доступ | Shared/private, доступ `owner/use/view`, авто-private при логинах создателя; `share`/`unshare` с вычисткой; вычистка логинов при деплое командного образа; share-коды между командами; лимиты на пользователя; выбор активной команды | S8, S14, S16 | M | P2 |
 | S24 | API-ключи v2 и вход агентов | Ключи с ресурсами (sandbox, environments), сроки, дочерний не шире родителя; rotate, usage; операции только из браузерной сессии; ключ sandbox и токен портов внутри VM; device flow для агента с подтверждением в SSO; `WWW-Authenticate` с `resource_metadata` | S8 | S | P1 |
 | S25 | Хранение данных и удаление | Сроки хранения остановленных и истории с предупреждениями; эфемерные sandbox (stop = delete); выключение мониторинга; ZDR на команду. Публичный статус удаления — в S7 | S6, S18, S19 | S | P3 |
@@ -452,7 +452,7 @@
   - conversations переживают stop и fork, потому что история лежит на диске;
   - steer: нативно (Claude Code, Codex) или interrupt + продолжение; режим доставки в событии;
   - каталог моделей; вложения; лимит параллельных conversations по RAM;
-  - конфиги harness при старте: MCP `computer` (S10), skill `sbx` (S21), файлы правил; слияние с пользовательскими;
+  - конфиги harness при старте: MCP `computer` (S10), skill `umiak` (S21), файлы правил; слияние с пользовательскими;
   - prompt и ожидание агента считаются активностью для idle-stop.
 - Уроки optibox: настоящие дельты, без двойного ответа; `cwd` всегда явный; идемпотентность `prompt` по ключу.
 - Опора: `docs:integrated-agents/*`, `vr:optibox/docs/*`.
@@ -517,7 +517,7 @@
   - `run` (create → push → exec → итог → delete, авто-stop через 15 min, если CLI умер);
   - `push` (git-aware tar через `/files/archive` или SSH), `scp`, `forward`, `ssh-config` для VS Code/Cursor;
   - `current` и `self`; completions; self-update;
-  - in-VM CLI: `sbx` и `host` внутри sandbox на ключе sandbox из S24 (`host url` ждёт маршрут);
+  - in-VM CLI: `umiak` и `host` внутри sandbox на ключе sandbox из S24 (`host url` ждёт маршрут);
   - `login --key-stdin`, `logout`, `status --check`, `dashboard` (одноразовый вход), `ssh -t`;
   - SDK-хелперы как у boat плюс загрузка файлов, плоские параметры и HTTP/2 в TS, async-клиент Python;
   - подписанные URL файлов через gateway; поиск, замена, наблюдение за каталогом.
@@ -554,7 +554,7 @@
 **S26. CI-раннеры.**
 - Содержание:
   - GitHub App (или webhook GitLab), очередь заданий, JIT-раннер в эфемерной sandbox;
-  - метки `sbx`, `sbx-large`, `sbx/from=<snapshot>/debug`;
+  - метки `umiak`, `umiak-large`, `umiak/from=<snapshot>/debug`;
   - отказ публичных репозиториев; лимит 6 h;
   - логи и статус в API/CLI; аннотация OOM;
   - Windows-раннеры на шаблоне `windows-core` (у boat нет).
@@ -594,7 +594,7 @@
   - тёплый пул под saved snapshot, чтобы `failFast` и массовый старт работали и с `from` (сейчас create из snapshot всегда холодный, S6 §7.3);
   - `Idempotency-Key` на resume;
   - рост диска при смене размера;
-  - пользовательский хук `~/.sbx/pre-stop` (сохранить состояние приложения перед stop);
+  - пользовательский хук `~/.umiak/pre-stop` (сохранить состояние приложения перед stop);
   - что делать с долго `degraded` sandbox (boat останавливает через 3 дня, S6 §11.1 не трогает).
 
 ## 5. Интеграции для агентов (подробно)
@@ -602,22 +602,22 @@
 ### 5.1 Skills и плагины
 
 Что есть у boat:
-- `vr:cloud-sandbox-vm-skills` — 13 сценарных skills, ставятся через `npx skills add` в Claude Code, Codex, OpenCode, Cursor. Каждый: когда использовать → почему → предпосылки → рецепт на bash → ограничения. Наш пакет примерно такой же: в нём 14 сценарных skills, набор и рецепты под `sbx` и наши шаблоны.
+- `vr:cloud-sandbox-vm-skills` — 13 сценарных skills, ставятся через `npx skills add` в Claude Code, Codex, OpenCode, Cursor. Каждый: когда использовать → почему → предпосылки → рецепт на bash → ограничения. Наш пакет примерно такой же: в нём 14 сценарных skills, набор и рецепты под `umiak` и наши шаблоны.
 - `vr:kimi-box-plugin` — плагин Kimi Code (`kimi.plugin.json`) с командами `/box:setup`, `/box:new` и 18 skills: те же 13 сценарных (с правками) и 5 справочных (CLI, API, SDK TS, SDK Python, platform).
 - В sandbox для всех harness предустановлен skill `boat`.
 - Манифеста для Claude Code и `.mcp.json` у boat нет.
 
-Наш пакет (репозиторий `sbx-agent-kit` или каталог `integrations/agent-kit` в монорепо; строится вместе с CLI, версии совпадают).
+Наш пакет (репозиторий `umiak-agent-kit` или каталог `integrations/agent-kit` в монорепо; строится вместе с CLI, версии совпадают).
 
 **Справочные skills:**
 
 | Skill | Содержание |
 |---|---|
-| `sbx-cli` | Установка и вход (`sbx login`, ключ из env, `--key-stdin`); глобальные флаги; `current`/`self`; жизненный цикл; exec/ssh/push/forward/desktop; снапшоты; **контракт JSON/JSONL**: `jq 'select(.event=="ready")'`, строка ошибки, коды выхода; особенность stdin в PowerShell |
-| `sbx-api` | Base URL, авторизация, конверт, таблица кодов ошибок с `retryable` и действием; машина состояний; таблица эндпоинтов; цикл на curl; 502 = «могло выполниться» |
-| `sbx-sdk-ts`, `sbx-sdk-py` | Конфигурация, поток create → ждать → работа → очистка в `finally`; хелперы и их фреймы |
-| `sbx-mcp` | Список инструментов, когда MCP, а когда CLI, длинные задачи через detached + опрос |
-| `sbx-platform` | Sandbox на задачу или на пользователя, шаблон → fork, демон в VM + порт с токеном, квоты, что переживает stop/resume/fork |
+| `umiak-cli` | Установка и вход (`umiak login`, ключ из env, `--key-stdin`); глобальные флаги; `current`/`self`; жизненный цикл; exec/ssh/push/forward/desktop; снапшоты; **контракт JSON/JSONL**: `jq 'select(.event=="ready")'`, строка ошибки, коды выхода; особенность stdin в PowerShell |
+| `umiak-api` | Base URL, авторизация, конверт, таблица кодов ошибок с `retryable` и действием; машина состояний; таблица эндпоинтов; цикл на curl; 502 = «могло выполниться» |
+| `umiak-sdk-ts`, `umiak-sdk-py` | Конфигурация, поток create → ждать → работа → очистка в `finally`; хелперы и их фреймы |
+| `umiak-mcp` | Список инструментов, когда MCP, а когда CLI, длинные задачи через detached + опрос |
+| `umiak-platform` | Sandbox на задачу или на пользователя, шаблон → fork, демон в VM + порт с токеном, квоты, что переживает stop/resume/fork |
 
 **Сценарные skills** (триггер в `description` решает, сработает ли skill):
 
@@ -625,10 +625,10 @@
 |---|---|---|---|
 | `run-untrusted-code` | Недоверенный или сгенерированный код: `timeout`, удаление в `trap`, без секретов | есть | MVP (флаг из R3); полностью — S14 |
 | `code-execution` | Интерпретатор кода на настоящей машине | есть | MVP |
-| `offload-build-test` | Сборки и тесты вне хоста; до S22 — create + exec + delete, после — `sbx run --push .` | `cloud-sandbox` | MVP, упрощается в S22 |
+| `offload-build-test` | Сборки и тесты вне хоста; до S22 — create + exec + delete, после — `umiak run --push .` | `cloud-sandbox` | MVP, упрощается в S22 |
 | `docker-sandbox` | Docker/Compose + порт наружу | есть | MVP |
 | `ephemeral-ci` | Чистое окружение CI, артефакты обратно | есть | MVP |
-| `delegate-to-agent` | Отдать задачу coding-агенту в sandbox (`sbx prompt`, события, steer) | `agent-sandbox` | S15 |
+| `delegate-to-agent` | Отдать задачу coding-агенту в sandbox (`umiak prompt`, события, steer) | `agent-sandbox` | S15 |
 | `parallel-agents` | Подготовить базу, stop, fork N (свой env на копию — R11), собрать через git | есть | MVP |
 | `long-running-service` | systemd, без TTL, idle-stop, что переживает stop | `background-worker` | MVP |
 | `expose-port` | Публичный URL: `token`/`sso`/`public`, bind на 0.0.0.0 не нужен | `expose-localhost-tunnel`, `public-url-hosting` | MVP |
@@ -645,24 +645,24 @@
 - не передавать секреты в prompt, URL и аргументах;
 - URL с токеном, ключи и ссылки рабочего стола — секреты, в логах редактировать;
 - всегда передавать id (в скриптах `current` не работает);
-- квоты и шаблоны узнавать через `sbx limits`, не по памяти.
+- квоты и шаблоны узнавать через `umiak limits`, не по памяти.
 
 **Slash-команды** (плагин):
 
 | Команда | Что делает |
 |---|---|
-| `/sbx:setup` | Ставит CLI, входит (ключ из env или браузер), проверяет `sbx limits --json` |
-| `/sbx:new <задача>` | Создаёт sandbox, копирует входные данные, выполняет, возвращает результат или URL, по умолчанию stop |
-| `/sbx:list` | Список sandbox пользователя с состоянием |
-| `/sbx:cleanup` | Stop или delete sandbox, созданных в этой сессии (по метке) |
-| `/sbx:desktop [id]` | Ссылка на рабочий стол |
-| `/sbx:fork <n> <задача>` | Fork N копий и параллельный запуск (после S15 — через `prompt`) |
+| `/umiak:setup` | Ставит CLI, входит (ключ из env или браузер), проверяет `umiak limits --json` |
+| `/umiak:new <задача>` | Создаёт sandbox, копирует входные данные, выполняет, возвращает результат или URL, по умолчанию stop |
+| `/umiak:list` | Список sandbox пользователя с состоянием |
+| `/umiak:cleanup` | Stop или delete sandbox, созданных в этой сессии (по метке) |
+| `/umiak:desktop [id]` | Ссылка на рабочий стол |
+| `/umiak:fork <n> <задача>` | Fork N копий и параллельный запуск (после S15 — через `prompt`) |
 
 **Упаковка:**
 - `skills/*/SKILL.md` в формате agentskills: установка `npx skills add <внутренний репозиторий>` для Claude Code, Codex, OpenCode, Cursor;
 - плагин Claude Code: `.claude-plugin/plugin.json`, `marketplace.json` во внутреннем marketplace, `commands/`, `.mcp.json` с нашим MCP (Streamable HTTP, ключ из env или OAuth);
 - Codex, OpenCode, Cursor, Kimi: каталоги skills + регистрация MCP их командами (`codex mcp add`, `opencode.json`, `mcp.json`, `kimi.plugin.json`). Форматы манифестов проверить на момент S21: они быстро меняются;
-- skill `sbx` в шаблонах для всех harness (S15): как sandbox управляет собой через in-VM CLI.
+- skill `umiak` в шаблонах для всех harness (S15): как sandbox управляет собой через in-VM CLI.
 
 **Документация для агентов:**
 - `llms.txt` с блоком ключевых фактов (шаблоны, размеры, квоты, сроки, таймауты, события) и шпаргалкой CLI;
@@ -674,7 +674,7 @@
 
 Обновление 2026-10-29: итоговый список MVP — `docs/specs/s11-mcp.md` (38 инструментов). `computer_*` и `desktop_url` вошли в S11; `files_mkdir`, `files_move`, `sandbox_extend` не вводятся; добавлены `files_edit`, `sandbox_recover`, `computer_move`, `computer_clipboard_*`; `exec_input` и PTY — S22. Таблица ниже — исходный черновик.
 
-Транспорт: Streamable HTTP за `api.<domain>` (Bearer-ключ, позже OAuth по RFC 9728 через S24) и stdio через `sbx mcp`. Аннотации инструментов: `readOnlyHint` и `destructiveHint`. Delete требует повторить id (как заголовок подтверждения).
+Транспорт: Streamable HTTP за `api.<domain>` (Bearer-ключ, позже OAuth по RFC 9728 через S24) и stdio через `umiak mcp`. Аннотации инструментов: `readOnlyHint` и `destructiveHint`. Delete требует повторить id (как заголовок подтверждения).
 
 Длинные операции: `exec_start` + `exec_output` с offset, без удержания одного вызова. Вывод в ответе обрезается с явным `next_offset`.
 
@@ -699,7 +699,7 @@
 | `snapshot_tree`, `snapshot_read_file`, `snapshot_restore` | Снапшоты v2 | S18 |
 | `docs_search`, `docs_read` | Документация платформы | S21 |
 
-Ресурсы MCP (по желанию): `sbx://<id>/files/<path>`, `sbx://<id>/commands/<cmd>/output`.
+Ресурсы MCP (по желанию): `umiak://<id>/files/<path>`, `umiak://<id>/commands/<cmd>/output`.
 
 ### 5.3 Интеграции с фреймворками и eval-харнессами
 
@@ -709,7 +709,7 @@
 | Eve | `SandboxBackend` с нативным `spawn` | S27 |
 | E2B-совместимый SDK | Обёртка поверх нашего API для фреймворков, которые умеют только E2B (LangChain, OpenAI Agents SDK и др.) — только при спросе | S27, P3 |
 | Claude Agent SDK / свой агент в sandbox | Пример как в `vr:harbor-box/sdks/harbor-box-evals`: агент в VM, траектория JSONL выгружается | S21 (гайд) |
-| CI | GitHub Actions/GitLab раннеры; `sbx run` в любом CI | S26, S22 |
+| CI | GitHub Actions/GitLab раннеры; `umiak run` в любом CI | S26, S22 |
 | Convex, optibox | Не делаем | ⊘ |
 
 ## 6. Рекомендации master к MVP (S1–S13)
@@ -718,15 +718,15 @@
 
 | # | Область | Рекомендация | Почему сейчас |
 |---|---|---|---|
-| R1 | S7 | Зафиксировать **контракт CLI**: JSON автоматически, когда stdout не TTY; JSONL с событием `ready` у `new`/`fork --wait`; ошибка — последняя строка `{"event":"error","code",…}`; код выхода команды и 124 при таймауте; `current`. В API: заголовок подтверждения удаления (`Sbx-Confirm-Delete: <id>`), `retryable` и `requestId` в каждой ошибке. В SDK — хелперы `waitUntilReady`, `runCommand`, `streamCommand` | На этом контракте строятся skills, MCP, CI и скрипты; менять после релиза — ломать всех. Подтверждение удаления защищает от ошибок агентов |
+| R1 | S7 | Зафиксировать **контракт CLI**: JSON автоматически, когда stdout не TTY; JSONL с событием `ready` у `new`/`fork --wait`; ошибка — последняя строка `{"event":"error","code",…}`; код выхода команды и 124 при таймауте; `current`. В API: заголовок подтверждения удаления (`Umiak-Confirm-Delete: <id>`), `retryable` и `requestId` в каждой ошибке. В SDK — хелперы `waitUntilReady`, `runCommand`, `streamCommand` | На этом контракте строятся skills, MCP, CI и скрипты; менять после релиза — ломать всех. Подтверждение удаления защищает от ошибок агентов |
 | R2 | S6, S7 | `failFast` на create из шаблона: только тёплый пул, иначе `503 pool_exhausted`, ничего не создаётся. С `from` create у нас всегда холодный (S6 §7.3), поэтому там `failFast` либо отклоняется, либо ждёт тёплого пула под snapshot (S30) | Пул уже есть (S6 §9), это одна ветка admission; нужно evals и агентам, чувствительным к задержке |
 | R3 | S7/S8, S13 | Минимальная сущность **environment** (переменные, secret-файлы, репозитории, default) и флаг «без секретов пользователя» на create. Решить владельца: коллекция Payload (S8) + применение при claim (S6) | S13 кладёт репозитории в environment, а сущности нет ни в одной спецификации. Версии и upgrade — потом (S14) |
 | R4 | S8 | Модель scope ключей сразу как **действие × ресурс** со сроком жизни: действия как у boat (§2.14 K2), ограничение списком sandbox и environments (по желанию — шаблонов), срок по умолчанию 90 d, дочерний ключ не шире родителя. Зарезервировать тип ключа «sandbox» (видит только свою sandbox) для in-VM CLI | Менять семантику выданных ключей потом — миграция и риск для безопасности; S22/S24 строятся на этом |
-| R5 | S5 | В шаблон `linux` положить CLI coding-агентов (`claude`, `codex`, `opencode`), наш `sbx` CLI и набор инструментов по `docs:machines/tools.md` (Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool) | Пользователи начнут запускать агентов через exec и SSH задолго до S15; S15 опирается на версии в шаблоне |
+| R5 | S5 | В шаблон `linux` положить CLI coding-агентов (`claude`, `codex`, `opencode`), наш `umiak` CLI и набор инструментов по `docs:machines/tools.md` (Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool) | Пользователи начнут запускать агентов через exec и SSH задолго до S15; S15 опирается на версии в шаблоне |
 | R6 | S1, S5 | Проверить `/dev/kvm` в госте (вложенная виртуализация на хосте, `cpu host` уже в S1 §4.6) и записать: гарантия платформы или нет | Docker уже есть; Android-эмулятор, Firecracker, QEMU-тесты в CI требуют KVM. `cpu host` мешает живой миграции между разными CPU — решение влияет на S12 |
-| R7 | S3/S7 | Поднять `/files/archive` (tar каталога вверх и вниз потоком) из «позже» в v0 или в S7 | Без него `sbx push`, выгрузка артефактов и адаптеры evals делают по вызову на файл (боль harbor-box) |
+| R7 | S3/S7 | Поднять `/files/archive` (tar каталога вверх и вниз потоком) из «позже» в v0 или в S7 | Без него `umiak push`, выгрузка артефактов и адаптеры evals делают по вызову на файл (боль harbor-box) |
 | R8 | S11 | Взять список инструментов §5.2 как вход brainstorm S11, включая шаблон длинных задач (detached + опрос) и аннотации `destructiveHint` | S11 — главный канал для агентов и наше отличие от boat |
-| R9 | S7 | `GET /v1/limits`: квоты команды и остаток, допустимые шаблоны и размеры с причиной | Квоты есть (S6 §8.5); агентам нужно проверять перед массовым стартом, skills ссылаются на `sbx limits` |
+| R9 | S7 | `GET /v1/limits`: квоты команды и остаток, допустимые шаблоны и размеры с причиной | Квоты есть (S6 §8.5); агентам нужно проверять перед массовым стартом, skills ссылаются на `umiak limits` |
 | R10 | S4, S6, S7 | Согласовать формат slug: S6 §5.6 пишет «10 символов `[a-z0-9]`», S4 §4.2 — `[a-z0-9]+(-[a-z0-9]+)*`, 3–40 символов, по умолчанию три слова, rename в S7 | Slug виден в URL портов и SSH; противоречие между спецификациями нужно снять до реализации |
 | R11 | S6, S7 | `env` и `secretFiles` на fork (заменяют унаследованные) и на resume. Сейчас fork принимает только `name, labels, ttlSeconds, size` (S6 §7.7), resume — `size` и TTL (§7.6) | Центральный сценарий parallel-agents и evals: своя задача или секрет на каждую копию. Перешифровка `sandbox_secrets` для цели уже есть в §7.7, доработка мала |
 

@@ -6,10 +6,10 @@
 
 /**
  * Payload refuses a team delete without this header (teams access in
- * @sbx/payload), so the admin's own Delete never shows and the check below
+ * @umiak/payload), so the admin's own Delete never shows and the check below
  * cannot be skipped by accident.
  */
-export const DELETE_TEAM_HEADER = "x-sbx-delete-team";
+export const DELETE_TEAM_HEADER = "x-umiak-delete-team";
 
 export interface TeamContents {
 	/** 0 or 1: the list is read with limit=1. */
@@ -42,7 +42,7 @@ async function apiList(
 	const r = await f(path, {
 		method: "GET",
 		credentials: "same-origin",
-		headers: { Accept: "application/json", "Sbx-Team": teamId },
+		headers: { Accept: "application/json", "Umiak-Team": teamId },
 	});
 	if (!r.ok) throw new Error(`${path.split("?")[0]}: ${await errorText(r)}`);
 	const body = (await r.json()) as { data?: unknown };
@@ -52,7 +52,7 @@ async function apiList(
 	return body.data.length;
 }
 
-/** What the team still has, from the api with `Sbx-Team` of the team. */
+/** What the team still has, from the api with `Umiak-Team` of the team. */
 export async function teamContents(
 	f: Fetch,
 	teamId: string,

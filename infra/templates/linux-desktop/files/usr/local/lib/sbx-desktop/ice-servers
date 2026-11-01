@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-# Populated atomically by the OS streamer adapter from Desktop/Configure.
-set -euo pipefail
-exec cat /var/lib/sbx-stream/ice-servers.json

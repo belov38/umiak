@@ -1,6 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { encodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import {
 	commitTransaction,
 	createLocalReq,
@@ -9,13 +13,18 @@ import {
 	type Payload,
 } from "payload";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { migrateSbxPayload, notify } from "../src/index.ts";
+import { migrateUmiakPayload, notify } from "../src/index.ts";
 import { closePayload, Listener, type Note, openPayload } from "./helpers.ts";
 
 const pub = (kind: "user" | "team" | "apiKey", id: string | number) =>
 	encodeUuid(kind, String(id));
 
-const CHANNELS = ["sbx_identity", "sbx_config", "sbx_routes", "sbx_ssh_revoke"];
+const CHANNELS = [
+	"umiak_identity",
+	"umiak_config",
+	"umiak_routes",
+	"umiak_ssh_revoke",
+];
 
 describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 	let t: TestDatabase;
@@ -44,7 +53,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				team: teamId,
 				kind: "team",
 				secretHash: randomBytes(32).toString("hex"),
-				prefix: "sbx_key_x",
+				prefix: "umiak_key_x",
 				last4: "abcd",
 				scopes: ["sandboxes:read"],
 				expiresAt: new Date(Date.now() + 86400_000).toISOString(),
@@ -56,7 +65,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
 		payload = await openPayload(t.url);
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 		listener = new Listener(t.url);
 		await listener.start(CHANNELS);
 	});
@@ -94,7 +103,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				data: { name: "new" },
 				req,
 			});
-			expect(only(await listener.settle(), "sbx_identity")).toEqual([]);
+			expect(only(await listener.settle(), "umiak_identity")).toEqual([]);
 
 			await commitTransaction(req);
 			await listener.waitFor((n) => n.payload === `users:${u.id}`);
@@ -135,7 +144,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				id: u.id,
 				data: { name: "x" },
 			});
-			expect(only(await listener.settle(), "sbx_identity")).toEqual([
+			expect(only(await listener.settle(), "umiak_identity")).toEqual([
 				`users:${u.id}`,
 			]);
 		});
@@ -143,8 +152,8 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 		it("notify without a transaction sends at once", async () => {
 			const req = await createLocalReq({}, payload);
 			expect(req.transactionID).toBeUndefined();
-			await notify(req, "sbx_config", "sizes:probe");
-			expect(only(await listener.settle(), "sbx_config")).toEqual([
+			await notify(req, "umiak_config", "sizes:probe");
+			expect(only(await listener.settle(), "umiak_config")).toEqual([
 				"sizes:probe",
 			]);
 		});
@@ -161,7 +170,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			});
 			// pg_notify refuses payloads of 8000 bytes and more.
 			await expect(
-				notify(req, "sbx_identity", "x".repeat(9000)),
+				notify(req, "umiak_identity", "x".repeat(9000)),
 			).rejects.toThrow();
 			await killTransaction(req);
 			const back = await payload.findByID({ collection: "users", id: u.id });
@@ -175,14 +184,14 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			await commitTransaction(req);
 			if (id === undefined) throw new Error("no transaction");
 			req.transactionID = id;
-			await expect(notify(req, "sbx_identity", "users:x")).rejects.toThrow(
+			await expect(notify(req, "umiak_identity", "users:x")).rejects.toThrow(
 				/not open/,
 			);
 			delete req.transactionID;
 		});
 	});
 
-	describe("sbx_identity", () => {
+	describe("umiak_identity", () => {
 		it("users, teams, api-keys, ssh-keys notify '<collection>:<uuid>', memberships '<user>:<team>'", async () => {
 			const u = await user();
 			const tm = await team();
@@ -201,7 +210,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 					type: "ssh-ed25519",
 				},
 			});
-			const ids = only(await listener.settle(), "sbx_identity");
+			const ids = only(await listener.settle(), "umiak_identity");
 			expect(ids).toEqual([
 				`users:${u.id}`,
 				`teams:${tm.id}`,
@@ -222,17 +231,17 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				id: m.id,
 				data: { role: "member" },
 			});
-			expect(only(await listener.settle(), "sbx_identity")).toEqual([
+			expect(only(await listener.settle(), "umiak_identity")).toEqual([
 				`memberships:${u.id}:${tm.id}`,
 			]);
 			listener.clear();
 			await payload.delete({ collection: "ssh-keys", id: s.id });
-			expect(only(await listener.settle(), "sbx_identity")).toEqual([
+			expect(only(await listener.settle(), "umiak_identity")).toEqual([
 				`ssh-keys:${s.id}`,
 			]);
 		});
 
-		it("touching lastUsedAt or lastLoginAt sends no sbx_identity", async () => {
+		it("touching lastUsedAt or lastLoginAt sends no umiak_identity", async () => {
 			const u = await user();
 			const tm = await team();
 			const k = await apiKey(tm.id);
@@ -270,13 +279,13 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				id: k.id,
 				data: { name: "renamed" },
 			});
-			expect(only(await listener.settle(), "sbx_identity")).toEqual([
+			expect(only(await listener.settle(), "umiak_identity")).toEqual([
 				`api-keys:${k.id}`,
 			]);
 		});
 	});
 
-	describe("sbx_config and sbx_routes", () => {
+	describe("umiak_config and umiak_routes", () => {
 		it("templates, sizes and pool targets notify '<collection>:<uuid>'", async () => {
 			const size = await payload.create({
 				collection: "sizes",
@@ -296,7 +305,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				data: { template: "win", size: "notify-4gb", target: 0 },
 			});
 			await payload.delete({ collection: "pool-targets", id: pt.id });
-			expect(only(await listener.settle(), "sbx_config")).toEqual([
+			expect(only(await listener.settle(), "umiak_config")).toEqual([
 				`sizes:${size.id}`,
 				`templates:${tpl.id}`,
 				`pool-targets:${pt.id}`,
@@ -304,7 +313,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			]);
 		});
 
-		it("teams notify sbx_config only when the quota changes", async () => {
+		it("teams notify umiak_config only when the quota changes", async () => {
 			const tm = await team();
 			await listener.settle();
 			listener.clear();
@@ -314,8 +323,8 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				data: { name: "renamed" },
 			});
 			let notes = await listener.settle();
-			expect(only(notes, "sbx_config")).toEqual([]);
-			expect(only(notes, "sbx_identity")).toEqual([`teams:${tm.id}`]);
+			expect(only(notes, "umiak_config")).toEqual([]);
+			expect(only(notes, "umiak_identity")).toEqual([`teams:${tm.id}`]);
 			listener.clear();
 			await payload.update({
 				collection: "teams",
@@ -323,7 +332,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				data: { quota: { maxRamMb: 1024 } },
 			});
 			notes = await listener.settle();
-			expect(only(notes, "sbx_config")).toEqual([`teams:${tm.id}`]);
+			expect(only(notes, "umiak_config")).toEqual([`teams:${tm.id}`]);
 		});
 
 		it("publicDesktopEnabled invalidates gateway routes", async () => {
@@ -332,38 +341,38 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				data: { publicDesktopEnabled: true },
 			});
 			const notes = await listener.settle();
-			expect(only(notes, "sbx_routes")).toEqual(["*"]);
+			expect(only(notes, "umiak_routes")).toEqual(["*"]);
 			listener.clear();
 			await payload.updateGlobal({
 				slug: "platform-defaults",
 				data: { publicDesktopEnabled: false },
 			});
-			expect(only(await listener.settle(), "sbx_routes")).toEqual(["*"]);
+			expect(only(await listener.settle(), "umiak_routes")).toEqual(["*"]);
 		});
 
-		it("platform-defaults: publicPortsEnabled sends sbx_config and sbx_routes '*'", async () => {
+		it("platform-defaults: publicPortsEnabled sends umiak_config and umiak_routes '*'", async () => {
 			await payload.updateGlobal({
 				slug: "platform-defaults",
 				data: { publicPortsEnabled: false },
 			});
 			let notes = await listener.settle();
-			expect(only(notes, "sbx_config")).toEqual(["platform-defaults:global"]);
-			expect(only(notes, "sbx_routes")).toEqual(["*"]);
+			expect(only(notes, "umiak_config")).toEqual(["platform-defaults:global"]);
+			expect(only(notes, "umiak_routes")).toEqual(["*"]);
 			listener.clear();
 			await payload.updateGlobal({
 				slug: "platform-defaults",
 				data: { idleTimeoutSeconds: 600 },
 			});
 			notes = await listener.settle();
-			expect(only(notes, "sbx_config")).toEqual(["platform-defaults:global"]);
-			expect(only(notes, "sbx_routes")).toEqual([]);
+			expect(only(notes, "umiak_config")).toEqual(["platform-defaults:global"]);
+			expect(only(notes, "umiak_routes")).toEqual([]);
 			await payload.updateGlobal({
 				slug: "platform-defaults",
 				data: { publicPortsEnabled: true, idleTimeoutSeconds: 900 },
 			});
 		});
 
-		it("ssoPortPolicy any -> team bumps ssoPolicyEpoch and sends sbx_routes '*'", async () => {
+		it("ssoPortPolicy any -> team bumps ssoPolicyEpoch and sends umiak_routes '*'", async () => {
 			const before = await payload.findGlobal({ slug: "platform-defaults" });
 			expect(before.ssoPortPolicy).toBe("any");
 			const epoch = before.ssoPolicyEpoch as number;
@@ -373,7 +382,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			});
 			let d = await payload.findGlobal({ slug: "platform-defaults" });
 			expect(d.ssoPolicyEpoch).toBe(epoch + 1);
-			expect(only(await listener.settle(), "sbx_routes")).toEqual(["*"]);
+			expect(only(await listener.settle(), "umiak_routes")).toEqual(["*"]);
 			listener.clear();
 			// team -> any opens access: no new epoch is needed.
 			await payload.updateGlobal({
@@ -382,7 +391,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			});
 			d = await payload.findGlobal({ slug: "platform-defaults" });
 			expect(d.ssoPolicyEpoch).toBe(epoch + 1);
-			expect(only(await listener.settle(), "sbx_routes")).toEqual(["*"]);
+			expect(only(await listener.settle(), "umiak_routes")).toEqual(["*"]);
 			// The epoch is owned by the hook: a direct write is ignored.
 			await payload.updateGlobal({
 				slug: "platform-defaults",
@@ -393,7 +402,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 		});
 	});
 
-	describe("sbx_ssh_revoke", () => {
+	describe("umiak_ssh_revoke", () => {
 		it("a deactivated user -> 'user:usr_…'", async () => {
 			const u = await user();
 			await listener.settle();
@@ -403,7 +412,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				id: u.id,
 				data: { active: false, deactivatedReason: "operator" },
 			});
-			expect(only(await listener.settle(), "sbx_ssh_revoke")).toEqual([
+			expect(only(await listener.settle(), "umiak_ssh_revoke")).toEqual([
 				`user:${pub("user", u.id)}`,
 			]);
 			listener.clear();
@@ -412,7 +421,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				id: u.id,
 				data: { name: "still off" },
 			});
-			expect(only(await listener.settle(), "sbx_ssh_revoke")).toEqual([]);
+			expect(only(await listener.settle(), "umiak_ssh_revoke")).toEqual([]);
 		});
 
 		it("a deleted membership -> 'member:team_…:usr_…'", async () => {
@@ -430,10 +439,10 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			listener.clear();
 			await payload.delete({ collection: "memberships", id: m.id });
 			const notes = await listener.settle();
-			expect(only(notes, "sbx_ssh_revoke")).toEqual([
+			expect(only(notes, "umiak_ssh_revoke")).toEqual([
 				`member:${pub("team", tm.id)}:${pub("user", u.id)}`,
 			]);
-			expect(only(notes, "sbx_identity")).toEqual([
+			expect(only(notes, "umiak_identity")).toEqual([
 				`memberships:${u.id}:${tm.id}`,
 			]);
 		});
@@ -457,7 +466,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 					rotatedAt: new Date().toISOString(),
 				},
 			});
-			expect(only(await listener.settle(), "sbx_ssh_revoke")).toEqual([
+			expect(only(await listener.settle(), "umiak_ssh_revoke")).toEqual([
 				`key:${pub("apiKey", k1.id)}`,
 				`key:${pub("apiKey", k2.id)}`,
 			]);
@@ -468,7 +477,7 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				id: k1.id,
 				data: { secretHash: randomBytes(32).toString("hex") },
 			});
-			expect(only(await listener.settle(), "sbx_ssh_revoke")).toEqual([]);
+			expect(only(await listener.settle(), "umiak_ssh_revoke")).toEqual([]);
 		});
 
 		it("a deleted shared team -> 'team:team_…', revokes and deletes in one transaction", async () => {
@@ -483,21 +492,21 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			listener.clear();
 			await payload.delete({ collection: "teams", id: tm.id });
 			const notes = await listener.settle();
-			expect(only(notes, "sbx_ssh_revoke").sort()).toEqual(
+			expect(only(notes, "umiak_ssh_revoke").sort()).toEqual(
 				[
 					`member:${pub("team", tm.id)}:${pub("user", u.id)}`,
 					`key:${pub("apiKey", k.id)}`,
 					`team:${pub("team", tm.id)}`,
 				].sort(),
 			);
-			expect(only(notes, "sbx_identity").sort()).toEqual(
+			expect(only(notes, "umiak_identity").sort()).toEqual(
 				[
 					`memberships:${u.id}:${tm.id}`,
 					`api-keys:${k.id}`,
 					`teams:${tm.id}`,
 				].sort(),
 			);
-			expect(only(notes, "sbx_config")).toEqual([`teams:${tm.id}`]);
+			expect(only(notes, "umiak_config")).toEqual([`teams:${tm.id}`]);
 		});
 	});
 });

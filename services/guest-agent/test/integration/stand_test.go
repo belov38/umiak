@@ -3,7 +3,7 @@
 package integration
 
 // Stand tests of the pve acceptance run (apps/bench `s3`). They skip unless
-// SBX_STAND=1: the bench driver runs them one at a time, as root, in a real
+// UMIAK_STAND=1: the bench driver runs them one at a time, as root, in a real
 // Proxmox VM around actions it takes from outside the guest (a reboot, an S1
 // snapshot between Quiesce and Thaw, a fork). They share files with the driver
 // in standRun (tmpfs) and standVar (survives a reboot); secrets come on stdin
@@ -30,15 +30,15 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 const (
-	standRun = "/run/sbx-stand"
-	standVar = "/var/lib/sbx-stand"
+	standRun = "/run/umiak-stand"
+	standVar = "/var/lib/umiak-stand"
 	// rebootCmd is the command that runs across the reboot.
 	rebootCmd = "stand-reboot"
 	// standSnapshotWait bounds the wait for the driver's S1 snapshot.
@@ -48,7 +48,7 @@ const (
 // standOnly skips a test outside the pve stand.
 func standOnly(t *testing.T) {
 	t.Helper()
-	if os.Getenv("SBX_STAND") != "1" {
+	if os.Getenv("UMIAK_STAND") != "1" {
 		t.Skip("pve stand test: run by apps/bench s3")
 	}
 }
@@ -104,7 +104,7 @@ func TestStandRebootBefore(t *testing.T) {
 }
 
 // secretsDir is the tmpfs with the materialized secrets (spec 8.3).
-const secretsDir = "/run/sbx/secrets"
+const secretsDir = "/run/umiak/secrets"
 
 // Spec 21 item 4, after the reboot: the command is LOST/REBOOT with its
 // output readable, the secrets are gone and the phase is pending until

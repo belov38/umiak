@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 )
 
 func TestHTTPSink(t *testing.T) {
@@ -72,7 +72,7 @@ func TestHTTPSink(t *testing.T) {
 	ctx := context.Background()
 	// The payload type is not linked into the gateway: the sink must not
 	// need to resolve it (spec 9.6, 10.2).
-	payload := &anypb.Any{TypeUrl: "type.googleapis.com/sbx.agent.v1.Unknown", Value: []byte{0x0a, 0x03, 'a', 'b', 'c'}}
+	payload := &anypb.Any{TypeUrl: "type.googleapis.com/umiak.agent.v1.Unknown", Value: []byte{0x0a, 0x03, 'a', 'b', 'c'}}
 	acked, err := sink.DeliverEvents(ctx, "m-1", []*tunnelv1.Event{{Seq: 4, Type: "a", Payload: payload}, {Seq: 5, Type: "b"}})
 	if err != nil || acked != 5 {
 		t.Fatalf("DeliverEvents = %d, %v", acked, err)

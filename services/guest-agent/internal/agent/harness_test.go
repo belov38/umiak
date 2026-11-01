@@ -12,18 +12,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 const (
@@ -237,9 +237,9 @@ func (h *harness) buildDeps() Deps {
 			return &process.User{Name: name, UID: uid, GID: gid, Home: h.t.TempDir()}, nil
 		},
 		Statfs:     func(string) (uint64, uint64, error) { return 100 << 30, 50 << 30, nil },
-		Hostname:   func() (string, error) { return "sbx-test", nil },
+		Hostname:   func() (string, error) { return "umiak-test", nil },
 		IdleSample: func() (float64, uint64) { return 0, 0 },
-		ShimPath:   "/usr/local/lib/sbx-agent/versions/test/sbx-agent",
+		ShimPath:   "/usr/local/lib/umiak-agent/versions/test/umiak-agent",
 		Log:        slog.New(slog.DiscardHandler),
 
 		IdentityRetry: retry,

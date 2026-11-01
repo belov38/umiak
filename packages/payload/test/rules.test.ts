@@ -1,8 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { APIError, Forbidden, type Payload, ValidationError } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DELETE_TEAM_HEADER, migrateSbxPayload } from "../src/index.ts";
+import { DELETE_TEAM_HEADER, migrateUmiakPayload } from "../src/index.ts";
 import { closePayload, openPayload } from "./helpers.ts";
 
 describe.skipIf(skipPg())("collection rules", () => {
@@ -61,7 +65,7 @@ describe.skipIf(skipPg())("collection rules", () => {
 			team: teamId as string | number,
 			kind: "team" as const,
 			secretHash: randomBytes(32).toString("hex"),
-			prefix: "sbx_key_x",
+			prefix: "umiak_key_x",
 			last4: "abcd",
 			scopes: ["sandboxes:read"],
 			expiresAt: new Date(Date.now() + 86400_000).toISOString(),
@@ -84,7 +88,7 @@ describe.skipIf(skipPg())("collection rules", () => {
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
 		payload = await openPayload(t.url);
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 		operator = {
 			...(await user({ isOperator: true })),
 			collection: "users",
@@ -624,7 +628,7 @@ describe.skipIf(skipPg())("collection rules", () => {
 			await payload.update({
 				collection: "users",
 				id: u.id,
-				data: { isOperator: true, groups: ["sbx-operators"], name: "n" },
+				data: { isOperator: true, groups: ["umiak-operators"], name: "n" },
 				overrideAccess: false,
 				user: operator,
 			});
@@ -641,7 +645,7 @@ describe.skipIf(skipPg())("collection rules", () => {
 				data: {
 					email: `c-${randomUUID()}@example.com`,
 					isOperator: true,
-					groups: ["sbx-operators"],
+					groups: ["umiak-operators"],
 				},
 				overrideAccess: false,
 				user: operator,

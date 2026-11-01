@@ -5,7 +5,7 @@ import {
 	type AutounattendInput,
 	renderAutounattend,
 	renderOfflineAutounattend,
-	SBX_UNATTEND,
+	UMIAK_UNATTEND,
 	unattendPassword,
 	virtioDriverPaths,
 } from "../src/windows/unattend.ts";
@@ -291,19 +291,19 @@ describe("renderAutounattend", () => {
 	});
 });
 
-describe("SBX_UNATTEND", () => {
-	it("sbx-unattend contains no Password element", () => {
-		const doc = parse(SBX_UNATTEND);
-		expect(SBX_UNATTEND).not.toMatch(/Password/i);
-		expect(SBX_UNATTEND).not.toContain("UserAccounts");
-		expect(SBX_UNATTEND).not.toContain("AutoLogon");
+describe("UMIAK_UNATTEND", () => {
+	it("umiak-unattend contains no Password element", () => {
+		const doc = parse(UMIAK_UNATTEND);
+		expect(UMIAK_UNATTEND).not.toMatch(/Password/i);
+		expect(UMIAK_UNATTEND).not.toContain("UserAccounts");
+		expect(UMIAK_UNATTEND).not.toContain("AutoLogon");
 		expectComponentAttributes(doc);
 		expectShortCommands(doc);
 		expect(passes(doc)).toEqual(["generalize", "specialize", "oobeSystem"]);
 	});
 
 	it("generalize keeps devices, specialize runs identity apply and disables the deferred services", () => {
-		const doc = parse(SBX_UNATTEND);
+		const doc = parse(UMIAK_UNATTEND);
 		const pnp = component(
 			pass(doc, "generalize"),
 			"Microsoft-Windows-PnpSysprep",
@@ -315,7 +315,7 @@ describe("SBX_UNATTEND", () => {
 		// Services sysprep /generalize needs alive are disabled on the clone, right after it.
 		expect(SYSPREP_DEFERRED_SERVICES).toEqual(["dmwappushservice"]);
 		expect(cmds).toEqual([
-			'"C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe" identity apply --specialize',
+			'"C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe" identity apply --specialize',
 			...SYSPREP_DEFERRED_SERVICES.map(
 				(s) =>
 					`reg.exe add HKLM\\SYSTEM\\CurrentControlSet\\Services\\${s} /v Start /t REG_DWORD /d 4 /f`,
@@ -324,17 +324,17 @@ describe("SBX_UNATTEND", () => {
 	});
 
 	it("specialize sets the interim computer name; the agent renames with one reboot (R16)", () => {
-		const doc = parse(SBX_UNATTEND);
+		const doc = parse(UMIAK_UNATTEND);
 		const shell = component(
 			pass(doc, "specialize"),
 			"Microsoft-Windows-Shell-Setup",
 		);
-		expect(shell.ComputerName).toBe("SBXTEMPLATE");
+		expect(shell.ComputerName).toBe("UMIAKTEMPLATE");
 		expect(shell.TimeZone).toBe("UTC");
 	});
 
 	it("oobeSystem skips machine and user OOBE, hides every screen, en-US, UTC", () => {
-		const doc = parse(SBX_UNATTEND);
+		const doc = parse(UMIAK_UNATTEND);
 		const oobe = pass(doc, "oobeSystem");
 		const shell = component(oobe, "Microsoft-Windows-Shell-Setup");
 		expect(shell.OOBE).toEqual({
@@ -362,8 +362,8 @@ describe("SBX_UNATTEND", () => {
 				InputLocale: "en-US",
 				UserLocale: "en-US",
 			});
-		expect(SBX_UNATTEND).not.toContain("SystemLocale");
-		expect(SBX_UNATTEND).not.toMatch(/CodePage/i);
+		expect(UMIAK_UNATTEND).not.toContain("SystemLocale");
+		expect(UMIAK_UNATTEND).not.toMatch(/CodePage/i);
 	});
 });
 

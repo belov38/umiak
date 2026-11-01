@@ -1,25 +1,25 @@
 {
-	"name": "@sbx/sdk",
+	"name": "@umiak/sdk",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "TypeScript SDK of the sbx public API: facade (Sbx, Sandbox, commands, files, PTY), generated types, openapi-fetch transport, retries, credential chain",
+	"description": "TypeScript SDK of the umiak public API: facade (Umiak, Sandbox, commands, files, PTY), generated types, openapi-fetch transport, retries, credential chain",
 	"exports": {
 		".": "./src/index.ts"
 	},
 	"scripts": {
 		"gen": "node scripts/gen.ts",
 		"test": "vitest run",
-		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
+		"typecheck": "pnpm --filter \"@umiak/agent-client...\" run build && tsc --noEmit -p ."
 	},
 	"dependencies": {
 		"openapi-fetch": "0.17.0",
 		"openapi-typescript-helpers": "0.1.0"
 	},
 	"devDependencies": {
-		"@sbx/api": "workspace:*",
-		"@sbx/core": "workspace:*",
-		"@sbx/db": "workspace:*",
+		"@umiak/api": "workspace:*",
+		"@umiak/core": "workspace:*",
+		"@umiak/db": "workspace:*",
 		"openapi-typescript": "7.13.0"
 	}
 }

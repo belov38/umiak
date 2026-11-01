@@ -66,7 +66,7 @@ describe.each(ALL_CLIENTS)("$client", (rules) => {
 });
 
 describe("Claude Code", () => {
-	it("names are mcp__sbx__<tool>, at most 64 characters, [a-zA-Z0-9_-]", () => {
+	it("names are mcp__umiak__<tool>, at most 64 characters, [a-zA-Z0-9_-]", () => {
 		for (const t of tools) {
 			const q = CLAUDE_CODE.qualifiedName(t.name);
 			expect(q).toBe(`mcp__${SERVER_NAME}__${t.name}`);

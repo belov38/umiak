@@ -14,7 +14,7 @@ export const RESERVED_SLUGS: readonly string[] = [
 	"tunnel",
 	"admin",
 	"static",
-	"sbx",
+	"umiak",
 ];
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -48,7 +48,7 @@ export function isValidSlug(s: string): boolean {
 	return slugProblem(s) === null;
 }
 
-/** Throws SbxError `validation` (path `slug`) if `s` violates S4 §4.2 / S7 §5.4. */
+/** Throws UmiakError `validation` (path `slug`) if `s` violates S4 §4.2 / S7 §5.4. */
 export function validateSlug(s: string): void {
 	const problem = slugProblem(s);
 	if (problem !== null) {

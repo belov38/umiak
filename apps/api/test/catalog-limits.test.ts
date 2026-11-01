@@ -1,6 +1,10 @@
-import { StaticConfigReader } from "@sbx/config";
-import { createTopology, SIZES } from "@sbx/core/testing";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { StaticConfigReader } from "@umiak/config";
+import { createTopology, SIZES } from "@umiak/core/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApiDeps } from "../src/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";

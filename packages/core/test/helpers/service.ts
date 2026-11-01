@@ -2,7 +2,7 @@
 // own node), a StaticConfigReader for it, a principal of a fresh team and a
 // service wired to RecordingJobSender.
 import { randomBytes, randomUUID } from "node:crypto";
-import { StaticConfigReader } from "@sbx/config";
+import { StaticConfigReader } from "@umiak/config";
 import type pg from "pg";
 import { expect } from "vitest";
 import {
@@ -12,9 +12,9 @@ import {
 	type Principal,
 	RecordingJobSender,
 	SandboxServiceImpl,
-	SbxError,
 	SCOPES,
 	type SecretSets,
+	UmiakError,
 } from "../../src/index.ts";
 import {
 	createTopology,
@@ -224,18 +224,18 @@ export async function insertSavedSnapshot(
 	return id;
 }
 
-/** Awaits a rejection with SbxError `code` and returns the error. */
+/** Awaits a rejection with UmiakError `code` and returns the error. */
 export async function expectCode(
 	promise: Promise<unknown>,
 	code: string,
-): Promise<SbxError> {
+): Promise<UmiakError> {
 	const err = await promise.then(
 		() => null,
 		(e: unknown) => e,
 	);
-	expect(err).toBeInstanceOf(SbxError);
-	expect((err as SbxError).code).toBe(code);
-	return err as SbxError;
+	expect(err).toBeInstanceOf(UmiakError);
+	expect((err as UmiakError).code).toBe(code);
+	return err as UmiakError;
 }
 
 export interface SeedOptions {

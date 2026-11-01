@@ -18,11 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // Timing holds the gateway timings. Zero fields take the spec defaults.
@@ -40,7 +40,7 @@ type Timing struct {
 	// TCPDeadline is the default per-stream drain deadline of TCP streams (2 min).
 	TCPDeadline time.Duration
 	// MaxTCPDrainDeadline caps a caller-chosen drain deadline of a TCP
-	// stream (Sbx-Tcp-Drain-Deadline-Ms, TCPOptions.DrainDeadline) (15 min).
+	// stream (Umiak-Tcp-Drain-Deadline-Ms, TCPOptions.DrainDeadline) (15 min).
 	MaxTCPDrainDeadline time.Duration
 	// DrainMargin is added to the overall wait of Drain (10 s): EndpointWait
 	// + DrainSpread + the longest TCP drain deadline + DrainMargin.
@@ -58,7 +58,7 @@ type Timing struct {
 	// MaxEventBytes is the largest Events/Subscribe message the gateway reads
 	// (1 MiB, plus a small envelope allowance). A larger one ends the stream;
 	// the pump resubscribes with its backoff. Agents replace such events
-	// with an sbx.tunnel.event_too_large stub before sending. The agents'
+	// with an umiak.tunnel.event_too_large stub before sending. The agents'
 	// agent.Config.MaxEventBytes must not exceed it: an event between the
 	// two sizes would end the stream at every resubscribe and stall the
 	// machine's events.
@@ -123,7 +123,7 @@ type Config struct {
 	// unparsable versions get 426.
 	MinAgentVersion string
 	// AllowedServicePrefixes are the services the /rpc/ proxy passes
-	// (default [wire.ServicePrefixAgent]); sbx.tunnel.v1. is always refused.
+	// (default [wire.ServicePrefixAgent]); umiak.tunnel.v1. is always refused.
 	AllowedServicePrefixes []string
 	// MaxTCPStreamsPerMachine caps concurrent CONNECT streams per machine (800).
 	MaxTCPStreamsPerMachine int

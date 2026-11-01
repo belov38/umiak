@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/transport"
 )
 
 // Errors returned by the store.
@@ -412,7 +412,7 @@ func (s *Store) Instance(ctx context.Context, id string) (Instance, error) {
 // InstanceByURL returns the live gateway instance whose internal URL is
 // internalURL (compared ignoring a trailing slash): heartbeat newer than
 // staleAfter, the freshest one when an old row shares the URL. A caller that
-// got an instance URL from a response (a 421 Sbx-Instance-Url, a
+// got an instance URL from a response (a 421 Umiak-Instance-Url, a
 // transport.MovedError) checks it here before sending a service token there.
 func (s *Store) InstanceByURL(ctx context.Context, internalURL string, staleAfter time.Duration) (Instance, bool, error) {
 	var i Instance
