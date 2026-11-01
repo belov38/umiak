@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { verifyLiveDesktopMcp } from "../../apps/mcp/test/live-desktop.ts";
+import { typeIntoRunDialog } from "../../apps/mcp/test/windows-run.ts";
 import { makeContext } from "../../apps/template-builder/src/context.ts";
 import { verifyDesktopMedia } from "../../apps/web/e2e/desktop-media.ts";
 import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
@@ -49,8 +50,6 @@ function guestRoot(
 	const r = JSON.parse(raw) as { exitcode?: number; "out-data"?: string };
 	return { exitcode: r.exitcode ?? -1, out: r["out-data"] ?? "" };
 }
-/** Opens the Run dialog in the interactive session of user (exec runs in session 0). */
-const OPEN_RUN_DIALOG = `$a=New-ScheduledTaskAction -Execute explorer.exe -Argument 'shell:::{2559a1f3-21d7-11d4-bdaf-00c04f60b9f0}';$p=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\user" -LogonType Interactive;Register-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Action $a -Principal $p -Force|Out-Null;Start-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\';Start-Sleep 2;Unregister-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Confirm:$false`;
 const PWSH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
 const pwsh = (script: string, ...args: string[]) => [
 	PWSH,
@@ -165,22 +164,31 @@ try {
 	await writeFile(join(output, "before.png"), before.bytes, { mode: 0o600 });
 	const proofText = "S10 экран 世界";
 	let baseline: typeof before;
+	let after: typeof before | undefined;
 	if (windows) {
 		// The Run dialog (opened in the console session of user) executes a pwsh
 		// line typed with KEYEVENTF_UNICODE; a Win+R hotkey races Start on a fresh logon.
 		baseline = await sb.desktop.screenshot({ cursor: "false" });
-		await sb.exec(pwsh(OPEN_RUN_DIALOG));
-		await sb.desktop.act({
-			actions: [
-				{ type: "wait", ms: 1000 },
-				{
-					type: "type",
-					text: `pwsh -NoProfile -Command "Set-Content -NoNewline -Encoding utf8 $env:USERPROFILE\\s10-input-proof '${proofText}'"`,
-					delayMs: 5,
-				},
-				{ type: "wait", ms: 300 },
-			],
-		});
+		const attempt = await typeIntoRunDialog(
+			sb,
+			"s10-input-proof",
+			proofText,
+			async () => {
+				await sb.desktop.act({
+					actions: [
+						{
+							type: "type",
+							text: `pwsh -NoProfile -Command "Set-Content -NoNewline -Encoding utf8 $env:USERPROFILE\\s10-input-proof '${proofText}'"`,
+							delayMs: 5,
+						},
+						{ type: "wait", ms: 300 },
+					],
+				});
+				after = await sb.desktop.screenshot({ cursor: "false" });
+				await sb.desktop.act({ actions: [{ type: "key", keys: ["enter"] }] });
+			},
+		);
+		if (attempt > 1) console.log(`Run dialog needed ${attempt} attempts`);
 	} else {
 		await sb.exec([
 			"env",
@@ -208,14 +216,15 @@ try {
 				},
 			],
 		});
+		after = await sb.desktop.screenshot({ cursor: "false" });
+		await sb.desktop.act({
+			actions: [
+				{ type: "key", keys: ["enter"] },
+				{ type: "wait", ms: 500 },
+			],
+		});
 	}
-	const after = await sb.desktop.screenshot({ cursor: "false" });
-	await sb.desktop.act({
-		actions: [
-			{ type: "key", keys: ["enter"] },
-			{ type: "wait", ms: windows ? 4000 : 500 },
-		],
-	});
+	if (!after) throw new Error("no screenshot after typing");
 	await writeFile(join(output, "after.png"), after.bytes, { mode: 0o600 });
 	check(hash(baseline.bytes) !== hash(after.bytes), "input changes screenshot");
 	const proof = await sb.exec(
@@ -315,6 +324,18 @@ try {
 		await writeFile(join(output, "moonlight.log"), diagnostic.stdout, {
 			mode: 0o600,
 		});
+		if (windows) {
+			// The moonlight-web log is in the SYSTEM-only agent state.
+			const web = guestRoot(
+				sb,
+				pwsh(
+					"Get-Content -Tail 200 'C:\\ProgramData\\sbx-agent\\state\\desktop-moonlight\\web-server.log'",
+				),
+			);
+			await writeFile(join(output, "web-server.log"), web.out, {
+				mode: 0o600,
+			});
+		}
 		console.log("media diagnostics", output);
 		throw error;
 	}

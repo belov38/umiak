@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { chromium } from "@playwright/test";
 import type { Sandbox } from "@sbx/sdk";
 
+const MIN_PICTURE_BYTES = 30_000;
 const hash = (bytes: Uint8Array) =>
 	createHash("sha256").update(bytes).digest("hex");
 export async function verifyDesktopMedia(
@@ -39,6 +40,13 @@ export async function verifyDesktopMedia(
 			const page = await browser.newPage({
 				viewport: { width: 1280, height: 800 },
 			});
+			// Viewer logs for failures only; links and tickets are masked.
+			const consoleLines: string[] = [];
+			page.on("console", (m) =>
+				consoleLines.push(
+					`${new Date().toISOString()} ${m.type()} ${m.text().replace(/https?:\/\/\S+/g, "<url>")}`,
+				),
+			);
 			if (transport === "webrtc")
 				await page.addInitScript((protocol) => {
 					const force = (config: RTCConfiguration = {}): RTCConfiguration => ({
@@ -94,10 +102,25 @@ export async function verifyDesktopMedia(
 				}
 				const media = page.locator("video:visible, canvas:visible").first();
 				await media.waitFor({ timeout: 30_000 });
-				await page.waitForTimeout(3000);
-				const first = await media.screenshot();
+				// A decoded desktop is a large PNG; an empty or black element is a few KiB.
+				const pictureFrom = Date.now();
+				let first = await media.screenshot();
+				while (first.length < MIN_PICTURE_BYTES) {
+					if (Date.now() - pictureFrom > 30_000)
+						throw new Error(`${label} viewer shows no picture`);
+					await page.waitForTimeout(1000);
+					first = await media.screenshot();
+				}
+				console.log(
+					`${label} first picture after ${Date.now() - pictureFrom} ms`,
+				);
+				await page.waitForTimeout(1000);
+				first = await media.screenshot();
+				// The pointer is part of the captured frame on both platforms; typed text
+				// only shows when a window has the focus.
 				await sb.desktop.act({
 					actions: [
+						{ type: "move", x: 300 + 150 * index, y: 500 - 40 * index },
 						{ type: "type", text: `echo S10-${label}-frame-change` },
 						{ type: "key", keys: ["enter"] },
 					],
@@ -149,6 +172,7 @@ export async function verifyDesktopMedia(
 					const endBefore = await media.screenshot();
 					await sb.desktop.act({
 						actions: [
+							{ type: "move", x: 900 - 150 * index, y: 300 + 40 * index },
 							{ type: "type", text: `echo S10-${label}-end-${Date.now()}` },
 							{ type: "key", keys: ["enter"] },
 						],
@@ -173,6 +197,11 @@ export async function verifyDesktopMedia(
 				await writeFile(
 					join(output, `${label}-failure.txt`),
 					(await page.locator("body").textContent()) ?? "",
+					{ mode: 0o600 },
+				);
+				await writeFile(
+					join(output, `${label}-console.log`),
+					`${consoleLines.join("\n")}\n`,
 					{ mode: 0o600 },
 				);
 				console.log(`viewer ${label} diagnostics saved privately`);

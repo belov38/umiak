@@ -5,9 +5,7 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import type { Sandbox } from "@sbx/sdk";
-
-/** Opens the Run dialog in the interactive session of user (exec runs in session 0). */
-const OPEN_RUN_DIALOG = `$a=New-ScheduledTaskAction -Execute explorer.exe -Argument 'shell:::{2559a1f3-21d7-11d4-bdaf-00c04f60b9f0}';$p=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\user" -LogonType Interactive;Register-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Action $a -Principal $p -Force|Out-Null;Start-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\';Start-Sleep 2;Unregister-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Confirm:$false`;
+import { typeIntoRunDialog } from "./windows-run.ts";
 
 export async function verifyLiveDesktopMcp(
 	sandbox: Sandbox,
@@ -54,15 +52,16 @@ export async function verifyLiveDesktopMcp(
 		await call("computer_scroll", { dy: 1, screenshot_after: false });
 		await call("computer_key", { keys: "ctrl+c", screenshot_after: false });
 		const proofText = "MCP Привет 世界";
+		const line = windows
+			? `pwsh -NoProfile -Command "Set-Content -NoNewline -Encoding utf8 $env:USERPROFILE\\s10-mcp-input '${proofText}'"`
+			: `printf '%s' '${proofText}' > /tmp/s10-mcp-input`;
+		const typeLine = async () => {
+			await call("computer_type", { text: line, screenshot_after: false });
+			await call("computer_key", { keys: "enter", screenshot_after: false });
+		};
 		if (windows) {
 			// The Run dialog of the console session executes the typed pwsh line.
-			await sandbox.exec([
-				"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-				"-NoProfile",
-				"-Command",
-				OPEN_RUN_DIALOG,
-			]);
-			await new Promise((done) => setTimeout(done, 1000));
+			await typeIntoRunDialog(sandbox, "s10-mcp-input", proofText, typeLine);
 		} else {
 			// Programs do not survive stop or fork (S10 6.4): open a terminal of
 			// our own on this desktop and focus it, as the source step does.
@@ -82,27 +81,11 @@ export async function verifyLiveDesktopMcp(
 			]);
 			await new Promise((done) => setTimeout(done, 1500));
 			await call("computer_click", { x: 400, y: 300, screenshot_after: false });
+			await typeLine();
+			const proof = await sandbox.exec(["cat", "/tmp/s10-mcp-input"]);
+			if (proof.exitCode !== 0 || proof.stdout !== proofText)
+				throw new Error("MCP keyboard proof failed");
 		}
-		await call("computer_type", {
-			text: windows
-				? `pwsh -NoProfile -Command "Set-Content -NoNewline -Encoding utf8 $env:USERPROFILE\\s10-mcp-input '${proofText}'"`
-				: `printf '%s' '${proofText}' > /tmp/s10-mcp-input`,
-			screenshot_after: false,
-		});
-		await call("computer_key", { keys: "enter", screenshot_after: false });
-		if (windows) await new Promise((done) => setTimeout(done, 4000));
-		const proof = await sandbox.exec(
-			windows
-				? [
-						"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-						"-NoProfile",
-						"-Command",
-						"[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);[Console]::Write((Get-Content -Raw -Encoding utf8 (Join-Path $env:USERPROFILE 's10-mcp-input')))",
-					]
-				: ["cat", "/tmp/s10-mcp-input"],
-		);
-		if (proof.exitCode !== 0 || proof.stdout !== proofText)
-			throw new Error("MCP keyboard proof failed");
 		await call("computer_clipboard_write", { text: "MCP clipboard 世界" });
 		const clip = await call("computer_clipboard_read");
 		if (!JSON.stringify(clip).includes("MCP clipboard 世界"))
