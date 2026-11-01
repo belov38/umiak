@@ -31,7 +31,8 @@ import { checkKnownKeys, isPlainObject } from "./validate.ts";
 // team only reads, stop and delete (`findSandboxRow({write})`); a port block
 // blocks its route and PUT/rotate/DELETE of the port (`ports.ts`). The
 // triggers notify `sbx_routes` (0201 for hosted ports, 0204 for sandboxes);
-// a sandbox block also notifies `sbx_ssh_revoke` and `sbx_identity` (below).
+// a sandbox block also notifies `sbx_ssh_revoke` and `sbx_identity`, an unblock
+// `sbx_identity` (below).
 // Each change is a `sandbox_events` row with `{reason, note, by}`.
 
 export const BLOCK_NOTE_MAX_CHARS = 500;
@@ -177,6 +178,13 @@ export async function unblockSandbox(
 			reason: row.block_reason,
 			data: eventData(row.block_reason, input.note, p),
 		});
+		// The api desktop monitor lifts the block's revocation with a new epoch
+		// right away instead of on its next 5 s tick (S10 §13.2); the stream
+		// registry rechecks the block and closes nothing.
+		await tx.client.query(
+			`SELECT pg_notify('sbx_identity', 'sandboxes:' || $1::text)`,
+			[row.id],
+		);
 		return toSandbox(tx.client, updated);
 	});
 }

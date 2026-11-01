@@ -4,7 +4,8 @@
 // ssh-keys; ids are opaque) or '*' (flush everything). Caches of the api
 // (team keys, sessions) subscribe here; the stream registry follows (C9).
 // 'sandboxes:<uuid>' is not an identity change: core sends it when an
-// operator blocks a sandbox, and only the stream registry acts on it.
+// operator blocks or unblocks a sandbox; the stream registry and the desktop
+// access monitor act on it.
 import { type Notifier, PgNotifier } from "@sbx/core";
 import type { Logger } from "pino";
 

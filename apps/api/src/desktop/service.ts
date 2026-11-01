@@ -83,8 +83,9 @@ export async function desktopPolicy(deps: ApiDeps, id: string) {
 	const r = await poolOf(deps).query<{
 		access: "token" | "sso" | "public";
 		auth_epoch: number;
+		policy_revoked: boolean;
 	}>(
-		"SELECT access,auth_epoch FROM runtime.sandbox_desktops WHERE sandbox_id=$1",
+		"SELECT access,auth_epoch,policy_revoked FROM runtime.sandbox_desktops WHERE sandbox_id=$1",
 		[id],
 	);
 	const p = r.rows[0];
@@ -174,12 +175,16 @@ export async function lookupDesktopRoute(deps: ApiDeps, label: string) {
 		access: p.access,
 		tokenHash: null,
 		authEpoch: p.auth_epoch,
-		blocked: s.blocked || disabled,
+		// policy_revoked outlives an unblock until the access monitor advances the
+		// epoch again: until then the block's epoch must not open the desktop.
+		blocked: s.blocked || disabled || p.policy_revoked,
 		blockReason: s.blocked
 			? s.block_reason
 			: disabled
 				? "public_disabled"
-				: null,
+				: p.policy_revoked
+					? "policy_revoked"
+					: null,
 		hostRewrite: "localhost",
 		appProtocol: "http1",
 		teamId: encodeUuid("team", s.team_id),
