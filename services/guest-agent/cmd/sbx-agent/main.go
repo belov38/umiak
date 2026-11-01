@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
 )
 
@@ -62,6 +63,14 @@ func runWith(ctx context.Context, d deps, args []string, stdout, stderr io.Write
 		return 2
 	}
 	switch args[0] {
+	case "stream-web":
+		if err := desktop.RunWebService(ctx); err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	case "session":
+		return sessionCmd(ctx, args[1:], stderr)
 	case "version":
 		_, _ = fmt.Fprintln(stdout, d.version)
 		return 0

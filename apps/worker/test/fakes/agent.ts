@@ -7,6 +7,7 @@ import {
 	AgentRejected,
 	AgentUnavailable,
 	type ClaimRequest,
+	type DesktopConfiguration,
 	type PrepareStopResult,
 	type QuiesceHookOpts,
 } from "../../src/ports.ts";
@@ -14,6 +15,8 @@ import {
 export type AgentFailure = "unavailable" | { rejected: string };
 
 export type AgentMethod =
+	| "configureDesktop"
+	| "desktopReady"
 	| "claim"
 	| "updateEnv"
 	| "updateSecrets"
@@ -40,6 +43,11 @@ export function failureError(f: AgentFailure): Error {
 
 export class FakeAgent implements AgentPort {
 	readonly calls: AgentCall[] = [];
+	desktopReadyStates: boolean[] = [];
+	async desktopReady(machineId: string): Promise<boolean> {
+		this.#record({ method: "desktopReady", machineId });
+		return this.desktopReadyStates.shift() ?? true;
+	}
 	/** Activity per machine (default all zero). */
 	readonly activityOf = new Map<string, AgentActivity>();
 	/** `secretFilesWiped` of the PrepareStop answer. */
@@ -75,6 +83,13 @@ export class FakeAgent implements AgentPort {
 		}
 	}
 
+	async configureDesktop(
+		machineId: string,
+		args: DesktopConfiguration,
+		requestId: string,
+	): Promise<void> {
+		this.#record({ method: "configureDesktop", machineId, args, requestId });
+	}
 	async claim(
 		machineId: string,
 		req: ClaimRequest,

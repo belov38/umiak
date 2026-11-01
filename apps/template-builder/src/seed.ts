@@ -11,7 +11,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { REBOOT_STEP, type Recipe, stepFile, type Versions } from "./recipe.ts";
+import {
+	isDesktopRecipe,
+	REBOOT_STEP,
+	type Recipe,
+	stepFile,
+	type Versions,
+} from "./recipe.ts";
 import { formatVersionsToml } from "./versions-update.ts";
 
 // Seed ISO for the build VM (spec S5 sections 6.2, 7.2 step 3, 14)
@@ -94,7 +100,7 @@ function shellQuote(v: string): string {
 	return `'${v.replaceAll("'", "'\\''")}'`;
 }
 
-export function renderAgentToml(tunnelUrl?: string): string {
+export function renderAgentToml(tunnelUrl?: string, desktop = false): string {
 	const lines: string[] = [];
 	if (tunnelUrl !== undefined)
 		lines.push("[tunnel]", `url = ${JSON.stringify(tunnelUrl)}`, "");
@@ -103,12 +109,23 @@ export function renderAgentToml(tunnelUrl?: string): string {
 		'default = "user"',
 		"",
 		"[readiness]",
-		'required = ["identity", "claim", "secrets", "docker"]',
+		desktop
+			? 'required = ["identity", "claim", "secrets", "docker", "desktop"]'
+			: 'required = ["identity", "claim", "secrets", "docker"]',
 		"",
 		"[docker]",
 		"enabled = true",
 		"",
 	);
+	if (desktop)
+		lines.push(
+			"[desktop]",
+			"enabled = true",
+			"",
+			"[ports]",
+			"exclude = [22, 53, 47800, 47984, 47989, 47990, 48010]",
+			"",
+		);
 	return lines.join("\n");
 }
 
@@ -171,7 +188,10 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 	);
 	// A fixed name; the version travels in build/env.
 	out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
-	out.set("build/agent.toml", renderAgentToml(i.tunnelUrl));
+	out.set(
+		"build/agent.toml",
+		renderAgentToml(i.tunnelUrl, isDesktopRecipe(recipe)),
+	);
 	out.set(
 		"build/ssh-user-ca.pub",
 		i.sshUserCa === undefined ? "" : readFileSync(i.sshUserCa),

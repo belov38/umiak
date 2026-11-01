@@ -44,6 +44,8 @@ export interface PlatformDefaults {
 	defaultTemplate: string;
 	/** `public` ports allowed (S7 §11.2); default true. */
 	publicPortsEnabled: boolean;
+	/** Desktop sharing is disabled unless explicitly enabled. */
+	publicDesktopEnabled?: boolean | undefined;
 	/** Who may open `sso` ports (S7 §7.7, S8 C7); default `any`. */
 	ssoPortPolicy: SsoPortPolicy;
 	/** Added to `auth_epoch` of `sso` routes; bumped on a policy change (S8 C7). */

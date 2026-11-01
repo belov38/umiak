@@ -1,5 +1,6 @@
 import type { QueueName } from "@sbx/core";
 import type { WorkerCtx } from "../context.ts";
+import { refreshDesktopTurn } from "../desktop.ts";
 import { runAutostop } from "./autostop.ts";
 import { runCleanup } from "./cleanup.ts";
 import { runHealth } from "./health.ts";
@@ -22,6 +23,12 @@ export interface ControllerSpec {
 }
 
 export const CONTROLLERS: readonly ControllerSpec[] = [
+	{
+		queue: "ctl-desktop-turn",
+		intervalMs: 600_000,
+		enabled: (ctx) => ctx.turn !== undefined,
+		run: refreshDesktopTurn,
+	},
 	{ queue: "ctl-health", intervalMs: 10_000, run: runHealth },
 	{ queue: "ctl-autostop", intervalMs: 15_000, run: runAutostop },
 	{ queue: "ctl-cleanup", intervalMs: 600_000, run: runCleanup },

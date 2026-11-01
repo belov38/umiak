@@ -98,6 +98,9 @@ type IdleSource interface {
 // sources must be left as untyped nil when absent: Quiesce, Update, Metrics
 // and Claim then answer unimplemented, the others report empty values.
 type Options struct {
+	// DesktopStreams reports video viewers; BeforeStop revokes desktop access.
+	DesktopStreams func() uint32
+	BeforeStop     func(context.Context) error
 	// Info gives the static identity of the agent and the machine.
 	Info InfoSource
 	// Ready reports the readiness phases.
@@ -200,7 +203,12 @@ func (s *Service) activity() *agentv1.ActivityResponse {
 	if s.opts.Proc != nil {
 		running, ptys, attaches = s.opts.Proc.Counts()
 	}
+	var desktop uint32
+	if s.opts.DesktopStreams != nil {
+		desktop = s.opts.DesktopStreams()
+	}
 	return &agentv1.ActivityResponse{
+		DesktopStreams:  desktop,
 		RunningCommands: clampU32(int64(running)),
 		OpenPtys:        clampU32(int64(ptys)),
 		TcpStreams:      clampU32(loadTCP(s.opts.TCP)),
@@ -262,6 +270,11 @@ func (s *Service) UpdateSshCa(ctx context.Context, req *connect.Request[agentv1.
 func (s *Service) PrepareStop(ctx context.Context, _ *connect.Request[agentv1.PrepareStopRequest]) (*connect.Response[agentv1.PrepareStopResponse], error) {
 	if s.opts.Claim == nil {
 		return nil, unimplemented("claim")
+	}
+	if s.opts.BeforeStop != nil {
+		if err := s.opts.BeforeStop(ctx); err != nil {
+			return nil, err
+		}
 	}
 	wiped, err := s.opts.Claim.PrepareStop(ctx)
 	if err != nil {

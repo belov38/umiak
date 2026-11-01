@@ -326,6 +326,21 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			expect(only(notes, "sbx_config")).toEqual([`teams:${tm.id}`]);
 		});
 
+		it("publicDesktopEnabled invalidates gateway routes", async () => {
+			await payload.updateGlobal({
+				slug: "platform-defaults",
+				data: { publicDesktopEnabled: true },
+			});
+			const notes = await listener.settle();
+			expect(only(notes, "sbx_routes")).toEqual(["*"]);
+			listener.clear();
+			await payload.updateGlobal({
+				slug: "platform-defaults",
+				data: { publicDesktopEnabled: false },
+			});
+			expect(only(await listener.settle(), "sbx_routes")).toEqual(["*"]);
+		});
+
 		it("platform-defaults: publicPortsEnabled sends sbx_config and sbx_routes '*'", async () => {
 			await payload.updateGlobal({
 				slug: "platform-defaults",

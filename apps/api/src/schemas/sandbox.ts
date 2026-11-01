@@ -103,6 +103,7 @@ export const SandboxSchema = z
 			description: "The running operation, or null",
 		}),
 		endpoints: z.object({
+			desktop: z.string().optional(),
 			portUrlTemplate: z.string().openapi({
 				description: "URL of a published port; replace {port}",
 				example: "https://quiet-otter-lamp-{port}.sbx.example.com",

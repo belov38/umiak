@@ -101,6 +101,8 @@ export function hintFor(code: string, ctx: HintContext): string | undefined {
 		case "rate_limited":
 			return `too many requests; retry in ${retryIn(details)}.`;
 		case "forbidden": {
+			if (details.reason === "sandbox_blocked")
+				return "the platform operator blocked this sandbox; only reads, stop and delete work. Do not retry; tell the user.";
 			const scope = safeStr(details.requiredScope);
 			return scope === undefined
 				? undefined

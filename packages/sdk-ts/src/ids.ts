@@ -5,6 +5,7 @@ export const IDEMPOTENT_POSTS: ReadonlySet<string> = new Set([
 	"/v1/sandboxes",
 	"/v1/sandboxes/{sandbox}/fork",
 	"/v1/sandboxes/{sandbox}/commands",
+	"/v1/sandboxes/{sandbox}/desktop/actions",
 	"/v1/sandboxes/{sandbox}/ptys",
 	"/v1/snapshots",
 ]);

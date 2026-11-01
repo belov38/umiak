@@ -397,6 +397,31 @@ describe("updateVersionsFile", () => {
 		);
 	});
 
+	it("keeps explicitly pinned desktop artifacts when updating base tools", async () => {
+		const dir = copyTemplates();
+		const file = join(dir, "linux-fixture", "versions.toml");
+		const pin = { version: "1.2.3", sha256: "a".repeat(64) };
+		const desktop = { sunshine: pin, moonlight_web: pin, cua_driver: pin };
+		const linux = () => {
+			const recipe = loadRecipe(dir, "linux-fixture");
+			if (recipe.os !== "linux") throw new Error("linux-fixture is not linux");
+			return loadVersions(recipe);
+		};
+		writeFileSync(file, formatVersionsToml({ ...linux(), desktop }));
+		const res = await run(dir);
+		expect(linux().desktop).toEqual(desktop);
+		expect(res.changes.some((c) => c.startsWith("desktop."))).toBe(false);
+	});
+
+	it("does not rewrite a file with incomplete desktop pins", async () => {
+		const dir = copyTemplates();
+		const file = join(dir, "linux-fixture", "versions.toml");
+		const before = `${readFileSync(file, "utf8")}\n[desktop]\nsunshine = { version = "1.2.3", sha256 = "${"a".repeat(64)}" }\n`;
+		writeFileSync(file, before);
+		await expect(run(dir)).rejects.toThrow(/desktop/);
+		expect(readFileSync(file, "utf8")).toBe(before);
+	});
+
 	it("reports no changes on a second run", async () => {
 		const dir = copyTemplates();
 		await run(dir);

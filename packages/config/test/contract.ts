@@ -84,6 +84,7 @@ export function makeConfigFixture(): ConfigFixture {
 			recoverMinIntervalSeconds: 120,
 			defaultTemplate: "linux",
 			publicPortsEnabled: false,
+			publicDesktopEnabled: true,
 			ssoPortPolicy: "team",
 			ssoPolicyEpoch: 4,
 		},

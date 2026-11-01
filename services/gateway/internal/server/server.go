@@ -277,6 +277,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	i.streams = httpproxy.NewStreamTracker()
 	accessLog := obs.NewAccessLog(deps.AccessLog)
 	i.proxy = httpproxy.New(httpproxy.Config{
+		DesktopAPI:          cpapi.Desktop(deps.API),
 		SbxDomain:           cfg.SbxDomain,
 		Grammar:             grammar(cfg),
 		Routes:              i.routes,

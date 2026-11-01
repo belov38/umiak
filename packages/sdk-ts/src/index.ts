@@ -40,6 +40,12 @@ export {
 	resolveCredentials,
 } from "./credentials.ts";
 export {
+	Desktop,
+	type DesktopActions,
+	type DesktopLinkOptions,
+	type DesktopScreenshotQuery,
+} from "./desktop.ts";
+export {
 	AUTH_COMMAND_FAILED,
 	NETWORK_ERROR,
 	NO_API_URL,

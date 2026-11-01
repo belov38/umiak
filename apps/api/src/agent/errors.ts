@@ -219,6 +219,24 @@ export function agentErrorToHttp(e: unknown): ApiError {
 		return new ApiError(status, e.code, e.message, opts);
 	}
 	switch (e.code) {
+		case "desktop_unsupported":
+			return new ApiError(422, e.code, e.message);
+		case "desktop_not_ready":
+		case "desktop_busy":
+			return new ApiError(409, e.code, e.message, {
+				retryable: true,
+				headers: { "Retry-After": "2" },
+			});
+		case "invalid_action":
+			return new ApiError(400, e.code, e.message, { details: e.details });
+		case "action_failed":
+			return new ApiError(422, e.code, e.message, { details: e.details });
+		case "streamer_failed":
+			return new ApiError(503, "streamer_unavailable", e.message, {
+				retryable: true,
+			});
+		case "clipboard_unavailable":
+			return new ApiError(503, e.code, e.message, { retryable: true });
 		case "command_not_found":
 			return new ApiError(404, "not_found", "command not found");
 		case "not_found":

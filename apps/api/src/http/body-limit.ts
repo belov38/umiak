@@ -22,6 +22,8 @@ const LIMITS: [
 	limit: number | null,
 	timeout?: BodyTimeout,
 ][] = [
+	["PUT", /^\/v1\/sandboxes\/[^/]+\/desktop\/clipboard$/, 8 * MiB],
+	["POST", /^\/v1\/sandboxes\/[^/]+\/desktop\/actions$/, 8 * MiB],
 	["PUT", /^\/v1\/sandboxes\/[^/]+\/files\/content$/, null],
 	["PUT", /^\/v1\/sandboxes\/[^/]+\/files\/archive$/, null],
 	["PUT", /^\/v1\/sandboxes\/[^/]+\/files\/uploads\/[^/]+$/, 8 * MiB, "idle"],

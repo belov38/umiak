@@ -160,6 +160,9 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 			   LIMIT ${BATCH})`,
 		);
 	});
+	await ctx.pool.query(
+		"DELETE FROM runtime.desktop_tickets t WHERE created_at<now()-interval '1 day' AND (used_at IS NULL OR NOT EXISTS (SELECT 1 FROM runtime.sandbox_desktops d JOIN runtime.sandboxes s ON s.id=d.sandbox_id WHERE d.sandbox_id=t.sandbox_id AND d.auth_epoch=t.auth_epoch AND s.state='ready'))",
+	);
 	await part("port_auth_codes", async () => {
 		// The table belongs to S7 (migration 0301) and may not exist yet.
 		const t = await ctx.pool.query<{ ok: boolean }>(

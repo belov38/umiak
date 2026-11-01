@@ -1,0 +1,142 @@
+syntax = "proto3";
+package sbx.agent.v1;
+
+option go_package = "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1;agentv1";
+
+// DesktopActionFailure preserves partial progress in structured RPC error details.
+message DesktopActionFailure {
+  uint32 index = 1;
+  uint32 completed = 2;
+  string reason = 3;
+}
+
+// Desktop exposes session primitives independently of the video streamer.
+service Desktop {
+  rpc Status(DesktopStatusRequest) returns (DesktopStatusResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc Configure(DesktopConfigureRequest) returns (DesktopConfigureResponse);
+  rpc Open(DesktopOpenRequest) returns (DesktopOpenResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  rpc StopStreamer(DesktopStopStreamerRequest) returns (DesktopStopStreamerResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  rpc EndStreams(DesktopEndStreamsRequest) returns (DesktopEndStreamsResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  rpc Screenshot(DesktopScreenshotRequest) returns (DesktopScreenshotResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc Act(DesktopActRequest) returns (DesktopActResponse);
+  rpc GetClipboard(DesktopGetClipboardRequest) returns (DesktopGetClipboardResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc SetClipboard(DesktopSetClipboardRequest) returns (DesktopSetClipboardResponse);
+}
+// DesktopSize describes a pixel coordinate space.
+message DesktopSize {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+// DesktopPoint is a location in screen pixels.
+message DesktopPoint {
+  int32 x = 1;
+  int32 y = 2;
+}
+// DesktopRegion crops the source before resizing.
+message DesktopRegion {
+  int32 x = 1;
+  int32 y = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+}
+message DesktopStatusRequest {}
+message DesktopStatusResponse {
+  string state = 1;
+  string reason = 2;
+  DesktopSize screen = 3;
+  DesktopPoint cursor = 4;
+  bool running = 5;
+  uint32 desktop_streams = 6;
+  uint64 auth_epoch = 7;
+}
+// DesktopIceServer uses TURN REST credentials; never the shared TURN secret.
+message DesktopIceServer {
+  repeated string urls = 1;
+  string username = 2;
+  string credential = 3;
+}
+message DesktopConfigureRequest {
+  repeated DesktopIceServer ice_servers = 1;
+  uint64 auth_epoch = 2;
+}
+message DesktopConfigureResponse {}
+message DesktopOpenRequest {}
+message DesktopOpenResponse {
+  string host_id = 1;
+  string app_id = 2;
+}
+message DesktopStopStreamerRequest {}
+message DesktopStopStreamerResponse {}
+message DesktopEndStreamsRequest {}
+message DesktopEndStreamsResponse {}
+message DesktopScreenshotRequest {
+  string format = 1;
+  uint32 quality = 2;
+  uint32 max_width = 3;
+  uint32 max_height = 4;
+  DesktopRegion region = 5;
+  optional bool cursor = 6;
+}
+message DesktopScreenshotResponse {
+  bytes data = 1;
+  string content_type = 2;
+  DesktopSize screen = 3;
+  DesktopSize image = 4;
+  DesktopPoint cursor = 5;
+  double scale = 6;
+}
+// Key names: ctrl/alt/shift/meta, navigation, f1..f24, or one printable rune.
+// Action types: move/click/mouse_down/mouse_up/scroll/drag/key/key_down/key_up/type/wait.
+message DesktopAction {
+  string type = 1;
+  optional int32 x = 2;
+  optional int32 y = 3;
+  string button = 4;
+  uint32 count = 5;
+  repeated string modifiers = 6;
+  int32 dx = 7;
+  int32 dy = 8;
+  repeated DesktopPoint path = 9;
+  repeated string keys = 10;
+  string key = 11;
+  string text = 12;
+  optional uint32 delay_ms = 13;
+  uint32 ms = 14;
+}
+message DesktopActRequest {
+  repeated DesktopAction actions = 1;
+  DesktopSize coordinate_space = 2;
+  DesktopScreenshotRequest screenshot = 3;
+}
+message DesktopActResponse {
+  uint32 completed = 1;
+  DesktopPoint cursor = 2;
+  DesktopSize screen = 3;
+  DesktopScreenshotResponse screenshot = 4;
+}
+message DesktopGetClipboardRequest {}
+message DesktopGetClipboardResponse {
+  string text = 1;
+  bool has_text = 2;
+}
+message DesktopSetClipboardRequest {
+  string text = 1;
+}
+message DesktopSetClipboardResponse {}
+// DesktopStreamingChanged is emitted on stream transitions.
+message DesktopStreamingChanged {
+  bool streaming = 1;
+  uint32 count = 2;
+}

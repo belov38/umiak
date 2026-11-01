@@ -171,6 +171,10 @@ function deleteSteps(ctx: WorkerCtx, fenced: Fenced) {
 			run: () =>
 				fenced.tx(async (tx) => {
 					await tx.client.query(
+						"DELETE FROM runtime.sandbox_desktops WHERE sandbox_id=$1",
+						[sandboxId],
+					);
+					await tx.client.query(
 						"DELETE FROM runtime.sandbox_secrets WHERE sandbox_id = $1",
 						[sandboxId],
 					);

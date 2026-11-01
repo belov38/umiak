@@ -37,6 +37,8 @@ const (
 type IdleLoop struct {
 	// Counts gives running commands and attach streams; nil counts as zero.
 	Counts Counts
+	// DesktopStreams reports active video viewers.
+	DesktopStreams func() uint32
 	// TCP counts live CONNECT streams; nil counts as zero.
 	TCP *ports.Counter
 	// Sample returns the CPU usage in percent since the previous call and
@@ -112,6 +114,9 @@ func (l *IdleLoop) step(now time.Time) {
 		running, _, attaches = l.Counts.Counts()
 	}
 	busy := running > 0 || attaches > 0 || loadTCP(l.TCP) > 0
+	if l.DesktopStreams != nil && l.DesktopStreams() > 0 {
+		busy = true
+	}
 	cpu, io := l.Sample()
 
 	l.samples = append(l.samples, idleSample{at: now, cpu: cpu, io: io})

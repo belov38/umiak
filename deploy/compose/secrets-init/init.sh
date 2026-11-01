@@ -12,6 +12,7 @@
 #   worker/               data-keys.json, payload-secret,
 #                         idp-sync-client-secret
 #   web/                  payload-secret
+#   turn/                 auth-secret (32 random bytes, base64; worker/coturn only)
 #   keycloak/             oauth2-proxy-client-secret, sbx-worker-client-secret,
 #                         admin-password
 #   oauth2-proxy/         client-secret, cookie-secret
@@ -25,7 +26,7 @@
 set -eu
 umask 077
 
-S=/secrets
+S=${SBX_SECRETS_ROOT:-/secrets}
 GW=$S/gateway
 # node in the api and worker images, keycloak in the Keycloak image.
 NODE_UID=1000
@@ -33,7 +34,7 @@ KEYCLOAK_UID=1000
 # distroless nonroot in the oauth2-proxy image.
 OAUTH2_PROXY_UID=65532
 
-mkdir -p "$S/api" "$S/worker" "$S/web" "$S/keycloak" "$S/oauth2-proxy"
+mkdir -p "$S/api" "$S/worker" "$S/web" "$S/turn" "$S/keycloak" "$S/oauth2-proxy"
 
 # Base64 of N random bytes.
 rand() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
@@ -160,6 +161,8 @@ own() {
 own "$NODE_UID" "$S/api"
 own "$NODE_UID" "$S/worker"
 own "$NODE_UID" "$S/web"
+new "$S/turn/auth-secret" rand 32
+own "$NODE_UID" "$S/turn"
 own "$KEYCLOAK_UID" "$S/keycloak"
 own "$OAUTH2_PROXY_UID" "$S/oauth2-proxy"
 if [ "$(id -u)" = 0 ]; then

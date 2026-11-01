@@ -69,7 +69,7 @@ export function browserCommand(
 	return ["xdg-open", [url]];
 }
 
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
 	const [cmd, args] = browserCommand(process.platform, url);
 	try {
 		const p = spawn(cmd, args, { stdio: "ignore", detached: true });

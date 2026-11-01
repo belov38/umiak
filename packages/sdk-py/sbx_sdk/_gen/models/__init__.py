@@ -63,6 +63,61 @@ from .create_sandbox_request_secrets import CreateSandboxRequestSecrets
 from .create_snapshot_request import CreateSnapshotRequest
 from .create_ssh_key_request import CreateSshKeyRequest
 from .create_upload_request import CreateUploadRequest
+from .desktop_access_body import DesktopAccessBody
+from .desktop_access_body_access import DesktopAccessBodyAccess
+from .desktop_access_response_200 import DesktopAccessResponse200
+from .desktop_access_response_200_access import DesktopAccessResponse200Access
+from .desktop_act_body import DesktopActBody
+from .desktop_act_body_actions_item_type_0 import DesktopActBodyActionsItemType0
+from .desktop_act_body_actions_item_type_0_type import DesktopActBodyActionsItemType0Type
+from .desktop_act_body_actions_item_type_1 import DesktopActBodyActionsItemType1
+from .desktop_act_body_actions_item_type_1_button import DesktopActBodyActionsItemType1Button
+from .desktop_act_body_actions_item_type_1_modifiers_item import (
+    DesktopActBodyActionsItemType1ModifiersItem,
+)
+from .desktop_act_body_actions_item_type_1_type import DesktopActBodyActionsItemType1Type
+from .desktop_act_body_actions_item_type_2 import DesktopActBodyActionsItemType2
+from .desktop_act_body_actions_item_type_2_button import DesktopActBodyActionsItemType2Button
+from .desktop_act_body_actions_item_type_2_type import DesktopActBodyActionsItemType2Type
+from .desktop_act_body_actions_item_type_3 import DesktopActBodyActionsItemType3
+from .desktop_act_body_actions_item_type_3_type import DesktopActBodyActionsItemType3Type
+from .desktop_act_body_actions_item_type_4 import DesktopActBodyActionsItemType4
+from .desktop_act_body_actions_item_type_4_button import DesktopActBodyActionsItemType4Button
+from .desktop_act_body_actions_item_type_4_path_item import DesktopActBodyActionsItemType4PathItem
+from .desktop_act_body_actions_item_type_4_type import DesktopActBodyActionsItemType4Type
+from .desktop_act_body_actions_item_type_5 import DesktopActBodyActionsItemType5
+from .desktop_act_body_actions_item_type_5_type import DesktopActBodyActionsItemType5Type
+from .desktop_act_body_actions_item_type_6 import DesktopActBodyActionsItemType6
+from .desktop_act_body_actions_item_type_6_type import DesktopActBodyActionsItemType6Type
+from .desktop_act_body_actions_item_type_7 import DesktopActBodyActionsItemType7
+from .desktop_act_body_actions_item_type_7_type import DesktopActBodyActionsItemType7Type
+from .desktop_act_body_actions_item_type_8 import DesktopActBodyActionsItemType8
+from .desktop_act_body_actions_item_type_8_type import DesktopActBodyActionsItemType8Type
+from .desktop_act_body_coordinate_space import DesktopActBodyCoordinateSpace
+from .desktop_act_body_screenshot import DesktopActBodyScreenshot
+from .desktop_act_body_screenshot_format import DesktopActBodyScreenshotFormat
+from .desktop_act_response_200 import DesktopActResponse200
+from .desktop_act_response_200_cursor import DesktopActResponse200Cursor
+from .desktop_act_response_200_screen import DesktopActResponse200Screen
+from .desktop_act_response_200_screenshot import DesktopActResponse200Screenshot
+from .desktop_act_response_200_screenshot_content_type import (
+    DesktopActResponse200ScreenshotContentType,
+)
+from .desktop_get_clipboard_response_200 import DesktopGetClipboardResponse200
+from .desktop_link_body import DesktopLinkBody
+from .desktop_link_body_fps_type_0 import DesktopLinkBodyFpsType0
+from .desktop_link_body_fps_type_1 import DesktopLinkBodyFpsType1
+from .desktop_link_body_transport import DesktopLinkBodyTransport
+from .desktop_link_response_201 import DesktopLinkResponse201
+from .desktop_screenshot_cursor import DesktopScreenshotCursor
+from .desktop_screenshot_format import DesktopScreenshotFormat
+from .desktop_set_clipboard_body import DesktopSetClipboardBody
+from .desktop_status_response_200 import DesktopStatusResponse200
+from .desktop_status_response_200_access import DesktopStatusResponse200Access
+from .desktop_status_response_200_cursor import DesktopStatusResponse200Cursor
+from .desktop_status_response_200_screen import DesktopStatusResponse200Screen
+from .desktop_status_response_200_state import DesktopStatusResponse200State
+from .desktop_status_response_200_streamer import DesktopStatusResponse200Streamer
 from .env_patch_request import EnvPatchRequest
 from .env_patch_request_secrets import EnvPatchRequestSecrets
 from .env_replace_request import EnvReplaceRequest
@@ -289,6 +344,57 @@ __all__ = (
     "CreateSnapshotRequest",
     "CreateSshKeyRequest",
     "CreateUploadRequest",
+    "DesktopAccessBody",
+    "DesktopAccessBodyAccess",
+    "DesktopAccessResponse200",
+    "DesktopAccessResponse200Access",
+    "DesktopActBody",
+    "DesktopActBodyActionsItemType0",
+    "DesktopActBodyActionsItemType0Type",
+    "DesktopActBodyActionsItemType1",
+    "DesktopActBodyActionsItemType1Button",
+    "DesktopActBodyActionsItemType1ModifiersItem",
+    "DesktopActBodyActionsItemType1Type",
+    "DesktopActBodyActionsItemType2",
+    "DesktopActBodyActionsItemType2Button",
+    "DesktopActBodyActionsItemType2Type",
+    "DesktopActBodyActionsItemType3",
+    "DesktopActBodyActionsItemType3Type",
+    "DesktopActBodyActionsItemType4",
+    "DesktopActBodyActionsItemType4Button",
+    "DesktopActBodyActionsItemType4PathItem",
+    "DesktopActBodyActionsItemType4Type",
+    "DesktopActBodyActionsItemType5",
+    "DesktopActBodyActionsItemType5Type",
+    "DesktopActBodyActionsItemType6",
+    "DesktopActBodyActionsItemType6Type",
+    "DesktopActBodyActionsItemType7",
+    "DesktopActBodyActionsItemType7Type",
+    "DesktopActBodyActionsItemType8",
+    "DesktopActBodyActionsItemType8Type",
+    "DesktopActBodyCoordinateSpace",
+    "DesktopActBodyScreenshot",
+    "DesktopActBodyScreenshotFormat",
+    "DesktopActResponse200",
+    "DesktopActResponse200Cursor",
+    "DesktopActResponse200Screen",
+    "DesktopActResponse200Screenshot",
+    "DesktopActResponse200ScreenshotContentType",
+    "DesktopGetClipboardResponse200",
+    "DesktopLinkBody",
+    "DesktopLinkBodyFpsType0",
+    "DesktopLinkBodyFpsType1",
+    "DesktopLinkBodyTransport",
+    "DesktopLinkResponse201",
+    "DesktopScreenshotCursor",
+    "DesktopScreenshotFormat",
+    "DesktopSetClipboardBody",
+    "DesktopStatusResponse200",
+    "DesktopStatusResponse200Access",
+    "DesktopStatusResponse200Cursor",
+    "DesktopStatusResponse200Screen",
+    "DesktopStatusResponse200State",
+    "DesktopStatusResponse200Streamer",
     "Environment",
     "EnvironmentEnv",
     "EnvironmentList",

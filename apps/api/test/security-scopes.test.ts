@@ -34,6 +34,15 @@ import { type ApiWorld, apiWorld } from "./helpers/world.ts";
  */
 const PAST_GUARDS_EXCEPTIONS: Record<string, { status: number; code: string }> =
 	{
+		"desktop.status": { status: 422, code: "desktop_unsupported" },
+		"desktop.link": { status: 422, code: "desktop_unsupported" },
+		"desktop.access": { status: 422, code: "desktop_unsupported" },
+		"desktop.endStreams": { status: 422, code: "desktop_unsupported" },
+		"desktop.screenshot": { status: 422, code: "desktop_unsupported" },
+		"desktop.act": { status: 422, code: "desktop_unsupported" },
+		"desktop.getClipboard": { status: 422, code: "desktop_unsupported" },
+		"desktop.setClipboard": { status: 422, code: "desktop_unsupported" },
+
 		// Without a WebSocket upgrade (app.request): the socket path is
 		// covered over a real server in security-idor and pty.test.
 		"ptys.connect": { status: 426, code: "upgrade_required" },

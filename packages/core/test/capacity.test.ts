@@ -492,6 +492,7 @@ describe.skipIf(skipPg())("capacity", () => {
 				quota: "maxActiveSandboxes",
 				limit: 3,
 				current: 3,
+				requested: 1,
 			});
 		});
 
@@ -574,6 +575,7 @@ describe.skipIf(skipPg())("capacity", () => {
 				quota: "maxSavedSnapshots",
 				limit: 2,
 				current: 2,
+				requested: 1,
 			});
 		});
 

@@ -828,6 +828,28 @@ install -m 600 -o sbx -g sbx /root/.ssh/authorized_keys /home/sbx/.ssh/authorize
 printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' >/etc/ssh/sshd_config.d/50-sbx.conf
 systemctl restart ssh.service
 docker run --rm hello-world >/dev/null
+# Debian's default nftables.conf starts with `flush ruleset`: a reload of nftables.service
+# would also drop Docker's iptables-nft rules (published ports, including TURN). Manage only
+# this file's own table.
+cat >/etc/nftables.conf <<'NFT'
+#!/usr/sbin/nft -f
+# boat-dev-clone dev CP: only this table; no `flush ruleset`, which would also remove
+# Docker's iptables-nft rules (published ports, including TURN).
+table inet filter
+delete table inet filter
+table inet filter {
+	chain input {
+		type filter hook input priority filter;
+	}
+	chain forward {
+		type filter hook forward priority filter;
+	}
+	chain output {
+		type filter hook output priority filter;
+	}
+}
+NFT
+nft -c -f /etc/nftables.conf
 echo "cp: $PRETTY_NAME, $(docker --version), $(docker compose version), $(tailscale version | head -1)"
 CT
 pct config "$ID" | grep -E '^(arch|cores|memory|swap|rootfs|net0|features|unprivileged|onboot|dev0):'

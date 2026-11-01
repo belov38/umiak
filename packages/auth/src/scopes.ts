@@ -9,6 +9,7 @@ export const SCOPES = [
 	"files:write",
 	"ports:write",
 	"ssh:connect",
+	"desktop",
 	"snapshots:read",
 	"snapshots:write",
 	"environments:read",

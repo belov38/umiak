@@ -32,7 +32,8 @@ describe("idempotencyPrincipal", () => {
 	it("lists the S7 §7.3 scopes", () => {
 		expect(SCOPES).toContain("sandboxes:write");
 		expect(SCOPES).toContain("keys:admin");
-		expect(SCOPES).toHaveLength(14);
+		expect(SCOPES).toContain("desktop");
+		expect(SCOPES).toHaveLength(15);
 	});
 });
 

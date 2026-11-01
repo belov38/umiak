@@ -1,6 +1,5 @@
 // Contract check of the fake API: every request and response is validated
-// against apps/api/openapi/v1.json plus the S10 desktop fragment
-// (desktop.openapi.json), so the code tested against the fake cannot drift
+// against apps/api/openapi/v1.json, including S10, so the fake cannot drift
 // from the real API.
 //
 // Choices:
@@ -33,7 +32,6 @@ const addFormats = addFormatsModule.default;
 type Json = Record<string, unknown>;
 
 const V1_URL = new URL("../../../api/openapi/v1.json", import.meta.url);
-const DESKTOP_URL = new URL("./desktop.openapi.json", import.meta.url);
 const METHODS = ["get", "put", "post", "delete", "patch", "head"] as const;
 
 /** Response headers that the real API always sends (v1.json lacks `required`). */
@@ -62,29 +60,9 @@ function obj(v: unknown): Json {
 	return (v ?? {}) as Json;
 }
 
-/** v1.json and the desktop fragment as one document. */
+/** The public API document is the sole contract, including desktop routes. */
 export function loadContract(): Json {
-	const v1 = structuredClone(readJson(V1_URL));
-	const desktop = readJson(DESKTOP_URL);
-	// The scope `desktop` comes with S10; v1.json does not list it yet.
-	const scopes = obj(
-		obj(obj(obj(obj(obj(v1.components).schemas).Me).properties).auth)
-			.properties,
-	).scopes;
-	const items = obj(obj(scopes).items);
-	if (Array.isArray(items.enum) && !items.enum.includes("desktop")) {
-		items.enum.push("desktop");
-	}
-	const comps = obj(v1.components);
-	const schemas = {
-		...obj(comps.schemas),
-		...obj(obj(desktop.components).schemas),
-	};
-	return {
-		...v1,
-		paths: { ...obj(v1.paths), ...obj(desktop.paths) },
-		components: { ...comps, schemas },
-	};
+	return structuredClone(readJson(V1_URL));
 }
 
 function pointer(...tokens: string[]): string {

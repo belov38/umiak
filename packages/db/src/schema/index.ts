@@ -2,6 +2,7 @@ import {
 	agentEvents,
 	agentSyntheticEvents,
 	commands,
+	desktopTickets,
 	disks,
 	environments,
 	hostedPorts,
@@ -13,6 +14,7 @@ import {
 	portAuthCodes,
 	providers,
 	reconcileSeen,
+	sandboxDesktops,
 	sandboxEvents,
 	sandboxes,
 	sandboxSecrets,
@@ -32,6 +34,8 @@ export * from "./tunnel.ts";
 
 /** Every table of schemas `runtime` and `tunnel`, for drizzle(..., { schema }). */
 export const schema = {
+	desktopTickets,
+	sandboxDesktops,
 	providers,
 	nodes,
 	storages,

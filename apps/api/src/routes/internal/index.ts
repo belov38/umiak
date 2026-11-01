@@ -4,12 +4,14 @@
 // `code` at the top level too (the gateway reads it).
 import type { ApiApp, ApiDeps } from "../../deps.ts";
 import { registerAgentEventRoutes } from "./agent-events.ts";
+import { registerDesktopInternalRoutes } from "./desktop.ts";
 import { registerPortAuthRoutes } from "./port-auth.ts";
 import { registerGatewayRouteRoutes } from "./routes.ts";
 import { registerSshAuthorizeRoutes } from "./ssh-authorize.ts";
 
 export function registerInternalRoutes(app: ApiApp, deps: ApiDeps): void {
 	registerGatewayRouteRoutes(app, deps);
+	registerDesktopInternalRoutes(app, deps);
 	registerSshAuthorizeRoutes(app, deps);
 	registerPortAuthRoutes(app, deps);
 	registerAgentEventRoutes(app, deps);

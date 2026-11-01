@@ -21,6 +21,9 @@
 x-devcp-proxy-cidrs: &devcp-proxy-cidrs 172.16.0.0/12,127.0.0.1/32
 
 services:
+  # turn (desktop profile) takes SBX_TURN_* from .env (deploy.sh): its published ports and
+  # sysctls are interpolated in deploy/compose/turn.yaml, not only its environment.
+
   # sbx.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/sbx.yaml).
   migrate:
     volumes:
@@ -30,6 +33,7 @@ services:
   worker:
     environment:
       # The tunnel URL that the worker writes into smbios family (S5 §14) of every new machine.
+      SBX_TURN_URLS: ${SBX_DEVCP_TURN_URLS:?set by deploy.sh}
       SBX_TUNNEL_URL: ${SBX_TUNNEL_URL:?set by deploy.sh}
       # The port domain that the worker passes to agents in Claim (port_domain).
       SBX_PORT_DOMAIN: ${SBX_PORT_DOMAIN:?set by deploy.sh}
@@ -74,7 +78,7 @@ services:
 
   # S7: Keycloak behind Serve on :10000. The realm (imported on the first start only) gets the
   # oauth2-proxy redirect URI and web origin of the Serve name.
-  # The CT has 3 GB and no swap. Without a cgroup limit of its own the JVM in Docker in LXC sizes
+  # The CT has 6 GB and no swap. Without a cgroup limit of its own the JVM in Docker in LXC sizes
   # its heap from the host's RAM (sysinfo is not virtualised), grows past 2.5 GB and starves the
   # CT. A fixed heap and a container limit keep Keycloak under ~1 GB.
   keycloak:

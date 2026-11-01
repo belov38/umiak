@@ -1,0 +1,61 @@
+# Opt in with --profile desktop after assigning the TURN listener and TLS certificate.
+services:
+  turn:
+    image: sbx-turn:dev
+    build: { context: ./turn, dockerfile: Dockerfile }
+    profiles: [desktop]
+    # Own network namespace (S10 spec 9.2): SBX_TURN_IP is added to lo inside it, so
+    # relay <-> relay never leaves it and no host socket is a reachable peer. Only the
+    # client listeners are published on the TURN address; relay ports are not.
+    networks: [turn]
+    ports:
+      - ${SBX_TURN_IP:-127.0.0.1}:${SBX_TURN_PORT:-3478}:${SBX_TURN_PORT:-3478}/udp
+      - ${SBX_TURN_IP:-127.0.0.1}:${SBX_TURN_PORT:-3478}:${SBX_TURN_PORT:-3478}/tcp
+      - ${SBX_TURN_IP:-127.0.0.1}:${SBX_TURN_TLS_PORT:-443}:${SBX_TURN_TLS_PORT:-443}/tcp
+    # Relay ports above the ephemeral range of this namespace, and reserved.
+    sysctls:
+      net.ipv4.ip_local_port_range: "32768 60999"
+      net.ipv4.ip_local_reserved_ports: ${SBX_TURN_RELAY_MIN:-61000}-${SBX_TURN_RELAY_MAX:-65535}
+    # Root only for the address, the relay egress table and its watchdog (entrypoint.sh);
+    # turnserver runs as SBX_TURN_UID.
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/etc/sbx-turn/entrypoint.sh"]
+    environment:
+      SBX_TURN_IP: ${SBX_TURN_IP:-}
+      SBX_TURN_REALM: ${SBX_TURN_REALM:-}
+      SBX_TURN_PORT: ${SBX_TURN_PORT:-3478}
+      SBX_TURN_TLS_PORT: ${SBX_TURN_TLS_PORT:-443}
+      SBX_TURN_RELAY_MIN: ${SBX_TURN_RELAY_MIN:-61000}
+      SBX_TURN_RELAY_MAX: ${SBX_TURN_RELAY_MAX:-65535}
+      SBX_TURN_UID: ${SBX_TURN_UID:-3478}
+    # Unhealthy while the relay egress table differs from the one installed at start;
+    # the entrypoint's watchdog exits within SBX_TURN_GUARD_INTERVAL (2 s) in that case.
+    healthcheck:
+      test: ["CMD", "/bin/sh", "/etc/sbx-turn/entrypoint.sh", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+      start_period: 10s
+    volumes:
+      - ./turn/entrypoint.sh:/etc/sbx-turn/entrypoint.sh:ro
+      - ./secrets/turn:/secrets:ro
+    tmpfs:
+      - /run/turn:mode=0711
+    read_only: true
+    cap_drop: [ALL]
+    # NET_ADMIN: the address and the egress table; CHOWN/SETUID/SETGID: hand files to and drop to the
+    # relay uid; DAC_READ_SEARCH: read the operator-owned secrets. turnserver keeps
+    # only NET_BIND_SERVICE.
+    cap_add:
+      [NET_ADMIN, NET_BIND_SERVICE, CHOWN, SETUID, SETGID, DAC_READ_SEARCH]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  turn: {}

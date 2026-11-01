@@ -15,8 +15,11 @@ import (
 
 	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 
+	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/claim"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
+	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ext"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/files"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
 	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ports"
@@ -162,7 +165,12 @@ func (a *agent) startup(ctx context.Context) error {
 	if a.d.Resetter != nil {
 		hostname = claim.HostnameWriter(a.l, a.d.Resetter.SetHostname)
 	}
+	var extensions []ext.Extension
+	if a.cfg.DesktopEnabled {
+		extensions = append(extensions, desktop.Environment{})
+	}
 	a.claim, err = claim.New(claim.Options{
+		Extensions:   extensions,
 		Store:        st,
 		Layout:       a.l,
 		Ready:        a.tracker,
@@ -314,13 +322,32 @@ func (a *agent) buildServices() error {
 	}
 	a.confirm = newConfirmer(a.d.DebugConfirm, a.updater.Confirm)
 
+	if a.cfg.DesktopEnabled && (a.d.DesktopSession == nil || a.d.DesktopStreamer == nil) {
+		session, streamer, start, e := desktop.NewPlatform(a.l, a.identity.machineID()+":"+a.bootID)
+		if e != nil {
+			return e
+		}
+		if a.d.DesktopSession == nil {
+			a.d.DesktopSession = session
+			a.desktopStart = start
+		}
+		if a.d.DesktopStreamer == nil {
+			a.d.DesktopStreamer = streamer
+		}
+	}
+	a.desktop, err = desktop.New(desktop.Options{Enabled: a.cfg.DesktopEnabled, Identity: a.identity.machineID(), Dir: filepath.Join(a.l.StateDir, "desktop"), Session: a.d.DesktopSession, Streamer: a.d.DesktopStreamer, Emit: a.emit, HandlerOptions: interceptors})
+	if err != nil {
+		return err
+	}
+	a.reqcache.Scrub(agentv1connect.DesktopActProcedure, a.desktop.ActScrubber())
 	a.idle = &system.IdleLoop{
-		Counts: a.proc,
-		TCP:    a.tcp,
-		Sample: a.d.IdleSample,
-		Window: a.cfg.IdleWindow,
-		Emit:   a.emit,
-		Now:    a.d.Now,
+		DesktopStreams: a.desktop.Streams,
+		Counts:         a.proc,
+		TCP:            a.tcp,
+		Sample:         a.d.IdleSample,
+		Window:         a.cfg.IdleWindow,
+		Emit:           a.emit,
+		Now:            a.d.Now,
 	}
 	metrics := a.d.Metrics
 	if metrics == nil {
@@ -328,6 +355,8 @@ func (a *agent) buildServices() error {
 		metrics = a.gopsutil
 	}
 	a.system, err = system.New(system.Options{
+		DesktopStreams: a.desktop.Streams,
+		BeforeStop:     a.desktop.PrepareStop,
 		Info:           staticInfo{a: a},
 		Ready:          a.tracker,
 		Claim:          gatedClaimer{Claimer: a.claim, a: a},

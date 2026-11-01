@@ -624,3 +624,33 @@ describe("ctl-cleanup (§15.4)", () => {
 		expect(left.rows).toEqual([{ label: "new-3000" }]);
 	});
 });
+
+it("retains used desktop grants for live epochs beyond a day, then removes revoked epochs", async () => {
+	const w = await createWorld(db);
+	const { sandboxId } = await linkedSandbox(w);
+	await w.pool.query(
+		"INSERT INTO runtime.sandbox_desktops(sandbox_id) VALUES($1)",
+		[sandboxId],
+	);
+	for (const [used, epoch] of [
+		[true, 1],
+		[false, 1],
+		[true, 0],
+	] as const)
+		await w.pool.query(
+			"INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,auth_epoch,expires_at,created_at,used_at) VALUES($1,$2,'d-test', $3,now()-interval '49 hours',now()-interval '50 hours',CASE WHEN $4 THEN now()-interval '50 hours' ELSE NULL END)",
+			[randomBytes(32), sandboxId, epoch, used],
+		);
+	await runCleanup(w.ctx);
+	expect(
+		await count(w, "runtime.desktop_tickets WHERE sandbox_id=$1", [sandboxId]),
+	).toBe(1);
+	await w.pool.query(
+		"UPDATE runtime.sandbox_desktops SET auth_epoch=2 WHERE sandbox_id=$1",
+		[sandboxId],
+	);
+	await runCleanup(w.ctx);
+	expect(
+		await count(w, "runtime.desktop_tickets WHERE sandbox_id=$1", [sandboxId]),
+	).toBe(0);
+});

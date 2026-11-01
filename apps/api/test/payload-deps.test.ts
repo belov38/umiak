@@ -136,7 +136,12 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				return ((await r.json()) as { data: { slug: string; name: string }[] })
 					.data;
 			};
-			expect((await get()).map((t) => t.slug)).toEqual(["linux", "windows"]);
+			expect((await get()).map((t) => t.slug)).toEqual([
+				"linux",
+				"windows",
+				"linux-desktop",
+				"windows-desktop",
+			]);
 			// A change through Payload reaches the cached reader (LISTEN sbx_config).
 			const payload = await getSbxPayload({
 				databaseUrl: db.url,

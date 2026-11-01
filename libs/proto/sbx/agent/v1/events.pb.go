@@ -527,6 +527,7 @@ type Activity struct {
 	RunningCommands uint32                 `protobuf:"varint,1,opt,name=running_commands,json=runningCommands,proto3" json:"running_commands,omitempty"`
 	OpenPtys        uint32                 `protobuf:"varint,2,opt,name=open_ptys,json=openPtys,proto3" json:"open_ptys,omitempty"`
 	TcpStreams      uint32                 `protobuf:"varint,3,opt,name=tcp_streams,json=tcpStreams,proto3" json:"tcp_streams,omitempty"`
+	DesktopStreams  uint32                 `protobuf:"varint,4,opt,name=desktop_streams,json=desktopStreams,proto3" json:"desktop_streams,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -578,6 +579,13 @@ func (x *Activity) GetOpenPtys() uint32 {
 func (x *Activity) GetTcpStreams() uint32 {
 	if x != nil {
 		return x.TcpStreams
+	}
+	return 0
+}
+
+func (x *Activity) GetDesktopStreams() uint32 {
+	if x != nil {
+		return x.DesktopStreams
 	}
 	return 0
 }
@@ -923,12 +931,13 @@ const file_sbx_agent_v1_events_proto_rawDesc = "" +
 	"\x05ports\x18\x01 \x03(\v2\x12.sbx.agent.v1.PortR\x05ports\"S\n" +
 	"\vIdleChanged\x12\x12\n" +
 	"\x04idle\x18\x01 \x01(\bR\x04idle\x120\n" +
-	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"s\n" +
+	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"\x9c\x01\n" +
 	"\bActivity\x12)\n" +
 	"\x10running_commands\x18\x01 \x01(\rR\x0frunningCommands\x12\x1b\n" +
 	"\topen_ptys\x18\x02 \x01(\rR\bopenPtys\x12\x1f\n" +
 	"\vtcp_streams\x18\x03 \x01(\rR\n" +
-	"tcpStreams\"\\\n" +
+	"tcpStreams\x12'\n" +
+	"\x0fdesktop_streams\x18\x04 \x01(\rR\x0edesktopStreams\"\\\n" +
 	"\tPtyClosed\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x120\n" +

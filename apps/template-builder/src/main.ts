@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Qga } from "@sbx/pve";
@@ -31,7 +31,7 @@ import {
 } from "./image.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
 import { preflight } from "./preflight.ts";
-import { loadRecipe, loadVersions } from "./recipe.ts";
+import { loadRecipe, loadVerifyScript, loadVersions } from "./recipe.ts";
 import { FileRegistry } from "./registry.ts";
 import { configuredBuilds, retire } from "./retire.ts";
 import { pveGuestIo } from "./runner.ts";
@@ -128,14 +128,7 @@ function runVerify(
 			io: (vmid) => pveGuestIo(ioApi, cfg.node, vmid),
 			node: ctx.node,
 			ramGuard,
-			verifyScript: readFileSync(
-				join(
-					TEMPLATES_DIR,
-					recipe.verify,
-					m.os === "windows" ? "verify.ps1" : "verify.sh",
-				),
-				"utf8",
-			),
+			verifyScript: loadVerifyScript(TEMPLATES_DIR, recipe.verify, m.os),
 			secretFiles: defaultSecretFiles(cfg),
 			windows: {
 				fsfreezeFreeze: (vmid) => qga.fsfreezeFreeze(vmid),

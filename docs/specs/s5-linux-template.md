@@ -603,3 +603,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 - Google держит в `dl.google.com` только свежие версии Chrome: повторная сборка со старым `versions.toml` может не найти `.deb`. Тогда сборка падает на шаге `30-toolchains`, и нужен `--refresh`.
 - Размер образа вырастет из-за Chrome, JDK и ffmpeg (оценка +1 GB в thin pool); на время загрузки это не влияет (сервисов они не добавляют), проверка — `sbx-bench s5`.
 - `systemd.machine_id=firmware` с пустым `/etc/machine-id`: убедиться, что systemd не считает загрузку first boot и machine-id записывается на диск (`systemd-machine-id-commit`), проверка §10 п. 2 и 13.
+
+## S10 template slots (решение Ильи 2026-10-31)
+
+`linux-desktop` наследует `linux`, но использует собственный VMID `[596]` из dev-infra 590–596 (CT 590 остаётся); `windows-desktop` (S10, `extends: windows`) — `[595]` (решение master 2026-11-01). Linux `[597, 599]` и Windows `[598]` не меняются и S10 их не трогает. Пулы в MVP отсутствуют; default size 4gb, allowed 4gb/8gb задаются в runtime seeds/config.

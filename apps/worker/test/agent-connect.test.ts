@@ -12,7 +12,7 @@ import {
 	type Route,
 } from "@sbx/agent-client";
 import { ErrorDetailSchema } from "@sbx/proto";
-import { ClaimReason, System } from "@sbx/proto/agent/v1";
+import { ClaimReason, Desktop, System } from "@sbx/proto/agent/v1";
 import { describe, expect, it } from "vitest";
 import {
 	ConnectAgentPort,
@@ -47,6 +47,7 @@ type SystemImpl = Partial<ServiceImpl<typeof System>>;
 function portFor(
 	impl: SystemImpl,
 	opts: ConstructorParameters<typeof ConnectAgentPort>[1] = {},
+	desktop?: Partial<ServiceImpl<typeof Desktop>>,
 ): ConnectAgentPort {
 	const client = new AgentClient({
 		registry: new StaticRegistry(),
@@ -55,7 +56,10 @@ function portFor(
 		pollIntervalMs: 10,
 		maxAttempts: 2,
 		createTransport: () =>
-			createRouterTransport(({ service }) => service(System, impl)),
+			createRouterTransport(({ service }) => {
+				service(System, impl);
+				if (desktop) service(Desktop, desktop);
+			}),
 	});
 	return new ConnectAgentPort(client, opts);
 }
@@ -511,4 +515,32 @@ describe("ConnectAgentPort", () => {
 			tcpStreams: 5,
 		});
 	});
+});
+
+it("desktopReady maps the real Status contract and transient errors", async () => {
+	let state = "starting";
+	const port = portFor(
+		{},
+		{},
+		{
+			async status() {
+				return { state };
+			},
+		},
+	);
+	await expect(port.desktopReady(machineId)).resolves.toBe(false);
+	state = "ready";
+	await expect(port.desktopReady(machineId)).resolves.toBe(true);
+	const unavailable = portFor(
+		{},
+		{},
+		{
+			async status() {
+				throw new ConnectError("offline", Code.Unavailable);
+			},
+		},
+	);
+	await expect(unavailable.desktopReady(machineId)).rejects.toBeInstanceOf(
+		AgentUnavailable,
+	);
 });

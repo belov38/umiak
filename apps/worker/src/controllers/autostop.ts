@@ -42,6 +42,7 @@ const IDLE_DUE = `s.state = 'ready' AND s.health = 'ok'
 	AND (s.activity_counters->>'runningCommands')::bigint = 0
 	AND (s.activity_counters->>'openPtys')::bigint = 0
 	AND (s.activity_counters->>'tcpStreams')::bigint = 0
+	AND COALESCE((s.activity_counters->>'desktopStreams')::bigint,0) = 0
 	AND s.last_activity_at >= now() - make_interval(secs => ${ACTIVITY_FRESH_S})
 	AND s.activity_zero_since <= now() - make_interval(secs => s.idle_timeout_seconds)
 	AND (s.last_api_call_at IS NULL
@@ -82,7 +83,10 @@ async function liveIdle(
 	try {
 		const a = await ctx.agent.activity(machineId);
 		const zero =
-			a.runningCommands === 0 && a.openPtys === 0 && a.tcpStreams === 0;
+			a.runningCommands === 0 &&
+			a.openPtys === 0 &&
+			a.tcpStreams === 0 &&
+			(a.desktopStreams ?? 0) === 0;
 		if (!zero) {
 			ctx.log.debug(
 				{ sandboxId, activity: a },

@@ -25,6 +25,7 @@ export const routesAfterChange: GlobalAfterChangeHook = async ({
 }) => {
 	if (
 		previousDoc?.publicPortsEnabled !== doc.publicPortsEnabled ||
+		previousDoc?.publicDesktopEnabled !== doc.publicDesktopEnabled ||
 		previousDoc?.ssoPortPolicy !== doc.ssoPortPolicy
 	) {
 		await notify(req, "sbx_routes", "*");

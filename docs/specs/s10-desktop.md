@@ -1,6 +1,6 @@
 # S10. Рабочий стол и computer-use: спецификация
 
-Статус: согласовано master-сессией 2026-10-29 (лицензии GPL-3.0 ждут подтверждения Ильи, §26). Область S10 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §8, §10). Опирается на S2 (туннель), S3 (агент), S4 (gateway), S5 (шаблон Linux), S6 (control plane), S7 (публичное API), S8 (дашборд), S9 (Windows). Граница с фазой 2 — S29 «рабочий стол v2» в `docs/roadmap-phase2.md`.
+Статус: согласовано master-сессией 2026-10-29 (решения Ильи уточнены 2026-10-31, §26). Область S10 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §8, §10). Опирается на S2 (туннель), S3 (агент), S4 (gateway), S5 (шаблон Linux), S6 (control plane), S7 (публичное API), S8 (дашборд), S9 (Windows). Граница с фазой 2 — S29 «рабочий стол v2» в `docs/roadmap-phase2.md`.
 
 Пометка **[S10]** — решение автора спеки в рамках брифа master-сессии; его можно менять без нового согласования, если причина записана. Пометка **[исполнитель]** — деталь, которую исполнитель выбирает сам по результатам спайков и тестов. Решения master и открытые вопросы — §26.
 
@@ -18,9 +18,9 @@ AI-агентам и людям нужен графический рабочий
 
 Успех:
 - `linux-desktop` и `windows` дают одинаковые API рабочего стола и computer-use;
-- поток идёт без публичных IP у sandbox, в том числе через Tailscale в тестах;
-- claim `linux-desktop` из пула не медленнее 15 s (§15);
-- платформа ничего не форкает: Sunshine, moonlight-web и coturn ставятся из upstream-релизов без изменений.
+- поток идёт без публичных IP у sandbox; dev-адреса и транспорт доступа к стенду задаются только в `infra/dev-cp/`;
+- холодный create `linux-desktop` допускает до ~1 min, Windows — до 5 min (§15);
+- Sunshine и moonlight-web ставятся из upstream-релизов без изменений. Исключение S10: pinned coturn с минимальным патчем повторной проверки REST credentials на Refresh (обоснование и RED→GREEN ниже).
 
 ## 2. Цели, не-цели, анти-цели
 
@@ -30,7 +30,7 @@ AI-агентам и людям нужен графический рабочий
 - стрим в браузер для дашборда и API-клиентов через gateway S4: WebRTC через TURN и запасной транспорт WebSocket;
 - примитивы computer-use (скриншот, мышь, клавиатура, буфер обмена) в агенте и в публичном API S7, чтобы S11 обернул их в MCP;
 - доступ к потоку в режимах `token`, `sso`, `public`;
-- размеры и влияние на warm pool.
+- размеры и admission RAM при холодном создании.
 
 **Не-цели** (фаза 2, S29, если не сказано иначе):
 - поток только браузера с профилями Chrome (`boat browser`);
@@ -55,7 +55,7 @@ AI-агентам и людям нужен графический рабочий
 
 ## 3. Ограничения
 
-- Публичных IP у sandbox нет. Тесты идут через Tailscale.
+- Публичных IP у sandbox нет. Продукт не зависит от Tailscale; настройки dev-доступа находятся только в `infra/dev-cp/`. Внешние туннельные/relay-сервисы (cloudflared, ngrok, trycloudflare) запрещены; TURN self-hosted.
 - Control plane работает в Kubernetes за oauth2-proxy.
 - Граница доверия — VM (S2 §16). Всё, что внутри VM, может читать данные стримера своей VM.
 - Windows Server Core не входит в MVP.
@@ -86,7 +86,7 @@ AI-агентам и людям нужен графический рабочий
 - moonlight-web v3 закрывает наши нужды конфигурацией, без форка (boat держит свой форк — мы этого избегаем, анти-цель);
 - запасной транспорт WebSocket встроен (`dataTransport: auto`: сначала WebRTC 15 s, затем WebSocket). Для сетей без UDP поток идёт через gateway и туннель, TURN не нужен.
 
-Цена — GPL-3.0 у двух компонентов (ждёт подтверждения Ильи, §17, §26) и CPU на x264 (§15).
+GPL-3.0 у двух компонентов разрешена Ильёй (§17, §26). Кодирование x264 использует CPU (§15).
 
 **Computer-use — собственные примитивы агента, а не прокси к cua-driver** [S10]. Это меняет формулировку architecture §8. Причины:
 - cua-driver развивается очень быстро: релизы `cua-driver-rs` 0.30–0.38 вышли за месяц, и все помечены prerelease. Контракт публичного API v1 не должен зависеть от его схем;
@@ -136,8 +136,8 @@ hw:
   vga: std                       # operator console only; the desktop uses the Xorg dummy driver
   tablet: 0
 steps: [00-base, reboot, 10-system, 20-docker, 30-toolchains, 40-coding-agents, 50-sbx-agent, 60-desktop, 90-cleanup]
-pool: { mode: hibernated }       # §15.3
-size_default: 4gb                # §15.1
+vmids: [595, 596]               # own template slots; never 597/598/599
+# Default size 4gb, allowed 4gb/8gb: runtime seeds/config, not S5 recipe keys.
 boot_timeout_s: 300
 verify: linux-desktop
 ```
@@ -166,7 +166,7 @@ verify: linux-desktop
 - **Google Chrome stable** — `.deb` из репозитория Google (решение архитектуры §1). Репозиторий Google остаётся в источниках apt, автообновления нет (S5 их выключает). Managed policy в `/etc/opt/chrome/policies/managed/sbx.json`: без first run, без проверки браузера по умолчанию, без промо-вкладок, без отчётов. Chrome — браузер по умолчанию (`xdg-settings`, `update-alternatives`);
 - **Sunshine** — `sunshine_<v>-1+ubuntu26.04_amd64.deb` из релиза LizardByte;
 - **moonlight-web** — `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` из релиза, в `/opt/sbx-desktop/moonlight-web/<v>/`;
-- **cua-driver** — `cua-driver-rs-<v>-linux-x86_64.tar.gz`, подпись sigstore проверяется при сборке, в `/opt/sbx-desktop/cua-driver/<v>/`. Расширение `cua-perception` (AGPL) не ставится.
+- **cua-driver** — `cua-driver-rs-<v>-linux-x86_64-binary.tar.gz`, подпись sigstore проверяется при сборке, в `/opt/sbx-desktop/cua-driver/<v>/`. Расширение `cua-perception` (AGPL) не ставится.
 
 Конфигурация:
 - `/etc/X11/xorg.conf.d/10-sbx-dummy.conf`: драйвер `dummy`, `VideoRam 256000`, режим `1920x1080` (modeline из `cvt 1920 1080 60`), 24 bit, DPI 96.
@@ -184,7 +184,7 @@ verify: linux-desktop
 
 | Момент | Что делает агент | Зачем |
 |---|---|---|
-| загрузка без claim (подготовка пула) | запустить сессию, дождаться `desktop: ready` | `pool_ready` проверяет, что экран работает |
+| холодная загрузка до claim | дождаться идентичности и claim | пул в MVP отсутствует |
 | первый claim этой идентичности (S6 `System/Claim{reason: claim}`) | после шагов S3 §8.1 перезапустить сессию | PAM сессии должен прочитать env и секреты claim. Пользовательских программ на рабочем столе ещё нет, терять нечего |
 | загрузка после claim (resume, recover, reprovision) | запустить сессию, когда секреты для текущей загрузки применены (фаза `secrets` = `ready` при новом `bootId`) | сессия получает секреты. До этого `desktop: pending` |
 | смена env или секретов у работающей sandbox в той же загрузке | сессию не трогать | как у запущенных команд (S3 §8.1): новый env видят новые процессы агента. Документируется в S7 |
@@ -206,7 +206,7 @@ verify: linux-desktop
 Все проверки S5 §10, кроме п. 4, плюс:
 
 1. Проверка S5 §10 п. 4 (слушающие сокеты) со списком для рабочего стола: при остановленном стримере новых TCP-сокетов нет; Xorg слушает только unix-сокет.
-2. После загрузки без claim: LightDM активен, `user` в сессии `x11` на seat0 (`loginctl`), openbox работает, разрешение 1920×1080 (`xrandr`), фаза `desktop` = `ready`.
+2. После загрузки до claim: LightDM не стартует, `desktop: pending`. После claim и применения secrets текущего boot: LightDM активен, `user` в сессии `x11` на seat0 (`loginctl`), openbox работает, разрешение 1920×1080 (`xrandr`), фаза `desktop` = `ready`. Это уточнение согласует проверку с §6.4 и отсутствием pool в MVP.
 3. `sbx-agent doctor --desktop --json`: скриншот через `sbx-session` — PNG 1920×1080, не одноцветный (на рабочем столе есть панель tint2).
 4. Ввод: агент двигает курсор и кликает (позиция курсора совпадает); `type` печатает строку с не-ASCII символами в `xfce4-terminal`, и она совпадает; буфер: `SetClipboard` → `xclip -o` из сессии выдаёт тот же текст, и обратно.
 5. Стример: `Desktop/Open` запускает Sunshine и moonlight-web, pairing проходит, ответ содержит `hostId` и `appId`; при этом Sunshine и moonlight-web слушают только `127.0.0.1`. `Desktop/StopStreamer` их останавливает.
@@ -263,7 +263,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 {
   "web_server": {
     "bind_address": "127.0.0.1:47800",
-    "first_login_create_admin": true,
+    "first_login_create_admin": false,
     "first_login_assign_global_hosts": false,
     "forwarded_header": {
       "username_header": "X-Sbx-Desktop-User",
@@ -285,18 +285,20 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 Состояние стримера (`/var/lib/sbx-agent/desktop/` на Linux, `ProgramData\sbx-agent\desktop\` на Windows; доступ root/SYSTEM) содержит:
 - логин и пароль веб-UI Sunshine (32 случайных байта);
-- пароль администратора moonlight-web;
+- пароль администратора moonlight-web и пароль пользователя `sbx` — отдельные случайные секреты, не пароль Sunshine (s10-fix; в состоянии, записанном до разделения, остаётся общий пароль до следующей смены идентичности);
 - идентификаторы `hostId` и `appId` после pairing.
 
+Администратор moonlight-web создаётся до первого старта сервиса: агент кладёт в `data.json` хранилище формата v3 upstream (роль `Admin` и один пользователь, PBKDF2-HMAC-SHA256, 600 000 итераций, как `src/app/password.rs` v3.0.1), а `first_login_create_admin = false`. Первый `/api/login` больше не создаёт администратора, гонки с другим клиентом нет (s10-fix).
+
 Агент генерирует их сам и проводит pairing при первом запуске стримера после смены идентичности (S3 §7, S9 §11):
-1. Задать креды Sunshine (`sunshine --creds`), запустить Sunshine и moonlight-web.
+1. Задать креды Sunshine, записать хранилище moonlight-web с администратором, запустить Sunshine и moonlight-web.
 2. Через HTTP API moonlight-web (как администратор): создать роль `viewer` и пользователя `sbx` с этой ролью, добавить хост `localhost`, начать pairing и получить PIN.
 3. Передать PIN в Sunshine через API веб-UI: `POST https://127.0.0.1:47990/api/pin` с basic auth, CSRF-токеном и `pairing_id`, как требует текущая версия.
 4. Прочитать `hostId` и `appId` приложения `Desktop`.
 
 Права роли `viewer`: `allow_add_hosts = false`; только H.264; без HDR; `maximum_bitrate_kbps = 20000`; оба транспорта разрешены.
 
-Смена идентичности стирает это состояние, а также `sunshine_state.json` и данные moonlight-web: fork и VM из snapshot не уносят креды стримера источника. Pairing для пула выполняется при подготовке machine (до усыпления, §15.3), для fork — лениво, при первом открытии (несколько секунд).
+Смена идентичности стирает это состояние, а также `sunshine_state.json` и данные moonlight-web: fork и VM из snapshot не уносят креды стримера источника. Pairing выполняется лениво при первом открытии для каждой новой идентичности, включая create и fork (несколько секунд).
 
 Точные вызовы API moonlight-web v3 и Sunshine фиксирует спайк L **[исполнитель]**.
 
@@ -304,7 +306,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 - Стример не работает, пока рабочий стол не открывают. Скриншот и ввод через API идут мимо него.
 - `Desktop/Open` (§11.1) запускает Sunshine и moonlight-web, если они не запущены, ждёт готовности (до 20 s) и возвращает `{hostId, appId}`.
-- Агент останавливает стример через 15 min без активного потока [S10]. Так он не тратит CPU и RAM.
+- Агент останавливает стример через 15 min без активного потока [S10]. Так он не тратит CPU и RAM. Отсчёт — от последнего `Open` или последнего замеченного зрителя; цикл рабочего стола агента (раз в секунду) делает `StopStreamer` один раз за период простоя, следующий `Open` запускает стример заново. Остановка идемпотентна, поэтому работает и для стримера, который пережил перезапуск агента (s10-fix).
 - **Идёт ли поток.** Агенту нужен признак `streaming` (идёт хотя бы один поток): для простоя (§11.4) и для остановки по таймеру. Готового источника upstream нет: moonlight-web v3 — один процесс без отдельного процесса на поток, а API Sunshine отдаёт только список сопряжённых клиентов. Кандидаты по порядку **[исполнитель, спайк L]**:
   1. строки подключения и отключения клиента в логе Sunshine;
   2. подключённые UDP-сокеты moonlight-web к управляющему порту Sunshine (`127.0.0.1:47999`);
@@ -337,9 +339,9 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 ### 9.2 coturn: размещение и конфигурация
 
-- **Где.** В Kubernetes рядом с gateway, но не в процессе gateway (S4 §13). Основной вариант — Deployment с `hostNetwork: true` на выделенной ноде (метка `sbx.io/turn=true`), `external-ip` = IP этой ноды. Тогда relay ↔ relay остаётся внутри одного хоста, и наружу нужен только порт 3478 (и 443 для TLS). Запасной вариант — Service `LoadBalancer` с UDP; тогда S12 проверяет relay ↔ relay через VIP. Выбор — S12, проверка — §20.
+- **Где.** В Kubernetes рядом с gateway, но не в процессе gateway (S4 §13). TURN работает в **собственном network namespace** (s10-fix2), не на сети хоста: в compose — отдельная bridge-сеть, в Kubernetes — обычный под (не `hostNetwork`). Внутри namespace адрес TURN навешивается на `lo`, поэтому relay ↔ relay остаётся внутри namespace, а наружу публикуются только 3478/udp, 3478/tcp и 443/tcp (DNAT с сохранением адреса клиента: compose `ports`, в Kubernetes — Service `LoadBalancer`/`NodePort` с `externalTrafficPolicy: Local`). Выбор Service — S12, проверка — §20.
 - **Имя:** `turn.<domain>` → IP TURN. Сертификат для `turns:` выпускает cert-manager (как `*.sbx`).
-- **Порты:** `3478/udp`, `3478/tcp`, TLS на `443/tcp` (у TURN свой IP, поэтому 443 не конфликтует с `gateway-edge`). Порты relay — диапазон 49152–65535 на хосте TURN, наружу их открывать не нужно.
+- **Порты:** `3478/udp`, `3478/tcp`, TLS на `443/tcp` (у TURN свой IP, поэтому 443 не конфликтует с `gateway-edge`). Порты relay — **61000–65535** (`SBX_TURN_RELAY_MIN/MAX`), выше эфемерного диапазона Linux (`ip_local_port_range` по умолчанию 32768–60999); наружу их не публикуют. В namespace TURN диапазон relay резервируется (`net.ipv4.ip_local_reserved_ports`), а entrypoint отказывается стартовать, если диапазон relay пересекается с `ip_local_port_range` этого namespace.
 - **Sandbox → TURN.** VM ходит к TURN исходящими UDP-пакетами на 3478 через SNAT ноды. В firewall S1 нужен IPSet `sbx-turn` с адресом TURN и правило в группе `sbx-egress` перед запретами (TCP не нужен: VM использует TURN только по UDP, п. 3 §9.1):
 
 ```
@@ -372,6 +374,12 @@ total-quota=400
 prometheus
 ```
 
+- **Фильтр relay по портам** (s10-fix, s10-fix2). `allowed-peer-ip` coturn задаёт только IP: разрешение на собственный адрес TURN пускает allocation к любому UDP-порту этого адреса. На сети хоста это были бы другие службы хоста (на CT 590 приёмка достучалась Send indication до слушателя `:40123` и tailscaled `:41641`) и любые его сокеты в диапазоне relay — в том числе эфемерные клиентские сокеты (DNS и т. п.), потому что старый диапазон 49152–65535 пересекался с 32768–60999. Защита в три слоя:
+  1. **Свой namespace.** Entrypoint добавляет адрес TURN на `lo` своего namespace и отказывается стартовать, если этот адрес уже есть на другом интерфейсе (значит, контейнер запущен на сети хоста). `listening-ip` — адрес интерфейса namespace (куда приходит DNAT), `relay-ip` и `external-ip` — адрес TURN. В namespace нет других процессов с сокетами на адресе TURN, поэтому пиром может быть только relay-сокет этого же coturn. Прежний отказ от своего namespace касался NAT: hairpin-NAT Docker переписывал адрес пира relay ↔ relay. Здесь адрес TURN локален внутри namespace, пакеты relay ↔ relay не выходят из него и NAT не проходят.
+  2. **Таблица nftables `inet sbx_turn`** в namespace TURN (hook `output`, `meta skuid` + адрес + порт relay): relay-сокеты coturn (uid `SBX_TURN_UID`) шлют только на relay-порты того же адреса. Entrypoint ставит её от root при каждом старте, потом запускает turnserver под `SBX_TURN_UID` (`setpriv`, остаётся только `NET_BIND_SERVICE`).
+  3. **Fail closed.** Entrypoint остаётся init-процессом контейнера и каждые `SBX_TURN_GUARD_INTERVAL` (2 s) сравнивает `nft -s list table inet sbx_turn` с тем, что поставил. Если таблицы нет или она изменилась (например, root в контейнере через `docker exec`), init завершается, ядро убивает turnserver вместе с namespace PID, политика `restart` поднимает контейнер с новой таблицей. Healthcheck compose (`entrypoint.sh health`) делает ту же проверку. Перезагрузка nftables на хосте (`flush ruleset`) таблицу в namespace TURN не трогает.
+
+  **Требование к продакшену (S12):** TURN — под со своим network namespace (не `hostNetwork`), адрес TURN на `lo` пода, `NET_ADMIN` только у entrypoint (turnserver — под отдельным uid), диапазон relay выше `ip_local_port_range` и в `ip_local_reserved_ports` пода (обе sysctl в Kubernetes namespaced и разрешены как safe), публикуются только 3478 и 443 с сохранением адреса клиента. Liveness — та же проверка `entrypoint.sh health`. Если хостовый firewall перезагружается с `flush ruleset`, он не должен удалять NAT-правила публикации (иначе TURN недоступен, но не открыт). `no-software-attribute` и `no-cli` включены.
 - **Почему так.** Пиры, которых TURN пускает, — только его собственные relay-адреса. Поэтому утёкшие креды не превращают TURN в прокси наружу (анти-цель). Пары ICE, где TURN должен слать на host- или srflx-кандидат другой стороны, сразу получают отказ `CreatePermission`, и ICE выбирает relay ↔ relay (или прямой путь из п. 4 §9.1, если он есть). Relay от TURN к адресу браузера не поддерживается.
 
 ### 9.3 Креды TURN
@@ -499,6 +507,7 @@ Gateway сам обрабатывает `GET /` на метке `desktop` пос
 | `Act{actions, coordinate_space}` | последовательность действий ввода (§12.2) | `Sbx-Request-Id` |
 | `GetClipboard` / `SetClipboard{text}` | текст буфера обмена (§12.3) | `NO_SIDE_EFFECTS` / `Sbx-Request-Id` |
 
+- **Кэш `Sbx-Request-Id` и полезная нагрузка** (s10-fix). Исход `Act` хранится в кэше запросов агента (`state.db`, до 24 h) без скриншота: повтор с тем же id не повторяет ввод и возвращает сохранённый результат (`completed`, курсор, экран) со **свежим** скриншотом, если он был запрошен (`Screenshot` без побочных эффектов). Тело `SetClipboard` в кэше не хранится (только хеш запроса), `Screenshot` и `GetClipboard` не кэшируются. Так скриншоты не попадают в `state.db`, snapshot и fork (§16).
 - Скриншот возвращается в теле ответа (`bytes`). Для этого сервиса лимит сообщения Connect — 32 MiB **[исполнитель: проверить, что `libs/tunnel` его пропускает]**.
 - Ввод сериализуется: на machine одновременно выполняется один `Act`. Остальные ждут до 10 s, затем `resource_exhausted desktop_busy`.
 - Capabilities (S2 §10.2): `desktop.v1`, `desktop.stream.v1`, `desktop.input.v1`, `desktop.clipboard.v1`. Если их нет у агента, `api` отвечает `409 agent_outdated`.
@@ -530,6 +539,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 - Новое событие журнала `desktop.streaming_changed{streaming, count?}` (§8.4).
 - Счётчик **`desktopStreams`** (1, если идёт поток и число неизвестно) добавляется в оба места, откуда S6 берёт простой (S6 §12): в payload события `activity` и в ответ `System/Activity`, который S6 вызывает живьём перед idle-stop. При `desktopStreams > 0` sandbox `busy`, и idle-stop её не останавливает. Без этого зритель через TURN был бы невидим: TCP-потоков через туннель у WebRTC-потока нет.
 - Агентский признак простоя (S3 §13) тоже считает активный поток занятостью.
+- **Ошибка наблюдения** (s10-fix). Неудачная выборка зрителей сохраняет прошлое значение (не меньше 1) не дольше 2 min подряд идущих ошибок; после этого агент считает `desktopStreams = 0`. Иначе сломанный источник держал бы sandbox занятой и idle-stop не срабатывал бы никогда. Успешная выборка сбрасывает окно.
 - Вызовы computer-use API обновляют `last_api_call_at` как любые вызовы API (S6 `touchApiActivity`).
 
 ## 12. Примитивы computer-use
@@ -562,6 +572,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 
 - `coordinate_space {width, height}` в запросе: координаты даны в пространстве уменьшенного скриншота, агент пересчитывает их в экранные. Так LLM передаёт координаты с картинки 1280×720 без пересчёта.
 - Координаты вне экрана → `invalid_action` до выполнения первого действия (весь список проверяется заранее).
+- **Windows: заблокированный ввод** (s10-fix). `SendInput` возвращает 0 вставленных событий, пока входной рабочий стол не `Default` (переход входа в систему на свежем fork, защищённый рабочий стол). Helper повторяет только невставленные события каждые 50 ms до 2 s; затем `action_failed` с именем входного рабочего стола в сообщении. Ни одно нажатие не отправляется дважды.
 - Пределы: до 100 действий в запросе, суммарно до 60 s.
 - **Имена клавиш** — фиксированный словарь в proto, нижний регистр: модификаторы `ctrl`, `alt`, `shift`, `meta` (Super/Win); `enter`, `tab`, `escape`, `backspace`, `delete`, `insert`, `space`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `f1`…`f24`, `capslock`, `printscreen`, `menu`; одиночные печатные символы (`a`, `1`, `/`). Неизвестное имя → `invalid_action`.
 - Модификаторы `click` — тот же словарь.
@@ -608,6 +619,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 | 403 | `forbidden` | нет | `public` при выключенном `publicDesktopEnabled` (`details.reason: "public_disabled"`) |
 
 - Состояние sandbox — как для команд (S7 §9.1): не `ready` → `409 sandbox_not_ready`.
+- **Блокировка оператором** (S8 C3, s10-fix): `POST /links`, `PUT /access`, `POST /actions`, `PUT /clipboard` на заблокированной sandbox → `403 forbidden` с `details.reason: "sandbox_blocked"`, как `exec` (оператор проходит). Чтение (`GET /desktop`, `GET /screenshot`, `GET /clipboard`) разрешено, как чтение файлов; `DELETE /streams` разрешён (только отключает). Сама блокировка шлёт `NOTIFY sbx_identity 'sandboxes:<id>'`; монитор доступа `api` по нему (и раз в 5 s) поднимает `authEpoch`, вызывает `EndStreams` и отмечает `policy_revoked`, поэтому выданные билеты и cookie перестают действовать, а маршрут gateway получает `blocked`. Снятие блокировки снова поднимает `authEpoch` (s10-fix2): билет, выданный в те миллисекунды, пока ставилась блокировка, мог получить эпоху блокировки и иначе ожил бы после разблокировки.
 - Ресурс Sandbox (S7 §8.1): `endpoints.desktop = "https://<slug>-desktop.<sbx-domain>/"` у шаблонов с capability `desktop` (без билета).
 
 ### 13.3 Внутренние ручки (internal listener, service token gateway)
@@ -628,15 +640,16 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 
 ### 13.5 Таблицы
 
-Схема `runtime`, миграции S10 в `db/migrations/` с номерами **0400–0499** [S10, по прецеденту S7]:
+Схема `runtime`, миграции S10 в `db/migrations/`: **0401–0405** внутри блока S8 `0400–0499` по решению master (0400 занята S8 environments); следующий свободный номер блока — 0406 (`docs/roadmap.md`):
 
 ```
 sandbox_desktops(
   sandbox_id uuid pk,             -- runtime.sandboxes
   access text,                    -- token | sso | public
   auth_epoch int,
-  blocked bool, block_reason text null,
   turn_issued_at timestamptz null,
+  turn_attempted_at timestamptz null, -- last renewal attempt (0405): failed guests go to the back
+  pending_disconnect bool, policy_revoked bool,
   updated_at timestamptz)
 
 desktop_tickets(
@@ -647,7 +660,7 @@ desktop_tickets(
   used_at timestamptz null, created_at timestamptz)
 ```
 
-Триггер на `sandbox_desktops` шлёт `NOTIFY sbx_routes '<slug>'`. Cleanup S6 удаляет билеты старше суток. Изменения `packages/core` (`SandboxService`: `desktopLink`, `setDesktopAccess`, `endDesktopStreams`, шаг `authEpoch+1` в stop, шаг TURN в claim и provision) вносит исполнитель S10, согласуя с треком S6, как S7 (S7 §20.2).
+Блокировка — только `runtime.sandboxes.blocked` (S8): колонки `sandbox_desktops.blocked/block_reason` никто не писал, `0404_desktop_drop_block.sql` их удаляет (s10-fix). Триггер на `sandbox_desktops` шлёт `NOTIFY sbx_routes '<slug>'`. Cleanup S6 удаляет билеты старше суток. Изменения `packages/core` (`SandboxService`: `desktopLink`, `setDesktopAccess`, `endDesktopStreams`, шаг `authEpoch+1` в stop, шаг TURN в claim и provision) вносит исполнитель S10, согласуя с треком S6, как S7 (S7 §20.2).
 
 ## 14. Дашборд, CLI, SDK, MCP
 
@@ -670,11 +683,14 @@ S8 оставил заглушку; вкладку реализует испол
 
 | Команда | Что |
 |---|---|
-| `sbx desktop <id> [--fps 60] [--transport websocket] [--print]` | открыть ссылку в браузере (`--print` — только вывести) |
-| `sbx desktop screenshot <id> [-o file.png] [--max-width N] [--jpeg]` | скриншот в файл или stdout |
-| `sbx desktop act <id> [--json <file\|->]` | список действий из JSON; плюс короткие формы `click X Y`, `type TEXT`, `key ctrl+c`, `scroll DY` |
+| `sbx desktop [open] <id> [--fps 60] [--bitrate N] [--transport websocket] [--print]` | открыть ссылку в браузере (`--print` — только вывести) |
+| `sbx desktop screenshot <id> [-o file.png] [--max-width N] [--max-height N] [--jpeg] [--quality N]` | скриншот в файл или stdout |
+| `sbx desktop act <id> [--file <path\|->]` | список действий из JSON; плюс короткие формы `click X Y`, `type TEXT`, `key ctrl+c`, `scroll DY` |
 | `sbx desktop clipboard <id> [get\|set TEXT]` | буфер |
 | `sbx desktop access <id> token\|sso\|public` | режим доступа |
+| `sbx desktop end-streams <id>` | `DELETE /desktop/streams` |
+
+Реализация s10-fix: вход действий — `--file <path|->` (`-f`), а не `--json`, потому что глобальный `--json` CLI — формат вывода (S7 §14.3) и перехватывает флаг подкоманды. `end-streams` добавлен для `DELETE /desktop/streams`. Команды первого прохода `sbx screenshot|input|clipboard` и опции `sbx desktop --access/--end-streams` оставлены скрытыми синонимами.
 
 Контракт вывода — как у остального CLI (S7 §14.3): JSON, если stdout не TTY.
 
@@ -691,7 +707,7 @@ S8 оставил заглушку; вкладку реализует испол
 
 В `docs/roadmap-phase2.md` §5.2 эти инструменты помечены S29; после S10 они переходят в S11 (MVP). Правку roadmap делает master.
 
-## 15. Размеры и warm pool
+## 15. Размеры и холодное создание
 
 ### 15.1 Размеры [S10]
 
@@ -699,7 +715,7 @@ S8 оставил заглушку; вкладку реализует испол
 |---|---|---|---|
 | `2gb` | 2 | 2048 | `linux` (есть) |
 | `4gb` | 4 | 4096 | по умолчанию для `linux-desktop` и `windows` |
-| `8gb` | 8 | 8192 | разрешён для `linux-desktop` и `windows`; в PoC вместе с пулом не помещается |
+| `8gb` | 8 | 8192 | разрешён для `linux-desktop` и `windows`; в PoC занимает весь бюджет sandbox |
 
 - `linux-desktop`: `defaultSize = 4gb`, `allowedSizes = [4gb, 8gb]`. На 2 GB Chrome с несколькими вкладками и рабочий стол упираются в OOM.
 - `windows`: размер по умолчанию `4gb` теперь означает 4 vCPU вместо 2 (S9 §9). На `pve` 24 ядра, CPU не ограничен, а x264 и Windows вместе на 2 vCPU дают рывки. Ограничен только RAM (S6 §8.1).
@@ -711,24 +727,11 @@ S8 оставил заглушку; вкладку реализует испол
 - Сеть на зрителя: 8 Mbit/s по умолчанию, до 20 Mbit/s. Через TURN (WebRTC) или через gateway и туннель (WebSocket).
 - Узкое место на одной ноде — CPU хоста при нескольких потоках одновременно. Квота на число одновременных потоков в MVP не вводится; метрики (§18) показывают, когда она понадобится.
 
-### 15.3 Warm pool [S10]
+### 15.3 Холодное создание (решение Ильи 2026-10-31)
 
-- `linux-desktop` использует **спящий пул**, как Windows (S9 §14, механизм S6 `poolTargets.mode = hibernated`): готовая machine на диске, в простое RAM не занимает.
-- Подготовка machine пула: S6 §9.3 до `pool_ready` (`agent` + `identity` + `docker` + `desktop`), затем `Desktop/Open` для pairing (§8.3) и `StopStreamer`, затем `hibernate`.
-- Claim из спящего пула: S9 §14.3 (admission RAM, start, QGA `sbx-agent resume-hint`, подключение), затем `System/Claim` с перезапуском сессии (§6.4) и `Desktop/Configure`. Linux-агенту нужна подкоманда `resume-hint` (выставить время, `chronyc makestep`, переподключиться сразу) — изменение S3 (§21).
-- Цель: claim-to-ready `linux-desktop` ≤ 15 s.
-- **Цели пула в PoC** (8 GB):
+Warm и hibernated pools не входят в MVP ни для Linux, ни для Windows. Create: cold clone → boot → claim → Desktop/Configure → desktop ready. Никаких pool targets, подготовки machine пула, hibernate/resume-hint для пула и цели ≤15 s.
 
-| Пара | Цель | Режим | RAM в простое |
-|---|---|---|---|
-| `linux/2gb` | 1 | running | 2 GB |
-| `windows/4gb` | 1 | hibernated | 0 |
-| `linux-desktop/4gb` | 1 | hibernated | 0 |
-
-  Свободно 6 GB: одна sandbox с рабочим столом (4 GB) и одна `linux` (2 GB) одновременно, или три `linux`.
-- Если спайк L покажет, что спящий режим для Linux ненадёжен, — цель `linux-desktop` = 0. Холодный create — загрузка Linux (S5 §13.2) плюс старт рабочего стола, ожидается 20–40 s. Решение пишется в §24. Running-пул на 4 GB в PoC не держим: это половина свободной RAM.
-- `vmstate` спящей machine занимает на `local-lvm` примерно столько, сколько занятой RAM гостя (thin).
-- Смена сборки шаблона заменяет спящие machine, как warm (S6 §9.4).
+Для `linux-desktop` ожидается 20–40 s, допускается до ~1 min; для Windows допускается до 5 min. Это ориентиры до замеров, не измеренный результат. Stop/resume обычной sandbox остаётся в приёмке. Размер `4gb` по умолчанию, `8gb` разрешён; общий бюджет работающих sandbox на pve — 8 GB.
 
 ## 16. Безопасность
 
@@ -755,7 +758,7 @@ S8 оставил заглушку; вкладку реализует испол
 | Google Chrome | Google Chrome Terms of Service | в образе `linux-desktop` (решение архитектуры §1) |
 | openbox, LightDM, tint2, Xorg, PipeWire | GPL-2.0 / GPL-3.0 / MIT | пакеты Ubuntu |
 
-GPL-3.0 при распространении бинарников требует предложить исходный код. Мы не модифицируем код. Манифест сборки (S5 §11) записывает версию и URL исходников каждого GPL-компонента: этого достаточно для предложения исходников. Допустимость GPL-3.0-компонентов в образах внутренней платформы ждёт подтверждения Ильи; master рекомендует принять: бинарники не изменяются, используются только внутри компании, третьим лицам не распространяются (§26). Замена без GPL на обеих ОС — Guacamole (Apache-2.0), но с худшей задержкой и проблемами RDP на Windows (§4.1).
+GPL-3.0 при распространении бинарников требует предложить исходный код. Мы не модифицируем код. Манифест сборки (S5 §11) записывает версию и URL исходников каждого GPL-компонента: этого достаточно для предложения исходников. GPL-3.0-компоненты разрешены Ильёй: бинарники не изменяются, используются только внутри компании, третьим лицам не распространяются (§26). Замена без GPL на обеих ОС — Guacamole (Apache-2.0), но с худшей задержкой и проблемами RDP на Windows (§4.1).
 
 ## 18. Наблюдаемость
 
@@ -772,17 +775,17 @@ GPL-3.0 при распространении бинарников требуе�
 ### 19.1 Спайк L (Linux) — первым
 
 На `pve` в рамках ограничений §3: одна VM 4 GB (VMID 5xx), вместе с ней другие sandbox — не больше 8 GB.
-1. VM из шаблона S5 `linux` (или 599, если S5 ещё не собран), шаг `60-desktop` вручную через QGA.
+1. VM из шаблона S5 `linux` (только clone; исходные 597/598/599 не менять), шаг `60-desktop` вручную через QGA.
 2. Проверить вопросы: pairing через API moonlight-web v3 и Sunshine; поведение при втором зрителе; как агент узнаёт об активном потоке; проверяет ли coturn срок кредов при `Refresh`.
 3. Замеры §20: CPU при 1080p30 и 1080p60, RAM, время старта стримера, задержка «от стекла до стекла» по WebSocket и WebRTC через TURN.
-4. Спящий режим Linux: `hibernate`, пробуждение, `resume-hint`, перезапуск сессии; время claim-to-ready.
+4. Измерить холодный create и обычный stop/resume; часть спайка про hibernation исключена решением Ильи.
 
-Как браузер на Mac достаёт VM до готового gateway **[исполнитель]**: gateway и агент из треков `s2-impl` и `s4-impl`, если они уже работают; иначе — временный проброс через `pve`. Любое правило firewall для спайка — только с таймером отката (S1 §4.4). coturn для спайка — контейнер на Mac, доступный по Tailscale; если SNAT `sbx0` не выпускает VM в Tailscale хоста, спайк проверяет только WebSocket, а TURN проверяется в kind/k3s (S12). Изменения хоста `pve` сверх этого — только через master.
+Браузер открывает поток через gateway CT 590; адреса задаются только в `infra/dev-cp/`. TURN — собственный coturn в compose. Любое изменение firewall предварительно сообщается master и выполняется только с таймером отката (S1 §4.4). Внешние туннели и relay-сервисы запрещены.
 
 ### 19.2 Спайк W (Windows)
 
-После спайка S9 (vTPM и `suspend --todisk`), одна VM 4 GB:
-1. Видеоадаптер (§7): `std`, `virtio` + `viogpudo`, IddCx-драйвер. Захват `ddx`, скриншот `BitBlt`/DXGI до и после пробуждения из спящего режима.
+После merge S9 и сообщения master, одна VM 4 GB:
+1. Видеоадаптер (§7): `std`, `virtio` + `viogpudo`, IddCx-драйвер. Захват `ddx`, скриншот `BitBlt`/DXGI после cold boot и обычного stop/resume.
 2. Sunshine с `encoder = software` на Windows: поток идёт, CPU при 1080p30.
 3. Нужен ли аудиоустройство для старта потока.
 4. `SendInput` и `KEYEVENTF_UNICODE` из `sbx-session`: клики, печать, буфер.
@@ -791,7 +794,7 @@ GPL-3.0 при распространении бинарников требуе�
 
 1. Спайк L.
 2. Proto `desktop.proto` и сообщения `session.proto`; `sbx-session` на Linux; сервис `Desktop` в агенте (скриншот, ввод, буфер), фаза `desktop`, `desktop: true`, env.
-3. Рецепт `linux-desktop`, профиль `verify`, пул `hibernated` для Linux и `resume-hint`.
+3. Рецепт `linux-desktop` с VMIDs `[595, 596]`, профиль `verify`, холодное создание без пула.
 4. Стример: супервизор, pairing, `Open`, `EndStreams`, `Configure`.
 5. Gateway: `kind = desktop`, билеты, `GET /`, заголовок, `Origin`, cookie `Partitioned`.
 6. `api`: ручки §13, таблицы, внутренние ручки; `worker`: TURN-креды, `authEpoch` при stop, `desktopStreams`.
@@ -842,9 +845,9 @@ GPL-3.0 при распространении бинарников требуе�
 29. Креды с истёкшим сроком → `401` на `Allocate`. Продление контроллером: креды у `ready` sandbox никогда не старше 24 h.
 30. Firewall: из VM сверх правил S1 доступен только `sbx-turn` UDP 3478; TCP и другие порты TURN-хоста — нет.
 
-**Шаблон и пул:**
+**Шаблон и холодный create:**
 31. Проверки §6.6 и `windows-desktop` зелёные.
-32. Claim `linux-desktop` из спящего пула: claim-to-ready ≤ 15 s, `desktop: ready`, env claim виден в терминале на рабочем столе, запущенном вручную после claim. В пределах 8 GB одновременно работают пулы §15.3 и одна sandbox `linux-desktop`.
+32. Холодный create `linux-desktop`: измерить clone + boot + desktop start (ориентир до ~1 min), `desktop: ready`, env claim виден в терминале. Windows — до 5 min. RAM всех sandbox ≤8 GB, без пула.
 33. Fork работающей `linux-desktop`: у fork новые креды Sunshine и moonlight-web, pairing проходит при первом открытии; профиль Chrome сохранён.
 34. Idle-stop: при открытом потоке через TURN и без других действий sandbox не останавливается 30 min (`desktopStreams` в `activity` и в `System/Activity`); после закрытия потока останавливается через `idle_timeout_seconds`.
 35. Отзыв ключа, которым выдан билет, и удаление участника из команды: cookie зрителя сразу даёт `401`, поток обрывается не позже чем через 5 s после `NOTIFY sbx_identity`.
@@ -854,14 +857,14 @@ GPL-3.0 при распространении бинарников требуе�
 
 Вносят исполнители этих областей по этой спеке (как S7 §20); согласование — через master.
 
-- **S1:** IPSet `sbx-turn` и правило UDP 3478 в `sbx-egress` (§9.2), шаг runbook с таймером отката. `hibernate` для Linux machine (уже есть для S9) — без изменений кода, только для `os = linux`.
+- **S1:** IPSet `sbx-turn` и правило UDP 3478 в `sbx-egress` (§9.2), шаг runbook с таймером отката.
 - **S2 / `libs/tunnel`:** лимит размера сообщения Connect до 32 MiB для `sbx.agent.v1.Desktop/Screenshot` (если сейчас меньше).
 - **S3:** сервис `Desktop`; `sbx-session` на Linux и его сокет; фаза `desktop` на Linux; `CommandSpec.desktop` на Linux; `DISPLAY`/`XAUTHORITY` в платформенном env шаблонов с рабочим столом; перезапуск сессии при claim и после секретов; событие `desktop.streaming_changed` и `desktopStreams` в `activity` и `System/Activity`; учёт потока в признаке простоя; сокет `/run/sbx-session/`; подкоманда `resume-hint` на Linux; стирание состояния стримера при смене идентичности; коды ошибок §11.1; capabilities.
 - **S4:** поле `kind` в маршруте; для `kind = desktop` — билеты и обмен, `GET /` → `Open` → `302`, заголовок `X-Sbx-Desktop-User` только после авторизации, без пропуска CORS preflight, `Origin`-проверка, cookie `m: "d"` с `SameSite=None; Partitioned`, страница `desktop_starting`; порты стримера в зарезервированных (`SBX_GATEWAY_RESERVED_PORTS`).
-- **S5:** `extends` (S5 §16 уже предусмотрел), рецепт `linux-desktop`, профиль `verify: linux-desktop`, `pool.mode` и `size_default` в рецепте (как у S9).
-- **S6:** `desktopStreams` в `activity`, `System/Activity` и idle-stop; `authEpoch+1` рабочего стола в stop; `Desktop/Configure` в шагах `claim` и `provision`; контроллер `desktop-turn`; спящий пул для `os = linux`; `pool_ready` для `linux-desktop` = `agent` + `identity` + `docker` + `desktop`; таблицы §13.5 через `packages/core`.
+- **S5:** `extends` (S5 §16 уже предусмотрел), рецепт `linux-desktop`, профиль `verify: linux-desktop`, VMIDs `[595, 596]`; default size 4gb и allowed 4gb/8gb в runtime seeds/config.
+- **S6:** `desktopStreams` в `activity`, `System/Activity` и idle-stop; `authEpoch+1` рабочего стола в stop; `Desktop/Configure` в шагах `claim` и `provision`; контроллер `desktop-turn`; таблицы §13.5 через `packages/core`.
 - **S7:** scope `desktop`; ручки §13.2 и §13.3; ошибки; `endpoints.desktop`; зарезервированные порты стримера; политика `sso` для `kind = desktop`; отзыв доступа к рабочему столу в обработчике `NOTIFY sbx_identity` (§10.5, расширение S8 C9); креды TURN выдаёт `worker`, а не `api` (переопределение S4 §13); документация (смена env не меняет запущенный рабочий стол, Safari и чужой iframe).
-- **S8:** `PlatformDefaults.publicDesktopEnabled` (по умолчанию `false`) с `NOTIFY sbx_routes '*'`; сид шаблона `linux-desktop` (`capabilities` с `desktop`, `defaultSize: 4gb`); сид размеров `4gb` (4 vCPU) и `8gb`; цель пула `linux-desktop/4gb = 1, hibernated`; вкладка Desktop (§14.1) — делает исполнитель S10; scope `desktop` в форме ключей.
+- **S8:** `PlatformDefaults.publicDesktopEnabled` (по умолчанию `false`) с `NOTIFY sbx_routes '*'`; сид шаблона `linux-desktop` (`capabilities` с `desktop`, `defaultSize: 4gb`); сид размеров `4gb` (4 vCPU) и `8gb`; вкладка Desktop (§14.1) — делает исполнитель S10; scope `desktop` в форме ключей.
 - **S9:** шаг `60-desktop` дополняется §7; `hw.vga` — по спайку W; `sbx-session` получает `Capture`, `Input`, `ClipboardGet/Set` и запускает cua-driver; размер `windows` по умолчанию — `4gb` с 4 vCPU.
 - **S11:** инструменты §14.4.
 - **S12:** coturn (Deployment `hostNetwork` на ноде с меткой или UDP LB, Secret `static-auth-secret`, сертификат `turn.<domain>`, DNS), конфиг `SBX_TURN_URLS` и `SBX_TURN_SECRET_FILE` для `worker`, тревога по квоте TURN; IP TURN в IPSet `sbx-turn`.
@@ -890,7 +893,7 @@ apps/cli/                               sbx desktop
 
 ## 23. Версии
 
-Правило проекта: последние стабильные версии, перепроверить перед реализацией. Проверено 2026-10-29 (GitHub Releases, Google Version History API):
+Правило проекта: последние стабильные версии, перепроверить перед реализацией. Sunshine, moonlight-web, coturn и cua-driver перепроверены 2026-10-31 через GitHub Releases API; Chrome наследуется из актуальных pins S5.
 
 | Компонент | Версия | Примечание |
 |---|---|---|
@@ -898,13 +901,25 @@ apps/cli/                               sbx desktop
 | moonlight-web (`MrCreativ3001/moonlight-web-stream`) | v3.0.1 | linux-gnu и windows-gnu архивы |
 | coturn | 4.18.0 | та же, что в S4 §18 |
 | cua-driver (`trycua/cua`, тег `cua-driver-rs-v*`) | 0.38.0 | все релизы помечены prerelease; закрепляем последний не-nightly |
-| Google Chrome stable (Linux) | 156.0.8078.73 | закрепляется в `versions.toml` при сборке |
+| Google Chrome stable (Linux) | 156.0.8078.79-1 | наследуется из Linux versions.toml; закрепляется в `versions.toml` при сборке |
 | Go-модули | `github.com/jezek/xgb` и `golang.org/x/image` — последние на момент реализации | проверить `go list -m -versions` |
 | Для сравнения (§4.1) | KasmVNC 1.5.2, Selkies 2.1.0, noVNC 1.7.0, Guacamole 1.6.0, neko 3.2.0, TigerVNC 1.16.2, x11vnc 0.9.17 | не используются |
 
 ## 24. Результаты
 
-Заполняется при реализации: цифры спайков L и W (CPU, RAM, задержки, время старта стримера, claim-to-ready), выбранный видеоадаптер Windows, режим пула `linux-desktop`, поведение второго зрителя, способ определения активного потока.
+Состояние 2026-10-31: `qm list` показывает работающую Windows-сборку S9 в VM 598 (4096 MiB). S10 не запускал VM, не менял firewall, шаблоны и CT 590. Сборки desktop и измерений пока нет. SSH по IP использует сохранённый host key через alias из `infra/dev-cp/README.md`.
+
+Метаданные upstream (GitHub asset digest, не результат локального скачивания/проверки бинарника):
+
+| Артефакт | SHA256 |
+|---|---|
+| [Sunshine ubuntu26.04 amd64](https://github.com/LizardByte/Sunshine/releases/tag/v2026.914.233613) `sunshine_2026.914.233613-1+ubuntu26.04_amd64.deb` | `b8a8ceeeb2b3f30a18a994ad268c94e0c91170f33a864c7aad31eed927ad7d47` |
+| [moonlight-web linux x86_64](https://github.com/MrCreativ3001/moonlight-web-stream/releases/tag/v3.0.1) `moonlight-web-x86_64-unknown-linux-gnu.tar.gz` | `a46acb1f663faaff9cd97abd9671fe049dd525bfe955e95f7b9f753cc2b99f1a` |
+| [cua-driver linux x86_64 binary](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.38.0) `cua-driver-rs-0.38.0-linux-x86_64-binary.tar.gz` | `31ab9709dd91ce73677e49b9f3e75c6f0d3e4d9625c286c9e58262bfbea698dd` |
+
+cua-driver 0.38.0 — последний versioned release в просмотренной ленте (nightly исключены); GitHub помечает его prerelease, как уже предусмотрено §23. Перед сборкой нужны download/hash и Sigstore verification. Проверка coturn: latest tag `docker/4.18.0-r0`.
+
+Заполняется при реализации: цифры спайков L и W (CPU, RAM, задержки, время старта стримера, claim-to-ready), выбранный видеоадаптер Windows, время холодного create `linux-desktop` (пула нет), поведение второго зрителя, способ определения активного потока.
 
 ## 25. Оставлено исполнителю
 
@@ -928,3 +943,264 @@ apps/cli/                               sbx desktop
    - билет, выпущенный по JWT, привязан к пользователю, а не к `desktop_tickets.api_key_id`;
    - отзыв по деактивации пользователя идёт через путь S8 §20.1;
    - код ошибки для `public` при выключенном `publicDesktopEnabled` один: в §13 и в проверках §22 сейчас написано по-разному (`forbidden` и `route_blocked`).
+
+5. **MVP без пулов — решение Ильи 2026-10-31:** warm и hibernated pools исключены, включая Linux spike L; цель claim ≤15 s снята. Cold create: Linux до ~1 min, Windows до 5 min. Обычный stop/resume сохраняется.
+6. **Сеть — решение Ильи 2026-10-31:** продукт не привязан к Tailscale, dev-адреса только в `infra/dev-cp/`; cloudflared/ngrok/trycloudflare и внешние relay-сервисы запрещены. TURN собственный, self-hosted в compose.
+7. **Template slots — решение Ильи 2026-10-31:** `linux-desktop` только `[595, 596]`, диапазон dev-infra 590–596; CT 590 остаётся. 597, 598, 599 не менять. Sandbox VMIDs 500–589; перед стартом проверять S9 и общий RAM ≤8 GB.
+
+### S10 code pass 2026-10-31 (before pve spike)
+
+Agent/worker/gateway/API/TS+Python SDK/CLI/MCP реализованы и проверены на fakes. Linux и Windows factories теперь подключают реальные Session/Streamer adapters; PendingStreamer остаётся только для unsupported OS и явно не подключённых тестовых adapters. Реализованы secrets gate, OS helper bindings, private upstream state, pairing, process lifecycle и observed viewers. Live acceptance на pve ещё не выполнялся. Windows требует rebase на S9 (без merge в этом проходе), затем проверки на настоящей Win11.
+
+The linux-desktop recipe now inherits Linux pins, adds pinned cosign3.1.4 for cua signature verification, and installs upstream-generated moonlight config. The release archive contains `package/web-server`; extraction strips `package/`. Sunshine/moonlight services are manual; config templates contain no credentials. Audio starts disabled pending the best-effort spike (§8.5). `linux-desktop` verification combines Linux baseline and desktop image checks; full screen/input/stream acceptance runs after real claim through `infra/dev-cp/e2e-desktop.sh`. No template build/version or latency result has been claimed yet.
+
+### Adapter implementation choices (source-backed, 2026-10-31)
+
+`sbx-session` is implemented as the `session --socket` subcommand of the signed
+agent binary. This keeps helper and agent versions together across updates.
+Its local transport is bounded HTTP/JSON over an ACL-protected AF_UNIX socket,
+not a second public API; this replaces the proposed custom protobuf framing.
+Linux uses X11/XTEST/XFixes directly (no xdotool/scrot dependency for API calls),
+including Unicode keymap input and INCR clipboard transfers. systemd owns restarts.
+
+Sunshine source at v2026.914.233613 has no REST session-count endpoint.
+`/api/clients/list` lists paired certificates only. RTSP TCP requests are short-lived.
+Linux counts recent ASSURED UDP 47999 (ENet control) conntrack flows as the primary
+activity signal: the remaining TTL must be within 5 s of the guest's actual
+`nf_conntrack_udp_timeout_stream`. Extended ipv4/ipv6 records are parsed by transport
+token. Sunshine ENet CONNECTED/DISCONNECTED log transitions are a conservative fallback,
+because a forced session end does not log DISCONNECT.
+A failed observation never clears a previously active count. The agent also observes
+already-running streamers after its own restart. Empty/no streamer is zero activity.
+
+Sunshine password bootstrap uses POST/api/password and exact on-disk TLS certificate
+pinning; pairing uses GET/api/pin and POST/api/pin with pairing_id. Moonlight v3.0.1
+returns streamed NDJSON Pin then Paired. The proxy user sbx is a pre-created ordinary
+User, cannot add hosts; only the generated private administrator manages pairing.
+Source-derived wire fixtures are committed under internal/desktop/testdata/upstream;
+they are not live pve recordings.
+
+Windows implementation is based on local S9 d38ec62 (remote s9-impl was not yet
+published). Its autologon/user creation stays in S9. S10 registers session and
+cua-driver tasks after secrets/account readiness. Helper is the signed agent's
+session subcommand; GDI, SendInput and clipboard operate in that user's console.
+The upstream SunshineService owns Sunshine's console process. Moonlight runs in
+an SCM wrapper under NT SERVICE\\sbx-moonlight-web. Installer overlay adds65-streamer;
+Windows artifact pins are in windows/files/desktop-pins.json until the typed S9/S10
+manifest integration. No Windows VM or slot598 is touched by this code-only pass.
+Cua v0.38.0 defaults to stdio MCP; service/task explicitly launches serve.
+
+Linux Sunshine запускается system unit `sbx-sunshine.service` с `User=user` и явным
+session environment; upstream user unit выключен. Это упрощает один controller
+для root agent без DBus вызовов в user manager. Оба Linux streamer unit имеют
+TimeoutStopSec3. Revoke отменяет ещё и незавершённые Open/pairing requests,
+чтобы disconnect не ждал30s HTTP handshake. Windows Cua task запускает serve
+через hidden wrapper; PowerShell7.6.9 закреплён в mise, как в S9. Windows POSIX
+file modes синтетические: private access обеспечивается DACL и проверяется live.
+
+S8 integration (2026-10-31): Desktop tab uses real SDK, fresh single-use tickets outside query cache, retry2s on desktop_not_ready, iframe/fullscreen/new-tab/access/disconnect/resume. Payload migration adds publicDesktopEnabled=false + route invalidation and desktop4gb/8gb seeds. Runtime desktop migrations moved to0401/0402 after S8 environments0400. Linux verify stops source clone before booting fork (one4GiB VM). Master permits S9≤4GiB + S10≤4GiB; total≤8GiB.
+
+### Live Linux verification, 2026-10-31 (S10 after S8 merge)
+
+- `linux-desktop 20261031.3`, slot596; agent0.1.0+20261031.ebe5ea8. Build704s,7.8GiB thin used. Slot595 previous failed verification build retired/deleted. Upstream pins unchanged (§24).
+- `verify: linux-desktop`:109 checks,0FAIL; KVM available; first QGA9.606s, hardrestart9.441s. Sequential fork uses one4GiB VM; all clones/snapshot removed.
+- Direct-agent live probe: cold clone+boot toQGA11.286s, claim→desktopready2.097s;1920x1080 screenshot, mouse/Unicode keyboard proof + pixel diff, clipboardUnicode/emoji, actual Sunshine/Moon pairing, stopstreamer; fork fresh streamercredentials and stop/resume verified. Resume desktopready1.057s. These are NOT public API create or gateway media timings.
+- S8 Desktop tab implemented; Payload publicDesktopEnabled=false with route invalidation, catalog sizes4gb/8gb and verified build seeded. Worker waits actual desktop readiness on the same boot afterConfigure before create/resume finish.
+- Migration0403 tracks policy revocation transition. Direct media is ended for blocked/public-disabled routes. Used grants of current ready epoch remain retained/rechecked beyond12h and1day until stop/revoke changes epoch; cleanup then removes them. Public views without ticket are covered by route monitor.
+- Linux live acceptance passed on build 20261031.6 / VM 596; see "Linux live acceptance — 2026-11-01" below.
+
+Dev TURN decision (master, 2026-11-01): CT 590 shares its address with the gateway.
+Dev listener ports, TLS hostname and a narrow UDP relay range are configured only under
+`infra/dev-cp`. The TLS leaf comes from the existing dev CA, with a hostname in its
+permitted DNS namespace. A dedicated address with TLS 443, or SNI multiplexing, is a
+production follow-up, not an MVP blocker. CT 590 RAM stays at most 6144 MiB.
+
+
+Coturn Refresh policy (implementation, 2026-11-01): upstream4.18.0 intentionally
+caches the password for an established allocation ([upstream REST documentation](https://github.com/coturn/coturn/blob/23c6c1d32a3d2b21a56cee65d3203bcc4ea82d2b/README.turnserver)). To satisfy expiry-on-Refresh, compose builds the same pinned source with
+`deploy/compose/turn/refresh-auth.patch`: clear the cached key on the first Refresh
+pass and use the existing async credential callback; preserve it on the resumed
+pass. Source commit/archive SHA256 and patch are pinned in Dockerfile; no new auth
+algorithm. Live wire regression: original expired Refresh succeeds (RED), patched
+image rejects it while valid Refresh and UDP/TCP/TLS allocation succeed (GREEN).
+This intentionally tightens upstream's session policy; API and TURN credential
+format/TTL remain unchanged.
+
+
+Совместимость TURN channels (live, 2026-11-01): pinned rtc-turn0.21.1 из
+moonlight-web3.0.1 удаляет binding при438 и создаёт новый channel number для того же
+peer; coturn закономерно отвечает400. Подтверждено live-обрывом через10min и
+изолированным wire fixture с nonceTTL2s (тот же400 за3s). Для этой версии выбран
+стандартный `stale-nonce=0`. Повторная HMAC/REST timestamp проверка каждого Refresh
+сохраняется патчем; это не отключает срок credentials. Ротацию nonce можно вернуть
+после обновления исправленного upstream rtc-turn и повторной long-idle приёмки.
+
+
+TURN reconnect sizing (live, 2026-11-01): штатные browser ICE allocations и остатки
+предыдущего Moon peer при reconnect исчерпывали исходную user-quota4 (486; relay
+candidate на VM отсутствовал). Wire fixture с6 одновременными allocations того же
+REST principal воспроизводит486. По измерению выбраны user-quota16 и
+max-allocate-lifetime60s: закрытые UDP allocations освобождаются не позже1min,
+действующие обновляются каждые~30s. rtc-turn0.21.1 соблюдает выданный LIFETIME.
+Проверены6 allocations, LIFETIME≤60, valid/expired Refresh, peer403 и UDP/TCP/TLS.
+Квота400 и per-session bandwidth остаются; peer allowlist не расширялся.
+
+
+### Linux live acceptance — 2026-11-01
+
+Immutable `linux-desktop 20261031.6`, VM 596, agent `0.1.0+20261031.4865e13`.
+
+- Clean recipe build 676 s, 7.8 GiB; `verify: linux-desktop` 109 checks, 0 FAIL;
+  first QGA 9.9 s, hard-restart QGA 12.3 s.
+- Public cold create (API to `running` with desktop ready): 18.4 s and 14.4 s on two runs.
+- All MCP `computer_*` tools and `desktop_url` work against the real API; the
+  "desktop unsupported" fallback is not used when the capability is advertised.
+- PNG screenshot with cursor, Unicode keyboard proof, clipboard round-trip, WebSocket
+  media and forced relay-to-relay WebRTC over UDP, TCP and TLS TURN: changed frames.
+- 30 min hold with an open viewer and no API calls: 176 samples, `desktopStreams >= 1`,
+  all other activity counters 0, last API call 1830 s ago; frames still change after the hold.
+- Idle-stop with `idle_timeout = 60 s`: stopped 78.1 s after an explicit end-streams,
+  98.8 s after a natural page close without EndStreams.
+- Fork gets fresh streamer credentials; stop/resume with screenshot; old desktop
+  cookie returns 401 after resume; delete cleans up clones and snapshots.
+- After the runs only VM 596 remains in the S10 slots; 595 and all clones are removed.
+
+The S8 Desktop tab and S11 API contract are unchanged by the live fixes.
+Open: Windows desktop (§8) after S9; production TURN on TLS 443 (dedicated address or
+SNI). Audio stays disabled; performance, glass-to-glass latency and multi-viewer
+behaviour are not characterised by this acceptance.
+
+
+### Windows desktop — решения реализации (2026-11-01, после merge S9)
+
+- **Отдельный шаблон `windows-desktop`** (`extends: windows`, слот **595**), решение master
+  2026-11-01. Шаблон `windows` (598) остаётся headless и не меняется; §7 «S10 добавляет в
+  `60-desktop`» заменено отдельным шагом `65-streamer` дочернего рецепта (общие шаги
+  `_windows` без изменений). `linux-desktop` теперь занимает один слот **596**; как у
+  `windows`, пересборка одного слота требует сначала вывести старый шаблон.
+- **`agent.toml`** desktop-рецепта рендерит `sbx-tpl` (`isDesktopRecipe`): `[desktop] enabled`,
+  фаза `desktop` в `[readiness] required`, порты стримера в `[ports] exclude`. Установщик
+  `desktop-install.ps1` больше не правит `agent.toml` регулярными выражениями.
+- **Пины Windows-артефактов** (Sunshine MSI, moonlight-web zip, cua-driver zip, cosign) — в
+  `windows-desktop/files/desktop-pins.json` с sha256; cua-driver дополнительно проверяется
+  `cosign verify-blob`. Перенос в типизированный `versions.toml [desktop]` для Windows — follow-up.
+- **Edge**: политики `HideFirstRunExperience`, `BrowserSignin=0`, `SyncDisabled`,
+  `DefaultBrowserSettingEnabled=0`, без промо и рекомендаций.
+- **Verify `windows-desktop`**: базовый `windows/verify.ps1` целиком плюс группа `desktop`
+  (файлы стримеров, службы Manual/Stopped и учётная запись `NT SERVICE\sbx-moonlight-web`,
+  шаблон moonlight-web на loopback без STUN, `agent.toml`, нет слушателей стримера до Open,
+  политики Edge). Группа вставляется перед `# --- main ---` и регистрируется через
+  `$SbxExtraGroups`; в `windows/verify.ps1` добавлен только этот хук.
+- **Activity на Windows**: conntrack нет, а лог Sunshine не пишет DISCONNECT при
+  принудительном завершении. Основной признак — UDP-сокеты процесса moonlight-web
+  (`web-server.exe`, `GetExtendedUdpTable` с владельцем): ENet-канал к Sunshine есть у каждого
+  потока при любом транспорте браузера, без потока у moonlight-web UDP-сокетов нет. Число
+  потоков не определяется, агент сообщает `desktopStreams = 1` при наличии сокетов.
+  Ошибка выборки — запасной путь через лог Sunshine (консервативно).
+- **Сессия**: `register-session.ps1` регистрирует задачи `\sbx\session` и `\sbx\cua-driver`
+  (Interactive, `user`, триггер AtLogOn) при каждом старте агента; запуск сразу — только если
+  `user` уже вошёл, иначе их запускает триггер автологона.
+- **Видео (спайк W, §19.2)**: `hw.vga: std` (Microsoft Basic Display Adapter), без смены
+  адаптера. Его режим задаёт GOP OVMF, по умолчанию 1280×800, а `ChangeDisplaySettingsEx`
+  его не меняет. Шаг `65-streamer` пишет NVRAM-переменную OVMF `PlatformConfig`
+  (GUID `7235c51c-…`, 1920×1080) в efidisk сборочной VM; efidisk копируется в шаблон и клоны,
+  поэтому каждая загрузка сразу идёт в 1920×1080. Проверено на клоне: Basic Display Adapter
+  1920×1080, скриншот API 1920×1080, захват Sunshine `ddx` идёт. `vga: virtio` + `viogpudo`
+  проверен и отклонён: драйвер берёт тот же режим 1280×800, а смена режима из сессии
+  зависала. Verify проверяет `desktop_display` (1920×1080).
+- **ACL на Windows**: `icacls <dir> /inheritance:r /grant:r <sid>:(OI)(CI)F /T` оставляет
+  файлам внутри пустой DACL (флаги наследования для файлов отбрасываются), и даже SYSTEM
+  не может их прочитать. Агент и установщик ставят наследуемые права только на каталог,
+  дочерние элементы сбрасываются на наследование (`icacls <child> /reset /T`).
+- **Старт стримера на Windows**: Sunshine перед прослушиванием тестирует энкодеры, первый
+  `Open` занимает ~16–20 s; gateway в это время отвечает retryable `503 desktop_starting`,
+  вкладка Desktop и `e2e-desktop.ts` повторяют со свежим билетом через 2 s.
+- Лог moonlight-web на Windows: `state\desktop-moonlight\web-server.log` (последний запуск).
+
+### Windows live acceptance — 2026-11-01
+
+`windows-desktop 20261101.1`, VM 595, agent `0.1.0+20261101.a17c0d7b`, `hw.vga: std` +
+OVMF `PlatformConfig` 1920×1080.
+
+- Сборка 31.8 min (сборка + первый verify), диск 17.1 GiB. `verify: windows-desktop`:
+  110 проверок, 0 FAIL (базовый профиль S9 + группа `desktop`, включая `desktop_display`).
+  Первый verify этой сборки прервался потерей QGA на fork сразу после готовности агента
+  (перезагрузка переименования S9, R16); повторный `sbx-tpl verify` прошёл полностью.
+  В сборке 3 тот же шаг прошёл с первого раза.
+- Публичный холодный create до `ready` с фазой `desktop`: 139 s и 146 s (лимит 5 min).
+  Первое открытие стримера: 22 s (тест энкодеров Sunshine), повторные — < 1 s.
+- Скриншот 1920×1080, ввод мышью и клавиатурой меняет кадр, Unicode (`S10 экран 世界`) через
+  `KEYEVENTF_UNICODE` в окне «Выполнить» доходит до pwsh, буфер обмена туда и обратно.
+- Все MCP `computer_*` и `desktop_url` против настоящего API.
+- Стрим через gateway CT 590: WebSocket и relay↔relay WebRTC через TURN по UDP, TCP и TLS,
+  меняющиеся кадры, ещё раз после удержания.
+- Удержание зрителя 3 min без вызовов API: `desktopStreams = 1` весь интервал (UDP-сокеты
+  moonlight-web), sandbox не остановлен. После естественного закрытия страницы idle-stop
+  (`idle_timeout = 60 s`) через 105 s.
+- Fork получает новые креды стримера; stop/resume — desktop ready; старая cookie — 401;
+  удаление чистит всё. VM гостя ходит к TURN только по UDP 3478, TCP/TLS закрыты.
+- Регрессия Linux тем же сценарием после правок e2e: зелёная, create 17.9 s.
+
+Не заявлено для Windows: 30-минутное удержание (проверено 3 min; на Linux — 30 min),
+производительность и задержка, несколько зрителей, звук.
+
+### Windows desktop после правила fork/snapshot только из остановленной VM (2026-11-01)
+
+Rebase на `main` `743f112` (S9 §24.8–24.9, S6 §7.8–7.9, миграция `0208`) без конфликтов;
+runtime-миграции S10 остаются 0401–0403 и идут после 0208.
+
+- **Fork рабочего стола Windows.** Работающий `windows-desktop` без `forceStop` →
+  `409 snapshot_requires_stop` (проверено live). Fork из штатно остановленного источника
+  проходит; у fork новые креды стримера, скриншот 1920×1080, все MCP `computer_*` работают
+  на fork. `forceStop` переиспользует `stopSteps` worker-а, поэтому `authEpoch` растёт и
+  ссылки зрителей источника отзываются; перезапуск источника идёт через `deliverProvision`
+  с `Desktop/Configure` и ожиданием фазы `desktop`. Live-прогон `forceStop` для десктопа
+  не делался: источник и fork одновременно — 8 GB при бюджете S10 4 GB; общий путь
+  проверен S9 на шаблоне 598.
+- **Размер рабочего стола после перезагрузки.** Live-проверка нашла, что на 20261101.1
+  только первая загрузка клона давала 1920×1080, а resume и fork — сохранённые Windows
+  1280×800, растянутые на режим 1920×1080 (`GraphicsDrivers\Configuration`, сохранено
+  при сборке до записи `PlatformConfig`). `65-streamer` теперь очищает `Configuration` и
+  `Connectivity`; следующие загрузки сборки сохраняют 1920×1080. Verify проверяет и
+  сохранённый размер, e2e — скриншот после resume и на fork.
+- **Сборка `windows-desktop 20261101.2`**, VM 595, агент `0.1.0+20261101.cbddbf59`:
+  38 min со всем verify, 16.5 GiB, verify 110 проверок, 0 FAIL. Live на CT 590: create
+  198 s, первое открытие стрима 22 s, WebSocket и relay UDP/TCP/TLS, fork-правило,
+  `computer_*` на fork, resume 1920×1080, отзыв cookie, удаление — PASS.
+- Наблюдение: один раз на 20261101.1 штатный stop сразу после create не уложился в 300 s
+  (hard stop, `clean_stop = false`, затем fork → `snapshot_requires_clean_stop`). На
+  20261101.2 тот же сценарий — clean за 39 s, повторить не удалось. Если повторится —
+  `forceStop` после resume или повторный stop (сообщение API это подсказывает).
+
+### Приёмочные правки s10-fix (2026-11-01)
+
+Независимая приёмка master нашла 12 замечаний; правила записаны в разделах выше (помечены s10-fix).
+
+- **Блокировка оператором (H1).** Ручки рабочего стола, которые управляют гостем, проверяют блокировку как `exec` (§13.2). Live на CT 590 (`desktop-block-probe.ts`, `windows-desktop`): после блокировки `exec`, `POST /actions`, `PUT /clipboard`, `POST /links`, `PUT /access` → `403 sandbox_blocked`; скриншот разрешён; `authEpoch` 1→2, `EndStreams` выполнен, старая cookie зрителя → 403; после снятия блокировки действия снова работают. MCP `computer_*` показывает ошибку с подсказкой «не повторять».
+- **TURN и порты своего адреса (M3).** Таблица `inet sbx_turn` (§9.2). Live `verify-turn.py`: relay↔relay до UDP-, TCP- и TLS-клиента работает; Send indication на `192.168.68.90:40123` и `:41641` не доходит, счётчик drop растёт. Контроль: без таблицы тот же зонд доходит до слушателя `:40123` (`received 14`). turnserver работает от uid 3478 только с `CAP_NET_BIND_SERVICE`.
+- **Скриншоты в кэше запросов (M1).** Live (`desktop-cache-probe.ts`, `linux-desktop 20261101.2`): после 22 `Act` со скриншотами 1920×1080 в `state.db`, `-wal`, `-shm` 0 сигнатур PNG; повтор с тем же `Idempotency-Key` возвращает сохранённый результат и свежий скриншот.
+- **Контроллер `desktop-turn` (M2).** Ошибка одной sandbox пишется в лог и не прерывает остальные; порядок — старые креды первыми, `id`; партия до 100.
+- **Квота при `forceStop` (B3).** Счёт был верным: работающий источник уже учтён один раз, fork добавляет свой размер. С квотой 6144 MB fork 4 GB от источника 4 GB действительно не помещается (оба работают после fork). Сообщение теперь называет занятое, запрошенное и правило `forceStop`: `quota 'maxRamMb' exceeded (4096 MB in use + 4096 MB requested > limit 6144 MB); the source restarts after a forceStop fork…`, `details.requested`. Тест: при квоте 8192 forced fork проходит.
+- **Windows SendInput (B2).** Причина по коду: `SendInput` возвращает 0 вставленных событий (`ERROR_ACCESS_DENIED`), пока входной рабочий стол не `Default` — короткий переход входа в систему на свежем fork после переименования S9. Исходная ошибка не воспроизведена; helper теперь повторяет только невставленные события до 2 s (§12.2) и называет входной рабочий стол в ошибке. Три полных Windows `e2e-desktop` подряд на `20261101.3` без `action_failed`.
+- **Стример и простой (п. 8–9).** Автоостановка через 15 min без зрителя и окно 2 min для ошибок наблюдения (§8.4, §11.4), unit-тесты с управляемыми часами. Долгая live-проверка 15 min не проводилась.
+- **Креды стримера (п. 11).** Раздельные секреты и администратор moonlight-web до первого старта (§8.3); live: pairing и поток на новых сборках проходят (`e2e-desktop`). coturn: `no-software-attribute`, `no-cli`.
+- **CLI (п. 10)** — §14.2; **миграции (п. 12)** — `0401–0404` в блоке S8, `docs/roadmap.md`.
+- **e2e на Linux fork (B1).** MCP-проверка клавиатуры открывает и фокусирует свой терминал на fork.
+
+Сборки: `linux-desktop 20261101.2` (VM 596, verify 109 проверок, 0 FAIL; первая попытка verify упала на `qmstop` клона по блокировке VM после жёсткого рестарта — verify теперь повторяет остановку через `retryOnVmLock`, как Windows verify), `windows-desktop 20261101.3` (VM 595, verify 110 проверок, 0 FAIL), агент `0.1.0+20261101.fabc0b94`.
+
+Live на CT 590 (`s10-fix`): Linux `e2e-desktop` зелёный целиком — create 17.3 s, первое открытие потока 1.1 s, WebSocket и relay↔relay WebRTC UDP, MCP `computer_*` на источнике и на fork, stop/resume, отзыв cookie. Windows `e2e-desktop` — три прогона подряд зелёные (43 проверки каждый): create 187 s, 153 s, 123 s; первое открытие потока ~22 s.
+
+### Приёмочные правки s10-fix2 (2026-11-01)
+
+Вторая независимая приёмка master приняла H1, M1, M2, B1–B3 и п. 8–12 и нашла S1, S2, W1, N1, N2.
+
+- **S1, S2 — TURN (§9.2).** coturn перенесён в собственный network namespace (compose-сеть `turn`): адрес TURN на `lo` внутри, наружу опубликованы только 3478/udp, 3478/tcp и TLS; на сети хоста entrypoint отказывается стартовать. Порты relay — 61000–65535 (dev 61000–61040), выше `ip_local_port_range`, зарезервированы sysctl в namespace TURN; пересечение — отказ старта. Entrypoint остаётся init и каждые 2 s сравнивает таблицу `inet sbx_turn` с поставленной; при удалении или изменении init выходит, turnserver умирает вместе с namespace PID, compose перезапускает с новой таблицей; healthcheck — та же проверка. На CT 590 `nftables.conf` без `flush ruleset` (`infra/dev-cp/README.md`).
+  Live (`verify-turn.py`, `SBX_TURN_PROBE_GUARD=1`): relay↔relay до UDP/TCP/TLS-клиента работает; UDP-слушатели хоста на `192.168.68.90:40123` и `:61039` (внутри диапазона relay) ничего не получают, `:41641` тоже, счётчик drop растёт; после `docker exec … nft delete table inet sbx_turn` relay перестал работать через 0.5 s, восстановился с таблицей через 2.7 s; `systemctl reload nftables` в CT 590 не перезапускает TURN и не ломает публикацию портов. Запрещённые пиры (8.8.8.8, LAN, сеть VM) — 403.
+- **N1.** Снятие запрета политики (блокировка, public) тоже поднимает `authEpoch` (§13.2); тест: билет, записанный с эпохой блокировки, после разблокировки не обменивается.
+- **N2.** `ctl-desktop-turn` отмечает попытку (`turn_attempted_at`, миграция `0405`) и выбирает сначала не пробованные, потом самые давние попытки: полная партия недоступных гостей больше не блокирует остальных; тест с партией 1.
+- **W1 — Windows e2e.**
+  - *Прогон A* (текст не дошёл): Start открылся в момент запуска Run через `explorer.exe shell:::` на свежем входе и забрал фокус. Тест теперь открывает Run задачей в сессии `user`, находит поле ввода (`FindWindow` + `GetWindowRect`, права на передний план не нужны), кликает в него дважды настоящим вводом (первый клик может только закрыть Start), выделяет и печатает; успех — по файлу-доказательству, до 3 попыток с `Escape` между ними (`apps/mcp/test/windows-run.ts`, общий для e2e и MCP-проверки). Проверено с принудительно открытым Start. Продукт: готовность рабочего стола не задерживается до конца работы оболочки после первого входа — Start, тосты («Searching for Display Driver» у Basic Display Adapter) могут появиться и позже; агенты computer-use, как и тест, должны фокусировать окно кликом, а не полагаться на фокус.
+  - *Прогон B* (чёрный websocket viewer): в браузере не было ни одного декодированного кадра, Sunshine при этом закодировал 177 кадров с 8 I-кадрами за 8 s (обычно 2–4 — клиент повторно просил IDR). Не воспроизвелось: 3 подряд на тёплой VM, 3 после stop/resume, 7 полных Windows `e2e-desktop` подряд (последние 4 — на `s10-fix2` с новым TURN: 43 проверки каждый, create 119–129 s, первое открытие потока 24–27 s, первый кадр WebSocket/WebRTC через 150–215 ms, Run — с первой попытки). Причина не установлена; продуктовая ошибка не доказана. Тест теперь отличает «нет картинки» (ждёт первый кадр до 30 s) от «кадр не изменился», меняет кадр движением курсора (раньше — только набором текста, который виден лишь при фокусе), и при сбое сохраняет консоль браузера и `web-server.log` moonlight-web.
+
+Live на CT 590 (`s10-fix2`): `e2e.sh` 20/20, Linux `e2e-desktop` зелёный (44 проверки), Windows `e2e-desktop` 4 подряд зелёные; pve после прогонов — только шаблоны.

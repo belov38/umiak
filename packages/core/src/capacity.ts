@@ -264,6 +264,8 @@ export interface QuotaDelta {
 	 * that snapshot is not counted, since it is deleted when the new one is ready.
 	 */
 	replacingSavedName?: string;
+	/** Appended to the `quota_exceeded` message (why the request needs this much). */
+	note?: string;
 }
 
 /**
@@ -294,10 +296,22 @@ export async function checkQuota(
 		const n = r.rows[0]?.n ?? 0;
 		const ramMb = r.rows[0]?.ram_mb ?? 0;
 		if (addSandboxes > 0 && n + addSandboxes > quota.maxActiveSandboxes) {
-			throw quotaExceeded("maxActiveSandboxes", quota.maxActiveSandboxes, n);
+			throw quotaExceeded(
+				"maxActiveSandboxes",
+				quota.maxActiveSandboxes,
+				n,
+				addSandboxes,
+				delta.note,
+			);
 		}
 		if (addRamMb > 0 && ramMb + addRamMb > quota.maxRamMb) {
-			throw quotaExceeded("maxRamMb", quota.maxRamMb, ramMb);
+			throw quotaExceeded(
+				"maxRamMb",
+				quota.maxRamMb,
+				ramMb,
+				addRamMb,
+				delta.note,
+			);
 		}
 	}
 
@@ -310,7 +324,13 @@ export async function checkQuota(
 		);
 		const n = r.rows[0]?.n ?? 0;
 		if (n + addSaved > quota.maxSavedSnapshots) {
-			throw quotaExceeded("maxSavedSnapshots", quota.maxSavedSnapshots, n);
+			throw quotaExceeded(
+				"maxSavedSnapshots",
+				quota.maxSavedSnapshots,
+				n,
+				addSaved,
+				delta.note,
+			);
 		}
 	}
 }

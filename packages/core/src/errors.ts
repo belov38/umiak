@@ -128,11 +128,25 @@ export function quotaExceeded(
 	quota: string,
 	limit: number,
 	current: number,
+	requested?: number,
+	note?: string,
 ): SbxError {
+	const unit = quota === "maxRamMb" ? " MB" : "";
+	const usage =
+		requested === undefined
+			? `${current} of ${limit}`
+			: `${current}${unit} in use + ${requested}${unit} requested > limit ${limit}${unit}`;
 	return new SbxError(
 		"quota_exceeded",
-		`quota '${quota}' exceeded (${current} of ${limit})`,
-		{ details: { quota, limit, current } },
+		`quota '${quota}' exceeded (${usage})${note ? `; ${note}` : ""}`,
+		{
+			details: {
+				quota,
+				limit,
+				current,
+				...(requested === undefined ? {} : { requested }),
+			},
+		},
 	);
 }
 

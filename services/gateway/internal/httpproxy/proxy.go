@@ -50,6 +50,8 @@ type Config struct {
 	// It is called after the route and state checks, without the port
 	// access check.
 	Desktop http.Handler
+	// DesktopAPI exchanges tickets and starts the paired streamer.
+	DesktopAPI cpapi.DesktopClient
 	// Logger gets the internal details of failures; nil is slog.Default.
 	Logger *slog.Logger
 }
@@ -115,7 +117,7 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 	}
 	x.label = l
 	desktop := l.Kind == routes.KindDesktop
-	if desktop && h.cfg.Desktop == nil {
+	if desktop && h.cfg.Desktop == nil && h.cfg.DesktopAPI == nil {
 		x.fail(notFound())
 		return
 	}
@@ -155,7 +157,7 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 		x.fail(notFound())
 		return
 	}
-	if desktop {
+	if desktop && h.cfg.Desktop != nil {
 		h.cfg.Desktop.ServeHTTP(x.w, r)
 		return
 	}
@@ -163,8 +165,24 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 	// A preflight skips the access check (spec 8.5), but never one that asks
 	// for an upgrade: that would open a raw channel without authorization.
 	var auth portauth.Result
-	preflight := portauth.IsPreflight(r) && !hasUpgrade(r.Header)
-	if rt.Access != accessPublic && !preflight {
+	preflight := !desktop && portauth.IsPreflight(r) && !hasUpgrade(r.Header)
+	if desktop {
+		if rt.Port != 47800 || rt.AppProtocol != "http1" {
+			x.fail(notFound())
+			return
+		}
+		auth = h.cfg.Auth.CheckDesktop(x.w, r, l, rt, x.ip, x.rid, h.cfg.DesktopAPI)
+		if !auth.Proceed {
+			return
+		}
+		if auth.SetCookie != nil {
+			x.w.Header().Add("Set-Cookie", auth.SetCookie.String())
+			auth.SetCookie = nil
+		}
+		if h.desktopOpen(x) {
+			return
+		}
+	} else if rt.Access != accessPublic && !preflight {
 		auth = h.cfg.Auth.Check(x.w, r, l, rt, x.ip, x.rid)
 		x.authResult, x.userID = auth.AuthResult, auth.UserID
 		if !auth.Proceed {
@@ -245,6 +263,12 @@ func (h *handler) rewrite(x *exchange, pr *httputil.ProxyRequest, rt cpapi.Route
 	hd.Set("X-Forwarded-Port", "443")
 	hd.Set("Forwarded", forwardedHeader(x.ip, in.Host))
 	hd.Set("X-Request-Id", x.rid)
+	if rt.Kind == cpapi.KindDesktop {
+		hd.Set("X-Sbx-Desktop-User", "sbx")
+		q := out.URL.Query()
+		q.Del("_ticket")
+		out.URL.RawQuery = q.Encode()
+	}
 	if rt.Access == portauth.AccessSSO && auth.Email != "" {
 		hd.Set("X-Sbx-User-Email", auth.Email)
 	}
@@ -280,6 +304,10 @@ func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *htt
 	}
 	cleanResponseHeader(res.Header)
 	res.Header.Set("X-Robots-Tag", robotsTag)
+	if x.route != nil && x.route.Kind == cpapi.KindDesktop {
+		res.Header.Set("Cache-Control", "no-store")
+		res.Header.Set("Referrer-Policy", "no-referrer")
+	}
 	res.Header.Set("X-Request-Id", x.rid)
 	if setCookie != nil {
 		if v := setCookie.String(); v != "" {

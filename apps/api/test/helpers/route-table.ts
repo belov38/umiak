@@ -102,6 +102,71 @@ export const fresh = (prefix: string) =>
 	`${prefix}-${process.pid}-${++seq}-${Math.random().toString(36).slice(2, 8)}`;
 
 export const ROUTES: Record<string, Route> = {
+	"desktop.status": {
+		method: "GET",
+		path: "/v1/sandboxes/{sandbox}/desktop",
+		scope: "sandboxes:read",
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/desktop` }),
+	},
+	"desktop.link": {
+		method: "POST",
+		path: "/v1/sandboxes/{sandbox}/desktop/links",
+		scope: "desktop",
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/desktop/links` }),
+	},
+	"desktop.access": {
+		method: "PUT",
+		path: "/v1/sandboxes/{sandbox}/desktop/access",
+		scope: "desktop",
+		resources: ["sandbox"],
+		request: (f) => ({
+			path: `${sb(f)}/desktop/access`,
+			json: { access: "token" },
+		}),
+	},
+	"desktop.endStreams": {
+		method: "DELETE",
+		path: "/v1/sandboxes/{sandbox}/desktop/streams",
+		scope: "desktop",
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/desktop/streams` }),
+	},
+	"desktop.screenshot": {
+		method: "GET",
+		path: "/v1/sandboxes/{sandbox}/desktop/screenshot",
+		scope: "desktop",
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/desktop/screenshot` }),
+	},
+	"desktop.act": {
+		method: "POST",
+		path: "/v1/sandboxes/{sandbox}/desktop/actions",
+		scope: "desktop",
+		resources: ["sandbox"],
+		request: (f) => ({
+			path: `${sb(f)}/desktop/actions`,
+			json: { actions: [{ type: "move", x: 10, y: 20 }] },
+		}),
+	},
+	"desktop.getClipboard": {
+		method: "GET",
+		path: "/v1/sandboxes/{sandbox}/desktop/clipboard",
+		scope: "desktop",
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/desktop/clipboard` }),
+	},
+	"desktop.setClipboard": {
+		method: "PUT",
+		path: "/v1/sandboxes/{sandbox}/desktop/clipboard",
+		scope: "desktop",
+		resources: ["sandbox"],
+		request: (f) => ({
+			path: `${sb(f)}/desktop/clipboard`,
+			json: { text: "desktop" },
+		}),
+	},
 	// --- meta and account ---
 	"meta.get": {
 		method: "GET",

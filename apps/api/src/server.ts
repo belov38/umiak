@@ -42,6 +42,7 @@ import { DEFAULT_COMMAND_TIMINGS } from "./commands/attach.ts";
 import { DEFAULT_PTY_TIMINGS } from "./commands/pty-socket.ts";
 import { blockedSandboxesOf, StreamRegistry } from "./commands/registry.ts";
 import type { ApiDeps } from "./deps.ts";
+import { watchDesktopAccess } from "./desktop/revocation.ts";
 import { createApiLogger } from "./http/logger.ts";
 import { ApiMetrics } from "./http/metrics.ts";
 import { createApiServer } from "./http/websocket.ts";
@@ -251,6 +252,7 @@ export async function buildDeps(
 			lifecycle: new ApiLifecycle(),
 			payloadReady: () => sbx.assertPayloadMigrated(payload),
 		};
+		cleanups.push(watchDesktopAccess(deps));
 		return { deps, dispose };
 	} catch (e) {
 		await dispose();

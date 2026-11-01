@@ -45,6 +45,7 @@ export type AgentEvent =
 			runningCommands: number;
 			openPtys: number;
 			tcpStreams: number;
+			desktopStreams?: number;
 	  }
 	| { kind: "ports_changed"; listening: unknown[] }
 	/** S6 `quiesce.watchdog_thawed`; S3 `quiesce.auto_thawed`. */
@@ -205,14 +206,24 @@ export function normalizeAgentEvent(e: {
 			const runningCommands = count(field(p, "runningCommands"));
 			const openPtys = count(field(p, "openPtys"));
 			const tcpStreams = count(field(p, "tcpStreams"));
+			const desktopRaw = field(p, "desktopStreams");
+			const desktopStreams =
+				desktopRaw === undefined ? undefined : count(desktopRaw);
 			if (
 				runningCommands === null ||
 				openPtys === null ||
-				tcpStreams === null
+				tcpStreams === null ||
+				desktopStreams === null
 			) {
 				return null;
 			}
-			return { kind: "activity", runningCommands, openPtys, tcpStreams };
+			return {
+				kind: "activity",
+				runningCommands,
+				openPtys,
+				tcpStreams,
+				...(desktopStreams === undefined ? {} : { desktopStreams }),
+			};
 		}
 		case "ports.changed": {
 			const listening = p.listening ?? p.ports ?? [];

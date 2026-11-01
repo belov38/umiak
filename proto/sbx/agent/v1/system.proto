@@ -169,6 +169,7 @@ message ActivityResponse {
   uint32 open_ptys = 2;
   uint32 tcp_streams = 3;
   uint32 attach_streams = 4;
+  uint32 desktop_streams = 5;
 }
 
 // ClaimReason says why a claim is sent.

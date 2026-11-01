@@ -14,7 +14,14 @@
 // `attach` is one Process/Attach stream; the caller resumes it with
 // resumableAttach (commands/attach.ts). Without a client (no gateway token
 // configured) every call fails with AgentUnavailableError.
-import type { MessageInitShape } from "@bufbuild/protobuf";
+import {
+	type DescMessage,
+	fromJson,
+	type JsonObject,
+	type Message,
+	type MessageInitShape,
+	toJson,
+} from "@bufbuild/protobuf";
 import { type Timestamp, timestampDate } from "@bufbuild/protobuf/wkt";
 import {
 	type CallOptions,
@@ -37,6 +44,8 @@ import {
 	type CommandInfo,
 	type CommandSpecSchema,
 	CommandState,
+	Desktop,
+	DesktopActionFailureSchema,
 	type ExitEvent,
 	type ExitInfo,
 	ExitReason,
@@ -80,6 +89,7 @@ import type {
 	AgentStatRequest,
 	AgentStream,
 	AgentUpdateRequest,
+	DesktopMethod,
 } from "./types.ts";
 
 /** What ConnectAgentApi needs of AgentClient (tests pass a stand-in). */
@@ -327,6 +337,29 @@ export function toAgentError(e: unknown): unknown {
 	if (e instanceof AgentUnavailableError || e instanceof AgentOutdatedError) {
 		return e;
 	}
+	const desktopCode = errorDetail(e)?.code;
+	if (
+		desktopCode &&
+		/^desktop_|^streamer_|^action_failed$|^invalid_action$|^clipboard_unavailable$/.test(
+			desktopCode,
+		)
+	) {
+		let details: Record<string, unknown> = {};
+		try {
+			const action = e.findDetails(DesktopActionFailureSchema)[0];
+			if (action && desktopCode === "invalid_action")
+				details = { index: action.index, reason: action.reason };
+			if (action && desktopCode === "action_failed")
+				details = { index: action.index, completed: action.completed };
+		} catch {
+			/* Malformed optional details do not change the primary error. */
+		}
+		return new AgentCallError(
+			desktopCode,
+			e.rawMessage || desktopCode,
+			details,
+		);
+	}
 	if (isConnectionError(e)) return e;
 	if (
 		e.code === Code.Unavailable ||
@@ -345,6 +378,7 @@ type Clients = {
 	process: ConnectClient<typeof Process>;
 	filesystem: ConnectClient<typeof Filesystem>;
 	system: ConnectClient<typeof System>;
+	desktop: ConnectClient<typeof Desktop>;
 };
 
 export class ConnectAgentApi implements AgentApi {
@@ -370,6 +404,7 @@ export class ConnectAgentApi implements AgentApi {
 			process: createClient(Process, t),
 			filesystem: createClient(Filesystem, t),
 			system: createClient(System, t),
+			desktop: createClient(Desktop, t),
 		};
 	}
 
@@ -398,6 +433,33 @@ export class ConnectAgentApi implements AgentApi {
 	}
 
 	/** `tunnel.tunnel_sessions.capabilities`; [] without a session or while NULL. */
+	async desktopCall(
+		machineId: string,
+		method: DesktopMethod,
+		body: Record<string, unknown>,
+		opts: { requestId?: string; signal?: AbortSignal } = {},
+	): Promise<Record<string, unknown>> {
+		const descriptor = Desktop.method[method];
+		const response = await this.#call(machineId, "desktop", (client) => {
+			const call = client[method] as unknown as (
+				message: Message,
+				options: CallOptions,
+			) => Promise<Message>;
+			return call(
+				fromJson(
+					descriptor.input,
+					JSON.parse(JSON.stringify(body)) as JsonObject,
+				),
+				{
+					...this.#opts(opts.requestId, opts.signal),
+					...(method === "act" ? { timeoutMs: 75_000 } : {}),
+				},
+			);
+		});
+		return toJson(descriptor.output as DescMessage, response, {
+			alwaysEmitImplicit: true,
+		}) as Record<string, unknown>;
+	}
 	async capabilities(machineId: string): Promise<string[]> {
 		const r = await this.#pool.query<{ capabilities: string[] | null }>(
 			"SELECT capabilities FROM tunnel.tunnel_sessions WHERE machine_id = $1",

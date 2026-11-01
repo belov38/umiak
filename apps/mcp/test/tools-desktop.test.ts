@@ -679,9 +679,19 @@ describe("desktop_url", () => {
 });
 
 describe("errors", () => {
-	it("an API without the desktop routes (404) is desktop_unsupported when the sandbox exists", async () => {
+	it("an advertised desktop capability never becomes an unsupported fallback", async () => {
 		const hh = await start();
 		const sb = await desktop(hh);
+		hh.api.script.noDesktopRoutes = true;
+		const r = await hh.call("computer_clipboard_read", { sandbox: sb });
+		expect(r.isError).toBe(true);
+		expect(r.texts[0]).not.toContain("desktop_unsupported");
+		expect(r.texts[0]).toContain("not_found");
+	});
+	it("an old API without advertised desktop capability gets the unsupported fallback", async () => {
+		const hh = await start();
+		const created = await hh.call("sandbox_create", { template: "linux" });
+		const sb = created.json.id as string;
 		hh.api.script.noDesktopRoutes = true;
 		for (const [tool, args] of [
 			["computer_screenshot", {}],

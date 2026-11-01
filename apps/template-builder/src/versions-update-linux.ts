@@ -334,6 +334,18 @@ export function formatVersionsToml(v: Versions): string {
 			sortedEntries(v.npm).map(([k, ver]): [string, string] => [k, str(ver)]),
 		),
 	];
+	if (v.desktop) {
+		sections.push(
+			table("desktop", [
+				["sunshine", inline(v.desktop.sunshine)],
+				["moonlight_web", inline(v.desktop.moonlight_web)],
+				["cua_driver", inline(v.desktop.cua_driver)],
+				...(v.desktop.cosign
+					? [["cosign", inline(v.desktop.cosign)] as [string, string]]
+					: []),
+			]),
+		);
+	}
 	if (v.sbx) sections.push(table("sbx", [["cli", inline(v.sbx.cli)]]));
 	return `${UPDATE_HEADER}\n\n${sections.join("\n\n")}\n`;
 }
@@ -342,7 +354,7 @@ export function formatVersionsToml(v: Versions): string {
 
 type Section = Record<string, unknown>;
 
-/** Re-resolves every linux pin; `[sbx]` is kept from the previous file. */
+/** Re-resolves every linux pin; `[sbx]` and `[desktop]` are kept from the previous file. */
 export async function updateLinuxVersions(
 	file: string,
 	prev: Section | null,
@@ -364,6 +376,18 @@ export async function updateLinuxVersions(
 			`${file}: [sbx]: ${err instanceof z.ZodError ? z.prettifyError(err) : String(err)}`,
 		);
 	}
-	const next: Versions = sbx ? { ...resolved, sbx } : resolved;
+	let desktop: Versions["desktop"];
+	try {
+		desktop = versionsSchema.shape.desktop.parse(prev?.desktop);
+	} catch (err) {
+		throw new Error(
+			`${file}: [desktop]: ${err instanceof z.ZodError ? z.prettifyError(err) : String(err)}`,
+		);
+	}
+	const next: Versions = {
+		...resolved,
+		...(sbx ? { sbx } : {}),
+		...(desktop ? { desktop } : {}),
+	};
 	return { text: formatVersionsToml(next), changes: diffVersions(prev, next) };
 }

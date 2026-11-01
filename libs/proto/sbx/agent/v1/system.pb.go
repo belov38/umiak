@@ -1120,6 +1120,7 @@ type ActivityResponse struct {
 	OpenPtys        uint32                 `protobuf:"varint,2,opt,name=open_ptys,json=openPtys,proto3" json:"open_ptys,omitempty"`
 	TcpStreams      uint32                 `protobuf:"varint,3,opt,name=tcp_streams,json=tcpStreams,proto3" json:"tcp_streams,omitempty"`
 	AttachStreams   uint32                 `protobuf:"varint,4,opt,name=attach_streams,json=attachStreams,proto3" json:"attach_streams,omitempty"`
+	DesktopStreams  uint32                 `protobuf:"varint,5,opt,name=desktop_streams,json=desktopStreams,proto3" json:"desktop_streams,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1178,6 +1179,13 @@ func (x *ActivityResponse) GetTcpStreams() uint32 {
 func (x *ActivityResponse) GetAttachStreams() uint32 {
 	if x != nil {
 		return x.AttachStreams
+	}
+	return 0
+}
+
+func (x *ActivityResponse) GetDesktopStreams() uint32 {
+	if x != nil {
+		return x.DesktopStreams
 	}
 	return 0
 }
@@ -2245,13 +2253,14 @@ const file_sbx_agent_v1_system_proto_rawDesc = "" +
 	"\x10ListPortsRequest\"=\n" +
 	"\x11ListPortsResponse\x12(\n" +
 	"\x05ports\x18\x01 \x03(\v2\x12.sbx.agent.v1.PortR\x05ports\"\x11\n" +
-	"\x0fActivityRequest\"\xa2\x01\n" +
+	"\x0fActivityRequest\"\xcb\x01\n" +
 	"\x10ActivityResponse\x12)\n" +
 	"\x10running_commands\x18\x01 \x01(\rR\x0frunningCommands\x12\x1b\n" +
 	"\topen_ptys\x18\x02 \x01(\rR\bopenPtys\x12\x1f\n" +
 	"\vtcp_streams\x18\x03 \x01(\rR\n" +
 	"tcpStreams\x12%\n" +
-	"\x0eattach_streams\x18\x04 \x01(\rR\rattachStreams\"k\n" +
+	"\x0eattach_streams\x18\x04 \x01(\rR\rattachStreams\x12'\n" +
+	"\x0fdesktop_streams\x18\x05 \x01(\rR\x0edesktopStreams\"k\n" +
 	"\n" +
 	"SecretFile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +

@@ -154,8 +154,9 @@ describe.skipIf(!dockerAvailable())("test container guard", () => {
 
 		// Another package's sweep may remove the orphans first: check the state.
 		await removeOrphans();
-		expect(await exists(orphan)).toBe(false);
-		expect(await exists(reused)).toBe(false);
+		// A concurrent sweep can already be removing it; wait for Docker's final state.
+		await gone(orphan);
+		await gone(reused);
 		expect(await exists(kept)).toBe(true);
 		expect(await exists(mine)).toBe(true);
 		await live.kill();

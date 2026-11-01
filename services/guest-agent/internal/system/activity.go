@@ -23,6 +23,8 @@ const (
 type ActivityLoop struct {
 	// Counts gives running commands and open PTYs; nil counts as zero.
 	Counts Counts
+	// DesktopStreams reports active video viewers. Nil counts as zero.
+	DesktopStreams func() uint32
 	// TCP counts live CONNECT streams; nil counts as zero.
 	TCP *ports.Counter
 	// Emit receives the events.
@@ -35,7 +37,7 @@ type ActivityLoop struct {
 	Now func() time.Time
 
 	started bool
-	last    [3]int64
+	last    [4]int64
 	sentAt  time.Time
 }
 
@@ -67,7 +69,10 @@ func (l *ActivityLoop) step(now time.Time) {
 	if l.Counts != nil {
 		running, ptys, _ = l.Counts.Counts()
 	}
-	cur := [3]int64{int64(running), int64(ptys), loadTCP(l.TCP)}
+	cur := [4]int64{int64(running), int64(ptys), loadTCP(l.TCP), 0}
+	if l.DesktopStreams != nil {
+		cur[3] = int64(l.DesktopStreams())
+	}
 	heartbeat := l.Heartbeat
 	if heartbeat <= 0 {
 		heartbeat = DefaultActivityHeartbeat
@@ -88,6 +93,7 @@ func (l *ActivityLoop) step(now time.Time) {
 			RunningCommands: clampU32(cur[0]),
 			OpenPtys:        clampU32(cur[1]),
 			TcpStreams:      clampU32(cur[2]),
+			DesktopStreams:  clampU32(cur[3]),
 		})
 	}
 }

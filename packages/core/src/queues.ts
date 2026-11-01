@@ -15,6 +15,7 @@ export const QUEUE_NAMES = [
 	"ctl-reconcile",
 	"ctl-cleanup",
 	"ctl-idp-sync",
+	"ctl-desktop-turn",
 ] as const;
 export type QueueName = (typeof QUEUE_NAMES)[number];
 
@@ -98,6 +99,7 @@ export const QUEUES = {
 	"ctl-reconcile": CONTROLLER,
 	"ctl-cleanup": CONTROLLER,
 	"ctl-idp-sync": CONTROLLER,
+	"ctl-desktop-turn": CONTROLLER,
 } as const satisfies Record<QueueName, QueueOptions>;
 
 /** Dead-letter targets first: pg-boss requires them to exist. */

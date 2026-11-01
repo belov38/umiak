@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { encodeUuid } from "@sbx/auth";
 import { z } from "zod";
 import type { ApiApp, ApiDeps } from "../../deps.ts";
+import { lookupDesktopRoute } from "../../desktop/service.ts";
 import { ApiError } from "../../http/errors.ts";
 import { poolOf, readJson, requireGateway } from "./common.ts";
 
@@ -41,6 +42,21 @@ export function registerPortAuthRoutes(app: ApiApp, deps: ApiDeps): void {
 					400,
 					"invalid_code",
 					"the code is unknown, expired, already used or for another label",
+				);
+			}
+			const desktop = await lookupDesktopRoute(deps, label);
+			if (desktop) {
+				if (desktop.authEpoch !== row.auth_epoch)
+					throw new ApiError(400, "invalid_code", "stale desktop sign-in");
+				await poolOf(deps).query(
+					`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,user_id,auth_epoch,expires_at,used_at) VALUES($1,$2,$3,$4,$5,now(),now()) ON CONFLICT DO NOTHING`,
+					[
+						portAuthCodeHash(code),
+						desktop.rawSandboxId,
+						label,
+						row.user_id,
+						row.auth_epoch,
+					],
 				);
 			}
 			return c.json(

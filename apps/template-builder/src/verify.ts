@@ -12,6 +12,7 @@ import {
 	type Machines,
 	type NodeOps,
 	type ReadyInfo,
+	retryOnVmLock,
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
@@ -501,6 +502,10 @@ export async function verifyTemplate(
 ): Promise<VerifyResult> {
 	if (manifest.os === "windows") return verifyWindows(deps, manifest, o);
 	const tplVmid = manifest.pveVmid;
+	const size =
+		manifest.templateSlug === "linux-desktop"
+			? { cores: 4, memoryMb: 4096 }
+			: SIZE;
 	if (tplVmid === null) throw new Error("the build has no template VMID");
 	const now = deps.now ?? Date.now;
 	const sleep =
@@ -549,7 +554,7 @@ export async function verifyTemplate(
 	let kvm: VerifyResult["kvm"] = { available: false, reason: "not reported" };
 
 	const reserve = async (c: Clone) => {
-		await deps.ramGuard.reserve(c.vmid, SIZE.memoryMb);
+		await deps.ramGuard.reserve(c.vmid, size.memoryMb);
 		c.reserved = true;
 	};
 
@@ -636,7 +641,7 @@ export async function verifyTemplate(
 		step(`cloning template ${tplVmid}`);
 		const A: Clone = {
 			...a,
-			vmid: (await machines.create({ size: SIZE, smbios: a.smbios })).vmid,
+			vmid: (await machines.create({ size, smbios: a.smbios })).vmid,
 			reserved: false,
 		};
 		cloneA = A;
@@ -746,14 +751,26 @@ export async function verifyTemplate(
 		const f = identity();
 		const F: Clone = {
 			...f,
-			vmid: (await machines.fork(snap, { size: SIZE, smbios: f.smbios })).vmid,
+			vmid: (await machines.fork(snap, { size, smbios: f.smbios })).vmid,
 			reserved: false,
 		};
 		cloneF = F;
+		// Desktop verification shares the host with other build tracks. Preserve
+		// source evidence before stopping it; the fork never needs both guests live.
+		const sourceFacts = await facts(A);
+		if (manifest.templateSlug === "linux-desktop") {
+			// The hard restart above leaves qmeventd holding the VM lock for a while.
+			await retryOnVmLock(() => machines.stop(A.vmid), {
+				sleep,
+				onRetry: (err) => log(`stop VM ${A.vmid}: ${errorText(err)}; retrying`),
+			});
+			deps.ramGuard.release(A.vmid);
+			A.reserved = false;
+		}
 		await reserve(F);
 		step(`booting fork VM ${F.vmid}`);
 		await startClone(F, "fork_");
-		add(...checkForkIdentity(await facts(A), await facts(F)));
+		add(...checkForkIdentity(sourceFacts, await facts(F)));
 	} catch (err) {
 		failure = err;
 	}

@@ -128,3 +128,30 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestDesktopStreamsPreventIdleAndAppearInBothSources(t *testing.T) {
+	rec := &events.Recorder{}
+	count := uint32(1)
+	l := &ActivityLoop{DesktopStreams: func() uint32 { return count }, Emit: rec}
+	now := time.Now()
+	l.step(now)
+	payload := rec.Of(events.TypeActivity)[0].(*agentv1.Activity)
+	if payload.DesktopStreams != 1 {
+		t.Fatal("activity event lost desktop stream")
+	}
+	s := &Service{opts: Options{DesktopStreams: func() uint32 { return count }}}
+	if s.activity().DesktopStreams != 1 {
+		t.Fatal("live activity lost desktop stream")
+	}
+	count = 0
+	l.step(now.Add(time.Second))
+	if len(rec.Of(events.TypeActivity)) != 2 {
+		t.Fatal("desktop stream end not emitted")
+	}
+	idle := &IdleLoop{DesktopStreams: func() uint32 { return 1 }, Sample: func() (float64, uint64) { return 0, 0 }, Window: time.Second}
+	idle.step(now)
+	idle.step(now.Add(2 * time.Second))
+	if _, ok := idle.IdleSince(); ok {
+		t.Fatal("desktop viewer counted as idle")
+	}
+}

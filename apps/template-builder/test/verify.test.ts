@@ -610,6 +610,32 @@ function setup(over: Partial<VerifyDeps> = {}) {
 }
 
 describe("verifyTemplate", () => {
+	it("verifies desktop clones at the required 4gb size", async () => {
+		const { w, deps } = setup();
+		const sizes: (MachineSize | undefined)[] = [];
+		const create = w.machines.create;
+		const fork = w.machines.fork;
+		deps.machines = {
+			...w.machines,
+			create: async (o) => {
+				sizes.push(o?.size);
+				return create(o);
+			},
+			fork: async (s, o) => {
+				sizes.push(o?.size);
+				return fork(s, o);
+			},
+		};
+		await verifyTemplate(deps, {
+			...manifest(),
+			templateSlug: "linux-desktop",
+			pveVmid: 595,
+		});
+		expect(sizes).toEqual([
+			{ cores: 4, memoryMb: 4096 },
+			{ cores: 4, memoryMb: 4096 },
+		]);
+	});
 	it("checks a clone, its hard restart and a fork, then removes everything", async () => {
 		const { w, deps, ram, logs } = setup();
 		const v = await verifyTemplate(deps, manifest(), {});
@@ -707,6 +733,18 @@ describe("verifyTemplate", () => {
 		expect(a.serial).toMatch(new RegExp(`^sbx1:${UUID_A}:[A-Za-z0-9_-]{43}$`));
 		expect(f.serial).toMatch(new RegExp(`^sbx1:${UUID_F}:[A-Za-z0-9_-]{43}$`));
 		expect(f.serial.split(":")[2]).not.toBe(a.serial.split(":")[2]);
+	});
+
+	it("desktop fork verification runs only one 4GiB VM at a time", async () => {
+		const { w, deps } = setup();
+		const m = manifest();
+		m.templateSlug = "linux-desktop";
+		await verifyTemplate(deps, m, {});
+		const forkStart = w.log.indexOf("start 502");
+		const stops = w.log
+			.slice(0, forkStart)
+			.filter((line) => line === "stop 501");
+		expect(stops).toHaveLength(2);
 	});
 
 	it("passes the expected values through stdin and scans for secrets on the host only", async () => {

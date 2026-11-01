@@ -1,8 +1,8 @@
 # PoC configuration for the local compose stack, matching the real host `pve`.
 # Read only by `sbx-admin bootstrap` in `migrate` (topology and template
 # builds). api and worker take templates, sizes, quotas and pool targets from
-# Payload (S8, edited in /admin); its migrations seed the same `linux`, `windows`,
-# `2gb`, `4gb` and default quota as below. The templates, sizes, pools and
+# Payload (S8, edited in /admin); its migrations seed the same templates, sizes
+# and default quota as below. The templates, sizes, pools and
 # quotas sections here are not read by api or worker.
 # After editing: docker compose -f deploy/compose/compose.yaml up -d --force-recreate migrate
 templates:
@@ -21,13 +21,31 @@ templates:
     defaultSize: 4gb
     allowedSizes: [4gb]
 
+  # S10: desktop templates. Migration 20261101_010000_desktop_defaults inserts
+  # them, 8gb and 4 vCPU for 4gb (S10 section 15.1) into Payload.
+  - slug: linux-desktop
+    os: linux
+    enabled: true
+    defaultSize: 4gb
+    allowedSizes: [4gb, 8gb]
+    capabilities: [exec, files, ssh, desktop]
+  - slug: windows-desktop
+    os: windows
+    enabled: true
+    defaultSize: 4gb
+    allowedSizes: [4gb, 8gb]
+    capabilities: [exec, files, ssh, desktop]
+
 sizes:
   - slug: 2gb
     vcpu: 2
     memoryMb: 2048
   - slug: 4gb
-    vcpu: 2
+    vcpu: 4
     memoryMb: 4096
+  - slug: 8gb
+    vcpu: 8
+    memoryMb: 8192
 
 # Decision 17: warm pools are off. The worker must not create VMs on pve by
 # itself. Pool targets live in Payload (/admin, collection pool-targets; none
@@ -37,7 +55,7 @@ pools: []
 quotas:
   default:
     maxActiveSandboxes: 3
-    maxRamMb: 6144
+    maxRamMb: 8192
     maxSavedSnapshots: 10
 
 topology:
@@ -137,3 +155,69 @@ topology:
         tpmstate0:
           index: "2"
           version: v2.0
+
+    # S10: windows-desktop (extends windows, slot 595); verify 110 checks, 0 FAIL.
+    - templateSlug: windows-desktop
+      version: "20261101.3"
+      os: windows
+      node: pve
+      storage: local-lvm
+      pveVmid: 595
+      bootTimeoutS: 1200
+      agentVersion: 0.1.0+20261101.fabc0b94
+      hw:
+        machine: pc-q35-11.0+pve2
+        cpu: host
+        bios: ovmf
+        ostype: win11
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        vga: std
+        tablet: "1"
+        localtime: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
+      diskLayout:
+        efidisk0:
+          index: "0"
+          efitype: 4m
+          pre-enrolled-keys: "1"
+          ms-cert: 2023k
+        scsi0:
+          index: "1"
+          size: 96G
+          discard: "on"
+          iothread: "1"
+          ssd: "1"
+        tpmstate0:
+          index: "2"
+          version: v2.0
+
+    # S10: verified Linux desktop build; no warm/hibernated pool.
+    - templateSlug: linux-desktop
+      version: "20261101.2"
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 596
+      bootTimeoutS: 300
+      agentVersion: 0.1.0+20261101.fabc0b94
+      hw:
+        {
+          "machine": "q35",
+          "cpu": "host",
+          "bios": "seabios",
+          "ostype": "l26",
+          "scsihw": "virtio-scsi-single",
+          "agent": "enabled=1",
+          "serial0": "socket",
+          "vga": "std",
+          "tablet": "0",
+          "rng0": "source=/dev/urandom",
+          "cloudinit": false,
+        }
+      diskLayout:
+        {
+          "scsi0":
+            { "size": "64G", "discard": "on", "iothread": "1", "ssd": "1" },
+        }
