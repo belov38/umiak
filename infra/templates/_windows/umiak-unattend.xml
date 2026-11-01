@@ -7,7 +7,7 @@
   SkipMachineOOBE and SkipUserOOBE: without them OOBE stops at "Who's going
   to use this device?". Setup overwrites any computer name set during
   specialize, so ComputerName is a fixed interim name and the agent renames
-  the machine to UMIAK<12 hex> with one reboot after setup (ruling R16).
+  the machine to UMI<12 hex> with one reboot after setup (ruling R16).
   No system locale: it rewrites the code pages; files\firstboot.ps1
   (SetupComplete.cmd of the clone) restores them and the other settings
   sysprep resets.

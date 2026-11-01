@@ -11,11 +11,11 @@ export interface Config {
 	nodeSshHost: string;
 	nodeSshKeyFile: string;
 	nodeSshKnownHosts: string;
-	/** Sandbox VMIDs (pve: 500-589; 590-596 are dev infrastructure). */
+	/** Sandbox VMIDs (pve: 500-589; CT 590 is dev infrastructure). */
 	vmidRange: { min: number; max: number };
 	/**
-	 * Template slots (pve: 597-599). Each recipe picks its own slots in it (Linux 597 and 599,
-	 * Windows 598); 599 stays the PoC template until a Linux build replaces it.
+	 * Recipe slots on the dev stand: Linux 597, Linux desktop 596, Windows desktop 595,
+	 * Windows 598. Bound each build to its exact slot; 599 is a protected legacy reservation.
 	 */
 	templateVmidRange: { min: number; max: number };
 	clusterId: number;

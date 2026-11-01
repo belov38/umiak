@@ -80,7 +80,7 @@ The `umiak` CLI (S7) talks to the api on the Serve name (`umiak login --api-url 
 
 ### How agents get the name and the CA
 
-- **URL:** the smbios `family` field, `umiakt1:wss://tunnel.192-168-68-90.sslip.io/v1/connect` (S5 §14), which wins over `agent.toml`. `deploy.sh` sets `UMIAK_TUNNEL_URL` for the worker, which writes `family` into `smbios1` of every new machine (S5 §17.4 p. 3); `smoke.sh` sets it by hand for its 599 clone.
+- **URL:** the smbios `family` field, `umiakt1:wss://tunnel.192-168-68-90.sslip.io/v1/connect` (S5 §14), which wins over `agent.toml`. `deploy.sh` sets `UMIAK_TUNNEL_URL` for the worker, which writes `family` into `smbios1` of every new machine (S5 §17.4 p. 3); `smoke.sh` sets it by hand for its 597 clone.
 - **CA:** the agent pins `trust/tunnel-ca.pem` from its signed package. S5 template builds for this stack must pack the dev CA: `umiak-release pack --tunnel-ca ~/.config/umiak/dev-ca/ca.pem …` (on the CT, `~/.config/umiak/dev-ca/ca.pem`); `services/guest-agent/test/linux/run.sh` takes `TUNNEL_CA=<pem>` for the same. `[tunnel] trust_dir` in `agent.toml` also works but is not the template path.
 
 ## Deploy
@@ -170,7 +170,7 @@ The tokens come from the realm client `umiak-mcp` (redirect URIs `http://127.0.0
 infra/dev-cp/smoke.sh [--keep]
 ```
 
-Builds the dev-signed agent package (`services/guest-agent/test/linux/run.sh`, `BUILD_ONLY`, `TUNNEL_CA` = the dev CA), registers a machine (bootstrap secret hash in `tunnel.tunnel_credentials`), clones one 2 GB VM from template 599 into the free VMID nearest to 589 with the machine's smbios, and checks from the VM that the CT answers on 443 only (not 22, 2222, 5432, 7000, 8080, 9090, 9190, ping), that the host (LAN and `10.88.0.1`), the router and a LAN guest are closed, and that the internet is open. Then it checks that the tunnel host resolves to the CT through the VM's own DNS (not `/etc/hosts`), installs the agent as the S3 stand does (`stand-setup.sh install`, a package that pins the dev CA) with the tunnel URL in the smbios `family`, checks `umiak-agent doctor` (URL from `smbios`), waits for a `connected` row in `tunnel.tunnel_sessions` and calls `System/Info` through `@umiak/agent-client` in the worker container with the worker's service token. The VM and the database rows are removed at the end. About 4 minutes.
+Builds the dev-signed agent package (`services/guest-agent/test/linux/run.sh`, `BUILD_ONLY`, `TUNNEL_CA` = the dev CA), registers a machine (bootstrap secret hash in `tunnel.tunnel_credentials`), clones one 2 GB VM from template 597 into the free VMID nearest to 589 with the machine's smbios, and checks from the VM that the CT answers on 443 only (not 22, 2222, 5432, 7000, 8080, 9090, 9190, ping), that the host (LAN and `10.88.0.1`), the router and a LAN guest are closed, and that the internet is open. Then it checks that the tunnel host resolves to the CT through the VM's own DNS (not `/etc/hosts`), installs the agent as the S3 stand does (`stand-setup.sh install`, a package that pins the dev CA) with the tunnel URL in the smbios `family`, checks `umiak-agent doctor` (URL from `smbios`), waits for a `connected` row in `tunnel.tunnel_sessions` and calls `System/Info` through `@umiak/agent-client` in the worker container with the worker's service token. The VM and the database rows are removed at the end. About 4 minutes.
 
 ### S10: host access and template slots
 
@@ -188,13 +188,17 @@ ssh -o BatchMode=yes -o HostKeyAlias=pve.tail0000.ts.net root@100.64.10.2 qm lis
 
 Desktop template slots: **596** `linux-desktop`, **595** `windows-desktop` (one slot each,
 like `windows` in 598); sandbox clones use **500–589**.
-CT 590 remains unchanged. Do not modify templates 597/598/599/9000/9001.
-Before starting any VM, inspect `qm list`. Master allocated S9 up to 4 GiB and
-S10 up to 4 GiB concurrently; all running 500–599 VMs together may use at most 8 GiB.
-S10 verification stops the source before booting its fork. Never stop an S9 VM.
+R1 retains CT 590 in place and rebuilds only the four slots: Linux 597, Linux desktop 596,
+Windows desktop 595 and Windows 598, one at a time. Slot 599 is empty and stays reserved;
+never touch 9000/9001 or any VM/LXC below 500. Before starting any VM inspect `qm list`: all
+running 500–599 VMs together may use at most 8 GiB. Stop the source before booting a desktop
+fork. Never stop an unrelated VM to make room.
 
-After building with `--no-verify`, run `mise exec -- node infra/dev-cp/verify-desktop.ts <buildId>`
-and `mise exec -- node infra/dev-cp/spike-desktop.ts <buildId>` with the host environment above.
+After a Linux desktop build with `--no-verify`, run
+`mise exec -- node infra/dev-cp/verify-desktop.ts <buildId>` and
+`mise exec -- node infra/dev-cp/spike-desktop.ts <buildId>` with the host environment above.
+For Windows desktop use the standard `umiak-tpl verify <buildId>`: it selects the Windows
+verifier and QGA/VSS operations; the two desktop helper scripts above are Linux-only.
 Both check `qm list` before every start and remove their disposable clones. The spike
 uses a private debug socket only on its clone; it does not verify public gateway media.
 
@@ -280,13 +284,13 @@ from the guest before media; browser TCP/TLS access is checked separately.
 update on the disposable clone; acceptance runs leave it unset and test the template's
 own agent.
 
-Linux acceptance (2026-11-01, build 20261031.6 in 596, agent 0.1.0+20261031.4865e13):
+Historical S10 Linux acceptance (before R1, 2026-11-01, build 20261031.6 in 596, agent 0.1.0+20261031.4865e13):
 109-check profile, public create 14.4–18.4 s, real MCP tools, WebSocket and relay-only
 UDP/TCP/TLS frame diffs, 30 min viewer hold without API calls. With a 60 s idle timeout
 the sandbox stopped 78.1 s after EndStreams and 98.8 s after a natural page close. Fork
 credentials, resume, old-cookie 401 and deletion passed.
 
-Windows acceptance (2026-11-01, `windows-desktop 20261101.2` in 595): run
+Historical S10 Windows acceptance (before R1, 2026-11-01, `windows-desktop 20261101.2` in 595): run
 `UMIAK_E2E_TEMPLATE=windows-desktop infra/dev-cp/e2e-desktop.sh`. The Windows variant types into
 the Run dialog (opened by a one-shot interactive task, since exec runs in session 0), reads
 agent state through QGA as SYSTEM and retries `503 desktop_starting` with a fresh ticket.

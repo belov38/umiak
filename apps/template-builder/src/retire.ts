@@ -26,7 +26,7 @@ export interface RetireDeps {
 	registry: FileRegistry;
 	cfg: {
 		node: string;
-		/** Template slots umiak-tpl owns (pve: 597-599). */
+		/** Template slot bounds; dev recipes use 595/596/597/598. */
 		templateVmidRange: { min: number; max: number };
 		/** The PoC template (pve: 599). */
 		templateVmid: number;
