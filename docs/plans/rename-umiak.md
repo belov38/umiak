@@ -30,9 +30,9 @@
 - [x] R1.1c: 0500 заменяет notify function bodies; migration runner переносит legacy journal под lock; тесты fresh и upgrade (checksums сохранены).
 - [x] R1.1d: pnpm/uv lock, buf/OpenAPI/SDK regeneration; targeted GREEN, commit/push.
 - [x] R1.2a: compose/CI/recipes/scripts/UI/docs, fixtures/archive, named guards, registry и dry-run.
-- [ ] R1.2b: последовательно build → lint → typecheck → test; Go build/vet/race/lint и Windows builds/vet/lint; DB integration реально включена.
-- [ ] R1.2c: generated drift, compose config, девять images, signed Linux/Windows packages, integration harness и CLI platform compile; local dry-run.
-- [ ] R1.2d: интегрировать main, повторить затронутый gate; inventory allowlist; commit/push. Если локальная работа исчерпана — запросить освобождение стенда.
+- [x] R1.2b: последовательно build → lint → typecheck → test; Go build/vet/race/lint и Windows builds/vet/lint; DB integration реально включена.
+- [x] R1.2c: generated drift, compose config, девять images, signed Linux/Windows packages, integration harness и CLI platform compile; local dry-run.
+- [x] R1.2d: интегрировать main, повторить затронутый gate; inventory allowlist; commit/push. Если локальная работа исчерпана — запросить освобождение стенда.
 - [ ] R1.3: после сигнала master §5 backup/clean old runtime, host identity/network/CT/CA/IdP/DB/Serve, rollback timers, 4 template builds (≥90 min background-task limit, дождаться каждого).
 - [ ] R1.4: verify four templates, 20/20 e2e, два desktop E2E (UDP/TCP/TLS/idle), TURN guard/block/cache probes; уборка и evidence, push.
 - [ ] Финал: master независимая приёмка; R1.5 только master. Никаких оставленных running tasks.
@@ -48,3 +48,7 @@
 - Ruling: node-agent Windows build is not applicable (PVE host binary uses syscall.Flock/O_NOFOLLOW); build/vet/race/lint on native plus Linux build/vet/lint, Windows gates apply to the other four modules. No portability layer added.
 - R1 fixes: length-dependent header filter and base64 redaction, semantic PVE pool guard, CRLF Windows wrappers, sorted fixtures. Agent CLI test sockets exceeded macOS AF_UNIX path length after rename; shortened fixture ShimSockDir, 15 repeated race tests pass. MCP tool list grew 2 chars past its quota; shortened limits description without increasing the budget.
 - Master released stand; after local gate proceed without another approval. Fresh dev Payload quota max RAM = 8192 MB, product default unchanged. R1.5 remains master-owned.
+
+- R1.2 complete on `4f7eac0e`: sequential build/lint/typecheck/test exit 0 (test 278 s); TS 4466 pass / 8 expected skips, Python 81/81. Go root tests 1167 pass / 2 skips (1836 passes including subtests); all applicable Windows builds/vet/lint and Linux build/vet/lint (guest integration tag) pass. Node-agent is Linux host-only.
+- Local evidence: 9 image builds + gateway version, API/core/MCP imports, web syntax, oauth2 version; CLI 5 targets; npm pack + Python wheel import; signed Linux and Windows packages. Generated drift 429 files / 0 changes; buf breaking against namespace-normalized old proto passes (old unnormalized baseline reports 12 deleted namespace files as expected). Shell syntax Linux Bash 36/36 and PowerShell 22/22; native Mac Bash 3.2 cannot parse an unchanged Linux-only case inside process substitution, verified with the actual Linux interpreter instead.
+- Stand stage begins only after the consolidated gate above. Main checked again before R1.3; dashboard branch still pending.
