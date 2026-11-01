@@ -762,8 +762,7 @@ export async function verifyTemplate(
 			// The hard restart above leaves qmeventd holding the VM lock for a while.
 			await retryOnVmLock(() => machines.stop(A.vmid), {
 				sleep,
-				onRetry: (err) =>
-					log(`stop VM ${A.vmid}: ${errorText(err)}; retrying`),
+				onRetry: (err) => log(`stop VM ${A.vmid}: ${errorText(err)}; retrying`),
 			});
 			deps.ramGuard.release(A.vmid);
 			A.reserved = false;
