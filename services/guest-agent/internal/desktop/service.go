@@ -62,6 +62,8 @@ type Options struct {
 	Streamer       Streamer
 	Emit           events.Emitter
 	HandlerOptions []connect.HandlerOption
+	// Now is the clock of viewer activity. Default time.Now.
+	Now func() time.Time
 }
 type identityState struct {
 	Identity    string      `json:"identity"`
@@ -81,6 +83,7 @@ type Service struct {
 	streamGeneration uint64
 	streams          atomic.Uint32
 	input            chan struct{}
+	activity         viewerActivity
 }
 
 // New opens private state, rotating all credentials if the identity changed.
@@ -88,7 +91,11 @@ func New(o Options) (*Service, error) {
 	if o.Streamer == nil {
 		o.Streamer = PendingStreamer{}
 	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
 	s := &Service{opts: o, input: make(chan struct{}, 1)}
+	s.activity.touch(o.Now())
 	if !o.Enabled {
 		return s, nil
 	}
@@ -136,6 +143,7 @@ func New(o Options) (*Service, error) {
 	}
 	return s, nil
 }
+func (s *Service) now() time.Time { return s.opts.Now() }
 func randomSecret() string {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -237,6 +245,7 @@ func (s *Service) Open(ctx context.Context, _ *connect.Request[v1.DesktopOpenReq
 	if _, _, err := s.session(ctx); err != nil {
 		return nil, err
 	}
+	s.activity.touch(s.now())
 	s.mu.Lock()
 	credentials, ice, generation := s.state.Credentials, s.ice, s.streamGeneration
 	s.mu.Unlock()
@@ -253,6 +262,7 @@ func (s *Service) Open(ctx context.Context, _ *connect.Request[v1.DesktopOpenReq
 		return nil, failure(connect.CodeUnavailable, "streamer_failed")
 	}
 	s.running = true
+	s.activity.touch(s.now())
 	return connect.NewResponse(&v1.DesktopOpenResponse{HostId: host, AppId: app}), nil
 }
 
