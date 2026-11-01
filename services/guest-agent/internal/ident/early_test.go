@@ -77,7 +77,7 @@ func TestEarlyRebootsOnNameChange(t *testing.T) {
 	if err := (&File{MachineID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}).Save(l.IdentityFile); err != nil {
 		t.Fatal(err)
 	}
-	r := newWinFake(t, l, "UMIAKEEEEEEEEEEEE")
+	r := newWinFake(t, l, "UMIEEEEEEEEEEEE")
 	if err := Early(context.Background(), l, earlySource("boot-1"), r); err != nil {
 		t.Fatal(err)
 	}

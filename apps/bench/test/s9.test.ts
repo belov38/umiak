@@ -66,7 +66,7 @@ describe("agentReadiness", () => {
 	const id = "0a1b2c3d-1111-2222-3333-444455556666";
 	const info = (o: Record<string, unknown>) => ({
 		machine_id: id,
-		hostname: "UMIAK444455556666",
+		hostname: "UMI444455556666",
 		readiness: [
 			{ name: "identity", state: "ready" },
 			{ name: "claim", state: "pending" },
@@ -99,10 +99,11 @@ describe("agentReadiness", () => {
 
 	it("waits for the new computer name of a fork", () => {
 		const want = { machineId: id, hostname: computerNameFor(id) };
-		expect(want.hostname).toBe("UMIAK444455556666");
+		expect(want.hostname).toBe("UMI444455556666");
+		expect(want.hostname).toHaveLength(15);
 		expect(agentReadiness(info({}), want).ready).toBe(true);
 		expect(
-			agentReadiness(info({ hostname: "UMIAKAAAAAAAAAAAA" }), want).ready,
+			agentReadiness(info({ hostname: "UMIAAAAAAAAAAAA" }), want).ready,
 		).toBe(false);
 	});
 });
@@ -180,9 +181,7 @@ function fakeDeps(opts: { failFork?: boolean } = {}) {
 				// A fork reports the old name on its first answer, the new one after the rename.
 				const forkVm = vmid === 501;
 				const hostname =
-					forkVm && !renamed
-						? "UMIAKOLD"
-						: `UMIAK${id.slice(-12).toUpperCase()}`;
+					forkVm && !renamed ? "UMIAKOLD" : `UMI${id.slice(-12).toUpperCase()}`;
 				if (forkVm) renamed = true;
 				return {
 					exitCode: 0,

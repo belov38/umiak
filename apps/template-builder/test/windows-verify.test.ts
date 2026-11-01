@@ -62,7 +62,7 @@ describe("parseWindowsOutput", () => {
 			"CHECK trim INFO warning: not supported",
 			'TOOLS {"node":{"direct":"v26.13.0","login":"v26.13.0"}}',
 			'LICENSE {"status":"Licensed","channel":"RETAIL"}',
-			'FACTS {"computerName":"UMIAK0123456789AB"}',
+			'FACTS {"computerName":"UMI0123456789AB"}',
 			"",
 		].join("\r\n");
 		const r = parseWindowsOutput(out);
@@ -83,7 +83,7 @@ describe("parseWindowsOutput", () => {
 			node: { direct: "v26.13.0", login: "v26.13.0" },
 		});
 		expect(r.license).toEqual({ status: "Licensed", channel: "RETAIL" });
-		expect(r.facts).toEqual({ computerName: "UMIAK0123456789AB" });
+		expect(r.facts).toEqual({ computerName: "UMI0123456789AB" });
 	});
 
 	it("a broken LICENSE or FACTS line becomes a FAIL check", () => {
@@ -185,9 +185,10 @@ const probe = (over: Partial<ForkProbe> = {}): ForkProbe => ({
 const EXPECT_FORK = { marker: "marker-1", dpapi: "dpapi-1" };
 
 describe("checkWindowsFork", () => {
-	it("computer names are UMIAK + the last 12 hex digits upper-case", () => {
-		expect(computerNameFor(UUID_A)).toBe("UMIAK0123456789AB");
-		expect(computerNameFor(UUID_B)).toBe("UMIAKFEDCBA987654");
+	it("computer names are UMI + the last 12 hex digits upper-case", () => {
+		expect(computerNameFor(UUID_A)).toBe("UMI0123456789AB");
+		expect(computerNameFor(UUID_A)).toHaveLength(15);
+		expect(computerNameFor(UUID_B)).toBe("UMIFEDCBA987654");
 	});
 
 	it("passes a fork with a new identity that kept the data and the password", () => {

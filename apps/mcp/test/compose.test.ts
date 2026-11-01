@@ -111,6 +111,8 @@ describe("product compose: service mcp", () => {
 
 describe("dev-cp", () => {
 	const required = {
+		UMIAK_DEVCP_DB_PASSWORD: "test-db-password",
+		UMIAK_DEVCP_USER_PASSWORD: "test-user-password",
 		UMIAK_DEVCP_TURN_IP: "192.0.2.90",
 		UMIAK_DEVCP_TURN_HOST: "turn.test",
 		UMIAK_DEVCP_TURN_URLS: "turn:turn.test:3478?transport=udp",
@@ -130,6 +132,30 @@ describe("dev-cp", () => {
 			"https://ts.test:10000/realms/umiak/protocol/openid-connect/logout",
 	};
 	const files = [COMPOSE, join(DEVCP, "compose.dev-cp.yaml")];
+
+	withDocker("rotates the stand password for every database consumer", () => {
+		const services = resolve(files, {
+			...required,
+			UMIAK_MCP_PUBLIC_URL: "https://ts.test:8443/mcp",
+		});
+		for (const name of [
+			"migrate",
+			"web-migrate",
+			"worker",
+			"api",
+			"web",
+			"gateway",
+		])
+			expect(services[name]?.environment?.DATABASE_URL, name).toBe(
+				"postgres://umiak:test-db-password@postgres:5432/umiak",
+			);
+		for (const [name, key] of [
+			["postgres", "POSTGRES_PASSWORD"],
+			["keycloak-db", "PGPASSWORD"],
+			["keycloak", "KC_DB_PASSWORD"],
+		] as const)
+			expect(services[name]?.environment?.[key], name).toBe("test-db-password");
+	});
 
 	withDocker("takes the public MCP URL from .env", () => {
 		const env =

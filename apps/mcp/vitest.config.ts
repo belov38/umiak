@@ -57,6 +57,9 @@ export default defineConfig({
 		},
 	},
 	test: {
+		// Native socket deadlines/drain probes must not compete with compiler subprocesses
+		// from other files in this package on the same host.
+		fileParallelism: false,
 		include: ["test/**/*.test.ts"],
 		globalSetup: ["@umiak/db/testing/global-setup"],
 		// A hang guard only: tests wait on conditions and spawn processes, which

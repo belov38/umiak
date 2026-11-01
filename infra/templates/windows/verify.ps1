@@ -258,7 +258,7 @@ function Test-Os {
     Report os $ok "EditionID $ed (want $EditionId), build $b.$($cv.UBR) (want $Build), $($cv.ProductName) $($cv.DisplayVersion)"
 }
 
-# [2] Name UMIAK<12 hex> and MachineGuid of the test machine id.
+# [2] Name UMI<12 hex> and MachineGuid of the test machine id.
 function Test-Identity {
     $hex = ($MachineId -replace '-', '').ToUpperInvariant()
     if ($hex -notmatch '^[0-9A-F]{32}$') {
@@ -266,7 +266,7 @@ function Test-Identity {
         Report machine_guid $false "invalid -MachineId '$MachineId'"
         return
     }
-    $want = 'UMIAK' + $hex.Substring(20)
+    $want = 'UMI' + $hex.Substring(20)
     $active = [string](Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' 'ComputerName')
     $dns = [string](Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' 'Hostname')
     Report computer_name ($active -ceq $want -and $dns -eq $want) "active $active, hostname $dns, want $want"

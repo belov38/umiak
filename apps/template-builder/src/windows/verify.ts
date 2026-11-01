@@ -218,9 +218,9 @@ function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-/** Computer name of a machine (spec 11.2 p.4): UMIAK + the last 12 hex digits of its id. */
+/** Computer name of a machine (spec 11.2 p.4): UMI + the last 12 hex digits of its id. */
 export function computerNameFor(machineId: string): string {
-	return `UMIAK${uuidHex(machineId).slice(-12).toUpperCase()}`;
+	return `UMI${uuidHex(machineId).slice(-12).toUpperCase()}`;
 }
 
 /** Field of a protojson object under its proto name or its JSON (lowerCamel) name. */

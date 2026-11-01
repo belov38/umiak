@@ -161,9 +161,9 @@ export function s9Markdown(
 
 const uuidHex = (s: string) => s.replaceAll("-", "").toLowerCase();
 
-/** Computer name of a machine (spec S9 11.2): UMIAK + the last 12 hex digits of its id, upper case. */
+/** Computer name of a machine (spec S9 11.2): UMI + the last 12 hex digits of its id, upper case. */
 export function computerNameFor(machineId: string): string {
-	return `UMIAK${uuidHex(machineId).slice(-12).toUpperCase()}`;
+	return `UMI${uuidHex(machineId).slice(-12).toUpperCase()}`;
 }
 
 /** Field of a protojson object under its proto name or its lowerCamel JSON name. */
