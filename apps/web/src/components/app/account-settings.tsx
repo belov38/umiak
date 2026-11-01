@@ -1,9 +1,9 @@
 "use client";
+import { UmiakError } from "@umiak/sdk";
 // /app/account (S8 §9.9): profile (read-only, from the IdP), default team
 // (server action), SSH keys (GET/POST/DELETE /v1/ssh-keys through the SDK)
 // and sign-out.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { UmiakError } from "@umiak/sdk";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -36,13 +36,15 @@ function Section({
 	title,
 	description,
 	children,
+	plain = false,
 }: {
+	plain?: boolean;
 	title: string;
 	description?: ReactNode;
 	children: ReactNode;
 }) {
 	return (
-		<section className="space-y-3">
+		<section className={plain ? "space-y-3" : "dashboard-card space-y-3"}>
 			<div>
 				<h2 className="text-base font-semibold">{title}</h2>
 				{description && (
@@ -55,26 +57,26 @@ function Section({
 }
 
 export function AccountSettings({ signOutHref }: { signOutHref: string }) {
+	const session = useAppSession();
 	return (
 		<div className="max-w-4xl space-y-8">
 			<h1 className="text-xl font-semibold">Account</h1>
-			<Profile />
-			<DefaultTeam />
+			<section className="dashboard-card space-y-5">
+				<div className="flex items-center justify-between gap-3">
+					<h2>Account · {session.user.name}</h2>
+					<Button asChild variant="ghost">
+						<a
+							href={signOutHref}
+							title="Ends the single sign-on session too; the CLI will ask for umiak login again."
+						>
+							Sign out
+						</a>
+					</Button>
+				</div>
+				<Profile />
+				<DefaultTeam />
+			</section>
 			<SshKeys />
-			<Section
-				title="Sign out"
-				description={
-					<>
-						Ends the single sign-on session too: the CLI will ask for{" "}
-						<code>umiak login</code> again.
-					</>
-				}
-			>
-				<Button asChild variant="outline">
-					{/* oauth2-proxy route: a full page load. */}
-					<a href={signOutHref}>Sign out</a>
-				</Button>
-			</Section>
 		</div>
 	);
 }
@@ -83,10 +85,11 @@ function Profile() {
 	const s = useAppSession();
 	return (
 		<Section
+			plain
 			title="Profile"
 			description="From your identity provider; change it there."
 		>
-			<dl className="grid max-w-xl grid-cols-[8rem_1fr] gap-y-1 text-sm">
+			<dl className="grid max-w-xl grid-cols-[8rem_minmax(0,1fr)] gap-y-1 text-sm">
 				<dt className="text-muted-foreground">Name</dt>
 				<dd>{s.user.name}</dd>
 				<dt className="text-muted-foreground">Email</dt>
@@ -115,6 +118,7 @@ function DefaultTeam() {
 	if (s.teams.length === 0) return null;
 	return (
 		<Section
+			plain
 			title="Default team"
 			description={
 				<>
@@ -138,7 +142,7 @@ function DefaultTeam() {
 					})
 				}
 			>
-				<SelectTrigger className="w-72" aria-label="Default team">
+				<SelectTrigger className="w-full max-w-72" aria-label="Default team">
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>

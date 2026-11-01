@@ -63,7 +63,8 @@ export function TeamSettings({ data }: { data: TeamSettingsData }) {
 	const session = useAppSession();
 	const perm = { role: data.myRole, personal: data.team.personal };
 	return (
-		<div className="space-y-8">
+		<div className="space-y-6">
+			<h1>Team settings</h1>
 			<TeamNotices
 				teamId={data.team.id}
 				notices={data.notices}
@@ -93,7 +94,7 @@ function Section({
 	children: ReactNode;
 }) {
 	return (
-		<section className="space-y-3">
+		<section className="dashboard-card space-y-3">
 			<div>
 				<h2 className="text-base font-semibold">{title}</h2>
 				{description && (
@@ -125,9 +126,9 @@ function NameSection({
 		});
 	};
 	return (
-		<div className="space-y-1">
+		<div className="dashboard-card space-y-3">
 			<div className="flex items-center gap-2">
-				<h1 className="text-xl font-semibold">Team settings</h1>
+				<h2>Team name</h2>
 				{data.team.personal && <Badge variant="secondary">personal</Badge>}
 			</div>
 			{canRename ? (

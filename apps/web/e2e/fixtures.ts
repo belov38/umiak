@@ -262,6 +262,13 @@ export const test = base.extend<Fixtures>({
 			sessions.push(s);
 			return s;
 		});
+		// Unload the apps before draining: a late Next prefetch could otherwise
+		// start between an empty drain and context.close(), disposing its body.
+		await Promise.all(
+			sessions
+				.flatMap((s) => s.context.pages())
+				.map((p) => p.goto("about:blank")),
+		);
 		// Every body is read before the contexts close (closing drops them).
 		expect(await audit.drain(), "responses still in flight").toEqual([]);
 		for (const s of sessions) await s.context.close();
@@ -321,14 +328,13 @@ export async function openTab(page: Page, name: string) {
 }
 
 /** Text of the n-th xterm on the page (DOM renderer rows). */
-export function xtermText(page: Page, n = 0): Promise<string> {
-	return (
-		page
-			.getByTestId("xterm")
-			.nth(n)
-			// biome-ignore lint/performance/useDomNodeTextContent: rows as rendered lines
-			.evaluate((el) => (el as HTMLElement).innerText)
-	);
+export async function xtermText(page: Page, n = 0): Promise<string> {
+	const view = page.getByTestId("xterm").nth(n);
+	// xterm skips DOM painting outside the viewport. Reload resets scroll;
+	// observe the terminal as a person would, without changing its buffer.
+	await view.scrollIntoViewIfNeeded();
+	// biome-ignore lint/performance/useDomNodeTextContent: rows as rendered lines
+	return view.evaluate((el) => (el as HTMLElement).innerText);
 }
 
 /**

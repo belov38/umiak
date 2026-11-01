@@ -31,7 +31,7 @@ export function BlockLock({ sandbox }: { sandbox: SandboxData }) {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
-					className="inline-flex items-center text-amber-700"
+					className="inline-flex items-center text-warning"
 					data-testid="sandbox-blocked"
 				>
 					<LockIcon className="size-3.5" />
@@ -83,8 +83,18 @@ export function StateCell({ sandbox }: { sandbox: SandboxData }) {
 	return (
 		<span
 			data-testid="sandbox-state"
-			className={cn(sandbox.state === "ready" && "text-emerald-700")}
+			className={cn(
+				"inline-flex items-center gap-2",
+				sandbox.state === "ready" && "text-[var(--success)]",
+			)}
 		>
+			<span
+				aria-hidden="true"
+				className={cn(
+					"size-1.5 rounded-full",
+					sandbox.state === "ready" ? "bg-[var(--success)]" : "bg-[#c4c4c4]",
+				)}
+			/>
 			{sandbox.state}
 		</span>
 	);
@@ -98,7 +108,7 @@ export function HealthCell({ sandbox }: { sandbox: SandboxData }) {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span>
-					<Badge className="bg-amber-100 text-amber-900">degraded</Badge>
+					<Badge className="bg-warning-tint text-warning">degraded</Badge>
 				</span>
 			</TooltipTrigger>
 			<TooltipContent className="max-w-72">

@@ -52,11 +52,11 @@ export function KvRows({
 				return (
 					// biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity
 					<div key={i} className="space-y-0.5">
-						<div className="flex items-center gap-1.5">
+						<div className="kv-row flex min-w-0 items-center gap-1.5">
 							<Input
 								aria-label={`${label} ${i + 1} name`}
 								placeholder={keyPlaceholder}
-								className="w-48 font-mono"
+								className="w-0 flex-[2] font-mono"
 								autoComplete="off"
 								spellCheck={false}
 								aria-invalid={err !== undefined}
@@ -66,7 +66,7 @@ export function KvRows({
 							<Input
 								aria-label={`${label} ${i + 1} value`}
 								placeholder={secret ? "•••" : valuePlaceholder}
-								className="w-72 font-mono"
+								className="w-0 flex-[3] font-mono"
 								type={secret && !visible ? "password" : "text"}
 								autoComplete={secret ? "new-password" : "off"}
 								spellCheck={false}

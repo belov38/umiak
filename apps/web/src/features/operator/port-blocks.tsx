@@ -70,7 +70,7 @@ export function PortBlocks({ sandbox }: { sandbox: SandboxData }) {
 							</span>
 							<span className="text-xs text-muted-foreground">{p.access}</span>
 							{p.blocked && (
-								<span className="inline-flex items-center gap-1 text-xs text-amber-700">
+								<span className="inline-flex items-center gap-1 text-xs text-warning">
 									<LockIcon className="size-3.5" />
 									blocked{p.blockReason ? ` (${p.blockReason})` : ""}
 								</span>

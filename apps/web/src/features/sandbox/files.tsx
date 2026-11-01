@@ -361,7 +361,7 @@ export function FilesTab({
 									}}
 								>
 									{f.type === "dir" ? (
-										<FolderIcon className="size-4 text-sky-700" />
+										<FolderIcon className="size-4 text-primary" />
 									) : f.type === "symlink" ? (
 										<LinkIcon className="size-4 text-muted-foreground" />
 									) : (
@@ -522,7 +522,7 @@ function Uploads({
 								className={cn(
 									"flex-1 text-xs",
 									u.state === "done"
-										? "text-emerald-700"
+										? "text-success"
 										: u.state === "failed"
 											? "text-destructive"
 											: "text-muted-foreground",

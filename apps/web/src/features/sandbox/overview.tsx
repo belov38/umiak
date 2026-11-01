@@ -43,10 +43,10 @@ export function OverviewTab({
 	});
 	const now = Date.now();
 	return (
-		<div className="grid gap-6 lg:grid-cols-2">
+		<div className="sandbox-overview">
 			<section className="space-y-2">
 				<h2 className="font-medium">Properties</h2>
-				<dl className="grid grid-cols-[9rem_1fr] gap-y-1 text-sm">
+				<dl className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-y-1 text-sm">
 					<dt className="text-muted-foreground">ID</dt>
 					<dd className="font-mono text-xs">{s.id}</dd>
 					<dt className="text-muted-foreground">Created</dt>
@@ -152,7 +152,7 @@ export function OverviewTab({
 									{p.access}
 								</span>
 								{p.blocked && (
-									<span className="text-xs text-amber-700">blocked</span>
+									<span className="text-xs text-warning">blocked</span>
 								)}
 							</li>
 						))}

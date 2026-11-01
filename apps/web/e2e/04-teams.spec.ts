@@ -47,7 +47,10 @@ test("owner invites, member sees the sandbox but cannot manage; cross-team and C
 		"member",
 	]);
 	await expect(
-		alice.page.getByText(state.users.bob.email).first(),
+		alice.page
+			.getByRole("main")
+			.getByText(state.users.bob.email, { exact: true })
+			.first(),
 	).toBeVisible();
 	// Positive control of the response audit: the server action's answer and
 	// the RSC payloads are read (here: the members list with bob).
@@ -65,12 +68,17 @@ test("owner invites, member sees the sandbox but cannot manage; cross-team and C
 	await bob.page.getByRole("button", { name: /^Team:/ }).click();
 	await bob.page.getByRole("menuitem", { name }).click();
 	await bob.page.waitForURL(new RegExp(`/app/t/${shared}`));
-	await expect(bob.page.getByRole("link", { name: slug })).toBeVisible();
+	await expect(
+		bob.page.getByRole("link", { name: slug, exact: true }),
+	).toBeVisible();
 
 	// A member: no management buttons.
 	await bob.page.goto(`/app/t/${shared}/settings`);
 	await expect(
-		bob.page.getByText(state.users.alice.email).first(),
+		bob.page
+			.getByRole("main")
+			.getByText(state.users.alice.email, { exact: true })
+			.first(),
 	).toBeVisible();
 	await expect(
 		bob.page.getByRole("textbox", { name: "Email to invite" }),
@@ -81,9 +89,9 @@ test("owner invites, member sees the sandbox but cannot manage; cross-team and C
 	);
 	await bob.page.goto(`/app/t/${shared}/keys`);
 	await expect(bob.page.getByRole("heading", { level: 1 })).toBeVisible();
-	await expect(bob.page.getByRole("button", { name: "New key" })).toHaveCount(
-		0,
-	);
+	await expect(
+		bob.page.getByRole("form", { name: "New team API key" }),
+	).toHaveCount(0);
 
 	// ...and the server action itself refuses him.
 	const asMember = await callAction(bob.request, invite, [
@@ -108,7 +116,10 @@ test("owner invites, member sees the sandbox but cannot manage; cross-team and C
 	// Nothing changed in alice's personal team.
 	await alice.page.goto(`/app/t/${alicePersonal}/settings`);
 	await expect(
-		alice.page.getByText(state.users.alice.email).first(),
+		alice.page
+			.getByRole("main")
+			.getByText(state.users.alice.email, { exact: true })
+			.first(),
 	).toBeVisible();
 	await expect(alice.page.getByText(state.users.bob.email)).toHaveCount(0);
 

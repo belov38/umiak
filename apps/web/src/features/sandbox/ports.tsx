@@ -138,7 +138,7 @@ export function PortsTab({
 							<span className="w-14 font-mono font-medium">{p.port}</span>
 							{p.blocked && (
 								<span
-									className="flex items-center gap-1 text-amber-700"
+									className="flex items-center gap-1 text-warning"
 									title={blockText(p)}
 								>
 									<LockIcon className="size-3.5" />

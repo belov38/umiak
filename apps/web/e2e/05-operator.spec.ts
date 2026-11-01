@@ -49,8 +49,7 @@ test("non-operators get 403 on the operator screens and allTeams", async ({
 	// The operator's own team key: no operator rights on the public API.
 	const opTeam = await personalTeam(op);
 	await op.page.goto(`/app/t/${opTeam}/keys`);
-	await op.page.getByRole("button", { name: "New key" }).click();
-	const dialog = op.page.getByRole("dialog", { name: "New team API key" });
+	const dialog = op.page.getByRole("form", { name: "New team API key" });
 	await dialog
 		.getByRole("textbox", { name: "Key name" })
 		.fill(`op-${state.run}`);
