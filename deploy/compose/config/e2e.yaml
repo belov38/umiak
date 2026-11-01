@@ -1,0 +1,49 @@
+# Isolated dashboard E2E topology. The backend implements PVE/agent ports in process;
+# these builds are fixtures, never registrations of real dev-stand templates.
+# Keep this independent of the operator's current rebuild/cutover state.
+topology:
+  providers:
+    - name: pve
+      clusterMacId: 1
+      vmidMin: 500
+      vmidMax: 589
+      apiUrl: https://fake.invalid:8006
+      tlsName: pve
+      secretRef: pve
+      nodes:
+        - name: pve
+          ramCapMb: 8192
+          cloneConcurrency: 4
+          nodeAgentRef: pve
+          storages:
+            - name: local-lvm
+              driver: lvmthin
+  templateBuilds:
+    - templateSlug: linux
+      version: e2e-1
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 597
+      bootTimeoutS: 300
+    - templateSlug: windows
+      version: e2e-1
+      os: windows
+      node: pve
+      storage: local-lvm
+      pveVmid: 598
+      bootTimeoutS: 300
+    - templateSlug: linux-desktop
+      version: e2e-1
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 596
+      bootTimeoutS: 300
+    - templateSlug: windows-desktop
+      version: e2e-1
+      os: windows
+      node: pve
+      storage: local-lvm
+      pveVmid: 595
+      bootTimeoutS: 300
