@@ -53,7 +53,7 @@ export async function verifyLiveDesktopMcp(
 		const proofText = "MCP Привет 世界";
 		if (windows) {
 			// The Run dialog of the console session executes the typed pwsh line.
-			await call("computer_key", { keys: "win+r", screenshot_after: false });
+			await call("computer_key", { keys: "meta+r", screenshot_after: false });
 			await new Promise((done) => setTimeout(done, 1500));
 		}
 		await call("computer_type", {

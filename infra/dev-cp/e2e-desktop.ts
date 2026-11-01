@@ -80,14 +80,20 @@ function check(value: unknown, label: string) {
 try {
 	await budget();
 	const start = performance.now();
-	const sb = await client.sandboxes.create({
-		template,
-		size: "4gb",
-		labels: { e2e: "desktop" },
-		idleTimeoutSeconds: process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE ? 300 : 60,
-		ttlSeconds: 3600,
-	});
-	created.push(sb);
+	// SBX_E2E_SANDBOX reuses an existing sandbox (diagnostics); it is never deleted here.
+	const reuse = process.env.SBX_E2E_SANDBOX;
+	const sb = reuse
+		? await client.sandboxes.get(reuse)
+		: await client.sandboxes.create({
+				template,
+				size: "4gb",
+				labels: { e2e: "desktop" },
+				idleTimeoutSeconds: process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE
+					? 300
+					: 60,
+				ttlSeconds: 3600,
+			});
+	if (!reuse) created.push(sb);
 	await sb.waitUntilReady({ timeoutMs: windows ? 600_000 : 300_000 });
 	const createMs = Math.round(performance.now() - start);
 	if (process.env.SBX_DESKTOP_TEST_AGENT_PACKAGE) {
@@ -132,10 +138,7 @@ try {
 	const egress = await sb.exec(
 		windows
 			? pwsh(
-					"$h=$args[0];$p=[int]$args[1];$tid=[byte[]]::new(12);[Security.Cryptography.RandomNumberGenerator]::Fill($tid);$m=[byte[]](0,1,0,0,0x21,0x12,0xa4,0x42)+$tid;$u=[Net.Sockets.UdpClient]::new();$u.Client.ReceiveTimeout=3000;[void]$u.Send($m,$m.Length,$h,$p);$ep=[Net.IPEndPoint]::new([Net.IPAddress]::Any,0);$d=$u.Receive([ref]$ep);if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$d[8..19],$tid)){exit 2};foreach($q in @($p,[int]$args[2])){$t=[Net.Sockets.TcpClient]::new();if($t.ConnectAsync($h,$q).Wait(2000)){exit 3};$t.Dispose()}",
-					turnHost,
-					process.env.SBX_DESKTOP_TURN_PORT ?? "",
-					process.env.SBX_DESKTOP_TURN_TLS_PORT ?? "",
+					`$h='${turnHost}';$p=[int]'${process.env.SBX_DESKTOP_TURN_PORT ?? ""}';$tls=[int]'${process.env.SBX_DESKTOP_TURN_TLS_PORT ?? ""}';$tid=[byte[]]::new(12);[Security.Cryptography.RandomNumberGenerator]::Fill($tid);$m=[byte[]](0,1,0,0,0x21,0x12,0xa4,0x42)+$tid;$u=[Net.Sockets.UdpClient]::new();$u.Client.ReceiveTimeout=3000;[void]$u.Send($m,$m.Length,$h,$p);$ep=[Net.IPEndPoint]::new([Net.IPAddress]::Any,0);$d=$u.Receive([ref]$ep);if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$d[8..19],$tid)){exit 2};foreach($q in @($p,$tls)){$t=[Net.Sockets.TcpClient]::new();try{if($t.ConnectAsync($h,$q).Wait(2000)){exit 3}}catch{};$t.Dispose()}`,
 				)
 			: [
 					"python3",
@@ -147,6 +150,8 @@ try {
 					process.env.SBX_DESKTOP_TURN_TLS_PORT ?? "",
 				],
 	);
+	if (egress.exitCode !== 0)
+		console.log(`egress exit ${egress.exitCode}: ${egress.stderr.slice(-400)}`);
 	check(egress.exitCode === 0, "VM TURN egress UDP only; TCP/TLS blocked");
 
 	check(sb.data.endpoints.desktop, "desktop capability");
@@ -164,7 +169,7 @@ try {
 		await sb.desktop.act({
 			actions: [
 				{ type: "click", x: 960, y: 540 },
-				{ type: "key", keys: ["win", "r"] },
+				{ type: "key", keys: ["meta", "r"] },
 				{ type: "wait", ms: 1500 },
 				{
 					type: "type",
@@ -255,8 +260,11 @@ try {
 		);
 		url = next.href;
 	}
+	const page = (await response?.text()) ?? "";
+	if (response?.status !== 200)
+		console.log(`stream page HTTP ${response?.status}: ${page.slice(0, 300)}`);
 	check(
-		response?.status === 200 && (await response.text()).includes("<html"),
+		response?.status === 200 && page.includes("<html"),
 		"gateway stream page",
 	);
 	try {

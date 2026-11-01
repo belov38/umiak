@@ -30,14 +30,28 @@ func secureSocket(ctx context.Context, path string) error {
 // PlatformEnvironment leaves Windows display selection to the interactive helper.
 func PlatformEnvironment() map[string]string { return nil }
 func windowsACL(ctx context.Context, path, account string) error {
-	rights := "F"
-	if info, err := os.Stat(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		return err
-	} else if info.IsDir() {
-		rights = "(OI)(CI)F"
 	}
-	_, e := ExecCommand(ctx, "icacls.exe", path, "/inheritance:r", "/grant:r", "*S-1-5-18:"+rights, account+":"+rights, "/T", "/Q")
-	return e
+	for _, args := range aclCommands(path, account, info.IsDir(), childNames(path, info.IsDir())) {
+		if _, e := ExecCommand(ctx, "icacls.exe", args...); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+func childNames(dir string, isDir bool) []string {
+	if !isDir {
+		return nil
+	}
+	entries, _ := os.ReadDir(dir)
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
 }
 
 type scmService struct{ service *mgr.Service }

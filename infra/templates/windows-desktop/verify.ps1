@@ -42,10 +42,8 @@ function Test-Desktop {
         $ev = "bind $($cfg.web_server.bind_address), ice_servers $(@($cfg.webrtc.ice_servers).Count), script $($cfg.webrtc.ice_server_script)"
     }
     Report desktop_moonlight_config $ok $ev
-    foreach ($f in @('ice-servers.cmd', 'register-session.ps1', 'run-cua.ps1')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $DesktopRoot $f))) { $ok = $false; $ev = "$f missing" }
-    }
-    Report desktop_files $ok $ev
+    $missing = @('ice-servers.cmd', 'register-session.ps1', 'run-cua.ps1' | Where-Object { -not (Test-Path -LiteralPath (Join-Path $DesktopRoot $_)) })
+    Report desktop_files ($missing.Count -eq 0) "missing: $(if ($missing.Count) { $missing -join ', ' } else { 'none' })"
 
     # agent.toml: desktop enabled, desktop readiness, streamer ports never published.
     $toml = Get-Content -Raw -LiteralPath (Join-Path $env:ProgramData 'sbx-agent\agent.toml')
@@ -57,6 +55,11 @@ function Test-Desktop {
     # Nothing listens on the streamer ports until Desktop/Open, and never off loopback.
     $listen = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in $StreamerPorts })
     Report desktop_streamer_stopped ($listen.Count -eq 0) $(if ($listen.Count) { ($listen | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort)" }) -join ', ' } else { 'no listener' })
+
+    # The template's OVMF PlatformConfig gives the Basic Display Adapter 1920x1080.
+    $vc = @(Get-CimInstance -ClassName Win32_VideoController)
+    $ok = $vc.Count -ge 1 -and $vc[0].CurrentHorizontalResolution -eq 1920 -and $vc[0].CurrentVerticalResolution -eq 1080
+    Report desktop_display $ok (($vc | ForEach-Object { "$($_.Name) $($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution)" }) -join '; ')
 
     # Edge first-run and sign-in prompts are off (spec S10 section 7).
     $edge = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -ErrorAction SilentlyContinue
