@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 // Real acceptance runner. Uses the existing CLI profile; never logs ticket URLs or secrets.
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -15,51 +14,11 @@ import {
 	waitDesktopIdleStop,
 } from "./desktop-observe.ts";
 import { installTestAgent } from "./guest-package.ts";
+import { guestRoot, pwsh } from "./guest-root.ts";
 
 const client = new Sbx();
 const template = process.env.SBX_E2E_TEMPLATE ?? "linux-desktop";
 const windows = template.startsWith("windows");
-/** One argument for the remote shell of ssh. */
-const shq = (a: string) => `'${a.replaceAll("'", "'\\''")}'`;
-/** Runs argv as SYSTEM (Windows) or root (Linux) through QGA on the pve host. */
-function guestRoot(
-	sb: Sandbox,
-	argv: string[],
-): { exitcode: number; out: string } {
-	const id = Number(observeDesktop(sb.data.slug).runtime_id);
-	if (!(id >= 500 && id <= 589)) throw new Error(`unexpected VMID ${id}`);
-	const raw = execFileSync(
-		"ssh",
-		[
-			"-o",
-			"BatchMode=yes",
-			"-o",
-			"HostKeyAlias=pve.tail0000.ts.net",
-			"root@100.64.10.2",
-			"qm",
-			"guest",
-			"exec",
-			String(id),
-			"--timeout",
-			"30",
-			"--",
-			...argv.map(shq),
-		],
-		{ encoding: "utf8", timeout: 60_000 },
-	);
-	const r = JSON.parse(raw) as { exitcode?: number; "out-data"?: string };
-	return { exitcode: r.exitcode ?? -1, out: r["out-data"] ?? "" };
-}
-const PWSH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
-const pwsh = (script: string, ...args: string[]) => [
-	PWSH,
-	"-NoLogo",
-	"-NoProfile",
-	"-NonInteractive",
-	"-Command",
-	script,
-	...args,
-];
 const created: Sandbox[] = [];
 const removed = new Set<string>();
 const budget = () =>
@@ -304,38 +263,42 @@ try {
 					);
 			},
 			Number(process.env.SBX_DESKTOP_IDLE_HOLD_MS ?? 0) > 0,
+			async (label) => {
+				// Read while the failed stream is still up: EndStreams restarts moonlight-web.
+				const logs = windows
+					? {
+							"web-server.log": pwsh(
+								"Get-Content -Tail 400 'C:\\ProgramData\\sbx-agent\\state\\desktop-moonlight\\web-server.log'",
+							),
+							"sunshine.log": pwsh(
+								"Get-Content -Tail 400 'C:\\Program Files\\Sunshine\\config\\sunshine.log'",
+							),
+						}
+					: {
+							"web-server.log": [
+								"journalctl",
+								"-u",
+								"sbx-moonlight-web",
+								"--no-pager",
+								"-n",
+								"400",
+							],
+							"sunshine.log": [
+								"tail",
+								"-n",
+								"400",
+								"/home/user/.local/state/sbx-sunshine/sunshine.log",
+							],
+						};
+				for (const [name, argv] of Object.entries(logs))
+					await writeFile(
+						join(output, `${label}-${name}`),
+						guestRoot(sb, argv).out,
+						{ mode: 0o600 },
+					);
+			},
 		);
 	} catch (error) {
-		const diagnostic = await sb.exec(
-			windows
-				? pwsh(
-						"Get-Content -Tail 80 'C:\\Program Files\\Sunshine\\config\\sunshine.log'",
-					)
-				: [
-						"sudo",
-						"journalctl",
-						"-u",
-						"sbx-moonlight-web",
-						"--no-pager",
-						"-n",
-						"60",
-					],
-		);
-		await writeFile(join(output, "moonlight.log"), diagnostic.stdout, {
-			mode: 0o600,
-		});
-		if (windows) {
-			// The moonlight-web log is in the SYSTEM-only agent state.
-			const web = guestRoot(
-				sb,
-				pwsh(
-					"Get-Content -Tail 200 'C:\\ProgramData\\sbx-agent\\state\\desktop-moonlight\\web-server.log'",
-				),
-			);
-			await writeFile(join(output, "web-server.log"), web.out, {
-				mode: 0o600,
-			});
-		}
 		console.log("media diagnostics", output);
 		throw error;
 	}
