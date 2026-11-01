@@ -146,7 +146,10 @@ export function stopSteps(ctx: WorkerCtx, fenced: Fenced, prefix = ""): Step[] {
 					SHUTDOWN_TIMEOUT_S[os];
 				await fenced.check();
 				const res = await ownedPowerOp(ctx, m.id, vmid, "shutdown", () =>
-					infra.shutdown(vmid, timeoutS, { expectedOwner: m.id }),
+					infra.shutdown(vmid, timeoutS, {
+						expectedOwner: m.id,
+						beforeAct: () => fenced.check(),
+					}),
 				);
 				if (res === "timeout" && forced) {
 					// No hard stop here: the compensation does it, then starts the VM again.
