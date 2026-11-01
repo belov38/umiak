@@ -237,7 +237,9 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 					if (Date.now() > end) break;
 					await new Promise((r) => setTimeout(r, 20));
 				}
-				expect(notes.slice(2)).toEqual([`sbx_identity=sandboxes:${s.sandboxId}`]);
+				expect(notes.slice(2)).toEqual([
+					`sbx_identity=sandboxes:${s.sandboxId}`,
+				]);
 				// A repeat unblock changes nothing and sends nothing.
 				await env.svc.unblock(op, s.sandboxId);
 				await new Promise((r) => setTimeout(r, 200));

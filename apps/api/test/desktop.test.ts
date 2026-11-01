@@ -351,8 +351,7 @@ it("between unblock and the access monitor a block-epoch ticket is refused and t
 		).status,
 	).toBe(401);
 	expect(
-		(await gateway.request("GET", `/internal/v1/gateway/routes/${label}`))
-			.body,
+		(await gateway.request("GET", `/internal/v1/gateway/routes/${label}`)).body,
 	).toMatchObject({ blocked: false });
 });
 
